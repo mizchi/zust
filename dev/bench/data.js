@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795034958700,
+  "lastUpdate": 1795036005657,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -9380,6 +9380,165 @@ window.BENCHMARK_DATA = {
           {
             "name": "rt/strings run (-O)",
             "value": 56.935,
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "committer": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "distinct": true,
+          "id": "096a6bc06b745b75b17067828bdd6a0a0734f235",
+          "message": "`i32::try_from(x)`, `::std::..` paths, read_unaligned, uninitialized, sleep_ms, future::ready\n\n- `T::try_from(x)` for an integer type T is `x.try_into()` to T\n- a path that starts with `::std` / `::core` / `::alloc` resolves like one\n  without the leading `::`\n- prelude: `ptr::read_unaligned` / `write_unaligned`, `mem::uninitialized`\n  (zeroed), `thread::sleep_ms` (one thread: nothing to wait for),\n  `future::ready(x)` (futures run at once: the value)\n- tests/ui: run-pass 1421 (58.9%), check-pass 1133 (62.7%), build-pass 82\n\nAccepted compile-fail removal (it was rejected before only because\n`::std::mem::transmute` was not resolved; it needs the type of a call whose\nargument diverges): transmute/diverging-fn-transmute.rs\n\nKPIs (gen5000): noop 662.9 M instr (+0.1%), edit 623.7 (+0.2%; the prelude\ngrew by these functions and is read on every build), check 3892.3, cache\nunchanged; LSP ready 122 ms. Against rustc -C incremental on gen1000: cold\n6.1x, no-op 11x, edit 15x faster. README and SUPPORTED.md (en + ja) updated.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-18T20:53:52Z",
+          "tree_id": "1118fd02a836667792e310d2f6ff6a0bcc4e7772",
+          "url": "https://github.com/mizchi/zust/commit/096a6bc06b745b75b17067828bdd6a0a0734f235"
+        },
+        "date": 1795036005212,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "gen1000 build cold",
+            "value": 117.733,
+            "unit": "ms"
+          },
+          {
+            "name": "gen1000 build noop",
+            "value": 12.162,
+            "unit": "ms"
+          },
+          {
+            "name": "gen1000 build edit 1 fn",
+            "value": 17.944,
+            "unit": "ms"
+          },
+          {
+            "name": "gen1000 check",
+            "value": 77.508,
+            "unit": "ms"
+          },
+          {
+            "name": "gen1000 build cold peak RSS",
+            "value": 17.586,
+            "unit": "MiB"
+          },
+          {
+            "name": "gen1000 binary",
+            "value": 323.977,
+            "unit": "KiB"
+          },
+          {
+            "name": "gen1000 cache",
+            "value": 387.205,
+            "unit": "KiB"
+          },
+          {
+            "name": "gen1000 build noop instructions",
+            "value": 141.41,
+            "unit": "M instr"
+          },
+          {
+            "name": "gen1000 build edit 1 fn instructions",
+            "value": 134.416,
+            "unit": "M instr"
+          },
+          {
+            "name": "gen1000 check instructions",
+            "value": 790.108,
+            "unit": "M instr"
+          },
+          {
+            "name": "gen5000 build cold",
+            "value": 534.125,
+            "unit": "ms"
+          },
+          {
+            "name": "gen5000 build noop",
+            "value": 59.259,
+            "unit": "ms"
+          },
+          {
+            "name": "gen5000 build edit 1 fn",
+            "value": 65.394,
+            "unit": "ms"
+          },
+          {
+            "name": "gen5000 check",
+            "value": 376.89,
+            "unit": "ms"
+          },
+          {
+            "name": "gen5000 build cold peak RSS",
+            "value": 51.68,
+            "unit": "MiB"
+          },
+          {
+            "name": "gen5000 binary",
+            "value": 1558.336,
+            "unit": "KiB"
+          },
+          {
+            "name": "gen5000 cache",
+            "value": 1902.83,
+            "unit": "KiB"
+          },
+          {
+            "name": "gen5000 build noop instructions",
+            "value": 661.702,
+            "unit": "M instr"
+          },
+          {
+            "name": "gen5000 build edit 1 fn instructions",
+            "value": 622.135,
+            "unit": "M instr"
+          },
+          {
+            "name": "gen5000 check instructions",
+            "value": 3889.029,
+            "unit": "M instr"
+          },
+          {
+            "name": "rt/fib run (-O)",
+            "value": 54.237,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/hashmap run (-O)",
+            "value": 87.493,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/matmul run (-O)",
+            "value": 37.82,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/nbody run (-O)",
+            "value": 53.665,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/sieve run (-O)",
+            "value": 91.975,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/sort run (-O)",
+            "value": 141.238,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/strings run (-O)",
+            "value": 35.412,
             "unit": "ms"
           }
         ]
