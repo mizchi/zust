@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795036301095,
+  "lastUpdate": 1795036303391,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -22040,6 +22040,70 @@ window.BENCHMARK_DATA = {
           {
             "name": "tests/ui check-pass passing",
             "value": 1133,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui build-pass pass rate",
+            "value": 60.74,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui build-pass passing",
+            "value": 82,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui compile-fail pass rate",
+            "value": 38.27,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui compile-fail passing",
+            "value": 2816,
+            "unit": "tests"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "committer": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "distinct": true,
+          "id": "f077e7c44ef6f04613d66277ce88053eead5a0fa",
+          "message": "Prelude selection: per-item tables once, Fx hashing for the needed names\n\n- is_iterator_trait and gated_impl are computed once for all prelude items\n  (they rebuilt a Vec per impl item on every build); the set of needed names\n  uses Fx hashing instead of SipHash\n- a one-line program's build: 44.9 -> 42.7 M instr (-5%); gen1000 noop\n  141.5 -> 139.6 M (-1.3%), edit 134.8 -> 133.0 (-1.4%); gen5000 edit\n  623.7 -> 620.8 (-0.5%), noop 662.9 -> 663.8 (+0.1%), check unchanged;\n  caches unchanged; LSP ready 111 ms\n- against rustc -C incremental on gen1000: cold 7.0x, no-op 11x, edit 15x\n  faster. README and SUPPORTED.md (en + ja) updated.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-18T21:03:07Z",
+          "tree_id": "2817bf58577f7189a186031099500ba88d58dcc2",
+          "url": "https://github.com/mizchi/zust/commit/f077e7c44ef6f04613d66277ce88053eead5a0fa"
+        },
+        "date": 1795036302752,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tests/ui run-pass pass rate",
+            "value": 58.85,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui run-pass passing",
+            "value": 1420,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui check-pass pass rate",
+            "value": 62.65,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui check-pass passing",
+            "value": 1132,
             "unit": "tests"
           },
           {
