@@ -1,0 +1,193 @@
+#!/usr/bin/env python3
+"""Run zustc against rustc's own UI test suite (rust-lang/rust `tests/ui`) and report how much of it passes.
+
+usage: python3 bench/rust_ui.py --fetch                 sparse-clone tests/ui at the pinned commit into out/rust-tests
+       python3 bench/rust_ui.py [--kinds run-pass,check-pass,compile-fail] [--limit N] [--jobs N]
+                                [--json out/rust_ui.json] [--results out/rust_ui_results.txt] [--filter SUBSTR]
+(run from the repository root after cargo build --release)
+
+Each test's kind comes from its header directives, as in rustc's compiletest:
+- run-pass: zustc builds it, the program exits 0, and its stdout equals `<name>.run.stdout` when that file exists
+- check-pass / build-pass: `zustc check` accepts it (build-pass also builds it)
+- compile-fail (no pass/fail directive; errors marked with `//~ ERROR`): `zustc check` rejects it
+
+Tests zustc cannot be asked to handle are counted as "not applicable", not as failures: nightly `#![feature(..)]`,
+auxiliary crates (`aux-build`, `aux-crate`), `compile-flags`, `revisions`, `needs-*` other than what Linux x86-64 has,
+`only-*` / `ignore-*` that exclude Linux x86-64, and `ignore-test`. A zustc panic or signal is counted as a crash.
+"""
+import argparse, json, os, re, subprocess, sys, tempfile, time
+from concurrent.futures import ThreadPoolExecutor
+
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+ZUSTC = os.path.join(ROOT, "target/release/zustc")
+TESTS = os.path.join(ROOT, "out/rust-tests")
+# (rust-lang/rust 1.100.0: the rustc this repository is developed with)
+REPO = "https://github.com/rust-lang/rust"
+TAG = "1.100.0"
+COMMIT = "0ef1bc386059596dada8fb65b50425aab2ea637a"
+
+PASS_KINDS = ("run-pass", "check-pass", "build-pass", "run-fail", "check-fail", "build-fail", "run-crash")
+
+
+def fetch():
+    if os.path.isdir(os.path.join(TESTS, ".git")):
+        head = subprocess.run(["git", "-C", TESTS, "rev-parse", "HEAD"], capture_output=True, text=True).stdout.strip()
+        if head == COMMIT:
+            print(f"{TESTS} is already at {TAG} ({COMMIT[:9]})")
+            return
+        raise SystemExit(f"{TESTS} is at {head}, not {COMMIT}; remove it and fetch again")
+    os.makedirs(os.path.dirname(TESTS), exist_ok=True)
+    subprocess.run(["git", "-c", "advice.detachedHead=false", "clone", "-q", "--depth", "1", "--filter=blob:none", "--sparse",
+                    "--branch", TAG, REPO, TESTS], check=True)
+    subprocess.run(["git", "-C", TESTS, "sparse-checkout", "set", "tests/ui"], check=True)
+    head = subprocess.run(["git", "-C", TESTS, "rev-parse", "HEAD"], capture_output=True, text=True).stdout.strip()
+    if head != COMMIT:
+        raise SystemExit(f"tag {TAG} is {head}, expected {COMMIT}")
+    print(f"fetched tests/ui at {TAG} ({COMMIT[:9]}) into {TESTS}")
+
+
+def directives(text):
+    """`//@ name` / `//@ name: value` lines at the top of the file"""
+    out = {}
+    for m in re.finditer(r"^\s*//@\s*([\w-]+)(?:\s*:\s*(.*))?$", text, re.M):
+        out.setdefault(m.group(1), []).append((m.group(2) or "").strip())
+    return out
+
+
+def classify(path):
+    """(kind, reason-if-not-applicable)"""
+    text = open(path, errors="replace").read()
+    ds = directives(text)
+    kind = next((k for k in PASS_KINDS if k in ds), "compile-fail")
+    if "ignore-test" in ds:
+        return kind, "ignore-test"
+    if "#![feature(" in text:
+        return kind, "nightly feature"
+    for d in ("aux-build", "aux-crate", "aux-bin", "proc-macro"):
+        if d in ds:
+            return kind, "auxiliary crate"
+    if "revisions" in ds:
+        return kind, "revisions"
+    if "compile-flags" in ds or "rustc-env" in ds or "exec-env" in ds:
+        return kind, "compile flags / env"
+    for d in ds:
+        if d.startswith("only-") and d not in ("only-x86_64", "only-linux", "only-unix", "only-64bit", "only-gnu", "only-elf"):
+            return kind, "only other targets"
+        if d.startswith("ignore-") and d in ("ignore-x86_64", "ignore-linux", "ignore-unix", "ignore-64bit", "ignore-gnu", "ignore-elf"):
+            return kind, "ignored on this target"
+        if d.startswith("needs-") and d not in ("needs-unwind", "needs-threads", "needs-dynamic-linking"):
+            return kind, "needs other support"
+    if kind == "compile-fail" and "//~" not in text:
+        return kind, "no error annotation"
+    if kind in ("run-fail", "check-fail", "build-fail", "run-crash"):
+        return kind, "other kind"
+    return kind, None
+
+
+# (memory limit per test, so that a runaway compile (e.g. endless monomorphization) cannot take the machine down)
+LIMIT = ["prlimit", "--as=2147483648", "--"] if subprocess.run(["sh", "-c", "command -v prlimit"], capture_output=True).returncode == 0 else []
+
+
+def crashed(r):
+    return r.returncode < 0 or "panicked at" in r.stderr or "RUST_BACKTRACE" in r.stderr
+
+
+def run_one(path, kind, tmp):
+    name = os.path.splitext(os.path.basename(path))[0]
+    exe = os.path.join(tmp, re.sub(r"[^\w]", "_", os.path.relpath(path, TESTS)))
+    try:
+        if kind in ("check-pass", "compile-fail"):
+            r = subprocess.run([*LIMIT, ZUSTC, "check", path], capture_output=True, text=True, timeout=30)
+            if crashed(r):
+                return "crash"
+            ok = r.returncode == 0
+            return "pass" if ok == (kind == "check-pass") else "fail"
+        r = subprocess.run([*LIMIT, ZUSTC, path, "-o", exe, "--no-cache"], capture_output=True, text=True, timeout=60)
+        if crashed(r):
+            return "crash"
+        if r.returncode != 0:
+            return "fail"
+        if kind == "build-pass":
+            return "pass"
+        p = subprocess.run([*LIMIT, exe], capture_output=True, timeout=20, cwd=tmp)
+        if p.returncode != 0:
+            return "fail"
+        want = os.path.join(os.path.dirname(path), name + ".run.stdout")
+        if os.path.exists(want) and p.stdout != open(want, "rb").read():
+            return "fail"
+        return "pass"
+    except subprocess.TimeoutExpired:
+        return "timeout"
+    finally:
+        for suf in ("", ".o", ".crcache2", ".link"):
+            try:
+                os.remove(exe + suf)
+            except OSError:
+                pass
+
+
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--fetch", action="store_true")
+    ap.add_argument("--kinds", default="run-pass,check-pass,build-pass,compile-fail")
+    ap.add_argument("--limit", type=int, default=0, help="run only the first N applicable tests of each kind")
+    ap.add_argument("--filter", default="", help="only tests whose path contains this")
+    ap.add_argument("--jobs", type=int, default=os.cpu_count() or 4)
+    ap.add_argument("--json", default=os.path.join(ROOT, "out/rust_ui.json"))
+    ap.add_argument("--results", default=os.path.join(ROOT, "out/rust_ui_results.txt"))
+    a = ap.parse_args()
+    if a.fetch:
+        fetch()
+        return
+    ui = os.path.join(TESTS, "tests/ui")
+    if not os.path.isdir(ui):
+        raise SystemExit("tests/ui is missing: run python3 bench/rust_ui.py --fetch first")
+    kinds = a.kinds.split(",")
+    tests, skipped = [], {}
+    for d, dirs, fs in os.walk(ui):
+        dirs[:] = sorted(x for x in dirs if x != "auxiliary")
+        for f in sorted(fs):
+            if not f.endswith(".rs"):
+                continue
+            p = os.path.join(d, f)
+            if a.filter and a.filter not in p:
+                continue
+            k, why = classify(p)
+            if k not in kinds:
+                continue
+            if why:
+                skipped.setdefault(k, {}).setdefault(why, 0)
+                skipped[k][why] += 1
+            else:
+                tests.append((p, k))
+    if a.limit:
+        per = {}
+        tests = [t for t in tests if per.setdefault(t[1], 0) < a.limit and not per.__setitem__(t[1], per[t[1]] + 1)]
+    t0 = time.time()
+    with tempfile.TemporaryDirectory() as tmp, ThreadPoolExecutor(a.jobs) as ex:
+        res = list(ex.map(lambda t: (t[0], t[1], run_one(t[0], t[1], tmp)), tests))
+    summary = {}
+    for _, k, r in res:
+        s = summary.setdefault(k, {"pass": 0, "fail": 0, "crash": 0, "timeout": 0})
+        s[r] += 1
+    out = {"commit": COMMIT, "tag": TAG, "seconds": round(time.time() - t0, 1), "kinds": {}}
+    for k in kinds:
+        s = summary.get(k, {"pass": 0, "fail": 0, "crash": 0, "timeout": 0})
+        n = sum(s.values())
+        out["kinds"][k] = {**s, "applicable": n, "not_applicable": skipped.get(k, {}), "pass_rate": round(100 * s["pass"] / n, 2) if n else None}
+    os.makedirs(os.path.dirname(a.json), exist_ok=True)
+    json.dump(out, open(a.json, "w"), indent=1)
+    with open(a.results, "w") as f:
+        for p, k, r in sorted(res):
+            f.write(f"{r}\t{k}\t{os.path.relpath(p, ui)}\n")
+    print(f"rust-lang/rust tests/ui at {TAG} ({COMMIT[:9]}), {out['seconds']} s")
+    print("| kind | applicable | pass | fail | crash | timeout | pass rate | not applicable |")
+    print("|---|---:|---:|---:|---:|---:|---:|---:|")
+    for k, v in out["kinds"].items():
+        na = sum(v["not_applicable"].values())
+        rate = "-" if v["pass_rate"] is None else f"{v['pass_rate']}%"
+        print(f"| {k} | {v['applicable']} | {v['pass']} | {v['fail']} | {v['crash']} | {v['timeout']} | {rate} | {na} |")
+
+
+if __name__ == "__main__":
+    main()
