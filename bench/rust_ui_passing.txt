@@ -159,6 +159,7 @@ run-pass	associated-types/associated-types-in-default-method.rs
 run-pass	associated-types/associated-types-in-fn.rs
 run-pass	associated-types/associated-types-in-impl-generics.rs
 run-pass	associated-types/associated-types-in-inherent-method.rs
+run-pass	associated-types/associated-types-issue-20220.rs
 check-pass	associated-types/associated-types-issue-20371.rs
 run-pass	associated-types/associated-types-issue-21212.rs
 run-pass	associated-types/associated-types-method.rs
@@ -408,6 +409,7 @@ check-pass	autoref-autoderef/reborrow-mut-self-to-ref-self-method.rs
 run-pass	binding/bind-field-short-with-modifiers.rs
 run-pass	binding/borrowed-ptr-pattern-3.rs
 run-pass	binding/borrowed-ptr-pattern-infallible.rs
+run-pass	binding/borrowed-ptr-pattern-option.rs
 run-pass	binding/borrowed-ptr-pattern.rs
 run-pass	binding/exhaustive-bool-match-sanity.rs
 run-pass	binding/expr-match-generic-unique1.rs
@@ -1018,6 +1020,7 @@ run-pass	coercion/coerce-overloaded-autoderef.rs
 run-pass	coercion/coerce-reborrow-imm-ptr-arg.rs
 run-pass	coercion/coerce-reborrow-imm-ptr-rcvr.rs
 run-pass	coercion/coerce-reborrow-imm-vec-arg.rs
+run-pass	coercion/coerce-reborrow-imm-vec-rcvr.rs
 compile-fail	coercion/coerce-reborrow-multi-arg-fail.rs
 build-pass	coercion/coerce-reborrow-multi-arg.rs
 run-pass	coercion/coerce-reborrow-mut-ptr-arg.rs
@@ -1607,6 +1610,7 @@ check-pass	entry-point/imported_main_conflict_lib.rs
 compile-fail	entry-point/main-with-invalid-signature.rs
 compile-fail	entry-point/return-ty-has-bound-vars.rs
 run-pass	enum-discriminant/const-implicit-enum-discriminant.rs
+run-pass	enum-discriminant/get_discr.rs
 run-pass	enum-discriminant/issue-104519.rs
 run-pass	enum-discriminant/issue-61696.rs
 run-pass	enum-discriminant/issue-90038.rs
@@ -1916,6 +1920,7 @@ run-pass	for-loop-while/issue-1257.rs
 run-pass	for-loop-while/issue-2216.rs
 run-pass	for-loop-while/issue-69841.rs
 compile-fail	for-loop-while/iter-from-mac-call.rs
+run-pass	for-loop-while/label_break_value.rs
 compile-fail	for-loop-while/label_break_value_invalid.rs
 run-pass	for-loop-while/labeled-break.rs
 run-pass	for-loop-while/linear-for-loop.rs
@@ -1965,7 +1970,9 @@ run-pass	functions-closures/closure-expected-type/issue-38714.rs
 run-pass	functions-closures/closure-expected-type/supply-nothing.rs
 run-pass	functions-closures/closure-immediate.rs
 run-pass	functions-closures/closure-inference.rs
+run-pass	functions-closures/closure-inference2.rs
 run-pass	functions-closures/closure-reform.rs
+run-pass	functions-closures/closure-returning-closure.rs
 run-pass	functions-closures/copy-closure.rs
 run-pass	functions-closures/fn-bare-assign.rs
 run-pass	functions-closures/fn-bare-coerce-to-block.rs
@@ -2345,6 +2352,7 @@ compile-fail	inference/issue-86094-suggest-add-return-to-coerce-ret-ty.rs
 compile-fail	inference/issue-86162-1.rs
 compile-fail	inference/issue-86162-2.rs
 check-pass	inference/iter-ufcs-coercion-type-unification.rs
+run-pass	inference/iterator-sum-array-15673.rs
 run-pass	inference/lambda-infer-unresolved.rs
 compile-fail	inference/multiple-impl-apply.rs
 compile-fail	inference/need_type_info/channel.rs
@@ -2390,6 +2398,7 @@ build-pass	iterators/issue-58952-filter-type-length.rs
 run-pass	iterators/iter-cloned-type-inference.rs
 run-pass	iterators/iter-range.rs
 compile-fail	iterators/iterator-does-not-need-into-iter.rs
+run-pass	iterators/iterator-type-inference-sum-15673.rs
 compile-fail	iterators/vec-on-unimplemented.rs
 compile-fail	keyword/extern/keyword-extern-as-identifier-expr.rs
 compile-fail	keyword/extern/keyword-extern-as-identifier-type.rs
@@ -2929,6 +2938,7 @@ run-pass	mir/mir_codegen_switchint.rs
 run-pass	mir/mir_coercion_casts.rs
 run-pass	mir/mir_constval_adts.rs
 run-pass	mir/mir_match_arm_guard.rs
+run-pass	mir/mir_match_test.rs
 run-pass	mir/mir_small_agg_arg.rs
 run-pass	mir/mir_static_subtype.rs
 run-pass	mir/mir_temp_promotions.rs
@@ -3278,6 +3288,7 @@ run-pass	overloaded/overloaded-calls-object-two-args.rs
 run-pass	overloaded/overloaded-calls-object-zero-args.rs
 run-pass	overloaded/overloaded-deref.rs
 run-pass	overloaded/overloaded-index-assoc-list.rs
+run-pass	overloaded/overloaded-index-in-field.rs
 run-pass	overloaded/overloaded_deref_with_ref_pattern_issue15609.rs
 run-pass	overloaded/subtyping-both-lhs-and-rhs-in-add-impl.rs
 run-pass	packed/misaligned-reference-drop-field-99838.rs
@@ -4039,6 +4050,7 @@ run-pass	regions/regions-addr-of-ret.rs
 compile-fail	regions/regions-adjusted-lvalue-op.rs
 run-pass	regions/regions-assoc-type-region-bound.rs
 run-pass	regions/regions-assoc-type-static-bound.rs
+run-pass	regions/regions-borrow-evec-fixed.rs
 run-pass	regions/regions-borrow-evec-uniq.rs
 run-pass	regions/regions-bot.rs
 run-pass	regions/regions-bound-lists-feature-gate-2.rs
@@ -4085,6 +4097,7 @@ run-pass	regions/regions-nullary-variant.rs
 check-pass	regions/regions-outlives-nominal-type.rs
 check-pass	regions/regions-outlives-projection-hrtype.rs
 check-pass	regions/regions-outlives-scalar.rs
+run-pass	regions/regions-params.rs
 compile-fail	regions/regions-pattern-typing-issue-19552.rs
 compile-fail	regions/regions-pattern-typing-issue-19997.rs
 run-pass	regions/regions-reassign-let-bound-pointer.rs
@@ -4367,6 +4380,7 @@ run-pass	self/self-re-assign.rs
 run-pass	self/self-shadowing-import.rs
 check-pass	self/self-type-in-inherent-fn.rs
 compile-fail	self/self_type_keyword.rs
+run-pass	self/string-self-append.rs
 compile-fail	self/suggest-self-2.rs
 compile-fail	self/suggest-self.rs
 run-pass	self/ufcs-self-method-in-method-body.rs
@@ -5299,6 +5313,7 @@ run-pass	unboxed-closures/unboxed-closures-infer-upvar.rs
 run-pass	unboxed-closures/unboxed-closures-move-mutable.rs
 run-pass	unboxed-closures/unboxed-closures-prelude.rs
 run-pass	unboxed-closures/unboxed-closures-simple.rs
+run-pass	unboxed-closures/unboxed-closures-single-word-env.rs
 run-pass	unboxed-closures/unboxed-closures-static-call-fn-once.rs
 compile-fail	unboxed-closures/unboxed-closures-type-mismatch-closure-from-another-scope.rs
 compile-fail	unboxed-closures/unboxed-closures-type-mismatch.rs
@@ -5377,6 +5392,7 @@ check-pass	use/use-mod/use-mod-6.rs
 check-pass	variance/smart-pointers-covariant.rs
 compile-fail	variance/variance-contravariant-arg-object.rs
 compile-fail	variance/variance-covariant-arg-object.rs
+run-pass	variance/variance-intersection-of-ref-and-opt-ref.rs
 compile-fail	variance/variance-invariant-arg-object.rs
 compile-fail	variance/variance-issue-20533.rs
 compile-fail	variance/variance-regions-unused-direct.rs

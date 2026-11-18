@@ -819,7 +819,7 @@ impl Inf<'_> {
                         if *semi || i + 1 < n {
                             if is_fmt_macro(p) {
                                 self.fmt_width_vars(g);
-                            } else if matches!(macro_name(p), "assert" | "debug_assert") {
+                            } else if matches!(macro_name(p), "assert" | "debug_assert" | "assert_eq" | "assert_ne" | "debug_assert_eq" | "debug_assert_ne") {
                                 self.macro_expr(p, g);
                             }
                             continue;
@@ -1343,6 +1343,27 @@ impl Inf<'_> {
             self.fmt_width_vars(g);
             let unit = matches!(macro_name(p), "print" | "println" | "eprint" | "eprintln");
             return if unit { self.known(Ty::Unit) } else { self.var() };
+        }
+        // (`assert_eq!(6, (0..3).map(|i| x[i]).sum::<u64>())`: both sides are inferred (`i` is a usize from the index),
+        // recorded by position for the code generator, which reads the arguments again)
+        if matches!(name, "assert_eq" | "assert_ne" | "debug_assert_eq" | "debug_assert_ne") {
+            let Some(ki) = self.macro_args_kept(g) else { return self.known(Ty::Unit) };
+            if self.keep[ki].len() >= 2 {
+                let (a, b): (*const Expr, *const Expr) = (&self.keep[ki][0], &self.keep[ki][1]);
+                self.pos_record += 1;
+                // SAFETY: keep の要素は推論の終わりまで動かさない
+                let va = self.expr(unsafe { &*a });
+                let vb = self.expr(unsafe { &*b });
+                self.pos_record -= 1;
+                // (unified unless both sides are calls: a generic call's result (`foo(&node)` with V from an associated
+                // type) would take the other call's integer default (`Some(22)`))
+                let simple = |e: &Expr| !matches!(e, Expr::Call(..) | Expr::MethodCall(..));
+                // SAFETY: as above
+                if simple(unsafe { &*a }) || simple(unsafe { &*b }) {
+                    self.unify(va, vb);
+                }
+            }
+            return self.known(Ty::Unit);
         }
         // (`assert!(a == e)`: the condition constrains its locals, `let e = 5;` is the type of `a`)
         if name == "assert" || name == "debug_assert" {
