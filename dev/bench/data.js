@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795039893104,
+  "lastUpdate": 1795039895367,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -19879,6 +19879,85 @@ window.BENCHMARK_DATA = {
           {
             "name": "parity 一致の平均",
             "value": 95.349,
+            "unit": "%"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "committer": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "distinct": true,
+          "id": "e7fdc21f4d3cd1a7b2eaaf1c9ceee769ab39b995",
+          "message": "`-> impl Trait` bodies ending in `()` or a diverging macro; `impl ?Sized` returns are an error\n\n- a body whose last expression is `()` itself, or `panic!()` / `todo!()` /\n  `unimplemented!()` / `unreachable!()`, gives `-> impl Trait` the type `()`\n  (the inference result `()` was taken as \"unknown\" before)\n- `-> impl ?Sized` with no other trait: \"the size for values of type\n  `impl ?Sized` cannot be known at compilation time\"\n- tests/ui: check-pass 1141 (63.1%), run-pass 1440, compile-fail 2815\n\nKPIs (gen5000): noop 663.2 M instr (+0.3%), edit 620.8, check 3893.0, cache\nunchanged. LSP references p50 11.6 ms in the full run; against 60cbe60 on the\nsame machine (8 alternating runs) 2.34 vs 2.35 ms, definition 0.55 vs 0.55\nms, ready 291 vs 299 ms. Against rustc -C incremental on gen1000: cold 4.9x,\nno-op 11x, edit 14x faster. README and SUPPORTED.md (en + ja) updated.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-18T21:55:36Z",
+          "tree_id": "d296d4159922c6c2fa61d85a780357da6d0f8136",
+          "url": "https://github.com/mizchi/zust/commit/e7fdc21f4d3cd1a7b2eaaf1c9ceee769ab39b995"
+        },
+        "date": 1795039894869,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "parity documentSymbol (名前の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity workspace/symbol (上位 20 の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity definition (行き先の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity hover (名前を含む)",
+            "value": 92.5,
+            "unit": "%"
+          },
+          {
+            "name": "parity references (数の一致)",
+            "value": 97.297,
+            "unit": "%"
+          },
+          {
+            "name": "parity documentHighlight (数の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity rename (書き換えの一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity signatureHelp (名前・引数の数・今の引数の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity completion `x.\\|` (書いてある名前を含む)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity completion `na\\|me` (同)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity 一致の平均",
+            "value": 98.98,
             "unit": "%"
           }
         ]
