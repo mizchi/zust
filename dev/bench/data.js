@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795002989273,
+  "lastUpdate": 1795002990925,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -4167,6 +4167,85 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/mizchi/zust/commit/1e4018cafcccd2458a750000d5ef4a181c276ae0"
         },
         "date": 1795001298124,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "parity documentSymbol (名前の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity workspace/symbol (上位 20 の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity definition (行き先の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity hover (名前を含む)",
+            "value": 87.5,
+            "unit": "%"
+          },
+          {
+            "name": "parity references (数の一致)",
+            "value": 97.222,
+            "unit": "%"
+          },
+          {
+            "name": "parity documentHighlight (数の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity rename (書き換えの一致)",
+            "value": 94.118,
+            "unit": "%"
+          },
+          {
+            "name": "parity signatureHelp (名前・引数の数・今の引数の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity completion `x.\\|` (書いてある名前を含む)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity completion `na\\|me` (同)",
+            "value": 84,
+            "unit": "%"
+          },
+          {
+            "name": "parity 一致の平均",
+            "value": 96.284,
+            "unit": "%"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "committer": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "distinct": true,
+          "id": "5a4c59429939965d5b97d7cf56a862243afcae5d",
+          "message": "zustc borrowck: & vs &mut derefs, for loops over borrows, values pushed into collections, reborrows by default binding modes\n\n- a deref through `&` is its own projection: E0596 / E0594 for mutation behind a `&` reference\n- `for x in &mut v { v.push(1) }`: the loan of the iterable lasts for the whole loop\n- a `&mut self` method of a value holding references stores what its arguments borrow\n  (`v.push(&mut x)`)\n- matching a reference with bindings reborrows `*r` (default binding modes)\n- prelude views (Iter, Chars, ChunksExact ..) hold the loan of what they iterate; their methods\n  and `Iterator::next` do not borrow the view itself; closures capture mutably only the places\n  they assign or borrow mutably\n- tests/ui compile-fail 34.6% -> 35.0% (borrowck 159, nll 41, closures 36), no regressions;\n  all cratebench crates still build\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-18T11:40:09Z",
+          "tree_id": "138d6d88ea74370dfacd700c314f02ebfbdd8b3e",
+          "url": "https://github.com/mizchi/zust/commit/5a4c59429939965d5b97d7cf56a862243afcae5d"
+        },
+        "date": 1795002990471,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
