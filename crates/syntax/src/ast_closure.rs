@@ -493,7 +493,11 @@ fn is_cap(e: &Expr, caps: &[String]) -> bool {
 
 fn moves_in(e: &Expr, caps: &[String]) -> bool {
     match e {
-        Expr::Closure(..) => return false,
+        // (a nested closure that owns the capture: `|| { let c = move || t.0 = ..; }` moves `t` into the outer
+        // closure too)
+        Expr::Closure(mv, ..) => {
+            return if *mv { free_vars(e).iter().any(|n| caps.contains(n)) } else { moves_capture(e, caps) };
+        }
         Expr::Call(_, a) if a.iter().any(|x| is_cap(x, caps)) => return true,
         Expr::Return(Some(v)) if is_cap(v, caps) => return true,
         Expr::Block(_, _, b) | Expr::Const(b) | Expr::Loop(_, b) => {

@@ -533,6 +533,7 @@ compile-fail	borrowck/borrowck-closures-unique.rs
 compile-fail	borrowck/borrowck-consume-upcast-box.rs
 compile-fail	borrowck/borrowck-deref-pattern-assignment.rs
 compile-fail	borrowck/borrowck-escaping-closure-error-1.rs
+run-pass	borrowck/borrowck-field-sensitivity-rpass.rs
 compile-fail	borrowck/borrowck-field-sensitivity.rs
 run-pass	borrowck/borrowck-fixed-length-vecs.rs
 compile-fail	borrowck/borrowck-for-loop-correct-cmt-for-pattern.rs
@@ -850,6 +851,7 @@ run-pass	closures/2229_closure_analysis/run_pass/edition.rs
 run-pass	closures/2229_closure_analysis/run_pass/filter-on-struct-member.rs
 check-pass	closures/2229_closure_analysis/run_pass/issue-87378.rs
 run-pass	closures/2229_closure_analysis/run_pass/issue-88372.rs
+run-pass	closures/2229_closure_analysis/run_pass/move_closure.rs
 run-pass	closures/2229_closure_analysis/run_pass/multilevel-path-1.rs
 run-pass	closures/2229_closure_analysis/run_pass/multilevel-path-2.rs
 run-pass	closures/2229_closure_analysis/run_pass/multilevel-path-3.rs

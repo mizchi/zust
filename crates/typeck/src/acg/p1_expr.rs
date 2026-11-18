@@ -999,6 +999,22 @@ impl Cx<'_> {
         };
         // `S { a: 1, ..base }`: base を一時変数に置き、書かれていないフィールドをそこからムーブする
         // (書いたフィールドの元の値は、一時変数のスコープの終わりで drop される)
+        // (a place as the base (`..x`): the fields not written are read or moved out of it one by one, and the
+        // rest of `x` stays where it is)
+        if let Some(base) = rest.as_deref().filter(|b| matches!(strip_paren(b), Expr::Path(..)) && is_place_expr(b) && self.const_of(b).is_none()) {
+            if let Some(Ty::Struct(bsid)) = self.peek(base).filter(|&t| !self.prog.has_param(t)) {
+                let all: Vec<String> = self.prog.structs[bsid as usize].fields.iter().map(|f| f.0.clone()).collect();
+                let mut nfields = sfields.clone();
+                for f in all {
+                    if !sfields.iter().any(|fv| fv.0 == f) {
+                        let at = expr_start(base);
+                        nfields.push((f.clone(), Expr::Field(Box::new(base.clone()), f, crate::parse::Span { start: at, at })));
+                    }
+                }
+                let ns = self.keep_expr(Expr::Struct(path.clone(), nfields, None));
+                return self.struct_lit(ns, Some(Ty::Struct(bsid)));
+            }
+        }
         if let Some(base) = rest {
             let st = match expected {
                 Some(Ty::Struct(x)) if self.prog.base_of(x) == self.prog.base_of(sid) => Some(Ty::Struct(x)),
@@ -1213,6 +1229,18 @@ impl Cx<'_> {
                 let (v, _) = self.read(p);
                 self.write(Place::Mem(a, off as i32, ft), v);
                 if self.needs_drop(t) {
+                    // (a capture of the enclosing closure moved into this one: as for moving it out, the
+                    // enclosing closure's slot becomes empty)
+                    // (the cap binding is the first one of that name: a later `let` shadows it)
+                    let first = self.scopes.iter().flat_map(|s| s.iter()).find(|b| b.0 == cd.captures[i]).map(|b| b.1);
+                    if let Some(c) = self.caps.iter().find(|c| c.0 == cd.captures[i] && first == Some(loc)) {
+                        if c.2 || !self.zeroable(t) {
+                            return err(SP, "moving a captured value out of a closure is not supported");
+                        }
+                        if let Some(dst) = self.loc_addr(loc) {
+                            self.zero(dst, t);
+                        }
+                    }
                     self.mark_moved_loc(loc);
                 }
             } else {
