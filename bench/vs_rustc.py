@@ -104,8 +104,9 @@ def bench(name):
     sys.stdout.flush()
 
 
-linker = next((l for l in ["wild", "mold", "ld.lld", "ld"] if shutil.which(l)), "?")
-print(f"zustc のリンカ: {linker} / {subprocess.run(['rustc', '--version'], capture_output=True, text=True).stdout.strip()}")
-names = sys.argv[1:] or ["gen1000"] + sorted(f[:-3] for f in os.listdir("bench/rt") if f.endswith(".rs"))
-for n in names:
-    bench(n)
+if __name__ == "__main__":
+    linker = next((l for l in ["wild", "mold", "ld.lld", "ld"] if shutil.which(l)), "?")
+    print(f"zustc のリンカ: {linker} / {subprocess.run(['rustc', '--version'], capture_output=True, text=True).stdout.strip()}")
+    names = sys.argv[1:] or ["gen1000"] + sorted(f[:-3] for f in os.listdir("bench/rt") if f.endswith(".rs"))
+    for n in names:
+        bench(n)
