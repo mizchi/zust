@@ -993,6 +993,12 @@ impl Program {
         match t {
             Ty::Box(_) => true,
             Ty::Array(e, n) => n > 0 && self.needs_drop(*e),
+            // (ManuallyDrop / MaybeUninit never drop what they hold)
+            Ty::Struct(sid) if matches!(self.structs[self.base_of(sid) as usize].name.as_str(), "ManuallyDrop" | "MaybeUninit")
+                && self.struct_item.get(self.base_of(sid) as usize).is_some_and(|&i| i >= self.prelude_from) =>
+            {
+                false
+            }
             Ty::Struct(sid) => {
                 let sd = &self.structs[sid as usize];
                 self.drop_impls.contains(&self.base_of(sid))

@@ -147,6 +147,11 @@ impl Cx<'_> {
                     if self.prog.field(sid, fname).is_none() {
                         if let Some(d) = self.user_deref_sid(base, sid) {
                             let f2 = self.keep_expr(Expr::Field(Box::new(Expr::Paren(Box::new(d))), fname.clone(), crate::parse::Span::default()));
+                            if let Expr::Field(p, _, _) = f2 {
+                                if let Expr::Paren(u) = &**p {
+                                    self.deref_shared(u);
+                                }
+                            }
                             return self.place(f2);
                         }
                     }
@@ -161,6 +166,7 @@ impl Cx<'_> {
                 // `*g` (g: MutexGuard など Deref を実装した型): `*g.deref_mut()` / `*g.deref()`
                 if let Some(d) = self.user_deref(x) {
                     let d = self.keep_expr(d);
+                    self.deref_shared(d);
                     return self.place(d);
                 }
                 // `*b` は b をムーブしない
@@ -524,7 +530,9 @@ impl Cx<'_> {
             Expr::Assign(left, right) => {
                 let (blk0, ev0) = (self.b.live_block(), self.bk.evs.len());
                 self.bk.place_depth += 1;
+                let pm = std::mem::replace(&mut self.bk.place_mut, true);
                 let p = self.place(left);
+                self.bk.place_mut = pm;
                 self.bk.place_depth -= 1;
                 let p = p?;
                 // (the right side is evaluated first: `*{ drop(x); &mut *y } = S { ..*x }`)
@@ -896,7 +904,10 @@ impl Cx<'_> {
             e => e,
         };
         if is_place_expr(rexpr) && !fn_item && !not_var(inner) {
-            let pl = self.place(rexpr)?;
+            let pm = std::mem::replace(&mut self.bk.place_mut, m);
+            let pl = self.place(rexpr);
+            self.bk.place_mut = pm;
+            let pl = pl?;
             // (`&mut x as *mut _` / coerced to a raw pointer: not a loan)
             if !matches!(expected, Some(Ty::Ptr(..))) {
                 self.bk_borrow(rexpr, m, err_pos(rexpr));

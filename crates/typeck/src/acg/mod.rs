@@ -807,6 +807,17 @@ impl Cx<'_> {
     }
 
     /// 書き換えで作った式をコード生成の間持っておき、その参照を返す
+    /// `*x.deref_mut()` that acg makes to reach a place through Deref: the borrow checker sees a shared borrow
+    /// (as for `index_mut`)
+    pub(crate) fn deref_shared(&mut self, d: &Expr) {
+        if self.bk.place_mut {
+            return;
+        }
+        if let Expr::Unary(_, c, _) = d {
+            self.bk.shared_recv = &**c as *const Expr as usize;
+        }
+    }
+
     pub fn keep_expr(&mut self, e: Expr) -> &'static Expr {
         self.keep.push(Box::new(e));
         // SAFETY: keep の Box の中身は Cx が生きている間動かない

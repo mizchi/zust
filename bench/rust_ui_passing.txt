@@ -602,6 +602,8 @@ compile-fail	borrowck/borrowck-uninit-field-access.rs
 compile-fail	borrowck/borrowck-uninit-in-assignop.rs
 compile-fail	borrowck/borrowck-uninit-ref-chain.rs
 compile-fail	borrowck/borrowck-union-borrow.rs
+compile-fail	borrowck/borrowck-union-move-assign.rs
+compile-fail	borrowck/borrowck-union-move.rs
 compile-fail	borrowck/borrowck-union-uninitialized.rs
 compile-fail	borrowck/borrowck-uniq-via-lend.rs
 run-pass	borrowck/borrowck-uniq-via-ref.rs
@@ -1197,6 +1199,7 @@ run-pass	consts/const-eval/issue-64908.rs
 run-pass	consts/const-eval/issue-64970.rs
 check-pass	consts/const-eval/issue-70804-fn-subtyping.rs
 check-pass	consts/const-eval/no_lint_for_statically_known_error.rs
+check-pass	consts/const-eval/nonnull_as_ref.rs
 run-pass	consts/const-eval/nrvo.rs
 check-pass	consts/const-eval/promote-static.rs
 check-pass	consts/const-eval/promote_mutable_zst_mir_borrowck.rs
@@ -1278,6 +1281,7 @@ check-pass	consts/issue-88649.rs
 check-pass	consts/issue-94371.rs
 run-pass	consts/issue-broken-mir.rs
 check-pass	consts/let-irrefutable-pattern-ice-120337.rs
+check-pass	consts/manually_drop_structural_eq.rs
 run-pass	consts/match-const-fn-structs.rs
 run-pass	consts/method-reference-in-const-dyn-fn.rs
 compile-fail	consts/min_const_fn/cmp_fn_pointers.rs
@@ -1290,13 +1294,11 @@ compile-fail	consts/normalize-before-const-arg-has-type-goal.rs
 run-pass	consts/packed_pattern.rs
 run-pass	consts/packed_pattern2.rs
 run-pass	consts/promote_borrowed_field.rs
-compile-fail	consts/promoted_const_call3.rs
 check-pass	consts/promotion-drop-type-static-lifetime-86672.rs
 check-pass	consts/raw-ptr-const.rs
 check-pass	consts/raw_pointer_promoted.rs
 check-pass	consts/recursive-type.rs
 run-pass	consts/references.rs
-compile-fail	consts/refs-to-cell-in-final.rs
 run-pass	consts/repeat_match.rs
 check-pass	consts/self_normalization.rs
 run-pass	consts/short-circuit-or-with-const-bool.rs
@@ -1307,6 +1309,7 @@ check-pass	consts/static-default-lifetime/static-trait-impl.rs
 check-pass	consts/static-promoted-to-mutable-static.rs
 compile-fail	consts/std/conjure_zst.rs
 check-pass	consts/unnormalized-param-env.rs
+check-pass	consts/unsafe_cell_in_const.rs
 check-pass	consts/unwind-abort.rs
 compile-fail	coroutine/coroutine-in-orphaned-anon-const.rs
 check-pass	coroutine/issue-62506-two_awaits.rs
@@ -1469,6 +1472,7 @@ compile-fail	dropck/drop-with-active-borrows-1.rs
 run-pass	dropck/dropck-boxed-self-referencial-fnmut.rs
 run-pass	dropck/dropck-empty-array.rs
 run-pass	dropck/dropck-type-in-dyn-fn-param.rs
+compile-fail	dropck/dropck-union.rs
 run-pass	dropck/dropck_fn_type.rs
 compile-fail	dropck/dropck_no_diverge_on_nonregular_3.rs
 compile-fail	dropck/dropck_trait_cycle_checked.rs
@@ -2443,6 +2447,7 @@ check-pass	lint/improper-ctypes/ice-irregular-recursive-types.rs
 check-pass	lint/improper-ctypes/mustpass-113436.rs
 check-pass	lint/improper-ctypes/mustpass-113900.rs
 check-pass	lint/improper-ctypes/mustpass-134060.rs
+check-pass	lint/improper-ctypes/mustpass-73747.rs
 check-pass	lint/inert-attr-macro.rs
 compile-fail	lint/invalid_null_args.rs
 check-pass	lint/issue-103317.rs
@@ -4285,9 +4290,11 @@ run-pass	static/static-struct-initialization-5688.rs
 run-pass	statics/conditional-static-declaration-16010.rs
 build-pass	statics/enum-with-static-str-variant-13214.rs
 build-pass	statics/issue-15261.rs
+run-pass	statics/issue-17718-static-unsafe-interior.rs
 check-pass	statics/issue-44373-2.rs
 build-pass	statics/nested-allocations-dont-inherit-codegen-attrs.rs
 check-pass	statics/nested_struct.rs
+check-pass	statics/recursive_interior_mut.rs
 compile-fail	statics/static-generic-param-soundness.rs
 run-pass	statics/static-method-in-trait-with-tps-intracrate.rs
 run-pass	statics/static-methods-in-traits.rs
@@ -4865,6 +4872,7 @@ run-pass	traits/where-clause-vs-impl.rs
 check-pass	transmutability/transmute-copy-associated-type.rs
 compile-fail	transmute/ambiguity-in-closure-arg.rs
 compile-fail	transmute/diverging-fn-transmute.rs
+check-pass	transmute/lifetimes.rs
 compile-fail	transmute/main.rs
 compile-fail	transmute/transmute-associated-type-to-slice.rs
 compile-fail	transmute/transmute-from-fn-item-types-error.rs
@@ -5119,14 +5127,18 @@ compile-fail	uninhabited/missing-if-let-or-let-else.rs
 compile-fail	uninhabited/privately-uninhabited-mir-call.rs
 check-pass	uninhabited/uninhabited-enum-cast.rs
 check-pass	union/issue-99375.rs
+compile-fail	union/union-assignop.rs
 run-pass	union/union-const-codegen.rs
 compile-fail	union/union-derive-clone.rs
+run-pass	union/union-drop-assign.rs
 compile-fail	union/union-empty.rs
 build-pass	union/union-field-access-error-65462.rs
 compile-fail	union/union-fields-2.rs
 compile-fail	union/union-generic.rs
 run-pass	union/union-inherent-method.rs
 run-pass	union/union-macro.rs
+run-pass	union/union-manuallydrop-rpass.rs
+run-pass	union/union-nodrop.rs
 compile-fail	union/union-nonrepresentable.rs
 compile-fail	union/union-pat-in-param.rs
 compile-fail	union/union-suggest-field.rs

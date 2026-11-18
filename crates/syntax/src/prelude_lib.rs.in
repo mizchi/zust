@@ -7474,6 +7474,83 @@ impl<T> Iterator for __RecvIter<T> {
     }
 }
 
+
+/// `std::mem::ManuallyDrop` (the value is not dropped: Program::needs_drop knows the name)
+pub struct ManuallyDrop<T> {
+    value: T,
+}
+
+impl<T> ManuallyDrop<T> {
+    pub const fn new(v: T) -> ManuallyDrop<T> {
+        ManuallyDrop { value: v }
+    }
+    pub fn into_inner(slot: ManuallyDrop<T>) -> T {
+        unsafe { (&slot.value as *const T).read() }
+    }
+    pub unsafe fn drop(slot: &mut ManuallyDrop<T>) {
+        __exr_drop_in_place(&mut slot.value as *mut T);
+    }
+    pub unsafe fn take(slot: &mut ManuallyDrop<T>) -> T {
+        (&slot.value as *const T).read()
+    }
+    pub fn deref(&self) -> &T {
+        &self.value
+    }
+    pub fn deref_mut(&mut self) -> &mut T {
+        &mut self.value
+    }
+}
+
+/// `std::ptr::NonNull`
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct NonNull<T> {
+    p: *mut T,
+}
+
+impl<T> NonNull<T> {
+    pub fn new(p: *mut T) -> Option<NonNull<T>> {
+        if p.is_null() { None } else { Some(NonNull { p }) }
+    }
+    pub const unsafe fn new_unchecked(p: *mut T) -> NonNull<T> {
+        NonNull { p }
+    }
+    pub fn dangling() -> NonNull<T> {
+        NonNull { p: core::mem::align_of::<T>() as *mut T }
+    }
+    pub fn as_ptr(self) -> *mut T {
+        self.p
+    }
+    pub unsafe fn as_ref(&self) -> &T {
+        &*self.p
+    }
+    pub unsafe fn as_mut(&mut self) -> &mut T {
+        &mut *self.p
+    }
+    pub fn cast<U>(self) -> NonNull<U> {
+        NonNull { p: self.p as *mut U }
+    }
+}
+
+/// `std::cell::UnsafeCell`
+pub struct UnsafeCell<T> {
+    value: T,
+}
+
+impl<T> UnsafeCell<T> {
+    pub const fn new(v: T) -> UnsafeCell<T> {
+        UnsafeCell { value: v }
+    }
+    pub fn get(&self) -> *mut T {
+        &self.value as *const T as *mut T
+    }
+    pub fn get_mut(&mut self) -> &mut T {
+        &mut self.value
+    }
+    pub fn into_inner(self) -> T {
+        self.value
+    }
+}
+
 // 内部可変性。借用の検査はしない (borrow / borrow_mut は参照をそのまま返す)
 pub struct RefCell<T> {
     val: T,

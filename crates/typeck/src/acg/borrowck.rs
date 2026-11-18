@@ -155,6 +155,9 @@ pub struct Bk {
     pub op_call: usize,
     /// The `index_mut` call acg makes to read an indexed place (its receiver is seen as shared)
     pub shared_recv: usize,
+    /// The place being lowered is written or borrowed mutably (`*x = ..`, `&mut *x`): a `deref_mut` acg makes
+    /// for it is a mutable borrow
+    pub place_mut: bool,
     /// The tail expression of the function body (its address)
     pub tail: usize,
     /// Loan made for an expression (`&x`: the address of x; `x.m()` with a borrowed receiver: of the call)
