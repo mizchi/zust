@@ -427,6 +427,19 @@ impl Cx<'_> {
                 };
                 return Ok((Some(self.b.ins().fcmp(cc, l, r)), Ty::Bool));
             }
+            // (`Box<T>`: the values it points to are compared)
+            if let Ty::Box(i) = lt {
+                if !lt.is_fat() {
+                    if matches!(op, "==" | "!=") {
+                        let e = self.eq_at(l, r, lt, SP)?;
+                        let e = if op == "!=" { self.b.ins().bxor_imm_u(e, 1) } else { e };
+                        return Ok((Some(e), Ty::Bool));
+                    }
+                    let c = self.cmp_call(l, r, *i)?;
+                    let e = self.ord_code_test(c, op);
+                    return Ok((Some(e), Ty::Bool));
+                }
+            }
             if !(lt.is_int() || matches!(lt, Ty::Bool | Ty::Char | Ty::Ptr(..))) {
                 return err(SP, format!("comparison of `{}` is not supported", self.prog.tn(lt)));
             }

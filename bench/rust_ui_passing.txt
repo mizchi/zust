@@ -416,6 +416,7 @@ run-pass	binding/borrowed-ptr-pattern-option.rs
 run-pass	binding/borrowed-ptr-pattern.rs
 run-pass	binding/exhaustive-bool-match-sanity.rs
 run-pass	binding/expr-match-generic-unique1.rs
+run-pass	binding/expr-match-generic-unique2.rs
 run-pass	binding/expr-match-generic.rs
 run-pass	binding/expr-match-panic-all.rs
 run-pass	binding/expr-match-panic.rs
@@ -779,11 +780,14 @@ run-pass	box/match-box-deref-codegen.rs
 run-pass	box/self-assignment.rs
 compile-fail	box/suggest-box-for-expr-field-issue-139631.rs
 run-pass	box/unit/expr-block-generic-unique1.rs
+run-pass	box/unit/expr-block-generic-unique2.rs
 run-pass	box/unit/unique-generic-assign.rs
 run-pass	box/unit/unique-in-tag.rs
 run-pass	box/unit/unique-in-vec-copy.rs
+run-pass	box/unit/unique-kinds.rs
 run-pass	box/unit/unique-object-move.rs
 run-pass	box/unit/unique-send-2.rs
+run-pass	box/unit/unique-swap.rs
 run-pass	builtin-superkinds/builtin-superkinds-capabilities-transitive.rs
 run-pass	builtin-superkinds/builtin-superkinds-capabilities.rs
 run-pass	builtin-superkinds/builtin-superkinds-phantom-typaram.rs
@@ -2695,6 +2699,7 @@ check-pass	lint/unused/must-use-box-from-raw.rs
 check-pass	lint/unused/must-use-ops.rs
 compile-fail	lint/unused/must_use-tuple.rs
 run-pass	lint/unused/no-unused-parens-return-block.rs
+check-pass	lint/unused/unused-allocation-box-cmp-issue-134186.rs
 compile-fail	lint/unused/unused-allocation.rs
 check-pass	lint/unused/unused-attr-repr-packed-c-order.rs
 check-pass	lint/unused/unused-braces-attrs-issue-141549.rs
@@ -2740,6 +2745,8 @@ compile-fail	loops/loop-proper-liveness.rs
 run-pass	loops/loop-with-label-9047.rs
 run-pass	loops/unreachable-while-loop-5741.rs
 compile-fail	lowering/span-bug-issue-121431.rs
+run-pass	macros/assert-eq-macro-success.rs
+run-pass	macros/assert-ne-macro-success.rs
 run-pass	macros/assign-to-expr-metavar.rs
 compile-fail	macros/bad-concat.rs
 compile-fail	macros/bang-after-name.rs
