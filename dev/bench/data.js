@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795002987372,
+  "lastUpdate": 1795002989273,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -3124,6 +3124,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "lsp peak RSS",
             "value": 65.125,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "committer": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "distinct": true,
+          "id": "5a4c59429939965d5b97d7cf56a862243afcae5d",
+          "message": "zustc borrowck: & vs &mut derefs, for loops over borrows, values pushed into collections, reborrows by default binding modes\n\n- a deref through `&` is its own projection: E0596 / E0594 for mutation behind a `&` reference\n- `for x in &mut v { v.push(1) }`: the loan of the iterable lasts for the whole loop\n- a `&mut self` method of a value holding references stores what its arguments borrow\n  (`v.push(&mut x)`)\n- matching a reference with bindings reborrows `*r` (default binding modes)\n- prelude views (Iter, Chars, ChunksExact ..) hold the loan of what they iterate; their methods\n  and `Iterator::next` do not borrow the view itself; closures capture mutably only the places\n  they assign or borrow mutably\n- tests/ui compile-fail 34.6% -> 35.0% (borrowck 159, nll 41, closures 36), no regressions;\n  all cratebench crates still build\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-18T11:40:09Z",
+          "tree_id": "138d6d88ea74370dfacd700c314f02ebfbdd8b3e",
+          "url": "https://github.com/mizchi/zust/commit/5a4c59429939965d5b97d7cf56a862243afcae5d"
+        },
+        "date": 1795002988795,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "lsp definition p50",
+            "value": 0.415,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp hover p50",
+            "value": 0.35,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp completion p50",
+            "value": 0.966,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp references p50",
+            "value": 2.745,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp rename p50",
+            "value": 0.385,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp signatureHelp p50",
+            "value": 0.775,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp documentHighlight p50",
+            "value": 0.667,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp ready (startup to indexed)",
+            "value": 98.982,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp peak RSS",
+            "value": 65.16,
             "unit": "MiB"
           }
         ]
