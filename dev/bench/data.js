@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795028158212,
+  "lastUpdate": 1795028160043,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -18310,6 +18310,70 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/mizchi/zust/commit/e598fdf2346ad88f899d6d71915ce400ef7f40d6"
         },
         "date": 1795027928327,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tests/ui run-pass pass rate",
+            "value": 56.53,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui run-pass passing",
+            "value": 1364,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui check-pass pass rate",
+            "value": 60.76,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui check-pass passing",
+            "value": 1098,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui build-pass pass rate",
+            "value": 60,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui build-pass passing",
+            "value": 81,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui compile-fail pass rate",
+            "value": 38.16,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui compile-fail passing",
+            "value": 2808,
+            "unit": "tests"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "committer": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "distinct": true,
+          "id": "72201ab0d3ed326ca582cd5dbf4f8f18ba2f6fcb",
+          "message": "README (en + ja): speed against rustc, KPIs over time, current coverage\n\n- the rustc comparison measured again today: gen1000 (bench/vs_rustc.py), the\n  small programs in bench/rt and the cratebench crates, with ratios\n- the KPI history: gen5000 no-op / edit / check instructions, caches, peak RSS\n  and LSP p50s at each point since borrow checking went in (-11.3% no-op,\n  -12.2% edit, -2.0% check, caches unchanged)\n- tests/ui coverage now (run-pass 56.5%, check-pass 60.8%, build-pass 60.0%,\n  compile-fail 38.2%) and a link to SUPPORTED.md; the status note no longer says\n  there is no borrow checking\n- SUPPORTED.md (en + ja): a checklist section on speed against rustc\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-18T18:50:40Z",
+          "tree_id": "af7f3374f194e5dd960f7ac361afe4c6b8d143a6",
+          "url": "https://github.com/mizchi/zust/commit/72201ab0d3ed326ca582cd5dbf4f8f18ba2f6fcb"
+        },
+        "date": 1795028159588,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
