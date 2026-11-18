@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795004160340,
+  "lastUpdate": 1795004161791,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -3580,6 +3580,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "lsp peak RSS",
             "value": 65.062,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "committer": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "distinct": true,
+          "id": "a7622b3bd7bf3d84f574c38fe1446fdf69624e38",
+          "message": "zustc: generic traits (`trait Tr<T>`), checks on generic parameter lists\n\n- a trait's type parameters become generics of its members (after Self); impls of a generic trait\n  for different types work (several impls of it for one type are still not supported)\n- E0403 (a parameter name used twice), `Self` as a parameter, lifetimes after type parameters,\n  keyword lifetimes, const parameters of non-primitive types, a trait parameter default that\n  needs the trait itself\n- tests/ui: run-pass 46.4% -> 47.7%, check-pass 46.2% -> 49.9%, compile-fail 35.0% -> 36.6%;\n  two compile-fail tests that passed only because generic traits were rejected on the annotated\n  line no longer pass (associated-types/issue-59324, type/type-check-defaults)\n- KPIs unchanged: gen5000 check 3971 M instr, cache 1903 KiB, LSP p50 0.5-3.4 ms\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-18T11:57:06Z",
+          "tree_id": "d90ed42fdf3159d337d35d83c1d6a8235d32bced",
+          "url": "https://github.com/mizchi/zust/commit/a7622b3bd7bf3d84f574c38fe1446fdf69624e38"
+        },
+        "date": 1795004161569,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "lsp definition p50",
+            "value": 0.421,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp hover p50",
+            "value": 0.372,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp completion p50",
+            "value": 0.899,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp references p50",
+            "value": 2.766,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp rename p50",
+            "value": 0.441,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp signatureHelp p50",
+            "value": 0.863,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp documentHighlight p50",
+            "value": 0.678,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp ready (startup to indexed)",
+            "value": 93.932,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp peak RSS",
+            "value": 65.137,
             "unit": "MiB"
           }
         ]
