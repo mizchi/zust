@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795031975050,
+  "lastUpdate": 1795031976892,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -19463,6 +19463,70 @@ window.BENCHMARK_DATA = {
           {
             "name": "tests/ui compile-fail passing",
             "value": 2818,
+            "unit": "tests"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "committer": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "distinct": true,
+          "id": "1501b301db3d730c0eb5ec4fb5c65338029c3bb2",
+          "message": "Builtin macros: offset_of!, addr_of!, try!, stringify!, concat!, line!, column!, option_env!\n\n- `offset_of!(T, a.b)` is the offset from the layout; `addr_of!(x)` /\n  `addr_of_mut!(x)` take the address as a raw pointer (and count as taking\n  x's address); `try!(e)` is `e?`; `stringify!` / `concat!` (literals only,\n  an error otherwise) / `line!` / `column!` are literals; `option_env!` is None\n- tests/ui: run-pass 1381 (57.2%), check-pass 1120 (62.0%), compile-fail 2819\n\nKPIs (gen5000): noop 661.3 M instr, edit 622.8, check 3893.3, cache unchanged;\nLSP ready 108 ms. Against rustc -C incremental on gen1000: cold 4.7x, no-op\n11x, edit 13x faster (rustc's own times move by about 10% between runs).\nREADME and SUPPORTED.md (en + ja) updated.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-18T19:47:58Z",
+          "tree_id": "1738c8dbabd2ec312312f6be317d3706df74bbec",
+          "url": "https://github.com/mizchi/zust/commit/1501b301db3d730c0eb5ec4fb5c65338029c3bb2"
+        },
+        "date": 1795031976410,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tests/ui run-pass pass rate",
+            "value": 57.23,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui run-pass passing",
+            "value": 1381,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui check-pass pass rate",
+            "value": 61.98,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui check-pass passing",
+            "value": 1120,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui build-pass pass rate",
+            "value": 60,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui build-pass passing",
+            "value": 81,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui compile-fail pass rate",
+            "value": 38.31,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui compile-fail passing",
+            "value": 2819,
             "unit": "tests"
           }
         ]
