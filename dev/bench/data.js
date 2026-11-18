@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795013815123,
+  "lastUpdate": 1795013817142,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -7456,6 +7456,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "lsp peak RSS",
             "value": 66.617,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "committer": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "distinct": true,
+          "id": "9b37c8b553ae38a9e20fd42ed900e7da7f93b036",
+          "message": "zustc: rename_shadowed scans the source only when a shadowable name occurs (gen5000 check 4040 -> 3994 M instructions)\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-18T14:50:47Z",
+          "tree_id": "0ad1815461bb5011dcf4d6d7bb653d4f6569682d",
+          "url": "https://github.com/mizchi/zust/commit/9b37c8b553ae38a9e20fd42ed900e7da7f93b036"
+        },
+        "date": 1795013816675,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "lsp definition p50",
+            "value": 0.574,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp hover p50",
+            "value": 0.471,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp completion p50",
+            "value": 1.072,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp references p50",
+            "value": 3.214,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp rename p50",
+            "value": 0.698,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp signatureHelp p50",
+            "value": 0.756,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp documentHighlight p50",
+            "value": 0.801,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp ready (startup to indexed)",
+            "value": 129.052,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp peak RSS",
+            "value": 66.633,
             "unit": "MiB"
           }
         ]
