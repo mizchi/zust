@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795009306968,
+  "lastUpdate": 1795009308822,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -5176,6 +5176,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "lsp peak RSS",
             "value": 66.629,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "committer": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "distinct": true,
+          "id": "cb825abd3668afa47c76491a8f167af453c07912",
+          "message": "zustc: macro hygiene for let bindings, hex / computed enum discriminants, one-variant enum casts, mpsc prelude dependencies\n\n- a macro body's own `let x` names are kept apart from the caller's (`{ let _x = 9; $e }` with\n  `$e = _x` reads the caller's _x)\n- discriminants: hex / octal / binary literals with suffixes, and + - * / % << >> | & ^ ! of them\n  (0xDEADBEE was read as 0)\n- `E::V as usize` for an enum of one variant gives its discriminant (no tag is stored)\n- a program using mpsc::channel gets the RefCell / VecDeque / Rc deref the queue needs\n- tests/ui: run-pass 51.3%, check-pass 54.2%, build-pass 50.4%, no regressions\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-18T13:37:14Z",
+          "tree_id": "4020b5268720d308d0b95144e21282b846cc4cfa",
+          "url": "https://github.com/mizchi/zust/commit/cb825abd3668afa47c76491a8f167af453c07912"
+        },
+        "date": 1795009308424,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "lsp definition p50",
+            "value": 0.48,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp hover p50",
+            "value": 0.402,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp completion p50",
+            "value": 0.802,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp references p50",
+            "value": 2.185,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp rename p50",
+            "value": 0.436,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp signatureHelp p50",
+            "value": 0.602,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp documentHighlight p50",
+            "value": 0.715,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp ready (startup to indexed)",
+            "value": 104.085,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp peak RSS",
+            "value": 66.828,
             "unit": "MiB"
           }
         ]
