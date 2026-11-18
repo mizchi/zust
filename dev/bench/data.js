@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795010135413,
+  "lastUpdate": 1795010137301,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -5404,6 +5404,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "lsp peak RSS",
             "value": 66.828,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "committer": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "distinct": true,
+          "id": "517b9af89137994431ccecbf7af087c5f7212df7",
+          "message": "zustc: identifier patterns naming a const of the scrutinee's type compare with its value\n\n`X => ..` with `const X: u64 = !0 as u16 as u64;` (or a `&str` / integer slice const) was read as a\nbinding that matches everything. Only consts of the same simple type are compared for now.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-18T13:48:53Z",
+          "tree_id": "b16629c5ca04bfa3df372eb2feba5d73844eef80",
+          "url": "https://github.com/mizchi/zust/commit/517b9af89137994431ccecbf7af087c5f7212df7"
+        },
+        "date": 1795010137113,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "lsp definition p50",
+            "value": 0.409,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp hover p50",
+            "value": 0.342,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp completion p50",
+            "value": 0.844,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp references p50",
+            "value": 2.487,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp rename p50",
+            "value": 0.383,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp signatureHelp p50",
+            "value": 0.643,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp documentHighlight p50",
+            "value": 0.628,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp ready (startup to indexed)",
+            "value": 97.423,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp peak RSS",
+            "value": 66.797,
             "unit": "MiB"
           }
         ]
