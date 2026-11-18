@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795038218505,
+  "lastUpdate": 1795038220313,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -19517,6 +19517,85 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/mizchi/zust/commit/a5bdbca6567a62240fbc151a38b67c37d74f55f2"
         },
         "date": 1795037458845,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "parity documentSymbol (名前の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity workspace/symbol (上位 20 の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity definition (行き先の一致)",
+            "value": 97.222,
+            "unit": "%"
+          },
+          {
+            "name": "parity hover (名前を含む)",
+            "value": 95,
+            "unit": "%"
+          },
+          {
+            "name": "parity references (数の一致)",
+            "value": 92.105,
+            "unit": "%"
+          },
+          {
+            "name": "parity documentHighlight (数の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity rename (書き換えの一致)",
+            "value": 90,
+            "unit": "%"
+          },
+          {
+            "name": "parity signatureHelp (名前・引数の数・今の引数の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity completion `x.\\|` (書いてある名前を含む)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity completion `na\\|me` (同)",
+            "value": 79.167,
+            "unit": "%"
+          },
+          {
+            "name": "parity 一致の平均",
+            "value": 95.349,
+            "unit": "%"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "committer": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "distinct": true,
+          "id": "60cbe604d6574e5afed905cc18ea09f6b9626409",
+          "message": "`==` / `<` on Box<T> compare the values; KPIs and docs for this and a5bdbca\n\n- `Box<T> == Box<T>` / `!=` / `<` and the others compare what the boxes point\n  to (they were \"comparison of `Box<i32>` is not supported\")\n- tests/ui: run-pass 1440 (59.7%), check-pass 1135, compile-fail 2815\n\nKPIs (gen5000): noop 661.0 M instr (-0.4%), edit 621.0, check 3893.0, cache\nunchanged. LSP p50 hover 0.60 ms in the full run; against f606b34 on the same\nmachine (4 alternating runs) hover 0.32 vs 0.35 ms and ready 275 vs 287 ms.\nAgainst rustc -C incremental on gen1000: cold 5.8x, no-op 12x, edit 16x\nfaster. README and SUPPORTED.md (en + ja) updated.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-18T21:39:26Z",
+          "tree_id": "89c397ead8d5c63f6ce9d6287b3018b69d3d42b5",
+          "url": "https://github.com/mizchi/zust/commit/60cbe604d6574e5afed905cc18ea09f6b9626409"
+        },
+        "date": 1795038219905,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
