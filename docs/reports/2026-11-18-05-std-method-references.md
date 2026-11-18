@@ -1,61 +1,61 @@
-# std のメソッドの参照の差を詰める (2026-11-18)
+# Closing the gap in references of std methods (2026-11-18)
 
-日付: 2026-11-18
+Date: 2026-11-18
 
-zustc のワークスペースで、よく使う std のメソッド 20 個の references を rust-analyzer と 1 件ずつ比べた
-(`navigate.rs` の中の呼び出しから)。
+In the zustc workspace, compared the references of 20 commonly used std methods against rust-analyzer, one by one
+(starting from calls in `navigate.rs`).
 
-| メソッド | 前 (zustc / rust-analyzer) | 今 |
+| Method | Before (zustc / rust-analyzer) | Now |
 |---|---|---|
 | `Option::map` | 214 / 246 | 266 / 266 |
 | `Iterator::map` | 282 / 342 | 349 / 349 |
-| `collect` / `push` / `filter` / `starts_with` / `clone` / `is_empty` / `len` / `as_str` / `contains` / `get` / `insert` / `trim` / `find` / `first` / `extend` | 数〜十数件の差 | 全部同じ |
+| `collect` / `push` / `filter` / `starts_with` / `clone` / `is_empty` / `len` / `as_str` / `contains` / `get` / `insert` / `trim` / `find` / `first` / `extend` | Differences of a few to a dozen or so | All the same |
 | `ToString::to_string` | 0 / 607 | 605 / 613 |
-| `Option::unwrap` / `<[T]>::iter` | 341 / 346、812 / 822 | 345 / 346、831 / 832 |
+| `Option::unwrap` / `<[T]>::iter` | 341 / 346, 812 / 822 | 345 / 346, 831 / 832 |
 
-直した主なもの:
+Main fixes:
 
-- **名前の解決**
-  - 受け手の型と Deref の先の両方にあるメソッドは受け手に近い方を選ぶ (`String::len` と `str::len`)。前は 2 つになって答えていなかった。
-  - Deref の先は blanket impl の trait より先に見る (`RefMut<Option<T>>` の `as_ref` は Option のもの)。
-  - trait のメソッドの宣言と、その blanket impl (`impl<T: Display> ToString for T`) の両方が候補なら宣言を選ぶ。
-  - 同じ名前の const・関数がほかのファイルやクレートにもあるときは、同じファイル・同じクレートのものを選ぶ (`const PRELUDE`、テストの `fn run`)。
-  - `use .. as PTy` の別名の enum のバリアントを、同じ名前の構造体 (`Path`) と取り違えていたのを直した。
-- **型**
-  - 入れ子のアダプタの要素 (`Peekable<Skip<Args>>`)。
-  - 型の別名の受け手 (`type Cur = Option<..>`)。
-  - `<str as ToOwned>::Owned` などの射影。
-  - `get(i)` の `I::Output`。
-  - タプル構造体のフィールド (`self.0`)。
-  - `&mut T` を取る関数 (`mem::take`)。
-  - 関数の名前を渡した `and_then(str_lit)`。
-  - `Some(e)`。
-  - 本体が `if` / `match` のクロージャ。
-  - `&|t: &str| ..`。
-  - `let x;` の後の代入。
-  - 修飾つきの型 (`&std::cell::RefCell<..>`) を射影と取り違えて捨てていたのを直した。
-- **パターン**
-  - 前の腕の本体が括弧なしで `,` で終わる腕の束縛 (`"-O" => o.opt = true, s if ..`)。
-  - ガードに `==` がある腕。
-  - `matches!(e, P(g) if g..)` のガードの束縛。
-- **ライブラリの索引**
-  - 本文を捨てたライブラリでも分かるように、タプルのバリアントのフィールドの書き方を定義に残した (proc_macro2 の `TokenTree::Literal(l)`)。
-  - `macro_rules!` の結果の型の手がかりも定義に残した (`json!` → `json_internal!` → `Value`)。
+- **Name resolution**
+  - For a method that exists on both the receiver type and its Deref target, pick the one closer to the receiver (`String::len` and `str::len`). Before, there were 2 and no answer was given.
+  - Look at the Deref target before traits with blanket impls (`as_ref` on `RefMut<Option<T>>` is Option's).
+  - If both a trait method declaration and its blanket impl (`impl<T: Display> ToString for T`) are candidates, pick the declaration.
+  - When a const or function with the same name also exists in another file or crate, pick the one in the same file or same crate (`const PRELUDE`, the test `fn run`).
+  - Fixed enum variants of an alias from `use .. as PTy` being mistaken for a struct with the same name (`Path`).
+- **Types**
+  - Elements of nested adapters (`Peekable<Skip<Args>>`).
+  - Receivers of type aliases (`type Cur = Option<..>`).
+  - Projections such as `<str as ToOwned>::Owned`.
+  - `I::Output` of `get(i)`.
+  - Tuple struct fields (`self.0`).
+  - Functions taking `&mut T` (`mem::take`).
+  - Passing a function name: `and_then(str_lit)`.
+  - `Some(e)`.
+  - Closures whose body is `if` / `match`.
+  - `&|t: &str| ..`.
+  - Assignment after `let x;`.
+  - Fixed qualified types (`&std::cell::RefCell<..>`) being mistaken for projections and discarded.
+- **Patterns**
+  - Bindings in a match arm that follows an arm whose body ends with `,` without braces (`"-O" => o.opt = true, s if ..`).
+  - Match arms with `==` in the guard.
+  - Bindings in the guard of `matches!(e, P(g) if g..)`.
+- **Library index**
+  - Kept the shape of tuple variant fields in the definition, so it is known even for libraries whose text was discarded (proc_macro2's `TokenTree::Literal(l)`).
+  - Also kept hints for the result type of `macro_rules!` in the definition (`json!` → `json_internal!` → `Value`).
 
-まだ違うもの:
+Still different:
 
-- `&*ptr` の型。
-- `usize::BITS` の関連 const。
-- クロージャの引数の `e.to_string()` (`map_err(|e| ..)` の `io::Error`)。
-- rust-analyzer が impl の側の `to_string` (string.rs の特殊化) に行く 1 か所。
+- The type of `&*ptr`.
+- The associated const `usize::BITS`.
+- `e.to_string()` on a closure parameter (`io::Error` in `map_err(|e| ..)`).
+- One place where rust-analyzer goes to the `to_string` on the impl side (the specialization in string.rs).
 
-`python3 bench/lsp_parity.py` の一致の平均は前回と同じか上がった:
+The match average of `python3 bench/lsp_parity.py` is the same as last time or higher:
 
-| 対象 | zustc | rust-analyzer |
+| Target | zustc | rust-analyzer |
 |---|---|---|
 | synth | 99.7% | 99.1% |
 | fixture | 97.3% | 95.6% |
 | zustc | 96.3% | 95.5% |
-| ide | 98.1% (+2.8 点) | 97.9% |
+| ide | 98.1% (+2.8 pts) | 97.9% |
 
-references の p50 は zustc で 4.2 ms、rust-analyzer では 24.1 ms。依存クレートの索引を足した分、メモリは 66 MB になった (rust-analyzer は 2.4 GB)。
+references p50 is 4.2 ms for zustc and 24.1 ms for rust-analyzer. Adding the index of dependency crates raised memory to 66 MB (rust-analyzer: 2.4 GB).

@@ -1,42 +1,42 @@
-# 型推論の不足を詰める (2026-11-18)
+# Closing gaps in type inference (2026-11-18)
 
-日付: 2026-11-18
+Date: 2026-11-18
 
-rust-analyzer の hover の型を正解にして、よく書く式 39 個 (繰り返しの鎖・Option / Result・HashMap・タプル・
-ターボフィッシュ・数の型のメソッド) を比べた。前は 17 個のうち 7 個しか合っていなかった (`Option<U>` /
-`Option<Iter<'_, ..>::Item>` / 型が出ない) のが、39 個全部 (クロージャの型の表示も) 同じになった。この比べ方は
-`crates/analyzer/tests/lsp.rs` の `type_inference_like_rust_analyzer` (本物の std を使う) に残した。
+Using rust-analyzer's hover types as the ground truth, compared 39 commonly written expressions (iterator chains, Option / Result, HashMap, tuples,
+turbofish, numeric-type methods). Before, only 7 of 17 matched (`Option<U>` /
+`Option<Iter<'_, ..>::Item>` / no type shown); now all 39 are the same (including how closure types are displayed). This comparison is kept as
+`type_inference_like_rust_analyzer` in `crates/analyzer/tests/lsp.rs` (it uses the real std).
 
-- **繰り返しの要素の型** (`iter_item`): `Iter<'_, T>` → &T、`IterMut` → &mut T、`IntoIter` → T、HashMap の
-  `Iter<'_, K, V>` → (&K, &V)、`Map<I, impl FnMut(..) -> R>` → R、`FilterMap` / `FlatMap` / `Flatten` / `Enumerate` /
-  `Zip` / `Cloned` / `Copied` / `Rev` / `Skip` .. 、`Chars` / `Lines` / `Range` ..。`Self::Item` / `<A as Iterator>::Item` /
-  `U::IntoIter` の射影を置き換える (`norm_proj`)。
-- **メソッドの型引数をクロージャから決める**: 定義に、シグネチャの `F: FnMut(Self::Item) -> B` などから
-  (引数の番号, 型引数, 戻り値の形, 引数の形) を持たせる (`fn_bounds`)。呼び出しの引数のクロージャの戻り値の型を形に
-  当てはめて (`unify`: `Option<U>` と `Option<char>` → U = char)、`map` / `and_then` / `filter_map` / `fold` の結果の型を
-  決める。型引数そのものの引数 (`zip(other: U)`) は引数の式の型で。ターボフィッシュ (`collect::<Vec<_>>()` /
-  `sum::<u32>()` / `parse::<u8>()`) は最初の型引数に (`_` は要素の型)。
-- **クロージャの引数の型**: シグネチャの `F: FnOnce(&T)` の引数の形から (`KEY.with(|m| ..)` の m は &T、`fold` の 2 つめは
-  要素)。分からなければ受け手の要素の型。タプルのパターン `|(k, v)|` / `for (i, x) in` / `let (a, b) =` も。
-- **式の型**: タプルの式 `(a, b)`・タプルの添字 `x.0` (の後の添字 `u.1[0]` も)・括弧の式・配列の式 `[a, b]` / `[x; n]`・
-  単位構造体の値・`match` / `if` / ブロックの式 (腕・ブロックの最後の式の型)・`&x` の参照・ローカルのクロージャの呼び出し・
-  寿命の名前を外す (`&'a str` → `&str`)。
-- **std のマクロの中の impl**: slice の `Iter` などの `impl Iterator` は core のマクロの中にあって見えないので、繰り返しの型に
-  Iterator を持たせる。数の型のメソッド (`wrapping_sub` / `checked_sub` / `count_ones` ..) は core の `uint_impl!` /
-  `int_impl!` の本体のアイテムを `impl __uint` / `impl __int` にして、u8 .. / i8 .. の持ち主に足す。数の型には `Ord` /
-  `PartialOrd` / `Clone` / `Hash` .. も (`n.min(m)`)。`Iterator for Map<I, F>` の `B` のような impl の決まらない型引数は要素の型。
-  `thread_local!` の static の型は `LocalKey<T>`。
-- **型引数の束縛**: 受け手が型引数 `T` なら、`impl<T: Clone>` / `where T: Show` の trait のメソッド。
-- **定義の行き先**: derive がある型の `Point::default()` / `x.clone()` は std の trait の宣言より derive の名前に (hover は
-  trait のメソッドのシグネチャ、参照も数える)。`let h: Hidden = n.into();` は Hidden の `impl From<i32> for Hidden` の from。
-  ライブラリの同じ持ち主・同じ名前のメソッドがいくつかのファイルにあるとき (`From` の impl) は先のもの。
-- **構造体の省略形** `T { x }`: definition はローカルとフィールドの両方、documentHighlight も両方、rename は書き足す形
-  (`x: new` / `new: x`)。`.` の後の補完には self を取らない関連関数を出さない。
-- **長いシグネチャ**: 記号の detail を 120 文字で切っていたので、引数の多い関数の戻り値の型が取れていなかった
-  (1,000 文字まで)。切ったシグネチャで std の索引のスレッドが落ちていた不具合も直し、std のファイル 1 つで索引を作るのに
-  失敗しても、そのファイルだけ飛ばすようにした。
+- **Iterator element types** (`iter_item`): `Iter<'_, T>` → &T, `IterMut` → &mut T, `IntoIter` → T, HashMap's
+  `Iter<'_, K, V>` → (&K, &V), `Map<I, impl FnMut(..) -> R>` → R, `FilterMap` / `FlatMap` / `Flatten` / `Enumerate` /
+  `Zip` / `Cloned` / `Copied` / `Rev` / `Skip` .., `Chars` / `Lines` / `Range` ... Replaces the projections `Self::Item` / `<A as Iterator>::Item` /
+  `U::IntoIter` (`norm_proj`).
+- **Deciding method type arguments from closures**: definitions carry (argument index, type argument, return shape, argument shape) taken from
+  signature bounds such as `F: FnMut(Self::Item) -> B` (`fn_bounds`). The return type of the closure in the call's arguments is fitted to the shape
+  (`unify`: `Option<U>` and `Option<char>` → U = char), which decides the result type of `map` / `and_then` / `filter_map` / `fold`.
+  An argument whose type is the type argument itself (`zip(other: U)`) uses the type of the argument expression. Turbofish (`collect::<Vec<_>>()` /
+  `sum::<u32>()` / `parse::<u8>()`) goes to the first type argument (`_` is the element type).
+- **Types of closure parameters**: from the parameter shape of the signature's `F: FnOnce(&T)` (m in `KEY.with(|m| ..)` is &T; the second one of `fold` is
+  the element). If unknown, the element type of the receiver. Also tuple patterns `|(k, v)|` / `for (i, x) in` / `let (a, b) =`.
+- **Expression types**: tuple expressions `(a, b)`, tuple indexing `x.0` (and indexing after it, `u.1[0]`), parenthesized expressions, array expressions `[a, b]` / `[x; n]`,
+  unit struct values, `match` / `if` / block expressions (the type of the last expression of the match arm or block), references `&x`, calls to local closures,
+  and dropping lifetime names (`&'a str` → `&str`).
+- **impls inside std macros**: `impl Iterator` for slice `Iter` and similar live inside core macros and are not visible, so the iterator types are given
+  Iterator directly. For numeric-type methods (`wrapping_sub` / `checked_sub` / `count_ones` ..), the items in the bodies of core's `uint_impl!` /
+  `int_impl!` are turned into `impl __uint` / `impl __int` and added to the u8 .. / i8 .. owners. Numeric types also get `Ord` /
+  `PartialOrd` / `Clone` / `Hash` .. (`n.min(m)`). An impl's undetermined type argument, such as `B` in `Iterator for Map<I, F>`, is the element type.
+  The type of a `thread_local!` static is `LocalKey<T>`.
+- **Type argument bindings**: if the receiver is a type argument `T`, the trait methods from `impl<T: Clone>` / `where T: Show`.
+- **Definition targets**: for a type with derive, `Point::default()` / `x.clone()` go to the derive name rather than the std trait declaration (hover shows
+  the trait method signature, and references count it too). `let h: Hidden = n.into();` goes to from in Hidden's `impl From<i32> for Hidden`.
+  When methods with the same owner and same name in a library exist in several files (`From` impls), the first one is used.
+- **Struct shorthand** `T { x }`: definition gives both the local and the field, documentHighlight gives both, and rename uses the expanding form
+  (`x: new` / `new: x`). Completion after `.` does not offer associated functions that do not take self.
+- **Long signatures**: symbol details were cut at 120 characters, so the return type of functions with many parameters was lost
+  (now up to 1,000 characters). Also fixed a bug where a truncated signature crashed the std index thread; if building the index for one std file
+  fails, only that file is skipped.
 
-結果: fixture の definition は 462 → 465/467、references は 606 → 609/629。`python3 bench/lsp_parity.py` の一致の平均は
-synth 99.7% / fixture 97.3% / zustc 96.3% (rust-analyzer はそれぞれ 99.1% / 95.6% / 95.5%)。ide (navigate.rs。作業の間に
-本文が変わるので位置は毎回違う) は 95〜98% (rust-analyzer 95〜98%)。時間は前と同じ (references の p50 は zustc で 5.4 ms、
-rust-analyzer 27.9 ms)。std のメソッドの参照 (`Iterator::map` など) は rust-analyzer の 8 割ほどを数える (前は 0)。
+Results: fixture definition 462 → 465/467, references 606 → 609/629. The match average of `python3 bench/lsp_parity.py` is
+synth 99.7% / fixture 97.3% / zustc 96.3% (rust-analyzer: 99.1% / 95.6% / 95.5%). ide (navigate.rs; its text changes during the work,
+so the positions differ every time) is 95–98% (rust-analyzer 95–98%). Times are unchanged (references p50 is 5.4 ms for zustc,
+27.9 ms for rust-analyzer). references of std methods (`Iterator::map` and so on) count about 80% of rust-analyzer's (before: 0).

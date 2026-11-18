@@ -1,307 +1,307 @@
-# 対応している言語のサブセット
+# Supported language subset
 
-zustc がコンパイルできるのは Rust のサブセット。std を使うプログラム (Vec / String / HashMap / 書式化 / イテレータ / Box /
-Rc など) は、zustc が持つ組み込みの prelude (`crates/syntax/src/prelude_lib.rs.in`。本物の std ではない) で動かす。
-`#![no_std]` のプログラムも扱える。
+zustc compiles a subset of Rust. Programs that use std (Vec / String / HashMap / formatting / iterators / Box /
+Rc and so on) run on zustc's built-in prelude (`crates/syntax/src/prelude_lib.rs.in`; it is not the real std).
+`#![no_std]` programs are also supported.
 
-正しさは、同じプログラムを rustc でもビルドし、実行結果 (標準出力と終了コード) を比べて確かめている
-(`tests/compare.sh` は `examples/*.rs`、`tests/probe.sh` は `tests/probe/*.rs`)。no_std のものは rustc 側を libcore だけ
-(`-C panic=abort`) でビルドする。
+Correctness is checked by also building the same program with rustc and comparing the results (stdout and exit code)
+(`tests/compare.sh` for `examples/*.rs`, `tests/probe.sh` for `tests/probe/*.rs`). For no_std programs, the rustc side is built with libcore only
+(`-C panic=abort`).
 
-**大事な前提**: 借用検査・可変性の検査・ムーブの検査・match の網羅性の検査はしない (下の「型推論と検査」)。rustc を通る
-プログラムを速くビルドするための道具で、rustc の代わりに正しさを確かめるものではない。
+**Important premise**: there is no borrow checking, mutability checking, move checking, or match exhaustiveness checking (see "Type inference and checking" below). It is a tool
+for building programs that already pass rustc quickly, not a replacement for rustc in checking correctness.
 
-## 言語
+## Language
 
-- アイテム：
+- Items:
   - `fn`
-  - `extern "C"` の宣言と定義
-  - `struct`：名前付き / タプル / unit
-  - `enum`：unit / tuple / struct のバリアントと、判別値
-  - `const`、`static`、`static mut`
-  - `use`（名前は最後のセグメントで解決する）
-  - クレート属性（`#![no_std]` など）
-- impl と trait：
-  - 固有 `impl`
-  - `trait`（必須メソッドとデフォルトメソッド）
-  - `impl Trait for S`：struct / enum / プリミティブ型（`impl Tr for u32`）
+  - `extern "C"` declarations and definitions
+  - `struct`: named / tuple / unit
+  - `enum`: unit / tuple / struct variants, and discriminants
+  - `const`, `static`, `static mut`
+  - `use` (names are resolved by the last segment)
+  - Crate attributes (`#![no_std]` and so on)
+- impl and trait:
+  - Inherent `impl`
+  - `trait` (required methods and default methods)
+  - `impl Trait for S`: struct / enum / primitive types (`impl Tr for u32`)
   - `#[derive(Clone, Copy, PartialEq, ..)]`
-- ジェネリクス：
-  - 関数（`<T: A + B>`、`where`、turbofish）
-  - struct / enum（`Pair<T>`、`Option<T>`）
-  - `impl<T> X<T>`、`impl<T> Option<&T>` のような self 型パターン
-  - すべて呼び出し元で型引数を推論し、単相化する。ライフタイムは消去する
-  - 引数位置の `impl Trait`（名前のない型パラメータとして扱う）
-- クロージャ（`examples/closures.rs`）：
-  - キャプチャ：参照（既定）と `move`（値）。入れ子のクロージャ、`self` やメソッド呼び出しを含む本体
-  - `F: Fn(A) -> B` / `FnMut` / `FnOnce` 境界、`impl Fn(A) -> B` 引数、`&F` / `&mut F` 渡し
-  - 戻り値位置の `impl Fn(A) -> B`（末尾が `move` クロージャで、キャプチャが引数だけのもの）
-  - struct のフィールドに入れる（`struct Button<F: Fn(i64) -> i64> { on_click: F }`、`(self.on_click)(x)`）
-  - 引数・戻り値の型は、注釈 → 呼び先の境界 → 使われ方（親の型推論）→ 本体の型推論の順に決める
-- `dyn Trait`（`examples/dyn_trait.rs`）：
-  - `&dyn Trait` / `&mut dyn Trait`。`&T` からの暗黙の変換（引数・let・フィールド・配列・戻り値）と `as &dyn Trait`
-  - デフォルトメソッド、ジェネリックな impl（`impl<T> Tr for W<T>`）、プリミティブ型への impl を vtable 経由で呼ぶ
-  - `&dyn Fn(A) -> B`（クロージャを vtable 経由で呼ぶ）
-- 関数ポインタ（`examples/fn_ptr_box.rs`）：
-  - `fn(A, B) -> R` 型。関数アイテムを値として使う（引数・戻り値・let・struct のフィールド・配列）、`(op.f)(a, b)`
-  - `F: Fn(A) -> B` に関数を渡す（`apply(double, 5)`、`o.map(double)`）
-  - ジェネリック関数は turbofish（`id::<i64>`）か期待型（`let f: fn(i64) -> i64 = id;`）で型引数を決める
-  - `&dyn Fn` / `Box<dyn Fn>` にする（引数 3 個まで。prelude の中継関数 `__exr_fnptrN` が vtable に入る）
-- `Box<T>`（`examples/fn_ptr_box.rs`）：
-  - `Box::new(x)` は libc の `malloc` でヒープに置き、drop で `free` する
-  - `Box<dyn Trait>` / `Box<dyn Fn(A) -> B>`、自動 deref、`*b`、`&Box<T>` → `&T`、`Option<Box<Node>>` のような再帰的な型
-- `Vec<T>` / `String`（`examples/vec_string.rs`）：prelude に Rust で書いてある（`crates/syntax/src/prelude_lib.rs.in`）。libc の `realloc` / `free` を使い、Drop で要素を drop してから解放する
-  - `Vec`：`new` / `with_capacity` / `push` / `pop` / `len` / `is_empty` / `capacity` / `get(_mut)` / `first` / `last` / `insert` / `remove` / `swap_remove` / `swap` / `reverse` / `truncate` / `clear` / `append` / `as_slice` / `as_mut_slice` / `extend_from_slice` / `clone`（`T: Copy`）/ `contains` / `==`（`T: PartialEq`）/ `sort`（`T: Ord`、挿入ソート）
-  - `vec![a, b]` / `vec![x; n]`、添字 `v[i]`（範囲外は panic）、`&v[a..b]`、`for x in &v` / `v.iter_mut()` / `v`（値で回す）
-  - `&Vec<T>` → `&[T]`、`&String` → `&str` の暗黙の変換（ジェネリックな `&[T]` 引数にも）
-  - `String`：`new` / `from` / `with_capacity` / `push_str` / `push(char)`（UTF-8 に符号化）/ `len` / `is_empty` / `as_str` / `as_bytes` / `clear` / `truncate` / `clone` / `==`（`String` 同士と `&str`）、`"..".to_string()` / `to_owned()`
-  - `&str` / `&[T]` の `==` は中身で比べる
-  - Vec / String のメソッドは、型の名前がコードに現れたときだけ prelude から付ける（自分の struct に `push` があるだけでは付かない）
-- Iterator（`examples/iterators.rs`）：prelude に `trait Iterator { type Item; fn next(..); .. }` とアダプタを Rust で書いてある
-  - 関連型：`type Item = u32;`（impl）と `Self::Item` / `I::Item`（シグネチャ）、`I: Iterator<Item = T>` / `where Self: Iterator<Item = &T>` の制約で型パラメータを解く
-  - 自前の `impl Iterator for S`、`for x in it`（`while let Some(x) = it.next()` にする）
-  - 作るもの：`v.iter()` / `iter_mut()` / `into_iter()`（Vec・配列・スライス）、`(a..b)` / `(a..=b)` を値として、`s.chars()`（UTF-8 を復号）
-  - アダプタ：`map` / `filter` / `filter_map` / `enumerate` / `zip` / `take` / `skip` / `take_while` / `chain` / `copied` / `cloned`
-  - 消費：`collect`（`Vec<_>` / `String`、`collect::<Vec<_>>()` と `let v: Vec<_> = ..` の `_` も）/ `sum` / `product` / `count` / `fold` / `for_each` / `any` / `all` / `find` / `position` / `last` / `nth` / `max` / `min`
-  - クロージャの引数の型は、呼び先の境界（`F: FnMut(Self::Item) -> B`）を関連型まで解いて決める。型推論も関連型を辿る（`let s: i64 = (1..=10).sum();` の範囲は i64）
-  - prelude のイテレータ部品は、イテレータを作ってアダプタ・消費メソッドを呼ぶコード（`v.iter().map(` / `(0..n).sum(` / `impl Iterator` / `.chars()`）があるときだけ付ける。`for x in v.iter()` だけ、`Option::map` だけ、変数名の `count` だけでは付けない
-- 書式化（`examples/formatting.rs`）：`format!` / `print!` / `println!` / `eprint!` / `eprintln!` / `write!` / `writeln!`（`String` と `fmt::Formatter` に）
-  - `{}` / `{:?}` / `{:#?}`、位置・名前つき引数、`{x}` の取り込み、`{{` / `}}`
-  - 幅・寄せ・埋め（`{:>8}` / `{:*^9}` / `{:08}` / `{:>w$}`）、`+`、`#`、精度（文字列の切り詰め）、`x` / `X` / `b` / `o`
-  - `impl fmt::Display for S`（`fmt::Result` / `fmt::Formatter<'_>` / `f.pad`）と `x.to_string()`
-  - `#[derive(Debug)]`（struct・タプル構造体・unit 構造体・enum・ジェネリック）。整数・bool・char・`&str`・String・Vec・配列・スライス・タプル・Option・Result・HashMap の Debug
-  - 型ごとの Display / Debug の本体は codegen が作る（`__exr_display::<T>` / `__exr_debug::<T>`）。prelude は Rust で書いた helper だけ
-- HashMap（`examples/hashmap.rs`、`examples/text_more.rs`）：prelude に Rust で書いた（オープンアドレス法・線形探索・FNV-1a）
+- Generics:
+  - Functions (`<T: A + B>`, `where`, turbofish)
+  - struct / enum (`Pair<T>`, `Option<T>`)
+  - `impl<T> X<T>`, and self type patterns such as `impl<T> Option<&T>`
+  - In all cases, type arguments are inferred at the call site and monomorphized. Lifetimes are erased
+  - `impl Trait` in argument position (treated as an anonymous type parameter)
+- Closures (`examples/closures.rs`):
+  - Captures: by reference (default) and `move` (by value). Nested closures, and bodies containing `self` or method calls
+  - `F: Fn(A) -> B` / `FnMut` / `FnOnce` bounds, `impl Fn(A) -> B` arguments, passing `&F` / `&mut F`
+  - `impl Fn(A) -> B` in return position (when the tail is a `move` closure that captures only arguments)
+  - Stored in struct fields (`struct Button<F: Fn(i64) -> i64> { on_click: F }`, `(self.on_click)(x)`)
+  - Parameter and return types are decided in this order: annotation → bound of the callee → usage (type inference of the parent) → type inference of the body
+- `dyn Trait` (`examples/dyn_trait.rs`):
+  - `&dyn Trait` / `&mut dyn Trait`. Implicit conversion from `&T` (arguments, let, fields, arrays, return values) and `as &dyn Trait`
+  - Calls through the vtable to default methods, generic impls (`impl<T> Tr for W<T>`), and impls on primitive types
+  - `&dyn Fn(A) -> B` (calls a closure through the vtable)
+- Function pointers (`examples/fn_ptr_box.rs`):
+  - The `fn(A, B) -> R` type. Using function items as values (arguments, return values, let, struct fields, arrays), `(op.f)(a, b)`
+  - Passing a function to `F: Fn(A) -> B` (`apply(double, 5)`, `o.map(double)`)
+  - For generic functions, type arguments are decided by turbofish (`id::<i64>`) or by the expected type (`let f: fn(i64) -> i64 = id;`)
+  - Converting to `&dyn Fn` / `Box<dyn Fn>` (up to 3 arguments; the prelude's trampoline function `__exr_fnptrN` goes into the vtable)
+- `Box<T>` (`examples/fn_ptr_box.rs`):
+  - `Box::new(x)` places the value on the heap with libc `malloc`, and drop calls `free`
+  - `Box<dyn Trait>` / `Box<dyn Fn(A) -> B>`, auto-deref, `*b`, `&Box<T>` → `&T`, and recursive types such as `Option<Box<Node>>`
+- `Vec<T>` / `String` (`examples/vec_string.rs`): written in Rust in the prelude (`crates/syntax/src/prelude_lib.rs.in`). They use libc `realloc` / `free`, and Drop drops the elements before freeing
+  - `Vec`: `new` / `with_capacity` / `push` / `pop` / `len` / `is_empty` / `capacity` / `get(_mut)` / `first` / `last` / `insert` / `remove` / `swap_remove` / `swap` / `reverse` / `truncate` / `clear` / `append` / `as_slice` / `as_mut_slice` / `extend_from_slice` / `clone` (`T: Copy`) / `contains` / `==` (`T: PartialEq`) / `sort` (`T: Ord`, insertion sort)
+  - `vec![a, b]` / `vec![x; n]`, indexing `v[i]` (panics when out of range), `&v[a..b]`, `for x in &v` / `v.iter_mut()` / `v` (iterating by value)
+  - Implicit conversions `&Vec<T>` → `&[T]` and `&String` → `&str` (also to generic `&[T]` arguments)
+  - `String`: `new` / `from` / `with_capacity` / `push_str` / `push(char)` (encoded as UTF-8) / `len` / `is_empty` / `as_str` / `as_bytes` / `clear` / `truncate` / `clone` / `==` (between `String`s and with `&str`), `"..".to_string()` / `to_owned()`
+  - `==` on `&str` / `&[T]` compares contents
+  - Vec / String methods are attached from the prelude only when the type name appears in the code (having a `push` on your own struct is not enough)
+- Iterator (`examples/iterators.rs`): the prelude has `trait Iterator { type Item; fn next(..); .. }` and the adapters written in Rust
+  - Associated types: `type Item = u32;` (impl) and `Self::Item` / `I::Item` (signatures); type parameters are solved from the constraints `I: Iterator<Item = T>` / `where Self: Iterator<Item = &T>`
+  - Your own `impl Iterator for S`, `for x in it` (turned into `while let Some(x) = it.next()`)
+  - Producers: `v.iter()` / `iter_mut()` / `into_iter()` (Vec, arrays, slices), `(a..b)` / `(a..=b)` as values, `s.chars()` (decodes UTF-8)
+  - Adapters: `map` / `filter` / `filter_map` / `enumerate` / `zip` / `take` / `skip` / `take_while` / `chain` / `copied` / `cloned`
+  - Consumers: `collect` (`Vec<_>` / `String`, including the `_` in `collect::<Vec<_>>()` and `let v: Vec<_> = ..`) / `sum` / `product` / `count` / `fold` / `for_each` / `any` / `all` / `find` / `position` / `last` / `nth` / `max` / `min`
+  - Closure parameter types are decided by solving the callee's bound (`F: FnMut(Self::Item) -> B`) down to associated types. Type inference also follows associated types (the range in `let s: i64 = (1..=10).sum();` is i64)
+  - The prelude's iterator parts are attached only when there is code that creates an iterator and calls adapters or consumers (`v.iter().map(` / `(0..n).sum(` / `impl Iterator` / `.chars()`). They are not attached for just `for x in v.iter()`, just `Option::map`, or just a variable named `count`
+- Formatting (`examples/formatting.rs`): `format!` / `print!` / `println!` / `eprint!` / `eprintln!` / `write!` / `writeln!` (to `String` and `fmt::Formatter`)
+  - `{}` / `{:?}` / `{:#?}`, positional and named arguments, `{x}` captures, `{{` / `}}`
+  - Width, alignment and fill (`{:>8}` / `{:*^9}` / `{:08}` / `{:>w$}`), `+`, `#`, precision (truncation of strings), `x` / `X` / `b` / `o`
+  - `impl fmt::Display for S` (`fmt::Result` / `fmt::Formatter<'_>` / `f.pad`) and `x.to_string()`
+  - `#[derive(Debug)]` (structs, tuple structs, unit structs, enums, generics). Debug for integers, bool, char, `&str`, String, Vec, arrays, slices, tuples, Option, Result, HashMap
+  - The per-type Display / Debug bodies are generated by codegen (`__exr_display::<T>` / `__exr_debug::<T>`). The prelude has only helpers written in Rust
+- HashMap (`examples/hashmap.rs`, `examples/text_more.rs`): written in Rust in the prelude (open addressing, linear probing, FNV-1a)
   - `new` / `with_capacity` / `insert` / `get` / `get_mut` / `remove` / `contains_key` / `len` / `is_empty` / `clear` / `m[&k]`
   - `entry(k).or_insert(v)` / `or_insert_with` / `and_modify`
-  - `iter` / `iter_mut` / `keys` / `values` / `values_mut` / `into_iter` / `for (k, v) in &m`、`collect::<HashMap<_, _>>()`
-  - キーは整数・bool・char・`&str`・String と `#[derive(Hash)]` の struct / enum / タプル（ハッシュ関数は型ごとに codegen が作る）
-  - 回る順番は rustc と違う（rustc もランダムなので、例ではキーを並べ替えてから出す）
-- 文字列と char（`examples/strings_chars.rs`）：prelude の `__exr_str_<名前>` / `__exr_char_<名前>` があれば、
-  `s.名前(..)` / `c.名前(..)` はそれを呼ぶ（型推論もそのシグネチャを使う。&str の引数には char も渡せる）
+  - `iter` / `iter_mut` / `keys` / `values` / `values_mut` / `into_iter` / `for (k, v) in &m`, `collect::<HashMap<_, _>>()`
+  - Keys: integers, bool, char, `&str`, String, and `#[derive(Hash)]` structs / enums / tuples (codegen generates a hash function per type)
+  - Iteration order differs from rustc (rustc's is also random, so the examples sort the keys before printing)
+- Strings and char (`examples/strings_chars.rs`): if the prelude has `__exr_str_<name>` / `__exr_char_<name>`,
+  `s.name(..)` / `c.name(..)` calls it (type inference also uses that signature; a char can be passed to a &str parameter)
   - `to_uppercase` / `to_lowercase` / `replace` / `replacen` / `repeat` / `split("..")` / `split_once` / `strip_prefix` / `strip_suffix` /
-    `trim_start` / `trim_end` / `rfind` / `char_indices` / `bytes` / `eq_ignore_ascii_case` / `parse::<整数>()`（`ParseIntError` の Display / Debug も std と同じ）
-  - String の `insert` / `insert_str` / `remove` / `pop` / `retain` / `+` / `+=`、`&s[a..b]`（文字の境界でなければ panic）
-  - char の `is_alphabetic` / `is_numeric` / `is_alphanumeric` / `is_whitespace` / `is_uppercase` / `is_lowercase` / `to_digit` / `is_digit` /
-    `to_uppercase` / `to_lowercase` / `len_utf8`、`char::from_digit` / `char::from_u32` / `char::from(u8)`。
-    Unicode の表は持たないので、ASCII・Latin-1・ギリシャ文字・キリル文字・仮名・漢字・ハングルの範囲で近似する
-- イテレータの追加分（`examples/iter_vec_more.rs`）：`rev`（Vec・配列・範囲・chars・map / filter / copied / chain の後。DoubleEndedIterator の代わりに各型が `next_back` を持つ）/
-  `step_by` / `peekable`（`peek` / `next_if`）/ `skip_while` / `scan` / `inspect` / `flat_map` / `flatten`（中身は Vec・Option・イテレータ）
-- Vec / スライスの追加分：`retain` / `retain_mut` / `dedup` / `dedup_by_key` / `drain(範囲)` / `split_off` / `resize` / `fill` / `first_mut` / `last_mut` /
-  `windows` / `chunks` / `to_vec` / `join` / `concat`（要素が `&str` か String）
-- Option / Result の追加分：`expect` / `zip` / `map_or_else` / `or_else` / `and` / `get_or_insert_with` / `insert` / `is_none_or` / `is_ok_and` / `is_err_and` / `map_or`
-- clone（`examples/clone_derive.rs`）：`#[derive(Clone)]` の struct / enum / ジェネリック、Box・タプル・配列・Option・Result、手書きの `impl Clone`。
-  本体は型ごとに codegen が作る（`__exr_clone::<T>`。drop の要らないフィールドはコピー、ほかはフィールドごとに clone）
-- Default（`examples/defaults.rs`）：`#[derive(Default)]`、手書きの `impl Default`、`Default::default()` / `T::default()` / `i32::default()` / `Vec::default()`、
-  構造体の更新記法 `S { a: 1, ..Default::default() }` / `..base`、`unwrap_or_default`、`std::mem::take` / `swap` / `replace`（Copy でない型も）。
-  本体は型ごとに codegen が作る（`__exr_default::<T>`: 0 で埋め、手書きの impl を持つフィールドはそれを呼ぶ）
-- コレクション（`examples/collections.rs`）：`HashSet`（HashMap<T, ()> の上に。和・積・差・collect）、`BTreeMap` / `BTreeSet`（キーの順に並べた Vec と二分探索。
-  回る順・`entry().or_insert` / `or_default`・`first_key_value`・`pop_first`・`m[&k]` は std と同じ）、`VecDeque`（リングバッファ。`d[i]`・両端の push / pop）。
-  キーが `&str` / String の map の `get("k")` は std の Borrow と同じく `&str` で引ける
-- `impl Index` / `IndexMut`：`x[i]` は x が `index` / `index_mut` を持つ struct なら `*x.index_mut(i)` にする
-- 関連定数（`examples/assoc_consts.rs`）：`impl S { const N: usize = 4; }` / trait の `const K: u32;`（既定値も）。`S::N` / `Self::N` / `T::N`（型引数）、配列の長さにも
-- モジュール（`examples/modules.rs`）：1 ファイルの中の `mod m { .. }`（入れ子・`pub(crate)`・`use self:: / super:: / crate::`・`m::f()` / `m::S` / `m::N`）。
-  字句解析の前に `mod m {` と対応する `}` を空白にして平らにし（位置と行は変えない）、名前解決はパスの先頭のモジュール名を読み飛ばす。
-  `#[cfg(test)] mod tests { .. }` は消す
-- `macro_rules!`（`examples/macros.rs`）：字句解析の前にテキストとして展開する（展開は 1 行に収め、後ろの行番号を変えない）。
-  断片 expr / ident / ty / literal / tt / block など、繰り返し `$(..),*` / `$(..)+` / `$(..)?`、再帰、アイテムを作るマクロ。
-  式の断片は `( .. )` で包んで埋め込むので `square!(1 + 2)` の優先順位は Rust と同じ
-- 演算子のオーバーロード：`impl Add / Sub / Mul / Div / Rem / Neg / Not / BitAnd / BitOr / BitXor / AddAssign ..`。
-  `a + b` は左辺が struct で `add` メソッドがあれば `a.add(b)` にする（`impl Mul<i32> for V` のような右辺の型も）
-- `&str` のメソッド：`split(char)` / `split_whitespace` / `lines` / `trim*` / `starts_with` / `ends_with` / `contains` / `find`（引数は `&str` か `char`）、`<` などの比較と `sort`
-- 大小比較（`examples/ordering.rs`、`examples/ordering_impl.rs`、`examples/ordering_inline.rs`）：
-  - `<` / `<=` / `>` / `>=` をタプル・配列・スライス・`&str`・String・Vec・Option・Result と `#[derive(PartialOrd, Ord)]` の struct / enum に（辞書順。enum はバリアントの判別値の順）
-  - 手書きの `impl PartialOrd` / `impl Ord`（`impl PartialEq` / `impl Eq for S {}` も）。`<` と sort はそれを呼ぶ
-    - sort / sort_unstable / max / min / clamp / BinaryHeap / BTreeMap / BTreeSet / Reverse / 境界 `T: Ord` / `T: Eq`、タプルや Option の中、enum への impl も
-    - 配列・スライス・Vec・参照の `==` の要素も手書きの eq を呼ぶ
-    - `BTreeSet` / `BTreeMap` の collect は std と同じく、等しいものが続いたら後のものを残す（insert は前のキーを残す）
-  - `cmp` / `partial_cmp`（整数にも）、`Ordering` と `reverse` / `then` / `then_with` / `is_lt` など、`std::cmp::Reverse`
-  - `max` / `min`（Ord な struct・タプル・String にも）、`std::cmp::max` / `min`
-  - `sort` / `sort_by` / `sort_by_key` / `sort_by_cached_key` / `sort_unstable*`（安定なマージソート。Vec・配列・スライス・`v[a..b]`）、`binary_search` / `binary_search_by` / `binary_search_by_key`（同じ値が並ぶときに返す位置も std と同じ）、`clamp`（整数・Ord な型。`lo > hi` なら panic）、イテレータの `max` / `min` / `max_by_key` / `min_by_key` / `max_by` / `min_by`
-  - `BinaryHeap`（`examples/binary_heap.rs`）：`new` / `with_capacity` / `from(vec)` / `collect` / `push` / `pop` / `peek` / `len` / `is_empty` / `clear` / `iter` / `into_iter` / `into_vec` / `into_sorted_vec` / `{:?}`。
-    sift の手順を std と同じにしてあるので、`iter` / `into_vec` / `{:?}` の並びも rustc と一致する。`Reverse` で最小ヒープ
-  - `BinaryHeap::append` / `extend`（`examples/binary_heap_extend.rs`）：std と同じ `rebuild_tail`（足す数が多ければ全体を作り直し、少なければ 1 つずつ sift_up。2048 要素を超えたら別の閾値）なので、足した後の並びも一致する
-  - `Vec::extend`。引数は Vec・配列・`&v` / `&[..]`・範囲・イテレータ（IntoIterator の代わりに codegen が `into_iter()` / `iter()` を補う。要素の参照なら Copy として足す）
-  - 比較の本体は型ごとに codegen が作る（`__exr_cmp::<T>`。Box / Vec を使わないプログラムではその場で展開する）
-- Drop（`examples/drop.rs`、`examples/drop_more.rs`。drop の順序を rustc と比べ、valgrind でリーク・二重解放がないことを確かめる）：
-  - `impl Drop for S`（ジェネリックな impl も）、`drop(x)`
-  - スコープの終わりで宣言と逆順に drop する。対象は return / `?` / break / continue で抜けるスコープ、値を捨てる式文、`let _ = e`、代入で上書きされる古い値
-  - ムーブを追跡する：値として読む・値で受ける `self`・`move` キャプチャ・値で束縛するパターン（`if let Some(b) = o`）・`for x in arr`
-  - 一時値（`make().area()`、`&Box::new(..)`、match 対象）は文の終わりで drop する。let の初期化式の一時値はブロックの終わりまで延ばす
-  - フィールドだけのムーブ（`self.top = n.next`）は、元のフィールドを 0 で埋めて持ち主を drop する
-- 型：
-  - 整数（`i8`〜`i64`、`u8`〜`u64`、`isize`、`usize`）、`bool`、`char`、`()`、`!`
-  - `&T`、`&mut T`、`*const T`、`*mut T`
-  - `[T; N]`（N はリテラルか const）、`&[T]`、`&mut [T]`、`&str`
-  - タプル、struct、enum
-  - `core::ffi::c_int` などの C 型の別名
-- 式：
-  - 算術・ビット演算・比較・短絡評価・`as`
-    - キャストは整数 ⇔ char / bool、参照 → ポインタ、ポインタ ⇔ usize、フィールドのない enum → 整数
-  - `let`（分解も）、代入、複合代入
-    - 左辺はローカル変数・フィールド・`*p`・`a[i]`・static
-  - `if` / `match` / `if let` / `while let` / `while` / `loop` / `for`（`break` / `continue` / `return`）
-    - ラベル付きの `break 'outer` / `continue 'outer`、`break v`（`loop` の値）、ラベル付きブロック `'a: { .. break 'a v; .. }`
+    `trim_start` / `trim_end` / `rfind` / `char_indices` / `bytes` / `eq_ignore_ascii_case` / `parse::<integer>()` (Display / Debug of `ParseIntError` are also the same as std)
+  - String's `insert` / `insert_str` / `remove` / `pop` / `retain` / `+` / `+=`, `&s[a..b]` (panics if not on a char boundary)
+  - char's `is_alphabetic` / `is_numeric` / `is_alphanumeric` / `is_whitespace` / `is_uppercase` / `is_lowercase` / `to_digit` / `is_digit` /
+    `to_uppercase` / `to_lowercase` / `len_utf8`, `char::from_digit` / `char::from_u32` / `char::from(u8)`.
+    There are no Unicode tables, so it approximates within the ranges of ASCII, Latin-1, Greek, Cyrillic, kana, kanji and Hangul
+- More iterators (`examples/iter_vec_more.rs`): `rev` (on Vec, arrays, ranges, chars, and after map / filter / copied / chain; instead of DoubleEndedIterator, each type has `next_back`) /
+  `step_by` / `peekable` (`peek` / `next_if`) / `skip_while` / `scan` / `inspect` / `flat_map` / `flatten` (contents are Vec, Option or iterators)
+- More Vec / slice: `retain` / `retain_mut` / `dedup` / `dedup_by_key` / `drain(range)` / `split_off` / `resize` / `fill` / `first_mut` / `last_mut` /
+  `windows` / `chunks` / `to_vec` / `join` / `concat` (elements are `&str` or String)
+- More Option / Result: `expect` / `zip` / `map_or_else` / `or_else` / `and` / `get_or_insert_with` / `insert` / `is_none_or` / `is_ok_and` / `is_err_and` / `map_or`
+- clone (`examples/clone_derive.rs`): `#[derive(Clone)]` structs / enums / generics, Box, tuples, arrays, Option, Result, and hand-written `impl Clone`.
+  The body is generated per type by codegen (`__exr_clone::<T>`; fields that need no drop are copied, others are cloned field by field)
+- Default (`examples/defaults.rs`): `#[derive(Default)]`, hand-written `impl Default`, `Default::default()` / `T::default()` / `i32::default()` / `Vec::default()`,
+  struct update syntax `S { a: 1, ..Default::default() }` / `..base`, `unwrap_or_default`, `std::mem::take` / `swap` / `replace` (also for non-Copy types).
+  The body is generated per type by codegen (`__exr_default::<T>`: fills with 0, and calls the hand-written impl for fields that have one)
+- Collections (`examples/collections.rs`): `HashSet` (on top of HashMap<T, ()>; union, intersection, difference, collect), `BTreeMap` / `BTreeSet` (a Vec kept in key order, with binary search;
+  iteration order, `entry().or_insert` / `or_default`, `first_key_value`, `pop_first` and `m[&k]` are the same as std), `VecDeque` (ring buffer; `d[i]`, push / pop at both ends).
+  `get("k")` on a map with `&str` / String keys can look up by `&str`, the same as std's Borrow
+- `impl Index` / `IndexMut`: `x[i]` becomes `*x.index_mut(i)` if x is a struct with `index` / `index_mut`
+- Associated constants (`examples/assoc_consts.rs`): `impl S { const N: usize = 4; }` / trait `const K: u32;` (also with default values). `S::N` / `Self::N` / `T::N` (type arguments), also in array lengths
+- Modules (`examples/modules.rs`): `mod m { .. }` within one file (nested, `pub(crate)`, `use self:: / super:: / crate::`, `m::f()` / `m::S` / `m::N`).
+  Before lexing, `mod m {` and its matching `}` are replaced with whitespace to flatten them (positions and lines do not change), and name resolution skips the leading module names of a path.
+  `#[cfg(test)] mod tests { .. }` is removed
+- `macro_rules!` (`examples/macros.rs`): expanded as text before lexing (an expansion fits on 1 line, so later line numbers do not change).
+  Fragments expr / ident / ty / literal / tt / block and so on, repetitions `$(..),*` / `$(..)+` / `$(..)?`, recursion, and macros that produce items.
+  Expression fragments are embedded wrapped in `( .. )`, so the precedence of `square!(1 + 2)` is the same as Rust
+- Operator overloading: `impl Add / Sub / Mul / Div / Rem / Neg / Not / BitAnd / BitOr / BitXor / AddAssign ..`.
+  `a + b` becomes `a.add(b)` if the left side is a struct with an `add` method (also right-hand types such as `impl Mul<i32> for V`)
+- `&str` methods: `split(char)` / `split_whitespace` / `lines` / `trim*` / `starts_with` / `ends_with` / `contains` / `find` (argument is `&str` or `char`), comparisons such as `<`, and `sort`
+- Ordering comparisons (`examples/ordering.rs`, `examples/ordering_impl.rs`, `examples/ordering_inline.rs`):
+  - `<` / `<=` / `>` / `>=` on tuples, arrays, slices, `&str`, String, Vec, Option, Result, and `#[derive(PartialOrd, Ord)]` structs / enums (lexicographic; enums by variant discriminant order)
+  - Hand-written `impl PartialOrd` / `impl Ord` (also `impl PartialEq` / `impl Eq for S {}`). `<` and sort call them
+    - Also sort / sort_unstable / max / min / clamp / BinaryHeap / BTreeMap / BTreeSet / Reverse / bounds `T: Ord` / `T: Eq`, inside tuples and Option, and impls on enums
+    - Elements of `==` on arrays, slices, Vec and references also call the hand-written eq
+    - collect into `BTreeSet` / `BTreeMap` keeps the later one when equal items follow each other, same as std (insert keeps the earlier key)
+  - `cmp` / `partial_cmp` (also on integers), `Ordering` with `reverse` / `then` / `then_with` / `is_lt` and so on, `std::cmp::Reverse`
+  - `max` / `min` (also on Ord structs, tuples, String), `std::cmp::max` / `min`
+  - `sort` / `sort_by` / `sort_by_key` / `sort_by_cached_key` / `sort_unstable*` (stable merge sort; Vec, arrays, slices, `v[a..b]`), `binary_search` / `binary_search_by` / `binary_search_by_key` (the position returned when equal values are adjacent is also the same as std), `clamp` (integers and Ord types; panics if `lo > hi`), iterator `max` / `min` / `max_by_key` / `min_by_key` / `max_by` / `min_by`
+  - `BinaryHeap` (`examples/binary_heap.rs`): `new` / `with_capacity` / `from(vec)` / `collect` / `push` / `pop` / `peek` / `len` / `is_empty` / `clear` / `iter` / `into_iter` / `into_vec` / `into_sorted_vec` / `{:?}`.
+    The sift steps are the same as std, so the order of `iter` / `into_vec` / `{:?}` also matches rustc. Min-heap via `Reverse`
+  - `BinaryHeap::append` / `extend` (`examples/binary_heap_extend.rs`): the same `rebuild_tail` as std (rebuild everything if many are added, otherwise sift_up one at a time; a different threshold above 2048 elements), so the order after adding also matches
+  - `Vec::extend`. The argument can be a Vec, an array, `&v` / `&[..]`, a range, or an iterator (instead of IntoIterator, codegen inserts `into_iter()` / `iter()`; references to elements are added as Copy)
+  - The comparison bodies are generated per type by codegen (`__exr_cmp::<T>`; in programs that do not use Box / Vec, they are expanded inline)
+- Drop (`examples/drop.rs`, `examples/drop_more.rs`; the drop order is compared with rustc, and valgrind confirms there are no leaks or double frees):
+  - `impl Drop for S` (also generic impls), `drop(x)`
+  - Drops in reverse declaration order at the end of a scope. This covers scopes exited by return / `?` / break / continue, expression statements that discard a value, `let _ = e`, and old values overwritten by assignment
+  - Tracks moves: reading as a value, `self` taken by value, `move` captures, patterns that bind by value (`if let Some(b) = o`), `for x in arr`
+  - Temporaries (`make().area()`, `&Box::new(..)`, match scrutinees) are dropped at the end of the statement. Temporaries in a let initializer are extended to the end of the block
+  - A move of only a field (`self.top = n.next`) fills the original field with 0 and drops the owner
+- Types:
+  - Integers (`i8`–`i64`, `u8`–`u64`, `isize`, `usize`), `bool`, `char`, `()`, `!`
+  - `&T`, `&mut T`, `*const T`, `*mut T`
+  - `[T; N]` (N is a literal or a const), `&[T]`, `&mut [T]`, `&str`
+  - Tuples, structs, enums
+  - C type aliases such as `core::ffi::c_int`
+- Expressions:
+  - Arithmetic, bitwise operations, comparisons, short-circuit evaluation, `as`
+    - Casts: integer ⇔ char / bool, reference → pointer, pointer ⇔ usize, fieldless enum → integer
+  - `let` (also destructuring), assignment, compound assignment
+    - The left side can be a local variable, a field, `*p`, `a[i]`, or a static
+  - `if` / `match` / `if let` / `while let` / `while` / `loop` / `for` (`break` / `continue` / `return`)
+    - Labeled `break 'outer` / `continue 'outer`, `break v` (the value of a `loop`), labeled blocks `'a: { .. break 'a v; .. }`
     - `let PAT = e else { return; };`
-  - `for` で回せるもの：
-    - `a..b`、`a..=b`、`(a..b).rev()`
-    - 配列・スライス（`&xs`、`&mut xs`、値渡し）と、それに `.iter()` / `.iter_mut()` / `.copied()` / `.enumerate()` / `.rev()` を付けたもの
-  - 構築：struct / タプル / enum / 配列（`[a, b]`、`[x; N]`）
-  - 添字 `a[i]`（範囲外なら panic）、`&a[lo..hi]`（`..` / `lo..` / `..=hi` も）
-  - `&[T; N]` → `&[T]` の暗黙の変換
-  - `==` / `!=`：struct / enum / タプル / 配列は構造的に比べる。手書きの `eq` があればそれを呼ぶ
-  - リテラル：`"..."`（`&'static str`）、`b"..."`、`b'x'`、`'x'`、負のリテラル
-  - `?`（Option / Result）
-  - マクロ：`panic!` / `unreachable!` / `todo!` / `assert!` / `assert_eq!` / `assert_ne!` / `debug_assert*!` / `matches!`
-    - メッセージは書式化しない
-    - `assert_eq!` / `assert_ne!` は `==` / `!=` として比べる（Option・Vec・String と `&str` なども）
-    - マクロの引数の中のクロージャも使える（`println!("{:?}", v.iter().map(|x| x * 2).collect::<Vec<_>>())`、`examples/closures_in_macros.rs`）。
-      クロージャは最初の `|` の位置で識別する（codegen がマクロの引数を parse し直してもノードの対応が取れる）
-- パターン：
-  - `_`、束縛（`ref` / `mut`）、`x @ p`、リテラル、範囲、`|`（`A(x) | B(x)` のように束縛してもよい）
-  - スライスパターン `[a, b]` / `[first, .., last]` / `[x, rest @ ..]`（配列・スライス・`v[..]`）
-  - バリアント、struct、タプル、`&p`、入れ子、ガード
-  - 参照を match したときのデフォルト束縛モード
-  - `None` などの unit バリアント
-- メソッド：
-  - 自動 deref と自動参照、UFCS（`S::m(&x)` / `Trait::m(&x)` / `<S as Trait>::m(&x)`）
-  - 静的ディスパッチ。固有メソッド → trait 実装 → デフォルトメソッドの順に探す
-- 浮動小数点 `f32` / `f64`：
-  - 四則演算・`%`・比較・`as` キャスト（整数への変換は rustc と同じ飽和）、`1.5` / `1e-3` / `2.0f32` リテラル
-  - メソッド：`sqrt` / `abs` / `floor` / `ceil` / `round` / `trunc` / `powi` / `powf` / `exp` / `ln` / `sin` / `cos` / `atan2` / `hypot` / `mul_add` / `max` / `min`（NaN を無視）/ `total_cmp` / `is_nan` / `to_bits` など（超越関数は libm）
-  - 定数：`f64::MAX` / `EPSILON` / `NAN` / `INFINITY` / `consts::PI` など。`f64::sqrt(x)` のパス呼び出し
-  - 書式化は rustc と同じ桁：最短表現（往復で同じ値になる最短の桁、`{:?}` は指数が -5 以下か 16 以上で `1e-7` 形式）、`{:.N}`（正確な 10 進展開から偶数丸め）。10 進変換は 1e9 進の多倍長で正確に行う
-  - `"1.5".parse::<f64>()`（strtod、`ParseFloatError`）
-  - `examples/float_fuzz.rs` の 6000 行（乱数のビット列の Display / Debug / `{:.N}` / parse）が rustc と一致する
-- 128 bit 整数 `i128` / `u128`：
-  - 算術・比較・シフト・ビット演算は Cranelift の I128（引数と戻り値は `enable_llvm_abi_extensions` で SysV と同じ 2 レジスタ）
-  - 除算・剰余、浮動小数点との変換（丸めは 1 回）、書式化（`{}` / `{:x}` / `{:b}` / 幅など）、`parse` は prelude の関数
-  - `checked_*` / `wrapping_*` / `pow` / `count_ones` / `MAX` / `MIN`、HashMap のキー、derive
-  - `examples/int128.rs` の乱数による照合（3000 組の四則演算・シフト・比較）が rustc と一致する
-- そのほか：
-  - 整数の `overflowing_*` / `checked_pow` / `saturating_pow` / `rem_euclid` / `div_euclid` / `next_power_of_two` / `leading_ones` / `isqrt` / `from_str_radix`
-  - `i32::pow(2, 10)` のような、プリミティブのメソッドを関数の形で呼ぶもの
-  - `From` の impl と `.into()`（期待型の `from`。String は `String::from`、数値はキャスト）
-  - `vec![v; n]` の要素が Copy でないもの（clone して並べる）、`Vec<Vec<T>>` の `concat`、`collect::<String>()` の要素が `&str` / `String`
-  - `partition` / `rposition`、`collect::<Option<Vec<T>>>()` / `collect::<Result<Vec<T>, E>>()`、メソッドの turbofish の型推論
-  - `String::from_utf8` / `std::str::from_utf8`（検査と `Utf8Error` の表示は std と同じ）、`trim_matches` 系（パターンは &str / char / クロージャ）、`split` / `lines` / `split_whitespace` の `rev()`
-  - `Rc`（`clone` / `strong_count` / `ptr_eq`。弱参照はない）、`RefCell`（`borrow` / `borrow_mut` は参照を返すだけで、借用の検査はしない）、`Cell`
-  - メソッドが見つからないときの `deref` 先での検索（`rc.borrow_mut()`）。`struct Node { children: Vec<Node> }` や `Vec<Rc<RefCell<Node>>>` のような再帰型
-  - 書式の `{:e}` / `{:E}`（精度つきも）、幅・精度を引数から取る `{:w$}` / `{:.p$}` / `{:.*}`、`{:12e}` のような幅と型の組み合わせ
-  - `println!` などの書式マクロの引数の中の型推論（parse し直したノードの型はソース上の位置で codegen に渡す）
-  - 終わりのない範囲 `(1..)`、`char::is_ascii_digit` などを関数の値として渡すこと
-  - `use E::*;` で取り込んだバリアントを短い名前で使うこと、`Box` を通した再帰型の derive(PartialEq)（比較の glue 関数を作る）
-  - `try_into`（整数どうし。範囲外は `TryFromIntError`）、`i64::from(x)`、char の範囲 `'a'..='e'`
-  - `BTreeMap::range`（`a..b` / `a..=b` / `a..`）、`HashMap` の `entry(..).or_default()`
-  - `for x in (0..n).step_by(k)` のようにアダプタを通した for のループ変数の型推論
-  - `Vec` の `rotate_left` / `rotate_right` / `split_at`、`Iterator::eq`、`std::cmp::Reverse(x)` のような `std::` 付きのパスでの構築
-  - ローカル変数をキャプチャして返すクロージャ（`let mut c = 0; move || { c += 1; c }`。型は注釈かリテラル・String の初期化式から）
-  - `?` でのエラーの `From` 変換（`impl From<ParseIntError> for AppError`）
-  - 関数の中に書いたアイテム（`fn` / `struct` / `enum` / `const` / `use`。字句レベルでファイルの末尾に移す）
-  - `std::collections::HashMap::new()` のような長いパス、`VecDeque::from(vec)`、スライスの `split_at` / `split_at_mut`、`Chars::as_str`
-  - 標準入出力：`io::stdin()` の `read_line` / `lines()` / `read_to_string` / `lock()`、`io::stdout()` / `lock()` / `flush()`、`BufWriter::new(..)`、`write!` / `writeln!` を `write_str` を持つ任意の型に（libc の stdio を使うので `print!` と順序が混ざらない）
-  - `std::process::exit`、`dbg!`、`for i in 0..`（終わりのない範囲）、`char_indices()` / `bytes()` の `rev()`
-  - クロージャを含む型を返すクロージャ（`flat_map(|i| (0..i).map(move |j| (i, j)))`、`|a| move |b| a + b`）: 型推論がクロージャの struct 型（親の型引数・キャプチャ・引数・戻り値）まで解く
-  - `Iterator::cycle`、`Box<T>` の `as_ref()` / `as_mut()`
-  - 書式化のビルダー `f.debug_struct(..)` / `debug_tuple` / `debug_list` / `debug_set` / `debug_map`、`f.alternate()` / `width()` / `precision()` / `pad()`
-  - `HashMap::from([..])`（HashSet / BTreeMap / BTreeSet / VecDeque / BinaryHeap も）、HashMap の `retain` / `drain` / `extend`、HashSet / BTreeMap / BTreeSet / String の `extend`、値としての `[a, b].into_iter()`
-  - `Ord::cmp(&a, &b)` / `PartialOrd::partial_cmp(..)` の UFCS
-  - char のリテラル・範囲のパターン（`'a'..='z'`）、文字列リテラルのパターン（`match s { "add" => .. }`）
-  - 引数のパターン（`fn index(&self, (i, j): (usize, usize))`）、参照への演算子の impl（`impl Add for &M`）
-  - `Iterator` を受ける引数への `&Vec` / スライス / 配列（`a.iter().zip(&b)`）、範囲の添字を受け手にしたメソッド（`v[a..b].iter()`）
-  - ユーザの `impl IntoIterator for &Coll`（`for x in &c`）、型パラメータ以外を縛る where 節（`where C::Item: Debug` / `where Self: Sized`。読み飛ばす）
-  - `Box<dyn Error>`（`dyn Error + Send + Sync` も。変換した時点で `{}` / `{:?}` の文字列にした prelude の型で表す。`?` / `Box::new(e)` / `"msg".into()` で変換）、`impl std::error::Error for E {}`、`fn main() -> Result<(), E>`（Err なら `Error: {:?}` を stderr に出して終了コード 1）
-  - 自分を `Option<Box<..>>` で含むジェネリックな型（`Node<T> { next: Option<Box<Node<T>>> }`）
-  - ブランケット impl（`impl<T: Display> Describe for T`。境界は検査せず、メソッドが見つからないときにどの型でも探す）
-  - `-> impl Iterator<Item = T>` などクロージャ以外の `impl Trait` の戻り値（プログラムを組み立てた直後に本体を型推論して具体型を入れる。呼び出し側のキャッシュのキーには解いた型が入る）
-  - `const fn` を const の初期化式から呼ぶこと、範囲パターンの端に const（`i32::MIN..=-1`）、`?Sized` 境界
-  - const ジェネリクス `const N: usize`（関数・impl・struct の型パラメータ）
-    - 配列の長さ `[T; N]`、値としての `N`（`for i in 0..N`、`[0; N]`、`N * 10`）
-    - 引数 `f::<3>()` / `Buf<4>` / `Mat::<C, R>::zero()` / const の名前 `zeros::<K>()`、引数の配列からの推論（`sum([1, 2, 3])`）
-    - 型引数の位置には長さを持つ配列型 `[(); n]` を入れ、インスタンスの中の `N` はそこから読む（ジェネリックな型の長さは `CONST_LEN_BASE + i`）。式の長さ（`[T; N * 2]`）は未対応（rustc の安定版も同じ）
-  - `Type::<A>::f()` の型のセグメントの型引数（`Vec::<i32>::new()` も）
-  - 型の違う `==` / `!=` は trait で解決する：右辺の型を持つ `impl PartialEq<R> for S`（手書きのものも）を、両辺の型（片方の参照を外したものも）で選んで `eq` を呼ぶ
-    - prelude に std と同じ組み合わせ：`Vec<T>` と `[U; N]` / `&[U; N]` / `&[U]` / `[U]` / `Vec<U>`、`[T]` と `Vec<U>` / `[U; N]`、`[T; N]` と `[U]` / `&[U]` / `[U; N]`（要素の型も違ってよい：`Vec<String> == ["a", "b"]`）
-    - impl の self 型に配列・スライス（`impl .. for [T; N]` / `for [T]`）
-    - `a[..2] == [1, 2]`（サイズ不定のスライスの比較は参照で比べる）
-  - 型の違う `<` / `<=` / `>` / `>=` も同じく `impl PartialOrd<R> for S` の `partial_cmp` で（`Meters < Feet`、`Ver < (1, 5)`、`Ver < 2`）
-    - 右辺がリテラル・タプル・配列なら、左の型の impl のうち形の合う R を期待型にする（`(1, 5)` を `(u32, u32)` に）。`==` も同じ
-    - `partial_cmp` が `None` なら 4 つともすべて false（rustc と同じ。同じ型の手書きの partial_cmp も）
-    - f64 / f32 の `partial_cmp` は NaN で `None`
-- panic：
-  - `#[panic_handler]` があればそれを呼ぶ（範囲外アクセス・`unwrap`・`assert!`・`panic!`・オーバーフロー検査など）
-  - なければ trap する。std のプログラム（`no_std` でないもの）では main の最初に trap（SIGILL）のシグナルハンドラを登録し、
-    rustc の panic と同じく stdout を書き出して終了コード 101 で終わる
-  - stderr には rustc と同じ形で、場所と種類ごとのメッセージを出す（`thread 'main' panicked at src/main.rs:行:列:` の次の行。ファイル名は `src/main.rs` 固定）
-    - オーバーフロー・0 除算・`MIN / -1`・シフト量、`panic!` / `unreachable!` / `todo!` / `unimplemented!`（書式つきも）、`assert!`（式の文字列か独自のメッセージ）、`assert_eq!` / `assert_ne!`（`left` / `right` の値を `{:?}` で。独自のメッセージも）
-    - 範囲外の添字は `index out of bounds: the len is N but the index is I`
-    - `Option` / `Result` の `unwrap` / `expect` は呼んだ側の場所（`#[track_caller]` 相当）。`Result::unwrap` の `Err` の値は、書式化を使うプログラムでだけ `{:?}` で出す
-  - `assert_eq!(a, b)` は `let l = &(a); let r = &(b); if !(*l == *r) { panic }` に展開し、a と b を 1 回だけ評価する。
-    右の型は左から決める（`assert_eq!(o, None)`）。左が数のリテラルなら右を先に評価して左の型を右から決める（`assert_eq!(2, n)`）。
-    値を書式化するので、assert_eq! を使う std のプログラムには書式化の部品が付く
-  - 場所の行はアイテムの開始行を足したファイルの中の行。場所を書き込んだ関数のキャッシュは開始行を覚えておき、上に行を足して行がずれたらコンパイルし直す
-  - しくみ：trap ごとに別の trap コードを付け、codegen が「関数の中のオフセット → 種類・行・列・メッセージ」を記録する。
-    driver がそれを static の表 `__EXR_TRAP_TABLE`（1 か所 8 byte）にし、SIGILL のハンドラ（`SA_SIGINFO`）が発生したアドレスで引く。
-    検査そのものは `trapnz` のままなので、検査の速さは変わらない。範囲外の添字だけは長さと添字を渡すため、関数ごとに 1 つの冷たいブロックから `__exr_panic_index` を呼ぶ
-- オーバーフロー検査（rustc の debug ビルドと同じ。`-O` なら入れない）：
-  - `+` / `-` / `*`（と `+=` など）、単項の `-`、`abs`、`pow`、`<<` / `>>` の量が型の幅以上
-  - 0 除算と `MIN / -1`（rustc と同じく `-O` でも検査する）。除数・シフト量が定数なら省く
-  - `sum` / `product`（std と同じく呼び出し側の設定に従う: prelude の `#[rustc_inherit_overflow_checks]`）
-  - prelude の中は検査しない（ハッシュなどで折り返す演算を書いている）。128 bit の掛け算は検査しない
-  - 検査は分岐でなく条件つき trap（`trapnz`）にした。分岐とブロックで panic の場所を渡すと gen1000 のコンパイルが +50%、`trapnz` なら +5%
+  - What `for` can iterate over:
+    - `a..b`, `a..=b`, `(a..b).rev()`
+    - Arrays and slices (`&xs`, `&mut xs`, by value), and those with `.iter()` / `.iter_mut()` / `.copied()` / `.enumerate()` / `.rev()` applied
+  - Construction: struct / tuple / enum / array (`[a, b]`, `[x; N]`)
+  - Indexing `a[i]` (panics when out of range), `&a[lo..hi]` (also `..` / `lo..` / `..=hi`)
+  - Implicit conversion `&[T; N]` → `&[T]`
+  - `==` / `!=`: structs / enums / tuples / arrays are compared structurally. A hand-written `eq` is called if there is one
+  - Literals: `"..."` (`&'static str`), `b"..."`, `b'x'`, `'x'`, negative literals
+  - `?` (Option / Result)
+  - Macros: `panic!` / `unreachable!` / `todo!` / `assert!` / `assert_eq!` / `assert_ne!` / `debug_assert*!` / `matches!`
+    - Messages are not formatted
+    - `assert_eq!` / `assert_ne!` compare as `==` / `!=` (also Option, Vec, String with `&str`, and so on)
+    - Closures inside macro arguments also work (`println!("{:?}", v.iter().map(|x| x * 2).collect::<Vec<_>>())`, `examples/closures_in_macros.rs`).
+      Closures are identified by the position of their first `|` (so nodes still correspond when codegen re-parses the macro arguments)
+- Patterns:
+  - `_`, bindings (`ref` / `mut`), `x @ p`, literals, ranges, `|` (bindings are allowed, as in `A(x) | B(x)`)
+  - Slice patterns `[a, b]` / `[first, .., last]` / `[x, rest @ ..]` (arrays, slices, `v[..]`)
+  - Variants, structs, tuples, `&p`, nesting, guards
+  - Default binding modes when matching on a reference
+  - Unit variants such as `None`
+- Methods:
+  - Auto-deref and auto-ref, UFCS (`S::m(&x)` / `Trait::m(&x)` / `<S as Trait>::m(&x)`)
+  - Static dispatch. Lookup order: inherent methods → trait impls → default methods
+- Floating point `f32` / `f64`:
+  - Arithmetic, `%`, comparisons, `as` casts (conversion to integers saturates, same as rustc), literals `1.5` / `1e-3` / `2.0f32`
+  - Methods: `sqrt` / `abs` / `floor` / `ceil` / `round` / `trunc` / `powi` / `powf` / `exp` / `ln` / `sin` / `cos` / `atan2` / `hypot` / `mul_add` / `max` / `min` (ignore NaN) / `total_cmp` / `is_nan` / `to_bits` and so on (transcendental functions use libm)
+  - Constants: `f64::MAX` / `EPSILON` / `NAN` / `INFINITY` / `consts::PI` and so on. Path calls such as `f64::sqrt(x)`
+  - Formatting uses the same digits as rustc: shortest representation (the shortest digits that round-trip to the same value; `{:?}` uses the `1e-7` form when the exponent is -5 or less or 16 or more), `{:.N}` (round-half-to-even from the exact decimal expansion). Decimal conversion is done exactly with base-1e9 multi-precision arithmetic
+  - `"1.5".parse::<f64>()` (strtod, `ParseFloatError`)
+  - The 6000 lines of `examples/float_fuzz.rs` (Display / Debug / `{:.N}` / parse of random bit patterns) match rustc
+- 128-bit integers `i128` / `u128`:
+  - Arithmetic, comparisons, shifts and bitwise operations use Cranelift's I128 (arguments and return values use 2 registers, the same as SysV, via `enable_llvm_abi_extensions`)
+  - Division, remainder, conversion to and from floating point (rounded once), formatting (`{}` / `{:x}` / `{:b}` / width and so on), and `parse` are prelude functions
+  - `checked_*` / `wrapping_*` / `pow` / `count_ones` / `MAX` / `MIN`, HashMap keys, derive
+  - The randomized check in `examples/int128.rs` (3000 pairs of arithmetic, shifts and comparisons) matches rustc
+- Other:
+  - Integer `overflowing_*` / `checked_pow` / `saturating_pow` / `rem_euclid` / `div_euclid` / `next_power_of_two` / `leading_ones` / `isqrt` / `from_str_radix`
+  - Calling primitive methods in function form, such as `i32::pow(2, 10)`
+  - `From` impls and `.into()` (`from` of the expected type; `String::from` for String, a cast for numbers)
+  - `vec![v; n]` with non-Copy elements (cloned and laid out), `concat` of `Vec<Vec<T>>`, `collect::<String>()` with `&str` / `String` elements
+  - `partition` / `rposition`, `collect::<Option<Vec<T>>>()` / `collect::<Result<Vec<T>, E>>()`, type inference for method turbofish
+  - `String::from_utf8` / `std::str::from_utf8` (validation and the display of `Utf8Error` are the same as std), the `trim_matches` family (pattern is &str / char / closure), `rev()` on `split` / `lines` / `split_whitespace`
+  - `Rc` (`clone` / `strong_count` / `ptr_eq`; no weak references), `RefCell` (`borrow` / `borrow_mut` only return references and do not check borrows), `Cell`
+  - Searching the `deref` target when a method is not found (`rc.borrow_mut()`). Recursive types such as `struct Node { children: Vec<Node> }` and `Vec<Rc<RefCell<Node>>>`
+  - Format `{:e}` / `{:E}` (also with precision), `{:w$}` / `{:.p$}` / `{:.*}` taking width and precision from arguments, combinations of width and type such as `{:12e}`
+  - Type inference inside the arguments of format macros such as `println!` (the types of re-parsed nodes are passed to codegen by their source position)
+  - Unbounded ranges `(1..)`, passing `char::is_ascii_digit` and similar as function values
+  - Using variants imported with `use E::*;` by their short names, derive(PartialEq) on recursive types through `Box` (generates a comparison glue function)
+  - `try_into` (between integers; out of range gives `TryFromIntError`), `i64::from(x)`, char ranges `'a'..='e'`
+  - `BTreeMap::range` (`a..b` / `a..=b` / `a..`), `entry(..).or_default()` on `HashMap`
+  - Type inference of the loop variable in a for through adapters, such as `for x in (0..n).step_by(k)`
+  - `Vec`'s `rotate_left` / `rotate_right` / `split_at`, `Iterator::eq`, construction through paths with `std::`, such as `std::cmp::Reverse(x)`
+  - Closures that capture and return local variables (`let mut c = 0; move || { c += 1; c }`; the type comes from an annotation or from a literal or String initializer)
+  - `From` conversion of errors with `?` (`impl From<ParseIntError> for AppError`)
+  - Items written inside functions (`fn` / `struct` / `enum` / `const` / `use`; moved lexically to the end of the file)
+  - Long paths such as `std::collections::HashMap::new()`, `VecDeque::from(vec)`, slice `split_at` / `split_at_mut`, `Chars::as_str`
+  - Standard I/O: `read_line` / `lines()` / `read_to_string` / `lock()` on `io::stdin()`, `io::stdout()` / `lock()` / `flush()`, `BufWriter::new(..)`, `write!` / `writeln!` to any type with `write_str` (uses libc stdio, so the order does not get mixed up with `print!`)
+  - `std::process::exit`, `dbg!`, `for i in 0..` (unbounded range), `rev()` on `char_indices()` / `bytes()`
+  - Closures that return types containing closures (`flat_map(|i| (0..i).map(move |j| (i, j)))`, `|a| move |b| a + b`): type inference solves down to the closure's struct type (the parent's type arguments, captures, parameters, return value)
+  - `Iterator::cycle`, `as_ref()` / `as_mut()` on `Box<T>`
+  - Formatting builders `f.debug_struct(..)` / `debug_tuple` / `debug_list` / `debug_set` / `debug_map`, `f.alternate()` / `width()` / `precision()` / `pad()`
+  - `HashMap::from([..])` (also HashSet / BTreeMap / BTreeSet / VecDeque / BinaryHeap), HashMap's `retain` / `drain` / `extend`, `extend` on HashSet / BTreeMap / BTreeSet / String, `[a, b].into_iter()` as a value
+  - UFCS `Ord::cmp(&a, &b)` / `PartialOrd::partial_cmp(..)`
+  - char literal and range patterns (`'a'..='z'`), string literal patterns (`match s { "add" => .. }`)
+  - Parameter patterns (`fn index(&self, (i, j): (usize, usize))`), operator impls on references (`impl Add for &M`)
+  - Passing `&Vec` / slices / arrays to parameters that take an `Iterator` (`a.iter().zip(&b)`), methods with a range index as the receiver (`v[a..b].iter()`)
+  - User `impl IntoIterator for &Coll` (`for x in &c`), where clauses that bound things other than type parameters (`where C::Item: Debug` / `where Self: Sized`; skipped)
+  - `Box<dyn Error>` (also `dyn Error + Send + Sync`; represented by a prelude type that stores the `{}` / `{:?}` strings at the point of conversion; converted with `?` / `Box::new(e)` / `"msg".into()`), `impl std::error::Error for E {}`, `fn main() -> Result<(), E>` (on Err, prints `Error: {:?}` to stderr and exits with code 1)
+  - Generic types that contain themselves through `Option<Box<..>>` (`Node<T> { next: Option<Box<Node<T>>> }`)
+  - Blanket impls (`impl<T: Display> Describe for T`; the bound is not checked, and when a method is not found, it is looked up for any type)
+  - `impl Trait` return values other than closures, such as `-> impl Iterator<Item = T>` (right after the program is assembled, the body is type-inferred and the concrete type is filled in; the solved type goes into the cache key of the caller)
+  - Calling a `const fn` from a const initializer, consts at the ends of range patterns (`i32::MIN..=-1`), `?Sized` bounds
+  - Const generics `const N: usize` (type parameters of functions, impls and structs)
+    - Array length `[T; N]`, `N` as a value (`for i in 0..N`, `[0; N]`, `N * 10`)
+    - Arguments `f::<3>()` / `Buf<4>` / `Mat::<C, R>::zero()` / const names `zeros::<K>()`, inference from array arguments (`sum([1, 2, 3])`)
+    - The type argument position holds an array type with that length, `[(); n]`, and `N` inside an instance is read from it (the length for a generic type is `CONST_LEN_BASE + i`). Lengths given by expressions (`[T; N * 2]`) are not supported (also not supported in stable rustc)
+  - Type arguments on the type segment in `Type::<A>::f()` (also `Vec::<i32>::new()`)
+  - `==` / `!=` between different types is resolved through traits: an `impl PartialEq<R> for S` with the right-hand type (including hand-written ones) is chosen by the types of both sides (also with one side's reference removed), and its `eq` is called
+    - The prelude has the same combinations as std: `Vec<T>` with `[U; N]` / `&[U; N]` / `&[U]` / `[U]` / `Vec<U>`, `[T]` with `Vec<U>` / `[U; N]`, `[T; N]` with `[U]` / `&[U]` / `[U; N]` (element types may also differ: `Vec<String> == ["a", "b"]`)
+    - Arrays and slices as the self type of an impl (`impl .. for [T; N]` / `for [T]`)
+    - `a[..2] == [1, 2]` (comparisons of unsized slices compare by reference)
+  - `<` / `<=` / `>` / `>=` between different types likewise use `partial_cmp` of `impl PartialOrd<R> for S` (`Meters < Feet`, `Ver < (1, 5)`, `Ver < 2`)
+    - If the right side is a literal, tuple or array, the R of a matching shape among the left type's impls becomes the expected type (`(1, 5)` becomes `(u32, u32)`). The same applies to `==`
+    - If `partial_cmp` is `None`, all four are false (same as rustc; also for hand-written partial_cmp on the same type)
+    - `partial_cmp` on f64 / f32 is `None` for NaN
+- panic:
+  - If there is a `#[panic_handler]`, it is called (out-of-range access, `unwrap`, `assert!`, `panic!`, overflow checks, and so on)
+  - Otherwise it traps. In std programs (not `no_std`), a signal handler for trap (SIGILL) is registered at the start of main,
+    and, like a rustc panic, it flushes stdout and exits with code 101
+  - stderr gets the location and a per-kind message in the same form as rustc (on the line after `thread 'main' panicked at src/main.rs:line:col:`; the file name is fixed to `src/main.rs`)
+    - Overflow, division by 0, `MIN / -1`, shift amount, `panic!` / `unreachable!` / `todo!` / `unimplemented!` (also with format), `assert!` (the expression string or a custom message), `assert_eq!` / `assert_ne!` (the `left` / `right` values with `{:?}`; also custom messages)
+    - Out-of-range indexing gives `index out of bounds: the len is N but the index is I`
+    - `unwrap` / `expect` on `Option` / `Result` report the caller's location (equivalent to `#[track_caller]`). The `Err` value of `Result::unwrap` is printed with `{:?}` only in programs that use formatting
+  - `assert_eq!(a, b)` expands to `let l = &(a); let r = &(b); if !(*l == *r) { panic }`, evaluating a and b only once.
+    The right side's type is decided from the left (`assert_eq!(o, None)`). If the left is a numeric literal, the right is evaluated first and the left's type is decided from the right (`assert_eq!(2, n)`).
+    Because the values are formatted, std programs that use assert_eq! get the formatting parts attached
+  - The line of a location is the line in the file, including the item's start line. The cache of a function with a location written into it remembers the start line, and recompiles if lines are added above it and the lines shift
+  - How it works: each trap gets its own trap code, and codegen records "offset within function → kind, line, column, message".
+    The driver turns that into a static table `__EXR_TRAP_TABLE` (8 bytes per location), and the SIGILL handler (`SA_SIGINFO`) looks it up by the faulting address.
+    The checks themselves stay `trapnz`, so check speed does not change. Only out-of-range indexing, which passes the length and the index, calls `__exr_panic_index` from one cold block per function
+- Overflow checks (same as a rustc debug build; not inserted with `-O`):
+  - `+` / `-` / `*` (and `+=` and so on), unary `-`, `abs`, `pow`, `<<` / `>>` amounts at or above the type width
+  - Division by 0 and `MIN / -1` (checked even with `-O`, same as rustc). Omitted when the divisor or shift amount is a constant
+  - `sum` / `product` (follow the caller's setting, same as std: `#[rustc_inherit_overflow_checks]` in the prelude)
+  - No checks inside the prelude (it contains arithmetic that wraps on purpose, such as hashing). 128-bit multiplication is not checked
+  - Checks are conditional traps (`trapnz`), not branches. Passing the panic location through branches and blocks makes gen1000 compilation +50%; with `trapnz` it is +5%
 
-## core の代わり（組み込みの prelude、`crates/syntax/src/prelude_lib.rs.in`）
+## Replacement for core (built-in prelude, `crates/syntax/src/prelude_lib.rs.in`)
 
-- `Option<T>`：`is_some` / `is_none` / `unwrap` / `unwrap_or` / `ok_or` / `or` / `xor` / `take` / `replace` / `as_ref` / `as_mut` / `copied` / `cloned`
-  - クロージャを取るもの：`map` / `and_then` / `unwrap_or_else` / `map_or` / `is_some_and` / `filter` / `ok_or_else`
-- `Result<T, E>`：`is_ok` / `is_err` / `unwrap` / `unwrap_err` / `unwrap_or` / `ok` / `err`
-  - クロージャを取るもの：`map` / `map_err` / `and_then` / `unwrap_or_else`
+- `Option<T>`: `is_some` / `is_none` / `unwrap` / `unwrap_or` / `ok_or` / `or` / `xor` / `take` / `replace` / `as_ref` / `as_mut` / `copied` / `cloned`
+  - Ones that take closures: `map` / `and_then` / `unwrap_or_else` / `map_or` / `is_some_and` / `filter` / `ok_or_else`
+- `Result<T, E>`: `is_ok` / `is_err` / `unwrap` / `unwrap_err` / `unwrap_or` / `ok` / `err`
+  - Ones that take closures: `map` / `map_err` / `and_then` / `unwrap_or_else`
 - `core::panic::PanicInfo`
-- `core::cmp::{min, max}`、`core::mem::{swap, replace, size_of, align_of}`、`core::ptr::{null, null_mut, read_volatile, write_volatile}`
-- 組み込みメソッド：
-  - 整数：`wrapping_*` / `checked_*`（→ Option）/ `saturating_*` / `min` / `max` / `abs` / `abs_diff` / `signum` / `pow` / `count_ones` / `leading_zeros` / `trailing_zeros` / `is_power_of_two` / `rotate_*` / `swap_bytes` / `is_ascii_*` / `to_ascii_*`
-  - 関連定数：`u32::MAX` / `MIN` / `BITS`
-  - 配列・スライス：`len` / `is_empty` / `get` / `get_mut` / `first` / `last` / `swap` / `contains` / `as_ptr` / `as_mut_ptr`
-  - `&str`：`len` / `is_empty` / `as_bytes` / `as_ptr`
-  - 生ポインタ：`add` / `sub` / `offset` / `is_null` / `read` / `write` / `read_volatile` / `write_volatile` / `cast`
+- `core::cmp::{min, max}`, `core::mem::{swap, replace, size_of, align_of}`, `core::ptr::{null, null_mut, read_volatile, write_volatile}`
+- Built-in methods:
+  - Integers: `wrapping_*` / `checked_*` (→ Option) / `saturating_*` / `min` / `max` / `abs` / `abs_diff` / `signum` / `pow` / `count_ones` / `leading_zeros` / `trailing_zeros` / `is_power_of_two` / `rotate_*` / `swap_bytes` / `is_ascii_*` / `to_ascii_*`
+  - Associated constants: `u32::MAX` / `MIN` / `BITS`
+  - Arrays and slices: `len` / `is_empty` / `get` / `get_mut` / `first` / `last` / `swap` / `contains` / `as_ptr` / `as_mut_ptr`
+  - `&str`: `len` / `is_empty` / `as_bytes` / `as_ptr`
+  - Raw pointers: `add` / `sub` / `offset` / `is_null` / `read` / `write` / `read_volatile` / `write_volatile` / `cast`
 
-prelude は、ユーザのコードの識別子から辿れるアイテムだけを付ける。`Option` を使わないプログラムには何も足さないので、キャッシュもビルド時間も増えない。
+The prelude attaches only the items reachable from identifiers in the user's code. Nothing is added to a program that does not use `Option`, so neither the cache nor the build time grows.
 
-- `core::cmp::max` などは、ユーザが同じ名前の関数を定義してもぶつからないよう `__core_*` という名前で持っている。
-- それらは、コードに `core::` か `use core::` が現れたときだけ付ける。
+- `core::cmp::max` and similar are kept under `__core_*` names so they do not collide if the user defines a function with the same name.
+- They are attached only when `core::` or `use core::` appears in the code.
 
-## 型推論と検査
+## Type inference and checking
 
-- 型推論は関数単位の単一化で行う（`crates/sema/src/ast_infer.rs`）。
-  - 参照・ポインタ・配列・スライス、ジェネリックな ADT の形も単一化する。
-  - リテラル・構築・呼び出しの型も記録し、codegen で期待型が分からないときに使う（`Pair { a: 1 }.swap()` の `1` を、後ろの使用箇所から `i64` に決める）。
-- 借用検査・可変性検査・ムーブ検査・match の網羅性検査はしない。
-  - rustc を通るプログラムなら意味は変わらない前提で、struct は常にコピーしている。
-  - どの arm にも合わなければ trap する。
-  - オーバーフローは rustc の debug ビルドと同じく検査する（`-O` なら wrap する。上の「オーバーフロー検査」）。
+- Type inference is done by per-function unification (`crates/sema/src/ast_infer.rs`).
+  - It also unifies the shapes of references, pointers, arrays, slices, and generic ADTs.
+  - It also records the types of literals, constructions and calls, and codegen uses them when the expected type is unknown (the `1` in `Pair { a: 1 }.swap()` is decided as `i64` from a later use).
+- There is no borrow checking, mutability checking, move checking, or match exhaustiveness checking.
+  - Structs are always copied, on the premise that the meaning does not change for programs that pass rustc.
+  - If no match arm matches, it traps.
+  - Overflow is checked the same as a rustc debug build (with `-O` it wraps; see "Overflow checks" above).
 
-## 未対応
+## Not supported
 
-- `Box<[T]>`、`Box::into_raw` などの Box の関数（`new` 以外）
-- `String + &str` / `Vec` のスライスメソッドの一部（prelude に書いたもの以外。`&v` を `&[T]` にすれば組み込みのスライスメソッドは使える）
-- イテレータの制限：`DoubleEndedIterator` / `ExactSizeIterator` の trait（`rev` は next_back を持つ prelude の型だけ）、`collect` は Vec / String / HashMap / HashSet / BTreeMap / `Option<Vec<T>>` / `Result<Vec<T>, E>` など prelude にあるもの
-- 関連型の制限：trait の関連型は `Self::X` / `T::X` / `<T as Tr>::X` の形だけ。関連型に境界（`type Item: Copy;`）は付けられない
-- 書式化の制限：`{:p}`、`format_args!`、`Formatter` の `fill()` / `align()`
-- 比較の制限：`partial_cmp` は浮動小数点の NaN 以外では常に `Some`。BinaryHeap の `drain` / `retain` / `peek_mut`。一般の `IntoIterator` 境界はない（`extend` は codegen が引数をイテレータにする）
-- HashMap の制限：キーに `impl Hash` を手書きすること
-- Drop の制限
-  - panic では drop しない（unwind しない）
-  - `impl Drop` を持つ型のフィールドの一部だけをパターンでムーブすると、残りのフィールドはリークする（`let Pair { a, .. } = p;` の `b`）
-  - クロージャの本体から `move` キャプチャした値をムーブすること（FnOnce として消費する使い方）はエラーにする
-  - `Box` の中身のフィールドをムーブすると（`let n = boxed; n.val`）、Box の領域はリークする
-  - 一時値の寿命は rustc の規則の近似（let の初期化式の一時値は常にブロックの終わりまで延びる）
-- クロージャの制限
-  - Fn / FnMut / FnOnce を区別しない（`FnMut` のクロージャを `&dyn Fn` にしてもエラーにならない）
-  - ローカル変数をキャプチャするクロージャを `impl Fn` で返すとき、型が注釈やリテラルから分からない変数（`let v = Vec::new();` など）
-- `dyn` の制限：`Self` やジェネリクスを使うメソッド（object safe でないもの）は dyn 経由で呼べない。`dyn A + B` は不可
-- 1 ファイルの中のモジュールは平らにするので、別のモジュールに同じ名前のアイテムがあるとぶつかる（`mod x;` の別ファイルは `x.rs` / `x/mod.rs` を読む）
-- 関数の中のアイテムは末尾に移すので、ほかの関数の中の同名のアイテムとぶつかる。そのエラーの行番号は移した先のもの
-- `macro_rules!` の制限：衛生 (hygiene) はない（展開はテキストの置き換え）。`$x:expr` などは次の区切りまでのトークン列として取る近似
-- ジェネリックな関数の `-> impl Trait` の戻り値
-- 参照の Vec を `iter().flatten()` すること（`into_iter().flatten()` は可）、型パラメータのある trait（`From<T>` は名前だけ持ち、同じ型への `From` の impl は 1 つまで）
-- `impl Trait for [T; N]` のような、プリミティブ以外の組み込み型への impl
+- `Box<[T]>`, and Box functions such as `Box::into_raw` (other than `new`)
+- `String + &str` / some `Vec` slice methods (other than those written in the prelude; turning `&v` into `&[T]` gives access to the built-in slice methods)
+- Iterator limitations: the `DoubleEndedIterator` / `ExactSizeIterator` traits (`rev` only works on prelude types that have next_back); `collect` only into what the prelude has, such as Vec / String / HashMap / HashSet / BTreeMap / `Option<Vec<T>>` / `Result<Vec<T>, E>`
+- Associated type limitations: trait associated types only in the forms `Self::X` / `T::X` / `<T as Tr>::X`. Associated types cannot have bounds (`type Item: Copy;`)
+- Formatting limitations: `{:p}`, `format_args!`, `fill()` / `align()` on `Formatter`
+- Comparison limitations: `partial_cmp` is always `Some` except for floating-point NaN. BinaryHeap's `drain` / `retain` / `peek_mut`. There are no general `IntoIterator` bounds (`extend` has codegen turn the argument into an iterator)
+- HashMap limitations: hand-written `impl Hash` for keys
+- Drop limitations
+  - No drop on panic (no unwinding)
+  - If a pattern moves only some fields of a type with `impl Drop`, the remaining fields leak (`b` in `let Pair { a, .. } = p;`)
+  - Moving a value captured with `move` out of the closure body (consuming it as FnOnce) is an error
+  - Moving a field out of a `Box`'s contents (`let n = boxed; n.val`) leaks the Box's allocation
+  - Temporary lifetimes approximate rustc's rules (temporaries in a let initializer are always extended to the end of the block)
+- Closure limitations
+  - Fn / FnMut / FnOnce are not distinguished (turning an `FnMut` closure into `&dyn Fn` is not an error)
+  - When returning a closure that captures local variables as `impl Fn`, variables whose type cannot be determined from an annotation or a literal (`let v = Vec::new();` and so on)
+- `dyn` limitations: methods that use `Self` or generics (not object safe) cannot be called through dyn. `dyn A + B` is not allowed
+- Modules within one file are flattened, so items with the same name in different modules collide (for `mod x;` in a separate file, `x.rs` / `x/mod.rs` is read)
+- Items inside functions are moved to the end, so they collide with items of the same name inside other functions. Line numbers in those errors are for the moved location
+- `macro_rules!` limitations: no hygiene (expansion is text replacement). `$x:expr` and similar are approximated as the token sequence up to the next delimiter
+- `-> impl Trait` return values of generic functions
+- `iter().flatten()` on a Vec of references (`into_iter().flatten()` works), traits with type parameters (`From<T>` keeps only the name, and at most one `From` impl into the same type)
+- impls on built-in types other than primitives, such as `impl Trait for [T; N]`

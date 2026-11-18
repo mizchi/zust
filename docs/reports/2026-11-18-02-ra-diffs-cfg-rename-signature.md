@@ -1,44 +1,44 @@
-# rust-analyzer との残りの違いを詰める: cfg・trait の impl の rename・signatureHelp (2026-11-18)
+# Closing the remaining differences from rust-analyzer: cfg, rename of trait impls, signatureHelp (2026-11-18)
 
-日付: 2026-11-18
+Date: 2026-11-18
 
-- **cfg で外れたアイテムの中**: rust-analyzer に小さいワークスペースで聞いて確かめた振る舞いに合わせた。
-  - rust-analyzer は外れたアイテム (関数・impl・struct・enum・const・type・trait・インラインの mod・文の cfg) の中も、
-    外側のスコープから見えるアイテムへのパス (`used()` / `P` / `sub::deep` / `crate::P` / use で取り込んだ名前) は解決して、
-    definition / references / hover に答える。ローカル・フィールド・メソッド (`p.get()` / `s.x`)・関連アイテム (`P::new`)・
-    外れたアイテムの名前そのものには答えない。前の zustc は外れたものを全部除いていた。
-  - `def_at` が外れた所のトークンを `inactive_def_at` で引き、上の範囲だけを答える。references・rename・hover もこれを通る。
-  - `apply_cfg`: 設定されていない cfg を「成り立つ」としていたのを、rustc と同じく「成り立たない」にした
-    (`no_global_oom_handling` / `miri` / `doc` / 知らない `key = ".."`)。`target_arch` / `target_pointer_width` /
-    `target_endian` / `target_env` / `target_vendor` / `target_has_atomic` / `panic` を分かるようにした。`test` と
-    `debug_assertions` は rust-analyzer と同じく成り立つとする。
-- **trait の impl のメソッドの rename** (`impl Default for S` の `fn default`): rust-analyzer は std の宣言と依存のクレートの
-  ソースまで 1,273 か所書き換える (そのままでは壊れる書き換え)。zustc はここは合わせず、
-  - trait がワークスペースのもの: trait の宣言から引き直して、宣言・全部の impl・呼び出しを書き換える。
-  - ライブラリ・外部のクレートの trait: 理由を付けて断る (宣言の方を変えられないので)。
+- **Inside items excluded by cfg**: matched the behavior confirmed by querying rust-analyzer on a small workspace.
+  - Inside excluded items (functions, impls, structs, enums, consts, types, traits, inline mods, statement cfg), rust-analyzer still
+    resolves paths to items visible from the outer scope (`used()` / `P` / `sub::deep` / `crate::P` / names imported with use),
+    and answers definition / references / hover for them. It does not answer for locals, fields, methods (`p.get()` / `s.x`), associated items (`P::new`),
+    or the name of the excluded item itself. Previously zustc excluded everything that was excluded.
+  - `def_at` looks up tokens in excluded regions with `inactive_def_at` and answers only the cases above. references, rename and hover also go through this.
+  - `apply_cfg`: unset cfgs used to be treated as "true"; now they are "false", as in rustc
+    (`no_global_oom_handling` / `miri` / `doc` / unknown `key = ".."`). Added support for `target_arch` / `target_pointer_width` /
+    `target_endian` / `target_env` / `target_vendor` / `target_has_atomic` / `panic`. `test` and
+    `debug_assertions` are treated as true, same as rust-analyzer.
+- **Renaming a method of a trait impl** (`fn default` in `impl Default for S`): rust-analyzer rewrites 1,273 locations, reaching into the std
+  declaration and the sources of dependency crates (an edit that breaks the build as-is). zustc does not match this:
+  - Trait in the workspace: re-resolve from the trait declaration, and rewrite the declaration, all impls, and the calls.
+  - Trait from a library or external crate: refuse with a reason (because the declaration cannot be changed).
 - **signatureHelp**:
-  - `st.extend(..)` (`Vec<String>`) に答えなかったのは、std の `impl Extend<T> for Vec` と `impl Extend<&T> for Vec` の
-    2 つの候補でどちらも選ばなかったため。同じファイルの同じ持ち主・同じ名前のメソッドなら先のもの (総称的なもの) にした。
-    definition / hover も同じく答えるようになった。
-  - クロージャの呼び出し `h(..)` (`let h = |name: &str| -> Option<Key> { .. }`): `impl Fn(name: &str) -> Option<Key>` を
-    シグネチャにする (戻り値を書いていなければ本体の式の型)。rust-analyzer は `Key` を展開して `u128` にする。
-  - rust-analyzer と同じく doc コメントを `documentation` に付けた。
-- **式の型のリテラル**: `"a"` → &str、`'c'` → char、`b"x"` → &[u8]、`b'x'` → u8、`1u8` / `2.0f32` / `1_000usize`、
-  `true` → bool。式全体がリテラルのときだけ (`x + 1` の 1 は式の型ではない)。接尾辞のない数 (`0` / `1.5`) は、
-  使い方で型が決まる (rust-analyzer は `let mut acc = 0; acc = add(acc, x_i64)` の acc を i64 にする) ので型にしない。
+  - No answer for `st.extend(..)` (`Vec<String>`) because there were two candidates, std's `impl Extend<T> for Vec` and `impl Extend<&T> for Vec`,
+    and neither was chosen. For methods with the same owner and same name in the same file, the first one (the generic one) is now used.
+    definition / hover now answer in the same way.
+  - Closure call `h(..)` (`let h = |name: &str| -> Option<Key> { .. }`): the signature is `impl Fn(name: &str) -> Option<Key>`
+    (if the return type is not written, the type of the body expression). rust-analyzer expands `Key` to `u128`.
+  - Attached doc comments as `documentation`, same as rust-analyzer.
+- **Expression types for literals**: `"a"` → &str, `'c'` → char, `b"x"` → &[u8], `b'x'` → u8, `1u8` / `2.0f32` / `1_000usize`,
+  `true` → bool. Only when the whole expression is a literal (the 1 in `x + 1` is not an expression type). Numbers without a suffix (`0` / `1.5`)
+  get their type from usage (rust-analyzer makes acc in `let mut acc = 0; acc = add(acc, x_i64)` an i64), so no type is given.
 
-結果 (`python3 bench/lsp_parity.py`、zustc を対象。synth は全部 100% のまま):
+Results (`python3 bench/lsp_parity.py`, target zustc; synth stays at 100% for everything):
 
-| 機能 | 前 | 後 | rust-analyzer |
+| Feature | Before | After | rust-analyzer |
 |---|---:|---:|---:|
-| references (数の一致) | 78% | 92% | 100% |
+| references (count match) | 78% | 92% | 100% |
 | documentHighlight | 85% | 100% | 100% |
-| rename (書き換えの一致) | 82% | 94% | 100% |
-| signatureHelp | 89% (答えた 85%) | 100% (答えた 95%) | 100% (答えた 95%) |
-| 時間の中央値 refe / rena / sign (ms) | 14.5 / 1.3 / 1.3 | 14.2 / 1.3 / 1.2 | 25.0 / 0.8 / 0.5 |
+| rename (edit match) | 82% | 94% | 100% |
+| signatureHelp | 89% (answered 85%) | 100% (answered 95%) | 100% (answered 95%) |
+| Median time refe / rena / sign (ms) | 14.5 / 1.3 / 1.3 | 14.2 / 1.3 / 1.2 | 25.0 / 0.8 / 0.5 |
 
-fixture (`python3 bench/ide_golden_ra.py`): definition 460 → 462/467、references 584 → 606/629 (93% → 96%)、
-hover 612 → 614/636。
+fixture (`python3 bench/ide_golden_ra.py`): definition 460 → 462/467, references 584 → 606/629 (93% → 96%),
+hover 612 → 614/636.
 
-残りの違い: rename の `default` (上の、わざと断るもの)。references の `u8` / `Key` (rust-analyzer は OUT_DIR の生成
-ファイルと、build.rs と共有する lexer.rs の中も数える)。hover の `ZUSTC_INLINE_LOG` (文字列の中)。
+Remaining differences: rename of `default` (the deliberate refusal above). references for `u8` / `Key` (rust-analyzer also counts inside the
+generated files in OUT_DIR, and inside lexer.rs, which is shared with build.rs). hover on `ZUSTC_INLINE_LOG` (inside a string).
