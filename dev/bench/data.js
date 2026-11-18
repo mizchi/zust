@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795003286575,
+  "lastUpdate": 1795004160340,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -2384,6 +2384,165 @@ window.BENCHMARK_DATA = {
           {
             "name": "rt/strings run (-O)",
             "value": 74.357,
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "committer": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "distinct": true,
+          "id": "a7622b3bd7bf3d84f574c38fe1446fdf69624e38",
+          "message": "zustc: generic traits (`trait Tr<T>`), checks on generic parameter lists\n\n- a trait's type parameters become generics of its members (after Self); impls of a generic trait\n  for different types work (several impls of it for one type are still not supported)\n- E0403 (a parameter name used twice), `Self` as a parameter, lifetimes after type parameters,\n  keyword lifetimes, const parameters of non-primitive types, a trait parameter default that\n  needs the trait itself\n- tests/ui: run-pass 46.4% -> 47.7%, check-pass 46.2% -> 49.9%, compile-fail 35.0% -> 36.6%;\n  two compile-fail tests that passed only because generic traits were rejected on the annotated\n  line no longer pass (associated-types/issue-59324, type/type-check-defaults)\n- KPIs unchanged: gen5000 check 3971 M instr, cache 1903 KiB, LSP p50 0.5-3.4 ms\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-18T11:57:06Z",
+          "tree_id": "d90ed42fdf3159d337d35d83c1d6a8235d32bced",
+          "url": "https://github.com/mizchi/zust/commit/a7622b3bd7bf3d84f574c38fe1446fdf69624e38"
+        },
+        "date": 1795004160019,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "gen1000 build cold",
+            "value": 122.478,
+            "unit": "ms"
+          },
+          {
+            "name": "gen1000 build noop",
+            "value": 13.746,
+            "unit": "ms"
+          },
+          {
+            "name": "gen1000 build edit 1 fn",
+            "value": 18.39,
+            "unit": "ms"
+          },
+          {
+            "name": "gen1000 check",
+            "value": 75.02,
+            "unit": "ms"
+          },
+          {
+            "name": "gen1000 build cold peak RSS",
+            "value": 20.066,
+            "unit": "MiB"
+          },
+          {
+            "name": "gen1000 binary",
+            "value": 323.977,
+            "unit": "KiB"
+          },
+          {
+            "name": "gen1000 cache",
+            "value": 387.199,
+            "unit": "KiB"
+          },
+          {
+            "name": "gen1000 build noop instructions",
+            "value": 155.464,
+            "unit": "M instr"
+          },
+          {
+            "name": "gen1000 build edit 1 fn instructions",
+            "value": 148.273,
+            "unit": "M instr"
+          },
+          {
+            "name": "gen1000 check instructions",
+            "value": 799.312,
+            "unit": "M instr"
+          },
+          {
+            "name": "gen5000 build cold",
+            "value": 550.851,
+            "unit": "ms"
+          },
+          {
+            "name": "gen5000 build noop",
+            "value": 78.139,
+            "unit": "ms"
+          },
+          {
+            "name": "gen5000 build edit 1 fn",
+            "value": 86.115,
+            "unit": "ms"
+          },
+          {
+            "name": "gen5000 check",
+            "value": 387.272,
+            "unit": "ms"
+          },
+          {
+            "name": "gen5000 build cold peak RSS",
+            "value": 76.098,
+            "unit": "MiB"
+          },
+          {
+            "name": "gen5000 binary",
+            "value": 1558.336,
+            "unit": "KiB"
+          },
+          {
+            "name": "gen5000 cache",
+            "value": 1902.824,
+            "unit": "KiB"
+          },
+          {
+            "name": "gen5000 build noop instructions",
+            "value": 745.632,
+            "unit": "M instr"
+          },
+          {
+            "name": "gen5000 build edit 1 fn instructions",
+            "value": 707.303,
+            "unit": "M instr"
+          },
+          {
+            "name": "gen5000 check instructions",
+            "value": 3968.16,
+            "unit": "M instr"
+          },
+          {
+            "name": "rt/fib run (-O)",
+            "value": 54.164,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/hashmap run (-O)",
+            "value": 85.734,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/matmul run (-O)",
+            "value": 37.839,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/nbody run (-O)",
+            "value": 53.739,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/sieve run (-O)",
+            "value": 91.947,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/sort run (-O)",
+            "value": 134.136,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/strings run (-O)",
+            "value": 35.665,
             "unit": "ms"
           }
         ]
