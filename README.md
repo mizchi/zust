@@ -208,13 +208,13 @@ Known differences from rust-analyzer are listed in [TODO.md](TODO.md).
 
 ## Documentation
 
-The documents below are written in Japanese.
+Japanese versions of the docs are under [docs/ja/](docs/ja/).
 
 - [docs/language.md](docs/language.md): the subset of Rust that zustc supports, and what it does not
 - [docs/architecture.md](docs/architecture.md): crate layout, the pipeline, how incremental builds work, value representation
 - [docs/reports/](docs/reports/README.md): work log, as dated reports (benchmark results and what was done at each step)
-- [CONTRIBUTING.md](CONTRIBUTING.md): how to develop: build, test, benchmark, and write reports
-- [TODO.md](TODO.md): what is next
+- [CONTRIBUTING.md](CONTRIBUTING.md) (Japanese): how to develop: build, test, benchmark, and write reports
+- [TODO.md](TODO.md) (Japanese): what is next
 
 ## History
 

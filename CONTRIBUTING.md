@@ -1,7 +1,7 @@
 # 開発のしかた
 
 zust (zustc と zust-analyzer) を直す・足すときの手順。使い方は [README.ja.md](README.ja.md)、中のしくみは
-[docs/architecture.md](docs/architecture.md)。
+[docs/ja/architecture.md](docs/ja/architecture.md)。
 
 ## 準備
 
@@ -41,9 +41,9 @@ git submodule update --init cratebench/vendor
 | `tests/` | zustc のテスト (rustc と比べるもの、キャッシュ、セルフホストなど) |
 | `benches/` / `bench/` | criterion のベンチ / ベンチマークと回帰監視のスクリプト |
 | `cratebench/` | 実在の小さなクレートをビルドするベンチ |
-| `docs/` | 言語のサブセット、設計、作業のレポート |
+| `docs/` | 言語のサブセット、設計、作業のレポート (英語。日本語版は `docs/ja/`) |
 
-crate ごとの詳しい中身は [docs/architecture.md](docs/architecture.md) にある。
+crate ごとの詳しい中身は [docs/ja/architecture.md](docs/ja/architecture.md) にある。
 
 ## テスト
 
@@ -141,7 +141,7 @@ bench/regress.sh
   - 新しい例を足しただけなら `UPDATE_BUDGET=new` (既存の上限は変えない)。
 
   予算を緩める前に、増えた理由 (付く prelude が増えた、など) を詰める。これまでの例は
-  [docs/reports/2026-11-15-17-regression-catches.md](docs/reports/2026-11-15-17-regression-catches.md) にある。
+  [docs/ja/reports/2026-11-15-17-regression-catches.md](docs/ja/reports/2026-11-15-17-regression-catches.md) にある。
 
 ### ほかのベンチマーク
 
@@ -221,7 +221,7 @@ python3 bench/ci_bench.py --out-dir out/ci
 
 ### レポートの書き方
 
-作業の記録は `docs/reports/YYYY-MM-DD-NN-<slug>.md` に置く。
+作業の記録は `docs/reports/YYYY-MM-DD-NN-<slug>.md` に英語で置く。日本語版を書くなら、同じ名前で `docs/ja/reports/` に置く。
 
 - `YYYY-MM-DD` は作業した日。
 - `NN` はその日の中の順番 (01 から)。
@@ -230,15 +230,15 @@ python3 bench/ci_bench.py --out-dir out/ci
 ファイル名で並べると日付順になる。中身は次の形にする。
 
 ```markdown
-# タイトル
+# Title
 
-日付: YYYY-MM-DD
+Date: YYYY-MM-DD
 
-何をしたか・なぜか・どう測ったか・結果 (数字)・分かったこと・残ったこと
+What was done, why, how it was measured, the results (numbers), what was learned, what is left
 ```
 
 数字は測った時点のものとして残す (後から書き換えない)。書いたら、[docs/reports/README.md](docs/reports/README.md) の
-一覧に 1 行足す。
+一覧に 1 行足す (日本語版を書いたら [docs/ja/reports/README.md](docs/ja/reports/README.md) にも)。
 
 ### コミット
 
