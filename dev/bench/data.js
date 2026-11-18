@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795005729653,
+  "lastUpdate": 1795005731492,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -6458,6 +6458,70 @@ window.BENCHMARK_DATA = {
           {
             "name": "tests/ui check-pass passing",
             "value": 966,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui build-pass pass rate",
+            "value": 48.89,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui build-pass passing",
+            "value": 66,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui compile-fail pass rate",
+            "value": 37.39,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui compile-fail passing",
+            "value": 2751,
+            "unit": "tests"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "committer": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "distinct": true,
+          "id": "0cf0753f778bdb3d4691a0422996ac8f1d057a05",
+          "message": "zustc: `const` / `static` items in bodies, integer literal receivers, `Trait::method(x, ..)` for builtin traits\n\n- a `const` / non-mut `static` in a block (often from a macro expansion) is a typed immutable\n  binding; tests/parse.rs counts them as lets on the syn side too\n- `4.f()` with `impl U for isize`: an unsuffixed literal takes the one integer type with the method\n- `Clone::clone(&x)`, `Add::add(a, b)`, `Neg::neg(x)` .. for the builtin traits\n- tests/ui: run-pass 49.5%, check-pass 53.5%, no regressions\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-18T12:31:38Z",
+          "tree_id": "4162ef4bf7751a459971c5594a648cf353cb278b",
+          "url": "https://github.com/mizchi/zust/commit/0cf0753f778bdb3d4691a0422996ac8f1d057a05"
+        },
+        "date": 1795005730985,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tests/ui run-pass pass rate",
+            "value": 49.52,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui run-pass passing",
+            "value": 1195,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui check-pass pass rate",
+            "value": 53.51,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui check-pass passing",
+            "value": 967,
             "unit": "tests"
           },
           {
