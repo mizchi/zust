@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795039895367,
+  "lastUpdate": 1795039897746,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -23524,6 +23524,70 @@ window.BENCHMARK_DATA = {
           {
             "name": "tests/ui check-pass passing",
             "value": 1135,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui build-pass pass rate",
+            "value": 60.74,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui build-pass passing",
+            "value": 82,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui compile-fail pass rate",
+            "value": 38.26,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui compile-fail passing",
+            "value": 2815,
+            "unit": "tests"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "committer": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "distinct": true,
+          "id": "e7fdc21f4d3cd1a7b2eaaf1c9ceee769ab39b995",
+          "message": "`-> impl Trait` bodies ending in `()` or a diverging macro; `impl ?Sized` returns are an error\n\n- a body whose last expression is `()` itself, or `panic!()` / `todo!()` /\n  `unimplemented!()` / `unreachable!()`, gives `-> impl Trait` the type `()`\n  (the inference result `()` was taken as \"unknown\" before)\n- `-> impl ?Sized` with no other trait: \"the size for values of type\n  `impl ?Sized` cannot be known at compilation time\"\n- tests/ui: check-pass 1141 (63.1%), run-pass 1440, compile-fail 2815\n\nKPIs (gen5000): noop 663.2 M instr (+0.3%), edit 620.8, check 3893.0, cache\nunchanged. LSP references p50 11.6 ms in the full run; against 60cbe60 on the\nsame machine (8 alternating runs) 2.34 vs 2.35 ms, definition 0.55 vs 0.55\nms, ready 291 vs 299 ms. Against rustc -C incremental on gen1000: cold 4.9x,\nno-op 11x, edit 14x faster. README and SUPPORTED.md (en + ja) updated.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-18T21:55:36Z",
+          "tree_id": "d296d4159922c6c2fa61d85a780357da6d0f8136",
+          "url": "https://github.com/mizchi/zust/commit/e7fdc21f4d3cd1a7b2eaaf1c9ceee769ab39b995"
+        },
+        "date": 1795039897237,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tests/ui run-pass pass rate",
+            "value": 59.68,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui run-pass passing",
+            "value": 1440,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui check-pass pass rate",
+            "value": 63.14,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui check-pass passing",
+            "value": 1141,
             "unit": "tests"
           },
           {
