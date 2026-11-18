@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795004486545,
+  "lastUpdate": 1795004488714,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -5736,6 +5736,70 @@ window.BENCHMARK_DATA = {
           {
             "name": "tests/ui compile-fail passing",
             "value": 2693,
+            "unit": "tests"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "committer": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "distinct": true,
+          "id": "0e01ee9726ed0e8ab268af006a3464f66aed8566",
+          "message": "zustc: PhantomData, generic unit structs as values, E0072 for generic types, cycle in blanket associated types\n\n- prelude: std::marker::PhantomData<T> (zero-sized; the instance comes from type inference)\n- `struct Foo<T> { f: Option<Foo<T>> }` is rejected as infinitely sized\n- `impl<F: Future> IntoFuture for F { type Item = F::Item; }` no longer recurses forever\n- tests/ui: run-pass 48.3%, check-pass 51.4%, compile-fail 36.9%; one compile-fail test that\n  passed only because PhantomData was missing no longer passes\n  (coherence/warn-when-cycle-is-error-in-coherence)\n- KPIs: gen5000 check 3978 M instr (+0.2%, the larger prelude), cache sizes unchanged\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-18T12:06:44Z",
+          "tree_id": "1bff4213f76342bd18a9b642988a8c7d71b8bec2",
+          "url": "https://github.com/mizchi/zust/commit/0e01ee9726ed0e8ab268af006a3464f66aed8566"
+        },
+        "date": 1795004488093,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tests/ui run-pass pass rate",
+            "value": 48.32,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui run-pass passing",
+            "value": 1166,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui check-pass pass rate",
+            "value": 51.36,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui check-pass passing",
+            "value": 928,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui build-pass pass rate",
+            "value": 48.15,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui build-pass passing",
+            "value": 65,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui compile-fail pass rate",
+            "value": 36.9,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui compile-fail passing",
+            "value": 2715,
             "unit": "tests"
           }
         ]
