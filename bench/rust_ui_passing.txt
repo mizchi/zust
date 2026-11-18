@@ -1254,6 +1254,7 @@ check-pass	consts/promotion-drop-type-static-lifetime-86672.rs
 check-pass	consts/raw-ptr-const.rs
 check-pass	consts/raw_pointer_promoted.rs
 check-pass	consts/recursive-type.rs
+run-pass	consts/references.rs
 compile-fail	consts/refs-to-cell-in-final.rs
 run-pass	consts/repeat_match.rs
 check-pass	consts/self_normalization.rs

@@ -737,6 +737,16 @@ pub fn const_lit_pat(prog: &Program, p: &Pat) -> Option<Pat> {
     }
 }
 
+/// An identifier pattern naming a `const` (any value, not only a literal): the pattern compares with it
+pub fn const_ident_pat<'a>(prog: &Program, p: &'a Pat) -> Option<&'a str> {
+    let Pat::Ident(false, false, n, None) = p else { return None };
+    if !n.starts_with(|c: char| c.is_ascii_uppercase()) {
+        return None;
+    }
+    let &ci = prog.const_index.get(n)?;
+    prog.consts[ci as usize].stat.is_none().then_some(n.as_str())
+}
+
 /// 識別子のパターンが unit バリアント (`None` など) に解決されるなら、そのパス
 pub fn unit_variant_ident(prog: &Program, p: &Pat) -> Option<Path> {
     let Pat::Ident(false, false, n, None) = p else { return None };

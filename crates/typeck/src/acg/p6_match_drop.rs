@@ -310,6 +310,24 @@ impl Cx<'_> {
         Ok(out)
     }
 
+    /// An identifier pattern that names a const of the scrutinee's type (a simple type: integer, bool, char, `&str`,
+    /// a reference to an integer or integer slice)
+    pub(crate) fn const_pat_ok(&self, pat: &Pat, t: Ty) -> bool {
+        let Some(n) = const_ident_pat(self.prog, pat) else { return false };
+        if self.lookup(n).is_some() {
+            return false;
+        }
+        let ct = self.prog.consts[self.prog.const_index[n] as usize].ty;
+        let simple = |t: Ty| t.is_int() || matches!(t, Ty::Bool | Ty::Char);
+        ct == t
+            && match t {
+                Ty::Ref(_, Ty::Str) => true,
+                Ty::Ref(_, Ty::Slice(e)) => simple(**e),
+                Ty::Ref(_, i) => simple(*i),
+                t => simple(t),
+            }
+    }
+
     /// パターンの判定だけをする (合わなければ fail へ飛ぶ)。束縛は pat_bind で行う
     pub(crate) fn pat_test(&mut self, pat: &Pat, p: Place, fail: Block) -> R<()> {
         match pat {
@@ -326,6 +344,18 @@ impl Cx<'_> {
             Pat::Ident(..) if const_lit_pat(self.prog, pat).is_some() => {
                 let lp = const_lit_pat(self.prog, pat).unwrap();
                 self.pat_test(&lp, p, fail)
+            }
+            // (`X => ..` with `const X: u64 = !0 as u16 as u64;` / `const FOO: &[u8] = b"foo";`: equal to its value)
+            Pat::Ident(..) if self.const_pat_ok(pat, p.ty()) => {
+                let n = const_ident_pat(self.prog, pat).unwrap().to_string();
+                let t = p.ty();
+                let (v, _) = self.read(p);
+                let ce = self.keep_expr(path_expr(&n));
+                let (c, ct) = self.expr(ce, Some(t))?;
+                self.same(SP, ct, t)?;
+                let cond = self.eq_at(v.unwrap(), c.unwrap(), t, SP)?;
+                self.require(cond, fail);
+                Ok(())
             }
             Pat::Ident(_, _, _, sub) => match sub {
                 Some(sub) => self.pat_test(sub, p, fail),
@@ -572,6 +602,7 @@ impl Cx<'_> {
             Pat::Wild | Pat::Rest | Pat::Lit(_) | Pat::Range(..) | Pat::Path(_) => Ok(()),
             Pat::Ident(..) if unit_variant_ident(self.prog, pat).is_some() => Ok(()),
             Pat::Ident(..) if const_lit_pat(self.prog, pat).is_some() => Ok(()),
+            Pat::Ident(..) if self.const_pat_ok(pat, p.ty()) => Ok(()),
             Pat::Ident(by_ref, mutable, name, subpat) => {
                 if let Some(sub) = subpat {
                     self.pat_bind(sub, p, mode)?;
