@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795041870863,
+  "lastUpdate": 1795041872744,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -15436,6 +15436,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "lsp peak RSS",
             "value": 68.258,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "committer": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "distinct": true,
+          "id": "880367002d13725989cb12436650b63ebab2aa4f",
+          "message": "README, SUPPORTED: compare with relax and rust-glancer\n\nrelax (makepad/relax 3489f2d, a Rust JIT) on gen1000 and bench/rt, measured\nfrom source to finished output with bench/vs_relax.py; zust-analyzer against\nrust-analyzer and rust-glancer (50dd51a) in one lsp_parity run on zustc's sources.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-18T22:38:23Z",
+          "tree_id": "97b6b02eea5ce4629440cac95f3dbf338d0ac7d0",
+          "url": "https://github.com/mizchi/zust/commit/880367002d13725989cb12436650b63ebab2aa4f"
+        },
+        "date": 1795041872346,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "lsp definition p50",
+            "value": 0.454,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp hover p50",
+            "value": 0.377,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp completion p50",
+            "value": 0.655,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp references p50",
+            "value": 6.389,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp rename p50",
+            "value": 0.409,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp signatureHelp p50",
+            "value": 0.504,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp documentHighlight p50",
+            "value": 0.71,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp ready (startup to indexed)",
+            "value": 85.595,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp peak RSS",
+            "value": 68.066,
             "unit": "MiB"
           }
         ]
