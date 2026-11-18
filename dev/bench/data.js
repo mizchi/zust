@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795028160043,
+  "lastUpdate": 1795029657844,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -8108,6 +8108,165 @@ window.BENCHMARK_DATA = {
           {
             "name": "rt/strings run (-O)",
             "value": 41.514,
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "committer": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "distinct": true,
+          "id": "cbcd294207b86c66671a6f2b01e54911a91ffa29",
+          "message": "Items inside function bodies: mod, trait, impl, type, union, pub items\n\n- the preprocessor moves `mod`, `trait`, `impl`, `type`, `union` and `pub` /\n  `pub(crate)` items out of function bodies like the other items; a moved\n  `mod` is flattened afterwards\n- `fn() -> T` (a type) no longer marks the next `{ .. }` as a function body\n- the scan decides \"start of a statement in a body\" before looking at the\n  keyword, so it costs no more than before (hoist 21.8 M instr on gen5000)\n- tests/ui: run-pass 1371 (56.8%), check-pass 1108 (61.3%), compile-fail 2813\n\nAccepted compile-fail removal (it was rejected before because the items in\nthe fn body were not supported; it needs the check for infinite opaque types):\nimpl-trait/issues/infinite-impl-trait-issue-38064.rs\n\nKPIs (gen5000): noop 661.5 M instr, edit 622.9, check 3893.1, cache\nunchanged; LSP ready 109 ms. Against rustc -C incremental on gen1000: cold\n5.3x, no-op 12x, edit 15x faster. README and SUPPORTED.md (en + ja) updated,\nwith the rustc comparison over time.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-18T19:12:56Z",
+          "tree_id": "5b814ce4aff4b568851efb85b770f10c4f6f1f0c",
+          "url": "https://github.com/mizchi/zust/commit/cbcd294207b86c66671a6f2b01e54911a91ffa29"
+        },
+        "date": 1795029656759,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "gen1000 build cold",
+            "value": 115.994,
+            "unit": "ms"
+          },
+          {
+            "name": "gen1000 build noop",
+            "value": 12.254,
+            "unit": "ms"
+          },
+          {
+            "name": "gen1000 build edit 1 fn",
+            "value": 16.7,
+            "unit": "ms"
+          },
+          {
+            "name": "gen1000 check",
+            "value": 76.895,
+            "unit": "ms"
+          },
+          {
+            "name": "gen1000 build cold peak RSS",
+            "value": 17.445,
+            "unit": "MiB"
+          },
+          {
+            "name": "gen1000 binary",
+            "value": 323.977,
+            "unit": "KiB"
+          },
+          {
+            "name": "gen1000 cache",
+            "value": 387.205,
+            "unit": "KiB"
+          },
+          {
+            "name": "gen1000 build noop instructions",
+            "value": 141.387,
+            "unit": "M instr"
+          },
+          {
+            "name": "gen1000 build edit 1 fn instructions",
+            "value": 134.077,
+            "unit": "M instr"
+          },
+          {
+            "name": "gen1000 check instructions",
+            "value": 790.378,
+            "unit": "M instr"
+          },
+          {
+            "name": "gen5000 build cold",
+            "value": 526.665,
+            "unit": "ms"
+          },
+          {
+            "name": "gen5000 build noop",
+            "value": 59.611,
+            "unit": "ms"
+          },
+          {
+            "name": "gen5000 build edit 1 fn",
+            "value": 66.815,
+            "unit": "ms"
+          },
+          {
+            "name": "gen5000 check",
+            "value": 368.051,
+            "unit": "ms"
+          },
+          {
+            "name": "gen5000 build cold peak RSS",
+            "value": 51.789,
+            "unit": "MiB"
+          },
+          {
+            "name": "gen5000 binary",
+            "value": 1558.336,
+            "unit": "KiB"
+          },
+          {
+            "name": "gen5000 cache",
+            "value": 1902.83,
+            "unit": "KiB"
+          },
+          {
+            "name": "gen5000 build noop instructions",
+            "value": 662.538,
+            "unit": "M instr"
+          },
+          {
+            "name": "gen5000 build edit 1 fn instructions",
+            "value": 620.817,
+            "unit": "M instr"
+          },
+          {
+            "name": "gen5000 check instructions",
+            "value": 3890.162,
+            "unit": "M instr"
+          },
+          {
+            "name": "rt/fib run (-O)",
+            "value": 54.023,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/hashmap run (-O)",
+            "value": 84.569,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/matmul run (-O)",
+            "value": 37.656,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/nbody run (-O)",
+            "value": 53.496,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/sieve run (-O)",
+            "value": 92.139,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/sort run (-O)",
+            "value": 143.053,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/strings run (-O)",
+            "value": 35.319,
             "unit": "ms"
           }
         ]
