@@ -98,6 +98,43 @@ pub fn bound_names(bs: &[Bound]) -> R<Vec<String>> {
 }
 
 fn collect_generics(g: &Generics, out: &mut Vec<(String, Vec<String>)>) -> R<()> {
+    // (E0403 and the parser's checks on the parameter list)
+    let mut seen: Vec<&str> = vec![];
+    let mut after_ty = false;
+    for p in &g.params {
+        let n = match p {
+            GParam::Lifetime(l) => {
+                if after_ty {
+                    return err("lifetime parameters must be declared prior to type and const parameters");
+                }
+                if l == "'self" || l == "'static" || l == "'_" {
+                    return Err(format!("lifetimes cannot use keyword names (`{l}`)"));
+                }
+                l.as_str()
+            }
+            GParam::Ty(n, _, _) | GParam::Const(n, _) => {
+                after_ty = true;
+                // (the type of a const parameter: integers, bool, char)
+                if let GParam::Const(_, t) = p {
+                    let ok = matches!(t, PTy::Path(None, q) if q.segs.len() == 1 && matches!(q.segs[0].name.as_str(),
+                        "u8" | "u16" | "u32" | "u64" | "u128" | "usize" | "i8" | "i16" | "i32" | "i64" | "i128" | "isize" | "bool" | "char"));
+                    if !ok {
+                        let tn = ty_compact(t);
+                        let tn = if tn.is_empty() { "this type".to_string() } else { format!("`{tn}`") };
+                        return Err(format!("{tn} is forbidden as the type of a const generic parameter"));
+                    }
+                }
+                if n == "Self" {
+                    return err("unexpected keyword `Self` in generic parameters");
+                }
+                n.as_str()
+            }
+        };
+        if seen.contains(&n) {
+            return Err(format!("the name `{n}` is already used for a generic parameter in this item's generic parameters"));
+        }
+        seen.push(n);
+    }
     for p in &g.params {
         match p {
             GParam::Lifetime(_) => {}
@@ -132,11 +169,33 @@ fn adt_params(g: &Generics) -> R<Vec<String>> {
     Ok(v.into_iter().map(|x| x.0).collect())
 }
 
-fn only_lifetimes(g: &Generics) -> R<()> {
-    if g.params.iter().any(|p| !matches!(p, GParam::Lifetime(_))) {
-        return err("generics are not supported yet (lifetimes only)");
+/// The names of the paths in a type (`Box<dyn Foo>` → Box, Foo)
+fn ty_names(t: &PTy, out: &mut Vec<String>) {
+    match t {
+        PTy::Path(q, p) => {
+            if let Some(q) = q {
+                ty_names(q, out);
+            }
+            for s in &p.segs {
+                out.push(s.name.clone());
+                for a in &s.args {
+                    if let crate::parse::GArg::Ty(t) | crate::parse::GArg::Bind(_, t) = a {
+                        ty_names(t, out);
+                    }
+                }
+            }
+        }
+        PTy::Ref(_, _, i) | PTy::Ptr(_, i) | PTy::Slice(i) | PTy::Array(i, _) => ty_names(i, out),
+        PTy::Tuple(ts) => ts.iter().for_each(|t| ty_names(t, out)),
+        PTy::Dyn(bs) | PTy::Impl(bs) => {
+            for b in bs {
+                if let Bound::Trait(_, p) = b {
+                    ty_names(&PTy::Path(None, p.clone()), out);
+                }
+            }
+        }
+        _ => {}
     }
-    Ok(())
 }
 
 /// 型の空白なしのテキスト (syn のトークン列から空白を除いたものと同じ: `PartialEq<[U;N]>` の比較用)
@@ -690,7 +749,17 @@ pub fn summarize(item: &Item, owner: Option<&Owner>) -> R<Summary> {
             sm.aliases.push((n.clone(), gs.into_iter().map(|x| x.0).collect(), tysyn(t, None)?));
         }
         ItemKind::Trait(n, g, _, _) => {
-            only_lifetimes(g)?;
+            // (`trait Foo<X = Box<dyn Foo>>`: the default needs the trait itself)
+            for p in &g.params {
+                if let GParam::Ty(_, _, Some(d)) = p {
+                    let mut names = vec![];
+                    ty_names(d, &mut names);
+                    if names.iter().any(|x| x == n) {
+                        return Err(format!("cycle detected when computing the default of a type parameter of `{n}`"));
+                    }
+                }
+            }
+            collect_generics(g, &mut sm.trait_generics)?;
             sm.trait_decl = Some(n.clone());
         }
         ItemKind::Impl(g, tr, self_ty, _) => {
@@ -894,7 +963,7 @@ pub fn owner_of(it: &SrcItem, sums: &[Summary]) -> Option<Owner> {
         }
         LexKind::TraitMember(h) => sums[h as usize].trait_decl.clone().map(|n| Owner {
             self_ty: TySyn::Named("Self".into()),
-            generics: vec![("Self".into(), vec![n.clone()])],
+            generics: std::iter::once(("Self".to_string(), vec![n.clone()])).chain(sums[h as usize].trait_generics.iter().cloned()).collect(),
             base: n,
             impl_trait: None,
             is_trait: true,

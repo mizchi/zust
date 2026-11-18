@@ -307,6 +307,8 @@ pub struct Summary {
     pub enums: Vec<(String, Vec<VariantSyn>)>,
     /// trait ヘッダならその名前
     pub trait_decl: Option<String>,
+    /// trait ヘッダの型パラメータ (`trait From<T>` の T) と境界
+    pub trait_generics: Vec<(String, Vec<String>)>,
     /// `impl Trait for S` のヘッダなら trait 名
     pub impl_trait: Option<String>,
     /// `#[derive(..)]` された (型名, trait 名)。derive した trait は実装扱いにする
