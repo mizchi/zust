@@ -115,6 +115,18 @@ impl Cx<'_> {
                                 let t = Ty::Struct(sid);
                                 Ok(Place::Mem(self.temp(t), 0, t))
                             }
+                            // (a generic unit struct (`PhantomData`): the instance type inference chose, or `()`s)
+                            Some(sid) if self.prog.structs[sid as usize].fields.is_empty() && !self.prog.structs[sid as usize].is_enum => {
+                                let base = self.prog.base_of(sid);
+                                let t = match self.lets.get(&(e as *const Expr as usize)).copied() {
+                                    Some(Ty::Struct(x)) if self.prog.base_of(x) == base && !self.prog.has_param(Ty::Struct(x)) => Ty::Struct(x),
+                                    _ => {
+                                        let n = self.prog.structs[base as usize].generics.len();
+                                        Ty::Struct(self.prog.instantiate(base, vec![Ty::Unit; n])?)
+                                    }
+                                };
+                                Ok(Place::Mem(self.temp(t), 0, t))
+                            }
                             // `use std::f64::consts::PI;` してからの `PI`
                             _ => match self.float_const_name(e) {
                                 Some(x) => {

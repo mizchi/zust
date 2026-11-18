@@ -1741,9 +1741,29 @@ impl Program {
 
     /// 具体型 t の関連型 name (`impl Iterator for Counter { type Item = u32; }` なら u32)
     pub fn assoc_of(&self, t: Ty, name: &str) -> Option<Ty> {
+        thread_local! {
+            static DEPTH: std::cell::Cell<u32> = const { std::cell::Cell::new(0) };
+        }
+        // (`impl<F: Future> IntoFuture for F { type Item = F::Item; }` refers to another trait's `Item` of the same
+        // type: a cycle through the blanket impl. Bounded, and such a definition is not used to answer its own name)
+        if DEPTH.with(|d| d.get()) > 32 {
+            return None;
+        }
+        DEPTH.with(|d| d.set(d.get() + 1));
+        let r = self.assoc_of0(t, name);
+        DEPTH.with(|d| d.set(d.get() - 1));
+        r
+    }
+
+    fn assoc_of0(&self, t: Ty, name: &str) -> Option<Ty> {
         for a in &self.assocs {
             if a.name != name {
                 continue;
+            }
+            if let Ty::Assoc(v) = a.value {
+                if v.base == a.self_ty && v.name == name {
+                    continue;
+                }
             }
             let mut sol = vec![None; a.ngen];
             if self.match_ty(a.self_ty, t, &mut sol) {
@@ -1938,6 +1958,10 @@ impl Program {
                 TySyn::App(n, args) => {
                     // 型引数のうち、その型が値として持つもの (`Vec<T>` の T はポインタの先なので要らない)
                     let mut by_value = vec![true; args.len()];
+                    // (a generic type holding itself by value: `struct Foo<T> { f: Option<Foo<T>> }`)
+                    if self.struct_index.get(&n) == Some(&(id as u32)) {
+                        return Err(format!("{line}:1: recursive type `{}` has infinite size", sdefs[id].1));
+                    }
                     if let Some(&sid) = self.struct_index.get(&n) {
                         let bg = sdefs[sid as usize].3.clone();
                         let fs = fields_of(&sdefs[sid as usize].2);

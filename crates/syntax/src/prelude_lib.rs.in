@@ -6787,6 +6787,10 @@ impl Ordering {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct Reverse<T>(pub T);
 
+/// `std::marker::PhantomData` (no fields: a zero-sized value of every T)
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
+pub struct PhantomData<T>;
+
 impl<T> PartialOrd for Reverse<T> {
     fn partial_cmp(&self, o: &Reverse<T>) -> Option<Ordering> {
         Some(__exr_cmp_m::<T>(&o.0, &self.0))
