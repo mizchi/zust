@@ -991,6 +991,13 @@ pub fn summarize(item: &Item, owner: Option<&Owner>) -> R<Summary> {
         ItemKind::Type(n, g, _, Some(t)) => {
             let mut gs = Vec::new();
             collect_generics(g, &mut gs)?;
+            let consts: Vec<&str> = g.params.iter().filter_map(|p| match p {
+                GParam::Const(n, _) => Some(n.as_str()),
+                _ => None,
+            }).collect();
+            if !consts.is_empty() && const_param_in_op(t, &consts) {
+                return err("generic parameters may not be used in const operations");
+            }
             sm.aliases.push((n.clone(), gs.into_iter().map(|x| x.0).collect(), tysyn(t, None)?));
         }
         ItemKind::Trait(n, g, _, _) => {
@@ -1306,5 +1313,25 @@ pub fn owner_of(it: &SrcItem, sums: &[Summary]) -> Option<Owner> {
             is_trait: true,
         }),
         _ => None,
+    }
+}
+
+/// An array length in t is an operation on a const parameter (`[u8; N - 1]`; `[u8; N]` alone is fine)
+fn const_param_in_op(t: &PTy, consts: &[&str]) -> bool {
+    match t {
+        PTy::Array(e, n) => {
+            let bare = matches!(&**n, Expr::Path(None, p) if p.segs.len() == 1)
+                || matches!(&**n, Expr::Block(None, false, b) if matches!(b.stmts.as_slice(), [Stmt::Expr(Expr::Path(None, p), false)] if p.segs.len() == 1));
+            if !bare {
+                let d = format!("{n:?}");
+                if consts.iter().any(|c| d.contains(&format!("\"{c}\""))) {
+                    return true;
+                }
+            }
+            const_param_in_op(e, consts)
+        }
+        PTy::Ref(_, _, i) | PTy::Ptr(_, i) | PTy::Slice(i) => const_param_in_op(i, consts),
+        PTy::Tuple(v) => v.iter().any(|x| const_param_in_op(x, consts)),
+        _ => false,
     }
 }

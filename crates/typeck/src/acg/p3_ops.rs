@@ -1423,6 +1423,16 @@ impl Cx<'_> {
             }
             e => match crate::ast_summary::const_int(e) {
                 Ok(v) if (0..=u32::MAX as i64).contains(&v) => Ok(v as u32),
+                Err(_) => {
+                    // (an expression over other consts: Program evaluates its text)
+                    let ts = crate::ast_types::tysyn(&crate::parse::Ty::Array(Box::new(crate::parse::Ty::Path(None, path_of("u8"))), Box::new(e.clone())), None)
+                        .or_else(|er| err(SP, er))?;
+                    match self.prog.resolve(&ts) {
+                        Ok(Ty::Array(_, n)) => Ok(n),
+                        Ok(_) => err(SP, "array length must be a literal or a const"),
+                        Err(er) => err(SP, er),
+                    }
+                }
                 _ => err(SP, "array length must be a literal or a const"),
             },
         }

@@ -70,6 +70,22 @@ fn const_expr_text(e: &Expr) -> Option<String> {
         Expr::Unary(op, x, _) if op == "-" => format!("(-{})", const_expr_text(x)?),
         Expr::Paren(x) => const_expr_text(x)?,
         Expr::MethodCall(r, m, g, a, _) if g.is_empty() && a.is_empty() => format!("{}.{m}()", const_expr_text(r)?),
+        Expr::Unary(op, x, _) if op == "!" => format!("(!{})", const_expr_text(x)?),
+        // (the type of a cast does not change an integer constant's value here)
+        Expr::Cast(x, _) => format!("({} as usize)", const_expr_text(x)?),
+        Expr::Block(None, false, b) | Expr::Const(b) if b.stmts.len() == 1 => match &b.stmts[0] {
+            Stmt::Expr(x, false) => const_expr_text(x)?,
+            _ => return None,
+        },
+        Expr::Index(b, i, _) => format!("{}[{}]", const_expr_text(b)?, const_expr_text(i)?),
+        Expr::Field(b, f, _) => format!("{}.{f}", const_expr_text(b)?),
+        Expr::If(c, t, Some(e)) => {
+            let t = match t.stmts.as_slice() {
+                [Stmt::Expr(x, false)] => const_expr_text(x)?,
+                _ => return None,
+            };
+            format!("(if {} {{ {t} }} else {{ {} }})", const_expr_text(c)?, const_expr_text(e)?)
+        }
         _ => return None,
     })
 }
@@ -149,6 +165,11 @@ pub fn tysyn(t: &PTy, self_ty: Option<&TySyn>) -> R<TySyn> {
                 // (a constant expression of literals: `[u8; 1 + 1]`, `[T; 4 as usize]`)
                 x => match crate::ast_summary::const_int(x) {
                     Ok(v) if (0..=u32::MAX as i64).contains(&v) => ArrLen::Lit(v as u64),
+                    // (an expression over other consts, `[u8; N * 2]` / `[T; ARR[0]]`: its text, for Program to evaluate)
+                    Err(_) => match const_expr_text(x) {
+                        Some(t) => ArrLen::Const(t),
+                        None => return Err("array length must be a literal or a const".to_string()),
+                    },
                     _ => return Err("array length must be a literal or a const".to_string()),
                 },
             };

@@ -1461,7 +1461,7 @@ impl Program {
     /// 配列の長さに使う const (要約の const 表から整数の定数式として評価する)
     fn const_usize(&self, name: &str) -> R<u64> {
         // (const ジェネリクスの引数の式 `{ A - 16 }` は式のテキストで来る)
-        let v = if !self.const_index.contains_key(name) && name.bytes().any(|c| !(c.is_ascii_alphanumeric() || c == b'_' || c == b':')) {
+        let v = if !self.const_index.contains_key(name) && (name.starts_with(|c: char| c.is_ascii_digit()) || name.bytes().any(|c| !(c.is_ascii_alphanumeric() || c == b'_' || c == b':'))) {
             let e = crate::parse::parse_expr(name)?;
             self.eval_const(&e, 1)?
         } else {
@@ -1604,6 +1604,10 @@ impl Program {
                 let full = format!("{}::{}", p.segs[0].name, p.segs[1].name);
                 if self.const_index.contains_key(&full) {
                     return self.const_int(&full, depth);
+                }
+                // (`Foo::Bar as usize`: a unit variant's discriminant)
+                if let Some((sid, vi)) = self.variant_by_p(&PPath::of(p), None) {
+                    return Ok(self.structs[sid as usize].variants[vi].discr as i128);
                 }
                 let t = Ty::prim(&p.segs[0].name).ok_or("unsupported path in constant")?;
                 prim_assoc_const(t, &p.segs[1].name).ok_or("unsupported constant")?

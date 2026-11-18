@@ -26,7 +26,9 @@ compile-fail	argument-suggestions/permuted_arguments.rs
 compile-fail	argument-suggestions/suggest-better-removing-issue-126246.rs
 compile-fail	argument-suggestions/swapped_arguments.rs
 compile-fail	argument-suggestions/too-long.rs
+run-pass	array-slice-vec/array_const_index-2.rs
 run-pass	array-slice-vec/byte-literals.rs
+run-pass	array-slice-vec/cast-in-array-size.rs
 run-pass	array-slice-vec/check-static-slice.rs
 run-pass	array-slice-vec/copy-out-of-array-1.rs
 run-pass	array-slice-vec/destructure-array-1.rs
@@ -1059,6 +1061,7 @@ compile-fail	confuse-field-and-method/issue-33784.rs
 compile-fail	confuse-field-and-method/private-field.rs
 check-pass	const-generics/apit-with-const-param.rs
 check-pass	const-generics/arg-in-pat-2.rs
+compile-fail	const-generics/argument_order.rs
 compile-fail	const-generics/associated-const-bindings/const-bound-to-assoc-ty-99828.rs
 compile-fail	const-generics/associated-const-bindings/issue-105330.rs
 compile-fail	const-generics/associated-const-bindings/mismatched-types-with-generic-in-ace-no-feature-gate.rs
@@ -1095,7 +1098,9 @@ compile-fail	const-generics/early/closing-args-token.rs
 compile-fail	const-generics/early/const-expression-parameter.rs
 compile-fail	const-generics/early/const_arg_trivial_macro_expansion-2.rs
 compile-fail	const-generics/early/invalid-const-arguments.rs
+check-pass	const-generics/early/trivial-const-arg-macro-nested.rs
 check-pass	const-generics/early/trivial-const-arg-macro-param.rs
+check-pass	const-generics/early/trivial-const-arg-macro.rs
 compile-fail	const-generics/gca/suggest-const-item-for-generic-expr.rs
 compile-fail	const-generics/generic_arg_infer/in-signature.rs
 compile-fail	const-generics/generic_arg_infer/infer-arg-test.rs
@@ -1184,6 +1189,7 @@ compile-fail	consts/const-array-oob.rs
 compile-fail	consts/const-as-fn.rs
 run-pass	consts/const-big-enum.rs
 run-pass	consts/const-bitshift-rhs-inference.rs
+check-pass	consts/const-blocks/const-block-in-array-size.rs
 run-pass	consts/const-blocks/const-repeat.rs
 run-pass	consts/const-blocks/fn-call-in-const.rs
 check-pass	consts/const-blocks/nll-pass.rs
@@ -1226,11 +1232,14 @@ check-pass	consts/const-eval/stable-metric/dominators-edge-case.rs
 run-pass	consts/const-eval/variance-const-eval-cycle.rs
 run-pass	consts/const-eval/write-to-uninhabited-enum-variant.rs
 check-pass	consts/const-eval/zst_operand_eval.rs
+run-pass	consts/const-expr-in-fixed-length-vec.rs
+run-pass	consts/const-expr-in-vec-repeat.rs
 run-pass	consts/const-fields-and-indexing.rs
 check-pass	consts/const-fn-destructuring-arg.rs
 run-pass	consts/const-fn-method.rs
 run-pass	consts/const-fn-val.rs
 build-pass	consts/const-fn-zst-args.rs
+run-pass	consts/const-index-feature-gate.rs
 compile-fail	consts/const-int-conversion.rs
 compile-fail	consts/const-int-wrapping.rs
 compile-fail	consts/const-item-no-type/with-colon.rs
@@ -1278,7 +1287,9 @@ compile-fail	consts/issue-104609.rs
 check-pass	consts/issue-13837.rs
 run-pass	consts/issue-17718-borrow-interior.rs
 check-pass	consts/issue-17718-references.rs
+run-pass	consts/issue-17756.rs
 build-pass	consts/issue-21562.rs
+run-pass	consts/issue-23833.rs
 check-pass	consts/issue-28822.rs
 run-pass	consts/issue-29914.rs
 check-pass	consts/issue-33903.rs
@@ -1556,6 +1567,7 @@ compile-fail	entry-point/imported_main_conflict.rs
 check-pass	entry-point/imported_main_conflict_lib.rs
 compile-fail	entry-point/main-with-invalid-signature.rs
 compile-fail	entry-point/return-ty-has-bound-vars.rs
+run-pass	enum-discriminant/const-implicit-enum-discriminant.rs
 run-pass	enum-discriminant/issue-104519.rs
 run-pass	enum-discriminant/issue-61696.rs
 run-pass	enum-discriminant/issue-90038.rs
@@ -4393,6 +4405,7 @@ run-pass	structs-enums/enum-discrim-autosizing.rs
 run-pass	structs-enums/enum-export-inheritance.rs
 run-pass	structs-enums/enum-nullable-const-null-with-fields.rs
 compile-fail	structs-enums/enum-rec/issue-17431-7.rs
+run-pass	structs-enums/enum-vec-initializer.rs
 run-pass	structs-enums/expr-if-struct.rs
 run-pass	structs-enums/expr-match-struct.rs
 run-pass	structs-enums/functional-struct-upd.rs
