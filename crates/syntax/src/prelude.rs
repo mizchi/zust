@@ -497,6 +497,48 @@ fn defined_name(src: &str, it: &SrcItem) -> Option<String> {
 
 /// ユーザのコードから (識別子を辿って) 使われうる prelude のアイテムだけを、ソースとして返す。
 /// Option を使わないプログラムには何も足さないので、キャッシュも大きくならない
+/// Prelude types a program may define for itself (no part of the compiler names them): when the program does, the
+/// prelude's own is renamed `__p_<name>` in the prelude text, so the two do not collide
+const SHADOWABLE: &[&str] = &[
+    "Chain", "Entry", "Enumerate", "Filter", "FilterMap", "Map", "OptIter", "Scan", "Skip", "Take", "TakeWhile", "Zip",
+];
+
+pub fn rename_shadowed(user_src: &str, prelude: String) -> String {
+    let b = user_src.as_bytes();
+    let is_id = |c: u8| c.is_ascii_alphanumeric() || c == b'_';
+    let mut out = prelude;
+    for &n in SHADOWABLE {
+        // (`struct Map` / `enum Map` / `trait Map` / `type Map` in the program)
+        let defined = ["struct ", "enum ", "trait ", "type ", "union "].iter().any(|k| {
+            let pat = format!("{k}{n}");
+            user_src.match_indices(&pat).any(|(i, _)| {
+                let e = i + pat.len();
+                (i == 0 || !is_id(b[i - 1])) && (e == b.len() || !is_id(b[e]))
+            })
+        });
+        if !defined || !out.contains(n) {
+            continue;
+        }
+        let ob = out.as_bytes();
+        let mut r = String::with_capacity(out.len() + 64);
+        let mut i = 0;
+        while let Some(k) = out[i..].find(n) {
+            let at = i + k;
+            let end = at + n.len();
+            let word = (at == 0 || !is_id(ob[at - 1])) && (end == ob.len() || !is_id(ob[end]));
+            r.push_str(&out[i..at]);
+            if word {
+                r.push_str("__p_");
+            }
+            r.push_str(n);
+            i = end;
+        }
+        r.push_str(&out[i..]);
+        out = r;
+    }
+    out
+}
+
 pub fn select(user_src: &str, user_items: &[SrcItem]) -> String {
     select_with(user_src, user_items, &mut SelectCache::default())
 }

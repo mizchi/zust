@@ -715,6 +715,7 @@ compile-fail	borrowck/two-phase-across-loop.rs
 run-pass	borrowck/two-phase-baseline.rs
 run-pass	borrowck/two-phase-control-flow-split-before-activation.rs
 run-pass	borrowck/two-phase-method-receivers.rs
+compile-fail	borrowck/two-phase-surprise-no-conflict.rs
 compile-fail	borrowck/unboxed-closures-move-upvar-from-non-once-ref-closure.rs
 compile-fail	borrowck/uninitalized-in-match-arm-issue-126133.rs
 compile-fail	borrowck/unmatched-arg-and-hir-arg-issue-126385.rs
@@ -833,6 +834,7 @@ check-pass	closures/2229_closure_analysis/run_pass/destructure-pattern-closure-w
 check-pass	closures/2229_closure_analysis/run_pass/destructure_patterns.rs
 run-pass	closures/2229_closure_analysis/run_pass/disjoint-capture-in-same-closure.rs
 run-pass	closures/2229_closure_analysis/run_pass/edition.rs
+run-pass	closures/2229_closure_analysis/run_pass/filter-on-struct-member.rs
 check-pass	closures/2229_closure_analysis/run_pass/issue-87378.rs
 run-pass	closures/2229_closure_analysis/run_pass/issue-88372.rs
 run-pass	closures/2229_closure_analysis/run_pass/multilevel-path-1.rs
@@ -2257,6 +2259,7 @@ compile-fail	inference/tutorial-suffix-inference-test.rs
 check-pass	inference/untyped-primitives.rs
 compile-fail	inference/useless-turbofish-suggestion.rs
 compile-fail	infinite/infinite-recursion-const-fn.rs
+compile-fail	infinite/infinite-struct.rs
 compile-fail	infinite/infinite-tag-type-recursion.rs
 compile-fail	inline-const/const-expr-lifetime-err.rs
 compile-fail	inline-const/expr-with-block-err.rs
@@ -2466,6 +2469,7 @@ check-pass	lint/must_not_suspend/gated.rs
 check-pass	lint/non-local-defs/convoluted-locals-131474-with-mods.rs
 check-pass	lint/non-local-defs/convoluted-locals-131474.rs
 check-pass	lint/non-local-defs/convoluted-locals-132427.rs
+check-pass	lint/non-snake-case/allow-snake-case-field-destructuring-issue-89469.rs
 check-pass	lint/non-snake-case/field-lint-expectation-issue-159323.rs
 check-pass	lint/non-snake-case/lint-non-snake-case-no-lowercase-equivalent.rs
 check-pass	lint/non-snake-case/non-snake-ffi-issue-31924.rs
@@ -4939,6 +4943,7 @@ compile-fail	typeck/assign-non-lval-mut-ref.rs
 compile-fail	typeck/assign-non-lval-needs-deref.rs
 compile-fail	typeck/associated-type-ice-recovery-66353.rs
 compile-fail	typeck/attempted-access-non-fatal.rs
+compile-fail	typeck/bad-index-modulo-higher-ranked-regions.rs
 compile-fail	typeck/bad-recursive-type-sig-infer.rs
 compile-fail	typeck/call-unit-struct-as-fn.rs
 compile-fail	typeck/check-args-on-fn-err-2.rs

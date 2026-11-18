@@ -158,6 +158,7 @@ pub fn with_prelude_in(src: &str, crates: &[String], fix: &mut Vec<(u32, u32, i3
     let user = items.len();
     tm.lap("split", String::new());
     let extra = crate::prelude::select_with(src, &items, &mut cache.sel);
+    let extra = crate::prelude::rename_shadowed(src, extra);
     tm.lap("prelude", String::new());
     if extra.is_empty() {
         return Ok((src.to_string(), items, user, 0));
