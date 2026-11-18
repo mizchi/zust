@@ -504,19 +504,29 @@ const SHADOWABLE: &[&str] = &[
 ];
 
 pub fn rename_shadowed(user_src: &str, prelude: String) -> String {
-    let b = user_src.as_bytes();
+    // (most programs name none of them: a quick look first)
+    if !SHADOWABLE.iter().any(|n| user_src.contains(n)) {
+        return prelude;
+    }
+    // (one pass over the program's words: `struct Map` / `enum Map` / `trait Map` / `type Map` / `union Map`)
+    let mut defined: Vec<&str> = vec![];
+    let mut prev = "";
+    for w in user_src.split(|c: char| !(c.is_ascii_alphanumeric() || c == '_')) {
+        if w.is_empty() {
+            continue;
+        }
+        if matches!(prev, "struct" | "enum" | "trait" | "type" | "union") && SHADOWABLE.contains(&w) && !defined.contains(&w) {
+            defined.push(w);
+        }
+        prev = w;
+    }
+    if defined.is_empty() {
+        return prelude;
+    }
     let is_id = |c: u8| c.is_ascii_alphanumeric() || c == b'_';
     let mut out = prelude;
-    for &n in SHADOWABLE {
-        // (`struct Map` / `enum Map` / `trait Map` / `type Map` in the program)
-        let defined = ["struct ", "enum ", "trait ", "type ", "union "].iter().any(|k| {
-            let pat = format!("{k}{n}");
-            user_src.match_indices(&pat).any(|(i, _)| {
-                let e = i + pat.len();
-                (i == 0 || !is_id(b[i - 1])) && (e == b.len() || !is_id(b[e]))
-            })
-        });
-        if !defined || !out.contains(n) {
+    for n in defined {
+        if !out.contains(n) {
             continue;
         }
         let ob = out.as_bytes();
