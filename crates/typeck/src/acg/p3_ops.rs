@@ -1407,7 +1407,10 @@ impl Cx<'_> {
                     Err(er) => err(SP, er),
                 }
             }
-            _ => err(SP, "array length must be a literal or a const"),
+            e => match crate::ast_summary::const_int(e) {
+                Ok(v) if (0..=u32::MAX as i64).contains(&v) => Ok(v as u32),
+                _ => err(SP, "array length must be a literal or a const"),
+            },
         }
     }
 

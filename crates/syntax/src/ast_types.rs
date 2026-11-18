@@ -146,7 +146,11 @@ pub fn tysyn(t: &PTy, self_ty: Option<&TySyn>) -> R<TySyn> {
                     };
                     ArrLen::Const(format!("{a}::{}", p.segs[1].name))
                 }
-                _ => return Err("array length must be a literal or a const".to_string()),
+                // (a constant expression of literals: `[u8; 1 + 1]`, `[T; 4 as usize]`)
+                x => match crate::ast_summary::const_int(x) {
+                    Ok(v) if (0..=u32::MAX as i64).contains(&v) => ArrLen::Lit(v as u64),
+                    _ => return Err("array length must be a literal or a const".to_string()),
+                },
             };
             TySyn::Array(Box::new(tysyn(e, self_ty)?), len)
         }

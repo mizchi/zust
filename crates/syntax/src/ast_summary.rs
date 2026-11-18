@@ -63,7 +63,7 @@ fn self_of(name: &str, generics: &[String]) -> TySyn {
     }
 }
 
-fn const_int(e: &Expr) -> R<i64> {
+pub fn const_int(e: &Expr) -> R<i64> {
     match e {
         Expr::Lit(t, _) if t.starts_with(|c: char| c.is_ascii_digit()) => {
             let t: String = t.chars().filter(|&c| c != '_').collect();
@@ -81,6 +81,11 @@ fn const_int(e: &Expr) -> R<i64> {
         Expr::Unary(op, x, _) if op == "!" => Ok(!const_int(x)?),
         Expr::Paren(x) => const_int(x),
         Expr::Cast(x, _) => const_int(x),
+        // (`{ 3 }`)
+        Expr::Block(_, _, b) if b.stmts.len() == 1 => match &b.stmts[0] {
+            crate::parse::Stmt::Expr(x, false) => const_int(x),
+            _ => err("only integer literals are supported as discriminants"),
+        },
         Expr::Binary(op, a, b, _) => {
             let (a, b) = (const_int(a)?, const_int(b)?);
             Ok(match op.as_str() {

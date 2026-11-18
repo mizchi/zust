@@ -54,6 +54,7 @@ run-pass	array-slice-vec/vec-macro-rvalue-scope.rs
 run-pass	array-slice-vec/vec-macro-with-trailing-comma.rs
 run-pass	array-slice-vec/vec-matching-fixed.rs
 compile-fail	array-slice-vec/vec-mut-iter-borrow.rs
+run-pass	array-slice-vec/vec-repeat-with-cast.rs
 compile-fail	array-slice-vec/vec-res-add.rs
 run-pass	array-slice-vec/vector-no-ann-2.rs
 compile-fail	array-slice-vec/vector-no-ann.rs
@@ -289,6 +290,7 @@ check-pass	async-await/issue-63832-await-short-temporary-lifetime-1.rs
 check-pass	async-await/issue-63832-await-short-temporary-lifetime.rs
 compile-fail	async-await/issue-67252-unnamed-future.rs
 compile-fail	async-await/issue-69446-fnmut-capture.rs
+check-pass	async-await/issue-73050.rs
 compile-fail	async-await/issue-73741-type-err.rs
 compile-fail	async-await/issue-74072-lifetime-name-annotations.rs
 compile-fail	async-await/issue-74497-lifetime-in-opaque.rs
@@ -1033,6 +1035,7 @@ compile-fail	const-generics/associated-const-bindings/issue-105330.rs
 compile-fail	const-generics/associated-const-bindings/mismatched-types-with-generic-in-ace-no-feature-gate.rs
 compile-fail	const-generics/associated-const-bindings/unconstrained_impl_param.rs
 check-pass	const-generics/associated-type-bound.rs
+check-pass	const-generics/backcompat/unevaluated-consts.rs
 compile-fail	const-generics/bad-const-generic-exprs.rs
 compile-fail	const-generics/bad-subst-const-kind.rs
 compile-fail	const-generics/ban-self-when-feature-not-enabled.rs
@@ -1138,6 +1141,7 @@ check-pass	const_prop/const-prop-overflowing-casts.rs
 compile-fail	const_prop/ice-type-mismatch-when-copying-112824.rs
 build-pass	const_prop/unreachable-bounds.rs
 build-pass	const_prop/unreachable-overflow.rs
+run-pass	consts/arithmetic-expr-in-array-len.rs
 build-pass	consts/array-literal-index-oob.rs
 check-pass	consts/assoc-const-elided-lifetime.rs
 compile-fail	consts/bad-array-size-in-type-err.rs
@@ -2620,6 +2624,7 @@ check-pass	macros/macro-followed-by-seq.rs
 compile-fail	macros/macro-fragment-ident-underscore-error.rs
 compile-fail	macros/macro-hygiene-help-issue-149604.rs
 run-pass	macros/macro-in-array-len-expr.rs
+check-pass	macros/macro-invocation-in-count-expr-fixed-array-type.rs
 compile-fail	macros/macro-invocation-span-error-7970.rs
 compile-fail	macros/macro-match-nonterminal.rs
 check-pass	macros/macro-meta-items-modern.rs
@@ -2765,6 +2770,7 @@ compile-fail	mir/mir-build-2021-closure-capture-ice-110453-2.rs
 run-pass	mir/mir_call_with_associated_type.rs
 run-pass	mir/mir_cast_fn_ret.rs
 run-pass	mir/mir_codegen_array.rs
+run-pass	mir/mir_codegen_array_2.rs
 run-pass	mir/mir_codegen_call_converging.rs
 run-pass	mir/mir_codegen_spike1.rs
 run-pass	mir/mir_codegen_switch.rs
