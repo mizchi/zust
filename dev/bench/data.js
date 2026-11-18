@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795022403179,
+  "lastUpdate": 1795023510969,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -6836,6 +6836,165 @@ window.BENCHMARK_DATA = {
           {
             "name": "rt/strings run (-O)",
             "value": 35.595,
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "committer": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "distinct": true,
+          "id": "69724e0e583bea00e19f3cbd798e4d6efe04f865",
+          "message": "std::iter::repeat / once / empty / repeat_with / successors\n\n- prelude iterators for these; a program writing `iter::` and one of the\n  names gets the Iterator trait with them\n- `ptr::write(` / `ptr::read(` / `drop_in_place(` pull in those functions by\n  that exact form (a bare `write` / `read` is not looked up), keeping the\n  no_std programs' caches within the size budget\n- test_variant reports an internal error instead of panicking on an enum\n  instance without variants (`iter::empty().collect()` with `T` unresolved)\n- tests/ui: run-pass 1340, check-pass 1076\n\nAccepted compile-fail removal (rejected before only because Iterator was\nmissing; it needs the captured-lifetime check on `impl Trait` returns):\nsuggestions/lifetimes/explicit-lifetime-suggestion-in-proper-span-issue-121267.rs\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-18T17:32:22Z",
+          "tree_id": "8b7e67b23ada4abbe1ea0be30ac2470260c706c6",
+          "url": "https://github.com/mizchi/zust/commit/69724e0e583bea00e19f3cbd798e4d6efe04f865"
+        },
+        "date": 1795023510581,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "gen1000 build cold",
+            "value": 114.431,
+            "unit": "ms"
+          },
+          {
+            "name": "gen1000 build noop",
+            "value": 12.205,
+            "unit": "ms"
+          },
+          {
+            "name": "gen1000 build edit 1 fn",
+            "value": 16.556,
+            "unit": "ms"
+          },
+          {
+            "name": "gen1000 check",
+            "value": 72.207,
+            "unit": "ms"
+          },
+          {
+            "name": "gen1000 build cold peak RSS",
+            "value": 17.832,
+            "unit": "MiB"
+          },
+          {
+            "name": "gen1000 binary",
+            "value": 323.977,
+            "unit": "KiB"
+          },
+          {
+            "name": "gen1000 cache",
+            "value": 387.205,
+            "unit": "KiB"
+          },
+          {
+            "name": "gen1000 build noop instructions",
+            "value": 146.43,
+            "unit": "M instr"
+          },
+          {
+            "name": "gen1000 build edit 1 fn instructions",
+            "value": 140.035,
+            "unit": "M instr"
+          },
+          {
+            "name": "gen1000 check instructions",
+            "value": 795.71,
+            "unit": "M instr"
+          },
+          {
+            "name": "gen5000 build cold",
+            "value": 530.405,
+            "unit": "ms"
+          },
+          {
+            "name": "gen5000 build noop",
+            "value": 61.138,
+            "unit": "ms"
+          },
+          {
+            "name": "gen5000 build edit 1 fn",
+            "value": 66.538,
+            "unit": "ms"
+          },
+          {
+            "name": "gen5000 check",
+            "value": 369.637,
+            "unit": "ms"
+          },
+          {
+            "name": "gen5000 build cold peak RSS",
+            "value": 54.738,
+            "unit": "MiB"
+          },
+          {
+            "name": "gen5000 binary",
+            "value": 1558.336,
+            "unit": "KiB"
+          },
+          {
+            "name": "gen5000 cache",
+            "value": 1902.83,
+            "unit": "KiB"
+          },
+          {
+            "name": "gen5000 build noop instructions",
+            "value": 693.216,
+            "unit": "M instr"
+          },
+          {
+            "name": "gen5000 build edit 1 fn instructions",
+            "value": 652.653,
+            "unit": "M instr"
+          },
+          {
+            "name": "gen5000 check instructions",
+            "value": 3921.025,
+            "unit": "M instr"
+          },
+          {
+            "name": "rt/fib run (-O)",
+            "value": 54.24,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/hashmap run (-O)",
+            "value": 90.202,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/matmul run (-O)",
+            "value": 37.989,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/nbody run (-O)",
+            "value": 53.649,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/sieve run (-O)",
+            "value": 93.762,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/sort run (-O)",
+            "value": 144.35,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/strings run (-O)",
+            "value": 35.619,
             "unit": "ms"
           }
         ]
