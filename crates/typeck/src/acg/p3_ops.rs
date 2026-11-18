@@ -65,6 +65,11 @@ impl Cx<'_> {
             Expr::AssignOp(op, l, r, _) => (op.as_str(), &**l, &**r, true),
             _ => unreachable!(),
         };
+        // (a fn item has no `==`: only fn pointers compare, `f as fn() == g as fn()`)
+        if !assign && self.user_code && is_cmp(op) && self.fn_item(strip_paren(left)).is_some() {
+            let pos = if let Expr::Binary(_, _, _, sp) = e { sp.start } else { SP };
+            return err(pos, format!("binary operation `{op}` cannot be applied to a fn item (cast it to a fn pointer)"));
+        }
         // 短絡評価
         if !assign && (op == "&&" || op == "||") {
             let (l, lt) = self.expr(left, Some(Ty::Bool))?;
@@ -397,7 +402,7 @@ impl Cx<'_> {
             while let Ty::Ref(_, i) = base {
                 base = *i;
             }
-            if base != lt && !base.is_agg() && !base.is_fat() && (base.is_int() || base.is_float() || matches!(base, Ty::Bool | Ty::Char)) {
+            if base != lt && !base.is_agg() && !base.is_fat() && (base.is_int() || base.is_float() || matches!(base, Ty::Bool | Ty::Char | Ty::Fn(_) | Ty::Ptr(..))) {
                 while let Ty::Ref(_, i) = lt {
                     let ct = if matches!(i, Ty::Ref(..)) { PTR } else { clif_ty(*i).unwrap() };
                     l = self.b.ins().load(ct, mf(), l, 0);
@@ -440,7 +445,12 @@ impl Cx<'_> {
                     return Ok((Some(e), Ty::Bool));
                 }
             }
-            if !(lt.is_int() || matches!(lt, Ty::Bool | Ty::Char | Ty::Ptr(..))) {
+            // (pointers cannot be compared in a `const fn`: their addresses are not known during const eval)
+            if matches!(lt, Ty::Ptr(..) | Ty::Fn(_)) && self.user_code && self.prog.names.get(self.root as usize).is_some_and(|n| self.prog.const_fns.contains_key(n)) {
+                let pos = if let Expr::Binary(_, _, _, sp) = e { sp.start } else { SP };
+                return err(pos, "pointers cannot be reliably compared during const eval");
+            }
+            if !(lt.is_int() || matches!(lt, Ty::Bool | Ty::Char | Ty::Ptr(..) | Ty::Fn(_))) {
                 return err(SP, format!("comparison of `{}` is not supported", self.prog.tn(lt)));
             }
             let s = lt.signed();

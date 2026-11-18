@@ -1678,7 +1678,7 @@ impl Cx<'_> {
         }
         let id = self.prog.fn_by_p(&PPath::of(p), self.self_sid)?;
         let s = &self.prog.sigs[id as usize];
-        (!s.is_main && s.has_body || s.is_extern).then_some(id)
+        (s.has_body || s.is_extern).then_some(id)
     }
 
     /// 関数アイテムを関数ポインタの値にする。ジェネリックなら turbofish か期待型 (`fn(i64) -> i64`) で型引数を決める

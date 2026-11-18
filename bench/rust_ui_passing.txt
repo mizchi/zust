@@ -505,8 +505,10 @@ run-pass	binop/add-ref-operand-method-lookup.rs
 run-pass	binop/binary-minus-without-space.rs
 compile-fail	binop/binary-op-not-allowed-issue-125631.rs
 compile-fail	binop/binary-op-on-double-ref.rs
+run-pass	binop/binary-op-on-fn-ptr-eq.rs
 compile-fail	binop/binary-op-suggest-deref.rs
 compile-fail	binop/binop-bitxor-str.rs
+run-pass	binop/binop-evaluation-order-primitive.rs
 compile-fail	binop/binop-logic-float.rs
 compile-fail	binop/binop-logic-int.rs
 compile-fail	binop/binop-mul-bool.rs
@@ -1042,6 +1044,7 @@ build-pass	coercion/coerce-reborrow-multi-arg.rs
 run-pass	coercion/coerce-reborrow-mut-ptr-arg.rs
 run-pass	coercion/coerce-reborrow-mut-ptr-rcvr.rs
 compile-fail	coercion/coerce-to-bang-cast.rs
+run-pass	coercion/coerce-unify-return.rs
 run-pass	coercion/coerce-unsize-subtype.rs
 compile-fail	coercion/coercion-missing-tail-expected-type.rs
 check-pass	coercion/constrain-expectation-in-arg.rs
@@ -1289,6 +1292,7 @@ check-pass	consts/const-eval/zst_operand_eval.rs
 run-pass	consts/const-expr-in-fixed-length-vec.rs
 run-pass	consts/const-expr-in-vec-repeat.rs
 compile-fail	consts/const-extern-fn/const-extern-fn-requires-unsafe.rs
+run-pass	consts/const-extern-function.rs
 run-pass	consts/const-fields-and-indexing.rs
 run-pass	consts/const-fn-const-eval.rs
 check-pass	consts/const-fn-destructuring-arg.rs
@@ -1990,6 +1994,7 @@ check-pass	frontmatter/location-include-in-expr-ctxt.rs
 compile-fail	fully-qualified-type/fully-qualified-type-name1.rs
 compile-fail	fully-qualified-type/fully-qualified-type-name2.rs
 compile-fail	fully-qualified-type/fully-qualified-type-name4.rs
+run-pass	function-pointer/function-pointer-comparison-54696.rs
 compile-fail	function-pointer/signature-mismatch.rs
 compile-fail	functional-struct-update/fru-on-enum-variant.rs
 run-pass	functions-closures/bare-fn-implements-fn-mut.rs
@@ -2602,6 +2607,9 @@ check-pass	lint/empty-lint-attributes.rs
 check-pass	lint/expect-future_breakage-crash-issue-126521.rs
 check-pass	lint/expect-unused-imports.rs
 check-pass	lint/explicit-outlives-unsized-object-lifetime.rs
+check-pass	lint/fn-ptr-comparisons-134345.rs
+check-pass	lint/fn-ptr-comparisons-no_std.rs
+check-pass	lint/fn-ptr-comparisons.rs
 compile-fail	lint/for-loops-over-fallibles/macro-iterator-next.rs
 check-pass	lint/forbid-group-member.rs
 check-pass	lint/forgetting_copy_types.rs
@@ -3216,7 +3224,6 @@ check-pass	nll/ty-outlives/projection-body.rs
 check-pass	nll/ty-outlives/projection-where-clause-env.rs
 check-pass	nll/ty-outlives/projection-where-clause-trait.rs
 compile-fail	nll/type-check-pointer-coercions.rs
-compile-fail	nll/type-check-pointer-comparisons.rs
 check-pass	nll/unexpected-inference-var-ice-116599.rs
 compile-fail	nll/user-annotations/adt-brace-structs.rs
 compile-fail	nll/user-annotations/adt-tuple-struct.rs
@@ -4112,6 +4119,7 @@ run-pass	regions/regions-copy-closure.rs
 run-pass	regions/regions-creating-enums2.rs
 run-pass	regions/regions-creating-enums5.rs
 run-pass	regions/regions-debruijn-of-object.rs
+run-pass	regions/regions-dependent-autofn.rs
 run-pass	regions/regions-dependent-autoslice.rs
 run-pass	regions/regions-dependent-let-ref.rs
 run-pass	regions/regions-early-bound-lifetime-in-assoc-fn.rs

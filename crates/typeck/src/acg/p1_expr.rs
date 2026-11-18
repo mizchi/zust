@@ -800,6 +800,8 @@ impl Cx<'_> {
                         return Ok((v, to));
                     }
                     (Ty::Ptr(..), Ty::Ptr(..)) => return Ok((v, to)),
+                    // (a fn pointer as a raw pointer: the same address)
+                    (Ty::Fn(_), Ty::Ptr(..)) => return Ok((v, to)),
                     (Ty::Ptr(..), t) if matches!(t, Ty::Usize | Ty::U64 | Ty::Isize | Ty::I64) => {
                         return Ok((v, to));
                     }
