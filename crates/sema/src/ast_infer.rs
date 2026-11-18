@@ -819,6 +819,8 @@ impl Inf<'_> {
                         if *semi || i + 1 < n {
                             if is_fmt_macro(p) {
                                 self.fmt_width_vars(g);
+                            } else if matches!(macro_name(p), "assert" | "debug_assert") {
+                                self.macro_expr(p, g);
                             }
                             continue;
                         }
@@ -1341,6 +1343,21 @@ impl Inf<'_> {
             self.fmt_width_vars(g);
             let unit = matches!(macro_name(p), "print" | "println" | "eprint" | "eprintln");
             return if unit { self.known(Ty::Unit) } else { self.var() };
+        }
+        // (`assert!(a == e)`: the condition constrains its locals, `let e = 5;` is the type of `a`)
+        if name == "assert" || name == "debug_assert" {
+            let Some(xs) = ast_closure::macro_args_at(g, self.mbase) else { return self.known(Ty::Unit) };
+            let Some(x) = xs.into_iter().next() else { return self.known(Ty::Unit) };
+            self.no_record += 1;
+            let ki = self.keep.len();
+            self.keep.push(vec![x]);
+            let x: *const Expr = &self.keep[ki][0];
+            // SAFETY: keep の要素は推論の終わりまで動かさない
+            let v = self.expr(unsafe { &*x });
+            let b = self.known(Ty::Bool);
+            self.unify(v, b);
+            self.no_record -= 1;
+            return self.known(Ty::Unit);
         }
         if name == "vec" && self.prog.struct_index.contains_key("Vec") {
             let el = self.var();

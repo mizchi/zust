@@ -1414,6 +1414,7 @@ run-pass	derives/debug/derive-Debug-use-ufcs-struct.rs
 run-pass	derives/debug/derive-debug-2.rs
 check-pass	derives/debug/derive-debug-generic-with-lifetime.rs
 check-pass	derives/debug/derive-debug-newtype-unsized-slice.rs
+run-pass	derives/default/deriving-default-enum.rs
 compile-fail	derives/derive-assoc-type-not-impl.rs
 check-pass	derives/derive-compound-arities.rs
 run-pass	derives/derive-hygiene-struct-builder.rs
@@ -4060,6 +4061,7 @@ check-pass	regions/regions-implied-bounds-projection-gap-2.rs
 check-pass	regions/regions-implied-bounds-projection-gap-3.rs
 check-pass	regions/regions-implied-bounds-projection-gap-4.rs
 compile-fail	regions/regions-implied-bounds-projection-gap-hr-1.rs
+run-pass	regions/regions-infer-borrow-scope-addr-of.rs
 compile-fail	regions/regions-infer-borrow-scope-too-big.rs
 run-pass	regions/regions-infer-borrow-scope-view.rs
 run-pass	regions/regions-infer-borrow-scope-within-loop-ok.rs
