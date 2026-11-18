@@ -18,6 +18,13 @@ README の「必要なもの」に加えて、次のものを使う。
 cargo build --release --workspace
 ```
 
+`cratebench/run.py` と `bench/deps_bench.py` は、実在のクレートのソースを git submodule から使う。最初に一度取ってくる
+(`git clone --recurse-submodules` で clone してもよい)。
+
+```bash
+git submodule update --init cratebench/vendor
+```
+
 `target/release/zustc` と `target/release/zust-analyzer` ができる。テストやスクリプトの多くは、この 2 つの release
 ビルドを使う。
 
@@ -221,4 +228,4 @@ origin/main からの差分の行だけを変異させ、テストで見つか�
 ## ライセンス
 
 送られた貢献は、明示しない限り、README の「ライセンス」のとおり MIT OR Apache-2.0 で提供されたものとする。他のプロジェクトの
-コードを取り込むときは、ライセンスが合うものだけにし、元のライセンスのファイルも一緒に置く (`cratebench/vendor/` と同じ)。
+コードを取り込むときは、ライセンスが合うものだけにし、上流のリポジトリを git submodule にする (`cratebench/vendor/` と同じ) か、元のライセンスのファイルも一緒に置く。

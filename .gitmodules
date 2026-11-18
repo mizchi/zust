@@ -1,0 +1,28 @@
+[submodule "cratebench/vendor/fnv"]
+	path = cratebench/vendor/fnv
+	url = https://github.com/servo/rust-fnv.git
+	shallow = true
+[submodule "cratebench/vendor/adler2"]
+	path = cratebench/vendor/adler2
+	url = https://github.com/oyvindln/adler2.git
+	shallow = true
+[submodule "cratebench/vendor/hex"]
+	path = cratebench/vendor/hex
+	url = https://github.com/KokaKiwi/rust-hex.git
+	shallow = true
+[submodule "cratebench/vendor/itoa"]
+	path = cratebench/vendor/itoa
+	url = https://github.com/dtolnay/itoa.git
+	shallow = true
+[submodule "cratebench/vendor/rustc-hash"]
+	path = cratebench/vendor/rustc-hash
+	url = https://github.com/rust-lang/rustc-hash.git
+	shallow = true
+[submodule "cratebench/vendor/cfg-if"]
+	path = cratebench/vendor/cfg-if
+	url = https://github.com/rust-lang/cfg-if.git
+	shallow = true
+[submodule "cratebench/vendor/either"]
+	path = cratebench/vendor/either
+	url = https://github.com/rayon-rs/either.git
+	shallow = true

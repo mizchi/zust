@@ -22,6 +22,19 @@ ZUSTC = os.path.join(ROOT, "target/release/zustc")
 OUT = os.path.join(ROOT, "out/cratebench")
 
 
+def copy_crate_src(src, dst):
+    """vendor の submodule (上流のリポジトリそのまま) から、クレートのソースを dst/src/ にコピーする。
+    lib.rs がリポジトリの直下にあるもの (fnv) も src/lib.rs にそろえる"""
+    os.makedirs(dst, exist_ok=True)
+    if os.path.isdir(os.path.join(src, "src")):
+        shutil.copytree(os.path.join(src, "src"), os.path.join(dst, "src"))
+    elif os.path.isfile(os.path.join(src, "lib.rs")):
+        os.makedirs(os.path.join(dst, "src"))
+        shutil.copy(os.path.join(src, "lib.rs"), os.path.join(dst, "src/lib.rs"))
+    else:
+        raise RuntimeError(f"{src} にクレートのソースがない (git submodule update --init cratebench/vendor)")
+
+
 def sh(cmd, cwd=HERE, check=True):
     t = time.perf_counter()
     r = subprocess.run(cmd, cwd=cwd, capture_output=True, text=True)
@@ -44,7 +57,7 @@ def setup(name, ed, feats, d):
     """作業用のコピー (edit で app を書き換えるので) とワークスペースの説明ファイル"""
     shutil.rmtree(d, ignore_errors=True)
     os.makedirs(d)
-    shutil.copytree(os.path.join(HERE, "vendor", name), os.path.join(d, "lib"))
+    copy_crate_src(os.path.join(HERE, "vendor", name), os.path.join(d, "lib"))
     os.makedirs(os.path.join(d, "app"))
     shutil.copy(os.path.join(HERE, "apps", name, "main.rs"), os.path.join(d, "app/main.rs"))
     lname = name.replace("-", "_")

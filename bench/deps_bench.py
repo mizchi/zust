@@ -25,6 +25,19 @@ import time
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 ZUSTC = os.path.join(ROOT, "target/release/zustc")
 VENDOR = os.path.join(ROOT, "cratebench/vendor")
+
+
+def copy_crate_src(src, dst):
+    """vendor の submodule (上流のリポジトリそのまま) から、クレートのソースを dst/src/ にコピーする。
+    lib.rs がリポジトリの直下にあるもの (fnv) も src/lib.rs にそろえる"""
+    os.makedirs(dst, exist_ok=True)
+    if os.path.isdir(os.path.join(src, "src")):
+        shutil.copytree(os.path.join(src, "src"), os.path.join(dst, "src"))
+    elif os.path.isfile(os.path.join(src, "lib.rs")):
+        os.makedirs(os.path.join(dst, "src"))
+        shutil.copy(os.path.join(src, "lib.rs"), os.path.join(dst, "src/lib.rs"))
+    else:
+        raise RuntimeError(f"{src} にクレートのソースがない (git submodule update --init cratebench/vendor)")
 # (名前, edition, feature, クレート名)
 REAL = [("fnv", "2015", ["std"], "fnv"), ("adler2", "2021", ["std"], "adler2"), ("hex", "2018", ["std", "alloc"], "hex"),
         ("itoa", "2021", [], "itoa"), ("rustc-hash", "2021", ["std"], "rustc_hash"), ("cfg-if", "2018", [], "cfg_if")]
@@ -47,7 +60,7 @@ def gen(d, mids, fns, k):
     ws = []
     members = []
     for name, ed, feats, cn in REAL:
-        shutil.copytree(os.path.join(VENDOR, name), os.path.join(d, name))
+        copy_crate_src(os.path.join(VENDOR, name), os.path.join(d, name))
         f = f" features={','.join(feats)}" if feats else ""
         ws.append(f"lib {cn} {name}/src/lib.rs{f}")
         fl = "".join(f'{x} = []\n' for x in feats)
