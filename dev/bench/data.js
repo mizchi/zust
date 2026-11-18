@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795025253104,
+  "lastUpdate": 1795025254730,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -13991,6 +13991,85 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/mizchi/zust/commit/3a1fd226dadde111404a27dca46f29eb0f16c21f"
         },
         "date": 1795024532629,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "parity documentSymbol (名前の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity workspace/symbol (上位 20 の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity definition (行き先の一致)",
+            "value": 97.222,
+            "unit": "%"
+          },
+          {
+            "name": "parity hover (名前を含む)",
+            "value": 95,
+            "unit": "%"
+          },
+          {
+            "name": "parity references (数の一致)",
+            "value": 92.105,
+            "unit": "%"
+          },
+          {
+            "name": "parity documentHighlight (数の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity rename (書き換えの一致)",
+            "value": 90,
+            "unit": "%"
+          },
+          {
+            "name": "parity signatureHelp (名前・引数の数・今の引数の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity completion `x.\\|` (書いてある名前を含む)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity completion `na\\|me` (同)",
+            "value": 79.167,
+            "unit": "%"
+          },
+          {
+            "name": "parity 一致の平均",
+            "value": 95.349,
+            "unit": "%"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "committer": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "distinct": true,
+          "id": "379cbce4c4e1480f2d431255c29f59b96db7d284",
+          "message": "Static initializers: floats, raw pointers, `if` / blocks / comparisons, const indexing and fields\n\n- f32 / f64 statics (literals, `-x`, `+ - * /`, casts, other consts)\n- raw pointer statics: null, the address of a static (`&X as *const T`,\n  `&raw const X`), or of anonymous data (`&mut 1isize as *mut _`)\n- integer constants: `{ x }`, `if c { a } else { b }`, comparisons, `&&` /\n  `||`, `true` / `false`, `X[i]` and `T.0` / `S.f` of const arrays, byte\n  strings, tuples and structs\n- a bool static keeps the low bit (`!true` was stored as -2)\n- tests/ui: run-pass 1348 (55.86%)\n\nKPIs (gen5000): noop 660.7 M instr, edit 622.2, check 3887.3, cache unchanged.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-18T17:56:03Z",
+          "tree_id": "3463ff5240ad2eb7e557305843690a75d76040d8",
+          "url": "https://github.com/mizchi/zust/commit/379cbce4c4e1480f2d431255c29f59b96db7d284"
+        },
+        "date": 1795025254526,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
