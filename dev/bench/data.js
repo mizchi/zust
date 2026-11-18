@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1794999468369,
+  "lastUpdate": 1794999470329,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -2668,6 +2668,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "lsp peak RSS",
             "value": 64.652,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "committer": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "distinct": true,
+          "id": "b9f18c91591437a339bf4dbf154ced10a5652619",
+          "message": "zustc borrowck: moves by patterns and for loops, moves out of references and indexes, closure captures by place\n\n- a binding by value moves the part of the scrutinee it binds; `ref` / `ref mut` bindings\n  borrow it; a binding of the whole scrutinee and unit struct patterns are not moves\n- E0507 / E0508: moving a non-Copy value out through a reference or out of an index\n- `&mut T` read in `let b = a;` / a block tail is moved, not reborrowed\n- closures capture the places they use (RFC 2229: `p.x`, `*r`, the parts a pattern binds),\n  by value / mutable / shared reference from how each place is used; the closure holds the loans\n- tests/ui compile-fail 33.7% -> 34.4% (borrowck 141, nll 39, moves 21, closures 31), no regressions\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-18T10:53:48Z",
+          "tree_id": "5c42d76c890b019e5dab0fa2d69dda424638fb75",
+          "url": "https://github.com/mizchi/zust/commit/b9f18c91591437a339bf4dbf154ced10a5652619"
+        },
+        "date": 1794999469913,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "lsp definition p50",
+            "value": 0.527,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp hover p50",
+            "value": 0.413,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp completion p50",
+            "value": 1.005,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp references p50",
+            "value": 2.324,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp rename p50",
+            "value": 0.683,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp signatureHelp p50",
+            "value": 0.549,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp documentHighlight p50",
+            "value": 0.797,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp ready (startup to indexed)",
+            "value": 83.264,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp peak RSS",
+            "value": 64.852,
             "unit": "MiB"
           }
         ]
