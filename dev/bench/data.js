@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795025547101,
+  "lastUpdate": 1795025548937,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -14298,6 +14298,85 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/mizchi/zust/commit/379cbce4c4e1480f2d431255c29f59b96db7d284"
         },
         "date": 1795025254526,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "parity documentSymbol (名前の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity workspace/symbol (上位 20 の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity definition (行き先の一致)",
+            "value": 97.222,
+            "unit": "%"
+          },
+          {
+            "name": "parity hover (名前を含む)",
+            "value": 95,
+            "unit": "%"
+          },
+          {
+            "name": "parity references (数の一致)",
+            "value": 92.105,
+            "unit": "%"
+          },
+          {
+            "name": "parity documentHighlight (数の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity rename (書き換えの一致)",
+            "value": 90,
+            "unit": "%"
+          },
+          {
+            "name": "parity signatureHelp (名前・引数の数・今の引数の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity completion `x.\\|` (書いてある名前を含む)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity completion `na\\|me` (同)",
+            "value": 79.167,
+            "unit": "%"
+          },
+          {
+            "name": "parity 一致の平均",
+            "value": 95.349,
+            "unit": "%"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "committer": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "distinct": true,
+          "id": "232f346bf3ed5cf9174f9020acde1495f28fcb58",
+          "message": "Fn pointer statics (`static F: fn(isize) -> isize = f;`)\n\n- a static's initializer may name a non-generic function, also inside arrays,\n  tuples and structs: the data holds a relocation to the function, which is\n  compiled and placed even when only the static refers to it\n- tests/ui: run-pass 1351\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-18T18:04:36Z",
+          "tree_id": "f19abb8cc1253b4e9660fdaab21f3227709d04b3",
+          "url": "https://github.com/mizchi/zust/commit/232f346bf3ed5cf9174f9020acde1495f28fcb58"
+        },
+        "date": 1795025548542,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
