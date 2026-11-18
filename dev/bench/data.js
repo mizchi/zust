@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795014484967,
+  "lastUpdate": 1795015383268,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -5405,6 +5405,165 @@ window.BENCHMARK_DATA = {
           {
             "name": "rt/strings run (-O)",
             "value": 35.567,
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "committer": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "distinct": true,
+          "id": "eb82f3c9a843e0a39251809847deaa99ee913944",
+          "message": "zustc parser: associated type bounds, higher-ranked types, GAT where clauses after the value, qualified GAT paths, C variadics\n\n- `Iterator<Item: Debug>` (read as `Item = impl Debug`); rejected inside `dyn`\n- `for<'a> fn(&'a u8)` / `for<'a> Fn(&'a T)` in type position (the binder is dropped);\n  `for<..> dyn` is an error\n- `type Item<'a> = &'a T where T: 'a;`, `<T as Tr>::Gat<'a>`\n- `extern \"C\" { fn printf(f: *const u8, ...); }`\n- tests/ui: run-pass 52.9%, check-pass 57.8%, build-pass 56.3%; 23 compile-fail tests that were\n  rejected only by these parse errors now need checks zustc does not have (well-formedness,\n  coherence, lifetime shadowing / E0261, impl vs trait where clauses, ABI of variadics)\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-18T15:14:50Z",
+          "tree_id": "3ecc4b94d8b856a1e49186c9f11bee3805d07944",
+          "url": "https://github.com/mizchi/zust/commit/eb82f3c9a843e0a39251809847deaa99ee913944"
+        },
+        "date": 1795015382539,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "gen1000 build cold",
+            "value": 121.529,
+            "unit": "ms"
+          },
+          {
+            "name": "gen1000 build noop",
+            "value": 15.969,
+            "unit": "ms"
+          },
+          {
+            "name": "gen1000 build edit 1 fn",
+            "value": 20.796,
+            "unit": "ms"
+          },
+          {
+            "name": "gen1000 check",
+            "value": 79.638,
+            "unit": "ms"
+          },
+          {
+            "name": "gen1000 build cold peak RSS",
+            "value": 20.461,
+            "unit": "MiB"
+          },
+          {
+            "name": "gen1000 binary",
+            "value": 323.977,
+            "unit": "KiB"
+          },
+          {
+            "name": "gen1000 cache",
+            "value": 387.205,
+            "unit": "KiB"
+          },
+          {
+            "name": "gen1000 build noop instructions",
+            "value": 159.184,
+            "unit": "M instr"
+          },
+          {
+            "name": "gen1000 build edit 1 fn instructions",
+            "value": 152.385,
+            "unit": "M instr"
+          },
+          {
+            "name": "gen1000 check instructions",
+            "value": 801.981,
+            "unit": "M instr"
+          },
+          {
+            "name": "gen5000 build cold",
+            "value": 558.956,
+            "unit": "ms"
+          },
+          {
+            "name": "gen5000 build noop",
+            "value": 83.646,
+            "unit": "ms"
+          },
+          {
+            "name": "gen5000 build edit 1 fn",
+            "value": 91.893,
+            "unit": "ms"
+          },
+          {
+            "name": "gen5000 check",
+            "value": 409.485,
+            "unit": "ms"
+          },
+          {
+            "name": "gen5000 build cold peak RSS",
+            "value": 76.18,
+            "unit": "MiB"
+          },
+          {
+            "name": "gen5000 binary",
+            "value": 1558.336,
+            "unit": "KiB"
+          },
+          {
+            "name": "gen5000 cache",
+            "value": 1902.83,
+            "unit": "KiB"
+          },
+          {
+            "name": "gen5000 build noop instructions",
+            "value": 763.194,
+            "unit": "M instr"
+          },
+          {
+            "name": "gen5000 build edit 1 fn instructions",
+            "value": 724.174,
+            "unit": "M instr"
+          },
+          {
+            "name": "gen5000 check instructions",
+            "value": 3987.139,
+            "unit": "M instr"
+          },
+          {
+            "name": "rt/fib run (-O)",
+            "value": 54.504,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/hashmap run (-O)",
+            "value": 90.143,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/matmul run (-O)",
+            "value": 38.109,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/nbody run (-O)",
+            "value": 54.169,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/sieve run (-O)",
+            "value": 92.718,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/sort run (-O)",
+            "value": 155.11,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/strings run (-O)",
+            "value": 35.903,
             "unit": "ms"
           }
         ]
