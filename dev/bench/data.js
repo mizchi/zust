@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795037455291,
+  "lastUpdate": 1795037457314,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -14296,6 +14296,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "lsp peak RSS",
             "value": 67.473,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "committer": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "distinct": true,
+          "id": "a5bdbca6567a62240fbc151a38b67c37d74f55f2",
+          "message": "Integer literals for `T: Foo` take the one integer type that implements it; Box bounds\n\n- an integer literal passed for a type parameter whose bounds `i32` does not\n  meet takes the one integer type that meets them all (`go(5)` with\n  `impl Foo for isize` only), as rustc picks it\n- `Box<T>` meets Clone / PartialEq / Eq / PartialOrd / Ord / Debug / Display /\n  Hash / Default when T does\n- tests/ui: run-pass 1434 (59.4%), compile-fail 2815\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-18T21:26:49Z",
+          "tree_id": "ea2b09b83b0db10974dd14014c9fa74fe809a6b0",
+          "url": "https://github.com/mizchi/zust/commit/a5bdbca6567a62240fbc151a38b67c37d74f55f2"
+        },
+        "date": 1795037456860,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "lsp definition p50",
+            "value": 0.452,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp hover p50",
+            "value": 0.396,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp completion p50",
+            "value": 0.868,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp references p50",
+            "value": 2.308,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp rename p50",
+            "value": 0.527,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp signatureHelp p50",
+            "value": 0.566,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp documentHighlight p50",
+            "value": 0.653,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp ready (startup to indexed)",
+            "value": 103.888,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp peak RSS",
+            "value": 67.43,
             "unit": "MiB"
           }
         ]
