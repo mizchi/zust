@@ -176,6 +176,14 @@
     "docs_reports_2026-11-18-08-borrow-checking.ja": {
       "path": "docs/ja/reports/2026-11-18-08-borrow-checking.md",
       "role": "historical"
+    },
+    "docs_reports_2026-11-18-09-compat-with-kpis.en": {
+      "path": "docs/reports/2026-11-18-09-compat-with-kpis.md",
+      "role": "historical"
+    },
+    "docs_reports_2026-11-18-09-compat-with-kpis.ja": {
+      "path": "docs/ja/reports/2026-11-18-09-compat-with-kpis.md",
+      "role": "historical"
     }
   },
   "comparisons": [
@@ -419,6 +427,17 @@
       },
       "target": {
         "source": "docs_reports_2026-11-18-08-borrow-checking.ja"
+      }
+    },
+    {
+      "id": "docs_reports_2026-11-18-09-compat-with-kpis",
+      "topic": "The Japanese file docs/ja/reports/2026-11-18-09-compat-with-kpis.md is a faithful translation of docs/reports/2026-11-18-09-compat-with-kpis.md",
+      "mode": "translation",
+      "reference": {
+        "source": "docs_reports_2026-11-18-09-compat-with-kpis.en"
+      },
+      "target": {
+        "source": "docs_reports_2026-11-18-09-compat-with-kpis.ja"
       }
     }
   ]

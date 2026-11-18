@@ -66,3 +66,4 @@ zustc / zust-analyzer の作業の記録 (日付順)。数値はそれぞれの�
 | 2026-11-18 | [TODO.md の rust-analyzer との残りの違いを詰める](2026-11-18-06-remaining-differences.md) |
 | 2026-11-18 | [rustc 自身の UI テストを仕様のテスト集にする](2026-11-18-07-rustc-ui-tests.md) |
 | 2026-11-18 | [MIR なしの借用検査](2026-11-18-08-borrow-checking.md) |
+| 2026-11-18 | [KPI を見ながら tests/ui の互換性を上げる](2026-11-18-09-compat-with-kpis.md) |

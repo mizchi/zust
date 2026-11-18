@@ -3,7 +3,12 @@
 ## Compiler (zustc)
 
 - **rustc's tests/ui** (`python3 bench/rust_ui.py`; [report](docs/reports/2026-11-18-07-rustc-ui-tests.md))
-  - Raise the pass rates: run-pass 46.4%, check-pass 46.2%, compile-fail 35.0% (at an annotated line)
+  - Raise the pass rates: run-pass 52.9%, check-pass 57.8%, build-pass 56.3%, compile-fail 38.2% (at an annotated
+    line; [report](docs/reports/2026-11-18-09-compat-with-kpis.md))
+  - Largest gaps: `Pin` / `NonNull` / `UnsafeCell`, `async`, integer-literal inference, generic fns returning
+    `impl Trait`, closures coerced to fn pointers, items inside blocks
+  - Checks that compile-fail tests need: well-formedness of defaults and bounds, coherence, bounds of blanket
+    impls, Send through dyn / async, lifetime shadowing, lints
 - **Borrow checking** ([report](docs/reports/2026-11-18-08-borrow-checking.md))
   - Region errors against signatures (E0621, E0521, "lifetime may not live long enough"): universal regions and
     outlives checking of the body against the declaration

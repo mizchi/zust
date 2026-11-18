@@ -67,3 +67,4 @@ Japanese versions are in [../ja/reports/](../ja/reports/README.md).
 | 2026-11-18 | [Closing the remaining differences from rust-analyzer in TODO.md](2026-11-18-06-remaining-differences.md) |
 | 2026-11-18 | [rustc's own UI tests as a specification suite](2026-11-18-07-rustc-ui-tests.md) |
 | 2026-11-18 | [Borrow checking without MIR](2026-11-18-08-borrow-checking.md) |
+| 2026-11-18 | [Raising tests/ui compatibility while tracking the KPIs](2026-11-18-09-compat-with-kpis.md) |

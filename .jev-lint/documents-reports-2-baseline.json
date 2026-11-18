@@ -1,6 +1,6 @@
 {
   "schema": "jev-lint-documents-1",
-  "snapshotDigest": "3d1939f5d47dd96e4eb5be4bc52a94e7ecbecde3943555a3323d9c9b560bb0b7",
+  "snapshotDigest": "81405e8506542f6791ef0048f9d0bd89f15d5d414520fe73b7c27f6672d7be40",
   "questionDigest": "209d6df378ccb747fcb0e821998fcd6105bc76638a88d22488d3b398d6a21595",
   "model": "jev-1.14.0",
   "snapshotChanged": false,
@@ -66,10 +66,10 @@
       "contextHash": "7c7b286af72e5d19978bdcefe4ac1812afb0557f682df47ae767fa9324a36f5c",
       "judgment": {
         "choice": "supports",
-        "confidence": 1,
+        "confidence": 0.99,
         "probabilities": {
-          "supports": 1,
-          "contradicts": 0,
+          "supports": 0.99,
+          "contradicts": 0.01,
           "unrelated": 0,
           "insufficient_context": 0
         }
@@ -100,12 +100,12 @@
       "contextHash": "a068452334ef52150a1932e9d45207a4c156e3a5c60d69e061e986b1aa86d889",
       "judgment": {
         "choice": "supports",
-        "confidence": 0.97,
+        "confidence": 0.95,
         "probabilities": {
-          "supports": 0.98,
-          "contradicts": 0.02,
+          "supports": 0.96,
+          "contradicts": 0.03,
           "unrelated": 0,
-          "insufficient_context": 0
+          "insufficient_context": 0.01
         }
       }
     },
@@ -134,10 +134,10 @@
       "contextHash": "a5fea429fa886ab323fa8e8906063064e1b8742597a6e62ec08f3667ea7c37d5",
       "judgment": {
         "choice": "supports",
-        "confidence": 1,
+        "confidence": 0.99,
         "probabilities": {
-          "supports": 1,
-          "contradicts": 0,
+          "supports": 0.99,
+          "contradicts": 0.01,
           "unrelated": 0,
           "insufficient_context": 0
         }
@@ -168,12 +168,12 @@
       "contextHash": "ecee8f597e8c6093bcea35ffd84dafe505685fb3c77901bd2a2a9e033883360c",
       "judgment": {
         "choice": "supports",
-        "confidence": 0.97,
+        "confidence": 0.99,
         "probabilities": {
-          "supports": 0.98,
+          "supports": 0.99,
           "contradicts": 0.01,
           "unrelated": 0,
-          "insufficient_context": 0.01
+          "insufficient_context": 0
         }
       }
     },
@@ -236,12 +236,12 @@
       "contextHash": "68facf70966b576a1dde106a31fd37de8e21bda46e6439878b91e7bce57154b6",
       "judgment": {
         "choice": "supports",
-        "confidence": 0.97,
+        "confidence": 0.96,
         "probabilities": {
-          "supports": 0.98,
+          "supports": 0.97,
           "contradicts": 0.02,
           "unrelated": 0,
-          "insufficient_context": 0
+          "insufficient_context": 0.01
         }
       }
     },
@@ -338,10 +338,10 @@
       "contextHash": "b91a1cf01d33b66ef15111899d22ac963d6abc38c4242e6d72ebc80aefe2aecd",
       "judgment": {
         "choice": "supports",
-        "confidence": 1,
+        "confidence": 0.99,
         "probabilities": {
-          "supports": 1,
-          "contradicts": 0,
+          "supports": 0.99,
+          "contradicts": 0.01,
           "unrelated": 0,
           "insufficient_context": 0
         }
@@ -610,10 +610,10 @@
       "contextHash": "60cba8f9920a12369db8088d9da4aba7831509e04aeed3ec12052847209a00f4",
       "judgment": {
         "choice": "supports",
-        "confidence": 0.99,
+        "confidence": 1,
         "probabilities": {
-          "supports": 0.99,
-          "contradicts": 0.01,
+          "supports": 1,
+          "contradicts": 0,
           "unrelated": 0,
           "insufficient_context": 0
         }
@@ -712,10 +712,10 @@
       "contextHash": "fee3dc6136c2d74a8f2b22992deee33ae5ead6cdbc19c240e51b7dcbe27e38cc",
       "judgment": {
         "choice": "supports",
-        "confidence": 0.97,
+        "confidence": 0.96,
         "probabilities": {
-          "supports": 0.98,
-          "contradicts": 0.01,
+          "supports": 0.97,
+          "contradicts": 0.02,
           "unrelated": 0,
           "insufficient_context": 0.01
         }
@@ -754,12 +754,46 @@
           "insufficient_context": 0.01
         }
       }
+    },
+    {
+      "id": "docs_reports_2026-11-18-09-compat-with-kpis",
+      "topic": "The Japanese file docs/ja/reports/2026-11-18-09-compat-with-kpis.md is a faithful translation of docs/reports/2026-11-18-09-compat-with-kpis.md",
+      "mode": "translation",
+      "reference": {
+        "source": "docs_reports_2026-11-18-09-compat-with-kpis.en",
+        "path": "docs/reports/2026-11-18-09-compat-with-kpis.md",
+        "startLine": 1,
+        "endLine": 123,
+        "quote": "# Raising tests/ui compatibility while tracking the KPIs\n\nDate: 2026-11-18\n\nThis report covers a run of changes made one failure category at a time on rustc's tests/ui\n([report 07](2026-11-18-07-rustc-ui-tests.md)). The work started after the borrow checker\n([report 08](2026-11-18-08-borrow-checking.md)).\n\nEach change was kept only if all of these held:\n\n- **No run-pass regressions**: no run-pass test in the baseline list stopped passing.\n- **The repository's own checks pass**: the workspace tests, `tests/compare.sh` and the cratebench crates still build.\n- **The KPIs held**: build speed, check speed, build cache size and LSP latency did not get worse.\n\nThe categories came from grouping the first error of every failing run-pass / check-pass test.\n\n## Results\n\n| kind | before | after |\n|---|---:|---:|\n| run-pass | 46.42% | **52.92%** (1277) |\n| check-pass | 46.15% | **57.83%** (1045) |\n| build-pass | 48.15% | **56.30%** (76) |\n| compile-fail (error on an annotated line) | 35.04% | **38.16%** (2808) |\n\nThe list of passing tests in `bench/rust_ui_passing.txt` grew from 4597 to 5206.\n\nAbout 70 compile-fail tests left the list. Before, each was rejected only because zustc did not support a construct\n(generic traits, unions, `PhantomData`, some syntax), and that rejection happened to land on an annotated line. Each\nnow needs a check zustc does not have yet. The commit messages name them. They need:\n\n- well-formedness of type defaults and bounds\n- coherence\n- bound checks on blanket impls\n- Send through `dyn` and `async`\n- lifetime shadowing\n- lints\n\n## What changed\n\n- **Traits.**\n  - Generic traits (`trait Tr<T>`): the trait's parameters become generics of its members. This change alone made\n    216 more tests pass.\n  - Blanket impls with or without members, and the default methods of such a trait. A trait with a blanket impl\n    counts as implemented by every type; the impl's bounds are not checked yet.\n  - Impls for `()`.\n  - Impls of the marker traits (Send, Sync, UnwindSafe, RefUnwindSafe, Unpin) without a declaration.\n  - Send and Sync as auto traits.\n  - `Trait::method(x)` for the builtin traits.\n  - When a primitive type has a static function and a method of the same name, a method call takes the method,\n    always. The choice had depended on hash set order.\n- **Items.**\n  - Unions: every field at offset 0, and union literals of one field.\n  - `const` / `static` items inside function bodies, often produced by macro expansion.\n  - `#![crate_type = \"lib\"]` sources need no `main`.\n  - A program's own `Map` / `Filter` / `Zip` no longer collides with the prelude's adapters.\n- **Expressions and patterns.**\n  - Enum discriminants written in hex or as constant expressions, and casts of one-variant enums.\n  - Array lengths given by constant expressions.\n  - `x as Box<dyn Tr>`.\n  - Identifier patterns that name a const compare with the const's value.\n  - Macro hygiene for `let` bindings in macro bodies.\n  - Integer literal receivers (`4.f()`).\n  - `-> impl Trait` functions whose body has no value.\n  - A const generic parameter used as a value takes the expected integer type.\n- **Parser.**\n  - Associated type bounds (`Iterator<Item: Debug>`).\n  - `for<'a>` types.\n  - GAT where clauses after the value, and qualified GAT paths.\n  - C variadics.\n- **Prelude (one thread).**\n  - `Arc` and the atomic types.\n  - `thread::spawn`: the closure runs at once, and `join` returns its value.\n  - `mpsc` channels as a shared queue.\n  - `PhantomData`.\n  - `Ordering` from `std::sync::atomic` and the mpsc types are renamed when imported from those modules. zustc\n    resolves names by their last segment, so these renames keep them apart from `cmp::Ordering` and from a\n    program's own `Receiver`.\n- **Checks.** Each is reported only for the program's own items, because the prelude's types may break these rules.\n  - E0403 and other checks on generic parameter lists.\n  - E0207: an unconstrained impl parameter.\n  - E0392: an unused type or lifetime parameter.\n  - E0735: `Self` in a parameter default.\n  - E0740: a union field that would need dropping.\n  - Unknown derive macros.\n  - E0072 for generic types.\n  - E0373 and Send for `thread::spawn`.\n  - `use<..>` capture lists.\n\n## KPIs\n\nKPIs are instruction counts from valgrind for `bench/ci_bench.py`'s generated programs, and p50 latencies from\n`bench/lsp_parity.py`. Both are taken on the same machine.\n\n| KPI | before | after |\n|---|---:|---:|\n| gen5000 noop build | 746.0 M instr | 685.7 M instr (-8.1%) |\n| gen5000 edit one function | 709.3 M instr | 648.1 M instr (-8.6%) |\n| gen5000 check | 3971.0 M instr | 3912.7 M instr (-1.5%) |\n| gen5000 build cache | 1902.8 KiB | 1902.8 KiB |\n| gen1000 build cache | 387.2 KiB | 387.2 KiB |\n| LSP definition / hover / completion / references p50 | 0.65 / 0.47 / 1.28 / 3.36 ms | 0.53 / 0.43 / 1.09 / 3.06 ms |\n| LSP ready (startup to indexed) | 135 ms | 116 ms |\n\nOn the way, three changes made the KPIs worse, and each was found and fixed with the same measurement:\n\n- Several whole-source scans per build for the new std names.\n- A word scan in the prelude renaming: check instructions went up 8.6% before it was fixed.\n- The prelude selection searched every item with a memo per item and per pattern. Replacing that with one search\n  of the whole source is what makes the noop build cheaper than before.\n\nWall-clock times on this shared machine vary by ±20%; the instruction counts are what the comparisons use.\n\n## What is next\n\nThe largest groups among the failing run-pass / check-pass tests are:\n\n- types that are still unknown, such as `Pin`, `impl Trait` in some positions, `NonNull` and `UnsafeCell`\n- `async` blocks and functions\n- mismatched types from integer-literal inference\n- generic functions returning `impl Trait`\n- non-capturing closures coerced to `fn` pointers\n- items inside blocks that the preprocessor does not move",
+        "contentHash": "5d88f6121dd0bcf35e3bb31bf8d7ecf0d016a1cb9da872629b670ecedfc78814"
+      },
+      "target": {
+        "source": "docs_reports_2026-11-18-09-compat-with-kpis.ja",
+        "path": "docs/ja/reports/2026-11-18-09-compat-with-kpis.md",
+        "startLine": 1,
+        "endLine": 112,
+        "quote": "# KPI を見ながら tests/ui の互換性を上げる\n\nDate: 2026-11-18\n\nこの報告は、rustc の tests/ui（[報告 07](2026-11-18-07-rustc-ui-tests.md)）に対して、失敗の分類ごとに 1 つずつ入れた一連の変更をまとめる。作業は借用検査（[報告 08](2026-11-18-08-borrow-checking.md)）の後に始めた。\n\nそれぞれの変更は、次のすべてを満たすときだけ残した。\n\n- **run-pass に回帰がない**: ベースラインの一覧にある run-pass のテストで、通らなくなったものがない。\n- **リポジトリ自身の検査が通る**: ワークスペースのテスト、`tests/compare.sh`、cratebench のクレートのビルドが通る。\n- **KPI が保たれる**: ビルド速度、check の速度、ビルドキャッシュのサイズ、LSP の応答時間が悪くなっていない。\n\n分類は、失敗している run-pass / check-pass のテストの最初のエラーをまとめて作った。\n\n## 結果\n\n| 種類 | 前 | 後 |\n|---|---:|---:|\n| run-pass | 46.42% | **52.92%**（1277） |\n| check-pass | 46.15% | **57.83%**（1045） |\n| build-pass | 48.15% | **56.30%**（76） |\n| compile-fail（注釈の行でのエラー） | 35.04% | **38.16%**（2808） |\n\n`bench/rust_ui_passing.txt` の通るテストの一覧は 4597 件から 5206 件になった。\n\ncompile-fail のテスト約 70 件が一覧から外れた。これらは、zustc が構文（ジェネリックなトレイト、共用体、`PhantomData`、一部の構文など）に未対応だったために弾かれ、その位置がたまたま注釈の行だったものである。どれも、zustc にまだない検査が要るようになった。どれがそうかはコミットメッセージに書いてある。必要な検査は次のとおり。\n\n- 型の既定値と境界の well-formedness\n- coherence\n- ブランケット impl の境界の検査\n- `dyn` と `async` を通した Send\n- 寿命の shadowing\n- lint\n\n## 変えたこと\n\n- **トレイト。**\n  - ジェネリックなトレイト（`trait Tr<T>`）。トレイトのパラメータをメンバの総称引数にする。これだけで 216 件が新たに通った。\n  - メンバの有無にかかわらずブランケット impl を扱い、そのトレイトの既定メソッドも使えるようにした。ブランケット impl のあるトレイトはどの型でも実装済みとみなす。impl の境界はまだ検査しない。\n  - `()` への impl。\n  - マーカートレイト（Send、Sync、UnwindSafe、RefUnwindSafe、Unpin）の impl を、宣言なしで受け付ける。\n  - Send / Sync を自動トレイトとして扱う。\n  - 組み込みトレイトの `Trait::method(x)`。\n  - プリミティブ型に同名の静的関数とメソッドがあるとき、メソッド呼び出しは常にメソッドを選ぶ。選択がハッシュ集合の順序に依っていた。\n- **アイテム。**\n  - 共用体。全フィールドをオフセット 0 に置き、フィールド 1 つのリテラルを書ける。\n  - 関数本体の中の `const` / `static`。マクロの展開から出てくることが多い。\n  - `#![crate_type = \"lib\"]` のソースは `main` を要しない。\n  - 利用者の `Map` / `Filter` / `Zip` が、prelude のアダプタとぶつからない。\n- **式とパターン。**\n  - 16 進や定数式で書いた列挙型の判別値と、バリアントが 1 つの列挙型のキャスト。\n  - 定数式で書いた配列長。\n  - `x as Box<dyn Tr>`。\n  - 定数を名前で書いた識別子のパターンは、その値と比べる。\n  - マクロの本体の `let` の束縛の衛生性。\n  - 整数リテラルのレシーバ（`4.f()`）。\n  - 本体に値のない `-> impl Trait` の関数。\n  - 値として使った const ジェネリクスのパラメータは、期待される整数型をとる。\n- **構文解析。**\n  - 関連型の境界（`Iterator<Item: Debug>`）。\n  - `for<'a>` の型。\n  - 値の後ろの GAT の where 句と、修飾された GAT のパス。\n  - C の可変長引数。\n- **prelude（単一スレッド）。**\n  - `Arc` とアトミック型。\n  - `thread::spawn`。クロージャをその場で実行し、`join` がその値を返す。\n  - `mpsc` のチャネル（共有のキュー）。\n  - `PhantomData`。\n  - `std::sync::atomic` の `Ordering` と mpsc の型は、そのモジュールから取り込んだときに名前を付け替える。zustc は名前を最後のセグメントで解決するので、この付け替えで `cmp::Ordering` や利用者自身の `Receiver` と区別する。\n- **検査。** どれも利用者の項目にだけ報告する（prelude の型はこれらの規則を破ることがあるため）。\n  - E0403 ほか、ジェネリクスの宣言の検査。\n  - E0207：制約されない impl のパラメータ。\n  - E0392：使われない型・寿命パラメータ。\n  - E0735：パラメータの既定値の中の `Self`。\n  - E0740：drop が要る共用体のフィールド。\n  - 未知の derive マクロ。\n  - ジェネリックな型の E0072。\n  - `thread::spawn` の E0373 と Send。\n  - `use<..>` のキャプチャの一覧。\n\n## KPI\n\nKPI は、`bench/ci_bench.py` が生成するプログラムに対する valgrind の命令数と、`bench/lsp_parity.py` の p50 の応答時間である。どちらも同じマシンで測った。\n\n| KPI | 前 | 後 |\n|---|---:|---:|\n| gen5000 の no-op ビルド | 746.0 M 命令 | 685.7 M 命令（-8.1%） |\n| gen5000 の 1 関数編集 | 709.3 M 命令 | 648.1 M 命令（-8.6%） |\n| gen5000 の check | 3971.0 M 命令 | 3912.7 M 命令（-1.5%） |\n| gen5000 のビルドキャッシュ | 1902.8 KiB | 1902.8 KiB |\n| gen1000 のビルドキャッシュ | 387.2 KiB | 387.2 KiB |\n| LSP の definition / hover / completion / references の p50 | 0.65 / 0.47 / 1.28 / 3.36 ms | 0.53 / 0.43 / 1.09 / 3.06 ms |\n| LSP の起動から索引ができるまで | 135 ms | 116 ms |\n\n途中で 3 つの変更が KPI を悪くし、どれも同じ計測で見つけて直した。\n\n- 新しい std の名前のために、ビルドのたびにソース全体を何度も走査していた。\n- prelude の名前の付け替えで単語を走査していた。直すまでは check の命令数が 8.6% 増えていた。\n- prelude の選別が、アイテムごと・パターンごとのメモを持ってすべてのアイテムを探していた。これをソース全体の 1 回の検索に替えたことで、no-op ビルドが以前より軽くなった。\n\nこの共有マシンでは実時間が ±20% ほど揺れるので、比較には命令数を使っている。\n\n## 次にやること\n\n失敗している run-pass / check-pass のテストで多いのは次のものである。\n\n- まだ型が分からないもの：`Pin`、一部の位置の `impl Trait`、`NonNull`、`UnsafeCell` など\n- `async` のブロックと関数\n- 整数リテラルの推論による型の不一致\n- `impl Trait` を返すジェネリックな関数\n- キャプチャしないクロージャの `fn` ポインタへの強制変換\n- 前処理が外へ移さない、ブロックの中のアイテム",
+        "contentHash": "8bf73794491b159b72c108571659d0ed91300f302df3e3c447d0f6bfaebfb894"
+      },
+      "context": [],
+      "candidateId": "ad6f4e8022725e7be82305b4a53304e027aa449266d475f60afbd9f93be1dff7",
+      "contextHash": "54b56e94027819b91287b9766c4872faa76c4344146540b341b4389c6b8dd7ce",
+      "judgment": {
+        "choice": "supports",
+        "confidence": 0.95,
+        "probabilities": {
+          "supports": 0.96,
+          "contradicts": 0.03,
+          "unrelated": 0,
+          "insufficient_context": 0.01
+        }
+      }
     }
   ],
   "coverage": {
-    "expected": 22,
-    "selected": 22,
-    "answered": 22,
+    "expected": 23,
+    "selected": 23,
+    "answered": 23,
     "missing": 0,
     "contradictions": 0,
     "unassessed": 0,
@@ -768,9 +802,9 @@
     "unboundDocuments": 0
   },
   "usage": {
-    "requests": 22,
-    "inputTokens": 86734,
-    "usd": 0.0036428280000000003
+    "requests": 23,
+    "inputTokens": 92443,
+    "usd": 0.0038826060000000003
   },
   "errors": []
 }
