@@ -622,9 +622,10 @@ impl<'a> PreludeScan<'a> {
         false
     }
 
+    /// (the same as asking every item and the text between them, except for a match across an item boundary: one
+    /// search of the whole source is cheaper than a memo per item, even when only one item changed)
     fn has(&mut self, pat: &str) -> bool {
-        let key = format!("contains:{pat}");
-        self.any(&key, &|t: &str| t.contains(pat))
+        self.src.contains(pat)
     }
 }
 
