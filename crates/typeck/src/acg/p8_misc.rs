@@ -185,7 +185,7 @@ impl Cx<'_> {
             Loc::Slot(ss) if t.is_agg() => Some(self.b.ins().stack_addr(PTR, ss, 0)),
             Loc::Slot(ss) => Some(self.b.ins().stack_load(clif_ty(t).unwrap_or(PTR), ss, 0)),
             Loc::Ptr(v) => Some(v),
-            Loc::Zst => None,
+            Loc::Zst(_) => None,
         }
     }
 

@@ -212,7 +212,7 @@ impl<'p> Cx<'p> {
             let env = env.ok_or("closure without environment (inline)")?;
             for (n, t, by_ref, off) in self.caps.clone() {
                 let a = if by_ref { self.b.ins().load(PTR, mf(), env, off as i32) } else { self.addr_plus(env, off as i32) };
-                let loc = if clif_ty(t).is_none() && !t.is_agg() { Loc::Zst } else { Loc::Ptr(a) };
+                let loc = if clif_ty(t).is_none() && !t.is_agg() { Loc::Zst(self.bk.fresh_zst()) } else { Loc::Ptr(a) };
                 self.scopes.last_mut().unwrap().push((n, loc, t));
             }
         }

@@ -33,6 +33,8 @@ pub struct FnSig {
     pub self_ty: Option<Ty>,
     pub export: bool,
     pub panic_handler: bool,
+    /// SigSyn::ret_from (which reference arguments the return value may borrow from)
+    pub ret_from: u64,
 }
 
 impl FnSig {
@@ -378,6 +380,7 @@ impl Insts {
             },
             export: false,
             panic_handler: false,
+            ret_from: b.ret_from,
         };
         let id = self.n_fns + self.list.len() as u32;
         self.list.push(Inst {
@@ -788,6 +791,7 @@ impl Program {
                     self_ty,
                     export: ss.export,
                     panic_handler: ss.panic_handler,
+                    ret_from: ss.ret_from,
                 });
                 if ss.panic_handler {
                     p.panic_handler = Some(p.names.len() as u32 - 1);

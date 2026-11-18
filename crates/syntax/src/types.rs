@@ -269,6 +269,9 @@ pub struct SigSyn {
     pub export: bool,
     /// `#[panic_handler]`
     pub panic_handler: bool,
+    /// Which reference arguments the return value may borrow from (borrow checking): bit i for argument i (self
+    /// first), bit 63 set when known. 0: not known (any of them)
+    pub ret_from: u64,
 }
 
 /// enum のバリアント (要約に保存する形)

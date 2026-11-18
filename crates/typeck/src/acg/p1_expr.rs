@@ -50,7 +50,14 @@ impl Cx<'_> {
     // --- place (左辺値) ---------------------------------------------------
 
     pub(crate) fn place(&mut self, e: &Expr) -> R<Place> {
-        self.place_inner(e).map_err(|m| self.at(err_pos(e), m))
+        let outer = self.bk.place_depth == 0;
+        self.bk.place_depth += 1;
+        let r = self.place_inner(e).map_err(|m| self.at(err_pos(e), m));
+        self.bk.place_depth -= 1;
+        if outer && r.is_ok() {
+            self.bk_acc(e, borrowck::Acc::Read);
+        }
+        r
     }
 
     pub(crate) fn place_inner(&mut self, e: &Expr) -> R<Place> {
@@ -86,7 +93,7 @@ impl Cx<'_> {
                 };
                 match self.lookup(id) {
                     Some((Loc::Var(v), t)) => Ok(Place::Var(v, t)),
-                    Some((Loc::Zst, t)) => Ok(Place::Zst(t)),
+                    Some((Loc::Zst(_), t)) => Ok(Place::Zst(t)),
                     Some((l, t)) => {
                         let a = self.loc_addr(l).unwrap();
                         Ok(Place::Mem(a, 0, t))
@@ -250,7 +257,11 @@ impl Cx<'_> {
 
     /// 式を評価し、期待型への暗黙の変換 (`&[T; N]` → `&[T]`) をする
     pub(crate) fn expr(&mut self, e: &Expr, expected: Option<Ty>) -> R<V> {
-        let (v, t) = self.expr_inner(e, expected).map_err(|m| {
+        // (the places inside a sub-expression are accesses of their own)
+        let pd = std::mem::take(&mut self.bk.place_depth);
+        let r = self.expr_inner(e, expected);
+        self.bk.place_depth = pd;
+        let (v, t) = r.map_err(|m| {
             // (エラーに、位置を持つ一番内側の式の先頭の行:桁を付ける。ACG_DEBUG_AT=1 なら式も)
             let m = if std::env::var_os("ACG_DEBUG_AT").is_some() && !m.contains(" (at `") {
                 let d = format!("{e:?}");
@@ -384,6 +395,9 @@ impl Cx<'_> {
             Expr::Path(..) | Expr::Field(..) => {
                 let p = self.place(e)?;
                 let r = self.read(p);
+                if self.bk_on() && !self.bk_ty(r.1).0 {
+                    self.bk_acc(e, borrowck::Acc::Move);
+                }
                 // drop が要る値を値として読んだらムーブ
                 if self.needs_drop(r.1) {
                     let mut root = e;
@@ -471,14 +485,33 @@ impl Cx<'_> {
             Expr::Unary(..) => self.unary(e, expected),
             Expr::Ref(..) => self.reference(e, expected),
             Expr::Struct(..) => self.struct_lit(e, expected),
-            Expr::Binary(..) | Expr::AssignOp(..) => self.binary(e, expected),
+            Expr::Binary(..) => self.binary(e, expected),
+            Expr::AssignOp(_, left, _, _) => {
+                let r = self.binary(e, expected)?;
+                self.bk_acc(left, borrowck::Acc::Modify);
+                Ok(r)
+            }
             Expr::Assign(left, right) => {
-                let p = self.place(left)?;
+                let (blk0, ev0) = (self.b.live_block(), self.bk.evs.len());
+                self.bk.place_depth += 1;
+                let p = self.place(left);
+                self.bk.place_depth -= 1;
+                let p = p?;
+                // (the right side is evaluated first: `*{ drop(x); &mut *y } = S { ..*x }`)
+                let lhs_evs = if self.b.live_block() == blk0 && blk0.is_some() { self.bk.evs.split_off(ev0) } else { vec![] };
                 let t = p.ty();
-                let (v, rt) = self.expr(right, Some(t))?;
+                self.bk_frame();
+                let r = self.expr(right, Some(t));
+                let srcs = self.bk_frame_end();
+                let cur = self.b.live_block();
+                for (b, e) in lhs_evs {
+                    self.bk.evs.push((cur.unwrap_or(b), e));
+                }
+                let (v, rt) = r?;
                 if rt == Ty::Never {
                     return Ok((None, Ty::Never));
                 }
+                self.bk_assign(left, &srcs);
                 self.same(SP, rt, t)?;
                 let refill = if self.needs_drop(t) { self.drop_before_assign(left, p) } else { None };
                 self.write(p, v);
@@ -627,9 +660,15 @@ impl Cx<'_> {
                 let v = match value {
                     Some(e) => {
                         self.mark_ret_call(e);
-                        let (v, t) = self.expr(e, Some(ret))?;
+                        self.bk_frame();
+                        let r = self.expr(e, Some(ret));
+                        let srcs = self.bk_frame_end();
+                        let (v, t) = r?;
                         if t == Ty::Never {
                             return Ok((None, Ty::Never));
+                        }
+                        if borrowck::has_refs(self.prog, ret, 0) {
+                            { let _ = &srcs; self.bk_ret(e); }
                         }
                         self.same(expr_start(e), t, ret)?;
                         v
@@ -804,7 +843,12 @@ impl Cx<'_> {
             e => e,
         };
         if is_place_expr(rexpr) && !fn_item && !not_var(inner) {
-            return match self.place(rexpr)? {
+            let pl = self.place(rexpr)?;
+            // (`&mut x as *mut _` / coerced to a raw pointer: not a loan)
+            if !matches!(expected, Some(Ty::Ptr(..))) {
+                self.bk_borrow(rexpr, m, err_pos(rexpr));
+            }
+            return match pl {
                 // `&mut v[i]` (v: Vec<Box<T>>) を `&mut T` の位置に: Box の中身を指す (deref の強制変換)
                 Place::Mem(a, o, Ty::Box(x)) if matches!(expected, Some(Ty::Ref(_, e)) if *e == *x) && !x.is_fat() => {
                     let p = self.b.ins().load(PTR, mf(), a, o);
@@ -892,7 +936,29 @@ impl Cx<'_> {
                 _ => None,
             };
             self.scopes.push(vec![]);
-            let (bv, bt) = self.expr(base, st)?;
+            // (borrow checking: the fields not written are read or moved one by one, not the whole base)
+            let bkp = if self.bk_on() { self.bk_place(base).map(|p| p.0) } else { None };
+            let saved_on = self.bk.on;
+            if bkp.is_some() {
+                self.bk.on = false;
+            }
+            let (blk0, ev0) = (self.b.live_block(), self.bk.evs.len());
+            let r = self.expr(base, st);
+            self.bk.on = saved_on;
+            let (bv, bt) = r?;
+            // (Rust evaluates `..base` after the fields written: keep its events for later, if it stayed in one block)
+            let deferred = if self.b.live_block() == blk0 && blk0.is_some() { self.bk.evs.split_off(ev0) } else { vec![] };
+            if let (Some(bp), Ty::Struct(bsid)) = (bkp, bt) {
+                let fs = self.prog.structs[bsid as usize].fields.clone();
+                for (f, ft, _) in fs {
+                    if !sfields.iter().any(|fv| fv.0 == f) {
+                        let mut p = bp.clone();
+                        p.proj.push(borrowck::Proj::Field(f));
+                        let a = if borrowck::is_copy(self.prog, ft, 0) { borrowck::Acc::Read } else { borrowck::Acc::Move };
+                        self.bk_acc_place(p, a, err_pos(base));
+                    }
+                }
+            }
             if bt == Ty::Never {
                 self.scopes.pop();
                 return Ok((None, Ty::Never));
@@ -910,7 +976,12 @@ impl Cx<'_> {
                 }
             }
             let ns = self.keep_expr(Expr::Struct(path.clone(), nfields, None));
-            let r = self.struct_lit(ns, Some(bt))?;
+            let r = self.struct_lit(ns, Some(bt));
+            let cur = self.b.live_block();
+            for (b, e) in deferred {
+                self.bk.evs.push((cur.unwrap_or(b), e));
+            }
+            let r = r?;
             self.pop_scope();
             return Ok(r);
         }
@@ -1059,7 +1130,7 @@ impl Cx<'_> {
             if cd.moved.get(i).copied().unwrap_or(false) {
                 let p = match loc {
                     Loc::Var(v) => Place::Var(v, t),
-                    Loc::Zst => Place::Zst(t),
+                    Loc::Zst(_) => Place::Zst(t),
                     l => Place::Mem(self.loc_addr(l).unwrap(), 0, t),
                 };
                 let (v, _) = self.read(p);
@@ -1069,7 +1140,7 @@ impl Cx<'_> {
                 }
             } else {
                 let addr = match loc {
-                    Loc::Zst => self.b.ins().iconst(PTR, 0),
+                    Loc::Zst(_) => self.b.ins().iconst(PTR, 0),
                     Loc::Var(_) => {
                         return err(SP, "internal: captured variable is not in memory");
                     }
@@ -1407,7 +1478,8 @@ impl Cx<'_> {
             }
         }
         let args: Vec<&Expr> = cargs.iter().collect();
-        match t {
+        self.bk_frame();
+        let r = match t {
             Ty::Struct(sid) => {
                 let Some(&cid) = self.prog.closure_of_struct.get(&self.prog.base_of(sid)) else {
                     return err(SP, format!("expected a function, found `{}`", self.prog.tn(t)));
@@ -1418,7 +1490,9 @@ impl Cx<'_> {
             Ty::Ref(_, Ty::Dyn(s)) | Ty::Box(Ty::Dyn(s)) => self.dyn_fn_call(v, s, &args, SP),
             Ty::Fn(f) => self.indirect_call(Indirect::Ptr(v), &f.params, f.ret, &args, SP),
             t => err(SP, format!("expected a function, found `{}`", self.prog.tn(t))),
-        }
+        };
+        self.bk_frame_end_call();
+        r
     }
 
     pub(crate) fn call(&mut self, c: &Expr, expected: Option<Ty>) -> R<V> {

@@ -70,9 +70,11 @@ impl Cx<'_> {
         let Expr::Match(scrut, arms) = m else {
             return err(SP, "internal: match_ on a non-match expression");
         };
-        let Some(place) = self.scrutinee(scrut)? else {
+        let pats: Vec<&Pat> = arms.iter().map(|a| &a.pat).collect();
+        let Some(place) = self.bk_scrutinee(scrut, None, &pats)? else {
             return Ok((None, Ty::Never));
         };
+        let bk_ss = self.bk.scrut.clone();
         let sflag = self.last_scrut;
         let merge = self.b.create_block();
         let mut result_ty: Option<Ty> = None;
@@ -83,7 +85,11 @@ impl Cx<'_> {
             self.pat_test(&arm.pat, place, next)?;
             self.scopes.push(vec![]);
             let ob = self.owned_binds;
-            self.pat_bind(&arm.pat, place, BindMode::Move)?;
+            self.bk.scrut = bk_ss.clone();
+            self.bk_bind_begin();
+            let r = self.pat_bind(&arm.pat, place, BindMode::Move);
+            self.bk_bind_end();
+            r?;
             if self.owned_binds > ob {
                 self.release_outer(scrut, sflag);
             }
@@ -117,7 +123,7 @@ impl Cx<'_> {
         let Expr::Let(lpat, lexpr) = l else {
             return err(SP, "internal: if_let without `let`");
         };
-        let Some(place) = self.scrutinee(lexpr)? else {
+        let Some(place) = self.bk_scrutinee(lexpr, None, &[&**lpat])? else {
             return Ok((None, Ty::Never));
         };
         let sflag = self.last_scrut;
@@ -128,7 +134,10 @@ impl Cx<'_> {
         self.pat_test(lpat, place, else_blk)?;
         self.scopes.push(vec![]);
         let ob = self.owned_binds;
-        self.pat_bind(lpat, place, BindMode::Move)?;
+        self.bk_bind_begin();
+        let r = self.pat_bind(lpat, place, BindMode::Move);
+        self.bk_bind_end();
+        r?;
         if self.owned_binds > ob {
             self.release_outer(lexpr, sflag);
         }
@@ -167,14 +176,17 @@ impl Cx<'_> {
         self.b.switch_to_block(header);
         // 毎回 match 対象を評価し直す (一時値は 1 回ごとに drop する)
         let t0 = self.temps.len();
-        let Some(place) = self.scrutinee(e)? else {
+        let Some(place) = self.bk_scrutinee(e, None, &[pat])? else {
             return Ok((None, Ty::Never));
         };
         let sflag = self.last_scrut;
         self.pat_test(pat, place, exit)?;
         self.scopes.push(vec![]);
         let ob = self.owned_binds;
-        self.pat_bind(pat, place, BindMode::Move)?;
+        self.bk_bind_begin();
+        let r = self.pat_bind(pat, place, BindMode::Move);
+        self.bk_bind_end();
+        r?;
         if self.owned_binds > ob {
             self.release_outer(e, sflag);
         }
@@ -567,6 +579,7 @@ impl Cx<'_> {
                 match mode {
                     BindMode::Move => {
                         let (v, t) = self.read(p);
+                        self.bk.mut_next = Some(*mutable);
                         self.bind(name, t, v);
                     }
                     BindMode::Ref(m) => {
@@ -1058,7 +1071,7 @@ impl Cx<'_> {
                 self.b.ins().stack_store(x, ss, 0);
                 self.b.ins().stack_addr(PTR, ss, 0)
             }
-            Loc::Zst => self.b.ins().iconst(PTR, 0),
+            Loc::Zst(_) => self.b.ins().iconst(PTR, 0),
         };
         self.drop_in_place(addr, o.ty);
         self.b.ins().jump(done, &[]);
@@ -1088,6 +1101,7 @@ impl Cx<'_> {
 
     /// スコープを閉じる: そのスコープのローカル変数を逆順に drop する
     pub(crate) fn pop_scope(&mut self) {
+        self.bk_dead_scope(SP);
         let depth = self.scopes.len() - 1;
         while self.owned.last().is_some_and(|o| o.depth >= depth) {
             let o = self.owned.pop().unwrap();

@@ -17,6 +17,7 @@
 
 #![allow(clippy::too_many_arguments)]
 
+pub mod borrowck;
 pub mod clif;
 pub mod lit;
 mod p1_expr;
@@ -242,8 +243,10 @@ pub fn compile(prog: &Program, insts: &Mutex<Insts>, id: u32, f: &ItemFn, line_b
     let extra: Vec<(String, Ty)> = caps.iter().map(|c| (c.0.clone(), c.1)).collect();
     let user_code = prog.item_of.get(body_id as usize).copied().flatten().is_some_and(|i| i < prog.prelude_from);
     let ((lets, _, _), margs, texts) = crate::ast_infer::infer_ctx_margs(prog, f.sig.recv.is_some(), &f.sig.params, &f.block, &sig, &env, &extra, Some(sig.ret), Some((root, base_k)));
+    let bk_level = if user_code && prog.closures.get(&body_id).is_none() { borrowck::level() } else { 0 };
     let mut cx = Cx {
         b: FunctionBuilder::new(&clif_sig(&sig)),
+        bk: borrowck::Bk { on: bk_level > 0, level: bk_level, line_base, ..Default::default() },
         prog,
         scopes: vec![vec![]],
         loops: vec![],
@@ -321,6 +324,7 @@ pub fn compile(prog: &Program, insts: &Mutex<Insts>, id: u32, f: &ItemFn, line_b
         cx.body(f, &sig)
     };
     r?;
+    cx.bk_check()?;
     // (入口以外で作った drop フラグは入口で 0 にする: minclif はフラグのスロットを関数の最初に 0 にする)
     let late = std::mem::take(&mut cx.late_flags);
     let requested = std::mem::take(&mut cx.requested);
@@ -473,6 +477,14 @@ pub fn has_loc(m: &str) -> bool {
 }
 
 /// 1 つの名前だけのパス (`x`)
+/// `mut x` (for the borrow checker)
+pub fn pat_mut(p: &Pat) -> Option<bool> {
+    match p {
+        Pat::Ident(false, m, _, None) => Some(*m),
+        _ => None,
+    }
+}
+
 pub fn ident_of(p: &Path) -> Option<&str> {
     if !p.global && p.segs.len() == 1 && p.segs[0].args.is_empty() && p.segs[0].fn_args.is_none() {
         Some(&p.segs[0].name)
@@ -511,12 +523,13 @@ pub enum LenKey {
 /// 式の評価結果。Unit / Never のとき値は None。struct のときはアドレス。
 pub type V = (Option<Value>, Ty);
 
-#[derive(Clone, Copy, PartialEq)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub enum Loc {
     Var(Variable),
     Slot(StackSlot),
     Ptr(Value),
-    Zst,
+    /// (番号は借用検査が変数を見分けるため)
+    Zst(u32),
 }
 
 #[derive(Clone, Copy)]
@@ -563,6 +576,8 @@ pub enum BindMode {
 
 pub struct Cx<'p> {
     pub b: FunctionBuilder,
+    /// 借用検査の記録
+    pub bk: borrowck::Bk,
     pub prog: &'p Program,
     pub scopes: Vec<Vec<(String, Loc, Ty)>>,
     pub loops: Vec<Loop>,
@@ -877,7 +892,7 @@ impl Cx<'_> {
             Loc::Var(v) => Some(self.b.use_var(v)),
             Loc::Slot(ss) => Some(self.b.ins().stack_load(PTR, ss, 0)),
             Loc::Ptr(a) => Some(self.b.ins().load(PTR, mf(), a, 0)),
-            Loc::Zst => None,
+            Loc::Zst(_) => None,
         }
     }
 
@@ -885,7 +900,7 @@ impl Cx<'_> {
         match l {
             Loc::Slot(ss) => Some(self.b.ins().stack_addr(PTR, ss, 0)),
             Loc::Ptr(v) => Some(v),
-            Loc::Var(_) | Loc::Zst => None,
+            Loc::Var(_) | Loc::Zst(_) => None,
         }
     }
 
@@ -935,7 +950,7 @@ impl Cx<'_> {
                 }
             }
             _ => match clif_ty(ty) {
-                None => Loc::Zst,
+                None => Loc::Zst(self.bk.fresh_zst()),
                 Some(_) if self.addr_taken.contains(&name) => {
                     let ss = self.slot(ty);
                     if let Some(v) = v {
@@ -952,6 +967,7 @@ impl Cx<'_> {
                 }
             },
         };
+        self.bk_local(loc, &name, ty);
         self.scopes.last_mut().unwrap().push((name, loc, ty));
         if self.needs_drop(ty) {
             self.owned_binds += 1;
@@ -978,7 +994,17 @@ impl Cx<'_> {
         for (p, _) in &f.sig.params {
             names.push(pat_name(p)?);
         }
+        // (`mut x` parameters, for the borrow checker; `self` is not known)
+        let mut muts: Vec<Option<bool>> = vec![];
+        if f.sig.recv.is_some() {
+            muts.push(None);
+        }
+        for (p, _) in &f.sig.params {
+            muts.push(pat_mut(p));
+        }
+        let mut muts = muts.into_iter();
         for (name, &ty) in names.into_iter().zip(&sig.params) {
+            self.bk.mut_next = muts.next().flatten();
             if !ty.is_agg() && clif_ty(ty).is_none() {
                 self.bind(name, ty, None);
                 continue;
@@ -988,6 +1014,7 @@ impl Cx<'_> {
             };
             if ty.is_agg() {
                 // 呼び出し側がコピー済みなので、そのメモリをそのまま使う (値渡しの引数は呼び出された側が drop する)
+                self.bk_local(Loc::Ptr(v), &name, ty);
                 self.scopes.last_mut().unwrap().push((name, Loc::Ptr(v), ty));
                 self.own_local(Loc::Ptr(v), ty);
             } else {
@@ -1003,7 +1030,7 @@ impl Cx<'_> {
             let env = env.ok_or("closure without environment")?;
             for (n, t, by_ref, off) in self.caps.clone() {
                 let a = if by_ref { self.b.ins().load(PTR, mf(), env, off as i32) } else { self.addr_plus(env, off as i32) };
-                let loc = if clif_ty(t).is_none() && !t.is_agg() { Loc::Zst } else { Loc::Ptr(a) };
+                let loc = if clif_ty(t).is_none() && !t.is_agg() { Loc::Zst(self.bk.fresh_zst()) } else { Loc::Ptr(a) };
                 self.scopes.last_mut().unwrap().push((n, loc, t));
             }
         }
@@ -1012,6 +1039,7 @@ impl Cx<'_> {
         }
         if let Some(Stmt::Expr(e, false)) = f.block.stmts.last() {
             self.mark_ret_call(e);
+            self.bk.tail = e as *const Expr as usize;
         }
         let (v, t) = self.block(&f.block, Some(self.ret))?;
         if t == Ty::Never {
@@ -1141,7 +1169,8 @@ impl Cx<'_> {
                         return err(SP, "`let` without initializer is not supported");
                     };
                     let ann = ann_ty.as_ref().and_then(|t| self.parse_ty(t).ok());
-                    let Some(place) = self.scrutinee_as(init, ann)? else {
+                    // (destructuring reads the parts the pattern binds, not the whole value)
+                    let Some(place) = self.bk_scrutinee(init, ann, &[pat])? else {
                         diverged = true;
                         continue;
                     };
@@ -1161,7 +1190,10 @@ impl Cx<'_> {
                     }
                     let ob = self.owned_binds;
                     let pre = if is_place_expr(init) { self.moved_flag(init) } else { None };
-                    self.pat_bind(pat, place, BindMode::Move)?;
+                    self.bk_bind_begin();
+                    let r = self.pat_bind(pat, place, BindMode::Move);
+                    self.bk_bind_end();
+                    r?;
                     if self.owned_binds > ob {
                         match pre {
                             Some(f) => self.clear_flag(f),
@@ -1179,7 +1211,11 @@ impl Cx<'_> {
                         return err(SP, "`let` without initializer is not supported");
                     };
                     if is_place_expr(init) {
-                        let _ = self.place(init)?;
+                        // (`let _ = x;` does not read x)
+                        self.bk.place_depth += 1;
+                        let r = self.place(init);
+                        self.bk.place_depth -= 1;
+                        let _ = r?;
                     } else {
                         let (v, t) = self.expr(init, None)?;
                         if t == Ty::Never {
@@ -1242,10 +1278,15 @@ impl Cx<'_> {
                                 Some(ct) => Some(self.b.ins().iconst(ct, 0)),
                             }
                         };
+                        self.bk.uninit_next = true;
+                        self.bk.mut_next = pat_mut(pat);
                         self.bind(name, ty, v);
                         continue;
                     };
-                    let (mut v, mut t) = self.expr(init, ann.or(hint))?;
+                    self.bk_frame();
+                    let r = self.expr(init, ann.or(hint));
+                    let srcs = self.bk_frame_end();
+                    let (mut v, mut t) = r?;
                     if t == Ty::Never {
                         diverged = true;
                         continue;
@@ -1263,7 +1304,9 @@ impl Cx<'_> {
                     }
                     let ty = ann.unwrap_or(t);
                     self.same(SP, t, ty).map_err(|m| self.at(expr_start(init), m))?;
-                    self.bind(name, ty, v);
+                    self.bk.mut_next = pat_mut(pat);
+                    self.bind(name.clone(), ty, v);
+                    self.bk_def_named(&name, &srcs);
                     self.extend_temps(t0);
                 }
                 // (`;` の付いたマクロの文。末尾の `vec![]` などは式として期待型を渡す)
@@ -1286,7 +1329,19 @@ impl Cx<'_> {
                 }
                 Stmt::Expr(e, semi) => {
                     let exp = if last && !*semi { expected } else { None };
-                    let r = self.expr(e, exp)?;
+                    // (the value of the function body: what it borrows must outlive the function)
+                    let tail = last && !*semi && self.bk.tail == e as *const Expr as usize && self.bk_on();
+                    if tail {
+                        self.bk_frame();
+                    }
+                    let r = self.expr(e, exp);
+                    if tail {
+                        let srcs = self.bk_frame_end();
+                        if borrowck::has_refs(self.prog, self.ret, 0) {
+                            { let _ = &srcs; self.bk_ret(e); }
+                        }
+                    }
+                    let r = r?;
                     if r.1 == Ty::Never {
                         diverged = true;
                     }

@@ -252,7 +252,93 @@ fn parse_sig(sig: &PSig, is_extern: bool, is_main: bool, owner: Option<&Owner>) 
         self_ty: owner.filter(|_| !is_trait).map(|o| o.self_ty.clone()),
         export: false,
         panic_handler: false,
+        ret_from: ret_from(sig),
     })
+}
+
+/// Lifetimes in a type (`'_` and elided `&` count as "elided")
+fn lifetimes(t: &PTy, out: &mut Vec<String>, elided: &mut bool, opaque: &mut bool) {
+    match t {
+        PTy::Ref(l, _, i) => {
+            match l {
+                None => *elided = true,
+                Some(l) if l == "'_" => *elided = true,
+                Some(l) => out.push(l.clone()),
+            }
+            lifetimes(i, out, elided, opaque);
+        }
+        PTy::Path(q, p) => {
+            if let Some(q) = q {
+                lifetimes(q, out, elided, opaque);
+            }
+            for s in &p.segs {
+                for a in &s.args {
+                    match a {
+                        crate::parse::GArg::Lifetime(l) if l == "'_" => *elided = true,
+                        crate::parse::GArg::Lifetime(l) => out.push(l.clone()),
+                        crate::parse::GArg::Ty(t) | crate::parse::GArg::Bind(_, t) => lifetimes(t, out, elided, opaque),
+                        _ => {}
+                    }
+                }
+            }
+        }
+        PTy::Ptr(_, i) | PTy::Slice(i) | PTy::Array(i, _) => lifetimes(i, out, elided, opaque),
+        PTy::Tuple(ts) => {
+            for t in ts {
+                lifetimes(t, out, elided, opaque);
+            }
+        }
+        PTy::Impl(_) | PTy::Dyn(_) | PTy::Macro(_) | PTy::Infer => *opaque = true,
+        PTy::Fn(..) | PTy::Never => {}
+    }
+}
+
+/// SigSyn::ret_from: the elision rules (`&self` methods return borrows of self, else the only argument with
+/// lifetimes) and named lifetimes (`fn f<'a>(x: &'a T, y: &U) -> &'a T` borrows from x only)
+fn ret_from(sig: &PSig) -> u64 {
+    const KNOWN: u64 = 1 << 63;
+    let Some(ret) = &sig.ret else { return KNOWN };
+    let (mut rl, mut relided, mut opaque) = (vec![], false, false);
+    lifetimes(ret, &mut rl, &mut relided, &mut opaque);
+    if opaque {
+        return 0;
+    }
+    let mut inputs: Vec<&PTy> = vec![];
+    if let Some(r) = &sig.recv_ty {
+        inputs.push(r);
+    }
+    inputs.extend(sig.params.iter().map(|p| &p.1));
+    if inputs.len() > 62 {
+        return 0;
+    }
+    let mut mask = 0u64;
+    for (i, t) in inputs.iter().enumerate() {
+        if let PTy::Ref(Some(l), _, _) = t {
+            if rl.contains(l) && l != "'static" {
+                mask |= 1 << i;
+            }
+        }
+    }
+    if relided {
+        let recv_ref = matches!(sig.recv_ty, Some(PTy::Ref(..)));
+        if recv_ref {
+            mask |= 1;
+        } else {
+            let with: Vec<usize> = (0..inputs.len())
+                .filter(|&i| {
+                    let (mut l, mut e, mut o) = (vec![], false, false);
+                    lifetimes(inputs[i], &mut l, &mut e, &mut o);
+                    e || !l.is_empty()
+                })
+                .collect();
+            match with.as_slice() {
+                [i] if matches!(inputs[*i], PTy::Ref(..)) => mask |= 1 << i,
+                [_] => {}
+                _ => return 0,
+            }
+        }
+    }
+    KNOWN | mask
 }
 
 /// `Fn(A, B) -> R` 形式の境界なら (種類, 引数, 戻り値)

@@ -259,6 +259,9 @@ impl Recorder {
     pub fn current_block(&self) -> Option<Block> {
         self.cur
     }
+    pub fn n_blocks(&self) -> usize {
+        self.blocks.len()
+    }
     pub fn n_values(&self) -> usize {
         self.vt.len()
     }

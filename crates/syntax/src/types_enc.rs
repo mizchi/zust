@@ -117,6 +117,7 @@ crate::enc_struct!(SigSyn {
     self_ty,
     export,
     panic_handler,
+    ret_from,
 });
 crate::enc_struct!(Summary {
     fns,

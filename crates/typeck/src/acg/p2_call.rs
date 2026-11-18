@@ -503,6 +503,7 @@ impl Cx<'_> {
         };
         let name = method.to_string();
         // (メソッドがなく `impl Deref` があれば、deref した先で探す: `rc.borrow_mut()`)
+        let mut via_deref = false;
         let (a, o, sid, id) = loop {
             let (a, o, sid) = loop {
                 p = match p {
@@ -545,6 +546,7 @@ impl Cx<'_> {
                     _ => target,
                 };
                 p = Place::Mem(v.unwrap(), 0, inner_t);
+                via_deref = true;
                 continue;
             }
             let sname = self.prog.structs[sid as usize].name.clone();
@@ -561,6 +563,19 @@ impl Cx<'_> {
             Ty::Ref(m, _) => Ty::Ref(m, intern(st)),
             _ => st,
         };
+        let mut bk_late = None;
+        if self.bk_on() && !via_deref {
+            let flows = self.bk_ret_from(id, 0);
+            let ev = self.bk_recv_ev(recv, recv_ty, flows);
+            if let (true, Some(borrowck::Ev::Acc(_, borrowck::Acc::Borrow(ln), _))) = (flows, &ev) {
+                self.bk.loan_of.insert(e as *const Expr as usize, *ln);
+            }
+            if matches!(recv_ty, Ty::Ref(true, _)) {
+                bk_late = ev;
+            } else {
+                self.bk_push(ev);
+            }
+        }
         // `self` を値で受ける: 受け手からムーブ
         if !matches!(recv_ty, Ty::Ref(..)) && self.needs_drop(st) {
             match recv_temp {
@@ -569,7 +584,9 @@ impl Cx<'_> {
             }
         }
         let args: Vec<&Expr> = margs.iter().collect();
-        self.call_fn(id, Some((recv_v, recv_ty)), &args, tf, expected, SP)
+        let r = self.call_fn(id, Some((recv_v, recv_ty)), &args, tf, expected, SP);
+        self.bk_push(bk_late);
+        r
     }
 
     /// 組み込みの AsRef (`s.as_ref()` → `s.as_bytes()` / `&s[..]`)。受け手が as_ref を持つ構造体 (Option など) なら None
@@ -922,7 +939,7 @@ impl Cx<'_> {
             .collect();
         let conv_refs: Vec<&Expr> = args.iter().zip(&conv).map(|(a, c)| c.as_ref().unwrap_or(*a)).collect();
         let args: &[&Expr] = &conv_refs;
-        for (a, &pt) in args.iter().zip(&sig0.params[skip..]) {
+        for (i, (a, &pt)) in args.iter().zip(&sig0.params[skip..]).enumerate() {
             let mut exp = Some(self.prog.partial_subst(pt, &sol)).filter(|&t| !self.prog.has_param(t));
             // (`[i64; N]` の N がまだ分からなくても、配列のリテラルには要素の型を渡す。長さはリテラルから決まる)
             if exp.is_none() {
@@ -951,7 +968,13 @@ impl Cx<'_> {
                 let r = Some(self.prog.partial_subst(*bret, &sol));
                 self.closure_hint = Some((ps, r));
             }
-            let (v, mut t) = self.expr(a, exp)?;
+            // (an argument `&x` the result does not borrow from: its loan ends with the call)
+            if self.bk_on() && matches!(strip_paren(a), Expr::Ref(..)) && matches!(pt, Ty::Ref(..)) && !self.bk_ret_from(id, i + skip) {
+                self.bk.no_loan_src = true;
+            }
+            let r = self.expr(a, exp);
+            self.bk.no_loan_src = false;
+            let (v, mut t) = r?;
             self.closure_hint = None;
             // クロージャの実際の引数・戻り値の型から境界の型パラメータを解く (`map<U, F: FnOnce(T) -> U>`)
             if let Some((bps, bret)) = &fb {

@@ -77,13 +77,19 @@ pub struct FunctionBuilder {
     gvs: Vec<String>,
     /// iconst で作った値とその定数
     consts: crate::fxhash::FxMap<u32, i64>,
+    /// ブロックの間のジャンプ (借用検査の CFG)
+    pub edges: Vec<(Block, Block)>,
+    /// 今のブロックは終端命令を置いた (この後の命令には届かない)
+    pub dead: bool,
+    /// 終端命令のないまま離れたブロック → 切り替え先 (戻ってこなければそこへ落ちる)
+    pub falls: Vec<(Block, Block)>,
 }
 
 impl FunctionBuilder {
     pub fn new(sig: &Signature) -> FunctionBuilder {
         let ps = sig.params.iter().map(|p| p.value_type).collect();
         let rs = sig.returns.iter().map(|p| p.value_type).collect();
-        FunctionBuilder { m: M::new(ps, rs), funcs: vec![], sigs: vec![], results: vec![], gvs: vec![], consts: crate::fxhash::FxMap::default() }
+        FunctionBuilder { m: M::new(ps, rs), funcs: vec![], sigs: vec![], results: vec![], gvs: vec![], consts: crate::fxhash::FxMap::default(), edges: vec![], dead: false, falls: vec![] }
     }
     pub fn ins(&mut self) -> Ins<'_> {
         Ins(self)
@@ -104,7 +110,27 @@ impl FunctionBuilder {
         self.m.block_params(b)
     }
     pub fn switch_to_block(&mut self, b: Block) {
+        if let Some(c) = self.m.current_block() {
+            if !self.dead && c != b {
+                self.falls.push((c, b));
+            }
+        }
+        self.falls.retain(|f| f.0 != b);
+        self.dead = false;
         self.m.switch_to_block(b)
+    }
+    /// 借用検査の記録先のブロック (終端命令の後なら None)
+    pub fn live_block(&self) -> Option<Block> {
+        if self.dead { None } else { self.m.current_block() }
+    }
+    /// CFG の辺 (落ちるものを含む)
+    pub fn cfg_edges(&self) -> Vec<(Block, Block)> {
+        let mut e = self.edges.clone();
+        e.extend_from_slice(&self.falls);
+        e
+    }
+    pub fn n_blocks(&self) -> usize {
+        self.m.n_blocks()
     }
     pub fn current_block(&self) -> Option<Block> {
         self.m.current_block()
@@ -217,15 +243,33 @@ impl Ins<'_> {
         m.store(v, a, off)
     }
     pub fn jump(mut self, b: Block, args: &[Value]) {
+        if let Some(c) = self.0.live_block() {
+            self.0.edges.push((c, b));
+        }
+        self.0.dead = true;
         self.m().jump(b, args)
     }
     pub fn brif(mut self, c: Value, a: Block, aa: &[Value], b: Block, ba: &[Value]) {
+        if let Some(cur) = self.0.live_block() {
+            // (a constant condition (`true && ..`) takes one edge only)
+            match self.0.consts.get(&c.0) {
+                Some(0) => self.0.edges.push((cur, b)),
+                Some(_) => self.0.edges.push((cur, a)),
+                None => {
+                    self.0.edges.push((cur, a));
+                    self.0.edges.push((cur, b));
+                }
+            }
+        }
+        self.0.dead = true;
         self.m().brif(c, a, aa, b, ba)
     }
     pub fn return_(mut self, vs: &[Value]) {
+        self.0.dead = true;
         self.m().return_(vs)
     }
     pub fn trap(mut self, c: TrapCode) {
+        self.0.dead = true;
         self.m().trap_code(c.0)
     }
     pub fn trapz(mut self, v: Value, c: TrapCode) {
