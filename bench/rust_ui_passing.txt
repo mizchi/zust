@@ -303,6 +303,8 @@ check-pass	async-await/issues/issue-60518.rs
 compile-fail	async-await/issues/issue-61187.rs
 compile-fail	async-await/issues/issue-62009-1.rs
 compile-fail	async-await/issues/issue-62009-2.rs
+check-pass	async-await/issues/issue-62517-1.rs
+check-pass	async-await/issues/issue-62517-2.rs
 check-pass	async-await/issues/issue-63388-3.rs
 check-pass	async-await/issues/issue-63388-4.rs
 check-pass	async-await/issues/issue-64391-2.rs
@@ -478,6 +480,9 @@ compile-fail	block-result/issue-13428.rs
 compile-fail	block-result/issue-13624.rs
 compile-fail	block-result/issue-20862.rs
 compile-fail	block-result/unexpected-return-on-unit.rs
+check-pass	borrowck/alias-liveness/higher-ranked.rs
+check-pass	borrowck/alias-liveness/opaque-capture.rs
+check-pass	borrowck/alias-liveness/rpit-static.rs
 compile-fail	borrowck/argument_number_mismatch_ice.rs
 compile-fail	borrowck/assign-imm-local-twice.rs
 compile-fail	borrowck/assign_mutable_fields.rs
@@ -870,6 +875,7 @@ compile-fail	closures/issue-25439.rs
 compile-fail	closures/issue-6801.rs
 check-pass	closures/issue-68025.rs
 check-pass	closures/issue-72408-nested-closures-exponential.rs
+compile-fail	closures/issue-78720.rs
 compile-fail	closures/issue-82438-mut-without-upvar.rs
 compile-fail	closures/issue-84044-drop-non-mut.rs
 run-pass	closures/issue-868.rs
@@ -1990,8 +1996,10 @@ run-pass	impl-header-lifetime-elision/bare_type.rs
 run-pass	impl-header-lifetime-elision/explicit-and-elided-same-header.rs
 run-pass	impl-header-lifetime-elision/path-underscore.rs
 run-pass	impl-trait/basic-trait-impl.rs
+check-pass	impl-trait/closure-calling-parent-fn.rs
 build-pass	impl-trait/defined-by-trait-resolution.rs
 compile-fail	impl-trait/diagnostics/fully-qualified-path-impl-trait.rs
+check-pass	impl-trait/different_where_bounds.rs
 compile-fail	impl-trait/dyn-incompatible-trait-in-return-position-dyn-trait.rs
 check-pass	impl-trait/equal-hidden-lifetimes.rs
 check-pass	impl-trait/explicit-generic-args-with-impl-trait/const-args.rs
@@ -2000,6 +2008,7 @@ compile-fail	impl-trait/explicit-generic-args-with-impl-trait/not-enough-args.rs
 compile-fail	impl-trait/extra-impl-in-trait-impl.rs
 compile-fail	impl-trait/impl-trait-in-generic-param.rs
 check-pass	impl-trait/in-ctfe/fully_monomorphic_const_eval.rs
+check-pass	impl-trait/in-ctfe/match-arm-exhaustive.rs
 compile-fail	impl-trait/in-trait/async-and-ret-ref.rs
 compile-fail	impl-trait/in-trait/bad-item-bound-within-rpitit-2.rs
 compile-fail	impl-trait/in-trait/bad-projection-from-opaque.rs
@@ -2017,9 +2026,11 @@ compile-fail	impl-trait/in-trait/wf-bounds.rs
 compile-fail	impl-trait/issues/infinite-impl-trait-issue-38064.rs
 compile-fail	impl-trait/issues/issue-100075-2.rs
 compile-fail	impl-trait/issues/issue-100075.rs
+check-pass	impl-trait/issues/issue-100187.rs
 compile-fail	impl-trait/issues/issue-102605.rs
 compile-fail	impl-trait/issues/issue-103181-2.rs
 compile-fail	impl-trait/issues/issue-21659-show-relevant-trait-impls-3.rs
+check-pass	impl-trait/issues/issue-49376.rs
 check-pass	impl-trait/issues/issue-49556.rs
 compile-fail	impl-trait/issues/issue-54966.rs
 compile-fail	impl-trait/issues/issue-58956.rs
@@ -2038,6 +2049,8 @@ check-pass	impl-trait/nested-return-type3.rs
 compile-fail	impl-trait/nested-return-type4.rs
 check-pass	impl-trait/nested-rpit-with-anonymous-lifetimes.rs
 compile-fail	impl-trait/no-trait.rs
+run-pass	impl-trait/not_general_enough_regression_106630.rs
+compile-fail	impl-trait/opaque-used-in-extraneous-argument.rs
 compile-fail	impl-trait/point-to-type-err-cause-on-impl-trait-return.rs
 compile-fail	impl-trait/precise-capturing/bad-lifetimes.rs
 compile-fail	impl-trait/precise-capturing/bad-params.rs
@@ -2045,14 +2058,19 @@ compile-fail	impl-trait/precise-capturing/bound-modifiers.rs
 check-pass	impl-trait/precise-capturing/elided.rs
 compile-fail	impl-trait/precise-capturing/forgot-to-capture-const.rs
 compile-fail	impl-trait/precise-capturing/forgot-to-capture-type.rs
+check-pass	impl-trait/precise-capturing/higher-ranked.rs
 compile-fail	impl-trait/precise-capturing/ordering.rs
+check-pass	impl-trait/precise-capturing/overcaptures-2024-but-fine.rs
 compile-fail	impl-trait/precise-capturing/overcaptures-2024.rs
 compile-fail	impl-trait/precise-capturing/redundant.rs
 compile-fail	impl-trait/precise-capturing/rpitit.rs
 compile-fail	impl-trait/precise-capturing/unexpected-token.rs
+compile-fail	impl-trait/printing-binder.rs
 run-pass	impl-trait/region-escape-via-bound-contravariant-closure.rs
 run-pass	impl-trait/region-escape-via-bound-contravariant.rs
 compile-fail	impl-trait/rpit-not-sized.rs
+compile-fail	impl-trait/rpit/non-defining-use-lifetimes.rs
+check-pass	impl-trait/rpit/unit-impl-default-36379.rs
 compile-fail	impl-trait/stashed-diag-issue-121504.rs
 check-pass	impl-trait/struct-field-fragment-in-name.rs
 compile-fail	impl-trait/suggest-calling-rpit-closure.rs
@@ -2308,6 +2326,7 @@ compile-fail	lifetimes/lifetime-errors/liveness-assign-imm-local-notes.rs
 check-pass	lifetimes/lifetime-in-unit-struct-pattern.rs
 check-pass	lifetimes/lifetime-inference-miss-15735.rs
 compile-fail	lifetimes/lifetime-no-keyword.rs
+compile-fail	lifetimes/mismatched-lifetime-syntaxes-details/mismatched-lifetime-syntaxes.rs
 compile-fail	lifetimes/missing-lifetime-in-assoc-type-2.rs
 compile-fail	lifetimes/missing-lifetime-in-assoc-type-3.rs
 compile-fail	lifetimes/missing-lifetime-in-assoc-type-4.rs
@@ -4124,6 +4143,7 @@ compile-fail	single-use-lifetime/fn-types.rs
 compile-fail	single-use-lifetime/issue-107998.rs
 compile-fail	single-use-lifetime/lifetime-bounds.rs
 compile-fail	single-use-lifetime/one-use-in-fn-argument.rs
+check-pass	single-use-lifetime/one-use-in-fn-return.rs
 check-pass	single-use-lifetime/one-use-in-struct.rs
 check-pass	single-use-lifetime/two-uses-in-fn-argument-and-return.rs
 check-pass	single-use-lifetime/two-uses-in-fn-arguments.rs
@@ -4570,6 +4590,7 @@ compile-fail	trait-bounds/issue-82038.rs
 compile-fail	trait-bounds/negative-bound-not-supported-58857.rs
 compile-fail	trait-bounds/ownership-mismatch-on-arg.rs
 compile-fail	trait-bounds/sort-missing-ord-bound.rs
+compile-fail	trait-bounds/trait-bound-adt-issue-145611.rs
 compile-fail	trait-bounds/trait-selection-overflow-prevention-72839.rs
 compile-fail	traits/alias/generic-default-in-dyn.rs
 run-pass	traits/anon-static-method.rs

@@ -643,7 +643,9 @@ fn resolve_opaque(prog: &mut Program, src: &str, items: &[SrcItem]) -> R<()> {
             let Some(f) = parse_fn(src, &items[ii as usize])? else { continue };
             let env = TyEnv { self_sid: sig.impl_of, params: vec![], self_ty: sig.self_ty };
             let (_, r, _) = crate::ast_infer::infer_ctx(prog, f.sig.recv.is_some(), &f.sig.params, &f.block, &sig, &env, &[], None, Some((id, 0)));
-            if let Some(t) = r.filter(|&t| t != Ty::Unit && !prog.has_param(t)) {
+            // (a body with no value (`-> impl Sized {}`) returns `()`)
+            let no_value = !matches!(f.block.stmts.last(), Some(crate::parse::Stmt::Expr(_, false))) && !format!("{:?}", f.block).contains("Return(Some");
+            if let Some(t) = r.filter(|&t| (t != Ty::Unit || no_value) && !prog.has_param(t)) {
                 prog.sigs[id as usize].ret = t;
                 done[k] = true;
                 progress = true;

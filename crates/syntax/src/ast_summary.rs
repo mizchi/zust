@@ -310,7 +310,61 @@ fn expr_compact(e: &Expr) -> String {
 }
 
 /// 関数のシグネチャ (front.rs の parse_sig)
+/// `-> impl Trait + use<..>`: the precise capture list names the function's own parameters
+fn check_impl_ret(sig: &PSig, owner: Option<&Owner>) -> R<()> {
+    let Some(PTy::Impl(bs)) = &sig.ret else { return Ok(()) };
+    if !bs.iter().any(|b| matches!(b, Bound::Trait(_, p) if p.segs.last().is_some_and(|s| s.name != "use"))) {
+        return err("at least one trait must be specified");
+    }
+    let mut lts: Vec<&str> = vec![];
+    let mut tys: Vec<&str> = vec![];
+    for p in &sig.generics.params {
+        match p {
+            GParam::Lifetime(l) => lts.push(l),
+            GParam::Ty(n, _, _) | GParam::Const(n, _) => tys.push(n),
+        }
+    }
+    for b in bs {
+        let Bound::Trait(_, p) = b else { continue };
+        let Some(s) = p.segs.last().filter(|s| s.name == "use" && p.segs.len() == 1) else { continue };
+        for a in &s.args {
+            match a {
+                crate::parse::GArg::Lifetime(l) if l == "'_" => {
+                    // (fine when an argument has an elided lifetime for it to name)
+                    let elided = sig.recv_ty.is_some()
+                        || sig.params.iter().any(|p| {
+                            let (mut v, mut e, mut o) = (vec![], false, false);
+                            lifetimes(&p.1, &mut v, &mut e, &mut o);
+                            e
+                        });
+                    if !elided {
+                        return err("missing lifetime specifier");
+                    }
+                }
+                crate::parse::GArg::Lifetime(l) if l == "'static" => {
+                    return err("expected lifetime parameter in `use<...>` precise captures list, found `'static`")
+                }
+                crate::parse::GArg::Lifetime(l) if !lts.contains(&l.as_str()) && owner.is_none() => {
+                    return Err(format!("use of undeclared lifetime name `{l}`"))
+                }
+                crate::parse::GArg::Ty(PTy::Path(None, q)) if q.segs.len() == 1 => {
+                    let n = q.segs[0].name.as_str();
+                    if n == "Self" && owner.is_some_and(|o| !o.is_trait) {
+                        return err("`Self` can't be captured in `use<...>` precise captures list, since it is an alias");
+                    }
+                    if !tys.contains(&n) && owner.is_none_or(|o| !o.generics.iter().any(|g| g.0 == n)) {
+                        return Err(format!("cannot find type or const parameter `{n}` in this scope"));
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+    Ok(())
+}
+
 fn parse_sig(sig: &PSig, is_extern: bool, is_main: bool, owner: Option<&Owner>) -> R<SigSyn> {
+    check_impl_ret(sig, owner)?;
     let mut generics = owner.map(|o| o.generics.clone()).unwrap_or_default();
     collect_generics(&sig.generics, &mut generics)?;
     if is_extern && !generics.is_empty() {
