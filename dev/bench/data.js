@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795033302448,
+  "lastUpdate": 1795033304318,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -12700,6 +12700,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "lsp peak RSS",
             "value": 67.387,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "committer": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "distinct": true,
+          "id": "4d210d285de78c6b95607d76d5a2382a5b69f223",
+          "message": "Type inference sees the condition of assert!\n\n- `assert!(cond, ..)` / `debug_assert!`, also as a statement: the condition is\n  inferred as a bool, so `let e = 5; .. assert!(a == e)` with `a: usize` makes\n  `e` a usize\n- tests/ui: run-pass 1384 (57.4%)\n\nKPIs (gen5000): noop 662.1 M instr (+0.1%), edit 622.9, check 3893.6 (+0.0%),\ncache unchanged; LSP ready 111 ms. Against rustc -C incremental on gen1000:\ncold 4.9x, no-op 12x, edit 14x faster. README and SUPPORTED.md (en + ja)\nupdated.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-18T20:13:40Z",
+          "tree_id": "3960fd7058765bd9e46687ea03730c0bdcb9eddd",
+          "url": "https://github.com/mizchi/zust/commit/4d210d285de78c6b95607d76d5a2382a5b69f223"
+        },
+        "date": 1795033304075,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "lsp definition p50",
+            "value": 0.458,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp hover p50",
+            "value": 0.408,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp completion p50",
+            "value": 0.84,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp references p50",
+            "value": 2.395,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp rename p50",
+            "value": 0.512,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp signatureHelp p50",
+            "value": 0.586,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp documentHighlight p50",
+            "value": 0.642,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp ready (startup to indexed)",
+            "value": 108.742,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp peak RSS",
+            "value": 67.418,
             "unit": "MiB"
           }
         ]
