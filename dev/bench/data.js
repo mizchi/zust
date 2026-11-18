@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795033963197,
+  "lastUpdate": 1795033965133,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -20546,6 +20546,70 @@ window.BENCHMARK_DATA = {
           {
             "name": "tests/ui run-pass passing",
             "value": 1384,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui check-pass pass rate",
+            "value": 62.48,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui check-pass passing",
+            "value": 1129,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui build-pass pass rate",
+            "value": 60,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui build-pass passing",
+            "value": 81,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui compile-fail pass rate",
+            "value": 38.27,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui compile-fail passing",
+            "value": 2816,
+            "unit": "tests"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "committer": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "distinct": true,
+          "id": "441d0c265d2e3ca97428cbdc6ef9447b7b27c298",
+          "message": "Type inference sees the arguments of assert_eq! / assert_ne!\n\n- both sides are inferred and recorded by position for the code generator\n  (`assert_eq!(6, (0..3).map(|i| x[i]).sum::<u64>())`: `i` is a usize from the\n  index); the two sides are unified unless both are calls (a generic call's\n  result with a type from an associated type would take the other call's\n  integer default)\n- tests/ui: run-pass 1400 (58.0%)\n\nKPIs (gen5000): noop 661.4 M instr, edit 622.8, check 3893.5, cache\nunchanged; LSP ready 114 ms. Against rustc -C incremental on gen1000: cold\n5.1x, no-op 12x, edit 14x faster. README and SUPPORTED.md (en + ja) updated.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-18T20:29:01Z",
+          "tree_id": "9755ac9318cdea53b9193d80977e35ef0592b738",
+          "url": "https://github.com/mizchi/zust/commit/441d0c265d2e3ca97428cbdc6ef9447b7b27c298"
+        },
+        "date": 1795033964744,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tests/ui run-pass pass rate",
+            "value": 58.02,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui run-pass passing",
+            "value": 1400,
             "unit": "tests"
           },
           {
