@@ -276,6 +276,7 @@ compile-fail	async-await/async-fn/impl-header.rs
 compile-fail	async-await/async-fn/macro-async-trait-bound-theoretical-regression.rs
 compile-fail	async-await/async-fn/method-call-pos.rs
 check-pass	async-await/async-trait-fn.rs
+compile-fail	async-await/async-unsafe-fn-call-in-safe.rs
 compile-fail	async-await/await-keyword/await-macro-rustfix.rs
 compile-fail	async-await/await-keyword/incorrect-syntax-suggestions.rs
 check-pass	async-await/bound-normalization.rs
@@ -439,6 +440,7 @@ run-pass	binding/irrefutable-slice-patterns.rs
 compile-fail	binding/issue-40402-1.rs
 compile-fail	binding/issue-40402-2.rs
 check-pass	binding/issue-53114-borrow-checks.rs
+compile-fail	binding/issue-53114-safety-checks.rs
 run-pass	binding/let-destruct-ref.rs
 run-pass	binding/let-var-hygiene.rs
 run-pass	binding/match-borrowed_str.rs
@@ -1286,6 +1288,7 @@ run-pass	consts/const-eval/write-to-uninhabited-enum-variant.rs
 check-pass	consts/const-eval/zst_operand_eval.rs
 run-pass	consts/const-expr-in-fixed-length-vec.rs
 run-pass	consts/const-expr-in-vec-repeat.rs
+compile-fail	consts/const-extern-fn/const-extern-fn-requires-unsafe.rs
 run-pass	consts/const-fields-and-indexing.rs
 run-pass	consts/const-fn-const-eval.rs
 check-pass	consts/const-fn-destructuring-arg.rs
@@ -1704,6 +1707,7 @@ compile-fail	error-codes/E0117.rs
 compile-fail	error-codes/E0120.rs
 compile-fail	error-codes/E0121.rs
 compile-fail	error-codes/E0131.rs
+compile-fail	error-codes/E0133.rs
 compile-fail	error-codes/E0201.rs
 compile-fail	error-codes/E0207.rs
 compile-fail	error-codes/E0214.rs
@@ -2424,6 +2428,8 @@ compile-fail	infinite/infinite-tag-type-recursion.rs
 compile-fail	inline-const/const-expr-lifetime-err.rs
 compile-fail	inline-const/expr-with-block-err.rs
 compile-fail	inline-const/in-pat-recovery.rs
+compile-fail	intrinsics/incorrect-read_via_copy-defn.rs
+compile-fail	intrinsics/incorrect-transmute.rs
 compile-fail	intrinsics/unchecked_math_unstable.rs
 check-pass	iterators/array.rs
 run-pass	iterators/bytes-iterator-clone-12677.rs
@@ -4499,6 +4505,7 @@ compile-fail	static/static-closures.rs
 compile-fail	static/static-lifetime.rs
 run-pass	static/static-list-initialization-5917.rs
 compile-fail	static/static-mut-bad-types.rs
+compile-fail	static/static-mut-requires-unsafe.rs
 build-pass	static/static-str-deref-ref.rs
 check-pass	static/static-string-slice-9249.rs
 run-pass	static/static-struct-initialization-5688.rs
@@ -5394,6 +5401,7 @@ check-pass	uninhabited/exhaustive-wo-nevertype-issue-51221.rs
 compile-fail	uninhabited/missing-if-let-or-let-else.rs
 compile-fail	uninhabited/privately-uninhabited-mir-call.rs
 check-pass	uninhabited/uninhabited-enum-cast.rs
+compile-fail	union/access_union_field.rs
 check-pass	union/issue-99375.rs
 compile-fail	union/union-assignop.rs
 compile-fail	union/union-borrow-move-parent-sibling.rs
@@ -5415,20 +5423,27 @@ compile-fail	union/union-pat-in-param.rs
 compile-fail	union/union-suggest-field.rs
 run-pass	union/union-trait-impl.rs
 run-pass	union/union-transmute.rs
+compile-fail	union/union-unsafe.rs
 check-pass	union/union_wild_or_wild.rs
 compile-fail	unop/unop-neg-bool.rs
 check-pass	unsafe/edition-2024-unsafe_op_in_unsafe_fn.rs
+compile-fail	unsafe/foreign-unsafe-fn-called.rs
+compile-fail	unsafe/issue-3080.rs
 compile-fail	unsafe/issue-45087-unreachable-unsafe.rs
+compile-fail	unsafe/issue-47412.rs
 check-pass	unsafe/issue-85435-unsafe-op-in-let-under-unsafe-under-closure.rs
 build-pass	unsafe/maybe-uninit-zero-sized-types.rs
 compile-fail	unsafe/raw-pointer-field-access-error.rs
 compile-fail	unsafe/unsafe-block-without-braces.rs
+compile-fail	unsafe/unsafe-fn-assign-deref-ptr.rs
 compile-fail	unsafe/unsafe-fn-autoderef.rs
+compile-fail	unsafe/unsafe-fn-called-from-safe.rs
 run-pass	unsafe/unsafe-fn-called-from-unsafe-blk.rs
 run-pass	unsafe/unsafe-fn-called-from-unsafe-fn.rs
 compile-fail	unsafe/unsafe-fn-called-through-ref.rs
 compile-fail	unsafe/unsafe-fn-deref-ptr.rs
 check-pass	unsafe/unsafe_op_in_unsafe_fn/edition_2024_default.rs
+compile-fail	unsafe/unsafe_op_in_unsafe_fn/rfc-2585-unsafe_op_in_unsafe_fn.rs
 compile-fail	unsized-locals/align.rs
 compile-fail	unsized-locals/by-value-trait-dyn-compatibility-rpass.rs
 compile-fail	unsized-locals/by-value-trait-dyn-compatibility.rs

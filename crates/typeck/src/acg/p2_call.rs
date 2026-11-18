@@ -615,6 +615,7 @@ impl Cx<'_> {
         if into_recv {
             self.bk_frame();
         }
+        self.check_unsafe_call(id, msp.start)?;
         let r = self.call_fn(id, Some((recv_v, recv_ty)), &args, tf, expected, SP);
         if into_recv {
             let srcs = self.bk_frame_end();
@@ -968,6 +969,15 @@ impl Cx<'_> {
             _ => None,
         };
         deref.and_then(|d| cands.iter().copied().find(|&c| fits(c, d))).unwrap_or(id)
+    }
+
+    /// E0133: a call written in the source (pos.line != 0) to an `unsafe fn` outside `unsafe`
+    pub(crate) fn check_unsafe_call(&self, id: u32, pos: Sp) -> R<()> {
+        if self.unsafe_ok == 0 && pos.line != 0 && self.prog.sigs[id as usize].is_unsafe {
+            let n = self.prog.names[id as usize].rsplit("::").next().unwrap_or("").split('#').next().unwrap_or("");
+            return err(pos, format!("call to unsafe function `{}` is unsafe and requires unsafe block (E0133)", n.strip_prefix("__core_").unwrap_or(n)));
+        }
+        Ok(())
     }
 
     pub(crate) fn call_fn(&mut self, id: u32, recv: Option<(Value, Ty)>, args: &[&Expr], turbofish: Option<&[GArg]>, expected: Option<Ty>, span: Sp) -> R<V> {

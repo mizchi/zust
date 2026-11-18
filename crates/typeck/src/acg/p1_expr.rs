@@ -101,6 +101,9 @@ impl Cx<'_> {
                     None => match self.prog.const_index.get(id) {
                         // static はデータのアドレス
                         Some(&ci) if self.prog.consts[ci as usize].stat.is_some() => {
+                            if self.prog.consts[ci as usize].stat == Some(true) && self.unsafe_ok == 0 && p.pos.line != 0 && self.raw_ref == 0 {
+                                return err(p.pos, "use of mutable static is unsafe and requires unsafe block (E0133)");
+                            }
                             let t = self.prog.consts[ci as usize].ty;
                             let a = self.static_sym(ci);
                             Ok(Place::Mem(a, 0, t))
@@ -162,7 +165,7 @@ impl Cx<'_> {
                     None => err(SP, format!("no field `{fname}` on type `{}`", self.prog.structs[sid as usize].name)),
                 }
             }
-            Expr::Unary(op, x, _) if op == "*" => {
+            Expr::Unary(op, x, sp) if op == "*" => {
                 // `*g` (g: MutexGuard など Deref を実装した型): `*g.deref_mut()` / `*g.deref()`
                 if let Some(d) = self.user_deref(x) {
                     let d = self.keep_expr(d);
@@ -173,6 +176,9 @@ impl Cx<'_> {
                 let (v, t) = self.read_no_move(x)?;
                 match (v, t) {
                     (Some(_), t) if t.is_fat() => err(SP, "dereferencing a slice is not supported (index it instead)"),
+                    (Some(_), Ty::Ptr(..)) if self.unsafe_ok == 0 && sp.start.line != 0 => {
+                        err(sp.start, "dereference of raw pointer is unsafe and requires unsafe block (E0133)")
+                    }
                     (Some(p), Ty::Ref(_, inner) | Ty::Ptr(_, inner) | Ty::Box(inner)) => Ok(Place::Mem(p, 0, *inner)),
                     _ => err(SP, format!("type `{}` cannot be dereferenced", self.prog.tn(t))),
                 }
@@ -379,11 +385,14 @@ impl Cx<'_> {
             }
             Expr::Lit(l, _) => self.lit(l, expected),
             Expr::Paren(p) => self.expr(p, expected),
-            Expr::Block(label, _, b) => {
-                if let Some(l) = label {
-                    return self.labeled_block(label_name(l), b, expected);
-                }
-                self.block(b, expected)
+            Expr::Block(label, uns, b) => {
+                self.unsafe_ok += *uns as u32;
+                let r = match label {
+                    Some(l) => self.labeled_block(label_name(l), b, expected),
+                    None => self.block(b, expected),
+                };
+                self.unsafe_ok -= *uns as u32;
+                r
             }
             Expr::Path(_, p) if self.is_variant_path(p) || p.segs.len() >= 2 => {
                 let Some((sid, vi)) = self.prog.variant_by_p(&PPath::of(p), self.self_sid) else {
@@ -426,6 +435,16 @@ impl Cx<'_> {
                 self.fn_value(e, id, expected)
             }
             Expr::Path(..) | Expr::Field(..) => {
+                // (reading a union field needs `unsafe`, E0133; writing one does not)
+                if let Expr::Field(b, _, sp) = e {
+                    if self.unsafe_ok == 0 && sp.start.line != 0 {
+                        if let Some(Ty::Struct(sid)) = self.peek(b).map(|t| self.strip_refs(t)) {
+                            if self.prog.unions.contains(&self.prog.structs[self.prog.base_of(sid) as usize].name) {
+                                return err(sp.start, "access to union field is unsafe and requires unsafe block (E0133)");
+                            }
+                        }
+                    }
+                }
                 // (`&mut T` read where no reference type is expected is moved, not reborrowed: `{src}` / `let b = a;`)
                 let exp_none = self.bk.exp_none;
                 let p = self.place(e)?;
@@ -1807,6 +1826,9 @@ impl Cx<'_> {
                 None
             }
         });
+        if let Expr::Path(_, p) = &**func {
+            self.check_unsafe_call(id, p.pos)?;
+        }
         let r = self.call_fn(id, None, &args, tf, expected, SP);
         self.seg_self = None;
         r

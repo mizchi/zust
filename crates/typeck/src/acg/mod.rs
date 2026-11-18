@@ -253,6 +253,8 @@ pub fn compile(prog: &Program, insts: &Mutex<Insts>, id: u32, f: &ItemFn, line_b
         ret: sig.ret,
         is_main: sig.is_main,
         user_code,
+        raw_ref: 0,
+        unsafe_ok: (!user_code || sig.is_unsafe || prog.closures.get(&body_id).is_some()) as u32,
         overflow_checks: prog.overflow_checks && (user_code || f.attrs.iter().any(|a| a.contains("rustc_inherit_overflow_checks"))),
         traps: vec![],
         line_base,
@@ -592,6 +594,10 @@ pub struct Cx<'p> {
     pub ret: Ty,
     pub is_main: bool,
     pub user_code: bool,
+    /// > 0 inside `unsafe { }`, an `unsafe fn`, or code not checked for E0133 (the prelude, closure bodies)
+    pub unsafe_ok: u32,
+    /// > 0 under `&raw const` / `&raw mut` / `addr_of!` (a raw reference to a `static mut` is safe)
+    pub raw_ref: u32,
     pub overflow_checks: bool,
     pub traps: Vec<(u32, u32)>,
     pub line_base: u32,

@@ -269,6 +269,8 @@ pub struct SigSyn {
     pub export: bool,
     /// `#[panic_handler]`
     pub panic_handler: bool,
+    /// `unsafe fn`, or a fn of an `extern` block (calling it needs `unsafe`, E0133)
+    pub is_unsafe: bool,
     /// Which reference arguments the return value may borrow from (borrow checking): bit i for argument i (self
     /// first), bit 63 set when known. 0: not known (any of them)
     pub ret_from: u64,

@@ -12,7 +12,7 @@
 - [x] tests/ui run-pass：60.0%（1449 / 2413）
 - [x] tests/ui check-pass：63.6%（1149 / 1807）
 - [x] tests/ui build-pass：62.2%（84 / 135）
-- [ ] tests/ui compile-fail（注釈の行でエラー）：38.2%（2812 / 7358）
+- [ ] tests/ui compile-fail（注釈の行でエラー）：38.4%（2827 / 7358）
 - [x] 実際のクレート：fnv、adler2、hex、itoa、rustc-hash、cfg-if がビルドでき、同じ出力を出す（6 / 6）
 - [x] zust-analyzer が rust-analyzer と同じように答える：95.4%（rust-analyzer は 96.2%）
 
@@ -50,6 +50,8 @@
 - [x] 借用検査：ムーブ、衝突するローン、持ち出し、可変性：borrowck 49.4%
   （[報告 08](docs/ja/reports/2026-11-18-08-borrow-checking.md)）
 - [x] 型の誤り、見つからないアイテム、ジェネリクスの宣言（E0403、E0207、E0392、E0072 など）：typeck 53.4%、structs 66.7%
+- [x] `unsafe` の外の unsafe な操作（E0133）：`unsafe fn` と extern の関数の呼び出し、生ポインタの参照外し、`static mut`、
+  共用体のフィールドの読み出し（クロージャと const の中、`unsafe_op_in_unsafe_fn` の lint はまだ）
 - [ ] シグネチャに対する region の誤り（E0621、E0521）：regions 12.9%、lifetimes 19.5%
 - [ ] coherence、ブランケット impl の境界、dyn 互換性（E0038）
 - [ ] lint と警告：lint 8.3%
@@ -107,8 +109,8 @@
 
 ## rustc との速度の比較 (2026-11-18)
 
-- [x] cold ビルド：gen1000 で rustc `-C incremental` の 4.5 倍速い。小さなプログラムで 2.5〜4.0 倍、実際のクレートで 2.9〜4.2 倍
-- [x] 編集して再ビルド：gen1000 で 15 倍速い。小さなプログラムで 12〜17 倍、実際のクレートで 4.8〜7.0 倍
+- [x] cold ビルド：gen1000 で rustc `-C incremental` の 4.8 倍速い。小さなプログラムで 2.5〜4.0 倍、実際のクレートで 2.9〜4.2 倍
+- [x] 編集して再ビルド：gen1000 で 16 倍速い。小さなプログラムで 12〜17 倍、実際のクレートで 4.8〜7.0 倍
 - [x] ディスクのビルドキャッシュ：1/14（gen1000 で 766 KiB と 10.8 MiB）
 - [x] バイナリ：gen1000 で 1/3.2、実際のクレートで 1/93〜1/550
 - [ ] 実行時間：小さなプログラムで zustc は rustc `-O` の 1.2〜3.6 倍遅い（rustc の debug ビルドよりは速い）。
@@ -124,8 +126,8 @@
 | KPI | 今 | この作業の前 |
 |---|---:|---:|
 | gen5000 の no-op ビルド | 662.1 M 命令 | 746.0 M |
-| gen5000 の 1 関数を編集した後のビルド | 621.7 M 命令 | 709.3 M |
-| gen5000 の `check` | 3891.1 M 命令 | 3971.0 M |
+| gen5000 の 1 関数を編集した後のビルド | 621.8 M 命令 | 709.3 M |
+| gen5000 の `check` | 3891.7 M 命令 | 3971.0 M |
 | gen5000 のビルドキャッシュ | 1902.8 KiB | 1902.8 KiB |
-| LSP の definition / hover / completion / references の p50 | 0.78 / 0.56 / 1.33 / 11.28 ms | — |
+| LSP の definition / hover / completion / references の p50 | 0.64 / 0.50 / 1.30 / 11.99 ms | — |
 | LSP の起動から索引ができるまで（zustc と ide の対象の合計） | 113 ms | — |

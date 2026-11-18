@@ -1220,7 +1220,10 @@ impl Cx<'_> {
                 let e = crate::parse::parse_expr_at(&src, self.mbase)?;
                 let e: &Expr = self.keep_expr(e);
                 let want = expected.filter(|t| matches!(t, Ty::Ptr(..)));
-                match self.expr(e, want)? {
+                self.raw_ref += 1;
+                let r = self.expr(e, want);
+                self.raw_ref -= 1;
+                match r? {
                     (v, Ty::Ref(m, i)) => Ok((v, Ty::Ptr(m, i))),
                     r => Ok(r),
                 }
