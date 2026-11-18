@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795027071252,
+  "lastUpdate": 1795027072818,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -14912,6 +14912,85 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/mizchi/zust/commit/351df2e31923d542ed40fe703526e4c4437b14da"
         },
         "date": 1795026274582,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "parity documentSymbol (名前の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity workspace/symbol (上位 20 の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity definition (行き先の一致)",
+            "value": 97.222,
+            "unit": "%"
+          },
+          {
+            "name": "parity hover (名前を含む)",
+            "value": 95,
+            "unit": "%"
+          },
+          {
+            "name": "parity references (数の一致)",
+            "value": 92.105,
+            "unit": "%"
+          },
+          {
+            "name": "parity documentHighlight (数の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity rename (書き換えの一致)",
+            "value": 90,
+            "unit": "%"
+          },
+          {
+            "name": "parity signatureHelp (名前・引数の数・今の引数の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity completion `x.\\|` (書いてある名前を含む)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity completion `na\\|me` (同)",
+            "value": 79.167,
+            "unit": "%"
+          },
+          {
+            "name": "parity 一致の平均",
+            "value": 95.349,
+            "unit": "%"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "committer": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "distinct": true,
+          "id": "e3aaf41ae383d633b0ab08f2fdd6d1797772eb7f",
+          "message": "`const fn` calls in constants and array lengths\n\n- the parser keeps a `const fn`'s body text; the summary records free,\n  non-generic const fns with plain parameters, and Program evaluates a call\n  with integer arguments: `let x = ..;` statements and a tail expression\n  (`if`, blocks, arithmetic, other calls)\n- array lengths may be such calls (`[i32; add(1, 2)]`)\n- tests/ui: run-pass 1363 (56.49%)\n\nKPIs (gen5000): noop 660.9 M instr, edit 622.5, check 3888.0 (+0.0%), cache\nunchanged; LSP ready 110 ms.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-18T18:28:29Z",
+          "tree_id": "4adfaea408187ab968333a611674ba7687ec4dbc",
+          "url": "https://github.com/mizchi/zust/commit/e3aaf41ae383d633b0ab08f2fdd6d1797772eb7f"
+        },
+        "date": 1795027072590,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
