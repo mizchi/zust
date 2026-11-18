@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795012390791,
+  "lastUpdate": 1795012393011,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -6544,6 +6544,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "lsp peak RSS",
             "value": 66.516,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "committer": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "distinct": true,
+          "id": "1a3a0f91799c2fde3f8b58459e24385c03e91df4",
+          "message": "zustc: `x as Box<dyn Tr>` / `as Rc<dyn Tr>` coerce, casts to the same type\n\n- an `as` to Box<dyn ..> / Box<[T]> or a type with a dyn argument is the unsizing coercion\n- `f as fn()` where f already has that type\n- tests/ui: run-pass 51.6% -> 52.4%, check-pass 56.6%; three compile-fail tests that failed only\n  because such casts were unsupported need E0716 / Send through dyn / async checks\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-18T14:28:02Z",
+          "tree_id": "9537e2468a08b6269bd7f1bae3cb6046f9fae056",
+          "url": "https://github.com/mizchi/zust/commit/1a3a0f91799c2fde3f8b58459e24385c03e91df4"
+        },
+        "date": 1795012392374,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "lsp definition p50",
+            "value": 0.549,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp hover p50",
+            "value": 0.449,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp completion p50",
+            "value": 1.054,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp references p50",
+            "value": 3.17,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp rename p50",
+            "value": 0.678,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp signatureHelp p50",
+            "value": 0.772,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp documentHighlight p50",
+            "value": 0.794,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp ready (startup to indexed)",
+            "value": 132.15,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp peak RSS",
+            "value": 66.562,
             "unit": "MiB"
           }
         ]
