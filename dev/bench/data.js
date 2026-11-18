@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795010137301,
+  "lastUpdate": 1795010138840,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -7237,6 +7237,85 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/mizchi/zust/commit/cb825abd3668afa47c76491a8f167af453c07912"
         },
         "date": 1795009310211,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "parity documentSymbol (名前の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity workspace/symbol (上位 20 の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity definition (行き先の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity hover (名前を含む)",
+            "value": 87.5,
+            "unit": "%"
+          },
+          {
+            "name": "parity references (数の一致)",
+            "value": 97.222,
+            "unit": "%"
+          },
+          {
+            "name": "parity documentHighlight (数の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity rename (書き換えの一致)",
+            "value": 89.474,
+            "unit": "%"
+          },
+          {
+            "name": "parity signatureHelp (名前・引数の数・今の引数の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity completion `x.\\|` (書いてある名前を含む)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity completion `na\\|me` (同)",
+            "value": 85.185,
+            "unit": "%"
+          },
+          {
+            "name": "parity 一致の平均",
+            "value": 95.938,
+            "unit": "%"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "committer": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "distinct": true,
+          "id": "517b9af89137994431ccecbf7af087c5f7212df7",
+          "message": "zustc: identifier patterns naming a const of the scrutinee's type compare with its value\n\n`X => ..` with `const X: u64 = !0 as u16 as u64;` (or a `&str` / integer slice const) was read as a\nbinding that matches everything. Only consts of the same simple type are compared for now.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-18T13:48:53Z",
+          "tree_id": "b16629c5ca04bfa3df372eb2feba5d73844eef80",
+          "url": "https://github.com/mizchi/zust/commit/517b9af89137994431ccecbf7af087c5f7212df7"
+        },
+        "date": 1795010138637,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
