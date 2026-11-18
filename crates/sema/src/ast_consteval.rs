@@ -134,6 +134,8 @@ fn write(prog: &Program, e: &Expr, ty: Ty, v: &mut DataVal, off: u32, depth: u32
     match ty {
         t if t.is_int() || matches!(t, Ty::Bool | Ty::Char) => {
             let x = prog.eval_const(e, 0)?;
+            // (`!true` is the integer `!1`: a bool keeps its low bit)
+            let x = if t == Ty::Bool { x & 1 } else { x };
             put_int(v, off, t.bits() / 8, x);
             Ok(())
         }
@@ -279,6 +281,54 @@ fn write(prog: &Program, e: &Expr, ty: Ty, v: &mut DataVal, off: u32, depth: u32
             }
         }
         Ty::Unit => Ok(()),
+        Ty::F64 => {
+            let x = eval_float(prog, e, depth)?;
+            v.bytes[off as usize..off as usize + 8].copy_from_slice(&x.to_le_bytes());
+            Ok(())
+        }
+        Ty::F32 => {
+            let x = eval_float(prog, e, depth)? as f32;
+            v.bytes[off as usize..off as usize + 4].copy_from_slice(&x.to_le_bytes());
+            Ok(())
+        }
+        // raw pointers: null (`ptr::null()` / `0 as *const T`), or the address of a static (`&X as *const T`,
+        // `&raw const X`, `addr_of!(X)`)
+        Ty::Ptr(..) => {
+            let mut x = e;
+            while let Expr::Cast(y, _) | Expr::Paren(y) = x {
+                x = y;
+            }
+            let target = match x {
+                Expr::Ref(_, y) | Expr::RawRef(_, y) => Some(&**y),
+                Expr::Macro(p, args, _) if p.segs.last().is_some_and(|s| s.name == "addr_of" || s.name == "addr_of_mut") => {
+                    let _ = args;
+                    None
+                }
+                _ => None,
+            };
+            if let Some(Expr::Path(None, p)) = target {
+                if let Some(&ci) = ident(p).and_then(|id| prog.const_index.get(id)) {
+                    if prog.consts[ci as usize].stat.is_some() {
+                        v.relocs.push((off, DRef::Static(ci)));
+                        return Ok(());
+                    }
+                }
+            }
+            // (`&mut 1isize as *mut _`: a pointer to anonymous data)
+            if let (Some(y), Ty::Ptr(_, inner)) = (target, ty) {
+                if !inner.is_fat() {
+                    let d = eval(prog, y, *inner)?;
+                    v.relocs.push((off, DRef::Anon(d)));
+                    return Ok(());
+                }
+            }
+            let null = matches!(x, Expr::Call(f, a) if a.is_empty() && matches!(&**f, Expr::Path(None, p) if p.segs.last().is_some_and(|s| s.name == "null" || s.name == "null_mut")))
+                || prog.eval_const(x, 0) == Ok(0);
+            if null {
+                return Ok(());
+            }
+            Err(format!("constants of type `{}` are not supported", prog.tn(ty)))
+        }
         t => Err(format!("constants of type `{}` are not supported", prog.tn(t))),
     }
 }
@@ -296,4 +346,41 @@ pub fn dump(dv: &DataVal, indent: usize, out: &mut Vec<String>) {
             }
         }
     }
+}
+
+/// A float constant: a literal, `-x`, `+ - * /` of them, a cast of an integer constant, another const
+fn eval_float(prog: &Program, e: &Expr, depth: u32) -> R<f64> {
+    if depth > 64 {
+        return Err("constant is too deeply nested".to_string());
+    }
+    Ok(match e {
+        Expr::Paren(x) => eval_float(prog, x, depth + 1)?,
+        Expr::Lit(t, _) => {
+            let s: String = t.chars().filter(|&c| c != '_').collect();
+            let s = s.trim_end_matches("f64").trim_end_matches("f32");
+            s.parse::<f64>().map_err(|_| "not a float constant".to_string())?
+        }
+        Expr::Unary(op, x, _) if op == "-" => -eval_float(prog, x, depth + 1)?,
+        Expr::Binary(op, l, r, _) => {
+            let (l, r) = (eval_float(prog, l, depth + 1)?, eval_float(prog, r, depth + 1)?);
+            match op.as_str() {
+                "+" => l + r,
+                "-" => l - r,
+                "*" => l * r,
+                "/" => l / r,
+                _ => return Err("unsupported operator in a float constant".to_string()),
+            }
+        }
+        Expr::Cast(x, _) => match eval_float(prog, x, depth + 1) {
+            Ok(f) => f,
+            Err(_) => prog.eval_const(x, 0)? as f64,
+        },
+        Expr::Path(None, p) => {
+            let id = ident(p).ok_or("unsupported float constant")?;
+            let ci = *prog.const_index.get(id).ok_or("unsupported float constant")?;
+            let ce = crate::parse::parse_expr(&prog.consts[ci as usize].expr)?;
+            eval_float(prog, &ce, depth + 1)?
+        }
+        _ => return Err("unsupported float constant".to_string()),
+    })
 }

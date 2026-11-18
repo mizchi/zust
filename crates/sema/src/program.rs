@@ -1471,6 +1471,25 @@ impl Program {
         self.eval_const(&e, depth + 1)
     }
 
+    /// The part `pick` takes from the value of the constant expression b (through `&`, `*`, parentheses and other
+    /// consts)
+    fn const_part(&self, b: &crate::parse::Expr, depth: u32, pick: &dyn Fn(&crate::parse::Expr) -> Option<crate::parse::Expr>) -> R<crate::parse::Expr> {
+        use crate::parse::Expr;
+        if depth > 64 {
+            return Err("constant is too deeply nested".into());
+        }
+        match b {
+            Expr::Paren(x) | Expr::Ref(_, x) => self.const_part(x, depth + 1, pick),
+            Expr::Unary(op, x, _) if op == "*" => self.const_part(x, depth + 1, pick),
+            Expr::Path(None, p) if !p.global && p.segs.len() == 1 && p.segs[0].args.is_empty() => {
+                let ci = *self.const_index.get(p.segs[0].name.as_str()).ok_or("unsupported expression in constant")?;
+                let e = crate::parse::parse_expr(&self.consts[ci as usize].expr)?;
+                self.const_part(&e, depth + 1, pick)
+            }
+            x => pick(x).ok_or_else(|| "unsupported expression in constant".into()),
+        }
+    }
+
     /// 自前の構文木の整数の定数式を評価する
     pub fn eval_const(&self, e: &crate::parse::Expr, depth: u32) -> R<i128> {
         use crate::parse::Expr;
@@ -1478,6 +1497,49 @@ impl Program {
             Expr::Lit(t, _) => lit_int(t).ok_or("not an integer constant")?,
             Expr::Paren(x) => self.eval_const(x, depth)?,
             Expr::Cast(x, _) => self.eval_const(x, depth)?,
+            // (`{ 3 }` / `{ let x = ..; }` is not: a block of one expression; `if c { a } else { b }`)
+            Expr::Block(None, false, b) if b.stmts.len() == 1 => match &b.stmts[0] {
+                crate::parse::Stmt::Expr(x, false) => self.eval_const(x, depth)?,
+                _ => return Err("unsupported expression in constant".into()),
+            },
+            Expr::If(c, t, Some(els)) => {
+                let tail = |b: &crate::parse::Block| match b.stmts.as_slice() {
+                    [crate::parse::Stmt::Expr(x, false)] => Some(x.clone()),
+                    _ => None,
+                };
+                let c = self.eval_const(c, depth)?;
+                if c != 0 {
+                    let x = tail(t).ok_or("unsupported expression in constant")?;
+                    self.eval_const(&x, depth)?
+                } else {
+                    self.eval_const(els, depth)?
+                }
+            }
+            Expr::Path(None, p) if p.segs.len() == 1 && (p.segs[0].name == "true" || p.segs[0].name == "false") => (p.segs[0].name == "true") as i128,
+            // (`X[0]` / `T.1` of a const array, byte string, tuple or struct)
+            Expr::Index(b, i, _) => {
+                let i = self.eval_const(i, depth)?;
+                let part = self.const_part(b, depth, &|x| match x {
+                    Expr::Array(xs) => usize::try_from(i).ok().and_then(|i| xs.get(i).cloned()),
+                    Expr::Repeat(x, _) => Some((**x).clone()),
+                    Expr::Lit(t, p) => {
+                        let (_, bs) = crate::ast_consteval::str_lit(t)?;
+                        let b = *bs.get(usize::try_from(i).ok()?)?;
+                        Some(Expr::Lit(b.to_string(), *p))
+                    }
+                    _ => None,
+                })?;
+                self.eval_const(&part, depth + 1)?
+            }
+            Expr::Field(b, f, _) => {
+                let part = self.const_part(b, depth, &|x| match x {
+                    Expr::Tuple(xs) => f.parse::<usize>().ok().and_then(|k| xs.get(k).cloned()),
+                    Expr::Struct(_, fs, _) => fs.iter().find(|x| &x.0 == f).map(|x| x.1.clone()),
+                    Expr::Call(_, xs) => f.parse::<usize>().ok().and_then(|k| xs.get(k).cloned()),
+                    _ => None,
+                })?;
+                self.eval_const(&part, depth + 1)?
+            }
             Expr::Unary(op, x, _) => {
                 let v = self.eval_const(x, depth)?;
                 match op.as_str() {
@@ -1499,6 +1561,14 @@ impl Program {
                     "&" => l & r,
                     "|" => l | r,
                     "^" => l ^ r,
+                    "==" => (l == r) as i128,
+                    "!=" => (l != r) as i128,
+                    "<" => (l < r) as i128,
+                    "<=" => (l <= r) as i128,
+                    ">" => (l > r) as i128,
+                    ">=" => (l >= r) as i128,
+                    "&&" => (l != 0 && r != 0) as i128,
+                    "||" => (l != 0 || r != 0) as i128,
                     _ => return Err("unsupported operator in constant".into()),
                 }
             }

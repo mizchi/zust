@@ -27,6 +27,7 @@ compile-fail	argument-suggestions/suggest-better-removing-issue-126246.rs
 compile-fail	argument-suggestions/swapped_arguments.rs
 compile-fail	argument-suggestions/too-long.rs
 run-pass	array-slice-vec/byte-literals.rs
+run-pass	array-slice-vec/check-static-slice.rs
 run-pass	array-slice-vec/copy-out-of-array-1.rs
 run-pass	array-slice-vec/destructure-array-1.rs
 run-pass	array-slice-vec/driftsort-off-by-one-issue-136103.rs
@@ -1188,6 +1189,7 @@ run-pass	consts/const-blocks/fn-call-in-const.rs
 check-pass	consts/const-blocks/nll-pass.rs
 run-pass	consts/const-blocks/run-pass.rs
 run-pass	consts/const-byte-str-cast.rs
+run-pass	consts/const-contents.rs
 run-pass	consts/const-enum-byref-self.rs
 run-pass	consts/const-enum-byref.rs
 run-pass	consts/const-enum-ptr.rs
@@ -1224,6 +1226,7 @@ check-pass	consts/const-eval/stable-metric/dominators-edge-case.rs
 run-pass	consts/const-eval/variance-const-eval-cycle.rs
 run-pass	consts/const-eval/write-to-uninhabited-enum-variant.rs
 check-pass	consts/const-eval/zst_operand_eval.rs
+run-pass	consts/const-fields-and-indexing.rs
 check-pass	consts/const-fn-destructuring-arg.rs
 run-pass	consts/const-fn-method.rs
 build-pass	consts/const-fn-zst-args.rs
@@ -1238,6 +1241,7 @@ run-pass	consts/const-negation.rs
 run-pass	consts/const-negative.rs
 run-pass	consts/const-nullary-enum.rs
 run-pass	consts/const-nullary-univariant-enum.rs
+run-pass	consts/const-rec-and-tup.rs
 run-pass	consts/const-region-ptrs.rs
 check-pass	consts/const-static-ref-to-closure.rs
 run-pass	consts/const-struct-offsets.rs
@@ -1271,6 +1275,7 @@ compile-fail	consts/invalid-const-in-body.rs
 check-pass	consts/issue-104155.rs
 compile-fail	consts/issue-104609.rs
 check-pass	consts/issue-13837.rs
+run-pass	consts/issue-17718-borrow-interior.rs
 check-pass	consts/issue-17718-references.rs
 build-pass	consts/issue-21562.rs
 check-pass	consts/issue-28822.rs
@@ -1322,7 +1327,9 @@ run-pass	consts/signed_enum_discr.rs
 check-pass	consts/static-cycle-error.rs
 check-pass	consts/static-default-lifetime/inner-item.rs
 check-pass	consts/static-default-lifetime/static-trait-impl.rs
+run-pass	consts/static-mut-refs.rs
 check-pass	consts/static-promoted-to-mutable-static.rs
+run-pass	consts/static-raw-pointer-interning.rs
 compile-fail	consts/std/conjure_zst.rs
 check-pass	consts/unnormalized-param-env.rs
 check-pass	consts/unsafe_cell_in_const.rs
@@ -4344,6 +4351,7 @@ run-pass	static/static-struct-initialization-5688.rs
 run-pass	statics/conditional-static-declaration-16010.rs
 build-pass	statics/enum-with-static-str-variant-13214.rs
 build-pass	statics/issue-15261.rs
+run-pass	statics/issue-17233.rs
 run-pass	statics/issue-17718-static-unsafe-interior.rs
 check-pass	statics/issue-44373-2.rs
 build-pass	statics/nested-allocations-dont-inherit-codegen-attrs.rs
