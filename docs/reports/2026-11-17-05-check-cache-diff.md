@@ -1,24 +1,25 @@
-# check のキャッシュのキーと読み戻しを差分にする (2026-11-17)
+# Incremental cache keys and read-back for check (2026-11-17)
 
-日付: 2026-11-17
+Date: 2026-11-17
 
-check は毎回、全関数 (compiler_main.rs で 9115) のキャッシュのキーを作り、キャッシュから読み戻して (要求していたインスタンスを
-要求し直して) いた。LSP のセッションでは前回の check の記録 (`ChkMemo`) を持ち、次の条件で使う。
+Every check built cache keys for all functions (9115 in compiler_main.rs) and read them back from the cache (re-requesting the instances
+that had been requested). An LSP session now keeps a record of the previous check (`ChkMemo`) and uses it under the following conditions.
 
-- 宣言の指紋 (`Analysis::iface_fp`): fn アイテムは要約 (シグネチャ・クロージャ) の符号のハッシュ、ほかのアイテムはテキストの
-  ハッシュを並べたもの。関数の本体だけの編集では変わらない。キーが参照するもの (参照先のシグネチャ・struct・const・
-  名前の表) はどれもこれで決まる。
-- 指紋が前回と同じなら、本体のアイテムのハッシュが同じ関数は検査済み (キーも読み戻しも要らない)。要求していたインスタンスは
-  名前で辿り、本体 (総称関数) のアイテムが変わったものだけを要求し直して検査する。検査に通らなかったものは毎回検査し直す。
-- 指紋が変わったら今までどおりキーとキャッシュで検査し、記録を作り直す。記録を作るのはキャッシュを使うセッション
-  (LSP) だけ (1 度だけの `zustc check` では作らない)。`ZUSTC_NO_CHECK_MEMO=1` で使わない。
-- tests/check.rs: examples の関数の本体に型エラーになる文・ならない文を足したり消したりを続け、毎回新しいセッションで
-  検査したものと診断を比べる。
+- Declaration fingerprint (`Analysis::iface_fp`): for fn items, the hash of the encoded item summary (signature, closures); for other items,
+  their text hashes, in order. Editing only a function body does not change it. Everything a key refers to (referenced signatures, structs,
+  consts, the name table) is determined by it.
+- If the fingerprint is the same as last time, functions whose body item hash is the same are already checked (no key or read-back needed).
+  Requested instances are followed by name, and only those whose body (generic function) item changed are re-requested and checked.
+  Anything that failed checking is re-checked every time.
+- If the fingerprint changed, checking uses keys and the cache as before, and the record is rebuilt. Only sessions that use the cache
+  (the LSP) build the record (a one-shot `zustc check` does not). `ZUSTC_NO_CHECK_MEMO=1` disables it.
+- tests/check.rs: keeps adding and removing statements that do or do not cause type errors in the function bodies of examples, and each
+  time compares the diagnostics with a check in a fresh session.
 
-| compiler_main.rs の 1 関数の編集 | 前 | 後 |
+| Editing 1 function in compiler_main.rs | Before | After |
 |---|---:|---:|
-| check (キーと読み戻し、検査) | 約 100 ms | 37 ms (検査し直すのは 13 関数: 編集した関数と、エラーのある関数) |
-| LSP didChange (stdio 越し) | 238 ms | 194 ms |
+| check (keys and read-back, checking) | about 100 ms | 37 ms (13 functions are re-checked: the edited function and the functions with errors) |
+| LSP didChange (over stdio) | 238 ms | 194 ms |
 
-残り (didChange 194 ms): 前処理 30 ms、参照 29 ms、Program 17 ms、要約 9 ms、prelude の選択 7 ms、split 6 ms、
-ほか (診断の JSON、cfg の評価など) 約 60 ms。
+Remaining (didChange 194 ms): preprocessing 30 ms, references 29 ms, Program 17 ms, item summary 9 ms, prelude selection 7 ms, split 6 ms,
+other (diagnostics JSON, cfg evaluation, etc.) about 60 ms.

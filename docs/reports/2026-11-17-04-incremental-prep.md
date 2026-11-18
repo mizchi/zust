@@ -1,30 +1,32 @@
-# 前処理をアイテムごとの差分にする (2026-11-17)
+# Incremental preprocessing per item (2026-11-17)
 
-日付: 2026-11-17
+Date: 2026-11-17
 
-前処理 (thread_local! の展開・マクロの展開・`mod` を平らにする・入れ子のアイテムの移動・コンストラクタの書き換え) を
-`crates/syntax/src/prep.rs` にまとめ、編集をまたいでチャンクごとに覚えるようにした。
+Preprocessing (thread_local! expansion, macro expansion, `mod` flattening, moving nested items, constructor rewriting) is now gathered in
+`crates/syntax/src/prep.rs` and remembered per chunk across edits.
 
-- チャンク: アイテムの境界 (`mod` / `impl` / `trait` の中も) で切った行の範囲。チャンクに切るのも前回との差分
-  (前後の変わっていない部分の境界はそのまま、間だけを字句解析し直す)。
-- どの前処理も、ファイル全体から集めたもの (マクロの定義・タプル struct とバリアントの要素数・モジュールの木と `use`・入れ子の
-  アイテムの名前) を使ってトークンごとに書き換え、行の数を変えない。集めるものはアイテムの宣言にしか依らないので、関数の
-  本体の中の式と const / static の初期化式を消した「骨組み」から同じものが集まる (本体の中の入れ子のアイテム・`use`・
-  `macro_rules!`・ユーザのマクロの呼び出しは残す。残すもののない本体は括弧ごと消す)。
-- 骨組みの全体が前回と同じなら、変わっていないチャンクは前回の結果を使い、変わったチャンクだけを「ほかを骨組みにした
-  ソース」(compiler_main.rs で 2.1 MB → 0.31 MB) で前処理して行で切り出す。骨組みが変わったとき (宣言の編集)・括弧が
-  釣り合っていないとき・移したアイテムがチャンクをまたぐときは全体を前処理する。
-- 1 回目の呼び出しは全体を前処理するだけ (1 度しか前処理しないビルドでチャンクの記録を作らない)。
-- tests/prep_inc.rs: examples と crates/core/src のファイルを `mod` で束ねたものに乱数の編集 (本体の中と、どこでも) を
-  続けて加え、毎回全体の前処理と本文・桁のずれ・成否を比べる (差分の経路 156 回、全体の経路 364 回)。
-  `ZUSTC_PREP_VERIFY=1` で毎回比べる、`ZUSTC_NO_PREP_INC=1` で切る、`ZUSTC_PREP_LOG=1` で経路を出す。
-- 乱数の編集のテストで、壊れたソースで入れ子のアイテムの名前の変更が止まらず stack overflow になる hoist の不具合が
-  見つかったので直した (変えても同じならやり直さない、やり直しは 8 回まで)。
+- Chunk: a range of lines cut at item boundaries (also inside `mod` / `impl` / `trait`). Cutting into chunks is also incremental
+  against the previous run (the boundaries in the unchanged parts before and after are kept; only the middle is re-lexed).
+- Every preprocessing step rewrites token by token using data gathered from the whole file (macro definitions, element counts of tuple
+  structs and variants, the module tree and `use`, names of nested items), and does not change the number of lines. The gathered data
+  depends only on item declarations, so the same data can be gathered from a "skeleton" in which the expressions inside function
+  bodies and the initializers of const / static are removed (nested items, `use`, `macro_rules!` and user macro calls inside bodies
+  are kept; a body with nothing to keep is removed together with its braces).
+- If the whole skeleton is the same as last time, unchanged chunks reuse the previous result, and only the changed chunks are
+  preprocessed in a "source where everything else is skeleton" (2.1 MB → 0.31 MB for compiler_main.rs) and then cut out by line.
+  When the skeleton changes (a declaration edit), when braces are unbalanced, or when a moved item crosses a chunk boundary, the
+  whole file is preprocessed.
+- The first call only preprocesses the whole file (a build that preprocesses just once does not create chunk records).
+- tests/prep_inc.rs: keeps applying random edits (inside bodies, and anywhere) to the files of examples and crates/core/src bundled with
+  `mod`, and each time compares the text, the column shifts and success/failure with full preprocessing (incremental path 156 times,
+  full path 364 times). `ZUSTC_PREP_VERIFY=1` compares every time, `ZUSTC_NO_PREP_INC=1` turns it off, `ZUSTC_PREP_LOG=1` prints the path.
+- The random edit test found a hoist bug where renaming nested items in broken source never stopped and caused a stack overflow.
+  It is fixed (no retry if the rename changes nothing; at most 8 retries).
 
-| compiler_main.rs (38886 行) の 1 関数の編集 | 前 | 後 |
+| Editing 1 function in compiler_main.rs (38886 lines) | Before | After |
 |---|---:|---:|
-| 前処理 | 約 270 ms | 28 ms |
-| LSP didChange (stdio 越し) | 476 ms | 238 ms |
+| Preprocessing | about 270 ms | 28 ms |
+| LSP didChange (over stdio) | 476 ms | 238 ms |
 
-残り (didChange 238 ms): 全関数 (9115) のキャッシュのキーと読み戻し 約 100 ms、参照 30 ms、Program 18 ms、要約 8 ms、
-split 6 ms、prelude の選択 7 ms。
+Remaining (didChange 238 ms): cache keys and read-back for all functions (9115) about 100 ms, references 30 ms, Program 18 ms, item summary 8 ms,
+split 6 ms, prelude selection 7 ms.

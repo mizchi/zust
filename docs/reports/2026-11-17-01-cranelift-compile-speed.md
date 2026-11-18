@@ -1,25 +1,25 @@
-# Cranelift の経路の関数のコンパイルを速くする (2026-11-17)
+# Faster compilation of functions on the Cranelift path (2026-11-17)
 
-日付: 2026-11-17
+Date: 2026-11-17
 
-自分自身 (out/selfhost/compiler_main.rs、38886 行・9178 関数) を `--no-cache` でコンパイルした時間 (ms)。
-どの段階でも出力の .o は同じ。
+Time (ms) to compile the compiler itself (out/selfhost/compiler_main.rs, 38886 lines, 9178 functions) with `--no-cache`.
+The output .o is the same at every stage.
 
-| 変更 | -j 1 | -j 4 |
+| Change | -j 1 | -j 4 |
 |---|---:|---:|
-| 前 | 4650 | 2040 |
-| Cranelift の IR の検査を切る (`ZUSTC_CLIF_VERIFY=1` で入れる) | 4140 | |
-| 関数の本体の構文木を本体ごとに 1 回だけ読む | 3950 | |
-| 番号の表を FxHash に、`Context` / `FunctionBuilderContext` を使い回す | 3810 | |
-| クロージャの本体を引くたびに囲む関数を読み直さない (囲む関数ごとにクロージャの式を覚える) | 約 −450 | |
-| 式の形のハッシュ (`expr_hash`) を Debug の文字列から木をたどるハッシュに (部分式はアドレスで覚える) | 3740 | |
-| キャッシュのキーで、参照先のシグネチャのハッシュを関数ごとに覚える | 3690 | |
-| 文字列リテラルの解読で 1 文字ずつ String を作らない (コンパイラに埋め込んだ 286KB の prelude) | 3640 | 1740 |
+| Before | 4650 | 2040 |
+| Turn off verification of the Cranelift IR (enable it with `ZUSTC_CLIF_VERIFY=1`) | 4140 | |
+| Read the syntax tree of a function body only once per body | 3950 | |
+| Use FxHash for the number tables; reuse `Context` / `FunctionBuilderContext` | 3810 | |
+| Do not re-read the enclosing function each time a closure body is looked up (remember the closure expressions per enclosing function) | about −450 | |
+| Change the expression shape hash (`expr_hash`) from a Debug string to a hash that walks the tree (subexpressions are remembered by address) | 3740 | |
+| In the cache key, remember the hash of the referenced signatures per function | 3690 | |
+| Do not build a String per character when decoding string literals (the 286KB prelude embedded in the compiler) | 3640 | 1740 |
 
-(計測の揺れは ±200 ms 程度。最初の 3 行は前のコミット)
+(Measurement noise is about ±200 ms. The first 3 rows are from the previous commit.)
 
-- 式の形のハッシュは、推論で記録した全部の部分式について Debug の文字列を作っていたので、深さに比例して重くなっていた
-  (全体の 9%)。今は木を 1 回たどり、部分式のハッシュを混ぜる (Debug が同じなら同じ値)。
-- 残りは Cranelift 自身が約半分 (regalloc2 が 22%、lower 6%、emit 4%)、acg のコード生成が 20%、型推論が 5%。
-- `single_pass` の regalloc (`ZUSTC_CLIF_FAST_RA=1`) にすると 3640 → 3050 ms になるが、.o が 43% 大きくなり、
-  できたコンパイラの実行が約 40% 遅くなる (lexer_main.rs で 75 → 104 ms)。既定は backtracking のままにした。
+- The expression shape hash built a Debug string for every subexpression recorded during inference, so its cost grew with depth
+  (9% of the total). Now it walks the tree once and mixes in the subexpression hashes (the same Debug string gives the same value).
+- Of the rest, Cranelift itself is about half (regalloc2 22%, lower 6%, emit 4%), acg code generation is 20%, and type inference is 5%.
+- Switching to the `single_pass` regalloc (`ZUSTC_CLIF_FAST_RA=1`) goes from 3640 → 3050 ms, but the .o becomes 43% larger and
+  the resulting compiler runs about 40% slower (75 → 104 ms on lexer_main.rs). The default stays backtracking.
