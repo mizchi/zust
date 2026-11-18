@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795017073724,
+  "lastUpdate": 1795018048250,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -6041,6 +6041,165 @@ window.BENCHMARK_DATA = {
           {
             "name": "rt/strings run (-O)",
             "value": 73.841,
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "committer": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "distinct": true,
+          "id": "4a84a6ce5b4822a219b01462257ed9f7dfd00c44",
+          "message": "mem::transmute / forget / size_of_val, ptr::read / write / drop_in_place; const temporaries drop\n\n- prelude: transmute (with E0512 size check and the &T -> &mut T lint),\n  transmute_copy, forget, size_of_val, align_of_val, ptr::drop_in_place,\n  ptr::read, ptr::write\n- `&mut x` / `&x` passed for a generic `*mut T` / `*const T` parameter\n- the atomic Ordering rename also sees a `use` after the file's header\n  comments, and `use std::sync::atomic::*`\n- `BAR.0` with a `const BAR` that needs dropping drops the temporary\n- tests/ui: run-pass 1307, check-pass 1058, build-pass 77, compile-fail 2802\n\nAccepted compile-fail removals (passed only because transmute was unknown):\nclosures/coerce-unsafe-to-closure.rs (fn item as a closure, E0277),\ncmse-nonsecure/cmse-nonsecure-call/gate_test.rs (feature gate),\nconsts/const-eval/ptr-to-int-transmute-in-consts-issue-87525.rs and\nconsts/const-eval/transmute-const-promotion.rs (const eval),\npacked/packed-struct-generic-transmute.rs and packed/packed-struct-transmute.rs\n(repr(packed) layout), transmute/ambiguity-in-closure-arg.rs (inference),\ntransmute/unnecessary-transmutation.rs (lint)\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-18T16:02:18Z",
+          "tree_id": "5a6e7a8ccccd597c8fd98e5b1af54ccd47b712ca",
+          "url": "https://github.com/mizchi/zust/commit/4a84a6ce5b4822a219b01462257ed9f7dfd00c44"
+        },
+        "date": 1795018047757,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "gen1000 build cold",
+            "value": 155.801,
+            "unit": "ms"
+          },
+          {
+            "name": "gen1000 build noop",
+            "value": 20.083,
+            "unit": "ms"
+          },
+          {
+            "name": "gen1000 build edit 1 fn",
+            "value": 27.074,
+            "unit": "ms"
+          },
+          {
+            "name": "gen1000 check",
+            "value": 129.34,
+            "unit": "ms"
+          },
+          {
+            "name": "gen1000 build cold peak RSS",
+            "value": 17.699,
+            "unit": "MiB"
+          },
+          {
+            "name": "gen1000 binary",
+            "value": 323.977,
+            "unit": "KiB"
+          },
+          {
+            "name": "gen1000 cache",
+            "value": 387.205,
+            "unit": "KiB"
+          },
+          {
+            "name": "gen1000 build noop instructions",
+            "value": 145.787,
+            "unit": "M instr"
+          },
+          {
+            "name": "gen1000 build edit 1 fn instructions",
+            "value": 138.883,
+            "unit": "M instr"
+          },
+          {
+            "name": "gen1000 check instructions",
+            "value": 793.873,
+            "unit": "M instr"
+          },
+          {
+            "name": "gen5000 build cold",
+            "value": 699.146,
+            "unit": "ms"
+          },
+          {
+            "name": "gen5000 build noop",
+            "value": 89.701,
+            "unit": "ms"
+          },
+          {
+            "name": "gen5000 build edit 1 fn",
+            "value": 96.577,
+            "unit": "ms"
+          },
+          {
+            "name": "gen5000 check",
+            "value": 609.595,
+            "unit": "ms"
+          },
+          {
+            "name": "gen5000 build cold peak RSS",
+            "value": 54.586,
+            "unit": "MiB"
+          },
+          {
+            "name": "gen5000 binary",
+            "value": 1558.336,
+            "unit": "KiB"
+          },
+          {
+            "name": "gen5000 cache",
+            "value": 1902.83,
+            "unit": "KiB"
+          },
+          {
+            "name": "gen5000 build noop instructions",
+            "value": 688.762,
+            "unit": "M instr"
+          },
+          {
+            "name": "gen5000 build edit 1 fn instructions",
+            "value": 647.507,
+            "unit": "M instr"
+          },
+          {
+            "name": "gen5000 check instructions",
+            "value": 3910.568,
+            "unit": "M instr"
+          },
+          {
+            "name": "rt/fib run (-O)",
+            "value": 73.065,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/hashmap run (-O)",
+            "value": 178.392,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/matmul run (-O)",
+            "value": 46.217,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/nbody run (-O)",
+            "value": 89.129,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/sieve run (-O)",
+            "value": 107.053,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/sort run (-O)",
+            "value": 245.08,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/strings run (-O)",
+            "value": 74.198,
             "unit": "ms"
           }
         ]
