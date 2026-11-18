@@ -587,7 +587,16 @@ impl Session2 {
                 return Err(format!("{}:1: {e}", it.line));
             }
         }
-        let mut prog = Program::build_with(&items, &sums, self.ctx.lib.is_none())?;
+        // (`#![crate_type = "lib"]`: a library, no `main` needed)
+        let lib_attr = {
+            let mut end = src.len().min(4096);
+            while !src.is_char_boundary(end) {
+                end -= 1;
+            }
+            let c: String = src[..end].chars().filter(|c| !c.is_whitespace()).collect();
+            ["lib", "rlib", "dylib", "cdylib", "staticlib", "proc-macro"].iter().any(|k| c.contains(&format!("#![crate_type=\"{k}\"]")))
+        };
+        let mut prog = Program::build_with(&items, &sums, self.ctx.lib.is_none() && !lib_attr)?;
         tm.lap("program", String::new());
         prog.prelude_from = user as u32;
         prog.overflow_checks = !self.opts.opt;
