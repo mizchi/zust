@@ -119,6 +119,8 @@ impl Cx<'_> {
             if !m.is_empty() && self.prog.method(sid, m).is_some() {
                 let ne = mcall(paren(left), m, vec![right.clone()]);
                 let ne = self.keep_expr(ne);
+                // (an operator: `&mut self` is not two-phase)
+                self.bk.op_call = ne as *const Expr as usize;
                 return self.expr(ne, expected);
             }
         }

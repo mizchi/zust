@@ -180,6 +180,9 @@ impl Cx<'_> {
                 let Some(Ty::Struct(sid)) = self.peek_or_static(b).map(|t| self.strip_refs(t)) else { unreachable!() };
                 let m = if self.prog.method(sid, "index_mut").is_some() { "index_mut" } else { "index" };
                 let e = self.keep_expr(mcall(Expr::Paren(b.clone()), m, vec![(**k).clone()]));
+                // (index_mut is used for reads too: the borrow checker sees a shared borrow; a write is checked on the
+                // place itself)
+                self.bk.shared_recv = e as *const Expr as usize;
                 let (v, t) = self.expr(e, None)?;
                 match (v, t) {
                     (Some(p), Ty::Ref(_, inner)) => Ok(Place::Mem(p, 0, *inner)),

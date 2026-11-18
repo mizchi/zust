@@ -51,6 +51,7 @@ run-pass	array-slice-vec/vec-macro-no-std.rs
 run-pass	array-slice-vec/vec-macro-rvalue-scope.rs
 run-pass	array-slice-vec/vec-macro-with-trailing-comma.rs
 run-pass	array-slice-vec/vec-matching-fixed.rs
+compile-fail	array-slice-vec/vec-mut-iter-borrow.rs
 compile-fail	array-slice-vec/vec-res-add.rs
 run-pass	array-slice-vec/vector-no-ann-2.rs
 compile-fail	array-slice-vec/vector-no-ann.rs
@@ -192,6 +193,7 @@ compile-fail	async-await/await-keyword/incorrect-syntax-suggestions.rs
 check-pass	async-await/bound-normalization.rs
 compile-fail	async-await/coroutine-desc.rs
 build-pass	async-await/default-struct-update.rs
+compile-fail	async-await/dont-print-desugared-async.rs
 compile-fail	async-await/dont-suggest-await-on-method-return-mismatch.rs
 compile-fail	async-await/drop-order/drop-order-locals-are-hidden.rs
 compile-fail	async-await/drop-track-bad-field-in-fru.rs
@@ -404,8 +406,10 @@ compile-fail	block-result/issue-13428.rs
 compile-fail	block-result/issue-13624.rs
 compile-fail	block-result/issue-20862.rs
 compile-fail	block-result/unexpected-return-on-unit.rs
+compile-fail	borrowck/argument_number_mismatch_ice.rs
 compile-fail	borrowck/assign-imm-local-twice.rs
 compile-fail	borrowck/assign_mutable_fields.rs
+compile-fail	borrowck/assignment-to-immutable-ref.rs
 compile-fail	borrowck/async-trait-proposes-let-binding.rs
 compile-fail	borrowck/augmented-assignments.rs
 compile-fail	borrowck/borrow-checker-lifetime-error-46471.rs
@@ -415,6 +419,7 @@ compile-fail	borrowck/borrowck-and-init.rs
 compile-fail	borrowck/borrowck-argument.rs
 compile-fail	borrowck/borrowck-assign-comp-idx.rs
 compile-fail	borrowck/borrowck-assign-comp.rs
+compile-fail	borrowck/borrowck-assign-to-andmut-in-aliasable-loc.rs
 compile-fail	borrowck/borrowck-assign-to-andmut-in-borrowed-loc.rs
 run-pass	borrowck/borrowck-assign-to-subfield.rs
 run-pass	borrowck/borrowck-assignment-to-static-mut.rs
@@ -477,6 +482,7 @@ compile-fail	borrowck/borrowck-move-out-of-overloaded-auto-deref.rs
 run-pass	borrowck/borrowck-multiple-borrows-interior-boxes.rs
 compile-fail	borrowck/borrowck-multiple-captures.rs
 compile-fail	borrowck/borrowck-mut-addr-of-imm-var.rs
+compile-fail	borrowck/borrowck-mut-borrow-linear-errors.rs
 compile-fail	borrowck/borrowck-mut-slice-of-imm-vec.rs
 run-pass	borrowck/borrowck-mut-uniq.rs
 run-pass	borrowck/borrowck-mut-vec-as-imm-slice.rs
@@ -551,6 +557,7 @@ compile-fail	borrowck/issue-42344.rs
 compile-fail	borrowck/issue-45199.rs
 run-pass	borrowck/issue-46095.rs
 compile-fail	borrowck/issue-46471.rs
+compile-fail	borrowck/issue-51117.rs
 run-pass	borrowck/issue-51348-multi-ref-mut-in-guard.rs
 compile-fail	borrowck/issue-52713-bug.rs
 compile-fail	borrowck/issue-54499-field-mutation-marks-mut-as-used.rs
@@ -576,11 +583,16 @@ compile-fail	borrowck/issue-81365-7.rs
 compile-fail	borrowck/issue-81365-8.rs
 compile-fail	borrowck/issue-81365-9.rs
 compile-fail	borrowck/issue-82126-mismatched-subst-and-hir.rs
+compile-fail	borrowck/issue-85765.rs
+compile-fail	borrowck/issue-91206.rs
+compile-fail	borrowck/issue-92015.rs
+compile-fail	borrowck/issue-93093.rs
 run-pass	borrowck/lazy-init.rs
 compile-fail	borrowck/mismatched-pointer-type-in-self-7061.rs
 compile-fail	borrowck/move-in-pattern-mut.rs
 compile-fail	borrowck/move-in-pattern.rs
 compile-fail	borrowck/mutability-errors.rs
+compile-fail	borrowck/mutate-vec-while-iterating.rs
 check-pass	borrowck/nested-closure-with-generic-ice.rs
 compile-fail	borrowck/non-ADT-struct-pattern-box-pattern-ice-121463.rs
 compile-fail	borrowck/or-patterns.rs
@@ -597,9 +609,12 @@ run-pass	borrowck/region-checker-map-closure-13665.rs
 check-pass	borrowck/self-field-consume-with-drop-type.rs
 check-pass	borrowck/struct-field-move-with-drop-borrow.rs
 compile-fail	borrowck/suggest-assign-rvalue.rs
+compile-fail	borrowck/suggest-mut-iterator.rs
 compile-fail	borrowck/suggest-ref-mut-issue-118596.rs
+compile-fail	borrowck/suggestions/overloaded-index-without-indexmut.rs
 compile-fail	borrowck/tainted-promoteds.rs
 check-pass	borrowck/tuple-field-move-with-drop-borrow.rs
+compile-fail	borrowck/two-phase-across-loop.rs
 run-pass	borrowck/two-phase-baseline.rs
 run-pass	borrowck/two-phase-control-flow-split-before-activation.rs
 run-pass	borrowck/two-phase-method-receivers.rs
@@ -867,6 +882,8 @@ compile-fail	coherence/warn-when-cycle-is-error-in-coherence.rs
 check-pass	collections/btreemap/btreemap_into_iterator_lifetime.rs
 run-pass	collections/hashmap/hashmap-debug-format.rs
 compile-fail	collections/hashmap/hashmap-index-mut.rs
+compile-fail	collections/hashmap/hashmap-iter-value-lifetime.rs
+compile-fail	collections/hashmap/hashmap-lifetimes.rs
 run-pass	collections/hashmap/hashmap-path-key.rs
 run-pass	collections/hashset-connected-border-12860.rs
 compile-fail	compare-method/bad-self-type.rs
@@ -1176,6 +1193,10 @@ compile-fail	did_you_mean/issue-114112.rs
 compile-fail	did_you_mean/issue-35937.rs
 compile-fail	did_you_mean/issue-36798.rs
 compile-fail	did_you_mean/issue-36798_unknown_field.rs
+compile-fail	did_you_mean/issue-38147-1.rs
+compile-fail	did_you_mean/issue-38147-2.rs
+compile-fail	did_you_mean/issue-38147-3.rs
+compile-fail	did_you_mean/issue-38147-4.rs
 compile-fail	did_you_mean/issue-39544.rs
 compile-fail	did_you_mean/issue-40006.rs
 compile-fail	did_you_mean/issue-40396.rs
@@ -1218,6 +1239,7 @@ run-pass	drop/dropflag-reinit-in-loop.rs
 run-pass	drop/dst-coerce-unsized-drop.rs
 run-pass	drop/enum-drop-impl-15063.rs
 compile-fail	drop/explicit-call-to-dtor.rs
+compile-fail	drop/explicit-call-to-supertrait-dtor.rs
 compile-fail	drop/explicit-drop-call-named-ref.rs
 check-pass	drop/field-replace-in-struct-with-drop.rs
 run-pass	drop/generic-drop-trait-bound-15858.rs
@@ -1346,6 +1368,7 @@ compile-fail	error-codes/E0214.rs
 compile-fail	error-codes/E0277-2.rs
 compile-fail	error-codes/E0277-3.rs
 compile-fail	error-codes/E0277.rs
+compile-fail	error-codes/E0389.rs
 compile-fail	error-codes/E0390.rs
 compile-fail	error-codes/E0404.rs
 compile-fail	error-codes/E0405.rs
@@ -1977,6 +2000,8 @@ run-pass	let-else/const-fn.rs
 check-pass	let-else/detect-invisible-delimiter.rs
 compile-fail	let-else/issue-94176.rs
 check-pass	let-else/let-else-binding-explicit-mut-pass.rs
+compile-fail	let-else/let-else-binding-explicit-mut.rs
+compile-fail	let-else/let-else-binding-immutable.rs
 compile-fail	let-else/let-else-destructuring.rs
 compile-fail	let-else/let-else-if.rs
 check-pass	let-else/let-else-irrefutable-152938.rs
@@ -2511,6 +2536,7 @@ compile-fail	moves/needs-clone-through-deref.rs
 compile-fail	mut/mut-cross-borrowing.rs
 compile-fail	mut/mut-pattern-internal-mutability.rs
 compile-fail	mut/mut-suggestion.rs
+compile-fail	mut/mutable-class-fields-2.rs
 compile-fail	mut/mutable-class-fields.rs
 compile-fail	namespace/namespaced-enum-glob-import-no-impls.rs
 run-pass	namespace/struct-type-and-function-name-coexistence.rs
@@ -2565,6 +2591,7 @@ check-pass	nll/issue-40510-4.rs
 run-pass	nll/issue-45696-long-live-borrows-in-boxes.rs
 run-pass	nll/issue-45696-no-variant-box-recur.rs
 run-pass	nll/issue-47153-generic-const.rs
+compile-fail	nll/issue-47388.rs
 compile-fail	nll/issue-47470.rs
 run-pass	nll/issue-47589.rs
 run-pass	nll/issue-48070.rs
@@ -3643,6 +3670,8 @@ compile-fail	rfcs/rfc-1937-termination-trait/termination-trait-main-wrong-type.r
 compile-fail	rfcs/rfc-1937-termination-trait/termination-trait-not-satisfied.rs
 compile-fail	rfcs/rfc-2005-default-binding-mode/borrowck-issue-49631.rs
 run-pass	rfcs/rfc-2005-default-binding-mode/enum-ok.rs
+compile-fail	rfcs/rfc-2005-default-binding-mode/enum.rs
+compile-fail	rfcs/rfc-2005-default-binding-mode/explicit-mut.rs
 run-pass	rfcs/rfc-2005-default-binding-mode/for-ok.rs
 run-pass	rfcs/rfc-2005-default-binding-mode/lit-ok.rs
 run-pass	rfcs/rfc-2005-default-binding-mode/range.rs
@@ -3772,6 +3801,7 @@ compile-fail	sized/unsized-str-in-return-expr-arg-and-local.rs
 compile-fail	span/E0072.rs
 compile-fail	span/borrowck-borrow-overloaded-auto-deref-mut.rs
 compile-fail	span/borrowck-borrow-overloaded-deref-mut.rs
+compile-fail	span/borrowck-call-method-from-mut-aliasable.rs
 compile-fail	span/coerce-suggestions.rs
 compile-fail	span/drop-location-span-error-rust-2021-incompatible-closure-captures-96258.rs
 check-pass	span/issue-24690.rs
@@ -3783,6 +3813,7 @@ compile-fail	span/issue-81800.rs
 compile-fail	span/lint-unused-unsafe.rs
 compile-fail	span/missing-unit-argument.rs
 check-pass	span/multispan-import-lint.rs
+compile-fail	span/mut-arg-hint.rs
 compile-fail	span/mutability-suggestion-fullwidth-ampersand.rs
 compile-fail	span/regions-escape-loop-via-variable.rs
 compile-fail	span/send-is-not-static-std-sync-2.rs
@@ -4008,6 +4039,7 @@ compile-fail	suggestions/issue-59819.rs
 compile-fail	suggestions/issue-62843.rs
 compile-fail	suggestions/issue-64252-self-type.rs
 compile-fail	suggestions/issue-66968-suggest-sorted-words.rs
+compile-fail	suggestions/issue-68049-2.rs
 compile-fail	suggestions/issue-71394-no-from-impl.rs
 compile-fail	suggestions/issue-82566-1.rs
 compile-fail	suggestions/issue-82566-2.rs
@@ -4094,7 +4126,10 @@ compile-fail	suggestions/suggest-imm-mut-trait-implementations.rs
 compile-fail	suggestions/suggest-let-and-typo-issue-132483.rs
 compile-fail	suggestions/suggest-let-for-assignment.rs
 compile-fail	suggestions/suggest-methods.rs
+compile-fail	suggestions/suggest-mut-method-for-loop-hashmap.rs
+compile-fail	suggestions/suggest-mut-method-for-loop.rs
 compile-fail	suggestions/suggest-null-ptr.rs
+compile-fail	suggestions/suggest-ref-mut.rs
 compile-fail	suggestions/suggest-remove-deref.rs
 compile-fail	suggestions/suggest-remove-reference-index.rs
 compile-fail	suggestions/suggest-remove-refs-1.rs

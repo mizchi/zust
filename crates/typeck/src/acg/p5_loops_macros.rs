@@ -286,7 +286,30 @@ impl HoistScan {
 impl Cx<'_> {
     // --- for ループ ------------------------------------------------------
 
+    /// `for pat in &x { .. }` / `for pat in &mut x { .. }`: x is borrowed until the loop ends (a hidden local holds
+    /// the loan; it is read when the loop is left)
     pub(crate) fn for_(&mut self, f: &Expr) -> R<V> {
+        let mut temp = None;
+        if let Expr::For(_, _, fexpr, _) = f {
+            if let (true, Expr::Ref(m, inner)) = (self.bk_on(), strip_paren(fexpr)) {
+                // (the loan only: the lowering reads x itself)
+                let t0 = self.bk.call_temps.len();
+                if let Some(ln) = self.bk_loan_only(inner, *m) {
+                    self.bk_call_temp(&[borrowck::Src::Loan(ln)], true);
+                }
+                if self.bk.call_temps.len() > t0 {
+                    temp = Some(t0);
+                }
+            }
+        }
+        let r = self.for_inner(f);
+        if let Some(t0) = temp {
+            self.bk_call_temps_end(t0);
+        }
+        r
+    }
+
+    fn for_inner(&mut self, f: &Expr) -> R<V> {
         let Expr::For(label, fpat, fexpr, fbody) = f else { unreachable!() };
         // (ラベルは syn の ident と同じく先頭の `'` を外した形で持つ)
         self.pending_label = label.as_ref().map(|l| l.trim_start_matches('\'').to_string());
@@ -376,12 +399,17 @@ impl Cx<'_> {
                 None => fexpr,
             };
             self.scopes.push(vec![]);
-            let (v, t) = self.expr(src_e, None)?;
+            // (the iterator holds what the iterable expression borrows: `for x in &mut xs { xs.push(1) }`)
+            self.bk_frame();
+            let r = self.expr(src_e, None);
+            let srcs = self.bk_frame_end();
+            let (v, t) = r?;
             if t == Ty::Never {
                 self.pop_scope();
                 return Ok((None, Ty::Never));
             }
             self.bind("__exr_it".into(), t, v);
+            self.bk_def_named("__exr_it", &srcs, src_e);
             let call: &Expr = self.keep_expr(mcall(path_expr("__exr_it"), "next", vec![]));
             let pat = Pat::TupleStruct(path_of("Some"), vec![(**fpat).clone()]);
             let r = self.while_let_parts(&pat, call, fbody);

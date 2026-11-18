@@ -597,9 +597,9 @@ impl Cx<'_> {
                 }
                 Ok(())
             }
-            Pat::Ref(_, inner) => {
+            Pat::Ref(pm, inner) => {
                 let (q, _) = self.pat_deref_once(p);
-                let saved = self.bk_pat_proj(borrowck::Proj::Deref(false));
+                let saved = self.bk_pat_proj(borrowck::ref_deref(*pm));
                 let r = self.pat_bind(inner, q, BindMode::Move);
                 self.bk.pat_path = saved;
                 r

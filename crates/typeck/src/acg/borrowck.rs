@@ -27,8 +27,10 @@ use crate::types::Ty;
 #[derive(Clone, PartialEq, Eq, Hash, Debug)]
 pub enum Proj {
     Field(String),
-    /// `*x` (true: through a Box, which the local owns)
+    /// `*x` (true: through a Box, which the local owns; false: through a `&mut`)
     Deref(bool),
+    /// `*x` through a `&`
+    Shr,
     Index,
 }
 
@@ -38,10 +40,15 @@ pub struct BPlace {
     pub proj: Vec<Proj>,
 }
 
+/// The deref of a `&mut` / `&`
+pub fn ref_deref(m: bool) -> Proj {
+    if m { Proj::Deref(false) } else { Proj::Shr }
+}
+
 impl BPlace {
     /// The part of the place the local owns (up to the first deref of a reference)
     fn owned_len(&self) -> usize {
-        self.proj.iter().position(|p| *p == Proj::Deref(false)).unwrap_or(self.proj.len())
+        self.proj.iter().position(|p| matches!(p, Proj::Deref(false) | Proj::Shr)).unwrap_or(self.proj.len())
     }
 }
 
@@ -100,6 +107,8 @@ pub struct Loan {
     pub sp: Sp,
     /// Where a mutability error is reported (a closure's loan: the use in its body)
     pub at: Sp,
+    /// Made without an access of its own (`for x in &mut v`): the accesses acg makes at its position are its own
+    pub quiet: bool,
 }
 
 /// What the checker found (the first error by source position is reported)
@@ -142,6 +151,10 @@ pub struct Bk {
     pub move_mut_next: bool,
     /// The place the pattern being bound matches (the scrutinee, then its parts)
     pub pat_path: Option<BPlace>,
+    /// The method call an operator was rewritten to (its address)
+    pub op_call: usize,
+    /// The `index_mut` call acg makes to read an indexed place (its receiver is seen as shared)
+    pub shared_recv: usize,
     /// The tail expression of the function body (its address)
     pub tail: usize,
     /// Loan made for an expression (`&x`: the address of x; `x.m()` with a borrowed receiver: of the call)
@@ -194,6 +207,17 @@ pub fn is_copy(prog: &Program, t: Ty, depth: u32) -> bool {
     }
 }
 
+/// The prelude's iterator and view types: raw pointers into what they were made from, so they hold the loan of it
+const VIEWS: &[&str] = &[
+    "Windows", "Chunks", "ChunksExact", "Iter", "IterMut", "Chars", "DebugStruct", "DebugTuple", "DebugMap", "MutexGuard", "HmIter",
+    "HmIterMut", "BtIter", "BtIterMut", "DqIter", "Split", "SplitStr", "MatchIndices", "RSplitStr", "CharIndices", "Bytes", "SplitFn",
+];
+
+pub fn is_view(prog: &Program, sid: u32) -> bool {
+    let b = prog.base_of(sid);
+    VIEWS.contains(&prog.structs[b as usize].name.as_str()) && prog.struct_item.get(b as usize).is_some_and(|&i| i >= prog.prelude_from)
+}
+
 /// Whether a value of type t may hold a reference (and so a loan)
 pub fn has_refs(prog: &Program, t: Ty, _depth: u32) -> bool {
     fn go(prog: &Program, t: Ty, seen: &mut Vec<u32>, memo: &mut HashMap<u32, bool>) -> bool {
@@ -215,7 +239,8 @@ pub fn has_refs(prog: &Program, t: Ty, _depth: u32) -> bool {
                 seen.push(sid);
                 let sd = &prog.structs[sid as usize];
                 // (a closure holds what it captures by reference as raw pointers)
-                let clo = prog.closure_of_struct.contains_key(&prog.base_of(sid)) && sd.fields.iter().any(|f| matches!(f.1, Ty::Ptr(..)));
+                let clo = (prog.closure_of_struct.contains_key(&prog.base_of(sid)) && sd.fields.iter().any(|f| matches!(f.1, Ty::Ptr(..))))
+                    || is_view(prog, sid);
                 let r = clo
                     || sd.symbolic
                     || sd.fields.iter().any(|f| go(prog, f.1, seen, memo))
@@ -243,7 +268,7 @@ fn path_str(locals: &[Local], p: &BPlace) -> String {
                 s.push('.');
                 s.push_str(f);
             }
-            Proj::Deref(_) => {
+            Proj::Deref(_) | Proj::Shr => {
                 // (auto-deref before a field is not written)
                 if !matches!(p.proj.get(i + 1), Some(Proj::Field(_))) {
                     s.insert(0, '*');
@@ -391,6 +416,18 @@ impl Bk {
         if self.level == 0 || self.evs.is_empty() {
             return None;
         }
+        if std::env::var_os("ZUSTC_BK_DEBUG").is_some() {
+            for (i, l) in self.locals.iter().enumerate() {
+                eprintln!("local {i}: {} refs={} copy={} mut={:?}", l.name, l.refs, l.copy, l.mutable);
+            }
+            for (i, l) in self.loans.iter().enumerate() {
+                eprintln!("loan {i}: {:?} mut={}", l.place, l.mutable);
+            }
+            for (b, e) in &self.evs {
+                eprintln!("b{}: {e:?}", b.0);
+            }
+            eprintln!("edges: {:?}", self.edges.iter().map(|e| (e.0 .0, e.1 .0)).collect::<Vec<_>>());
+        }
         // ---- location-insensitive pre-pass (as Polonius' LocationInsensitive / Hybrid): if no error is possible when
         // control flow is ignored, the dataflow is not needed. The mutability errors that do not depend on the flow
         // are found here
@@ -410,12 +447,10 @@ impl Bk {
                         need_moves = true;
                     }
                     let lo = &self.locals[p.local as usize];
-                    if lo.mutable == Some(false) && p.owned_len() == p.proj.len() {
-                        if *a == Acc::Write && p.proj.is_empty() {
-                            need_inited = true;
-                        } else {
-                            self.check_mut(&State::default(), p, *a, *sp, &mut errs);
-                        }
+                    if *a == Acc::Write && p.proj.is_empty() {
+                        need_inited |= lo.mutable == Some(false);
+                    } else {
+                        self.check_mut(&State::default(), p, *a, *sp, &mut errs);
                     }
                     if !need_loans {
                         if let Some(ls) = by_local.get(&p.local) {
@@ -725,6 +760,23 @@ impl Bk {
     /// Mutation of a local not declared `mut`
     fn check_mut(&self, st: &State, p: &BPlace, a: Acc, sp: Sp, errs: &mut Vec<BkError>) {
         let lo = &self.locals[p.local as usize];
+        let writes = match a {
+            Acc::Borrow(l) => self.loans[l as usize].mutable,
+            Acc::Write | Acc::Modify => true,
+            _ => false,
+        };
+        // (through a `&`: `&mut *r` / `r.x = 1` with r: &T)
+        if writes && p.proj.contains(&Proj::Shr) {
+            let i = p.proj.iter().rposition(|x| *x == Proj::Shr).unwrap();
+            let behind = path_str(&self.locals, &BPlace { local: p.local, proj: p.proj[..=i].to_vec() });
+            let msg = match a {
+                Acc::Borrow(_) => format!("cannot borrow `{}` as mutable, as `{behind}` is behind a `&` reference", path_str(&self.locals, p)),
+                _ => format!("cannot assign to `{}`, which is behind a `&` reference", path_str(&self.locals, p)),
+            };
+            let sp = if let Acc::Borrow(l) = a { self.loans[l as usize].at } else { sp };
+            errs.push(BkError { sp, msg });
+            return;
+        }
         if lo.mutable != Some(false) || p.owned_len() < p.proj.len() {
             return;
         }
@@ -788,7 +840,7 @@ impl Bk {
                 continue;
             }
             let lo = &self.loans[ln as usize];
-            if lo.place.local != p.local {
+            if lo.place.local != p.local || lo.quiet && lo.sp == sp {
                 continue;
             }
             if !lo.mutable && !wants_mut {
@@ -797,7 +849,7 @@ impl Bk {
             let conflict = match a {
                 // (overwriting a reference does not touch what it points to)
                 Acc::Write => {
-                    prefix(&p.proj, &lo.place.proj) && !lo.place.proj[p.proj.len()..].first().is_some_and(|x| *x == Proj::Deref(false))
+                    prefix(&p.proj, &lo.place.proj) && !lo.place.proj[p.proj.len()..].first().is_some_and(|x| matches!(x, Proj::Deref(false) | Proj::Shr))
                         || prefix(&lo.place.proj, &p.proj)
                 }
                 _ => overlap(&lo.place, p),
@@ -916,6 +968,22 @@ impl Cx<'_> {
                 }
             }
         }
+        // (matching a reference binds by reference (default binding modes): the bindings reborrow `*e`)
+        if let Some((mut p, Some(Ty::Ref(m, _)))) = self.bk_place(e) {
+            let binds = pats.iter().any(|p| {
+                let mut v = vec![];
+                crate::ast_closure::pat_idents(p, &mut v);
+                !v.is_empty()
+            });
+            if binds {
+                p.proj.push(ref_deref(m));
+                let sp = err_pos(e);
+                let ln = self.bk.loans.len() as u32;
+                self.bk.loans.push(Loan { place: p.clone(), mutable: m, sp, at: sp, quiet: false });
+                self.bk_ev(Ev::Acc(p, Acc::Borrow(ln), sp));
+                self.bk.src(Src::Loan(ln));
+            }
+        }
         let srcs = self.bk_frame_end();
         self.bk.scrut = srcs;
         self.bk.scrut_place = self.bk_place(e).map(|p| (p.0, err_pos(e)));
@@ -954,7 +1022,7 @@ impl Cx<'_> {
         let Some(p) = self.bk.pat_path.clone() else { return saved };
         let sp = self.bk.scrut_place.as_ref().map(|x| x.1).unwrap_or(super::SP);
         let ln = self.bk.loans.len() as u32;
-        self.bk.loans.push(Loan { place: p.clone(), mutable: m, sp, at: sp });
+        self.bk.loans.push(Loan { place: p.clone(), mutable: m, sp, at: sp, quiet: false });
         self.bk_ev(Ev::Acc(p, Acc::Borrow(ln), sp));
         let mut s = saved.clone().unwrap_or_default();
         s.push(Src::Loan(ln));
@@ -1037,8 +1105,8 @@ impl Cx<'_> {
                 let mut t = t?;
                 loop {
                     match t {
-                        Ty::Ref(_, i) => {
-                            p.proj.push(Proj::Deref(false));
+                        Ty::Ref(m, i) => {
+                            p.proj.push(ref_deref(m));
                             t = *i;
                         }
                         Ty::Box(i) => {
@@ -1060,8 +1128,8 @@ impl Cx<'_> {
             Expr::Unary(op, x, _) if op == "*" => {
                 let (mut p, t) = self.bk_place(x)?;
                 match t? {
-                    Ty::Ref(_, i) => {
-                        p.proj.push(Proj::Deref(false));
+                    Ty::Ref(m, i) => {
+                        p.proj.push(ref_deref(m));
                         Some((p, Some(*i)))
                     }
                     Ty::Box(i) => {
@@ -1074,8 +1142,8 @@ impl Cx<'_> {
             Expr::Index(b, _, _) => {
                 let (mut p, t) = self.bk_place(b)?;
                 let mut t = t?;
-                while let Ty::Ref(_, i) = t {
-                    p.proj.push(Proj::Deref(false));
+                while let Ty::Ref(m, i) = t {
+                    p.proj.push(ref_deref(m));
                     t = *i;
                 }
                 p.proj.push(Proj::Index);
@@ -1122,7 +1190,7 @@ impl Cx<'_> {
         let Some((p, _)) = self.bk_place(e) else { return };
         let ln = self.bk.loans.len() as u32;
         self.bk.loan_of.insert(e as *const Expr as usize, ln);
-        self.bk.loans.push(Loan { place: p.clone(), mutable: m, sp, at: sp });
+        self.bk.loans.push(Loan { place: p.clone(), mutable: m, sp, at: sp, quiet: false });
         let l = p.local;
         self.bk_ev(Ev::Acc(p, Acc::Borrow(ln), sp));
         if !quiet {
@@ -1143,8 +1211,8 @@ impl Cx<'_> {
                 let mut t = t;
                 loop {
                     match t {
-                        Some(Ty::Ref(_, i)) => {
-                            p.proj.push(Proj::Deref(false));
+                        Some(Ty::Ref(rm, i)) => {
+                            p.proj.push(ref_deref(rm));
                             t = Some(*i);
                         }
                         Some(Ty::Box(i)) => {
@@ -1155,7 +1223,7 @@ impl Cx<'_> {
                     }
                 }
                 let ln = self.bk.loans.len() as u32;
-                self.bk.loans.push(Loan { place: p.clone(), mutable: m, sp, at: sp });
+                self.bk.loans.push(Loan { place: p.clone(), mutable: m, sp, at: sp, quiet: false });
                 let l = p.local;
                 if flows {
                     self.bk.src(Src::Loan(ln));
@@ -1176,7 +1244,36 @@ impl Cx<'_> {
 
 /// Whether the result of calling id may borrow from its argument i (self is 0)
     pub(crate) fn bk_ret_from(&self, id: u32, i: usize) -> bool {
-        let m = self.prog.sigs[id as usize].ret_from;
+        let sig = &self.prog.sigs[id as usize];
+        // (a method of a prelude view (`chunks.remainder()`): the result borrows what the view borrows, which the view's
+        // local passes on, not the view)
+        if i == 0 && sig.has_self {
+            if let Some(Ty::Ref(_, Ty::Struct(v))) = sig.params.first() {
+                if is_view(self.prog, *v) {
+                    return false;
+                }
+            }
+        }
+        // (`Iterator::next`: an item never borrows the iterator itself)
+        if i == 0 && sig.has_self && self.prog.names.get(id as usize).is_some_and(|n| n.ends_with("::next") || n.ends_with("::next_back")) {
+            return false;
+        }
+        // (a prelude view (`v.iter()`, `s.chars()`) borrows the receiver: the prelude writes no lifetimes)
+        if i == 0 && sig.has_self && matches!(sig.params.first(), Some(Ty::Ref(..))) {
+            let mut r = sig.ret;
+            if let Ty::Struct(o) = r {
+                // (`Option<Iter<T>>` ..)
+                if self.prog.structs[o as usize].args.len() == 1 && !is_view(self.prog, o) {
+                    r = self.prog.structs[o as usize].args[0];
+                }
+            }
+            if let Ty::Struct(v) = r {
+                if is_view(self.prog, v) {
+                    return true;
+                }
+            }
+        }
+        let m = sig.ret_from;
         // (not known: say no, so that a borrow is never kept alive by a guess)
         m != 0 && i < 63 && m >> i & 1 == 1
     }
@@ -1203,10 +1300,13 @@ impl Cx<'_> {
             paths.push((BPlace { local: l, proj: vec![] }, Some(t), CapMode::Use, super::SP));
         }
         let move_kw = matches!(c, Expr::Closure(true, ..));
-        let m = crate::ast_closure::assigns_capture(c, &[n.to_string()]);
+        // (the places of n the body assigns or borrows mutably: those are captured by `&mut`)
+        let mut muts: Vec<BPlace> = vec![];
+        self.bk_cap_muts(body, n, &mut muts);
+        let assigns = crate::ast_closure::assigns_capture(c, &[n.to_string()]);
         for (p, pt, mode, _) in &mut paths {
             // (stop at an index, and a move closure at a deref: it captures the reference)
-            let cut = p.proj.iter().position(|x| *x == Proj::Index || move_kw && matches!(x, Proj::Deref(_)));
+            let cut = p.proj.iter().position(|x| *x == Proj::Index || move_kw && matches!(x, Proj::Deref(_) | Proj::Shr));
             if let Some(i) = cut {
                 p.proj.truncate(i);
                 *pt = None;
@@ -1215,6 +1315,7 @@ impl Cx<'_> {
                 *mode = CapMode::Val;
             } else if *mode == CapMode::Use {
                 // (a use that is not a pattern: acg's analysis says whether the closure takes the value)
+                let m = assigns && muts.iter().any(|q| overlap(q, p));
                 *mode = if by_move { CapMode::Val } else if m { CapMode::RefMut } else { CapMode::Ref };
             }
         }
@@ -1244,7 +1345,7 @@ impl Cx<'_> {
                 continue;
             }
             let ln = self.bk.loans.len() as u32;
-            self.bk.loans.push(Loan { place: p.clone(), mutable: mode == CapMode::RefMut, sp, at });
+            self.bk.loans.push(Loan { place: p.clone(), mutable: mode == CapMode::RefMut, sp, at, quiet: false });
             self.bk_ev(Ev::Acc(p, Acc::Borrow(ln), sp));
             self.bk.src(Src::Loan(ln));
         }
@@ -1356,6 +1457,25 @@ impl Cx<'_> {
             Pat::Lit(_) | Pat::Range(..) | Pat::Path(_) => out.push((base.clone(), t, CapMode::Ref, sp)),
             _ => out.push((base.clone(), t, CapMode::Use, sp)),
         }
+    }
+
+    /// The places rooted at n that the closure body assigns (`n.a = ..`, `n += 1`) or borrows mutably (`&mut n.b`)
+    fn bk_cap_muts(&self, e: &Expr, n: &str, out: &mut Vec<BPlace>) {
+        match e {
+            Expr::Assign(l, _) | Expr::AssignOp(_, l, _, _) | Expr::Ref(true, l) => {
+                if let Some((p, _)) = self.bk_rooted_at(l, n) {
+                    out.push(p);
+                }
+            }
+            Expr::Macro(_, g, _) => {
+                for a in crate::ast_closure::macro_args(g).unwrap_or_default() {
+                    self.bk_cap_muts(&a, n, out);
+                }
+                return;
+            }
+            _ => {}
+        }
+        crate::ast_closure::each_child_pub(e, &mut |c| self.bk_cap_muts(c, n, out));
     }
 
     /// The places rooted at the variable n that the closure body uses
@@ -1493,6 +1613,29 @@ impl Cx<'_> {
             }
             self.bk_ev(Ev::Acc(BPlace { local: id, proj: vec![] }, Acc::Read, super::SP));
             self.bk_ev(Ev::Dead(id, super::SP));
+        }
+    }
+
+    /// A loan of the place e, with no access recorded for it
+    pub(crate) fn bk_loan_only(&mut self, e: &Expr, m: bool) -> Option<u32> {
+        let (p, _) = self.bk_place(e)?;
+        let sp = err_pos(e);
+        let ln = self.bk.loans.len() as u32;
+        self.bk.loans.push(Loan { place: p, mutable: m, sp, at: sp, quiet: true });
+        Some(ln)
+    }
+
+    /// What srcs borrow is stored into the local the place e is rooted at
+    pub(crate) fn bk_flow_into(&mut self, e: &Expr, srcs: &[Src]) {
+        if !self.bk_on() || srcs.is_empty() {
+            return;
+        }
+        if let Some((p, _)) = self.bk_place(e) {
+            let l = p.local;
+            if self.bk.locals[l as usize].refs {
+                let srcs: Vec<Src> = srcs.iter().filter(|s| **s != Src::Local(l)).copied().collect();
+                self.bk_ev(Ev::Flow(l, srcs));
+            }
         }
     }
 

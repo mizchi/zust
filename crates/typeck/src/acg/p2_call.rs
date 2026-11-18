@@ -568,17 +568,18 @@ impl Cx<'_> {
         let t0 = self.bk.call_temps.len();
         if self.bk_on() && !via_deref {
             let flows = self.bk_ret_from(id, 0);
-            let ev = self.bk_recv_ev(recv, recv_ty, flows);
+            let bk_recv_ty = if self.bk.shared_recv == e as *const Expr as usize { Ty::Ref(false, intern(st)) } else { recv_ty };
+            let ev = self.bk_recv_ev(recv, bk_recv_ty, flows);
             if let (true, Some(borrowck::Ev::Acc(_, borrowck::Acc::Borrow(ln), _))) = (flows, &ev) {
                 self.bk.loan_of.insert(e as *const Expr as usize, *ln);
             }
             // (two-phase for a call written as a method call; an operator (`x += x` → `add_assign`, synthesized
             // without a position) borrows first)
-            if matches!(recv_ty, Ty::Ref(true, _)) && msp.at.line != 0 {
+            if matches!(bk_recv_ty, Ty::Ref(true, _)) && self.bk.op_call != e as *const Expr as usize {
                 bk_late = ev;
             } else {
                 // (an operator's `&mut self` lasts until the call: `x += x` moves x while it is borrowed)
-                if let (true, Some(borrowck::Ev::Acc(_, borrowck::Acc::Borrow(ln), _))) = (matches!(recv_ty, Ty::Ref(true, _)), &ev) {
+                if let (true, Some(borrowck::Ev::Acc(_, borrowck::Acc::Borrow(ln), _))) = (matches!(bk_recv_ty, Ty::Ref(true, _)), &ev) {
                     let ln = *ln;
                     self.bk_push(ev);
                     self.bk_call_temp(&[borrowck::Src::Loan(ln)], true);
@@ -596,7 +597,17 @@ impl Cx<'_> {
             }
         }
         let args: Vec<&Expr> = margs.iter().collect();
+        // (a `&mut self` method of a value that holds references stores what its arguments borrow:
+        // `v.push(&mut x)`)
+        let into_recv = self.bk_on() && !via_deref && matches!(recv_ty, Ty::Ref(true, _)) && borrowck::has_refs(self.prog, st, 0);
+        if into_recv {
+            self.bk_frame();
+        }
         let r = self.call_fn(id, Some((recv_v, recv_ty)), &args, tf, expected, SP);
+        if into_recv {
+            let srcs = self.bk_frame_end();
+            self.bk_flow_into(recv, &srcs);
+        }
         self.bk_push(bk_late);
         if bk_op_temp {
             self.bk_call_temps_end(t0);
