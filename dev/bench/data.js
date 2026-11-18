@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795012393011,
+  "lastUpdate": 1795012395201,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -8772,6 +8772,85 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/mizchi/zust/commit/22b266e4b793a95a53db873f5682603ff38b2b87"
         },
         "date": 1795012087988,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "parity documentSymbol (名前の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity workspace/symbol (上位 20 の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity definition (行き先の一致)",
+            "value": 97.222,
+            "unit": "%"
+          },
+          {
+            "name": "parity hover (名前を含む)",
+            "value": 95,
+            "unit": "%"
+          },
+          {
+            "name": "parity references (数の一致)",
+            "value": 92.105,
+            "unit": "%"
+          },
+          {
+            "name": "parity documentHighlight (数の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity rename (書き換えの一致)",
+            "value": 90,
+            "unit": "%"
+          },
+          {
+            "name": "parity signatureHelp (名前・引数の数・今の引数の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity completion `x.\\|` (書いてある名前を含む)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity completion `na\\|me` (同)",
+            "value": 79.167,
+            "unit": "%"
+          },
+          {
+            "name": "parity 一致の平均",
+            "value": 95.349,
+            "unit": "%"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "committer": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "distinct": true,
+          "id": "1a3a0f91799c2fde3f8b58459e24385c03e91df4",
+          "message": "zustc: `x as Box<dyn Tr>` / `as Rc<dyn Tr>` coerce, casts to the same type\n\n- an `as` to Box<dyn ..> / Box<[T]> or a type with a dyn argument is the unsizing coercion\n- `f as fn()` where f already has that type\n- tests/ui: run-pass 51.6% -> 52.4%, check-pass 56.6%; three compile-fail tests that failed only\n  because such casts were unsupported need E0716 / Send through dyn / async checks\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-18T14:28:02Z",
+          "tree_id": "9537e2468a08b6269bd7f1bae3cb6046f9fae056",
+          "url": "https://github.com/mizchi/zust/commit/1a3a0f91799c2fde3f8b58459e24385c03e91df4"
+        },
+        "date": 1795012394592,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
