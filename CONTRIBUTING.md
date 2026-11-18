@@ -1,233 +1,243 @@
-# 開発のしかた
+# Contributing
 
-zust (zustc と zust-analyzer) を直す・足すときの手順。使い方は [README.ja.md](README.ja.md)、中のしくみは
-[docs/ja/architecture.md](docs/ja/architecture.md)。
+English | [日本語](CONTRIBUTING.ja.md)
 
-## 準備
+This document covers how to change and extend zust (zustc and zust-analyzer). See [README.md](README.md) for usage
+and [docs/architecture.md](docs/architecture.md) for how it works inside.
 
-README の「必要なもの」に加えて、次のものを使う。
+## Setup
 
-- rustc: tests/compare.sh や tests/probe.sh が、同じプログラムを rustc でもビルドして結果を比べる。
-- python3: ベンチマークのスクリプト (`bench/*.py`)。
-- valgrind (あれば): tests/compare.sh がメモリエラーとリークも見る。
-- rust-analyzer (あれば): `bench/lsp_parity.py` と `bench/ide_golden_ra.py` が答えを比べる。
-- cargo-mutants (あれば): ミューテーションテスト。
-- wild (あれば): リンクが速くなる。ベンチマークの数字は wild で測っている。
+In addition to the requirements in the README, the following tools are used:
+
+- rustc: `tests/compare.sh` and `tests/probe.sh` build the same programs with rustc and compare the results.
+- python3: the benchmark scripts (`bench/*.py`).
+- valgrind (optional): `tests/compare.sh` also checks for memory errors and leaks.
+- rust-analyzer (optional): `bench/lsp_parity.py` and `bench/ide_golden_ra.py` compare answers against it.
+- cargo-mutants (optional): mutation testing.
+- wild (optional): faster linking. The benchmark numbers are measured with wild.
 
 ```bash
 cargo build --release --workspace
 ```
 
-`cratebench/run.py` と `bench/deps_bench.py` は、実在のクレートのソースを git submodule から使う。最初に一度取ってくる
-(`git clone --recurse-submodules` で clone してもよい)。
+This builds `target/release/zustc` and `target/release/zust-analyzer`. Most tests and scripts use these two release
+builds.
+
+`cratebench/run.py` and `bench/deps_bench.py` use the sources of real crates from git submodules. Fetch them once
+(or clone with `git clone --recurse-submodules`):
 
 ```bash
 git submodule update --init cratebench/vendor
 ```
 
-`target/release/zustc` と `target/release/zust-analyzer` ができる。テストやスクリプトの多くは、この 2 つの release
-ビルドを使う。
+## Repository layout
 
-## リポジトリの構成
-
-| 場所 | 中身 |
+| path | contents |
 |---|---|
-| `src/` | `zustc` の CLI (`src/main.rs`) と、下の crate の再輸出 |
-| `crates/base` → `syntax` → `sema` → `typeck` → `codegen` → `core` | コンパイラの層 (下から順に依存する) |
-| `crates/minclif` / `crates/clif` / `crates/ir` | 自前の x86-64 バックエンド / Cranelift のバックエンド / 命令の列の型 |
-| `crates/ide` | エディタ向けの解析 (シンボル・定義・参照・hover・補完)。コンパイラ本体からは使わない |
-| `crates/analyzer` | LSP サーバ `zust-analyzer` |
-| `examples/` | zustc でコンパイルする入力 (Cargo の example ではない) |
-| `tests/` | zustc のテスト (rustc と比べるもの、キャッシュ、セルフホストなど) |
-| `benches/` / `bench/` | criterion のベンチ / ベンチマークと回帰監視のスクリプト |
-| `cratebench/` | 実在の小さなクレートをビルドするベンチ |
-| `docs/` | 言語のサブセット、設計、作業のレポート (英語。日本語版は `docs/ja/`) |
+| `src/` | the `zustc` CLI (`src/main.rs`) and re-exports of the crates below |
+| `crates/base` → `syntax` → `sema` → `typeck` → `codegen` → `core` | the compiler layers (each depends on the ones before it) |
+| `crates/minclif` / `crates/clif` / `crates/ir` | our own x86-64 backend / the Cranelift backend / the instruction-stream types |
+| `crates/ide` | editor analysis (symbols, definition, references, hover, completion). Not used by the compiler |
+| `crates/analyzer` | the LSP server `zust-analyzer` |
+| `examples/` | inputs compiled by zustc (not Cargo examples) |
+| `tests/` | zustc tests (comparisons with rustc, caching, self-hosting, and more) |
+| `benches/` / `bench/` | criterion benchmarks / benchmark and regression-monitoring scripts |
+| `cratebench/` | a benchmark that builds small real-world crates |
+| `docs/` | the language subset, the design, and work reports (English; Japanese versions in `docs/ja/`) |
 
-crate ごとの詳しい中身は [docs/ja/architecture.md](docs/ja/architecture.md) にある。
+What each crate contains is described in detail in [docs/architecture.md](docs/architecture.md).
 
-## テスト
+## Tests
 
 ```bash
 cargo test --release --workspace
 ```
 
-全部のテスト。次のものが入っている。
+This runs all the tests:
 
-- lexer などの単体テスト
-- check の診断 (エラーの後も止まらないこと、キャッシュされた呼び出し元越しに総称関数の本体のエラーを拾うこと)
-- キャッシュとインクリメンタルビルド
-- panic の場所、複数クレート
-- サイズ予算 (`tests/budget.rs`)
-- zust-ide のゴールデン
-- zust-analyzer の結合テスト (実際のバイナリを stdio で動かす)
+- unit tests (the lexer and others)
+- diagnostics from check: it keeps going after an error, and it reports errors in generic function bodies even
+  through cached callers
+- caching and incremental builds
+- panic locations and multiple crates
+- the size budget (`tests/budget.rs`)
+- zust-ide golden files
+- zust-analyzer integration tests (they drive the real binary over stdio)
 
-LSP の側だけを直したときは、次のコマンドで足りる。
+If you only changed the LSP side, this is enough:
 
 ```bash
 cargo test --release -p zust-ide -p zust-analyzer
 ```
 
-### rustc と結果を比べる
+### Comparing results with rustc
 
 ```bash
 tests/compare.sh
 ```
 
-`examples/*.rs` を zustc と rustc の両方でビルドし、出力と終了コードが一致するかを確かめる。キャッシュなしのビルドと、
-キャッシュからの再ビルドの両方を比べる。valgrind があれば、メモリエラーと確実なリークも失敗にする。
+Builds `examples/*.rs` with both zustc and rustc and checks that the output and exit code match. It compares both a
+build without a cache and a rebuild from the cache. If valgrind is available, memory errors and definite leaks also
+fail the run.
 
 ```bash
 tests/probe.sh
 ```
 
-よく使う機能の小さいプログラム (`tests/probe/*.rs`) を rustc と比べ、通った数を出す。言語の機能を足したら、ここに
-probe を足す。
+Compares small programs that use common features (`tests/probe/*.rs`) with rustc and prints how many pass. When you
+add a language feature, add a probe here.
 
-### セルフホスト
+### Self-hosting
 
 ```bash
 tests/selfhost.sh
 ```
 
-zustc 自身のソースの一部 (lexer / prelude / link / macros / parse / 型推論 など) を zustc でコンパイルし、rustc で
-コンパイルしたものと出力が同じかを確かめる。
+Compiles parts of zustc's own source (lexer, prelude, link, macros, parse, type inference, and more) with zustc and
+checks that the output is the same as the rustc-compiled version.
 
 ```bash
 tests/selfhost_compiler.sh
 ```
 
-コンパイラ全体を zustc と rustc の両方でコンパイルする。できた 2 つのコンパイラが同じ `.o` を出すかを確かめる。zustc 版で
-自分自身をもう一度コンパイルし、同じものになるか (不動点) も見る。
+Compiles the whole compiler with both zustc and rustc and checks that the two resulting compilers produce the same
+`.o` files. It also compiles the compiler again with the zustc-built version and checks that the result is the same
+(a fixed point).
 
-### ゴールデン
+### Golden files
 
-`crates/ide/tests/golden/*.txt` は zust-ide の答えの記録。意図して答えを変えたら、次のコマンドで書き直す。
+`crates/ide/tests/golden/*.txt` record zust-ide's answers. When you change answers on purpose, rewrite them with:
 
 ```bash
 UPDATE_GOLDEN=1 cargo test -p zust-ide --test golden
 ```
 
-書き直す前に、差分が改善かどうかを確かめる。rust-analyzer と同じ答えになったかは、次のコマンドで見られる。
+Before rewriting, make sure the diff is an improvement. To see whether the answers now agree with rust-analyzer, run:
 
 ```bash
 python3 bench/ide_golden_ra.py --detail
 ```
 
-## ベンチマークと回帰監視
+## Benchmarks and regression monitoring
 
 ```bash
 bench/regress.sh save
 ```
 
-機能を足す前に、今の状態をベースライン `main` として保存する。
+Before adding a feature, save the current state as the baseline `main`.
 
 ```bash
 bench/regress.sh
 ```
 
-ベースラインと比べる。次のどれかがあれば失敗する。
+Compares against the baseline. It fails if any of these happen:
 
-- criterion (`benches/compile.rs`) が「回帰」と判定したもの
-- サイズ予算 (`bench/budget.txt`) の超過
-- rustc との出力の差 (`tests/compare.sh`)
+- criterion (`benches/compile.rs`) reports a regression
+- the size budget (`bench/budget.txt`) is exceeded
+- output differs from rustc (`tests/compare.sh`)
 
-### 判定の決まり
+### Rules for judging
 
-- 5% 未満の変化は無視する。有意水準は 1%。cold 系は ±10% ぶれるので、閾値を 15% にしている。
-- 値はマシンの状態で変わる。比べるときは同じ時間帯に、ベースラインのコミットと並べて測る (git worktree で HEAD を同時に
-  ベンチすると確か)。原因を詰めるには callgrind の命令数が安定している。
-- サイズ予算は、例ごとに、バイナリ・`.o`・キャッシュの上限のバイト数を持つ。
-  - 意図して増やすなら `UPDATE_BUDGET=1`。
-  - 新しい例を足しただけなら `UPDATE_BUDGET=new` (既存の上限は変えない)。
+- Changes below 5% are ignored. The significance level is 1%. The cold benchmarks vary by ±10%, so their threshold
+  is 15%.
+- Values depend on the state of the machine. To compare, measure at the same time as the baseline commit (benchmarking
+  HEAD in a git worktree at the same time is reliable). To track down a cause, callgrind instruction counts are stable.
+- The size budget holds an upper limit in bytes for each example's binary, `.o` and cache.
+  - To increase it on purpose, use `UPDATE_BUDGET=1`.
+  - If you only added new examples, use `UPDATE_BUDGET=new` (existing limits stay unchanged).
 
-  予算を緩める前に、増えた理由 (付く prelude が増えた、など) を詰める。これまでの例は
-  [docs/ja/reports/2026-11-15-17-regression-catches.md](docs/ja/reports/2026-11-15-17-regression-catches.md) にある。
+  Before loosening the budget, find out why the size grew (for example, more prelude items attached). Past cases are
+  in [docs/reports/2026-11-15-17-regression-catches.md](docs/reports/2026-11-15-17-regression-catches.md).
 
-### ほかのベンチマーク
+### Other benchmarks
 
-| スクリプト | 何を測るか |
+| script | what it measures |
 |---|---|
-| `python3 bench/vs_rustc.py [NAME..]` | rustc との比較 (cold・no-op・1 か所編集の時間、ディスク、バイナリ、実行時間) |
-| `python3 bench/runtime.py` | 実行時間とバイナリだけ (軽い版) |
-| `python3 bench/run.py 1000 5000` | N 関数の生成したプログラムでの cold / no-op / 1 関数編集 |
-| `python3 bench/ws_bench.py --rustc` | 複数クレートのワークスペース |
-| `python3 bench/deps_bench.py` | 依存の多い複数クレート |
-| `python3 bench/lsp_compare.py --cold` | LSP サーバの速さ (rust-analyzer / rust-glancer と) |
-| `python3 bench/lsp_parity.py` | LSP の答えを rust-analyzer と比べる |
+| `python3 bench/vs_rustc.py [NAME..]` | comparison with rustc (cold, no-op and one-edit build times, disk, binary size, run time) |
+| `python3 bench/runtime.py` | run time and binary size only (a lighter version) |
+| `python3 bench/run.py 1000 5000` | cold / no-op / one-function edit on generated programs with N functions |
+| `python3 bench/ws_bench.py --rustc` | a multi-crate workspace |
+| `python3 bench/deps_bench.py` | multiple crates with many dependencies |
+| `python3 bench/lsp_compare.py --cold` | LSP server speed (against rust-analyzer / rust-glancer) |
+| `python3 bench/lsp_parity.py` | compares LSP answers with rust-analyzer |
 
-`lsp_parity.py` は、前回の数字と比べて差を出せる。
+`lsp_parity.py` can compare against the previous numbers and show the difference:
 
 ```bash
 python3 bench/lsp_parity.py --compare bench/lsp_parity.json --json bench/lsp_parity.json --out bench/lsp_parity_result.md
 ```
 
-`--detail` を付けると、違った所を出す。
+Add `--detail` to print the places where the answers differ.
 
-### ミューテーションテスト
+### Mutation testing
 
 ```bash
 bench/mutants.sh diff
 ```
 
-origin/main からの差分の行だけを変異させ、テストで見つかるかを見る。`bench/mutants.sh pkg zust-ide` (クレート) や
-`bench/mutants.sh file crates/ide/src/symbols.rs` (ファイル) でも絞れる。見つからなかった変異は
-`mutants.out/missed.txt` に出る。テストを足して潰す。
+Mutates only the lines changed since origin/main and checks whether the tests catch the mutants. You can also narrow
+it with `bench/mutants.sh pkg zust-ide` (a crate) or `bench/mutants.sh file crates/ide/src/symbols.rs` (a file).
+Mutants the tests miss are written to `mutants.out/missed.txt`; add tests to kill them.
 
-## CI とベンチマークのダッシュボード
+## CI and the benchmark dashboard
 
-- `.github/workflows/ci.yml`: push と pull request ごとに、release ビルド、`cargo test --release --workspace`、
-  `tests/compare.sh` を走らせる。サイズ予算はリンカで変わるので、CI は wild 0.11.0 を入れて `ZUSTC_BENCH_LINKER=wild` で測る
-  (`bench/budget.txt` も wild の大きさ)。
-- `.github/workflows/bench.yml`: main への push ごとに `bench/ci_bench.py` を走らせ、
-  [github-action-benchmark](https://github.com/benchmark-action/github-action-benchmark) で gh-pages ブランチの `dev/bench/` に
-  結果を積む。ダッシュボードは https://mizchi.github.io/zust/dev/bench/ (リポジトリの Settings → Pages で gh-pages ブランチを
-  公開しておく)。
-  - zustc: 1000 / 5000 関数のプログラムのビルド (cold / no-op / 1 関数編集)・check の時間と命令数、ピーク RSS、出力と
-    キャッシュの大きさ、`bench/rt` の実行時間
-  - zust-analyzer: `bench/lsp_parity.py` (zustc 自身のソース) の各問い合わせの p50、起動から索引ができるまで、RSS
-  - rust-analyzer と同じ答えを返した割合
-  - 前回より 30% 以上悪くなった (一致の割合は 5%) ものは、ワークフローの結果に警告が出る (失敗にはしない)
+- `.github/workflows/ci.yml` runs a release build, `cargo test --release --workspace` and `tests/compare.sh` on every
+  push and pull request. The size budget depends on the linker, so CI installs wild 0.11.0 and measures with
+  `ZUSTC_BENCH_LINKER=wild` (`bench/budget.txt` also holds wild sizes).
+- `.github/workflows/bench.yml` runs `bench/ci_bench.py` on every push to main and stores the results in `dev/bench/`
+  on the gh-pages branch with
+  [github-action-benchmark](https://github.com/benchmark-action/github-action-benchmark). The dashboard is at
+  https://mizchi.github.io/zust/dev/bench/ (publish the gh-pages branch in the repository's Settings → Pages).
+  It tracks:
+  - zustc: build (cold / no-op / one-function edit) and check times and instruction counts for programs with 1000 and
+    5000 functions, peak RSS, output and cache size, and run time of `bench/rt`
+  - zust-analyzer: p50 of each query in `bench/lsp_parity.py` (on zustc's own sources), time from startup until
+    indexed, and RSS
+  - the share of answers that agree with rust-analyzer
+  - Anything that got worse by 30% or more since the previous run (5% for the agreement ratios) produces a warning in
+    the workflow result. It does not fail the run.
 
-ローカルで同じものを測るには:
+To measure the same things locally:
 
 ```bash
 python3 bench/ci_bench.py --out-dir out/ci
 ```
 
-## デバッグ用の環境変数
+## Debugging environment variables
 
-| 変数 | 意味 |
+| variable | meaning |
 |---|---|
-| `ZUSTC_IR_VERIFY=1` | 組み立て直した命令の値の型が、型検査の記録と同じかを確かめる |
-| `ZUSTC_CLIF_VERIFY=1` / `ZUSTC_CLIF_DUMP=1` | Cranelift の IR を検証する / 出す |
-| `ZUSTC_PREP_VERIFY=1` | 前処理の差分の結果を、全部やり直した結果と比べる |
-| `ZUSTC_DUMP_PRE=FILE` | 前処理 (macro_rules! の展開・`mod x;` の結合) の後のソースを FILE に書く |
-| `ZUSTC_LOG_COMPILED=1` | コンパイルした関数の名前を出す (キャッシュから読めなかったものはその理由も) |
-| `ZUSTC_PROF=1` | 段ごとの時間を細かく出す |
-| `ZUSTC_NO_STRIP=1` | 出力のシンボルを残す (callgrind などで関数名を見る) |
-| `ZUSTC_BENCH_LINKER` | criterion のベンチのリンカを固定する |
+| `ZUSTC_IR_VERIFY=1` | check that the value types of the rebuilt instructions match the type checker's record |
+| `ZUSTC_CLIF_VERIFY=1` / `ZUSTC_CLIF_DUMP=1` | verify / dump the Cranelift IR |
+| `ZUSTC_PREP_VERIFY=1` | compare the result of incremental preprocessing with a full rerun |
+| `ZUSTC_DUMP_PRE=FILE` | write the source after preprocessing (`macro_rules!` expansion, merging `mod x;` files) to FILE |
+| `ZUSTC_LOG_COMPILED=1` | print the names of compiled functions (and why, for those that could not be read from the cache) |
+| `ZUSTC_PROF=1` | print detailed time per phase |
+| `ZUSTC_NO_STRIP=1` | keep symbols in the output (to see function names in callgrind and similar tools) |
+| `ZUSTC_BENCH_LINKER` | pin the linker used by the criterion benchmarks |
 
-ほかの `ZUSTC_NO_*` は、最適化やインクリメンタルの仕掛けを 1 つずつ切って比べるためのもの。名前でコードを検索すると
-意味が分かる。
+The other `ZUSTC_NO_*` variables turn off one optimization or incremental mechanism at a time, for comparison. Search
+the code for the name to see what each one does.
 
-## 変更の進め方
+## How to make changes
 
-- 言語の機能を足すときは、まず `examples/` か `tests/probe/` に rustc と比べるプログラムを足す。
-- 変更の後は `cargo test --release --workspace` を通す。コンパイラを変えたら `tests/compare.sh` も通す。
-  速さやサイズに効く変更なら `bench/regress.sh` も通す。
-- LSP の答えを変えたら、`bench/lsp_parity.py` で一致の割合と時間が下がっていないことを見る。
-- まとまった作業をしたら、レポートを書く (次の節)。
-- rust-analyzer との違いや、残したことは [TODO.md](TODO.md) に書く。
+- When adding a language feature, first add a program to `examples/` or `tests/probe/` that compares with rustc.
+- After a change, pass `cargo test --release --workspace`. If you changed the compiler, also pass `tests/compare.sh`.
+  If the change affects speed or size, also pass `bench/regress.sh`.
+- If you changed LSP answers, check with `bench/lsp_parity.py` that agreement and times did not get worse.
+- After a substantial piece of work, write a report (next section).
+- Record differences from rust-analyzer and anything left undone in [TODO.md](TODO.md).
 
-### レポートの書き方
+### Writing reports
 
-作業の記録は `docs/reports/YYYY-MM-DD-NN-<slug>.md` に英語で置く。日本語版を書くなら、同じ名前で `docs/ja/reports/` に置く。
+Work reports go in `docs/reports/YYYY-MM-DD-NN-<slug>.md`, in English. If you also write a Japanese version, put it
+in `docs/ja/reports/` under the same name.
 
-- `YYYY-MM-DD` は作業した日。
-- `NN` はその日の中の順番 (01 から)。
-- `<slug>` は内容を表す短い kebab-case。
+- `YYYY-MM-DD` is the day of the work.
+- `NN` is the order within that day (starting at 01).
+- `<slug>` is a short kebab-case description.
 
-ファイル名で並べると日付順になる。中身は次の形にする。
+Sorting by file name gives date order. Use this form:
 
 ```markdown
 # Title
@@ -237,16 +247,18 @@ Date: YYYY-MM-DD
 What was done, why, how it was measured, the results (numbers), what was learned, what is left
 ```
 
-数字は測った時点のものとして残す (後から書き換えない)。書いたら、[docs/reports/README.md](docs/reports/README.md) の
-一覧に 1 行足す (日本語版を書いたら [docs/ja/reports/README.md](docs/ja/reports/README.md) にも)。
+Keep the numbers as they were when measured (do not rewrite them later). After writing a report, add a line to the
+list in [docs/reports/README.md](docs/reports/README.md) (and to
+[docs/ja/reports/README.md](docs/ja/reports/README.md) if you wrote a Japanese version).
 
-### コミット
+### Commits
 
-- 1 つのコミットは 1 つのまとまった変更にする。
-- メッセージは、どの部分か (`ide:` / `analyzer:` / `docs:` など) と、何を変えたかを書く。
-- 名前は zustc / zust-analyzer / zust-* に揃える。
+- Keep one coherent change per commit.
+- In the message, name the area (`ide:` / `analyzer:` / `docs:` and so on) and say what changed.
+- Use the names zustc / zust-analyzer / zust-*.
 
-## ライセンス
+## License
 
-送られた貢献は、明示しない限り、README の「ライセンス」のとおり MIT OR Apache-2.0 で提供されたものとする。他のプロジェクトの
-コードを取り込むときは、ライセンスが合うものだけにし、上流のリポジトリを git submodule にする (`cratebench/vendor/` と同じ) か、元のライセンスのファイルも一緒に置く。
+Unless stated otherwise, contributions are provided under MIT OR Apache-2.0, as described in the README's "License"
+section. When bringing in code from other projects, only use code with a compatible license, and either add the
+upstream repository as a git submodule (as `cratebench/vendor/` does) or include the original license files.
