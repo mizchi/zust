@@ -1,9 +1,34 @@
-# TODO: rust-analyzer との残りの違い
+# TODO
 
-`bench/lsp_parity.py` と、std のメソッドの references を 1 件ずつ比べた結果 (README の「std のメソッドの参照の差を詰める」)
+## コンパイラ (zustc)
+
+- **言語**
+  - モジュール、`DoubleEndedIterator`（値としての `rev`）、`HashSet` / `BTreeMap`
+  - 単相化をレイアウトでキーにして共有する（`Vec<A>` と `Vec<B>` を 1 つにする。blaze の polymorph）
+  - 最小の自前 std（relax 方式）
+- **インクリメンタル**
+  - α 正規化ハッシュ
+  - 依存するクレートの解析結果 (要約・Program の一部) を使う側で使い回す (今はソースを解析し直す)
+  - 変わった .o だけを差し替えるリンク
+  - libwild の埋め込みと、メモリ上の .o（`.o` 書き出しと `exec` をなくす）
+- **増分リンク**
+  - `.text` に余白を残し、変更された関数だけを差し替える
+  - ジャンプテーブル経由の呼び出し（blaze 方式）
+- **cold ビルド**
+  - 要約と parse を並列化する
+  - cold 時に AST を 2 回 parse している点を解消する
+- **サイズ**
+  - コンパイラ側の ICF（コード + リロケーション先のハッシュ）
+  - 文字列の merge セクション
+- **`-O`**
+  - 自前インライン展開と stack-slot forwarding（Cranelift に SROA がない分を補う）
+
+## zust-analyzer: rust-analyzer との残りの違い
+
+`bench/lsp_parity.py` と、std のメソッドの references を 1 件ずつ比べた結果 ([docs/reports/2026-11-18-05-std-method-references.md](docs/reports/2026-11-18-05-std-method-references.md))
 から残ったもの。
 
-## 型推論
+### 型推論
 
 - [ ] `&*ptr` の型 (生ポインタの参照外し `*const T` → T と、その前の `&`)。
   例: `crates/sema/src/ast_infer.rs` の `let tf = unsafe { &*tf };` の後の `tf.iter()`
@@ -17,7 +42,7 @@
 - [ ] str の `Split<'_, P>` の `next` の定義の行き先 (slice の `Split` の impl と取り違える。str の繰り返しの impl は
   core のマクロ `generate_pattern_iterators!` の中にある)
 
-## 定義・参照
+### 定義・参照
 
 - [ ] rust-analyzer は `"x".to_string()` を特殊化の impl (`impl ToString for str`) でも数える (string.rs の別の行)。
   zustc は trait の宣言だけ
@@ -26,12 +51,12 @@
 - [ ] zustc の target で references の数の一致が 97% (rust-analyzer 100%) の 1 か所
 - [ ] fixture: definition 465/467、references 609/629 の残り
 
-## rename
+### rename
 
 - [ ] `Default::default` の rename (rust-analyzer は依存クレートの中まで書き換える。今はワークスペースだけ: 意図した違い)
 - [ ] `use a::Point as Pt` の別名の rename (意図した違い)
 
-## 速さ・メモリ
+### 速さ・メモリ
 
 - [ ] references の p90 (zustc の target で 65 ms) の遅いもの: 名前の多いメソッドの全ファイルの解決
 - [ ] 依存クレートの索引でメモリが 55 MB → 66 MB。使わない定義を落とす / 遅延で読む
