@@ -999,6 +999,10 @@ impl Program {
         if self.blanket_traits.contains(tr) {
             return true;
         }
+        // (auto traits: structurally, Rc / raw pointers are not Send, also Cell / RefCell are not Sync)
+        if tr == "Send" || tr == "Sync" {
+            return self.auto_trait(t, tr == "Sync", 0);
+        }
         // (const ジェネリクスの引数は長さを持つ配列型)
         if tr == CONST_GENERIC {
             return matches!(t, Ty::Array(Ty::Unit, _));
@@ -1138,6 +1142,38 @@ impl Program {
                 ) || self.prim_impls.contains(&(t, tr.to_string()))
             }
             _ => matches!(tr, "Copy" | "Clone" | "Sized") || self.prim_impls.contains(&(t, tr.to_string())),
+        }
+    }
+
+    fn auto_trait(&self, t: Ty, sync: bool, d: u32) -> bool {
+        if d > 12 {
+            return true;
+        }
+        match t {
+            Ty::Ptr(..) => false,
+            Ty::Ref(_, i) | Ty::Box(i) | Ty::Array(i, _) | Ty::Slice(i) => self.auto_trait(*i, sync, d + 1),
+            Ty::Struct(sid) => {
+                let b = self.base_of(sid);
+                let name = self.structs[b as usize].name.as_str();
+                // (a user's `unsafe impl Send for T`)
+                if self.impls.contains(&(b, if sync { "Sync" } else { "Send" }.to_string())) {
+                    return true;
+                }
+                match name {
+                    "Rc" => return false,
+                    "Cell" | "RefCell" if sync => return false,
+                    // (the prelude's own types hold raw pointers: what they hold decides)
+                    _ => {}
+                }
+                let sd = &self.structs[sid as usize];
+                let prelude = self.struct_item.get(b as usize).is_some_and(|&i| i >= self.prelude_from);
+                if prelude {
+                    return sd.args.iter().all(|&a| self.auto_trait(a, sync, d + 1));
+                }
+                sd.fields.iter().all(|f| self.auto_trait(f.1, sync, d + 1))
+                    && sd.variants.iter().all(|v| v.fields.iter().all(|f| self.auto_trait(f.1, sync, d + 1)))
+            }
+            _ => true,
         }
     }
 

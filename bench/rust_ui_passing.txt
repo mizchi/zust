@@ -194,6 +194,7 @@ check-pass	associated-types/issue-20763-2.rs
 check-pass	associated-types/issue-20825-2.rs
 check-pass	associated-types/issue-22066.rs
 compile-fail	associated-types/issue-22560.rs
+run-pass	associated-types/issue-22828.rs
 run-pass	associated-types/issue-23208.rs
 check-pass	associated-types/issue-24159.rs
 check-pass	associated-types/issue-24204.rs
@@ -237,7 +238,6 @@ check-pass	associated-types/supertrait-bound-references-own-associated-type.rs
 check-pass	associated-types/unioned-keys-with-associated-type-23442.rs
 check-pass	associated-types/wf-cycle-2.rs
 check-pass	associated-types/wf-cycle.rs
-compile-fail	async-await/async-await-let-else.rs
 compile-fail	async-await/async-borrowck-escaping-closure-error.rs
 build-pass	async-await/async-closure-matches-expr.rs
 compile-fail	async-await/async-closures/ambiguous-arg.rs
@@ -361,6 +361,7 @@ build-pass	attributes/unsafe/cfg-unsafe-attributes.rs
 build-pass	attributes/unsafe/unsafe-attributes.rs
 check-pass	attributes/used/used-not-dead-code-lint.rs
 run-pass	auto-traits/auto-is-contextual.rs
+check-pass	auto-traits/auto-trait-projection-recursion.rs
 compile-fail	auto-traits/hashmap-send-requires-send-contents.rs
 compile-fail	auto-traits/issue-117789.rs
 run-pass	autoref-autoderef/auto-ref-bounded-ty-param.rs
@@ -635,7 +636,6 @@ compile-fail	borrowck/index-mut-help-with-impl.rs
 compile-fail	borrowck/index-mut-help.rs
 check-pass	borrowck/index-self-with-arithmetic-on-self-item.rs
 compile-fail	borrowck/issue-103250.rs
-compile-fail	borrowck/issue-103624.rs
 check-pass	borrowck/issue-104639-lifetime-order.rs
 check-pass	borrowck/issue-10876.rs
 compile-fail	borrowck/issue-109271-pass-self-into-closure.rs
@@ -1401,7 +1401,6 @@ compile-fail	did_you_mean/issue-53280-expected-float-found-integer-literal.rs
 compile-fail	did_you_mean/issue-54109-and_instead_of_ampersands.rs
 compile-fail	did_you_mean/issue-54109-without-witness.rs
 compile-fail	did_you_mean/issue-56028-there-is-an-enum-variant.rs
-compile-fail	did_you_mean/recursion_limit.rs
 compile-fail	did_you_mean/replace-impl-infer-ty-from-trait.rs
 compile-fail	did_you_mean/trait-object-reference-without-parens-suggestion.rs
 compile-fail	did_you_mean/typo-suggestion-improvement-46332.rs
@@ -1851,11 +1850,13 @@ run-pass	functions-closures/call-closure-from-overloaded-op.rs
 run-pass	functions-closures/capture-clauses-boxed-closures.rs
 run-pass	functions-closures/capture-clauses-unboxed-closures.rs
 run-pass	functions-closures/clone-closure.rs
+run-pass	functions-closures/closure-bounds-can-capture-chan.rs
 run-pass	functions-closures/closure-expected-type/expect-infer-supply-two-infers.rs
 run-pass	functions-closures/closure-expected-type/issue-38714.rs
 run-pass	functions-closures/closure-expected-type/supply-nothing.rs
 run-pass	functions-closures/closure-immediate.rs
 run-pass	functions-closures/closure-inference.rs
+run-pass	functions-closures/closure-reform.rs
 run-pass	functions-closures/copy-closure.rs
 run-pass	functions-closures/fn-bare-assign.rs
 run-pass	functions-closures/fn-bare-coerce-to-block.rs
@@ -4746,6 +4747,7 @@ run-pass	traits/inheritance/static2.rs
 check-pass	traits/inheritance/supertrait-operator-issue-18088.rs
 build-pass	traits/issue-104322.rs
 compile-fail	traits/issue-105231.rs
+run-pass	traits/issue-15155.rs
 run-pass	traits/issue-22019.rs
 run-pass	traits/issue-22110.rs
 compile-fail	traits/issue-22384.rs
