@@ -615,6 +615,40 @@ impl Cx<'_> {
         r
     }
 
+    /// `thread::spawn(|| ..)`: the closure must own what it uses (E0373) and be Send (no `Rc`)
+    fn check_spawn_closure(&self, c: &Expr) -> R<()> {
+        let Expr::Closure(mv, _, _, _, cpos) = strip_paren(c) else { return Ok(()) };
+        for n in crate::ast_closure::free_vars(strip_paren(c)) {
+            let Some((_, t)) = self.lookup(&n) else { continue };
+            if self.holds_rc(t, 0) {
+                return Err(self.at(*cpos, format!("`{}` cannot be sent between threads safely", self.prog.tn(t))));
+            }
+            if !*mv && !crate::ast_closure::moves_capture(strip_paren(c), &[n.clone()]) {
+                return Err(self.at(*cpos, format!("closure may outlive the current function, but it borrows `{n}`, which is owned by the current function")));
+            }
+        }
+        Ok(())
+    }
+
+    fn holds_rc(&self, t: Ty, d: u32) -> bool {
+        if d > 6 {
+            return false;
+        }
+        match t {
+            Ty::Struct(sid) => {
+                let sd = &self.prog.structs[sid as usize];
+                let b = self.prog.base_of(sid);
+                // (the prelude's own types (a channel's queue is an Rc) are not looked into: only their arguments)
+                let prelude = self.prog.struct_item.get(b as usize).is_some_and(|&i| i >= self.prog.prelude_from);
+                self.prog.structs[b as usize].name == "Rc"
+                    || sd.args.iter().any(|&a| self.holds_rc(a, d + 1))
+                    || !prelude && sd.fields.iter().any(|f| self.holds_rc(f.1, d + 1))
+            }
+            Ty::Ref(_, i) | Ty::Box(i) | Ty::Array(i, _) => self.holds_rc(*i, d + 1),
+            _ => false,
+        }
+    }
+
     /// 組み込みの AsRef (`s.as_ref()` → `s.as_bytes()` / `&s[..]`)。受け手が as_ref を持つ構造体 (Option など) なら None
     pub(crate) fn as_ref_rewrite(&self, recv: &Expr, expected: Option<Ty>) -> Option<Expr> {
         let (target, is_string, seq) = self.as_ref_target(recv, expected)?;
@@ -695,9 +729,9 @@ impl Cx<'_> {
             return Ok(None);
         };
         // (`4.f()` with `impl U for isize`: the literal takes the one integer type that has the method)
-        if lit_int && t.is_int() && self.prog.prim_method(t, method).is_none() {
+        if lit_int && t.is_int() && self.prog.prim_self_method(t, method).is_none() {
             let ints = [Ty::I8, Ty::I16, Ty::I32, Ty::I64, Ty::I128, Ty::Isize, Ty::U8, Ty::U16, Ty::U32, Ty::U64, Ty::U128, Ty::Usize];
-            let with: Vec<Ty> = ints.into_iter().filter(|&i| self.prog.prim_method(i, method).is_some()).collect();
+            let with: Vec<Ty> = ints.into_iter().filter(|&i| self.prog.prim_self_method(i, method).is_some()).collect();
             if let [only] = with[..] {
                 t = only;
             }
@@ -722,7 +756,7 @@ impl Cx<'_> {
         let name = method.clone();
         // str / スライス / 配列への trait 実装 (`impl Hash for str` / `for [T]`): 受け手は &str / &[T] (fat) か &[T; N]
         if matches!(t, Ty::Str | Ty::Slice(_) | Ty::Array(..)) {
-            let Some(id) = self.prog.prim_method(t, &name) else {
+            let Some(id) = self.prog.prim_self_method(t, &name) else {
                 return Ok(None);
             };
             if !matches!(self.prog.sigs[id as usize].params.first(), Some(Ty::Ref(..))) {
@@ -753,7 +787,7 @@ impl Cx<'_> {
         if !(t.is_int() || matches!(t, Ty::Bool | Ty::Char)) {
             return Ok(None);
         }
-        let Some(id) = self.prog.prim_method(t, &name) else {
+        let Some(id) = self.prog.prim_self_method(t, &name) else {
             return Ok(None);
         };
         // 受け手: 値ならそのまま、&self ならメモリに置いてそのアドレス
@@ -915,6 +949,11 @@ impl Cx<'_> {
     }
 
     fn call_fn_inner(&mut self, id: u32, recv: Option<(Value, Ty)>, args: &[&Expr], turbofish: Option<&[GArg]>, expected: Option<Ty>, span: Sp) -> R<V> {
+        if self.prog.names.get(id as usize).is_some_and(|n| n == "__core_spawn") {
+            if let Some(c) = args.first() {
+                self.check_spawn_closure(c)?;
+            }
+        }
         // (戻り値を書く先: 引数の中の呼び出しには渡さない)
         let hint = self.dst_hint.take();
         let id = self.pick_overload(id, recv.map(|r| r.1), args);

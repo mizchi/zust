@@ -6408,6 +6408,1072 @@ impl<T> Display for Rc<T> {
     }
 }
 
+
+// `std::sync::Arc` (one thread: the same as Rc)
+// (ポインタは型を消して持つ: `Arc<RefCell<Node>>` を Node が持つとき、レイアウトが中身を辿らないように)
+pub struct Arc<T> {
+    p: *mut u8,
+}
+
+impl<T> Arc<T> {
+    pub fn new(v: T) -> Arc<T> {
+        let p = unsafe { __exr_malloc(core::mem::size_of::<__RcBox<T>>()) } as *mut __RcBox<T>;
+        unsafe {
+            p.write(__RcBox { strong: 1, weak: 0, val: v });
+        }
+        Arc { p: p as *mut u8 }
+    }
+    fn __bx(&self) -> *mut __RcBox<T> {
+        self.p as *mut __RcBox<T>
+    }
+    pub fn clone(&self) -> Arc<T> {
+        unsafe {
+            (*self.__bx()).strong += 1;
+        }
+        Arc { p: self.p }
+    }
+    pub fn strong_count(this: &Arc<T>) -> usize {
+        unsafe { (*this.__bx()).strong }
+    }
+    pub fn ptr_eq(a: &Arc<T>, b: &Arc<T>) -> bool {
+        a.p == b.p
+    }
+    pub fn as_ref(&self) -> &T {
+        unsafe { &(*self.__bx()).val }
+    }
+}
+
+// (Deref の代わりに固有メソッド: codegen はメソッドが見つからないとき `deref` を探す)
+impl<T> Arc<T> {
+    pub fn deref(&self) -> &T {
+        unsafe { &(*self.__bx()).val }
+    }
+}
+
+impl<T> Drop for Arc<T> {
+    fn drop(&mut self) {
+        unsafe {
+            let b = self.__bx();
+            (*b).strong -= 1;
+            if (*b).strong == 0 {
+                __exr_drop_in_place(&mut (*b).val as *mut T);
+                __exr_free(self.p);
+            }
+        }
+    }
+}
+
+impl<T> Debug for Arc<T> {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError> {
+        __exr_debug(self.as_ref(), f);
+        Ok(())
+    }
+}
+
+impl<T> Display for Arc<T> {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError> {
+        __exr_display(self.as_ref(), f);
+        Ok(())
+    }
+}
+
+
+// `std::sync::atomic` (one thread: a cell; the orderings are accepted and ignored).
+// The front end renames `Ordering` imported from `std::sync::atomic` to `__AtOrd_` (same length: no column shift)
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum __AtOrd_ {
+    Relaxed,
+    Release,
+    Acquire,
+    AcqRel,
+    SeqCst,
+}
+
+pub struct AtomicUsize {
+    v: usize,
+}
+
+impl AtomicUsize {
+    pub const fn new(v: usize) -> AtomicUsize {
+        AtomicUsize { v }
+    }
+    fn __p(&self) -> *mut usize {
+        &self.v as *const usize as *mut usize
+    }
+    pub fn load(&self, _o: __AtOrd_) -> usize {
+        self.v
+    }
+    pub fn store(&self, x: usize, _o: __AtOrd_) {
+        unsafe { self.__p().write(x) }
+    }
+    pub fn swap(&self, x: usize, _o: __AtOrd_) -> usize {
+        let old = self.v;
+        unsafe { self.__p().write(x) }
+        old
+    }
+    pub fn compare_exchange(&self, cur: usize, new: usize, _s: __AtOrd_, _f: __AtOrd_) -> Result<usize, usize> {
+        let old = self.v;
+        if old == cur {
+            unsafe { self.__p().write(new) }
+            Ok(old)
+        } else {
+            Err(old)
+        }
+    }
+    pub fn compare_exchange_weak(&self, cur: usize, new: usize, s: __AtOrd_, f: __AtOrd_) -> Result<usize, usize> {
+        self.compare_exchange(cur, new, s, f)
+    }
+    pub fn get_mut(&mut self) -> &mut usize {
+        &mut self.v
+    }
+    pub fn into_inner(self) -> usize {
+        self.v
+    }
+    pub fn fetch_add(&self, x: usize, _o: __AtOrd_) -> usize {
+        let old = self.v;
+        unsafe { self.__p().write(old.wrapping_add(x)) }
+        old
+    }
+    pub fn fetch_sub(&self, x: usize, _o: __AtOrd_) -> usize {
+        let old = self.v;
+        unsafe { self.__p().write(old.wrapping_sub(x)) }
+        old
+    }
+    pub fn fetch_max(&self, x: usize, _o: __AtOrd_) -> usize {
+        let old = self.v;
+        if x > old {
+            unsafe { self.__p().write(x) }
+        }
+        old
+    }
+    pub fn fetch_min(&self, x: usize, _o: __AtOrd_) -> usize {
+        let old = self.v;
+        if x < old {
+            unsafe { self.__p().write(x) }
+        }
+        old
+    }
+    pub fn fetch_and(&self, x: usize, _o: __AtOrd_) -> usize {
+        let old = self.v;
+        unsafe { self.__p().write(old & x) }
+        old
+    }
+    pub fn fetch_or(&self, x: usize, _o: __AtOrd_) -> usize {
+        let old = self.v;
+        unsafe { self.__p().write(old | x) }
+        old
+    }
+}
+
+impl Debug for AtomicUsize {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError> {
+        __exr_debug(&self.v, f);
+        Ok(())
+    }
+}
+
+pub struct AtomicIsize {
+    v: isize,
+}
+
+impl AtomicIsize {
+    pub const fn new(v: isize) -> AtomicIsize {
+        AtomicIsize { v }
+    }
+    fn __p(&self) -> *mut isize {
+        &self.v as *const isize as *mut isize
+    }
+    pub fn load(&self, _o: __AtOrd_) -> isize {
+        self.v
+    }
+    pub fn store(&self, x: isize, _o: __AtOrd_) {
+        unsafe { self.__p().write(x) }
+    }
+    pub fn swap(&self, x: isize, _o: __AtOrd_) -> isize {
+        let old = self.v;
+        unsafe { self.__p().write(x) }
+        old
+    }
+    pub fn compare_exchange(&self, cur: isize, new: isize, _s: __AtOrd_, _f: __AtOrd_) -> Result<isize, isize> {
+        let old = self.v;
+        if old == cur {
+            unsafe { self.__p().write(new) }
+            Ok(old)
+        } else {
+            Err(old)
+        }
+    }
+    pub fn compare_exchange_weak(&self, cur: isize, new: isize, s: __AtOrd_, f: __AtOrd_) -> Result<isize, isize> {
+        self.compare_exchange(cur, new, s, f)
+    }
+    pub fn get_mut(&mut self) -> &mut isize {
+        &mut self.v
+    }
+    pub fn into_inner(self) -> isize {
+        self.v
+    }
+    pub fn fetch_add(&self, x: isize, _o: __AtOrd_) -> isize {
+        let old = self.v;
+        unsafe { self.__p().write(old.wrapping_add(x)) }
+        old
+    }
+    pub fn fetch_sub(&self, x: isize, _o: __AtOrd_) -> isize {
+        let old = self.v;
+        unsafe { self.__p().write(old.wrapping_sub(x)) }
+        old
+    }
+    pub fn fetch_max(&self, x: isize, _o: __AtOrd_) -> isize {
+        let old = self.v;
+        if x > old {
+            unsafe { self.__p().write(x) }
+        }
+        old
+    }
+    pub fn fetch_min(&self, x: isize, _o: __AtOrd_) -> isize {
+        let old = self.v;
+        if x < old {
+            unsafe { self.__p().write(x) }
+        }
+        old
+    }
+    pub fn fetch_and(&self, x: isize, _o: __AtOrd_) -> isize {
+        let old = self.v;
+        unsafe { self.__p().write(old & x) }
+        old
+    }
+    pub fn fetch_or(&self, x: isize, _o: __AtOrd_) -> isize {
+        let old = self.v;
+        unsafe { self.__p().write(old | x) }
+        old
+    }
+}
+
+impl Debug for AtomicIsize {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError> {
+        __exr_debug(&self.v, f);
+        Ok(())
+    }
+}
+
+pub struct AtomicU8 {
+    v: u8,
+}
+
+impl AtomicU8 {
+    pub const fn new(v: u8) -> AtomicU8 {
+        AtomicU8 { v }
+    }
+    fn __p(&self) -> *mut u8 {
+        &self.v as *const u8 as *mut u8
+    }
+    pub fn load(&self, _o: __AtOrd_) -> u8 {
+        self.v
+    }
+    pub fn store(&self, x: u8, _o: __AtOrd_) {
+        unsafe { self.__p().write(x) }
+    }
+    pub fn swap(&self, x: u8, _o: __AtOrd_) -> u8 {
+        let old = self.v;
+        unsafe { self.__p().write(x) }
+        old
+    }
+    pub fn compare_exchange(&self, cur: u8, new: u8, _s: __AtOrd_, _f: __AtOrd_) -> Result<u8, u8> {
+        let old = self.v;
+        if old == cur {
+            unsafe { self.__p().write(new) }
+            Ok(old)
+        } else {
+            Err(old)
+        }
+    }
+    pub fn compare_exchange_weak(&self, cur: u8, new: u8, s: __AtOrd_, f: __AtOrd_) -> Result<u8, u8> {
+        self.compare_exchange(cur, new, s, f)
+    }
+    pub fn get_mut(&mut self) -> &mut u8 {
+        &mut self.v
+    }
+    pub fn into_inner(self) -> u8 {
+        self.v
+    }
+    pub fn fetch_add(&self, x: u8, _o: __AtOrd_) -> u8 {
+        let old = self.v;
+        unsafe { self.__p().write(old.wrapping_add(x)) }
+        old
+    }
+    pub fn fetch_sub(&self, x: u8, _o: __AtOrd_) -> u8 {
+        let old = self.v;
+        unsafe { self.__p().write(old.wrapping_sub(x)) }
+        old
+    }
+    pub fn fetch_max(&self, x: u8, _o: __AtOrd_) -> u8 {
+        let old = self.v;
+        if x > old {
+            unsafe { self.__p().write(x) }
+        }
+        old
+    }
+    pub fn fetch_min(&self, x: u8, _o: __AtOrd_) -> u8 {
+        let old = self.v;
+        if x < old {
+            unsafe { self.__p().write(x) }
+        }
+        old
+    }
+    pub fn fetch_and(&self, x: u8, _o: __AtOrd_) -> u8 {
+        let old = self.v;
+        unsafe { self.__p().write(old & x) }
+        old
+    }
+    pub fn fetch_or(&self, x: u8, _o: __AtOrd_) -> u8 {
+        let old = self.v;
+        unsafe { self.__p().write(old | x) }
+        old
+    }
+}
+
+impl Debug for AtomicU8 {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError> {
+        __exr_debug(&self.v, f);
+        Ok(())
+    }
+}
+
+pub struct AtomicU16 {
+    v: u16,
+}
+
+impl AtomicU16 {
+    pub const fn new(v: u16) -> AtomicU16 {
+        AtomicU16 { v }
+    }
+    fn __p(&self) -> *mut u16 {
+        &self.v as *const u16 as *mut u16
+    }
+    pub fn load(&self, _o: __AtOrd_) -> u16 {
+        self.v
+    }
+    pub fn store(&self, x: u16, _o: __AtOrd_) {
+        unsafe { self.__p().write(x) }
+    }
+    pub fn swap(&self, x: u16, _o: __AtOrd_) -> u16 {
+        let old = self.v;
+        unsafe { self.__p().write(x) }
+        old
+    }
+    pub fn compare_exchange(&self, cur: u16, new: u16, _s: __AtOrd_, _f: __AtOrd_) -> Result<u16, u16> {
+        let old = self.v;
+        if old == cur {
+            unsafe { self.__p().write(new) }
+            Ok(old)
+        } else {
+            Err(old)
+        }
+    }
+    pub fn compare_exchange_weak(&self, cur: u16, new: u16, s: __AtOrd_, f: __AtOrd_) -> Result<u16, u16> {
+        self.compare_exchange(cur, new, s, f)
+    }
+    pub fn get_mut(&mut self) -> &mut u16 {
+        &mut self.v
+    }
+    pub fn into_inner(self) -> u16 {
+        self.v
+    }
+    pub fn fetch_add(&self, x: u16, _o: __AtOrd_) -> u16 {
+        let old = self.v;
+        unsafe { self.__p().write(old.wrapping_add(x)) }
+        old
+    }
+    pub fn fetch_sub(&self, x: u16, _o: __AtOrd_) -> u16 {
+        let old = self.v;
+        unsafe { self.__p().write(old.wrapping_sub(x)) }
+        old
+    }
+    pub fn fetch_max(&self, x: u16, _o: __AtOrd_) -> u16 {
+        let old = self.v;
+        if x > old {
+            unsafe { self.__p().write(x) }
+        }
+        old
+    }
+    pub fn fetch_min(&self, x: u16, _o: __AtOrd_) -> u16 {
+        let old = self.v;
+        if x < old {
+            unsafe { self.__p().write(x) }
+        }
+        old
+    }
+    pub fn fetch_and(&self, x: u16, _o: __AtOrd_) -> u16 {
+        let old = self.v;
+        unsafe { self.__p().write(old & x) }
+        old
+    }
+    pub fn fetch_or(&self, x: u16, _o: __AtOrd_) -> u16 {
+        let old = self.v;
+        unsafe { self.__p().write(old | x) }
+        old
+    }
+}
+
+impl Debug for AtomicU16 {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError> {
+        __exr_debug(&self.v, f);
+        Ok(())
+    }
+}
+
+pub struct AtomicU32 {
+    v: u32,
+}
+
+impl AtomicU32 {
+    pub const fn new(v: u32) -> AtomicU32 {
+        AtomicU32 { v }
+    }
+    fn __p(&self) -> *mut u32 {
+        &self.v as *const u32 as *mut u32
+    }
+    pub fn load(&self, _o: __AtOrd_) -> u32 {
+        self.v
+    }
+    pub fn store(&self, x: u32, _o: __AtOrd_) {
+        unsafe { self.__p().write(x) }
+    }
+    pub fn swap(&self, x: u32, _o: __AtOrd_) -> u32 {
+        let old = self.v;
+        unsafe { self.__p().write(x) }
+        old
+    }
+    pub fn compare_exchange(&self, cur: u32, new: u32, _s: __AtOrd_, _f: __AtOrd_) -> Result<u32, u32> {
+        let old = self.v;
+        if old == cur {
+            unsafe { self.__p().write(new) }
+            Ok(old)
+        } else {
+            Err(old)
+        }
+    }
+    pub fn compare_exchange_weak(&self, cur: u32, new: u32, s: __AtOrd_, f: __AtOrd_) -> Result<u32, u32> {
+        self.compare_exchange(cur, new, s, f)
+    }
+    pub fn get_mut(&mut self) -> &mut u32 {
+        &mut self.v
+    }
+    pub fn into_inner(self) -> u32 {
+        self.v
+    }
+    pub fn fetch_add(&self, x: u32, _o: __AtOrd_) -> u32 {
+        let old = self.v;
+        unsafe { self.__p().write(old.wrapping_add(x)) }
+        old
+    }
+    pub fn fetch_sub(&self, x: u32, _o: __AtOrd_) -> u32 {
+        let old = self.v;
+        unsafe { self.__p().write(old.wrapping_sub(x)) }
+        old
+    }
+    pub fn fetch_max(&self, x: u32, _o: __AtOrd_) -> u32 {
+        let old = self.v;
+        if x > old {
+            unsafe { self.__p().write(x) }
+        }
+        old
+    }
+    pub fn fetch_min(&self, x: u32, _o: __AtOrd_) -> u32 {
+        let old = self.v;
+        if x < old {
+            unsafe { self.__p().write(x) }
+        }
+        old
+    }
+    pub fn fetch_and(&self, x: u32, _o: __AtOrd_) -> u32 {
+        let old = self.v;
+        unsafe { self.__p().write(old & x) }
+        old
+    }
+    pub fn fetch_or(&self, x: u32, _o: __AtOrd_) -> u32 {
+        let old = self.v;
+        unsafe { self.__p().write(old | x) }
+        old
+    }
+}
+
+impl Debug for AtomicU32 {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError> {
+        __exr_debug(&self.v, f);
+        Ok(())
+    }
+}
+
+pub struct AtomicU64 {
+    v: u64,
+}
+
+impl AtomicU64 {
+    pub const fn new(v: u64) -> AtomicU64 {
+        AtomicU64 { v }
+    }
+    fn __p(&self) -> *mut u64 {
+        &self.v as *const u64 as *mut u64
+    }
+    pub fn load(&self, _o: __AtOrd_) -> u64 {
+        self.v
+    }
+    pub fn store(&self, x: u64, _o: __AtOrd_) {
+        unsafe { self.__p().write(x) }
+    }
+    pub fn swap(&self, x: u64, _o: __AtOrd_) -> u64 {
+        let old = self.v;
+        unsafe { self.__p().write(x) }
+        old
+    }
+    pub fn compare_exchange(&self, cur: u64, new: u64, _s: __AtOrd_, _f: __AtOrd_) -> Result<u64, u64> {
+        let old = self.v;
+        if old == cur {
+            unsafe { self.__p().write(new) }
+            Ok(old)
+        } else {
+            Err(old)
+        }
+    }
+    pub fn compare_exchange_weak(&self, cur: u64, new: u64, s: __AtOrd_, f: __AtOrd_) -> Result<u64, u64> {
+        self.compare_exchange(cur, new, s, f)
+    }
+    pub fn get_mut(&mut self) -> &mut u64 {
+        &mut self.v
+    }
+    pub fn into_inner(self) -> u64 {
+        self.v
+    }
+    pub fn fetch_add(&self, x: u64, _o: __AtOrd_) -> u64 {
+        let old = self.v;
+        unsafe { self.__p().write(old.wrapping_add(x)) }
+        old
+    }
+    pub fn fetch_sub(&self, x: u64, _o: __AtOrd_) -> u64 {
+        let old = self.v;
+        unsafe { self.__p().write(old.wrapping_sub(x)) }
+        old
+    }
+    pub fn fetch_max(&self, x: u64, _o: __AtOrd_) -> u64 {
+        let old = self.v;
+        if x > old {
+            unsafe { self.__p().write(x) }
+        }
+        old
+    }
+    pub fn fetch_min(&self, x: u64, _o: __AtOrd_) -> u64 {
+        let old = self.v;
+        if x < old {
+            unsafe { self.__p().write(x) }
+        }
+        old
+    }
+    pub fn fetch_and(&self, x: u64, _o: __AtOrd_) -> u64 {
+        let old = self.v;
+        unsafe { self.__p().write(old & x) }
+        old
+    }
+    pub fn fetch_or(&self, x: u64, _o: __AtOrd_) -> u64 {
+        let old = self.v;
+        unsafe { self.__p().write(old | x) }
+        old
+    }
+}
+
+impl Debug for AtomicU64 {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError> {
+        __exr_debug(&self.v, f);
+        Ok(())
+    }
+}
+
+pub struct AtomicI8 {
+    v: i8,
+}
+
+impl AtomicI8 {
+    pub const fn new(v: i8) -> AtomicI8 {
+        AtomicI8 { v }
+    }
+    fn __p(&self) -> *mut i8 {
+        &self.v as *const i8 as *mut i8
+    }
+    pub fn load(&self, _o: __AtOrd_) -> i8 {
+        self.v
+    }
+    pub fn store(&self, x: i8, _o: __AtOrd_) {
+        unsafe { self.__p().write(x) }
+    }
+    pub fn swap(&self, x: i8, _o: __AtOrd_) -> i8 {
+        let old = self.v;
+        unsafe { self.__p().write(x) }
+        old
+    }
+    pub fn compare_exchange(&self, cur: i8, new: i8, _s: __AtOrd_, _f: __AtOrd_) -> Result<i8, i8> {
+        let old = self.v;
+        if old == cur {
+            unsafe { self.__p().write(new) }
+            Ok(old)
+        } else {
+            Err(old)
+        }
+    }
+    pub fn compare_exchange_weak(&self, cur: i8, new: i8, s: __AtOrd_, f: __AtOrd_) -> Result<i8, i8> {
+        self.compare_exchange(cur, new, s, f)
+    }
+    pub fn get_mut(&mut self) -> &mut i8 {
+        &mut self.v
+    }
+    pub fn into_inner(self) -> i8 {
+        self.v
+    }
+    pub fn fetch_add(&self, x: i8, _o: __AtOrd_) -> i8 {
+        let old = self.v;
+        unsafe { self.__p().write(old.wrapping_add(x)) }
+        old
+    }
+    pub fn fetch_sub(&self, x: i8, _o: __AtOrd_) -> i8 {
+        let old = self.v;
+        unsafe { self.__p().write(old.wrapping_sub(x)) }
+        old
+    }
+    pub fn fetch_max(&self, x: i8, _o: __AtOrd_) -> i8 {
+        let old = self.v;
+        if x > old {
+            unsafe { self.__p().write(x) }
+        }
+        old
+    }
+    pub fn fetch_min(&self, x: i8, _o: __AtOrd_) -> i8 {
+        let old = self.v;
+        if x < old {
+            unsafe { self.__p().write(x) }
+        }
+        old
+    }
+    pub fn fetch_and(&self, x: i8, _o: __AtOrd_) -> i8 {
+        let old = self.v;
+        unsafe { self.__p().write(old & x) }
+        old
+    }
+    pub fn fetch_or(&self, x: i8, _o: __AtOrd_) -> i8 {
+        let old = self.v;
+        unsafe { self.__p().write(old | x) }
+        old
+    }
+}
+
+impl Debug for AtomicI8 {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError> {
+        __exr_debug(&self.v, f);
+        Ok(())
+    }
+}
+
+pub struct AtomicI16 {
+    v: i16,
+}
+
+impl AtomicI16 {
+    pub const fn new(v: i16) -> AtomicI16 {
+        AtomicI16 { v }
+    }
+    fn __p(&self) -> *mut i16 {
+        &self.v as *const i16 as *mut i16
+    }
+    pub fn load(&self, _o: __AtOrd_) -> i16 {
+        self.v
+    }
+    pub fn store(&self, x: i16, _o: __AtOrd_) {
+        unsafe { self.__p().write(x) }
+    }
+    pub fn swap(&self, x: i16, _o: __AtOrd_) -> i16 {
+        let old = self.v;
+        unsafe { self.__p().write(x) }
+        old
+    }
+    pub fn compare_exchange(&self, cur: i16, new: i16, _s: __AtOrd_, _f: __AtOrd_) -> Result<i16, i16> {
+        let old = self.v;
+        if old == cur {
+            unsafe { self.__p().write(new) }
+            Ok(old)
+        } else {
+            Err(old)
+        }
+    }
+    pub fn compare_exchange_weak(&self, cur: i16, new: i16, s: __AtOrd_, f: __AtOrd_) -> Result<i16, i16> {
+        self.compare_exchange(cur, new, s, f)
+    }
+    pub fn get_mut(&mut self) -> &mut i16 {
+        &mut self.v
+    }
+    pub fn into_inner(self) -> i16 {
+        self.v
+    }
+    pub fn fetch_add(&self, x: i16, _o: __AtOrd_) -> i16 {
+        let old = self.v;
+        unsafe { self.__p().write(old.wrapping_add(x)) }
+        old
+    }
+    pub fn fetch_sub(&self, x: i16, _o: __AtOrd_) -> i16 {
+        let old = self.v;
+        unsafe { self.__p().write(old.wrapping_sub(x)) }
+        old
+    }
+    pub fn fetch_max(&self, x: i16, _o: __AtOrd_) -> i16 {
+        let old = self.v;
+        if x > old {
+            unsafe { self.__p().write(x) }
+        }
+        old
+    }
+    pub fn fetch_min(&self, x: i16, _o: __AtOrd_) -> i16 {
+        let old = self.v;
+        if x < old {
+            unsafe { self.__p().write(x) }
+        }
+        old
+    }
+    pub fn fetch_and(&self, x: i16, _o: __AtOrd_) -> i16 {
+        let old = self.v;
+        unsafe { self.__p().write(old & x) }
+        old
+    }
+    pub fn fetch_or(&self, x: i16, _o: __AtOrd_) -> i16 {
+        let old = self.v;
+        unsafe { self.__p().write(old | x) }
+        old
+    }
+}
+
+impl Debug for AtomicI16 {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError> {
+        __exr_debug(&self.v, f);
+        Ok(())
+    }
+}
+
+pub struct AtomicI32 {
+    v: i32,
+}
+
+impl AtomicI32 {
+    pub const fn new(v: i32) -> AtomicI32 {
+        AtomicI32 { v }
+    }
+    fn __p(&self) -> *mut i32 {
+        &self.v as *const i32 as *mut i32
+    }
+    pub fn load(&self, _o: __AtOrd_) -> i32 {
+        self.v
+    }
+    pub fn store(&self, x: i32, _o: __AtOrd_) {
+        unsafe { self.__p().write(x) }
+    }
+    pub fn swap(&self, x: i32, _o: __AtOrd_) -> i32 {
+        let old = self.v;
+        unsafe { self.__p().write(x) }
+        old
+    }
+    pub fn compare_exchange(&self, cur: i32, new: i32, _s: __AtOrd_, _f: __AtOrd_) -> Result<i32, i32> {
+        let old = self.v;
+        if old == cur {
+            unsafe { self.__p().write(new) }
+            Ok(old)
+        } else {
+            Err(old)
+        }
+    }
+    pub fn compare_exchange_weak(&self, cur: i32, new: i32, s: __AtOrd_, f: __AtOrd_) -> Result<i32, i32> {
+        self.compare_exchange(cur, new, s, f)
+    }
+    pub fn get_mut(&mut self) -> &mut i32 {
+        &mut self.v
+    }
+    pub fn into_inner(self) -> i32 {
+        self.v
+    }
+    pub fn fetch_add(&self, x: i32, _o: __AtOrd_) -> i32 {
+        let old = self.v;
+        unsafe { self.__p().write(old.wrapping_add(x)) }
+        old
+    }
+    pub fn fetch_sub(&self, x: i32, _o: __AtOrd_) -> i32 {
+        let old = self.v;
+        unsafe { self.__p().write(old.wrapping_sub(x)) }
+        old
+    }
+    pub fn fetch_max(&self, x: i32, _o: __AtOrd_) -> i32 {
+        let old = self.v;
+        if x > old {
+            unsafe { self.__p().write(x) }
+        }
+        old
+    }
+    pub fn fetch_min(&self, x: i32, _o: __AtOrd_) -> i32 {
+        let old = self.v;
+        if x < old {
+            unsafe { self.__p().write(x) }
+        }
+        old
+    }
+    pub fn fetch_and(&self, x: i32, _o: __AtOrd_) -> i32 {
+        let old = self.v;
+        unsafe { self.__p().write(old & x) }
+        old
+    }
+    pub fn fetch_or(&self, x: i32, _o: __AtOrd_) -> i32 {
+        let old = self.v;
+        unsafe { self.__p().write(old | x) }
+        old
+    }
+}
+
+impl Debug for AtomicI32 {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError> {
+        __exr_debug(&self.v, f);
+        Ok(())
+    }
+}
+
+pub struct AtomicI64 {
+    v: i64,
+}
+
+impl AtomicI64 {
+    pub const fn new(v: i64) -> AtomicI64 {
+        AtomicI64 { v }
+    }
+    fn __p(&self) -> *mut i64 {
+        &self.v as *const i64 as *mut i64
+    }
+    pub fn load(&self, _o: __AtOrd_) -> i64 {
+        self.v
+    }
+    pub fn store(&self, x: i64, _o: __AtOrd_) {
+        unsafe { self.__p().write(x) }
+    }
+    pub fn swap(&self, x: i64, _o: __AtOrd_) -> i64 {
+        let old = self.v;
+        unsafe { self.__p().write(x) }
+        old
+    }
+    pub fn compare_exchange(&self, cur: i64, new: i64, _s: __AtOrd_, _f: __AtOrd_) -> Result<i64, i64> {
+        let old = self.v;
+        if old == cur {
+            unsafe { self.__p().write(new) }
+            Ok(old)
+        } else {
+            Err(old)
+        }
+    }
+    pub fn compare_exchange_weak(&self, cur: i64, new: i64, s: __AtOrd_, f: __AtOrd_) -> Result<i64, i64> {
+        self.compare_exchange(cur, new, s, f)
+    }
+    pub fn get_mut(&mut self) -> &mut i64 {
+        &mut self.v
+    }
+    pub fn into_inner(self) -> i64 {
+        self.v
+    }
+    pub fn fetch_add(&self, x: i64, _o: __AtOrd_) -> i64 {
+        let old = self.v;
+        unsafe { self.__p().write(old.wrapping_add(x)) }
+        old
+    }
+    pub fn fetch_sub(&self, x: i64, _o: __AtOrd_) -> i64 {
+        let old = self.v;
+        unsafe { self.__p().write(old.wrapping_sub(x)) }
+        old
+    }
+    pub fn fetch_max(&self, x: i64, _o: __AtOrd_) -> i64 {
+        let old = self.v;
+        if x > old {
+            unsafe { self.__p().write(x) }
+        }
+        old
+    }
+    pub fn fetch_min(&self, x: i64, _o: __AtOrd_) -> i64 {
+        let old = self.v;
+        if x < old {
+            unsafe { self.__p().write(x) }
+        }
+        old
+    }
+    pub fn fetch_and(&self, x: i64, _o: __AtOrd_) -> i64 {
+        let old = self.v;
+        unsafe { self.__p().write(old & x) }
+        old
+    }
+    pub fn fetch_or(&self, x: i64, _o: __AtOrd_) -> i64 {
+        let old = self.v;
+        unsafe { self.__p().write(old | x) }
+        old
+    }
+}
+
+impl Debug for AtomicI64 {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError> {
+        __exr_debug(&self.v, f);
+        Ok(())
+    }
+}
+
+pub struct AtomicBool {
+    v: bool,
+}
+
+impl AtomicBool {
+    pub const fn new(v: bool) -> AtomicBool {
+        AtomicBool { v }
+    }
+    fn __p(&self) -> *mut bool {
+        &self.v as *const bool as *mut bool
+    }
+    pub fn load(&self, _o: __AtOrd_) -> bool {
+        self.v
+    }
+    pub fn store(&self, x: bool, _o: __AtOrd_) {
+        unsafe { self.__p().write(x) }
+    }
+    pub fn swap(&self, x: bool, _o: __AtOrd_) -> bool {
+        let old = self.v;
+        unsafe { self.__p().write(x) }
+        old
+    }
+    pub fn compare_exchange(&self, cur: bool, new: bool, _s: __AtOrd_, _f: __AtOrd_) -> Result<bool, bool> {
+        let old = self.v;
+        if old == cur {
+            unsafe { self.__p().write(new) }
+            Ok(old)
+        } else {
+            Err(old)
+        }
+    }
+    pub fn compare_exchange_weak(&self, cur: bool, new: bool, s: __AtOrd_, f: __AtOrd_) -> Result<bool, bool> {
+        self.compare_exchange(cur, new, s, f)
+    }
+    pub fn get_mut(&mut self) -> &mut bool {
+        &mut self.v
+    }
+    pub fn into_inner(self) -> bool {
+        self.v
+    }
+    pub fn fetch_or(&self, x: bool, _o: __AtOrd_) -> bool {
+        let old = self.v;
+        unsafe { self.__p().write(old || x) }
+        old
+    }
+    pub fn fetch_and(&self, x: bool, _o: __AtOrd_) -> bool {
+        let old = self.v;
+        unsafe { self.__p().write(old && x) }
+        old
+    }
+}
+
+impl Debug for AtomicBool {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError> {
+        __exr_debug(&self.v, f);
+        Ok(())
+    }
+}
+
+// `std::thread` (one thread: `spawn` runs the closure at once; `join` gives its value)
+pub struct JoinHandle<T> {
+    v: Option<T>,
+}
+
+impl<T> JoinHandle<T> {
+    pub fn join(self) -> Result<T, ()> {
+        match self.v {
+            Some(x) => Ok(x),
+            None => Err(()),
+        }
+    }
+    pub fn is_finished(&self) -> bool {
+        true
+    }
+}
+
+pub fn __core_spawn<T, F: FnOnce() -> T>(f: F) -> JoinHandle<T> {
+    JoinHandle { v: Some(f()) }
+}
+
+pub fn __core_yield_now() {}
+
+// `std::sync::mpsc` (one thread: a shared queue. `recv` on an empty queue is an error, as if every sender
+// had hung up)
+pub struct __Sndr<T> {
+    q: Rc<RefCell<VecDeque<T>>>,
+}
+
+pub struct __SyncSndr<T> {
+    q: Rc<RefCell<VecDeque<T>>>,
+}
+
+pub struct __Rcvr__<T> {
+    q: Rc<RefCell<VecDeque<T>>>,
+}
+
+pub fn __core_channel<T>() -> (__Sndr<T>, __Rcvr__<T>) {
+    let q = Rc::new(RefCell::new(VecDeque::new()));
+    (__Sndr { q: q.clone() }, __Rcvr__ { q })
+}
+
+pub fn __core_sync_channel<T>(_n: usize) -> (__SyncSndr<T>, __Rcvr__<T>) {
+    let q = Rc::new(RefCell::new(VecDeque::new()));
+    (__SyncSndr { q: q.clone() }, __Rcvr__ { q })
+}
+
+impl<T> __Sndr<T> {
+    pub fn send(&self, v: T) -> Result<(), T> {
+        self.q.borrow_mut().push_back(v);
+        Ok(())
+    }
+    pub fn clone(&self) -> __Sndr<T> {
+        __Sndr { q: self.q.clone() }
+    }
+}
+
+impl<T> __SyncSndr<T> {
+    pub fn send(&self, v: T) -> Result<(), T> {
+        self.q.borrow_mut().push_back(v);
+        Ok(())
+    }
+    pub fn clone(&self) -> __SyncSndr<T> {
+        __SyncSndr { q: self.q.clone() }
+    }
+}
+
+impl<T> __Rcvr__<T> {
+    pub fn recv(&self) -> Result<T, ()> {
+        match self.q.borrow_mut().pop_front() {
+            Some(v) => Ok(v),
+            None => Err(()),
+        }
+    }
+    pub fn try_recv(&self) -> Result<T, ()> {
+        self.recv()
+    }
+    pub fn iter(&self) -> __RecvIter<T> {
+        __RecvIter { q: self.q.clone() }
+    }
+    pub fn try_iter(&self) -> __RecvIter<T> {
+        __RecvIter { q: self.q.clone() }
+    }
+}
+
+pub struct __RecvIter<T> {
+    q: Rc<RefCell<VecDeque<T>>>,
+}
+
+impl<T> Iterator for __RecvIter<T> {
+    type Item = T;
+    fn next(&mut self) -> Option<T> {
+        self.q.borrow_mut().pop_front()
+    }
+}
+
 // 内部可変性。借用の検査はしない (borrow / borrow_mut は参照をそのまま返す)
 pub struct RefCell<T> {
     val: T,

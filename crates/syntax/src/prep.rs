@@ -674,6 +674,75 @@ fn split_out(p: &Prep, lines: &[usize], fix: &[(u32, u32, i32)], want: &[bool]) 
     Some(outs)
 }
 
+/// std names that zustc's prelude has under another name, because it resolves names by their last segment:
+/// `Ordering` from `std::sync::atomic` (not `cmp::Ordering`) and the mpsc channel types (a program may define its
+/// own `Receiver`). (module, name, prelude name); the prelude name is as long as the name, so no column moves
+const STD_RENAMES: &[(&str, &str, &str)] = &[
+    ("atomic", "Ordering", "__AtOrd_"),
+    ("mpsc", "Sender", "__Sndr"),
+    ("mpsc", "SyncSender", "__SyncSndr"),
+    ("mpsc", "Receiver", "__Rcvr__"),
+];
+
+/// Rename them where they come from that module: `module::Name`, or `Name` imported by a `use` of that module (and
+/// neither imported from elsewhere nor defined in the file)
+pub fn std_renames(src: &str) -> Option<String> {
+    if !STD_RENAMES.iter().any(|r| src.contains(r.0)) {
+        return None;
+    }
+    let b = src.as_bytes();
+    let is_id = |c: u8| c.is_ascii_alphanumeric() || c == b'_';
+    let words = |u: &str| -> Vec<String> { u.split(|c: char| !(c.is_alphanumeric() || c == '_')).map(|w| w.to_string()).collect() };
+    let mut out = src.to_string();
+    let mut changed = false;
+    for &(m, name, to) in STD_RENAMES {
+        if !src.contains(m) || !src.contains(name) {
+            continue;
+        }
+        let (mut imported, mut other) = (false, false);
+        for st in src.split(';') {
+            let t = st.trim_start();
+            let Some(u) = t.strip_prefix("use ").or_else(|| t.strip_prefix("pub use ")) else { continue };
+            let ws = words(u);
+            if ws.iter().any(|w| w == name) {
+                if ws.iter().any(|w| w == m) {
+                    imported = true;
+                } else {
+                    other = true;
+                }
+            }
+        }
+        let defined = ["struct", "enum", "trait", "type", "union"].iter().any(|k| {
+            let pat = format!("{k} {name}");
+            src.match_indices(&pat).any(|(i, _)| {
+                let e = i + pat.len();
+                e == b.len() || !is_id(b[e])
+            })
+        });
+        let bare = imported && !other && !defined;
+        let cur = std::mem::take(&mut out);
+        let cb = cur.as_bytes();
+        let mut i = 0;
+        while let Some(k) = cur[i..].find(name) {
+            let at = i + k;
+            let end = at + name.len();
+            let word = (at == 0 || !is_id(cb[at - 1])) && (end == cb.len() || !is_id(cb[end]));
+            let after_m = cur[..at].ends_with(&format!("{m}::"));
+            let qualified = at >= 2 && &cb[at - 2..at] == b"::";
+            out.push_str(&cur[i..at]);
+            if word && (after_m || (bare && (!qualified || cur[..at].ends_with("mpsc::") || cur[..at].ends_with("atomic::")))) {
+                out.push_str(to);
+                changed = true;
+            } else {
+                out.push_str(name);
+            }
+            i = end;
+        }
+        out.push_str(&cur[i..]);
+    }
+    changed.then_some(out)
+}
+
 /// 前処理 (差分)。fix には桁のずれを足す
 pub fn prep(src: &str, crates: &[String], fix: &mut Vec<(u32, u32, i32)>, cfg: Option<&crate::cfg::CfgSet>, memo: &mut PrepMemo) -> R<String> {
     memo.calls += 1;

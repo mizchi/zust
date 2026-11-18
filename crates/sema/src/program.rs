@@ -880,6 +880,15 @@ impl Program {
             if sm.impl_generics.iter().any(|g| g.0 == *sn) && matches!(sm.impl_self_ty, Some(TySyn::Named(_))) {
                 p.blanket_selfs.insert(sn.clone());
                 p.blanket_traits.insert(tr.clone());
+                // (the trait's default methods are methods of every type)
+                let ids: Vec<u32> = p.traits.get(tr).cloned().unwrap_or_default();
+                for id in ids {
+                    let sg = &p.sigs[id as usize];
+                    if sg.has_self && sg.has_body {
+                        let m = p.names[id as usize].rsplit("::").next().unwrap_or("").to_string();
+                        p.blanket.entry(m).or_insert(id);
+                    }
+                }
                 continue;
             }
             let Some(&sid) = p.struct_index.get(sn).or(sn.strip_prefix("#tuple").and_then(|k| k.parse().ok()).map(|k| p.tuple_base(k)).as_ref()) else {
@@ -1129,6 +1138,32 @@ impl Program {
     }
 
     /// プリミティブ型 t のメソッド (trait 実装のもの → なければ trait のデフォルトメソッド)
+    /// prim_method for a method call: of the functions of that name, one that takes self (`impl Foo for isize`
+    /// with `fn new() -> bool` and `impl Bar for isize` with `fn new(&self) -> bool`: `1.new()` is Bar's)
+    pub fn prim_self_method(&self, t: Ty, name: &str) -> Option<u32> {
+        let id = self.prim_method(t, name)?;
+        if self.sigs[id as usize].has_self {
+            return Some(id);
+        }
+        if let Some(ids) = self.overloads.get(&self.names[id as usize]) {
+            if let Some(&i) = ids.iter().find(|&&i| self.sigs[i as usize].has_self) {
+                return Some(i);
+            }
+        }
+        // (the default methods of the traits implemented for t)
+        for (pt, tr) in &self.prim_impls {
+            if *pt != t {
+                continue;
+            }
+            for &d in self.traits.get(tr).map(|v| v.as_slice()).unwrap_or(&[]) {
+                if self.sigs[d as usize].has_body && self.sigs[d as usize].has_self && self.names[d as usize].rsplit("::").next() == Some(name) {
+                    return Some(d);
+                }
+            }
+        }
+        Some(id)
+    }
+
     pub fn prim_method(&self, t: Ty, name: &str) -> Option<u32> {
         if let Some(&id) = self.index.get(&format!("{}::{name}", self.tn(t))) {
             return Some(id);

@@ -11,6 +11,7 @@ compile-fail	argument-suggestions/disjoint-spans-issue-151607.rs
 compile-fail	argument-suggestions/display-is-suggestable.rs
 compile-fail	argument-suggestions/invalid_arguments.rs
 compile-fail	argument-suggestions/issue-100154.rs
+compile-fail	argument-suggestions/issue-100478.rs
 compile-fail	argument-suggestions/issue-101097.rs
 compile-fail	argument-suggestions/issue-109425.rs
 compile-fail	argument-suggestions/issue-109831.rs
@@ -115,6 +116,7 @@ compile-fail	associated-types/assoc-type-element-mismatch-in-hrtb.rs
 check-pass	associated-types/assoc-type-in-generic-struct-bound.rs
 check-pass	associated-types/assoc-type-in-unused-where-clause.rs
 run-pass	associated-types/assoc-type-layout-unsized-allowed-sized-used.rs
+run-pass	associated-types/assoc-type-method-call-via-blanket-impl.rs
 check-pass	associated-types/assoc-type-named-string.rs
 check-pass	associated-types/assoc-type-outlives-via-where-clause-63253.rs
 check-pass	associated-types/assoc-type-output-is-sized.rs
@@ -288,6 +290,7 @@ check-pass	async-await/issue-78115.rs
 compile-fail	async-await/issue-84841.rs
 compile-fail	async-await/issues/issue-102206.rs
 compile-fail	async-await/issues/issue-107280.rs
+check-pass	async-await/issues/issue-54974.rs
 check-pass	async-await/issues/issue-55324.rs
 check-pass	async-await/issues/issue-58885.rs
 check-pass	async-await/issues/issue-59001.rs
@@ -529,7 +532,6 @@ compile-fail	borrowck/borrowck-lend-flow-if.rs
 compile-fail	borrowck/borrowck-lend-flow-loop.rs
 compile-fail	borrowck/borrowck-lend-flow-match.rs
 compile-fail	borrowck/borrowck-lend-flow.rs
-compile-fail	borrowck/borrowck-loan-blocks-move-cc.rs
 compile-fail	borrowck/borrowck-loan-in-overloaded-op.rs
 compile-fail	borrowck/borrowck-loan-rcvr-overloaded-op.rs
 compile-fail	borrowck/borrowck-loan-rcvr.rs
@@ -550,9 +552,11 @@ run-pass	borrowck/borrowck-multiple-borrows-interior-boxes.rs
 compile-fail	borrowck/borrowck-multiple-captures.rs
 compile-fail	borrowck/borrowck-mut-addr-of-imm-var.rs
 compile-fail	borrowck/borrowck-mut-borrow-linear-errors.rs
+compile-fail	borrowck/borrowck-mut-borrow-of-mut-base-ptr.rs
 compile-fail	borrowck/borrowck-mut-slice-of-imm-vec.rs
 run-pass	borrowck/borrowck-mut-uniq.rs
 run-pass	borrowck/borrowck-mut-vec-as-imm-slice.rs
+compile-fail	borrowck/borrowck-overloaded-index-autoderef.rs
 compile-fail	borrowck/borrowck-overloaded-index-move-index.rs
 compile-fail	borrowck/borrowck-overloaded-index-ref-index.rs
 compile-fail	borrowck/borrowck-partial-reinit-1.rs
@@ -563,12 +567,14 @@ compile-fail	borrowck/borrowck-pat-reassign-binding.rs
 run-pass	borrowck/borrowck-pat-reassign-no-binding.rs
 compile-fail	borrowck/borrowck-reborrow-from-mut.rs
 compile-fail	borrowck/borrowck-reinit.rs
+compile-fail	borrowck/borrowck-report-with-custom-diagnostic.rs
 compile-fail	borrowck/borrowck-return.rs
 run-pass	borrowck/borrowck-rvalues-mutable.rs
 run-pass	borrowck/borrowck-scope-of-deref-issue-4666.rs
 check-pass	borrowck/borrowck-slice-pattern-element-loan-array-no-overlap.rs
 run-pass	borrowck/borrowck-static-item-in-fn.rs
 compile-fail	borrowck/borrowck-storage-dead.rs
+compile-fail	borrowck/borrowck-swap-mut-base-ptr.rs
 compile-fail	borrowck/borrowck-unary-move.rs
 compile-fail	borrowck/borrowck-uninit-after-item.rs
 compile-fail	borrowck/borrowck-uninit-field-access.rs
@@ -659,6 +665,7 @@ run-pass	borrowck/lazy-init.rs
 compile-fail	borrowck/mismatched-pointer-type-in-self-7061.rs
 compile-fail	borrowck/move-in-pattern-mut.rs
 compile-fail	borrowck/move-in-pattern.rs
+compile-fail	borrowck/moved-value-in-thread-loop-12041.rs
 compile-fail	borrowck/mutability-errors.rs
 compile-fail	borrowck/mutate-vec-while-iterating.rs
 check-pass	borrowck/nested-closure-with-generic-ice.rs
@@ -822,6 +829,7 @@ compile-fail	closures/closure-arg-type-mismatch-method-receiver.rs
 compile-fail	closures/closure-expected.rs
 compile-fail	closures/closure-immutable-outer-variable.rs
 run-pass	closures/closure-last-use-move.rs
+compile-fail	closures/closure-move-sync.rs
 compile-fail	closures/closure-move-use-after-move-diagnostic.rs
 run-pass	closures/closure-mut-argument-6153.rs
 compile-fail	closures/closure-ref-fn-kind-mismatch-issue-161327.rs
@@ -845,6 +853,7 @@ run-pass	closures/issue-10682.rs
 compile-fail	closures/issue-11873.rs
 run-pass	closures/issue-1460.rs
 run-pass	closures/issue-22864-1.rs
+run-pass	closures/issue-22864-2.rs
 compile-fail	closures/issue-25439.rs
 compile-fail	closures/issue-6801.rs
 check-pass	closures/issue-68025.rs
@@ -1082,6 +1091,7 @@ run-pass	const-generics/promotion.rs
 run-pass	const-generics/type-after-const-ok.rs
 check-pass	const-generics/type-dependent/issue-67144-1.rs
 check-pass	const-generics/type-dependent/issue-67144-2.rs
+run-pass	const-generics/type-dependent/issue-69816.rs
 check-pass	const-generics/type-dependent/issue-70217.rs
 compile-fail	const-generics/type-dependent/issue-71382.rs
 run-pass	const-generics/type-dependent/qpath.rs
@@ -1244,6 +1254,7 @@ compile-fail	coroutine/stalled-coroutine-obligations.rs
 compile-fail	cycle-trait/cycle-error-comparing-function-inside-itself-66667.rs
 compile-fail	cycle-trait/cycle-trait-default-type-trait.rs
 compile-fail	delegation/ice-line-bounds-issue-148732.rs
+check-pass	deprecation/atomic_initializers.rs
 run-pass	deprecation/deprecated-macro_escape-inner.rs
 run-pass	deprecation/deprecated-macro_escape.rs
 check-pass	deprecation/derive_on_deprecated.rs
@@ -1395,6 +1406,7 @@ run-pass	dropck/dropck-empty-array.rs
 run-pass	dropck/dropck-type-in-dyn-fn-param.rs
 run-pass	dropck/dropck_fn_type.rs
 compile-fail	dropck/dropck_no_diverge_on_nonregular_3.rs
+compile-fail	dropck/dropck_trait_cycle_checked.rs
 run-pass	dropck/dropck_traits.rs
 check-pass	dropck/issue-54943-1.rs
 check-pass	dropck/issue-54943-2.rs
@@ -1520,6 +1532,9 @@ compile-fail	error-codes/E0424.rs
 compile-fail	error-codes/E0428.rs
 check-pass	error-codes/E0429.rs
 compile-fail	error-codes/E0433.rs
+compile-fail	error-codes/E0499.rs
+compile-fail	error-codes/E0503.rs
+compile-fail	error-codes/E0505.rs
 compile-fail	error-codes/E0506.rs
 compile-fail	error-codes/E0508.rs
 compile-fail	error-codes/E0512.rs
@@ -1674,6 +1689,7 @@ check-pass	feature-gates/soft-feature-gate-trait_alias.rs
 check-pass	feature-gates/soft-feature-gate-try_blocks.rs
 check-pass	feature-gates/soft-syntax-gates-without-errors.rs
 compile-fail	ffi/extern-static-mut-slice-54410.rs
+run-pass	fmt/debug-single-call.rs
 run-pass	fmt/format-enum-with-recursive-variant.rs
 run-pass	fmt/format-macro-no-std.rs
 compile-fail	fmt/incorrect-separator.rs
@@ -2602,7 +2618,6 @@ compile-fail	methods/dont-suggest-import-on-deref-err.rs
 compile-fail	methods/duplicate-method-call-on-self.rs
 compile-fail	methods/field-method-suggestion-using-return-ty.rs
 compile-fail	methods/filter-relevant-fn-bounds.rs
-compile-fail	methods/generic-method-unsatisfied-bound.rs
 compile-fail	methods/ident-from-macro-expansion.rs
 run-pass	methods/inherent-method-resolution-on-deref-type-53843.rs
 compile-fail	methods/issue-19521.rs
@@ -2628,6 +2643,7 @@ run-pass	methods/method-projection.rs
 run-pass	methods/method-recursive-blanket-impl.rs
 compile-fail	methods/method-resolvable-path-in-pattern.rs
 compile-fail	methods/method-self-arg-1.rs
+compile-fail	methods/method-self-arg-2.rs
 run-pass	methods/method-self-arg.rs
 compile-fail	methods/method-value-without-call.rs
 check-pass	methods/nested-fn-call-shadowed-assoc-fn-variable.rs
@@ -2730,6 +2746,7 @@ check-pass	modules/path-attr-inner-attr-nested-mod-rs/path-attr-inner-attr-neste
 check-pass	modules/pub-use-handling-in-modules-56128.rs
 check-pass	modules/pub-use-module-alias-5950.rs
 run-pass	modules/use-statement-duplicate-check-7663.rs
+compile-fail	moves/arc-consumed-in-looped-closure.rs
 compile-fail	moves/invalid-suggestions-destructuring-assignment-drop.rs
 run-pass	moves/issue-22536-copy-mustnt-zero.rs
 compile-fail	moves/issue-46099-move-in-macro.rs
@@ -2753,12 +2770,17 @@ run-pass	moves/move-out-of-field.rs
 compile-fail	moves/move-out-of-shared-ref-deref.rs
 compile-fail	moves/move-out-of-tuple-field.rs
 compile-fail	moves/moves-based-on-type-access-to-field.rs
+compile-fail	moves/moves-based-on-type-capture-clause-bad.rs
+run-pass	moves/moves-based-on-type-capture-clause.rs
 compile-fail	moves/moves-based-on-type-cyclic-types-issue-4821.rs
 compile-fail	moves/moves-based-on-type-distribute-copy-over-paren.rs
 compile-fail	moves/moves-based-on-type-exprs.rs
 compile-fail	moves/moves-based-on-type-tuple.rs
 compile-fail	moves/moves-sru-moved-field.rs
 compile-fail	moves/needs-clone-through-deref.rs
+compile-fail	moves/no-capture-arc.rs
+compile-fail	moves/no-reuse-move-arc.rs
+compile-fail	mut/mut-cant-alias.rs
 compile-fail	mut/mut-cross-borrowing.rs
 compile-fail	mut/mut-pattern-internal-mutability.rs
 compile-fail	mut/mut-suggestion.rs
@@ -2795,6 +2817,7 @@ compile-fail	nll/borrowed-referent-issue-38899.rs
 compile-fail	nll/borrowed-universal-error-2.rs
 compile-fail	nll/cannot-move-block-spans.rs
 compile-fail	nll/closure-access-spans.rs
+compile-fail	nll/closure-borrow-spans.rs
 compile-fail	nll/closure-captures.rs
 compile-fail	nll/closure-move-spans.rs
 check-pass	nll/closure-requirements/issue-58127-mutliple-requirements.rs
@@ -3591,6 +3614,7 @@ compile-fail	pattern/pat-type-err-formal-param.rs
 compile-fail	pattern/patkind-ref-binding-issue-122415.rs
 compile-fail	pattern/pattern-binding-disambiguation.rs
 compile-fail	pattern/pattern-error-continue.rs
+run-pass	pattern/pattern-match-arc-move.rs
 compile-fail	pattern/pattern-tyvar-2.rs
 check-pass	pattern/patterns-dont-match-nt-statement.rs
 compile-fail	pattern/range-pattern-meant-to-be-slice-rest-pattern.rs
@@ -3660,6 +3684,7 @@ check-pass	proc-macro/derive-multiple-with-packed.rs
 check-pass	proc-macro/extern-prelude-extern-crate-proc-macro.rs
 compile-fail	proc-macro/illegal-proc-macro-derive-use.rs
 compile-fail	proc-macro/invalid-attributes.rs
+run-pass	process-termination/process-termination-simple.rs
 run-pass	process/windows-exit-code-still-active.rs
 run-pass	ptr_ops/ptr-swap-basic.rs
 run-pass	ptr_ops/ptr-swap-overlapping-regions.rs
@@ -4074,11 +4099,13 @@ compile-fail	span/E0072.rs
 compile-fail	span/borrowck-borrow-overloaded-auto-deref-mut.rs
 compile-fail	span/borrowck-borrow-overloaded-deref-mut.rs
 compile-fail	span/borrowck-call-method-from-mut-aliasable.rs
+compile-fail	span/borrowck-let-suggestion-suffixes.rs
 compile-fail	span/coerce-suggestions.rs
 compile-fail	span/drop-location-span-error-rust-2021-incompatible-closure-captures-96258.rs
 check-pass	span/issue-24690.rs
 compile-fail	span/issue-29595.rs
 compile-fail	span/issue-34264.rs
+compile-fail	span/issue-36537.rs
 compile-fail	span/issue-39018.rs
 compile-fail	span/issue-42234-unknown-receiver-type.rs
 compile-fail	span/issue-81800.rs
@@ -4087,6 +4114,7 @@ compile-fail	span/missing-unit-argument.rs
 check-pass	span/multispan-import-lint.rs
 compile-fail	span/mut-arg-hint.rs
 compile-fail	span/mutability-suggestion-fullwidth-ampersand.rs
+compile-fail	span/regionck-unboxed-closure-lifetimes.rs
 compile-fail	span/regions-escape-loop-via-variable.rs
 compile-fail	span/send-is-not-static-std-sync-2.rs
 compile-fail	span/suggestion-non-ascii.rs
@@ -4294,6 +4322,7 @@ compile-fail	suggestions/into-str.rs
 compile-fail	suggestions/issue-101421.rs
 compile-fail	suggestions/issue-101623.rs
 compile-fail	suggestions/issue-102354.rs
+compile-fail	suggestions/issue-102892.rs
 compile-fail	suggestions/issue-102972.rs
 compile-fail	suggestions/issue-104086-suggest-let.rs
 compile-fail	suggestions/issue-104287.rs
@@ -4403,8 +4432,8 @@ compile-fail	suggestions/suggest-closure-return-type-3.rs
 compile-fail	suggestions/suggest-collect.rs
 compile-fail	suggestions/suggest-create-closure-issue-150701.rs
 compile-fail	suggestions/suggest-dereferencing-index.rs
-compile-fail	suggestions/suggest-derive-default-for-enums.rs
 compile-fail	suggestions/suggest-exact-alias-before-similar-name.rs
+compile-fail	suggestions/suggest-field-through-deref.rs
 compile-fail	suggestions/suggest-fn-ptr-for-fn-item-in-fn-ret.rs
 compile-fail	suggestions/suggest-imm-mut-trait-implementations.rs
 compile-fail	suggestions/suggest-let-and-typo-issue-132483.rs
@@ -4460,13 +4489,30 @@ compile-fail	sync/suggest-ref-cell.rs
 build-pass	target-feature/implied-features.rs
 check-pass	thread-local/long-docs.rs
 run-pass	thread-local/thread-local-with-attributes-30756.rs
+run-pass	threads-sendsync/child-outlives-parent.rs
+run-pass	threads-sendsync/clone-with-exterior.rs
+run-pass	threads-sendsync/issue-29488.rs
 compile-fail	threads-sendsync/rc-is-not-send.rs
 run-pass	threads-sendsync/sendfn-is-a-block.rs
+run-pass	threads-sendsync/spawn-fn.rs
+run-pass	threads-sendsync/spawn.rs
+run-pass	threads-sendsync/spawn2.rs
+run-pass	threads-sendsync/task-comm-1.rs
+run-pass	threads-sendsync/task-comm-12.rs
+run-pass	threads-sendsync/task-comm-17.rs
+run-pass	threads-sendsync/task-life-0.rs
+run-pass	threads-sendsync/thread-join-unwrap.rs
 run-pass	threads-sendsync/thread-local-syntax.rs
+run-pass	threads-sendsync/threads.rs
+run-pass	threads-sendsync/tls-dont-move-after-init.rs
+run-pass	threads-sendsync/yield.rs
+run-pass	threads-sendsync/yield1.rs
+run-pass	threads-sendsync/yield2.rs
 check-pass	tool-attributes/diagnostic_item2.rs
 compile-fail	tool-attributes/tool-attributes-misplaced-1.rs
 run-pass	tool-attributes/tool_lints-rpass.rs
 compile-fail	trait-bounds/argument-with-unnecessary-method-call.rs
+compile-fail	trait-bounds/deep-level-send-bound-check-issue-40827.rs
 compile-fail	trait-bounds/false-span-in-trait-bound-label.rs
 compile-fail	trait-bounds/issue-82038.rs
 compile-fail	trait-bounds/negative-bound-not-supported-58857.rs
@@ -4746,9 +4792,11 @@ compile-fail	type/type-check/issue-116967-cannot-coerce-returned-result.rs
 compile-fail	type/type-check/point-at-inference-3.rs
 compile-fail	type/type-mismatch-multiple.rs
 compile-fail	type/type-parameter-defaults-referencing-Self-ppaux.rs
+compile-fail	type/type-params-in-different-spaces-1.rs
 compile-fail	type/type-path-err-node-types.rs
 compile-fail	type/type-recursive.rs
 run-pass	type/unit-type-basic-usages.rs
+compile-fail	type/verbose-suggestion-for-missing-fn-args.rs
 compile-fail	type/wrong-call-return-type-due-to-generic-arg.rs
 compile-fail	typeck/assign-non-lval-derefmut.rs
 compile-fail	typeck/assign-non-lval-mut-ref.rs
@@ -4948,6 +4996,7 @@ compile-fail	use/use-after-move-self.rs
 check-pass	use/use-keyword.rs
 check-pass	use/use-mod/use-mod-5.rs
 check-pass	use/use-mod/use-mod-6.rs
+check-pass	variance/smart-pointers-covariant.rs
 compile-fail	variance/variance-contravariant-arg-object.rs
 compile-fail	variance/variance-covariant-arg-object.rs
 compile-fail	variance/variance-invariant-arg-object.rs

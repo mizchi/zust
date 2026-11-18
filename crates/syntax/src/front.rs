@@ -149,6 +149,8 @@ fn split_diff(old: &str, items: &[SrcItem], new: &str) -> Option<Vec<SrcItem>> {
 /// 返り値の 4 つ目は prelude の先頭の行 (prelude の中の行 = 結合したソースの行 - これ)
 pub fn with_prelude_in(src: &str, crates: &[String], fix: &mut Vec<(u32, u32, i32)>, cfg: Option<&crate::cfg::CfgSet>, cache: &mut FrontMemo) -> R<(String, Vec<SrcItem>, usize, usize)> {
     let mut tm = Timer { on: std::env::var_os("ZUSTC_PROF").is_some(), last: now_ns(), start: now_ns() };
+    let renamed = crate::prep::std_renames(src);
+    let src: &str = renamed.as_deref().unwrap_or(src);
     let pre = crate::prep::prep(src, crates, fix, cfg, &mut cache.prep)?;
     let src: &str = &pre;
     tm.lap("prep", String::new());
