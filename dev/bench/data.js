@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795026272988,
+  "lastUpdate": 1795026275068,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -14605,6 +14605,85 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/mizchi/zust/commit/232f346bf3ed5cf9174f9020acde1495f28fcb58"
         },
         "date": 1795025548542,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "parity documentSymbol (名前の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity workspace/symbol (上位 20 の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity definition (行き先の一致)",
+            "value": 97.222,
+            "unit": "%"
+          },
+          {
+            "name": "parity hover (名前を含む)",
+            "value": 95,
+            "unit": "%"
+          },
+          {
+            "name": "parity references (数の一致)",
+            "value": 92.105,
+            "unit": "%"
+          },
+          {
+            "name": "parity documentHighlight (数の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity rename (書き換えの一致)",
+            "value": 90,
+            "unit": "%"
+          },
+          {
+            "name": "parity signatureHelp (名前・引数の数・今の引数の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity completion `x.\\|` (書いてある名前を含む)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity completion `na\\|me` (同)",
+            "value": 79.167,
+            "unit": "%"
+          },
+          {
+            "name": "parity 一致の平均",
+            "value": 95.349,
+            "unit": "%"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "committer": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "distinct": true,
+          "id": "351df2e31923d542ed40fe703526e4c4437b14da",
+          "message": "Array lengths as constant expressions over other consts\n\n- an array length that is not a literal expression keeps its text (`N * 2`,\n  `ARR[0] as usize`, `Foo::Bar as usize`, `{ x }`, `const { 2 }`, `if`, `!`,\n  comparisons, fields): Program evaluates it, as for const generic arguments\n- a unit variant path in a constant is its discriminant\n- `[u8; N - 1]` with a const parameter N in a type alias: \"generic parameters\n  may not be used in const operations\"\n- tests/ui: run-pass 1360 (56.36%), check-pass 1079, compile-fail 2807\n\nKPIs (gen5000): noop 661.0 M instr, edit 622.6, check 3887.4, cache unchanged;\nLSP ready 110 ms.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-18T18:19:38Z",
+          "tree_id": "b04833681e98da692521a75e247e6d92809e1c43",
+          "url": "https://github.com/mizchi/zust/commit/351df2e31923d542ed40fe703526e4c4437b14da"
+        },
+        "date": 1795026274582,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
