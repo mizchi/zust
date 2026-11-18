@@ -182,6 +182,8 @@ fn cfg_predicates() {
     if cfg!(windows) {
         want.push("windows_");
     }
+    // (`miri` は成り立つ: rust-analyzer の `cargo.cfgs` の既定)
+    want.push("miri_");
     // (設定されていない cfg `whatever` / `foo = "x"` は成り立たない: rustc と同じ)
     want.extend(["other_fn", "m", "inner"]);
     assert_eq!(names, want);

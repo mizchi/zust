@@ -307,6 +307,22 @@ impl Server {
                 out.push((u.clone(), f));
             }
         }
+        // (クレートの名前 → 根のファイル: `std::..` / `fixture::..` のパスの先頭の名前の定義と参照)
+        let mut roots: Vec<(String, usize)> = vec![];
+        for (i, (u, _)) in out.iter().enumerate() {
+            if let Some(n) = lib_crate_root(u) {
+                roots.push((n, i));
+            }
+        }
+        for (n, u) in &self.crates {
+            if matches!(n.as_str(), "core" | "alloc" | "std" | "test" | "proc_macro") {
+                continue;
+            }
+            if let Some(i) = out.iter().position(|x| &x.0 == u) {
+                roots.push((n.clone(), i));
+            }
+        }
+        navigate::set_crate_roots(roots);
         out
     }
 
@@ -679,7 +695,7 @@ fn index_std() -> Vec<(String, FileIndex)> {
     let Some(sysroot) = sysroot else { return vec![] };
     let lib = Path::new(&sysroot).join("lib/rustlib/src/rust/library");
     let mut out = vec![];
-    for krate in ["core", "alloc", "std"] {
+    for (ki, krate) in ["core", "alloc", "std"].into_iter().enumerate() {
         let dir = lib.join(krate).join("src");
         let mut paths = vec![];
         rs_files(&dir, &mut paths, 0);
@@ -693,12 +709,30 @@ fn index_std() -> Vec<(String, FileIndex)> {
             // (索引の作り方の不具合で 1 つのファイルが落ちても、std の索引全体を失わない: そのファイルだけ飛ばす)
             let m = navigate::module_of(&rel);
             match std::panic::catch_unwind(move || FileIndex::library(text, m)) {
-                Ok(ix) => out.push((path_uri(&p), ix)),
+                Ok(mut ix) => {
+                    // (ライブラリのクレートごとの番号: `mod x;` のファイルを同じクレートの中で探すため)
+                    ix.krate = navigate::LIB_KRATE_BASE + ki as u32;
+                    out.push((path_uri(&p), ix))
+                }
                 Err(_) => eprintln!("zust-analyzer: {rel} の索引を作れなかった (飛ばす)"),
             }
         }
     }
     out
+}
+
+/// ライブラリのクレートの根のファイル (`…/library/std/src/lib.rs`、`…/registry/src/…/serde_json-1.0.0/src/lib.rs`) ならその名前
+fn lib_crate_root(uri: &str) -> Option<String> {
+    let dir = uri.strip_suffix("/src/lib.rs")?;
+    let last = dir.rsplit('/').next()?;
+    if dir.contains("/rustlib/src/rust/library/") {
+        return Some(last.to_string());
+    }
+    if dir.contains("/registry/src/") {
+        let (n, v) = last.rsplit_once('-')?;
+        return v.starts_with(|c: char| c.is_ascii_digit()).then(|| n.replace('-', "_"));
+    }
+    None
 }
 
 /// 依存クレート (ワークスペースのパッケージの `[dependencies]` / `[dev-dependencies]` / `[build-dependencies]` のうち、
@@ -755,7 +789,7 @@ fn index_deps(root: &Path) -> Vec<(String, FileIndex)> {
     let Some(home) = home else { return vec![] };
     let regs: Vec<PathBuf> = std::fs::read_dir(home.join("registry/src")).into_iter().flatten().flatten().map(|e| e.path()).collect();
     let mut out = vec![];
-    for n in names {
+    for (ni, n) in names.into_iter().enumerate() {
         let Some(v) = vers.get(&n) else { continue };
         let Some(dir) = regs.iter().map(|r| r.join(format!("{n}-{v}"))).find(|d| d.join("src").exists()) else { continue };
         let mut paths = vec![];
@@ -767,7 +801,8 @@ fn index_deps(root: &Path) -> Vec<(String, FileIndex)> {
             }
             let Ok(text) = std::fs::read_to_string(&p) else { continue };
             let m = navigate::module_of(&rel);
-            if let Ok(ix) = std::panic::catch_unwind(move || FileIndex::library(text, m)) {
+            if let Ok(mut ix) = std::panic::catch_unwind(move || FileIndex::library(text, m)) {
+                ix.krate = navigate::LIB_KRATE_BASE + 100 + ni as u32;
                 out.push((path_uri(&p), ix));
             }
         }

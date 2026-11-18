@@ -41,12 +41,12 @@ ws/src/lib.rs:24:33 as -> - | refs 0/0 | -
 ws/src/lib.rs:24:36 Pt -> ws/src/shapes.rs:6:12+5 | refs 15/14 | ```rust⏎shapes⏎pub struct Point⏎```
 ws/src/lib.rs:24:40 Shape -> ws/src/shapes.rs:12:10+5 | refs 12/11 [ws/src/lib.rs:24:40+5 ws/src/lib.rs:134:13+5 ws/src/lib.rs:135:13+5 ws/src/shapes.rs:12:10+5 ws/src/shapes.rs:43:6+5 ws/src/shapes.rs:46:13+5 ws/src/shapes.rs:47:13+5 ws/src/shapes.rs:48:13+5 ws/src/shapes.rs:54:17+5 ws/src/shapes.rs:56:9+5 ws/src/shapes.rs:57:9+5 ws/src/shapes.rs:58:9+5] | ```rust⏎shapes⏎pub enum Shape⏎```
 ws/src/lib.rs:25:1 use -> - | refs 0/0 | -
-ws/src/lib.rs:25:5 std -> - | refs 0/0 | -
-ws/src/lib.rs:25:10 collections -> lib/std/src/lib.rs:2:9+11 | refs 2/1 [lib/std/src/lib.rs:2:9+11 ws/src/lib.rs:25:10+11] | ```rust⏎pub mod collections⏎```
+ws/src/lib.rs:25:5 std -> lib/std/src/lib.rs:0:1+0 | refs 3/2 [lib/std/src/lib.rs:0:1+0 ws/src/lib.rs:25:5+3 ws/src/lib.rs:26:5+3] | ```rust⏎⏎```
+ws/src/lib.rs:25:10 collections -> lib/std/src/collections/mod.rs:0:1+0 | refs 2/1 [lib/std/src/lib.rs:2:9+11 ws/src/lib.rs:25:10+11] | ```rust⏎pub mod collections⏎```
 ws/src/lib.rs:25:23 HashMap -> lib/std/src/collections/hash/map.rs:2:12+7 | refs 4/3 [lib/std/src/collections/hash/map.rs:2:12+7 ws/src/lib.rs:25:23+7 ws/src/lib.rs:43:21+7 ws/src/lib.rs:115:31+7] | ```rust⏎collections::hash::map⏎pub struct HashMap<K, V>⏎```⏎⏎---⏎⏎A hash map.
 ws/src/lib.rs:26:1 use -> - | refs 0/0 | -
-ws/src/lib.rs:26:5 std -> - | refs 0/0 | -
-ws/src/lib.rs:26:10 sync -> lib/std/src/lib.rs:3:9+4 | refs 2/1 [lib/std/src/lib.rs:3:9+4 ws/src/lib.rs:26:10+4] | ```rust⏎pub mod sync⏎```
+ws/src/lib.rs:26:5 std -> lib/std/src/lib.rs:0:1+0 | refs 3/2 | ```rust⏎⏎```
+ws/src/lib.rs:26:10 sync -> lib/std/src/sync/mod.rs:0:1+0 | refs 2/1 [lib/std/src/lib.rs:3:9+4 ws/src/lib.rs:26:10+4] | ```rust⏎pub mod sync⏎```
 ws/src/lib.rs:26:16 Mutex -> lib/std/src/sync/poison/mutex.rs:2:12+5 | refs 3/2 [lib/std/src/sync/poison/mutex.rs:2:12+5 ws/src/lib.rs:26:16+5 ws/src/lib.rs:126:19+5] | ```rust⏎sync::poison::mutex⏎pub struct Mutex<T: ?Sized>⏎```⏎⏎---⏎⏎A mutual exclusion primitive.
 ws/src/lib.rs:27:1 use -> - | refs 0/0 | -
 ws/src/lib.rs:27:5 util -> ws/src/util/mod.rs:1:1+0 | refs 6/5 | ```rust⏎pub mod util⏎```
@@ -56,7 +56,7 @@ ws/src/lib.rs:29:5 use -> - | refs 0/0 | -
 ws/src/lib.rs:29:9 inner -> ws/src/lib.rs:7:5+5 | refs 3/2 | ```rust⏎mod inner⏎```
 ws/src/lib.rs:29:16 more -> ws/src/lib.rs:11:13+4 | refs 2/1 | ```rust⏎inner⏎pub mod more⏎```
 ws/src/lib.rs:29:22 Hidden -> ws/src/lib.rs:13:20+6 | refs 9/8 | ```rust⏎inner::more⏎pub struct Hidden⏎```⏎⏎---⏎⏎A hidden thing.
-ws/src/lib.rs:33:3 derive -> - | refs 0/0 | -
+ws/src/lib.rs:33:3 derive -> lib/core/src/macros/mod.rs:15:11+6 | refs 5/4 [lib/core/src/macros/mod.rs:15:11+6 ws/src/lib.rs:33:3+6 ws/src/lib.rs:45:3+6 ws/src/shapes.rs:5:3+6 ws/src/shapes.rs:11:3+6] | ```rust⏎macros⏎pub macro derive($item:item)⏎```⏎⏎---⏎⏎Attribute macro used to apply derive macros.
 ws/src/lib.rs:33:10 Debug -> lib/core/src/fmt/macros.rs:2:11+5 | refs 5/4 [lib/core/src/fmt/macros.rs:2:11+5 ws/src/lib.rs:33:10+5 ws/src/lib.rs:45:10+5 ws/src/shapes.rs:5:10+5 ws/src/shapes.rs:11:10+5] | ```rust⏎fmt::macros⏎pub macro Debug($item:item)⏎```⏎⏎---⏎⏎Derive macro generating an impl of the trait `Debug`.
 ws/src/lib.rs:33:17 Clone -> lib/core/src/fmt/macros.rs:5:11+5 | refs 4/3 [lib/core/src/fmt/macros.rs:5:11+5 ws/src/lib.rs:33:17+5 ws/src/shapes.rs:5:17+5 ws/src/shapes.rs:11:17+5] | ```rust⏎fmt::macros⏎pub macro Clone($item:item)⏎```
 ws/src/lib.rs:33:24 Default -> lib/core/src/fmt/macros.rs:8:11+7 | refs 3/2 [lib/core/src/fmt/macros.rs:8:11+7 ws/src/lib.rs:33:24+7 ws/src/shapes.rs:5:41+7] | ```rust⏎fmt::macros⏎pub macro Default($item:item)⏎```
@@ -99,7 +99,7 @@ ws/src/lib.rs:43:16 V -> ws/src/lib.rs:43:16+1 | refs 2/1 [ws/src/lib.rs:43:16+1
 ws/src/lib.rs:43:21 HashMap -> lib/std/src/collections/hash/map.rs:2:12+7 | refs 4/3 | ```rust⏎collections::hash::map⏎pub struct HashMap<K, V>⏎```⏎⏎---⏎⏎A hash map.
 ws/src/lib.rs:43:29 String -> lib/alloc/src/string.rs:2:12+6 | refs 12/11 | ```rust⏎string⏎pub struct String⏎```⏎⏎---⏎⏎A UTF-8–encoded, growable string.
 ws/src/lib.rs:43:37 V -> ws/src/lib.rs:43:16+1 | refs 2/1 | ```rust⏎V⏎```
-ws/src/lib.rs:45:3 derive -> - | refs 0/0 | -
+ws/src/lib.rs:45:3 derive -> lib/core/src/macros/mod.rs:15:11+6 | refs 5/4 | ```rust⏎macros⏎pub macro derive($item:item)⏎```⏎⏎---⏎⏎Attribute macro used to apply derive macros.
 ws/src/lib.rs:45:10 Debug -> lib/core/src/fmt/macros.rs:2:11+5 | refs 5/4 | ```rust⏎fmt::macros⏎pub macro Debug($item:item)⏎```⏎⏎---⏎⏎Derive macro generating an impl of the trait `Debug`.
 ws/src/lib.rs:46:1 pub -> - | refs 0/0 | -
 ws/src/lib.rs:46:5 enum -> ws/src/lib.rs:46:10+5 | refs 7/6 | -
@@ -140,7 +140,7 @@ ws/src/lib.rs:59:9 let -> - | refs 0/0 | -
 ws/src/lib.rs:59:13 s -> ws/src/lib.rs:59:13+1 | refs 3/2 [ws/src/lib.rs:59:13+1 ws/src/lib.rs:60:19+1 ws/src/lib.rs:60:22+1] | ```rust⏎s: String⏎```
 ws/src/lib.rs:59:17 self -> - | refs 0/0 | -
 ws/src/lib.rs:59:22 describe -> ws/src/lib.rs:57:8+8 | refs 5/4 | ```rust⏎Describe⏎fn describe(&self) -> String⏎```
-ws/src/lib.rs:60:9 format -> - | refs 0/0 | -
+ws/src/lib.rs:60:9 format -> lib/alloc/src/macros.rs:8:14+6 | refs 3/2 [lib/alloc/src/macros.rs:8:14+6 ws/src/lib.rs:60:9+6 ws/src/shapes.rs:39:9+6] | ```rust⏎macros⏎macro_rules! format⏎```
 ws/src/lib.rs:64:1 impl -> - | refs 0/0 | -
 ws/src/lib.rs:64:6 Describe -> ws/src/lib.rs:56:11+8 | refs 5/4 | ```rust⏎pub trait Describe⏎```
 ws/src/lib.rs:64:15 for -> - | refs 0/0 | -
@@ -367,7 +367,7 @@ ws/src/lib.rs:137:27 x -> ws/src/shapes.rs:7:9+1 | refs 15/14 | ```rust⏎Point�
 ws/src/lib.rs:137:32 ORIGIN -> ws/src/lib.rs:53:12+6 | refs 2/1 | ```rust⏎pub static ORIGIN: Pt = Pt { x: 0, y: 0 }⏎```
 ws/src/lib.rs:138:5 let -> - | refs 0/0 | -
 ws/src/lib.rs:138:9 all -> ws/src/lib.rs:138:9+3 | refs 3/2 [ws/src/lib.rs:138:9+3 ws/src/lib.rs:140:16+3 ws/src/lib.rs:144:18+3] | ```rust⏎all: Vec<Shape>⏎```
-ws/src/lib.rs:138:15 vec -> - | refs 0/0 | -
+ws/src/lib.rs:138:15 vec -> lib/alloc/src/macros.rs:3:14+3 | refs 2/1 [lib/alloc/src/macros.rs:3:14+3 ws/src/lib.rs:138:15+3] | ```rust⏎macros⏎macro_rules! vec⏎```
 ws/src/lib.rs:138:20 s -> ws/src/lib.rs:134:9+1 | refs 2/1 | ```rust⏎s: Shape⏎```
 ws/src/lib.rs:138:23 r -> ws/src/lib.rs:135:9+1 | refs 2/1 | ```rust⏎r: Rect⏎```
 ws/src/lib.rs:139:5 let -> - | refs 0/0 | -
@@ -571,8 +571,8 @@ ws/src/lib.rs:216:30 str -> - | refs 8/8 | ```rust⏎str⏎```
 ws/src/lib.rs:220:3 cfg -> - | refs 0/0 | -
 ws/src/lib.rs:220:7 miri -> - | refs 0/0 | -
 ws/src/lib.rs:221:1 pub -> - | refs 0/0 | -
-ws/src/lib.rs:221:5 fn -> - | refs 0/0 | -
-ws/src/lib.rs:221:8 under_miri -> - | refs 0/0 | -
+ws/src/lib.rs:221:5 fn -> ws/src/lib.rs:221:8+10 | refs 1/1 [ws/src/lib.rs:221:5+2] | -
+ws/src/lib.rs:221:8 under_miri -> ws/src/lib.rs:221:8+10 | refs 1/0 | ```rust⏎pub fn under_miri()⏎```
 ws/src/lib.rs:223:1 macro_rules -> - | refs 0/0 | -
 ws/src/lib.rs:223:14 square -> ws/src/lib.rs:223:14+6 | refs 2/1 [ws/src/lib.rs:223:14+6 ws/src/lib.rs:230:13+6] | ```rust⏎macro_rules! square⏎```
 ws/src/lib.rs:224:7 e -> - | refs 0/0 | -
@@ -618,7 +618,7 @@ ws/src/lib.rs:241:1 mod -> ws/src/lib.rs:241:5+5 | refs 1/0 [ws/src/lib.rs:241:5
 ws/src/lib.rs:241:5 tests -> ws/src/lib.rs:241:5+5 | refs 1/0 | ```rust⏎mod tests⏎```
 ws/src/lib.rs:242:5 use -> - | refs 0/0 | -
 ws/src/lib.rs:242:9 super -> - | refs 0/0 | -
-ws/src/lib.rs:244:7 test -> - | refs 0/0 | -
+ws/src/lib.rs:244:7 test -> lib/core/src/macros/mod.rs:11:11+4 | refs 3/2 [lib/core/src/macros/mod.rs:11:11+4 ws/src/lib.rs:244:7+4 ws/tests/it.rs:7:3+4] | ```rust⏎macros⏎pub macro test($item:item)⏎```⏎⏎---⏎⏎Attribute macro applied to a function to turn it into a unit test.
 ws/src/lib.rs:245:5 fn -> ws/src/lib.rs:245:8+13 | refs 1/1 [ws/src/lib.rs:245:5+2] | -
 ws/src/lib.rs:245:8 counter_works -> ws/src/lib.rs:245:8+13 | refs 1/0 | ```rust⏎tests⏎fn counter_works()⏎```
 ws/src/lib.rs:246:9 let -> - | refs 0/0 | -
@@ -628,10 +628,10 @@ ws/src/lib.rs:246:21 Counter -> ws/src/lib.rs:34:12+7 | refs 15/14 | ```rust⏎p
 ws/src/lib.rs:246:30 new -> ws/src/lib.rs:71:12+3 | refs 4/3 | ```rust⏎impl Counter⏎pub fn new(name: &str) -> Self⏎```
 ws/src/lib.rs:247:9 c -> ws/src/lib.rs:246:17+1 | refs 3/2 | ```rust⏎c: Counter⏎```
 ws/src/lib.rs:247:11 bump -> ws/src/lib.rs:75:12+4 | refs 4/3 | ```rust⏎impl Counter⏎pub fn bump(&mut self) -> &mut Self⏎```
-ws/src/lib.rs:248:9 assert_eq -> - | refs 0/0 | -
+ws/src/lib.rs:248:9 assert_eq -> lib/core/src/macros/mod.rs:7:14+9 | refs 4/3 [lib/core/src/macros/mod.rs:7:14+9 ws/src/lib.rs:248:9+9 ws/src/lib.rs:249:9+9 ws/tests/it.rs:12:5+9] | ```rust⏎macros⏎macro_rules! assert_eq⏎```
 ws/src/lib.rs:248:20 c -> ws/src/lib.rs:246:17+1 | refs 3/2 | ```rust⏎c: Counter⏎```
 ws/src/lib.rs:248:22 count -> ws/src/lib.rs:35:9+5 | refs 6/5 | ```rust⏎Counter⏎pub count: u64⏎```
-ws/src/lib.rs:249:9 assert_eq -> - | refs 0/0 | -
+ws/src/lib.rs:249:9 assert_eq -> lib/core/src/macros/mod.rs:7:14+9 | refs 4/3 | ```rust⏎macros⏎macro_rules! assert_eq⏎```
 ws/src/lib.rs:249:20 extra_or_test -> ws/src/lib.rs:201:8+13 | refs 2/1 | ```rust⏎pub fn extra_or_test() -> u8⏎```
 ws/src/lib.rs:253:1 impl -> - | refs 0/0 | -
 ws/src/lib.rs:253:6 From -> lib/core/src/convert/mod.rs:5:11+4 | refs 2/1 [lib/core/src/convert/mod.rs:5:11+4 ws/src/lib.rs:253:6+4] | ```rust⏎convert⏎pub trait From<T>: Sized⏎```
@@ -676,10 +676,10 @@ ws/src/lib.rs:263:32 i32 -> - | refs 20/20 | ```rust⏎i32⏎```
 ws/src/shapes.rs:3:1 use -> - | refs 0/0 | -
 ws/src/shapes.rs:3:5 super -> - | refs 0/0 | -
 ws/src/shapes.rs:3:12 Describe -> ws/src/lib.rs:56:11+8 | refs 5/4 | ```rust⏎pub trait Describe⏎```
-ws/src/shapes.rs:5:3 derive -> - | refs 0/0 | -
+ws/src/shapes.rs:5:3 derive -> lib/core/src/macros/mod.rs:15:11+6 | refs 5/4 | ```rust⏎macros⏎pub macro derive($item:item)⏎```⏎⏎---⏎⏎Attribute macro used to apply derive macros.
 ws/src/shapes.rs:5:10 Debug -> lib/core/src/fmt/macros.rs:2:11+5 | refs 5/4 | ```rust⏎fmt::macros⏎pub macro Debug($item:item)⏎```⏎⏎---⏎⏎Derive macro generating an impl of the trait `Debug`.
 ws/src/shapes.rs:5:17 Clone -> lib/core/src/fmt/macros.rs:5:11+5 | refs 4/3 | ```rust⏎fmt::macros⏎pub macro Clone($item:item)⏎```
-ws/src/shapes.rs:5:24 Copy -> - | refs 0/0 | -
+ws/src/shapes.rs:5:24 Copy -> lib/core/src/marker.rs:4:11+4 | refs 2/1 [lib/core/src/marker.rs:4:11+4 ws/src/shapes.rs:5:24+4] | ```rust⏎marker⏎pub macro Copy($item:item)⏎```⏎⏎---⏎⏎Derive macro generating an impl of the trait `Copy`.
 ws/src/shapes.rs:5:30 PartialEq -> lib/core/src/fmt/macros.rs:11:11+9 | refs 3/2 | ```rust⏎fmt::macros⏎pub macro PartialEq($item:item)⏎```
 ws/src/shapes.rs:5:41 Default -> lib/core/src/fmt/macros.rs:8:11+7 | refs 3/2 | ```rust⏎fmt::macros⏎pub macro Default($item:item)⏎```
 ws/src/shapes.rs:6:1 pub -> - | refs 0/0 | -
@@ -691,7 +691,7 @@ ws/src/shapes.rs:7:12 i32 -> - | refs 20/20 | ```rust⏎i32⏎```
 ws/src/shapes.rs:8:5 pub -> - | refs 0/0 | -
 ws/src/shapes.rs:8:9 y -> ws/src/shapes.rs:8:9+1 | refs 9/8 | ```rust⏎Point⏎pub y: i32⏎```
 ws/src/shapes.rs:8:12 i32 -> - | refs 20/20 | ```rust⏎i32⏎```
-ws/src/shapes.rs:11:3 derive -> - | refs 0/0 | -
+ws/src/shapes.rs:11:3 derive -> lib/core/src/macros/mod.rs:15:11+6 | refs 5/4 | ```rust⏎macros⏎pub macro derive($item:item)⏎```⏎⏎---⏎⏎Attribute macro used to apply derive macros.
 ws/src/shapes.rs:11:10 Debug -> lib/core/src/fmt/macros.rs:2:11+5 | refs 5/4 | ```rust⏎fmt::macros⏎pub macro Debug($item:item)⏎```⏎⏎---⏎⏎Derive macro generating an impl of the trait `Debug`.
 ws/src/shapes.rs:11:17 Clone -> lib/core/src/fmt/macros.rs:5:11+5 | refs 4/3 | ```rust⏎fmt::macros⏎pub macro Clone($item:item)⏎```
 ws/src/shapes.rs:12:1 pub -> - | refs 0/0 | -
@@ -773,7 +773,7 @@ ws/src/shapes.rs:38:9 let -> - | refs 0/0 | -
 ws/src/shapes.rs:38:13 z -> ws/src/shapes.rs:38:13+1 | refs 2/1 [ws/src/shapes.rs:38:13+1 ws/src/shapes.rs:39:35+1] | ```rust⏎z: Point⏎```
 ws/src/shapes.rs:38:17 Point -> ws/src/shapes.rs:6:12+5 | refs 15/14 | ```rust⏎shapes⏎pub struct Point⏎```
 ws/src/shapes.rs:38:24 ZERO -> ws/src/shapes.rs:19:15+4 | refs 2/1 | ```rust⏎impl Point⏎pub const ZERO: Point = Point { x: 0, y: 0 }⏎```
-ws/src/shapes.rs:39:9 format -> - | refs 0/0 | -
+ws/src/shapes.rs:39:9 format -> lib/alloc/src/macros.rs:8:14+6 | refs 3/2 | ```rust⏎macros⏎macro_rules! format⏎```
 ws/src/shapes.rs:39:26 self -> - | refs 0/0 | -
 ws/src/shapes.rs:39:31 x -> ws/src/shapes.rs:7:9+1 | refs 15/14 | ```rust⏎Point⏎pub x: i32⏎```
 ws/src/shapes.rs:39:35 z -> ws/src/shapes.rs:38:13+1 | refs 2/1 | ```rust⏎z: Point⏎```
@@ -957,7 +957,7 @@ ws/src/util/text.rs:25:25 as -> - | refs 0/0 | -
 ws/src/util/text.rs:25:28 usize -> - | refs 7/7 | ```rust⏎usize⏎```
 == ws/tests/it.rs
 ws/tests/it.rs:1:1 use -> - | refs 0/0 | -
-ws/tests/it.rs:1:5 fixture -> - | refs 0/0 | -
+ws/tests/it.rs:1:5 fixture -> ws/src/lib.rs:1:1+0 | refs 7/6 [ws/src/lib.rs:1:1+0 ws/src/lib.rs:24:5+5 ws/src/lib.rs:242:9+5 ws/src/shapes.rs:3:5+5 ws/src/shapes.rs:62:5+5 ws/src/util/mod.rs:23:30+5 ws/tests/it.rs:1:5+7] | ```rust⏎⏎```
 ws/tests/it.rs:1:15 Counter -> ws/src/lib.rs:34:12+7 | refs 15/14 | ```rust⏎pub struct Counter⏎```⏎⏎---⏎⏎A counter type.⏎It counts things.
 ws/tests/it.rs:1:24 Describe -> ws/src/lib.rs:56:11+8 | refs 5/4 | ```rust⏎pub trait Describe⏎```
 ws/tests/it.rs:3:1 fn -> ws/tests/it.rs:3:4+6 | refs 2/2 [ws/tests/it.rs:3:1+2 ws/tests/it.rs:4:5+18] | -
@@ -965,7 +965,7 @@ ws/tests/it.rs:3:4 helper -> ws/tests/it.rs:3:4+6 | refs 2/1 | ```rust⏎tests::
 ws/tests/it.rs:3:16 Counter -> ws/src/lib.rs:34:12+7 | refs 15/14 | ```rust⏎pub struct Counter⏎```⏎⏎---⏎⏎A counter type.⏎It counts things.
 ws/tests/it.rs:4:5 Counter -> ws/src/lib.rs:34:12+7 | refs 15/14 | ```rust⏎pub struct Counter⏎```⏎⏎---⏎⏎A counter type.⏎It counts things.
 ws/tests/it.rs:4:14 new -> ws/src/lib.rs:71:12+3 | refs 4/3 | ```rust⏎impl Counter⏎pub fn new(name: &str) -> Self⏎```
-ws/tests/it.rs:7:3 test -> - | refs 0/0 | -
+ws/tests/it.rs:7:3 test -> lib/core/src/macros/mod.rs:11:11+4 | refs 3/2 | ```rust⏎macros⏎pub macro test($item:item)⏎```⏎⏎---⏎⏎Attribute macro applied to a function to turn it into a unit test.
 ws/tests/it.rs:8:1 fn -> ws/tests/it.rs:8:4+11 | refs 1/1 [ws/tests/it.rs:8:1+2] | -
 ws/tests/it.rs:8:4 integration -> ws/tests/it.rs:8:4+11 | refs 1/0 | ```rust⏎tests::it⏎fn integration()⏎```
 ws/tests/it.rs:9:5 let -> - | refs 0/0 | -
@@ -975,10 +975,10 @@ ws/tests/it.rs:10:5 let -> - | refs 0/0 | -
 ws/tests/it.rs:10:9 d -> ws/tests/it.rs:10:9+1 | refs 2/1 [ws/tests/it.rs:10:9+1 ws/tests/it.rs:11:13+1] | ```rust⏎d: String⏎```
 ws/tests/it.rs:10:13 c -> ws/tests/it.rs:9:9+1 | refs 3/2 | ```rust⏎c: Counter⏎```
 ws/tests/it.rs:10:15 describe -> ws/src/lib.rs:65:8+8 | refs 2/1 | ```rust⏎impl Describe for Counter⏎fn describe(&self) -> String⏎```
-ws/tests/it.rs:11:5 assert -> - | refs 0/0 | -
+ws/tests/it.rs:11:5 assert -> lib/core/src/macros/mod.rs:3:14+6 | refs 2/1 [lib/core/src/macros/mod.rs:3:14+6 ws/tests/it.rs:11:5+6] | ```rust⏎macros⏎macro_rules! assert⏎```
 ws/tests/it.rs:11:13 d -> ws/tests/it.rs:10:9+1 | refs 2/1 | ```rust⏎d: String⏎```
 ws/tests/it.rs:11:15 len -> lib/core/src/str/mod.rs:2:18+3 | refs 9/8 | ```rust⏎impl str⏎pub const fn len(&self) -> usize⏎```
-ws/tests/it.rs:12:5 assert_eq -> - | refs 0/0 | -
+ws/tests/it.rs:12:5 assert_eq -> lib/core/src/macros/mod.rs:7:14+9 | refs 4/3 | ```rust⏎macros⏎macro_rules! assert_eq⏎```
 ws/tests/it.rs:12:16 c -> ws/tests/it.rs:9:9+1 | refs 3/2 | ```rust⏎c: Counter⏎```
 ws/tests/it.rs:12:18 twice -> ws/src/lib.rs:58:8+5 | refs 2/1 | ```rust⏎Describe⏎fn twice(&self) -> String⏎```
 ws/tests/it.rs:12:26 len -> lib/core/src/str/mod.rs:2:18+3 | refs 9/8 | ```rust⏎impl str⏎pub const fn len(&self) -> usize⏎```

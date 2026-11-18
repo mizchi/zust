@@ -43,7 +43,11 @@ struct Fx {
 fn index(name: &str, text: &str, features: &[&str]) -> FileIndex {
     let fs: Vec<String> = features.iter().map(|s| s.to_string()).collect();
     if let Some(rel) = name.strip_prefix("lib/") {
-        return FileIndex::library(text.to_string(), navigate::module_of(rel));
+        let mut f = FileIndex::library(text.to_string(), navigate::module_of(rel));
+        // (ライブラリのクレートごとの番号: LSP と同じ)
+        let k = ["core", "alloc", "std"].iter().position(|c| rel.starts_with(&format!("{c}/"))).unwrap_or(9);
+        f.krate = navigate::LIB_KRATE_BASE + k as u32;
+        return f;
     }
     let (rel, krate) = if let Some(r) = name.strip_prefix("ws/") {
         (r, if r.starts_with("src/") { 0 } else { 1 })
@@ -65,6 +69,14 @@ fn fixture_of(features: &[&str], part: &str) -> Fx {
     names.retain(|n| part == "all" || n.starts_with("lib/") || n.starts_with(&format!("{part}/")));
     let texts: Vec<String> = names.iter().map(|n| std::fs::read_to_string(base.join(n)).unwrap()).collect();
     let ws = names.iter().zip(&texts).map(|(n, t)| index(n, t, features)).collect();
+    // (クレートの根: LSP が設定するのと同じ)
+    let mut roots = vec![];
+    for (c, f) in [("core", "lib/core/src/lib.rs"), ("alloc", "lib/alloc/src/lib.rs"), ("std", "lib/std/src/lib.rs"), ("fixture", "ws/src/lib.rs")] {
+        if let Some(i) = names.iter().position(|n| n == f) {
+            roots.push((c.to_string(), i));
+        }
+    }
+    navigate::set_crate_roots(roots);
     Fx { names, texts, ws }
 }
 

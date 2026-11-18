@@ -470,7 +470,7 @@ impl Scan<'_> {
                     // (core の数の型のメソッドはマクロ `uint_impl!` / `int_impl!` の本体にある: その腕の中のアイテムを
                     // `impl __uint` / `impl __int` のメンバにする (navigate が u8 .. / i8 .. の持ち主に足す))
                     let mname = self.text(j + 2).to_vec();
-                    if matches!(mname.as_slice(), b"uint_impl" | b"int_impl" | b"from_str_int_impl") && self.sym(j + 3, b'{') {
+                    if matches!(mname.as_slice(), b"uint_impl" | b"int_impl" | b"from_str_int_impl" | b"generate_pattern_iterators") && self.sym(j + 3, b'{') {
                         let mut ch = vec![];
                         let mut q = j + 4;
                         while q < e {
@@ -509,6 +509,8 @@ impl Scan<'_> {
                         let owner = match mname.as_slice() {
                             b"uint_impl" => "__uint",
                             b"int_impl" => "__int",
+                            // (str の `Split<'a, P>` などの Iterator の impl: navigate がそれらの型の持ち主に足す)
+                            b"generate_pattern_iterators" => "__str_pat_iter",
                             _ => "__num",
                         };
                         let (na, nb) = (self.t[j + 2].1, self.t[j + 2].2);

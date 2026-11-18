@@ -95,7 +95,7 @@ sym/odd.rs:24:14 core -> - | refs 0/0 | -
 sym/odd.rs:24:19 as -> - | refs 0/0 | -
 sym/odd.rs:24:22 kore -> - | refs 0/0 | -
 sym/odd.rs:25:1 use -> - | refs 0/0 | -
-sym/odd.rs:25:5 std -> - | refs 0/0 | -
+sym/odd.rs:25:5 std -> lib/std/src/lib.rs:0:1+0 | refs 3/2 [lib/std/src/lib.rs:0:1+0 sym/odd.rs:25:5+3 sym/odd.rs:89:24+3] | ```rust⏎⏎```
 sym/odd.rs:25:10 fmt -> - | refs 0/0 | -
 sym/odd.rs:25:16 self -> - | refs 0/0 | -
 sym/odd.rs:25:22 Debug -> lib/core/src/fmt/macros.rs:2:11+5 | refs 2/1 [lib/core/src/fmt/macros.rs:2:11+5 sym/odd.rs:25:22+5] | ```rust⏎fmt::macros⏎pub macro Debug($item:item)⏎```⏎⏎---⏎⏎Derive macro generating an impl of the trait `Debug`.
@@ -273,8 +273,8 @@ sym/odd.rs:89:5 type -> sym/odd.rs:89:10+5 | refs 1/0 [sym/odd.rs:89:10+5] | -
 sym/odd.rs:89:10 Alias -> sym/odd.rs:89:10+5 | refs 1/0 | ```rust⏎odd⏎pub type Alias<K, V> = std::collections::HashMap<K, Vec<V>>;⏎```
 sym/odd.rs:89:16 K -> sym/odd.rs:89:16+1 | refs 2/1 [sym/odd.rs:89:16+1 sym/odd.rs:89:50+1] | ```rust⏎K⏎```
 sym/odd.rs:89:19 V -> sym/odd.rs:89:19+1 | refs 2/1 [sym/odd.rs:89:19+1 sym/odd.rs:89:57+1] | ```rust⏎V⏎```
-sym/odd.rs:89:24 std -> - | refs 0/0 | -
-sym/odd.rs:89:29 collections -> lib/std/src/lib.rs:2:9+11 | refs 2/1 [lib/std/src/lib.rs:2:9+11 sym/odd.rs:89:29+11] | ```rust⏎pub mod collections⏎```
+sym/odd.rs:89:24 std -> lib/std/src/lib.rs:0:1+0 | refs 3/2 | ```rust⏎⏎```
+sym/odd.rs:89:29 collections -> lib/std/src/collections/mod.rs:0:1+0 | refs 2/1 [lib/std/src/lib.rs:2:9+11 sym/odd.rs:89:29+11] | ```rust⏎pub mod collections⏎```
 sym/odd.rs:89:42 HashMap -> lib/std/src/collections/hash/map.rs:2:12+7 | refs 2/1 [lib/std/src/collections/hash/map.rs:2:12+7 sym/odd.rs:89:42+7] | ```rust⏎collections::hash::map⏎pub struct HashMap<K, V>⏎```⏎⏎---⏎⏎A hash map.
 sym/odd.rs:89:50 K -> sym/odd.rs:89:16+1 | refs 2/1 | ```rust⏎K⏎```
 sym/odd.rs:89:53 Vec -> lib/alloc/src/vec/mod.rs:2:12+3 | refs 5/4 | ```rust⏎vec⏎pub struct Vec<T>⏎```⏎⏎---⏎⏎A contiguous growable array type.

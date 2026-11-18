@@ -701,9 +701,10 @@ impl FileIndex {
         match w.as_str() {
             "unix" => cfg!(unix),
             "windows" => cfg!(windows),
-            // (rust-analyzer はワークスペースのクレートを test と debug_assertions ありで見る)
-            "test" | "debug_assertions" => true,
-            // (設定されていない cfg: `no_global_oom_handling` / `miri` / `doc` / `bootstrap` など)
+            // (rust-analyzer はワークスペースのクレートを test と debug_assertions ありで見る。`miri` も
+            // (rust-analyzer の設定 `cargo.cfgs` の既定が `["debug_assertions", "miri"]`))
+            "test" | "debug_assertions" | "miri" => true,
+            // (設定されていない cfg: `no_global_oom_handling` / `doc` / `bootstrap` など)
             _ => false,
         }
     }
@@ -1833,7 +1834,9 @@ fn shorthand_pair(ws: &[&FileIndex], file: usize, k: usize) -> Option<Loc> {
 /// `mod x;` (ファイルのモジュール) の定義の行き先はそのファイルの始め (rust-analyzer と同じ)
 fn mod_file(ws: &[&FileIndex], l: Loc) -> Option<Loc> {
     let d = ws[l.file].defs.iter().find(|d| d.start == l.start && d.kind == SymKind::Module)?;
-    let i = ws.iter().position(|w| !w.lib && w.module.len() == d.module.len() + 1 && w.module.starts_with(&d.module) && w.module.last() == Some(&d.name))?;
+    let kr = ws[l.file].krate;
+    let lib = ws[l.file].lib;
+    let i = ws.iter().position(|w| (if lib { w.lib && w.krate == kr } else { !w.lib }) && w.module.len() == d.module.len() + 1 && w.module.starts_with(&d.module) && w.module.last() == Some(&d.name))?;
     Some(Loc { file: i, start: 0, end: 0 })
 }
 
@@ -1869,6 +1872,53 @@ fn inactive_def_at(ws: &[&FileIndex], file: usize, k: usize) -> Vec<Loc> {
         .collect()
 }
 
+/// トークン k が cfg の述語の中 (`#[cfg(..)]` / `#[cfg_attr(pred, ..)]` の pred / `cfg!(..)`) か。`any` / `all` / `not` の入れ子も
+fn in_cfg_pred(f: &FileIndex, k: usize) -> bool {
+    let mut j = k;
+    let mut d = 0i32;
+    let lo = k.saturating_sub(128);
+    while j > lo {
+        j -= 1;
+        if f.sym(j, b')') {
+            d += 1;
+        } else if f.sym(j, b'(') {
+            if d > 0 {
+                d -= 1;
+                continue;
+            }
+            // (`cfg!(..)`)
+            if j >= 2 && f.sym(j - 1, b'!') && f.tok(j - 2) == "cfg" {
+                return true;
+            }
+            if j == 0 || !f.ident(j - 1) {
+                return false;
+            }
+            match f.tok(j - 1) {
+                "any" | "all" | "not" => continue,
+                "cfg" => return j >= 2 && f.sym(j - 2, b'['),
+                "cfg_attr" => {
+                    // (最初の引数 (述語) の中だけ: `#[cfg_attr(test, derive(Debug))]` の Debug は述語ではない)
+                    let mut dd = 0;
+                    for q in j + 1..k {
+                        if f.sym(q, b'(') {
+                            dd += 1;
+                        } else if f.sym(q, b')') {
+                            dd -= 1;
+                        } else if dd == 0 && f.sym(q, b',') {
+                            return false;
+                        }
+                    }
+                    return j >= 2 && f.sym(j - 2, b'[');
+                }
+                _ => return false,
+            }
+        } else if f.sym(j, b';') || f.sym(j, b'{') || f.sym(j, b'}') {
+            return false;
+        }
+    }
+    false
+}
+
 fn def_at1(ws: &[&FileIndex], file: usize, off: usize) -> Vec<Loc> {
     let f = ws[file];
     let Some(k) = f.tok_at(off) else { return f.capture_at(off).map(|(_, b, _)| vec![Loc { file, start: f.toks[b].1 as usize, end: f.toks[b].2 as usize }]).unwrap_or_default() };
@@ -1878,12 +1928,33 @@ fn def_at1(ws: &[&FileIndex], file: usize, off: usize) -> Vec<Loc> {
     if PRIMS.contains(&name.as_str()) {
         return vec![];
     }
+    // (cfg の述語の中の名前 (`#[cfg(test)]` の test、`cfg!(unix)`) はどれも指さない (rust-analyzer と同じ))
+    if in_cfg_pred(f, k) {
+        return vec![];
+    }
     // 定義の名前の上
     // (impl の名前の範囲は self 型の名前なので、impl は飛ばす: `impl P` の P は struct P)
     if let Some(d) = f.defs.iter().find(|d| d.start == start && d.kind != SymKind::Impl) {
         return vec![loc(file, d)];
     }
+    // (クレートの名前 `std::..` / `extern crate x;`: そのクレートの根のファイルの始め (rust-analyzer と同じ))
+    if (f.before_path(k) && !f.after_path(k)) || (k >= 2 && f.tok(k - 1) == "crate" && f.tok(k - 2) == "extern") {
+        if !f.defs.iter().any(|d| d.name == name && d.kind == SymKind::Module) {
+            if let Some(r) = crate_root(ws, &name) {
+                return vec![Loc { file: r, start: 0, end: 0 }];
+            }
+        }
+    }
     // (見える定義: ライブラリと src の下のファイルと、このファイル)
+    // マクロの呼び出し `name!(..)` / `a::name!(..)`: マクロだけ (`vec!` は `mod vec` ではない、`format!` は `fn format` ではない)
+    if f.sym(k + 1, b'!') && !f.sym(k + 2, b'=') && !(k >= 1 && f.sym(k - 1, b'.')) {
+        let c: Vec<(usize, &Def)> = named(ws, file, &*name).into_iter().filter(|(_, d)| d.kind == SymKind::Macro && d.owner.is_empty()).collect();
+        if !c.is_empty() {
+            // (このファイルの macro_rules! を先に)
+            let here: Vec<(usize, &Def)> = c.iter().copied().filter(|x| x.0 == file).collect();
+            return prefer_ws(ws, if here.is_empty() { c } else { here }, file);
+        }
+    }
     // メソッド・フィールド `x.name`
     if k >= 1 && f.sym(k - 1, b'.') && !(k >= 2 && f.sym(k - 2, b'.')) {
         let call = f.sym(k + 1, b'(') || (f.before_path(k) && f.sym(k + 3, b'<'));
@@ -1896,6 +1967,19 @@ fn def_at1(ws: &[&FileIndex], file: usize, off: usize) -> Vec<Loc> {
         }
         let c: Vec<(usize, &Def)> = named(ws, file, &*name).into_iter().filter(|(_, d)| kinds.contains(&d.kind) && (owner.is_none() || owners.contains(&d.owner))).collect();
         let mut c = prefer_concrete(c, &concrete);
+        // (同じ名前の別の型の impl (str の `Split<'a, P>` に slice の `Split<'a, T, P>` の impl): 型引数の数が合うものがあれば、
+        // 合わない impl は外す)
+        if let Some(o) = owner.as_deref() {
+            let n = targs(strip_ref(o)).len();
+            let fits = |d: &Def| !d.container.starts_with("impl") || d.owner != type_head(o) || targs(impl_self_full(&d.container)).len() == n;
+            if n > 0 && c.iter().any(|x| x.1.owner == type_head(o) && fits(x.1)) || c.iter().any(|x| x.1.owner == "__str_pat_iter") {
+                c.retain(|x| fits(x.1));
+            }
+            // (str の `Split<'a, P>` (型引数 1 つ) のメソッドは core のマクロの中のもの (`io::Split<B>` ではない))
+            if n == 1 && c.iter().any(|x| x.1.owner == "__str_pat_iter") {
+                c.retain(|x| x.1.owner == "__str_pat_iter" || x.1.owner != type_head(o));
+            }
+        }
         // (受け手の型と Deref の先の両方にあるもの (`String::len` と `str::len`): 受け手に近い方)
         if let Some(first) = concrete.iter().find(|o| c.iter().any(|x| &x.1.owner == *o)) {
             let first = first.clone();
@@ -1946,7 +2030,12 @@ fn def_at1(ws: &[&FileIndex], file: usize, off: usize) -> Vec<Loc> {
         if !matches!(q.as_str(), "crate" | "super" | "self") {
             // (型のメンバか、モジュールの中のアイテム)
             let (qs, nc) = owner_split(ws, file, &q);
-            let c: Vec<(usize, &Def)> = named(ws, file, &*name).into_iter().filter(|(_, d)| qs.contains(&d.owner) || (d.owner.is_empty() && d.module.last() == Some(&q))).collect();
+            // (`std::collections` / `fixture::Counter`: Q がクレートの名前なら、その根のファイルのアイテム)
+            let root = crate_root(ws, &q);
+            let c: Vec<(usize, &Def)> = named(ws, file, &*name)
+                .into_iter()
+                .filter(|(i, d)| qs.contains(&d.owner) || (d.owner.is_empty() && d.module.last() == Some(&q)) || root.is_some_and(|r| *i == r && d.owner.is_empty() && d.module[..] == ws[r].module[..]))
+                .collect();
             let mut c = prefer_concrete(c, &qs[..nc]);
             // (型と Deref の先の両方にあるもの (`String::as_str` と `str::as_str`): 型そのもの)
             if let Some(first) = qs[..nc].iter().find(|o| c.iter().any(|x| &x.1.owner == *o)).cloned() {
@@ -2389,6 +2478,74 @@ fn block_tails(f: &FileIndex, file: usize, open: usize, close: usize, out: &mut 
     expr_tails(f, file, s, close - 1, out);
 }
 
+/// 範囲の式 (トークン s..=e、深さ 0 に `..` / `..=`) の型: `Range<T>` / `RangeInclusive<T>`。T は分かる方の端の型、
+/// どちらも接尾辞のない数なら i32 (rust-analyzer と同じ既定)。終わりのない `a..` は `RangeFrom<T>`
+fn range_type(ws: &[&FileIndex], file: usize, s: usize, e: usize, depth: u32) -> Option<String> {
+    let f = ws[file];
+    let mut dd = 0;
+    for q in s..=e {
+        if f.sym(q, b'(') || f.sym(q, b'[') || f.sym(q, b'{') {
+            dd += 1;
+        } else if f.sym(q, b')') || f.sym(q, b']') || f.sym(q, b'}') {
+            dd -= 1;
+        } else if dd == 0 && f.sym(q, b'.') && f.sym(q + 1, b'.') && !f.sym(q + 2, b'.') {
+            let incl = f.sym(q + 2, b'=');
+            let hi_s = if incl { q + 3 } else { q + 2 };
+            let hi = if hi_s <= e { expr_type(ws, file, e, depth + 1) } else { None };
+            let lo = if q > s { expr_type(ws, file, q - 1, depth + 1) } else { None };
+            let tt = hi.or(lo).unwrap_or_else(|| "i32".to_string());
+            let tt = strip_ref(&tt).to_string();
+            let kind = if hi_s > e { "RangeFrom" } else if incl { "RangeInclusive" } else { "Range" };
+            return Some(format!("{kind}<{tt}>"));
+        }
+    }
+    None
+}
+
+/// 前置の演算子 (`&` / `&mut` / `*`) で始まる式 (トークン s..=e) の型: 演算子のかかる式の型 t (式の終わりのトークンの型) に、
+/// 内側から当てはめる (`&*p` の p: `*const T` → `&T`)。間に二項演算子があれば (`*a + b`) そのまま
+fn with_prefix(f: &FileIndex, s: usize, e: usize, t: String) -> String {
+    let mut ops = vec![];
+    let mut q = s;
+    while q < e {
+        if f.sym(q, b'&') {
+            if f.ident(q + 1) && f.tok(q + 1) == "mut" {
+                ops.push("&mut");
+                q += 2;
+            } else {
+                ops.push("&");
+                q += 1;
+            }
+        } else if f.sym(q, b'*') {
+            ops.push("*");
+            q += 1;
+        } else {
+            break;
+        }
+    }
+    if ops.is_empty() || (q..e).any(|j| f.toks[j].0 == 1 && b"+-*/%<>=!|^".contains(&f.text.as_bytes()[f.toks[j].1 as usize]) && !f.sym(j, b'>') && !(f.sym(j, b'-') && f.sym(j + 1, b'>'))) {
+        return t;
+    }
+    let mut t = t;
+    for op in ops.iter().rev() {
+        t = match *op {
+            "&" => format!("&{t}"),
+            "&mut" => format!("&mut {t}"),
+            _ => {
+                let x = t.trim();
+                if let Some(r) = x.strip_prefix("&mut ").or_else(|| x.strip_prefix('&')).or_else(|| x.strip_prefix("*const ")).or_else(|| x.strip_prefix("*mut ")) {
+                    r.trim().to_string()
+                } else if matches!(type_head(x).as_str(), "Box" | "Rc" | "Arc") && !x.starts_with('&') {
+                    targs(x).into_iter().next().unwrap_or_else(|| x.to_string())
+                } else {
+                    x.to_string()
+                }
+            }
+        };
+    }
+    t
+}
+
 /// 式 (トークン s..=e) の出口: match の腕・if / else のブロック・ブロックならその中の最後の式、ほかは式そのもの
 fn expr_tails(f: &FileIndex, file: usize, s: usize, e: usize, out: &mut Vec<Loc>) {
     let whole = |out: &mut Vec<Loc>| {
@@ -2399,6 +2556,8 @@ fn expr_tails(f: &FileIndex, file: usize, s: usize, e: usize, out: &mut Vec<Loc>
     };
     if f.sym(s, b'{') && close_of(f, s) == e {
         block_tails(f, file, s, e, out);
+    } else if f.ident(s) && f.tok(s) == "unsafe" && f.sym(s + 1, b'{') && close_of(f, s + 1) == e {
+        block_tails(f, file, s + 1, e, out);
     } else if f.ident(s) && matches!(f.tok(s), "while" | "for") {
         // (値のないループ: 出口ではない (rust-analyzer と同じ))
     } else if f.ident(s) && f.tok(s) == "match" {
@@ -2480,16 +2639,18 @@ fn references_in(ws: &[&FileIndex], file: usize, off: usize, include_decl: bool,
     // (行き先が `#[derive(Default)]` の名前 (derive が作るメソッド): 問い合わせた名前 (`default`) で探す)
     let via_derive = !tf.slim && tf.tok_at(target.start).is_some_and(|j| tf.in_derive(j));
     let qname = ws[file].tok_at(off).map(|k| ws[file].tok(k).to_string()).unwrap_or_default();
+    // (クレートの根 (`std` / `fixture`): 位置 0..0。名前は問い合わせた名前)
+    let crate_ref = target.start == 0 && target.end == 0;
     let name = match tf.defs.iter().find(|x| x.start == target.start) {
-        _ if via_derive => qname.as_str(),
+        _ if via_derive || crate_ref => qname.as_str(),
         Some(d) if tf.slim => d.name.as_str(),
         _ => &tf.text[target.start..target.end],
     };
     // (ローカルなら定義のある関数の中だけ)
-    let is_local = !via_derive && !tf.defs.iter().any(|x| x.start == target.start && x.kind != SymKind::Impl);
+    let is_local = !via_derive && !crate_ref && !tf.defs.iter().any(|x| x.start == target.start && x.kind != SymKind::Impl);
     let mut out = vec![];
     // (ライブラリの索引はトークンを持たないので、宣言はここで足す。derive の名前も (名前が違うので下では見つからない))
-    if include_decl && ((tf.lib && only.is_none()) || (via_derive && only.is_none_or(|o| o == target.file))) {
+    if include_decl && ((tf.lib && only.is_none()) || ((via_derive || crate_ref) && only.is_none_or(|o| o == target.file))) {
         out.push(target);
     }
     // (型なら、その impl の中の `Self` も参照: rust-analyzer と同じ)
@@ -2526,7 +2687,7 @@ fn references_in(ws: &[&FileIndex], file: usize, off: usize, include_decl: bool,
         if (is_local && i != target.file) || only.is_some_and(|o| o != i) {
             continue;
         }
-        if w0.lib || !(w0.may_have(name) || (is_type && w0.may_have("Self")) || (is_mod && (w0.may_have("self") || w0.may_have("super")))) {
+        if w0.lib || !(w0.may_have(name) || (is_type && w0.may_have("Self")) || (is_mod && (w0.may_have("self") || w0.may_have("super"))) || (crate_ref && w0.krate == tf.krate && (w0.may_have("crate") || w0.may_have("super")))) {
             continue;
         }
         // (メモリから外したファイル: 読み直す。そのファイルの中の識別子の解決には、読み直したものを使う)
@@ -2575,6 +2736,23 @@ fn references_in(ws: &[&FileIndex], file: usize, off: usize, include_decl: bool,
             } else if is_field && shorthand_field(wsx, i, k as usize).first() == Some(&target) {
                 // (省略形 `T { x }` の x はフィールドの参照でもある)
                 out.push(here);
+            }
+        }
+        // (ワークスペースのクレートの根: そのクレートの中の `crate::` / `pub(crate)` と、根を指す `super` も (rust-analyzer と同じ))
+        if crate_ref && !tf.lib && w.krate == tf.krate && !w.lib {
+            for (k, _) in w.toks.iter().enumerate() {
+                if !w.ident(k) {
+                    continue;
+                }
+                let at = w.toks[k].1 as usize;
+                let hit = match w.tok(k) {
+                    "crate" => w.before_path(k) && !w.after_path(k) || (k >= 2 && w.sym(k - 1, b'(') && w.tok(k - 2) == "pub"),
+                    "super" => w.before_path(k) && !w.after_path(k) && w.module_at(at).len() == 1,
+                    _ => false,
+                };
+                if hit && !w.in_macro_body(at) {
+                    out.push(Loc { file: i, start: at, end: w.toks[k].2 as usize });
+                }
             }
         }
         // (ローカルなら `format!("{x}")` の中の x も)
@@ -2836,9 +3014,12 @@ fn expand(ws: &[&FileIndex], file: usize, t: &str) -> Vec<String> {
         // (同じ名前の別名がいくつもあれば (`io::Result<T>` と `fmt::Result`): 修飾のモジュールが合うもの、型引数の数が合うもの)
         let qual = strip_ref(&cur).split('<').next().unwrap_or("").rsplit("::").nth(1).map(|s| s.to_string());
         let nargs = targs(&cur).len();
-        let aliases: Vec<&Def> = named(ws, file, &h).into_iter().map(|x| x.1).filter(|d| d.kind == SymKind::TypeAlias && d.owner.is_empty() && !d.ty.is_empty() && type_head(&d.ty) != h).collect();
+        // (右辺が同じ名前の型でも、型引数の数が違う別名 (`io::Result<T>` = `Result<T, Error>`) は開く)
+        let aliases: Vec<(usize, &Def)> = named(ws, file, &h).into_iter().filter(|(_, d)| d.kind == SymKind::TypeAlias && d.owner.is_empty() && !d.ty.is_empty() && (type_head(&d.ty) != h || targs(&d.ty).len() != d.params.len())).collect();
         // (修飾がなければ型引数の数が合うものだけ: `Result<X, Y>` は enum の Result で、別名 `io::Result<T>` ではない)
-        let best = aliases.iter().copied().filter(|d| qual.is_some() || d.params.len() == nargs || nargs == 0).min_by_key(|d| (qual.as_ref().is_some_and(|q| d.module.last() != Some(q)), d.params.len() != nargs));
+        // (修飾がなければ、使う所から見えるもの: 同じファイル、同じクレート、ワークスペースの順)
+        let kr = ws[file].krate;
+        let best = aliases.iter().copied().filter(|(_, d)| qual.is_some() || d.params.len() == nargs || nargs == 0).min_by_key(|(i, d)| (qual.as_ref().is_some_and(|q| d.module.last() != Some(q)), d.params.len() != nargs, *i != file, ws[*i].krate != kr, ws[*i].lib)).map(|x| x.1);
         let next = if let Some(d) = best {
             subst(&d.ty, &d.params, &targs(&cur))
         } else if matches!(h.as_str(), "MutexGuard" | "RwLockReadGuard" | "RwLockWriteGuard" | "Box" | "Rc" | "Arc" | "Ref" | "RefMut" | "ManuallyDrop") {
@@ -2963,6 +3144,23 @@ thread_local! {
     static OWNERS: RefCell<FxMap<(String, u32), (Vec<String>, usize)>> = RefCell::new(FxMap::default());
 }
 
+/// ライブラリのクレートの `krate` の番号の始め (ワークスペースのクレートの番号と重ならないように)
+pub const LIB_KRATE_BASE: u32 = 1_000_000;
+
+thread_local! {
+    /// クレートの名前 → 根のファイル (ws の番号)。LSP がワークスペースの並びを作るたびに設定する
+    static CRATE_ROOTS: RefCell<Vec<(String, usize)>> = const { RefCell::new(Vec::new()) };
+}
+
+/// クレートの名前と根のファイル (ws の番号) を設定する (`std` / 依存クレート / ワークスペースのクレート)
+pub fn set_crate_roots(v: Vec<(String, usize)>) {
+    CRATE_ROOTS.with(|c| *c.borrow_mut() = v);
+}
+
+fn crate_root(ws: &[&FileIndex], name: &str) -> Option<usize> {
+    CRATE_ROOTS.with(|c| c.borrow().iter().find(|(n, _)| n == name).map(|x| x.1)).filter(|&i| i < ws.len())
+}
+
 fn clear_memo() {
     OWNERS.with(|m| m.borrow_mut().clear());
     NAMED.with(|m| m.borrow_mut().clear());
@@ -3008,6 +3206,8 @@ fn owner_split(ws: &[&FileIndex], file: usize, o: &str) -> (Vec<String>, usize) 
             // (数の型のメソッドは core のマクロ `uint_impl!` / `int_impl!` の中: symbols がそれを `impl __uint` / `impl __int` にする)
             "u8" | "u16" | "u32" | "u64" | "u128" | "usize" => extra.extend(["__uint".to_string(), "__num".to_string()]),
             "i8" | "i16" | "i32" | "i64" | "i128" | "isize" => extra.extend(["__int".to_string(), "__num".to_string()]),
+            // (str のパターンの繰り返し: core のマクロ `generate_pattern_iterators!` の中の impl (symbols が `impl __str_pat_iter` にする))
+            "Split" | "RSplit" | "SplitN" | "RSplitN" | "SplitTerminator" | "RSplitTerminator" | "Matches" | "RMatches" | "MatchIndices" | "RMatchIndices" => extra.push("__str_pat_iter".to_string()),
             _ => {}
         }
     }
@@ -3107,6 +3307,32 @@ fn member_type1(ws: &[&FileIndex], file: usize, o: &str, name: &str, kinds: &[Sy
 
 /// 受け手の型 o のメンバ name の (型, 定義)
 fn member_def<'a>(ws: &[&'a FileIndex], file: usize, o: &str, name: &str, kinds: &[SymKind]) -> Option<(String, &'a Def)> {
+    let (t, d) = member_def0(ws, file, o, name, kinds)?;
+    Some((qualify_local_type(ws, file, d, t), d))
+}
+
+/// 定義 d の型 t の頭の名前が、d と同じファイルの型で、同じ名前の型がほかにもあるとき (serde_json の `map::Iter` と
+/// slice / path の `Iter`): モジュールで修飾する (`map::Iter`)。後の関連型・メソッドの引き当てで取り違えないように
+fn qualify_local_type(ws: &[&FileIndex], file: usize, d: &Def, t: String) -> String {
+    let body = t.trim_start_matches('&').trim_start_matches("mut ").trim_start();
+    let pre = &t[..t.len() - body.len()];
+    let h = type_head(body);
+    // (型引数のある型は型引数の数で見分けられる (`Iter<'a, T>` / `Iter<'a, K, V>`) ので、型引数のないものだけ)
+    if h.is_empty() || body.starts_with(|c: char| !c.is_ascii_uppercase()) || body[..body.find('<').unwrap_or(body.len())].contains("::") || !targs(body).is_empty() {
+        return t;
+    }
+    let defs: Vec<(usize, &Def)> = named(ws, file, &h).into_iter().filter(|(_, x)| x.owner.is_empty() && matches!(x.kind, SymKind::Struct | SymKind::Enum | SymKind::Union)).collect();
+    if defs.len() < 2 {
+        return t;
+    }
+    let Some(i) = named(ws, file, &d.name).into_iter().find(|(_, x)| std::ptr::eq(*x, d)).map(|x| x.0) else { return t };
+    match defs.iter().find(|(j, _)| *j == i).filter(|(_, x)| !x.module.is_empty()) {
+        Some((_, x)) => format!("{pre}{}::{body}", x.module.join("::")),
+        None => t,
+    }
+}
+
+fn member_def0<'a>(ws: &[&'a FileIndex], file: usize, o: &str, name: &str, kinds: &[SymKind]) -> Option<(String, &'a Def)> {
     let os = owner_names(ws, file, &type_head(o));
     let kr = ws[file].krate;
     // (ワークスペースのものを先に。ライブラリは lib_rank の順)
@@ -3119,7 +3345,12 @@ fn member_def<'a>(ws: &[&'a FileIndex], file: usize, o: &str, name: &str, kinds:
             .filter(|(_, d)| kinds.contains(&d.kind) && os.contains(&d.owner) && !d.ty.is_empty())
             // (持ち主が型そのもののもの (`Option::as_ref`) を trait のもの (`AsRef::as_ref`) より先に)
             // (同じ名前の別の型 (str の `Split<'a, P>` と slice の `Split<'a, T, P>`) は、型引数の数が合う impl を先に)
-            .min_by_key(|(lib, d)| (*lib, d.owner != type_head(o), d.container.starts_with("impl") && targs(impl_self_full(&d.container)).len() != targs(o).len(), if *lib { lib_rank(d) } else { 0 }))
+            .min_by_key(|(lib, d)| {
+                let mismatch = d.container.starts_with("impl") && targs(impl_self_full(&d.container)).len() != targs(o).len();
+                // (型引数のない受け手 (serde_json の `map::Iter`) に、型引数の要る同じ名前の型 (slice の `Iter<'a, T>`) の impl は
+                // 使わない: trait のメソッド (`Iterator::find`) を先に)
+                (*lib, targs(o).is_empty() && mismatch, d.owner != type_head(o), mismatch, if *lib { lib_rank(d) } else { 0 })
+            })
             .map(|x| x.1)
     };
     // (なければ Deref の先 (`RefMut<Option<T>>` の `as_ref` は Option のもの)、それもなければブランケットの impl の trait のメソッド)
@@ -3135,7 +3366,16 @@ fn member_def<'a>(ws: &[&'a FileIndex], file: usize, o: &str, name: &str, kinds:
         }
         None => return None,
     };
-    // (別名 `type Cur = Option<..>` の受け手は、持ち主の型まで開いてから置き換える)
+    // (別名 `type Cur = Option<..>` の受け手は、持ち主の型まで開いてから置き換える。持ち主と同じ名前の別名
+    // `io::Result<T>` (= `Result<T, Error>`) も、impl の型引数の数に合うまで開く)
+    let arity_differs = || d.container.starts_with("impl") && targs(impl_self_full(&d.container)).len() != targs(o).len();
+    if d.owner == type_head(o) && arity_differs() {
+        let n = targs(impl_self_full(&d.container)).len();
+        if let Some(x) = expand(ws, file, o).into_iter().skip(1).find(|x| type_head(x) == d.owner && targs(x).len() == n) {
+            let x = if o.starts_with('&') && !x.starts_with('&') { format!("&{x}") } else { x };
+            return Some((def_subst(d, &x, &d.ty), d));
+        }
+    }
     if d.owner != type_head(o) && d.container.starts_with("impl") {
         if let Some(x) = expand(ws, file, o).into_iter().skip(1).find(|x| type_head(x) == d.owner) {
             let x = if o.starts_with('&') && !x.starts_with('&') { format!("&{x}") } else { x };
@@ -3230,8 +3470,8 @@ fn expr_type(ws: &[&FileIndex], file: usize, k: usize, depth: u32) -> Option<Str
             // `Q::CONST` / `Enum::Variant`
             let q = f.tok(k.checked_sub(3)?).to_string();
             let q = if q == "Self" { self_ty(at)? } else { q };
-            // (`a::b::P` / `m::CONST`: モジュールの下の単位構造体・const)
-            if q.starts_with(|c: char| c.is_ascii_lowercase()) {
+            // (`a::b::P` / `m::CONST`: モジュールの下の単位構造体・const。`u32::MAX` の u32 は型 (モジュールの `core::char::MAX` ではない))
+            if q.starts_with(|c: char| c.is_ascii_lowercase()) && !PRIMS.contains(&q.as_str()) {
                 let kr = f.krate;
                 return named(ws, file, r)
                     .into_iter()
@@ -3379,19 +3619,8 @@ fn expr_type(ws: &[&FileIndex], file: usize, k: usize, depth: u32) -> Option<Str
             }
             if ends.len() == 1 && !trailing {
                 // (範囲の式 `(a..b)` / `(a..=b)`: Range<T> (T は分かる方の端の型))
-                let mut dd = 0;
-                for q in p + 1..k {
-                    if f.sym(q, b'(') || f.sym(q, b'[') || f.sym(q, b'{') {
-                        dd += 1;
-                    } else if f.sym(q, b')') || f.sym(q, b']') || f.sym(q, b'}') {
-                        dd -= 1;
-                    } else if dd == 0 && f.sym(q, b'.') && f.sym(q + 1, b'.') && !f.sym(q + 2, b'.') {
-                        let incl = f.sym(q + 2, b'=');
-                        let hi = expr_type(ws, file, k - 1, depth + 1);
-                        let lo = if q > p + 1 { expr_type(ws, file, q - 1, depth + 1) } else { None };
-                        let tt = hi.or(lo).unwrap_or_else(|| "i32".to_string());
-                        return Some(format!("{}<{tt}>", if incl { "RangeInclusive" } else { "Range" }));
-                    }
+                if let Some(t) = range_type(ws, file, p + 1, k - 1, depth) {
+                    return Some(t);
                 }
                 return expr_type(ws, file, ends[0], depth + 1);
             }
@@ -3453,6 +3682,8 @@ fn expr_type(ws: &[&FileIndex], file: usize, k: usize, depth: u32) -> Option<Str
                 let e = f.toks.partition_point(|t| (t.2 as usize) < l.end);
                 if e < k {
                     if let Some(t) = expr_type(ws, file, e, depth + 1) {
+                        let ts = f.toks.partition_point(|t| (t.1 as usize) < l.start);
+                        let t = with_prefix(f, ts, e, t);
                         if !t.contains('_') {
                             return Some(t);
                         }
@@ -3622,7 +3853,7 @@ fn binding_type(ws: &[&FileIndex], file: usize, b: usize, depth: u32) -> Option<
         if type_head(&t) == "Self" {
             return f.enclosing_fn(a).filter(|d| !d.owner.is_empty()).map(|d| impl_self_full(&d.container).to_string());
         }
-        return (!type_head(&t).is_empty() || strip_ref(&t).starts_with('(')).then_some(t);
+        return (!type_head(&t).is_empty() || strip_ref(&t).starts_with('(') || t.starts_with("*const ") || t.starts_with("*mut ")).then_some(t);
     }
     // パターンの中の束縛 (タプル・バリアント・構造体・スライスの入れ子): パターンの置かれた所の型に、外から道筋を当てはめる
     if let Some(t) = pattern_type(ws, file, b, depth) {
@@ -3652,7 +3883,10 @@ fn binding_type(ws: &[&FileIndex], file: usize, b: usize, depth: u32) -> Option<
     // `for x in EXPR {` / `for (i, x) in EXPR {` (タプルのパターンなら要素の中の番号)
     if let Some((in_tok, path)) = for_pattern(f, b) {
         let e = expr_end(f, in_tok + 1, true)?;
-        let t = expr_type(ws, file, e, depth + 1)?;
+        let t = match range_type(ws, file, in_tok + 1, e, depth) {
+            Some(t) => t,
+            None => expr_type(ws, file, e, depth + 1)?,
+        };
         // (`for x in &v` / `&mut v`: 参照の繰り返し)
         let t = if f.sym(in_tok + 1, b'&') && !t.starts_with('&') { if f.tok(in_tok + 2) == "mut" { format!("&mut {t}") } else { format!("&{t}") } } else { t };
         let mut ty = if is_iter_head(&type_head(&t)) { iter_item_ws(ws, file, &t) } else { iter_item(&t).or_else(|| elem_type(&t)).or_else(|| iter_item_ws(ws, file, &t)) }?;
@@ -3733,8 +3967,8 @@ fn binding_type(ws: &[&FileIndex], file: usize, b: usize, depth: u32) -> Option<
                     }
                 }
                 // (`let p = &v["x"];` / `&mut x`: 前の参照。式の終わりの型がそのまま全体の型のとき (`&a.b` / `&v[i]`))
-                if f.sym(b + 2, b'&') && !f.sym(b + 3, b'&') && !t.starts_with('&') && (b + 3..e).all(|q| !(f.toks[q].0 == 1 && b"+-*/%<>=!|^".contains(&f.text.as_bytes()[f.toks[q].1 as usize]) && !f.sym(q, b'>'))) {
-                    return Some(if f.tok(b + 3) == "mut" { format!("&mut {t}") } else { format!("&{t}") });
+                if (f.sym(b + 2, b'&') || f.sym(b + 2, b'*')) && !t.starts_with('&') {
+                    return Some(with_prefix(f, b + 2, e, t));
                 }
                 return Some(t);
             }
@@ -4638,7 +4872,7 @@ fn is_iter_head(h: &str) -> bool {
         h,
         "Iter" | "IterMut" | "IntoIter" | "Drain" | "Map" | "Filter" | "FilterMap" | "Enumerate" | "Rev" | "Skip" | "Take" | "SkipWhile" | "TakeWhile" | "MapWhile"
             | "Peekable" | "Fuse" | "StepBy" | "Chain" | "Zip" | "Cloned" | "Copied" | "Flatten" | "FlatMap" | "Inspect" | "Scan" | "Cycle" | "Chars" | "CharIndices"
-            | "Bytes" | "Lines" | "Split" | "SplitWhitespace" | "SplitN" | "RSplit" | "Keys" | "Values" | "ValuesMut" | "Windows" | "Chunks" | "Range" | "RangeInclusive"
+            | "Bytes" | "Lines" | "Split" | "SplitWhitespace" | "SplitN" | "RSplit" | "Keys" | "Values" | "ValuesMut" | "Windows" | "Chunks" | "Range" | "RangeInclusive" | "RangeFrom"
     )
 }
 
@@ -4654,6 +4888,10 @@ fn iter_item(t: &str) -> Option<String> {
         a.pop();
     }
     let first = || a.first().cloned();
+    // (型引数のない同じ名前の型 (serde_json の `map::Iter`): std の繰り返しではない。その型の impl から (iter_item_ws))
+    if a.is_empty() && !matches!(h.as_str(), "Chars" | "CharIndices" | "Bytes" | "Lines" | "SplitWhitespace") {
+        return None;
+    }
     // (クロージャの型 `impl FnMut(..) -> R` の R)
     let ret_of = |f: &str| -> Option<String> {
         let i = f.find(") -> ")?;
@@ -4666,7 +4904,7 @@ fn iter_item(t: &str) -> Option<String> {
         "Iter" | "Windows" | "Chunks" => format!("&{}", if h == "Iter" { first()? } else { format!("[{}]", first()?) }),
         "IterMut" => format!("&mut {}", first()?),
         "IntoIter" | "Drain" if a.len() == 2 => format!("({}, {})", a[0], a[1]),
-        "IntoIter" | "Drain" | "Range" | "RangeInclusive" => first()?,
+        "IntoIter" | "Drain" | "Range" | "RangeInclusive" | "RangeFrom" => first()?,
         "Keys" => format!("&{}", first()?),
         "Values" => format!("&{}", a.get(1)?),
         "ValuesMut" => format!("&mut {}", a.get(1)?),
@@ -4703,9 +4941,22 @@ fn assoc_type(ws: &[&FileIndex], file: usize, ty: &str, tr: &str, name: &str) ->
     if h.is_empty() {
         return None;
     }
-    let (_, d) = named(ws, file, name).into_iter().find(|(_, d)| {
-        d.kind == SymKind::TypeAlias && d.owner == h && !d.ty.is_empty() && d.container.strip_prefix("impl ").and_then(|n| n.rsplit_once(" for ")).is_some_and(|(t2, _)| type_head(t2.trim_start_matches('!')) == tr)
-    })?;
+    // (同じ名前の型がいくつもあれば (slice / option / serde_json の `Iter`): impl の self 型の型引数の数が合うもの、
+    // 同じファイル・同じクレートのもの)
+    let n = targs(ty).len();
+    let kr = ws[file].krate;
+    // (修飾 `map::Iter` (qualify_local_type): その名前の型がちょうどそのモジュールにあれば、そのモジュールの impl だけ
+    // (ほかの `Iter` の関連型を答えない。serde_json の `map::Iter` の impl はマクロの中で見えない))
+    let path = strip_ref(ty).split('<').next().unwrap_or("");
+    let qual = path.rsplit_once("::").map(|(q, _)| q.to_string());
+    let exact = qual.as_ref().is_some_and(|q| named(ws, file, &h).iter().any(|(_, x)| x.owner.is_empty() && matches!(x.kind, SymKind::Struct | SymKind::Enum) && x.module.join("::") == *q));
+    let (_, d) = named(ws, file, name)
+        .into_iter()
+        .filter(|(_, d)| {
+            d.kind == SymKind::TypeAlias && d.owner == h && !d.ty.is_empty() && d.container.strip_prefix("impl ").and_then(|n| n.rsplit_once(" for ")).is_some_and(|(t2, _)| type_head(t2.trim_start_matches('!')) == tr)
+        })
+        .filter(|(_, d)| !exact || qual.as_ref().is_some_and(|q| d.module.join("::") == *q))
+        .min_by_key(|(i, d)| (targs(impl_self_full(&d.container)).len() != n, *i != file, ws[*i].krate != kr))?;
     let t = def_subst(d, ty, &d.ty);
     // (impl の self 型の型引数の名前が残ったものは分からない)
     Some(t)
@@ -4871,9 +5122,10 @@ fn norm_proj_with(t: &str, more: &dyn Fn(&str, bool) -> Option<String>) -> Strin
                 let c = b[j - 1];
                 if c == b'>' && j >= 2 && b[j - 2] == b'-' {
                     // (`->` の `>` は括弧ではない)
-                } else if c == b'>' {
+                } else if c == b'>' || c == b']' {
+                    // (配列 `[T; N]` の中の空白で切らない)
                     d += 1;
-                } else if c == b'<' {
+                } else if c == b'<' || c == b'[' {
                     if d == 0 {
                         break;
                     }
@@ -4885,10 +5137,12 @@ fn norm_proj_with(t: &str, more: &dyn Fn(&str, bool) -> Option<String>) -> Strin
             }
             (j, s[j..i].to_string())
         };
+        // (配列の値 `[T; N]` (IntoIterator の impl は `[T; N]` の持ち主で引けない): 要素は T、繰り返しは `IntoIter<T>`)
+        let arr = |x: &str| x.trim().starts_with('[').then(|| elem_type(x.trim())).flatten();
         let rep = if into {
-            if is_iter_head(&type_head(&inner)) { Some(inner.clone()) } else { iter_item(&inner).map(|e| format!("IntoIter<{e}>")).or_else(|| more(&inner, true)) }
+            if is_iter_head(&type_head(&inner)) { Some(inner.clone()) } else { iter_item(&inner).or_else(|| arr(&inner)).map(|e| format!("IntoIter<{e}>")).or_else(|| more(&inner, true)) }
         } else {
-            iter_item(&inner).or_else(|| more(&inner, false))
+            iter_item(&inner).or_else(|| arr(&inner)).or_else(|| more(&inner, false))
         };
         match rep {
             Some(item) => s = format!("{}{}{}", &s[..a], item, &s[i + plen..]),
@@ -5302,9 +5556,39 @@ fn pattern_type(ws: &[&FileIndex], file: usize, b: usize, depth: u32) -> Option<
     };
     let root;
     let mut mroot = 0;
+    // (match の腕のパターンの中なら、その始め: 前の腕の本体 (`x == y,`) まで戻らない)
+    let arm_start = {
+        let mut q = b + 1;
+        let mut d = 0i32;
+        let mut found = None;
+        while q < f.toks.len() && q < b + 256 {
+            if f.sym(q, b'(') || f.sym(q, b'[') || f.sym(q, b'{') {
+                d += 1;
+            } else if f.sym(q, b')') || f.sym(q, b']') || f.sym(q, b'}') {
+                d -= 1;
+                if d < -8 {
+                    break;
+                }
+            } else if f.sym(q, b';') {
+                break;
+            } else if f.sym(q, b'=') && f.sym(q + 1, b'>') {
+                let (pa, pe) = f.arm_pat(q);
+                if pa <= b && b < pe {
+                    found = Some(pa);
+                }
+                break;
+            }
+            q += 1;
+        }
+        found
+    };
     loop {
         if j == 0 {
             return None;
+        }
+        if arm_start.is_some_and(|pa| j <= pa) {
+            root = 'a';
+            break;
         }
         j -= 1;
         if f.toks[j].0 != 1 && !f.ident(j) {
@@ -5416,7 +5700,10 @@ fn pattern_type(ws: &[&FileIndex], file: usize, b: usize, depth: u32) -> Option<
         'f' => {
             let (in_tok, _) = for_pattern_in(f, b)?;
             let e = expr_end(f, in_tok + 1, true)?;
-            let t = expr_type(ws, file, e, depth + 1)?;
+            let t = match range_type(ws, file, in_tok + 1, e, depth) {
+                Some(t) => t,
+                None => expr_type(ws, file, e, depth + 1)?,
+            };
             let t = if f.sym(in_tok + 1, b'&') && !t.starts_with('&') { if f.tok(in_tok + 2) == "mut" { format!("&mut {t}") } else { format!("&{t}") } } else { t };
             if is_iter_head(&type_head(&t)) { iter_item_ws(ws, file, &t) } else { iter_item(&t).or_else(|| elem_type(&t)).or_else(|| iter_item_ws(ws, file, &t)) }?
         }
@@ -5971,5 +6258,14 @@ pub fn type_at(ws: &[&FileIndex], file: usize, off: usize) -> Option<String> {
     let f = ws[file];
     let k = f.toks.partition_point(|t| (t.2 as usize) <= off).min(f.toks.len().checked_sub(1)?);
     let k = if (f.toks[k].1 as usize) > off { k.checked_sub(1)? } else { k };
+    // (束縛そのもの (パターン・引数・`let x`) の位置: その束縛の型。ほかは式の型)
+    if f.ident(k) && f.local(k, f.tok(k)).is_none() {
+        let at = f.toks[k].1 as usize;
+        if def_at(ws, file, at).first().is_some_and(|l| l.file == file && l.start == at && !f.defs.iter().any(|d| d.start == at)) {
+            if let Some(t) = binding_type(ws, file, k, 0) {
+                return Some(t);
+            }
+        }
+    }
     expr_type(ws, file, k, 0)
 }

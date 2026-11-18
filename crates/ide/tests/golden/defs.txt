@@ -1,5 +1,8 @@
 #### features ["std"]
-== lib/alloc/src/string.rs module=["string"] lib=true slim=true src=true krate=0
+== lib/alloc/src/macros.rs module=["macros"] lib=true slim=true src=true krate=1000001
+Macro vec owner="" in="" mod=["macros"] ty="" params=[] at=lib/alloc/src/macros.rs:3:14 item=22..154 pos=[2, 13, 2, 16]
+Macro format owner="" in="" mod=["macros"] ty="" params=[] at=lib/alloc/src/macros.rs:8:14 item=155..250 pos=[7, 13, 7, 19]
+== lib/alloc/src/string.rs module=["string"] lib=true slim=true src=true krate=1000001
 Struct String owner="" in="" mod=["string"] ty="" params=[] at=lib/alloc/src/string.rs:2:12 item=40..79 pos=[1, 11, 1, 17]
 Field vec owner="String" in="String" mod=["string"] ty="Vec<u8>" params=[] at=lib/alloc/src/string.rs:3:5 item=64..76 pos=[2, 4, 2, 7]
 Impl impl String owner="" in="" mod=["string"] ty="" params=[] at=lib/alloc/src/string.rs:6:6 item=81..279 pos=[5, 5, 5, 11]
@@ -16,7 +19,7 @@ Method to_string owner="ToString" in="ToString" mod=["string"] ty="String" param
 Impl impl ToString for T owner="" in="" mod=["string"] ty="" params=[] at=lib/alloc/src/string.rs:35:27 item=521..623 pos=[34, 26, 34, 40]
 Method to_string owner="T" in="impl ToString for T" mod=["string"] ty="String" params=[] at=lib/alloc/src/string.rs:36:8 item=568..621 pos=[35, 7, 35, 16]
 impls [("String", "Deref"), ("String", "Clone"), ("*", "ToString")]
-== lib/alloc/src/vec/mod.rs module=["vec"] lib=true slim=true src=true krate=0
+== lib/alloc/src/vec/mod.rs module=["vec"] lib=true slim=true src=true krate=1000001
 Struct Vec owner="" in="" mod=["vec"] ty="" params=["T"] at=lib/alloc/src/vec/mod.rs:2:12 item=38..95 pos=[1, 11, 1, 14]
 Field buf owner="Vec" in="Vec" mod=["vec"] ty="RawVec<T>" params=["T"] at=lib/alloc/src/vec/mod.rs:3:5 item=62..76 pos=[2, 4, 2, 7]
 Field len owner="Vec" in="Vec" mod=["vec"] ty="usize" params=["T"] at=lib/alloc/src/vec/mod.rs:4:5 item=82..92 pos=[3, 4, 3, 7]
@@ -32,10 +35,10 @@ Method deref owner="Vec" in="impl Deref for Vec<T>" mod=["vec"] ty="&[T]" params
 Impl impl Clone for Vec<T> owner="" in="" mod=["vec"] ty="" params=[] at=lib/alloc/src/vec/mod.rs:32:16 item=527..614 pos=[31, 15, 31, 31]
 Method clone owner="Vec" in="impl Clone for Vec<T>" mod=["vec"] ty="Vec<T>" params=[] at=lib/alloc/src/vec/mod.rs:33:8 item=565..612 pos=[32, 7, 32, 12]
 impls [("Vec", "Deref"), ("Vec", "Clone")]
-== lib/core/src/clone.rs module=["clone"] lib=true slim=true src=true krate=0
+== lib/core/src/clone.rs module=["clone"] lib=true slim=true src=true krate=1000000
 Trait Clone owner="" in="" mod=["clone"] ty="" params=[] at=lib/core/src/clone.rs:2:11 item=70..125 pos=[1, 10, 1, 15]
 Method clone owner="Clone" in="Clone" mod=["clone"] ty="Self" params=[] at=lib/core/src/clone.rs:3:8 item=99..123 pos=[2, 7, 2, 12]
-== lib/core/src/convert/mod.rs module=["convert"] lib=true slim=true src=true krate=0
+== lib/core/src/convert/mod.rs module=["convert"] lib=true slim=true src=true krate=1000000
 Trait Into owner="" in="" mod=["convert"] ty="" params=[] at=lib/core/src/convert/mod.rs:1:11 item=0..52 pos=[0, 10, 0, 14]
 Method into owner="Into" in="Into" mod=["convert"] ty="T" params=[] at=lib/core/src/convert/mod.rs:2:8 item=31..50 pos=[1, 7, 1, 11]
 Trait From owner="" in="" mod=["convert"] ty="" params=[] at=lib/core/src/convert/mod.rs:5:11 item=54..113 pos=[4, 10, 4, 14]
@@ -43,15 +46,15 @@ Method from owner="From" in="From" mod=["convert"] ty="Self" params=[] at=lib/co
 Impl impl Into<U> for T owner="" in="" mod=["convert"] ty="" params=[] at=lib/core/src/convert/mod.rs:9:12 item=115..212 pos=[8, 11, 8, 24]
 Method into owner="T" in="impl Into<U> for T" mod=["convert"] ty="U" params=[] at=lib/core/src/convert/mod.rs:13:8 item=168..210 pos=[12, 7, 12, 11]
 impls [("*", "Into")]
-== lib/core/src/default.rs module=["default"] lib=true slim=true src=true krate=0
+== lib/core/src/default.rs module=["default"] lib=true slim=true src=true krate=1000000
 Trait Default owner="" in="" mod=["default"] ty="" params=[] at=lib/core/src/default.rs:1:11 item=0..54 pos=[0, 10, 0, 17]
 Method default owner="Default" in="Default" mod=["default"] ty="Self" params=[] at=lib/core/src/default.rs:2:8 item=31..52 pos=[1, 7, 1, 14]
-== lib/core/src/fmt/macros.rs module=["fmt", "macros"] lib=true slim=true src=true krate=0
+== lib/core/src/fmt/macros.rs module=["fmt", "macros"] lib=true slim=true src=true krate=1000000
 Macro Debug owner="" in="" mod=["fmt", "macros"] ty="" params=[] at=lib/core/src/fmt/macros.rs:2:11 item=58..117 pos=[1, 10, 1, 15]
 Macro Clone owner="" in="" mod=["fmt", "macros"] ty="" params=[] at=lib/core/src/fmt/macros.rs:5:11 item=118..177 pos=[4, 10, 4, 15]
 Macro Default owner="" in="" mod=["fmt", "macros"] ty="" params=[] at=lib/core/src/fmt/macros.rs:8:11 item=178..239 pos=[7, 10, 7, 17]
 Macro PartialEq owner="" in="" mod=["fmt", "macros"] ty="" params=[] at=lib/core/src/fmt/macros.rs:11:11 item=240..303 pos=[10, 10, 10, 19]
-== lib/core/src/iter/adapters/enumerate.rs module=["iter", "adapters", "enumerate"] lib=true slim=true src=true krate=0
+== lib/core/src/iter/adapters/enumerate.rs module=["iter", "adapters", "enumerate"] lib=true slim=true src=true krate=1000000
 Struct Enumerate owner="" in="" mod=["iter", "adapters", "enumerate"] ty="" params=["I"] at=lib/core/src/iter/adapters/enumerate.rs:1:12 item=0..58 pos=[0, 11, 0, 20]
 Field iter owner="Enumerate" in="Enumerate" mod=["iter", "adapters", "enumerate"] ty="I" params=["I"] at=lib/core/src/iter/adapters/enumerate.rs:2:5 item=30..37 pos=[1, 4, 1, 8]
 Field count owner="Enumerate" in="Enumerate" mod=["iter", "adapters", "enumerate"] ty="usize" params=["I"] at=lib/core/src/iter/adapters/enumerate.rs:3:5 item=43..55 pos=[2, 4, 2, 9]
@@ -59,18 +62,26 @@ Impl impl Iterator for Enumerate<I> owner="" in="" mod=["iter", "adapters", "enu
 TypeAlias Item owner="Enumerate" in="impl Iterator for Enumerate<I>" mod=["iter", "adapters", "enumerate"] ty="(usize, <I as Iterator>::Item)" params=[] at=lib/core/src/iter/adapters/enumerate.rs:10:10 item=123..166 pos=[9, 9, 9, 13]
 Method next owner="Enumerate" in="impl Iterator for Enumerate<I>" mod=["iter", "adapters", "enumerate"] ty="Option<(usize, <I as Iterator>::Item)>" params=[] at=lib/core/src/iter/adapters/enumerate.rs:11:8 item=171..255 pos=[10, 7, 10, 11]
 impls [("Enumerate", "Iterator")]
-== lib/core/src/iter/traits.rs module=["iter", "traits"] lib=true slim=true src=true krate=0
+== lib/core/src/iter/traits.rs module=["iter", "traits"] lib=true slim=true src=true krate=1000000
 Trait Iterator owner="" in="" mod=["iter", "traits"] ty="" params=[] at=lib/core/src/iter/traits.rs:1:11 item=0..370 pos=[0, 10, 0, 18]
 TypeAlias Item owner="Iterator" in="Iterator" mod=["iter", "traits"] ty="" params=[] at=lib/core/src/iter/traits.rs:2:10 item=25..35 pos=[1, 9, 1, 13]
 Method next owner="Iterator" in="Iterator" mod=["iter", "traits"] ty="Option<Self::Item>" params=[] at=lib/core/src/iter/traits.rs:3:8 item=40..81 pos=[2, 7, 2, 11]
 Method count owner="Iterator" in="Iterator" mod=["iter", "traits"] ty="usize" params=[] at=lib/core/src/iter/traits.rs:4:8 item=86..168 pos=[3, 7, 3, 12]
 Method enumerate owner="Iterator" in="Iterator" mod=["iter", "traits"] ty="Enumerate<Self>" params=[] at=lib/core/src/iter/traits.rs:10:8 item=173..269 pos=[9, 7, 9, 16]
 Method last owner="Iterator" in="Iterator" mod=["iter", "traits"] ty="Option<Self::Item>" params=[] at=lib/core/src/iter/traits.rs:16:8 item=274..368 pos=[15, 7, 15, 11]
-== lib/core/src/ops/deref.rs module=["ops", "deref"] lib=true slim=true src=true krate=0
+== lib/core/src/macros/mod.rs module=["macros"] lib=true slim=true src=true krate=1000000
+Macro assert owner="" in="" mod=["macros"] ty="" params=[] at=lib/core/src/macros/mod.rs:3:14 item=22..118 pos=[2, 13, 2, 19]
+Macro assert_eq owner="" in="" mod=["macros"] ty="" params=[] at=lib/core/src/macros/mod.rs:7:14 item=119..231 pos=[6, 13, 6, 22]
+Macro test owner="" in="" mod=["macros"] ty="" params=[] at=lib/core/src/macros/mod.rs:11:11 item=303..361 pos=[10, 10, 10, 14]
+Macro derive owner="" in="" mod=["macros"] ty="" params=[] at=lib/core/src/macros/mod.rs:15:11 item=411..471 pos=[14, 10, 14, 16]
+== lib/core/src/marker.rs module=["marker"] lib=true slim=true src=true krate=1000000
+Trait Copy owner="" in="" mod=["marker"] ty="" params=[] at=lib/core/src/marker.rs:2:11 item=32..56 pos=[1, 10, 1, 14]
+Macro Copy owner="" in="" mod=["marker"] ty="" params=[] at=lib/core/src/marker.rs:4:11 item=114..172 pos=[3, 10, 3, 14]
+== lib/core/src/ops/deref.rs module=["ops", "deref"] lib=true slim=true src=true krate=1000000
 Trait Deref owner="" in="" mod=["ops", "deref"] ty="" params=[] at=lib/core/src/ops/deref.rs:1:11 item=0..82 pos=[0, 10, 0, 15]
 TypeAlias Target owner="Deref" in="Deref" mod=["ops", "deref"] ty="" params=[] at=lib/core/src/ops/deref.rs:2:10 item=22..42 pos=[1, 9, 1, 15]
 Method deref owner="Deref" in="Deref" mod=["ops", "deref"] ty="&Self::Target" params=[] at=lib/core/src/ops/deref.rs:3:8 item=47..80 pos=[2, 7, 2, 12]
-== lib/core/src/option.rs module=["option"] lib=true slim=true src=true krate=0
+== lib/core/src/option.rs module=["option"] lib=true slim=true src=true krate=1000000
 Enum Option owner="" in="" mod=["option"] ty="" params=["T"] at=lib/core/src/option.rs:4:10 item=45..140 pos=[3, 9, 3, 15]
 Variant None owner="Option" in="Option" mod=["option"] ty="Option" params=["T"] at=lib/core/src/option.rs:6:5 item=88..92 pos=[5, 4, 5, 8]
 Variant Some owner="Option" in="Option" mod=["option"] ty="Option" params=["T"] at=lib/core/src/option.rs:8:5 item=130..137 pos=[7, 4, 7, 8]
@@ -80,7 +91,7 @@ Method unwrap owner="Option" in="impl Option<T>" mod=["option"] ty="T" params=[]
 Method unwrap_or owner="Option" in="impl Option<T>" mod=["option"] ty="T" params=[] at=lib/core/src/option.rs:21:12 item=387..450 pos=[20, 11, 20, 20]
 Method map owner="Option" in="impl Option<T>" mod=["option"] ty="Option<U>" params=[] at=lib/core/src/option.rs:24:12 item=455..536 pos=[23, 11, 23, 14]
 Method as_ref owner="Option" in="impl Option<T>" mod=["option"] ty="Option<&T>" params=[] at=lib/core/src/option.rs:27:18 item=541..605 pos=[26, 17, 26, 23]
-== lib/core/src/result.rs module=["result"] lib=true slim=true src=true krate=0
+== lib/core/src/result.rs module=["result"] lib=true slim=true src=true krate=1000000
 Enum Result owner="" in="" mod=["result"] ty="" params=["T", "E"] at=lib/core/src/result.rs:4:10 item=125..173 pos=[3, 9, 3, 15]
 Variant Ok owner="Result" in="Result" mod=["result"] ty="Result" params=["T", "E"] at=lib/core/src/result.rs:5:5 item=153..158 pos=[4, 4, 4, 6]
 Variant Err owner="Result" in="Result" mod=["result"] ty="Result" params=["T", "E"] at=lib/core/src/result.rs:6:5 item=164..170 pos=[5, 4, 5, 7]
@@ -89,7 +100,7 @@ Method unwrap owner="Result" in="impl Result<T, E>" mod=["result"] ty="T" params
 Method ok owner="Result" in="impl Result<T, E>" mod=["result"] ty="Option<T>" params=[] at=lib/core/src/result.rs:13:12 item=258..310 pos=[12, 11, 12, 13]
 Method map_err owner="Result" in="impl Result<T, E>" mod=["result"] ty="Result<T, F>" params=[] at=lib/core/src/result.rs:16:12 item=315..404 pos=[15, 11, 15, 18]
 Method is_ok owner="Result" in="impl Result<T, E>" mod=["result"] ty="bool" params=[] at=lib/core/src/result.rs:19:18 item=409..466 pos=[18, 17, 18, 22]
-== lib/core/src/slice/iter.rs module=["slice", "iter"] lib=true slim=true src=true krate=0
+== lib/core/src/slice/iter.rs module=["slice", "iter"] lib=true slim=true src=true krate=1000000
 Struct Iter owner="" in="" mod=["slice", "iter"] ty="" params=["T"] at=lib/core/src/slice/iter.rs:1:12 item=0..68 pos=[0, 11, 0, 15]
 Field ptr owner="Iter" in="Iter" mod=["slice", "iter"] ty="*const T" params=["T"] at=lib/core/src/slice/iter.rs:2:5 item=33..46 pos=[1, 4, 1, 7]
 Field end owner="Iter" in="Iter" mod=["slice", "iter"] ty="*const T" params=["T"] at=lib/core/src/slice/iter.rs:3:5 item=52..65 pos=[2, 4, 2, 7]
@@ -97,19 +108,19 @@ Impl impl Iterator for Iter<'a, T> owner="" in="" mod=["slice", "iter"] ty="" pa
 TypeAlias Item owner="Iter" in="impl Iterator for Iter<'a, T>" mod=["slice", "iter"] ty="&'a T" params=[] at=lib/core/src/slice/iter.rs:7:10 item=113..131 pos=[6, 9, 6, 13]
 Method next owner="Iter" in="impl Iterator for Iter<'a, T>" mod=["slice", "iter"] ty="Option<&'a T>" params=[] at=lib/core/src/slice/iter.rs:8:8 item=136..195 pos=[7, 7, 7, 11]
 impls [("Iter", "Iterator")]
-== lib/core/src/slice/mod.rs module=["slice"] lib=true slim=true src=true krate=0
+== lib/core/src/slice/mod.rs module=["slice"] lib=true slim=true src=true krate=1000000
 Module iter owner="" in="" mod=["slice"] ty="" params=[] at=lib/core/src/slice/mod.rs:1:9 item=0..13 pos=[0, 8, 0, 12]
 Impl impl [T] owner="" in="" mod=["slice"] ty="" params=[] at=lib/core/src/slice/mod.rs:4:9 item=35..315 pos=[3, 8, 3, 11]
 Method len owner="[T]" in="impl [T]" mod=["slice"] ty="usize" params=[] at=lib/core/src/slice/mod.rs:5:18 item=53..109 pos=[4, 17, 4, 20]
 Method iter owner="[T]" in="impl [T]" mod=["slice"] ty="Iter<'_, T>" params=[] at=lib/core/src/slice/mod.rs:8:12 item=114..171 pos=[7, 11, 7, 15]
 Method first owner="[T]" in="impl [T]" mod=["slice"] ty="Option<&T>" params=[] at=lib/core/src/slice/mod.rs:11:18 item=176..239 pos=[10, 17, 10, 22]
 Method get owner="[T]" in="impl [T]" mod=["slice"] ty="Option<&T>" params=[] at=lib/core/src/slice/mod.rs:14:12 item=244..313 pos=[13, 11, 13, 14]
-== lib/core/src/str/mod.rs module=["str"] lib=true slim=true src=true krate=0
+== lib/core/src/str/mod.rs module=["str"] lib=true slim=true src=true krate=1000000
 Impl impl str owner="" in="" mod=["str"] ty="" params=[] at=lib/core/src/str/mod.rs:1:6 item=0..201 pos=[0, 5, 0, 8]
 Method len owner="str" in="impl str" mod=["str"] ty="usize" params=[] at=lib/core/src/str/mod.rs:2:18 item=15..71 pos=[1, 17, 1, 20]
 Method trim owner="str" in="impl str" mod=["str"] ty="&str" params=[] at=lib/core/src/str/mod.rs:5:12 item=76..126 pos=[4, 11, 4, 15]
 Method starts_with owner="str" in="impl str" mod=["str"] ty="bool" params=[] at=lib/core/src/str/mod.rs:8:12 item=131..199 pos=[7, 11, 7, 22]
-== lib/std/src/collections/hash/map.rs module=["collections", "hash", "map"] lib=true slim=true src=true krate=0
+== lib/std/src/collections/hash/map.rs module=["collections", "hash", "map"] lib=true slim=true src=true krate=1000002
 Struct HashMap owner="" in="" mod=["collections", "hash", "map"] ty="" params=["K", "V"] at=lib/std/src/collections/hash/map.rs:2:12 item=16..72 pos=[1, 11, 1, 18]
 Field base owner="HashMap" in="HashMap" mod=["collections", "hash", "map"] ty="RawTable<(K, V)>" params=["K", "V"] at=lib/std/src/collections/hash/map.rs:3:5 item=47..69 pos=[2, 4, 2, 8]
 Impl impl HashMap<K, V> owner="" in="" mod=["collections", "hash", "map"] ty="" params=[] at=lib/std/src/collections/hash/map.rs:6:12 item=74..360 pos=[5, 11, 5, 24]
@@ -117,26 +128,26 @@ Method new owner="HashMap" in="impl HashMap<K, V>" mod=["collections", "hash", "
 Method insert owner="HashMap" in="impl HashMap<K, V>" mod=["collections", "hash", "map"] ty="Option<V>" params=[] at=lib/std/src/collections/hash/map.rs:10:12 item=163..236 pos=[9, 11, 9, 17]
 Method get owner="HashMap" in="impl HashMap<K, V>" mod=["collections", "hash", "map"] ty="Option<&V>" params=[] at=lib/std/src/collections/hash/map.rs:13:12 item=241..303 pos=[12, 11, 12, 14]
 Method len owner="HashMap" in="impl HashMap<K, V>" mod=["collections", "hash", "map"] ty="usize" params=[] at=lib/std/src/collections/hash/map.rs:16:12 item=308..358 pos=[15, 11, 15, 14]
-== lib/std/src/collections/mod.rs module=["collections"] lib=true slim=true src=true krate=0
+== lib/std/src/collections/mod.rs module=["collections"] lib=true slim=true src=true krate=1000002
 Module hash owner="" in="" mod=["collections"] ty="" params=[] at=lib/std/src/collections/mod.rs:3:5 item=35..44 pos=[2, 4, 2, 8]
-== lib/std/src/lib.rs module=[] lib=true slim=true src=true krate=0
+== lib/std/src/lib.rs module=[] lib=true slim=true src=true krate=1000002
 Module collections owner="" in="" mod=[] ty="" params=[] at=lib/std/src/lib.rs:2:9 item=41..61 pos=[1, 8, 1, 19]
 Module sync owner="" in="" mod=[] ty="" params=[] at=lib/std/src/lib.rs:3:9 item=62..75 pos=[2, 8, 2, 12]
 Module sys owner="" in="" mod=[] ty="" params=[] at=lib/std/src/lib.rs:4:5 item=76..84 pos=[3, 4, 3, 7]
-== lib/std/src/sync/mod.rs module=["sync"] lib=true slim=true src=true krate=0
+== lib/std/src/sync/mod.rs module=["sync"] lib=true slim=true src=true krate=1000002
 Module nonpoison owner="" in="" mod=["sync"] ty="" params=[] at=lib/std/src/sync/mod.rs:3:9 item=56..74 pos=[2, 8, 2, 17]
 Module poison owner="" in="" mod=["sync"] ty="" params=[] at=lib/std/src/sync/mod.rs:4:5 item=75..86 pos=[3, 4, 3, 10]
-== lib/std/src/sync/nonpoison/mutex.rs module=["sync", "nonpoison", "mutex"] lib=true slim=true src=true krate=0
+== lib/std/src/sync/nonpoison/mutex.rs module=["sync", "nonpoison", "mutex"] lib=true slim=true src=true krate=1000002
 Struct Mutex owner="" in="" mod=["sync", "nonpoison", "mutex"] ty="" params=["T"] at=lib/std/src/sync/nonpoison/mutex.rs:1:12 item=0..56 pos=[0, 11, 0, 16]
 Field data owner="Mutex" in="Mutex" mod=["sync", "nonpoison", "mutex"] ty="UnsafeCell<T>" params=["T"] at=lib/std/src/sync/nonpoison/mutex.rs:2:5 item=34..53 pos=[1, 4, 1, 8]
 Impl impl Mutex<T> owner="" in="" mod=["sync", "nonpoison", "mutex"] ty="" params=[] at=lib/std/src/sync/nonpoison/mutex.rs:5:17 item=58..154 pos=[4, 16, 4, 24]
 Method lock owner="Mutex" in="impl Mutex<T>" mod=["sync", "nonpoison", "mutex"] ty="MutexGuard<'_, T>" params=[] at=lib/std/src/sync/nonpoison/mutex.rs:6:12 item=89..152 pos=[5, 11, 5, 15]
-== lib/std/src/sync/poison/mod.rs module=["sync", "poison"] lib=true slim=true src=true krate=0
+== lib/std/src/sync/poison/mod.rs module=["sync", "poison"] lib=true slim=true src=true krate=1000002
 Module mutex owner="" in="" mod=["sync", "poison"] ty="" params=[] at=lib/std/src/sync/poison/mod.rs:3:5 item=43..53 pos=[2, 4, 2, 9]
 TypeAlias LockResult owner="" in="" mod=["sync", "poison"] ty="Result<T, PoisonError<T>>" params=["T"] at=lib/std/src/sync/poison/mod.rs:5:10 item=55..106 pos=[4, 9, 4, 19]
 Struct PoisonError owner="" in="" mod=["sync", "poison"] ty="" params=["T"] at=lib/std/src/sync/poison/mod.rs:7:12 item=108..150 pos=[6, 11, 6, 22]
 Field data owner="PoisonError" in="PoisonError" mod=["sync", "poison"] ty="T" params=["T"] at=lib/std/src/sync/poison/mod.rs:8:5 item=140..147 pos=[7, 4, 7, 8]
-== lib/std/src/sync/poison/mutex.rs module=["sync", "poison", "mutex"] lib=true slim=true src=true krate=0
+== lib/std/src/sync/poison/mutex.rs module=["sync", "poison", "mutex"] lib=true slim=true src=true krate=1000002
 Struct Mutex owner="" in="" mod=["sync", "poison", "mutex"] ty="" params=["T"] at=lib/std/src/sync/poison/mutex.rs:2:12 item=34..113 pos=[1, 11, 1, 16]
 Field inner owner="Mutex" in="Mutex" mod=["sync", "poison", "mutex"] ty="sys::Mutex" params=["T"] at=lib/std/src/sync/poison/mutex.rs:3:5 item=68..85 pos=[2, 4, 2, 9]
 Field data owner="Mutex" in="Mutex" mod=["sync", "poison", "mutex"] ty="UnsafeCell<T>" params=["T"] at=lib/std/src/sync/poison/mutex.rs:4:5 item=91..110 pos=[3, 4, 3, 8]
@@ -150,7 +161,7 @@ Impl impl Deref for MutexGuard<'_, T> owner="" in="" mod=["sync", "poison", "mut
 TypeAlias Target owner="MutexGuard" in="impl Deref for MutexGuard<'_, T>" mod=["sync", "poison", "mutex"] ty="T" params=[] at=lib/std/src/sync/poison/mutex.rs:24:10 item=431..447 pos=[23, 9, 23, 15]
 Method deref owner="MutexGuard" in="impl Deref for MutexGuard<'_, T>" mod=["sync", "poison", "mutex"] ty="&T" params=[] at=lib/std/src/sync/poison/mutex.rs:25:8 item=452..497 pos=[24, 7, 24, 12]
 impls [("MutexGuard", "Deref")]
-== lib/std/src/sys/sync/mutex.rs module=["sys", "sync", "mutex"] lib=true slim=true src=true krate=0
+== lib/std/src/sys/sync/mutex.rs module=["sys", "sync", "mutex"] lib=true slim=true src=true krate=1000002
 Struct Mutex owner="" in="" mod=["sys", "sync", "mutex"] ty="" params=[] at=lib/std/src/sys/sync/mutex.rs:1:12 item=0..36 pos=[0, 11, 0, 16]
 Field futex owner="Mutex" in="Mutex" mod=["sys", "sync", "mutex"] ty="u32" params=[] at=lib/std/src/sys/sync/mutex.rs:2:5 item=23..33 pos=[1, 4, 1, 9]
 Impl impl Mutex owner="" in="" mod=["sys", "sync", "mutex"] ty="" params=[] at=lib/std/src/sys/sync/mutex.rs:5:6 item=38..134 pos=[4, 5, 4, 10]
@@ -276,6 +287,7 @@ Function with_std owner="" in="" mod=[] ty="Counter" params=[] at=ws/src/lib.rs:
 Function extra_or_test owner="" in="" mod=[] ty="u8" params=[] at=ws/src/lib.rs:201:8 item=4072..4147 pos=[0, 0, 0, 0]
 Function platform owner="" in="" mod=[] ty="&'static str" params=[] at=ws/src/lib.rs:206:8 item=4149..4210 pos=[0, 0, 0, 0]
 Function os_name owner="" in="" mod=[] ty="&'static str" params=[] at=ws/src/lib.rs:216:8 item=4281..4357 pos=[0, 0, 0, 0]
+Function under_miri owner="" in="" mod=[] ty="" params=[] at=ws/src/lib.rs:221:8 item=4359..4394 pos=[0, 0, 0, 0]
 Macro square owner="" in="" mod=[] ty="" params=[] at=ws/src/lib.rs:223:14 item=4396..4461 pos=[0, 0, 0, 0]
 Function use_macro owner="" in="" mod=[] ty="i64" params=[] at=ws/src/lib.rs:229:8 item=4463..4565 pos=[0, 0, 0, 0]
 Function texts owner="" in="" mod=[] ty="usize" params=[] at=ws/src/lib.rs:234:8 item=4567..4683 pos=[0, 0, 0, 0]
@@ -328,7 +340,10 @@ Function shout_len owner="" in="" mod=["util", "text"] ty="usize" params=[] at=w
 Function helper owner="" in="" mod=["tests", "it"] ty="Counter" params=[] at=ws/tests/it.rs:3:4 item=35..84 pos=[0, 0, 0, 0]
 Function integration owner="" in="" mod=["tests", "it"] ty="" params=[] at=ws/tests/it.rs:8:4 item=86..224 pos=[0, 0, 0, 0]
 #### features []
-== lib/alloc/src/string.rs module=["string"] lib=true slim=true src=true krate=0
+== lib/alloc/src/macros.rs module=["macros"] lib=true slim=true src=true krate=1000001
+Macro vec owner="" in="" mod=["macros"] ty="" params=[] at=lib/alloc/src/macros.rs:3:14 item=22..154 pos=[2, 13, 2, 16]
+Macro format owner="" in="" mod=["macros"] ty="" params=[] at=lib/alloc/src/macros.rs:8:14 item=155..250 pos=[7, 13, 7, 19]
+== lib/alloc/src/string.rs module=["string"] lib=true slim=true src=true krate=1000001
 Struct String owner="" in="" mod=["string"] ty="" params=[] at=lib/alloc/src/string.rs:2:12 item=40..79 pos=[1, 11, 1, 17]
 Field vec owner="String" in="String" mod=["string"] ty="Vec<u8>" params=[] at=lib/alloc/src/string.rs:3:5 item=64..76 pos=[2, 4, 2, 7]
 Impl impl String owner="" in="" mod=["string"] ty="" params=[] at=lib/alloc/src/string.rs:6:6 item=81..279 pos=[5, 5, 5, 11]
@@ -345,7 +360,7 @@ Method to_string owner="ToString" in="ToString" mod=["string"] ty="String" param
 Impl impl ToString for T owner="" in="" mod=["string"] ty="" params=[] at=lib/alloc/src/string.rs:35:27 item=521..623 pos=[34, 26, 34, 40]
 Method to_string owner="T" in="impl ToString for T" mod=["string"] ty="String" params=[] at=lib/alloc/src/string.rs:36:8 item=568..621 pos=[35, 7, 35, 16]
 impls [("String", "Deref"), ("String", "Clone"), ("*", "ToString")]
-== lib/alloc/src/vec/mod.rs module=["vec"] lib=true slim=true src=true krate=0
+== lib/alloc/src/vec/mod.rs module=["vec"] lib=true slim=true src=true krate=1000001
 Struct Vec owner="" in="" mod=["vec"] ty="" params=["T"] at=lib/alloc/src/vec/mod.rs:2:12 item=38..95 pos=[1, 11, 1, 14]
 Field buf owner="Vec" in="Vec" mod=["vec"] ty="RawVec<T>" params=["T"] at=lib/alloc/src/vec/mod.rs:3:5 item=62..76 pos=[2, 4, 2, 7]
 Field len owner="Vec" in="Vec" mod=["vec"] ty="usize" params=["T"] at=lib/alloc/src/vec/mod.rs:4:5 item=82..92 pos=[3, 4, 3, 7]
@@ -361,10 +376,10 @@ Method deref owner="Vec" in="impl Deref for Vec<T>" mod=["vec"] ty="&[T]" params
 Impl impl Clone for Vec<T> owner="" in="" mod=["vec"] ty="" params=[] at=lib/alloc/src/vec/mod.rs:32:16 item=527..614 pos=[31, 15, 31, 31]
 Method clone owner="Vec" in="impl Clone for Vec<T>" mod=["vec"] ty="Vec<T>" params=[] at=lib/alloc/src/vec/mod.rs:33:8 item=565..612 pos=[32, 7, 32, 12]
 impls [("Vec", "Deref"), ("Vec", "Clone")]
-== lib/core/src/clone.rs module=["clone"] lib=true slim=true src=true krate=0
+== lib/core/src/clone.rs module=["clone"] lib=true slim=true src=true krate=1000000
 Trait Clone owner="" in="" mod=["clone"] ty="" params=[] at=lib/core/src/clone.rs:2:11 item=70..125 pos=[1, 10, 1, 15]
 Method clone owner="Clone" in="Clone" mod=["clone"] ty="Self" params=[] at=lib/core/src/clone.rs:3:8 item=99..123 pos=[2, 7, 2, 12]
-== lib/core/src/convert/mod.rs module=["convert"] lib=true slim=true src=true krate=0
+== lib/core/src/convert/mod.rs module=["convert"] lib=true slim=true src=true krate=1000000
 Trait Into owner="" in="" mod=["convert"] ty="" params=[] at=lib/core/src/convert/mod.rs:1:11 item=0..52 pos=[0, 10, 0, 14]
 Method into owner="Into" in="Into" mod=["convert"] ty="T" params=[] at=lib/core/src/convert/mod.rs:2:8 item=31..50 pos=[1, 7, 1, 11]
 Trait From owner="" in="" mod=["convert"] ty="" params=[] at=lib/core/src/convert/mod.rs:5:11 item=54..113 pos=[4, 10, 4, 14]
@@ -372,15 +387,15 @@ Method from owner="From" in="From" mod=["convert"] ty="Self" params=[] at=lib/co
 Impl impl Into<U> for T owner="" in="" mod=["convert"] ty="" params=[] at=lib/core/src/convert/mod.rs:9:12 item=115..212 pos=[8, 11, 8, 24]
 Method into owner="T" in="impl Into<U> for T" mod=["convert"] ty="U" params=[] at=lib/core/src/convert/mod.rs:13:8 item=168..210 pos=[12, 7, 12, 11]
 impls [("*", "Into")]
-== lib/core/src/default.rs module=["default"] lib=true slim=true src=true krate=0
+== lib/core/src/default.rs module=["default"] lib=true slim=true src=true krate=1000000
 Trait Default owner="" in="" mod=["default"] ty="" params=[] at=lib/core/src/default.rs:1:11 item=0..54 pos=[0, 10, 0, 17]
 Method default owner="Default" in="Default" mod=["default"] ty="Self" params=[] at=lib/core/src/default.rs:2:8 item=31..52 pos=[1, 7, 1, 14]
-== lib/core/src/fmt/macros.rs module=["fmt", "macros"] lib=true slim=true src=true krate=0
+== lib/core/src/fmt/macros.rs module=["fmt", "macros"] lib=true slim=true src=true krate=1000000
 Macro Debug owner="" in="" mod=["fmt", "macros"] ty="" params=[] at=lib/core/src/fmt/macros.rs:2:11 item=58..117 pos=[1, 10, 1, 15]
 Macro Clone owner="" in="" mod=["fmt", "macros"] ty="" params=[] at=lib/core/src/fmt/macros.rs:5:11 item=118..177 pos=[4, 10, 4, 15]
 Macro Default owner="" in="" mod=["fmt", "macros"] ty="" params=[] at=lib/core/src/fmt/macros.rs:8:11 item=178..239 pos=[7, 10, 7, 17]
 Macro PartialEq owner="" in="" mod=["fmt", "macros"] ty="" params=[] at=lib/core/src/fmt/macros.rs:11:11 item=240..303 pos=[10, 10, 10, 19]
-== lib/core/src/iter/adapters/enumerate.rs module=["iter", "adapters", "enumerate"] lib=true slim=true src=true krate=0
+== lib/core/src/iter/adapters/enumerate.rs module=["iter", "adapters", "enumerate"] lib=true slim=true src=true krate=1000000
 Struct Enumerate owner="" in="" mod=["iter", "adapters", "enumerate"] ty="" params=["I"] at=lib/core/src/iter/adapters/enumerate.rs:1:12 item=0..58 pos=[0, 11, 0, 20]
 Field iter owner="Enumerate" in="Enumerate" mod=["iter", "adapters", "enumerate"] ty="I" params=["I"] at=lib/core/src/iter/adapters/enumerate.rs:2:5 item=30..37 pos=[1, 4, 1, 8]
 Field count owner="Enumerate" in="Enumerate" mod=["iter", "adapters", "enumerate"] ty="usize" params=["I"] at=lib/core/src/iter/adapters/enumerate.rs:3:5 item=43..55 pos=[2, 4, 2, 9]
@@ -388,18 +403,26 @@ Impl impl Iterator for Enumerate<I> owner="" in="" mod=["iter", "adapters", "enu
 TypeAlias Item owner="Enumerate" in="impl Iterator for Enumerate<I>" mod=["iter", "adapters", "enumerate"] ty="(usize, <I as Iterator>::Item)" params=[] at=lib/core/src/iter/adapters/enumerate.rs:10:10 item=123..166 pos=[9, 9, 9, 13]
 Method next owner="Enumerate" in="impl Iterator for Enumerate<I>" mod=["iter", "adapters", "enumerate"] ty="Option<(usize, <I as Iterator>::Item)>" params=[] at=lib/core/src/iter/adapters/enumerate.rs:11:8 item=171..255 pos=[10, 7, 10, 11]
 impls [("Enumerate", "Iterator")]
-== lib/core/src/iter/traits.rs module=["iter", "traits"] lib=true slim=true src=true krate=0
+== lib/core/src/iter/traits.rs module=["iter", "traits"] lib=true slim=true src=true krate=1000000
 Trait Iterator owner="" in="" mod=["iter", "traits"] ty="" params=[] at=lib/core/src/iter/traits.rs:1:11 item=0..370 pos=[0, 10, 0, 18]
 TypeAlias Item owner="Iterator" in="Iterator" mod=["iter", "traits"] ty="" params=[] at=lib/core/src/iter/traits.rs:2:10 item=25..35 pos=[1, 9, 1, 13]
 Method next owner="Iterator" in="Iterator" mod=["iter", "traits"] ty="Option<Self::Item>" params=[] at=lib/core/src/iter/traits.rs:3:8 item=40..81 pos=[2, 7, 2, 11]
 Method count owner="Iterator" in="Iterator" mod=["iter", "traits"] ty="usize" params=[] at=lib/core/src/iter/traits.rs:4:8 item=86..168 pos=[3, 7, 3, 12]
 Method enumerate owner="Iterator" in="Iterator" mod=["iter", "traits"] ty="Enumerate<Self>" params=[] at=lib/core/src/iter/traits.rs:10:8 item=173..269 pos=[9, 7, 9, 16]
 Method last owner="Iterator" in="Iterator" mod=["iter", "traits"] ty="Option<Self::Item>" params=[] at=lib/core/src/iter/traits.rs:16:8 item=274..368 pos=[15, 7, 15, 11]
-== lib/core/src/ops/deref.rs module=["ops", "deref"] lib=true slim=true src=true krate=0
+== lib/core/src/macros/mod.rs module=["macros"] lib=true slim=true src=true krate=1000000
+Macro assert owner="" in="" mod=["macros"] ty="" params=[] at=lib/core/src/macros/mod.rs:3:14 item=22..118 pos=[2, 13, 2, 19]
+Macro assert_eq owner="" in="" mod=["macros"] ty="" params=[] at=lib/core/src/macros/mod.rs:7:14 item=119..231 pos=[6, 13, 6, 22]
+Macro test owner="" in="" mod=["macros"] ty="" params=[] at=lib/core/src/macros/mod.rs:11:11 item=303..361 pos=[10, 10, 10, 14]
+Macro derive owner="" in="" mod=["macros"] ty="" params=[] at=lib/core/src/macros/mod.rs:15:11 item=411..471 pos=[14, 10, 14, 16]
+== lib/core/src/marker.rs module=["marker"] lib=true slim=true src=true krate=1000000
+Trait Copy owner="" in="" mod=["marker"] ty="" params=[] at=lib/core/src/marker.rs:2:11 item=32..56 pos=[1, 10, 1, 14]
+Macro Copy owner="" in="" mod=["marker"] ty="" params=[] at=lib/core/src/marker.rs:4:11 item=114..172 pos=[3, 10, 3, 14]
+== lib/core/src/ops/deref.rs module=["ops", "deref"] lib=true slim=true src=true krate=1000000
 Trait Deref owner="" in="" mod=["ops", "deref"] ty="" params=[] at=lib/core/src/ops/deref.rs:1:11 item=0..82 pos=[0, 10, 0, 15]
 TypeAlias Target owner="Deref" in="Deref" mod=["ops", "deref"] ty="" params=[] at=lib/core/src/ops/deref.rs:2:10 item=22..42 pos=[1, 9, 1, 15]
 Method deref owner="Deref" in="Deref" mod=["ops", "deref"] ty="&Self::Target" params=[] at=lib/core/src/ops/deref.rs:3:8 item=47..80 pos=[2, 7, 2, 12]
-== lib/core/src/option.rs module=["option"] lib=true slim=true src=true krate=0
+== lib/core/src/option.rs module=["option"] lib=true slim=true src=true krate=1000000
 Enum Option owner="" in="" mod=["option"] ty="" params=["T"] at=lib/core/src/option.rs:4:10 item=45..140 pos=[3, 9, 3, 15]
 Variant None owner="Option" in="Option" mod=["option"] ty="Option" params=["T"] at=lib/core/src/option.rs:6:5 item=88..92 pos=[5, 4, 5, 8]
 Variant Some owner="Option" in="Option" mod=["option"] ty="Option" params=["T"] at=lib/core/src/option.rs:8:5 item=130..137 pos=[7, 4, 7, 8]
@@ -409,7 +432,7 @@ Method unwrap owner="Option" in="impl Option<T>" mod=["option"] ty="T" params=[]
 Method unwrap_or owner="Option" in="impl Option<T>" mod=["option"] ty="T" params=[] at=lib/core/src/option.rs:21:12 item=387..450 pos=[20, 11, 20, 20]
 Method map owner="Option" in="impl Option<T>" mod=["option"] ty="Option<U>" params=[] at=lib/core/src/option.rs:24:12 item=455..536 pos=[23, 11, 23, 14]
 Method as_ref owner="Option" in="impl Option<T>" mod=["option"] ty="Option<&T>" params=[] at=lib/core/src/option.rs:27:18 item=541..605 pos=[26, 17, 26, 23]
-== lib/core/src/result.rs module=["result"] lib=true slim=true src=true krate=0
+== lib/core/src/result.rs module=["result"] lib=true slim=true src=true krate=1000000
 Enum Result owner="" in="" mod=["result"] ty="" params=["T", "E"] at=lib/core/src/result.rs:4:10 item=125..173 pos=[3, 9, 3, 15]
 Variant Ok owner="Result" in="Result" mod=["result"] ty="Result" params=["T", "E"] at=lib/core/src/result.rs:5:5 item=153..158 pos=[4, 4, 4, 6]
 Variant Err owner="Result" in="Result" mod=["result"] ty="Result" params=["T", "E"] at=lib/core/src/result.rs:6:5 item=164..170 pos=[5, 4, 5, 7]
@@ -418,7 +441,7 @@ Method unwrap owner="Result" in="impl Result<T, E>" mod=["result"] ty="T" params
 Method ok owner="Result" in="impl Result<T, E>" mod=["result"] ty="Option<T>" params=[] at=lib/core/src/result.rs:13:12 item=258..310 pos=[12, 11, 12, 13]
 Method map_err owner="Result" in="impl Result<T, E>" mod=["result"] ty="Result<T, F>" params=[] at=lib/core/src/result.rs:16:12 item=315..404 pos=[15, 11, 15, 18]
 Method is_ok owner="Result" in="impl Result<T, E>" mod=["result"] ty="bool" params=[] at=lib/core/src/result.rs:19:18 item=409..466 pos=[18, 17, 18, 22]
-== lib/core/src/slice/iter.rs module=["slice", "iter"] lib=true slim=true src=true krate=0
+== lib/core/src/slice/iter.rs module=["slice", "iter"] lib=true slim=true src=true krate=1000000
 Struct Iter owner="" in="" mod=["slice", "iter"] ty="" params=["T"] at=lib/core/src/slice/iter.rs:1:12 item=0..68 pos=[0, 11, 0, 15]
 Field ptr owner="Iter" in="Iter" mod=["slice", "iter"] ty="*const T" params=["T"] at=lib/core/src/slice/iter.rs:2:5 item=33..46 pos=[1, 4, 1, 7]
 Field end owner="Iter" in="Iter" mod=["slice", "iter"] ty="*const T" params=["T"] at=lib/core/src/slice/iter.rs:3:5 item=52..65 pos=[2, 4, 2, 7]
@@ -426,19 +449,19 @@ Impl impl Iterator for Iter<'a, T> owner="" in="" mod=["slice", "iter"] ty="" pa
 TypeAlias Item owner="Iter" in="impl Iterator for Iter<'a, T>" mod=["slice", "iter"] ty="&'a T" params=[] at=lib/core/src/slice/iter.rs:7:10 item=113..131 pos=[6, 9, 6, 13]
 Method next owner="Iter" in="impl Iterator for Iter<'a, T>" mod=["slice", "iter"] ty="Option<&'a T>" params=[] at=lib/core/src/slice/iter.rs:8:8 item=136..195 pos=[7, 7, 7, 11]
 impls [("Iter", "Iterator")]
-== lib/core/src/slice/mod.rs module=["slice"] lib=true slim=true src=true krate=0
+== lib/core/src/slice/mod.rs module=["slice"] lib=true slim=true src=true krate=1000000
 Module iter owner="" in="" mod=["slice"] ty="" params=[] at=lib/core/src/slice/mod.rs:1:9 item=0..13 pos=[0, 8, 0, 12]
 Impl impl [T] owner="" in="" mod=["slice"] ty="" params=[] at=lib/core/src/slice/mod.rs:4:9 item=35..315 pos=[3, 8, 3, 11]
 Method len owner="[T]" in="impl [T]" mod=["slice"] ty="usize" params=[] at=lib/core/src/slice/mod.rs:5:18 item=53..109 pos=[4, 17, 4, 20]
 Method iter owner="[T]" in="impl [T]" mod=["slice"] ty="Iter<'_, T>" params=[] at=lib/core/src/slice/mod.rs:8:12 item=114..171 pos=[7, 11, 7, 15]
 Method first owner="[T]" in="impl [T]" mod=["slice"] ty="Option<&T>" params=[] at=lib/core/src/slice/mod.rs:11:18 item=176..239 pos=[10, 17, 10, 22]
 Method get owner="[T]" in="impl [T]" mod=["slice"] ty="Option<&T>" params=[] at=lib/core/src/slice/mod.rs:14:12 item=244..313 pos=[13, 11, 13, 14]
-== lib/core/src/str/mod.rs module=["str"] lib=true slim=true src=true krate=0
+== lib/core/src/str/mod.rs module=["str"] lib=true slim=true src=true krate=1000000
 Impl impl str owner="" in="" mod=["str"] ty="" params=[] at=lib/core/src/str/mod.rs:1:6 item=0..201 pos=[0, 5, 0, 8]
 Method len owner="str" in="impl str" mod=["str"] ty="usize" params=[] at=lib/core/src/str/mod.rs:2:18 item=15..71 pos=[1, 17, 1, 20]
 Method trim owner="str" in="impl str" mod=["str"] ty="&str" params=[] at=lib/core/src/str/mod.rs:5:12 item=76..126 pos=[4, 11, 4, 15]
 Method starts_with owner="str" in="impl str" mod=["str"] ty="bool" params=[] at=lib/core/src/str/mod.rs:8:12 item=131..199 pos=[7, 11, 7, 22]
-== lib/std/src/collections/hash/map.rs module=["collections", "hash", "map"] lib=true slim=true src=true krate=0
+== lib/std/src/collections/hash/map.rs module=["collections", "hash", "map"] lib=true slim=true src=true krate=1000002
 Struct HashMap owner="" in="" mod=["collections", "hash", "map"] ty="" params=["K", "V"] at=lib/std/src/collections/hash/map.rs:2:12 item=16..72 pos=[1, 11, 1, 18]
 Field base owner="HashMap" in="HashMap" mod=["collections", "hash", "map"] ty="RawTable<(K, V)>" params=["K", "V"] at=lib/std/src/collections/hash/map.rs:3:5 item=47..69 pos=[2, 4, 2, 8]
 Impl impl HashMap<K, V> owner="" in="" mod=["collections", "hash", "map"] ty="" params=[] at=lib/std/src/collections/hash/map.rs:6:12 item=74..360 pos=[5, 11, 5, 24]
@@ -446,26 +469,26 @@ Method new owner="HashMap" in="impl HashMap<K, V>" mod=["collections", "hash", "
 Method insert owner="HashMap" in="impl HashMap<K, V>" mod=["collections", "hash", "map"] ty="Option<V>" params=[] at=lib/std/src/collections/hash/map.rs:10:12 item=163..236 pos=[9, 11, 9, 17]
 Method get owner="HashMap" in="impl HashMap<K, V>" mod=["collections", "hash", "map"] ty="Option<&V>" params=[] at=lib/std/src/collections/hash/map.rs:13:12 item=241..303 pos=[12, 11, 12, 14]
 Method len owner="HashMap" in="impl HashMap<K, V>" mod=["collections", "hash", "map"] ty="usize" params=[] at=lib/std/src/collections/hash/map.rs:16:12 item=308..358 pos=[15, 11, 15, 14]
-== lib/std/src/collections/mod.rs module=["collections"] lib=true slim=true src=true krate=0
+== lib/std/src/collections/mod.rs module=["collections"] lib=true slim=true src=true krate=1000002
 Module hash owner="" in="" mod=["collections"] ty="" params=[] at=lib/std/src/collections/mod.rs:3:5 item=35..44 pos=[2, 4, 2, 8]
-== lib/std/src/lib.rs module=[] lib=true slim=true src=true krate=0
+== lib/std/src/lib.rs module=[] lib=true slim=true src=true krate=1000002
 Module collections owner="" in="" mod=[] ty="" params=[] at=lib/std/src/lib.rs:2:9 item=41..61 pos=[1, 8, 1, 19]
 Module sync owner="" in="" mod=[] ty="" params=[] at=lib/std/src/lib.rs:3:9 item=62..75 pos=[2, 8, 2, 12]
 Module sys owner="" in="" mod=[] ty="" params=[] at=lib/std/src/lib.rs:4:5 item=76..84 pos=[3, 4, 3, 7]
-== lib/std/src/sync/mod.rs module=["sync"] lib=true slim=true src=true krate=0
+== lib/std/src/sync/mod.rs module=["sync"] lib=true slim=true src=true krate=1000002
 Module nonpoison owner="" in="" mod=["sync"] ty="" params=[] at=lib/std/src/sync/mod.rs:3:9 item=56..74 pos=[2, 8, 2, 17]
 Module poison owner="" in="" mod=["sync"] ty="" params=[] at=lib/std/src/sync/mod.rs:4:5 item=75..86 pos=[3, 4, 3, 10]
-== lib/std/src/sync/nonpoison/mutex.rs module=["sync", "nonpoison", "mutex"] lib=true slim=true src=true krate=0
+== lib/std/src/sync/nonpoison/mutex.rs module=["sync", "nonpoison", "mutex"] lib=true slim=true src=true krate=1000002
 Struct Mutex owner="" in="" mod=["sync", "nonpoison", "mutex"] ty="" params=["T"] at=lib/std/src/sync/nonpoison/mutex.rs:1:12 item=0..56 pos=[0, 11, 0, 16]
 Field data owner="Mutex" in="Mutex" mod=["sync", "nonpoison", "mutex"] ty="UnsafeCell<T>" params=["T"] at=lib/std/src/sync/nonpoison/mutex.rs:2:5 item=34..53 pos=[1, 4, 1, 8]
 Impl impl Mutex<T> owner="" in="" mod=["sync", "nonpoison", "mutex"] ty="" params=[] at=lib/std/src/sync/nonpoison/mutex.rs:5:17 item=58..154 pos=[4, 16, 4, 24]
 Method lock owner="Mutex" in="impl Mutex<T>" mod=["sync", "nonpoison", "mutex"] ty="MutexGuard<'_, T>" params=[] at=lib/std/src/sync/nonpoison/mutex.rs:6:12 item=89..152 pos=[5, 11, 5, 15]
-== lib/std/src/sync/poison/mod.rs module=["sync", "poison"] lib=true slim=true src=true krate=0
+== lib/std/src/sync/poison/mod.rs module=["sync", "poison"] lib=true slim=true src=true krate=1000002
 Module mutex owner="" in="" mod=["sync", "poison"] ty="" params=[] at=lib/std/src/sync/poison/mod.rs:3:5 item=43..53 pos=[2, 4, 2, 9]
 TypeAlias LockResult owner="" in="" mod=["sync", "poison"] ty="Result<T, PoisonError<T>>" params=["T"] at=lib/std/src/sync/poison/mod.rs:5:10 item=55..106 pos=[4, 9, 4, 19]
 Struct PoisonError owner="" in="" mod=["sync", "poison"] ty="" params=["T"] at=lib/std/src/sync/poison/mod.rs:7:12 item=108..150 pos=[6, 11, 6, 22]
 Field data owner="PoisonError" in="PoisonError" mod=["sync", "poison"] ty="T" params=["T"] at=lib/std/src/sync/poison/mod.rs:8:5 item=140..147 pos=[7, 4, 7, 8]
-== lib/std/src/sync/poison/mutex.rs module=["sync", "poison", "mutex"] lib=true slim=true src=true krate=0
+== lib/std/src/sync/poison/mutex.rs module=["sync", "poison", "mutex"] lib=true slim=true src=true krate=1000002
 Struct Mutex owner="" in="" mod=["sync", "poison", "mutex"] ty="" params=["T"] at=lib/std/src/sync/poison/mutex.rs:2:12 item=34..113 pos=[1, 11, 1, 16]
 Field inner owner="Mutex" in="Mutex" mod=["sync", "poison", "mutex"] ty="sys::Mutex" params=["T"] at=lib/std/src/sync/poison/mutex.rs:3:5 item=68..85 pos=[2, 4, 2, 9]
 Field data owner="Mutex" in="Mutex" mod=["sync", "poison", "mutex"] ty="UnsafeCell<T>" params=["T"] at=lib/std/src/sync/poison/mutex.rs:4:5 item=91..110 pos=[3, 4, 3, 8]
@@ -479,7 +502,7 @@ Impl impl Deref for MutexGuard<'_, T> owner="" in="" mod=["sync", "poison", "mut
 TypeAlias Target owner="MutexGuard" in="impl Deref for MutexGuard<'_, T>" mod=["sync", "poison", "mutex"] ty="T" params=[] at=lib/std/src/sync/poison/mutex.rs:24:10 item=431..447 pos=[23, 9, 23, 15]
 Method deref owner="MutexGuard" in="impl Deref for MutexGuard<'_, T>" mod=["sync", "poison", "mutex"] ty="&T" params=[] at=lib/std/src/sync/poison/mutex.rs:25:8 item=452..497 pos=[24, 7, 24, 12]
 impls [("MutexGuard", "Deref")]
-== lib/std/src/sys/sync/mutex.rs module=["sys", "sync", "mutex"] lib=true slim=true src=true krate=0
+== lib/std/src/sys/sync/mutex.rs module=["sys", "sync", "mutex"] lib=true slim=true src=true krate=1000002
 Struct Mutex owner="" in="" mod=["sys", "sync", "mutex"] ty="" params=[] at=lib/std/src/sys/sync/mutex.rs:1:12 item=0..36 pos=[0, 11, 0, 16]
 Field futex owner="Mutex" in="Mutex" mod=["sys", "sync", "mutex"] ty="u32" params=[] at=lib/std/src/sys/sync/mutex.rs:2:5 item=23..33 pos=[1, 4, 1, 9]
 Impl impl Mutex owner="" in="" mod=["sys", "sync", "mutex"] ty="" params=[] at=lib/std/src/sys/sync/mutex.rs:5:6 item=38..134 pos=[4, 5, 4, 10]
@@ -605,6 +628,7 @@ Function with_std owner="" in="" mod=[] ty="Counter" params=[] at=ws/src/lib.rs:
 Function extra_or_test owner="" in="" mod=[] ty="u8" params=[] at=ws/src/lib.rs:201:8 item=4072..4147 pos=[0, 0, 0, 0]
 Function platform owner="" in="" mod=[] ty="&'static str" params=[] at=ws/src/lib.rs:206:8 item=4149..4210 pos=[0, 0, 0, 0]
 Function os_name owner="" in="" mod=[] ty="&'static str" params=[] at=ws/src/lib.rs:216:8 item=4281..4357 pos=[0, 0, 0, 0]
+Function under_miri owner="" in="" mod=[] ty="" params=[] at=ws/src/lib.rs:221:8 item=4359..4394 pos=[0, 0, 0, 0]
 Macro square owner="" in="" mod=[] ty="" params=[] at=ws/src/lib.rs:223:14 item=4396..4461 pos=[0, 0, 0, 0]
 Function use_macro owner="" in="" mod=[] ty="i64" params=[] at=ws/src/lib.rs:229:8 item=4463..4565 pos=[0, 0, 0, 0]
 Function texts owner="" in="" mod=[] ty="usize" params=[] at=ws/src/lib.rs:234:8 item=4567..4683 pos=[0, 0, 0, 0]
@@ -657,7 +681,10 @@ Function shout_len owner="" in="" mod=["util", "text"] ty="usize" params=[] at=w
 Function helper owner="" in="" mod=["tests", "it"] ty="Counter" params=[] at=ws/tests/it.rs:3:4 item=35..84 pos=[0, 0, 0, 0]
 Function integration owner="" in="" mod=["tests", "it"] ty="" params=[] at=ws/tests/it.rs:8:4 item=86..224 pos=[0, 0, 0, 0]
 #### features ["std", "extra"]
-== lib/alloc/src/string.rs module=["string"] lib=true slim=true src=true krate=0
+== lib/alloc/src/macros.rs module=["macros"] lib=true slim=true src=true krate=1000001
+Macro vec owner="" in="" mod=["macros"] ty="" params=[] at=lib/alloc/src/macros.rs:3:14 item=22..154 pos=[2, 13, 2, 16]
+Macro format owner="" in="" mod=["macros"] ty="" params=[] at=lib/alloc/src/macros.rs:8:14 item=155..250 pos=[7, 13, 7, 19]
+== lib/alloc/src/string.rs module=["string"] lib=true slim=true src=true krate=1000001
 Struct String owner="" in="" mod=["string"] ty="" params=[] at=lib/alloc/src/string.rs:2:12 item=40..79 pos=[1, 11, 1, 17]
 Field vec owner="String" in="String" mod=["string"] ty="Vec<u8>" params=[] at=lib/alloc/src/string.rs:3:5 item=64..76 pos=[2, 4, 2, 7]
 Impl impl String owner="" in="" mod=["string"] ty="" params=[] at=lib/alloc/src/string.rs:6:6 item=81..279 pos=[5, 5, 5, 11]
@@ -674,7 +701,7 @@ Method to_string owner="ToString" in="ToString" mod=["string"] ty="String" param
 Impl impl ToString for T owner="" in="" mod=["string"] ty="" params=[] at=lib/alloc/src/string.rs:35:27 item=521..623 pos=[34, 26, 34, 40]
 Method to_string owner="T" in="impl ToString for T" mod=["string"] ty="String" params=[] at=lib/alloc/src/string.rs:36:8 item=568..621 pos=[35, 7, 35, 16]
 impls [("String", "Deref"), ("String", "Clone"), ("*", "ToString")]
-== lib/alloc/src/vec/mod.rs module=["vec"] lib=true slim=true src=true krate=0
+== lib/alloc/src/vec/mod.rs module=["vec"] lib=true slim=true src=true krate=1000001
 Struct Vec owner="" in="" mod=["vec"] ty="" params=["T"] at=lib/alloc/src/vec/mod.rs:2:12 item=38..95 pos=[1, 11, 1, 14]
 Field buf owner="Vec" in="Vec" mod=["vec"] ty="RawVec<T>" params=["T"] at=lib/alloc/src/vec/mod.rs:3:5 item=62..76 pos=[2, 4, 2, 7]
 Field len owner="Vec" in="Vec" mod=["vec"] ty="usize" params=["T"] at=lib/alloc/src/vec/mod.rs:4:5 item=82..92 pos=[3, 4, 3, 7]
@@ -690,10 +717,10 @@ Method deref owner="Vec" in="impl Deref for Vec<T>" mod=["vec"] ty="&[T]" params
 Impl impl Clone for Vec<T> owner="" in="" mod=["vec"] ty="" params=[] at=lib/alloc/src/vec/mod.rs:32:16 item=527..614 pos=[31, 15, 31, 31]
 Method clone owner="Vec" in="impl Clone for Vec<T>" mod=["vec"] ty="Vec<T>" params=[] at=lib/alloc/src/vec/mod.rs:33:8 item=565..612 pos=[32, 7, 32, 12]
 impls [("Vec", "Deref"), ("Vec", "Clone")]
-== lib/core/src/clone.rs module=["clone"] lib=true slim=true src=true krate=0
+== lib/core/src/clone.rs module=["clone"] lib=true slim=true src=true krate=1000000
 Trait Clone owner="" in="" mod=["clone"] ty="" params=[] at=lib/core/src/clone.rs:2:11 item=70..125 pos=[1, 10, 1, 15]
 Method clone owner="Clone" in="Clone" mod=["clone"] ty="Self" params=[] at=lib/core/src/clone.rs:3:8 item=99..123 pos=[2, 7, 2, 12]
-== lib/core/src/convert/mod.rs module=["convert"] lib=true slim=true src=true krate=0
+== lib/core/src/convert/mod.rs module=["convert"] lib=true slim=true src=true krate=1000000
 Trait Into owner="" in="" mod=["convert"] ty="" params=[] at=lib/core/src/convert/mod.rs:1:11 item=0..52 pos=[0, 10, 0, 14]
 Method into owner="Into" in="Into" mod=["convert"] ty="T" params=[] at=lib/core/src/convert/mod.rs:2:8 item=31..50 pos=[1, 7, 1, 11]
 Trait From owner="" in="" mod=["convert"] ty="" params=[] at=lib/core/src/convert/mod.rs:5:11 item=54..113 pos=[4, 10, 4, 14]
@@ -701,15 +728,15 @@ Method from owner="From" in="From" mod=["convert"] ty="Self" params=[] at=lib/co
 Impl impl Into<U> for T owner="" in="" mod=["convert"] ty="" params=[] at=lib/core/src/convert/mod.rs:9:12 item=115..212 pos=[8, 11, 8, 24]
 Method into owner="T" in="impl Into<U> for T" mod=["convert"] ty="U" params=[] at=lib/core/src/convert/mod.rs:13:8 item=168..210 pos=[12, 7, 12, 11]
 impls [("*", "Into")]
-== lib/core/src/default.rs module=["default"] lib=true slim=true src=true krate=0
+== lib/core/src/default.rs module=["default"] lib=true slim=true src=true krate=1000000
 Trait Default owner="" in="" mod=["default"] ty="" params=[] at=lib/core/src/default.rs:1:11 item=0..54 pos=[0, 10, 0, 17]
 Method default owner="Default" in="Default" mod=["default"] ty="Self" params=[] at=lib/core/src/default.rs:2:8 item=31..52 pos=[1, 7, 1, 14]
-== lib/core/src/fmt/macros.rs module=["fmt", "macros"] lib=true slim=true src=true krate=0
+== lib/core/src/fmt/macros.rs module=["fmt", "macros"] lib=true slim=true src=true krate=1000000
 Macro Debug owner="" in="" mod=["fmt", "macros"] ty="" params=[] at=lib/core/src/fmt/macros.rs:2:11 item=58..117 pos=[1, 10, 1, 15]
 Macro Clone owner="" in="" mod=["fmt", "macros"] ty="" params=[] at=lib/core/src/fmt/macros.rs:5:11 item=118..177 pos=[4, 10, 4, 15]
 Macro Default owner="" in="" mod=["fmt", "macros"] ty="" params=[] at=lib/core/src/fmt/macros.rs:8:11 item=178..239 pos=[7, 10, 7, 17]
 Macro PartialEq owner="" in="" mod=["fmt", "macros"] ty="" params=[] at=lib/core/src/fmt/macros.rs:11:11 item=240..303 pos=[10, 10, 10, 19]
-== lib/core/src/iter/adapters/enumerate.rs module=["iter", "adapters", "enumerate"] lib=true slim=true src=true krate=0
+== lib/core/src/iter/adapters/enumerate.rs module=["iter", "adapters", "enumerate"] lib=true slim=true src=true krate=1000000
 Struct Enumerate owner="" in="" mod=["iter", "adapters", "enumerate"] ty="" params=["I"] at=lib/core/src/iter/adapters/enumerate.rs:1:12 item=0..58 pos=[0, 11, 0, 20]
 Field iter owner="Enumerate" in="Enumerate" mod=["iter", "adapters", "enumerate"] ty="I" params=["I"] at=lib/core/src/iter/adapters/enumerate.rs:2:5 item=30..37 pos=[1, 4, 1, 8]
 Field count owner="Enumerate" in="Enumerate" mod=["iter", "adapters", "enumerate"] ty="usize" params=["I"] at=lib/core/src/iter/adapters/enumerate.rs:3:5 item=43..55 pos=[2, 4, 2, 9]
@@ -717,18 +744,26 @@ Impl impl Iterator for Enumerate<I> owner="" in="" mod=["iter", "adapters", "enu
 TypeAlias Item owner="Enumerate" in="impl Iterator for Enumerate<I>" mod=["iter", "adapters", "enumerate"] ty="(usize, <I as Iterator>::Item)" params=[] at=lib/core/src/iter/adapters/enumerate.rs:10:10 item=123..166 pos=[9, 9, 9, 13]
 Method next owner="Enumerate" in="impl Iterator for Enumerate<I>" mod=["iter", "adapters", "enumerate"] ty="Option<(usize, <I as Iterator>::Item)>" params=[] at=lib/core/src/iter/adapters/enumerate.rs:11:8 item=171..255 pos=[10, 7, 10, 11]
 impls [("Enumerate", "Iterator")]
-== lib/core/src/iter/traits.rs module=["iter", "traits"] lib=true slim=true src=true krate=0
+== lib/core/src/iter/traits.rs module=["iter", "traits"] lib=true slim=true src=true krate=1000000
 Trait Iterator owner="" in="" mod=["iter", "traits"] ty="" params=[] at=lib/core/src/iter/traits.rs:1:11 item=0..370 pos=[0, 10, 0, 18]
 TypeAlias Item owner="Iterator" in="Iterator" mod=["iter", "traits"] ty="" params=[] at=lib/core/src/iter/traits.rs:2:10 item=25..35 pos=[1, 9, 1, 13]
 Method next owner="Iterator" in="Iterator" mod=["iter", "traits"] ty="Option<Self::Item>" params=[] at=lib/core/src/iter/traits.rs:3:8 item=40..81 pos=[2, 7, 2, 11]
 Method count owner="Iterator" in="Iterator" mod=["iter", "traits"] ty="usize" params=[] at=lib/core/src/iter/traits.rs:4:8 item=86..168 pos=[3, 7, 3, 12]
 Method enumerate owner="Iterator" in="Iterator" mod=["iter", "traits"] ty="Enumerate<Self>" params=[] at=lib/core/src/iter/traits.rs:10:8 item=173..269 pos=[9, 7, 9, 16]
 Method last owner="Iterator" in="Iterator" mod=["iter", "traits"] ty="Option<Self::Item>" params=[] at=lib/core/src/iter/traits.rs:16:8 item=274..368 pos=[15, 7, 15, 11]
-== lib/core/src/ops/deref.rs module=["ops", "deref"] lib=true slim=true src=true krate=0
+== lib/core/src/macros/mod.rs module=["macros"] lib=true slim=true src=true krate=1000000
+Macro assert owner="" in="" mod=["macros"] ty="" params=[] at=lib/core/src/macros/mod.rs:3:14 item=22..118 pos=[2, 13, 2, 19]
+Macro assert_eq owner="" in="" mod=["macros"] ty="" params=[] at=lib/core/src/macros/mod.rs:7:14 item=119..231 pos=[6, 13, 6, 22]
+Macro test owner="" in="" mod=["macros"] ty="" params=[] at=lib/core/src/macros/mod.rs:11:11 item=303..361 pos=[10, 10, 10, 14]
+Macro derive owner="" in="" mod=["macros"] ty="" params=[] at=lib/core/src/macros/mod.rs:15:11 item=411..471 pos=[14, 10, 14, 16]
+== lib/core/src/marker.rs module=["marker"] lib=true slim=true src=true krate=1000000
+Trait Copy owner="" in="" mod=["marker"] ty="" params=[] at=lib/core/src/marker.rs:2:11 item=32..56 pos=[1, 10, 1, 14]
+Macro Copy owner="" in="" mod=["marker"] ty="" params=[] at=lib/core/src/marker.rs:4:11 item=114..172 pos=[3, 10, 3, 14]
+== lib/core/src/ops/deref.rs module=["ops", "deref"] lib=true slim=true src=true krate=1000000
 Trait Deref owner="" in="" mod=["ops", "deref"] ty="" params=[] at=lib/core/src/ops/deref.rs:1:11 item=0..82 pos=[0, 10, 0, 15]
 TypeAlias Target owner="Deref" in="Deref" mod=["ops", "deref"] ty="" params=[] at=lib/core/src/ops/deref.rs:2:10 item=22..42 pos=[1, 9, 1, 15]
 Method deref owner="Deref" in="Deref" mod=["ops", "deref"] ty="&Self::Target" params=[] at=lib/core/src/ops/deref.rs:3:8 item=47..80 pos=[2, 7, 2, 12]
-== lib/core/src/option.rs module=["option"] lib=true slim=true src=true krate=0
+== lib/core/src/option.rs module=["option"] lib=true slim=true src=true krate=1000000
 Enum Option owner="" in="" mod=["option"] ty="" params=["T"] at=lib/core/src/option.rs:4:10 item=45..140 pos=[3, 9, 3, 15]
 Variant None owner="Option" in="Option" mod=["option"] ty="Option" params=["T"] at=lib/core/src/option.rs:6:5 item=88..92 pos=[5, 4, 5, 8]
 Variant Some owner="Option" in="Option" mod=["option"] ty="Option" params=["T"] at=lib/core/src/option.rs:8:5 item=130..137 pos=[7, 4, 7, 8]
@@ -738,7 +773,7 @@ Method unwrap owner="Option" in="impl Option<T>" mod=["option"] ty="T" params=[]
 Method unwrap_or owner="Option" in="impl Option<T>" mod=["option"] ty="T" params=[] at=lib/core/src/option.rs:21:12 item=387..450 pos=[20, 11, 20, 20]
 Method map owner="Option" in="impl Option<T>" mod=["option"] ty="Option<U>" params=[] at=lib/core/src/option.rs:24:12 item=455..536 pos=[23, 11, 23, 14]
 Method as_ref owner="Option" in="impl Option<T>" mod=["option"] ty="Option<&T>" params=[] at=lib/core/src/option.rs:27:18 item=541..605 pos=[26, 17, 26, 23]
-== lib/core/src/result.rs module=["result"] lib=true slim=true src=true krate=0
+== lib/core/src/result.rs module=["result"] lib=true slim=true src=true krate=1000000
 Enum Result owner="" in="" mod=["result"] ty="" params=["T", "E"] at=lib/core/src/result.rs:4:10 item=125..173 pos=[3, 9, 3, 15]
 Variant Ok owner="Result" in="Result" mod=["result"] ty="Result" params=["T", "E"] at=lib/core/src/result.rs:5:5 item=153..158 pos=[4, 4, 4, 6]
 Variant Err owner="Result" in="Result" mod=["result"] ty="Result" params=["T", "E"] at=lib/core/src/result.rs:6:5 item=164..170 pos=[5, 4, 5, 7]
@@ -747,7 +782,7 @@ Method unwrap owner="Result" in="impl Result<T, E>" mod=["result"] ty="T" params
 Method ok owner="Result" in="impl Result<T, E>" mod=["result"] ty="Option<T>" params=[] at=lib/core/src/result.rs:13:12 item=258..310 pos=[12, 11, 12, 13]
 Method map_err owner="Result" in="impl Result<T, E>" mod=["result"] ty="Result<T, F>" params=[] at=lib/core/src/result.rs:16:12 item=315..404 pos=[15, 11, 15, 18]
 Method is_ok owner="Result" in="impl Result<T, E>" mod=["result"] ty="bool" params=[] at=lib/core/src/result.rs:19:18 item=409..466 pos=[18, 17, 18, 22]
-== lib/core/src/slice/iter.rs module=["slice", "iter"] lib=true slim=true src=true krate=0
+== lib/core/src/slice/iter.rs module=["slice", "iter"] lib=true slim=true src=true krate=1000000
 Struct Iter owner="" in="" mod=["slice", "iter"] ty="" params=["T"] at=lib/core/src/slice/iter.rs:1:12 item=0..68 pos=[0, 11, 0, 15]
 Field ptr owner="Iter" in="Iter" mod=["slice", "iter"] ty="*const T" params=["T"] at=lib/core/src/slice/iter.rs:2:5 item=33..46 pos=[1, 4, 1, 7]
 Field end owner="Iter" in="Iter" mod=["slice", "iter"] ty="*const T" params=["T"] at=lib/core/src/slice/iter.rs:3:5 item=52..65 pos=[2, 4, 2, 7]
@@ -755,19 +790,19 @@ Impl impl Iterator for Iter<'a, T> owner="" in="" mod=["slice", "iter"] ty="" pa
 TypeAlias Item owner="Iter" in="impl Iterator for Iter<'a, T>" mod=["slice", "iter"] ty="&'a T" params=[] at=lib/core/src/slice/iter.rs:7:10 item=113..131 pos=[6, 9, 6, 13]
 Method next owner="Iter" in="impl Iterator for Iter<'a, T>" mod=["slice", "iter"] ty="Option<&'a T>" params=[] at=lib/core/src/slice/iter.rs:8:8 item=136..195 pos=[7, 7, 7, 11]
 impls [("Iter", "Iterator")]
-== lib/core/src/slice/mod.rs module=["slice"] lib=true slim=true src=true krate=0
+== lib/core/src/slice/mod.rs module=["slice"] lib=true slim=true src=true krate=1000000
 Module iter owner="" in="" mod=["slice"] ty="" params=[] at=lib/core/src/slice/mod.rs:1:9 item=0..13 pos=[0, 8, 0, 12]
 Impl impl [T] owner="" in="" mod=["slice"] ty="" params=[] at=lib/core/src/slice/mod.rs:4:9 item=35..315 pos=[3, 8, 3, 11]
 Method len owner="[T]" in="impl [T]" mod=["slice"] ty="usize" params=[] at=lib/core/src/slice/mod.rs:5:18 item=53..109 pos=[4, 17, 4, 20]
 Method iter owner="[T]" in="impl [T]" mod=["slice"] ty="Iter<'_, T>" params=[] at=lib/core/src/slice/mod.rs:8:12 item=114..171 pos=[7, 11, 7, 15]
 Method first owner="[T]" in="impl [T]" mod=["slice"] ty="Option<&T>" params=[] at=lib/core/src/slice/mod.rs:11:18 item=176..239 pos=[10, 17, 10, 22]
 Method get owner="[T]" in="impl [T]" mod=["slice"] ty="Option<&T>" params=[] at=lib/core/src/slice/mod.rs:14:12 item=244..313 pos=[13, 11, 13, 14]
-== lib/core/src/str/mod.rs module=["str"] lib=true slim=true src=true krate=0
+== lib/core/src/str/mod.rs module=["str"] lib=true slim=true src=true krate=1000000
 Impl impl str owner="" in="" mod=["str"] ty="" params=[] at=lib/core/src/str/mod.rs:1:6 item=0..201 pos=[0, 5, 0, 8]
 Method len owner="str" in="impl str" mod=["str"] ty="usize" params=[] at=lib/core/src/str/mod.rs:2:18 item=15..71 pos=[1, 17, 1, 20]
 Method trim owner="str" in="impl str" mod=["str"] ty="&str" params=[] at=lib/core/src/str/mod.rs:5:12 item=76..126 pos=[4, 11, 4, 15]
 Method starts_with owner="str" in="impl str" mod=["str"] ty="bool" params=[] at=lib/core/src/str/mod.rs:8:12 item=131..199 pos=[7, 11, 7, 22]
-== lib/std/src/collections/hash/map.rs module=["collections", "hash", "map"] lib=true slim=true src=true krate=0
+== lib/std/src/collections/hash/map.rs module=["collections", "hash", "map"] lib=true slim=true src=true krate=1000002
 Struct HashMap owner="" in="" mod=["collections", "hash", "map"] ty="" params=["K", "V"] at=lib/std/src/collections/hash/map.rs:2:12 item=16..72 pos=[1, 11, 1, 18]
 Field base owner="HashMap" in="HashMap" mod=["collections", "hash", "map"] ty="RawTable<(K, V)>" params=["K", "V"] at=lib/std/src/collections/hash/map.rs:3:5 item=47..69 pos=[2, 4, 2, 8]
 Impl impl HashMap<K, V> owner="" in="" mod=["collections", "hash", "map"] ty="" params=[] at=lib/std/src/collections/hash/map.rs:6:12 item=74..360 pos=[5, 11, 5, 24]
@@ -775,26 +810,26 @@ Method new owner="HashMap" in="impl HashMap<K, V>" mod=["collections", "hash", "
 Method insert owner="HashMap" in="impl HashMap<K, V>" mod=["collections", "hash", "map"] ty="Option<V>" params=[] at=lib/std/src/collections/hash/map.rs:10:12 item=163..236 pos=[9, 11, 9, 17]
 Method get owner="HashMap" in="impl HashMap<K, V>" mod=["collections", "hash", "map"] ty="Option<&V>" params=[] at=lib/std/src/collections/hash/map.rs:13:12 item=241..303 pos=[12, 11, 12, 14]
 Method len owner="HashMap" in="impl HashMap<K, V>" mod=["collections", "hash", "map"] ty="usize" params=[] at=lib/std/src/collections/hash/map.rs:16:12 item=308..358 pos=[15, 11, 15, 14]
-== lib/std/src/collections/mod.rs module=["collections"] lib=true slim=true src=true krate=0
+== lib/std/src/collections/mod.rs module=["collections"] lib=true slim=true src=true krate=1000002
 Module hash owner="" in="" mod=["collections"] ty="" params=[] at=lib/std/src/collections/mod.rs:3:5 item=35..44 pos=[2, 4, 2, 8]
-== lib/std/src/lib.rs module=[] lib=true slim=true src=true krate=0
+== lib/std/src/lib.rs module=[] lib=true slim=true src=true krate=1000002
 Module collections owner="" in="" mod=[] ty="" params=[] at=lib/std/src/lib.rs:2:9 item=41..61 pos=[1, 8, 1, 19]
 Module sync owner="" in="" mod=[] ty="" params=[] at=lib/std/src/lib.rs:3:9 item=62..75 pos=[2, 8, 2, 12]
 Module sys owner="" in="" mod=[] ty="" params=[] at=lib/std/src/lib.rs:4:5 item=76..84 pos=[3, 4, 3, 7]
-== lib/std/src/sync/mod.rs module=["sync"] lib=true slim=true src=true krate=0
+== lib/std/src/sync/mod.rs module=["sync"] lib=true slim=true src=true krate=1000002
 Module nonpoison owner="" in="" mod=["sync"] ty="" params=[] at=lib/std/src/sync/mod.rs:3:9 item=56..74 pos=[2, 8, 2, 17]
 Module poison owner="" in="" mod=["sync"] ty="" params=[] at=lib/std/src/sync/mod.rs:4:5 item=75..86 pos=[3, 4, 3, 10]
-== lib/std/src/sync/nonpoison/mutex.rs module=["sync", "nonpoison", "mutex"] lib=true slim=true src=true krate=0
+== lib/std/src/sync/nonpoison/mutex.rs module=["sync", "nonpoison", "mutex"] lib=true slim=true src=true krate=1000002
 Struct Mutex owner="" in="" mod=["sync", "nonpoison", "mutex"] ty="" params=["T"] at=lib/std/src/sync/nonpoison/mutex.rs:1:12 item=0..56 pos=[0, 11, 0, 16]
 Field data owner="Mutex" in="Mutex" mod=["sync", "nonpoison", "mutex"] ty="UnsafeCell<T>" params=["T"] at=lib/std/src/sync/nonpoison/mutex.rs:2:5 item=34..53 pos=[1, 4, 1, 8]
 Impl impl Mutex<T> owner="" in="" mod=["sync", "nonpoison", "mutex"] ty="" params=[] at=lib/std/src/sync/nonpoison/mutex.rs:5:17 item=58..154 pos=[4, 16, 4, 24]
 Method lock owner="Mutex" in="impl Mutex<T>" mod=["sync", "nonpoison", "mutex"] ty="MutexGuard<'_, T>" params=[] at=lib/std/src/sync/nonpoison/mutex.rs:6:12 item=89..152 pos=[5, 11, 5, 15]
-== lib/std/src/sync/poison/mod.rs module=["sync", "poison"] lib=true slim=true src=true krate=0
+== lib/std/src/sync/poison/mod.rs module=["sync", "poison"] lib=true slim=true src=true krate=1000002
 Module mutex owner="" in="" mod=["sync", "poison"] ty="" params=[] at=lib/std/src/sync/poison/mod.rs:3:5 item=43..53 pos=[2, 4, 2, 9]
 TypeAlias LockResult owner="" in="" mod=["sync", "poison"] ty="Result<T, PoisonError<T>>" params=["T"] at=lib/std/src/sync/poison/mod.rs:5:10 item=55..106 pos=[4, 9, 4, 19]
 Struct PoisonError owner="" in="" mod=["sync", "poison"] ty="" params=["T"] at=lib/std/src/sync/poison/mod.rs:7:12 item=108..150 pos=[6, 11, 6, 22]
 Field data owner="PoisonError" in="PoisonError" mod=["sync", "poison"] ty="T" params=["T"] at=lib/std/src/sync/poison/mod.rs:8:5 item=140..147 pos=[7, 4, 7, 8]
-== lib/std/src/sync/poison/mutex.rs module=["sync", "poison", "mutex"] lib=true slim=true src=true krate=0
+== lib/std/src/sync/poison/mutex.rs module=["sync", "poison", "mutex"] lib=true slim=true src=true krate=1000002
 Struct Mutex owner="" in="" mod=["sync", "poison", "mutex"] ty="" params=["T"] at=lib/std/src/sync/poison/mutex.rs:2:12 item=34..113 pos=[1, 11, 1, 16]
 Field inner owner="Mutex" in="Mutex" mod=["sync", "poison", "mutex"] ty="sys::Mutex" params=["T"] at=lib/std/src/sync/poison/mutex.rs:3:5 item=68..85 pos=[2, 4, 2, 9]
 Field data owner="Mutex" in="Mutex" mod=["sync", "poison", "mutex"] ty="UnsafeCell<T>" params=["T"] at=lib/std/src/sync/poison/mutex.rs:4:5 item=91..110 pos=[3, 4, 3, 8]
@@ -808,7 +843,7 @@ Impl impl Deref for MutexGuard<'_, T> owner="" in="" mod=["sync", "poison", "mut
 TypeAlias Target owner="MutexGuard" in="impl Deref for MutexGuard<'_, T>" mod=["sync", "poison", "mutex"] ty="T" params=[] at=lib/std/src/sync/poison/mutex.rs:24:10 item=431..447 pos=[23, 9, 23, 15]
 Method deref owner="MutexGuard" in="impl Deref for MutexGuard<'_, T>" mod=["sync", "poison", "mutex"] ty="&T" params=[] at=lib/std/src/sync/poison/mutex.rs:25:8 item=452..497 pos=[24, 7, 24, 12]
 impls [("MutexGuard", "Deref")]
-== lib/std/src/sys/sync/mutex.rs module=["sys", "sync", "mutex"] lib=true slim=true src=true krate=0
+== lib/std/src/sys/sync/mutex.rs module=["sys", "sync", "mutex"] lib=true slim=true src=true krate=1000002
 Struct Mutex owner="" in="" mod=["sys", "sync", "mutex"] ty="" params=[] at=lib/std/src/sys/sync/mutex.rs:1:12 item=0..36 pos=[0, 11, 0, 16]
 Field futex owner="Mutex" in="Mutex" mod=["sys", "sync", "mutex"] ty="u32" params=[] at=lib/std/src/sys/sync/mutex.rs:2:5 item=23..33 pos=[1, 4, 1, 9]
 Impl impl Mutex owner="" in="" mod=["sys", "sync", "mutex"] ty="" params=[] at=lib/std/src/sys/sync/mutex.rs:5:6 item=38..134 pos=[4, 5, 4, 10]
@@ -935,6 +970,7 @@ Function extra_only owner="" in="" mod=[] ty="u8" params=[] at=ws/src/lib.rs:196
 Function extra_or_test owner="" in="" mod=[] ty="u8" params=[] at=ws/src/lib.rs:201:8 item=4072..4147 pos=[0, 0, 0, 0]
 Function platform owner="" in="" mod=[] ty="&'static str" params=[] at=ws/src/lib.rs:206:8 item=4149..4210 pos=[0, 0, 0, 0]
 Function os_name owner="" in="" mod=[] ty="&'static str" params=[] at=ws/src/lib.rs:216:8 item=4281..4357 pos=[0, 0, 0, 0]
+Function under_miri owner="" in="" mod=[] ty="" params=[] at=ws/src/lib.rs:221:8 item=4359..4394 pos=[0, 0, 0, 0]
 Macro square owner="" in="" mod=[] ty="" params=[] at=ws/src/lib.rs:223:14 item=4396..4461 pos=[0, 0, 0, 0]
 Function use_macro owner="" in="" mod=[] ty="i64" params=[] at=ws/src/lib.rs:229:8 item=4463..4565 pos=[0, 0, 0, 0]
 Function texts owner="" in="" mod=[] ty="usize" params=[] at=ws/src/lib.rs:234:8 item=4567..4683 pos=[0, 0, 0, 0]

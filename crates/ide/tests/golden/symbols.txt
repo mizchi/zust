@@ -1,3 +1,8 @@
+== lib/alloc/src/macros.rs
+Macro vec [22..154] name 51..54 macro_rules!
+Macro format [155..250] name 184..190 macro_rules!
+flat vec in "" lsp=12
+flat format in "" lsp=12
 == lib/alloc/src/string.rs
 Struct String [40..79] name 51..57 
   Field vec [64..76] name 64..67 Vec<u8>
@@ -116,6 +121,20 @@ flat next in "Iterator" lsp=6
 flat count in "Iterator" lsp=6
 flat enumerate in "Iterator" lsp=6
 flat last in "Iterator" lsp=6
+== lib/core/src/macros/mod.rs
+Macro assert [22..118] name 51..57 macro_rules!
+Macro assert_eq [119..231] name 148..157 macro_rules!
+Macro test [303..361] name 313..317 macro
+Macro derive [411..471] name 421..427 macro
+flat assert in "" lsp=12
+flat assert_eq in "" lsp=12
+flat test in "" lsp=12
+flat derive in "" lsp=12
+== lib/core/src/marker.rs
+Trait Copy [32..56] name 42..46 
+Macro Copy [114..172] name 124..128 macro
+flat Copy in "" lsp=11
+flat Copy in "" lsp=12
 == lib/core/src/ops/deref.rs
 Trait Deref [0..82] name 10..15 
   TypeAlias Target [22..42] name 27..33 
