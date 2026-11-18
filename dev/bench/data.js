@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795013382433,
+  "lastUpdate": 1795013384384,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -7228,6 +7228,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "lsp peak RSS",
             "value": 66.461,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "committer": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "distinct": true,
+          "id": "415ab06e8fe9fbeec73279c10afc73d385a66ac2",
+          "message": "zustc: a program's own Map / Filter / Zip / Chain .. no longer collide with the prelude's iterator adapters\n\nWhen the program defines a type with such a name, the prelude's is renamed `__p_<name>` in the\nselected prelude text (only names no part of the compiler refers to by name).\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-18T14:45:59Z",
+          "tree_id": "092a9378e93f780f439fe9b75d68a63b68f8052c",
+          "url": "https://github.com/mizchi/zust/commit/415ab06e8fe9fbeec73279c10afc73d385a66ac2"
+        },
+        "date": 1795013383965,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "lsp definition p50",
+            "value": 0.462,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp hover p50",
+            "value": 0.387,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp completion p50",
+            "value": 0.76,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp references p50",
+            "value": 2.218,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp rename p50",
+            "value": 0.497,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp signatureHelp p50",
+            "value": 0.579,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp documentHighlight p50",
+            "value": 0.603,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp ready (startup to indexed)",
+            "value": 104.72,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp peak RSS",
+            "value": 66.617,
             "unit": "MiB"
           }
         ]
