@@ -41,6 +41,15 @@ pub struct Solver<'p> {
     pub ret: u32,
     /// Shape::Adt の型引数の型変数
     pub adt_args: Vec<u32>,
+    /// resolve の入れ子の深さ (形の循環で止まらなくならないように)
+    resolve_depth: u32,
+    /// occurs の見た印 (型変数ごとの世代の番号) と今の世代
+    occ_mark: Vec<u32>,
+    occ_gen: u32,
+    /// resolve の記憶 (代表の型変数 → 型) と、それが正しい版 (link のたびに rver が進む)
+    rcache: crate::fxhash::FxMap<u32, Option<Ty>>,
+    rcache_ver: u64,
+    rver: u64,
     /// 呼び出しの引数を推論している深さと、本体の推論を後回しにしたクロージャ (式, 引数, 戻り値)
     pub defer: u32,
     /// 囲んでいるループ / ラベル付きブロック: (ラベル, 値の型, ブロックか, break があったか)
@@ -75,6 +84,12 @@ impl<'p> Solver<'p> {
             lets: vec![],
             ret: 0,
             adt_args: vec![],
+            resolve_depth: 0,
+            occ_mark: vec![],
+            occ_gen: 0,
+            rcache: Default::default(),
+            rcache_ver: 0,
+            rver: 0,
             defer: 0,
             brk: vec![],
             assoc_later: vec![],
@@ -179,6 +194,7 @@ impl Solver<'_> {
         v
     }
     pub fn link(&mut self, from: u32, to: u32) {
+        self.rver += 1;
         self.parent[from as usize] = to;
         self.int_lit[to as usize] |= self.int_lit[from as usize];
         self.float_lit[to as usize] |= self.float_lit[from as usize];
@@ -233,6 +249,39 @@ impl Solver<'_> {
         }
     }
 
+    /// 型変数 v が t の形の中に現れるか (単一化で無限の型を作らないため)。形は共有された部分を持つ (DAG) ので、
+    /// 見た型変数に印を付けて 1 度だけ辿る (印は世代の番号で、毎回消さない)
+    fn occurs(&mut self, v: u32, t: u32, _depth: u32) -> bool {
+        self.occ_gen = self.occ_gen.wrapping_add(1);
+        if self.occ_gen == 0 {
+            self.occ_mark.iter_mut().for_each(|m| *m = 0);
+            self.occ_gen = 1;
+        }
+        let g = self.occ_gen;
+        let mut stack = vec![t];
+        while let Some(t) = stack.pop() {
+            let t = self.find(t);
+            if t == v {
+                return true;
+            }
+            let ti = t as usize;
+            if self.occ_mark.len() <= ti {
+                self.occ_mark.resize(self.shape.len().max(ti + 1), 0);
+            }
+            if self.occ_mark[ti] == g {
+                continue;
+            }
+            self.occ_mark[ti] = g;
+            match self.shape[ti] {
+                Some(Shape::Ref(_, i) | Shape::Arr(i, _) | Shape::Slc(i) | Shape::Ptr(_, i) | Shape::Bx(i)) => stack.push(i),
+                Some(Shape::Adt(_, st, n)) => stack.extend_from_slice(&self.adt_args[st as usize..(st + n) as usize]),
+                Some(Shape::Clo(st, n)) => stack.extend_from_slice(&self.adt_args[st as usize..(st + n + 1) as usize]),
+                _ => {}
+            }
+        }
+        false
+    }
+
     pub fn unify(&mut self, a: u32, b: u32) {
         let (a, b) = (self.find(a), self.find(b));
         if a == b {
@@ -240,8 +289,17 @@ impl Solver<'_> {
         }
         match (self.shape[a as usize], self.shape[b as usize]) {
             (Some(Shape::Known(Ty::Never)), _) | (_, Some(Shape::Known(Ty::Never))) => {}
-            (None, _) => self.link(a, b),
-            (_, None) => self.link(b, a),
+            // (出現検査: `f = Box::new(f)` の f を `Box<f>` にはしない (無限の型)。決まらないまま残す)
+            (None, _) => {
+                if !self.occurs(a, b, 0) {
+                    self.link(a, b)
+                }
+            }
+            (_, None) => {
+                if !self.occurs(b, a, 0) {
+                    self.link(b, a)
+                }
+            }
             (Some(Shape::Ref(_, x)), Some(Shape::Ref(_, y))) => {
                 // `&T` と `&dyn Trait`: 強制変換なので中身は単一化せず、dyn の方を代表にする
                 let is_dyn = |s: &mut Self, v: u32| {
@@ -545,7 +603,31 @@ impl Solver<'_> {
             }
         }
     }
+    /// 型変数 v の型 (まだ分からなければ None)。形の循環 (無限の型) があっても止まるように、深さを数える
     pub fn resolve(&mut self, v: u32) -> Option<Ty> {
+        if self.resolve_depth > 256 {
+            return None;
+        }
+        // (同じ型変数を何度も解かない: 入れ子のクロージャの型 (`dup(dup(..))`) は同じ部分を共有していて、記憶しないと
+        // 段の数の指数になる。型変数の形が変わったら (link) 消す)
+        let r = self.find(v);
+        if self.rcache_ver != self.rver {
+            self.rcache.clear();
+            self.rcache_ver = self.rver;
+        }
+        if let Some(t) = self.rcache.get(&r) {
+            return *t;
+        }
+        self.resolve_depth += 1;
+        let t = self.resolve0(v);
+        self.resolve_depth -= 1;
+        if self.rcache_ver == self.rver {
+            self.rcache.insert(r, t);
+        }
+        t
+    }
+
+    fn resolve0(&mut self, v: u32) -> Option<Ty> {
         let r = self.find(v);
         match self.shape[r as usize] {
             Some(Shape::Known(t)) => Some(t),

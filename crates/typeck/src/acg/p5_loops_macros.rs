@@ -1283,7 +1283,7 @@ impl Cx<'_> {
         let fail = self.b.create_block();
         self.test_variant(place, inst, ok_vi, SP, fail)?;
         let (_, oty, ooff) = self.prog.structs[inst as usize].variants[ok_vi].fields[0];
-        let (okv, _) = self.read(Self::field_place(place, oty, ooff));
+        let (okv, _) = self.read(Self::field_place(place, oty, ooff)?);
         let cont = self.b.create_block();
         let param = clif_ty(oty).map(|ct| self.b.append_block_param(cont, ct));
         match okv {
@@ -1305,7 +1305,7 @@ impl Cx<'_> {
         if family == "Result" {
             let (_, ety, eoff) = self.prog.structs[inst as usize].variants[err_vi].fields[0];
             let (_, rety, reoff) = self.prog.structs[rinst as usize].variants[r_err].fields[0];
-            let (ev, _) = self.read(Self::field_place(place, ety, eoff));
+            let (ev, _) = self.read(Self::field_place(place, ety, eoff)?);
             // エラーの型が違えば `From::from` で変換する (`impl From<ParseIntError> for AppError`)
             let ev = if ety != rety {
                 let conv = match rety {

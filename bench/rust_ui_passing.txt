@@ -556,6 +556,7 @@ check-pass	closure-expected-type/expect-infer-var-supply-ty-with-bound-region.rs
 check-pass	closure-expected-type/expect-infer-var-supply-ty-with-free-region.rs
 compile-fail	closure-expected-type/expect-two-infer-vars-supply-ty-with-bound-region.rs
 check-pass	closure-expected-type/issue-24421.rs
+compile-fail	closure-expected-type/trait-bound-expects-closure-returns-itself.rs
 check-pass	closures/2229_closure_analysis/diagnostics/liveness.rs
 check-pass	closures/2229_closure_analysis/diagnostics/liveness_unintentional_copy.rs
 compile-fail	closures/2229_closure_analysis/issue-118144.rs
@@ -618,7 +619,9 @@ check-pass	closures/issue-102089-multiple-opaque-cast.rs
 run-pass	closures/issue-10682.rs
 run-pass	closures/issue-1460.rs
 run-pass	closures/issue-22864-1.rs
+compile-fail	closures/issue-25439.rs
 check-pass	closures/issue-68025.rs
+check-pass	closures/issue-72408-nested-closures-exponential.rs
 run-pass	closures/issue-868.rs
 check-pass	closures/issue-97607.rs
 compile-fail	closures/local-type-mix.rs
@@ -1619,6 +1622,7 @@ compile-fail	impl-trait/issues/issue-58956.rs
 check-pass	impl-trait/issues/issue-68532.rs
 compile-fail	impl-trait/issues/issue-72911.rs
 compile-fail	impl-trait/issues/issue-86642.rs
+compile-fail	impl-trait/issues/issue-99914.rs
 check-pass	impl-trait/lazy_subtyping_of_opaques.rs
 compile-fail	impl-trait/must_outlive_least_region_or_bound.rs
 check-pass	impl-trait/needs_least_region_or_bound.rs
@@ -1738,6 +1742,7 @@ run-pass	indexing/ref-array-indexing.rs
 compile-fail	inference/ambiguity-errors-single-diagnostic.rs
 run-pass	inference/auto-instantiate.rs
 check-pass	inference/bitwise-integer-inference-68951.rs
+compile-fail	inference/deref-suggestion.rs
 compile-fail	inference/erase-type-params-in-label.rs
 run-pass	inference/fnonce-closure-call.rs
 run-pass	inference/generic-type-inference-10436.rs
@@ -3453,6 +3458,7 @@ compile-fail	rfcs/rfc-2565-param-attrs/param-attrs-builtin-attrs.rs
 run-pass	runtime/deep_recursion.rs
 compile-fail	rust-2018/edition-lint-inter-outlives/edition-lint-infer-outlives-multispan.rs
 compile-fail	rust-2018/edition-lint-inter-outlives/edition-lint-infer-outlives.rs
+check-pass	rust-2018/edition-lint-inter-outlives/explicit-outlives-recursive-119228.rs
 check-pass	rust-2018/try-ident.rs
 check-pass	rust-2018/uniform-paths/ambiguity-nested.rs
 check-pass	rust-2018/uniform-paths/ambiguity.rs
@@ -3529,6 +3535,7 @@ check-pass	single-use-lifetime/two-uses-in-fn-argument-and-return.rs
 check-pass	single-use-lifetime/two-uses-in-fn-arguments.rs
 check-pass	single-use-lifetime/two-uses-in-inherent-impl-header.rs
 compile-fail	sized/ensure-overriding-bindings-in-pattern-with-ty-err-doesnt-ice.rs
+check-pass	sized/recursive-type-pass.rs
 run-pass	sized/sized-box-unsized-content.rs
 run-pass	sized/sized-reference-to-unsized.rs
 compile-fail	sized/unsized-binding.rs
@@ -3539,6 +3546,7 @@ compile-fail	span/drop-location-span-error-rust-2021-incompatible-closure-captur
 check-pass	span/issue-24690.rs
 compile-fail	span/issue-29595.rs
 compile-fail	span/issue-34264.rs
+compile-fail	span/issue-39018.rs
 compile-fail	span/issue-42234-unknown-receiver-type.rs
 compile-fail	span/issue-81800.rs
 compile-fail	span/lint-unused-unsafe.rs
@@ -3577,6 +3585,7 @@ check-pass	statics/nested_struct.rs
 run-pass	statics/static-methods-in-traits.rs
 check-pass	statics/static-mut-shared-parens.rs
 build-pass	statics/static-mut-unsafe-init.rs
+build-pass	statics/static-mut-with-assoc-type-field.rs
 compile-fail	statics/uninhabited-static.rs
 run-pass	std/issue-3563-3.rs
 compile-fail	stdlib-unit-tests/not-sync.rs
@@ -3838,6 +3847,7 @@ compile-fail	suggestions/suggest-assoc-fn-call-with-turbofish.rs
 compile-fail	suggestions/suggest-assoc-fn-call-without-receiver.rs
 compile-fail	suggestions/suggest-boxed-empty-block.rs
 compile-fail	suggestions/suggest-calling-fn-in-deref-issue-161564.rs
+compile-fail	suggestions/suggest-closure-return-type-1.rs
 compile-fail	suggestions/suggest-closure-return-type-2.rs
 compile-fail	suggestions/suggest-closure-return-type-3.rs
 compile-fail	suggestions/suggest-collect.rs
@@ -4214,6 +4224,7 @@ compile-fail	ufcs/ufcs-explicit-self-bad.rs
 compile-fail	ufcs/ufcs-qpath-self-mismatch.rs
 run-pass	unboxed-closures/issue-18652.rs
 run-pass	unboxed-closures/issue-18661.rs
+compile-fail	unboxed-closures/unboxed-closure-no-cyclic-sig.rs
 compile-fail	unboxed-closures/unboxed-closure-sugar-used-on-struct-1.rs
 compile-fail	unboxed-closures/unboxed-closure-sugar-used-on-struct-3.rs
 compile-fail	unboxed-closures/unboxed-closure-sugar-used-on-struct.rs

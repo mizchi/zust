@@ -163,7 +163,7 @@ def main():
     ap.add_argument("--json", default=os.path.join(ROOT, "out/rust_ui.json"))
     ap.add_argument("--results", default=os.path.join(ROOT, "out/rust_ui_results.txt"))
     ap.add_argument("--baseline", default=None, help="list of passing tests (kind<TAB>path) to compare against")
-    ap.add_argument("--check", action="store_true", help="with --baseline: exit 1 if a test in the baseline no longer passes")
+    ap.add_argument("--check", action="store_true", help="with --baseline: exit 1 if a test in the baseline no longer passes, or zustc crashes on any test")
     ap.add_argument("--write-baseline", action="store_true", help="with --baseline: write the passing tests to it")
     ap.add_argument("--bench-json", default=None, help="write pass rates in github-action-benchmark's customBiggerIsBetter format")
     a = ap.parse_args()
@@ -245,6 +245,12 @@ def main():
             if new and a.check:
                 print("(newly passing tests: update the baseline with --write-baseline)")
             if lost and a.check:
+                status = 1
+            # (a compiler must not panic on any input: every crash fails the check)
+            crashes = sorted((k, os.path.relpath(p, ui)) for p, k, r in res if r == "crash")
+            for k, p in crashes:
+                print(f"crash: {k} {p}")
+            if crashes and a.check:
                 status = 1
     print(f"rust-lang/rust tests/ui at {TAG} ({COMMIT[:9]}), {out['seconds']} s")
     print("| kind | applicable | pass | fail | wrong line | crash | timeout | pass rate | not applicable |")

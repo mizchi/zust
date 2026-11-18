@@ -1425,7 +1425,8 @@ impl Cx<'_> {
         let (size, _) = self.prog.size_align(elem);
         // (定数の整数の配列 (`[0u8; 24]`): 値を並べた 8 byte ずつ書く)
         // (小さい配列は要素ごと: 要素の幅で読み書きするので、スロットの要素を変数にできる (SROA))
-        if let (Some(c), true) = (v.and_then(|v| self.iconst_of(v)), elem.is_int() && size <= 4 && size * n >= 8 && n > 16) {
+        // (大きいもの (256 byte を超える) はループ: `[0u8; 4_000_000_000]` を書き込みの列にしない)
+        if let (Some(c), true) = (v.and_then(|v| self.iconst_of(v)), elem.is_int() && size <= 4 && size * n >= 8 && n > 16 && (size as u64) * (n as u64) <= 256) {
             let mask = if size == 8 { u64::MAX } else { (1u64 << (size * 8)) - 1 };
             let mut pat = 0u64;
             for k in 0..(8 / size) {

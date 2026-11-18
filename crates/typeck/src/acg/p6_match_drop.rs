@@ -234,10 +234,12 @@ impl Cx<'_> {
         }
     }
 
-    pub(crate) fn field_place(p: Place, fty: Ty, off: u32) -> Place {
+    /// 構造体・列挙・タプルの値 p のフィールド (オフセット off、型 fty) の場所。p がメモリにない (パターンが値の型に
+    /// 合わない: `let Ok(0) = 42u8;`) なら型の不一致のエラー
+    pub(crate) fn field_place(p: Place, fty: Ty, off: u32) -> R<Place> {
         match p {
-            Place::Mem(a, o, _) => Place::Mem(a, o + off as i32, fty),
-            _ => unreachable!("aggregates always live in memory"),
+            Place::Mem(a, o, _) => Ok(Place::Mem(a, o + off as i32, fty)),
+            _ => err(SP, "mismatched types: this pattern does not match the type of the value"),
         }
     }
 
@@ -463,7 +465,7 @@ impl Cx<'_> {
                         };
                         for (fi, sub) in Self::tuple_fields(elems.iter(), fields.len(), SP).map_err(|m| self.at(path.pos, m))? {
                             let (_, fty, off) = fields[fi];
-                            self.pat_test(sub, Self::field_place(p, fty, off), fail)?;
+                            self.pat_test(sub, Self::field_place(p, fty, off)?, fail)?;
                         }
                         Ok(())
                     }
@@ -471,7 +473,7 @@ impl Cx<'_> {
                         let fields = self.tuple_pat_fields(p, elems.len(), SP)?;
                         for (fi, sub) in Self::tuple_fields(elems.iter(), fields.len(), SP)? {
                             let (_, fty, off) = fields[fi];
-                            self.pat_test(sub, Self::field_place(p, fty, off), fail)?;
+                            self.pat_test(sub, Self::field_place(p, fty, off)?, fail)?;
                         }
                         Ok(())
                     }
@@ -542,7 +544,7 @@ impl Cx<'_> {
             let Some(&(_, fty, off)) = fields.iter().find(|f| f.0 == *fid) else {
                 return err(SP, format!("no field `{fid}`"));
             };
-            out.push((fpat, Self::field_place(p, fty, off)));
+            out.push((fpat, Self::field_place(p, fty, off)?));
         }
         if !*has_rest && out.len() != fields.len() {
             return err(SP, "pattern does not mention all fields (add `..`)");
@@ -665,7 +667,7 @@ impl Cx<'_> {
                 };
                 for (fi, sub) in Self::tuple_fields(elems.iter(), fields.len(), SP).map_err(|m| self.at(path.pos, m))? {
                     let (_, fty, off) = fields[fi];
-                    self.pat_bind(sub, Self::field_place(p, fty, off), mode)?;
+                    self.pat_bind(sub, Self::field_place(p, fty, off)?, mode)?;
                 }
                 Ok(())
             }
@@ -674,7 +676,7 @@ impl Cx<'_> {
                 let fields = self.tuple_pat_fields(p, elems.len(), SP)?;
                 for (fi, sub) in Self::tuple_fields(elems.iter(), fields.len(), SP)? {
                     let (_, fty, off) = fields[fi];
-                    self.pat_bind(sub, Self::field_place(p, fty, off), mode)?;
+                    self.pat_bind(sub, Self::field_place(p, fty, off)?, mode)?;
                 }
                 Ok(())
             }

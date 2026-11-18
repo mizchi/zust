@@ -664,7 +664,8 @@ pub fn has_hole(prog: &Program, t: Ty) -> bool {
     match t {
         Ty::Param(i) => i == crate::program::HOLE,
         Ty::Ref(_, i) | Ty::Ptr(_, i) | Ty::Array(i, _) | Ty::Slice(i) | Ty::Box(i) => has_hole(prog, *i),
-        Ty::Struct(sid) => prog.structs[sid as usize].args.iter().any(|&a| has_hole(prog, a)),
+        // (`_` は型パラメータなので、型パラメータの残らないインスタンス (symbolic でない) には無い: 辿らない)
+        Ty::Struct(sid) => prog.structs[sid as usize].symbolic && prog.structs[sid as usize].args.iter().any(|&a| has_hole(prog, a)),
         _ => false,
     }
 }

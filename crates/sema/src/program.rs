@@ -79,6 +79,9 @@ pub struct StructDef {
     /// インスタンス (`Option<i64>`) なら元の定義と型引数
     pub base: Option<u32>,
     pub args: Vec<Ty>,
+    /// 型引数に型パラメータが残っているインスタンスか (has_param が引数を辿り直さないように: 入れ子のクロージャの
+    /// 型は共有された部分を持つので、辿り直すと段の数の指数になる)
+    pub symbolic: bool,
 }
 
 impl StructDef {
@@ -95,6 +98,7 @@ impl StructDef {
             generics: vec![],
             base: None,
             args: vec![],
+            symbolic: false,
         }
     }
 }
@@ -240,6 +244,8 @@ pub struct Program {
     pub closure_by: FxMap<(u32, u32), u32>,
     /// クロージャの (ジェネリックな) struct id → fn id
     pub closure_of_struct: FxMap<u32, u32>,
+    /// hash_ty のインスタンスごとの記憶 (入れ子のクロージャの型は同じ部分を共有するので、辿り直すと指数になる)
+    pub inst_keys: std::sync::Mutex<FxMap<u32, Key>>,
     /// `impl Drop for S` のある struct / enum (ジェネリックなら元の定義)
     pub drop_impls: crate::fxhash::FxSet<u32>,
     /// drop が要る型がありうるか (prelude に drop glue があるか。Box も Drop もなければ false)
@@ -472,6 +478,7 @@ impl Program {
             closures: FxMap::default(),
             closure_by: FxMap::default(),
             closure_of_struct: FxMap::default(),
+            inst_keys: Default::default(),
             drop_impls: Default::default(),
             has_drop: false,
             assocs: vec![],
@@ -1554,15 +1561,20 @@ impl Program {
         // 自分を (Box などの中に) 含む型 (`Node<T> { next: Option<Box<Node<T>>> }`): 作っている途中の
         // インスタンスがまた要求されたら、先に番号だけ取って返す (中身は外側が作り終えてから入れる)
         let key = (base, args.clone());
+        // (型引数が入れ子に増えていく再帰 (`struct A<T> { y: A<A<T>> }`) や、自分を含むクロージャは止まらない:
+        // rustc の再帰の上限と同じく、深すぎればエラー)
+        if INSTANTIATING.with(|v| v.borrow().len()) > 64 {
+            return Err(format!("reached the recursion limit while instantiating `{}`", self.structs[base as usize].name));
+        }
         let pending = INSTANTIATING.with(|v| {
             let mut v = v.borrow_mut();
             match v.iter_mut().find(|e| e.0 == key) {
                 Some(e) => Some(*e.1.get_or_insert_with(|| {
                     let b = &self.structs[base as usize];
-                    let names: Vec<String> = args.iter().map(|&t| self.tn(t)).collect();
-                    let mut d = StructDef::blank(format!("{}<{}>", b.name, names.join(", ")), b.is_enum);
+                    let mut d = StructDef::blank(self.inst_name(&b.name, &args), b.is_enum);
                     d.base = Some(base);
                     d.args = args.clone();
+                    d.symbolic = args.iter().any(|&t| self.has_param(t));
                     self.structs.push(d)
                 })),
                 None => {
@@ -1592,6 +1604,28 @@ impl Program {
         Ok(id)
     }
 
+    /// インスタンスの名前 `Name<A, B>` (タプルは `(A, B)`)。入れ子のクロージャの型 (`dup(dup(..))`) は名前が段ごとに倍に
+    /// なるので、長いもの (512 byte を超える) は先頭と全体のハッシュにする (名前はシンボルにも使うので、ハッシュで区別を残す)
+    fn inst_name(&self, base_name: &str, args: &[Ty]) -> String {
+        let names: Vec<String> = args.iter().map(|&t| self.tn(t)).collect();
+        let full = if base_name.starts_with("#tuple") {
+            if names.len() == 1 { format!("({},)", names[0]) } else { format!("({})", names.join(", ")) }
+        } else {
+            format!("{}<{}>", base_name, names.join(", "))
+        };
+        if full.len() <= 512 {
+            return full;
+        }
+        use std::hash::{Hash, Hasher};
+        let mut h = std::collections::hash_map::DefaultHasher::new();
+        full.hash(&mut h);
+        let mut cut = 200;
+        while !full.is_char_boundary(cut) {
+            cut -= 1;
+        }
+        format!("{}…#{:016x}>", &full[..cut], h.finish())
+    }
+
     fn instantiate_inner(&self, base: u32, args: Vec<Ty>) -> R<StructDef> {
         let b = &self.structs[base as usize];
         if b.generics.len() != args.len() {
@@ -1603,19 +1637,11 @@ impl Program {
             ));
         }
         let symbolic = args.iter().any(|&t| self.has_param(t));
-        let names: Vec<String> = args.iter().map(|&t| self.tn(t)).collect();
-        let name = if b.name.starts_with("#tuple") {
-            if names.len() == 1 {
-                format!("({},)", names[0])
-            } else {
-                format!("({})", names.join(", "))
-            }
-        } else {
-            format!("{}<{}>", b.name, names.join(", "))
-        };
+        let name = self.inst_name(&b.name, &args);
         let mut d = StructDef::blank(name, b.is_enum);
         d.base = Some(base);
         d.args = args.clone();
+        d.symbolic = symbolic;
         d.tag = b.tag;
         if !symbolic {
             if b.is_enum {
@@ -1653,6 +1679,8 @@ impl Program {
         let (mut off, mut align) = (0u32, 1u32);
         for (n, t) in fields {
             let (sz, al) = self.size_align(t);
+            // (まだレイアウトの決まっていない型 (作っている途中の再帰する型) は揃えが 0: 揃えは 1 以上)
+            let al = al.max(1);
             off = off.next_multiple_of(al);
             out.push((n, t, off));
             off += sz;
@@ -1676,8 +1704,8 @@ impl Program {
             palign = palign.max(al);
             laid.push(f);
         }
-        let poff = tag_size.next_multiple_of(palign);
-        let align = palign.max(tag_size);
+        let poff = tag_size.next_multiple_of(palign.max(1));
+        let align = palign.max(tag_size).max(1);
         let out = vs
             .into_iter()
             .zip(laid)
@@ -1699,10 +1727,7 @@ impl Program {
             Ty::Ref(_, i) | Ty::Ptr(_, i) | Ty::Array(i, _) | Ty::Slice(i) | Ty::Box(i) => {
                 self.has_param(*i)
             }
-            Ty::Struct(sid) => self.structs[sid as usize]
-                .args
-                .iter()
-                .any(|&a| self.has_param(a)),
+            Ty::Struct(sid) => self.structs[sid as usize].symbolic,
             Ty::Fn(f) => f.params.iter().chain([&f.ret]).any(|&a| self.has_param(a)),
             // 関連型は具体型ではない (型パラメータを含むときだけ現れる)
             Ty::Assoc(_) => true,
@@ -1730,7 +1755,8 @@ impl Program {
     /// 型パラメータに型引数を入れる
     pub fn subst(&self, t: Ty, args: &[Ty]) -> Ty {
         match t {
-            Ty::Param(i) => args[i as usize],
+            // (引数のない型パラメータ (`_` の印 HOLE など) はそのまま: 型推論・検査が後で扱う)
+            Ty::Param(i) => args.get(i as usize).copied().unwrap_or(t),
             Ty::Ref(m, i) => Ty::Ref(m, intern(self.subst(*i, args))),
             Ty::Ptr(m, i) => Ty::Ptr(m, intern(self.subst(*i, args))),
             Ty::Array(i, n) => {
@@ -2090,13 +2116,24 @@ impl Program {
                     // インスタンス: 元の定義の deep hash + 型引数
                     // (クロージャの struct は同じアイテムに複数あるので名前も入れる)
                     Some(b) => {
-                        h.add(&(103u8, self.structs[b as usize].deep, sd.args.len()));
-                        if self.closure_of_struct.contains_key(&b) {
-                            h.add(&self.structs[b as usize].name);
-                        }
-                        for &a in &sd.args {
-                            self.hash_ty(a, h);
-                        }
+                        let cached = self.inst_keys.lock().unwrap().get(&id).copied();
+                        let k = match cached {
+                            Some(k) => k,
+                            None => {
+                                let mut hi = KeyHasher::new();
+                                hi.add(&(103u8, self.structs[b as usize].deep, sd.args.len()));
+                                if self.closure_of_struct.contains_key(&b) {
+                                    hi.add(&self.structs[b as usize].name);
+                                }
+                                for &a in &sd.args {
+                                    self.hash_ty(a, &mut hi);
+                                }
+                                let k = hi.finish();
+                                self.inst_keys.lock().unwrap().insert(id, k);
+                                k
+                            }
+                        };
+                        h.add(&(103u8, k));
                     }
                     None => h.add(&(101u8, sd.deep)),
                 }
