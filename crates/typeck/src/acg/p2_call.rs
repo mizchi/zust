@@ -921,7 +921,7 @@ impl Cx<'_> {
         let sig0 = self.prog.sigs[id as usize].clone();
         let skip = recv.is_some() as usize;
         if sig0.params.len() != args.len() + skip {
-            return err(span, format!("expected {} arguments, found {}", sig0.params.len() - skip, args.len()));
+            return err(span, format!("expected {} arguments, found {}", sig0.params.len().saturating_sub(skip), args.len()));
         }
         // 実引数を先に評価する (ジェネリックなら型を見てから呼び先を決める)。
         // 型パラメータは turbofish → 前の引数の順に分かった分だけ、後の引数の期待型に使う
