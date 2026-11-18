@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795022401132,
+  "lastUpdate": 1795022403179,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -15382,6 +15382,70 @@ window.BENCHMARK_DATA = {
           {
             "name": "tests/ui compile-fail passing",
             "value": 2802,
+            "unit": "tests"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "committer": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "distinct": true,
+          "id": "3b5fd541720c03952702700d9ff79857402bc167",
+          "message": "`impl .. for dyn Trait`, formatting through `dyn Display` / `dyn Debug`\n\n- the parser takes bounds on a `dyn` self type (`impl dyn Tr + 'a`,\n  `impl X for dyn Tr + Send`); the methods belong to `__dyn_Tr` and are found\n  for receivers of that trait object type\n- checks on such impls: E0371 (the object type implements its own trait),\n  E0120 (Drop), E0321 (auto traits), `Self` in the self type\n- `{}` / `{:?}` of `&dyn Display`, `Box<dyn Debug>` and the like call the trait\n  object's `fmt`; the vtable entry for these two traits formats the value with\n  `{}` / `{:?}` (so `&0 as &dyn Display` works too)\n- E0592 across two impl blocks is reported at the first definition\n- tests/ui: run-pass 1336, check-pass 1073 (59.38%), compile-fail 2806\n\nAccepted compile-fail removals (passed only because `impl .. for dyn` was not\nparsed; they need dyn compatibility (E0038) or generic argument counts):\ndyn-compatibility/almost-supertrait-associated-type.rs,\ndyn-compatibility/ice-generics-of-crate-root-152335.rs,\nimpl-trait/in-trait/cycle-effective-visibilities-during-dyn-compatibility-check.rs,\ntraits/associated_type_bound/assoc-type-bounds-with-the-same-name-with-lacking-generic-arg-148121.rs\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-18T17:05:24Z",
+          "tree_id": "8067493bdd33253d0accc99b5c508e044ca303bb",
+          "url": "https://github.com/mizchi/zust/commit/3b5fd541720c03952702700d9ff79857402bc167"
+        },
+        "date": 1795022402672,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tests/ui run-pass pass rate",
+            "value": 55.37,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui run-pass passing",
+            "value": 1336,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui check-pass pass rate",
+            "value": 59.38,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui check-pass passing",
+            "value": 1073,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui build-pass pass rate",
+            "value": 57.04,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui build-pass passing",
+            "value": 77,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui compile-fail pass rate",
+            "value": 38.14,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui compile-fail passing",
+            "value": 2806,
             "unit": "tests"
           }
         ]
