@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795013384384,
+  "lastUpdate": 1795013386387,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -9693,6 +9693,85 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/mizchi/zust/commit/f0b3489bb54c296aa4dd2f116bf6e6bf4a8a21d9"
         },
         "date": 1795013064852,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "parity documentSymbol (名前の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity workspace/symbol (上位 20 の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity definition (行き先の一致)",
+            "value": 97.222,
+            "unit": "%"
+          },
+          {
+            "name": "parity hover (名前を含む)",
+            "value": 95,
+            "unit": "%"
+          },
+          {
+            "name": "parity references (数の一致)",
+            "value": 92.105,
+            "unit": "%"
+          },
+          {
+            "name": "parity documentHighlight (数の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity rename (書き換えの一致)",
+            "value": 90,
+            "unit": "%"
+          },
+          {
+            "name": "parity signatureHelp (名前・引数の数・今の引数の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity completion `x.\\|` (書いてある名前を含む)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity completion `na\\|me` (同)",
+            "value": 79.167,
+            "unit": "%"
+          },
+          {
+            "name": "parity 一致の平均",
+            "value": 95.349,
+            "unit": "%"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "committer": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "distinct": true,
+          "id": "415ab06e8fe9fbeec73279c10afc73d385a66ac2",
+          "message": "zustc: a program's own Map / Filter / Zip / Chain .. no longer collide with the prelude's iterator adapters\n\nWhen the program defines a type with such a name, the prelude's is renamed `__p_<name>` in the\nselected prelude text (only names no part of the compiler refers to by name).\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-18T14:45:59Z",
+          "tree_id": "092a9378e93f780f439fe9b75d68a63b68f8052c",
+          "url": "https://github.com/mizchi/zust/commit/415ab06e8fe9fbeec73279c10afc73d385a66ac2"
+        },
+        "date": 1795013385934,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
