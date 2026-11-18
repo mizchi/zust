@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1794998549978,
+  "lastUpdate": 1794998551719,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -3510,6 +3510,70 @@ window.BENCHMARK_DATA = {
           {
             "name": "tests/ui compile-fail passing",
             "value": 2298,
+            "unit": "tests"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "committer": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "distinct": true,
+          "id": "70569be92e121677fb5b86e427cc8db2b9006dcf",
+          "message": "zustc: borrow checking on the CFG acg emits (moves, uninitialized locals, loans, mutability)\n\nacg records, per minclif block, when a local is bound, read, moved, written, borrowed and\ngoes out of scope, plus the jumps between blocks. After a body is lowered, a backward\nliveness pass and a forward pass over moves and loans run on that CFG: a loan is live while\na live local may hold it (Polonius' loans flowing through origins, one origin per local),\nand an access that conflicts with a live loan, or touches a path that may be moved, is an\nerror. A location-insensitive pre-pass skips the dataflow when no error is possible.\n\n- E0382 / E0381 (use after move, uninitialized), E0499 / E0502 / E0503 / E0505 / E0506\n  (conflicts with a live loan), E0597 (dropped while borrowed), E0515 (returning a borrow\n  of a local), E0596 / E0594 / E0384 (mutation of a local not declared mut)\n- two-phase borrows for &mut self receivers; loans killed when the local they go through\n  is overwritten; struct update syntax and assignment evaluate in Rust's order\n- which arguments a call's result borrows from comes from the elision rules and named\n  lifetimes (SigSyn::ret_from); unknown signatures (closures, fn pointers) pass no loans on\n- tests/ui: compile-fail 31.2% -> 33.7% (borrowck 30 -> 123, nll 12 -> 31, moves 2 -> 16),\n  no regressions; check instructions on gen5000 +1.8% (ZUSTC_BORROWCK=0 turns it off)\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-18T10:31:03Z",
+          "tree_id": "677e7f7577564d6f756fec7a37159568579a7037",
+          "url": "https://github.com/mizchi/zust/commit/70569be92e121677fb5b86e427cc8db2b9006dcf"
+        },
+        "date": 1794998551252,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tests/ui run-pass pass rate",
+            "value": 46.42,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui run-pass passing",
+            "value": 1120,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui check-pass pass rate",
+            "value": 46.15,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui check-pass passing",
+            "value": 834,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui build-pass pass rate",
+            "value": 48.15,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui build-pass passing",
+            "value": 65,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui compile-fail pass rate",
+            "value": 33.7,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui compile-fail passing",
+            "value": 2480,
             "unit": "tests"
           }
         ]
