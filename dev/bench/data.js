@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795015385333,
+  "lastUpdate": 1795015387196,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -10614,6 +10614,85 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/mizchi/zust/commit/23aa0ee9cc0d2990ae7975eee5ddd0c81f722ea6"
         },
         "date": 1795014482543,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "parity documentSymbol (名前の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity workspace/symbol (上位 20 の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity definition (行き先の一致)",
+            "value": 97.222,
+            "unit": "%"
+          },
+          {
+            "name": "parity hover (名前を含む)",
+            "value": 95,
+            "unit": "%"
+          },
+          {
+            "name": "parity references (数の一致)",
+            "value": 92.105,
+            "unit": "%"
+          },
+          {
+            "name": "parity documentHighlight (数の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity rename (書き換えの一致)",
+            "value": 90,
+            "unit": "%"
+          },
+          {
+            "name": "parity signatureHelp (名前・引数の数・今の引数の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity completion `x.\\|` (書いてある名前を含む)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity completion `na\\|me` (同)",
+            "value": 79.167,
+            "unit": "%"
+          },
+          {
+            "name": "parity 一致の平均",
+            "value": 95.349,
+            "unit": "%"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "committer": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "distinct": true,
+          "id": "eb82f3c9a843e0a39251809847deaa99ee913944",
+          "message": "zustc parser: associated type bounds, higher-ranked types, GAT where clauses after the value, qualified GAT paths, C variadics\n\n- `Iterator<Item: Debug>` (read as `Item = impl Debug`); rejected inside `dyn`\n- `for<'a> fn(&'a u8)` / `for<'a> Fn(&'a T)` in type position (the binder is dropped);\n  `for<..> dyn` is an error\n- `type Item<'a> = &'a T where T: 'a;`, `<T as Tr>::Gat<'a>`\n- `extern \"C\" { fn printf(f: *const u8, ...); }`\n- tests/ui: run-pass 52.9%, check-pass 57.8%, build-pass 56.3%; 23 compile-fail tests that were\n  rejected only by these parse errors now need checks zustc does not have (well-formedness,\n  coherence, lifetime shadowing / E0261, impl vs trait where clauses, ABI of variadics)\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-18T15:14:50Z",
+          "tree_id": "3ecc4b94d8b856a1e49186c9f11bee3805d07944",
+          "url": "https://github.com/mizchi/zust/commit/eb82f3c9a843e0a39251809847deaa99ee913944"
+        },
+        "date": 1795015386686,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
