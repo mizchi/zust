@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795036296259,
+  "lastUpdate": 1795036298752,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -13840,6 +13840,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "lsp peak RSS",
             "value": 67.469,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "committer": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "distinct": true,
+          "id": "f077e7c44ef6f04613d66277ce88053eead5a0fa",
+          "message": "Prelude selection: per-item tables once, Fx hashing for the needed names\n\n- is_iterator_trait and gated_impl are computed once for all prelude items\n  (they rebuilt a Vec per impl item on every build); the set of needed names\n  uses Fx hashing instead of SipHash\n- a one-line program's build: 44.9 -> 42.7 M instr (-5%); gen1000 noop\n  141.5 -> 139.6 M (-1.3%), edit 134.8 -> 133.0 (-1.4%); gen5000 edit\n  623.7 -> 620.8 (-0.5%), noop 662.9 -> 663.8 (+0.1%), check unchanged;\n  caches unchanged; LSP ready 111 ms\n- against rustc -C incremental on gen1000: cold 7.0x, no-op 11x, edit 15x\n  faster. README and SUPPORTED.md (en + ja) updated.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-18T21:03:07Z",
+          "tree_id": "2817bf58577f7189a186031099500ba88d58dcc2",
+          "url": "https://github.com/mizchi/zust/commit/f077e7c44ef6f04613d66277ce88053eead5a0fa"
+        },
+        "date": 1795036298085,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "lsp definition p50",
+            "value": 0.59,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp hover p50",
+            "value": 0.539,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp completion p50",
+            "value": 1.109,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp references p50",
+            "value": 3.14,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp rename p50",
+            "value": 0.685,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp signatureHelp p50",
+            "value": 0.768,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp documentHighlight p50",
+            "value": 0.814,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp ready (startup to indexed)",
+            "value": 115.389,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp peak RSS",
+            "value": 67.355,
             "unit": "MiB"
           }
         ]
