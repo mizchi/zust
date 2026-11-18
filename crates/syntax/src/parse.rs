@@ -2246,13 +2246,14 @@ impl Parser {
                 self.i += 1;
                 let mut g = if self.is_punct("<") && !self.punct_at(1, ">") { self.generics()? } else { Generics { params: Vec::new(), preds: Vec::new() } };
                 let neg = self.eat_punct("!");
-                let first = self.ty_no_bounds()?;
+                // (`impl dyn Tr + 'a { .. }` / `impl X for dyn Tr + Send`: the self type takes bounds)
+                let first = if self.is_ident("dyn") { self.ty()? } else { self.ty_no_bounds()? };
                 let (tr, self_ty) = if self.eat_ident("for") {
                     let p = match first {
                         Ty::Path(None, p) => p,
                         _ => return Err(self.err("expected a trait path")),
                     };
-                    (Some((neg, p)), self.ty_no_bounds()?)
+                    (Some((neg, p)), if self.is_ident("dyn") { self.ty()? } else { self.ty_no_bounds()? })
                 } else {
                     (None, first)
                 };

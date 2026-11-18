@@ -1075,6 +1075,32 @@ pub fn summarize(item: &Item, owner: Option<&Owner>) -> R<Summary> {
                 sm.impl_self_ty = Some(tysyn(self_ty, None)?);
                 return Ok(sm);
             }
+            // (`impl dyn Tr + 'a { .. }` / `impl X for dyn Tr`: the methods of `__dyn`)
+            if let PTy::Dyn(bs) = self_path {
+                let principal = bs.iter().find_map(|b| match b {
+                    Bound::Trait(_, p) => p.segs.last().map(|s| s.name.clone()),
+                    _ => None,
+                });
+                let mut names = vec![];
+                ty_names(self_path, &mut names);
+                if names.iter().any(|n| n == "Self") {
+                    return err("`Self` is not valid in the self type of an impl block");
+                }
+                if let (Some(t), Some(p)) = (sm.impl_trait.as_deref(), principal.as_deref()) {
+                    if t == p {
+                        return Err(format!("the object type `dyn {p}` automatically implements the trait `{t}` (E0371)"));
+                    }
+                    if t == "Drop" {
+                        return err("the `Drop` trait may only be implemented for local structs, enums, and unions (E0120)");
+                    }
+                    if matches!(t, "Send" | "Sync" | "Unpin") {
+                        return Err(format!("cross-crate traits with a default impl, like `{t}`, can only be implemented for a struct/enum type, not `dyn {p}` (E0321)"));
+                    }
+                }
+                sm.impl_self = Some(format!("__dyn_{}", principal.unwrap_or_default()));
+                sm.impl_self_ty = Some(tysyn(self_ty, None)?);
+                return Ok(sm);
+            }
             let PTy::Path(None, tp) = self_path else {
                 return err("unsupported impl self type");
             };

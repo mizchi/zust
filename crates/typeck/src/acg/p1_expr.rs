@@ -1308,6 +1308,16 @@ impl Cx<'_> {
                     return err(span, format!("`{}` cannot be called through `dyn` (it needs `&self`)", self.prog.names[d as usize]));
                 };
                 let recv = [Ty::Ref(*m, intern(t))];
+                // (`&0 as &dyn Display`: a type formatted by the compiler itself goes through a prelude shim that
+                // formats it with `{}` / `{:?}`)
+                if matches!(tr, "Display" | "Debug") {
+                    let shim = if tr == "Display" { "__exr_dyn_display" } else { "__exr_dyn_debug" };
+                    if let Some(&sid) = self.prog.index.get(shim) {
+                        let (fid, _) = self.resolve_call(sid, &recv, vec![Some(t)], None, span)?;
+                        fns.push(fid);
+                        continue;
+                    }
+                }
                 let sol = vec![None; ds.generics.len()];
                 let (mut fid, _) = self.resolve_call(d, &recv, sol, None, span)?;
                 // ジェネリックな impl (`impl<T> Tr for W<T>`) のメソッドはさらにインスタンス化する

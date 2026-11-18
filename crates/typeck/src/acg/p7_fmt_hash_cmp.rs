@@ -254,6 +254,7 @@ impl Cx<'_> {
             Ty::Unit => debug,
             Ty::Ref(_, i) | Ty::Box(i) => self.fmt_ok(*i, debug),
             Ty::Array(e, _) | Ty::Slice(e) => debug && self.fmt_ok(*e, debug),
+            Ty::Dyn(s) => dyn_has_fmt(s, debug),
             Ty::Struct(sid) => {
                 let b = self.prog.base_of(sid);
                 let tr = if debug { "Debug" } else { "Display" };
@@ -504,6 +505,28 @@ impl Cx<'_> {
                             self.call_named("__exr_fmt_exp_int", vec![Ty::Unit], &[(f, fref), (mag, Ty::U128), (neg, Ty::Bool), (up, Ty::Bool)], span)?;
                         }
                         continue;
+                    }
+                    // (`&dyn Display` / `Box<dyn Debug>`: the trait object's own `fmt`)
+                    let (mut dv, mut dt) = (v, t);
+                    // (dv is the address of a value of type dt; a fat pointer's value is its (data, vtable) pair's
+                    // address, so `&Box<dyn ..>` is loaded once to reach the pair)
+                    while let Ty::Ref(_, i @ (Ty::Ref(..) | Ty::Box(_))) = dt {
+                        dv = self.b.ins().load(PTR, mf(), dv, 0);
+                        dt = *i;
+                    }
+                    if let Ty::Ref(_, Ty::Dyn(s)) | Ty::Box(Ty::Dyn(s)) = dt {
+                        if dyn_has_fmt(s, *debug) {
+                            self.scopes.push(vec![]);
+                            // (seen as `&dyn ..`: a Box is not dropped here)
+                            self.bind("__exr_dv".into(), Ty::Ref(false, intern(Ty::Dyn(s))), Some(dv));
+                            self.bind("__exr_df".into(), fref, Some(f));
+                            let e = crate::parse::parse_expr("{ let _ = __exr_dv.fmt(__exr_df); }")?;
+                            let e = self.keep_expr(e);
+                            let r = self.expr(e, None);
+                            self.scopes.pop();
+                            r?;
+                            continue;
+                        }
                     }
                     let g = if *debug { "__exr_debug" } else { "__exr_display" };
                     self.call_named(g, vec![t], &[(v, Ty::Ref(false, intern(t))), (f, fref)], span)?;
@@ -1299,3 +1322,9 @@ impl Cx<'_> {
     }
 }
 
+
+/// The trait object type `s` (`Display`, `fmt::Debug + Send` ..) has the formatting trait's `fmt`
+fn dyn_has_fmt(s: &str, debug: bool) -> bool {
+    let want = if debug { "Debug" } else { "Display" };
+    s.split('+').any(|p| p.trim().rsplit("::").next() == Some(want))
+}

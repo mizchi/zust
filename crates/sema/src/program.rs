@@ -716,7 +716,12 @@ impl Program {
                 let mut sym_suffix = String::new();
                 let name = &if let Some(&prev) = p.index.get(name) {
                     if ss.impl_trait.is_none() || p.sigs[prev as usize].impl_trait.is_none() {
-                        return Err(format!("{}:1: duplicate definition of `{name}`", it.line));
+                        // (in two impl blocks, E0592 is reported at the first definition)
+                        let line = match p.item_of.get(prev as usize).copied().flatten().map(|k| &items[k as usize]) {
+                            Some(pit) if matches!((pit.kind, it.kind), (crate::lexer::ItemKind::ImplMember(a), crate::lexer::ItemKind::ImplMember(b)) if a != b) => pit.line,
+                            _ => it.line,
+                        };
+                        return Err(format!("{line}:1: duplicate definition of `{name}`"));
                     }
                     let k = p.overloads.entry(name.clone()).or_insert_with(|| vec![prev]);
                     k.push(p.names.len() as u32);
@@ -750,7 +755,7 @@ impl Program {
                 };
                 let mut blanket = false;
                 let impl_of = match &ss.impl_of {
-                    Some(n) if Ty::prim(n).is_some() || n == "__array" || n == "__slice" || n == "str" => None,
+                    Some(n) if Ty::prim(n).is_some() || n == "__array" || n == "__slice" || n.starts_with("__dyn_") || n == "str" => None,
                     Some(n) => match p.struct_index.get(n).copied().or_else(|| {
                         n.strip_prefix("#tuple").and_then(|k| k.parse().ok()).map(|k| p.tuple_base(k))
                     }).as_ref() {
@@ -867,7 +872,7 @@ impl Program {
                 continue;
             };
             // (右辺の型を持つ比較の impl と、配列・スライスへの impl は、`==` が関数を直接選ぶので数えない)
-            if tr.starts_with("PartialEq<") || tr.starts_with("PartialOrd<") || sn == "__array" || sn == "__slice" {
+            if tr.starts_with("PartialEq<") || tr.starts_with("PartialOrd<") || sn == "__array" || sn == "__slice" || sn.starts_with("__dyn_") {
                 // (`impl BufRead for &[u8]`: 境界を満たすかのために覚える)
                 if sn == "__slice" && matches!(sm.impl_self_ty, Some(TySyn::Ref(false, _))) && !tr.contains('<') {
                     p.ref_slice_traits.insert(tr.clone());
@@ -1240,6 +1245,14 @@ impl Program {
             Ty::Array(..) => Some("__array"),
             _ => None,
         };
+        // (`impl dyn Tr { fn m(&self) }`: `__dyn_Tr::m`)
+        if let Ty::Dyn(s) = t {
+            let p = s.split('+').next().unwrap_or("").trim();
+            let p = p.split('<').next().unwrap_or(p).rsplit("::").next().unwrap_or(p);
+            if let Some(&id) = self.index.get(&format!("__dyn_{p}::{name}")) {
+                return Some(id);
+            }
+        }
         if let Some(&id) = base.and_then(|g| self.index.get(&format!("{g}::{name}"))) {
             // (`impl Tr for [u8; 1]`, `.. for [u8; 2]` ..: 同じ名前の impl が並ぶなら self の型が合うもの)
             if let Some(ids) = self.overloads.get(&self.names[id as usize]) {

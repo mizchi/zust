@@ -989,6 +989,9 @@ pub fn select_with(user_src: &str, user_items: &[SrcItem], cache: &mut SelectCac
     }
     // (the one-thread mpsc channel is a shared queue)
     // (ManuallyDrop is used through Deref: `m.0`, `*m`)
+    if sc.has("dyn") && (sc.has("Display") || sc.has("Debug")) {
+        need.extend(["__exr_dyn_display", "__exr_dyn_debug"]);
+    }
     if sc.has("ManuallyDrop") {
         need.extend(["Deref", "deref", "deref_mut"]);
     }

@@ -3389,6 +3389,14 @@ pub trait Display {
     fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError>;
 }
 
+// (`&0 as &dyn Display`: the vtable entry for a type the compiler formats itself)
+fn __exr_dyn_display<T: Display>(x: &T, f: &mut Formatter) -> Result<(), __FmtError> {
+    write!(f, "{}", x)
+}
+fn __exr_dyn_debug<T: Debug>(x: &T, f: &mut Formatter) -> Result<(), __FmtError> {
+    write!(f, "{:?}", x)
+}
+
 pub trait Debug {
     fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError>;
 }
