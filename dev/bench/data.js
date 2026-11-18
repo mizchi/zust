@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795015878041,
+  "lastUpdate": 1795017066161,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -5882,6 +5882,165 @@ window.BENCHMARK_DATA = {
           {
             "name": "rt/strings run (-O)",
             "value": 41.568,
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "committer": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "distinct": true,
+          "id": "e3bf32322b8d9dc702a88d989cbc3553579942b1",
+          "message": "Prelude ManuallyDrop, NonNull and UnsafeCell; reads through Deref borrow shared\n\n- prelude: ManuallyDrop<T> (no drop glue), NonNull<T>, UnsafeCell<T>\n- a place reached through an acg-made `deref_mut` is a shared borrow for the\n  borrow checker unless the place is written or borrowed `&mut`\n- tests/ui: run-pass 1281, check-pass 1051, compile-fail 2810\n\nAccepted compile-fail removals (passed only because UnsafeCell / ManuallyDrop\nwere unknown; they need const-eval checks):\nconsts/promoted_const_call3.rs, consts/refs-to-cell-in-final.rs\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-18T15:46:21Z",
+          "tree_id": "491135e92ed925fc6188540c026bbc8faab4bd4d",
+          "url": "https://github.com/mizchi/zust/commit/e3bf32322b8d9dc702a88d989cbc3553579942b1"
+        },
+        "date": 1795017065674,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "gen1000 build cold",
+            "value": 154.711,
+            "unit": "ms"
+          },
+          {
+            "name": "gen1000 build noop",
+            "value": 18.803,
+            "unit": "ms"
+          },
+          {
+            "name": "gen1000 build edit 1 fn",
+            "value": 25.097,
+            "unit": "ms"
+          },
+          {
+            "name": "gen1000 check",
+            "value": 122.764,
+            "unit": "ms"
+          },
+          {
+            "name": "gen1000 build cold peak RSS",
+            "value": 17.684,
+            "unit": "MiB"
+          },
+          {
+            "name": "gen1000 binary",
+            "value": 323.977,
+            "unit": "KiB"
+          },
+          {
+            "name": "gen1000 cache",
+            "value": 387.205,
+            "unit": "KiB"
+          },
+          {
+            "name": "gen1000 build noop instructions",
+            "value": 145.718,
+            "unit": "M instr"
+          },
+          {
+            "name": "gen1000 build edit 1 fn instructions",
+            "value": 138.878,
+            "unit": "M instr"
+          },
+          {
+            "name": "gen1000 check instructions",
+            "value": 794.471,
+            "unit": "M instr"
+          },
+          {
+            "name": "gen5000 build cold",
+            "value": 686.952,
+            "unit": "ms"
+          },
+          {
+            "name": "gen5000 build noop",
+            "value": 81.348,
+            "unit": "ms"
+          },
+          {
+            "name": "gen5000 build edit 1 fn",
+            "value": 89.65,
+            "unit": "ms"
+          },
+          {
+            "name": "gen5000 check",
+            "value": 593.719,
+            "unit": "ms"
+          },
+          {
+            "name": "gen5000 build cold peak RSS",
+            "value": 54.453,
+            "unit": "MiB"
+          },
+          {
+            "name": "gen5000 binary",
+            "value": 1558.336,
+            "unit": "KiB"
+          },
+          {
+            "name": "gen5000 cache",
+            "value": 1902.83,
+            "unit": "KiB"
+          },
+          {
+            "name": "gen5000 build noop instructions",
+            "value": 688.375,
+            "unit": "M instr"
+          },
+          {
+            "name": "gen5000 build edit 1 fn instructions",
+            "value": 647.5,
+            "unit": "M instr"
+          },
+          {
+            "name": "gen5000 check instructions",
+            "value": 3912.571,
+            "unit": "M instr"
+          },
+          {
+            "name": "rt/fib run (-O)",
+            "value": 72.446,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/hashmap run (-O)",
+            "value": 110.496,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/matmul run (-O)",
+            "value": 45.261,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/nbody run (-O)",
+            "value": 88.784,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/sieve run (-O)",
+            "value": 91.296,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/sort run (-O)",
+            "value": 233.841,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/strings run (-O)",
+            "value": 73.841,
             "unit": "ms"
           }
         ]
