@@ -2632,6 +2632,72 @@ impl<I: Iterator> Iterator for Take<I> {
     }
 }
 
+// `std::iter::repeat` / `once` / `empty` / `repeat_with` / `successors`
+pub struct __IterRepeat<T> {
+    v: T,
+}
+// (no `T: Clone` on the impl: the bound is checked where `repeat` is called)
+impl<T> Iterator for __IterRepeat<T> {
+    type Item = T;
+    fn next(&mut self) -> Option<T> {
+        Some(self.v.clone())
+    }
+}
+pub fn __core_repeat<T: Clone>(v: T) -> __IterRepeat<T> {
+    __IterRepeat { v: v }
+}
+pub struct __IterOnce<T> {
+    v: Option<T>,
+}
+impl<T> Iterator for __IterOnce<T> {
+    type Item = T;
+    fn next(&mut self) -> Option<T> {
+        self.v.take()
+    }
+}
+pub fn __core_once<T>(v: T) -> __IterOnce<T> {
+    __IterOnce { v: Some(v) }
+}
+pub struct __IterEmpty<T> {
+    _p: PhantomData<T>,
+}
+impl<T> Iterator for __IterEmpty<T> {
+    type Item = T;
+    fn next(&mut self) -> Option<T> {
+        None
+    }
+}
+pub fn __core_empty<T>() -> __IterEmpty<T> {
+    __IterEmpty { _p: PhantomData }
+}
+pub struct __IterRepeatWith<F> {
+    f: F,
+}
+impl<T, F: FnMut() -> T> Iterator for __IterRepeatWith<F> {
+    type Item = T;
+    fn next(&mut self) -> Option<T> {
+        Some((self.f)())
+    }
+}
+pub fn __core_repeat_with<T, F: FnMut() -> T>(f: F) -> __IterRepeatWith<F> {
+    __IterRepeatWith { f: f }
+}
+pub struct __IterSuccessors<T, F> {
+    next: Option<T>,
+    f: F,
+}
+impl<T, F: FnMut(&T) -> Option<T>> Iterator for __IterSuccessors<T, F> {
+    type Item = T;
+    fn next(&mut self) -> Option<T> {
+        let cur = self.next.take()?;
+        self.next = (self.f)(&cur);
+        Some(cur)
+    }
+}
+pub fn __core_successors<T, F: FnMut(&T) -> Option<T>>(first: Option<T>, f: F) -> __IterSuccessors<T, F> {
+    __IterSuccessors { next: first, f: f }
+}
+
 pub struct Skip<I> {
     iter: I,
     n: usize,

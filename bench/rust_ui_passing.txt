@@ -1493,6 +1493,7 @@ check-pass	dropck/constrained_by_assoc_type_equality.rs
 compile-fail	dropck/drop-with-active-borrows-1.rs
 run-pass	dropck/dropck-boxed-self-referencial-fnmut.rs
 run-pass	dropck/dropck-empty-array.rs
+run-pass	dropck/dropck-resolves-associated-type-in-field.rs
 run-pass	dropck/dropck-type-in-dyn-fn-param.rs
 compile-fail	dropck/dropck-union.rs
 run-pass	dropck/dropck_fn_type.rs
@@ -1835,6 +1836,8 @@ compile-fail	for-loop-while/for-loop-diagnostic-span.rs
 run-pass	for-loop-while/for-loop-goofiness.rs
 run-pass	for-loop-while/for-loop-has-unit-body.rs
 run-pass	for-loop-while/for-loop-into-iterator.rs
+run-pass	for-loop-while/for-loop-lifetime-of-unbound-values.rs
+run-pass	for-loop-while/for-loop-mut-ref-element.rs
 run-pass	for-loop-while/for-loop-no-std.rs
 run-pass	for-loop-while/for-loop-panic.rs
 run-pass	for-loop-while/for-loop-unconstrained-element-type-i32-fallback.rs
@@ -2077,6 +2080,7 @@ check-pass	impl-trait/explicit-generic-args-with-impl-trait/const-args.rs
 compile-fail	impl-trait/explicit-generic-args-with-impl-trait/explicit-generic-args-for-impl.rs
 compile-fail	impl-trait/explicit-generic-args-with-impl-trait/not-enough-args.rs
 compile-fail	impl-trait/extra-impl-in-trait-impl.rs
+check-pass	impl-trait/impl-subtyper.rs
 compile-fail	impl-trait/impl-trait-in-generic-param.rs
 check-pass	impl-trait/in-ctfe/fully_monomorphic_const_eval.rs
 check-pass	impl-trait/in-ctfe/match-arm-exhaustive.rs
@@ -2100,6 +2104,7 @@ check-pass	impl-trait/issues/issue-100187.rs
 compile-fail	impl-trait/issues/issue-102605.rs
 compile-fail	impl-trait/issues/issue-103181-2.rs
 compile-fail	impl-trait/issues/issue-21659-show-relevant-trait-impls-3.rs
+check-pass	impl-trait/issues/issue-42479.rs
 check-pass	impl-trait/issues/issue-49376.rs
 check-pass	impl-trait/issues/issue-49556.rs
 compile-fail	impl-trait/issues/issue-54966.rs
@@ -2111,6 +2116,7 @@ compile-fail	impl-trait/issues/issue-84073.rs
 compile-fail	impl-trait/issues/issue-86642.rs
 compile-fail	impl-trait/issues/issue-99914.rs
 check-pass	impl-trait/lazy_subtyping_of_opaques.rs
+check-pass	impl-trait/mapping-duplicated-lifetimes-issue-114597.rs
 check-pass	impl-trait/member-constraints/placeholders_lift_to_static.rs
 check-pass	impl-trait/multiple-lifetimes/inverse-bounds.rs
 compile-fail	impl-trait/must_outlive_least_region_or_bound.rs
@@ -2318,6 +2324,7 @@ compile-fail	iterators/issue-28098.rs
 build-pass	iterators/issue-58952-filter-type-length.rs
 run-pass	iterators/iter-cloned-type-inference.rs
 run-pass	iterators/iter-range.rs
+compile-fail	iterators/iterator-does-not-need-into-iter.rs
 compile-fail	iterators/vec-on-unimplemented.rs
 compile-fail	keyword/extern/keyword-extern-as-identifier-expr.rs
 compile-fail	keyword/extern/keyword-extern-as-identifier-type.rs
@@ -3873,6 +3880,7 @@ run-pass	process-termination/process-termination-simple.rs
 run-pass	process/windows-exit-code-still-active.rs
 run-pass	ptr_ops/ptr-swap-basic.rs
 run-pass	ptr_ops/ptr-swap-overlapping-regions.rs
+run-pass	ptr_ops/ptr-write-bool-representation.rs
 run-pass	ptr_ops/raw-pointer-type-basic.rs
 check-pass	pub/issue-33174-restricted-type-in-public-interface.rs
 compile-fail	pub/pub-ident-fn-2.rs
@@ -4572,7 +4580,6 @@ compile-fail	suggestions/js-style-comparison-op-separate-eq-token.rs
 compile-fail	suggestions/js-style-comparison-op.rs
 compile-fail	suggestions/let-binding-init-expr-as-ty.rs
 compile-fail	suggestions/let-binding-suggest-issue-133713.rs
-compile-fail	suggestions/lifetimes/explicit-lifetime-suggestion-in-proper-span-issue-121267.rs
 compile-fail	suggestions/many-type-ascription.rs
 compile-fail	suggestions/match-with-different-arm-types-as-stmt-instead-of-expr.rs
 compile-fail	suggestions/method-access-to-range-literal-typo.rs

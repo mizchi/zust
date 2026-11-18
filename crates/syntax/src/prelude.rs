@@ -989,6 +989,17 @@ pub fn select_with(user_src: &str, user_items: &[SrcItem], cache: &mut SelectCac
     }
     // (the one-thread mpsc channel is a shared queue)
     // (ManuallyDrop is used through Deref: `m.0`, `*m`)
+    // (`iter::repeat(x).take(n)`: the iterator these return needs the trait, even with no `next` written)
+    // (`ptr::write(p, v)` / `ptr::read(p)`: `write` / `read` alone are not looked up as functions)
+    for (pat, n) in [("ptr::write(", "write"), ("ptr::read(", "read"), ("drop_in_place(", "drop_in_place")] {
+        if sc.has(pat) {
+            need.insert(n);
+        }
+    }
+    // (only with `iter::` written: `is_empty` / `call_once` are not these)
+    if sc.has("iter::") && (sc.has("repeat") || sc.has("once") || sc.has("empty") || sc.has("successors")) {
+        need.extend(["Iterator", "next"]);
+    }
     if sc.has("dyn") && (sc.has("Display") || sc.has("Debug")) {
         need.extend(["__exr_dyn_display", "__exr_dyn_debug"]);
     }

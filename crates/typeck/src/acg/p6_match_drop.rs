@@ -301,6 +301,9 @@ impl Cx<'_> {
         if sd.variants.len() == 1 {
             return Ok(()); // バリアントが 1 つなら判定不要
         }
+        if vi >= sd.variants.len() {
+            return err(span, format!("internal: `{}` has no variant {vi}", sd.name));
+        }
         let (tag, discr) = (sd.tag, sd.variants[vi].discr);
         let Place::Mem(a, o, _) = p else {
             unreachable!()
