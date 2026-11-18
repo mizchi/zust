@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795033961072,
+  "lastUpdate": 1795033963197,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -17368,6 +17368,85 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/mizchi/zust/commit/4d210d285de78c6b95607d76d5a2382a5b69f223"
         },
         "date": 1795033305744,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "parity documentSymbol (名前の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity workspace/symbol (上位 20 の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity definition (行き先の一致)",
+            "value": 97.222,
+            "unit": "%"
+          },
+          {
+            "name": "parity hover (名前を含む)",
+            "value": 95,
+            "unit": "%"
+          },
+          {
+            "name": "parity references (数の一致)",
+            "value": 92.105,
+            "unit": "%"
+          },
+          {
+            "name": "parity documentHighlight (数の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity rename (書き換えの一致)",
+            "value": 90,
+            "unit": "%"
+          },
+          {
+            "name": "parity signatureHelp (名前・引数の数・今の引数の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity completion `x.\\|` (書いてある名前を含む)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity completion `na\\|me` (同)",
+            "value": 79.167,
+            "unit": "%"
+          },
+          {
+            "name": "parity 一致の平均",
+            "value": 95.349,
+            "unit": "%"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "committer": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "distinct": true,
+          "id": "441d0c265d2e3ca97428cbdc6ef9447b7b27c298",
+          "message": "Type inference sees the arguments of assert_eq! / assert_ne!\n\n- both sides are inferred and recorded by position for the code generator\n  (`assert_eq!(6, (0..3).map(|i| x[i]).sum::<u64>())`: `i` is a usize from the\n  index); the two sides are unified unless both are calls (a generic call's\n  result with a type from an associated type would take the other call's\n  integer default)\n- tests/ui: run-pass 1400 (58.0%)\n\nKPIs (gen5000): noop 661.4 M instr, edit 622.8, check 3893.5, cache\nunchanged; LSP ready 114 ms. Against rustc -C incremental on gen1000: cold\n5.1x, no-op 12x, edit 14x faster. README and SUPPORTED.md (en + ja) updated.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-18T20:29:01Z",
+          "tree_id": "9755ac9318cdea53b9193d80977e35ef0592b738",
+          "url": "https://github.com/mizchi/zust/commit/441d0c265d2e3ca97428cbdc6ef9447b7b27c298"
+        },
+        "date": 1795033962837,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
