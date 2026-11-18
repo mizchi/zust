@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795013061787,
+  "lastUpdate": 1795013063388,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -7000,6 +7000,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "lsp peak RSS",
             "value": 66.445,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "committer": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "distinct": true,
+          "id": "f0b3489bb54c296aa4dd2f116bf6e6bf4a8a21d9",
+          "message": "zustc: Send / Sync as auto traits\n\nA type is Send unless it holds an Rc or a raw pointer, and Sync unless it also holds a Cell /\nRefCell; `unsafe impl Send` counts; the prelude's own types are judged by their arguments.\ntests/ui: run-pass 52.7%, check-pass 56.8%; three compile-fail tests that were rejected only\nbecause Send was never satisfied now need async / recursion-limit checks.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-18T14:39:36Z",
+          "tree_id": "8ed04fb77a8a7eceec7652e5cedd02d1c7477c10",
+          "url": "https://github.com/mizchi/zust/commit/f0b3489bb54c296aa4dd2f116bf6e6bf4a8a21d9"
+        },
+        "date": 1795013063159,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "lsp definition p50",
+            "value": 0.589,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp hover p50",
+            "value": 0.529,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp completion p50",
+            "value": 1.218,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp references p50",
+            "value": 3.044,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp rename p50",
+            "value": 0.707,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp signatureHelp p50",
+            "value": 0.81,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp documentHighlight p50",
+            "value": 0.886,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp ready (startup to indexed)",
+            "value": 121.989,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp peak RSS",
+            "value": 66.461,
             "unit": "MiB"
           }
         ]
