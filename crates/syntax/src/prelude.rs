@@ -935,7 +935,8 @@ pub fn select_with(user_src: &str, user_items: &[SrcItem], cache: &mut SelectCac
         need.extend(["eprintln", "Debug", "__exr_eprint"]);
     }
     // (the one-thread mpsc channel is a shared queue)
-    if sc.has("channel") || sc.has("__Sndr") || sc.has("__Rcvr__") || sc.has("__SyncSndr") {
+    // (one scan: a program using the channel imports or names `mpsc`)
+    if sc.has("mpsc") {
         need.extend(["__core_channel", "__core_sync_channel", "__Sndr", "__SyncSndr", "__Rcvr__", "__RecvIter", "Rc", "RefCell", "VecDeque", "borrow_mut", "push_back", "pop_front", "clone", "Option", "Result", "Iterator", "next", "Deref", "deref", "new"]);
     }
     // 標準入出力

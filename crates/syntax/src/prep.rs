@@ -687,7 +687,10 @@ const STD_RENAMES: &[(&str, &str, &str)] = &[
 /// Rename them where they come from that module: `module::Name`, or `Name` imported by a `use` of that module (and
 /// neither imported from elsewhere nor defined in the file)
 pub fn std_renames(src: &str) -> Option<String> {
-    if !STD_RENAMES.iter().any(|r| src.contains(r.0)) {
+    // (each module name is looked for once: this runs on every build)
+    let has_atomic = src.contains("atomic");
+    let has_mpsc = src.contains("mpsc");
+    if !has_atomic && !has_mpsc {
         return None;
     }
     let b = src.as_bytes();
@@ -696,7 +699,7 @@ pub fn std_renames(src: &str) -> Option<String> {
     let mut out = src.to_string();
     let mut changed = false;
     for &(m, name, to) in STD_RENAMES {
-        if !src.contains(m) || !src.contains(name) {
+        if !(if m == "atomic" { has_atomic } else { has_mpsc }) || !src.contains(name) {
             continue;
         }
         let (mut imported, mut other) = (false, false);
