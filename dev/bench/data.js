@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795040760132,
+  "lastUpdate": 1795040762033,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -14980,6 +14980,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "lsp peak RSS",
             "value": 67.852,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "committer": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "distinct": true,
+          "id": "9bd52971c4495a073fd139a6141d86196d5acf23",
+          "message": "Let user code redefine more std type names (Mutex, Command, Peekable, PathBuf ..)\n\nThe prelude now renames these on a clash, as it already did for Map, Filter\nand the other iterator adapters, instead of reporting a duplicate definition.\ntests/ui: 3 more pass, no regressions. KPIs unchanged within noise.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-18T22:08:11Z",
+          "tree_id": "8e341069c2f5aa1b6dfdf444f5992321f0cfbb68",
+          "url": "https://github.com/mizchi/zust/commit/9bd52971c4495a073fd139a6141d86196d5acf23"
+        },
+        "date": 1795040761595,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "lsp definition p50",
+            "value": 0.419,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp hover p50",
+            "value": 0.352,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp completion p50",
+            "value": 0.858,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp references p50",
+            "value": 9.708,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp rename p50",
+            "value": 0.436,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp signatureHelp p50",
+            "value": 0.732,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp documentHighlight p50",
+            "value": 0.823,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp ready (startup to indexed)",
+            "value": 97.093,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp peak RSS",
+            "value": 67.961,
             "unit": "MiB"
           }
         ]
