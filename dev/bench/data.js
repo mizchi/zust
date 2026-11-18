@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1794995421483,
+  "lastUpdate": 1794998546379,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -1589,6 +1589,165 @@ window.BENCHMARK_DATA = {
           {
             "name": "rt/strings run (-O)",
             "value": 73.951,
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "committer": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "distinct": true,
+          "id": "70569be92e121677fb5b86e427cc8db2b9006dcf",
+          "message": "zustc: borrow checking on the CFG acg emits (moves, uninitialized locals, loans, mutability)\n\nacg records, per minclif block, when a local is bound, read, moved, written, borrowed and\ngoes out of scope, plus the jumps between blocks. After a body is lowered, a backward\nliveness pass and a forward pass over moves and loans run on that CFG: a loan is live while\na live local may hold it (Polonius' loans flowing through origins, one origin per local),\nand an access that conflicts with a live loan, or touches a path that may be moved, is an\nerror. A location-insensitive pre-pass skips the dataflow when no error is possible.\n\n- E0382 / E0381 (use after move, uninitialized), E0499 / E0502 / E0503 / E0505 / E0506\n  (conflicts with a live loan), E0597 (dropped while borrowed), E0515 (returning a borrow\n  of a local), E0596 / E0594 / E0384 (mutation of a local not declared mut)\n- two-phase borrows for &mut self receivers; loans killed when the local they go through\n  is overwritten; struct update syntax and assignment evaluate in Rust's order\n- which arguments a call's result borrows from comes from the elision rules and named\n  lifetimes (SigSyn::ret_from); unknown signatures (closures, fn pointers) pass no loans on\n- tests/ui: compile-fail 31.2% -> 33.7% (borrowck 30 -> 123, nll 12 -> 31, moves 2 -> 16),\n  no regressions; check instructions on gen5000 +1.8% (ZUSTC_BORROWCK=0 turns it off)\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-18T10:31:03Z",
+          "tree_id": "677e7f7577564d6f756fec7a37159568579a7037",
+          "url": "https://github.com/mizchi/zust/commit/70569be92e121677fb5b86e427cc8db2b9006dcf"
+        },
+        "date": 1794998545624,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "gen1000 build cold",
+            "value": 122.725,
+            "unit": "ms"
+          },
+          {
+            "name": "gen1000 build noop",
+            "value": 14.034,
+            "unit": "ms"
+          },
+          {
+            "name": "gen1000 build edit 1 fn",
+            "value": 19.406,
+            "unit": "ms"
+          },
+          {
+            "name": "gen1000 check",
+            "value": 75.593,
+            "unit": "ms"
+          },
+          {
+            "name": "gen1000 build cold peak RSS",
+            "value": 19.98,
+            "unit": "MiB"
+          },
+          {
+            "name": "gen1000 binary",
+            "value": 323.977,
+            "unit": "KiB"
+          },
+          {
+            "name": "gen1000 cache",
+            "value": 387.199,
+            "unit": "KiB"
+          },
+          {
+            "name": "gen1000 build noop instructions",
+            "value": 155.431,
+            "unit": "M instr"
+          },
+          {
+            "name": "gen1000 build edit 1 fn instructions",
+            "value": 148.24,
+            "unit": "M instr"
+          },
+          {
+            "name": "gen1000 check instructions",
+            "value": 795.714,
+            "unit": "M instr"
+          },
+          {
+            "name": "gen5000 build cold",
+            "value": 547.385,
+            "unit": "ms"
+          },
+          {
+            "name": "gen5000 build noop",
+            "value": 74.963,
+            "unit": "ms"
+          },
+          {
+            "name": "gen5000 build edit 1 fn",
+            "value": 87.504,
+            "unit": "ms"
+          },
+          {
+            "name": "gen5000 check",
+            "value": 388.259,
+            "unit": "ms"
+          },
+          {
+            "name": "gen5000 build cold peak RSS",
+            "value": 75.727,
+            "unit": "MiB"
+          },
+          {
+            "name": "gen5000 binary",
+            "value": 1558.336,
+            "unit": "KiB"
+          },
+          {
+            "name": "gen5000 cache",
+            "value": 1902.824,
+            "unit": "KiB"
+          },
+          {
+            "name": "gen5000 build noop instructions",
+            "value": 745.463,
+            "unit": "M instr"
+          },
+          {
+            "name": "gen5000 build edit 1 fn instructions",
+            "value": 706.587,
+            "unit": "M instr"
+          },
+          {
+            "name": "gen5000 check instructions",
+            "value": 3950.296,
+            "unit": "M instr"
+          },
+          {
+            "name": "rt/fib run (-O)",
+            "value": 54.286,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/hashmap run (-O)",
+            "value": 87.756,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/matmul run (-O)",
+            "value": 37.861,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/nbody run (-O)",
+            "value": 53.674,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/sieve run (-O)",
+            "value": 94.029,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/sort run (-O)",
+            "value": 145.762,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/strings run (-O)",
+            "value": 35.521,
             "unit": "ms"
           }
         ]
