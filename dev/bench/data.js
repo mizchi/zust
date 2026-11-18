@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795005949543,
+  "lastUpdate": 1795007146169,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -3179,6 +3179,165 @@ window.BENCHMARK_DATA = {
           {
             "name": "rt/strings run (-O)",
             "value": 38.157,
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "committer": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "distinct": true,
+          "id": "ccfe8ce8b27f2e443f5b28982b44078fa26bcba7",
+          "message": "zustc: one-thread std::thread / mpsc / atomics / Arc, default methods of blanket impls, deterministic method choice on primitives\n\n- prelude: Arc (as Rc), AtomicUsize .. AtomicBool (cells; orderings ignored), thread::spawn\n  (runs the closure at once; JoinHandle::join gives its value), mpsc::channel / sync_channel\n  (a shared queue)\n- `Ordering` from std::sync::atomic and the mpsc types are renamed in the source to prelude\n  names of the same length when imported from those modules (zustc resolves names by their last\n  segment; a program's own `Receiver` keeps its name)\n- thread::spawn: E0373 for a closure that borrows, and `Rc` is not Send\n- the default methods of a trait with a blanket impl are methods of every type\n- `1.new()` with a static `Foo::new` and a method `Bar::new` for isize: the method, always\n  (the candidates came from a hash set)\n- tests/ui: run-pass 50.5%, check-pass 53.7%, compile-fail 37.7%; three compile-fail tests that\n  failed to compile for other reasons now need bound checks on blanket impls\n- KPIs: gen5000 check 3987 M instr (+0.25%, the larger prelude)\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-18T12:55:34Z",
+          "tree_id": "523eac9173c9d936d113ccbd2ba1f4d2c3b247b1",
+          "url": "https://github.com/mizchi/zust/commit/ccfe8ce8b27f2e443f5b28982b44078fa26bcba7"
+        },
+        "date": 1795007145510,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "gen1000 build cold",
+            "value": 121.086,
+            "unit": "ms"
+          },
+          {
+            "name": "gen1000 build noop",
+            "value": 13.855,
+            "unit": "ms"
+          },
+          {
+            "name": "gen1000 build edit 1 fn",
+            "value": 19.278,
+            "unit": "ms"
+          },
+          {
+            "name": "gen1000 check",
+            "value": 79.256,
+            "unit": "ms"
+          },
+          {
+            "name": "gen1000 build cold peak RSS",
+            "value": 20.434,
+            "unit": "MiB"
+          },
+          {
+            "name": "gen1000 binary",
+            "value": 323.977,
+            "unit": "KiB"
+          },
+          {
+            "name": "gen1000 cache",
+            "value": 387.199,
+            "unit": "KiB"
+          },
+          {
+            "name": "gen1000 build noop instructions",
+            "value": 156.685,
+            "unit": "M instr"
+          },
+          {
+            "name": "gen1000 build edit 1 fn instructions",
+            "value": 149.954,
+            "unit": "M instr"
+          },
+          {
+            "name": "gen1000 check instructions",
+            "value": 800.717,
+            "unit": "M instr"
+          },
+          {
+            "name": "gen5000 build cold",
+            "value": 551.118,
+            "unit": "ms"
+          },
+          {
+            "name": "gen5000 build noop",
+            "value": 75.438,
+            "unit": "ms"
+          },
+          {
+            "name": "gen5000 build edit 1 fn",
+            "value": 83.932,
+            "unit": "ms"
+          },
+          {
+            "name": "gen5000 check",
+            "value": 392.14,
+            "unit": "ms"
+          },
+          {
+            "name": "gen5000 build cold peak RSS",
+            "value": 76.012,
+            "unit": "MiB"
+          },
+          {
+            "name": "gen5000 binary",
+            "value": 1558.336,
+            "unit": "KiB"
+          },
+          {
+            "name": "gen5000 cache",
+            "value": 1902.824,
+            "unit": "KiB"
+          },
+          {
+            "name": "gen5000 build noop instructions",
+            "value": 750.88,
+            "unit": "M instr"
+          },
+          {
+            "name": "gen5000 build edit 1 fn instructions",
+            "value": 711.658,
+            "unit": "M instr"
+          },
+          {
+            "name": "gen5000 check instructions",
+            "value": 3979.386,
+            "unit": "M instr"
+          },
+          {
+            "name": "rt/fib run (-O)",
+            "value": 54.11,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/hashmap run (-O)",
+            "value": 86.255,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/matmul run (-O)",
+            "value": 37.771,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/nbody run (-O)",
+            "value": 53.59,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/sieve run (-O)",
+            "value": 92.068,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/sort run (-O)",
+            "value": 143.167,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/strings run (-O)",
+            "value": 35.496,
             "unit": "ms"
           }
         ]
