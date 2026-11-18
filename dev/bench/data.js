@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795041872744,
+  "lastUpdate": 1795041874657,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -20745,6 +20745,85 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/mizchi/zust/commit/e45ee100ed392377781ef1eece25b5efbc32ad81"
         },
         "date": 1795041645230,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "parity documentSymbol (名前の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity workspace/symbol (上位 20 の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity definition (行き先の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity hover (名前を含む)",
+            "value": 92.5,
+            "unit": "%"
+          },
+          {
+            "name": "parity references (数の一致)",
+            "value": 97.297,
+            "unit": "%"
+          },
+          {
+            "name": "parity documentHighlight (数の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity rename (書き換えの一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity signatureHelp (名前・引数の数・今の引数の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity completion `x.\\|` (書いてある名前を含む)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity completion `na\\|me` (同)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity 一致の平均",
+            "value": 98.98,
+            "unit": "%"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "committer": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "distinct": true,
+          "id": "880367002d13725989cb12436650b63ebab2aa4f",
+          "message": "README, SUPPORTED: compare with relax and rust-glancer\n\nrelax (makepad/relax 3489f2d, a Rust JIT) on gen1000 and bench/rt, measured\nfrom source to finished output with bench/vs_relax.py; zust-analyzer against\nrust-analyzer and rust-glancer (50dd51a) in one lsp_parity run on zustc's sources.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-18T22:38:23Z",
+          "tree_id": "97b6b02eea5ce4629440cac95f3dbf338d0ac7d0",
+          "url": "https://github.com/mizchi/zust/commit/880367002d13725989cb12436650b63ebab2aa4f"
+        },
+        "date": 1795041874227,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
