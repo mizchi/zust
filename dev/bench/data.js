@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795036763962,
+  "lastUpdate": 1795036765530,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -22431,6 +22431,70 @@ window.BENCHMARK_DATA = {
           {
             "name": "tests/ui compile-fail passing",
             "value": 2816,
+            "unit": "tests"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "committer": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "distinct": true,
+          "id": "f606b345e28b01425220c4aa7a6fe1c3bc12e049",
+          "message": "Trait objects of generic traits: `dyn Foo<isize>`\n\n- `dyn Tr<A, B, Assoc = C>`: the trait is found by its name, and the trait's\n  own parameters are the arguments written, both for the vtable (to_dyn) and\n  for method calls through the object (the bindings are left out)\n- tests/ui: run-pass 1428 (59.2%), check-pass 1134 (62.8%), compile-fail 2814\n\nAccepted compile-fail removals (they were rejected before only because\n`dyn Foo<'a, Item = dyn Bar>` was not resolved; they need region checks):\nobject-lifetime/object-lifetime-default-assoc-ty-binding-item-bounds.rs,\nobject-lifetime/object-lifetime-default-assoc-ty-binding-item-bounds-non-static.rs\n\nKPIs (gen5000): noop 663.8 M instr, edit 620.8, check 3893.0, cache unchanged\n(gen1000 noop 140.4 in the full run; repeated runs of the same build give\n131.5 after the first, so it moves with the cache state); LSP ready 109 ms.\nAgainst rustc -C incremental on gen1000: cold 7.2x, no-op 11x, edit 14x\nfaster. README and SUPPORTED.md (en + ja) updated.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-18T21:15:12Z",
+          "tree_id": "f1628aecc9587662233bd7950d2de218ff875d38",
+          "url": "https://github.com/mizchi/zust/commit/f606b345e28b01425220c4aa7a6fe1c3bc12e049"
+        },
+        "date": 1795036765263,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tests/ui run-pass pass rate",
+            "value": 59.18,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui run-pass passing",
+            "value": 1428,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui check-pass pass rate",
+            "value": 62.76,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui check-pass passing",
+            "value": 1134,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui build-pass pass rate",
+            "value": 60.74,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui build-pass passing",
+            "value": 82,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui compile-fail pass rate",
+            "value": 38.24,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui compile-fail passing",
+            "value": 2814,
             "unit": "tests"
           }
         ]
