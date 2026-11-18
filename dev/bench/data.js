@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1794995415942,
+  "lastUpdate": 1794995417835,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -2212,6 +2212,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "lsp peak RSS",
             "value": 63.758,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "committer": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "distinct": true,
+          "id": "ac2361ee6aa6df574a8286c28eb4b67043b7d5c9",
+          "message": "zustc: fix all 34 crashes on rustc tests/ui (occurs check, resolve/instantiation depth limits, zero alignment, _ in subst, pattern/type mismatch error, memoized has_param/has_hole/hash_ty and resolve, capped instance names, large repeat arrays as loops); rust_ui --check fails on any crash\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-18T09:45:16Z",
+          "tree_id": "d42c2fb3cb27bedb9ff12b4c7f19ed44ce2973cd",
+          "url": "https://github.com/mizchi/zust/commit/ac2361ee6aa6df574a8286c28eb4b67043b7d5c9"
+        },
+        "date": 1794995417368,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "lsp definition p50",
+            "value": 0.544,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp hover p50",
+            "value": 0.523,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp completion p50",
+            "value": 1.027,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp references p50",
+            "value": 2.669,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp rename p50",
+            "value": 0.545,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp signatureHelp p50",
+            "value": 0.757,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp documentHighlight p50",
+            "value": 0.805,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp ready (startup to indexed)",
+            "value": 114.242,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp peak RSS",
+            "value": 63.73,
             "unit": "MiB"
           }
         ]
