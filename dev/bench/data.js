@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795036303391,
+  "lastUpdate": 1795036760524,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -9698,6 +9698,165 @@ window.BENCHMARK_DATA = {
           {
             "name": "rt/strings run (-O)",
             "value": 73.882,
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "committer": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "distinct": true,
+          "id": "f606b345e28b01425220c4aa7a6fe1c3bc12e049",
+          "message": "Trait objects of generic traits: `dyn Foo<isize>`\n\n- `dyn Tr<A, B, Assoc = C>`: the trait is found by its name, and the trait's\n  own parameters are the arguments written, both for the vtable (to_dyn) and\n  for method calls through the object (the bindings are left out)\n- tests/ui: run-pass 1428 (59.2%), check-pass 1134 (62.8%), compile-fail 2814\n\nAccepted compile-fail removals (they were rejected before only because\n`dyn Foo<'a, Item = dyn Bar>` was not resolved; they need region checks):\nobject-lifetime/object-lifetime-default-assoc-ty-binding-item-bounds.rs,\nobject-lifetime/object-lifetime-default-assoc-ty-binding-item-bounds-non-static.rs\n\nKPIs (gen5000): noop 663.8 M instr, edit 620.8, check 3893.0, cache unchanged\n(gen1000 noop 140.4 in the full run; repeated runs of the same build give\n131.5 after the first, so it moves with the cache state); LSP ready 109 ms.\nAgainst rustc -C incremental on gen1000: cold 7.2x, no-op 11x, edit 14x\nfaster. README and SUPPORTED.md (en + ja) updated.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-18T21:15:12Z",
+          "tree_id": "f1628aecc9587662233bd7950d2de218ff875d38",
+          "url": "https://github.com/mizchi/zust/commit/f606b345e28b01425220c4aa7a6fe1c3bc12e049"
+        },
+        "date": 1795036759904,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "gen1000 build cold",
+            "value": 122.102,
+            "unit": "ms"
+          },
+          {
+            "name": "gen1000 build noop",
+            "value": 15.35,
+            "unit": "ms"
+          },
+          {
+            "name": "gen1000 build edit 1 fn",
+            "value": 20.454,
+            "unit": "ms"
+          },
+          {
+            "name": "gen1000 check",
+            "value": 94.679,
+            "unit": "ms"
+          },
+          {
+            "name": "gen1000 build cold peak RSS",
+            "value": 17.73,
+            "unit": "MiB"
+          },
+          {
+            "name": "gen1000 binary",
+            "value": 323.977,
+            "unit": "KiB"
+          },
+          {
+            "name": "gen1000 cache",
+            "value": 387.205,
+            "unit": "KiB"
+          },
+          {
+            "name": "gen1000 build noop instructions",
+            "value": 139.634,
+            "unit": "M instr"
+          },
+          {
+            "name": "gen1000 build edit 1 fn instructions",
+            "value": 132.571,
+            "unit": "M instr"
+          },
+          {
+            "name": "gen1000 check instructions",
+            "value": 789.411,
+            "unit": "M instr"
+          },
+          {
+            "name": "gen5000 build cold",
+            "value": 543.044,
+            "unit": "ms"
+          },
+          {
+            "name": "gen5000 build noop",
+            "value": 63.691,
+            "unit": "ms"
+          },
+          {
+            "name": "gen5000 build edit 1 fn",
+            "value": 71.056,
+            "unit": "ms"
+          },
+          {
+            "name": "gen5000 check",
+            "value": 449.151,
+            "unit": "ms"
+          },
+          {
+            "name": "gen5000 build cold peak RSS",
+            "value": 51.984,
+            "unit": "MiB"
+          },
+          {
+            "name": "gen5000 binary",
+            "value": 1558.336,
+            "unit": "KiB"
+          },
+          {
+            "name": "gen5000 cache",
+            "value": 1902.83,
+            "unit": "KiB"
+          },
+          {
+            "name": "gen5000 build noop instructions",
+            "value": 661.038,
+            "unit": "M instr"
+          },
+          {
+            "name": "gen5000 build edit 1 fn instructions",
+            "value": 618.944,
+            "unit": "M instr"
+          },
+          {
+            "name": "gen5000 check instructions",
+            "value": 3888.885,
+            "unit": "M instr"
+          },
+          {
+            "name": "rt/fib run (-O)",
+            "value": 63.306,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/hashmap run (-O)",
+            "value": 98.808,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/matmul run (-O)",
+            "value": 40.009,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/nbody run (-O)",
+            "value": 66.565,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/sieve run (-O)",
+            "value": 77.323,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/sort run (-O)",
+            "value": 173.301,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/strings run (-O)",
+            "value": 57.465,
             "unit": "ms"
           }
         ]
