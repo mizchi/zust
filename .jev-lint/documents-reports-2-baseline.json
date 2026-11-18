@@ -1,6 +1,6 @@
 {
   "schema": "jev-lint-documents-1",
-  "snapshotDigest": "769a99cae877c841ccf9ccc25f7f3d6f989e2b3c5c279e4f10039eb851a6be68",
+  "snapshotDigest": "3d1939f5d47dd96e4eb5be4bc52a94e7ecbecde3943555a3323d9c9b560bb0b7",
   "questionDigest": "209d6df378ccb747fcb0e821998fcd6105bc76638a88d22488d3b398d6a21595",
   "model": "jev-1.14.0",
   "snapshotChanged": false,
@@ -32,10 +32,10 @@
       "contextHash": "ec20e2ebdd2ae375a6636074c628c438138c77646a5be532bd01237081e3f660",
       "judgment": {
         "choice": "supports",
-        "confidence": 1,
+        "confidence": 0.99,
         "probabilities": {
-          "supports": 1,
-          "contradicts": 0,
+          "supports": 0.99,
+          "contradicts": 0.01,
           "unrelated": 0,
           "insufficient_context": 0
         }
@@ -100,12 +100,12 @@
       "contextHash": "a068452334ef52150a1932e9d45207a4c156e3a5c60d69e061e986b1aa86d889",
       "judgment": {
         "choice": "supports",
-        "confidence": 0.95,
+        "confidence": 0.97,
         "probabilities": {
-          "supports": 0.96,
-          "contradicts": 0.03,
+          "supports": 0.98,
+          "contradicts": 0.02,
           "unrelated": 0,
-          "insufficient_context": 0.01
+          "insufficient_context": 0
         }
       }
     },
@@ -134,10 +134,10 @@
       "contextHash": "a5fea429fa886ab323fa8e8906063064e1b8742597a6e62ec08f3667ea7c37d5",
       "judgment": {
         "choice": "supports",
-        "confidence": 0.99,
+        "confidence": 1,
         "probabilities": {
-          "supports": 0.99,
-          "contradicts": 0.01,
+          "supports": 1,
+          "contradicts": 0,
           "unrelated": 0,
           "insufficient_context": 0
         }
@@ -202,10 +202,10 @@
       "contextHash": "5b6ede2d00ec82893b1c63b36b593d1e9e7999236c2422416b8324666f265c93",
       "judgment": {
         "choice": "supports",
-        "confidence": 0.96,
+        "confidence": 0.97,
         "probabilities": {
-          "supports": 0.97,
-          "contradicts": 0.03,
+          "supports": 0.98,
+          "contradicts": 0.02,
           "unrelated": 0,
           "insufficient_context": 0
         }
@@ -236,10 +236,10 @@
       "contextHash": "68facf70966b576a1dde106a31fd37de8e21bda46e6439878b91e7bce57154b6",
       "judgment": {
         "choice": "supports",
-        "confidence": 0.96,
+        "confidence": 0.97,
         "probabilities": {
-          "supports": 0.97,
-          "contradicts": 0.03,
+          "supports": 0.98,
+          "contradicts": 0.02,
           "unrelated": 0,
           "insufficient_context": 0
         }
@@ -644,10 +644,10 @@
       "contextHash": "1275e8de4d291bc21dd7f5b87a5196cba9cca33005a1ac6eca77fa3d0892971e",
       "judgment": {
         "choice": "supports",
-        "confidence": 0.97,
+        "confidence": 0.96,
         "probabilities": {
-          "supports": 0.98,
-          "contradicts": 0.02,
+          "supports": 0.97,
+          "contradicts": 0.03,
           "unrelated": 0,
           "insufficient_context": 0
         }
@@ -720,12 +720,46 @@
           "insufficient_context": 0.01
         }
       }
+    },
+    {
+      "id": "docs_reports_2026-11-18-08-borrow-checking",
+      "topic": "The Japanese file docs/ja/reports/2026-11-18-08-borrow-checking.md is a faithful translation of docs/reports/2026-11-18-08-borrow-checking.md",
+      "mode": "translation",
+      "reference": {
+        "source": "docs_reports_2026-11-18-08-borrow-checking.en",
+        "path": "docs/reports/2026-11-18-08-borrow-checking.md",
+        "startLine": 1,
+        "endLine": 137,
+        "quote": "# Borrow checking without MIR\n\nDate: 2026-11-18\n\nzustc had no borrow checker: it accepted every program that type checked. This report covers what was chosen,\nhow it fits a compiler that lowers the AST straight to machine code, and what it does on rustc's own UI tests\n([report 07](2026-11-18-07-rustc-ui-tests.md)).\n\n## State of the art\n\n- rustc's default checker is NLL. It infers regions as sets of points from liveness and outlives constraints, and\n  reports an access that conflicts with a loan that is still in scope.\n- Its successor is Polonius. The 2026 project goal ([Rust project goals: borrow checker\n  within](https://goals.rust-lang.org/2026/roadmap-borrow-checker-within.html)) is to stabilize \"Polonius alpha\" in\n  2026. Polonius alpha handles conditional borrows (NLL problem case 3) and lending iterators. Full flow-sensitive\n  Polonius is listed as future work.\n- [The Polonius book](https://rust-lang.github.io/polonius/rules/loans.html) states the analysis as rules over\n  loans and origins:\n  - A loan flows into the origin of the reference it creates, and moves along subset relations and CFG edges while\n    that origin is live.\n  - A loan is live at a point if a live origin contains it.\n  - An error is an invalidation of a live loan.\n  - The book also describes a location-insensitive variant used as a fast pre-pass. If it finds no possible error,\n    the full analysis is skipped.\n- [Wu, Wang, Chen (arXiv 2611.06319)](https://arxiv.org/html/2611.06319) show that, when checked lazily, Polonius\n  is a forward abstract interpretation, with no separate liveness pass.\n\n## Design\n\nzustc has no MIR. acg (type checking and code generation together) lowers each function body to minclif. The\nborrow checker uses the CFG that acg already builds:\n\n1. **Recording.** While lowering, acg records events per minclif block:\n   - a local is bound (initialized or not), read, moved, written, or borrowed (`&`, `&mut`, autoref receivers,\n     closure captures, `ref` bindings);\n   - a local goes out of scope.\n\n   `jump` and `brif` also record the CFG edges. A brif on a constant records only the edge it takes.\n2. **Places.** A place is a local plus projections: fields, `*` through a Box, `*` through `&mut`, `*` through `&`,\n   and index. Field and deref projections come from the static types, as auto-deref does.\n3. **Location-insensitive pre-pass.** The pass ignores control flow. If there is no move, no uninitialized local,\n   and no access that overlaps a conflicting loan, the dataflow does not run. Mutability errors that do not depend\n   on flow are reported here.\n4. **Dataflow.**\n   - A backward pass computes the liveness of locals.\n   - A forward pass, iterated to a fixpoint, tracks three things: which paths may be moved or uninitialized, which\n     immutable locals may already be assigned, and which loans each local may hold.\n   - A loan is live where a live local may hold it. This is the Polonius view, with one origin per local.\n5. **What flows into a local.** Without lifetimes in the types, this is approximated:\n   - A local gets the loans created while evaluating its initializer, plus the loans held by the locals read there.\n   - A call passes on the borrow of an argument only if the signature says the result may borrow from it. This is\n     decided by the elision rules and named lifetimes in the declaration (`SigSyn::ret_from`).\n   - Unknown signatures pass nothing on. These are closures, fn pointers and `impl Trait` returns.\n   - Iterator and view types in the prelude (`Iter`, `Chars`, `ChunksExact`, …) hold the loan of what they iterate.\n\nLoans that no local holds die with their expression. This gives two-phase borrows (`v.push(v.len())`) and the\nconditional-return case that NLL rejects. The price is that conflicts inside one expression are found only between\nthe arguments of a call. A hidden local keeps the argument borrows alive until the call is made, so\n`f(&mut x, &x)` and `x += x` (with an overloaded `+=`) conflict.\n\nOther rules:\n\n- A loan is killed when the local it goes through is overwritten (Polonius' `loan_killed_at`).\n- Rust's evaluation order is followed: for `a = b`, `b` is evaluated first; for `S { f, ..base }`, `base` is\n  evaluated last.\n- Closures capture places, not variables (RFC 2229: `p.x`, `*r`, the parts a pattern binds). Each place is captured\n  by value, `&mut` or `&`, depending on how it is used.\n- Calls that acg itself synthesizes are not treated as the user's borrows: the `index_mut` used for reads, and the\n  method call an operator is rewritten to.\n\n## Errors found\n\n| code | what |\n|---|---|\n| E0382 / E0381 | use of a moved / uninitialized value, including moves by patterns, `for` loops and `move` closures |\n| E0499 / E0502 / E0503 / E0505 / E0506 | an access that conflicts with a live loan |\n| E0597 / E0515 | a borrow that outlives what it borrows: at the end of a scope, carried out of a block, stored behind a parameter, or returned |\n| E0507 / E0508 | a move out through a reference or out of an index |\n| E0596 / E0594 / E0384 | mutation of a local not declared `mut`, or of a place behind a `&` reference; a second assignment to an immutable local |\n\nOnly the first error of each function is reported, since acg stops a function at its first error.\n`ZUSTC_BORROWCK=0` turns the checker off, `=1` checks moves only, and `ZUSTC_BK_DEBUG=1` prints the recorded\nevents.\n\n## Results\n\nThe baseline is the commit before (ac2361e). The tests/ui suite is the same 1.100.0 tests/ui as in report 07.\n\n| kind | pass before | pass after | pass rate after |\n|---|---:|---:|---:|\n| run-pass | 1120 | 1120 | 46.42% |\n| check-pass | 834 | 834 | 46.15% |\n| build-pass | 65 | 65 | 48.15% |\n| compile-fail | 2298 | 2578 | 35.04% (from 31.23%) |\n\nNo test in the baseline list regressed. That list has 4597 tests now, from 4317.\n\nA false positive in a test that already failed for another reason would not show up as a regression. A separate\nscan of every failing run-pass / check-pass / build-pass test finds no borrow-checker error among them.\n\nCompile-fail tests that pass, by directory:\n\n| directory | before | after | applicable |\n|---|---:|---:|---:|\n| borrowck | 30 | 159 | 354 |\n| nll | 12 | 41 | 187 |\n| closures | 21 | 36 | 115 |\n| moves | 2 | 21 | 49 |\n| liveness | 4 | 9 | 16 |\n\nCost, measured as instructions for `zustc check` (valgrind) on the generated benchmark programs:\n\n| program | off | on | change |\n|---|---:|---:|---:|\n| gen1000 | 782.7 M | 800.0 M | +2.2% |\n| gen5000 | 3883.9 M | 3971.1 M | +2.2% |\n\nWithout the location-insensitive pre-pass the change was +6.3%. Most of what is left is the recording during\nlowering, not the analysis.\n\nThe crates in cratebench (fnv, adler2, hex, itoa, rustc-hash, cfg-if) still build and give the same output. Two of\nthem first hit false positives:\n\n- prelude view methods (`ChunksExact::remainder`) were taken to borrow the view;\n- a closure that assigned one field of `self` was taken to borrow all of `self` mutably.\n\n## What is left\n\n- Region errors against signatures, such as E0621, E0521, and \"lifetime may not live long enough\". These need\n  universal regions and outlives checking of the body against the declaration, not only loans.\n- Precise flow through types. A local holds the loans of everything its initializer read, so a value taken out\n  through a call (`v.get(0).cloned()`) still counts as borrowing `v`. To avoid false positives because of this,\n  E0515 and the escaping-block case of E0597 look only at what the expression borrows directly.\n- E0716 (temporaries dropped while borrowed), E0510, uses by `Drop` at the end of a scope, partial moves out of\n  arrays and struct patterns, and more than one error per function.\n- `tests/selfhost_compiler.sh` was not run. It does not get past a parse error in the generated single-file\n  compiler, and it does not at the commit before either.",
+        "contentHash": "179f7f55cb4a02073bb4d5eddf744196d1671e14feba024afa76bbd7dd407ac4"
+      },
+      "target": {
+        "source": "docs_reports_2026-11-18-08-borrow-checking.ja",
+        "path": "docs/ja/reports/2026-11-18-08-borrow-checking.md",
+        "startLine": 1,
+        "endLine": 104,
+        "quote": "# MIR なしの借用検査\n\nDate: 2026-11-18\n\nzustc には借用検査がなく、型検査を通るプログラムはすべて受け付けていた。この報告では、何を選んだか、AST から直接機械語にするコンパイラにどう合わせたか、rustc 自身の UI テスト（[報告 07](2026-11-18-07-rustc-ui-tests.md)）で何が起きたかをまとめる。\n\n## 現在の手法\n\n- rustc の既定の検査器は NLL である。liveness と outlives 制約から region を点の集合として推論し、まだ有効なローンと衝突するアクセスを報告する。\n- 後継は Polonius である。2026 年のプロジェクト目標（[Rust project goals: borrow checker within](https://goals.rust-lang.org/2026/roadmap-borrow-checker-within.html)）は、\"Polonius alpha\" を 2026 年に安定化することである。Polonius alpha は条件付きの借用（NLL problem case 3）と lending iterator を扱える。フローを完全に区別する Polonius は今後の課題とされている。\n- [Polonius の本](https://rust-lang.github.io/polonius/rules/loans.html) は、解析をローンと origin の規則として書いている。\n  - ローンは、それが作る参照の origin に入る。その origin が生きている間、subset 関係と CFG の辺に沿って進む。\n  - ある点でローンが生きているのは、それを含む origin が生きているときである。\n  - 生きているローンを無効にするアクセスが誤りである。\n  - 本は、位置を区別しない版を速い前処理として使うことも書いている。前処理が誤りの可能性を見つけなければ、完全な解析は省略する。\n- [Wu, Wang, Chen (arXiv 2611.06319)](https://arxiv.org/html/2611.06319) は、遅延して検査すれば Polonius は前向きの抽象解釈になり、別の liveness パスが要らないことを示している。\n\n## 設計\n\nzustc には MIR がない。acg（型検査とコード生成を兼ねる）が関数本体を minclif に下ろす。借用検査は、acg がすでに作っている CFG を使う。\n\n1. **記録。** acg は下ろしながら、minclif のブロックごとにイベントを記録する。\n   - ローカル変数が束縛される（初期化あり・なし）、読まれる、ムーブされる、書かれる、借用される（`&`、`&mut`、自動参照のレシーバ、クロージャのキャプチャ、`ref` 束縛）。\n   - ローカル変数がスコープを出る。\n\n   `jump` と `brif` は CFG の辺も記録する。定数を条件とする brif は、取る辺だけを記録する。\n2. **場所。** 場所はローカル変数と射影の列である。射影には、フィールド、Box を通る `*`、`&mut` を通る `*`、`&` を通る `*`、添字がある。フィールドと deref の射影は、自動 deref と同じく静的な型から決める。\n3. **位置を区別しない前処理。** この前処理は制御フローを無視する。ムーブも未初期化の変数も、衝突するローンと重なるアクセスもなければ、データフローは回さない。フローに依らない可変性の誤りはここで報告する。\n4. **データフロー。**\n   - 後ろ向きのパスでローカル変数の生存を求める。\n   - 前向きのパスを不動点まで回し、3 つを追う。ムーブ済み・未初期化かもしれないパス、代入済みかもしれない不変の変数、各変数が持ちうるローンである。\n   - ローンが生きているのは、生きている変数がそれを持ちうる点である。これは Polonius の見方で、origin を変数ごとに 1 つとしたものにあたる。\n5. **変数に何が流れるか。** 型に寿命がないので、次のように近似する。\n   - 変数は、初期化式を評価する間に作られたローンと、そこで読んだ変数が持つローンを受け取る。\n   - 呼び出しが引数の借用を戻り値に流すのは、シグネチャが「戻り値はその引数から借りうる」と言うときだけである。これは宣言の省略規則と名前付きの寿命から決める（`SigSyn::ret_from`）。\n   - シグネチャの分からない呼び出しは何も流さない。クロージャ、関数ポインタ、`impl Trait` を返すものがこれにあたる。\n   - prelude の反復子・ビューの型（`Iter`、`Chars`、`ChunksExact` など）は、反復する元のローンを持つ。\n\nどの変数も持たないローンは、その式とともに終わる。これで two-phase borrow（`v.push(v.len())`）と、NLL が拒む条件付きの return の場合が受け入れられる。代わりに、1 つの式の中の衝突は、呼び出しの引数どうしの間でしか見つけられない。引数の借用は、呼び出しが行われるまで隠れた変数に持たせて生かしておくので、`f(&mut x, &x)` と `x += x`（オーバーロードされた `+=`）は衝突になる。\n\nほかの規則は次のとおり。\n\n- ローンは、それが通る変数が上書きされると消える（Polonius の `loan_killed_at`）。\n- 評価順は Rust に合わせる。`a = b` では `b` を先に、`S { f, ..base }` では `base` を最後に評価する。\n- クロージャは変数ではなく場所をキャプチャする（RFC 2229: `p.x`、`*r`、パターンが束縛する部分）。場所ごとに、使われ方から値・`&mut`・`&` のどれでキャプチャするかを決める。\n- acg 自身が合成する呼び出しは、利用者の借用として扱わない。読み出しに使う `index_mut` と、演算子を書き換えたメソッド呼び出しがこれにあたる。\n\n## 見つける誤り\n\n| コード | 内容 |\n|---|---|\n| E0382 / E0381 | ムーブ済み・未初期化の値の使用（パターン、`for` ループ、`move` クロージャによるムーブを含む） |\n| E0499 / E0502 / E0503 / E0505 / E0506 | 生きているローンと衝突するアクセス |\n| E0597 / E0515 | 借用が借用先より長く生きる（スコープの終わり、ブロックの外への持ち出し、引数の先への格納、戻り値） |\n| E0507 / E0508 | 参照を通したムーブ、添字からのムーブ |\n| E0596 / E0594 / E0384 | `mut` でない変数や `&` 参照の先の変更、不変の変数への 2 回目の代入 |\n\nacg は関数の最初の誤りでその関数を打ち切るので、報告するのは関数ごとに最初の誤りだけである。`ZUSTC_BORROWCK=0` で検査を止め、`=1` でムーブだけを検査する。`ZUSTC_BK_DEBUG=1` で記録したイベントを表示する。\n\n## 結果\n\n比較の基準は直前のコミット（ac2361e）である。tests/ui は報告 07 と同じ 1.100.0 のものを使う。\n\n| 種類 | 前の pass | 後の pass | 後の pass 率 |\n|---|---:|---:|---:|\n| run-pass | 1120 | 1120 | 46.42% |\n| check-pass | 834 | 834 | 46.15% |\n| build-pass | 65 | 65 | 48.15% |\n| compile-fail | 2298 | 2578 | 35.04%（31.23% から） |\n\nベースラインの一覧にあるテストで回帰したものはない。一覧は 4317 件から 4597 件になった。\n\n別の理由ですでに失敗しているテストでの誤検出は、回帰として現れない。そこで、失敗している run-pass / check-pass / build-pass のテストをすべて別に調べたが、借用検査の誤りは 1 件も出なかった。\n\nディレクトリ別に、通る compile-fail のテストの数:\n\n| ディレクトリ | 前 | 後 | 対象 |\n|---|---:|---:|---:|\n| borrowck | 30 | 159 | 354 |\n| nll | 12 | 41 | 187 |\n| closures | 21 | 36 | 115 |\n| moves | 2 | 21 | 49 |\n| liveness | 4 | 9 | 16 |\n\nコストは、生成したベンチマークのプログラムに対する `zustc check` の命令数（valgrind）で測った。\n\n| プログラム | なし | あり | 変化 |\n|---|---:|---:|---:|\n| gen1000 | 782.7 M | 800.0 M | +2.2% |\n| gen5000 | 3883.9 M | 3971.1 M | +2.2% |\n\n位置を区別しない前処理がないときは +6.3% だった。残りの大半は解析ではなく、下ろしながらの記録である。\n\ncratebench のクレート（fnv、adler2、hex、itoa、rustc-hash、cfg-if）は今もビルドでき、同じ出力を出す。うち 2 つでは、最初に誤検出が出た。\n\n- prelude のビューのメソッド（`ChunksExact::remainder`）を、ビュー自身から借りるものとして扱っていた。\n- `self` の 1 つのフィールドに代入するクロージャを、`self` 全体を可変に借りるものとして扱っていた。\n\n## 残っていること\n\n- シグネチャに対する region の誤り（E0621、E0521、\"lifetime may not live long enough\"）。ローンだけでなく、universal region と、本体の宣言に対する outlives の検査が要る。\n- 型を通した正確な流れ。変数は初期化式で読んだものすべてのローンを持つので、呼び出しで取り出した値（`v.get(0).cloned()`）もまだ `v` を借りているとみなされる。これによる誤検出を避けるため、E0515 と、ブロックの外へ持ち出す E0597 は、式が直接借りるものだけを見る。\n- E0716（借用中に一時値が drop される）、E0510、スコープの終わりの `Drop` による使用、配列や struct パターンからの部分ムーブ、関数ごとに 2 つ以上の誤りを出すこと。\n- `tests/selfhost_compiler.sh` は実行していない。生成した 1 ファイルのコンパイラの構文エラーで先に進まず、これは直前のコミットでも同じである。",
+        "contentHash": "a065fa02e6f7197e7638bff8762e151b7df4e07e60d233d4645b1979ef9d4612"
+      },
+      "context": [],
+      "candidateId": "b8af6423e2e084fb16779e3608f920c710b2967588d902689b1a41fb282eb8b0",
+      "contextHash": "74cd923d61e00b7739f80b534b652a909070bb949bfb007a464579050da1d263",
+      "judgment": {
+        "choice": "supports",
+        "confidence": 0.97,
+        "probabilities": {
+          "supports": 0.98,
+          "contradicts": 0.01,
+          "unrelated": 0,
+          "insufficient_context": 0.01
+        }
+      }
     }
   ],
   "coverage": {
-    "expected": 21,
-    "selected": 21,
-    "answered": 21,
+    "expected": 22,
+    "selected": 22,
+    "answered": 22,
     "missing": 0,
     "contradictions": 0,
     "unassessed": 0,
@@ -734,9 +768,9 @@
     "unboundDocuments": 0
   },
   "usage": {
-    "requests": 21,
-    "inputTokens": 79595,
-    "usd": 0.00334299
+    "requests": 22,
+    "inputTokens": 86734,
+    "usd": 0.0036428280000000003
   },
   "errors": []
 }

@@ -65,3 +65,4 @@ zustc / zust-analyzer の作業の記録 (日付順)。数値はそれぞれの�
 | 2026-11-18 | [std のメソッドの参照の差を詰める (2026-11-18)](2026-11-18-05-std-method-references.md) |
 | 2026-11-18 | [TODO.md の rust-analyzer との残りの違いを詰める](2026-11-18-06-remaining-differences.md) |
 | 2026-11-18 | [rustc 自身の UI テストを仕様のテスト集にする](2026-11-18-07-rustc-ui-tests.md) |
+| 2026-11-18 | [MIR なしの借用検査](2026-11-18-08-borrow-checking.md) |

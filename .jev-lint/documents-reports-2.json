@@ -168,6 +168,14 @@
     "docs_reports_2026-11-18-07-rustc-ui-tests.ja": {
       "path": "docs/ja/reports/2026-11-18-07-rustc-ui-tests.md",
       "role": "historical"
+    },
+    "docs_reports_2026-11-18-08-borrow-checking.en": {
+      "path": "docs/reports/2026-11-18-08-borrow-checking.md",
+      "role": "historical"
+    },
+    "docs_reports_2026-11-18-08-borrow-checking.ja": {
+      "path": "docs/ja/reports/2026-11-18-08-borrow-checking.md",
+      "role": "historical"
     }
   },
   "comparisons": [
@@ -400,6 +408,17 @@
       },
       "target": {
         "source": "docs_reports_2026-11-18-07-rustc-ui-tests.ja"
+      }
+    },
+    {
+      "id": "docs_reports_2026-11-18-08-borrow-checking",
+      "topic": "The Japanese file docs/ja/reports/2026-11-18-08-borrow-checking.md is a faithful translation of docs/reports/2026-11-18-08-borrow-checking.md",
+      "mode": "translation",
+      "reference": {
+        "source": "docs_reports_2026-11-18-08-borrow-checking.en"
+      },
+      "target": {
+        "source": "docs_reports_2026-11-18-08-borrow-checking.ja"
       }
     }
   ]

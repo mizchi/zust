@@ -3,8 +3,16 @@
 ## Compiler (zustc)
 
 - **rustc's tests/ui** (`python3 bench/rust_ui.py`; [report](docs/reports/2026-11-18-07-rustc-ui-tests.md))
-  - Fix the 34 crashes (zustc panics or is killed)
-  - Raise the pass rates: run-pass 46.4%, check-pass 46.0%, compile-fail 31.1% (at an annotated line)
+  - Raise the pass rates: run-pass 46.4%, check-pass 46.2%, compile-fail 35.0% (at an annotated line)
+- **Borrow checking** ([report](docs/reports/2026-11-18-08-borrow-checking.md))
+  - Region errors against signatures (E0621, E0521, "lifetime may not live long enough"): universal regions and
+    outlives checking of the body against the declaration
+  - Loans flowing through types: a local holds the loans of all it read, so E0515 and E0597 for values carried out
+    of a block only look at what is borrowed directly
+  - E0716 (temporaries dropped while borrowed), E0510, uses by `Drop` at the end of a scope, partial moves out of
+    arrays and struct patterns
+  - More than one error per function
+  - Cost: +2.2% instructions on `zustc check`, mostly the recording during lowering
 - **Language**
   - Modules, `DoubleEndedIterator` (`rev` as a value), `HashSet` / `BTreeMap`
   - Share monomorphized instances keyed by layout (make `Vec<A>` and `Vec<B>` one; blaze's polymorph)
