@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795015638873,
+  "lastUpdate": 1795015640916,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -8140,6 +8140,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "lsp peak RSS",
             "value": 66.613,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "committer": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "distinct": true,
+          "id": "d5a253ec2780bf708cddbde46d18b407434167c0",
+          "message": "zustc: prelude selection asks the whole source once per name instead of every item (noop build -9%, check -2% instructions)\n\nPreludeScan::has searched each item with a memo per (item, pattern); that is the same answer as one\nsearch of the whole source (but for a match across an item boundary) and cost more than the search\n(StrSearcher setup and a hash insert per item).\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-18T15:21:46Z",
+          "tree_id": "2f91908ca70dadafa63be932cb6efe3b5222575d",
+          "url": "https://github.com/mizchi/zust/commit/d5a253ec2780bf708cddbde46d18b407434167c0"
+        },
+        "date": 1795015640443,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "lsp definition p50",
+            "value": 0.45,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp hover p50",
+            "value": 0.403,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp completion p50",
+            "value": 0.806,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp references p50",
+            "value": 2.233,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp rename p50",
+            "value": 0.527,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp signatureHelp p50",
+            "value": 0.668,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp documentHighlight p50",
+            "value": 0.639,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp ready (startup to indexed)",
+            "value": 96.774,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp peak RSS",
+            "value": 66.422,
             "unit": "MiB"
           }
         ]
