@@ -738,11 +738,26 @@ impl Cx<'_> {
                     self.same(SP, t, to)?;
                     return Ok((v, t));
                 }
+                // (`Box::new(s) as Box<dyn Tr>` / `as Rc<dyn Tr>`: the unsizing coercion too)
+                let unsizing = match to {
+                    Ty::Box(Ty::Dyn(_) | Ty::Slice(_)) => true,
+                    Ty::Struct(sid) => self.prog.structs[sid as usize].args.iter().any(|a| matches!(a, Ty::Dyn(_))),
+                    _ => false,
+                };
+                if unsizing {
+                    let (v, t) = self.expr(x, Some(to))?;
+                    self.same(SP, t, to)?;
+                    return Ok((v, t));
+                }
                 let hint = self.peek(x).or(match &**x {
                     Expr::Lit(l, _) if matches!(lit::lit(l), Some(Lit::Float(_))) => Some(Ty::F64),
                     _ => Some(Ty::I32),
                 });
                 let (v, from) = self.expr(x, hint)?;
+                // (a cast to the same type: `f as fn()` with f: fn())
+                if from == to && !from.is_int() && !from.is_float() {
+                    return Ok((v, to));
+                }
                 if from == Ty::Never {
                     return Ok((None, Ty::Never));
                 }

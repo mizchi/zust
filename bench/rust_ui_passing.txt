@@ -726,6 +726,7 @@ compile-fail	box/suggest-box-for-expr-field-issue-139631.rs
 run-pass	box/unit/expr-block-generic-unique1.rs
 run-pass	box/unit/unique-generic-assign.rs
 run-pass	box/unit/unique-in-tag.rs
+run-pass	box/unit/unique-object-move.rs
 run-pass	builtin-superkinds/builtin-superkinds-phantom-typaram.rs
 compile-fail	builtin-superkinds/builtin-superkinds-simple.rs
 check-pass	builtin-superkinds/builtin-superkinds-simple2.rs
@@ -761,6 +762,7 @@ compile-fail	cast/issue-84213.rs
 compile-fail	cast/issue-89497.rs
 compile-fail	cast/non-primitive-cast-suggestion.rs
 compile-fail	cast/non-primitive-isize-ref-cast.rs
+run-pass	cast/owned-struct-to-trait-cast-6318.rs
 compile-fail	cast/ptr-to-ptr-different-regions.rs
 compile-fail	cast/ptr-to-ptr-indirect-different-regions.rs
 compile-fail	cast/ptr-to-trait-obj-wrap-upcast.rs
@@ -855,6 +857,7 @@ run-pass	closures/closure-mut-argument-6153.rs
 compile-fail	closures/closure-ref-fn-kind-mismatch-issue-161327.rs
 compile-fail	closures/closure-reform-bad.rs
 compile-fail	closures/closure-return-type-mismatch.rs
+run-pass	closures/closure-type-inference-in-context-9129.rs
 run-pass	closures/closure-upvar-trait-caching.rs
 run-pass	closures/closure-with-fixed-size-array-param.rs
 check-pass	closures/closure_promotion.rs
@@ -1152,6 +1155,7 @@ run-pass	consts/const-blocks/const-repeat.rs
 run-pass	consts/const-blocks/fn-call-in-const.rs
 check-pass	consts/const-blocks/nll-pass.rs
 run-pass	consts/const-blocks/run-pass.rs
+run-pass	consts/const-byte-str-cast.rs
 run-pass	consts/const-enum-byref-self.rs
 run-pass	consts/const-enum-byref.rs
 run-pass	consts/const-enum-ptr.rs
@@ -1263,6 +1267,7 @@ compile-fail	consts/min_const_fn/min_const_fn.rs
 compile-fail	consts/missing_assoc_const_type.rs
 compile-fail	consts/missing_assoc_const_type2.rs
 run-pass	consts/module-const-array-size-13763.rs
+run-pass	consts/non-scalar-cast.rs
 compile-fail	consts/normalize-before-const-arg-has-type-goal.rs
 run-pass	consts/packed_pattern.rs
 run-pass	consts/packed_pattern2.rs
@@ -1408,6 +1413,7 @@ run-pass	drop/drop-on-ret.rs
 run-pass	drop/drop-on-untaken-arm.rs
 run-pass	drop/drop-once-on-move.rs
 run-pass	drop/drop-scope-exit.rs
+run-pass	drop/drop-struct-as-object.rs
 run-pass	drop/drop-trait-generic.rs
 run-pass	drop/drop-trait.rs
 run-pass	drop/drop-uninhabited-enum.rs
@@ -1424,12 +1430,15 @@ compile-fail	drop/explicit-drop-call-named-ref.rs
 check-pass	drop/field-replace-in-struct-with-drop.rs
 run-pass	drop/generic-drop-trait-bound-15858.rs
 check-pass	drop/issue-17718-const-destructors.rs
+run-pass	drop/issue-2734.rs
 run-pass	drop/issue-2735-2.rs
 run-pass	drop/issue-2735-3.rs
+run-pass	drop/issue-2735.rs
 run-pass	drop/issue-90752-raw-ptr-shenanigans.rs
 run-pass	drop/issue-979.rs
 check-pass	drop/lint-tail-expr-drop-order-gated.rs
 compile-fail	drop/missing-drop-method.rs
+run-pass	drop/nested-return-drop-order.rs
 run-pass	drop/no-drop-flag-size.rs
 run-pass	drop/rc-trait-object-double-drop.rs
 compile-fail	drop/repeat-drop-2.rs
@@ -1848,8 +1857,10 @@ run-pass	functions-closures/fn-bare-assign.rs
 run-pass	functions-closures/fn-bare-coerce-to-block.rs
 run-pass	functions-closures/fn-bare-item.rs
 run-pass	functions-closures/fn-bare-size.rs
+run-pass	functions-closures/fn-coerce-field.rs
 compile-fail	functions-closures/fn-help-with-err-generic-is-not-function.rs
 compile-fail	functions-closures/fn-help-with-err.rs
+run-pass	functions-closures/fn-item-type-cast.rs
 run-pass	functions-closures/fn-item-type-coerce.rs
 run-pass	functions-closures/fn-lval.rs
 run-pass	functions-closures/fn-type-infer.rs
@@ -2758,6 +2769,7 @@ run-pass	mir/mir_codegen_call_converging.rs
 run-pass	mir/mir_codegen_spike1.rs
 run-pass	mir/mir_codegen_switch.rs
 run-pass	mir/mir_codegen_switchint.rs
+run-pass	mir/mir_coercion_casts.rs
 run-pass	mir/mir_constval_adts.rs
 run-pass	mir/mir_match_arm_guard.rs
 run-pass	mir/mir_small_agg_arg.rs
@@ -3131,6 +3143,7 @@ compile-fail	parser/bad-struct-following-where.rs
 compile-fail	parser/bare-type-in-impl-parameter.rs
 check-pass	parser/bastion-of-the-turbofish.rs
 compile-fail	parser/better-expected.rs
+run-pass	parser/block-expr-statement-vs-expr.rs
 compile-fail	parser/bound-single-question-mark.rs
 compile-fail	parser/bounds-lifetime-1.rs
 compile-fail	parser/bounds-lifetime-2.rs
@@ -3900,6 +3913,8 @@ run-pass	regions/regions-self-in-enums.rs
 run-pass	regions/regions-simple.rs
 run-pass	regions/regions-static-bound-rpass.rs
 run-pass	regions/regions-static-closure.rs
+check-pass	regions/regions-trait-1.rs
+run-pass	regions/regions-trait-object-1.rs
 run-pass	regions/regions-variance-contravariant-use-contravariant.rs
 run-pass	regions/regions-variance-covariant-use-covariant.rs
 check-pass	regions/type-param-outlives-reempty-issue-74429.rs
@@ -4112,6 +4127,7 @@ check-pass	rust-2021/future-prelude-collision-imported.rs
 compile-fail	rust-2021/ice-return-unsized-can-impl-2.rs
 compile-fail	rust-2021/ice-return-unsized-can-impl.rs
 compile-fail	rust-2021/ice-unsized-fn-params.rs
+check-pass	rust-2021/inherent-dyn-collision.rs
 check-pass	rust-2021/prelude2021.rs
 check-pass	rust-2021/reserved-prefixes-migration.rs
 compile-fail	rust-2021/reserved-prefixes.rs
@@ -4231,7 +4247,6 @@ compile-fail	static/static-closures.rs
 compile-fail	static/static-lifetime.rs
 run-pass	static/static-list-initialization-5917.rs
 compile-fail	static/static-mut-bad-types.rs
-compile-fail	static/static-reference-to-fn-2.rs
 build-pass	static/static-str-deref-ref.rs
 check-pass	static/static-string-slice-9249.rs
 run-pass	static/static-struct-initialization-5688.rs
@@ -4688,6 +4703,7 @@ compile-fail	traits/dont-autoderef-ty-with-escaping-var.rs
 compile-fail	traits/dont-suggest-impl-as-closure-arg.rs
 compile-fail	traits/duplicate-generic-parameter-error-86756.rs
 compile-fail	traits/duplicate-methods.rs
+run-pass	traits/dynamic-dispatch-trait-objects-5666.rs
 compile-fail	traits/error-reporting/ambiguity-in-dropck-err-reporting.rs
 compile-fail	traits/explicit-reference-cast-unrelated-leaf.rs
 run-pass	traits/false-ambiguity-where-clause-builtin-bound.rs
@@ -4737,7 +4753,6 @@ run-pass	traits/issue-5008-borrowed-traitobject-method-call.rs
 compile-fail	traits/issue-50480.rs
 build-pass	traits/issue-56202.rs
 run-pass	traits/issue-6334.rs
-compile-fail	traits/issue-7013.rs
 check-pass	traits/issue-70944.rs
 compile-fail	traits/issue-75627.rs
 compile-fail	traits/issue-87558.rs
@@ -4767,6 +4782,8 @@ compile-fail	traits/object/supertrait-lifetime-bound.rs
 check-pass	traits/object/trait-object-with-nested-generics.rs
 check-pass	traits/object/trait-object-with-send-supertrait.rs
 compile-fail	traits/object/vs-lifetime-2.rs
+run-pass	traits/object/with-lifetime-bound.rs
+run-pass	traits/objects-owned-object-borrowed-method-headerless.rs
 run-pass	traits/parameterized-with-bounds.rs
 check-pass	traits/polymorphic-trait-creation-7673.rs
 compile-fail	traits/question-mark-span-144304.rs
@@ -4809,6 +4826,7 @@ compile-fail	traits/trivial_impl.rs
 run-pass	traits/ufcs-object.rs
 compile-fail	traits/unspecified-self-in-trait-ref.rs
 check-pass	traits/use-before-def.rs
+run-pass	traits/virtual-call-parameter-handling.rs
 compile-fail	traits/wf-object/no-duplicates.rs
 check-pass	traits/where-clause-on-self-assoc-type.rs
 run-pass	traits/where-clause-vs-impl.rs
@@ -4857,7 +4875,6 @@ compile-fail	type-alias-enum-variants/resolve-to-enum-variant-in-type-namespace-
 compile-fail	type-alias-impl-trait/coherence/orphanck-tait-with-projection-arg.rs
 check-pass	type-alias-impl-trait/cross_inference_rpit.rs
 compile-fail	type-alias-impl-trait/issue-60371.rs
-compile-fail	type-alias-impl-trait/issue-98604.rs
 check-pass	type-alias-impl-trait/wf-check-rpit-lifetimes.rs
 check-pass	type-alias/issue-14933.rs
 compile-fail	type-alias/issue-62364-self-ty-arg.rs
@@ -5033,6 +5050,7 @@ compile-fail	unboxed-closures/unboxed-closure-sugar-used-on-struct-3.rs
 compile-fail	unboxed-closures/unboxed-closure-sugar-used-on-struct.rs
 run-pass	unboxed-closures/unboxed-closures-all-traits.rs
 compile-fail	unboxed-closures/unboxed-closures-borrow-conflict.rs
+run-pass	unboxed-closures/unboxed-closures-boxed.rs
 run-pass	unboxed-closures/unboxed-closures-by-ref.rs
 run-pass	unboxed-closures/unboxed-closures-call-fn-autoderef.rs
 run-pass	unboxed-closures/unboxed-closures-call-sugar-autoderef.rs
