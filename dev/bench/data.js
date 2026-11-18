@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795017066161,
+  "lastUpdate": 1795017068510,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -8596,6 +8596,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "lsp peak RSS",
             "value": 66.5,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "committer": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "distinct": true,
+          "id": "e3bf32322b8d9dc702a88d989cbc3553579942b1",
+          "message": "Prelude ManuallyDrop, NonNull and UnsafeCell; reads through Deref borrow shared\n\n- prelude: ManuallyDrop<T> (no drop glue), NonNull<T>, UnsafeCell<T>\n- a place reached through an acg-made `deref_mut` is a shared borrow for the\n  borrow checker unless the place is written or borrowed `&mut`\n- tests/ui: run-pass 1281, check-pass 1051, compile-fail 2810\n\nAccepted compile-fail removals (passed only because UnsafeCell / ManuallyDrop\nwere unknown; they need const-eval checks):\nconsts/promoted_const_call3.rs, consts/refs-to-cell-in-final.rs\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-18T15:46:21Z",
+          "tree_id": "491135e92ed925fc6188540c026bbc8faab4bd4d",
+          "url": "https://github.com/mizchi/zust/commit/e3bf32322b8d9dc702a88d989cbc3553579942b1"
+        },
+        "date": 1795017068231,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "lsp definition p50",
+            "value": 0.574,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp hover p50",
+            "value": 0.526,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp completion p50",
+            "value": 1.068,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp references p50",
+            "value": 3.191,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp rename p50",
+            "value": 0.677,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp signatureHelp p50",
+            "value": 0.742,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp documentHighlight p50",
+            "value": 0.823,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp ready (startup to indexed)",
+            "value": 126.282,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp peak RSS",
+            "value": 66.465,
             "unit": "MiB"
           }
         ]
