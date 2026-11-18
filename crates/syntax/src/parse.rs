@@ -2206,7 +2206,12 @@ impl Parser {
                 if self.eat_punct(";") {
                     return Ok(ItemKind::Fn(sig, None));
                 }
+                let st = self.i;
                 let b = self.block()?;
+                // (a `const fn`'s body text: constants may call it)
+                if sig.quals.iter().any(|q| q == "const") {
+                    self.init_text = self.tokens_text(st, self.i);
+                }
                 Ok(ItemKind::Fn(sig, Some(b)))
             }
             "struct" | "union" => {

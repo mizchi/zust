@@ -1119,6 +1119,15 @@ pub fn summarize(item: &Item, owner: Option<&Owner>) -> R<Summary> {
         }
         ItemKind::Fn(fs, Some(body)) => {
             let name = fs.name.clone();
+            if !item.init_text.is_empty() && fs.generics.params.is_empty() {
+                let ps: Option<Vec<String>> = fs.params.iter().map(|(p, _)| match p {
+                    Pat::Ident(false, _, n, None) => Some(n.clone()),
+                    _ => None,
+                }).collect();
+                if let Some(ps) = ps {
+                    sm.const_fns.push((name.clone(), ps, item.init_text.clone()));
+                }
+            }
             let export = has_attr(&item.attrs, "no_mangle");
             let is_main = name == "main" && !export;
             let mut sig = parse_sig(fs, false, is_main, None)?;

@@ -240,6 +240,8 @@ pub struct Program {
     pub unions: std::collections::HashSet<String>,
     /// The tag type of enums with `#[repr(u8)]` and the like
     pub reprs: HashMap<String, Ty>,
+    /// `const fn` bodies a constant may call: name -> (parameter names, body text)
+    pub const_fns: HashMap<String, (Vec<String>, String)>,
     /// 同じ型への別々の trait impl が同じ名前の関数を持つもの (`impl From<&str> for P` と `impl From<String> for P`):
     /// 最初の名前 → 候補の関数 (2 つ目以降は `P::from#1` のような名前)。呼び出し側が引数の型で選ぶ
     pub overloads: FxMap<String, Vec<u32>>,
@@ -491,6 +493,7 @@ impl Program {
             blanket_traits: Default::default(),
             unions: Default::default(),
             reprs: Default::default(),
+            const_fns: Default::default(),
             overloads: Default::default(),
             by_last: FxMap::default(),
             traits: FxMap::default(),
@@ -521,6 +524,9 @@ impl Program {
             .collect();
         for sm in sums {
             p.unions.extend(sm.unions.iter().cloned());
+            for (n, ps, b) in &sm.const_fns {
+                p.const_fns.insert(n.clone(), (ps.clone(), b.clone()));
+            }
             for (n, t) in &sm.reprs {
                 if let Some(t) = Ty::from_suffix(t) {
                     p.reprs.insert(n.clone(), t);
@@ -1504,6 +1510,23 @@ impl Program {
         }
     }
 
+    /// A `const fn` body of `let x = ..;` statements and a tail expression, with the locals in env
+    fn eval_block_env(&self, b: &crate::parse::Block, env: &mut Vec<(String, i128)>, depth: u32) -> R<i128> {
+        use crate::parse::{Pat, Stmt};
+        let n = b.stmts.len();
+        for (k, s) in b.stmts.iter().enumerate() {
+            match s {
+                Stmt::Let(Pat::Ident(false, _, name, None), _, Some(init), None) => {
+                    let v = self.eval_const(&subst_consts(init, env), depth)?;
+                    env.push((name.clone(), v));
+                }
+                Stmt::Expr(x, false) if k + 1 == n => return self.eval_const(&subst_consts(x, env), depth),
+                _ => return Err("unsupported statement in a const fn".into()),
+            }
+        }
+        Err("a const fn without a value".into())
+    }
+
     /// 自前の構文木の整数の定数式を評価する
     pub fn eval_const(&self, e: &crate::parse::Expr, depth: u32) -> R<i128> {
         use crate::parse::Expr;
@@ -1530,6 +1553,24 @@ impl Program {
                 }
             }
             Expr::Path(None, p) if p.segs.len() == 1 && (p.segs[0].name == "true" || p.segs[0].name == "false") => (p.segs[0].name == "true") as i128,
+            // (a call of a `const fn` with integer arguments: its body with the parameters bound)
+            Expr::Call(f, args) if matches!(&**f, Expr::Path(None, p) if p.segs.len() == 1 && self.const_fns.contains_key(p.segs[0].name.as_str())) => {
+                let Expr::Path(None, p) = &**f else { unreachable!() };
+                if depth > 48 {
+                    return Err("constant evaluation recursed too deeply".into());
+                }
+                let (ps, body) = self.const_fns[p.segs[0].name.as_str()].clone();
+                if ps.len() != args.len() {
+                    return Err("wrong number of arguments in a constant call".into());
+                }
+                let mut env: Vec<(String, i128)> = vec![];
+                for (n, a) in ps.iter().zip(args) {
+                    env.push((n.clone(), self.eval_const(a, depth + 1)?));
+                }
+                let b = crate::parse::parse_expr(&body)?;
+                let Expr::Block(_, _, b) = b else { return Err("unsupported const fn".into()) };
+                self.eval_block_env(&b, &mut env, depth + 1)?
+            }
             // (`X[0]` / `T.1` of a const array, byte string, tuple or struct)
             Expr::Index(b, i, _) => {
                 let i = self.eval_const(i, depth)?;
@@ -2912,4 +2953,45 @@ pub fn const_generic_value(env: &TyEnv, name: &str) -> Option<u32> {
         Ty::Array(Ty::Unit, n) if *n < CONST_LEN_BASE => Some(*n),
         _ => None,
     })
+}
+
+/// e with the names bound in env (the latest binding of each) replaced by their integer values
+fn subst_consts(e: &crate::parse::Expr, env: &[(String, i128)]) -> crate::parse::Expr {
+    use crate::parse::Expr;
+    let r = |x: &Expr| Box::new(subst_consts(x, env));
+    match e {
+        Expr::Path(None, p) if p.segs.len() == 1 && p.segs[0].args.is_empty() => {
+            match env.iter().rev().find(|(n, _)| *n == p.segs[0].name) {
+                Some((_, v)) if *v < 0 => Expr::Paren(Box::new(Expr::Unary("-".into(), Box::new(Expr::Lit((-*v).to_string(), p.pos)), Default::default()))),
+                Some((_, v)) => Expr::Lit(v.to_string(), p.pos),
+                None => e.clone(),
+            }
+        }
+        Expr::Paren(x) => Expr::Paren(r(x)),
+        Expr::Unary(op, x, s) => Expr::Unary(op.clone(), r(x), *s),
+        Expr::Binary(op, a, b, s) => Expr::Binary(op.clone(), r(a), r(b), *s),
+        Expr::Cast(x, t) => Expr::Cast(r(x), t.clone()),
+        Expr::Call(f, args) => Expr::Call(f.clone(), args.iter().map(|a| subst_consts(a, env)).collect()),
+        Expr::MethodCall(x, m, g, args, s) => Expr::MethodCall(r(x), m.clone(), g.clone(), args.iter().map(|a| subst_consts(a, env)).collect(), *s),
+        Expr::Index(a, b, s) => Expr::Index(r(a), r(b), *s),
+        Expr::If(c, t, els) => {
+            let mut t = t.clone();
+            for st in &mut t.stmts {
+                if let crate::parse::Stmt::Expr(x, semi) = st {
+                    *st = crate::parse::Stmt::Expr(subst_consts(x, env), *semi);
+                }
+            }
+            Expr::If(r(c), t, els.as_ref().map(|x| r(x)))
+        }
+        Expr::Block(l, u, b) => {
+            let mut b = b.clone();
+            for st in &mut b.stmts {
+                if let crate::parse::Stmt::Expr(x, semi) = st {
+                    *st = crate::parse::Stmt::Expr(subst_consts(x, env), *semi);
+                }
+            }
+            Expr::Block(l.clone(), *u, b)
+        }
+        e => e.clone(),
+    }
 }

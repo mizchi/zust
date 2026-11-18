@@ -78,6 +78,12 @@ fn const_expr_text(e: &Expr) -> Option<String> {
             _ => return None,
         },
         Expr::Index(b, i, _) => format!("{}[{}]", const_expr_text(b)?, const_expr_text(i)?),
+        // (a `const fn` call: `[i32; add(1, 2)]`)
+        Expr::Call(f, args) if matches!(&**f, Expr::Path(None, p) if single(p).is_some()) => {
+            let Expr::Path(None, p) = &**f else { unreachable!() };
+            let a: Option<Vec<String>> = args.iter().map(const_expr_text).collect();
+            format!("{}({})", single(p)?, a?.join(", "))
+        }
         Expr::Field(b, f, _) => format!("{}.{f}", const_expr_text(b)?),
         Expr::If(c, t, Some(e)) => {
             let t = match t.stmts.as_slice() {

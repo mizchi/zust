@@ -1235,6 +1235,7 @@ check-pass	consts/const-eval/zst_operand_eval.rs
 run-pass	consts/const-expr-in-fixed-length-vec.rs
 run-pass	consts/const-expr-in-vec-repeat.rs
 run-pass	consts/const-fields-and-indexing.rs
+run-pass	consts/const-fn-const-eval.rs
 check-pass	consts/const-fn-destructuring-arg.rs
 run-pass	consts/const-fn-method.rs
 run-pass	consts/const-fn-val.rs
@@ -1292,6 +1293,8 @@ build-pass	consts/issue-21562.rs
 run-pass	consts/issue-23833.rs
 check-pass	consts/issue-28822.rs
 run-pass	consts/issue-29914.rs
+run-pass	consts/issue-29927-1.rs
+run-pass	consts/issue-29927.rs
 check-pass	consts/issue-33903.rs
 run-pass	consts/issue-37222.rs
 check-pass	consts/issue-37550-1.rs
