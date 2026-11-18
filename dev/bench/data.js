@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795023514497,
+  "lastUpdate": 1795023516582,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -15733,6 +15733,70 @@ window.BENCHMARK_DATA = {
           {
             "name": "tests/ui check-pass passing",
             "value": 1073,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui build-pass pass rate",
+            "value": 57.04,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui build-pass passing",
+            "value": 77,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui compile-fail pass rate",
+            "value": 38.14,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui compile-fail passing",
+            "value": 2806,
+            "unit": "tests"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "committer": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "distinct": true,
+          "id": "69724e0e583bea00e19f3cbd798e4d6efe04f865",
+          "message": "std::iter::repeat / once / empty / repeat_with / successors\n\n- prelude iterators for these; a program writing `iter::` and one of the\n  names gets the Iterator trait with them\n- `ptr::write(` / `ptr::read(` / `drop_in_place(` pull in those functions by\n  that exact form (a bare `write` / `read` is not looked up), keeping the\n  no_std programs' caches within the size budget\n- test_variant reports an internal error instead of panicking on an enum\n  instance without variants (`iter::empty().collect()` with `T` unresolved)\n- tests/ui: run-pass 1340, check-pass 1076\n\nAccepted compile-fail removal (rejected before only because Iterator was\nmissing; it needs the captured-lifetime check on `impl Trait` returns):\nsuggestions/lifetimes/explicit-lifetime-suggestion-in-proper-span-issue-121267.rs\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-18T17:32:22Z",
+          "tree_id": "8b7e67b23ada4abbe1ea0be30ac2470260c706c6",
+          "url": "https://github.com/mizchi/zust/commit/69724e0e583bea00e19f3cbd798e4d6efe04f865"
+        },
+        "date": 1795023516242,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tests/ui run-pass pass rate",
+            "value": 55.53,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui run-pass passing",
+            "value": 1340,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui check-pass pass rate",
+            "value": 59.55,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui check-pass passing",
+            "value": 1076,
             "unit": "tests"
           },
           {
