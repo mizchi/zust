@@ -23,30 +23,74 @@ English | [日本語](README.ja.md)
 > **Status**: experimental.
 >
 > - zustc only targets Linux x86-64 and does not support all of Rust ([supported language](docs/language.md)).
-> - zustc does no borrow checking and similar checks, so it is not a replacement for rustc for checking correctness.
+> - zustc's checks (types, borrow checking without region errors) are partial, so it is not a replacement for rustc for checking correctness.
 > - zust-analyzer implements only part of what rust-analyzer does.
 
 ## How fast
 
-These numbers are for a generated program with 1000 functions (gen1000), measured with `python3 bench/vs_rustc.py`
-(2026-11-15, 4 cores):
+### Against rustc
 
-| | cold | edit one place | cache on disk |
-|---|---:|---:|---:|
-| zustc | 118 ms | 28 ms | 105 KiB |
-| rustc `-C incremental` | 827 ms | 417 ms | 22 MiB |
+Measured with `python3 bench/vs_rustc.py` and `python3 cratebench/run.py` (2026-11-18, 4 cores, rustc 1.100.0; times
+are medians of 3 runs). gen1000 is a generated program with 1000 functions:
 
-Results for other programs are in [docs/reports/2026-11-15-15-status.md](docs/reports/2026-11-15-15-status.md).
+| gen1000 | cold | no-op | edit one function | on disk | binary (stripped) | run |
+|---|---:|---:|---:|---:|---:|---:|
+| zustc | 131 ms | 15 ms | 22 ms | 766 KiB | 324 KiB | 10 ms |
+| zustc `-O` | 270 ms | 57 ms | 56 ms | 1199 KiB | 341 KiB | 3 ms |
+| rustc `-C incremental` | 643 ms | 172 ms | 348 ms | 10.8 MiB | 1038 KiB | 9 ms |
+| rustc `-O` | 15456 ms | - | - | - | 377 KiB | 2 ms |
+| **zustc vs rustc `-C incremental`** | **4.9x faster** | **11x faster** | **16x faster** | **14x smaller** | **3.2x smaller** | |
 
-zust-analyzer and rust-analyzer were compared on zustc's own sources, with 40 query points (2026-11-18,
-`python3 bench/lsp_parity.py`):
+Small programs (`bench/rt`: fib, hashmap, matmul, nbody, sieve, sort, strings) and real crates (cratebench: fnv,
+adler2, hex, itoa, rustc-hash, cfg-if; all six give the same output as rustc):
 
-| | startup until symbols resolve | memory | references p50 | same reference count as rust-analyzer |
+| | zustc vs rustc `-C incremental` (bench/rt) | zustc vs rustc (cratebench) |
+|---|---:|---:|
+| cold build | 2.9–4.1x faster (24–49 ms vs 82–178 ms) | 2.3–4.4x faster (21–75 ms vs 93–306 ms) |
+| edit and rebuild | 12–18x faster (5–7 ms vs 68–98 ms) | 4.7–8.8x faster (12–28 ms vs 63–140 ms) |
+| binary | 11–24x smaller | 90–550x smaller (8–48 KiB vs 4.4 MiB) |
+| run time vs rustc `-O` | zustc 1.1–4.1x slower, zustc `-O` 1.1–3.2x slower | zustc 3.1–17x slower, zustc `-O` 0.9–7.3x |
+
+zustc's code is close to rustc's debug build at run time, and faster than it in all seven small programs (rustc's
+debug build is 3–26x slower than rustc `-O` there).
+
+zust-analyzer against rust-analyzer on zustc's own sources (40 query points, `python3 bench/lsp_parity.py`,
+2026-11-18):
+
+| | startup until symbols resolve | memory | references p50 | agreement (40 points) |
 |---|---:|---:|---:|---:|
-| zust-analyzer | 129 ms | 66 MB | 4.2 ms | 97% |
-| rust-analyzer | 5594 ms | 2.4 GB | 24.1 ms | (baseline) |
+| zust-analyzer | 144 ms | 70 MB | 4.6 ms | 95.3% |
+| rust-analyzer | 6302 ms | 2150 MB | 154.1 ms | 96.2% |
 
 Details are in [bench/lsp_parity_result.md](bench/lsp_parity_result.md).
+
+### KPIs over time
+
+The KPIs are build speed, build cache size and LSP latency, measured with `python3 bench/ci_bench.py` on generated
+programs of 1000 / 5000 functions. Builds are compared by instruction counts (valgrind), because wall-clock times on
+the shared machine vary by about ±20%.
+
+| point | gen5000 no-op build | gen5000 edit 1 fn | gen5000 `check` | gen5000 cache | gen1000 cache | gen5000 cold peak RSS |
+|---|---:|---:|---:|---:|---:|---:|
+| before borrow checking (ac2361e) | | | 3883.9 M | | | |
+| borrow checking added ([report 08](docs/reports/2026-11-18-08-borrow-checking.md)) | 746.0 M | 709.3 M | 3971.0 M | 1902.8 KiB | 387.2 KiB | 76.0 MiB |
+| compatibility round ([report 09](docs/reports/2026-11-18-09-compat-with-kpis.md), 03367bc) | 685.7 M | 648.1 M | 3912.7 M | 1902.8 KiB | 387.2 KiB | 54.6 MiB |
+| faster prelude selection (3a1fd22) | 661.1 M | 622.4 M | 3887.3 M | 1902.8 KiB | 387.2 KiB | 51.8 MiB |
+| now: async, statics, const fn (e598fdf) | 661.9 M | 622.6 M | 3892.9 M | 1902.8 KiB | 387.2 KiB | 51.9 MiB |
+| **change since borrow checking** | **-11.3%** | **-12.2%** | **-2.0%** | **0%** | **0%** | **-32%** |
+
+LSP (p50 of `bench/lsp_parity.py` on zustc's own sources; these are wall-clock times):
+
+| point | definition | hover | completion | references | startup until indexed |
+|---|---:|---:|---:|---:|---:|
+| borrow checking added | 0.65 ms | 0.47 ms | 1.28 ms | 3.36 ms | 135 ms |
+| compatibility round (03367bc) | 0.53 ms | 0.43 ms | 1.09 ms | 3.06 ms | 116 ms |
+| faster prelude selection (3a1fd22) | 0.58 ms | 0.47 ms | 1.37 ms | 3.45 ms | 109 ms |
+| now (e598fdf) | 0.42 ms | 0.34 ms | 0.90 ms | 1.78 ms | 277 ms (two targets) |
+
+Each change is kept only if these do not get worse. When an LSP time rises in a full run, the two builds are
+compared again on the same machine, alternating runs, before it is called noise. The last row comes from such a
+comparison, and its startup is the sum over two target files.
 
 The [benchmark dashboard](https://mizchi.github.io/zust/dev/bench/) tracks these numbers for every commit to main.
 They are measured on shared GitHub Actions runners, so times fluctuate. The instruction-count series show changes
@@ -59,12 +103,12 @@ only the tests it can be asked to handle (no nightly features, auxiliary crates 
 
 | kind | applicable | pass |
 |---|---:|---:|
-| run-pass (builds, runs, same output) | 2413 | 1120 (46.4%) |
-| check-pass (accepted by `zustc check`) | 1807 | 831 (46.0%) |
-| build-pass | 135 | 64 (47.4%) |
-| compile-fail (rejected at an annotated line) | 7358 | 2291 (31.1%) |
+| run-pass (builds, runs, same output) | 2413 | 1364 (56.5%) |
+| check-pass (accepted by `zustc check`) | 1807 | 1098 (60.8%) |
+| build-pass | 135 | 81 (60.0%) |
+| compile-fail (rejected at an annotated line) | 7358 | 2808 (38.2%) |
 
-zustc does no borrow checking, so many compile-fail tests are out of its reach by design.
+[SUPPORTED.md](SUPPORTED.md) breaks this down by area as a checklist.
 
 ## Requirements
 

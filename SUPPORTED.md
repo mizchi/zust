@@ -100,6 +100,17 @@ Status as of 2026-11-18 (commit e598fdf). The percentages are rustc's own UI tes
 - [ ] SIMD, inline asm
 - proc macros: not applicable (they are separate crates)
 
+## Speed against rustc (2026-11-18)
+
+- [x] cold build: 4.9x faster than rustc `-C incremental` on gen1000, 2.3–4.4x on real crates
+- [x] edit and rebuild: 16x faster on gen1000, 12–18x on small programs, 4.7–8.8x on real crates
+- [x] build cache on disk: 14x smaller (766 KiB vs 10.8 MiB on gen1000)
+- [x] binary: 3.2x smaller on gen1000, 90–550x on real crates
+- [ ] run time: zustc is 1.1–4.1x slower than rustc `-O` on small programs (faster than rustc's debug build);
+  zustc `-O` 1.1–3.2x
+
+The tables are in the [README](README.md#against-rustc).
+
 ## KPIs now
 
 | KPI | now | before this work |
