@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795040762033,
+  "lastUpdate": 1795040764010,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -20131,6 +20131,85 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/mizchi/zust/commit/e7fdc21f4d3cd1a7b2eaaf1c9ceee769ab39b995"
         },
         "date": 1795039894869,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "parity documentSymbol (名前の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity workspace/symbol (上位 20 の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity definition (行き先の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity hover (名前を含む)",
+            "value": 92.5,
+            "unit": "%"
+          },
+          {
+            "name": "parity references (数の一致)",
+            "value": 97.297,
+            "unit": "%"
+          },
+          {
+            "name": "parity documentHighlight (数の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity rename (書き換えの一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity signatureHelp (名前・引数の数・今の引数の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity completion `x.\\|` (書いてある名前を含む)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity completion `na\\|me` (同)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity 一致の平均",
+            "value": 98.98,
+            "unit": "%"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "committer": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "distinct": true,
+          "id": "9bd52971c4495a073fd139a6141d86196d5acf23",
+          "message": "Let user code redefine more std type names (Mutex, Command, Peekable, PathBuf ..)\n\nThe prelude now renames these on a clash, as it already did for Map, Filter\nand the other iterator adapters, instead of reporting a duplicate definition.\ntests/ui: 3 more pass, no regressions. KPIs unchanged within noise.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-18T22:08:11Z",
+          "tree_id": "8e341069c2f5aa1b6dfdf444f5992321f0cfbb68",
+          "url": "https://github.com/mizchi/zust/commit/9bd52971c4495a073fd139a6141d86196d5acf23"
+        },
+        "date": 1795040763521,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
