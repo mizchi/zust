@@ -1,11 +1,11 @@
-# セルフホストの第 10 段階: アイテムの要約を自前の構文木へ移す
+# Self-hosting stage 10: moving item summaries to our own syntax tree
 
-日付: 2026-11-16
+Date: 2026-11-16
 
-- `src/ast_summary.rs`：front.rs の `summarize` / `parse_sig` / `lift_closures` / `parse_and_summarize`（syn の構文木 → 要約）を自前の構文木に移植。
-  `tests/ast_summary.rs` が driver と同じ前処理の後の全 2199 アイテムで syn 版と同じ要約になることを確かめる
-  （const の初期値のテキスト・境界のテキストは proc_macro2 の表示と同じ空け方）
-- 要約の型（`Summary` / `SigSyn` / `VariantSyn` / `ClosureSyn` / `Owner` など）も types.rs へ
-- モジュールの中の `use a::{X as Y}` の別名（名前がぶつからないときも）
-- 修正：`let nn = ..; if let Some(nn) = nn { v.push(nn) }`（match 対象と同じ名前の束縛でムーブ）で外側の変数をムーブ済みにせず、二重に解放していた
-- `if` / ブロックの式の型を `peek` で引く（`if c { "a" } else { "b" }.to_string()`）
+- `src/ast_summary.rs`: ported front.rs's `summarize` / `parse_sig` / `lift_closures` / `parse_and_summarize` (syn syntax tree → item summary) to our own syntax tree.
+  `tests/ast_summary.rs` checks that all 2199 items, after the same preprocessing as the driver, produce the same item summary as the syn version
+  (the text of const initializers and bounds uses the same spacing as proc_macro2's output)
+- The item summary types (`Summary` / `SigSyn` / `VariantSyn` / `ClosureSyn` / `Owner`, etc.) also moved to types.rs
+- Aliases in `use a::{X as Y}` inside modules (also when names do not collide)
+- Fix: in `let nn = ..; if let Some(nn) = nn { v.push(nn) }` (a move through a binding with the same name as the match scrutinee), the outer variable was not marked as moved, so it was freed twice
+- The type of an `if` / block expression is looked up with `peek` (`if c { "a" } else { "b" }.to_string()`)

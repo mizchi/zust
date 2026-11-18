@@ -1,33 +1,33 @@
-# minclif のレジスタ割り当て
+# Register allocation in minclif
 
-日付: 2026-11-16
+Date: 2026-11-16
 
-minclif は命令をすぐ機械語にし、値はすべてスタックのスロットに置いていた (命令ごとに rax / rcx に読んで結果を書く)。
-割り当てには関数全体を見る必要があるので、2 回組み立てる形にした (`src/minclif.rs`):
+minclif turned instructions into machine code immediately and placed every value in a stack slot (each instruction loads into rax / rcx and writes the result back).
+Allocation needs to see the whole function, so it now assembles twice (`src/minclif.rs`):
 
-1. **記録と解析**: `FunctionBuilder` は呼ばれた命令を `Op` (104 種。Emitter の公開メソッドから機械的に作った) として記録しながら、
-   今までの組み立て (`Emitter`) で 1 回目を組み立てる (値の番号と型を決め、acg が問い合わせる値・ブロックを返す)。
-   1 回目は値・変数の読み書き (命令の番号)、区間 (ブロックを続けて書いた範囲) と飛び先、関数を呼ぶ命令を記録する
-2. **割り当て** (`plan`): 1 つの区間の中で書いて読む値はその範囲、区間をまたぐもの (変数・ブロック引数・ループで生きる値) は
-   後ろ向きのデータフロー (区間の入口・出口で生きているか) で生きている区間の端まで延ばした範囲を生存区間にし、線形走査で
-   rbx・r12〜r15 (呼ばれた側が保存: 呼び出しをまたぐ区間用) と rsi・rdi・r8〜r10 (呼び出しを含まない区間用) に割り当てる。
-   足りなければ「読み書きの回数 / 長さ」が小さいものをスロットへ。浮動小数点・i128・スロットを直接使う値 (アドレスとして
-   使う・幅の違う読み書き) はスロットのまま。すぐ後が trap の呼び出し (panic) は戻らないので、またぐとしない
-3. **本番**: 割り当てを持った Emitter で記録した命令をもう一度組み立てる。今までの命令の組み立てはそのまま使え、
-   値の読み書き (load_rax / store_rax など) が割り当てを見る。よく使う命令はレジスタの形で書く: 64 / 32 bit の
-   add / sub / and / or / xor / imul と cmp は `mov d, a; op d, b`、定数は直接、load / store は `[base + off]`。
-   使った呼ばれた側が保存するレジスタはプロローグで保存し ret の前に戻す。呼び出しの引数が引数のレジスタにあるときは
-   スタックを経由する (順に書くと壊れる)
+1. **Recording and analysis**: `FunctionBuilder` records each called instruction as an `Op` (104 kinds, generated mechanically from Emitter's public methods) while
+   assembling a first pass with the existing assembler (`Emitter`) (it decides value numbers and types, and returns the values and blocks that acg queries).
+   The first pass records value and variable reads and writes (instruction numbers), segments (ranges where a block was written contiguously) and jump targets, and instructions that call functions
+2. **Allocation** (`plan`): for a value written and read inside one segment, the live interval is that range; for values that cross segments (variables, block parameters, values live in loops),
+   the range is extended to the end of the live segments using backward dataflow (whether it is live at segment entry and exit). Linear scan then
+   assigns them to rbx, r12 to r15 (callee-saved: for intervals that cross calls) and rsi, rdi, r8 to r10 (for intervals with no calls).
+   If registers run out, those with a small "number of reads and writes / length" go to slots. Floating point, i128, and values that use a slot directly (used
+   as an address, or read and written with different widths) stay in slots. A call immediately followed by a trap (panic) does not return, so it does not count as crossing
+3. **Final pass**: the Emitter, now holding the allocation, assembles the recorded instructions again. The existing instruction assembly is reused as-is,
+   and value loads and stores (load_rax / store_rax, etc.) consult the allocation. Common instructions are written in register form: 64 / 32 bit
+   add / sub / and / or / xor / imul and cmp become `mov d, a; op d, b`, constants are used directly, and load / store use `[base + off]`.
+   Callee-saved registers that are used are saved in the prologue and restored before ret. When call arguments are in argument registers, they
+   go through the stack (writing them in order would clobber them)
 
-あわせて: `icmp` の値を `brif` だけが使うなら `cmp` + `jcc` にする、else に渡すものがなければ直接飛ぶ、すぐ次への `jmp` は nop。
-浮動小数点は xmm8〜15 (呼び出しで壊れるので、呼び出しを含まない区間だけ) に置き、`fadd` などは 2 つ目もレジスタから読む。
-変数と値の間は直接写す。自分の関数 (`_x..`) を呼ぶときは可変長引数用の `al` を書かない。
-`MINCLIF_NO_REGALLOC=1` で割り当てなし (比較用)。
+Also: if an `icmp` value is used only by `brif`, it becomes `cmp` + `jcc`; if nothing is passed to else, jump directly; a `jmp` to the immediately next block is a nop.
+Floating point values are placed in xmm8 to xmm15 (clobbered by calls, so only for intervals with no calls), and `fadd` and similar also read the second operand from a register.
+Copies between variables and values are direct. When calling our own functions (`_x..`), `al` for variadic arguments is not written.
+`MINCLIF_NO_REGALLOC=1` disables allocation (for comparison).
 
-結果:
-- `python3 bench/runtime.py` の実行時間 (driver2 -O。出力はすべて一致):
+Results:
+- Run times from `python3 bench/runtime.py` (driver2 -O. All outputs match):
 
-  | | 割り当てなし | 整数だけ | + 浮動小数点・直接の写し | Cranelift の経路 (`zustc -O`) | rustc -O |
+  | | no allocation | integers only | + floating point, direct copies | Cranelift path (`zustc -O`) | rustc -O |
   |---|---:|---:|---:|---:|---:|
   | fib | 111 ms | 90 | 96 | 82 | 30 |
   | hashmap | 341 | 210 | 208 | 149 | 103 |
@@ -37,10 +37,10 @@ minclif は命令をすぐ機械語にし、値はすべてスタックのスロ
   | sort | 624 | 344 | 341 | 252 | 210 |
   | strings | 227 | 119 | 120 | 70 | 42 |
 
-  rustc のデバッグビルドよりどれも速く、ビルドは Cranelift の経路の約半分の時間。実行は Cranelift の経路にまだ届かない
-  (struct のフィールド・配列の要素はメモリのまま、命令の選び方がまだ単純)
-- 簡単なループ (1000 要素の和 × 20 万回): 1.08 秒 → 0.44 秒 (rustc の opt-level=0 と同じ)
-- セルフホスト版のコンパイラで自分自身をコンパイルする時間: 18.0 秒 → **10.1 秒** (front 3.2 → 1.7 秒、codegen 13.0 → 7.6 秒)。
-  コンパイラの実行ファイルは 23 MB → 12 MB
-- リンカに wild (0.10) を入れた (`cargo install --locked wild-linker --version 0.10.0`。link.rs は wild > mold > ld.lld の順に使う)。
-  ワークスペースのベンチ: cold 355 ms、関数の本体の変更 37 ms、bin の変更 60 ms
+  All are faster than rustc's debug build, and the build takes about half the time of the Cranelift path. Execution has not yet caught up with the Cranelift path
+  (struct fields and array elements stay in memory, and instruction selection is still simple)
+- A simple loop (sum of 1000 elements × 200 thousand times): 1.08 seconds → 0.44 seconds (the same as rustc opt-level=0)
+- Time for the self-hosted compiler to compile itself: 18.0 seconds → **10.1 seconds** (front 3.2 → 1.7 seconds, codegen 13.0 → 7.6 seconds).
+  The compiler executable went from 23 MB → 12 MB
+- Added wild (0.10) as the linker (`cargo install --locked wild-linker --version 0.10.0`. link.rs uses wild > mold > ld.lld in that order).
+  Workspace benchmark: cold 355 ms, function body change 37 ms, bin change 60 ms

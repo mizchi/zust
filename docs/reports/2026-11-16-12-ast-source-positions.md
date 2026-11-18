@@ -1,17 +1,17 @@
-# 自前の構文木のソース位置
+# Source positions in our own syntax tree
 
-日付: 2026-11-16
+Date: 2026-11-16
 
-- `parse::Span { start, at }` を、panic の場所に使う式 (Unary / Binary / AssignOp / MethodCall / Index / Macro) に持たせた。
-  start は式の先頭 (syn の `e.span()`)、at は式ごとの位置 (メソッド名・`[`・演算子・マクロの開き括弧)
-- 式のマクロの引数のテキストは、元の行・桁の配置のまま作る (`group_text_laid_out`)。読み直すときはマクロの位置からずらす
-  (`parse_expr_at` / `ast_closure::macro_args_at`) ので、`println!` の引数の中の `unwrap()` なども元の位置になる
-- acg の `loc()` がこの位置を使う: 添字の範囲外 (Vec は `[`、配列は式の先頭)・オーバーフロー・0 除算・`unwrap` / `expect` (メソッド名)・
-  `panic!` / `assert!` / `dbg!` (マクロの先頭) の場所が rustc と同じになった。`tests/panic_loc.rs` が rustc と比べる
-- `tests/driver2.rs` は stderr (panic のメッセージ) も比べるようにした (139 すべて一致)。`matches!` の引数は型推論とコード生成が同じ構文木 (`ast_closure::matches_parts`) を使う
-- `dbg!` の桁は syn 版が引数の位置を出していた (rustc はマクロの位置)。syn 版も直した
-- 移植の初めに作った ast_codegen.rs (v1) は acg が置き換えたので消した (tests/ast_codegen.rs は driver2 で tests/acg を試す)
-- コンパイルエラーにも場所を付ける: Path / Field / Lit にも位置を持たせ、acg のエラーには「位置を持つ一番内側の式」の
-  `行:桁:` を付ける (メソッド呼び出し・フィールドは名前の位置、let の型の不一致は初期値、引数の型の不一致はその引数、
-  return・末尾の式はその値)。構文エラー・要約のエラーはアイテムの中の行をファイルの行に直す。
-  `tests/compile_errors.rs` が tests/compile_errors/*.rs で syn 版のドライバとメッセージ (場所ごと) が同じか比べる
+- Added `parse::Span { start, at }` to the expressions used for panic locations (Unary / Binary / AssignOp / MethodCall / Index / Macro).
+  start is the start of the expression (syn's `e.span()`); at is the per-expression position (the method name, `[`, the operator, the macro's opening bracket)
+- The text of expression macro arguments is built with the original line and column layout (`group_text_laid_out`). When re-parsing, it is offset from the macro's position
+  (`parse_expr_at` / `ast_closure::macro_args_at`), so things like `unwrap()` inside `println!` arguments also get their original position
+- acg's `loc()` uses this position: the locations of out-of-range indexing (`[` for Vec, the start of the expression for arrays), overflow, division by zero, `unwrap` / `expect` (the method name), and
+  `panic!` / `assert!` / `dbg!` (the start of the macro) now match rustc. `tests/panic_loc.rs` compares with rustc
+- `tests/driver2.rs` now also compares stderr (panic messages) (all 139 match). For `matches!` arguments, type inference and code generation use the same syntax tree (`ast_closure::matches_parts`)
+- For the column of `dbg!`, the syn version printed the position of the argument (rustc uses the macro's position). The syn version was fixed too
+- ast_codegen.rs (v1), made at the start of the port, was replaced by acg and deleted (tests/ast_codegen.rs runs tests/acg through driver2)
+- Compile errors also get locations: Path / Field / Lit also carry positions, and acg errors get the `line:col:` of "the innermost expression that has a position"
+  (the name position for method calls and fields, the initializer for a let type mismatch, the argument itself for an argument type mismatch,
+  the value for return and tail expressions). For syntax errors and item summary errors, line numbers within the item are converted to file line numbers.
+  `tests/compile_errors.rs` checks on tests/compile_errors/*.rs that the messages (including locations) are the same as with the syn-version driver

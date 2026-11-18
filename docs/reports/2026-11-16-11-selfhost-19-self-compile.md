@@ -1,18 +1,18 @@
-# セルフホストの第 19 段階: zustc で zustc (syn・Cranelift を使わない経路) をコンパイルする
+# Self-hosting stage 19: compiling zustc (the path without syn and Cranelift) with zustc
 
-日付: 2026-11-16
+Date: 2026-11-16
 
-- `tests/selfhost/build_compiler.py`：driver2 + acg + minclif と、それが使うモジュール全部 (lexer / macros / prelude / types / parse /
-  ast_* / program / solver / ctors / ast_infer / ast_consteval / link) を 1 ファイル (約 3 万 1 千行) のコンパイラにまとめる
+- `tests/selfhost/build_compiler.py`: bundles driver2 + acg + minclif and every module they use (lexer / macros / prelude / types / parse /
+  ast_* / program / solver / ctors / ast_infer / ast_consteval / link) into a single-file compiler (about 31 thousand lines)
   (`compiler <in.rs> -o <out> [-O]`)
-- これを zustc (driver2) でコンパイルしたものが、実際にプログラムをコンパイルして動かせる (zustc が自分自身をコンパイルした)
-- `tests/selfhost_compiler.sh`：rustc 版と zustc 版の 2 つのコンパイラで probe / examples / acg をコンパイルし、.o と実行結果を比べる。
-  さらに zustc 版で自分自身をもう一度コンパイルする (2 段目)
-- 結果: **139 個のプログラムすべてで、rustc 版と zustc 版のコンパイラが同じバイト列の .o を出し、実行結果も同じ**。
-  zustc 版のコンパイラで自分自身をコンパイルし直すと、1 段目と同じ .o (約 18 MB) になる (不動点)
-- 比べて見つかったもの: `matches!(tmp, Some(V(x)) if ..)` で束縛が一時値からムーブして二重に drop していた (syn 版にもあった)、
-  acg の i128 の `abs` / 加減算のオーバーフロー検査
-- そこまでに直したこと: モジュールを平らにするときの名前 (`std::path::Path` と同名の定義、`use super::*` で見える use、`&'static`)、
-  型推論 (受け手の型が分からない `len`、注釈つきの let、`x.clone()` の整数)、acg の deref の強制変換 (`&&T` → `&T`、`&String` → `&str`)、
-  範囲の添字の受け手の自動参照、`matches!` の guard の中のクロージャ、minclif の bitcast の 0 拡張。zustc がまだ扱えない書き方
-  (分解代入・`collect::<Option<Vec<_>>>`・クロージャから fn ポインタへの変換・`std::f64::consts` の値など) はソースを書き換えた
+- When compiled with zustc (driver2), it can actually compile and run programs (zustc compiled itself)
+- `tests/selfhost_compiler.sh`: compiles probe / examples / acg with the two compilers, the rustc version and the zustc version, and compares the .o files and run results.
+  It then compiles itself once more with the zustc version (second stage)
+- Result: **for all 139 programs, the rustc-built and zustc-built compilers emit byte-identical .o files, and the run results are also the same**.
+  Recompiling itself with the zustc-built compiler gives the same .o (about 18 MB) as the first stage (fixed point)
+- Found by comparison: in `matches!(tmp, Some(V(x)) if ..)` the binding moved out of a temporary and it was dropped twice (also present in the syn version),
+  and the overflow checks for i128 `abs` / add/sub in acg
+- Fixed along the way: names when flattening modules (definitions with the same name as `std::path::Path`, uses visible through `use super::*`, `&'static`),
+  type inference (`len` with an unknown receiver type, annotated lets, `x.clone()` on integers), deref coercions in acg (`&&T` → `&T`, `&String` → `&str`),
+  auto-reference of the receiver for range indexing, closures inside a `matches!` guard, zero extension in minclif's bitcast. Constructs zustc cannot handle yet
+  (destructuring assignment, `collect::<Option<Vec<_>>>`, conversion from closures to fn pointers, the values of `std::f64::consts`, etc.) were rewritten in the source

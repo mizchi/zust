@@ -1,32 +1,32 @@
-# セルフホスト版のコンパイラの前半 (front) を速くする
+# Speeding up the first half (front) of the self-hosted compiler
 
-日付: 2026-11-16
+Date: 2026-11-16
 
-zustc で作ったコンパイラ (`tests/selfhost/build_compiler.py`) で自分自身 (約 3 万 3 千行) をコンパイルするときの前半の時間
-(`ZUSTC_PROF=1 ... --time` の段階ごとの時間。gdb で止めた場所を数えて、多いところから直した):
+Time spent in the first half when the zustc-built compiler (`tests/selfhost/build_compiler.py`) compiles itself (about 33 thousand lines)
+(per-stage times from `ZUSTC_PROF=1 ... --time`. We counted where gdb stopped and fixed the most frequent places first):
 
-| 段階 | 最初 | 後 | rustc 版のコンパイラ (後) |
+| Stage | Initial | After | rustc-built compiler (after) |
 |---|---:|---:|---:|
 | macros | 9870 ms | 499 ms | 96 ms |
-| flatten (モジュールを平らに) | 2501 | 552 | 51 |
+| flatten (flatten modules) | 2501 | 552 | 51 |
 | hoist + ctor | 613 | 467 | 61 |
 | split | 578 | 287 | 18 |
-| prelude の選択 | 1219 | 74 | 16 |
-| 要約 | 約 2400 | 1054 | 110 |
+| prelude selection | 1219 | 74 | 16 |
+| item summary | about 2400 | 1054 | 110 |
 | program + refs | 862 | 645 | 72 |
-| **front の合計** | **18159** | **3745** | **439** |
+| **front total** | **18159** | **3745** | **439** |
 
-- macros: 自前の proc_macro2 (mini_pm2) の字句解析がトークンごとに行頭から桁を数えていた (前から数え足す)。
-  `find_calls` / 定義集めが括弧ごとに中身を写していた (中にマクロの名前が無い括弧は辿らない)。
-  展開したものにマクロの名前が無ければもう一周しない。さらに、ソース全体は速い `lexer::tokenize` で見て、proc_macro2 で読むのは
-  定義と呼び出しの括弧の中だけにした (`tests/macros_expand.rs` が前の版 `expand_reference` と結果が同じか確かめる)
-- flatten: 表を埋める `iter_mut().take(n).skip(m)` が毎回先頭から辿っていた (添字のループに)
-- prelude の選択: ソース全体の `contains` を 40 回ほど呼ぶ。prelude の `str::find` を libc の `memmem` にした
-  (zustc で作るプログラムすべてで速くなる)
-- split: アイテムのハッシュ (キャッシュのキー) は SipHash を 2 つ使っていた。2 本の掛け算・回転の混ぜ合わせ (`src/key.rs`) にした。
-  呼び出しの区切りに依らない (8 byte ずつ溜める) ので、std と zustc の prelude で Hash の実装が write を呼ぶ区切りが違っても同じ値になる
-- 要約: アイテムごとに独立なので fork して分ける (driver2 の関数のコンパイルと同じ)。構文解析の `punct_at` (演算子の優先順位ごとに
-  何度も呼ぶ) をバイトで比べ、記号でない位置では演算子を探さない。字句解析は ASCII をバイトのまま見る
-- refs: 4 つの表を引く前に、どれかの表にある名前の集合で 1 回だけ引く
-- 残りは生成するコードの質 (小さい関数のインライン展開がない、`Iterator` のアダプタが関数呼び出しになる)。後半の codegen は 15.8 秒
-  (rustc 版 0.95 秒) で、こちらも同じ理由
+- macros: the lexer of our own proc_macro2 (mini_pm2) counted columns from the start of the line for every token (it now counts on from the previous one).
+  `find_calls` / definition collection copied the contents of every bracket (brackets that contain no macro name are no longer walked).
+  If the expansion contains no macro name, there is no further round. In addition, the whole source is scanned with the fast `lexer::tokenize`, and proc_macro2 only reads
+  the inside of definitions and call brackets (`tests/macros_expand.rs` checks that the result is the same as the previous version, `expand_reference`)
+- flatten: `iter_mut().take(n).skip(m)` used to fill a table walked from the start every time (replaced with an index loop)
+- prelude selection: calls `contains` on the whole source about 40 times. The prelude's `str::find` now uses libc's `memmem`
+  (this speeds up every program built with zustc)
+- split: the item hash (the cache key) used two SipHashes. It now uses a mix of two multiply-and-rotate lanes (`src/key.rs`).
+  It does not depend on how calls are split (it buffers 8 bytes at a time), so it gives the same value even when the Hash implementations in std and zustc's prelude split their write calls differently
+- item summary: items are independent, so the work is split with fork (the same as function compilation in driver2). The parser's `punct_at` (called
+  many times per operator precedence level) compares bytes, and does not search for operators at positions that are not symbols. The lexer looks at ASCII as raw bytes
+- refs: before looking up the 4 tables, look up once in the set of names present in any of the tables
+- The rest is the quality of the generated code (no inlining of small functions; `Iterator` adapters become function calls). The second half, codegen, takes 15.8 seconds
+  (0.95 seconds for the rustc version), for the same reason

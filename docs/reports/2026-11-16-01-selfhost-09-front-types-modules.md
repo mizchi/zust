@@ -1,16 +1,16 @@
-# セルフホストの第 9 段階: front.rs の型の部分を分ける・モジュールの名前空間
+# Self-hosting stage 9: splitting out the type part of front.rs, and module namespaces
 
-日付: 2026-11-16
+Date: 2026-11-16
 
-- `src/types.rs`：front.rs から syn に依存しない部分（`Ty` / `TySyn` / `ArrLen` / intern）を分けた（front は `pub use` で見せる）
-- `src/ast_types.rs`：front.rs の `parse_tysyn`（syn の型 → TySyn）を自前の構文木に移植。`tests/ast_types.rs` が全ファイルの 3914 個の型で syn 版と一致することを確かめる
-  （`dyn` の trait は proc_macro2 と同じ空け方のテキストにする）
-- モジュールの名前空間：別々のモジュールで同じ名前（`types::Ty` と `parse::Ty`）を定義したら、平らにする前にモジュールの中の定義を `m__Ty` にし、
-  中の参照・`use crate::m::{Ty as X}`（別名も）・`m::Ty` / `crate::m::Ty` / `super::Ty` のパスを直す（enum のバリアント名・フィールドは変えない）。Debug の表示は元の名前
-- 関数の中の同じ名前の static（`intern` ごとの `static TABLE`）は、外に出す前に関数ごとに名前を変える
-- `std::sync::Mutex`、`Box::leak`、`std::ptr::eq`、`Result::as_ref`、`HashSet<&T>::get(&t)`（`&T` を `&&T` に）、生ポインタのハッシュ、`&&str == &&str`
-- 修正：参照を通して再帰する型（`enum T { R(&'static T) }`）の `==` でコンパイラがスタックを使い切っていた（glue 関数で比べる）
-- 修正：型推論で `&String` を `&str` の引数に渡すと参照どうしを同じ型にしていた（ガードつきの腕で `t.len()` が壊れた値を読んだ）
-- 修正：`v == b"crate"`（v は後で型の決まる `x.to_vec()`）で v をバイト列の型にしていた
-- 修正：`String` の `contains` などの書き換えで作ったノードに型の記録がなく、メソッドが見つからなかった
-- クロージャの変数の呼び出し `tok(k)` の戻り値の型を `peek` で引く
+- `src/types.rs`: split out the parts of front.rs that do not depend on syn (`Ty` / `TySyn` / `ArrLen` / intern) (front re-exports them with `pub use`)
+- `src/ast_types.rs`: ported front.rs's `parse_tysyn` (syn type → TySyn) to our own syntax tree. `tests/ast_types.rs` checks that it matches the syn version on the 3914 types across all files
+  (the trait in `dyn` is rendered as text with the same spacing as proc_macro2)
+- Module namespaces: when separate modules define the same name (`types::Ty` and `parse::Ty`), the definition inside the module is renamed to `m__Ty` before flattening,
+  and the references inside, `use crate::m::{Ty as X}` (including aliases), and the paths `m::Ty` / `crate::m::Ty` / `super::Ty` are rewritten (enum variant names and fields are not changed). Debug output shows the original name
+- Statics with the same name inside functions (a `static TABLE` per `intern`) are renamed per function before being moved out
+- `std::sync::Mutex`, `Box::leak`, `std::ptr::eq`, `Result::as_ref`, `HashSet<&T>::get(&t)` (`&T` to `&&T`), hashing of raw pointers, `&&str == &&str`
+- Fix: `==` on a type that recurses through a reference (`enum T { R(&'static T) }`) made the compiler run out of stack (it now compares with a glue function)
+- Fix: in type inference, passing `&String` to a `&str` argument unified the two reference types (in a match arm with a guard, `t.len()` read a broken value)
+- Fix: in `v == b"crate"` (v is `x.to_vec()`, whose type is decided later), v was given the byte-string type
+- Fix: nodes created by rewriting `String`'s `contains` and similar had no type record, so the method was not found
+- The return type of a call through a closure variable `tok(k)` is looked up with `peek`

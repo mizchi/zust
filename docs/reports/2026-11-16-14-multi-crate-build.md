@@ -1,50 +1,50 @@
-# 複数ファイル・複数クレート (`zustc build <workspace>`)
+# Multiple files and multiple crates (`zustc build <workspace>`)
 
-日付: 2026-11-16
+Date: 2026-11-16
 
-- `mod x;` は `x.rs` / `x/mod.rs` を読む (`src/srcmap.rs`)。行番号を変えないように、`mod x;` は空白にして中身をファイルの最後に
-  `pub mod x { .. }` として足し、結合したソースの行 → (ファイル, 行) の表を持つ。エラーは `ファイル:行:桁:` になる
-- ワークスペースのファイルは 1 行 1 クレート (`lib <名前> <根> [依存..]` / `bin <名前> <根> [依存..]`)。クレートごとに .o を作り、最後にリンクする
-- クレート C は「C のソース + 依存するクレートのソースを `pub mod 名前 { .. }` で後ろに付けたもの」として解析する。
-  依存するクレートの総称でない関数と static は、そのクレートの .o にあるのでコンパイルせずシンボルで呼ぶ。総称関数のインスタンスと
-  prelude は各 .o に local で置く。クレートのモジュールの中の名前は必ず `名前__Item` にする (どのクレートと一緒に解析しても同じシンボル)。
-  クレートの中の `crate::` はそのクレート、`pub use` の再輸出も辿る
-- panic の表はクレートごとに置き、実行ファイルの表が依存するクレートの表 (`_xT_<名前>`) の列を指す。表にはファイルの対応と、
-  名前を変えて桁がずれた所 (`geom::f` → `geom__f` は同じ長さだが、`f` → `geom__f` は長くなる) の表を入れ、panic の場所は
-  元のファイル・行・桁で出る (rustc と同じ `geom/src/lib.rs:13:37`)。unwrap の呼んだ場所 (`__EXR_CALLER`) は実行ファイルのものを皆で使う
-- 指紋: クレートごとに「コンパイラ・設定・自分のソース・依存するクレートのインターフェースのハッシュ」を `<名前>.fp` に書き、同じなら
-  何もしない。インターフェースのハッシュは、総称でない関数はシグネチャだけ、それ以外 (総称関数・trait・総称の impl・`const fn`・
-  `-> impl Trait`) は本体と行も入れる。だから依存されるクレートの関数の本体を変えても、使う側はコンパイルし直さない (リンクだけ)
-- 古いクレートは互いのソースしか使わない (.o を待たない) ので、fork して同時にコンパイルする。キャッシュはクレートごと (`<名前>.crcache2`)
-- `tests/workspace.rs`：tests/workspace (3 クレート・5 ファイル: trait オブジェクト・static・再輸出・Display) を rustc (rlib + リンク) と
-  比べる (出力・終了コード・クレートとファイルをまたぐ 0 除算 / 添字 / unwrap の panic の場所)。関数の本体の変更でそのクレートだけ、
-  シグネチャの変更で使う側も作り直すことも確かめる
+- `mod x;` reads `x.rs` / `x/mod.rs` (`src/srcmap.rs`). To keep line numbers unchanged, `mod x;` is blanked out and its contents are appended at the end of the file
+  as `pub mod x { .. }`, with a table from lines of the combined source → (file, line). Errors become `file:line:col:`
+- The workspace file has one crate per line (`lib <name> <root> [deps..]` / `bin <name> <root> [deps..]`). A .o is built per crate and they are linked at the end
+- Crate C is analyzed as "C's source + the sources of the crates it depends on, appended as `pub mod name { .. }`".
+  Non-generic functions and statics of dependency crates are in that crate's .o, so they are not compiled and are called by symbol. Instances of generic functions and
+  the prelude are placed locally in each .o. Names inside a crate's modules are always `name__Item` (the same symbol no matter which crate it is analyzed with).
+  `crate::` inside a crate means that crate, and `pub use` re-exports are followed too
+- The panic table is placed per crate, and the executable's table points to the list of dependency crates' tables (`_xT_<name>`). The table holds the file mapping and
+  a table of places where renaming shifted columns (`geom::f` → `geom__f` has the same length, but `f` → `geom__f` is longer), so panic locations are
+  reported with the original file, line and column (`geom/src/lib.rs:13:37`, the same as rustc). The unwrap caller location (`__EXR_CALLER`) of the executable is shared by all
+- Fingerprints: per crate, a hash of "compiler, settings, own source, interfaces of dependency crates" is written to `<name>.fp`, and if it is unchanged
+  nothing is done. The interface hash includes only the signature for non-generic functions; for everything else (generic functions, traits, generic impls, `const fn`,
+  `-> impl Trait`) it also includes the body and lines. So changing the body of a function in a depended-on crate does not recompile its users (only relinks)
+- Out-of-date crates only use each other's sources (they do not wait for .o files), so they are compiled concurrently with fork. The cache is per crate (`<name>.crcache2`)
+- `tests/workspace.rs`: compares tests/workspace (3 crates, 5 files: trait objects, statics, re-exports, Display) with rustc (rlib + link)
+  (output, exit code, panic locations for division by zero / indexing / unwrap across crates and files). It also checks that a change to a function body rebuilds only that crate,
+  and a change to a signature rebuilds its users too
 
-`python3 bench/ws_bench.py --rustc` (6 lib × 8 ファイル × 40 関数 = 1920 関数 + bin、4 コア。rustc は `-C incremental` の rlib + リンク):
+`python3 bench/ws_bench.py --rustc` (6 lib × 8 files × 40 functions = 1920 functions + bin, 4 cores. rustc uses `-C incremental` rlib + link):
 
-| 場面 | zustc build | rustc |
+| Scenario | zustc build | rustc |
 |---|---:|---:|
 | cold | 489 ms | 3786 ms |
-| 変更なし | 7 ms | 1043 ms |
-| いちばん下のクレートの関数の本体を変える | 66 ms | 1062 ms |
-| いちばん下のクレートの関数のシグネチャを変える | 189 ms | 1136 ms |
-| bin の main を変える | 83 ms | 1029 ms |
+| no changes | 7 ms | 1043 ms |
+| change the body of a function in the bottom crate | 66 ms | 1062 ms |
+| change the signature of a function in the bottom crate | 189 ms | 1136 ms |
+| change main in bin | 83 ms | 1029 ms |
 
-(どれも 3 回の中央値。シグネチャの場面は 150〜190 ms で揺れる)
+(All are the median of 3 runs. The signature scenario varies between 150 and 190 ms)
 
-速くするためにしたこと (この順に計った):
+What we did to make it faster (measured in this order):
 
-| 変更 | cold | 変更なし | 本体 | シグネチャ | bin |
+| Change | cold | no changes | body | signature | bin |
 |---|---:|---:|---:|---:|---:|
-| 最初 (毎回すべてのクレートを解析) | 1229 | 725 | 936 | 733 | 805 |
-| 指紋 + インターフェースのハッシュ + クレートごとのキャッシュ | 1296 | 15 | 798 → 83 | 743 | 237 |
-| モジュールの名前の付け替えの 2 乗を除く (トークンごとの線形探索を表に) | 880 | 24 | 83 | 422 | 108 |
-| 古いクレートを fork で同時に | 486 | 20 | 81 | 229 | 113 |
-| インターフェースのハッシュを保存、名前の表を FxHash にしパスでない名前を先に除く | 464 | 7 | 60 | 154 | 82 |
+| initial (analyze every crate every time) | 1229 | 725 | 936 | 733 | 805 |
+| fingerprint + interface hash + per-crate cache | 1296 | 15 | 798 → 83 | 743 | 237 |
+| remove the quadratic cost of module renaming (per-token linear search replaced by a table) | 880 | 24 | 83 | 422 | 108 |
+| compile out-of-date crates concurrently with fork | 486 | 20 | 81 | 229 | 113 |
+| save the interface hash, use FxHash for the name table, and filter out non-path names first | 464 | 7 | 60 | 154 | 82 |
 
-(「本体」の 798 → 83 は、平らにした後のテキストで `{` を探していたインターフェースのハッシュの誤りを直した分)。
-残りはリンク (約 22 ms、毎回すべての .o) と、使う側ごとに依存するクレートのソースを解析し直す時間 (名前の付け替え・分割・prelude の選択)。
+(The 798 → 83 for "body" comes from fixing a bug in the interface hash, which searched for `{` in the flattened text.)
+What remains is linking (about 22 ms, all .o files every time) and the time to re-analyze dependency crates' sources for each user (renaming, splitting, prelude selection).
 
-セルフホストで見つかった遅さ: zustc で作ったコンパイラが自分自身をコンパイルすると、.o を作る段階が 13 分以上かかっていた。
-`parse::tokenize` がトークンごとに行頭から文字を数えていた (長い行で 2 乗。rustc 版は SIMD の `chars().count()` で目立たなかった) ので、
-前のトークンから数え足すようにした。2.4 秒になり、2 段目全体は 36 秒 (rustc 版のコンパイラは 5.6 秒)。
+Slowness found during self-hosting: when the zustc-built compiler compiled itself, the stage that builds the .o took more than 13 minutes.
+`parse::tokenize` counted characters from the start of the line for every token (quadratic on long lines; in the rustc version it was not noticeable thanks to SIMD `chars().count()`), so
+it now counts on from the previous token. It became 2.4 seconds, and the whole second stage is 36 seconds (the rustc-built compiler takes 5.6 seconds).

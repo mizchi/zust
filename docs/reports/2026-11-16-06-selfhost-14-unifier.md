@@ -1,14 +1,14 @@
-# セルフホストの第 14 段階: 型推論の単一化器を分ける
+# Self-hosting stage 14: splitting out the type inference unifier
 
-日付: 2026-11-16
+Date: 2026-11-16
 
-- `src/solver.rs`：infer.rs から、構文木に依存しない単一化器（型変数・形 `Shape`・union-find・関連型と境界の後回し・
-  `known_g` / `apply` / `resolve` など 900 行余り）を分けた。infer.rs の `Inf` は syn に固有の部分だけを持ち、`Deref` で `Solver` を使う。
-  境界の関連型の束縛（`Iterator<Item = T>`）も自前の構文解析で読む
-- `src/ctors.rs`：値として使ったタプルのバリアント / タプル struct（`.map(Some)` / `.map(Ty::Struct)` / `.map(W)` / `let f = E::V;`）を
-  クロージャ（`|__c0| Some(__c0)`）に書き換える（字句の上で、enum / struct の定義から要素数を読む。行番号は変えない）
-- 足したもの：`None::<u32>`（型引数を書いたバリアント）、ユーザの `impl Index` の結果の型の推論、配列の `as_slice()`
-- 修正：
-  - `move` でないクロージャのキャプチャを、クロージャ全体で「値か参照か」を決めていた。Copy の値（`f(p)` の p）を渡すだけで
-    Vec のキャプチャまで値で持ち、二重に解放していた。キャプチャごとに決める（値として渡す・返すものだけ値で持つ）
-  - const ジェネリクスの仮の長さで配列のサイズの掛け算があふれていた（デバッグビルドで trap）
+- `src/solver.rs`: split out of infer.rs the unifier that does not depend on the syntax tree (type variables, shapes `Shape`, union-find, deferral of associated types and bounds,
+  `known_g` / `apply` / `resolve`, etc., a little over 900 lines). `Inf` in infer.rs keeps only the syn-specific parts and uses `Solver` through `Deref`.
+  Associated type bindings in bounds (`Iterator<Item = T>`) are also read by our own parser
+- `src/ctors.rs`: rewrites tuple variants / tuple structs used as values (`.map(Some)` / `.map(Ty::Struct)` / `.map(W)` / `let f = E::V;`) into
+  closures (`|__c0| Some(__c0)`) (lexically, reading the number of fields from the enum / struct definitions. Line numbers are not changed)
+- Added: `None::<u32>` (a variant with explicit type arguments), inference of the result type of a user `impl Index`, `as_slice()` on arrays
+- Fixes:
+  - for non-`move` closures, "by value or by reference" was decided for the whole closure. Merely passing a Copy value (p in `f(p)`) made
+    the Vec capture be held by value too, and it was freed twice. This is now decided per capture (only what is passed or returned by value is held by value)
+  - array size multiplication overflowed with the placeholder length for const generics (trap in debug builds)

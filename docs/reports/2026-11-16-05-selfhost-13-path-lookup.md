@@ -1,7 +1,7 @@
-# セルフホストの第 13 段階: パスの検索を syn から分ける
+# Self-hosting stage 13: separating path lookup from syn
 
-日付: 2026-11-16
+Date: 2026-11-16
 
-- `program.rs` の `PPath`（セグメントの名前と型引数の有無）の上に、モジュールを外す・struct / enum のバリアント / 関数をパスで引く処理を移した。
-  front.rs の syn 版（`fn_by_path` など）は syn のパスを `PPath` にして呼ぶだけ。自前の構文木のパスからも `PPath::of` で引ける
-- 修正：関数の中のアイテムを外に出すとき、トップレベルの同じ名前（`fn walk` が 2 つ）とぶつかるものも改名する
+- On top of `PPath` in `program.rs` (segment names and whether type arguments are present), moved the logic that strips modules and looks up structs / enum variants / functions by path.
+  The syn version in front.rs (`fn_by_path`, etc.) just converts the syn path to a `PPath` and calls it. Paths in our own syntax tree can also be looked up with `PPath::of`
+- Fix: when moving items out of a function, also rename those that collide with a top-level item of the same name (two `fn walk`)

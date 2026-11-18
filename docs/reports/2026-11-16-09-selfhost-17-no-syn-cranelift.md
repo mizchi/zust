@@ -1,13 +1,13 @@
-# セルフホストの第 17 段階: syn・Cranelift を使わない経路でプログラムを作る
+# Self-hosting stage 17: building programs through a path that uses neither syn nor Cranelift
 
-日付: 2026-11-16
+Date: 2026-11-16
 
-- `src/ast_codegen.rs`：自前の構文木と ast_infer の型から minclif で機械語を作るコード生成 (codegen.rs の置き換えの始まり)。
-  `build_object(src)` が lexer → prelude → ast_summary → program → ast_infer → ast_codegen → minclif → ELF の .o を作る (syn も Cranelift も使わない)
-- いま扱えるもの: 整数・bool・char・キャスト、let / 代入 / 複合代入、算術・ビット演算・比較・`&&` / `||`、if / while / loop / break / continue / return、
-  ユーザの関数と extern "C" の関数の呼び出し。`tests/ast_codegen.rs` が `tests/acg/*.rs` (no_std) を cc でリンクして rustc 版と出力を比べる
-- v1: 値の表し方を codegen.rs に寄せた。ローカル変数はスタックスロット、struct / enum / 配列 / タプル / fat pointer はアドレスで扱い memcpy で複製、
-  集約型の引数はアドレス渡し、集約型の戻り値は隠れた第 1 引数 (sret)。struct / タプル / 配列 / enum の値とパターン (match / if let / while let / let-else)、
-  フィールド・添字 (範囲検査)・`&a[i..j]`・`&[T; N]` → `&[T]`、文字列 / バイト列リテラル (.data)、`len` / `as_bytes` / `as_ptr`、
-  範囲・配列・スライスの for、ジェネリックでないメソッド。`tests/acg/aggs.rs` が rustc と同じ出力になる
-  (ast_infer は配列・タプル・参照・演算・キャストの式の型も記録するようにした)
+- `src/ast_codegen.rs`: code generation that produces machine code with minclif from our own syntax tree and the types from ast_infer (the start of replacing codegen.rs).
+  `build_object(src)` goes lexer → prelude → ast_summary → program → ast_infer → ast_codegen → minclif → ELF .o (using neither syn nor Cranelift)
+- Currently handled: integers, bool, char, casts, let / assignment / compound assignment, arithmetic, bitwise ops, comparisons, `&&` / `||`, if / while / loop / break / continue / return,
+  calls to user functions and extern "C" functions. `tests/ast_codegen.rs` links `tests/acg/*.rs` (no_std) with cc and compares the output with the rustc version
+- v1: value representation now follows codegen.rs. Local variables are stack slots; struct / enum / array / tuple / fat pointer are handled by address and copied with memcpy;
+  aggregate arguments are passed by address; aggregate return values use a hidden first argument (sret). struct / tuple / array / enum values and patterns (match / if let / while let / let-else),
+  fields, indexing (bounds checks), `&a[i..j]`, `&[T; N]` → `&[T]`, string / byte-string literals (.data), `len` / `as_bytes` / `as_ptr`,
+  for over ranges, arrays and slices, non-generic methods. `tests/acg/aggs.rs` gives the same output as rustc
+  (ast_infer now also records the types of array, tuple, reference, operator and cast expressions)

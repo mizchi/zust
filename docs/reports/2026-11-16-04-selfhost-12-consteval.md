@@ -1,9 +1,9 @@
-# セルフホストの第 12 段階: 定数評価を自前の構文木へ移す
+# Self-hosting stage 12: moving const evaluation to our own syntax tree
 
-日付: 2026-11-16
+Date: 2026-11-16
 
-- `src/ast_consteval.rs`：consteval.rs（static の初期値 → データのバイト列とリロケーション）を自前の構文木に移植し、
-  driver の static の評価はこちらを使う（失敗したときだけ、場所つきのメッセージを syn 版で作る）。
-  文字列・バイト文字列のリテラルの中身（エスケープ・raw 文字列）も自前で読む。
-  `tests/ast_consteval.rs` が probe / examples の全 696 個の const / static で syn 版と同じバイト列・リロケーションになることを確かめる
-- 足したもの：`&Box<T>` → `&T` の強制変換（`e = x;` で x: `&Box<Expr>`。推論でも参照どうしをつながず中身を単一化する）
+- `src/ast_consteval.rs`: ported consteval.rs (static initializer → data bytes and relocations) to our own syntax tree,
+  and the driver now uses it to evaluate statics (only on failure does it build the message with location using the syn version).
+  The contents of string and byte-string literals (escapes, raw strings) are also read by our own code.
+  `tests/ast_consteval.rs` checks that all 696 consts / statics in probe / examples produce the same bytes and relocations as the syn version
+- Added: the `&Box<T>` → `&T` coercion (`e = x;` with x: `&Box<Expr>`. Inference also no longer links the two reference types and unifies the contents instead)

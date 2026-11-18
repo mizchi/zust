@@ -1,18 +1,18 @@
-# セルフホストの第 11 段階: Program の表を syn から分ける
+# Self-hosting stage 11: separating the Program tables from syn
 
-日付: 2026-11-16
+Date: 2026-11-16
 
-- `src/program.rs`：front.rs の `Program` / `FnSig` / `StructDef` / `AdtTable` / `Insts` と、`build`（要約 → 表）・レイアウト・
-  インスタンス化・`implements`・`resolve_with` などを移した。syn の構文木を引く検索（`fn_by_path` / `variant_by_path` / `eval_int` など）は
-  front.rs の別の `impl Program` に残る。const の評価（配列の長さ）は自前の構文解析（`parse::parse_expr`）で行う
-- `src/key.rs`：キャッシュキーの `KeyHasher` を cache.rs から分けた（cache.rs は codegen に依存するため）
-- 足したもの：`thread_local!`（遅延初期化する `static mut` と `with` を持つ unit struct に展開）、unit struct の static、
-  モジュールの中の static のパス（`m::S`）、`use crate::m::*` で取り込んだ名前の改名、`&T` → `*const T`、
-  `&mut v[i]`（`Vec<Box<T>>`）→ `&mut T`、MutexGuard など Deref の型の `*g` / `g[i]`、`Range::contains`、`next_multiple_of`、
-  u128 / i128 の掛け算のオーバーフロー検査（Cranelift に `umul_overflow.i128` がないので 64 bit ずつ組み立てる）、
-  タプル・Option の `Hash::hash`（std と同じ順に書き込むので DefaultHasher の値も一致する）、`it.chain([(&a, &b)])`、
-  `&&u32 == &&u32`、`print!` 系の型 ()
-- 修正：
-  - HashMap のキーの Vec を（要素でなく）バッファのアドレスでハッシュしていた（`HashMap<(u32, Vec<Ty>), u32>` が引けない）
-  - `*b`（b: Box）から中身をムーブしても b を drop して中身を二重に解放していた
-  - `it.zip(slice)` の要素の型を推論せず、`sn == "__array"` で `&String` を `&str` と取り違えていた（推論でも `.iter()` にする）
+- `src/program.rs`: moved front.rs's `Program` / `FnSig` / `StructDef` / `AdtTable` / `Insts`, together with `build` (item summary → tables), layout,
+  instantiation, `implements`, `resolve_with`, and more. Lookups that walk the syn syntax tree (`fn_by_path` / `variant_by_path` / `eval_int`, etc.) stay in
+  a separate `impl Program` in front.rs. Const evaluation (array lengths) uses our own parser (`parse::parse_expr`)
+- `src/key.rs`: split the cache key's `KeyHasher` out of cache.rs (because cache.rs depends on codegen)
+- Added: `thread_local!` (expanded into a lazily initialized `static mut` and a unit struct with `with`), statics of unit structs,
+  paths to statics inside modules (`m::S`), renaming of names imported with `use crate::m::*`, `&T` → `*const T`,
+  `&mut v[i]` (`Vec<Box<T>>`) → `&mut T`, `*g` / `g[i]` on Deref types such as MutexGuard, `Range::contains`, `next_multiple_of`,
+  overflow checks for u128 / i128 multiplication (Cranelift has no `umul_overflow.i128`, so it is built from 64-bit pieces),
+  `Hash::hash` for tuples and Option (written in the same order as std, so DefaultHasher values also match), `it.chain([(&a, &b)])`,
+  `&&u32 == &&u32`, type () for the `print!` family
+- Fixes:
+  - Vec keys in a HashMap were hashed by the buffer address (not by the elements), so `HashMap<(u32, Vec<Ty>), u32>` lookups failed
+  - after moving the contents out of `*b` (b: Box), b was still dropped and the contents were freed twice
+  - the element type of `it.zip(slice)` was not inferred, so `sn == "__array"` mistook `&String` for `&str` (inference now also uses `.iter()`)

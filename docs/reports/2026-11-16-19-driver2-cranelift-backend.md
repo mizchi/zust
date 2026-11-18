@@ -1,22 +1,22 @@
-# driver2 の Cranelift バックエンド (minclif と比べる)
+# A Cranelift backend for driver2 (compared with minclif)
 
-日付: 2026-11-16
+Date: 2026-11-16
 
-minclif の FunctionBuilder は acg が呼んだ命令をすべて `Op` として記録している。その列を Cranelift の IR に組み立て直して
-コンパイルするバックエンドを足した (`src/clif_backend.rs`、`ZUSTC_BACKEND=cranelift`)。acg・インライン展開・キャッシュ・.o の
-書き出しは同じなので、同じフロントエンド・同じ命令の列でバックエンドだけを比べられる。
+minclif's FunctionBuilder records every instruction acg calls as an `Op`. We added a backend that rebuilds that sequence as Cranelift IR and
+compiles it (`src/clif_backend.rs`, `ZUSTC_BACKEND=cranelift`). acg, inlining, the cache and .o
+writing are shared, so only the backend is compared, with the same frontend and the same instruction sequence.
 
-- 値は minclif の値の番号 → Cranelift の値。ブロック・変数・スロット・関数も番号で対応させる (記録のときに命令ごとの戻り値も
-  残すようにした)。acg は値を支配していないブロックで使うことがある (minclif は値をスロットに置くので困らない) ので、
-  定義と別の区間で使う値は Cranelift の Variable にして、SSA は cranelift_frontend に組み立てさせる
-- drop フラグのスロットは途中で作られるので、組み立てた後で入口の先頭に 0 を書く
-- 再配置は名前で返す (呼び出しは PLT32、記号は GOTPCREL)。trap の番号も minclif と同じ
-- `tests/driver2_cranelift.rs`：probe / examples / acg を -O なしと -O で、minclif と出力・stderr・終了コードが同じか (すべて一致)。
-  セルフホスト版のコンパイラを Cranelift でビルドしたものも、minclif でビルドしたものと同じ .o を出す
+- Values map minclif value numbers → Cranelift values. Blocks, variables, slots and functions are also mapped by number (recording now also keeps
+  each instruction's return value). acg sometimes uses a value in a block that the value does not dominate (no problem for minclif, which keeps values in slots), so
+  values used in a segment other than their definition's become Cranelift Variables, and cranelift_frontend builds the SSA
+- Drop-flag slots are created midway, so after building, 0 is written at the start of the entry block
+- Relocations are returned by name (calls are PLT32, symbols are GOTPCREL). Trap codes are also the same as minclif's
+- `tests/driver2_cranelift.rs`: builds probe / examples / acg without -O and with -O, and checks that output, stderr and exit code are the same as minclif (all match).
+  The self-hosted compiler built with Cranelift also emits the same .o as the one built with minclif
 
-実行時間 (`python3 bench/runtime.py`、ms):
+Run times (`python3 bench/runtime.py`, ms):
 
-| | driver2 -O (minclif) | driver2 + Cranelift | driver2 + Cranelift -O | 前の Cranelift の経路 (`zustc -O`) | rustc -O |
+| | driver2 -O (minclif) | driver2 + Cranelift | driver2 + Cranelift -O | previous Cranelift path (`zustc -O`) | rustc -O |
 |---|---:|---:|---:|---:|---:|
 | fib | 110 | 91 | 79 | 79 | 31 |
 | hashmap | 214 | 155 | 144 | 148 | 112 |
@@ -26,24 +26,24 @@ minclif の FunctionBuilder は acg が呼んだ命令をすべて `Op` とし�
 | sort | 334 | 294 | 233 | 248 | 208 |
 | strings | 111 | 91 | 68 | 73 | 42 |
 
-セルフホスト版のコンパイラ (約 3 万 3 千行) で比べる:
+Compared on the self-hosted compiler (about 33 thousand lines):
 
-| バックエンド | そのコンパイル (-j 1。acg を含む) | できる実行ファイル | できたコンパイラが自分自身をコンパイルする時間 |
+| Backend | Compiling it (-j 1, including acg) | Resulting executable | Time for the resulting compiler to compile itself |
 |---|---:|---:|---:|
-| minclif | 2.40 秒 | 8.8 MB | 11.5 秒 |
-| minclif -O | 3.15 秒 | 10.6 MB | 10.1 秒 |
-| Cranelift (opt none) | 5.07 秒 | 5.4 MB | 6.9 秒 |
-| Cranelift -O (speed, backtracking) | 8.26 秒 | 6.6 MB | **6.0 秒** |
-| Cranelift -O (speed, single_pass) | 6.95 秒 | 9.2 MB | 8.9 秒 |
+| minclif | 2.40 seconds | 8.8 MB | 11.5 seconds |
+| minclif -O | 3.15 seconds | 10.6 MB | 10.1 seconds |
+| Cranelift (opt none) | 5.07 seconds | 5.4 MB | 6.9 seconds |
+| Cranelift -O (speed, backtracking) | 8.26 seconds | 6.6 MB | **6.0 seconds** |
+| Cranelift -O (speed, single_pass) | 6.95 seconds | 9.2 MB | 8.9 seconds |
 
-(rustc -O でビルドしたコンパイラは 1.6 秒)。ワークスペースのベンチ (`bench/ws_bench.py`) は minclif / Cranelift で cold 440 / 727 ms、
-変更なし 7 / 6 ms、関数の本体の変更 42 / 36 ms、bin の変更 74 / 67 ms (関数ごとのキャッシュで、変更のあとのコンパイルは小さい)。
+(The compiler built with rustc -O takes 1.6 seconds.) The workspace benchmark (`bench/ws_bench.py`) with minclif / Cranelift: cold 440 / 727 ms,
+no changes 7 / 6 ms, function body change 42 / 36 ms, bin change 74 / 67 ms (with the per-function cache, compilation after a change is small).
 
-分かったこと: minclif は Cranelift (opt none) の約 2 倍、-O どうしで約 2.6 倍速くコンパイルするが、出すコードは 1.0〜6 倍遅い
-(セルフホスト版のコンパイラでは 1.7 倍)。増分のビルドでは変わった関数しかコンパイルしないので、コンパイルの速さの差は
-cold のときだけ効く。
+What we learned: minclif compiles about 2 times faster than Cranelift (opt none), and about 2.6 times faster when both use -O, but the code it emits is 1.0 to 6 times slower
+(1.7 times for the self-hosted compiler). Incremental builds compile only the changed functions, so the difference in compile speed
+only matters for cold builds.
 
-ここまでで、外部クレートに依存しないモジュール（lexer / enc / fxhash / prelude / link / testgen / program / ast_consteval / solver / ctors / ast_infer / minclif / ast_codegen）と、
-依存が小さく代わりを書けるもの（elfz: zstd、macros: proc_macro2）は zustc でコンパイルでき、rustc と同じ結果になる。
-残りの front（syn の構文木を引く検索）/ infer（syn 版。自前の構文木の版 ast_infer はある）/ consteval（codegen の定数の昇格）/ closure / codegen / driver / cache は syn と cranelift の上に書かれている。
-syn の代わりは src/parse.rs（自前の構文木）を土台にして front から順に移す。cranelift の代わり (自前のコード生成) はその後。
+At this point, the modules that do not depend on external crates (lexer / enc / fxhash / prelude / link / testgen / program / ast_consteval / solver / ctors / ast_infer / minclif / ast_codegen), and
+those with small dependencies for which we could write replacements (elfz: zstd, macros: proc_macro2), can be compiled with zustc and give the same results as rustc.
+The rest, front (lookups that walk the syn syntax tree) / infer (the syn version; ast_infer, the version for our own syntax tree, exists) / consteval (constant promotion in codegen) / closure / codegen / driver / cache, is written on top of syn and cranelift.
+The replacement for syn will be moved over starting from front, built on src/parse.rs (our own syntax tree). The replacement for cranelift (our own code generation) comes after that.

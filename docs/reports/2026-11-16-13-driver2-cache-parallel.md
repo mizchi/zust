@@ -1,10 +1,10 @@
-# driver2 のキャッシュと並列化
+# Cache and parallelization in driver2
 
-日付: 2026-11-16
+Date: 2026-11-16
 
-- `src/cache2.rs`：キーは 128 bit のハッシュ、値はアイテムの要約 (`types_enc.rs` の Summary の直列化) か、関数の機械語 +
-  シンボリックな再配置 (acg::Blob。呼び先のインスタンスは「元の関数名 + 型引数」で書く)。保存は今回使ったエントリだけ
-- 関数のキーは「本体のハッシュ + 自分と呼び先のシグネチャ + 名前で現れる struct のレイアウト + const」(driver.rs と同じ考え方)
-- 並列化は fork: 子プロセス k が i % jobs == k の関数をコンパイルし、Blob を pipe で親に返す。親は順に読み戻してインスタンスを
-  要求し直す (j=1 と j=8 で .o は同じバイト列)。zustc の std にスレッドがないので libc の fork / pipe / waitpid を直接呼ぶ
-- 400 関数のプログラム: cold 104 ms (j=1) / 90 ms (j=8)、変更なし 7 ms (リンクしない)、1 関数の変更で 1 関数だけコンパイル
+- `src/cache2.rs`: the key is a 128-bit hash; the value is either an item summary (the serialization of Summary in `types_enc.rs`) or a function's machine code +
+  symbolic relocations (acg::Blob; callee instances are written as "original function name + type arguments"). Only the entries used this time are saved
+- A function's key is "hash of the body + signatures of itself and its callees + layouts of structs that appear by name + consts" (the same idea as driver.rs)
+- Parallelization uses fork: child process k compiles the functions with i % jobs == k and returns the Blobs to the parent over a pipe. The parent reads them back in order and
+  re-requests the instances (the .o is byte-identical with j=1 and j=8). zustc's std has no threads, so it calls libc's fork / pipe / waitpid directly
+- A 400-function program: cold 104 ms (j=1) / 90 ms (j=8), no changes 7 ms (no linking), changing 1 function recompiles only that 1 function
