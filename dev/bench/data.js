@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795001298582,
+  "lastUpdate": 1795001300492,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -4252,6 +4252,70 @@ window.BENCHMARK_DATA = {
           {
             "name": "tests/ui compile-fail passing",
             "value": 2530,
+            "unit": "tests"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "committer": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "distinct": true,
+          "id": "1e4018cafcccd2458a750000d5ef4a181c276ae0",
+          "message": "zustc borrowck: loans of arguments last until the call, values escaping blocks and parameters, closure positions\n\n- the loan of an argument `&mut x` (and of an operator's `&mut self`: `x += x`) is held by a\n  hidden local until the call is made, so `f(&mut x, &x)` conflicts; method receivers stay\n  two-phase\n- E0597 for a borrow carried out of a block (`let y = { let z = 0; &z };`) and for a borrow\n  stored behind a reference parameter (`*x = Some(&mut local)`), checked at every exit\n- Expr::Closure keeps where the closure starts; capture errors point at the closure, mutability\n  errors at the use in its body\n- tests/ui compile-fail 34.4% -> 34.6%, no regressions; check instructions on gen5000 +1.9%\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-18T11:14:19Z",
+          "tree_id": "e769c6b20893b1467f39ad886adcc5454485f565",
+          "url": "https://github.com/mizchi/zust/commit/1e4018cafcccd2458a750000d5ef4a181c276ae0"
+        },
+        "date": 1795001299959,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tests/ui run-pass pass rate",
+            "value": 46.42,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui run-pass passing",
+            "value": 1120,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui check-pass pass rate",
+            "value": 46.15,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui check-pass passing",
+            "value": 834,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui build-pass pass rate",
+            "value": 48.15,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui build-pass passing",
+            "value": 65,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui compile-fail pass rate",
+            "value": 34.56,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui compile-fail passing",
+            "value": 2543,
             "unit": "tests"
           }
         ]
