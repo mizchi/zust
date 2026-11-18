@@ -1214,6 +1214,7 @@ run-pass	consts/arithmetic-expr-in-array-len.rs
 build-pass	consts/array-literal-index-oob.rs
 check-pass	consts/assoc-const-elided-lifetime.rs
 compile-fail	consts/bad-array-size-in-type-err.rs
+run-pass	consts/cast-discriminant-zst-enum.rs
 run-pass	consts/chained-constants-stackoverflow.rs
 run-pass	consts/check_const-feature-gated.rs
 build-pass	consts/closure-in-foreign-crate.rs
@@ -1222,6 +1223,7 @@ run-pass	consts/const-adt-align-mismatch.rs
 build-pass	consts/const-array-oob-in-range-expr.rs
 compile-fail	consts/const-array-oob.rs
 compile-fail	consts/const-as-fn.rs
+run-pass	consts/const-autoderef.rs
 run-pass	consts/const-big-enum.rs
 run-pass	consts/const-bitshift-rhs-inference.rs
 check-pass	consts/const-blocks/const-block-in-array-size.rs
@@ -1230,6 +1232,7 @@ run-pass	consts/const-blocks/fn-call-in-const.rs
 check-pass	consts/const-blocks/nll-pass.rs
 run-pass	consts/const-blocks/run-pass.rs
 run-pass	consts/const-byte-str-cast.rs
+run-pass	consts/const-const.rs
 run-pass	consts/const-contents.rs
 run-pass	consts/const-enum-byref-self.rs
 run-pass	consts/const-enum-byref.rs
@@ -1273,10 +1276,15 @@ run-pass	consts/const-fields-and-indexing.rs
 run-pass	consts/const-fn-const-eval.rs
 check-pass	consts/const-fn-destructuring-arg.rs
 run-pass	consts/const-fn-method.rs
+run-pass	consts/const-fn-nested.rs
 run-pass	consts/const-fn-val.rs
 build-pass	consts/const-fn-zst-args.rs
+run-pass	consts/const-fn.rs
 run-pass	consts/const-index-feature-gate.rs
 compile-fail	consts/const-int-conversion.rs
+run-pass	consts/const-int-rotate-rpass.rs
+run-pass	consts/const-int-saturating-arith.rs
+run-pass	consts/const-int-sign-rpass.rs
 compile-fail	consts/const-int-wrapping.rs
 compile-fail	consts/const-item-no-type/with-colon.rs
 run-pass	consts/const-labeled-break.rs
@@ -1295,6 +1303,7 @@ run-pass	consts/const-struct.rs
 run-pass	consts/const-trait-to-trait.rs
 run-pass	consts/const-tuple-struct.rs
 run-pass	consts/const-unit-struct.rs
+run-pass	consts/const-unsafe-fn.rs
 run-pass	consts/const-vec-syntax.rs
 run-pass	consts/const-vecs-and-slices.rs
 check-pass	consts/const_forget.rs
@@ -1311,8 +1320,11 @@ run-pass	consts/const_let_eq_float.rs
 check-pass	consts/const_prop_slice_pat_ice.rs
 run-pass	consts/const_refs_to_static.rs
 check-pass	consts/const_short_circuit.rs
+run-pass	consts/const_unsafe_unreachable.rs
 run-pass	consts/consts-in-patterns.rs
 run-pass	consts/control-flow/basics.rs
+check-pass	consts/control-flow/exhaustive-c-like-enum-match.rs
+run-pass	consts/control-flow/short-circuit-let.rs
 run-pass	consts/control-flow/short-circuit.rs
 check-pass	consts/control-flow/single_variant_match_ice.rs
 run-pass	consts/deref_in_pattern.rs
@@ -1327,7 +1339,9 @@ check-pass	consts/issue-17718-references.rs
 run-pass	consts/issue-17756.rs
 build-pass	consts/issue-21562.rs
 run-pass	consts/issue-23833.rs
+run-pass	consts/issue-23968-const-not-overflow.rs
 check-pass	consts/issue-28822.rs
+run-pass	consts/issue-29914-2.rs
 run-pass	consts/issue-29914.rs
 run-pass	consts/issue-29927-1.rs
 run-pass	consts/issue-29927.rs
@@ -1383,6 +1397,7 @@ run-pass	consts/static-mut-refs.rs
 check-pass	consts/static-promoted-to-mutable-static.rs
 run-pass	consts/static-raw-pointer-interning.rs
 compile-fail	consts/std/conjure_zst.rs
+run-pass	consts/transmute-const.rs
 check-pass	consts/unnormalized-param-env.rs
 check-pass	consts/unsafe_cell_in_const.rs
 check-pass	consts/unwind-abort.rs
@@ -3235,6 +3250,7 @@ compile-fail	numeric/numeric-suffix/numeric-suffix-u32.rs
 compile-fail	numeric/numeric-suffix/numeric-suffix-u64.rs
 compile-fail	numeric/numeric-suffix/numeric-suffix-usize.rs
 compile-fail	numeric/numeric-suffix/numeric-suffix.rs
+run-pass	numeric/ref-int.rs
 run-pass	numeric/type-limit-comparisons-6130.rs
 compile-fail	numeric/uppercase-base-prefix-invalid-no-fix.rs
 compile-fail	object-lifetime/object-lifetime-default-assoc-ty-binding-item-bounds-non-static.rs
@@ -3465,6 +3481,7 @@ check-pass	parser/issues/issue-115780-pat-lt-bracket-in-macro-call.rs
 compile-fail	parser/issues/issue-14303.rs
 compile-fail	parser/issues/issue-15914.rs
 compile-fail	parser/issues/issue-1655.rs
+run-pass	parser/issues/issue-17718-parse-const.rs
 compile-fail	parser/issues/issue-17904-2.rs
 compile-fail	parser/issues/issue-19096.rs
 compile-fail	parser/issues/issue-20616-1.rs
@@ -4567,6 +4584,7 @@ run-pass	structs/struct-literal-dtor.rs
 run-pass	structs/struct-new-as-field-name.rs
 run-pass	structs/struct-order-of-eval-1.rs
 run-pass	structs/struct-order-of-eval-2.rs
+run-pass	structs/struct-order-of-eval-4.rs
 run-pass	structs/struct-partial-move-1.rs
 run-pass	structs/struct-partial-move-2.rs
 compile-fail	structs/struct-pat-derived-error.rs

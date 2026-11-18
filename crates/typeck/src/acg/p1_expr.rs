@@ -929,6 +929,14 @@ impl Cx<'_> {
                     let a = self.temp(t);
                     Ok((Some(a), Ty::Ref(m, intern(t))))
                 }
+                // (a value in a register: a const read as a place (`assert_eq!(B, 3)` borrows `B`) or a local the
+                // address-taken scan did not see: borrow a copy in a temporary)
+                Place::Var(v, t) if !matches!(rexpr.as_ref(), Expr::Path(_, p) if ident_of(p).is_some_and(|n| self.lookup(n).is_some()) && m) => {
+                    let val = self.b.use_var(v);
+                    let a = self.temp(t);
+                    self.b.ins().store(mf(), val, a, 0);
+                    Ok((Some(a), Ty::Ref(m, intern(t))))
+                }
                 Place::Var(..) => err(SP, "internal: borrowed local is not in memory"),
             };
         }
