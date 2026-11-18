@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795018789122,
+  "lastUpdate": 1795018790892,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -12149,6 +12149,85 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/mizchi/zust/commit/4a84a6ce5b4822a219b01462257ed9f7dfd00c44"
         },
         "date": 1795018051335,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "parity documentSymbol (名前の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity workspace/symbol (上位 20 の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity definition (行き先の一致)",
+            "value": 97.222,
+            "unit": "%"
+          },
+          {
+            "name": "parity hover (名前を含む)",
+            "value": 95,
+            "unit": "%"
+          },
+          {
+            "name": "parity references (数の一致)",
+            "value": 92.105,
+            "unit": "%"
+          },
+          {
+            "name": "parity documentHighlight (数の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity rename (書き換えの一致)",
+            "value": 90,
+            "unit": "%"
+          },
+          {
+            "name": "parity signatureHelp (名前・引数の数・今の引数の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity completion `x.\\|` (書いてある名前を含む)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity completion `na\\|me` (同)",
+            "value": 79.167,
+            "unit": "%"
+          },
+          {
+            "name": "parity 一致の平均",
+            "value": 95.349,
+            "unit": "%"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "committer": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "distinct": true,
+          "id": "bffa3ad4724aa19ac7b8be9353a6ab93cf81b0af",
+          "message": "Fix two double frees: FRU from a place, captures moved into a nested move closure\n\n- `S { a, ..x }` with a place `x` reads or moves the fields not written out of\n  `x` one by one; `x` keeps the others (it was moved whole into a temporary\n  that dropped them a second time)\n- a closure whose nested `move` closure uses a capture owns that capture, and\n  moving it into the nested closure empties the enclosing closure's slot\n- tests/ui: run-pass 1309\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-18T16:15:26Z",
+          "tree_id": "47f021e61a61db3f213d4ad3b3ca82dcb475270d",
+          "url": "https://github.com/mizchi/zust/commit/bffa3ad4724aa19ac7b8be9353a6ab93cf81b0af"
+        },
+        "date": 1795018790469,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
