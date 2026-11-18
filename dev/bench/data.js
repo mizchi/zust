@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795043626936,
+  "lastUpdate": 1795043628833,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -25399,6 +25399,70 @@ window.BENCHMARK_DATA = {
           {
             "name": "tests/ui compile-fail passing",
             "value": 2827,
+            "unit": "tests"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "committer": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "distinct": true,
+          "id": "b2620bda961b4f2951eedada30e634f1fa2e3c8a",
+          "message": "Fn pointer comparisons and casts; `main` as a value\n\n`f == g` and `&f == &g` on fn pointers compare addresses, `f as *const ()`\ncasts, and `main` can be used as a value (`Box::new(main)`, `let f: fn() = main`).\nComparing a fn item (not a pointer) and comparing pointers in a `const fn` are\nerrors, as in rustc. tests/ui: run-pass +6, check-pass +3, compile-fail +3; one\ncompile-fail test leaves the baseline (nll/type-check-pointer-comparisons.rs passed\nonly because the comparison was unsupported; its errors are lifetime errors).\nKPIs: gen5000 check +0.07%, the no-op build within its usual range.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-18T23:03:16Z",
+          "tree_id": "746facad9933b83c1e0b4b71e63728c3e7ecb575",
+          "url": "https://github.com/mizchi/zust/commit/b2620bda961b4f2951eedada30e634f1fa2e3c8a"
+        },
+        "date": 1795043628354,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tests/ui run-pass pass rate",
+            "value": 60.3,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui run-pass passing",
+            "value": 1455,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui check-pass pass rate",
+            "value": 63.75,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui check-pass passing",
+            "value": 1152,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui build-pass pass rate",
+            "value": 62.22,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui build-pass passing",
+            "value": 84,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui compile-fail pass rate",
+            "value": 38.41,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui compile-fail passing",
+            "value": 2826,
             "unit": "tests"
           }
         ]
