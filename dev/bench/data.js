@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795004482138,
+  "lastUpdate": 1795004484293,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -3808,6 +3808,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "lsp peak RSS",
             "value": 65.137,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "committer": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "distinct": true,
+          "id": "0e01ee9726ed0e8ab268af006a3464f66aed8566",
+          "message": "zustc: PhantomData, generic unit structs as values, E0072 for generic types, cycle in blanket associated types\n\n- prelude: std::marker::PhantomData<T> (zero-sized; the instance comes from type inference)\n- `struct Foo<T> { f: Option<Foo<T>> }` is rejected as infinitely sized\n- `impl<F: Future> IntoFuture for F { type Item = F::Item; }` no longer recurses forever\n- tests/ui: run-pass 48.3%, check-pass 51.4%, compile-fail 36.9%; one compile-fail test that\n  passed only because PhantomData was missing no longer passes\n  (coherence/warn-when-cycle-is-error-in-coherence)\n- KPIs: gen5000 check 3978 M instr (+0.2%, the larger prelude), cache sizes unchanged\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-18T12:06:44Z",
+          "tree_id": "1bff4213f76342bd18a9b642988a8c7d71b8bec2",
+          "url": "https://github.com/mizchi/zust/commit/0e01ee9726ed0e8ab268af006a3464f66aed8566"
+        },
+        "date": 1795004483679,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "lsp definition p50",
+            "value": 0.615,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp hover p50",
+            "value": 0.47,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp completion p50",
+            "value": 1.057,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp references p50",
+            "value": 3.784,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp rename p50",
+            "value": 0.511,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp signatureHelp p50",
+            "value": 0.83,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp documentHighlight p50",
+            "value": 0.769,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp ready (startup to indexed)",
+            "value": 121.108,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp peak RSS",
+            "value": 65.199,
             "unit": "MiB"
           }
         ]
