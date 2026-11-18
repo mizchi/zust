@@ -66,11 +66,37 @@ fn self_of(name: &str, generics: &[String]) -> TySyn {
 fn const_int(e: &Expr) -> R<i64> {
     match e {
         Expr::Lit(t, _) if t.starts_with(|c: char| c.is_ascii_digit()) => {
-            let digits: String = t.chars().filter(|&c| c != '_').take_while(|c| c.is_ascii_digit()).collect();
-            digits.parse::<i64>().map_err(|e| e.to_string())
+            let t: String = t.chars().filter(|&c| c != '_').collect();
+            let (radix, body) = match t.get(..2) {
+                Some("0x") => (16, &t[2..]),
+                Some("0o") => (8, &t[2..]),
+                Some("0b") => (2, &t[2..]),
+                _ => (10, &t[..]),
+            };
+            // (a type suffix: `5u8`, `0xFFi64`)
+            let digits: String = body.chars().take_while(|c| c.is_digit(radix)).collect();
+            u64::from_str_radix(&digits, radix).map(|v| v as i64).map_err(|e| e.to_string())
         }
-        Expr::Unary(op, x, _) if op == "-" => Ok(-const_int(x)?),
+        Expr::Unary(op, x, _) if op == "-" => Ok(const_int(x)?.wrapping_neg()),
+        Expr::Unary(op, x, _) if op == "!" => Ok(!const_int(x)?),
         Expr::Paren(x) => const_int(x),
+        Expr::Cast(x, _) => const_int(x),
+        Expr::Binary(op, a, b, _) => {
+            let (a, b) = (const_int(a)?, const_int(b)?);
+            Ok(match op.as_str() {
+                "+" => a.wrapping_add(b),
+                "-" => a.wrapping_sub(b),
+                "*" => a.wrapping_mul(b),
+                "/" if b != 0 => a / b,
+                "%" if b != 0 => a % b,
+                "<<" => a.wrapping_shl(b as u32),
+                ">>" => a.wrapping_shr(b as u32),
+                "|" => a | b,
+                "&" => a & b,
+                "^" => a ^ b,
+                _ => return err("only integer literals are supported as discriminants"),
+            })
+        }
         _ => err("only integer literals are supported as discriminants"),
     }
 }

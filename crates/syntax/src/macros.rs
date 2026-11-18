@@ -354,9 +354,47 @@ fn tt_text(t: &TokenTree, out: &mut String) {
     }
 }
 
-fn transcribe(body: &[Pt], binds: &HashMap<String, Bind>, out: &mut String) -> Result<(), String> {
+/// The names a macro body binds with `let` (not from its variables): hygiene keeps them apart from the caller's names
+/// (`macro_rules! m { ($e:expr) => {{ let x = 9; $e }} }` with `m!(x)` uses the caller's x)
+fn body_lets(body: &[Pt], out: &mut Vec<String>) {
+    let mut i = 0;
+    while i < body.len() {
+        match &body[i] {
+            Pt::Tok(TokenTree::Ident(k)) if k == "let" => {
+                let mut j = i + 1;
+                if matches!(body.get(j), Some(Pt::Tok(TokenTree::Ident(m))) if m == "mut") {
+                    j += 1;
+                }
+                // (a plain binding only: `let x = ..` / `let x: T` / `let x;`, not `if let Some(..) =`)
+                let plain = matches!(body.get(j + 1), Some(Pt::Tok(TokenTree::Punct(p))) if matches!(p.as_char(), '=' | ':' | ';'));
+                if let (Some(Pt::Tok(TokenTree::Ident(n))), true) = (body.get(j), plain) {
+                    let n = n.to_string();
+                    if n != "_" && !out.contains(&n) {
+                        out.push(n);
+                    }
+                }
+            }
+            Pt::Group(_, inner) | Pt::Rep(inner, _, _) => body_lets(inner, out),
+            _ => {}
+        }
+        i += 1;
+    }
+}
+
+/// transcribe with hygiene for the body's own `let` names
+fn transcribe_h(body: &[Pt], binds: &HashMap<String, Bind>, out: &mut String) -> Result<(), String> {
+    let mut lets = vec![];
+    body_lets(body, &mut lets);
+    transcribe(body, binds, out, &lets)
+}
+
+fn transcribe(body: &[Pt], binds: &HashMap<String, Bind>, out: &mut String, lets: &[String]) -> Result<(), String> {
     for p in body {
         match p {
+            Pt::Tok(TokenTree::Ident(i)) if lets.iter().any(|l| *i == l.as_str()) => {
+                out.push_str(&i.to_string());
+                out.push_str("__mh ");
+            }
             Pt::Tok(t) => tt_text(t, out),
             Pt::Group(d, inner) => {
                 let (o, c) = match d {
@@ -366,7 +404,7 @@ fn transcribe(body: &[Pt], binds: &HashMap<String, Bind>, out: &mut String) -> R
                     Delimiter::None => ("", ""),
                 };
                 out.push_str(o);
-                transcribe(inner, binds, out)?;
+                transcribe(inner, binds, out, lets)?;
                 out.push_str(c);
                 out.push(' ');
             }
@@ -425,7 +463,7 @@ fn transcribe(body: &[Pt], binds: &HashMap<String, Bind>, out: &mut String) -> R
                             }
                         }
                     }
-                    transcribe(inner, &b, out)?;
+                    transcribe(inner, &b, out, lets)?;
                 }
             }
         }
@@ -632,7 +670,7 @@ pub fn expand_cfg(src: &str, cfg: Option<&crate::cfg::CfgSet>) -> Result<Option<
                 let mut binds = HashMap::new();
                 if match_pat(&r.pat, &args, &mut binds) {
                     let mut body = String::new();
-                    transcribe(&r.body, &binds, &mut body)?;
+                    transcribe_h(&r.body, &binds, &mut body)?;
                     // 式の位置は `({ .. })`、トップレベルと `mod` / `impl` / `trait` の中はアイテムとしてそのまま
                     let top = depth[i] == 0 || item_scope(b, &toks, &close, &depth, i);
                     let rep = if top { body } else { format!("({{ {body} }})") };
@@ -822,7 +860,7 @@ fn find_calls(
                             let mut binds = HashMap::new();
                             if match_pat(&r.pat, &args, &mut binds) {
                                 let mut body = String::new();
-                                transcribe(&r.body, &binds, &mut body)?;
+                                transcribe_h(&r.body, &binds, &mut body)?;
                                 // 式の位置は `({ .. })`、トップレベルはアイテムとしてそのまま
                                 let rep = if depth == 0 { body } else { format!("({{ {body} }})") };
                                 let mut a = name.span().byte_range().start;

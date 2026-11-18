@@ -4,6 +4,7 @@ check-pass	abi/explicit_repr_rust.rs
 build-pass	abi/extern/extern-c-method-return-struct.rs
 run-pass	abi/extern/extern-call-direct.rs
 run-pass	abi/numbers-arithmetic/float-struct.rs
+build-pass	abi/return-ref-as-immediate-in-codegen.rs
 compile-fail	anon-params/anon-params-denied-2018.rs
 compile-fail	argument-suggestions/basic.rs
 compile-fail	argument-suggestions/complex.rs
@@ -387,6 +388,7 @@ compile-fail	binding/issue-40402-1.rs
 compile-fail	binding/issue-40402-2.rs
 check-pass	binding/issue-53114-borrow-checks.rs
 run-pass	binding/let-destruct-ref.rs
+run-pass	binding/let-var-hygiene.rs
 run-pass	binding/match-borrowed_str.rs
 run-pass	binding/match-bot-2.rs
 run-pass	binding/match-bot.rs
@@ -1182,6 +1184,7 @@ check-pass	consts/const-mut-refs/const_mut_refs.rs
 run-pass	consts/const-negation.rs
 run-pass	consts/const-negative.rs
 run-pass	consts/const-nullary-enum.rs
+run-pass	consts/const-nullary-univariant-enum.rs
 run-pass	consts/const-region-ptrs.rs
 check-pass	consts/const-static-ref-to-closure.rs
 run-pass	consts/const-struct-offsets.rs
@@ -1477,9 +1480,11 @@ compile-fail	enum-discriminant/non-int-discriminant-promoted-ice-138660.rs
 run-pass	enum-discriminant/repr-u64-enum-discriminant-cast.rs
 compile-fail	enum/assoc-fn-call-on-variant.rs
 check-pass	enum/dead-code-associated-function.rs
+check-pass	enum/enum-discrim-range-overflow.rs
 run-pass	enum/enum-disr-val-pretty.rs
 compile-fail	enum/enum-nonexisting-field.rs
 run-pass	enum/enum-nullable-simplifycfg-misopt.rs
+check-pass	enum/enum-referred-by-submodule-5900.rs
 run-pass	enum/enum-size-variance.rs
 compile-fail	enum/enum-to-float-cast-2.rs
 compile-fail	enum/enum-variant-field-error-80607.rs
@@ -1708,6 +1713,7 @@ check-pass	feature-gates/soft-feature-gate-try_blocks.rs
 check-pass	feature-gates/soft-syntax-gates-without-errors.rs
 compile-fail	ffi/extern-static-mut-slice-54410.rs
 run-pass	fmt/debug-single-call.rs
+run-pass	fmt/format-args-capture-macro-hygiene-pass.rs
 run-pass	fmt/format-enum-with-recursive-variant.rs
 run-pass	fmt/format-macro-no-std.rs
 compile-fail	fmt/incorrect-separator.rs
@@ -2517,6 +2523,7 @@ compile-fail	macros/empty-comment.rs
 compile-fail	macros/empty-trailing-stmt.rs
 check-pass	macros/expr_2021_cargo_fix_edition.rs
 compile-fail	macros/failed-to-reparse-issue-139445.rs
+run-pass	macros/for-loop-macro-rules-hygiene.rs
 compile-fail	macros/issue-102878.rs
 compile-fail	macros/issue-111749.rs
 check-pass	macros/issue-112342-2.rs
@@ -2963,6 +2970,7 @@ run-pass	numbers-arithmetic/isize-base.rs
 compile-fail	numbers-arithmetic/not-suggest-float-literal.rs
 run-pass	numbers-arithmetic/shift-various-types.rs
 run-pass	numbers-arithmetic/shift.rs
+run-pass	numbers-arithmetic/signed-shift-const-eval.rs
 run-pass	numbers-arithmetic/u32-decr.rs
 run-pass	numbers-arithmetic/u8-incr-decr.rs
 run-pass	numbers-arithmetic/u8-incr.rs
@@ -4216,6 +4224,7 @@ compile-fail	structs-enums/issue-103869.rs
 run-pass	structs-enums/issue-1701.rs
 compile-fail	structs-enums/issue-3008-3.rs
 run-pass	structs-enums/issue-38002.rs
+run-pass	structs-enums/ivec-tag.rs
 check-pass	structs-enums/nested-enum-same-names.rs
 run-pass	structs-enums/rec-extend.rs
 run-pass	structs-enums/rec-tup.rs
@@ -4233,6 +4242,7 @@ compile-fail	structs-enums/struct-rec/issue-74224.rs
 compile-fail	structs-enums/struct-rec/issue-84611.rs
 compile-fail	structs-enums/struct-rec/mutual-struct-recursion.rs
 run-pass	structs-enums/tag-align-shape.rs
+run-pass	structs-enums/tag-disr-val-shape.rs
 run-pass	structs-enums/tag-exports.rs
 check-pass	structs-enums/tag-in-block.rs
 run-pass	structs-enums/tag.rs
@@ -4525,7 +4535,9 @@ run-pass	thread-local/thread-local-with-attributes-30756.rs
 run-pass	threads-sendsync/child-outlives-parent.rs
 run-pass	threads-sendsync/clone-with-exterior.rs
 run-pass	threads-sendsync/issue-29488.rs
+run-pass	threads-sendsync/issue-4446.rs
 compile-fail	threads-sendsync/rc-is-not-send.rs
+run-pass	threads-sendsync/sendable-class.rs
 run-pass	threads-sendsync/sendfn-is-a-block.rs
 run-pass	threads-sendsync/spawn-fn.rs
 run-pass	threads-sendsync/spawn.rs
@@ -4533,11 +4545,17 @@ run-pass	threads-sendsync/spawn2.rs
 run-pass	threads-sendsync/task-comm-1.rs
 run-pass	threads-sendsync/task-comm-12.rs
 run-pass	threads-sendsync/task-comm-17.rs
+run-pass	threads-sendsync/task-comm-4.rs
+run-pass	threads-sendsync/task-comm-5.rs
+run-pass	threads-sendsync/task-comm-6.rs
+run-pass	threads-sendsync/task-comm-chan-nil.rs
 run-pass	threads-sendsync/task-life-0.rs
+run-pass	threads-sendsync/task-spawn-move-and-copy.rs
 run-pass	threads-sendsync/thread-join-unwrap.rs
 run-pass	threads-sendsync/thread-local-syntax.rs
 run-pass	threads-sendsync/threads.rs
 run-pass	threads-sendsync/tls-dont-move-after-init.rs
+run-pass	threads-sendsync/trivial-message.rs
 run-pass	threads-sendsync/yield.rs
 run-pass	threads-sendsync/yield1.rs
 run-pass	threads-sendsync/yield2.rs

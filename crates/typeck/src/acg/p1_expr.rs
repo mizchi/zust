@@ -763,6 +763,11 @@ impl Cx<'_> {
                 if let Ty::Struct(sid) = from {
                     let sd = &self.prog.structs[sid as usize];
                     if to.is_int() && sd.is_enum && sd.variants.iter().all(|v| v.fields.is_empty()) {
+                        // (one variant: no tag is stored, the value is its discriminant)
+                        if sd.variants.len() == 1 {
+                            let d = sd.variants[0].discr;
+                            return Ok((Some(self.int_const(to, d as i128)), to));
+                        }
                         let tag = sd.tag;
                         let t = self.b.ins().load(clif_ty(tag).unwrap(), mf(), v.unwrap(), 0);
                         return Ok((Some(self.convert(t, tag, to)), to));
