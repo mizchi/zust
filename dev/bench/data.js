@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795005118826,
+  "lastUpdate": 1795005120472,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -5395,6 +5395,85 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/mizchi/zust/commit/0e01ee9726ed0e8ab268af006a3464f66aed8566"
         },
         "date": 1795004485905,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "parity documentSymbol (名前の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity workspace/symbol (上位 20 の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity definition (行き先の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity hover (名前を含む)",
+            "value": 87.5,
+            "unit": "%"
+          },
+          {
+            "name": "parity references (数の一致)",
+            "value": 97.222,
+            "unit": "%"
+          },
+          {
+            "name": "parity documentHighlight (数の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity rename (書き換えの一致)",
+            "value": 94.118,
+            "unit": "%"
+          },
+          {
+            "name": "parity signatureHelp (名前・引数の数・今の引数の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity completion `x.\\|` (書いてある名前を含む)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity completion `na\\|me` (同)",
+            "value": 84,
+            "unit": "%"
+          },
+          {
+            "name": "parity 一致の平均",
+            "value": 96.284,
+            "unit": "%"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "committer": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "distinct": true,
+          "id": "e6e2d0073023b42fb1f7a2c564d437866077e180",
+          "message": "zustc: blanket impls without members, impls for (), E0207\n\n- `impl<T> Tr for T {}` (with or without members) makes every type implement Tr (bounds are not\n  checked yet); `impl Tr for ()` is recorded like impls for primitive types\n- E0207: an impl type parameter that appears in neither the self type (projections `T::A` do\n  not count), the trait, its bounds nor the where clauses\n- tests/ui: run-pass 49.0%, check-pass 53.5%, build-pass 48.9%, compile-fail 37.4%; 11\n  compile-fail tests that were rejected only because blanket impls without members were not\n  understood no longer pass (they need WF / coherence / Send checks)\n- KPIs: gen5000 check 3978 M instr, unchanged\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-18T12:18:07Z",
+          "tree_id": "fc3e0c4dbcdd55b0406ef62dba73fa99bd6bca51",
+          "url": "https://github.com/mizchi/zust/commit/e6e2d0073023b42fb1f7a2c564d437866077e180"
+        },
+        "date": 1795005120045,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
