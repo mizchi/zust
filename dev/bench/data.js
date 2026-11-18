@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795043059079,
+  "lastUpdate": 1795043060933,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -15664,6 +15664,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "lsp peak RSS",
             "value": 68.066,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "committer": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "distinct": true,
+          "id": "04b7d0b59380c1b53100613d8cd7a8fd7b8d8215",
+          "message": "Check unsafe operations outside `unsafe` (E0133)\n\nCalls to an `unsafe fn` or an extern-block fn, raw pointer derefs, uses of a\n`static mut` (not under `addr_of!`) and union field reads are errors outside an\n`unsafe` block or `unsafe fn`. Only code written in the user's source is checked\n(generated code has no position); closure bodies and the prelude are not yet.\ntests/ui compile-fail: 15 more pass, no regressions. KPIs unchanged.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-18T22:51:49Z",
+          "tree_id": "16f908e8e4eb6bd4ab5ac18d52277bb0dcb95452",
+          "url": "https://github.com/mizchi/zust/commit/04b7d0b59380c1b53100613d8cd7a8fd7b8d8215"
+        },
+        "date": 1795043060484,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "lsp definition p50",
+            "value": 0.442,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp hover p50",
+            "value": 0.377,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp completion p50",
+            "value": 0.906,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp references p50",
+            "value": 10.198,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp rename p50",
+            "value": 0.41,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp signatureHelp p50",
+            "value": 0.866,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp documentHighlight p50",
+            "value": 0.831,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp ready (startup to indexed)",
+            "value": 99.667,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp peak RSS",
+            "value": 68.109,
             "unit": "MiB"
           }
         ]
