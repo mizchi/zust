@@ -1,6 +1,6 @@
 # 開発のしかた
 
-zust (zustc と zust-analyzer) を直す・足すときの手順。使い方は [README.md](README.md)、中のしくみは
+zust (zustc と zust-analyzer) を直す・足すときの手順。使い方は [README.ja.md](README.ja.md)、中のしくみは
 [docs/architecture.md](docs/architecture.md)。
 
 ## 準備
