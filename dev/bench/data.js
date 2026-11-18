@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795008309132,
+  "lastUpdate": 1795008311172,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -7591,6 +7591,70 @@ window.BENCHMARK_DATA = {
           {
             "name": "tests/ui compile-fail passing",
             "value": 2774,
+            "unit": "tests"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "committer": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "distinct": true,
+          "id": "35fb6c11d831503295cda93c0b8b6d07971b0e2f",
+          "message": "zustc: unions; checks on struct / enum / union definitions\n\n- `union`: every field at offset 0, size the largest field; a union expression writes one field\n- for the program's own definitions (the prelude's types may break these rules): unused type and\n  lifetime parameters (E0392; a use in another parameter's bound or a where clause counts),\n  `Self` in a parameter default (E0735), unknown derive macros, empty and tuple unions, union\n  fields that need dropping (E0740), derives on unions other than Clone + Copy\n- `impl Trait` in a generic bound is rejected\n- tests/ui: run-pass 50.7%, check-pass 54.1%, build-pass 49.6%, compile-fail 38.2%; four\n  compile-fail tests that were rejected only because unions were unsupported need lint / feature\n  gate / attribute checks\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-18T13:20:07Z",
+          "tree_id": "ca9472c0db8cd6447675c355c8e095184161f371",
+          "url": "https://github.com/mizchi/zust/commit/35fb6c11d831503295cda93c0b8b6d07971b0e2f"
+        },
+        "date": 1795008310737,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tests/ui run-pass pass rate",
+            "value": 50.68,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui run-pass passing",
+            "value": 1223,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui check-pass pass rate",
+            "value": 54.07,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui check-pass passing",
+            "value": 977,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui build-pass pass rate",
+            "value": 49.63,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui build-pass passing",
+            "value": 67,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui compile-fail pass rate",
+            "value": 38.18,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui compile-fail passing",
+            "value": 2809,
             "unit": "tests"
           }
         ]
