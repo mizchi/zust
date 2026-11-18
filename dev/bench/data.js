@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795043062719,
+  "lastUpdate": 1795043064551,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -25028,6 +25028,70 @@ window.BENCHMARK_DATA = {
           {
             "name": "tests/ui compile-fail passing",
             "value": 2812,
+            "unit": "tests"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "committer": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "distinct": true,
+          "id": "04b7d0b59380c1b53100613d8cd7a8fd7b8d8215",
+          "message": "Check unsafe operations outside `unsafe` (E0133)\n\nCalls to an `unsafe fn` or an extern-block fn, raw pointer derefs, uses of a\n`static mut` (not under `addr_of!`) and union field reads are errors outside an\n`unsafe` block or `unsafe fn`. Only code written in the user's source is checked\n(generated code has no position); closure bodies and the prelude are not yet.\ntests/ui compile-fail: 15 more pass, no regressions. KPIs unchanged.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-18T22:51:49Z",
+          "tree_id": "16f908e8e4eb6bd4ab5ac18d52277bb0dcb95452",
+          "url": "https://github.com/mizchi/zust/commit/04b7d0b59380c1b53100613d8cd7a8fd7b8d8215"
+        },
+        "date": 1795043064096,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tests/ui run-pass pass rate",
+            "value": 60.05,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui run-pass passing",
+            "value": 1449,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui check-pass pass rate",
+            "value": 63.59,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui check-pass passing",
+            "value": 1149,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui build-pass pass rate",
+            "value": 62.22,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui build-pass passing",
+            "value": 84,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui compile-fail pass rate",
+            "value": 38.42,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui compile-fail passing",
+            "value": 2827,
             "unit": "tests"
           }
         ]
