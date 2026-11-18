@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795027069631,
+  "lastUpdate": 1795027071252,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -11104,6 +11104,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "lsp peak RSS",
             "value": 67,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "committer": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "distinct": true,
+          "id": "e3aaf41ae383d633b0ab08f2fdd6d1797772eb7f",
+          "message": "`const fn` calls in constants and array lengths\n\n- the parser keeps a `const fn`'s body text; the summary records free,\n  non-generic const fns with plain parameters, and Program evaluates a call\n  with integer arguments: `let x = ..;` statements and a tail expression\n  (`if`, blocks, arithmetic, other calls)\n- array lengths may be such calls (`[i32; add(1, 2)]`)\n- tests/ui: run-pass 1363 (56.49%)\n\nKPIs (gen5000): noop 660.9 M instr, edit 622.5, check 3888.0 (+0.0%), cache\nunchanged; LSP ready 110 ms.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-18T18:28:29Z",
+          "tree_id": "4adfaea408187ab968333a611674ba7687ec4dbc",
+          "url": "https://github.com/mizchi/zust/commit/e3aaf41ae383d633b0ab08f2fdd6d1797772eb7f"
+        },
+        "date": 1795027071011,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "lsp definition p50",
+            "value": 0.395,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp hover p50",
+            "value": 0.321,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp completion p50",
+            "value": 0.943,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp references p50",
+            "value": 2.837,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp rename p50",
+            "value": 0.54,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp signatureHelp p50",
+            "value": 0.733,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp documentHighlight p50",
+            "value": 0.585,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp ready (startup to indexed)",
+            "value": 103.194,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp peak RSS",
+            "value": 67.289,
             "unit": "MiB"
           }
         ]
