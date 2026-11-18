@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795041874657,
+  "lastUpdate": 1795041876496,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -24617,6 +24617,70 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/mizchi/zust/commit/e45ee100ed392377781ef1eece25b5efbc32ad81"
         },
         "date": 1795041647092,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tests/ui run-pass pass rate",
+            "value": 60.05,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui run-pass passing",
+            "value": 1449,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui check-pass pass rate",
+            "value": 63.59,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui check-pass passing",
+            "value": 1149,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui build-pass pass rate",
+            "value": 62.22,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui build-pass passing",
+            "value": 84,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui compile-fail pass rate",
+            "value": 38.22,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui compile-fail passing",
+            "value": 2812,
+            "unit": "tests"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "committer": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "distinct": true,
+          "id": "880367002d13725989cb12436650b63ebab2aa4f",
+          "message": "README, SUPPORTED: compare with relax and rust-glancer\n\nrelax (makepad/relax 3489f2d, a Rust JIT) on gen1000 and bench/rt, measured\nfrom source to finished output with bench/vs_relax.py; zust-analyzer against\nrust-analyzer and rust-glancer (50dd51a) in one lsp_parity run on zustc's sources.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-18T22:38:23Z",
+          "tree_id": "97b6b02eea5ce4629440cac95f3dbf338d0ac7d0",
+          "url": "https://github.com/mizchi/zust/commit/880367002d13725989cb12436650b63ebab2aa4f"
+        },
+        "date": 1795041876093,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
