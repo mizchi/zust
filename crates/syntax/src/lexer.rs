@@ -643,7 +643,7 @@ fn hoist_parts_at(src: &str, redo: u32) -> Option<(String, Vec<(usize, String)>)
     // (速く飛ばす: 字下げした行頭の `fn ` などがなければ入れ子のアイテムはない)
     let indented = src.split('\n').any(|l| {
         let t = l.trim_start();
-        t.len() < l.len() && ["fn ", "struct ", "enum ", "use ", "const ", "static "].iter().any(|k| t.starts_with(k))
+        t.len() < l.len() && ["fn ", "struct ", "enum ", "use ", "const ", "static ", "mod ", "trait ", "impl", "type ", "union ", "pub fn ", "pub struct ", "pub enum ", "pub const ", "pub static ", "pub trait ", "pub type ", "pub(crate) "].iter().any(|k| t.starts_with(k))
     });
     if !indented {
         return None;
@@ -674,12 +674,43 @@ fn hoist_parts_at(src: &str, redo: u32) -> Option<(String, Vec<(usize, String)>)
                 }
             }
             let in_body = fn_bodies.last().is_some_and(|&(d, _)| depth > d);
-            let stmt_start = k == 0 || is_sym(k - 1, b"{") || is_sym(k - 1, b"}") || is_sym(k - 1, b";") || is_sym(k - 1, b"]");
-            let item_kw = matches!(t, b"fn" | b"struct" | b"enum" | b"const" | b"use" | b"static");
-            // (`const` の後ろに `fn` や `|` (const クロージャ) が来るものは別扱い: `const fn` は fn で見る)
-            if in_body && stmt_start && item_kw && k + 1 < toks.len() && toks[k + 1].0 == 0 {
-                // アイテムの終わり: `{ .. }` (fn / struct / enum) か `;`
+            // (`pub fn` / `pub(crate) struct` inside a body: what flattening a `mod` in a function leaves)
+            // (most identifiers are not at the start of a statement in a body: decide that first, it is cheap)
+            let stmt_start = in_body && (k == 0 || is_sym(k - 1, b"{") || is_sym(k - 1, b"}") || is_sym(k - 1, b";") || is_sym(k - 1, b"]"));
+            if !stmt_start {
+                if t == b"fn" && k + 1 < toks.len() && toks[k + 1].0 == 0 {
+                    pending_fn = true;
+                }
+                k += 1;
+                continue;
+            }
+            let ik = if t == b"pub" && k + 1 < toks.len() {
                 let mut j = k + 1;
+                if is_sym(j, b"(") {
+                    while j < toks.len() && !is_sym(j, b")") {
+                        j += 1;
+                    }
+                    j += 1;
+                }
+                if j < toks.len() && toks[j].0 == 0 && matches!(tok(j), b"fn" | b"struct" | b"enum" | b"const" | b"use" | b"static" | b"mod" | b"trait" | b"type" | b"union") {
+                    j
+                } else {
+                    k
+                }
+            } else {
+                k
+            };
+            let pt = t;
+            let t = tok(ik);
+            // (`mod m { .. }` / `trait T { .. }` / `impl S { .. }` / `type A = ..;` / `union U { .. }` too; `union` is a
+            // keyword only before a name)
+            let item_kw = matches!(t, b"fn" | b"struct" | b"enum" | b"const" | b"use" | b"static" | b"mod" | b"trait" | b"impl" | b"type")
+                || (t == b"union" && ik + 1 < toks.len() && toks[ik + 1].0 == 0);
+            let impl_like = t == b"impl";
+            // (`const` の後ろに `fn` や `|` (const クロージャ) が来るものは別扱い: `const fn` は fn で見る)
+            if in_body && stmt_start && item_kw && ik + 1 < toks.len() && (toks[ik + 1].0 == 0 || (impl_like && is_sym(ik + 1, b"<"))) {
+                // アイテムの終わり: `{ .. }` (fn / struct / enum) か `;`
+                let mut j = ik + 1;
                 let mut d = 0i32;
                 let mut end = None;
                 while j < toks.len() {
@@ -744,14 +775,16 @@ fn hoist_parts_at(src: &str, redo: u32) -> Option<(String, Vec<(usize, String)>)
                     }
                 }
                 moves.push((toks[st].1, toks[e].2));
-                let nk = if matches!(t, b"static") && tok(k + 1) == b"mut" { k + 2 } else { k + 1 };
-                if nk < toks.len() && toks[nk].0 == 0 && t != b"use" {
+                let nk = if matches!(t, b"static") && tok(ik + 1) == b"mut" { ik + 2 } else { ik + 1 };
+                if nk < toks.len() && toks[nk].0 == 0 && t != b"use" && t != b"impl" {
                     nested_names.push((tok(nk).to_vec(), fn_bodies.last().unwrap().1));
                 }
                 k = e + 1;
                 continue;
             }
-            if t == b"fn" {
+            let _ = pt;
+            // (a fn item has a name: `fn() -> T` is a type)
+            if t == b"fn" && ik + 1 < toks.len() && toks[ik + 1].0 == 0 {
                 pending_fn = true;
             }
         } else if toks[k].0 == 1 {

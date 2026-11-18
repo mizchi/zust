@@ -26,25 +26,33 @@ Rust のサブセットを速くインクリメンタルにビルドするコン
 ### rustc との比較
 
 `python3 bench/vs_rustc.py` と `python3 cratebench/run.py` で測った (2026-11-18、4 コア、rustc 1.100.0。時間は 3 回の
-中央値)。gen1000 は 1000 関数の生成したプログラム:
+中央値)。作業の回ごとに測り直す。gen1000 は 1000 関数の生成したプログラム:
 
 | gen1000 | cold | no-op | 1 関数を編集 | ディスク | バイナリ (strip 後) | 実行 |
 |---|---:|---:|---:|---:|---:|---:|
-| zustc | 131 ms | 15 ms | 22 ms | 766 KiB | 324 KiB | 10 ms |
-| zustc `-O` | 270 ms | 57 ms | 56 ms | 1199 KiB | 341 KiB | 3 ms |
-| rustc `-C incremental` | 643 ms | 172 ms | 348 ms | 10.8 MiB | 1038 KiB | 9 ms |
-| rustc `-O` | 15456 ms | - | - | - | 377 KiB | 2 ms |
-| **zustc の rustc `-C incremental` 比** | **4.9 倍速い** | **11 倍速い** | **16 倍速い** | **1/14** | **1/3.2** | |
+| zustc | 117 ms | 15 ms | 22 ms | 766 KiB | 324 KiB | 9 ms |
+| zustc `-O` | 293 ms | 58 ms | 57 ms | 1199 KiB | 341 KiB | 3 ms |
+| rustc `-C incremental` | 620 ms | 176 ms | 334 ms | 10.8 MiB | 1038 KiB | 6 ms |
+| rustc `-O` | 14975 ms | - | - | - | 377 KiB | 2 ms |
+| **zustc の rustc `-C incremental` 比** | **5.3 倍速い** | **12 倍速い** | **15 倍速い** | **1/14** | **1/3.2** | |
 
 小さなプログラム (`bench/rt`: fib、hashmap、matmul、nbody、sieve、sort、strings) と実際のクレート (cratebench: fnv、
 adler2、hex、itoa、rustc-hash、cfg-if。6 つとも rustc と同じ出力を出す):
 
 | | zustc の rustc `-C incremental` 比 (bench/rt) | zustc の rustc 比 (cratebench) |
 |---|---:|---:|
-| cold ビルド | 2.9〜4.1 倍速い (24〜49 ms と 82〜178 ms) | 2.3〜4.4 倍速い (21〜75 ms と 93〜306 ms) |
-| 編集して再ビルド | 12〜18 倍速い (5〜7 ms と 68〜98 ms) | 4.7〜8.8 倍速い (12〜28 ms と 63〜140 ms) |
+| cold ビルド | 2.9〜4.1 倍速い (24〜49 ms と 82〜178 ms) | 3.0〜4.5 倍速い (21〜64 ms と 82〜228 ms) |
+| 編集して再ビルド | 12〜18 倍速い (5〜7 ms と 68〜98 ms) | 4.7〜7.6 倍速い (11〜24 ms と 58〜114 ms) |
 | バイナリ | 1/11〜1/24 | 1/90〜1/550 (8〜48 KiB と 4.4 MiB) |
 | rustc `-O` に対する実行時間 | zustc は 1.1〜4.1 倍遅い、zustc `-O` は 1.1〜3.2 倍 | zustc は 3.1〜17 倍遅い、zustc `-O` は 0.9〜7.3 倍 |
+
+同じ gen1000 の比較の推移 (rustc 自身の時間も回ごとに ±10% ほど動く):
+
+| 測った時点 | zustc の cold | rustc `-C incremental` の cold | 比 | zustc の編集 | rustc の編集 | 比 |
+|---|---:|---:|---:|---:|---:|---:|
+| 2026-11-15 ([報告](docs/ja/reports/2026-11-15-15-status.md)) | 118 ms | 827 ms | 7.0 倍 | 28 ms | 417 ms | 14.9 倍 |
+| 2026-11-18、72201ab | 131 ms | 643 ms | 4.9 倍 | 22 ms | 348 ms | 15.8 倍 |
+| 2026-11-18、ブロックの中のアイテム | 117 ms | 620 ms | 5.3 倍 | 22 ms | 334 ms | 15.2 倍 |
 
 zustc のコードの実行速度は rustc の debug ビルドに近く、7 つの小さなプログラムのすべてでそれより速い (そこでは rustc の debug
 ビルドは rustc `-O` の 3〜26 倍遅い)。
@@ -70,7 +78,8 @@ KPI はビルドの速度、ビルドキャッシュのサイズ、LSP の応答
 | 借用検査を入れた後 ([報告 08](docs/ja/reports/2026-11-18-08-borrow-checking.md)) | 746.0 M | 709.3 M | 3971.0 M | 1902.8 KiB | 387.2 KiB | 76.0 MiB |
 | 互換性の作業 ([報告 09](docs/ja/reports/2026-11-18-09-compat-with-kpis.md)、03367bc) | 685.7 M | 648.1 M | 3912.7 M | 1902.8 KiB | 387.2 KiB | 54.6 MiB |
 | prelude の選別の高速化 (3a1fd22) | 661.1 M | 622.4 M | 3887.3 M | 1902.8 KiB | 387.2 KiB | 51.8 MiB |
-| 今: async、static、const fn (e598fdf) | 661.9 M | 622.6 M | 3892.9 M | 1902.8 KiB | 387.2 KiB | 51.9 MiB |
+| async、static、const fn (e598fdf) | 661.9 M | 622.6 M | 3892.9 M | 1902.8 KiB | 387.2 KiB | 51.9 MiB |
+| 今: ブロックの中のアイテム | 661.5 M | 622.9 M | 3893.1 M | 1902.8 KiB | 387.2 KiB | 51.6 MiB |
 | **借用検査を入れた後からの変化** | **-11.3%** | **-12.2%** | **-2.0%** | **0%** | **0%** | **-32%** |
 
 LSP (zustc 自身のソースに対する `bench/lsp_parity.py` の p50。実時間):
@@ -80,10 +89,11 @@ LSP (zustc 自身のソースに対する `bench/lsp_parity.py` の p50。実時
 | 借用検査を入れた後 | 0.65 ms | 0.47 ms | 1.28 ms | 3.36 ms | 135 ms |
 | 互換性の作業 (03367bc) | 0.53 ms | 0.43 ms | 1.09 ms | 3.06 ms | 116 ms |
 | prelude の選別の高速化 (3a1fd22) | 0.58 ms | 0.47 ms | 1.37 ms | 3.45 ms | 109 ms |
-| 今 (e598fdf) | 0.42 ms | 0.34 ms | 0.90 ms | 1.78 ms | 277 ms (2 つの対象の合計) |
+| async (e598fdf)、同じマシンでの比較 | 0.42 ms | 0.34 ms | 0.90 ms | 1.78 ms | 277 ms (2 つの対象の合計) |
+| 今: ブロックの中のアイテム | 0.59 ms | 0.49 ms | 1.26 ms | 3.52 ms | 109 ms |
 
 どの変更も、これらが悪くならないときだけ残す。全体の計測で LSP の時間が上がったときは、同じマシンで 2 つのビルドを
-交互に走らせて比べ直してから、揺れかどうかを決める。最後の行はそうして比べた値で、起動の時間は 2 つの対象のファイルの合計。
+交互に走らせて比べ直してから、揺れかどうかを決める。e598fdf の行はそうして比べた値で、起動の時間は 2 つの対象のファイルの合計。ほかの行は `bench/ci_bench.py` の全体の計測。
 
 main に入るたびに測った数字の推移は [ベンチマークのダッシュボード](https://mizchi.github.io/zust/dev/bench/) にある
 (GitHub Actions の共有のランナーで測るので、時間は揺れる。命令数の系列の方が差を見やすい)。
@@ -95,10 +105,10 @@ zustc に求められるもの (nightly の機能・補助のクレート・特�
 
 | 種類 | 対象 | 通った |
 |---|---:|---:|
-| run-pass (ビルドでき、実行して同じ出力) | 2413 | 1364 (56.5%) |
-| check-pass (`zustc check` が通す) | 1807 | 1098 (60.8%) |
+| run-pass (ビルドでき、実行して同じ出力) | 2413 | 1371 (56.8%) |
+| check-pass (`zustc check` が通す) | 1807 | 1108 (61.3%) |
 | build-pass | 135 | 81 (60.0%) |
-| compile-fail (注釈の行で拒む) | 7358 | 2808 (38.2%) |
+| compile-fail (注釈の行で拒む) | 7358 | 2813 (38.2%) |
 
 分野ごとの内訳はチェックリストの形で [SUPPORTED.ja.md](SUPPORTED.ja.md) にある。
 
