@@ -35,19 +35,19 @@ medians of 3 runs). They are measured again with each round of work. gen1000 is 
 
 | gen1000 | cold | no-op | edit one function | on disk | binary (stripped) | run |
 |---|---:|---:|---:|---:|---:|---:|
-| zustc | 112 ms | 14 ms | 21 ms | 766 KiB | 324 KiB | 10 ms |
-| zustc `-O` | 303 ms | 53 ms | 56 ms | 1199 KiB | 341 KiB | 3 ms |
-| rustc `-C incremental` | 655 ms | 161 ms | 341 ms | 10.8 MiB | 1038 KiB | 6 ms |
-| rustc `-O` | 15056 ms | - | - | - | 377 KiB | 2 ms |
-| **zustc vs rustc `-C incremental`** | **5.8x faster** | **12x faster** | **16x faster** | **14x smaller** | **3.2x smaller** | |
+| zustc | 121 ms | 16 ms | 23 ms | 766 KiB | 324 KiB | 9 ms |
+| zustc `-O` | 285 ms | 56 ms | 56 ms | 1199 KiB | 341 KiB | 3 ms |
+| rustc `-C incremental` | 592 ms | 169 ms | 331 ms | 10.8 MiB | 1038 KiB | 6 ms |
+| rustc `-O` | 14902 ms | - | - | - | 377 KiB | 2 ms |
+| **zustc vs rustc `-C incremental`** | **4.9x faster** | **11x faster** | **14x faster** | **14x smaller** | **3.2x smaller** | |
 
 Small programs (`bench/rt`: fib, hashmap, matmul, nbody, sieve, sort, strings) and real crates (cratebench: fnv,
 adler2, hex, itoa, rustc-hash, cfg-if; all six give the same output as rustc):
 
 | | zustc vs rustc `-C incremental` (bench/rt) | zustc vs rustc (cratebench) |
 |---|---:|---:|
-| cold build | 2.9–4.1x faster (24–49 ms vs 82–178 ms) | 3.3–4.2x faster (21–61 ms vs 89–205 ms) |
-| edit and rebuild | 12–18x faster (5–7 ms vs 68–98 ms) | 4.7–7.0x faster (11–21 ms vs 60–112 ms) |
+| cold build | 2.9–4.1x faster (24–49 ms vs 82–178 ms) | 3.0–4.0x faster (25–62 ms vs 93–236 ms) |
+| edit and rebuild | 12–18x faster (5–7 ms vs 68–98 ms) | 5.1–7.2x faster (12–23 ms vs 68–122 ms) |
 | binary | 11–24x smaller | 90–550x smaller (8–48 KiB vs 4.4 MiB) |
 | run time vs rustc `-O` | zustc 1.1–4.1x slower, zustc `-O` 1.1–3.2x slower | zustc 3.1–17x slower, zustc `-O` 0.9–7.3x |
 
@@ -68,7 +68,8 @@ the previous commit, 1501b30 and 8e797a9 have the same cold median, 96 and 98 ms
 | 2026-11-18, `try_from`, `::std` paths, more std functions (096a6bc) | 102 ms | 624 ms | 6.1x | 22 ms | 327 ms | 14.9x |
 | 2026-11-18, prelude selection without per-build tables (f077e7c) | 89 ms | 623 ms | 7.0x | 22 ms | 320 ms | 14.5x |
 | 2026-11-18, `dyn Trait<A>` (f606b34) | 89 ms | 641 ms | 7.2x | 22 ms | 309 ms | 14.0x |
-| 2026-11-18, integer literals for bounds, `Box` comparisons | 112 ms | 655 ms | 5.8x | 21 ms | 341 ms | 16.2x |
+| 2026-11-18, integer literals for bounds, `Box` comparisons (60cbe60) | 112 ms | 655 ms | 5.8x | 21 ms | 341 ms | 16.2x |
+| 2026-11-18, `impl Trait` returning `()` | 121 ms | 592 ms | 4.9x | 23 ms | 331 ms | 14.4x |
 
 zustc's code is close to rustc's debug build at run time, and faster than it in all seven small programs (rustc's
 debug build is 3–26x slower than rustc `-O` there).
@@ -106,7 +107,8 @@ the shared machine vary by about ±20%.
 | `try_from`, `::std` paths, more std functions (096a6bc) | 662.9 M | 623.7 M | 3892.3 M | 1902.8 KiB | 387.2 KiB | 52.0 MiB |
 | prelude selection without per-build tables (f077e7c) | 663.8 M | 620.8 M | 3892.9 M | 1902.8 KiB | 387.2 KiB | 52.0 MiB |
 | `dyn Trait<A>` (f606b34) | 663.8 M | 620.8 M | 3893.0 M | 1902.8 KiB | 387.2 KiB | 51.8 MiB |
-| now: integer literals for bounds, `Box` comparisons | 661.0 M | 621.0 M | 3893.0 M | 1902.8 KiB | 387.2 KiB | 51.7 MiB |
+| integer literals for bounds, `Box` comparisons (60cbe60) | 661.0 M | 621.0 M | 3893.0 M | 1902.8 KiB | 387.2 KiB | 51.7 MiB |
+| now: `impl Trait` returning `()` | 663.2 M | 620.8 M | 3893.0 M | 1902.8 KiB | 387.2 KiB | 51.7 MiB |
 | **change since borrow checking** | **-11.3%** | **-12.2%** | **-2.0%** | **0%** | **0%** | **-32%** |
 
 LSP (p50 of `bench/lsp_parity.py` on zustc's own sources; these are wall-clock times):
@@ -127,7 +129,8 @@ LSP (p50 of `bench/lsp_parity.py` on zustc's own sources; these are wall-clock t
 | `try_from`, `::std` paths, more std functions (096a6bc) | 0.57 ms | 0.48 ms | 1.22 ms | 3.47 ms | 122 ms |
 | prelude selection without per-build tables (f077e7c) | 0.55 ms | 0.45 ms | 1.30 ms | 3.26 ms | 111 ms |
 | `dyn Trait<A>` (f606b34) | 0.51 ms | 0.43 ms | 1.17 ms | 3.39 ms | 109 ms |
-| now: integer literals for bounds, `Box` comparisons | 0.60 ms | 0.60 ms | 1.23 ms | 3.25 ms | 109 ms (same machine against f606b34: hover 0.32 vs 0.35 ms, ready 275 vs 287 ms) |
+| integer literals for bounds, `Box` comparisons (60cbe60) | 0.60 ms | 0.60 ms | 1.23 ms | 3.25 ms | 109 ms (same machine against f606b34: hover 0.32 vs 0.35 ms, ready 275 vs 287 ms) |
+| now: `impl Trait` returning `()` | 0.94 ms | 0.56 ms | 1.30 ms | 11.57 ms | 115 ms (same machine against 60cbe60, 8 alternating runs: definition 0.55 vs 0.55 ms, references 2.34 vs 2.35 ms, ready 291 vs 299 ms) |
 
 Each change is kept only if these do not get worse. When an LSP time rises in a full run, the two builds are
 compared again on the same machine, alternating runs, before it is called noise. The last row comes from such a
@@ -145,7 +148,7 @@ only the tests it can be asked to handle (no nightly features, auxiliary crates 
 | kind | applicable | pass |
 |---|---:|---:|
 | run-pass (builds, runs, same output) | 2413 | 1440 (59.7%) |
-| check-pass (accepted by `zustc check`) | 1807 | 1135 (62.8%) |
+| check-pass (accepted by `zustc check`) | 1807 | 1141 (63.1%) |
 | build-pass | 135 | 82 (60.7%) |
 | compile-fail (rejected at an annotated line) | 7358 | 2815 (38.3%) |
 

@@ -105,6 +105,7 @@ compile-fail	associated-type-bounds/binder-on-bound.rs
 check-pass	associated-type-bounds/dedup-normalized-1.rs
 check-pass	associated-type-bounds/entails-sized-dyn-compatibility.rs
 check-pass	associated-type-bounds/handle-predicates-that-can-define-assoc-type.rs
+check-pass	associated-type-bounds/higher-ranked.rs
 check-pass	associated-type-bounds/implied-in-supertrait.rs
 compile-fail	associated-type-bounds/inside-adt.rs
 compile-fail	associated-type-bounds/issue-102335-ty.rs
@@ -2169,6 +2170,8 @@ build-pass	impl-trait/defined-by-trait-resolution.rs
 compile-fail	impl-trait/diagnostics/fully-qualified-path-impl-trait.rs
 check-pass	impl-trait/different_where_bounds.rs
 compile-fail	impl-trait/dyn-incompatible-trait-in-return-position-dyn-trait.rs
+check-pass	impl-trait/dyn-trait-elided-two-inputs-assoc.rs
+check-pass	impl-trait/dyn-trait-elided-two-inputs-param.rs
 check-pass	impl-trait/equal-hidden-lifetimes.rs
 check-pass	impl-trait/explicit-generic-args-with-impl-trait/const-args.rs
 compile-fail	impl-trait/explicit-generic-args-with-impl-trait/explicit-generic-args-for-impl.rs
@@ -2188,6 +2191,7 @@ check-pass	impl-trait/in-trait/default-method-binder-shifting.rs
 compile-fail	impl-trait/in-trait/dont-probe-missing-item-name-3.rs
 check-pass	impl-trait/in-trait/early.rs
 check-pass	impl-trait/in-trait/expeced-refree-to-map-to-reearlybound-ice-108580.rs
+check-pass	impl-trait/in-trait/lifetime-in-associated-trait-bound.rs
 compile-fail	impl-trait/in-trait/opaque-and-lifetime-mismatch.rs
 compile-fail	impl-trait/in-trait/opaque-in-impl-is-opaque.rs
 check-pass	impl-trait/in-trait/outlives-in-nested-rpit.rs
@@ -2239,6 +2243,7 @@ compile-fail	impl-trait/precise-capturing/overcaptures-2024.rs
 check-pass	impl-trait/precise-capturing/self-capture.rs
 compile-fail	impl-trait/precise-capturing/unexpected-token.rs
 compile-fail	impl-trait/printing-binder.rs
+check-pass	impl-trait/recursive-auto-trait.rs
 run-pass	impl-trait/region-escape-via-bound-contravariant-closure.rs
 run-pass	impl-trait/region-escape-via-bound-contravariant.rs
 compile-fail	impl-trait/rpit-not-sized.rs
@@ -4980,6 +4985,7 @@ run-pass	traits/impl-2.rs
 compile-fail	traits/impl-for-module.rs
 run-pass	traits/impl-implicit-trait.rs
 run-pass	traits/impl-object-overlap-issue-23853.rs
+check-pass	traits/impl_trait_as_trait_return_position.rs
 compile-fail	traits/incoherent-impl-ambiguity.rs
 run-pass	traits/infer-from-object-issue-26952.rs
 run-pass	traits/inheritance/auto.rs

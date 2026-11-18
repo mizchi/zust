@@ -654,6 +654,15 @@ fn resolve_opaque(prog: &mut Program, src: &str, items: &[SrcItem]) -> R<()> {
             let (_, r, _) = crate::ast_infer::infer_ctx(prog, f.sig.recv.is_some(), &f.sig.params, &f.block, &sig, &env, &[], None, Some((id, 0)));
             // (a body with no value (`-> impl Sized {}`) returns `()`)
             let no_value = !matches!(f.block.stmts.last(), Some(crate::parse::Stmt::Expr(_, false))) && !format!("{:?}", f.block).contains("Return(Some");
+            // (a body ending in `()` itself, or in a diverging macro (`panic!()` / `todo!()`), is `()` too)
+            let unit_tail = match f.block.stmts.last() {
+                Some(crate::parse::Stmt::Expr(crate::parse::Expr::Tuple(v), false)) => v.is_empty(),
+                Some(crate::parse::Stmt::Expr(crate::parse::Expr::Macro(p, _, _), _)) => {
+                    matches!(p.segs.last().map(|s| s.name.as_str()), Some("panic" | "todo" | "unimplemented" | "unreachable"))
+                }
+                _ => false,
+            };
+            let no_value = no_value || unit_tail;
             if let Some(t) = r.filter(|&t| (t != Ty::Unit || no_value) && !prog.has_param(t)) {
                 prog.sigs[id as usize].ret = t;
                 done[k] = true;

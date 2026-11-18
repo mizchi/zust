@@ -422,6 +422,12 @@ fn parse_sig(sig: &PSig, is_extern: bool, is_main: bool, owner: Option<&Owner>) 
     }
     let ret = match &sig.ret {
         None => TySyn::Prim(Ty::Unit),
+        // (`-> impl ?Sized` with no other trait: a return value must have a size)
+        Some(PTy::Impl(bs)) if bs.iter().any(|b| matches!(b, Bound::Trait(true, p) if p.segs.last().is_some_and(|s| s.name == "Sized")))
+            && !bs.iter().any(|b| matches!(b, Bound::Trait(false, _))) =>
+        {
+            return err("the size for values of type `impl ?Sized` cannot be known at compilation time");
+        }
         Some(PTy::Impl(_)) => TySyn::Named(IMPL_RET.into()),
         Some(t) => tysyn(t, self_ty)?,
     };
