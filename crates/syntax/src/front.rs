@@ -36,14 +36,14 @@ fn count_nl(b: &[u8]) -> usize {
 #[doc(hidden)]
 pub fn split_inc(src: &str, memo: &mut Option<(String, Vec<SrcItem>)>) -> R<Vec<SrcItem>> {
     let r = match memo.as_ref() {
-        Some((old, items)) if std::env::var_os("CRUSTC_NO_SPLIT_INC").is_none() => split_diff(old, items, src),
+        Some((old, items)) if std::env::var_os("ZUSTC_NO_SPLIT_INC").is_none() => split_diff(old, items, src),
         _ => None,
     };
     let items = match r {
         Some(v) => v,
         None => lexer::split(src)?,
     };
-    if std::env::var_os("CRUSTC_SPLIT_VERIFY").is_some() {
+    if std::env::var_os("ZUSTC_SPLIT_VERIFY").is_some() {
         let full = lexer::split(src)?;
         let same = full.len() == items.len()
             && full.iter().zip(&items).all(|(a, b)| a.start == b.start && a.end == b.end && a.line == b.line && a.hash == b.hash && a.idents == b.idents && a.kind == b.kind);
@@ -148,7 +148,7 @@ fn split_diff(old: &str, items: &[SrcItem], new: &str) -> Option<Vec<SrcItem>> {
 /// cfg: マクロを展開したものの中の `#[cfg(..)]` を評価する設定
 /// 返り値の 4 つ目は prelude の先頭の行 (prelude の中の行 = 結合したソースの行 - これ)
 pub fn with_prelude_in(src: &str, crates: &[String], fix: &mut Vec<(u32, u32, i32)>, cfg: Option<&crate::cfg::CfgSet>, cache: &mut FrontMemo) -> R<(String, Vec<SrcItem>, usize, usize)> {
-    let mut tm = Timer { on: std::env::var_os("CRUSTC_PROF").is_some(), last: now_ns(), start: now_ns() };
+    let mut tm = Timer { on: std::env::var_os("ZUSTC_PROF").is_some(), last: now_ns(), start: now_ns() };
     let pre = crate::prep::prep(src, crates, fix, cfg, &mut cache.prep)?;
     let src: &str = &pre;
     tm.lap("prep", String::new());

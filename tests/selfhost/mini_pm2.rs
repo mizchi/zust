@@ -1,6 +1,6 @@
 // proc_macro2 の代わり (src/macros.rs が使う分だけ): 文字列を字句解析してトークン木にする。
 // 位置 (byte_range / 行・列) は与えた文字列の中の位置。コメントは飛ばす (doc コメントも)。
-// rustc 版と crustc 版の両方がこれを使うので、本物の proc_macro2 と細部が違っても出力は比べられる。
+// rustc 版と zustc 版の両方がこれを使うので、本物の proc_macro2 と細部が違っても出力は比べられる。
 pub mod proc_macro2 {
     use std::fmt;
 

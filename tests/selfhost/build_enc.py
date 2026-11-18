@@ -1,8 +1,8 @@
-"""crustc 自身の crates/syntax/src/enc.rs と crates/base/src/fxhash.rs を 1 ファイルのプログラムにまとめる。
+"""zustc 自身の crates/syntax/src/enc.rs と crates/base/src/fxhash.rs を 1 ファイルのプログラムにまとめる。
 main は enc_struct! で符号化できる struct を作って符号化・復号し、バイト列と結果を出す。FxHasher のハッシュも出す。"""
 enc = open("crates/syntax/src/enc.rs").read()
 fx = open("crates/base/src/fxhash.rs").read()
-print("""// 自動生成: tests/selfhost/build_enc.py (crustc の crates/syntax/src/enc.rs と crates/base/src/fxhash.rs をそのまま含む)
+print("""// 自動生成: tests/selfhost/build_enc.py (zustc の crates/syntax/src/enc.rs と crates/base/src/fxhash.rs をそのまま含む)
 mod enc {
 """ + enc + """}
 

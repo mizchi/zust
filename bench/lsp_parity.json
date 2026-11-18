@@ -93,7 +93,7 @@
   "ready_ms": 10.385751724243164,
   "rss_mb": 18.71484375
  },
- "crustc": {
+ "zustc": {
   "metrics": {
    "documentSymbol (名前の一致)": 1.0,
    "workspace/symbol (上位 20 の一致)": 1.0,

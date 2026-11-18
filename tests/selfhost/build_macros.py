@@ -1,4 +1,4 @@
-"""crustc 自身の crates/syntax/src/macros.rs (macro_rules! の展開と include_str!) を 1 ファイルのプログラムにまとめる。
+"""zustc 自身の crates/syntax/src/macros.rs (macro_rules! の展開と include_str!) を 1 ファイルのプログラムにまとめる。
 proc_macro2 クレートは使えないので、使う分だけの代わり (tests/selfhost/mini_pm2.rs) を付ける
 (rustc 版も同じ代わりを使う)。
 usage: python3 tests/selfhost/build_macros.py > out/selfhost/macros_main.rs
@@ -10,7 +10,7 @@ pm2 = open("tests/selfhost/mini_pm2.rs").read()
 lexer = open("crates/syntax/src/lexer.rs").read()
 key = open("crates/base/src/key.rs").read()
 cfg = open("crates/syntax/src/cfg.rs").read()
-print("""// 自動生成: tests/selfhost/build_macros.py (crustc の crates/syntax/src/macros.rs をそのまま含む)
+print("""// 自動生成: tests/selfhost/build_macros.py (zustc の crates/syntax/src/macros.rs をそのまま含む)
 """ + pm2 + """
 mod cache {
 """ + key + """

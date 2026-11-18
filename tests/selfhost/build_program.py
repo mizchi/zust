@@ -1,4 +1,4 @@
-"""crustc 自身の crates/sema/src/program.rs (全体の表: 関数シグネチャ・struct / enum のレイアウト・trait 実装) を、要約までの
+"""zustc 自身の crates/sema/src/program.rs (全体の表: 関数シグネチャ・struct / enum のレイアウト・trait 実装) を、要約までの
 モジュール (lexer / prelude / types / parse / ast_types / ast_closure / ast_summary) と一緒に 1 ファイルのプログラムにまとめる。
 usage: python3 tests/selfhost/build_program.py > out/selfhost/program_main.rs
 main は引数のファイルごとに、driver と同じ手順 (モジュールを平らに・入れ子のアイテムを外へ・prelude を後ろに付ける) で
@@ -10,7 +10,7 @@ import glob, os
 def body(p):
     return open(p).read()
 
-items = max(glob.glob("target/release/build/crustc-syntax*/**/prelude_items.rs", recursive=True), key=os.path.getmtime)
+items = max(glob.glob("target/release/build/zust-syntax*/**/prelude_items.rs", recursive=True), key=os.path.getmtime)
 prelude = (body("crates/syntax/src/prelude.rs")
     .replace('include_str!("prelude_lib.rs.in")', 'include_str!("../../crates/syntax/src/prelude_lib.rs.in")')
     .replace('include!(concat!(env!("OUT_DIR"), "/prelude_items.rs"));', open(items).read()))
@@ -19,7 +19,7 @@ parts = [("key", body("crates/base/src/key.rs")), ("fxhash", body("crates/base/s
          ("ast_types", body("crates/syntax/src/ast_types.rs")), ("ast_closure", body("crates/syntax/src/ast_closure.rs")),
          ("ast_summary", body("crates/syntax/src/ast_summary.rs")), ("program", body("crates/sema/src/program.rs")),
          ("ast_consteval", body("crates/sema/src/ast_consteval.rs")), ("solver", body("crates/sema/src/solver.rs")), ("ctors", body("crates/syntax/src/ctors.rs")), ("ast_infer", body("crates/sema/src/ast_infer.rs"))]
-out = ["// 自動生成: tests/selfhost/build_program.py (crustc の src/*.rs をそのまま含む)", "mod cache {\n    pub use crate::key::*;\n}\n"]
+out = ["// 自動生成: tests/selfhost/build_program.py (zustc の src/*.rs をそのまま含む)", "mod cache {\n    pub use crate::key::*;\n}\n"]
 for name, src in parts:
     out.append(f"mod {name} {{\n" + src + "}\n")
 out.append(r"""

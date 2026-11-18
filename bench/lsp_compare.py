@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""LSP サーバの比較: crustc-lsp / rust-analyzer / rust-glancer を同じ手順で動かして測る。
+"""LSP サーバの比較: zust-analyzer / rust-analyzer / rust-glancer を同じ手順で動かして測る。
 
-usage: python3 bench/lsp_compare.py [--servers crustc,rust-analyzer,rust-glancer] [--targets synth,crustc]
+usage: python3 bench/lsp_compare.py [--servers zustc,rust-analyzer,rust-glancer] [--targets synth,zustc]
                                     [--out bench/lsp_compare_result.md] [--reps 10] [--timeout 300]
-(このディレクトリで実行。事前に cargo build --release --workspace (target/release/crustc-lsp を作る)。rust-glancer は RUST_GLANCER=<バイナリ> か PATH から)
+(このディレクトリで実行。事前に cargo build --release --workspace (target/release/zust-analyzer を作る)。rust-glancer は RUST_GLANCER=<バイナリ> か PATH から)
 
 測るもの (サーバごと・対象ごと):
 - init: initialize の応答までの時間
@@ -17,7 +17,7 @@ usage: python3 bench/lsp_compare.py [--servers crustc,rust-analyzer,rust-glancer
 サーバから来る要求 (workspace/configuration・window/workDoneProgress/create・client/registerCapability など) には空で答える。
 対象:
 - synth: 生成した Cargo のクレート (モジュール 40 個・各 25 関数 + struct / enum / impl)
-- crustc: このディレクトリ (Cargo のワークスペース。依存に cranelift などがある)
+- zustc: このディレクトリ (Cargo のワークスペース。依存に cranelift などがある)
 """
 
 import argparse, json, os, shutil, statistics, subprocess, sys, tempfile, threading, time
@@ -220,7 +220,7 @@ def make_synth(dir, mods=40):
     }
 
 
-def crustc_target():
+def zustc_target():
     return {
         "root": HERE,
         "open": "crates/core/src/driver2.rs",
@@ -346,8 +346,8 @@ def fmt(x, unit=""):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--servers", default="crustc,rust-analyzer,rust-glancer")
-    ap.add_argument("--targets", default="synth,crustc,big")
+    ap.add_argument("--servers", default="zustc,rust-analyzer,rust-glancer")
+    ap.add_argument("--targets", default="synth,zustc,big")
     ap.add_argument("--reps", type=int, default=10)
     ap.add_argument("--timeout", type=float, default=300)
     ap.add_argument("--out", default=None)
@@ -355,7 +355,7 @@ def main():
     a = ap.parse_args()
     glancer = os.environ.get("RUST_GLANCER") or shutil.which("rust-glancer") or "/home/user/rust-glancer/target/release/rust-glancer"
     servers = {
-        "crustc": [os.path.join(HERE, "target/release/crustc-lsp")],
+        "zustc": [os.path.join(HERE, "target/release/zust-analyzer")],
         "rust-analyzer": [os.environ.get("RUST_ANALYZER") or "rust-analyzer"],
         "rust-glancer": [glancer, "lsp"],
     }
@@ -366,8 +366,8 @@ def main():
             targets["synth"] = make_synth(os.path.join(tmp, "synth"))
         elif t == "big":
             targets["big"] = make_synth(os.path.join(tmp, "big"), 1000)
-        elif t == "crustc":
-            targets["crustc"] = crustc_target()
+        elif t == "zustc":
+            targets["zustc"] = zustc_target()
     out = ["| 対象 | サーバ | init | ready | docsym (数) | wsym (見つかった) | edit→docsym | edit→diag | references 1 回目 / 2 回目 (数) | peak RSS (子も) |",
            "|---|---|---:|---:|---:|---:|---:|---:|---:|---:|"]
     for tn, t in targets.items():

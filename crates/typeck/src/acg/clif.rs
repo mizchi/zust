@@ -1,4 +1,4 @@
-//! Cranelift の FunctionBuilder / InstBuilder と同じ形の API を、命令を記録するだけの crustc_ir::Recorder の上に作る薄い層
+//! Cranelift の FunctionBuilder / InstBuilder と同じ形の API を、命令を記録するだけの zust_ir::Recorder の上に作る薄い層
 //! (機械語にするのはバックエンド: codegen の lower が記録を minclif / Cranelift で組み立て直す)。
 //! codegen.rs (Cranelift 版) のコードをほぼそのまま移せるようにするためのもの。
 //! 型による命令の振り分け (i128 / 浮動小数点) もここでする。

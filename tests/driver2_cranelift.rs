@@ -4,12 +4,12 @@
 #![cfg(feature = "acg")]
 use std::path::PathBuf;
 
-fn build(src: &str, out: &PathBuf, opt: bool, cl: bool) -> Result<crustc::driver2::Report2, String> {
-    let mut o = crustc::driver2::Options2 { opt, no_cache: true, jobs: 1, ..Default::default() };
+fn build(src: &str, out: &PathBuf, opt: bool, cl: bool) -> Result<zustc::driver2::Report2, String> {
+    let mut o = zustc::driver2::Options2 { opt, no_cache: true, jobs: 1, ..Default::default() };
     if cl {
-        o.backend = Some(crustc::clif_backend::compile);
+        o.backend = Some(zustc::clif_backend::compile);
     }
-    crustc::driver2::Session2::new(o).build(src, out)
+    zustc::driver2::Session2::new(o).build(src, out)
 }
 
 #[test]

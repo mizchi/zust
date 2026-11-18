@@ -1,17 +1,17 @@
-"""crustc と rustc で、実行時間・ビルド時間・バイナリサイズを比べる (bench/rt/*.rs)。
+"""zustc と rustc で、実行時間・ビルド時間・バイナリサイズを比べる (bench/rt/*.rs)。
 usage: python3 bench/runtime.py [NAME ...]   (このディレクトリで実行。事前に cargo build --release)
 各設定でビルド 3 回・実行 3 回の中央値。出力が rustc -O と一致するかも確かめる。"""
 import os, shutil, statistics, subprocess, sys, time
 
-CRUSTC = os.path.abspath("target/release/crustc")
+ZUSTC = os.path.abspath("target/release/zustc")
 W = os.path.abspath("out/runtime")
 # (既定は driver2 (自前のフロントエンド) + Cranelift。--backend=minclif で minclif。
 #  MINCLIF_NO_REGALLOC は minclif のレジスタ割り当てなし)
 CONFIGS = [
-    ("minclif -O (割り当てなし)", lambda s, o: ["env", "MINCLIF_NO_REGALLOC=1", CRUSTC, s, "-o", o, "--backend=minclif", "-O", "--no-cache"]),
-    ("minclif -O", lambda s, o: [CRUSTC, s, "-o", o, "--backend=minclif", "-O", "--no-cache"]),
-    ("crustc (Cranelift)", lambda s, o: [CRUSTC, s, "-o", o, "--no-cache"]),
-    ("crustc -O (Cranelift)", lambda s, o: [CRUSTC, s, "-o", o, "-O", "--no-cache"]),
+    ("minclif -O (割り当てなし)", lambda s, o: ["env", "MINCLIF_NO_REGALLOC=1", ZUSTC, s, "-o", o, "--backend=minclif", "-O", "--no-cache"]),
+    ("minclif -O", lambda s, o: [ZUSTC, s, "-o", o, "--backend=minclif", "-O", "--no-cache"]),
+    ("zustc (Cranelift)", lambda s, o: [ZUSTC, s, "-o", o, "--no-cache"]),
+    ("zustc -O (Cranelift)", lambda s, o: [ZUSTC, s, "-o", o, "-O", "--no-cache"]),
     ("rustc (debug)", lambda s, o: ["rustc", "--edition", "2021", "-Awarnings", s, "-o", o]),
     ("rustc -O", lambda s, o: ["rustc", "--edition", "2021", "-Awarnings", "-O", s, "-o", o]),
 ]

@@ -9,7 +9,7 @@
 //!   `macro_rules!`・ユーザのマクロの呼び出しと、括弧と `;` は残す。行の数は同じ) から同じものが集まる。
 //! - 骨組みの全体が前回と同じなら、変わっていないチャンクの結果は前回のものを使い、変わったチャンクだけを、ほかを骨組みに
 //!   したソースで前処理して行で切り出す。骨組みが変わったら (宣言を変えた) 全体を前処理し直す。
-//! - `CRUSTC_PREP_VERIFY=1` で毎回全体の前処理と比べる。`CRUSTC_NO_PREP_INC=1` で差分を使わない。
+//! - `ZUSTC_PREP_VERIFY=1` で毎回全体の前処理と比べる。`ZUSTC_NO_PREP_INC=1` で差分を使わない。
 
 use crate::fxhash::FxMap;
 use crate::lexer;
@@ -60,7 +60,7 @@ pub fn prep_full(src: &str, crates: &[String], fix: &mut Vec<(u32, u32, i32)>, c
         Some(t) => t.as_str(),
         None => s1,
     };
-    if let Some(p) = std::env::var_os("CRUSTC_DUMP_PRE") {
+    if let Some(p) = std::env::var_os("ZUSTC_DUMP_PRE") {
         let _ = std::fs::write(p, s2);
     }
     let flat = lexer::flatten_modules_fix(s2, crates, fix);
@@ -677,7 +677,7 @@ fn split_out(p: &Prep, lines: &[usize], fix: &[(u32, u32, i32)], want: &[bool]) 
 /// 前処理 (差分)。fix には桁のずれを足す
 pub fn prep(src: &str, crates: &[String], fix: &mut Vec<(u32, u32, i32)>, cfg: Option<&crate::cfg::CfgSet>, memo: &mut PrepMemo) -> R<String> {
     memo.calls += 1;
-    if std::env::var_os("CRUSTC_NO_PREP_INC").is_some() || (memo.calls == 1 && std::env::var_os("CRUSTC_PREP_VERIFY").is_none()) {
+    if std::env::var_os("ZUSTC_NO_PREP_INC").is_some() || (memo.calls == 1 && std::env::var_os("ZUSTC_PREP_VERIFY").is_none()) {
         return prep_full(src, crates, fix, cfg).map(|p| p.text);
     }
     let r = prep_inc(src, crates, cfg, memo);
@@ -696,11 +696,11 @@ pub fn prep(src: &str, crates: &[String], fix: &mut Vec<(u32, u32, i32)>, cfg: O
             return Err(e);
         }
     };
-    if std::env::var_os("CRUSTC_PREP_VERIFY").is_some() {
+    if std::env::var_os("ZUSTC_PREP_VERIFY").is_some() {
         let mut f2 = vec![];
         let full = prep_full(src, crates, &mut f2, cfg)?;
         if full.text != text || f2 != fx {
-            if let Ok(p) = std::env::var("CRUSTC_PREP_VERIFY_DUMP") {
+            if let Ok(p) = std::env::var("ZUSTC_PREP_VERIFY_DUMP") {
                 let _ = std::fs::write(format!("{p}.inc"), &text);
                 let _ = std::fs::write(format!("{p}.full"), &full.text);
             }
@@ -726,7 +726,7 @@ fn prep_inc(src: &str, crates: &[String], cfg: Option<&crate::cfg::CfgSet>, memo
         memo.calls = c;
         memo.key = key;
     }
-    let log = std::env::var_os("CRUSTC_PREP_LOG").is_some();
+    let log = std::env::var_os("ZUSTC_PREP_LOG").is_some();
     let (starts, balanced) = chunk_starts(src, &mut memo.chunks);
     if !balanced {
         return Ok(None);

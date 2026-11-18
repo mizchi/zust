@@ -33,7 +33,7 @@ fn driver2_matches_expected() {
         };
         let src = std::fs::read_to_string(p).unwrap();
         let exe = dir.join(&name);
-        if let Err(e) = crustc::driver2::build(&src, &exe, false, None) {
+        if let Err(e) = zustc::driver2::build(&src, &exe, false, None) {
             bad.push(format!("{name}: {}", e.lines().next().unwrap_or("")));
             continue;
         }

@@ -34,16 +34,16 @@ fn run(exe: &Path, dir: &Path, n: usize) -> (String, String, Option<i32>) {
 
 #[test]
 fn workspace_matches_rustc_and_rebuilds_incrementally() {
-    let dir = std::env::temp_dir().join(format!("crustc_ws_{}", std::process::id()));
+    let dir = std::env::temp_dir().join(format!("zustc_ws_{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
     copy_dir(Path::new("tests/workspace"), &dir);
     let rs: PathBuf = dir.join("target_rustc");
     std::fs::create_dir_all(&rs).unwrap();
     let st = Command::new("bash").arg(dir.join("build_rustc.sh")).arg(&rs).status().unwrap();
     assert!(st.success());
-    let crates = crustc::driver2::read_workspace(&dir.join("workspace.txt")).unwrap();
+    let crates = zustc::driver2::read_workspace(&dir.join("workspace.txt")).unwrap();
     let out = dir.join("target");
-    let mut s = crustc::driver2::Session2::new(crustc::driver2::Options2::default());
+    let mut s = zustc::driver2::Session2::new(zustc::driver2::Options2::default());
     let r = s.build_workspace(&crates, &out).unwrap();
     assert_eq!(r.linked, 1);
     // (引数の数で: 0 = 依存するクレートの中の 0 除算, 1 = 普通, 2 = bin のモジュールのファイルの添字, 3 = unwrap)

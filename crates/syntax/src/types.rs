@@ -1,5 +1,5 @@
 //! 型の表現 (front.rs から分けた、syn に依存しない部分)。`Ty` (解決済みの型) と `TySyn` (構文上の型) と intern。
-//! crustc 自身でもコンパイルできる書き方にしてある (セルフホストの対象)。
+//! zustc 自身でもコンパイルできる書き方にしてある (セルフホストの対象)。
 
 use std::collections::HashSet;
 use std::sync::{Mutex, OnceLock};

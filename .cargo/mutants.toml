@@ -1,7 +1,7 @@
 # cargo-mutants の設定 (bench/mutants.sh から使う。直接 `cargo mutants ...` でも読まれる)
 # 変異は 1 万 8 千個ほどあるので、全部は回さない: bench/mutants.sh で差分・ファイル・クレート・shard に絞る
 
-# 変異ごとのビルドは release の設定で (テストの多くは crustc でプログラムをコンパイルして動かすので、debug だと遅い)。
+# 変異ごとのビルドは release の設定で (テストの多くは zustc でプログラムをコンパイルして動かすので、debug だと遅い)。
 # 増分ビルドを入れ、デバッグ情報は付けない
 profile = "mutants"
 

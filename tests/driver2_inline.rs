@@ -23,10 +23,10 @@ fn inline_keeps_behavior() {
         let name = p.file_stem().unwrap().to_string_lossy().to_string();
         let src = std::fs::read_to_string(p).unwrap();
         let (a, b) = (dir.join(format!("{name}.0")), dir.join(format!("{name}.1")));
-        if crustc::driver2::build(&src, &a, false, None).is_err() {
+        if zustc::driver2::build(&src, &a, false, None).is_err() {
             continue;
         }
-        if let Err(e) = crustc::driver2::build(&src, &b, true, None) {
+        if let Err(e) = zustc::driver2::build(&src, &b, true, None) {
             bad.push(format!("{name}: -O build failed: {}", e.lines().next().unwrap_or("")));
             continue;
         }

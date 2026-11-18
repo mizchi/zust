@@ -3,7 +3,7 @@
 //! 「同じフロントエンド・同じ命令の列」でバックエンドだけを比べられる (minclif と Cranelift)。
 //!
 //! 返すのは minclif と同じ形: (機械語, 再配置 (名前・ELF の種類), trap の場所と番号)。
-//! crustc 自身ではコンパイルできない (cranelift を使う) ので、セルフホストには入れない。
+//! zustc 自身ではコンパイルできない (cranelift を使う) ので、セルフホストには入れない。
 
 use minclif::{FMap, FSet};
 
@@ -27,8 +27,8 @@ pub fn make_isa(opt: bool, fast_ra: bool) -> OwnedTargetIsa {
     f.set("is_pic", "true").unwrap();
     f.set("unwind_info", "false").unwrap();
     f.set("enable_llvm_abi_extensions", "true").unwrap();
-    // (IR の検査はコンパイルの 18% を占めていた: 既定では切る。CRUSTC_CLIF_VERIFY=1 で入れる)
-    f.set("enable_verifier", if std::env::var_os("CRUSTC_CLIF_VERIFY").is_some() { "true" } else { "false" }).unwrap();
+    // (IR の検査はコンパイルの 18% を占めていた: 既定では切る。ZUSTC_CLIF_VERIFY=1 で入れる)
+    f.set("enable_verifier", if std::env::var_os("ZUSTC_CLIF_VERIFY").is_some() { "true" } else { "false" }).unwrap();
     cranelift_native::builder().unwrap().finish(settings::Flags::new(f)).unwrap()
 }
 
@@ -78,7 +78,7 @@ fn fcc(c: FloatCC) -> CFloatCC {
 
 /// minclif の記録から機械語を作る。zero: 入口で 0 にするスロット
 pub fn compile(fb: &FunctionBuilder, zero: &[StackSlot], opt: bool) -> Result<(Vec<u8>, Vec<Reloc>, Vec<(u32, u8)>), String> {
-    let fast_ra = std::env::var_os("CRUSTC_CLIF_FAST_RA").is_some();
+    let fast_ra = std::env::var_os("ZUSTC_CLIF_FAST_RA").is_some();
     ISA.with(|cell| {
         let mut c = cell.borrow_mut();
         if !matches!(&*c, Some((o, f, _)) if *o == opt && *f == fast_ra) {
@@ -123,8 +123,8 @@ fn build(fb: &FunctionBuilder, zero: &[StackSlot], isa: &dyn cranelift_codegen::
     // 使うことがある (minclif は値をスロットに置くので困らない)。SSA は cranelift_frontend が組み立てる
     let mut gvars: FMap<u32, Variable> = FMap::default();
     // スロットのアドレスは使う所で作り直す (長く生きる値・区間をまたぐ Variable にしない: レジスタ割り当てが軽くなる)
-    let remat = std::env::var_os("CRUSTC_CLIF_NO_REMAT").is_none();
-    let fold_br = std::env::var_os("CRUSTC_CLIF_NO_FOLD_BR").is_none();
+    let remat = std::env::var_os("ZUSTC_CLIF_NO_REMAT").is_none();
+    let fold_br = std::env::var_os("ZUSTC_CLIF_NO_FOLD_BR").is_none();
     let mut saddr: FMap<u32, (u32, i32)> = FMap::default();
     if remat {
         for (i, op) in fb.ops.iter().enumerate() {
@@ -174,7 +174,7 @@ fn build(fb: &FunctionBuilder, zero: &[StackSlot], isa: &dyn cranelift_codegen::
     // スタックのスロットのフィールドを Variable にする (SROA: minclif と同じ判定。アドレスが load / store にしか
     // 使われないスロット)。Cranelift はスタックのスロットを SSA にしないので、struct の値がメモリを往復しなくなる
     let mut facc: FMap<u32, Variable> = FMap::default();
-    if let (Some(tr), true) = (fb.track(), std::env::var_os("CRUSTC_CLIF_NO_SROA").is_none()) {
+    if let (Some(tr), true) = (fb.track(), std::env::var_os("ZUSTC_CLIF_NO_SROA").is_none()) {
         let zs: Vec<u32> = zero.iter().map(|z| z.0).collect();
         let (prom, fields, ftys) = minclif::sroa(tr, fb.n_values(), fb.paddr(), fb.n_slots(), &zs);
         if !fields.is_empty() {
@@ -207,7 +207,7 @@ fn build(fb: &FunctionBuilder, zero: &[StackSlot], isa: &dyn cranelift_codegen::
     let mut in_entry = true;
     // 前のブロックの数 (まだ書いていない飛び込む命令の数)。0 になったブロックはすぐ閉じる (seal): 変数の値を前のブロックから
     // その場で決められるので、ブロックの引数の仮置きが減り、定数の条件の分岐を畳める
-    let early_seal = std::env::var_os("CRUSTC_CLIF_LATE_SEAL").is_none();
+    let early_seal = std::env::var_os("ZUSTC_CLIF_LATE_SEAL").is_none();
     let mut rem: FMap<u32, u32> = FMap::default();
     if early_seal {
         b.seal_block(entry);
@@ -868,8 +868,8 @@ fn build(fb: &FunctionBuilder, zero: &[StackSlot], isa: &dyn cranelift_codegen::
             }
         }
     }
-    // (CRUSTC_CLIF_STATS=1: 命令の種類ごとの数を出す。CRUSTC_CLIF_DUMP=1: IR を出す)
-    if std::env::var_os("CRUSTC_CLIF_STATS").is_some() {
+    // (ZUSTC_CLIF_STATS=1: 命令の種類ごとの数を出す。ZUSTC_CLIF_DUMP=1: IR を出す)
+    if std::env::var_os("ZUSTC_CLIF_STATS").is_some() {
         let mut n = 0;
         for bl in func.layout.blocks() {
             for i in func.layout.block_insts(bl) {
@@ -879,10 +879,10 @@ fn build(fb: &FunctionBuilder, zero: &[StackSlot], isa: &dyn cranelift_codegen::
         }
         eprintln!("CLIFFN insts={n} blocks={} slots={} values={}", func.layout.blocks().count(), func.sized_stack_slots.len(), func.dfg.num_values());
     }
-    if std::env::var_os("CRUSTC_CLIF_DUMP").is_some() {
+    if std::env::var_os("ZUSTC_CLIF_DUMP").is_some() {
         eprintln!("{}", func.display());
     }
-    let stat_n = if std::env::var_os("CRUSTC_CLIF_TIME").is_some() { Some((func.dfg.num_insts(), func.layout.blocks().count(), std::time::Instant::now())) } else { None };
+    let stat_n = if std::env::var_os("ZUSTC_CLIF_TIME").is_some() { Some((func.dfg.num_insts(), func.layout.blocks().count(), std::time::Instant::now())) } else { None };
     ctx.func = func;
     ctx.compile(isa, &mut ControlPlane::default()).map_err(|e| format!("cranelift: {:?}", e.inner))?;
     if let Some((n, bl, t)) = stat_n {

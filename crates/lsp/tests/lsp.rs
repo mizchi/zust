@@ -1,14 +1,14 @@
-//! `crustc-lsp` を実際に起動し、stdio 越しに診断が返ることを確かめる。
+//! `zust-analyzer` を実際に起動し、stdio 越しに診断が返ることを確かめる。
 
 use std::io::{BufReader, Write};
 use std::process::{Command, Stdio};
 
-use crustc_lsp::{read_msg, write_msg};
+use zust_analyzer::{read_msg, write_msg};
 use serde_json::{Value, json};
 
 #[test]
 fn diagnostics_roundtrip() {
-    let mut child = Command::new(env!("CARGO_BIN_EXE_crustc-lsp"))
+    let mut child = Command::new(env!("CARGO_BIN_EXE_zust-analyzer"))
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .spawn()
@@ -60,7 +60,7 @@ fn diagnostics_roundtrip() {
 /// documentSymbol (開いたドキュメントの木) と workspace/symbol (開いたドキュメントとワークスペースの .rs から名前で探す)
 #[test]
 fn symbols() {
-    use crustc_lsp::Server;
+    use zust_analyzer::Server;
     let root = std::path::PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join("lsp_symbols");
     let _ = std::fs::remove_dir_all(&root);
     std::fs::create_dir_all(root.join("src")).unwrap();
@@ -144,7 +144,7 @@ fn definition_and_references_slim() {
 }
 
 fn nav(budget: usize, dir: &str) {
-    use crustc_lsp::Server;
+    use zust_analyzer::Server;
     let root = std::path::PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join(dir);
     let _ = std::fs::remove_dir_all(&root);
     std::fs::create_dir_all(root.join("src")).unwrap();
@@ -197,7 +197,7 @@ fn nav(budget: usize, dir: &str) {
 /// hover と completion: シグネチャ・doc コメント・ローカルの型、`x.|` (受け手の型のメンバ)、`Q::|`、名前の途中
 #[test]
 fn hover_and_completion() {
-    use crustc_lsp::Server;
+    use zust_analyzer::Server;
     let root = std::path::PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join("lsp_hover");
     let _ = std::fs::remove_dir_all(&root);
     std::fs::create_dir_all(root.join("src")).unwrap();
@@ -236,7 +236,7 @@ fn hover_and_completion() {
     let c = labels(ask("textDocument/completion", 4, 14));
     assert!(c.contains(&"shifted".to_string()) && c.contains(&"x".to_string()) && !c.contains(&"push".to_string()), "{c:?}");
     let c = labels(ask("textDocument/completion", 7, 6));
-    if std::env::var_os("CRUSTC_LSP_NO_STD").is_none() && c.iter().any(|x| x == "len") {
+    if std::env::var_os("ZUST_ANALYZER_NO_STD").is_none() && c.iter().any(|x| x == "len") {
         assert!(c.contains(&"push".to_string()) && c.contains(&"iter".to_string()), "{c:?}");
     }
     // `Point::|`: 関連関数とフィールドでないもの
@@ -250,7 +250,7 @@ fn hover_and_completion() {
 /// rename (prepareRename・ほかのファイルも書き換える・理由付きの断り)、signatureHelp、documentHighlight
 #[test]
 fn rename_signature_highlight() {
-    use crustc_lsp::Server;
+    use zust_analyzer::Server;
     let root = std::path::PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join("lsp_rename");
     let _ = std::fs::remove_dir_all(&root);
     std::fs::create_dir_all(root.join("src")).unwrap();
@@ -312,8 +312,8 @@ fn rename_signature_highlight() {
 /// タプル・ターボフィッシュ・数の型のメソッド (core のマクロの中)。std が要るので、見つからなければ何もしない
 #[test]
 fn type_inference_like_rust_analyzer() {
-    use crustc_lsp::Server;
-    if std::env::var_os("CRUSTC_LSP_NO_STD").is_some() || std::process::Command::new("rustc").args(["--print", "sysroot"]).output().map(|o| !o.status.success()).unwrap_or(true) {
+    use zust_analyzer::Server;
+    if std::env::var_os("ZUST_ANALYZER_NO_STD").is_some() || std::process::Command::new("rustc").args(["--print", "sysroot"]).output().map(|o| !o.status.success()).unwrap_or(true) {
         return;
     }
     let root = std::path::PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join("lsp_types");

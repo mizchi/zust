@@ -1,6 +1,6 @@
 //! codegen.rs (syn の構文木 → Cranelift) を、自前の構文木 (src/parse.rs) → minclif (src/minclif.rs) に移したもの。
 //! Cranelift と同じ形の API は clif.rs が minclif の上に作る。syn の構文木の代わりは parse.rs の構文木、
-//! syn 版の型推論 (infer) の代わりは ast_infer。外部クレートに依存しないので crustc 自身でもコンパイルできる。
+//! syn 版の型推論 (infer) の代わりは ast_infer。外部クレートに依存しないので zustc 自身でもコンパイルできる。
 //!
 //! 値の表現は codegen.rs と同じ:
 //! - 整数 / bool / 参照: 値 (参照はポインタ)
@@ -804,7 +804,7 @@ impl Cx<'_> {
     pub fn temp_fresh(&mut self, t: Ty) -> Value {
         let ss = self.slot(t);
         let a = self.b.ins().stack_addr(PTR, ss, 0);
-        if std::env::var_os("CRUSTC_NO_FRESH").is_none() {
+        if std::env::var_os("ZUSTC_NO_FRESH").is_none() {
             self.fresh.insert(a.0, ss);
         }
         a
@@ -1031,7 +1031,7 @@ impl Cx<'_> {
     /// e が呼び出しなら、戻り値を sret の場所に直接書かせる印を付ける
     pub fn mark_ret_call(&mut self, e: &Expr) {
         let e = strip_paren(e);
-        if self.sret.is_some() && self.inline_ret.is_none() && matches!(e, Expr::Call(..) | Expr::MethodCall(..) | Expr::Struct(..)) && std::env::var_os("CRUSTC_NO_RET_DST").is_none() {
+        if self.sret.is_some() && self.inline_ret.is_none() && matches!(e, Expr::Call(..) | Expr::MethodCall(..) | Expr::Struct(..)) && std::env::var_os("ZUSTC_NO_RET_DST").is_none() {
             self.ret_call = Some(e as *const Expr as usize);
         }
     }

@@ -1,4 +1,4 @@
-"""本物の小さなクレート (vendor/) を、それを使う app (apps/) と一緒に crustc と rustc でビルドして比べる。
+"""本物の小さなクレート (vendor/) を、それを使う app (apps/) と一緒に zustc と rustc でビルドして比べる。
 
 usage: python3 cratebench/run.py [NAME ...] [--reps R]   (experiment のディレクトリで。事前に cargo build --release)
 
@@ -6,7 +6,7 @@ usage: python3 cratebench/run.py [NAME ...] [--reps R]   (experiment のディ�
   - 出力が rustc -O と同じか
   - ビルド時間: cold (キャッシュなし) / noop (何も変えない) / edit (app の main を 1 か所変える)。中央値 (ms)
   - 実行時間 (中央値, ms) とバイナリサイズ
-crustc はワークスペース (lib + bin) としてビルドする。rustc は lib を rlib にして --extern でリンクする
+zustc はワークスペース (lib + bin) としてビルドする。rustc は lib を rlib にして --extern でリンクする
 (edit は app だけをコンパイルし直す: cargo と同じ)。
 """
 import os
@@ -18,7 +18,7 @@ import time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
-CRUSTC = os.path.join(ROOT, "target/release/crustc")
+ZUSTC = os.path.join(ROOT, "target/release/zustc")
 OUT = os.path.join(ROOT, "out/cratebench")
 
 
@@ -105,15 +105,15 @@ def bench(name, ed, feats, reps):
         colds = []
         for _ in range(reps):
             shutil.rmtree(tgt, ignore_errors=True)
-            colds.append(sh([CRUSTC, "build", "ws.txt", "-o", tgt, *o], cwd=d)[0])
-        noop = statistics.median([sh([CRUSTC, "build", "ws.txt", "-o", tgt, *o], cwd=d)[0] for _ in range(reps)])
+            colds.append(sh([ZUSTC, "build", "ws.txt", "-o", tgt, *o], cwd=d)[0])
+        noop = statistics.median([sh([ZUSTC, "build", "ws.txt", "-o", tgt, *o], cwd=d)[0] for _ in range(reps)])
         edits = []
         for k in range(reps * 2):
             toggle_edit(d, k)
-            edits.append(sh([CRUSTC, "build", "ws.txt", "-o", tgt, *o], cwd=d)[0])
+            edits.append(sh([ZUSTC, "build", "ws.txt", "-o", tgt, *o], cwd=d)[0])
         exe = os.path.join(tgt, "app")
         rt, out = median_run(exe, reps)
-        rows.append((f"crustc{' -O' if opt else ''}", statistics.median(colds), noop, statistics.median(edits), rt, os.path.getsize(exe), out == want))
+        rows.append((f"zustc{' -O' if opt else ''}", statistics.median(colds), noop, statistics.median(edits), rt, os.path.getsize(exe), out == want))
     return rows
 
 

@@ -14,7 +14,7 @@ fn acg_like_rustc() {
     for p in &files {
         let name = p.file_stem().unwrap().to_string_lossy().to_string();
         let src = std::fs::read_to_string(p).unwrap();
-        let obj = match crustc::driver2::build_object(&src, false) {
+        let obj = match zustc::driver2::build_object(&src, false) {
             Ok(o) => o,
             Err(e) => {
                 bad.push(format!("{name}: {e}"));

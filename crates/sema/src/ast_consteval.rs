@@ -1,5 +1,5 @@
 //! static の初期値をデータのバイト列 (+ リロケーション) にする定数評価: consteval.rs (syn 版) の移植。
-//! 自前の構文木 (src/parse.rs) の上で動き、外部クレートに依存しないので crustc 自身でもコンパイルできる。
+//! 自前の構文木 (src/parse.rs) の上で動き、外部クレートに依存しないので zustc 自身でもコンパイルできる。
 //! tests/ast_consteval.rs が全ファイルの static で syn 版と同じ結果になることを確かめる。
 
 use crate::parse::{Expr, Path};

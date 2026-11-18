@@ -5,9 +5,9 @@
 //!
 //! ドキュメントごとに Session2 を 1 つ持ち、キャッシュはメモリ上だけに置く。
 //! 変わっていない関数は「検査済み」の印で飛ばすので、応答時間は変更量に比例する。
-//! シンボルは crustc_ide::symbols で字句の列から読む (構文が壊れていても読める所まで)。workspace/symbol・定義・参照は
+//! シンボルは zust_ide::symbols で字句の列から読む (構文が壊れていても読める所まで)。workspace/symbol・定義・参照は
 //! 開いているドキュメントと、ワークスペースの根の下の .rs ファイル (更新時刻と大きさで覚える) の索引
-//! (crustc_ide::navigate::FileIndex) から引く。ワークスペースの本文と字句の列は `CRUSTC_LSP_MEM_MB` (既定 4) MB の分だけ
+//! (zust_ide::navigate::FileIndex) から引く。ワークスペースの本文と字句の列は `ZUST_ANALYZER_MEM_MB` (既定 4) MB の分だけ
 //! 持ち、超えた分のファイルは定義と名前の集合だけにする (参照・hover で要るときに読み直し、同じだけの大きさの LRU で覚える)。
 
 use std::cell::RefCell;
@@ -18,9 +18,9 @@ use std::path::{Path, PathBuf};
 
 use serde_json::{Value, json};
 
-use crustc_core::driver2::{Options2, Session2};
-use crustc_ide::navigate::{self, FileIndex, Loc};
-use crustc_ide::symbols::{self, LineIndex, Symbol};
+use zust_core::driver2::{Options2, Session2};
+use zust_ide::navigate::{self, FileIndex, Loc};
+use zust_ide::symbols::{self, LineIndex, Symbol};
 
 /// 開いているドキュメント
 struct Doc {
@@ -78,7 +78,7 @@ impl Server {
             lib: vec![],
             layout: None,
             feats: HashMap::new(),
-            budget: std::env::var("CRUSTC_LSP_MEM_MB").ok().and_then(|v| v.parse::<f64>().ok()).map(|m| (m * 1048576.0) as usize).unwrap_or(4 << 20),
+            budget: std::env::var("ZUST_ANALYZER_MEM_MB").ok().and_then(|v| v.parse::<f64>().ok()).map(|m| (m * 1048576.0) as usize).unwrap_or(4 << 20),
             cache: RefCell::new(vec![]),
             crates: vec![],
             exit: false,
@@ -86,7 +86,7 @@ impl Server {
         }
     }
 
-    /// 本文を持つワークスペースのファイルの大きさの上限 (byte。既定は `CRUSTC_LSP_MEM_MB`、なければ 4 MB)
+    /// 本文を持つワークスペースのファイルの大きさの上限 (byte。既定は `ZUST_ANALYZER_MEM_MB`、なければ 4 MB)
     pub fn set_mem_budget(&mut self, bytes: usize) {
         self.budget = bytes;
     }
@@ -109,12 +109,12 @@ impl Server {
                     .or_else(|| p["rootPath"].as_str().map(PathBuf::from))
                     .or_else(|| p["workspaceFolders"][0]["uri"].as_str().and_then(uri_path));
                 self.root = root;
-                if self.lib_job.is_none() && std::env::var_os("CRUSTC_LSP_NO_STD").is_none() {
+                if self.lib_job.is_none() && std::env::var_os("ZUST_ANALYZER_NO_STD").is_none() {
                     let r = self.root.clone();
                     self.lib_job = Some(std::thread::spawn(move || {
                         let mut v = index_std();
                         if let Some(r) = r {
-                            if std::env::var_os("CRUSTC_LSP_NO_DEPS").is_none() {
+                            if std::env::var_os("ZUST_ANALYZER_NO_DEPS").is_none() {
                                 v.extend(index_deps(&r));
                             }
                         }
@@ -125,7 +125,7 @@ impl Server {
                     "capabilities": { "textDocumentSync": 1, "documentSymbolProvider": true, "workspaceSymbolProvider": true, "definitionProvider": true, "referencesProvider": true,
                         "hoverProvider": true, "completionProvider": { "triggerCharacters": [".", ":"] },
                         "renameProvider": { "prepareProvider": true }, "signatureHelpProvider": { "triggerCharacters": ["(", ","] }, "documentHighlightProvider": true },
-                    "serverInfo": { "name": "crustc", "version": env!("CARGO_PKG_VERSION") }
+                    "serverInfo": { "name": "zustc", "version": env!("CARGO_PKG_VERSION") }
                 }))]
             }
             "textDocument/documentSymbol" => {
@@ -150,7 +150,7 @@ impl Server {
                 vec![reply(r)]
             }
             // (調べるための拡張: その位置のトークンで終わる式の型)
-            "crustc/typeAt" => {
+            "zustc/typeAt" => {
                 let uri = p["textDocument"]["uri"].as_str().unwrap_or("").to_string();
                 let (line, ch) = (p["position"]["line"].as_u64().unwrap_or(0) as u32, p["position"]["character"].as_u64().unwrap_or(0) as u32);
                 let r = self.at(&uri, line, ch, |_, _, idx, fi, off| navigate::type_at(idx, fi, off)).flatten();
@@ -230,7 +230,7 @@ impl Server {
                 json!({
                     "range": { "start": {"line": l, "character": c}, "end": {"line": l, "character": c + 1} },
                     "severity": 1,
-                    "source": "crustc",
+                    "source": "zustc",
                     "message": d.msg,
                 })
             })
@@ -672,7 +672,7 @@ fn in_src(root: Option<&Path>, p: &Path) -> bool {
 
 /// std / core / alloc の定義の索引 (rustc --print sysroot の rust-src。なければ空)
 fn index_std() -> Vec<(String, FileIndex)> {
-    let sysroot = std::env::var("CRUSTC_LSP_SYSROOT").ok().or_else(|| {
+    let sysroot = std::env::var("ZUST_ANALYZER_SYSROOT").ok().or_else(|| {
         let o = std::process::Command::new("rustc").args(["--print", "sysroot"]).output().ok()?;
         Some(String::from_utf8_lossy(&o.stdout).trim().to_string())
     });
@@ -694,7 +694,7 @@ fn index_std() -> Vec<(String, FileIndex)> {
             let m = navigate::module_of(&rel);
             match std::panic::catch_unwind(move || FileIndex::library(text, m)) {
                 Ok(ix) => out.push((path_uri(&p), ix)),
-                Err(_) => eprintln!("crustc-lsp: {rel} の索引を作れなかった (飛ばす)"),
+                Err(_) => eprintln!("zust-analyzer: {rel} の索引を作れなかった (飛ばす)"),
             }
         }
     }
@@ -1178,7 +1178,7 @@ fn out_dir_file(root: &Path, pkg: &str, rel: &str) -> Option<PathBuf> {
 /// ファイルの中の `mod x;` (囲む `mod a { .. }` の名前の列, 名前, `#[path = ".."]`)
 fn mod_decls(text: &str) -> Vec<(Vec<String>, String, Option<String>)> {
     let s = text.as_bytes();
-    let t = crustc_core::lexer::tokenize(s);
+    let t = zust_core::lexer::tokenize(s);
     let tk = |k: usize| -> &str { &text[t[k].1..t[k].2] };
     let sym = |k: usize, c: u8| k < t.len() && t[k].0 == 1 && s[t[k].1] == c;
     let mut out = vec![];

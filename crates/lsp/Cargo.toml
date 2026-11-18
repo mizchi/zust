@@ -1,14 +1,14 @@
 [package]
-name = "crustc-lsp"
+name = "zust-analyzer"
 version = "0.1.0"
 edition = "2024"
-description = "crustc の LSP サーバ (バイナリ crustc-lsp)。診断は driver2 の Session2::check、シンボル・定義・参照・hover・補完は crustc-ide。バックエンド (codegen / minclif / Cranelift) に依存しない"
+description = "zustc の LSP サーバ (バイナリ zust-analyzer)。診断は driver2 の Session2::check、シンボル・定義・参照・hover・補完は zust-ide。バックエンド (codegen / minclif / Cranelift) に依存しない"
 
 [[bin]]
-name = "crustc-lsp"
+name = "zust-analyzer"
 path = "src/main.rs"
 
 [dependencies]
-crustc-core = { path = "../core", default-features = false }
-crustc-ide = { path = "../ide" }
+zust-core = { path = "../core", default-features = false }
+zust-ide = { path = "../ide" }
 serde_json = "1"

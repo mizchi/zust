@@ -24,7 +24,7 @@ fn panic_locations_like_rustc() {
     let st = std::process::Command::new("rustc").args(["-Awarnings", "--edition", "2024", src_path, "-o"]).arg(&r).status().unwrap();
     assert!(st.success());
     let d = dir.join("d");
-    crustc::driver2::build(&src, &d, false, None).unwrap();
+    zustc::driver2::build(&src, &d, false, None).unwrap();
     let mut bad = vec![];
     for k in 0..7 {
         let a = std::process::Command::new(&r).arg(k.to_string()).output().unwrap();

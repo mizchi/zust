@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""LSP の機能の比較: crustc-lsp / rust-analyzer / rust-glancer が、同じ問い合わせに同じ答えを返すか。
+"""LSP の機能の比較: zust-analyzer / rust-analyzer / rust-glancer が、同じ問い合わせに同じ答えを返すか。
 速さの比較 (lsp_compare.py) は「何を返すか」を見ないので、機能の不足と答えの違いをここで見る。rust-analyzer を正解とする。
 
-(事前に cargo build --release --workspace: target/release/crustc-lsp を使う)
-usage: python3 bench/lsp_parity.py [--servers crustc,rust-analyzer,rust-glancer] [--targets synth,fixture,crustc,ide]
+(事前に cargo build --release --workspace: target/release/zust-analyzer を使う)
+usage: python3 bench/lsp_parity.py [--servers zustc,rust-analyzer,rust-glancer] [--targets synth,fixture,zustc,ide]
                                    [--points 40] [--out bench/lsp_parity_result.md] [--json bench/lsp_parity.json]
                                    [--compare bench/lsp_parity.json] [--detail [--detail-out FILE]]
 
@@ -18,13 +18,13 @@ usage: python3 bench/lsp_parity.py [--servers crustc,rust-analyzer,rust-glancer]
 - documentHighlight / rename / signatureHelp: 数・書き換えの集合・(名前, 引数の数, 今の引数) が同じ割合
 - 一致の平均: 上の割合の平均
 各問い合わせの時間の p50 / p90、起動から索引ができるまでの時間、メモリの最大 (サーバと子のプロセスの RSS) も出す。
---json で crustc の数字を残し、次に --compare で前回との差 (一致は点、時間は ms) を列に足す。
+--json で zustc の数字を残し、次に --compare で前回との差 (一致は点、時間は ms) を列に足す。
 """
 
 import argparse, json, os, re, shutil, statistics, sys, tempfile, time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from lsp_compare import HERE, Lsp, make_synth, crustc_target, uri  # noqa: E402
+from lsp_compare import HERE, Lsp, make_synth, zustc_target, uri  # noqa: E402
 
 CAPS = [("documentSymbolProvider", "docsym"), ("workspaceSymbolProvider", "wsym"), ("definitionProvider", "definition"),
         ("hoverProvider", "hover"), ("completionProvider", "completion"), ("referencesProvider", "references"),
@@ -354,7 +354,7 @@ def report(tn, res, npts, ndots, prev=None):
     sv = [k for k in res if res[k]]
     ms = metrics(res)
     pm = (prev or {}).get(tn, {})
-    head = sv + (["crustc の前回との差"] if pm and "crustc" in sv else [])
+    head = sv + (["zustc の前回との差"] if pm and "zustc" in sv else [])
     out.append("| 機能 | " + " | ".join(head) + " |")
     out.append("|---|" + "---|" * len(head))
     out.append("| 対応を返す機能 | " + " | ".join(", ".join(k for k, v in res[s]["caps"].items() if v) or "-" for s in sv) + (" | |" if len(head) > len(sv) else " |"))
@@ -362,7 +362,7 @@ def report(tn, res, npts, ndots, prev=None):
     for lb in labels:
         cells = [ms[s].get(lb, (None, "-"))[1] for s in sv]
         if len(head) > len(sv):
-            now, old = ms["crustc"].get(lb, (None,))[0], pm.get("metrics", {}).get(lb)
+            now, old = ms["zustc"].get(lb, (None,))[0], pm.get("metrics", {}).get(lb)
             cells.append(f"{100 * (now - old):+.1f} 点" if now is not None and old is not None else "")
         out.append(f"| {lb} | " + " | ".join(cells) + " |")
     def tm(s):
@@ -370,37 +370,37 @@ def report(tn, res, npts, ndots, prev=None):
     cells = [tm(s) for s in sv]
     if len(head) > len(sv):
         pt = pm.get("timing", {})
-        cells.append(", ".join(f"{k[:4]} {a - pt[k][0]:+.1f}" for k, (a, b) in timing(res["crustc"]).items() if k in pt))
+        cells.append(", ".join(f"{k[:4]} {a - pt[k][0]:+.1f}" for k, (a, b) in timing(res["zustc"]).items() if k in pt))
     out.append("| 時間 p50/p90 (ms) | " + " | ".join(cells) + " |")
     cells = [f"{res[s]['ready_ms']:.0f} ms ({res[s]['idle_ms']:.0f} ms) / {res[s]['rss_mb']:.0f} MB" for s in sv]
     if len(head) > len(sv):
-        cells.append(f"{res['crustc']['ready_ms'] - pm.get('ready_ms', 0):+.0f} ms / {res['crustc']['rss_mb'] - pm.get('rss_mb', 0):+.0f} MB" if "ready_ms" in pm else "")
+        cells.append(f"{res['zustc']['ready_ms'] - pm.get('ready_ms', 0):+.0f} ms / {res['zustc']['rss_mb'] - pm.get('rss_mb', 0):+.0f} MB" if "ready_ms" in pm else "")
     out.append("| 起動から名前が引けるまで (作業が終わるまで) / メモリの最大 (RSS) | " + " | ".join(cells) + " |")
     return "\n".join(out)
 
 
 def summary(res):
-    """JSON に残すもの (crustc の分): 一致の数字・時間・起動・メモリ"""
-    r = res.get("crustc")
+    """JSON に残すもの (zustc の分): 一致の数字・時間・起動・メモリ"""
+    r = res.get("zustc")
     if not r:
         return {}
-    return {"metrics": {k: v[0] for k, v in metrics(res).get("crustc", {}).items()}, "timing": timing(r), "ready_ms": r["ready_ms"], "rss_mb": r["rss_mb"]}
+    return {"metrics": {k: v[0] for k, v in metrics(res).get("zustc", {}).items()}, "timing": timing(r), "ready_ms": r["ready_ms"], "rss_mb": r["rss_mb"]}
 
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--servers", default="crustc,rust-analyzer,rust-glancer")
-    ap.add_argument("--targets", default="synth,fixture,crustc,ide")
+    ap.add_argument("--servers", default="zustc,rust-analyzer,rust-glancer")
+    ap.add_argument("--targets", default="synth,fixture,zustc,ide")
     ap.add_argument("--points", type=int, default=40)
     ap.add_argument("--timeout", type=float, default=300)
     ap.add_argument("--out", default=None)
     ap.add_argument("--detail", action="store_true", help="rust-analyzer と違った所を stderr に出す")
     ap.add_argument("--detail-out", default=None, help="--detail の出力を (stderr の代わりに) このファイルに書く")
-    ap.add_argument("--json", default=None, help="crustc の一致・時間・起動・メモリを JSON に書く (次の --compare に使う)")
+    ap.add_argument("--json", default=None, help="zustc の一致・時間・起動・メモリを JSON に書く (次の --compare に使う)")
     ap.add_argument("--compare", default=None, help="前の --json と比べて差の列を足す")
     a = ap.parse_args()
     glancer = os.environ.get("RUST_GLANCER") or shutil.which("rust-glancer") or "/home/user/rust-glancer/target/release/rust-glancer"
-    allsv = {"crustc": [os.path.join(HERE, "target/release/crustc-lsp")], "rust-analyzer": [os.environ.get("RUST_ANALYZER") or "rust-analyzer"], "rust-glancer": [glancer, "lsp"]}
+    allsv = {"zustc": [os.path.join(HERE, "target/release/zust-analyzer")], "rust-analyzer": [os.environ.get("RUST_ANALYZER") or "rust-analyzer"], "rust-glancer": [glancer, "lsp"]}
     servers = {k: allsv[k] for k in a.servers.split(",") if os.path.exists(allsv[k][0]) or shutil.which(allsv[k][0])}
     tmp = tempfile.mkdtemp(prefix="lsp_parity_")
     prev = json.load(open(a.compare)) if a.compare and os.path.exists(a.compare) else None
@@ -424,7 +424,7 @@ def main():
 
 
 def target(tn, tmp):
-    """対象: synth (生成した 40 モジュール)・fixture (ide のテストの fixture のワークスペース)・crustc (このリポジトリの
+    """対象: synth (生成した 40 モジュール)・fixture (ide のテストの fixture のワークスペース)・zustc (このリポジトリの
     driver2.rs を開く)・ide (このリポジトリの navigate.rs を開く: 字句の部品が多い別の書き方のファイル)"""
     if tn == "synth":
         return make_synth(os.path.join(tmp, "synth"))
@@ -433,10 +433,10 @@ def target(tn, tmp):
         shutil.copytree(os.path.join(HERE, "crates/ide/tests/fixture/ws"), d)
         return {"root": d, "open": "src/lib.rs", "ready": ("shout_len", "shout_len"), "queries": ["Counter", "Wrapper", "shout", "area", "Point"]}
     if tn == "ide":
-        t = dict(crustc_target())
+        t = dict(zustc_target())
         t.update({"open": "crates/ide/src/navigate.rs", "queries": ["FileIndex", "def_at", "references", "Loc", "complete"]})
         return t
-    return crustc_target()
+    return zustc_target()
 
 
 if __name__ == "__main__":

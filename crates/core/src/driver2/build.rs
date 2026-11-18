@@ -136,7 +136,7 @@ impl Session2 {
                     a.line_base_for(&*g, id)
                 };
                 let raw = self.get(k);
-                if std::env::var_os("CRUSTC_LOG_COMPILED").is_some() && raw.is_some() {
+                if std::env::var_os("ZUSTC_LOG_COMPILED").is_some() && raw.is_some() {
                     let d = crate::cache2::decode_blob(raw.as_ref().unwrap(), &a.prog, &insts);
                     match &d {
                         None => eprintln!("decode-fail {}", a.prog.names[insts.lock().unwrap().body_of(id) as usize]),
@@ -153,7 +153,7 @@ impl Session2 {
                     None => misses.push(id),
                 }
             }
-            if std::env::var_os("CRUSTC_LOG_COMPILED").is_some() {
+            if std::env::var_os("ZUSTC_LOG_COMPILED").is_some() {
                 let g = insts.lock().unwrap();
                 for &id in &misses {
                     let b = g.body_of(id);
@@ -588,7 +588,7 @@ fn emit_object(a: &Analysis, ctx: &CrateCtx, insts: &Insts, user_live: &[u32], b
             segs.push((1, "src/main.rs".to_string(), 1));
         }
         if a.prelude_line0 > 0 && (a.prelude_line0 as u32) < PRELUDE_LINE {
-            segs.push((PRELUDE_LINE + 1, "<crustc prelude>".to_string(), 1));
+            segs.push((PRELUDE_LINE + 1, "<zustc prelude>".to_string(), 1));
         }
         uv(&mut bytes, segs.len() as u64);
         for (st, n, first) in &segs {
@@ -776,7 +776,7 @@ pub fn interface_hash(text: &str) -> Key {
     h.finish()
 }
 
-/// 16 進の文字列 (u128::from_str_radix の代わり: crustc の std にはない)
+/// 16 進の文字列 (u128::from_str_radix の代わり: zustc の std にはない)
 fn parse_hex(s: &str) -> Option<u128> {
     let mut v: u128 = 0;
     for c in s.bytes() {
@@ -794,7 +794,7 @@ fn key_hex(k: Key) -> String {
     format!("{:016x}{:016x}", (k >> 64) as u64, k as u64)
 }
 
-/// ディレクトリを (親も) 作る (std::fs::create_dir_all の代わり: crustc の std にはない)
+/// ディレクトリを (親も) 作る (std::fs::create_dir_all の代わり: zustc の std にはない)
 fn mkdir_all(dir: &std::path::Path) -> R<()> {
     let s = format!("{}", dir.display());
     let b = s.as_bytes();
@@ -848,7 +848,7 @@ impl Session2 {
         let mut src = own.clone();
         let mut map = own_map.clone();
         src.push('\n');
-        let no_prune = std::env::var_os("CRUSTC_NO_DEP_PRUNE").is_some();
+        let no_prune = std::env::var_os("ZUSTC_NO_DEP_PRUNE").is_some();
         let mut ranges: Vec<(u32, u32, Vec<usize>, u32)> = vec![];
         for &j in deps {
             let (t0, m) = dep_loaded[j].as_ref().unwrap();
@@ -976,7 +976,7 @@ impl Session2 {
             }
         }
         reached.sort_unstable();
-        if std::env::var_os("CRUSTC_DEBUG_REACH").is_some() {
+        if std::env::var_os("ZUSTC_DEBUG_REACH").is_some() {
             let mut cnt: FxMap<String, usize> = FxMap::default();
             for &(j, k) in &reached {
                 let it = &dep_items[j].as_ref().unwrap()[k];
@@ -1102,7 +1102,7 @@ impl Session2 {
         // 古いクレートが使うソース: 自分は依存するクレートのマクロだけを添えて展開したもの、依存するクレートは
         // 展開して総称でない関数の本体を消したもの (stub::interface_text)。どちらもクレートごとに 1 回だけ作る
         // (使う側で依存するクレートのソース全体を展開・解析し直すと、依存が多いと推移的な依存の大きさに比例する)
-        let reuse = std::env::var_os("CRUSTC_NO_DEP_STUB").is_none();
+        let reuse = std::env::var_os("ZUSTC_NO_DEP_STUB").is_none();
         let mut fp2s: Vec<(usize, String)> = vec![];
         // (古いクレートごとの、依存するクレートのインターフェースのうち名前で届くアイテム: 使う側にはそれだけを渡す)
         let mut reach_of: Vec<Option<Vec<(usize, usize)>>> = vec![None; crates.len()];
@@ -1157,7 +1157,7 @@ impl Session2 {
                         }
                     }
                 }
-                let marker = "\n// __crustc_dep_macros__\n";
+                let marker = "\n// __zustc_dep_macros__\n";
                 let exp = if dd.is_empty() && !text.contains("macro_rules!") {
                     text.clone()
                 } else {

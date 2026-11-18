@@ -1,4 +1,4 @@
-"""crustc と本物の rustc を同じプログラム・同じ手順で比べ、表 (Markdown) にする。
+"""zustc と本物の rustc を同じプログラム・同じ手順で比べ、表 (Markdown) にする。
 usage: python3 bench/vs_rustc.py [NAME ...]   (このディレクトリで実行。事前に cargo build --release)
   NAME は gen1000 (bench/gen.py の 1000 関数) か bench/rt/NAME.rs。省略するとすべて。
 
@@ -6,13 +6,13 @@ usage: python3 bench/vs_rustc.py [NAME ...]   (このディレクトリで実行
   cold    キャッシュも incremental ディレクトリもない状態からのビルド
   no-op   何も変えずにもう一度ビルド
   edit    1 か所変えてビルド (gen1000 は f500 の本体、bench/rt は末尾に足した関数の定数)
-  disk    ビルドが残すもの (crustc: キャッシュ + .o、rustc: incremental ディレクトリ)
+  disk    ビルドが残すもの (zustc: キャッシュ + .o、rustc: incremental ディレクトリ)
   binary  出力の大きさ (strip 後)、run 実行時間 (出力は rustc -O と一致するか確かめる)
-比べる設定: crustc (debug, 既定のリンカ。wild が PATH にあれば wild)、crustc -O、
+比べる設定: zustc (debug, 既定のリンカ。wild が PATH にあれば wild)、zustc -O、
 rustc -Cincremental (debug)、rustc -O (非 incremental)"""
 import os, shutil, statistics, subprocess, sys, time
 
-CRUSTC = os.path.abspath("target/release/crustc")
+ZUSTC = os.path.abspath("target/release/zustc")
 W = os.path.abspath("out/vs_rustc")
 
 
@@ -80,14 +80,14 @@ def bench(name):
         run(build)
         r = statistics.median(run([exe])[0] for _ in range(3))
         out = run([exe])[1]
-        # (crustc の出力はシンボルを持たない。rustc の出力は std のシンボルとデバッグ情報を含むので strip した大きさで比べる)
+        # (zustc の出力はシンボルを持たない。rustc の出力は std のシンボルとデバッグ情報を含むので strip した大きさで比べる)
         subprocess.run(["strip", "-o", exe + ".strip", exe], check=True)
         rows.append((label, c, noop, e, du(*store), os.path.getsize(exe + ".strip"), r, out))
 
     exe = os.path.join(d, "c")
-    scenario("crustc", [CRUSTC, src, "-o", exe], exe, [exe + ".crcache2", exe + ".o"])
+    scenario("zustc", [ZUSTC, src, "-o", exe], exe, [exe + ".crcache2", exe + ".o"])
     exe = os.path.join(d, "cO")
-    scenario("crustc -O", [CRUSTC, src, "-o", exe, "-O"], exe, [exe + ".crcache2", exe + ".o"])
+    scenario("zustc -O", [ZUSTC, src, "-o", exe, "-O"], exe, [exe + ".crcache2", exe + ".o"])
     exe, inc = os.path.join(d, "r"), os.path.join(d, "r-incr")
     scenario("rustc -Cincremental", ["rustc", "--edition", "2021", "-Awarnings", "-Cincremental=" + inc, src, "-o", exe],
              exe, [inc])
@@ -105,7 +105,7 @@ def bench(name):
 
 
 linker = next((l for l in ["wild", "mold", "ld.lld", "ld"] if shutil.which(l)), "?")
-print(f"crustc のリンカ: {linker} / {subprocess.run(['rustc', '--version'], capture_output=True, text=True).stdout.strip()}")
+print(f"zustc のリンカ: {linker} / {subprocess.run(['rustc', '--version'], capture_output=True, text=True).stdout.strip()}")
 names = sys.argv[1:] or ["gen1000"] + sorted(f[:-3] for f in os.listdir("bench/rt") if f.endswith(".rs"))
 for n in names:
     bench(n)

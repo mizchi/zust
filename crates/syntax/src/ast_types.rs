@@ -1,6 +1,6 @@
 //! 型の構文 (自前の構文木の `parse::Ty`) を `TySyn` にする: front.rs の `parse_tysyn` (syn 版) の移植。
 //! tests/ast_types.rs が全ファイルの型で syn 版と同じ結果になることを確かめる。
-//! 外部クレートに依存しない (src/parse.rs と src/types.rs だけ) ので crustc 自身でもコンパイルできる。
+//! 外部クレートに依存しない (src/parse.rs と src/types.rs だけ) ので zustc 自身でもコンパイルできる。
 
 use crate::parse::{Bound, Expr, GArg, Path, Stmt, Ty as PTy};
 use crate::types::{ArrLen, Ty, TySyn};

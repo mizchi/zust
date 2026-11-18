@@ -3,7 +3,7 @@
 //! API は Cranelift の FunctionBuilder に寄せてある (ブロック・ブロック引数・変数・スタックスロット・命令)。
 //! 生成は単純: 値はすべてフレームの 8 byte のスロットに置き、命令ごとに rax / rcx に読んで計算して書き戻す。
 //! 整数の値は型の幅で 0 拡張した形でスロットに持つ (符号つきの比較・拡張のときだけ符号拡張する)。
-//! 外部クレートに依存しないので crustc 自身でもコンパイルできる。tests/minclif.rs が cc でリンクして動かす。
+//! 外部クレートに依存しないので zustc 自身でもコンパイルできる。tests/minclif.rs が cc でリンクして動かす。
 
 
 /// 速いハッシュ (FxHash: 番号を引く表に。std の SipHash はコンパイルの数 % を占めていた)
@@ -39,7 +39,7 @@ pub type FMap<K, V> = std::collections::HashMap<K, V, std::hash::BuildHasherDefa
 pub type FSet<K> = std::collections::HashSet<K, std::hash::BuildHasherDefault<FxHasher>>;
 
 /// 値の型
-pub use crustc_ir::{Block, FloatCC, FuncRef, IntCC, Op, Reloc, StackSlot, Type, Value, Variable};
+pub use zust_ir::{Block, FloatCC, FuncRef, IntCC, Op, Reloc, StackSlot, Type, Value, Variable};
 
 /// 1 関数分の機械語の組み立て (FunctionBuilder が 2 回使う: 解析 (track) と、割り当てを使った本番)
 pub struct Emitter {
@@ -3507,10 +3507,10 @@ impl FunctionBuilder {
 }
 
 /// 記録した命令を本番の Emitter で組み立てる (戻り値は解析のときと同じ番号になる)
-/// 記録 (crustc_ir::Recorder) を同じ順に組み立て直す。記録の番号 (値・ブロック・変数・スロット・関数) はここで振り直す
+/// 記録 (zust_ir::Recorder) を同じ順に組み立て直す。記録の番号 (値・ブロック・変数・スロット・関数) はここで振り直す
 /// (minclif は命令の中で値やスロットを作ることがあるので番号が違う)。2 つ目は記録のスロットの番号 → minclif のスロットの番号。
-/// CRUSTC_IR_VERIFY=1 で、値の型が記録と同じかを確かめる
-pub fn from_recording(rec: &crustc_ir::Recorder) -> (FunctionBuilder, Vec<u32>) {
+/// ZUSTC_IR_VERIFY=1 で、値の型が記録と同じかを確かめる
+pub fn from_recording(rec: &zust_ir::Recorder) -> (FunctionBuilder, Vec<u32>) {
     fn put(m: &mut Vec<u32>, i: u32, x: u32) {
         let i = i as usize;
         if m.len() <= i {
@@ -3522,7 +3522,7 @@ pub fn from_recording(rec: &crustc_ir::Recorder) -> (FunctionBuilder, Vec<u32>) 
         Value(m[v.0 as usize])
     }
     let mut fb = FunctionBuilder::new(rec.params.clone(), rec.rets.clone());
-    let verify = std::env::var_os("CRUSTC_IR_VERIFY").is_some();
+    let verify = std::env::var_os("ZUSTC_IR_VERIFY").is_some();
     let mut vm: Vec<u32> = vec![];
     let mut bm: Vec<u32> = vec![];
     let mut varm: Vec<u32> = vec![];
@@ -3955,7 +3955,7 @@ pub fn from_recording(rec: &crustc_ir::Recorder) -> (FunctionBuilder, Vec<u32>) 
             for &x in out {
                 let (a, b) = (rec.value_type(Value(x)), fb.value_type(Value(vm[x as usize])));
                 if a != b {
-                    panic!("crustc_ir: the type of v{x} is {a:?} in the recording but {b:?} in minclif (op {i})");
+                    panic!("zust_ir: the type of v{x} is {a:?} in the recording but {b:?} in minclif (op {i})");
                 }
             }
         }

@@ -10,7 +10,7 @@
 - [ ] 関連 const の型 (`usize::BITS` → u32)。例: `(usize::BITS).to_string()`
 - [ ] std の関数の引数のクロージャの引数の型が、エラーの型などで決まるもの
   (`std::fs::write(..).map_err(|e| e.to_string())` の e は `io::Error`)
-- [ ] パターンの束縛の型を、束縛そのものの位置でも答える (`crustc/typeAt` は使う側の位置でしか答えない)
+- [ ] パターンの束縛の型を、束縛そのものの位置でも答える (`zustc/typeAt` は使う側の位置でしか答えない)
 - [ ] `match` の腕のタプルのパターン `(TokenTree::Literal(x), TokenTree::Literal(y))` の x / y
 - [ ] `p.as_object_mut().unwrap()` のような、依存クレートの型 (serde_json の `Value`) のメソッドの戻り値の鎖
 - [ ] 数の型の値 `k.to_string()` (for の変数が範囲 `0..n` のとき、要素の型が決まらないもの)
@@ -20,10 +20,10 @@
 ## 定義・参照
 
 - [ ] rust-analyzer は `"x".to_string()` を特殊化の impl (`impl ToString for str`) でも数える (string.rs の別の行)。
-  crustc は trait の宣言だけ
-- [ ] `ast_summary.rs` の `s.starts_with(k)` (k: &&str) を crustc だけが `str::starts_with` に数える (rust-analyzer は
+  zustc は trait の宣言だけ
+- [ ] `ast_summary.rs` の `s.starts_with(k)` (k: &&str) を zustc だけが `str::starts_with` に数える (rust-analyzer は
   別の解決)
-- [ ] crustc の target で references の数の一致が 97% (rust-analyzer 100%) の 1 か所
+- [ ] zustc の target で references の数の一致が 97% (rust-analyzer 100%) の 1 か所
 - [ ] fixture: definition 465/467、references 609/629 の残り
 
 ## rename
@@ -33,5 +33,5 @@
 
 ## 速さ・メモリ
 
-- [ ] references の p90 (crustc の target で 65 ms) の遅いもの: 名前の多いメソッドの全ファイルの解決
+- [ ] references の p90 (zustc の target で 65 ms) の遅いもの: 名前の多いメソッドの全ファイルの解決
 - [ ] 依存クレートの索引でメモリが 55 MB → 66 MB。使わない定義を落とす / 遅延で読む

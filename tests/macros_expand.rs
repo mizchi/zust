@@ -1,5 +1,5 @@
 //! macros::expand (速い版: 全体は lexer::tokenize で見る) が、前の版 (expand_reference: 全体を proc_macro2 で読む) と
-//! 同じ結果になるか。macro_rules! を含むテスト・例・crustc 自身のソースと、セルフホスト用にまとめたコンパイラで比べる
+//! 同じ結果になるか。macro_rules! を含むテスト・例・zustc 自身のソースと、セルフホスト用にまとめたコンパイラで比べる
 
 fn rs_files(dir: &std::path::Path, out: &mut Vec<std::path::PathBuf>) {
     let Ok(rd) = std::fs::read_dir(dir) else { return };
@@ -27,8 +27,8 @@ fn fast_expand_matches_reference() {
             continue;
         }
         n += 1;
-        let a = crustc::macros::expand(&src);
-        let b = crustc::macros::expand_reference(&src);
+        let a = zustc::macros::expand(&src);
+        let b = zustc::macros::expand_reference(&src);
         // (どちらも失敗するもの (読めないソース) は数えない。メッセージが違っても場所が同じならよい)
         match (&a, &b) {
             (Ok(x), Ok(y)) if x == y => {}

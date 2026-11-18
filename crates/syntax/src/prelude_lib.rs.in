@@ -2117,7 +2117,7 @@ impl String {
     }
 }
 // --- Iterator ------------------------------------------------------------------------------
-// (このファイルは crustc だけがコンパイルする。アダプタの struct には、関連型を決めるための
+// (このファイルは zustc だけがコンパイルする。アダプタの struct には、関連型を決めるための
 //  使わない型パラメータを持たせている: `Map<I, F, B>` の B など)
 
 // (len は実装する側が書く。std の既定の実装 (size_hint から) はない)
@@ -9827,7 +9827,7 @@ unsafe extern "C" {
     fn __exr_memmem(h: *const u8, hl: usize, n: *const u8, nl: usize) -> *const u8;
 }
 
-// (libc の memmem: 長い文字列を何度も探すプログラム (crustc 自身) で、1 byte ずつ比べるより何倍も速い)
+// (libc の memmem: 長い文字列を何度も探すプログラム (zustc 自身) で、1 byte ずつ比べるより何倍も速い)
 fn __exr_str_find<G>(s: &str, t: &str) -> Option<usize> {
     let a = s.as_bytes();
     let b = t.as_bytes();

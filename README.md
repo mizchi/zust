@@ -1,7 +1,7 @@
-# crustc
+# zustc
 
 自分用の Rust (サブセット) コンパイラ。Rust で書き、自前のフロントエンド (lexer / parser / 型推論) と、
-Cranelift (既定) か自前の minclif でコード生成する。crustc 自身で crustc をコンパイルできる (minclif の経路)。
+Cranelift (既定) か自前の minclif でコード生成する。zustc 自身で zustc をコンパイルできる (minclif の経路)。
 **インクリメンタルな開発ビルド**に特化して、次の 4 つを小さくすることを狙う。
 
 - 再ビルド時間
@@ -9,119 +9,125 @@ Cranelift (既定) か自前の minclif でコード生成する。crustc 自身
 - キャッシュのディスク消費
 - 出力バイナリのサイズ
 
-設計の元にした blaze / relax / wild の調査は [NOTES.md](NOTES.md) にまとめた。
+設計の元にした blaze / relax / wild の調査は [NOTES.md](NOTES.md) にまとめた。rust-analyzer との残りの違いは
+[TODO.md](TODO.md)。
 
-### crate の構成 (このディレクトリの Cargo ワークスペース)
+もとは mizchi/playground の `2026-11-14-crustc/` (名前は crustc、LSP は crustc-lsp) で作っていたものを、履歴ごとこの
+リポジトリに移した。名前は zustc (コンパイラ)、zust-analyzer (LSP サーバ)、zust-* (ライブラリの crate) に変えた。
+環境変数も `CRUSTC_*` → `ZUSTC_*` (LSP の `CRUSTC_LSP_*` は `ZUST_ANALYZER_*`) に変えた。以下の記録の中の数字や日付は
+移す前のもの。
+
+### crate の構成 (Cargo ワークスペース)
 
 層は base → syntax → sema → typeck → codegen → core (driver) の順。syntax・sema・typeck がコンパイラと LSP・解析で
 共有する部分で、LSP は core を feature `build` なしで使い、バックエンド (codegen / minclif / Cranelift) に依存しない。
 
 | crate | 中身 | 依存 |
 |---|---|---|
-| `crates/base` (`crustc-base`) | fxhash (FxMap / FxSet)・key (キャッシュのキー)・prof (段ごとの時間) | なし |
-| `crates/syntax` (`crustc-syntax`) | front (前処理 → アイテムへの分割 (差分) → prelude を付ける、の流れと編集をまたぐ記憶 FrontMemo) / lexer / parse (自前の構文木) / cfg / macros / ctors / prep (前処理の差分) / srcmap / stub / types (要約の型)・types_enc / enc (直列化) / ast_types / ast_closure / ast_summary (アイテムの要約) / prelude (選択と prelude_lib.rs.in、build.rs) | base、proc-macro2 |
-| `crates/sema` (`crustc-sema`) | program (名前・型・トレイト・impl の表、インスタンス) / solver / ast_infer (型推論) / ast_consteval | syntax |
-| `crates/ir` (`crustc-ir`) | 命令の列の型 (Type / Value / Block / Op …) と、命令を記録するだけの Recorder (値の型を覚える) | なし |
-| `crates/typeck` (`crustc-typeck`) | acg (構文木 → 命令の列の記録。型の検査はここで出る) / cache2 (Blob の直列化) | sema、ir、proc-macro2 |
-| `crates/codegen` (`crustc-codegen`) | lower (記録を minclif に組み立て直して機械語にする。Cranelift なら crustc-clif に渡す) / link | typeck、minclif |
-| `crates/core` (`crustc-core`) | driver2 (Session2: 解析・check・キャッシュ) と、feature `build` (既定) の driver2/build.rs (機械語・fork の並列化・オブジェクト・リンク・ワークスペース)。下の層を公開し直す | typeck、(build なら) codegen |
-| `crates/ide` (`crustc-ide`) | エディタ向けの解析: symbols (documentSymbol / workspace/symbol のシンボル) / navigate (定義・参照・hover・補完。字句の列と定義の表からの軽い型の推定)。コンパイラ本体からは使わない | syntax |
-| `crates/lsp` (`crustc-lsp`) | LSP サーバ (バイナリ `crustc-lsp`)。診断は driver2 の check、それ以外は ide。ワークスペースの本文はメモリの上限まで | core (build なし)、ide、serde_json |
+| `crates/base` (`zust-base`) | fxhash (FxMap / FxSet)・key (キャッシュのキー)・prof (段ごとの時間) | なし |
+| `crates/syntax` (`zust-syntax`) | front (前処理 → アイテムへの分割 (差分) → prelude を付ける、の流れと編集をまたぐ記憶 FrontMemo) / lexer / parse (自前の構文木) / cfg / macros / ctors / prep (前処理の差分) / srcmap / stub / types (要約の型)・types_enc / enc (直列化) / ast_types / ast_closure / ast_summary (アイテムの要約) / prelude (選択と prelude_lib.rs.in、build.rs) | base、proc-macro2 |
+| `crates/sema` (`zust-sema`) | program (名前・型・トレイト・impl の表、インスタンス) / solver / ast_infer (型推論) / ast_consteval | syntax |
+| `crates/ir` (`zust-ir`) | 命令の列の型 (Type / Value / Block / Op …) と、命令を記録するだけの Recorder (値の型を覚える) | なし |
+| `crates/typeck` (`zust-typeck`) | acg (構文木 → 命令の列の記録。型の検査はここで出る) / cache2 (Blob の直列化) | sema、ir、proc-macro2 |
+| `crates/codegen` (`zust-codegen`) | lower (記録を minclif に組み立て直して機械語にする。Cranelift なら zust-clif に渡す) / link | typeck、minclif |
+| `crates/core` (`zust-core`) | driver2 (Session2: 解析・check・キャッシュ) と、feature `build` (既定) の driver2/build.rs (機械語・fork の並列化・オブジェクト・リンク・ワークスペース)。下の層を公開し直す | typeck、(build なら) codegen |
+| `crates/ide` (`zust-ide`) | エディタ向けの解析: symbols (documentSymbol / workspace/symbol のシンボル) / navigate (定義・参照・hover・補完。字句の列と定義の表からの軽い型の推定)。コンパイラ本体からは使わない | syntax |
+| `crates/lsp` (`zust-analyzer`) | LSP サーバ (バイナリ `zust-analyzer`)。診断は driver2 の check、それ以外は ide。ワークスペースの本文はメモリの上限まで | core (build なし)、ide、serde_json |
 | `crates/minclif` | Cranelift に似た API の小さな x86-64 バックエンド (レジスタ割り当て・スタックの struct のフィールドの変数化・ELF の .o)。`from_recording` で記録を組み立て直す | ir |
-| `crates/clif` (`crustc-clif`) | driver2 の Cranelift バックエンド: minclif が組み立てた命令の列を Cranelift の IR にしてコンパイルする | minclif、cranelift |
-| `.` (`crustc`) | CLI と、上のものの再輸出 (テスト・ベンチ)。ide と lsp には依存しない (ベンチの lsp/* だけが dev-dependency で使う) | 上のもの (ide・lsp を除く) |
+| `crates/clif` (`zust-clif`) | driver2 の Cranelift バックエンド: minclif が組み立てた命令の列を Cranelift の IR にしてコンパイルする | minclif、cranelift |
+| `.` (`zustc`) | CLI と、上のものの再輸出 (テスト・ベンチ)。ide と lsp には依存しない (ベンチの lsp/* だけが dev-dependency で使う) | 上のもの (ide・lsp を除く) |
 
-各 crate の lib.rs は下の層のモジュールを公開し直す (`pub use crustc_syntax::*;` など)。ファイルの中は `crate::lexer` の
+各 crate の lib.rs は下の層のモジュールを公開し直す (`pub use zust_syntax::*;` など)。ファイルの中は `crate::lexer` の
 ように書き、どの crate に置いても、セルフホストで全部を 1 つのクレートのモジュールに並べても同じパスで引ける。
 
-型の検査とバックエンドの分け方: acg は命令を crustc_ir::Recorder に記録するだけ (値・ブロックなどに番号を振り、値の型を
+型の検査とバックエンドの分け方: acg は命令を zust_ir::Recorder に記録するだけ (値・ブロックなどに番号を振り、値の型を
 minclif と同じ決め方で覚える)。check はそこで止め、ビルドは codegen の lower が記録を minclif の FunctionBuilder に同じ順で
 組み立て直してから機械語にする (minclif は命令の中で値やスロットを作るので番号は組み立て直す側で振り直す。
-`CRUSTC_IR_VERIFY=1` で値の型が記録と同じかを確かめる)。出力の機械語は分ける前とバイト単位で同じ。
+`ZUSTC_IR_VERIFY=1` で値の型が記録と同じかを確かめる)。出力の機械語は分ける前とバイト単位で同じ。
 
-経路は **driver2** だけ (`crustc x.rs` は Cranelift、`--backend=minclif` で minclif)。build / check / LSP のすべてが driver2 を使う。
+経路は **driver2** だけ (`zustc x.rs` は Cranelift、`--backend=minclif` で minclif)。build / check / LSP のすべてが driver2 を使う。
 最初のドライバ (syn + Cranelift、`crates/legacy`) は 2026-11-16 に削除した (git の履歴にある)。
-セルフホスト (tests/selfhost*.sh) は base / syntax / sema / ir / typeck / codegen / core と minclif のソースを 1 ファイルにまとめて crustc でコンパイルする。
+セルフホスト (tests/selfhost*.sh) は base / syntax / sema / ir / typeck / codegen / core と minclif のソースを 1 ファイルにまとめて zustc でコンパイルする。
 
 ## 現状（2026-11-15、`python3 bench/vs_rustc.py`）
 
-同じソースを同じ手順（cold → no-op → 1 か所編集）で crustc と rustc 1.97.0 でビルドし、残るディスク・バイナリ（strip 後）・実行時間を比べた。
-crustc のリンカは wild 0.10.0。どの組み合わせでも出力は rustc `-O` と一致した。全結果（no-op を含む）は `bench/vs_rustc_result.md`。
+同じソースを同じ手順（cold → no-op → 1 か所編集）で zustc と rustc 1.97.0 でビルドし、残るディスク・バイナリ（strip 後）・実行時間を比べた。
+zustc のリンカは wild 0.10.0。どの組み合わせでも出力は rustc `-O` と一致した。全結果（no-op を含む）は `bench/vs_rustc_result.md`。
 
 | プログラム | 設定 | cold ms | edit ms | disk KiB | binary KiB (strip) | run ms（rustc -O 比） |
 |---|---|---:|---:|---:|---:|---:|
-| gen1000 | crustc | 118 | 28 | 104.9 | 520.9 | 12（4.97x） |
-|  | crustc -O | 169 | 30 | 93.9 | 273.3 | 6（2.58x） |
+| gen1000 | zustc | 118 | 28 | 104.9 | 520.9 | 12（4.97x） |
+|  | zustc -O | 169 | 30 | 93.9 | 273.3 | 6（2.58x） |
 |  | rustc -Cincremental | 827 | 417 | 22156.3 | 1043.4 | 9（3.78x） |
 |  | rustc -O | 11448 | - | 0.0 | 382.4 | 2（1.00x） |
-| fib | crustc | 24 | 4 | 19.0 | 18.8 | 99（3.87x） |
-|  | crustc -O | 34 | 5 | 16.0 | 13.8 | 73（2.85x） |
+| fib | zustc | 24 | 4 | 19.0 | 18.8 | 99（3.87x） |
+|  | zustc -O | 34 | 5 | 16.0 | 13.8 | 73（2.85x） |
 |  | rustc -Cincremental | 127 | 97 | 312.4 | 335.6 | 95（3.73x） |
 |  | rustc -O | 111 | - | 0.0 | 334.6 | 25（1.00x） |
-| hashmap | crustc | 37 | 6 | 35.1 | 27.3 | 218（1.91x） |
-|  | crustc -O | 41 | 6 | 29.3 | 18.9 | 176（1.55x） |
+| hashmap | zustc | 37 | 6 | 35.1 | 27.3 | 218（1.91x） |
+|  | zustc -O | 41 | 6 | 29.3 | 18.9 | 176（1.55x） |
 |  | rustc -Cincremental | 211 | 107 | 2632.2 | 373.7 | 732（6.43x） |
 |  | rustc -O | 280 | - | 0.0 | 347.8 | 114（1.00x） |
-| matmul | crustc | 51 | 7 | 46.1 | 42.2 | 198（6.32x） |
-|  | crustc -O | 56 | 7 | 37.9 | 26.3 | 53（1.69x） |
+| matmul | zustc | 51 | 7 | 46.1 | 42.2 | 198（6.32x） |
+|  | zustc -O | 56 | 7 | 37.9 | 26.3 | 53（1.69x） |
 |  | rustc -Cincremental | 162 | 98 | 2671.3 | 378.4 | 692（22.13x） |
 |  | rustc -O | 211 | - | 0.0 | 361.0 | 31（1.00x） |
-| nbody | crustc | 36 | 6 | 36.3 | 39.9 | 413（9.83x） |
-|  | crustc -O | 46 | 5 | 28.4 | 22.6 | 69（1.65x） |
+| nbody | zustc | 36 | 6 | 36.3 | 39.9 | 413（9.83x） |
+|  | zustc -O | 46 | 5 | 28.4 | 22.6 | 69（1.65x） |
 |  | rustc -Cincremental | 143 | 105 | 2226.5 | 365.9 | 1185（28.22x） |
 |  | rustc -O | 165 | - | 0.0 | 363.9 | 42（1.00x） |
-| sieve | crustc | 26 | 4 | 20.4 | 20.5 | 211（2.30x） |
-|  | crustc -O | 29 | 4 | 16.8 | 14.2 | 130（1.42x） |
+| sieve | zustc | 26 | 4 | 20.4 | 20.5 | 211（2.30x） |
+|  | zustc -O | 29 | 4 | 16.8 | 14.2 | 130（1.42x） |
 |  | rustc -Cincremental | 131 | 94 | 1475.6 | 340.4 | 431（4.69x） |
 |  | rustc -O | 128 | - | 0.0 | 335.0 | 92（1.00x） |
-| sort | crustc | 42 | 7 | 40.7 | 46.4 | 252（1.33x） |
-|  | crustc -O | 51 | 8 | 32.3 | 30.0 | 195（1.03x） |
+| sort | zustc | 42 | 7 | 40.7 | 46.4 | 252（1.33x） |
+|  | zustc -O | 51 | 8 | 32.3 | 30.0 | 195（1.03x） |
 |  | rustc -Cincremental | 174 | 113 | 3102.2 | 384.9 | 1983（10.45x） |
 |  | rustc -O | 281 | - | 0.0 | 348.0 | 190（1.00x） |
-| strings | crustc | 38 | 7 | 41.3 | 33.7 | 113（3.32x） |
-|  | crustc -O | 52 | 6 | 33.7 | 22.3 | 73（2.17x） |
+| strings | zustc | 38 | 7 | 41.3 | 33.7 | 113（3.32x） |
+|  | zustc -O | 52 | 6 | 33.7 | 22.3 | 73（2.17x） |
 |  | rustc -Cincremental | 172 | 102 | 2198.4 | 357.3 | 121（3.57x） |
 |  | rustc -O | 187 | - | 0.0 | 339.8 | 34（1.00x） |
 
 - 1 か所編集の再ビルドは rustc の incremental の 13〜24 倍速い（gen1000 で 28 ms 対 417 ms）。
-- 残すディスク（crustc はキャッシュ + 圧縮した `.o`、rustc は incremental ディレクトリ）は 1/16〜1/210（gen1000 で 105 KiB 対 22156 KiB）。
+- 残すディスク（zustc はキャッシュ + 圧縮した `.o`、rustc は incremental ディレクトリ）は 1/16〜1/210（gen1000 で 105 KiB 対 22156 KiB）。
 - バイナリは、小さいプログラムでは rustc の 1/8〜1/18（rustc は std を静的にリンクする）。gen1000 は debug の検査の分だけ rustc `-O` より大きい。
-- 実行時間は、crustc の debug ビルドが rustc の debug ビルドより速いものが多い（gen1000 と fib を除く）。crustc `-O` は rustc `-O` の 1.0〜2.9 倍（sort は同じ、sieve は 1.4 倍、matmul・nbody は 1.6〜1.7 倍）。
+- 実行時間は、zustc の debug ビルドが rustc の debug ビルドより速いものが多い（gen1000 と fib を除く）。zustc `-O` は rustc `-O` の 1.0〜2.9 倍（sort は同じ、sieve は 1.4 倍、matmul・nbody は 1.6〜1.7 倍）。
 
 ## 動かし方
 
 ```bash
 cargo build --release
-./target/release/crustc examples/hello.rs -o out/hello --time
+./target/release/zustc examples/hello.rs -o out/hello --time
 ./out/hello
 ```
 
 ```bash
-./target/release/crustc build tests/workspace/workspace.txt -o out/ws   # 複数クレートのワークスペース (書き方は下の「複数ファイル・複数クレート」)
+./target/release/zustc build tests/workspace/workspace.txt -o out/ws   # 複数クレートのワークスペース (書き方は下の「複数ファイル・複数クレート」)
 ```
 
 ```bash
-./target/release/crustc check examples/traits.rs
+./target/release/zustc check examples/traits.rs
 ```
 
 全関数 (到達しないものも、総称関数は要求されたインスタンスごと) を検査して全診断を表示する (`Session2::check`。
 コード生成までして minclif でエラーを集める。結果はキャッシュに入る)。
 
 ```bash
-cargo build --release -p crustc-lsp
-./target/release/crustc-lsp
+cargo build --release -p zust-analyzer
+./target/release/zust-analyzer
 ```
 
-LSP サーバ（stdio、crustc とは別のバイナリ）。対応は initialize / didOpen / didChange（全文同期）/ didClose / shutdown /
+LSP サーバ（stdio、zustc とは別のバイナリ）。対応は initialize / didOpen / didChange（全文同期）/ didClose / shutdown /
 documentSymbol / workspace/symbol / definition / references / hover / completion で、publishDiagnostics を返す。
-`CRUSTC_LSP_MEM_MB` (本文を持つ上限、既定 4)・`CRUSTC_LSP_NO_STD` (std の索引を作らない)・`CRUSTC_LSP_SYSROOT`。
-bench/lsp_compare.py と bench/lsp_parity.py は `target/release/crustc-lsp` を使う (`cargo build --release --workspace`)。
+`ZUST_ANALYZER_MEM_MB` (本文を持つ上限、既定 4)・`ZUST_ANALYZER_NO_STD` (std の索引を作らない)・`ZUST_ANALYZER_SYSROOT`。
+bench/lsp_compare.py と bench/lsp_parity.py は `target/release/zust-analyzer` を使う (`cargo build --release --workspace`)。
 
 | オプション | 意味 |
 |---|---|
 | `-o PATH` | 出力パス。同じ場所に `PATH.o`、`PATH.crcache2`（キャッシュ）、`PATH.link`（リンク行）を置く |
 | `-O` | 小さい関数のインライン展開と、Cranelift の `speed` + backtracking regalloc (minclif ならレジスタ割り当ての後の命令の形)。オーバーフローの検査をしない |
-| `--backend=cranelift\|minclif` | コード生成 (既定 cranelift。環境変数 `CRUSTC_BACKEND` でも) |
+| `--backend=cranelift\|minclif` | コード生成 (既定 cranelift。環境変数 `ZUSTC_BACKEND` でも) |
 | `--linker=wild\|mold\|lld\|bfd\|PATH` | リンカを選ぶ。既定は PATH にある順に wild > mold > ld.lld > ld |
 | `--time` | フェーズごとの時間とピーク RSS を表示する |
 | `-j N` | コード生成のスレッド数。ミスが 32 件未満ならスレッドを立てない |
@@ -141,7 +147,7 @@ cargo test --release
 tests/compare.sh
 ```
 
-`examples/*.rs` を crustc と rustc の両方でビルドし、実行結果が一致するかを確かめる。
+`examples/*.rs` を zustc と rustc の両方でビルドし、実行結果が一致するかを確かめる。
 
 ```bash
 python3 bench/run.py 1000 5000
@@ -154,7 +160,7 @@ python3 bench/vs_rustc.py
 ```
 
 本物の rustc との比較（上の「現状」の表）。gen1000 と `bench/rt/*.rs`（fib / hashmap / matmul / nbody / sieve / sort / strings）を、
-crustc（debug / `-O`）と rustc（`-Cincremental` / `-O`）でビルドし、cold・no-op・1 か所編集の時間、ディスク、バイナリ、実行時間を表にする。
+zustc（debug / `-O`）と rustc（`-Cincremental` / `-O`）でビルドし、cold・no-op・1 か所編集の時間、ディスク、バイナリ、実行時間を表にする。
 `NAME` を並べればそのプログラムだけ。`python3 bench/runtime.py` は実行時間とバイナリだけを比べる軽い版。
 
 ```bash
@@ -167,8 +173,8 @@ tests/probe.sh
 tests/selfhost.sh
 ```
 
-セルフホストの確認。crustc 自身のソースのうち外部クレートに依存しない部分を crustc でコンパイルし、rustc でコンパイルしたものと出力を比べる。
-- `src/lexer.rs`（と `src/cache.rs` の KeyHasher = std の DefaultHasher 2 つ）：crustc 自身のソース・examples・probe の 144 ファイルを字句解析し、アイテムの区切りと 128 bit のハッシュが rustc 版と完全に一致する。
+セルフホストの確認。zustc 自身のソースのうち外部クレートに依存しない部分を zustc でコンパイルし、rustc でコンパイルしたものと出力を比べる。
+- `src/lexer.rs`（と `src/cache.rs` の KeyHasher = std の DefaultHasher 2 つ）：zustc 自身のソース・examples・probe の 144 ファイルを字句解析し、アイテムの区切りと 128 bit のハッシュが rustc 版と完全に一致する。
 - `src/prelude.rs`（prelude の項目を名前で選ぶ。lexer / fxhash / KeyHasher と、build.rs が作る 46 万文字の表 `PRELUDE_ITEMS` を含む）：probe と examples の 125 ファイルをユーザのソースとして、選ばれた prelude の長さ・行数・ハッシュが rustc 版と一致する（-O で rustc 版 0.13 秒に対し 0.40 秒）。
 - `src/link.rs`（リンカを探して直接起動する）と `src/testgen.rs`：C の `.o` を自分でリンクして実行し（2 回目は保存したリンク行で）、出力が rustc 版と一致する。`std::path` と `std::process::Command` を使う。
 - `src/elfz.rs`（`.o` のセクションを SHF_COMPRESSED にする）：zstd クレートの代わりに同じ API の小さな RLE を付けて、C の `.o` を圧縮・解凍し、セクションとシンボルが rustc 版と一致する。
@@ -180,8 +186,8 @@ tests/selfhost.sh
 - `src/program.rs`（全体の表。front.rs から syn に依存しない部分を分けたもの：関数シグネチャ・struct / enum の定義とレイアウト・インスタンス化・trait 実装・const の評価）：要約までのモジュールと prelude を合わせた約 1 万 1 千行のプログラムで、probe / examples の 135 ファイルの Program を作り、関数・型（サイズ・フィールドのオフセット・128 bit の深いハッシュ）・impl・const（と `src/ast_consteval.rs` で評価した static の初期値のデータ）と、全関数の本体のパスを `fn_by_p` / `struct_by_p` / `variant_by_p` で引いた結果、`src/solver.rs`（型推論の単一化器）でジェネリックな関数を解いた結果、`src/ctors.rs` の書き換え、`src/ast_infer.rs`（型推論）でユーザの関数 552 個の let の型を推論した結果の 7 万 5 千行の出力が、probe / examples / src の 157 ファイルで rustc 版と一致する（-O でも）。
 - `src/enc.rs`（キャッシュの直列化。`enc_struct!` マクロと trait の静的呼び出し `T::dec(r)`）と `src/fxhash.rs`（FxHasher / `FxMap`）：構造体・Vec・Option・タプルを符号化して戻し、バイト列とハッシュが rustc 版と一致する（-O でも）。
 
-環境変数：`CRUSTC_DUMP_PRELUDE=1` は付けた prelude を stderr に出す。`CRUSTC_NO_STRIP=1` は出力のシンボルを残す（callgrind などで関数名を見るため）。
-`CRUSTC_BENCH_LINKER` は criterion のベンチのリンカを固定する。
+環境変数：`ZUSTC_DUMP_PRELUDE=1` は付けた prelude を stderr に出す。`ZUSTC_NO_STRIP=1` は出力のシンボルを残す（callgrind などで関数名を見るため）。
+`ZUSTC_BENCH_LINKER` は criterion のベンチのリンカを固定する。
 
 ### 回帰監視（criterion + サイズ予算）
 
@@ -691,7 +697,7 @@ prelude は、ユーザのコードの識別子から辿れるアイテムだけ
 src.rs ──srcmap (mod x; のファイル)──▶ macros (macro_rules!) ──▶ モジュールを平らに ──▶ lexer: アイテム + ハッシュ
    ──▶ 要約 (キャッシュ、fork で並列) ──▶ Program (シグネチャ・レイアウト) ──▶ 到達する関数
    ──▶ 関数ごと: キャッシュ? ── miss ──▶ ast_infer (型推論) → acg (自前の構文木から minclif の命令の列。-O で小さい関数を展開)
-                                        → Cranelift (crustc-clif) か minclif (レジスタ割り当て) で機械語 → Blob (fork で並列)
+                                        → Cranelift (zust-clif) か minclif (レジスタ割り当て) で機械語 → Blob (fork で並列)
    ──▶ minclif の ELF 書き出しで .o (panic の場所の表を含む) ──▶ wild でリンク (変わらなければしない)
 ```
 
@@ -701,7 +707,7 @@ src.rs ──srcmap (mod x; のファイル)──▶ macros (macro_rules!) ─�
 | `crates/syntax/src/macros.rs` / `srcmap.rs` | macro_rules! の展開・include_str!、`mod x;` のファイルの読み込みと行の対応 |
 | `crates/syntax/src/parse.rs` / `ast_*.rs` | 自前の構文木・要約・型推論・クロージャ解析・定数評価 |
 | `crates/sema/src/program.rs` | 全体の表 (シグネチャ・レイアウト・trait 実装・インスタンス) |
-| `crates/typeck/src/acg/` | 構文木から命令の列 (crustc_ir::Recorder) への 1 パスの lowering と型検査。-O で小さい関数をインライン展開 |
+| `crates/typeck/src/acg/` | 構文木から命令の列 (zust_ir::Recorder) への 1 パスの lowering と型検査。-O で小さい関数をインライン展開 |
 | `crates/core/src/driver2.rs` / `cache2.rs` | `Session2`：キャッシュ (ディスク + メモリ)、build / check / ワークスペース、fork の並列化、.o の書き出し |
 | `crates/codegen/src/link.rs` | `cc -###` からリンク行を取り出して保存し、リンカを直接起動する |
 | `crates/minclif` | 命令の記録・レジスタ割り当て・x86-64 の機械語・ELF の .o |
@@ -759,9 +765,9 @@ src.rs ──srcmap (mod x; のファイル)──▶ macros (macro_rules!) ─�
 
 | tool | cold ms | no-op ms | 1 関数編集 ms | peak RSS (cold) | binary | cache / incr dir |
 |---|---:|---:|---:|---:|---:|---:|
-| crustc（wild を直接起動） | 128 | 11.7 | **19.0** | **13.4 MiB** | 413 KiB | **498 KiB** |
-| crustc（bfd を直接起動） | 129 | 12.1 | 33.2 | 13.2 MiB | 422 KiB | 498 KiB |
-| crustc（lld を直接起動） | 141 | 12.0 | 36.7 | 58.7 MiB | 412 KiB | 498 KiB |
+| zustc（wild を直接起動） | 128 | 11.7 | **19.0** | **13.4 MiB** | 413 KiB | **498 KiB** |
+| zustc（bfd を直接起動） | 129 | 12.1 | 33.2 | 13.2 MiB | 422 KiB | 498 KiB |
+| zustc（lld を直接起動） | 141 | 12.0 | 36.7 | 58.7 MiB | 412 KiB | 498 KiB |
 | rustc `-Cincremental -Cdebuginfo=0` | 887 | 217 | 461 | 164 MiB | 5013 KiB | 22151 KiB |
 | rustc `-Cincremental -Cdebuginfo=2` | 1015 | 218 | 563 | 183 MiB | 5557 KiB | 24592 KiB |
 | rustc `-O`（参考、非 incremental） | 12445 | - | - | 147 MiB | 382 KiB | - |
@@ -770,15 +776,15 @@ src.rs ──srcmap (mod x; のファイル)──▶ macros (macro_rules!) ─�
 
 | tool | cold ms | no-op ms | 1 関数編集 ms | peak RSS (cold) | binary | cache / incr dir |
 |---|---:|---:|---:|---:|---:|---:|
-| crustc（wild を直接起動） | 497 | 63.6 | **87.0** | **34.4 MiB** | 2030 KiB | **2479 KiB** |
-| crustc（bfd を直接起動） | 471 | 53.9 | 87.0 | 34.6 MiB | 2038 KiB | 2479 KiB |
+| zustc（wild を直接起動） | 497 | 63.6 | **87.0** | **34.4 MiB** | 2030 KiB | **2479 KiB** |
+| zustc（bfd を直接起動） | 471 | 53.9 | 87.0 | 34.6 MiB | 2038 KiB | 2479 KiB |
 | rustc `-Cincremental -Cdebuginfo=0` | 3810 | 756 | 1911 | 499 MiB | 8040 KiB | 113644 KiB |
 
 rustc と比べると、1 関数編集は 20〜24 倍速く、cold の RSS は 1/12〜1/14、キャッシュは 1/45 になった。
 5000 関数の no-op が 60ms 前後あるのは、ファイル全体の lex、`.o` の作り直し、キャッシュの読み書きが N に比例するため。
 マルチファイル化してファイル単位の要約にすれば、ここも O(変更量) にできる。
 
-1 関数を編集したときの crustc の内訳（`--time`、N=1000）：
+1 関数を編集したときの zustc の内訳（`--time`、N=1000）：
 
 | フェーズ | ms |
 |---|---:|
@@ -792,7 +798,7 @@ rustc と比べると、1 関数編集は 20〜24 倍速く、cold の RSS は 1
 | link（wild） | 5.6 |
 | **合計** | **15.9（ピーク RSS 12 MiB）** |
 
-hello（`examples/hello.rs`）の出力サイズは、crustc で 6.0 KiB、rustc の debug（strip あり）で 333 KiB。
+hello（`examples/hello.rs`）の出力サイズは、zustc で 6.0 KiB、rustc の debug（strip あり）で 333 KiB。
 rustc 側はほとんどが std 由来。
 
 ### rustc との比較（2026-11-15 時点。オーバーフロー検査・panic のメッセージなどを足した後）
@@ -803,15 +809,15 @@ wild は入っていない環境で、リンカは自動選択（ld.lld）。
 
 | tool | cold ms | no-op ms | 1 関数編集 ms | peak RSS (cold) | binary | cache / incr dir |
 |---|---:|---:|---:|---:|---:|---:|
-| crustc | 167 | 20 | **44** | **59 MiB** | 553 KiB | **642 KiB** |
+| zustc | 167 | 20 | **44** | **59 MiB** | 553 KiB | **642 KiB** |
 | rustc `-Cincremental -Cdebuginfo=0` | 962 | 230 | 433 | 163 MiB | 5013 KiB | 22151 KiB |
 | rustc `-O`（非 incremental） | 11604 | - | - | 147 MiB | 382 KiB | - |
 
-1 関数編集は rustc の incremental の約 10 倍速い。上の表（wild、検査を足す前）より crustc が遅いのは、リンカの違い（wild 5ms / ld.lld 17ms）と、検査と panic の表の分。
+1 関数編集は rustc の incremental の約 10 倍速い。上の表（wild、検査を足す前）より zustc が遅いのは、リンカの違い（wild 5ms / ld.lld 17ms）と、検査と panic の表の分。
 
 生成したコードの速さ（`python3 bench/runtime.py`、`bench/rt/*.rs`。ビルドはキャッシュなし、ビルド・実行とも 3 回の中央値。どれも出力は rustc と一致）：
 
-| プログラム | crustc | crustc `-O` | rustc (debug) | rustc `-O` | ビルド ms（crustc / rustc debug / rustc -O） |
+| プログラム | zustc | zustc `-O` | rustc (debug) | rustc `-O` | ビルド ms（zustc / rustc debug / rustc -O） |
 |---|---:|---:|---:|---:|---|
 | fib（再帰 fib(35)） | 86 ms（3.1x） | 68 ms（2.5x） | 97 ms（3.5x） | 27 ms | 44 / 106 / 127 |
 | hashmap（100 万回の entry） | 212 ms（1.9x） | 144 ms（1.3x） | 723 ms（6.5x） | 112 ms | 55 / 162 / 289 |
@@ -825,9 +831,9 @@ wild は入っていない環境で、リンカは自動選択（ld.lld）。
 
 （括弧は rustc `-O` に対する倍率）
 
-- crustc の debug ビルドは、strings を除いて rustc の debug ビルドより速い（検査は同じく入っている）。rustc の debug は std のジェネリックなコード（イテレータ・HashMap など）を最適化なしで実体化するため遅い。
-- crustc `-O` は rustc `-O` の 1.3〜5 倍。差が大きいのは、浮動小数点の配列を添字で回す nbody（LLVM はループと範囲検査を消してベクトル化する）、マージソートの sort、書式化の strings。
-- ビルドは crustc が rustc debug の 2〜3 倍、rustc `-O` の 3〜5 倍速い（キャッシュなし。インクリメンタルなら上の表のとおり差はもっと開く）。
+- zustc の debug ビルドは、strings を除いて rustc の debug ビルドより速い（検査は同じく入っている）。rustc の debug は std のジェネリックなコード（イテレータ・HashMap など）を最適化なしで実体化するため遅い。
+- zustc `-O` は rustc `-O` の 1.3〜5 倍。差が大きいのは、浮動小数点の配列を添字で回す nbody（LLVM はループと範囲検査を消してベクトル化する）、マージソートの sort、書式化の strings。
+- ビルドは zustc が rustc debug の 2〜3 倍、rustc `-O` の 3〜5 倍速い（キャッシュなし。インクリメンタルなら上の表のとおり差はもっと開く）。
 - nbody と sort の改善（同じマシンでも 2 割ほどぶれるので、倍率はその時の rustc `-O` に対するもの）：
   - `for k in 0..C`（C は定数）のループ変数で長さ C 以上の配列を引くときは範囲の検査を省く（debug でも）
   - 同じブロックの中で、同じ添字と長さの検査は 1 回だけ（debug でも）
@@ -840,7 +846,7 @@ wild は入っていない環境で、リンカは自動選択（ld.lld）。
 
 バイナリサイズ（KiB）：
 
-| プログラム | crustc | crustc `-O` | rustc (debug) | rustc (debug, strip) | rustc `-O` (strip) |
+| プログラム | zustc | zustc `-O` | rustc (debug) | rustc (debug, strip) | rustc `-O` (strip) |
 |---|---:|---:|---:|---:|---:|
 | fib | 15.4 | 10.9 | 4259 | 336 | 335 |
 | hashmap | 24.1 | 16.1 | 4324 | 373 | 348 |
@@ -880,30 +886,30 @@ gen1000（ソース 310 KB）での変化：
 
 | tool | cold ms | no-op ms | 1 関数編集 ms | peak RSS (cold) | binary | cache + .o |
 |---|---:|---:|---:|---:|---:|---:|
-| crustc（wild） | 124 | 17 | **28** | 19.5 MiB | 554 KiB | **270 KiB** |
-| crustc（ld.lld、圧縮しない一時 `.o`） | 151 | 18 | 41 | 59.0 MiB | 553 KiB | 270 KiB |
+| zustc（wild） | 124 | 17 | **28** | 19.5 MiB | 554 KiB | **270 KiB** |
+| zustc（ld.lld、圧縮しない一時 `.o`） | 151 | 18 | 41 | 59.0 MiB | 553 KiB | 270 KiB |
 
 - 圧縮は 587 KB → 69 KB で 0.3 ms（`--time` の `compress`）。wild の解凍込みのリンクは 6〜9 ms。
 
 #### 本物の rustc との比較（`python3 bench/vs_rustc.py`）
 
 同じソースを同じ手順（cold → no-op → 1 か所編集）でビルドし、残るディスク・バイナリ（strip 後）・実行時間を並べる。全結果は `bench/vs_rustc_result.md`。
-crustc のリンカは wild 0.10.0、rustc 1.97.0。どの設定でも出力は rustc `-O` と一致した。
+zustc のリンカは wild 0.10.0、rustc 1.97.0。どの設定でも出力は rustc `-O` と一致した。
 
 | プログラム | | cold ms | edit ms | disk KiB | binary KiB | run ms |
 |---|---|---:|---:|---:|---:|---:|
-| gen1000 | crustc | **118** | **28** | **105** | 521 | 12 |
+| gen1000 | zustc | **118** | **28** | **105** | 521 | 12 |
 | | rustc -Cincremental | 827 | 417 | 22156 | 1043 | 9 |
 | | rustc -O | 11448 | - | - | 382 | 2 |
-| nbody | crustc -O | **47** | **6** | **29** | **23** | 92 |
+| nbody | zustc -O | **47** | **6** | **29** | **23** | 92 |
 | | rustc -Cincremental | 149 | 106 | 2227 | 366 | 1231 |
 | | rustc -O | 177 | - | - | 364 | 62 |
-| sort | crustc -O | **51** | **8** | **32** | **30** | **195** |
+| sort | zustc -O | **51** | **8** | **32** | **30** | **195** |
 | | rustc -Cincremental | 203 | 128 | 3102 | 385 | 2041 |
 | | rustc -O | 317 | - | - | 348 | 184 |
 
 - 編集後の再ビルドは rustc の incremental の 15〜20 倍速く、残すディスクは 1/75〜1/210、バイナリは 1/10〜1/20（gen1000 は rustc `-O` より大きい: debug の検査と最適化なしの分）。
-- 実行時間は crustc（debug）が rustc（debug）より速いものが多い（gen1000 を除く）。crustc `-O` は rustc `-O` の 1.0〜2.6 倍（sort は同じ、strings は 2.2 倍）。
+- 実行時間は zustc（debug）が rustc（debug）より速いものが多い（gen1000 を除く）。zustc `-O` は rustc `-O` の 1.0〜2.6 倍（sort は同じ、strings は 2.2 倍）。
 
 #### strings と sort の `-O` を速くした時
 
@@ -928,7 +934,7 @@ crustc のリンカは wild 0.10.0、rustc 1.97.0。どの設定でも出力は 
 - サイズ：整数を sort するプログラムは基数ソートの分が付く（sorting のバイナリ +42%、ordering のキャッシュ +49%）。書式化を使うプログラムも少し増える。予算は取り直した。
 - キャッシュに残ったもの：panic の場所の表（1 か所 4〜5 byte）、リロケーション、要約（21 KB）、エントリの索引（1 件 20 byte、約 40 KB）。整数は可変長で、オフセットと行は前の値との差で書く。
 
-crustc のバイナリはシンボルを持たない（strip しても同じ大きさ）。rustc は std を静的にリンクするので、strip しても 335 KiB 以上ある。crustc は使う部分の prelude だけをコンパイルし、libc を動的にリンクするので、rustc の 1/10〜1/30 になる。
+zustc のバイナリはシンボルを持たない（strip しても同じ大きさ）。rustc は std を静的にリンクするので、strip しても 335 KiB 以上ある。zustc は使う部分の prelude だけをコンパイルし、libc を動的にリンクするので、rustc の 1/10〜1/30 になる。
 
 #### matmul と sieve の `-O`、ジェネリクスと単相化
 
@@ -949,9 +955,9 @@ crustc のバイナリはシンボルを持たない（strip しても同じ大�
   キャッシュは機械語を（長さ, ハッシュ）で `.o` から引くので、畳んだインスタンスも代表の機械語でヒットする。examples 全体でバイナリ −3%（binary_heap −13%）、`.o` −3%。
 - drop の要らない型の `__exr_drop_in_place::<T>` / `drop(x)` は呼ばない（インスタンスも作らない。collections でインスタンス 353 → 341）。
 
-#### std の範囲へ（セルフホストの第 1 段階: crustc 自身の lexer）
+#### std の範囲へ（セルフホストの第 1 段階: zustc 自身の lexer）
 
-crustc 自身の `src/lexer.rs` を 1 ファイルにまとめて（`tests/selfhost/build_lexer.py`）crustc でコンパイルし、足りないものを順に足した。
+zustc 自身の `src/lexer.rs` を 1 ファイルにまとめて（`tests/selfhost/build_lexer.py`）zustc でコンパイルし、足りないものを順に足した。
 - `std::hash`：`Hash` / `Hasher`（`write_u8` 〜 `write_usize`・`write_str`・`write_length_prefix` の既定のメソッドも）と、整数・bool・char・str・String・スライス・Vec の `impl Hash`、
   `DefaultHasher`（std と同じ SipHash-1-3・鍵 0 で、値も std と一致する）
 - str とスライスへの trait 実装（`impl Hash for str` / `impl<T: Hash> Hash for [T]`）のメソッド呼び出し（組み込みのメソッドより先に探す）
@@ -1012,7 +1018,7 @@ crustc 自身の `src/lexer.rs` を 1 ファイルにまとめて（`tests/selfh
 #### セルフホストの第 7 段階: 自前の構文解析 (syn から離れる土台)
 
 - `src/parse.rs`：外部クレートなしの Rust の字句・構文解析（アイテム・型・パターン・式・文。優先順位、`if` の頭の struct リテラル、
-  `>>` とジェネリクス、let チェーン、ラベル、クロージャ、マクロの呼び出しはトークン列のまま）。crustc がコンパイルできる書き方で書いてある
+  `>>` とジェネリクス、let チェーン、ラベル、クロージャ、マクロの呼び出しはトークン列のまま）。zustc がコンパイルできる書き方で書いてある
 - `tests/parse.rs`：probe / examples / src の全ファイルで、節の種類ごとの数 (22 種) が syn で数えたものと一致する
 - 後で代入する `let x;`（0 で埋めて置く）
 - 修正：非ジェネリックな enum のフィールドの `Option<T>` が、T の大きさが決まる前に配置されてフィールドが重なっていた
@@ -1101,7 +1107,7 @@ crustc 自身の `src/lexer.rs` を 1 ファイルにまとめて（`tests/selfh
 #### セルフホストの第 15 段階: 型推論を自前の構文木へ移す
 
 - `src/ast_infer.rs`：infer.rs の構文木を辿る部分（パターン・ブロック・式・メソッド呼び出し・クロージャ・書式マクロの引数など 1,900 行）を
-  自前の構文木に移植した。単一化器は solver.rs を共有する。`tests/ast_infer.rs` が probe / examples と crustc 自身のモジュール
+  自前の構文木に移植した。単一化器は solver.rs を共有する。`tests/ast_infer.rs` が probe / examples と zustc 自身のモジュール
   （`out/selfhost/program_main.rs`）の 885 関数・2,380 個の let で syn 版と同じ型になることを確かめる
 - 推論の結果をノードのアドレスに加えてソース上の位置でも記録し、codegen が書き換えで複製したノード（`__exr_slice_to_vec(&a[..])` の中の式など）も型を引けるようにした
 - 足したもの：`DerefMut` trait、Deref 越しのフィールド（`self.prog` で self: `&mut Inf`）、`Option::iter` / `into_iter` と `it.chain(Some(x))`、
@@ -1112,7 +1118,7 @@ crustc 自身の `src/lexer.rs` を 1 ファイルにまとめて（`tests/selfh
   - 相互再帰の型（`Ty` ↔ `FnTy`）の deep hash が同じになり、別の型のインスタンス（`HashMap::find<&FnTy>` と `<&Ty>`）のキャッシュキーがぶつかっていた
   - 自前の構文解析で `&&T` を 3 重の参照と読んでいた
   - `*const T` の `const` をモジュールの名前空間の定義と見ていた
-- 回避（crustc が未対応のもの）：スコープにない trait のメソッドを候補から外さない（`Solver::deref` を `deref_var` に改名）、
+- 回避（zustc が未対応のもの）：スコープにない trait のメソッドを候補から外さない（`Solver::deref` を `deref_var` に改名）、
   `std::mem::discriminant`（形の番号の関数にした）
 
 #### セルフホストの第 16 段階: Cranelift の代わりのバックエンドの土台
@@ -1120,7 +1126,7 @@ crustc 自身の `src/lexer.rs` を 1 ファイルにまとめて（`tests/selfh
 - `src/minclif.rs`：Cranelift の FunctionBuilder に寄せた API（ブロック・ブロック引数・変数・スタックスロット・整数の命令・比較・select・
   読み書き・呼び出し (System V、7 個目以降はスタック)・return）で x86-64 の機械語を直接出し、ELF の再配置可能オブジェクトを書く最小のバックエンド。
   値はすべてフレームのスロットに置く単純な生成。`tests/minclif.rs` がループ・再帰・8 引数の関数を組み立てて cc でリンクして動かす。
-  crustc でコンパイルした版も同じバイト列の .o を書き、それをリンクして動く（tests/selfhost.sh の minclif）
+  zustc でコンパイルした版も同じバイト列の .o を書き、それをリンクして動く（tests/selfhost.sh の minclif）
 - 浮動小数点 (f32 / f64 の四則・sqrt・丸め・比較 (NaN の扱いも)・符号の操作・整数との変換 (Rust の `as` と同じく飽和))、
   i128 (加減・ビット演算・比較・シフトは命令列、乗除は libgcc の `__multi3` など)、オーバーフローつきの演算、clz / ctz / popcnt /
   bswap / 回転 / min / max / abs / umulhi、trapz / trapnz、関数ポインタの呼び出し、名前のアドレス (GOT 経由)、
@@ -1146,7 +1152,7 @@ crustc 自身の `src/lexer.rs` を 1 ファイルにまとめて（`tests/selfh
   (式 / 呼び出し / 演算 / メソッド / ループとマクロ / match と drop / 書式化・ハッシュ・比較 / その他)
 - `src/driver2.rs`：syn と Cranelift を使わないドライバ。lexer / macros / prelude → ast_summary → Program → acg → minclif の ELF の .o → リンク。
   インスタンスの不動点・クロージャ・static・vtable・同じ機械語のインスタンスの畳み込み・panic の場所の表は driver.rs と同じ
-- `--features acg` で有効になる。`CRUSTC_DRIVER2=1 crustc x.rs` でこちらを使う。`tests/driver2.rs` が probe / examples / acg を今のドライバと比べ、
+- `--features acg` で有効になる。`ZUSTC_DRIVER2=1 zustc x.rs` でこちらを使う。`tests/driver2.rs` が probe / examples / acg を今のドライバと比べ、
   `tests/selfhost.sh` (当時は `SELFHOST_DRIVER2=1`。今は常にこの経路) がセルフホストの全段階 (lexer〜program・minclif・enc) を driver2 でビルドして rustc 版と比べる (すべて一致)
 - 移して分かったこと:
   - minclif のブロックに後から戻って続きを書けなかった (Cranelift は書ける)。離れるときに続きへの jmp を置くようにした
@@ -1157,21 +1163,21 @@ crustc 自身の `src/lexer.rs` を 1 ファイルにまとめて（`tests/selfh
   - 同じ文字列のクロージャ (`|x| x.1.clone()` が 2 か所) が同じ番号になっていた。本体のクロージャはアドレスで引く
   - 自前の構文解析の誤り (`&&x` のパターン、パターンの `true` / `false`)、整数の `clone()` の型推論の誤り (syn 版にもあった) も直した
 
-#### セルフホストの第 19 段階: crustc で crustc (syn・Cranelift を使わない経路) をコンパイルする
+#### セルフホストの第 19 段階: zustc で zustc (syn・Cranelift を使わない経路) をコンパイルする
 
 - `tests/selfhost/build_compiler.py`：driver2 + acg + minclif と、それが使うモジュール全部 (lexer / macros / prelude / types / parse /
   ast_* / program / solver / ctors / ast_infer / ast_consteval / link) を 1 ファイル (約 3 万 1 千行) のコンパイラにまとめる
   (`compiler <in.rs> -o <out> [-O]`)
-- これを crustc (driver2) でコンパイルしたものが、実際にプログラムをコンパイルして動かせる (crustc が自分自身をコンパイルした)
-- `tests/selfhost_compiler.sh`：rustc 版と crustc 版の 2 つのコンパイラで probe / examples / acg をコンパイルし、.o と実行結果を比べる。
-  さらに crustc 版で自分自身をもう一度コンパイルする (2 段目)
-- 結果: **139 個のプログラムすべてで、rustc 版と crustc 版のコンパイラが同じバイト列の .o を出し、実行結果も同じ**。
-  crustc 版のコンパイラで自分自身をコンパイルし直すと、1 段目と同じ .o (約 18 MB) になる (不動点)
+- これを zustc (driver2) でコンパイルしたものが、実際にプログラムをコンパイルして動かせる (zustc が自分自身をコンパイルした)
+- `tests/selfhost_compiler.sh`：rustc 版と zustc 版の 2 つのコンパイラで probe / examples / acg をコンパイルし、.o と実行結果を比べる。
+  さらに zustc 版で自分自身をもう一度コンパイルする (2 段目)
+- 結果: **139 個のプログラムすべてで、rustc 版と zustc 版のコンパイラが同じバイト列の .o を出し、実行結果も同じ**。
+  zustc 版のコンパイラで自分自身をコンパイルし直すと、1 段目と同じ .o (約 18 MB) になる (不動点)
 - 比べて見つかったもの: `matches!(tmp, Some(V(x)) if ..)` で束縛が一時値からムーブして二重に drop していた (syn 版にもあった)、
   acg の i128 の `abs` / 加減算のオーバーフロー検査
 - そこまでに直したこと: モジュールを平らにするときの名前 (`std::path::Path` と同名の定義、`use super::*` で見える use、`&'static`)、
   型推論 (受け手の型が分からない `len`、注釈つきの let、`x.clone()` の整数)、acg の deref の強制変換 (`&&T` → `&T`、`&String` → `&str`)、
-  範囲の添字の受け手の自動参照、`matches!` の guard の中のクロージャ、minclif の bitcast の 0 拡張。crustc がまだ扱えない書き方
+  範囲の添字の受け手の自動参照、`matches!` の guard の中のクロージャ、minclif の bitcast の 0 拡張。zustc がまだ扱えない書き方
   (分解代入・`collect::<Option<Vec<_>>>`・クロージャから fn ポインタへの変換・`std::f64::consts` の値など) はソースを書き換えた
 
 #### 自前の構文木のソース位置
@@ -1196,10 +1202,10 @@ crustc 自身の `src/lexer.rs` を 1 ファイルにまとめて（`tests/selfh
   シンボリックな再配置 (acg::Blob。呼び先のインスタンスは「元の関数名 + 型引数」で書く)。保存は今回使ったエントリだけ
 - 関数のキーは「本体のハッシュ + 自分と呼び先のシグネチャ + 名前で現れる struct のレイアウト + const」(driver.rs と同じ考え方)
 - 並列化は fork: 子プロセス k が i % jobs == k の関数をコンパイルし、Blob を pipe で親に返す。親は順に読み戻してインスタンスを
-  要求し直す (j=1 と j=8 で .o は同じバイト列)。crustc の std にスレッドがないので libc の fork / pipe / waitpid を直接呼ぶ
+  要求し直す (j=1 と j=8 で .o は同じバイト列)。zustc の std にスレッドがないので libc の fork / pipe / waitpid を直接呼ぶ
 - 400 関数のプログラム: cold 104 ms (j=1) / 90 ms (j=8)、変更なし 7 ms (リンクしない)、1 関数の変更で 1 関数だけコンパイル
 
-#### 複数ファイル・複数クレート (`crustc build <workspace>`)
+#### 複数ファイル・複数クレート (`zustc build <workspace>`)
 
 - `mod x;` は `x.rs` / `x/mod.rs` を読む (`src/srcmap.rs`)。行番号を変えないように、`mod x;` は空白にして中身をファイルの最後に
   `pub mod x { .. }` として足し、結合したソースの行 → (ファイル, 行) の表を持つ。エラーは `ファイル:行:桁:` になる
@@ -1221,7 +1227,7 @@ crustc 自身の `src/lexer.rs` を 1 ファイルにまとめて（`tests/selfh
 
 `python3 bench/ws_bench.py --rustc` (6 lib × 8 ファイル × 40 関数 = 1920 関数 + bin、4 コア。rustc は `-C incremental` の rlib + リンク):
 
-| 場面 | crustc build | rustc |
+| 場面 | zustc build | rustc |
 |---|---:|---:|
 | cold | 489 ms | 3786 ms |
 | 変更なし | 7 ms | 1043 ms |
@@ -1244,14 +1250,14 @@ crustc 自身の `src/lexer.rs` を 1 ファイルにまとめて（`tests/selfh
 (「本体」の 798 → 83 は、平らにした後のテキストで `{` を探していたインターフェースのハッシュの誤りを直した分)。
 残りはリンク (約 22 ms、毎回すべての .o) と、使う側ごとに依存するクレートのソースを解析し直す時間 (名前の付け替え・分割・prelude の選択)。
 
-セルフホストで見つかった遅さ: crustc で作ったコンパイラが自分自身をコンパイルすると、.o を作る段階が 13 分以上かかっていた。
+セルフホストで見つかった遅さ: zustc で作ったコンパイラが自分自身をコンパイルすると、.o を作る段階が 13 分以上かかっていた。
 `parse::tokenize` がトークンごとに行頭から文字を数えていた (長い行で 2 乗。rustc 版は SIMD の `chars().count()` で目立たなかった) ので、
 前のトークンから数え足すようにした。2.4 秒になり、2 段目全体は 36 秒 (rustc 版のコンパイラは 5.6 秒)。
 
 #### セルフホスト版のコンパイラの前半 (front) を速くする
 
-crustc で作ったコンパイラ (`tests/selfhost/build_compiler.py`) で自分自身 (約 3 万 3 千行) をコンパイルするときの前半の時間
-(`CRUSTC_PROF=1 ... --time` の段階ごとの時間。gdb で止めた場所を数えて、多いところから直した):
+zustc で作ったコンパイラ (`tests/selfhost/build_compiler.py`) で自分自身 (約 3 万 3 千行) をコンパイルするときの前半の時間
+(`ZUSTC_PROF=1 ... --time` の段階ごとの時間。gdb で止めた場所を数えて、多いところから直した):
 
 | 段階 | 最初 | 後 | rustc 版のコンパイラ (後) |
 |---|---:|---:|---:|
@@ -1270,9 +1276,9 @@ crustc で作ったコンパイラ (`tests/selfhost/build_compiler.py`) で自�
   定義と呼び出しの括弧の中だけにした (`tests/macros_expand.rs` が前の版 `expand_reference` と結果が同じか確かめる)
 - flatten: 表を埋める `iter_mut().take(n).skip(m)` が毎回先頭から辿っていた (添字のループに)
 - prelude の選択: ソース全体の `contains` を 40 回ほど呼ぶ。prelude の `str::find` を libc の `memmem` にした
-  (crustc で作るプログラムすべてで速くなる)
+  (zustc で作るプログラムすべてで速くなる)
 - split: アイテムのハッシュ (キャッシュのキー) は SipHash を 2 つ使っていた。2 本の掛け算・回転の混ぜ合わせ (`src/key.rs`) にした。
-  呼び出しの区切りに依らない (8 byte ずつ溜める) ので、std と crustc の prelude で Hash の実装が write を呼ぶ区切りが違っても同じ値になる
+  呼び出しの区切りに依らない (8 byte ずつ溜める) ので、std と zustc の prelude で Hash の実装が write を呼ぶ区切りが違っても同じ値になる
 - 要約: アイテムごとに独立なので fork して分ける (driver2 の関数のコンパイルと同じ)。構文解析の `punct_at` (演算子の優先順位ごとに
   何度も呼ぶ) をバイトで比べ、記号でない位置では演算子を探さない。字句解析は ASCII をバイトのまま見る
 - refs: 4 つの表を引く前に、どれかの表にある名前の集合で 1 回だけ引く
@@ -1297,7 +1303,7 @@ crustc で作ったコンパイラ (`tests/selfhost/build_compiler.py`) で自�
 - 一緒に minclif に、直前に書いた値をすぐ読み直す命令を省く覗き穴最適化を入れた (`rax_holds`: 直前の命令が
   「rax を v のスロットに書く」なら v を読まない。ブロックの始まりでは消す)
 - `tests/driver2_inline.rs`：probe / examples / acg を `-O` と `-O` なしでビルドし、出力・stderr・終了コードが同じか
-- 効果 (セルフホスト版のコンパイラで自分自身をコンパイルする時間。どれも `CRUSTC_NO_INLINE=1` で同じ仕事をさせて比べる):
+- 効果 (セルフホスト版のコンパイラで自分自身をコンパイルする時間。どれも `ZUSTC_NO_INLINE=1` で同じ仕事をさせて比べる):
   展開なし 20.85 秒 → 展開あり 19.76 秒 → 読み直しの省略も 18.32 秒 (12% 速い)。展開で生成するコードは 27% 大きくなり、
   `-O` のコンパイルは約 20% 遅くなる (型推論の使い回しの後)。minclif はすべての値をスタックに置くので、呼び出しを
   なくしても値の読み書きが残り、効果は小さい。大きく速くするにはレジスタ割り当てが要る
@@ -1329,7 +1335,7 @@ minclif は命令をすぐ機械語にし、値はすべてスタックのスロ
 結果:
 - `python3 bench/runtime.py` の実行時間 (driver2 -O。出力はすべて一致):
 
-  | | 割り当てなし | 整数だけ | + 浮動小数点・直接の写し | Cranelift の経路 (`crustc -O`) | rustc -O |
+  | | 割り当てなし | 整数だけ | + 浮動小数点・直接の写し | Cranelift の経路 (`zustc -O`) | rustc -O |
   |---|---:|---:|---:|---:|---:|
   | fib | 111 ms | 90 | 96 | 82 | 30 |
   | hashmap | 341 | 210 | 208 | 149 | 103 |
@@ -1365,7 +1371,7 @@ Rust を 1.100.0、wild を 0.11.0 に上げた (`rustup update stable`、`cargo
 #### driver2 の Cranelift バックエンド (minclif と比べる)
 
 minclif の FunctionBuilder は acg が呼んだ命令をすべて `Op` として記録している。その列を Cranelift の IR に組み立て直して
-コンパイルするバックエンドを足した (`src/clif_backend.rs`、`CRUSTC_BACKEND=cranelift`)。acg・インライン展開・キャッシュ・.o の
+コンパイルするバックエンドを足した (`src/clif_backend.rs`、`ZUSTC_BACKEND=cranelift`)。acg・インライン展開・キャッシュ・.o の
 書き出しは同じなので、同じフロントエンド・同じ命令の列でバックエンドだけを比べられる。
 
 - 値は minclif の値の番号 → Cranelift の値。ブロック・変数・スロット・関数も番号で対応させる (記録のときに命令ごとの戻り値も
@@ -1378,7 +1384,7 @@ minclif の FunctionBuilder は acg が呼んだ命令をすべて `Op` とし�
 
 実行時間 (`python3 bench/runtime.py`、ms):
 
-| | driver2 -O (minclif) | driver2 + Cranelift | driver2 + Cranelift -O | 前の Cranelift の経路 (`crustc -O`) | rustc -O |
+| | driver2 -O (minclif) | driver2 + Cranelift | driver2 + Cranelift -O | 前の Cranelift の経路 (`zustc -O`) | rustc -O |
 |---|---:|---:|---:|---:|---:|
 | fib | 110 | 91 | 79 | 79 | 31 |
 | hashmap | 214 | 155 | 144 | 148 | 112 |
@@ -1406,13 +1412,13 @@ minclif の FunctionBuilder は acg が呼んだ命令をすべて `Op` とし�
 cold のときだけ効く。
 
 ここまでで、外部クレートに依存しないモジュール（lexer / enc / fxhash / prelude / link / testgen / program / ast_consteval / solver / ctors / ast_infer / minclif / ast_codegen）と、
-依存が小さく代わりを書けるもの（elfz: zstd、macros: proc_macro2）は crustc でコンパイルでき、rustc と同じ結果になる。
+依存が小さく代わりを書けるもの（elfz: zstd、macros: proc_macro2）は zustc でコンパイルでき、rustc と同じ結果になる。
 残りの front（syn の構文木を引く検索）/ infer（syn 版。自前の構文木の版 ast_infer はある）/ consteval（codegen の定数の昇格）/ closure / codegen / driver / cache は syn と cranelift の上に書かれている。
 syn の代わりは src/parse.rs（自前の構文木）を土台にして front から順に移す。cranelift の代わり (自前のコード生成) はその後。
 
 #### 最初のドライバ (syn + Cranelift) を外す
 
-- `crustc check` と LSP を driver2 の `Session2::check` に移した。全関数 (到達しないものも) と要求された総称関数のインスタンスを
+- `zustc check` と LSP を driver2 の `Session2::check` に移した。全関数 (到達しないものも) と要求された総称関数のインスタンスを
   コンパイルしてエラーを集め、結果はキャッシュに入れる (次の検査・ビルドはそれを使う)
 - `crates/legacy` (syn・cranelift-object・zstd) と、syn 版と比べていたテスト (ast_closure / ast_consteval / ast_infer /
   ast_summary / ast_types) とセルフホストの elfz を削除した。期待する出力は `tests/expected/` の golden ファイル
@@ -1448,31 +1454,31 @@ rustc (lib を rlib にして `--extern`) と比べる: 出力が rustc -O と�
 |---|---|---:|---:|---:|---:|---:|---|
 | fnv | rustc | 170 |  | 135 | 495 | 4483 KiB |  |
 | fnv | rustc -O | 348 |  | 312 | 42 | 4413 KiB |  |
-| fnv | crustc | 64 | 2 | 18 | 135 | 26 KiB | yes |
-| fnv | crustc -O | 91 | 2 | 24 | 114 | 27 KiB | yes |
+| fnv | zustc | 64 | 2 | 18 | 135 | 26 KiB | yes |
+| fnv | zustc -O | 91 | 2 | 24 | 114 | 27 KiB | yes |
 | adler2 | rustc | 157 |  | 95 | 624 | 4424 KiB |  |
 | adler2 | rustc -O | 220 |  | 138 | 12 | 4389 KiB |  |
-| adler2 | crustc | 52 | 2 | 18 | 262 | 16 KiB | yes |
-| adler2 | crustc -O | 68 | 2 | 22 | 136 | 15 KiB | yes |
+| adler2 | zustc | 52 | 2 | 18 | 262 | 16 KiB | yes |
+| adler2 | zustc -O | 68 | 2 | 22 | 136 | 15 KiB | yes |
 | hex | rustc | 265 |  | 121 | 148 | 4479 KiB |  |
 | hex | rustc -O | 454 |  | 291 | 11 | 4399 KiB |  |
-| hex | crustc | 79 | 2 | 27 | 84 | 52 KiB | yes |
-| hex | crustc -O | 109 | 2 | 32 | 73 | 52 KiB | yes |
+| hex | zustc | 79 | 2 | 27 | 84 | 52 KiB | yes |
+| hex | zustc -O | 109 | 2 | 32 | 73 | 52 KiB | yes |
 | rustc-hash | rustc | 203 |  | 142 | 468 | 4490 KiB |  |
 | rustc-hash | rustc -O | 352 |  | 300 | 58 | 4408 KiB |  |
-| rustc-hash | crustc | 67 | 2 | 19 | 182 | 29 KiB | yes |
-| rustc-hash | crustc -O | 88 | 2 | 27 | 163 | 27 KiB | yes |
+| rustc-hash | zustc | 67 | 2 | 19 | 182 | 29 KiB | yes |
+| rustc-hash | zustc -O | 88 | 2 | 27 | 163 | 27 KiB | yes |
 | cfg-if | rustc | 94 |  | 74 | 388 | 4390 KiB |  |
 | cfg-if | rustc -O | 110 |  | 86 | 58 | 4387 KiB |  |
-| cfg-if | crustc | 28 | 2 | 13 | 183 | 8 KiB | yes |
-| cfg-if | crustc -O | 37 | 2 | 15 | 57 | 8 KiB | yes |
+| cfg-if | zustc | 28 | 2 | 13 | 183 | 8 KiB | yes |
+| cfg-if | zustc -O | 37 | 2 | 15 | 57 | 8 KiB | yes |
 
 ビルドは rustc より 2〜4 倍速く、編集のビルドは 5〜10 倍速い。実行は rustc -O より遅い (adler2 は 40 倍だった)。
 
 adler2 の内側のループ (`U32X4([u32; 4])` の `+=` と `chunks_exact`) を見て直したもの (-O の実行 478 → 114 ms、fnv 137 → 112 ms):
 - Cranelift の経路にも SROA: minclif と同じ判定 (`minclif::sroa`。アドレスが load / store にしか使われないスロット) で、
   スロットの (オフセット, 型) ごとに Cranelift の Variable にする (Cranelift はスタックのスロットを SSA にしない)。
-  `CRUSTC_CLIF_NO_SROA=1` で切る
+  `ZUSTC_CLIF_NO_SROA=1` で切る
 - スロットのアドレスを入れた変数 (インライン展開した `&mut self`) も、定義がすべて同じアドレスならそのアドレスとして扱う
 - スカラーの小さい配列 (16 要素まで) のコピーと `[0; N]` の初期化は要素の幅で読み書きする (8 byte ずつだと幅が合わず変数にできない)
 - インライン展開の大きさを構文木の Debug の長さではなくソースのトークンの数 (110 まで) で測る (Debug は位置などで膨らみ、
@@ -1487,7 +1493,7 @@ itoa (-O の実行 440 → 73 ms、rustc -O は 32 ms) のために足したも�
   評価は i128 で途中の切り詰めを見ないので、`!` を含むものと結果が型の範囲の外のものは実行時に計算する
 - `999.try_into().expect(..)` (型に収まる整数リテラル) は定数
 - クロージャの本体もインライン展開する (`Map::next` の中の `(self.f)(x)` など。キャプチャは `__env` のフィールドとして束縛する。
-  `CRUSTC_NO_INLINE_CLOSURE=1` で切る)。依存するクレートのクロージャは展開しない (ほかの関数と同じ)
+  `ZUSTC_NO_INLINE_CLOSURE=1` で切る)。依存するクレートのクロージャは展開しない (ほかの関数と同じ)
 - prelude: `MaybeUninit<T>` (uninit は 0 で埋める)・`hint::unreachable_unchecked`。組み込み: `mem::zeroed`・整数の
   `ilog2` / `ilog10` / `unsigned_abs`・`get_unchecked(_mut)` (添字にする)・スライス → `&mut [T; N]` の `try_into`
   (行き先が型推論にないときは `.unwrap()` の期待型から)
@@ -1517,7 +1523,7 @@ rustc-hash・cfg-if のために足したもの:
 - 依存するクレートのマクロの展開は 1 回: 各クレートは依存するクレートのマクロの定義だけを添えて自分の分だけ展開する
 - 使う側に渡すのはインターフェース (`crates/syntax/src/stub.rs`): 総称でない関数の本体を `{ loop {} }` にする (依存する
   クレート自身がコンパイルする)。総称関数・総称な impl・trait・`const fn`・`-> impl Trait`・`async fn` は残す。
-  展開とインターフェースは `<名前>.prep` に保存する。`CRUSTC_NO_DEP_STUB=1` で前の動き
+  展開とインターフェースは `<名前>.prep` に保存する。`ZUSTC_NO_DEP_STUB=1` で前の動き
 - 並列にビルドする子プロセスが作ったキャッシュのエントリ (要約・関数の機械語) を親に返し、後の組のクレートが fork で引き継ぐ
   (prelude の単相化や依存するクレートのアイテムの要約は多くのクレートで同じ: 100 クレートの cold でコンパイルする関数 11360 → 5984)
 - 細かい指紋 (`<名前>.fp2`): 依存するクレートのインターフェースのアイテムのうち、自分の識別子から名前でたどって届くもの
@@ -1527,13 +1533,13 @@ rustc-hash・cfg-if のために足したもの:
 
 - 使う側に渡すのは、依存するクレートのインターフェースのうち自分から名前で届くアイテムだけ (細かい指紋と同じたどり方)。
   ほかは空白にする (`use` は名前の解決に要るので残す)。これで平らにする・要約・Program・prelude の選択が使う分だけになる
-  (100 クレートの m50 で依存のアイテム 800 前後 → 150)。`CRUSTC_NO_DEP_PRUNE=1` で切る。
+  (100 クレートの m50 で依存のアイテム 800 前後 → 150)。`ZUSTC_NO_DEP_PRUNE=1` で切る。
   impl の名前はヘッダの trait と型の名前で、`impl<..>` の中・`where` から後ろ・プリミティブ型は数えず、std の型 (`Vec` など)
   への trait の実装は trait の名前だけで届く (`impl FromHex for [u8; 4]` が `u8` と書いたクレートすべてから届いていた)
 
 結果 (ms、中央値。「前」は使い回しの前、「中」はインターフェースと指紋とキャッシュの共有まで、右は名前で届くものだけにした後):
 
-| 中間クレート | 場面 | crustc 前 | crustc 中 | crustc | cargo |
+| 中間クレート | 場面 | zustc 前 | zustc 中 | zustc | cargo |
 |---|---|---:|---:|---:|---:|
 | 20 (400 関数) | cold | 759 | 462 | 261 | 858 |
 | | low-body | 29 | 33 | 23 | 373 |
@@ -1553,7 +1559,7 @@ rustc-hash・cfg-if のために足したもの:
 - 閉じた prelude の関数 (本体が prelude で、総称でないか型引数が prelude・プリミティブの型だけ、クロージャでない) のキーは、
   コンパイラ ID・本体・自分のシグネチャ・`#[panic_handler]` だけにする。参照先のシグネチャを名前の最後で多めに取っていたので、
   `.push(` を呼ぶ prelude の関数のキーにユーザの `Acc5::push` が入り、クレートごとに違うキーになっていた
-- prelude の関数の panic の場所は prelude の中の行にする (`PRELUDE_LINE` = 49152 から後ろを場所の表で `<crustc prelude>` の
+- prelude の関数の panic の場所は prelude の中の行にする (`PRELUDE_LINE` = 49152 から後ろを場所の表で `<zustc prelude>` の
   ファイルにする)。選んだ prelude のアイテムは元の行に置く (間は改行)。前は prelude の場所の行の基準がユーザのソースの長さと
   prelude の選び方で変わるのでキャッシュが当たらず、表示も `src/main.rs:259` のような意味のない場所だった
 - 依存するクレートの総称関数のインスタンスも使い回す: 本体が prelude か依存するクレート j にあり、型引数にこのクレートの型を
@@ -1566,14 +1572,14 @@ rustc-hash・cfg-if のために足したもの:
 - Program を「依存の土台 + 自分のアイテム」に分けるのは見送った: 測ると Program の段は 1 クレートあたり約 1 ms
   (cold の合計の 4%、app の変更の 2%) で、土台 (依存の届く部分と選んだ prelude) もクレートごとに違って共有できない
 
-| 中間クレート | 場面 | crustc | cargo |
+| 中間クレート | 場面 | zustc | cargo |
 |---|---|---:|---:|
 | 20 | cold | 265 | 862 |
 | 50 | cold | 553 | 1731 |
 | 100 | cold | 1088 | 3070 |
 | 100 | noop / low-body / low-sig / app-body | 11 / 37 / 94 / 49 | 120 / 1481 / 1557 / 250 |
 
-cargo は依存するクレートが変わると (本体だけでも) 使う側をすべてコンパイルし直す。crustc は関数ごとのキャッシュと
+cargo は依存するクレートが変わると (本体だけでも) 使う側をすべてコンパイルし直す。zustc は関数ごとのキャッシュと
 インターフェースの指紋で、変わった所を使うクレートだけを作り直す。残り: 各クレートが prelude (500 アイテム余り) の要約・
 Program を作り直している (クレートごとに選ぶ prelude が違うので、Program を丸ごと共有はしていない)。cold の残りの大半は関数の
 コンパイル (Cranelift)。
@@ -1586,7 +1592,7 @@ Program を作り直している (クレートごとに選ぶ prelude が違う�
 | 変更 | -j 1 | -j 4 |
 |---|---:|---:|
 | 前 | 4650 | 2040 |
-| Cranelift の IR の検査を切る (`CRUSTC_CLIF_VERIFY=1` で入れる) | 4140 | |
+| Cranelift の IR の検査を切る (`ZUSTC_CLIF_VERIFY=1` で入れる) | 4140 | |
 | 関数の本体の構文木を本体ごとに 1 回だけ読む | 3950 | |
 | 番号の表を FxHash に、`Context` / `FunctionBuilderContext` を使い回す | 3810 | |
 | クロージャの本体を引くたびに囲む関数を読み直さない (囲む関数ごとにクロージャの式を覚える) | 約 −450 | |
@@ -1599,7 +1605,7 @@ Program を作り直している (クレートごとに選ぶ prelude が違う�
 - 式の形のハッシュは、推論で記録した全部の部分式について Debug の文字列を作っていたので、深さに比例して重くなっていた
   (全体の 9%)。今は木を 1 回たどり、部分式のハッシュを混ぜる (Debug が同じなら同じ値)。
 - 残りは Cranelift 自身が約半分 (regalloc2 が 22%、lower 6%、emit 4%)、acg のコード生成が 20%、型推論が 5%。
-- `single_pass` の regalloc (`CRUSTC_CLIF_FAST_RA=1`) にすると 3640 → 3050 ms になるが、.o が 43% 大きくなり、
+- `single_pass` の regalloc (`ZUSTC_CLIF_FAST_RA=1`) にすると 3640 → 3050 ms になるが、.o が 43% 大きくなり、
   できたコンパイラの実行が約 40% 遅くなる (lexer_main.rs で 75 → 104 ms)。既定は backtracking のままにした。
 
 ### Cranelift に渡す IR を小さくする (2026-11-17)
@@ -1629,26 +1635,26 @@ Program を作り直している (クレートごとに選ぶ prelude が違う�
   変わらず、8 byte で書いた直後に 16 byte で読むとストアからの転送が効かず、できたコンパイラの実行が 20% 遅くなった。
 - 残り: 小さい関数でも Cranelift は 1 関数あたり約 30 µs かかる (10 命令未満の関数 1600 個で 50 ms)。時間の多くは
   regalloc2 の生存区間の計算 (Env::init) と割り当て。
-- 調べるための環境変数: `CRUSTC_CLIF_STATS=1` (命令の種類ごとの数)、`CRUSTC_CLIF_DUMP=1` (IR)、`CRUSTC_CLIF_TIME=1`
-  (関数ごとの compile の時間)。それぞれの変更は `CRUSTC_NO_FRESH` / `CRUSTC_NO_RET_DST` / `CRUSTC_CLIF_NO_REMAT` /
-  `CRUSTC_CLIF_LATE_SEAL` / `CRUSTC_CLIF_NO_FOLD_BR` で切れる。
+- 調べるための環境変数: `ZUSTC_CLIF_STATS=1` (命令の種類ごとの数)、`ZUSTC_CLIF_DUMP=1` (IR)、`ZUSTC_CLIF_TIME=1`
+  (関数ごとの compile の時間)。それぞれの変更は `ZUSTC_NO_FRESH` / `ZUSTC_NO_RET_DST` / `ZUSTC_CLIF_NO_REMAT` /
+  `ZUSTC_CLIF_LATE_SEAL` / `ZUSTC_CLIF_NO_FOLD_BR` で切れる。
 
 ### check を型検査で止めて LSP を速くする (2026-11-17)
 
-- check (`crustc check` と LSP) は、acg のコード生成 (型の検査はここで出る) までにして、機械語 (Cranelift / minclif) を作らない
+- check (`zustc check` と LSP) は、acg のコード生成 (型の検査はここで出る) までにして、機械語 (Cranelift / minclif) を作らない
   (`Inline::check_only`)。検査済みの印は「要求した総称関数のインスタンスへの再配置だけを持つ空の Blob」で、ビルドの Blob と別の
-  キー (`CHECK_SALT`) に覚える (ビルドの Blob があればそれも検査済みとして使う)。`CRUSTC_CHECK_CODEGEN=1` で機械語まで作る。
+  キー (`CHECK_SALT`) に覚える (ビルドの Blob があればそれも検査済みとして使う)。`ZUSTC_CHECK_CODEGEN=1` で機械語まで作る。
 - prelude の選択 (`select_with`) がソースの全体を 80 回あまり `contains` で調べていたのを、アイテムごとに調べてアイテムの
   ハッシュで覚える形にした (`PreludeScan`)。それまで `SelectCache` を呼ぶたびに作り直していて、アイテムごとの記憶が効いて
   いなかったので Session2 に持たせた (`FrontMemo`)。
 - `lexer::split` を差分にした (`split_inc`): 前回の入力と結果を覚え、前後の変わっていない部分のアイテムはそのまま (後ろは位置と
   行をずらして) 使い、間だけを split し直す。区切りは空白の後から始まるトップレベルのアイテム (impl / trait は丸ごと)。間の
   終わりがコメント・文字列の途中かもしれないときと、split が失敗するときは全体を split する。tests/split_inc.rs は実際のソースに
-  乱数の編集を続けて加え、毎回全体の split と比べる。`CRUSTC_SPLIT_VERIFY=1` で毎回比べる、`CRUSTC_NO_SPLIT_INC=1` で切る。
+  乱数の編集を続けて加え、毎回全体の split と比べる。`ZUSTC_SPLIT_VERIFY=1` で毎回比べる、`ZUSTC_NO_SPLIT_INC=1` で切る。
 
 | | 前 | 後 |
 |---|---:|---:|
-| `crustc check` compiler_main.rs (38886 行) | 3.6 s | 1.6 s |
+| `zustc check` compiler_main.rs (38886 行) | 3.6 s | 1.6 s |
 | LSP didOpen / didChange、生成した 1000 関数 (17019 行、stdio 越し) | 135 / 12.2 ms | 122 / 9.6 ms |
 | LSP didOpen / didChange、compiler_main.rs (1 関数の編集) | 2.09 s / 523 ms | 1.63 s / 476 ms |
 | split (生成した 1000 関数の didChange) | 2.0 ms | 0.6 ms |
@@ -1674,7 +1680,7 @@ Program を作り直している (クレートごとに選ぶ prelude が違う�
 - 1 回目の呼び出しは全体を前処理するだけ (1 度しか前処理しないビルドでチャンクの記録を作らない)。
 - tests/prep_inc.rs: examples と crates/core/src のファイルを `mod` で束ねたものに乱数の編集 (本体の中と、どこでも) を
   続けて加え、毎回全体の前処理と本文・桁のずれ・成否を比べる (差分の経路 156 回、全体の経路 364 回)。
-  `CRUSTC_PREP_VERIFY=1` で毎回比べる、`CRUSTC_NO_PREP_INC=1` で切る、`CRUSTC_PREP_LOG=1` で経路を出す。
+  `ZUSTC_PREP_VERIFY=1` で毎回比べる、`ZUSTC_NO_PREP_INC=1` で切る、`ZUSTC_PREP_LOG=1` で経路を出す。
 - 乱数の編集のテストで、壊れたソースで入れ子のアイテムの名前の変更が止まらず stack overflow になる hoist の不具合が
   見つかったので直した (変えても同じならやり直さない、やり直しは 8 回まで)。
 
@@ -1697,7 +1703,7 @@ check は毎回、全関数 (compiler_main.rs で 9115) のキャッシュのキ
 - 指紋が前回と同じなら、本体のアイテムのハッシュが同じ関数は検査済み (キーも読み戻しも要らない)。要求していたインスタンスは
   名前で辿り、本体 (総称関数) のアイテムが変わったものだけを要求し直して検査する。検査に通らなかったものは毎回検査し直す。
 - 指紋が変わったら今までどおりキーとキャッシュで検査し、記録を作り直す。記録を作るのはキャッシュを使うセッション
-  (LSP) だけ (1 度だけの `crustc check` では作らない)。`CRUSTC_NO_CHECK_MEMO=1` で使わない。
+  (LSP) だけ (1 度だけの `zustc check` では作らない)。`ZUSTC_NO_CHECK_MEMO=1` で使わない。
 - tests/check.rs: examples の関数の本体に型エラーになる文・ならない文を足したり消したりを続け、毎回新しいセッションで
   検査したものと診断を比べる。
 
@@ -1713,7 +1719,7 @@ check は毎回、全関数 (compiler_main.rs で 9115) のキャッシュのキ
 
 `textDocument/documentSymbol` (ファイルのアウトライン) と `workspace/symbol` (名前で探す) に対応した。
 
-- シンボルは crustc-syntax の `symbols` で、字句の列から読む (構文木を作らない)。編集の途中で構文が壊れていても、読める所
+- シンボルは zust-syntax の `symbols` で、字句の列から読む (構文木を作らない)。編集の途中で構文が壊れていても、読める所
   までは出す (本体の `{` は波括弧だけで対応を取り、閉じていなければ次の字下げなしのアイテムの前で切る)。位置は
   エディタのテキストそのもの (前処理の前) の UTF-16 の桁。
 - 出すもの: mod / struct / enum / union / trait / impl (`impl Tr for S<T>` の名前) / fn (impl・trait の中は Method) / const /
@@ -1736,30 +1742,30 @@ documentSymbol (edit→docsym) と、publishDiagnostics が来るまで (edit→
 VmHWM と、括弧の中は子孫のプロセスも足した RSS の最大 (50 ms ごと)。
 
 - 対象 synth: 生成した Cargo のクレート (モジュール 40 個・各 25 関数 + struct / enum / impl、約 4400 行)。開くのは src/m7.rs
-- 対象 crustc: このディレクトリ (Cargo のワークスペース、依存に cranelift など)。開くのは crates/core/src/driver2.rs
+- 対象 zustc: このディレクトリ (Cargo のワークスペース、依存に cranelift など)。開くのは crates/core/src/driver2.rs
 - rust-analyzer 1.100.0 (rustup の component)。rust-glancer は github.com/rust-glancer/rust-glancer (50dd51a) を
   `cargo build --release -p rust-glancer` でビルドしたもの (`RUST_GLANCER=<バイナリ>` で指定。rust-src が要る)。
   `--cold` は rust-glancer の索引 (target/rust_glancer) を消してから測る
 
 | 対象 | サーバ | init | ready | docsym (数) | wsym (見つかった) | edit→docsym | edit→diag | peak RSS (子も) |
 |---|---|---:|---:|---:|---:|---:|---:|---:|
-| synth | crustc | 2.2 ms | 9.6 ms | 0.6 ms (37) | 0.7 ms (5/5) | 2.0 ms | 1.3 ms | 7.5 MB (5.1 MB) |
-| synth | crustc (定義・参照を足した後) | 2.0 ms | 9.7 ms | 0.6 ms (37) | 0.6 ms (5/5) | 1.8 ms | 1.6 ms | 10.7 MB (6.4 MB) |
+| synth | zustc | 2.2 ms | 9.6 ms | 0.6 ms (37) | 0.7 ms (5/5) | 2.0 ms | 1.3 ms | 7.5 MB (5.1 MB) |
+| synth | zustc (定義・参照を足した後) | 2.0 ms | 9.7 ms | 0.6 ms (37) | 0.6 ms (5/5) | 1.8 ms | 1.6 ms | 10.7 MB (6.4 MB) |
 | synth | rust-analyzer | 18.7 ms | 3243 ms | 1.0 ms (37) | 2.3 ms (5/5) | 8.3 ms | 309 ms | 607 MB (878 MB) |
 | synth | rust-glancer | 36.4 ms | 5799 ms | 1.9 ms (38) | 27.0 ms (5/5) | 43.3 ms | - | 16.9 MB (888 MB) |
-| crustc | crustc | 2.3 ms | 55.0 ms | 1.8 ms (123) | 3.5 ms (5/5) | 9.7 ms | 7.8 ms | 10.9 MB (9.9 MB) |
-| crustc | crustc (定義・参照を足した後) | 1.9 ms | 91.4 ms | 2.1 ms (123) | 1.3 ms (5/5) | 13.0 ms | 10.4 ms | 29.9 MB (29.4 MB) |
-| crustc | rust-analyzer | 23.0 ms | 5954 ms | 3.6 ms (124) | 2.0 ms (5/5) | 26.2 ms | - | 1360 MB (2723 MB) |
-| crustc | rust-glancer | 130 ms | 10593 ms | 7.5 ms (113) | 262 ms (5/5) | 48.6 ms | - | 30.7 MB (1798 MB) |
+| zustc | zustc | 2.3 ms | 55.0 ms | 1.8 ms (123) | 3.5 ms (5/5) | 9.7 ms | 7.8 ms | 10.9 MB (9.9 MB) |
+| zustc | zustc (定義・参照を足した後) | 1.9 ms | 91.4 ms | 2.1 ms (123) | 1.3 ms (5/5) | 13.0 ms | 10.4 ms | 29.9 MB (29.4 MB) |
+| zustc | rust-analyzer | 23.0 ms | 5954 ms | 3.6 ms (124) | 2.0 ms (5/5) | 26.2 ms | - | 1360 MB (2723 MB) |
+| zustc | rust-glancer | 130 ms | 10593 ms | 7.5 ms (113) | 262 ms (5/5) | 48.6 ms | - | 30.7 MB (1798 MB) |
 
 読み方の注意:
 - 機能の幅が違う。rust-analyzer はクレートの依存まで名前解決・型推論をして、補完・定義へのジャンプなどもできる。
-  rust-glancer は依存まで索引を作る (ディスクに置く) 軽量版。crustc lsp は開いたファイルを 1 つのクレートとして検査し
-  (Cargo の依存・`mod x;` のほかのファイルは読まない)、シンボルは字句の列から読むだけ。crustc の ready が速いのは、依存も
+  rust-glancer は依存まで索引を作る (ディスクに置く) 軽量版。zustc lsp は開いたファイルを 1 つのクレートとして検査し
+  (Cargo の依存・`mod x;` のほかのファイルは読まない)、シンボルは字句の列から読むだけ。zustc の ready が速いのは、依存も
   型の索引も作らず、ワークスペースの .rs のシンボルを読むだけだから。
-- edit→diag: crustc は開いたファイルだけの検査の結果 (driver2.rs 単体なのでエラーが出る)。rust-analyzer は自前の診断を
-  push する (crustc の対象では 20 秒の間に来なかった)。rust-glancer の診断は既定で切ってある (cargo check を設定で入れる)。
-- edit→docsym は didChange を受けた後の処理を含む (crustc は didChange のたびに check するので、その時間も入る)。
+- edit→diag: zustc は開いたファイルだけの検査の結果 (driver2.rs 単体なのでエラーが出る)。rust-analyzer は自前の診断を
+  push する (zustc の対象では 20 秒の間に来なかった)。rust-glancer の診断は既定で切ってある (cargo check を設定で入れる)。
+- edit→docsym は didChange を受けた後の処理を含む (zustc は didChange のたびに check するので、その時間も入る)。
 - rust-analyzer と rust-glancer は子プロセス (cargo metadata・rustc・索引の作業) が大きい。rust-glancer は本体は 17〜31 MB。
 - シンボルの数の違い: rust-glancer は impl の中の関連アイテムなどの数え方が違う (synth の 38 は impl の名前の出し方)。
 
@@ -1771,7 +1777,7 @@ hover・references の数、`.` の直後 (`x.|name`) と識別子の途中 (`na
 
 #### synth (40 箇所、`.` の後 20 箇所。比べる相手は rust-analyzer)
 
-| 機能 | crustc | rust-analyzer | rust-glancer |
+| 機能 | zustc | rust-analyzer | rust-glancer |
 |---|---|---|---|
 | 対応を返す機能 | docsym, wsym | docsym, wsym, definition, hover, completion, references, rename, signature, semantic, inlay, codeAction, format | docsym, wsym, definition, hover, completion, references, rename, semantic, inlay, codeAction, format |
 | documentSymbol (名前の一致) | 名前 100% (種類も 97%) | 名前 100% (種類も 100%) | 名前 100% (種類も 95%); 余分 #0 |
@@ -1783,9 +1789,9 @@ hover・references の数、`.` の直後 (`x.|name`) と識別子の途中 (`na
 | completion `na\|me` (同) | 0% (候補 0) | 91% (候補 145) | 56% (候補 5) |
 | 時間の中央値 (ms) | defi 0.1, hove 0.1, comp 0.1, refe 0.1 | defi 0.5, hove 0.6, comp 4.1, refe 1.0 | defi 7.7, hove 8.4, comp 234.5, refe 20.3 |
 
-#### crustc (40 箇所、`.` の後 20 箇所。比べる相手は rust-analyzer)
+#### zustc (40 箇所、`.` の後 20 箇所。比べる相手は rust-analyzer)
 
-| 機能 | crustc | rust-analyzer | rust-glancer |
+| 機能 | zustc | rust-analyzer | rust-glancer |
 |---|---|---|---|
 | 対応を返す機能 | docsym, wsym | docsym, wsym, definition, hover, completion, references, rename, signature, semantic, inlay, codeAction, format | docsym, wsym, definition, hover, completion, references, rename, semantic, inlay, codeAction, format |
 | documentSymbol (名前の一致) | 名前 99% (種類も 97%); 足りない extern "C" | 名前 100% (種類も 100%) | 名前 90% (種類も 82%); 足りない c_close, c_exit, c_fork, c_mkdir |
@@ -1798,17 +1804,17 @@ hover・references の数、`.` の直後 (`x.|name`) と識別子の途中 (`na
 | 時間の中央値 (ms) | defi 0.1, hove 0.1, comp 0.1, refe 0.1 | defi 0.9, hove 1.0, comp 7.7, refe 31.4 | defi 14.4, hove 12.3, comp 257.3, refe 325.4 |
 
 分かったこと:
-- (この時点では) crustc lsp が持っているのは診断と documentSymbol / workspace/symbol だけ。definition・hover・references・completion
+- (この時点では) zustc lsp が持っているのは診断と documentSymbol / workspace/symbol だけ。definition・hover・references・completion
   (rust-analyzer と rust-glancer は持っている) が無いので、速さの比較は同じ機能での比較になっていない。
-- シンボルはおおむね同じ。documentSymbol の違いは extern ブロックの扱い (crustc は中の宣言を外に並べる、rust-analyzer は
+- シンボルはおおむね同じ。documentSymbol の違いは extern ブロックの扱い (zustc は中の宣言を外に並べる、rust-analyzer は
   `extern "C"` を 1 つのシンボルにする) と種類の付け方。workspace/symbol の違いは並べ方 (問い合わせに合う候補の選び方と
   順) で、上位 20 の一致は 61〜87%。
-- rust-glancer は definition・hover・completion を持つが、crustc の対象では rust-analyzer と違う答えも多い (references の
+- rust-glancer は definition・hover・completion を持つが、zustc の対象では rust-analyzer と違う答えも多い (references の
   数の一致 42%)。completion は 1 回 250 ms ほど。
 
 ### LSP の定義ジャンプと参照 (2026-11-17)
 
-`textDocument/definition` と `textDocument/references` に対応した (crustc-syntax の `navigate`)。型推論はせず、字句の列と
+`textDocument/definition` と `textDocument/references` に対応した (zust-syntax の `navigate`)。型推論はせず、字句の列と
 アイテムの表 (symbols を平らにして、持ち主の型・モジュールのパスを付けたもの) で名前を解決する:
 
 - ローカル: 関数の引数・`let` (`;` の後から見える)・`for` / `if let` / `while let` (次の `{` から)・match の腕・クロージャの引数。
@@ -1822,17 +1828,17 @@ hover・references の数、`.` の直後 (`x.|name`) と識別子の途中 (`na
   benches / build.rs) と `mod x;` (`#[path]`・インラインの mod も) をたどってファイルのモジュールのパスを決める。tests などの
   クレートのアイテムは同じクレートからだけ見える。
 - std / core / alloc (`rustc --print sysroot` の rust-src) は initialize の後に別スレッドで索引を作る (定義と use だけを持ち、
-  本文は捨てて位置は行と桁で覚える: 約 7 MB)。`CRUSTC_LSP_NO_STD=1` で切る。
+  本文は捨てて位置は行と桁で覚える: 約 7 MB)。`ZUST_ANALYZER_NO_STD=1` で切る。
 - references は、同じ名前の識別子 (ファイルごとの名前の表で引く) のうち、definition が同じ所に解決されるもの。
   `macro_rules!` の本体の中は数えない (rust-analyzer と同じ)。
-- メモリ: ワークスペースの全ファイルの字句の列 (u32 で持つ) と名前の表を持つので、crustc の対象で peak RSS 10.9 → 29.9 MB
+- メモリ: ワークスペースの全ファイルの字句の列 (u32 で持つ) と名前の表を持つので、zustc の対象で peak RSS 10.9 → 29.9 MB
   (std の索引を切ると 27.5 MB)。ready も 55 → 91 ms (ワークスペースの索引を作る)。
 
 `python3 bench/lsp_parity.py` (rust-analyzer の答えと比べる。`--detail` で合わない所を出す):
 
 #### synth (40 箇所、`.` の後 20 箇所。比べる相手は rust-analyzer)
 
-| 機能 | crustc | rust-analyzer | rust-glancer |
+| 機能 | zustc | rust-analyzer | rust-glancer |
 |---|---|---|---|
 | 対応を返す機能 | docsym, wsym, definition, references | docsym, wsym, definition, hover, completion, references, rename, signature, semantic, inlay, codeAction, format | docsym, wsym, definition, hover, completion, references, rename, semantic, inlay, codeAction, format |
 | documentSymbol (名前の一致) | 名前 100% (種類も 97%) | 名前 100% (種類も 100%) | 名前 100% (種類も 95%); 余分 #0 |
@@ -1844,9 +1850,9 @@ hover・references の数、`.` の直後 (`x.|name`) と識別子の途中 (`na
 | completion `na\|me` (同) | 0% (候補 0) | 91% (候補 145) | 56% (候補 5) |
 | 時間の中央値 (ms) | defi 0.8, hove 0.2, comp 0.1, refe 5.8 | defi 0.4, hove 0.5, comp 2.5, refe 1.0 | defi 6.3, hove 6.3, comp 218.4, refe 18.8 |
 
-#### crustc (40 箇所、`.` の後 20 箇所。比べる相手は rust-analyzer)
+#### zustc (40 箇所、`.` の後 20 箇所。比べる相手は rust-analyzer)
 
-| 機能 | crustc | rust-analyzer | rust-glancer |
+| 機能 | zustc | rust-analyzer | rust-glancer |
 |---|---|---|---|
 | 対応を返す機能 | docsym, wsym, definition, references | docsym, wsym, definition, hover, completion, references, rename, signature, semantic, inlay, codeAction, format | docsym, wsym, definition, hover, completion, references, rename, semantic, inlay, codeAction, format |
 | documentSymbol (名前の一致) | 名前 99% (種類も 97%); 足りない extern "C" | 名前 100% (種類も 100%) | 名前 90% (種類も 82%); 足りない c_close, c_exit, c_fork, c_mkdir |
@@ -1858,18 +1864,18 @@ hover・references の数、`.` の直後 (`x.|name`) と識別子の途中 (`na
 | completion `na\|me` (同) | 0% (候補 0) | 68% (候補 85) | 60% (候補 3) |
 | 時間の中央値 (ms) | defi 1.3, hove 0.3, comp 0.1, refe 13.6 | defi 0.8, hove 1.1, comp 6.6, refe 27.9 | defi 15.4, hove 13.0, comp 243.6, refe 315.0 |
 
-- definition は synth で 100%、crustc で 97% (合わないのは、cfg で外れたアイテム `Backend` に答える所 (rust-analyzer は
+- definition は synth で 100%、zustc で 97% (合わないのは、cfg で外れたアイテム `Backend` に答える所 (rust-analyzer は
   答えない) と、`FxMap::default()` を型の別名の先 (HashMap の impl) までたどれない所)。rust-glancer は 87%。時間は 1 回 1 ms ほど。
-- references (数がちょうど同じ) は synth で 100%、crustc で 64% (rust-glancer 42%)。合わないのは主に型推論が要るもの:
+- references (数がちょうど同じ) は synth で 100%、zustc で 64% (rust-glancer 42%)。合わないのは主に型推論が要るもの:
   `Default::default()` の呼び出し先 (impl Default のメソッド)、`FxMap::default()` (型の別名をたどった先の std のメソッド)、
   `x.f()` の受け手の型がローカルの注釈から分からないもの。ほかは数が 1〜3 ずれるもの (`Ty` 2290 個など)。組み込みの型
-  (`u8`) は rust-analyzer が参照を返すが crustc は返さない。時間は crustc の対象で 1 回 10〜14 ms (rust-analyzer 28 ms)。
+  (`u8`) は rust-analyzer が参照を返すが zustc は返さない。時間は zustc の対象で 1 回 10〜14 ms (rust-analyzer 28 ms)。
 - hover と completion は未対応。
 
 ### LSP の hover と補完、大きいワークスペースのメモリ (2026-11-17)
 
 `textDocument/hover` と `textDocument/completion` (`.` と `:` で起動) に対応した。どちらも定義・参照と同じ索引
-(crustc-syntax の `navigate`) から引く。型検査は使わない。
+(zust-syntax の `navigate`) から引く。型検査は使わない。
 
 - hover: 定義のシグネチャ (属性を外し、本体の `{` の前まで)・囲むもの (impl / モジュール)・その前の `///` の doc コメント。
   ローカルは推定した型 (`q: Point`)、組み込みの型はその名前。
@@ -1889,17 +1895,17 @@ hover・references の数、`.` の直後 (`x.|name`) と識別子の途中 (`na
   - `pub const unsafe fn` と `const trait` を読めていなかった (core の `impl str` のメソッドの大半が落ちていた)。
   - `sys`・テスト・ほかの OS 向けのファイルを入れない。
   - 位置は定義に、モジュールのパス・囲むものは共有して持つ: 約 21 MB → 10 MB。
-- 大きいワークスペース (`CRUSTC_LSP_MEM_MB`、既定 4):
+- 大きいワークスペース (`ZUST_ANALYZER_MEM_MB`、既定 4):
   - ワークスペースの本文と字句の列は、合計がこの大きさまでのファイルの分だけ持つ。
   - 超えた分のファイルは slim にして、定義・`pub use`・出てくる名前のハッシュの集合だけを持つ。
   - 参照・hover で要るときは、名前のハッシュで選んだファイルだけ読み直す。読み直したものは同じ大きさまで LRU で覚える。
-  - `CRUSTC_LSP_MEM_MB=0` (全部 slim) でも答えは変わらない (parity は同じ)。参照は遅くなる: crustc の対象で 1 回 9 → 31 ms。
+  - `ZUST_ANALYZER_MEM_MB=0` (全部 slim) でも答えは変わらない (parity は同じ)。参照は遅くなる: zustc の対象で 1 回 9 → 31 ms。
 
 `python3 bench/lsp_parity.py`:
 
 #### synth (40 箇所、`.` の後 20 箇所。比べる相手は rust-analyzer)
 
-| 機能 | crustc | rust-analyzer | rust-glancer |
+| 機能 | zustc | rust-analyzer | rust-glancer |
 |---|---|---|---|
 | 対応を返す機能 | docsym, wsym, definition, hover, completion, references | docsym, wsym, definition, hover, completion, references, rename, signature, semantic, inlay, codeAction, format | docsym, wsym, definition, hover, completion, references, rename, semantic, inlay, codeAction, format |
 | documentSymbol (名前の一致) | 名前 100% (種類も 97%) | 名前 100% (種類も 100%) | 名前 100% (種類も 95%); 余分 #0 |
@@ -1911,9 +1917,9 @@ hover・references の数、`.` の直後 (`x.|name`) と識別子の途中 (`na
 | completion `na\|me` (同) | 97% (候補 25) | 91% (候補 145) | 56% (候補 5) |
 | 時間の中央値 (ms) | defi 0.9, hove 0.8, comp 1.0, refe 3.5 | defi 0.4, hove 0.6, comp 3.1, refe 1.0 | defi 6.7, hove 6.7, comp 224.6, refe 18.9 |
 
-#### crustc (40 箇所、`.` の後 20 箇所。比べる相手は rust-analyzer)
+#### zustc (40 箇所、`.` の後 20 箇所。比べる相手は rust-analyzer)
 
-| 機能 | crustc | rust-analyzer | rust-glancer |
+| 機能 | zustc | rust-analyzer | rust-glancer |
 |---|---|---|---|
 | 対応を返す機能 | docsym, wsym, definition, hover, completion, references | docsym, wsym, definition, hover, completion, references, rename, signature, semantic, inlay, codeAction, format | docsym, wsym, definition, hover, completion, references, rename, semantic, inlay, codeAction, format |
 | documentSymbol (名前の一致) | 名前 99% (種類も 97%); 足りない extern "C" | 名前 100% (種類も 100%) | 名前 90% (種類も 82%); 足りない c_close, c_exit, c_fork, c_mkdir |
@@ -1925,43 +1931,43 @@ hover・references の数、`.` の直後 (`x.|name`) と識別子の途中 (`na
 | completion `na\|me` (同) | 80% (候補 7) | 68% (候補 85) | 60% (候補 3) |
 | 時間の中央値 (ms) | defi 1.0, hove 1.0, comp 1.3, refe 8.8 | defi 1.0, hove 1.1, comp 7.0, refe 30.9 | defi 16.0, hove 13.9, comp 265.5, refe 388.4 |
 
-- crustc の対象で、hover 85% (rust-analyzer 88%) と `x.|` の補完 100% (候補の数の中央値 40、rust-analyzer 26)。
+- zustc の対象で、hover 85% (rust-analyzer 88%) と `x.|` の補完 100% (候補の数の中央値 40、rust-analyzer 26)。
   rust-glancer はそれぞれ 72% と 90% (候補 37)。
-- hover で合わないのは文字列の中の名前 (`"CRUSTC_INLINE_LOG"`) の 2 か所だけ。
+- hover で合わないのは文字列の中の名前 (`"ZUSTC_INLINE_LOG"`) の 2 か所だけ。
 - `na|me` は、rust-analyzer がほかの候補を多く出す (中央値 85 個) ため、そこに書いてある名前が入らないことがある (68%)。
-  crustc は絞るので 80% (候補 7)。この指標で上回っても、補完の質が上とは言えない。
+  zustc は絞るので 80% (候補 7)。この指標で上回っても、補完の質が上とは言えない。
 - definition は 100% になった (`FxMap::default()` を別名の先の HashMap の impl にした)。references は 67%。残りの多くは、
   1〜3 個ずれる数え方の違いと、組み込みの型 (`u8`) の参照。
-- 時間 (1 回、crustc の対象): definition / hover 1.0 ms、補完 1.3 ms、参照 9 ms。rust-analyzer は 1.0 / 1.1 / 7.0 / 31 ms。
+- 時間 (1 回、zustc の対象): definition / hover 1.0 ms、補完 1.3 ms、参照 9 ms。rust-analyzer は 1.0 / 1.1 / 7.0 / 31 ms。
 
 `python3 bench/lsp_compare.py --cold` (参照の列を足した。big はモジュール 1000 個・約 11 万行・4.5 MB の生成クレート):
 
 | 対象 | サーバ | init | ready | docsym (数) | wsym (見つかった) | edit→docsym | edit→diag | references 1 回目 / 2 回目 (数) | peak RSS (子も) |
 |---|---|---:|---:|---:|---:|---:|---:|---:|---:|
-| synth | crustc | 4.9 ms | 14.6 ms | 0.8 ms (37) | 0.9 ms (5/5) | 2.1 ms | 1.5 ms | 207 ms / 3.5 ms (29) | 16.9 MB (15.8 MB) |
+| synth | zustc | 4.9 ms | 14.6 ms | 0.8 ms (37) | 0.9 ms (5/5) | 2.1 ms | 1.5 ms | 207 ms / 3.5 ms (29) | 16.9 MB (15.8 MB) |
 | synth | rust-analyzer | 23.9 ms | 3398 ms | 1.4 ms (37) | 1.0 ms (5/5) | 19.7 ms | 299 ms | 84.0 ms / 3.2 ms (29) | 596 MB (865 MB) |
 | synth | rust-glancer | 26.0 ms | 5812 ms | 1.9 ms (38) | 31.2 ms (5/5) | 4.7 ms | - | 380 ms / 14.6 ms (29) | 15.7 MB (888 MB) |
-| crustc | crustc | 2.5 ms | 86.7 ms | 1.8 ms (123) | 1.2 ms (5/5) | 13.6 ms | 10.9 ms | 71.9 ms / 10.0 ms (36) | 30.1 MB (30.1 MB) |
-| crustc | rust-analyzer | 25.7 ms | 6653 ms | 4.4 ms (124) | 1.1 ms (5/5) | 12.3 ms | - | 1698 ms / 15.1 ms (36) | 1571 MB (1633 MB) |
-| crustc | rust-glancer | 106 ms | 11194 ms | 7.7 ms (113) | 265 ms (5/5) | 48.0 ms | - | 1702 ms / 122 ms (36) | 29.8 MB (1799 MB) |
-| big | crustc | 2.4 ms | 152 ms | 0.8 ms (37) | 14.4 ms (5/5) | 3.7 ms | 3.1 ms | 47.6 ms / 16.6 ms (29) | 55.1 MB (55.1 MB) |
+| zustc | zustc | 2.5 ms | 86.7 ms | 1.8 ms (123) | 1.2 ms (5/5) | 13.6 ms | 10.9 ms | 71.9 ms / 10.0 ms (36) | 30.1 MB (30.1 MB) |
+| zustc | rust-analyzer | 25.7 ms | 6653 ms | 4.4 ms (124) | 1.1 ms (5/5) | 12.3 ms | - | 1698 ms / 15.1 ms (36) | 1571 MB (1633 MB) |
+| zustc | rust-glancer | 106 ms | 11194 ms | 7.7 ms (113) | 265 ms (5/5) | 48.0 ms | - | 1702 ms / 122 ms (36) | 29.8 MB (1799 MB) |
+| big | zustc | 2.4 ms | 152 ms | 0.8 ms (37) | 14.4 ms (5/5) | 3.7 ms | 3.1 ms | 47.6 ms / 16.6 ms (29) | 55.1 MB (55.1 MB) |
 | big | rust-analyzer | 20.1 ms | 4293 ms | 5.7 ms (37) | 14.7 ms (5/5) | 5.2 ms | 4875 ms | 487 ms / 7.1 ms (29) | 825 MB (2038 MB) |
 | big | rust-glancer | 35.5 ms | 6206 ms | 1.9 ms (38) | 108 ms (5/5) | 5.0 ms | - | 926 ms / 29.4 ms (29) | 22.0 MB (1033 MB) |
 
 - 参照の 1 回目は std の索引 (initialize の後に別スレッドで作る) を待つ時間を含む: synth で 207 ms。
   rust-analyzer と rust-glancer の 1 回目 (0.5〜1.7 秒) よりは短い。
 - peak RSS:
-  - crustc の対象: 定義・参照を入れた直後の 29.9 MB から 30.1 MB (hover・補完のための型の情報・std の impl を足しても、
+  - zustc の対象: 定義・参照を入れた直後の 29.9 MB から 30.1 MB (hover・補完のための型の情報・std の impl を足しても、
     std の索引を小さくした分で相殺)。
-  - big: 55 MB (`CRUSTC_LSP_MEM_MB=0` で 28 MB)。
+  - big: 55 MB (`ZUST_ANALYZER_MEM_MB=0` で 28 MB)。
   - rust-analyzer は 0.6〜1.6 GB。rust-glancer は本体 16〜30 MB だが、子プロセスを足すと 0.9〜1.8 GB。
 
-### LSP を crustc から分ける (2026-11-17)
+### LSP を zustc から分ける (2026-11-17)
 
-- symbols と navigate を crustc-syntax から新しいクレート crustc-ide に移した (コンパイラの層にエディタ向けのコードを
-  置かない。crustc 自身でコンパイルする層 (base〜core) にも入らない)。
-- crustc-lsp をバイナリ `crustc-lsp` にした。`crustc lsp` は無くし、案内を出して終わる。crustc (CLI とライブラリ) は
-  crustc-ide / crustc-lsp に依存しない (`cargo tree -p crustc` に出ない)。ベンチの lsp/* だけが dev-dependency で使う。
+- symbols と navigate を zust-syntax から新しいクレート zust-ide に移した (コンパイラの層にエディタ向けのコードを
+  置かない。zustc 自身でコンパイルする層 (base〜core) にも入らない)。
+- zust-analyzer をバイナリ `zust-analyzer` にした。`zustc lsp` は無くし、案内を出して終わる。zustc (CLI とライブラリ) は
+  zust-ide / zust-analyzer に依存しない (`cargo tree -p zustc` に出ない)。ベンチの lsp/* だけが dev-dependency で使う。
 - LSP のテストは crates/lsp/tests/lsp.rs に移した。
 
 ### references の残りの不一致を詰める (2026-11-17)
@@ -1981,7 +1987,7 @@ hover・references の数、`.` の直後 (`x.|name`) と識別子の途中 (`na
 
 #### synth (40 箇所、`.` の後 20 箇所。比べる相手は rust-analyzer)
 
-| 機能 | crustc | rust-analyzer | rust-glancer |
+| 機能 | zustc | rust-analyzer | rust-glancer |
 |---|---|---|---|
 | 対応を返す機能 | docsym, wsym, definition, hover, completion, references | docsym, wsym, definition, hover, completion, references, rename, signature, semantic, inlay, codeAction, format | docsym, wsym, definition, hover, completion, references, rename, semantic, inlay, codeAction, format |
 | documentSymbol (名前の一致) | 名前 100% (種類も 97%) | 名前 100% (種類も 100%) | 名前 100% (種類も 95%); 余分 #0 |
@@ -1993,9 +1999,9 @@ hover・references の数、`.` の直後 (`x.|name`) と識別子の途中 (`na
 | completion `na\|me` (同) | 97% (候補 25) | 91% (候補 145) | 56% (候補 5) |
 | 時間の中央値 (ms) | defi 0.8, hove 0.7, comp 1.0, refe 3.7 | defi 0.5, hove 0.7, comp 3.7, refe 1.8 | defi 7.5, hove 7.6, comp 235.4, refe 19.8 |
 
-#### crustc (40 箇所、`.` の後 20 箇所。比べる相手は rust-analyzer)
+#### zustc (40 箇所、`.` の後 20 箇所。比べる相手は rust-analyzer)
 
-| 機能 | crustc | rust-analyzer | rust-glancer |
+| 機能 | zustc | rust-analyzer | rust-glancer |
 |---|---|---|---|
 | 対応を返す機能 | docsym, wsym, definition, hover, completion, references | docsym, wsym, definition, hover, completion, references, rename, signature, semantic, inlay, codeAction, format | docsym, wsym, definition, hover, completion, references, rename, semantic, inlay, codeAction, format |
 | documentSymbol (名前の一致) | 名前 99% (種類も 97%); 足りない extern "C" | 名前 100% (種類も 100%) | 名前 90% (種類も 82%); 足りない c_close, c_exit, c_fork, c_mkdir |
@@ -2007,7 +2013,7 @@ hover・references の数、`.` の直後 (`x.|name`) と識別子の途中 (`na
 | completion `na\|me` (同) | 80% (候補 7) | 68% (候補 85) | 60% (候補 3) |
 | 時間の中央値 (ms) | defi 1.1, hove 1.0, comp 1.3, refe 16.6 | defi 0.9, hove 1.2, comp 6.2, refe 28.3 | defi 14.9, hove 12.5, comp 252.8, refe 330.1 |
 
-- crustc の対象の references (数がちょうど同じ) は 67% → 78%。
+- zustc の対象の references (数がちょうど同じ) は 67% → 78%。
 - 残りの 9 か所は、どれも rust-analyzer 側の事情。
   - cfg で外れた `#[cfg(not(feature = "build"))] fn lower_blob` の中:
     - rust-analyzer は中の名前を数える (Vec・Analysis で 1〜2 個)。
@@ -2015,7 +2021,7 @@ hover・references の数、`.` の直後 (`x.|name`) と識別子の途中 (`na
   - `u8`: rust-analyzer は target/ の下に生成した prelude_items.rs (`include!`) の中も数える。
   - `Key`: build.rs の中の `mod key { pub type Key = u128; }` を、rust-analyzer は crates/base の Key の参照に数える。
 - 時間: 参照は 1 回 17 ms (前は 9 ms。impl の中の `Self` も解決するため)。rust-analyzer は 28 ms。
-- `CRUSTC_LSP_MEM_MB=0` (全部 slim) でも同じ答え。
+- `ZUST_ANALYZER_MEM_MB=0` (全部 slim) でも同じ答え。
 - hover は 85 → 82%: cfg で外れた `Backend` に答えなくなったため (rust-analyzer も答えない)。
 
 ### ミューテーションテスト (cargo-mutants、2026-11-17)
@@ -2028,12 +2034,12 @@ hover・references の数、`.` の直後 (`x.|name`) と識別子の途中 (`na
   - 変異は全部で 18,240 個。1 個にテストで数秒〜1 分かかるので、全部は回さない。
 - 範囲の絞り方:
   - `bench/mutants.sh diff [BASE]`: BASE (既定 origin/main) からの差分の行の変異だけ。変更の確認に。
-  - `bench/mutants.sh pkg crustc-ide`: クレートごと。
+  - `bench/mutants.sh pkg zust-ide`: クレートごと。
   - `bench/mutants.sh file crates/ide/src/symbols.rs -- -F match_score -j 2`: ファイル・関数の名前・並列の数を指定する。
   - `bench/mutants.sh list ...`: 数を見るだけ。
   - `--` の後ろは cargo mutants にそのまま渡す (`--shard 1/8` など)。
 - テストに使うパッケージ:
-  - crates/ide・crates/lsp だけの変異: crustc-ide と crustc-lsp のテスト。1 個 2〜3 秒。
+  - crates/ide・crates/lsp だけの変異: zust-ide と zust-analyzer のテスト。1 個 2〜3 秒。
   - それ以外: ワークスペース全部のテスト (コンパイラの層のテストの多くはルートの tests/ にある)。1 個 1 分ほど。
 - 時間切れは、基準のテストの時間の 3 倍か 180 秒の大きい方。
 - 結果は `mutants.out/` (missed.txt がテストで見つからなかった変異)。
@@ -2077,8 +2083,8 @@ use の木 (`use_tree` 27・`resolve_use` 18・`reexport` 18)、文字列の小�
   - or パターン `(m, 0) | (0, m)` の m が後ろの方に行っていた。rust-analyzer と同じく前の方に。
   - `apply_cfg` で、cfg で外れたアイテムの derive を数え直すときに、外れた範囲をまだ入れていなかった。
   - LSP がファイルの直下の `#[path = "x.rs"] mod m;` を `<ファイル名>/x.rs` で探していた (rustc はファイルのある
-    ディレクトリから)。これで navigate_tests.rs が読まれず、crustc の参照の一致が 78% → 58% に下がって見えていた。
-- 速さ: `python3 bench/lsp_parity.py` (crustc を対象) は defi 1.0 / hove 0.9 / comp 1.2 / refe 15.1 ms で、前と同じ
+    ディレクトリから)。これで navigate_tests.rs が読まれず、zustc の参照の一致が 78% → 58% に下がって見えていた。
+- 速さ: `python3 bench/lsp_parity.py` (zustc を対象) は defi 1.0 / hove 0.9 / comp 1.2 / refe 15.1 ms で、前と同じ
   (rust-analyzer は 0.9 / 0.9 / 5.6 / 27.3 ms)。一致も前と同じ (definition 100%・hover 82%・references 78%)。
   残りの references の違いは、rust-analyzer が数える cfg で外れたアイテムの中・OUT_DIR の生成ファイル・build.rs と
   共有する lexer.rs の中のもの。
@@ -2119,20 +2125,20 @@ use の木 (`use_tree` 27・`resolve_use` 18・`reexport` 18)、文字列の小�
 rust-analyzer との比べ方を `bench/lsp_parity.py` に足した (rename は書き換えの集合が同じか、signatureHelp は
 名前を含むか・引数の数・今の引数が同じか、documentHighlight は数):
 
-| 対象 | 機能 | crustc | rust-analyzer |
+| 対象 | 機能 | zustc | rust-analyzer |
 |---|---|---|---|
 | synth | rename | 100% | 100% |
 | synth | signatureHelp | 100% (答えた 100%) | 100% (答えた 95%) |
 | synth | documentHighlight | 100% | 100% |
-| crustc | rename | 82% (断ったのも同じ 23/23) | 100% |
-| crustc | signatureHelp | 89% (答えた 85%) | 100% (答えた 95%) |
-| crustc | documentHighlight | 85% | 100% |
+| zustc | rename | 82% (断ったのも同じ 23/23) | 100% |
+| zustc | signatureHelp | 89% (答えた 85%) | 100% (答えた 95%) |
+| zustc | documentHighlight | 85% | 100% |
 
-- 時間の中央値 (crustc を対象): rename 1.3 ms (rust-analyzer 0.9)、signatureHelp 1.3 ms (同 0.4)。
+- 時間の中央値 (zustc を対象): rename 1.3 ms (rust-analyzer 0.9)、signatureHelp 1.3 ms (同 0.4)。
   ほかの機能の時間と一致は前と同じ (references 14.5 ms、rust-analyzer 26.4 ms)。
 - 残りの違い:
   - rename・documentHighlight: rust-analyzer が数える cfg で外れたアイテムの中 (references と同じもの)。
-    `Default::default` を rust-analyzer は依存のクレートの中まで 1,273 か所書き換える (crustc はワークスペースの 16 か所)。
+    `Default::default` を rust-analyzer は依存のクレートの中まで 1,273 か所書き換える (zustc はワークスペースの 16 か所)。
   - signatureHelp: std の trait のメソッド (`extend`) と、クロージャの呼び出し (`body_hash(..)`) に答えない。
 - 最初に測ったときは rename 71%・signatureHelp 26% だった。rust-analyzer と比べて直したもの:
   メソッドの呼び出しの self (引数の数と今の引数が 1 ずれていた)、use の名前の上の rename (別名にする)、
@@ -2144,14 +2150,14 @@ rust-analyzer との比べ方を `bench/lsp_parity.py` に足した (rename は�
   - rust-analyzer は外れたアイテム (関数・impl・struct・enum・const・type・trait・インラインの mod・文の cfg) の中も、
     外側のスコープから見えるアイテムへのパス (`used()` / `P` / `sub::deep` / `crate::P` / use で取り込んだ名前) は解決して、
     definition / references / hover に答える。ローカル・フィールド・メソッド (`p.get()` / `s.x`)・関連アイテム (`P::new`)・
-    外れたアイテムの名前そのものには答えない。前の crustc は外れたものを全部除いていた。
+    外れたアイテムの名前そのものには答えない。前の zustc は外れたものを全部除いていた。
   - `def_at` が外れた所のトークンを `inactive_def_at` で引き、上の範囲だけを答える。references・rename・hover もこれを通る。
   - `apply_cfg`: 設定されていない cfg を「成り立つ」としていたのを、rustc と同じく「成り立たない」にした
     (`no_global_oom_handling` / `miri` / `doc` / 知らない `key = ".."`)。`target_arch` / `target_pointer_width` /
     `target_endian` / `target_env` / `target_vendor` / `target_has_atomic` / `panic` を分かるようにした。`test` と
     `debug_assertions` は rust-analyzer と同じく成り立つとする。
 - **trait の impl のメソッドの rename** (`impl Default for S` の `fn default`): rust-analyzer は std の宣言と依存のクレートの
-  ソースまで 1,273 か所書き換える (そのままでは壊れる書き換え)。crustc はここは合わせず、
+  ソースまで 1,273 か所書き換える (そのままでは壊れる書き換え)。zustc はここは合わせず、
   - trait がワークスペースのもの: trait の宣言から引き直して、宣言・全部の impl・呼び出しを書き換える。
   - ライブラリ・外部のクレートの trait: 理由を付けて断る (宣言の方を変えられないので)。
 - **signatureHelp**:
@@ -2165,7 +2171,7 @@ rust-analyzer との比べ方を `bench/lsp_parity.py` に足した (rename は�
   `true` → bool。式全体がリテラルのときだけ (`x + 1` の 1 は式の型ではない)。接尾辞のない数 (`0` / `1.5`) は、
   使い方で型が決まる (rust-analyzer は `let mut acc = 0; acc = add(acc, x_i64)` の acc を i64 にする) ので型にしない。
 
-結果 (`python3 bench/lsp_parity.py`、crustc を対象。synth は全部 100% のまま):
+結果 (`python3 bench/lsp_parity.py`、zustc を対象。synth は全部 100% のまま):
 
 | 機能 | 前 | 後 | rust-analyzer |
 |---|---:|---:|---:|
@@ -2179,19 +2185,19 @@ fixture (`python3 bench/ide_golden_ra.py`): definition 460 → 462/467、referen
 hover 612 → 614/636。
 
 残りの違い: rename の `default` (上の、わざと断るもの)。references の `u8` / `Key` (rust-analyzer は OUT_DIR の生成
-ファイルと、build.rs と共有する lexer.rs の中も数える)。hover の `CRUSTC_INLINE_LOG` (文字列の中)。
+ファイルと、build.rs と共有する lexer.rs の中も数える)。hover の `ZUSTC_INLINE_LOG` (文字列の中)。
 
 ### LSP の比べ方を広げ、残りの違いを詰める (2026-11-18)
 
 **ベンチマーク (`bench/lsp_parity.py`) を直した**:
 
-- 対象を 4 つに: synth (生成した 40 モジュール)・fixture (ide のテストのワークスペース、新)・crustc (driver2.rs)・
+- 対象を 4 つに: synth (生成した 40 モジュール)・fixture (ide のテストのワークスペース、新)・zustc (driver2.rs)・
   ide (navigate.rs、新: 字句の部品が多い別の書き方のファイル)。
 - rust-analyzer の準備ができるまで待つ: 名前が引けた後も型の解析を続けているので、`$/progress` と
   `experimental/serverStatus` (quiescent) を見て、作業が終わるまで待つ (前は fixture で rust-analyzer の補完が 0% に見えていた)。
 - 時間は p50 と p90。起動から名前が引けるまで・作業が終わるまでの時間と、メモリの最大 (サーバと子のプロセスの RSS)。
 - 「一致の平均」(機能ごとの一致の平均) を 1 つの数に。
-- `--json bench/lsp_parity.json` で crustc の数字を残し、`--compare` で前回との差 (一致は点、時間は ms) を列に足す。
+- `--json bench/lsp_parity.json` で zustc の数字を残し、`--compare` で前回との差 (一致は点、時間は ms) を列に足す。
 - `--detail` で workspace/symbol・documentSymbol の違いも出す。`--detail-out` でファイルに。
 
 **直したもの** (どれも rust-analyzer に小さいワークスペースで聞いて、振る舞いを確かめてから合わせた):
@@ -2223,17 +2229,17 @@ hover 612 → 614/636。
 - references: 候補の識別子ごとに名前の候補を全部の定義 (std を含めて 10 万個以上) から探していた。問い合わせ 1 回の間の
   名前の索引 (`named`) にした。メンバの参照で `Q::name` の Q が持ち主でない具体的な型なら解決もしない。
   サーバの中で 2.5 ms → 0.5 ms (synth)。
-- documentHighlight: ワークスペース全体の参照を探してから絞っていたのを、そのファイルだけ探すように (crustc で 14.9 → 1.2 ms)。
+- documentHighlight: ワークスペース全体の参照を探してから絞っていたのを、そのファイルだけ探すように (zustc で 14.9 → 1.2 ms)。
 - hover / signatureHelp: std のファイルを読み直すとき、本文だけにした (索引は作らない)。
 - 応答は 1 回の書き込みに (ヘッダと本文を分けると stdout の行ごとの flush で 3 回になっていた)。
 
-結果 (`python3 bench/lsp_parity.py --compare`、crustc / rust-analyzer。一致の平均の差は今回の前との差):
+結果 (`python3 bench/lsp_parity.py --compare`、zustc / rust-analyzer。一致の平均の差は今回の前との差):
 
-| 対象 | 一致の平均 crustc | rust-analyzer | 差 | references p50 crustc / ra (ms) | 起動から名前まで / メモリ crustc | rust-analyzer |
+| 対象 | 一致の平均 zustc | rust-analyzer | 差 | references p50 zustc / ra (ms) | 起動から名前まで / メモリ zustc | rust-analyzer |
 |---|---:|---:|---:|---|---|---|
 | synth | 99.7% | 99.1% | +1.3 点 | 0.7 / 0.7 | 13 ms / 17 MB | 2689 ms / 868 MB |
 | fixture | 97.3% | 95.6% | +15.4 点 | 0.9 / 0.9 | 7 ms / 17 MB | 332 ms / 833 MB |
-| crustc | 96.3% | 95.5% | +4.3 点 | 5.4 / 22.4 | 139 ms / 53 MB | 4932 ms / 2368 MB |
+| zustc | 96.3% | 95.5% | +4.3 点 | 5.4 / 22.4 | 139 ms / 53 MB | 4932 ms / 2368 MB |
 | ide | 96.0% | 97.5% | +8.4 点 | 3.6 / 2.3 | 170 ms / 53 MB | 5391 ms / 1874 MB |
 
 - workspace/symbol は 4 つとも 100% (前は 62〜87%)、documentSymbol は種類まで 100%、documentHighlight は 100%。
@@ -2242,7 +2248,7 @@ hover 612 → 614/636。
 - ide の `x.|` の補完は -10 点に見えるが、作業の間に navigate.rs が変わって比べる位置が違う。
 - 残りの違い:
   - rename の `Default::default` (rust-analyzer は依存のクレートの中まで書き換える。わざと断る) と、
-    `use a::{Point as Pt}` の Point の上 (rust-analyzer は別名だけを変えて使う所を変えない。crustc は定義を変える)。
+    `use a::{Point as Pt}` の Point の上 (rust-analyzer は別名だけを変えて使う所を変えない。zustc は定義を変える)。
   - references の `Key`: build.rs と共有する lexer.rs の中の別の `Key` を rust-analyzer が数える。
   - 型が分からない受け手の補完 (`x.as_str()` など)・std のメソッドの signatureHelp (`map(` など)・数の型の
     メソッド (`wrapping_sub`: core ではマクロで作る)。
@@ -2284,16 +2290,16 @@ rust-analyzer の hover の型を正解にして、よく書く式 39 個 (繰�
   失敗しても、そのファイルだけ飛ばすようにした。
 
 結果: fixture の definition は 462 → 465/467、references は 606 → 609/629。`python3 bench/lsp_parity.py` の一致の平均は
-synth 99.7% / fixture 97.3% / crustc 96.3% (rust-analyzer はそれぞれ 99.1% / 95.6% / 95.5%)。ide (navigate.rs。作業の間に
-本文が変わるので位置は毎回違う) は 95〜98% (rust-analyzer 95〜98%)。時間は前と同じ (references の p50 は crustc で 5.4 ms、
+synth 99.7% / fixture 97.3% / zustc 96.3% (rust-analyzer はそれぞれ 99.1% / 95.6% / 95.5%)。ide (navigate.rs。作業の間に
+本文が変わるので位置は毎回違う) は 95〜98% (rust-analyzer 95〜98%)。時間は前と同じ (references の p50 は zustc で 5.4 ms、
 rust-analyzer 27.9 ms)。std のメソッドの参照 (`Iterator::map` など) は rust-analyzer の 8 割ほどを数える (前は 0)。
 
 ### std のメソッドの参照の差を詰める (2026-11-18)
 
-crustc のワークスペースで、よく使う std のメソッド 20 個の references を rust-analyzer と 1 件ずつ比べた
+zustc のワークスペースで、よく使う std のメソッド 20 個の references を rust-analyzer と 1 件ずつ比べた
 (`navigate.rs` の中の呼び出しから)。
 
-| メソッド | 前 (crustc / rust-analyzer) | 今 |
+| メソッド | 前 (zustc / rust-analyzer) | 今 |
 |---|---|---|
 | `Option::map` | 214 / 246 | 266 / 266 |
 | `Iterator::map` | 282 / 342 | 349 / 349 |
@@ -2339,14 +2345,14 @@ crustc のワークスペースで、よく使う std のメソッド 20 個の 
 
 `python3 bench/lsp_parity.py` の一致の平均は前回と同じか上がった:
 
-| 対象 | crustc | rust-analyzer |
+| 対象 | zustc | rust-analyzer |
 |---|---|---|
 | synth | 99.7% | 99.1% |
 | fixture | 97.3% | 95.6% |
-| crustc | 96.3% | 95.5% |
+| zustc | 96.3% | 95.5% |
 | ide | 98.1% (+2.8 点) | 97.9% |
 
-references の p50 は crustc で 4.2 ms、rust-analyzer では 24.1 ms。依存クレートの索引を足した分、メモリは 66 MB になった (rust-analyzer は 2.4 GB)。
+references の p50 は zustc で 4.2 ms、rust-analyzer では 24.1 ms。依存クレートの索引を足した分、メモリは 66 MB になった (rust-analyzer は 2.4 GB)。
 
 ### 途中で分かったこと
 

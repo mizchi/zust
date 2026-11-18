@@ -1,14 +1,14 @@
-"""crustc 自身の crates/syntax/src/prelude.rs (prelude の項目を名前で選ぶ) を、lexer.rs・fxhash.rs・key.rs の KeyHasher と一緒に
+"""zustc 自身の crates/syntax/src/prelude.rs (prelude の項目を名前で選ぶ) を、lexer.rs・fxhash.rs・key.rs の KeyHasher と一緒に
 1 ファイルのプログラムにまとめる。
 usage: python3 tests/selfhost/build_prelude.py > out/selfhost/prelude_main.rs
 main は引数のファイルごとに、ユーザのソースとして prelude::select を呼び、選ばれた prelude の長さ・行数・ハッシュを出す。
 (include_str! は out/selfhost/ から見た crates/syntax/src/prelude_lib.rs.in を指すように書き換え、build.rs の生成する
- PRELUDE_ITEMS の表 (target/release/build/crustc-core-*/out/prelude_items.rs の新しいもの) はそのまま埋め込む)"""
+ PRELUDE_ITEMS の表 (target/release/build/zust-core-*/out/prelude_items.rs の新しいもの) はそのまま埋め込む)"""
 import glob, os
 
 lexer = open("crates/syntax/src/lexer.rs").read()
 fx = open("crates/base/src/fxhash.rs").read()
-items = max(glob.glob("target/release/build/crustc-syntax*/**/prelude_items.rs", recursive=True), key=os.path.getmtime)
+items = max(glob.glob("target/release/build/zust-syntax*/**/prelude_items.rs", recursive=True), key=os.path.getmtime)
 prelude = (open("crates/syntax/src/prelude.rs").read()
     .replace('include_str!("prelude_lib.rs.in")', 'include_str!("../../crates/syntax/src/prelude_lib.rs.in")')
     .replace('include!(concat!(env!("OUT_DIR"), "/prelude_items.rs"));', open(items).read()))
@@ -16,7 +16,7 @@ cache = open("crates/base/src/key.rs").read()
 a = cache.index("pub type Key = u128;")
 b = len(cache)
 hasher = cache[a:b]
-print("""// 自動生成: tests/selfhost/build_prelude.py (crustc の crates/syntax/src/prelude.rs をそのまま含む)
+print("""// 自動生成: tests/selfhost/build_prelude.py (zustc の crates/syntax/src/prelude.rs をそのまま含む)
 mod cache {
 use std::hash::{Hash, Hasher};
 """ + hasher + """}

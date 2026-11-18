@@ -1,4 +1,4 @@
-"""依存の多い複数クレートのワークスペースのビルド時間 (crustc build と cargo の比較)。
+"""依存の多い複数クレートのワークスペースのビルド時間 (zustc build と cargo の比較)。
 
 usage: python3 bench/deps_bench.py [--mids N] [--fns F] [--deps K] [--reps R] [--no-cargo]
 
@@ -13,7 +13,7 @@ usage: python3 bench/deps_bench.py [--mids N] [--fns F] [--deps K] [--reps R] [-
   low-body  いちばん下の中間クレート m0 (ほぼ全部が推移的に依存する) の関数の本体を 1 つ変える
   low-sig   m0 の pub 関数のシグネチャを変える (使う側も直す)
   app-body  app の main を変える
-cargo は path 依存のワークスペース (dev プロファイル: incremental あり、クレートは並列に)。crustc は既定 (Cranelift、-O なし)
+cargo は path 依存のワークスペース (dev プロファイル: incremental あり、クレートは並列に)。zustc は既定 (Cranelift、-O なし)
 """
 import os
 import random
@@ -23,7 +23,7 @@ import sys
 import time
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-CRUSTC = os.path.join(ROOT, "target/release/crustc")
+ZUSTC = os.path.join(ROOT, "target/release/zustc")
 VENDOR = os.path.join(ROOT, "cratebench/vendor")
 # (名前, edition, feature, クレート名)
 REAL = [("fnv", "2015", ["std"], "fnv"), ("adler2", "2021", ["std"], "adler2"), ("hex", "2018", ["std", "alloc"], "hex"),
@@ -143,7 +143,7 @@ def main():
         else:
             i += 1
     d = os.path.join(ROOT, "out/depsbench")
-    tools = [("crustc", f"{CRUSTC} build workspace.txt -o target", os.path.join(d, "target/app"))]
+    tools = [("zustc", f"{ZUSTC} build workspace.txt -o target", os.path.join(d, "target/app"))]
     if "--no-cargo" not in a:
         tools.append(("cargo", "cargo build --offline -q", os.path.join(d, "target_cargo/debug/app")))
     env_note = ""
@@ -175,8 +175,8 @@ def main():
             outs.setdefault(name, []).append(subprocess.run([exe], capture_output=True, text=True).stdout)
         results[name] = res
     print(f"workspace: {desc}{env_note}")
-    if len(tools) > 1 and outs["crustc"] != outs["cargo"]:
-        print(f"OUTPUT DIFFERS: crustc {outs['crustc'][:1]} cargo {outs['cargo'][:1]}")
+    if len(tools) > 1 and outs["zustc"] != outs["cargo"]:
+        print(f"OUTPUT DIFFERS: zustc {outs['zustc'][:1]} cargo {outs['cargo'][:1]}")
     print("| step | " + " | ".join(n for n, _, _ in tools) + " |")
     print("|---|" + "---:|" * len(tools))
     for st in steps:

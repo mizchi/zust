@@ -5,23 +5,23 @@
 //! - front/* : 字句解析だけ (no-op の下限)
 //!
 //! 使い方は bench/regress.sh を参照 (ベースライン保存と比較)。
-//! リンカは環境変数 CRUSTC_BENCH_LINKER で固定できる (未指定なら自動選択)。
+//! リンカは環境変数 ZUSTC_BENCH_LINKER で固定できる (未指定なら自動選択)。
 
 use std::path::PathBuf;
 use std::time::Duration;
 
 use criterion::{BatchSize, Criterion, criterion_group, criterion_main};
-use crustc_lsp::Server;
-use crustc::testgen::program;
-use crustc::{Options2, Session2};
+use zust_analyzer::Server;
+use zustc::testgen::program;
+use zustc::{Options2, Session2};
 use serde_json::json;
 
 const N: usize = 1000;
 
 fn opts() -> Options2 {
     Options2 {
-        linker: std::env::var("CRUSTC_BENCH_LINKER").ok(),
-        backend: Some(crustc::clif_backend::compile),
+        linker: std::env::var("ZUSTC_BENCH_LINKER").ok(),
+        backend: Some(zustc::clif_backend::compile),
         ..Options2::default()
     }
 }
@@ -136,7 +136,7 @@ fn build(c: &mut Criterion) {
 fn front(c: &mut Criterion) {
     let v = program(N, 0);
     c.bench_function(&format!("front/lex/{N}"), |b| {
-        b.iter(|| crustc::lexer::split(&v).unwrap().len())
+        b.iter(|| zustc::lexer::split(&v).unwrap().len())
     });
 }
 

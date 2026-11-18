@@ -7,6 +7,6 @@ fn matches_python_generator() {
     let Ok(py) = py else { return }; // python が無い環境では省略
     assert_eq!(
         String::from_utf8(py.stdout).unwrap(),
-        crustc::testgen::program(50, 3)
+        zustc::testgen::program(50, 3)
     );
 }

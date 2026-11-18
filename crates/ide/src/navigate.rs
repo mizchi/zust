@@ -16,8 +16,8 @@
 use std::cell::RefCell;
 use std::rc::Rc;
 use std::sync::Arc;
-use crustc_syntax::fxhash::{FxMap, FxSet};
-use crustc_syntax::lexer::tokenize;
+use zust_syntax::fxhash::{FxMap, FxSet};
+use zust_syntax::lexer::tokenize;
 use crate::symbols::{SymKind, Symbol, document_symbols};
 
 /// 定義 (シンボルを平らにして、持ち主とモジュールを付けたもの)
@@ -1659,7 +1659,7 @@ fn use_module(here: &[String], path: &[String]) -> (Vec<String>, bool) {
             m.extend(path[i..].iter().cloned());
             (m, true)
         }
-        // (ほかのクレート `std::sync` / `crustc_core::driver2`: クレートの名前を外す)
+        // (ほかのクレート `std::sync` / `zust_core::driver2`: クレートの名前を外す)
         Some(_) => (path[1..].to_vec(), false),
         None => (vec![], true),
     }
@@ -3519,7 +3519,7 @@ fn expr_type(ws: &[&FileIndex], file: usize, k: usize, depth: u32) -> Option<Str
             let q = if q == "Self" { self_ty(at)? } else { q };
             // (`a::b::T(..)` / `m::f(..)`: モジュールの下のタプル構造体・関数)
             if q.starts_with(|c: char| c.is_ascii_lowercase()) && q != "self" && q != "super" && q != "crate" {
-                // (同じ名前の関数がいくつもあれば、モジュールの名前が修飾 q のもの: `crustc::macros::expand` は macros の expand)
+                // (同じ名前の関数がいくつもあれば、モジュールの名前が修飾 q のもの: `zustc::macros::expand` は macros の expand)
                 let cands: Vec<&Def> = named(ws, file, name).into_iter().map(|x| x.1).filter(|d| d.owner.is_empty() && matches!(d.kind, SymKind::Struct | SymKind::Function)).collect();
                 let pick = cands.iter().find(|d| d.module.last() == Some(&q)).or(cands.first());
                 if let Some(t) = pick.map(|d| if d.kind == SymKind::Struct { name.to_string() } else { apply_call_args(ws, file, d.ty.clone(), &d.fnret, m + 1, depth) }).filter(|t| !t.is_empty()) {
@@ -5965,7 +5965,7 @@ fn closure_sig(ws: &[&FileIndex], t: Loc) -> Option<String> {
     Some(format!("impl Fn({params}){ret}"))
 }
 
-/// (調べるための) off のトークンで終わる式の型 (LSP の `crustc/typeAt`)
+/// (調べるための) off のトークンで終わる式の型 (LSP の `zustc/typeAt`)
 pub fn type_at(ws: &[&FileIndex], file: usize, off: usize) -> Option<String> {
     clear_memo();
     let f = ws[file];

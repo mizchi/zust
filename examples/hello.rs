@@ -1,4 +1,4 @@
-// rustc でもそのままコンパイルできる crustc サブセットのサンプル
+// rustc でもそのままコンパイルできる zustc サブセットのサンプル
 unsafe extern "C" {
     fn putchar(c: i32) -> i32;
 }

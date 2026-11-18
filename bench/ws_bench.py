@@ -1,4 +1,4 @@
-"""複数クレートのワークスペースのビルドの時間 (crustc build と rustc の比較)。
+"""複数クレートのワークスペースのビルドの時間 (zustc build と rustc の比較)。
 
 usage: python3 bench/ws_bench.py [--crates K] [--files F] [--fns N] [--reps R] [--rustc]
 
@@ -17,7 +17,7 @@ import sys
 import time
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-CRUSTC = os.path.join(ROOT, "target/release/crustc")
+ZUSTC = os.path.join(ROOT, "target/release/zustc")
 
 
 def run(cmd, cwd, env=None):
@@ -53,7 +53,7 @@ def main():
                     "--files", str(opt["--files"]), "--fns", str(opt["--fns"])], check=True)
     nfn = opt["--crates"] * opt["--files"] * opt["--fns"]
     print(f"workspace: {opt['--crates']} lib crates x {opt['--files']} files x {opt['--fns']} fns = {nfn} fns (+ app)")
-    tools = [("crustc", f"{CRUSTC} build workspace.txt -o target", lambda: shutil.rmtree(os.path.join(d, "target"), ignore_errors=True))]
+    tools = [("zustc", f"{ZUSTC} build workspace.txt -o target", lambda: shutil.rmtree(os.path.join(d, "target"), ignore_errors=True))]
     if use_rustc:
         tools.append(("rustc", "FLAGS='-C incremental=inc' OUT=target_rustc bash build_rustc.sh",
                       lambda: (shutil.rmtree(os.path.join(d, "target_rustc"), ignore_errors=True), shutil.rmtree(os.path.join(d, "inc"), ignore_errors=True))))
@@ -82,12 +82,12 @@ def main():
                     f()
                 dt, _ = run(cmd, d)
                 res.setdefault(step, []).append(dt)
-            exe = os.path.join(d, "target/app" if name == "crustc" else "target_rustc/app")
+            exe = os.path.join(d, "target/app" if name == "zustc" else "target_rustc/app")
             outs = subprocess.run([exe], capture_output=True, text=True).stdout
             res.setdefault("_out", []).append(outs)
         results[name] = res
-    if use_rustc and results["crustc"]["_out"] != results["rustc"]["_out"]:
-        print("OUTPUT DIFFERS between crustc and rustc")
+    if use_rustc and results["zustc"]["_out"] != results["rustc"]["_out"]:
+        print("OUTPUT DIFFERS between zustc and rustc")
     print(f"| step | " + " | ".join(n for n, _, _ in tools) + " |")
     print("|---|" + "---:|" * len(tools))
     for step in ["cold", "noop", "leaf-body", "leaf-sig", "app-body"]:

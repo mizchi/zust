@@ -100,7 +100,7 @@ fn let_stmt(name: &str, init: Expr) -> Stmt {
     Stmt::Let(Pat::Ident(false, false, name.to_string(), None), None, Some(init), None)
 }
 
-/// hoist_index_bases の走査 (関数の中に置くと crustc の入れ子のアイテムの持ち上げが impl を扱えないので外に置く)
+/// hoist_index_bases の走査 (関数の中に置くと zustc の入れ子のアイテムの持ち上げが impl を扱えないので外に置く)
 struct HoistScan {
     /// 現れた添字の鎖: (根の名前, 受け手の式の列 (`x`, `x[i]`, ..), 代入の左辺か)
     chains: Vec<(String, Vec<Expr>, bool)>,

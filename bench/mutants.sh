@@ -3,13 +3,13 @@
 # 変異は全部で 1 万 8 千個ほどあり、1 個にビルドとテストで数十秒かかるので、範囲を絞って回す:
 #
 #   bench/mutants.sh diff [BASE]      BASE (既定 origin/main) からの差分の行の変異だけ (変更の確認に)
-#   bench/mutants.sh pkg NAME         クレート NAME の変異 (例: crustc-ide, crustc-base)
+#   bench/mutants.sh pkg NAME         クレート NAME の変異 (例: zust-ide, zust-base)
 #   bench/mutants.sh file PATH...     ファイルの変異 (例: crates/ide/src/symbols.rs)
 #   bench/mutants.sh list [...]       変異の一覧だけ (数を見る)。後ろは cargo mutants の引数
 #
 # テストに使うパッケージは、変異を入れるクレートから決める:
-#   crates/ide・crates/lsp だけ → crustc-ide と crustc-lsp のテスト (速い)
-#   それ以外 → ワークスペース全部のテスト (コンパイラの層のテストの多くは crustc (ルート) の tests/ にある)
+#   crates/ide・crates/lsp だけ → zust-ide と zust-analyzer のテスト (速い)
+#   それ以外 → ワークスペース全部のテスト (コンパイラの層のテストの多くは zustc (ルート) の tests/ にある)
 # `--` の後ろは cargo mutants にそのまま渡す (例: -- -j 2 --shard 1/8 -F 'match_score')。
 # 結果は mutants.out/ (missed.txt: テストで見つからなかった変異、caught.txt、timeout.txt、unviable.txt)。
 #
@@ -37,7 +37,7 @@ tests_for() {
     esac
   done
   if [ $only_ide = 1 ] && [ $# -gt 0 ]; then
-    echo "--test-package crustc-ide --test-package crustc-lsp"
+    echo "--test-package zust-ide --test-package zust-analyzer"
   else
     echo "--test-workspace true"
   fi
@@ -56,7 +56,7 @@ case "$mode" in
   pkg)
     [ ${#args[@]} -ge 1 ] || { echo "usage: bench/mutants.sh pkg NAME"; exit 2; }
     case "${args[0]}" in
-      crustc-ide|crustc-lsp) t="--test-package crustc-ide --test-package crustc-lsp" ;;
+      zust-ide|zust-analyzer) t="--test-package zust-ide --test-package zust-analyzer" ;;
       *) t="--test-workspace true" ;;
     esac
     # shellcheck disable=SC2086

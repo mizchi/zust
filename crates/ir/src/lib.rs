@@ -1,6 +1,6 @@
-//! crustc の命令の列 (IR) の型: 型・値・ブロック・変数・スタックスロット・関数の参照・再配置と、記録した命令 (Op)。
+//! zustc の命令の列 (IR) の型: 型・値・ブロック・変数・スタックスロット・関数の参照・再配置と、記録した命令 (Op)。
 //! acg (型の検査とコード生成) は Recorder に命令を記録するだけで、機械語にするのはバックエンド (minclif / Cranelift) が
-//! 記録を読み直して行う。check (LSP) はバックエンドなしで記録を捨てる。外部クレートに依存しない (crustc 自身でもコンパイルできる)
+//! 記録を読み直して行う。check (LSP) はバックエンドなしで記録を捨てる。外部クレートに依存しない (zustc 自身でもコンパイルできる)
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Type {
@@ -220,7 +220,7 @@ pub enum Op {
 
 /// 命令を記録するだけの組み立て (acg が使う)。値・ブロック・変数・スロット・関数の参照に番号を振り、値の型を覚える。
 /// 機械語にはしない: バックエンド (minclif / Cranelift) が ops を同じ順に読み直して組み立てる (番号は読み直す側で振り直す)。
-/// 値の型の決め方は minclif の FunctionBuilder と同じ (codegen の CRUSTC_IR_VERIFY=1 で読み直すときに確かめる)
+/// 値の型の決め方は minclif の FunctionBuilder と同じ (codegen の ZUSTC_IR_VERIFY=1 で読み直すときに確かめる)
 
 pub struct Recorder {
     pub params: Vec<Type>,

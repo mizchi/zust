@@ -1,7 +1,7 @@
 //! キャッシュキー (128 bit のハッシュ)。cache.rs と program.rs が使う。
 //!
 //! 以前は SipHash (std の DefaultHasher) を 2 つ使っていたが、全アイテムの全トークンを毎ビルドハッシュするので、
-//! crustc でコンパイルしたコンパイラ (インライン展開がない) では目に見えて遅かった。
+//! zustc でコンパイルしたコンパイラ (インライン展開がない) では目に見えて遅かった。
 //! 2 本の 64 bit の掛け算・回転の混ぜ合わせ (互いに違う定数) を使い、最後に murmur3 の fmix64 で混ぜる。
 //! 暗号的な強さは要らない (入力は自分のソース) が、128 bit なので偶然の衝突は起きない。
 
@@ -10,7 +10,7 @@ use std::hash::{Hash, Hasher};
 pub type Key = u128;
 
 /// バイト列を 8 byte ずつ混ぜる。呼び出しの区切りに依らない (write("ab") と write("a"); write("b") が同じ):
-/// std と crustc の prelude で Hash の実装が write を呼ぶ区切りが違っても同じ値になるように
+/// std と zustc の prelude で Hash の実装が write を呼ぶ区切りが違っても同じ値になるように
 #[derive(Clone, Copy)]
 pub struct KeyState {
     a: u64,

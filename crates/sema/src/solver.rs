@@ -1,5 +1,5 @@
 //! 型推論の単一化器 (型変数・形・union-find・関連型と境界の後回し)。infer.rs (syn の構文木を辿る) から
-//! 構文木に依存しない部分を分けたもの。外部クレートに依存しないので crustc 自身でもコンパイルできる。
+//! 構文木に依存しない部分を分けたもの。外部クレートに依存しないので zustc 自身でもコンパイルできる。
 
 use crate::program::{Program, TyEnv};
 use crate::types::{Ty, intern};

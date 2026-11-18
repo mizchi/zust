@@ -10,7 +10,7 @@ fn compile_errors_match_expected() {
     for p in &files {
         let src = std::fs::read_to_string(p).unwrap();
         let want = std::fs::read_to_string(p.with_extension("err")).unwrap();
-        let got = crustc::driver2::build(&src, &dir.join("x"), false, None).err().unwrap_or_default();
+        let got = zustc::driver2::build(&src, &dir.join("x"), false, None).err().unwrap_or_default();
         if got.trim() != want.trim() {
             bad.push(format!("{}: got {got:?}, want {:?}", p.display(), want.trim()));
         }

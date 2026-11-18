@@ -125,8 +125,8 @@ pub fn link_many(requested: Option<&str>, objs: &[&Path], out: &Path) -> Result<
             a
         }
     };
-    // (プロファイル用: CRUSTC_NO_STRIP があればシンボルを残す)
-    let args: Vec<String> = if std::env::var_os("CRUSTC_NO_STRIP").is_some() {
+    // (プロファイル用: ZUSTC_NO_STRIP があればシンボルを残す)
+    let args: Vec<String> = if std::env::var_os("ZUSTC_NO_STRIP").is_some() {
         args.into_iter().filter(|a| a != "-s").collect()
     } else {
         args

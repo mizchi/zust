@@ -517,7 +517,7 @@ fn item_scope(b: &[u8], toks: &[(u8, usize, usize)], close: &[usize], depth: &[u
 
 /// ソースの中の macro_rules! を展開する。なければ None。
 /// ソース全体は速い lexer::tokenize で見て、proc_macro2 の字句解析は定義と呼び出しの括弧の中だけにする
-/// (全体を proc_macro2 で読むと、大きなソース (crustc 自身) で遅い)。結果は expand_reference と同じ
+/// (全体を proc_macro2 で読むと、大きなソース (zustc 自身) で遅い)。結果は expand_reference と同じ
 pub fn expand(src: &str) -> Result<Option<String>, String> {
     expand_cfg(src, None)
 }

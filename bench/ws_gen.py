@@ -1,11 +1,11 @@
-"""複数クレート・複数ファイルのワークスペースを作る (driver2 の `crustc build` と rustc の比較用)。
+"""複数クレート・複数ファイルのワークスペースを作る (driver2 の `zustc build` と rustc の比較用)。
 
 usage: python3 bench/ws_gen.py <dir> [--crates K] [--files F] [--fns N]
 
 - lib c0..c{K-1}: c{i} は c{i-1} と c0 に依存する。各クレートは lib.rs + F 個のモジュールのファイル (m{j}.rs)、
   ファイルごとに N 個の関数・struct・総称関数・trait の impl
 - bin app: 全部のクレートに依存し、各クレートの run を呼んで合計を出す
-- workspace.txt (crustc build 用) と build_rustc.sh (rustc で同じものを rlib + リンクで作る)
+- workspace.txt (zustc build 用) と build_rustc.sh (rustc で同じものを rlib + リンクで作る)
 """
 import os
 import sys

@@ -1,6 +1,6 @@
 //! アイテムの要約 (front.rs の `summarize` / `parse_sig` / `lift_closures` / `parse_and_summarize`) を
 //! 自前の構文木 (src/parse.rs) の上で行う。tests/ast_summary.rs が全ファイルで syn 版と同じ要約になることを確かめる。
-//! 外部クレートに依存しない (parse / types / ast_types / ast_closure / lexer だけ) ので crustc 自身でもコンパイルできる。
+//! 外部クレートに依存しない (parse / types / ast_types / ast_closure / lexer だけ) ので zustc 自身でもコンパイルできる。
 
 use crate::ast_closure;
 use crate::ast_types::tysyn;

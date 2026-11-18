@@ -1,6 +1,6 @@
 //! 自前の構文解析 (crates/syntax/src/parse.rs) を syn と比べる: probe / examples / src の全ファイルを解析し、
 //! 節の種類ごとの数が syn で数えたものと一致するか。
-use crustc::parse::{Counts, parse_file};
+use zustc::parse::{Counts, parse_file};
 use syn::visit::Visit;
 
 #[derive(Default)]

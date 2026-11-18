@@ -1,13 +1,13 @@
 //! ide のゴールデンテスト: tests/fixture の小さいワークスペース (と小さい std) のすべての識別子の位置で、定義・参照・
 //! hover・補完を出して、tests/golden/*.txt と比べる。シンボルの一覧と定義の表 (Def) も比べる。
-//! 期待値は crustc の出力そのもの (変わったら差分を見て直すか、`UPDATE_GOLDEN=1 cargo test -p crustc-ide --test golden`
+//! 期待値は zustc の出力そのもの (変わったら差分を見て直すか、`UPDATE_GOLDEN=1 cargo test -p zust-ide --test golden`
 //! で書き直す)。ワークスペースの中の定義の行き先は bench/ide_golden_ra.py で rust-analyzer と比べてある。
 //!
 //! ほかに、ほかのファイルを slim にしても (本文を捨てて読み直しても) 答えが同じかを見る。
 
-use crustc_ide::navigate::{self, FileIndex, Item, Loc};
-use crustc_ide::symbols::{self, Symbol};
-use crustc_syntax::lexer::tokenize;
+use zust_ide::navigate::{self, FileIndex, Item, Loc};
+use zust_ide::symbols::{self, Symbol};
+use zust_syntax::lexer::tokenize;
 use std::collections::HashSet;
 use std::fmt::Write as _;
 use std::path::{Path, PathBuf};

@@ -2,8 +2,8 @@
 //! 実際のソース (crates/{syntax,sema,core}/src/*.rs と examples/*.rs) に、乱数で編集 (文字の挿入・削除、引用符やコメントの開き、
 //! 関数の追加・削除) を続けて加え、各段で比べる
 
-use crustc::front::split_inc;
-use crustc::lexer::{self, SrcItem};
+use zustc::front::split_inc;
+use zustc::lexer::{self, SrcItem};
 
 fn same(a: &[SrcItem], b: &[SrcItem]) -> bool {
     a.len() == b.len()

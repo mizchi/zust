@@ -1,7 +1,7 @@
 //! driver2 のキャッシュと並列化: 2 回目のビルドは全部キャッシュから読み同じ .o になること、
 //! 関数 1 つの変更ではその関数だけコンパイルし直すこと、fork で並列にコンパイルしても 1 プロセスと同じ .o になること。
 #![cfg(feature = "acg")]
-use crustc::driver2::{Options2, Session2};
+use zustc::driver2::{Options2, Session2};
 
 fn program(k: u32) -> String {
     let mut s = String::new();

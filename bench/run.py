@@ -1,8 +1,8 @@
-"""crustc と rustc (incremental) のビルド時間・ピークメモリ・ディスク消費・バイナリサイズを比べる。
+"""zustc と rustc (incremental) のビルド時間・ピークメモリ・ディスク消費・バイナリサイズを比べる。
 usage: python3 bench/run.py [N ...]   (このディレクトリで実行。事前に cargo build --release)"""
 import os, resource, shutil, subprocess, sys, time
 
-EXR = os.path.abspath("target/release/crustc")
+EXR = os.path.abspath("target/release/zustc")
 W = os.path.abspath("out/bench")
 
 
@@ -41,17 +41,17 @@ def bench(n):
         gen(n, 1, src)
         edit = measure(build)
         r1 = subprocess.run([out], capture_output=True, text=True).stdout.strip()
-        # (crustc のキャッシュは機械語を .o から引くので、.o も足して数える)
+        # (zustc のキャッシュは機械語を .o から引くので、.o も足して数える)
         extra = du(out + ".o") if store.endswith(".crcache2") else 0
         rows.append((tool, cold, noop, edit, os.path.getsize(out), du(store) + extra, r1))
 
     exe = os.path.join(d, "exr")
-    scenario("crustc (auto)", [EXR, src, "-o", exe], exe, exe + ".crcache2")
+    scenario("zustc (auto)", [EXR, src, "-o", exe], exe, exe + ".crcache2")
     for lk in ["bfd", "lld", "wild"]:
         if lk == "wild" and not shutil.which("wild"):
             continue
         exe2 = os.path.join(d, "exr-" + lk)
-        scenario(f"crustc (--linker={lk})", [EXR, src, "-o", exe2, f"--linker={lk}"], exe2, exe2 + ".crcache2")
+        scenario(f"zustc (--linker={lk})", [EXR, src, "-o", exe2, f"--linker={lk}"], exe2, exe2 + ".crcache2")
     for name, flags in [("rustc -Cincremental dbg=0", ["-Cdebuginfo=0"]),
                         ("rustc -Cincremental dbg=2", ["-Cdebuginfo=2"])][: 1 if n > 1000 else 2]:
         inc = os.path.join(d, "inc-" + flags[0][-1])

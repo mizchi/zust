@@ -1,8 +1,8 @@
 //! 最小のバックエンド (crates/minclif/src/lib.rs) で関数を組み立て、ELF の .o にして cc でリンクし、動かして出力を確かめる。
-use crustc::minclif::{FunctionBuilder, IntCC, Type, write_object};
+use zustc::minclif::{FunctionBuilder, IntCC, Type, write_object};
 
 /// sum(n) = 0 + 1 + .. + (n - 1) (ブロック引数のループ)
-fn sum() -> (String, Vec<u8>, Vec<crustc::minclif::Reloc>, bool) {
+fn sum() -> (String, Vec<u8>, Vec<zustc::minclif::Reloc>, bool) {
     let mut b = FunctionBuilder::new(vec![Type::I64], vec![Type::I64]);
     let n = b.func_params()[0];
     let head = b.create_block();
@@ -26,7 +26,7 @@ fn sum() -> (String, Vec<u8>, Vec<crustc::minclif::Reloc>, bool) {
 }
 
 /// fib(n) (再帰)
-fn fib() -> (String, Vec<u8>, Vec<crustc::minclif::Reloc>, bool) {
+fn fib() -> (String, Vec<u8>, Vec<zustc::minclif::Reloc>, bool) {
     let mut b = FunctionBuilder::new(vec![Type::I32], vec![Type::I32]);
     let n = b.func_params()[0];
     let me = b.import_function("mc_fib");
@@ -48,7 +48,7 @@ fn fib() -> (String, Vec<u8>, Vec<crustc::minclif::Reloc>, bool) {
 }
 
 /// 変数・スタックスロット・読み書き・割り算・符号つきの比較・select・8 個の引数
-fn misc() -> (String, Vec<u8>, Vec<crustc::minclif::Reloc>, bool) {
+fn misc() -> (String, Vec<u8>, Vec<zustc::minclif::Reloc>, bool) {
     let ps = vec![Type::I64; 8];
     let mut b = FunctionBuilder::new(ps, vec![Type::I64]);
     let a = b.func_params();
@@ -114,8 +114,8 @@ fn link_and_run() {
 }
 
 /// 浮動小数点・i128・オーバーフロー・ビット演算・間接呼び出し・データ: 1 関数の中で計算して printf で出す
-fn ext() -> (Vec<(String, Vec<u8>, Vec<crustc::minclif::Reloc>, bool)>, Vec<crustc::minclif::DataDef>, Vec<String>) {
-    use crustc::minclif::FloatCC;
+fn ext() -> (Vec<(String, Vec<u8>, Vec<zustc::minclif::Reloc>, bool)>, Vec<zustc::minclif::DataDef>, Vec<String>) {
+    use zustc::minclif::FloatCC;
     let mut b = FunctionBuilder::new(vec![], vec![Type::I64]);
     let printf = b.import_function("printf");
     let mut want: Vec<String> = vec![];
@@ -376,7 +376,7 @@ fn ext() -> (Vec<(String, Vec<u8>, Vec<crustc::minclif::Reloc>, bool)>, Vec<crus
 fn ext_ops() {
     let (mut funcs, datas, want) = ext();
     funcs.push(sum());
-    let obj = crustc::minclif::write_object_full(&funcs, &datas);
+    let obj = zustc::minclif::write_object_full(&funcs, &datas);
     let dir = std::env::temp_dir().join(format!("minclif_ext_{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
     std::fs::write(dir.join("f.o"), &obj).unwrap();

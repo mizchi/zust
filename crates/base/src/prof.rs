@@ -1,4 +1,4 @@
-//! 時間の計測 (CRUSTC_PROF=1 の段ごとの時間)。std::time を使わない (crustc 自身でもコンパイルできるように)
+//! 時間の計測 (ZUSTC_PROF=1 の段ごとの時間)。std::time を使わない (zustc 自身でもコンパイルできるように)
 
 unsafe extern "C" {
     #[link_name = "clock_gettime"]

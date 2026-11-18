@@ -1,15 +1,15 @@
-//! crustc の CLI。
-//!   crustc <input.rs> [-o out] [...]   ビルド (自前のフロントエンド + Cranelift。`--backend=minclif` で minclif)
-//!   crustc build <workspace> [-o dir]   ワークスペース (複数のクレート) をビルド
-//!   crustc check <input.rs>            型検査だけ (全診断を表示)
+//! zustc の CLI。
+//!   zustc <input.rs> [-o out] [...]   ビルド (自前のフロントエンド + Cranelift。`--backend=minclif` で minclif)
+//!   zustc build <workspace> [-o dir]   ワークスペース (複数のクレート) をビルド
+//!   zustc check <input.rs>            型検査だけ (全診断を表示)
 
 use std::path::PathBuf;
 
-use crustc::driver2::{Options2, Session2};
+use zustc::driver2::{Options2, Session2};
 
 fn usage() -> ! {
     eprintln!(
-        "usage: crustc <input.rs> [-o out] [-O] [--backend=cranelift|minclif] [--linker=NAME] [--features=a,b] [--time] [-j N] [--no-cache]\n       crustc build <workspace-file> [-o out-dir] [-O] [--backend=..] [-j N] [--time] [--no-cache]\n       crustc check <input.rs>"
+        "usage: zustc <input.rs> [-o out] [-O] [--backend=cranelift|minclif] [--linker=NAME] [--features=a,b] [--time] [-j N] [--no-cache]\n       zustc build <workspace-file> [-o out-dir] [-O] [--backend=..] [-j N] [--time] [--no-cache]\n       zustc check <input.rs>"
     );
     std::process::exit(2)
 }
@@ -25,8 +25,8 @@ fn main() {
     let mut input = PathBuf::new();
     let mut output = PathBuf::new();
     let mut mode = "build";
-    // (バックエンド: 既定は Cranelift。CRUSTC_BACKEND=minclif / --backend=minclif で minclif)
-    let mut backend = std::env::var("CRUSTC_BACKEND").unwrap_or_else(|_| "cranelift".to_string());
+    // (バックエンド: 既定は Cranelift。ZUSTC_BACKEND=minclif / --backend=minclif で minclif)
+    let mut backend = std::env::var("ZUSTC_BACKEND").unwrap_or_else(|_| "cranelift".to_string());
     match args.peek().map(String::as_str) {
         Some("check") => {
             mode = "check";
@@ -37,7 +37,7 @@ fn main() {
             args.next();
         }
         Some("lsp") => {
-            eprintln!("crustc: LSP サーバは別のバイナリ crustc-lsp になった (cargo build --release -p crustc-lsp)");
+            eprintln!("zustc: LSP サーバは別のバイナリ zust-analyzer になった (cargo build --release -p zust-analyzer)");
             std::process::exit(2);
         }
         _ => {}
@@ -60,7 +60,7 @@ fn main() {
         usage();
     }
     match backend.as_str() {
-        "cranelift" => o.backend = Some(crustc::clif_backend::compile),
+        "cranelift" => o.backend = Some(zustc::clif_backend::compile),
         "minclif" => o.backend = None,
         b => {
             eprintln!("error: unknown backend `{b}` (cranelift / minclif)");
@@ -68,7 +68,7 @@ fn main() {
         }
     }
     if mode == "workspace" {
-        let crates = crustc::driver2::read_workspace(&input).unwrap_or_else(|e| die(e));
+        let crates = zustc::driver2::read_workspace(&input).unwrap_or_else(|e| die(e));
         let out_dir = if output.as_os_str().is_empty() { input.parent().map(|d| d.join("target")).unwrap_or("target".into()) } else { output };
         // (キャッシュはクレートごとに out_dir/<名前>.crcache2)
         match Session2::new(o).build_workspace(&crates, &out_dir) {
@@ -78,7 +78,7 @@ fn main() {
     }
     if mode == "check" {
         // (`mod x;` のファイルも読む。診断の行は結合したソースのもの: 1 ファイルならそのまま)
-        let (src, _) = crustc::srcmap::load_crate(&input, "src/main.rs", &o.cfg_with(&o.features)).unwrap_or_else(|e| die(e));
+        let (src, _) = zustc::srcmap::load_crate(&input, "src/main.rs", &o.cfg_with(&o.features)).unwrap_or_else(|e| die(e));
         let diags = Session2::new(Options2 { no_cache: true, jobs: 1, ..o }).check(&src);
         for d in &diags {
             eprintln!("error: {}:{}:{}: {}", input.display(), d.line, d.col, d.msg);

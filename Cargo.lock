@@ -311,94 +311,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "460fbee9c2c2f33933d720630a6a0bac33ba7053db5344fac858d4b8952d77d5"
 
 [[package]]
-name = "crustc"
-version = "0.1.0"
-dependencies = [
- "criterion",
- "crustc-clif",
- "crustc-core",
- "crustc-lsp",
- "minclif",
- "proc-macro2",
- "serde_json",
- "syn 2.0.119",
-]
-
-[[package]]
-name = "crustc-base"
-version = "0.1.0"
-
-[[package]]
-name = "crustc-clif"
-version = "0.1.0"
-dependencies = [
- "cranelift-codegen",
- "cranelift-frontend",
- "cranelift-native",
- "minclif",
-]
-
-[[package]]
-name = "crustc-codegen"
-version = "0.1.0"
-dependencies = [
- "crustc-typeck",
- "minclif",
-]
-
-[[package]]
-name = "crustc-core"
-version = "0.1.0"
-dependencies = [
- "crustc-codegen",
- "crustc-typeck",
-]
-
-[[package]]
-name = "crustc-ide"
-version = "0.1.0"
-dependencies = [
- "crustc-syntax",
-]
-
-[[package]]
-name = "crustc-ir"
-version = "0.1.0"
-
-[[package]]
-name = "crustc-lsp"
-version = "0.1.0"
-dependencies = [
- "crustc-core",
- "crustc-ide",
- "serde_json",
-]
-
-[[package]]
-name = "crustc-sema"
-version = "0.1.0"
-dependencies = [
- "crustc-syntax",
-]
-
-[[package]]
-name = "crustc-syntax"
-version = "0.1.0"
-dependencies = [
- "crustc-base",
- "proc-macro2",
-]
-
-[[package]]
-name = "crustc-typeck"
-version = "0.1.0"
-dependencies = [
- "crustc-ir",
- "crustc-sema",
- "proc-macro2",
-]
-
-[[package]]
 name = "either"
 version = "1.19.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -531,7 +443,7 @@ checksum = "cf8baf1c55e62ffcace7a9f06f4bd9cd3f0c4beb022d3b367256b91b87513d98"
 name = "minclif"
 version = "0.1.0"
 dependencies = [
- "crustc-ir",
+ "zust-ir",
 ]
 
 [[package]]
@@ -831,3 +743,91 @@ name = "zmij"
 version = "1.0.23"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "29666d0abbfad1e3dc4dcf6144730dd3a3ab225bbbdac83319345b1b44ccfc1b"
+
+[[package]]
+name = "zust-analyzer"
+version = "0.1.0"
+dependencies = [
+ "serde_json",
+ "zust-core",
+ "zust-ide",
+]
+
+[[package]]
+name = "zust-base"
+version = "0.1.0"
+
+[[package]]
+name = "zust-clif"
+version = "0.1.0"
+dependencies = [
+ "cranelift-codegen",
+ "cranelift-frontend",
+ "cranelift-native",
+ "minclif",
+]
+
+[[package]]
+name = "zust-codegen"
+version = "0.1.0"
+dependencies = [
+ "minclif",
+ "zust-typeck",
+]
+
+[[package]]
+name = "zust-core"
+version = "0.1.0"
+dependencies = [
+ "zust-codegen",
+ "zust-typeck",
+]
+
+[[package]]
+name = "zust-ide"
+version = "0.1.0"
+dependencies = [
+ "zust-syntax",
+]
+
+[[package]]
+name = "zust-ir"
+version = "0.1.0"
+
+[[package]]
+name = "zust-sema"
+version = "0.1.0"
+dependencies = [
+ "zust-syntax",
+]
+
+[[package]]
+name = "zust-syntax"
+version = "0.1.0"
+dependencies = [
+ "proc-macro2",
+ "zust-base",
+]
+
+[[package]]
+name = "zust-typeck"
+version = "0.1.0"
+dependencies = [
+ "proc-macro2",
+ "zust-ir",
+ "zust-sema",
+]
+
+[[package]]
+name = "zustc"
+version = "0.1.0"
+dependencies = [
+ "criterion",
+ "minclif",
+ "proc-macro2",
+ "serde_json",
+ "syn 2.0.119",
+ "zust-analyzer",
+ "zust-clif",
+ "zust-core",
+]

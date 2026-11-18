@@ -1,11 +1,11 @@
 """syn・Cranelift を使わないコンパイラ全体 (driver2 + acg + minclif と、それが使うモジュール) を 1 ファイルのプログラムにまとめる。
 usage: python3 tests/selfhost/build_compiler.py > out/selfhost/compiler_main.rs
-main は `compiler <in.rs> -o <out> [-O]` で driver2::build を呼ぶ (crustc の CRUSTC_DRIVER2=1 と同じ)。
-これを crustc でコンパイルしたものが、crustc 自身でコンパイルした crustc (の syn を使わない経路) になる。
+main は `compiler <in.rs> -o <out> [-O]` で driver2::build を呼ぶ (zustc の ZUSTC_DRIVER2=1 と同じ)。
+これを zustc でコンパイルしたものが、zustc 自身でコンパイルした zustc (の syn を使わない経路) になる。
 proc_macro2 は tests/selfhost/mini_pm2.rs で代える (macros.rs が使う)。"""
 import re, glob, os, re
 
-# crustc はアイテム位置の macro_rules! を展開しないので enc_struct! をここで展開する
+# zustc はアイテム位置の macro_rules! を展開しないので enc_struct! をここで展開する
 def expand_enc_struct(src):
     def ex(m):
         t, fs = m.group(1), [f.strip() for f in m.group(2).split(",") if f.strip()]
@@ -20,7 +20,7 @@ def expand_enc_struct(src):
 def body(p):
     return open(p).read()
 
-items = max(glob.glob("target/release/build/crustc-syntax*/**/prelude_items.rs", recursive=True), key=os.path.getmtime)
+items = max(glob.glob("target/release/build/zust-syntax*/**/prelude_items.rs", recursive=True), key=os.path.getmtime)
 prelude = (body("crates/syntax/src/prelude.rs")
     .replace('include_str!("prelude_lib.rs.in")', 'include_str!("../../crates/syntax/src/prelude_lib.rs.in")')
     .replace('include!(concat!(env!("OUT_DIR"), "/prelude_items.rs"));', open(items).read()))
@@ -46,9 +46,9 @@ parts = [("key", body("crates/base/src/key.rs")), ("fxhash", body("crates/base/s
          ("ast_types", body("crates/syntax/src/ast_types.rs")), ("ast_closure", body("crates/syntax/src/ast_closure.rs")),
          ("ast_summary", body("crates/syntax/src/ast_summary.rs")), ("program", body("crates/sema/src/program.rs")),
          ("ast_consteval", body("crates/sema/src/ast_consteval.rs")), ("solver", body("crates/sema/src/solver.rs")), ("ctors", body("crates/syntax/src/ctors.rs")),
-         ("ast_infer", body("crates/sema/src/ast_infer.rs")), ("ir", ir), ("minclif", body("crates/minclif/src/lib.rs").replace("crustc_ir::", "crate::ir::")), ("lower", body("crates/codegen/src/lower.rs")), ("link", body("crates/codegen/src/link.rs")),
+         ("ast_infer", body("crates/sema/src/ast_infer.rs")), ("ir", ir), ("minclif", body("crates/minclif/src/lib.rs").replace("zust_ir::", "crate::ir::")), ("lower", body("crates/codegen/src/lower.rs")), ("link", body("crates/codegen/src/link.rs")),
          ("macros", body("crates/syntax/src/macros.rs") + "\nuse crate::proc_macro2;\n"), ("acg", acg), ("enc", body("crates/syntax/src/enc.rs")), ("types_enc", expand_enc_struct(body("crates/syntax/src/types_enc.rs"))), ("cache2", body("crates/typeck/src/cache2.rs")), ("cfg", body("crates/syntax/src/cfg.rs")), ("stub", body("crates/syntax/src/stub.rs")), ("srcmap", body("crates/syntax/src/srcmap.rs")), ("prep", body("crates/syntax/src/prep.rs")), ("prof", body("crates/base/src/prof.rs")), ("front", body("crates/syntax/src/front.rs")), ("driver2", driver2)]
-out = ["// 自動生成: tests/selfhost/build_compiler.py (crustc の src/*.rs をそのまま含む)",
+out = ["// 自動生成: tests/selfhost/build_compiler.py (zustc の src/*.rs をそのまま含む)",
        "mod cache {\n    pub use crate::key::*;\n}\n", body("tests/selfhost/mini_pm2.rs")]
 for name, src in parts:
     out.append(f"mod {name} {{\n" + src + "\n}\n")

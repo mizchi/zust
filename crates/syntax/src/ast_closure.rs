@@ -1,7 +1,7 @@
 //! クロージャの解析 (src/closure.rs と同じこと) を、自前の構文木 (src/parse.rs) の上で行う。
 //! syn から離れるための移植の 1 つ目: 本体の中のクロージャ (前順・マクロの引数の中も)、自由変数、
 //! キャプチャを値として使うか。tests/ast_closure.rs が syn 版と同じ結果になることを確かめる。
-//! 外部クレートに依存しないので crustc 自身でもコンパイルできる。
+//! 外部クレートに依存しないので zustc 自身でもコンパイルできる。
 
 use crate::parse::{Block, Expr, Pat, Path, Pos, Stmt, TokKind, Ty, parse_expr, parse_expr_at, pos_at, tokenize};
 
@@ -600,7 +600,7 @@ pub fn expr_hash_memo(e: &Expr, memo: &mut crate::fxhash::FxMap<usize, u64>) -> 
 }
 
 /// 木をたどって混ぜるハッシュ (部分式は自分のハッシュの値で混ぜる。式でない葉は Debug の文字列で)
-/// (FNV 風: crustc でもコンパイルできるよう trait を使わずに書く)
+/// (FNV 風: zustc でもコンパイルできるよう trait を使わずに書く)
 struct EHash {
     h: u64,
     /// 部分式のハッシュをアドレスで覚えるか

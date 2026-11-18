@@ -1,5 +1,5 @@
-//! 記録した命令の列 (crustc_ir::Recorder) を機械語にする: minclif の FunctionBuilder に組み立て直し、
-//! minclif のまま (レジスタ割り当て + x86-64) か、Cranelift のバックエンド (crustc-clif) で機械語にする
+//! 記録した命令の列 (zust_ir::Recorder) を機械語にする: minclif の FunctionBuilder に組み立て直し、
+//! minclif のまま (レジスタ割り当て + x86-64) か、Cranelift のバックエンド (zust-clif) で機械語にする
 
 use crate::ir::{Recorder, Reloc, StackSlot};
 

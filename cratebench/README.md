@@ -1,6 +1,6 @@
 # cratebench
 
-crates.io の小さなクレートを crustc でビルドできるか・どのくらい速いかを rustc と比べる。
+crates.io の小さなクレートを zustc でビルドできるか・どのくらい速いかを rustc と比べる。
 
 - `vendor/<名前>/`: クレートのソース (crates.io の配布物の `src/` と LICENSE をそのまま)
 - `apps/<名前>/main.rs`: そのクレートを使うプログラム (最後に `done` を出す。edit の計測はこの行を書き換える)

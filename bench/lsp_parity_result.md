@@ -1,6 +1,6 @@
 #### synth (40 箇所、`.` の後 20 箇所。比べる相手は rust-analyzer)
 
-| 機能 | crustc | rust-analyzer | rust-glancer | crustc の前回との差 |
+| 機能 | zustc | rust-analyzer | rust-glancer | zustc の前回との差 |
 |---|---|---|---|---|
 | 対応を返す機能 | docsym, wsym, definition, hover, completion, references, rename, signature, highlight | docsym, wsym, definition, hover, completion, references, rename, signature, semantic, highlight, inlay, codeAction, format | docsym, wsym, definition, hover, completion, references, rename, semantic, highlight, inlay, codeAction, format | |
 | documentSymbol (名前の一致) | 名前 100% (種類も 100%) | 名前 100% (種類も 100%) | 名前 100% (種類も 95%); 余分 #0 | +0.0 点 |
@@ -19,7 +19,7 @@
 
 #### fixture (40 箇所、`.` の後 20 箇所。比べる相手は rust-analyzer)
 
-| 機能 | crustc | rust-analyzer | rust-glancer | crustc の前回との差 |
+| 機能 | zustc | rust-analyzer | rust-glancer | zustc の前回との差 |
 |---|---|---|---|---|
 | 対応を返す機能 | docsym, wsym, definition, hover, completion, references, rename, signature, highlight | docsym, wsym, definition, hover, completion, references, rename, signature, semantic, highlight, inlay, codeAction, format | docsym, wsym, definition, hover, completion, references, rename, semantic, highlight, inlay, codeAction, format | |
 | documentSymbol (名前の一致) | 名前 100% (種類も 100%) | 名前 100% (種類も 100%) | 名前 100% (種類も 82%); 余分 #0 | +0.0 点 |
@@ -36,9 +36,9 @@
 | 時間 p50/p90 (ms) | defi 0.4/0.9, hove 0.3/0.9, comp 0.9/2.1, refe 0.5/1.4, rena 0.4/1.3, sign 0.2/0.5, docu 0.4/1.4 | defi 0.4/0.9, hove 0.5/4.9, comp 4.3/10.7, refe 0.9/5.6, rena 0.6/1.0, sign 0.2/0.7, docu 0.6/1.4 | defi 9.6/22.1, hove 8.8/209.7, comp 215.3/274.7, refe 19.4/240.0, rena 12.4/67.0, sign 0.2/0.3, docu 11.3/62.9 | defi -0.1, hove -0.2, comp -0.0, refe -0.4, rena -0.5, sign -0.3, docu -0.4 |
 | 起動から名前が引けるまで (作業が終わるまで) / メモリの最大 (RSS) | 10 ms (513 ms) / 19 MB | 415 ms (3639 ms) / 852 MB | 5147 ms (5147 ms) / 881 MB | -0 ms / +1 MB |
 
-#### crustc (40 箇所、`.` の後 20 箇所。比べる相手は rust-analyzer)
+#### zustc (40 箇所、`.` の後 20 箇所。比べる相手は rust-analyzer)
 
-| 機能 | crustc | rust-analyzer | rust-glancer | crustc の前回との差 |
+| 機能 | zustc | rust-analyzer | rust-glancer | zustc の前回との差 |
 |---|---|---|---|---|
 | 対応を返す機能 | docsym, wsym, definition, hover, completion, references, rename, signature, highlight | docsym, wsym, definition, hover, completion, references, rename, signature, semantic, highlight, inlay, codeAction, format | docsym, wsym, definition, hover, completion, references, rename, semantic, highlight, inlay, codeAction, format | |
 | documentSymbol (名前の一致) | 名前 100% (種類も 100%) | 名前 100% (種類も 100%) | 名前 90% (種類も 82%); 足りない c_close, c_exit, c_fork, c_mkdir | +0.0 点 |
@@ -57,7 +57,7 @@
 
 #### ide (40 箇所、`.` の後 20 箇所。比べる相手は rust-analyzer)
 
-| 機能 | crustc | rust-analyzer | rust-glancer | crustc の前回との差 |
+| 機能 | zustc | rust-analyzer | rust-glancer | zustc の前回との差 |
 |---|---|---|---|---|
 | 対応を返す機能 | docsym, wsym, definition, hover, completion, references, rename, signature, highlight | docsym, wsym, definition, hover, completion, references, rename, signature, semantic, highlight, inlay, codeAction, format | docsym, wsym, definition, hover, completion, references, rename, semantic, highlight, inlay, codeAction, format | |
 | documentSymbol (名前の一致) | 名前 100% (種類も 100%) | 名前 100% (種類も 100%) | 名前 100% (種類も 98%); 余分 #0, #1 | +0.0 点 |

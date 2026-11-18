@@ -911,11 +911,11 @@ fn library_reexports() {
 
 #[test]
 fn literal_hovers() {
-    let src = "fn f(x: u8) {\n    let a = \"CRUSTC_LOG\";\n    let b = \"a\\n\\u{41}\\x42\";\n    let c = r#\"raw \"q\"\"#;\n    let d = b\"xy\";\n    let e = 'z';\n    let g = b'q';\n    let h = format!(\"{x}\");\n}\n";
+    let src = "fn f(x: u8) {\n    let a = \"ZUSTC_LOG\";\n    let b = \"a\\n\\u{41}\\x42\";\n    let c = r#\"raw \"q\"\"#;\n    let d = b\"xy\";\n    let e = 'z';\n    let g = b'q';\n    let h = format!(\"{x}\");\n}\n";
     let fi = FileIndex::new(src.to_string(), vec![]);
     let ws = [&fi];
     let h = |p: &str, d: usize| hover(&ws, 0, at(src, p, 0) + d, &no);
-    assert_eq!(h("CRUSTC_LOG", 2).unwrap(), "```rust\n&'static str\n```\n---\n\nvalue of literal: ` CRUSTC_LOG `");
+    assert_eq!(h("ZUSTC_LOG", 2).unwrap(), "```rust\n&'static str\n```\n---\n\nvalue of literal: ` ZUSTC_LOG `");
     assert!(h("a\\n", 0).unwrap().ends_with("` a\nAB `"), "{:?}", h("a\\n", 0));
     assert!(h("raw", 0).unwrap().ends_with("` raw \"q\" `"));
     assert!(h("xy", 0).unwrap().contains("&'static [u8; 2]"));

@@ -77,7 +77,7 @@ def main():
             if rd == d:
                 st["def"][0] += 1
             elif detail:
-                print(f"def  {f}:{li}:{col} {name}: crustc {d} / ra {rd}")
+                print(f"def  {f}:{li}:{col} {name}: zustc {d} / ra {rd}")
         rf = (s.request("textDocument/references", dict(p, context={"includeDeclaration": True}), timeout=60) or {}).get("result")
         rn = len(rf) if isinstance(rf, list) else 0
         if os.environ.get("SHOW") == f"{f}:{li}:{col}":
@@ -88,14 +88,14 @@ def main():
             if rn == n:
                 st["refs"][0] += 1
             elif detail:
-                print(f"refs {f}:{li}:{col} {name}: crustc {n} / ra {rn}")
+                print(f"refs {f}:{li}:{col} {name}: zustc {n} / ra {rn}")
         hv = (s.request("textDocument/hover", p, timeout=60) or {}).get("result")
         if hv:
             st["hover"][1] += 1
             if h:
                 st["hover"][0] += 1
             elif detail:
-                print(f"hover {f}:{li}:{col} {name}: crustc なし")
+                print(f"hover {f}:{li}:{col} {name}: zustc なし")
     s.close()
     shutil.rmtree(tmp, ignore_errors=True)
     for k, (a, b) in st.items():

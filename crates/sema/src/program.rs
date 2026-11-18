@@ -1,5 +1,5 @@
 //! プログラム全体の表 (関数シグネチャ・struct / enum の定義とレイアウト・trait 実装など)。
-//! アイテム要約 (`Summary`) から作る。syn に依存しない (crustc 自身でもコンパイルできる) 部分で、
+//! アイテム要約 (`Summary`) から作る。syn に依存しない (zustc 自身でもコンパイルできる) 部分で、
 //! syn の構文木を引く検索 (`fn_by_path` など) は front.rs の別の `impl Program` にある。
 
 use std::collections::{HashMap, HashSet};

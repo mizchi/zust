@@ -7,7 +7,7 @@ fn parse(s: &str) -> Res<i32> {
     s.parse::<i32>().map_err(|e| format!("bad {}: {}", s, e))
 }
 fn main() {
-    let path = "/tmp/crustc_probe_std_io_hash.txt";
+    let path = "/tmp/zustc_probe_std_io_hash.txt";
     fs::write(path, "alpha\nbeta\n").unwrap();
     let s = fs::read_to_string(path).unwrap();
     println!("{:?} {}", s, fs::read(path).unwrap().len());
@@ -16,7 +16,7 @@ fn main() {
         Err(e) => println!("{} | {:?}", e, e),
     }
     let r: std::io::Result<()> = Ok(());
-    println!("{:?} {:?}", r, std::env::var("CRUSTC_PROBE_NOT_SET"));
+    println!("{:?} {:?}", r, std::env::var("ZUSTC_PROBE_NOT_SET"));
     println!("{}", std::env::args().count());
     let mut h = DefaultHasher::new();
     "hello".hash(&mut h);

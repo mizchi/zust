@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# examples/*.rs を crustc と rustc の両方でビルドし、実行結果が一致するか確かめる。
+# examples/*.rs を zustc と rustc の両方でビルドし、実行結果が一致するか確かめる。
 # usage: tests/compare.sh   (このディレクトリで、cargo build --release の後に実行)
 set -u
 cd "$(dirname "$0")/.."
@@ -10,12 +10,12 @@ for src in examples/*.rs; do
   name=$(basename "$src" .rs)
   # キャッシュなし (cold) とキャッシュからの再ビルド (warm) の両方を確かめる
   rm -f "$out/$name.crcache2" "$out/$name.cold.crcache2"
-  if ! ./target/release/crustc "$src" -o "$out/$name.cold" >"$out/$name.log" 2>&1; then
-    echo "FAIL $name (crustc)"; cat "$out/$name.log"; fail=1; continue
+  if ! ./target/release/zustc "$src" -o "$out/$name.cold" >"$out/$name.log" 2>&1; then
+    echo "FAIL $name (zustc)"; cat "$out/$name.log"; fail=1; continue
   fi
   cp "$out/$name.cold.crcache2" "$out/$name.crcache2" 2>/dev/null
-  if ! ./target/release/crustc "$src" -o "$out/$name" >"$out/$name.log" 2>&1; then
-    echo "FAIL $name (crustc, warm)"; cat "$out/$name.log"; fail=1; continue
+  if ! ./target/release/zustc "$src" -o "$out/$name" >"$out/$name.log" 2>&1; then
+    echo "FAIL $name (zustc, warm)"; cat "$out/$name.log"; fail=1; continue
   fi
   # no_std (#![no_std] + #![no_main]) は libcore だけで、panic=abort・libc をリンクしてビルドする
   # (rust_eh_personality は panic=abort では呼ばれないので 0 に定義しておく)

@@ -3,7 +3,7 @@
 //! 各段で本文・桁のずれ・成否を比べる。編集は関数の本体の中 (骨組みが変わらない: 差分の経路) と、どこでも (骨組みが
 //! 変わる: 全体の経路) の両方
 
-use crustc::prep::{PrepMemo, prep, prep_full};
+use zustc::prep::{PrepMemo, prep, prep_full};
 
 struct Rng(u64);
 

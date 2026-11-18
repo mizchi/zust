@@ -847,7 +847,7 @@ fn hoist_plain(s: &[u8], moves: &[(usize, usize)]) -> Option<(String, Vec<(usize
 }
 
 /// `thread_local! { static N: T = init; }` を、遅延初期化する `static mut` と `N.with(|v| ..)` を持つ unit struct にする
-/// (crustc の生成するプログラムはスレッドを作らないので、スレッドごとの値は 1 つでよい)。
+/// (zustc の生成するプログラムはスレッドを作らないので、スレッドごとの値は 1 つでよい)。
 /// 展開は 1 行に収め、後ろの行番号は変えない
 pub fn expand_thread_local(src: &str) -> Option<String> {
     if !src.contains("thread_local") {
@@ -1080,7 +1080,7 @@ pub fn rename_module_collisions_fix(src: &str, crates: &[String], fix: &mut Vec<
         k += 1;
     }
     // `use std::path::{Path, PathBuf};` などで std / core / alloc から取り込む型の名前: モジュールの中で同じ名前を
-    // 定義していたら (crustc 自身の `parse::Path` など) ぶつかるものとして名前を変える
+    // 定義していたら (zustc 自身の `parse::Path` など) ぶつかるものとして名前を変える
     let mut std_names: Vec<Vec<u8>> = vec![];
     {
         let mut j = 0;
@@ -1126,7 +1126,7 @@ pub fn rename_module_collisions_fix(src: &str, crates: &[String], fix: &mut Vec<
     };
     // 名前を変える定義: (スコープ, 元の名前) → 新しい名前
     let mut renamed: Vec<(usize, Vec<u8>, Vec<u8>)> = vec![];
-    if std::env::var_os("CRUSTC_DEBUG_RENAME").is_some() {
+    if std::env::var_os("ZUSTC_DEBUG_RENAME").is_some() {
         for d in &defs {
             if colliding(&d.0) {
                 let line = s[..toks[d.2].1].iter().filter(|&&c| c == b'\n').count() + 1;

@@ -1,5 +1,5 @@
 //! check (LSP の診断) はエラーがあっても止まらず、全関数の診断を返す
-use crustc::{Options2, Session2};
+use zustc::{Options2, Session2};
 
 #[test]
 fn reports_all_errors_and_recovers() {
@@ -84,7 +84,7 @@ fn check_memo_matches_fresh_check() {
         for _ in 0..8 {
             let d1 = s.check(&cur);
             let d2 = Session2::new(Options2 { jobs: 1, ..Options2::default() }).check(&cur);
-            let f = |d: &[crustc::Diagnostic]| d.iter().map(|x| (x.line, x.col, x.msg.clone())).collect::<Vec<_>>();
+            let f = |d: &[zustc::Diagnostic]| d.iter().map(|x| (x.line, x.col, x.msg.clone())).collect::<Vec<_>>();
             assert_eq!(f(&d1), f(&d2), "{}", p.display());
             compared += 1;
             // (関数の本体の先頭 (`{\n` の後ろ) に文を足すか、足したものを消す)

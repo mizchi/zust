@@ -1,6 +1,6 @@
 //! syn と Cranelift を使わないドライバ: ソース → (lexer / macros / prelude) → ast_summary → Program →
 //! acg (自前の構文木のコード生成) → minclif の ELF の .o → リンク。
-//! driver.rs と同じ手順を、外部クレートに依存しないモジュールだけで行う (crustc 自身でもコンパイルできる)。
+//! driver.rs と同じ手順を、外部クレートに依存しないモジュールだけで行う (zustc 自身でもコンパイルできる)。
 //! キャッシュと並列化はまだない。
 
 use std::sync::Mutex;
@@ -214,7 +214,7 @@ pub fn analyze(src0: &str, opt: bool) -> R<Analysis> {
     Session2::new(Options2 { opt, no_cache: true, jobs: 1, ..Default::default() }).analyze(src0)
 }
 
-/// 機械語にするバックエンド (Cranelift: crustc-clif の compile)。feature `build` なしでは使わない
+/// 機械語にするバックエンド (Cranelift: zust-clif の compile)。feature `build` なしでは使わない
 #[cfg(feature = "build")]
 pub type Backend = crate::lower::ClBackend;
 #[cfg(not(feature = "build"))]
@@ -283,7 +283,7 @@ pub struct Report2 {
     pub linked: bool,
 }
 
-// (read / write は std と同じ名前の libc の関数。ポインタを *mut u8 で受ける: crustc でもコンパイルできるように)
+// (read / write は std と同じ名前の libc の関数。ポインタを *mut u8 で受ける: zustc でもコンパイルできるように)
 #[allow(suspicious_runtime_symbol_definitions)]
 unsafe extern "C" {
     #[link_name = "sysconf"]
@@ -448,8 +448,8 @@ impl Session2 {
         let cfg = self.opts.cfg_with(self.ctx.features.as_ref().unwrap_or(&self.opts.features));
         let (src, items, user, prelude_line0) = with_prelude_in(src0, &crates, &mut fix, Some(&cfg), &mut self.sel)?;
         self.ctx.map.colfix = fix;
-        let mut tm = Timer { on: std::env::var_os("CRUSTC_PROF").is_some(), last: now_ns(), start: now_ns() };
-        if let Some(p) = std::env::var_os("CRUSTC_DUMP_SRC") {
+        let mut tm = Timer { on: std::env::var_os("ZUSTC_PROF").is_some(), last: now_ns(), start: now_ns() };
+        if let Some(p) = std::env::var_os("ZUSTC_DUMP_SRC") {
             let _ = std::fs::write(p, &src);
         }
         let cid = self.cid;
@@ -609,7 +609,7 @@ impl Session2 {
         }
         tm.lap("refs", String::new());
         let mut a = Analysis { iface_fp, src, items, prog, refs, srefs, crefs, n_parsed, ext_items, inl: acg::Inline::default(), cl: self.opts.backend, prelude_line0, dep_ranges: self.ctx.dep_ranges.clone(), asts: Mutex::new(FxMap::default()), encl: Mutex::new(FxMap::default()), sig_keys: Mutex::new(Vec::new()) };
-        if self.opts.opt && std::env::var_os("CRUSTC_NO_INLINE").is_none() {
+        if self.opts.opt && std::env::var_os("ZUSTC_NO_INLINE").is_none() {
             a.inl = inline_bodies(&a);
         }
         Ok(a)
@@ -752,12 +752,12 @@ fn inline_bodies(a: &Analysis) -> acg::Inline {
         }
         // (クロージャの本体: 大きさは本体の構文木で見る (アイテムは囲む関数のもの))
         if p.closures.contains_key(&(id as u32)) {
-            if std::env::var_os("CRUSTC_NO_INLINE_CLOSURE").is_some() {
+            if std::env::var_os("ZUSTC_NO_INLINE_CLOSURE").is_some() {
                 continue;
             }
             if let Ok(f) = fn_ast(a, id as u32) {
                 let ok = acg::inline_candidate(&f) && format!("{:?}", f.block).len() <= 2400;
-                if std::env::var_os("CRUSTC_INLINE_LOG").is_some() {
+                if std::env::var_os("ZUSTC_INLINE_LOG").is_some() {
                     eprintln!("inline {} closure {}", if ok { "yes" } else { "no " }, p.names[id]);
                 }
                 if ok {
@@ -784,7 +784,7 @@ fn inline_bodies(a: &Analysis) -> acg::Inline {
         }
         if let Ok(f) = fn_ast(a, id as u32) {
             let ok = acg::inline_candidate(&f);
-            if std::env::var_os("CRUSTC_INLINE_LOG").is_some() {
+            if std::env::var_os("ZUSTC_INLINE_LOG").is_some() {
                 eprintln!("inline {} {ntok} {}", if ok { "yes" } else { "no " }, p.names[id]);
             }
             if ok {
@@ -979,7 +979,7 @@ fn compile_id_req(a: &Analysis, insts: &Mutex<Insts>, id: u32) -> R<(Blob, Vec<u
 
 /// 記録を機械語にして Blob を作る (バックエンドなしでは作れない)
 #[cfg(not(feature = "build"))]
-fn lower_blob(_: &Analysis, _: acg::Compiled, _: Vec<u32>) -> R<(Blob, Vec<u32>)> { Err("internal: crustc-core was built without the backend (feature `build`)".into()) }
+fn lower_blob(_: &Analysis, _: acg::Compiled, _: Vec<u32>) -> R<(Blob, Vec<u32>)> { Err("internal: zust-core was built without the backend (feature `build`)".into()) }
 
 /// 位置付きのエラー (行・桁は 1 始まり)。check / LSP が返す
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -1017,7 +1017,7 @@ impl Diagnostic {
 }
 
 impl Session2 {
-    /// 型検査だけを行い、全診断を返す (`crustc check` と LSP)。到達しない関数も、総称関数は要求されたインスタンスごとに
+    /// 型検査だけを行い、全診断を返す (`zustc check` と LSP)。到達しない関数も、総称関数は要求されたインスタンスごとに
     /// 検査する (コード生成までしてエラーを集め、結果はキャッシュに入れる: 次の検査・ビルドはそれを使う)。prelude の中の診断は出さない
     pub fn check(&mut self, src: &str) -> Vec<Diagnostic> {
         let user_lines = src.bytes().filter(|&c| c == b'\n').count() + 1;
@@ -1025,12 +1025,12 @@ impl Session2 {
             Ok(a) => a,
             Err(e) => return vec![Diagnostic::parse(&e)],
         };
-        // 検査だけ: コード生成 (acg) で型を検査し、機械語は作らない (CRUSTC_CHECK_CODEGEN=1 で機械語まで作る)。
+        // 検査だけ: コード生成 (acg) で型を検査し、機械語は作らない (ZUSTC_CHECK_CODEGEN=1 で機械語まで作る)。
         // 検査済みの印は、要求したインスタンスへの再配置だけを持つ空の Blob を、ビルドとは別のキーで覚える
         // (ビルドの Blob があればそれも検査済みとして使う)
-        let check_only = std::env::var_os("CRUSTC_CHECK_CODEGEN").is_none();
+        let check_only = std::env::var_os("ZUSTC_CHECK_CODEGEN").is_none();
         a.inl.check_only = check_only;
-        let mut tm = Timer { on: std::env::var_os("CRUSTC_PROF").is_some(), last: now_ns(), start: now_ns() };
+        let mut tm = Timer { on: std::env::var_os("ZUSTC_PROF").is_some(), last: now_ns(), start: now_ns() };
         let (mut n_keys, mut n_hit, mut n_checked, mut n_memo) = (0, 0, 0, 0);
         let insts = Mutex::new(Insts::new(&a.prog));
         let mut errs: Vec<String> = vec![];
@@ -1038,10 +1038,10 @@ impl Session2 {
         // 前回の check の記録: 宣言の指紋が同じなら、本体のアイテムが変わっていない関数は検査済み (キーも読み戻しも要らない)。
         // 要求していたインスタンスは名前で辿り、本体が変わったものだけを要求し直す
         let old = match self.chk.take() {
-            Some(m) if m.fp == a.iface_fp && check_only && std::env::var_os("CRUSTC_NO_CHECK_MEMO").is_none() => Some(m),
+            Some(m) if m.fp == a.iface_fp && check_only && std::env::var_os("ZUSTC_NO_CHECK_MEMO").is_none() => Some(m),
             _ => None,
         };
-        // (記録を作るのは、続けて検査する (キャッシュを使う) セッションだけ: 1 度だけの `crustc check` では作らない)
+        // (記録を作るのは、続けて検査する (キャッシュを使う) セッションだけ: 1 度だけの `zustc check` では作らない)
         let keep = check_only && !self.opts.no_cache;
         let mut memo = ChkMemo { fp: a.iface_fp, ents: FxMap::default() };
         let mut seen: FxSet<String> = FxSet::default();
