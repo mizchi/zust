@@ -490,6 +490,8 @@ run-pass	binding/pattern-bound-var-in-for-each.rs
 run-pass	binding/pattern-in-closure.rs
 run-pass	binding/range-inclusive-pattern-precedence.rs
 build-pass	binding/ref-in-let-lhs-in-field.rs
+run-pass	binding/shadow.rs
+run-pass	binding/simple-generic-match.rs
 compile-fail	binding/tuple-binder-on-err-ty.rs
 run-pass	binding/underscore-prefixed-function-argument.rs
 run-pass	binding/use-uninit-match.rs
@@ -1584,7 +1586,6 @@ run-pass	dropck/dropck-resolves-associated-type-in-field.rs
 run-pass	dropck/dropck-type-in-dyn-fn-param.rs
 compile-fail	dropck/dropck-union.rs
 run-pass	dropck/dropck_fn_type.rs
-compile-fail	dropck/dropck_no_diverge_on_nonregular_3.rs
 compile-fail	dropck/dropck_trait_cycle_checked.rs
 run-pass	dropck/dropck_traits.rs
 run-pass	dropck/issue-34053.rs
@@ -2068,8 +2069,12 @@ check-pass	generics/generic-impl-method-params-2311.rs
 run-pass	generics/generic-ivec-leak.rs
 run-pass	generics/generic-newtype-struct.rs
 run-pass	generics/generic-object.rs
+run-pass	generics/generic-recursive-tag.rs
 run-pass	generics/generic-tag-corruption.rs
 run-pass	generics/generic-tag-local.rs
+run-pass	generics/generic-tag-match.rs
+run-pass	generics/generic-tag-values.rs
+run-pass	generics/generic-tag.rs
 run-pass	generics/generic-temporary.rs
 check-pass	generics/generic-trait-method-params-2311.rs
 run-pass	generics/generic-tup.rs
@@ -3204,9 +3209,7 @@ check-pass	nll/ty-outlives/projection-where-clause-trait.rs
 compile-fail	nll/type-check-pointer-coercions.rs
 compile-fail	nll/type-check-pointer-comparisons.rs
 check-pass	nll/unexpected-inference-var-ice-116599.rs
-compile-fail	nll/user-annotations/adt-brace-enums.rs
 compile-fail	nll/user-annotations/adt-brace-structs.rs
-compile-fail	nll/user-annotations/adt-tuple-enums.rs
 compile-fail	nll/user-annotations/adt-tuple-struct.rs
 check-pass	nll/user-annotations/closure-sig.rs
 compile-fail	nll/user-annotations/constant-in-expr-inherent-1.rs
@@ -3955,6 +3958,7 @@ compile-fail	pattern/range-pattern-meant-to-be-slice-rest-pattern.rs
 check-pass	pattern/rest-pat-syntactic.rs
 check-pass	pattern/rfc-3627-match-ergonomics-2024/min_match_ergonomics_success.rs
 compile-fail	pattern/rfc-3637-guard-patterns/only-resolve-top-level-guard-expr-once-ice-141265.rs
+run-pass	pattern/size-and-align.rs
 compile-fail	pattern/struct-parser-recovery-issue-126344.rs
 run-pass	pattern/struct-pattern-in-fn-arg.rs
 compile-fail	pattern/struct-pattern-on-non-struct-resolve-error.rs
@@ -4554,6 +4558,7 @@ run-pass	structs-enums/rec.rs
 run-pass	structs-enums/record-pat.rs
 run-pass	structs-enums/resource-in-struct.rs
 check-pass	structs-enums/simple-generic-tag.rs
+run-pass	structs-enums/simple-match-generic-tag.rs
 run-pass	structs-enums/small-enum-range-edge.rs
 run-pass	structs-enums/struct-field-shorthand.rs
 compile-fail	structs-enums/struct-rec/issue-17431-1.rs

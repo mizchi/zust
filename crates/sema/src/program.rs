@@ -2834,7 +2834,7 @@ impl Program {
             let vi = self.structs[sid as usize].variants.iter().position(|v| v.name == n)?;
             return Some((sid, vi));
         }
-        if segs.len() != 2 || segs[1].args {
+        if segs.len() != 2 {
             return None;
         }
         let tn = segs[0].name.as_str();
