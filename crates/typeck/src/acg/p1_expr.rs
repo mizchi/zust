@@ -241,7 +241,13 @@ impl Cx<'_> {
 
     /// フィールドアクセスの土台: 自動 deref しながら struct のアドレスを求める
     pub(crate) fn struct_base(&mut self, base: &Expr) -> R<(Value, i32, u32)> {
-        let mut p = if is_place_expr(base) {
+        // (`BAR.0` with a `const BAR` that needs dropping: the value is a temporary, dropped after the statement)
+        let const_tmp = matches!(base, Expr::Path(..))
+            && self.const_of(base).is_some_and(|c| {
+                let c = &self.prog.consts[c as usize];
+                c.stat.is_none() && self.needs_drop(c.ty)
+            });
+        let mut p = if is_place_expr(base) && !const_tmp {
             self.place(base)?
         } else {
             let r = self.expr(base, None)?;

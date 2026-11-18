@@ -704,10 +704,17 @@ pub fn std_renames(src: &str) -> Option<String> {
         }
         let (mut imported, mut other) = (false, false);
         for st in src.split(';') {
-            let t = st.trim_start();
+            // (skip the comment lines and attributes in front: the first `use` follows the file's header)
+            let mut t = st.trim_start();
+            while t.starts_with("//") || t.starts_with("#") {
+                let Some(nl) = t.find('\n') else { break };
+                t = t[nl + 1..].trim_start();
+            }
             let Some(u) = t.strip_prefix("use ").or_else(|| t.strip_prefix("pub use ")) else { continue };
             let ws = words(u);
-            if ws.iter().any(|w| w == name) {
+            if u.contains(&format!("{m}::*")) {
+                imported = true;
+            } else if ws.iter().any(|w| w == name) {
                 if ws.iter().any(|w| w == m) {
                     imported = true;
                 } else {

@@ -737,6 +737,9 @@ run-pass	box/unit/expr-block-generic-unique1.rs
 run-pass	box/unit/unique-generic-assign.rs
 run-pass	box/unit/unique-in-tag.rs
 run-pass	box/unit/unique-object-move.rs
+run-pass	box/unit/unique-send-2.rs
+run-pass	builtin-superkinds/builtin-superkinds-capabilities-transitive.rs
+run-pass	builtin-superkinds/builtin-superkinds-capabilities.rs
 run-pass	builtin-superkinds/builtin-superkinds-phantom-typaram.rs
 compile-fail	builtin-superkinds/builtin-superkinds-simple.rs
 check-pass	builtin-superkinds/builtin-superkinds-simple2.rs
@@ -877,7 +880,6 @@ run-pass	closures/closure-with-fixed-size-array-param.rs
 check-pass	closures/closure_promotion.rs
 check-pass	closures/closure_requires_expectation.rs
 compile-fail	closures/coerce-unsafe-closure-to-unsafe-fn-ptr.rs
-compile-fail	closures/coerce-unsafe-to-closure.rs
 compile-fail	closures/correct-args-on-call-suggestion.rs
 build-pass	closures/deeply-nested_closures.rs
 run-pass	closures/destructure-newtype-closure.rs
@@ -906,6 +908,7 @@ compile-fail	closures/local-type-mix.rs
 compile-fail	closures/missing-body.rs
 run-pass	closures/module-path-not-confused-with-upvar.rs
 check-pass	closures/move-closure-can-call-captured-fnmut.rs
+run-pass	closures/move-closure-is-send.rs
 run-pass	closures/moved-upvar-mut-rebind-11958.rs
 run-pass	closures/nested-closure-call.rs
 run-pass	closures/no-capture-closure-call.rs
@@ -930,7 +933,6 @@ compile-fail	closures/unsized-return-suggest-ref-issue-152064.rs
 compile-fail	closures/unsized_value_move.rs
 run-pass	closures/unused-closure-ice-16256.rs
 check-pass	closures/upvar-or-pattern-issue-138958.rs
-compile-fail	cmse-nonsecure/cmse-nonsecure-call/gate_test.rs
 run-pass	codegen/adt-nested-match-misopt.rs
 run-pass	codegen/alias-uninit-value.rs
 run-pass	codegen/arm-collect-into-vec-codegen-regression.rs
@@ -938,6 +940,7 @@ run-pass	codegen/assign-expr-unit-type.rs
 run-pass	codegen/bitvec-to-bools-opt-miscompile.rs
 run-pass	codegen/box-deref-segfault-misopt.rs
 build-pass	codegen/codegen-binder-not-ignored-in-generic-fn.rs
+run-pass	codegen/correctly-monomorphize-generic-drop-impl.rs
 run-pass	codegen/dont-miscompile-enums.rs
 run-pass	codegen/issue-101585-128bit-repeat.rs
 run-pass	codegen/issue-16602-1.rs
@@ -1204,10 +1207,8 @@ run-pass	consts/const-eval/nrvo.rs
 check-pass	consts/const-eval/promote-static.rs
 check-pass	consts/const-eval/promote_mutable_zst_mir_borrowck.rs
 compile-fail	consts/const-eval/promoted_raw_ptr_ops.rs
-compile-fail	consts/const-eval/ptr-to-int-transmute-in-consts-issue-87525.rs
 check-pass	consts/const-eval/simple_with_undef.rs
 check-pass	consts/const-eval/stable-metric/dominators-edge-case.rs
-compile-fail	consts/const-eval/transmute-const-promotion.rs
 run-pass	consts/const-eval/variance-const-eval-cycle.rs
 run-pass	consts/const-eval/write-to-uninhabited-enum-variant.rs
 check-pass	consts/const-eval/zst_operand_eval.rs
@@ -1294,6 +1295,7 @@ compile-fail	consts/normalize-before-const-arg-has-type-goal.rs
 run-pass	consts/packed_pattern.rs
 run-pass	consts/packed_pattern2.rs
 run-pass	consts/promote_borrowed_field.rs
+run-pass	consts/promoted_const_call4.rs
 check-pass	consts/promotion-drop-type-static-lifetime-86672.rs
 check-pass	consts/raw-ptr-const.rs
 check-pass	consts/raw_pointer_promoted.rs
@@ -1334,6 +1336,7 @@ compile-fail	derived-errors/issue-31997-1.rs
 compile-fail	derived-errors/issue-31997.rs
 compile-fail	derived-errors/no-spurious-unconstrained-param.rs
 compile-fail	derives/clone-copy/deriving-copyclone.rs
+run-pass	derives/clone-copy/misbehaving-clone-impl.rs
 run-pass	derives/debug/derive-Debug-enum-variants.rs
 run-pass	derives/debug/derive-Debug-use-ufcs-struct.rs
 run-pass	derives/debug/derive-debug-2.rs
@@ -1477,6 +1480,7 @@ run-pass	dropck/dropck_fn_type.rs
 compile-fail	dropck/dropck_no_diverge_on_nonregular_3.rs
 compile-fail	dropck/dropck_trait_cycle_checked.rs
 run-pass	dropck/dropck_traits.rs
+run-pass	dropck/issue-34053.rs
 check-pass	dropck/issue-54943-1.rs
 check-pass	dropck/issue-54943-2.rs
 check-pass	dropck/no-dropck-overflow-on-deep-nesting.rs
@@ -2117,6 +2121,8 @@ check-pass	impl-trait/rpit/unit-impl-default-36379.rs
 compile-fail	impl-trait/stashed-diag-issue-121504.rs
 check-pass	impl-trait/struct-field-fragment-in-name.rs
 compile-fail	impl-trait/suggest-calling-rpit-closure.rs
+check-pass	impl-trait/transmute/in-defining-scope.rs
+check-pass	impl-trait/transmute/outside-of-defining-scope.rs
 run-pass	impl-trait/universal_hrtb_anon.rs
 run-pass	impl-trait/universal_hrtb_named.rs
 run-pass	impl-trait/universal_multiple_bounds.rs
@@ -2397,6 +2403,7 @@ check-pass	lifetimes/struct-lifetime-inference-15735.rs
 run-pass	lifetimes/struct-with-lifetime-parameters-9259.rs
 run-pass	lifetimes/trait-object-constructor-14821.rs
 check-pass	lifetimes/tuple-struct-vs-struct-with-fields-borrowck-10902.rs
+check-pass	lifetimes/unsafe-transmute-in-find-11740.rs
 compile-fail	lifetimes/unusual-rib-combinations.rs
 build-pass	limits/limit-huge-struct-derive-debug.rs
 build-pass	linkage-attr/unreferenced-used-static-issue-127052.rs
@@ -2439,6 +2446,8 @@ check-pass	lint/expect-unused-imports.rs
 check-pass	lint/explicit-outlives-unsized-object-lifetime.rs
 compile-fail	lint/for-loops-over-fallibles/macro-iterator-next.rs
 check-pass	lint/forbid-group-member.rs
+check-pass	lint/forgetting_copy_types.rs
+check-pass	lint/forgetting_references.rs
 compile-fail	lint/function_casts_as_integer.rs
 compile-fail	lint/ice-array-into-iter-lint-issue-121532.rs
 build-pass	lint/ice-unions-known-panics-lint-issue-121534.rs
@@ -2449,6 +2458,8 @@ check-pass	lint/improper-ctypes/mustpass-113900.rs
 check-pass	lint/improper-ctypes/mustpass-134060.rs
 check-pass	lint/improper-ctypes/mustpass-73747.rs
 check-pass	lint/inert-attr-macro.rs
+check-pass	lint/int_to_ptr-no_std.rs
+check-pass	lint/int_to_ptr.rs
 compile-fail	lint/invalid_null_args.rs
 check-pass	lint/issue-103317.rs
 compile-fail	lint/issue-103435-extra-parentheses.rs
@@ -2667,6 +2678,7 @@ run-pass	macros/macro-self-mutability-7911.rs
 check-pass	macros/macro-seq-followed-by-seq.rs
 check-pass	macros/macro-stmt-2.rs
 run-pass	macros/macro-variable-declaration-with-bounds-5554.rs
+run-pass	macros/macro-variable-unused-reporting-5718.rs
 run-pass	macros/macro-with-attrs2.rs
 compile-fail	macros/macros-in-trait-positions-issue-40845.rs
 compile-fail	macros/missing-bang-in-decl.rs
@@ -3062,6 +3074,7 @@ run-pass	numbers-arithmetic/i128-min-literal-parses.rs
 run-pass	numbers-arithmetic/i32-sub.rs
 run-pass	numbers-arithmetic/i8-incr.rs
 run-pass	numbers-arithmetic/integer-literal-radix.rs
+run-pass	numbers-arithmetic/integer-literal-suffix-inference-3.rs
 run-pass	numbers-arithmetic/integer-literal-suffix-inference.rs
 run-pass	numbers-arithmetic/isize-base.rs
 compile-fail	numbers-arithmetic/not-suggest-float-literal.rs
@@ -3138,9 +3151,7 @@ run-pass	overloaded/overloaded-index-assoc-list.rs
 run-pass	overloaded/overloaded_deref_with_ref_pattern_issue15609.rs
 run-pass	overloaded/subtyping-both-lhs-and-rhs-in-add-impl.rs
 run-pass	packed/misaligned-reference-drop-field-99838.rs
-compile-fail	packed/packed-struct-generic-transmute.rs
 run-pass	packed/packed-struct-match.rs
-compile-fail	packed/packed-struct-transmute.rs
 check-pass	panics/panic-handler-closures.rs
 build-pass	parallel-rustc/assert-found_cycle-issue-115223.rs
 build-pass	parallel-rustc/export-symbols-deadlock-issue-118205.rs
@@ -4322,6 +4333,7 @@ run-pass	structs-enums/class-typarams.rs
 check-pass	structs-enums/classes-self-referential.rs
 run-pass	structs-enums/compare-generic-enums.rs
 run-pass	structs-enums/empty-tag.rs
+run-pass	structs-enums/enum-alignment.rs
 run-pass	structs-enums/enum-discr.rs
 run-pass	structs-enums/enum-export-inheritance.rs
 run-pass	structs-enums/enum-nullable-const-null-with-fields.rs
@@ -4351,7 +4363,10 @@ compile-fail	structs-enums/struct-rec/issue-17431-5.rs
 compile-fail	structs-enums/struct-rec/issue-74224.rs
 compile-fail	structs-enums/struct-rec/issue-84611.rs
 compile-fail	structs-enums/struct-rec/mutual-struct-recursion.rs
+run-pass	structs-enums/tag-align-dyn-u64.rs
+run-pass	structs-enums/tag-align-dyn-variants.rs
 run-pass	structs-enums/tag-align-shape.rs
+run-pass	structs-enums/tag-align-u64.rs
 run-pass	structs-enums/tag-disr-val-shape.rs
 run-pass	structs-enums/tag-exports.rs
 check-pass	structs-enums/tag-in-block.rs
@@ -4642,6 +4657,7 @@ check-pass	thread-local/long-docs.rs
 run-pass	thread-local/thread-local-with-attributes-30756.rs
 run-pass	threads-sendsync/child-outlives-parent.rs
 run-pass	threads-sendsync/clone-with-exterior.rs
+run-pass	threads-sendsync/comm.rs
 run-pass	threads-sendsync/issue-29488.rs
 run-pass	threads-sendsync/issue-4446.rs
 compile-fail	threads-sendsync/rc-is-not-send.rs
@@ -4650,12 +4666,20 @@ run-pass	threads-sendsync/sendfn-is-a-block.rs
 run-pass	threads-sendsync/spawn-fn.rs
 run-pass	threads-sendsync/spawn.rs
 run-pass	threads-sendsync/spawn2.rs
+run-pass	threads-sendsync/task-comm-0.rs
 run-pass	threads-sendsync/task-comm-1.rs
+run-pass	threads-sendsync/task-comm-11.rs
 run-pass	threads-sendsync/task-comm-12.rs
+run-pass	threads-sendsync/task-comm-13.rs
+run-pass	threads-sendsync/task-comm-14.rs
+run-pass	threads-sendsync/task-comm-15.rs
 run-pass	threads-sendsync/task-comm-17.rs
+run-pass	threads-sendsync/task-comm-3.rs
 run-pass	threads-sendsync/task-comm-4.rs
 run-pass	threads-sendsync/task-comm-5.rs
 run-pass	threads-sendsync/task-comm-6.rs
+run-pass	threads-sendsync/task-comm-7.rs
+run-pass	threads-sendsync/task-comm-9.rs
 run-pass	threads-sendsync/task-comm-chan-nil.rs
 run-pass	threads-sendsync/task-life-0.rs
 run-pass	threads-sendsync/task-spawn-move-and-copy.rs
@@ -4800,6 +4824,7 @@ check-pass	traits/issue-90195.rs
 check-pass	traits/issue-92292.rs
 check-pass	traits/issue-96665.rs
 check-pass	traits/make-sure-to-filter-projections-by-def-id.rs
+run-pass	traits/method-on-deeply-nested-struct-perf.rs
 run-pass	traits/monad.rs
 run-pass	traits/multidispatch-conditional-impl-not-considered.rs
 run-pass	traits/multidispatch2.rs
@@ -4870,15 +4895,14 @@ compile-fail	traits/wf-object/no-duplicates.rs
 check-pass	traits/where-clause-on-self-assoc-type.rs
 run-pass	traits/where-clause-vs-impl.rs
 check-pass	transmutability/transmute-copy-associated-type.rs
-compile-fail	transmute/ambiguity-in-closure-arg.rs
 compile-fail	transmute/diverging-fn-transmute.rs
 check-pass	transmute/lifetimes.rs
 compile-fail	transmute/main.rs
 compile-fail	transmute/transmute-associated-type-to-slice.rs
+build-pass	transmute/transmute-bool-u8.rs
 compile-fail	transmute/transmute-from-fn-item-types-error.rs
 compile-fail	transmute/transmute-imut-to-mut.rs
 check-pass	transmute/transmute-same-associated-type.rs
-compile-fail	transmute/unnecessary-transmutation.rs
 compile-fail	trimmed-paths/core-unicode.rs
 compile-fail	try-block/try-block-in-edition2015.rs
 run-pass	try-block/try-is-identifier-edition2015.rs
@@ -5077,6 +5101,7 @@ compile-fail	typeck/typeck-inner-expr-on-field-access-error.rs
 compile-fail	typeck/typeck_type_placeholder_item_help.rs
 compile-fail	typeck/typeck_type_placeholder_mismatch.rs
 compile-fail	typeck/unconstrained-impl-extra-parameter.rs
+run-pass	typeck/unify-return-ty.rs
 compile-fail	typeck/while-type-error.rs
 compile-fail	typeck/wrong-ret-type.rs
 compile-fail	ufcs/ufcs-explicit-self-bad.rs
@@ -5131,6 +5156,7 @@ compile-fail	union/union-assignop.rs
 run-pass	union/union-const-codegen.rs
 compile-fail	union/union-derive-clone.rs
 run-pass	union/union-drop-assign.rs
+run-pass	union/union-drop.rs
 compile-fail	union/union-empty.rs
 build-pass	union/union-field-access-error-65462.rs
 compile-fail	union/union-fields-2.rs

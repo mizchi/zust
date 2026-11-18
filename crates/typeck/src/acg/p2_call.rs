@@ -839,6 +839,23 @@ impl Cx<'_> {
         Ok(sol)
     }
 
+    /// `transmute::<T, U>`: E0512 for types of different sizes, and `&T` to `&mut T` (deny lint)
+    fn check_transmute(&self, from: Ty, to: Ty, span: Sp) -> R<()> {
+        if self.prog.has_param(from) || self.prog.has_param(to) {
+            return Ok(());
+        }
+        if matches!((from, to), (Ty::Ref(false, _), Ty::Ref(true, _))) {
+            return err(span, "transmuting &T to &mut T is undefined behavior, even if the reference is unused");
+        }
+        let (a, b) = (self.prog.size_align(from).0, self.prog.size_align(to).0);
+        if a != b {
+            return err(span, format!(
+                "cannot transmute between types of different sizes, or dependently-sized types (E0512): `{}` ({} bits) to `{}` ({} bits)",
+                self.prog.tn(from), a * 8, self.prog.tn(to), b * 8));
+        }
+        Ok(())
+    }
+
     pub(crate) fn resolve_call(&mut self, id: u32, arg_tys: &[Ty], mut sol: Vec<Option<Ty>>, ret_hint: Option<Ty>, span: Sp) -> R<(u32, FnSig)> {
         let sig = self.prog.sigs[id as usize].clone();
         if !sig.is_generic() {
@@ -1180,6 +1197,9 @@ impl Cx<'_> {
             }
         }
         let (target, sig) = self.resolve_call(id, &arg_tys, sol0, expected, span)?;
+        if self.prog.names[id as usize] == "__core_transmute" && sig.params.len() == 1 {
+            self.check_transmute(sig.params[0], sig.ret, span)?;
+        }
         let mut cv = vec![];
         let sret = if is_sret(&sig) {
             let a = match hint {
@@ -1208,6 +1228,8 @@ impl Cx<'_> {
                         (self.b.ins().load(PTR, mf(), v, 0), pt)
                     }
                 }
+                // (`&mut x` for a `*mut T` parameter)
+                (Ty::Ref(m1, a), Ty::Ptr(m2, b)) if a == b && (m1 || !m2) && !a.is_fat() => (v, pt),
                 _ => (v, t),
             };
             self.same(sp, t, pt)?;

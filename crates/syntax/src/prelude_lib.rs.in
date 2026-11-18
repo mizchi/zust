@@ -63,6 +63,31 @@ pub fn __core_replace<T>(dest: &mut T, src: T) -> T {
 pub fn __core_take<T>(dest: &mut T) -> T {
     __core_replace(dest, __exr_default::<T>())
 }
+pub fn __core_forget<T>(x: T) {
+    let _m = ManuallyDrop::new(x);
+}
+pub unsafe fn __core_transmute<T, U>(x: T) -> U {
+    let m = ManuallyDrop::new(x);
+    unsafe { (&m as *const ManuallyDrop<T> as *const U).read() }
+}
+pub unsafe fn __core_transmute_copy<T, U>(x: &T) -> U {
+    unsafe { (x as *const T as *const U).read() }
+}
+pub fn __core_size_of_val<T>(_x: &T) -> usize {
+    core::mem::size_of::<T>()
+}
+pub fn __core_align_of_val<T>(_x: &T) -> usize {
+    core::mem::align_of::<T>()
+}
+pub unsafe fn __core_drop_in_place<T>(p: *mut T) {
+    unsafe { __core_drop(p.read()) }
+}
+pub unsafe fn __core_read<T>(p: *const T) -> T {
+    unsafe { p.read() }
+}
+pub unsafe fn __core_write<T>(p: *mut T, v: T) {
+    unsafe { p.write(v) }
+}
 // `T::default()` / `Default::default()` / derive(Default): 本体は型ごとに codegen が作る
 // (0 で埋めてから、手書きの impl Default を持つフィールドはそれを呼ぶ)
 fn __exr_default<T>() -> T {

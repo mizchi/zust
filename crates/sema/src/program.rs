@@ -1968,6 +1968,8 @@ impl Program {
             },
             (Ty::Ref(_, a), Ty::Ref(_, b))
             | (Ty::Ptr(_, a), Ty::Ptr(_, b))
+            // (`&mut x` passed for a `*mut T` coerces)
+            | (Ty::Ptr(_, a), Ty::Ref(_, b))
             | (Ty::Slice(a), Ty::Slice(b))
             | (Ty::Box(a), Ty::Box(b)) => self.match_ty(*a, *b, sol),
             // (const ジェネリクスの長さ: 長さを持つ Ty::Array(Unit, m) で解く)
