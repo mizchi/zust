@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795009308822,
+  "lastUpdate": 1795009310627,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -6930,6 +6930,85 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/mizchi/zust/commit/35fb6c11d831503295cda93c0b8b6d07971b0e2f"
         },
         "date": 1795008308677,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "parity documentSymbol (名前の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity workspace/symbol (上位 20 の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity definition (行き先の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity hover (名前を含む)",
+            "value": 87.5,
+            "unit": "%"
+          },
+          {
+            "name": "parity references (数の一致)",
+            "value": 97.222,
+            "unit": "%"
+          },
+          {
+            "name": "parity documentHighlight (数の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity rename (書き換えの一致)",
+            "value": 89.474,
+            "unit": "%"
+          },
+          {
+            "name": "parity signatureHelp (名前・引数の数・今の引数の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity completion `x.\\|` (書いてある名前を含む)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity completion `na\\|me` (同)",
+            "value": 85.185,
+            "unit": "%"
+          },
+          {
+            "name": "parity 一致の平均",
+            "value": 95.938,
+            "unit": "%"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "committer": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "distinct": true,
+          "id": "cb825abd3668afa47c76491a8f167af453c07912",
+          "message": "zustc: macro hygiene for let bindings, hex / computed enum discriminants, one-variant enum casts, mpsc prelude dependencies\n\n- a macro body's own `let x` names are kept apart from the caller's (`{ let _x = 9; $e }` with\n  `$e = _x` reads the caller's _x)\n- discriminants: hex / octal / binary literals with suffixes, and + - * / % << >> | & ^ ! of them\n  (0xDEADBEE was read as 0)\n- `E::V as usize` for an enum of one variant gives its discriminant (no tag is stored)\n- a program using mpsc::channel gets the RefCell / VecDeque / Rc deref the queue needs\n- tests/ui: run-pass 51.3%, check-pass 54.2%, build-pass 50.4%, no regressions\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-18T13:37:14Z",
+          "tree_id": "4020b5268720d308d0b95144e21282b846cc4cfa",
+          "url": "https://github.com/mizchi/zust/commit/cb825abd3668afa47c76491a8f167af453c07912"
+        },
+        "date": 1795009310211,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
