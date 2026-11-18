@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795007149959,
+  "lastUpdate": 1795007151761,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -7220,6 +7220,70 @@ window.BENCHMARK_DATA = {
           {
             "name": "tests/ui compile-fail passing",
             "value": 2751,
+            "unit": "tests"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "committer": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "distinct": true,
+          "id": "ccfe8ce8b27f2e443f5b28982b44078fa26bcba7",
+          "message": "zustc: one-thread std::thread / mpsc / atomics / Arc, default methods of blanket impls, deterministic method choice on primitives\n\n- prelude: Arc (as Rc), AtomicUsize .. AtomicBool (cells; orderings ignored), thread::spawn\n  (runs the closure at once; JoinHandle::join gives its value), mpsc::channel / sync_channel\n  (a shared queue)\n- `Ordering` from std::sync::atomic and the mpsc types are renamed in the source to prelude\n  names of the same length when imported from those modules (zustc resolves names by their last\n  segment; a program's own `Receiver` keeps its name)\n- thread::spawn: E0373 for a closure that borrows, and `Rc` is not Send\n- the default methods of a trait with a blanket impl are methods of every type\n- `1.new()` with a static `Foo::new` and a method `Bar::new` for isize: the method, always\n  (the candidates came from a hash set)\n- tests/ui: run-pass 50.5%, check-pass 53.7%, compile-fail 37.7%; three compile-fail tests that\n  failed to compile for other reasons now need bound checks on blanket impls\n- KPIs: gen5000 check 3987 M instr (+0.25%, the larger prelude)\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-18T12:55:34Z",
+          "tree_id": "523eac9173c9d936d113ccbd2ba1f4d2c3b247b1",
+          "url": "https://github.com/mizchi/zust/commit/ccfe8ce8b27f2e443f5b28982b44078fa26bcba7"
+        },
+        "date": 1795007151292,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tests/ui run-pass pass rate",
+            "value": 50.48,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui run-pass passing",
+            "value": 1218,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui check-pass pass rate",
+            "value": 53.68,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui check-pass passing",
+            "value": 970,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui build-pass pass rate",
+            "value": 48.89,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui build-pass passing",
+            "value": 66,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui compile-fail pass rate",
+            "value": 37.7,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui compile-fail passing",
+            "value": 2774,
             "unit": "tests"
           }
         ]
