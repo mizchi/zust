@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795041641755,
+  "lastUpdate": 1795041643831,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -15208,6 +15208,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "lsp peak RSS",
             "value": 67.961,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "committer": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "distinct": true,
+          "id": "e45ee100ed392377781ef1eece25b5efbc32ad81",
+          "message": "`std::pin::Pin` as a plain pointer in the prelude\n\nPin::new / new_unchecked / get_ref / get_mut / into_inner and deref; user code\nmay define its own `Pin`. tests/ui: check-pass +6, build-pass +2, run-pass +0.\nFive compile-fail tests leave the baseline: they passed only because `Pin` was\nunknown on the annotated line (the expected errors are E0133 for an unsafe call\nin a closure, and lifetime errors that zustc does not check yet).\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-18T22:25:36Z",
+          "tree_id": "20d61a24bcd385bb9953b9a3aeaf24df5c8ed895",
+          "url": "https://github.com/mizchi/zust/commit/e45ee100ed392377781ef1eece25b5efbc32ad81"
+        },
+        "date": 1795041643380,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "lsp definition p50",
+            "value": 0.472,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp hover p50",
+            "value": 0.378,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp completion p50",
+            "value": 0.928,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp references p50",
+            "value": 9.656,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp rename p50",
+            "value": 0.39,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp signatureHelp p50",
+            "value": 0.807,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp documentHighlight p50",
+            "value": 0.823,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp ready (startup to indexed)",
+            "value": 103.709,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp peak RSS",
+            "value": 68.258,
             "unit": "MiB"
           }
         ]
