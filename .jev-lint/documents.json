@@ -17,6 +17,14 @@
       "path": "CONTRIBUTING.ja.md",
       "role": "document"
     },
+    "SUPPORTED.en": {
+      "path": "SUPPORTED.md",
+      "role": "document"
+    },
+    "SUPPORTED.ja": {
+      "path": "SUPPORTED.ja.md",
+      "role": "document"
+    },
     "docs_architecture.en": {
       "path": "docs/architecture.md",
       "role": "document"
@@ -63,6 +71,17 @@
       },
       "target": {
         "source": "CONTRIBUTING.ja"
+      }
+    },
+    {
+      "id": "SUPPORTED",
+      "topic": "The Japanese file SUPPORTED.ja.md is a faithful translation of SUPPORTED.md",
+      "mode": "translation",
+      "reference": {
+        "source": "SUPPORTED.en"
+      },
+      "target": {
+        "source": "SUPPORTED.ja"
       }
     },
     {

@@ -206,6 +206,7 @@ rust-analyzer との違いで分かっているものは [TODO.md](TODO.md) に�
 - [docs/ja/architecture.md](docs/ja/architecture.md): crate の構成、処理の流れ、インクリメンタルビルドのしくみ、値の表現
 - [docs/ja/reports/](docs/ja/reports/README.md): 作業の記録 (日付順のレポート。ベンチマークの結果、各段階でやったこと)
 - [CONTRIBUTING.ja.md](CONTRIBUTING.ja.md): 開発のしかた (ビルド、テスト、ベンチマーク、レポートの書き方)
+- [SUPPORTED.ja.md](SUPPORTED.ja.md): 対応しているもの、目処がついているもの、パフォーマンスが悪化しそうなもの、未着手のもの
 - [TODO.md](TODO.md): これからやること (英語)
 
 ## ライセンス

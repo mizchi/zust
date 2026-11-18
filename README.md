@@ -228,6 +228,7 @@ Japanese versions of the docs are under [docs/ja/](docs/ja/).
 - [docs/architecture.md](docs/architecture.md): crate layout, the pipeline, how incremental builds work, value representation
 - [docs/reports/](docs/reports/README.md): work log, as dated reports (benchmark results and what was done at each step)
 - [CONTRIBUTING.md](CONTRIBUTING.md): how to develop: build, test, benchmark, and write reports
+- [SUPPORTED.md](SUPPORTED.md): what is supported, what is in sight, what would cost performance, and what is not started
 - [TODO.md](TODO.md): what is next
 
 ## License
