@@ -81,6 +81,35 @@ impl Cx<'_> {
     pub(crate) fn method_call(&mut self, e: &Expr, expected: Option<Ty>) -> R<V> {
         let Expr::MethodCall(recv, method, gargs, margs, msp) = e else { unreachable!() };
         let msp = *msp;
+        // `let b: Box<_> = 22.into();` (`From<T> for Box<T>`): `Box::new(22)`
+        if method == "into" && margs.is_empty() && matches!(expected, Some(Ty::Box(_))) {
+            let rt = self.peek(recv);
+            if rt.is_none_or(|t| !matches!(t, Ty::Box(_) | Ty::Ref(..) | Ty::Str | Ty::Slice(_)) && !matches!(t, Ty::Struct(sid) if self.prog.method(sid, "into").is_some())) {
+                let seg = |n: &str| crate::parse::Seg { name: n.to_string(), args: vec![], fn_args: None, text: n.to_string() };
+                let bn = crate::parse::Path { global: false, segs: vec![seg("Box"), seg("new")], pos: Default::default() };
+                let c = Expr::Call(Box::new(Expr::Path(None, bn)), vec![(**recv).clone()]);
+                let c = self.keep_expr(c);
+                return self.expr(c, expected);
+            }
+        }
+        // `2.eq(&3)` / `x.lt(&y)` on a number, bool or char: the operator (`2 == *&3`)
+        if margs.len() == 1 {
+            let op = match method.as_str() {
+                "eq" => "==",
+                "ne" => "!=",
+                "lt" => "<",
+                "le" => "<=",
+                "gt" => ">",
+                "ge" => ">=",
+                _ => "",
+            };
+            if !op.is_empty() && self.peek(recv).is_some_and(|t| t.is_int() || t.is_float() || matches!(t, Ty::Bool | Ty::Char)) {
+                let rhs = Expr::Unary("*".into(), Box::new(paren(margs[0].clone())), crate::parse::Span::default());
+                let b = Expr::Binary(op.into(), Box::new(paren((**recv).clone())), Box::new(rhs), msp);
+                let b = self.keep_expr(b);
+                return self.expr(b, expected);
+            }
+        }
         // (`v[1..].iter()`: 範囲の添字の受け手は参照にする (自動参照)。文字列は str のメソッドが受ける)
         if let Expr::Index(b, ix, _) = strip_paren(recv) {
             let bt = self.peek(b).map(|t| self.strip_refs(t));

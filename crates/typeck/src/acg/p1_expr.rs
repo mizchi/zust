@@ -553,6 +553,15 @@ impl Cx<'_> {
                 Ok(r)
             }
             Expr::Assign(left, right) => {
+                // (`map[&k] = v`: a map's index is not a place to assign to (E0594); `insert` or `get_mut`)
+                if let Expr::Index(b, _, _) = strip_paren(left) {
+                    if let Some(Ty::Struct(sid)) = self.peek(b).map(|t| self.strip_refs(t)) {
+                        let n = self.prog.structs[self.prog.base_of(sid) as usize].name.as_str();
+                        if matches!(n, "HashMap" | "BTreeMap") {
+                            return err(expr_start(left), format!("cannot assign to data in an index of `{n}` (E0594)"));
+                        }
+                    }
+                }
                 let (blk0, ev0) = (self.b.live_block(), self.bk.evs.len());
                 self.bk.place_depth += 1;
                 let pm = std::mem::replace(&mut self.bk.place_mut, true);

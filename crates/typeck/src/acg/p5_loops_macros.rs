@@ -311,6 +311,36 @@ impl Cx<'_> {
 
     fn for_inner(&mut self, f: &Expr) -> R<V> {
         let Expr::For(label, fpat, fexpr, fbody) = f else { unreachable!() };
+        // `for p in opt.iter() { .. }` (Option, with no iterator in the prelude): a loop of at most one turn,
+        // `for _ in 0..1 { if let Some(__x) = &opt { let p = __x; .. } }` (`into_iter`: the Option itself)
+        if let Expr::MethodCall(recv, m, _, margs, _) = strip_paren(fexpr) {
+            if margs.is_empty() && matches!(m.as_str(), "iter" | "iter_mut" | "into_iter") {
+                if let Some(Ty::Struct(sid)) = self.peek(recv) {
+                    if self.prog.structs[self.prog.base_of(sid) as usize].name == "Option" && self.prog.method(sid, m).is_none() {
+                        let scrut = match m.as_str() {
+                            "iter" => Expr::Ref(false, Box::new(Expr::Paren(recv.clone()))),
+                            "iter_mut" => Expr::Ref(true, Box::new(Expr::Paren(recv.clone()))),
+                            _ => Expr::Paren(recv.clone()),
+                        };
+                        let some = Pat::TupleStruct(path_of("Some"), vec![Pat::Ident(false, false, "__exr_ox".into(), None)]);
+                        let mut stmts = vec![Stmt::Let((**fpat).clone(), None, Some(path_expr("__exr_ox")), None)];
+                        stmts.extend(fbody.stmts.iter().cloned());
+                        let iflet = Expr::If(Box::new(Expr::Let(Box::new(some), Box::new(scrut))), crate::parse::Block { stmts }, None);
+                        // (with no `break` / `continue` in the body, no loop: a value moved in is not moved in a loop)
+                        let dbg = format!("{fbody:?}");
+                        if label.is_none() && !dbg.contains("Break(") && !dbg.contains("Continue(") {
+                            let st = Expr::Block(None, false, crate::parse::Block { stmts: vec![Stmt::Expr(iflet, true)] });
+                            let st: &Expr = self.keep_expr(st);
+                            return self.expr(st, None);
+                        }
+                        let range = Expr::Range(Some(Box::new(Expr::Lit("0usize".into(), Default::default()))), Some(Box::new(Expr::Lit("1usize".into(), Default::default()))), false);
+                        let lp = Expr::For(label.clone(), Box::new(Pat::Wild), Box::new(range), crate::parse::Block { stmts: vec![Stmt::Expr(iflet, false)] });
+                        let lp: &Expr = self.keep_expr(lp);
+                        return self.for_inner(lp);
+                    }
+                }
+            }
+        }
         // (ラベルは syn の ident と同じく先頭の `'` を外した形で持つ)
         self.pending_label = label.as_ref().map(|l| l.trim_start_matches('\'').to_string());
         // 外側からアダプタ (`.rev()` / `.enumerate()` / `.iter()` ...) を剥がす

@@ -1161,6 +1161,10 @@ pub fn select_with(user_src: &str, user_items: &[SrcItem], cache: &mut SelectCac
         need.extend(["__exr_main_err", "process_exit", "eprintln", "__exr_eprint", "Debug"]);
         need.extend(FMT_NAMES.iter().copied());
     }
+    // (`map[&k]` / `map["k"]` is `map.get(..).unwrap()`)
+    if (need.contains("HashMap") || need.contains("BTreeMap")) && sc.has("[") {
+        need.extend(["get", "unwrap", "Option"]);
+    }
     // (`impl IntoIterator for &Coll` の into_iter はイテレータを返す)
     if sc.has("IntoIterator for") {
         need.extend(["__into_iter_mark", "Iterator", "next", "iter"]);

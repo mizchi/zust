@@ -51,6 +51,7 @@ run-pass	array-slice-vec/slice-of-multi-ref.rs
 check-pass	array-slice-vec/slice-subslice-ref-lifetime.rs
 compile-fail	array-slice-vec/slice-to-vec-comparison.rs
 check-pass	array-slice-vec/subslice-range-return-ref.rs
+run-pass	array-slice-vec/vec-dst.rs
 run-pass	array-slice-vec/vec-late-init.rs
 run-pass	array-slice-vec/vec-macro-no-std.rs
 run-pass	array-slice-vec/vec-macro-rvalue-scope.rs
@@ -589,7 +590,6 @@ compile-fail	borrowck/borrowck-escaping-closure-error-1.rs
 run-pass	borrowck/borrowck-field-sensitivity-rpass.rs
 compile-fail	borrowck/borrowck-field-sensitivity.rs
 run-pass	borrowck/borrowck-fixed-length-vecs.rs
-compile-fail	borrowck/borrowck-for-loop-correct-cmt-for-pattern.rs
 compile-fail	borrowck/borrowck-for-loop-head-linkage.rs
 compile-fail	borrowck/borrowck-for-loop-uninitialized-binding.rs
 run-pass	borrowck/borrowck-freeze-frozen-mut.rs
@@ -765,6 +765,7 @@ run-pass	borrowck/reborrow-in-match-ref-mut-option.rs
 compile-fail	borrowck/reborrow-in-match-suggest-deref.rs
 run-pass	borrowck/refcell-borrow-comparison-12033.rs
 run-pass	borrowck/region-checker-map-closure-13665.rs
+run-pass	borrowck/rvalue-lifetime-match-equivalence-7660.rs
 check-pass	borrowck/self-field-consume-with-drop-type.rs
 check-pass	borrowck/static-trait-bound-lost.rs
 check-pass	borrowck/struct-field-move-with-drop-borrow.rs
@@ -772,6 +773,7 @@ run-pass	borrowck/struct-with-reference-to-trait-5708.rs
 compile-fail	borrowck/suggest-assign-rvalue.rs
 compile-fail	borrowck/suggest-mut-iterator.rs
 compile-fail	borrowck/suggest-ref-mut-issue-118596.rs
+compile-fail	borrowck/suggestions/overloaded-index-not-mut-but-should-be-mut.rs
 compile-fail	borrowck/suggestions/overloaded-index-without-indexmut.rs
 compile-fail	borrowck/tainted-promoteds.rs
 check-pass	borrowck/tuple-field-move-with-drop-borrow.rs
@@ -797,6 +799,7 @@ run-pass	box/unit/unique-in-tag.rs
 run-pass	box/unit/unique-in-vec-copy.rs
 run-pass	box/unit/unique-kinds.rs
 run-pass	box/unit/unique-object-move.rs
+run-pass	box/unit/unique-pat-3.rs
 run-pass	box/unit/unique-send-2.rs
 run-pass	box/unit/unique-swap.rs
 run-pass	builtin-superkinds/builtin-superkinds-capabilities-transitive.rs
@@ -1092,6 +1095,8 @@ compile-fail	coherence/orphan-check-error-reporting-ty-var.rs
 check-pass	coherence/super-traits/super-trait-knowable-1.rs
 check-pass	coherence/super-traits/super-trait-knowable-2.rs
 check-pass	coherence/super-traits/super-trait-knowable-3.rs
+compile-fail	collections/btreemap/btreemap-index-mut-2.rs
+compile-fail	collections/btreemap/btreemap-index-mut.rs
 check-pass	collections/btreemap/btreemap_into_iterator_lifetime.rs
 run-pass	collections/hashmap/hashmap-debug-format.rs
 compile-fail	collections/hashmap/hashmap-index-mut.rs
@@ -1438,6 +1443,7 @@ compile-fail	deprecation/issue-84637-deprecated-associated-function.rs
 compile-fail	deprecation/try-macro-suggestion.rs
 compile-fail	deprecation/unit_and_tuple_struct.rs
 check-pass	deref/deref-impl-for-dyn-trait.rs
+run-pass	deref/deref-in-for-loop.rs
 check-pass	deref/deref-mut-method-through-box.rs
 run-pass	deref/deref-newtype-method-call.rs
 run-pass	deref/deref-newtype-slice-coercion.rs
@@ -1548,6 +1554,7 @@ run-pass	drop/destructor-run-for-expression-4734.rs
 compile-fail	drop/drop-conflicting-impls.rs
 run-pass	drop/drop-count-assertion-16151.rs
 run-pass	drop/drop-immediate-non-box-ty-9446.rs
+run-pass	drop/drop-in-for-loop-destructure.rs
 run-pass	drop/drop-on-empty-block-exit.rs
 run-pass	drop/drop-on-ret.rs
 run-pass	drop/drop-on-untaken-arm.rs
@@ -2724,6 +2731,7 @@ check-pass	lint/unused/issue-71290-unused-paren-binop.rs
 check-pass	lint/unused/match_with_guard.rs
 check-pass	lint/unused/must-use-block-expr.rs
 check-pass	lint/unused/must-use-box-from-raw.rs
+check-pass	lint/unused/must-use-macros.rs
 check-pass	lint/unused/must-use-ops.rs
 compile-fail	lint/unused/must_use-tuple.rs
 run-pass	lint/unused/no-unused-parens-return-block.rs
@@ -2761,6 +2769,7 @@ check-pass	liveness/liveness-derive.rs
 compile-fail	liveness/liveness-forgot-ret.rs
 compile-fail	liveness/liveness-missing-ret2.rs
 compile-fail	liveness/liveness-move-call-arg.rs
+compile-fail	liveness/liveness-move-in-loop.rs
 compile-fail	liveness/liveness-return-last-stmt-semi.rs
 compile-fail	liveness/liveness-use-after-send.rs
 run-pass	liveness/unused-assignments-diverging-branch-issue-156416.rs
@@ -2804,6 +2813,7 @@ check-pass	macros/issue-112342-2.rs
 check-pass	macros/issue-22463.rs
 run-pass	macros/issue-25274.rs
 compile-fail	macros/issue-26094.rs
+check-pass	macros/issue-2804.rs
 check-pass	macros/issue-33185.rs
 compile-fail	macros/issue-35450.rs
 compile-fail	macros/issue-46438.rs
@@ -3215,6 +3225,7 @@ check-pass	nll/maybe-initialized-drop-uninitialized.rs
 compile-fail	nll/move-errors.rs
 compile-fail	nll/move-subpaths-moves-root.rs
 check-pass	nll/normalization-bounds.rs
+run-pass	nll/process_or_insert_default.rs
 check-pass	nll/promotable-mutable-zst-doesnt-conflict.rs
 check-pass	nll/promoted-liveness.rs
 run-pass	nll/rc-loop.rs

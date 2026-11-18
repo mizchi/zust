@@ -9,8 +9,8 @@
 
 ## 全体
 
-- [x] tests/ui run-pass：60.3%（1455 / 2413）
-- [x] tests/ui check-pass：63.8%（1152 / 1807）
+- [x] tests/ui run-pass：60.5%（1461 / 2413）
+- [x] tests/ui check-pass：64.3%（1161 / 1807）
 - [x] tests/ui build-pass：62.2%（84 / 135）
 - [ ] tests/ui compile-fail（注釈の行でエラー）：38.4%（2826 / 7358）
 - [x] 実際のクレート：fnv、adler2、hex、itoa、rustc-hash、cfg-if がビルドでき、同じ出力を出す（6 / 6）
@@ -109,8 +109,8 @@
 
 ## rustc との速度の比較 (2026-11-18)
 
-- [x] cold ビルド：gen1000 で rustc `-C incremental` の 6.9 倍速い。小さなプログラムで 2.5〜4.0 倍、実際のクレートで 2.9〜4.2 倍
-- [x] 編集して再ビルド：gen1000 で 14 倍速い。小さなプログラムで 12〜17 倍、実際のクレートで 4.8〜7.0 倍
+- [x] cold ビルド：gen1000 で rustc `-C incremental` の 6.7 倍速い。小さなプログラムで 2.5〜4.0 倍、実際のクレートで 2.9〜4.2 倍
+- [x] 編集して再ビルド：gen1000 で 15 倍速い。小さなプログラムで 12〜17 倍、実際のクレートで 4.8〜7.0 倍
 - [x] ディスクのビルドキャッシュ：1/14（gen1000 で 766 KiB と 10.8 MiB）
 - [x] バイナリ：gen1000 で 1/3.2、実際のクレートで 1/93〜1/550
 - [ ] 実行時間：小さなプログラムで zustc は rustc `-O` の 1.2〜3.6 倍遅い（rustc の debug ビルドよりは速い）。
@@ -127,7 +127,7 @@
 |---|---:|---:|
 | gen5000 の no-op ビルド | 664.9 M 命令 | 746.0 M |
 | gen5000 の 1 関数を編集した後のビルド | 621.8 M 命令 | 709.3 M |
-| gen5000 の `check` | 3894.6 M 命令 | 3971.0 M |
+| gen5000 の `check` | 3895.2 M 命令 | 3971.0 M |
 | gen5000 のビルドキャッシュ | 1902.8 KiB | 1902.8 KiB |
-| LSP の definition / hover / completion / references の p50 | 0.65 / 0.54 / 1.18 / 11.34 ms | — |
-| LSP の起動から索引ができるまで（zustc と ide の対象の合計） | 114 ms | — |
+| LSP の definition / hover / completion / references の p50 | 0.61 / 0.50 / 1.12 / 12.27 ms | — |
+| LSP の起動から索引ができるまで（zustc と ide の対象の合計） | 108 ms | — |
