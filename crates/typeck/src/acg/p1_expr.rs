@@ -1543,7 +1543,7 @@ impl Cx<'_> {
                     | "Deref" | "DerefMut" | "Borrow" | "ToOwned" | "AddAssign" | "SubAssign" | "MulAssign" | "DivAssign" | "Index"
                     | "Drop" | "Fn" | "FnMut" | "FnOnce" | "Debug" | "Display"
             );
-            if !p.global && p.segs.len() == 2 && p.segs[0].args.is_empty() && (known || self.prog.traits.contains_key(&p.segs[0].name))
+            if !p.global && p.segs.len() == 2 && p.segs[0].args.is_empty() && known
                 && !self.prog.struct_index.contains_key(&p.segs[0].name)
                 && self.prog.fn_by_p(&PPath::of(p), self.self_sid).is_none_or(|id| self.prog.sigs[id as usize].has_self)
             {
