@@ -96,6 +96,7 @@ check-pass	associated-item/associated-item-two-bounds.rs
 compile-fail	associated-item/impl-duplicate-methods.rs
 compile-fail	associated-item/issue-48027.rs
 compile-fail	associated-item/missing-associated_item_or_field_def_ids.rs
+check-pass	associated-type-bounds/ambiguous-associated-type.rs
 check-pass	associated-type-bounds/assoc-type-bound-through-where-clause.rs
 compile-fail	associated-type-bounds/assoc-type-eq-with-dyn-atb-fail.rs
 check-pass	associated-type-bounds/associated-item-through-where-clause.rs
@@ -1472,6 +1473,7 @@ compile-fail	derives/imperfect-derive-phantom.rs
 compile-fail	derives/issue-43023.rs
 compile-fail	derives/issue-91492.rs
 compile-fail	derives/issue-91550.rs
+check-pass	derives/no-ice-on-derived-copy-with-associated-type-field.rs
 compile-fail	derives/no-send-sync-derives.rs
 run-pass	derives/no-spurious-unused-variable-warning-on-derive-hash.rs
 build-pass	derives/six-hundred-fields.rs
@@ -4862,6 +4864,7 @@ run-pass	threads-sendsync/comm.rs
 run-pass	threads-sendsync/issue-29488.rs
 run-pass	threads-sendsync/issue-4446.rs
 compile-fail	threads-sendsync/rc-is-not-send.rs
+run-pass	threads-sendsync/send-type-inference.rs
 run-pass	threads-sendsync/sendable-class.rs
 run-pass	threads-sendsync/sendfn-is-a-block.rs
 run-pass	threads-sendsync/spawn-fn.rs

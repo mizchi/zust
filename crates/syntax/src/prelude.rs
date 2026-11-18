@@ -513,6 +513,8 @@ fn defined_name(src: &str, it: &SrcItem) -> Option<String> {
 /// prelude's own is renamed `__p_<name>` in the prelude text, so the two do not collide
 const SHADOWABLE: &[&str] = &[
     "Chain", "Entry", "Enumerate", "Filter", "FilterMap", "Map", "OptIter", "Scan", "Skip", "Take", "TakeWhile", "Zip",
+    "Command", "Mutex", "VarError", "Rev", "StepBy", "Peekable", "Cloned", "Flatten", "FlatMap", "Inspect", "SkipWhile",
+    "PathBuf", "Args", "BufWriter",
 ];
 
 pub fn rename_shadowed(user_src: &str, prelude: String) -> String {
