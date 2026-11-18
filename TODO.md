@@ -2,6 +2,9 @@
 
 ## Compiler (zustc)
 
+- **rustc's tests/ui** (`python3 bench/rust_ui.py`; [report](docs/reports/2026-11-18-07-rustc-ui-tests.md))
+  - Fix the 34 crashes (zustc panics or is killed)
+  - Raise the pass rates: run-pass 46.4%, check-pass 46.0%, compile-fail 31.1% (at an annotated line)
 - **Language**
   - Modules, `DoubleEndedIterator` (`rev` as a value), `HashSet` / `BTreeMap`
   - Share monomorphized instances keyed by layout (make `Vec<A>` and `Vec<B>` one; blaze's polymorph)

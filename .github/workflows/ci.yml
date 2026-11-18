@@ -36,6 +36,23 @@ jobs:
       - name: Compare with rustc (examples)
         run: tests/compare.sh
 
+  rust-ui:
+    # (rustc's own tests/ui: fail if a test zustc passed (bench/rust_ui_passing.txt) no longer passes)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Install wild
+        run: command -v wild || cargo install --locked wild-linker@0.11.0
+      - name: Build zustc
+        run: cargo build --release --bin zustc
+      - name: Fetch rust-lang/rust tests/ui
+        run: python3 bench/rust_ui.py --fetch
+      - name: Run tests/ui against the baseline
+        run: python3 bench/rust_ui.py --baseline bench/rust_ui_passing.txt --check
+
   docs:
     # (英語の文書と日本語訳: 組がそろっているか・記録した jev-lint の判定が今の文書のものか。API キーは要らない)
     runs-on: ubuntu-24.04

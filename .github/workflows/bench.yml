@@ -35,6 +35,10 @@ jobs:
         run: cargo build --release --workspace
       - name: Run benchmarks
         run: python3 bench/ci_bench.py --out-dir out/ci
+      - name: Run rustc's tests/ui
+        run: |
+          python3 bench/rust_ui.py --fetch
+          python3 bench/rust_ui.py --bench-json out/ci/rust_ui.json --json out/ci/rust_ui_summary.json
       - name: Store zustc results
         uses: benchmark-action/github-action-benchmark@v1
         with:
@@ -74,9 +78,23 @@ jobs:
           alert-threshold: "105%"
           comment-on-alert: false
           fail-on-alert: false
+      - name: Store rustc tests/ui pass rates
+        uses: benchmark-action/github-action-benchmark@v1
+        with:
+          name: rustc tests/ui
+          tool: customBiggerIsBetter
+          output-file-path: out/ci/rust_ui.json
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          auto-push: true
+          gh-pages-branch: gh-pages
+          benchmark-data-dir-path: dev/bench
+          alert-threshold: "102%"
+          comment-on-alert: false
+          fail-on-alert: false
       - uses: actions/upload-artifact@v4
         with:
           name: bench-results
           path: |
             out/ci/*.json
             out/ci/work/lsp_parity_result.md
+            out/rust_ui_results.txt

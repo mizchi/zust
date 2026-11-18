@@ -9,7 +9,8 @@ usage: python3 bench/rust_ui.py --fetch                 sparse-clone tests/ui at
 Each test's kind comes from its header directives, as in rustc's compiletest:
 - run-pass: zustc builds it, the program exits 0, and its stdout equals `<name>.run.stdout` when that file exists
 - check-pass / build-pass: `zustc check` accepts it (build-pass also builds it)
-- compile-fail (no pass/fail directive; errors marked with `//~ ERROR`): `zustc check` rejects it
+- compile-fail (no pass/fail directive; errors marked with `//~ ERROR`): `zustc check` rejects it with an error on a
+  line an annotation points at. Rejections that only report other lines are counted as "wrong line"
 
 Tests zustc cannot be asked to handle are counted as "not applicable", not as failures: nightly `#![feature(..)]`,
 auxiliary crates (`aux-build`, `aux-crate`), `compile-flags`, `revisions`, `needs-*` other than what Linux x86-64 has,
@@ -88,6 +89,25 @@ def classify(path):
 LIMIT = ["prlimit", "--as=2147483648", "--"] if subprocess.run(["sh", "-c", "command -v prlimit"], capture_output=True).returncode == 0 else []
 
 
+def error_lines(text):
+    """Lines that `//~ ERROR` annotations point at: `//~` this line, `//~^` one line up per caret, `//~|` the same line
+    as the previous annotation"""
+    out, last = set(), None
+    for i, line in enumerate(text.split("\n"), 1):
+        m = re.search(r"//~(\^*|\|)\s*(ERROR|error)", line)
+        if not m:
+            continue
+        mark = m.group(1)
+        if mark == "|":
+            at = last
+        else:
+            at = i - len(mark)
+        if at is not None:
+            out.add(at)
+            last = at
+    return out
+
+
 def crashed(r):
     return r.returncode < 0 or "panicked at" in r.stderr or "RUST_BACKTRACE" in r.stderr
 
@@ -101,7 +121,14 @@ def run_one(path, kind, tmp):
             if crashed(r):
                 return "crash"
             ok = r.returncode == 0
-            return "pass" if ok == (kind == "check-pass") else "fail"
+            if kind == "check-pass":
+                return "pass" if ok else "fail"
+            if ok:
+                return "fail"
+            # (rejected: count it only when an error is reported on a line an annotation points at)
+            want = error_lines(open(path, errors="replace").read())
+            got = {int(m.group(1)) for m in re.finditer(r"^error: [^\n]*?:(\d+):\d+:", r.stderr, re.M)}
+            return "pass" if want & got else "wrong-line"
         r = subprocess.run([*LIMIT, ZUSTC, path, "-o", exe, "--no-cache"], capture_output=True, text=True, timeout=60)
         if crashed(r):
             return "crash"
@@ -135,6 +162,10 @@ def main():
     ap.add_argument("--jobs", type=int, default=os.cpu_count() or 4)
     ap.add_argument("--json", default=os.path.join(ROOT, "out/rust_ui.json"))
     ap.add_argument("--results", default=os.path.join(ROOT, "out/rust_ui_results.txt"))
+    ap.add_argument("--baseline", default=None, help="list of passing tests (kind<TAB>path) to compare against")
+    ap.add_argument("--check", action="store_true", help="with --baseline: exit 1 if a test in the baseline no longer passes")
+    ap.add_argument("--write-baseline", action="store_true", help="with --baseline: write the passing tests to it")
+    ap.add_argument("--bench-json", default=None, help="write pass rates in github-action-benchmark's customBiggerIsBetter format")
     a = ap.parse_args()
     if a.fetch:
         fetch()
@@ -168,11 +199,11 @@ def main():
         res = list(ex.map(lambda t: (t[0], t[1], run_one(t[0], t[1], tmp)), tests))
     summary = {}
     for _, k, r in res:
-        s = summary.setdefault(k, {"pass": 0, "fail": 0, "crash": 0, "timeout": 0})
+        s = summary.setdefault(k, {"pass": 0, "fail": 0, "wrong-line": 0, "crash": 0, "timeout": 0})
         s[r] += 1
     out = {"commit": COMMIT, "tag": TAG, "seconds": round(time.time() - t0, 1), "kinds": {}}
     for k in kinds:
-        s = summary.get(k, {"pass": 0, "fail": 0, "crash": 0, "timeout": 0})
+        s = summary.get(k, {"pass": 0, "fail": 0, "wrong-line": 0, "crash": 0, "timeout": 0})
         n = sum(s.values())
         out["kinds"][k] = {**s, "applicable": n, "not_applicable": skipped.get(k, {}), "pass_rate": round(100 * s["pass"] / n, 2) if n else None}
     os.makedirs(os.path.dirname(a.json), exist_ok=True)
@@ -180,13 +211,50 @@ def main():
     with open(a.results, "w") as f:
         for p, k, r in sorted(res):
             f.write(f"{r}\t{k}\t{os.path.relpath(p, ui)}\n")
+    if a.bench_json:
+        rows = []
+        for k, v in out["kinds"].items():
+            if v["pass_rate"] is not None:
+                rows.append({"name": f"tests/ui {k} pass rate", "value": v["pass_rate"], "unit": "%"})
+                rows.append({"name": f"tests/ui {k} passing", "value": v["pass"], "unit": "tests"})
+        json.dump(rows, open(a.bench_json, "w"), indent=1)
+    status = 0
+    if a.baseline:
+        now = {(k, os.path.relpath(p, ui)): r for p, k, r in res}
+        passing = {key for key, r in now.items() if r == "pass"}
+        if a.write_baseline:
+            with open(a.baseline, "w") as f:
+                f.write(f"# tests/ui tests zustc passes (rust-lang/rust {TAG}, {COMMIT[:9]}); bench/rust_ui.py --write-baseline\n")
+                for k, p in sorted(passing, key=lambda x: (x[1], x[0])):
+                    f.write(f"{k}\t{p}\n")
+        else:
+            base = set()
+            for line in open(a.baseline):
+                if line.strip() and not line.startswith("#"):
+                    k, p = line.rstrip("\n").split("\t")
+                    base.add((k, p))
+            ran = set(now)
+            lost = sorted(x for x in base & ran if now[x] not in ("pass", "timeout"))
+            slow = sorted(x for x in base & ran if now[x] == "timeout")
+            new = sorted(passing - base)
+            for k, p in lost:
+                print(f"regression: {k} {p} ({now[(k, p)]})")
+            for k, p in slow:
+                print(f"timeout (was passing): {k} {p}")
+            print(f"baseline: {len(lost)} regressions, {len(slow)} timeouts, {len(new)} newly passing")
+            if new and a.check:
+                print("(newly passing tests: update the baseline with --write-baseline)")
+            if lost and a.check:
+                status = 1
     print(f"rust-lang/rust tests/ui at {TAG} ({COMMIT[:9]}), {out['seconds']} s")
-    print("| kind | applicable | pass | fail | crash | timeout | pass rate | not applicable |")
-    print("|---|---:|---:|---:|---:|---:|---:|---:|")
+    print("| kind | applicable | pass | fail | wrong line | crash | timeout | pass rate | not applicable |")
+    print("|---|---:|---:|---:|---:|---:|---:|---:|---:|")
     for k, v in out["kinds"].items():
         na = sum(v["not_applicable"].values())
         rate = "-" if v["pass_rate"] is None else f"{v['pass_rate']}%"
-        print(f"| {k} | {v['applicable']} | {v['pass']} | {v['fail']} | {v['crash']} | {v['timeout']} | {rate} | {na} |")
+        wl = v["wrong-line"] if k == "compile-fail" else "-"
+        print(f"| {k} | {v['applicable']} | {v['pass']} | {v['fail']} | {wl} | {v['crash']} | {v['timeout']} | {rate} | {na} |")
+    sys.exit(status)
 
 
 if __name__ == "__main__":

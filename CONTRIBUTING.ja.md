@@ -102,6 +102,34 @@ tests/selfhost_compiler.sh
 コンパイラ全体を zustc と rustc の両方でコンパイルする。できた 2 つのコンパイラが同じ `.o` を出すかを確かめる。zustc 版で
 自分自身をもう一度コンパイルし、同じものになるか (不動点) も見る。
 
+### rustc 自身のテスト集
+
+`bench/rust_ui.py` は、rustc の UI テスト (rust-lang/rust の `tests/ui`。rustc 1.100.0 のコミットに固定) を zustc で
+走らせる。最初に一度取ってくる (`tests/ui` だけの部分 clone、約 170 MB を `out/rust-tests` に):
+
+```bash
+python3 bench/rust_ui.py --fetch
+```
+
+```bash
+python3 bench/rust_ui.py --baseline bench/rust_ui_passing.txt --check
+```
+
+テストの種類は、compiletest と同じく頭の指示から決める。run-pass のテストは、ビルドでき、終了コード 0 で、
+`.run.stdout` と同じものを出すこと。check-pass のテストは `zustc check` が通すこと。compile-fail のテストは、
+`//~ ERROR` の注釈が指す行にエラーを出して拒むこと。zustc に求められないもの (nightly の `#![feature]`・補助の
+クレート・`compile-flags`・`revisions`・ほかのターゲット) が要るテストは「対象外」に数える。
+
+`bench/rust_ui_passing.txt` は zustc が通るテストの一覧。そのどれかが通らなくなると CI が失敗する。変更で通る
+テストが増えたら、一覧を書き直す:
+
+```bash
+python3 bench/rust_ui.py --baseline bench/rust_ui_passing.txt --write-baseline
+```
+
+`--filter 文字列` でパスが合うものだけ、`--kinds run-pass` で 1 つの種類だけを走らせる。すべてのテストの結果は
+`out/rust_ui_results.txt` にある。
+
 ### ゴールデン
 
 `crates/ide/tests/golden/*.txt` は zust-ide の答えの記録。意図して答えを変えたら、次のコマンドで書き直す。
@@ -179,7 +207,7 @@ origin/main からの差分の行だけを変異させ、テストで見つか�
 ## CI とベンチマークのダッシュボード
 
 - `.github/workflows/ci.yml`: push と pull request ごとに、release ビルド、`cargo test --release --workspace`、
-  `tests/compare.sh` を走らせる。サイズ予算はリンカで変わるので、CI は wild 0.11.0 を入れて `ZUSTC_BENCH_LINKER=wild` で測る
+  `tests/compare.sh`、tests/ui の一覧との比較を走らせる。サイズ予算はリンカで変わるので、CI は wild 0.11.0 を入れて `ZUSTC_BENCH_LINKER=wild` で測る
   (`bench/budget.txt` も wild の大きさ)。
 - `.github/workflows/bench.yml`: main への push ごとに `bench/ci_bench.py` を走らせ、
   [github-action-benchmark](https://github.com/benchmark-action/github-action-benchmark) で gh-pages ブランチの `dev/bench/` に
@@ -189,6 +217,7 @@ origin/main からの差分の行だけを変異させ、テストで見つか�
     キャッシュの大きさ、`bench/rt` の実行時間
   - zust-analyzer: `bench/lsp_parity.py` (zustc 自身のソース) の各問い合わせの p50、起動から索引ができるまで、RSS
   - rust-analyzer と同じ答えを返した割合
+  - rustc の tests/ui の通った割合
   - 前回より 30% 以上悪くなった (一致の割合は 5%) ものは、ワークフローの結果に警告が出る (失敗にはしない)
 
 ローカルで同じものを測るには:

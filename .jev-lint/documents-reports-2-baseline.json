@@ -1,6 +1,6 @@
 {
   "schema": "jev-lint-documents-1",
-  "snapshotDigest": "7b8b4072d40878a35a6d859499ff8a63a8c5ac5c932200004ffec6c74959de33",
+  "snapshotDigest": "769a99cae877c841ccf9ccc25f7f3d6f989e2b3c5c279e4f10039eb851a6be68",
   "questionDigest": "209d6df378ccb747fcb0e821998fcd6105bc76638a88d22488d3b398d6a21595",
   "model": "jev-1.14.0",
   "snapshotChanged": false,
@@ -32,10 +32,10 @@
       "contextHash": "ec20e2ebdd2ae375a6636074c628c438138c77646a5be532bd01237081e3f660",
       "judgment": {
         "choice": "supports",
-        "confidence": 0.99,
+        "confidence": 1,
         "probabilities": {
-          "supports": 0.99,
-          "contradicts": 0.01,
+          "supports": 1,
+          "contradicts": 0,
           "unrelated": 0,
           "insufficient_context": 0
         }
@@ -100,12 +100,12 @@
       "contextHash": "a068452334ef52150a1932e9d45207a4c156e3a5c60d69e061e986b1aa86d889",
       "judgment": {
         "choice": "supports",
-        "confidence": 0.99,
+        "confidence": 0.95,
         "probabilities": {
-          "supports": 0.99,
-          "contradicts": 0.01,
+          "supports": 0.96,
+          "contradicts": 0.03,
           "unrelated": 0,
-          "insufficient_context": 0
+          "insufficient_context": 0.01
         }
       }
     },
@@ -202,10 +202,10 @@
       "contextHash": "5b6ede2d00ec82893b1c63b36b593d1e9e7999236c2422416b8324666f265c93",
       "judgment": {
         "choice": "supports",
-        "confidence": 0.99,
+        "confidence": 0.96,
         "probabilities": {
-          "supports": 0.99,
-          "contradicts": 0.01,
+          "supports": 0.97,
+          "contradicts": 0.03,
           "unrelated": 0,
           "insufficient_context": 0
         }
@@ -236,10 +236,10 @@
       "contextHash": "68facf70966b576a1dde106a31fd37de8e21bda46e6439878b91e7bce57154b6",
       "judgment": {
         "choice": "supports",
-        "confidence": 0.97,
+        "confidence": 0.96,
         "probabilities": {
-          "supports": 0.98,
-          "contradicts": 0.02,
+          "supports": 0.97,
+          "contradicts": 0.03,
           "unrelated": 0,
           "insufficient_context": 0
         }
@@ -270,10 +270,10 @@
       "contextHash": "ed2a1f14d0739ff354f0f733b191758f1f701bf8d97c6ff2fb9d9d6c3960f277",
       "judgment": {
         "choice": "supports",
-        "confidence": 0.97,
+        "confidence": 0.99,
         "probabilities": {
-          "supports": 0.98,
-          "contradicts": 0.02,
+          "supports": 0.99,
+          "contradicts": 0.01,
           "unrelated": 0,
           "insufficient_context": 0
         }
@@ -686,12 +686,46 @@
           "insufficient_context": 0
         }
       }
+    },
+    {
+      "id": "docs_reports_2026-11-18-07-rustc-ui-tests",
+      "topic": "The Japanese file docs/ja/reports/2026-11-18-07-rustc-ui-tests.md is a faithful translation of docs/reports/2026-11-18-07-rustc-ui-tests.md",
+      "mode": "translation",
+      "reference": {
+        "source": "docs_reports_2026-11-18-07-rustc-ui-tests.en",
+        "path": "docs/reports/2026-11-18-07-rustc-ui-tests.md",
+        "startLine": 1,
+        "endLine": 60,
+        "quote": "# rustc's own UI tests as a specification suite\n\nDate: 2026-11-18\n\n`tests/ui` in rust-lang/rust is the closest thing Rust has to an executable specification: each file says, in header\ndirectives, whether it must run, must check, or must be rejected (with the expected errors marked by `//~ ERROR`).\n`bench/rust_ui.py` runs zustc against it and reports pass rates.\n\n## Fetching\n\nA git submodule would download all of rust-lang/rust, and git cannot make a submodule sparse without manual setup.\nThe script instead pins a commit (tag 1.100.0, `0ef1bc386`, the same commit as the rustc used here) and does a\nshallow, blob-filtered, sparse clone of only `tests/ui` into `out/rust-tests`: 6 seconds and 170 MB, 20,364 test\nfiles.\n\n## What counts as passing\n\nThe kind of each test comes from its directives, as in rustc's compiletest:\n\n| kind | files | passes when |\n|---|---:|---|\n| run-pass | 3771 | zustc builds it, it exits 0, and stdout equals `<name>.run.stdout` if that exists |\n| check-pass | 3654 | `zustc check` accepts it |\n| build-pass | 572 | zustc builds it |\n| compile-fail (no pass/fail directive) | 11707 | `zustc check` rejects it with an error on a line an annotation points at |\n\nTests that need what zustc cannot be asked for are counted as not applicable: nightly `#![feature]`, auxiliary crates\n(`aux-build`, `aux-crate`), `compile-flags` / `rustc-env`, `revisions`, targets other than Linux x86-64, `ignore-test`,\nand compile-fail tests without annotations. Each zustc run is limited to 2 GB of address space (`prlimit`) and a\ntimeout; one test had taken the whole machine's memory before the limit was added.\n\nFor compile-fail, \"rejected\" alone was misleading. A first version counted any rejection and gave 64%. Many of\nthose were rejections for unrelated reasons, such as a missing type that the test did not mean to test. Requiring an\nerror on an annotated line (`//~` this line, `//~^` one line up per caret, `//~|` the same line as the previous\nannotation) gives 31%. Rejections elsewhere are reported separately as \"wrong line\".\n\n## Results\n\nOn 4 cores with 3 workers the applicable tests take 112 seconds.\n\n| kind | applicable | pass | fail | wrong line | crash | timeout | pass rate | not applicable |\n|---|---:|---:|---:|---:|---:|---:|---:|---:|\n| run-pass | 2413 | 1120 | 1287 | - | 5 | 1 | 46.42% | 1357 |\n| check-pass | 1807 | 831 | 972 | - | 4 | 0 | 45.99% | 1843 |\n| build-pass | 135 | 64 | 69 | - | 2 | 0 | 47.41% | 354 |\n| compile-fail | 7358 | 2291 | 2613 | 2428 | 23 | 3 | 31.14% | 4438 |\n\nTwo runs on the same machine gave the same set of passing tests.\n\n## Keeping it from regressing\n\n`bench/rust_ui_passing.txt` lists the 4306 passing tests. CI (`rust-ui` job) fetches `tests/ui` and fails if a test\non the list no longer passes; a timeout only warns. When a change makes more tests pass, `--write-baseline` rewrites\nthe list. The benchmark workflow also sends the pass rates and counts to the dashboard.\n\n## What is next\n\nThe failures are the backlog for the language: `out/rust_ui_results.txt` lists every test with its result, and\n`--filter` narrows a run to one area (for example `--filter tests/ui/closures`). The 34 crashes come first, since a\ncompiler should not panic on any input.",
+        "contentHash": "f6a028b7e8481cf36a02ab8cd5839039dd180aa403c7229df7ed97745627ab8b"
+      },
+      "target": {
+        "source": "docs_reports_2026-11-18-07-rustc-ui-tests.ja",
+        "path": "docs/ja/reports/2026-11-18-07-rustc-ui-tests.md",
+        "startLine": 1,
+        "endLine": 59,
+        "quote": "# rustc 自身の UI テストを仕様のテスト集にする\n\n日付: 2026-11-18\n\nrust-lang/rust の `tests/ui` は、Rust にとって実行できる仕様にいちばん近いもの。各ファイルが、頭の指示で、実行できる\nべきか、検査を通るべきか、拒まれるべきか (期待するエラーは `//~ ERROR` で印を付ける) を書いている。\n`bench/rust_ui.py` は zustc をそれに対して走らせ、通った割合を出す。\n\n## 取り方\n\ngit submodule にすると rust-lang/rust 全体を取ってきてしまい、submodule を部分 checkout にするには手で設定が要る。\nそこでスクリプトがコミット (タグ 1.100.0、`0ef1bc386`。ここで使っている rustc と同じコミット) を固定し、`tests/ui`\nだけを、浅く・blob を絞った部分 clone で `out/rust-tests` に取る。6 秒、170 MB、テストのファイルは 20,364。\n\n## 何を通ったとするか\n\n各テストの種類は、rustc の compiletest と同じく指示から決める:\n\n| 種類 | ファイル | 通ったとする条件 |\n|---|---:|---|\n| run-pass | 3771 | zustc がビルドでき、終了コード 0 で、`<名前>.run.stdout` があればそれと同じものを出す |\n| check-pass | 3654 | `zustc check` が通す |\n| build-pass | 572 | zustc がビルドできる |\n| compile-fail (pass / fail の指示がない) | 11707 | `zustc check` が、注釈の指す行にエラーを出して拒む |\n\nzustc に求められないものが要るテストは「対象外」に数える: nightly の `#![feature]`、補助のクレート\n(`aux-build`・`aux-crate`)、`compile-flags` / `rustc-env`、`revisions`、Linux x86-64 以外のターゲット、\n`ignore-test`、注釈のない compile-fail。zustc の 1 回の実行は、アドレス空間 2 GB (`prlimit`) と時間で制限する。\n制限を付ける前は、1 つのテストがマシン全体のメモリを使い切った。\n\ncompile-fail は「拒んだ」だけでは当てにならなかった。最初の版はどんな拒み方でも数えて 64% になった。その多くは、\nテストが確かめたいのとは関係のない理由 (見つからない型など) で拒んでいた。注釈の行 (`//~` はその行、`//~^` は\n`^` 1 つにつき 1 行上、`//~|` は前の注釈と同じ行) にエラーを出すことを条件にすると 31%。ほかの行だけで拒んだものは\n「行が違う」として別に数える。\n\n## 結果\n\n4 コア・3 並列で、対象のテストに 112 秒かかる。\n\n| 種類 | 対象 | 通った | 失敗 | 行が違う | クラッシュ | 時間切れ | 通った割合 | 対象外 |\n|---|---:|---:|---:|---:|---:|---:|---:|---:|\n| run-pass | 2413 | 1120 | 1287 | - | 5 | 1 | 46.42% | 1357 |\n| check-pass | 1807 | 831 | 972 | - | 4 | 0 | 45.99% | 1843 |\n| build-pass | 135 | 64 | 69 | - | 2 | 0 | 47.41% | 354 |\n| compile-fail | 7358 | 2291 | 2613 | 2428 | 23 | 3 | 31.14% | 4438 |\n\n同じマシンで 2 回走らせ、通ったテストの集合は同じだった。\n\n## 後退させないために\n\n`bench/rust_ui_passing.txt` は通った 4306 のテストの一覧。CI (`rust-ui` のジョブ) が `tests/ui` を取ってきて、一覧の\nテストが通らなくなれば失敗する (時間切れは警告だけ)。変更で通るテストが増えたら、`--write-baseline` で一覧を\n書き直す。ベンチマークのワークフローも、通った割合と数をダッシュボードに送る。\n\n## 次にやること\n\n失敗したものが言語の残りの仕事の一覧になる: `out/rust_ui_results.txt` にすべてのテストの結果があり、`--filter` で\n1 つの分野に絞って走らせられる (例: `--filter tests/ui/closures`)。コンパイラはどんな入力でも panic するべきでは\nないので、34 件のクラッシュから先に直す。",
+        "contentHash": "510b61a92349406bbd0dd0c27fdfd70bee20eb114ce9041f1d159b2c61a55164"
+      },
+      "context": [],
+      "candidateId": "9e4bf29dd8bd3287e6116b9550b13fd117cab23f8751fbffe29ecff46bef968f",
+      "contextHash": "fee3dc6136c2d74a8f2b22992deee33ae5ead6cdbc19c240e51b7dcbe27e38cc",
+      "judgment": {
+        "choice": "supports",
+        "confidence": 0.97,
+        "probabilities": {
+          "supports": 0.98,
+          "contradicts": 0.01,
+          "unrelated": 0,
+          "insufficient_context": 0.01
+        }
+      }
     }
   ],
   "coverage": {
-    "expected": 20,
-    "selected": 20,
-    "answered": 20,
+    "expected": 21,
+    "selected": 21,
+    "answered": 21,
     "missing": 0,
     "contradictions": 0,
     "unassessed": 0,
@@ -700,9 +734,9 @@
     "unboundDocuments": 0
   },
   "usage": {
-    "requests": 20,
-    "inputTokens": 75958,
-    "usd": 0.003190236
+    "requests": 21,
+    "inputTokens": 79595,
+    "usd": 0.00334299
   },
   "errors": []
 }

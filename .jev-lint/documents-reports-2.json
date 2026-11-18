@@ -160,6 +160,14 @@
     "docs_reports_2026-11-18-06-remaining-differences.ja": {
       "path": "docs/ja/reports/2026-11-18-06-remaining-differences.md",
       "role": "historical"
+    },
+    "docs_reports_2026-11-18-07-rustc-ui-tests.en": {
+      "path": "docs/reports/2026-11-18-07-rustc-ui-tests.md",
+      "role": "historical"
+    },
+    "docs_reports_2026-11-18-07-rustc-ui-tests.ja": {
+      "path": "docs/ja/reports/2026-11-18-07-rustc-ui-tests.md",
+      "role": "historical"
     }
   },
   "comparisons": [
@@ -381,6 +389,17 @@
       },
       "target": {
         "source": "docs_reports_2026-11-18-06-remaining-differences.ja"
+      }
+    },
+    {
+      "id": "docs_reports_2026-11-18-07-rustc-ui-tests",
+      "topic": "The Japanese file docs/ja/reports/2026-11-18-07-rustc-ui-tests.md is a faithful translation of docs/reports/2026-11-18-07-rustc-ui-tests.md",
+      "mode": "translation",
+      "reference": {
+        "source": "docs_reports_2026-11-18-07-rustc-ui-tests.en"
+      },
+      "target": {
+        "source": "docs_reports_2026-11-18-07-rustc-ui-tests.ja"
       }
     }
   ]

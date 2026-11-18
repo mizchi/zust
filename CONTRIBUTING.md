@@ -105,6 +105,34 @@ Compiles the whole compiler with both zustc and rustc and checks that the two re
 `.o` files. It also compiles the compiler again with the zustc-built version and checks that the result is the same
 (a fixed point).
 
+### rustc's own test suite
+
+`bench/rust_ui.py` runs zustc against rustc's UI tests (rust-lang/rust `tests/ui`, pinned to the commit of rustc
+1.100.0). Fetch them once (a sparse clone of only `tests/ui`, about 170 MB, into `out/rust-tests`):
+
+```bash
+python3 bench/rust_ui.py --fetch
+```
+
+```bash
+python3 bench/rust_ui.py --baseline bench/rust_ui_passing.txt --check
+```
+
+Each test's kind comes from its header directives, as in compiletest. A run-pass test must build, exit 0 and print
+its `.run.stdout`. A check-pass test must pass `zustc check`. A compile-fail test must be rejected with an error on a
+line that one of its `//~ ERROR` annotations points at. Tests that need what zustc cannot be asked for (nightly
+`#![feature]`, auxiliary crates, `compile-flags`, `revisions`, other targets) are counted as not applicable.
+
+`bench/rust_ui_passing.txt` lists the tests zustc passes. CI fails if one of them no longer passes. When a change
+makes more tests pass, rewrite the list:
+
+```bash
+python3 bench/rust_ui.py --baseline bench/rust_ui_passing.txt --write-baseline
+```
+
+`--filter SUBSTR` runs only matching paths, `--kinds run-pass` one kind, and `out/rust_ui_results.txt` has the result
+of every test.
+
 ### Golden files
 
 `crates/ide/tests/golden/*.txt` record zust-ide's answers. When you change answers on purpose, rewrite them with:
@@ -182,8 +210,8 @@ Mutants the tests miss are written to `mutants.out/missed.txt`; add tests to kil
 
 ## CI and the benchmark dashboard
 
-- `.github/workflows/ci.yml` runs a release build, `cargo test --release --workspace` and `tests/compare.sh` on every
-  push and pull request. The size budget depends on the linker, so CI installs wild 0.11.0 and measures with
+- `.github/workflows/ci.yml` runs a release build, `cargo test --release --workspace`, `tests/compare.sh` and the
+  tests/ui baseline check on every push and pull request. The size budget depends on the linker, so CI installs wild 0.11.0 and measures with
   `ZUSTC_BENCH_LINKER=wild` (`bench/budget.txt` also holds wild sizes).
 - `.github/workflows/bench.yml` runs `bench/ci_bench.py` on every push to main and stores the results in `dev/bench/`
   on the gh-pages branch with
@@ -195,6 +223,7 @@ Mutants the tests miss are written to `mutants.out/missed.txt`; add tests to kil
   - zust-analyzer: p50 of each query in `bench/lsp_parity.py` (on zustc's own sources), time from startup until
     indexed, and RSS
   - the share of answers that agree with rust-analyzer
+  - the pass rates on rustc's tests/ui
   - Anything that got worse by 30% or more since the previous run (5% for the agreement ratios) produces a warning in
     the workflow result. It does not fail the run.
 

@@ -52,6 +52,20 @@ The [benchmark dashboard](https://mizchi.github.io/zust/dev/bench/) tracks these
 They are measured on shared GitHub Actions runners, so times fluctuate. The instruction-count series show changes
 more clearly.
 
+### Coverage of rustc's test suite
+
+zustc run against rustc's own UI tests (`tests/ui` of rust-lang/rust 1.100.0, `python3 bench/rust_ui.py`), counting
+only the tests it can be asked to handle (no nightly features, auxiliary crates or special flags):
+
+| kind | applicable | pass |
+|---|---:|---:|
+| run-pass (builds, runs, same output) | 2413 | 1120 (46.4%) |
+| check-pass (accepted by `zustc check`) | 1807 | 831 (46.0%) |
+| build-pass | 135 | 64 (47.4%) |
+| compile-fail (rejected at an annotated line) | 7358 | 2291 (31.1%) |
+
+zustc does no borrow checking, so many compile-fail tests are out of its reach by design.
+
 ## Requirements
 
 - Linux x86-64

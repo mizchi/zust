@@ -44,6 +44,20 @@ zust-analyzer と rust-analyzer を、zustc 自身のソース (40 か所の問�
 main に入るたびに測った数字の推移は [ベンチマークのダッシュボード](https://mizchi.github.io/zust/dev/bench/) にある
 (GitHub Actions の共有のランナーで測るので、時間は揺れる。命令数の系列の方が差を見やすい)。
 
+### rustc のテスト集をどれだけ通るか
+
+rustc 自身の UI テスト (rust-lang/rust 1.100.0 の `tests/ui`、`python3 bench/rust_ui.py`) を zustc で走らせた結果。
+zustc に求められるもの (nightly の機能・補助のクレート・特別なフラグが要らないもの) だけを数える:
+
+| 種類 | 対象 | 通った |
+|---|---:|---:|
+| run-pass (ビルドでき、実行して同じ出力) | 2413 | 1120 (46.4%) |
+| check-pass (`zustc check` が通す) | 1807 | 831 (46.0%) |
+| build-pass | 135 | 64 (47.4%) |
+| compile-fail (注釈の行で拒む) | 7358 | 2291 (31.1%) |
+
+zustc は借用検査をしないので、compile-fail の多くはもともと対象外の性質のもの。
+
 ## 必要なもの
 
 - Linux x86-64
