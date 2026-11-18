@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795008306748,
+  "lastUpdate": 1795008309132,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -6678,6 +6678,85 @@ window.BENCHMARK_DATA = {
           {
             "name": "parity 一致の平均",
             "value": 96.284,
+            "unit": "%"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "committer": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "distinct": true,
+          "id": "35fb6c11d831503295cda93c0b8b6d07971b0e2f",
+          "message": "zustc: unions; checks on struct / enum / union definitions\n\n- `union`: every field at offset 0, size the largest field; a union expression writes one field\n- for the program's own definitions (the prelude's types may break these rules): unused type and\n  lifetime parameters (E0392; a use in another parameter's bound or a where clause counts),\n  `Self` in a parameter default (E0735), unknown derive macros, empty and tuple unions, union\n  fields that need dropping (E0740), derives on unions other than Clone + Copy\n- `impl Trait` in a generic bound is rejected\n- tests/ui: run-pass 50.7%, check-pass 54.1%, build-pass 49.6%, compile-fail 38.2%; four\n  compile-fail tests that were rejected only because unions were unsupported need lint / feature\n  gate / attribute checks\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-18T13:20:07Z",
+          "tree_id": "ca9472c0db8cd6447675c355c8e095184161f371",
+          "url": "https://github.com/mizchi/zust/commit/35fb6c11d831503295cda93c0b8b6d07971b0e2f"
+        },
+        "date": 1795008308677,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "parity documentSymbol (名前の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity workspace/symbol (上位 20 の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity definition (行き先の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity hover (名前を含む)",
+            "value": 87.5,
+            "unit": "%"
+          },
+          {
+            "name": "parity references (数の一致)",
+            "value": 97.222,
+            "unit": "%"
+          },
+          {
+            "name": "parity documentHighlight (数の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity rename (書き換えの一致)",
+            "value": 89.474,
+            "unit": "%"
+          },
+          {
+            "name": "parity signatureHelp (名前・引数の数・今の引数の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity completion `x.\\|` (書いてある名前を含む)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity completion `na\\|me` (同)",
+            "value": 85.185,
+            "unit": "%"
+          },
+          {
+            "name": "parity 一致の平均",
+            "value": 95.938,
             "unit": "%"
           }
         ]
