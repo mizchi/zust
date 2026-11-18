@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795013819172,
+  "lastUpdate": 1795013821418,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -11632,6 +11632,70 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/mizchi/zust/commit/415ab06e8fe9fbeec73279c10afc73d385a66ac2"
         },
         "date": 1795013387791,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tests/ui run-pass pass rate",
+            "value": 52.76,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui run-pass passing",
+            "value": 1273,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui check-pass pass rate",
+            "value": 56.83,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui check-pass passing",
+            "value": 1027,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui build-pass pass rate",
+            "value": 50.37,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui build-pass passing",
+            "value": 68,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui compile-fail pass rate",
+            "value": 38.3,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui compile-fail passing",
+            "value": 2818,
+            "unit": "tests"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "committer": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "distinct": true,
+          "id": "9b37c8b553ae38a9e20fd42ed900e7da7f93b036",
+          "message": "zustc: rename_shadowed scans the source only when a shadowable name occurs (gen5000 check 4040 -> 3994 M instructions)\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-18T14:50:47Z",
+          "tree_id": "0ad1815461bb5011dcf4d6d7bb653d4f6569682d",
+          "url": "https://github.com/mizchi/zust/commit/9b37c8b553ae38a9e20fd42ed900e7da7f93b036"
+        },
+        "date": 1795013820829,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
