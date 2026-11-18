@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795039890627,
+  "lastUpdate": 1795039893104,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -14752,6 +14752,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "lsp peak RSS",
             "value": 67.543,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "committer": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "distinct": true,
+          "id": "e7fdc21f4d3cd1a7b2eaaf1c9ceee769ab39b995",
+          "message": "`-> impl Trait` bodies ending in `()` or a diverging macro; `impl ?Sized` returns are an error\n\n- a body whose last expression is `()` itself, or `panic!()` / `todo!()` /\n  `unimplemented!()` / `unreachable!()`, gives `-> impl Trait` the type `()`\n  (the inference result `()` was taken as \"unknown\" before)\n- `-> impl ?Sized` with no other trait: \"the size for values of type\n  `impl ?Sized` cannot be known at compilation time\"\n- tests/ui: check-pass 1141 (63.1%), run-pass 1440, compile-fail 2815\n\nKPIs (gen5000): noop 663.2 M instr (+0.3%), edit 620.8, check 3893.0, cache\nunchanged. LSP references p50 11.6 ms in the full run; against 60cbe60 on the\nsame machine (8 alternating runs) 2.34 vs 2.35 ms, definition 0.55 vs 0.55\nms, ready 291 vs 299 ms. Against rustc -C incremental on gen1000: cold 4.9x,\nno-op 11x, edit 14x faster. README and SUPPORTED.md (en + ja) updated.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-18T21:55:36Z",
+          "tree_id": "d296d4159922c6c2fa61d85a780357da6d0f8136",
+          "url": "https://github.com/mizchi/zust/commit/e7fdc21f4d3cd1a7b2eaaf1c9ceee769ab39b995"
+        },
+        "date": 1795039892631,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "lsp definition p50",
+            "value": 0.482,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp hover p50",
+            "value": 0.398,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp completion p50",
+            "value": 0.971,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp references p50",
+            "value": 10.323,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp rename p50",
+            "value": 0.423,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp signatureHelp p50",
+            "value": 0.84,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp documentHighlight p50",
+            "value": 0.868,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp ready (startup to indexed)",
+            "value": 100.55,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp peak RSS",
+            "value": 67.852,
             "unit": "MiB"
           }
         ]
