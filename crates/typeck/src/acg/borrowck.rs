@@ -128,6 +128,14 @@ pub struct Bk {
     pub bind_srcs: Option<Vec<Src>>,
     /// What the last scrutinee holds
     pub scrut: Vec<Src>,
+    /// The last scrutinee as a place, and its position
+    pub scrut_place: Option<(BPlace, Sp)>,
+    /// The expression being lowered moves a `&mut T` it reads (`let b = a;`, `{a}`), not reborrows it
+    pub exp_none: bool,
+    /// The next expression lowered is such a place
+    pub move_mut_next: bool,
+    /// The place the pattern being bound matches (the scrutinee, then its parts)
+    pub pat_path: Option<BPlace>,
     /// The tail expression of the function body (its address)
     pub tail: usize,
     /// Loan made for an expression (`&x`: the address of x; `x.m()` with a borrowed receiver: of the call)
@@ -196,7 +204,10 @@ pub fn has_refs(prog: &Program, t: Ty, _depth: u32) -> bool {
                 }
                 seen.push(sid);
                 let sd = &prog.structs[sid as usize];
-                let r = sd.symbolic
+                // (a closure holds what it captures by reference as raw pointers)
+                let clo = prog.closure_of_struct.contains_key(&prog.base_of(sid)) && sd.fields.iter().any(|f| matches!(f.1, Ty::Ptr(..)));
+                let r = clo
+                    || sd.symbolic
                     || sd.fields.iter().any(|f| go(prog, f.1, seen, memo))
                     || sd.variants.iter().any(|v| v.fields.iter().any(|f| go(prog, f.1, seen, memo)))
                     || sd.args.iter().any(|&a| go(prog, a, seen, memo));
@@ -581,6 +592,12 @@ impl Bk {
                             self.check_loans(&ll, p, *a, *sp, errs);
                         }
                     }
+                    if let (Acc::Move, Some(errs)) = (a, errs.as_deref_mut()) {
+                        if p.owned_len() < p.proj.len() || p.proj.contains(&Proj::Index) {
+                            let what = if p.owned_len() < p.proj.len() { "which is behind a reference" } else { "an indexed place" };
+                            errs.push(BkError { sp: *sp, msg: format!("cannot move out of `{}`, {what}", path_str(&self.locals, p)) });
+                        }
+                    }
                     match a {
                         Acc::Move => {
                             let own = p.owned_len();
@@ -754,6 +771,17 @@ pub fn pos(e: &Expr) -> Sp {
     }
 }
 
+/// How a closure uses a captured place
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug)]
+pub enum CapMode {
+    /// Not known from the use (acg's capture analysis decides)
+    Use,
+    Ref,
+    RefMut,
+    /// Moved out (bound by value, not Copy)
+    Val,
+}
+
 /// The pattern looks at the value (a discriminant, a literal, a length), so matching reads the scrutinee
 fn pat_reads(p: &Pat) -> bool {
     match p {
@@ -817,17 +845,81 @@ impl Cx<'_> {
         }
         let srcs = self.bk_frame_end();
         self.bk.scrut = srcs;
+        self.bk.scrut_place = self.bk_place(e).map(|p| (p.0, err_pos(e)));
         r
+    }
+
+    /// A binding by value moves the part of the scrutinee it binds (if it is not Copy)
+    pub(crate) fn bk_pat_move(&mut self, t: Ty, name: &str) {
+        if !self.bk_on() {
+            return;
+        }
+        let Some(p) = self.bk.pat_path.clone() else { return };
+        // (a binding of the whole scrutinee (`match c { c2 => .. }`) is not tracked (rustc accepts assigning to c's
+        // fields in the arm); a unit struct pattern `S` binds nothing)
+        if self.bk.scrut_place.as_ref().is_some_and(|s| s.0 == p) {
+            return;
+        }
+        if let Ty::Struct(sid) = t {
+            if self.prog.structs[self.prog.base_of(sid) as usize].name == name {
+                return;
+            }
+        }
+        if !self.bk_ty(t).0 {
+            let sp = self.bk.scrut_place.as_ref().map(|x| x.1).unwrap_or(super::SP);
+            self.bk_acc_place(p, Acc::Move, sp);
+        }
+    }
+
+    /// A `ref` / `ref mut` binding borrows the part of the scrutinee it binds: the loan flows into the binding.
+    /// Returns the bind_srcs to restore
+    pub(crate) fn bk_pat_ref(&mut self, m: bool, explicit: bool) -> Option<Vec<Src>> {
+        let saved = self.bk.bind_srcs.clone();
+        if !self.bk_on() || !explicit {
+            return saved;
+        }
+        let Some(p) = self.bk.pat_path.clone() else { return saved };
+        let sp = self.bk.scrut_place.as_ref().map(|x| x.1).unwrap_or(super::SP);
+        let ln = self.bk.loans.len() as u32;
+        self.bk.loans.push(Loan { place: p.clone(), mutable: m, sp });
+        self.bk_ev(Ev::Acc(p, Acc::Borrow(ln), sp));
+        let mut s = saved.clone().unwrap_or_default();
+        s.push(Src::Loan(ln));
+        self.bk.bind_srcs = Some(s);
+        saved
+    }
+
+    /// Descend into a part of the pattern (returns the path to restore)
+    pub(crate) fn bk_pat_proj(&mut self, pr: Proj) -> Option<BPlace> {
+        let saved = self.bk.pat_path.clone();
+        if let Some(p) = &mut self.bk.pat_path {
+            p.proj.push(pr);
+        }
+        saved
+    }
+
+    /// A field of a tuple / tuple struct / enum variant pattern (deref: the pattern matched through a reference)
+    pub(crate) fn bk_pat_field(&mut self, deref: bool, variant: Option<&str>, f: &str) -> Option<BPlace> {
+        if deref {
+            return self.bk.pat_path.take();
+        }
+        let name = match variant {
+            Some(v) => format!("{v}::{f}"),
+            None => f.to_string(),
+        };
+        self.bk_pat_proj(Proj::Field(name))
     }
 
     /// Bind a pattern against the last scrutinee
     pub(crate) fn bk_bind_begin(&mut self) {
         if self.bk_on() {
             self.bk.bind_srcs = Some(self.bk.scrut.clone());
+            self.bk.pat_path = self.bk.scrut_place.as_ref().map(|x| x.0.clone());
         }
     }
     pub(crate) fn bk_bind_end(&mut self) {
         self.bk.bind_srcs = None;
+        self.bk.pat_path = None;
     }
 
     /// (Copy, may hold references), cached
@@ -1020,6 +1112,279 @@ impl Cx<'_> {
         if let Some(e) = e {
             self.bk_ev(e);
         }
+    }
+
+    /// A closure captures the local n: by value it is moved (or copied), by reference it is borrowed (mutably if the
+    /// closure assigns it) and the closure holds the loan
+    pub(crate) fn bk_capture(&mut self, c: &Expr, n: &str, loc: Loc, t: Ty, by_move: bool) {
+        if !self.bk_on() {
+            return;
+        }
+        let Some(&l) = self.bk.by_loc.get(&loc) else { return };
+        let Expr::Closure(_, _, _, body) = c else { return };
+        let sp = super::expr_start(body);
+        // (edition 2021 closures capture the places they use (`x.a`), not whole variables (RFC 2229))
+        let mut paths: Vec<(BPlace, Option<Ty>, CapMode)> = vec![];
+        self.bk_cap_paths(body, n, &mut paths);
+        if paths.is_empty() {
+            paths.push((BPlace { local: l, proj: vec![] }, Some(t), CapMode::Use));
+        }
+        let move_kw = matches!(c, Expr::Closure(true, ..));
+        let m = crate::ast_closure::assigns_capture(c, &[n.to_string()]);
+        for (p, pt, mode) in &mut paths {
+            // (stop at an index, and a move closure at a deref: it captures the reference)
+            let cut = p.proj.iter().position(|x| *x == Proj::Index || move_kw && matches!(x, Proj::Deref(_)));
+            if let Some(i) = cut {
+                p.proj.truncate(i);
+                *pt = None;
+            }
+            if move_kw {
+                *mode = CapMode::Val;
+            } else if *mode == CapMode::Use {
+                // (a use that is not a pattern: acg's analysis says whether the closure takes the value)
+                *mode = if by_move { CapMode::Val } else if m { CapMode::RefMut } else { CapMode::Ref };
+            }
+        }
+        paths.sort_by_key(|p| p.0.proj.len());
+        let mut keep: Vec<(BPlace, Option<Ty>, CapMode)> = vec![];
+        for (p, pt, mode) in paths {
+            if p.local != l {
+                continue;
+            }
+            match keep.iter_mut().find(|k| prefix(&k.0.proj, &p.proj)) {
+                Some(k) => k.2 = k.2.max(mode),
+                None => keep.push((p, pt, mode)),
+            }
+        }
+        for (p, pt, mode) in keep {
+            let pt = if p.proj.is_empty() { Some(t) } else { pt };
+            if mode == CapMode::Val {
+                let copy = pt.is_none_or(|t| self.bk_ty(t).0);
+                self.bk_acc_place(p, if copy { Acc::Read } else { Acc::Move }, sp);
+                continue;
+            }
+            let ln = self.bk.loans.len() as u32;
+            self.bk.loans.push(Loan { place: p.clone(), mutable: mode == CapMode::RefMut, sp });
+            self.bk_ev(Ev::Acc(p, Acc::Borrow(ln), sp));
+            self.bk.src(Src::Loan(ln));
+        }
+        if self.bk.locals[l as usize].refs {
+            self.bk.src(Src::Local(l));
+        }
+    }
+
+    /// A place rooted at the variable n (`n`, `n.a`, `*n.b`)
+    fn bk_rooted_at(&self, e: &Expr, n: &str) -> Option<(BPlace, Option<Ty>)> {
+        let mut root = e;
+        loop {
+            match root {
+                Expr::Paren(x) | Expr::Field(x, _, _) => root = x,
+                Expr::Unary(op, x, _) if op == "*" => root = x,
+                _ => break,
+            }
+        }
+        match root {
+            Expr::Path(_, p) if ident_of(p) == Some(n) => self.bk_place(e),
+            _ => None,
+        }
+    }
+
+    /// The parts of the place (base, of type t) that the pattern binds or looks at, and how
+    fn bk_pat_cap(&self, pat: &Pat, base: &BPlace, t: Option<Ty>, out: &mut Vec<(BPlace, Option<Ty>, CapMode)>) {
+        let field = |b: &BPlace, name: String| {
+            let mut b = b.clone();
+            b.proj.push(Proj::Field(name));
+            b
+        };
+        match pat {
+            Pat::Wild | Pat::Rest => {}
+            Pat::Ident(by_ref, m, _, None) => {
+                let mode = match (by_ref, m) {
+                    (true, true) => CapMode::RefMut,
+                    (true, false) => CapMode::Ref,
+                    // (a Copy value bound by value is read: captured by reference)
+                    _ if t.is_some_and(|t| is_copy(self.prog, t, 0)) => CapMode::Ref,
+                    _ if t.is_some() => CapMode::Val,
+                    _ => CapMode::Use,
+                };
+                out.push((base.clone(), t, mode));
+            }
+            Pat::Tuple(ps) if !ps.iter().any(|p| matches!(p, Pat::Rest)) || matches!(ps.last(), Some(Pat::Rest)) => {
+                let fields = match t {
+                    Some(Ty::Struct(sid)) if self.prog.is_tuple(sid) => Some(self.prog.structs[sid as usize].fields.clone()),
+                    _ => None,
+                };
+                for (i, p) in ps.iter().enumerate() {
+                    if matches!(p, Pat::Rest) {
+                        break;
+                    }
+                    let ft = fields.as_ref().and_then(|f| f.get(i)).map(|f| f.1);
+                    let name = fields.as_ref().and_then(|f| f.get(i)).map(|f| f.0.clone()).unwrap_or_else(|| i.to_string());
+                    self.bk_pat_cap(p, &field(base, name), ft, out);
+                }
+            }
+            Pat::TupleStruct(path, ps) if !ps.iter().any(|p| matches!(p, Pat::Rest)) => {
+                let Some(Ty::Struct(sid)) = t else {
+                    out.push((base.clone(), t, CapMode::Use));
+                    return;
+                };
+                let sd = &self.prog.structs[sid as usize];
+                let vname = path.segs.last().map(|s| s.name.as_str()).unwrap_or("");
+                // (a struct, or an enum of one variant: the fields are captured one by one)
+                let (fields, prefix) = if !sd.is_enum {
+                    (sd.fields.clone(), None)
+                } else {
+                    match sd.variants.iter().find(|v| v.name == vname) {
+                        Some(v) => (v.fields.clone(), Some(v.name.clone())),
+                        None => {
+                            out.push((base.clone(), t, CapMode::Use));
+                            return;
+                        }
+                    }
+                };
+                let mut sub = vec![];
+                for (p, f) in ps.iter().zip(&fields) {
+                    let name = match &prefix {
+                        Some(v) => format!("{v}::{}", f.0),
+                        None => f.0.clone(),
+                    };
+                    self.bk_pat_cap(p, &field(base, name), Some(f.1), &mut sub);
+                }
+                if sd.is_enum && sd.variants.len() > 1 {
+                    // (the discriminant is read: the whole place, as strongly as its parts are used)
+                    let mode = sub.iter().map(|x| x.2).max().unwrap_or(CapMode::Ref).max(CapMode::Ref);
+                    out.push((base.clone(), t, mode));
+                } else {
+                    out.extend(sub);
+                }
+            }
+            Pat::Slice(ps) if ps.iter().all(|p| matches!(p, Pat::Wild | Pat::Rest)) => {}
+            Pat::Slice(ps) => {
+                // (the whole array, as strongly as its elements are bound)
+                let et = match t {
+                    Some(Ty::Array(e, _)) => Some(*e),
+                    _ => None,
+                };
+                let mut sub = vec![];
+                for p in ps {
+                    self.bk_pat_cap(p, base, et, &mut sub);
+                }
+                let mode = sub.iter().map(|x| x.2).max().unwrap_or(CapMode::Ref).max(CapMode::Ref);
+                out.push((base.clone(), t, mode));
+            }
+            Pat::Ident(true, m, _, Some(_)) => out.push((base.clone(), t, if *m { CapMode::RefMut } else { CapMode::Ref })),
+            Pat::Lit(_) | Pat::Range(..) | Pat::Path(_) => out.push((base.clone(), t, CapMode::Ref)),
+            _ => out.push((base.clone(), t, CapMode::Use)),
+        }
+    }
+
+    /// The places rooted at the variable n that the closure body uses
+    fn bk_cap_paths(&self, e: &Expr, n: &str, out: &mut Vec<(BPlace, Option<Ty>, CapMode)>) {
+        // (destructuring a captured place captures the parts the patterns use: `let (ref mut x, _) = a;`)
+        // (a use that captures nothing (`match a { [_, ..] => .. }`) is marked by a place of no local)
+        let seen = BPlace { local: u32::MAX, proj: vec![] };
+        match e {
+            Expr::Match(x, arms) => {
+                if let Some((p, t)) = self.bk_rooted_at(x, n) {
+                    out.push((seen, None, CapMode::Use));
+                    for a in arms {
+                        self.bk_pat_cap(&a.pat, &p, t, out);
+                        if let Some(g) = &a.guard {
+                            self.bk_cap_paths(g, n, out);
+                        }
+                        self.bk_cap_paths(&a.body, n, out);
+                    }
+                    return;
+                }
+            }
+            Expr::Let(pat, x) => {
+                if let Some((p, t)) = self.bk_rooted_at(x, n) {
+                    out.push((seen, None, CapMode::Use));
+                    self.bk_pat_cap(pat, &p, t, out);
+                    return;
+                }
+            }
+            Expr::Block(_, _, b) => {
+                for st in &b.stmts {
+                    match st {
+                        crate::parse::Stmt::Let(pat, _, Some(init), els) => {
+                            match self.bk_rooted_at(init, n) {
+                                Some((p, t)) if !matches!(pat, Pat::Ident(..)) => {
+                                    out.push((seen.clone(), None, CapMode::Use));
+                                    self.bk_pat_cap(pat, &p, t, out)
+                                }
+                                _ => self.bk_cap_paths(init, n, out),
+                            }
+                            if let Some(eb) = els {
+                                self.bk_cap_paths(&Expr::Block(None, false, eb.clone()), n, out);
+                            }
+                        }
+                        crate::parse::Stmt::Expr(x, _) => self.bk_cap_paths(x, n, out),
+                        _ => {}
+                    }
+                }
+                return;
+            }
+            _ => {}
+        }
+        let mut root = e;
+        loop {
+            match root {
+                Expr::Paren(x) | Expr::Field(x, _, _) | Expr::Index(x, _, _) => root = x,
+                Expr::Unary(op, x, _) if op == "*" => root = x,
+                _ => break,
+            }
+        }
+        if let Expr::Path(_, p) = root {
+            if ident_of(p) == Some(n) {
+                if let Some(x) = self.bk_place(e) {
+                    out.push((x.0, x.1, CapMode::Use));
+                } else if let Some(x) = self.bk_place(root) {
+                    out.push((x.0, x.1, CapMode::Use));
+                }
+                // (the index expressions are uses of their own)
+                let mut x = e;
+                loop {
+                    match x {
+                        Expr::Index(b, i, _) => {
+                            self.bk_cap_paths(i, n, out);
+                            x = b;
+                        }
+                        Expr::Paren(b) | Expr::Field(b, _, _) => x = b,
+                        Expr::Unary(_, b, _) => x = b,
+                        _ => break,
+                    }
+                }
+                return;
+            }
+        }
+        if let Expr::Macro(_, g, _) = e {
+            match crate::ast_closure::macro_args(g) {
+                Some(args) => {
+                    for a in &args {
+                        // (`println!("{n}")`: the whole variable)
+                        if let Expr::Lit(t, _) = a {
+                            if crate::ast_closure::fmt_inline_names(t).iter().any(|x| x == n) {
+                                if let Some(x) = self.bk_local_of(n) {
+                                    out.push((BPlace { local: x, proj: vec![] }, None, CapMode::Use));
+                                }
+                            }
+                        }
+                        self.bk_cap_paths(a, n, out);
+                    }
+                }
+                // (not readable as arguments: assume the whole variable is used)
+                None => {
+                    if g.contains(n) {
+                        if let Some(x) = self.bk_local_of(n) {
+                            out.push((BPlace { local: x, proj: vec![] }, None, CapMode::Use));
+                        }
+                    }
+                }
+            }
+            return;
+        }
+        crate::ast_closure::each_child_pub(e, &mut |c| self.bk_cap_paths(c, n, out));
     }
 
     /// Start collecting what flows into a value

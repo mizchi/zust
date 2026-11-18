@@ -259,6 +259,7 @@ impl Cx<'_> {
     pub(crate) fn expr(&mut self, e: &Expr, expected: Option<Ty>) -> R<V> {
         // (the places inside a sub-expression are accesses of their own)
         let pd = std::mem::take(&mut self.bk.place_depth);
+        self.bk.exp_none = std::mem::take(&mut self.bk.move_mut_next) && expected.is_none();
         let r = self.expr_inner(e, expected);
         self.bk.place_depth = pd;
         let (v, t) = r.map_err(|m| {
@@ -393,9 +394,11 @@ impl Cx<'_> {
                 self.fn_value(e, id, expected)
             }
             Expr::Path(..) | Expr::Field(..) => {
+                // (`&mut T` read where no reference type is expected is moved, not reborrowed: `{src}` / `let b = a;`)
+                let exp_none = self.bk.exp_none;
                 let p = self.place(e)?;
                 let r = self.read(p);
-                if self.bk_on() && !self.bk_ty(r.1).0 {
+                if self.bk_on() && (!self.bk_ty(r.1).0 || exp_none && matches!(r.1, Ty::Ref(true, _))) {
                     self.bk_acc(e, borrowck::Acc::Move);
                 }
                 // drop が要る値を値として読んだらムーブ
@@ -475,6 +478,9 @@ impl Cx<'_> {
             }
             Expr::Unary(op, x, _) if op == "*" => {
                 let p = self.place(e)?;
+                if self.bk_on() && !self.bk_ty(p.ty()).0 {
+                    self.bk_acc(e, borrowck::Acc::Move);
+                }
                 // `*b` (b: Box<T>、T は drop が要る): 中身のムーブ。b は drop しない
                 let boxed = matches!(self.peek(x), Some(Ty::Box(_)));
                 if boxed && self.needs_drop(p.ty()) {
@@ -692,6 +698,9 @@ impl Cx<'_> {
             Expr::Index(_, ix, _) if matches!(&**ix, Expr::Range(..)) => err(SP, "range indexing needs a reference: `&a[lo..hi]`"),
             Expr::Index(..) => {
                 let p = self.place(e)?;
+                if self.bk_on() && !self.bk_ty(p.ty()).0 {
+                    self.bk_acc(e, borrowck::Acc::Move);
+                }
                 Ok(self.read(p))
             }
             Expr::For(..) => self.for_(e),
@@ -1039,9 +1048,11 @@ impl Cx<'_> {
             let Some((loc, t)) = self.lookup(n) else {
                 return err(SP, format!("cannot capture `{n}` here"));
             };
-            let ct = if cd.moved.get(i).copied().unwrap_or(false) { t } else { Ty::Ptr(true, intern(t)) };
+            let by_move = cd.moved.get(i).copied().unwrap_or(false);
+            let ct = if by_move { t } else { Ty::Ptr(true, intern(t)) };
             sol[cd.n_parent + i] = Some(ct);
             caps.push((loc, t));
+            self.bk_capture(c, n, loc, t, by_move);
         }
         let mut g = cd.n_parent + cd.captures.len();
         let mut pslots = vec![];

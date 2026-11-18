@@ -1284,6 +1284,7 @@ impl Cx<'_> {
                         continue;
                     };
                     self.bk_frame();
+                    self.bk.move_mut_next = ann_ty.is_none();
                     let r = self.expr(init, ann.or(hint));
                     let srcs = self.bk_frame_end();
                     let (mut v, mut t) = r?;
@@ -1334,6 +1335,7 @@ impl Cx<'_> {
                     if tail {
                         self.bk_frame();
                     }
+                    self.bk.move_mut_next = last && !*semi;
                     let r = self.expr(e, exp);
                     if tail {
                         let srcs = self.bk_frame_end();

@@ -75,6 +75,7 @@ impl Cx<'_> {
             return Ok((None, Ty::Never));
         };
         let bk_ss = self.bk.scrut.clone();
+        let bk_sp = self.bk.scrut_place.clone();
         let sflag = self.last_scrut;
         let merge = self.b.create_block();
         let mut result_ty: Option<Ty> = None;
@@ -86,6 +87,7 @@ impl Cx<'_> {
             self.scopes.push(vec![]);
             let ob = self.owned_binds;
             self.bk.scrut = bk_ss.clone();
+            self.bk.scrut_place = bk_sp.clone();
             self.bk_bind_begin();
             let r = self.pat_bind(&arm.pat, place, BindMode::Move);
             self.bk_bind_end();
@@ -579,6 +581,7 @@ impl Cx<'_> {
                 match mode {
                     BindMode::Move => {
                         let (v, t) = self.read(p);
+                        self.bk_pat_move(t, &name);
                         self.bk.mut_next = Some(*mutable);
                         self.bind(name, t, v);
                     }
@@ -587,14 +590,19 @@ impl Cx<'_> {
                             return err(SP, "cannot bind by reference here");
                         };
                         let addr = self.addr_plus(a, o);
+                        let saved = self.bk_pat_ref(m, *by_ref);
                         self.bind(name, Ty::Ref(m, intern(t)), Some(addr));
+                        self.bk.bind_srcs = saved;
                     }
                 }
                 Ok(())
             }
             Pat::Ref(_, inner) => {
                 let (q, _) = self.pat_deref_once(p);
-                self.pat_bind(inner, q, BindMode::Move)
+                let saved = self.bk_pat_proj(borrowck::Proj::Deref(false));
+                let r = self.pat_bind(inner, q, BindMode::Move);
+                self.bk.pat_path = saved;
+                r
             }
             Pat::Or(cases) => {
                 if !cases.iter().any(has_bindings) {
@@ -655,6 +663,19 @@ impl Cx<'_> {
                 Ok(())
             }
             Pat::Slice(_) => {
+                // (moving out of an array by a pattern is allowed: not tracked)
+                let saved = self.bk.pat_path.take();
+                let r = self.pat_bind_slice(pat, p, mode);
+                self.bk.pat_path = saved;
+                r
+            }
+            _ => self.pat_bind_rest(pat, p, mode),
+        }
+    }
+
+    fn pat_bind_slice(&mut self, pat: &Pat, p: Place, mode: BindMode) -> R<()> {
+        match pat {
+            Pat::Slice(_) => {
                 let (base, len, elem, rmode) = self.slice_scrutinee(p, SP)?;
                 let mode = rmode.map(BindMode::Ref).unwrap_or(mode);
                 let (pre, rest, post) = slice_parts(pat);
@@ -672,33 +693,56 @@ impl Cx<'_> {
                 }
                 Ok(())
             }
+            _ => unreachable!(),
+        }
+    }
+
+    fn pat_bind_rest(&mut self, pat: &Pat, p: Place, mode: BindMode) -> R<()> {
+        match pat {
             Pat::TupleStruct(path, elems) => {
                 let (p, mode) = self.pat_deref(p, mode);
-                let fields = match self.variant_on(path, p.ty()) {
-                    Some((sid, vi)) => self.prog.structs[sid as usize].variants[vi].fields.clone(),
-                    None => self.tuple_struct_fields(path, p.ty(), SP)?,
+                let (fields, vname) = match self.variant_on(path, p.ty()) {
+                    Some((sid, vi)) => {
+                        let v = &self.prog.structs[sid as usize].variants[vi];
+                        (v.fields.clone(), Some(v.name.clone()))
+                    }
+                    None => (self.tuple_struct_fields(path, p.ty(), SP)?, None),
                 };
+                let deref = matches!(mode, BindMode::Ref(_));
                 for (fi, sub) in Self::tuple_fields(elems.iter(), fields.len(), SP).map_err(|m| self.at(path.pos, m))? {
-                    let (_, fty, off) = fields[fi];
-                    self.pat_bind(sub, Self::field_place(p, fty, off)?, mode)?;
+                    let (fname, fty, off) = fields[fi].clone();
+                    let saved = self.bk_pat_field(deref, vname.as_deref(), &fname);
+                    let r = self.pat_bind(sub, Self::field_place(p, fty, off)?, mode);
+                    self.bk.pat_path = saved;
+                    r?;
                 }
                 Ok(())
             }
             Pat::Tuple(elems) => {
                 let (p, mode) = self.pat_deref(p, mode);
                 let fields = self.tuple_pat_fields(p, elems.len(), SP)?;
+                let deref = matches!(mode, BindMode::Ref(_));
                 for (fi, sub) in Self::tuple_fields(elems.iter(), fields.len(), SP)? {
-                    let (_, fty, off) = fields[fi];
-                    self.pat_bind(sub, Self::field_place(p, fty, off)?, mode)?;
+                    let (fname, fty, off) = fields[fi].clone();
+                    let saved = self.bk_pat_field(deref, None, &fname);
+                    let r = self.pat_bind(sub, Self::field_place(p, fty, off)?, mode);
+                    self.bk.pat_path = saved;
+                    r?;
                 }
                 Ok(())
             }
             Pat::Struct(..) => {
                 let (p, mode) = self.pat_deref(p, mode);
-                for (sub, fp) in self.struct_pat_fields(pat, p, None)? {
-                    self.pat_bind(sub, fp, mode)?;
-                }
-                Ok(())
+                // (the parts are not tracked: the field names are not at hand here)
+                let saved = self.bk.pat_path.take();
+                let r = (|| {
+                    for (sub, fp) in self.struct_pat_fields(pat, p, None)? {
+                        self.pat_bind(sub, fp, mode)?;
+                    }
+                    Ok(())
+                })();
+                self.bk.pat_path = saved;
+                r
             }
             _ => err(SP, "unsupported pattern"),
         }
