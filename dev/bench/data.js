@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795012743753,
+  "lastUpdate": 1795013061787,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -4769,6 +4769,165 @@ window.BENCHMARK_DATA = {
           {
             "name": "rt/strings run (-O)",
             "value": 74.074,
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "committer": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "distinct": true,
+          "id": "f0b3489bb54c296aa4dd2f116bf6e6bf4a8a21d9",
+          "message": "zustc: Send / Sync as auto traits\n\nA type is Send unless it holds an Rc or a raw pointer, and Sync unless it also holds a Cell /\nRefCell; `unsafe impl Send` counts; the prelude's own types are judged by their arguments.\ntests/ui: run-pass 52.7%, check-pass 56.8%; three compile-fail tests that were rejected only\nbecause Send was never satisfied now need async / recursion-limit checks.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-18T14:39:36Z",
+          "tree_id": "8ed04fb77a8a7eceec7652e5cedd02d1c7477c10",
+          "url": "https://github.com/mizchi/zust/commit/f0b3489bb54c296aa4dd2f116bf6e6bf4a8a21d9"
+        },
+        "date": 1795013061311,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "gen1000 build cold",
+            "value": 168.874,
+            "unit": "ms"
+          },
+          {
+            "name": "gen1000 build noop",
+            "value": 23.934,
+            "unit": "ms"
+          },
+          {
+            "name": "gen1000 build edit 1 fn",
+            "value": 29.599,
+            "unit": "ms"
+          },
+          {
+            "name": "gen1000 check",
+            "value": 126.86,
+            "unit": "ms"
+          },
+          {
+            "name": "gen1000 build cold peak RSS",
+            "value": 20.531,
+            "unit": "MiB"
+          },
+          {
+            "name": "gen1000 binary",
+            "value": 323.977,
+            "unit": "KiB"
+          },
+          {
+            "name": "gen1000 cache",
+            "value": 387.205,
+            "unit": "KiB"
+          },
+          {
+            "name": "gen1000 build noop instructions",
+            "value": 156.83,
+            "unit": "M instr"
+          },
+          {
+            "name": "gen1000 build edit 1 fn instructions",
+            "value": 150.127,
+            "unit": "M instr"
+          },
+          {
+            "name": "gen1000 check instructions",
+            "value": 799.587,
+            "unit": "M instr"
+          },
+          {
+            "name": "gen5000 build cold",
+            "value": 745,
+            "unit": "ms"
+          },
+          {
+            "name": "gen5000 build noop",
+            "value": 119.643,
+            "unit": "ms"
+          },
+          {
+            "name": "gen5000 build edit 1 fn",
+            "value": 128.435,
+            "unit": "ms"
+          },
+          {
+            "name": "gen5000 check",
+            "value": 641.231,
+            "unit": "ms"
+          },
+          {
+            "name": "gen5000 build cold peak RSS",
+            "value": 76.098,
+            "unit": "MiB"
+          },
+          {
+            "name": "gen5000 binary",
+            "value": 1558.336,
+            "unit": "KiB"
+          },
+          {
+            "name": "gen5000 cache",
+            "value": 1902.83,
+            "unit": "KiB"
+          },
+          {
+            "name": "gen5000 build noop instructions",
+            "value": 751.91,
+            "unit": "M instr"
+          },
+          {
+            "name": "gen5000 build edit 1 fn instructions",
+            "value": 712.651,
+            "unit": "M instr"
+          },
+          {
+            "name": "gen5000 check instructions",
+            "value": 3975.73,
+            "unit": "M instr"
+          },
+          {
+            "name": "rt/fib run (-O)",
+            "value": 72.989,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/hashmap run (-O)",
+            "value": 142.199,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/matmul run (-O)",
+            "value": 45.981,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/nbody run (-O)",
+            "value": 89.159,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/sieve run (-O)",
+            "value": 99.294,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/sort run (-O)",
+            "value": 242.969,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/strings run (-O)",
+            "value": 74.241,
             "unit": "ms"
           }
         ]
