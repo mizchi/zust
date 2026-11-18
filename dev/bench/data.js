@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795034693812,
+  "lastUpdate": 1795034696143,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -13156,6 +13156,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "lsp peak RSS",
             "value": 67.324,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "committer": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "distinct": true,
+          "id": "fb2f2f2135de73a854bb0a39e8530f5c71d270b4",
+          "message": "Shared borrows of values kept in registers\n\n- `&B` of a const read as a place (`assert_eq!(B, 3)`), or of a local the\n  address-taken scan did not see, borrows a copy in a temporary instead of\n  failing with \"borrowed local is not in memory\" (`&mut` of a local still does)\n- tests/ui: run-pass 1417 (58.7%), check-pass 1130\n\nKPIs (gen5000): noop 662.0 M instr (+0.1%), edit 622.7, check 3893.5, cache\nunchanged; LSP ready 110 ms. Against rustc -C incremental on gen1000: cold\n5.3x, no-op 11x, edit 17x faster. README and SUPPORTED.md (en + ja) updated.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-18T20:39:41Z",
+          "tree_id": "06d5aa54b8662655d695dacb0a3a5f290ab9d845",
+          "url": "https://github.com/mizchi/zust/commit/fb2f2f2135de73a854bb0a39e8530f5c71d270b4"
+        },
+        "date": 1795034695582,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "lsp definition p50",
+            "value": 0.609,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp hover p50",
+            "value": 0.511,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp completion p50",
+            "value": 1.119,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp references p50",
+            "value": 3.145,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp rename p50",
+            "value": 0.678,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp signatureHelp p50",
+            "value": 0.821,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp documentHighlight p50",
+            "value": 0.848,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp ready (startup to indexed)",
+            "value": 129.15,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp peak RSS",
+            "value": 67.297,
             "unit": "MiB"
           }
         ]
