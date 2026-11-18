@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795001300492,
+  "lastUpdate": 1795002987372,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -2066,6 +2066,165 @@ window.BENCHMARK_DATA = {
           {
             "name": "rt/strings run (-O)",
             "value": 35.529,
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "committer": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "distinct": true,
+          "id": "5a4c59429939965d5b97d7cf56a862243afcae5d",
+          "message": "zustc borrowck: & vs &mut derefs, for loops over borrows, values pushed into collections, reborrows by default binding modes\n\n- a deref through `&` is its own projection: E0596 / E0594 for mutation behind a `&` reference\n- `for x in &mut v { v.push(1) }`: the loan of the iterable lasts for the whole loop\n- a `&mut self` method of a value holding references stores what its arguments borrow\n  (`v.push(&mut x)`)\n- matching a reference with bindings reborrows `*r` (default binding modes)\n- prelude views (Iter, Chars, ChunksExact ..) hold the loan of what they iterate; their methods\n  and `Iterator::next` do not borrow the view itself; closures capture mutably only the places\n  they assign or borrow mutably\n- tests/ui compile-fail 34.6% -> 35.0% (borrowck 159, nll 41, closures 36), no regressions;\n  all cratebench crates still build\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-18T11:40:09Z",
+          "tree_id": "138d6d88ea74370dfacd700c314f02ebfbdd8b3e",
+          "url": "https://github.com/mizchi/zust/commit/5a4c59429939965d5b97d7cf56a862243afcae5d"
+        },
+        "date": 1795002986689,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "gen1000 build cold",
+            "value": 120.067,
+            "unit": "ms"
+          },
+          {
+            "name": "gen1000 build noop",
+            "value": 14.427,
+            "unit": "ms"
+          },
+          {
+            "name": "gen1000 build edit 1 fn",
+            "value": 19.464,
+            "unit": "ms"
+          },
+          {
+            "name": "gen1000 check",
+            "value": 78.595,
+            "unit": "ms"
+          },
+          {
+            "name": "gen1000 build cold peak RSS",
+            "value": 20.258,
+            "unit": "MiB"
+          },
+          {
+            "name": "gen1000 binary",
+            "value": 323.977,
+            "unit": "KiB"
+          },
+          {
+            "name": "gen1000 cache",
+            "value": 387.199,
+            "unit": "KiB"
+          },
+          {
+            "name": "gen1000 build noop instructions",
+            "value": 155.38,
+            "unit": "M instr"
+          },
+          {
+            "name": "gen1000 build edit 1 fn instructions",
+            "value": 148.196,
+            "unit": "M instr"
+          },
+          {
+            "name": "gen1000 check instructions",
+            "value": 799.102,
+            "unit": "M instr"
+          },
+          {
+            "name": "gen5000 build cold",
+            "value": 549.746,
+            "unit": "ms"
+          },
+          {
+            "name": "gen5000 build noop",
+            "value": 77.707,
+            "unit": "ms"
+          },
+          {
+            "name": "gen5000 build edit 1 fn",
+            "value": 86.773,
+            "unit": "ms"
+          },
+          {
+            "name": "gen5000 check",
+            "value": 388.84,
+            "unit": "ms"
+          },
+          {
+            "name": "gen5000 build cold peak RSS",
+            "value": 75.809,
+            "unit": "MiB"
+          },
+          {
+            "name": "gen5000 binary",
+            "value": 1558.336,
+            "unit": "KiB"
+          },
+          {
+            "name": "gen5000 cache",
+            "value": 1902.824,
+            "unit": "KiB"
+          },
+          {
+            "name": "gen5000 build noop instructions",
+            "value": 745.299,
+            "unit": "M instr"
+          },
+          {
+            "name": "gen5000 build edit 1 fn instructions",
+            "value": 706.416,
+            "unit": "M instr"
+          },
+          {
+            "name": "gen5000 check instructions",
+            "value": 3967.042,
+            "unit": "M instr"
+          },
+          {
+            "name": "rt/fib run (-O)",
+            "value": 54.299,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/hashmap run (-O)",
+            "value": 90.477,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/matmul run (-O)",
+            "value": 37.942,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/nbody run (-O)",
+            "value": 54.331,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/sieve run (-O)",
+            "value": 93.049,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/sort run (-O)",
+            "value": 147.178,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/strings run (-O)",
+            "value": 35.733,
             "unit": "ms"
           }
         ]
