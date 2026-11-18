@@ -220,6 +220,8 @@ pub struct Program {
     /// ブランケット impl のメソッド (名前 → 関数 id) と、その self 型の型パラメータ名
     pub blanket: FxMap<String, u32>,
     pub blanket_selfs: std::collections::HashSet<String>,
+    /// Traits with a blanket impl (`impl<T> Tr for T`): every type implements them (bounds are not checked)
+    pub blanket_traits: std::collections::HashSet<String>,
     /// 同じ型への別々の trait impl が同じ名前の関数を持つもの (`impl From<&str> for P` と `impl From<String> for P`):
     /// 最初の名前 → 候補の関数 (2 つ目以降は `P::from#1` のような名前)。呼び出し側が引数の型で選ぶ
     pub overloads: FxMap<String, Vec<u32>>,
@@ -468,6 +470,7 @@ impl Program {
             opt: false,
             blanket: FxMap::default(),
             blanket_selfs: Default::default(),
+            blanket_traits: Default::default(),
             overloads: Default::default(),
             by_last: FxMap::default(),
             traits: FxMap::default(),
@@ -864,13 +867,19 @@ impl Program {
             }
             // プリミティブ型への trait 実装 (`impl Tr for u32`)
             // (`impl Hash for str`: str も組み込みの型として持つ)
-            if let Some(pt) = Ty::prim(sn).or((sn == "str").then_some(Ty::Str)) {
+            if let Some(pt) = Ty::prim(sn).or((sn == "str").then_some(Ty::Str)).or((sn == "#tuple0").then_some(Ty::Unit)) {
                 if !p.prim_impls.insert((pt, tr.clone())) {
                     return Err(format!(
                         "{}:1: conflicting implementations of trait `{tr}` for `{sn}`",
                         it.line
                     ));
                 }
+                continue;
+            }
+            // (`impl<T> Tr for T`, with or without members)
+            if sm.impl_generics.iter().any(|g| g.0 == *sn) && matches!(sm.impl_self_ty, Some(TySyn::Named(_))) {
+                p.blanket_selfs.insert(sn.clone());
+                p.blanket_traits.insert(tr.clone());
                 continue;
             }
             let Some(&sid) = p.struct_index.get(sn).or(sn.strip_prefix("#tuple").and_then(|k| k.parse().ok()).map(|k| p.tuple_base(k)).as_ref()) else {
@@ -974,6 +983,9 @@ impl Program {
 
     /// 型 t が trait tr を実装しているか
     pub fn implements(&self, t: Ty, tr: &str) -> bool {
+        if self.blanket_traits.contains(tr) {
+            return true;
+        }
         // (const ジェネリクスの引数は長さを持つ配列型)
         if tr == CONST_GENERIC {
             return matches!(t, Ty::Array(Ty::Unit, _));
@@ -1112,7 +1124,7 @@ impl Program {
                         | "Hash"
                 ) || self.prim_impls.contains(&(t, tr.to_string()))
             }
-            _ => matches!(tr, "Copy" | "Clone" | "Sized"),
+            _ => matches!(tr, "Copy" | "Clone" | "Sized") || self.prim_impls.contains(&(t, tr.to_string())),
         }
     }
 

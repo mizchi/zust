@@ -169,6 +169,28 @@ fn adt_params(g: &Generics) -> R<Vec<String>> {
     Ok(v.into_iter().map(|x| x.0).collect())
 }
 
+/// Replace the projections on the parameters (`T::Assoc`) in a type by `_`
+fn strip_projections(t: &mut PTy, params: &[&str]) {
+    match t {
+        PTy::Path(None, p) if p.segs.len() > 1 && params.contains(&p.segs[0].name.as_str()) => *t = PTy::Infer,
+        PTy::Path(q, p) => {
+            if let Some(q) = q {
+                strip_projections(q, params);
+            }
+            for s in &mut p.segs {
+                for a in &mut s.args {
+                    if let crate::parse::GArg::Ty(t) | crate::parse::GArg::Bind(_, t) = a {
+                        strip_projections(t, params);
+                    }
+                }
+            }
+        }
+        PTy::Ref(_, _, i) | PTy::Ptr(_, i) | PTy::Slice(i) | PTy::Array(i, _) => strip_projections(i, params),
+        PTy::Tuple(ts) => ts.iter_mut().for_each(|t| strip_projections(t, params)),
+        _ => {}
+    }
+}
+
 /// The names of the paths in a type (`Box<dyn Foo>` → Box, Foo)
 fn ty_names(t: &PTy, out: &mut Vec<String>) {
     match t {
@@ -183,10 +205,20 @@ fn ty_names(t: &PTy, out: &mut Vec<String>) {
                         ty_names(t, out);
                     }
                 }
+                if let Some((ps, r)) = &s.fn_args {
+                    ps.iter().for_each(|t| ty_names(t, out));
+                    if let Some(r) = r {
+                        ty_names(r, out);
+                    }
+                }
             }
         }
         PTy::Ref(_, _, i) | PTy::Ptr(_, i) | PTy::Slice(i) | PTy::Array(i, _) => ty_names(i, out),
         PTy::Tuple(ts) => ts.iter().for_each(|t| ty_names(t, out)),
+        PTy::Fn(ps, r) => {
+            ps.iter().for_each(|t| ty_names(t, out));
+            ty_names(r, out);
+        }
         PTy::Dyn(bs) | PTy::Impl(bs) => {
             for b in bs {
                 if let Bound::Trait(_, p) = b {
@@ -779,6 +811,42 @@ pub fn summarize(item: &Item, owner: Option<&Owner>) -> R<Summary> {
                 }
             }
             collect_generics(g, &mut sm.impl_generics)?;
+            // (E0207: a type parameter must appear in the self type or the trait; a where clause counts too)
+            {
+                let mut names = vec![];
+                // (a projection `T::Assoc` in the self type does not constrain T)
+                let params: Vec<&str> = g.params.iter().filter_map(|p| if let GParam::Ty(n, _, _) = p { Some(n.as_str()) } else { None }).collect();
+                let mut st = self_ty.clone();
+                strip_projections(&mut st, &params);
+                ty_names(&st, &mut names);
+                if let Some((_, tp)) = tr {
+                    ty_names(&PTy::Path(None, tp.clone()), &mut names);
+                }
+                for (t, bs) in &g.preds {
+                    ty_names(t, &mut names);
+                    for b in bs {
+                        if let Bound::Trait(_, p) = b {
+                            ty_names(&PTy::Path(None, p.clone()), &mut names);
+                        }
+                    }
+                }
+                for p in &g.params {
+                    if let GParam::Ty(_, bs, _) = p {
+                        for b in bs {
+                            if let Bound::Trait(_, p) = b {
+                                ty_names(&PTy::Path(None, p.clone()), &mut names);
+                            }
+                        }
+                    }
+                }
+                for p in &g.params {
+                    if let GParam::Ty(n, _, _) = p {
+                        if !names.iter().any(|x| x == n) {
+                            return Err(format!("the type parameter `{n}` is not constrained by the impl trait, self type, or predicates"));
+                        }
+                    }
+                }
+            }
             // `impl Add for &M`: M のメソッド `__ref_add` (self は &M) として持つ
             let self_path = match self_ty {
                 PTy::Ref(_, _, i) if tr.is_some() => &**i,
