@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795037459313,
+  "lastUpdate": 1795037461780,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -22802,6 +22802,70 @@ window.BENCHMARK_DATA = {
           {
             "name": "tests/ui compile-fail passing",
             "value": 2814,
+            "unit": "tests"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "committer": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "distinct": true,
+          "id": "a5bdbca6567a62240fbc151a38b67c37d74f55f2",
+          "message": "Integer literals for `T: Foo` take the one integer type that implements it; Box bounds\n\n- an integer literal passed for a type parameter whose bounds `i32` does not\n  meet takes the one integer type that meets them all (`go(5)` with\n  `impl Foo for isize` only), as rustc picks it\n- `Box<T>` meets Clone / PartialEq / Eq / PartialOrd / Ord / Debug / Display /\n  Hash / Default when T does\n- tests/ui: run-pass 1434 (59.4%), compile-fail 2815\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-18T21:26:49Z",
+          "tree_id": "ea2b09b83b0db10974dd14014c9fa74fe809a6b0",
+          "url": "https://github.com/mizchi/zust/commit/a5bdbca6567a62240fbc151a38b67c37d74f55f2"
+        },
+        "date": 1795037461283,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tests/ui run-pass pass rate",
+            "value": 59.43,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui run-pass passing",
+            "value": 1434,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui check-pass pass rate",
+            "value": 62.76,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui check-pass passing",
+            "value": 1134,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui build-pass pass rate",
+            "value": 60.74,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui build-pass passing",
+            "value": 82,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui compile-fail pass rate",
+            "value": 38.26,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui compile-fail passing",
+            "value": 2815,
             "unit": "tests"
           }
         ]
