@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795018051619,
+  "lastUpdate": 1795018053244,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -13898,6 +13898,70 @@ window.BENCHMARK_DATA = {
           {
             "name": "tests/ui compile-fail passing",
             "value": 2810,
+            "unit": "tests"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "committer": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "distinct": true,
+          "id": "4a84a6ce5b4822a219b01462257ed9f7dfd00c44",
+          "message": "mem::transmute / forget / size_of_val, ptr::read / write / drop_in_place; const temporaries drop\n\n- prelude: transmute (with E0512 size check and the &T -> &mut T lint),\n  transmute_copy, forget, size_of_val, align_of_val, ptr::drop_in_place,\n  ptr::read, ptr::write\n- `&mut x` / `&x` passed for a generic `*mut T` / `*const T` parameter\n- the atomic Ordering rename also sees a `use` after the file's header\n  comments, and `use std::sync::atomic::*`\n- `BAR.0` with a `const BAR` that needs dropping drops the temporary\n- tests/ui: run-pass 1307, check-pass 1058, build-pass 77, compile-fail 2802\n\nAccepted compile-fail removals (passed only because transmute was unknown):\nclosures/coerce-unsafe-to-closure.rs (fn item as a closure, E0277),\ncmse-nonsecure/cmse-nonsecure-call/gate_test.rs (feature gate),\nconsts/const-eval/ptr-to-int-transmute-in-consts-issue-87525.rs and\nconsts/const-eval/transmute-const-promotion.rs (const eval),\npacked/packed-struct-generic-transmute.rs and packed/packed-struct-transmute.rs\n(repr(packed) layout), transmute/ambiguity-in-closure-arg.rs (inference),\ntransmute/unnecessary-transmutation.rs (lint)\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-18T16:02:18Z",
+          "tree_id": "5a6e7a8ccccd597c8fd98e5b1af54ccd47b712ca",
+          "url": "https://github.com/mizchi/zust/commit/4a84a6ce5b4822a219b01462257ed9f7dfd00c44"
+        },
+        "date": 1795018052980,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tests/ui run-pass pass rate",
+            "value": 54.12,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui run-pass passing",
+            "value": 1306,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui check-pass pass rate",
+            "value": 58.49,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui check-pass passing",
+            "value": 1057,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui build-pass pass rate",
+            "value": 57.04,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui build-pass passing",
+            "value": 77,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui compile-fail pass rate",
+            "value": 38.08,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui compile-fail passing",
+            "value": 2802,
             "unit": "tests"
           }
         ]
