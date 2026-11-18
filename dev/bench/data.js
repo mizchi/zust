@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795009310627,
+  "lastUpdate": 1795009312573,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -7952,6 +7952,70 @@ window.BENCHMARK_DATA = {
           {
             "name": "tests/ui build-pass passing",
             "value": 67,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui compile-fail pass rate",
+            "value": 38.18,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui compile-fail passing",
+            "value": 2809,
+            "unit": "tests"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "committer": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "distinct": true,
+          "id": "cb825abd3668afa47c76491a8f167af453c07912",
+          "message": "zustc: macro hygiene for let bindings, hex / computed enum discriminants, one-variant enum casts, mpsc prelude dependencies\n\n- a macro body's own `let x` names are kept apart from the caller's (`{ let _x = 9; $e }` with\n  `$e = _x` reads the caller's _x)\n- discriminants: hex / octal / binary literals with suffixes, and + - * / % << >> | & ^ ! of them\n  (0xDEADBEE was read as 0)\n- `E::V as usize` for an enum of one variant gives its discriminant (no tag is stored)\n- a program using mpsc::channel gets the RefCell / VecDeque / Rc deref the queue needs\n- tests/ui: run-pass 51.3%, check-pass 54.2%, build-pass 50.4%, no regressions\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-18T13:37:14Z",
+          "tree_id": "4020b5268720d308d0b95144e21282b846cc4cfa",
+          "url": "https://github.com/mizchi/zust/commit/cb825abd3668afa47c76491a8f167af453c07912"
+        },
+        "date": 1795009312161,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tests/ui run-pass pass rate",
+            "value": 51.35,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui run-pass passing",
+            "value": 1239,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui check-pass pass rate",
+            "value": 54.18,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui check-pass passing",
+            "value": 979,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui build-pass pass rate",
+            "value": 50.37,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui build-pass passing",
+            "value": 68,
             "unit": "tests"
           },
           {
