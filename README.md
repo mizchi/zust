@@ -216,21 +216,6 @@ Japanese versions of the docs are under [docs/ja/](docs/ja/).
 - [CONTRIBUTING.md](CONTRIBUTING.md): how to develop: build, test, benchmark, and write reports
 - [TODO.md](TODO.md): what is next
 
-## History
-
-This project started as `2026-11-14-crustc/` in mizchi/playground, where the compiler was called crustc and the LSP
-server crustc-lsp. On 2026-11-18 it moved to this repository with its history, and the names changed:
-
-| before | now |
-|---|---|
-| `crustc` (compiler) | `zustc` |
-| `crustc-lsp` (LSP server) | `zust-analyzer` |
-| library crates | `zust-*` |
-| environment variables `CRUSTC_*` | `ZUSTC_*` |
-| environment variables `CRUSTC_LSP_*` | `ZUST_ANALYZER_*` |
-
-Numbers and dates in docs/reports/ are from before the move.
-
 ## License
 
 Like Rust itself, zust is dual-licensed; you may use it under either of:

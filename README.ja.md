@@ -194,21 +194,6 @@ rust-analyzer との違いで分かっているものは [TODO.md](TODO.md) に�
 - [CONTRIBUTING.ja.md](CONTRIBUTING.ja.md): 開発のしかた (ビルド、テスト、ベンチマーク、レポートの書き方)
 - [TODO.md](TODO.md): これからやること (英語)
 
-## 経緯
-
-mizchi/playground の `2026-11-14-crustc/` (名前は crustc、LSP サーバは crustc-lsp) で作っていたものを、2026-11-18 に
-履歴ごとこのリポジトリに移した。そのとき名前を変えている。
-
-| 前 | 今 |
-|---|---|
-| `crustc` (コンパイラ) | `zustc` |
-| `crustc-lsp` (LSP サーバ) | `zust-analyzer` |
-| ライブラリの crate | `zust-*` |
-| 環境変数 `CRUSTC_*` | `ZUSTC_*` |
-| 環境変数 `CRUSTC_LSP_*` | `ZUST_ANALYZER_*` |
-
-docs/reports/ の記録の中の数字や日付は、移す前のもの。
-
 ## ライセンス
 
 Rust 本体と同じく、次のどちらかを選んで使える (デュアルライセンス)。
