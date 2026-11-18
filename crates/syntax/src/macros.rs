@@ -374,6 +374,15 @@ fn body_lets(body: &[Pt], out: &mut Vec<String>) {
                     }
                 }
             }
+            // (a label defined in the body, `'x: loop`: kept as "'x")
+            Pt::Tok(TokenTree::Punct(q)) if q.as_char() == '\'' => {
+                if let (Some(Pt::Tok(TokenTree::Ident(n))), Some(Pt::Tok(TokenTree::Punct(c)))) = (body.get(i + 1), body.get(i + 2)) {
+                    let n = format!("'{n}");
+                    if c.as_char() == ':' && !out.contains(&n) {
+                        out.push(n);
+                    }
+                }
+            }
             Pt::Group(_, inner) | Pt::Rep(inner, _, _) => body_lets(inner, out),
             _ => {}
         }
@@ -389,8 +398,17 @@ fn transcribe_h(body: &[Pt], binds: &HashMap<String, Bind>, out: &mut String) ->
 }
 
 fn transcribe(body: &[Pt], binds: &HashMap<String, Bind>, out: &mut String, lets: &[String]) -> Result<(), String> {
-    for p in body {
+    for (k, p) in body.iter().enumerate() {
         match p {
+            // (a label of the body's own: `'x` -> `'x__mh`)
+            Pt::Tok(TokenTree::Ident(i))
+                if k > 0
+                    && matches!(&body[k - 1], Pt::Tok(TokenTree::Punct(q)) if q.as_char() == '\'')
+                    && lets.iter().any(|l| l.strip_prefix('\'') == Some(i.to_string().as_str())) =>
+            {
+                out.push_str(&i.to_string());
+                out.push_str("__mh ");
+            }
             Pt::Tok(TokenTree::Ident(i)) if lets.iter().any(|l| *i == l.as_str()) => {
                 out.push_str(&i.to_string());
                 out.push_str("__mh ");

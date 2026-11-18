@@ -303,6 +303,8 @@ pub struct Summary {
     pub structs: Vec<(String, Vec<(String, TySyn)>)>,
     /// The names of the structs above that are unions (fields all at offset 0)
     pub unions: Vec<String>,
+    /// (enum, integer type) for an enum with `#[repr(u8)]` and the like
+    pub reprs: Vec<(String, String)>,
     /// An error in a struct / enum / union definition (unused parameter ..), reported for the program's own items only
     /// (the prelude's types may break these rules)
     pub adt_err: Option<String>,

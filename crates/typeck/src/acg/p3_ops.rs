@@ -338,14 +338,10 @@ impl Cx<'_> {
                     return Ok((Some(e), Ty::Bool));
                 }
             }
+            // (-1 / 0 / 1, or 2 for unordered (a NaN inside))
             let c = self.cmp_call(la, ra, t)?;
-            let cc = match op {
-                "<" => IntCC::SignedLessThan,
-                "<=" => IntCC::SignedLessThanOrEqual,
-                ">" => IntCC::SignedGreaterThan,
-                _ => IntCC::SignedGreaterThanOrEqual,
-            };
-            return Ok((Some(self.b.ins().icmp_imm_s(cc, c, 0)), Ty::Bool));
+            let e = self.ord_code_test(c, op);
+            return Ok((Some(e), Ty::Bool));
         }
         // (`v == b"crate"` / `&v == b"x"` (v: Vec<u8>): 参照を外して `Vec<T> == [T; N]` に。値の表現は同じ (場所のアドレス))
         if matches!(op, "==" | "!=") && lt != rt {
@@ -659,13 +655,31 @@ impl Cx<'_> {
                 let sd = &self.prog.structs[sid as usize];
                 if !sd.is_enum {
                     let fields = sd.fields.clone();
-                    let mut acc = one(self);
+                    // (scalar fields: all compared; otherwise the comparison stops at the first unequal field, as
+                    // derive(PartialEq) does: a later field's `eq` may not be called)
+                    if fields.iter().all(|f| f.1.is_int() || matches!(f.1, Ty::Bool | Ty::Char | Ty::Unit)) {
+                        let mut acc = one(self);
+                        for (_, ft, off) in fields {
+                            let (x, y) = self.load_field(a, b, ft, off);
+                            let c = self.agg_or_scalar_eq(x, y, ft, span)?;
+                            acc = self.b.ins().band(acc, c);
+                        }
+                        return Ok(acc);
+                    }
+                    let done = self.b.create_block();
+                    let res = self.b.append_block_param(done, types::I8);
                     for (_, ft, off) in fields {
                         let (x, y) = self.load_field(a, b, ft, off);
                         let c = self.agg_or_scalar_eq(x, y, ft, span)?;
-                        acc = self.b.ins().band(acc, c);
+                        let next = self.b.create_block();
+                        let z = self.b.ins().iconst(types::I8, 0);
+                        self.b.ins().brif(c, next, &[], done, &[z]);
+                        self.b.switch_to_block(next);
                     }
-                    return Ok(acc);
+                    let o = one(self);
+                    self.b.ins().jump(done, &[o]);
+                    self.b.switch_to_block(done);
+                    return Ok(res);
                 }
                 // enum: タグが同じで、そのバリアントのフィールドが等しい
                 let (tag, variants) = (sd.tag, sd.variants.iter().map(|v| (v.discr, v.fields.clone())).collect::<Vec<_>>());

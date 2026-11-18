@@ -224,6 +224,8 @@ pub struct Program {
     pub blanket_traits: std::collections::HashSet<String>,
     /// The structs that are unions
     pub unions: std::collections::HashSet<String>,
+    /// The tag type of enums with `#[repr(u8)]` and the like
+    pub reprs: HashMap<String, Ty>,
     /// 同じ型への別々の trait impl が同じ名前の関数を持つもの (`impl From<&str> for P` と `impl From<String> for P`):
     /// 最初の名前 → 候補の関数 (2 つ目以降は `P::from#1` のような名前)。呼び出し側が引数の型で選ぶ
     pub overloads: FxMap<String, Vec<u32>>,
@@ -474,6 +476,7 @@ impl Program {
             blanket_selfs: Default::default(),
             blanket_traits: Default::default(),
             unions: Default::default(),
+            reprs: Default::default(),
             overloads: Default::default(),
             by_last: FxMap::default(),
             traits: FxMap::default(),
@@ -504,6 +507,11 @@ impl Program {
             .collect();
         for sm in sums {
             p.unions.extend(sm.unions.iter().cloned());
+            for (n, t) in &sm.reprs {
+                if let Some(t) = Ty::from_suffix(t) {
+                    p.reprs.insert(n.clone(), t);
+                }
+            }
             for (n, g, t) in &sm.aliases {
                 if !adt_names.contains(n.as_str()) {
                     p.aliases.insert(n.clone(), (g.clone(), t.clone()));
@@ -2143,10 +2151,32 @@ impl Program {
                     discrs.push(d);
                     next = d + 1;
                 }
-                let tag = if discrs.iter().all(|&d| (0..=255).contains(&d)) {
-                    Ty::U8
+                let repr = self.reprs.get(&self.structs[id as u32 as usize].name).copied();
+                let tag = if let Some(t) = repr {
+                    // (`#[repr(u8)]`: the discriminants are values of that type, `!0 as u8` is 255)
+                    let bits = t.bits();
+                    if bits < 64 {
+                        for d in &mut discrs {
+                            let m = (1i64 << bits) - 1;
+                            let v = *d & m;
+                            *d = if t.signed() && v >> (bits - 1) == 1 { v - (1i64 << bits) } else { v };
+                        }
+                    }
+                    t
                 } else {
-                    Ty::I32
+                    // (the smallest integer type that holds every discriminant, as rustc picks)
+                    let (lo, hi) = (discrs.iter().copied().min().unwrap_or(0), discrs.iter().copied().max().unwrap_or(0));
+                    if lo >= 0 {
+                        if hi <= 0xff { Ty::U8 } else if hi <= 0xffff { Ty::U16 } else if hi <= 0xffff_ffff { Ty::U32 } else { Ty::U64 }
+                    } else if lo >= -0x80 && hi <= 0x7f {
+                        Ty::I8
+                    } else if lo >= -0x8000 && hi <= 0x7fff {
+                        Ty::I16
+                    } else if lo >= -0x8000_0000 && hi <= 0x7fff_ffff {
+                        Ty::I32
+                    } else {
+                        Ty::I64
+                    }
                 };
                 let mut rv = vec![];
                 for (v, d) in vs.iter().zip(discrs) {

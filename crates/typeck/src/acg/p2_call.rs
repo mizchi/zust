@@ -557,12 +557,24 @@ impl Cx<'_> {
             return err(SP, format!("`{sname}::{name}` is an associated function, not a method"));
         }
         // struct のアドレスを渡す: `&self` ならそのまま、`self` なら call_fn がコピーする
-        let recv_v = self.addr_plus(a, o);
+        let mut recv_v = self.addr_plus(a, o);
         let st = Ty::Struct(sid);
         let recv_ty = match self.prog.sigs[id as usize].params[0] {
             Ty::Ref(m, _) => Ty::Ref(m, intern(st)),
             _ => st,
         };
+        // (`self` by value out of a capture held by value (`move || foo.unwrap()`): the value moves to a temporary
+        // and the capture's slot becomes empty)
+        if !matches!(recv_ty, Ty::Ref(..)) && recv_temp.is_none() && self.needs_drop(st) && self.zeroable(st) {
+            if let Expr::Path(_, p) = strip_paren(recv) {
+                if ident_of(p).and_then(|id| self.lookup(id).map(|(l, _)| (id, l))).is_some_and(|(id, l)| self.is_value_cap(id, l)) {
+                    let tmp = self.temp(st);
+                    self.copy(tmp, recv_v, st);
+                    self.zero(recv_v, st);
+                    recv_v = tmp;
+                }
+            }
+        }
         let mut bk_late = None;
         let mut bk_op_temp = false;
         let t0 = self.bk.call_temps.len();

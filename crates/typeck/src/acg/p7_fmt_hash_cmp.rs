@@ -1134,7 +1134,7 @@ impl Cx<'_> {
                 let y = self.b.ins().load(ct, mf(), b, 0);
                 self.cmp_scalar(x, y, t.signed())
             }
-            // (NaN はどちらとも等しい扱い: partial_cmp の None の代わり)
+            // (NaN: 2, partial_cmp's None; `<` / `>=` and the others are all false for it)
             t if t.is_float() => {
                 let ct = clif_ty(t).unwrap();
                 let x = self.b.ins().load(ct, mf(), a, 0);
@@ -1143,7 +1143,10 @@ impl Cx<'_> {
                 let g = self.b.ins().fcmp(FloatCC::GreaterThan, x, y);
                 let l = self.b.ins().uextend(types::I32, l);
                 let g = self.b.ins().uextend(types::I32, g);
-                self.b.ins().isub(g, l)
+                let c = self.b.ins().isub(g, l);
+                let uno = self.b.ins().fcmp(FloatCC::Unordered, x, y);
+                let two = self.b.ins().iconst(types::I32, 2);
+                self.b.ins().select(uno, two, c)
             }
             Ty::Ref(_, Ty::Str | Ty::Slice(_)) => {
                 let e = match t {
@@ -1180,7 +1183,9 @@ impl Cx<'_> {
                     self.scopes.push(vec![]);
                     self.bind("__exr_ca".into(), r, Some(a));
                     self.bind("__exr_cb".into(), r, Some(b));
-                    let src = if m == "partial_cmp" {
+                    let src = if m == "partial_cmp" && self.prog.index.contains_key("__exr_pord_code") {
+                        "__exr_pord_code::<()>(&__exr_ca.partial_cmp(__exr_cb))"
+                    } else if m == "partial_cmp" {
                         "__exr_pord_i32::<()>(&__exr_ca.partial_cmp(__exr_cb))"
                     } else {
                         "__exr_ord_i32::<()>(&__exr_ca.cmp(__exr_cb))"
@@ -1204,7 +1209,7 @@ impl Cx<'_> {
                     let ct = clif_ty(tag_ty).unwrap();
                     let ta = self.b.ins().load(ct, mf(), a, 0);
                     let tb = self.b.ins().load(ct, mf(), b, 0);
-                    let c = self.cmp_scalar(ta, tb, true);
+                    let c = self.cmp_scalar(ta, tb, tag_ty.signed());
                     self.cmp_chain(c, done);
                     for (d, fs) in variants {
                         if fs.is_empty() {

@@ -558,6 +558,8 @@ impl Cx<'_> {
     pub(crate) fn pat_deref_once(&mut self, p: Place) -> (Place, bool) {
         match p {
             Place::Var(v, Ty::Ref(m, i)) => (Place::Mem(self.b.use_var(v), 0, *i), m),
+            // (a `&[T]` / `&str` in memory is the (pointer, length) pair itself: the slice place is that pair)
+            Place::Mem(a, o, Ty::Ref(m, i @ (Ty::Slice(_) | Ty::Str))) => (Place::Mem(a, o, *i), m),
             Place::Mem(a, o, Ty::Ref(m, i)) => (Place::Mem(self.b.ins().load(PTR, mf(), a, o), 0, *i), m),
             p => (p, false),
         }
@@ -1079,6 +1081,17 @@ impl Cx<'_> {
     pub(crate) fn release(&mut self, e: &Expr, flag: Option<StackSlot>) {
         if is_place_expr(e) {
             self.mark_moved(e);
+            // (a pattern moved out of a capture held by value: its slot becomes empty, as for moving the capture
+            // out; the values bound were read already)
+            if let Expr::Path(_, p) = strip_paren(e) {
+                if let Some((loc, t)) = ident_of(p).and_then(|id| self.lookup(id).filter(|&(l, _)| self.is_value_cap(id, l))) {
+                    if self.needs_drop(t) && self.zeroable(t) {
+                        if let Some(dst) = self.loc_addr(loc) {
+                            self.zero(dst, t);
+                        }
+                    }
+                }
+            }
         } else if let Some(f) = flag {
             self.clear_flag(f);
         }
@@ -1119,6 +1132,13 @@ impl Cx<'_> {
         };
         self.drop_in_place(addr, p.ty());
         None
+    }
+
+    /// name (bound at loc) is a capture of the closure being lowered, held by value
+    pub(crate) fn is_value_cap(&self, name: &str, loc: Loc) -> bool {
+        // (the capture's binding is the first of that name: a later `let` shadows it)
+        let first = self.scopes.iter().flat_map(|s| s.iter()).find(|b| b.0 == name).map(|b| b.1);
+        first == Some(loc) && self.caps.iter().any(|c| c.0 == name && !c.2)
     }
 
     pub(crate) fn mark_moved_loc(&mut self, loc: Loc) {

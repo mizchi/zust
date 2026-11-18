@@ -53,6 +53,8 @@ run-pass	array-slice-vec/vec-macro-no-std.rs
 run-pass	array-slice-vec/vec-macro-rvalue-scope.rs
 run-pass	array-slice-vec/vec-macro-with-trailing-comma.rs
 run-pass	array-slice-vec/vec-matching-fixed.rs
+run-pass	array-slice-vec/vec-matching-fold.rs
+run-pass	array-slice-vec/vec-matching-legal-tail-element-borrow.rs
 compile-fail	array-slice-vec/vec-mut-iter-borrow.rs
 run-pass	array-slice-vec/vec-repeat-with-cast.rs
 compile-fail	array-slice-vec/vec-res-add.rs
@@ -395,6 +397,7 @@ run-pass	binding/if-let.rs
 run-pass	binding/inconsistent-lifetime-mismatch.rs
 run-pass	binding/inferred-suffix-in-pattern-range.rs
 compile-fail	binding/invalid-assignment-in-while-77218.rs
+run-pass	binding/irrefutable-slice-patterns.rs
 compile-fail	binding/issue-40402-1.rs
 compile-fail	binding/issue-40402-2.rs
 check-pass	binding/issue-53114-borrow-checks.rs
@@ -403,6 +406,7 @@ run-pass	binding/let-var-hygiene.rs
 run-pass	binding/match-borrowed_str.rs
 run-pass	binding/match-bot-2.rs
 run-pass	binding/match-bot.rs
+run-pass	binding/match-byte-array-patterns.rs
 run-pass	binding/match-enum-struct-0.rs
 run-pass	binding/match-enum-struct-1.rs
 run-pass	binding/match-implicit-copy-unique.rs
@@ -426,6 +430,7 @@ run-pass	binding/match-ref-binding-mut.rs
 run-pass	binding/match-ref-binding.rs
 run-pass	binding/match-struct-0.rs
 run-pass	binding/match-tag.rs
+run-pass	binding/match-unsized.rs
 run-pass	binding/match-value-binding-in-guard-3291.rs
 run-pass	binding/match-vec-rvalue.rs
 run-pass	binding/match-with-at-binding-8391.rs
@@ -1357,11 +1362,15 @@ run-pass	derives/deriving-in-fn.rs
 check-pass	derives/deriving-meta-empty-trait-list.rs
 compile-fail	derives/deriving-meta-unknown-trait.rs
 run-pass	derives/deriving-with-repr-packed-3.rs
+run-pass	derives/eq-ord/derive-partial-ord-discriminant-64bit.rs
+run-pass	derives/eq-ord/derive-partial-ord-discriminant.rs
 run-pass	derives/eq-ord/derive-partial-ord.rs
+run-pass	derives/eq-ord/derive-partialord-correctness.rs
 run-pass	derives/eq-ord/deriving-cmp-generic-enum.rs
 run-pass	derives/eq-ord/deriving-cmp-generic-struct-enum.rs
 run-pass	derives/eq-ord/deriving-cmp-generic-struct.rs
 run-pass	derives/eq-ord/deriving-cmp-generic-tuple-struct.rs
+run-pass	derives/eq-ord/deriving-cmp-shortcircuit.rs
 run-pass	derives/eq-ord/deriving-self-lifetime-totalord-totaleq.rs
 compile-fail	derives/eq-ord/internal_eq_trait_method_impls.rs
 check-pass	derives/hash-on-compound-types.rs
@@ -1536,6 +1545,7 @@ compile-fail	enum-discriminant/non-int-discriminant-promoted-ice-138660.rs
 run-pass	enum-discriminant/repr-u64-enum-discriminant-cast.rs
 compile-fail	enum/assoc-fn-call-on-variant.rs
 check-pass	enum/dead-code-associated-function.rs
+run-pass	enum/enum-discrim-manual-sizing.rs
 check-pass	enum/enum-discrim-range-overflow.rs
 run-pass	enum/enum-disr-val-pretty.rs
 compile-fail	enum/enum-nonexisting-field.rs
@@ -1543,6 +1553,7 @@ run-pass	enum/enum-nullable-simplifycfg-misopt.rs
 check-pass	enum/enum-referred-by-submodule-5900.rs
 run-pass	enum/enum-size-variance.rs
 compile-fail	enum/enum-to-float-cast-2.rs
+run-pass	enum/enum-univariant-repr.rs
 compile-fail	enum/enum-variant-field-error-80607.rs
 compile-fail	enum/enum-variant-generic-args-in-module-segment.rs
 compile-fail	enum/enum-variant-no-field.rs
@@ -2039,6 +2050,8 @@ check-pass	higher-ranked/trait-bounds/normalize-under-binder/norm-before-method-
 compile-fail	hygiene/fields-numeric-borrowck.rs
 compile-fail	hygiene/for-loop.rs
 run-pass	hygiene/hygiene-dodging-1.rs
+run-pass	hygiene/hygienic-labels-in-let.rs
+run-pass	hygiene/hygienic-labels.rs
 check-pass	hygiene/no_implicit_prelude-2021.rs
 compile-fail	illegal-sized-bound/mutability-mismatch-arg.rs
 run-pass	impl-header-lifetime-elision/bare_type.rs
@@ -2661,6 +2674,7 @@ compile-fail	macros/macro-hygiene-help-issue-149604.rs
 run-pass	macros/macro-in-array-len-expr.rs
 check-pass	macros/macro-invocation-in-count-expr-fixed-array-type.rs
 compile-fail	macros/macro-invocation-span-error-7970.rs
+run-pass	macros/macro-lifetime-used-with-labels.rs
 compile-fail	macros/macro-match-nonterminal.rs
 check-pass	macros/macro-meta-items-modern.rs
 run-pass	macros/macro-method-issue-4621.rs
@@ -2892,6 +2906,7 @@ run-pass	moves/issue-22536-copy-mustnt-zero.rs
 compile-fail	moves/issue-46099-move-in-macro.rs
 compile-fail	moves/issue-72649-uninit-in-loop.rs
 compile-fail	moves/issue-99470-move-out-of-some.rs
+run-pass	moves/match-move-same-binding-15571.rs
 compile-fail	moves/matching-partially-moved-value-17385.rs
 run-pass	moves/move-2.rs
 run-pass	moves/move-3-unique.rs
@@ -4337,6 +4352,7 @@ run-pass	structs-enums/compare-generic-enums.rs
 run-pass	structs-enums/empty-tag.rs
 run-pass	structs-enums/enum-alignment.rs
 run-pass	structs-enums/enum-discr.rs
+run-pass	structs-enums/enum-discrim-autosizing.rs
 run-pass	structs-enums/enum-export-inheritance.rs
 run-pass	structs-enums/enum-nullable-const-null-with-fields.rs
 compile-fail	structs-enums/enum-rec/issue-17431-7.rs

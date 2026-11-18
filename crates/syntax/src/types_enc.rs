@@ -123,6 +123,7 @@ crate::enc_struct!(Summary {
     fns,
     structs,
     unions,
+    reprs,
     adt_err,
     impl_self,
     enums,

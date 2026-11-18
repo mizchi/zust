@@ -44,6 +44,20 @@ fn derive_names(attrs: &[String]) -> Vec<String> {
     out
 }
 
+/// The integer type of `#[repr(u8)]` / `#[repr(C, i16)]`
+fn int_repr(attrs: &[String]) -> Option<String> {
+    for a in attrs {
+        let c = compact(a);
+        let Some(inner) = c.strip_prefix("#[repr(").and_then(|x| x.strip_suffix(")]")) else { continue };
+        for part in inner.split(',') {
+            if matches!(part, "u8" | "u16" | "u32" | "u64" | "i8" | "i16" | "i32" | "i64" | "usize" | "isize") {
+                return Some(part.to_string());
+            }
+        }
+    }
+    None
+}
+
 /// `#[link_name = "malloc"]` の名前
 fn link_name(attrs: &[String]) -> Option<String> {
     for a in attrs {
@@ -1126,6 +1140,9 @@ pub fn summarize(item: &Item, owner: Option<&Owner>) -> R<Summary> {
                     }
                 }
                 sm.adt_err = adt_checks(&item.attrs, g, &tys, false, vars.len()).err();
+                if let Some(r) = int_repr(&item.attrs) {
+                    sm.reprs.push((sn.clone(), r));
+                }
             }
             sm.adt_generics = adt_params(g)?;
             let selft = self_of(sn, &sm.adt_generics);

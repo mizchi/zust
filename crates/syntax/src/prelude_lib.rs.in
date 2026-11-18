@@ -8008,7 +8008,9 @@ fn __exr_pcmp_fl<T>(a: T, b: T) -> Option<Ordering> {
 }
 
 fn __exr_pcmp_m<T>(a: &T, b: &T) -> Option<Ordering> {
-    Some(__exr_cmp_m::<T>(a, b))
+    // (2: unordered, a NaN inside)
+    let c = __exr_cmp::<T>(a, b);
+    if c == 2 { None } else { Some(__exr_ordering::<()>(c)) }
 }
 
 fn __exr_ord_i32<G>(o: &Ordering) -> i32 {
