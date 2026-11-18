@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795012395201,
+  "lastUpdate": 1795012397466,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -10188,6 +10188,70 @@ window.BENCHMARK_DATA = {
           {
             "name": "tests/ui compile-fail passing",
             "value": 2821,
+            "unit": "tests"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "committer": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "distinct": true,
+          "id": "1a3a0f91799c2fde3f8b58459e24385c03e91df4",
+          "message": "zustc: `x as Box<dyn Tr>` / `as Rc<dyn Tr>` coerce, casts to the same type\n\n- an `as` to Box<dyn ..> / Box<[T]> or a type with a dyn argument is the unsizing coercion\n- `f as fn()` where f already has that type\n- tests/ui: run-pass 51.6% -> 52.4%, check-pass 56.6%; three compile-fail tests that failed only\n  because such casts were unsupported need E0716 / Send through dyn / async checks\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-18T14:28:02Z",
+          "tree_id": "9537e2468a08b6269bd7f1bae3cb6046f9fae056",
+          "url": "https://github.com/mizchi/zust/commit/1a3a0f91799c2fde3f8b58459e24385c03e91df4"
+        },
+        "date": 1795012396859,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tests/ui run-pass pass rate",
+            "value": 52.42,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui run-pass passing",
+            "value": 1265,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui check-pass pass rate",
+            "value": 56.56,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui check-pass passing",
+            "value": 1022,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui build-pass pass rate",
+            "value": 50.37,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui build-pass passing",
+            "value": 68,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui compile-fail pass rate",
+            "value": 38.3,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui compile-fail passing",
+            "value": 2818,
             "unit": "tests"
           }
         ]
