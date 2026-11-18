@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795045770657,
+  "lastUpdate": 1795045772096,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -21666,6 +21666,85 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/mizchi/zust/commit/b2620bda961b4f2951eedada30e634f1fa2e3c8a"
         },
         "date": 1795043626326,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "parity documentSymbol (名前の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity workspace/symbol (上位 20 の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity definition (行き先の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity hover (名前を含む)",
+            "value": 92.5,
+            "unit": "%"
+          },
+          {
+            "name": "parity references (数の一致)",
+            "value": 97.297,
+            "unit": "%"
+          },
+          {
+            "name": "parity documentHighlight (数の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity rename (書き換えの一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity signatureHelp (名前・引数の数・今の引数の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity completion `x.\\|` (書いてある名前を含む)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity completion `na\\|me` (同)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity 一致の平均",
+            "value": 98.98,
+            "unit": "%"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "committer": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "distinct": true,
+          "id": "5ecf037bc5f1490e38e252d7d5e9dcc9ebfd54a7",
+          "message": "Option in `for`, `2.eq(&3)`, `Box<T>` from `.into()`, no assignment to `map[&k]`\n\n- `for p in opt.iter() / iter_mut() / into_iter()` becomes an `if let` (a loop of\n  one turn when the body has `break` / `continue`), so no iterator is pulled into\n  the prelude: a rule that did so grew the cache of no_std examples 2 KB -> 15 KB\n  and was dropped.\n- `x.eq(&y)` / `lt` / .. on numbers, bool and char are the operators.\n- `let b: Box<i64> = 5.into()` is `Box::new(5)`.\n- `map[&k]` / `map[\"k\"]` pull in `get` and `unwrap`; assigning to `map[&k]` is an\n  error (E0594), as in rustc.\ntests/ui: run-pass +6, check-pass +2, compile-fail +3. One compile-fail test leaves\nthe baseline (borrowck/borrowck-for-loop-correct-cmt-for-pattern.rs: its error,\na move out of a reference in a `for` pattern, is not checked yet).\nKPIs unchanged.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-18T23:33:40Z",
+          "tree_id": "bb044ad4b7c648e95403fa5e6a6350285239a3f3",
+          "url": "https://github.com/mizchi/zust/commit/5ecf037bc5f1490e38e252d7d5e9dcc9ebfd54a7"
+        },
+        "date": 1795045771881,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
