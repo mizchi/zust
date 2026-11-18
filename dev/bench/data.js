@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795012089857,
+  "lastUpdate": 1795012390791,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -4451,6 +4451,165 @@ window.BENCHMARK_DATA = {
           {
             "name": "rt/strings run (-O)",
             "value": 57.264,
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "committer": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "distinct": true,
+          "id": "1a3a0f91799c2fde3f8b58459e24385c03e91df4",
+          "message": "zustc: `x as Box<dyn Tr>` / `as Rc<dyn Tr>` coerce, casts to the same type\n\n- an `as` to Box<dyn ..> / Box<[T]> or a type with a dyn argument is the unsizing coercion\n- `f as fn()` where f already has that type\n- tests/ui: run-pass 51.6% -> 52.4%, check-pass 56.6%; three compile-fail tests that failed only\n  because such casts were unsupported need E0716 / Send through dyn / async checks\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-18T14:28:02Z",
+          "tree_id": "9537e2468a08b6269bd7f1bae3cb6046f9fae056",
+          "url": "https://github.com/mizchi/zust/commit/1a3a0f91799c2fde3f8b58459e24385c03e91df4"
+        },
+        "date": 1795012389754,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "gen1000 build cold",
+            "value": 164.1,
+            "unit": "ms"
+          },
+          {
+            "name": "gen1000 build noop",
+            "value": 20.435,
+            "unit": "ms"
+          },
+          {
+            "name": "gen1000 build edit 1 fn",
+            "value": 26.158,
+            "unit": "ms"
+          },
+          {
+            "name": "gen1000 check",
+            "value": 110.186,
+            "unit": "ms"
+          },
+          {
+            "name": "gen1000 build cold peak RSS",
+            "value": 20.535,
+            "unit": "MiB"
+          },
+          {
+            "name": "gen1000 binary",
+            "value": 323.977,
+            "unit": "KiB"
+          },
+          {
+            "name": "gen1000 cache",
+            "value": 387.205,
+            "unit": "KiB"
+          },
+          {
+            "name": "gen1000 build noop instructions",
+            "value": 156.913,
+            "unit": "M instr"
+          },
+          {
+            "name": "gen1000 build edit 1 fn instructions",
+            "value": 150.051,
+            "unit": "M instr"
+          },
+          {
+            "name": "gen1000 check instructions",
+            "value": 799.467,
+            "unit": "M instr"
+          },
+          {
+            "name": "gen5000 build cold",
+            "value": 740.392,
+            "unit": "ms"
+          },
+          {
+            "name": "gen5000 build noop",
+            "value": 107.122,
+            "unit": "ms"
+          },
+          {
+            "name": "gen5000 build edit 1 fn",
+            "value": 116.175,
+            "unit": "ms"
+          },
+          {
+            "name": "gen5000 check",
+            "value": 550.223,
+            "unit": "ms"
+          },
+          {
+            "name": "gen5000 build cold peak RSS",
+            "value": 76.227,
+            "unit": "MiB"
+          },
+          {
+            "name": "gen5000 binary",
+            "value": 1558.336,
+            "unit": "KiB"
+          },
+          {
+            "name": "gen5000 cache",
+            "value": 1902.83,
+            "unit": "KiB"
+          },
+          {
+            "name": "gen5000 build noop instructions",
+            "value": 751.482,
+            "unit": "M instr"
+          },
+          {
+            "name": "gen5000 build edit 1 fn instructions",
+            "value": 712.466,
+            "unit": "M instr"
+          },
+          {
+            "name": "gen5000 check instructions",
+            "value": 3975.118,
+            "unit": "M instr"
+          },
+          {
+            "name": "rt/fib run (-O)",
+            "value": 55.727,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/hashmap run (-O)",
+            "value": 122.006,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/matmul run (-O)",
+            "value": 51.409,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/nbody run (-O)",
+            "value": 77.668,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/sieve run (-O)",
+            "value": 116.97,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/sort run (-O)",
+            "value": 205.105,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/strings run (-O)",
+            "value": 64.727,
             "unit": "ms"
           }
         ]
