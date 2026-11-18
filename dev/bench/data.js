@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795034954802,
+  "lastUpdate": 1795034956715,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -17982,6 +17982,85 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/mizchi/zust/commit/fb2f2f2135de73a854bb0a39e8530f5c71d270b4"
         },
         "date": 1795034697758,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "parity documentSymbol (名前の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity workspace/symbol (上位 20 の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity definition (行き先の一致)",
+            "value": 97.222,
+            "unit": "%"
+          },
+          {
+            "name": "parity hover (名前を含む)",
+            "value": 95,
+            "unit": "%"
+          },
+          {
+            "name": "parity references (数の一致)",
+            "value": 92.105,
+            "unit": "%"
+          },
+          {
+            "name": "parity documentHighlight (数の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity rename (書き換えの一致)",
+            "value": 90,
+            "unit": "%"
+          },
+          {
+            "name": "parity signatureHelp (名前・引数の数・今の引数の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity completion `x.\\|` (書いてある名前を含む)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity completion `na\\|me` (同)",
+            "value": 79.167,
+            "unit": "%"
+          },
+          {
+            "name": "parity 一致の平均",
+            "value": 95.349,
+            "unit": "%"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "committer": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "distinct": true,
+          "id": "1f0c607c4e4e29f771b54d08005f4ea013759bf2",
+          "message": "docs: SUPPORTED.md (en + ja) numbers for fb2f2f2\n\nrun-pass 1417 (58.7%), check-pass 1130; against rustc -C incremental on\ngen1000 cold 5.3x and edit 17x faster; gen5000 noop 662.0 M instr, edit 622.7.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-18T20:40:08Z",
+          "tree_id": "ac0f0f9f9d8863581cd90701161862eb6ac39868",
+          "url": "https://github.com/mizchi/zust/commit/1f0c607c4e4e29f771b54d08005f4ea013759bf2"
+        },
+        "date": 1795034956247,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
