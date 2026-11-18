@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1794993479450,
+  "lastUpdate": 1794993481353,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -1984,6 +1984,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "lsp peak RSS",
             "value": 63.859,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "committer": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "distinct": true,
+          "id": "fe0d84f8e9932e510e42aab93d935c84d7be8864",
+          "message": "bench: rustc tests/ui as a spec suite: stricter compile-fail rule, baseline of passing tests checked in CI, pass rates on the dashboard; docs (en + ja)\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-18T09:07:12Z",
+          "tree_id": "c9f1ee03e32704d3fe38aefa0dab28cb7bdaaa1f",
+          "url": "https://github.com/mizchi/zust/commit/fe0d84f8e9932e510e42aab93d935c84d7be8864"
+        },
+        "date": 1794993480908,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "lsp definition p50",
+            "value": 0.397,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp hover p50",
+            "value": 0.336,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp completion p50",
+            "value": 0.93,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp references p50",
+            "value": 2.651,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp rename p50",
+            "value": 0.387,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp signatureHelp p50",
+            "value": 0.751,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp documentHighlight p50",
+            "value": 0.617,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp ready (startup to indexed)",
+            "value": 105.881,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp peak RSS",
+            "value": 63.758,
             "unit": "MiB"
           }
         ]
