@@ -152,6 +152,14 @@
     "docs_reports_2026-11-18-05-std-method-references.ja": {
       "path": "docs/ja/reports/2026-11-18-05-std-method-references.md",
       "role": "historical"
+    },
+    "docs_reports_2026-11-18-06-remaining-differences.en": {
+      "path": "docs/reports/2026-11-18-06-remaining-differences.md",
+      "role": "historical"
+    },
+    "docs_reports_2026-11-18-06-remaining-differences.ja": {
+      "path": "docs/ja/reports/2026-11-18-06-remaining-differences.md",
+      "role": "historical"
     }
   },
   "comparisons": [
@@ -362,6 +370,17 @@
       },
       "target": {
         "source": "docs_reports_2026-11-18-05-std-method-references.ja"
+      }
+    },
+    {
+      "id": "docs_reports_2026-11-18-06-remaining-differences",
+      "topic": "The Japanese file docs/ja/reports/2026-11-18-06-remaining-differences.md is a faithful translation of docs/reports/2026-11-18-06-remaining-differences.md",
+      "mode": "translation",
+      "reference": {
+        "source": "docs_reports_2026-11-18-06-remaining-differences.en"
+      },
+      "target": {
+        "source": "docs_reports_2026-11-18-06-remaining-differences.ja"
       }
     }
   ]

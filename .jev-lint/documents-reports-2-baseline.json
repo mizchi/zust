@@ -1,6 +1,6 @@
 {
   "schema": "jev-lint-documents-1",
-  "snapshotDigest": "582d71e34a907f21c5da948cb2cf9aabed8fc03ce7d7e8e5ea5326b78f93f699",
+  "snapshotDigest": "7b8b4072d40878a35a6d859499ff8a63a8c5ac5c932200004ffec6c74959de33",
   "questionDigest": "209d6df378ccb747fcb0e821998fcd6105bc76638a88d22488d3b398d6a21595",
   "model": "jev-1.14.0",
   "snapshotChanged": false,
@@ -100,10 +100,10 @@
       "contextHash": "a068452334ef52150a1932e9d45207a4c156e3a5c60d69e061e986b1aa86d889",
       "judgment": {
         "choice": "supports",
-        "confidence": 0.97,
+        "confidence": 0.99,
         "probabilities": {
-          "supports": 0.98,
-          "contradicts": 0.02,
+          "supports": 0.99,
+          "contradicts": 0.01,
           "unrelated": 0,
           "insufficient_context": 0
         }
@@ -168,12 +168,12 @@
       "contextHash": "ecee8f597e8c6093bcea35ffd84dafe505685fb3c77901bd2a2a9e033883360c",
       "judgment": {
         "choice": "supports",
-        "confidence": 0.99,
+        "confidence": 0.97,
         "probabilities": {
-          "supports": 0.99,
+          "supports": 0.98,
           "contradicts": 0.01,
           "unrelated": 0,
-          "insufficient_context": 0
+          "insufficient_context": 0.01
         }
       }
     },
@@ -202,10 +202,10 @@
       "contextHash": "5b6ede2d00ec82893b1c63b36b593d1e9e7999236c2422416b8324666f265c93",
       "judgment": {
         "choice": "supports",
-        "confidence": 0.96,
+        "confidence": 0.99,
         "probabilities": {
-          "supports": 0.97,
-          "contradicts": 0.03,
+          "supports": 0.99,
+          "contradicts": 0.01,
           "unrelated": 0,
           "insufficient_context": 0
         }
@@ -270,10 +270,10 @@
       "contextHash": "ed2a1f14d0739ff354f0f733b191758f1f701bf8d97c6ff2fb9d9d6c3960f277",
       "judgment": {
         "choice": "supports",
-        "confidence": 0.99,
+        "confidence": 0.97,
         "probabilities": {
-          "supports": 0.99,
-          "contradicts": 0.01,
+          "supports": 0.98,
+          "contradicts": 0.02,
           "unrelated": 0,
           "insufficient_context": 0
         }
@@ -372,12 +372,12 @@
       "contextHash": "65d03eec8a642fb4c59c7bacc74397f936864091105bba631e8977b9ca9c1612",
       "judgment": {
         "choice": "supports",
-        "confidence": 0.95,
+        "confidence": 0.99,
         "probabilities": {
-          "supports": 0.96,
-          "contradicts": 0.03,
+          "supports": 0.99,
+          "contradicts": 0.01,
           "unrelated": 0,
-          "insufficient_context": 0.01
+          "insufficient_context": 0
         }
       }
     },
@@ -644,10 +644,44 @@
       "contextHash": "1275e8de4d291bc21dd7f5b87a5196cba9cca33005a1ac6eca77fa3d0892971e",
       "judgment": {
         "choice": "supports",
-        "confidence": 0.96,
+        "confidence": 0.97,
         "probabilities": {
-          "supports": 0.97,
-          "contradicts": 0.03,
+          "supports": 0.98,
+          "contradicts": 0.02,
+          "unrelated": 0,
+          "insufficient_context": 0
+        }
+      }
+    },
+    {
+      "id": "docs_reports_2026-11-18-06-remaining-differences",
+      "topic": "The Japanese file docs/ja/reports/2026-11-18-06-remaining-differences.md is a faithful translation of docs/reports/2026-11-18-06-remaining-differences.md",
+      "mode": "translation",
+      "reference": {
+        "source": "docs_reports_2026-11-18-06-remaining-differences.en",
+        "path": "docs/reports/2026-11-18-06-remaining-differences.md",
+        "startLine": 1,
+        "endLine": 85,
+        "quote": "# Closing the remaining differences from rust-analyzer in TODO.md\n\nDate: 2026-11-18\n\nWork on the items left in TODO.md: zust-analyzer answers that differed from rust-analyzer, the fixture remainder, and\nreference speed. Each item was reproduced in a small crate and compared with rust-analyzer's answer, then checked on\nthe fixture workspace (`bench/ide_golden_ra.py`) and on zustc's own sources (`bench/lsp_parity.py`).\n\n## Type inference\n\n- **Prefix operators.** `&*p` on a raw pointer `*const T` is `&T`; `*b` on `&T` / `Box<T>` is `T`. Leading `&` /\n  `&mut` / `*` are applied to the type of the operand (only when no binary operator follows). Raw pointer annotations\n  (`p: *const T`) are accepted. `unsafe { .. }` blocks are looked into like plain blocks.\n- **Associated consts of primitive types.** `u32::MAX` was `char` and `i64::MIN` was `f32`: a lowercase qualifier was\n  read as a module, which found the deprecated module constants `core::char::MAX` / `core::f32::MIN`. Primitive type\n  names are now types, so `u32::MAX` is `u32` and `usize::BITS` is `u32` (definitions match rust-analyzer).\n- **Aliases with the same head name.** `std::io::Result<T>` (= `Result<T, Error>`) was never expanded, because an alias\n  whose right-hand side has the same name was skipped to avoid loops. It is now expanded when the number of type\n  arguments differs, and method lookup expands the receiver until it matches the impl's arity. The `e` in\n  `fs::write(..).map_err(|e| e.to_string())` is `io::Error`. Among several aliases of one name, the one in the same file,\n  then the same crate, then the workspace is preferred.\n- **Range loop variables.** `for k in 0..n` (without parentheses) gives `k` the type of `n`; `for k in 0..3` gives\n  `i32` (rust-analyzer's default). `a..` is `RangeFrom<T>`.\n- **Array values.** `[\"a\", \"b\"].into_iter()` was `[&str; 2]::IntoIter`: the projection was cut at the space inside\n  `[&str; 2]`. It is now `IntoIter<&str>`, and `find(|k| ..)` gives `k: &&str` (so `k.len()` is `str::len`, as in\n  rust-analyzer).\n- **Match arms with tuple patterns.** In `(TokenTree::Literal(x), TokenTree::Literal(y)) => ..`, the walk back from `x`\n  went through the previous arm's body and stopped at its `==`. The arm's pattern span is now found first.\n- **Iterators of dependencies.** serde_json's `Map::iter()` returns `map::Iter` (no type arguments). It was mixed up with\n  `option::Iter<'a, A>` and then with `std::path::Iter`. A type with no type arguments returned by a method is now\n  qualified with its module when the name is ambiguous, and associated types are looked up only in that module. The\n  impl itself is generated by a macro, so the item type is now unknown rather than wrong (TODO.md).\n- **`zustc/typeAt` at bindings.** The debug request now answers at a binding itself (patterns, parameters, closure\n  parameters), not only at its uses.\n\n## Definitions and references\n\n- **`name!(..)` resolves to macros only.** `vec!` went to `pub mod vec`, `format!` to nothing (it collided with\n  `fn fmt::format`). `format!` now has 3 references, like rust-analyzer.\n- **str pattern iterators.** `s.split(',').next()` went to slice `Split::next`. The methods inside core's\n  `generate_pattern_iterators!` are indexed as `__str_pat_iter` (like `uint_impl!`), and impls whose number of type\n  arguments does not match the receiver are dropped.\n- **Crate names.** The server tells zust-analyzer which file is each crate's root (workspace crates, std / core / alloc,\n  and dependencies). `std` and `fixture` now go to the crate root, `std::collections` to `collections/mod.rs`, and the\n  references of a workspace crate include `crate::`, `pub(crate)` and `super` that mean its root, as in\n  rust-analyzer (7/7 for `fixture`). Library crates get their own crate number so that `mod x;` is resolved within the\n  same crate.\n- **`cfg(miri)`.** rust-analyzer's `cargo.cfgs` defaults to `[\"debug_assertions\", \"miri\"]`, so `#[cfg(miri)]` items are\n  active. zust-analyzer now does the same.\n- **Names inside cfg predicates.** `test` in `#[cfg(test)]` was counted as a reference of the `#[test]` attribute\n  macro. Names inside `#[cfg(..)]`, the predicate of `#[cfg_attr(..)]` and `cfg!(..)` no longer resolve.\n- **Golden harness.** The ide golden test now registers crate roots and gives library files their crate numbers, as\n  the server does. The fixture's small std gained the macros and attributes the fixture uses (`assert!`, `assert_eq!`,\n  `vec!`, `format!`, `test`, `derive`, `Copy`), so `bench/ide_golden_ra.py` compares like with like.\n\n## Speed\n\nReferences scan each file independently. Slim files are reloaded first on the main thread; then the files are scanned\non up to 8 threads (when there are 8 or more files). On 4 cores the slow queries on zustc's own sources (methods with\ncommon names) went from 110–230 ms to 55–205 ms.\n\n## Results\n\n`python3 bench/ide_golden_ra.py` (the fixture against rust-analyzer):\n\n| | before | after |\n|---|---:|---:|\n| definition | 465/467 | 467/467 |\n| references | 609/629 | 627/629 |\n| hover | 615/636 | 633/636 |\n\nThe two references left are std modules, where rust-analyzer also counts paths inside std's sources.\n\n`python3 bench/lsp_parity.py`:\n\n| target | agreement (zust-analyzer / rust-analyzer) | references p50 / p90 |\n|---|---|---|\n| synth | 99.7% / 99.1% | 0.4 / 0.9 ms |\n| fixture | 97.3% / 95.6% | 0.3 / 0.9 ms |\n| zustc | 96.3% / 95.5% | 2.9 / 32.8 ms (was 4.2 / 65 ms; rust-analyzer 14.2 / 880 ms) |\n| ide | 99.0% / 97.5% (+0.9; references 100%, +2.5) | 4.6 / 19.1 ms |\n\nOn the zustc target the remaining differences are the intended `Default::default` rename and one `Key` reference that\nrust-analyzer counts in `crates/syntax/build.rs` (the build script's own `type Key = u128`). Memory is unchanged at\n66 MB. What is left is in TODO.md.",
+        "contentHash": "751e3112d76b74a0b0644229472d822ee7221e3ba7080e57afa6e18c89c8135e"
+      },
+      "target": {
+        "source": "docs_reports_2026-11-18-06-remaining-differences.ja",
+        "path": "docs/ja/reports/2026-11-18-06-remaining-differences.md",
+        "startLine": 1,
+        "endLine": 82,
+        "quote": "# TODO.md の rust-analyzer との残りの違いを詰める\n\n日付: 2026-11-18\n\nTODO.md に残っていた項目 (zust-analyzer の答えが rust-analyzer と違うもの、fixture の残り、参照の速さ) に取り組んだ。\nそれぞれを小さなクレートで再現して rust-analyzer の答えと比べ、fixture のワークスペース (`bench/ide_golden_ra.py`) と\nzustc 自身のソース (`bench/lsp_parity.py`) で確かめた。\n\n## 型推論\n\n- **前置の演算子。** 生ポインタ `*const T` への `&*p` は `&T`、`&T` / `Box<T>` への `*b` は `T`。前に付いた `&` / `&mut` /\n  `*` を、演算子のかかる式の型に当てはめる (後ろに二項演算子があるときは除く)。生ポインタの注釈 (`p: *const T`) も\n  受け付ける。`unsafe { .. }` のブロックも、普通のブロックと同じく中を見る。\n- **組み込みの型の関連定数。** `u32::MAX` が `char`、`i64::MIN` が `f32` になっていた。小文字の修飾をモジュールとして\n  読み、古いモジュールの定数 `core::char::MAX` / `core::f32::MIN` を拾っていた。組み込みの型の名前は型として扱うように\n  したので、`u32::MAX` は `u32`、`usize::BITS` は `u32` (定義の行き先も rust-analyzer と同じ)。\n- **同じ名前を頭に持つ別名。** `std::io::Result<T>` (= `Result<T, Error>`) が開かれていなかった。右辺が同じ名前の別名は、\n  ループを避けるために飛ばしていたため。型引数の数が違えば開くようにし、メソッドを引くときは impl の型引数の数に合う\n  まで受け手を開く。`fs::write(..).map_err(|e| e.to_string())` の `e` は `io::Error`。同じ名前の別名がいくつもあれば、\n  同じファイル、同じクレート、ワークスペースの順に選ぶ。\n- **範囲のループ変数。** 括弧のない `for k in 0..n` の `k` は `n` の型、`for k in 0..3` は `i32` (rust-analyzer の既定)。\n  `a..` は `RangeFrom<T>`。\n- **配列の値。** `[\"a\", \"b\"].into_iter()` が `[&str; 2]::IntoIter` のままだった。射影の前の型を、`[&str; 2]` の中の空白で\n  切っていた。今は `IntoIter<&str>` で、`find(|k| ..)` の `k` は `&&str` (なので `k.len()` は rust-analyzer と同じく\n  `str::len`)。\n- **タプルのパターンの match の腕。** `(TokenTree::Literal(x), TokenTree::Literal(y)) => ..` で、`x` から後ろへ戻ると前の\n  腕の本体を越え、その `==` で止まっていた。先に腕のパターンの範囲を求めるようにした。\n- **依存クレートの繰り返し。** serde_json の `Map::iter()` は `map::Iter` (型引数なし) を返す。これを `option::Iter<'a, A>`\n  と、次に `std::path::Iter` と取り違えていた。メソッドが返す型引数のない型は、名前がほかと重なればモジュールで修飾し、\n  関連型はそのモジュールの中だけで引く。impl そのものはマクロで作られているので、要素の型は間違いではなく「分からない」\n  になった (TODO.md)。\n- **束縛での `zustc/typeAt`。** デバッグ用の問い合わせが、使う所だけでなく束縛そのもの (パターン・引数・クロージャの引数)\n  でも答える。\n\n## 定義と参照\n\n- **`name!(..)` はマクロだけに解決する。** `vec!` が `pub mod vec` に、`format!` がどこにも行かなかった\n  (`fn fmt::format` と重なっていた)。`format!` の参照は rust-analyzer と同じ 3 件になった。\n- **str のパターンの繰り返し。** `s.split(',').next()` が slice の `Split::next` に行っていた。core のマクロ\n  `generate_pattern_iterators!` の中のメソッドを `__str_pat_iter` として索引し (`uint_impl!` と同じ)、受け手と型引数の数が\n  合わない impl を外す。\n- **クレートの名前。** サーバが、どのファイルが各クレートの根か (ワークスペースのクレート、std / core / alloc、依存\n  クレート) を zust-analyzer に伝える。`std` と `fixture` はクレートの根へ、`std::collections` は `collections/mod.rs` へ\n  行く。ワークスペースのクレートの参照には、rust-analyzer と同じく、その根を指す `crate::`・`pub(crate)`・`super` も\n  入る (`fixture` で 7/7)。ライブラリのクレートには別々のクレート番号を付け、`mod x;` を同じクレートの中で解決する。\n- **`cfg(miri)`。** rust-analyzer の `cargo.cfgs` の既定は `[\"debug_assertions\", \"miri\"]` なので、`#[cfg(miri)]` のアイテムは\n  有効。zust-analyzer も同じにした。\n- **cfg の述語の中の名前。** `#[cfg(test)]` の `test` を、属性マクロ `#[test]` の参照に数えていた。`#[cfg(..)]`・\n  `#[cfg_attr(..)]` の述語・`cfg!(..)` の中の名前は解決しない。\n- **ゴールデンのテスト。** ide のゴールデンのテストも、サーバと同じくクレートの根を設定し、ライブラリのファイルに\n  クレート番号を付ける。fixture の小さな std に、fixture が使うマクロと属性 (`assert!`・`assert_eq!`・`vec!`・`format!`・\n  `test`・`derive`・`Copy`) を足し、`bench/ide_golden_ra.py` が同じ条件で比べられるようにした。\n\n## 速さ\n\n参照はファイルごとに独立に探す。slim なファイルを先にメインのスレッドで読み直し、そのあとファイルを最大 8 本の\nスレッドで探す (ファイルが 8 個以上のとき)。4 コアで、zustc 自身のソースの遅い問い合わせ (よくある名前のメソッド) は\n110〜230 ms から 55〜205 ms になった。\n\n## 結果\n\n`python3 bench/ide_golden_ra.py` (fixture を rust-analyzer と比べる):\n\n| | 前 | 後 |\n|---|---:|---:|\n| definition | 465/467 | 467/467 |\n| references | 609/629 | 627/629 |\n| hover | 615/636 | 633/636 |\n\n残った参照の 2 件は std のモジュールで、rust-analyzer は std のソースの中のパスも数える。\n\n`python3 bench/lsp_parity.py`:\n\n| 対象 | 一致 (zust-analyzer / rust-analyzer) | references の p50 / p90 |\n|---|---|---|\n| synth | 99.7% / 99.1% | 0.4 / 0.9 ms |\n| fixture | 97.3% / 95.6% | 0.3 / 0.9 ms |\n| zustc | 96.3% / 95.5% | 2.9 / 32.8 ms (前は 4.2 / 65 ms。rust-analyzer は 14.2 / 880 ms) |\n| ide | 99.0% / 97.5% (+0.9。references は 100%、+2.5) | 4.6 / 19.1 ms |\n\nzustc の対象で残った違いは、意図した `Default::default` の rename と、rust-analyzer が `crates/syntax/build.rs` (ビルド\nスクリプト自身の `type Key = u128`) で数える `Key` の参照 1 件。メモリは 66 MB のまま。残りは TODO.md にある。",
+        "contentHash": "f77db335dda81b73931654bfd16d6428bb5ddbb4f7a5694fccd34ec4c38c6716"
+      },
+      "context": [],
+      "candidateId": "1693ab26ed501ca269f1523ef9c2313d4bc1cd323033f57f504019228e456dd8",
+      "contextHash": "f1894d506a5e66f92906b403c8a6a69c60e6e1bad8273b43b0489836c39d482f",
+      "judgment": {
+        "choice": "supports",
+        "confidence": 0.97,
+        "probabilities": {
+          "supports": 0.98,
+          "contradicts": 0.02,
           "unrelated": 0,
           "insufficient_context": 0
         }
@@ -655,9 +689,9 @@
     }
   ],
   "coverage": {
-    "expected": 19,
-    "selected": 19,
-    "answered": 19,
+    "expected": 20,
+    "selected": 20,
+    "answered": 20,
     "missing": 0,
     "contradictions": 0,
     "unassessed": 0,
@@ -666,9 +700,9 @@
     "unboundDocuments": 0
   },
   "usage": {
-    "requests": 19,
-    "inputTokens": 70425,
-    "usd": 0.00295785
+    "requests": 20,
+    "inputTokens": 75958,
+    "usd": 0.003190236
   },
   "errors": []
 }

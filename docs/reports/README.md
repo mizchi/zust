@@ -64,3 +64,4 @@ Japanese versions are in [../ja/reports/](../ja/reports/README.md).
 | 2026-11-18 | [Widening the LSP comparison and closing the remaining differences (2026-11-18)](2026-11-18-03-lsp-parity-wider.md) |
 | 2026-11-18 | [Closing gaps in type inference (2026-11-18)](2026-11-18-04-type-inference-gaps.md) |
 | 2026-11-18 | [Closing the gap in references of std methods (2026-11-18)](2026-11-18-05-std-method-references.md) |
+| 2026-11-18 | [Closing the remaining differences from rust-analyzer in TODO.md](2026-11-18-06-remaining-differences.md) |
