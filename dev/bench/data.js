@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795029662405,
+  "lastUpdate": 1795029664602,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -18721,6 +18721,70 @@ window.BENCHMARK_DATA = {
           {
             "name": "tests/ui compile-fail passing",
             "value": 2808,
+            "unit": "tests"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "committer": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "distinct": true,
+          "id": "cbcd294207b86c66671a6f2b01e54911a91ffa29",
+          "message": "Items inside function bodies: mod, trait, impl, type, union, pub items\n\n- the preprocessor moves `mod`, `trait`, `impl`, `type`, `union` and `pub` /\n  `pub(crate)` items out of function bodies like the other items; a moved\n  `mod` is flattened afterwards\n- `fn() -> T` (a type) no longer marks the next `{ .. }` as a function body\n- the scan decides \"start of a statement in a body\" before looking at the\n  keyword, so it costs no more than before (hoist 21.8 M instr on gen5000)\n- tests/ui: run-pass 1371 (56.8%), check-pass 1108 (61.3%), compile-fail 2813\n\nAccepted compile-fail removal (it was rejected before because the items in\nthe fn body were not supported; it needs the check for infinite opaque types):\nimpl-trait/issues/infinite-impl-trait-issue-38064.rs\n\nKPIs (gen5000): noop 661.5 M instr, edit 622.9, check 3893.1, cache\nunchanged; LSP ready 109 ms. Against rustc -C incremental on gen1000: cold\n5.3x, no-op 12x, edit 15x faster. README and SUPPORTED.md (en + ja) updated,\nwith the rustc comparison over time.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-18T19:12:56Z",
+          "tree_id": "5b814ce4aff4b568851efb85b770f10c4f6f1f0c",
+          "url": "https://github.com/mizchi/zust/commit/cbcd294207b86c66671a6f2b01e54911a91ffa29"
+        },
+        "date": 1795029663967,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tests/ui run-pass pass rate",
+            "value": 56.82,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui run-pass passing",
+            "value": 1371,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui check-pass pass rate",
+            "value": 61.32,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui check-pass passing",
+            "value": 1108,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui build-pass pass rate",
+            "value": 60,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui build-pass passing",
+            "value": 81,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui compile-fail pass rate",
+            "value": 38.23,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui compile-fail passing",
+            "value": 2813,
             "unit": "tests"
           }
         ]
