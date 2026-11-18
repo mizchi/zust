@@ -1054,6 +1054,12 @@ impl Program {
         if tr == "Send" || tr == "Sync" {
             return self.auto_trait(t, tr == "Sync", 0);
         }
+        // (`Box<T>` is Clone / PartialEq / Eq / PartialOrd / Ord / Debug / Display / Hash / Default when T is)
+        if let Ty::Box(i) = t {
+            if matches!(tr, "Clone" | "PartialEq" | "Eq" | "PartialOrd" | "Ord" | "Debug" | "Display" | "Hash" | "Default") {
+                return self.implements(*i, tr);
+            }
+        }
         // (const ジェネリクスの引数は長さを持つ配列型)
         if tr == CONST_GENERIC {
             return matches!(t, Ty::Array(Ty::Unit, _));

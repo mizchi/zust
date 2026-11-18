@@ -182,6 +182,7 @@ run-pass	associated-types/associated-types-simple.rs
 run-pass	associated-types/associated-types-stream.rs
 run-pass	associated-types/associated-types-struct-field-named.rs
 run-pass	associated-types/associated-types-struct-field-numbered.rs
+run-pass	associated-types/associated-types-sugar-path.rs
 compile-fail	associated-types/associated-types-unconstrained.rs
 check-pass	associated-types/bound-references-sibling-assoc-type.rs
 check-pass	associated-types/cache/chrono-scan.rs
@@ -780,6 +781,7 @@ compile-fail	box/suggest-box-for-expr-field-issue-139631.rs
 run-pass	box/unit/expr-block-generic-unique1.rs
 run-pass	box/unit/unique-generic-assign.rs
 run-pass	box/unit/unique-in-tag.rs
+run-pass	box/unit/unique-in-vec-copy.rs
 run-pass	box/unit/unique-object-move.rs
 run-pass	box/unit/unique-send-2.rs
 run-pass	builtin-superkinds/builtin-superkinds-capabilities-transitive.rs
@@ -2725,6 +2727,7 @@ compile-fail	liveness/liveness-forgot-ret.rs
 compile-fail	liveness/liveness-missing-ret2.rs
 compile-fail	liveness/liveness-move-call-arg.rs
 compile-fail	liveness/liveness-return-last-stmt-semi.rs
+compile-fail	liveness/liveness-use-after-send.rs
 run-pass	liveness/unused-assignments-diverging-branch-issue-156416.rs
 check-pass	liveness/unused-assignments-match-guard-issue-80954.rs
 build-pass	loops/infinite-loop-simplify-cfg-75704.rs
@@ -4939,6 +4942,9 @@ run-pass	traits/core-marker-name-shadowing-issue-2284.rs
 check-pass	traits/cycle-generic-bound.rs
 run-pass	traits/cycle-type-trait.rs
 run-pass	traits/default-method/bound-subst.rs
+run-pass	traits/default-method/bound-subst2.rs
+run-pass	traits/default-method/bound-subst3.rs
+run-pass	traits/default-method/bound.rs
 run-pass	traits/default-method/macro.rs
 check-pass	traits/default-method/mut.rs
 check-pass	traits/default-method/nested-supertrait-method-in-default-body.rs
@@ -4953,6 +4959,7 @@ compile-fail	traits/dont-suggest-impl-as-closure-arg.rs
 compile-fail	traits/duplicate-generic-parameter-error-86756.rs
 compile-fail	traits/duplicate-methods.rs
 run-pass	traits/dynamic-dispatch-trait-objects-5666.rs
+run-pass	traits/early-vtbl-resolution.rs
 compile-fail	traits/error-reporting/ambiguity-in-dropck-err-reporting.rs
 compile-fail	traits/explicit-reference-cast-unrelated-leaf.rs
 run-pass	traits/false-ambiguity-where-clause-builtin-bound.rs

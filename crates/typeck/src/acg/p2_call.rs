@@ -1050,6 +1050,22 @@ impl Cx<'_> {
         let args: &[&Expr] = &conv_refs;
         for (i, (a, &pt)) in args.iter().zip(&sig0.params[skip..]).enumerate() {
             let mut exp = Some(self.prog.partial_subst(pt, &sol)).filter(|&t| !self.prog.has_param(t));
+            // (an integer literal for `T: Foo`: the one integer type that implements every bound, as rustc picks it)
+            if exp.is_none() {
+                if let (Ty::Param(g), true) = (pt, is_int_lit(a)) {
+                    if let Some((_, bounds)) = sig0.generics.get(g as usize) {
+                        let traits: Vec<&str> = bounds.iter().map(|b| b.split('<').next().unwrap_or(b).trim()).filter(|b| self.prog.traits.contains_key(*b)).collect();
+                        if !traits.is_empty() && !traits.iter().all(|tr| self.prog.implements(Ty::I32, tr)) {
+                            let ints = [Ty::U8, Ty::U16, Ty::U32, Ty::U64, Ty::Usize, Ty::I8, Ty::I16, Ty::I64, Ty::Isize, Ty::U128, Ty::I128];
+                            let ok: Vec<Ty> = ints.into_iter().filter(|&t| traits.iter().all(|tr| self.prog.implements(t, tr))).collect();
+                            if let [t] = ok.as_slice() {
+                                exp = Some(*t);
+                                sol[g as usize] = Some(*t);
+                            }
+                        }
+                    }
+                }
+            }
             // (`[i64; N]` の N がまだ分からなくても、配列のリテラルには要素の型を渡す。長さはリテラルから決まる)
             if exp.is_none() {
                 if let Ty::Array(e, n) = self.prog.partial_subst(pt, &sol) {
@@ -1509,5 +1525,14 @@ impl Cx<'_> {
         // (リテラルは型を付ける: `i32::pow(2, 10)` の 2 は i32)
         let recv = if matches!(a0, Expr::Lit(_, _)) { paren(Expr::Cast(Box::new(a0.clone()), ty_named(ty))) } else { paren(a0.clone()) };
         Some(Expr::MethodCall(Box::new(recv), ms.to_string(), vec![], rest, crate::parse::Span::default()))
+    }
+}
+
+/// An integer literal without a suffix (`3`, `-3`)
+fn is_int_lit(e: &Expr) -> bool {
+    match strip_paren(e) {
+        Expr::Lit(t, _) => t.starts_with(|c: char| c.is_ascii_digit()) && !t.contains('.') && !t.contains(['i', 'u']) && !t.contains('e'),
+        Expr::Unary(op, x, _) => op == "-" && is_int_lit(x),
+        _ => false,
     }
 }
