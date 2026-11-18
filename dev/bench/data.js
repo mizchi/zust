@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795033050532,
+  "lastUpdate": 1795033053165,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -16754,6 +16754,85 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/mizchi/zust/commit/1501b301db3d730c0eb5ec4fb5c65338029c3bb2"
         },
         "date": 1795031974609,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "parity documentSymbol (名前の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity workspace/symbol (上位 20 の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity definition (行き先の一致)",
+            "value": 97.222,
+            "unit": "%"
+          },
+          {
+            "name": "parity hover (名前を含む)",
+            "value": 95,
+            "unit": "%"
+          },
+          {
+            "name": "parity references (数の一致)",
+            "value": 92.105,
+            "unit": "%"
+          },
+          {
+            "name": "parity documentHighlight (数の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity rename (書き換えの一致)",
+            "value": 90,
+            "unit": "%"
+          },
+          {
+            "name": "parity signatureHelp (名前・引数の数・今の引数の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity completion `x.\\|` (書いてある名前を含む)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity completion `na\\|me` (同)",
+            "value": 79.167,
+            "unit": "%"
+          },
+          {
+            "name": "parity 一致の平均",
+            "value": 95.349,
+            "unit": "%"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "committer": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "distinct": true,
+          "id": "8cb2f88513f5285243d469c279c34078161a5c8c",
+          "message": "`impl Trait` in trait method declarations; assert_matches!, format_args!\n\n- `fn f(&self) -> impl Tr;` in a trait: each impl's method takes its type from\n  its body (the declaration's type is a placeholder)\n- `assert_matches!(e, pat)` is `assert!(matches!(e, pat))`; `format_args!(..)`\n  is the formatted String\n- tests/ui: run-pass 1382 (57.3%), check-pass 1129 (62.5%), compile-fail 2816\n\nAccepted compile-fail removals (they were rejected before because `impl\nTrait` in traits was not supported; they need name resolution inside opaque\nbounds, the undeclared-lifetime check, Sized well-formedness and the `use<..>`\ncapture checks): impl-trait/in-trait/missing-lt-outlives-in-rpitit-114274.rs,\nimpl-trait/in-trait/refine-err.rs,\nimpl-trait/in-trait/rpitit-shadowed-by-missing-adt.rs,\nimpl-trait/in-trait/wf-bounds.rs, impl-trait/precise-capturing/redundant.rs,\nimpl-trait/precise-capturing/rpitit.rs\n\nKPIs (gen5000): noop 661.4 M instr, edit 622.9, check 3893.3, cache unchanged.\nLSP ready 145 ms in the full run; against 1501b30 on the same machine (4\nalternating runs) 281 vs 285 ms. zustc's gen1000 cold build against 8e797a9,\nalternating: 98 vs 96 ms median. Against rustc -C incremental on gen1000:\ncold 4.6x, no-op 12x, edit 18x faster. README and SUPPORTED.md (en + ja)\nupdated.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-18T20:01:29Z",
+          "tree_id": "1998f36b408c39f98755221fa7291a39da956fdc",
+          "url": "https://github.com/mizchi/zust/commit/8cb2f88513f5285243d469c279c34078161a5c8c"
+        },
+        "date": 1795033052683,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
