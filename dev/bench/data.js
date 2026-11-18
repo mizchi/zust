@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795030541722,
+  "lastUpdate": 1795030543502,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -16140,6 +16140,85 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/mizchi/zust/commit/cbcd294207b86c66671a6f2b01e54911a91ffa29"
         },
         "date": 1795029661824,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "parity documentSymbol (名前の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity workspace/symbol (上位 20 の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity definition (行き先の一致)",
+            "value": 97.222,
+            "unit": "%"
+          },
+          {
+            "name": "parity hover (名前を含む)",
+            "value": 95,
+            "unit": "%"
+          },
+          {
+            "name": "parity references (数の一致)",
+            "value": 92.105,
+            "unit": "%"
+          },
+          {
+            "name": "parity documentHighlight (数の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity rename (書き換えの一致)",
+            "value": 90,
+            "unit": "%"
+          },
+          {
+            "name": "parity signatureHelp (名前・引数の数・今の引数の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity completion `x.\\|` (書いてある名前を含む)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity completion `na\\|me` (同)",
+            "value": 79.167,
+            "unit": "%"
+          },
+          {
+            "name": "parity 一致の平均",
+            "value": 95.349,
+            "unit": "%"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "committer": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "distinct": true,
+          "id": "8e797a9e21bc72138f1717a7ecd3521303416d1a",
+          "message": "Inference of holes and fn items; call arguments borrowed until the call\n\n- `let v: Vec<Box<_>> = Vec::new();`: holes in an annotation take what the\n  let inference found\n- a generic fn passed as a value (`.map(drop)`, `.map(copy)`,\n  `.map(Result::unwrap)`) is instantiated from the bound's parameter types even\n  when the return type is still open\n- borrow checking: a `&x` argument lives until the call, as `&mut x` did\n  (`add(&*a, rewrite(&mut a))` is E0502); a binding by value in an arm with a\n  guard does not move before the guard holds; a union's fields are one place\n- tests/ui: run-pass 1374 (56.9%), check-pass 1112 (61.5%), compile-fail 2818\n\nAccepted compile-fail removal (it was rejected before because `.map(drop)`\ndid not compile; it needs the unused-iterator lint): lint/issue-109152.rs\n\nKPIs (gen5000): noop 661.6 M instr, edit 623.0, check 3893.3, cache unchanged;\nLSP ready 115 ms. Against rustc -C incremental on gen1000: cold 6.4x, no-op\n11x, edit 16x faster. README and SUPPORTED.md (en + ja) updated.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-18T19:31:34Z",
+          "tree_id": "5ebdb65367c7153b63d28f3186460511b8c5b3f7",
+          "url": "https://github.com/mizchi/zust/commit/8e797a9e21bc72138f1717a7ecd3521303416d1a"
+        },
+        "date": 1795030543121,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
