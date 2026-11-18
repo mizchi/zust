@@ -1287,3 +1287,19 @@ fn macro_hints_of_library_macros() {
 }
 
 
+
+#[test]
+fn prefix_ops_ranges_cfg_names_and_macro_calls() {
+    let src = "struct B { n: u8 }\nmod vec { pub fn f() {} }\nmacro_rules! vec { () => { 0 }; }\nfn g(p: *const B, q: &B, n: usize) {\n    let a = unsafe { &*p };\n    let b = &*q;\n    for k in 0..n { let _ = k; }\n    for j in 0..3 { let _ = j; }\n    let v = vec!();\n}\n#[cfg(test)]\nfn test() {}\n";
+    let fi = FileIndex::new(src.to_string(), vec![]);
+    let ws = [&fi];
+    let ty = |p: &str| hover(&ws, 0, at(src, p, 0), &no).unwrap_or_default();
+    for (p, want) in [("a =", "a: &B"), ("b =", "b: &B"), ("k in", "k: usize"), ("j in", "j: i32")] {
+        assert!(ty(p).contains(want), "{p}: {}", ty(p));
+    }
+    // (`vec!()` はマクロ (mod vec ではない))
+    let d = definition(&ws, 0, at(src, "vec!()", 0));
+    assert_eq!(d.first().map(|l| l.start), Some(at(src, "vec { ()", 0)));
+    // (`#[cfg(test)]` の test は fn test を指さない)
+    assert!(definition(&ws, 0, at(src, "test)]", 0)).is_empty());
+}
