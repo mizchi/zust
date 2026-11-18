@@ -113,6 +113,9 @@
 - [x] バイナリ：gen1000 で 1/3.2、実際のクレートで 1/93〜1/550
 - [ ] 実行時間：小さなプログラムで zustc は rustc `-O` の 1.2〜3.6 倍遅い（rustc の debug ビルドよりは速い）。
   zustc `-O` は 1.0〜2.9 倍
+- [x] relax (Rust の JIT) との比較、ソースから出力が終わるまで：cold で 5.3〜12 倍、no-op で 1.3〜3.4 倍、編集の後で 1.6〜18 倍速い。
+  キャッシュは 1/190（gen1000）〜1/3800
+- [x] zust-analyzer と rust-analyzer / rust-glancer：索引ができるまで 113 ms と 6.1 秒 / 10.0 秒、メモリ 71 MB と 2.1 GB / 1.6 GB
 
 表は [README](README.ja.md#rustc-との比較) にある。
 

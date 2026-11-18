@@ -113,6 +113,9 @@ Status as of 2026-11-18, updated with each round of work. The percentages are ru
 - [x] binary: 3.2x smaller on gen1000, 93–550x on real crates
 - [ ] run time: zustc is 1.2–3.6x slower than rustc `-O` on small programs (faster than rustc's debug build);
   zustc `-O` 1.0–2.9x
+- [x] against relax (a Rust JIT), source to finished output: 5.3–12x faster cold, 1.3–3.4x on a no-op run, 1.6–18x
+  after an edit; cache 1/190 (gen1000) to 1/3800
+- [x] zust-analyzer against rust-analyzer / rust-glancer: ready in 113 ms vs 6.1 s / 10.0 s, 71 MB vs 2.1 GB / 1.6 GB
 
 The tables are in the [README](README.md#against-rustc).
 

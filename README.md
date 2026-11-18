@@ -77,13 +77,34 @@ the previous commit, 1501b30 and 8e797a9 have the same cold median, 96 and 98 ms
 zustc's code is close to rustc's debug build at run time, and faster than it in all seven small programs (rustc's
 debug build is 3–26x slower than rustc `-O` there).
 
-zust-analyzer against rust-analyzer on zustc's own sources (40 query points, `python3 bench/lsp_parity.py`,
-2026-11-18; startup, memory and references measured again at e45ee10, agreement from the earlier full run):
+Against relax ([makepad/relax](https://github.com/makepad/relax) 3489f2d, a Rust JIT that compiles each function
+when it is first called; `python3 bench/vs_relax.py`, 2026-11-18). relax runs the program while it compiles it, so the
+three are compared on the time from source to the program's last output (zustc and rustc: build, then run). Every
+output matches rustc `-O`:
 
-| | startup until symbols resolve | memory | references p50 | agreement (40 points) |
+| source to finished output | cold | no-op | edit one function | cache on disk |
 |---|---:|---:|---:|---:|
-| zust-analyzer | 113 ms | 71 MB | 11.3 ms | 95.3% |
-| rust-analyzer | 5725 ms | 2056 MB | 215.9 ms | 96.2% |
+| gen1000: zustc | 103 ms | 23 ms | 31 ms | 766 KiB |
+| gen1000: rustc `-C incremental` | 585 ms | 173 ms | 384 ms | 10.8 MiB |
+| gen1000: relax run | 1193 ms | 74 ms | 569 ms | 145 MiB |
+| bench/rt (7 programs): zustc | 87–278 ms | 56–224 ms | 58–266 ms | 37–90 KiB |
+| bench/rt: rustc `-C incremental` | 164–1718 ms | 141–1654 ms | 145–1615 ms | 0.1–0.9 MiB |
+| bench/rt: relax run | 831–1460 ms | 106–356 ms | 168–435 ms | 136–137 MiB |
+| **zustc vs relax** | **5.3–12x faster** | **1.3–3.4x faster** | **1.6–18x faster** | **1/190 (gen1000)–1/3800** |
+
+relax's numbers include starting its runtime and loading its own std; its strength (patching edits into a running
+program, keeping its state) is not measured here. On the small programs, the run itself is a large part of every
+number: rustc's debug build runs slowly, so relax beats it on five of the seven after an edit.
+
+zust-analyzer against rust-analyzer and rust-glancer on zustc's own sources (40 query points,
+`python3 bench/lsp_parity.py --servers zustc,rust-analyzer,rust-glancer --targets zustc`, 2026-11-18, e45ee10;
+rust-glancer is github.com/rust-glancer/rust-glancer 50dd51a):
+
+| | startup until symbols resolve | memory | references p50 | agreement (mean over the queries) |
+|---|---:|---:|---:|---:|
+| zust-analyzer | 113 ms | 71 MB | 10.9 ms | 99.0% |
+| rust-analyzer | 6118 ms | 2060 MB | 214.0 ms | 98.9% |
+| rust-glancer | 9965 ms | 1573 MB | 548.8 ms | 58.5% |
 
 Details are in [bench/lsp_parity_result.md](bench/lsp_parity_result.md).
 

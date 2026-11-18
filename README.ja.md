@@ -72,13 +72,33 @@ adler2、hex、itoa、rustc-hash、cfg-if。6 つとも rustc と同じ出力を
 zustc のコードの実行速度は rustc の debug ビルドに近く、7 つの小さなプログラムのすべてでそれより速い (そこでは rustc の debug
 ビルドは rustc `-O` の 3〜26 倍遅い)。
 
-zust-analyzer と rust-analyzer を、zustc 自身のソース (40 か所の問い合わせ) で比べた (`python3 bench/lsp_parity.py`、
-2026-11-18。起動・メモリ・references は e45ee10 で測り直し、一致は前の全体の測定から):
+relax ([makepad/relax](https://github.com/makepad/relax) 3489f2d。関数を初めて呼ぶときにコンパイルする Rust の JIT) との比較
+(`python3 bench/vs_relax.py`、2026-11-18)。relax はコンパイルしながら実行するので、ソースからプログラムが出力を出し終わるまでの時間で比べる
+(zustc と rustc はビルドしてから実行)。出力はすべて rustc `-O` と一致する:
 
-| | 起動から名前が引けるまで | メモリ | references の p50 | 一致 (40 か所) |
+| ソースから出力が終わるまで | cold | no-op | 1 関数を編集 | ディスクのキャッシュ |
 |---|---:|---:|---:|---:|
-| zust-analyzer | 113 ms | 71 MB | 11.3 ms | 95.3% |
-| rust-analyzer | 5725 ms | 2056 MB | 215.9 ms | 96.2% |
+| gen1000: zustc | 103 ms | 23 ms | 31 ms | 766 KiB |
+| gen1000: rustc `-C incremental` | 585 ms | 173 ms | 384 ms | 10.8 MiB |
+| gen1000: relax run | 1193 ms | 74 ms | 569 ms | 145 MiB |
+| bench/rt (7 つ): zustc | 87〜278 ms | 56〜224 ms | 58〜266 ms | 37〜90 KiB |
+| bench/rt: rustc `-C incremental` | 164〜1718 ms | 141〜1654 ms | 145〜1615 ms | 0.1〜0.9 MiB |
+| bench/rt: relax run | 831〜1460 ms | 106〜356 ms | 168〜435 ms | 136〜137 MiB |
+| **zustc の relax 比** | **5.3〜12 倍速い** | **1.3〜3.4 倍速い** | **1.6〜18 倍速い** | **1/190 (gen1000)〜1/3800** |
+
+relax の数字は、ランタイムの起動と relax 自身の std の読み込みを含む。relax の強み (動いているプログラムに編集を差し込み、状態を保つ) は
+ここでは測っていない。小さなプログラムでは、どの数字も実行そのものが大きな部分を占める。rustc の debug ビルドは実行が遅いので、
+編集の後は 7 つのうち 5 つで relax が rustc より速い。
+
+zust-analyzer を rust-analyzer、rust-glancer と、zustc 自身のソース (40 か所の問い合わせ) で比べた
+(`python3 bench/lsp_parity.py --servers zustc,rust-analyzer,rust-glancer --targets zustc`、2026-11-18、e45ee10。
+rust-glancer は github.com/rust-glancer/rust-glancer の 50dd51a):
+
+| | 起動から名前が引けるまで | メモリ | references の p50 | 一致 (問い合わせの平均) |
+|---|---:|---:|---:|---:|
+| zust-analyzer | 113 ms | 71 MB | 10.9 ms | 99.0% |
+| rust-analyzer | 6118 ms | 2060 MB | 214.0 ms | 98.9% |
+| rust-glancer | 9965 ms | 1573 MB | 548.8 ms | 58.5% |
 
 詳しくは [bench/lsp_parity_result.md](bench/lsp_parity_result.md)。
 
