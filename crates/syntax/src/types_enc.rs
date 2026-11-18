@@ -122,6 +122,8 @@ crate::enc_struct!(SigSyn {
 crate::enc_struct!(Summary {
     fns,
     structs,
+    unions,
+    adt_err,
     impl_self,
     enums,
     trait_decl,

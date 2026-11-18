@@ -222,6 +222,8 @@ pub struct Program {
     pub blanket_selfs: std::collections::HashSet<String>,
     /// Traits with a blanket impl (`impl<T> Tr for T`): every type implements them (bounds are not checked)
     pub blanket_traits: std::collections::HashSet<String>,
+    /// The structs that are unions
+    pub unions: std::collections::HashSet<String>,
     /// 同じ型への別々の trait impl が同じ名前の関数を持つもの (`impl From<&str> for P` と `impl From<String> for P`):
     /// 最初の名前 → 候補の関数 (2 つ目以降は `P::from#1` のような名前)。呼び出し側が引数の型で選ぶ
     pub overloads: FxMap<String, Vec<u32>>,
@@ -471,6 +473,7 @@ impl Program {
             blanket: FxMap::default(),
             blanket_selfs: Default::default(),
             blanket_traits: Default::default(),
+            unions: Default::default(),
             overloads: Default::default(),
             by_last: FxMap::default(),
             traits: FxMap::default(),
@@ -500,6 +503,7 @@ impl Program {
             .flat_map(|sm| sm.structs.iter().map(|x| x.0.as_str()).chain(sm.enums.iter().map(|x| x.0.as_str())))
             .collect();
         for sm in sums {
+            p.unions.extend(sm.unions.iter().cloned());
             for (n, g, t) in &sm.aliases {
                 if !adt_names.contains(n.as_str()) {
                     p.aliases.insert(n.clone(), (g.clone(), t.clone()));
@@ -1553,7 +1557,7 @@ impl Program {
                 } else {
                     let fs: Vec<(String, Ty)> =
                         b.fields.iter().map(|(n, t, _)| (n.clone(), self.subst(*t, &args))).collect();
-                    let (fs, size, align) = self.struct_layout(fs);
+                    let (fs, size, align) = self.adt_fields_layout(&b.name, fs);
                     let d = self.structs.get_mut(id as usize);
                     if d.size != size || d.align != align || d.fields.len() != fs.len() {
                         changed = true;
@@ -1588,7 +1592,7 @@ impl Program {
                     d.align = align;
                 } else {
                     let fs: Vec<(String, Ty)> = b.fields.iter().map(|(n, t, _)| (n.clone(), *t)).collect();
-                    let (fs, size, align) = self.struct_layout(fs);
+                    let (fs, size, align) = self.adt_fields_layout(&b.name, fs);
                     let d = self.structs.get_mut(id);
                     let moved = d.fields.iter().zip(&fs).any(|(x, y)| x.2 != y.2);
                     if d.size != size || d.align != align || moved {
@@ -1715,7 +1719,7 @@ impl Program {
                     .iter()
                     .map(|(n, t, _)| (n.clone(), self.subst(*t, &args)))
                     .collect();
-                let (fs, size, align) = self.struct_layout(fs);
+                let (fs, size, align) = self.adt_fields_layout(&b.name, fs);
                 d.fields = fs;
                 d.size = size;
                 d.align = align;
@@ -1725,6 +1729,22 @@ impl Program {
     }
 
     /// フィールドを宣言順に自然なアラインメントで並べる (repr(C) 相当)
+    /// The layout of a struct named name (a union: every field at offset 0)
+    fn adt_fields_layout(&self, name: &str, fields: Vec<(String, Ty)>) -> (Vec<(String, Ty, u32)>, u32, u32) {
+        if !self.unions.contains(name) {
+            return self.struct_layout(fields);
+        }
+        let (mut size, mut align) = (0u32, 1u32);
+        let mut out = vec![];
+        for (n, t) in fields {
+            let (sz, al) = self.size_align(t);
+            size = size.max(sz);
+            align = align.max(al.max(1));
+            out.push((n, t, 0));
+        }
+        (out, size.next_multiple_of(align), align)
+    }
+
     fn struct_layout(&self, fields: Vec<(String, Ty)>) -> (Vec<(String, Ty, u32)>, u32, u32) {
         let mut out = vec![];
         let (mut off, mut align) = (0u32, 1u32);
@@ -2047,7 +2067,7 @@ impl Program {
                     self.structs.get_mut(id).fields =
                         fs.into_iter().map(|(n, t)| (n, t, 0)).collect();
                 } else {
-                    let (out, size, align) = self.struct_layout(fs);
+                    let (out, size, align) = self.adt_fields_layout(&sdefs[id].1, fs);
                     let sd = self.structs.get_mut(id);
                     sd.fields = out;
                     sd.size = size;

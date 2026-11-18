@@ -98,6 +98,18 @@ pub fn bound_names(bs: &[Bound]) -> R<Vec<String>> {
 }
 
 fn collect_generics(g: &Generics, out: &mut Vec<(String, Vec<String>)>) -> R<()> {
+    // (`T: Iterator<Item = impl Foo>`)
+    for p in &g.params {
+        if let GParam::Ty(_, bs, _) = p {
+            for b in bs {
+                if let Bound::Trait(_, bp) = b {
+                    if bp.segs.iter().any(|s| s.args.iter().any(|a| matches!(a, crate::parse::GArg::Bind(_, PTy::Impl(_)) | crate::parse::GArg::Ty(PTy::Impl(_))))) {
+                        return err("`impl Trait` is not allowed in generics");
+                    }
+                }
+            }
+        }
+    }
     // (E0403 and the parser's checks on the parameter list)
     let mut seen: Vec<&str> = vec![];
     let mut after_ty = false;
@@ -347,6 +359,91 @@ fn parse_sig(sig: &PSig, is_extern: bool, is_main: bool, owner: Option<&Owner>) 
     })
 }
 
+/// Checks on a struct / enum / union definition: unused parameters (E0392), `Self` in defaults (E0735), union fields
+fn adt_checks(attrs: &[String], g: &Generics, tys: &[&PTy], union: bool, nfields: usize) -> R<()> {
+    let mut names = vec![];
+    let mut lts = vec![];
+    for t in tys {
+        ty_names(t, &mut names);
+        let (mut e, mut o) = (false, false);
+        lifetimes(t, &mut lts, &mut e, &mut o);
+    }
+    for (t, bs) in &g.preds {
+        ty_names(t, &mut names);
+        for b in bs {
+            if let Bound::Trait(_, bp) = b {
+                let bt = PTy::Path(None, bp.clone());
+                ty_names(&bt, &mut names);
+                let (mut e, mut o) = (false, false);
+                lifetimes(&bt, &mut lts, &mut e, &mut o);
+            }
+        }
+    }
+    // (a parameter used in another one's bound counts: `struct P<A, F: FnOnce() -> [A; 10]>(F)`)
+    for p in &g.params {
+        if let GParam::Ty(_, bs, _) = p {
+            for b in bs {
+                match b {
+                    Bound::Trait(_, bp) => {
+                        let bt = PTy::Path(None, bp.clone());
+                        ty_names(&bt, &mut names);
+                        let (mut e, mut o) = (false, false);
+                        lifetimes(&bt, &mut lts, &mut e, &mut o);
+                    }
+                    Bound::Lifetime(l) => lts.push(l.clone()),
+                }
+            }
+        }
+    }
+    for p in &g.params {
+        match p {
+            GParam::Lifetime(l) if !lts.contains(l) => return Err(format!("parameter `{l}` is never used")),
+            GParam::Ty(n, _, d) => {
+                if !names.iter().any(|x| x == n) {
+                    return Err(format!("parameter `{n}` is never used"));
+                }
+                if let Some(d) = d {
+                    let mut dn = vec![];
+                    ty_names(d, &mut dn);
+                    if dn.iter().any(|x| x == "Self") {
+                        return err("generic parameters cannot use `Self` in their defaults");
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    let derives = derive_names(attrs);
+    for d in &derives {
+        if !matches!(d.as_str(), "Clone" | "Copy" | "Debug" | "PartialEq" | "Eq" | "PartialOrd" | "Ord" | "Hash" | "Default") {
+            return Err(format!("cannot find derive macro `{d}` in this scope"));
+        }
+    }
+    if union {
+        if nfields == 0 {
+            return err("unions cannot have zero fields");
+        }
+        if let Some(d) = derives.iter().find(|d| !matches!(d.as_str(), "Clone" | "Copy")) {
+            return Err(format!("this trait cannot be derived for unions: `{d}`"));
+        }
+        if derives.iter().any(|d| d == "Clone") && !derives.iter().any(|d| d == "Copy") {
+            return err("the trait bound `Copy` is not satisfied: a union can derive `Clone` only with `Copy`");
+        }
+        // (E0740: fields that would need dropping)
+        for t in tys {
+            let owning = match t {
+                PTy::Dyn(_) | PTy::Slice(_) => true,
+                PTy::Path(None, p) => p.segs.last().is_some_and(|s| matches!(s.name.as_str(), "String" | "Vec" | "Box" | "Rc" | "Arc" | "HashMap" | "str")),
+                _ => false,
+            };
+            if owning {
+                return err("field must implement `Copy` or be wrapped in `ManuallyDrop<...>` to be used in a union");
+            }
+        }
+    }
+    Ok(())
+}
+
 /// Lifetimes in a type (`'_` and elided `&` count as "elided")
 fn lifetimes(t: &PTy, out: &mut Vec<String>, elided: &mut bool, opaque: &mut bool) {
     match t {
@@ -379,8 +476,25 @@ fn lifetimes(t: &PTy, out: &mut Vec<String>, elided: &mut bool, opaque: &mut boo
                 lifetimes(t, out, elided, opaque);
             }
         }
-        PTy::Impl(_) | PTy::Dyn(_) | PTy::Macro(_) | PTy::Infer => *opaque = true,
-        PTy::Fn(..) | PTy::Never => {}
+        PTy::Impl(bs) | PTy::Dyn(bs) => {
+            *opaque = true;
+            for b in bs {
+                match b {
+                    Bound::Lifetime(l) => out.push(l.clone()),
+                    Bound::Trait(_, p) => lifetimes(&PTy::Path(None, p.clone()), out, elided, opaque),
+                }
+            }
+        }
+        PTy::Macro(_) | PTy::Infer => *opaque = true,
+        PTy::Fn(ps, r) => {
+            // (the lifetimes of a fn pointer type are its own: only named ones count as uses)
+            let (mut e, mut o) = (false, false);
+            for t in ps {
+                lifetimes(t, out, &mut e, &mut o);
+            }
+            lifetimes(r, out, &mut e, &mut o);
+        }
+        PTy::Never => {}
     }
 }
 
@@ -917,6 +1031,17 @@ pub fn summarize(item: &Item, owner: Option<&Owner>) -> R<Summary> {
             }
         }
         ItemKind::Enum(sn, g, vars) => {
+            {
+                let mut tys: Vec<&PTy> = vec![];
+                for (_, f, _) in vars {
+                    match f {
+                        Fields::Named(v) => tys.extend(v.iter().map(|x| &x.1)),
+                        Fields::Tuple(v) => tys.extend(v.iter()),
+                        Fields::Unit => {}
+                    }
+                }
+                sm.adt_err = adt_checks(&item.attrs, g, &tys, false, vars.len()).err();
+            }
             sm.adt_generics = adt_params(g)?;
             let selft = self_of(sn, &sm.adt_generics);
             let mut vs = Vec::new();
@@ -950,7 +1075,23 @@ pub fn summarize(item: &Item, owner: Option<&Owner>) -> R<Summary> {
             }
             sm.enums.push((sn.clone(), vs));
         }
-        ItemKind::Struct(sn, g, fields) => {
+        ItemKind::Struct(sn, g, fields) | ItemKind::Union(sn, g, fields) => {
+            let union = matches!(item.kind, ItemKind::Union(..));
+            {
+                let tys: Vec<&PTy> = match fields {
+                    Fields::Named(v) => v.iter().map(|x| &x.1).collect(),
+                    Fields::Tuple(v) => v.iter().collect(),
+                    Fields::Unit => vec![],
+                };
+                if union && matches!(fields, Fields::Tuple(_)) {
+                    return err("tuple unions are not allowed");
+                }
+                // (PhantomData itself is the one type whose parameter needs no use)
+                sm.adt_err = adt_checks(&item.attrs, g, &tys, union, tys.len()).err();
+            }
+            if union {
+                sm.unions.push(sn.clone());
+            }
             sm.adt_generics = adt_params(g)?;
             let selft = self_of(sn, &sm.adt_generics);
             let mut fs = Vec::new();

@@ -581,6 +581,12 @@ impl Session2 {
                 String::new()
             }
         });
+        // (struct / enum / union definitions of the program: unused parameters, union fields ..)
+        for (it, sm) in items[..user].iter().zip(&sums[..user]) {
+            if let Some(e) = &sm.adt_err {
+                return Err(format!("{}:1: {e}", it.line));
+            }
+        }
         let mut prog = Program::build_with(&items, &sums, self.ctx.lib.is_none())?;
         tm.lap("program", String::new());
         prog.prelude_from = user as u32;

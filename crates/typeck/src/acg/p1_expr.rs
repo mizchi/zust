@@ -1024,7 +1024,12 @@ impl Cx<'_> {
             }
             args.push((fi, fe));
         }
-        if args.len() != fields.len() {
+        // (a union is written through one field)
+        let union = self.prog.unions.contains(&self.prog.structs[self.prog.base_of(sid) as usize].name);
+        if union && args.len() != 1 {
+            return err(SP, "a union expression needs exactly one field");
+        }
+        if args.len() != fields.len() && !union {
             return err(SP, format!("missing fields in initializer of `{}`", self.prog.structs[sid as usize].name));
         }
         self.adt_value(sid, None, &args, expected, SP)
