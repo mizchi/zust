@@ -946,6 +946,42 @@ impl Cx<'_> {
 
     pub(crate) fn if_(&mut self, e: &Expr, expected: Option<Ty>) -> R<V> {
         let Expr::If(cond, then_branch, else_branch) = e else { unreachable!() };
+        // let chains (`if let Some(x) = o && x > 0 { A } else { B }`): nested ifs, B in each failing branch
+        // (`if let Some(x) = o { if x > 0 { A } else { B } } else { B }`)
+        if let Expr::Binary(op, ..) = &**cond {
+            if op == "&&" {
+                fn chain<'a>(e: &'a Expr, out: &mut Vec<&'a Expr>) {
+                    match e {
+                        Expr::Binary(op, l, r, _) if op == "&&" => {
+                            chain(l, out);
+                            chain(r, out);
+                        }
+                        e => out.push(e),
+                    }
+                }
+                let mut cs = vec![];
+                chain(cond, &mut cs);
+                if cs.iter().any(|c| matches!(c, Expr::Let(..))) {
+                    let mut body = then_branch.clone();
+                    for (i, c) in cs.iter().enumerate().rev() {
+                        let nested = Expr::If(Box::new((*c).clone()), body, else_branch.clone());
+                        if i == 0 {
+                            let at = cs
+                                .iter()
+                                .map(|c| match c {
+                                    Expr::Let(_, x) => expr_start(x),
+                                    c => expr_start(c),
+                                })
+                                .find(|p| p.line != 0)
+                                .unwrap_or(SP);
+                            let ne: &Expr = self.keep_expr(nested);
+                            return self.expr(ne, expected).map_err(|m| self.at(at, m));
+                        }
+                        body = crate::parse::Block { stmts: vec![Stmt::Expr(nested, false)] };
+                    }
+                }
+            }
+        }
         if let Expr::Let(..) = &**cond {
             return self.if_let(e, cond, expected);
         }

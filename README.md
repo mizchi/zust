@@ -35,11 +35,11 @@ medians of 3 runs). They are measured again with each round of work. gen1000 is 
 
 | gen1000 | cold | no-op | edit one function | on disk | binary (stripped) | run |
 |---|---:|---:|---:|---:|---:|---:|
-| zustc | 93 ms | 14 ms | 21 ms | 766 KiB | 324 KiB | 9 ms |
-| zustc `-O` | 274 ms | 52 ms | 54 ms | 1199 KiB | 341 KiB | 3 ms |
-| rustc `-C incremental` | 621 ms | 161 ms | 309 ms | 10.8 MiB | 1038 KiB | 6 ms |
-| rustc `-O` | 14404 ms | - | - | - | 377 KiB | 2 ms |
-| **zustc vs rustc `-C incremental`** | **6.7x faster** | **11x faster** | **15x faster** | **14x smaller** | **3.2x smaller** | |
+| zustc | 88 ms | 14 ms | 20 ms | 766 KiB | 324 KiB | 9 ms |
+| zustc `-O` | 260 ms | 51 ms | 54 ms | 1199 KiB | 341 KiB | 3 ms |
+| rustc `-C incremental` | 631 ms | 160 ms | 314 ms | 10.8 MiB | 1038 KiB | 6 ms |
+| rustc `-O` | 14440 ms | - | - | - | 377 KiB | 2 ms |
+| **zustc vs rustc `-C incremental`** | **7.2x faster** | **11x faster** | **16x faster** | **14x smaller** | **3.2x smaller** | |
 
 Small programs (`bench/rt`: fib, hashmap, matmul, nbody, sieve, sort, strings) and real crates (cratebench: fnv,
 adler2, hex, itoa, rustc-hash, cfg-if; all six give the same output as rustc):
@@ -75,7 +75,8 @@ the previous commit, 1501b30 and 8e797a9 have the same cold median, 96 and 98 ms
 | 2026-11-18, e45ee10 measured again with all programs | 130 ms | 587 ms | 4.5x | 22 ms | 332 ms | 15.1x |
 | 2026-11-18, unsafe checks (E0133) (04b7d0b) | 128 ms | 611 ms | 4.8x | 22 ms | 343 ms | 15.6x |
 | 2026-11-18, fn pointer comparisons, `main` as a value (b2620bd) | 90 ms | 625 ms | 6.9x | 23 ms | 326 ms | 14.2x |
-| 2026-11-18, diverging `let`, Option in `for`, `2.eq(&3)` | 93 ms | 621 ms | 6.7x | 21 ms | 309 ms | 14.7x |
+| 2026-11-18, diverging `let`, Option in `for`, `2.eq(&3)` (5ecf037) | 93 ms | 621 ms | 6.7x | 21 ms | 309 ms | 14.7x |
+| 2026-11-18, let chains, `&raw const` / `&raw mut` | 88 ms | 631 ms | 7.2x | 20 ms | 314 ms | 15.7x |
 
 zustc's code is close to rustc's debug build at run time, and faster than it in all seven small programs (rustc's
 debug build is 3–26x slower than rustc `-O` there).
@@ -140,7 +141,8 @@ the shared machine vary by about ±20%.
 | `Pin`, generic arguments on variants (e45ee10) | 662.1 M | 621.7 M | 3891.1 M | 1902.8 KiB | 387.2 KiB | 51.9 MiB |
 | unsafe checks (E0133) (04b7d0b) | 662.1 M | 621.8 M | 3891.7 M | 1902.8 KiB | 387.2 KiB | 51.8 MiB |
 | fn pointer comparisons, `main` as a value (b2620bd) | 664.9 M | 621.8 M | 3894.6 M | 1902.8 KiB | 387.2 KiB | 51.6 MiB |
-| now: diverging `let`, Option in `for`, `2.eq(&3)` | 664.9 M | 621.8 M | 3895.2 M | 1902.8 KiB | 387.2 KiB | 51.7 MiB |
+| diverging `let`, Option in `for`, `2.eq(&3)` (5ecf037) | 664.9 M | 621.8 M | 3895.2 M | 1902.8 KiB | 387.2 KiB | 51.7 MiB |
+| now: let chains, `&raw const` / `&raw mut` | 662.2 M | 621.8 M | 3895.6 M | 1902.8 KiB | 387.2 KiB | 51.8 MiB |
 | **change since borrow checking** | **-11.3%** | **-12.2%** | **-2.0%** | **0%** | **0%** | **-32%** |
 
 LSP (p50 of `bench/lsp_parity.py` on zustc's own sources; these are wall-clock times):
@@ -167,7 +169,8 @@ LSP (p50 of `bench/lsp_parity.py` on zustc's own sources; these are wall-clock t
 | `Pin`, generic arguments on variants (e45ee10) | 0.78 ms | 0.56 ms | 1.33 ms | 11.28 ms | 113 ms |
 | unsafe checks (E0133) (04b7d0b) | 0.64 ms | 0.50 ms | 1.30 ms | 11.99 ms | 113 ms |
 | fn pointer comparisons, `main` as a value (b2620bd) | 0.65 ms | 0.54 ms | 1.18 ms | 11.34 ms | 114 ms |
-| now: diverging `let`, Option in `for`, `2.eq(&3)` | 0.61 ms | 0.50 ms | 1.12 ms | 12.27 ms | 108 ms |
+| diverging `let`, Option in `for`, `2.eq(&3)` (5ecf037) | 0.61 ms | 0.50 ms | 1.12 ms | 12.27 ms | 108 ms |
+| now: let chains, `&raw const` / `&raw mut` | 0.57 ms | 0.46 ms | 1.08 ms | 10.41 ms | 108 ms |
 
 Each change is kept only if these do not get worse. When an LSP time rises in a full run, the two builds are
 compared again on the same machine, alternating runs, before it is called noise. The last row comes from such a
@@ -184,10 +187,10 @@ only the tests it can be asked to handle (no nightly features, auxiliary crates 
 
 | kind | applicable | pass |
 |---|---:|---:|
-| run-pass (builds, runs, same output) | 2413 | 1461 (60.5%) |
-| check-pass (accepted by `zustc check`) | 1807 | 1161 (64.3%) |
+| run-pass (builds, runs, same output) | 2413 | 1463 (60.6%) |
+| check-pass (accepted by `zustc check`) | 1807 | 1171 (64.8%) |
 | build-pass | 135 | 84 (62.2%) |
-| compile-fail (rejected at an annotated line) | 7358 | 2826 (38.4%) |
+| compile-fail (rejected at an annotated line) | 7358 | 2828 (38.4%) |
 
 [SUPPORTED.md](SUPPORTED.md) breaks this down by area as a checklist.
 

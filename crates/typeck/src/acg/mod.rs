@@ -396,7 +396,7 @@ fn addr_taken(b: &crate::parse::Block) -> HashSet<String> {
     }
     fn visit(e: &Expr, out: &mut HashSet<String>) {
         match e {
-            Expr::Ref(_, x) => {
+            Expr::Ref(_, x) | Expr::RawRef(_, x) => {
                 if let Some(n) = root(x) {
                     out.insert(n);
                 }

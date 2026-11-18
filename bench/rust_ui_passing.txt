@@ -555,6 +555,11 @@ compile-fail	borrowck/augmented-assignments.rs
 compile-fail	borrowck/bad-drop-side-effects.rs
 compile-fail	borrowck/borrow-checker-lifetime-error-46471.rs
 compile-fail	borrowck/borrow-immutable-deref-box.rs
+compile-fail	borrowck/borrow-raw-address-of-borrowed.rs
+check-pass	borrowck/borrow-raw-address-of-deref-mutability-ok.rs
+compile-fail	borrowck/borrow-raw-address-of-deref-mutability.rs
+check-pass	borrowck/borrow-raw-address-of-mutability-ok.rs
+compile-fail	borrowck/borrow-raw-address-of-mutability.rs
 compile-fail	borrowck/borrowck-access-permissions.rs
 compile-fail	borrowck/borrowck-and-init.rs
 compile-fail	borrowck/borrowck-argument.rs
@@ -1243,6 +1248,9 @@ run-pass	consts/chained-constants-stackoverflow.rs
 run-pass	consts/check_const-feature-gated.rs
 build-pass	consts/closure-in-foreign-crate.rs
 compile-fail	consts/closure-type-error-during-const-eval-66706.rs
+check-pass	consts/const-address-of-interior-mut.rs
+check-pass	consts/const-address-of-mut.rs
+check-pass	consts/const-address-of.rs
 run-pass	consts/const-adt-align-mismatch.rs
 build-pass	consts/const-array-oob-in-range-expr.rs
 compile-fail	consts/const-array-oob.rs
@@ -1316,6 +1324,7 @@ compile-fail	consts/const-item-no-type/with-colon.rs
 run-pass	consts/const-labeled-break.rs
 check-pass	consts/const-match-pattern-arm.rs
 run-pass	consts/const-meth-pattern.rs
+check-pass	consts/const-mut-refs/const_mut_address_of.rs
 check-pass	consts/const-mut-refs/const_mut_refs.rs
 run-pass	consts/const-negation.rs
 run-pass	consts/const-negative.rs
@@ -1338,7 +1347,6 @@ run-pass	consts/const_in_pattern/cyclic-const-dag-pass.rs
 check-pass	consts/const_in_pattern/issue-53708.rs
 run-pass	consts/const_in_pattern/issue-62614.rs
 run-pass	consts/const_in_pattern/null-raw-ptr-issue-119270.rs
-compile-fail	consts/const_in_pattern/suggest_equality_comparison_instead_of_pattern_matching.rs
 check-pass	consts/const_let_assign.rs
 check-pass	consts/const_let_assign2.rs
 run-pass	consts/const_let_eq.rs
@@ -1394,6 +1402,7 @@ check-pass	consts/let-irrefutable-pattern-ice-120337.rs
 check-pass	consts/manually_drop_structural_eq.rs
 run-pass	consts/match-const-fn-structs.rs
 run-pass	consts/method-reference-in-const-dyn-fn.rs
+check-pass	consts/min_const_fn/address_of_const.rs
 check-pass	consts/min_const_fn/allow_raw_ptr_dereference_const_fn.rs
 compile-fail	consts/min_const_fn/cmp_fn_pointers.rs
 compile-fail	consts/min_const_fn/min_const_fn.rs
@@ -3365,6 +3374,7 @@ run-pass	overloaded/overloaded-index-in-field.rs
 run-pass	overloaded/overloaded_deref_with_ref_pattern_issue15609.rs
 run-pass	overloaded/subtyping-both-lhs-and-rhs-in-add-impl.rs
 run-pass	packed/misaligned-reference-drop-field-99838.rs
+run-pass	packed/packed-struct-address-of-element.rs
 run-pass	packed/packed-struct-match.rs
 check-pass	panics/panic-handler-closures.rs
 build-pass	parallel-rustc/assert-found_cycle-issue-115223.rs
@@ -4381,10 +4391,13 @@ check-pass	rfcs/rfc-2396-target_feature-11/issue-99876.rs
 run-pass	rfcs/rfc-2421-unreserve-pure-offsetof-sizeof-alignof/offsetof-alignof-sizeof-pure-can-be-used-as-idents.rs
 check-pass	rfcs/rfc-2457-non-ascii-idents/mod_inline_nonascii_allowed.rs
 check-pass	rfcs/rfc-2457-non-ascii-idents/utf8_idents.rs
+run-pass	rfcs/rfc-2497-if-let-chains/ast-lowering-does-not-wrap-let-chains.rs
 compile-fail	rfcs/rfc-2497-if-let-chains/ast-validate-guards.rs
 check-pass	rfcs/rfc-2497-if-let-chains/chains-without-let.rs
 compile-fail	rfcs/rfc-2497-if-let-chains/edition-gate.rs
 compile-fail	rfcs/rfc-2497-if-let-chains/ensure-that-let-else-does-not-interact-with-let-chains.rs
+check-pass	rfcs/rfc-2497-if-let-chains/issue-90722.rs
+check-pass	rfcs/rfc-2497-if-let-chains/issue-92145.rs
 check-pass	rfcs/rfc-2497-if-let-chains/no-double-assigments.rs
 run-pass	rfcs/rfc-2497-if-let-chains/protect-precedences.rs
 compile-fail	rfcs/rfc-2565-param-attrs/param-attrs-2018.rs
@@ -4523,6 +4536,7 @@ run-pass	static/issue-1660.rs
 build-pass	static/issue-34194.rs
 compile-fail	static/missing-type.rs
 check-pass	static/raw-ref-deref-with-unsafe.rs
+check-pass	static/raw-ref-static-mut.rs
 run-pass	static/refer-to-other-statics-by-value.rs
 build-pass	static/static-array-shared-slice-references.rs
 compile-fail	static/static-closures.rs

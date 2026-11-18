@@ -541,6 +541,17 @@ impl Cx<'_> {
             }
             Expr::Unary(..) => self.unary(e, expected),
             Expr::Ref(..) => self.reference(e, expected),
+            // `&raw const p` / `&raw mut p`: the address of the place, as a raw pointer (also of a `static mut`)
+            Expr::RawRef(m, x) => {
+                let r = self.keep_expr(Expr::Ref(*m, x.clone()));
+                self.raw_ref += 1;
+                let v = self.reference(r, None);
+                self.raw_ref -= 1;
+                match v? {
+                    (v, Ty::Ref(m, i)) => Ok((v, Ty::Ptr(m, i))),
+                    r => Ok(r),
+                }
+            }
             Expr::Struct(..) => self.struct_lit(e, expected),
             Expr::Binary(..) => self.binary(e, expected),
             Expr::AssignOp(_, left, _, _) => {

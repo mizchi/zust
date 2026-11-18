@@ -9,10 +9,10 @@
 
 ## 全体
 
-- [x] tests/ui run-pass：60.5%（1461 / 2413）
-- [x] tests/ui check-pass：64.3%（1161 / 1807）
+- [x] tests/ui run-pass：60.6%（1463 / 2413）
+- [x] tests/ui check-pass：64.8%（1171 / 1807）
 - [x] tests/ui build-pass：62.2%（84 / 135）
-- [ ] tests/ui compile-fail（注釈の行でエラー）：38.4%（2826 / 7358）
+- [ ] tests/ui compile-fail（注釈の行でエラー）：38.4%（2828 / 7358）
 - [x] 実際のクレート：fnv、adler2、hex、itoa、rustc-hash、cfg-if がビルドでき、同じ出力を出す（6 / 6）
 - [x] zust-analyzer が rust-analyzer と同じように答える：95.4%（rust-analyzer は 96.2%）
 
@@ -27,6 +27,7 @@
 - [x] 名前解決：77.1%
 - [x] static：整数・浮動小数点・生ポインタ・関数ポインタ・`const fn` の呼び出し：75.0%
 - [x] 構造体、`..base`（フィールドごと）：74.2%
+- [x] let チェーン（`if let A = x && cond`）、`&raw const` / `&raw mut`
 - [x] 構文解析：73.7%
 - [x] クロージャ（キャプチャ、`Fn` トレイト、`move`）：71.7%
 - [x] derive：`Debug`、`Clone`、`Copy`、`PartialEq`/`Eq`、`PartialOrd`/`Ord`、`Hash`、`Default`：68.2%
@@ -109,8 +110,8 @@
 
 ## rustc との速度の比較 (2026-11-18)
 
-- [x] cold ビルド：gen1000 で rustc `-C incremental` の 6.7 倍速い。小さなプログラムで 2.5〜4.0 倍、実際のクレートで 2.9〜4.2 倍
-- [x] 編集して再ビルド：gen1000 で 15 倍速い。小さなプログラムで 12〜17 倍、実際のクレートで 4.8〜7.0 倍
+- [x] cold ビルド：gen1000 で rustc `-C incremental` の 7.2 倍速い。小さなプログラムで 2.5〜4.0 倍、実際のクレートで 2.9〜4.2 倍
+- [x] 編集して再ビルド：gen1000 で 16 倍速い。小さなプログラムで 12〜17 倍、実際のクレートで 4.8〜7.0 倍
 - [x] ディスクのビルドキャッシュ：1/14（gen1000 で 766 KiB と 10.8 MiB）
 - [x] バイナリ：gen1000 で 1/3.2、実際のクレートで 1/93〜1/550
 - [ ] 実行時間：小さなプログラムで zustc は rustc `-O` の 1.2〜3.6 倍遅い（rustc の debug ビルドよりは速い）。
@@ -125,9 +126,9 @@
 
 | KPI | 今 | この作業の前 |
 |---|---:|---:|
-| gen5000 の no-op ビルド | 664.9 M 命令 | 746.0 M |
+| gen5000 の no-op ビルド | 662.2 M 命令 | 746.0 M |
 | gen5000 の 1 関数を編集した後のビルド | 621.8 M 命令 | 709.3 M |
-| gen5000 の `check` | 3895.2 M 命令 | 3971.0 M |
+| gen5000 の `check` | 3895.6 M 命令 | 3971.0 M |
 | gen5000 のビルドキャッシュ | 1902.8 KiB | 1902.8 KiB |
-| LSP の definition / hover / completion / references の p50 | 0.61 / 0.50 / 1.12 / 12.27 ms | — |
+| LSP の definition / hover / completion / references の p50 | 0.57 / 0.46 / 1.08 / 10.41 ms | — |
 | LSP の起動から索引ができるまで（zustc と ide の対象の合計） | 108 ms | — |
