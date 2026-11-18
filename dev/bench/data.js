@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795011582899,
+  "lastUpdate": 1795011584417,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -9035,6 +9035,70 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/mizchi/zust/commit/3bfd50a00d2a9b094b64ed3413b0ed1fe809b6d5"
         },
         "date": 1795011139075,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tests/ui run-pass pass rate",
+            "value": 51.43,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui run-pass passing",
+            "value": 1241,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui check-pass pass rate",
+            "value": 54.95,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui check-pass passing",
+            "value": 993,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui build-pass pass rate",
+            "value": 50.37,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui build-pass passing",
+            "value": 68,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui compile-fail pass rate",
+            "value": 38.26,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui compile-fail passing",
+            "value": 2815,
+            "unit": "tests"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "committer": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "distinct": true,
+          "id": "36038246cc70d995c33dc5169a1ff8829c9ff05b",
+          "message": "zustc: fewer whole-source scans per build (prelude selection of the channel, std renames)\n\nThe four `sc.has` scans for the mpsc names become one (`mpsc`), and std_renames looks for each module\nname once. gen5000 noop build 759 -> 753 M instructions (746 before the std additions).\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-18T14:10:20Z",
+          "tree_id": "fdb3dd2f00350104f57173468d6a2cab2ba10619",
+          "url": "https://github.com/mizchi/zust/commit/36038246cc70d995c33dc5169a1ff8829c9ff05b"
+        },
+        "date": 1795011584226,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
