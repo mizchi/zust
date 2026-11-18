@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795037457314,
+  "lastUpdate": 1795037459313,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -19210,6 +19210,85 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/mizchi/zust/commit/f606b345e28b01425220c4aa7a6fe1c3bc12e049"
         },
         "date": 1795036763707,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "parity documentSymbol (名前の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity workspace/symbol (上位 20 の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity definition (行き先の一致)",
+            "value": 97.222,
+            "unit": "%"
+          },
+          {
+            "name": "parity hover (名前を含む)",
+            "value": 95,
+            "unit": "%"
+          },
+          {
+            "name": "parity references (数の一致)",
+            "value": 92.105,
+            "unit": "%"
+          },
+          {
+            "name": "parity documentHighlight (数の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity rename (書き換えの一致)",
+            "value": 90,
+            "unit": "%"
+          },
+          {
+            "name": "parity signatureHelp (名前・引数の数・今の引数の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity completion `x.\\|` (書いてある名前を含む)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity completion `na\\|me` (同)",
+            "value": 79.167,
+            "unit": "%"
+          },
+          {
+            "name": "parity 一致の平均",
+            "value": 95.349,
+            "unit": "%"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "committer": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "distinct": true,
+          "id": "a5bdbca6567a62240fbc151a38b67c37d74f55f2",
+          "message": "Integer literals for `T: Foo` take the one integer type that implements it; Box bounds\n\n- an integer literal passed for a type parameter whose bounds `i32` does not\n  meet takes the one integer type that meets them all (`go(5)` with\n  `impl Foo for isize` only), as rustc picks it\n- `Box<T>` meets Clone / PartialEq / Eq / PartialOrd / Ord / Debug / Display /\n  Hash / Default when T does\n- tests/ui: run-pass 1434 (59.4%), compile-fail 2815\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-18T21:26:49Z",
+          "tree_id": "ea2b09b83b0db10974dd14014c9fa74fe809a6b0",
+          "url": "https://github.com/mizchi/zust/commit/a5bdbca6567a62240fbc151a38b67c37d74f55f2"
+        },
+        "date": 1795037458845,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
