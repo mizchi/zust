@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795025545133,
+  "lastUpdate": 1795025547101,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -10648,6 +10648,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "lsp peak RSS",
             "value": 67.074,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "committer": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "distinct": true,
+          "id": "232f346bf3ed5cf9174f9020acde1495f28fcb58",
+          "message": "Fn pointer statics (`static F: fn(isize) -> isize = f;`)\n\n- a static's initializer may name a non-generic function, also inside arrays,\n  tuples and structs: the data holds a relocation to the function, which is\n  compiled and placed even when only the static refers to it\n- tests/ui: run-pass 1351\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-18T18:04:36Z",
+          "tree_id": "f19abb8cc1253b4e9660fdaab21f3227709d04b3",
+          "url": "https://github.com/mizchi/zust/commit/232f346bf3ed5cf9174f9020acde1495f28fcb58"
+        },
+        "date": 1795025546674,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "lsp definition p50",
+            "value": 0.509,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp hover p50",
+            "value": 0.461,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp completion p50",
+            "value": 1.024,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp references p50",
+            "value": 3.397,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp rename p50",
+            "value": 0.621,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp signatureHelp p50",
+            "value": 0.717,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp documentHighlight p50",
+            "value": 0.714,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp ready (startup to indexed)",
+            "value": 127.506,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp peak RSS",
+            "value": 67.117,
             "unit": "MiB"
           }
         ]
