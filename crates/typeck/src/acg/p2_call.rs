@@ -1068,7 +1068,8 @@ impl Cx<'_> {
                     params: bps.iter().map(|&t| self.prog.partial_subst(t, &sol)).collect(),
                     ret: self.prog.partial_subst(*bret, &sol),
                 };
-                if !ft.params.iter().any(|&t| self.prog.has_param(t)) && !self.prog.has_param(ft.ret) {
+                // (the return type may be still open (`map(drop)`: B): the parameters decide the instance)
+                if !ft.params.iter().any(|&t| self.prog.has_param(t)) {
                     exp = Some(Ty::Fn(crate::types::intern_fn(ft)));
                 }
             }
@@ -1092,7 +1093,8 @@ impl Cx<'_> {
                         self.bk.src(s);
                     }
                 }
-                self.bk_call_temp(&srcs, matches!(strip_paren(a), Expr::Ref(true, _)));
+                // (a `&x` argument also lives until the call: `add(&*a, rewrite(&mut a))` conflicts)
+                self.bk_call_temp(&srcs, matches!(strip_paren(a), Expr::Ref(..)));
             }
             let (v, mut t) = r?;
             self.closure_hint = None;

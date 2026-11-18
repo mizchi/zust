@@ -110,7 +110,9 @@ impl Cx<'_> {
             self.bk.scrut = bk_ss.clone();
             self.bk.scrut_place = bk_sp.clone();
             self.bk_bind_begin();
+            self.bk.guard_arm = arm.guard.is_some();
             let r = self.pat_bind(&arm.pat, place, BindMode::Move);
+            self.bk.guard_arm = false;
             self.bk_bind_end();
             r?;
             if self.owned_binds > ob {

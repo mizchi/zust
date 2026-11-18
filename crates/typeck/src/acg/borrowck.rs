@@ -155,6 +155,9 @@ pub struct Bk {
     pub op_call: usize,
     /// The `index_mut` call acg makes to read an indexed place (its receiver is seen as shared)
     pub shared_recv: usize,
+    /// Binding the pattern of an arm with a guard: a binding by value does not move until the guard holds (the next
+    /// arm may bind the same place again)
+    pub guard_arm: bool,
     /// The place being lowered is written or borrowed mutably (`*x = ..`, `&mut *x`): a `deref_mut` acg makes
     /// for it is a mutable borrow
     pub place_mut: bool,
@@ -1011,7 +1014,8 @@ impl Cx<'_> {
         }
         if !self.bk_ty(t).0 {
             let sp = self.bk.scrut_place.as_ref().map(|x| x.1).unwrap_or(super::SP);
-            self.bk_acc_place(p, Acc::Move, sp);
+            let a = if self.bk.guard_arm { Acc::Read } else { Acc::Move };
+            self.bk_acc_place(p, a, sp);
         }
     }
 
@@ -1125,7 +1129,10 @@ impl Cx<'_> {
                     return None;
                 }
                 let f = sd.fields.iter().find(|f| f.0 == *name)?;
-                p.proj.push(Proj::Field(name.clone()));
+                // (the fields of a union are the same memory: a union place is the whole union)
+                if !self.prog.unions.contains(&self.prog.structs[self.prog.base_of(sid) as usize].name) {
+                    p.proj.push(Proj::Field(name.clone()));
+                }
                 Some((p, Some(f.1)))
             }
             Expr::Unary(op, x, _) if op == "*" => {

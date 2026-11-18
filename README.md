@@ -35,19 +35,19 @@ medians of 3 runs). They are measured again with each round of work. gen1000 is 
 
 | gen1000 | cold | no-op | edit one function | on disk | binary (stripped) | run |
 |---|---:|---:|---:|---:|---:|---:|
-| zustc | 117 ms | 15 ms | 22 ms | 766 KiB | 324 KiB | 9 ms |
-| zustc `-O` | 293 ms | 58 ms | 57 ms | 1199 KiB | 341 KiB | 3 ms |
-| rustc `-C incremental` | 620 ms | 176 ms | 334 ms | 10.8 MiB | 1038 KiB | 6 ms |
-| rustc `-O` | 14975 ms | - | - | - | 377 KiB | 2 ms |
-| **zustc vs rustc `-C incremental`** | **5.3x faster** | **12x faster** | **15x faster** | **14x smaller** | **3.2x smaller** | |
+| zustc | 94 ms | 15 ms | 22 ms | 766 KiB | 324 KiB | 10 ms |
+| zustc `-O` | 274 ms | 55 ms | 61 ms | 1199 KiB | 341 KiB | 3 ms |
+| rustc `-C incremental` | 602 ms | 165 ms | 353 ms | 10.8 MiB | 1038 KiB | 6 ms |
+| rustc `-O` | 15148 ms | - | - | - | 377 KiB | 2 ms |
+| **zustc vs rustc `-C incremental`** | **6.4x faster** | **11x faster** | **16x faster** | **14x smaller** | **3.2x smaller** | |
 
 Small programs (`bench/rt`: fib, hashmap, matmul, nbody, sieve, sort, strings) and real crates (cratebench: fnv,
 adler2, hex, itoa, rustc-hash, cfg-if; all six give the same output as rustc):
 
 | | zustc vs rustc `-C incremental` (bench/rt) | zustc vs rustc (cratebench) |
 |---|---:|---:|
-| cold build | 2.9–4.1x faster (24–49 ms vs 82–178 ms) | 3.0–4.5x faster (21–64 ms vs 82–228 ms) |
-| edit and rebuild | 12–18x faster (5–7 ms vs 68–98 ms) | 4.7–7.6x faster (11–24 ms vs 58–114 ms) |
+| cold build | 2.9–4.1x faster (24–49 ms vs 82–178 ms) | 2.9–4.4x faster (21–55 ms vs 92–223 ms) |
+| edit and rebuild | 12–18x faster (5–7 ms vs 68–98 ms) | 5.0–6.6x faster (12–21 ms vs 72–107 ms) |
 | binary | 11–24x smaller | 90–550x smaller (8–48 KiB vs 4.4 MiB) |
 | run time vs rustc `-O` | zustc 1.1–4.1x slower, zustc `-O` 1.1–3.2x slower | zustc 3.1–17x slower, zustc `-O` 0.9–7.3x |
 
@@ -57,7 +57,8 @@ The same gen1000 comparison over time (rustc's own times move by about ±10% bet
 |---|---:|---:|---:|---:|---:|---:|
 | 2026-11-15 ([report](docs/reports/2026-11-15-15-status.md)) | 118 ms | 827 ms | 7.0x | 28 ms | 417 ms | 14.9x |
 | 2026-11-18, 72201ab | 131 ms | 643 ms | 4.9x | 22 ms | 348 ms | 15.8x |
-| 2026-11-18, items inside blocks | 117 ms | 620 ms | 5.3x | 22 ms | 334 ms | 15.2x |
+| 2026-11-18, items inside blocks (cbcd294) | 117 ms | 620 ms | 5.3x | 22 ms | 334 ms | 15.2x |
+| 2026-11-18, inference and borrowck of call arguments | 94 ms | 602 ms | 6.4x | 22 ms | 353 ms | 16.0x |
 
 zustc's code is close to rustc's debug build at run time, and faster than it in all seven small programs (rustc's
 debug build is 3–26x slower than rustc `-O` there).
@@ -85,7 +86,8 @@ the shared machine vary by about ±20%.
 | compatibility round ([report 09](docs/reports/2026-11-18-09-compat-with-kpis.md), 03367bc) | 685.7 M | 648.1 M | 3912.7 M | 1902.8 KiB | 387.2 KiB | 54.6 MiB |
 | faster prelude selection (3a1fd22) | 661.1 M | 622.4 M | 3887.3 M | 1902.8 KiB | 387.2 KiB | 51.8 MiB |
 | async, statics, const fn (e598fdf) | 661.9 M | 622.6 M | 3892.9 M | 1902.8 KiB | 387.2 KiB | 51.9 MiB |
-| now: items inside blocks | 661.5 M | 622.9 M | 3893.1 M | 1902.8 KiB | 387.2 KiB | 51.6 MiB |
+| items inside blocks (cbcd294) | 661.5 M | 622.9 M | 3893.1 M | 1902.8 KiB | 387.2 KiB | 51.6 MiB |
+| now: inference and borrowck of call arguments | 661.6 M | 623.0 M | 3893.3 M | 1902.8 KiB | 387.2 KiB | 51.7 MiB |
 | **change since borrow checking** | **-11.3%** | **-12.2%** | **-2.0%** | **0%** | **0%** | **-32%** |
 
 LSP (p50 of `bench/lsp_parity.py` on zustc's own sources; these are wall-clock times):
@@ -96,7 +98,8 @@ LSP (p50 of `bench/lsp_parity.py` on zustc's own sources; these are wall-clock t
 | compatibility round (03367bc) | 0.53 ms | 0.43 ms | 1.09 ms | 3.06 ms | 116 ms |
 | faster prelude selection (3a1fd22) | 0.58 ms | 0.47 ms | 1.37 ms | 3.45 ms | 109 ms |
 | async (e598fdf), same-machine comparison | 0.42 ms | 0.34 ms | 0.90 ms | 1.78 ms | 277 ms (two targets) |
-| now: items inside blocks | 0.59 ms | 0.49 ms | 1.26 ms | 3.52 ms | 109 ms |
+| items inside blocks (cbcd294) | 0.59 ms | 0.49 ms | 1.26 ms | 3.52 ms | 109 ms |
+| now: inference and borrowck of call arguments | 0.55 ms | 0.45 ms | 1.15 ms | 3.39 ms | 115 ms |
 
 Each change is kept only if these do not get worse. When an LSP time rises in a full run, the two builds are
 compared again on the same machine, alternating runs, before it is called noise. The last row comes from such a
@@ -113,10 +116,10 @@ only the tests it can be asked to handle (no nightly features, auxiliary crates 
 
 | kind | applicable | pass |
 |---|---:|---:|
-| run-pass (builds, runs, same output) | 2413 | 1371 (56.8%) |
-| check-pass (accepted by `zustc check`) | 1807 | 1108 (61.3%) |
+| run-pass (builds, runs, same output) | 2413 | 1374 (56.9%) |
+| check-pass (accepted by `zustc check`) | 1807 | 1112 (61.5%) |
 | build-pass | 135 | 81 (60.0%) |
-| compile-fail (rejected at an annotated line) | 7358 | 2813 (38.2%) |
+| compile-fail (rejected at an annotated line) | 7358 | 2818 (38.3%) |
 
 [SUPPORTED.md](SUPPORTED.md) breaks this down by area as a checklist.
 

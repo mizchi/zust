@@ -1580,7 +1580,9 @@ impl Cx<'_> {
             for (&a, &b) in sig0.params.iter().zip(&f.params) {
                 self.prog.match_ty(a, b, &mut sol);
             }
-            self.prog.match_ty(sig0.ret, f.ret, &mut sol);
+            if !self.prog.has_param(f.ret) {
+                self.prog.match_ty(sig0.ret, f.ret, &mut sol);
+            }
         }
         for (i, g) in sig0.generics.iter().enumerate() {
             if g.0 == "G" && sol[i].is_none() {

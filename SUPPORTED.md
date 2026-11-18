@@ -9,10 +9,10 @@ Status as of 2026-11-18, updated with each round of work. The percentages are ru
 
 ## Overall
 
-- [x] tests/ui run-pass: 56.8% (1371 / 2413)
-- [x] tests/ui check-pass: 61.3% (1108 / 1807)
+- [x] tests/ui run-pass: 56.9% (1374 / 2413)
+- [x] tests/ui check-pass: 61.5% (1112 / 1807)
 - [x] tests/ui build-pass: 60.0% (81 / 135)
-- [ ] tests/ui compile-fail (an error on an annotated line): 38.2% (2813 / 7358)
+- [ ] tests/ui compile-fail (an error on an annotated line): 38.3% (2818 / 7358)
 - [x] real crates: fnv, adler2, hex, itoa, rustc-hash and cfg-if build and give the same output (6 / 6)
 - [x] zust-analyzer answers like rust-analyzer: 95.4% (rust-analyzer: 96.2%)
 
@@ -68,7 +68,9 @@ Status as of 2026-11-18, updated with each round of work. The percentages are ru
 
 ## In sight (known approach, small cost)
 
-- [ ] infer type parameters from the expected return type (`iter::empty().collect()`): ~44 tests
+- [ ] type parameters: `let v: Vec<Box<_>> = ..` (holes in an annotation) and generic fns passed as values
+  (`.map(drop)`, `.map(Result::unwrap)`) now infer; `iter::empty().collect()`, `let f = id;` and const parameters
+  inferred from patterns do not (~35 tests)
 - [ ] items inside blocks: `mod`, `trait`, `impl`, `type`, `union` and `pub` items in a fn body now move out; items that
   macro expansion produces inside a body do not yet (~30 tests)
 - [ ] macros zustc does not know yet: ~36 tests
@@ -103,8 +105,8 @@ Status as of 2026-11-18, updated with each round of work. The percentages are ru
 
 ## Speed against rustc (2026-11-18)
 
-- [x] cold build: 5.3x faster than rustc `-C incremental` on gen1000, 3.0–4.5x on real crates
-- [x] edit and rebuild: 15x faster on gen1000, 12–18x on small programs, 4.7–7.6x on real crates
+- [x] cold build: 6.4x faster than rustc `-C incremental` on gen1000, 2.9–4.4x on real crates
+- [x] edit and rebuild: 16x faster on gen1000, 12–18x on small programs, 5.0–6.6x on real crates
 - [x] build cache on disk: 14x smaller (766 KiB vs 10.8 MiB on gen1000)
 - [x] binary: 3.2x smaller on gen1000, 90–550x on real crates
 - [ ] run time: zustc is 1.1–4.1x slower than rustc `-O` on small programs (faster than rustc's debug build);
@@ -116,9 +118,9 @@ The tables are in the [README](README.md#against-rustc).
 
 | KPI | now | before this work |
 |---|---:|---:|
-| gen5000 no-op build | 661.5 M instr | 746.0 M |
-| gen5000 build after editing one function | 622.9 M instr | 709.3 M |
-| gen5000 `check` | 3893.1 M instr | 3971.0 M |
+| gen5000 no-op build | 661.6 M instr | 746.0 M |
+| gen5000 build after editing one function | 623.0 M instr | 709.3 M |
+| gen5000 `check` | 3893.3 M instr | 3971.0 M |
 | gen5000 build cache | 1902.8 KiB | 1902.8 KiB |
 | LSP definition / hover / completion / references p50 | 0.42 / 0.34 / 0.90 / 1.78 ms | — |
 | LSP ready (startup to indexed, zustc + ide targets) | 277 ms | — |

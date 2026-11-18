@@ -1263,7 +1263,14 @@ impl Cx<'_> {
                 Stmt::Let(pat, ann_ty, init, _) => {
                     let name = pat_name(pat)?;
                     let ann = match ann_ty {
-                        Some(t) => Some(self.parse_ty(t)?),
+                        // (`let v: Vec<Box<_>> = Vec::new();`: the holes are what inference found, when it did)
+                        Some(t) => {
+                            let a = self.parse_ty(t)?;
+                            match self.lets.get(&crate::ast_infer::stmt_key(st)).copied() {
+                                Some(inf) if has_hole(self.prog, a) && !has_hole(self.prog, inf) && !self.prog.has_param(inf) => Some(inf),
+                                _ => Some(a),
+                            }
+                        }
                         // (型推論は強制変換の行き先 `[T]` などを入れてしまうことがあるので、サイズ不定の型は使わない)
                         None => self
                             .lets

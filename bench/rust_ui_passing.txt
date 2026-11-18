@@ -338,6 +338,7 @@ check-pass	async-await/issues/issue-62517-2.rs
 check-pass	async-await/issues/issue-63388-3.rs
 check-pass	async-await/issues/issue-63388-4.rs
 check-pass	async-await/issues/issue-64391-2.rs
+check-pass	async-await/issues/issue-64433.rs
 compile-fail	async-await/issues/issue-65159.rs
 check-pass	async-await/issues/issue-65436-raw-ptr-not-send.rs
 check-pass	async-await/issues/issue-69307-nested.rs
@@ -526,6 +527,7 @@ check-pass	borrowck/alias-liveness/higher-ranked.rs
 check-pass	borrowck/alias-liveness/opaque-capture.rs
 check-pass	borrowck/alias-liveness/rpit-static.rs
 compile-fail	borrowck/argument_number_mismatch_ice.rs
+check-pass	borrowck/array-disjoint-borrows-issue-135671.rs
 compile-fail	borrowck/assign-imm-local-twice.rs
 compile-fail	borrowck/assign_mutable_fields.rs
 compile-fail	borrowck/assignment-to-immutable-ref.rs
@@ -545,6 +547,7 @@ run-pass	borrowck/borrowck-assign-to-subfield.rs
 run-pass	borrowck/borrowck-assignment-to-static-mut.rs
 compile-fail	borrowck/borrowck-auto-mut-ref-to-immut-var.rs
 compile-fail	borrowck/borrowck-bad-nested-calls-free.rs
+compile-fail	borrowck/borrowck-bad-nested-calls-move.rs
 run-pass	borrowck/borrowck-binding-mutbl.rs
 compile-fail	borrowck/borrowck-block-uninit.rs
 run-pass	borrowck/borrowck-borrow-from-expr-block.rs
@@ -635,6 +638,7 @@ compile-fail	borrowck/borrowck-uninit-after-item.rs
 compile-fail	borrowck/borrowck-uninit-field-access.rs
 compile-fail	borrowck/borrowck-uninit-in-assignop.rs
 compile-fail	borrowck/borrowck-uninit-ref-chain.rs
+compile-fail	borrowck/borrowck-union-borrow-nested.rs
 compile-fail	borrowck/borrowck-union-borrow.rs
 compile-fail	borrowck/borrowck-union-move-assign.rs
 compile-fail	borrowck/borrowck-union-move.rs
@@ -2549,7 +2553,6 @@ check-pass	lint/issue-103317.rs
 compile-fail	lint/issue-103435-extra-parentheses.rs
 compile-fail	lint/issue-104392.rs
 check-pass	lint/issue-108155.rs
-compile-fail	lint/issue-109152.rs
 check-pass	lint/issue-110573.rs
 check-pass	lint/issue-14837.rs
 check-pass	lint/issue-19102.rs
@@ -2952,6 +2955,7 @@ compile-fail	mismatched_types/string-clone-mismatch-61106.rs
 compile-fail	mismatched_types/suggest-extra-borrow-issue-78613.rs
 compile-fail	mismatched_types/suggest-option-asderef-inference-var.rs
 compile-fail	mismatched_types/suggest-option-asderef-unfixable.rs
+compile-fail	mismatched_types/suggest-option-asderef.rs
 compile-fail	mismatched_types/suggest-removing-tuple-struct-field.rs
 compile-fail	mismatched_types/transforming-option-ref-issue-127545.rs
 compile-fail	missing/missing-block-hint.rs
@@ -3084,6 +3088,7 @@ run-pass	nll/issue-47589.rs
 run-pass	nll/issue-48070.rs
 run-pass	nll/issue-48623-closure.rs
 compile-fail	nll/issue-48803.rs
+run-pass	nll/issue-50343.rs
 run-pass	nll/issue-50461-used-mut-from-moves.rs
 check-pass	nll/issue-50716-1.rs
 check-pass	nll/issue-51351.rs
@@ -3100,6 +3105,8 @@ compile-fail	nll/issue-53807.rs
 compile-fail	nll/issue-54302-cases.rs
 check-pass	nll/issue-55288.rs
 check-pass	nll/issue-55344.rs
+check-pass	nll/issue-55651.rs
+compile-fail	nll/issue-57100.rs
 compile-fail	nll/issue-57280-1-flipped.rs
 compile-fail	nll/issue-57843.rs
 run-pass	nll/issue-57960.rs
@@ -4208,6 +4215,7 @@ compile-fail	return/return-struct.rs
 compile-fail	return/return-type.rs
 compile-fail	return/tail-expr-as-potential-return.rs
 compile-fail	rfcs/rfc-0000-never_patterns/ICE-119271-never-arm-attr-in-guard.rs
+run-pass	rfcs/rfc-0107-bind-by-move-pattern-guards/bind-by-move-no-guards.rs
 check-pass	rfcs/rfc-0107-bind-by-move-pattern-guards/former-E0008-now-pass.rs
 run-pass	rfcs/rfc-0107-bind-by-move-pattern-guards/rfc-basic-examples.rs
 compile-fail	rfcs/rfc-0107-bind-by-move-pattern-guards/rfc-reject-double-move-in-first-arm.rs
@@ -5096,6 +5104,7 @@ compile-fail	type/missing-let-in-binding.rs
 run-pass	type/mutually-recursive-types.rs
 compile-fail	type/option-ref-advice.rs
 compile-fail	type/struct-constructor-as-value.rs
+check-pass	type/type-alias-bounds.rs
 compile-fail	type/type-annotation-needed.rs
 compile-fail	type/type-ascription-instead-of-initializer.rs
 compile-fail	type/type-ascription-instead-of-statement-end.rs
@@ -5261,6 +5270,7 @@ run-pass	unboxed-closures/unboxed-closures-infer-fnmut-calling-fnmut.rs
 run-pass	unboxed-closures/unboxed-closures-infer-fnmut-move.rs
 run-pass	unboxed-closures/unboxed-closures-infer-fnmut.rs
 run-pass	unboxed-closures/unboxed-closures-infer-kind.rs
+run-pass	unboxed-closures/unboxed-closures-infer-upvar.rs
 run-pass	unboxed-closures/unboxed-closures-move-mutable.rs
 run-pass	unboxed-closures/unboxed-closures-prelude.rs
 run-pass	unboxed-closures/unboxed-closures-simple.rs
@@ -5280,6 +5290,7 @@ compile-fail	uninhabited/privately-uninhabited-mir-call.rs
 check-pass	uninhabited/uninhabited-enum-cast.rs
 check-pass	union/issue-99375.rs
 compile-fail	union/union-assignop.rs
+compile-fail	union/union-borrow-move-parent-sibling.rs
 run-pass	union/union-const-codegen.rs
 compile-fail	union/union-derive-clone.rs
 run-pass	union/union-drop-assign.rs
@@ -5291,6 +5302,7 @@ compile-fail	union/union-generic.rs
 run-pass	union/union-inherent-method.rs
 run-pass	union/union-macro.rs
 run-pass	union/union-manuallydrop-rpass.rs
+compile-fail	union/union-move.rs
 run-pass	union/union-nodrop.rs
 compile-fail	union/union-nonrepresentable.rs
 compile-fail	union/union-pat-in-param.rs
