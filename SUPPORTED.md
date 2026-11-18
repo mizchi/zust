@@ -106,8 +106,8 @@ Status as of 2026-11-18, updated with each round of work. The percentages are ru
 
 ## Speed against rustc (2026-11-18)
 
-- [x] cold build: 6.1x faster than rustc `-C incremental` on gen1000, 3.1–4.2x on real crates
-- [x] edit and rebuild: 15x faster on gen1000, 12–18x on small programs, 5.2–7.3x on real crates
+- [x] cold build: 7.0x faster than rustc `-C incremental` on gen1000, 2.8–4.3x on real crates
+- [x] edit and rebuild: 15x faster on gen1000, 12–18x on small programs, 4.7–7.9x on real crates
 - [x] build cache on disk: 14x smaller (766 KiB vs 10.8 MiB on gen1000)
 - [x] binary: 3.2x smaller on gen1000, 90–550x on real crates
 - [ ] run time: zustc is 1.1–4.1x slower than rustc `-O` on small programs (faster than rustc's debug build);
@@ -119,9 +119,9 @@ The tables are in the [README](README.md#against-rustc).
 
 | KPI | now | before this work |
 |---|---:|---:|
-| gen5000 no-op build | 662.9 M instr | 746.0 M |
-| gen5000 build after editing one function | 623.7 M instr | 709.3 M |
-| gen5000 `check` | 3892.3 M instr | 3971.0 M |
+| gen5000 no-op build | 663.8 M instr | 746.0 M |
+| gen5000 build after editing one function | 620.8 M instr | 709.3 M |
+| gen5000 `check` | 3892.9 M instr | 3971.0 M |
 | gen5000 build cache | 1902.8 KiB | 1902.8 KiB |
 | LSP definition / hover / completion / references p50 | 0.42 / 0.34 / 0.90 / 1.78 ms | — |
 | LSP ready (startup to indexed, zustc + ide targets) | 277 ms | — |

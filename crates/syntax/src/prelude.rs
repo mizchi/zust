@@ -13,7 +13,7 @@ pub const PRELUDE: &str = include_str!("prelude_lib.rs.in");
 
 include!(concat!(env!("OUT_DIR"), "/prelude_items.rs"));
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::sync::OnceLock;
 
 use crate::lexer::{ItemKind, SrcItem};
@@ -126,10 +126,14 @@ fn method_call_at(src: &[u8], a: usize, b: usize) -> bool {
 
 /// Iterator の trait / impl (と IntoIter の Drop) のヘッダか
 fn is_iterator_trait(h: usize) -> bool {
-    let it = &items()[h].0;
-    it.idents
-        .iter()
-        .any(|&(a, b)| matches!(&PRELUDE[a as usize..b as usize], "Iterator" | "IntoIter"))
+    // (computed once per item: the selection asks for each impl member on every build)
+    static T: OnceLock<Vec<bool>> = OnceLock::new();
+    T.get_or_init(|| {
+        items()
+            .iter()
+            .map(|(it, _, _)| it.idents.iter().any(|&(a, b)| matches!(&PRELUDE[a as usize..b as usize], "Iterator" | "IntoIter")))
+            .collect()
+    })[h]
 }
 
 /// `__exr_str_<m>` / `__exr_char_<m>` の helper: メソッド名 m → helper の名前
@@ -190,15 +194,23 @@ fn gated_trait(h: usize) -> Option<&'static str> {
 
 /// 名前が要るときだけ付ける trait の実装 (`impl Read for &[u8]`)
 fn gated_impl(h: usize) -> Option<&'static str> {
-    let it = &items()[h].0;
-    if !matches!(it.kind, ItemKind::ImplHeader) {
-        return None;
-    }
-    let ws: Vec<&'static str> = it.idents.iter().map(|&(a, b)| &PRELUDE[a as usize..b as usize]).collect();
-    match ws.as_slice() {
-        ["impl", t, "for", ..] if matches!(*t, "Read" | "BufRead") => Some(t),
-        _ => None,
-    }
+    // (computed once per item, as is_iterator_trait)
+    static T: OnceLock<Vec<Option<&'static str>>> = OnceLock::new();
+    T.get_or_init(|| {
+        items()
+            .iter()
+            .map(|(it, _, _)| {
+                if !matches!(it.kind, ItemKind::ImplHeader) {
+                    return None;
+                }
+                let ws: Vec<&'static str> = it.idents.iter().map(|&(a, b)| &PRELUDE[a as usize..b as usize]).collect();
+                match ws.as_slice() {
+                    ["impl", t, "for", ..] if matches!(*t, "Read" | "BufRead") => Some(*t),
+                    _ => None,
+                }
+            })
+            .collect()
+    })[h]
 }
 
 /// ユーザが手で impl している (`impl Ord for S` / `impl<T> Add for W<T>`) trait の名前 (最後のセグメント)
@@ -423,7 +435,7 @@ const ITER_NAMES: &[&str] = &[
 ];
 
 /// prelude のアイテムの識別子を need に足す (Iterator のメソッド名はメソッド呼び出しの位置だけ)
-fn add_idents(need: &mut HashSet<&'static str>, it: &SrcItem) {
+fn add_idents(need: &mut crate::fxhash::FxSet<&'static str>, it: &SrcItem) {
     let bytes = PRELUDE.as_bytes();
     for &(a, b) in &it.idents {
         let w = &PRELUDE[a as usize..b as usize];
@@ -677,7 +689,8 @@ pub fn select_with(user_src: &str, user_items: &[SrcItem], cache: &mut SelectCac
         }
         t
     });
-    let mut need: HashSet<&str> = HashSet::new();
+    // (Fx hashing: the set is asked thousands of times per build)
+    let mut need: crate::fxhash::FxSet<&str> = Default::default();
     let bytes = user_src.as_bytes();
     let mut chain = false;
     let old = std::mem::take(&mut cache.map);
