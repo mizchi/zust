@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795011579965,
+  "lastUpdate": 1795011581437,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -5860,6 +5860,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "lsp peak RSS",
             "value": 66.504,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "committer": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "distinct": true,
+          "id": "36038246cc70d995c33dc5169a1ff8829c9ff05b",
+          "message": "zustc: fewer whole-source scans per build (prelude selection of the channel, std renames)\n\nThe four `sc.has` scans for the mpsc names become one (`mpsc`), and std_renames looks for each module\nname once. gen5000 noop build 759 -> 753 M instructions (746 before the std additions).\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-18T14:10:20Z",
+          "tree_id": "fdb3dd2f00350104f57173468d6a2cab2ba10619",
+          "url": "https://github.com/mizchi/zust/commit/36038246cc70d995c33dc5169a1ff8829c9ff05b"
+        },
+        "date": 1795011581245,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "lsp definition p50",
+            "value": 0.486,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp hover p50",
+            "value": 0.366,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp completion p50",
+            "value": 0.985,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp references p50",
+            "value": 1.96,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp rename p50",
+            "value": 0.636,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp signatureHelp p50",
+            "value": 0.835,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp documentHighlight p50",
+            "value": 0.661,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp ready (startup to indexed)",
+            "value": 104.469,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp peak RSS",
+            "value": 66.57,
             "unit": "MiB"
           }
         ]
