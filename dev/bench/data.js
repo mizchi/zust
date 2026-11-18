@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795011137750,
+  "lastUpdate": 1795011139260,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -8704,6 +8704,70 @@ window.BENCHMARK_DATA = {
           {
             "name": "tests/ui compile-fail passing",
             "value": 2809,
+            "unit": "tests"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "committer": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "distinct": true,
+          "id": "3bfd50a00d2a9b094b64ed3413b0ed1fe809b6d5",
+          "message": "zustc: `-> impl Trait` bodies with no value, checks on `use<..>` precise capture lists\n\n- a function returning `impl Trait` whose body has no value returns `()`\n- `impl Trait + use<..>`: names must be the function's parameters (E0799 / E0800), no `'static`,\n  `'_` only with an elided input lifetime, no `Self` in an inherent impl; `impl 'static` alone needs\n  a trait\n- tests/ui: check-pass 55.0%, compile-fail 38.3%, no regressions\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-18T14:02:33Z",
+          "tree_id": "2f6b4183b4c180c56b755828ea08aa93b03f9401",
+          "url": "https://github.com/mizchi/zust/commit/3bfd50a00d2a9b094b64ed3413b0ed1fe809b6d5"
+        },
+        "date": 1795011139075,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tests/ui run-pass pass rate",
+            "value": 51.43,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui run-pass passing",
+            "value": 1241,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui check-pass pass rate",
+            "value": 54.95,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui check-pass passing",
+            "value": 993,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui build-pass pass rate",
+            "value": 50.37,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui build-pass passing",
+            "value": 68,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui compile-fail pass rate",
+            "value": 38.26,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui compile-fail passing",
+            "value": 2815,
             "unit": "tests"
           }
         ]
