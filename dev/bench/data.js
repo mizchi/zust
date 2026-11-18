@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795018049957,
+  "lastUpdate": 1795018051619,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -11842,6 +11842,85 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/mizchi/zust/commit/e3bf32322b8d9dc702a88d989cbc3553579942b1"
         },
         "date": 1795017070668,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "parity documentSymbol (名前の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity workspace/symbol (上位 20 の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity definition (行き先の一致)",
+            "value": 97.222,
+            "unit": "%"
+          },
+          {
+            "name": "parity hover (名前を含む)",
+            "value": 95,
+            "unit": "%"
+          },
+          {
+            "name": "parity references (数の一致)",
+            "value": 92.105,
+            "unit": "%"
+          },
+          {
+            "name": "parity documentHighlight (数の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity rename (書き換えの一致)",
+            "value": 90,
+            "unit": "%"
+          },
+          {
+            "name": "parity signatureHelp (名前・引数の数・今の引数の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity completion `x.\\|` (書いてある名前を含む)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity completion `na\\|me` (同)",
+            "value": 79.167,
+            "unit": "%"
+          },
+          {
+            "name": "parity 一致の平均",
+            "value": 95.349,
+            "unit": "%"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "committer": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "distinct": true,
+          "id": "4a84a6ce5b4822a219b01462257ed9f7dfd00c44",
+          "message": "mem::transmute / forget / size_of_val, ptr::read / write / drop_in_place; const temporaries drop\n\n- prelude: transmute (with E0512 size check and the &T -> &mut T lint),\n  transmute_copy, forget, size_of_val, align_of_val, ptr::drop_in_place,\n  ptr::read, ptr::write\n- `&mut x` / `&x` passed for a generic `*mut T` / `*const T` parameter\n- the atomic Ordering rename also sees a `use` after the file's header\n  comments, and `use std::sync::atomic::*`\n- `BAR.0` with a `const BAR` that needs dropping drops the temporary\n- tests/ui: run-pass 1307, check-pass 1058, build-pass 77, compile-fail 2802\n\nAccepted compile-fail removals (passed only because transmute was unknown):\nclosures/coerce-unsafe-to-closure.rs (fn item as a closure, E0277),\ncmse-nonsecure/cmse-nonsecure-call/gate_test.rs (feature gate),\nconsts/const-eval/ptr-to-int-transmute-in-consts-issue-87525.rs and\nconsts/const-eval/transmute-const-promotion.rs (const eval),\npacked/packed-struct-generic-transmute.rs and packed/packed-struct-transmute.rs\n(repr(packed) layout), transmute/ambiguity-in-closure-arg.rs (inference),\ntransmute/unnecessary-transmutation.rs (lint)\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-18T16:02:18Z",
+          "tree_id": "5a6e7a8ccccd597c8fd98e5b1af54ccd47b712ca",
+          "url": "https://github.com/mizchi/zust/commit/4a84a6ce5b4822a219b01462257ed9f7dfd00c44"
+        },
+        "date": 1795018051335,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
