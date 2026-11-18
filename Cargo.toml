@@ -6,7 +6,7 @@ edition = "2024"
 autoexamples = false
 
 [workspace]
-members = ["crates/ir", "crates/minclif", "crates/base", "crates/syntax", "crates/sema", "crates/typeck", "crates/codegen", "crates/core", "crates/clif", "crates/ide", "crates/lsp"]
+members = ["crates/ir", "crates/minclif", "crates/base", "crates/syntax", "crates/sema", "crates/typeck", "crates/codegen", "crates/core", "crates/clif", "crates/ide", "crates/analyzer"]
 
 [features]
 # (以前は driver2 を有効にする feature。今は常に入っている: テストの cfg のために残す)
@@ -20,7 +20,7 @@ minclif = { path = "crates/minclif" }
 
 [dev-dependencies]
 # (ベンチの lsp/* が LSP サーバを in-process で動かす。zustc 本体は LSP に依存しない)
-zust-analyzer = { path = "crates/lsp" }
+zust-analyzer = { path = "crates/analyzer" }
 serde_json = "1"
 # (テストが syn 版と比べるのに使う)
 syn = { version = "2", default-features = false, features = ["full", "parsing", "printing", "visit", "clone-impls"] }

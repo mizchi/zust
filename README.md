@@ -32,7 +32,7 @@ Cranelift (既定) か自前の minclif でコード生成する。zustc 自身�
 | `crates/codegen` (`zust-codegen`) | lower (記録を minclif に組み立て直して機械語にする。Cranelift なら zust-clif に渡す) / link | typeck、minclif |
 | `crates/core` (`zust-core`) | driver2 (Session2: 解析・check・キャッシュ) と、feature `build` (既定) の driver2/build.rs (機械語・fork の並列化・オブジェクト・リンク・ワークスペース)。下の層を公開し直す | typeck、(build なら) codegen |
 | `crates/ide` (`zust-ide`) | エディタ向けの解析: symbols (documentSymbol / workspace/symbol のシンボル) / navigate (定義・参照・hover・補完。字句の列と定義の表からの軽い型の推定)。コンパイラ本体からは使わない | syntax |
-| `crates/lsp` (`zust-analyzer`) | LSP サーバ (バイナリ `zust-analyzer`)。診断は driver2 の check、それ以外は ide。ワークスペースの本文はメモリの上限まで | core (build なし)、ide、serde_json |
+| `crates/analyzer` (`zust-analyzer`) | LSP サーバ (バイナリ `zust-analyzer`)。診断は driver2 の check、それ以外は ide。ワークスペースの本文はメモリの上限まで | core (build なし)、ide、serde_json |
 | `crates/minclif` | Cranelift に似た API の小さな x86-64 バックエンド (レジスタ割り当て・スタックの struct のフィールドの変数化・ELF の .o)。`from_recording` で記録を組み立て直す | ir |
 | `crates/clif` (`zust-clif`) | driver2 の Cranelift バックエンド: minclif が組み立てた命令の列を Cranelift の IR にしてコンパイルする | minclif、cranelift |
 | `.` (`zustc`) | CLI と、上のものの再輸出 (テスト・ベンチ)。ide と lsp には依存しない (ベンチの lsp/* だけが dev-dependency で使う) | 上のもの (ide・lsp を除く) |
@@ -712,7 +712,7 @@ src.rs ──srcmap (mod x; のファイル)──▶ macros (macro_rules!) ─�
 | `crates/codegen/src/link.rs` | `cc -###` からリンク行を取り出して保存し、リンカを直接起動する |
 | `crates/minclif` | 命令の記録・レジスタ割り当て・x86-64 の機械語・ELF の .o |
 | `crates/clif` | 記録した命令の列 → Cranelift の IR → 機械語 |
-| `crates/lsp/src/lib.rs` | LSP サーバ (ドキュメントごとに `Session2` を持ち `check` の診断を返す。ワークスペースと std の索引) |
+| `crates/analyzer/src/lib.rs` | LSP サーバ (ドキュメントごとに `Session2` を持ち `check` の診断を返す。ワークスペースと std の索引) |
 | `crates/ide/src/navigate.rs` / `symbols.rs` | 定義・参照・hover・補完の名前解決と、シンボルの一覧 |
 | `src/main.rs` | CLI (build / check / ワークスペースの build) |
 
@@ -1968,7 +1968,7 @@ hover・references の数、`.` の直後 (`x.|name`) と識別子の途中 (`na
   置かない。zustc 自身でコンパイルする層 (base〜core) にも入らない)。
 - zust-analyzer をバイナリ `zust-analyzer` にした。`zustc lsp` は無くし、案内を出して終わる。zustc (CLI とライブラリ) は
   zust-ide / zust-analyzer に依存しない (`cargo tree -p zustc` に出ない)。ベンチの lsp/* だけが dev-dependency で使う。
-- LSP のテストは crates/lsp/tests/lsp.rs に移した。
+- LSP のテストは crates/analyzer/tests/lsp.rs に移した。
 
 ### references の残りの不一致を詰める (2026-11-17)
 
@@ -2039,7 +2039,7 @@ hover・references の数、`.` の直後 (`x.|name`) と識別子の途中 (`na
   - `bench/mutants.sh list ...`: 数を見るだけ。
   - `--` の後ろは cargo mutants にそのまま渡す (`--shard 1/8` など)。
 - テストに使うパッケージ:
-  - crates/ide・crates/lsp だけの変異: zust-ide と zust-analyzer のテスト。1 個 2〜3 秒。
+  - crates/ide・crates/analyzer だけの変異: zust-ide と zust-analyzer のテスト。1 個 2〜3 秒。
   - それ以外: ワークスペース全部のテスト (コンパイラの層のテストの多くはルートの tests/ にある)。1 個 1 分ほど。
 - 時間切れは、基準のテストの時間の 3 倍か 180 秒の大きい方。
 - 結果は `mutants.out/` (missed.txt がテストで見つからなかった変異)。
@@ -2108,7 +2108,7 @@ use の木 (`use_tree` 27・`resolve_use` 18・`reexport` 18)、文字列の小�
 ### LSP に rename / signatureHelp / documentHighlight を足す (2026-11-18)
 
 どれも、もとからある definition / references / シグネチャの部品の上に作った (`crates/ide/src/navigate.rs` の
-`prepare_rename` / `rename` / `signature_help`、`crates/lsp/src/lib.rs` のハンドラ)。
+`prepare_rename` / `rename` / `signature_help`、`crates/analyzer/src/lib.rs` のハンドラ)。
 
 - **rename** (`prepareProvider` も):
   - references の位置を書き換える。trait のメソッドなら impl のメソッドも書き換える。
@@ -2258,7 +2258,7 @@ hover 612 → 614/636。
 rust-analyzer の hover の型を正解にして、よく書く式 39 個 (繰り返しの鎖・Option / Result・HashMap・タプル・
 ターボフィッシュ・数の型のメソッド) を比べた。前は 17 個のうち 7 個しか合っていなかった (`Option<U>` /
 `Option<Iter<'_, ..>::Item>` / 型が出ない) のが、39 個全部 (クロージャの型の表示も) 同じになった。この比べ方は
-`crates/lsp/tests/lsp.rs` の `type_inference_like_rust_analyzer` (本物の std を使う) に残した。
+`crates/analyzer/tests/lsp.rs` の `type_inference_like_rust_analyzer` (本物の std を使う) に残した。
 
 - **繰り返しの要素の型** (`iter_item`): `Iter<'_, T>` → &T、`IterMut` → &mut T、`IntoIter` → T、HashMap の
   `Iter<'_, K, V>` → (&K, &V)、`Map<I, impl FnMut(..) -> R>` → R、`FilterMap` / `FlatMap` / `Flatten` / `Enumerate` /

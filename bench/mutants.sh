@@ -8,7 +8,7 @@
 #   bench/mutants.sh list [...]       変異の一覧だけ (数を見る)。後ろは cargo mutants の引数
 #
 # テストに使うパッケージは、変異を入れるクレートから決める:
-#   crates/ide・crates/lsp だけ → zust-ide と zust-analyzer のテスト (速い)
+#   crates/ide・crates/analyzer だけ → zust-ide と zust-analyzer のテスト (速い)
 #   それ以外 → ワークスペース全部のテスト (コンパイラの層のテストの多くは zustc (ルート) の tests/ にある)
 # `--` の後ろは cargo mutants にそのまま渡す (例: -- -j 2 --shard 1/8 -F 'match_score')。
 # 結果は mutants.out/ (missed.txt: テストで見つからなかった変異、caught.txt、timeout.txt、unviable.txt)。
@@ -32,7 +32,7 @@ tests_for() {
   local only_ide=1
   for f in "$@"; do
     case "$f" in
-      crates/ide/*|crates/lsp/*) ;;
+      crates/ide/*|crates/analyzer/*) ;;
       *) only_ide=0 ;;
     esac
   done
