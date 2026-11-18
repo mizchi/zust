@@ -15,6 +15,7 @@ README の「必要なもの」に加えて、次のものを使う。
 - rust-analyzer (あれば): `bench/lsp_parity.py` と `bench/ide_golden_ra.py` が答えを比べる。
 - cargo-mutants (あれば): ミューテーションテスト。
 - wild (あれば): リンクが速くなる。ベンチマークの数字は wild で測っている。
+- Node 24 以上と TypeSafe の API キー (あれば): 英語と日本語の文書が食い違っていないかの確認 (jev-lint)。
 
 ```bash
 cargo build --release --workspace
@@ -195,6 +196,30 @@ origin/main からの差分の行だけを変異させ、テストで見つか�
 ```bash
 python3 bench/ci_bench.py --out-dir out/ci
 ```
+
+## 英語の文書と日本語訳
+
+英語の文書にはそれぞれ日本語訳がある: `README.md` / `README.ja.md`、`CONTRIBUTING.md` / `CONTRIBUTING.ja.md`、
+`docs/X.md` / `docs/ja/X.md` (レポートも)。片方を変えたら、もう片方も変える。
+[jev-lint](https://github.com/mizchi/jev-lint) の `docs` が、それぞれの組が同じことを言っているかをモデルに聞く。
+
+- `scripts/docs_manifest.py` は、組から jev-lint のマニフェスト (`.jev-lint/documents*.json`) を書く。`--check` は、
+  相手のないファイルがあるか、マニフェストが古ければ失敗する。
+- `scripts/docs_check.sh` は、記録した判定 (`.jev-lint/*-baseline.json`) を今の文書で読み直す。オフラインで、API キーは
+  要らない (CI が走らせる)。組が食い違っているか、判定を記録した後に文書が変わっていれば失敗する。
+- `scripts/docs_check.sh --update` は、文書が変わったマニフェストだけをモデルに判定させ直し、記録を書き直す。
+  https://typesafe.ai の `TYPESAFE_API_KEY` (か `TYPESAFEAI_API_KEY`) が要る。文書の本文はその API に送られる。64 組を
+  全部判定して約 $0.03。
+
+コミットフックは、clone ごとに一度有効にする。
+
+```bash
+git config core.hooksPath .githooks
+```
+
+Markdown を変えたコミットでは、フックが `scripts/docs_check.sh --update` を走らせ、書き直した記録をコミットに足し、組が
+食い違っていればコミットを止める。判定はモデルの判断なので、出た組を読んで間違っている側を直す (判定の方が間違っていれば
+`--no-verify` でコミットする)。
 
 ## デバッグ用の環境変数
 

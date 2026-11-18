@@ -1,0 +1,767 @@
+{
+  "schema": "jev-lint-documents-manifest-1",
+  "files": {
+    "docs_reports_2026-11-14-01-blaze-relax-wild-survey.en": {
+      "path": "docs/reports/2026-11-14-01-blaze-relax-wild-survey.md",
+      "role": "historical"
+    },
+    "docs_reports_2026-11-14-01-blaze-relax-wild-survey.ja": {
+      "path": "docs/ja/reports/2026-11-14-01-blaze-relax-wild-survey.md",
+      "role": "historical"
+    },
+    "docs_reports_2026-11-15-01-incremental-bench.en": {
+      "path": "docs/reports/2026-11-15-01-incremental-bench.md",
+      "role": "historical"
+    },
+    "docs_reports_2026-11-15-01-incremental-bench.ja": {
+      "path": "docs/ja/reports/2026-11-15-01-incremental-bench.md",
+      "role": "historical"
+    },
+    "docs_reports_2026-11-15-02-vs-rustc.en": {
+      "path": "docs/reports/2026-11-15-02-vs-rustc.md",
+      "role": "historical"
+    },
+    "docs_reports_2026-11-15-02-vs-rustc.ja": {
+      "path": "docs/ja/reports/2026-11-15-02-vs-rustc.md",
+      "role": "historical"
+    },
+    "docs_reports_2026-11-15-03-incremental-disk-usage.en": {
+      "path": "docs/reports/2026-11-15-03-incremental-disk-usage.md",
+      "role": "historical"
+    },
+    "docs_reports_2026-11-15-03-incremental-disk-usage.ja": {
+      "path": "docs/ja/reports/2026-11-15-03-incremental-disk-usage.md",
+      "role": "historical"
+    },
+    "docs_reports_2026-11-15-04-vs-real-rustc.en": {
+      "path": "docs/reports/2026-11-15-04-vs-real-rustc.md",
+      "role": "historical"
+    },
+    "docs_reports_2026-11-15-04-vs-real-rustc.ja": {
+      "path": "docs/ja/reports/2026-11-15-04-vs-real-rustc.md",
+      "role": "historical"
+    },
+    "docs_reports_2026-11-15-05-strings-sort-opt.en": {
+      "path": "docs/reports/2026-11-15-05-strings-sort-opt.md",
+      "role": "historical"
+    },
+    "docs_reports_2026-11-15-05-strings-sort-opt.ja": {
+      "path": "docs/ja/reports/2026-11-15-05-strings-sort-opt.md",
+      "role": "historical"
+    },
+    "docs_reports_2026-11-15-06-matmul-sieve-generics.en": {
+      "path": "docs/reports/2026-11-15-06-matmul-sieve-generics.md",
+      "role": "historical"
+    },
+    "docs_reports_2026-11-15-06-matmul-sieve-generics.ja": {
+      "path": "docs/ja/reports/2026-11-15-06-matmul-sieve-generics.md",
+      "role": "historical"
+    },
+    "docs_reports_2026-11-15-07-selfhost-01-lexer.en": {
+      "path": "docs/reports/2026-11-15-07-selfhost-01-lexer.md",
+      "role": "historical"
+    },
+    "docs_reports_2026-11-15-07-selfhost-01-lexer.ja": {
+      "path": "docs/ja/reports/2026-11-15-07-selfhost-01-lexer.md",
+      "role": "historical"
+    },
+    "docs_reports_2026-11-15-08-selfhost-02-enc-fxhash.en": {
+      "path": "docs/reports/2026-11-15-08-selfhost-02-enc-fxhash.md",
+      "role": "historical"
+    },
+    "docs_reports_2026-11-15-08-selfhost-02-enc-fxhash.ja": {
+      "path": "docs/ja/reports/2026-11-15-08-selfhost-02-enc-fxhash.md",
+      "role": "historical"
+    },
+    "docs_reports_2026-11-15-09-selfhost-03-prelude.en": {
+      "path": "docs/reports/2026-11-15-09-selfhost-03-prelude.md",
+      "role": "historical"
+    },
+    "docs_reports_2026-11-15-09-selfhost-03-prelude.ja": {
+      "path": "docs/ja/reports/2026-11-15-09-selfhost-03-prelude.md",
+      "role": "historical"
+    },
+    "docs_reports_2026-11-15-10-selfhost-04-link-testgen.en": {
+      "path": "docs/reports/2026-11-15-10-selfhost-04-link-testgen.md",
+      "role": "historical"
+    },
+    "docs_reports_2026-11-15-10-selfhost-04-link-testgen.ja": {
+      "path": "docs/ja/reports/2026-11-15-10-selfhost-04-link-testgen.md",
+      "role": "historical"
+    },
+    "docs_reports_2026-11-15-11-selfhost-05-elfz.en": {
+      "path": "docs/reports/2026-11-15-11-selfhost-05-elfz.md",
+      "role": "historical"
+    },
+    "docs_reports_2026-11-15-11-selfhost-05-elfz.ja": {
+      "path": "docs/ja/reports/2026-11-15-11-selfhost-05-elfz.md",
+      "role": "historical"
+    },
+    "docs_reports_2026-11-15-12-selfhost-06-macros.en": {
+      "path": "docs/reports/2026-11-15-12-selfhost-06-macros.md",
+      "role": "historical"
+    },
+    "docs_reports_2026-11-15-12-selfhost-06-macros.ja": {
+      "path": "docs/ja/reports/2026-11-15-12-selfhost-06-macros.md",
+      "role": "historical"
+    },
+    "docs_reports_2026-11-15-13-selfhost-07-own-parser.en": {
+      "path": "docs/reports/2026-11-15-13-selfhost-07-own-parser.md",
+      "role": "historical"
+    },
+    "docs_reports_2026-11-15-13-selfhost-07-own-parser.ja": {
+      "path": "docs/ja/reports/2026-11-15-13-selfhost-07-own-parser.md",
+      "role": "historical"
+    },
+    "docs_reports_2026-11-15-14-selfhost-08-closure-analysis.en": {
+      "path": "docs/reports/2026-11-15-14-selfhost-08-closure-analysis.md",
+      "role": "historical"
+    },
+    "docs_reports_2026-11-15-14-selfhost-08-closure-analysis.ja": {
+      "path": "docs/ja/reports/2026-11-15-14-selfhost-08-closure-analysis.md",
+      "role": "historical"
+    },
+    "docs_reports_2026-11-15-15-status.en": {
+      "path": "docs/reports/2026-11-15-15-status.md",
+      "role": "historical"
+    },
+    "docs_reports_2026-11-15-15-status.ja": {
+      "path": "docs/ja/reports/2026-11-15-15-status.md",
+      "role": "historical"
+    },
+    "docs_reports_2026-11-15-16-lessons.en": {
+      "path": "docs/reports/2026-11-15-16-lessons.md",
+      "role": "historical"
+    },
+    "docs_reports_2026-11-15-16-lessons.ja": {
+      "path": "docs/ja/reports/2026-11-15-16-lessons.md",
+      "role": "historical"
+    },
+    "docs_reports_2026-11-15-17-regression-catches.en": {
+      "path": "docs/reports/2026-11-15-17-regression-catches.md",
+      "role": "historical"
+    },
+    "docs_reports_2026-11-15-17-regression-catches.ja": {
+      "path": "docs/ja/reports/2026-11-15-17-regression-catches.md",
+      "role": "historical"
+    },
+    "docs_reports_2026-11-16-01-selfhost-09-front-types-modules.en": {
+      "path": "docs/reports/2026-11-16-01-selfhost-09-front-types-modules.md",
+      "role": "historical"
+    },
+    "docs_reports_2026-11-16-01-selfhost-09-front-types-modules.ja": {
+      "path": "docs/ja/reports/2026-11-16-01-selfhost-09-front-types-modules.md",
+      "role": "historical"
+    },
+    "docs_reports_2026-11-16-02-selfhost-10-item-summary.en": {
+      "path": "docs/reports/2026-11-16-02-selfhost-10-item-summary.md",
+      "role": "historical"
+    },
+    "docs_reports_2026-11-16-02-selfhost-10-item-summary.ja": {
+      "path": "docs/ja/reports/2026-11-16-02-selfhost-10-item-summary.md",
+      "role": "historical"
+    },
+    "docs_reports_2026-11-16-03-selfhost-11-program-tables.en": {
+      "path": "docs/reports/2026-11-16-03-selfhost-11-program-tables.md",
+      "role": "historical"
+    },
+    "docs_reports_2026-11-16-03-selfhost-11-program-tables.ja": {
+      "path": "docs/ja/reports/2026-11-16-03-selfhost-11-program-tables.md",
+      "role": "historical"
+    },
+    "docs_reports_2026-11-16-04-selfhost-12-consteval.en": {
+      "path": "docs/reports/2026-11-16-04-selfhost-12-consteval.md",
+      "role": "historical"
+    },
+    "docs_reports_2026-11-16-04-selfhost-12-consteval.ja": {
+      "path": "docs/ja/reports/2026-11-16-04-selfhost-12-consteval.md",
+      "role": "historical"
+    },
+    "docs_reports_2026-11-16-05-selfhost-13-path-lookup.en": {
+      "path": "docs/reports/2026-11-16-05-selfhost-13-path-lookup.md",
+      "role": "historical"
+    },
+    "docs_reports_2026-11-16-05-selfhost-13-path-lookup.ja": {
+      "path": "docs/ja/reports/2026-11-16-05-selfhost-13-path-lookup.md",
+      "role": "historical"
+    },
+    "docs_reports_2026-11-16-06-selfhost-14-unifier.en": {
+      "path": "docs/reports/2026-11-16-06-selfhost-14-unifier.md",
+      "role": "historical"
+    },
+    "docs_reports_2026-11-16-06-selfhost-14-unifier.ja": {
+      "path": "docs/ja/reports/2026-11-16-06-selfhost-14-unifier.md",
+      "role": "historical"
+    },
+    "docs_reports_2026-11-16-07-selfhost-15-type-inference.en": {
+      "path": "docs/reports/2026-11-16-07-selfhost-15-type-inference.md",
+      "role": "historical"
+    },
+    "docs_reports_2026-11-16-07-selfhost-15-type-inference.ja": {
+      "path": "docs/ja/reports/2026-11-16-07-selfhost-15-type-inference.md",
+      "role": "historical"
+    },
+    "docs_reports_2026-11-16-08-selfhost-16-backend-base.en": {
+      "path": "docs/reports/2026-11-16-08-selfhost-16-backend-base.md",
+      "role": "historical"
+    },
+    "docs_reports_2026-11-16-08-selfhost-16-backend-base.ja": {
+      "path": "docs/ja/reports/2026-11-16-08-selfhost-16-backend-base.md",
+      "role": "historical"
+    },
+    "docs_reports_2026-11-16-09-selfhost-17-no-syn-cranelift.en": {
+      "path": "docs/reports/2026-11-16-09-selfhost-17-no-syn-cranelift.md",
+      "role": "historical"
+    },
+    "docs_reports_2026-11-16-09-selfhost-17-no-syn-cranelift.ja": {
+      "path": "docs/ja/reports/2026-11-16-09-selfhost-17-no-syn-cranelift.md",
+      "role": "historical"
+    },
+    "docs_reports_2026-11-16-10-selfhost-18-acg-driver2.en": {
+      "path": "docs/reports/2026-11-16-10-selfhost-18-acg-driver2.md",
+      "role": "historical"
+    },
+    "docs_reports_2026-11-16-10-selfhost-18-acg-driver2.ja": {
+      "path": "docs/ja/reports/2026-11-16-10-selfhost-18-acg-driver2.md",
+      "role": "historical"
+    },
+    "docs_reports_2026-11-16-11-selfhost-19-self-compile.en": {
+      "path": "docs/reports/2026-11-16-11-selfhost-19-self-compile.md",
+      "role": "historical"
+    },
+    "docs_reports_2026-11-16-11-selfhost-19-self-compile.ja": {
+      "path": "docs/ja/reports/2026-11-16-11-selfhost-19-self-compile.md",
+      "role": "historical"
+    },
+    "docs_reports_2026-11-16-12-ast-source-positions.en": {
+      "path": "docs/reports/2026-11-16-12-ast-source-positions.md",
+      "role": "historical"
+    },
+    "docs_reports_2026-11-16-12-ast-source-positions.ja": {
+      "path": "docs/ja/reports/2026-11-16-12-ast-source-positions.md",
+      "role": "historical"
+    },
+    "docs_reports_2026-11-16-13-driver2-cache-parallel.en": {
+      "path": "docs/reports/2026-11-16-13-driver2-cache-parallel.md",
+      "role": "historical"
+    },
+    "docs_reports_2026-11-16-13-driver2-cache-parallel.ja": {
+      "path": "docs/ja/reports/2026-11-16-13-driver2-cache-parallel.md",
+      "role": "historical"
+    },
+    "docs_reports_2026-11-16-14-multi-crate-build.en": {
+      "path": "docs/reports/2026-11-16-14-multi-crate-build.md",
+      "role": "historical"
+    },
+    "docs_reports_2026-11-16-14-multi-crate-build.ja": {
+      "path": "docs/ja/reports/2026-11-16-14-multi-crate-build.md",
+      "role": "historical"
+    },
+    "docs_reports_2026-11-16-15-front-speedup.en": {
+      "path": "docs/reports/2026-11-16-15-front-speedup.md",
+      "role": "historical"
+    },
+    "docs_reports_2026-11-16-15-front-speedup.ja": {
+      "path": "docs/ja/reports/2026-11-16-15-front-speedup.md",
+      "role": "historical"
+    },
+    "docs_reports_2026-11-16-16-inlining.en": {
+      "path": "docs/reports/2026-11-16-16-inlining.md",
+      "role": "historical"
+    },
+    "docs_reports_2026-11-16-16-inlining.ja": {
+      "path": "docs/ja/reports/2026-11-16-16-inlining.md",
+      "role": "historical"
+    },
+    "docs_reports_2026-11-16-17-minclif-regalloc.en": {
+      "path": "docs/reports/2026-11-16-17-minclif-regalloc.md",
+      "role": "historical"
+    },
+    "docs_reports_2026-11-16-17-minclif-regalloc.ja": {
+      "path": "docs/ja/reports/2026-11-16-17-minclif-regalloc.md",
+      "role": "historical"
+    },
+    "docs_reports_2026-11-16-18-minclif-struct-fields-in-regs.en": {
+      "path": "docs/reports/2026-11-16-18-minclif-struct-fields-in-regs.md",
+      "role": "historical"
+    },
+    "docs_reports_2026-11-16-18-minclif-struct-fields-in-regs.ja": {
+      "path": "docs/ja/reports/2026-11-16-18-minclif-struct-fields-in-regs.md",
+      "role": "historical"
+    },
+    "docs_reports_2026-11-16-19-driver2-cranelift-backend.en": {
+      "path": "docs/reports/2026-11-16-19-driver2-cranelift-backend.md",
+      "role": "historical"
+    },
+    "docs_reports_2026-11-16-19-driver2-cranelift-backend.ja": {
+      "path": "docs/ja/reports/2026-11-16-19-driver2-cranelift-backend.md",
+      "role": "historical"
+    },
+    "docs_reports_2026-11-16-20-remove-first-driver.en": {
+      "path": "docs/reports/2026-11-16-20-remove-first-driver.md",
+      "role": "historical"
+    },
+    "docs_reports_2026-11-16-20-remove-first-driver.ja": {
+      "path": "docs/ja/reports/2026-11-16-20-remove-first-driver.md",
+      "role": "historical"
+    },
+    "docs_reports_2026-11-16-21-cratebench.en": {
+      "path": "docs/reports/2026-11-16-21-cratebench.md",
+      "role": "historical"
+    },
+    "docs_reports_2026-11-16-21-cratebench.ja": {
+      "path": "docs/ja/reports/2026-11-16-21-cratebench.md",
+      "role": "historical"
+    },
+    "docs_reports_2026-11-16-22-deps-bench.en": {
+      "path": "docs/reports/2026-11-16-22-deps-bench.md",
+      "role": "historical"
+    },
+    "docs_reports_2026-11-16-22-deps-bench.ja": {
+      "path": "docs/ja/reports/2026-11-16-22-deps-bench.md",
+      "role": "historical"
+    }
+  },
+  "comparisons": [
+    {
+      "id": "docs_reports_2026-11-14-01-blaze-relax-wild-survey",
+      "topic": "The Japanese file docs/ja/reports/2026-11-14-01-blaze-relax-wild-survey.md is a faithful translation of docs/reports/2026-11-14-01-blaze-relax-wild-survey.md",
+      "mode": "translation",
+      "reference": {
+        "source": "docs_reports_2026-11-14-01-blaze-relax-wild-survey.en"
+      },
+      "target": {
+        "source": "docs_reports_2026-11-14-01-blaze-relax-wild-survey.ja"
+      }
+    },
+    {
+      "id": "docs_reports_2026-11-15-01-incremental-bench",
+      "topic": "The Japanese file docs/ja/reports/2026-11-15-01-incremental-bench.md is a faithful translation of docs/reports/2026-11-15-01-incremental-bench.md",
+      "mode": "translation",
+      "reference": {
+        "source": "docs_reports_2026-11-15-01-incremental-bench.en"
+      },
+      "target": {
+        "source": "docs_reports_2026-11-15-01-incremental-bench.ja"
+      }
+    },
+    {
+      "id": "docs_reports_2026-11-15-02-vs-rustc",
+      "topic": "The Japanese file docs/ja/reports/2026-11-15-02-vs-rustc.md is a faithful translation of docs/reports/2026-11-15-02-vs-rustc.md",
+      "mode": "translation",
+      "reference": {
+        "source": "docs_reports_2026-11-15-02-vs-rustc.en"
+      },
+      "target": {
+        "source": "docs_reports_2026-11-15-02-vs-rustc.ja"
+      }
+    },
+    {
+      "id": "docs_reports_2026-11-15-03-incremental-disk-usage",
+      "topic": "The Japanese file docs/ja/reports/2026-11-15-03-incremental-disk-usage.md is a faithful translation of docs/reports/2026-11-15-03-incremental-disk-usage.md",
+      "mode": "translation",
+      "reference": {
+        "source": "docs_reports_2026-11-15-03-incremental-disk-usage.en"
+      },
+      "target": {
+        "source": "docs_reports_2026-11-15-03-incremental-disk-usage.ja"
+      }
+    },
+    {
+      "id": "docs_reports_2026-11-15-04-vs-real-rustc",
+      "topic": "The Japanese file docs/ja/reports/2026-11-15-04-vs-real-rustc.md is a faithful translation of docs/reports/2026-11-15-04-vs-real-rustc.md",
+      "mode": "translation",
+      "reference": {
+        "source": "docs_reports_2026-11-15-04-vs-real-rustc.en"
+      },
+      "target": {
+        "source": "docs_reports_2026-11-15-04-vs-real-rustc.ja"
+      }
+    },
+    {
+      "id": "docs_reports_2026-11-15-05-strings-sort-opt",
+      "topic": "The Japanese file docs/ja/reports/2026-11-15-05-strings-sort-opt.md is a faithful translation of docs/reports/2026-11-15-05-strings-sort-opt.md",
+      "mode": "translation",
+      "reference": {
+        "source": "docs_reports_2026-11-15-05-strings-sort-opt.en"
+      },
+      "target": {
+        "source": "docs_reports_2026-11-15-05-strings-sort-opt.ja"
+      }
+    },
+    {
+      "id": "docs_reports_2026-11-15-06-matmul-sieve-generics",
+      "topic": "The Japanese file docs/ja/reports/2026-11-15-06-matmul-sieve-generics.md is a faithful translation of docs/reports/2026-11-15-06-matmul-sieve-generics.md",
+      "mode": "translation",
+      "reference": {
+        "source": "docs_reports_2026-11-15-06-matmul-sieve-generics.en"
+      },
+      "target": {
+        "source": "docs_reports_2026-11-15-06-matmul-sieve-generics.ja"
+      }
+    },
+    {
+      "id": "docs_reports_2026-11-15-07-selfhost-01-lexer",
+      "topic": "The Japanese file docs/ja/reports/2026-11-15-07-selfhost-01-lexer.md is a faithful translation of docs/reports/2026-11-15-07-selfhost-01-lexer.md",
+      "mode": "translation",
+      "reference": {
+        "source": "docs_reports_2026-11-15-07-selfhost-01-lexer.en"
+      },
+      "target": {
+        "source": "docs_reports_2026-11-15-07-selfhost-01-lexer.ja"
+      }
+    },
+    {
+      "id": "docs_reports_2026-11-15-08-selfhost-02-enc-fxhash",
+      "topic": "The Japanese file docs/ja/reports/2026-11-15-08-selfhost-02-enc-fxhash.md is a faithful translation of docs/reports/2026-11-15-08-selfhost-02-enc-fxhash.md",
+      "mode": "translation",
+      "reference": {
+        "source": "docs_reports_2026-11-15-08-selfhost-02-enc-fxhash.en"
+      },
+      "target": {
+        "source": "docs_reports_2026-11-15-08-selfhost-02-enc-fxhash.ja"
+      }
+    },
+    {
+      "id": "docs_reports_2026-11-15-09-selfhost-03-prelude",
+      "topic": "The Japanese file docs/ja/reports/2026-11-15-09-selfhost-03-prelude.md is a faithful translation of docs/reports/2026-11-15-09-selfhost-03-prelude.md",
+      "mode": "translation",
+      "reference": {
+        "source": "docs_reports_2026-11-15-09-selfhost-03-prelude.en"
+      },
+      "target": {
+        "source": "docs_reports_2026-11-15-09-selfhost-03-prelude.ja"
+      }
+    },
+    {
+      "id": "docs_reports_2026-11-15-10-selfhost-04-link-testgen",
+      "topic": "The Japanese file docs/ja/reports/2026-11-15-10-selfhost-04-link-testgen.md is a faithful translation of docs/reports/2026-11-15-10-selfhost-04-link-testgen.md",
+      "mode": "translation",
+      "reference": {
+        "source": "docs_reports_2026-11-15-10-selfhost-04-link-testgen.en"
+      },
+      "target": {
+        "source": "docs_reports_2026-11-15-10-selfhost-04-link-testgen.ja"
+      }
+    },
+    {
+      "id": "docs_reports_2026-11-15-11-selfhost-05-elfz",
+      "topic": "The Japanese file docs/ja/reports/2026-11-15-11-selfhost-05-elfz.md is a faithful translation of docs/reports/2026-11-15-11-selfhost-05-elfz.md",
+      "mode": "translation",
+      "reference": {
+        "source": "docs_reports_2026-11-15-11-selfhost-05-elfz.en"
+      },
+      "target": {
+        "source": "docs_reports_2026-11-15-11-selfhost-05-elfz.ja"
+      }
+    },
+    {
+      "id": "docs_reports_2026-11-15-12-selfhost-06-macros",
+      "topic": "The Japanese file docs/ja/reports/2026-11-15-12-selfhost-06-macros.md is a faithful translation of docs/reports/2026-11-15-12-selfhost-06-macros.md",
+      "mode": "translation",
+      "reference": {
+        "source": "docs_reports_2026-11-15-12-selfhost-06-macros.en"
+      },
+      "target": {
+        "source": "docs_reports_2026-11-15-12-selfhost-06-macros.ja"
+      }
+    },
+    {
+      "id": "docs_reports_2026-11-15-13-selfhost-07-own-parser",
+      "topic": "The Japanese file docs/ja/reports/2026-11-15-13-selfhost-07-own-parser.md is a faithful translation of docs/reports/2026-11-15-13-selfhost-07-own-parser.md",
+      "mode": "translation",
+      "reference": {
+        "source": "docs_reports_2026-11-15-13-selfhost-07-own-parser.en"
+      },
+      "target": {
+        "source": "docs_reports_2026-11-15-13-selfhost-07-own-parser.ja"
+      }
+    },
+    {
+      "id": "docs_reports_2026-11-15-14-selfhost-08-closure-analysis",
+      "topic": "The Japanese file docs/ja/reports/2026-11-15-14-selfhost-08-closure-analysis.md is a faithful translation of docs/reports/2026-11-15-14-selfhost-08-closure-analysis.md",
+      "mode": "translation",
+      "reference": {
+        "source": "docs_reports_2026-11-15-14-selfhost-08-closure-analysis.en"
+      },
+      "target": {
+        "source": "docs_reports_2026-11-15-14-selfhost-08-closure-analysis.ja"
+      }
+    },
+    {
+      "id": "docs_reports_2026-11-15-15-status",
+      "topic": "The Japanese file docs/ja/reports/2026-11-15-15-status.md is a faithful translation of docs/reports/2026-11-15-15-status.md",
+      "mode": "translation",
+      "reference": {
+        "source": "docs_reports_2026-11-15-15-status.en"
+      },
+      "target": {
+        "source": "docs_reports_2026-11-15-15-status.ja"
+      }
+    },
+    {
+      "id": "docs_reports_2026-11-15-16-lessons",
+      "topic": "The Japanese file docs/ja/reports/2026-11-15-16-lessons.md is a faithful translation of docs/reports/2026-11-15-16-lessons.md",
+      "mode": "translation",
+      "reference": {
+        "source": "docs_reports_2026-11-15-16-lessons.en"
+      },
+      "target": {
+        "source": "docs_reports_2026-11-15-16-lessons.ja"
+      }
+    },
+    {
+      "id": "docs_reports_2026-11-15-17-regression-catches",
+      "topic": "The Japanese file docs/ja/reports/2026-11-15-17-regression-catches.md is a faithful translation of docs/reports/2026-11-15-17-regression-catches.md",
+      "mode": "translation",
+      "reference": {
+        "source": "docs_reports_2026-11-15-17-regression-catches.en"
+      },
+      "target": {
+        "source": "docs_reports_2026-11-15-17-regression-catches.ja"
+      }
+    },
+    {
+      "id": "docs_reports_2026-11-16-01-selfhost-09-front-types-modules",
+      "topic": "The Japanese file docs/ja/reports/2026-11-16-01-selfhost-09-front-types-modules.md is a faithful translation of docs/reports/2026-11-16-01-selfhost-09-front-types-modules.md",
+      "mode": "translation",
+      "reference": {
+        "source": "docs_reports_2026-11-16-01-selfhost-09-front-types-modules.en"
+      },
+      "target": {
+        "source": "docs_reports_2026-11-16-01-selfhost-09-front-types-modules.ja"
+      }
+    },
+    {
+      "id": "docs_reports_2026-11-16-02-selfhost-10-item-summary",
+      "topic": "The Japanese file docs/ja/reports/2026-11-16-02-selfhost-10-item-summary.md is a faithful translation of docs/reports/2026-11-16-02-selfhost-10-item-summary.md",
+      "mode": "translation",
+      "reference": {
+        "source": "docs_reports_2026-11-16-02-selfhost-10-item-summary.en"
+      },
+      "target": {
+        "source": "docs_reports_2026-11-16-02-selfhost-10-item-summary.ja"
+      }
+    },
+    {
+      "id": "docs_reports_2026-11-16-03-selfhost-11-program-tables",
+      "topic": "The Japanese file docs/ja/reports/2026-11-16-03-selfhost-11-program-tables.md is a faithful translation of docs/reports/2026-11-16-03-selfhost-11-program-tables.md",
+      "mode": "translation",
+      "reference": {
+        "source": "docs_reports_2026-11-16-03-selfhost-11-program-tables.en"
+      },
+      "target": {
+        "source": "docs_reports_2026-11-16-03-selfhost-11-program-tables.ja"
+      }
+    },
+    {
+      "id": "docs_reports_2026-11-16-04-selfhost-12-consteval",
+      "topic": "The Japanese file docs/ja/reports/2026-11-16-04-selfhost-12-consteval.md is a faithful translation of docs/reports/2026-11-16-04-selfhost-12-consteval.md",
+      "mode": "translation",
+      "reference": {
+        "source": "docs_reports_2026-11-16-04-selfhost-12-consteval.en"
+      },
+      "target": {
+        "source": "docs_reports_2026-11-16-04-selfhost-12-consteval.ja"
+      }
+    },
+    {
+      "id": "docs_reports_2026-11-16-05-selfhost-13-path-lookup",
+      "topic": "The Japanese file docs/ja/reports/2026-11-16-05-selfhost-13-path-lookup.md is a faithful translation of docs/reports/2026-11-16-05-selfhost-13-path-lookup.md",
+      "mode": "translation",
+      "reference": {
+        "source": "docs_reports_2026-11-16-05-selfhost-13-path-lookup.en"
+      },
+      "target": {
+        "source": "docs_reports_2026-11-16-05-selfhost-13-path-lookup.ja"
+      }
+    },
+    {
+      "id": "docs_reports_2026-11-16-06-selfhost-14-unifier",
+      "topic": "The Japanese file docs/ja/reports/2026-11-16-06-selfhost-14-unifier.md is a faithful translation of docs/reports/2026-11-16-06-selfhost-14-unifier.md",
+      "mode": "translation",
+      "reference": {
+        "source": "docs_reports_2026-11-16-06-selfhost-14-unifier.en"
+      },
+      "target": {
+        "source": "docs_reports_2026-11-16-06-selfhost-14-unifier.ja"
+      }
+    },
+    {
+      "id": "docs_reports_2026-11-16-07-selfhost-15-type-inference",
+      "topic": "The Japanese file docs/ja/reports/2026-11-16-07-selfhost-15-type-inference.md is a faithful translation of docs/reports/2026-11-16-07-selfhost-15-type-inference.md",
+      "mode": "translation",
+      "reference": {
+        "source": "docs_reports_2026-11-16-07-selfhost-15-type-inference.en"
+      },
+      "target": {
+        "source": "docs_reports_2026-11-16-07-selfhost-15-type-inference.ja"
+      }
+    },
+    {
+      "id": "docs_reports_2026-11-16-08-selfhost-16-backend-base",
+      "topic": "The Japanese file docs/ja/reports/2026-11-16-08-selfhost-16-backend-base.md is a faithful translation of docs/reports/2026-11-16-08-selfhost-16-backend-base.md",
+      "mode": "translation",
+      "reference": {
+        "source": "docs_reports_2026-11-16-08-selfhost-16-backend-base.en"
+      },
+      "target": {
+        "source": "docs_reports_2026-11-16-08-selfhost-16-backend-base.ja"
+      }
+    },
+    {
+      "id": "docs_reports_2026-11-16-09-selfhost-17-no-syn-cranelift",
+      "topic": "The Japanese file docs/ja/reports/2026-11-16-09-selfhost-17-no-syn-cranelift.md is a faithful translation of docs/reports/2026-11-16-09-selfhost-17-no-syn-cranelift.md",
+      "mode": "translation",
+      "reference": {
+        "source": "docs_reports_2026-11-16-09-selfhost-17-no-syn-cranelift.en"
+      },
+      "target": {
+        "source": "docs_reports_2026-11-16-09-selfhost-17-no-syn-cranelift.ja"
+      }
+    },
+    {
+      "id": "docs_reports_2026-11-16-10-selfhost-18-acg-driver2",
+      "topic": "The Japanese file docs/ja/reports/2026-11-16-10-selfhost-18-acg-driver2.md is a faithful translation of docs/reports/2026-11-16-10-selfhost-18-acg-driver2.md",
+      "mode": "translation",
+      "reference": {
+        "source": "docs_reports_2026-11-16-10-selfhost-18-acg-driver2.en"
+      },
+      "target": {
+        "source": "docs_reports_2026-11-16-10-selfhost-18-acg-driver2.ja"
+      }
+    },
+    {
+      "id": "docs_reports_2026-11-16-11-selfhost-19-self-compile",
+      "topic": "The Japanese file docs/ja/reports/2026-11-16-11-selfhost-19-self-compile.md is a faithful translation of docs/reports/2026-11-16-11-selfhost-19-self-compile.md",
+      "mode": "translation",
+      "reference": {
+        "source": "docs_reports_2026-11-16-11-selfhost-19-self-compile.en"
+      },
+      "target": {
+        "source": "docs_reports_2026-11-16-11-selfhost-19-self-compile.ja"
+      }
+    },
+    {
+      "id": "docs_reports_2026-11-16-12-ast-source-positions",
+      "topic": "The Japanese file docs/ja/reports/2026-11-16-12-ast-source-positions.md is a faithful translation of docs/reports/2026-11-16-12-ast-source-positions.md",
+      "mode": "translation",
+      "reference": {
+        "source": "docs_reports_2026-11-16-12-ast-source-positions.en"
+      },
+      "target": {
+        "source": "docs_reports_2026-11-16-12-ast-source-positions.ja"
+      }
+    },
+    {
+      "id": "docs_reports_2026-11-16-13-driver2-cache-parallel",
+      "topic": "The Japanese file docs/ja/reports/2026-11-16-13-driver2-cache-parallel.md is a faithful translation of docs/reports/2026-11-16-13-driver2-cache-parallel.md",
+      "mode": "translation",
+      "reference": {
+        "source": "docs_reports_2026-11-16-13-driver2-cache-parallel.en"
+      },
+      "target": {
+        "source": "docs_reports_2026-11-16-13-driver2-cache-parallel.ja"
+      }
+    },
+    {
+      "id": "docs_reports_2026-11-16-14-multi-crate-build",
+      "topic": "The Japanese file docs/ja/reports/2026-11-16-14-multi-crate-build.md is a faithful translation of docs/reports/2026-11-16-14-multi-crate-build.md",
+      "mode": "translation",
+      "reference": {
+        "source": "docs_reports_2026-11-16-14-multi-crate-build.en"
+      },
+      "target": {
+        "source": "docs_reports_2026-11-16-14-multi-crate-build.ja"
+      }
+    },
+    {
+      "id": "docs_reports_2026-11-16-15-front-speedup",
+      "topic": "The Japanese file docs/ja/reports/2026-11-16-15-front-speedup.md is a faithful translation of docs/reports/2026-11-16-15-front-speedup.md",
+      "mode": "translation",
+      "reference": {
+        "source": "docs_reports_2026-11-16-15-front-speedup.en"
+      },
+      "target": {
+        "source": "docs_reports_2026-11-16-15-front-speedup.ja"
+      }
+    },
+    {
+      "id": "docs_reports_2026-11-16-16-inlining",
+      "topic": "The Japanese file docs/ja/reports/2026-11-16-16-inlining.md is a faithful translation of docs/reports/2026-11-16-16-inlining.md",
+      "mode": "translation",
+      "reference": {
+        "source": "docs_reports_2026-11-16-16-inlining.en"
+      },
+      "target": {
+        "source": "docs_reports_2026-11-16-16-inlining.ja"
+      }
+    },
+    {
+      "id": "docs_reports_2026-11-16-17-minclif-regalloc",
+      "topic": "The Japanese file docs/ja/reports/2026-11-16-17-minclif-regalloc.md is a faithful translation of docs/reports/2026-11-16-17-minclif-regalloc.md",
+      "mode": "translation",
+      "reference": {
+        "source": "docs_reports_2026-11-16-17-minclif-regalloc.en"
+      },
+      "target": {
+        "source": "docs_reports_2026-11-16-17-minclif-regalloc.ja"
+      }
+    },
+    {
+      "id": "docs_reports_2026-11-16-18-minclif-struct-fields-in-regs",
+      "topic": "The Japanese file docs/ja/reports/2026-11-16-18-minclif-struct-fields-in-regs.md is a faithful translation of docs/reports/2026-11-16-18-minclif-struct-fields-in-regs.md",
+      "mode": "translation",
+      "reference": {
+        "source": "docs_reports_2026-11-16-18-minclif-struct-fields-in-regs.en"
+      },
+      "target": {
+        "source": "docs_reports_2026-11-16-18-minclif-struct-fields-in-regs.ja"
+      }
+    },
+    {
+      "id": "docs_reports_2026-11-16-19-driver2-cranelift-backend",
+      "topic": "The Japanese file docs/ja/reports/2026-11-16-19-driver2-cranelift-backend.md is a faithful translation of docs/reports/2026-11-16-19-driver2-cranelift-backend.md",
+      "mode": "translation",
+      "reference": {
+        "source": "docs_reports_2026-11-16-19-driver2-cranelift-backend.en"
+      },
+      "target": {
+        "source": "docs_reports_2026-11-16-19-driver2-cranelift-backend.ja"
+      }
+    },
+    {
+      "id": "docs_reports_2026-11-16-20-remove-first-driver",
+      "topic": "The Japanese file docs/ja/reports/2026-11-16-20-remove-first-driver.md is a faithful translation of docs/reports/2026-11-16-20-remove-first-driver.md",
+      "mode": "translation",
+      "reference": {
+        "source": "docs_reports_2026-11-16-20-remove-first-driver.en"
+      },
+      "target": {
+        "source": "docs_reports_2026-11-16-20-remove-first-driver.ja"
+      }
+    },
+    {
+      "id": "docs_reports_2026-11-16-21-cratebench",
+      "topic": "The Japanese file docs/ja/reports/2026-11-16-21-cratebench.md is a faithful translation of docs/reports/2026-11-16-21-cratebench.md",
+      "mode": "translation",
+      "reference": {
+        "source": "docs_reports_2026-11-16-21-cratebench.en"
+      },
+      "target": {
+        "source": "docs_reports_2026-11-16-21-cratebench.ja"
+      }
+    },
+    {
+      "id": "docs_reports_2026-11-16-22-deps-bench",
+      "topic": "The Japanese file docs/ja/reports/2026-11-16-22-deps-bench.md is a faithful translation of docs/reports/2026-11-16-22-deps-bench.md",
+      "mode": "translation",
+      "reference": {
+        "source": "docs_reports_2026-11-16-22-deps-bench.en"
+      },
+      "target": {
+        "source": "docs_reports_2026-11-16-22-deps-bench.ja"
+      }
+    }
+  ]
+}

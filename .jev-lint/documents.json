@@ -1,0 +1,102 @@
+{
+  "schema": "jev-lint-documents-manifest-1",
+  "files": {
+    "README.en": {
+      "path": "README.md",
+      "role": "document"
+    },
+    "README.ja": {
+      "path": "README.ja.md",
+      "role": "document"
+    },
+    "CONTRIBUTING.en": {
+      "path": "CONTRIBUTING.md",
+      "role": "document"
+    },
+    "CONTRIBUTING.ja": {
+      "path": "CONTRIBUTING.ja.md",
+      "role": "document"
+    },
+    "docs_architecture.en": {
+      "path": "docs/architecture.md",
+      "role": "document"
+    },
+    "docs_architecture.ja": {
+      "path": "docs/ja/architecture.md",
+      "role": "document"
+    },
+    "docs_language.en": {
+      "path": "docs/language.md",
+      "role": "document"
+    },
+    "docs_language.ja": {
+      "path": "docs/ja/language.md",
+      "role": "document"
+    },
+    "docs_reports_README.en": {
+      "path": "docs/reports/README.md",
+      "role": "document"
+    },
+    "docs_reports_README.ja": {
+      "path": "docs/ja/reports/README.md",
+      "role": "document"
+    }
+  },
+  "comparisons": [
+    {
+      "id": "README",
+      "topic": "The Japanese file README.ja.md is a faithful translation of README.md",
+      "mode": "translation",
+      "reference": {
+        "source": "README.en"
+      },
+      "target": {
+        "source": "README.ja"
+      }
+    },
+    {
+      "id": "CONTRIBUTING",
+      "topic": "The Japanese file CONTRIBUTING.ja.md is a faithful translation of CONTRIBUTING.md",
+      "mode": "translation",
+      "reference": {
+        "source": "CONTRIBUTING.en"
+      },
+      "target": {
+        "source": "CONTRIBUTING.ja"
+      }
+    },
+    {
+      "id": "docs_architecture",
+      "topic": "The Japanese file docs/ja/architecture.md is a faithful translation of docs/architecture.md",
+      "mode": "translation",
+      "reference": {
+        "source": "docs_architecture.en"
+      },
+      "target": {
+        "source": "docs_architecture.ja"
+      }
+    },
+    {
+      "id": "docs_language",
+      "topic": "The Japanese file docs/ja/language.md is a faithful translation of docs/language.md",
+      "mode": "translation",
+      "reference": {
+        "source": "docs_language.en"
+      },
+      "target": {
+        "source": "docs_language.ja"
+      }
+    },
+    {
+      "id": "docs_reports_README",
+      "topic": "The Japanese file docs/ja/reports/README.md is a faithful translation of docs/reports/README.md",
+      "mode": "translation",
+      "reference": {
+        "source": "docs_reports_README.en"
+      },
+      "target": {
+        "source": "docs_reports_README.ja"
+      }
+    }
+  ]
+}

@@ -15,6 +15,7 @@ In addition to the requirements in the README, the following tools are used:
 - rust-analyzer (optional): `bench/lsp_parity.py` and `bench/ide_golden_ra.py` compare answers against it.
 - cargo-mutants (optional): mutation testing.
 - wild (optional): faster linking. The benchmark numbers are measured with wild.
+- Node 24+ and a TypeSafe API key (optional): checking that English and Japanese documents agree (jev-lint).
 
 ```bash
 cargo build --release --workspace
@@ -202,6 +203,31 @@ To measure the same things locally:
 ```bash
 python3 bench/ci_bench.py --out-dir out/ci
 ```
+
+## English and Japanese documents
+
+Each English document has a Japanese translation: `README.md` / `README.ja.md`, `CONTRIBUTING.md` /
+`CONTRIBUTING.ja.md`, and `docs/X.md` / `docs/ja/X.md` (reports included). When you change one, change the other
+too. [jev-lint](https://github.com/mizchi/jev-lint) `docs` asks a model whether each pair still says the same thing.
+
+- `scripts/docs_manifest.py` writes the jev-lint manifests (`.jev-lint/documents*.json`) from the pairs;
+  `--check` fails if a file has no counterpart or a manifest is out of date.
+- `scripts/docs_check.sh` replays the recorded verdicts (`.jev-lint/*-baseline.json`) against the current documents.
+  It is offline and needs no API key; CI runs it. It fails if a pair contradicts, or if a document changed after its
+  verdict was recorded.
+- `scripts/docs_check.sh --update` asks the model again for the manifests whose documents changed and rewrites the
+  records. It needs `TYPESAFE_API_KEY` (or `TYPESAFEAI_API_KEY`) from https://typesafe.ai; the document text is
+  sent to that API. A full run of all 64 pairs costs about $0.03.
+
+Enable the pre-commit hook once per clone:
+
+```bash
+git config core.hooksPath .githooks
+```
+
+When a commit touches Markdown, the hook runs `scripts/docs_check.sh --update`, adds the updated records to the
+commit, and stops the commit if a pair contradicts. A verdict is a model's judgment: read the reported pair and fix
+whichever side is wrong (or, if the finding is wrong, commit with `--no-verify`).
 
 ## Debugging environment variables
 

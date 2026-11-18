@@ -1,0 +1,368 @@
+{
+  "schema": "jev-lint-documents-manifest-1",
+  "files": {
+    "docs_reports_2026-11-17-01-cranelift-compile-speed.en": {
+      "path": "docs/reports/2026-11-17-01-cranelift-compile-speed.md",
+      "role": "historical"
+    },
+    "docs_reports_2026-11-17-01-cranelift-compile-speed.ja": {
+      "path": "docs/ja/reports/2026-11-17-01-cranelift-compile-speed.md",
+      "role": "historical"
+    },
+    "docs_reports_2026-11-17-02-cranelift-smaller-ir.en": {
+      "path": "docs/reports/2026-11-17-02-cranelift-smaller-ir.md",
+      "role": "historical"
+    },
+    "docs_reports_2026-11-17-02-cranelift-smaller-ir.ja": {
+      "path": "docs/ja/reports/2026-11-17-02-cranelift-smaller-ir.md",
+      "role": "historical"
+    },
+    "docs_reports_2026-11-17-03-check-stops-at-typeck.en": {
+      "path": "docs/reports/2026-11-17-03-check-stops-at-typeck.md",
+      "role": "historical"
+    },
+    "docs_reports_2026-11-17-03-check-stops-at-typeck.ja": {
+      "path": "docs/ja/reports/2026-11-17-03-check-stops-at-typeck.md",
+      "role": "historical"
+    },
+    "docs_reports_2026-11-17-04-incremental-prep.en": {
+      "path": "docs/reports/2026-11-17-04-incremental-prep.md",
+      "role": "historical"
+    },
+    "docs_reports_2026-11-17-04-incremental-prep.ja": {
+      "path": "docs/ja/reports/2026-11-17-04-incremental-prep.md",
+      "role": "historical"
+    },
+    "docs_reports_2026-11-17-05-check-cache-diff.en": {
+      "path": "docs/reports/2026-11-17-05-check-cache-diff.md",
+      "role": "historical"
+    },
+    "docs_reports_2026-11-17-05-check-cache-diff.ja": {
+      "path": "docs/ja/reports/2026-11-17-05-check-cache-diff.md",
+      "role": "historical"
+    },
+    "docs_reports_2026-11-17-06-lsp-symbol-search.en": {
+      "path": "docs/reports/2026-11-17-06-lsp-symbol-search.md",
+      "role": "historical"
+    },
+    "docs_reports_2026-11-17-06-lsp-symbol-search.ja": {
+      "path": "docs/ja/reports/2026-11-17-06-lsp-symbol-search.md",
+      "role": "historical"
+    },
+    "docs_reports_2026-11-17-07-lsp-vs-rust-analyzer-glancer.en": {
+      "path": "docs/reports/2026-11-17-07-lsp-vs-rust-analyzer-glancer.md",
+      "role": "historical"
+    },
+    "docs_reports_2026-11-17-07-lsp-vs-rust-analyzer-glancer.ja": {
+      "path": "docs/ja/reports/2026-11-17-07-lsp-vs-rust-analyzer-glancer.md",
+      "role": "historical"
+    },
+    "docs_reports_2026-11-17-08-lsp-parity.en": {
+      "path": "docs/reports/2026-11-17-08-lsp-parity.md",
+      "role": "historical"
+    },
+    "docs_reports_2026-11-17-08-lsp-parity.ja": {
+      "path": "docs/ja/reports/2026-11-17-08-lsp-parity.md",
+      "role": "historical"
+    },
+    "docs_reports_2026-11-17-09-lsp-definition-references.en": {
+      "path": "docs/reports/2026-11-17-09-lsp-definition-references.md",
+      "role": "historical"
+    },
+    "docs_reports_2026-11-17-09-lsp-definition-references.ja": {
+      "path": "docs/ja/reports/2026-11-17-09-lsp-definition-references.md",
+      "role": "historical"
+    },
+    "docs_reports_2026-11-17-10-lsp-hover-completion-memory.en": {
+      "path": "docs/reports/2026-11-17-10-lsp-hover-completion-memory.md",
+      "role": "historical"
+    },
+    "docs_reports_2026-11-17-10-lsp-hover-completion-memory.ja": {
+      "path": "docs/ja/reports/2026-11-17-10-lsp-hover-completion-memory.md",
+      "role": "historical"
+    },
+    "docs_reports_2026-11-17-11-split-lsp.en": {
+      "path": "docs/reports/2026-11-17-11-split-lsp.md",
+      "role": "historical"
+    },
+    "docs_reports_2026-11-17-11-split-lsp.ja": {
+      "path": "docs/ja/reports/2026-11-17-11-split-lsp.md",
+      "role": "historical"
+    },
+    "docs_reports_2026-11-17-12-references-mismatches.en": {
+      "path": "docs/reports/2026-11-17-12-references-mismatches.md",
+      "role": "historical"
+    },
+    "docs_reports_2026-11-17-12-references-mismatches.ja": {
+      "path": "docs/ja/reports/2026-11-17-12-references-mismatches.md",
+      "role": "historical"
+    },
+    "docs_reports_2026-11-17-13-mutation-testing.en": {
+      "path": "docs/reports/2026-11-17-13-mutation-testing.md",
+      "role": "historical"
+    },
+    "docs_reports_2026-11-17-13-mutation-testing.ja": {
+      "path": "docs/ja/reports/2026-11-17-13-mutation-testing.md",
+      "role": "historical"
+    },
+    "docs_reports_2026-11-17-14-ide-missed-mutants.en": {
+      "path": "docs/reports/2026-11-17-14-ide-missed-mutants.md",
+      "role": "historical"
+    },
+    "docs_reports_2026-11-17-14-ide-missed-mutants.ja": {
+      "path": "docs/ja/reports/2026-11-17-14-ide-missed-mutants.md",
+      "role": "historical"
+    },
+    "docs_reports_2026-11-18-01-lsp-rename-signature-highlight.en": {
+      "path": "docs/reports/2026-11-18-01-lsp-rename-signature-highlight.md",
+      "role": "historical"
+    },
+    "docs_reports_2026-11-18-01-lsp-rename-signature-highlight.ja": {
+      "path": "docs/ja/reports/2026-11-18-01-lsp-rename-signature-highlight.md",
+      "role": "historical"
+    },
+    "docs_reports_2026-11-18-02-ra-diffs-cfg-rename-signature.en": {
+      "path": "docs/reports/2026-11-18-02-ra-diffs-cfg-rename-signature.md",
+      "role": "historical"
+    },
+    "docs_reports_2026-11-18-02-ra-diffs-cfg-rename-signature.ja": {
+      "path": "docs/ja/reports/2026-11-18-02-ra-diffs-cfg-rename-signature.md",
+      "role": "historical"
+    },
+    "docs_reports_2026-11-18-03-lsp-parity-wider.en": {
+      "path": "docs/reports/2026-11-18-03-lsp-parity-wider.md",
+      "role": "historical"
+    },
+    "docs_reports_2026-11-18-03-lsp-parity-wider.ja": {
+      "path": "docs/ja/reports/2026-11-18-03-lsp-parity-wider.md",
+      "role": "historical"
+    },
+    "docs_reports_2026-11-18-04-type-inference-gaps.en": {
+      "path": "docs/reports/2026-11-18-04-type-inference-gaps.md",
+      "role": "historical"
+    },
+    "docs_reports_2026-11-18-04-type-inference-gaps.ja": {
+      "path": "docs/ja/reports/2026-11-18-04-type-inference-gaps.md",
+      "role": "historical"
+    },
+    "docs_reports_2026-11-18-05-std-method-references.en": {
+      "path": "docs/reports/2026-11-18-05-std-method-references.md",
+      "role": "historical"
+    },
+    "docs_reports_2026-11-18-05-std-method-references.ja": {
+      "path": "docs/ja/reports/2026-11-18-05-std-method-references.md",
+      "role": "historical"
+    }
+  },
+  "comparisons": [
+    {
+      "id": "docs_reports_2026-11-17-01-cranelift-compile-speed",
+      "topic": "The Japanese file docs/ja/reports/2026-11-17-01-cranelift-compile-speed.md is a faithful translation of docs/reports/2026-11-17-01-cranelift-compile-speed.md",
+      "mode": "translation",
+      "reference": {
+        "source": "docs_reports_2026-11-17-01-cranelift-compile-speed.en"
+      },
+      "target": {
+        "source": "docs_reports_2026-11-17-01-cranelift-compile-speed.ja"
+      }
+    },
+    {
+      "id": "docs_reports_2026-11-17-02-cranelift-smaller-ir",
+      "topic": "The Japanese file docs/ja/reports/2026-11-17-02-cranelift-smaller-ir.md is a faithful translation of docs/reports/2026-11-17-02-cranelift-smaller-ir.md",
+      "mode": "translation",
+      "reference": {
+        "source": "docs_reports_2026-11-17-02-cranelift-smaller-ir.en"
+      },
+      "target": {
+        "source": "docs_reports_2026-11-17-02-cranelift-smaller-ir.ja"
+      }
+    },
+    {
+      "id": "docs_reports_2026-11-17-03-check-stops-at-typeck",
+      "topic": "The Japanese file docs/ja/reports/2026-11-17-03-check-stops-at-typeck.md is a faithful translation of docs/reports/2026-11-17-03-check-stops-at-typeck.md",
+      "mode": "translation",
+      "reference": {
+        "source": "docs_reports_2026-11-17-03-check-stops-at-typeck.en"
+      },
+      "target": {
+        "source": "docs_reports_2026-11-17-03-check-stops-at-typeck.ja"
+      }
+    },
+    {
+      "id": "docs_reports_2026-11-17-04-incremental-prep",
+      "topic": "The Japanese file docs/ja/reports/2026-11-17-04-incremental-prep.md is a faithful translation of docs/reports/2026-11-17-04-incremental-prep.md",
+      "mode": "translation",
+      "reference": {
+        "source": "docs_reports_2026-11-17-04-incremental-prep.en"
+      },
+      "target": {
+        "source": "docs_reports_2026-11-17-04-incremental-prep.ja"
+      }
+    },
+    {
+      "id": "docs_reports_2026-11-17-05-check-cache-diff",
+      "topic": "The Japanese file docs/ja/reports/2026-11-17-05-check-cache-diff.md is a faithful translation of docs/reports/2026-11-17-05-check-cache-diff.md",
+      "mode": "translation",
+      "reference": {
+        "source": "docs_reports_2026-11-17-05-check-cache-diff.en"
+      },
+      "target": {
+        "source": "docs_reports_2026-11-17-05-check-cache-diff.ja"
+      }
+    },
+    {
+      "id": "docs_reports_2026-11-17-06-lsp-symbol-search",
+      "topic": "The Japanese file docs/ja/reports/2026-11-17-06-lsp-symbol-search.md is a faithful translation of docs/reports/2026-11-17-06-lsp-symbol-search.md",
+      "mode": "translation",
+      "reference": {
+        "source": "docs_reports_2026-11-17-06-lsp-symbol-search.en"
+      },
+      "target": {
+        "source": "docs_reports_2026-11-17-06-lsp-symbol-search.ja"
+      }
+    },
+    {
+      "id": "docs_reports_2026-11-17-07-lsp-vs-rust-analyzer-glancer",
+      "topic": "The Japanese file docs/ja/reports/2026-11-17-07-lsp-vs-rust-analyzer-glancer.md is a faithful translation of docs/reports/2026-11-17-07-lsp-vs-rust-analyzer-glancer.md",
+      "mode": "translation",
+      "reference": {
+        "source": "docs_reports_2026-11-17-07-lsp-vs-rust-analyzer-glancer.en"
+      },
+      "target": {
+        "source": "docs_reports_2026-11-17-07-lsp-vs-rust-analyzer-glancer.ja"
+      }
+    },
+    {
+      "id": "docs_reports_2026-11-17-08-lsp-parity",
+      "topic": "The Japanese file docs/ja/reports/2026-11-17-08-lsp-parity.md is a faithful translation of docs/reports/2026-11-17-08-lsp-parity.md",
+      "mode": "translation",
+      "reference": {
+        "source": "docs_reports_2026-11-17-08-lsp-parity.en"
+      },
+      "target": {
+        "source": "docs_reports_2026-11-17-08-lsp-parity.ja"
+      }
+    },
+    {
+      "id": "docs_reports_2026-11-17-09-lsp-definition-references",
+      "topic": "The Japanese file docs/ja/reports/2026-11-17-09-lsp-definition-references.md is a faithful translation of docs/reports/2026-11-17-09-lsp-definition-references.md",
+      "mode": "translation",
+      "reference": {
+        "source": "docs_reports_2026-11-17-09-lsp-definition-references.en"
+      },
+      "target": {
+        "source": "docs_reports_2026-11-17-09-lsp-definition-references.ja"
+      }
+    },
+    {
+      "id": "docs_reports_2026-11-17-10-lsp-hover-completion-memory",
+      "topic": "The Japanese file docs/ja/reports/2026-11-17-10-lsp-hover-completion-memory.md is a faithful translation of docs/reports/2026-11-17-10-lsp-hover-completion-memory.md",
+      "mode": "translation",
+      "reference": {
+        "source": "docs_reports_2026-11-17-10-lsp-hover-completion-memory.en"
+      },
+      "target": {
+        "source": "docs_reports_2026-11-17-10-lsp-hover-completion-memory.ja"
+      }
+    },
+    {
+      "id": "docs_reports_2026-11-17-11-split-lsp",
+      "topic": "The Japanese file docs/ja/reports/2026-11-17-11-split-lsp.md is a faithful translation of docs/reports/2026-11-17-11-split-lsp.md",
+      "mode": "translation",
+      "reference": {
+        "source": "docs_reports_2026-11-17-11-split-lsp.en"
+      },
+      "target": {
+        "source": "docs_reports_2026-11-17-11-split-lsp.ja"
+      }
+    },
+    {
+      "id": "docs_reports_2026-11-17-12-references-mismatches",
+      "topic": "The Japanese file docs/ja/reports/2026-11-17-12-references-mismatches.md is a faithful translation of docs/reports/2026-11-17-12-references-mismatches.md",
+      "mode": "translation",
+      "reference": {
+        "source": "docs_reports_2026-11-17-12-references-mismatches.en"
+      },
+      "target": {
+        "source": "docs_reports_2026-11-17-12-references-mismatches.ja"
+      }
+    },
+    {
+      "id": "docs_reports_2026-11-17-13-mutation-testing",
+      "topic": "The Japanese file docs/ja/reports/2026-11-17-13-mutation-testing.md is a faithful translation of docs/reports/2026-11-17-13-mutation-testing.md",
+      "mode": "translation",
+      "reference": {
+        "source": "docs_reports_2026-11-17-13-mutation-testing.en"
+      },
+      "target": {
+        "source": "docs_reports_2026-11-17-13-mutation-testing.ja"
+      }
+    },
+    {
+      "id": "docs_reports_2026-11-17-14-ide-missed-mutants",
+      "topic": "The Japanese file docs/ja/reports/2026-11-17-14-ide-missed-mutants.md is a faithful translation of docs/reports/2026-11-17-14-ide-missed-mutants.md",
+      "mode": "translation",
+      "reference": {
+        "source": "docs_reports_2026-11-17-14-ide-missed-mutants.en"
+      },
+      "target": {
+        "source": "docs_reports_2026-11-17-14-ide-missed-mutants.ja"
+      }
+    },
+    {
+      "id": "docs_reports_2026-11-18-01-lsp-rename-signature-highlight",
+      "topic": "The Japanese file docs/ja/reports/2026-11-18-01-lsp-rename-signature-highlight.md is a faithful translation of docs/reports/2026-11-18-01-lsp-rename-signature-highlight.md",
+      "mode": "translation",
+      "reference": {
+        "source": "docs_reports_2026-11-18-01-lsp-rename-signature-highlight.en"
+      },
+      "target": {
+        "source": "docs_reports_2026-11-18-01-lsp-rename-signature-highlight.ja"
+      }
+    },
+    {
+      "id": "docs_reports_2026-11-18-02-ra-diffs-cfg-rename-signature",
+      "topic": "The Japanese file docs/ja/reports/2026-11-18-02-ra-diffs-cfg-rename-signature.md is a faithful translation of docs/reports/2026-11-18-02-ra-diffs-cfg-rename-signature.md",
+      "mode": "translation",
+      "reference": {
+        "source": "docs_reports_2026-11-18-02-ra-diffs-cfg-rename-signature.en"
+      },
+      "target": {
+        "source": "docs_reports_2026-11-18-02-ra-diffs-cfg-rename-signature.ja"
+      }
+    },
+    {
+      "id": "docs_reports_2026-11-18-03-lsp-parity-wider",
+      "topic": "The Japanese file docs/ja/reports/2026-11-18-03-lsp-parity-wider.md is a faithful translation of docs/reports/2026-11-18-03-lsp-parity-wider.md",
+      "mode": "translation",
+      "reference": {
+        "source": "docs_reports_2026-11-18-03-lsp-parity-wider.en"
+      },
+      "target": {
+        "source": "docs_reports_2026-11-18-03-lsp-parity-wider.ja"
+      }
+    },
+    {
+      "id": "docs_reports_2026-11-18-04-type-inference-gaps",
+      "topic": "The Japanese file docs/ja/reports/2026-11-18-04-type-inference-gaps.md is a faithful translation of docs/reports/2026-11-18-04-type-inference-gaps.md",
+      "mode": "translation",
+      "reference": {
+        "source": "docs_reports_2026-11-18-04-type-inference-gaps.en"
+      },
+      "target": {
+        "source": "docs_reports_2026-11-18-04-type-inference-gaps.ja"
+      }
+    },
+    {
+      "id": "docs_reports_2026-11-18-05-std-method-references",
+      "topic": "The Japanese file docs/ja/reports/2026-11-18-05-std-method-references.md is a faithful translation of docs/reports/2026-11-18-05-std-method-references.md",
+      "mode": "translation",
+      "reference": {
+        "source": "docs_reports_2026-11-18-05-std-method-references.en"
+      },
+      "target": {
+        "source": "docs_reports_2026-11-18-05-std-method-references.ja"
+      }
+    }
+  ]
+}

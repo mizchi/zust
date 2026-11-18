@@ -35,3 +35,15 @@ jobs:
         run: cargo test --release --workspace
       - name: Compare with rustc (examples)
         run: tests/compare.sh
+
+  docs:
+    # (英語の文書と日本語訳: 組がそろっているか・記録した jev-lint の判定が今の文書のものか。API キーは要らない)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Check English / Japanese documents
+        run: scripts/docs_check.sh

@@ -1,0 +1,15 @@
+#!/usr/bin/env bash
+# 英語の文書と日本語訳 (README.md / README.ja.md、CONTRIBUTING*.md、docs/ と docs/ja/) の食い違いを止める。
+# 有効にする: git config core.hooksPath .githooks
+# (jev-lint は作業ツリーの文書を読む。ステージしていない変更があれば、それも含めて判定する)
+set -uo pipefail
+git diff --cached --name-only --diff-filter=ACMRD | grep -qE '\.md$' || exit 0
+scripts/docs_check.sh --update
+rc=$?
+if [ $rc -eq 0 ]; then
+  # (書き直した記録とマニフェストもこのコミットに入れる)
+  git add .jev-lint/
+  exit 0
+fi
+echo "pre-commit: 文書の確認が通らなかった (終了コード $rc)。直すか、確かめた上で git commit --no-verify" >&2
+exit 1
