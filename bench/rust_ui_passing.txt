@@ -1033,7 +1033,9 @@ run-pass	const-generics/broken-mir-2.rs
 compile-fail	const-generics/check_const_arg_type_in_trait_object.rs
 run-pass	const-generics/concrete-const-as-fn-arg.rs
 run-pass	const-generics/concrete-const-impl-method.rs
+run-pass	const-generics/const-arg-in-fn.rs
 compile-fail	const-generics/const-arg-type-arg-misordered.rs
+run-pass	const-generics/const-fn-with-const-param.rs
 compile-fail	const-generics/const-generic-function.rs
 check-pass	const-generics/const-param-after-const-literal-arg.rs
 compile-fail	const-generics/const-param-before-other-params.rs
@@ -1064,6 +1066,7 @@ compile-fail	const-generics/generic_const_exprs/feature-gate-generic_const_exprs
 compile-fail	const-generics/ice-118285-fn-ptr-value.rs
 compile-fail	const-generics/ice-const-generic-function-return-ty.rs
 compile-fail	const-generics/ice-unexpected-inference-var-122549.rs
+run-pass	const-generics/impl-const-generic-struct.rs
 compile-fail	const-generics/incorrect-const-param.rs
 compile-fail	const-generics/incorrect-number-of-const-args.rs
 compile-fail	const-generics/infer/cannot-infer-const-args.rs
@@ -1108,12 +1111,14 @@ compile-fail	const-generics/parser-error-recovery/issue-89013.rs
 compile-fail	const-generics/projection-as-arg-const.rs
 run-pass	const-generics/promotion.rs
 run-pass	const-generics/type-after-const-ok.rs
+run-pass	const-generics/type-dependent/issue-63695.rs
 check-pass	const-generics/type-dependent/issue-67144-1.rs
 check-pass	const-generics/type-dependent/issue-67144-2.rs
 run-pass	const-generics/type-dependent/issue-69816.rs
 check-pass	const-generics/type-dependent/issue-70217.rs
 compile-fail	const-generics/type-dependent/issue-71382.rs
 run-pass	const-generics/type-dependent/qpath.rs
+run-pass	const-generics/type-dependent/simple.rs
 compile-fail	const-generics/type_not_in_scope.rs
 run-pass	const-generics/uninferred-consts-during-codegen-1.rs
 run-pass	const-generics/uninferred-consts-during-codegen-2.rs

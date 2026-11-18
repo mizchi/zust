@@ -397,7 +397,12 @@ impl Cx<'_> {
             // const ジェネリクスの N: インスタンスの型引数の長さ
             Expr::Path(..) if self.const_generic(e).is_some() => {
                 let n = self.const_generic(e).unwrap();
-                Ok((Some(self.b.ins().iconst(types::I64, n as i64)), Ty::Usize))
+                // (`const N: u8`: the parameter's type is not kept; an expected integer type is taken as it)
+                let t = match expected {
+                    Some(t) if t.is_int() => t,
+                    _ => Ty::Usize,
+                };
+                Ok((Some(self.int_const(t, n as i128)), t))
             }
             // const は式そのものを埋め込む
             Expr::Path(..) if self.const_of(e).is_some() => {
