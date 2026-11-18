@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795007148233,
+  "lastUpdate": 1795007149959,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -6316,6 +6316,85 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/mizchi/zust/commit/c2f0b6f0abca8c2c784e0022669eb8a62c2b4a67"
         },
         "date": 1795005947220,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "parity documentSymbol (名前の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity workspace/symbol (上位 20 の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity definition (行き先の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity hover (名前を含む)",
+            "value": 87.5,
+            "unit": "%"
+          },
+          {
+            "name": "parity references (数の一致)",
+            "value": 97.222,
+            "unit": "%"
+          },
+          {
+            "name": "parity documentHighlight (数の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity rename (書き換えの一致)",
+            "value": 94.118,
+            "unit": "%"
+          },
+          {
+            "name": "parity signatureHelp (名前・引数の数・今の引数の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity completion `x.\\|` (書いてある名前を含む)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity completion `na\\|me` (同)",
+            "value": 84,
+            "unit": "%"
+          },
+          {
+            "name": "parity 一致の平均",
+            "value": 96.284,
+            "unit": "%"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "committer": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "distinct": true,
+          "id": "ccfe8ce8b27f2e443f5b28982b44078fa26bcba7",
+          "message": "zustc: one-thread std::thread / mpsc / atomics / Arc, default methods of blanket impls, deterministic method choice on primitives\n\n- prelude: Arc (as Rc), AtomicUsize .. AtomicBool (cells; orderings ignored), thread::spawn\n  (runs the closure at once; JoinHandle::join gives its value), mpsc::channel / sync_channel\n  (a shared queue)\n- `Ordering` from std::sync::atomic and the mpsc types are renamed in the source to prelude\n  names of the same length when imported from those modules (zustc resolves names by their last\n  segment; a program's own `Receiver` keeps its name)\n- thread::spawn: E0373 for a closure that borrows, and `Rc` is not Send\n- the default methods of a trait with a blanket impl are methods of every type\n- `1.new()` with a static `Foo::new` and a method `Bar::new` for isize: the method, always\n  (the candidates came from a hash set)\n- tests/ui: run-pass 50.5%, check-pass 53.7%, compile-fail 37.7%; three compile-fail tests that\n  failed to compile for other reasons now need bound checks on blanket impls\n- KPIs: gen5000 check 3987 M instr (+0.25%, the larger prelude)\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-18T12:55:34Z",
+          "tree_id": "523eac9173c9d936d113ccbd2ba1f4d2c3b247b1",
+          "url": "https://github.com/mizchi/zust/commit/ccfe8ce8b27f2e443f5b28982b44078fa26bcba7"
+        },
+        "date": 1795007149514,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
