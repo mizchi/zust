@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795018792650,
+  "lastUpdate": 1795020240046,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -6359,6 +6359,165 @@ window.BENCHMARK_DATA = {
           {
             "name": "rt/strings run (-O)",
             "value": 56.619,
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "committer": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "distinct": true,
+          "id": "7364f79e82a6fe525aca0b21a19aa99dbdacced4",
+          "message": "Fix wrong code: slice patterns through `&`, captures moved by value, labels in macros, derived comparisons\n\n- `let &[ref xs @ ..] = s` (a `&[T]` in memory): the slice place is the pair\n  itself (it loaded the data pointer as the pair's address and crashed)\n- a by-value capture moved out by a pattern or by a `self` method\n  (`move || foo.unwrap()`) leaves its slot empty (it was dropped twice)\n- macro hygiene for labels defined in a macro body (`'x: loop` in a macro no\n  longer catches the caller's `break 'x`)\n- derive(PartialOrd): NaN compares unordered (every `<`/`>=` is false and\n  partial_cmp is None); enum tags compare unsigned when the tag type is\n- `#[repr(u8)]` and the like set an enum's tag type (and wrap its\n  discriminants); without one, the tag is the smallest integer type that holds\n  every discriminant\n- derived `==` stops at the first unequal field\n- tests/ui: run-pass 1325 (54.91%)\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-18T16:32:01Z",
+          "tree_id": "ddd3e2ec91f3c2d86d1060308d4be2f8a83ad026",
+          "url": "https://github.com/mizchi/zust/commit/7364f79e82a6fe525aca0b21a19aa99dbdacced4"
+        },
+        "date": 1795020239655,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "gen1000 build cold",
+            "value": 121.959,
+            "unit": "ms"
+          },
+          {
+            "name": "gen1000 build noop",
+            "value": 14.313,
+            "unit": "ms"
+          },
+          {
+            "name": "gen1000 build edit 1 fn",
+            "value": 19.174,
+            "unit": "ms"
+          },
+          {
+            "name": "gen1000 check",
+            "value": 79.298,
+            "unit": "ms"
+          },
+          {
+            "name": "gen1000 build cold peak RSS",
+            "value": 17.738,
+            "unit": "MiB"
+          },
+          {
+            "name": "gen1000 binary",
+            "value": 323.977,
+            "unit": "KiB"
+          },
+          {
+            "name": "gen1000 cache",
+            "value": 387.205,
+            "unit": "KiB"
+          },
+          {
+            "name": "gen1000 build noop instructions",
+            "value": 145.84,
+            "unit": "M instr"
+          },
+          {
+            "name": "gen1000 build edit 1 fn instructions",
+            "value": 138.917,
+            "unit": "M instr"
+          },
+          {
+            "name": "gen1000 check instructions",
+            "value": 794.059,
+            "unit": "M instr"
+          },
+          {
+            "name": "gen5000 build cold",
+            "value": 543.936,
+            "unit": "ms"
+          },
+          {
+            "name": "gen5000 build noop",
+            "value": 63.699,
+            "unit": "ms"
+          },
+          {
+            "name": "gen5000 build edit 1 fn",
+            "value": 71.251,
+            "unit": "ms"
+          },
+          {
+            "name": "gen5000 check",
+            "value": 384.404,
+            "unit": "ms"
+          },
+          {
+            "name": "gen5000 build cold peak RSS",
+            "value": 54.758,
+            "unit": "MiB"
+          },
+          {
+            "name": "gen5000 binary",
+            "value": 1558.336,
+            "unit": "KiB"
+          },
+          {
+            "name": "gen5000 cache",
+            "value": 1902.83,
+            "unit": "KiB"
+          },
+          {
+            "name": "gen5000 build noop instructions",
+            "value": 688.623,
+            "unit": "M instr"
+          },
+          {
+            "name": "gen5000 build edit 1 fn instructions",
+            "value": 647.755,
+            "unit": "M instr"
+          },
+          {
+            "name": "gen5000 check instructions",
+            "value": 3912.258,
+            "unit": "M instr"
+          },
+          {
+            "name": "rt/fib run (-O)",
+            "value": 54.369,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/hashmap run (-O)",
+            "value": 95.138,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/matmul run (-O)",
+            "value": 38.241,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/nbody run (-O)",
+            "value": 55.612,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/sieve run (-O)",
+            "value": 95.474,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/sort run (-O)",
+            "value": 162.924,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/strings run (-O)",
+            "value": 36.237,
             "unit": "ms"
           }
         ]
