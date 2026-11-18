@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795025254730,
+  "lastUpdate": 1795025256466,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -16465,6 +16465,70 @@ window.BENCHMARK_DATA = {
           {
             "name": "tests/ui run-pass passing",
             "value": 1340,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui check-pass pass rate",
+            "value": 59.55,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui check-pass passing",
+            "value": 1076,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui build-pass pass rate",
+            "value": 57.04,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui build-pass passing",
+            "value": 77,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui compile-fail pass rate",
+            "value": 38.14,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui compile-fail passing",
+            "value": 2806,
+            "unit": "tests"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "committer": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "distinct": true,
+          "id": "379cbce4c4e1480f2d431255c29f59b96db7d284",
+          "message": "Static initializers: floats, raw pointers, `if` / blocks / comparisons, const indexing and fields\n\n- f32 / f64 statics (literals, `-x`, `+ - * /`, casts, other consts)\n- raw pointer statics: null, the address of a static (`&X as *const T`,\n  `&raw const X`), or of anonymous data (`&mut 1isize as *mut _`)\n- integer constants: `{ x }`, `if c { a } else { b }`, comparisons, `&&` /\n  `||`, `true` / `false`, `X[i]` and `T.0` / `S.f` of const arrays, byte\n  strings, tuples and structs\n- a bool static keeps the low bit (`!true` was stored as -2)\n- tests/ui: run-pass 1348 (55.86%)\n\nKPIs (gen5000): noop 660.7 M instr, edit 622.2, check 3887.3, cache unchanged.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-18T17:56:03Z",
+          "tree_id": "3463ff5240ad2eb7e557305843690a75d76040d8",
+          "url": "https://github.com/mizchi/zust/commit/379cbce4c4e1480f2d431255c29f59b96db7d284"
+        },
+        "date": 1795025256229,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tests/ui run-pass pass rate",
+            "value": 55.86,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui run-pass passing",
+            "value": 1348,
             "unit": "tests"
           },
           {
