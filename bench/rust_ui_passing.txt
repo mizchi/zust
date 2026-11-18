@@ -1243,7 +1243,9 @@ check-pass	consts/int_ptr_for_zst_slices.rs
 compile-fail	consts/invalid-const-in-body.rs
 check-pass	consts/issue-104155.rs
 compile-fail	consts/issue-104609.rs
+check-pass	consts/issue-13837.rs
 check-pass	consts/issue-17718-references.rs
+build-pass	consts/issue-21562.rs
 check-pass	consts/issue-28822.rs
 run-pass	consts/issue-29914.rs
 check-pass	consts/issue-33903.rs
@@ -4755,6 +4757,7 @@ run-pass	traits/issue-15155.rs
 run-pass	traits/issue-22019.rs
 run-pass	traits/issue-22110.rs
 compile-fail	traits/issue-22384.rs
+run-pass	traits/issue-22655.rs
 check-pass	traits/issue-23003-overflow.rs
 run-pass	traits/issue-23003.rs
 check-pass	traits/issue-2611-3.rs

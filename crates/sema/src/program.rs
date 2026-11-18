@@ -866,6 +866,18 @@ impl Program {
                 }
                 continue;
             }
+            // (marker traits the compiler knows without a declaration: `unsafe impl Send for P {}`)
+            if matches!(tr.as_str(), "Send" | "Sync" | "UnwindSafe" | "RefUnwindSafe" | "Unpin") {
+                // (the self type must still name known types: `unsafe impl Send for Foo<T> {}` without `<T>`)
+                if let Some(st) = &sm.impl_self_ty {
+                    let gn: Vec<&str> = sm.impl_generics.iter().map(|g| g.0.as_str()).collect();
+                    p.resolve_g(st, &gn).map_err(|e| format!("{}:1: {e}", it.line))?;
+                }
+                if let Some(&sid) = p.struct_index.get(sn) {
+                    p.impls.insert((sid, tr.clone()));
+                }
+                continue;
+            }
             if !p.traits.contains_key(tr) {
                 return Err(format!("{}:1: cannot find trait `{tr}`", it.line));
             }
