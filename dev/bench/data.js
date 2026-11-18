@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795015383268,
+  "lastUpdate": 1795015385333,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -7912,6 +7912,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "lsp peak RSS",
             "value": 66.562,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "committer": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "distinct": true,
+          "id": "eb82f3c9a843e0a39251809847deaa99ee913944",
+          "message": "zustc parser: associated type bounds, higher-ranked types, GAT where clauses after the value, qualified GAT paths, C variadics\n\n- `Iterator<Item: Debug>` (read as `Item = impl Debug`); rejected inside `dyn`\n- `for<'a> fn(&'a u8)` / `for<'a> Fn(&'a T)` in type position (the binder is dropped);\n  `for<..> dyn` is an error\n- `type Item<'a> = &'a T where T: 'a;`, `<T as Tr>::Gat<'a>`\n- `extern \"C\" { fn printf(f: *const u8, ...); }`\n- tests/ui: run-pass 52.9%, check-pass 57.8%, build-pass 56.3%; 23 compile-fail tests that were\n  rejected only by these parse errors now need checks zustc does not have (well-formedness,\n  coherence, lifetime shadowing / E0261, impl vs trait where clauses, ABI of variadics)\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-18T15:14:50Z",
+          "tree_id": "3ecc4b94d8b856a1e49186c9f11bee3805d07944",
+          "url": "https://github.com/mizchi/zust/commit/eb82f3c9a843e0a39251809847deaa99ee913944"
+        },
+        "date": 1795015384840,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "lsp definition p50",
+            "value": 0.424,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp hover p50",
+            "value": 0.373,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp completion p50",
+            "value": 0.96,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp references p50",
+            "value": 2.674,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp rename p50",
+            "value": 0.568,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp signatureHelp p50",
+            "value": 0.7,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp documentHighlight p50",
+            "value": 0.605,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp ready (startup to indexed)",
+            "value": 99.28,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp peak RSS",
+            "value": 66.613,
             "unit": "MiB"
           }
         ]
