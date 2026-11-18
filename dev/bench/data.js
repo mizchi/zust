@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795002990925,
+  "lastUpdate": 1795002992705,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -4623,6 +4623,70 @@ window.BENCHMARK_DATA = {
           {
             "name": "tests/ui compile-fail passing",
             "value": 2543,
+            "unit": "tests"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "committer": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "distinct": true,
+          "id": "5a4c59429939965d5b97d7cf56a862243afcae5d",
+          "message": "zustc borrowck: & vs &mut derefs, for loops over borrows, values pushed into collections, reborrows by default binding modes\n\n- a deref through `&` is its own projection: E0596 / E0594 for mutation behind a `&` reference\n- `for x in &mut v { v.push(1) }`: the loan of the iterable lasts for the whole loop\n- a `&mut self` method of a value holding references stores what its arguments borrow\n  (`v.push(&mut x)`)\n- matching a reference with bindings reborrows `*r` (default binding modes)\n- prelude views (Iter, Chars, ChunksExact ..) hold the loan of what they iterate; their methods\n  and `Iterator::next` do not borrow the view itself; closures capture mutably only the places\n  they assign or borrow mutably\n- tests/ui compile-fail 34.6% -> 35.0% (borrowck 159, nll 41, closures 36), no regressions;\n  all cratebench crates still build\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-18T11:40:09Z",
+          "tree_id": "138d6d88ea74370dfacd700c314f02ebfbdd8b3e",
+          "url": "https://github.com/mizchi/zust/commit/5a4c59429939965d5b97d7cf56a862243afcae5d"
+        },
+        "date": 1795002992240,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tests/ui run-pass pass rate",
+            "value": 46.42,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui run-pass passing",
+            "value": 1120,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui check-pass pass rate",
+            "value": 46.15,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui check-pass passing",
+            "value": 834,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui build-pass pass rate",
+            "value": 48.15,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui build-pass passing",
+            "value": 65,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui compile-fail pass rate",
+            "value": 35.04,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui compile-fail passing",
+            "value": 2578,
             "unit": "tests"
           }
         ]
