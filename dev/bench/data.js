@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795036762378,
+  "lastUpdate": 1795036763962,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -18903,6 +18903,85 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/mizchi/zust/commit/f077e7c44ef6f04613d66277ce88053eead5a0fa"
         },
         "date": 1795036300425,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "parity documentSymbol (名前の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity workspace/symbol (上位 20 の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity definition (行き先の一致)",
+            "value": 97.222,
+            "unit": "%"
+          },
+          {
+            "name": "parity hover (名前を含む)",
+            "value": 95,
+            "unit": "%"
+          },
+          {
+            "name": "parity references (数の一致)",
+            "value": 92.105,
+            "unit": "%"
+          },
+          {
+            "name": "parity documentHighlight (数の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity rename (書き換えの一致)",
+            "value": 90,
+            "unit": "%"
+          },
+          {
+            "name": "parity signatureHelp (名前・引数の数・今の引数の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity completion `x.\\|` (書いてある名前を含む)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity completion `na\\|me` (同)",
+            "value": 79.167,
+            "unit": "%"
+          },
+          {
+            "name": "parity 一致の平均",
+            "value": 95.349,
+            "unit": "%"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "committer": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "distinct": true,
+          "id": "f606b345e28b01425220c4aa7a6fe1c3bc12e049",
+          "message": "Trait objects of generic traits: `dyn Foo<isize>`\n\n- `dyn Tr<A, B, Assoc = C>`: the trait is found by its name, and the trait's\n  own parameters are the arguments written, both for the vtable (to_dyn) and\n  for method calls through the object (the bindings are left out)\n- tests/ui: run-pass 1428 (59.2%), check-pass 1134 (62.8%), compile-fail 2814\n\nAccepted compile-fail removals (they were rejected before only because\n`dyn Foo<'a, Item = dyn Bar>` was not resolved; they need region checks):\nobject-lifetime/object-lifetime-default-assoc-ty-binding-item-bounds.rs,\nobject-lifetime/object-lifetime-default-assoc-ty-binding-item-bounds-non-static.rs\n\nKPIs (gen5000): noop 663.8 M instr, edit 620.8, check 3893.0, cache unchanged\n(gen1000 noop 140.4 in the full run; repeated runs of the same build give\n131.5 after the first, so it moves with the cache state); LSP ready 109 ms.\nAgainst rustc -C incremental on gen1000: cold 7.2x, no-op 11x, edit 14x\nfaster. README and SUPPORTED.md (en + ja) updated.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-18T21:15:12Z",
+          "tree_id": "f1628aecc9587662233bd7950d2de218ff875d38",
+          "url": "https://github.com/mizchi/zust/commit/f606b345e28b01425220c4aa7a6fe1c3bc12e049"
+        },
+        "date": 1795036763707,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
