@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795027072818,
+  "lastUpdate": 1795027074484,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -17578,6 +17578,70 @@ window.BENCHMARK_DATA = {
           {
             "name": "tests/ui run-pass passing",
             "value": 1360,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui check-pass pass rate",
+            "value": 59.71,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui check-pass passing",
+            "value": 1079,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui build-pass pass rate",
+            "value": 57.04,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui build-pass passing",
+            "value": 77,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui compile-fail pass rate",
+            "value": 38.15,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui compile-fail passing",
+            "value": 2807,
+            "unit": "tests"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "committer": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "distinct": true,
+          "id": "e3aaf41ae383d633b0ab08f2fdd6d1797772eb7f",
+          "message": "`const fn` calls in constants and array lengths\n\n- the parser keeps a `const fn`'s body text; the summary records free,\n  non-generic const fns with plain parameters, and Program evaluates a call\n  with integer arguments: `let x = ..;` statements and a tail expression\n  (`if`, blocks, arithmetic, other calls)\n- array lengths may be such calls (`[i32; add(1, 2)]`)\n- tests/ui: run-pass 1363 (56.49%)\n\nKPIs (gen5000): noop 660.9 M instr, edit 622.5, check 3888.0 (+0.0%), cache\nunchanged; LSP ready 110 ms.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-18T18:28:29Z",
+          "tree_id": "4adfaea408187ab968333a611674ba7687ec4dbc",
+          "url": "https://github.com/mizchi/zust/commit/e3aaf41ae383d633b0ab08f2fdd6d1797772eb7f"
+        },
+        "date": 1795027074266,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tests/ui run-pass pass rate",
+            "value": 56.49,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui run-pass passing",
+            "value": 1363,
             "unit": "tests"
           },
           {
