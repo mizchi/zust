@@ -1,5 +1,7 @@
 # 調査メモ: blaze / relax / wild
 
+日付: 2026-11-14
+
 zustc の設計に使うため、3 つのプロジェクトを読んで整理した（2026-11-14 時点の main をソースで読んだだけで、ビルドはしていない。wild だけは crates.io の 0.10.0 を入れて実際に使った）。
 
 - blaze: https://github.com/indexable-inc/blaze
