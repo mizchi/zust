@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795013065116,
+  "lastUpdate": 1795013066828,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -10930,6 +10930,70 @@ window.BENCHMARK_DATA = {
           {
             "name": "tests/ui compile-fail passing",
             "value": 2818,
+            "unit": "tests"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "committer": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "distinct": true,
+          "id": "f0b3489bb54c296aa4dd2f116bf6e6bf4a8a21d9",
+          "message": "zustc: Send / Sync as auto traits\n\nA type is Send unless it holds an Rc or a raw pointer, and Sync unless it also holds a Cell /\nRefCell; `unsafe impl Send` counts; the prelude's own types are judged by their arguments.\ntests/ui: run-pass 52.7%, check-pass 56.8%; three compile-fail tests that were rejected only\nbecause Send was never satisfied now need async / recursion-limit checks.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-18T14:39:36Z",
+          "tree_id": "8ed04fb77a8a7eceec7652e5cedd02d1c7477c10",
+          "url": "https://github.com/mizchi/zust/commit/f0b3489bb54c296aa4dd2f116bf6e6bf4a8a21d9"
+        },
+        "date": 1795013066570,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tests/ui run-pass pass rate",
+            "value": 52.67,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui run-pass passing",
+            "value": 1271,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui check-pass pass rate",
+            "value": 56.78,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui check-pass passing",
+            "value": 1026,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui build-pass pass rate",
+            "value": 50.37,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui build-pass passing",
+            "value": 68,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui compile-fail pass rate",
+            "value": 38.26,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui compile-fail passing",
+            "value": 2815,
             "unit": "tests"
           }
         ]
