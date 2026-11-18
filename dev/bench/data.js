@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795015642958,
+  "lastUpdate": 1795015644978,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -12745,6 +12745,70 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/mizchi/zust/commit/eb82f3c9a843e0a39251809847deaa99ee913944"
         },
         "date": 1795015388556,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tests/ui run-pass pass rate",
+            "value": 52.92,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui run-pass passing",
+            "value": 1277,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui check-pass pass rate",
+            "value": 57.83,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui check-pass passing",
+            "value": 1045,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui build-pass pass rate",
+            "value": 56.3,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui build-pass passing",
+            "value": 76,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui compile-fail pass rate",
+            "value": 38.16,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui compile-fail passing",
+            "value": 2808,
+            "unit": "tests"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "committer": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "distinct": true,
+          "id": "d5a253ec2780bf708cddbde46d18b407434167c0",
+          "message": "zustc: prelude selection asks the whole source once per name instead of every item (noop build -9%, check -2% instructions)\n\nPreludeScan::has searched each item with a memo per (item, pattern); that is the same answer as one\nsearch of the whole source (but for a match across an item boundary) and cost more than the search\n(StrSearcher setup and a hash insert per item).\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-18T15:21:46Z",
+          "tree_id": "2f91908ca70dadafa63be932cb6efe3b5222575d",
+          "url": "https://github.com/mizchi/zust/commit/d5a253ec2780bf708cddbde46d18b407434167c0"
+        },
+        "date": 1795015644484,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
