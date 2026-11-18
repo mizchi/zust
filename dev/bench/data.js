@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795008304349,
+  "lastUpdate": 1795008306748,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -4948,6 +4948,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "lsp peak RSS",
             "value": 66.324,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "committer": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "distinct": true,
+          "id": "35fb6c11d831503295cda93c0b8b6d07971b0e2f",
+          "message": "zustc: unions; checks on struct / enum / union definitions\n\n- `union`: every field at offset 0, size the largest field; a union expression writes one field\n- for the program's own definitions (the prelude's types may break these rules): unused type and\n  lifetime parameters (E0392; a use in another parameter's bound or a where clause counts),\n  `Self` in a parameter default (E0735), unknown derive macros, empty and tuple unions, union\n  fields that need dropping (E0740), derives on unions other than Clone + Copy\n- `impl Trait` in a generic bound is rejected\n- tests/ui: run-pass 50.7%, check-pass 54.1%, build-pass 49.6%, compile-fail 38.2%; four\n  compile-fail tests that were rejected only because unions were unsupported need lint / feature\n  gate / attribute checks\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-18T13:20:07Z",
+          "tree_id": "ca9472c0db8cd6447675c355c8e095184161f371",
+          "url": "https://github.com/mizchi/zust/commit/35fb6c11d831503295cda93c0b8b6d07971b0e2f"
+        },
+        "date": 1795008306303,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "lsp definition p50",
+            "value": 0.574,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp hover p50",
+            "value": 0.515,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp completion p50",
+            "value": 1.054,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp references p50",
+            "value": 2.94,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp rename p50",
+            "value": 0.608,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp signatureHelp p50",
+            "value": 0.766,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp documentHighlight p50",
+            "value": 0.869,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp ready (startup to indexed)",
+            "value": 121.98,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp peak RSS",
+            "value": 66.629,
             "unit": "MiB"
           }
         ]
