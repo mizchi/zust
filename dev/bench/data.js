@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1794999470329,
+  "lastUpdate": 1794999472097,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -3553,6 +3553,85 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/mizchi/zust/commit/70569be92e121677fb5b86e427cc8db2b9006dcf"
         },
         "date": 1794998549523,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "parity documentSymbol (名前の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity workspace/symbol (上位 20 の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity definition (行き先の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity hover (名前を含む)",
+            "value": 87.5,
+            "unit": "%"
+          },
+          {
+            "name": "parity references (数の一致)",
+            "value": 97.222,
+            "unit": "%"
+          },
+          {
+            "name": "parity documentHighlight (数の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity rename (書き換えの一致)",
+            "value": 94.118,
+            "unit": "%"
+          },
+          {
+            "name": "parity signatureHelp (名前・引数の数・今の引数の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity completion `x.\\|` (書いてある名前を含む)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity completion `na\\|me` (同)",
+            "value": 84,
+            "unit": "%"
+          },
+          {
+            "name": "parity 一致の平均",
+            "value": 96.284,
+            "unit": "%"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "committer": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "distinct": true,
+          "id": "b9f18c91591437a339bf4dbf154ced10a5652619",
+          "message": "zustc borrowck: moves by patterns and for loops, moves out of references and indexes, closure captures by place\n\n- a binding by value moves the part of the scrutinee it binds; `ref` / `ref mut` bindings\n  borrow it; a binding of the whole scrutinee and unit struct patterns are not moves\n- E0507 / E0508: moving a non-Copy value out through a reference or out of an index\n- `&mut T` read in `let b = a;` / a block tail is moved, not reborrowed\n- closures capture the places they use (RFC 2229: `p.x`, `*r`, the parts a pattern binds),\n  by value / mutable / shared reference from how each place is used; the closure holds the loans\n- tests/ui compile-fail 33.7% -> 34.4% (borrowck 141, nll 39, moves 21, closures 31), no regressions\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-18T10:53:48Z",
+          "tree_id": "5c42d76c890b019e5dab0fa2d69dda424638fb75",
+          "url": "https://github.com/mizchi/zust/commit/b9f18c91591437a339bf4dbf154ced10a5652619"
+        },
+        "date": 1794999471654,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
