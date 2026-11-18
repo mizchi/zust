@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795017070938,
+  "lastUpdate": 1795017073724,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -13527,6 +13527,70 @@ window.BENCHMARK_DATA = {
           {
             "name": "tests/ui compile-fail passing",
             "value": 2808,
+            "unit": "tests"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "committer": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "distinct": true,
+          "id": "e3bf32322b8d9dc702a88d989cbc3553579942b1",
+          "message": "Prelude ManuallyDrop, NonNull and UnsafeCell; reads through Deref borrow shared\n\n- prelude: ManuallyDrop<T> (no drop glue), NonNull<T>, UnsafeCell<T>\n- a place reached through an acg-made `deref_mut` is a shared borrow for the\n  borrow checker unless the place is written or borrowed `&mut`\n- tests/ui: run-pass 1281, check-pass 1051, compile-fail 2810\n\nAccepted compile-fail removals (passed only because UnsafeCell / ManuallyDrop\nwere unknown; they need const-eval checks):\nconsts/promoted_const_call3.rs, consts/refs-to-cell-in-final.rs\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-18T15:46:21Z",
+          "tree_id": "491135e92ed925fc6188540c026bbc8faab4bd4d",
+          "url": "https://github.com/mizchi/zust/commit/e3bf32322b8d9dc702a88d989cbc3553579942b1"
+        },
+        "date": 1795017073486,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tests/ui run-pass pass rate",
+            "value": 53.05,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui run-pass passing",
+            "value": 1280,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui check-pass pass rate",
+            "value": 58.16,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui check-pass passing",
+            "value": 1051,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui build-pass pass rate",
+            "value": 56.3,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui build-pass passing",
+            "value": 76,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui compile-fail pass rate",
+            "value": 38.19,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui compile-fail passing",
+            "value": 2810,
             "unit": "tests"
           }
         ]
