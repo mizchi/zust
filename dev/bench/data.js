@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795024533123,
+  "lastUpdate": 1795024535045,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -16084,6 +16084,70 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/mizchi/zust/commit/69724e0e583bea00e19f3cbd798e4d6efe04f865"
         },
         "date": 1795023516242,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tests/ui run-pass pass rate",
+            "value": 55.53,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui run-pass passing",
+            "value": 1340,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui check-pass pass rate",
+            "value": 59.55,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui check-pass passing",
+            "value": 1076,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui build-pass pass rate",
+            "value": 57.04,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui build-pass passing",
+            "value": 77,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui compile-fail pass rate",
+            "value": 38.14,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui compile-fail passing",
+            "value": 2806,
+            "unit": "tests"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "committer": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "distinct": true,
+          "id": "3a1fd226dadde111404a27dca46f29eb0f16c21f",
+          "message": "Faster prelude selection: one look at the whole source per check\n\n- PreludeScan::any ran its predicate on every item (with a memo that only an\n  LSP edit reuses): for a program of more than 64 items it now looks at the\n  whole source once, as `has` does\n- rename_shadowed finds the names defined after `struct` / `enum` / `trait` /\n  `type` / `union` in one pass over the bytes instead of one search per name\n\ngen5000: noop build 693.3 -> 661.1 M instr (-4.6%), edit 1 fn 654.5 -> 622.4\n(-4.9%), check 3919.9 -> 3887.3 (-0.8%); gen1000 noop -4.3%; caches unchanged;\ncold build peak RSS 55.2 -> 51.8 MiB; LSP ready 109 ms.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-18T17:43:16Z",
+          "tree_id": "65526c68a2addaa9bbd0ff7ebb4ff3ef6c260f32",
+          "url": "https://github.com/mizchi/zust/commit/3a1fd226dadde111404a27dca46f29eb0f16c21f"
+        },
+        "date": 1795024534570,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
