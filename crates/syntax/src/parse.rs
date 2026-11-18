@@ -1879,6 +1879,15 @@ impl Parser {
             let mut a = attrs;
             a.extend(it.attrs);
             it.attrs = a;
+            // (a `const` / `static` in a body (often from a macro): an immutable binding of its value)
+            match it.kind {
+                ItemKind::Const(n, t, Some(e)) => {
+                    let p = if n == "_" { Pat::Wild } else { Pat::Ident(false, false, n, None) };
+                    return Ok(Stmt::Let(p, t, Some(e), None));
+                }
+                ItemKind::Static(false, n, t, e) => return Ok(Stmt::Let(Pat::Ident(false, false, n, None), Some(t), Some(e), None)),
+                k => it.kind = k,
+            }
             return Ok(Stmt::Item(it));
         }
         if self.eat_ident("let") {

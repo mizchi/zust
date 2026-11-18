@@ -694,6 +694,14 @@ impl Cx<'_> {
         let Some(mut t) = self.peek(recv).or(lit_int.then_some(Ty::I32)) else {
             return Ok(None);
         };
+        // (`4.f()` with `impl U for isize`: the literal takes the one integer type that has the method)
+        if lit_int && t.is_int() && self.prog.prim_method(t, method).is_none() {
+            let ints = [Ty::I8, Ty::I16, Ty::I32, Ty::I64, Ty::I128, Ty::Isize, Ty::U8, Ty::U16, Ty::U32, Ty::U64, Ty::U128, Ty::Usize];
+            let with: Vec<Ty> = ints.into_iter().filter(|&i| self.prog.prim_method(i, method).is_some()).collect();
+            if let [only] = with[..] {
+                t = only;
+            }
+        }
         // `impl Tr for &[T]` のメソッド (`__slice::__ref_m`、self は &[T]): 受け手の型が &[T] のとき
         if let Ty::Ref(false, Ty::Slice(_)) = t {
             let f = format!("__slice::__ref_{method}");

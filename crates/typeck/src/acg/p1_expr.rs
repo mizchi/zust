@@ -1534,6 +1534,54 @@ impl Cx<'_> {
             let e = self.keep_expr(e);
             return self.expr(e, expected);
         }
+        // `Trait::method(x, args)` (`Clone::clone(&s)`, `Add::add(a, b)`): the method call `x.method(args)`
+        if let (Expr::Path(None, p), Some(first)) = (&**func, cargs.first()) {
+            let known = matches!(
+                p.segs[0].name.as_str(),
+                "Clone" | "ToString" | "Add" | "Sub" | "Mul" | "Div" | "Rem" | "Neg" | "Not" | "BitAnd" | "BitOr" | "BitXor" | "Shl"
+                    | "Shr" | "PartialEq" | "PartialOrd" | "Ord" | "Iterator" | "IntoIterator" | "Into" | "AsRef" | "AsMut" | "Hash"
+                    | "Deref" | "DerefMut" | "Borrow" | "ToOwned" | "AddAssign" | "SubAssign" | "MulAssign" | "DivAssign" | "Index"
+                    | "Drop" | "Fn" | "FnMut" | "FnOnce" | "Debug" | "Display"
+            );
+            if !p.global && p.segs.len() == 2 && p.segs[0].args.is_empty() && (known || self.prog.traits.contains_key(&p.segs[0].name))
+                && !self.prog.struct_index.contains_key(&p.segs[0].name)
+                && self.prog.fn_by_p(&PPath::of(p), self.self_sid).is_none_or(|id| self.prog.sigs[id as usize].has_self)
+            {
+                let span = crate::parse::Span { start: p.pos, at: p.pos };
+                // (an operator: the expression `a + b`, which also covers primitive types)
+                let op = match (p.segs[0].name.as_str(), p.segs[1].name.as_str(), cargs.len()) {
+                    ("Add", "add", 2) => Some("+"),
+                    ("Sub", "sub", 2) => Some("-"),
+                    ("Mul", "mul", 2) => Some("*"),
+                    ("Div", "div", 2) => Some("/"),
+                    ("Rem", "rem", 2) => Some("%"),
+                    ("BitAnd", "bitand", 2) => Some("&"),
+                    ("BitOr", "bitor", 2) => Some("|"),
+                    ("BitXor", "bitxor", 2) => Some("^"),
+                    ("Shl", "shl", 2) => Some("<<"),
+                    ("Shr", "shr", 2) => Some(">>"),
+                    _ => None,
+                };
+                if let Some(op) = op {
+                    let b = Expr::Binary(op.to_string(), Box::new(Expr::Paren(Box::new(cargs[0].clone()))), Box::new(Expr::Paren(Box::new(cargs[1].clone()))), span);
+                    let b = self.keep_expr(b);
+                    return self.expr(b, expected);
+                }
+                if let (("Neg", "neg") | ("Not", "not"), 1) = ((p.segs[0].name.as_str(), p.segs[1].name.as_str()), cargs.len()) {
+                    let o = if p.segs[0].name == "Neg" { "-" } else { "!" };
+                    let u = Expr::Unary(o.to_string(), Box::new(Expr::Paren(Box::new(cargs[0].clone()))), span);
+                    let u = self.keep_expr(u);
+                    return self.expr(u, expected);
+                }
+                let recv = match first {
+                    Expr::Ref(_, x) => (**x).clone(),
+                    x => x.clone(),
+                };
+                let m = Expr::MethodCall(Box::new(Expr::Paren(Box::new(recv))), p.segs[1].name.clone(), p.segs[1].args.clone(), cargs[1..].to_vec(), span);
+                let m = self.keep_expr(m);
+                return self.expr(m, expected);
+            }
+        }
         if let Expr::Path(_, p) = &**func {
             if let Some((sid, vi)) = self.prog.variant_by_p(&PPath::of(p), self.self_sid) {
                 let v = &self.prog.structs[sid as usize].variants[vi];

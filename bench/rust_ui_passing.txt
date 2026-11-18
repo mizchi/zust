@@ -433,6 +433,7 @@ compile-fail	binding/tuple-binder-on-err-ty.rs
 run-pass	binding/underscore-prefixed-function-argument.rs
 run-pass	binding/use-uninit-match.rs
 run-pass	binding/use-uninit-match2.rs
+run-pass	binop/add-ref-operand-method-lookup.rs
 run-pass	binop/binary-minus-without-space.rs
 compile-fail	binop/binary-op-not-allowed-issue-125631.rs
 compile-fail	binop/binary-op-on-double-ref.rs
@@ -1174,9 +1175,12 @@ run-pass	consts/const_in_pattern/null-raw-ptr-issue-119270.rs
 compile-fail	consts/const_in_pattern/suggest_equality_comparison_instead_of_pattern_matching.rs
 check-pass	consts/const_let_assign.rs
 check-pass	consts/const_let_assign2.rs
+run-pass	consts/const_let_eq.rs
+run-pass	consts/const_let_eq_float.rs
 check-pass	consts/const_prop_slice_pat_ice.rs
 check-pass	consts/const_short_circuit.rs
 run-pass	consts/consts-in-patterns.rs
+run-pass	consts/control-flow/basics.rs
 run-pass	consts/control-flow/short-circuit.rs
 check-pass	consts/control-flow/single_variant_match_ice.rs
 run-pass	consts/deref_in_pattern.rs
@@ -2456,6 +2460,7 @@ compile-fail	lowering/span-bug-issue-121431.rs
 run-pass	macros/assign-to-expr-metavar.rs
 compile-fail	macros/bad-concat.rs
 compile-fail	macros/bang-after-name.rs
+check-pass	macros/block-to-expr-metavar.rs
 check-pass	macros/break-last-token-twice.rs
 compile-fail	macros/builtin-env-issue-114010.rs
 compile-fail	macros/builtin-prelude-no-accidents.rs
@@ -2588,6 +2593,7 @@ compile-fail	match/uninhabited-granular-moves.rs
 compile-fail	methods/assc-func-issue-149038.rs
 compile-fail	methods/assign-to-method.rs
 compile-fail	methods/associated-fn-turbofish-issue-159813.rs
+run-pass	methods/by-value-self-method-on-int.rs
 compile-fail	methods/call_method_unknown_pointee.rs
 check-pass	methods/calling-conventions-with-where-clause-ref-bound.rs
 compile-fail	methods/disambiguate-associated-function-first-arg.rs
@@ -2633,6 +2639,7 @@ compile-fail	methods/receiver-equality.rs
 compile-fail	methods/suggest-convert-ptr-to-ref.rs
 compile-fail	methods/suggest-method-on-call-for-ambig-receiver.rs
 compile-fail	methods/suggest-method-on-call-with-macro-rcvr.rs
+run-pass	methods/trait-method-resolution-7575.rs
 compile-fail	methods/trait-method-resolution-over-inherent-22684.rs
 compile-fail	methods/tuple-suggestions-issue-142488.rs
 compile-fail	methods/vec-autoderef-autoref.rs
@@ -2889,6 +2896,7 @@ run-pass	numbers-arithmetic/apfloat-modulo-wrong.rs
 run-pass	numbers-arithmetic/arith-unsigned.rs
 run-pass	numbers-arithmetic/bitwise-ops-platform.rs
 run-pass	numbers-arithmetic/div-mod.rs
+run-pass	numbers-arithmetic/float-int-invalid-const-cast.rs
 run-pass	numbers-arithmetic/float-literal-inference.rs
 run-pass	numbers-arithmetic/float-nan.rs
 run-pass	numbers-arithmetic/float-signature.rs
@@ -4104,6 +4112,7 @@ compile-fail	static/static-reference-to-fn-2.rs
 build-pass	static/static-str-deref-ref.rs
 check-pass	static/static-string-slice-9249.rs
 run-pass	static/static-struct-initialization-5688.rs
+run-pass	statics/conditional-static-declaration-16010.rs
 build-pass	statics/enum-with-static-str-variant-13214.rs
 build-pass	statics/issue-15261.rs
 check-pass	statics/issue-44373-2.rs
@@ -4516,7 +4525,10 @@ run-pass	traits/default-method/bound-subst.rs
 run-pass	traits/default-method/macro.rs
 check-pass	traits/default-method/mut.rs
 check-pass	traits/default-method/nested-supertrait-method-in-default-body.rs
+run-pass	traits/default-method/self.rs
 run-pass	traits/default-method/supertrait-method-in-default-body.rs
+run-pass	traits/default-method/supervtable.rs
+run-pass	traits/default-method/trivial.rs
 run-pass	traits/default_method_simple.rs
 compile-fail	traits/dont-autoderef-ty-with-escaping-var.rs
 compile-fail	traits/dont-suggest-impl-as-closure-arg.rs
@@ -4565,6 +4577,7 @@ run-pass	traits/issue-23003.rs
 check-pass	traits/issue-2611-3.rs
 compile-fail	traits/issue-32963.rs
 check-pass	traits/issue-33187.rs
+run-pass	traits/issue-3683.rs
 run-pass	traits/issue-5008-borrowed-traitobject-method-call.rs
 compile-fail	traits/issue-50480.rs
 build-pass	traits/issue-56202.rs
@@ -4626,6 +4639,7 @@ compile-fail	traits/suggest-dereferences/suggest-dereferencing-receiver-argument
 compile-fail	traits/suggest-remove-reference-in-where-clause.rs
 compile-fail	traits/test-2.rs
 compile-fail	traits/test.rs
+run-pass	traits/trait-implementation-for-usize-5321.rs
 check-pass	traits/trait-implementation-generic-access-6898.rs
 run-pass	traits/trait-object-lifetime-bounds-7563.rs
 compile-fail	traits/trait-object-method-receiver-rules.rs

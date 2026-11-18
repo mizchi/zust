@@ -42,6 +42,22 @@ impl<'a> Visit<'a> for SynCounts {
         self.0.lets += 1;
         syn::visit::visit_local(self, l);
     }
+    // (a `const` / non-mut `static` in a block is read as a `let` of its value)
+    fn visit_block(&mut self, b: &'a syn::Block) {
+        for s in &b.stmts {
+            match s {
+                syn::Stmt::Item(syn::Item::Const(c)) => {
+                    self.0.lets += 1;
+                    self.visit_expr(&c.expr);
+                }
+                syn::Stmt::Item(syn::Item::Static(st)) if matches!(st.mutability, syn::StaticMutability::None) => {
+                    self.0.lets += 1;
+                    self.visit_expr(&st.expr);
+                }
+                s => self.visit_stmt(s),
+            }
+        }
+    }
     fn visit_macro(&mut self, _: &'a syn::Macro) {
         self.0.macros += 1;
     }
