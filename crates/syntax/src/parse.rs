@@ -494,6 +494,11 @@ pub struct Parser {
     init_text: String,
     /// 位置の基準 (マクロの引数を読み直すとき、そのテキストの先頭の位置。0 行目ならずらさない)
     base: Pos,
+    /// Check that `.await` is inside an `async` fn / block (when reading a whole file; a re-read macro argument
+    /// does not know where it was)
+    async_on: bool,
+    /// Inside an `async` fn / block / closure (a plain closure inside one is not)
+    in_async: bool,
 }
 
 type R<T> = Result<T, String>;
@@ -515,7 +520,7 @@ fn bin_prec(op: &str) -> u32 {
 
 pub fn parse_file(src: &str) -> R<File> {
     let toks = tokenize(src)?;
-    let mut p = Parser { toks: toks, i: 0, init_text: String::new(), base: Pos::default() };
+    let mut p = Parser { toks: toks, i: 0, init_text: String::new(), base: Pos::default(), async_on: true, in_async: false };
     let mut attrs = Vec::new();
     while p.is_punct("#") && p.peek_is(1, "!") {
         attrs.push(p.attr()?);
@@ -548,7 +553,7 @@ pub fn parse_expr(src: &str) -> R<Expr> {
 /// 式を読む。位置は base (src の先頭のソース上の位置) からの位置にする
 pub fn parse_expr_at(src: &str, base: Pos) -> R<Expr> {
     let toks = tokenize(src)?;
-    let mut p = Parser { toks: toks, i: 0, init_text: String::new(), base };
+    let mut p = Parser { toks: toks, i: 0, init_text: String::new(), base, async_on: false, in_async: false };
     let e = p.expr(true)?;
     if p.i < p.toks.len() {
         return Err(p.err("unexpected token after expression"));
@@ -563,7 +568,7 @@ pub fn parse_pat_guard(src: &str) -> Option<(Pat, Option<Expr>)> {
 
 pub fn parse_pat_guard_at(src: &str, base: Pos) -> Option<(Pat, Option<Expr>)> {
     let toks = tokenize(src).ok()?;
-    let mut p = Parser { toks: toks, i: 0, init_text: String::new(), base };
+    let mut p = Parser { toks: toks, i: 0, init_text: String::new(), base, async_on: false, in_async: false };
     let pat = p.pat().ok()?;
     let guard = if p.eat_ident("if") { Some(p.expr(true).ok()?) } else { None };
     p.eat_punct(",");
@@ -1032,7 +1037,21 @@ impl Parser {
         }
         if self.is_ident("impl") {
             self.i += 1;
-            return Ok(Ty::Impl(self.bounds()?));
+            let bs = self.bounds()?;
+            // (`impl Future<Output = T>`: futures run at once (see `async`), so the type is T)
+            let out = bs.iter().find_map(|b| match b {
+                Bound::Trait(_, p) if p.segs.last().is_some_and(|s| s.name == "Future" || s.name == "IntoFuture") => {
+                    p.segs.last().unwrap().args.iter().find_map(|a| match a {
+                        GArg::Bind(n, t) if n == "Output" => Some(t.clone()),
+                        _ => None,
+                    })
+                }
+                _ => None,
+            });
+            if let Some(t) = out {
+                return Ok(t);
+            }
+            return Ok(Ty::Impl(bs));
         }
         if self.is_ident("dyn") {
             self.i += 1;
@@ -1485,6 +1504,9 @@ impl Parser {
             } else if self.is_punct(".") && !self.punct_at(0, "..") {
                 self.i += 1;
                 if self.eat_ident("await") {
+                    if self.async_on && !self.in_async {
+                        return Err(self.err("`await` is only allowed inside `async` functions and blocks"));
+                    }
                     continue;
                 }
                 let t = self.tok(0).ok_or_else(|| self.err("expected a field"))?.clone();
@@ -1558,6 +1580,15 @@ impl Parser {
     }
 
     fn closure(&mut self) -> R<Expr> {
+        // (an async closure's body may `.await`; a plain closure's may not, even inside an async block)
+        let is_async = self.eat_ident("async");
+        let saved = std::mem::replace(&mut self.in_async, is_async);
+        let r = self.closure_inner();
+        self.in_async = saved;
+        r
+    }
+
+    fn closure_inner(&mut self) -> R<Expr> {
         let start = self.pos();
         let mv = self.eat_ident("move");
         let mut ps = Vec::new();
@@ -1588,6 +1619,19 @@ impl Parser {
     fn primary_expr(&mut self, ss: bool) -> R<Expr> {
         let Some(t) = self.tok(0) else { return Err(self.err("expected an expression")) };
         let t = t.clone();
+        // `async { .. }` / `async move { .. }`: run at once (no executor: `.await` is the value itself), as a
+        // closure called on the spot so that `return` / `?` leave the block
+        if t.kind == TokKind::Ident && t.text == "async" && (self.peek_is(1, "{") || (self.peek_ident(1, "move") && self.peek_is(2, "{"))) {
+            let start = self.pos();
+            self.i += 1;
+            let mv = self.eat_ident("move");
+            let saved = std::mem::replace(&mut self.in_async, true);
+            let b = self.block();
+            self.in_async = saved;
+            let b = b?;
+            let c = Expr::Closure(mv, Vec::new(), None, Box::new(Expr::Block(None, false, b)), start);
+            return Ok(Expr::Call(Box::new(Expr::Paren(Box::new(c))), Vec::new()));
+        }
         match t.kind {
             TokKind::Lit => {
                 let lp = self.pos();
@@ -1745,6 +1789,10 @@ impl Parser {
                 return Ok(Expr::Const(self.block()?));
             }
             "move" => return self.closure(),
+            // (`async |x| ..` / `async move || ..`)
+            "async" if self.peek_is(1, "|") || self.peek_is(1, "||") || (self.peek_ident(1, "move") && (self.peek_is(2, "|") || self.peek_is(2, "||"))) => {
+                return self.closure();
+            }
             "return" => {
                 self.i += 1;
                 let v = if self.expr_follows() { Some(Box::new(self.expr(ss)?)) } else { None };
@@ -2207,7 +2255,10 @@ impl Parser {
                     return Ok(ItemKind::Fn(sig, None));
                 }
                 let st = self.i;
-                let b = self.block()?;
+                let saved = std::mem::replace(&mut self.in_async, sig.quals.iter().any(|q| q == "async"));
+                let b = self.block();
+                self.in_async = saved;
+                let b = b?;
                 // (a `const fn`'s body text: constants may call it)
                 if sig.quals.iter().any(|q| q == "const") {
                     self.init_text = self.tokens_text(st, self.i);
