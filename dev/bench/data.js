@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795023512791,
+  "lastUpdate": 1795023514497,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -13377,6 +13377,85 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/mizchi/zust/commit/3b5fd541720c03952702700d9ff79857402bc167"
         },
         "date": 1795022400651,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "parity documentSymbol (名前の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity workspace/symbol (上位 20 の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity definition (行き先の一致)",
+            "value": 97.222,
+            "unit": "%"
+          },
+          {
+            "name": "parity hover (名前を含む)",
+            "value": 95,
+            "unit": "%"
+          },
+          {
+            "name": "parity references (数の一致)",
+            "value": 92.105,
+            "unit": "%"
+          },
+          {
+            "name": "parity documentHighlight (数の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity rename (書き換えの一致)",
+            "value": 90,
+            "unit": "%"
+          },
+          {
+            "name": "parity signatureHelp (名前・引数の数・今の引数の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity completion `x.\\|` (書いてある名前を含む)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity completion `na\\|me` (同)",
+            "value": 79.167,
+            "unit": "%"
+          },
+          {
+            "name": "parity 一致の平均",
+            "value": 95.349,
+            "unit": "%"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "committer": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "distinct": true,
+          "id": "69724e0e583bea00e19f3cbd798e4d6efe04f865",
+          "message": "std::iter::repeat / once / empty / repeat_with / successors\n\n- prelude iterators for these; a program writing `iter::` and one of the\n  names gets the Iterator trait with them\n- `ptr::write(` / `ptr::read(` / `drop_in_place(` pull in those functions by\n  that exact form (a bare `write` / `read` is not looked up), keeping the\n  no_std programs' caches within the size budget\n- test_variant reports an internal error instead of panicking on an enum\n  instance without variants (`iter::empty().collect()` with `T` unresolved)\n- tests/ui: run-pass 1340, check-pass 1076\n\nAccepted compile-fail removal (rejected before only because Iterator was\nmissing; it needs the captured-lifetime check on `impl Trait` returns):\nsuggestions/lifetimes/explicit-lifetime-suggestion-in-proper-span-issue-121267.rs\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-18T17:32:22Z",
+          "tree_id": "8b7e67b23ada4abbe1ea0be30ac2470260c706c6",
+          "url": "https://github.com/mizchi/zust/commit/69724e0e583bea00e19f3cbd798e4d6efe04f865"
+        },
+        "date": 1795023514205,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
