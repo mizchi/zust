@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1794995419676,
+  "lastUpdate": 1794995421483,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -3139,6 +3139,70 @@ window.BENCHMARK_DATA = {
           {
             "name": "tests/ui compile-fail passing",
             "value": 2291,
+            "unit": "tests"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "committer": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "distinct": true,
+          "id": "ac2361ee6aa6df574a8286c28eb4b67043b7d5c9",
+          "message": "zustc: fix all 34 crashes on rustc tests/ui (occurs check, resolve/instantiation depth limits, zero alignment, _ in subst, pattern/type mismatch error, memoized has_param/has_hole/hash_ty and resolve, capped instance names, large repeat arrays as loops); rust_ui --check fails on any crash\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-18T09:45:16Z",
+          "tree_id": "d42c2fb3cb27bedb9ff12b4c7f19ed44ce2973cd",
+          "url": "https://github.com/mizchi/zust/commit/ac2361ee6aa6df574a8286c28eb4b67043b7d5c9"
+        },
+        "date": 1794995421082,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tests/ui run-pass pass rate",
+            "value": 46.37,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui run-pass passing",
+            "value": 1119,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui check-pass pass rate",
+            "value": 46.15,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui check-pass passing",
+            "value": 834,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui build-pass pass rate",
+            "value": 48.15,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui build-pass passing",
+            "value": 65,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui compile-fail pass rate",
+            "value": 31.23,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui compile-fail passing",
+            "value": 2298,
             "unit": "tests"
           }
         ]
