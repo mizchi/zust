@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795013066828,
+  "lastUpdate": 1795013382433,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -4928,6 +4928,165 @@ window.BENCHMARK_DATA = {
           {
             "name": "rt/strings run (-O)",
             "value": 74.241,
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "committer": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "distinct": true,
+          "id": "415ab06e8fe9fbeec73279c10afc73d385a66ac2",
+          "message": "zustc: a program's own Map / Filter / Zip / Chain .. no longer collide with the prelude's iterator adapters\n\nWhen the program defines a type with such a name, the prelude's is renamed `__p_<name>` in the\nselected prelude text (only names no part of the compiler refers to by name).\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-18T14:45:59Z",
+          "tree_id": "092a9378e93f780f439fe9b75d68a63b68f8052c",
+          "url": "https://github.com/mizchi/zust/commit/415ab06e8fe9fbeec73279c10afc73d385a66ac2"
+        },
+        "date": 1795013381545,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "gen1000 build cold",
+            "value": 98.33,
+            "unit": "ms"
+          },
+          {
+            "name": "gen1000 build noop",
+            "value": 19.113,
+            "unit": "ms"
+          },
+          {
+            "name": "gen1000 build edit 1 fn",
+            "value": 24.233,
+            "unit": "ms"
+          },
+          {
+            "name": "gen1000 check",
+            "value": 77.615,
+            "unit": "ms"
+          },
+          {
+            "name": "gen1000 build cold peak RSS",
+            "value": 20.598,
+            "unit": "MiB"
+          },
+          {
+            "name": "gen1000 binary",
+            "value": 323.977,
+            "unit": "KiB"
+          },
+          {
+            "name": "gen1000 cache",
+            "value": 387.205,
+            "unit": "KiB"
+          },
+          {
+            "name": "gen1000 build noop instructions",
+            "value": 227.796,
+            "unit": "M instr"
+          },
+          {
+            "name": "gen1000 build edit 1 fn instructions",
+            "value": 221.075,
+            "unit": "M instr"
+          },
+          {
+            "name": "gen1000 check instructions",
+            "value": 870.551,
+            "unit": "M instr"
+          },
+          {
+            "name": "gen5000 build cold",
+            "value": 429.372,
+            "unit": "ms"
+          },
+          {
+            "name": "gen5000 build noop",
+            "value": 99.08,
+            "unit": "ms"
+          },
+          {
+            "name": "gen5000 build edit 1 fn",
+            "value": 104.886,
+            "unit": "ms"
+          },
+          {
+            "name": "gen5000 check",
+            "value": 400.731,
+            "unit": "ms"
+          },
+          {
+            "name": "gen5000 build cold peak RSS",
+            "value": 76.293,
+            "unit": "MiB"
+          },
+          {
+            "name": "gen5000 binary",
+            "value": 1558.336,
+            "unit": "KiB"
+          },
+          {
+            "name": "gen5000 cache",
+            "value": 1902.83,
+            "unit": "KiB"
+          },
+          {
+            "name": "gen5000 build noop instructions",
+            "value": 1101.02,
+            "unit": "M instr"
+          },
+          {
+            "name": "gen5000 build edit 1 fn instructions",
+            "value": 1063.019,
+            "unit": "M instr"
+          },
+          {
+            "name": "gen5000 check instructions",
+            "value": 4326.317,
+            "unit": "M instr"
+          },
+          {
+            "name": "rt/fib run (-O)",
+            "value": 33.957,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/hashmap run (-O)",
+            "value": 120.978,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/matmul run (-O)",
+            "value": 29.51,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/nbody run (-O)",
+            "value": 49.932,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/sieve run (-O)",
+            "value": 60.642,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/sort run (-O)",
+            "value": 155.511,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/strings run (-O)",
+            "value": 41.43,
             "unit": "ms"
           }
         ]
