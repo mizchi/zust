@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1794999472097,
+  "lastUpdate": 1794999473865,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -3881,6 +3881,70 @@ window.BENCHMARK_DATA = {
           {
             "name": "tests/ui compile-fail passing",
             "value": 2480,
+            "unit": "tests"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "committer": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "distinct": true,
+          "id": "b9f18c91591437a339bf4dbf154ced10a5652619",
+          "message": "zustc borrowck: moves by patterns and for loops, moves out of references and indexes, closure captures by place\n\n- a binding by value moves the part of the scrutinee it binds; `ref` / `ref mut` bindings\n  borrow it; a binding of the whole scrutinee and unit struct patterns are not moves\n- E0507 / E0508: moving a non-Copy value out through a reference or out of an index\n- `&mut T` read in `let b = a;` / a block tail is moved, not reborrowed\n- closures capture the places they use (RFC 2229: `p.x`, `*r`, the parts a pattern binds),\n  by value / mutable / shared reference from how each place is used; the closure holds the loans\n- tests/ui compile-fail 33.7% -> 34.4% (borrowck 141, nll 39, moves 21, closures 31), no regressions\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-18T10:53:48Z",
+          "tree_id": "5c42d76c890b019e5dab0fa2d69dda424638fb75",
+          "url": "https://github.com/mizchi/zust/commit/b9f18c91591437a339bf4dbf154ced10a5652619"
+        },
+        "date": 1794999473421,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tests/ui run-pass pass rate",
+            "value": 46.42,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui run-pass passing",
+            "value": 1120,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui check-pass pass rate",
+            "value": 46.15,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui check-pass passing",
+            "value": 834,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui build-pass pass rate",
+            "value": 48.15,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui build-pass passing",
+            "value": 65,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui compile-fail pass rate",
+            "value": 34.38,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui compile-fail passing",
+            "value": 2530,
             "unit": "tests"
           }
         ]
