@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795030539686,
+  "lastUpdate": 1795030541722,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -12016,6 +12016,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "lsp peak RSS",
             "value": 67.367,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "committer": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "distinct": true,
+          "id": "8e797a9e21bc72138f1717a7ecd3521303416d1a",
+          "message": "Inference of holes and fn items; call arguments borrowed until the call\n\n- `let v: Vec<Box<_>> = Vec::new();`: holes in an annotation take what the\n  let inference found\n- a generic fn passed as a value (`.map(drop)`, `.map(copy)`,\n  `.map(Result::unwrap)`) is instantiated from the bound's parameter types even\n  when the return type is still open\n- borrow checking: a `&x` argument lives until the call, as `&mut x` did\n  (`add(&*a, rewrite(&mut a))` is E0502); a binding by value in an arm with a\n  guard does not move before the guard holds; a union's fields are one place\n- tests/ui: run-pass 1374 (56.9%), check-pass 1112 (61.5%), compile-fail 2818\n\nAccepted compile-fail removal (it was rejected before because `.map(drop)`\ndid not compile; it needs the unused-iterator lint): lint/issue-109152.rs\n\nKPIs (gen5000): noop 661.6 M instr, edit 623.0, check 3893.3, cache unchanged;\nLSP ready 115 ms. Against rustc -C incremental on gen1000: cold 6.4x, no-op\n11x, edit 16x faster. README and SUPPORTED.md (en + ja) updated.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-18T19:31:34Z",
+          "tree_id": "5ebdb65367c7153b63d28f3186460511b8c5b3f7",
+          "url": "https://github.com/mizchi/zust/commit/8e797a9e21bc72138f1717a7ecd3521303416d1a"
+        },
+        "date": 1795030541300,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "lsp definition p50",
+            "value": 0.449,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp hover p50",
+            "value": 0.399,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp completion p50",
+            "value": 0.843,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp references p50",
+            "value": 2.308,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp rename p50",
+            "value": 0.553,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp signatureHelp p50",
+            "value": 0.612,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp documentHighlight p50",
+            "value": 0.671,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp ready (startup to indexed)",
+            "value": 96.748,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp peak RSS",
+            "value": 67.328,
             "unit": "MiB"
           }
         ]
