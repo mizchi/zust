@@ -9,10 +9,10 @@ Status as of 2026-11-18, updated with each round of work. The percentages are ru
 
 ## Overall
 
-- [x] tests/ui run-pass: 57.2% (1381 / 2413)
-- [x] tests/ui check-pass: 62.0% (1120 / 1807)
+- [x] tests/ui run-pass: 57.3% (1382 / 2413)
+- [x] tests/ui check-pass: 62.5% (1129 / 1807)
 - [x] tests/ui build-pass: 60.0% (81 / 135)
-- [ ] tests/ui compile-fail (an error on an annotated line): 38.3% (2819 / 7358)
+- [ ] tests/ui compile-fail (an error on an annotated line): 38.3% (2816 / 7358)
 - [x] real crates: fnv, adler2, hex, itoa, rustc-hash and cfg-if build and give the same output (6 / 6)
 - [x] zust-analyzer answers like rust-analyzer: 95.4% (rust-analyzer: 96.2%)
 
@@ -41,7 +41,7 @@ Status as of 2026-11-18, updated with each round of work. The percentages are ru
 - [ ] const generics: 43.6% (no `generic_const_exprs`)
 - [ ] generic associated types: 40.0%
 - [ ] casts: 34.5%
-- [ ] `impl Trait`: 29.7% (return position only; not from generic fns, not nested, no TAIT)
+- [ ] `impl Trait`: 29.7% (return position, also in trait methods; not from generic fns, not nested, no TAIT)
 - [ ] layout: `repr(packed)` / `repr(align)` are ignored: 12–33%
 
 ## Checks (compile-fail)
@@ -74,7 +74,7 @@ Status as of 2026-11-18, updated with each round of work. The percentages are ru
 - [ ] items inside blocks: `mod`, `trait`, `impl`, `type`, `union` and `pub` items in a fn body now move out; items that
   macro expansion produces inside a body do not yet (~30 tests)
 - [ ] builtin macros: `offset_of!`, `addr_of!` / `addr_of_mut!`, `try!`, `stringify!`, `concat!`, `line!`, `column!`,
-  `option_env!` now work; `module_path!`, `file!`, `include!`, `format_args!`, `assert_matches!`, `asm!` do not (~12 tests)
+  `option_env!`, `assert_matches!`, `format_args!` now work; `module_path!`, `file!`, `include!`, `asm!` do not (~8 tests)
 - [ ] `impl Trait` returned by generic functions: ~21 tests
 - [ ] `repr(packed)` / `repr(align)`: ~16 tests
 - [ ] `Pin` without an executor (`Pin<&mut T>`, `Box::pin`)
@@ -106,8 +106,8 @@ Status as of 2026-11-18, updated with each round of work. The percentages are ru
 
 ## Speed against rustc (2026-11-18)
 
-- [x] cold build: 4.7x faster than rustc `-C incremental` on gen1000, 3.1–4.6x on real crates
-- [x] edit and rebuild: 13x faster on gen1000, 12–18x on small programs, 5.0–7.0x on real crates
+- [x] cold build: 4.6x faster than rustc `-C incremental` on gen1000, 3.2–4.3x on real crates
+- [x] edit and rebuild: 18x faster on gen1000, 12–18x on small programs, 4.9–7.7x on real crates
 - [x] build cache on disk: 14x smaller (766 KiB vs 10.8 MiB on gen1000)
 - [x] binary: 3.2x smaller on gen1000, 90–550x on real crates
 - [ ] run time: zustc is 1.1–4.1x slower than rustc `-O` on small programs (faster than rustc's debug build);
@@ -119,8 +119,8 @@ The tables are in the [README](README.md#against-rustc).
 
 | KPI | now | before this work |
 |---|---:|---:|
-| gen5000 no-op build | 661.3 M instr | 746.0 M |
-| gen5000 build after editing one function | 622.8 M instr | 709.3 M |
+| gen5000 no-op build | 661.4 M instr | 746.0 M |
+| gen5000 build after editing one function | 622.9 M instr | 709.3 M |
 | gen5000 `check` | 3893.3 M instr | 3971.0 M |
 | gen5000 build cache | 1902.8 KiB | 1902.8 KiB |
 | LSP definition / hover / completion / references p50 | 0.42 / 0.34 / 0.90 / 1.78 ms | — |

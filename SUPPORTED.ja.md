@@ -9,10 +9,10 @@
 
 ## 全体
 
-- [x] tests/ui run-pass：57.2%（1381 / 2413）
-- [x] tests/ui check-pass：62.0%（1120 / 1807）
+- [x] tests/ui run-pass：57.3%（1382 / 2413）
+- [x] tests/ui check-pass：62.5%（1129 / 1807）
 - [x] tests/ui build-pass：60.0%（81 / 135）
-- [ ] tests/ui compile-fail（注釈の行でエラー）：38.3%（2819 / 7358）
+- [ ] tests/ui compile-fail（注釈の行でエラー）：38.3%（2816 / 7358）
 - [x] 実際のクレート：fnv、adler2、hex、itoa、rustc-hash、cfg-if がビルドでき、同じ出力を出す（6 / 6）
 - [x] zust-analyzer が rust-analyzer と同じように答える：95.4%（rust-analyzer は 96.2%）
 
@@ -41,7 +41,7 @@
 - [ ] const ジェネリクス：43.6%（`generic_const_exprs` はない）
 - [ ] ジェネリックな関連型：40.0%
 - [ ] キャスト：34.5%
-- [ ] `impl Trait`：29.7%（戻り値の位置だけ。ジェネリックな関数から・入れ子・TAIT はない）
+- [ ] `impl Trait`：29.7%（戻り値の位置。トレイトのメソッドでも使える。ジェネリックな関数から・入れ子・TAIT はない）
 - [ ] レイアウト：`repr(packed)` / `repr(align)` は無視する：12〜33%
 
 ## 検査（compile-fail）
@@ -74,7 +74,7 @@
 - [ ] ブロックの中のアイテム：関数の本体の中の `mod`、`trait`、`impl`、`type`、`union`、`pub` のアイテムは外へ移すようになった。
   本体の中でマクロの展開から出るアイテムはまだ（約 30 テスト）
 - [ ] 組み込みマクロ：`offset_of!`、`addr_of!` / `addr_of_mut!`、`try!`、`stringify!`、`concat!`、`line!`、`column!`、
-  `option_env!` は使えるようになった。`module_path!`、`file!`、`include!`、`format_args!`、`assert_matches!`、`asm!` はまだ（約 12 テスト）
+  `option_env!`、`assert_matches!`、`format_args!` は使えるようになった。`module_path!`、`file!`、`include!`、`asm!` はまだ（約 8 テスト）
 - [ ] ジェネリックな関数が返す `impl Trait`：約 21 テスト
 - [ ] `repr(packed)` / `repr(align)`：約 16 テスト
 - [ ] エグゼキュータなしの `Pin`（`Pin<&mut T>`、`Box::pin`）
@@ -106,8 +106,8 @@
 
 ## rustc との速度の比較 (2026-11-18)
 
-- [x] cold ビルド：gen1000 で rustc `-C incremental` の 4.7 倍速い。実際のクレートで 3.1〜4.6 倍
-- [x] 編集して再ビルド：gen1000 で 13 倍速い。小さなプログラムで 12〜18 倍、実際のクレートで 5.0〜7.0 倍
+- [x] cold ビルド：gen1000 で rustc `-C incremental` の 4.6 倍速い。実際のクレートで 3.2〜4.3 倍
+- [x] 編集して再ビルド：gen1000 で 18 倍速い。小さなプログラムで 12〜18 倍、実際のクレートで 4.9〜7.7 倍
 - [x] ディスクのビルドキャッシュ：1/14（gen1000 で 766 KiB と 10.8 MiB）
 - [x] バイナリ：gen1000 で 1/3.2、実際のクレートで 1/90〜1/550
 - [ ] 実行時間：小さなプログラムで zustc は rustc `-O` の 1.1〜4.1 倍遅い（rustc の debug ビルドよりは速い）。
@@ -119,8 +119,8 @@
 
 | KPI | 今 | この作業の前 |
 |---|---:|---:|
-| gen5000 の no-op ビルド | 661.3 M 命令 | 746.0 M |
-| gen5000 の 1 関数を編集した後のビルド | 622.8 M 命令 | 709.3 M |
+| gen5000 の no-op ビルド | 661.4 M 命令 | 746.0 M |
+| gen5000 の 1 関数を編集した後のビルド | 622.9 M 命令 | 709.3 M |
 | gen5000 の `check` | 3893.3 M 命令 | 3971.0 M |
 | gen5000 のビルドキャッシュ | 1902.8 KiB | 1902.8 KiB |
 | LSP の definition / hover / completion / references の p50 | 0.42 / 0.34 / 0.90 / 1.78 ms | — |

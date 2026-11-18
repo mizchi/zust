@@ -1280,6 +1280,15 @@ impl Cx<'_> {
                 let e: &Expr = self.keep_expr(Expr::Lit(text, crate::parse::Pos::default()));
                 self.expr(e, expected)
             }
+            // `assert_matches!(e, pat)`: `assert!(matches!(e, pat))`; `format_args!(..)`: the formatted String
+            "assert_matches" | "debug_assert_matches" => {
+                let e: &Expr = self.keep_expr(Expr::Macro(path_of("assert"), format!("(matches!{g})"), crate::parse::Span::default()));
+                self.expr(e, expected)
+            }
+            "format_args" => {
+                let e: &Expr = self.keep_expr(Expr::Macro(path_of("format"), g.to_string(), crate::parse::Span::default()));
+                self.expr(e, None)
+            }
             // `option_env!("X")`: no build-time environment here
             "option_env" => {
                 let e: &Expr = self.keep_expr(path_expr("None"));

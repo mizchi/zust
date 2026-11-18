@@ -526,6 +526,7 @@ check-pass	borrowck/alias-liveness/escaping-bounds.rs
 check-pass	borrowck/alias-liveness/higher-ranked.rs
 check-pass	borrowck/alias-liveness/opaque-capture.rs
 check-pass	borrowck/alias-liveness/rpit-static.rs
+check-pass	borrowck/alias-liveness/rpitit-static.rs
 compile-fail	borrowck/argument_number_mismatch_ice.rs
 check-pass	borrowck/array-disjoint-borrows-issue-135671.rs
 compile-fail	borrowck/assign-imm-local-twice.rs
@@ -2150,13 +2151,18 @@ compile-fail	impl-trait/in-trait/bad-projection-from-opaque.rs
 compile-fail	impl-trait/in-trait/check-wf-on-non-defaulted-rpitit.rs
 compile-fail	impl-trait/in-trait/default-body-type-err.rs
 check-pass	impl-trait/in-trait/default-body.rs
-compile-fail	impl-trait/in-trait/missing-lt-outlives-in-rpitit-114274.rs
+check-pass	impl-trait/in-trait/default-method-binder-shifting.rs
+compile-fail	impl-trait/in-trait/dont-probe-missing-item-name-3.rs
+check-pass	impl-trait/in-trait/early.rs
+check-pass	impl-trait/in-trait/expeced-refree-to-map-to-reearlybound-ice-108580.rs
 compile-fail	impl-trait/in-trait/opaque-and-lifetime-mismatch.rs
-compile-fail	impl-trait/in-trait/refine-err.rs
+compile-fail	impl-trait/in-trait/opaque-in-impl-is-opaque.rs
+check-pass	impl-trait/in-trait/outlives-in-nested-rpit.rs
 compile-fail	impl-trait/in-trait/refine-resolution-errors.rs
-compile-fail	impl-trait/in-trait/rpitit-shadowed-by-missing-adt.rs
+check-pass	impl-trait/in-trait/rpitit-cycle-in-generics-of.rs
+compile-fail	impl-trait/in-trait/rpitit-duplicate-associated-fn.rs
+check-pass	impl-trait/in-trait/shorthand-projection-in-rpitit-bound.rs
 compile-fail	impl-trait/in-trait/synthetic-hir-has-parent.rs
-compile-fail	impl-trait/in-trait/wf-bounds.rs
 compile-fail	impl-trait/issues/issue-100075-2.rs
 compile-fail	impl-trait/issues/issue-100075.rs
 check-pass	impl-trait/issues/issue-100187.rs
@@ -2184,6 +2190,7 @@ check-pass	impl-trait/nested-return-type3.rs
 check-pass	impl-trait/nested-rpit-with-anonymous-lifetimes.rs
 compile-fail	impl-trait/no-trait.rs
 run-pass	impl-trait/not_general_enough_regression_106630.rs
+check-pass	impl-trait/opaque-hidden-inferred-rpitit.rs
 compile-fail	impl-trait/opaque-used-in-extraneous-argument.rs
 compile-fail	impl-trait/point-to-type-err-cause-on-impl-trait-return.rs
 compile-fail	impl-trait/precise-capturing/bad-lifetimes.rs
@@ -2196,8 +2203,7 @@ check-pass	impl-trait/precise-capturing/higher-ranked.rs
 compile-fail	impl-trait/precise-capturing/ordering.rs
 check-pass	impl-trait/precise-capturing/overcaptures-2024-but-fine.rs
 compile-fail	impl-trait/precise-capturing/overcaptures-2024.rs
-compile-fail	impl-trait/precise-capturing/redundant.rs
-compile-fail	impl-trait/precise-capturing/rpitit.rs
+check-pass	impl-trait/precise-capturing/self-capture.rs
 compile-fail	impl-trait/precise-capturing/unexpected-token.rs
 compile-fail	impl-trait/printing-binder.rs
 run-pass	impl-trait/region-escape-via-bound-contravariant-closure.rs
@@ -4447,6 +4453,7 @@ build-pass	statics/static-mut-unsafe-init.rs
 build-pass	statics/static-mut-with-assoc-type-field.rs
 compile-fail	statics/uninhabited-static.rs
 run-pass	std/issue-3563-3.rs
+run-pass	stdlib-unit-tests/matches2021.rs
 compile-fail	stdlib-unit-tests/not-sync.rs
 run-pass	str/debug-print-basic-tuple.rs
 run-pass	str/nul-char-equivalence.rs

@@ -1291,6 +1291,11 @@ pub fn parse_and_summarize(src: &str, it: &SrcItem, owner: Option<&Owner>) -> R<
             ItemKind::Fn(fs, body) => {
                 let mut sig = parse_sig(fs, false, false, Some(ow))?;
                 sig.has_body = body.is_some();
+                // (`fn f(&self) -> impl Tr;` in a trait: each impl's method has its own type from its body; the
+                // declaration's type is a placeholder (calls through a type parameter do not know it))
+                if sig.ret == TySyn::Named(IMPL_RET.into()) && body.is_none() {
+                    sig.ret = TySyn::Prim(Ty::Unit);
+                }
                 let mut sm = Summary::default();
                 sm.fns.push((format!("{}::{}", ow.base, fs.name), sig));
                 return Ok(sm);
