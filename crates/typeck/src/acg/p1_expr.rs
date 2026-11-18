@@ -1001,7 +1001,13 @@ impl Cx<'_> {
         // (書いたフィールドの元の値は、一時変数のスコープの終わりで drop される)
         // (a place as the base (`..x`): the fields not written are read or moved out of it one by one, and the
         // rest of `x` stays where it is)
-        if let Some(base) = rest.as_deref().filter(|b| matches!(strip_paren(b), Expr::Path(..)) && is_place_expr(b) && self.const_of(b).is_none()) {
+        if let Some(base) = rest.as_deref().filter(|b| {
+            let mut r = strip_paren(b);
+            while let Expr::Field(x, _, _) = r {
+                r = strip_paren(x);
+            }
+            matches!(r, Expr::Path(..)) && is_place_expr(b) && self.const_of(r).is_none()
+        }) {
             if let Some(Ty::Struct(bsid)) = self.peek(base).filter(|&t| !self.prog.has_param(t)) {
                 let all: Vec<String> = self.prog.structs[bsid as usize].fields.iter().map(|f| f.0.clone()).collect();
                 let mut nfields = sfields.clone();

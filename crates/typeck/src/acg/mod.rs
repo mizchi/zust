@@ -751,7 +751,17 @@ pub fn const_ident_pat<'a>(prog: &Program, p: &'a Pat) -> Option<&'a str> {
 pub fn unit_variant_ident(prog: &Program, p: &Pat) -> Option<Path> {
     let Pat::Ident(false, false, n, None) = p else { return None };
     let path = path_of(n);
-    let (sid, vi) = prog.variant_by_p(&PPath::of(&path), None)?;
+    let Some((sid, vi)) = prog.variant_by_p(&PPath::of(&path), None) else {
+        // (a const whose value is a unit variant, `const C: E = E::A;`: the pattern is that variant)
+        let ci = *prog.const_index.get(n.as_str())?;
+        let c = &prog.consts[ci as usize];
+        if c.stat.is_some() || !c.expr.trim_start().starts_with(|ch: char| ch.is_ascii_uppercase()) {
+            return None;
+        }
+        let Ok(Expr::Path(None, cp)) = crate::parse::parse_expr(&c.expr) else { return None };
+        let (sid, vi) = prog.variant_by_p(&PPath::of(&cp), None)?;
+        return (prog.structs[sid as usize].variants[vi].kind == crate::types::VariantKind::Unit).then_some(cp);
+    };
     (prog.structs[sid as usize].variants[vi].kind == crate::types::VariantKind::Unit).then_some(path)
 }
 

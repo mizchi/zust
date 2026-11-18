@@ -501,7 +501,8 @@ fn moves_in(e: &Expr, caps: &[String]) -> bool {
         Expr::Call(_, a) if a.iter().any(|x| is_cap(x, caps)) => return true,
         Expr::Return(Some(v)) if is_cap(v, caps) => return true,
         Expr::Block(_, _, b) | Expr::Const(b) | Expr::Loop(_, b) => {
-            if b.stmts.iter().any(|s| matches!(s, Stmt::Let(_, _, Some(x), _) if is_cap(x, caps))) {
+            // (`let C(ref mut r, _) = c;` binds by reference: not a move)
+            if b.stmts.iter().any(|s| matches!(s, Stmt::Let(p, _, Some(x), _) if is_cap(x, caps) && binds_by_value(p))) {
                 return true;
             }
         }
@@ -916,5 +917,18 @@ impl EHash {
                 self.sub(x, memo);
             }
         }
+    }
+}
+
+/// The pattern binds a part of the value by value (`x`, `Some(x)`), not only by reference or not at all
+fn binds_by_value(p: &Pat) -> bool {
+    match p {
+        Pat::Ident(by_ref, _, n, sub) => {
+            (!*by_ref && n.starts_with(|c: char| c.is_ascii_lowercase() || c == '_') && n != "_") || sub.as_deref().is_some_and(binds_by_value)
+        }
+        Pat::Ref(_, q) => binds_by_value(q),
+        Pat::Or(v) | Pat::Tuple(v) | Pat::TupleStruct(_, v) | Pat::Slice(v) => v.iter().any(binds_by_value),
+        Pat::Struct(_, fs, _) => fs.iter().any(|f| binds_by_value(&f.1)),
+        _ => false,
     }
 }

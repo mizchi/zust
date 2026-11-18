@@ -70,6 +70,27 @@ impl Cx<'_> {
         let Expr::Match(scrut, arms) = m else {
             return err(SP, "internal: match_ on a non-match expression");
         };
+        // (an arm with a guard and an or-pattern: the guard runs for each alternative that matches, left to right.
+        // The arm becomes one arm per alternative)
+        if arms.iter().any(|a| a.guard.is_some() && has_or(&a.pat)) {
+            let mut out = vec![];
+            let mut changed = false;
+            for a in arms {
+                let alts = if a.guard.is_some() { or_alts(&a.pat) } else { vec![] };
+                if alts.len() < 2 || alts.len() > 32 {
+                    out.push(a.clone());
+                    continue;
+                }
+                changed = true;
+                for p in alts {
+                    out.push(crate::parse::Arm { pat: p, guard: a.guard.clone(), body: a.body.clone() });
+                }
+            }
+            if changed {
+                let m2 = self.keep_expr(Expr::Match(scrut.clone(), out));
+                return self.match_(m2, expected);
+            }
+        }
         let pats: Vec<&Pat> = arms.iter().map(|a| &a.pat).collect();
         let Some(place) = self.bk_scrutinee(scrut, None, &pats)? else {
             return Ok((None, Ty::Never));
@@ -1410,5 +1431,55 @@ impl Cx<'_> {
         }
         self.b.ins().return_(&[]);
         Ok(())
+    }
+}
+
+fn has_or(p: &Pat) -> bool {
+    match p {
+        Pat::Or(_) => true,
+        Pat::Ident(_, _, _, Some(q)) | Pat::Ref(_, q) => has_or(q),
+        Pat::Tuple(v) | Pat::TupleStruct(_, v) | Pat::Slice(v) => v.iter().any(has_or),
+        Pat::Struct(_, fs, _) => fs.iter().any(|f| has_or(&f.1)),
+        _ => false,
+    }
+}
+
+/// The alternatives of a pattern with or-patterns inside, left to right (`(a | b, c | d)`: `(a, c)`, `(a, d)`, ..)
+fn or_alts(p: &Pat) -> Vec<Pat> {
+    // (the product of the parts' alternatives, the first part varying slowest)
+    fn product(parts: &[Pat]) -> Vec<Vec<Pat>> {
+        let mut out: Vec<Vec<Pat>> = vec![vec![]];
+        for q in parts {
+            let alts = or_alts(q);
+            let mut next = vec![];
+            for o in &out {
+                for a in &alts {
+                    let mut v = o.clone();
+                    v.push(a.clone());
+                    next.push(v);
+                }
+            }
+            out = next;
+            if out.len() > 64 {
+                break;
+            }
+        }
+        out
+    }
+    match p {
+        Pat::Or(v) => v.iter().flat_map(or_alts).collect(),
+        Pat::Ident(r, m, n, Some(q)) => or_alts(q).into_iter().map(|a| Pat::Ident(*r, *m, n.clone(), Some(Box::new(a)))).collect(),
+        Pat::Ref(m, q) => or_alts(q).into_iter().map(|a| Pat::Ref(*m, Box::new(a))).collect(),
+        Pat::Tuple(v) => product(v).into_iter().map(Pat::Tuple).collect(),
+        Pat::TupleStruct(path, v) => product(v).into_iter().map(|x| Pat::TupleStruct(path.clone(), x)).collect(),
+        Pat::Slice(v) => product(v).into_iter().map(Pat::Slice).collect(),
+        Pat::Struct(path, fs, rest) => {
+            let ps: Vec<Pat> = fs.iter().map(|f| f.1.clone()).collect();
+            product(&ps)
+                .into_iter()
+                .map(|x| Pat::Struct(path.clone(), fs.iter().map(|f| f.0.clone()).zip(x).collect(), *rest))
+                .collect()
+        }
+        p => vec![p.clone()],
     }
 }

@@ -374,6 +374,16 @@ fn body_lets(body: &[Pt], out: &mut Vec<String>) {
                     }
                 }
             }
+            // (a match arm binding just a name, `_x => ..`)
+            Pt::Tok(TokenTree::Ident(n))
+                if matches!((body.get(i + 1), body.get(i + 2)), (Some(Pt::Tok(TokenTree::Punct(a))), Some(Pt::Tok(TokenTree::Punct(b)))) if a.as_char() == '=' && b.as_char() == '>')
+                    && !(i > 0 && matches!(&body[i - 1], Pt::Tok(TokenTree::Punct(c)) if c.as_char() == ':' || c.as_char() == '\'')) =>
+            {
+                let n = n.to_string();
+                if !matches!(n.as_str(), "_" | "true" | "false") && n.starts_with(|c: char| c.is_ascii_lowercase() || c == '_') && !out.contains(&n) {
+                    out.push(n);
+                }
+            }
             // (a label defined in the body, `'x: loop`: kept as "'x")
             Pt::Tok(TokenTree::Punct(q)) if q.as_char() == '\'' => {
                 if let (Some(Pt::Tok(TokenTree::Ident(n))), Some(Pt::Tok(TokenTree::Punct(c)))) = (body.get(i + 1), body.get(i + 2)) {
