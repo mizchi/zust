@@ -1341,7 +1341,22 @@ impl Cx<'_> {
                     let srcs = self.bk_frame_end();
                     let (mut v, mut t) = r?;
                     if t == Ty::Never {
+                        // (the code after it is unreachable but still checked: `let y: u32 = x;` with `x: !`)
                         diverged = true;
+                        // (with an annotation, the binding has that type: `let n: Option<!> = loop {};`)
+                        match ann.filter(|&a| !has_hole(self.prog, a) && !self.prog.has_param(a) && !self.needs_drop(a)) {
+                            Some(a) => {
+                                let v = if a.is_agg() {
+                                    let tmp = self.temp(a);
+                                    self.zero(tmp, a);
+                                    Some(tmp)
+                                } else {
+                                    clif_ty(a).map(|ct| if ct == types::I128 { self.int_const(Ty::I128, 0) } else if ct.is_float() { if ct == types::F64 { self.b.ins().f64const(0.0) } else { self.b.ins().f32const(0.0) } } else { self.b.ins().iconst(ct, 0) })
+                                };
+                                self.bind(name, a, v);
+                            }
+                            None => self.bind(name, Ty::Never, None),
+                        }
                         continue;
                     }
                     let mut ann = ann.filter(|&a| !has_hole(self.prog, a));

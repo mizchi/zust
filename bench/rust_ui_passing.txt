@@ -2733,6 +2733,7 @@ check-pass	lint/unused/unused-associated-item.rs
 check-pass	lint/unused/unused-attr-repr-packed-c-order.rs
 check-pass	lint/unused/unused-braces-attrs-issue-141549.rs
 compile-fail	lint/unused/unused-doc-comments-edge-cases.rs
+check-pass	lint/unused/unused-never-binding-issue-158783.rs
 check-pass	lint/unused/unused-parens-issue-106413.rs
 check-pass	lint/unused/unused-results-unit-and-uninhabited.rs
 check-pass	lint/unused/unused-var-in-unreachable-code.rs
@@ -3117,14 +3118,17 @@ compile-fail	mut/mutable-class-fields-2.rs
 compile-fail	mut/mutable-class-fields.rs
 compile-fail	namespace/namespaced-enum-glob-import-no-impls.rs
 run-pass	namespace/struct-type-and-function-name-coexistence.rs
+check-pass	never_type/basic/adjust_never.rs
 compile-fail	never_type/basic/call-fn-never-arg-wrong-type.rs
 check-pass	never_type/basic/call-fn-never-arg.rs
+check-pass	never_type/basic/cast-never.rs
+check-pass	never_type/basic/clone-never.rs
 compile-fail	never_type/basic/never-assign-wrong-type.rs
 check-pass	never_type/basic/never-associated-type.rs
 run-pass	never_type/basic/never-result.rs
 check-pass	never_type/basic/never-type-arg.rs
 run-pass	never_type/basic/never-type-rvalues.rs
-compile-fail	never_type/fallback_change/defaulted-never-note.rs
+check-pass	never_type/basic/never_transmute_never.rs
 compile-fail	never_type/fallback_change/dependency-on-fallback-to-unit.rs
 compile-fail	never_type/fallback_change/diverging-fallback-unconstrained-return.rs
 compile-fail	never_type/fallback_change/fallback-closure-ret.rs
@@ -4072,6 +4076,7 @@ run-pass	reachable/diverging-expressions-unreachable-code.rs
 check-pass	reachable/expr_andand.rs
 check-pass	reachable/expr_oror.rs
 compile-fail	reachable/expr_unary.rs
+check-pass	reachable/never-assign-dead-code.rs
 check-pass	reachable/unreachable-by-call-arguments-issue-139627.rs
 run-pass	reachable/unreachable-code-diverging-expressions.rs
 run-pass	reborrow/reborrow-mutable-reference.rs
@@ -5113,7 +5118,6 @@ check-pass	traits/stack-error-order-dependence.rs
 compile-fail	traits/static-method-generic-inference.rs
 run-pass	traits/static-method-overwriting.rs
 run-pass	traits/static-outlives-a-where-clause.rs
-compile-fail	traits/subtype-recursion-limit.rs
 compile-fail	traits/suggest-dereferences/deref-argument.rs
 compile-fail	traits/suggest-dereferences/invalid-suggest-deref-issue-127590.rs
 compile-fail	traits/suggest-dereferences/issue-62530.rs
@@ -5170,6 +5174,7 @@ compile-fail	tuple/add-tuple-within-arguments.rs
 compile-fail	tuple/index-invalid.rs
 check-pass	tuple/indexing-in-macro.rs
 run-pass	tuple/nested-zst-tuple-fields.rs
+check-pass	tuple/never-to-any-coercion-in-collection-issue-100727.rs
 run-pass	tuple/one-tuple.rs
 run-pass	tuple/tup.rs
 compile-fail	tuple/tuple-arity-mismatch.rs
@@ -5209,7 +5214,6 @@ compile-fail	type-inference/unbounded-type-param-in-fn.rs
 compile-fail	type/ascription/issue-47666.rs
 compile-fail	type/ascription/issue-60933.rs
 compile-fail	type/cannot-find-wrapper-with-impl-trait.rs
-compile-fail	type/closure-with-wrong-borrows.rs
 compile-fail	type/inherent-impl-primitive-types-error.rs
 compile-fail	type/issue-101866.rs
 compile-fail	type/issue-102598.rs
