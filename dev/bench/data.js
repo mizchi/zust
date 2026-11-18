@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795046072053,
+  "lastUpdate": 1795046073851,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -21973,6 +21973,85 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/mizchi/zust/commit/5ecf037bc5f1490e38e252d7d5e9dcc9ebfd54a7"
         },
         "date": 1795045771881,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "parity documentSymbol (名前の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity workspace/symbol (上位 20 の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity definition (行き先の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity hover (名前を含む)",
+            "value": 92.5,
+            "unit": "%"
+          },
+          {
+            "name": "parity references (数の一致)",
+            "value": 97.297,
+            "unit": "%"
+          },
+          {
+            "name": "parity documentHighlight (数の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity rename (書き換えの一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity signatureHelp (名前・引数の数・今の引数の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity completion `x.\\|` (書いてある名前を含む)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity completion `na\\|me` (同)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity 一致の平均",
+            "value": 98.98,
+            "unit": "%"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "committer": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "distinct": true,
+          "id": "d01898bb08569c261f1707f742734efc3c94cdde",
+          "message": "Let chains and `&raw const` / `&raw mut`\n\n`if let P = x && cond && let Q = y { A } else { B }` is nested ifs with B in each\nfailing branch (errors point at the chain's first condition). `&raw const p` /\n`&raw mut p` take the place's address as a raw pointer (the local is kept in\nmemory; a `static mut` needs no `unsafe`). tests/ui: run-pass +2, check-pass +10,\ncompile-fail +2. One compile-fail test leaves the baseline\n(consts/const_in_pattern/suggest_equality_comparison_instead_of_pattern_matching.rs:\nit passed only because let chains were unsupported on the annotated line; its\nerror, a constant of a non-structural type in a pattern, is not checked yet).\nKPIs unchanged.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-18T23:45:13Z",
+          "tree_id": "5d618a088ada7e827dbcf09f758bb51777fd858f",
+          "url": "https://github.com/mizchi/zust/commit/d01898bb08569c261f1707f742734efc3c94cdde"
+        },
+        "date": 1795046073501,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
