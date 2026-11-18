@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795020240046,
+  "lastUpdate": 1795020241783,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -9280,6 +9280,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "lsp peak RSS",
             "value": 66.691,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "committer": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "distinct": true,
+          "id": "7364f79e82a6fe525aca0b21a19aa99dbdacced4",
+          "message": "Fix wrong code: slice patterns through `&`, captures moved by value, labels in macros, derived comparisons\n\n- `let &[ref xs @ ..] = s` (a `&[T]` in memory): the slice place is the pair\n  itself (it loaded the data pointer as the pair's address and crashed)\n- a by-value capture moved out by a pattern or by a `self` method\n  (`move || foo.unwrap()`) leaves its slot empty (it was dropped twice)\n- macro hygiene for labels defined in a macro body (`'x: loop` in a macro no\n  longer catches the caller's `break 'x`)\n- derive(PartialOrd): NaN compares unordered (every `<`/`>=` is false and\n  partial_cmp is None); enum tags compare unsigned when the tag type is\n- `#[repr(u8)]` and the like set an enum's tag type (and wrap its\n  discriminants); without one, the tag is the smallest integer type that holds\n  every discriminant\n- derived `==` stops at the first unequal field\n- tests/ui: run-pass 1325 (54.91%)\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-18T16:32:01Z",
+          "tree_id": "ddd3e2ec91f3c2d86d1060308d4be2f8a83ad026",
+          "url": "https://github.com/mizchi/zust/commit/7364f79e82a6fe525aca0b21a19aa99dbdacced4"
+        },
+        "date": 1795020241546,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "lsp definition p50",
+            "value": 0.437,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp hover p50",
+            "value": 0.34,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp completion p50",
+            "value": 0.955,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp references p50",
+            "value": 2.9,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp rename p50",
+            "value": 0.525,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp signatureHelp p50",
+            "value": 0.731,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp documentHighlight p50",
+            "value": 0.597,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp ready (startup to indexed)",
+            "value": 104.509,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp peak RSS",
+            "value": 66.93,
             "unit": "MiB"
           }
         ]
