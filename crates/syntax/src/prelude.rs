@@ -504,26 +504,39 @@ const SHADOWABLE: &[&str] = &[
 ];
 
 pub fn rename_shadowed(user_src: &str, prelude: String) -> String {
-    // (most programs name none of them: a quick look first)
-    if !SHADOWABLE.iter().any(|n| user_src.contains(n)) {
-        return prelude;
-    }
-    // (one pass over the program's words: `struct Map` / `enum Map` / `trait Map` / `type Map` / `union Map`)
+    // (one pass over the bytes: the name after `struct ` / `enum ` / `trait ` / `type ` / `union `. It replaces a
+    // search for each name: those were most of the cost of a no-op build of a large program)
     let mut defined: Vec<&str> = vec![];
-    let mut prev = "";
-    for w in user_src.split(|c: char| !(c.is_ascii_alphanumeric() || c == '_')) {
-        if w.is_empty() {
-            continue;
+    let b = user_src.as_bytes();
+    let is_id = |c: u8| c.is_ascii_alphanumeric() || c == b'_';
+    let mut i = 0;
+    while i < b.len() {
+        let c = b[i];
+        if matches!(c, b's' | b'e' | b't' | b'u') && (i == 0 || !is_id(b[i - 1])) {
+            let rest = &b[i..];
+            let kw = [&b"struct "[..], b"enum ", b"trait ", b"type ", b"union "].into_iter().find(|k| rest.starts_with(k));
+            if let Some(k) = kw {
+                let mut a = i + k.len();
+                while a < b.len() && b[a] == b' ' {
+                    a += 1;
+                }
+                let mut e = a;
+                while e < b.len() && is_id(b[e]) {
+                    e += 1;
+                }
+                let w = &user_src[a..e];
+                if SHADOWABLE.contains(&w) && !defined.contains(&w) {
+                    defined.push(w);
+                }
+                i = e.max(i + 1);
+                continue;
+            }
         }
-        if matches!(prev, "struct" | "enum" | "trait" | "type" | "union") && SHADOWABLE.contains(&w) && !defined.contains(&w) {
-            defined.push(w);
-        }
-        prev = w;
+        i += 1;
     }
     if defined.is_empty() {
         return prelude;
     }
-    let is_id = |c: u8| c.is_ascii_alphanumeric() || c == b'_';
     let mut out = prelude;
     for n in defined {
         if !out.contains(n) {
@@ -599,6 +612,11 @@ impl<'a> PreludeScan<'a> {
 
     /// どこかのアイテム (かアイテムの外) で f が真か。key は f の名前 (結果を覚えるキー)
     fn any(&mut self, key: &str, f: &dyn Fn(&str) -> bool) -> bool {
+        // (one look at the whole source, as `has` does: running f on every item was 12% of a no-op build of a
+        // large program, and the memo only helps an LSP edit)
+        if self.spans.len() > 64 {
+            return f(self.src);
+        }
         let mut kh: u64 = 0xcbf2_9ce4_8422_2325;
         for &c in key.as_bytes() {
             kh = (kh ^ c as u64).wrapping_mul(0x0100_0000_01b3);
@@ -987,26 +1005,29 @@ pub fn select_with(user_src: &str, user_items: &[SrcItem], cache: &mut SelectCac
         need.extend(FMT_NAMES.iter().copied());
         need.extend(["eprintln", "Debug", "__exr_eprint"]);
     }
-    // (the one-thread mpsc channel is a shared queue)
-    // (ManuallyDrop is used through Deref: `m.0`, `*m`)
-    // (`iter::repeat(x).take(n)`: the iterator these return needs the trait, even with no `next` written)
-    // (`ptr::write(p, v)` / `ptr::read(p)`: `write` / `read` alone are not looked up as functions)
-    for (pat, n) in [("ptr::write(", "write"), ("ptr::read(", "read"), ("drop_in_place(", "drop_in_place")] {
-        if sc.has(pat) {
-            need.insert(n);
+    // (`ptr::write(p, v)` / `ptr::read(p)`: `write` / `read` alone are not looked up as functions; one scan for
+    // `ptr::` first: most programs have none)
+    if sc.has("ptr::") {
+        for (pat, n) in [("ptr::write(", "write"), ("ptr::read(", "read"), ("ptr::drop_in_place(", "drop_in_place")] {
+            if sc.has(pat) {
+                need.insert(n);
+            }
         }
     }
-    // (only with `iter::` written: `is_empty` / `call_once` are not these)
+    // (`iter::repeat(x).take(n)`: the iterator these return needs the trait, even with no `next` written; only
+    // with `iter::` written: `is_empty` / `call_once` are not these)
     if sc.has("iter::") && (sc.has("repeat") || sc.has("once") || sc.has("empty") || sc.has("successors")) {
         need.extend(["Iterator", "next"]);
     }
     if sc.has("dyn") && (sc.has("Display") || sc.has("Debug")) {
         need.extend(["__exr_dyn_display", "__exr_dyn_debug"]);
     }
+    // (ManuallyDrop is used through Deref: `m.0`, `*m`)
     if sc.has("ManuallyDrop") {
         need.extend(["Deref", "deref", "deref_mut"]);
     }
-    // (one scan: a program using the channel imports or names `mpsc`)
+    // (the one-thread mpsc channel is a shared queue; one scan: a program using the channel imports or names
+    // `mpsc`)
     if sc.has("mpsc") {
         need.extend(["__core_channel", "__core_sync_channel", "__Sndr", "__SyncSndr", "__Rcvr__", "__RecvIter", "Rc", "RefCell", "VecDeque", "borrow_mut", "push_back", "pop_front", "clone", "Option", "Result", "Iterator", "next", "Deref", "deref", "new"]);
     }
