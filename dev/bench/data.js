@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795043624910,
+  "lastUpdate": 1795043626936,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -21359,6 +21359,85 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/mizchi/zust/commit/04b7d0b59380c1b53100613d8cd7a8fd7b8d8215"
         },
         "date": 1795043062253,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "parity documentSymbol (名前の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity workspace/symbol (上位 20 の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity definition (行き先の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity hover (名前を含む)",
+            "value": 92.5,
+            "unit": "%"
+          },
+          {
+            "name": "parity references (数の一致)",
+            "value": 97.297,
+            "unit": "%"
+          },
+          {
+            "name": "parity documentHighlight (数の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity rename (書き換えの一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity signatureHelp (名前・引数の数・今の引数の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity completion `x.\\|` (書いてある名前を含む)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity completion `na\\|me` (同)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity 一致の平均",
+            "value": 98.98,
+            "unit": "%"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "committer": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "distinct": true,
+          "id": "b2620bda961b4f2951eedada30e634f1fa2e3c8a",
+          "message": "Fn pointer comparisons and casts; `main` as a value\n\n`f == g` and `&f == &g` on fn pointers compare addresses, `f as *const ()`\ncasts, and `main` can be used as a value (`Box::new(main)`, `let f: fn() = main`).\nComparing a fn item (not a pointer) and comparing pointers in a `const fn` are\nerrors, as in rustc. tests/ui: run-pass +6, check-pass +3, compile-fail +3; one\ncompile-fail test leaves the baseline (nll/type-check-pointer-comparisons.rs passed\nonly because the comparison was unsupported; its errors are lifetime errors).\nKPIs: gen5000 check +0.07%, the no-op build within its usual range.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-18T23:03:16Z",
+          "tree_id": "746facad9933b83c1e0b4b71e63728c3e7ecb575",
+          "url": "https://github.com/mizchi/zust/commit/b2620bda961b4f2951eedada30e634f1fa2e3c8a"
+        },
+        "date": 1795043626326,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
