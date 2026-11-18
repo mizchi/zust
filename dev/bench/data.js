@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795043060933,
+  "lastUpdate": 1795043062719,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -21052,6 +21052,85 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/mizchi/zust/commit/880367002d13725989cb12436650b63ebab2aa4f"
         },
         "date": 1795041874227,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "parity documentSymbol (名前の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity workspace/symbol (上位 20 の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity definition (行き先の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity hover (名前を含む)",
+            "value": 92.5,
+            "unit": "%"
+          },
+          {
+            "name": "parity references (数の一致)",
+            "value": 97.297,
+            "unit": "%"
+          },
+          {
+            "name": "parity documentHighlight (数の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity rename (書き換えの一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity signatureHelp (名前・引数の数・今の引数の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity completion `x.\\|` (書いてある名前を含む)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity completion `na\\|me` (同)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity 一致の平均",
+            "value": 98.98,
+            "unit": "%"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "committer": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "distinct": true,
+          "id": "04b7d0b59380c1b53100613d8cd7a8fd7b8d8215",
+          "message": "Check unsafe operations outside `unsafe` (E0133)\n\nCalls to an `unsafe fn` or an extern-block fn, raw pointer derefs, uses of a\n`static mut` (not under `addr_of!`) and union field reads are errors outside an\n`unsafe` block or `unsafe fn`. Only code written in the user's source is checked\n(generated code has no position); closure bodies and the prelude are not yet.\ntests/ui compile-fail: 15 more pass, no regressions. KPIs unchanged.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-18T22:51:49Z",
+          "tree_id": "16f908e8e4eb6bd4ab5ac18d52277bb0dcb95452",
+          "url": "https://github.com/mizchi/zust/commit/04b7d0b59380c1b53100613d8cd7a8fd7b8d8215"
+        },
+        "date": 1795043062253,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
