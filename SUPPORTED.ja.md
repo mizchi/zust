@@ -9,10 +9,10 @@
 
 ## 全体
 
-- [x] tests/ui run-pass：56.9%（1374 / 2413）
-- [x] tests/ui check-pass：61.5%（1112 / 1807）
+- [x] tests/ui run-pass：57.2%（1381 / 2413）
+- [x] tests/ui check-pass：62.0%（1120 / 1807）
 - [x] tests/ui build-pass：60.0%（81 / 135）
-- [ ] tests/ui compile-fail（注釈の行でエラー）：38.3%（2818 / 7358）
+- [ ] tests/ui compile-fail（注釈の行でエラー）：38.3%（2819 / 7358）
 - [x] 実際のクレート：fnv、adler2、hex、itoa、rustc-hash、cfg-if がビルドでき、同じ出力を出す（6 / 6）
 - [x] zust-analyzer が rust-analyzer と同じように答える：95.4%（rust-analyzer は 96.2%）
 
@@ -73,7 +73,8 @@
   パラメータはまだ（約 35 テスト）
 - [ ] ブロックの中のアイテム：関数の本体の中の `mod`、`trait`、`impl`、`type`、`union`、`pub` のアイテムは外へ移すようになった。
   本体の中でマクロの展開から出るアイテムはまだ（約 30 テスト）
-- [ ] zustc がまだ知らないマクロ：約 36 テスト
+- [ ] 組み込みマクロ：`offset_of!`、`addr_of!` / `addr_of_mut!`、`try!`、`stringify!`、`concat!`、`line!`、`column!`、
+  `option_env!` は使えるようになった。`module_path!`、`file!`、`include!`、`format_args!`、`assert_matches!`、`asm!` はまだ（約 12 テスト）
 - [ ] ジェネリックな関数が返す `impl Trait`：約 21 テスト
 - [ ] `repr(packed)` / `repr(align)`：約 16 テスト
 - [ ] エグゼキュータなしの `Pin`（`Pin<&mut T>`、`Box::pin`）
@@ -105,8 +106,8 @@
 
 ## rustc との速度の比較 (2026-11-18)
 
-- [x] cold ビルド：gen1000 で rustc `-C incremental` の 6.4 倍速い。実際のクレートで 2.9〜4.4 倍
-- [x] 編集して再ビルド：gen1000 で 16 倍速い。小さなプログラムで 12〜18 倍、実際のクレートで 5.0〜6.6 倍
+- [x] cold ビルド：gen1000 で rustc `-C incremental` の 4.7 倍速い。実際のクレートで 3.1〜4.6 倍
+- [x] 編集して再ビルド：gen1000 で 13 倍速い。小さなプログラムで 12〜18 倍、実際のクレートで 5.0〜7.0 倍
 - [x] ディスクのビルドキャッシュ：1/14（gen1000 で 766 KiB と 10.8 MiB）
 - [x] バイナリ：gen1000 で 1/3.2、実際のクレートで 1/90〜1/550
 - [ ] 実行時間：小さなプログラムで zustc は rustc `-O` の 1.1〜4.1 倍遅い（rustc の debug ビルドよりは速い）。
@@ -118,8 +119,8 @@
 
 | KPI | 今 | この作業の前 |
 |---|---:|---:|
-| gen5000 の no-op ビルド | 661.6 M 命令 | 746.0 M |
-| gen5000 の 1 関数を編集した後のビルド | 623.0 M 命令 | 709.3 M |
+| gen5000 の no-op ビルド | 661.3 M 命令 | 746.0 M |
+| gen5000 の 1 関数を編集した後のビルド | 622.8 M 命令 | 709.3 M |
 | gen5000 の `check` | 3893.3 M 命令 | 3971.0 M |
 | gen5000 のビルドキャッシュ | 1902.8 KiB | 1902.8 KiB |
 | LSP の definition / hover / completion / references の p50 | 0.42 / 0.34 / 0.90 / 1.78 ms | — |

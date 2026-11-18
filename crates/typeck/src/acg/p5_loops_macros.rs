@@ -1185,6 +1185,106 @@ impl Cx<'_> {
                 let _ = expected;
                 Ok((Some(res), Ty::Bool))
             }
+            // `offset_of!(Type, field)` / `offset_of!(Type, a.b)`: the field's offset in the layout
+            "offset_of" => {
+                let a = macro_arg_texts(g);
+                let [ty, fields] = a.as_slice() else {
+                    return err(SP, "`offset_of!` takes a type and a field");
+                };
+                let Ok(Expr::Cast(_, pt)) = crate::parse::parse_expr(&format!("0 as {ty}")) else {
+                    return err(SP, "`offset_of!`: cannot read the type");
+                };
+                let mut t = self.parse_ty(&pt)?;
+                let mut off = 0u32;
+                for f in fields.split('.') {
+                    let f = f.trim();
+                    let Ty::Struct(sid) = t else {
+                        return err(SP, format!("`offset_of!`: `{}` has no fields", self.prog.tn(t)));
+                    };
+                    let Some((ft, fo)) = self.prog.field(sid, f) else {
+                        return err(SP, format!("no field `{f}` on type `{}`", self.prog.tn(t)));
+                    };
+                    off += fo;
+                    t = ft;
+                }
+                Ok((Some(self.b.ins().iconst(types::I64, off as i64)), Ty::Usize))
+            }
+            // `addr_of!(p)` / `addr_of_mut!(p)`: `&raw const p` / `&raw mut p`
+            "addr_of" | "addr_of_mut" => {
+                let a = macro_arg_texts(g);
+                let Some(x) = a.first() else {
+                    return err(SP, format!("`{name}!` takes a place"));
+                };
+                // (`&x` as a raw pointer: the same address)
+                let src = if name == "addr_of_mut" { format!("&mut ({x})") } else { format!("&({x})") };
+                let e = crate::parse::parse_expr_at(&src, self.mbase)?;
+                let e: &Expr = self.keep_expr(e);
+                let want = expected.filter(|t| matches!(t, Ty::Ptr(..)));
+                match self.expr(e, want)? {
+                    (v, Ty::Ref(m, i)) => Ok((v, Ty::Ptr(m, i))),
+                    r => Ok(r),
+                }
+            }
+            // `try!(e)` (2015): `e?`
+            "r#try" | "try" => {
+                let args = self.macro_args(p, g)?;
+                let Some(x) = args.into_iter().next() else {
+                    return err(SP, "`try!` takes an expression");
+                };
+                let e: &Expr = self.keep_expr(Expr::Try(Box::new(x)));
+                self.expr(e, expected)
+            }
+            // `stringify!(tokens)` / `concat!("a", 1, 'c', true)` / `line!()` / `column!()`: literals
+            "stringify" | "concat" | "line" | "column" => {
+                let text = match name.as_str() {
+                    "stringify" => format!("{:?}", tokens_text(strip_delims(g).unwrap_or(""))),
+                    "line" | "column" => {
+                        let (l, c) = self.loc(self.mstart);
+                        let v = if name == "line" { l } else { c };
+                        let e: &Expr = self.keep_expr(Expr::Lit(format!("{v}u32"), crate::parse::Pos::default()));
+                        return self.expr(e, expected);
+                    }
+                    _ => {
+                        let mut out = String::new();
+                        for a in macro_arg_texts(g) {
+                            let a = a.trim();
+                            // (only literals: `concat!(x)` with a variable is an error)
+                            let lit = matches!(crate::parse::parse_expr(a), Ok(Expr::Lit(..)))
+                                || matches!(crate::parse::parse_expr(a), Ok(Expr::Unary(op, x, _)) if op == "-" && matches!(*x, Expr::Lit(..)))
+                                || a == "true" || a == "false";
+                            if !lit {
+                                return err(SP, "expected a literal (only literals, like `\"foo\"`, `-42` and `3.14`, can be passed to `concat!()`)");
+                            }
+                            match crate::ast_consteval::str_lit(a) {
+                                Some((false, b)) => out.push_str(&String::from_utf8_lossy(&b)),
+                                _ if a.starts_with('\'') && a.ends_with('\'') && a.len() >= 3 => {
+                                    match crate::parse::parse_expr(a) {
+                                        Ok(Expr::Lit(t, _)) => match lit::lit(&t) {
+                                            Some(Lit::Char(c)) => out.push(c),
+                                            _ => out.push_str(&a[1..a.len() - 1]),
+                                        },
+                                        _ => out.push_str(&a[1..a.len() - 1]),
+                                    }
+                                }
+                                _ => {
+                                    // (numbers and bools as written, without a suffix)
+                                    let t: String = a.chars().filter(|&c| c != '_').collect();
+                                    let t = t.trim_end_matches(|c: char| c.is_ascii_alphabetic() && !t.starts_with("true") && !t.starts_with("false"));
+                                    out.push_str(if a == "true" || a == "false" { a } else { t });
+                                }
+                            }
+                        }
+                        format!("{out:?}")
+                    }
+                };
+                let e: &Expr = self.keep_expr(Expr::Lit(text, crate::parse::Pos::default()));
+                self.expr(e, expected)
+            }
+            // `option_env!("X")`: no build-time environment here
+            "option_env" => {
+                let e: &Expr = self.keep_expr(path_expr("None"));
+                self.expr(e, expected.or(Some(Ty::Unit)).filter(|t| *t != Ty::Unit))
+            }
             _ => err(SP, format!("macro `{name}!` is not supported")),
         }
     }

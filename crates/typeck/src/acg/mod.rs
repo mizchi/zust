@@ -401,6 +401,13 @@ fn addr_taken(b: &crate::parse::Block) -> HashSet<String> {
             }
             Expr::Macro(p, g, _) => {
                 let name = p.segs.last().map(|s| s.name.as_str()).unwrap_or("");
+                if matches!(name, "addr_of" | "addr_of_mut") {
+                    if let Some(es) = crate::ast_closure::macro_args(g) {
+                        if let Some(n) = es.first().and_then(root) {
+                            out.insert(n);
+                        }
+                    }
+                }
                 if matches!(name, "assert_eq" | "assert_ne" | "debug_assert_eq" | "debug_assert_ne") {
                     if let Some(es) = crate::ast_closure::macro_args(g) {
                         for e in es.iter().take(2) {

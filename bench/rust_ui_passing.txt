@@ -1305,6 +1305,7 @@ check-pass	consts/const_let_assign2.rs
 run-pass	consts/const_let_eq.rs
 run-pass	consts/const_let_eq_float.rs
 check-pass	consts/const_prop_slice_pat_ice.rs
+run-pass	consts/const_refs_to_static.rs
 check-pass	consts/const_short_circuit.rs
 run-pass	consts/consts-in-patterns.rs
 run-pass	consts/control-flow/basics.rs
@@ -1349,6 +1350,7 @@ check-pass	consts/let-irrefutable-pattern-ice-120337.rs
 check-pass	consts/manually_drop_structural_eq.rs
 run-pass	consts/match-const-fn-structs.rs
 run-pass	consts/method-reference-in-const-dyn-fn.rs
+check-pass	consts/min_const_fn/allow_raw_ptr_dereference_const_fn.rs
 compile-fail	consts/min_const_fn/cmp_fn_pointers.rs
 compile-fail	consts/min_const_fn/min_const_fn.rs
 check-pass	consts/min_const_fn/min_const_fn_dyn.rs
@@ -2396,7 +2398,11 @@ run-pass	late-bound-lifetimes/issue-36381.rs
 check-pass	late-bound-lifetimes/issue-47511.rs
 compile-fail	late-bound-lifetimes/issue-80618.rs
 run-pass	layout/aggregate-lang/struct-align.rs
+run-pass	layout/aggregate-lang/struct-offsets.rs
+run-pass	layout/aggregate-lang/struct-size.rs
 run-pass	layout/aggregate-lang/union-align.rs
+run-pass	layout/aggregate-lang/union-offsets.rs
+run-pass	layout/aggregate-lang/union-size.rs
 compile-fail	layout/issue-unsized-tail-restatic-ice-122488.rs
 compile-fail	layout/malformed-unsized-type-in-union.rs
 run-pass	layout/opt-repr-i32-min.rs
@@ -2524,6 +2530,7 @@ check-pass	lint/dead-code/issue-85071-2.rs
 check-pass	lint/dead-code/issue-85071.rs
 check-pass	lint/dead-code/issue-85255.rs
 run-pass	lint/dead-code/leading-underscore.rs
+check-pass	lint/dead-code/offset-of-correct-param-env.rs
 check-pass	lint/dead-code/self-assign.rs
 check-pass	lint/dead-code/struct-used-as-pattern-issue-56750.rs
 check-pass	lint/dead-code/type-in-transparent.rs
@@ -2556,6 +2563,7 @@ check-pass	lint/issue-108155.rs
 check-pass	lint/issue-110573.rs
 check-pass	lint/issue-14837.rs
 check-pass	lint/issue-19102.rs
+check-pass	lint/issue-47775-nested-macro-unnecessary-parens-arg.rs
 check-pass	lint/issue-54099-camel-case-underscore-types.rs
 check-pass	lint/issue-57410-1.rs
 check-pass	lint/issue-57410.rs
@@ -2627,6 +2635,7 @@ check-pass	lint/unknown-lints/allow-unknown-unstable-lint-inline.rs
 check-pass	lint/unknown-lints/suggestions.rs
 check-pass	lint/unknown-lints/warn-unknown-unstable-lint-inline.rs
 check-pass	lint/unreachable-async-fn.rs
+check-pass	lint/unused-braces-macro-arg-issue-158747.rs
 check-pass	lint/unused-braces-while-let-with-mutable-value.rs
 check-pass	lint/unused-parens-labeled-break-issue-143256.rs
 check-pass	lint/unused-qualifications-global-paths.rs
@@ -2696,6 +2705,7 @@ check-pass	macros/block-to-expr-metavar.rs
 check-pass	macros/break-last-token-twice.rs
 compile-fail	macros/builtin-env-issue-114010.rs
 compile-fail	macros/builtin-prelude-no-accidents.rs
+check-pass	macros/builtin-std-paths.rs
 check-pass	macros/column-macro-collision.rs
 compile-fail	macros/compile_error_macro-suppress-errors.rs
 run-pass	macros/conditional-debug-macro-on.rs
@@ -2757,6 +2767,7 @@ check-pass	macros/macro-meta-items-modern.rs
 run-pass	macros/macro-method-issue-4621.rs
 check-pass	macros/macro-multiple-items.rs
 check-pass	macros/macro-named-default.rs
+run-pass	macros/macro-nested_definition_issue-31946.rs
 check-pass	macros/macro-nt-list.rs
 check-pass	macros/macro-pat-follow-2018.rs
 run-pass	macros/macro-pat-neg-lit.rs
@@ -3003,6 +3014,7 @@ compile-fail	moves/move-in-guard-2.rs
 compile-fail	moves/move-into-dead-array-1.rs
 compile-fail	moves/move-into-dead-array-2.rs
 run-pass	moves/move-nullary-fn.rs
+compile-fail	moves/move-of-addr-of-mut.rs
 compile-fail	moves/move-out-of-array-1.rs
 run-pass	moves/move-out-of-field.rs
 compile-fail	moves/move-out-of-shared-ref-deref.rs
@@ -3223,8 +3235,10 @@ check-pass	object-lifetime/object-lifetime-default-inferred-args.rs
 check-pass	object-lifetime/object-lifetime-default-resolved-gat.rs
 compile-fail	object-lifetime/undeclared-object-lifetime.rs
 compile-fail	offset-of/offset-of-inference.rs
+check-pass	offset-of/offset-of-must-use.rs
 compile-fail	offset-of/offset-of-output-type.rs
 build-pass	offset-of/offset-of-temporaries.rs
+run-pass	offset-of/offset-of-tuple-nested.rs
 compile-fail	on-unimplemented/slice-index.rs
 compile-fail	on-unimplemented/suggest_tuple_wrap.rs
 compile-fail	on-unimplemented/suggest_tuple_wrap_root_obligation.rs
@@ -4282,6 +4296,7 @@ check-pass	rust-2018/edition-lint-inter-outlives/explicit-outlives-recursive-119
 check-pass	rust-2018/issue-51008-1.rs
 check-pass	rust-2018/issue-51008.rs
 check-pass	rust-2018/try-ident.rs
+check-pass	rust-2018/try-macro.rs
 check-pass	rust-2018/uniform-paths/ambiguity-nested.rs
 check-pass	rust-2018/uniform-paths/ambiguity.rs
 check-pass	rust-2018/uniform-paths/block-scoped-shadow-nested.rs
@@ -4383,6 +4398,7 @@ compile-fail	span/issue-36537.rs
 compile-fail	span/issue-39018.rs
 compile-fail	span/issue-42234-unknown-receiver-type.rs
 compile-fail	span/issue-81800.rs
+check-pass	span/let-offset-of.rs
 compile-fail	span/missing-unit-argument.rs
 check-pass	span/multispan-import-lint.rs
 compile-fail	span/mut-arg-hint.rs
