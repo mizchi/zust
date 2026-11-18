@@ -30,21 +30,21 @@ Rust のサブセットを速くインクリメンタルにビルドするコン
 
 | gen1000 | cold | no-op | 1 関数を編集 | ディスク | バイナリ (strip 後) | 実行 |
 |---|---:|---:|---:|---:|---:|---:|
-| zustc | 121 ms | 16 ms | 23 ms | 766 KiB | 324 KiB | 9 ms |
-| zustc `-O` | 285 ms | 56 ms | 56 ms | 1199 KiB | 341 KiB | 3 ms |
-| rustc `-C incremental` | 592 ms | 169 ms | 331 ms | 10.8 MiB | 1038 KiB | 6 ms |
-| rustc `-O` | 14902 ms | - | - | - | 377 KiB | 2 ms |
-| **zustc の rustc `-C incremental` 比** | **6.1 倍速い** | **11 倍速い** | **17 倍速い** | **1/14** | **1/3.2** | |
+| zustc | 130 ms | 20 ms | 22 ms | 766 KiB | 324 KiB | 10 ms |
+| zustc `-O` | 365 ms | 52 ms | 52 ms | 1199 KiB | 341 KiB | 3 ms |
+| rustc `-C incremental` | 587 ms | 161 ms | 332 ms | 10.8 MiB | 1038 KiB | 6 ms |
+| rustc `-O` | 14767 ms | - | - | - | 377 KiB | 2 ms |
+| **zustc の rustc `-C incremental` 比** | **4.5 倍速い** | **8.1 倍速い** | **15 倍速い** | **1/14** | **1/3.2** | |
 
 小さなプログラム (`bench/rt`: fib、hashmap、matmul、nbody、sieve、sort、strings) と実際のクレート (cratebench: fnv、
 adler2、hex、itoa、rustc-hash、cfg-if。6 つとも rustc と同じ出力を出す):
 
 | | zustc の rustc `-C incremental` 比 (bench/rt) | zustc の rustc 比 (cratebench) |
 |---|---:|---:|
-| cold ビルド | 2.9〜4.1 倍速い (24〜49 ms と 82〜178 ms) | 3.0〜4.0 倍速い (25〜62 ms と 93〜236 ms) |
-| 編集して再ビルド | 12〜18 倍速い (5〜7 ms と 68〜98 ms) | 5.1〜7.2 倍速い (12〜23 ms と 68〜122 ms) |
-| バイナリ | 1/11〜1/24 | 1/90〜1/550 (8〜48 KiB と 4.4 MiB) |
-| rustc `-O` に対する実行時間 | zustc は 1.1〜4.1 倍遅い、zustc `-O` は 1.1〜3.2 倍 | zustc は 3.1〜17 倍遅い、zustc `-O` は 0.9〜7.3 倍 |
+| cold ビルド | 2.5〜4.0 倍速い (21〜39 ms と 71〜131 ms) | 2.9〜4.2 倍速い (22〜61 ms と 90〜234 ms) |
+| 編集して再ビルド | 12〜17 倍速い (4〜6 ms と 63〜75 ms) | 4.8〜7.0 倍速い (11〜22 ms と 68〜114 ms) |
+| バイナリ | 1/13〜1/24 | 1/93〜1/550 (8〜48 KiB と 4.4 MiB) |
+| rustc `-O` に対する実行時間 | zustc は 1.2〜3.6 倍遅い、zustc `-O` は 1.0〜2.9 倍 | zustc は 3.1〜22 倍遅い、zustc `-O` は 0.9〜9.1 倍 |
 
 同じ gen1000 の比較の推移 (rustc 自身の時間は回ごとに ±10% ほど、zustc の cold ビルドは ±20% ほど動く。前のコミットと交互に走らせると、
 1501b30 と 8e797a9 の cold の中央値は 96 ms と 98 ms で同じ):
@@ -66,18 +66,19 @@ adler2、hex、itoa、rustc-hash、cfg-if。6 つとも rustc と同じ出力を
 | 2026-11-18、境界に合わせた整数リテラル、`Box` の比較 (60cbe60) | 112 ms | 655 ms | 5.8 倍 | 21 ms | 341 ms | 16.2 倍 |
 | 2026-11-18、`()` を返す `impl Trait` (e7fdc21) | 121 ms | 592 ms | 4.9 倍 | 23 ms | 331 ms | 14.4 倍 |
 | 2026-11-18、ユーザーのコードが定義しなおせる std の型名 (9bd5297) | 120 ms | 625 ms | 5.2 倍 | 21 ms | 331 ms | 15.8 倍 |
-| 2026-11-18、`Pin`、バリアントの型引数 | 109 ms | 669 ms | 6.1 倍 | 22 ms | 372 ms | 16.9 倍 |
+| 2026-11-18、`Pin`、バリアントの型引数 (e45ee10) | 109 ms | 669 ms | 6.1 倍 | 22 ms | 372 ms | 16.9 倍 |
+| 2026-11-18、e45ee10 をすべてのプログラムで測り直した | 130 ms | 587 ms | 4.5 倍 | 22 ms | 332 ms | 15.1 倍 |
 
 zustc のコードの実行速度は rustc の debug ビルドに近く、7 つの小さなプログラムのすべてでそれより速い (そこでは rustc の debug
 ビルドは rustc `-O` の 3〜26 倍遅い)。
 
 zust-analyzer と rust-analyzer を、zustc 自身のソース (40 か所の問い合わせ) で比べた (`python3 bench/lsp_parity.py`、
-2026-11-18):
+2026-11-18。起動・メモリ・references は e45ee10 で測り直し、一致は前の全体の測定から):
 
 | | 起動から名前が引けるまで | メモリ | references の p50 | 一致 (40 か所) |
 |---|---:|---:|---:|---:|
-| zust-analyzer | 144 ms | 70 MB | 4.6 ms | 95.3% |
-| rust-analyzer | 6302 ms | 2150 MB | 154.1 ms | 96.2% |
+| zust-analyzer | 113 ms | 71 MB | 11.3 ms | 95.3% |
+| rust-analyzer | 5725 ms | 2056 MB | 215.9 ms | 96.2% |
 
 詳しくは [bench/lsp_parity_result.md](bench/lsp_parity_result.md)。
 

@@ -35,21 +35,21 @@ medians of 3 runs). They are measured again with each round of work. gen1000 is 
 
 | gen1000 | cold | no-op | edit one function | on disk | binary (stripped) | run |
 |---|---:|---:|---:|---:|---:|---:|
-| zustc | 121 ms | 16 ms | 23 ms | 766 KiB | 324 KiB | 9 ms |
-| zustc `-O` | 285 ms | 56 ms | 56 ms | 1199 KiB | 341 KiB | 3 ms |
-| rustc `-C incremental` | 592 ms | 169 ms | 331 ms | 10.8 MiB | 1038 KiB | 6 ms |
-| rustc `-O` | 14902 ms | - | - | - | 377 KiB | 2 ms |
-| **zustc vs rustc `-C incremental`** | **6.1x faster** | **11x faster** | **17x faster** | **14x smaller** | **3.2x smaller** | |
+| zustc | 130 ms | 20 ms | 22 ms | 766 KiB | 324 KiB | 10 ms |
+| zustc `-O` | 365 ms | 52 ms | 52 ms | 1199 KiB | 341 KiB | 3 ms |
+| rustc `-C incremental` | 587 ms | 161 ms | 332 ms | 10.8 MiB | 1038 KiB | 6 ms |
+| rustc `-O` | 14767 ms | - | - | - | 377 KiB | 2 ms |
+| **zustc vs rustc `-C incremental`** | **4.5x faster** | **8.1x faster** | **15x faster** | **14x smaller** | **3.2x smaller** | |
 
 Small programs (`bench/rt`: fib, hashmap, matmul, nbody, sieve, sort, strings) and real crates (cratebench: fnv,
 adler2, hex, itoa, rustc-hash, cfg-if; all six give the same output as rustc):
 
 | | zustc vs rustc `-C incremental` (bench/rt) | zustc vs rustc (cratebench) |
 |---|---:|---:|
-| cold build | 2.9–4.1x faster (24–49 ms vs 82–178 ms) | 3.0–4.0x faster (25–62 ms vs 93–236 ms) |
-| edit and rebuild | 12–18x faster (5–7 ms vs 68–98 ms) | 5.1–7.2x faster (12–23 ms vs 68–122 ms) |
-| binary | 11–24x smaller | 90–550x smaller (8–48 KiB vs 4.4 MiB) |
-| run time vs rustc `-O` | zustc 1.1–4.1x slower, zustc `-O` 1.1–3.2x slower | zustc 3.1–17x slower, zustc `-O` 0.9–7.3x |
+| cold build | 2.5–4.0x faster (21–39 ms vs 71–131 ms) | 2.9–4.2x faster (22–61 ms vs 90–234 ms) |
+| edit and rebuild | 12–17x faster (4–6 ms vs 63–75 ms) | 4.8–7.0x faster (11–22 ms vs 68–114 ms) |
+| binary | 13–24x smaller | 93–550x smaller (8–48 KiB vs 4.4 MiB) |
+| run time vs rustc `-O` | zustc 1.2–3.6x slower, zustc `-O` 1.0–2.9x slower | zustc 3.1–22x slower, zustc `-O` 0.9–9.1x |
 
 The same gen1000 comparison over time (rustc's own times move by about ±10% between runs, and zustc's cold build by about ±20%: run alternately against
 the previous commit, 1501b30 and 8e797a9 have the same cold median, 96 and 98 ms):
@@ -71,18 +71,19 @@ the previous commit, 1501b30 and 8e797a9 have the same cold median, 96 and 98 ms
 | 2026-11-18, integer literals for bounds, `Box` comparisons (60cbe60) | 112 ms | 655 ms | 5.8x | 21 ms | 341 ms | 16.2x |
 | 2026-11-18, `impl Trait` returning `()` (e7fdc21) | 121 ms | 592 ms | 4.9x | 23 ms | 331 ms | 14.4x |
 | 2026-11-18, std type names that user code may redefine (9bd5297) | 120 ms | 625 ms | 5.2x | 21 ms | 331 ms | 15.8x |
-| 2026-11-18, `Pin`, generic arguments on variants | 109 ms | 669 ms | 6.1x | 22 ms | 372 ms | 16.9x |
+| 2026-11-18, `Pin`, generic arguments on variants (e45ee10) | 109 ms | 669 ms | 6.1x | 22 ms | 372 ms | 16.9x |
+| 2026-11-18, e45ee10 measured again with all programs | 130 ms | 587 ms | 4.5x | 22 ms | 332 ms | 15.1x |
 
 zustc's code is close to rustc's debug build at run time, and faster than it in all seven small programs (rustc's
 debug build is 3–26x slower than rustc `-O` there).
 
 zust-analyzer against rust-analyzer on zustc's own sources (40 query points, `python3 bench/lsp_parity.py`,
-2026-11-18):
+2026-11-18; startup, memory and references measured again at e45ee10, agreement from the earlier full run):
 
 | | startup until symbols resolve | memory | references p50 | agreement (40 points) |
 |---|---:|---:|---:|---:|
-| zust-analyzer | 144 ms | 70 MB | 4.6 ms | 95.3% |
-| rust-analyzer | 6302 ms | 2150 MB | 154.1 ms | 96.2% |
+| zust-analyzer | 113 ms | 71 MB | 11.3 ms | 95.3% |
+| rust-analyzer | 5725 ms | 2056 MB | 215.9 ms | 96.2% |
 
 Details are in [bench/lsp_parity_result.md](bench/lsp_parity_result.md).
 

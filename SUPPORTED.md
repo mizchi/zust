@@ -107,12 +107,12 @@ Status as of 2026-11-18, updated with each round of work. The percentages are ru
 
 ## Speed against rustc (2026-11-18)
 
-- [x] cold build: 6.1x faster than rustc `-C incremental` on gen1000, 3.0–4.0x on real crates
-- [x] edit and rebuild: 17x faster on gen1000, 12–18x on small programs, 5.1–7.2x on real crates
+- [x] cold build: 4.5x faster than rustc `-C incremental` on gen1000, 2.5–4.0x on small programs, 2.9–4.2x on real crates
+- [x] edit and rebuild: 15x faster on gen1000, 12–17x on small programs, 4.8–7.0x on real crates
 - [x] build cache on disk: 14x smaller (766 KiB vs 10.8 MiB on gen1000)
-- [x] binary: 3.2x smaller on gen1000, 90–550x on real crates
-- [ ] run time: zustc is 1.1–4.1x slower than rustc `-O` on small programs (faster than rustc's debug build);
-  zustc `-O` 1.1–3.2x
+- [x] binary: 3.2x smaller on gen1000, 93–550x on real crates
+- [ ] run time: zustc is 1.2–3.6x slower than rustc `-O` on small programs (faster than rustc's debug build);
+  zustc `-O` 1.0–2.9x
 
 The tables are in the [README](README.md#against-rustc).
 
