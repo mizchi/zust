@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795022399109,
+  "lastUpdate": 1795022401132,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -13070,6 +13070,85 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/mizchi/zust/commit/a190fcfdf82d5e0cb2d71cd1836c431084c36a0f"
         },
         "date": 1795020568691,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "parity documentSymbol (名前の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity workspace/symbol (上位 20 の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity definition (行き先の一致)",
+            "value": 97.222,
+            "unit": "%"
+          },
+          {
+            "name": "parity hover (名前を含む)",
+            "value": 95,
+            "unit": "%"
+          },
+          {
+            "name": "parity references (数の一致)",
+            "value": 92.105,
+            "unit": "%"
+          },
+          {
+            "name": "parity documentHighlight (数の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity rename (書き換えの一致)",
+            "value": 90,
+            "unit": "%"
+          },
+          {
+            "name": "parity signatureHelp (名前・引数の数・今の引数の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity completion `x.\\|` (書いてある名前を含む)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity completion `na\\|me` (同)",
+            "value": 79.167,
+            "unit": "%"
+          },
+          {
+            "name": "parity 一致の平均",
+            "value": 95.349,
+            "unit": "%"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "committer": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "distinct": true,
+          "id": "3b5fd541720c03952702700d9ff79857402bc167",
+          "message": "`impl .. for dyn Trait`, formatting through `dyn Display` / `dyn Debug`\n\n- the parser takes bounds on a `dyn` self type (`impl dyn Tr + 'a`,\n  `impl X for dyn Tr + Send`); the methods belong to `__dyn_Tr` and are found\n  for receivers of that trait object type\n- checks on such impls: E0371 (the object type implements its own trait),\n  E0120 (Drop), E0321 (auto traits), `Self` in the self type\n- `{}` / `{:?}` of `&dyn Display`, `Box<dyn Debug>` and the like call the trait\n  object's `fmt`; the vtable entry for these two traits formats the value with\n  `{}` / `{:?}` (so `&0 as &dyn Display` works too)\n- E0592 across two impl blocks is reported at the first definition\n- tests/ui: run-pass 1336, check-pass 1073 (59.38%), compile-fail 2806\n\nAccepted compile-fail removals (passed only because `impl .. for dyn` was not\nparsed; they need dyn compatibility (E0038) or generic argument counts):\ndyn-compatibility/almost-supertrait-associated-type.rs,\ndyn-compatibility/ice-generics-of-crate-root-152335.rs,\nimpl-trait/in-trait/cycle-effective-visibilities-during-dyn-compatibility-check.rs,\ntraits/associated_type_bound/assoc-type-bounds-with-the-same-name-with-lacking-generic-arg-148121.rs\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-18T17:05:24Z",
+          "tree_id": "8067493bdd33253d0accc99b5c508e044ca303bb",
+          "url": "https://github.com/mizchi/zust/commit/3b5fd541720c03952702700d9ff79857402bc167"
+        },
+        "date": 1795022400651,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
