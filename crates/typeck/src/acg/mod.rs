@@ -1021,6 +1021,7 @@ impl Cx<'_> {
                 self.bind(name, ty, Some(v));
             }
         }
+        self.bk.params = (0..self.bk.locals.len() as u32).collect();
         // クロージャ: キャプチャを `__env` のフィールド (by-ref なら指す先) として見せる
         if !self.caps.is_empty() {
             let env = match self.lookup("__env") {
@@ -1307,7 +1308,7 @@ impl Cx<'_> {
                     self.same(SP, t, ty).map_err(|m| self.at(expr_start(init), m))?;
                     self.bk.mut_next = pat_mut(pat);
                     self.bind(name.clone(), ty, v);
-                    self.bk_def_named(&name, &srcs);
+                    self.bk_def_named(&name, &srcs, init);
                     self.extend_temps(t0);
                 }
                 // (`;` の付いたマクロの文。末尾の `vec![]` などは式として期待型を渡す)

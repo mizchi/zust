@@ -13,7 +13,7 @@ pub(crate) fn label_name(l: &str) -> String {
 /// クロージャ本体を普通の fn にする: `fn call(__env: (), a: _, __p1: _) { let (x, y) = __p1; 本体 }`。
 /// (closure::synth と同じ。本体の型推論 (infer_ctx) に渡して、決まらない引数・戻り値の型を求めるのに使う)
 pub(crate) fn closure_synth(c: &Expr) -> ItemFn {
-    let Expr::Closure(_, inputs, _, body) = c else { unreachable!() };
+    let Expr::Closure(_, inputs, _, body, _) = c else { unreachable!() };
     let mut params: Vec<(Pat, crate::parse::Ty)> = vec![(Pat::Ident(false, false, "__env".into(), None), crate::parse::Ty::Tuple(vec![]))];
     let mut stmts: Vec<Stmt> = vec![];
     for (i, (pat, ty)) in inputs.iter().enumerate() {
@@ -493,8 +493,12 @@ impl Cx<'_> {
             Expr::Struct(..) => self.struct_lit(e, expected),
             Expr::Binary(..) => self.binary(e, expected),
             Expr::AssignOp(_, left, _, _) => {
+                // (an overloaded `+=` is a call of `add_assign(&mut self, ..)`: no access of its own)
+                let builtin = !matches!(self.peek(left), Some(Ty::Struct(_) | Ty::Ref(_, Ty::Struct(_))));
                 let r = self.binary(e, expected)?;
-                self.bk_acc(left, borrowck::Acc::Modify);
+                if builtin {
+                    self.bk_acc(left, borrowck::Acc::Modify);
+                }
                 Ok(r)
             }
             Expr::Assign(left, right) => {
@@ -1013,7 +1017,7 @@ impl Cx<'_> {
 
     /// `|..| ..`: キャプチャを struct に詰めた値。型引数 (キャプチャ・引数・戻り値の型) をここで決める
     pub(crate) fn closure_value(&mut self, c: &Expr, expected: Option<Ty>) -> R<V> {
-        let Expr::Closure(_, inputs, _, _) = c else { return err(SP, "internal: expected a closure") };
+        let Expr::Closure(_, inputs, _, _, _) = c else { return err(SP, "internal: expected a closure") };
         let prog = self.prog;
         let hint = self.closure_hint.take();
         let Some(&k) = self.closure_ix.get(&format!("@{}", c as *const Expr as usize)).or_else(|| self.closure_ix.get(&crate::ast_closure::closure_key(c))) else {

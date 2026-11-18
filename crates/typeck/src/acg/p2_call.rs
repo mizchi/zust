@@ -564,16 +564,28 @@ impl Cx<'_> {
             _ => st,
         };
         let mut bk_late = None;
+        let mut bk_op_temp = false;
+        let t0 = self.bk.call_temps.len();
         if self.bk_on() && !via_deref {
             let flows = self.bk_ret_from(id, 0);
             let ev = self.bk_recv_ev(recv, recv_ty, flows);
             if let (true, Some(borrowck::Ev::Acc(_, borrowck::Acc::Borrow(ln), _))) = (flows, &ev) {
                 self.bk.loan_of.insert(e as *const Expr as usize, *ln);
             }
-            if matches!(recv_ty, Ty::Ref(true, _)) {
+            // (two-phase for a call written as a method call; an operator (`x += x` → `add_assign`, synthesized
+            // without a position) borrows first)
+            if matches!(recv_ty, Ty::Ref(true, _)) && msp.at.line != 0 {
                 bk_late = ev;
             } else {
-                self.bk_push(ev);
+                // (an operator's `&mut self` lasts until the call: `x += x` moves x while it is borrowed)
+                if let (true, Some(borrowck::Ev::Acc(_, borrowck::Acc::Borrow(ln), _))) = (matches!(recv_ty, Ty::Ref(true, _)), &ev) {
+                    let ln = *ln;
+                    self.bk_push(ev);
+                    self.bk_call_temp(&[borrowck::Src::Loan(ln)], true);
+                    bk_op_temp = true;
+                } else {
+                    self.bk_push(ev);
+                }
             }
         }
         // `self` を値で受ける: 受け手からムーブ
@@ -586,6 +598,9 @@ impl Cx<'_> {
         let args: Vec<&Expr> = margs.iter().collect();
         let r = self.call_fn(id, Some((recv_v, recv_ty)), &args, tf, expected, SP);
         self.bk_push(bk_late);
+        if bk_op_temp {
+            self.bk_call_temps_end(t0);
+        }
         r
     }
 
@@ -874,6 +889,13 @@ impl Cx<'_> {
     }
 
     pub(crate) fn call_fn(&mut self, id: u32, recv: Option<(Value, Ty)>, args: &[&Expr], turbofish: Option<&[GArg]>, expected: Option<Ty>, span: Sp) -> R<V> {
+        let t0 = self.bk.call_temps.len();
+        let r = self.call_fn_inner(id, recv, args, turbofish, expected, span);
+        self.bk_call_temps_end(t0);
+        r
+    }
+
+    fn call_fn_inner(&mut self, id: u32, recv: Option<(Value, Ty)>, args: &[&Expr], turbofish: Option<&[GArg]>, expected: Option<Ty>, span: Sp) -> R<V> {
         // (戻り値を書く先: 引数の中の呼び出しには渡さない)
         let hint = self.dst_hint.take();
         let id = self.pick_overload(id, recv.map(|r| r.1), args);
@@ -968,12 +990,23 @@ impl Cx<'_> {
                 let r = Some(self.prog.partial_subst(*bret, &sol));
                 self.closure_hint = Some((ps, r));
             }
+            let top_ref = self.bk_on() && matches!(strip_paren(a), Expr::Ref(..));
             // (an argument `&x` the result does not borrow from: its loan ends with the call)
-            if self.bk_on() && matches!(strip_paren(a), Expr::Ref(..)) && matches!(pt, Ty::Ref(..)) && !self.bk_ret_from(id, i + skip) {
-                self.bk.no_loan_src = true;
+            let flows = !(top_ref && matches!(pt, Ty::Ref(..)) && !self.bk_ret_from(id, i + skip));
+            if top_ref {
+                self.bk_frame();
             }
             let r = self.expr(a, exp);
-            self.bk.no_loan_src = false;
+            if top_ref {
+                // (the loan of an argument `&x` / `&mut x` lasts until the call: `f(&mut x, &x)` conflicts)
+                let srcs = self.bk_frame_end_quiet();
+                for &s in &srcs {
+                    if flows || matches!(s, borrowck::Src::Local(_)) {
+                        self.bk.src(s);
+                    }
+                }
+                self.bk_call_temp(&srcs, matches!(strip_paren(a), Expr::Ref(true, _)));
+            }
             let (v, mut t) = r?;
             self.closure_hint = None;
             // クロージャの実際の引数・戻り値の型から境界の型パラメータを解く (`map<U, F: FnOnce(T) -> U>`)

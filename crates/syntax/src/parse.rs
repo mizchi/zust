@@ -388,7 +388,8 @@ pub enum Expr {
     Break(Option<String>, Option<Box<Expr>>),
     Continue(Option<String>),
     Return(Option<Box<Expr>>),
-    Closure(bool, Vec<(Pat, Option<Ty>)>, Option<Box<Ty>>, Box<Expr>),
+    /// (the last field: where the closure starts)
+    Closure(bool, Vec<(Pat, Option<Ty>)>, Option<Box<Ty>>, Box<Expr>, Pos),
     Tuple(Vec<Expr>),
     Array(Vec<Expr>),
     Repeat(Box<Expr>, Box<Expr>),
@@ -1528,6 +1529,7 @@ impl Parser {
     }
 
     fn closure(&mut self) -> R<Expr> {
+        let start = self.pos();
         let mv = self.eat_ident("move");
         let mut ps = Vec::new();
         if self.punct_at(0, "||") {
@@ -1551,7 +1553,7 @@ impl Parser {
         } else {
             self.expr(true)?
         };
-        Ok(Expr::Closure(mv, ps, ret, Box::new(body)))
+        Ok(Expr::Closure(mv, ps, ret, Box::new(body), start))
     }
 
     fn primary_expr(&mut self, ss: bool) -> R<Expr> {
@@ -2593,7 +2595,7 @@ impl Counts {
                 }
             }
             Expr::Continue(_) => {}
-            Expr::Closure(_, _, _, b) => {
+            Expr::Closure(_, _, _, b, _) => {
                 self.closures += 1;
                 self.expr(b);
             }

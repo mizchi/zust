@@ -687,7 +687,7 @@ pub fn parse_fn(src: &str, it: &SrcItem) -> R<Option<ItemFn>> {
 
 /// クロージャ式を関数にする (`fn call(__env: (), p0: (), ..) { 本体 }`: 型はシグネチャから決まる)
 pub fn synth_closure(c: &Expr) -> ItemFn {
-    let Expr::Closure(_, ps, _, body) = c else { unreachable!() };
+    let Expr::Closure(_, ps, _, body, _) = c else { unreachable!() };
     let unit = crate::parse::Ty::Tuple(vec![]);
     let mut params = vec![(Pat::Ident(false, false, "__env".into(), None), unit.clone())];
     let mut stmts = vec![];

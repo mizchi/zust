@@ -407,6 +407,8 @@ compile-fail	block-result/unexpected-return-on-unit.rs
 compile-fail	borrowck/assign-imm-local-twice.rs
 compile-fail	borrowck/assign_mutable_fields.rs
 compile-fail	borrowck/async-trait-proposes-let-binding.rs
+compile-fail	borrowck/augmented-assignments.rs
+compile-fail	borrowck/borrow-checker-lifetime-error-46471.rs
 compile-fail	borrowck/borrow-immutable-deref-box.rs
 compile-fail	borrowck/borrowck-access-permissions.rs
 compile-fail	borrowck/borrowck-and-init.rs
@@ -419,6 +421,7 @@ run-pass	borrowck/borrowck-assignment-to-static-mut.rs
 compile-fail	borrowck/borrowck-auto-mut-ref-to-immut-var.rs
 compile-fail	borrowck/borrowck-bad-nested-calls-free.rs
 run-pass	borrowck/borrowck-binding-mutbl.rs
+compile-fail	borrowck/borrowck-block-uninit.rs
 run-pass	borrowck/borrowck-borrow-from-expr-block.rs
 compile-fail	borrowck/borrowck-borrow-from-owned-ptr.rs
 compile-fail	borrowck/borrowck-borrow-from-stack-variable.rs
@@ -459,6 +462,7 @@ compile-fail	borrowck/borrowck-loan-in-overloaded-op.rs
 compile-fail	borrowck/borrowck-loan-rcvr-overloaded-op.rs
 compile-fail	borrowck/borrowck-loan-rcvr.rs
 compile-fail	borrowck/borrowck-local-borrow-outlives-fn.rs
+compile-fail	borrowck/borrowck-local-borrow-with-panic-outlives-fn.rs
 compile-fail	borrowck/borrowck-match-already-borrowed.rs
 compile-fail	borrowck/borrowck-match-binding-is-assignment.rs
 compile-fail	borrowck/borrowck-move-error-many-places.rs
@@ -576,6 +580,7 @@ run-pass	borrowck/lazy-init.rs
 compile-fail	borrowck/mismatched-pointer-type-in-self-7061.rs
 compile-fail	borrowck/move-in-pattern-mut.rs
 compile-fail	borrowck/move-in-pattern.rs
+compile-fail	borrowck/mutability-errors.rs
 check-pass	borrowck/nested-closure-with-generic-ice.rs
 compile-fail	borrowck/non-ADT-struct-pattern-box-pattern-ice-121463.rs
 compile-fail	borrowck/or-patterns.rs
@@ -676,8 +681,12 @@ check-pass	closure-expected-type/expect-infer-var-supply-ty-with-free-region.rs
 compile-fail	closure-expected-type/expect-two-infer-vars-supply-ty-with-bound-region.rs
 check-pass	closure-expected-type/issue-24421.rs
 compile-fail	closure-expected-type/trait-bound-expects-closure-returns-itself.rs
+compile-fail	closures/2229_closure_analysis/array_subslice.rs
 compile-fail	closures/2229_closure_analysis/diagnostics/arrays.rs
+compile-fail	closures/2229_closure_analysis/diagnostics/borrowck/borrowck-1.rs
+compile-fail	closures/2229_closure_analysis/diagnostics/borrowck/borrowck-closures-mut-and-imm.rs
 compile-fail	closures/2229_closure_analysis/diagnostics/box.rs
+compile-fail	closures/2229_closure_analysis/diagnostics/cant-mutate-imm.rs
 compile-fail	closures/2229_closure_analysis/diagnostics/closure-origin-single-variant-diagnostics.rs
 check-pass	closures/2229_closure_analysis/diagnostics/liveness.rs
 check-pass	closures/2229_closure_analysis/diagnostics/liveness_unintentional_copy.rs
@@ -691,6 +700,7 @@ run-pass	closures/2229_closure_analysis/match/issue-87097.rs
 run-pass	closures/2229_closure_analysis/match/issue-87426.rs
 run-pass	closures/2229_closure_analysis/match/issue-87988.rs
 run-pass	closures/2229_closure_analysis/match/match-edge-cases_1.rs
+compile-fail	closures/2229_closure_analysis/match/pattern-matching-should-fail.rs
 compile-fail	closures/2229_closure_analysis/migrations/macro.rs
 compile-fail	closures/2229_closure_analysis/migrations/migrations_rustfix.rs
 run-pass	closures/2229_closure_analysis/migrations/nested-copy-drops-83176.rs
@@ -2547,6 +2557,7 @@ check-pass	nll/issue-21114-ebfull.rs
 compile-fail	nll/issue-21232-partial-init-and-erroneous-use.rs
 compile-fail	nll/issue-21232-partial-init-and-use.rs
 check-pass	nll/issue-22323-temp-destruction.rs
+compile-fail	nll/issue-27868.rs
 check-pass	nll/issue-30104.rs
 compile-fail	nll/issue-30438-c.rs
 check-pass	nll/issue-40510-2.rs
@@ -4091,7 +4102,9 @@ compile-fail	suggestions/suggest-remove-refs-2.rs
 compile-fail	suggestions/suggest-remove-refs-5.rs
 compile-fail	suggestions/suggest-remove-refs-6.rs
 compile-fail	suggestions/suggest-ret-on-async-w-late.rs
+compile-fail	suggestions/suggest-slice-swap.rs
 compile-fail	suggestions/suggest-split-at-mut.rs
+compile-fail	suggestions/suggest-swap.rs
 compile-fail	suggestions/suggest-tryinto-edition-change.rs
 compile-fail	suggestions/suggest-using-chars.rs
 compile-fail	suggestions/suggest-variants.rs

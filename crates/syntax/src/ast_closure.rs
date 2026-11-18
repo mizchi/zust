@@ -192,7 +192,7 @@ fn each_child(e: &Expr, f: &mut dyn FnMut(&Expr)) {
                 f(v);
             }
         }
-        Expr::Closure(_, _, _, b) => f(b),
+        Expr::Closure(_, _, _, b, _) => f(b),
         Expr::Tuple(v) | Expr::Array(v) => {
             for y in v {
                 f(y);
@@ -386,7 +386,7 @@ impl Free {
                 }
             }
             Expr::Block(_, _, b) | Expr::Const(b) | Expr::Loop(_, b) => self.block(b),
-            Expr::Closure(_, ps, _, body) => {
+            Expr::Closure(_, ps, _, body, _) => {
                 self.scopes.push(vec![]);
                 for (p, _) in ps {
                     self.bind(p);
@@ -536,7 +536,7 @@ fn each_child_stmts(e: &Expr, f: &mut dyn FnMut(&Expr)) {
 
 /// クロージャの本体がキャプチャした変数を値として使うか (関数の引数・本体の値・`let y = x;` の右辺・`return x`)
 pub fn moves_capture(c: &Expr, caps: &[String]) -> bool {
-    let Expr::Closure(_, _, _, body) = c else { return false };
+    let Expr::Closure(_, _, _, body, _) = c else { return false };
     let tail = match &**body {
         Expr::Block(_, _, b) => b.stmts.last().and_then(|s| match s {
             Stmt::Expr(e, false) => Some(e),
@@ -580,7 +580,7 @@ fn assigns_in(e: &Expr, caps: &[String]) -> bool {
 
 /// クロージャの本体がキャプチャした変数に代入するか (`r = ..` / `n += 1` / `v.x = ..`)
 pub fn assigns_capture(c: &Expr, caps: &[String]) -> bool {
-    let Expr::Closure(_, _, _, body) = c else { return false };
+    let Expr::Closure(_, _, _, body, _) = c else { return false };
     assigns_in(body, caps)
 }
 
@@ -859,7 +859,7 @@ impl EHash {
                 self.n(25);
                 self.opt_e(x, memo);
             }
-            Expr::Closure(mv, ps, rt, body) => {
+            Expr::Closure(mv, ps, rt, body, _) => {
                 self.n(26 + ((*mv as u64) << 8));
                 self.n(ps.len() as u64);
                 for (p, t) in ps {

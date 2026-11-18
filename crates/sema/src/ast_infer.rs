@@ -625,7 +625,7 @@ impl Inf<'_> {
     }
 
     fn closure_body(&mut self, c: &Expr, vs: &[u32], rv: u32) {
-        let Expr::Closure(_, ps, _, body) = c else { return };
+        let Expr::Closure(_, ps, _, body, _) = c else { return };
         self.scopes.push(vec![]);
         for ((p, _), &v) in ps.iter().zip(vs) {
             self.pat(p, v, None);
@@ -1613,7 +1613,7 @@ impl Inf<'_> {
     }
 
     fn closure(&mut self, c: &Expr) -> u32 {
-        let Expr::Closure(_, ps, ret, _) = c else { return self.var() };
+        let Expr::Closure(_, ps, ret, _, _) = c else { return self.var() };
         let st = self.adt_args.len() as u32;
         let n = ps.len() as u32;
         let mut vs = vec![];

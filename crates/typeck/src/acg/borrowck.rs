@@ -76,6 +76,10 @@ pub enum Ev {
     Flow(u32, Vec<Src>),
     /// The function returns a value holding these loans
     Ret(Vec<Src>, Sp),
+    /// These loans are stored behind a reference the function was given
+    Escape(Vec<Src>),
+    /// The local keeps these loans (what its initializer borrows directly): they must not be of a dead local
+    Keep(u32, Vec<Src>),
 }
 
 #[derive(Clone, Debug)]
@@ -94,6 +98,8 @@ pub struct Loan {
     pub place: BPlace,
     pub mutable: bool,
     pub sp: Sp,
+    /// Where a mutability error is reported (a closure's loan: the use in its body)
+    pub at: Sp,
 }
 
 /// What the checker found (the first error by source position is reported)
@@ -142,9 +148,13 @@ pub struct Bk {
     pub loan_of: HashMap<usize, u32>,
     /// The next `&e` is an argument the call's result does not borrow from (its loan does not flow on)
     pub no_loan_src: bool,
+    /// Hidden locals holding the loans of the arguments of the calls being lowered (live until the call)
+    pub call_temps: Vec<u32>,
     pub zst: u32,
     /// Line of the item (positions in messages are absolute)
     pub line_base: u32,
+    /// The locals that are parameters
+    pub params: Vec<u32>,
     /// Type → (Copy, may hold references)
     pub ty_info: HashMap<Ty, (bool, bool)>,
 }
@@ -270,6 +280,20 @@ struct State {
     inited: Vec<u32>,
     /// local → loans it may hold (sorted)
     holds: Vec<(u32, Vec<u32>)>,
+    /// Loans of locals that went out of scope (a value made in a block may still carry one out)
+    dead: Vec<u32>,
+    /// Loans stored behind a reference the function was given (`*x = &local`): they outlive the function
+    escaped: Vec<u32>,
+}
+
+fn add_sorted(v: &mut Vec<u32>, x: u32) -> bool {
+    match v.binary_search(&x) {
+        Ok(_) => false,
+        Err(i) => {
+            v.insert(i, x);
+            true
+        }
+    }
 }
 
 impl State {
@@ -280,6 +304,12 @@ impl State {
                 self.inited.insert(i, *x);
                 ch = true;
             }
+        }
+        for &x in &o.dead {
+            ch |= add_sorted(&mut self.dead, x);
+        }
+        for &x in &o.escaped {
+            ch |= add_sorted(&mut self.escaped, x);
         }
         for m in &o.moved {
             if !self.moved.iter().any(|x| x.place == m.place && x.uninit == m.uninit) {
@@ -406,7 +436,7 @@ impl Bk {
                         need_loans = true;
                     }
                 }
-                Ev::Ret(..) => need_loans |= self.level >= 2,
+                Ev::Ret(..) | Ev::Escape(..) => need_loans |= self.level >= 2,
                 _ => {}
             }
         }
@@ -506,6 +536,16 @@ impl Bk {
             let Some(st) = &st_in[b] else { continue };
             let mut st = st.clone();
             self.run_block(&evs[b], &mut st, Some(&mut errs), &live_out[b], loans_on, &mut vec![]);
+            // (the function ends here (return / panic): a loan stored behind a parameter must not be of a local)
+            if succ[b].is_empty() {
+                for &ln in &st.escaped {
+                    let lo = &self.loans[ln as usize];
+                    if lo.place.owned_len() == lo.place.proj.len() && !self.params.contains(&lo.place.local) {
+                        let name = path_str(&self.locals, &lo.place);
+                        errs.push(BkError { sp: lo.sp, msg: format!("`{name}` does not live long enough (stored where it outlives the function)") });
+                    }
+                }
+            }
         }
         errs.sort_by_key(|e| (e.sp.line, e.sp.col));
         errs.into_iter().next()
@@ -566,6 +606,15 @@ impl Bk {
                     st.kill_loans_of(*l, &self.loans);
                 }
                 Ev::Dead(l, sp) => {
+                    for (ln, lo) in self.loans.iter().enumerate() {
+                        if lo.place.local == *l && lo.place.owned_len() == lo.place.proj.len() {
+                            add_sorted(&mut st.dead, ln as u32);
+                            if let (true, Some(errs)) = (st.escaped.binary_search(&(ln as u32)).is_ok(), errs.as_deref_mut()) {
+                                let name = path_str(&self.locals, &lo.place);
+                                errs.push(BkError { sp: lo.sp, msg: format!("`{name}` does not live long enough (stored where it outlives the function)") });
+                            }
+                        }
+                    }
                     if loans_on {
                         if let Some(errs) = errs.as_deref_mut() {
                             // (a loan of the local, or of what it owns, still live when it goes away)
@@ -599,6 +648,12 @@ impl Bk {
                         }
                     }
                     match a {
+                        // (a new instance of the loan: the one of the previous iteration of a loop is gone)
+                        Acc::Borrow(ln) => {
+                            if let Ok(i) = st.dead.binary_search(ln) {
+                                st.dead.remove(i);
+                            }
+                        }
                         Acc::Move => {
                             let own = p.owned_len();
                             if own == p.proj.len() && !p.proj.contains(&Proj::Index) {
@@ -623,14 +678,30 @@ impl Bk {
                         _ => {}
                     }
                 }
-                Ev::Def(l, srcs) => {
-                    let ls = self.resolve(srcs, st);
+                Ev::Keep(l, srcs) => {
+                    // (a loan of a local already gone, kept by a local still used: `let y = { let z = 0; &z };`)
+                    if let Some(errs) = errs.as_deref_mut() {
+                        if loans_on && is_live(&live_at[i], *l) {
+                            let ls = self.resolve(srcs, st);
+                            if let Some(&ln) = ls.iter().find(|ln| st.dead.binary_search(ln).is_ok()) {
+                                let lo = &self.loans[ln as usize];
+                                let name = path_str(&self.locals, &BPlace { local: lo.place.local, proj: vec![] });
+                                errs.push(BkError { sp: lo.sp, msg: format!("`{name}` does not live long enough (dropped while still borrowed)") });
+                            }
+                        }
+                    }
+                }
+                Ev::Def(l, srcs) | Ev::Flow(l, srcs) => {
+                    let mut ls = self.resolve(srcs, st);
+                    if let Ev::Flow(..) = e {
+                        ls.extend_from_slice(st.held(*l));
+                    }
                     st.set_holds(*l, ls);
                 }
-                Ev::Flow(l, srcs) => {
-                    let mut ls = self.resolve(srcs, st);
-                    ls.extend_from_slice(st.held(*l));
-                    st.set_holds(*l, ls);
+                Ev::Escape(srcs) => {
+                    for ln in self.resolve(srcs, st) {
+                        add_sorted(&mut st.escaped, ln);
+                    }
                 }
                 Ev::Ret(srcs, sp) => {
                     if loans_on {
@@ -660,7 +731,9 @@ impl Bk {
         let name = &lo.name;
         let msg = match a {
             Acc::Borrow(l) if self.loans[l as usize].mutable => {
-                format!("cannot borrow `{}` as mutable, as `{name}` is not declared as mutable", path_str(&self.locals, p))
+                let msg = format!("cannot borrow `{}` as mutable, as `{name}` is not declared as mutable", path_str(&self.locals, p));
+                errs.push(BkError { sp: self.loans[l as usize].at, msg });
+                return;
             }
             Acc::Write | Acc::Modify if !p.proj.is_empty() => {
                 format!("cannot assign to `{}`, as `{name}` is not declared as mutable", path_str(&self.locals, p))
@@ -881,7 +954,7 @@ impl Cx<'_> {
         let Some(p) = self.bk.pat_path.clone() else { return saved };
         let sp = self.bk.scrut_place.as_ref().map(|x| x.1).unwrap_or(super::SP);
         let ln = self.bk.loans.len() as u32;
-        self.bk.loans.push(Loan { place: p.clone(), mutable: m, sp });
+        self.bk.loans.push(Loan { place: p.clone(), mutable: m, sp, at: sp });
         self.bk_ev(Ev::Acc(p, Acc::Borrow(ln), sp));
         let mut s = saved.clone().unwrap_or_default();
         s.push(Src::Loan(ln));
@@ -1049,7 +1122,7 @@ impl Cx<'_> {
         let Some((p, _)) = self.bk_place(e) else { return };
         let ln = self.bk.loans.len() as u32;
         self.bk.loan_of.insert(e as *const Expr as usize, ln);
-        self.bk.loans.push(Loan { place: p.clone(), mutable: m, sp });
+        self.bk.loans.push(Loan { place: p.clone(), mutable: m, sp, at: sp });
         let l = p.local;
         self.bk_ev(Ev::Acc(p, Acc::Borrow(ln), sp));
         if !quiet {
@@ -1082,7 +1155,7 @@ impl Cx<'_> {
                     }
                 }
                 let ln = self.bk.loans.len() as u32;
-                self.bk.loans.push(Loan { place: p.clone(), mutable: m, sp });
+                self.bk.loans.push(Loan { place: p.clone(), mutable: m, sp, at: sp });
                 let l = p.local;
                 if flows {
                     self.bk.src(Src::Loan(ln));
@@ -1121,17 +1194,17 @@ impl Cx<'_> {
             return;
         }
         let Some(&l) = self.bk.by_loc.get(&loc) else { return };
-        let Expr::Closure(_, _, _, body) = c else { return };
-        let sp = super::expr_start(body);
+        let Expr::Closure(_, _, _, body, sp) = c else { return };
+        let sp = *sp;
         // (edition 2021 closures capture the places they use (`x.a`), not whole variables (RFC 2229))
-        let mut paths: Vec<(BPlace, Option<Ty>, CapMode)> = vec![];
+        let mut paths: Vec<(BPlace, Option<Ty>, CapMode, Sp)> = vec![];
         self.bk_cap_paths(body, n, &mut paths);
         if paths.is_empty() {
-            paths.push((BPlace { local: l, proj: vec![] }, Some(t), CapMode::Use));
+            paths.push((BPlace { local: l, proj: vec![] }, Some(t), CapMode::Use, super::SP));
         }
         let move_kw = matches!(c, Expr::Closure(true, ..));
         let m = crate::ast_closure::assigns_capture(c, &[n.to_string()]);
-        for (p, pt, mode) in &mut paths {
+        for (p, pt, mode, _) in &mut paths {
             // (stop at an index, and a move closure at a deref: it captures the reference)
             let cut = p.proj.iter().position(|x| *x == Proj::Index || move_kw && matches!(x, Proj::Deref(_)));
             if let Some(i) = cut {
@@ -1146,17 +1219,24 @@ impl Cx<'_> {
             }
         }
         paths.sort_by_key(|p| p.0.proj.len());
-        let mut keep: Vec<(BPlace, Option<Ty>, CapMode)> = vec![];
-        for (p, pt, mode) in paths {
+        let mut keep: Vec<(BPlace, Option<Ty>, CapMode, Sp)> = vec![];
+        for (p, pt, mode, at) in paths {
             if p.local != l {
                 continue;
             }
             match keep.iter_mut().find(|k| prefix(&k.0.proj, &p.proj)) {
-                Some(k) => k.2 = k.2.max(mode),
-                None => keep.push((p, pt, mode)),
+                Some(k) => {
+                    if mode > k.2 {
+                        k.2 = mode;
+                        k.3 = at;
+                    }
+                }
+                None => keep.push((p, pt, mode, at)),
             }
         }
-        for (p, pt, mode) in keep {
+        for (p, pt, mode, at) in keep {
+            // (the use in the body, for a mutability error; the closure itself otherwise)
+            let at = if at.line == 0 { sp } else { at };
             let pt = if p.proj.is_empty() { Some(t) } else { pt };
             if mode == CapMode::Val {
                 let copy = pt.is_none_or(|t| self.bk_ty(t).0);
@@ -1164,7 +1244,7 @@ impl Cx<'_> {
                 continue;
             }
             let ln = self.bk.loans.len() as u32;
-            self.bk.loans.push(Loan { place: p.clone(), mutable: mode == CapMode::RefMut, sp });
+            self.bk.loans.push(Loan { place: p.clone(), mutable: mode == CapMode::RefMut, sp, at });
             self.bk_ev(Ev::Acc(p, Acc::Borrow(ln), sp));
             self.bk.src(Src::Loan(ln));
         }
@@ -1190,7 +1270,7 @@ impl Cx<'_> {
     }
 
     /// The parts of the place (base, of type t) that the pattern binds or looks at, and how
-    fn bk_pat_cap(&self, pat: &Pat, base: &BPlace, t: Option<Ty>, out: &mut Vec<(BPlace, Option<Ty>, CapMode)>) {
+    fn bk_pat_cap(&self, pat: &Pat, base: &BPlace, t: Option<Ty>, sp: Sp, out: &mut Vec<(BPlace, Option<Ty>, CapMode, Sp)>) {
         let field = |b: &BPlace, name: String| {
             let mut b = b.clone();
             b.proj.push(Proj::Field(name));
@@ -1207,7 +1287,7 @@ impl Cx<'_> {
                     _ if t.is_some() => CapMode::Val,
                     _ => CapMode::Use,
                 };
-                out.push((base.clone(), t, mode));
+                out.push((base.clone(), t, mode, sp));
             }
             Pat::Tuple(ps) if !ps.iter().any(|p| matches!(p, Pat::Rest)) || matches!(ps.last(), Some(Pat::Rest)) => {
                 let fields = match t {
@@ -1220,12 +1300,12 @@ impl Cx<'_> {
                     }
                     let ft = fields.as_ref().and_then(|f| f.get(i)).map(|f| f.1);
                     let name = fields.as_ref().and_then(|f| f.get(i)).map(|f| f.0.clone()).unwrap_or_else(|| i.to_string());
-                    self.bk_pat_cap(p, &field(base, name), ft, out);
+                    self.bk_pat_cap(p, &field(base, name), ft, sp, out);
                 }
             }
             Pat::TupleStruct(path, ps) if !ps.iter().any(|p| matches!(p, Pat::Rest)) => {
                 let Some(Ty::Struct(sid)) = t else {
-                    out.push((base.clone(), t, CapMode::Use));
+                    out.push((base.clone(), t, CapMode::Use, sp));
                     return;
                 };
                 let sd = &self.prog.structs[sid as usize];
@@ -1237,7 +1317,7 @@ impl Cx<'_> {
                     match sd.variants.iter().find(|v| v.name == vname) {
                         Some(v) => (v.fields.clone(), Some(v.name.clone())),
                         None => {
-                            out.push((base.clone(), t, CapMode::Use));
+                            out.push((base.clone(), t, CapMode::Use, sp));
                             return;
                         }
                     }
@@ -1248,12 +1328,12 @@ impl Cx<'_> {
                         Some(v) => format!("{v}::{}", f.0),
                         None => f.0.clone(),
                     };
-                    self.bk_pat_cap(p, &field(base, name), Some(f.1), &mut sub);
+                    self.bk_pat_cap(p, &field(base, name), Some(f.1), sp, &mut sub);
                 }
                 if sd.is_enum && sd.variants.len() > 1 {
                     // (the discriminant is read: the whole place, as strongly as its parts are used)
                     let mode = sub.iter().map(|x| x.2).max().unwrap_or(CapMode::Ref).max(CapMode::Ref);
-                    out.push((base.clone(), t, mode));
+                    out.push((base.clone(), t, mode, sp));
                 } else {
                     out.extend(sub);
                 }
@@ -1267,28 +1347,28 @@ impl Cx<'_> {
                 };
                 let mut sub = vec![];
                 for p in ps {
-                    self.bk_pat_cap(p, base, et, &mut sub);
+                    self.bk_pat_cap(p, base, et, sp, &mut sub);
                 }
                 let mode = sub.iter().map(|x| x.2).max().unwrap_or(CapMode::Ref).max(CapMode::Ref);
-                out.push((base.clone(), t, mode));
+                out.push((base.clone(), t, mode, sp));
             }
-            Pat::Ident(true, m, _, Some(_)) => out.push((base.clone(), t, if *m { CapMode::RefMut } else { CapMode::Ref })),
-            Pat::Lit(_) | Pat::Range(..) | Pat::Path(_) => out.push((base.clone(), t, CapMode::Ref)),
-            _ => out.push((base.clone(), t, CapMode::Use)),
+            Pat::Ident(true, m, _, Some(_)) => out.push((base.clone(), t, if *m { CapMode::RefMut } else { CapMode::Ref }, sp)),
+            Pat::Lit(_) | Pat::Range(..) | Pat::Path(_) => out.push((base.clone(), t, CapMode::Ref, sp)),
+            _ => out.push((base.clone(), t, CapMode::Use, sp)),
         }
     }
 
     /// The places rooted at the variable n that the closure body uses
-    fn bk_cap_paths(&self, e: &Expr, n: &str, out: &mut Vec<(BPlace, Option<Ty>, CapMode)>) {
+    fn bk_cap_paths(&self, e: &Expr, n: &str, out: &mut Vec<(BPlace, Option<Ty>, CapMode, Sp)>) {
         // (destructuring a captured place captures the parts the patterns use: `let (ref mut x, _) = a;`)
         // (a use that captures nothing (`match a { [_, ..] => .. }`) is marked by a place of no local)
         let seen = BPlace { local: u32::MAX, proj: vec![] };
         match e {
             Expr::Match(x, arms) => {
                 if let Some((p, t)) = self.bk_rooted_at(x, n) {
-                    out.push((seen, None, CapMode::Use));
+                    out.push((seen, None, CapMode::Use, super::SP));
                     for a in arms {
-                        self.bk_pat_cap(&a.pat, &p, t, out);
+                        self.bk_pat_cap(&a.pat, &p, t, err_pos(x), out);
                         if let Some(g) = &a.guard {
                             self.bk_cap_paths(g, n, out);
                         }
@@ -1299,8 +1379,8 @@ impl Cx<'_> {
             }
             Expr::Let(pat, x) => {
                 if let Some((p, t)) = self.bk_rooted_at(x, n) {
-                    out.push((seen, None, CapMode::Use));
-                    self.bk_pat_cap(pat, &p, t, out);
+                    out.push((seen, None, CapMode::Use, super::SP));
+                    self.bk_pat_cap(pat, &p, t, err_pos(x), out);
                     return;
                 }
             }
@@ -1310,8 +1390,8 @@ impl Cx<'_> {
                         crate::parse::Stmt::Let(pat, _, Some(init), els) => {
                             match self.bk_rooted_at(init, n) {
                                 Some((p, t)) if !matches!(pat, Pat::Ident(..)) => {
-                                    out.push((seen.clone(), None, CapMode::Use));
-                                    self.bk_pat_cap(pat, &p, t, out)
+                                    out.push((seen.clone(), None, CapMode::Use, super::SP));
+                                    self.bk_pat_cap(pat, &p, t, err_pos(init), out)
                                 }
                                 _ => self.bk_cap_paths(init, n, out),
                             }
@@ -1338,9 +1418,9 @@ impl Cx<'_> {
         if let Expr::Path(_, p) = root {
             if ident_of(p) == Some(n) {
                 if let Some(x) = self.bk_place(e) {
-                    out.push((x.0, x.1, CapMode::Use));
+                    out.push((x.0, x.1, CapMode::Use, err_pos(e)));
                 } else if let Some(x) = self.bk_place(root) {
-                    out.push((x.0, x.1, CapMode::Use));
+                    out.push((x.0, x.1, CapMode::Use, err_pos(e)));
                 }
                 // (the index expressions are uses of their own)
                 let mut x = e;
@@ -1366,7 +1446,7 @@ impl Cx<'_> {
                         if let Expr::Lit(t, _) = a {
                             if crate::ast_closure::fmt_inline_names(t).iter().any(|x| x == n) {
                                 if let Some(x) = self.bk_local_of(n) {
-                                    out.push((BPlace { local: x, proj: vec![] }, None, CapMode::Use));
+                                    out.push((BPlace { local: x, proj: vec![] }, None, CapMode::Use, super::SP));
                                 }
                             }
                         }
@@ -1377,7 +1457,7 @@ impl Cx<'_> {
                 None => {
                     if g.contains(n) {
                         if let Some(x) = self.bk_local_of(n) {
-                            out.push((BPlace { local: x, proj: vec![] }, None, CapMode::Use));
+                            out.push((BPlace { local: x, proj: vec![] }, None, CapMode::Use, super::SP));
                         }
                     }
                 }
@@ -1387,11 +1467,48 @@ impl Cx<'_> {
         crate::ast_closure::each_child_pub(e, &mut |c| self.bk_cap_paths(c, n, out));
     }
 
+    /// A hidden local holds the loans of an argument until the call is made (only mutable ones matter: a shared
+    /// argument loan conflicts only with a write, and arguments do not write)
+    pub(crate) fn bk_call_temp(&mut self, srcs: &[Src], m: bool) {
+        if !self.bk_on() || !m {
+            return;
+        }
+        let loans: Vec<Src> = srcs.iter().filter(|s| matches!(s, Src::Loan(_))).copied().collect();
+        if loans.is_empty() {
+            return;
+        }
+        let id = self.bk.locals.len() as u32;
+        self.bk.locals.push(Local { name: "<argument>".into(), ty: Ty::Unit, copy: true, refs: true, mutable: None });
+        self.bk_ev(Ev::Bind(id, true));
+        self.bk_ev(Ev::Def(id, loans));
+        self.bk.call_temps.push(id);
+    }
+
+    /// The call is made: the argument loans end
+    pub(crate) fn bk_call_temps_end(&mut self, t0: usize) {
+        while self.bk.call_temps.len() > t0 {
+            let id = self.bk.call_temps.pop().unwrap();
+            if id == u32::MAX || !self.bk_on() {
+                continue;
+            }
+            self.bk_ev(Ev::Acc(BPlace { local: id, proj: vec![] }, Acc::Read, super::SP));
+            self.bk_ev(Ev::Dead(id, super::SP));
+        }
+    }
+
     /// Start collecting what flows into a value
     pub(crate) fn bk_frame(&mut self) {
         if self.bk_on() {
             self.bk.frames.push(vec![]);
         }
+    }
+
+    /// Stop collecting, without passing the sources on
+    pub(crate) fn bk_frame_end_quiet(&mut self) -> Vec<Src> {
+        if !self.bk_on() {
+            return vec![];
+        }
+        self.bk.frames.pop().unwrap_or_default()
     }
 
     /// Stop collecting (the sources also flow into the enclosing frame: `let a = { let b = &x; b };`)
@@ -1420,14 +1537,19 @@ impl Cx<'_> {
         }
     }
 
-    /// The local named n (just bound) holds what the frame collected
-    pub(crate) fn bk_def_named(&mut self, n: &str, srcs: &[Src]) {
+    /// The local named n (just bound from init) holds what the frame collected
+    pub(crate) fn bk_def_named(&mut self, n: &str, srcs: &[Src], init: &Expr) {
         if !self.bk_on() || srcs.is_empty() {
             return;
         }
         if let Some(l) = self.bk_local_of(n) {
             if self.bk.locals[l as usize].refs {
                 self.bk_ev(Ev::Def(l, srcs.to_vec()));
+                let mut direct = vec![];
+                self.bk_direct(init, &mut direct);
+                if !direct.is_empty() {
+                    self.bk_ev(Ev::Keep(l, direct));
+                }
             }
         }
     }
@@ -1440,7 +1562,12 @@ impl Cx<'_> {
         let Some((p, _)) = self.bk_place(strip_paren(left)) else { return };
         let l = p.local;
         let whole = p.proj.is_empty();
+        // (`*x = ..` / `x.f = ..` through a reference parameter: what is stored outlives the function)
+        let through = p.owned_len() < p.proj.len() && self.bk.params.contains(&l);
         self.bk_ev(Ev::Acc(p, Acc::Write, err_pos(left)));
+        if through && !srcs.is_empty() {
+            self.bk_ev(Ev::Escape(srcs.to_vec()));
+        }
         if self.bk.locals[l as usize].refs {
             if whole {
                 self.bk_ev(Ev::Def(l, srcs.to_vec()));

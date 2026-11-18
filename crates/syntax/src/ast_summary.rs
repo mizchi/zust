@@ -419,7 +419,7 @@ fn pats_in_expr(e: &Expr, out: &mut Vec<String>) {
             pats_in_expr(x, out);
             pats_in_block(b, out);
         }
-        Expr::Closure(_, ps, _, body) => {
+        Expr::Closure(_, ps, _, body, _) => {
             for (p, _) in ps {
                 ast_closure::pat_idents(p, out);
             }
@@ -536,7 +536,7 @@ fn lift_closures(sig_ast: &PSig, body: &Block, fname: &str, sig: &mut SigSyn, se
     let bound = bound_in_fn(sig_ast, body);
     let mut out: Vec<ClosureSyn> = Vec::new();
     for (k, c) in cs.iter().enumerate() {
-        let Expr::Closure(mv, cps, cret, _) = c else { continue };
+        let Expr::Closure(mv, cps, cret, _, _) = c else { continue };
         let name = format!("{fname}::{{closure#{k}}}");
         let mut generics: Vec<String> = sig.generics.iter().map(|g| g.0.clone()).collect();
         let n_parent = generics.len() as u64;
@@ -605,7 +605,7 @@ fn lift_closures(sig_ast: &PSig, body: &Block, fname: &str, sig: &mut SigSyn, se
         while let Some(Expr::Paren(p)) = tail {
             tail = Some(&**p);
         }
-        let Some(tc @ Expr::Closure(_, tps, _, _)) = tail else {
+        let Some(tc @ Expr::Closure(_, tps, _, _, _)) = tail else {
             sig.ret = TySyn::Named(OPAQUE_RET.into());
             sm.closures = out;
             return Ok(());
