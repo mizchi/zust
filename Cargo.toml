@@ -2,6 +2,7 @@
 name = "zustc"
 version = "0.1.0"
 edition = "2024"
+license = "MIT OR Apache-2.0"
 # examples/ は zustc でコンパイルする入力 (Cargo の example ではない。no_std のものもある)
 autoexamples = false
 

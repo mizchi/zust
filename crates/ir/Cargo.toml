@@ -2,6 +2,7 @@
 name = "zust-ir"
 version = "0.1.0"
 edition = "2024"
+license = "MIT OR Apache-2.0"
 description = "zustc の命令の列 (IR) の型と、命令を記録するだけの Recorder (バックエンドに依存しない)"
 
 [dependencies]

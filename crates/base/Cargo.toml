@@ -2,6 +2,7 @@
 name = "zust-base"
 version = "0.1.0"
 edition = "2024"
+license = "MIT OR Apache-2.0"
 description = "zustc の全体で使う小さな部品: FxHash の表、キャッシュのキーのハッシュ(外部クレートに依存しない)"
 
 [dependencies]

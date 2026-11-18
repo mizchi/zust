@@ -2,6 +2,7 @@
 name = "zust-clif"
 version = "0.1.0"
 edition = "2024"
+license = "MIT OR Apache-2.0"
 description = "driver2 の Cranelift バックエンド: minclif が記録した命令の列を Cranelift でコンパイルする"
 
 [dependencies]

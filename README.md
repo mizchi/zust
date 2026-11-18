@@ -200,3 +200,15 @@ mizchi/playground の `2026-11-14-crustc/` (名前は crustc、LSP サーバは 
 | 環境変数 `CRUSTC_LSP_*` | `ZUST_ANALYZER_*` |
 
 docs/reports/ の記録の中の数字や日付は、移す前のもの。
+
+## ライセンス
+
+Rust 本体と同じく、次のどちらかを選んで使える (デュアルライセンス)。
+
+- Apache License, Version 2.0 ([LICENSE-APACHE](LICENSE-APACHE))
+- MIT license ([LICENSE-MIT](LICENSE-MIT))
+
+明示しない限り、このリポジトリに送られた貢献は、Apache-2.0 の定義に従い、追加の条件なしに上の 2 つのデュアルライセンスで
+提供されたものとする。
+
+`cratebench/vendor/` の中のクレートは、それぞれのライセンス (各ディレクトリの LICENSE-*) に従う。

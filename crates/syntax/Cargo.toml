@@ -2,6 +2,7 @@
 name = "zust-syntax"
 version = "0.1.0"
 edition = "2024"
+license = "MIT OR Apache-2.0"
 description = "zustc の構文の層: 字句解析・構文木・cfg・マクロの展開などの前処理・アイテムの要約・prelude の選択"
 build = "build.rs"
 

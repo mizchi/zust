@@ -2,6 +2,7 @@
 name = "zust-sema"
 version = "0.1.0"
 edition = "2024"
+license = "MIT OR Apache-2.0"
 description = "zustc の意味の層: Program (名前・型・トレイトの表)、型推論、const の評価"
 
 [dependencies]

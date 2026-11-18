@@ -2,6 +2,7 @@
 name = "zust-codegen"
 version = "0.1.0"
 edition = "2024"
+license = "MIT OR Apache-2.0"
 description = "zustc のバックエンド側: 記録した命令の列を minclif / Cranelift で機械語にする (lower)、リンク"
 
 [dependencies]
