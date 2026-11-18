@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795046070182,
+  "lastUpdate": 1795046072053,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -16348,6 +16348,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "lsp peak RSS",
             "value": 68.156,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "committer": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "distinct": true,
+          "id": "d01898bb08569c261f1707f742734efc3c94cdde",
+          "message": "Let chains and `&raw const` / `&raw mut`\n\n`if let P = x && cond && let Q = y { A } else { B }` is nested ifs with B in each\nfailing branch (errors point at the chain's first condition). `&raw const p` /\n`&raw mut p` take the place's address as a raw pointer (the local is kept in\nmemory; a `static mut` needs no `unsafe`). tests/ui: run-pass +2, check-pass +10,\ncompile-fail +2. One compile-fail test leaves the baseline\n(consts/const_in_pattern/suggest_equality_comparison_instead_of_pattern_matching.rs:\nit passed only because let chains were unsupported on the annotated line; its\nerror, a constant of a non-structural type in a pattern, is not checked yet).\nKPIs unchanged.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-18T23:45:13Z",
+          "tree_id": "5d618a088ada7e827dbcf09f758bb51777fd858f",
+          "url": "https://github.com/mizchi/zust/commit/d01898bb08569c261f1707f742734efc3c94cdde"
+        },
+        "date": 1795046071702,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "lsp definition p50",
+            "value": 0.727,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp hover p50",
+            "value": 0.484,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp completion p50",
+            "value": 1.014,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp references p50",
+            "value": 11.667,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp rename p50",
+            "value": 0.569,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp signatureHelp p50",
+            "value": 0.84,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp documentHighlight p50",
+            "value": 1.121,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp ready (startup to indexed)",
+            "value": 130.658,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp peak RSS",
+            "value": 68.383,
             "unit": "MiB"
           }
         ]
