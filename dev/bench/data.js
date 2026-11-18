@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795020571079,
+  "lastUpdate": 1795022397155,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -6677,6 +6677,165 @@ window.BENCHMARK_DATA = {
           {
             "name": "rt/strings run (-O)",
             "value": 35.567,
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "committer": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "distinct": true,
+          "id": "3b5fd541720c03952702700d9ff79857402bc167",
+          "message": "`impl .. for dyn Trait`, formatting through `dyn Display` / `dyn Debug`\n\n- the parser takes bounds on a `dyn` self type (`impl dyn Tr + 'a`,\n  `impl X for dyn Tr + Send`); the methods belong to `__dyn_Tr` and are found\n  for receivers of that trait object type\n- checks on such impls: E0371 (the object type implements its own trait),\n  E0120 (Drop), E0321 (auto traits), `Self` in the self type\n- `{}` / `{:?}` of `&dyn Display`, `Box<dyn Debug>` and the like call the trait\n  object's `fmt`; the vtable entry for these two traits formats the value with\n  `{}` / `{:?}` (so `&0 as &dyn Display` works too)\n- E0592 across two impl blocks is reported at the first definition\n- tests/ui: run-pass 1336, check-pass 1073 (59.38%), compile-fail 2806\n\nAccepted compile-fail removals (passed only because `impl .. for dyn` was not\nparsed; they need dyn compatibility (E0038) or generic argument counts):\ndyn-compatibility/almost-supertrait-associated-type.rs,\ndyn-compatibility/ice-generics-of-crate-root-152335.rs,\nimpl-trait/in-trait/cycle-effective-visibilities-during-dyn-compatibility-check.rs,\ntraits/associated_type_bound/assoc-type-bounds-with-the-same-name-with-lacking-generic-arg-148121.rs\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-18T17:05:24Z",
+          "tree_id": "8067493bdd33253d0accc99b5c508e044ca303bb",
+          "url": "https://github.com/mizchi/zust/commit/3b5fd541720c03952702700d9ff79857402bc167"
+        },
+        "date": 1795022396397,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "gen1000 build cold",
+            "value": 114.425,
+            "unit": "ms"
+          },
+          {
+            "name": "gen1000 build noop",
+            "value": 12.559,
+            "unit": "ms"
+          },
+          {
+            "name": "gen1000 build edit 1 fn",
+            "value": 16.919,
+            "unit": "ms"
+          },
+          {
+            "name": "gen1000 check",
+            "value": 73.418,
+            "unit": "ms"
+          },
+          {
+            "name": "gen1000 build cold peak RSS",
+            "value": 18.109,
+            "unit": "MiB"
+          },
+          {
+            "name": "gen1000 binary",
+            "value": 323.977,
+            "unit": "KiB"
+          },
+          {
+            "name": "gen1000 cache",
+            "value": 387.205,
+            "unit": "KiB"
+          },
+          {
+            "name": "gen1000 build noop instructions",
+            "value": 145.914,
+            "unit": "M instr"
+          },
+          {
+            "name": "gen1000 build edit 1 fn instructions",
+            "value": 139.043,
+            "unit": "M instr"
+          },
+          {
+            "name": "gen1000 check instructions",
+            "value": 794.31,
+            "unit": "M instr"
+          },
+          {
+            "name": "gen5000 build cold",
+            "value": 528.506,
+            "unit": "ms"
+          },
+          {
+            "name": "gen5000 build noop",
+            "value": 56.589,
+            "unit": "ms"
+          },
+          {
+            "name": "gen5000 build edit 1 fn",
+            "value": 66.904,
+            "unit": "ms"
+          },
+          {
+            "name": "gen5000 check",
+            "value": 367.244,
+            "unit": "ms"
+          },
+          {
+            "name": "gen5000 build cold peak RSS",
+            "value": 54.805,
+            "unit": "MiB"
+          },
+          {
+            "name": "gen5000 binary",
+            "value": 1558.336,
+            "unit": "KiB"
+          },
+          {
+            "name": "gen5000 cache",
+            "value": 1902.83,
+            "unit": "KiB"
+          },
+          {
+            "name": "gen5000 build noop instructions",
+            "value": 689.769,
+            "unit": "M instr"
+          },
+          {
+            "name": "gen5000 build edit 1 fn instructions",
+            "value": 648.806,
+            "unit": "M instr"
+          },
+          {
+            "name": "gen5000 check instructions",
+            "value": 3914.529,
+            "unit": "M instr"
+          },
+          {
+            "name": "rt/fib run (-O)",
+            "value": 54.217,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/hashmap run (-O)",
+            "value": 83.615,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/matmul run (-O)",
+            "value": 37.881,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/nbody run (-O)",
+            "value": 53.657,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/sieve run (-O)",
+            "value": 90.594,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/sort run (-O)",
+            "value": 138.3,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/strings run (-O)",
+            "value": 35.595,
             "unit": "ms"
           }
         ]
