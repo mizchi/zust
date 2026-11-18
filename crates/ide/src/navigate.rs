@@ -2683,25 +2683,27 @@ fn references_in(ws: &[&FileIndex], file: usize, off: usize, include_decl: bool,
     if owner.is_none() {
         concrete.clear();
     }
-    for (i, &w0) in ws.iter().enumerate() {
-        if (is_local && i != target.file) || only.is_some_and(|o| o != i) {
-            continue;
-        }
-        if w0.lib || !(w0.may_have(name) || (is_type && w0.may_have("Self")) || (is_mod && (w0.may_have("self") || w0.may_have("super"))) || (crate_ref && w0.krate == tf.krate && (w0.may_have("crate") || w0.may_have("super")))) {
-            continue;
-        }
-        // (メモリから外したファイル: 読み直す。そのファイルの中の識別子の解決には、読み直したものを使う)
-        let held;
-        let mut ws2: Vec<&FileIndex> = vec![];
-        let (w, wsx): (&FileIndex, &[&FileIndex]) = if w0.slim {
-            let Some(r) = load(i) else { continue };
-            held = r;
-            ws2.extend_from_slice(ws);
-            ws2[i] = &held;
-            (&held, &ws2)
-        } else {
-            (w0, ws)
-        };
+    // (探すファイル。メモリから外したファイル (slim) は先に読み直し、識別子の解決にはそれを使う)
+    let files: Vec<usize> = ws
+        .iter()
+        .enumerate()
+        .filter(|&(i, &w0)| {
+            !((is_local && i != target.file) || only.is_some_and(|o| o != i))
+                && !w0.lib
+                && (w0.may_have(name) || (is_type && w0.may_have("Self")) || (is_mod && (w0.may_have("self") || w0.may_have("super"))) || (crate_ref && w0.krate == tf.krate && (w0.may_have("crate") || w0.may_have("super"))))
+        })
+        .map(|(i, _)| i)
+        .collect();
+    let held: Vec<(usize, Rc<FileIndex>)> = files.iter().filter(|&&i| ws[i].slim).filter_map(|&i| load(i).map(|r| (i, r))).collect();
+    let mut wsx: Vec<&FileIndex> = ws.to_vec();
+    for (i, r) in &held {
+        wsx[*i] = r;
+    }
+    let files: Vec<usize> = files.into_iter().filter(|&i| !ws[i].slim || held.iter().any(|(j, _)| *j == i)).collect();
+    let wsx: &[&FileIndex] = &wsx;
+    let scan = |i: usize| -> Vec<Loc> {
+        let w = wsx[i];
+        let mut out = vec![];
         let none: Vec<u32> = vec![];
         let ks = w.idents.get(name).unwrap_or(&none);
         let selfs = if is_type { w.idents.get("Self").unwrap_or(&none) } else { &none };
@@ -2768,6 +2770,38 @@ fn references_in(ws: &[&FileIndex], file: usize, off: usize, include_decl: bool,
                     }
                 }
             }
+        }
+        out
+    };
+    // (ファイルごとに独立なので、多ければスレッドに分ける。名前の表の記憶 (thread_local) はスレッドごと、クレートの根は写す)
+    let par = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(1).min(8);
+    if files.len() >= 8 && par > 1 {
+        let roots = CRATE_ROOTS.with(|c| c.borrow().clone());
+        let mut parts: Vec<Vec<(usize, Vec<Loc>)>> = vec![];
+        std::thread::scope(|sc| {
+            let hs: Vec<_> = (0..par)
+                .map(|t| {
+                    let files = &files;
+                    let scan = &scan;
+                    let roots = roots.clone();
+                    sc.spawn(move || {
+                        set_crate_roots(roots);
+                        files.iter().skip(t).step_by(par).map(|&i| (i, scan(i))).collect::<Vec<_>>()
+                    })
+                })
+                .collect();
+            for h in hs {
+                parts.push(h.join().unwrap_or_default());
+            }
+        });
+        let mut all: Vec<(usize, Vec<Loc>)> = parts.into_iter().flatten().collect();
+        all.sort_by_key(|x| x.0);
+        for (_, v) in all {
+            out.extend(v);
+        }
+    } else {
+        for &i in &files {
+            out.extend(scan(i));
         }
     }
     out
