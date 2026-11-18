@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795029660190,
+  "lastUpdate": 1795029662405,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -15833,6 +15833,85 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/mizchi/zust/commit/72201ab0d3ed326ca582cd5dbf4f8f18ba2f6fcb"
         },
         "date": 1795028157770,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "parity documentSymbol (名前の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity workspace/symbol (上位 20 の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity definition (行き先の一致)",
+            "value": 97.222,
+            "unit": "%"
+          },
+          {
+            "name": "parity hover (名前を含む)",
+            "value": 95,
+            "unit": "%"
+          },
+          {
+            "name": "parity references (数の一致)",
+            "value": 92.105,
+            "unit": "%"
+          },
+          {
+            "name": "parity documentHighlight (数の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity rename (書き換えの一致)",
+            "value": 90,
+            "unit": "%"
+          },
+          {
+            "name": "parity signatureHelp (名前・引数の数・今の引数の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity completion `x.\\|` (書いてある名前を含む)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity completion `na\\|me` (同)",
+            "value": 79.167,
+            "unit": "%"
+          },
+          {
+            "name": "parity 一致の平均",
+            "value": 95.349,
+            "unit": "%"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "committer": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "distinct": true,
+          "id": "cbcd294207b86c66671a6f2b01e54911a91ffa29",
+          "message": "Items inside function bodies: mod, trait, impl, type, union, pub items\n\n- the preprocessor moves `mod`, `trait`, `impl`, `type`, `union` and `pub` /\n  `pub(crate)` items out of function bodies like the other items; a moved\n  `mod` is flattened afterwards\n- `fn() -> T` (a type) no longer marks the next `{ .. }` as a function body\n- the scan decides \"start of a statement in a body\" before looking at the\n  keyword, so it costs no more than before (hoist 21.8 M instr on gen5000)\n- tests/ui: run-pass 1371 (56.8%), check-pass 1108 (61.3%), compile-fail 2813\n\nAccepted compile-fail removal (it was rejected before because the items in\nthe fn body were not supported; it needs the check for infinite opaque types):\nimpl-trait/issues/infinite-impl-trait-issue-38064.rs\n\nKPIs (gen5000): noop 661.5 M instr, edit 622.9, check 3893.1, cache\nunchanged; LSP ready 109 ms. Against rustc -C incremental on gen1000: cold\n5.3x, no-op 12x, edit 15x faster. README and SUPPORTED.md (en + ja) updated,\nwith the rustc comparison over time.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-18T19:12:56Z",
+          "tree_id": "5b814ce4aff4b568851efb85b770f10c4f6f1f0c",
+          "url": "https://github.com/mizchi/zust/commit/cbcd294207b86c66671a6f2b01e54911a91ffa29"
+        },
+        "date": 1795029661824,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
