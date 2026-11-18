@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795018790892,
+  "lastUpdate": 1795018792650,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -14249,6 +14249,70 @@ window.BENCHMARK_DATA = {
           {
             "name": "tests/ui check-pass passing",
             "value": 1057,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui build-pass pass rate",
+            "value": 57.04,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui build-pass passing",
+            "value": 77,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui compile-fail pass rate",
+            "value": 38.08,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui compile-fail passing",
+            "value": 2802,
+            "unit": "tests"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "committer": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "distinct": true,
+          "id": "bffa3ad4724aa19ac7b8be9353a6ab93cf81b0af",
+          "message": "Fix two double frees: FRU from a place, captures moved into a nested move closure\n\n- `S { a, ..x }` with a place `x` reads or moves the fields not written out of\n  `x` one by one; `x` keeps the others (it was moved whole into a temporary\n  that dropped them a second time)\n- a closure whose nested `move` closure uses a capture owns that capture, and\n  moving it into the nested closure empties the enclosing closure's slot\n- tests/ui: run-pass 1309\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-18T16:15:26Z",
+          "tree_id": "47f021e61a61db3f213d4ad3b3ca82dcb475270d",
+          "url": "https://github.com/mizchi/zust/commit/bffa3ad4724aa19ac7b8be9353a6ab93cf81b0af"
+        },
+        "date": 1795018792231,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tests/ui run-pass pass rate",
+            "value": 54.25,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui run-pass passing",
+            "value": 1309,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui check-pass pass rate",
+            "value": 58.55,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui check-pass passing",
+            "value": 1058,
             "unit": "tests"
           },
           {
