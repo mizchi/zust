@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795043622937,
+  "lastUpdate": 1795043624910,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -15892,6 +15892,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "lsp peak RSS",
             "value": 68.109,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "committer": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "distinct": true,
+          "id": "b2620bda961b4f2951eedada30e634f1fa2e3c8a",
+          "message": "Fn pointer comparisons and casts; `main` as a value\n\n`f == g` and `&f == &g` on fn pointers compare addresses, `f as *const ()`\ncasts, and `main` can be used as a value (`Box::new(main)`, `let f: fn() = main`).\nComparing a fn item (not a pointer) and comparing pointers in a `const fn` are\nerrors, as in rustc. tests/ui: run-pass +6, check-pass +3, compile-fail +3; one\ncompile-fail test leaves the baseline (nll/type-check-pointer-comparisons.rs passed\nonly because the comparison was unsupported; its errors are lifetime errors).\nKPIs: gen5000 check +0.07%, the no-op build within its usual range.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-18T23:03:16Z",
+          "tree_id": "746facad9933b83c1e0b4b71e63728c3e7ecb575",
+          "url": "https://github.com/mizchi/zust/commit/b2620bda961b4f2951eedada30e634f1fa2e3c8a"
+        },
+        "date": 1795043624448,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "lsp definition p50",
+            "value": 0.439,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp hover p50",
+            "value": 0.373,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp completion p50",
+            "value": 1.019,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp references p50",
+            "value": 9.696,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp rename p50",
+            "value": 0.408,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp signatureHelp p50",
+            "value": 0.788,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp documentHighlight p50",
+            "value": 0.842,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp ready (startup to indexed)",
+            "value": 97.611,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp peak RSS",
+            "value": 68.195,
             "unit": "MiB"
           }
         ]
