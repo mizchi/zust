@@ -848,6 +848,11 @@ impl Parser {
                 let n = self.ident()?;
                 self.expect_punct("=")?;
                 v.push(GArg::Bind(n, self.ty()?));
+            } else if self.tok(0).is_some_and(|t| t.kind == TokKind::Ident) && self.punct_at(1, ":") && !self.punct_at(1, "::") {
+                // (an associated type bound `Iterator<Item: Debug>`: `Item = impl Debug`)
+                let n = self.ident()?;
+                self.expect_punct(":")?;
+                v.push(GArg::Bind(n, Ty::Impl(self.bounds()?)));
             } else if self.tok(0).is_some_and(|t| t.kind == TokKind::Lit) || self.is_punct("-") {
                 v.push(GArg::Const(self.unary_expr(true)?));
             } else if self.is_open("{") {
@@ -956,6 +961,22 @@ impl Parser {
         if self.eat_punct("!") {
             return Ok(Ty::Never);
         }
+        // (a higher-ranked type `for<'a> fn(&'a u8)` / `for<'a> Fn(&'a T)`: the binder is dropped)
+        if self.is_ident("for") && self.punct_at(1, "<") {
+            self.i += 2;
+            while !self.eat_close_angle() {
+                if self.lifetime().is_none() {
+                    return Err(self.err("expected a lifetime"));
+                }
+                if !self.eat_punct(",") && !self.punct_at(0, ">") {
+                    return Err(self.err("expected one of `,`, `:`, or `>`"));
+                }
+            }
+            if self.is_ident("dyn") || self.is_ident("impl") {
+                return Err(self.err("`for<...>` expected after `dyn` / `impl`, not before"));
+            }
+            return self.ty_inner(plus);
+        }
         if self.is_punct("&") {
             // `&&T` は & を 2 つ
             if self.punct_at(0, "&&") {
@@ -1015,7 +1036,13 @@ impl Parser {
         }
         if self.is_ident("dyn") {
             self.i += 1;
-            return Ok(Ty::Dyn(if plus { self.bounds()? } else { vec![Bound::Trait(false, self.path(true)?)] }));
+            let bs = if plus { self.bounds()? } else { vec![Bound::Trait(false, self.path(true)?)] };
+            // (`dyn Tr<Item: Bound>`)
+            let atb = bs.iter().any(|b| matches!(b, Bound::Trait(_, p) if p.segs.iter().any(|s| s.args.iter().any(|a| matches!(a, GArg::Bind(_, Ty::Impl(_)))))));
+            if atb {
+                return Err(self.err("associated type bounds are not allowed in `dyn` types"));
+            }
+            return Ok(Ty::Dyn(bs));
         }
         if self.is_ident("fn") || self.is_ident("unsafe") || self.is_ident("extern") {
             while self.eat_ident("unsafe") || self.eat_ident("extern") {
@@ -1054,7 +1081,9 @@ impl Parser {
             }
             while self.eat_punct("::") {
                 let n = self.ident()?;
-                path.segs.push(Seg { name: n, args: Vec::new(), fn_args: None, text: String::new() });
+                // (`<T as Tr>::Gat<'a>`: the arguments of a generic associated type)
+                let args = if self.eat_punct("<") { self.generic_args()? } else { Vec::new() };
+                path.segs.push(Seg { name: n, args, fn_args: None, text: String::new() });
             }
             return Ok(Ty::Path(Some(Box::new(q)), path));
         }
@@ -2088,6 +2117,11 @@ impl Parser {
                 self.i = save;
             }
             first = false;
+            // (C variadics `extern "C" { fn printf(f: *const u8, ...); }`: the rest is not checked)
+            if self.punct_at(0, "...") {
+                self.i += 3;
+                break;
+            }
             let p = self.pat()?;
             self.expect_punct(":")?;
             let t = if self.punct_at(0, "...") {
@@ -2288,6 +2322,8 @@ impl Parser {
                 let bs = if self.eat_punct(":") { self.bounds()? } else { Vec::new() };
                 self.where_clause(&mut g)?;
                 let t = if self.eat_punct("=") { Some(self.ty()?) } else { None };
+                // (a generic associated type's where clause after the value: `type Item<'a> = &'a T where T: 'a;`)
+                self.where_clause(&mut g)?;
                 self.expect_punct(";")?;
                 Ok(ItemKind::Type(n, g, bs, t))
             }
