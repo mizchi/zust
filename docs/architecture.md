@@ -1,133 +1,133 @@
-# 設計
+# Design
 
-## crate の構成 (Cargo ワークスペース)
+## Crate layout (Cargo workspace)
 
-層は base → syntax → sema → typeck → codegen → core (driver) の順。syntax・sema・typeck がコンパイラと LSP・解析で
-共有する部分で、LSP は core を feature `build` なしで使い、バックエンド (codegen / minclif / Cranelift) に依存しない。
+The layers go in this order: base → syntax → sema → typeck → codegen → core (driver). syntax, sema and typeck are the parts that the compiler, the LSP and analysis
+share. The LSP uses core without the feature `build`, and does not depend on the backends (codegen / minclif / Cranelift).
 
-| crate | 中身 | 依存 |
+| crate | Contents | Depends on |
 |---|---|---|
-| `crates/base` (`zust-base`) | fxhash (FxMap / FxSet)・key (キャッシュのキー)・prof (段ごとの時間) | なし |
-| `crates/syntax` (`zust-syntax`) | front (前処理 → アイテムへの分割 (差分) → prelude を付ける、の流れと編集をまたぐ記憶 FrontMemo) / lexer / parse (自前の構文木) / cfg / macros / ctors / prep (前処理の差分) / srcmap / stub / types (要約の型)・types_enc / enc (直列化) / ast_types / ast_closure / ast_summary (アイテムの要約) / prelude (選択と prelude_lib.rs.in、build.rs) | base、proc-macro2 |
-| `crates/sema` (`zust-sema`) | program (名前・型・トレイト・impl の表、インスタンス) / solver / ast_infer (型推論) / ast_consteval | syntax |
-| `crates/ir` (`zust-ir`) | 命令の列の型 (Type / Value / Block / Op …) と、命令を記録するだけの Recorder (値の型を覚える) | なし |
-| `crates/typeck` (`zust-typeck`) | acg (構文木 → 命令の列の記録。型の検査はここで出る) / cache2 (Blob の直列化) | sema、ir、proc-macro2 |
-| `crates/codegen` (`zust-codegen`) | lower (記録を minclif に組み立て直して機械語にする。Cranelift なら zust-clif に渡す) / link | typeck、minclif |
-| `crates/core` (`zust-core`) | driver2 (Session2: 解析・check・キャッシュ) と、feature `build` (既定) の driver2/build.rs (機械語・fork の並列化・オブジェクト・リンク・ワークスペース)。下の層を公開し直す | typeck、(build なら) codegen |
-| `crates/ide` (`zust-ide`) | エディタ向けの解析: symbols (documentSymbol / workspace/symbol のシンボル) / navigate (定義・参照・hover・補完。字句の列と定義の表からの軽い型の推定)。コンパイラ本体からは使わない | syntax |
-| `crates/analyzer` (`zust-analyzer`) | LSP サーバ (バイナリ `zust-analyzer`)。診断は driver2 の check、それ以外は ide。ワークスペースの本文はメモリの上限まで | core (build なし)、ide、serde_json |
-| `crates/minclif` | Cranelift に似た API の小さな x86-64 バックエンド (レジスタ割り当て・スタックの struct のフィールドの変数化・ELF の .o)。`from_recording` で記録を組み立て直す | ir |
-| `crates/clif` (`zust-clif`) | driver2 の Cranelift バックエンド: minclif が組み立てた命令の列を Cranelift の IR にしてコンパイルする | minclif、cranelift |
-| `.` (`zustc`) | CLI と、上のものの再輸出 (テスト・ベンチ)。ide と lsp には依存しない (ベンチの lsp/* だけが dev-dependency で使う) | 上のもの (ide・lsp を除く) |
+| `crates/base` (`zust-base`) | fxhash (FxMap / FxSet), key (cache keys), prof (time per stage) | none |
+| `crates/syntax` (`zust-syntax`) | front (the flow preprocessing → splitting into items (diff) → attaching the prelude, plus FrontMemo, the memory kept across edits) / lexer / parse (own syntax tree) / cfg / macros / ctors / prep (preprocessing diff) / srcmap / stub / types (item summary types), types_enc / enc (serialization) / ast_types / ast_closure / ast_summary (item summaries) / prelude (selection and prelude_lib.rs.in, build.rs) | base, proc-macro2 |
+| `crates/sema` (`zust-sema`) | program (tables of names, types, traits and impls; instances) / solver / ast_infer (type inference) / ast_consteval | syntax |
+| `crates/ir` (`zust-ir`) | Types for the instruction sequence (Type / Value / Block / Op …), and Recorder, which only records instructions (it remembers the types of values) | none |
+| `crates/typeck` (`zust-typeck`) | acg (records the syntax tree as an instruction sequence; type checking errors come out here) / cache2 (Blob serialization) | sema, ir, proc-macro2 |
+| `crates/codegen` (`zust-codegen`) | lower (rebuilds the record into minclif and turns it into machine code; for Cranelift it passes it to zust-clif) / link | typeck, minclif |
+| `crates/core` (`zust-core`) | driver2 (Session2: analysis, check, cache), and, with the feature `build` (default), driver2/build.rs (machine code, fork parallelization, objects, linking, workspaces). Re-exports the lower layers | typeck, (with build) codegen |
+| `crates/ide` (`zust-ide`) | Analysis for editors: symbols (symbols for documentSymbol / workspace/symbol) / navigate (definition, references, hover, completion; light type estimation from the token sequence and the definition table). Not used by the compiler itself | syntax |
+| `crates/analyzer` (`zust-analyzer`) | LSP server (binary `zust-analyzer`). Diagnostics come from driver2's check; everything else from ide. Workspace file contents are kept up to a memory limit | core (without build), ide, serde_json |
+| `crates/minclif` | A small x86-64 backend with a Cranelift-like API (register allocation, turning fields of stack structs into variables, ELF .o). `from_recording` rebuilds a record | ir |
+| `crates/clif` (`zust-clif`) | The Cranelift backend of driver2: turns the instruction sequence that minclif built into Cranelift IR and compiles it | minclif, cranelift |
+| `.` (`zustc`) | The CLI, and re-exports of the above (for tests and benches). Does not depend on ide or lsp (only the bench lsp/* uses them, as dev-dependencies) | the above (except ide and lsp) |
 
-各 crate の lib.rs は下の層のモジュールを公開し直す (`pub use zust_syntax::*;` など)。ファイルの中は `crate::lexer` の
-ように書き、どの crate に置いても、セルフホストで全部を 1 つのクレートのモジュールに並べても同じパスで引ける。
+Each crate's lib.rs re-exports the modules of the lower layers (`pub use zust_syntax::*;` and so on). Inside files, paths are written like
+`crate::lexer`. So the same path resolves whichever crate a file is in, and also when self-hosting lays everything out as modules of one crate.
 
-型の検査とバックエンドの分け方: acg は命令を zust_ir::Recorder に記録するだけ (値・ブロックなどに番号を振り、値の型を
-minclif と同じ決め方で覚える)。check はそこで止め、ビルドは codegen の lower が記録を minclif の FunctionBuilder に同じ順で
-組み立て直してから機械語にする (minclif は命令の中で値やスロットを作るので番号は組み立て直す側で振り直す。
-`ZUSTC_IR_VERIFY=1` で値の型が記録と同じかを確かめる)。出力の機械語は分ける前とバイト単位で同じ。
+How type checking and the backend are split: acg only records instructions into zust_ir::Recorder (it numbers values, blocks and so on, and remembers the types of values
+the same way minclif decides them). check stops there. A build has codegen's lower rebuild the record into minclif's FunctionBuilder in the same order,
+then turn it into machine code (minclif creates values and slots inside instructions, so the rebuilding side renumbers them.
+`ZUSTC_IR_VERIFY=1` checks that the value types match the record). The output machine code is byte-for-byte the same as before the split.
 
-経路は **driver2** だけ (`zustc x.rs` は Cranelift、`--backend=minclif` で minclif)。build / check / LSP のすべてが driver2 を使う。
-最初のドライバ (syn + Cranelift、`crates/legacy`) は 2026-11-16 に削除した (git の履歴にある)。
-セルフホスト (tests/selfhost*.sh) は base / syntax / sema / ir / typeck / codegen / core と minclif のソースを 1 ファイルにまとめて zustc でコンパイルする。
+The only path is **driver2** (`zustc x.rs` uses Cranelift; `--backend=minclif` uses minclif). build, check and the LSP all use driver2.
+The first driver (syn + Cranelift, `crates/legacy`) was deleted on 2026-11-16 (it is in the git history).
+Self-hosting (tests/selfhost*.sh) combines the sources of base / syntax / sema / ir / typeck / codegen / core and minclif into one file and compiles it with zustc.
 
-## 処理の流れ (driver2)
+## Processing flow (driver2)
 
-今の主経路 (driver2):
+The current main path (driver2):
 
 ```
-src.rs ──srcmap (mod x; のファイル)──▶ macros (macro_rules!) ──▶ モジュールを平らに ──▶ lexer: アイテム + ハッシュ
-   ──▶ 要約 (キャッシュ、fork で並列) ──▶ Program (シグネチャ・レイアウト) ──▶ 到達する関数
-   ──▶ 関数ごと: キャッシュ? ── miss ──▶ ast_infer (型推論) → acg (自前の構文木から minclif の命令の列。-O で小さい関数を展開)
-                                        → Cranelift (zust-clif) か minclif (レジスタ割り当て) で機械語 → Blob (fork で並列)
-   ──▶ minclif の ELF 書き出しで .o (panic の場所の表を含む) ──▶ wild でリンク (変わらなければしない)
+src.rs ──srcmap (mod x; files)──▶ macros (macro_rules!) ──▶ flatten modules ──▶ lexer: items + hashes
+   ──▶ item summaries (cached, parallel via fork) ──▶ Program (signatures, layouts) ──▶ reachable functions
+   ──▶ per function: cached? ── miss ──▶ ast_infer (type inference) → acg (own syntax tree to minclif instruction sequence; -O inlines small functions)
+                                        → machine code via Cranelift (zust-clif) or minclif (register allocation) → Blob (parallel via fork)
+   ──▶ .o via minclif's ELF writer (includes the panic location table) ──▶ link with wild (skipped if unchanged)
 ```
 
-| 場所 | 役割 |
+| Location | Role |
 |---|---|
-| `crates/syntax/src/lexer.rs` | トップレベルのアイテム分割と、正規化トークン列のハッシュ。`impl` はヘッダとメンバに分ける |
-| `crates/syntax/src/macros.rs` / `srcmap.rs` | macro_rules! の展開・include_str!、`mod x;` のファイルの読み込みと行の対応 |
-| `crates/syntax/src/parse.rs` / `ast_*.rs` | 自前の構文木・要約・型推論・クロージャ解析・定数評価 |
-| `crates/sema/src/program.rs` | 全体の表 (シグネチャ・レイアウト・trait 実装・インスタンス) |
-| `crates/typeck/src/acg/` | 構文木から命令の列 (zust_ir::Recorder) への 1 パスの lowering と型検査。-O で小さい関数をインライン展開 |
-| `crates/core/src/driver2.rs` / `cache2.rs` | `Session2`：キャッシュ (ディスク + メモリ)、build / check / ワークスペース、fork の並列化、.o の書き出し |
-| `crates/codegen/src/link.rs` | `cc -###` からリンク行を取り出して保存し、リンカを直接起動する |
-| `crates/minclif` | 命令の記録・レジスタ割り当て・x86-64 の機械語・ELF の .o |
-| `crates/clif` | 記録した命令の列 → Cranelift の IR → 機械語 |
-| `crates/analyzer/src/lib.rs` | LSP サーバ (ドキュメントごとに `Session2` を持ち `check` の診断を返す。ワークスペースと std の索引) |
-| `crates/ide/src/navigate.rs` / `symbols.rs` | 定義・参照・hover・補完の名前解決と、シンボルの一覧 |
-| `src/main.rs` | CLI (build / check / ワークスペースの build) |
+| `crates/syntax/src/lexer.rs` | Splits top-level items, and hashes the normalized token sequence. Splits `impl` into a header and members |
+| `crates/syntax/src/macros.rs` / `srcmap.rs` | Expansion of macro_rules! and include_str!; reading `mod x;` files and mapping lines |
+| `crates/syntax/src/parse.rs` / `ast_*.rs` | Own syntax tree, item summaries, type inference, closure analysis, constant evaluation |
+| `crates/sema/src/program.rs` | Whole-program tables (signatures, layouts, trait implementations, instances) |
+| `crates/typeck/src/acg/` | One-pass lowering from the syntax tree to the instruction sequence (zust_ir::Recorder), and type checking. -O inlines small functions |
+| `crates/core/src/driver2.rs` / `cache2.rs` | `Session2`: cache (disk + memory), build / check / workspaces, fork parallelization, writing .o |
+| `crates/codegen/src/link.rs` | Extracts the link line from `cc -###`, saves it, and starts the linker directly |
+| `crates/minclif` | Instruction recording, register allocation, x86-64 machine code, ELF .o |
+| `crates/clif` | Recorded instruction sequence → Cranelift IR → machine code |
+| `crates/analyzer/src/lib.rs` | LSP server (holds one `Session2` per document and returns diagnostics from `check`; index of the workspace and std) |
+| `crates/ide/src/navigate.rs` / `symbols.rs` | Name resolution for definition, references, hover and completion; symbol lists |
+| `src/main.rs` | CLI (build / check / workspace build) |
 
-### インクリメンタル性の要点
+### Key points of incrementality
 
-（単相化について）
-- ジェネリック関数とデフォルトメソッドは、要求された（関数, 型引数）ごとにインスタンスになる。
-  キーは「元の関数のキー + 型引数（struct は deep hash）」。
-- インスタンスは作業リストで不動点まで処理する。キャッシュした呼び出し元の Blob には、インスタンス参照を（元の関数名, 型引数）で保存してある。そのため読み戻すと、必要なインスタンスがまた要求される。
-- 実測（examples/traits.rs、25 関数 / 11 インスタンス）：
-  - `total_area<T>` の本体を編集すると、再コンパイルはその 2 インスタンスだけ。
-  - デフォルトメソッド `score` の本体を編集すると、再コンパイルはそれを使う 2 型分だけ（上書きしている Rect は対象外）。
-- check（LSP）でも、検査済みの印に「その関数が要求したインスタンス」を入れてある。
-  そのため、呼び出し元がキャッシュに当たっても、ジェネリック本体の型エラーは報告される。
+(About monomorphization)
+- Generic functions and default methods become one instance per requested (function, type arguments).
+  The key is "the original function's key + the type arguments (structs by deep hash)".
+- Instances are processed with a worklist until a fixed point. The cached Blob of a caller stores its instance references as (original function name, type arguments). So when it is read back, the needed instances are requested again.
+- Measured (examples/traits.rs, 25 functions / 11 instances):
+  - Editing the body of `total_area<T>` recompiles only its 2 instances.
+  - Editing the body of the default method `score` recompiles only the 2 types that use it (Rect, which overrides it, is not affected).
+- In check (LSP) too, the "checked" mark includes "the instances this function requested".
+  So type errors in generic bodies are reported even when the caller hits the cache.
 
-1. **callee の本体を変えても caller は再コンパイルされない。**
-   キーに入るのは参照先のシグネチャだけで、Blob は callee を名前で参照している（blaze の template と同じ考え方）。
-   シグネチャを変えた場合だけ、それを参照している関数が無効になる。
-2. **struct は deep hash で追跡する。**
-   - deep hash は、その struct 自身と、フィールドから推移的に届く全 struct の定義ハッシュをまとめたもの。参照フィールド経由も含む。
-   - シグネチャのハッシュにも、struct は deep hash で入る。
-   - そのため、`fn get(o: &Outer) -> i64 { o.inner.b }` のように `Inner` を名前で書いていない関数でも、`Inner` のレイアウトが変われば正しく再コンパイルされる（確認済み）。
-3. **`impl` ブロックはメソッド単位で追跡する。**
-   - lexer が `impl X {` のヘッダとメンバを別のアイテムに分ける。メンバのハッシュにはヘッダのハッシュを混ぜる。
-   - そのため、メソッドを 1 つ編集しても parse し直すのはそのメソッドだけで、再コンパイルもそのメソッドだけ（確認済み：18 関数中 1 miss）。
-   - シグネチャを変えた場合は、そのメソッドと呼び出し元だけが再コンパイルされる（2 miss）。
-   - `x.len()` のようなメソッド呼び出しは、型を見ずに名前の最後のセグメント（`len`）で参照グラフに入れる。どの型の `len` も参照したことになるので過大近似だが、安全側になる。
-4. **整形やコメント編集では何も再コンパイルされない。**
-   キャッシュは全ヒットし、`.o` も同一になるのでリンクも省略される。
-5. **変わっていないアイテムは parse もしない。**
-   ファイル全体を syn で parse すると、1000 関数（320KB）で 80ms かかる。自前 lexer なら 2.6ms で済む。
-6. **到達しない関数は parse も型検査もコード生成もしない。**
-   その結果、オブジェクトにも入らない。
-   その副作用として、到達しない関数の中の型エラーは報告されない（rustc なら報告される）。
-7. **ディスク消費に上限がある。**
-   保存するのは今回のビルドで使ったエントリだけなので、古い世代は自動的に消える。キャッシュのサイズは「今のコード量」程度に収まる。
-8. **メモリ**
-   - 同時に生きている AST は常に 1 関数分だけ。
-   - Cranelift の `Context` と `FunctionBuilderContext` はスレッドごとに使い回す。
-   - インクリメンタル時はスレッドを起動しない。
-   - cold 時（要約のミスが 33 件以上）は、要約用の parse を並列にし、AST は持ち帰らない。
-     全部保持すると、5000 関数では syn の AST だけでピーク RSS が 162MB になっていた。持ち帰らない形にして 35MB になった。
+1. **Changing a callee's body does not recompile the caller.**
+   Only the signatures of referenced items go into the key, and the Blob refers to the callee by name (the same idea as blaze's template).
+   Only a signature change invalidates the functions that reference it.
+2. **Structs are tracked by deep hash.**
+   - The deep hash combines the definition hashes of the struct itself and of every struct reachable transitively from its fields. This includes fields reached through references.
+   - Structs also go into signature hashes by deep hash.
+   - So even a function that does not name `Inner`, like `fn get(o: &Outer) -> i64 { o.inner.b }`, is correctly recompiled when the layout of `Inner` changes (verified).
+3. **`impl` blocks are tracked per method.**
+   - The lexer splits the `impl X {` header and the members into separate items. The header hash is mixed into each member hash.
+   - So editing one method re-parses only that method and recompiles only that method (verified: 1 miss out of 18 functions).
+   - Changing a signature recompiles only that method and its callers (2 misses).
+   - A method call like `x.len()` enters the reference graph by the last segment of the name (`len`), without looking at types. This counts as referencing `len` of every type, so it is an over-approximation, but it is on the safe side.
+4. **Reformatting or editing comments recompiles nothing.**
+   The cache hits on everything, and the `.o` is identical, so linking is skipped too.
+5. **Unchanged items are not even parsed.**
+   Parsing a whole file with syn takes 80ms for 1000 functions (320KB). The own lexer takes only 2.6ms.
+6. **Unreachable functions are not parsed, type checked or code generated.**
+   As a result, they do not go into the object either.
+   A side effect is that type errors inside unreachable functions are not reported (rustc would report them).
+7. **Disk usage has an upper bound.**
+   Only the entries used in the current build are saved, so old generations disappear automatically. The cache size stays around "the current amount of code".
+8. **Memory**
+   - Only one function's AST is alive at a time.
+   - Cranelift's `Context` and `FunctionBuilderContext` are reused per thread.
+   - Incremental builds do not start threads.
+   - On cold builds (33 or more item summary misses), the parsing for item summaries runs in parallel, and the ASTs are not brought back.
+     Keeping them all made peak RSS 162MB from syn's ASTs alone at 5000 functions. Not bringing them back brought it to 35MB.
 
-## 値の表現と ABI（内部用）
+## Value representation and ABI (internal)
 
-- **スカラー**（整数・bool・参照）は SSA 値で表す。参照はポインタ。
-- **ローカル変数**
-  - アドレスを取られないスカラーは Cranelift の `Variable`（レジスタ）に置く。
-  - `&x` で参照されるものと struct はスタックスロットに置く。
-- **struct**
-  - 値は常にメモリ上にあり、式の評価結果は「そのアドレス」になる。
-  - let・代入・引数・return の時点でコピーする（サイズは静的に分かるので、load/store に展開する）。
-  - 引数：呼び出し側が一時領域にコピーし、そのアドレスを渡す。
-  - 戻り値：呼び出し側が確保した領域のアドレスを、隠れ第 1 引数（sret）で渡す。
-  - extern "C" 関数との間で struct を値で受け渡すことはできない（エラーになる）。
-- **レイアウト**：宣言順に自然なアラインメントで並べる（repr(C) 相当）。
-- **クロージャ**（`crates/syntax/src/ast_closure.rs`）
-  - 要約の段階で、本体の k 番目（前順）のクロージャを次の 2 つに持ち上げる（lambda lifting）。
-    - struct `親::{closure#k}<親の型引数, __C.., __P.., __R>`。フィールドはキャプチャで、参照キャプチャなら `*mut T`、`move` なら `T`。
-    - fn `親::{closure#k}::call(__env: *mut その struct, 引数..) -> __R`。
-  - キャプチャ・引数・戻り値の型がすべて struct の型引数に入る。そのためクロージャの型だけで本体のインスタンスが決まり、既存の単相化とインスタンス単位のキャッシュにそのまま乗る。
-  - 本体は親のアイテムを parse し直し、k 番目を取り出して普通の fn にしてコンパイルする。キャプチャは `__env` のフィールドとしてスコープに入る。
-  - 呼ばれないクロージャも、作った時点でインスタンスを要求する（本体のエラーを報告するため。未使用なら `--gc-sections` で消える）。
-- **関数ポインタ**：関数のアドレス 1 語。`func_addr` で取り、`call_indirect` で呼ぶ（ABI は普通の呼び出しと同じ）。
-- **`Box<T>`**：ヒープへのポインタ（`Box<dyn ..>` は fat pointer）。参照と同じ経路で自動 deref・dyn への変換をする。
-- **drop**（`crates/typeck/src/acg/p6_match_drop.rs`）
-  - drop が要る値を持つローカル変数・一時値は、1 byte の drop フラグと一緒に所有者として登録する。ムーブでフラグを 0 にし、スコープの出口でフラグが 1 のものを逆順に drop する（分岐でムーブするかどうかが変わっても正しい）。
-  - drop 本体は prelude の `__exr_drop_in_place::<T>` のインスタンス（drop glue）。codegen が型ごとに 1 段だけ展開した本体を作り（`impl Drop` の呼び出し → フィールド / バリアント / 要素 → Box なら free）、入れ子の型は呼び出しにするので、再帰的な型でも展開が止まる。
-  - vtable の最後の欄は中身の型の drop glue。`Box<dyn Trait>` の drop はここを呼んでから free する。
-  - drop glue はインスタンス単位でキャッシュされる。`impl Drop` の有無は deep hash に入れてあり、後から足し引きしても、その型を使う関数が作り直される。
-- **`&dyn Trait`**：(データのポインタ, vtable のアドレス) の 16 byte。
-  - vtable は trait のメソッドの宣言順に並べた関数アドレスの列で、Blob に「関数 ID の列」として持つ。
-  - キャッシュには関数名（インスタンスなら元の関数名と型引数）で保存する。
-  - `.o` では内容で重複を除いた読み取り専用データにする。
-  - `&dyn Fn(A) -> B` の vtable は、クロージャ本体のインスタンス 1 個だけ。
+- **Scalars** (integers, bool, references) are SSA values. References are pointers.
+- **Local variables**
+  - Scalars whose address is not taken are put in Cranelift `Variable`s (registers).
+  - Things referenced by `&x`, and structs, are put in stack slots.
+- **Structs**
+  - The value is always in memory, and the result of evaluating an expression is "its address".
+  - It is copied at let, assignment, argument passing and return (the size is known statically, so it expands to load/store).
+  - Arguments: the caller copies into a temporary area and passes its address.
+  - Return values: the caller passes the address of an area it allocated as a hidden first argument (sret).
+  - Structs cannot be passed by value to or from extern "C" functions (it is an error).
+- **Layout**: fields are laid out in declaration order with natural alignment (equivalent to repr(C)).
+- **Closures** (`crates/syntax/src/ast_closure.rs`)
+  - At the item summary stage, the k-th closure (pre-order) of a body is lifted into the following two (lambda lifting).
+    - struct `parent::{closure#k}<parent's type arguments, __C.., __P.., __R>`. The fields are the captures: `*mut T` for a by-reference capture, `T` for `move`.
+    - fn `parent::{closure#k}::call(__env: *mut that struct, arguments..) -> __R`.
+  - The types of the captures, arguments and return value all go into the struct's type arguments. So the closure's type alone determines the body's instance, and it fits directly into the existing monomorphization and per-instance cache.
+  - For the body, the parent item is parsed again, the k-th closure is taken out, made into an ordinary fn and compiled. Captures enter scope as fields of `__env`.
+  - A closure that is never called still requests its instance when it is created (to report errors in its body; if unused, `--gc-sections` removes it).
+- **Function pointers**: one word holding the function's address. Taken with `func_addr` and called with `call_indirect` (the ABI is the same as an ordinary call).
+- **`Box<T>`**: a pointer to the heap (`Box<dyn ..>` is a fat pointer). Auto-deref and conversion to dyn go through the same path as references.
+- **drop** (`crates/typeck/src/acg/p6_match_drop.rs`)
+  - Local variables and temporaries holding values that need drop are registered as owners, together with a 1-byte drop flag. A move sets the flag to 0, and at scope exit the ones whose flag is 1 are dropped in reverse order (this is correct even when whether a move happens depends on a branch).
+  - The drop body is an instance of the prelude's `__exr_drop_in_place::<T>` (drop glue). codegen builds a body that expands only one level per type (call to `impl Drop` → fields / variants / elements → free if Box), and nested types become calls, so expansion stops even for recursive types.
+  - The last slot of a vtable is the drop glue of the contained type. Dropping a `Box<dyn Trait>` calls it and then frees.
+  - Drop glue is cached per instance. Whether `impl Drop` exists is part of the deep hash, so adding or removing it later rebuilds the functions that use that type.
+- **`&dyn Trait`**: 16 bytes of (data pointer, vtable address).
+  - A vtable is a sequence of function addresses in the declaration order of the trait's methods, held in the Blob as "a sequence of function IDs".
+  - The cache stores them by function name (for an instance, the original function name and type arguments).
+  - In the `.o`, they become read-only data deduplicated by content.
+  - The vtable of `&dyn Fn(A) -> B` is just the one instance of the closure body.

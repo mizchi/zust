@@ -1,127 +1,127 @@
-# 回帰監視が見つけたもの
+# What regression monitoring caught
 
-日付: 2026-11-15
+Date: 2026-11-15
 
-サイズ予算・criterion・`tests/compare.sh` の回帰監視 (`bench/regress.sh`) が実際に働いた例。どれも予算や閾値を緩めずに直した。
+Examples where the regression monitoring (`bench/regress.sh`) of size budgets, criterion and `tests/compare.sh` actually did its job. All of them were fixed without loosening budgets or thresholds.
 
-- サイズ
-  - enum の追加で要約が 1 byte/アイテム増えた。要約の符号化を詰めて解決した。
-  - 検査済みの印が 4 byte/関数増えた。空なら書かないようにした。
-  - prelude を全部付けていたので、どのキャッシュも約 2.3 KB 増えた。使われるものだけを付けるようにした。
-  - フィールド名 `min` / `max` で `core::cmp` の関数まで付いていた。`core` という識別子が現れたときだけにした。
-- 速度
-  - no_std 対応で、LSP の 1 関数編集が +31%、no-op ビルドが +10% 遅くなった。
-  - 時間帯によるぶれを除くため、ベースラインのコミットを worktree で同時にベンチし、callgrind で原因を詰めた。
-  - 直したもの：毎回の全識別子のハッシュ（prelude の選択）、LSP が本文全体をハッシュしていたこと、名前表の SipHash。
-  - 名前表は自前の FxHasher に替えた。キャッシュのキーには使わない。
-  - 結果、LSP の 1 関数編集は −7%、no-op ビルドは −4% と、ベースラインより速くなった。
-- 正しさ（クロージャ・dyn の追加時。`tests/compare.sh` に「キャッシュなし」と「キャッシュからの再ビルド」の両方を比べる段を足して見つけた）
-  - 同じ関数の中のクロージャは、struct の deep hash（＝親アイテムのハッシュ）とシグネチャがどれも同じになる。そのため `consume::<closure#8>` と `consume::<closure#9>` のキャッシュキーが衝突し、2 回目のビルドで別のクロージャの機械語が使われていた。キーにクロージャの名前を入れて直した。
-  - vtable を zero-init で定義したため `.bss` に置かれ、リロケーションが適用されず null を呼んでいた。
-- 速度（クロージャ・dyn の追加時）
-  - HEAD との A/B で、LSP の 1 関数編集に +4% が出た。型推論の呼び出しごとの `Vec` の clone と、struct のハッシュに名前を入れていたことが原因で、どちらも外した。
-  - callgrind の命令数で見ると、1 関数編集（`Session::check`）は HEAD より少なくなった。didOpen（cold）は約 +2% で、criterion でも有意差はない。
-- 関数ポインタ・Box の追加時
-  - `Ty` が 16 → 24 byte になっていた（前回の `Dyn(&'static str)` が fat pointer だったため）。`&'static String` にして 16 byte に戻した。
-  - criterion では LSP の 1 関数編集が +14%、lexer が +10% と出た。ただ lexer のコードは変えていない。
-  - callgrind で見ると、`lexer::St::tok` の `b"..".contains(&c)` が memchr になっていた。呼び出し回数は同じで、命令数だけ +32% 増えていた（静的な文字列の配置の違い）。
-  - `matches!` に替えた結果、ベースラインより LSP の 1 関数編集 −5%、no-op ビルド −13%、lexer −6% になった。
-- Drop の追加時（`tests/compare.sh` に valgrind の段を足した：メモリエラーと確実なリークがあれば失敗）
-  - `*b` の読み出しが `b` のムーブ扱いになり、Box がリークしていた。deref の中身はムーブせずに読むようにした。
-  - `self.top = n.next`（Box の中身のフィールドだけのムーブ）で、`n` 全体をムーブ扱いにしていたため、ノードがリークしていた。
-    ムーブしたフィールドを 0（null の Box / `None`）で埋め、持ち主は普通に drop するようにした。
-  - 以前からあった不具合も 2 つ見つかった。
-    - `&Rect { .. }` を `&'static` で返すと、スタック上の一時値を指していた。rustc と同じく定数式は静的データに昇格するようにした。
-    - タプル構造体のフィールド `n.0` の型を推論していなかった。
-  - Box も Drop も使わないプログラムは、drop の処理を一切生成しない（`Program::has_drop`）。速度とサイズ予算は変わらない。
-- Vec / String の追加時
-  - criterion ではほぼ全項目が +20〜40% になったが、変えていない lexer も同じだけ遅く、マシンの負荷による揺れだった。
-    同じ時間帯に HEAD と並べて測ると ±10% 程度の揺れの中。callgrind の命令数も HEAD 以下。
-  - 本物の増加は prelude の選択（+26%）だけだった。prelude の名前が増え、先頭 1 byte ごとの候補表が長くなったのが原因。(先頭 1 byte, 長さ) で引く表にして HEAD より少なくした。
-  - `==` は識別子として現れないので、prelude の `Vec::eq` / `String::eq` が付かず、ポインタを比べていた。eq は型と一緒に付け、到達可能性の根にも入れた。
-- Iterator の追加時
-  - サイズ予算がほぼ全部の例で超過した（hello のキャッシュが 3.2 KB → 10.8 KB）。`for x in v.iter()`・変数名の `count`・`a.max(b)`・`Option::take`・フィールドの `.next` で、イテレータの部品が丸ごと付いていた。
-    付ける条件を「イテレータを作る呼び出しの後ろにアダプタ・消費メソッドが続く」などに絞り、既存の例の予算は 1 byte も緩めずに通るようにした。
-  - LSP の 1 関数編集で prelude の選択が +63%（候補の名前が増えたため）。アイテムのハッシュごとに結果を Session に覚え、変わっていないアイテムは走査しないようにした。callgrind で `Session::check` は HEAD より少ない。
-  - 型推論が一時的に parse したマクロの引数の型をアドレスで記録していたため、解放後のアドレスに codegen が作ったノードが重なり、別の式の型（`&str`）を引いていた。一時ノードは記録しないようにした。
-  - クロージャを 1 つ編集すると、それを受け取る map などのインスタンスが 65 個作り直されていた。クロージャの struct の deep hash から親アイテムのハッシュを外し、18 個（親とクロージャだけ）にした。
-- format! / HashMap の追加時
-  - nostd_core のキャッシュが 8.7 KB → 22.7 KB になった。生ポインタの `p.write(v)` の `write` と `a.max(b)` で、書式化の部品と String / Vec が丸ごと付いていた。
-    書式化のマクロ名は `name!` の形のときだけ数え、`__exr_str_cmp` も max / min では付けないようにした。
-  - iterators は HashMap のイテレータ（`HmIter` など、`impl Iterator for` の側）が付いていた。これらも HashMap の名前があるときだけにした。
-  - 書式化の helper（`__exr_fmt_int` など）はジェネリック `<G>` にして根から外した。呼ばれた分だけインスタンスとしてコンパイルされる。
-    instance の本体から呼ばれる非ジェネリックな関数（`__exr_print` → `putchar`）は、codegen の各波の後に生きている集合を広げて拾う。
-  - 予算を緩めたのは vec_string のキャッシュだけ（45.0 KB → 48.5 KB）。`name.to_string()` は受け手の型が選択の時点で分からず（整数なら Display が要る）、書式化の部品を付けるため。
-  - callgrind: gen1000 のビルドは +0.15%、check は −4%。prelude を多く使う例は増えた（iterators +5%、vec_string +15%。付く prelude が増えた分）。
-- 大小比較（PartialOrd / Ord）の追加時
-  - 比較の glue（`__exr_cmp`）を常に付けると、小さい例のキャッシュが 20 byte ずつ増えて予算を超えた。
-    再帰する型は Box / Vec を通るので、glue はそれらを使うプログラムにだけ付け、ほかは codegen が比較をその場で展開するようにした。
-  - `use core::cmp::{max, min}` の `cmp` と境界の `T: Ord` で、trait の宣言と `Ordering` が付いていた。`cmp::` はパスとして数えず、trait の宣言は手書きの `impl Ord for` があるときだけ付ける。既存の予算は 1 byte も緩めていない。
-  - 途中で見つけた既存のバグ
-    - ブロック末尾の式や match の arm の `println!` の一時値を文の終わりで drop していて、Cranelift の検証（値の支配関係）に落ちていた（`if c { println!(..) } else { .. }`）。
-      末尾の式と arm の一時値は、その場で drop するようにした（Rust 2024 と同じ）。
-    - `&&&str` の `len()` が 1 段しか辿らず、0 を返していた。
-    - 比較の右辺の `None` / `Ordering::Less` を場所（ローカル変数）として読もうとしていた。
-  - callgrind: gen1000 のビルドは −2.6%、check は −6.8%、prelude を使う例は +0.4〜1.5%。
-- マージソート・binary_search・clamp の追加時（`examples/sorting.rs`）
-  - sort は 16 個ずつの挿入ソート + 下から上へのマージ（作業領域は realloc で n 要素分）。要素は `read` / `write` でビット移動するので Drop を持つ型でも二重解放しない（valgrind で確認）。
-    20 万要素の `Vec<u64>` の sort が 56 秒 → 0.04 秒になった。
-  - sort を使う例はサイズ予算を上げた（vec_string +3%、ordering +16% など）。マージソートの本体が挿入ソートより大きく、要素型と比較のクロージャごとにインスタンスができるため。
-    vec_string のビルドも +9%（callgrind。コンパイルする関数が増えた分）。sort を使わないプログラムは変わらない（gen1000 は ±0%）。
-  - 途中で見つけた既存のバグ
-    - `&mut u64` / `&u64` を受け手にした整数のメソッド（`s.wrapping_mul(..)`）が、指す先ではなくアドレスを計算していた。
-    - `std::cmp::Ordering::Less` のような 3 段以上のパスのバリアントを、2 段目の名前（`cmp`）で探していた。
-    - 生ポインタの `==` / `!=` が使えなかった。
-- BinaryHeap・sort_by_cached_key の追加時
-  - サイズ予算は既存の項目をどれも変えていない（BinaryHeap は名前があるときだけ付く）。
-  - callgrind: prelude が大きくなった分、プロセスごとに 1 回の prelude の字句解析が +0.5M 命令（hello で +3.8%、約 0.1 ms）。gen1000 のビルドは ±0%。
-    check の計測は 1000 関数で ±8% ほど揺れる（HEAD 同士でも 1.82G〜1.92G）ので、3 回ずつ測って差がないことを見た。
-- BinaryHeap の append / extend の追加時
-  - 型推論が `Vec<T>::extend` の `Item = T` を `v.extend(w.iter())` の `&i32` と単一化して、`v` を `Vec<&i32>` にしていた。extend は引数の要素型（参照なら中身。`&str` は除く）から v の要素型を決めるようにした。
-  - 途中で見つけた既存のバグ：`&&str` の `to_string()` の型を推論できず、`a.iter().map(|s| s.to_string())` のクロージャの戻り値が決まらなかった。
-  - サイズ予算・callgrind（gen1000 / hello / vec_string / binary_heap）はどれも ±1% 以内。
-- よく使う機能をまとめて足した時（`tests/probe.sh`：`tests/probe/*.rs` の小さいプログラムを rustc と比べて通った数を数える。2 / 28 から始めた）
-  - prelude が 4000 行近くになり、プロセスごとに 1 回の prelude の字句解析が hello のビルドの半分（8M 命令）を占めた。
-    分割を build.rs に移し（`src/lexer.rs` をそのまま使う）、prelude の本体は `src/prelude_lib.rs.in` に置いた。hello は 14.9M → 9.3M 命令。
-  - 文字列の helper・演算子の trait で、既存の例のサイズ予算が軒並み超えた（nostd_core のキャッシュ 8.7 KB → 29.7 KB など）。
-    - 整数の `to_ascii_uppercase` や `Option::replace` と同じ名前の helper は、String か文字列リテラルの受け手があるときだけ付ける
-    - 演算子の trait の宣言は手書きの `impl Add for ..` があるときだけ
-    - String の新しいメソッドはジェネリック `<G>` にした（メソッド名だけで生きているとみなされ、Vec の `pop` などで String の `pop` までコンパイルされていた）
-    - chars で回していた helper は UTF-8 を直接読み、イテレータの部品を付けない
-    既存の予算は 1 byte も緩めていない。
-- 浮動小数点・i128・標準入出力・Rc/RefCell・`impl Iterator` の戻り値などを足した時（probe を 73 本に増やし、すべて rustc と一致）
-  - 10 進変換は glibc の `ecvt_r` が桁を間違える場合があったので、1e9 進の多倍長で正確に行う。`examples/float_fuzz.rs`（6000 行）・`examples/int128.rs` の乱数の照合が rustc と一致する。
-  - サイズ予算は、新しい prelude の型を「名前が出たときだけ付ける」（owner の gating）にして、ほとんどの項目を変えずに済ませた。上限を上げたのは iterators（+68 B）・text_more（+0.4%）・hashmap（+0.3%、Iterator の既定メソッドの `cycle` の分）だけ。
-  - callgrind（命令数）：hello は作業前 9.96M → 9.95M（prelude の項目表を作るときの `Vec` の確保をやめて、増えた分を打ち消した）。gen1000 は 2.43G で、HEAD のビルド同士でも ±2% 揺れる範囲で差はない。
-- オーバーフロー検査の追加時
-  - callgrind：gen1000 のビルドは 2.43G → 2.55G 命令（+5%）、`-O` は HEAD と同じ 3.06G。hello は 9.95M → 10.25M（main のハンドラ登録の分）。
-    最初は検査ごとに panic 用の分岐とブロックを作っていて +50%（3.67G）だった。`trapnz` にし、定数の除数・シフト量の検査を省いた。
-  - サイズ：検査の分だけコードが増える（gen1000 のバイナリ 443 KB → 498 KB、`-O` なら増えない）。rustc の debug ビルドと同じ性質の増加なので、予算は UPDATE_BUDGET=1 で取り直した。
-  - 途中で見つけた既存のバグ：`?` で String のエラーを返すと二重解放、`{ return None; }` が `()` 型、enum の `==` が使っていないバリアントのポインタを辿る、`saturating_add` がベクトル用の命令、`struct Node { children: Vec<Node> }` が「無限の大きさ」、`Node<T>` が `Option<Box<Node<T>>>` を持つと具体化が止まらない、char のリテラルパターン、型推論の中で作り直した式のアドレスが codegen のノードと重なる、など。
-  - `|a| a + 1` の戻り値を呼び先の境界 (`B`) で決めようとして、まだ決まっていない `B` を親の型推論より優先していた（`map(|w| w.parse().unwrap())`）。
-- panic のメッセージを種類ごとに出した時
-  - 実行時のハンドラ（表引き・数の書き出し・メッセージ）が std のプログラムに必ず付く分、小さい例のサイズが +3〜6 KB（hello のバイナリ 6.0 KB → 10.0 KB）。
-    最初は +6〜7 KB で、書式つき panic の関数が String / Vec を引き込んでいた（書式化を使うプログラムだけに付けるようにした）・
-    sigaction の構造体を配列の初期化で作っていた（static にした）・メッセージを if の連鎖で選んでいた（繋げた文字列と位置の表にした）のを直した。
-  - 表は最初 1 か所 16 byte で gen1000 のオブジェクトが +15%。オフセット 20 bit・メッセージ番号 13 bit・種類と行と列 31 bit を 1 語に詰めて +8%（キャッシュも同じ形で +5%）。予算は UPDATE_BUDGET=1 で取り直した。
-  - callgrind：gen1000 のビルドは 2.54G → 2.57G（+1%）、`-O` は 3.06G → 3.11G。hello のキャッシュなしのビルドは 10.3M → 29M（ハンドラの関数の parse と codegen。約 4 ms）、キャッシュありの再ビルドは 2.8M → 5.6M。
-  - 途中で見つけた既存のバグ：`__FmtError` が Debug を実装していなかった（`Result<_, fmt::Error>` の unwrap）。
-- 型の違う `==` を PartialEq の trait で解決した時
-  - 名前の付け方：右辺の型が self 型と違う `impl PartialEq<R> for S` のメソッドは `S::<PartialEq<R>>::eq`（Display / Debug の `S::<Display>::fmt` と同じ）。`==` は lt と rt が違うときだけその候補を探すので、同じ型の比較は今までどおり。
-  - 型推論：`==` の両辺が Vec と配列・スライスなら要素どうしを、数のリテラルのときだけ単一化する（`v == [1, 2]` で v: Vec<i64>）。`Vec<String> == Vec<&str>` は単一化しない。
-  - サイズ：配列を比べるプログラムに impl の分が付き、キャッシュは +0.1〜1.7%（enums +256 B など）。callgrind：gen1000・hello ±0%、vec_string +2%（付く prelude の parse）。
-- assert_eq! の left / right の値を出した時
-  - 書式化を使っていなかったプログラムに書式化の部品が付く（options のバイナリ 16.7 KB → 23.9 KB、ビルドは 57M → 125M 命令）。値を `{:?}` で出すのに要る分なので予算は取り直した。gen1000・hello は ±0%。
-  - 途中で見つけた既存のバグ：
-    - panic の場所の行がアイテムの中の行だった（2 番目以降の関数の行がずれる）。dbg! も同じだった。
-    - prelude の名前を何も使わないプログラム（traits など）には panic のハンドラが付かず、panic が SIGILL（終了コード 132）だった。
-    - `&None` を変数の借用として扱っていた。
-- イテレータ・Vec・clone の追加時
-  - **これまで `#[derive(Clone)]` の型の `.clone()` は使えず、`Vec<String>` の clone と `cloned()` はビットごとのコピー（二重解放）だった**。clone の glue を足して直した。
-  - 新しいアダプタ（Rev / Peekable / FlatMap など）の `impl Iterator` が、イテレータを使うプログラムに全部付いていた。その struct が要るときだけにした。
-    書式化の Formatter の `fill` フィールドが `Vec::fill` を引いて clone 一式まで付いていたので、フィールド名を変えた。既存の予算は緩めていない。
-  - `vec![..].join(..)` の一時値の Vec を drop していなかった（valgrind で見つけた）。
-  - callgrind: gen1000 ±0%、hello +2.5%、vec_string / iterators / hashmap は +0.5〜1%。
-- マクロの引数の中のクロージャの追加時
-  - 要約と codegen が `|` を含むマクロの引数だけを parse してクロージャを数える。callgrind は gen1000 +0.2%、iterators +0.7%、formatting ±0%。
-  - 型推論は `vec![..]` の引数を parse し直したノードを推論の終わりまで持ち、クロージャの本体を呼び先の境界が分かるまで後回しにできるようにした（`vec![v.iter().map(|x| x * x).sum::<i32>(); 2]`）。
+- Size
+  - Adding enums made item summaries grow by 1 byte/item. Fixed by packing the item summary encoding.
+  - The "checked" mark grew by 4 bytes/function. It is now not written when empty.
+  - The whole prelude was being attached, so every cache grew by about 2.3 KB. Now only what is used is attached.
+  - The field names `min` / `max` pulled in the functions of `core::cmp`. Now only when the identifier `core` appears.
+- Speed
+  - no_std support made LSP 1-function edits +31% slower and no-op builds +10% slower.
+  - To remove noise depending on the time of day, the baseline commit was benchmarked at the same time in a worktree, and the cause was narrowed down with callgrind.
+  - What was fixed: hashing all identifiers every time (prelude selection), the LSP hashing the whole file contents, and SipHash in the name table.
+  - The name table was switched to our own FxHasher. It is not used for cache keys.
+  - As a result, LSP 1-function edits became −7% and no-op builds −4%, faster than the baseline.
+- Correctness (when adding closures and dyn; found by adding a stage to `tests/compare.sh` that compares both "no cache" and "rebuild from cache")
+  - Closures in the same function all get the same struct deep hash (= the parent item's hash) and signature. So the cache keys of `consume::<closure#8>` and `consume::<closure#9>` collided, and the second build used another closure's machine code. Fixed by putting the closure's name in the key.
+  - vtables were defined as zero-init, so they were placed in `.bss`, relocations were not applied, and null was called.
+- Speed (when adding closures and dyn)
+  - An A/B against HEAD showed +4% on LSP 1-function edits. The causes were a `Vec` clone per type inference call and including names in struct hashes; both were removed.
+  - By callgrind instruction counts, 1-function edits (`Session::check`) became fewer than HEAD. didOpen (cold) was about +2%, with no significant difference in criterion either.
+- When adding function pointers and Box
+  - `Ty` had grown from 16 → 24 bytes (because the earlier `Dyn(&'static str)` was a fat pointer). Changed to `&'static String` to get back to 16 bytes.
+  - criterion showed LSP 1-function edits +14% and lexer +10%. But the lexer code had not changed.
+  - callgrind showed that `b"..".contains(&c)` in `lexer::St::tok` had become a memchr. The call count was the same; only the instruction count grew by +32% (a difference in the placement of static strings).
+  - Switching to `matches!` gave, versus the baseline, LSP 1-function edits −5%, no-op builds −13%, lexer −6%.
+- When adding Drop (added a valgrind stage to `tests/compare.sh`: it fails on memory errors and definite leaks)
+  - Reading `*b` was treated as a move of `b`, and the Box leaked. The contents of a deref are now read without moving.
+  - `self.top = n.next` (moving only a field of the Box contents) treated the whole `n` as moved, so nodes leaked.
+    The moved field is now filled with 0 (a null Box / `None`), and the owner is dropped normally.
+  - Two existing bugs were also found.
+    - Returning `&Rect { .. }` as `&'static` pointed to a temporary on the stack. Constant expressions are now promoted to static data, as in rustc.
+    - The type of the tuple struct field `n.0` was not inferred.
+  - Programs that use neither Box nor Drop generate no drop handling at all (`Program::has_drop`). Speed and size budgets do not change.
+- When adding Vec / String
+  - criterion showed +20–40% on almost every item, but the unchanged lexer was just as slow; it was noise from machine load.
+    Measured side by side with HEAD in the same time slot, it was within about ±10% noise. callgrind instruction counts were also at or below HEAD.
+  - The only real increase was prelude selection (+26%). The cause was more prelude names, which made the candidate tables per first byte longer. Switched to a table looked up by (first byte, length), bringing it below HEAD.
+  - `==` does not appear as an identifier, so the prelude's `Vec::eq` / `String::eq` were not attached, and pointers were compared. eq is now attached together with the type, and also added to the reachability roots.
+- When adding Iterator
+  - Size budgets were exceeded in almost every example (hello's cache went from 3.2 KB → 10.8 KB). `for x in v.iter()`, the variable name `count`, `a.max(b)`, `Option::take` and the field `.next` pulled in all the iterator parts.
+    The conditions for attaching were narrowed, e.g. to "a call that creates an iterator followed by an adapter or consuming method", so the existing examples pass without loosening their budgets by even 1 byte.
+  - On LSP 1-function edits, prelude selection was +63% (because there were more candidate names). The result is now remembered in the Session per item hash, and unchanged items are not scanned. In callgrind, `Session::check` is below HEAD.
+  - Type inference recorded the types of macro arguments it parsed temporarily by address, so nodes created by codegen landed on freed addresses and looked up the type of another expression (`&str`). Temporary nodes are no longer recorded.
+  - Editing one closure rebuilt 65 instances of the map etc. that receive it. Removing the parent item's hash from the closure struct's deep hash brought this to 18 (just the parent and the closures).
+- When adding format! / HashMap
+  - nostd_core's cache went from 8.7 KB → 22.7 KB. `write` in a raw pointer's `p.write(v)` and `a.max(b)` pulled in all the formatting parts and String / Vec.
+    Formatting macro names are now counted only in the form `name!`, and `__exr_str_cmp` is no longer attached for max / min.
+  - iterators got HashMap's iterators (`HmIter` etc., on the `impl Iterator for` side). These are also attached only when the HashMap name is present.
+  - The formatting helpers (`__exr_fmt_int` etc.) were made generic `<G>` and removed from the roots. Only the ones called are compiled, as instances.
+    Non-generic functions called from instance bodies (`__exr_print` → `putchar`) are picked up by expanding the live set after each codegen wave.
+  - The only budget loosened was vec_string's cache (45.0 KB → 48.5 KB). For `name.to_string()`, the receiver type is not known at selection time (integers need Display), so the formatting parts get attached.
+  - callgrind: gen1000 build +0.15%, check −4%. Examples that use a lot of the prelude grew (iterators +5%, vec_string +15%, due to more prelude being attached).
+- When adding ordering comparisons (PartialOrd / Ord)
+  - Always attaching the comparison glue (`__exr_cmp`) made the caches of small examples grow by 20 bytes each and exceed the budgets.
+    Recursive types go through Box / Vec, so the glue is attached only to programs that use those, and elsewhere codegen expands comparisons in place.
+  - `cmp` in `use core::cmp::{max, min}` and the bound `T: Ord` attached the trait declaration and `Ordering`. `cmp::` is no longer counted as a path, and the trait declaration is attached only when there is a hand-written `impl Ord for`. No existing budget was loosened by even 1 byte.
+  - Existing bugs found along the way
+    - Temporaries of `println!` in a block's tail expression or in a match arm were dropped at the end of the statement, which failed Cranelift's verifier (value dominance) (`if c { println!(..) } else { .. }`).
+      Temporaries in tail expressions and match arms are now dropped on the spot (the same as Rust 2024).
+    - `len()` on `&&&str` followed only one level and returned 0.
+    - `None` / `Ordering::Less` on the right side of a comparison were read as places (local variables).
+  - callgrind: gen1000 build −2.6%, check −6.8%, examples that use the prelude +0.4–1.5%.
+- When adding merge sort, binary_search and clamp (`examples/sorting.rs`)
+  - sort is insertion sort in groups of 16 + bottom-up merging (the work area is n elements via realloc). Elements are moved bitwise with `read` / `write`, so there is no double free even for types with Drop (checked with valgrind).
+    sort of a 200,000-element `Vec<u64>` went from 56 seconds → 0.04 seconds.
+  - Size budgets were raised for examples that use sort (vec_string +3%, ordering +16%, etc.). The merge sort body is larger than insertion sort, and there is an instance per element type and comparison closure.
+    vec_string's build is also +9% (callgrind; due to more functions to compile). Programs that do not use sort do not change (gen1000 ±0%).
+  - Existing bugs found along the way
+    - Integer methods with a `&mut u64` / `&u64` receiver (`s.wrapping_mul(..)`) computed on the address instead of the pointee.
+    - Variants with paths of 3 or more segments, like `std::cmp::Ordering::Less`, were looked up by the second segment's name (`cmp`).
+    - `==` / `!=` on raw pointers did not work.
+- When adding BinaryHeap and sort_by_cached_key
+  - No existing size budget item changed (BinaryHeap is attached only when its name is present).
+  - callgrind: since the prelude got larger, the once-per-process lexing of the prelude is +0.5M instructions (+3.8% on hello, about 0.1 ms). gen1000 build ±0%.
+    The check measurement has about ±8% noise at 1000 functions (even HEAD vs HEAD gives 1.82G–1.92G), so it was measured 3 times each to confirm there was no difference.
+- When adding BinaryHeap append / extend
+  - Type inference unified `Item = T` of `Vec<T>::extend` with the `&i32` of `v.extend(w.iter())`, making `v` a `Vec<&i32>`. extend now decides v's element type from the argument's element type (the pointee for references, except `&str`).
+  - Existing bug found along the way: the type of `to_string()` on `&&str` could not be inferred, so the return value of the closure in `a.iter().map(|s| s.to_string())` was not determined.
+  - Size budgets and callgrind (gen1000 / hello / vec_string / binary_heap) were all within ±1%.
+- When adding commonly used features in bulk (`tests/probe.sh`: compares small programs in `tests/probe/*.rs` against rustc and counts how many pass; it started at 2 / 28)
+  - The prelude reached nearly 4000 lines, and the once-per-process lexing of the prelude took half of hello's build (8M instructions).
+    The splitting was moved to build.rs (using `src/lexer.rs` as-is), and the prelude body was put in `src/prelude_lib.rs.in`. hello went from 14.9M → 9.3M instructions.
+  - The string helpers and operator traits made the size budgets of existing examples exceed across the board (nostd_core's cache 8.7 KB → 29.7 KB, etc.).
+    - Helpers with the same names as integer `to_ascii_uppercase` or `Option::replace` are attached only when there is a String or string literal receiver
+    - Operator trait declarations only when there is a hand-written `impl Add for ..`
+    - New String methods were made generic `<G>` (they were considered live by method name alone, so Vec's `pop` etc. caused String's `pop` to be compiled too)
+    - Helpers that looped over chars now read UTF-8 directly and do not attach the iterator parts
+    No existing budget was loosened by even 1 byte.
+- When adding floating point, i128, standard I/O, Rc/RefCell, `impl Iterator` return values, etc. (probe increased to 73 programs, all matching rustc)
+  - Decimal conversion with glibc's `ecvt_r` sometimes got digits wrong, so it is done exactly with base-1e9 multi-precision arithmetic. The random cross-checks of `examples/float_fuzz.rs` (6000 lines) and `examples/int128.rs` match rustc.
+  - For size budgets, new prelude types are "attached only when their name appears" (owner gating), so most items did not need to change. The limits were raised only for iterators (+68 B), text_more (+0.4%) and hashmap (+0.3%, for `cycle`, a default method of Iterator).
+  - callgrind (instruction counts): hello went from 9.96M before the work → 9.95M (dropping a `Vec` allocation when building the prelude item table offset the increase). gen1000 is 2.43G, with no difference within the ±2% noise seen even between HEAD builds.
+- When adding overflow checks
+  - callgrind: gen1000 build 2.43G → 2.55G instructions (+5%); `-O` is 3.06G, the same as HEAD. hello 9.95M → 10.25M (for registering the handler in main).
+    At first, each check created its own panic branch and block, giving +50% (3.67G). Switched to `trapnz`, and skipped checks for constant divisors and shift amounts.
+  - Size: code grows by the amount of the checks (gen1000's binary 443 KB → 498 KB; no growth with `-O`). This is the same kind of growth as rustc debug builds, so the budgets were re-recorded with UPDATE_BUDGET=1.
+  - Existing bugs found along the way: double free when returning a String error with `?`, `{ return None; }` having type `()`, enum `==` following pointers of unused variants, `saturating_add` using a vector instruction, `struct Node { children: Vec<Node> }` being "infinitely sized", instantiation never stopping when `Node<T>` holds `Option<Box<Node<T>>>`, char literal patterns, the addresses of expressions rebuilt inside type inference overlapping codegen nodes, and so on.
+  - When trying to decide the return value of `|a| a + 1` from the callee's bound (`B`), the not-yet-determined `B` was given priority over the parent's type inference (`map(|w| w.parse().unwrap())`).
+- When emitting panic messages per kind
+  - The runtime handler (table lookup, number printing, messages) is always attached to std programs, so small examples grew by +3–6 KB (hello's binary 6.0 KB → 10.0 KB).
+    At first it was +6–7 KB. Fixed: the formatted panic function pulled in String / Vec (it is now attached only to programs that use formatting),
+    the sigaction struct was built by array initialization (made static), and messages were selected with an if chain (changed to a concatenated string and a position table).
+  - The table was at first 16 bytes per location, making gen1000's object +15%. Packing a 20-bit offset, 13-bit message number, and 31 bits of kind, line and column into one word made it +8% (the cache, in the same form, +5%). The budgets were re-recorded with UPDATE_BUDGET=1.
+  - callgrind: gen1000 build 2.54G → 2.57G (+1%), `-O` 3.06G → 3.11G. hello's no-cache build 10.3M → 29M (parsing and codegen of the handler functions; about 4 ms), rebuild with cache 2.8M → 5.6M.
+  - Existing bug found along the way: `__FmtError` did not implement Debug (unwrap of `Result<_, fmt::Error>`).
+- When resolving `==` between different types via the PartialEq trait
+  - Naming: methods of `impl PartialEq<R> for S` whose right-hand type differs from the self type are named `S::<PartialEq<R>>::eq` (the same as `S::<Display>::fmt` for Display / Debug). `==` looks for that candidate only when lt and rt differ, so same-type comparisons work as before.
+  - Type inference: when both sides of `==` are a Vec and an array or slice, the elements are unified only when they are numeric literals (`v == [1, 2]` with v: Vec<i64>). `Vec<String> == Vec<&str>` is not unified.
+  - Size: programs that compare arrays get the impl attached, and caches are +0.1–1.7% (enums +256 B, etc.). callgrind: gen1000 and hello ±0%, vec_string +2% (parsing of the attached prelude).
+- When printing the left / right values of assert_eq!
+  - Programs that did not use formatting get the formatting parts attached (options' binary 16.7 KB → 23.9 KB, build 57M → 125M instructions). This is what is needed to print the values with `{:?}`, so the budgets were re-recorded. gen1000 and hello ±0%.
+  - Existing bugs found along the way:
+    - The line of a panic location was the line within the item (lines of the second and later functions were off). dbg! had the same problem.
+    - Programs that use no prelude names at all (traits etc.) did not get the panic handler, so a panic was SIGILL (exit code 132).
+    - `&None` was treated as a borrow of a variable.
+- When adding iterators, Vec and clone
+  - **Until now, `.clone()` on `#[derive(Clone)]` types did not work, and clone of `Vec<String>` and `cloned()` were bitwise copies (double free)**. Fixed by adding clone glue.
+  - The `impl Iterator` of the new adapters (Rev / Peekable / FlatMap etc.) were all attached to any program that used iterators. Now only when that struct is needed.
+    The Formatter's `fill` field in formatting pulled in `Vec::fill` and the whole clone set, so the field was renamed. No existing budget was loosened.
+  - The temporary Vec in `vec![..].join(..)` was not dropped (found with valgrind).
+  - callgrind: gen1000 ±0%, hello +2.5%, vec_string / iterators / hashmap +0.5–1%.
+- When adding closures inside macro arguments
+  - The item summary and codegen parse only macro arguments that contain `|` to count closures. callgrind: gen1000 +0.2%, iterators +0.7%, formatting ±0%.
+  - Type inference keeps the re-parsed nodes of `vec![..]` arguments until the end of inference, so closure bodies can be deferred until the callee's bound is known (`vec![v.iter().map(|x| x * x).sum::<i32>(); 2]`).

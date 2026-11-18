@@ -1,12 +1,12 @@
-# セルフホストの第 3 段階: prelude.rs
+# Self-hosting stage 3: prelude.rs
 
-日付: 2026-11-15
+Date: 2026-11-15
 
-- `include_str!("..")` / `include_bytes!("..")`（入力ファイルからの相対パス。中身はエスケープして 1 行のリテラルにする）
-- `std::sync::OnceLock`（`get_or_init` / `get` / `set`）。mut でない static も書き込める所に置く（内部可変性）
-- `str::rsplit` / `rsplit_once` / `match_indices`、クロージャのパターンの `starts_with` / `ends_with`、`Iterator::find_map`
-- 要素が整数などでないスライスの `contains`（`NAMES.contains(&w)`、PartialEq で比べる）
-- 参照の列の `flatten`（`map.get(k)` の `&Vec<T>` などを `&T` で順に）
-- const のパターン（`Some(BOX_FREE) | Some(DROP_GLUE)`、初期値がリテラルの const）
-- `&s[a..b]`（s: &str / String）の型推論、`matches!` の中のメソッドの連鎖（parse し直した式の型を位置で引く）
-- 修正：`a || f(&format!(..))` の右辺の一時値の drop フラグが、右辺を通らないとき初期化されていなかった（入口で 0 にする）
+- `include_str!("..")` / `include_bytes!("..")` (paths relative to the input file; the contents are escaped into a one-line literal)
+- `std::sync::OnceLock` (`get_or_init` / `get` / `set`). Non-mut statics are also placed in writable memory (interior mutability)
+- `str::rsplit` / `rsplit_once` / `match_indices`, `starts_with` / `ends_with` with closure patterns, `Iterator::find_map`
+- `contains` on slices whose elements are not integers etc. (`NAMES.contains(&w)`, compared with PartialEq)
+- `flatten` over a sequence of references (yielding `&T` in order from a `&Vec<T>` from `map.get(k)` etc.)
+- const patterns (`Some(BOX_FREE) | Some(DROP_GLUE)`, consts whose initial value is a literal)
+- Type inference for `&s[a..b]` (s: &str / String), method chains inside `matches!` (the type of a re-parsed expression is looked up by position)
+- Fix: the drop flag of a temporary on the right side of `a || f(&format!(..))` was not initialized when the right side was not evaluated (it is now set to 0 at the entry)

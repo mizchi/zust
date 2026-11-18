@@ -1,11 +1,11 @@
 # 実験のレポート
 
-zustc / zust-analyzer の作業の記録 (日付順)。数値はそれぞれの時点のもの。
+zustc / zust-analyzer の作業の記録 (日付順)。数値はそれぞれの時点のもの。英語版は [../../reports/](../../reports/README.md)。
 
 | 日付 | レポート |
 |---|---|
 | 2026-11-14 | [調査メモ: blaze / relax / wild](2026-11-14-01-blaze-relax-wild-survey.md) |
-| 2026-11-15 | [N = 1000 関数（320KB）](2026-11-15-01-incremental-bench.md) |
+| 2026-11-15 | [生成したプログラムのインクリメンタルビルド (N = 1000 / 5000)](2026-11-15-01-incremental-bench.md) |
 | 2026-11-15 | [rustc との比較（2026-11-15 時点。オーバーフロー検査・panic のメッセージなどを足した後）](2026-11-15-02-vs-rustc.md) |
 | 2026-11-15 | [インクリメンタルビルドのディスク使用量](2026-11-15-03-incremental-disk-usage.md) |
 | 2026-11-15 | [本物の rustc との比較（`python3 bench/vs_rustc.py`）](2026-11-15-04-vs-real-rustc.md) |

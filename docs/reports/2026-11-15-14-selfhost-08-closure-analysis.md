@@ -1,11 +1,11 @@
-# セルフホストの第 8 段階: クロージャ解析を自前の構文木へ移す
+# Self-hosting stage 8: moving closure analysis to the own syntax tree
 
-日付: 2026-11-15
+Date: 2026-11-15
 
-- `src/ast_closure.rs`：closure.rs（syn の構文木）と同じ解析（本体の中のクロージャを前順に、マクロの引数の中も・自由変数・
-  キャプチャを値として使うか）を src/parse.rs の構文木の上で行う。`tests/ast_closure.rs` が全ファイルの 1273 個のクロージャで syn 版と一致することを確かめる
-- 修正：値として渡す変数と代入する変数が混ざったクロージャ（`|| { r = cnt(caps); }`）は全部を値でキャプチャしていたので、外の `r` が変わらなかった
-  （代入するキャプチャがあれば参照で持つ）
-- 修正：型推論で `&Vec<T>` を `&[T]` の引数に渡すと参照どうしを同じ型にしていたので、クロージャがキャプチャした `&Vec<T>` が `&[T]` として扱われた
-- 修正：`matches!(x, p if guard)` の guard の中の変数をキャプチャに数えていなかった
-- `&Box<T>` / `&&T` を `&dyn FnMut(&T)` の引数に渡す（deref の強制変換）
+- `src/ast_closure.rs`: performs the same analysis as closure.rs (on syn's syntax tree) (closures in a body in pre-order, including inside macro arguments; free variables;
+  whether a capture is used as a value) on the syntax tree of src/parse.rs. `tests/ast_closure.rs` checks that it matches the syn version on all 1273 closures across all files
+- Fix: a closure mixing variables passed as values and variables that are assigned (`|| { r = cnt(caps); }`) captured everything by value, so the outer `r` did not change
+  (if any capture is assigned, it is held by reference)
+- Fix: passing `&Vec<T>` to a `&[T]` argument made type inference unify the two references as the same type, so a `&Vec<T>` captured by a closure was treated as `&[T]`
+- Fix: variables inside the guard of `matches!(x, p if guard)` were not counted as captures
+- Passing `&Box<T>` / `&&T` to a `&dyn FnMut(&T)` argument (deref coercion)

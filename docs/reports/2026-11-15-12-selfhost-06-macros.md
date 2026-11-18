@@ -1,9 +1,9 @@
-# セルフホストの第 6 段階: macros.rs
+# Self-hosting stage 6: macros.rs
 
-日付: 2026-11-15
+Date: 2026-11-15
 
-- struct と同じ名前のバリアント（`TokenTree::Punct(Punct { .. })`：裸の名前は struct を優先）
-- `&a == &b`（a, b が struct などの参照どうし）、`impl PartialEq` と `impl PartialEq<str>` の両方
-- `Option::flatten`、HashMap の `clone`（以前は浅いコピーで二重解放になっていた）、`String::replace_range` / `into_bytes`
-- 修正：`None` などの大文字の名前のパターンをクロージャのキャプチャ候補に数えていた
-- 修正：`include_str!` の展開が、同じ行の 2 つ目以降のコメント・文字列の中のものも展開していた
+- Variants with the same name as a struct (`TokenTree::Punct(Punct { .. })`: a bare name prefers the struct)
+- `&a == &b` (a, b references to structs etc.), both `impl PartialEq` and `impl PartialEq<str>`
+- `Option::flatten`, HashMap `clone` (before, it was a shallow copy and caused a double free), `String::replace_range` / `into_bytes`
+- Fix: uppercase names in patterns, such as `None`, were counted as closure capture candidates
+- Fix: `include_str!` expansion also expanded occurrences inside the second and later comments and strings on the same line

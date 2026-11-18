@@ -1,11 +1,11 @@
-# セルフホストの第 7 段階: 自前の構文解析 (syn から離れる土台)
+# Self-hosting stage 7: own parser (groundwork for moving away from syn)
 
-日付: 2026-11-15
+Date: 2026-11-15
 
-- `src/parse.rs`：外部クレートなしの Rust の字句・構文解析（アイテム・型・パターン・式・文。優先順位、`if` の頭の struct リテラル、
-  `>>` とジェネリクス、let チェーン、ラベル、クロージャ、マクロの呼び出しはトークン列のまま）。zustc がコンパイルできる書き方で書いてある
-- `tests/parse.rs`：probe / examples / src の全ファイルで、節の種類ごとの数 (22 種) が syn で数えたものと一致する
-- 後で代入する `let x;`（0 で埋めて置く）
-- 修正：非ジェネリックな enum のフィールドの `Option<T>` が、T の大きさが決まる前に配置されてフィールドが重なっていた
-  （再帰する構文木で起きる。インスタンスを取り直した後、非ジェネリックな定義も取り直す）
-- 修正：ユーザの `struct Path` が prelude の `type Path = str` に負けていた
+- `src/parse.rs`: lexing and parsing of Rust with no external crates (items, types, patterns, expressions, statements; precedence, struct literals in `if` heads,
+  `>>` and generics, let chains, labels, closures; macro calls stay as token sequences). It is written in a style that zustc can compile
+- `tests/parse.rs`: on every file in probe / examples / src, the count per node kind (22 kinds) matches the count from syn
+- `let x;` assigned later (it is set up filled with 0)
+- Fix: an `Option<T>` field of a non-generic enum was laid out before the size of T was known, so fields overlapped
+  (this happens with recursive syntax trees; after re-taking the instances, the non-generic definitions are re-taken too)
+- Fix: a user `struct Path` lost to the prelude's `type Path = str`

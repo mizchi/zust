@@ -1,11 +1,11 @@
-# セルフホストの第 2 段階: enc.rs + fxhash.rs
+# Self-hosting stage 2: enc.rs + fxhash.rs
 
-日付: 2026-11-15
+Date: 2026-11-15
 
-- trait の静的呼び出し：`Enc::dec(r)?`・`T::dec(r)`（Self は期待される型・型推論から）、ジェネリックな impl（`impl<T: Enc> Enc for Vec<T>` / `impl<A, B> Enc for (A, B)`）への静的ディスパッチと単相化
-- `Trait::m(&x, ..)` / `crate::m::Trait::m(..)`（self を取るメソッド）はメソッド呼び出しとして
-- スライス → 配列の `try_into`（`u64::from_le_bytes(b[..8].try_into().unwrap())`、`TryFromSliceError`）、`get(a..b)` / `get_mut(a..b)`（Vec・配列・スライス）
-- `S::default()` / `<S>::default()` / `m::S::default()` / ジェネリックな別名 `FxMap::default()`
-- `HashMap<K, V, BuildHasherDefault<H>>` / `HashSet<K, S>`（ハッシャの型引数は受け付けて、既定のハッシュを使う。反復順は std と違う）
-- `macro_rules!`：`$t:ty { .. }` のように後ろに括弧が続くフラグメント、`$crate`、`crate::m!(..)` の呼び出し
-- ユーザ定義の trait をタプルに実装（`impl<A, B> Tr for (A, B)`）
+- Static trait calls: `Enc::dec(r)?`, `T::dec(r)` (Self from the expected type / type inference), static dispatch and monomorphization for generic impls (`impl<T: Enc> Enc for Vec<T>` / `impl<A, B> Enc for (A, B)`)
+- `Trait::m(&x, ..)` / `crate::m::Trait::m(..)` (methods that take self) are treated as method calls
+- Slice → array `try_into` (`u64::from_le_bytes(b[..8].try_into().unwrap())`, `TryFromSliceError`), `get(a..b)` / `get_mut(a..b)` (Vec, arrays, slices)
+- `S::default()` / `<S>::default()` / `m::S::default()` / the generic alias `FxMap::default()`
+- `HashMap<K, V, BuildHasherDefault<H>>` / `HashSet<K, S>` (the hasher type argument is accepted, and the default hash is used; iteration order differs from std)
+- `macro_rules!`: fragments followed by brackets, like `$t:ty { .. }`, `$crate`, calls of the form `crate::m!(..)`
+- Implementing user-defined traits for tuples (`impl<A, B> Tr for (A, B)`)

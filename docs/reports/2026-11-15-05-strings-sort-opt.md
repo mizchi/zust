@@ -1,26 +1,26 @@
-# strings と sort の `-O` を速くした時
+# Making strings and sort faster with `-O`
 
-日付: 2026-11-15
+Date: 2026-11-15
 
-| | 前 | 後 | rustc -O |
+| | Before | After | rustc -O |
 |---|---:|---:|---:|
 | strings `-O` | 141 ms | **73 ms** | 34 ms |
 | sort `-O` | 550 ms | **195 ms** | 190 ms |
-| strings（debug） | 259 ms | 113 ms | （rustc debug 121 ms） |
-| sort（debug） | 725 ms | 252 ms | （rustc debug 1983 ms） |
+| strings (debug) | 259 ms | 113 ms | (rustc debug 121 ms) |
+| sort (debug) | 725 ms | 252 ms | (rustc debug 1983 ms) |
 
-- 書式化（callgrind で整数の書式化が 41%）：
-  - `{}` の整数（10 進・幅と符号の指定なし）は、桁を後ろから詰めてまとめて足す（一時の String と 1 文字ずつの push をやめた。10 の割り算は掛け算になる）
-  - `format!` の String は、決まった部分の長さ + 引数 1 つあたり 8 byte を先に確保する
-  - `Vec::truncate` は drop の要らない要素なら長さを変えるだけ（`core::mem::needs_drop` を足した）。`extend_from_slice` は memcpy
-  - 整数の定数で埋める配列（`[0u8; 24]`）は 8 byte ずつ書き、アラインメントの小さい集約型の写しも 8 byte ずつ（前は 1 byte ずつ）
-  - `split` の next はフィールドをローカルに写してから回す
-- sort：
-  - 64 bit 以下の整数の `sort` と、キーが整数の `sort_by_key` は、安定な LSD 基数ソート（全要素で同じバイトの桁は飛ばす）。
-    sort_by_key のキーの関数は要素ごとに 1 回だけ呼ぶ（std は比較ごとに呼ぶので、呼ばれる回数は std と違う）。
-    （キーを 1 回だけ計算してから添字や (キー, 添字) を並べる方法も試したが、並べ替えのランダムな読み書きで遅くなった）
-  - prelude の型ごとの分岐（`if __exr_int_kind::<T>() == 0` / `needs_drop::<T>()`）は、型で決まるので使わない側をコンパイルしない（インスタンスも作らない）
-- サイズ：整数を sort するプログラムは基数ソートの分が付く（sorting のバイナリ +42%、ordering のキャッシュ +49%）。書式化を使うプログラムも少し増える。予算は取り直した。
-- キャッシュに残ったもの：panic の場所の表（1 か所 4〜5 byte）、リロケーション、要約（21 KB）、エントリの索引（1 件 20 byte、約 40 KB）。整数は可変長で、オフセットと行は前の値との差で書く。
+- Formatting (callgrind showed integer formatting at 41%):
+  - For integers in `{}` (decimal, no width or sign specifier), fill the digits from the back and append them all at once (no more temporary String and per-character push; division by 10 becomes a multiplication)
+  - The String of `format!` reserves the length of the fixed parts + 8 bytes per argument up front
+  - `Vec::truncate` only changes the length if the elements need no drop (added `core::mem::needs_drop`). `extend_from_slice` is a memcpy
+  - Arrays filled with an integer constant (`[0u8; 24]`) are written 8 bytes at a time, and copies of aggregates with small alignment are also 8 bytes at a time (before, 1 byte at a time)
+  - `split`'s next copies the fields into locals before looping
+- sort:
+  - `sort` on integers of 64 bits or less, and `sort_by_key` with an integer key, use a stable LSD radix sort (digits whose byte is the same in all elements are skipped).
+    sort_by_key calls the key function only once per element (std calls it per comparison, so the number of calls differs from std).
+    (I also tried computing the keys once and then sorting indices or (key, index) pairs, but the random reads and writes of the permutation made it slower)
+  - Per-type branches in the prelude (`if __exr_int_kind::<T>() == 0` / `needs_drop::<T>()`) are decided by the type, so the unused side is not compiled (and no instances are created)
+- Size: programs that sort integers get the radix sort added (sorting's binary +42%, ordering's cache +49%). Programs that use formatting also grow a little. The budgets were re-recorded.
+- What remains in the cache: the panic location table (4–5 bytes per location), relocations, item summaries (21 KB), the entry index (20 bytes per entry, about 40 KB). Integers are variable-length, and offsets and lines are written as differences from the previous value.
 
-zustc のバイナリはシンボルを持たない（strip しても同じ大きさ）。rustc は std を静的にリンクするので、strip しても 335 KiB 以上ある。zustc は使う部分の prelude だけをコンパイルし、libc を動的にリンクするので、rustc の 1/10〜1/30 になる。
+zustc binaries have no symbols (stripping gives the same size). rustc links std statically, so even after strip it is 335 KiB or more. zustc compiles only the parts of the prelude that are used and links libc dynamically, so its binaries are 1/10–1/30 of rustc's.

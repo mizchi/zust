@@ -1,94 +1,94 @@
-# 調査メモ: blaze / relax / wild
+# Survey notes: blaze / relax / wild
 
-日付: 2026-11-14
+Date: 2026-11-14
 
-zustc の設計に使うため、3 つのプロジェクトを読んで整理した（2026-11-14 時点の main をソースで読んだだけで、ビルドはしていない。wild だけは crates.io の 0.10.0 を入れて実際に使った）。
+To use in the design of zustc, I read three projects and organized the findings (I only read the source of main as of 2026-11-14 and did not build them. Only wild was actually used, by installing 0.10.0 from crates.io).
 
 - blaze: https://github.com/indexable-inc/blaze
 - relax: https://github.com/makepad/relax
 - wild: https://github.com/wild-linker/wild
 
-## 一覧
+## Overview
 
 | | blaze | relax | wild |
 |---|---|---|---|
-| 何か | cargo の代わり。常駐 daemon が rustc を使わずにビルドする | Rust の JIT とライブコンパイラ | 高速な ELF リンカ |
-| フロントエンド | rust-analyzer の fork（rowan、hir-def/hir-ty）。trait solver は rustc から vendor | 全部自前（lexer、Pratt parser、rustc から移植した typeck と next-solver）。依存クレートなし | - |
-| IR | HIR → MIR → (CLIF / LIR) | typeck::Body → RIR（非 SSA の vreg、CFG） | - |
-| バックエンド | 今は MIR → CLIF。v2 では開発ビルドを copy-and-patch stencil、リリースを LLVM にする方針で、ネイティブコード生成に Cranelift は使わない | 自前（interp → O1 → O3、linear scan regalloc） | - |
-| コンパイル単位 | 単相化した関数インスタンス 1 個 | 関数インスタンス 1 個（初回呼び出しで lazy に） | 入力セクション |
-| キャッシュキー | BLAKE3 で、本体を α 正規化しスパンは入れない。callee は interface hash だけ | 128bit。compiler ID + インスタンス + 依存の interface 指紋 + 本体 | - |
-| リンク | 自前リンカ（約 89k 行）。in-place patch とジャンプテーブル | リンカなし（JIT）。startup image あり | 並列。`--gc-sections` は既定で有効、ICF なし、LTO はプラグイン経由のみ |
+| What it is | A replacement for cargo. A resident daemon builds without using rustc | A Rust JIT and live compiler | A fast ELF linker |
+| Frontend | A fork of rust-analyzer (rowan, hir-def/hir-ty). The trait solver is vendored from rustc | All its own (lexer, Pratt parser, typeck and next-solver ported from rustc). No dependency crates | - |
+| IR | HIR → MIR → (CLIF / LIR) | typeck::Body → RIR (non-SSA vregs, CFG) | - |
+| Backend | Currently MIR → CLIF. v2 plans copy-and-patch stencils for dev builds and LLVM for release builds, and will not use Cranelift for native code generation | Its own (interp → O1 → O3, linear scan regalloc) | - |
+| Compilation unit | One monomorphized function instance | One function instance (lazily, on first call) | Input sections |
+| Cache key | BLAKE3, with the body α-normalized and no spans. Callees by interface hash only | 128bit. compiler ID + instance + interface fingerprints of dependencies + body | - |
+| Linking | Its own linker (about 89k lines). In-place patching and jump tables | No linker (JIT). Has a startup image | Parallel. `--gc-sections` is on by default, no ICF, LTO only via plugins |
 
-## blaze から真似できること
+## What can be copied from blaze
 
-1. **関数単位キャッシュ + callee は interface hash だけ**（`crates/blaze-codegen/src/template.rs`）。
-   コンパイル済みコードは callee を「参照リストの位置」で持つので、callee の本体を編集しても caller は再コンパイルされない。リロケーションの名前が付け替わるだけ。
-   → zustc でそのまま採用した（`Blob` のリロケーションは関数 ID か名前で持つ）。
-2. **本体ハッシュに空白・コメント・スパンを入れない**（`docs/v2/plan/design/item-hash.md`）。
-   blaze はさらにローカル変数を de Bruijn 風の index に α 正規化するので、ローカル変数のリネームでも無効化されない。
-   → zustc は lexer レベルの正規化まで。α 正規化はまだ。
-3. **到達可能性**：main、テスト、export から到達するものだけをコンパイルする。
-4. **ICF とポリモーフ化はリンカではなくコンパイラでやる**：
-   - レイアウト（size/align/ABI）でキーを作るので `Vec<A>` と `Vec<B>` が共有できる。
-   - コード + リロケーション先のハッシュで同一関数を畳む（`dedupe.rs`）。
-   - 定数だけが違う関数をパラメータ化する（`fold.rs`）。
-5. **開発ビルドではシンボル名を短いハッシュにし、line table だけにする**。
-6. **増分リンク**：`.text` に余白を残しておき、変更された関数は末尾に追記し、ジャンプテーブル経由で呼ぶ。リンクが支配的になってから検討すれば十分。
-7. **やらなくていいもの**：daemon、DBSP、stencil。モノレポ規模の仕組みで、個人用には過剰。
+1. **Per-function cache + callees by interface hash only** (`crates/blaze-codegen/src/template.rs`).
+   Compiled code holds callees by "position in the reference list", so editing a callee's body does not recompile the caller. Only the relocation names are reassigned.
+   → zustc adopted this as-is (relocations in a `Blob` are held by function ID or name).
+2. **No whitespace, comments or spans in the body hash** (`docs/v2/plan/design/item-hash.md`).
+   blaze also α-normalizes local variables into de Bruijn-style indices, so renaming a local variable does not invalidate either.
+   → zustc only goes as far as lexer-level normalization. No α-normalization yet.
+3. **Reachability**: compile only what is reachable from main, tests and exports.
+4. **Do ICF and polymorphization in the compiler, not the linker**:
+   - Keys are made from layout (size/align/ABI), so `Vec<A>` and `Vec<B>` can share code.
+   - Identical functions are folded by a hash of code + relocation targets (`dedupe.rs`).
+   - Functions that differ only in constants are parameterized (`fold.rs`).
+5. **In dev builds, make symbol names short hashes and keep only the line table**.
+6. **Incremental linking**: leave slack in `.text`, append changed functions at the end, and call through a jump table. It is enough to consider this once linking dominates.
+7. **What is not needed**: the daemon, DBSP, stencils. These are monorepo-scale mechanisms and overkill for personal use.
 
-## relax から真似できること
+## What can be copied from relax
 
-1. **demand-driven**：名前解決も型検査も、到達したものだけ行う（`front/src/lazy.rs`、`demand.rs`）。AOT なら「main からの到達集合だけをコンパイル」になる。
-2. **キャッシュ形式**（`compiler/src/cache.rs`、`store.rs`）：
-   - 1 クレート = 1 ファイル。ヘッダの後にソート済みの index、その後に append-only の payload。A/B の index スロットを切り替えて crash-safe にしている。
-   - リロケーションは安定な ID（定義キー、文字列のバイト列など）で保存する。
-   - インライン展開したときは、取り込んだ関数のキーも記録する。
-   → zustc も 1 ファイルにした。index + payload で、デコードはヒットしたときだけ。
-3. **自前の小さな std**（約 120k 行）。rust-src をコンパイルしないので、ビルド時間もバイナリも小さくなる。
-4. **最適化 tier の要点**（LLVM 比 1.12x）：
-   - インライン展開（rustc のコストモデル）。
-   - スタックスロットの SROA 系。Cranelift には SROA がないので、ここは自前で書く必要がある。
-   - LICM、値域解析による境界チェック削除。
-5. **パーサはエラー回復なしで最初のエラーで止まる**。個人用ならそれで十分。
+1. **Demand-driven**: both name resolution and type checking are done only for what is reached (`front/src/lazy.rs`, `demand.rs`). For AOT this becomes "compile only the set reachable from main".
+2. **Cache format** (`compiler/src/cache.rs`, `store.rs`):
+   - 1 crate = 1 file. After the header comes a sorted index, then an append-only payload. It switches between A/B index slots to be crash-safe.
+   - Relocations are saved with stable IDs (definition keys, string bytes, and so on).
+   - When inlining, it also records the keys of the inlined functions.
+   → zustc also uses one file. Index + payload, decoding only on a hit.
+3. **Its own small std** (about 120k lines). It does not compile rust-src, so both build time and binaries are smaller.
+4. **Key points of the optimization tier** (1.12x vs LLVM):
+   - Inlining (rustc's cost model).
+   - SROA-style work on stack slots. Cranelift has no SROA, so this part has to be written by hand.
+   - LICM, bounds check elimination via value range analysis.
+5. **The parser has no error recovery and stops at the first error**. That is enough for personal use.
 
-## wild から真似できること / zustc 側でやるべきこと
+## What can be copied from wild / what zustc should do itself
 
-1. **オブジェクトの出し方**：
-   - 関数ごとにセクションを分ける（`ObjectBuilder::per_function_section(true)`）。これがないと `--gc-sections` で何も消えない。
-   - export しないものは Local/hidden にする。
-   - `-no-pie` で `R_*_RELATIVE` を出さない。
-   - 文字列は `SHF_MERGE|SHF_STRINGS` セクションに置く。ただし merge セクションは GC されないので、死んだデータを入れないこと。
-2. **LTO は linker plugin（LLVM bitcode / GIMPLE）だけ**。Cranelift には該当する IR がないので、wild はただのネイティブリンカになる。
-   **インライン展開、DCE、単相化の重複除去、ICF はコンパイラ側で whole-program にやるしかない。**
-   → zustc は 1 プログラム = 1 オブジェクトにして、到達可能性による DCE をコンパイラ側でやっている。
-3. **cc ドライバを経由しない**：
-   - 実測で、cc + lld は 21ms、wild の直接起動は 5ms だった。
-   - `libwild` クレートを使えばライブラリとして呼べるし、`FileSystem` trait でオブジェクトをメモリから直接渡せる。`.o` を書く必要がなくなる。
-4. **増分リンクは wild の最終目標だが、まだ実装されていない**。
-5. 実装テクニック：
-   - mmap して `'data` で借用し、コピーしない。
-   - `u32` の dense ID と Vec の表を使う。
-   - 名前のハッシュは 1 回だけ計算して使い回す。
-   - 出力を先にサイズ決めしてから、互いに素な `&mut` スライスに分けて並列に書く。
-   - fork して後片付けを裏に回す。
+1. **How to emit objects**:
+   - Put each function in its own section (`ObjectBuilder::per_function_section(true)`). Without this, `--gc-sections` removes nothing.
+   - Make non-exported things Local/hidden.
+   - Use `-no-pie` to avoid emitting `R_*_RELATIVE`.
+   - Put strings in `SHF_MERGE|SHF_STRINGS` sections. But merge sections are not GC'd, so do not put dead data in them.
+2. **LTO is only via linker plugins (LLVM bitcode / GIMPLE)**. Cranelift has no matching IR, so wild is just a native linker.
+   **Inlining, DCE, deduplication of monomorphizations and ICF can only be done whole-program in the compiler.**
+   → zustc makes 1 program = 1 object and does DCE by reachability in the compiler.
+3. **Do not go through the cc driver**:
+   - Measured: cc + lld took 21ms; starting wild directly took 5ms.
+   - With the `libwild` crate it can be called as a library, and the `FileSystem` trait lets objects be passed directly from memory. There is no need to write a `.o`.
+4. **Incremental linking is wild's end goal, but it is not implemented yet**.
+5. Implementation techniques:
+   - mmap and borrow with `'data`, no copying.
+   - Use dense `u32` IDs and Vec tables.
+   - Compute name hashes once and reuse them.
+   - Size the output first, then split it into disjoint `&mut` slices and write in parallel.
+   - fork and move cleanup to the background.
 
-## zustc で採用したもの（優先度順）
+## What zustc adopted (in priority order)
 
-| アイデア | 出典 | 状態 |
+| Idea | Source | Status |
 |---|---|---|
-| 関数単位の機械語キャッシュ。callee はシグネチャだけをキーに入れる | blaze template / relax cache | 実装済み |
-| 空白・コメントを無視したアイテムハッシュ（自前 lexer） | blaze item-hash | 実装済み |
-| 変更したアイテムだけ syn で parse（要約キャッシュ） | relax demand / blaze early cutoff | 実装済み |
-| main からの到達可能性。到達しない関数は parse もしない | blaze / relax | 実装済み |
-| 1 ファイルキャッシュ。今回使ったエントリだけ書き戻すので自動 GC になる | relax store | 実装済み |
-| 関数ごとのセクション、Local シンボル、`-no-pie`、`--gc-sections`、strip | wild | 実装済み |
-| リンク行をキャッシュして、リンカ（wild）を直接起動する | wild 実測 | 実装済み |
-| オブジェクトが同一ならリンクを省略 | - | 実装済み |
-| ミスの多いとき（cold）だけスレッド並列。各スレッドは担当アイテムだけを parse | relax compile_split | 実装済み |
-| α 正規化ハッシュ（ローカル変数のリネームで無効化しない） | blaze | 未実装 |
-| ICF（コード + リロケーション先のハッシュ） | blaze dedupe | 未実装 |
-| レイアウトをキーにした単相化 | blaze polymorph | 未実装（ジェネリクスがまだない） |
-| 自前インライン + slot forwarding（-O 時） | relax | 未実装 |
-| libwild の埋め込み、メモリ上のオブジェクト | wild | 未実装 |
-| 増分リンク（余白 + ジャンプテーブル） | blaze patch-in-place | 未実装 |
+| Per-function machine code cache. Only callee signatures go into the key | blaze template / relax cache | Implemented |
+| Item hash that ignores whitespace and comments (own lexer) | blaze item-hash | Implemented |
+| Parse only changed items with syn (item summary cache) | relax demand / blaze early cutoff | Implemented |
+| Reachability from main. Unreachable functions are not even parsed | blaze / relax | Implemented |
+| One-file cache. Only entries used this time are written back, so GC is automatic | relax store | Implemented |
+| Per-function sections, Local symbols, `-no-pie`, `--gc-sections`, strip | wild | Implemented |
+| Cache the link line and start the linker (wild) directly | wild measurement | Implemented |
+| Skip linking if the object is identical | - | Implemented |
+| Thread parallelism only when there are many misses (cold). Each thread parses only its assigned items | relax compile_split | Implemented |
+| α-normalized hash (renaming local variables does not invalidate) | blaze | Not implemented |
+| ICF (hash of code + relocation targets) | blaze dedupe | Not implemented |
+| Monomorphization keyed by layout | blaze polymorph | Not implemented (no generics yet) |
+| Own inlining + slot forwarding (with -O) | relax | Not implemented |
+| Embedding libwild, objects in memory | wild | Not implemented |
+| Incremental linking (slack + jump table) | blaze patch-in-place | Not implemented |
