@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795004484293,
+  "lastUpdate": 1795004486545,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -5088,6 +5088,85 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/mizchi/zust/commit/a7622b3bd7bf3d84f574c38fe1446fdf69624e38"
         },
         "date": 1795004163033,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "parity documentSymbol (名前の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity workspace/symbol (上位 20 の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity definition (行き先の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity hover (名前を含む)",
+            "value": 87.5,
+            "unit": "%"
+          },
+          {
+            "name": "parity references (数の一致)",
+            "value": 97.222,
+            "unit": "%"
+          },
+          {
+            "name": "parity documentHighlight (数の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity rename (書き換えの一致)",
+            "value": 94.118,
+            "unit": "%"
+          },
+          {
+            "name": "parity signatureHelp (名前・引数の数・今の引数の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity completion `x.\\|` (書いてある名前を含む)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity completion `na\\|me` (同)",
+            "value": 84,
+            "unit": "%"
+          },
+          {
+            "name": "parity 一致の平均",
+            "value": 96.284,
+            "unit": "%"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "committer": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "distinct": true,
+          "id": "0e01ee9726ed0e8ab268af006a3464f66aed8566",
+          "message": "zustc: PhantomData, generic unit structs as values, E0072 for generic types, cycle in blanket associated types\n\n- prelude: std::marker::PhantomData<T> (zero-sized; the instance comes from type inference)\n- `struct Foo<T> { f: Option<Foo<T>> }` is rejected as infinitely sized\n- `impl<F: Future> IntoFuture for F { type Item = F::Item; }` no longer recurses forever\n- tests/ui: run-pass 48.3%, check-pass 51.4%, compile-fail 36.9%; one compile-fail test that\n  passed only because PhantomData was missing no longer passes\n  (coherence/warn-when-cycle-is-error-in-coherence)\n- KPIs: gen5000 check 3978 M instr (+0.2%, the larger prelude), cache sizes unchanged\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-18T12:06:44Z",
+          "tree_id": "1bff4213f76342bd18a9b642988a8c7d71b8bec2",
+          "url": "https://github.com/mizchi/zust/commit/0e01ee9726ed0e8ab268af006a3464f66aed8566"
+        },
+        "date": 1795004485905,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
