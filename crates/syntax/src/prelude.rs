@@ -1008,7 +1008,7 @@ pub fn select_with(user_src: &str, user_items: &[SrcItem], cache: &mut SelectCac
     // (`ptr::write(p, v)` / `ptr::read(p)`: `write` / `read` alone are not looked up as functions; one scan for
     // `ptr::` first: most programs have none)
     if sc.has("ptr::") {
-        for (pat, n) in [("ptr::write(", "write"), ("ptr::read(", "read"), ("ptr::drop_in_place(", "drop_in_place")] {
+        for (pat, n) in [("ptr::write(", "write"), ("ptr::read(", "read"), ("ptr::drop_in_place(", "drop_in_place"), ("read_unaligned(", "read_unaligned"), ("write_unaligned(", "write_unaligned")] {
             if sc.has(pat) {
                 need.insert(n);
             }
@@ -1038,8 +1038,9 @@ pub fn select_with(user_src: &str, user_items: &[SrcItem], cache: &mut SelectCac
     if sc.has("stdout") || need.contains("BufWriter") {
         need.extend(["Stdout", "StdoutLock", "__core_stdout", "IoError", "Result", "write_str", "flush", "as_str"]);
     }
-    if sc.has("try_into") {
-        need.extend(["TryFromIntError", "TryFromSliceError", "Result"]);
+    // (`i32::try_from(x)` is `x.try_into()`)
+    if sc.has("try_into") || sc.has("try_from") {
+        need.extend(["TryFromIntError", "TryFromSliceError", "Result", "try_into"]);
     }
     if sc.any("open_range", &open_range) {
         need.insert("RangeFrom");

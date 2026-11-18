@@ -2873,6 +2873,12 @@ impl Program {
             q.segs[0].args = false;
             return self.fn_by_p_inner(&q, self_sid);
         }
+        // (`::std::mem::swap` is `std::mem::swap`)
+        if p.global && p.segs.first().is_some_and(|s| matches!(s.name.as_str(), "std" | "core" | "alloc")) {
+            let mut q = p.clone();
+            q.global = false;
+            return self.fn_by_p_inner(&q, self_sid);
+        }
         if p.global || p.segs.iter().take(n.saturating_sub(1)).any(|s| s.args) {
             return None;
         }

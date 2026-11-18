@@ -35,19 +35,19 @@ medians of 3 runs). They are measured again with each round of work. gen1000 is 
 
 | gen1000 | cold | no-op | edit one function | on disk | binary (stripped) | run |
 |---|---:|---:|---:|---:|---:|---:|
-| zustc | 112 ms | 15 ms | 22 ms | 766 KiB | 324 KiB | 10 ms |
-| zustc `-O` | 306 ms | 53 ms | 61 ms | 1199 KiB | 341 KiB | 3 ms |
-| rustc `-C incremental` | 595 ms | 161 ms | 367 ms | 10.8 MiB | 1038 KiB | 6 ms |
-| rustc `-O` | 14757 ms | - | - | - | 377 KiB | 2 ms |
-| **zustc vs rustc `-C incremental`** | **5.3x faster** | **11x faster** | **17x faster** | **14x smaller** | **3.2x smaller** | |
+| zustc | 102 ms | 15 ms | 22 ms | 766 KiB | 324 KiB | 9 ms |
+| zustc `-O` | 279 ms | 56 ms | 55 ms | 1199 KiB | 341 KiB | 3 ms |
+| rustc `-C incremental` | 624 ms | 167 ms | 327 ms | 10.8 MiB | 1038 KiB | 6 ms |
+| rustc `-O` | 14824 ms | - | - | - | 377 KiB | 2 ms |
+| **zustc vs rustc `-C incremental`** | **6.1x faster** | **11x faster** | **15x faster** | **14x smaller** | **3.2x smaller** | |
 
 Small programs (`bench/rt`: fib, hashmap, matmul, nbody, sieve, sort, strings) and real crates (cratebench: fnv,
 adler2, hex, itoa, rustc-hash, cfg-if; all six give the same output as rustc):
 
 | | zustc vs rustc `-C incremental` (bench/rt) | zustc vs rustc (cratebench) |
 |---|---:|---:|
-| cold build | 2.9–4.1x faster (24–49 ms vs 82–178 ms) | 3.1–4.4x faster (21–60 ms vs 92–238 ms) |
-| edit and rebuild | 12–18x faster (5–7 ms vs 68–98 ms) | 4.6–7.1x faster (11–21 ms vs 65–114 ms) |
+| cold build | 2.9–4.1x faster (24–49 ms vs 82–178 ms) | 3.1–4.2x faster (21–63 ms vs 88–218 ms) |
+| edit and rebuild | 12–18x faster (5–7 ms vs 68–98 ms) | 5.2–7.3x faster (11–20 ms vs 66–112 ms) |
 | binary | 11–24x smaller | 90–550x smaller (8–48 KiB vs 4.4 MiB) |
 | run time vs rustc `-O` | zustc 1.1–4.1x slower, zustc `-O` 1.1–3.2x slower | zustc 3.1–17x slower, zustc `-O` 0.9–7.3x |
 
@@ -64,7 +64,8 @@ the previous commit, 1501b30 and 8e797a9 have the same cold median, 96 and 98 ms
 | 2026-11-18, `impl Trait` in traits, more macros (8cb2f88) | 131 ms | 605 ms | 4.6x | 20 ms | 357 ms | 17.9x |
 | 2026-11-18, `assert!` in type inference (4d210d2) | 126 ms | 619 ms | 4.9x | 23 ms | 328 ms | 14.3x |
 | 2026-11-18, `assert_eq!` in type inference (441d0c2) | 119 ms | 605 ms | 5.1x | 25 ms | 338 ms | 13.5x |
-| 2026-11-18, borrowing values in registers | 112 ms | 595 ms | 5.3x | 22 ms | 367 ms | 16.7x |
+| 2026-11-18, borrowing values in registers (fb2f2f2) | 112 ms | 595 ms | 5.3x | 22 ms | 367 ms | 16.7x |
+| 2026-11-18, `try_from`, `::std` paths, more std functions | 102 ms | 624 ms | 6.1x | 22 ms | 327 ms | 14.9x |
 
 zustc's code is close to rustc's debug build at run time, and faster than it in all seven small programs (rustc's
 debug build is 3–26x slower than rustc `-O` there).
@@ -98,7 +99,8 @@ the shared machine vary by about ±20%.
 | `impl Trait` in traits, more macros (8cb2f88) | 661.4 M | 622.9 M | 3893.3 M | 1902.8 KiB | 387.2 KiB | 51.7 MiB |
 | `assert!` in type inference (4d210d2) | 662.1 M | 622.9 M | 3893.6 M | 1902.8 KiB | 387.2 KiB | 51.7 MiB |
 | `assert_eq!` in type inference (441d0c2) | 661.4 M | 622.8 M | 3893.5 M | 1902.8 KiB | 387.2 KiB | 51.7 MiB |
-| now: borrowing values in registers | 662.0 M | 622.7 M | 3893.5 M | 1902.8 KiB | 387.2 KiB | 51.6 MiB |
+| borrowing values in registers (fb2f2f2) | 662.0 M | 622.7 M | 3893.5 M | 1902.8 KiB | 387.2 KiB | 51.6 MiB |
+| now: `try_from`, `::std` paths, more std functions | 662.9 M | 623.7 M | 3892.3 M | 1902.8 KiB | 387.2 KiB | 52.0 MiB |
 | **change since borrow checking** | **-11.3%** | **-12.2%** | **-2.0%** | **0%** | **0%** | **-32%** |
 
 LSP (p50 of `bench/lsp_parity.py` on zustc's own sources; these are wall-clock times):
@@ -115,7 +117,8 @@ LSP (p50 of `bench/lsp_parity.py` on zustc's own sources; these are wall-clock t
 | `impl Trait` in traits, more macros (8cb2f88) | 0.59 ms | 0.49 ms | 1.22 ms | 3.76 ms | 145 ms (same machine against 1501b30: 281 vs 285 ms, two targets) |
 | `assert!` in type inference (4d210d2) | 0.63 ms | 0.51 ms | 1.32 ms | 3.41 ms | 111 ms |
 | `assert_eq!` in type inference (441d0c2) | 0.61 ms | 0.47 ms | 1.27 ms | 3.49 ms | 114 ms |
-| now: borrowing values in registers | 0.57 ms | 0.48 ms | 1.19 ms | 3.74 ms | 110 ms |
+| borrowing values in registers (fb2f2f2) | 0.57 ms | 0.48 ms | 1.19 ms | 3.74 ms | 110 ms |
+| now: `try_from`, `::std` paths, more std functions | 0.57 ms | 0.48 ms | 1.22 ms | 3.47 ms | 122 ms |
 
 Each change is kept only if these do not get worse. When an LSP time rises in a full run, the two builds are
 compared again on the same machine, alternating runs, before it is called noise. The last row comes from such a
@@ -132,9 +135,9 @@ only the tests it can be asked to handle (no nightly features, auxiliary crates 
 
 | kind | applicable | pass |
 |---|---:|---:|
-| run-pass (builds, runs, same output) | 2413 | 1417 (58.7%) |
-| check-pass (accepted by `zustc check`) | 1807 | 1130 (62.5%) |
-| build-pass | 135 | 81 (60.0%) |
+| run-pass (builds, runs, same output) | 2413 | 1421 (58.9%) |
+| check-pass (accepted by `zustc check`) | 1807 | 1133 (62.7%) |
+| build-pass | 135 | 82 (60.7%) |
 | compile-fail (rejected at an annotated line) | 7358 | 2816 (38.3%) |
 
 [SUPPORTED.md](SUPPORTED.md) breaks this down by area as a checklist.

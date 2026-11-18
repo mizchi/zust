@@ -1629,6 +1629,18 @@ impl Cx<'_> {
         if let Some(r) = self.default_call(c, expected)? {
             return Ok(r);
         }
+        // `i32::try_from(x)` (an integer type): `x.try_into()` to that type
+        if let (Expr::Path(None, p), [x]) = (&**func, cargs.as_slice()) {
+            if p.segs.len() == 2 && p.segs[1].name == "try_from" {
+                if let Some(t) = Ty::from_suffix(&p.segs[0].name).filter(|t| t.is_int()) {
+                    if let Some(rt) = self.result_of(t, "TryFromIntError") {
+                        let e = self.keep_expr(mcall(x.clone(), "try_into", vec![]));
+                        self.try_into_hint = Some(t);
+                        return self.expr(e, Some(rt));
+                    }
+                }
+            }
+        }
         if let Some(e) = self.prim_method_call(c) {
             let e = self.keep_expr(e);
             return self.expr(e, expected);

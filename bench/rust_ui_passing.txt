@@ -54,6 +54,7 @@ check-pass	array-slice-vec/subslice-range-return-ref.rs
 run-pass	array-slice-vec/vec-late-init.rs
 run-pass	array-slice-vec/vec-macro-no-std.rs
 run-pass	array-slice-vec/vec-macro-rvalue-scope.rs
+run-pass	array-slice-vec/vec-macro-with-brackets.rs
 run-pass	array-slice-vec/vec-macro-with-trailing-comma.rs
 run-pass	array-slice-vec/vec-matching-fixed.rs
 run-pass	array-slice-vec/vec-matching-fold.rs
@@ -270,6 +271,7 @@ compile-fail	async-await/async-fn/impl-header.rs
 compile-fail	async-await/async-fn/macro-async-trait-bound-theoretical-regression.rs
 compile-fail	async-await/async-fn/method-call-pos.rs
 check-pass	async-await/async-trait-fn.rs
+compile-fail	async-await/await-keyword/await-macro-rustfix.rs
 compile-fail	async-await/await-keyword/incorrect-syntax-suggestions.rs
 check-pass	async-await/bound-normalization.rs
 compile-fail	async-await/coroutine-desc.rs
@@ -2561,6 +2563,7 @@ check-pass	lint/dead-code/issue-85071-2.rs
 check-pass	lint/dead-code/issue-85071.rs
 check-pass	lint/dead-code/issue-85255.rs
 run-pass	lint/dead-code/leading-underscore.rs
+check-pass	lint/dead-code/not-lint-adt-appeared-in-pattern-issue-120770.rs
 check-pass	lint/dead-code/offset-of-correct-param-env.rs
 check-pass	lint/dead-code/self-assign.rs
 check-pass	lint/dead-code/struct-used-as-pattern-issue-56750.rs
@@ -2704,6 +2707,8 @@ check-pass	lint/use-redundant/use-redundant-glob.rs
 check-pass	lint/use-redundant/use-redundant-issue-71450.rs
 check-pass	lint/use-redundant/use-redundant-issue-78894.rs
 check-pass	lint/use-redundant/use-redundant-not-parent.rs
+check-pass	lint/use-redundant/use-redundant-prelude-rust-2015.rs
+check-pass	lint/use-redundant/use-redundant-prelude-rust-2021.rs
 check-pass	lint/use-redundant/use-redundant.rs
 check-pass	lint/wide_pointer_comparisons-no_std.rs
 run-pass	liveness/liveness-assign-imm-local-after-ret.rs
@@ -4486,6 +4491,7 @@ build-pass	statics/static-mut-unsafe-init.rs
 build-pass	statics/static-mut-with-assoc-type-field.rs
 compile-fail	statics/uninhabited-static.rs
 run-pass	std/issue-3563-3.rs
+run-pass	std/thread-sleep-ms.rs
 run-pass	stdlib-unit-tests/matches2021.rs
 compile-fail	stdlib-unit-tests/not-sync.rs
 run-pass	str/debug-print-basic-tuple.rs
@@ -5077,6 +5083,7 @@ compile-fail	traits/trait-upcasting/type-checking-test-2.rs
 compile-fail	traits/trait-upcasting/type-checking-test-3.rs
 compile-fail	traits/trait-upcasting/type-checking-test-4.rs
 compile-fail	traits/trivial_impl.rs
+run-pass	traits/tryfrominterror-result-comparison.rs
 run-pass	traits/ufcs-object.rs
 compile-fail	traits/unspecified-self-in-trait-ref.rs
 check-pass	traits/use-before-def.rs
@@ -5085,9 +5092,9 @@ compile-fail	traits/wf-object/no-duplicates.rs
 check-pass	traits/where-clause-on-self-assoc-type.rs
 run-pass	traits/where-clause-vs-impl.rs
 check-pass	transmutability/transmute-copy-associated-type.rs
-compile-fail	transmute/diverging-fn-transmute.rs
 check-pass	transmute/lifetimes.rs
 compile-fail	transmute/main.rs
+run-pass	transmute/transmute-array-to-scalar.rs
 compile-fail	transmute/transmute-associated-type-to-slice.rs
 build-pass	transmute/transmute-bool-u8.rs
 compile-fail	transmute/transmute-from-fn-item-types-error.rs
@@ -5372,6 +5379,7 @@ compile-fail	unop/unop-neg-bool.rs
 check-pass	unsafe/edition-2024-unsafe_op_in_unsafe_fn.rs
 compile-fail	unsafe/issue-45087-unreachable-unsafe.rs
 check-pass	unsafe/issue-85435-unsafe-op-in-let-under-unsafe-under-closure.rs
+build-pass	unsafe/maybe-uninit-zero-sized-types.rs
 compile-fail	unsafe/raw-pointer-field-access-error.rs
 compile-fail	unsafe/unsafe-block-without-braces.rs
 compile-fail	unsafe/unsafe-fn-autoderef.rs

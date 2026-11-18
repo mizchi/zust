@@ -82,6 +82,21 @@ pub fn __core_align_of_val<T>(_x: &T) -> usize {
 pub unsafe fn __core_drop_in_place<T>(p: *mut T) {
     unsafe { __core_drop(p.read()) }
 }
+pub unsafe fn __core_read_unaligned<T>(p: *const T) -> T {
+    unsafe { p.read() }
+}
+pub unsafe fn __core_write_unaligned<T>(p: *mut T, v: T) {
+    unsafe { p.write(v) }
+}
+pub unsafe fn __core_uninitialized<T>() -> T {
+    unsafe { core::mem::zeroed::<T>() }
+}
+// (one thread: there is nothing to wait for)
+pub fn __core_sleep_ms(_ms: u32) {}
+// (`std::future::ready(x)`: futures run at once, so it is the value)
+pub fn __core_ready<T>(x: T) -> T {
+    x
+}
 pub unsafe fn __core_read<T>(p: *const T) -> T {
     unsafe { p.read() }
 }
