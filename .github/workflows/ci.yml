@@ -1,0 +1,37 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  # (サイズ予算 bench/budget.txt は wild で測った大きさ。リンカで変わるので固定する)
+  ZUSTC_BENCH_LINKER: wild
+
+jobs:
+  test:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rust-src
+      - uses: Swatinem/rust-cache@v2
+      - name: Install wild and valgrind
+        run: |
+          command -v wild || cargo install --locked wild-linker@0.11.0
+          sudo apt-get update && sudo apt-get install -y valgrind
+      - name: Build
+        run: cargo build --release --workspace
+      - name: Test
+        run: cargo test --release --workspace
+      - name: Compare with rustc (examples)
+        run: tests/compare.sh

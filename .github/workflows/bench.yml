@@ -1,0 +1,82 @@
+name: Benchmark
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+# (gh-pages に結果を積むので、同時に 1 つだけ)
+concurrency:
+  group: bench
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+  deployments: write
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  bench:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rust-src, rust-analyzer
+      - uses: Swatinem/rust-cache@v2
+      - name: Install wild and valgrind
+        run: |
+          command -v wild || cargo install --locked wild-linker@0.11.0
+          sudo apt-get update && sudo apt-get install -y valgrind
+      - name: Build
+        run: cargo build --release --workspace
+      - name: Run benchmarks
+        run: python3 bench/ci_bench.py --out-dir out/ci
+      - name: Store zustc results
+        uses: benchmark-action/github-action-benchmark@v1
+        with:
+          name: zustc
+          tool: customSmallerIsBetter
+          output-file-path: out/ci/zustc.json
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          auto-push: true
+          gh-pages-branch: gh-pages
+          benchmark-data-dir-path: dev/bench
+          alert-threshold: "130%"
+          comment-on-alert: false
+          fail-on-alert: false
+      - name: Store zust-analyzer results
+        uses: benchmark-action/github-action-benchmark@v1
+        with:
+          name: zust-analyzer
+          tool: customSmallerIsBetter
+          output-file-path: out/ci/analyzer.json
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          auto-push: true
+          gh-pages-branch: gh-pages
+          benchmark-data-dir-path: dev/bench
+          alert-threshold: "130%"
+          comment-on-alert: false
+          fail-on-alert: false
+      - name: Store parity with rust-analyzer
+        uses: benchmark-action/github-action-benchmark@v1
+        with:
+          name: zust-analyzer parity with rust-analyzer
+          tool: customBiggerIsBetter
+          output-file-path: out/ci/parity.json
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          auto-push: true
+          gh-pages-branch: gh-pages
+          benchmark-data-dir-path: dev/bench
+          alert-threshold: "105%"
+          comment-on-alert: false
+          fail-on-alert: false
+      - uses: actions/upload-artifact@v4
+        with:
+          name: bench-results
+          path: |
+            out/ci/*.json
+            out/ci/work/lsp_parity_result.md

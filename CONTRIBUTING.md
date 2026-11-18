@@ -173,6 +173,27 @@ origin/main からの差分の行だけを変異させ、テストで見つか�
 `bench/mutants.sh file crates/ide/src/symbols.rs` (ファイル) でも絞れる。見つからなかった変異は
 `mutants.out/missed.txt` に出る。テストを足して潰す。
 
+## CI とベンチマークのダッシュボード
+
+- `.github/workflows/ci.yml`: push と pull request ごとに、release ビルド、`cargo test --release --workspace`、
+  `tests/compare.sh` を走らせる。サイズ予算はリンカで変わるので、CI は wild 0.11.0 を入れて `ZUSTC_BENCH_LINKER=wild` で測る
+  (`bench/budget.txt` も wild の大きさ)。
+- `.github/workflows/bench.yml`: main への push ごとに `bench/ci_bench.py` を走らせ、
+  [github-action-benchmark](https://github.com/benchmark-action/github-action-benchmark) で gh-pages ブランチの `dev/bench/` に
+  結果を積む。ダッシュボードは https://mizchi.github.io/zust/dev/bench/ (リポジトリの Settings → Pages で gh-pages ブランチを
+  公開しておく)。
+  - zustc: 1000 / 5000 関数のプログラムのビルド (cold / no-op / 1 関数編集)・check の時間と命令数、ピーク RSS、出力と
+    キャッシュの大きさ、`bench/rt` の実行時間
+  - zust-analyzer: `bench/lsp_parity.py` (zustc 自身のソース) の各問い合わせの p50、起動から索引ができるまで、RSS
+  - rust-analyzer と同じ答えを返した割合
+  - 前回より 30% 以上悪くなった (一致の割合は 5%) ものは、ワークフローの結果に警告が出る (失敗にはしない)
+
+ローカルで同じものを測るには:
+
+```bash
+python3 bench/ci_bench.py --out-dir out/ci
+```
+
 ## デバッグ用の環境変数
 
 | 変数 | 意味 |

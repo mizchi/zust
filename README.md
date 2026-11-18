@@ -1,5 +1,8 @@
 # zust
 
+[![CI](https://github.com/mizchi/zust/actions/workflows/ci.yml/badge.svg)](https://github.com/mizchi/zust/actions/workflows/ci.yml)
+[![Benchmark](https://github.com/mizchi/zust/actions/workflows/bench.yml/badge.svg)](https://mizchi.github.io/zust/dev/bench/)
+
 Rust のサブセットを速くインクリメンタルにビルドするコンパイラ **zustc** と、軽い LSP サーバ **zust-analyzer**。
 
 - **zustc**: 自前のフロントエンド (lexer / parser / 型推論) と Cranelift (既定) か自前の x86-64 バックエンド minclif で
@@ -35,6 +38,9 @@ zust-analyzer と rust-analyzer を、zustc 自身のソース (40 か所の問�
 | rust-analyzer | 5594 ms | 2.4 GB | 24.1 ms | (基準) |
 
 詳しくは [bench/lsp_parity_result.md](bench/lsp_parity_result.md)。
+
+main に入るたびに測った数字の推移は [ベンチマークのダッシュボード](https://mizchi.github.io/zust/dev/bench/) にある
+(GitHub Actions の共有のランナーで測るので、時間は揺れる。命令数の系列の方が差を見やすい)。
 
 ## 必要なもの
 
