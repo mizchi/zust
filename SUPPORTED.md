@@ -9,10 +9,10 @@ Status as of 2026-11-18, updated with each round of work. The percentages are ru
 
 ## Overall
 
-- [x] tests/ui run-pass: 59.7% (1441 / 2413)
-- [x] tests/ui check-pass: 63.3% (1143 / 1807)
-- [x] tests/ui build-pass: 60.7% (82 / 135)
-- [ ] tests/ui compile-fail (an error on an annotated line): 38.3% (2815 / 7358)
+- [x] tests/ui run-pass: 60.0% (1449 / 2413)
+- [x] tests/ui check-pass: 63.6% (1149 / 1807)
+- [x] tests/ui build-pass: 62.2% (84 / 135)
+- [ ] tests/ui compile-fail (an error on an annotated line): 38.2% (2812 / 7358)
 - [x] real crates: fnv, adler2, hex, itoa, rustc-hash and cfg-if build and give the same output (6 / 6)
 - [x] zust-analyzer answers like rust-analyzer: 95.4% (rust-analyzer: 96.2%)
 
@@ -59,7 +59,7 @@ Status as of 2026-11-18, updated with each round of work. The percentages are ru
 
 - [x] the prelude (zustc's own small std): `Option`/`Result`, `Vec`, `String`, `HashMap`/`HashSet`,
   `BTreeMap`/`BTreeSet`, `VecDeque`, `BinaryHeap`, `Rc`/`Arc`, `Cell`/`RefCell`, `Mutex`, `OnceLock`, `ManuallyDrop`,
-  `NonNull`, `UnsafeCell`, `PhantomData`, atomics, `mpsc`, `mem::*`, `ptr::{read, write, drop_in_place, null}`,
+  `NonNull`, `Pin` (a plain pointer: `Pin::new`, `get_mut`, `into_inner`, deref), `UnsafeCell`, `PhantomData`, atomics, `mpsc`, `mem::*`, `ptr::{read, write, drop_in_place, null}`,
   `iter::{repeat, once, empty, repeat_with, successors}`, formatting, stdin/stdout/fs/env/process basics
 - [ ] async / await: 64.1%. It runs at once, with no executor (no `poll`, `Waker`, `Pin<Box<dyn Future>>`)
 - [ ] threads: 61.4%. One thread: `thread::spawn` runs the closure at once
@@ -78,7 +78,7 @@ Status as of 2026-11-18, updated with each round of work. The percentages are ru
   `option_env!`, `assert_matches!`, `format_args!` now work; `module_path!`, `file!`, `include!`, `asm!` do not (~8 tests)
 - [ ] `impl Trait` returned by generic functions: ~21 tests
 - [ ] `repr(packed)` / `repr(align)`: ~16 tests
-- [ ] `Pin` without an executor (`Pin<&mut T>`, `Box::pin`)
+- [ ] `Pin`: `Pin<&T>` / `Pin<&mut T>` work as the pointer; `Box::pin`, `pin!` and `self: Pin<&Self>` receivers do not
 - [ ] dyn compatibility (E0038), generic argument counts of traits
 - [ ] closures that capture `&mut` are not `Copy`
 
@@ -107,8 +107,8 @@ Status as of 2026-11-18, updated with each round of work. The percentages are ru
 
 ## Speed against rustc (2026-11-18)
 
-- [x] cold build: 5.2x faster than rustc `-C incremental` on gen1000, 3.0–4.0x on real crates
-- [x] edit and rebuild: 16x faster on gen1000, 12–18x on small programs, 5.1–7.2x on real crates
+- [x] cold build: 6.1x faster than rustc `-C incremental` on gen1000, 3.0–4.0x on real crates
+- [x] edit and rebuild: 17x faster on gen1000, 12–18x on small programs, 5.1–7.2x on real crates
 - [x] build cache on disk: 14x smaller (766 KiB vs 10.8 MiB on gen1000)
 - [x] binary: 3.2x smaller on gen1000, 90–550x on real crates
 - [ ] run time: zustc is 1.1–4.1x slower than rustc `-O` on small programs (faster than rustc's debug build);
@@ -120,9 +120,9 @@ The tables are in the [README](README.md#against-rustc).
 
 | KPI | now | before this work |
 |---|---:|---:|
-| gen5000 no-op build | 663.8 M instr | 746.0 M |
-| gen5000 build after editing one function | 620.8 M instr | 709.3 M |
-| gen5000 `check` | 3893.0 M instr | 3971.0 M |
+| gen5000 no-op build | 662.1 M instr | 746.0 M |
+| gen5000 build after editing one function | 621.7 M instr | 709.3 M |
+| gen5000 `check` | 3891.1 M instr | 3971.0 M |
 | gen5000 build cache | 1902.8 KiB | 1902.8 KiB |
-| LSP definition / hover / completion / references p50 | 0.59 / 0.46 / 1.03 / 12.17 ms | — |
-| LSP ready (startup to indexed, zustc + ide targets) | 141 ms | — |
+| LSP definition / hover / completion / references p50 | 0.78 / 0.56 / 1.33 / 11.28 ms | — |
+| LSP ready (startup to indexed, zustc + ide targets) | 113 ms | — |

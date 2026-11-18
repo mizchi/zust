@@ -9,10 +9,10 @@
 
 ## 全体
 
-- [x] tests/ui run-pass：59.7%（1441 / 2413）
-- [x] tests/ui check-pass：63.3%（1143 / 1807）
-- [x] tests/ui build-pass：60.7%（82 / 135）
-- [ ] tests/ui compile-fail（注釈の行でエラー）：38.3%（2815 / 7358）
+- [x] tests/ui run-pass：60.0%（1449 / 2413）
+- [x] tests/ui check-pass：63.6%（1149 / 1807）
+- [x] tests/ui build-pass：62.2%（84 / 135）
+- [ ] tests/ui compile-fail（注釈の行でエラー）：38.2%（2812 / 7358）
 - [x] 実際のクレート：fnv、adler2、hex、itoa、rustc-hash、cfg-if がビルドでき、同じ出力を出す（6 / 6）
 - [x] zust-analyzer が rust-analyzer と同じように答える：95.4%（rust-analyzer は 96.2%）
 
@@ -58,7 +58,7 @@
 ## ランタイムと std
 
 - [x] prelude（zustc 自身の小さな std）：`Option`/`Result`、`Vec`、`String`、`HashMap`/`HashSet`、`BTreeMap`/`BTreeSet`、
-  `VecDeque`、`BinaryHeap`、`Rc`/`Arc`、`Cell`/`RefCell`、`Mutex`、`OnceLock`、`ManuallyDrop`、`NonNull`、`UnsafeCell`、
+  `VecDeque`、`BinaryHeap`、`Rc`/`Arc`、`Cell`/`RefCell`、`Mutex`、`OnceLock`、`ManuallyDrop`、`NonNull`、`Pin`（ただのポインタ：`Pin::new`、`get_mut`、`into_inner`、deref）、`UnsafeCell`、
   `PhantomData`、アトミック型、`mpsc`、`mem::*`、`ptr::{read, write, drop_in_place, null}`、
   `iter::{repeat, once, empty, repeat_with, successors}`、書式化、stdin/stdout/fs/env/process の基本
 - [ ] async / await：64.1%。エグゼキュータなしでその場で実行する（`poll`、`Waker`、`Pin<Box<dyn Future>>` はない）
@@ -78,7 +78,7 @@
   `option_env!`、`assert_matches!`、`format_args!` は使えるようになった。`module_path!`、`file!`、`include!`、`asm!` はまだ（約 8 テスト）
 - [ ] ジェネリックな関数が返す `impl Trait`：約 21 テスト
 - [ ] `repr(packed)` / `repr(align)`：約 16 テスト
-- [ ] エグゼキュータなしの `Pin`（`Pin<&mut T>`、`Box::pin`）
+- [ ] `Pin`：`Pin<&T>` / `Pin<&mut T>` はポインタとして動く。`Box::pin`、`pin!`、`self: Pin<&Self>` の受け手はまだ
 - [ ] dyn 互換性（E0038）、トレイトの総称引数の数
 - [ ] `&mut` をキャプチャするクロージャは `Copy` でない
 
@@ -107,8 +107,8 @@
 
 ## rustc との速度の比較 (2026-11-18)
 
-- [x] cold ビルド：gen1000 で rustc `-C incremental` の 5.2 倍速い。実際のクレートで 3.0〜4.0 倍
-- [x] 編集して再ビルド：gen1000 で 16 倍速い。小さなプログラムで 12〜18 倍、実際のクレートで 5.1〜7.2 倍
+- [x] cold ビルド：gen1000 で rustc `-C incremental` の 6.1 倍速い。実際のクレートで 3.0〜4.0 倍
+- [x] 編集して再ビルド：gen1000 で 17 倍速い。小さなプログラムで 12〜18 倍、実際のクレートで 5.1〜7.2 倍
 - [x] ディスクのビルドキャッシュ：1/14（gen1000 で 766 KiB と 10.8 MiB）
 - [x] バイナリ：gen1000 で 1/3.2、実際のクレートで 1/90〜1/550
 - [ ] 実行時間：小さなプログラムで zustc は rustc `-O` の 1.1〜4.1 倍遅い（rustc の debug ビルドよりは速い）。
@@ -120,9 +120,9 @@
 
 | KPI | 今 | この作業の前 |
 |---|---:|---:|
-| gen5000 の no-op ビルド | 663.8 M 命令 | 746.0 M |
-| gen5000 の 1 関数を編集した後のビルド | 620.8 M 命令 | 709.3 M |
-| gen5000 の `check` | 3893.0 M 命令 | 3971.0 M |
+| gen5000 の no-op ビルド | 662.1 M 命令 | 746.0 M |
+| gen5000 の 1 関数を編集した後のビルド | 621.7 M 命令 | 709.3 M |
+| gen5000 の `check` | 3891.1 M 命令 | 3971.0 M |
 | gen5000 のビルドキャッシュ | 1902.8 KiB | 1902.8 KiB |
-| LSP の definition / hover / completion / references の p50 | 0.59 / 0.46 / 1.03 / 12.17 ms | — |
-| LSP の起動から索引ができるまで（zustc と ide の対象の合計） | 141 ms | — |
+| LSP の definition / hover / completion / references の p50 | 0.78 / 0.56 / 1.33 / 11.28 ms | — |
+| LSP の起動から索引ができるまで（zustc と ide の対象の合計） | 113 ms | — |

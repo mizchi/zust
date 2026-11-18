@@ -236,6 +236,8 @@ run-pass	associated-types/method-on-impl-with-assoc-type-projection.rs
 compile-fail	associated-types/mismatched-types-in-associated-type-87490.rs
 compile-fail	associated-types/missing-associated-types.rs
 compile-fail	associated-types/nested-assoc-type-projection-ice-109864.rs
+build-pass	associated-types/normalization-debruijn-1.rs
+build-pass	associated-types/normalization-debruijn-2.rs
 check-pass	associated-types/normalization-probe-cycle.rs
 check-pass	associated-types/normalize-cycle-in-eval-no-region.rs
 check-pass	associated-types/normalize-cycle-in-eval.rs
@@ -345,6 +347,7 @@ check-pass	async-await/issues/issue-63388-3.rs
 check-pass	async-await/issues/issue-63388-4.rs
 check-pass	async-await/issues/issue-64391-2.rs
 check-pass	async-await/issues/issue-64433.rs
+check-pass	async-await/issues/issue-64477.rs
 compile-fail	async-await/issues/issue-65159.rs
 check-pass	async-await/issues/issue-65436-raw-ptr-not-send.rs
 check-pass	async-await/issues/issue-69307-nested.rs
@@ -936,7 +939,6 @@ run-pass	closures/closure-upvar-trait-caching.rs
 run-pass	closures/closure-with-fixed-size-array-param.rs
 check-pass	closures/closure_promotion.rs
 check-pass	closures/closure_requires_expectation.rs
-compile-fail	closures/coerce-unsafe-closure-to-unsafe-fn-ptr.rs
 compile-fail	closures/correct-args-on-call-suggestion.rs
 build-pass	closures/deeply-nested_closures.rs
 run-pass	closures/destructure-newtype-closure.rs
@@ -2713,6 +2715,7 @@ compile-fail	lint/unused/must_use-tuple.rs
 run-pass	lint/unused/no-unused-parens-return-block.rs
 check-pass	lint/unused/unused-allocation-box-cmp-issue-134186.rs
 compile-fail	lint/unused/unused-allocation.rs
+check-pass	lint/unused/unused-associated-item.rs
 check-pass	lint/unused/unused-attr-repr-packed-c-order.rs
 check-pass	lint/unused/unused-braces-attrs-issue-141549.rs
 compile-fail	lint/unused/unused-doc-comments-edge-cases.rs
@@ -2911,7 +2914,6 @@ run-pass	methods/by-value-self-method-on-int.rs
 compile-fail	methods/call_method_unknown_pointee.rs
 check-pass	methods/calling-conventions-with-where-clause-ref-bound.rs
 compile-fail	methods/disambiguate-associated-function-first-arg.rs
-compile-fail	methods/dont-ice-on-object-lookup-w-error-region.rs
 compile-fail	methods/dont-suggest-import-on-deref-err.rs
 compile-fail	methods/duplicate-method-call-on-self.rs
 compile-fail	methods/field-method-suggestion-using-return-ty.rs
@@ -3016,6 +3018,7 @@ compile-fail	mismatched_types/issue-38371-unfixable.rs
 compile-fail	mismatched_types/issue-47706.rs
 compile-fail	mismatched_types/issue-84976.rs
 compile-fail	mismatched_types/mismatch-args-vargs-issue-130372.rs
+compile-fail	mismatched_types/mismatch-sugg-for-shorthand-field.rs
 compile-fail	mismatched_types/mismatch-ty-dont-suggest.rs
 compile-fail	mismatched_types/mismatch-ty-unwrap-expect.rs
 compile-fail	mismatched_types/never-option-unwrap-suggestion-issue-162241.rs
@@ -4389,9 +4392,9 @@ check-pass	rustdoc/doc-test-attr-pass.rs
 check-pass	rustdoc/hidden-doc-associated-item.rs
 compile-fail	rustdoc/unterminated-doc-comment.rs
 compile-fail	self/arbitrary-self-types-dyn-incompatible.rs
-compile-fail	self/arbitrary_self_types_pin_lifetime_impl_trait-async.rs
-compile-fail	self/arbitrary_self_types_pin_lifetime_impl_trait.rs
-compile-fail	self/arbitrary_self_types_pin_lifetime_mismatch-async.rs
+compile-fail	self/arbitrary_self_type_mut_difference.rs
+compile-fail	self/arbitrary_self_types_needing_mut_pin.rs
+compile-fail	self/arbitrary_self_types_pin_needing_borrow.rs
 run-pass	self/by-value-self-in-mut-slot.rs
 compile-fail	self/class-missing-self.rs
 check-pass	self/dispatch-from-dyn-layout-2.rs
@@ -4408,6 +4411,10 @@ check-pass	self/elision/lt-self.rs
 check-pass	self/elision/lt-struct-async.rs
 check-pass	self/elision/lt-struct.rs
 compile-fail	self/elision/nested-item.rs
+check-pass	self/elision/ref-alias-async.rs
+check-pass	self/elision/ref-alias.rs
+check-pass	self/elision/ref-mut-alias-async.rs
+check-pass	self/elision/ref-mut-alias.rs
 check-pass	self/elision/self-async.rs
 check-pass	self/elision/self.rs
 check-pass	self/elision/struct-async.rs
@@ -4647,6 +4654,7 @@ compile-fail	suggestions/assoc_fn_without_self.rs
 compile-fail	suggestions/async-fn-ctor-passed-as-arg-where-it-should-have-been-called.rs
 compile-fail	suggestions/bool_typo_err_suggest.rs
 compile-fail	suggestions/borrow-cast-or-binexpr-with-parens.rs
+compile-fail	suggestions/box-future-wrong-output.rs
 compile-fail	suggestions/boxed-variant-field.rs
 compile-fail	suggestions/call-boxed.rs
 compile-fail	suggestions/call-on-missing.rs

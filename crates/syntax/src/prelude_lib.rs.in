@@ -7615,6 +7615,42 @@ impl<T> ManuallyDrop<T> {
     }
 }
 
+/// `std::pin::Pin` (no executor: nothing moves values behind the program's back, so a Pin is the pointer)
+#[derive(Clone, Copy)]
+pub struct Pin<P> {
+    pointer: P,
+}
+
+impl<P> Pin<P> {
+    pub fn new(pointer: P) -> Pin<P> {
+        Pin { pointer }
+    }
+    pub unsafe fn new_unchecked(pointer: P) -> Pin<P> {
+        Pin { pointer }
+    }
+    pub fn into_inner(pin: Pin<P>) -> P {
+        pin.pointer
+    }
+    pub unsafe fn into_inner_unchecked(pin: Pin<P>) -> P {
+        pin.pointer
+    }
+    pub fn get_ref(self) -> P {
+        self.pointer
+    }
+    pub fn get_mut(self) -> P {
+        self.pointer
+    }
+    pub unsafe fn get_unchecked_mut(self) -> P {
+        self.pointer
+    }
+    pub fn deref(&self) -> &P {
+        &self.pointer
+    }
+    pub fn deref_mut(&mut self) -> &mut P {
+        &mut self.pointer
+    }
+}
+
 /// `std::ptr::NonNull`
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct NonNull<T> {
