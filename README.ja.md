@@ -18,7 +18,7 @@ Rust のサブセットを速くインクリメンタルにビルドするコン
 - **zust-analyzer**: エディタ向けの LSP サーバ。定義・参照・hover・補完・rename などを、字句の列と定義の表からの軽い解析で
   返す。普通の Rust のワークスペース (std と依存クレートも索引する) で使える。
 
-> **状態**: 実験的なプロジェクト。zustc は Linux x86-64 だけで、Rust の全部は扱えない ([対応している言語](docs/language.md))。
+> **状態**: 実験的なプロジェクト。zustc は Linux x86-64 だけで、Rust の全部は扱えない ([対応している言語](docs/ja/language.md))。
 > 借用検査などはしないので、rustc の代わりに正しさを確かめる道具ではない。zust-analyzer は rust-analyzer の一部の機能だけ。
 
 ## どのくらい速いか
@@ -30,7 +30,7 @@ Rust のサブセットを速くインクリメンタルにビルドするコン
 | zustc | 118 ms | 28 ms | 105 KiB |
 | rustc `-C incremental` | 827 ms | 417 ms | 22 MiB |
 
-他のプログラムの結果は [docs/reports/2026-11-15-15-status.md](docs/reports/2026-11-15-15-status.md) にある。
+他のプログラムの結果は [docs/reports/2026-11-15-15-status.md](docs/ja/reports/2026-11-15-15-status.md) にある。
 
 zust-analyzer と rust-analyzer を、zustc 自身のソース (40 か所の問い合わせ) で比べた (2026-11-18、`python3 bench/lsp_parity.py`):
 
@@ -188,9 +188,9 @@ rust-analyzer との違いで分かっているものは [TODO.md](TODO.md) に�
 
 ## ドキュメント
 
-- [docs/language.md](docs/language.md): zustc が扱える Rust のサブセットと、扱えないもの
-- [docs/architecture.md](docs/architecture.md): crate の構成、処理の流れ、インクリメンタルビルドのしくみ、値の表現
-- [docs/reports/](docs/reports/README.md): 作業の記録 (日付順のレポート。ベンチマークの結果、各段階でやったこと)
+- [docs/ja/language.md](docs/ja/language.md): zustc が扱える Rust のサブセットと、扱えないもの
+- [docs/ja/architecture.md](docs/ja/architecture.md): crate の構成、処理の流れ、インクリメンタルビルドのしくみ、値の表現
+- [docs/ja/reports/](docs/ja/reports/README.md): 作業の記録 (日付順のレポート。ベンチマークの結果、各段階でやったこと)
 - [CONTRIBUTING.md](CONTRIBUTING.md): 開発のしかた (ビルド、テスト、ベンチマーク、レポートの書き方)
 - [TODO.md](TODO.md): これからやること
 
