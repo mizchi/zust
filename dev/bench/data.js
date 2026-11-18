@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795041645681,
+  "lastUpdate": 1795041647566,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -24286,6 +24286,70 @@ window.BENCHMARK_DATA = {
           {
             "name": "tests/ui compile-fail passing",
             "value": 2815,
+            "unit": "tests"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "committer": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "distinct": true,
+          "id": "e45ee100ed392377781ef1eece25b5efbc32ad81",
+          "message": "`std::pin::Pin` as a plain pointer in the prelude\n\nPin::new / new_unchecked / get_ref / get_mut / into_inner and deref; user code\nmay define its own `Pin`. tests/ui: check-pass +6, build-pass +2, run-pass +0.\nFive compile-fail tests leave the baseline: they passed only because `Pin` was\nunknown on the annotated line (the expected errors are E0133 for an unsafe call\nin a closure, and lifetime errors that zustc does not check yet).\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-18T22:25:36Z",
+          "tree_id": "20d61a24bcd385bb9953b9a3aeaf24df5c8ed895",
+          "url": "https://github.com/mizchi/zust/commit/e45ee100ed392377781ef1eece25b5efbc32ad81"
+        },
+        "date": 1795041647092,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tests/ui run-pass pass rate",
+            "value": 60.05,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui run-pass passing",
+            "value": 1449,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui check-pass pass rate",
+            "value": 63.59,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui check-pass passing",
+            "value": 1149,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui build-pass pass rate",
+            "value": 62.22,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui build-pass passing",
+            "value": 84,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui compile-fail pass rate",
+            "value": 38.22,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui compile-fail passing",
+            "value": 2812,
             "unit": "tests"
           }
         ]
