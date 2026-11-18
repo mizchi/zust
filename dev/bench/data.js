@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795027922848,
+  "lastUpdate": 1795027924888,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -11332,6 +11332,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "lsp peak RSS",
             "value": 67.289,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "committer": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "distinct": true,
+          "id": "e598fdf2346ad88f899d6d71915ce400ef7f40d6",
+          "message": "`async` blocks, fns and closures (run at once), `impl Future<Output = T>`\n\n- `async { .. }` / `async move { .. }` is a closure called on the spot (no\n  executor: `.await` is the value itself, as before), so `return` and `?`\n  leave the block; `async fn` returns its value; `impl Future<Output = T>` is T\n- `async |x| ..` closures parse\n- `.await` outside an async fn / block / closure: \"`await` is only allowed\n  inside `async` functions and blocks\" (checked when reading a file)\n- tests/ui: run-pass 1364, check-pass 1098 (60.76%), build-pass 81 (60.0%)\n\nAccepted compile-fail removals (they were rejected before only because async\nwas not parsed; they need borrow escapes from async blocks (E0373), lints,\ncaptured lifetimes of `impl Trait`, async closure Fn traits, the edition, or a\nprecise position for closure parameter types):\nasync-await/async-borrowck-escaping-closure-error.rs,\nasync-await/async-closures/ambiguous-arg.rs,\nasync-await/async-closures/lint-closure-returning-async-block.rs,\nasync-await/async-closures/not-fn.rs, async-await/issue-67252-unnamed-future.rs,\nasync-await/issues/issue-72312.rs, async-await/issues/issue-78938-async-block.rs,\nclosures/local-type-mix.rs, coercion/coerce-block-tail-83783.rs,\ncoroutine/stalled-coroutine-obligations.rs, impl-trait/nested-return-type4.rs,\nparser/issues/issue-114219.rs, span/lint-unused-unsafe.rs\n\nKPIs (gen5000): noop 661.9 M instr (+0.1%), edit 622.6, check 3892.9 (+0.1%),\ncache unchanged. LSP, same machine against the previous commit (4 alternating\nruns): ready median 291 -> 277 ms, definition 0.43 -> 0.42 ms, references\n1.87 -> 1.78 ms.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-18T18:40:27Z",
+          "tree_id": "9280dbfffc00b393a4f43f6d50248257594f455a",
+          "url": "https://github.com/mizchi/zust/commit/e598fdf2346ad88f899d6d71915ce400ef7f40d6"
+        },
+        "date": 1795027924342,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "lsp definition p50",
+            "value": 0.422,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp hover p50",
+            "value": 0.351,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp completion p50",
+            "value": 1.012,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp references p50",
+            "value": 2.679,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp rename p50",
+            "value": 0.511,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp signatureHelp p50",
+            "value": 0.731,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp documentHighlight p50",
+            "value": 0.591,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp ready (startup to indexed)",
+            "value": 98.439,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp peak RSS",
+            "value": 67.152,
             "unit": "MiB"
           }
         ]
