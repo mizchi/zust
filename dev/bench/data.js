@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795036010730,
+  "lastUpdate": 1795036296259,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -9539,6 +9539,165 @@ window.BENCHMARK_DATA = {
           {
             "name": "rt/strings run (-O)",
             "value": 35.412,
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "committer": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "distinct": true,
+          "id": "f077e7c44ef6f04613d66277ce88053eead5a0fa",
+          "message": "Prelude selection: per-item tables once, Fx hashing for the needed names\n\n- is_iterator_trait and gated_impl are computed once for all prelude items\n  (they rebuilt a Vec per impl item on every build); the set of needed names\n  uses Fx hashing instead of SipHash\n- a one-line program's build: 44.9 -> 42.7 M instr (-5%); gen1000 noop\n  141.5 -> 139.6 M (-1.3%), edit 134.8 -> 133.0 (-1.4%); gen5000 edit\n  623.7 -> 620.8 (-0.5%), noop 662.9 -> 663.8 (+0.1%), check unchanged;\n  caches unchanged; LSP ready 111 ms\n- against rustc -C incremental on gen1000: cold 7.0x, no-op 11x, edit 15x\n  faster. README and SUPPORTED.md (en + ja) updated.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-18T21:03:07Z",
+          "tree_id": "2817bf58577f7189a186031099500ba88d58dcc2",
+          "url": "https://github.com/mizchi/zust/commit/f077e7c44ef6f04613d66277ce88053eead5a0fa"
+        },
+        "date": 1795036295005,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "gen1000 build cold",
+            "value": 153.096,
+            "unit": "ms"
+          },
+          {
+            "name": "gen1000 build noop",
+            "value": 17.661,
+            "unit": "ms"
+          },
+          {
+            "name": "gen1000 build edit 1 fn",
+            "value": 24.025,
+            "unit": "ms"
+          },
+          {
+            "name": "gen1000 check",
+            "value": 120.031,
+            "unit": "ms"
+          },
+          {
+            "name": "gen1000 build cold peak RSS",
+            "value": 17.598,
+            "unit": "MiB"
+          },
+          {
+            "name": "gen1000 binary",
+            "value": 323.977,
+            "unit": "KiB"
+          },
+          {
+            "name": "gen1000 cache",
+            "value": 387.205,
+            "unit": "KiB"
+          },
+          {
+            "name": "gen1000 build noop instructions",
+            "value": 139.636,
+            "unit": "M instr"
+          },
+          {
+            "name": "gen1000 build edit 1 fn instructions",
+            "value": 132.571,
+            "unit": "M instr"
+          },
+          {
+            "name": "gen1000 check instructions",
+            "value": 789.423,
+            "unit": "M instr"
+          },
+          {
+            "name": "gen5000 build cold",
+            "value": 672.079,
+            "unit": "ms"
+          },
+          {
+            "name": "gen5000 build noop",
+            "value": 75.885,
+            "unit": "ms"
+          },
+          {
+            "name": "gen5000 build edit 1 fn",
+            "value": 83.869,
+            "unit": "ms"
+          },
+          {
+            "name": "gen5000 check",
+            "value": 578.085,
+            "unit": "ms"
+          },
+          {
+            "name": "gen5000 build cold peak RSS",
+            "value": 51.844,
+            "unit": "MiB"
+          },
+          {
+            "name": "gen5000 binary",
+            "value": 1558.336,
+            "unit": "KiB"
+          },
+          {
+            "name": "gen5000 cache",
+            "value": 1902.83,
+            "unit": "KiB"
+          },
+          {
+            "name": "gen5000 build noop instructions",
+            "value": 661.029,
+            "unit": "M instr"
+          },
+          {
+            "name": "gen5000 build edit 1 fn instructions",
+            "value": 618.944,
+            "unit": "M instr"
+          },
+          {
+            "name": "gen5000 check instructions",
+            "value": 3888.942,
+            "unit": "M instr"
+          },
+          {
+            "name": "rt/fib run (-O)",
+            "value": 72.599,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/hashmap run (-O)",
+            "value": 106.698,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/matmul run (-O)",
+            "value": 45.326,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/nbody run (-O)",
+            "value": 88.572,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/sieve run (-O)",
+            "value": 90.556,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/sort run (-O)",
+            "value": 232.433,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/strings run (-O)",
+            "value": 73.882,
             "unit": "ms"
           }
         ]
