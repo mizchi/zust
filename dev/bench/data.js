@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795020241783,
+  "lastUpdate": 1795020243427,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -12456,6 +12456,85 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/mizchi/zust/commit/bffa3ad4724aa19ac7b8be9353a6ab93cf81b0af"
         },
         "date": 1795018790469,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "parity documentSymbol (名前の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity workspace/symbol (上位 20 の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity definition (行き先の一致)",
+            "value": 97.222,
+            "unit": "%"
+          },
+          {
+            "name": "parity hover (名前を含む)",
+            "value": 95,
+            "unit": "%"
+          },
+          {
+            "name": "parity references (数の一致)",
+            "value": 92.105,
+            "unit": "%"
+          },
+          {
+            "name": "parity documentHighlight (数の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity rename (書き換えの一致)",
+            "value": 90,
+            "unit": "%"
+          },
+          {
+            "name": "parity signatureHelp (名前・引数の数・今の引数の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity completion `x.\\|` (書いてある名前を含む)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity completion `na\\|me` (同)",
+            "value": 79.167,
+            "unit": "%"
+          },
+          {
+            "name": "parity 一致の平均",
+            "value": 95.349,
+            "unit": "%"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "committer": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "distinct": true,
+          "id": "7364f79e82a6fe525aca0b21a19aa99dbdacced4",
+          "message": "Fix wrong code: slice patterns through `&`, captures moved by value, labels in macros, derived comparisons\n\n- `let &[ref xs @ ..] = s` (a `&[T]` in memory): the slice place is the pair\n  itself (it loaded the data pointer as the pair's address and crashed)\n- a by-value capture moved out by a pattern or by a `self` method\n  (`move || foo.unwrap()`) leaves its slot empty (it was dropped twice)\n- macro hygiene for labels defined in a macro body (`'x: loop` in a macro no\n  longer catches the caller's `break 'x`)\n- derive(PartialOrd): NaN compares unordered (every `<`/`>=` is false and\n  partial_cmp is None); enum tags compare unsigned when the tag type is\n- `#[repr(u8)]` and the like set an enum's tag type (and wrap its\n  discriminants); without one, the tag is the smallest integer type that holds\n  every discriminant\n- derived `==` stops at the first unequal field\n- tests/ui: run-pass 1325 (54.91%)\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-18T16:32:01Z",
+          "tree_id": "ddd3e2ec91f3c2d86d1060308d4be2f8a83ad026",
+          "url": "https://github.com/mizchi/zust/commit/7364f79e82a6fe525aca0b21a19aa99dbdacced4"
+        },
+        "date": 1795020243203,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
