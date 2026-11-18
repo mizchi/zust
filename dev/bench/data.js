@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795038216542,
+  "lastUpdate": 1795038218505,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -14524,6 +14524,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "lsp peak RSS",
             "value": 67.43,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "committer": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "distinct": true,
+          "id": "60cbe604d6574e5afed905cc18ea09f6b9626409",
+          "message": "`==` / `<` on Box<T> compare the values; KPIs and docs for this and a5bdbca\n\n- `Box<T> == Box<T>` / `!=` / `<` and the others compare what the boxes point\n  to (they were \"comparison of `Box<i32>` is not supported\")\n- tests/ui: run-pass 1440 (59.7%), check-pass 1135, compile-fail 2815\n\nKPIs (gen5000): noop 661.0 M instr (-0.4%), edit 621.0, check 3893.0, cache\nunchanged. LSP p50 hover 0.60 ms in the full run; against f606b34 on the same\nmachine (4 alternating runs) hover 0.32 vs 0.35 ms and ready 275 vs 287 ms.\nAgainst rustc -C incremental on gen1000: cold 5.8x, no-op 12x, edit 16x\nfaster. README and SUPPORTED.md (en + ja) updated.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-18T21:39:26Z",
+          "tree_id": "89c397ead8d5c63f6ce9d6287b3018b69d3d42b5",
+          "url": "https://github.com/mizchi/zust/commit/60cbe604d6574e5afed905cc18ea09f6b9626409"
+        },
+        "date": 1795038218105,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "lsp definition p50",
+            "value": 0.459,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp hover p50",
+            "value": 0.399,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp completion p50",
+            "value": 0.912,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp references p50",
+            "value": 2.434,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp rename p50",
+            "value": 0.534,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp signatureHelp p50",
+            "value": 0.594,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp documentHighlight p50",
+            "value": 0.675,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp ready (startup to indexed)",
+            "value": 98.511,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp peak RSS",
+            "value": 67.543,
             "unit": "MiB"
           }
         ]
