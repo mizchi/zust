@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795026270860,
+  "lastUpdate": 1795026272988,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -10876,6 +10876,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "lsp peak RSS",
             "value": 67.117,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "committer": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "distinct": true,
+          "id": "351df2e31923d542ed40fe703526e4c4437b14da",
+          "message": "Array lengths as constant expressions over other consts\n\n- an array length that is not a literal expression keeps its text (`N * 2`,\n  `ARR[0] as usize`, `Foo::Bar as usize`, `{ x }`, `const { 2 }`, `if`, `!`,\n  comparisons, fields): Program evaluates it, as for const generic arguments\n- a unit variant path in a constant is its discriminant\n- `[u8; N - 1]` with a const parameter N in a type alias: \"generic parameters\n  may not be used in const operations\"\n- tests/ui: run-pass 1360 (56.36%), check-pass 1079, compile-fail 2807\n\nKPIs (gen5000): noop 661.0 M instr, edit 622.6, check 3887.4, cache unchanged;\nLSP ready 110 ms.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-18T18:19:38Z",
+          "tree_id": "b04833681e98da692521a75e247e6d92809e1c43",
+          "url": "https://github.com/mizchi/zust/commit/351df2e31923d542ed40fe703526e4c4437b14da"
+        },
+        "date": 1795026272458,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "lsp definition p50",
+            "value": 0.671,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp hover p50",
+            "value": 0.492,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp completion p50",
+            "value": 1.135,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp references p50",
+            "value": 3.72,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp rename p50",
+            "value": 0.822,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp signatureHelp p50",
+            "value": 0.84,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp documentHighlight p50",
+            "value": 0.901,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp ready (startup to indexed)",
+            "value": 138.144,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp peak RSS",
+            "value": 67,
             "unit": "MiB"
           }
         ]
