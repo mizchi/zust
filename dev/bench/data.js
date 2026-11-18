@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795034696143,
+  "lastUpdate": 1795034698340,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -17675,6 +17675,85 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/mizchi/zust/commit/441d0c265d2e3ca97428cbdc6ef9447b7b27c298"
         },
         "date": 1795033962837,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "parity documentSymbol (名前の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity workspace/symbol (上位 20 の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity definition (行き先の一致)",
+            "value": 97.222,
+            "unit": "%"
+          },
+          {
+            "name": "parity hover (名前を含む)",
+            "value": 95,
+            "unit": "%"
+          },
+          {
+            "name": "parity references (数の一致)",
+            "value": 92.105,
+            "unit": "%"
+          },
+          {
+            "name": "parity documentHighlight (数の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity rename (書き換えの一致)",
+            "value": 90,
+            "unit": "%"
+          },
+          {
+            "name": "parity signatureHelp (名前・引数の数・今の引数の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity completion `x.\\|` (書いてある名前を含む)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity completion `na\\|me` (同)",
+            "value": 79.167,
+            "unit": "%"
+          },
+          {
+            "name": "parity 一致の平均",
+            "value": 95.349,
+            "unit": "%"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "committer": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "distinct": true,
+          "id": "fb2f2f2135de73a854bb0a39e8530f5c71d270b4",
+          "message": "Shared borrows of values kept in registers\n\n- `&B` of a const read as a place (`assert_eq!(B, 3)`), or of a local the\n  address-taken scan did not see, borrows a copy in a temporary instead of\n  failing with \"borrowed local is not in memory\" (`&mut` of a local still does)\n- tests/ui: run-pass 1417 (58.7%), check-pass 1130\n\nKPIs (gen5000): noop 662.0 M instr (+0.1%), edit 622.7, check 3893.5, cache\nunchanged; LSP ready 110 ms. Against rustc -C incremental on gen1000: cold\n5.3x, no-op 11x, edit 17x faster. README and SUPPORTED.md (en + ja) updated.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-18T20:39:41Z",
+          "tree_id": "06d5aa54b8662655d695dacb0a3a5f290ab9d845",
+          "url": "https://github.com/mizchi/zust/commit/fb2f2f2135de73a854bb0a39e8530f5c71d270b4"
+        },
+        "date": 1795034697758,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
