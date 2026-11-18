@@ -1229,6 +1229,7 @@ check-pass	consts/const-eval/zst_operand_eval.rs
 run-pass	consts/const-fields-and-indexing.rs
 check-pass	consts/const-fn-destructuring-arg.rs
 run-pass	consts/const-fn-method.rs
+run-pass	consts/const-fn-val.rs
 build-pass	consts/const-fn-zst-args.rs
 compile-fail	consts/const-int-conversion.rs
 compile-fail	consts/const-int-wrapping.rs
@@ -4160,6 +4161,7 @@ run-pass	rfcs/rfc-1238-nonparametric-dropck/must-work-ex2.rs
 compile-fail	rfcs/rfc-1445-restrict-constants-in-patterns/issue-6804-nan-match.rs
 run-pass	rfcs/rfc-1445-restrict-constants-in-patterns/rfc1445/eq-allows-match-on-ty-in-macro.rs
 run-pass	rfcs/rfc-1445-restrict-constants-in-patterns/rfc1445/eq-allows-match.rs
+run-pass	rfcs/rfc-1623-static/rfc1623.rs
 compile-fail	rfcs/rfc-1937-termination-trait/issue-103052-1.rs
 run-pass	rfcs/rfc-1937-termination-trait/termination-trait-for-box-dyn-error-ok.rs
 run-pass	rfcs/rfc-1937-termination-trait/termination-trait-for-empty.rs
@@ -4357,6 +4359,7 @@ check-pass	statics/issue-44373-2.rs
 build-pass	statics/nested-allocations-dont-inherit-codegen-attrs.rs
 check-pass	statics/nested_struct.rs
 check-pass	statics/recursive_interior_mut.rs
+run-pass	statics/static-function-pointer.rs
 compile-fail	statics/static-generic-param-soundness.rs
 run-pass	statics/static-method-in-trait-with-tps-intracrate.rs
 run-pass	statics/static-methods-in-traits.rs

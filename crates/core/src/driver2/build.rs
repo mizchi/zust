@@ -116,6 +116,20 @@ impl Session2 {
     /// 解析済みのプログラムの .o を作る (キャッシュを引き、なければコンパイルしてキャッシュに入れる)
     fn compile_object(&mut self, a: &Analysis, rep: &mut Report2, tm: Option<&mut Timer>) -> R<Vec<u8>> {
         let mut live = a.prog.reachable(&a.refs);
+        // (a function only a static points to (`static F: fn() = f;`) is compiled too)
+        for c in &a.prog.consts {
+            if c.stat.is_some() && c.ty_has_fn() {
+                if let Ok(e) = crate::parse::parse_expr(&c.expr) {
+                    let mut ids = vec![];
+                    static_fns(&a.prog, &e, &mut ids, 0);
+                    for f in ids {
+                        if let Some(l) = live.get_mut(f as usize) {
+                            *l = true;
+                        }
+                    }
+                }
+            }
+        }
         let mut user_live: Vec<u32> = (0..a.prog.names.len()).filter(|&i| live[i] && concrete(&a.prog, i) && !a.is_ext(i as u32)).map(|i| i as u32).collect();
         let insts = Mutex::new(Insts::new(&a.prog));
         let mut blobs: FxMap<u32, Blob> = FxMap::default();
@@ -273,6 +287,16 @@ fn emit_object(a: &Analysis, ctx: &CrateCtx, insts: &Insts, user_live: &[u32], b
             s.is_main || s.export
         })
         .collect();
+    // (a function a static points to: `static F: fn() = f;`)
+    for c in &prog.consts {
+        if c.stat.is_some() && c.ty_has_fn() {
+            if let Ok(e) = crate::parse::parse_expr(&c.expr) {
+                let mut ids = vec![];
+                static_fns(prog, &e, &mut ids, 0);
+                stack.extend(ids.into_iter().filter(|f| blobs.contains_key(f)));
+            }
+        }
+    }
     while let Some(u) = stack.pop() {
         if !reach.insert(u) {
             continue;
@@ -439,6 +463,7 @@ fn emit_object(a: &Analysis, ctx: &CrateCtx, insts: &Insts, user_live: &[u32], b
             todo: &mut Vec<u32>,
             nested: &mut usize,
             static_name: &dyn Fn(u32) -> String,
+            fname: &dyn Fn(u32) -> String,
         ) {
             let mut rs = vec![];
             for (off, r) in dv.relocs {
@@ -450,15 +475,16 @@ fn emit_object(a: &Analysis, ctx: &CrateCtx, insts: &Insts, user_live: &[u32], b
                     crate::ast_consteval::DRef::Anon(inner) => {
                         *nested += 1;
                         let n = format!(".Lxn{}", *nested);
-                        place(inner, n.clone(), datas, todo, nested, static_name);
+                        place(inner, n.clone(), datas, todo, nested, static_name, fname);
                         rs.push((off, n, 0));
                     }
+                    crate::ast_consteval::DRef::Func(f) => rs.push((off, fname(f), 0)),
                 }
             }
             datas.push((name, dv.bytes, rs, false));
         }
         let n0 = datas.len();
-        place(dv, static_name(ci), &mut datas, &mut todo, &mut nested, &static_name);
+        place(dv, static_name(ci), &mut datas, &mut todo, &mut nested, &static_name, &fname);
         // (ライブラリの static は外に見せる)
         if (ctx.lib.is_some() && c.item < a.prog.prelude_from && !a.ext_items[c.item as usize]) || (ctx.lib.is_none() && !ctx.deps.is_empty() && c.name == "__EXR_CALLER") {
             if let Some(d) = datas[n0..].iter_mut().find(|d| d.0 == static_name(ci)) {
@@ -1357,3 +1383,21 @@ impl Session2 {
     }
 }
 
+
+/// The functions a static's initializer names as values (fn pointers, also inside arrays, tuples and structs)
+fn static_fns(prog: &crate::program::Program, e: &crate::parse::Expr, out: &mut Vec<u32>, depth: u32) {
+    use crate::parse::Expr;
+    if depth > 32 {
+        return;
+    }
+    if let Some(f) = crate::ast_consteval::fn_of(prog, e) {
+        out.push(f);
+        return;
+    }
+    match e {
+        Expr::Paren(x) | Expr::Ref(_, x) | Expr::Cast(x, _) => static_fns(prog, x, out, depth + 1),
+        Expr::Array(xs) | Expr::Tuple(xs) | Expr::Call(_, xs) => xs.iter().for_each(|x| static_fns(prog, x, out, depth + 1)),
+        Expr::Struct(_, fs, _) => fs.iter().for_each(|f| static_fns(prog, &f.1, out, depth + 1)),
+        _ => {}
+    }
+}

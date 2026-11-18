@@ -167,6 +167,20 @@ enum AdtShape {
 }
 
 /// const / static の定義
+impl ConstDef {
+    /// The type holds a fn pointer somewhere (written out: `fn(` in the type's name is enough for statics)
+    pub fn ty_has_fn(&self) -> bool {
+        fn has(t: Ty, d: u32) -> bool {
+            d < 8 && match t {
+                Ty::Fn(_) => true,
+                Ty::Array(e, _) | Ty::Ref(_, e) => has(*e, d + 1),
+                _ => false,
+            }
+        }
+        has(self.ty, 0) || matches!(self.ty, Ty::Struct(_))
+    }
+}
+
 pub struct ConstDef {
     pub name: String,
     pub ty: Ty,

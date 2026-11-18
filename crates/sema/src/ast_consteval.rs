@@ -12,6 +12,21 @@ pub enum DRef {
     Anon(DataVal),
     /// static (Program::consts の index)
     Static(u32),
+    /// a function (`static F: fn() = f;`: Program::sigs の index)
+    Func(u32),
+}
+
+/// The function a constant of a fn pointer type names (`f` / `f as fn(..)` / `m::f`): a non-generic function with a
+/// body
+pub fn fn_of(prog: &Program, e: &Expr) -> Option<u32> {
+    let mut e = e;
+    while let Expr::Paren(x) | Expr::Cast(x, _) = e {
+        e = x;
+    }
+    let Expr::Path(None, p) = e else { return None };
+    let id = prog.fn_by_p(&crate::program::PPath::of(p), None)?;
+    let s = &prog.sigs[id as usize];
+    (!s.is_generic() && (s.has_body || s.is_extern)).then_some(id)
 }
 
 pub struct DataVal {
@@ -281,6 +296,11 @@ fn write(prog: &Program, e: &Expr, ty: Ty, v: &mut DataVal, off: u32, depth: u32
             }
         }
         Ty::Unit => Ok(()),
+        Ty::Fn(_) => {
+            let f = fn_of(prog, e).ok_or_else(|| format!("constants of type `{}` are not supported", prog.tn(ty)))?;
+            v.relocs.push((off, DRef::Func(f)));
+            Ok(())
+        }
         Ty::F64 => {
             let x = eval_float(prog, e, depth)?;
             v.bytes[off as usize..off as usize + 8].copy_from_slice(&x.to_le_bytes());
@@ -340,6 +360,7 @@ pub fn dump(dv: &DataVal, indent: usize, out: &mut Vec<String>) {
     for (o, r) in &dv.relocs {
         match r {
             DRef::Static(c) => out.push(format!("{}@{o} static {c}", " ".repeat(indent + 1))),
+            DRef::Func(f) => out.push(format!("{}@{o} fn {f}", " ".repeat(indent + 1))),
             DRef::Anon(inner) => {
                 out.push(format!("{}@{o} anon", " ".repeat(indent + 1)));
                 dump(inner, indent + 2, out);
