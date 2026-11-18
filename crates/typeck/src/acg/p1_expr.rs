@@ -1304,6 +1304,9 @@ impl Cx<'_> {
             self.requested.push(iid);
             fns.push(iid);
         } else {
+            // (`dyn Foo<isize>`: the trait's own parameters are the arguments written)
+            let (trn, targs) = self.dyn_trait_args(tr);
+            let tr = trn.as_str();
             let Some(decls) = self.prog.traits.get(tr) else {
                 return err(span, format!("cannot find trait `{tr}`"));
             };
@@ -1316,6 +1319,7 @@ impl Cx<'_> {
                     return err(span, format!("`{}` cannot be called through `dyn` (it needs `&self`)", self.prog.names[d as usize]));
                 };
                 let recv = [Ty::Ref(*m, intern(t))];
+                let targs = targs.clone();
                 // (`&0 as &dyn Display`: a type formatted by the compiler itself goes through a prelude shim that
                 // formats it with `{}` / `{:?}`)
                 if matches!(tr, "Display" | "Debug") {
@@ -1326,7 +1330,12 @@ impl Cx<'_> {
                         continue;
                     }
                 }
-                let sol = vec![None; ds.generics.len()];
+                let mut sol = vec![None; ds.generics.len()];
+                for (k, a) in targs.iter().enumerate() {
+                    if let Some(slot) = sol.get_mut(1 + k) {
+                        *slot = Some(*a);
+                    }
+                }
                 let (mut fid, _) = self.resolve_call(d, &recv, sol, None, span)?;
                 // ジェネリックな impl (`impl<T> Tr for W<T>`) のメソッドはさらにインスタンス化する
                 if (fid as usize) < self.prog.sigs.len() && self.prog.sigs[fid as usize].is_generic() {
@@ -1431,6 +1440,41 @@ impl Cx<'_> {
         Ok((r, ret))
     }
 
+    /// The trait of `dyn Tr<A, B, Assoc = C>` and the types of its own arguments (the bindings are left out)
+    pub(crate) fn dyn_trait_args(&mut self, tr: &str) -> (String, Vec<Ty>) {
+        let Some((n, rest)) = tr.split_once('<') else { return (tr.trim().to_string(), vec![]) };
+        let inner = rest.trim_end().strip_suffix('>').unwrap_or(rest);
+        let mut args = vec![];
+        // (the arguments split at the commas outside brackets)
+        let mut parts: Vec<String> = vec![];
+        let (mut d, mut cur) = (0i32, String::new());
+        for c in inner.chars() {
+            match c {
+                '<' | '(' | '[' => d += 1,
+                '>' | ')' | ']' => d -= 1,
+                ',' if d == 0 => {
+                    parts.push(std::mem::take(&mut cur));
+                    continue;
+                }
+                _ => {}
+            }
+            cur.push(c);
+        }
+        parts.push(cur);
+        for a in &parts {
+            let a = a.trim();
+            if a.is_empty() || a.contains('=') {
+                continue;
+            }
+            if let Ok(Expr::Cast(_, pt)) = crate::parse::parse_expr(&format!("0 as {a}")) {
+                if let Ok(t) = self.parse_ty(&pt) {
+                    args.push(t);
+                }
+            }
+        }
+        (n.trim().to_string(), args)
+    }
+
     /// `&dyn Fn(A) -> B` の呼び出し (vtable の 0 番目がクロージャの本体)
     pub(crate) fn dyn_fn_call(&mut self, fat: Value, s: &str, args: &[&Expr], span: Sp) -> R<V> {
         let (ps, r) = self.dyn_fn_sig(s).or_else(|e| err(span, e))?;
@@ -1440,17 +1484,25 @@ impl Cx<'_> {
     /// `x.m(..)` (x: `&dyn Trait`)
     pub(crate) fn dyn_method_call(&mut self, fat: Value, tr: &str, mc: &Expr) -> R<V> {
         let Expr::MethodCall(_, name, _, margs, _) = mc else { return err(SP, "internal: expected a method call") };
+        let (trn, targs) = self.dyn_trait_args(tr);
+        let tr = trn.as_str();
         let decls = self.prog.traits.get(tr).cloned().unwrap_or_default();
         let Some(idx) = decls.iter().position(|&d| self.prog.names[d as usize].rsplit("::").next() == Some(name.as_str())) else {
             return err(SP, format!("no method named `{name}` found for `dyn {tr}`"));
         };
         let ds = &self.prog.sigs[decls[idx] as usize];
-        // Self は引数・戻り値に出てこない (object safe) 前提。出てきたらエラー
-        let ps: Vec<Ty> = ds.params[1..].to_vec();
-        if ps.iter().chain([&ds.ret]).any(|&t| self.prog.has_param(t)) {
+        // (the trait's parameters are the arguments of `dyn Tr<A>`; Self は引数・戻り値に出てこない (object safe) 前提)
+        let mut sol: Vec<Option<Ty>> = vec![None; ds.generics.len()];
+        for (k, a) in targs.iter().enumerate() {
+            if let Some(slot) = sol.get_mut(1 + k) {
+                *slot = Some(*a);
+            }
+        }
+        let ps: Vec<Ty> = ds.params[1..].iter().map(|&t| self.prog.partial_subst(t, &sol)).collect();
+        let ret = self.prog.partial_subst(ds.ret, &sol);
+        if ps.iter().chain([&ret]).any(|&t| self.prog.has_param(t)) {
             return err(SP, format!("`{name}` cannot be called through `dyn {tr}` (it uses `Self` or generics)"));
         }
-        let ret = ds.ret;
         let args: Vec<&Expr> = margs.iter().collect();
         self.dyn_call(fat, idx, &ps, ret, &args, SP)
     }

@@ -2058,6 +2058,7 @@ compile-fail	generics/generic-impl-less-params-with-defaults.rs
 check-pass	generics/generic-impl-method-params-2311.rs
 run-pass	generics/generic-ivec-leak.rs
 run-pass	generics/generic-newtype-struct.rs
+run-pass	generics/generic-object.rs
 run-pass	generics/generic-tag-corruption.rs
 run-pass	generics/generic-tag-local.rs
 run-pass	generics/generic-temporary.rs
@@ -2123,6 +2124,7 @@ run-pass	higher-ranked/trait-bounds/hrtb-parse.rs
 run-pass	higher-ranked/trait-bounds/hrtb-precedence-of-plus-where-clause.rs
 run-pass	higher-ranked/trait-bounds/hrtb-precedence-of-plus.rs
 run-pass	higher-ranked/trait-bounds/hrtb-resolve-lifetime.rs
+run-pass	higher-ranked/trait-bounds/hrtb-trait-object-paren-notation.rs
 run-pass	higher-ranked/trait-bounds/hrtb-trait-object-passed-to-closure.rs
 run-pass	higher-ranked/trait-bounds/hrtb-type-outlives.rs
 run-pass	higher-ranked/trait-bounds/hrtb-unboxed-closure-trait.rs
@@ -2547,6 +2549,7 @@ check-pass	lint/dead-code/allow-dead-code-propagation-to-impls.rs
 check-pass	lint/dead-code/allow-or-expect-dead_code-114557-2.rs
 check-pass	lint/dead-code/allow-or-expect-dead_code-114557-3.rs
 check-pass	lint/dead-code/allow-unused-trait.rs
+run-pass	lint/dead-code/associated-type.rs
 check-pass	lint/dead-code/const-arg-used-in-pub-trait.rs
 check-pass	lint/dead-code/const-underscore-issue-101532.rs
 check-pass	lint/dead-code/const-underscore-issue-142104.rs
@@ -3258,8 +3261,6 @@ compile-fail	numeric/numeric-suffix/numeric-suffix.rs
 run-pass	numeric/ref-int.rs
 run-pass	numeric/type-limit-comparisons-6130.rs
 compile-fail	numeric/uppercase-base-prefix-invalid-no-fix.rs
-compile-fail	object-lifetime/object-lifetime-default-assoc-ty-binding-item-bounds-non-static.rs
-compile-fail	object-lifetime/object-lifetime-default-assoc-ty-binding-item-bounds.rs
 check-pass	object-lifetime/object-lifetime-default-assoc-ty-self-ty-static.rs
 run-pass	object-lifetime/object-lifetime-default-default-to-static.rs
 compile-fail	object-lifetime/object-lifetime-default-from-box-error.rs
@@ -4573,6 +4574,7 @@ compile-fail	structs/method-chain-expression-failure.rs
 run-pass	structs/module-qualified-struct-destructure.rs
 compile-fail	structs/multi-line-fru-suggestion.rs
 run-pass	structs/multiple-inherent-impl-blocks.rs
+run-pass	structs/mutable-unit-struct-borrow-11267.rs
 run-pass	structs/newtype-struct-drop-run.rs
 check-pass	structs/newtype-struct-with-dtor.rs
 compile-fail	structs/non-struct-in-struct-position.rs
@@ -4943,6 +4945,7 @@ check-pass	traits/default-method/nested-supertrait-method-in-default-body.rs
 run-pass	traits/default-method/self.rs
 run-pass	traits/default-method/supertrait-method-in-default-body.rs
 run-pass	traits/default-method/supervtable.rs
+run-pass	traits/default-method/trait-object-lifetime-bound.rs
 run-pass	traits/default-method/trivial.rs
 run-pass	traits/default_method_simple.rs
 compile-fail	traits/dont-autoderef-ty-with-escaping-var.rs
@@ -5029,6 +5032,7 @@ check-pass	traits/object/crash-due-to-projections-modulo-norm.rs
 run-pass	traits/object/dyn-iterator-with-non-ord-item.rs
 compile-fail	traits/object/elaborated-predicates-unconstrained-late-bound.rs
 compile-fail	traits/object/enforce-supertrait-projection.rs
+check-pass	traits/object/infer-shadows-implied-projection.rs
 compile-fail	traits/object/issue-44454-1.rs
 compile-fail	traits/object/issue-44454-2.rs
 run-pass	traits/object/lifetime-first.rs
@@ -5340,6 +5344,7 @@ run-pass	unboxed-closures/unboxed-closures-prelude.rs
 run-pass	unboxed-closures/unboxed-closures-simple.rs
 run-pass	unboxed-closures/unboxed-closures-single-word-env.rs
 run-pass	unboxed-closures/unboxed-closures-static-call-fn-once.rs
+run-pass	unboxed-closures/unboxed-closures-sugar-object.rs
 compile-fail	unboxed-closures/unboxed-closures-type-mismatch-closure-from-another-scope.rs
 compile-fail	unboxed-closures/unboxed-closures-type-mismatch.rs
 run-pass	unboxed-closures/unboxed-closures-zero-args.rs
@@ -5440,6 +5445,7 @@ compile-fail	wf/wf-static-method.rs
 check-pass	where-clauses/impl-method-where-clause-resolution.rs
 check-pass	where-clauses/issue-50825-1.rs
 compile-fail	where-clauses/method-suggestion-no-duplication.rs
+run-pass	where-clauses/obligation-error-propagation.rs
 check-pass	where-clauses/where-clause-bounds-inconsistency.rs
 run-pass	where-clauses/where-clause-early-bound-lifetimes.rs
 check-pass	where-clauses/where-clause-on-struct-definitions.rs

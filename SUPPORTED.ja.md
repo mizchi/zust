@@ -9,10 +9,10 @@
 
 ## 全体
 
-- [x] tests/ui run-pass：58.9%（1421 / 2413）
-- [x] tests/ui check-pass：62.7%（1133 / 1807）
+- [x] tests/ui run-pass：59.2%（1428 / 2413）
+- [x] tests/ui check-pass：62.8%（1134 / 1807）
 - [x] tests/ui build-pass：60.7%（82 / 135）
-- [ ] tests/ui compile-fail（注釈の行でエラー）：38.3%（2816 / 7358）
+- [ ] tests/ui compile-fail（注釈の行でエラー）：38.2%（2814 / 7358）
 - [x] 実際のクレート：fnv、adler2、hex、itoa、rustc-hash、cfg-if がビルドでき、同じ出力を出す（6 / 6）
 - [x] zust-analyzer が rust-analyzer と同じように答える：95.4%（rust-analyzer は 96.2%）
 
@@ -35,7 +35,7 @@
 - [x] ジェネリクス：61.9%（期待される型からしか分からない型パラメータは推論しない）
 - [ ] const：54.9%（ヒープの値、ジェネリックな `const fn` はない）
 - [ ] drop：53.6%（一部の一時値の drop の順序が違う）
-- [ ] トレイト：51.0%（ジェネリックなトレイト、ブランケット impl、`dyn`、`impl .. for dyn Tr` は動く。coherence はない）
+- [ ] トレイト：51.0%（ジェネリックなトレイト、ブランケット impl、`dyn`（`dyn Tr<A>` も）、`impl .. for dyn Tr` は動く。coherence はない）
 - [ ] `macro_rules!`：47.1%（`let`・ラベル・アームの束縛の衛生性。断片の種類は一部）
 - [ ] 共用体：46.2%（`repr(packed)` はない）
 - [ ] const ジェネリクス：43.6%（`generic_const_exprs` はない）
@@ -106,8 +106,8 @@
 
 ## rustc との速度の比較 (2026-11-18)
 
-- [x] cold ビルド：gen1000 で rustc `-C incremental` の 7.0 倍速い。実際のクレートで 2.8〜4.3 倍
-- [x] 編集して再ビルド：gen1000 で 15 倍速い。小さなプログラムで 12〜18 倍、実際のクレートで 4.7〜7.9 倍
+- [x] cold ビルド：gen1000 で rustc `-C incremental` の 7.2 倍速い。実際のクレートで 3.3〜3.9 倍
+- [x] 編集して再ビルド：gen1000 で 14 倍速い。小さなプログラムで 12〜18 倍、実際のクレートで 5.2〜8.0 倍
 - [x] ディスクのビルドキャッシュ：1/14（gen1000 で 766 KiB と 10.8 MiB）
 - [x] バイナリ：gen1000 で 1/3.2、実際のクレートで 1/90〜1/550
 - [ ] 実行時間：小さなプログラムで zustc は rustc `-O` の 1.1〜4.1 倍遅い（rustc の debug ビルドよりは速い）。
@@ -121,7 +121,7 @@
 |---|---:|---:|
 | gen5000 の no-op ビルド | 663.8 M 命令 | 746.0 M |
 | gen5000 の 1 関数を編集した後のビルド | 620.8 M 命令 | 709.3 M |
-| gen5000 の `check` | 3892.9 M 命令 | 3971.0 M |
+| gen5000 の `check` | 3893.0 M 命令 | 3971.0 M |
 | gen5000 のビルドキャッシュ | 1902.8 KiB | 1902.8 KiB |
 | LSP の definition / hover / completion / references の p50 | 0.42 / 0.34 / 0.90 / 1.78 ms | — |
 | LSP の起動から索引ができるまで（zustc と ide の対象の合計） | 277 ms | — |
