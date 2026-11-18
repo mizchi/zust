@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795020565240,
+  "lastUpdate": 1795020567324,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -9508,6 +9508,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "lsp peak RSS",
             "value": 66.93,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "committer": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "distinct": true,
+          "id": "a190fcfdf82d5e0cb2d71cd1836c431084c36a0f",
+          "message": "Fix wrong code: or-patterns with guards, const unit-variant patterns, ref lets in closures, FRU from fields\n\n- an arm with a guard and an or-pattern runs the guard for each matching\n  alternative, left to right (the arm is split per alternative)\n- an identifier pattern naming a const whose value is a unit variant\n  (`const C: E = E::A;`) tests that variant instead of binding\n- `let C(ref mut r, _) = c;` in a closure captures `c` by reference\n- `S { a, ..f.inner }`: the FRU fix also covers field places\n- macro hygiene for match arms binding a plain name (`_x => ..`)\n- tests/ui: run-pass 1331 (55.16%)\n\nAccepted compile-fail removal (passed only because the closure captured by\nvalue; it needs closures with `&mut` captures to be non-Copy):\nclosures/2229_closure_analysis/diagnostics/closure-origin-single-variant-diagnostics.rs\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-18T16:42:36Z",
+          "tree_id": "028c0f0b8b44041ecff4c7d7058f8ad3cf952ef8",
+          "url": "https://github.com/mizchi/zust/commit/a190fcfdf82d5e0cb2d71cd1836c431084c36a0f"
+        },
+        "date": 1795020566867,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "lsp definition p50",
+            "value": 0.422,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp hover p50",
+            "value": 0.347,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp completion p50",
+            "value": 0.975,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp references p50",
+            "value": 2.717,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp rename p50",
+            "value": 0.553,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp signatureHelp p50",
+            "value": 0.876,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp documentHighlight p50",
+            "value": 0.617,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp ready (startup to indexed)",
+            "value": 100.665,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp peak RSS",
+            "value": 66.781,
             "unit": "MiB"
           }
         ]
