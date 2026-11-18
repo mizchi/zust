@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795015387196,
+  "lastUpdate": 1795015389027,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -12414,6 +12414,70 @@ window.BENCHMARK_DATA = {
           {
             "name": "tests/ui compile-fail passing",
             "value": 2818,
+            "unit": "tests"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "committer": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "distinct": true,
+          "id": "eb82f3c9a843e0a39251809847deaa99ee913944",
+          "message": "zustc parser: associated type bounds, higher-ranked types, GAT where clauses after the value, qualified GAT paths, C variadics\n\n- `Iterator<Item: Debug>` (read as `Item = impl Debug`); rejected inside `dyn`\n- `for<'a> fn(&'a u8)` / `for<'a> Fn(&'a T)` in type position (the binder is dropped);\n  `for<..> dyn` is an error\n- `type Item<'a> = &'a T where T: 'a;`, `<T as Tr>::Gat<'a>`\n- `extern \"C\" { fn printf(f: *const u8, ...); }`\n- tests/ui: run-pass 52.9%, check-pass 57.8%, build-pass 56.3%; 23 compile-fail tests that were\n  rejected only by these parse errors now need checks zustc does not have (well-formedness,\n  coherence, lifetime shadowing / E0261, impl vs trait where clauses, ABI of variadics)\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-18T15:14:50Z",
+          "tree_id": "3ecc4b94d8b856a1e49186c9f11bee3805d07944",
+          "url": "https://github.com/mizchi/zust/commit/eb82f3c9a843e0a39251809847deaa99ee913944"
+        },
+        "date": 1795015388556,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tests/ui run-pass pass rate",
+            "value": 52.92,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui run-pass passing",
+            "value": 1277,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui check-pass pass rate",
+            "value": 57.83,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui check-pass passing",
+            "value": 1045,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui build-pass pass rate",
+            "value": 56.3,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui build-pass passing",
+            "value": 76,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui compile-fail pass rate",
+            "value": 38.16,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui compile-fail passing",
+            "value": 2808,
             "unit": "tests"
           }
         ]
