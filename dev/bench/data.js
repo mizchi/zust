@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795020569145,
+  "lastUpdate": 1795020571079,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -14981,6 +14981,70 @@ window.BENCHMARK_DATA = {
           {
             "name": "tests/ui run-pass passing",
             "value": 1325,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui check-pass pass rate",
+            "value": 58.55,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui check-pass passing",
+            "value": 1058,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui build-pass pass rate",
+            "value": 57.04,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui build-pass passing",
+            "value": 77,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui compile-fail pass rate",
+            "value": 38.08,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui compile-fail passing",
+            "value": 2802,
+            "unit": "tests"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "committer": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "distinct": true,
+          "id": "a190fcfdf82d5e0cb2d71cd1836c431084c36a0f",
+          "message": "Fix wrong code: or-patterns with guards, const unit-variant patterns, ref lets in closures, FRU from fields\n\n- an arm with a guard and an or-pattern runs the guard for each matching\n  alternative, left to right (the arm is split per alternative)\n- an identifier pattern naming a const whose value is a unit variant\n  (`const C: E = E::A;`) tests that variant instead of binding\n- `let C(ref mut r, _) = c;` in a closure captures `c` by reference\n- `S { a, ..f.inner }`: the FRU fix also covers field places\n- macro hygiene for match arms binding a plain name (`_x => ..`)\n- tests/ui: run-pass 1331 (55.16%)\n\nAccepted compile-fail removal (passed only because the closure captured by\nvalue; it needs closures with `&mut` captures to be non-Copy):\nclosures/2229_closure_analysis/diagnostics/closure-origin-single-variant-diagnostics.rs\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-18T16:42:36Z",
+          "tree_id": "028c0f0b8b44041ecff4c7d7058f8ad3cf952ef8",
+          "url": "https://github.com/mizchi/zust/commit/a190fcfdf82d5e0cb2d71cd1836c431084c36a0f"
+        },
+        "date": 1795020570589,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tests/ui run-pass pass rate",
+            "value": 55.16,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui run-pass passing",
+            "value": 1331,
             "unit": "tests"
           },
           {
