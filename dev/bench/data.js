@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1794992868747,
+  "lastUpdate": 1794992870607,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -1756,6 +1756,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "lsp peak RSS",
             "value": 63.66,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "committer": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "distinct": true,
+          "id": "c155863ea399958530809b183dad2c06d097d630",
+          "message": "bench: run zustc against rustc's own tests/ui (sparse clone of rust-lang/rust 1.100.0) and report pass rates by kind\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-18T08:59:23Z",
+          "tree_id": "9fbc716ebf4d79c7bf1f9ca3b9762eee1f260534",
+          "url": "https://github.com/mizchi/zust/commit/c155863ea399958530809b183dad2c06d097d630"
+        },
+        "date": 1794992870144,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "lsp definition p50",
+            "value": 0.42,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp hover p50",
+            "value": 0.345,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp completion p50",
+            "value": 1.009,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp references p50",
+            "value": 2.67,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp rename p50",
+            "value": 0.373,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp signatureHelp p50",
+            "value": 0.662,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp documentHighlight p50",
+            "value": 0.609,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp ready (startup to indexed)",
+            "value": 96.976,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp peak RSS",
+            "value": 63.859,
             "unit": "MiB"
           }
         ]
