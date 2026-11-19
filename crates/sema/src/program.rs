@@ -3312,7 +3312,14 @@ impl Program {
                         .copied();
                 }
                 let ty = if ty == "Self" { self.structs[self.base_of(self_sid?) as usize].name.clone() } else { ty.to_string() };
-                self.index.get(&format!("{ty}::{m}")).copied()
+                if let Some(&id) = self.index.get(&format!("{ty}::{m}")) {
+                    return Some(id);
+                }
+                // (`type Ham = foo::Qux;` then `Ham::new()`: the function of the type the alias names)
+                match self.aliases.get(&ty).map(|a| &a.1) {
+                    Some(TySyn::Named(t) | TySyn::App(t, _)) if *t != ty => self.index.get(&format!("{t}::{m}")).copied(),
+                    _ => None,
+                }
             }
             _ => None,
         }

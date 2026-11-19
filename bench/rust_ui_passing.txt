@@ -5546,6 +5546,7 @@ check-pass	type-alias-impl-trait/nested-rpit-with-lifetimes.rs
 check-pass	type-alias-impl-trait/wf-check-rpit-lifetimes.rs
 check-pass	type-alias/issue-14933.rs
 compile-fail	type-alias/issue-62364-self-ty-arg.rs
+run-pass	type-alias/static-method-type-alias-11047.rs
 run-pass	type-alias/type-param.rs
 check-pass	type-alias/where-clause-on-generic-type-alias.rs
 compile-fail	type-inference/ambiguous-num-type-method-call.rs
@@ -5681,6 +5682,7 @@ compile-fail	typeck/minus-string.rs
 compile-fail	typeck/missing-private-fields-in-struct-literal.rs
 compile-fail	typeck/no-type-for-node-ice.rs
 compile-fail	typeck/non-function-call-error.rs
+run-pass	typeck/osstring-str-equality.rs
 compile-fail	typeck/output-type-mismatch.rs
 compile-fail	typeck/parenthesized-type-param.rs
 compile-fail	typeck/parenthesized-type-params-in-paths.rs
