@@ -834,6 +834,29 @@ impl Cx<'_> {
                 return self.expr(&c, expected).map(Some);
             }
         }
+        // (`impl Tr for &i32` / `impl Tr for &S`: `T::__ref_m` with self `&&T`, for a receiver of type &T)
+        if let Ty::Ref(_, inner) = t {
+            let f = match *inner {
+                Ty::Struct(sid) => self.prog.method(sid, &format!("__ref_{method}")).map(|id| self.prog.names[id as usize].clone()),
+                it if it.is_int() || it.is_float() || matches!(it, Ty::Bool | Ty::Char | Ty::Str) => {
+                    let f = format!("{}::__ref_{method}", self.prog.tn(it));
+                    self.prog.index.contains_key(&f).then_some(f)
+                }
+                _ => None,
+            };
+            if let Some(f) = f {
+                if let Some(&id) = self.prog.index.get(&f) {
+                    let a0 = match self.prog.sigs[id as usize].params.first() {
+                        Some(Ty::Ref(m, Ty::Ref(..))) => Expr::Ref(*m, Box::new(recv.clone())),
+                        _ => recv.clone(),
+                    };
+                    let mut args = vec![a0];
+                    args.extend(margs.iter().cloned());
+                    let c = Expr::Call(Box::new(path_expr(&f)), args);
+                    return self.expr(&c, expected).map(Some);
+                }
+            }
+        }
         while let Ty::Ref(_, i) = t {
             t = *i;
         }

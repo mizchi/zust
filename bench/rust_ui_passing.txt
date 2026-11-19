@@ -2310,7 +2310,6 @@ run-pass	functions-closures/fn-item-type-coerce.rs
 run-pass	functions-closures/fn-lval.rs
 run-pass	functions-closures/fn-type-infer.rs
 run-pass	functions-closures/implied-bounds-closure-arg-outlives.rs
-compile-fail	generic-associated-types/bugs/hrtb-implied-3.rs
 check-pass	generic-associated-types/bugs/issue-88460.rs
 check-pass	generic-associated-types/construct_with_other_type.rs
 compile-fail	generic-associated-types/empty_generics.rs
@@ -2435,7 +2434,6 @@ run-pass	higher-ranked/trait-bounds/hrtb-binder-levels-in-object-types.rs
 run-pass	higher-ranked/trait-bounds/hrtb-closure-lifetime-infer.rs
 run-pass	higher-ranked/trait-bounds/hrtb-debruijn-object-types-in-closures.rs
 run-pass	higher-ranked/trait-bounds/hrtb-fn-like-trait.rs
-compile-fail	higher-ranked/trait-bounds/hrtb-just-for-static.rs
 compile-fail	higher-ranked/trait-bounds/hrtb-malformed-lifetime-generics.rs
 run-pass	higher-ranked/trait-bounds/hrtb-opt-in-copy.rs
 run-pass	higher-ranked/trait-bounds/hrtb-parse.rs
@@ -2457,6 +2455,7 @@ compile-fail	higher-ranked/trait-bounds/issue-58451.rs
 check-pass	higher-ranked/trait-bounds/issue-60283.rs
 check-pass	higher-ranked/trait-bounds/issue-88586-hr-self-outlives-in-trait-def.rs
 check-pass	higher-ranked/trait-bounds/issue-90177.rs
+check-pass	higher-ranked/trait-bounds/normalize-under-binder/issue-62529-4.rs
 check-pass	higher-ranked/trait-bounds/normalize-under-binder/issue-62529-5.rs
 check-pass	higher-ranked/trait-bounds/normalize-under-binder/issue-70120.rs
 check-pass	higher-ranked/trait-bounds/normalize-under-binder/issue-74261.rs
@@ -2483,6 +2482,8 @@ run-pass	impl-header-lifetime-elision/bare_type.rs
 compile-fail	impl-header-lifetime-elision/dyn-trait.rs
 run-pass	impl-header-lifetime-elision/explicit-and-elided-same-header.rs
 run-pass	impl-header-lifetime-elision/path-underscore.rs
+run-pass	impl-header-lifetime-elision/ref-underscore.rs
+run-pass	impl-header-lifetime-elision/trait-underscore.rs
 run-pass	impl-trait/basic-trait-impl.rs
 run-pass	impl-trait/bounds_regression.rs
 check-pass	impl-trait/closure-calling-parent-fn.rs
@@ -2532,6 +2533,7 @@ check-pass	impl-trait/in-trait/rpitit-cycle-in-generics-of.rs
 compile-fail	impl-trait/in-trait/rpitit-duplicate-associated-fn-with-nested.rs
 compile-fail	impl-trait/in-trait/rpitit-duplicate-associated-fn.rs
 check-pass	impl-trait/in-trait/shorthand-projection-in-rpitit-bound.rs
+check-pass	impl-trait/in-trait/success.rs
 compile-fail	impl-trait/in-trait/suggest-missing-item.rs
 check-pass	impl-trait/in-trait/where-clause.rs
 check-pass	impl-trait/inside-item-nested-in-anon-const.rs
@@ -2560,6 +2562,7 @@ compile-fail	impl-trait/issues/issue-84073.rs
 compile-fail	impl-trait/issues/issue-84919.rs
 compile-fail	impl-trait/issues/issue-86642.rs
 compile-fail	impl-trait/issues/issue-87295.rs
+check-pass	impl-trait/issues/issue-93788.rs
 compile-fail	impl-trait/issues/issue-99073-2.rs
 compile-fail	impl-trait/issues/issue-99914.rs
 check-pass	impl-trait/lazy_subtyping_of_opaques.rs
@@ -2588,6 +2591,7 @@ check-pass	impl-trait/precise-capturing/rpitit-outlives.rs
 check-pass	impl-trait/precise-capturing/self-capture.rs
 compile-fail	impl-trait/precise-capturing/unexpected-token.rs
 compile-fail	impl-trait/printing-binder.rs
+build-pass	impl-trait/projection.rs
 check-pass	impl-trait/recursive-auto-trait.rs
 run-pass	impl-trait/region-escape-via-bound-contravariant-closure.rs
 run-pass	impl-trait/region-escape-via-bound-contravariant.rs
@@ -2987,6 +2991,7 @@ check-pass	lint/dead-code/not-lint-adt-appeared-in-pattern-issue-120770.rs
 check-pass	lint/dead-code/offset-of-correct-param-env.rs
 check-pass	lint/dead-code/self-assign.rs
 check-pass	lint/dead-code/struct-used-as-pattern-issue-56750.rs
+check-pass	lint/dead-code/type-alias-used-in-impl-59333.rs
 check-pass	lint/dead-code/type-in-transparent.rs
 build-pass	lint/dead-code/unused-variant-pub.rs
 run-pass	lint/dead-code/with-impl.rs
@@ -4757,7 +4762,6 @@ run-pass	regions/regions-dependent-let-ref.rs
 run-pass	regions/regions-early-bound-lifetime-in-assoc-fn.rs
 run-pass	regions/regions-early-bound-used-in-bound-method.rs
 run-pass	regions/regions-escape-into-other-fn.rs
-compile-fail	regions/regions-escape-via-trait-or-not.rs
 run-pass	regions/regions-expl-self.rs
 run-pass	regions/regions-fn-subtyping-2.rs
 check-pass	regions/regions-fn-subtyping-return-static.rs
@@ -5397,6 +5401,7 @@ compile-fail	suggestions/dont-suggest-private-trait-method.rs
 compile-fail	suggestions/dont-suggest-ref/simple.rs
 compile-fail	suggestions/dont-suggest-ufcs-for-const.rs
 run-pass	suggestions/dont-try-removing-the-field.rs
+compile-fail	suggestions/dont-wrap-ambiguous-receivers.rs
 compile-fail	suggestions/double-reference-ty-in-self-ty.rs
 compile-fail	suggestions/dyn-incompatible-trait-should-use-self-2021-without-dyn.rs
 compile-fail	suggestions/dyn-incompatible-trait-should-use-self-2021.rs

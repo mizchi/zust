@@ -253,6 +253,8 @@ pub struct Program {
     pub by_last: FxMap<String, Vec<u32>>,
     /// trait 名 → その trait で宣言された関数
     pub traits: FxMap<String, Vec<u32>>,
+    /// impls whose self type is a reference to a concrete type (`impl Tr for &i32` / `for &S`): (that type, trait)
+    pub ref_impls: std::collections::HashSet<(Ty, String)>,
     /// 親トレイト (`trait Bar: Foo`)
     pub trait_supers: FxMap<String, Vec<String>>,
     /// (型, trait) の実装
@@ -600,6 +602,7 @@ impl Program {
             prelude_from: u32::MAX,
             overflow_checks: false,
             trait_supers: FxMap::default(),
+            ref_impls: Default::default(),
             deny_unreachable: false,
             opt: false,
             blanket: FxMap::default(),
@@ -1134,6 +1137,12 @@ impl Program {
             }
             // プリミティブ型への trait 実装 (`impl Tr for u32`)
             // (`impl Hash for str`: str も組み込みの型として持つ)
+            // (`impl Tr for &i32` / `impl Tr for &S`: the reference type implements Tr)
+            if let Some(TySyn::Ref(..)) = &sm.impl_self_ty {
+                if let Some(t) = sm.impl_self_ty.as_ref().and_then(|t| p.resolve_g(t, &[]).ok()) {
+                    p.ref_impls.insert((t, tr.clone()));
+                }
+            }
             if let Some(pt) = Ty::prim(sn).or((sn == "str").then_some(Ty::Str)).or((sn == "#tuple0").then_some(Ty::Unit)) {
                 let dup = !p.prim_impls.insert((pt, tr.clone()));
                 if impl_overlaps(&mut self_tys, sums, ii, sn, tr, dup) {
@@ -1331,6 +1340,9 @@ impl Program {
     /// 型 t が trait tr を実装しているか
     pub fn implements(&self, t: Ty, tr: &str) -> bool {
         if self.blanket_traits.contains(tr) {
+            return true;
+        }
+        if matches!(t, Ty::Ref(..)) && !self.ref_impls.is_empty() && self.ref_impls.contains(&(t, tr.to_string())) {
             return true;
         }
         // (every type is Sized but str, slices and dyn Trait)
