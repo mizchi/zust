@@ -1,28 +1,12 @@
 {
   "schema": "jev-lint-documents-manifest-1",
   "files": {
-    "README.en": {
-      "path": "README.md",
-      "role": "document"
-    },
-    "README.ja": {
-      "path": "README.ja.md",
-      "role": "document"
-    },
     "CONTRIBUTING.en": {
       "path": "CONTRIBUTING.md",
       "role": "document"
     },
     "CONTRIBUTING.ja": {
       "path": "CONTRIBUTING.ja.md",
-      "role": "document"
-    },
-    "SUPPORTED.en": {
-      "path": "SUPPORTED.md",
-      "role": "document"
-    },
-    "SUPPORTED.ja": {
-      "path": "SUPPORTED.ja.md",
       "role": "document"
     },
     "docs_architecture.en": {
@@ -52,17 +36,6 @@
   },
   "comparisons": [
     {
-      "id": "README",
-      "topic": "The Japanese file README.ja.md is a faithful translation of README.md",
-      "mode": "translation",
-      "reference": {
-        "source": "README.en"
-      },
-      "target": {
-        "source": "README.ja"
-      }
-    },
-    {
       "id": "CONTRIBUTING",
       "topic": "The Japanese file CONTRIBUTING.ja.md is a faithful translation of CONTRIBUTING.md",
       "mode": "translation",
@@ -71,17 +44,6 @@
       },
       "target": {
         "source": "CONTRIBUTING.ja"
-      }
-    },
-    {
-      "id": "SUPPORTED",
-      "topic": "The Japanese file SUPPORTED.ja.md is a faithful translation of SUPPORTED.md",
-      "mode": "translation",
-      "reference": {
-        "source": "SUPPORTED.en"
-      },
-      "target": {
-        "source": "SUPPORTED.ja"
       }
     },
     {

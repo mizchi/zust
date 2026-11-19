@@ -2,7 +2,7 @@
 
 [English](CONTRIBUTING.md) | 日本語
 
-zust (zustc と zust-analyzer) を直す・足すときの手順。使い方は [README.ja.md](README.ja.md)、中のしくみは
+zust (zustc と zust-analyzer) を直す・足すときの手順。使い方は [README.md](README.md)、中のしくみは
 [docs/ja/architecture.md](docs/ja/architecture.md)。
 
 ## 準備
@@ -228,7 +228,10 @@ python3 bench/ci_bench.py --out-dir out/ci
 
 ## 英語の文書と日本語訳
 
-英語の文書にはそれぞれ日本語訳がある: `README.md` / `README.ja.md`、`CONTRIBUTING.md` / `CONTRIBUTING.ja.md`、
+`README.md` は英語だけ (概要・測った数値・サポート範囲・ロードマップを 1 か所に持つ)。その中の測った数値
+(`<!-- auto:.. -->` の間と、`<!-- total:.. -->` / `<!-- ui:.. -->` / `<!-- cf:.. -->` の直後) は CI が書き直す
+(bench.yml が main への push ごとに `scripts/update_readme.py` を実行する) ので、手で直さない。英語の文書と日本語訳の組は
+`CONTRIBUTING.md` / `CONTRIBUTING.ja.md`、
 `docs/X.md` / `docs/ja/X.md` (レポートも)。片方を変えたら、もう片方も変える。
 [jev-lint](https://github.com/mizchi/jev-lint) の `docs` が、それぞれの組が同じことを言っているかをモデルに聞く。
 
@@ -273,7 +276,9 @@ Markdown を変えたコミットでは、フックが `scripts/docs_check.sh --
   速さやサイズに効く変更なら `bench/regress.sh` も通す。
 - LSP の答えを変えたら、`bench/lsp_parity.py` で一致の割合と時間が下がっていないことを見る。
 - まとまった作業をしたら、レポートを書く (次の節)。
-- rust-analyzer との違いや、残したことは [TODO.md](TODO.md) に書く (英語)。
+- rust-analyzer との違いや、残したことは README の [Roadmap](README.md#roadmap) に、サポート範囲は
+  [What is supported](README.md#what-is-supported) に書く (英語。割合のある新しい分野には tests/ui のディレクトリを
+  書いた `<!-- ui:DIR -->` を付ける)。
 
 ### レポートの書き方
 

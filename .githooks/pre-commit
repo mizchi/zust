@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# 英語の文書と日本語訳 (README.md / README.ja.md、CONTRIBUTING*.md、docs/ と docs/ja/) の食い違いを止める。
+# 英語の文書と日本語訳 (CONTRIBUTING*.md、docs/ と docs/ja/) の食い違いを止める。
 # 有効にする: git config core.hooksPath .githooks
 # (jev-lint は作業ツリーの文書を読む。ステージしていない変更があれば、それも含めて判定する)
 set -uo pipefail

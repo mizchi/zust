@@ -235,8 +235,11 @@ python3 bench/ci_bench.py --out-dir out/ci
 
 ## English and Japanese documents
 
-Each English document has a Japanese translation: `README.md` / `README.ja.md`, `CONTRIBUTING.md` /
-`CONTRIBUTING.ja.md`, and `docs/X.md` / `docs/ja/X.md` (reports included). When you change one, change the other
+`README.md` is in English only: it holds the overview, the measured numbers, what is supported and the roadmap in one
+place. The measured numbers in it (between `<!-- auto:.. -->` markers, and after `<!-- total:.. -->`, `<!-- ui:.. -->`
+and `<!-- cf:.. -->` markers) are rewritten by CI (`scripts/update_readme.py`, run by bench.yml after each push to
+main); do not edit them by hand. `CONTRIBUTING.md` / `CONTRIBUTING.ja.md` and `docs/X.md` / `docs/ja/X.md` (reports
+included) are English / Japanese pairs. When you change one, change the other
 too. [jev-lint](https://github.com/mizchi/jev-lint) `docs` asks a model whether each pair still says the same thing.
 
 - `scripts/docs_manifest.py` writes the jev-lint manifests (`.jev-lint/documents*.json`) from the pairs;
@@ -281,7 +284,9 @@ the code for the name to see what each one does.
   If the change affects speed or size, also pass `bench/regress.sh`.
 - If you changed LSP answers, check with `bench/lsp_parity.py` that agreement and times did not get worse.
 - After a substantial piece of work, write a report (next section).
-- Record differences from rust-analyzer and anything left undone in [TODO.md](TODO.md).
+- Record differences from rust-analyzer and anything left undone in the [Roadmap](README.md#roadmap) of the README, and
+  what is supported in its [What is supported](README.md#what-is-supported) (a new area with a percentage gets a
+  `<!-- ui:DIR -->` marker naming its tests/ui directories).
 
 ### Writing reports
 

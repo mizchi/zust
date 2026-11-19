@@ -4,7 +4,7 @@
 usage: python3 scripts/docs_manifest.py          マニフェストを書き直す
        python3 scripts/docs_manifest.py --check  組がそろっているか・マニフェストが最新かを確かめる (書かない)
 
-組: README.md / README.ja.md、CONTRIBUTING.md / CONTRIBUTING.ja.md、SUPPORTED.md / SUPPORTED.ja.md、docs/X.md / docs/ja/X.md
+組: CONTRIBUTING.md / CONTRIBUTING.ja.md、docs/X.md / docs/ja/X.md (README.md は英語だけ)
 (docs/reports/ も含む)。jev-lint のマニフェストは 1 つに 100 ファイルまでなので、レポートは分けて書く。
 """
 import glob, json, os, sys
@@ -17,7 +17,7 @@ REPORTS_PER_MANIFEST = 40
 def pairs():
     """(英語, 日本語) の組と、相手のいないファイル"""
     out, missing = [], []
-    top = [("README.md", "README.ja.md"), ("CONTRIBUTING.md", "CONTRIBUTING.ja.md"), ("SUPPORTED.md", "SUPPORTED.ja.md")]
+    top = [("CONTRIBUTING.md", "CONTRIBUTING.ja.md")]
     en_docs = sorted(p for p in glob.glob("docs/**/*.md", root_dir=ROOT, recursive=True) if not p.startswith("docs/ja/"))
     ja_docs = sorted(glob.glob("docs/ja/**/*.md", root_dir=ROOT, recursive=True))
     for en in en_docs:

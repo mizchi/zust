@@ -3,8 +3,6 @@
 [![CI](https://github.com/mizchi/zust/actions/workflows/ci.yml/badge.svg)](https://github.com/mizchi/zust/actions/workflows/ci.yml)
 [![Benchmark](https://github.com/mizchi/zust/actions/workflows/bench.yml/badge.svg)](https://mizchi.github.io/zust/dev/bench/)
 
-English | [日本語](README.ja.md)
-
 **zustc** is a compiler for a subset of Rust built for fast incremental builds. **zust-analyzer** is a lightweight LSP server.
 
 - **zustc** has its own front end: lexer, parser and type inference. It generates code with Cranelift (the default) or
@@ -26,12 +24,61 @@ English | [日本語](README.ja.md)
 > - zustc's checks (types, borrow checking without region errors) are partial, so it is not a replacement for rustc for checking correctness.
 > - zust-analyzer implements only part of what rust-analyzer does.
 
-## How fast
+## Status
 
-### Against rustc
+Numbers measured <!-- measured -->2026-11-19, bdfd3a9<!-- /measured --> by CI on each push to main (bench.yml runs
+`bench/ci_bench.py` and `bench/rust_ui.py`, then `scripts/update_readme.py` writes them here). Times come from shared
+GitHub Actions runners and vary by about ±20%; the instruction counts (valgrind) do not.
+
+### Coverage of rustc's test suite
+
+zustc run against rustc's own UI tests (`tests/ui` of rust-lang/rust 1.100.0, `python3 bench/rust_ui.py`), counting
+only the tests it can be asked to handle (no nightly features, auxiliary crates or special flags):
+
+<!-- auto:ui -->
+| kind | applicable | pass |
+|---|---:|---:|
+| run-pass (builds, runs, same output) | 2385 | 1577 (66.1%) |
+| check-pass (accepted by `zustc check`) | 1807 | 1334 (73.8%) |
+| build-pass | 135 | 94 (69.6%) |
+| compile-fail (rejected at an annotated line) | 7358 | 2883 (39.2%) |
+<!-- /auto:ui -->
+
+[What is supported](#what-is-supported) breaks this down by area.
+
+### KPIs
+
+Build speed, build cache size and LSP latency on generated programs of 1000 / 5000 functions (`bench/ci_bench.py`):
+
+<!-- auto:kpi -->
+| KPI | gen1000 | gen5000 |
+|---|---:|---:|
+| cold build | 136 ms | 607 ms |
+| no-op build | 18.0 ms | 85.6 ms |
+| build after editing one function | 31.1 ms | 99.4 ms |
+| `check` | 123 ms | 526 ms |
+| no-op build (instructions) | 141.2 M | 665.5 M |
+| edit one function (instructions) | 134.5 M | 627.7 M |
+| `check` (instructions) | 793.1 M | 3904.4 M |
+| build cache on disk | 387.2 KiB | 1902.8 KiB |
+| binary | 324.0 KiB | 1558.3 KiB |
+| cold build peak RSS | 17.9 MiB | 52.0 MiB |
+
+| zust-analyzer (zustc's own sources) | |
+|---|---:|
+| p50: definition, hover, completion, references, rename | 0.81 ms / 0.74 ms / 1.48 ms / 3.93 ms / 0.96 ms |
+| startup until indexed | 181 ms |
+| peak RSS | 73.4 MiB |
+<!-- /auto:kpi -->
+
+Every change is also measured on its own with `python3 bench/kpi_track.py`, so that small increases that add up stay
+visible: [bench/kpi_log.md](bench/kpi_log.md) has one row per change with its effect (Δ) and the total since the
+reference (Σ). The [benchmark dashboard](https://mizchi.github.io/zust/dev/bench/) has the CI numbers of every commit.
+
+### Against rustc, relax and rust-analyzer (snapshots)
 
 Measured with `python3 bench/vs_rustc.py` and `python3 cratebench/run.py` (2026-11-18, 4 cores, rustc 1.100.0; times are
-medians of 3 runs). They are measured again with each round of work. gen1000 is a generated program with 1000 functions:
+medians of 3 runs). These comparisons are run by hand (they need rustc, relax and rust-analyzer side by side) and are dated. gen1000 is a generated program with 1000 functions:
 
 | gen1000 | cold | no-op | edit one function | on disk | binary (stripped) | run |
 |---|---:|---:|---:|---:|---:|---:|
@@ -50,39 +97,6 @@ adler2, hex, itoa, rustc-hash, cfg-if; all six give the same output as rustc):
 | edit and rebuild | 12–17x faster (4–6 ms vs 63–75 ms) | 4.8–7.0x faster (11–22 ms vs 68–114 ms) |
 | binary | 13–24x smaller | 93–550x smaller (8–48 KiB vs 4.4 MiB) |
 | run time vs rustc `-O` | zustc 1.2–3.6x slower, zustc `-O` 1.0–2.9x slower | zustc 3.1–22x slower, zustc `-O` 0.9–9.1x |
-
-The same gen1000 comparison over time (rustc's own times move by about ±10% between runs, and zustc's cold build by about ±20%: run alternately against
-the previous commit, 1501b30 and 8e797a9 have the same cold median, 96 and 98 ms):
-
-| measured | zustc cold | rustc `-C incremental` cold | ratio | zustc edit | rustc edit | ratio |
-|---|---:|---:|---:|---:|---:|---:|
-| 2026-11-15 ([report](docs/reports/2026-11-15-15-status.md)) | 118 ms | 827 ms | 7.0x | 28 ms | 417 ms | 14.9x |
-| 2026-11-18, 72201ab | 131 ms | 643 ms | 4.9x | 22 ms | 348 ms | 15.8x |
-| 2026-11-18, items inside blocks (cbcd294) | 117 ms | 620 ms | 5.3x | 22 ms | 334 ms | 15.2x |
-| 2026-11-18, inference and borrowck of call arguments (8e797a9) | 94 ms | 602 ms | 6.4x | 22 ms | 353 ms | 16.0x |
-| 2026-11-18, builtin macros (1501b30) | 127 ms | 600 ms | 4.7x | 24 ms | 316 ms | 13.2x |
-| 2026-11-18, `impl Trait` in traits, more macros (8cb2f88) | 131 ms | 605 ms | 4.6x | 20 ms | 357 ms | 17.9x |
-| 2026-11-18, `assert!` in type inference (4d210d2) | 126 ms | 619 ms | 4.9x | 23 ms | 328 ms | 14.3x |
-| 2026-11-18, `assert_eq!` in type inference (441d0c2) | 119 ms | 605 ms | 5.1x | 25 ms | 338 ms | 13.5x |
-| 2026-11-18, borrowing values in registers (fb2f2f2) | 112 ms | 595 ms | 5.3x | 22 ms | 367 ms | 16.7x |
-| 2026-11-18, `try_from`, `::std` paths, more std functions (096a6bc) | 102 ms | 624 ms | 6.1x | 22 ms | 327 ms | 14.9x |
-| 2026-11-18, prelude selection without per-build tables (f077e7c) | 89 ms | 623 ms | 7.0x | 22 ms | 320 ms | 14.5x |
-| 2026-11-18, `dyn Trait<A>` (f606b34) | 89 ms | 641 ms | 7.2x | 22 ms | 309 ms | 14.0x |
-| 2026-11-18, integer literals for bounds, `Box` comparisons (60cbe60) | 112 ms | 655 ms | 5.8x | 21 ms | 341 ms | 16.2x |
-| 2026-11-18, `impl Trait` returning `()` (e7fdc21) | 121 ms | 592 ms | 4.9x | 23 ms | 331 ms | 14.4x |
-| 2026-11-18, std type names that user code may redefine (9bd5297) | 120 ms | 625 ms | 5.2x | 21 ms | 331 ms | 15.8x |
-| 2026-11-18, `Pin`, generic arguments on variants (e45ee10) | 109 ms | 669 ms | 6.1x | 22 ms | 372 ms | 16.9x |
-| 2026-11-18, e45ee10 measured again with all programs | 130 ms | 587 ms | 4.5x | 22 ms | 332 ms | 15.1x |
-| 2026-11-18, unsafe checks (E0133) (04b7d0b) | 128 ms | 611 ms | 4.8x | 22 ms | 343 ms | 15.6x |
-| 2026-11-18, fn pointer comparisons, `main` as a value (b2620bd) | 90 ms | 625 ms | 6.9x | 23 ms | 326 ms | 14.2x |
-| 2026-11-18, diverging `let`, Option in `for`, `2.eq(&3)` (5ecf037) | 93 ms | 621 ms | 6.7x | 21 ms | 309 ms | 14.7x |
-| 2026-11-18, let chains, `&raw const` / `&raw mut` (d01898b) | 88 ms | 631 ms | 7.2x | 20 ms | 314 ms | 15.7x |
-| 2026-11-19, three parallel lanes: parser, std, item summaries (9effaaa); a slower machine after a container restart (rustc `-O` 18.5 s, was 14.4 s) | 142 ms | 691 ms | 4.9x | 24 ms | 370 ms | 15.4x |
-| 2026-11-19, `impl Tr for Box<S>`, shifts and `reverse_bits`, `..b` values (962f2a6) | 150 ms | 847 ms | 5.6x | 27 ms | 447 ms | 16.6x |
-| 2026-11-19, `as _` / `as *const _` (75630e2) | 127 ms | 859 ms | 6.8x | 31 ms | 399 ms | 12.9x |
-| 2026-11-19, operator traits of numbers, `dyn Tr: Tr` (a6c8ba5) | 122 ms | 763 ms | 6.3x | 25 ms | 417 ms | 16.7x |
-| 2026-11-19, bounds of associated types checked for `dyn Tr<Y = T>` (509b25d) | 166 ms | 746 ms | 4.5x | 30 ms | 403 ms | 13.4x |
-| 2026-11-19, consts of generic impls | 123 ms | 756 ms | 6.1x | 27 ms | 406 ms | 15.0x |
 
 zustc's code is close to rustc's debug build at run time, and faster than it in all seven small programs (rustc's
 debug build is 3–26x slower than rustc `-O` there).
@@ -117,106 +131,6 @@ rust-glancer is github.com/rust-glancer/rust-glancer 50dd51a):
 | rust-glancer | 9965 ms | 1573 MB | 548.8 ms | 58.5% |
 
 Details are in [bench/lsp_parity_result.md](bench/lsp_parity_result.md).
-
-### KPIs over time
-
-The KPIs are build speed, build cache size and LSP latency, measured with `python3 bench/ci_bench.py` on generated
-programs of 1000 / 5000 functions. Builds are compared by instruction counts (valgrind), because wall-clock times on
-the shared machine vary by about ±20%.
-
-Since 2026-11-19 every change is also measured on its own with `python3 bench/kpi_track.py`, so that small increases
-that add up stay visible: [bench/kpi_log.md](bench/kpi_log.md) has one row per change with its effect (Δ) and the total
-since the reference (Σ). Its counts do not move between runs (the no-op build is the least of 3 runs and does not
-include the partial rebuild that the tables below sometimes caught, which is why those read about 40 M higher). It
-found a +1.5% `check` cost in its first round (b0edbd7, fixed in 89d9fe9).
-
-| point | gen5000 no-op build | gen5000 edit 1 fn | gen5000 `check` | gen5000 cache | gen1000 cache | gen5000 cold peak RSS |
-|---|---:|---:|---:|---:|---:|---:|
-| before borrow checking (ac2361e) | | | 3883.9 M | | | |
-| borrow checking added ([report 08](docs/reports/2026-11-18-08-borrow-checking.md)) | 746.0 M | 709.3 M | 3971.0 M | 1902.8 KiB | 387.2 KiB | 76.0 MiB |
-| compatibility round ([report 09](docs/reports/2026-11-18-09-compat-with-kpis.md), 03367bc) | 685.7 M | 648.1 M | 3912.7 M | 1902.8 KiB | 387.2 KiB | 54.6 MiB |
-| faster prelude selection (3a1fd22) | 661.1 M | 622.4 M | 3887.3 M | 1902.8 KiB | 387.2 KiB | 51.8 MiB |
-| async, statics, const fn (e598fdf) | 661.9 M | 622.6 M | 3892.9 M | 1902.8 KiB | 387.2 KiB | 51.9 MiB |
-| items inside blocks (cbcd294) | 661.5 M | 622.9 M | 3893.1 M | 1902.8 KiB | 387.2 KiB | 51.6 MiB |
-| inference and borrowck of call arguments (8e797a9) | 661.6 M | 623.0 M | 3893.3 M | 1902.8 KiB | 387.2 KiB | 51.7 MiB |
-| builtin macros (1501b30) | 661.3 M | 622.8 M | 3893.3 M | 1902.8 KiB | 387.2 KiB | 51.6 MiB |
-| `impl Trait` in traits, more macros (8cb2f88) | 661.4 M | 622.9 M | 3893.3 M | 1902.8 KiB | 387.2 KiB | 51.7 MiB |
-| `assert!` in type inference (4d210d2) | 662.1 M | 622.9 M | 3893.6 M | 1902.8 KiB | 387.2 KiB | 51.7 MiB |
-| `assert_eq!` in type inference (441d0c2) | 661.4 M | 622.8 M | 3893.5 M | 1902.8 KiB | 387.2 KiB | 51.7 MiB |
-| borrowing values in registers (fb2f2f2) | 662.0 M | 622.7 M | 3893.5 M | 1902.8 KiB | 387.2 KiB | 51.6 MiB |
-| `try_from`, `::std` paths, more std functions (096a6bc) | 662.9 M | 623.7 M | 3892.3 M | 1902.8 KiB | 387.2 KiB | 52.0 MiB |
-| prelude selection without per-build tables (f077e7c) | 663.8 M | 620.8 M | 3892.9 M | 1902.8 KiB | 387.2 KiB | 52.0 MiB |
-| `dyn Trait<A>` (f606b34) | 663.8 M | 620.8 M | 3893.0 M | 1902.8 KiB | 387.2 KiB | 51.8 MiB |
-| integer literals for bounds, `Box` comparisons (60cbe60) | 661.0 M | 621.0 M | 3893.0 M | 1902.8 KiB | 387.2 KiB | 51.7 MiB |
-| `impl Trait` returning `()` (e7fdc21) | 663.2 M | 620.8 M | 3893.0 M | 1902.8 KiB | 387.2 KiB | 51.7 MiB |
-| std type names that user code may redefine (9bd5297) | 663.8 M | 620.8 M | 3893.0 M | 1902.8 KiB | 387.2 KiB | 51.9 MiB |
-| `Pin`, generic arguments on variants (e45ee10) | 662.1 M | 621.7 M | 3891.1 M | 1902.8 KiB | 387.2 KiB | 51.9 MiB |
-| unsafe checks (E0133) (04b7d0b) | 662.1 M | 621.8 M | 3891.7 M | 1902.8 KiB | 387.2 KiB | 51.8 MiB |
-| fn pointer comparisons, `main` as a value (b2620bd) | 664.9 M | 621.8 M | 3894.6 M | 1902.8 KiB | 387.2 KiB | 51.6 MiB |
-| diverging `let`, Option in `for`, `2.eq(&3)` (5ecf037) | 664.9 M | 621.8 M | 3895.2 M | 1902.8 KiB | 387.2 KiB | 51.7 MiB |
-| let chains, `&raw const` / `&raw mut` (d01898b) | 662.2 M | 621.8 M | 3895.6 M | 1902.8 KiB | 387.2 KiB | 51.8 MiB |
-| three parallel lanes: parser, std, item summaries (9effaaa) | 668.7 M | 626.3 M | 3906.9 M | 1902.8 KiB | 387.2 KiB | 51.4 MiB |
-| `impl Tr for Box<S>`, shifts and `reverse_bits`, `..b` values (962f2a6) | 666.0 M | 626.3 M | 3907.0 M | 1902.8 KiB | 387.2 KiB | 51.8 MiB |
-| `as _` / `as *const _` (75630e2) | 662.8 M | 626.2 M | 3906.8 M | 1902.8 KiB | 387.2 KiB | 52.0 MiB |
-| operator traits of numbers, `dyn Tr: Tr` (a6c8ba5) | 668.7 M | 626.3 M | 3906.8 M | 1902.8 KiB | 387.2 KiB | 51.7 MiB |
-| bounds of associated types checked for `dyn Tr<Y = T>` (509b25d) | 666.2 M | 626.2 M | 3906.1 M | 1902.8 KiB | 387.2 KiB | 52.1 MiB |
-| now: consts of generic impls | 667.1 M | 626.6 M | 3906.2 M | 1902.8 KiB | 387.2 KiB | 51.8 MiB |
-| **change since borrow checking** | **-11.3%** | **-12.2%** | **-2.0%** | **0%** | **0%** | **-32%** |
-
-LSP (p50 of `bench/lsp_parity.py` on zustc's own sources; these are wall-clock times):
-
-| point | definition | hover | completion | references | startup until indexed |
-|---|---:|---:|---:|---:|---:|
-| borrow checking added | 0.65 ms | 0.47 ms | 1.28 ms | 3.36 ms | 135 ms |
-| compatibility round (03367bc) | 0.53 ms | 0.43 ms | 1.09 ms | 3.06 ms | 116 ms |
-| faster prelude selection (3a1fd22) | 0.58 ms | 0.47 ms | 1.37 ms | 3.45 ms | 109 ms |
-| async (e598fdf), same-machine comparison | 0.42 ms | 0.34 ms | 0.90 ms | 1.78 ms | 277 ms (two targets) |
-| items inside blocks (cbcd294) | 0.59 ms | 0.49 ms | 1.26 ms | 3.52 ms | 109 ms |
-| inference and borrowck of call arguments (8e797a9) | 0.55 ms | 0.45 ms | 1.15 ms | 3.39 ms | 115 ms |
-| builtin macros (1501b30) | 0.53 ms | 0.42 ms | 1.21 ms | 3.04 ms | 108 ms |
-| `impl Trait` in traits, more macros (8cb2f88) | 0.59 ms | 0.49 ms | 1.22 ms | 3.76 ms | 145 ms (same machine against 1501b30: 281 vs 285 ms, two targets) |
-| `assert!` in type inference (4d210d2) | 0.63 ms | 0.51 ms | 1.32 ms | 3.41 ms | 111 ms |
-| `assert_eq!` in type inference (441d0c2) | 0.61 ms | 0.47 ms | 1.27 ms | 3.49 ms | 114 ms |
-| borrowing values in registers (fb2f2f2) | 0.57 ms | 0.48 ms | 1.19 ms | 3.74 ms | 110 ms |
-| `try_from`, `::std` paths, more std functions (096a6bc) | 0.57 ms | 0.48 ms | 1.22 ms | 3.47 ms | 122 ms |
-| prelude selection without per-build tables (f077e7c) | 0.55 ms | 0.45 ms | 1.30 ms | 3.26 ms | 111 ms |
-| `dyn Trait<A>` (f606b34) | 0.51 ms | 0.43 ms | 1.17 ms | 3.39 ms | 109 ms |
-| integer literals for bounds, `Box` comparisons (60cbe60) | 0.60 ms | 0.60 ms | 1.23 ms | 3.25 ms | 109 ms (same machine against f606b34: hover 0.32 vs 0.35 ms, ready 275 vs 287 ms) |
-| `impl Trait` returning `()` (e7fdc21) | 0.94 ms | 0.56 ms | 1.30 ms | 11.57 ms | 115 ms (same machine against 60cbe60, 8 alternating runs: definition 0.55 vs 0.55 ms, references 2.34 vs 2.35 ms, ready 291 vs 299 ms) |
-| std type names that user code may redefine (9bd5297) | 0.59 ms | 0.46 ms | 1.03 ms | 12.17 ms | 141 ms (3 more runs: 109, 112, 129 ms) |
-| `Pin`, generic arguments on variants (e45ee10) | 0.78 ms | 0.56 ms | 1.33 ms | 11.28 ms | 113 ms |
-| unsafe checks (E0133) (04b7d0b) | 0.64 ms | 0.50 ms | 1.30 ms | 11.99 ms | 113 ms |
-| fn pointer comparisons, `main` as a value (b2620bd) | 0.65 ms | 0.54 ms | 1.18 ms | 11.34 ms | 114 ms |
-| diverging `let`, Option in `for`, `2.eq(&3)` (5ecf037) | 0.61 ms | 0.50 ms | 1.12 ms | 12.27 ms | 108 ms |
-| let chains, `&raw const` / `&raw mut` (d01898b) | 0.57 ms | 0.46 ms | 1.08 ms | 10.41 ms | 108 ms |
-| three parallel lanes: parser, std, item summaries (9effaaa) | 0.94 ms | 0.77 ms | 1.65 ms | 15.79 ms | 141 ms (slower machine; against d01898b on it, 6 alternating runs: references 16.4 vs 14.4 ms, ready 140 vs 134 ms, but one LSP run under cachegrind is 10.953 G vs 10.955 G instructions: the code run is the same) |
-| `impl Tr for Box<S>`, shifts and `reverse_bits`, `..b` values (962f2a6) | 0.93 ms | 0.77 ms | 1.84 ms | 15.16 ms | 128 ms |
-| `as _` / `as *const _` (75630e2) | 0.98 ms | 0.89 ms | 1.86 ms | 16.81 ms | 130 ms |
-| operator traits of numbers, `dyn Tr: Tr` (a6c8ba5) | 0.99 ms | 0.87 ms | 1.71 ms | 16.72 ms | 161 ms |
-| bounds of associated types checked for `dyn Tr<Y = T>` (509b25d) | 0.88 ms | 0.80 ms | 1.63 ms | 17.57 ms | 152 ms |
-| now: consts of generic impls | 0.94 ms | 0.76 ms | 1.60 ms | 16.12 ms | 138 ms |
-
-Each change is kept only if these do not get worse. When an LSP time rises in a full run, the two builds are
-compared again on the same machine, alternating runs, before it is called noise. The last row comes from such a
-comparison, and its startup is the sum over two target files; the other rows are full runs of `bench/ci_bench.py`.
-
-The [benchmark dashboard](https://mizchi.github.io/zust/dev/bench/) tracks these numbers for every commit to main.
-They are measured on shared GitHub Actions runners, so times fluctuate. The instruction-count series show changes
-more clearly.
-
-### Coverage of rustc's test suite
-
-zustc run against rustc's own UI tests (`tests/ui` of rust-lang/rust 1.100.0, `python3 bench/rust_ui.py`), counting
-only the tests it can be asked to handle (no nightly features, auxiliary crates or special flags):
-
-| kind | applicable | pass |
-|---|---:|---:|
-| run-pass (builds, runs, same output) | 2385 | 1572 (65.9%) |
-| check-pass (accepted by `zustc check`) | 1807 | 1324 (73.3%) |
-| build-pass | 135 | 94 (69.6%) |
-| compile-fail (rejected at an annotated line) | 7358 | 2886 (39.2%) |
-
-[SUPPORTED.md](SUPPORTED.md) breaks this down by area as a checklist.
 
 ## Requirements
 
@@ -370,18 +284,211 @@ Documents are synced in full: didChange receives the whole text.
 | `ZUST_ANALYZER_NO_DEPS` | do not index dependency crates |
 | `ZUST_ANALYZER_SYSROOT` | sysroot to look for the std sources in (default: `rustc --print sysroot`) |
 
-Known differences from rust-analyzer are listed in [TODO.md](TODO.md).
+Known differences from rust-analyzer are listed under [Roadmap](#roadmap).
+
+## What is supported
+
+The percentages are rustc's own UI tests that pass in that area: run-pass + check-pass + build-pass of the tests/ui
+directories named in the comment next to the number (`ui:`), or compile-fail (`cf:`). CI rewrites them with the rest of
+the measured numbers. The [reports](docs/reports/) explain each step.
+
+- `[x]` works for ordinary code (most tests of the area pass)
+- `[ ]` partial or missing; the note says what is left
+
+### Overall
+
+- [x] tests/ui run-pass: <!-- total:run-pass -->66.1% (1577 / 2385)
+- [x] tests/ui check-pass: <!-- total:check-pass -->73.8% (1334 / 1807)
+- [x] tests/ui build-pass: <!-- total:build-pass -->69.6% (94 / 135)
+- [ ] tests/ui compile-fail (an error on an annotated line): <!-- total:compile-fail -->39.2% (2883 / 7358)
+- [x] real crates: fnv, adler2, hex, itoa, rustc-hash and cfg-if build and give the same output (6 / 6)
+- [x] zust-analyzer answers like rust-analyzer: 95.4% (rust-analyzer: 96.2%)
+
+### Language
+
+- [x] numbers, arithmetic, overflow checks: <!-- ui:numbers-arithmetic -->93.1%
+- [x] `for` / `while` / `loop`, labels: <!-- ui:for-loop-while,loops,label -->91.7%
+- [x] enums, `#[repr(u8)]`, auto-sized tags: <!-- ui:enum,enum-discriminant -->83.3%
+- [x] `cfg`: <!-- ui:cfg -->81.2%
+- [x] bindings, patterns, slice patterns, or-patterns (also with guards): <!-- ui:binding,pattern,or-patterns -->84.3%
+- [x] `match`: <!-- ui:match -->78.0%
+- [x] name resolution: <!-- ui:resolve -->82.9%
+- [x] statics: ints, floats, raw pointers, fn pointers, `const fn` calls: <!-- ui:statics -->75.0%
+- [x] structs, `..base` (field by field): <!-- ui:structs,structs-enums -->78.7%
+- [x] type aliases and paths (`impl foo::Point`) as impl self types, discriminants from constants and earlier variants, where clauses on concrete types
+- [x] syntax: GAT bindings, `dyn for<'a> Fn`, 2015 anonymous parameters, raw lifetimes `'r#a`, half-open range patterns, shebangs, Unicode white space; `macro_rules!` fragments matched by kind (`ident`, `literal`, `lifetime`, `vis`)
+- [x] methods of `impl Tr for Box<S>` (a Box impl next to a blanket impl of the same trait is E0119), `..b` / `..=b` / `..` values, `wrapping_shl` / `checked_shl` / `overflowing_shl` / `reverse_bits`
+- [x] let chains (`if let A = x && cond`), also in match guards (`P if let Q = e =>`); inline `const { .. }`, `&raw const` / `&raw mut`
+- [x] parser: <!-- ui:parser -->88.9%
+- [x] closures (capture, `Fn` traits, `move`; with no captures also as fn pointers): <!-- ui:closures,unboxed-closures,functions-closures -->76.0%
+- [x] derives: `Debug`, `Clone`, `Copy`, `PartialEq`/`Eq`, `PartialOrd`/`Ord`, `Hash`, `Default`: <!-- ui:derives,deriving -->79.5%
+- [x] imports, `use`: <!-- ui:imports -->73.9%
+- [x] associated types: <!-- ui:associated-types -->69.2%
+- [x] generics: <!-- ui:generics -->73.8% (an integer literal for `T: Foo` takes the one integer type that implements Foo; a type
+  parameter known only from the expected type is not inferred)
+- [ ] consts: <!-- ui:consts -->69.6% (no heap values, no generic `const fn`; a const of a generic impl (`const C: Option<T> = None`) takes its type at each use)
+- [ ] drop: <!-- ui:drop -->58.0% (the drop order of some temporaries differs)
+- [ ] traits: <!-- ui:traits -->62.7% (generic traits, blanket impls, `dyn` (also `dyn Tr<A>`), `impl .. for dyn Tr` work; no coherence)
+- [ ] `macro_rules!`: <!-- ui:macros -->65.7% (hygiene for `let`, labels, arm bindings; not every fragment kind)
+- [ ] unions: <!-- ui:union -->57.7% (no `repr(packed)`)
+- [ ] const generics: <!-- ui:const-generics -->50.5% (no `generic_const_exprs`)
+- [ ] generic associated types: <!-- ui:generic-associated-types -->44.4%
+- [ ] casts (`as _` / `as *const _` take the source or expected type; a pointer of unknown kind is E0641): <!-- ui:cast -->44.8%
+- [ ] `impl Trait`: <!-- ui:impl-trait -->57.6% (return position, also nested (`-> Option<impl Debug>`), in trait methods and generic fns (typed per instance); no TAIT)
+- [ ] layout: `repr(packed)` / `repr(align)` are ignored: <!-- ui:packed,layout -->38.7%
+
+### Checks (compile-fail)
+
+- [x] borrow checking: moves, conflicting loans, escapes, mutability: borrowck <!-- cf:borrowck -->52.8%
+  ([report 08](docs/reports/2026-11-18-08-borrow-checking.md))
+- [x] type errors, missing items, generics declarations (E0403, E0207, E0392, E0072 ..): typeck <!-- cf:typeck -->56.1%, structs <!-- cf:structs -->68.8%
+- [x] unsafe operations outside `unsafe` (E0133): calls to `unsafe fn` and extern fns, raw pointer derefs, `static mut`,
+  union field reads (not yet inside closures or consts, and not the `unsafe_op_in_unsafe_fn` lint)
+- [x] non-exhaustive `match` (E0004): bool, unit, enums (variants that cannot have a value need no arm), structs and
+  tuples, nested and with or-patterns (integer and slice patterns, and types left generic, are not checked yet)
+- [ ] region errors against signatures (E0621, E0521): regions <!-- cf:regions -->12.1%, lifetimes <!-- cf:lifetimes -->18.8%
+- [ ] coherence, bounds of blanket impls, dyn compatibility (E0038), the bindings of `dyn Tr<A = T>` against the associated type's bounds (done when T is a primitive, `str` or a struct name)
+- [ ] lints and warnings: lint <!-- cf:lint -->7.8%
+- [ ] editions (2015-only errors)
+
+### Runtime and std
+
+- [x] the prelude (zustc's own small std): `Option`/`Result`, `Vec`, `String`, `HashMap`/`HashSet`,
+  `BTreeMap`/`BTreeSet`, `VecDeque`, `BinaryHeap`, `Rc`/`Arc`, `Cell`/`RefCell`, `Mutex`, `OnceLock`, `ManuallyDrop`,
+  `Duration`, `AtomicPtr`, `RangeTo` / `RangeFull` as types, `Fuse`, `iter::Empty`, `NonNull`, `Pin` (a plain pointer: `Pin::new`, `get_mut`, `into_inner`, deref), `UnsafeCell`, `PhantomData`, atomics, `mpsc`, `mem::*`, `ptr::{read, write, drop_in_place, null}`,
+  `iter::{repeat, once, empty, repeat_with, successors}`, formatting, stdin/stdout/fs/env/process basics
+- [ ] async / await: <!-- ui:async-await -->72.8%. It runs at once, with no executor (no `poll`, `Waker`, `Pin<Box<dyn Future>>`)
+- [ ] threads: <!-- ui:threads-sendsync -->66.7%. One thread: `thread::spawn` runs the closure at once
+- [ ] iterators: <!-- ui:iterators -->41.2% (`iter::empty()` cannot infer its item from the target)
+- [ ] FFI: <!-- ui:abi -->14.3%. Scalars only, no structs by value
+- [ ] panics: <!-- ui:panics -->11.1%. A panic aborts: no unwinding, `catch_unwind`, `set_hook`
+
+### In sight (known approach, small cost)
+
+- [ ] type parameters: `let v: Vec<Box<_>> = ..` (holes in an annotation) and generic fns passed as values
+  (`.map(drop)`, `.map(Result::unwrap)`) now infer; `iter::empty().collect()`, `let f = id;` and const parameters
+  inferred from patterns do not (~35 tests)
+- [ ] items inside blocks: `mod`, `trait`, `impl`, `type`, `union` and `pub` items in a fn body now move out; items a
+  macro expands to in statement position move out too; from a macro in expression position not yet (~12 tests)
+- [ ] builtin macros: `offset_of!`, `addr_of!` / `addr_of_mut!`, `try!`, `stringify!`, `concat!`, `line!`, `column!`,
+  `option_env!`, `assert_matches!`, `format_args!` now work; `module_path!`, `file!`, `include!`, `asm!` do not (~8 tests)
+- [ ] `repr(packed)` / `repr(align)`: ~16 tests
+- [ ] `Pin`: `Pin<&T>` / `Pin<&mut T>` work as the pointer; `Box::pin(fut)` and `Pin<Box<dyn Future<Output = T>>>` work (the future's value, as async runs at once); `pin!` and
+  `self: Pin<&Self>` receivers do not
+- [ ] dyn compatibility (E0038), generic argument counts of traits
+- [ ] closures that capture `&mut` are not `Copy`
+
+### Expected to cost performance (measured before kept)
+
+- [ ] region checking against signatures: `check` time (borrowck costs +2.2% today)
+- [ ] coherence and bounds of blanket impls: `check` time, LSP
+- [ ] real async (state machines, `poll`, an executor): build time, binary size
+- [ ] unwinding (landing pads): build time, binary size
+- [ ] field-precise closure captures in codegen: binary size
+- [ ] a larger prelude: no-op build and cache size (the prelude, ~11k lines, is scanned on every build)
+- [ ] real threads (a pthread runtime): runtime size
+
+### Large features not started
+
+- [ ] real concurrency (parallel threads, a blocking `Mutex`)
+- [ ] executors: `Future::poll`, `Waker`, `Pin<Box<dyn Future>>` (~25 tests)
+- [ ] unwinding: `catch_unwind`, panic hooks (~22 tests)
+- [ ] FFI: structs by value, other ABIs (~27 tests)
+- [ ] full region / lifetime checking
+- [ ] a full trait solver: specialization, auto traits through `dyn` / `async`, higher-ranked bounds
+- [ ] lints and warnings
+- [ ] editions
+- [ ] SIMD, inline asm
+- proc macros: not applicable (they are separate crates)
+
+## Roadmap
+
+### Compiler (zustc)
+
+- **rustc's tests/ui** (`python3 bench/rust_ui.py`; [report](docs/reports/2026-11-18-07-rustc-ui-tests.md))
+  - Raise the pass rates ([Status](#status))
+  - Largest gaps: unwinding (`catch_unwind`, `panic::set_hook`), structs by value through FFI, type inference (type
+    parameters known only from the expected type), `type` aliases and macros in expression position inside bodies,
+    closures in consts, `impl Trait` in argument types nested in other types (`&Vec<impl Display>`)
+  - Checks that compile-fail tests need: well-formedness of defaults and bounds, coherence, bounds of blanket
+    impls, Send through dyn / async, lifetime shadowing, lints
+- **Borrow checking** ([report](docs/reports/2026-11-18-08-borrow-checking.md))
+  - Region errors against signatures (E0621, E0521, "lifetime may not live long enough"): universal regions and
+    outlives checking of the body against the declaration
+  - Loans flowing through types: a local holds the loans of all it read, so E0515 and E0597 for values carried out
+    of a block only look at what is borrowed directly
+  - E0716 (temporaries dropped while borrowed), E0510, uses by `Drop` at the end of a scope, partial moves out of
+    arrays and struct patterns
+  - More than one error per function
+  - Cost: +2.2% instructions on `zustc check`, mostly the recording during lowering
+- **Language**
+  - Modules, `DoubleEndedIterator` (`rev` as a value), `HashSet` / `BTreeMap`
+  - Share monomorphized instances keyed by layout (make `Vec<A>` and `Vec<B>` one; blaze's polymorph)
+  - A minimal std of our own (the relax approach)
+- **Incremental**
+  - Alpha-normalized hashes
+  - Reuse the analysis results of dependency crates (item summaries, parts of Program) on the dependent side (today
+    the sources are analyzed again)
+  - Linking that replaces only the `.o` files that changed
+  - Embedding libwild and keeping `.o` files in memory (no `.o` writes and no `exec`)
+- **Incremental linking**
+  - Leave padding in `.text` and replace only the functions that changed
+  - Calls through a jump table (the blaze approach)
+- **Cold builds**
+  - Parallelize item summaries and parsing
+  - Stop parsing the AST twice in cold builds
+- **Size**
+  - ICF in the compiler (hash of code + relocation targets)
+  - Merge sections for strings
+- **`-O`**
+  - Our own inlining and stack-slot forwarding (to make up for Cranelift having no SROA)
+
+### zust-analyzer: remaining differences from rust-analyzer
+
+What is left after comparing with `bench/lsp_parity.py`, `bench/ide_golden_ra.py` and checking references one by one
+([docs/reports/2026-11-18-06-remaining-differences.md](docs/reports/2026-11-18-06-remaining-differences.md)).
+
+#### Type inference
+
+- [ ] The `Item` of iterators whose `Iterator` impl is generated by a macro inside a dependency (serde_json's
+  `map::Iter`, from `delegate_iterator!`). zust-analyzer now answers nothing there instead of a wrong type
+- [ ] An `Iter` type with no type arguments returned from a dependency is told apart from same-named types only by its
+  module; generic types are still matched by name and number of arguments
+
+#### Definitions and references
+
+- [ ] Go to definition on `x.to_string()`: rust-analyzer jumps to the type's `Display::fmt` impl; zust-analyzer goes
+  to `ToString::to_string`
+- [ ] In the references of `ToString::to_string`, rust-analyzer lists the blanket impl's method (string.rs:2969) instead
+  of the trait declaration (string.rs:2956)
+- [ ] References of std modules (`std::collections`, `std::sync`): rust-analyzer also counts the paths inside std's
+  own sources (`self::hash_map` in `collections/mod.rs`). zust-analyzer does not keep library text, so it only counts
+  the workspace (fixture: 627/629 references)
+- [ ] rust-analyzer counts `-> Key` in `crates/syntax/build.rs` (the build script's own `type Key = u128`) as a
+  reference of `zust_base::key::Key`. This looks like a rust-analyzer quirk from `lexer.rs` being shared into the
+  build script with `#[path]`; zust-analyzer does not count it
+- [ ] Definitions of items generated by a macro (the str pattern iterators' `next`, `u32::MAX`): rust-analyzer also
+  lists the macro call site (`generate_pattern_iterators! {`, `uint_impl! {`); zust-analyzer lists only the item inside
+  the macro body
+
+#### Rename
+
+- [ ] Renaming `Default::default` (rust-analyzer also rewrites inside dependency crates; we only rewrite the workspace.
+  An intended difference)
+- [ ] Renaming the alias in `use a::Point as Pt` (an intended difference)
+
+#### Speed and memory
+
+- [ ] References p90 on the zustc target is 32.8 ms (it was 65 ms before scanning files on several threads). The slow
+  cases are methods with common names (`len`, `iter`), resolved at every occurrence
+- [ ] The dependency-crate index raised memory from 55 MB to 66 MB. Drop unused definitions / load them lazily
 
 ## Documentation
-
-Japanese versions of the docs are under [docs/ja/](docs/ja/).
 
 - [docs/language.md](docs/language.md): the subset of Rust that zustc supports, and what it does not
 - [docs/architecture.md](docs/architecture.md): crate layout, the pipeline, how incremental builds work, value representation
 - [docs/reports/](docs/reports/README.md): work log, as dated reports (benchmark results and what was done at each step)
 - [CONTRIBUTING.md](CONTRIBUTING.md): how to develop: build, test, benchmark, and write reports
-- [SUPPORTED.md](SUPPORTED.md): what is supported, what is in sight, what would cost performance, and what is not started
-- [TODO.md](TODO.md): what is next
 
 ## License
 
