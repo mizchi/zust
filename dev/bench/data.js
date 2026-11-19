@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795099086204,
+  "lastUpdate": 1795099087929,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -52482,6 +52482,70 @@ window.BENCHMARK_DATA = {
           {
             "name": "tests/ui compile-fail passing",
             "value": 3307,
+            "unit": "tests"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "committer": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "distinct": true,
+          "id": "f86ca0953e3b085608e3b38391d47b651d60b952",
+          "message": "Default fns of a trait through a type; f64::from_bits; turbofish commas in macro args\n\n- `S::f()`, `<S as Tr>::f()` and `S::f` as a value, where f is a default fn of a trait S implements (no `self`):\n  the callee is found through the type, and Self is bound to it (it used to be \"cannot find value\" / \"cannot infer\n  type parameter Self\").\n- `f64::from_bits` / `f32::from_bits`.\n- Macro arguments split at top-level commas: a part that does not parse is joined with the next ones\n  (`assert_eq!(-86, sub::<Abc, Def>())`).\n\ntests/ui: run-pass traits/item-inside-macro.rs, union/union-nonzero.rs pass. Removed from the baseline (they passed\nonly because the call used to fail): compile-fail associated-types/assoc-type-element-mismatch-in-hrtb.rs,\nassociated-types/issue-44153.rs (an impl whose where-clause does not hold), privacy/privacy-ufcs.rs (zustc has no\nprivacy check).\nKPIs: no change outside noise.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-19T14:33:55Z",
+          "tree_id": "09bd6c308fa84d4a8e4bc2465a71bf7514b1a937",
+          "url": "https://github.com/mizchi/zust/commit/f86ca0953e3b085608e3b38391d47b651d60b952"
+        },
+        "date": 1795099087669,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tests/ui run-pass pass rate",
+            "value": 68.26,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui run-pass passing",
+            "value": 1628,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui check-pass pass rate",
+            "value": 75.71,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui check-pass passing",
+            "value": 1368,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui build-pass pass rate",
+            "value": 70.37,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui build-pass passing",
+            "value": 95,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui compile-fail pass rate",
+            "value": 44.89,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui compile-fail passing",
+            "value": 3303,
             "unit": "tests"
           }
         ]
