@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795111321819,
+  "lastUpdate": 1795111323978,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -34816,6 +34816,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "lsp peak RSS",
             "value": 72.605,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "committer": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "distinct": true,
+          "id": "19d10c0fa8723752e8a7c65baa0a40d83ae5140b",
+          "message": "Found building rust-utf8 (SimonSapin/rust-utf8) and static-assertions (nvzqz) with zustc:\n- `#[path = \"bool.rs\"] pub mod _bool;`: the file the attribute names, beside the declaring file.\n- `str::from_utf8(..)` with `use core::str;` / `use std::str;`: the module's fn (as `std::str::from_utf8`).\n- Utf8Error::error_len.\n- std's error types (io::Error, Utf8Error, FromUtf8Error, ParseIntError, ParseFloatError, TryFromIntError)\n  implement Error (`Some(err)` as `&dyn Error`); the prelude includes these impls, and the trait, only when the\n  program names Error and the type.\n- The item splitter: attributes with no item after them at the end of a file (those of a `#[macro_export]\n  macro_rules!` that expansion took out, last in a lib crate) are no unterminated item.\nrust-utf8's lib now builds (its app still meets a borrow-checker false positive: a loan returned after a loop is taken\nas live inside the loop); static-assertions stops at associated consts of two impls for `[(); 0]` / `[(); 1]`.\n\ntests/ui: run-pass modules/mod_file_with_path_attr.rs, modules/special_module_name_ignore.rs, check-pass\nrfcs/rfc-2457-non-ascii-idents/mod_file_nonascii_with_path_allowed.rs; 0 regressions. cratebench: the 6 crates give\nthe same output. README: tests/ui coverage measured on 61f478f+ (the benchmark tables stay CI's).\nKPIs: no change outside noise (traits edit +0.10%, crates edit +0.20%).\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-19T17:54:44Z",
+          "tree_id": "98d34361f515608b9e2619109a5aec5d04aa4505",
+          "url": "https://github.com/mizchi/zust/commit/19d10c0fa8723752e8a7c65baa0a40d83ae5140b"
+        },
+        "date": 1795111323499,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "lsp definition p50",
+            "value": 0.456,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp hover p50",
+            "value": 0.392,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp completion p50",
+            "value": 0.991,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp references p50",
+            "value": 2.863,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp rename p50",
+            "value": 1.235,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp signatureHelp p50",
+            "value": 0.771,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp documentHighlight p50",
+            "value": 0.742,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp ready (startup to indexed)",
+            "value": 113.027,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp peak RSS",
+            "value": 72.746,
             "unit": "MiB"
           }
         ]
