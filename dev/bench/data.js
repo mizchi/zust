@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795121532543,
+  "lastUpdate": 1795121534650,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -37324,6 +37324,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "lsp peak RSS",
             "value": 72.41,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "committer": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "distinct": true,
+          "id": "fb2070be86af0e9e7dcb65939b28258f31deb5c0",
+          "message": "Integer literals typed by method resolution; methods through nested Boxes\n\n- `3.double()` / `let x = 3; x.double()` with `impl Double for usize`\n  only: the one integer type whose impl has the method fixes the\n  literal's type (rustc's probe of `{integer}`).\n- `&self` methods of a number reached through `Box<Box<..>>`, and\n  `self: Box<Self>` methods on `Box<number>`.\n\ntests/ui: +4 genuine passes (3 run-pass, 1 compile-fail).\nKPI: unchanged (no-op back within the band).\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-19T20:47:16Z",
+          "tree_id": "8b6d9f169cffd31add21848a84f258dac20932c0",
+          "url": "https://github.com/mizchi/zust/commit/fb2070be86af0e9e7dcb65939b28258f31deb5c0"
+        },
+        "date": 1795121534358,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "lsp definition p50",
+            "value": 0.756,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp hover p50",
+            "value": 0.563,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp completion p50",
+            "value": 1.071,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp references p50",
+            "value": 5.458,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp rename p50",
+            "value": 0.558,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp signatureHelp p50",
+            "value": 0.835,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp documentHighlight p50",
+            "value": 0.989,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp ready (startup to indexed)",
+            "value": 142.331,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp peak RSS",
+            "value": 72.168,
             "unit": "MiB"
           }
         ]
