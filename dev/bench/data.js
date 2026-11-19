@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795112336523,
+  "lastUpdate": 1795112338802,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -47509,6 +47509,85 @@ window.BENCHMARK_DATA = {
           {
             "name": "parity 一致の平均",
             "value": 94.223,
+            "unit": "%"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "committer": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "distinct": true,
+          "id": "5d5bcd0282ca48bbd01ab2676e540f3da81316ee",
+          "message": "Errors in a dependency crate's functions at their own file's lines\n\nA function of a dependency compiled in the app's build has its lines counted from that crate's start, tagged with the\ncrate (`tag << 20 | line`, for panic locations that do not depend on where the crate sits in the combined source).\nIts errors carried those tagged lines (`lib/src/lib.rs:2428502019:5`). They are put back at the combined source's\nlines before relocation, and relocation now also maps the second place a message names (`(at L:C)`: the same file's\nline, or `file:L:C`).\n\ntests/ui: 0 regressions. KPIs: no change outside noise.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-19T18:13:03Z",
+          "tree_id": "71fd14f48e827b567aa54b370ad7b97e14b7c5e0",
+          "url": "https://github.com/mizchi/zust/commit/5d5bcd0282ca48bbd01ab2676e540f3da81316ee"
+        },
+        "date": 1795112338266,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "parity documentSymbol (名前の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity workspace/symbol (上位 20 の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity definition (行き先の一致)",
+            "value": 97.143,
+            "unit": "%"
+          },
+          {
+            "name": "parity hover (名前を含む)",
+            "value": 87.5,
+            "unit": "%"
+          },
+          {
+            "name": "parity references (数の一致)",
+            "value": 86.111,
+            "unit": "%"
+          },
+          {
+            "name": "parity documentHighlight (数の一致)",
+            "value": 97.143,
+            "unit": "%"
+          },
+          {
+            "name": "parity rename (書き換えの一致)",
+            "value": 83.333,
+            "unit": "%"
+          },
+          {
+            "name": "parity signatureHelp (名前・引数の数・今の引数の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity completion `x.\\|` (書いてある名前を含む)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity completion `na\\|me` (同)",
+            "value": 92.857,
+            "unit": "%"
+          },
+          {
+            "name": "parity 一致の平均",
+            "value": 94.409,
             "unit": "%"
           }
         ]
