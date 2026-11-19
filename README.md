@@ -26,7 +26,7 @@
 
 ## Status
 
-Numbers measured <!-- measured -->2026-11-19, e6813d9<!-- /measured --> by CI on each push to main (bench.yml runs
+Numbers measured <!-- measured -->2026-11-19, 24f79bc<!-- /measured --> by CI on each push to main (bench.yml runs
 `bench/ci_bench.py` and `bench/rust_ui.py`, then `scripts/update_readme.py` writes them here). Times come from shared
 GitHub Actions runners and vary by about ±20%; the instruction counts (valgrind) do not.
 
@@ -38,7 +38,7 @@ only the tests it can be asked to handle (no nightly features, auxiliary crates 
 <!-- auto:ui -->
 | kind | applicable | pass |
 |---|---:|---:|
-| run-pass (builds, runs, same output) | 2385 | 1577 (66.1%) |
+| run-pass (builds, runs, same output) | 2385 | 1579 (66.2%) |
 | check-pass (accepted by `zustc check`) | 1807 | 1334 (73.8%) |
 | build-pass | 135 | 94 (69.6%) |
 | compile-fail (rejected at an annotated line) | 7358 | 2883 (39.2%) |
@@ -53,22 +53,22 @@ Build speed, build cache size and LSP latency on generated programs of 1000 / 50
 <!-- auto:kpi -->
 | KPI | gen1000 | gen5000 |
 |---|---:|---:|
-| cold build | 117 ms | 534 ms |
-| no-op build | 12.9 ms | 59.1 ms |
-| build after editing one function | 17.0 ms | 66.4 ms |
-| `check` | 78 ms | 374 ms |
+| cold build | 117 ms | 528 ms |
+| no-op build | 12.4 ms | 57.2 ms |
+| build after editing one function | 17.4 ms | 64.2 ms |
+| `check` | 77 ms | 376 ms |
 | no-op build (instructions) | 140.6 M | 664.7 M |
 | edit one function (instructions) | 134.2 M | 625.1 M |
 | `check` (instructions) | 791.8 M | 3902.4 M |
 | build cache on disk | 387.2 KiB | 1902.8 KiB |
 | binary | 324.0 KiB | 1558.3 KiB |
-| cold build peak RSS | 17.8 MiB | 52.1 MiB |
+| cold build peak RSS | 17.9 MiB | 52.1 MiB |
 
 | zust-analyzer (zustc's own sources) | |
 |---|---:|
-| p50: definition, hover, completion, references, rename | 0.47 ms / 0.38 ms / 1.02 ms / 2.84 ms / 0.57 ms |
-| startup until indexed | 112 ms |
-| peak RSS | 70.5 MiB |
+| p50: definition, hover, completion, references, rename | 0.45 ms / 0.36 ms / 0.83 ms / 2.72 ms / 0.50 ms |
+| startup until indexed | 106 ms |
+| peak RSS | 70.8 MiB |
 <!-- /auto:kpi -->
 
 Every change is also measured on its own with `python3 bench/kpi_track.py`, so that small increases that add up stay
@@ -297,7 +297,7 @@ the measured numbers. The [reports](docs/reports/) explain each step.
 
 ### Overall
 
-- [x] tests/ui run-pass: <!-- total:run-pass -->66.1% (1577 / 2385)
+- [x] tests/ui run-pass: <!-- total:run-pass -->66.2% (1579 / 2385)
 - [x] tests/ui check-pass: <!-- total:check-pass -->73.8% (1334 / 1807)
 - [x] tests/ui build-pass: <!-- total:build-pass -->69.6% (94 / 135)
 - [ ] tests/ui compile-fail (an error on an annotated line): <!-- total:compile-fail -->39.2% (2883 / 7358)
