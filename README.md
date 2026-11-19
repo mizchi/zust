@@ -26,7 +26,7 @@
 
 ## Status
 
-Numbers measured <!-- measured -->2026-11-19, e467fb1<!-- /measured --> by CI on each push to main (bench.yml runs
+Numbers measured <!-- measured -->2026-11-19, cc7b9f1<!-- /measured --> by CI on each push to main (bench.yml runs
 `bench/ci_bench.py` and `bench/rust_ui.py`, then `scripts/update_readme.py` writes them here). Times come from shared
 GitHub Actions runners and vary by about ±20%; the instruction counts (valgrind) do not.
 
@@ -38,10 +38,10 @@ only the tests it can be asked to handle (no nightly features, auxiliary crates 
 <!-- auto:ui -->
 | kind | applicable | pass |
 |---|---:|---:|
-| run-pass (builds, runs, same output) | 2385 | 1616 (67.8%) |
-| check-pass (accepted by `zustc check`) | 1807 | 1361 (75.3%) |
+| run-pass (builds, runs, same output) | 2385 | 1617 (67.8%) |
+| check-pass (accepted by `zustc check`) | 1807 | 1366 (75.6%) |
 | build-pass | 135 | 95 (70.4%) |
-| compile-fail (rejected at an annotated line) | 7358 | 3307 (44.9%) |
+| compile-fail (rejected at an annotated line) | 7358 | 3310 (45.0%) |
 <!-- /auto:ui -->
 
 [What is supported](#what-is-supported) breaks this down by area.
@@ -53,22 +53,22 @@ Build speed, build cache size and LSP latency on generated programs of 1000 / 50
 <!-- auto:kpi -->
 | KPI | gen1000 | gen5000 |
 |---|---:|---:|
-| cold build | 117 ms | 539 ms |
-| no-op build | 12.1 ms | 60.5 ms |
-| build after editing one function | 17.4 ms | 67.2 ms |
-| `check` | 76 ms | 379 ms |
-| no-op build (instructions) | 141.1 M | 665.8 M |
-| edit one function (instructions) | 134.1 M | 624.9 M |
-| `check` (instructions) | 792.8 M | 3905.3 M |
+| cold build | 118 ms | 531 ms |
+| no-op build | 12.4 ms | 59.5 ms |
+| build after editing one function | 17.1 ms | 64.5 ms |
+| `check` | 75 ms | 373 ms |
+| no-op build (instructions) | 141.0 M | 665.8 M |
+| edit one function (instructions) | 134.1 M | 625.0 M |
+| `check` (instructions) | 792.5 M | 3904.5 M |
 | build cache on disk | 387.2 KiB | 1902.8 KiB |
 | binary | 324.0 KiB | 1558.3 KiB |
-| cold build peak RSS | 18.4 MiB | 52.5 MiB |
+| cold build peak RSS | 18.5 MiB | 52.7 MiB |
 
 | zust-analyzer (zustc's own sources) | |
 |---|---:|
-| p50: definition, hover, completion, references, rename | 0.49 ms / 0.35 ms / 1.04 ms / 2.43 ms / 0.52 ms |
-| startup until indexed | 108 ms |
-| peak RSS | 71.3 MiB |
+| p50: definition, hover, completion, references, rename | 0.44 ms / 0.34 ms / 0.98 ms / 2.40 ms / 0.51 ms |
+| startup until indexed | 107 ms |
+| peak RSS | 71.5 MiB |
 <!-- /auto:kpi -->
 
 Every change is also measured on its own with `python3 bench/kpi_track.py`, so that small increases that add up stay
@@ -297,10 +297,10 @@ the measured numbers. The [reports](docs/reports/) explain each step.
 
 ### Overall
 
-- [x] tests/ui run-pass: <!-- total:run-pass -->67.8% (1616 / 2385)
-- [x] tests/ui check-pass: <!-- total:check-pass -->75.3% (1361 / 1807)
+- [x] tests/ui run-pass: <!-- total:run-pass -->67.8% (1617 / 2385)
+- [x] tests/ui check-pass: <!-- total:check-pass -->75.6% (1366 / 1807)
 - [x] tests/ui build-pass: <!-- total:build-pass -->70.4% (95 / 135)
-- [ ] tests/ui compile-fail (an error on an annotated line): <!-- total:compile-fail -->44.9% (3307 / 7358)
+- [ ] tests/ui compile-fail (an error on an annotated line): <!-- total:compile-fail -->45.0% (3310 / 7358)
 - [x] real crates: fnv, adler2, hex, itoa, rustc-hash and cfg-if build and give the same output (6 / 6)
 - [x] zust-analyzer answers like rust-analyzer: 95.4% (rust-analyzer: 96.2%)
 
@@ -352,7 +352,7 @@ the measured numbers. The [reports](docs/reports/) explain each step.
   array patterns of the wrong length (E0527, E0528)
 - [ ] region errors against signatures (E0621, E0521): regions <!-- cf:regions -->12.1%, lifetimes <!-- cf:lifetimes -->19.5%
 - [ ] coherence, bounds of blanket impls, dyn compatibility (E0038), the bindings of `dyn Tr<A = T>` against the associated type's bounds (done when T is a primitive, `str` or a struct name)
-- [ ] lints and warnings: lint <!-- cf:lint -->11.2%
+- [ ] lints and warnings: lint <!-- cf:lint -->11.7%
 - [ ] editions (2015-only errors)
 
 ### Runtime and std
