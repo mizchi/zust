@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795112338802,
+  "lastUpdate": 1795112341244,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -56894,6 +56894,70 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/mizchi/zust/commit/4c7e69ac3dce2b7b7786f90b0984c9b7cdda74ea"
         },
         "date": 1795111941499,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tests/ui run-pass pass rate",
+            "value": 69.52,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui run-pass passing",
+            "value": 1658,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui check-pass pass rate",
+            "value": 77.2,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui check-pass passing",
+            "value": 1395,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui build-pass pass rate",
+            "value": 70.37,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui build-pass passing",
+            "value": 95,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui compile-fail pass rate",
+            "value": 45.09,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui compile-fail passing",
+            "value": 3318,
+            "unit": "tests"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "committer": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "distinct": true,
+          "id": "5d5bcd0282ca48bbd01ab2676e540f3da81316ee",
+          "message": "Errors in a dependency crate's functions at their own file's lines\n\nA function of a dependency compiled in the app's build has its lines counted from that crate's start, tagged with the\ncrate (`tag << 20 | line`, for panic locations that do not depend on where the crate sits in the combined source).\nIts errors carried those tagged lines (`lib/src/lib.rs:2428502019:5`). They are put back at the combined source's\nlines before relocation, and relocation now also maps the second place a message names (`(at L:C)`: the same file's\nline, or `file:L:C`).\n\ntests/ui: 0 regressions. KPIs: no change outside noise.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-19T18:13:03Z",
+          "tree_id": "71fd14f48e827b567aa54b370ad7b97e14b7c5e0",
+          "url": "https://github.com/mizchi/zust/commit/5d5bcd0282ca48bbd01ab2676e540f3da81316ee"
+        },
+        "date": 1795112340741,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
