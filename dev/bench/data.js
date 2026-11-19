@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795131090768,
+  "lastUpdate": 1795131093032,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -39376,6 +39376,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "lsp peak RSS",
             "value": 72.836,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "committer": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "distinct": true,
+          "id": "28d12286ad59ad5ecae75d84582fede2a613bbb5",
+          "message": "RPITIT: a trait's default method returning impl Trait\n\n`trait Foo { fn bar(&self) -> impl Display { 42 } }`: the default\nmethod's return type is its body's, as for a free fn (it was left as\nan unresolved `impl Trait`).\n\ntests/ui: +4 genuine check-pass passes; two compile-fail tests that\npassed only through that unresolved type (at the expected line) go to\nrust_ui_accidental.txt.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-19T23:23:40Z",
+          "tree_id": "cd21e9d5030c57aec68ce11882160d384ab65494",
+          "url": "https://github.com/mizchi/zust/commit/28d12286ad59ad5ecae75d84582fede2a613bbb5"
+        },
+        "date": 1795131092560,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "lsp definition p50",
+            "value": 0.504,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp hover p50",
+            "value": 0.392,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp completion p50",
+            "value": 0.998,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp references p50",
+            "value": 4.411,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp rename p50",
+            "value": 0.396,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp signatureHelp p50",
+            "value": 0.769,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp documentHighlight p50",
+            "value": 0.794,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp ready (startup to indexed)",
+            "value": 110.117,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp peak RSS",
+            "value": 72.715,
             "unit": "MiB"
           }
         ]
