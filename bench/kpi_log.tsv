@@ -53,3 +53,4 @@ date	commit	change	noop_M	edit_M	check_M	cache_KiB	lsp_G	run	check	build	cfail
 2026-11-19	40a457e	impls for raw pointers and !	625.171	626.763	3906.213	1902.8	-	1617	1366	95	3309
 2026-11-19	534e950	destructuring by-value captures	625.171	626.762	3908.309	1902.8	-	1617	1366	95	3309
 2026-11-19	bf7e12c	compound assignment order	625.171	626.762	3907.739	1902.8	-	1618	1366	95	3310
+2026-11-19	a6204f3	struct literal field order before ..base	625.174	626.766	3909.763	1902.8	-	1620	1366	95	3309
