@@ -643,9 +643,10 @@ impl Cx<'_> {
             t if t.is_int() || matches!(t, Ty::Bool | Ty::Char | Ty::Ptr(..)) => Ok(self.b.ins().icmp(IntCC::Equal, a, b)),
             t if t.is_float() => Ok(self.b.ins().fcmp(FloatCC::Equal, a, b)),
             // `&str` / `&[T]`: 長さと中身で比べる
-            Ty::Ref(_, Ty::Str | Ty::Slice(_)) => {
+            // (`Box<[T]>` / `Box<str>` likewise: the same (pointer, length) pair)
+            Ty::Ref(_, Ty::Str | Ty::Slice(_)) | Ty::Box(Ty::Str | Ty::Slice(_)) => {
                 let e = match t {
-                    Ty::Ref(_, Ty::Slice(e)) => **e,
+                    Ty::Ref(_, Ty::Slice(e)) | Ty::Box(Ty::Slice(e)) => **e,
                     _ => Ty::U8,
                 };
                 let (es, _) = self.prog.size_align(e);

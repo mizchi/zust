@@ -1691,6 +1691,7 @@ run-pass	derives/debug/derive-Debug-use-ufcs-tuple.rs
 run-pass	derives/debug/derive-debug-2.rs
 check-pass	derives/debug/derive-debug-generic-with-lifetime.rs
 check-pass	derives/debug/derive-debug-newtype-unsized-slice.rs
+run-pass	derives/default/deriving-default-box.rs
 run-pass	derives/default/deriving-default-enum.rs
 compile-fail	derives/derive-assoc-type-not-impl.rs
 check-pass	derives/derive-compound-arities.rs
@@ -5078,6 +5079,7 @@ compile-fail	rfcs/rfc-0107-bind-by-move-pattern-guards/rfc-reject-double-move-in
 run-pass	rfcs/rfc-1238-nonparametric-dropck/must-work-ex1.rs
 run-pass	rfcs/rfc-1238-nonparametric-dropck/must-work-ex2.rs
 compile-fail	rfcs/rfc-1445-restrict-constants-in-patterns/issue-6804-nan-match.rs
+run-pass	rfcs/rfc-1445-restrict-constants-in-patterns/match-empty-array-allowed-without-eq-issue-62336.rs
 run-pass	rfcs/rfc-1445-restrict-constants-in-patterns/phantom-data-is-structurally-matchable.rs
 run-pass	rfcs/rfc-1445-restrict-constants-in-patterns/rfc1445/eq-allows-match-on-ty-in-macro.rs
 run-pass	rfcs/rfc-1445-restrict-constants-in-patterns/rfc1445/eq-allows-match.rs

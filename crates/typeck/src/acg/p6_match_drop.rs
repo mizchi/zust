@@ -121,7 +121,18 @@ impl Cx<'_> {
             let ne: &Expr = self.keep_expr(Expr::Block(None, false, blk));
             return self.expr(ne, expected);
         }
-        let Some(place) = self.bk_scrutinee(scrut, None, &pats)? else {
+        // (`match [] { FOO => .. }`: an empty array scrutinee takes its type from a const pattern)
+        let scrut_exp = match strip_paren(scrut) {
+            Expr::Array(xs) if xs.is_empty() => pats.iter().find_map(|p| {
+                let n = match p {
+                    Pat::Path(pa) if pa.segs.len() == 1 => pa.segs[0].name.as_str(),
+                    p => const_ident_pat(self.prog, p)?,
+                };
+                self.prog.const_index.get(n).map(|&ci| self.prog.consts[ci as usize].ty).filter(|t| matches!(t, Ty::Array(..)))
+            }),
+            _ => None,
+        };
+        let Some(place) = self.bk_scrutinee(scrut, scrut_exp, &pats)? else {
             return Ok((None, Ty::Never));
         };
         // (E0004: the arms must cover the scrutinee's type; user code only)

@@ -84,3 +84,4 @@ date	commit	change	noop_M	edit_M	check_M	cache_KiB	lsp_G	run	check	build	cfail
 2026-11-19	fb2070b+	ops: BitAndAssign/BitOrAssign/BitXorAssign/ShlAssign/ShrAssign/Shl/Shr traits for user impls	0.873	592.023	3881.059	1902.8	-	1679	1405	95	3324	1181.280	64.135	11.269	323.453
 2026-11-19	fb2070b+	ops: Bit*Assign/Shl*/Shr* traits; selection caches op/cmp/gated trait lookups per item	0.871	591.396	3878.918	1902.8	-	1679	1405	95	3323	1180.711	63.168	11.258	319.880
 2026-11-19	5e449f6+	empty arrays: T from the other args, Box::<T>::new([]), let _: T = []; Box<[T; N]> methods	0.874	591.582	3879.054	1902.8	-	1682	1406	95	3324	1181.028	63.220	11.272	320.003
+2026-11-19	ee10b39+	Box<[T]> == Box<[T]>; match [] typed by its const pattern	0.876	591.641	3879.056	1902.8	-	1684	1406	95	3324	1181.534	63.265	11.286	319.962
