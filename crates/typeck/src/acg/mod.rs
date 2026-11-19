@@ -1374,6 +1374,12 @@ impl Cx<'_> {
                         }
                     }
                     let ty = ann.unwrap_or(t);
+                    // (`*mut T` where `*const T` is written: the same pointer)
+                    if let (Ty::Ptr(true, x), Ty::Ptr(false, y)) = (t, ty) {
+                        if x == y {
+                            t = ty;
+                        }
+                    }
                     self.same(SP, t, ty).map_err(|m| self.at(expr_start(init), m))?;
                     self.bk.mut_next = pat_mut(pat);
                     self.bind(name.clone(), ty, v);

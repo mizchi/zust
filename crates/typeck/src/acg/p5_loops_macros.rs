@@ -1540,6 +1540,20 @@ impl Cx<'_> {
             }
             return err(SP, "`Box::leak` needs a Box");
         }
+        // `Box::into_raw(b)` / `Box::from_raw(p)`: the same pointer as a raw pointer / as the Box (the Box is not dropped)
+        if matches!(name.as_str(), "into_raw" | "from_raw") && n >= 2 && p.segs[n - 2].name == "Box" && cargs.len() == 1 && !self.prog.struct_index.contains_key("Box") {
+            let want = match (name.as_str(), expected) {
+                ("from_raw", Some(Ty::Box(i))) => Some(Ty::Ptr(true, i)),
+                _ => None,
+            };
+            let (v, t) = self.expr(&cargs[0], want)?;
+            let Some(v) = v else { return Ok(Some((None, Ty::Never))) };
+            return match (name.as_str(), t) {
+                ("into_raw", Ty::Box(i)) => Ok(Some((Some(v), Ty::Ptr(true, i)))),
+                ("from_raw", Ty::Ptr(_, i)) => Ok(Some((Some(v), Ty::Box(i)))),
+                _ => err(SP, format!("`Box::{name}` needs a {}", if name == "into_raw" { "Box" } else { "raw pointer" })),
+            };
+        }
         // `Box::new(x)`: ヒープに置いて、所有する `&mut T` として返す (解放はしない)
         if name == "new" && n >= 2 && p.segs[n - 2].name == "Box" && !self.prog.struct_index.contains_key("Box") {
             if cargs.len() != 1 {

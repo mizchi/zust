@@ -951,6 +951,7 @@ run-pass	closures/2229_closure_analysis/run_pass/multilevel-path-3.rs
 run-pass	closures/2229_closure_analysis/run_pass/mut_ref.rs
 run-pass	closures/2229_closure_analysis/run_pass/mut_ref_struct_mem.rs
 run-pass	closures/2229_closure_analysis/run_pass/nested-closure.rs
+run-pass	closures/2229_closure_analysis/run_pass/unsafe_ptr.rs
 run-pass	closures/2229_closure_analysis/unresolvable-upvar-issue-87987.rs
 compile-fail	closures/add_semicolon_non_block_closure.rs
 check-pass	closures/at-pattern-weirdness-issue-137553.rs
@@ -1614,6 +1615,7 @@ run-pass	drop/drop-immediate-non-box-ty-9446.rs
 run-pass	drop/drop-in-for-loop-destructure.rs
 run-pass	drop/drop-on-empty-block-exit.rs
 run-pass	drop/drop-on-ret.rs
+run-pass	drop/drop-on-untaken-arm-raw-ptr.rs
 run-pass	drop/drop-on-untaken-arm.rs
 run-pass	drop/drop-once-on-move.rs
 run-pass	drop/drop-scope-exit.rs
