@@ -12,7 +12,7 @@ Status as of 2026-11-18, updated with each round of work. The percentages are ru
 - [x] tests/ui run-pass: 65.9% (1572 / 2385)
 - [x] tests/ui check-pass: 73.3% (1324 / 1807)
 - [x] tests/ui build-pass: 69.6% (94 / 135)
-- [ ] tests/ui compile-fail (an error on an annotated line): 38.8% (2858 / 7358)
+- [ ] tests/ui compile-fail (an error on an annotated line): 39.2% (2886 / 7358)
 - [x] real crates: fnv, adler2, hex, itoa, rustc-hash and cfg-if build and give the same output (6 / 6)
 - [x] zust-analyzer answers like rust-analyzer: 95.4% (rust-analyzer: 96.2%)
 
@@ -56,6 +56,8 @@ Status as of 2026-11-18, updated with each round of work. The percentages are ru
 - [x] type errors, missing items, generics declarations (E0403, E0207, E0392, E0072 ..): typeck 53.4%, structs 66.7%
 - [x] unsafe operations outside `unsafe` (E0133): calls to `unsafe fn` and extern fns, raw pointer derefs, `static mut`,
   union field reads (not yet inside closures or consts, and not the `unsafe_op_in_unsafe_fn` lint)
+- [x] non-exhaustive `match` (E0004): bool, unit, enums (variants that cannot have a value need no arm), structs and
+  tuples, nested and with or-patterns (integer and slice patterns, and types left generic, are not checked yet)
 - [ ] region errors against signatures (E0621, E0521): regions 12.9%, lifetimes 19.5%
 - [ ] coherence, bounds of blanket impls, dyn compatibility (E0038), the bindings of `dyn Tr<A = T>` against the associated type's bounds (done when T is a primitive, `str` or a struct name)
 - [ ] lints and warnings: lint 8.3%

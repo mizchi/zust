@@ -12,7 +12,7 @@
 - [x] tests/ui run-pass：65.9%（1572 / 2385）
 - [x] tests/ui check-pass：73.3%（1324 / 1807）
 - [x] tests/ui build-pass：69.6%（94 / 135）
-- [ ] tests/ui compile-fail（注釈の行でエラー）：38.8%（2858 / 7358）
+- [ ] tests/ui compile-fail（注釈の行でエラー）：39.2%（2886 / 7358）
 - [x] 実際のクレート：fnv、adler2、hex、itoa、rustc-hash、cfg-if がビルドでき、同じ出力を出す（6 / 6）
 - [x] zust-analyzer が rust-analyzer と同じように答える：95.4%（rust-analyzer は 96.2%）
 
@@ -56,6 +56,8 @@
 - [x] 型の誤り、見つからないアイテム、ジェネリクスの宣言（E0403、E0207、E0392、E0072 など）：typeck 53.4%、structs 66.7%
 - [x] `unsafe` の外の unsafe な操作（E0133）：`unsafe fn` と extern の関数の呼び出し、生ポインタの参照外し、`static mut`、
   共用体のフィールドの読み出し（クロージャと const の中、`unsafe_op_in_unsafe_fn` の lint はまだ）
+- [x] 網羅的でない `match`（E0004）：bool、unit、列挙型（値を持てないバリアントにはアームが要らない）、構造体とタプル、
+  入れ子と or パターンを含む（整数とスライスのパターン、ジェネリックのままの型はまだ検査しない）
 - [ ] シグネチャに対する region の誤り（E0621、E0521）：regions 12.9%、lifetimes 19.5%
 - [ ] coherence、ブランケット impl の境界、dyn 互換性（E0038）、`dyn Tr<A = T>` の束縛と関連型の境界（T がプリミティブ型・`str`・構造体の名前のときは検査する）
 - [ ] lint と警告：lint 8.3%

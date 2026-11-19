@@ -214,7 +214,7 @@ only the tests it can be asked to handle (no nightly features, auxiliary crates 
 | run-pass (builds, runs, same output) | 2385 | 1572 (65.9%) |
 | check-pass (accepted by `zustc check`) | 1807 | 1324 (73.3%) |
 | build-pass | 135 | 94 (69.6%) |
-| compile-fail (rejected at an annotated line) | 7358 | 2858 (38.8%) |
+| compile-fail (rejected at an annotated line) | 7358 | 2886 (39.2%) |
 
 [SUPPORTED.md](SUPPORTED.md) breaks this down by area as a checklist.
 

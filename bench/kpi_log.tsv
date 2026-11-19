@@ -19,3 +19,4 @@ date	commit	change	noop_M	edit_M	check_M	cache_KiB	lsp_G	run	check	build	cfail
 2026-11-19	85225ee	reborrow of fat pointers through *, (*f)(x)	625.189	626.791	3905.638	1902.8	10.8944	1570	1323	93	2860
 2026-11-19	8fb090b	TypeId::of, type_name (check +0.04%: all in glibc malloc (_int_malloc, malloc_consolidate), zustc's own code is unchanged)	625.242	626.596	3907.370	1902.8	-	1570	1323	94	2860
 2026-11-19	b0a0794	match *x on slices; *slice as a value is E0277	625.241	626.594	3907.294	1902.8	-	1572	1324	94	2858
+2026-11-19	c54a325	match exhaustiveness (E0004)	625.241	626.595	3907.292	1902.8	10.9010	1572	1324	94	2886
