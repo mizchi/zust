@@ -6,6 +6,11 @@ use crate::types::{Ty, intern};
 
 pub type R<T> = Result<T, String>;
 
+thread_local! {
+    /// how deep the typing of generic `impl Trait` fns' bodies is nested (Solver::apply_self)
+    static OPAQUE_DEPTH: std::cell::Cell<u32> = const { std::cell::Cell::new(0) };
+}
+
 #[derive(Clone, Copy)]
 pub enum Shape {
     Known(Ty),
@@ -875,6 +880,27 @@ impl Solver<'_> {
                 let prog = self.prog;
                 self.unify_fn_bounds(&prog.sigs[id as usize].generics, &mut pv);
                 self.unify_assoc_bounds(&prog.sigs[id as usize].generics, &mut pv);
+                // (a generic fn returning `impl Trait`, with its arguments known: the type of its body for them)
+                if let Some(body) = prog.opaque_generic.get(&id).cloned().filter(|_| OPAQUE_DEPTH.with(|d| d.get() < 4)) {
+                    let ts: Vec<Option<Ty>> = pv.iter().map(|v| v.and_then(|v| self.resolve(v))).collect();
+                    if let Some(ts) = ts.into_iter().collect::<Option<Vec<Ty>>>().filter(|ts| ts.iter().all(|&t| !prog.has_param(t))) {
+                        let sig0 = &prog.sigs[id as usize];
+                        let sig = crate::program::FnSig { params: sig0.params.iter().map(|&t| prog.subst(t, &ts)).collect(), ..sig0.clone() };
+                        let env = crate::program::TyEnv {
+                            self_sid: sig.impl_of,
+                            params: sig0.generics.iter().map(|g| g.0.clone()).zip(ts.iter().copied()).collect(),
+                            self_ty: sig.self_ty,
+                        };
+                        // (bounded: generic fns returning each other's results)
+                        OPAQUE_DEPTH.with(|d| d.set(d.get() + 1));
+                        let (_, rt, _) = crate::ast_infer::infer_ctx(prog, body.2, &body.0, &body.1, &sig, &env, &[], None, Some((id, 0)));
+                        OPAQUE_DEPTH.with(|d| d.set(d.get() - 1));
+                        if let Some(t) = rt.filter(|&t| !prog.has_param(t)) {
+                            self.late_bounds(id, pv);
+                            return self.known(t);
+                        }
+                    }
+                }
                 let r = self.known_g(ret, &mut pv);
                 self.late_bounds(id, pv);
                 r

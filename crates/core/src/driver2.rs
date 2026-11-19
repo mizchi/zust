@@ -632,16 +632,6 @@ impl Session2 {
 }
 
 /// `-> impl Iterator<..>` の戻り値を本体の型推論で決める (front.rs の resolve_opaque と同じ)
-/// a type that names a generic fn's parameters only directly (`T`, `&T`, `Box<T>`): an instance substitutes it as is
-/// (a struct of the parameters (`(T, T)`) is not taken yet: its instance's arguments are not put in correctly)
-fn simple_param_ty(prog: &Program, t: Ty) -> bool {
-    match t {
-        Ty::Param(i) => i != crate::program::HOLE,
-        Ty::Ref(_, i) | Ty::Box(i) => simple_param_ty(prog, *i),
-        t => !prog.has_param(t),
-    }
-}
-
 /// a `_` left in a type (inference did not decide it)
 fn has_hole_ty(t: Ty) -> bool {
     match t {
@@ -667,11 +657,23 @@ fn resolve_opaque(prog: &mut Program, src: &str, items: &[SrcItem]) -> R<()> {
             let Some(ii) = prog.item_of[id as usize] else { continue };
             let Some(f) = parse_fn(src, &items[ii as usize])? else { continue };
             let env = TyEnv { self_sid: sig.impl_of, params: vec![], self_ty: sig.self_ty };
-            let (_, r, _) = if sig.is_generic() {
-                crate::ast_infer::infer_ctx_generic(prog, f.sig.recv.is_some(), &f.sig.params, &f.block, &sig, &env, Some((id, 0)))
-            } else {
-                crate::ast_infer::infer_ctx(prog, f.sig.recv.is_some(), &f.sig.params, &f.block, &sig, &env, &[], None, Some((id, 0)))
-            };
+            // (a generic fn: each instance's return type comes from its body with the instance's arguments, when
+            // the instance is made (Insts::request); calls before that see a new type variable)
+            if sig.is_generic() {
+                // (`fn opaque<T>(t: T) -> impl Sized { opaque(Some(t)) }`: each instance's type is the next one's)
+                let me = prog.names[id as usize].rsplit("::").next().unwrap_or("").to_string();
+                if let Some(crate::parse::Stmt::Expr(crate::parse::Expr::Call(callee, _), false)) = f.block.stmts.last() {
+                    if matches!(&**callee, crate::parse::Expr::Path(None, p) if p.segs.last().is_some_and(|s| s.name == me)) {
+                        return Err(format!("{}:1: cannot resolve opaque type (`{me}` returns its own result for other arguments)", items[ii as usize].line));
+                    }
+                }
+                prog.opaque_generic.insert(id, std::sync::Arc::new((f.sig.params.clone(), f.block.clone(), f.sig.recv.is_some())));
+                prog.sigs[id as usize].ret = Ty::Param(crate::program::HOLE);
+                done[k] = true;
+                progress = true;
+                continue;
+            }
+            let (_, r, _) = crate::ast_infer::infer_ctx(prog, f.sig.recv.is_some(), &f.sig.params, &f.block, &sig, &env, &[], None, Some((id, 0)));
             // (a body with no value (`-> impl Sized {}`) returns `()`)
             let no_value = !matches!(f.block.stmts.last(), Some(crate::parse::Stmt::Expr(_, false))) && !format!("{:?}", f.block).contains("Return(Some");
             // (a body ending in `()` itself, or in a diverging macro (`panic!()` / `todo!()`), is `()` too)
@@ -683,9 +685,7 @@ fn resolve_opaque(prog: &mut Program, src: &str, items: &[SrcItem]) -> R<()> {
                 _ => false,
             };
             let no_value = no_value || unit_tail;
-            // (a generic fn's type may name its own parameters: each instance puts its arguments in)
-            let generic = sig.is_generic();
-            if let Some(t) = r.filter(|&t| (t != Ty::Unit || no_value) && (!prog.has_param(t) || (generic && simple_param_ty(prog, t))) && !has_hole_ty(t)) {
+            if let Some(t) = r.filter(|&t| (t != Ty::Unit || no_value) && !prog.has_param(t) && !has_hole_ty(t)) {
                 prog.sigs[id as usize].ret = t;
                 done[k] = true;
                 progress = true;

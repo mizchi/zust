@@ -280,6 +280,8 @@ pub struct Program {
     pub assocs: Vec<AssocDef>,
     /// (trait, associated type) -> the bounds of its declaration (`type Y: Clone;`)
     pub assoc_bounds: HashMap<(String, String), Vec<String>>,
+    /// generic fns returning `impl Trait`: (parameters, body, has self), to type each instance's body
+    pub opaque_generic: HashMap<u32, std::sync::Arc<(Vec<(crate::parse::Pat, crate::parse::Ty)>, crate::parse::Block, bool)>>,
     /// 右辺の型を持つ比較の impl の eq (`Vec::<PartialEq<[T;N]>>::eq` など)。`a == b` の型が違うとき探す
     pub peq: Vec<u32>,
     /// 型の別名: 名前 → (型パラメータ, 中身)
@@ -413,6 +415,20 @@ impl Insts {
             ret_from: b.ret_from,
             is_unsafe: b.is_unsafe,
         };
+        // (a generic fn returning `impl Trait`: the type of this instance's body)
+        let mut sig = sig;
+        if let Some(body) = prog.opaque_generic.get(&base) {
+            let env = TyEnv {
+                self_sid: sig.impl_of,
+                params: b.generics.iter().map(|g| g.0.clone()).zip(args.iter().copied()).collect(),
+                self_ty: sig.self_ty,
+            };
+            let (_, r, _) = crate::ast_infer::infer_ctx(prog, body.2, &body.0, &body.1, &sig, &env, &[], None, Some((base, 0)));
+            match r.filter(|&t| !prog.has_param(t)) {
+                Some(t) => sig.ret = t,
+                None => return Err(format!("cannot infer the `impl Trait` return type of `{}`", prog.names[base as usize])),
+            }
+        }
         let id = self.n_fns + self.list.len() as u32;
         self.list.push(Inst {
             base,
@@ -604,6 +620,7 @@ impl Program {
             has_drop: false,
             assocs: vec![],
             assoc_bounds: Default::default(),
+            opaque_generic: Default::default(),
             peq: vec![],
             aliases: FxMap::default(),
             pord: vec![],
@@ -1245,6 +1262,10 @@ impl Program {
     pub fn implements(&self, t: Ty, tr: &str) -> bool {
         if self.blanket_traits.contains(tr) {
             return true;
+        }
+        // (every type is Sized but str, slices and dyn Trait)
+        if tr == "Sized" {
+            return !matches!(t, Ty::Str | Ty::Slice(_) | Ty::Dyn(_));
         }
         // (auto traits: structurally, Rc / raw pointers are not Send, also Cell / RefCell are not Sync)
         if tr == "Send" || tr == "Sync" {

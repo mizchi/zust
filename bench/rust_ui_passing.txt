@@ -1163,6 +1163,8 @@ compile-fail	confuse-field-and-method/private-field.rs
 check-pass	const-generics/apit-with-const-param.rs
 check-pass	const-generics/arg-in-pat-2.rs
 compile-fail	const-generics/argument_order.rs
+check-pass	const-generics/array-impls/alloc-traits-impls-length-32.rs
+check-pass	const-generics/array-impls/alloc-traits-impls-length-33.rs
 check-pass	const-generics/array-impls/core-traits-impls-length-32.rs
 check-pass	const-generics/array-impls/core-traits-impls-length-33.rs
 compile-fail	const-generics/associated-const-bindings/const-bound-to-assoc-ty-99828.rs
@@ -1184,6 +1186,7 @@ run-pass	const-generics/const-fn-with-const-param.rs
 compile-fail	const-generics/const-generic-function.rs
 check-pass	const-generics/const-param-after-const-literal-arg.rs
 compile-fail	const-generics/const-param-before-other-params.rs
+check-pass	const-generics/const-param-in-async.rs
 compile-fail	const-generics/const-param-type-depends-on-type-param-ungated.rs
 check-pass	const-generics/const_eval_unchecked_doesnt_fire_patterns.rs
 compile-fail	const-generics/default-ty-closure.rs
@@ -2282,8 +2285,10 @@ compile-fail	impl-header-lifetime-elision/dyn-trait.rs
 run-pass	impl-header-lifetime-elision/explicit-and-elided-same-header.rs
 run-pass	impl-header-lifetime-elision/path-underscore.rs
 run-pass	impl-trait/basic-trait-impl.rs
+run-pass	impl-trait/bounds_regression.rs
 check-pass	impl-trait/closure-calling-parent-fn.rs
 run-pass	impl-trait/closure-in-impl-trait-arg.rs
+check-pass	impl-trait/closure-in-type.rs
 build-pass	impl-trait/defined-by-trait-resolution.rs
 compile-fail	impl-trait/diagnostics/fully-qualified-path-impl-trait.rs
 check-pass	impl-trait/different_where_bounds.rs
@@ -2328,14 +2333,17 @@ compile-fail	impl-trait/issues/issue-100075.rs
 check-pass	impl-trait/issues/issue-100187.rs
 compile-fail	impl-trait/issues/issue-102605.rs
 compile-fail	impl-trait/issues/issue-103181-2.rs
+compile-fail	impl-trait/issues/issue-103599.rs
 compile-fail	impl-trait/issues/issue-21659-show-relevant-trait-impls-3.rs
 check-pass	impl-trait/issues/issue-42479.rs
 check-pass	impl-trait/issues/issue-46959.rs
 check-pass	impl-trait/issues/issue-49376.rs
 check-pass	impl-trait/issues/issue-49556.rs
 compile-fail	impl-trait/issues/issue-54966.rs
+check-pass	impl-trait/issues/issue-55608-captures-empty-region.rs
 compile-fail	impl-trait/issues/issue-58956.rs
 compile-fail	impl-trait/issues/issue-62742.rs
+check-pass	impl-trait/issues/issue-65581.rs
 check-pass	impl-trait/issues/issue-68532.rs
 compile-fail	impl-trait/issues/issue-72911.rs
 compile-fail	impl-trait/issues/issue-84073.rs
@@ -2372,11 +2380,13 @@ check-pass	impl-trait/recursive-auto-trait.rs
 run-pass	impl-trait/region-escape-via-bound-contravariant-closure.rs
 run-pass	impl-trait/region-escape-via-bound-contravariant.rs
 compile-fail	impl-trait/rpit-not-sized.rs
+check-pass	impl-trait/rpit/inherits-lifetime.rs
 compile-fail	impl-trait/rpit/non-defining-use-lifetimes.rs
 check-pass	impl-trait/rpit/unit-impl-default-36379.rs
 compile-fail	impl-trait/stashed-diag-issue-121504.rs
 check-pass	impl-trait/struct-field-fragment-in-name.rs
 compile-fail	impl-trait/suggest-calling-rpit-closure.rs
+check-pass	impl-trait/trait_resolution.rs
 check-pass	impl-trait/transmute/in-defining-scope.rs
 check-pass	impl-trait/transmute/outside-of-defining-scope.rs
 run-pass	impl-trait/universal_hrtb_anon.rs
@@ -2592,6 +2602,7 @@ check-pass	layout/unexpected-unsized-field-issue-135020.rs
 check-pass	layout/unsatisfiable-sized-ungated.rs
 check-pass	lazy-type-alias-impl-trait/lifetime_inference.rs
 check-pass	lazy-type-alias-impl-trait/opaque_vs_opaque.rs
+check-pass	lazy-type-alias-impl-trait/unsized_sized_opaque.rs
 compile-fail	let-else/accidental-if.rs
 run-pass	let-else/const-fn.rs
 check-pass	let-else/detect-invisible-delimiter.rs
@@ -3273,6 +3284,7 @@ compile-fail	moves/moves-sru-moved-field.rs
 compile-fail	moves/needs-clone-through-deref.rs
 compile-fail	moves/no-capture-arc.rs
 compile-fail	moves/no-reuse-move-arc.rs
+compile-fail	moves/recreating-value-in-loop-condition.rs
 compile-fail	mut/mut-cant-alias.rs
 compile-fail	mut/mut-cross-borrowing.rs
 compile-fail	mut/mut-pattern-internal-mutability.rs
@@ -5345,6 +5357,7 @@ run-pass	traits/object/with-lifetime-bound.rs
 run-pass	traits/objects-owned-object-borrowed-method-headerless.rs
 run-pass	traits/parameterized-with-bounds.rs
 check-pass	traits/polymorphic-trait-creation-7673.rs
+compile-fail	traits/projection-no-progress-cycle-issue-159750.rs
 compile-fail	traits/question-mark-span-144304.rs
 compile-fail	traits/rc-not-send.rs
 run-pass	traits/region-pointer-simple.rs
@@ -5446,6 +5459,7 @@ compile-fail	type-alias-impl-trait/coherence/orphanck-tait-with-projection-arg.r
 check-pass	type-alias-impl-trait/cross_inference_rpit.rs
 check-pass	type-alias-impl-trait/implied_bounds3.rs
 compile-fail	type-alias-impl-trait/issue-60371.rs
+check-pass	type-alias-impl-trait/nested-rpit-with-lifetimes.rs
 check-pass	type-alias-impl-trait/wf-check-rpit-lifetimes.rs
 check-pass	type-alias/issue-14933.rs
 compile-fail	type-alias/issue-62364-self-ty-arg.rs
