@@ -26,7 +26,7 @@
 
 ## Status
 
-Numbers measured <!-- measured -->2026-11-19, 6c5bee4<!-- /measured --> by CI on each push to main (bench.yml runs
+Numbers measured <!-- measured -->2026-11-19, 0740e9b<!-- /measured --> by CI on each push to main (bench.yml runs
 `bench/ci_bench.py` and `bench/rust_ui.py`, then `scripts/update_readme.py` writes them here). Times come from shared
 GitHub Actions runners and vary by about ±20%; the instruction counts (valgrind) do not.
 
@@ -41,7 +41,7 @@ only the tests it can be asked to handle (no nightly features, auxiliary crates 
 | run-pass (builds, runs, same output) | 2385 | 1587 (66.5%) |
 | check-pass (accepted by `zustc check`) | 1807 | 1342 (74.3%) |
 | build-pass | 135 | 94 (69.6%) |
-| compile-fail (rejected at an annotated line) | 7358 | 2967 (40.3%) |
+| compile-fail (rejected at an annotated line) | 7358 | 3085 (41.9%) |
 <!-- /auto:ui -->
 
 [What is supported](#what-is-supported) breaks this down by area.
@@ -53,22 +53,22 @@ Build speed, build cache size and LSP latency on generated programs of 1000 / 50
 <!-- auto:kpi -->
 | KPI | gen1000 | gen5000 |
 |---|---:|---:|
-| cold build | 121 ms | 544 ms |
-| no-op build | 12.9 ms | 60.7 ms |
-| build after editing one function | 18.8 ms | 67.6 ms |
-| `check` | 78 ms | 379 ms |
-| no-op build (instructions) | 140.7 M | 666.4 M |
-| edit one function (instructions) | 134.6 M | 626.9 M |
-| `check` (instructions) | 791.8 M | 3900.3 M |
+| cold build | 83 ms | 363 ms |
+| no-op build | 12.1 ms | 50.1 ms |
+| build after editing one function | 17.3 ms | 56.6 ms |
+| `check` | 67 ms | 335 ms |
+| no-op build (instructions) | 140.7 M | 667.7 M |
+| edit one function (instructions) | 134.2 M | 624.9 M |
+| `check` (instructions) | 791.6 M | 3898.8 M |
 | build cache on disk | 387.2 KiB | 1902.8 KiB |
 | binary | 324.0 KiB | 1558.3 KiB |
-| cold build peak RSS | 17.8 MiB | 52.0 MiB |
+| cold build peak RSS | 17.9 MiB | 52.2 MiB |
 
 | zust-analyzer (zustc's own sources) | |
 |---|---:|
-| p50: definition, hover, completion, references, rename | 0.48 ms / 0.40 ms / 1.03 ms / 2.90 ms / 0.56 ms |
-| startup until indexed | 114 ms |
-| peak RSS | 70.9 MiB |
+| p50: definition, hover, completion, references, rename | 0.40 ms / 0.34 ms / 0.65 ms / 1.72 ms / 0.42 ms |
+| startup until indexed | 87 ms |
+| peak RSS | 71.0 MiB |
 <!-- /auto:kpi -->
 
 Every change is also measured on its own with `python3 bench/kpi_track.py`, so that small increases that add up stay
@@ -300,7 +300,7 @@ the measured numbers. The [reports](docs/reports/) explain each step.
 - [x] tests/ui run-pass: <!-- total:run-pass -->66.5% (1587 / 2385)
 - [x] tests/ui check-pass: <!-- total:check-pass -->74.3% (1342 / 1807)
 - [x] tests/ui build-pass: <!-- total:build-pass -->69.6% (94 / 135)
-- [ ] tests/ui compile-fail (an error on an annotated line): <!-- total:compile-fail -->40.3% (2967 / 7358)
+- [ ] tests/ui compile-fail (an error on an annotated line): <!-- total:compile-fail -->41.9% (3085 / 7358)
 - [x] real crates: fnv, adler2, hex, itoa, rustc-hash and cfg-if build and give the same output (6 / 6)
 - [x] zust-analyzer answers like rust-analyzer: 95.4% (rust-analyzer: 96.2%)
 
@@ -340,16 +340,16 @@ the measured numbers. The [reports](docs/reports/) explain each step.
 
 ### Checks (compile-fail)
 
-- [x] borrow checking: moves, conflicting loans, escapes, mutability: borrowck <!-- cf:borrowck -->53.1%
+- [x] borrow checking: moves, conflicting loans, escapes, mutability: borrowck <!-- cf:borrowck -->53.4%
   ([report 08](docs/reports/2026-11-18-08-borrow-checking.md))
-- [x] type errors, missing items, generics declarations (E0403, E0207, E0392, E0072 ..): typeck <!-- cf:typeck -->57.1%, structs <!-- cf:structs -->70.8%
+- [x] type errors, missing items, generics declarations (E0403, E0207, E0392, E0072 ..): typeck <!-- cf:typeck -->59.3%, structs <!-- cf:structs -->70.8%
 - [x] unsafe operations outside `unsafe` (E0133): calls to `unsafe fn` and extern fns, raw pointer derefs, `static mut`,
   union field reads (not yet inside closures or consts, and not the `unsafe_op_in_unsafe_fn` lint)
 - [x] non-exhaustive `match` (E0004): bool, unit, enums (variants that cannot have a value need no arm), structs and
   tuples, nested and with or-patterns (integer and slice patterns, and types left generic, are not checked yet)
 - [x] unreachable match arms under `#![deny(unreachable_patterns)]` (the same usefulness check, arm by arm);
   array patterns of the wrong length (E0527, E0528)
-- [ ] region errors against signatures (E0621, E0521): regions <!-- cf:regions -->12.1%, lifetimes <!-- cf:lifetimes -->18.8%
+- [ ] region errors against signatures (E0621, E0521): regions <!-- cf:regions -->12.1%, lifetimes <!-- cf:lifetimes -->19.5%
 - [ ] coherence, bounds of blanket impls, dyn compatibility (E0038), the bindings of `dyn Tr<A = T>` against the associated type's bounds (done when T is a primitive, `str` or a struct name)
 - [ ] lints and warnings: lint <!-- cf:lint -->8.3%
 - [ ] editions (2015-only errors)
