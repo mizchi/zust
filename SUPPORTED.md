@@ -9,10 +9,10 @@ Status as of 2026-11-18, updated with each round of work. The percentages are ru
 
 ## Overall
 
-- [x] tests/ui run-pass: 65.8% (1570 / 2385)
-- [x] tests/ui check-pass: 73.2% (1323 / 1807)
+- [x] tests/ui run-pass: 65.9% (1572 / 2385)
+- [x] tests/ui check-pass: 73.3% (1324 / 1807)
 - [x] tests/ui build-pass: 69.6% (94 / 135)
-- [ ] tests/ui compile-fail (an error on an annotated line): 38.9% (2860 / 7358)
+- [ ] tests/ui compile-fail (an error on an annotated line): 38.8% (2858 / 7358)
 - [x] real crates: fnv, adler2, hex, itoa, rustc-hash and cfg-if build and give the same output (6 / 6)
 - [x] zust-analyzer answers like rust-analyzer: 95.4% (rust-analyzer: 96.2%)
 
