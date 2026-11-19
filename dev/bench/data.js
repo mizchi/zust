@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795111937584,
+  "lastUpdate": 1795111939900,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -47147,6 +47147,85 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/mizchi/zust/commit/19d10c0fa8723752e8a7c65baa0a40d83ae5140b"
         },
         "date": 1795111325832,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "parity documentSymbol (名前の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity workspace/symbol (上位 20 の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity definition (行き先の一致)",
+            "value": 91.176,
+            "unit": "%"
+          },
+          {
+            "name": "parity hover (名前を含む)",
+            "value": 80,
+            "unit": "%"
+          },
+          {
+            "name": "parity references (数の一致)",
+            "value": 88.571,
+            "unit": "%"
+          },
+          {
+            "name": "parity documentHighlight (数の一致)",
+            "value": 91.176,
+            "unit": "%"
+          },
+          {
+            "name": "parity rename (書き換えの一致)",
+            "value": 91.304,
+            "unit": "%"
+          },
+          {
+            "name": "parity signatureHelp (名前・引数の数・今の引数の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity completion `x.\\|` (書いてある名前を含む)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity completion `na\\|me` (同)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity 一致の平均",
+            "value": 94.223,
+            "unit": "%"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "committer": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "distinct": true,
+          "id": "4c7e69ac3dce2b7b7786f90b0984c9b7cdda74ea",
+          "message": "borrowck: an assigned value of a type without references carries no loans\n\n`self.incomplete = Incomplete::new(buf); continue;` (rust-utf8's BufReadDecoder): the loan of `buf` flowed into\n`self` through the assignment, though Incomplete holds no reference, so the next iteration's `self.buf_read.fill_buf()`\nread as a conflict. The loans an assignment records are now empty for such a type (as a `let` of one already was).\nrust-utf8 (lib + app with decode / LossyDecoder / BufReadDecoder) now builds and prints what rustc's build does.\n\ntests/ui: 0 regressions, no change. KPIs: no change outside noise.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-19T18:04:04Z",
+          "tree_id": "2c4c5b5ed3ebfce1d194f47ed6f58cd6f49e9799",
+          "url": "https://github.com/mizchi/zust/commit/4c7e69ac3dce2b7b7786f90b0984c9b7cdda74ea"
+        },
+        "date": 1795111939424,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
