@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795115504942,
+  "lastUpdate": 1795115508464,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -58047,6 +58047,70 @@ window.BENCHMARK_DATA = {
           {
             "name": "tests/ui compile-fail passing",
             "value": 3315,
+            "unit": "tests"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "committer": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "distinct": true,
+          "id": "807aa18f29ec9f3711ad311a5c4b9676694eec38",
+          "message": "E0507 also for a pattern moving out of `*rc`\n\n`let (a,) = *rc;` (and `match *rc { (s,) => .. }`) with a non-Copy part: the pattern moved out of the Rc's value, and the\ndrop flag of rc was cleared in its place. The check of a by-value `*rc` now runs wherever a pattern takes ownership of\npart of its scrutinee (release / the place-scrutinee path of `let`).\n\ntests/ui: 0 regressions. cratebench: same output. KPIs: no change outside noise.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-19T19:06:45Z",
+          "tree_id": "e1bf48cf038dd7a6578c9cc06529c78937da5e15",
+          "url": "https://github.com/mizchi/zust/commit/807aa18f29ec9f3711ad311a5c4b9676694eec38"
+        },
+        "date": 1795115507926,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tests/ui run-pass pass rate",
+            "value": 69.73,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui run-pass passing",
+            "value": 1663,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui check-pass pass rate",
+            "value": 77.53,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui check-pass passing",
+            "value": 1401,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui build-pass pass rate",
+            "value": 70.37,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui build-pass passing",
+            "value": 95,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui compile-fail pass rate",
+            "value": 45.04,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui compile-fail passing",
+            "value": 3314,
             "unit": "tests"
           }
         ]
