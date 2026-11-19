@@ -221,8 +221,9 @@ def make_synth(dir, mods=40):
 
 
 def zustc_target():
+    # (ZUST_LSP_ROOT: another copy of the sources, e.g. a fixed snapshot, so that the target does not change with the code)
     return {
-        "root": HERE,
+        "root": os.environ.get("ZUST_LSP_ROOT") or HERE,
         "open": "crates/core/src/driver2.rs",
         "ready": ("build_workspace", "build_workspace"),
         "queries": ["Session2", "check", "split_inc", "Recorder", "lower"],

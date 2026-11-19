@@ -1,13 +1,13 @@
 date	commit	change	noop_M	edit_M	check_M	cache_KiB	lsp_G	run	check	build	cfail
-2026-11-19	45579fc	reference: before per-change tracking	625.309	626.912	3905.245	1902.8	11.2435	1536	1271	89	2844
-2026-11-19	927540d	pointee as the expected type of `&x` coerced to a raw pointer	625.309	626.912	3905.365	1902.8	11.2461	1538	1271	89	2845
-2026-11-19	b0edbd7	`_` in an annotation is a new inference variable (with a Debug-printing check)	625.130	626.989	3963.523	1902.8	11.2486	1545	1273	89	2843
-2026-11-19	042f17d	methods of numbers in a Box, blanket-impl methods of numbers	625.130	626.990	3963.563	1902.8	11.2621	1545	1273	89	2850
-2026-11-19	89d9fe9	drop the Debug-printing check on annotated lets	625.127	626.729	3905.088	1902.8	11.0232	1545	1273	89	2850
+2026-11-19	45579fc	reference: before per-change tracking	625.309	626.912	3905.245	1902.8	10.8855	1536	1271	89	2844
+2026-11-19	927540d	pointee as the expected type of `&x` coerced to a raw pointer	625.309	626.912	3905.365	1902.8	-	1538	1271	89	2845
+2026-11-19	b0edbd7	`_` in an annotation is a new inference variable (with a Debug-printing check)	625.130	626.989	3963.523	1902.8	-	1545	1273	89	2843
+2026-11-19	042f17d	methods of numbers in a Box, blanket-impl methods of numbers	625.130	626.990	3963.563	1902.8	-	1545	1273	89	2850
+2026-11-19	89d9fe9	drop the Debug-printing check on annotated lets	625.127	626.729	3905.088	1902.8	-	1545	1273	89	2850
 2026-11-19	6f5a272	tests/ui: skip compiletest-ignore-dir directories (module files of other tests; run-pass 2413 -> 2385 applicable)	625.187	626.789	3905.209	1902.8	-	1544	1273	89	2850
 2026-11-19	1271aae	skip `use` items in bodies (from macro expansions)	625.185	626.787	3904.932	1902.8	-	1547	1273	89	2850
-2026-11-19	5ae34e1	items from statement-position macro expansions	625.184	626.787	3905.089	1902.8	11.0124	1552	1276	89	2850
+2026-11-19	5ae34e1	items from statement-position macro expansions	625.184	626.787	3905.089	1902.8	-	1552	1276	89	2850
 2026-11-19	9539e64	macro definitions from expansions; statement-position expansions into the block	625.185	626.787	3905.062	1902.8	-	1553	1278	89	2850
 2026-11-19	6c8b074	expand_reference follows the statement-position rules (test fix)	625.185	626.787	3905.063	1902.8	-	1553	1278	89	2850
 2026-11-19	a593fd0	Box::into_raw / from_raw, *mut T for a let written *const T	625.186	626.788	3905.063	1902.8	-	1555	1278	89	2850
-2026-11-19	2ddc076	closures with no captures as fn pointers	625.185	626.788	3905.285	1902.8	11.0617	1559	1283	89	2851
+2026-11-19	2ddc076	closures with no captures as fn pointers	625.185	626.788	3905.285	1902.8	-	1559	1283	89	2851

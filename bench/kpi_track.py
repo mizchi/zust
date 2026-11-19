@@ -11,7 +11,9 @@ Only deterministic numbers are logged (wall-clock times move by 10-30% between r
   a no-op build (the least of 3 runs: it moves by ~0.1% run to run), a build after editing one function, and `check`,
   counted by cachegrind; and the build cache size. The work directory is always ~/.cache/zust-kpi-track (whatever
   checkout runs it), so paths do not change the counts.
-- with --lsp: the instructions of one zust-analyzer session of bench/lsp_parity.py on zustc's own sources (slow).
+- with --lsp: the instructions of one zust-analyzer session of bench/lsp_parity.py on zustc's sources as of REF_COMMIT
+  (a snapshot unpacked once under the work directory: the checkout's own sources grow with the code, which would move
+  the count without any change to the server). It moves by ~0.1% run to run (the client polls until the index is ready).
 - tests/ui pass counts from out/rust_ui.json, when it is newer than target/release/zustc.
 
 Each run prints the change against the previous row and against the first row (the reference), and rewrites
@@ -49,6 +51,19 @@ def build_kpis():
     return noop, edit, check, cache
 
 
+REF_COMMIT = "45579fc"
+
+
+def lsp_tree():
+    d = os.path.join(WORK, f"lsp-tree-{REF_COMMIT}")
+    if not os.path.isdir(d):
+        os.makedirs(d + ".tmp", exist_ok=True)
+        a = subprocess.run(["git", "archive", REF_COMMIT], capture_output=True, check=True, cwd=ROOT).stdout
+        subprocess.run(["tar", "-x", "-C", d + ".tmp"], input=a, check=True)
+        os.replace(d + ".tmp", d)
+    return d
+
+
 def lsp_kpi():
     """instructions (G) of one zust-analyzer session: the server binary is wrapped in cachegrind for one run"""
     za = os.path.join(ROOT, "target/release/zust-analyzer")
@@ -60,9 +75,10 @@ def lsp_kpi():
             f.write(f'#!/bin/sh\nexec valgrind --tool=cachegrind --cache-sim=no --cachegrind-out-file={out} {real} "$@"\n')
         os.chmod(za + ".wrap", 0o755)
         os.replace(za + ".wrap", za)
+        env = dict(os.environ, ZUST_LSP_ROOT=lsp_tree())
         subprocess.run([sys.executable, os.path.join(ROOT, "bench/lsp_parity.py"), "--servers", "zustc", "--targets", "zustc",
                         "--timeout", "600", "--json", os.path.join(WORK, "lsp.json"), "--out", os.path.join(WORK, "lsp.md")],
-                       check=True, capture_output=True, cwd=ROOT)
+                       check=True, capture_output=True, cwd=ROOT, env=env)
     finally:
         shutil.copy(real, za)
     for line in open(out):
@@ -104,7 +120,9 @@ def write_md(rows):
            "",
            "Written by `python3 bench/kpi_track.py` after each change (deterministic counts only; see the script). "
            "Δ is against the row before, Σ against the first row. The same binary measured again moves by up to "
-           "~0.01%, so differences below ~0.02% are noise.",
+           "~0.01% (builds) / ~0.1% (LSP), so differences below that are noise. The LSP column is measured on a fixed "
+           "snapshot of the sources (45579fc) since 2026-11-19; the values the rows before had were taken on the "
+           "checkout's own sources and are left out.",
            "",
            "| date | commit | change | no-op build (M instr) | edit one fn (M instr) | check (M instr) | cache (KiB) | LSP session (G instr) | tests/ui run / check / build / compile-fail |",
            "|---|---|---|---:|---:|---:|---:|---:|---|"]
