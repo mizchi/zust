@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795114847160,
+  "lastUpdate": 1795114849519,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -48068,6 +48068,85 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/mizchi/zust/commit/0b564442fae8737a2336b070cc6d5f175ca92f0e"
         },
         "date": 1795114541653,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "parity documentSymbol (名前の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity workspace/symbol (上位 20 の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity definition (行き先の一致)",
+            "value": 97.143,
+            "unit": "%"
+          },
+          {
+            "name": "parity hover (名前を含む)",
+            "value": 87.5,
+            "unit": "%"
+          },
+          {
+            "name": "parity references (数の一致)",
+            "value": 86.111,
+            "unit": "%"
+          },
+          {
+            "name": "parity documentHighlight (数の一致)",
+            "value": 97.143,
+            "unit": "%"
+          },
+          {
+            "name": "parity rename (書き換えの一致)",
+            "value": 83.333,
+            "unit": "%"
+          },
+          {
+            "name": "parity signatureHelp (名前・引数の数・今の引数の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity completion `x.\\|` (書いてある名前を含む)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity completion `na\\|me` (同)",
+            "value": 92.857,
+            "unit": "%"
+          },
+          {
+            "name": "parity 一致の平均",
+            "value": 94.409,
+            "unit": "%"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "committer": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "distinct": true,
+          "id": "a3ceff5e1f4e4135adac5a793fd9995ace4875c2",
+          "message": "E0507: moving out of `*x` for an Rc / a Deref type of the program's\n\n`let x = *rc;` (rc: Rc<NonCopy>) was accepted: the place is `*rc.deref()`, reached through the returned reference, so\nno move of a local was seen, and the program freed the value twice. A by-value read of `*x` whose type is not Copy,\nwith x of a Deref type other than Box, is now \"cannot move out of an `Rc`\" / \"cannot move out of dereference of `T`\"\n(reading a Copy value, `(*rc).len()` and `(*rc).clone()` are unchanged). A pattern moving out of `*rc`\n(`let (a,) = *rc;`) is not caught yet.\n\ntests/ui: compile-fail borrowck/borrowck-move-out-of-overloaded-deref.rs passes; 0 regressions. cratebench: same\noutput. KPIs: no change outside noise.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-19T18:56:01Z",
+          "tree_id": "9b493ed4d5412570928eb3b020f3ff6d85028d75",
+          "url": "https://github.com/mizchi/zust/commit/a3ceff5e1f4e4135adac5a793fd9995ace4875c2"
+        },
+        "date": 1795114849045,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
