@@ -2263,6 +2263,7 @@ run-pass	hygiene/hygiene-dodging-1.rs
 run-pass	hygiene/hygienic-labels-in-let.rs
 run-pass	hygiene/hygienic-labels.rs
 run-pass	hygiene/issue-15221.rs
+check-pass	hygiene/issue-32922.rs
 check-pass	hygiene/issue-61574-const-parameters.rs
 check-pass	hygiene/no_implicit_prelude-2021.rs
 run-pass	hygiene/thread-local-not-in-prelude.rs
@@ -2929,6 +2930,7 @@ check-pass	macros/issue-33185.rs
 compile-fail	macros/issue-35450.rs
 run-pass	macros/issue-37175.rs
 check-pass	macros/issue-39467.rs
+check-pass	macros/issue-40770.rs
 compile-fail	macros/issue-46438.rs
 run-pass	macros/issue-52169.rs
 compile-fail	macros/issue-61033-1.rs
@@ -2998,6 +3000,7 @@ run-pass	macros/macro-rules-def-in-block-expr.rs
 run-pass	macros/macro-self-mutability-7911.rs
 check-pass	macros/macro-seq-followed-by-seq.rs
 check-pass	macros/macro-stmt-2.rs
+run-pass	macros/macro-stmt.rs
 run-pass	macros/macro-variable-declaration-with-bounds-5554.rs
 run-pass	macros/macro-variable-unused-reporting-5718.rs
 run-pass	macros/macro-with-attrs2.rs

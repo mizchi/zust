@@ -768,14 +768,8 @@ fn split_items(body: &str) -> Option<(String, String)> {
     any.then_some((items, rest))
 }
 
-pub fn expand_cfg(src: &str, cfg: Option<&crate::cfg::CfgSet>) -> Result<Option<String>, String> {
-    if !src.contains("macro_rules!") {
-        return Ok(None);
-    }
-    let mut text = src.to_string();
-    let mut macros: HashMap<String, Vec<Rule>> = HashMap::new();
-    // 1. 定義を集めて消す (関数の本体や `mod m { .. }` の中の定義も)
-    {
+/// 1. `macro_rules!` の定義を集めて消す (関数の本体や `mod m { .. }` の中の定義も)
+fn collect_defs(text: &mut String, macros: &mut HashMap<String, Vec<Rule>>) -> Result<(), String> {
         let b = text.as_bytes();
         let toks = crate::lexer::tokenize(b);
         let (close, _) = brackets(b, &toks);
@@ -819,13 +813,26 @@ pub fn expand_cfg(src: &str, cfg: Option<&crate::cfg::CfgSet>) -> Result<Option<
                 }
             }
         }
-        text = String::from_utf8(bb).map_err(|e| e.to_string())?;
+        *text = String::from_utf8(bb).map_err(|e| e.to_string())?;
+        Ok(())
+}
+
+pub fn expand_cfg(src: &str, cfg: Option<&crate::cfg::CfgSet>) -> Result<Option<String>, String> {
+    if !src.contains("macro_rules!") {
+        return Ok(None);
     }
+    let mut text = src.to_string();
+    let mut macros: HashMap<String, Vec<Rule>> = HashMap::new();
+    collect_defs(&mut text, &mut macros)?;
     if macros.is_empty() {
         return Ok(Some(text));
     }
     // 2. 呼び出しを展開する (いちばん外側の呼び出しだけ。展開したものの中の呼び出しは次の周)
-    for _round in 0..64 {
+    for round in 0..64 {
+        // (definitions an expansion produced: `macro_rules! foo { () => { macro_rules! bar { .. } } }`)
+        if round > 0 && text.contains("macro_rules") {
+            collect_defs(&mut text, &mut macros)?;
+        }
         let b = text.as_bytes();
         let toks = crate::lexer::tokenize(b);
         let (close, depth) = brackets(b, &toks);
@@ -858,7 +865,15 @@ pub fn expand_cfg(src: &str, cfg: Option<&crate::cfg::CfgSet>) -> Result<Option<
                     // (a call in statement position: the items it expands to are items of the enclosing block, not
                     // of the `({ .. })` around the rest: `fn main() { m!(); S }` with `struct S;` from m)
                     let stmt_pos = i == 0 || sym(i - 1, b';') || sym(i - 1, b'{') || sym(i - 1, b'}');
+                    // (not with attributes: a `#[cfg(false)]` item removed later would leave the attributes before it)
+                    let spliced = !top && stmt_pos && (sym(ge + 1, b';') || sym(ge + 1, b'}')) && !body.contains('#');
+                    // (the call's own `;` goes when the expansion ends a statement itself: no stray `;` after attributes)
+                    let drop_semi = spliced && sym(ge + 1, b';') && body.trim_end().ends_with(';');
                     let rep = if top {
+                        body
+                    } else if spliced {
+                        // (followed by `;` or the block's end: the statements go into the block as they are; the
+                        // expansion's own `let`s are already renamed for hygiene, so they do not capture names)
                         body
                     } else if stmt_pos {
                         match split_items(&body) {
@@ -881,7 +896,7 @@ pub fn expand_cfg(src: &str, cfg: Option<&crate::cfg::CfgSet>) -> Result<Option<
                     }
                     // (トップレベルの `name!(..);` の `;` も取る)
                     let mut e = toks[ge].2;
-                    if top && sym(ge + 1, b';') {
+                    if (top || drop_semi) && sym(ge + 1, b';') {
                         e = toks[ge + 1].2;
                     }
                     reps.push((a, e, rep));
