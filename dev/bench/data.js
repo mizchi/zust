@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795126674757,
+  "lastUpdate": 1795126676871,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -38464,6 +38464,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "lsp peak RSS",
             "value": 72.57,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "committer": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "distinct": true,
+          "id": "a0a6c394573e872bf3ce337883a4b074a167b3aa",
+          "message": "Debug of raw pointers: the address in hex\n\n`{:?}` of a `*const T` / `*mut T` (or a reference to one, as\nassert_eq! formats it) prints `0x..`, padded by the spec's width and\nalignment, through a prelude helper (`__exr_fmt_ptr`) that is selected\nonly when the program writes `*const` or `*mut`.\n\ntests/ui: +8 genuine run-pass passes.\nKPI: within noise (all deltas <= +0.09%).\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-19T22:12:52Z",
+          "tree_id": "caddeee9ab1cb031653244736374d9bc03c8ed21",
+          "url": "https://github.com/mizchi/zust/commit/a0a6c394573e872bf3ce337883a4b074a167b3aa"
+        },
+        "date": 1795126676424,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "lsp definition p50",
+            "value": 0.491,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp hover p50",
+            "value": 0.545,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp completion p50",
+            "value": 0.927,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp references p50",
+            "value": 4.649,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp rename p50",
+            "value": 0.514,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp signatureHelp p50",
+            "value": 0.736,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp documentHighlight p50",
+            "value": 0.855,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp ready (startup to indexed)",
+            "value": 118.641,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp peak RSS",
+            "value": 72.625,
             "unit": "MiB"
           }
         ]
