@@ -2951,6 +2951,7 @@ compile-fail	macros/macro-at-most-once-rep-2015.rs
 run-pass	macros/macro-at-most-once-rep-2018-rpass.rs
 compile-fail	macros/macro-at-most-once-rep-2018.rs
 check-pass	macros/macro-attribute-expansion.rs
+check-pass	macros/macro-attributes.rs
 run-pass	macros/macro-block-nonterminal.rs
 check-pass	macros/macro-const-stringify.rs
 run-pass	macros/macro-crate-use.rs
@@ -2967,13 +2968,19 @@ run-pass	macros/macro-in-array-len-expr.rs
 run-pass	macros/macro-in-or-pattern.rs
 check-pass	macros/macro-invocation-in-count-expr-fixed-array-type.rs
 compile-fail	macros/macro-invocation-span-error-7970.rs
+check-pass	macros/macro-invocation-with-curly-braces-34418.rs
+run-pass	macros/macro-lifetime-used-with-bound.rs
 run-pass	macros/macro-lifetime-used-with-labels.rs
+run-pass	macros/macro-lifetime-used-with-static.rs
+run-pass	macros/macro-lifetime.rs
+run-pass	macros/macro-literal.rs
 compile-fail	macros/macro-match-nonterminal.rs
 check-pass	macros/macro-meta-items-modern.rs
 run-pass	macros/macro-method-issue-4621.rs
 check-pass	macros/macro-multiple-items.rs
 check-pass	macros/macro-named-default.rs
 run-pass	macros/macro-nested_definition_issue-31946.rs
+run-pass	macros/macro-nested_stmt_macros.rs
 compile-fail	macros/macro-non-lifetime.rs
 check-pass	macros/macro-nt-list.rs
 check-pass	macros/macro-pat-follow-2018.rs
@@ -4677,6 +4684,7 @@ compile-fail	span/issue-39018.rs
 compile-fail	span/issue-42234-unknown-receiver-type.rs
 compile-fail	span/issue-81800.rs
 check-pass	span/let-offset-of.rs
+check-pass	span/macro-span-replacement.rs
 compile-fail	span/missing-unit-argument.rs
 check-pass	span/multispan-import-lint.rs
 compile-fail	span/mut-arg-hint.rs

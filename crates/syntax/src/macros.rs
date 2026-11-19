@@ -683,6 +683,91 @@ pub fn macro_defs(src: &str) -> String {
 }
 
 /// expand と同じだが、展開した後のソースの `#[cfg(..)]` を周ごとに評価する (`#[cfg(p)] m! { .. }` を展開する前に)
+/// The top-level items of a macro's expansion (`struct S;`, `fn f() {..}`, `impl ..`, `macro_rules! m {..}` ..) and the
+/// other statements, as two texts; None when there is no item
+fn split_items(body: &str) -> Option<(String, String)> {
+    let b = body.as_bytes();
+    let toks = crate::lexer::tokenize(b);
+    let n = toks.len();
+    let tk = |k: usize| -> &[u8] { &b[toks[k].1..toks[k].2] };
+    let sym = |k: usize, c: u8| k < n && toks[k].0 == 1 && b[toks[k].1] == c;
+    const KW: &[&[u8]] = &[b"struct", b"enum", b"fn", b"impl", b"trait", b"mod", b"use", b"union", b"type", b"static", b"extern", b"macro_rules"];
+    let (mut items, mut rest) = (String::new(), String::new());
+    let mut any = false;
+    let mut i = 0;
+    while i < n {
+        // (attributes, `pub` / `pub(crate)`, `unsafe` / `async` / `const` before the keyword)
+        let st = i;
+        let mut k = i;
+        while sym(k, b'#') && sym(k + 1, b'[') {
+            let mut d = 0;
+            k += 1;
+            while k < n {
+                if sym(k, b'[') {
+                    d += 1;
+                } else if sym(k, b']') {
+                    d -= 1;
+                    if d == 0 {
+                        k += 1;
+                        break;
+                    }
+                }
+                k += 1;
+            }
+        }
+        if k < n && tk(k) == b"pub" {
+            k += 1;
+            if sym(k, b'(') {
+                while k < n && !sym(k, b')') {
+                    k += 1;
+                }
+                k += 1;
+            }
+        }
+        while k < n && matches!(tk(k), b"unsafe" | b"async") {
+            k += 1;
+        }
+        let const_fn = k + 1 < n && tk(k) == b"const" && tk(k + 1) == b"fn";
+        if const_fn {
+            k += 1;
+        }
+        let is_item = k < n && toks[k].0 == 0 && KW.contains(&tk(k));
+        // (`static` / `type` / `use` end at the `;`; the others at it or at their first `{ .. }`)
+        let semi_only = k < n && matches!(tk(k), b"static" | b"type" | b"use");
+        // the statement's end
+        let mut j = k.max(st);
+        let mut d = 0i32;
+        let mut end = n;
+        while j < n {
+            if sym(j, b'(') || sym(j, b'[') || sym(j, b'{') {
+                d += 1;
+            } else if sym(j, b')') || sym(j, b']') || sym(j, b'}') {
+                d -= 1;
+                if d == 0 && sym(j, b'}') && is_item && !semi_only {
+                    end = if sym(j + 1, b';') { j + 2 } else { j + 1 };
+                    break;
+                }
+            } else if d == 0 && sym(j, b';') {
+                end = j + 1;
+                break;
+            }
+            j += 1;
+        }
+        let a = toks[st].1;
+        let e = if end < n { toks[end].1 } else { body.len() };
+        if is_item {
+            any = true;
+            items.push_str(&body[a..e]);
+            items.push(' ');
+        } else {
+            rest.push_str(&body[a..e]);
+            rest.push(' ');
+        }
+        i = end;
+    }
+    any.then_some((items, rest))
+}
+
 pub fn expand_cfg(src: &str, cfg: Option<&crate::cfg::CfgSet>) -> Result<Option<String>, String> {
     if !src.contains("macro_rules!") {
         return Ok(None);
@@ -770,7 +855,19 @@ pub fn expand_cfg(src: &str, cfg: Option<&crate::cfg::CfgSet>) -> Result<Option<
                     // 式の位置は `({ .. })`、トップレベルと `mod` / `impl` / `trait` の中はアイテムとしてそのまま
                     // (`const C: T = m!();` at the top or in an impl is an expression)
                     let top = (depth[i] == 0 || item_scope(b, &toks, &close, &depth, i)) && !(i > 0 && sym(i - 1, b'='));
-                    let rep = if top { body } else { format!("({{ {body} }})") };
+                    // (a call in statement position: the items it expands to are items of the enclosing block, not
+                    // of the `({ .. })` around the rest: `fn main() { m!(); S }` with `struct S;` from m)
+                    let stmt_pos = i == 0 || sym(i - 1, b';') || sym(i - 1, b'{') || sym(i - 1, b'}');
+                    let rep = if top {
+                        body
+                    } else if stmt_pos {
+                        match split_items(&body) {
+                            Some((items, rest)) => format!("{items} ({{ {rest} }})"),
+                            None => format!("({{ {body} }})"),
+                        }
+                    } else {
+                        format!("({{ {body} }})")
+                    };
                     // (`crate::m!(..)` / `self::m!(..)`: 前のパスも消す)
                     let mut a = toks[i].1;
                     let mut k = i;
