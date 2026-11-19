@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795095404978,
+  "lastUpdate": 1795098139327,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -22418,6 +22418,165 @@ window.BENCHMARK_DATA = {
           {
             "name": "rt/strings run (-O)",
             "value": 34.047,
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "committer": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "distinct": true,
+          "id": "731f606a24f9802316ed348e6c595c2313902807",
+          "message": "No-op builds read no source (stat stamps); prelude selection searches a byte index\n\nWhere zustc was clearly slower than blaze was the no-op build at scale (gen5000: 84 ms against 29 ms): it ran the\nfront end over the whole source with every function a cache hit. blaze's daemon never reads a file whose stat stamp\ndid not move (crates/blaze-vfs/src/watch.rs, with git's racy-stamp rule in disk.rs window_ns).\n\n- zustc keeps <output>.stamp: the stat stamps (dev, ino, size, mtime, ctime, mode) of every file the last\n  successful build read, of both places each `mod x;` looked, of the zustc binary and of the output, under a key of\n  the command line, the working directory and the ZUSTC_/ACG_/MINCLIF_/PATH environment. When all match, the build\n  stops (gen5000 no-op: 625 M -> 0.87 M instructions, 84 ms -> 2 ms). A stamp within 20 ms (2 s for whole-second\n  times) of its file's change is not trusted, a crate using include_str!/include_bytes! keeps none, and the file is\n  removed before a build that does the work. ZUSTC_NO_STAMP=1 turns it off.\n- Prelude selection asked `src.contains` ~90 times per build, and most patterns are in no source, so each read all of\n  it. A source of 256 KiB or more is now searched through an index of the positions of every byte that is not a\n  lowercase letter or white space (each search looks only where the pattern's rarest such byte is), and the\n  whole-source scanners behind `any` first look up a pattern they need (`panic!(`, `..)`, `vec![`, ...).\n  gen5000 edit -5.9%, check -0.9%.\n- kpi_track: the cache's compiler id is the stat of /proc/self/exe, which under valgrind is valgrind's, so the\n  measured edit build used to read a cache its own (valgrind) no-op runs had rewritten. The no-op runs no longer\n  write it, so one unshort-circuited no-op build under valgrind now comes before the edit (otherwise edit read as +7%).\n- vs_blaze: the memory column measured a no-op build; it now measures an edit build. Adds gen5000, and ZUSTC= picks\n  the binary. README's blaze table is measured again.\n\nFixed cost of the stamp file: traits edit +0.25%, crates no-op +0.26% (~0.15 M / 0.03 M instructions).\ntests/ui: 0 regressions. selfhost.sh: the same two failures as before this change (prelude, macros).\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-19T14:17:28Z",
+          "tree_id": "714fb83aed9d3b00eca80b20d814aa5f777b3e08",
+          "url": "https://github.com/mizchi/zust/commit/731f606a24f9802316ed348e6c595c2313902807"
+        },
+        "date": 1795098138784,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "gen1000 build cold",
+            "value": 118.582,
+            "unit": "ms"
+          },
+          {
+            "name": "gen1000 build noop",
+            "value": 0.807,
+            "unit": "ms"
+          },
+          {
+            "name": "gen1000 build edit 1 fn",
+            "value": 17.525,
+            "unit": "ms"
+          },
+          {
+            "name": "gen1000 check",
+            "value": 78.178,
+            "unit": "ms"
+          },
+          {
+            "name": "gen1000 build cold peak RSS",
+            "value": 17.824,
+            "unit": "MiB"
+          },
+          {
+            "name": "gen1000 binary",
+            "value": 323.977,
+            "unit": "KiB"
+          },
+          {
+            "name": "gen1000 cache",
+            "value": 387.21,
+            "unit": "KiB"
+          },
+          {
+            "name": "gen1000 build noop instructions",
+            "value": 0.723,
+            "unit": "M instr"
+          },
+          {
+            "name": "gen1000 build edit 1 fn instructions",
+            "value": 133.603,
+            "unit": "M instr"
+          },
+          {
+            "name": "gen1000 check instructions",
+            "value": 784.249,
+            "unit": "M instr"
+          },
+          {
+            "name": "gen5000 build cold",
+            "value": 530.859,
+            "unit": "ms"
+          },
+          {
+            "name": "gen5000 build noop",
+            "value": 0.803,
+            "unit": "ms"
+          },
+          {
+            "name": "gen5000 build edit 1 fn",
+            "value": 64.941,
+            "unit": "ms"
+          },
+          {
+            "name": "gen5000 check",
+            "value": 376.644,
+            "unit": "ms"
+          },
+          {
+            "name": "gen5000 build cold peak RSS",
+            "value": 51.918,
+            "unit": "MiB"
+          },
+          {
+            "name": "gen5000 binary",
+            "value": 1558.336,
+            "unit": "KiB"
+          },
+          {
+            "name": "gen5000 cache",
+            "value": 1902.835,
+            "unit": "KiB"
+          },
+          {
+            "name": "gen5000 build noop instructions",
+            "value": 0.724,
+            "unit": "M instr"
+          },
+          {
+            "name": "gen5000 build edit 1 fn instructions",
+            "value": 627.88,
+            "unit": "M instr"
+          },
+          {
+            "name": "gen5000 check instructions",
+            "value": 3869.069,
+            "unit": "M instr"
+          },
+          {
+            "name": "rt/fib run (-O)",
+            "value": 54.709,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/hashmap run (-O)",
+            "value": 91.566,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/matmul run (-O)",
+            "value": 39.796,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/nbody run (-O)",
+            "value": 52.507,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/sieve run (-O)",
+            "value": 92.062,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/sort run (-O)",
+            "value": 138.222,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/strings run (-O)",
+            "value": 34.269,
             "unit": "ms"
           }
         ]
