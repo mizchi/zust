@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795104726321,
+  "lastUpdate": 1795104727994,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -45305,6 +45305,85 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/mizchi/zust/commit/f4f96cfd1ea6752b2fda82fa9bd8f3443ac84402"
         },
         "date": 1795103994280,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "parity documentSymbol (名前の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity workspace/symbol (上位 20 の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity definition (行き先の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity hover (名前を含む)",
+            "value": 85,
+            "unit": "%"
+          },
+          {
+            "name": "parity references (数の一致)",
+            "value": 91.429,
+            "unit": "%"
+          },
+          {
+            "name": "parity documentHighlight (数の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity rename (書き換えの一致)",
+            "value": 86.667,
+            "unit": "%"
+          },
+          {
+            "name": "parity signatureHelp (名前・引数の数・今の引数の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity completion `x.\\|` (書いてある名前を含む)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity completion `na\\|me` (同)",
+            "value": 87.5,
+            "unit": "%"
+          },
+          {
+            "name": "parity 一致の平均",
+            "value": 95.06,
+            "unit": "%"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "committer": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "distinct": true,
+          "id": "a55841b018ebe2907ed9533c7ff118beced2964b",
+          "message": "Methods of impls for [T; N], &[T; N] and &[T]\n\n`impl<T> Tr for [T; 3] { fn f(self) .. }` and `impl<'a, T> Tr for &'a [T; 3]` (registered as `__array::__ref_f`)\nhad no method call: `[1, 2, 3].f()` and `x.f()` with x: &[i32; 3] (also in a generic fn's instance) now call them.\nA receiver is wrapped in a reference only for a `&self` of its own type.\n\ntests/ui: compile-fail traits/fn-pointer/suggest-wrap-parens-method.rs passes (the run-pass case above had no test of\nits own); 0 regressions. KPIs: no change outside noise.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-19T16:06:52Z",
+          "tree_id": "0c1e04556398c82d49b7513fa99b3b803a245e60",
+          "url": "https://github.com/mizchi/zust/commit/a55841b018ebe2907ed9533c7ff118beced2964b"
+        },
+        "date": 1795104727761,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
