@@ -128,6 +128,8 @@ impl Solver<'_> {
             }
             // 関連型 (まだ決まっていない) は分からないものとして扱う
             Ty::Assoc(_) => self.var(),
+            // (`_` written in a type: a new variable)
+            Ty::Param(crate::program::HOLE) => self.var(),
             Ty::Array(e, n) => {
                 let i = self.known(*e);
                 self.with(Shape::Arr(i, n))

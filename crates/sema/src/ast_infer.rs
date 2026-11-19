@@ -545,6 +545,17 @@ impl Inf<'_> {
 
     /// 書かれた型の型変数 (`Vec<_>` の `_` は新しい型変数)
     fn ty_var(&mut self, t: &PTy) -> u32 {
+        // (`Box<_>`: Box is not a struct; its argument is a variable too)
+        if let PTy::Path(None, p) = t {
+            if let Some(last) = p.segs.last() {
+                if last.name == "Box" && p.segs.len() == 1 && !self.prog.struct_index.contains_key("Box") {
+                    if let [GArg::Ty(a)] = &last.args[..] {
+                        let i = self.ty_var(a);
+                        return self.with(Shape::Bx(i));
+                    }
+                }
+            }
+        }
         if let Some(k) = self.parse_ty(t) {
             return self.known(k);
         }
@@ -785,14 +796,20 @@ impl Inf<'_> {
         let n = b.stmts.len();
         for (i, st) in b.stmts.iter().enumerate() {
             match st {
-                Stmt::Let(pat, ann, init, _) => {
-                    let ann = ann.as_ref().and_then(|t| self.parse_ty(t));
+                Stmt::Let(pat, ann_ty, init, _) => {
+                    let ann = ann_ty.as_ref().and_then(|t| self.parse_ty(t));
                     let v = match init {
                         Some(init) => self.expr(init),
                         None => self.var(),
                     };
                     // (注釈が完全な型なら変数はその型: `let s: &[T] = &v;` の強制変換で初期値の型と違ってよい)
                     let v = match ann {
+                        // (`let p: Box<_> = ..`: each `_` is a new type variable, decided by the uses as well)
+                        Some(_) if ann_ty.as_ref().is_some_and(|a| format!("{a:?}").contains("Infer")) => {
+                            let k = self.ty_var(ann_ty.as_ref().unwrap());
+                            self.unify(v, k);
+                            v
+                        }
                         Some(t) => {
                             let k = self.known(t);
                             self.unify(v, k);
