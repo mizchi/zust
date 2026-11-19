@@ -26,7 +26,7 @@
 
 ## Status
 
-Numbers measured <!-- measured -->2026-11-19, af42f28<!-- /measured --> by CI on each push to main (bench.yml runs
+Numbers measured <!-- measured -->2026-11-19, e78ed31<!-- /measured --> by CI on each push to main (bench.yml runs
 `bench/ci_bench.py` and `bench/rust_ui.py`, then `scripts/update_readme.py` writes them here). Times come from shared
 GitHub Actions runners and vary by about ±20%; the instruction counts (valgrind) do not.
 
@@ -38,10 +38,10 @@ only the tests it can be asked to handle (no nightly features, auxiliary crates 
 <!-- auto:ui -->
 | kind | applicable | pass |
 |---|---:|---:|
-| run-pass (builds, runs, same output) | 2385 | 1606 (67.3%) |
-| check-pass (accepted by `zustc check`) | 1807 | 1356 (75.0%) |
-| build-pass | 135 | 94 (69.6%) |
-| compile-fail (rejected at an annotated line) | 7358 | 3307 (44.9%) |
+| run-pass (builds, runs, same output) | 2385 | 1611 (67.5%) |
+| check-pass (accepted by `zustc check`) | 1807 | 1361 (75.3%) |
+| build-pass | 135 | 95 (70.4%) |
+| compile-fail (rejected at an annotated line) | 7358 | 3303 (44.9%) |
 <!-- /auto:ui -->
 
 [What is supported](#what-is-supported) breaks this down by area.
@@ -53,22 +53,22 @@ Build speed, build cache size and LSP latency on generated programs of 1000 / 50
 <!-- auto:kpi -->
 | KPI | gen1000 | gen5000 |
 |---|---:|---:|
-| cold build | 116 ms | 529 ms |
-| no-op build | 11.9 ms | 53.9 ms |
-| build after editing one function | 15.9 ms | 63.2 ms |
-| `check` | 72 ms | 358 ms |
-| no-op build (instructions) | 141.0 M | 665.8 M |
-| edit one function (instructions) | 134.1 M | 624.9 M |
-| `check` (instructions) | 792.9 M | 3905.0 M |
+| cold build | 123 ms | 545 ms |
+| no-op build | 15.3 ms | 66.8 ms |
+| build after editing one function | 21.4 ms | 74.3 ms |
+| `check` | 97 ms | 454 ms |
+| no-op build (instructions) | 141.1 M | 665.8 M |
+| edit one function (instructions) | 134.1 M | 625.1 M |
+| `check` (instructions) | 792.8 M | 3904.7 M |
 | build cache on disk | 387.2 KiB | 1902.8 KiB |
 | binary | 324.0 KiB | 1558.3 KiB |
-| cold build peak RSS | 18.6 MiB | 52.8 MiB |
+| cold build peak RSS | 17.8 MiB | 52.1 MiB |
 
 | zust-analyzer (zustc's own sources) | |
 |---|---:|
-| p50: definition, hover, completion, references, rename | 0.40 ms / 0.33 ms / 0.91 ms / 2.22 ms / 0.49 ms |
-| startup until indexed | 104 ms |
-| peak RSS | 70.9 MiB |
+| p50: definition, hover, completion, references, rename | 0.53 ms / 0.42 ms / 0.90 ms / 1.98 ms / 0.54 ms |
+| startup until indexed | 102 ms |
+| peak RSS | 71.0 MiB |
 <!-- /auto:kpi -->
 
 Every change is also measured on its own with `python3 bench/kpi_track.py`, so that small increases that add up stay
@@ -297,10 +297,10 @@ the measured numbers. The [reports](docs/reports/) explain each step.
 
 ### Overall
 
-- [x] tests/ui run-pass: <!-- total:run-pass -->67.3% (1606 / 2385)
-- [x] tests/ui check-pass: <!-- total:check-pass -->75.0% (1356 / 1807)
-- [x] tests/ui build-pass: <!-- total:build-pass -->69.6% (94 / 135)
-- [ ] tests/ui compile-fail (an error on an annotated line): <!-- total:compile-fail -->44.9% (3307 / 7358)
+- [x] tests/ui run-pass: <!-- total:run-pass -->67.5% (1611 / 2385)
+- [x] tests/ui check-pass: <!-- total:check-pass -->75.3% (1361 / 1807)
+- [x] tests/ui build-pass: <!-- total:build-pass -->70.4% (95 / 135)
+- [ ] tests/ui compile-fail (an error on an annotated line): <!-- total:compile-fail -->44.9% (3303 / 7358)
 - [x] real crates: fnv, adler2, hex, itoa, rustc-hash and cfg-if build and give the same output (6 / 6)
 - [x] zust-analyzer answers like rust-analyzer: 95.4% (rust-analyzer: 96.2%)
 
@@ -324,7 +324,7 @@ the measured numbers. The [reports](docs/reports/) explain each step.
 - [x] closures (capture, `Fn` traits, `move`; with no captures also as fn pointers): <!-- ui:closures,unboxed-closures,functions-closures -->76.0%
 - [x] derives: `Debug`, `Clone`, `Copy`, `PartialEq`/`Eq`, `PartialOrd`/`Ord`, `Hash`, `Default`: <!-- ui:derives,deriving -->79.5%
 - [x] imports, `use`: <!-- ui:imports -->77.3%
-- [x] associated types: <!-- ui:associated-types -->69.9%
+- [x] associated types: <!-- ui:associated-types -->70.6%
 - [x] generics: <!-- ui:generics -->76.2% (an integer literal for `T: Foo` takes the one integer type that implements Foo; a type
   parameter known only from the expected type is not inferred)
 - [ ] consts: <!-- ui:consts -->70.7% (no heap values, no generic `const fn`; a const of a generic impl (`const C: Option<T> = None`) takes its type at each use)
@@ -335,7 +335,7 @@ the measured numbers. The [reports](docs/reports/) explain each step.
 - [ ] const generics: <!-- ui:const-generics -->51.5% (no `generic_const_exprs`)
 - [ ] generic associated types: <!-- ui:generic-associated-types -->46.7%
 - [ ] casts (`as _` / `as *const _` take the source or expected type; a pointer of unknown kind is E0641): <!-- ui:cast -->44.8%
-- [ ] `impl Trait`: <!-- ui:impl-trait -->60.2% (return position, also nested (`-> Option<impl Debug>`), in trait methods and generic fns (typed per instance); no TAIT)
+- [ ] `impl Trait`: <!-- ui:impl-trait -->62.7% (return position, also nested (`-> Option<impl Debug>`), in trait methods and generic fns (typed per instance); no TAIT)
 - [ ] layout: `repr(packed)` / `repr(align)` are ignored: <!-- ui:packed,layout -->38.7%
 
 ### Checks (compile-fail)
@@ -350,7 +350,7 @@ the measured numbers. The [reports](docs/reports/) explain each step.
 - [x] impl methods against the trait's declaration: parameter count (E0050), kind of receiver (E0053)
 - [x] unreachable match arms under `#![deny(unreachable_patterns)]` (the same usefulness check, arm by arm);
   array patterns of the wrong length (E0527, E0528)
-- [ ] region errors against signatures (E0621, E0521): regions <!-- cf:regions -->12.9%, lifetimes <!-- cf:lifetimes -->19.5%
+- [ ] region errors against signatures (E0621, E0521): regions <!-- cf:regions -->12.1%, lifetimes <!-- cf:lifetimes -->19.5%
 - [ ] coherence, bounds of blanket impls, dyn compatibility (E0038), the bindings of `dyn Tr<A = T>` against the associated type's bounds (done when T is a primitive, `str` or a struct name)
 - [ ] lints and warnings: lint <!-- cf:lint -->11.2%
 - [ ] editions (2015-only errors)
