@@ -42,3 +42,4 @@ date	commit	change	noop_M	edit_M	check_M	cache_KiB	lsp_G	run	check	build	cfail
 2026-11-19	f9d67f9	nested items with qualifiers	627.040	628.631	3908.958	1902.8	-	1603	1360	94	3307
 2026-11-19	62e578f	revert qualifier hoisting (+0.30% for 4 tests)	625.171	626.837	3907.087	1902.8	-	1603	1356	94	3306
 2026-11-19	b9139df	tuple struct constructors as let values	625.171	626.837	3907.087	1902.8	-	1605	1356	94	3307
+2026-11-19	d7ffa57	generic fn values through let	625.169	626.835	3908.058	1902.8	-	1606	1356	94	3306
