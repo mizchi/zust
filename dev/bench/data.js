@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795120849664,
+  "lastUpdate": 1795120851801,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -37096,6 +37096,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "lsp peak RSS",
             "value": 72.332,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "committer": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "distinct": true,
+          "id": "afa825835b690b05782057132e6472c76503172c",
+          "message": "macros: textual scope, `pub m!()`, fmt macros in expanded text\n\n- A `macro_rules!` macro called above its only (non-exported, not\n  `use`d) definition reports \"cannot find macro `m` in this scope\".\n- `pub m!(..)` in an item list reports \"can't qualify macro invocation\n  with `pub`\".\n- The prelude selection sees `println ! (` in expanded macro output, so\n  formatting macros passed to a macro no longer miss the Formatter.\n\ntests/ui: +9 genuine passes (5 run-pass, 3 check-pass, 1 compile-fail);\ntwo wrong-reason passes go to rust_ui_accidental.txt.\nKPI: no-op +0.3% (3k instructions; the no-op path does not expand macros).\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-19T20:34:55Z",
+          "tree_id": "27022061b39ddcc5b721ef26f214959fa3fca305",
+          "url": "https://github.com/mizchi/zust/commit/afa825835b690b05782057132e6472c76503172c"
+        },
+        "date": 1795120851262,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "lsp definition p50",
+            "value": 0.479,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp hover p50",
+            "value": 0.376,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp completion p50",
+            "value": 1.01,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp references p50",
+            "value": 4.523,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp rename p50",
+            "value": 0.367,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp signatureHelp p50",
+            "value": 0.713,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp documentHighlight p50",
+            "value": 0.759,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp ready (startup to indexed)",
+            "value": 108.667,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp peak RSS",
+            "value": 72.41,
             "unit": "MiB"
           }
         ]
