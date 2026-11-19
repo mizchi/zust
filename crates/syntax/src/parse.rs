@@ -174,12 +174,21 @@ pub fn tokenize(src: &str) -> Result<Vec<Tok>, String> {
                 kind = TokKind::Lit;
             } else {
                 i += 1;
+                // (a raw lifetime `'r#a` is `'a`)
+                let raw = b.get(i) == Some(&b'r') && b.get(i + 1) == Some(&b'#') && b.get(i + 2).is_some_and(|&d| d == b'_' || d.is_ascii_alphabetic() || d >= 0x80);
+                if raw {
+                    i += 2;
+                }
                 while i < b.len() {
                     let d = src[i..].chars().next().unwrap();
                     if !is_ident_cont(d) {
                         break;
                     }
                     i += d.len_utf8();
+                }
+                if raw {
+                    raw_lifetime(&mut out, src, start, i, tline, col);
+                    continue;
                 }
                 kind = TokKind::Lifetime;
             }
@@ -237,6 +246,11 @@ pub fn tokenize(src: &str) -> Result<Vec<Tok>, String> {
         } else if c < 0x80 && is_punct_byte(c) {
             i += 1;
             kind = TokKind::Punct;
+        } else if other_white_space(ch) {
+            // (Rust's other white space characters: vertical tab, next line, the direction marks, line / paragraph
+            // separators)
+            i += ch.len_utf8();
+            continue;
         } else {
             return Err(format!("{tline}:{}: unexpected character {ch:?}", col + 1));
         }
@@ -244,6 +258,21 @@ pub fn tokenize(src: &str) -> Result<Vec<Tok>, String> {
         out.push(Tok { kind: kind, text: src[start..i].to_string(), joint: joint, line: tline, col: col, lo: start as u32 });
     }
     Ok(out)
+}
+
+/// A raw lifetime `'r#a` (src[start..end]) as the token `'a`
+#[cold]
+#[inline(never)]
+fn raw_lifetime(out: &mut Vec<Tok>, src: &str, start: usize, end: usize, line: u32, col: u32) {
+    let text = format!("'{}", &src[start + 3..end]);
+    out.push(Tok { kind: TokKind::Lifetime, text, joint: false, line, col, lo: start as u32 });
+}
+
+/// Rust's white space characters other than ASCII (and the vertical tab / form feed)
+#[cold]
+#[inline(never)]
+fn other_white_space(ch: char) -> bool {
+    matches!(ch, '\u{b}' | '\u{c}' | '\u{85}' | '\u{200e}' | '\u{200f}' | '\u{2028}' | '\u{2029}')
 }
 
 /// 記号の文字 (`+-*/%^!&|=<>@.,;:#$?~\`) か
@@ -858,6 +887,18 @@ impl Parser {
                 let n = self.ident()?;
                 self.expect_punct(":")?;
                 v.push(GArg::Bind(n, Ty::Impl(self.bounds()?)));
+            } else if self.tok(0).is_some_and(|t| t.kind == TokKind::Ident) && self.is_gat_binding() {
+                // (a generic associated type's binding / bound, `Item<'a> = &'a T` / `Gat<'b>: Tr`: the arguments are
+                // dropped)
+                let n = self.ident()?;
+                self.i += 1;
+                let _ = self.generic_args()?;
+                if self.eat_punct("=") {
+                    v.push(GArg::Bind(n, self.ty()?));
+                } else {
+                    self.expect_punct(":")?;
+                    v.push(GArg::Bind(n, Ty::Impl(self.bounds()?)));
+                }
             } else if self.tok(0).is_some_and(|t| t.kind == TokKind::Lit) || self.is_punct("-") {
                 v.push(GArg::Const(self.unary_expr(true)?));
             } else if self.is_open("{") {
@@ -873,6 +914,34 @@ impl Parser {
                 return Err(self.err("expected `,` or `>`"));
             }
         }
+    }
+
+    /// At `Name<..>` followed by `=` or `:` (a generic associated type in generic arguments)
+    fn is_gat_binding(&self) -> bool {
+        if !self.punct_at(1, "<") || self.punct_at(1, "<=") {
+            return false;
+        }
+        let mut depth = 0u32;
+        let mut k = 1;
+        while let Some(t) = self.tok(k) {
+            if t.kind == TokKind::Punct {
+                match t.text.as_str() {
+                    "<" => depth += 1,
+                    ">" if !(k > 0 && self.toks[self.i + k - 1].text == "-" && self.toks[self.i + k - 1].joint) => {
+                        depth -= 1;
+                        if depth == 0 {
+                            return (self.punct_at(k + 1, "=") && !self.punct_at(k + 1, "==")) || (self.punct_at(k + 1, ":") && !self.punct_at(k + 1, "::"));
+                        }
+                    }
+                    ";" => return false,
+                    _ => {}
+                }
+            } else if t.kind == TokKind::Open && t.text == "{" {
+                return false;
+            }
+            k += 1;
+        }
+        false
     }
 
     /// `>` を 1 つ食べる (`>>` / `>=` / `>>=` の先頭の `>` も)
@@ -902,7 +971,7 @@ impl Parser {
             } else if self.punct_at(0, "::") && self.punct_at(2, "<") {
                 self.i += 3;
                 seg.args = self.generic_args()?;
-            } else if in_ty && self.is_open("(") && matches!(seg.name.as_str(), "Fn" | "FnMut" | "FnOnce") {
+            } else if in_ty && self.is_open("(") && matches!(seg.name.as_str(), "Fn" | "FnMut" | "FnOnce" | "AsyncFn" | "AsyncFnMut" | "AsyncFnOnce") {
                 self.i += 1;
                 let mut ps = Vec::new();
                 while !self.is_close() {
@@ -928,27 +997,40 @@ impl Parser {
     fn bounds(&mut self) -> R<Vec<Bound>> {
         let mut v = Vec::new();
         loop {
-            if let Some(l) = self.lifetime() {
-                v.push(Bound::Lifetime(l));
-            } else if self.is_open("(") {
-                self.i += 1;
-                let q = self.eat_punct("?");
-                v.push(Bound::Trait(q, self.path(true)?));
-                self.expect_close(")")?;
-            } else {
-                let q = self.eat_punct("?");
-                if self.eat_ident("for") {
-                    self.expect_punct("<")?;
-                    let _ = self.generic_args()?;
-                }
-                if self.tok(0).is_some_and(|t| t.kind == TokKind::Ident) || self.is_punct("::") {
-                    v.push(Bound::Trait(q, self.path(true)?));
-                } else {
-                    break;
-                }
+            let b = self.bounds_one()?;
+            if b.is_empty() {
+                break;
             }
+            v.extend(b);
             if !self.eat_punct("+") {
                 break;
+            }
+        }
+        Ok(v)
+    }
+
+    /// One bound (none when no bound starts here)
+    fn bounds_one(&mut self) -> R<Vec<Bound>> {
+        let mut v = Vec::new();
+        if let Some(l) = self.lifetime() {
+            v.push(Bound::Lifetime(l));
+        } else if self.is_open("(") {
+            self.i += 1;
+            let q = self.eat_punct("?");
+            if self.eat_ident("for") {
+                self.expect_punct("<")?;
+                let _ = self.generic_args()?;
+            }
+            v.push(Bound::Trait(q, self.path(true)?));
+            self.expect_close(")")?;
+        } else {
+            let q = self.eat_punct("?");
+            if self.eat_ident("for") {
+                self.expect_punct("<")?;
+                let _ = self.generic_args()?;
+            }
+            if self.tok(0).is_some_and(|t| t.kind == TokKind::Ident) || self.is_punct("::") {
+                v.push(Bound::Trait(q, self.path(true)?));
             }
         }
         Ok(v)
@@ -1016,6 +1098,14 @@ impl Parser {
         }
         if self.is_open("(") {
             self.i += 1;
+            // (a macro call in a type position, expanded as `({ T })`)
+            if self.is_open("{") {
+                self.i += 1;
+                let t = self.ty()?;
+                self.expect_close("}")?;
+                self.expect_close(")")?;
+                return Ok(t);
+            }
             let mut v = Vec::new();
             let mut comma = false;
             while !self.is_close() {
@@ -1055,8 +1145,20 @@ impl Parser {
         }
         if self.is_ident("dyn") {
             self.i += 1;
-            let bs = if plus { self.bounds()? } else { vec![Bound::Trait(false, self.path(true)?)] };
+            let bs = if plus || self.is_ident("for") || self.is_open("(") {
+                // (`&dyn for<'a> Fn(&'a u8)` / `&dyn (Tr)`: one bound, `+` is not taken without `plus`)
+                let mut bs = self.bounds_one()?;
+                if plus && self.eat_punct("+") {
+                    bs.extend(self.bounds()?);
+                }
+                bs
+            } else {
+                vec![Bound::Trait(false, self.path(true)?)]
+            };
             // (`dyn Tr<Item: Bound>`)
+            if !bs.iter().any(|b| matches!(b, Bound::Trait(..))) {
+                return Err(self.err("at least one trait is required for an object type"));
+            }
             let atb = bs.iter().any(|b| matches!(b, Bound::Trait(_, p) if p.segs.iter().any(|s| s.args.iter().any(|a| matches!(a, GArg::Bind(_, Ty::Impl(_)))))));
             if atb {
                 return Err(self.err("associated type bounds are not allowed in `dyn` types"));
@@ -1075,6 +1177,11 @@ impl Parser {
             self.expect_open("(")?;
             let mut ps = Vec::new();
             while !self.is_close() {
+                // (a C variadic function pointer, `extern "C" fn(u8, ...)`)
+                if self.punct_at(0, "...") {
+                    self.i += 3;
+                    break;
+                }
                 if self.tok(0).is_some_and(|t| t.kind == TokKind::Ident) && self.punct_at(1, ":") && !self.punct_at(1, "::") {
                     self.i += 2;
                 }
@@ -1153,7 +1260,18 @@ impl Parser {
     fn pat_list(&mut self, close: &str) -> R<Vec<Pat>> {
         let mut v = Vec::new();
         while !self.is_close() {
-            v.push(self.pat()?);
+            let p = self.pat()?;
+            // (`[a @ 3.., ..]`: a nightly feature)
+            if close == "]" {
+                let sub = match &p {
+                    Pat::Ident(_, _, _, Some(b)) => &**b,
+                    p => p,
+                };
+                if matches!(sub, Pat::Range(Some(_), None, _)) {
+                    return Err(self.err("`X..` patterns in slices are experimental"));
+                }
+            }
+            v.push(p);
             if !self.eat_punct(",") {
                 break;
             }
@@ -1186,6 +1304,14 @@ impl Parser {
         Ok(Expr::Path(None, p))
     }
 
+    fn range_pat(&self, lo: Option<Box<Expr>>, hi: Option<Box<Expr>>, incl: bool) -> R<Pat> {
+        let is_str = |e: &Option<Box<Expr>>| matches!(e.as_deref(), Some(Expr::Lit(t, _)) if t.starts_with('"') || t.starts_with("b\"") || t.starts_with('r'));
+        if is_str(&lo) || is_str(&hi) {
+            return Err(self.err("only `char` and numeric types are allowed in range patterns"));
+        }
+        Ok(Pat::Range(lo, hi, incl))
+    }
+
     fn pat_one(&mut self) -> R<Pat> {
         let p = self.pat_atom()?;
         // 範囲 `a..=b` / `a..`
@@ -1198,7 +1324,7 @@ impl Parser {
             };
             self.i += 3;
             let hi = self.pat_range_end()?;
-            return Ok(Pat::Range(Some(lo), hi, true));
+            return self.range_pat(Some(lo), hi, true);
         }
         if self.punct_at(0, "..") && !self.punct_at(0, "...") {
             let lo = match p {
@@ -1208,7 +1334,7 @@ impl Parser {
             };
             self.i += 2;
             let hi = self.pat_range_end()?;
-            return Ok(Pat::Range(Some(lo), hi, false));
+            return self.range_pat(Some(lo), hi, false);
         }
         Ok(p)
     }
@@ -1220,10 +1346,16 @@ impl Parser {
         }
         if self.punct_at(0, "..=") {
             self.i += 3;
-            return Ok(Pat::Range(None, Some(Box::new(self.pat_lit_expr()?)), true));
+            let hi = self.pat_lit_expr()?;
+            return self.range_pat(None, Some(Box::new(hi)), true);
         }
         if self.punct_at(0, "..") {
             self.i += 2;
+            // (a half-open range `..5` / `..-7` / `..MAX`; `..` alone is the rest)
+            if self.tok(0).is_some_and(|t| t.kind == TokKind::Lit || (t.kind == TokKind::Ident && t.text != "if")) || self.is_punct("-") || self.punct_at(0, "::") {
+                let hi = self.pat_lit_expr()?;
+                return self.range_pat(None, Some(Box::new(hi)), false);
+            }
             return Ok(Pat::Rest);
         }
         if self.is_punct("&") {
@@ -1239,6 +1371,14 @@ impl Parser {
         }
         if self.is_open("(") {
             self.i += 1;
+            // (a macro call in a pattern position, expanded as `({ p })`)
+            if self.is_open("{") {
+                self.i += 1;
+                let p = self.pat()?;
+                self.expect_close("}")?;
+                self.expect_close(")")?;
+                return Ok(p);
+            }
             let mut v = Vec::new();
             let mut comma = false;
             while !self.is_close() {
@@ -1260,6 +1400,10 @@ impl Parser {
         }
         if self.tok(0).is_some_and(|t| t.kind == TokKind::Lit) || self.is_punct("-") {
             return Ok(Pat::Lit(Box::new(self.pat_lit_expr()?)));
+        }
+        // (a qualified path to a constant, `<T as Tr>::C`)
+        if self.is_punct("<") && !self.punct_at(0, "<<") {
+            return Ok(Pat::Lit(Box::new(self.primary_expr(false)?)));
         }
         // (`true` / `false` はリテラルのパターン)
         if (self.is_ident("true") || self.is_ident("false")) && !self.punct_at(1, "::") {
@@ -1289,6 +1433,9 @@ impl Parser {
             let mut fs = Vec::new();
             let mut rest = false;
             while !self.is_close() {
+                if self.is_punct("#") {
+                    self.attrs()?;
+                }
                 if self.punct_at(0, "..") {
                     self.i += 2;
                     rest = true;
@@ -1359,12 +1506,14 @@ impl Parser {
             Some(t) => match t.kind {
                 TokKind::Close => false,
                 TokKind::Punct => matches!(t.text.as_str(), "-" | "*" | "!" | "&" | "|" | "<" | ":") && !(t.text == "=" ),
-                TokKind::Open => !(t.text == "{"),
+                // (`{` too: `(1..{ 2 })`; the callers do not take it where a block follows (`for i in 0.. {`))
+                TokKind::Open => true,
                 _ => !(t.kind == TokKind::Ident && t.text == "as"),
             },
         }
     }
 
+    #[inline(always)]
     fn range_expr(&mut self, ss: bool) -> R<Expr> {
         if self.punct_at(0, "..") {
             let incl = self.punct_at(0, "..=");
@@ -1461,6 +1610,10 @@ impl Parser {
                 return Ok(Expr::Ref(false, Box::new(inner)));
             }
             self.i += 1;
+            // (`&..` / `&..0`: a reference to a range)
+            if self.tok(0).is_some_and(|t| t.text.as_bytes()[0] == b'.') && self.punct_at(0, "..") {
+                return self.ref_range(ss);
+            }
             if self.is_ident("raw") && (self.peek_ident(1, "const") || self.peek_ident(1, "mut")) {
                 self.i += 1;
                 let m = self.eat_ident("mut");
@@ -1474,6 +1627,12 @@ impl Parser {
             return Ok(Expr::Ref(m, Box::new(e)));
         }
         self.postfix_expr(ss)
+    }
+
+    #[cold]
+    #[inline(never)]
+    fn ref_range(&mut self, ss: bool) -> R<Expr> {
+        Ok(Expr::Ref(false, Box::new(self.range_expr(ss)?)))
     }
 
     fn call_args(&mut self) -> R<Vec<Expr>> {
@@ -1515,6 +1674,15 @@ impl Parser {
                     // `x.0` / `x.0.1` (字句では 0.1 が 1 つの数)
                     self.i += 1;
                     for part in t.text.split('.') {
+                        // (`t.0. 0`: the literal `0.` ends with the next field's dot)
+                        if part.is_empty() {
+                            if self.tok(0).is_some_and(|n| n.kind == TokKind::Lit && n.text.bytes().all(|c| c.is_ascii_digit())) {
+                                let n = self.toks[self.i].text.clone();
+                                self.i += 1;
+                                e = Expr::Field(Box::new(e), n, Span { start, at: fpos });
+                            }
+                            continue;
+                        }
                         e = Expr::Field(Box::new(e), part.to_string(), Span { start, at: fpos });
                     }
                     continue;
@@ -1661,6 +1829,10 @@ impl Parser {
                     let mut v = Vec::new();
                     let mut comma = false;
                     while !self.is_close() {
+                        // (`(#[allow(x)] e)`: an expression fragment of a macro with its attribute)
+                        if self.is_punct("#") {
+                            self.attrs()?;
+                        }
                         v.push(self.expr(true)?);
                         comma = self.eat_punct(",");
                         if !comma {
@@ -1758,7 +1930,7 @@ impl Parser {
                     } else {
                         self.expr(true)?
                     };
-                    let blocky = matches!(body, Expr::Block(..) | Expr::If(..) | Expr::Match(..) | Expr::Loop(..) | Expr::While(..) | Expr::For(..));
+                    let blocky = matches!(body, Expr::Block(..) | Expr::If(..) | Expr::Match(..) | Expr::Loop(..) | Expr::While(..) | Expr::For(..) | Expr::Const(..));
                     arms.push(Arm { pat: pat, guard: guard, body: body });
                     if !self.eat_punct(",") && !blocky && !self.is_close() {
                         return Err(self.err("expected `,` after a match arm"));
@@ -1812,7 +1984,8 @@ impl Parser {
                 self.i += 1;
                 let p = self.pat()?;
                 self.expect_punct("=")?;
-                let e = self.bin_expr(4, false)?;
+                // (a struct literal only where the caller takes one: a match guard `if let P = S { .. } =>`)
+                let e = self.bin_expr(4, ss)?;
                 return Ok(Expr::Let(Box::new(p), Box::new(e)));
             }
             _ => {}
@@ -1858,6 +2031,9 @@ impl Parser {
             let mut fs = Vec::new();
             let mut base = None;
             while !self.is_close() {
+                if self.is_punct("#") {
+                    self.attrs()?;
+                }
                 if self.punct_at(0, "..") {
                     self.i += 2;
                     base = Some(Box::new(self.expr(true)?));
@@ -1894,7 +2070,7 @@ impl Parser {
             Some(t) if t.kind == TokKind::Ident || t.kind == TokKind::Lit => {
                 self.punct_at(2, ":") && !self.punct_at(2, "::") || self.peek_is(2, ",") || self.tok(2).is_some_and(|x| x.kind == TokKind::Close)
             }
-            Some(_) => self.punct_at(1, ".."),
+            Some(_) => self.punct_at(1, "..") || (self.punct_at(1, "#") && self.tok(2).is_some_and(|t| t.kind == TokKind::Open && t.text == "[")),
             None => false,
         }
     }
@@ -1909,6 +2085,11 @@ impl Parser {
                 return Err(self.err("unclosed block"));
             }
             if self.eat_punct(";") {
+                continue;
+            }
+            // (an inner attribute at the start of the body, `#![allow(x)]`)
+            if stmts.is_empty() && self.is_punct("#") && self.peek_is(1, "!") && self.tok(2).is_some_and(|t| t.kind == TokKind::Open && t.text == "[") {
+                self.attr()?;
                 continue;
             }
             stmts.push(self.stmt()?);
@@ -1946,7 +2127,7 @@ impl Parser {
         self.is_open("{")
             || self.tok(0).is_some_and(|t| t.kind == TokKind::Lifetime)
             || ["if", "match", "loop", "while", "for"].iter().any(|k| self.is_ident(k))
-            || (self.is_ident("unsafe") && self.tok(1).is_some_and(|t| t.kind == TokKind::Open))
+            || (self.tok(1).is_some_and(|t| t.kind == TokKind::Open && t.text == "{") && (self.is_ident("unsafe") || self.is_ident("const")))
     }
 
     fn stmt(&mut self) -> R<Stmt> {
@@ -1984,6 +2165,8 @@ impl Parser {
                 return Ok(Stmt::Expr(e, semi));
             }
             let e = self.postfix_rest(e, start)?;
+            // (`{ x }.a = 1;` / `{ t }.0 += 1;`: an assignment to the place)
+            let e = if self.tok(0).is_some_and(|t| t.kind == TokKind::Punct && t.text != ";") { self.place_assign(e, start)? } else { e };
             let semi = self.eat_punct(";");
             return Ok(Stmt::Expr(e, semi));
         }
@@ -1997,6 +2180,22 @@ impl Parser {
             return Ok(Stmt::Expr(e, false));
         }
         Err(self.err("expected `;`"))
+    }
+
+    /// An assignment to a place that starts with a block, `{ x }.a = 1` / `{ t }.0 += 1` (e when none follows)
+    #[cold]
+    #[inline(never)]
+    fn place_assign(&mut self, e: Expr, start: Pos) -> R<Expr> {
+        if self.is_punct("=") && !self.punct_at(0, "==") && !self.punct_at(0, "=>") {
+            self.i += 1;
+            return Ok(Expr::Assign(Box::new(e), Box::new(self.expr(true)?)));
+        }
+        if let Some(op) = ["<<=", ">>=", "+=", "-=", "*=", "/=", "%=", "^=", "&=", "|="].iter().find(|op| self.punct_at(0, op)) {
+            let at = self.pos();
+            self.i += op.len();
+            return Ok(Expr::AssignOp(op[..op.len() - 1].to_string(), Box::new(e), Box::new(self.expr(true)?), Span { start, at }));
+        }
+        Ok(e)
     }
 
     // ------------------------------------------------ アイテム
@@ -2045,7 +2244,7 @@ impl Parser {
             return Ok(());
         }
         loop {
-            if self.is_open("{") || self.is_punct(";") || self.at_end() {
+            if self.is_open("{") || self.is_punct(";") || self.is_punct("=") || self.at_end() {
                 break;
             }
             if let Some(l) = self.lifetime() {
@@ -2057,7 +2256,8 @@ impl Parser {
                     self.expect_punct("<")?;
                     let _ = self.generic_args()?;
                 }
-                let t = self.ty_no_bounds()?;
+                // (`dyn A + 'static: B`: a trait object type takes its bounds)
+                let t = if self.is_ident("dyn") { self.ty()? } else { self.ty_no_bounds()? };
                 self.expect_punct(":")?;
                 let bs = self.bounds()?;
                 g.preds.push((t, bs));
@@ -2107,7 +2307,8 @@ impl Parser {
         if !self.eat_ident("pub") {
             return Ok(false);
         }
-        if self.is_open("(") {
+        // (`pub(crate)` / `pub(in m)`; in `struct S(pub (u8, u8))` the group is the field's type)
+        if self.is_open("(") && ["crate", "self", "super", "in"].iter().any(|k| self.peek_ident(1, k)) {
             let _ = self.group_text()?;
         }
         Ok(true)
@@ -2170,7 +2371,31 @@ impl Parser {
                 self.i += 3;
                 break;
             }
-            let p = self.pat()?;
+            let save = self.i;
+            let p = match self.pat() {
+                Ok(p) if self.is_punct(":") && !self.punct_at(0, "::") => p,
+                // (an anonymous parameter of a 2015 trait method, `fn f(u8, u8);`: read as a pattern first, so that
+                // `fn f(&'a str)` is still an error)
+                Err(e) => return Err(e),
+                r => {
+                    let at = self.i;
+                    self.i = save;
+                    match self.ty() {
+                        Ok(t) if self.is_punct(",") || self.is_close() => {
+                            params.push((Pat::Wild, t));
+                            if !self.eat_punct(",") {
+                                break;
+                            }
+                            continue;
+                        }
+                        _ => {
+                            self.i = at;
+                            r?;
+                            return Err(self.err("expected `:`"));
+                        }
+                    }
+                }
+            };
             self.expect_punct(":")?;
             let t = if self.punct_at(0, "...") {
                 self.i += 3;
@@ -2221,6 +2446,9 @@ impl Parser {
         loop {
             if self.is_ident("const") && (self.peek_ident(1, "fn") || self.peek_ident(1, "unsafe") || self.peek_ident(1, "extern")) {
                 quals.push("const".to_string());
+                self.i += 1;
+            } else if self.is_ident("safe") && (self.peek_ident(1, "fn") || self.peek_ident(1, "static")) {
+                // (`unsafe extern { safe fn f(); }`)
                 self.i += 1;
             } else if self.is_ident("async") && !self.peek_is(1, "{") {
                 quals.push("async".to_string());
@@ -2301,6 +2529,10 @@ impl Parser {
             "impl" => {
                 self.i += 1;
                 let mut g = if self.is_punct("<") && !self.punct_at(1, ">") { self.generics()? } else { Generics { params: Vec::new(), preds: Vec::new() } };
+                // (`impl<> T<> for S<>`: empty generics)
+                if self.punct_at(0, "<>") {
+                    self.i += 2;
+                }
                 let neg = self.eat_punct("!");
                 // (`impl dyn Tr + 'a { .. }` / `impl X for dyn Tr + Send`: the self type takes bounds)
                 let first = if self.is_ident("dyn") { self.ty()? } else { self.ty_no_bounds()? };

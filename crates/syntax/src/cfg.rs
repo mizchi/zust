@@ -150,6 +150,11 @@ fn thing_end(s: &[u8], toks: &[Tok], mut i: usize) -> usize {
         }
         if toks[k].0 == 1 && is_open(b) {
             let m = matching(s, toks, k);
+            // (`#[cfg(x)] if a { .. } else if b { .. } else { .. }`: the whole `if`)
+            if b == b"{" && !semi_item && t(j) == b"if" && t(m + 1) == b"else" {
+                k = m + 2;
+                continue;
+            }
             if b == b"{" && !semi_item {
                 // (ブロックで終わるもの。後ろの `,` も消す: バリアント・match の腕)
                 return if t(m + 1) == b"," { m + 1 } else { m };
