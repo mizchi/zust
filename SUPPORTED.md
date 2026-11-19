@@ -9,10 +9,10 @@ Status as of 2026-11-18, updated with each round of work. The percentages are ru
 
 ## Overall
 
-- [x] tests/ui run-pass: 65.4% (1559 / 2385)
-- [x] tests/ui check-pass: 71.4% (1290 / 1807)
+- [x] tests/ui run-pass: 65.4% (1560 / 2385)
+- [x] tests/ui check-pass: 71.9% (1300 / 1807)
 - [x] tests/ui build-pass: 65.9% (89 / 135)
-- [ ] tests/ui compile-fail (an error on an annotated line): 38.7% (2851 / 7358)
+- [ ] tests/ui compile-fail (an error on an annotated line): 38.8% (2854 / 7358)
 - [x] real crates: fnv, adler2, hex, itoa, rustc-hash and cfg-if build and give the same output (6 / 6)
 - [x] zust-analyzer answers like rust-analyzer: 95.4% (rust-analyzer: 96.2%)
 
@@ -46,7 +46,7 @@ Status as of 2026-11-18, updated with each round of work. The percentages are ru
 - [ ] const generics: 43.6% (no `generic_const_exprs`)
 - [ ] generic associated types: 40.0%
 - [ ] casts (`as _` / `as *const _` take the source or expected type; a pointer of unknown kind is E0641): 34.5%
-- [ ] `impl Trait`: 29.7% (return position, also in trait methods and generic fns returning a parameter; not nested, no TAIT)
+- [ ] `impl Trait`: 29.7% (return position, also in trait methods and generic fns (typed per instance); not nested, no TAIT)
 - [ ] layout: `repr(packed)` / `repr(align)` are ignored: 12–33%
 
 ## Checks (compile-fail)
@@ -82,8 +82,6 @@ Status as of 2026-11-18, updated with each round of work. The percentages are ru
   macro expands to in statement position move out too; from a macro in expression position not yet (~12 tests)
 - [ ] builtin macros: `offset_of!`, `addr_of!` / `addr_of_mut!`, `try!`, `stringify!`, `concat!`, `line!`, `column!`,
   `option_env!`, `assert_matches!`, `format_args!` now work; `module_path!`, `file!`, `include!`, `asm!` do not (~8 tests)
-- [ ] `impl Trait` returned by generic functions: done when the body's type is a parameter (`T`, `&T`, `Box<T>`); a struct of
-  the parameters (`(T, T)`, `Vec<T>`'s iterators) not yet (~15 tests)
 - [ ] `repr(packed)` / `repr(align)`: ~16 tests
 - [ ] `Pin`: `Pin<&T>` / `Pin<&mut T>` work as the pointer; `Box::pin`, `pin!` and `self: Pin<&Self>` receivers do not
 - [ ] dyn compatibility (E0038), generic argument counts of traits

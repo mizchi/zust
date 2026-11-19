@@ -9,10 +9,10 @@
 
 ## 全体
 
-- [x] tests/ui run-pass：65.4%（1559 / 2385）
-- [x] tests/ui check-pass：71.4%（1290 / 1807）
+- [x] tests/ui run-pass：65.4%（1560 / 2385）
+- [x] tests/ui check-pass：71.9%（1300 / 1807）
 - [x] tests/ui build-pass：65.9%（89 / 135）
-- [ ] tests/ui compile-fail（注釈の行でエラー）：38.7%（2851 / 7358）
+- [ ] tests/ui compile-fail（注釈の行でエラー）：38.8%（2854 / 7358）
 - [x] 実際のクレート：fnv、adler2、hex、itoa、rustc-hash、cfg-if がビルドでき、同じ出力を出す（6 / 6）
 - [x] zust-analyzer が rust-analyzer と同じように答える：95.4%（rust-analyzer は 96.2%）
 
@@ -46,7 +46,7 @@
 - [ ] const ジェネリクス：43.6%（`generic_const_exprs` はない）
 - [ ] ジェネリックな関連型：40.0%
 - [ ] キャスト（`as _`、`as *const _` は元の型か期待型から決める。決まらないポインタは E0641）：34.5%
-- [ ] `impl Trait`：29.7%（戻り値の位置。トレイトのメソッドと、型パラメータを返すジェネリックな関数でも使える。入れ子・TAIT はない）
+- [ ] `impl Trait`：29.7%（戻り値の位置。トレイトのメソッドとジェネリックな関数（インスタンスごとに型を決める）でも使える。入れ子・TAIT はない）
 - [ ] レイアウト：`repr(packed)` / `repr(align)` は無視する：12〜33%
 
 ## 検査（compile-fail）
@@ -82,8 +82,6 @@
   文の位置のマクロの展開から出るアイテムも外へ移す。式の位置のマクロから出るものはまだ（約 12 テスト）
 - [ ] 組み込みマクロ：`offset_of!`、`addr_of!` / `addr_of_mut!`、`try!`、`stringify!`、`concat!`、`line!`、`column!`、
   `option_env!`、`assert_matches!`、`format_args!` は使えるようになった。`module_path!`、`file!`、`include!`、`asm!` はまだ（約 8 テスト）
-- [ ] ジェネリックな関数が返す `impl Trait`：本体の型が型パラメータ（`T`、`&T`、`Box<T>`）なら動く。型パラメータの構造体
-  （`(T, T)`、`Vec<T>` のイテレータ）はまだ（約 15 テスト）
 - [ ] `repr(packed)` / `repr(align)`：約 16 テスト
 - [ ] `Pin`：`Pin<&T>` / `Pin<&mut T>` はポインタとして動く。`Box::pin`、`pin!`、`self: Pin<&Self>` の受け手はまだ
 - [ ] dyn 互換性（E0038）、トレイトの総称引数の数
