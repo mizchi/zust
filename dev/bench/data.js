@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795067947750,
+  "lastUpdate": 1795067949379,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -35376,6 +35376,70 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/mizchi/zust/commit/ca2baddb95db1d4f7a363de5d449bf4a6e0360c3"
         },
         "date": 1795067558821,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tests/ui run-pass pass rate",
+            "value": 65.83,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui run-pass passing",
+            "value": 1570,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui check-pass pass rate",
+            "value": 73.22,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui check-pass passing",
+            "value": 1323,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui build-pass pass rate",
+            "value": 69.63,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui build-pass passing",
+            "value": 94,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui compile-fail pass rate",
+            "value": 38.87,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui compile-fail passing",
+            "value": 2860,
+            "unit": "tests"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "committer": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "distinct": true,
+          "id": "9a1af2c0198048847b79b1abb4f4fa6699cb82f7",
+          "message": "kpi_log: what the TypeId row's check increase is; README, SUPPORTED after 8fb090b\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-19T05:50:28Z",
+          "tree_id": "14f29d48a481eaac9cc326aa117ef532578233b6",
+          "url": "https://github.com/mizchi/zust/commit/9a1af2c0198048847b79b1abb4f4fa6699cb82f7"
+        },
+        "date": 1795067949178,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
