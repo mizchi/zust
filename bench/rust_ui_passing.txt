@@ -5685,6 +5685,7 @@ compile-fail	suggestions/suggest-variants.rs
 compile-fail	suggestions/suggest_print_over_printf.rs
 compile-fail	suggestions/suppress-consider-slicing-issue-120605.rs
 compile-fail	suggestions/too-many-field-suggestions.rs
+compile-fail	suggestions/trait-hidden-method.rs
 compile-fail	suggestions/trait-with-missing-associated-type-restriction.rs
 compile-fail	suggestions/try-operator-dont-suggest-semicolon.rs
 run-pass	suggestions/try-removing-the-field.rs

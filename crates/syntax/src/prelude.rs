@@ -1654,7 +1654,8 @@ pub fn select_with(user_src: &str, user_items: &[SrcItem], cache: &mut SelectCac
             open_impl = false;
         }
         // impl の関連型 (`type Item = &T;`) は、その impl が付くなら必ず付ける
-        let assoc_member = matches!(it.kind, ItemKind::ImplMember(h) if chosen[h as usize])
+        // (and a trait's `type Item;`, whenever the trait is: E0191 needs it for `dyn Iterator`)
+        let assoc_member = matches!(it.kind, ItemKind::ImplMember(h) | ItemKind::TraitMember(h) if chosen[h as usize])
             && it
                 .idents
                 .first()

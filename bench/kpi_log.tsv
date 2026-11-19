@@ -78,3 +78,4 @@ date	commit	change	noop_M	edit_M	check_M	cache_KiB	lsp_G	run	check	build	cfail
 2026-11-19	807aa18+	dyn: no vtable entry for methods dyn cannot call, self: Box<Self> through Box<dyn>, E0038	0.872	591.610	3883.064	1902.8	-	1671	1401	95	3317	1180.743	63.506	11.263	320.328
 2026-11-19	55b8640+	E0038: own-trait rules (Self in signature, own generics, PartialEq supertrait)	0.872	591.506	3882.942	1902.8	-	1671	1402	95	3315	1180.927	63.472	11.263	320.397
 2026-11-19	bd7f2c7+	E0191: dyn Tr binds every associated type of Tr	0.872	592.132	3882.821	1902.8	-	1671	1402	95	3318	1180.704	63.499	11.264	320.458
+2026-11-19	e616656+	E0191 for dyn Iterator: the trait's type Item is selected with it	0.872	592.135	3884.061	1902.8	-	1671	1402	95	3318	1180.983	63.509	11.264	320.524
