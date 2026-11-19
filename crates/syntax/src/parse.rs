@@ -431,6 +431,8 @@ pub enum Expr {
 #[derive(Clone, Debug)]
 pub struct Arm {
     pub pat: Pat,
+    /// where the pattern starts
+    pub pos: Pos,
     pub guard: Option<Expr>,
     pub body: Expr,
 }
@@ -1952,6 +1954,7 @@ impl Parser {
                 let mut arms = Vec::new();
                 while !self.is_close() {
                     self.attrs()?;
+                    let apos = self.pos();
                     let pat = self.pat()?;
                     let guard = if self.eat_ident("if") { Some(self.expr(true)?) } else { None };
                     self.expect_punct("=>")?;
@@ -1963,7 +1966,7 @@ impl Parser {
                         self.expr(true)?
                     };
                     let blocky = matches!(body, Expr::Block(..) | Expr::If(..) | Expr::Match(..) | Expr::Loop(..) | Expr::While(..) | Expr::For(..) | Expr::Const(..));
-                    arms.push(Arm { pat: pat, guard: guard, body: body });
+                    arms.push(Arm { pat: pat, pos: apos, guard: guard, body: body });
                     if !self.eat_punct(",") && !blocky && !self.is_close() {
                         return Err(self.err("expected `,` after a match arm"));
                     }

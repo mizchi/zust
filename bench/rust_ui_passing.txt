@@ -51,6 +51,7 @@ run-pass	array-slice-vec/nested-vec-2.rs
 run-pass	array-slice-vec/new-style-fixed-length-vec.rs
 run-pass	array-slice-vec/repeated-vector-syntax.rs
 run-pass	array-slice-vec/slice-of-multi-ref.rs
+compile-fail	array-slice-vec/slice-pat-type-mismatches.rs
 check-pass	array-slice-vec/slice-subslice-ref-lifetime.rs
 compile-fail	array-slice-vec/slice-to-vec-comparison.rs
 check-pass	array-slice-vec/subslice-range-return-ref.rs
@@ -511,6 +512,7 @@ run-pass	binding/match-var-hygiene.rs
 run-pass	binding/match-vec-rvalue.rs
 run-pass	binding/match-with-at-binding-8391.rs
 run-pass	binding/match-with-ret-arm.rs
+compile-fail	binding/method-call-nonsensical-pattern-binding-7092.rs
 run-pass	binding/multi-let.rs
 run-pass	binding/mut-in-ident-patterns.rs
 run-pass	binding/nested-matchs.rs
@@ -739,6 +741,7 @@ compile-fail	borrowck/deref-and-mut-borrow-conflict.rs
 compile-fail	borrowck/deref-index-pattern-ref-suggestion.rs
 compile-fail	borrowck/disallow-possibly-uninitialized.rs
 check-pass	borrowck/enum-variants-share-field-name.rs
+compile-fail	borrowck/fnmut-borrow-error-in-closure-match.rs
 run-pass	borrowck/fsu-moves-and-copies.rs
 compile-fail	borrowck/ice-mutability-error-slicing-121807.rs
 compile-fail	borrowck/immut-function-arguments.rs
@@ -1422,6 +1425,7 @@ run-pass	consts/const-vecs-and-slices.rs
 check-pass	consts/const_forget.rs
 check-pass	consts/const_in_pattern/const-bytes-slice-pattern.rs
 run-pass	consts/const_in_pattern/cyclic-const-dag-pass.rs
+compile-fail	consts/const_in_pattern/issue-34784-match-on-non-int-raw-ptr.rs
 check-pass	consts/const_in_pattern/issue-53708.rs
 run-pass	consts/const_in_pattern/issue-62614.rs
 run-pass	consts/const_in_pattern/null-raw-ptr-issue-119270.rs
@@ -1616,6 +1620,7 @@ compile-fail	did_you_mean/bad-assoc-pat.rs
 compile-fail	did_you_mean/c-style-pointer-types.rs
 compile-fail	did_you_mean/casting-fn-item-to-fn-pointer.rs
 compile-fail	did_you_mean/collect-without-into-iter-call.rs
+compile-fail	did_you_mean/compatible-variants-in-pat.rs
 compile-fail	did_you_mean/compatible-variants.rs
 compile-fail	did_you_mean/expect-instead-of-unwrap.rs
 compile-fail	did_you_mean/issue-103909.rs
@@ -1749,6 +1754,7 @@ compile-fail	dyn-keyword/dyn-angle-brackets.rs
 compile-fail	dyn-keyword/issue-5153.rs
 check-pass	dyn-keyword/issue-56327-dyn-trait-in-macro-is-okay.rs
 compile-fail	dyn-keyword/misspelled-associated-item.rs
+compile-fail	dyn-keyword/suggest-dyn-on-bare-trait-in-pat.rs
 compile-fail	dyn-keyword/unresolved-associated-item.rs
 compile-fail	editions/dyn-trait-sugg-2021.rs
 run-pass	editions/edition-specific-identifier-shadowing-53333.rs
@@ -1812,9 +1818,12 @@ compile-fail	env-macro/env-too-many-args.rs
 compile-fail	env-macro/option_env-no-args.rs
 compile-fail	env-macro/option_env-not-string-literal.rs
 compile-fail	env-macro/option_env-too-many-args.rs
+compile-fail	error-codes/E0001.rs
 compile-fail	error-codes/E0004-2.rs
 compile-fail	error-codes/E0004.rs
 compile-fail	error-codes/E0023.rs
+compile-fail	error-codes/E0026.rs
+compile-fail	error-codes/E0027.rs
 compile-fail	error-codes/E0029.rs
 compile-fail	error-codes/E0033.rs
 compile-fail	error-codes/E0054.rs
@@ -1840,6 +1849,7 @@ compile-fail	error-codes/E0263.rs
 compile-fail	error-codes/E0277-2.rs
 compile-fail	error-codes/E0277-3.rs
 compile-fail	error-codes/E0277.rs
+compile-fail	error-codes/E0308-4.rs
 compile-fail	error-codes/E0389.rs
 compile-fail	error-codes/E0390.rs
 compile-fail	error-codes/E0392.rs
@@ -1861,6 +1871,10 @@ compile-fail	error-codes/E0506.rs
 compile-fail	error-codes/E0508.rs
 compile-fail	error-codes/E0512.rs
 compile-fail	error-codes/E0516.rs
+compile-fail	error-codes/E0527.rs
+compile-fail	error-codes/E0528.rs
+compile-fail	error-codes/E0529.rs
+compile-fail	error-codes/E0532.rs
 compile-fail	error-codes/E0559.rs
 compile-fail	error-codes/E0560.rs
 compile-fail	error-codes/E0596.rs
@@ -1956,6 +1970,7 @@ compile-fail	feature-gates/feature-gate-concat_bytes.rs
 compile-fail	feature-gates/feature-gate-const-c-variadic.rs
 compile-fail	feature-gates/feature-gate-custom_attribute2.rs
 compile-fail	feature-gates/feature-gate-decl_macro.rs
+compile-fail	feature-gates/feature-gate-deref_patterns.rs
 compile-fail	feature-gates/feature-gate-derive-from.rs
 compile-fail	feature-gates/feature-gate-diagnostic-on-move.rs
 check-pass	feature-gates/feature-gate-diagnostic-on-type-error-malformed-args.rs
@@ -2551,6 +2566,7 @@ compile-fail	inference/ambiguous_type_parameter.rs
 run-pass	inference/auto-instantiate.rs
 check-pass	inference/bitwise-integer-inference-68951.rs
 run-pass	inference/bivariant-param.rs
+compile-fail	inference/char-as-str-single.rs
 compile-fail	inference/deref-suggestion.rs
 compile-fail	inference/dont-collect-stmts-from-parent-body.rs
 compile-fail	inference/erase-type-params-in-label.rs
@@ -2925,6 +2941,7 @@ run-pass	lint/unused/ignored-allow-unused_variables.rs
 check-pass	lint/unused/import_remove_line.rs
 check-pass	lint/unused/issue-117142-invalid-remove-parens.rs
 check-pass	lint/unused/issue-47390-unused-variable-in-struct-pattern.rs
+compile-fail	lint/unused/issue-67691-unused-field-in-or-pattern.rs
 run-pass	lint/unused/issue-70041.rs
 check-pass	lint/unused/issue-71290-unused-paren-binop.rs
 check-pass	lint/unused/issue-90807-unused-paren.rs
@@ -3115,6 +3132,7 @@ check-pass	macros/trait-bound-not-parsed-as-matcher.rs
 run-pass	macros/typeck-macro-interaction-issue-8852.rs
 compile-fail	macros/undefined-macro-in-impl.rs
 check-pass	macros/user-defined-macro-rules.rs
+compile-fail	macros/vec-macro-in-pattern.rs
 compile-fail	match/borrowck-uninhabited.rs
 check-pass	match/const_non_normal_zst_ref_pattern.rs
 run-pass	match/guard-arm-and-or-arm.rs
@@ -3136,6 +3154,7 @@ run-pass	match/issue-5530.rs
 run-pass	match/issue-72680.rs
 compile-fail	match/issue-82866.rs
 check-pass	match/issue-84434.rs
+compile-fail	match/issue-91058.rs
 run-pass	match/match-borrowed-str.rs
 run-pass	match/match-cloned-string.rs
 compile-fail	match/match-fn-call.rs
@@ -3147,10 +3166,16 @@ run-pass	match/match-on-negative-integer-ranges.rs
 run-pass	match/match-range-char-const.rs
 compile-fail	match/match-range-fail.rs
 run-pass	match/match-ref-option-pattern.rs
+compile-fail	match/match-static-pattern.rs
+compile-fail	match/match-struct.rs
 compile-fail	match/match-tag-nullary.rs
 compile-fail	match/match-tag-unary.rs
 run-pass	match/match-tuple-slice.rs
+compile-fail	match/match-vec-mismatch-2.rs
+compile-fail	match/mismatched-types-in-match-5358.rs
+compile-fail	match/mismatched-types-in-match-7867.rs
 run-pass	match/multiple-refutable-patterns-13867.rs
+compile-fail	match/option-result-mismatch-11844.rs
 compile-fail	match/option-result-type-param-mismatch-13466.rs
 run-pass	match/overeager-sub-match-pruning-13027.rs
 run-pass	match/pattern-deref-miscompile.rs
@@ -3193,6 +3218,7 @@ compile-fail	methods/method-macro-backtrace.rs
 compile-fail	methods/method-not-found-but-doc-alias.rs
 compile-fail	methods/method-not-found-on-iterator.rs
 compile-fail	methods/method-not-found-on-struct.rs
+compile-fail	methods/method-path-in-pattern.rs
 run-pass	methods/method-projection.rs
 run-pass	methods/method-recursive-blanket-impl.rs
 compile-fail	methods/method-resolvable-path-in-pattern.rs
@@ -3265,6 +3291,7 @@ compile-fail	mismatched_types/float-integer-subtraction-error-24352.rs
 compile-fail	mismatched_types/float-literal-inference-restrictions.rs
 compile-fail	mismatched_types/fn-pointer-mismatch-diagnostics.rs
 compile-fail	mismatched_types/generic-mismatch-reporting-issue-116615.rs
+compile-fail	mismatched_types/issue-106182.rs
 compile-fail	mismatched_types/issue-118145-unwrap-for-shorthand.rs
 compile-fail	mismatched_types/issue-118510.rs
 compile-fail	mismatched_types/issue-1362.rs
@@ -3281,6 +3308,7 @@ compile-fail	mismatched_types/never-option-unwrap-suggestion-issue-162241.rs
 compile-fail	mismatched_types/normalize-fn-sig.rs
 compile-fail	mismatched_types/numeric-literal-cast.rs
 compile-fail	mismatched_types/recovered-block.rs
+compile-fail	mismatched_types/ref-pat-suggestions.rs
 compile-fail	mismatched_types/show_module.rs
 compile-fail	mismatched_types/starts-with-stringify-type-mismatch-48364.rs
 compile-fail	mismatched_types/string-clone-mismatch-61106.rs
@@ -3388,6 +3416,7 @@ compile-fail	never_type/regress/field-access-never-type-13847.rs
 compile-fail	never_type/regress/malformed-range-to-never.rs
 run-pass	never_type/regress/never-as-function-argument.rs
 compile-fail	never_type/regress/never-deref.rs
+compile-fail	never_type/regress/never-in-range-pat.rs
 compile-fail	never_type/regress/never-type-method-call-15207.rs
 compile-fail	never_type/regress/suggestion-ice-132517.rs
 run-pass	nll/borrow-use-issue-46875.rs
@@ -4204,6 +4233,9 @@ check-pass	pattern/check-struct-pat-fields-stability-issue-138319.rs
 compile-fail	pattern/constructor-type-mismatch.rs
 compile-fail	pattern/deref-patterns/deref-non-pointer.rs
 compile-fail	pattern/deref-patterns/deref-pointer-cast-mutability-71676.rs
+compile-fail	pattern/deref-patterns/needs-gate.rs
+compile-fail	pattern/enum-variant-not-found.rs
+compile-fail	pattern/fn-in-pat.rs
 run-pass	pattern/ignore-all-the-things.rs
 run-pass	pattern/inc-range-pat.rs
 run-pass	pattern/integer-range-binding.rs
@@ -4216,15 +4248,19 @@ run-pass	pattern/issue-15080.rs
 run-pass	pattern/issue-27320.rs
 run-pass	pattern/issue-6449.rs
 compile-fail	pattern/issue-66270-pat-struct-parser-recovery.rs
+compile-fail	pattern/issue-72574-1.rs
 compile-fail	pattern/issue-72574-2.rs
 compile-fail	pattern/issue-74539.rs
 check-pass	pattern/issue-74954.rs
 compile-fail	pattern/issue-80186-mut-binding-help-suggestion.rs
 run-pass	pattern/issue-8351-1.rs
 run-pass	pattern/issue-8351-2.rs
+compile-fail	pattern/issue-88074-pat-range-type-inference-err.rs
 compile-fail	pattern/issue-94866.rs
 run-pass	pattern/match-array-against-slice.rs
 run-pass	pattern/match-constant-and-byte-literal.rs
+compile-fail	pattern/match-enum-struct-variant-field-missing.rs
+compile-fail	pattern/match-errors-derived-error-suppression.rs
 compile-fail	pattern/missing_lifetime.rs
 check-pass	pattern/move-ref-patterns/borrowck-move-ref-pattern-pass.rs
 compile-fail	pattern/move-ref-patterns/borrowck-move-ref-pattern.rs
@@ -4234,12 +4270,17 @@ compile-fail	pattern/move-ref-patterns/move-ref-patterns-closure-captures-inside
 check-pass	pattern/move-ref-patterns/move-ref-patterns-closure-captures-pass.rs
 compile-fail	pattern/mut-pattern-of-immutable-borrow.rs
 compile-fail	pattern/no-patterns-in-args.rs
+compile-fail	pattern/non-structural-match-types-cycle-err.rs
+compile-fail	pattern/non-structural-match-types.rs
+compile-fail	pattern/pat-struct-field-expr-has-type.rs
+compile-fail	pattern/pat-tuple-overfield.rs
 compile-fail	pattern/pat-tuple-underfield.rs
 compile-fail	pattern/pat-type-err-formal-param.rs
 compile-fail	pattern/patkind-ref-binding-issue-122415.rs
 compile-fail	pattern/pattern-binding-disambiguation.rs
 compile-fail	pattern/pattern-error-continue.rs
 run-pass	pattern/pattern-match-arc-move.rs
+compile-fail	pattern/pattern-match-invalid-variant.rs
 compile-fail	pattern/pattern-tyvar-2.rs
 check-pass	pattern/patterns-dont-match-nt-statement.rs
 compile-fail	pattern/range-pattern-meant-to-be-slice-rest-pattern.rs
@@ -4254,20 +4295,25 @@ run-pass	pattern/struct-pattern-in-fn-arg.rs
 compile-fail	pattern/struct-pattern-on-non-struct-resolve-error.rs
 compile-fail	pattern/struct-pattern-with-missing-fields-resolve-error.rs
 run-pass	pattern/struct-wildcard-pattern-14308.rs
+compile-fail	pattern/struct_pattern_on_tuple_enum.rs
 compile-fail	pattern/suggest-adding-appropriate-missing-pattern-excluding-comments.rs
 run-pass	pattern/tuple-enum-match-15129.rs
+compile-fail	pattern/type_mismatch.rs
 compile-fail	pattern/uninit-trivial.rs
 run-pass	pattern/unit-pattern-matching-in-function-argument-7519.rs
+compile-fail	pattern/unit-type-struct-pattern-mismatch-16401.rs
 check-pass	pattern/unused-parameters-const-pattern.rs
 compile-fail	pattern/usefulness/conflicting_bindings.rs
 check-pass	pattern/usefulness/const-pat-ice.rs
 check-pass	pattern/usefulness/const-private-fields.rs
+compile-fail	pattern/usefulness/consts-opaque.rs
 check-pass	pattern/usefulness/integer-ranges/issue-117648-overlapping_range_endpoints-false-positive.rs
 run-pass	pattern/usefulness/integer-ranges/regression-switchint-sorting-with-ranges.rs
 run-pass	pattern/usefulness/irrefutable-let-patterns.rs
 run-pass	pattern/usefulness/irrefutable-unit.rs
 compile-fail	pattern/usefulness/issue-30240.rs
 compile-fail	pattern/usefulness/issue-3096-2.rs
+compile-fail	pattern/usefulness/issue-31221.rs
 compile-fail	pattern/usefulness/issue-39362.rs
 compile-fail	pattern/usefulness/issue-40221.rs
 compile-fail	pattern/usefulness/issue-4321.rs
@@ -4283,6 +4329,7 @@ compile-fail	pattern/usefulness/issue-82772-match-box-as-struct.rs
 compile-fail	pattern/usefulness/issue-85222-types-containing-non-exhaustive-types.rs
 check-pass	pattern/usefulness/issue-88747.rs
 compile-fail	pattern/usefulness/match-arm-statics-2.rs
+compile-fail	pattern/usefulness/match-arm-statics.rs
 compile-fail	pattern/usefulness/match-byte-array-patterns-2.rs
 compile-fail	pattern/usefulness/match-non-exhaustive.rs
 run-pass	pattern/usefulness/nested-exhaustive-match.rs
@@ -4292,6 +4339,8 @@ compile-fail	pattern/usefulness/non-exhaustive-pattern-witness.rs
 compile-fail	pattern/usefulness/slice-patterns-exhaustiveness.rs
 check-pass	pattern/usefulness/slice-patterns-irrefutable.rs
 compile-fail	pattern/usefulness/struct-like-enum-nonexhaustive.rs
+compile-fail	pattern/usefulness/struct-pattern-match-useless.rs
+compile-fail	pattern/usefulness/top-level-alternation.rs
 compile-fail	pattern/usefulness/tuple-struct-nonexhaustive.rs
 compile-fail	pattern/usefulness/type_polymorphic_byte_str_literals.rs
 compile-fail	pin-ergonomics/raw-ident.rs
@@ -4507,6 +4556,7 @@ compile-fail	resolve/builtin-attribute-not-value.rs
 compile-fail	resolve/cannot-find-value-in-scope-22811.rs
 compile-fail	resolve/change-ty-to-const-param-sugg-0.rs
 run-pass	resolve/const-iter-no-conflict-for-loop.rs
+compile-fail	resolve/const-with-typo-in-pattern-binding.rs
 compile-fail	resolve/crate-called-as-function.rs
 compile-fail	resolve/dot-notation-type-namespace-suggest-path-sep.rs
 compile-fail	resolve/duplicated-item-in-const-generics.rs
@@ -4527,6 +4577,7 @@ compile-fail	resolve/import-suggestion-duplicated-importing-same-item.rs
 compile-fail	resolve/issue-100365.rs
 compile-fail	resolve/issue-101749-2.rs
 compile-fail	resolve/issue-101749.rs
+compile-fail	resolve/issue-10200.rs
 compile-fail	resolve/issue-103202.rs
 compile-fail	resolve/issue-103474.rs
 compile-fail	resolve/issue-104700-inner_scope.rs
@@ -4607,6 +4658,7 @@ compile-fail	resolve/typo-suggestion-for-variable-with-name-similar-to-struct-fi
 compile-fail	resolve/typo-suggestion-mistyped-in-path.rs
 compile-fail	resolve/typo-suggestion-named-underscore.rs
 compile-fail	resolve/unboxed-closure-sugar-nonexistent-trait.rs
+compile-fail	resolve/unresolved-module-error-33293.rs
 compile-fail	resolve/unresolved-segments-visibility.rs
 compile-fail	resolve/unresolved_static_type_field.rs
 check-pass	resolve/unused-macro-import.rs
@@ -4649,6 +4701,7 @@ compile-fail	rfcs/rfc-2005-default-binding-mode/enum.rs
 compile-fail	rfcs/rfc-2005-default-binding-mode/explicit-mut.rs
 run-pass	rfcs/rfc-2005-default-binding-mode/for-ok.rs
 run-pass	rfcs/rfc-2005-default-binding-mode/lit-ok.rs
+compile-fail	rfcs/rfc-2005-default-binding-mode/no-double-error.rs
 run-pass	rfcs/rfc-2005-default-binding-mode/range.rs
 run-pass	rfcs/rfc-2005-default-binding-mode/ref-region.rs
 run-pass	rfcs/rfc-2005-default-binding-mode/reset-mode.rs
@@ -4778,7 +4831,9 @@ run-pass	self/self-shadowing-import.rs
 check-pass	self/self-type-in-inherent-fn.rs
 check-pass	self/self_lifetime-async.rs
 check-pass	self/self_lifetime.rs
+compile-fail	self/self_type_keyword-2.rs
 compile-fail	self/self_type_keyword.rs
+compile-fail	self/self_type_macro_name.rs
 run-pass	self/string-self-append.rs
 compile-fail	self/suggest-self-2.rs
 compile-fail	self/suggest-self.rs
@@ -4943,6 +4998,7 @@ run-pass	structs-enums/tag-exports.rs
 check-pass	structs-enums/tag-in-block.rs
 run-pass	structs-enums/tag.rs
 run-pass	structs-enums/tuple-struct-destructuring.rs
+compile-fail	structs-enums/tuple-variant-as-struct-variant.rs
 compile-fail	structs/default-field-values/non-exhaustive-ctor-not-found.rs
 compile-fail	structs/default-field-values/struct-fields-ice-147325.rs
 run-pass	structs/destructuring-struct-type-inference-8783.rs
@@ -4994,6 +5050,7 @@ compile-fail	structs/struct-record-suggestion.rs
 run-pass	structs/struct-size-with-drop-2895.rs
 run-pass	structs/struct-update-syntax-2463.rs
 check-pass	structs/struct-variant-field-visibility.rs
+compile-fail	structs/suggest-replacing-field-when-specifying-same-type.rs
 compile-fail	structs/syntax-error-not-missing-field.rs
 run-pass	structs/trie-node-structure-usage-3389.rs
 compile-fail	structs/tuple-struct-field-naming-47073.rs
@@ -5114,6 +5171,7 @@ compile-fail	suggestions/js-style-comparison-op.rs
 compile-fail	suggestions/let-binding-init-expr-as-ty.rs
 compile-fail	suggestions/let-binding-suggest-issue-133713.rs
 compile-fail	suggestions/many-type-ascription.rs
+compile-fail	suggestions/match-ergonomics.rs
 compile-fail	suggestions/match-with-different-arm-types-as-stmt-instead-of-expr.rs
 compile-fail	suggestions/method-access-to-range-literal-typo.rs
 compile-fail	suggestions/method-missing-parentheses.rs
@@ -5138,6 +5196,7 @@ compile-fail	suggestions/option-to-bool.rs
 compile-fail	suggestions/parenthesized-deref-suggestion.rs
 compile-fail	suggestions/partialeq_suggest_swap.rs
 compile-fail	suggestions/partialeq_suggest_swap_on_e0277.rs
+compile-fail	suggestions/pattern-struct-with-slice-vec-field.rs
 compile-fail	suggestions/range-index-instead-of-colon.rs
 compile-fail	suggestions/raw-byte-string-prefix.rs
 compile-fail	suggestions/raw-c-string-prefix.rs
@@ -5174,6 +5233,7 @@ compile-fail	suggestions/suggest-closure-return-type-2.rs
 compile-fail	suggestions/suggest-closure-return-type-3.rs
 compile-fail	suggestions/suggest-collect.rs
 compile-fail	suggestions/suggest-create-closure-issue-150701.rs
+compile-fail	suggestions/suggest-deref-in-match-issue-132784.rs
 compile-fail	suggestions/suggest-dereferencing-index.rs
 compile-fail	suggestions/suggest-exact-alias-before-similar-name.rs
 compile-fail	suggestions/suggest-field-through-deref.rs
@@ -5620,6 +5680,7 @@ compile-fail	type/type-check/cannot_infer_local_or_vec_in_tuples.rs
 compile-fail	type/type-check/coerce-result-return-value-2.rs
 compile-fail	type/type-check/coerce-result-return-value.rs
 compile-fail	type/type-check/issue-116967-cannot-coerce-returned-result.rs
+compile-fail	type/type-check/issue-41314.rs
 compile-fail	type/type-check/point-at-inference-3.rs
 compile-fail	type/type-mismatch-multiple.rs
 compile-fail	type/type-parameter-defaults-referencing-Self-ppaux.rs
@@ -5648,6 +5709,7 @@ compile-fail	typeck/do-not-suggest-adding-missing-zero-to-floating-point-number.
 compile-fail	typeck/do-not-suggest-placeholder-to-const-static-without-type.rs
 compile-fail	typeck/escaping_bound_vars.rs
 compile-fail	typeck/for-in-const-eval.rs
+compile-fail	typeck/function-in-pattern-error-12863.rs
 compile-fail	typeck/gather-locals-twice.rs
 compile-fail	typeck/ice-unexpected-region-123863.rs
 compile-fail	typeck/ice-with-expr-not-struct-127332.rs
@@ -5831,6 +5893,7 @@ compile-fail	union/union-suggest-field.rs
 run-pass	union/union-trait-impl.rs
 run-pass	union/union-transmute.rs
 compile-fail	union/union-unsafe.rs
+compile-fail	union/union.rs
 check-pass	union/union_access_through_block.rs
 check-pass	union/union_wild_or_wild.rs
 compile-fail	unop/unop-neg-bool.rs

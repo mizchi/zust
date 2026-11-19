@@ -600,6 +600,7 @@ impl Session2 {
         tm.lap("program", String::new());
         prog.prelude_from = user as u32;
         prog.overflow_checks = !self.opts.opt;
+        prog.deny_unreachable = src.contains("deny(unreachable_patterns") || src.contains("forbid(unreachable_patterns");
         prog.opt = self.opts.opt;
         resolve_opaque(&mut prog, &src, &items)?;
         let ol = self.ctx.own_lines as usize;

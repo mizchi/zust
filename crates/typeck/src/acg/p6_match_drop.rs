@@ -83,7 +83,7 @@ impl Cx<'_> {
                 }
                 changed = true;
                 for p in alts {
-                    out.push(crate::parse::Arm { pat: p, guard: a.guard.clone(), body: a.body.clone() });
+                    out.push(crate::parse::Arm { pat: p, pos: a.pos, guard: a.guard.clone(), body: a.body.clone() });
                 }
             }
             if changed {
@@ -100,6 +100,11 @@ impl Cx<'_> {
             if let Some(w) = self.non_exhaustive(arms, place.ty()) {
                 return Err(self.at(expr_start(scrut), format!("non-exhaustive patterns: `{w}` not covered (E0004)")));
             }
+            if self.prog.deny_unreachable {
+                if let Some(i) = self.unreachable_arm(arms, place.ty()) {
+                    return Err(self.at(arms[i].pos, "unreachable pattern".into()));
+                }
+            }
         }
         let bk_ss = self.bk.scrut.clone();
         let bk_sp = self.bk.scrut_place.clone();
@@ -111,7 +116,7 @@ impl Cx<'_> {
         for arm in arms {
             let next = self.b.create_block();
             // (a pattern has no position of its own: an error in it is reported at the arm's body)
-            self.pat_test(&arm.pat, place, next).map_err(|m| self.at(expr_start(&arm.body), m))?;
+            self.pat_test(&arm.pat, place, next).map_err(|m| self.at(arm.pos, m))?;
             self.scopes.push(vec![]);
             let ob = self.owned_binds;
             self.bk.scrut = bk_ss.clone();

@@ -26,6 +26,98 @@ struct Unknown;
 const MAX_WORK: u32 = 20_000;
 
 impl Cx<'_> {
+    /// The index of the first arm that no value can reach (the arms before it, without guards, cover all it matches)
+    pub(crate) fn unreachable_arm(&self, arms: &[crate::parse::Arm], ty: Ty) -> Option<usize> {
+        let mut rows: Vec<Vec<N>> = vec![];
+        let mut work = 0;
+        for (i, a) in arms.iter().enumerate() {
+            let q = self.norm(&a.pat, ty, 0).ok()?;
+            if !rows.is_empty() && !self.useful_q(&rows, &[q.clone()], &[ty], &mut work).ok()? {
+                return Some(i);
+            }
+            if a.guard.is_none() {
+                rows.push(vec![q]);
+            }
+        }
+        None
+    }
+
+    /// Whether the row q matches a value that none of rows matches
+    fn useful_q(&self, rows: &[Vec<N>], q: &[N], tys: &[Ty], work: &mut u32) -> Result<bool, Unknown> {
+        *work += 1 + rows.len() as u32;
+        if *work > MAX_WORK {
+            return Err(Unknown);
+        }
+        if tys.is_empty() {
+            return Ok(rows.is_empty());
+        }
+        let mut rs: Vec<Vec<N>> = vec![];
+        for r in rows {
+            expand_or(r, &mut rs);
+        }
+        let t = tys[0];
+        match &q[0] {
+            N::Or(alts) => {
+                for a in alts {
+                    let mut q2 = vec![a.clone()];
+                    q2.extend_from_slice(&q[1..]);
+                    if self.useful_q(&rs, &q2, tys, work)? {
+                        return Ok(true);
+                    }
+                }
+                Ok(false)
+            }
+            N::Ctor(c, subs) => {
+                let cs = self.ctors(t).ok_or(Unknown)?;
+                let fts = &cs.get(*c).ok_or(Unknown)?.1;
+                if subs.len() != fts.len() {
+                    return Err(Unknown);
+                }
+                let spec: Vec<Vec<N>> = rs.iter().filter_map(|r| specialize(r, *c, fts.len())).collect();
+                let mut q2 = subs.clone();
+                q2.extend_from_slice(&q[1..]);
+                let mut ntys = fts.clone();
+                ntys.extend_from_slice(&tys[1..]);
+                self.useful_q(&spec, &q2, &ntys, work)
+            }
+            // (literals are not told apart: a literal after a literal of the same column is not judged)
+            N::Lit => {
+                if rs.iter().any(|r| matches!(r[0], N::Lit | N::Ctor(..))) {
+                    return Err(Unknown);
+                }
+                let default: Vec<Vec<N>> = rs.iter().filter(|r| matches!(r[0], N::Wild)).map(|r| r[1..].to_vec()).collect();
+                self.useful_q(&default, &q[1..], &tys[1..], work)
+            }
+            N::Wild => {
+                let ctors = self.ctors(t);
+                let heads: Vec<usize> = rs.iter().filter_map(|r| if let N::Ctor(c, _) = &r[0] { Some(*c) } else { None }).collect();
+                let live = |cs: &Vec<(String, Vec<Ty>)>, c: usize| cs[c].1.iter().all(|&f| self.inhabited(f, 0));
+                match &ctors {
+                    Some(cs) if (0..cs.len()).all(|c| heads.contains(&c) || !live(cs, c)) => {
+                        for (ci, (_, fts)) in cs.iter().enumerate() {
+                            if !live(cs, ci) {
+                                continue;
+                            }
+                            let spec: Vec<Vec<N>> = rs.iter().filter_map(|r| specialize(r, ci, fts.len())).collect();
+                            let mut q2 = vec![N::Wild; fts.len()];
+                            q2.extend_from_slice(&q[1..]);
+                            let mut ntys = fts.clone();
+                            ntys.extend_from_slice(&tys[1..]);
+                            if self.useful_q(&spec, &q2, &ntys, work)? {
+                                return Ok(true);
+                            }
+                        }
+                        Ok(false)
+                    }
+                    _ => {
+                        let default: Vec<Vec<N>> = rs.iter().filter(|r| matches!(r[0], N::Wild)).map(|r| r[1..].to_vec()).collect();
+                        self.useful_q(&default, &q[1..], &tys[1..], work)
+                    }
+                }
+            }
+        }
+    }
+
     /// Some(witness) when the arms (those without a guard) do not cover `ty`
     pub(crate) fn non_exhaustive(&self, arms: &[crate::parse::Arm], ty: Ty) -> Option<String> {
         let mut rows = vec![];
@@ -123,6 +215,10 @@ impl Cx<'_> {
                     return Err(Unknown);
                 }
                 N::Lit
+            }
+            // (a const of another type (`FOO` of a struct type): its value is not modeled)
+            Pat::Ident(false, false, n, None) if self.prog.const_index.contains_key(n) || self.prog.const_by_last.contains_key(n) => {
+                return Err(Unknown);
             }
             Pat::Ident(_, _, _, None) => N::Wild,
             Pat::Ident(_, _, _, Some(sub)) => return self.norm(sub, t0, depth + 1),
