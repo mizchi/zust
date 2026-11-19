@@ -17,3 +17,4 @@ date	commit	change	noop_M	edit_M	check_M	cache_KiB	lsp_G	run	check	build	cfail
 2026-11-19	9568d59	Box::pin and Pin<Box<dyn Future<Output = T>>>	625.191	626.794	3905.841	1902.8	10.8958	1560	1307	89	2856
 2026-11-19	0902b52	inline const, if-let guards	625.127	626.729	3905.424	1902.8	10.8962	1567	1323	93	2861
 2026-11-19	85225ee	reborrow of fat pointers through *, (*f)(x)	625.189	626.791	3905.638	1902.8	10.8944	1570	1323	93	2860
+2026-11-19	8fb090b	TypeId::of, type_name	625.242	626.596	3907.370	1902.8	-	1570	1323	94	2860
