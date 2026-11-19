@@ -1029,7 +1029,7 @@ pub fn expand_reference(src: &str) -> Result<Option<String>, String> {
     for _round in 0..64 {
         let ts = TokenStream::from_str(&text).map_err(|e| format!("1:1: {e}"))?;
         let mut reps: Vec<(usize, usize, String)> = vec![];
-        find_calls(ts, &macros, &text, 0, &mut reps)?;
+        find_calls(ts, &macros, &text, 0, false, &mut reps)?;
         if reps.is_empty() {
             return Ok(Some(text));
         }
@@ -1058,6 +1058,7 @@ fn find_calls(
     macros: &HashMap<String, Vec<Rule>>,
     text: &str,
     depth: usize,
+    brace: bool,
     out: &mut Vec<(usize, usize, String)>,
 ) -> Result<(), String> {
     let toks: Vec<TokenTree> = ts.into_iter().collect();
@@ -1075,7 +1076,25 @@ fn find_calls(
                                 let mut body = String::new();
                                 transcribe_h(&r.body, &binds, &mut body)?;
                                 // 式の位置は `({ .. })`、トップレベルはアイテムとしてそのまま
-                                let rep = if depth == 0 { body } else { format!("({{ {body} }})") };
+                                // (as expand_cfg: a call in statement position in a block puts its statements into the
+                                // block (followed by `;` or the block's end), or its items before the `({ .. })`)
+                                let stmt_pos = brace
+                                    && (i == 0
+                                        || matches!(&toks[i - 1], TokenTree::Punct(q) if q.as_char() == ';')
+                                        || matches!(&toks[i - 1], TokenTree::Group(pg) if pg.delimiter() == proc_macro2::Delimiter::Brace));
+                                let next_semi = matches!(toks.get(i + 3), Some(TokenTree::Punct(q)) if q.as_char() == ';');
+                                let spliced = depth > 0 && stmt_pos && (next_semi || toks.get(i + 3).is_none()) && !body.contains('#');
+                                let drop_semi = spliced && next_semi && body.trim_end().ends_with(';');
+                                let rep = if depth == 0 || spliced {
+                                    body
+                                } else if stmt_pos {
+                                    match split_items(&body) {
+                                        Some((items, rest)) => format!("{items} ({{ {rest} }})"),
+                                        None => format!("({{ {body} }})"),
+                                    }
+                                } else {
+                                    format!("({{ {body} }})")
+                                };
                                 let mut a = name.span().byte_range().start;
                                 // (`crate::m!(..)` / `self::m!(..)`: 前のパスも消す)
                                 let mut k = i;
@@ -1092,7 +1111,7 @@ fn find_calls(
                                 }
                                 let mut e = g.span().byte_range().end;
                                 // (トップレベルの `name!(..);` の `;` も取る)
-                                if depth == 0 {
+                                if depth == 0 || drop_semi {
                                     if let Some(TokenTree::Punct(s)) = toks.get(i + 3) {
                                         if s.as_char() == ';' {
                                             e = s.span().byte_range().end;
@@ -1119,7 +1138,7 @@ fn find_calls(
             let r = g.span().byte_range();
             let inner = if r.start <= r.end && r.end <= text.len() { &text[r.start..r.end] } else { "" };
             if inner.is_empty() || macros.keys().any(|m| inner.contains(m.as_str())) {
-                find_calls(g.stream(), macros, text, depth + 1, out)?;
+                find_calls(g.stream(), macros, text, depth + 1, g.delimiter() == proc_macro2::Delimiter::Brace, out)?;
             }
         }
         i += 1;
