@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795111323978,
+  "lastUpdate": 1795111326296,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -46840,6 +46840,85 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/mizchi/zust/commit/61f478f9c66f66467b4186a95aeedb8ff8737bf2"
         },
         "date": 1795109478980,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "parity documentSymbol (名前の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity workspace/symbol (上位 20 の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity definition (行き先の一致)",
+            "value": 91.176,
+            "unit": "%"
+          },
+          {
+            "name": "parity hover (名前を含む)",
+            "value": 80,
+            "unit": "%"
+          },
+          {
+            "name": "parity references (数の一致)",
+            "value": 88.571,
+            "unit": "%"
+          },
+          {
+            "name": "parity documentHighlight (数の一致)",
+            "value": 91.176,
+            "unit": "%"
+          },
+          {
+            "name": "parity rename (書き換えの一致)",
+            "value": 91.304,
+            "unit": "%"
+          },
+          {
+            "name": "parity signatureHelp (名前・引数の数・今の引数の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity completion `x.\\|` (書いてある名前を含む)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity completion `na\\|me` (同)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity 一致の平均",
+            "value": 94.223,
+            "unit": "%"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "committer": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "distinct": true,
+          "id": "19d10c0fa8723752e8a7c65baa0a40d83ae5140b",
+          "message": "Found building rust-utf8 (SimonSapin/rust-utf8) and static-assertions (nvzqz) with zustc:\n- `#[path = \"bool.rs\"] pub mod _bool;`: the file the attribute names, beside the declaring file.\n- `str::from_utf8(..)` with `use core::str;` / `use std::str;`: the module's fn (as `std::str::from_utf8`).\n- Utf8Error::error_len.\n- std's error types (io::Error, Utf8Error, FromUtf8Error, ParseIntError, ParseFloatError, TryFromIntError)\n  implement Error (`Some(err)` as `&dyn Error`); the prelude includes these impls, and the trait, only when the\n  program names Error and the type.\n- The item splitter: attributes with no item after them at the end of a file (those of a `#[macro_export]\n  macro_rules!` that expansion took out, last in a lib crate) are no unterminated item.\nrust-utf8's lib now builds (its app still meets a borrow-checker false positive: a loan returned after a loop is taken\nas live inside the loop); static-assertions stops at associated consts of two impls for `[(); 0]` / `[(); 1]`.\n\ntests/ui: run-pass modules/mod_file_with_path_attr.rs, modules/special_module_name_ignore.rs, check-pass\nrfcs/rfc-2457-non-ascii-idents/mod_file_nonascii_with_path_allowed.rs; 0 regressions. cratebench: the 6 crates give\nthe same output. README: tests/ui coverage measured on 61f478f+ (the benchmark tables stay CI's).\nKPIs: no change outside noise (traits edit +0.10%, crates edit +0.20%).\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-19T17:54:44Z",
+          "tree_id": "98d34361f515608b9e2619109a5aec5d04aa4505",
+          "url": "https://github.com/mizchi/zust/commit/19d10c0fa8723752e8a7c65baa0a40d83ae5140b"
+        },
+        "date": 1795111325832,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
