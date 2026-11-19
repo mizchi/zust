@@ -1178,6 +1178,7 @@ check-pass	coercion/index-coercion-over-indexmut-72002.rs
 check-pass	coercion/infer-coerce-unsized-trait-object.rs
 compile-fail	coercion/intrinsic-in-unifying-coercion-149143.rs
 check-pass	coercion/issue-101066.rs
+run-pass	coercion/issue-14589.rs
 run-pass	coercion/issue-3794.rs
 compile-fail	coercion/issue-73886.rs
 compile-fail	coercion/leak_check_fndef_lub_deadcode_breakage.rs
@@ -1619,7 +1620,6 @@ check-pass	deprecation/derive_on_deprecated.rs
 check-pass	deprecation/derive_on_deprecated_forbidden.rs
 compile-fail	deprecation/issue-84637-deprecated-associated-function.rs
 compile-fail	deprecation/try-macro-suggestion.rs
-compile-fail	deprecation/unit_and_tuple_struct.rs
 check-pass	deref/deref-impl-for-dyn-trait.rs
 run-pass	deref/deref-in-for-loop.rs
 check-pass	deref/deref-mut-method-through-box.rs
@@ -2395,6 +2395,7 @@ run-pass	generics/newtype-with-generics.rs
 compile-fail	generics/overlapping-errors-span-issue-123861.rs
 check-pass	generics/resolve-generic-method-param-2312.rs
 compile-fail	generics/single-colon-path-not-const-generics.rs
+compile-fail	generics/slightly-nice-generic-literal-messages.rs
 run-pass	generics/type-params-in-for-each.rs
 compile-fail	generics/unclosed-generics-in-impl-def.rs
 compile-fail	generics/unconstrained-param-default-available.rs
@@ -2644,6 +2645,7 @@ run-pass	imports/enum-variant-import-path-15774.rs
 run-pass	imports/export-glob-imports-target.rs
 run-pass	imports/export-multi.rs
 check-pass	imports/extern-crate-self/extern-crate-self-macro-item.rs
+check-pass	imports/extern-crate-self/extern-crate-self-pass.rs
 check-pass	imports/glob-cycles.rs
 compile-fail	imports/glob-resolve1.rs
 run-pass	imports/global-path-resolution-drop.rs
@@ -2674,6 +2676,7 @@ run-pass	imports/import7.rs
 run-pass	imports/import8.rs
 compile-fail	imports/inaccessible_type_aliases.rs
 check-pass	imports/issue-18083.rs
+check-pass	imports/issue-24883.rs
 check-pass	imports/issue-26930.rs
 check-pass	imports/issue-32119.rs
 check-pass	imports/issue-32222.rs
@@ -2699,6 +2702,7 @@ run-pass	imports/reexport-star.rs
 compile-fail	imports/underscore-imports/shadow.rs
 check-pass	imports/unused-import-issue-157420.rs
 run-pass	imports/use-declaration-no-path-segment-prefix.rs
+run-pass	imports/use-mod.rs
 compile-fail	include-macros/mismatched-types.rs
 run-pass	include-macros/normalization.rs
 compile-fail	include-macros/shebang-in-expr-ctxt.rs
@@ -2752,7 +2756,6 @@ compile-fail	inference/need_type_info/issue-109905.rs
 compile-fail	inference/need_type_info/single-const-generic-suggestion.rs
 compile-fail	inference/need_type_info/single-type-generic-suggestion.rs
 compile-fail	inference/need_type_info/type-alias-indirect.rs
-compile-fail	inference/need_type_info/unconstrained-type-in-closure.rs
 compile-fail	inference/need_type_info/underscore-placeholder-wording.rs
 run-pass	inference/newlambdas-ret-infer.rs
 run-pass	inference/newlambdas-ret-infer2.rs
@@ -2938,6 +2941,7 @@ check-pass	lifetimes/static-bound-fulfillment-with-pointer-7268.rs
 check-pass	lifetimes/struct-lifetime-field-assignment-13405.rs
 check-pass	lifetimes/struct-lifetime-inference-15735.rs
 run-pass	lifetimes/struct-with-lifetime-parameters-9259.rs
+run-pass	lifetimes/trait-method-lifetime-bounds.rs
 run-pass	lifetimes/trait-object-constructor-14821.rs
 check-pass	lifetimes/tuple-struct-vs-struct-with-fields-borrowck-10902.rs
 check-pass	lifetimes/unsafe-transmute-in-find-11740.rs
@@ -3323,6 +3327,7 @@ compile-fail	macros/non-function-call-in-macro.rs
 check-pass	macros/none-delim-lookahead.rs
 check-pass	macros/out-of-scope-macro-calls-lint-registered.rs
 check-pass	macros/pub-item-inside-macro.rs
+check-pass	macros/pub-method-inside-macro.rs
 compile-fail	macros/recovery-allowed.rs
 check-pass	macros/recovery-forbidden.rs
 check-pass	macros/semi-after-macro-ty.rs
@@ -3418,6 +3423,7 @@ compile-fail	methods/method-call-lifetime-args-fail.rs
 compile-fail	methods/method-call-lifetime-args-lint-fail.rs
 compile-fail	methods/method-call-lifetime-args-lint.rs
 compile-fail	methods/method-call-lifetime-args.rs
+run-pass	methods/method-early-bound-lifetimes-on-self.rs
 compile-fail	methods/method-macro-backtrace.rs
 compile-fail	methods/method-not-found-but-doc-alias.rs
 compile-fail	methods/method-not-found-on-iterator.rs
@@ -3441,7 +3447,6 @@ compile-fail	methods/suggest-convert-ptr-to-ref.rs
 compile-fail	methods/suggest-method-on-call-for-ambig-receiver.rs
 compile-fail	methods/suggest-method-on-call-with-macro-rcvr.rs
 run-pass	methods/trait-method-resolution-7575.rs
-compile-fail	methods/trait-method-resolution-over-inherent-22684.rs
 compile-fail	methods/tuple-suggestions-issue-142488.rs
 compile-fail	methods/untrimmed-path-type.rs
 compile-fail	methods/vec-autoderef-autoref.rs
@@ -5386,7 +5391,6 @@ compile-fail	suggestions/dont-suggest-private-trait-method.rs
 compile-fail	suggestions/dont-suggest-ref/simple.rs
 compile-fail	suggestions/dont-suggest-ufcs-for-const.rs
 run-pass	suggestions/dont-try-removing-the-field.rs
-compile-fail	suggestions/dont-wrap-ambiguous-receivers.rs
 compile-fail	suggestions/double-reference-ty-in-self-ty.rs
 compile-fail	suggestions/dyn-incompatible-trait-should-use-self-2021-without-dyn.rs
 compile-fail	suggestions/dyn-incompatible-trait-should-use-self-2021.rs
@@ -5592,6 +5596,7 @@ compile-fail	suggestions/types/dont-suggest-path-names.rs
 compile-fail	suggestions/types/into-inference-needs-type.rs
 compile-fail	suggestions/ufcs-for-deref-inner-clone.rs
 compile-fail	suggestions/unnecessary_dot_for_floating_point_literal.rs
+check-pass	suggestions/unused-imports.rs
 compile-fail	suggestions/use-parentheses-to-call-closure-issue-145404.rs
 compile-fail	suggestions/while-let-typo.rs
 compile-fail	suggestions/wrap-function-local-constructors.rs
@@ -5969,7 +5974,6 @@ compile-fail	type-inference/index-expr-ambiguous-type.rs
 compile-fail	type-inference/swap-with-unspecified-type.rs
 compile-fail	type-inference/type-inference-none-in-generic-ref.rs
 compile-fail	type-inference/type-inference-unconstrained-none.rs
-compile-fail	type-inference/unbounded-associated-type.rs
 compile-fail	type-inference/unbounded-type-param-in-fn-with-assoc-type.rs
 compile-fail	type-inference/unbounded-type-param-in-fn.rs
 compile-fail	type/ascription/issue-47666.rs

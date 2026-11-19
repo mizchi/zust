@@ -1206,7 +1206,17 @@ impl Inf<'_> {
                         match Ty::from_suffix(segs[0]).or(if segs[0] == "char" { Some(Ty::Char) } else { None }) {
                             Some(_) if segs.len() == 2 && segs[1] == "BITS" => self.known(Ty::U32),
                             Some(t) if segs.len() == 2 => self.known(t),
-                            _ => self.var(),
+                            // (`std::marker::PhantomData` / `m::S`: a unit struct through a module path)
+                            _ => match self.prog.struct_index.get(*segs.last().unwrap()).copied() {
+                                Some(sid)
+                                    if !self.prog.structs[sid as usize].is_enum
+                                        && self.prog.structs[sid as usize].fields.is_empty()
+                                        && p.segs.iter().all(|s| s.args.is_empty()) =>
+                                {
+                                    self.adt_ctor(sid, None, vec![])
+                                }
+                                _ => self.var(),
+                            },
                         }
                     }
                 }

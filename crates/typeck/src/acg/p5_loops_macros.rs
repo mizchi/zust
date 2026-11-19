@@ -1786,6 +1786,12 @@ impl Cx<'_> {
 
     pub(crate) fn path_value(&mut self, e: &Expr, _expected: Option<Ty>) -> R<V> {
         let Expr::Path(q, p) = e else { unreachable!() };
+        if p.segs.iter().skip(1).any(|s| s.name == "crate") {
+            return err(SP, "`crate` in paths can only be used in start position (E0433)");
+        }
+        if p.global && p.segs.first().is_some_and(|s| s.name == "crate") {
+            return err(SP, "global paths cannot start with `crate` (E0433)");
+        }
         // `<u64 as Integer>::MAX_STR_LEN`: impl の関連 const `u64::MAX_STR_LEN`
         if let (Some(q), Some(last)) = (q, p.segs.last()) {
             if let Ok(t) = self.parse_ty(q) {
@@ -1876,6 +1882,25 @@ impl Cx<'_> {
         if let Some(q) = self.static_path(e) {
             let q: &Expr = self.keep_expr(q);
             return self.expr(q, _expected);
+        }
+        // (`std::marker::PhantomData` / `m::S`: a unit struct through a module path)
+        if segs.len() >= 2 && p.segs.iter().all(|s| s.args.is_empty()) {
+            let last = segs.last().unwrap();
+            let unit = self.prog.struct_index.get(last.as_str()).is_some_and(|&sid| {
+                let sd = &self.prog.structs[sid as usize];
+                !sd.is_enum && sd.fields.is_empty()
+            });
+            // (only when the modules exist: `::m::crate::S` or a misspelled module is an error)
+            let std_path = matches!(segs[0].as_str(), "std" | "core" | "alloc") && !segs.iter().skip(1).any(|s| s == "crate");
+            let real = std_path || self.strip_mods_path(p).is_some_and(|q| q.segs.len() == 1);
+            if unit && real && self.lookup(last).is_none() {
+                let ne: &Expr = self.keep_expr(path_expr(last));
+                // (the instance inference chose for the written path, for a generic one (`PhantomData<T>`))
+                if let Some(t) = self.lets.get(&(e as *const Expr as usize)).copied() {
+                    self.lets.insert(ne as *const Expr as usize, t);
+                }
+                return self.expr(ne, _expected);
+            }
         }
         err(SP, "cannot find value (unsupported path)")
     }
