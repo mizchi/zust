@@ -532,7 +532,7 @@ fn defined_name(src: &str, it: &SrcItem) -> Option<String> {
 const SHADOWABLE: &[&str] = &[
     "Chain", "Entry", "Enumerate", "Filter", "FilterMap", "Map", "OptIter", "Scan", "Skip", "Take", "TakeWhile", "Zip",
     "Command", "Mutex", "VarError", "Rev", "StepBy", "Peekable", "Cloned", "Flatten", "FlatMap", "Inspect", "SkipWhile",
-    "PathBuf", "Args", "BufWriter", "Pin", "Duration", "Fuse", "Empty", "RangeTo", "RangeToInclusive", "RangeFull",
+    "PathBuf", "Args", "BufWriter", "Pin", "Windows", "Bytes", "MatchIndices", "MutexGuard", "Chunks", "Duration", "Fuse", "Empty", "RangeTo", "RangeToInclusive", "RangeFull",
     "AtomicPtr", "TryReserveError", "c_void",
 ];
 
