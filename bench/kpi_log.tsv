@@ -8,3 +8,4 @@ date	commit	change	noop_M	edit_M	check_M	cache_KiB	lsp_G	run	check	build	cfail
 2026-11-19	1271aae	skip `use` items in bodies (from macro expansions)	625.185	626.787	3904.932	1902.8	-	1547	1273	89	2850
 2026-11-19	5ae34e1	items from statement-position macro expansions	625.184	626.787	3905.089	1902.8	11.0124	1552	1276	89	2850
 2026-11-19	9539e64	macro definitions from expansions; statement-position expansions into the block	625.185	626.787	3905.062	1902.8	-	1553	1278	89	2850
+2026-11-19	6c8b074	expand_reference follows the statement-position rules (test fix)	625.185	626.787	3905.063	1902.8	-	1553	1278	89	2850
