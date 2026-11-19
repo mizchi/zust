@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795052989327,
+  "lastUpdate": 1795052991348,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -27254,6 +27254,70 @@ window.BENCHMARK_DATA = {
           {
             "name": "tests/ui compile-fail passing",
             "value": 2852,
+            "unit": "tests"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "committer": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "distinct": true,
+          "id": "75630e2cce177b9ddee6b7d452a290d18bc93836",
+          "message": "Casts to `_` and `*const _` / `*mut _`\n\n`x as _` takes the expected type (else the source type); `&x as *const _` takes\nthe source's pointee, `0 as *const _` the expected pointer type; an integer literal\ncast to a pointer is a usize. A pointer whose pointee stays unknown is E0641, as in\nrustc (this also stops a crash on such casts). tests/ui: run-pass +5, check-pass +3,\ncompile-fail +2. Four compile-fail tests leave the baseline: they passed only because\n`as _` was unsupported on the annotated line (their errors are lifetime errors, a\ntemporary dropped while borrowed, and an invalid dyn-pointer cast).\nKPIs unchanged.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-19T01:45:17Z",
+          "tree_id": "d0b8766e4b4642ad9de1c42d0027905fa941cdfd",
+          "url": "https://github.com/mizchi/zust/commit/75630e2cce177b9ddee6b7d452a290d18bc93836"
+        },
+        "date": 1795052990879,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tests/ui run-pass pass rate",
+            "value": 63.49,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui run-pass passing",
+            "value": 1532,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui check-pass pass rate",
+            "value": 70.01,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui check-pass passing",
+            "value": 1265,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui build-pass pass rate",
+            "value": 65.19,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui build-pass passing",
+            "value": 88,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui compile-fail pass rate",
+            "value": 38.71,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui compile-fail passing",
+            "value": 2848,
             "unit": "tests"
           }
         ]
