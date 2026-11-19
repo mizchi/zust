@@ -9,10 +9,10 @@
 
 ## 全体
 
-- [x] tests/ui run-pass：63.7%（1536 / 2413）
-- [x] tests/ui check-pass：70.3%（1271 / 1807）
+- [x] tests/ui run-pass：64.0%（1545 / 2413）
+- [x] tests/ui check-pass：70.4%（1273 / 1807）
 - [x] tests/ui build-pass：65.9%（89 / 135）
-- [ ] tests/ui compile-fail（注釈の行でエラー）：38.7%（2844 / 7358）
+- [ ] tests/ui compile-fail（注釈の行でエラー）：38.7%（2850 / 7358）
 - [x] 実際のクレート：fnv、adler2、hex、itoa、rustc-hash、cfg-if がビルドでき、同じ出力を出す（6 / 6）
 - [x] zust-analyzer が rust-analyzer と同じように答える：95.4%（rust-analyzer は 96.2%）
 
