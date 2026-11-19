@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795101067486,
+  "lastUpdate": 1795101804673,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -23054,6 +23054,165 @@ window.BENCHMARK_DATA = {
           {
             "name": "rt/strings run (-O)",
             "value": 34.311,
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "committer": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "distinct": true,
+          "id": "64564af7185faa60fb39f65a6fa861c91c02a9da",
+          "message": "f32 literals rounded once; as_str for the &*String rewrite; a Box<_> annotation keeps its shape\n\n- An f32 literal was parsed as f64 and then rounded to f32, which can round twice (9007199791611905.0 gave\n  9007199000000000, rustc 9007200000000000). It is parsed as f32 now.\n- acg rewrites `&*s` / `&**s` / `&s[..]` (s a String / &String) to `s.as_str()`, but the prelude selection did not\n  pick `as_str` for it (\"no method named `as_str` found for `String`\").\n- `let k: Box<_> = 22.into();`: the annotation's hole was filled with the type inference recorded, even when that was\n  not a Box (here bool); it is used only when it has the annotation's shape (and, for structs, the same struct).\n\ntests/ui: 8 newly passing (run-pass binding/borrowed-ptr-pattern-2.rs, nll/issue-24535-allow-mutable-borrow-in-match-\nguard.rs, numbers-arithmetic/f32-literal-rounding-32805.rs, pattern/const-pattern-str-match-lifetime.rs; check-pass\nborrowck/string-borrowing-pattern-matching-11869.rs, borrowck/string-literal-match-patterns-11869.rs; compile-fail\nasync-await/issue-67765-async-diagnostic.rs, liveness/liveness-use-after-move.rs). Removed: compile-fail\nregions/regions-pattern-typing-issue-19552.rs (it failed only on the missing as_str; zustc does not check `T: 'static`).\nKPIs: traits edit +0.19% (two more searches of the source in the prelude selection), the rest noise.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-19T15:18:30Z",
+          "tree_id": "bbd856f2b8d6a5c410c96b1d81dc6a04f050868a",
+          "url": "https://github.com/mizchi/zust/commit/64564af7185faa60fb39f65a6fa861c91c02a9da"
+        },
+        "date": 1795101804453,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "gen1000 build cold",
+            "value": 122.01,
+            "unit": "ms"
+          },
+          {
+            "name": "gen1000 build noop",
+            "value": 0.867,
+            "unit": "ms"
+          },
+          {
+            "name": "gen1000 build edit 1 fn",
+            "value": 18.311,
+            "unit": "ms"
+          },
+          {
+            "name": "gen1000 check",
+            "value": 79.273,
+            "unit": "ms"
+          },
+          {
+            "name": "gen1000 build cold peak RSS",
+            "value": 17.973,
+            "unit": "MiB"
+          },
+          {
+            "name": "gen1000 binary",
+            "value": 323.977,
+            "unit": "KiB"
+          },
+          {
+            "name": "gen1000 cache",
+            "value": 387.21,
+            "unit": "KiB"
+          },
+          {
+            "name": "gen1000 build noop instructions",
+            "value": 0.726,
+            "unit": "M instr"
+          },
+          {
+            "name": "gen1000 build edit 1 fn instructions",
+            "value": 133.606,
+            "unit": "M instr"
+          },
+          {
+            "name": "gen1000 check instructions",
+            "value": 786.349,
+            "unit": "M instr"
+          },
+          {
+            "name": "gen5000 build cold",
+            "value": 532.535,
+            "unit": "ms"
+          },
+          {
+            "name": "gen5000 build noop",
+            "value": 0.776,
+            "unit": "ms"
+          },
+          {
+            "name": "gen5000 build edit 1 fn",
+            "value": 64.575,
+            "unit": "ms"
+          },
+          {
+            "name": "gen5000 check",
+            "value": 372.346,
+            "unit": "ms"
+          },
+          {
+            "name": "gen5000 build cold peak RSS",
+            "value": 52.008,
+            "unit": "MiB"
+          },
+          {
+            "name": "gen5000 binary",
+            "value": 1558.336,
+            "unit": "KiB"
+          },
+          {
+            "name": "gen5000 cache",
+            "value": 1902.835,
+            "unit": "KiB"
+          },
+          {
+            "name": "gen5000 build noop instructions",
+            "value": 0.726,
+            "unit": "M instr"
+          },
+          {
+            "name": "gen5000 build edit 1 fn instructions",
+            "value": 627.885,
+            "unit": "M instr"
+          },
+          {
+            "name": "gen5000 check instructions",
+            "value": 3870.893,
+            "unit": "M instr"
+          },
+          {
+            "name": "rt/fib run (-O)",
+            "value": 54.8,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/hashmap run (-O)",
+            "value": 91.063,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/matmul run (-O)",
+            "value": 39.906,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/nbody run (-O)",
+            "value": 54.125,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/sieve run (-O)",
+            "value": 93.896,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/sort run (-O)",
+            "value": 144.482,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/strings run (-O)",
+            "value": 34.437,
             "unit": "ms"
           }
         ]
