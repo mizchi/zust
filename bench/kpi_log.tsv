@@ -55,3 +55,4 @@ date	commit	change	noop_M	edit_M	check_M	cache_KiB	lsp_G	run	check	build	cfail
 2026-11-19	bf7e12c	compound assignment order	625.171	626.762	3907.739	1902.8	-	1618	1366	95	3310
 2026-11-19	a6204f3	struct literal field order before ..base	625.174	626.766	3909.763	1902.8	-	1620	1366	95	3309
 2026-11-19	395abc3	compound assignment without lookahead; check as the least of 3	625.175	626.767	3907.639	1902.8	-	1620	1366	95	3310
+2026-11-19	118d4ef	let _ = unit struct drops	625.265	626.856	3907.728	1902.8	-	1623	1368	95	3307
