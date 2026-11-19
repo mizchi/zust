@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795055038421,
+  "lastUpdate": 1795055040451,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -17716,6 +17716,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "lsp peak RSS",
             "value": 69.559,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "committer": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "distinct": true,
+          "id": "509b25d33c853d3755e53cb708152162097cb084",
+          "message": "Check the bindings of `dyn Tr<Y = T>` against `type Y: Bound;`\n\nA trait's associated type declarations with bounds are now in the item summary\n(empty for other items: the cache size is unchanged), and `dyn Tr<Y = T>` meets a\n`Tr` bound only when T meets Y's bounds (T a primitive, `str` or a struct name).\ntests/ui compile-fail +3 (three of the tests the previous commit took out of the\nbaseline now pass for the right reason). KPIs unchanged.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-19T02:09:41Z",
+          "tree_id": "a634ee5799f893823b4718fa2cfa676be039130b",
+          "url": "https://github.com/mizchi/zust/commit/509b25d33c853d3755e53cb708152162097cb084"
+        },
+        "date": 1795055040085,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "lsp definition p50",
+            "value": 0.631,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp hover p50",
+            "value": 0.478,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp completion p50",
+            "value": 1.096,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp references p50",
+            "value": 11.741,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp rename p50",
+            "value": 0.522,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp signatureHelp p50",
+            "value": 0.901,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp documentHighlight p50",
+            "value": 1.098,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp ready (startup to indexed)",
+            "value": 138.444,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp peak RSS",
+            "value": 69.836,
             "unit": "MiB"
           }
         ]
