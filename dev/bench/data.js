@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795118266664,
+  "lastUpdate": 1795118268944,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -59160,6 +59160,70 @@ window.BENCHMARK_DATA = {
           {
             "name": "tests/ui compile-fail passing",
             "value": 3316,
+            "unit": "tests"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "committer": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "distinct": true,
+          "id": "e6166560e71ab659e1f719c30fe4a9ab6f997c51",
+          "message": "E0191: a dyn type binds every associated type of its trait\n\n`Box<dyn T>` for `trait T { type A; .. }` was accepted. The summary of a trait member `type A;` now records every\nassociated type declared without a default (also those without bounds), and coercing to `dyn T` without `A = ..` is\n\"the value of the associated type `A` in `T` must be specified (E0191)\". (`dyn Iterator` coercions go through\nanother path and are not checked yet.)\n\ntests/ui: compile-fail associated-types/associated-types-incomplete-object.rs,\ntraits/cast-as-dyn-trait-wo-assoc-type-issue-21950.rs pass; 0 regressions. KPIs: no change outside noise.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-19T19:52:19Z",
+          "tree_id": "cffd26f18892f5a42d7bdc10b40aba0afab9121b",
+          "url": "https://github.com/mizchi/zust/commit/e6166560e71ab659e1f719c30fe4a9ab6f997c51"
+        },
+        "date": 1795118268385,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tests/ui run-pass pass rate",
+            "value": 70.02,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui run-pass passing",
+            "value": 1670,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui check-pass pass rate",
+            "value": 77.53,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui check-pass passing",
+            "value": 1401,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui build-pass pass rate",
+            "value": 70.37,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui build-pass passing",
+            "value": 95,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui compile-fail pass rate",
+            "value": 45.09,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui compile-fail passing",
+            "value": 3318,
             "unit": "tests"
           }
         ]
