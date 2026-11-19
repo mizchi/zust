@@ -967,6 +967,19 @@ impl Cx<'_> {
     pub(crate) fn reference(&mut self, e: &Expr, expected: Option<Ty>) -> R<V> {
         let Expr::Ref(m, rexpr) = e else { return err(SP, "internal: expected a reference") };
         let m = *m;
+        // `&*x` / `&mut *x` with x a fat pointer (`&[T]`, `&str`, `Box<dyn Tr>` ..): the reborrow is x's value itself
+        if let Expr::Unary(op, inner, _) = strip_paren(rexpr) {
+            if op == "*" {
+                if let Some(it) = self.peek(inner).filter(|t| t.is_fat() && matches!(t, Ty::Ref(..) | Ty::Box(_))) {
+                    let pointee = match it {
+                        Ty::Ref(_, p) | Ty::Box(p) => *p,
+                        _ => unreachable!(),
+                    };
+                    let (v, _) = self.read_no_move(inner)?;
+                    return Ok((v, Ty::Ref(m, intern(pointee))));
+                }
+            }
+        }
         // `&a[lo..hi]` → スライス (fat pointer)
         if let Expr::Index(b, ix, _) = &**rexpr {
             if let Expr::Range(..) = &**ix {
@@ -1797,6 +1810,13 @@ impl Cx<'_> {
 
     pub(crate) fn call(&mut self, c: &Expr, expected: Option<Ty>) -> R<V> {
         let Expr::Call(func, cargs) = c else { return err(SP, "internal: expected a call") };
+        // `(*f)(x)` with f: `Box<dyn Fn ..>` / `&dyn Fn ..` / a closure behind a reference: `f(x)`
+        if let Expr::Unary(op, inner, _) = strip_paren(func) {
+            if op == "*" && matches!(self.peek(inner), Some(Ty::Box(_) | Ty::Ref(..))) {
+                let ne = self.keep_expr(Expr::Call(inner.clone(), cargs.clone()));
+                return self.expr(ne, expected);
+            }
+        }
         if let Some(r) = self.default_call(c, expected)? {
             return Ok(r);
         }

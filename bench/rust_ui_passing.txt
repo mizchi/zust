@@ -831,6 +831,7 @@ run-pass	box/box-deref-in-match-arm-no-invalid-ir.rs
 run-pass	box/box-deref-match-arm.rs
 run-pass	box/empty-alloc-deref-rvalue.rs
 run-pass	box/match-box-deref-codegen.rs
+run-pass	box/new-box.rs
 run-pass	box/self-assignment.rs
 compile-fail	box/suggest-box-for-expr-field-issue-139631.rs
 run-pass	box/unit/expr-block-generic-unique1.rs
@@ -1108,6 +1109,7 @@ check-pass	coercion/index-coercion-over-indexmut-72002.rs
 check-pass	coercion/infer-coerce-unsized-trait-object.rs
 compile-fail	coercion/intrinsic-in-unifying-coercion-149143.rs
 check-pass	coercion/issue-101066.rs
+run-pass	coercion/issue-3794.rs
 compile-fail	coercion/leak_check_fndef_lub_deadcode_breakage.rs
 run-pass	coercion/method-return-trait-object-14399.rs
 compile-fail	coercion/mut-mut-wont-coerce.rs
@@ -2065,7 +2067,6 @@ run-pass	for-loop-while/foreach-simple-outer-slot.rs
 run-pass	for-loop-while/issue-1257.rs
 run-pass	for-loop-while/issue-2216.rs
 run-pass	for-loop-while/issue-69841.rs
-compile-fail	for-loop-while/iter-from-mac-call.rs
 run-pass	for-loop-while/label_break_value.rs
 compile-fail	for-loop-while/label_break_value_invalid.rs
 run-pass	for-loop-while/labeled-break.rs
@@ -5694,6 +5695,7 @@ run-pass	unboxed-closures/unboxed-closures-by-ref.rs
 run-pass	unboxed-closures/unboxed-closures-call-fn-autoderef.rs
 run-pass	unboxed-closures/unboxed-closures-call-sugar-autoderef.rs
 run-pass	unboxed-closures/unboxed-closures-call-sugar-object-autoderef.rs
+run-pass	unboxed-closures/unboxed-closures-call-sugar-object.rs
 run-pass	unboxed-closures/unboxed-closures-counter-not-moved.rs
 run-pass	unboxed-closures/unboxed-closures-direct-sugary-call.rs
 run-pass	unboxed-closures/unboxed-closures-extern-fn-hr.rs
