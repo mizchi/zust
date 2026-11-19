@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795074252171,
+  "lastUpdate": 1795074254110,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -24328,6 +24328,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "lsp peak RSS",
             "value": 70.949,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "committer": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "distinct": true,
+          "id": "56e72f191ca9a7f93cfa3972dbace1988dc846f4",
+          "message": "README: what is supported (qualified paths, integer and slice methods, impls for &T)\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-19T07:28:50Z",
+          "tree_id": "559cb8ce36104bcf4e2d3b5803ffd456e8800cab",
+          "url": "https://github.com/mizchi/zust/commit/56e72f191ca9a7f93cfa3972dbace1988dc846f4"
+        },
+        "date": 1795074253666,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "lsp definition p50",
+            "value": 0.463,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp hover p50",
+            "value": 0.385,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp completion p50",
+            "value": 0.963,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp references p50",
+            "value": 2.807,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp rename p50",
+            "value": 0.527,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp signatureHelp p50",
+            "value": 0.659,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp documentHighlight p50",
+            "value": 0.659,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp ready (startup to indexed)",
+            "value": 109.266,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp peak RSS",
+            "value": 70.844,
             "unit": "MiB"
           }
         ]
