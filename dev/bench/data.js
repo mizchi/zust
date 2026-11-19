@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795074256014,
+  "lastUpdate": 1795074257866,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -39086,6 +39086,70 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/mizchi/zust/commit/1f8e8b71c3e678cba5c1fcac73efb90918dc88e4"
         },
         "date": 1795073648660,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tests/ui run-pass pass rate",
+            "value": 66.5,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui run-pass passing",
+            "value": 1586,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui check-pass pass rate",
+            "value": 74.27,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui check-pass passing",
+            "value": 1342,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui build-pass pass rate",
+            "value": 69.63,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui build-pass passing",
+            "value": 94,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui compile-fail pass rate",
+            "value": 39.34,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui compile-fail passing",
+            "value": 2895,
+            "unit": "tests"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "committer": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "distinct": true,
+          "id": "56e72f191ca9a7f93cfa3972dbace1988dc846f4",
+          "message": "README: what is supported (qualified paths, integer and slice methods, impls for &T)\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-19T07:28:50Z",
+          "tree_id": "559cb8ce36104bcf4e2d3b5803ffd456e8800cab",
+          "url": "https://github.com/mizchi/zust/commit/56e72f191ca9a7f93cfa3972dbace1988dc846f4"
+        },
+        "date": 1795074257422,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
