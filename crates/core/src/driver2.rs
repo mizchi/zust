@@ -76,6 +76,35 @@ pub struct Analysis {
 }
 
 /// クレートの印 (panic の場所の行の上位ビット。ライブラリの panic の表の 8 byte 目): 1..=4000
+/// `L:C: ..` with L a tagged line (`tag << 20 | line in the crate`, line_base_for): the line in the combined source
+/// (the `(at L:C)` of a second place too)
+fn untag_lines(e: &str, shift: u32) -> String {
+    let fix = |n: u64| if n >= 1 << 20 { (n & ((1 << 20) - 1)) + shift as u64 } else { n };
+    let mut out = String::with_capacity(e.len());
+    let b = e.as_bytes();
+    let mut i = 0;
+    while i < b.len() {
+        // (a number followed by `:` and a digit, at the start or after `at ` / ` (at `)
+        let at_start = i == 0 || e[..i].ends_with("at ");
+        if at_start && b[i].is_ascii_digit() {
+            let mut j = i;
+            while j < b.len() && b[j].is_ascii_digit() {
+                j += 1;
+            }
+            if j + 1 < b.len() && b[j] == b':' && b[j + 1].is_ascii_digit() {
+                let n: u64 = e[i..j].parse().unwrap_or(0);
+                out.push_str(&fix(n).to_string());
+                i = j;
+                continue;
+            }
+        }
+        let ch = e[i..].chars().next().unwrap();
+        out.push(ch);
+        i += ch.len_utf8();
+    }
+    out
+}
+
 pub fn crate_tag(name: &str) -> u32 {
     let mut h: u32 = 0x811c9dc5;
     for b in name.bytes() {
@@ -1125,8 +1154,14 @@ fn compile_id_req(a: &Analysis, insts: &Mutex<Insts>, id: u32) -> R<(Blob, Vec<u
         let g = insts.lock().unwrap();
         a.line_base_for(&*g, id).unwrap_or(it.line as u32 - 1)
     };
+    // (a dependency crate's function has its lines from that crate's start, tagged (line_base_for): its errors are put
+    // back at the lines of the combined source)
+    let shift = {
+        let g = insts.lock().unwrap();
+        a.line_shift(&*g, id)
+    };
     let (c, req) = acg::compile(&a.prog, insts, id, f, lb, &a.inl)
-        .map_err(|e| if acg::has_loc(&e) { e } else { format!("{}:1: in `{}`: {e}", it.line, a.prog.names[body as usize]) })?;
+        .map_err(|e| if acg::has_loc(&e) { untag_lines(&e, shift) } else { format!("{}:1: in `{}`: {e}", it.line, a.prog.names[body as usize]) })?;
     // (check は機械語にしない。ビルドは記録をバックエンドで機械語にする)
     if a.inl.check_only {
         return Ok((acg::Compiled::empty_blob(), req));

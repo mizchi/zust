@@ -51,8 +51,34 @@ impl SrcMap {
         (col as i64 - d as i64).max(0) as u32
     }
 
-    /// エラーの先頭の `行:桁:` (か `行:`) を `ファイル:行:桁:` にする
+    /// relocate_err, and a second place `(at L:C)` in the message: `(at L:C)` in the same file, else `(at file:L:C)`
     pub fn relocate_err(&self, e: &str) -> String {
+        let head = self.relocate_head(e);
+        let Some(k) = head.find("(at ") else { return head };
+        let rest = &head[k + 4..];
+        let b = rest.as_bytes();
+        let mut i = 0;
+        while i < b.len() && b[i].is_ascii_digit() {
+            i += 1;
+        }
+        let mut j = i + 1;
+        while j < b.len() && b[j].is_ascii_digit() {
+            j += 1;
+        }
+        if i == 0 || i >= b.len() || b[i] != b':' || j == i + 1 || j >= b.len() || b[j] != b')' {
+            return head;
+        }
+        let line: u32 = rest[..i].parse().unwrap_or(0);
+        let col: u32 = rest[i + 1..j].parse().unwrap_or(0);
+        let (f, l) = self.locate(line);
+        let c = self.fix_col(line, col);
+        let main_file = head.split(':').next().unwrap_or("");
+        let place = if f == main_file { format!("{l}:{c}") } else { format!("{f}:{l}:{c}") };
+        format!("{}(at {place}){}", &head[..k], &rest[j + 1..])
+    }
+
+    /// エラーの先頭の `行:桁:` (か `行:`) を `ファイル:行:桁:` にする
+    fn relocate_head(&self, e: &str) -> String {
         let b = e.as_bytes();
         let mut i = 0;
         while i < b.len() && b[i].is_ascii_digit() {
