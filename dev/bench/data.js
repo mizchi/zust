@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795124921656,
+  "lastUpdate": 1795124924128,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -61366,6 +61366,70 @@ window.BENCHMARK_DATA = {
           {
             "name": "tests/ui check-pass passing",
             "value": 1406,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui build-pass pass rate",
+            "value": 70.37,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui build-pass passing",
+            "value": 95,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui compile-fail pass rate",
+            "value": 45.18,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui compile-fail passing",
+            "value": 3324,
+            "unit": "tests"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "committer": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "distinct": true,
+          "id": "e468530437e44ea1b2692a2382daff0eac06c3c9",
+          "message": "Box<[T]> equality; an empty-array scrutinee typed by its const pattern\n\n- `a == b` / `assert_eq!(a, b)` on `Box<[T]>`: the (pointer, length)\n  pair compared as for `&[T]`.\n- `match [] { FOO => .. }` with `const FOO: [B; 0]`: the scrutinee\n  takes the const's array type.\n\ntests/ui: +2 genuine run-pass passes.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-19T21:43:46Z",
+          "tree_id": "1d47acb83077c305751a302e93d04aca3837b7a5",
+          "url": "https://github.com/mizchi/zust/commit/e468530437e44ea1b2692a2382daff0eac06c3c9"
+        },
+        "date": 1795124923486,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tests/ui run-pass pass rate",
+            "value": 70.57,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui run-pass passing",
+            "value": 1683,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui check-pass pass rate",
+            "value": 77.75,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui check-pass passing",
+            "value": 1405,
             "unit": "tests"
           },
           {
