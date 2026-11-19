@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795106387951,
+  "lastUpdate": 1795106389969,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -45974,6 +45974,85 @@ window.BENCHMARK_DATA = {
           {
             "name": "parity 一致の平均",
             "value": 95.06,
+            "unit": "%"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "committer": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "distinct": true,
+          "id": "bc3181b5ceb80a3792c76b110aae28bbce104e27",
+          "message": "impl Trait inside a declared type; self-recursive impl Trait bodies; a list of accidental passes\n\n- `-> Result<(), impl Debug> { .. Err(Target) }`: the body is inferred against the declared type with a hole for each\n  `impl` (before, it was inferred alone, and `Ok`'s type stayed open: \"cannot infer the `impl Trait` return type\").\n- `fn test() -> impl Sized { test() }`: a body that only returns its own result is `()`.\n- bench/rust_ui_accidental.txt: compile-fail tests zustc rejects at the annotated line for another reason than the\n  one they test; rust_ui.py leaves them out of the baseline and of \"newly passing\" (they used to come back with each\n  --write-baseline).\n\ntests/ui: check-pass impl-trait/recursive-impl-trait-type-direct.rs, run-pass let-else/let-else-temp-borrowck.rs;\n0 regressions. KPIs: no change outside noise.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-19T16:31:11Z",
+          "tree_id": "15967783f0fcfacd961526d73695e81a6247e017",
+          "url": "https://github.com/mizchi/zust/commit/bc3181b5ceb80a3792c76b110aae28bbce104e27"
+        },
+        "date": 1795106389498,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "parity documentSymbol (名前の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity workspace/symbol (上位 20 の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity definition (行き先の一致)",
+            "value": 91.176,
+            "unit": "%"
+          },
+          {
+            "name": "parity hover (名前を含む)",
+            "value": 80,
+            "unit": "%"
+          },
+          {
+            "name": "parity references (数の一致)",
+            "value": 88.571,
+            "unit": "%"
+          },
+          {
+            "name": "parity documentHighlight (数の一致)",
+            "value": 91.176,
+            "unit": "%"
+          },
+          {
+            "name": "parity rename (書き換えの一致)",
+            "value": 91.304,
+            "unit": "%"
+          },
+          {
+            "name": "parity signatureHelp (名前・引数の数・今の引数の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity completion `x.\\|` (書いてある名前を含む)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity completion `na\\|me` (同)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity 一致の平均",
+            "value": 94.223,
             "unit": "%"
           }
         ]
