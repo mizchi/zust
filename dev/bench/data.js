@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795095400966,
+  "lastUpdate": 1795095402889,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -43156,6 +43156,85 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/mizchi/zust/commit/f54b63728ea3b4e7c0bf205bc1e9b66e134058d7"
         },
         "date": 1795094998527,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "parity documentSymbol (名前の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity workspace/symbol (上位 20 の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity definition (行き先の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity hover (名前を含む)",
+            "value": 87.5,
+            "unit": "%"
+          },
+          {
+            "name": "parity references (数の一致)",
+            "value": 88.889,
+            "unit": "%"
+          },
+          {
+            "name": "parity documentHighlight (数の一致)",
+            "value": 96.97,
+            "unit": "%"
+          },
+          {
+            "name": "parity rename (書き換えの一致)",
+            "value": 94.444,
+            "unit": "%"
+          },
+          {
+            "name": "parity signatureHelp (名前・引数の数・今の引数の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity completion `x.\\|` (書いてある名前を含む)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity completion `na\\|me` (同)",
+            "value": 80,
+            "unit": "%"
+          },
+          {
+            "name": "parity 一致の平均",
+            "value": 94.78,
+            "unit": "%"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "committer": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "distinct": true,
+          "id": "eaf8aa7b2850d226264166dc057a14210f9c271d",
+          "message": "kpi_track: cratebench/run.py loaded by its path (bench/ has a run.py of its own)\n\nMeasured on the reference 45579fc against now, the two new workloads show what gen5000 hid: check of gen_traits\n(without dyn, which 45579fc cannot build) 955.1 M -> 959.6 M (+0.47%), crates' edit builds 315.3 M -> 317.6 M\n(+0.70%), where gen5000's check moved +0.06%.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-19T13:30:35Z",
+          "tree_id": "d9f84e733a539ec2d4f8f393d4d8f573bd80a82e",
+          "url": "https://github.com/mizchi/zust/commit/eaf8aa7b2850d226264166dc057a14210f9c271d"
+        },
+        "date": 1795095402406,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
