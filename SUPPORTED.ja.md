@@ -9,8 +9,8 @@
 
 ## 全体
 
-- [x] tests/ui run-pass：65.1%（1552 / 2385）
-- [x] tests/ui check-pass：70.6%（1276 / 1807）
+- [x] tests/ui run-pass：65.2%（1555 / 2385）
+- [x] tests/ui check-pass：70.7%（1278 / 1807）
 - [x] tests/ui build-pass：65.9%（89 / 135）
 - [ ] tests/ui compile-fail（注釈の行でエラー）：38.7%（2850 / 7358）
 - [x] 実際のクレート：fnv、adler2、hex、itoa、rustc-hash、cfg-if がビルドでき、同じ出力を出す（6 / 6）

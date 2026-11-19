@@ -211,8 +211,8 @@ only the tests it can be asked to handle (no nightly features, auxiliary crates 
 
 | kind | applicable | pass |
 |---|---:|---:|
-| run-pass (builds, runs, same output) | 2385 | 1552 (65.1%) |
-| check-pass (accepted by `zustc check`) | 1807 | 1276 (70.6%) |
+| run-pass (builds, runs, same output) | 2385 | 1555 (65.2%) |
+| check-pass (accepted by `zustc check`) | 1807 | 1278 (70.7%) |
 | build-pass | 135 | 89 (65.9%) |
 | compile-fail (rejected at an annotated line) | 7358 | 2850 (38.7%) |
 
