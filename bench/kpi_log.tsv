@@ -81,3 +81,5 @@ date	commit	change	noop_M	edit_M	check_M	cache_KiB	lsp_G	run	check	build	cfail
 2026-11-19	e616656+	E0191 for dyn Iterator: the trait's type Item is selected with it	0.872	592.135	3884.061	1902.8	-	1671	1402	95	3318	1180.983	63.509	11.264	320.524
 2026-11-19	36f5544+	macros: textual scope (cannot find macro above its definition), pub m!(); fmt macros after expansion spacing	0.875	591.494	3882.753	1902.8	-	1676	1405	95	3321	1181.068	63.517	11.278	320.422
 2026-11-19	afa8258+	integer literal typed by the one integer impl with the method; methods through nested Box<number>, self: Box<Self> on numbers	0.873	591.511	3882.752	1902.8	-	1679	1405	95	3322	1180.894	63.510	11.265	320.366
+2026-11-19	fb2070b+	ops: BitAndAssign/BitOrAssign/BitXorAssign/ShlAssign/ShrAssign/Shl/Shr traits for user impls	0.873	592.023	3881.059	1902.8	-	1679	1405	95	3324	1181.280	64.135	11.269	323.453
+2026-11-19	fb2070b+	ops: Bit*Assign/Shl*/Shr* traits; selection caches op/cmp/gated trait lookups per item	0.871	591.396	3878.918	1902.8	-	1679	1405	95	3323	1180.711	63.168	11.258	319.880

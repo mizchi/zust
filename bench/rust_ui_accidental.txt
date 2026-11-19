@@ -10,3 +10,4 @@ compile-fail	async-await/edition-deny-async-fns-2015.rs
 compile-fail	borrowck/cannot-return-ref-to-temporary-format-args.rs
 compile-fail	attributes/crate-type-macro-call.rs
 compile-fail	recursion/recursion_limit/invalid_macro.rs
+compile-fail	wf/wf-misc-methods-issue-28609.rs

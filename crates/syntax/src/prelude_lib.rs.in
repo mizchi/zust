@@ -9076,6 +9076,29 @@ pub trait DivAssign {
 pub trait RemAssign {
     fn rem_assign(&mut self, rhs: Self);
 }
+pub trait BitAndAssign {
+    fn bitand_assign(&mut self, rhs: Self);
+}
+pub trait BitOrAssign {
+    fn bitor_assign(&mut self, rhs: Self);
+}
+pub trait BitXorAssign {
+    fn bitxor_assign(&mut self, rhs: Self);
+}
+pub trait ShlAssign {
+    fn shl_assign(&mut self, rhs: Self);
+}
+pub trait ShrAssign {
+    fn shr_assign(&mut self, rhs: Self);
+}
+pub trait Shl {
+    type Output;
+    fn shl(self, rhs: Self) -> Self::Output;
+}
+pub trait Shr {
+    type Output;
+    fn shr(self, rhs: Self) -> Self::Output;
+}
 
 pub trait PartialEq {
     fn eq(&self, other: &Self) -> bool;

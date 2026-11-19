@@ -171,37 +171,61 @@ fn helper_suffixes() -> &'static HashMap<&'static str, Vec<&'static str>> {
 
 /// 比較の trait (PartialEq / Eq / PartialOrd / Ord) の宣言か
 fn is_cmp_trait(h: usize) -> bool {
-    let it = &items()[h].0;
-    matches!(it.kind, ItemKind::TraitHeader)
-        && it
-            .idents
+    // (computed once per item: asked for every trait member on each round of the selection)
+    static T: OnceLock<Vec<bool>> = OnceLock::new();
+    T.get_or_init(|| {
+        items()
             .iter()
-            .any(|&(a, b)| matches!(&PRELUDE[a as usize..b as usize], "PartialEq" | "Eq" | "PartialOrd" | "Ord" | "Clone" | "Copy" | "Default"))
+            .map(|(it, _, _)| {
+                matches!(it.kind, ItemKind::TraitHeader)
+                    && it.idents.iter().any(|&(a, b)| {
+                        matches!(&PRELUDE[a as usize..b as usize], "PartialEq" | "Eq" | "PartialOrd" | "Ord" | "Clone" | "Copy" | "Default")
+                    })
+            })
+            .collect()
+    })[h]
 }
 
 /// 演算子の trait (宣言はユーザが手で impl するときだけ付ける)
 const OP_TRAITS: &[&str] = &[
     "Add", "Sub", "Mul", "Div", "Rem", "Neg", "Not", "BitAnd", "BitOr", "BitXor", "AddAssign", "SubAssign",
-    "MulAssign", "DivAssign", "RemAssign", "Index", "IndexMut", "From", "Deref", "IntoIterator", "Error",
+    "MulAssign", "DivAssign", "RemAssign", "BitAndAssign", "BitOrAssign", "BitXorAssign", "ShlAssign", "ShrAssign",
+    "Shl", "Shr", "Index", "IndexMut", "From", "Deref", "IntoIterator", "Error",
 ];
 
-/// 演算子の trait の宣言か
-fn is_op_trait(h: usize) -> bool {
-    let it = &items()[h].0;
-    matches!(it.kind, ItemKind::TraitHeader)
-        && it.idents.iter().any(|&(a, b)| OP_TRAITS.contains(&&PRELUDE[a as usize..b as usize]))
+/// 演算子の trait の宣言なら、その trait の名前 (item ごとに 1 回だけ計算する)
+fn op_trait_name(h: usize) -> Option<&'static str> {
+    static T: OnceLock<Vec<Option<&'static str>>> = OnceLock::new();
+    T.get_or_init(|| {
+        items()
+            .iter()
+            .map(|(it, _, _)| {
+                if !matches!(it.kind, ItemKind::TraitHeader) {
+                    return None;
+                }
+                it.idents.iter().map(|&(a, b)| &PRELUDE[a as usize..b as usize]).find(|w| OP_TRAITS.contains(w))
+            })
+            .collect()
+    })[h]
 }
 
 /// 名前が要るときだけ付ける trait の宣言 (メンバの名前が `write` / `hash` などよくある名前のもの)
 fn gated_trait(h: usize) -> Option<&'static str> {
-    let it = &items()[h].0;
-    if !matches!(it.kind, ItemKind::TraitHeader) {
-        return None;
-    }
-    it.idents
-        .iter()
-        .map(|&(a, b)| &PRELUDE[a as usize..b as usize])
-        .find(|w| matches!(*w, "Hasher" | "Hash" | "__BoolThen" | "__AsBytes" | "__PathExt" | "__AsPathStr" | "BufRead" | "Read" | "Write" | "__FWr" | "ExactSizeIterator" | "BuildHasher"))
+    // (computed once per item)
+    static T: OnceLock<Vec<Option<&'static str>>> = OnceLock::new();
+    T.get_or_init(|| {
+        items()
+            .iter()
+            .map(|(it, _, _)| {
+                if !matches!(it.kind, ItemKind::TraitHeader) {
+                    return None;
+                }
+                it.idents.iter().map(|&(a, b)| &PRELUDE[a as usize..b as usize]).find(|w| {
+                    matches!(*w, "Hasher" | "Hash" | "__BoolThen" | "__AsBytes" | "__PathExt" | "__AsPathStr" | "BufRead" | "Read" | "Write" | "__FWr" | "ExactSizeIterator" | "BuildHasher")
+                })
+            })
+            .collect()
+    })[h]
 }
 
 /// 名前が要るときだけ付ける trait の実装 (`impl Read for &[u8]`)
@@ -1526,8 +1550,7 @@ pub fn select_with(user_src: &str, user_items: &[SrcItem], cache: &mut SelectCac
                 if !cmp_impl && is_cmp_trait(h as usize) {
                     continue;
                 }
-                if is_op_trait(h as usize)
-                    && !all[h as usize].0.idents.iter().any(|&(a, b)| op_impls.contains(&&PRELUDE[a as usize..b as usize]))
+                if op_trait_name(h as usize).is_some_and(|n| !op_impls.contains(&n))
                     // (the Error trait for the prelude's own `impl Error for IoError ..`)
                     && !(name.as_deref() == Some("__err_mark") && need.contains("Error"))
                 {
@@ -1678,5 +1701,6 @@ pub fn select_with(user_src: &str, user_items: &[SrcItem], cache: &mut SelectCac
     if open_impl {
         out.push_str("}\n");
     }
+
     out
 }
