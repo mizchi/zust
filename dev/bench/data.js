@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795124342424,
+  "lastUpdate": 1795124344204,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -60995,6 +60995,70 @@ window.BENCHMARK_DATA = {
           {
             "name": "tests/ui check-pass passing",
             "value": 1405,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui build-pass pass rate",
+            "value": 70.37,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui build-pass passing",
+            "value": 95,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui compile-fail pass rate",
+            "value": 45.18,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui compile-fail passing",
+            "value": 3324,
+            "unit": "tests"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "committer": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "distinct": true,
+          "id": "ee10b39515413c67539400a56671d99fa8c35f0d",
+          "message": "Empty arrays typed from context; methods of Box<[T; N]>\n\n- `f(&[], &[1, 2])` / `f(None, Some(x))` for a generic f: the other\n  (non-closure) arguments' types solve the type parameters the empty\n  argument's type mentions (`&[i32; 2]` coerces to a `&[T]` parameter).\n- `Box::<[bool; 0]>::new([])`: the turbofish is the content's type.\n- `let _: [(); 0] = [];`: the annotation types an array literal.\n- `b.len()` / `b.iter()` / `b.sort()` with b: Box<[T; N]>: the array's\n  (or the slice's, for the mutating ones) method through the deref.\n\ntests/ui: +4 genuine passes (3 run-pass, 1 check-pass).\nKPI: within noise (all deltas <= +0.12%).\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-19T21:32:15Z",
+          "tree_id": "ee4937910590ca779365fbf6fad2ee2f027c2feb",
+          "url": "https://github.com/mizchi/zust/commit/ee10b39515413c67539400a56671d99fa8c35f0d"
+        },
+        "date": 1795124343972,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tests/ui run-pass pass rate",
+            "value": 70.52,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui run-pass passing",
+            "value": 1682,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui check-pass pass rate",
+            "value": 77.81,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui check-pass passing",
+            "value": 1406,
             "unit": "tests"
           },
           {
