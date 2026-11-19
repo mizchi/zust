@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795114849519,
+  "lastUpdate": 1795114852010,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -57676,6 +57676,70 @@ window.BENCHMARK_DATA = {
           {
             "name": "tests/ui compile-fail passing",
             "value": 3313,
+            "unit": "tests"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "committer": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "distinct": true,
+          "id": "a3ceff5e1f4e4135adac5a793fd9995ace4875c2",
+          "message": "E0507: moving out of `*x` for an Rc / a Deref type of the program's\n\n`let x = *rc;` (rc: Rc<NonCopy>) was accepted: the place is `*rc.deref()`, reached through the returned reference, so\nno move of a local was seen, and the program freed the value twice. A by-value read of `*x` whose type is not Copy,\nwith x of a Deref type other than Box, is now \"cannot move out of an `Rc`\" / \"cannot move out of dereference of `T`\"\n(reading a Copy value, `(*rc).len()` and `(*rc).clone()` are unchanged). A pattern moving out of `*rc`\n(`let (a,) = *rc;`) is not caught yet.\n\ntests/ui: compile-fail borrowck/borrowck-move-out-of-overloaded-deref.rs passes; 0 regressions. cratebench: same\noutput. KPIs: no change outside noise.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-19T18:56:01Z",
+          "tree_id": "9b493ed4d5412570928eb3b020f3ff6d85028d75",
+          "url": "https://github.com/mizchi/zust/commit/a3ceff5e1f4e4135adac5a793fd9995ace4875c2"
+        },
+        "date": 1795114851503,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tests/ui run-pass pass rate",
+            "value": 69.73,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui run-pass passing",
+            "value": 1663,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui check-pass pass rate",
+            "value": 77.53,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui check-pass passing",
+            "value": 1401,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui build-pass pass rate",
+            "value": 70.37,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui build-pass passing",
+            "value": 95,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui compile-fail pass rate",
+            "value": 45.05,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui compile-fail passing",
+            "value": 3315,
             "unit": "tests"
           }
         ]
