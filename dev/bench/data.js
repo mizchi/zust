@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795078827800,
+  "lastUpdate": 1795078830091,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -35481,6 +35481,85 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/mizchi/zust/commit/3753b19816b3bd3ad68ab03e4865b4ca923ebe31"
         },
         "date": 1795078554407,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "parity documentSymbol (名前の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity workspace/symbol (上位 20 の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity definition (行き先の一致)",
+            "value": 94.118,
+            "unit": "%"
+          },
+          {
+            "name": "parity hover (名前を含む)",
+            "value": 82.5,
+            "unit": "%"
+          },
+          {
+            "name": "parity references (数の一致)",
+            "value": 85.714,
+            "unit": "%"
+          },
+          {
+            "name": "parity documentHighlight (数の一致)",
+            "value": 94.118,
+            "unit": "%"
+          },
+          {
+            "name": "parity rename (書き換えの一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity signatureHelp (名前・引数の数・今の引数の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity completion `x.\\|` (書いてある名前を含む)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity completion `na\\|me` (同)",
+            "value": 95.833,
+            "unit": "%"
+          },
+          {
+            "name": "parity 一致の平均",
+            "value": 95.228,
+            "unit": "%"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "committer": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "distinct": true,
+          "id": "5178a1d99b045bb2683a21fe27de63342104ef71",
+          "message": "rust_ui.py: //~v annotations (one line down per v), as compiletest reads them\n\nA fix of the harness, not of zustc: compile-fail 3275 -> 3293 counts tests whose annotation points down.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-19T08:48:01Z",
+          "tree_id": "6623bfffae96997d7bce526f75c466238e1e354a",
+          "url": "https://github.com/mizchi/zust/commit/5178a1d99b045bb2683a21fe27de63342104ef71"
+        },
+        "date": 1795078829610,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
