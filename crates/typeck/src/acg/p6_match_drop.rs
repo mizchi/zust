@@ -119,10 +119,40 @@ impl Cx<'_> {
                 self.release_outer(scrut, sflag);
             }
             if let Some(g) = &arm.guard {
-                let (c, ct) = self.expr(g, Some(Ty::Bool))?;
-                self.same(SP, ct, Ty::Bool)?;
-                if let Some(c) = c {
-                    self.require(c, next);
+                // (`P if let Q = e && c => ..`: each `let` of the guard tests and binds in the arm's scope, each other
+                // condition must hold; a failure goes to the next arm)
+                fn chain<'a>(e: &'a Expr, out: &mut Vec<&'a Expr>) {
+                    match e {
+                        Expr::Binary(op, l, r, _) if op == "&&" => {
+                            chain(l, out);
+                            chain(r, out);
+                        }
+                        Expr::Paren(x) if matches!(&**x, Expr::Let(..)) => out.push(x),
+                        e => out.push(e),
+                    }
+                }
+                let mut cs = vec![];
+                chain(g, &mut cs);
+                if !cs.iter().any(|c| matches!(c, Expr::Let(..))) {
+                    cs = vec![g];
+                }
+                for c in cs {
+                    if let Expr::Let(lpat, lexpr) = c {
+                        let Some(lplace) = self.bk_scrutinee(lexpr, None, &[&**lpat])? else {
+                            break;
+                        };
+                        self.pat_test(lpat, lplace, next)?;
+                        self.bk_bind_begin();
+                        let r = self.pat_bind(lpat, lplace, BindMode::Move);
+                        self.bk_bind_end();
+                        r?;
+                        continue;
+                    }
+                    let (c, ct) = self.expr(c, Some(Ty::Bool))?;
+                    self.same(SP, ct, Ty::Bool)?;
+                    if let Some(c) = c {
+                        self.require(c, next);
+                    }
                 }
             }
             let t0 = self.temps.len();

@@ -370,11 +370,14 @@ check-pass	async-await/issues/issue-64433.rs
 check-pass	async-await/issues/issue-64477.rs
 compile-fail	async-await/issues/issue-65159.rs
 check-pass	async-await/issues/issue-65436-raw-ptr-not-send.rs
+build-pass	async-await/issues/issue-66695-static-refs.rs
+build-pass	async-await/issues/issue-67611-static-mut-refs.rs
 check-pass	async-await/issues/issue-69307-nested.rs
 check-pass	async-await/issues/issue-69307.rs
 check-pass	async-await/issues/issue-78600.rs
 compile-fail	async-await/issues/issue-95307.rs
 compile-fail	async-await/issues/non-async-enclosing-span.rs
+check-pass	async-await/missed-capture-issue-107414.rs
 run-pass	async-await/multiple-lifetimes/elided.rs
 run-pass	async-await/multiple-lifetimes/fn-ptr.rs
 check-pass	async-await/multiple-lifetimes/hrtb.rs
@@ -467,6 +470,7 @@ compile-fail	binding/issue-53114-safety-checks.rs
 run-pass	binding/let-assignability.rs
 run-pass	binding/let-destruct-ref.rs
 run-pass	binding/let-var-hygiene.rs
+run-pass	binding/match-beginning-vert.rs
 run-pass	binding/match-borrowed_str.rs
 run-pass	binding/match-bot-2.rs
 run-pass	binding/match-bot.rs
@@ -616,6 +620,7 @@ compile-fail	borrowck/borrowck-closures-two-mut.rs
 compile-fail	borrowck/borrowck-closures-unique.rs
 compile-fail	borrowck/borrowck-consume-upcast-box.rs
 compile-fail	borrowck/borrowck-deref-pattern-assignment.rs
+compile-fail	borrowck/borrowck-drop-from-guard.rs
 compile-fail	borrowck/borrowck-escaping-closure-error-1.rs
 run-pass	borrowck/borrowck-field-sensitivity-rpass.rs
 compile-fail	borrowck/borrowck-field-sensitivity.rs
@@ -820,6 +825,7 @@ compile-fail	borrowck/two-phase-surprise-no-conflict.rs
 compile-fail	borrowck/unboxed-closures-move-upvar-from-non-once-ref-closure.rs
 compile-fail	borrowck/uninitalized-in-match-arm-issue-126133.rs
 compile-fail	borrowck/unmatched-arg-and-hir-arg-issue-126385.rs
+compile-fail	borrowck/use-moved-value-in-match-guard-drop.rs
 compile-fail	borrowck/writing-to-immutable-vec.rs
 run-pass	box/box-deref-in-match-arm-no-invalid-ir.rs
 run-pass	box/box-deref-match-arm.rs
@@ -1295,6 +1301,7 @@ run-pass	consts/cast-discriminant-zst-enum.rs
 run-pass	consts/chained-constants-stackoverflow.rs
 run-pass	consts/check_const-feature-gated.rs
 build-pass	consts/closure-in-foreign-crate.rs
+check-pass	consts/closure-structural-match-issue-90013.rs
 compile-fail	consts/closure-type-error-during-const-eval-66706.rs
 check-pass	consts/const-address-of-interior-mut.rs
 check-pass	consts/const-address-of-mut.rs
@@ -1500,6 +1507,7 @@ compile-fail	coroutine/coroutine-in-orphaned-anon-const.rs
 check-pass	coroutine/issue-62506-two_awaits.rs
 compile-fail	coroutine/unresolved-ct-var.rs
 check-pass	coroutine/witness-ignore-fake-reads.rs
+build-pass	coroutine/yielding-in-match-guards.rs
 compile-fail	cycle-trait/cycle-error-comparing-function-inside-itself-66667.rs
 compile-fail	cycle-trait/cycle-trait-default-type-trait.rs
 compile-fail	delegation/ice-line-bounds-issue-148732.rs
@@ -1923,6 +1931,7 @@ compile-fail	feature-gates/feature-gate-builtin_syntax.rs
 compile-fail	feature-gates/feature-gate-cfg-version.rs
 compile-fail	feature-gates/feature-gate-closure_lifetime_binder.rs
 compile-fail	feature-gates/feature-gate-concat_bytes.rs
+compile-fail	feature-gates/feature-gate-const-c-variadic.rs
 compile-fail	feature-gates/feature-gate-custom_attribute2.rs
 compile-fail	feature-gates/feature-gate-decl_macro.rs
 compile-fail	feature-gates/feature-gate-derive-from.rs
@@ -2562,8 +2571,21 @@ compile-fail	inference/useless-turbofish-suggestion.rs
 compile-fail	infinite/infinite-recursion-const-fn.rs
 compile-fail	infinite/infinite-struct.rs
 compile-fail	infinite/infinite-tag-type-recursion.rs
-compile-fail	inline-const/const-expr-lifetime-err.rs
+build-pass	inline-const/const-expr-array-init.rs
+run-pass	inline-const/const-expr-basic.rs
+check-pass	inline-const/const-expr-generic.rs
+check-pass	inline-const/const-expr-inference.rs
+run-pass	inline-const/const-expr-lifetime.rs
+run-pass	inline-const/const-expr-macro.rs
+run-pass	inline-const/const-expr-reference.rs
+check-pass	inline-const/elided-lifetime-being-infer-vars.rs
+compile-fail	inline-const/expr-unsafe-err.rs
+check-pass	inline-const/expr-unsafe.rs
+check-pass	inline-const/expr-with-block.rs
 compile-fail	inline-const/in-pat-recovery.rs
+check-pass	inline-const/instance-doesnt-depend-on-type.rs
+check-pass	inline-const/interpolated.rs
+compile-fail	inline-const/uninit-local.rs
 compile-fail	intrinsics/incorrect-read_via_copy-defn.rs
 compile-fail	intrinsics/incorrect-transmute.rs
 compile-fail	intrinsics/unchecked_math_unstable.rs
@@ -2921,6 +2943,7 @@ compile-fail	liveness/liveness-return-last-stmt-semi.rs
 compile-fail	liveness/liveness-use-after-send.rs
 run-pass	liveness/unused-assignments-diverging-branch-issue-156416.rs
 check-pass	liveness/unused-assignments-match-guard-issue-80954.rs
+compile-fail	loops/dont-suggest-break-thru-item.rs
 build-pass	loops/infinite-loop-simplify-cfg-75704.rs
 run-pass	loops/issue-1974.rs
 compile-fail	loops/issue-43162.rs
@@ -4063,6 +4086,7 @@ run-pass	parser/slowparse-string.rs
 check-pass	parser/stripped-nested-outline-mod-pass.rs
 compile-fail	parser/struct-default-values-and-missing-field-separator.rs
 compile-fail	parser/struct-lit-placeholder-or-empty-path.rs
+check-pass	parser/struct-literal-in-match-guard.rs
 compile-fail	parser/struct-literals-in-invalid-places.rs
 compile-fail	parser/suggest-assoc-const.rs
 compile-fail	parser/suggest-const-for-global-var.rs
@@ -4405,7 +4429,6 @@ run-pass	regions/wf-bound-region-in-object-type.rs
 check-pass	repeat-expr/can-have-side-effects-consider-element.rs
 compile-fail	repeat-expr/copy-check-inference-side-effects.rs
 run-pass	repeat-expr/repeat-expr-in-static.rs
-compile-fail	repeat-expr/zero_diverging_consts.rs
 compile-fail	repeat-expr/zero_infer_diverging_consts.rs
 run-pass	repr/align-with-extern-c-fn.rs
 run-pass	repr/aligned_enum_cast.rs
@@ -4585,7 +4608,14 @@ run-pass	rfcs/rfc-2093-infer-outlives/privacy.rs
 compile-fail	rfcs/rfc-2126-crate-paths/crate-path-non-absolute.rs
 compile-fail	rfcs/rfc-2126-extern-absolute-paths/non-existent-2.rs
 run-pass	rfcs/rfc-2175-or-if-while-let/basic.rs
+check-pass	rfcs/rfc-2294-if-let-guard/drop-scope-let-chains.rs
+check-pass	rfcs/rfc-2294-if-let-guard/guard-lifetime-2.rs
 compile-fail	rfcs/rfc-2294-if-let-guard/let-chains-gated-correctly-in-guard.rs
+check-pass	rfcs/rfc-2294-if-let-guard/loop-mutability.rs
+check-pass	rfcs/rfc-2294-if-let-guard/move-guard-if-let.rs
+check-pass	rfcs/rfc-2294-if-let-guard/partially-macro-expanded.rs
+run-pass	rfcs/rfc-2294-if-let-guard/run-pass.rs
+check-pass	rfcs/rfc-2294-if-let-guard/shadowing.rs
 compile-fail	rfcs/rfc-2361-dbg-macro/dbg-macro-move-semantics.rs
 compile-fail	rfcs/rfc-2361-dbg-macro/dbg-macro-requires-debug.rs
 check-pass	rfcs/rfc-2396-target_feature-11/check-pass.rs
@@ -4600,6 +4630,7 @@ compile-fail	rfcs/rfc-2497-if-let-chains/ast-validate-guards.rs
 check-pass	rfcs/rfc-2497-if-let-chains/chains-without-let.rs
 compile-fail	rfcs/rfc-2497-if-let-chains/edition-gate.rs
 compile-fail	rfcs/rfc-2497-if-let-chains/ensure-that-let-else-does-not-interact-with-let-chains.rs
+run-pass	rfcs/rfc-2497-if-let-chains/if_let_guard_indirect_let_chains.rs
 check-pass	rfcs/rfc-2497-if-let-chains/issue-90722.rs
 check-pass	rfcs/rfc-2497-if-let-chains/issue-92145.rs
 check-pass	rfcs/rfc-2497-if-let-chains/no-double-assigments.rs
@@ -5221,6 +5252,7 @@ compile-fail	traits/closure-capture-not-send.rs
 compile-fail	traits/closure-rc-not-send.rs
 check-pass	traits/composition-trivial.rs
 check-pass	traits/const-traits/call-generic-method-nonconst-bound.rs
+compile-fail	traits/const-traits/gate.rs
 check-pass	traits/const-traits/group-traits.rs
 compile-fail	traits/const-traits/ice-120503-async-const-method.rs
 compile-fail	traits/const-traits/macro-const-trait-bound-theoretical-regression.rs

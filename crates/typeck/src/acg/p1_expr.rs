@@ -954,7 +954,13 @@ impl Cx<'_> {
                 r
             }
             Expr::Try(_) => self.try_(e),
-            _ => err(SP, "unsupported expression"),
+            // `const { .. }` (an inline const): its value, computed where it is (the same value as at compile time)
+            Expr::Const(b) => self.block(b, expected),
+            e => {
+                let k = format!("{e:?}");
+                let k = k.split(|c: char| !c.is_alphanumeric()).next().unwrap_or("").to_string();
+                err(SP, format!("unsupported expression ({k})"))
+            }
         }
     }
 
