@@ -490,7 +490,10 @@ run-pass	autoref-autoderef/auto-ref.rs
 run-pass	autoref-autoderef/autoderef-and-borrow-method-receiver.rs
 compile-fail	autoref-autoderef/autoderef-box-no-add.rs
 run-pass	autoref-autoderef/autoderef-method-on-trait.rs
+run-pass	autoref-autoderef/autoderef-method-priority.rs
+run-pass	autoref-autoderef/autoderef-method.rs
 run-pass	autoref-autoderef/autoderef-vec-box-fn-36786.rs
+run-pass	autoref-autoderef/autoref-intermediate-types-issue-3585.rs
 compile-fail	autoref-autoderef/deref-ambiguity-becomes-nonambiguous.rs
 run-pass	autoref-autoderef/deref-chain-method-calls-13264.rs
 check-pass	autoref-autoderef/reborrow-mut-self-to-ref-self-method.rs
@@ -721,6 +724,7 @@ compile-fail	borrowck/borrowck-match-binding-is-assignment.rs
 run-pass	borrowck/borrowck-move-by-capture-ok.rs
 compile-fail	borrowck/borrowck-move-error-many-places.rs
 compile-fail	borrowck/borrowck-move-error-with-note.rs
+compile-fail	borrowck/borrowck-move-from-subpath-of-borrowed-path.rs
 compile-fail	borrowck/borrowck-move-in-irrefut-pat.rs
 compile-fail	borrowck/borrowck-move-moved-value-into-closure.rs
 check-pass	borrowck/borrowck-move-out-from-array-no-overlap-match.rs

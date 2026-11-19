@@ -2017,6 +2017,21 @@ impl Inf<'_> {
             }
         }
         if callee.is_none() && sid.is_none() {
+            // (`3.double()` / `let x = 3; x.double()` with `impl Double for usize` only: the one integer type whose
+            // impl has the method fixes the literal's type, as rustc's probe of `{integer}`)
+            let root = self.find(rv);
+            if self.shape[root as usize].is_none() && self.int_lit[root as usize] && !is_builtin_scalar_method(n) {
+                let mut hit = None;
+                for t in [Ty::I8, Ty::I16, Ty::I32, Ty::I64, Ty::I128, Ty::Isize, Ty::U8, Ty::U16, Ty::U32, Ty::U64, Ty::U128, Ty::Usize] {
+                    if self.prog.prim_method(t, n).is_some() {
+                        hit = if hit.is_none() { Some(t) } else { Some(Ty::Never) };
+                    }
+                }
+                if let Some(t) = hit.filter(|t| *t != Ty::Never) {
+                    let k = self.known(t);
+                    self.unify(rv, k);
+                }
+            }
             if let Some(t) = self.resolve(rv) {
                 if let Some(id) = self.prog.prim_method(t, n) {
                     return self.apply_recv(Some(id), avs, rv);

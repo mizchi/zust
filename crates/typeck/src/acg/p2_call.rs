@@ -973,9 +973,16 @@ impl Cx<'_> {
             return Ok(None);
         }
         // (`b.inc()` with `impl Inc for i32` and b: Box<i32>: the number's method, when the Box has none)
-        let boxed_num = |t: Ty| matches!(t, Ty::Box(i) if i.is_int() || i.is_float() || matches!(*i, Ty::Bool | Ty::Char));
+        // (also `Box<Box<i32>>`: the number at the bottom of the Boxes)
+        let leaf = |mut t: Ty| {
+            while let Ty::Box(i) = t {
+                t = *i;
+            }
+            t
+        };
+        let boxed_num = |t: Ty| matches!(t, Ty::Box(_)) && { let i = leaf(t); i.is_int() || i.is_float() || matches!(i, Ty::Bool | Ty::Char) };
         let Some(id) = self.prog.prim_self_method(t, &name).or_else(|| match t {
-            Ty::Box(i) if boxed_num(t) => self.prog.prim_self_method(*i, &name),
+            Ty::Box(_) if boxed_num(t) => self.prog.prim_self_method(leaf(t), &name),
             _ => None,
         }) else {
             return Ok(None);
@@ -987,8 +994,25 @@ impl Cx<'_> {
             if !st.is_some_and(|st| matches!(st, Ty::Box(_)) && self.prog.match_ty(st, t, &mut sol)) {
                 // (a blanket impl's method on `Box<i32>`: the number's, through the deref (`(*b).m()`))
                 // (the Box's value is the address of the number: it is the `&self` / `&mut self` receiver itself)
-                if let Ty::Box(inner) = t {
+                if let Ty::Box(mut inner) = t {
+                    let nested = matches!(inner, Ty::Box(_));
+                    if nested {
+                        // (a `self: Box<Self>` method would move the inner Box out of the outer one)
+                        if matches!(self.prog.sigs[id as usize].params.first(), Some(Ty::Box(_))) {
+                            return Ok(None);
+                        }
+                    }
+                    while let Ty::Box(i) = inner {
+                        inner = i;
+                    }
                     if inner.is_int() || inner.is_float() || matches!(*inner, Ty::Bool | Ty::Char) {
+                        // (`self: Box<Self>`: the Box itself, moved)
+                        if matches!(self.prog.sigs[id as usize].params.first(), Some(Ty::Box(_))) {
+                            let (v, vt) = self.expr(recv, Some(t))?;
+                            let Some(v) = v else { return Ok(Some((None, Ty::Never))) };
+                            let args: Vec<&Expr> = margs.iter().collect();
+                            return self.call_fn(id, Some((v, vt)), &args, tf, expected, SP).map(Some);
+                        }
                         // (the receiver is borrowed, not moved: the Box stays the caller's)
                         let (v, vt) = self.read_no_move(recv)?;
                         let Some(mut v) = v else { return Ok(Some((None, Ty::Never))) };
@@ -996,6 +1020,11 @@ impl Cx<'_> {
                         while let Ty::Ref(_, i) = vt {
                             v = self.b.ins().load(PTR, mf(), v, 0);
                             vt = *i;
+                        }
+                        // (the Box's value is the address of what it holds: one load per inner Box)
+                        while let Ty::Box(Ty::Box(i)) = vt {
+                            v = self.b.ins().load(PTR, mf(), v, 0);
+                            vt = Ty::Box(i);
                         }
                         let recv_arg = match self.prog.sigs[id as usize].params.first() {
                             Some(Ty::Ref(m, _)) => (v, Ty::Ref(*m, intern(*inner))),
