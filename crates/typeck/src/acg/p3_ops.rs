@@ -155,14 +155,36 @@ impl Cx<'_> {
             _ => None,
         };
         if let Some(op) = compound {
-            let p = self.place(left)?;
-            let t = p.ty();
-            let (l, _) = self.read(p);
-            let rhint = if matches!(op, "<<" | ">>") { self.peek(right) } else { Some(t) };
-            let (r, rt) = self.expr(right, rhint.or(Some(t)))?;
+            // (for primitive operands the right side is evaluated first, then the place on the left (as rustc does:
+            // `{ log(L); x }.0 += { log(R); 0 }` logs R, L))
+            // (in a generic fn, `x += y` with x of a type parameter is a call of `add_assign` (left first), even when
+            // the instance's type is primitive)
+            let lt0 = self.peek(left);
+            // (a left side whose type is not known ahead (`(*r.borrow_mut()).y`) is placed first: its type is the
+            // hint for a literal on the right)
+            let generic = lt0.is_some_and(|t| self.env.params.iter().any(|(_, pt)| *pt == t));
+            let mut lhs = None;
+            let mut root = strip_paren(left);
+            while let Expr::Field(x, _, _) | Expr::Index(x, _, _) = root {
+                root = strip_paren(x);
+            }
+            let simple = matches!(root, Expr::Path(..) | Expr::Block(..));
+            if generic || lt0.is_none() || !simple {
+                let p = self.place(left)?;
+                lhs = Some(p);
+            }
+            let lt1 = lhs.map(|p| p.ty()).or(lt0);
+            let rhint = if matches!(op, "<<" | ">>") { self.peek(right) } else { lt1 };
+            let (r, rt) = self.expr(right, rhint.or(lt1))?;
+            let p = match lhs {
+                Some(p) => p,
+                None => self.place(left)?,
+            };
             let Some(mut r) = r else {
                 return Ok((None, Ty::Never));
             };
+            let t = p.ty();
+            let (l, _) = self.read(p);
             // `acc += x` (x: &i32): 整数への参照は値にする (core の `AddAssign<&i32>` 相当)
             let mut rt = rt;
             while let Ty::Ref(_, i) = rt {
