@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795127253281,
+  "lastUpdate": 1795127255551,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -62459,6 +62459,70 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/mizchi/zust/commit/a0a6c394573e872bf3ce337883a4b074a167b3aa"
         },
         "date": 1795126680493,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tests/ui run-pass pass rate",
+            "value": 71.11,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui run-pass passing",
+            "value": 1696,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui check-pass pass rate",
+            "value": 77.86,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui check-pass passing",
+            "value": 1407,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui build-pass pass rate",
+            "value": 70.37,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui build-pass passing",
+            "value": 95,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui compile-fail pass rate",
+            "value": 45.13,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui compile-fail passing",
+            "value": 3321,
+            "unit": "tests"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "committer": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "distinct": true,
+          "id": "ca0796bc0fffa88f844bfedecd7c836b3dfe9366",
+          "message": "Integer literals typed by a trait's default method\n\n`3.hi()` with `trait Speak { fn hi(&self) -> String { .. } }` and only\n`impl Speak for isize`: the literal's integer type is the one that\nimplements a trait whose default method has that name, as for the\ntypes whose impls define the method themselves.\n\ntests/ui: no change in passes (the tests that need it also need more).\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-19T22:23:08Z",
+          "tree_id": "384e0a82a5fb3acdd669270b53779edbec0fc2c3",
+          "url": "https://github.com/mizchi/zust/commit/ca0796bc0fffa88f844bfedecd7c836b3dfe9366"
+        },
+        "date": 1795127255135,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
