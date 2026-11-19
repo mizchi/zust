@@ -200,6 +200,7 @@ compile-fail	associated-types/hr-associated-type-bound-param-1.rs
 compile-fail	associated-types/hr-associated-type-bound-param-2.rs
 compile-fail	associated-types/hr-associated-type-bound-param-3.rs
 compile-fail	associated-types/hr-associated-type-bound-param-4.rs
+compile-fail	associated-types/hr-associated-type-bound-param-5.rs
 compile-fail	associated-types/hr-associated-type-bound-param-6.rs
 compile-fail	associated-types/hr-associated-type-projection-1.rs
 check-pass	associated-types/impl-trait-member-type-resolution-57399.rs
@@ -1342,7 +1343,6 @@ compile-fail	consts/const-int-conversion.rs
 run-pass	consts/const-int-rotate-rpass.rs
 run-pass	consts/const-int-saturating-arith.rs
 run-pass	consts/const-int-sign-rpass.rs
-compile-fail	consts/const-int-wrapping.rs
 compile-fail	consts/const-item-no-type/with-colon.rs
 run-pass	consts/const-labeled-break.rs
 check-pass	consts/const-match-pattern-arm.rs
@@ -1816,6 +1816,7 @@ compile-fail	error-codes/E0746.rs
 compile-fail	error-codes/E0790.rs
 compile-fail	error-codes/E0799.rs
 compile-fail	error-codes/E0800.rs
+compile-fail	error-codes/e0119/conflict-with-std.rs
 compile-fail	error-codes/e0119/issue-27403.rs
 compile-fail	error-codes/e0119/issue-28981.rs
 compile-fail	error-codes/ex-E0612.rs
@@ -2247,6 +2248,7 @@ check-pass	hygiene/no_implicit_prelude-2021.rs
 run-pass	hygiene/thread-local-not-in-prelude.rs
 compile-fail	illegal-sized-bound/mutability-mismatch-arg.rs
 run-pass	impl-header-lifetime-elision/bare_type.rs
+compile-fail	impl-header-lifetime-elision/dyn-trait.rs
 run-pass	impl-header-lifetime-elision/explicit-and-elided-same-header.rs
 run-pass	impl-header-lifetime-elision/path-underscore.rs
 run-pass	impl-trait/basic-trait-impl.rs
@@ -2358,6 +2360,7 @@ check-pass	implied-bounds/implied-bounds-unconstrained-2.rs
 check-pass	implied-bounds/implied_bounds_entailment_alias_var.rs
 check-pass	implied-bounds/implied_bounds_entailment_skip_non_outlives.rs
 check-pass	implied-bounds/issue-101951.rs
+check-pass	implied-bounds/normalization.rs
 compile-fail	implied-bounds/references-err.rs
 check-pass	implied-bounds/trait-where-clause-implied.rs
 compile-fail	imports/ambiguous-1.rs
@@ -2669,6 +2672,7 @@ check-pass	lint/dead-code/expect-dead-code-152370.rs
 check-pass	lint/dead-code/expect-dead-code-154324.rs
 check-pass	lint/dead-code/expect-dead-code-field-read-in-dead-fn.rs
 check-pass	lint/dead-code/expect-dead-code-through-non-expect-item.rs
+check-pass	lint/dead-code/expect-on-assoc-fn-issue-148861.rs
 check-pass	lint/dead-code/inferred-generic-arg.rs
 check-pass	lint/dead-code/issue-59003.rs
 check-pass	lint/dead-code/issue-68408-false-positive.rs
@@ -2740,7 +2744,6 @@ check-pass	lint/lint-pub-unreachable-for-nested-glob.rs
 compile-fail	lint/lint-qualification.rs
 compile-fail	lint/lint-range-endpoint-overflow.rs
 check-pass	lint/lint-raw-borrows-via-references.rs
-compile-fail	lint/lint-unconditional-recursion.rs
 check-pass	lint/lints-on-stmt-not-overridden-130142.rs
 check-pass	lint/mention-lint-group-in-default-level-lint-note-issue-65464.rs
 check-pass	lint/missing-copy-implementations-non-exhaustive.rs
@@ -3035,6 +3038,7 @@ compile-fail	methods/associated-fn-turbofish-issue-159813.rs
 run-pass	methods/by-value-self-method-on-int.rs
 compile-fail	methods/call_method_unknown_pointee.rs
 check-pass	methods/calling-conventions-with-where-clause-ref-bound.rs
+run-pass	methods/destructure-and-call-self-method.rs
 compile-fail	methods/disambiguate-associated-function-first-arg.rs
 compile-fail	methods/dont-suggest-import-on-deref-err.rs
 compile-fail	methods/duplicate-method-call-on-self.rs
@@ -4440,6 +4444,7 @@ compile-fail	resolve/suggestions/suggest-path-for-tuple-struct.rs
 compile-fail	resolve/suggestions/suggest-path-instead-of-mod-dot-item.rs
 compile-fail	resolve/token-error-correct-2.rs
 compile-fail	resolve/tuple-struct-alias.rs
+compile-fail	resolve/typo-suggestion-for-variable-with-name-similar-to-struct-field.rs
 compile-fail	resolve/typo-suggestion-mistyped-in-path.rs
 compile-fail	resolve/typo-suggestion-named-underscore.rs
 compile-fail	resolve/unboxed-closure-sugar-nonexistent-trait.rs
@@ -4859,6 +4864,7 @@ compile-fail	suggestions/dont-suggest-private-trait-method.rs
 compile-fail	suggestions/dont-suggest-ref/simple.rs
 compile-fail	suggestions/dont-suggest-ufcs-for-const.rs
 run-pass	suggestions/dont-try-removing-the-field.rs
+compile-fail	suggestions/dont-wrap-ambiguous-receivers.rs
 compile-fail	suggestions/double-reference-ty-in-self-ty.rs
 compile-fail	suggestions/dyn-incompatible-trait-should-use-self-2021-without-dyn.rs
 compile-fail	suggestions/enum-method-probe.rs
@@ -5228,6 +5234,7 @@ check-pass	traits/issue-2611-3.rs
 compile-fail	traits/issue-32963.rs
 check-pass	traits/issue-33187.rs
 run-pass	traits/issue-3683.rs
+run-pass	traits/issue-43132.rs
 run-pass	traits/issue-5008-borrowed-traitobject-method-call.rs
 compile-fail	traits/issue-50480.rs
 build-pass	traits/issue-56202.rs

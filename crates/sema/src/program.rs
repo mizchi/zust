@@ -898,7 +898,8 @@ impl Program {
                 };
                 let mut blanket = false;
                 let impl_of = match &ss.impl_of {
-                    Some(n) if Ty::prim(n).is_some() || n == "__array" || n == "__slice" || n.starts_with("__dyn_") || n == "str" => None,
+                    // (`impl Tr for Box<S>`: Box is not a struct; its methods are found by the self type, as for primitives)
+                    Some(n) if Ty::prim(n).is_some() || n == "__array" || n == "__slice" || n.starts_with("__dyn_") || n == "str" || (n == "Box" && !p.struct_index.contains_key("Box")) => None,
                     Some(n) => match p.struct_index.get(n).copied().or_else(|| {
                         n.strip_prefix("#tuple").and_then(|k| k.parse().ok()).map(|k| p.tuple_base(k))
                     }).as_ref() {
@@ -1011,6 +1012,8 @@ impl Program {
             })
             .collect();
         // 4. trait の実装 (impl ヘッダの要約から)
+        // (impls for Box: (trait, line), checked against blanket impls of the same trait after the loop)
+        let mut box_impls: Vec<(String, usize)> = vec![];
         for (ii, (it, sm)) in items.iter().zip(sums).enumerate() {
             let (Some(sn), Some(tr)) = (&sm.impl_self, &sm.impl_trait) else {
                 continue;
@@ -1061,6 +1064,14 @@ impl Program {
                 }
                 continue;
             }
+            // (`impl Tr for Box<S>`: a trait of that Box type, as for primitives; `impl<T> Tr for Box<T>` has no single type)
+            if sn == "Box" && !p.struct_index.contains_key("Box") {
+                box_impls.push((tr.clone(), it.line as usize));
+                if let Some(t) = sm.impl_self_ty.as_ref().and_then(|t| p.resolve_g(t, &[]).ok()) {
+                    p.prim_impls.insert((t, tr.clone()));
+                }
+                continue;
+            }
             // (`impl<T> Tr for T`, with or without members)
             if sm.impl_generics.iter().any(|g| g.0 == *sn) && matches!(sm.impl_self_ty, Some(TySyn::Named(_))) {
                 p.blanket_selfs.insert(sn.clone());
@@ -1102,6 +1113,10 @@ impl Program {
                     it.line
                 ));
             }
+        }
+        // (`impl<T> Tr for T` and `impl Tr for Box<U>` overlap: Box<U> is one of the T, E0119)
+        if let Some((tr, line)) = box_impls.iter().find(|(tr, _)| p.blanket_traits.contains(tr)) {
+            return Err(format!("{line}:1: conflicting implementations of trait `{tr}` for type `Box<_>`"));
         }
         // derive は実装扱い (Clone / Copy など。中身は常にビットコピーなので本体は要らない)
         for sm in sums {
@@ -1408,6 +1423,7 @@ impl Program {
         let base = match t {
             Ty::Slice(_) => Some("__slice"),
             Ty::Array(..) => Some("__array"),
+            Ty::Box(_) => Some("Box"),
             _ => None,
         };
         // (`impl dyn Tr { fn m(&self) }`: `__dyn_Tr::m`)

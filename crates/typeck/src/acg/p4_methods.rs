@@ -720,6 +720,13 @@ impl Cx<'_> {
             "to_le_bytes",
             "to_be_bytes",
             "to_ne_bytes",
+            "wrapping_shl",
+            "wrapping_shr",
+            "checked_shl",
+            "checked_shr",
+            "overflowing_shl",
+            "overflowing_shr",
+            "reverse_bits",
         ];
         if !known.contains(&name.as_str()) {
             return Ok(None);
@@ -1031,6 +1038,41 @@ impl Cx<'_> {
                 self.option_if(v, t, of)?
             }
             // (値, あふれたか) のタプル
+            // `a.wrapping_shl(n)`: the shift amount modulo the width; checked / overflowing tell whether n >= width
+            "wrapping_shl" | "wrapping_shr" | "checked_shl" | "checked_shr" | "overflowing_shl" | "overflowing_shr" => {
+                let n = arg(self, 0, Ty::U32)?;
+                let bits = t.bits() as i64;
+                let big = self.b.ins().icmp_imm_u(IntCC::UnsignedGreaterThanOrEqual, n, bits);
+                let n = self.convert(n, Ty::U32, t);
+                let n = self.b.ins().band_imm_u(n, bits - 1);
+                let v = if name.ends_with("shl") {
+                    self.b.ins().ishl(a, n)
+                } else if s {
+                    self.b.ins().sshr(a, n)
+                } else {
+                    self.b.ins().ushr(a, n)
+                };
+                match &name[..3] {
+                    "wra" => (Some(v), t),
+                    "che" => self.option_if(v, t, big)?,
+                    _ => self.pair_with_bool(v, t, big)?,
+                }
+            }
+            // bit order reversed: swap neighbouring bits, pairs, nibbles, then the bytes
+            "reverse_bits" if t.bits() <= 64 => {
+                let mut x = a;
+                for (sh, m) in [(1, 0x5555_5555_5555_5555u64), (2, 0x3333_3333_3333_3333), (4, 0x0f0f_0f0f_0f0f_0f0f)] {
+                    let mk = self.iconst_t(ct, m as i64);
+                    let shc = self.iconst_t(ct, sh);
+                    let hi = self.b.ins().ushr(x, shc);
+                    let hi = self.b.ins().band(hi, mk);
+                    let lo = self.b.ins().band(x, mk);
+                    let lo = self.b.ins().ishl(lo, shc);
+                    x = self.b.ins().bor(hi, lo);
+                }
+                let x = if t.bits() == 8 { x } else { self.b.ins().bswap(x) };
+                (Some(x), t)
+            }
             "overflowing_add" | "overflowing_sub" | "overflowing_mul" => {
                 let b = arg(self, 0, t)?;
                 let (v, of) = match name.as_str() {

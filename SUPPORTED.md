@@ -9,10 +9,10 @@ Status as of 2026-11-18, updated with each round of work. The percentages are ru
 
 ## Overall
 
-- [x] tests/ui run-pass: 63.2% (1525 / 2413)
-- [x] tests/ui check-pass: 69.7% (1260 / 1807)
+- [x] tests/ui run-pass: 63.3% (1527 / 2413)
+- [x] tests/ui check-pass: 69.8% (1262 / 1807)
 - [x] tests/ui build-pass: 65.2% (88 / 135)
-- [ ] tests/ui compile-fail (an error on an annotated line): 38.7% (2849 / 7358)
+- [ ] tests/ui compile-fail (an error on an annotated line): 38.8% (2852 / 7358)
 - [x] real crates: fnv, adler2, hex, itoa, rustc-hash and cfg-if build and give the same output (6 / 6)
 - [x] zust-analyzer answers like rust-analyzer: 95.4% (rust-analyzer: 96.2%)
 
@@ -29,6 +29,7 @@ Status as of 2026-11-18, updated with each round of work. The percentages are ru
 - [x] structs, `..base` (field by field): 74.2%
 - [x] type aliases and paths (`impl foo::Point`) as impl self types, discriminants from constants and earlier variants, where clauses on concrete types
 - [x] syntax: GAT bindings, `dyn for<'a> Fn`, 2015 anonymous parameters, raw lifetimes `'r#a`, half-open range patterns, shebangs, Unicode white space; `macro_rules!` fragments matched by kind (`ident`, `literal`, `lifetime`, `vis`)
+- [x] methods of `impl Tr for Box<S>` (a Box impl next to a blanket impl of the same trait is E0119), `..b` / `..=b` / `..` values, `wrapping_shl` / `checked_shl` / `overflowing_shl` / `reverse_bits`
 - [x] let chains (`if let A = x && cond`), `&raw const` / `&raw mut`
 - [x] parser: 73.7%
 - [x] closures (capture, `Fn` traits, `move`): 71.7%
@@ -112,8 +113,8 @@ Status as of 2026-11-18, updated with each round of work. The percentages are ru
 
 ## Speed against rustc (2026-11-18)
 
-- [x] cold build: 4.9x faster than rustc `-C incremental` on gen1000, 2.5–4.0x on small programs, 2.9–4.2x on real crates
-- [x] edit and rebuild: 15x faster on gen1000, 12–17x on small programs, 4.8–7.0x on real crates
+- [x] cold build: 5.6x faster than rustc `-C incremental` on gen1000, 2.5–4.0x on small programs, 2.9–4.2x on real crates
+- [x] edit and rebuild: 17x faster on gen1000, 12–17x on small programs, 4.8–7.0x on real crates
 - [x] build cache on disk: 14x smaller (766 KiB vs 10.8 MiB on gen1000)
 - [x] binary: 3.2x smaller on gen1000, 93–550x on real crates
 - [ ] run time: zustc is 1.2–3.6x slower than rustc `-O` on small programs (faster than rustc's debug build);
@@ -128,9 +129,9 @@ The tables are in the [README](README.md#against-rustc).
 
 | KPI | now | before this work |
 |---|---:|---:|
-| gen5000 no-op build | 668.7 M instr | 746.0 M |
+| gen5000 no-op build | 666.0 M instr | 746.0 M |
 | gen5000 build after editing one function | 626.3 M instr | 709.3 M |
-| gen5000 `check` | 3906.9 M instr | 3971.0 M |
+| gen5000 `check` | 3907.0 M instr | 3971.0 M |
 | gen5000 build cache | 1902.8 KiB | 1902.8 KiB |
-| LSP definition / hover / completion / references p50 | 0.94 / 0.77 / 1.65 / 15.79 ms (a slower machine after a restart; the instruction count is unchanged) | — |
-| LSP ready (startup to indexed, zustc + ide targets) | 141 ms | — |
+| LSP definition / hover / completion / references p50 | 0.93 / 0.77 / 1.84 / 15.16 ms (a slower machine after a restart; the instruction count is unchanged) | — |
+| LSP ready (startup to indexed, zustc + ide targets) | 128 ms | — |

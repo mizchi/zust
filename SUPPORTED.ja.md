@@ -9,10 +9,10 @@
 
 ## 全体
 
-- [x] tests/ui run-pass：63.2%（1525 / 2413）
-- [x] tests/ui check-pass：69.7%（1260 / 1807）
+- [x] tests/ui run-pass：63.3%（1527 / 2413）
+- [x] tests/ui check-pass：69.8%（1262 / 1807）
 - [x] tests/ui build-pass：65.2%（88 / 135）
-- [ ] tests/ui compile-fail（注釈の行でエラー）：38.7%（2849 / 7358）
+- [ ] tests/ui compile-fail（注釈の行でエラー）：38.8%（2852 / 7358）
 - [x] 実際のクレート：fnv、adler2、hex、itoa、rustc-hash、cfg-if がビルドでき、同じ出力を出す（6 / 6）
 - [x] zust-analyzer が rust-analyzer と同じように答える：95.4%（rust-analyzer は 96.2%）
 
@@ -29,6 +29,7 @@
 - [x] 構造体、`..base`（フィールドごと）：74.2%
 - [x] 型の別名やパス（`impl foo::Point`）を impl の self 型に、定数や前のバリアントを使う判別子、具体的な型の where 節
 - [x] 構文：GAT の束縛、`dyn for<'a> Fn`、2015 の名前のない引数、生の寿命 `'r#a`、半開きの範囲パターン、シバン、Unicode の空白。`macro_rules!` の断片を種類で照合（`ident`、`literal`、`lifetime`、`vis`）
+- [x] `impl Tr for Box<S>` のメソッド（Box への impl とブランケット impl の衝突は E0119）、`..b` / `..=b` / `..` の値、`wrapping_shl` / `checked_shl` / `overflowing_shl` / `reverse_bits`
 - [x] let チェーン（`if let A = x && cond`）、`&raw const` / `&raw mut`
 - [x] 構文解析：73.7%
 - [x] クロージャ（キャプチャ、`Fn` トレイト、`move`）：71.7%
@@ -112,8 +113,8 @@
 
 ## rustc との速度の比較 (2026-11-18)
 
-- [x] cold ビルド：gen1000 で rustc `-C incremental` の 4.9 倍速い。小さなプログラムで 2.5〜4.0 倍、実際のクレートで 2.9〜4.2 倍
-- [x] 編集して再ビルド：gen1000 で 15 倍速い。小さなプログラムで 12〜17 倍、実際のクレートで 4.8〜7.0 倍
+- [x] cold ビルド：gen1000 で rustc `-C incremental` の 5.6 倍速い。小さなプログラムで 2.5〜4.0 倍、実際のクレートで 2.9〜4.2 倍
+- [x] 編集して再ビルド：gen1000 で 17 倍速い。小さなプログラムで 12〜17 倍、実際のクレートで 4.8〜7.0 倍
 - [x] ディスクのビルドキャッシュ：1/14（gen1000 で 766 KiB と 10.8 MiB）
 - [x] バイナリ：gen1000 で 1/3.2、実際のクレートで 1/93〜1/550
 - [ ] 実行時間：小さなプログラムで zustc は rustc `-O` の 1.2〜3.6 倍遅い（rustc の debug ビルドよりは速い）。
@@ -128,9 +129,9 @@
 
 | KPI | 今 | この作業の前 |
 |---|---:|---:|
-| gen5000 の no-op ビルド | 668.7 M 命令 | 746.0 M |
+| gen5000 の no-op ビルド | 666.0 M 命令 | 746.0 M |
 | gen5000 の 1 関数を編集した後のビルド | 626.3 M 命令 | 709.3 M |
-| gen5000 の `check` | 3906.9 M 命令 | 3971.0 M |
+| gen5000 の `check` | 3907.0 M 命令 | 3971.0 M |
 | gen5000 のビルドキャッシュ | 1902.8 KiB | 1902.8 KiB |
-| LSP の definition / hover / completion / references の p50 | 0.94 / 0.77 / 1.65 / 15.79 ms（再起動後の遅いマシン。命令数は同じ） | — |
-| LSP の起動から索引ができるまで（zustc と ide の対象の合計） | 141 ms | — |
+| LSP の definition / hover / completion / references の p50 | 0.93 / 0.77 / 1.84 / 15.16 ms（再起動後の遅いマシン。命令数は同じ） | — |
+| LSP の起動から索引ができるまで（zustc と ide の対象の合計） | 128 ms | — |

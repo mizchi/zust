@@ -30,11 +30,11 @@ Rust のサブセットを速くインクリメンタルにビルドするコン
 
 | gen1000 | cold | no-op | 1 関数を編集 | ディスク | バイナリ (strip 後) | 実行 |
 |---|---:|---:|---:|---:|---:|---:|
-| zustc | 142 ms | 18 ms | 24 ms | 766 KiB | 324 KiB | 11 ms |
-| zustc `-O` | 327 ms | 62 ms | 75 ms | 1199 KiB | 341 KiB | 3 ms |
-| rustc `-C incremental` | 691 ms | 200 ms | 370 ms | 10.8 MiB | 1038 KiB | 7 ms |
-| rustc `-O` | 18474 ms | - | - | - | 377 KiB | 2 ms |
-| **zustc の rustc `-C incremental` 比** | **4.9 倍速い** | **11 倍速い** | **15 倍速い** | **1/14** | **1/3.2** | |
+| zustc | 150 ms | 21 ms | 27 ms | 766 KiB | 324 KiB | 11 ms |
+| zustc `-O` | 358 ms | 61 ms | 82 ms | 1199 KiB | 341 KiB | 3 ms |
+| rustc `-C incremental` | 847 ms | 192 ms | 447 ms | 10.8 MiB | 1038 KiB | 8 ms |
+| rustc `-O` | 18580 ms | - | - | - | 377 KiB | 2 ms |
+| **zustc の rustc `-C incremental` 比** | **5.6 倍速い** | **9.1 倍速い** | **17 倍速い** | **1/14** | **1/3.2** | |
 
 小さなプログラム (`bench/rt`: fib、hashmap、matmul、nbody、sieve、sort、strings) と実際のクレート (cratebench: fnv、
 adler2、hex、itoa、rustc-hash、cfg-if。6 つとも rustc と同じ出力を出す):
@@ -73,6 +73,7 @@ adler2、hex、itoa、rustc-hash、cfg-if。6 つとも rustc と同じ出力を
 | 2026-11-18、発散する `let`、`for` の Option、`2.eq(&3)` (5ecf037) | 93 ms | 621 ms | 6.7 倍 | 21 ms | 309 ms | 14.7 倍 |
 | 2026-11-18、let チェーン、`&raw const` / `&raw mut` (d01898b) | 88 ms | 631 ms | 7.2 倍 | 20 ms | 314 ms | 15.7 倍 |
 | 2026-11-19、3 つの並行の lane：構文解析、std、アイテムの要約 (9effaaa)。コンテナの再起動後の遅いマシン (rustc `-O` は 18.5 秒、前は 14.4 秒) | 142 ms | 691 ms | 4.9 倍 | 24 ms | 370 ms | 15.4 倍 |
+| 2026-11-19、`impl Tr for Box<S>`、シフトと `reverse_bits`、`..b` の値 | 150 ms | 847 ms | 5.6 倍 | 27 ms | 447 ms | 16.6 倍 |
 
 zustc のコードの実行速度は rustc の debug ビルドに近く、7 つの小さなプログラムのすべてでそれより速い (そこでは rustc の debug
 ビルドは rustc `-O` の 3〜26 倍遅い)。
@@ -137,7 +138,8 @@ KPI はビルドの速度、ビルドキャッシュのサイズ、LSP の応答
 | 関数ポインタの比較、値としての `main` (b2620bd) | 664.9 M | 621.8 M | 3894.6 M | 1902.8 KiB | 387.2 KiB | 51.6 MiB |
 | 発散する `let`、`for` の Option、`2.eq(&3)` (5ecf037) | 664.9 M | 621.8 M | 3895.2 M | 1902.8 KiB | 387.2 KiB | 51.7 MiB |
 | let チェーン、`&raw const` / `&raw mut` (d01898b) | 662.2 M | 621.8 M | 3895.6 M | 1902.8 KiB | 387.2 KiB | 51.8 MiB |
-| 今: 3 つの並行の lane：構文解析、std、アイテムの要約 (9effaaa) | 668.7 M | 626.3 M | 3906.9 M | 1902.8 KiB | 387.2 KiB | 51.4 MiB |
+| 3 つの並行の lane：構文解析、std、アイテムの要約 (9effaaa) | 668.7 M | 626.3 M | 3906.9 M | 1902.8 KiB | 387.2 KiB | 51.4 MiB |
+| 今: `impl Tr for Box<S>`、シフトと `reverse_bits`、`..b` の値 | 666.0 M | 626.3 M | 3907.0 M | 1902.8 KiB | 387.2 KiB | 51.8 MiB |
 | **借用検査を入れた後からの変化** | **-11.3%** | **-12.2%** | **-2.0%** | **0%** | **0%** | **-32%** |
 
 LSP (zustc 自身のソースに対する `bench/lsp_parity.py` の p50。実時間):
@@ -166,7 +168,8 @@ LSP (zustc 自身のソースに対する `bench/lsp_parity.py` の p50。実時
 | 関数ポインタの比較、値としての `main` (b2620bd) | 0.65 ms | 0.54 ms | 1.18 ms | 11.34 ms | 114 ms |
 | 発散する `let`、`for` の Option、`2.eq(&3)` (5ecf037) | 0.61 ms | 0.50 ms | 1.12 ms | 12.27 ms | 108 ms |
 | let チェーン、`&raw const` / `&raw mut` (d01898b) | 0.57 ms | 0.46 ms | 1.08 ms | 10.41 ms | 108 ms |
-| 今: 3 つの並行の lane：構文解析、std、アイテムの要約 (9effaaa) | 0.94 ms | 0.77 ms | 1.65 ms | 15.79 ms | 141 ms (遅いマシン。そこで d01898b と 6 回交互に比べると references は 16.4 ms と 14.4 ms、起動は 140 ms と 134 ms。ただし LSP の 1 回分を cachegrind で数えると命令数は 10.953 G と 10.955 G で、走るコードは同じ) |
+| 3 つの並行の lane：構文解析、std、アイテムの要約 (9effaaa) | 0.94 ms | 0.77 ms | 1.65 ms | 15.79 ms | 141 ms (遅いマシン。そこで d01898b と 6 回交互に比べると references は 16.4 ms と 14.4 ms、起動は 140 ms と 134 ms。ただし LSP の 1 回分を cachegrind で数えると命令数は 10.953 G と 10.955 G で、走るコードは同じ) |
+| 今: `impl Tr for Box<S>`、シフトと `reverse_bits`、`..b` の値 | 0.93 ms | 0.77 ms | 1.84 ms | 15.16 ms | 128 ms |
 
 どの変更も、これらが悪くならないときだけ残す。全体の計測で LSP の時間が上がったときは、同じマシンで 2 つのビルドを
 交互に走らせて比べ直してから、揺れかどうかを決める。e598fdf の行はそうして比べた値で、起動の時間は 2 つの対象のファイルの合計。ほかの行は `bench/ci_bench.py` の全体の計測。
@@ -181,10 +184,10 @@ zustc に求められるもの (nightly の機能・補助のクレート・特�
 
 | 種類 | 対象 | 通った |
 |---|---:|---:|
-| run-pass (ビルドでき、実行して同じ出力) | 2413 | 1525 (63.2%) |
-| check-pass (`zustc check` が通す) | 1807 | 1260 (69.7%) |
+| run-pass (ビルドでき、実行して同じ出力) | 2413 | 1527 (63.3%) |
+| check-pass (`zustc check` が通す) | 1807 | 1262 (69.8%) |
 | build-pass | 135 | 88 (65.2%) |
-| compile-fail (注釈の行で拒む) | 7358 | 2849 (38.7%) |
+| compile-fail (注釈の行で拒む) | 7358 | 2852 (38.8%) |
 
 分野ごとの内訳はチェックリストの形で [SUPPORTED.ja.md](SUPPORTED.ja.md) にある。
 

@@ -1630,6 +1630,31 @@ impl Cx<'_> {
             self.write(Place::Mem(a, off as i32, ft), lv);
             return Ok((Some(a), st));
         }
+        // `..b` / `..=b` (RangeTo / RangeToInclusive) and `..` (RangeFull), when the prelude has them
+        if start.is_none() {
+            let name = match (end, incl) {
+                (Some(_), false) => "RangeTo",
+                (Some(_), true) => "RangeToInclusive",
+                (None, _) => "RangeFull",
+            };
+            if let Some(&base) = self.prog.struct_index.get(name) {
+                let Some(hi) = end else {
+                    return Ok((None, Ty::Struct(base)));
+                };
+                let et = match expected {
+                    Some(Ty::Struct(sid)) if self.prog.base_of(sid) == base => self.prog.structs[sid as usize].args.first().copied(),
+                    _ => None,
+                }
+                .or_else(|| self.peek(hi));
+                let (hv, ht) = self.expr(hi, et)?;
+                let sid = self.prog.instantiate(base, vec![ht]).or_else(|e| err(SP, e))?;
+                let st = Ty::Struct(sid);
+                let a = self.temp(st);
+                let (_, ft, off) = self.prog.structs[sid as usize].fields[0];
+                self.write(Place::Mem(a, off as i32, ft), hv);
+                return Ok((Some(a), st));
+            }
+        }
         let name = if incl { "RangeInclusive" } else { "Range" };
         let (Some(lo), Some(hi)) = (start, end) else {
             return err(SP, "only `a..b` / `a..=b` / `a..` ranges can be used as values");

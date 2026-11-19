@@ -826,12 +826,20 @@ impl Cx<'_> {
             let args: Vec<&Expr> = margs.iter().collect();
             return self.call_fn(id, Some((v, vt)), &args, tf, expected, SP).map(Some);
         }
-        if !(t.is_int() || matches!(t, Ty::Bool | Ty::Char)) {
+        if !(t.is_int() || matches!(t, Ty::Bool | Ty::Char | Ty::Box(_))) {
             return Ok(None);
         }
         let Some(id) = self.prog.prim_self_method(t, &name) else {
             return Ok(None);
         };
+        // (`impl Tr for Box<S>`: only when the impl's self type is this Box; else the method is S's, through deref)
+        if let Ty::Box(_) = t {
+            let st = self.prog.sigs[id as usize].self_ty;
+            let mut sol = vec![None; self.prog.sigs[id as usize].generics.len()];
+            if !st.is_some_and(|st| matches!(st, Ty::Box(_)) && self.prog.match_ty(st, t, &mut sol)) {
+                return Ok(None);
+            }
+        }
         // 受け手: 値ならそのまま、&self ならメモリに置いてそのアドレス
         let (v, vt) = self.expr(recv, lit_int.then_some(t))?;
         let mut v = v.unwrap();
