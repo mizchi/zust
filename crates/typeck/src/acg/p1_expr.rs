@@ -1005,7 +1005,10 @@ impl Cx<'_> {
         }
         // 一時値への参照: 一時領域に置いてそのアドレスを取る
         let inner_exp = match expected {
+            // (`f(&3)` with `f(x: *const isize)`: the pointee too, for the coercion to the raw pointer)
+            // (not a pointer to a pointer: `&mut &mut x` is not `*mut *mut T`)
             Some(Ty::Ref(_, i)) => Some(*i),
+            Some(Ty::Ptr(_, i)) if !matches!(i, Ty::Ptr(..) | Ty::Ref(..)) => Some(*i),
             _ => None,
         };
         // 定数式への共有参照は静的データに昇格する (`fn f() -> &'static S { &S { x: 1 } }`)
