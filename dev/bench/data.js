@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795129601044,
+  "lastUpdate": 1795129603100,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -38920,6 +38920,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "lsp peak RSS",
             "value": 72.629,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "committer": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "distinct": true,
+          "id": "5dea15e9c3abde1a303d9189457da49dfb53a6a2",
+          "message": "Debug for ranges; cheaper prelude selection per process\n\n- `{:?}` of `Range` / `RangeInclusive` (`1..5`, `0..=3`,\n  `1..=1 (exhausted)`), selected only for a program that formats with\n  Debug (`{:?}`, assert_eq!, assert_ne!, dbg!).\n- Selection: an item that only its own name can make wanted is decided\n  by one lookup before the gates; `is_iterator_trait` / `is_drop_impl`\n  scan headers only, and the Drop test of an impl member is computed\n  once per header instead of on every round.\n\ntests/ui: +3 genuine passes (2 run-pass, 1 check-pass).\nKPI: crates edit -0.58%, traits edit -0.35%, edit -0.09% (the Debug\nimpls alone had cost +0.4% on crates edit).\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-19T23:00:50Z",
+          "tree_id": "8dcac85f839784785f0c100651a2b22ee9fd68b6",
+          "url": "https://github.com/mizchi/zust/commit/5dea15e9c3abde1a303d9189457da49dfb53a6a2"
+        },
+        "date": 1795129602597,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "lsp definition p50",
+            "value": 0.475,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp hover p50",
+            "value": 0.381,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp completion p50",
+            "value": 0.97,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp references p50",
+            "value": 4.353,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp rename p50",
+            "value": 0.404,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp signatureHelp p50",
+            "value": 0.753,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp documentHighlight p50",
+            "value": 0.823,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp ready (startup to indexed)",
+            "value": 118.891,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp peak RSS",
+            "value": 72.824,
             "unit": "MiB"
           }
         ]
