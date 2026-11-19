@@ -7,7 +7,8 @@ usage: python3 bench/kpi_track.py "short label of the change" [--lsp] [--dry-run
  bench/rust_ui.py first: its out/rust_ui.json is read)
 
 Only deterministic numbers are logged (wall-clock times move by 10-30% between runs on a shared machine):
-- gen5000 (bench/gen.py, 5000 fns): instructions of a no-op build, a build after editing one function, and `check`,
+- gen5000 (bench/gen.py, 5000 fns): instructions (of the zustc process; forked workers count the parent's work again) of
+  a no-op build (the least of 3 runs: it moves by ~0.1% run to run), a build after editing one function, and `check`,
   counted by cachegrind; and the build cache size. The work directory is always ~/.cache/zust-kpi-track (whatever
   checkout runs it), so paths do not change the counts.
 - with --lsp: the instructions of one zust-analyzer session of bench/lsp_parity.py on zustc's own sources (slow).
@@ -38,7 +39,7 @@ def build_kpis():
     gen(5000, 0, src)
     run_measured(build)
     run_measured(build)
-    noop = instructions(build)
+    noop = min(instructions(build) for _ in range(3))
     gen(5000, 3, src)
     edit = instructions(build)
     gen(5000, 0, src)

@@ -804,12 +804,6 @@ impl Inf<'_> {
                     };
                     // (注釈が完全な型なら変数はその型: `let s: &[T] = &v;` の強制変換で初期値の型と違ってよい)
                     let v = match ann {
-                        // (`let p: Box<_> = ..`: each `_` is a new type variable, decided by the uses as well)
-                        Some(_) if ann_ty.as_ref().is_some_and(|a| format!("{a:?}").contains("Infer")) => {
-                            let k = self.ty_var(ann_ty.as_ref().unwrap());
-                            self.unify(v, k);
-                            v
-                        }
                         Some(t) => {
                             let k = self.known(t);
                             self.unify(v, k);

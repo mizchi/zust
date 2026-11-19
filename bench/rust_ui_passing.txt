@@ -458,6 +458,7 @@ compile-fail	binding/issue-40402-1.rs
 compile-fail	binding/issue-40402-2.rs
 check-pass	binding/issue-53114-borrow-checks.rs
 compile-fail	binding/issue-53114-safety-checks.rs
+run-pass	binding/let-assignability.rs
 run-pass	binding/let-destruct-ref.rs
 run-pass	binding/let-var-hygiene.rs
 run-pass	binding/match-borrowed_str.rs
@@ -569,6 +570,7 @@ compile-fail	borrowck/assignment-to-immutable-ref.rs
 compile-fail	borrowck/async-trait-proposes-let-binding.rs
 compile-fail	borrowck/augmented-assignments.rs
 compile-fail	borrowck/bad-drop-side-effects.rs
+run-pass	borrowck/borrow-box-in-map-3026.rs
 compile-fail	borrowck/borrow-checker-lifetime-error-46471.rs
 compile-fail	borrowck/borrow-immutable-deref-box.rs
 compile-fail	borrowck/borrow-raw-address-of-borrowed.rs
@@ -576,6 +578,7 @@ check-pass	borrowck/borrow-raw-address-of-deref-mutability-ok.rs
 compile-fail	borrowck/borrow-raw-address-of-deref-mutability.rs
 check-pass	borrowck/borrow-raw-address-of-mutability-ok.rs
 compile-fail	borrowck/borrow-raw-address-of-mutability.rs
+compile-fail	borrowck/borrow-tuple-fields.rs
 compile-fail	borrowck/borrowck-access-permissions.rs
 compile-fail	borrowck/borrowck-and-init.rs
 compile-fail	borrowck/borrowck-argument.rs
@@ -621,6 +624,7 @@ compile-fail	borrowck/borrowck-init-in-fru.rs
 compile-fail	borrowck/borrowck-init-op-equal.rs
 compile-fail	borrowck/borrowck-init-plus-equal.rs
 compile-fail	borrowck/borrowck-issue-14498.rs
+compile-fail	borrowck/borrowck-issue-2657-1.rs
 compile-fail	borrowck/borrowck-issue-2657-2.rs
 compile-fail	borrowck/borrowck-issue-48962.rs
 run-pass	borrowck/borrowck-lend-args.rs
@@ -628,6 +632,9 @@ compile-fail	borrowck/borrowck-lend-flow-if.rs
 compile-fail	borrowck/borrowck-lend-flow-loop.rs
 compile-fail	borrowck/borrowck-lend-flow-match.rs
 compile-fail	borrowck/borrowck-lend-flow.rs
+compile-fail	borrowck/borrowck-loan-blocks-move-cc.rs
+compile-fail	borrowck/borrowck-loan-blocks-move.rs
+compile-fail	borrowck/borrowck-loan-blocks-mut-uniq.rs
 compile-fail	borrowck/borrowck-loan-in-overloaded-op.rs
 compile-fail	borrowck/borrowck-loan-rcvr-overloaded-op.rs
 compile-fail	borrowck/borrowck-loan-rcvr.rs
@@ -635,6 +642,7 @@ compile-fail	borrowck/borrowck-local-borrow-outlives-fn.rs
 compile-fail	borrowck/borrowck-local-borrow-with-panic-outlives-fn.rs
 compile-fail	borrowck/borrowck-match-already-borrowed.rs
 compile-fail	borrowck/borrowck-match-binding-is-assignment.rs
+run-pass	borrowck/borrowck-move-by-capture-ok.rs
 compile-fail	borrowck/borrowck-move-error-many-places.rs
 compile-fail	borrowck/borrowck-move-error-with-note.rs
 compile-fail	borrowck/borrowck-move-in-irrefut-pat.rs
@@ -1052,6 +1060,7 @@ compile-fail	codemap_tests/tab.rs
 compile-fail	codemap_tests/unicode_2.rs
 check-pass	codemap_tests/unicode_3.rs
 run-pass	codemap_tests/utf8-bom.rs
+run-pass	coercion/basic-ptr-coercions.rs
 check-pass	coercion/cast-higher-ranked-unsafe-fn-ptr.rs
 compile-fail	coercion/closure-in-array.rs
 run-pass	coercion/coerce-bare-fn-returning-zst-to-closure.rs
@@ -1089,6 +1098,7 @@ check-pass	coercion/mut-trait-object-coercion-8398.rs
 compile-fail	coercion/no-implicit-box-to-ref-coercion.rs
 compile-fail	coercion/non-primitive-cast-135412.rs
 compile-fail	coercion/pin-dyn-dispatch-sound.rs
+compile-fail	coercion/ptr-mutability-errors.rs
 check-pass	coercion/struct-literal-field-type-coercion-to-expected-type.rs
 compile-fail	coercion/type-errors.rs
 run-pass	coercion/unsafe-coercion.rs
@@ -1149,6 +1159,8 @@ compile-fail	confuse-field-and-method/private-field.rs
 check-pass	const-generics/apit-with-const-param.rs
 check-pass	const-generics/arg-in-pat-2.rs
 compile-fail	const-generics/argument_order.rs
+check-pass	const-generics/array-impls/core-traits-impls-length-32.rs
+check-pass	const-generics/array-impls/core-traits-impls-length-33.rs
 compile-fail	const-generics/associated-const-bindings/const-bound-to-assoc-ty-99828.rs
 compile-fail	const-generics/associated-const-bindings/issue-105330.rs
 compile-fail	const-generics/associated-const-bindings/mismatched-types-with-generic-in-ace-no-feature-gate.rs
@@ -4269,8 +4281,10 @@ run-pass	regions/regions-addr-of-ret.rs
 compile-fail	regions/regions-adjusted-lvalue-op.rs
 run-pass	regions/regions-assoc-type-region-bound.rs
 run-pass	regions/regions-assoc-type-static-bound.rs
+run-pass	regions/regions-borrow-at.rs
 run-pass	regions/regions-borrow-evec-fixed.rs
 run-pass	regions/regions-borrow-evec-uniq.rs
+run-pass	regions/regions-borrow-uniq.rs
 run-pass	regions/regions-bot.rs
 run-pass	regions/regions-bound-lists-feature-gate-2.rs
 run-pass	regions/regions-bound-lists-feature-gate.rs
@@ -4283,6 +4297,7 @@ run-pass	regions/regions-dependent-autoslice.rs
 run-pass	regions/regions-dependent-let-ref.rs
 run-pass	regions/regions-early-bound-lifetime-in-assoc-fn.rs
 run-pass	regions/regions-early-bound-used-in-bound-method.rs
+run-pass	regions/regions-escape-into-other-fn.rs
 compile-fail	regions/regions-escape-via-trait-or-not.rs
 run-pass	regions/regions-expl-self.rs
 run-pass	regions/regions-fn-subtyping-2.rs
@@ -5078,6 +5093,7 @@ compile-fail	threads-sendsync/rc-is-not-send.rs
 run-pass	threads-sendsync/send-type-inference.rs
 run-pass	threads-sendsync/sendable-class.rs
 run-pass	threads-sendsync/sendfn-is-a-block.rs
+run-pass	threads-sendsync/sendfn-spawn-with-fn-arg.rs
 run-pass	threads-sendsync/spawn-fn.rs
 run-pass	threads-sendsync/spawn.rs
 run-pass	threads-sendsync/spawn2.rs
@@ -5669,6 +5685,7 @@ run-pass	unsafe/unsafe-fn-called-from-unsafe-blk.rs
 run-pass	unsafe/unsafe-fn-called-from-unsafe-fn.rs
 compile-fail	unsafe/unsafe-fn-called-through-ref.rs
 compile-fail	unsafe/unsafe-fn-deref-ptr.rs
+run-pass	unsafe/unsafe-pointer-assignability.rs
 check-pass	unsafe/unsafe_op_in_unsafe_fn/edition_2024_default.rs
 compile-fail	unsafe/unsafe_op_in_unsafe_fn/rfc-2585-unsafe_op_in_unsafe_fn.rs
 compile-fail	unsized-locals/align.rs
