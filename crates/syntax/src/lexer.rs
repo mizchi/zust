@@ -167,6 +167,7 @@ pub fn split(src: &str) -> Result<Vec<SrcItem>, String> {
     let mut base: i32 = 0;
     let mut impl_header: Option<u32> = None;
     let mut impl_pending = false;
+    let mut angle: i32 = 0;
     // ブロックが trait か impl か
     let mut is_trait = false;
     // `#![...]` (クレート属性) の途中か
@@ -303,7 +304,7 @@ pub fn split(src: &str) -> Result<Vec<SrcItem>, String> {
             impl_header = None;
             continue;
         }
-        if c == b'#' && depth == 0 && st.cur.is_none() {
+        if c == b'#' && depth == base && st.cur.is_none() {
             let mut j = i;
             while j < n && s[j].is_ascii_whitespace() {
                 j += 1;
@@ -313,6 +314,10 @@ pub fn split(src: &str) -> Result<Vec<SrcItem>, String> {
         tok!(start, i, 5u8);
         match c {
             b'(' | b'[' | b'{' => depth += 1,
+            // (generic arguments in an item's head may hold a block: `fn f() -> Foo<{ N }> {` /
+            // `impl X for Foo<{ N }> {` do not end at the block's `}`)
+            b'<' if depth == base && !semi_only => angle += 1,
+            b'>' if depth == base && !semi_only && !(start > 0 && matches!(s[start - 1], b'-' | b'=')) => angle -= 1,
             b')' | b']' | b'}' => {
                 depth -= 1;
                 if depth < 0 {
@@ -325,9 +330,9 @@ pub fn split(src: &str) -> Result<Vec<SrcItem>, String> {
             }
             _ => {}
         }
-        let header_end = c == b'{' && depth == 1 && impl_pending;
-        let attr_end = inner_attr && c == b']' && depth == 0;
-        let item_end = depth == base && (c == b';' || (c == b'}' && !semi_only));
+        let header_end = c == b'{' && depth == 1 && impl_pending && angle <= 0;
+        let attr_end = inner_attr && c == b']' && depth == base;
+        let item_end = depth == base && (c == b';' || (c == b'}' && !semi_only && angle <= 0));
         if header_end || attr_end || item_end {
             let (sp, ln, idents) = st.cur.take().unwrap();
             let mut h = KeyHasher::new();
@@ -358,6 +363,7 @@ pub fn split(src: &str) -> Result<Vec<SrcItem>, String> {
             semi_only = false;
             // (`impl X;` のような壊れたアイテムの後で、次の `{` をヘッダにしない: アイテムの境界では状態を戻す)
             impl_pending = false;
+            angle = 0;
             if header_end {
                 impl_pending = false;
                 impl_header = Some(items.len() as u32);
@@ -713,11 +719,15 @@ fn hoist_parts_at(src: &str, redo: u32) -> Option<(String, Vec<(usize, String)>)
                 let mut j = ik + 1;
                 let mut d = 0i32;
                 let mut end = None;
+                // (`const X: S = S { a: 0 };` / `static` / `type` / `use` end at the `;`, after any braces)
+                let semi_only = matches!(t, b"static" | b"type" | b"use") || (t == b"const" && !matches!(tok(ik + 1), b"fn" | b"unsafe" | b"extern" | b"async"));
                 while j < toks.len() {
                     if toks[j].0 == 1 {
                         match tok(j) {
                             b"(" | b"[" => d += 1,
                             b")" | b"]" => d -= 1,
+                            b"{" if semi_only => d += 1,
+                            b"}" if semi_only => d -= 1,
                             b";" if d == 0 => {
                                 end = Some(j);
                                 break;
@@ -985,7 +995,15 @@ pub fn expand_thread_local(src: &str) -> Option<String> {
             ));
             j = i1 + 1;
         }
-        let a = toks[k].1;
+        // (`std::thread_local!` / `::std::thread_local!`: the path goes too)
+        let mut ak = k;
+        while ak >= 3 && is_sym(ak - 1, b':') && is_sym(ak - 2, b':') && toks[ak - 3].0 == 0 {
+            ak -= 3;
+        }
+        if ak >= 2 && is_sym(ak - 1, b':') && is_sym(ak - 2, b':') {
+            ak -= 2;
+        }
+        let a = toks[ak].1.max(last);
         out.push_str(&src[last..a]);
         out.push_str(expanded.replace('\n', " ").as_str());
         for _ in 0..s[a..end].iter().filter(|&&c| c == b'\n').count() {

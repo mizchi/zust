@@ -39,6 +39,15 @@ fn parse_pt(ts: TokenStream, is_pat: bool) -> Vec<Pt> {
     let mut i = 0;
     while i < toks.len() {
         match &toks[i] {
+            // (a doc comment in a matcher is ignored, as rustc does)
+            TokenTree::Punct(p)
+                if is_pat
+                    && p.as_char() == '#'
+                    && matches!(toks.get(i + 1), Some(TokenTree::Group(g)) if g.delimiter() == Delimiter::Bracket
+                        && matches!(g.stream().into_iter().next(), Some(TokenTree::Ident(d)) if d == "doc")) =>
+            {
+                i += 2;
+            }
             TokenTree::Punct(p) if p.as_char() == '$' && i + 1 < toks.len() => match &toks[i + 1] {
                 TokenTree::Ident(id) => {
                     // `$x:expr` (パターン) / `$x` (本体)
@@ -144,8 +153,15 @@ fn is_expr_keyword(s: &str) -> bool {
 fn take_frag(toks: &[TokenTree], kind: &str, stop: Option<&TokenTree>) -> Option<(usize, bool)> {
     match kind {
         "ident" | "lifetime" | "literal" | "tt" => {
-            if toks.is_empty() {
-                return None;
+            let first = toks.first()?;
+            // (the kind decides which rule matches: `($i:ident)` does not take `1`, `($l:literal)` not `x`)
+            match (kind, first) {
+                ("ident", TokenTree::Ident(i)) if i != "_" => {}
+                ("literal", TokenTree::Literal(_)) | ("literal", TokenTree::Punct(_)) => {}
+                ("literal", TokenTree::Ident(i)) if i == "true" || i == "false" => return Some((1, false)),
+                ("lifetime", TokenTree::Punct(p)) if p.as_char() == '\'' => {}
+                ("tt", _) => {}
+                _ => return None,
             }
             // (負のリテラル `-1` は 2 トークン)
             if kind == "literal" {
@@ -154,12 +170,26 @@ fn take_frag(toks: &[TokenTree], kind: &str, stop: Option<&TokenTree>) -> Option
                         return Some((2, false));
                     }
                 }
+                if !matches!(first, TokenTree::Literal(_)) {
+                    return None;
+                }
             }
             if kind == "lifetime" {
                 return Some((2.min(toks.len()), false));
             }
             Some((1, false))
         }
+        // (`pub` / `pub(crate)` / `pub(in path)` or nothing)
+        "vis" => match toks.first() {
+            Some(TokenTree::Ident(i)) if i == "pub" => match toks.get(1) {
+                Some(TokenTree::Group(g)) if g.delimiter() == Delimiter::Parenthesis => {
+                    let restr = matches!(g.stream().into_iter().next(), Some(TokenTree::Ident(k)) if k == "crate" || k == "self" || k == "super" || k == "in");
+                    Some((if restr { 2 } else { 1 }, false))
+                }
+                _ => Some((1, false)),
+            },
+            _ => Some((0, false)),
+        },
         "block" => match toks.first() {
             Some(TokenTree::Group(g)) if g.delimiter() == Delimiter::Brace => Some((1, false)),
             _ => None,
@@ -169,13 +199,44 @@ fn take_frag(toks: &[TokenTree], kind: &str, stop: Option<&TokenTree>) -> Option
             let mut n = 0;
             // (式: オペランドの後にオペランドが続いたら式は終わっている: `$($len:expr)+` の `1 2 3`)
             let mut after_operand = false;
+            // (a type / path keeps its generic arguments: `HashMap<K, V>` does not end at the `,`)
+            let angles = matches!(kind, "ty" | "path");
+            let mut angle: u32 = 0;
             while n < toks.len() {
+                if angle > 0 {
+                    if let TokenTree::Punct(p) = &toks[n] {
+                        match p.as_char() {
+                            '<' => angle += 1,
+                            // (`->` in `Fn() -> T` is not a closing angle)
+                            '>' if !(n > 0 && matches!(&toks[n - 1], TokenTree::Punct(q) if q.as_char() == '-' && q.spacing() == Spacing::Joint)) => angle -= 1,
+                            ';' => break,
+                            _ => {}
+                        }
+                    }
+                    n += 1;
+                    continue;
+                }
                 if let Some(s) = stop {
                     if same_tok(&toks[n], s) {
                         break;
                     }
                 }
+                // (an expression's turbofish `f::<A, B>` / qualified path `<T as Tr>::f`)
+                if matches!(&toks[n], TokenTree::Punct(p) if p.as_char() == '<')
+                    && (angles || (kind == "expr" && (n == 0 || matches!(&toks[n - 1], TokenTree::Punct(q) if q.as_char() == ':'))))
+                {
+                    angle = 1;
+                    n += 1;
+                    continue;
+                }
                 if kind == "expr" {
+                    // (an attribute on the expression, `#[allow(x)] 0`: not an operand)
+                    if matches!(&toks[n], TokenTree::Punct(p) if p.as_char() == '#')
+                        && matches!(toks.get(n + 1), Some(TokenTree::Group(g)) if g.delimiter() == Delimiter::Bracket)
+                    {
+                        n += 2;
+                        continue;
+                    }
                     let operand_start = match &toks[n] {
                         TokenTree::Literal(_) => true,
                         TokenTree::Ident(i) => !is_expr_keyword(&i.to_string()),
@@ -257,6 +318,8 @@ fn match_prefix(pat: &[Pt], toks: &[TokenTree], binds: &mut HashMap<String, Bind
             Pt::Rep(inner, sep, op) => {
                 let stop = next_lit(pat, k + 1, follow);
                 let mut items: Vec<HashMap<String, Bind>> = vec![];
+                // (where the last separator was: `$($x:ident),* ,` gives the trailing `,` back when no item follows it)
+                let mut sep_at: Option<usize> = None;
                 loop {
                     if i >= toks.len() {
                         break;
@@ -275,12 +338,14 @@ fn match_prefix(pat: &[Pt], toks: &[TokenTree], binds: &mut HashMap<String, Bind
                     }
                     i += n;
                     items.push(b);
+                    sep_at = None;
                     if *op == '?' {
                         break;
                     }
                     match sep {
                         Some(s) => {
                             if i < toks.len() && same_tok(s, &toks[i]) {
+                                sep_at = Some(i);
                                 i += 1;
                             } else {
                                 break;
@@ -288,6 +353,9 @@ fn match_prefix(pat: &[Pt], toks: &[TokenTree], binds: &mut HashMap<String, Bind
                         }
                         None => {}
                     }
+                }
+                if let Some(j) = sep_at {
+                    i = j;
                 }
                 if *op == '+' && items.is_empty() {
                     return None;
@@ -700,7 +768,8 @@ pub fn expand_cfg(src: &str, cfg: Option<&crate::cfg::CfgSet>) -> Result<Option<
                     let mut body = String::new();
                     transcribe_h(&r.body, &binds, &mut body)?;
                     // 式の位置は `({ .. })`、トップレベルと `mod` / `impl` / `trait` の中はアイテムとしてそのまま
-                    let top = depth[i] == 0 || item_scope(b, &toks, &close, &depth, i);
+                    // (`const C: T = m!();` at the top or in an impl is an expression)
+                    let top = (depth[i] == 0 || item_scope(b, &toks, &close, &depth, i)) && !(i > 0 && sym(i - 1, b'='));
                     let rep = if top { body } else { format!("({{ {body} }})") };
                     // (`crate::m!(..)` / `self::m!(..)`: 前のパスも消す)
                     let mut a = toks[i].1;
@@ -708,6 +777,10 @@ pub fn expand_cfg(src: &str, cfg: Option<&crate::cfg::CfgSet>) -> Result<Option<
                     while k >= 3 && toks[k - 3].0 == 0 && sym(k - 2, b':') && sym(k - 1, b':') {
                         a = toks[k - 3].1;
                         k -= 3;
+                    }
+                    // (`::m!(..)`)
+                    if k >= 2 && sym(k - 2, b':') && sym(k - 1, b':') && toks[k - 1].1 == toks[k - 2].1 + 1 && !(k >= 3 && toks[k - 3].0 == 0) {
+                        a = toks[k - 2].1;
                     }
                     // (トップレベルの `name!(..);` の `;` も取る)
                     let mut e = toks[ge].2;

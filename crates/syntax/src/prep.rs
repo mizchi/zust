@@ -111,6 +111,44 @@ pub fn prep_full(src: &str, crates: &[String], fix: &mut Vec<(u32, u32, i32)>, c
     Ok(Prep { text, moved })
 }
 
+/// The start of a source file without a byte order mark and a shebang line (`#!/usr/bin/env ..`, blanked to keep the
+/// line numbers; `#![attr]` is not one). None when there is neither
+fn file_start(src: &str) -> Option<String> {
+    let bom = src.starts_with('\u{feff}');
+    let s = if bom { &src[3..] } else { src };
+    if !s.starts_with("#!") {
+        return bom.then(|| s.to_string());
+    }
+    // (`#!` then whitespace / comments then `[` is an inner attribute)
+    let r = s[2..].as_bytes();
+    let mut i = 0;
+    loop {
+        while i < r.len() && r[i].is_ascii_whitespace() {
+            i += 1;
+        }
+        if r[i..].starts_with(b"//") {
+            while i < r.len() && r[i] != b'\n' {
+                i += 1;
+            }
+        } else if r[i..].starts_with(b"/*") {
+            match s[2 + i + 2..].find("*/") {
+                Some(e) => i += 2 + e + 2,
+                None => break,
+            }
+        } else {
+            break;
+        }
+    }
+    if r.get(i) == Some(&b'[') {
+        return bom.then(|| s.to_string());
+    }
+    let nl = s.find('\n').unwrap_or(s.len());
+    let mut out = String::with_capacity(s.len());
+    out.push_str(&" ".repeat(nl));
+    out.push_str(&s[nl..]);
+    Some(out)
+}
+
 /// チャンクの結果: 本文の行 (改行込み)、末尾に移したアイテム、桁のずれ (行はチャンクの先頭からの 0 始まり)
 struct ChunkOut {
     text: String,
@@ -762,6 +800,8 @@ pub fn std_renames(src: &str) -> Option<String> {
 /// 前処理 (差分)。fix には桁のずれを足す
 pub fn prep(src: &str, crates: &[String], fix: &mut Vec<(u32, u32, i32)>, cfg: Option<&crate::cfg::CfgSet>, memo: &mut PrepMemo) -> R<String> {
     memo.calls += 1;
+    let start = file_start(src);
+    let src: &str = start.as_deref().unwrap_or(src);
     if std::env::var_os("ZUSTC_NO_PREP_INC").is_some() || (memo.calls == 1 && std::env::var_os("ZUSTC_PREP_VERIFY").is_none()) {
         return prep_full(src, crates, fix, cfg).map(|p| p.text);
     }
