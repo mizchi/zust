@@ -13,3 +13,4 @@ date	commit	change	noop_M	edit_M	check_M	cache_KiB	lsp_G	run	check	build	cfail
 2026-11-19	2ddc076	closures with no captures as fn pointers	625.185	626.788	3905.285	1902.8	-	1559	1283	89	2851
 2026-11-19	a474393	LSP measured on a fixed snapshot (closures as fn pointers included)	625.125	626.728	3905.165	1902.8	10.8931	1559	1283	89	2851
 2026-11-19	6477f49	generic fns returning impl Trait (a parameter type)	625.185	626.788	3905.335	1902.8	10.8943	1559	1290	89	2851
+2026-11-19	a9f1a01	generic impl Trait returns typed per instance	625.191	626.794	3905.274	1902.8	10.8942	1560	1300	89	2854
