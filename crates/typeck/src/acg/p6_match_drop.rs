@@ -157,7 +157,7 @@ impl Cx<'_> {
             self.bk_bind_end();
             r?;
             if self.owned_binds > ob {
-                self.release_outer(scrut, sflag);
+                self.release_outer(scrut, sflag)?;
             }
             if let Some(g) = &arm.guard {
                 // (`P if let Q = e && c => ..`: each `let` of the guard tests and binds in the arm's scope, each other
@@ -235,7 +235,7 @@ impl Cx<'_> {
         self.bk_bind_end();
         r?;
         if self.owned_binds > ob {
-            self.release_outer(lexpr, sflag);
+            self.release_outer(lexpr, sflag)?;
         }
         let (tv, tt) = self.block(then_branch, expected)?;
         self.pop_scope();
@@ -284,7 +284,7 @@ impl Cx<'_> {
         self.bk_bind_end();
         r?;
         if self.owned_binds > ob {
-            self.release_outer(e, sflag);
+            self.release_outer(e, sflag)?;
         }
         self.loops.push(Loop {
             cont: header,
@@ -1188,7 +1188,28 @@ impl Cx<'_> {
     }
 
     /// パターンが match 対象 e から値でムーブした (flag は e が一時値のときのフラグ)
-    pub(crate) fn release(&mut self, e: &Expr, flag: Option<StackSlot>) {
+    pub(crate) fn release(&mut self, e: &Expr, flag: Option<StackSlot>) -> R<()> {
+        self.deref_move_check(e)?;
+        self.release_inner(e, flag)
+    }
+
+    /// a pattern moved a value out of `*rc` (an Rc / a Deref type of the program's): E0507, as `let x = *rc;`
+    pub(crate) fn deref_move_check(&mut self, e: &Expr) -> R<()> {
+        if let Expr::Unary(op, x, _) = strip_paren(e) {
+            if op == "*" && self.bk_on() && self.bk.level >= 1 {
+                if let Some(Ty::Struct(sid)) = self.peek(x).map(|t| self.strip_refs(t)) {
+                    if self.user_deref_sid(x, sid).is_some() {
+                        let n = self.prog.structs[self.prog.base_of(sid) as usize].name.clone();
+                        let what = if matches!(n.as_str(), "Rc" | "Arc") { format!("an `{n}`") } else { format!("dereference of `{}`", self.prog.tn(Ty::Struct(sid))) };
+                        return err(expr_start(e), format!("cannot move out of {what} (E0507)"));
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+
+    fn release_inner(&mut self, e: &Expr, flag: Option<StackSlot>) -> R<()> {
         // (a pattern moved out of a field of a local (`match a.1 { Some(v) => .. }`): the field becomes "empty" (0), as
         // `let v = a.1;` leaves it, so the owner's drop and a later `a.1 = ..` free nothing twice)
         if let Expr::Field(b, _, _) = strip_paren(e) {
@@ -1206,7 +1227,7 @@ impl Cx<'_> {
                     if self.needs_drop(t) && self.zeroable(t) {
                         let dst = self.addr_plus(a, o);
                         self.zero(dst, t);
-                        return;
+                        return Ok(());
                     }
                 }
             }
@@ -1227,16 +1248,18 @@ impl Cx<'_> {
         } else if let Some(f) = flag {
             self.clear_flag(f);
         }
+        Ok(())
     }
 
     /// パターンの束縛のスコープ (いちばん内側) を除いて release する:
     /// `let nn = ..; if let Some(nn) = nn { .. }` の match 対象 `nn` は外側の変数 (内側の束縛と同じ名前)
-    pub(crate) fn release_outer(&mut self, e: &Expr, flag: Option<StackSlot>) {
+    pub(crate) fn release_outer(&mut self, e: &Expr, flag: Option<StackSlot>) -> R<()> {
         let top = self.scopes.pop();
-        self.release(e, flag);
+        let r = self.release(e, flag);
         if let Some(t) = top {
             self.scopes.push(t);
         }
+        r
     }
 
     /// 代入で上書きする前に古い値を drop する。ローカル変数ならフラグを見て、代入後に立て直すフラグを返す

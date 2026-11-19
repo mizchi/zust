@@ -1313,11 +1313,12 @@ impl Cx<'_> {
                     self.bk_bind_end();
                     r?;
                     if self.owned_binds > ob {
+                        self.deref_move_check(init)?;
                         match pre {
                             Some(f) => self.clear_flag(f),
                             None => {
                                 let f = self.last_scrut;
-                                self.release(init, f);
+                                self.release(init, f)?;
                             }
                         }
                     }

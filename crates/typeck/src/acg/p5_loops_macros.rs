@@ -1447,7 +1447,7 @@ impl Cx<'_> {
         };
         // `?` は中身 (Ok / Some の値か、Err の値) をムーブするので、一時値 (や変数) はもう drop しない
         let sflag = self.last_scrut;
-        self.release(texpr, sflag);
+        self.release(texpr, sflag)?;
         let (place, _) = self.pat_deref(place, BindMode::Move);
         let Ty::Struct(inst) = place.ty() else {
             return err(SP, format!("the `?` operator cannot be applied to type `{}`", self.prog.tn(place.ty())));
