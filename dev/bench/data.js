@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795107491873,
+  "lastUpdate": 1795109475536,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -24008,6 +24008,165 @@ window.BENCHMARK_DATA = {
           {
             "name": "rt/strings run (-O)",
             "value": 34.129,
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "committer": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "distinct": true,
+          "id": "61f478f9c66f66467b4186a95aeedb8ff8737bf2",
+          "message": "Fixes found building byteorder (BurntSushi/byteorder) with zustc; io::Write, Cursor, fmt::Write\n\nbyteorder (lib with feature std + an app using ByteOrder, ReadBytesExt / WriteBytesExt on Vec and Cursor) now builds\nand prints what rustc's build does. What it needed:\n\n- `x.to_be()` / `to_le()`, `u32::from_be(x)` / `from_le` (x86-64 is little-endian).\n- `std::ptr::copy_nonoverlapping` / `copy` / `write_bytes` (memcpy / memmove / memset of count values).\n- `<u16>::from_be_bytes(..)` (a qualified self type with no trait) is the path `u16::from_be_bytes`.\n- `chunks_mut` / `chunks_exact_mut`.\n- `c[0] *= 10` where type inference did not reach the place's element type: a literal takes the place's type.\n- A one-argument `Result<T>` is `std::io::Result<T>` (`use std::io::{self, Result};`).\n- std::io::Write (write / write_all / flush, for Vec<u8> and Cursor<Vec<u8>>), Read::read_exact, std::io::Cursor\n  (Read for Cursor<Vec<u8>> / Cursor<&[u8]>), io errors UnexpectedEof / WriteZero.\n- std::fmt::Write (write_str / write_char, for String and the program's own types): prep::std_renames names it\n  `__FWr` where it comes from fmt, apart from io's Write. The prelude includes these only when their names are used\n  (the size budget caught `impl Write for Vec<u8>` pulled into every program using Vec).\n\ntests/ui: 8 newly passing (run-pass associated-consts x4, borrowck/two-phase-multiple-activations.rs,\nconsts/const-int-conversion-rpass.rs; check-pass intrinsics/issue-84297-reifying-copy.rs,\nrust-2021/generic-type-collision.rs). Removed (they failed on what is supported now, not on the lifetime / inference\nerrors they test): compile-fail consts/const-int-conversion.rs, nll/user-annotations/constant-in-expr-inherent-1.rs,\nmethod-ufcs-inherent-3.rs, method-ufcs-inherent-4.rs, traits/method-on-deeply-nested-struct-perf-2.rs.\nborrowck/cannot-return-ref-to-temporary-format-args.rs: bench/rust_ui_accidental.txt.\nKPIs: traits edit +0.26%, crates edit +0.21%, gen5000 edit / check +0.15% (a larger prelude to index).\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-19T17:26:10Z",
+          "tree_id": "5705b503b2e883cd725e456868cabef4b099a66f",
+          "url": "https://github.com/mizchi/zust/commit/61f478f9c66f66467b4186a95aeedb8ff8737bf2"
+        },
+        "date": 1795109475294,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "gen1000 build cold",
+            "value": 120.348,
+            "unit": "ms"
+          },
+          {
+            "name": "gen1000 build noop",
+            "value": 0.925,
+            "unit": "ms"
+          },
+          {
+            "name": "gen1000 build edit 1 fn",
+            "value": 18.398,
+            "unit": "ms"
+          },
+          {
+            "name": "gen1000 check",
+            "value": 79.927,
+            "unit": "ms"
+          },
+          {
+            "name": "gen1000 build cold peak RSS",
+            "value": 17.852,
+            "unit": "MiB"
+          },
+          {
+            "name": "gen1000 binary",
+            "value": 323.977,
+            "unit": "KiB"
+          },
+          {
+            "name": "gen1000 cache",
+            "value": 387.21,
+            "unit": "KiB"
+          },
+          {
+            "name": "gen1000 build noop instructions",
+            "value": 0.727,
+            "unit": "M instr"
+          },
+          {
+            "name": "gen1000 build edit 1 fn instructions",
+            "value": 133.814,
+            "unit": "M instr"
+          },
+          {
+            "name": "gen1000 check instructions",
+            "value": 785.271,
+            "unit": "M instr"
+          },
+          {
+            "name": "gen5000 build cold",
+            "value": 536.294,
+            "unit": "ms"
+          },
+          {
+            "name": "gen5000 build noop",
+            "value": 0.869,
+            "unit": "ms"
+          },
+          {
+            "name": "gen5000 build edit 1 fn",
+            "value": 67.18,
+            "unit": "ms"
+          },
+          {
+            "name": "gen5000 check",
+            "value": 386.799,
+            "unit": "ms"
+          },
+          {
+            "name": "gen5000 build cold peak RSS",
+            "value": 51.934,
+            "unit": "MiB"
+          },
+          {
+            "name": "gen5000 binary",
+            "value": 1558.336,
+            "unit": "KiB"
+          },
+          {
+            "name": "gen5000 cache",
+            "value": 1902.835,
+            "unit": "KiB"
+          },
+          {
+            "name": "gen5000 build noop instructions",
+            "value": 0.727,
+            "unit": "M instr"
+          },
+          {
+            "name": "gen5000 build edit 1 fn instructions",
+            "value": 629.637,
+            "unit": "M instr"
+          },
+          {
+            "name": "gen5000 check instructions",
+            "value": 3875.761,
+            "unit": "M instr"
+          },
+          {
+            "name": "rt/fib run (-O)",
+            "value": 54.341,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/hashmap run (-O)",
+            "value": 89.937,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/matmul run (-O)",
+            "value": 39.493,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/nbody run (-O)",
+            "value": 52.671,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/sieve run (-O)",
+            "value": 94.436,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/sort run (-O)",
+            "value": 141.045,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/strings run (-O)",
+            "value": 34.299,
             "unit": "ms"
           }
         ]
