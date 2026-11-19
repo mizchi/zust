@@ -63,6 +63,7 @@ run-pass	array-slice-vec/vec-macro-with-trailing-comma.rs
 run-pass	array-slice-vec/vec-matching-fixed.rs
 run-pass	array-slice-vec/vec-matching-fold.rs
 run-pass	array-slice-vec/vec-matching-legal-tail-element-borrow.rs
+run-pass	array-slice-vec/vec-matching.rs
 compile-fail	array-slice-vec/vec-mut-iter-borrow.rs
 run-pass	array-slice-vec/vec-repeat-with-cast.rs
 compile-fail	array-slice-vec/vec-res-add.rs
@@ -687,6 +688,7 @@ compile-fail	borrowck/borrowck-return.rs
 run-pass	borrowck/borrowck-rvalues-mutable.rs
 run-pass	borrowck/borrowck-scope-of-deref-issue-4666.rs
 check-pass	borrowck/borrowck-slice-pattern-element-loan-array-no-overlap.rs
+check-pass	borrowck/borrowck-slice-pattern-element-loan-slice-no-overlap.rs
 run-pass	borrowck/borrowck-static-item-in-fn.rs
 compile-fail	borrowck/borrowck-storage-dead.rs
 compile-fail	borrowck/borrowck-swap-mut-base-ptr.rs
@@ -4207,6 +4209,7 @@ check-pass	pattern/rest-pat-syntactic.rs
 check-pass	pattern/rfc-3627-match-ergonomics-2024/min_match_ergonomics_success.rs
 compile-fail	pattern/rfc-3637-guard-patterns/only-resolve-top-level-guard-expr-once-ice-141265.rs
 run-pass	pattern/size-and-align.rs
+run-pass	pattern/slice-pattern-recursion-15104.rs
 compile-fail	pattern/struct-parser-recovery-issue-126344.rs
 run-pass	pattern/struct-pattern-in-fn-arg.rs
 compile-fail	pattern/struct-pattern-on-non-struct-resolve-error.rs
@@ -4233,8 +4236,6 @@ check-pass	pattern/usefulness/issue-80501-or-pat-and-macro.rs
 compile-fail	pattern/usefulness/issue-82772-match-box-as-struct.rs
 check-pass	pattern/usefulness/issue-88747.rs
 run-pass	pattern/usefulness/nested-exhaustive-match.rs
-compile-fail	pattern/usefulness/non-exhaustive-match.rs
-compile-fail	pattern/usefulness/non-exhaustive-pattern-witness.rs
 check-pass	pattern/usefulness/slice-patterns-irrefutable.rs
 compile-fail	pin-ergonomics/raw-ident.rs
 compile-fail	pin-macro/lifetime_errors_on_promotion_misusage.rs

@@ -175,6 +175,10 @@ impl Cx<'_> {
                 // `*b` は b をムーブしない
                 let (v, t) = self.read_no_move(x)?;
                 match (v, t) {
+                    // (`match *x { [a, b] => .. }` with x: &[T]: the slice itself, as a place that holds its fat pointer;
+                    // patterns on it bind by value)
+                    // (a fat pointer's value is the address of its two words, which is what a slice place holds)
+                    (Some(fat), Ty::Ref(_, Ty::Slice(e))) => Ok(Place::Mem(fat, 0, Ty::Slice(e))),
                     (Some(_), t) if t.is_fat() => err(SP, "dereferencing a slice is not supported (index it instead)"),
                     (Some(_), Ty::Ptr(..)) if self.unsafe_ok == 0 && sp.start.line != 0 => {
                         err(sp.start, "dereference of raw pointer is unsafe and requires unsafe block (E0133)")
@@ -530,6 +534,10 @@ impl Cx<'_> {
             }
             Expr::Unary(op, x, _) if op == "*" => {
                 let p = self.place(e)?;
+                // (`*slice` as a value: its size is not known; only a place (a pattern, `&*s`) can be one)
+                if matches!(p.ty(), Ty::Slice(_) | Ty::Str | Ty::Dyn(_)) {
+                    return err(expr_start(e), format!("the size for values of type `{}` cannot be known at compilation time", self.prog.tn(p.ty())));
+                }
                 if self.bk_on() && !self.bk_ty(p.ty()).0 {
                     self.bk_acc(e, borrowck::Acc::Move);
                 }
