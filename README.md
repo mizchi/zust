@@ -124,6 +124,12 @@ The KPIs are build speed, build cache size and LSP latency, measured with `pytho
 programs of 1000 / 5000 functions. Builds are compared by instruction counts (valgrind), because wall-clock times on
 the shared machine vary by about ±20%.
 
+Since 2026-11-19 every change is also measured on its own with `python3 bench/kpi_track.py`, so that small increases
+that add up stay visible: [bench/kpi_log.md](bench/kpi_log.md) has one row per change with its effect (Δ) and the total
+since the reference (Σ). Its counts do not move between runs (the no-op build is the least of 3 runs and does not
+include the partial rebuild that the tables below sometimes caught, which is why those read about 40 M higher). It
+found a +1.5% `check` cost in its first round (b0edbd7, fixed in 89d9fe9).
+
 | point | gen5000 no-op build | gen5000 edit 1 fn | gen5000 `check` | gen5000 cache | gen1000 cache | gen5000 cold peak RSS |
 |---|---:|---:|---:|---:|---:|---:|
 | before borrow checking (ac2361e) | | | 3883.9 M | | | |

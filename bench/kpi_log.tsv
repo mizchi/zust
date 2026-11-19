@@ -1,2 +1,6 @@
 date	commit	change	noop_M	edit_M	check_M	cache_KiB	lsp_G	run	check	build	cfail
 2026-11-19	45579fc	reference: before per-change tracking	625.309	626.912	3905.245	1902.8	11.2435	1536	1271	89	2844
+2026-11-19	927540d	pointee as the expected type of `&x` coerced to a raw pointer	625.309	626.912	3905.365	1902.8	11.2461	1538	1271	89	2845
+2026-11-19	b0edbd7	`_` in an annotation is a new inference variable (with a Debug-printing check)	625.130	626.989	3963.523	1902.8	11.2486	1545	1273	89	2843
+2026-11-19	042f17d	methods of numbers in a Box, blanket-impl methods of numbers	625.130	626.990	3963.563	1902.8	11.2621	1545	1273	89	2850
+2026-11-19	89d9fe9	drop the Debug-printing check on annotated lets	625.127	626.729	3905.088	1902.8	11.0232	1545	1273	89	2850

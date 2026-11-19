@@ -136,7 +136,9 @@ def main():
     lsp = lsp_kpi() if a.lsp else None
     ui = ui_counts()
     commit = subprocess.run(["git", "rev-parse", "--short", "HEAD"], capture_output=True, text=True, cwd=ROOT).stdout.strip()
-    dirty = subprocess.run(["git", "status", "--porcelain", "--untracked-files=no"], capture_output=True, text=True, cwd=ROOT).stdout.strip()
+    # (the log itself does not count as a change)
+    dirty = [l for l in subprocess.run(["git", "status", "--porcelain", "--untracked-files=no"], capture_output=True, text=True,
+                                       cwd=ROOT).stdout.splitlines() if not l.endswith(("bench/kpi_log.tsv", "bench/kpi_log.md"))]
     row = {"date": datetime.date.today().isoformat(), "commit": commit + ("+" if dirty else ""), "change": a.change.replace("\t", " "),
            "noop_M": f"{noop:.3f}", "edit_M": f"{edit:.3f}", "check_M": f"{check:.3f}", "cache_KiB": f"{cache:.1f}",
            "lsp_G": "-" if lsp is None else f"{lsp:.4f}", "run": str(ui[0] or "-"), "check": str(ui[1] or "-"),
