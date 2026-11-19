@@ -3842,6 +3842,27 @@ fn __exr_fmt_lit<G>(f: &mut Formatter, s: &str) {
     f.buf.push_str(s);
 }
 
+// `{:?}` of a raw pointer: its address in hex (`0x7ffd..`), padded as a string
+fn __exr_fmt_ptr<G>(f: &mut Formatter, a: usize) {
+    let mut d: Vec<u8> = Vec::new();
+    let mut v = a;
+    loop {
+        let x = (v % 16) as u8;
+        d.push(if x < 10 { b'0' + x } else { b'a' + x - 10 });
+        v /= 16;
+        if v == 0 {
+            break;
+        }
+    }
+    let mut s = String::from("0x");
+    let mut i = d.len();
+    while i > 0 {
+        i -= 1;
+        s.push(d[i] as char);
+    }
+    __exr_pad::<()>(f, &s, 2);
+}
+
 // 幅に足りない分を fill で埋める (既定の寄せは def_align)
 fn __exr_pad<G>(f: &mut Formatter, s: &str, def_align: u8) {
     // 文字数 (UTF-8 の継続バイトは数えない)

@@ -981,6 +981,10 @@ pub fn select_with(user_src: &str, user_items: &[SrcItem], cache: &mut SelectCac
         || ((sc.has("assert_eq!(") || sc.has("assert_ne!(")) && !sc.has("no_std"))
     {
         need.extend(FMT_NAMES.iter().copied());
+        // (`{:?}` of a raw pointer)
+        if sc.has("*const") || sc.has("*mut") {
+            need.insert("__exr_fmt_ptr");
+        }
     }
     // `vec![..]` は Vec::with_capacity + push に、`"..".to_string()` は String::from になる
     if need.contains("vec") {

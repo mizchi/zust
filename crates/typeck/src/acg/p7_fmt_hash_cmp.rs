@@ -426,7 +426,13 @@ impl Cx<'_> {
                     let Some(&(v, t, asp)) = vals.get(*arg) else {
                         return err(span, format!("format string refers to argument {arg}, but there are {}", vals.len()));
                     };
-                    if !self.fmt_ok(t, *debug) {
+                    // (`{:?}` of a raw pointer, or of a reference to one: the address in hex)
+                    let mut pt = t;
+                    while let Ty::Ref(_, i) = pt {
+                        pt = *i;
+                    }
+                    let ptr_debug = *debug && matches!(pt, Ty::Ptr(_, i) if !i.is_fat()) && self.prog.index.contains_key("__exr_fmt_ptr");
+                    if !ptr_debug && !self.fmt_ok(t, *debug) {
                         return err(
                             asp,
                             format!(
@@ -479,6 +485,16 @@ impl Cx<'_> {
                             span,
                         )?;
                         cur = spec.clone();
+                    }
+                    if ptr_debug {
+                        let (mut pv, mut rt) = (v, t);
+                        while let Ty::Ref(_, i) = rt {
+                            pv = self.b.ins().load(PTR, mf(), pv, 0);
+                            rt = *i;
+                        }
+                        let a = self.b.ins().load(PTR, mf(), pv, 0);
+                        self.call_named("__exr_fmt_ptr", vec![Ty::Unit], &[(f, fref), (a, Ty::Usize)], span)?;
+                        continue;
                     }
                     // `{:e}` / `{:E}`: 数値を指数表記で (prelude の __exr_fmt_exp)
                     if spec.radix >= 5 && (t.is_int() || t.is_float()) {

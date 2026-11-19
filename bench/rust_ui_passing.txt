@@ -513,6 +513,7 @@ run-pass	binding/expr-match.rs
 run-pass	binding/fat-arrow-match.rs
 run-pass	binding/fn-pattern-expected-type-2.rs
 run-pass	binding/fn-pattern-expected-type.rs
+run-pass	binding/func-arg-incomplete-pattern.rs
 run-pass	binding/func-arg-wild-pattern.rs
 run-pass	binding/if-let.rs
 run-pass	binding/inconsistent-lifetime-mismatch.rs
@@ -590,6 +591,7 @@ compile-fail	binding/tuple-binder-on-err-ty.rs
 run-pass	binding/underscore-prefixed-function-argument.rs
 run-pass	binding/use-uninit-match.rs
 run-pass	binding/use-uninit-match2.rs
+run-pass	binding/zero_sized_subslice_match.rs
 run-pass	binop/add-ref-operand-method-lookup.rs
 run-pass	binop/binary-minus-without-space.rs
 compile-fail	binop/binary-op-not-allowed-issue-125631.rs
@@ -606,6 +608,7 @@ compile-fail	binop/binop-mul-i32-f32.rs
 run-pass	binop/binop-mutate-lhs-in-rhs.rs
 run-pass	binop/binop-subtyping-lifetimes.rs
 compile-fail	binop/binop-typeck.rs
+run-pass	binop/binops.rs
 compile-fail	binop/borrow-suggestion-109352-2.rs
 compile-fail	binop/box-arithmetic-14915.rs
 check-pass	binop/can-have-side-effects-consider-operands.rs
@@ -953,6 +956,7 @@ compile-fail	cast/cast-errors-issue-43825.rs
 compile-fail	cast/cast-from-nil.rs
 compile-fail	cast/cast-int-to-char.rs
 compile-fail	cast/cast-macro-lhs.rs
+run-pass	cast/cast-not-treated-as-lvalue.rs
 check-pass	cast/cast-pointee-projection.rs
 run-pass	cast/cast-ptr-to-fat-ptr.rs
 run-pass	cast/cast-region-to-uint.rs
@@ -1416,6 +1420,7 @@ compile-fail	const-generics/unused-type-param-suggestion.rs
 check-pass	const-generics/unused_braces.rs
 check-pass	const-generics/using-static-as-const-arg.rs
 compile-fail	const-generics/wrong-normalization.rs
+run-pass	const-ptr/pointer-address-stability.rs
 check-pass	const_prop/const-prop-overflowing-casts.rs
 compile-fail	const_prop/ice-type-mismatch-when-copying-112824.rs
 build-pass	const_prop/unreachable-bounds.rs
@@ -1450,6 +1455,7 @@ check-pass	consts/const-blocks/nll-pass.rs
 run-pass	consts/const-blocks/run-pass.rs
 run-pass	consts/const-byte-str-cast.rs
 compile-fail	consts/const-call.rs
+run-pass	consts/const-cast-ptr-int.rs
 run-pass	consts/const-closure-fn-trait-object.rs
 run-pass	consts/const-const.rs
 run-pass	consts/const-contents.rs
@@ -1525,6 +1531,7 @@ run-pass	consts/const-nullary-enum.rs
 run-pass	consts/const-nullary-univariant-enum.rs
 compile-fail	consts/const-pattern-rewrite-error-32086.rs
 run-pass	consts/const-rec-and-tup.rs
+run-pass	consts/const-region-ptrs-noncopy.rs
 run-pass	consts/const-region-ptrs.rs
 check-pass	consts/const-static-ref-to-closure.rs
 run-pass	consts/const-struct-offsets.rs
@@ -1585,6 +1592,7 @@ run-pass	consts/issue-29914-2.rs
 run-pass	consts/issue-29914.rs
 run-pass	consts/issue-29927-1.rs
 run-pass	consts/issue-29927.rs
+run-pass	consts/issue-33537.rs
 check-pass	consts/issue-33903.rs
 run-pass	consts/issue-37222.rs
 check-pass	consts/issue-37550-1.rs
