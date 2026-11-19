@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795129603100,
+  "lastUpdate": 1795129605119,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -52366,6 +52366,85 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/mizchi/zust/commit/ca0796bc0fffa88f844bfedecd7c836b3dfe9366"
         },
         "date": 1795127252876,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "parity documentSymbol (名前の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity workspace/symbol (上位 20 の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity definition (行き先の一致)",
+            "value": 97.143,
+            "unit": "%"
+          },
+          {
+            "name": "parity hover (名前を含む)",
+            "value": 87.5,
+            "unit": "%"
+          },
+          {
+            "name": "parity references (数の一致)",
+            "value": 86.111,
+            "unit": "%"
+          },
+          {
+            "name": "parity documentHighlight (数の一致)",
+            "value": 97.143,
+            "unit": "%"
+          },
+          {
+            "name": "parity rename (書き換えの一致)",
+            "value": 83.333,
+            "unit": "%"
+          },
+          {
+            "name": "parity signatureHelp (名前・引数の数・今の引数の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity completion `x.\\|` (書いてある名前を含む)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity completion `na\\|me` (同)",
+            "value": 92.857,
+            "unit": "%"
+          },
+          {
+            "name": "parity 一致の平均",
+            "value": 94.409,
+            "unit": "%"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "committer": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "distinct": true,
+          "id": "5dea15e9c3abde1a303d9189457da49dfb53a6a2",
+          "message": "Debug for ranges; cheaper prelude selection per process\n\n- `{:?}` of `Range` / `RangeInclusive` (`1..5`, `0..=3`,\n  `1..=1 (exhausted)`), selected only for a program that formats with\n  Debug (`{:?}`, assert_eq!, assert_ne!, dbg!).\n- Selection: an item that only its own name can make wanted is decided\n  by one lookup before the gates; `is_iterator_trait` / `is_drop_impl`\n  scan headers only, and the Drop test of an impl member is computed\n  once per header instead of on every round.\n\ntests/ui: +3 genuine passes (2 run-pass, 1 check-pass).\nKPI: crates edit -0.58%, traits edit -0.35%, edit -0.09% (the Debug\nimpls alone had cost +0.4% on crates edit).\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-19T23:00:50Z",
+          "tree_id": "8dcac85f839784785f0c100651a2b22ee9fd68b6",
+          "url": "https://github.com/mizchi/zust/commit/5dea15e9c3abde1a303d9189457da49dfb53a6a2"
+        },
+        "date": 1795129604591,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
