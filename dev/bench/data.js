@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795105423946,
+  "lastUpdate": 1795106385934,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -23690,6 +23690,165 @@ window.BENCHMARK_DATA = {
           {
             "name": "rt/strings run (-O)",
             "value": 44.789,
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "committer": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "distinct": true,
+          "id": "bc3181b5ceb80a3792c76b110aae28bbce104e27",
+          "message": "impl Trait inside a declared type; self-recursive impl Trait bodies; a list of accidental passes\n\n- `-> Result<(), impl Debug> { .. Err(Target) }`: the body is inferred against the declared type with a hole for each\n  `impl` (before, it was inferred alone, and `Ok`'s type stayed open: \"cannot infer the `impl Trait` return type\").\n- `fn test() -> impl Sized { test() }`: a body that only returns its own result is `()`.\n- bench/rust_ui_accidental.txt: compile-fail tests zustc rejects at the annotated line for another reason than the\n  one they test; rust_ui.py leaves them out of the baseline and of \"newly passing\" (they used to come back with each\n  --write-baseline).\n\ntests/ui: check-pass impl-trait/recursive-impl-trait-type-direct.rs, run-pass let-else/let-else-temp-borrowck.rs;\n0 regressions. KPIs: no change outside noise.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-19T16:31:11Z",
+          "tree_id": "15967783f0fcfacd961526d73695e81a6247e017",
+          "url": "https://github.com/mizchi/zust/commit/bc3181b5ceb80a3792c76b110aae28bbce104e27"
+        },
+        "date": 1795106385421,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "gen1000 build cold",
+            "value": 121.745,
+            "unit": "ms"
+          },
+          {
+            "name": "gen1000 build noop",
+            "value": 0.908,
+            "unit": "ms"
+          },
+          {
+            "name": "gen1000 build edit 1 fn",
+            "value": 19.101,
+            "unit": "ms"
+          },
+          {
+            "name": "gen1000 check",
+            "value": 79.547,
+            "unit": "ms"
+          },
+          {
+            "name": "gen1000 build cold peak RSS",
+            "value": 17.898,
+            "unit": "MiB"
+          },
+          {
+            "name": "gen1000 binary",
+            "value": 323.977,
+            "unit": "KiB"
+          },
+          {
+            "name": "gen1000 cache",
+            "value": 387.21,
+            "unit": "KiB"
+          },
+          {
+            "name": "gen1000 build noop instructions",
+            "value": 0.726,
+            "unit": "M instr"
+          },
+          {
+            "name": "gen1000 build edit 1 fn instructions",
+            "value": 133.783,
+            "unit": "M instr"
+          },
+          {
+            "name": "gen1000 check instructions",
+            "value": 786.472,
+            "unit": "M instr"
+          },
+          {
+            "name": "gen5000 build cold",
+            "value": 537.513,
+            "unit": "ms"
+          },
+          {
+            "name": "gen5000 build noop",
+            "value": 0.905,
+            "unit": "ms"
+          },
+          {
+            "name": "gen5000 build edit 1 fn",
+            "value": 68.448,
+            "unit": "ms"
+          },
+          {
+            "name": "gen5000 check",
+            "value": 383.582,
+            "unit": "ms"
+          },
+          {
+            "name": "gen5000 build cold peak RSS",
+            "value": 51.922,
+            "unit": "MiB"
+          },
+          {
+            "name": "gen5000 binary",
+            "value": 1558.336,
+            "unit": "KiB"
+          },
+          {
+            "name": "gen5000 cache",
+            "value": 1902.835,
+            "unit": "KiB"
+          },
+          {
+            "name": "gen5000 build noop instructions",
+            "value": 0.726,
+            "unit": "M instr"
+          },
+          {
+            "name": "gen5000 build edit 1 fn instructions",
+            "value": 628.831,
+            "unit": "M instr"
+          },
+          {
+            "name": "gen5000 check instructions",
+            "value": 3871.625,
+            "unit": "M instr"
+          },
+          {
+            "name": "rt/fib run (-O)",
+            "value": 54.895,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/hashmap run (-O)",
+            "value": 94.301,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/matmul run (-O)",
+            "value": 40.224,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/nbody run (-O)",
+            "value": 53.386,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/sieve run (-O)",
+            "value": 94.815,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/sort run (-O)",
+            "value": 155.788,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/strings run (-O)",
+            "value": 34.724,
             "unit": "ms"
           }
         ]
