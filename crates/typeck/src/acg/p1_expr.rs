@@ -1531,12 +1531,39 @@ impl Cx<'_> {
             if !self.prog.implements(t, tr) {
                 return err(span, format!("the trait `{tr}` is not implemented for `{}`", self.prog.tn(t)));
             }
+            // (E0038: a method without `where Self: Sized` that has no `self`, generics of its own, or `Self` in its
+            // parameters or result makes the trait not dyn compatible)
             for &d in &decls {
                 let ds = &self.prog.sigs[d as usize];
-                let Some(Ty::Ref(m, _)) = ds.params.first() else {
-                    return err(span, format!("`{}` cannot be called through `dyn` (it needs `&self`)", self.prog.names[d as usize]));
+                let sized = ds.generics.first().is_some_and(|g| g.1.iter().any(|b| b == "Sized"));
+                if sized {
+                    continue;
+                }
+                let self_in = |t: Ty| -> bool { self.prog.mentions_param(t, 0) };
+                let recv_ok = ds.has_self;
+                let own_generics = ds.generics.len() > 1 + targs.len();
+                let self_used = ds.params.iter().skip(1).any(|&p| self_in(p)) || self_in(ds.ret);
+                if !recv_ok || own_generics || self_used {
+                    let m = self.prog.names[d as usize].rsplit("::").next().unwrap_or("").to_string();
+                    return err(span, format!("the trait `{tr}` is not dyn compatible: `{m}` (E0038)"));
+                }
+            }
+            for &d in &decls {
+                let ds = &self.prog.sigs[d as usize];
+                // (a method dyn cannot call (`self` by value, no `self`, `where Self: Sized`, generics of its own) has
+                // no entry: it is an error only where it is called through dyn. `self: Box<Self>` takes the box)
+                let recv = match ds.params.first() {
+                    Some(Ty::Ref(m, _)) if ds.has_self => [Ty::Ref(*m, intern(t))],
+                    Some(Ty::Box(_)) if ds.has_self => [Ty::Box(intern(t))],
+                    _ => {
+                        fns.push(u32::MAX);
+                        continue;
+                    }
                 };
-                let recv = [Ty::Ref(*m, intern(t))];
+                if ds.generics.len() > 1 + targs.len() {
+                    fns.push(u32::MAX);
+                    continue;
+                }
                 let targs = targs.clone();
                 // (`&0 as &dyn Display`: a type formatted by the compiler itself goes through a prelude shim that
                 // formats it with `{}` / `{:?}`)
@@ -1740,6 +1767,24 @@ impl Cx<'_> {
         let Some(idx) = decls.iter().position(|&d| self.prog.names[d as usize].rsplit("::").next() == Some(name.as_str())) else {
             return err(SP, format!("no method named `{name}` found for `dyn {tr}`"));
         };
+        let ds = &self.prog.sigs[decls[idx] as usize];
+        // (a method the vtable has no entry for: `self` by value / no `self` / generics of its own)
+        let by_box = matches!(ds.params.first(), Some(Ty::Box(_)));
+        if !ds.has_self || !matches!(ds.params.first(), Some(Ty::Ref(..) | Ty::Box(_))) || ds.generics.len() > 1 + targs.len() {
+            return err(SP, format!("`{}` cannot be called through `dyn` (it needs `&self`)", self.prog.names[decls[idx] as usize]));
+        }
+        // (`self: Box<Self>` through a `Box<dyn Tr>`: the box goes to the method, which owns it now)
+        if by_box {
+            if let Expr::MethodCall(recv, ..) = mc {
+                // (only a `Box<dyn Tr>` has it: not `&dyn Tr`)
+                if let Some(rt @ Ty::Ref(..)) = self.peek(recv) {
+                    return err(SP, format!("no method named `{name}` found for reference `{}` in the current scope", self.prog.tn(rt)));
+                }
+                if is_place_expr(recv) {
+                    self.mark_moved(recv);
+                }
+            }
+        }
         let ds = &self.prog.sigs[decls[idx] as usize];
         // (the trait's parameters are the arguments of `dyn Tr<A>`; Self は引数・戻り値に出てこない (object safe) 前提)
         let mut sol: Vec<Option<Ty>> = vec![None; ds.generics.len()];

@@ -487,6 +487,7 @@ run-pass	autoref-autoderef/auto-ref-sliceable.rs
 run-pass	autoref-autoderef/auto-ref.rs
 run-pass	autoref-autoderef/autoderef-and-borrow-method-receiver.rs
 compile-fail	autoref-autoderef/autoderef-box-no-add.rs
+run-pass	autoref-autoderef/autoderef-method-on-trait.rs
 run-pass	autoref-autoderef/autoderef-vec-box-fn-36786.rs
 compile-fail	autoref-autoderef/deref-ambiguity-becomes-nonambiguous.rs
 run-pass	autoref-autoderef/deref-chain-method-calls-13264.rs
@@ -1876,6 +1877,7 @@ compile-fail	dyn-compatibility/erroneous_signature.rs
 check-pass	dyn-compatibility/impossible-predicates-multiple_supertrait_upcastable-check.rs
 check-pass	dyn-compatibility/item-bounds-can-reference-self.rs
 compile-fail	dyn-compatibility/mention-correct-dyn-incompatible-trait.rs
+compile-fail	dyn-compatibility/mentions-Self-in-super-predicates.rs
 compile-fail	dyn-compatibility/method-with-self-trait-bound-not-dyn-safe.rs
 compile-fail	dyn-compatibility/no-static.rs
 check-pass	dyn-compatibility/phantom-fn.rs
@@ -1980,6 +1982,7 @@ compile-fail	error-codes/E0120.rs
 compile-fail	error-codes/E0121.rs
 compile-fail	error-codes/E0131.rs
 compile-fail	error-codes/E0133.rs
+compile-fail	error-codes/E0161.rs
 compile-fail	error-codes/E0164.rs
 compile-fail	error-codes/E0201.rs
 compile-fail	error-codes/E0207.rs
@@ -5175,6 +5178,9 @@ compile-fail	self/arbitrary_self_types_pin_needing_borrow.rs
 run-pass	self/by-value-self-in-mut-slot.rs
 compile-fail	self/class-missing-self.rs
 check-pass	self/dispatch-from-dyn-layout-2.rs
+run-pass	self/dyn-compatibility-sized-self-by-value-self.rs
+run-pass	self/dyn-compatibility-sized-self-generic-method.rs
+run-pass	self/dyn-compatibility-sized-self-return-Self.rs
 check-pass	self/dyn-dispatch-do-not-mix-normalized-and-unnormalized.rs
 check-pass	self/elision/alias-async.rs
 check-pass	self/elision/alias.rs
@@ -5199,9 +5205,11 @@ check-pass	self/elision/self.rs
 check-pass	self/elision/struct-async.rs
 check-pass	self/elision/struct.rs
 run-pass	self/explicit-self-generic.rs
+run-pass	self/explicit-self-objects-uniq.rs
 compile-fail	self/invalid-self-argument.rs
 compile-fail	self/lot-of-references-self.rs
 run-pass	self/move-self.rs
+run-pass	self/objects-owned-object-owned-method.rs
 compile-fail	self/point-at-arbitrary-self-type-method.rs
 compile-fail	self/point-at-arbitrary-self-type-trait-method.rs
 check-pass	self/self-ctor-nongeneric.rs
@@ -5939,6 +5947,8 @@ check-pass	traits/object/crash-due-to-projections-modulo-norm.rs
 run-pass	traits/object/dyn-iterator-with-non-ord-item.rs
 compile-fail	traits/object/elaborated-predicates-unconstrained-late-bound.rs
 compile-fail	traits/object/enforce-supertrait-projection.rs
+run-pass	traits/object/exclusion.rs
+run-pass	traits/object/extern-c-trait-object-methods.rs
 check-pass	traits/object/infer-shadows-implied-projection.rs
 build-pass	traits/object/inherent-method-on-dyn-with-rc-coercion.rs
 compile-fail	traits/object/issue-44454-2.rs

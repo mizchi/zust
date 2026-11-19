@@ -2475,6 +2475,17 @@ impl Program {
     }
 
     /// 型の中に型パラメータが残っているか
+    /// t names the type parameter i itself (`Self` for 0), not through an associated type (`Self::Item`)
+    pub fn mentions_param(&self, t: Ty, i: u8) -> bool {
+        match t {
+            Ty::Param(j) => j == i,
+            Ty::Ref(_, x) | Ty::Ptr(_, x) | Ty::Array(x, _) | Ty::Slice(x) | Ty::Box(x) => self.mentions_param(*x, i),
+            Ty::Struct(sid) => self.structs[sid as usize].symbolic && self.structs[sid as usize].args.iter().any(|&a| self.mentions_param(a, i)),
+            Ty::Fn(f) => f.params.iter().chain([&f.ret]).any(|&a| self.mentions_param(a, i)),
+            _ => false,
+        }
+    }
+
     pub fn has_param(&self, t: Ty) -> bool {
         match t {
             Ty::Param(_) => true,
