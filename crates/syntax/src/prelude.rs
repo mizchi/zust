@@ -1071,10 +1071,12 @@ pub fn select_with(user_src: &str, user_items: &[SrcItem], cache: &mut SelectCac
     }
     // (ManuallyDrop is used through Deref: `m.0`, `*m`)
     // (`io::Error` / `io::Result<T>` は prelude の IoError: 名前が現れないので)
-    if sc.has("io::Error") || sc.has("io::Result") {
+    // (one scan of the source when `io::` is not written; the two below only after it)
+    if sc.has("io::") && (sc.has("io::Error") || sc.has("io::Result")) {
         need.extend(["IoError", "Result"]);
     }
-    if sc.has("FusedIterator") {
+    // (a FusedIterator impl comes with an Iterator impl: the source is scanned only then)
+    if (need.contains("Iterator") || need.contains("next")) && sc.has("FusedIterator") {
         need.insert("__fused_mark");
     }
     if sc.has("ManuallyDrop") {
