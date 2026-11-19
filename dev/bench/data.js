@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795101065748,
+  "lastUpdate": 1795101067486,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -53224,6 +53224,70 @@ window.BENCHMARK_DATA = {
           {
             "name": "tests/ui compile-fail passing",
             "value": 3309,
+            "unit": "tests"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "committer": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "distinct": true,
+          "id": "08086f5c6dff728e84ebb986a2726f5e83f61c82",
+          "message": "Moves out of a field through a pattern, fat-reference scrutinees, non-literal const patterns\n\n- `match a.1 { Some(v) => { a.1 = ..; v } }`: the pattern moved the field out, but the field kept its value, so the\n  assignment (and the owner's drop) freed it again. The field is now zeroed (\"empty\", as `let v = a.1;` leaves it).\n- `let ref mut x = &*x;`: the value of a fat reference is the address of its two words, which was the outer x's own\n  slot, so `*x = ..` overwrote the outer variable. A fat-reference scrutinee that is not a place is copied first.\n- A const pattern whose value is not a literal (`const X: u64 = !0 as u16 as u64;`) gives the scrutinee its type\n  (`match 1 { X => .. }` compared an i32 with it).\n\ntests/ui: run-pass borrowck/ref-mut-rebind-does-not-affect-outer.rs, consts/issue-17074.rs,\nmatch/match-field-reassign.rs pass; 0 regressions. (compile-fail suggestions/dont-wrap-ambiguous-receivers.rs fails\nat the annotated line for another reason; not added.) KPIs: no change outside noise.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-19T15:05:58Z",
+          "tree_id": "3bbe00d6c68f95f1db21c44cad237d251d4a72f6",
+          "url": "https://github.com/mizchi/zust/commit/08086f5c6dff728e84ebb986a2726f5e83f61c82"
+        },
+        "date": 1795101067260,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tests/ui run-pass pass rate",
+            "value": 68.51,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui run-pass passing",
+            "value": 1634,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui check-pass pass rate",
+            "value": 75.71,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui check-pass passing",
+            "value": 1368,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui build-pass pass rate",
+            "value": 70.37,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui build-pass passing",
+            "value": 95,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui compile-fail pass rate",
+            "value": 44.99,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui compile-fail passing",
+            "value": 3310,
             "unit": "tests"
           }
         ]
