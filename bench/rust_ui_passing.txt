@@ -139,6 +139,7 @@ check-pass	associated-type-bounds/issue-83017.rs
 compile-fail	associated-type-bounds/name-same-as-generic-type-issue-128249.rs
 compile-fail	associated-type-bounds/no-gat-position.rs
 check-pass	associated-type-bounds/order-dependent-bounds-issue-54121.rs
+run-pass	associated-type-bounds/rpit.rs
 compile-fail	associated-type-bounds/suggest-assoc-ty-bound-on-eq-bound.rs
 compile-fail	associated-type-bounds/suggest-contraining-assoc-type-because-of-assoc-const.rs
 compile-fail	associated-type-bounds/suggest-removing-impl.rs
@@ -755,6 +756,7 @@ compile-fail	borrowck/borrowck_for_loop_pattern_assignment.rs
 build-pass	borrowck/borrowed-pointer-in-struct-5884.rs
 compile-fail	borrowck/branch-condition-flow-issue-156494.rs
 compile-fail	borrowck/buffer-reuse-pattern-issue-147694.rs
+run-pass	borrowck/call-and-ref-option-mutate.rs
 compile-fail	borrowck/cannot-borrow-index-of-hashmap-in-for.rs
 compile-fail	borrowck/cannot-borrow-index-output-mutably.rs
 compile-fail	borrowck/clone-span-on-try-operator.rs
@@ -796,6 +798,7 @@ compile-fail	borrowck/issue-54499-field-mutation-of-moved-out.rs
 compile-fail	borrowck/issue-54499-field-mutation-of-never-init.rs
 compile-fail	borrowck/issue-54597-reject-move-out-of-borrow-via-pat.rs
 compile-fail	borrowck/issue-55492-borrowck-migrate-scans-parents.rs
+check-pass	borrowck/issue-55552-ascribe-wildcard-to-structured-pattern.rs
 compile-fail	borrowck/issue-58776-borrowck-scans-children.rs
 run-pass	borrowck/issue-62007-assign-box.rs
 run-pass	borrowck/issue-62007-assign-field.rs
@@ -813,6 +816,7 @@ compile-fail	borrowck/issue-81365-7.rs
 compile-fail	borrowck/issue-81365-8.rs
 compile-fail	borrowck/issue-81365-9.rs
 compile-fail	borrowck/issue-82126-mismatched-subst-and-hir.rs
+compile-fail	borrowck/issue-83309-ice-immut-in-for-loop.rs
 compile-fail	borrowck/issue-85765.rs
 compile-fail	borrowck/issue-91206.rs
 compile-fail	borrowck/issue-92015.rs
@@ -1576,6 +1580,7 @@ check-pass	consts/recursive-type.rs
 run-pass	consts/references.rs
 run-pass	consts/repeat_match.rs
 check-pass	consts/self_normalization.rs
+check-pass	consts/self_normalization2.rs
 run-pass	consts/short-circuit-or-with-const-bool.rs
 run-pass	consts/signed_enum_discr.rs
 compile-fail	consts/size_of-requires-type-annotation-in-const.rs
@@ -1617,7 +1622,6 @@ compile-fail	derived-errors/issue-30580.rs
 compile-fail	derived-errors/issue-31997-1.rs
 compile-fail	derived-errors/issue-31997.rs
 compile-fail	derived-errors/no-spurious-unconstrained-param.rs
-compile-fail	derives/clone-copy/deriving-copyclone.rs
 run-pass	derives/clone-copy/misbehaving-clone-impl.rs
 check-pass	derives/clone-include-gat-hrtb.rs
 run-pass	derives/debug/derive-Debug-enum-variants.rs
@@ -1720,6 +1724,7 @@ compile-fail	did_you_mean/replace-impl-infer-ty-from-trait.rs
 compile-fail	did_you_mean/trait-object-reference-without-parens-suggestion.rs
 compile-fail	did_you_mean/typo-suggestion-improvement-46332.rs
 compile-fail	did_you_mean/use_instead_of_import.rs
+run-pass	drop-bounds/drop-bounds-impl-drop.rs
 run-pass	drop/box-drop-unused-value-statement-regression.rs
 run-pass	drop/conditional-drop-10734.rs
 run-pass	drop/destructor-run-for-expression-4734.rs
@@ -1790,7 +1795,6 @@ compile-fail	dropck/unconstrained_const_param_on_drop.rs
 compile-fail	dst/dst-bad-coerce1.rs
 compile-fail	dst/dst-bad-coerce2.rs
 compile-fail	dst/dst-bad-coercions.rs
-compile-fail	dst/dst-index-fail.rs
 compile-fail	dst/dst-rvalue.rs
 compile-fail	dst/issue-90528-unsizing-not-suggestion-110063.rs
 compile-fail	dst/issue-90528-unsizing-suggestion-1.rs
@@ -2473,7 +2477,9 @@ check-pass	impl-trait/closure-in-type.rs
 build-pass	impl-trait/defined-by-trait-resolution.rs
 compile-fail	impl-trait/diagnostics/fully-qualified-path-impl-trait.rs
 check-pass	impl-trait/different_where_bounds.rs
+check-pass	impl-trait/divergence.rs
 compile-fail	impl-trait/dyn-incompatible-trait-in-return-position-dyn-trait.rs
+compile-fail	impl-trait/dyn-incompatible-trait-in-return-position-impl-trait.rs
 check-pass	impl-trait/dyn-trait-elided-two-inputs-assoc.rs
 check-pass	impl-trait/dyn-trait-elided-two-inputs-param.rs
 check-pass	impl-trait/equal-hidden-lifetimes.rs
@@ -2501,6 +2507,7 @@ compile-fail	impl-trait/in-trait/ensure-rpitits-are-created-before-freezing.rs
 check-pass	impl-trait/in-trait/expeced-refree-to-map-to-reearlybound-ice-108580.rs
 check-pass	impl-trait/in-trait/issue-102301.rs
 check-pass	impl-trait/in-trait/lifetime-in-associated-trait-bound.rs
+check-pass	impl-trait/in-trait/nested-rpitit.rs
 compile-fail	impl-trait/in-trait/not-inferred-generic.rs
 compile-fail	impl-trait/in-trait/opaque-and-lifetime-mismatch.rs
 compile-fail	impl-trait/in-trait/opaque-in-impl-is-opaque.rs
@@ -3108,6 +3115,7 @@ check-pass	lint/unused/must-use-macros.rs
 check-pass	lint/unused/must-use-ops.rs
 compile-fail	lint/unused/must_use-tuple.rs
 run-pass	lint/unused/no-unused-parens-return-block.rs
+check-pass	lint/unused/underscore-capture-issue-149889.rs
 check-pass	lint/unused/unused-allocation-box-cmp-issue-134186.rs
 compile-fail	lint/unused/unused-allocation.rs
 check-pass	lint/unused/unused-associated-item.rs
@@ -3394,6 +3402,7 @@ compile-fail	methods/issues/issue-90315.rs
 compile-fail	methods/issues/issue-94581.rs
 compile-fail	methods/method-ambig-one-trait-unknown-int-type.rs
 compile-fail	methods/method-ambiguity-no-rcvr.rs
+run-pass	methods/method-argument-inference-associated-type.rs
 compile-fail	methods/method-call-err-msg.rs
 check-pass	methods/method-call-in-iter-str-bytes.rs
 compile-fail	methods/method-call-lifetime-args-fail.rs
@@ -5329,6 +5338,7 @@ compile-fail	suggestions/args-instead-of-tuple-errors.rs
 compile-fail	suggestions/args-instead-of-tuple.rs
 compile-fail	suggestions/as-mut-closure.rs
 compile-fail	suggestions/as-ref-2.rs
+compile-fail	suggestions/as-ref.rs
 compile-fail	suggestions/assoc-const-as-field.rs
 compile-fail	suggestions/assoc-const-without-self.rs
 compile-fail	suggestions/assoc-ct-for-assoc-method.rs
@@ -5371,6 +5381,7 @@ compile-fail	suggestions/enum-variant-arg-mismatch.rs
 compile-fail	suggestions/field-access-considering-privacy.rs
 compile-fail	suggestions/field-access.rs
 compile-fail	suggestions/field-has-method.rs
+compile-fail	suggestions/fn-ctor-passed-as-arg-where-it-should-have-been-called.rs
 compile-fail	suggestions/fn-needing-specified-return-type-param.rs
 compile-fail	suggestions/fn-or-tuple-struct-with-underscore-args.rs
 compile-fail	suggestions/fn-or-tuple-struct-without-args.rs
@@ -5756,6 +5767,7 @@ compile-fail	traits/issue-32963.rs
 check-pass	traits/issue-33187.rs
 run-pass	traits/issue-3683.rs
 compile-fail	traits/issue-38604.rs
+run-pass	traits/issue-40085.rs
 run-pass	traits/issue-43132.rs
 run-pass	traits/issue-5008-borrowed-traitobject-method-call.rs
 compile-fail	traits/issue-50480.rs
@@ -6032,6 +6044,7 @@ compile-fail	typeck/issue-114918/const-in-struct-type-arg.rs
 compile-fail	typeck/issue-114918/const-in-trait-fn-return-type.rs
 compile-fail	typeck/issue-13853-2.rs
 compile-fail	typeck/issue-13853-5.rs
+compile-fail	typeck/issue-13853.rs
 compile-fail	typeck/issue-16338.rs
 compile-fail	typeck/issue-1871.rs
 run-pass	typeck/issue-18937-1.rs
@@ -6314,4 +6327,5 @@ run-pass	whitespace/vertical_tab_lexer.rs
 run-pass	windows-subsystem/console.rs
 run-pass	windows-subsystem/windows.rs
 run-pass	zero-sized/zero-size-type-destructors.rs
+run-pass	zero-sized/zero-sized-btreemap-insert.rs
 run-pass	zero-sized/zero-sized-tuple-struct.rs

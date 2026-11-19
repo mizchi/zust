@@ -699,7 +699,8 @@ impl Solver<'_> {
             Some((ft, _)) => self.field_var(ft, &vars),
             // (フィールドがなく Deref を実装した型 (`self.prog` で self: &Inf → Solver): deref の先のフィールド)
             None => match self.prog.method(sid, "deref").map(|d| self.prog.sigs[d as usize].ret) {
-                Some(Ty::Ref(_, t)) if !self.prog.has_param(*t) && !matches!(t, Ty::Str | Ty::Slice(_) | Ty::Dyn(_)) => {
+                // (not to itself: `impl Deref for Foo { type Target = Foo }` would never end)
+                Some(Ty::Ref(_, t)) if !self.prog.has_param(*t) && !matches!(t, Ty::Str | Ty::Slice(_) | Ty::Dyn(_)) && *t != Ty::Struct(sid) => {
                     let k = self.known(*t);
                     self.field(k, name)
                 }

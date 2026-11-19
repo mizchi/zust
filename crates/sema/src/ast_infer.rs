@@ -1239,6 +1239,15 @@ impl Inf<'_> {
             Expr::Path(None, p) => match ident(p).and_then(|id| self.lookup(id)) {
                 Some(v) => v,
                 None if ident(p).is_some_and(|id| crate::program::const_generic_value(self.env, id).is_some()) => self.known(Ty::Usize),
+                // (a unit struct as a value: `T`)
+                None if self.struct_by(p).is_some_and(|sid| {
+                    let sd = &self.prog.structs[sid as usize];
+                    !sd.is_enum && sd.fields.is_empty() && self.fn_by(p).is_none()
+                }) =>
+                {
+                    let sid = self.struct_by(p).unwrap();
+                    self.adt_ctor(sid, None, vec![])
+                }
                 None => match self.fn_by(p) {
                     Some(id)
                         if !self.prog.sigs[id as usize].is_generic()

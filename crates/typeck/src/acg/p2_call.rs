@@ -533,6 +533,7 @@ impl Cx<'_> {
         let name = method.to_string();
         // (メソッドがなく `impl Deref` があれば、deref した先で探す: `rc.borrow_mut()`)
         let mut via_deref = false;
+        let mut derefs = 0;
         let (a, o, sid, id) = loop {
             let (a, o, sid) = loop {
                 p = match p {
@@ -576,6 +577,11 @@ impl Cx<'_> {
                 };
                 p = Place::Mem(v.unwrap(), 0, inner_t);
                 via_deref = true;
+                derefs += 1;
+                if derefs > 16 {
+                    let sname = self.prog.structs[sid as usize].name.clone();
+                    return err(SP, format!("reached the recursion limit while auto-dereferencing `{sname}` (E0055)"));
+                }
                 continue;
             }
             let sname = self.prog.structs[sid as usize].name.clone();

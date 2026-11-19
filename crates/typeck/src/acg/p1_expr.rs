@@ -148,6 +148,25 @@ impl Cx<'_> {
                 // (フィールドがなく Deref を実装した型 (`self.prog` で self: &Inf): `(*self.deref()).prog`)
                 if let Some(Ty::Struct(sid)) = self.peek(base).map(|t| self.strip_refs(t)) {
                     if self.prog.field(sid, fname).is_none() {
+                        // (a Deref chain that never reaches a field of that name: `impl Deref for Foo { type Target = Foo }`)
+                        let mut t = sid;
+                        let mut cycle = false;
+                        for _ in 0..16 {
+                            let Some(d) = self.prog.method(t, "deref") else { break };
+                            let Ty::Ref(_, Ty::Struct(n)) = self.prog.sigs[d as usize].ret else { break };
+                            t = *n;
+                            if self.prog.field(t, fname).is_some() {
+                                break;
+                            }
+                            if t == sid {
+                                cycle = true;
+                                break;
+                            }
+                        }
+                        if cycle {
+                            let sname = self.prog.structs[sid as usize].name.clone();
+                            return err(SP, format!("reached the recursion limit while auto-dereferencing `{sname}` (E0055)"));
+                        }
                         if let Some(d) = self.user_deref_sid(base, sid) {
                             let f2 = self.keep_expr(Expr::Field(Box::new(Expr::Paren(Box::new(d))), fname.clone(), crate::parse::Span::default()));
                             if let Expr::Field(p, _, _) = f2 {
