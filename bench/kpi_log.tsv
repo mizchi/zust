@@ -57,3 +57,4 @@ date	commit	change	noop_M	edit_M	check_M	cache_KiB	lsp_G	run	check	build	cfail
 2026-11-19	395abc3	compound assignment without lookahead; check as the least of 3	625.175	626.767	3907.639	1902.8	-	1620	1366	95	3310
 2026-11-19	118d4ef	let _ = unit struct drops	625.265	626.856	3907.728	1902.8	-	1623	1368	95	3307
 2026-11-19	15a06b9	drops of for-loop temporaries	625.260	626.927	3909.618	1902.8	-	1624	1368	95	3306
+2026-11-19	7f430ff	dyn bindings; KPIs now also on traits and crates	625.264	626.930	3907.460	1902.8	10.8765	1626	1368	95	3306	1178.212	62.888	11.224	317.391
