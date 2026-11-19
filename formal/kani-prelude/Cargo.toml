@@ -1,0 +1,13 @@
+[package]
+name = "zust-kani-prelude"
+version = "0.0.0"
+edition = "2024"
+publish = false
+license = "MIT OR Apache-2.0"
+build = "build.rs"
+
+# (not a member of the zust workspace: run with `cargo kani` here)
+[workspace]
+
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ["cfg(kani)"] }
