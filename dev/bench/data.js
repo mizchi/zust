@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795104727994,
+  "lastUpdate": 1795104729662,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -54337,6 +54337,70 @@ window.BENCHMARK_DATA = {
           {
             "name": "tests/ui compile-fail passing",
             "value": 3316,
+            "unit": "tests"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "committer": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "distinct": true,
+          "id": "a55841b018ebe2907ed9533c7ff118beced2964b",
+          "message": "Methods of impls for [T; N], &[T; N] and &[T]\n\n`impl<T> Tr for [T; 3] { fn f(self) .. }` and `impl<'a, T> Tr for &'a [T; 3]` (registered as `__array::__ref_f`)\nhad no method call: `[1, 2, 3].f()` and `x.f()` with x: &[i32; 3] (also in a generic fn's instance) now call them.\nA receiver is wrapped in a reference only for a `&self` of its own type.\n\ntests/ui: compile-fail traits/fn-pointer/suggest-wrap-parens-method.rs passes (the run-pass case above had no test of\nits own); 0 regressions. KPIs: no change outside noise.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-19T16:06:52Z",
+          "tree_id": "0c1e04556398c82d49b7513fa99b3b803a245e60",
+          "url": "https://github.com/mizchi/zust/commit/a55841b018ebe2907ed9533c7ff118beced2964b"
+        },
+        "date": 1795104729401,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tests/ui run-pass pass rate",
+            "value": 69.01,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui run-pass passing",
+            "value": 1646,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui check-pass pass rate",
+            "value": 76.04,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui check-pass passing",
+            "value": 1374,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui build-pass pass rate",
+            "value": 70.37,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui build-pass passing",
+            "value": 95,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui compile-fail pass rate",
+            "value": 45.08,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui compile-fail passing",
+            "value": 3317,
             "unit": "tests"
           }
         ]
