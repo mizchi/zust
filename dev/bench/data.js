@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795101064090,
+  "lastUpdate": 1795101065748,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -44384,6 +44384,85 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/mizchi/zust/commit/9af93dd27826747f75a33827352452f9fb9063b2"
         },
         "date": 1795100299828,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "parity documentSymbol (名前の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity workspace/symbol (上位 20 の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity definition (行き先の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity hover (名前を含む)",
+            "value": 85,
+            "unit": "%"
+          },
+          {
+            "name": "parity references (数の一致)",
+            "value": 91.429,
+            "unit": "%"
+          },
+          {
+            "name": "parity documentHighlight (数の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity rename (書き換えの一致)",
+            "value": 86.667,
+            "unit": "%"
+          },
+          {
+            "name": "parity signatureHelp (名前・引数の数・今の引数の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity completion `x.\\|` (書いてある名前を含む)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity completion `na\\|me` (同)",
+            "value": 87.5,
+            "unit": "%"
+          },
+          {
+            "name": "parity 一致の平均",
+            "value": 95.06,
+            "unit": "%"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "committer": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "distinct": true,
+          "id": "08086f5c6dff728e84ebb986a2726f5e83f61c82",
+          "message": "Moves out of a field through a pattern, fat-reference scrutinees, non-literal const patterns\n\n- `match a.1 { Some(v) => { a.1 = ..; v } }`: the pattern moved the field out, but the field kept its value, so the\n  assignment (and the owner's drop) freed it again. The field is now zeroed (\"empty\", as `let v = a.1;` leaves it).\n- `let ref mut x = &*x;`: the value of a fat reference is the address of its two words, which was the outer x's own\n  slot, so `*x = ..` overwrote the outer variable. A fat-reference scrutinee that is not a place is copied first.\n- A const pattern whose value is not a literal (`const X: u64 = !0 as u16 as u64;`) gives the scrutinee its type\n  (`match 1 { X => .. }` compared an i32 with it).\n\ntests/ui: run-pass borrowck/ref-mut-rebind-does-not-affect-outer.rs, consts/issue-17074.rs,\nmatch/match-field-reassign.rs pass; 0 regressions. (compile-fail suggestions/dont-wrap-ambiguous-receivers.rs fails\nat the annotated line for another reason; not added.) KPIs: no change outside noise.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-19T15:05:58Z",
+          "tree_id": "3bbe00d6c68f95f1db21c44cad237d251d4a72f6",
+          "url": "https://github.com/mizchi/zust/commit/08086f5c6dff728e84ebb986a2726f5e83f61c82"
+        },
+        "date": 1795101065543,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
