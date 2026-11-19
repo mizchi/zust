@@ -254,6 +254,7 @@ pub fn compile(prog: &Program, insts: &Mutex<Insts>, id: u32, f: &ItemFn, line_b
         is_main: sig.is_main,
         user_code,
         raw_ref: 0,
+        const_hint: None,
         unsafe_ok: (!user_code || sig.is_unsafe || prog.closures.get(&body_id).is_some()) as u32,
         overflow_checks: prog.overflow_checks && (user_code || f.attrs.iter().any(|a| a.contains("rustc_inherit_overflow_checks"))),
         traps: vec![],
@@ -598,6 +599,8 @@ pub struct Cx<'p> {
     pub unsafe_ok: u32,
     /// > 0 under `&raw const` / `&raw mut` / `addr_of!` (a raw reference to a `static mut` is safe)
     pub raw_ref: u32,
+    /// the expected type at a use of a const whose type names its impl's parameters (`impl<T> S<T> { const C: Option<T> = None; }`)
+    pub const_hint: Option<Ty>,
     pub overflow_checks: bool,
     pub traps: Vec<(u32, u32)>,
     pub line_base: u32,

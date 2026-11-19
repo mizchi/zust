@@ -815,7 +815,12 @@ impl Program {
                 if anon_const(n) {
                     continue;
                 }
-                p.consts[k].ty = p.resolve(t).map_err(|e| format!("{}:1: {e}", it.line))?;
+                // (an impl's const whose type names the impl's parameters: a hole, typed at each use)
+                p.consts[k].ty = match p.resolve(t) {
+                    // (a projection `C::M` stays an error: its type is not the hole a use could fill)
+                    Err(e) if n.contains("::") && e.starts_with("cannot find type") && matches!(it.kind, crate::lexer::ItemKind::ImplMember(_)) && !format!("{t:?}").contains("Assoc(") => Ty::Param(HOLE),
+                    r => r.map_err(|e| format!("{}:1: {e}", it.line))?,
+                };
                 k += 1;
             }
             for (n, t, _, _) in &sm.statics {

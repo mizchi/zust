@@ -35,11 +35,11 @@ medians of 3 runs). They are measured again with each round of work. gen1000 is 
 
 | gen1000 | cold | no-op | edit one function | on disk | binary (stripped) | run |
 |---|---:|---:|---:|---:|---:|---:|
-| zustc | 166 ms | 21 ms | 30 ms | 766 KiB | 324 KiB | 12 ms |
-| zustc `-O` | 403 ms | 66 ms | 66 ms | 1199 KiB | 341 KiB | 4 ms |
-| rustc `-C incremental` | 746 ms | 201 ms | 403 ms | 10.8 MiB | 1038 KiB | 8 ms |
-| rustc `-O` | 18567 ms | - | - | - | 377 KiB | 2 ms |
-| **zustc vs rustc `-C incremental`** | **4.5x faster** | **9.6x faster** | **13x faster** | **14x smaller** | **3.2x smaller** | |
+| zustc | 123 ms | 18 ms | 27 ms | 766 KiB | 324 KiB | 11 ms |
+| zustc `-O` | 374 ms | 68 ms | 67 ms | 1199 KiB | 341 KiB | 3 ms |
+| rustc `-C incremental` | 756 ms | 197 ms | 406 ms | 10.8 MiB | 1038 KiB | 7 ms |
+| rustc `-O` | 18345 ms | - | - | - | 377 KiB | 2 ms |
+| **zustc vs rustc `-C incremental`** | **6.1x faster** | **11x faster** | **15x faster** | **14x smaller** | **3.2x smaller** | |
 
 Small programs (`bench/rt`: fib, hashmap, matmul, nbody, sieve, sort, strings) and real crates (cratebench: fnv,
 adler2, hex, itoa, rustc-hash, cfg-if; all six give the same output as rustc):
@@ -81,7 +81,8 @@ the previous commit, 1501b30 and 8e797a9 have the same cold median, 96 and 98 ms
 | 2026-11-19, `impl Tr for Box<S>`, shifts and `reverse_bits`, `..b` values (962f2a6) | 150 ms | 847 ms | 5.6x | 27 ms | 447 ms | 16.6x |
 | 2026-11-19, `as _` / `as *const _` (75630e2) | 127 ms | 859 ms | 6.8x | 31 ms | 399 ms | 12.9x |
 | 2026-11-19, operator traits of numbers, `dyn Tr: Tr` (a6c8ba5) | 122 ms | 763 ms | 6.3x | 25 ms | 417 ms | 16.7x |
-| 2026-11-19, bounds of associated types checked for `dyn Tr<Y = T>` | 166 ms | 746 ms | 4.5x | 30 ms | 403 ms | 13.4x |
+| 2026-11-19, bounds of associated types checked for `dyn Tr<Y = T>` (509b25d) | 166 ms | 746 ms | 4.5x | 30 ms | 403 ms | 13.4x |
+| 2026-11-19, consts of generic impls | 123 ms | 756 ms | 6.1x | 27 ms | 406 ms | 15.0x |
 
 zustc's code is close to rustc's debug build at run time, and faster than it in all seven small programs (rustc's
 debug build is 3–26x slower than rustc `-O` there).
@@ -152,7 +153,8 @@ the shared machine vary by about ±20%.
 | `impl Tr for Box<S>`, shifts and `reverse_bits`, `..b` values (962f2a6) | 666.0 M | 626.3 M | 3907.0 M | 1902.8 KiB | 387.2 KiB | 51.8 MiB |
 | `as _` / `as *const _` (75630e2) | 662.8 M | 626.2 M | 3906.8 M | 1902.8 KiB | 387.2 KiB | 52.0 MiB |
 | operator traits of numbers, `dyn Tr: Tr` (a6c8ba5) | 668.7 M | 626.3 M | 3906.8 M | 1902.8 KiB | 387.2 KiB | 51.7 MiB |
-| now: bounds of associated types checked for `dyn Tr<Y = T>` | 666.2 M | 626.2 M | 3906.1 M | 1902.8 KiB | 387.2 KiB | 52.1 MiB |
+| bounds of associated types checked for `dyn Tr<Y = T>` (509b25d) | 666.2 M | 626.2 M | 3906.1 M | 1902.8 KiB | 387.2 KiB | 52.1 MiB |
+| now: consts of generic impls | 667.1 M | 626.6 M | 3906.2 M | 1902.8 KiB | 387.2 KiB | 51.8 MiB |
 | **change since borrow checking** | **-11.3%** | **-12.2%** | **-2.0%** | **0%** | **0%** | **-32%** |
 
 LSP (p50 of `bench/lsp_parity.py` on zustc's own sources; these are wall-clock times):
@@ -185,7 +187,8 @@ LSP (p50 of `bench/lsp_parity.py` on zustc's own sources; these are wall-clock t
 | `impl Tr for Box<S>`, shifts and `reverse_bits`, `..b` values (962f2a6) | 0.93 ms | 0.77 ms | 1.84 ms | 15.16 ms | 128 ms |
 | `as _` / `as *const _` (75630e2) | 0.98 ms | 0.89 ms | 1.86 ms | 16.81 ms | 130 ms |
 | operator traits of numbers, `dyn Tr: Tr` (a6c8ba5) | 0.99 ms | 0.87 ms | 1.71 ms | 16.72 ms | 161 ms |
-| now: bounds of associated types checked for `dyn Tr<Y = T>` | 0.88 ms | 0.80 ms | 1.63 ms | 17.57 ms | 152 ms |
+| bounds of associated types checked for `dyn Tr<Y = T>` (509b25d) | 0.88 ms | 0.80 ms | 1.63 ms | 17.57 ms | 152 ms |
+| now: consts of generic impls | 0.94 ms | 0.76 ms | 1.60 ms | 16.12 ms | 138 ms |
 
 Each change is kept only if these do not get worse. When an LSP time rises in a full run, the two builds are
 compared again on the same machine, alternating runs, before it is called noise. The last row comes from such a
@@ -202,9 +205,9 @@ only the tests it can be asked to handle (no nightly features, auxiliary crates 
 
 | kind | applicable | pass |
 |---|---:|---:|
-| run-pass (builds, runs, same output) | 2413 | 1535 (63.6%) |
-| check-pass (accepted by `zustc check`) | 1807 | 1269 (70.2%) |
-| build-pass | 135 | 88 (65.2%) |
+| run-pass (builds, runs, same output) | 2413 | 1536 (63.7%) |
+| check-pass (accepted by `zustc check`) | 1807 | 1271 (70.3%) |
+| build-pass | 135 | 89 (65.9%) |
 | compile-fail (rejected at an annotated line) | 7358 | 2844 (38.7%) |
 
 [SUPPORTED.md](SUPPORTED.md) breaks this down by area as a checklist.

@@ -428,6 +428,7 @@ impl Cx<'_> {
             // const は式そのものを埋め込む
             Expr::Path(..) if self.const_of(e).is_some() => {
                 let ci = self.const_of(e).unwrap();
+                self.const_hint = expected;
                 self.const_value(e, ci)
             }
             Expr::Path(..) if self.fn_item(e).is_some() => {

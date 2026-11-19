@@ -752,6 +752,11 @@ impl Cx<'_> {
         let ce: Expr = crate::parse::parse_expr(&src).or_else(|er| err(SP, er))?;
         let ce = self.keep_expr(ce);
         // (行番号は今は出さない: Sp は場所を持たない)
+        // (a type that names the impl's parameters is a hole: the expression takes the expected type at the use)
+        let hint = self.const_hint.take();
+        if has_hole(prog, t) {
+            return self.expr(ce, hint.filter(|&h| !has_hole(prog, h))).map_err(|e| format!("{}:1: in constant `{}`: {e}", SP.line, c.name));
+        }
         let (v, vt) = self.expr(ce, Some(t)).map_err(|e| format!("{}:1: in constant `{}`: {e}", SP.line, c.name))?;
         self.same(SP, vt, t)?;
         Ok((v, t))
