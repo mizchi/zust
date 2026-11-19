@@ -906,7 +906,7 @@ pub fn select_with(user_src: &str, user_items: &[SrcItem], cache: &mut SelectCac
                 }
                 // 書式化のマクロは `name!(` のときだけ (`p.write(..)` のメソッドは別物)
                 if matches!(*n, "format" | "print" | "println" | "eprint" | "eprintln" | "write" | "writeln")
-                    && bytes.get(b as usize) != Some(&b'!')
+                    && bytes[b as usize..].iter().find(|c| !c.is_ascii_whitespace()) != Some(&b'!')
                 {
                     continue;
                 }

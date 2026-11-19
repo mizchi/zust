@@ -769,7 +769,9 @@ fn split_items(body: &str) -> Option<(String, String)> {
 }
 
 /// 1. `macro_rules!` の定義を集めて消す (関数の本体や `mod m { .. }` の中の定義も)
-fn collect_defs(text: &mut String, macros: &mut HashMap<String, Vec<Rule>>) -> Result<(), String> {
+/// `first` gets, for each name, the offset of its first definition (usize::MAX when one is `#[macro_export]`: a path
+/// to it works anywhere in the crate)
+fn collect_defs(text: &mut String, macros: &mut HashMap<String, Vec<Rule>>, mut first: Option<&mut HashMap<String, usize>>) -> Result<(), String> {
         let b = text.as_bytes();
         let toks = crate::lexer::tokenize(b);
         let (close, _) = brackets(b, &toks);
@@ -786,7 +788,7 @@ fn collect_defs(text: &mut String, macros: &mut HashMap<String, Vec<Rule>>) -> R
             let ge = close[i + 3];
             let name = String::from_utf8_lossy(tk(i + 2)).into_owned();
             let rules = parse_rules(&text[toks[i + 3].2..toks[ge].1])?;
-            macros.insert(name, rules);
+            macros.insert(name.clone(), rules);
             // `#[macro_export]` などの属性も消す
             let mut st = toks[i].1;
             if i >= 2 && sym(i - 1, b']') {
@@ -797,6 +799,11 @@ fn collect_defs(text: &mut String, macros: &mut HashMap<String, Vec<Rule>>) -> R
                 if o >= 2 && sym(o - 1, b'[') && sym(o - 2, b'#') {
                     st = toks[o - 2].1;
                 }
+            }
+            if let Some(f) = first.as_deref_mut() {
+                let exported = st != toks[i].1 && text[st..toks[i].1].contains("macro_export");
+                let at = if exported { usize::MAX } else { toks[i].1 };
+                f.entry(name.clone()).and_modify(|o| *o = (*o).min(at)).or_insert(at);
             }
             let mut en = toks[ge].2;
             if sym(ge + 1, b';') {
@@ -823,7 +830,8 @@ pub fn expand_cfg(src: &str, cfg: Option<&crate::cfg::CfgSet>) -> Result<Option<
     }
     let mut text = src.to_string();
     let mut macros: HashMap<String, Vec<Rule>> = HashMap::new();
-    collect_defs(&mut text, &mut macros)?;
+    let mut first: HashMap<String, usize> = HashMap::new();
+    collect_defs(&mut text, &mut macros, Some(&mut first))?;
     if macros.is_empty() {
         return Ok(Some(text));
     }
@@ -831,7 +839,7 @@ pub fn expand_cfg(src: &str, cfg: Option<&crate::cfg::CfgSet>) -> Result<Option<
     for round in 0..64 {
         // (definitions an expansion produced: `macro_rules! foo { () => { macro_rules! bar { .. } } }`)
         if round > 0 && text.contains("macro_rules") {
-            collect_defs(&mut text, &mut macros)?;
+            collect_defs(&mut text, &mut macros, None)?;
         }
         let b = text.as_bytes();
         let toks = crate::lexer::tokenize(b);
@@ -850,6 +858,32 @@ pub fn expand_cfg(src: &str, cfg: Option<&crate::cfg::CfgSet>) -> Result<Option<
                 i += 1;
                 continue;
             };
+            // (textual scope: a `macro_rules!` macro is usable only after its definition; E0433-like
+            // "cannot find macro" for `m!()` above the only `macro_rules! m` (not `crate::m!` / exported ones))
+            if round == 0 && !(i >= 2 && sym(i - 1, b':')) {
+                let nm = std::str::from_utf8(tk(i)).unwrap_or("");
+                // (`use m;` after the definition makes it a path-scoped item, usable above too)
+                let later = first.get(nm).is_some_and(|&d| d != usize::MAX && toks[i].1 < d)
+                    && !(0..toks.len().saturating_sub(1)).any(|k| toks[k].0 == 0 && tk(k) == b"use" && {
+                        let mut j = k + 1;
+                        while j < toks.len() && !sym(j, b';') && !(toks[j].0 == 0 && tk(j) == nm.as_bytes()) {
+                            j += 1;
+                        }
+                        j < toks.len() && !sym(j, b';')
+                    });
+                // (`pub m!(..);` in an item list)
+                let vis = i >= 1 && toks[i - 1].0 == 0 && tk(i - 1) == b"pub";
+                if later || vis {
+                    let at = toks[if vis { i - 1 } else { i }].1;
+                    let line = b[..at].iter().filter(|&&c| c == b'\n').count() + 1;
+                    let ls = b[..at].iter().rposition(|&c| c == b'\n').map(|k| k + 1).unwrap_or(0);
+                    let col = text[ls..at].chars().count();
+                    if vis {
+                        return Err(format!("{line}:{}: can't qualify macro invocation with `pub`", col + 1));
+                    }
+                    return Err(format!("{line}:{}: cannot find macro `{nm}` in this scope", col + 1));
+                }
+            }
             let ge = close[i + 2];
             let ts = TokenStream::from_str(&text[toks[i + 2].2..toks[ge].1]).map_err(|e| format!("1:1: {e}"))?;
             let args: Vec<TokenTree> = ts.into_iter().collect();

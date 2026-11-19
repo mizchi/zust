@@ -8,3 +8,5 @@ compile-fail	generics/generic-type-less-params-with-defaults.rs
 compile-fail	suggestions/dont-wrap-ambiguous-receivers.rs
 compile-fail	async-await/edition-deny-async-fns-2015.rs
 compile-fail	borrowck/cannot-return-ref-to-temporary-format-args.rs
+compile-fail	attributes/crate-type-macro-call.rs
+compile-fail	recursion/recursion_limit/invalid_macro.rs
