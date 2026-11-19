@@ -255,6 +255,8 @@ pub struct Program {
     pub traits: FxMap<String, Vec<u32>>,
     /// impls whose self type is a reference to a concrete type (`impl Tr for &i32` / `for &S`): (that type, trait)
     pub ref_impls: std::collections::HashSet<(Ty, String)>,
+    /// traits implemented for fn pointers (`impl Tr for fn(A) -> B`; generic ones count for every fn pointer)
+    pub fnptr_impls: std::collections::HashSet<(Option<Ty>, String)>,
     /// 親トレイト (`trait Bar: Foo`)
     pub trait_supers: FxMap<String, Vec<String>>,
     /// (型, trait) の実装
@@ -603,6 +605,7 @@ impl Program {
             overflow_checks: false,
             trait_supers: FxMap::default(),
             ref_impls: Default::default(),
+            fnptr_impls: Default::default(),
             deny_unreachable: false,
             opt: false,
             blanket: FxMap::default(),
@@ -977,7 +980,7 @@ impl Program {
                 let mut blanket = false;
                 let impl_of = match &ss.impl_of {
                     // (`impl Tr for Box<S>`: Box is not a struct; its methods are found by the self type, as for primitives)
-                    Some(n) if Ty::prim(n).is_some() || n == "__array" || n == "__slice" || n.starts_with("__dyn_") || n == "str" || (n == "Box" && !p.struct_index.contains_key("Box")) => None,
+                    Some(n) if Ty::prim(n).is_some() || n == "__array" || n == "__slice" || n == "__fnptr" || n.starts_with("__dyn_") || n == "str" || (n == "Box" && !p.struct_index.contains_key("Box")) => None,
                     Some(n) => match p.struct_index.get(n).copied().or_else(|| {
                         n.strip_prefix("#tuple").and_then(|k| k.parse().ok()).map(|k| p.tuple_base(k))
                     }).as_ref() {
@@ -1137,6 +1140,11 @@ impl Program {
             }
             // プリミティブ型への trait 実装 (`impl Tr for u32`)
             // (`impl Hash for str`: str も組み込みの型として持つ)
+            if sn == "__fnptr" {
+                let t = sm.impl_self_ty.as_ref().and_then(|t| p.resolve_g(t, &[]).ok());
+                p.fnptr_impls.insert((t, tr.clone()));
+                continue;
+            }
             // (`impl Tr for &i32` / `impl Tr for &S`: the reference type implements Tr)
             if let Some(TySyn::Ref(..)) = &sm.impl_self_ty {
                 if let Some(t) = sm.impl_self_ty.as_ref().and_then(|t| p.resolve_g(t, &[]).ok()) {
@@ -1534,6 +1542,7 @@ impl Program {
                 name == tr && self.dyn_bindings_ok(name, args)
             }),
             // 関数ポインタ: Fn 系 (引数の数が合うもの) と Copy
+            Ty::Fn(_) if !self.fnptr_impls.is_empty() && (self.fnptr_impls.contains(&(Some(t), tr.to_string())) || self.fnptr_impls.contains(&(None, tr.to_string()))) => true,
             Ty::Fn(f) => match parse_fn_bound(tr) {
                 Some((_, ps, _)) => ps.len() == f.params.len(),
                 None => matches!(tr, "Fn" | "FnMut" | "FnOnce" | "Copy" | "Clone" | "Sized" | "PartialEq" | "Eq"),
@@ -1667,6 +1676,7 @@ impl Program {
         // (`impl<T: Hash> Hash for [T]` / `for [T; N]` のメソッドは `__slice::m` / `__array::m`)
         let base = match t {
             Ty::Slice(_) => Some("__slice"),
+            Ty::Fn(_) => Some("__fnptr"),
             Ty::Array(..) => Some("__array"),
             Ty::Box(_) => Some("Box"),
             // (`impl Tr for ()`: the methods of `#tuple0`)

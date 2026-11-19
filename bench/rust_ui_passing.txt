@@ -1185,6 +1185,7 @@ check-pass	coercion/issue-101066.rs
 run-pass	coercion/issue-14589.rs
 run-pass	coercion/issue-3794.rs
 compile-fail	coercion/issue-73886.rs
+check-pass	coercion/leak_check_fndef_lub.rs
 compile-fail	coercion/leak_check_fndef_lub_deadcode_breakage.rs
 run-pass	coercion/method-return-trait-object-14399.rs
 compile-fail	coercion/mut-mut-wont-coerce.rs
@@ -1200,6 +1201,8 @@ compile-fail	coherence/associated-type2.rs
 check-pass	coherence/clone-impl-unsized-slice.rs
 compile-fail	coherence/coherence-blanket-conflicts-with-specific-multidispatch.rs
 compile-fail	coherence/coherence-error-suppression.rs
+check-pass	coherence/coherence-fn-covariant-bound-vs-static.rs
+check-pass	coherence/coherence-fn-inputs.rs
 compile-fail	coherence/coherence-impl-trait-for-trait-dyn-compatible.rs
 compile-fail	coherence/coherence-impl-trait-for-trait.rs
 compile-fail	coherence/coherence-inherited-subtyping.rs
@@ -1214,6 +1217,7 @@ compile-fail	coherence/coherence-overlap-unnormalizable-projection-1.rs
 compile-fail	coherence/coherence-projection-conflict-ty-param.rs
 check-pass	coherence/coherence-projection-ok-orphan.rs
 check-pass	coherence/coherence-projection-ok.rs
+check-pass	coherence/coherence-subtyping.rs
 compile-fail	coherence/coherence-tuple-conflict.rs
 run-pass	coherence/coherence-where-clause.rs
 check-pass	coherence/coherent-due-to-fulfill.rs
@@ -3133,6 +3137,7 @@ check-pass	lint/unused/concat-in-crate-deprecated-issue-137687.rs
 check-pass	lint/unused/const-local-var.rs
 run-pass	lint/unused/ignored-allow-unused_variables.rs
 check-pass	lint/unused/import_remove_line.rs
+check-pass	lint/unused/issue-104397.rs
 check-pass	lint/unused/issue-117142-invalid-remove-parens.rs
 check-pass	lint/unused/issue-47390-unused-variable-in-struct-pattern.rs
 compile-fail	lint/unused/issue-67691-unused-field-in-or-pattern.rs
@@ -3715,6 +3720,7 @@ check-pass	nll/issue-55344.rs
 check-pass	nll/issue-55651.rs
 compile-fail	nll/issue-57100.rs
 compile-fail	nll/issue-57280-1-flipped.rs
+compile-fail	nll/issue-57642-higher-ranked-subtype.rs
 compile-fail	nll/issue-57843.rs
 run-pass	nll/issue-57960.rs
 compile-fail	nll/issue-57989.rs
@@ -5411,7 +5417,6 @@ compile-fail	suggestions/dont-suggest-private-trait-method.rs
 compile-fail	suggestions/dont-suggest-ref/simple.rs
 compile-fail	suggestions/dont-suggest-ufcs-for-const.rs
 run-pass	suggestions/dont-try-removing-the-field.rs
-compile-fail	suggestions/dont-wrap-ambiguous-receivers.rs
 compile-fail	suggestions/double-reference-ty-in-self-ty.rs
 compile-fail	suggestions/dyn-incompatible-trait-should-use-self-2021-without-dyn.rs
 compile-fail	suggestions/dyn-incompatible-trait-should-use-self-2021.rs

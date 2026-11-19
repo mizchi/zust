@@ -526,6 +526,23 @@ impl Cx<'_> {
                 }
             }
         }
+        // (`f.m()` with f a fn pointer and `impl Tr for fn(..)`: the `__fnptr` method whose self type is f's)
+        if let Some(ft @ Ty::Fn(_)) = self.peek(recv) {
+            if let Some(id) = self.prog.prim_method(ft, method) {
+                let (v, t) = self.expr(recv, Some(ft))?;
+                let v = v.ok_or("internal: fn pointer without a value")?;
+                let (rv, rt) = match self.prog.sigs[id as usize].params.first() {
+                    Some(Ty::Ref(m, _)) => {
+                        let tmp = self.temp(t);
+                        self.b.ins().store(mf(), v, tmp, 0);
+                        (tmp, Ty::Ref(*m, intern(t)))
+                    }
+                    _ => (v, t),
+                };
+                let args: Vec<&Expr> = margs.iter().collect();
+                return self.call_fn(id, Some((rv, rt)), &args, None, expected, SP);
+            }
+        }
         let mut recv_temp = None;
         // (whether the receiver was reached through a reference: a `self` by value there moves out of it)
         let mut through_ref = false;
