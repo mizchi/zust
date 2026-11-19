@@ -28,3 +28,4 @@ date	commit	change	noop_M	edit_M	check_M	cache_KiB	lsp_G	run	check	build	cfail
 2026-11-19	2e73c1f	impls for &T of a type parameter	625.352	626.411	3906.158	1902.8	-	1586	1342	94	2895
 2026-11-19	0aa45a9	slice patterns in inference, E0527/E0528	625.350	626.409	3906.603	1902.8	10.8969	1587	1342	94	2904
 2026-11-19	1f1966e	unreachable patterns (deny), arm positions	627.309	628.367	3908.464	1902.8	10.8925	1587	1342	94	2967
+2026-11-19	8c2be84	deny attribute from the file head	625.356	626.415	3906.511	1902.8	-	1587	1342	94	2967
