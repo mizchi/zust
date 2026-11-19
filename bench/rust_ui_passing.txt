@@ -1819,10 +1819,12 @@ check-pass	dyn-compatibility/assoc_type_bounds_sized_unnecessary.rs
 check-pass	dyn-compatibility/associated_type_bound_mentions_self.rs
 check-pass	dyn-compatibility/by-value-self.rs
 compile-fail	dyn-compatibility/dyn-compatible-trait-implementation-20939.rs
+compile-fail	dyn-compatibility/dyn-incompatible-supertrait.rs
 check-pass	dyn-compatibility/elaborated-predicates-ordering.rs
 compile-fail	dyn-compatibility/erroneous_signature.rs
 check-pass	dyn-compatibility/impossible-predicates-multiple_supertrait_upcastable-check.rs
 check-pass	dyn-compatibility/item-bounds-can-reference-self.rs
+compile-fail	dyn-compatibility/mention-correct-dyn-incompatible-trait.rs
 compile-fail	dyn-compatibility/method-with-self-trait-bound-not-dyn-safe.rs
 compile-fail	dyn-compatibility/no-static.rs
 check-pass	dyn-compatibility/phantom-fn.rs
@@ -2453,6 +2455,7 @@ check-pass	higher-ranked/trait-bounds/issue-57639.rs
 compile-fail	higher-ranked/trait-bounds/issue-58451.rs
 check-pass	higher-ranked/trait-bounds/issue-60283.rs
 check-pass	higher-ranked/trait-bounds/issue-88586-hr-self-outlives-in-trait-def.rs
+check-pass	higher-ranked/trait-bounds/issue-90177.rs
 check-pass	higher-ranked/trait-bounds/normalize-under-binder/issue-62529-5.rs
 check-pass	higher-ranked/trait-bounds/normalize-under-binder/issue-70120.rs
 check-pass	higher-ranked/trait-bounds/normalize-under-binder/issue-74261.rs
@@ -5391,6 +5394,7 @@ compile-fail	suggestions/dont-suggest-private-trait-method.rs
 compile-fail	suggestions/dont-suggest-ref/simple.rs
 compile-fail	suggestions/dont-suggest-ufcs-for-const.rs
 run-pass	suggestions/dont-try-removing-the-field.rs
+compile-fail	suggestions/dont-wrap-ambiguous-receivers.rs
 compile-fail	suggestions/double-reference-ty-in-self-ty.rs
 compile-fail	suggestions/dyn-incompatible-trait-should-use-self-2021-without-dyn.rs
 compile-fail	suggestions/dyn-incompatible-trait-should-use-self-2021.rs
@@ -5697,6 +5701,7 @@ run-pass	traits/bug-7295.rs
 run-pass	traits/cache-issue-18209.rs
 compile-fail	traits/closure-capture-not-send.rs
 compile-fail	traits/closure-rc-not-send.rs
+run-pass	traits/coercion-generic.rs
 check-pass	traits/composition-trivial.rs
 check-pass	traits/const-traits/call-generic-method-nonconst-bound.rs
 compile-fail	traits/const-traits/gate.rs
@@ -5756,6 +5761,7 @@ run-pass	traits/inheritance/basic.rs
 run-pass	traits/inheritance/call-bound-inherited.rs
 run-pass	traits/inheritance/call-bound-inherited2.rs
 run-pass	traits/inheritance/cast-without-call-to-supertrait.rs
+run-pass	traits/inheritance/cast.rs
 run-pass	traits/inheritance/cross-trait-call.rs
 run-pass	traits/inheritance/diamond.rs
 run-pass	traits/inheritance/multiple-inheritors.rs
@@ -5792,6 +5798,7 @@ run-pass	traits/issue-43132.rs
 run-pass	traits/issue-5008-borrowed-traitobject-method-call.rs
 compile-fail	traits/issue-50480.rs
 build-pass	traits/issue-56202.rs
+run-pass	traits/issue-6128.rs
 run-pass	traits/issue-6334.rs
 check-pass	traits/issue-70944.rs
 check-pass	traits/issue-72455.rs
@@ -5802,6 +5809,7 @@ compile-fail	traits/issue-87558.rs
 check-pass	traits/issue-90195-2.rs
 check-pass	traits/issue-90195.rs
 check-pass	traits/issue-92292.rs
+run-pass	traits/issue-9394-inherited-calls.rs
 check-pass	traits/issue-96665.rs
 check-pass	traits/make-sure-to-filter-projections-by-def-id.rs
 compile-fail	traits/map-types.rs
@@ -6099,6 +6107,7 @@ compile-fail	typeck/issue-89044-wrapped-expr-method.rs
 compile-fail	typeck/issue-89275.rs
 compile-fail	typeck/issue-89806.rs
 compile-fail	typeck/issue-89856.rs
+check-pass	typeck/issue-89935.rs
 compile-fail	typeck/issue-90027-async-fn-return-suggestion.rs
 compile-fail	typeck/issue-90101.rs
 compile-fail	typeck/issue-90319.rs

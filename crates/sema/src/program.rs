@@ -253,6 +253,8 @@ pub struct Program {
     pub by_last: FxMap<String, Vec<u32>>,
     /// trait 名 → その trait で宣言された関数
     pub traits: FxMap<String, Vec<u32>>,
+    /// 親トレイト (`trait Bar: Foo`)
+    pub trait_supers: FxMap<String, Vec<String>>,
     /// (型, trait) の実装
     pub impls: HashSet<(u32, String)>,
     /// `#[panic_handler]` の関数 (no_std)。panic (範囲外アクセス・unwrap など) はここを呼ぶ
@@ -597,6 +599,7 @@ impl Program {
             opaque: vec![],
             prelude_from: u32::MAX,
             overflow_checks: false,
+            trait_supers: FxMap::default(),
             deny_unreachable: false,
             opt: false,
             blanket: FxMap::default(),
@@ -1069,6 +1072,9 @@ impl Program {
             }
             if let Some(tr) = &sm.trait_decl {
                 p.traits.entry(tr.clone()).or_default();
+                if !sm.trait_supers.is_empty() {
+                    p.trait_supers.insert(tr.clone(), sm.trait_supers.clone());
+                }
             }
         }
         p.peq = (0..p.names.len() as u32)
@@ -3274,6 +3280,27 @@ impl Program {
             return self_sid;
         }
         self.struct_index.get(id).copied()
+    }
+
+    /// The methods a `dyn tr` vtable holds, in order: the trait's own, then those of its supertraits (each name once)
+    pub fn dyn_methods(&self, tr: &str) -> Vec<u32> {
+        let mut out: Vec<u32> = self.traits.get(tr).cloned().unwrap_or_default();
+        let mut todo: Vec<String> = self.trait_supers.get(tr).cloned().unwrap_or_default();
+        let mut seen = vec![tr.to_string()];
+        while let Some(s) = todo.pop() {
+            if seen.contains(&s) {
+                continue;
+            }
+            seen.push(s.clone());
+            for &d in self.traits.get(&s).map(|v| v.as_slice()).unwrap_or(&[]) {
+                let m = self.names[d as usize].rsplit("::").next();
+                if !out.iter().any(|&o| self.names[o as usize].rsplit("::").next() == m) {
+                    out.push(d);
+                }
+            }
+            todo.extend(self.trait_supers.get(&s).cloned().unwrap_or_default());
+        }
+        out
     }
 
     pub fn fn_by_p(&self, p: &PPath, self_sid: Option<u32>) -> Option<u32> {

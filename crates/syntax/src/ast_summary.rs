@@ -1111,7 +1111,16 @@ pub fn summarize(item: &Item, owner: Option<&Owner>) -> R<Summary> {
             }
             sm.aliases.push((n.clone(), gs.into_iter().map(|x| x.0).collect(), tysyn(t, None)?));
         }
-        ItemKind::Trait(n, g, _, _) => {
+        ItemKind::Trait(n, g, supers, _) => {
+            for b in supers {
+                if let Bound::Trait(false, p) = b {
+                    if let Some(s) = p.segs.last() {
+                        if !matches!(s.name.as_str(), "Sized" | "Send" | "Sync" | "Copy" | "Clone" | "Unpin" | "Any" | "Debug" | "Display") {
+                            sm.trait_supers.push(s.name.clone());
+                        }
+                    }
+                }
+            }
             // (`trait Foo<X = Box<dyn Foo>>`: the default needs the trait itself)
             for p in &g.params {
                 if let GParam::Ty(_, _, Some(d)) = p {

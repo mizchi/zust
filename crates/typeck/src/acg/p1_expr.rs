@@ -1441,13 +1441,14 @@ impl Cx<'_> {
             // (`dyn Foo<isize>`: the trait's own parameters are the arguments written)
             let (trn, targs) = self.dyn_trait_args(tr);
             let tr = trn.as_str();
-            let Some(decls) = self.prog.traits.get(tr) else {
+            if !self.prog.traits.contains_key(tr) {
                 return err(span, format!("cannot find trait `{tr}`"));
-            };
+            }
+            let decls = self.prog.dyn_methods(tr);
             if !self.prog.implements(t, tr) {
                 return err(span, format!("the trait `{tr}` is not implemented for `{}`", self.prog.tn(t)));
             }
-            for &d in decls {
+            for &d in &decls {
                 let ds = &self.prog.sigs[d as usize];
                 let Some(Ty::Ref(m, _)) = ds.params.first() else {
                     return err(span, format!("`{}` cannot be called through `dyn` (it needs `&self`)", self.prog.names[d as usize]));
@@ -1620,7 +1621,7 @@ impl Cx<'_> {
         let Expr::MethodCall(_, name, _, margs, _) = mc else { return err(SP, "internal: expected a method call") };
         let (trn, targs) = self.dyn_trait_args(tr);
         let tr = trn.as_str();
-        let decls = self.prog.traits.get(tr).cloned().unwrap_or_default();
+        let decls = self.prog.dyn_methods(tr);
         let Some(idx) = decls.iter().position(|&d| self.prog.names[d as usize].rsplit("::").next() == Some(name.as_str())) else {
             return err(SP, format!("no method named `{name}` found for `dyn {tr}`"));
         };

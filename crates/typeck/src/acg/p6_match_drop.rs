@@ -1344,7 +1344,15 @@ impl Cx<'_> {
 
     /// vtable の中で drop glue が入っている位置 (メソッドの後ろ)
     pub(crate) fn vtable_drop_index(&self, tr: &str) -> usize {
-        if crate::ast_summary::parse_fn_bound(tr).is_some() { 1 } else { self.prog.traits.get(tr).map(|v| v.len()).unwrap_or(0) }
+        // (the trait's methods and its supertraits', as the vtable holds them)
+        if crate::ast_summary::parse_fn_bound(tr).is_some() {
+            1
+        } else if self.prog.traits.contains_key(tr) {
+            self.prog.dyn_methods(tr).len()
+        } else {
+            let base = tr.split('<').next().unwrap_or(tr).trim();
+            self.prog.dyn_methods(base).len()
+        }
     }
 
     /// vtable の drop の欄: t の drop glue (要らなければ u32::MAX = null)
