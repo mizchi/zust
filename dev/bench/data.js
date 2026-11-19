@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795106392142,
+  "lastUpdate": 1795107484622,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -23849,6 +23849,165 @@ window.BENCHMARK_DATA = {
           {
             "name": "rt/strings run (-O)",
             "value": 34.724,
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "committer": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "distinct": true,
+          "id": "32dacd1579ede7004db3ceceeaa749c40e80ea70",
+          "message": "Fixes found building scopeguard (bluss/scopeguard 1.2.0) with zustc\n\nscopeguard now builds as a lib + app workspace and its program prints what rustc's does (it is not added to\ncratebench: the crate would be a new submodule). What it needed:\n\n- cfg::strip: an item with a keyword (`#[cfg(feature = \"x\")] pub fn g<T, F>(..) where F: FnOnce(T), {..}`) ended at\n  the first `,` of its generics; it ends at its `;` or block.\n- `defer! { .. }` followed by more statements: a brace-delimited macro call in statement position is spliced into the\n  block as a statement (it was wrapped as an expression with no `;`, and its `let` guard dropped at once).\n- The crate-item renamer (`guard` -> `scopeguard__guard`) also renamed a fn's own parameter / `let` of that name in\n  its body (`fn into_inner(guard: Self) { ManuallyDrop::new(guard) }`); names a fn binds itself are left alone.\n- The prelude's ManuallyDrop kept its value in a field named `value`, which shadowed the field of the type it derefs\n  to (`guard.value`); it is `__md_value`. `*x` of a Deref struct the type records did not name goes through its deref.\n- `std::thread::panicking()` (false: a panic stops the process without unwinding).\n- `strategy: PhantomData` where `PhantomData<fn(S) -> S>` is expected: a generic unit struct is the expected instance.\n\ncratebench: the 6 crates build and give the same output as before. tests/ui: run-pass\nassociated-types/self-type-projection-dyn-coerce.rs, check-pass macros/panic-temporaries.rs, compile-fail\nborrowck/multiple-mutable-borrows-error-65131.rs; 0 regressions (async-await/edition-deny-async-fns-2015.rs fails at\nits line for another reason: bench/rust_ui_accidental.txt).\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-19T16:52:04Z",
+          "tree_id": "58ff2c8ebe3ec0ca9f604807a0e89881146097e1",
+          "url": "https://github.com/mizchi/zust/commit/32dacd1579ede7004db3ceceeaa749c40e80ea70"
+        },
+        "date": 1795107483976,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "gen1000 build cold",
+            "value": 119.191,
+            "unit": "ms"
+          },
+          {
+            "name": "gen1000 build noop",
+            "value": 0.845,
+            "unit": "ms"
+          },
+          {
+            "name": "gen1000 build edit 1 fn",
+            "value": 18.162,
+            "unit": "ms"
+          },
+          {
+            "name": "gen1000 check",
+            "value": 77.841,
+            "unit": "ms"
+          },
+          {
+            "name": "gen1000 build cold peak RSS",
+            "value": 17.84,
+            "unit": "MiB"
+          },
+          {
+            "name": "gen1000 binary",
+            "value": 323.977,
+            "unit": "KiB"
+          },
+          {
+            "name": "gen1000 cache",
+            "value": 387.21,
+            "unit": "KiB"
+          },
+          {
+            "name": "gen1000 build noop instructions",
+            "value": 0.727,
+            "unit": "M instr"
+          },
+          {
+            "name": "gen1000 build edit 1 fn instructions",
+            "value": 133.482,
+            "unit": "M instr"
+          },
+          {
+            "name": "gen1000 check instructions",
+            "value": 786.802,
+            "unit": "M instr"
+          },
+          {
+            "name": "gen5000 build cold",
+            "value": 535.908,
+            "unit": "ms"
+          },
+          {
+            "name": "gen5000 build noop",
+            "value": 0.863,
+            "unit": "ms"
+          },
+          {
+            "name": "gen5000 build edit 1 fn",
+            "value": 66.708,
+            "unit": "ms"
+          },
+          {
+            "name": "gen5000 check",
+            "value": 380.488,
+            "unit": "ms"
+          },
+          {
+            "name": "gen5000 build cold peak RSS",
+            "value": 52.07,
+            "unit": "MiB"
+          },
+          {
+            "name": "gen5000 binary",
+            "value": 1558.336,
+            "unit": "KiB"
+          },
+          {
+            "name": "gen5000 cache",
+            "value": 1902.835,
+            "unit": "KiB"
+          },
+          {
+            "name": "gen5000 build noop instructions",
+            "value": 0.727,
+            "unit": "M instr"
+          },
+          {
+            "name": "gen5000 build edit 1 fn instructions",
+            "value": 628.695,
+            "unit": "M instr"
+          },
+          {
+            "name": "gen5000 check instructions",
+            "value": 3871.087,
+            "unit": "M instr"
+          },
+          {
+            "name": "rt/fib run (-O)",
+            "value": 54.218,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/hashmap run (-O)",
+            "value": 90.464,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/matmul run (-O)",
+            "value": 39.551,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/nbody run (-O)",
+            "value": 52.671,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/sieve run (-O)",
+            "value": 92.341,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/sort run (-O)",
+            "value": 146.418,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/strings run (-O)",
+            "value": 34.129,
             "unit": "ms"
           }
         ]
