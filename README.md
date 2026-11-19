@@ -120,24 +120,28 @@ relax's numbers include starting its runtime and loading its own std; its streng
 program, keeping its state) is not measured here. On the small programs, the run itself is a large part of every
 number: rustc's debug build runs slowly, so relax beats it on five of the seven after an edit.
 
-Against blaze ([indexable-inc/blaze](https://github.com/indexable-inc/blaze), a replacement for cargo whose daemon
-compiles only what an edit changed, with its own front end and rustc's language as its target): not run here yet,
-so these are blaze's own published numbers (v1, 2026-10-25, Linux x86-64 on 16 cores of an AMD EPYC 9R45; its
-[benchmarks](https://github.com/indexable-inc/blaze/blob/main/docs/benchmarks.md)) next to zustc's on this machine.
-They are different programs on different machines: blaze builds real cargo projects that zustc cannot build yet
-(ripgrep, nushell, bun), and zustc's numbers are a generated single-crate program:
+Against blaze ([indexable-inc/blaze](https://github.com/indexable-inc/blaze) 0.20261027.0, a replacement for cargo
+whose daemon keeps the workspace compiled and builds only what an edit changed), on this machine and the same
+programs: each program as a cargo package for `blaze build` (dev profile, the daemon left running between builds as it
+is meant to be used; cold also stops it), `python3 bench/vs_blaze.py` (2026-11-19, 4 cores; medians of 3; every output
+matches rustc `-O`). Memory is the peak RSS of one build for zustc and rustc, and what blaze's daemon holds:
 
-| edit one function, then build | before | after |
-|---|---:|---:|
-| blaze: ripgrep (cargo → blaze) | 508 ms | 56 ms |
-| blaze: helix (cargo → blaze) | 2.15 s | 116 ms |
-| blaze: bun, 1.25M lines (cargo → blaze) | 9.11 s | 451 ms |
-| zustc: gen1000 (rustc `-C incremental` → zustc) | 406 ms | 27 ms |
+| | cold | no-op | edit one function | on disk | memory |
+|---|---:|---:|---:|---:|---:|
+| gen1000: zustc | 148 ms | 18 ms | 28 ms | 766 KiB | 13 MiB |
+| gen1000: rustc `-C incremental` | 767 ms | 207 ms | 408 ms | 10.8 MiB | 115 MiB |
+| gen1000: blaze | 2691 ms | 30 ms | 141 ms | 259 MiB | 443 MiB |
+| bench/rt (6 programs): zustc | 29–59 ms | 5–7 ms | 5–9 ms | 36–90 KiB | 13 MiB |
+| bench/rt: rustc `-C incremental` | 82–162 ms | 70–92 ms | 67–100 ms | 0.1–0.9 MiB | 75–85 MiB |
+| bench/rt: blaze | 1439–1669 ms | 29–38 ms | 35–42 ms | 244 MiB | 348–390 MiB |
+| **zustc vs blaze** | **18–54x faster** | **1.7–6x faster** | **4.6–7.4x faster** | **1/345 (gen1000)–1/6900** | **1/27–1/34** |
 
-blaze's daemon holds a few GB for a small project (16 GB after a ripgrep run, by its own ledger) where zustc's cache
-for gen1000 is 766 KiB on disk and nothing stays in memory between builds. Its way of tracking its numbers (each
-merge's instruction counts against the median of the last runs, with a noise band) is what `bench/kpi_track.py`
-now does too. A run of both on the same machine and the same program (gen1000 as a cargo project) is the next step.
+hashmap is left out of bench/rt's rows: blaze does not build it (`HashMap::new` reaches a thread-local static it cannot
+compile yet). blaze builds real cargo projects that zustc cannot build yet (ripgrep, nushell, bun: its own
+[benchmarks](https://github.com/indexable-inc/blaze/blob/main/docs/benchmarks.md) show 56 ms to rebuild ripgrep after an
+edit, against cargo's 508 ms, on 16 cores of an AMD EPYC 9R45), and compiles the standard library itself, which is
+most of its cold build and of its target directory here. Its way of tracking its numbers (each merge's instruction
+counts against the median of the last runs, with a noise band) is what `bench/kpi_track.py` does too.
 
 zust-analyzer against rust-analyzer and rust-glancer on zustc's own sources (40 query points,
 `python3 bench/lsp_parity.py --servers zustc,rust-analyzer,rust-glancer --targets zustc`, 2026-11-18, e45ee10;
