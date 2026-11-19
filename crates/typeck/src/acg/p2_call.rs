@@ -527,6 +527,8 @@ impl Cx<'_> {
             }
         }
         let mut recv_temp = None;
+        // (whether the receiver was reached through a reference: a `self` by value there moves out of it)
+        let mut through_ref = false;
         // (a Box value that is not a place: `Box::new(s).m()`, for `self: Box<Self>`)
         let mut recv_box: Option<(Value, Ty)> = None;
         let mut p = if is_place_expr(recv) {
@@ -543,6 +545,7 @@ impl Cx<'_> {
                 (_, Ty::Never) => return Ok((None, Ty::Never)),
                 (Some(a), t) if t.is_agg() => Place::Mem(a, 0, t),
                 (Some(v), t @ (Ty::Ref(_, i) | Ty::Box(i))) => {
+                    through_ref |= matches!(t, Ty::Ref(..));
                     if matches!(t, Ty::Box(_)) {
                         recv_box = Some((v, t));
                     }
@@ -568,10 +571,12 @@ impl Cx<'_> {
                         return self.dyn_method_call(fat, tr, e);
                     }
                     Place::Mem(a, o, Ty::Ref(_, i) | Ty::Box(i)) => {
+                        through_ref |= matches!(p.ty(), Ty::Ref(..));
                         let ptr = self.b.ins().load(PTR, mf(), a, o);
                         Place::Mem(ptr, 0, *i)
                     }
                     Place::Var(v, Ty::Ref(_, i) | Ty::Box(i)) => {
+                        through_ref |= matches!(p.ty(), Ty::Ref(..));
                         let ptr = self.b.use_var(v);
                         Place::Mem(ptr, 0, *i)
                     }
@@ -619,6 +624,14 @@ impl Cx<'_> {
         // struct のアドレスを渡す: `&self` ならそのまま、`self` なら call_fn がコピーする
         let mut recv_v = self.addr_plus(a, o);
         let st = Ty::Struct(sid);
+        // (`r.take()` with `fn take(self)` and r: &S, S not Copy: moving out of what r points to (E0507))
+        if through_ref && !via_deref && self.user_code {
+            let p0 = self.prog.sigs[id as usize].params.first().copied();
+            if matches!(p0, Some(Ty::Struct(_) | Ty::Param(_))) && self.prog.sigs[id as usize].has_self && !self.prog.implements(st, "Copy") {
+                let sname = self.prog.tn(st);
+                return err(SP, format!("cannot move out of a shared reference: `{name}` takes `self` by value and `{sname}` is not `Copy` (E0507)"));
+            }
+        }
         let recv_ty = match self.prog.sigs[id as usize].params[0] {
             Ty::Ref(m, _) => Ty::Ref(m, intern(st)),
             _ => st,
