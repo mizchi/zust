@@ -1772,6 +1772,7 @@ compile-fail	drop/explicit-drop-call-named-ref.rs
 check-pass	drop/field-replace-in-struct-with-drop.rs
 run-pass	drop/generic-drop-trait-bound-15858.rs
 check-pass	drop/issue-17718-const-destructors.rs
+run-pass	drop/issue-21486.rs
 run-pass	drop/issue-2734.rs
 run-pass	drop/issue-2735-2.rs
 run-pass	drop/issue-2735-3.rs
@@ -5361,6 +5362,7 @@ run-pass	structs/struct-literal-dtor.rs
 run-pass	structs/struct-new-as-field-name.rs
 run-pass	structs/struct-order-of-eval-1.rs
 run-pass	structs/struct-order-of-eval-2.rs
+run-pass	structs/struct-order-of-eval-3.rs
 run-pass	structs/struct-order-of-eval-4.rs
 run-pass	structs/struct-partial-move-1.rs
 run-pass	structs/struct-partial-move-2.rs
@@ -5420,7 +5422,6 @@ compile-fail	suggestions/dont-suggest-private-trait-method.rs
 compile-fail	suggestions/dont-suggest-ref/simple.rs
 compile-fail	suggestions/dont-suggest-ufcs-for-const.rs
 run-pass	suggestions/dont-try-removing-the-field.rs
-compile-fail	suggestions/dont-wrap-ambiguous-receivers.rs
 compile-fail	suggestions/double-reference-ty-in-self-ty.rs
 compile-fail	suggestions/dyn-incompatible-trait-should-use-self-2021-without-dyn.rs
 compile-fail	suggestions/dyn-incompatible-trait-should-use-self-2021.rs

@@ -1170,6 +1170,27 @@ impl Cx<'_> {
                 return self.struct_lit(ns, Some(Ty::Struct(bsid)));
             }
         }
+        // (`S { a: f(), ..g() }`: the fields written are evaluated before the base. Fields with effects (calls,
+        // blocks ..) go to locals first; literals and paths have none and keep the field's type as their hint)
+        if let Some(base) = rest {
+            let effects = |x: &Expr| !matches!(strip_paren(x), Expr::Lit(..) | Expr::Path(..) | Expr::Closure(..) | Expr::Ref(..) | Expr::Unary(..));
+            if sfields.iter().any(|(_, x)| effects(x)) && !matches!(strip_paren(base), Expr::Path(..)) {
+                let mut stmts = vec![];
+                let mut nfields = vec![];
+                for (i, (f, x)) in sfields.iter().enumerate() {
+                    if effects(x) {
+                        let n = format!("__exr_sf{i}");
+                        stmts.push(crate::parse::Stmt::Let(Pat::Ident(false, false, n.clone(), None), None, Some(x.clone()), None, Default::default()));
+                        nfields.push((f.clone(), path_expr(&n)));
+                    } else {
+                        nfields.push((f.clone(), x.clone()));
+                    }
+                }
+                stmts.push(crate::parse::Stmt::Expr(Expr::Struct(path.clone(), nfields, Some(base.clone())), false));
+                let ne: &Expr = self.keep_expr(Expr::Block(None, false, crate::parse::Block { stmts }));
+                return self.expr(ne, expected);
+            }
+        }
         if let Some(base) = rest {
             let st = match expected {
                 Some(Ty::Struct(x)) if self.prog.base_of(x) == self.prog.base_of(sid) => Some(Ty::Struct(x)),
