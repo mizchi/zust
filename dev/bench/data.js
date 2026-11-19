@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795115508464,
+  "lastUpdate": 1795116606448,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -25121,6 +25121,165 @@ window.BENCHMARK_DATA = {
           {
             "name": "rt/strings run (-O)",
             "value": 34.589,
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "committer": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "distinct": true,
+          "id": "55b86401eb74560511347b0cfefe90692c211408",
+          "message": "dyn: methods dyn cannot call have no vtable entry; self: Box<Self>; E0038\n\n- Coercing to `dyn Tr` failed when any method of Tr could not go through dyn (\"`Foo::f` cannot be called through\n  `dyn` (it needs `&self`)\"), also for `fn make() -> Self where Self: Sized` / `fn by(self) where Self: Sized`, which\n  rustc leaves out of the vtable. Such methods now get an empty entry, and calling one through dyn is the error.\n- `self: Box<Self>` methods are callable on `Box<dyn Tr>`: the box goes to the method (the receiver is moved). On a\n  `&dyn Tr` they are \"no method named .. found for reference\".\n- E0038 (not dyn compatible) at the coercion: a method without `where Self: Sized` that has no `self`, generics of its\n  own, or `Self` in its parameters or result.\n\ntests/ui: 10 newly passing (run-pass autoref-autoderef/autoderef-method-on-trait.rs, self/dyn-compatibility-sized-self-\nby-value-self.rs, -generic-method.rs, -return-Self.rs, self/explicit-self-objects-uniq.rs,\nself/objects-owned-object-owned-method.rs, traits/object/exclusion.rs, traits/object/extern-c-trait-object-methods.rs;\ncompile-fail dyn-compatibility/mentions-Self-in-super-predicates.rs, error-codes/E0161.rs); 0 regressions.\nKPIs: no change outside noise.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-19T19:24:00Z",
+          "tree_id": "685bd592934cfc64e24843fed572d3d61361c6cf",
+          "url": "https://github.com/mizchi/zust/commit/55b86401eb74560511347b0cfefe90692c211408"
+        },
+        "date": 1795116605944,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "gen1000 build cold",
+            "value": 116.679,
+            "unit": "ms"
+          },
+          {
+            "name": "gen1000 build noop",
+            "value": 0.774,
+            "unit": "ms"
+          },
+          {
+            "name": "gen1000 build edit 1 fn",
+            "value": 17.393,
+            "unit": "ms"
+          },
+          {
+            "name": "gen1000 check",
+            "value": 76.746,
+            "unit": "ms"
+          },
+          {
+            "name": "gen1000 build cold peak RSS",
+            "value": 18.082,
+            "unit": "MiB"
+          },
+          {
+            "name": "gen1000 binary",
+            "value": 323.977,
+            "unit": "KiB"
+          },
+          {
+            "name": "gen1000 cache",
+            "value": 387.21,
+            "unit": "KiB"
+          },
+          {
+            "name": "gen1000 build noop instructions",
+            "value": 0.73,
+            "unit": "M instr"
+          },
+          {
+            "name": "gen1000 build edit 1 fn instructions",
+            "value": 134.044,
+            "unit": "M instr"
+          },
+          {
+            "name": "gen1000 check instructions",
+            "value": 786.695,
+            "unit": "M instr"
+          },
+          {
+            "name": "gen5000 build cold",
+            "value": 529.328,
+            "unit": "ms"
+          },
+          {
+            "name": "gen5000 build noop",
+            "value": 0.801,
+            "unit": "ms"
+          },
+          {
+            "name": "gen5000 build edit 1 fn",
+            "value": 64.716,
+            "unit": "ms"
+          },
+          {
+            "name": "gen5000 check",
+            "value": 377.607,
+            "unit": "ms"
+          },
+          {
+            "name": "gen5000 build cold peak RSS",
+            "value": 52.117,
+            "unit": "MiB"
+          },
+          {
+            "name": "gen5000 binary",
+            "value": 1558.336,
+            "unit": "KiB"
+          },
+          {
+            "name": "gen5000 cache",
+            "value": 1902.835,
+            "unit": "KiB"
+          },
+          {
+            "name": "gen5000 build noop instructions",
+            "value": 0.73,
+            "unit": "M instr"
+          },
+          {
+            "name": "gen5000 build edit 1 fn instructions",
+            "value": 631.144,
+            "unit": "M instr"
+          },
+          {
+            "name": "gen5000 check instructions",
+            "value": 3875.331,
+            "unit": "M instr"
+          },
+          {
+            "name": "rt/fib run (-O)",
+            "value": 54.108,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/hashmap run (-O)",
+            "value": 85.524,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/matmul run (-O)",
+            "value": 39.519,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/nbody run (-O)",
+            "value": 52.35,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/sieve run (-O)",
+            "value": 92.25,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/sort run (-O)",
+            "value": 137.301,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/strings run (-O)",
+            "value": 34.147,
             "unit": "ms"
           }
         ]
