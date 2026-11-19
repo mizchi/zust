@@ -2408,6 +2408,7 @@ run-pass	imports/export-multi.rs
 check-pass	imports/extern-crate-self/extern-crate-self-macro-item.rs
 check-pass	imports/glob-cycles.rs
 compile-fail	imports/glob-resolve1.rs
+run-pass	imports/global-path-resolution-drop.rs
 check-pass	imports/import-after-macro-expand-1.rs
 check-pass	imports/import-after-macro-expand-10.rs
 check-pass	imports/import-after-macro-expand-11.rs
@@ -2419,6 +2420,7 @@ run-pass	imports/import-glob-0-rpass.rs
 compile-fail	imports/import-glob-0.rs
 run-pass	imports/import-glob-1.rs
 compile-fail	imports/import-glob-circular.rs
+run-pass	imports/import-glob-crate.rs
 run-pass	imports/import-in-block.rs
 run-pass	imports/import-prefix-macro.rs
 run-pass	imports/import-rpass.rs
@@ -2951,6 +2953,7 @@ compile-fail	macros/macro-at-most-once-rep-2018.rs
 check-pass	macros/macro-attribute-expansion.rs
 run-pass	macros/macro-block-nonterminal.rs
 check-pass	macros/macro-const-stringify.rs
+run-pass	macros/macro-crate-use.rs
 check-pass	macros/macro-delimiter-significance.rs
 check-pass	macros/macro-doc-comments.rs
 check-pass	macros/macro-doc-escapes.rs

@@ -1432,7 +1432,13 @@ impl Cx<'_> {
                         self.drop_temps(t0);
                     }
                 }
-                Stmt::Item(_) => return err(SP, "nested items are not supported"),
+                // (a `use` in a body, left by a macro's expansion: names are resolved by their last segment here)
+                Stmt::Item(it) if matches!(it.kind, crate::parse::ItemKind::Use(_)) => continue,
+                Stmt::Item(it) => {
+                    let k = format!("{:?}", it.kind);
+                    let k = k.split(|c: char| !c.is_alphanumeric()).next().unwrap_or("").to_string();
+                    return err(SP, format!("nested items are not supported ({k})"));
+                }
             }
         }
         self.pop_scope();
