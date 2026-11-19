@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795127251125,
+  "lastUpdate": 1795127253281,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -52059,6 +52059,85 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/mizchi/zust/commit/a0a6c394573e872bf3ce337883a4b074a167b3aa"
         },
         "date": 1795126678399,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "parity documentSymbol (名前の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity workspace/symbol (上位 20 の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity definition (行き先の一致)",
+            "value": 97.143,
+            "unit": "%"
+          },
+          {
+            "name": "parity hover (名前を含む)",
+            "value": 87.5,
+            "unit": "%"
+          },
+          {
+            "name": "parity references (数の一致)",
+            "value": 86.111,
+            "unit": "%"
+          },
+          {
+            "name": "parity documentHighlight (数の一致)",
+            "value": 97.143,
+            "unit": "%"
+          },
+          {
+            "name": "parity rename (書き換えの一致)",
+            "value": 83.333,
+            "unit": "%"
+          },
+          {
+            "name": "parity signatureHelp (名前・引数の数・今の引数の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity completion `x.\\|` (書いてある名前を含む)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity completion `na\\|me` (同)",
+            "value": 92.857,
+            "unit": "%"
+          },
+          {
+            "name": "parity 一致の平均",
+            "value": 94.409,
+            "unit": "%"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "committer": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "distinct": true,
+          "id": "ca0796bc0fffa88f844bfedecd7c836b3dfe9366",
+          "message": "Integer literals typed by a trait's default method\n\n`3.hi()` with `trait Speak { fn hi(&self) -> String { .. } }` and only\n`impl Speak for isize`: the literal's integer type is the one that\nimplements a trait whose default method has that name, as for the\ntypes whose impls define the method themselves.\n\ntests/ui: no change in passes (the tests that need it also need more).\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-19T22:23:08Z",
+          "tree_id": "384e0a82a5fb3acdd669270b53779edbec0fc2c3",
+          "url": "https://github.com/mizchi/zust/commit/ca0796bc0fffa88f844bfedecd7c836b3dfe9366"
+        },
+        "date": 1795127252876,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
