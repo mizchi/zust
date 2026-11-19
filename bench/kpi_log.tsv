@@ -47,3 +47,4 @@ date	commit	change	noop_M	edit_M	check_M	cache_KiB	lsp_G	run	check	build	cfail
 2026-11-19	bf85c64	std bounds for references and iterables	625.169	626.761	3908.320	1902.8	-	1611	1361	95	3304
 2026-11-19	c6cb509	into_iter on references	625.169	626.835	3906.040	1902.8	-	1611	1361	95	3302
 2026-11-19	7c07b8f	E0507 for self by value through a reference	625.168	626.835	3908.188	1902.8	-	1611	1361	95	3305
+2026-11-19	734f305	derived Copy needs Copy arguments	625.171	626.837	3906.222	1902.8	-	1611	1361	95	3307
