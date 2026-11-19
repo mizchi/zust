@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795105416982,
+  "lastUpdate": 1795105419126,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -33904,6 +33904,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "lsp peak RSS",
             "value": 71.672,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "committer": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "distinct": true,
+          "id": "ad709059a4e804ea9d64d9f24778af0d645db59f",
+          "message": "GATs with lifetime arguments; a trait's default fns through blanket impls; T::f in a generic body\n\n- `Self::F<'a>` (a generic associated type whose arguments are lifetimes) is the associated type `Self::F`\n  (\"cannot find type `F`\" before).\n- `<i32 as Fun>::id(3)` / `T::id(4)` with `impl<T> Fun for T {}`: the trait's default fn is found for a type that\n  implements the trait (it was looked for among the type's own methods only).\n- `T::identity(t)` where T is still a parameter: the one trait fn of that name.\n\ntests/ui: 21 newly passing (16 check-pass and 2 run-pass under generic-associated-types, async-await, borrowck,\nhigher-ranked, impl-trait, derives; compile-fail borrowck/trait-impl-argument-difference-ice.rs,\ncoercion/hr_alias_normalization_leaking_vars.rs, generic-associated-types/issue-68648-2.rs). Removed (they failed on\nthe unresolved GAT, not on what they test): compile-fail generic-associated-types/\ngeneric_associated_type_undeclared_lifetimes.rs, wf/issue-103573.rs. Not added (lifetime errors zustc does not\ncheck): generic-associated-types/issue-74684-1.rs, issue-74684-2.rs, projection-type-lifetime-mismatch.rs.\nKPIs: no change outside noise.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-19T16:18:35Z",
+          "tree_id": "ef9e0e873261d67e0ada5630fdcfa218437abeac",
+          "url": "https://github.com/mizchi/zust/commit/ad709059a4e804ea9d64d9f24778af0d645db59f"
+        },
+        "date": 1795105418662,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "lsp definition p50",
+            "value": 0.511,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp hover p50",
+            "value": 0.43,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp completion p50",
+            "value": 1.05,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp references p50",
+            "value": 3.352,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp rename p50",
+            "value": 0.476,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp signatureHelp p50",
+            "value": 0.705,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp documentHighlight p50",
+            "value": 0.738,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp ready (startup to indexed)",
+            "value": 141.681,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp peak RSS",
+            "value": 71.703,
             "unit": "MiB"
           }
         ]
