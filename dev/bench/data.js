@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795123170282,
+  "lastUpdate": 1795123172422,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -37552,6 +37552,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "lsp peak RSS",
             "value": 72.168,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "committer": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "distinct": true,
+          "id": "5e449f68357f47f0b5571f6fafcba01de173a182",
+          "message": "ops: Bit*Assign / Shl / Shr traits; cache per-item trait lookups in the prelude selection\n\n- The prelude declares BitAndAssign, BitOrAssign, BitXorAssign,\n  ShlAssign, ShrAssign, Shl and Shr for user impls (`b &= x`,\n  `b <<= 1`, `b << 2` on a user type).\n- The selection's fixpoint loop asked is_cmp_trait / is_op_trait /\n  gated_trait for every trait member on every round, scanning the\n  header's identifiers each time; they are now computed once per item.\n  This pays for the longer operator-trait list and more.\n\ntests/ui: no change in passes (wf-misc-methods-issue-28609 is a\nwrong-reason pass, now in rust_ui_accidental.txt).\nKPI: traits edit -1.5%, crates edit -1.1%, check -0.06%, no-op -0.1%.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-19T21:12:11Z",
+          "tree_id": "5d80dc198284d5b9c49b8ca725ddb754f9f92af3",
+          "url": "https://github.com/mizchi/zust/commit/5e449f68357f47f0b5571f6fafcba01de173a182"
+        },
+        "date": 1795123171946,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "lsp definition p50",
+            "value": 0.522,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp hover p50",
+            "value": 0.391,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp completion p50",
+            "value": 0.909,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp references p50",
+            "value": 4.442,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp rename p50",
+            "value": 0.415,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp signatureHelp p50",
+            "value": 0.725,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp documentHighlight p50",
+            "value": 0.806,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp ready (startup to indexed)",
+            "value": 114.711,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp peak RSS",
+            "value": 72.422,
             "unit": "MiB"
           }
         ]
