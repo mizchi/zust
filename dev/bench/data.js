@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795106389969,
+  "lastUpdate": 1795106392142,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -55079,6 +55079,70 @@ window.BENCHMARK_DATA = {
           {
             "name": "tests/ui compile-fail passing",
             "value": 3320,
+            "unit": "tests"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "committer": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "distinct": true,
+          "id": "bc3181b5ceb80a3792c76b110aae28bbce104e27",
+          "message": "impl Trait inside a declared type; self-recursive impl Trait bodies; a list of accidental passes\n\n- `-> Result<(), impl Debug> { .. Err(Target) }`: the body is inferred against the declared type with a hole for each\n  `impl` (before, it was inferred alone, and `Ok`'s type stayed open: \"cannot infer the `impl Trait` return type\").\n- `fn test() -> impl Sized { test() }`: a body that only returns its own result is `()`.\n- bench/rust_ui_accidental.txt: compile-fail tests zustc rejects at the annotated line for another reason than the\n  one they test; rust_ui.py leaves them out of the baseline and of \"newly passing\" (they used to come back with each\n  --write-baseline).\n\ntests/ui: check-pass impl-trait/recursive-impl-trait-type-direct.rs, run-pass let-else/let-else-temp-borrowck.rs;\n0 regressions. KPIs: no change outside noise.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-19T16:31:11Z",
+          "tree_id": "15967783f0fcfacd961526d73695e81a6247e017",
+          "url": "https://github.com/mizchi/zust/commit/bc3181b5ceb80a3792c76b110aae28bbce104e27"
+        },
+        "date": 1795106391600,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tests/ui run-pass pass rate",
+            "value": 69.14,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui run-pass passing",
+            "value": 1649,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui check-pass pass rate",
+            "value": 76.98,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui check-pass passing",
+            "value": 1391,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui build-pass pass rate",
+            "value": 70.37,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui build-pass passing",
+            "value": 95,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui compile-fail pass rate",
+            "value": 45.13,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui compile-fail passing",
+            "value": 3321,
             "unit": "tests"
           }
         ]
