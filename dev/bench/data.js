@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795055618351,
+  "lastUpdate": 1795055620391,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -17944,6 +17944,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "lsp peak RSS",
             "value": 69.836,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "committer": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "distinct": true,
+          "id": "45579fca0287f68e246fca6b35e24ce3ce13d824",
+          "message": "Consts of generic impls (`impl<T> S<T> { const C: Option<T> = None; }`)\n\nA const declared in an impl whose type names the impl's parameters gets a hole\nfor its type; each use types the inlined expression with the expected type there.\nA projection (`C::M`) is still an error. tests/ui: run-pass +1, check-pass +2,\nbuild-pass +1, no regressions. KPIs unchanged.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-19T02:24:14Z",
+          "tree_id": "a0eed351db77e60cf666d51e12ecf25f1bee0a1f",
+          "url": "https://github.com/mizchi/zust/commit/45579fca0287f68e246fca6b35e24ce3ce13d824"
+        },
+        "date": 1795055619932,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "lsp definition p50",
+            "value": 0.477,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp hover p50",
+            "value": 0.393,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp completion p50",
+            "value": 1.251,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp references p50",
+            "value": 10.525,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp rename p50",
+            "value": 0.434,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp signatureHelp p50",
+            "value": 0.885,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp documentHighlight p50",
+            "value": 0.867,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp ready (startup to indexed)",
+            "value": 105.278,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp peak RSS",
+            "value": 69.891,
             "unit": "MiB"
           }
         ]
