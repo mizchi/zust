@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795112341244,
+  "lastUpdate": 1795114537076,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -24644,6 +24644,165 @@ window.BENCHMARK_DATA = {
           {
             "name": "rt/strings run (-O)",
             "value": 34.274,
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "committer": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "distinct": true,
+          "id": "0b564442fae8737a2336b070cc6d5f175ca92f0e",
+          "message": "Destructuring assignment; `let (a, b);` and `let _: T;` without a value\n\n- `(a, b) = (b, a);`, `[x, _] = arr;`, nested tuples / arrays and `_`: the parser writes\n  `{ let (t0, t1) = rhs; a = t0; b = t1; }` (the right side first, then the places in order).\n- `let (a, mut b);` / `let (c, d): (u8, String);`: a `let` without a value for each name.\n- `let _: T;`: T must name a type, nothing else happens (it was \"`let` without initializer is not supported\").\nThe parser looks at a statement again only when it starts with `let (` (moving every statement once more cost\n`check` +0.2% in copies).\n\ntests/ui: 13 newly passing (run-pass associated-types/associated-types-from-supertrait.rs,\ndestructuring-assignment/warn-unused-duplication.rs, drop/nondrop-cycle.rs, generics/empty-generic-brackets-equiv.rs,\nmodules/module-use-nested-groups.rs; check-pass x6; compile-fail destructuring-assignment/note-unsupported.rs,\nslice_destructure_fail.rs). Removed (they failed only on the unsupported `let x;` / `(a, b) = ..`, not on what they\ntest): compile-fail destructuring-assignment/default-match-bindings-forbidden.rs (`(x, y) = &(1, 2)` is accepted\nthrough default binding modes), error-codes/E0719.rs, generic-associated-types/multiple-type-params-with-unmet-bounds.rs,\nown-bound-span.rs, lint/non-snake-case/lint-uppercase-variables.rs, nll/ty-outlives/wf-unreachable.rs,\nsuggestions/borrow-from-overloaded-deref-assign-issue-154826.rs (a move out of `*rc` through a pattern is not caught).\nKPIs: check +0.09%, the rest noise.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-19T18:45:48Z",
+          "tree_id": "fb15e1eafab680ecf3fcd57129a9b1603404e9d5",
+          "url": "https://github.com/mizchi/zust/commit/0b564442fae8737a2336b070cc6d5f175ca92f0e"
+        },
+        "date": 1795114536192,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "gen1000 build cold",
+            "value": 118.177,
+            "unit": "ms"
+          },
+          {
+            "name": "gen1000 build noop",
+            "value": 0.84,
+            "unit": "ms"
+          },
+          {
+            "name": "gen1000 build edit 1 fn",
+            "value": 17.199,
+            "unit": "ms"
+          },
+          {
+            "name": "gen1000 check",
+            "value": 76.35,
+            "unit": "ms"
+          },
+          {
+            "name": "gen1000 build cold peak RSS",
+            "value": 18.094,
+            "unit": "MiB"
+          },
+          {
+            "name": "gen1000 binary",
+            "value": 323.977,
+            "unit": "KiB"
+          },
+          {
+            "name": "gen1000 cache",
+            "value": 387.21,
+            "unit": "KiB"
+          },
+          {
+            "name": "gen1000 build noop instructions",
+            "value": 0.728,
+            "unit": "M instr"
+          },
+          {
+            "name": "gen1000 build edit 1 fn instructions",
+            "value": 134.284,
+            "unit": "M instr"
+          },
+          {
+            "name": "gen1000 check instructions",
+            "value": 788.115,
+            "unit": "M instr"
+          },
+          {
+            "name": "gen5000 build cold",
+            "value": 528.643,
+            "unit": "ms"
+          },
+          {
+            "name": "gen5000 build noop",
+            "value": 0.826,
+            "unit": "ms"
+          },
+          {
+            "name": "gen5000 build edit 1 fn",
+            "value": 66.254,
+            "unit": "ms"
+          },
+          {
+            "name": "gen5000 check",
+            "value": 376.742,
+            "unit": "ms"
+          },
+          {
+            "name": "gen5000 build cold peak RSS",
+            "value": 52.25,
+            "unit": "MiB"
+          },
+          {
+            "name": "gen5000 binary",
+            "value": 1558.336,
+            "unit": "KiB"
+          },
+          {
+            "name": "gen5000 cache",
+            "value": 1902.835,
+            "unit": "KiB"
+          },
+          {
+            "name": "gen5000 build noop instructions",
+            "value": 0.728,
+            "unit": "M instr"
+          },
+          {
+            "name": "gen5000 build edit 1 fn instructions",
+            "value": 631.134,
+            "unit": "M instr"
+          },
+          {
+            "name": "gen5000 check instructions",
+            "value": 3879.882,
+            "unit": "M instr"
+          },
+          {
+            "name": "rt/fib run (-O)",
+            "value": 54.081,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/hashmap run (-O)",
+            "value": 89.28,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/matmul run (-O)",
+            "value": 39.344,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/nbody run (-O)",
+            "value": 55.198,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/sieve run (-O)",
+            "value": 92.64,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/sort run (-O)",
+            "value": 143.6,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/strings run (-O)",
+            "value": 34.305,
             "unit": "ms"
           }
         ]
