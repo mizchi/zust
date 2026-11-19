@@ -1343,7 +1343,14 @@ impl Cx<'_> {
                         self.bk.place_depth -= 1;
                         let _ = r?;
                     } else {
-                        let (v, t) = self.expr(init, None)?;
+                        // (`let _: [(); 0] = [];`: the annotation is the expected type)
+                        // (only for an array literal, which needs it for its element type: an expected type would
+                        // also coerce, and `let _: *const u8 = &a;` must stay an error)
+                        let exp = match ann_ty {
+                            Some(t) if matches!(strip_paren(init), Expr::Array(_) | Expr::Repeat(..)) => self.parse_ty(t).ok().filter(|&t| !has_hole(self.prog, t)),
+                            _ => None,
+                        };
+                        let (v, t) = self.expr(init, exp)?;
                         if t == Ty::Never {
                             diverged = true;
                             continue;

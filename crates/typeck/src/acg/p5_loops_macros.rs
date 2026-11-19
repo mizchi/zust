@@ -1626,6 +1626,11 @@ impl Cx<'_> {
                 Some(Ty::Box(t)) if !matches!(t, Ty::Dyn(_) | Ty::Slice(_) | Ty::Str) => Some(*t),
                 _ => None,
             };
+            // (`Box::<[bool; 0]>::new([])`: the turbofish names the content)
+            let inner = match p.segs[n - 2].args.first() {
+                Some(GArg::Ty(t)) if p.segs[n - 2].args.len() == 1 => Some(self.parse_ty(t)?),
+                _ => inner,
+            };
             let (v, t) = self.expr(&cargs[0], inner)?;
             if t == Ty::Never {
                 return Ok(Some((None, Ty::Never)));

@@ -5,6 +5,7 @@ build-pass	abi/extern/extern-c-method-return-struct.rs
 run-pass	abi/extern/extern-call-direct.rs
 run-pass	abi/numbers-arithmetic/float-struct.rs
 build-pass	abi/return-ref-as-immediate-in-codegen.rs
+run-pass	allocator/empty-alloc-nonnull-guarantee.rs
 compile-fail	anon-params/anon-params-denied-2018.rs
 check-pass	anon-params/anon-params-deprecated.rs
 check-pass	anon-params/anon-params-trait-method-multiple.rs
@@ -560,6 +561,7 @@ run-pass	binding/match-tag.rs
 run-pass	binding/match-unsized.rs
 run-pass	binding/match-value-binding-in-guard-3291.rs
 run-pass	binding/match-var-hygiene.rs
+run-pass	binding/match-vec-alternatives.rs
 run-pass	binding/match-vec-rvalue.rs
 run-pass	binding/match-with-at-binding-8391.rs
 run-pass	binding/match-with-ret-arm.rs
@@ -1421,6 +1423,7 @@ run-pass	consts/arithmetic-expr-in-array-len.rs
 build-pass	consts/array-literal-index-oob.rs
 check-pass	consts/assoc-const-elided-lifetime.rs
 compile-fail	consts/bad-array-size-in-type-err.rs
+run-pass	consts/bool-comparison-in-const-array-len.rs
 run-pass	consts/cast-discriminant-zst-enum.rs
 run-pass	consts/chained-constants-stackoverflow.rs
 run-pass	consts/check_const-feature-gated.rs
@@ -2553,6 +2556,7 @@ check-pass	hygiene/no_implicit_prelude-2021.rs
 run-pass	hygiene/thread-local-not-in-prelude.rs
 compile-fail	illegal-sized-bound/mutability-mismatch-arg.rs
 run-pass	impl-header-lifetime-elision/bare_type.rs
+check-pass	impl-header-lifetime-elision/constant-used-as-arraylen.rs
 compile-fail	impl-header-lifetime-elision/dyn-trait.rs
 run-pass	impl-header-lifetime-elision/explicit-and-elided-same-header.rs
 run-pass	impl-header-lifetime-elision/path-underscore.rs

@@ -102,6 +102,36 @@ impl Cx<'_> {
                 return self.expr(ne, expected);
             }
         }
+        // (`b.len()` / `b.iter()` with b: Box<[T; N]>: the array's method, through the deref)
+        if matches!(local_ty.or_else(|| self.peek(recv)), Some(Ty::Box(Ty::Array(..))))
+            && !matches!(method.as_str(), "clone" | "into" | "into_iter" | "to_owned" | "eq" | "ne" | "fmt" | "hash" | "cmp" | "partial_cmp")
+            && self.prog.prim_method(local_ty.or_else(|| self.peek(recv)).unwrap(), method).is_none()
+        {
+            let d = Expr::Unary("*".into(), recv.clone(), Default::default());
+            // (a method that changes the elements: on `&mut (*b)[..]`)
+            let mutating = matches!(method.as_str(), "sort" | "sort_unstable" | "sort_by" | "sort_by_key" | "reverse" | "swap" | "fill" | "iter_mut" | "copy_from_slice" | "clone_from_slice" | "rotate_left" | "rotate_right" | "as_mut_ptr" | "first_mut" | "last_mut" | "get_mut" | "split_at_mut" | "chunks_mut");
+            let r = if mutating {
+                Expr::Ref(true, Box::new(Expr::Index(Box::new(paren(d)), Box::new(Expr::Range(None, None, false)), Default::default())))
+            } else {
+                d
+            };
+            let ne: &Expr = self.keep_expr(Expr::MethodCall(
+                Box::new(paren(r)),
+                method.to_string(),
+                gargs.clone(),
+                margs.clone(),
+                msp,
+            ));
+            // (the new receiver's type, for what looks the method up by it)
+            if let (Some(Ty::Box(at @ Ty::Array(el, _))), Expr::MethodCall(r, ..)) = (local_ty.or_else(|| self.peek(recv)), ne) {
+                let rt = if mutating { Ty::Ref(true, intern(Ty::Slice(el))) } else { *at };
+                self.lets.insert(&**r as *const Expr as usize, rt);
+                if let Expr::Paren(i) = &**r {
+                    self.lets.insert(&**i as *const Expr as usize, rt);
+                }
+            }
+            return self.expr(ne, expected);
+        }
         // `let b: Box<_> = 22.into();` (`From<T> for Box<T>`): `Box::new(22)`
         if method == "into" && margs.is_empty() && matches!(expected, Some(Ty::Box(_))) {
             let rt = self.peek(recv);
@@ -1297,6 +1327,49 @@ impl Cx<'_> {
             .collect();
         let conv_refs: Vec<&Expr> = args.iter().zip(&conv).map(|(a, c)| c.as_ref().unwrap_or(*a)).collect();
         let args: &[&Expr] = &conv_refs;
+        // (`f(&[], &[1, 2])` with `fn f<T>(a: &[T], b: &[T])`: an empty array (or `None`) tells nothing of T, so the other
+        // arguments' recorded types solve it first)
+        let empty_arr = |e: &Expr| match strip_paren(e) {
+            Expr::Array(xs) => xs.is_empty(),
+            Expr::Ref(_, i) => matches!(strip_paren(i), Expr::Array(xs) if xs.is_empty()),
+            // (`None` likewise)
+            Expr::Path(None, p) => p.segs.len() == 1 && p.segs[0].name == "None" && p.segs[0].args.is_empty(),
+            _ => false,
+        };
+        if args.iter().zip(&sig0.params[skip..]).any(|(a, &pt)| empty_arr(a) && self.prog.has_param(self.prog.partial_subst(pt, &sol))) {
+            // (only the type parameters the empty arguments' types mention, and not from closures: their types are
+            // the closures' own)
+            let mut wanted = vec![false; sol.len()];
+            for (a, &pt) in args.iter().zip(&sig0.params[skip..]) {
+                if empty_arr(a) {
+                    for (g, w) in wanted.iter_mut().enumerate() {
+                        // (pt mentions parameter g when substituting g alone changes it)
+                        let mut only = vec![None; sol.len()];
+                        only[g] = Some(Ty::Never);
+                        *w |= self.prog.partial_subst(pt, &only) != pt;
+                    }
+                }
+            }
+            for (a, &pt) in args.iter().zip(&sig0.params[skip..]) {
+                if !empty_arr(a) && !matches!(strip_paren(a), Expr::Closure(..)) {
+                    if let Some(t) = self.peek(a).filter(|&t| !has_hole(self.prog, t)) {
+                        let mut s2 = sol.clone();
+                        // (`&[1, 2]` for a `&[T]` parameter: the array coerces to the slice)
+                        let t2 = match t {
+                            Ty::Ref(m, Ty::Array(e, _)) if matches!(pt, Ty::Ref(_, Ty::Slice(_))) => Ty::Ref(m, intern(Ty::Slice(e))),
+                            t => t,
+                        };
+                        if self.prog.match_ty(pt, t2, &mut s2) {
+                            for ((x, y), w) in sol.iter_mut().zip(s2).zip(&wanted) {
+                                if x.is_none() && *w {
+                                    *x = y;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
         for (i, (a, &pt)) in args.iter().zip(&sig0.params[skip..]).enumerate() {
             let mut exp = Some(self.prog.partial_subst(pt, &sol)).filter(|&t| !self.prog.has_param(t));
             // (an integer literal for `T: Foo`: the one integer type that implements every bound, as rustc picks it)
