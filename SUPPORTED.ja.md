@@ -9,10 +9,10 @@
 
 ## 全体
 
-- [x] tests/ui run-pass：65.4%（1560 / 2385）
-- [x] tests/ui check-pass：72.3%（1307 / 1807）
-- [x] tests/ui build-pass：65.9%（89 / 135）
-- [ ] tests/ui compile-fail（注釈の行でエラー）：38.8%（2856 / 7358）
+- [x] tests/ui run-pass：65.7%（1567 / 2385）
+- [x] tests/ui check-pass：73.2%（1323 / 1807）
+- [x] tests/ui build-pass：68.9%（93 / 135）
+- [ ] tests/ui compile-fail（注釈の行でエラー）：38.9%（2861 / 7358）
 - [x] 実際のクレート：fnv、adler2、hex、itoa、rustc-hash、cfg-if がビルドでき、同じ出力を出す（6 / 6）
 - [x] zust-analyzer が rust-analyzer と同じように答える：95.4%（rust-analyzer は 96.2%）
 
@@ -30,7 +30,7 @@
 - [x] 型の別名やパス（`impl foo::Point`）を impl の self 型に、定数や前のバリアントを使う判別子、具体的な型の where 節
 - [x] 構文：GAT の束縛、`dyn for<'a> Fn`、2015 の名前のない引数、生の寿命 `'r#a`、半開きの範囲パターン、シバン、Unicode の空白。`macro_rules!` の断片を種類で照合（`ident`、`literal`、`lifetime`、`vis`）
 - [x] `impl Tr for Box<S>` のメソッド（Box への impl とブランケット impl の衝突は E0119）、`..b` / `..=b` / `..` の値、`wrapping_shl` / `checked_shl` / `overflowing_shl` / `reverse_bits`
-- [x] let チェーン（`if let A = x && cond`）、`&raw const` / `&raw mut`
+- [x] let チェーン（`if let A = x && cond`）、match のガードでも（`P if let Q = e =>`）。インラインの `const { .. }`、`&raw const` / `&raw mut`
 - [x] 構文解析：73.7%
 - [x] クロージャ（キャプチャ、`Fn` トレイト、`move`。キャプチャがなければ関数ポインタとしても）：71.7%
 - [x] derive：`Debug`、`Clone`、`Copy`、`PartialEq`/`Eq`、`PartialOrd`/`Ord`、`Hash`、`Default`：68.2%

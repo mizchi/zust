@@ -9,10 +9,10 @@ Status as of 2026-11-18, updated with each round of work. The percentages are ru
 
 ## Overall
 
-- [x] tests/ui run-pass: 65.4% (1560 / 2385)
-- [x] tests/ui check-pass: 72.3% (1307 / 1807)
-- [x] tests/ui build-pass: 65.9% (89 / 135)
-- [ ] tests/ui compile-fail (an error on an annotated line): 38.8% (2856 / 7358)
+- [x] tests/ui run-pass: 65.7% (1567 / 2385)
+- [x] tests/ui check-pass: 73.2% (1323 / 1807)
+- [x] tests/ui build-pass: 68.9% (93 / 135)
+- [ ] tests/ui compile-fail (an error on an annotated line): 38.9% (2861 / 7358)
 - [x] real crates: fnv, adler2, hex, itoa, rustc-hash and cfg-if build and give the same output (6 / 6)
 - [x] zust-analyzer answers like rust-analyzer: 95.4% (rust-analyzer: 96.2%)
 
@@ -30,7 +30,7 @@ Status as of 2026-11-18, updated with each round of work. The percentages are ru
 - [x] type aliases and paths (`impl foo::Point`) as impl self types, discriminants from constants and earlier variants, where clauses on concrete types
 - [x] syntax: GAT bindings, `dyn for<'a> Fn`, 2015 anonymous parameters, raw lifetimes `'r#a`, half-open range patterns, shebangs, Unicode white space; `macro_rules!` fragments matched by kind (`ident`, `literal`, `lifetime`, `vis`)
 - [x] methods of `impl Tr for Box<S>` (a Box impl next to a blanket impl of the same trait is E0119), `..b` / `..=b` / `..` values, `wrapping_shl` / `checked_shl` / `overflowing_shl` / `reverse_bits`
-- [x] let chains (`if let A = x && cond`), `&raw const` / `&raw mut`
+- [x] let chains (`if let A = x && cond`), also in match guards (`P if let Q = e =>`); inline `const { .. }`, `&raw const` / `&raw mut`
 - [x] parser: 73.7%
 - [x] closures (capture, `Fn` traits, `move`; with no captures also as fn pointers): 71.7%
 - [x] derives: `Debug`, `Clone`, `Copy`, `PartialEq`/`Eq`, `PartialOrd`/`Ord`, `Hash`, `Default`: 68.2%
