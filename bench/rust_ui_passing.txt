@@ -2634,6 +2634,7 @@ compile-fail	impl-trait/issues/issue-87295.rs
 check-pass	impl-trait/issues/issue-93788.rs
 compile-fail	impl-trait/issues/issue-99073-2.rs
 compile-fail	impl-trait/issues/issue-99073.rs
+check-pass	impl-trait/issues/issue-99642.rs
 compile-fail	impl-trait/issues/issue-99914.rs
 check-pass	impl-trait/lazy_subtyping_of_opaques.rs
 check-pass	impl-trait/mapping-duplicated-lifetimes-issue-114597.rs
@@ -5683,7 +5684,6 @@ compile-fail	suggestions/suggest-variants.rs
 compile-fail	suggestions/suggest_print_over_printf.rs
 compile-fail	suggestions/suppress-consider-slicing-issue-120605.rs
 compile-fail	suggestions/too-many-field-suggestions.rs
-compile-fail	suggestions/trait-hidden-method.rs
 compile-fail	suggestions/trait-with-missing-associated-type-restriction.rs
 compile-fail	suggestions/try-operator-dont-suggest-semicolon.rs
 run-pass	suggestions/try-removing-the-field.rs

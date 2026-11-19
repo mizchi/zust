@@ -1149,6 +1149,11 @@ pub fn summarize(item: &Item, owner: Option<&Owner>) -> R<Summary> {
                         if !matches!(s.name.as_str(), "Sized" | "Send" | "Sync" | "Copy" | "Clone" | "Unpin" | "Any" | "Debug" | "Display") {
                             sup.push(s.name.clone());
                         }
+                        // (`trait T: PartialEq`: its `Rhs` is Self by default, so T is not dyn compatible; a marker
+                        // no trait has the name of)
+                        if matches!(s.name.as_str(), "PartialEq" | "PartialOrd") && s.args.is_empty() {
+                            sup.push("#SelfRhs".to_string());
+                        }
                     }
                 }
             }

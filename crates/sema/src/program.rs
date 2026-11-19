@@ -261,6 +261,8 @@ pub struct Program {
     pub fnptr_impls: std::collections::HashSet<(Option<Ty>, String)>,
     /// 親トレイト (`trait Bar: Foo`)
     pub trait_supers: FxMap<String, Vec<String>>,
+    /// the generics a method of the trait starts with: Self and the trait's own parameters
+    pub trait_ngen: FxMap<String, usize>,
     /// (型, trait) の実装
     pub impls: HashSet<(u32, String)>,
     /// `#[panic_handler]` の関数 (no_std)。panic (範囲外アクセス・unwrap など) はここを呼ぶ
@@ -606,6 +608,7 @@ impl Program {
             prelude_from: u32::MAX,
             overflow_checks: false,
             trait_supers: FxMap::default(),
+            trait_ngen: FxMap::default(),
             ref_impls: Default::default(),
             ref_impl_pats: vec![],
             fnptr_impls: Default::default(),
@@ -1084,6 +1087,7 @@ impl Program {
                 if let Some((_, sup)) = sm.trait_generics.iter().find(|g| g.0 == "#supers") {
                     p.trait_supers.insert(tr.clone(), sup.clone());
                 }
+                p.trait_ngen.insert(tr.clone(), 1 + sm.trait_generics.iter().filter(|g| !g.0.starts_with('#')).count());
             }
         }
         p.peq = (0..p.names.len() as u32)
@@ -2475,17 +2479,6 @@ impl Program {
     }
 
     /// 型の中に型パラメータが残っているか
-    /// t names the type parameter i itself (`Self` for 0), not through an associated type (`Self::Item`)
-    pub fn mentions_param(&self, t: Ty, i: u8) -> bool {
-        match t {
-            Ty::Param(j) => j == i,
-            Ty::Ref(_, x) | Ty::Ptr(_, x) | Ty::Array(x, _) | Ty::Slice(x) | Ty::Box(x) => self.mentions_param(*x, i),
-            Ty::Struct(sid) => self.structs[sid as usize].symbolic && self.structs[sid as usize].args.iter().any(|&a| self.mentions_param(a, i)),
-            Ty::Fn(f) => f.params.iter().chain([&f.ret]).any(|&a| self.mentions_param(a, i)),
-            _ => false,
-        }
-    }
-
     pub fn has_param(&self, t: Ty) -> bool {
         match t {
             Ty::Param(_) => true,
