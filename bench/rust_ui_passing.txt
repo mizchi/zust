@@ -1197,7 +1197,6 @@ compile-fail	coercion/ptr-mutability-errors.rs
 check-pass	coercion/struct-literal-field-type-coercion-to-expected-type.rs
 compile-fail	coercion/type-errors.rs
 run-pass	coercion/unsafe-coercion.rs
-compile-fail	coherence/associated-type2.rs
 check-pass	coherence/clone-impl-unsized-slice.rs
 compile-fail	coherence/coherence-blanket-conflicts-with-specific-multidispatch.rs
 compile-fail	coherence/coherence-error-suppression.rs
@@ -2976,6 +2975,7 @@ check-pass	lint/const-item-interior-mutations-const-atomics.rs
 check-pass	lint/const-item-interior-mutations-const-deref.rs
 compile-fail	lint/dangling-pointers-from-temporaries/cstring-as-ptr.rs
 compile-fail	lint/dangling-pointers-from-temporaries/example-from-issue123613.rs
+compile-fail	lint/dangling-pointers-from-temporaries/ext.rs
 check-pass	lint/dead-code-pub-in-binary/interaction-deny-dead-code-only.rs
 check-pass	lint/dead-code/alias-type-used-as-generic-arg-in-impl.rs
 check-pass	lint/dead-code/allow-dead-code-propagation-to-impls.rs
@@ -3638,6 +3638,7 @@ compile-fail	never_type/basic/call-fn-never-arg-wrong-type.rs
 check-pass	never_type/basic/call-fn-never-arg.rs
 check-pass	never_type/basic/cast-never.rs
 check-pass	never_type/basic/clone-never.rs
+run-pass	never_type/basic/impl-for-never.rs
 compile-fail	never_type/basic/never-assign-wrong-type.rs
 check-pass	never_type/basic/never-associated-type.rs
 run-pass	never_type/basic/never-result.rs
@@ -4891,6 +4892,7 @@ compile-fail	resolve/issue-111312.rs
 compile-fail	resolve/issue-111727.rs
 check-pass	resolve/issue-114433-invalid-unused-qualifications-suggestion.rs
 compile-fail	resolve/issue-118295.rs
+compile-fail	resolve/issue-14254.rs
 compile-fail	resolve/issue-16058.rs
 compile-fail	resolve/issue-17518.rs
 compile-fail	resolve/issue-18252.rs
@@ -5887,6 +5889,7 @@ compile-fail	traits/question-mark-span-144304.rs
 compile-fail	traits/rc-not-send.rs
 run-pass	traits/region-pointer-simple.rs
 compile-fail	traits/resolve-impl-before-constrain-check.rs
+compile-fail	traits/safety-fn-body.rs
 run-pass	traits/safety-ok.rs
 check-pass	traits/self-not-send-in-default-method-8171.rs
 compile-fail	traits/send-trait-objects-basic.rs

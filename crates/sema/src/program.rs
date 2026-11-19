@@ -980,7 +980,7 @@ impl Program {
                 let mut blanket = false;
                 let impl_of = match &ss.impl_of {
                     // (`impl Tr for Box<S>`: Box is not a struct; its methods are found by the self type, as for primitives)
-                    Some(n) if Ty::prim(n).is_some() || n == "__array" || n == "__slice" || n == "__fnptr" || n.starts_with("__dyn_") || n == "str" || (n == "Box" && !p.struct_index.contains_key("Box")) => None,
+                    Some(n) if Ty::prim(n).is_some() || n == "__array" || n == "__slice" || n == "__fnptr" || n == "__ptr" || n == "__never" || n.starts_with("__dyn_") || n == "str" || (n == "Box" && !p.struct_index.contains_key("Box")) => None,
                     Some(n) => match p.struct_index.get(n).copied().or_else(|| {
                         n.strip_prefix("#tuple").and_then(|k| k.parse().ok()).map(|k| p.tuple_base(k))
                     }).as_ref() {
@@ -1140,7 +1140,12 @@ impl Program {
             }
             // プリミティブ型への trait 実装 (`impl Tr for u32`)
             // (`impl Hash for str`: str も組み込みの型として持つ)
-            if sn == "__fnptr" {
+            if matches!(sn.as_str(), "__fnptr" | "__ptr" | "__never") {
+                // (a std trait for a fn pointer / raw pointer / `!`: none of them is local (E0117))
+                const STD: &[&str] = &["Display", "Debug", "Clone", "Copy", "PartialEq", "Eq", "PartialOrd", "Ord", "Hash", "Default", "Drop", "Iterator", "From", "Into", "Add", "Sub", "Mul", "Div", "Deref", "Send", "Sync", "Fn", "FnMut", "FnOnce"];
+                if STD.contains(&tr.as_str()) {
+                    return Err(format!("{}:1: only traits defined in the current crate can be implemented for arbitrary types (E0117)", it.line));
+                }
                 let t = sm.impl_self_ty.as_ref().and_then(|t| p.resolve_g(t, &[]).ok());
                 p.fnptr_impls.insert((t, tr.clone()));
                 continue;
@@ -1346,6 +1351,21 @@ impl Program {
     }
 
     /// 型 t が trait tr を実装しているか
+    /// whether a generic impl of tr exists for t's kind (fn pointer / raw pointer / `!`): one of its methods' self types
+    fn has_kind_impl(&self, t: Ty, tr: &str) -> bool {
+        let base = match t {
+            Ty::Fn(_) => "__fnptr",
+            Ty::Ptr(..) => "__ptr",
+            _ => "__never",
+        };
+        let decls = self.traits.get(tr).map(|v| v.as_slice()).unwrap_or(&[]);
+        // (a marker trait has no methods to tell the kinds apart: any generic impl of a kind counts)
+        decls.is_empty() || decls.iter().any(|&d| {
+            let m = self.names[d as usize].rsplit("::").next().unwrap_or("");
+            self.index.contains_key(&format!("{base}::{m}"))
+        })
+    }
+
     /// What core / std implement for references, smart pointers and iterables (None: not decided here)
     fn implements_std(&self, t: Ty, tr: &str) -> Option<bool> {
         let base_name = |t: Ty| match t {
@@ -1542,7 +1562,14 @@ impl Program {
                 name == tr && self.dyn_bindings_ok(name, args)
             }),
             // 関数ポインタ: Fn 系 (引数の数が合うもの) と Copy
-            Ty::Fn(_) if !self.fnptr_impls.is_empty() && (self.fnptr_impls.contains(&(Some(t), tr.to_string())) || self.fnptr_impls.contains(&(None, tr.to_string()))) => true,
+            // (impls for fn pointers / raw pointers / `!`: the exact type, or a generic one (None) of that kind)
+            Ty::Fn(_) | Ty::Ptr(..) | Ty::Never
+                if !self.fnptr_impls.is_empty()
+                    && (self.fnptr_impls.contains(&(Some(t), tr.to_string()))
+                        || (self.fnptr_impls.contains(&(None, tr.to_string())) && self.has_kind_impl(t, tr))) =>
+            {
+                true
+            }
             Ty::Fn(f) => match parse_fn_bound(tr) {
                 Some((_, ps, _)) => ps.len() == f.params.len(),
                 None => matches!(tr, "Fn" | "FnMut" | "FnOnce" | "Copy" | "Clone" | "Sized" | "PartialEq" | "Eq"),
@@ -1677,6 +1704,8 @@ impl Program {
         let base = match t {
             Ty::Slice(_) => Some("__slice"),
             Ty::Fn(_) => Some("__fnptr"),
+            Ty::Ptr(..) => Some("__ptr"),
+            Ty::Never => Some("__never"),
             Ty::Array(..) => Some("__array"),
             Ty::Box(_) => Some("Box"),
             // (`impl Tr for ()`: the methods of `#tuple0`)

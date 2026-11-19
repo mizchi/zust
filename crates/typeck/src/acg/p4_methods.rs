@@ -651,6 +651,8 @@ impl Cx<'_> {
                 let Ty::Ptr(m, _) = pt else { unreachable!() };
                 (Some(p), Ty::Ptr(m, intern(to)))
             }
+            // (`impl Tr for *const T`: the method of `__ptr`; method_call passes the pointer)
+            m if self.prog.prim_method(pt, m).is_some() => return Ok(None),
             m => {
                 return err(
                     SP,

@@ -1214,8 +1214,12 @@ pub fn summarize(item: &Item, owner: Option<&Owner>) -> R<Summary> {
                 return Ok(sm);
             }
             // (`impl Tr for fn(A) -> B`: the methods of `__fnptr`)
-            if matches!(self_path, PTy::Fn(..)) && tr.is_some() {
-                sm.impl_self = Some("__fnptr".to_string());
+            if matches!(self_path, PTy::Fn(..) | PTy::Ptr(..) | PTy::Never) && tr.is_some() {
+                sm.impl_self = Some(match self_path {
+                    PTy::Fn(..) => "__fnptr",
+                    PTy::Ptr(..) => "__ptr",
+                    _ => "__never",
+                }.to_string());
                 sm.impl_self_ty = tysyn(self_ty, None).ok();
                 return Ok(sm);
             }

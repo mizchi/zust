@@ -527,7 +527,7 @@ impl Cx<'_> {
             }
         }
         // (`f.m()` with f a fn pointer and `impl Tr for fn(..)`: the `__fnptr` method whose self type is f's)
-        if let Some(ft @ Ty::Fn(_)) = self.peek(recv) {
+        if let Some(ft @ (Ty::Fn(_) | Ty::Ptr(..))) = self.peek(recv) {
             if let Some(id) = self.prog.prim_method(ft, method) {
                 let (v, t) = self.expr(recv, Some(ft))?;
                 let v = v.ok_or("internal: fn pointer without a value")?;
