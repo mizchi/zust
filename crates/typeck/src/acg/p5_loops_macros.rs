@@ -1542,6 +1542,15 @@ impl Cx<'_> {
                 return Ok(Some((Some(x), t)));
             }
         }
+        // `u32::from_be(x)` / `from_le` (x86-64 is little-endian)
+        if matches!(name.as_str(), "from_be" | "from_le") && p.segs.len() == 2 && cargs.len() == 1 {
+            if let Some(t) = Ty::prim(&p.segs[0].name).filter(|t| t.is_int()) {
+                let (v, _) = self.expr(&cargs[0], Some(t))?;
+                let Some(a) = v else { return Ok(Some((None, Ty::Never))) };
+                let x = if name == "from_be" && t.bits() > 8 { self.b.ins().bswap(a) } else { a };
+                return Ok(Some((Some(x), t)));
+            }
+        }
         // `f64::from_bits(u)` / `f32::from_bits(u)`
         if name == "from_bits" && p.segs.len() == 2 && cargs.len() == 1 && matches!(p.segs[0].name.as_str(), "f64" | "f32") {
             let f64_ = p.segs[0].name == "f64";

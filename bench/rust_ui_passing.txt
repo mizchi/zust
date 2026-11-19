@@ -90,13 +90,17 @@ check-pass	associated-consts/assoc-const-through-assoc-type-path.rs
 run-pass	associated-consts/associated-const-access.rs
 compile-fail	associated-consts/associated-const-array-len.rs
 compile-fail	associated-consts/associated-const-in-enum-discriminant.rs
+run-pass	associated-consts/associated-const-in-global-const.rs
 compile-fail	associated-consts/associated-const-in-trait.rs
 run-pass	associated-consts/associated-const-inherent-impl.rs
 run-pass	associated-consts/associated-const-marks-live-code.rs
 check-pass	associated-consts/associated-const-outer-ty-refs.rs
 run-pass	associated-consts/associated-const-overwrite-default.rs
 run-pass	associated-consts/associated-const-public-impl.rs
+run-pass	associated-consts/associated-const-self-type.rs
+run-pass	associated-consts/associated-const-ufcs-infer-trait.rs
 run-pass	associated-consts/associated-const-use-default.rs
+run-pass	associated-consts/associated-const-use-impl-of-same-trait.rs
 run-pass	associated-consts/associated-const.rs
 check-pass	associated-consts/constant-trait-item-reference-selection-26095.rs
 run-pass	associated-consts/defaults-cyclic-pass.rs
@@ -892,6 +896,7 @@ compile-fail	borrowck/two-phase-across-loop.rs
 run-pass	borrowck/two-phase-baseline.rs
 run-pass	borrowck/two-phase-control-flow-split-before-activation.rs
 run-pass	borrowck/two-phase-method-receivers.rs
+run-pass	borrowck/two-phase-multiple-activations.rs
 compile-fail	borrowck/two-phase-surprise-no-conflict.rs
 compile-fail	borrowck/unboxed-closures-move-upvar-from-non-once-ref-closure.rs
 compile-fail	borrowck/uninitalized-in-match-arm-issue-126133.rs
@@ -1487,7 +1492,7 @@ run-pass	consts/const-fn-val.rs
 build-pass	consts/const-fn-zst-args.rs
 run-pass	consts/const-fn.rs
 run-pass	consts/const-index-feature-gate.rs
-compile-fail	consts/const-int-conversion.rs
+run-pass	consts/const-int-conversion-rpass.rs
 run-pass	consts/const-int-overflowing-rpass.rs
 run-pass	consts/const-int-rotate-rpass.rs
 run-pass	consts/const-int-saturating-arith.rs
@@ -2860,6 +2865,7 @@ check-pass	inline-const/interpolated.rs
 compile-fail	inline-const/uninit-local.rs
 compile-fail	intrinsics/incorrect-read_via_copy-defn.rs
 compile-fail	intrinsics/incorrect-transmute.rs
+check-pass	intrinsics/issue-84297-reifying-copy.rs
 compile-fail	intrinsics/unchecked_math_unstable.rs
 check-pass	iterators/array.rs
 run-pass	iterators/bytes-iterator-clone-12677.rs
@@ -3814,7 +3820,6 @@ check-pass	nll/unexpected-inference-var-ice-116599.rs
 compile-fail	nll/user-annotations/adt-brace-structs.rs
 compile-fail	nll/user-annotations/adt-tuple-struct.rs
 check-pass	nll/user-annotations/closure-sig.rs
-compile-fail	nll/user-annotations/constant-in-expr-inherent-1.rs
 compile-fail	nll/user-annotations/constant-in-expr-normalize.rs
 compile-fail	nll/user-annotations/constant-in-expr-trait-item-1.rs
 check-pass	nll/user-annotations/downcast-infer.rs
@@ -3826,8 +3831,6 @@ compile-fail	nll/user-annotations/method-call.rs
 compile-fail	nll/user-annotations/method-ufcs-1.rs
 compile-fail	nll/user-annotations/method-ufcs-2.rs
 compile-fail	nll/user-annotations/method-ufcs-3.rs
-compile-fail	nll/user-annotations/method-ufcs-inherent-3.rs
-compile-fail	nll/user-annotations/method-ufcs-inherent-4.rs
 check-pass	nll/user-annotations/normalize-self-ty.rs
 check-pass	nll/user-annotations/type-annotation-with-hrtb.rs
 compile-fail	not-panic/not-panic-safe-2.rs
@@ -5134,6 +5137,7 @@ run-pass	rust-2018/uniform-paths/redundant.rs
 check-pass	rust-2021/future-prelude-collision-generic-trait.rs
 check-pass	rust-2021/future-prelude-collision-imported.rs
 check-pass	rust-2021/future-prelude-collision-macros.rs
+check-pass	rust-2021/generic-type-collision.rs
 compile-fail	rust-2021/ice-return-unsized-can-impl-2.rs
 compile-fail	rust-2021/ice-return-unsized-can-impl.rs
 compile-fail	rust-2021/ice-unsized-fn-params.rs
@@ -5900,7 +5904,6 @@ check-pass	traits/issue-96665.rs
 run-pass	traits/item-inside-macro.rs
 check-pass	traits/make-sure-to-filter-projections-by-def-id.rs
 compile-fail	traits/map-types.rs
-compile-fail	traits/method-on-deeply-nested-struct-perf-2.rs
 run-pass	traits/method-on-deeply-nested-struct-perf.rs
 run-pass	traits/monad.rs
 run-pass	traits/multidispatch-conditional-impl-not-considered.rs

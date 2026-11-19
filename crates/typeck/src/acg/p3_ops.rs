@@ -179,15 +179,23 @@ impl Cx<'_> {
             }
             let lt1 = lhs.map(|p| p.ty()).or(lt0);
             let rhint = if matches!(op, "<<" | ">>") { self.peek(right) } else { lt1 };
+            // (a literal takes the place's type, whatever type inference recorded for it: `c[0] *= 10` with c a
+            // chunk whose element type inference did not reach)
             let (r, rt) = self.expr(right, rhint.or(lt1))?;
             let p = match lhs {
                 Some(p) => p,
                 None => self.place(left)?,
             };
+            let t = p.ty();
+            // (an unsuffixed literal takes the place's type, which type inference may not have reached: `c[0] *= 10`
+            // with c a chunk of a `[u8]`)
+            let (r, rt) = match strip_paren(right) {
+                Expr::Lit(text, _) if rt != t && (t.is_int() || t.is_float()) && rt.is_int() && !matches!(op, "<<" | ">>") && text.bytes().all(|c| c.is_ascii_digit() || c == b'_') => self.lit(text, Some(t))?,
+                _ => (r, rt),
+            };
             let Some(mut r) = r else {
                 return Ok((None, Ty::Never));
             };
-            let t = p.ty();
             let (l, _) = self.read(p);
             // `acc += x` (x: &i32): 整数への参照は値にする (core の `AddAssign<&i32>` 相当)
             let mut rt = rt;

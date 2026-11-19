@@ -726,6 +726,8 @@ const STD_RENAMES: &[(&str, &str, &str)] = &[
     ("mpsc", "Sender", "__Sndr"),
     ("mpsc", "SyncSender", "__SyncSndr"),
     ("mpsc", "Receiver", "__Rcvr__"),
+    // (`std::fmt::Write`, not `std::io::Write`)
+    ("fmt", "Write", "__FWr"),
 ];
 
 /// Rename them where they come from that module: `module::Name`, or `Name` imported by a `use` of that module (and
@@ -734,7 +736,8 @@ pub fn std_renames(src: &str) -> Option<String> {
     // (each module name is looked for once: this runs on every build)
     let has_atomic = src.contains("atomic");
     let has_mpsc = src.contains("mpsc");
-    if !has_atomic && !has_mpsc {
+    let has_fmt_write = src.contains("Write") && src.contains("fmt");
+    if !has_atomic && !has_mpsc && !has_fmt_write {
         return None;
     }
     let b = src.as_bytes();
@@ -743,7 +746,7 @@ pub fn std_renames(src: &str) -> Option<String> {
     let mut out = src.to_string();
     let mut changed = false;
     for &(m, name, to) in STD_RENAMES {
-        if !(if m == "atomic" { has_atomic } else { has_mpsc }) || !src.contains(name) {
+        if !(match m { "atomic" => has_atomic, "fmt" => has_fmt_write, _ => has_mpsc }) || !src.contains(name) {
             continue;
         }
         let (mut imported, mut other) = (false, false);
@@ -784,7 +787,7 @@ pub fn std_renames(src: &str) -> Option<String> {
             let after_m = cur[..at].ends_with(&format!("{m}::"));
             let qualified = at >= 2 && &cb[at - 2..at] == b"::";
             out.push_str(&cur[i..at]);
-            if word && (after_m || (bare && (!qualified || cur[..at].ends_with("mpsc::") || cur[..at].ends_with("atomic::")))) {
+            if word && (after_m || (bare && (!qualified || cur[..at].ends_with("mpsc::") || cur[..at].ends_with("atomic::") || cur[..at].ends_with("fmt::")))) {
                 out.push_str(to);
                 changed = true;
             } else {

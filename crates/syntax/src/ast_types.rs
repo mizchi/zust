@@ -244,6 +244,13 @@ fn path_ty(p: &Path, self_ty: Option<&TySyn>) -> R<TySyn> {
         };
         return Ok(TySyn::App("Result".into(), vec![tysyn(a, self_ty)?, io_err]));
     }
+    // (`Result<T>` with one argument: `std::io::Result` imported by name (`use std::io::{self, Result};`), which is
+    // the only way a one-argument `Result` names a type)
+    if n == 1 && last.name == "Result" && last.args.len() == 1 {
+        if let Some(GArg::Ty(a)) = last.args.first() {
+            return Ok(TySyn::App("Result".into(), vec![tysyn(a, self_ty)?, TySyn::Named("IoError".into())]));
+        }
+    }
     // `fmt::Result` / `fmt::Error`
     if n >= 2 && p.segs[n - 2].name == "fmt" && (last.name == "Result" || last.name == "Error") {
         let err = TySyn::Named("__FmtError".into());

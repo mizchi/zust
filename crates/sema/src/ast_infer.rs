@@ -68,6 +68,8 @@ fn is_builtin_scalar_method(n: &str) -> bool {
             | "rotate_left"
             | "rotate_right"
             | "swap_bytes"
+            | "to_be"
+            | "to_le"
             | "signum"
             | "is_positive"
             | "is_negative"
@@ -1676,6 +1678,15 @@ impl Inf<'_> {
                         return self.known(t);
                     }
                 }
+                // `u32::from_be(x)` / `from_le`
+                if segs.len() == 2 && args.len() == 1 && matches!(segs[1].name.as_str(), "from_be" | "from_le") {
+                    if let Some(t) = Ty::prim(&segs[0].name).filter(|t| t.is_int()) {
+                        let a = self.expr(&args[0]);
+                        let k = self.known(t);
+                        self.unify(a, k);
+                        return self.known(t);
+                    }
+                }
                 // `f64::from_bits(u)`
                 if segs.len() == 2 && args.len() == 1 && segs[1].name == "from_bits" && matches!(segs[0].name.as_str(), "f64" | "f32") {
                     let a = self.expr(&args[0]);
@@ -2265,7 +2276,7 @@ impl Inf<'_> {
                 }
                 _ => self.var(),
             },
-            "wrapping_neg" | "abs" | "signum" | "swap_bytes" | "to_ascii_uppercase" | "to_ascii_lowercase" | "next_power_of_two" | "isqrt" => rv,
+            "wrapping_neg" | "abs" | "signum" | "swap_bytes" | "to_be" | "to_le" | "to_ascii_uppercase" | "to_ascii_lowercase" | "next_power_of_two" | "isqrt" => rv,
             "pow" | "rotate_left" | "rotate_right" | "wrapping_pow" | "saturating_pow" => {
                 for a in avs {
                     let k = self.known(Ty::U32);

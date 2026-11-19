@@ -1913,8 +1913,10 @@ impl Parser {
                     self.i += 1;
                     let q = self.ty()?;
                     let mut path = Path { global: false, segs: Vec::new(), pos: self.pos() };
+                    let mut had_as = None;
                     if self.eat_ident("as") {
                         path = self.path(true)?;
+                        had_as = Some(());
                     }
                     if !self.eat_close_angle() {
                         return Err(self.err("expected `>`"));
@@ -1927,6 +1929,14 @@ impl Parser {
                             seg.args = self.generic_args()?;
                         }
                         path.segs.push(seg);
+                    }
+                    // (`<u16>::from_be_bytes` / `<S>::f`, no trait: the path `u16::from_be_bytes`)
+                    if let (Ty::Path(None, qp), true) = (&q, had_as.is_none()) {
+                        if !qp.global && qp.segs.len() == 1 && !path.segs.is_empty() {
+                            let mut segs = qp.segs.clone();
+                            segs.extend(path.segs);
+                            return Ok(Expr::Path(None, Path { global: false, segs, pos: qp.pos }));
+                        }
                     }
                     return Ok(Expr::Path(Some(Box::new(q)), path));
                 }

@@ -493,6 +493,22 @@ unsafe extern "C" {
     fn __exr_memcpy(d: *mut u8, s: *const u8, n: usize) -> *mut u8;
 }
 
+unsafe extern "C" {
+    #[link_name = "memmove"]
+    fn __exr_memmove(d: *mut u8, s: *const u8, n: usize) -> *mut u8;
+}
+
+// `std::ptr::copy_nonoverlapping` / `copy` / `write_bytes`: count values of T
+pub unsafe fn __core_copy_nonoverlapping<T>(src: *const T, dst: *mut T, count: usize) {
+    unsafe { __exr_memcpy(dst as *mut u8, src as *const u8, count * core::mem::size_of::<T>()) };
+}
+pub unsafe fn __core_copy<T>(src: *const T, dst: *mut T, count: usize) {
+    unsafe { __exr_memmove(dst as *mut u8, src as *const u8, count * core::mem::size_of::<T>()) };
+}
+pub unsafe fn __core_write_bytes<T>(dst: *mut T, val: u8, count: usize) {
+    unsafe { __exr_memset(dst as *mut u8, val as i32, count * core::mem::size_of::<T>()) };
+}
+
 pub struct Vec<T> {
     ptr: *mut T,
     cap: usize,
@@ -849,6 +865,12 @@ impl<T> Vec<T> {
     pub fn chunks_exact(&self, n: usize) -> ChunksExact<T> {
         __exr_slice_chunks_exact(self.as_slice(), n)
     }
+    pub fn chunks_mut(&mut self, n: usize) -> ChunksMut<T> {
+        __exr_slice_chunks_mut(self.as_mut_slice(), n)
+    }
+    pub fn chunks_exact_mut(&mut self, n: usize) -> ChunksMut<T> {
+        __exr_slice_chunks_exact_mut(self.as_mut_slice(), n)
+    }
     pub fn as_ptr(&self) -> *const T {
         self.ptr as *const T
     }
@@ -1180,6 +1202,42 @@ fn __exr_slice_first_chunk<const N: usize, T>(s: &[T]) -> Option<&[T; N]> {
         return None;
     }
     unsafe { Some(&*(s.as_ptr() as *const [T; N])) }
+}
+
+pub struct ChunksMut<T> {
+    ptr: *mut T,
+    len: usize,
+    n: usize,
+    i: usize,
+    exact: bool,
+}
+
+impl<T> Iterator for ChunksMut<T> {
+    type Item = &mut [T];
+    fn next(&mut self) -> Option<&mut [T]> {
+        let left = self.len - self.i;
+        if left == 0 || (self.exact && left < self.n) {
+            return None;
+        }
+        let k = if left < self.n { left } else { self.n };
+        let s = unsafe { core::slice::from_raw_parts_mut(self.ptr.add(self.i), k) };
+        self.i += k;
+        Some(s)
+    }
+}
+
+// (`chunks_mut` / `chunks_exact_mut`: one iterator type, the exact one stops before a short chunk)
+fn __exr_slice_chunks_mut<T>(s: &mut [T], n: usize) -> ChunksMut<T> {
+    if n == 0 {
+        panic!("chunk size must be non-zero");
+    }
+    ChunksMut { ptr: s.as_mut_ptr(), len: s.len(), n: n, i: 0, exact: false }
+}
+fn __exr_slice_chunks_exact_mut<T>(s: &mut [T], n: usize) -> ChunksMut<T> {
+    if n == 0 {
+        panic!("chunk size must be non-zero");
+    }
+    ChunksMut { ptr: s.as_mut_ptr(), len: s.len(), n: n, i: 0, exact: true }
 }
 
 fn __exr_slice_chunks<T>(s: &[T], n: usize) -> Chunks<T> {
@@ -5213,9 +5271,135 @@ pub fn __core_unreachable_unchecked() -> ! {
     panic!("internal error: entered unreachable code")
 }
 
+// `std::fmt::Write` (prep::std_renames names it `__FWr`, apart from `std::io::Write`)
+pub trait __FWr {
+    fn write_str(&mut self, s: &str) -> Result<(), __FmtError>;
+    fn write_char(&mut self, c: char) -> Result<(), __FmtError> {
+        let mut s = String::new();
+        s.push(c);
+        self.write_str(&s)
+    }
+}
+
+impl __FWr for String {
+    fn write_str(&mut self, s: &str) -> Result<(), __FmtError> {
+        self.push_str(s);
+        Ok(())
+    }
+}
+
 // std::io::Read / BufRead (バイト列 `&[u8]` の実装。Stdin などは固有のメソッドを持つ)
 pub trait Read {
     fn read(&mut self, buf: &mut [u8]) -> Result<usize, IoError>;
+    fn read_exact(&mut self, buf: &mut [u8]) -> Result<(), IoError> {
+        let mut at = 0;
+        while at < buf.len() {
+            let n = self.read(&mut buf[at..])?;
+            if n == 0 {
+                return Err(IoError { code: -3 });
+            }
+            at += n;
+        }
+        Ok(())
+    }
+}
+
+// std::io::Write (bytes; Stdout and the others have methods of their own)
+pub trait Write {
+    fn write(&mut self, buf: &[u8]) -> Result<usize, IoError>;
+    fn flush(&mut self) -> Result<(), IoError> {
+        Ok(())
+    }
+    fn write_all(&mut self, buf: &[u8]) -> Result<(), IoError> {
+        let mut at = 0;
+        while at < buf.len() {
+            let n = self.write(&buf[at..])?;
+            if n == 0 {
+                return Err(IoError { code: -4 });
+            }
+            at += n;
+        }
+        Ok(())
+    }
+}
+
+impl Write for Vec<u8> {
+    fn write(&mut self, buf: &[u8]) -> Result<usize, IoError> {
+        self.extend_from_slice(buf);
+        Ok(buf.len())
+    }
+}
+
+// std::io::Cursor over bytes
+pub struct Cursor<T> {
+    inner: T,
+    pos: u64,
+}
+
+impl<T> Cursor<T> {
+    pub fn new(inner: T) -> Cursor<T> {
+        Cursor { inner: inner, pos: 0 }
+    }
+    pub fn into_inner(self) -> T {
+        self.inner
+    }
+    pub fn get_ref(&self) -> &T {
+        &self.inner
+    }
+    pub fn get_mut(&mut self) -> &mut T {
+        &mut self.inner
+    }
+    pub fn position(&self) -> u64 {
+        self.pos
+    }
+    pub fn set_position(&mut self, pos: u64) {
+        self.pos = pos;
+    }
+}
+
+fn __exr_cursor_read(data: &[u8], pos: &mut u64, buf: &mut [u8]) -> usize {
+    let at = if (*pos as usize) < data.len() { *pos as usize } else { data.len() };
+    let rest = &data[at..];
+    let n = if buf.len() < rest.len() { buf.len() } else { rest.len() };
+    let mut i = 0;
+    while i < n {
+        buf[i] = rest[i];
+        i += 1;
+    }
+    *pos += n as u64;
+    n
+}
+
+impl Read for Cursor<Vec<u8>> {
+    fn read(&mut self, buf: &mut [u8]) -> Result<usize, IoError> {
+        Ok(__exr_cursor_read(self.inner.as_slice(), &mut self.pos, buf))
+    }
+}
+
+impl Read for Cursor<&[u8]> {
+    fn read(&mut self, buf: &mut [u8]) -> Result<usize, IoError> {
+        Ok(__exr_cursor_read(self.inner, &mut self.pos, buf))
+    }
+}
+
+impl Write for Cursor<Vec<u8>> {
+    fn write(&mut self, buf: &[u8]) -> Result<usize, IoError> {
+        let at = self.pos as usize;
+        while self.inner.len() < at {
+            self.inner.push(0);
+        }
+        let mut i = 0;
+        while i < buf.len() {
+            if at + i < self.inner.len() {
+                self.inner[at + i] = buf[i];
+            } else {
+                self.inner.push(buf[i]);
+            }
+            i += 1;
+        }
+        self.pos += buf.len() as u64;
+        Ok(buf.len())
+    }
 }
 
 pub trait BufRead {
@@ -5274,6 +5458,10 @@ fn __exr_cstr<G>(p: *const u8) -> &str {
 fn __exr_io_kind<G>(code: i32) -> &str {
     if code == -1 {
         "InvalidData"
+    } else if code == -3 {
+        "UnexpectedEof"
+    } else if code == -4 {
+        "WriteZero"
     } else if code == 2 {
         "NotFound"
     } else if code == 13 || code == 1 {
@@ -5305,6 +5493,10 @@ impl IoError {
     fn __message(&self) -> &str {
         if self.code == -1 {
             "stream did not contain valid UTF-8"
+        } else if self.code == -3 {
+            "failed to fill whole buffer"
+        } else if self.code == -4 {
+            "failed to write whole buffer"
         } else {
             __exr_cstr::<()>(unsafe { __exr_strerror(self.code) })
         }

@@ -1682,7 +1682,7 @@ impl Cx<'_> {
                         | "is_sign_positive" => Some(Ty::Bool),
                         "pow" | "wrapping_add" | "wrapping_sub" | "wrapping_mul" | "wrapping_neg" | "wrapping_abs" | "saturating_abs" | "saturating_neg" | "saturating_add" | "saturating_sub" | "abs" | "min"
                         | "max" | "rem_euclid" | "div_euclid" | "next_multiple_of" | "next_power_of_two" | "rotate_left" | "rotate_right"
-                        | "swap_bytes" | "signum" | "wrapping_pow" | "saturating_pow" | "isqrt" | "sqrt" | "floor" | "ceil" | "round" | "trunc"
+                        | "swap_bytes" | "to_be" | "to_le" | "signum" | "wrapping_pow" | "saturating_pow" | "isqrt" | "sqrt" | "floor" | "ceil" | "round" | "trunc"
                         | "powi" | "powf" | "exp" | "ln" | "sin" | "cos" | "tan" | "clamp" => Some(t),
                         _ => None,
                     };

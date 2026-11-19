@@ -28,6 +28,8 @@ impl Cx<'_> {
             "windows" => Some(("__exr_slice_windows", false)),
             "chunks" => Some(("__exr_slice_chunks", false)),
             "chunks_exact" => Some(("__exr_slice_chunks_exact", false)),
+            "chunks_mut" => Some(("__exr_slice_chunks_mut", true)),
+            "chunks_exact_mut" => Some(("__exr_slice_chunks_exact_mut", true)),
             "split_first_chunk" => Some(("__exr_slice_split_first_chunk", false)),
             "first_chunk" => Some(("__exr_slice_first_chunk", false)),
             "to_vec" => Some(("__exr_slice_to_vec", false)),
@@ -719,6 +721,8 @@ impl Cx<'_> {
             "rotate_left",
             "rotate_right",
             "swap_bytes",
+            "to_be",
+            "to_le",
             "signum",
             "is_positive",
             "is_negative",
@@ -929,7 +933,9 @@ impl Cx<'_> {
                 };
                 (Some(v), t)
             }
-            "swap_bytes" => (
+            // (x86-64 is little-endian: `to_le` is the value, `to_be` swaps its bytes)
+            "to_le" => (Some(a), t),
+            "swap_bytes" | "to_be" => (
                 Some(if t.bits() == 8 {
                     a
                 } else {

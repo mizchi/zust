@@ -201,7 +201,7 @@ fn gated_trait(h: usize) -> Option<&'static str> {
     it.idents
         .iter()
         .map(|&(a, b)| &PRELUDE[a as usize..b as usize])
-        .find(|w| matches!(*w, "Hasher" | "Hash" | "__BoolThen" | "__AsBytes" | "__PathExt" | "__AsPathStr" | "BufRead" | "Read" | "ExactSizeIterator" | "BuildHasher"))
+        .find(|w| matches!(*w, "Hasher" | "Hash" | "__BoolThen" | "__AsBytes" | "__PathExt" | "__AsPathStr" | "BufRead" | "Read" | "Write" | "__FWr" | "ExactSizeIterator" | "BuildHasher"))
 }
 
 /// 名前が要るときだけ付ける trait の実装 (`impl Read for &[u8]`)
@@ -217,7 +217,7 @@ fn gated_impl(h: usize) -> Option<&'static str> {
                 }
                 let ws: Vec<&'static str> = it.idents.iter().map(|&(a, b)| &PRELUDE[a as usize..b as usize]).collect();
                 match ws.as_slice() {
-                    ["impl", t, "for", ..] if matches!(*t, "Read" | "BufRead") => Some(*t),
+                    ["impl", t, "for", ..] if matches!(*t, "Read" | "BufRead" | "Write" | "__FWr") => Some(*t),
                     _ => None,
                 }
             })
@@ -497,10 +497,10 @@ fn owner(h: usize) -> Option<&'static str> {
                     .find_map(|w| match w {
                         "Vec" | "String" | "HashMap" | "Reverse" | "BinaryHeap" | "SplitStr" | "RSplitStr" | "FlattenRef" | "MatchIndices" | "CharIndices"
                         | "Bytes" | "ToCase" | "ParseIntError" | "IntErrorKind" | "Rev" | "StepBy" | "Peekable"
-                        | "SkipWhile" | "PreludeScan" | "Inspect" | "FlatMap" | "Flatten" | "Cloned" | "Windows" | "Chunks" | "ChunksExact" | "Iter" | "IterMut" | "MaybeUninit"
+                        | "SkipWhile" | "PreludeScan" | "Inspect" | "FlatMap" | "Flatten" | "Cloned" | "Windows" | "Chunks" | "ChunksExact" | "ChunksMut" | "Iter" | "IterMut" | "MaybeUninit"
                         | "HashSet" | "SetIntoIter" | "BTreeMap" | "BTreeSet" | "BtEntry" | "BtIter" | "BtIterMut"
                         | "BtIntoIter" | "VecDeque" | "DqIter" | "DqIntoIter" | "f64" | "f32" | "ParseFloatError" | "i128" | "u128" | "FromUtf8Error" | "Utf8Error" | "Rc" | "Arc" | "ManuallyDrop" | "Pin" | "NonNull" | "UnsafeCell" | "RefCell" | "Cell" | "JoinHandle" | "__Sndr" | "__SyncSndr" | "__Rcvr__" | "__RecvIter" | "AtomicUsize" | "AtomicIsize" | "AtomicU8" | "AtomicU16" | "AtomicU32" | "AtomicU64" | "AtomicI8" | "AtomicI16" | "AtomicI32" | "AtomicI64" | "AtomicBool" | "OnceLock" | "Mutex" | "MutexGuard" | "RangeFrom" | "TryFromIntError" | "TryFromSliceError" | "Stdin" | "StdinLock" | "StdinLines" | "Stdout" | "StdoutLock"
-                        | "BufWriter" | "IoError" | "__DynError" | "Args" | "DefaultHasher" | "VarError"
+                        | "BufWriter" | "Cursor" | "ChunksMut" | "IoError" | "__DynError" | "Args" | "DefaultHasher" | "VarError"
                         | "PathBuf" | "__PathExt" | "__AsPathStr" | "Command" | "__ExitStatus" | "Cow" | "__CowStr"
                         | "Duration" | "AtomicPtr" | "RangeTo" | "RangeToInclusive" | "Fuse" => Some(w),
                         // HashMap のイテレータ (HmIter など) は HashMap を使うときだけ
@@ -861,7 +861,7 @@ pub fn select_with(user_src: &str, user_items: &[SrcItem], cache: &mut SelectCac
             "cloned", "format", "print", "println", "eprint", "eprintln", "write", "writeln",
             "split", "split_whitespace", "lines", "trim", "starts_with", "ends_with", "contains",
             "clamp", "from_u32", "char", "join", "concat", "drain", "default", "f64", "f32", "i128", "u128", "Iterator", "into", "split_at_mut",
-            "copy_from_slice", "clone_from_slice", "BufRead", "Read", "ExactSizeIterator", "BuildHasher", "split_first_chunk", "first_chunk", "chunks_exact",
+            "copy_from_slice", "clone_from_slice", "BufRead", "Read", "Write", "__FWr", "Cursor", "ExactSizeIterator", "BuildHasher", "split_first_chunk", "first_chunk", "chunks_exact", "chunks_mut", "chunks_exact_mut",
         ]);
         // (先頭の 1 byte, 長さ) ごとの候補。prelude の名前が増えても 1 識別子あたりの比較は 0〜1 回
         let mut t: Vec<Vec<&'static str>> = vec![vec![]; 256 * 32];
@@ -1113,6 +1113,8 @@ pub fn select_with(user_src: &str, user_items: &[SrcItem], cache: &mut SelectCac
         ("windows", "__exr_slice_windows"),
         ("chunks", "__exr_slice_chunks"),
         ("chunks_exact", "__exr_slice_chunks_exact"),
+        ("chunks_mut", "__exr_slice_chunks_mut"),
+        ("chunks_exact_mut", "__exr_slice_chunks_exact_mut"),
         ("split_first_chunk", "__exr_slice_split_first_chunk"),
         ("first_chunk", "__exr_slice_first_chunk"),
         ("to_vec", "__exr_slice_to_vec"),
