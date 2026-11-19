@@ -2649,6 +2649,7 @@ compile-fail	impl-trait/precise-capturing/unexpected-token.rs
 compile-fail	impl-trait/printing-binder.rs
 build-pass	impl-trait/projection.rs
 check-pass	impl-trait/recursive-auto-trait.rs
+check-pass	impl-trait/recursive-impl-trait-type-direct.rs
 run-pass	impl-trait/region-escape-via-bound-contravariant-closure.rs
 run-pass	impl-trait/region-escape-via-bound-contravariant.rs
 compile-fail	impl-trait/rpit-not-sized.rs
@@ -2929,6 +2930,7 @@ compile-fail	let-else/let-else-non-diverging.rs
 run-pass	let-else/let-else-run-pass.rs
 compile-fail	let-else/let-else-slicing-error.rs
 run-pass	let-else/let-else-source-expr-nomove-pass.rs
+run-pass	let-else/let-else-temp-borrowck.rs
 run-pass	let-else/let-else.rs
 compile-fail	let-else/uninitialized-refutable-let-issue-123844.rs
 compile-fail	lexer/lex-bad-char-literals-2.rs

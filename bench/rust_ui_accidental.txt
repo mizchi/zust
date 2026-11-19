@@ -1,0 +1,8 @@
+# compile-fail tests zustc rejects at the annotated line, but for another reason than the one they test (kind<TAB>path).
+# bench/rust_ui.py leaves them out of the baseline and of "newly passing". Remove a line once zustc reports the
+# error the test is about.
+compile-fail	generic-associated-types/issue-74684-1.rs
+compile-fail	generic-associated-types/issue-74684-2.rs
+compile-fail	generic-associated-types/projection-type-lifetime-mismatch.rs
+compile-fail	generics/generic-type-less-params-with-defaults.rs
+compile-fail	suggestions/dont-wrap-ambiguous-receivers.rs

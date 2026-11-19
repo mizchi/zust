@@ -654,6 +654,26 @@ fn has_hole_ty(t: Ty) -> bool {
     }
 }
 
+/// the declared return type (`Result<(), impl Debug>`, its `impl` parts holes) with the holes of the inferred one
+/// filled from it, where both have the same shape (inference may leave `Ok`'s type open: `Err(Target)`)
+fn merge_declared(prog: &Program, decl: Ty, inf: Ty) -> Ty {
+    let hole = |t: Ty| t == Ty::Param(crate::program::HOLE);
+    match (decl, inf) {
+        (d, i) if hole(i) && !hole(d) => d,
+        (Ty::Struct(x), Ty::Struct(y)) if x != y && prog.base_of(x) == prog.base_of(y) => {
+            let (ax, ay) = (prog.structs[x as usize].args.clone(), prog.structs[y as usize].args.clone());
+            if ax.len() != ay.len() {
+                return inf;
+            }
+            let args: Vec<Ty> = ax.iter().zip(&ay).map(|(&d, &i)| merge_declared(prog, d, i)).collect();
+            prog.instantiate(prog.base_of(x), args).map(Ty::Struct).unwrap_or(inf)
+        }
+        (Ty::Ref(_, d), Ty::Ref(m, i)) => Ty::Ref(m, crate::types::intern(merge_declared(prog, *d, *i))),
+        (Ty::Box(d), Ty::Box(i)) => Ty::Box(crate::types::intern(merge_declared(prog, *d, *i))),
+        _ => inf,
+    }
+}
+
 fn resolve_opaque(prog: &mut Program, src: &str, items: &[SrcItem]) -> R<()> {
     if prog.opaque.is_empty() {
         return Ok(());
@@ -686,7 +706,36 @@ fn resolve_opaque(prog: &mut Program, src: &str, items: &[SrcItem]) -> R<()> {
                 progress = true;
                 continue;
             }
-            let (_, r, _) = crate::ast_infer::infer_ctx(prog, f.sig.recv.is_some(), &f.sig.params, &f.block, &sig, &env, &[], None, Some((id, 0)));
+            // (`-> Result<(), impl Debug>`: the declared type with a hole for each `impl`, which the body fills)
+            let decl = f.sig.ret.as_ref().filter(|t| !matches!(t, crate::parse::Ty::Impl(_))).and_then(|t| {
+                fn holes(t: &crate::parse::Ty) -> crate::parse::Ty {
+                    use crate::parse::{GArg, Ty as P};
+                    match t {
+                        P::Impl(_) => P::Infer,
+                        P::Ref(l, m, i) => P::Ref(l.clone(), *m, Box::new(holes(i))),
+                        P::Tuple(v) => P::Tuple(v.iter().map(holes).collect()),
+                        P::Path(q, p) => {
+                            let mut p = p.clone();
+                            for s in &mut p.segs {
+                                for a in &mut s.args {
+                                    if let GArg::Ty(t) = a {
+                                        *t = holes(t);
+                                    }
+                                }
+                            }
+                            P::Path(q.clone(), p)
+                        }
+                        t => t.clone(),
+                    }
+                }
+                let ts = crate::ast_types::tysyn(&holes(t), None).ok()?;
+                prog.resolve_env(&ts, &env).ok()
+            });
+            let (_, r, _) = crate::ast_infer::infer_ctx(prog, f.sig.recv.is_some(), &f.sig.params, &f.block, &sig, &env, &[], decl, Some((id, 0)));
+            let sig = match decl {
+                Some(d) => crate::program::FnSig { ret: d, ..sig },
+                None => sig,
+            };
             // (a body with no value (`-> impl Sized {}`) returns `()`)
             let no_value = !matches!(f.block.stmts.last(), Some(crate::parse::Stmt::Expr(_, false))) && !format!("{:?}", f.block).contains("Return(Some");
             // (a body ending in `()` itself, or in a diverging macro (`panic!()` / `todo!()`), is `()` too)
@@ -704,6 +753,7 @@ fn resolve_opaque(prog: &mut Program, src: &str, items: &[SrcItem]) -> R<()> {
             if no_value && !matches!(f.sig.ret, Some(crate::parse::Ty::Impl(_))) {
                 return Err(format!("{}:1: type annotations needed (the return type of `{}` is not known from its body)", items[ii as usize].line, f.sig.name));
             }
+            let r = r.map(|t| merge_declared(prog, sig.ret, t));
             if let Some(t) = r.filter(|&t| (t != Ty::Unit || no_value) && !prog.has_param(t) && !has_hole_ty(t)) {
                 prog.sigs[id as usize].ret = t;
                 done[k] = true;
@@ -712,6 +762,24 @@ fn resolve_opaque(prog: &mut Program, src: &str, items: &[SrcItem]) -> R<()> {
         }
         if !progress {
             break;
+        }
+    }
+    // (`fn test() -> impl Sized { test() }`: a body that only returns its own result has no type of its own, and
+    // never returns; it is `()`)
+    for (k, &id) in ids.iter().enumerate() {
+        if done[k] {
+            continue;
+        }
+        let me = prog.names[id as usize].rsplit("::").next().unwrap_or("").to_string();
+        let Some(ii) = prog.item_of[id as usize] else { continue };
+        let Some(f) = parse_fn(src, &items[ii as usize])? else { continue };
+        if f.block.stmts.len() == 1 && matches!(f.sig.ret, Some(crate::parse::Ty::Impl(_))) {
+            if let Some(crate::parse::Stmt::Expr(crate::parse::Expr::Call(callee, _), false)) = f.block.stmts.last() {
+                if matches!(&**callee, crate::parse::Expr::Path(None, p) if p.segs.len() == 1 && p.segs[0].name == me) {
+                    prog.sigs[id as usize].ret = Ty::Unit;
+                    done[k] = true;
+                }
+            }
         }
     }
     if let Some(k) = done.iter().position(|d| !*d) {

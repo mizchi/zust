@@ -66,3 +66,4 @@ date	commit	change	noop_M	edit_M	check_M	cache_KiB	lsp_G	run	check	build	cfail
 2026-11-19	64564af+	rename program types that collide with the prelude's (__u_); generic impls for &[T; N] / &[T] meet bounds	0.873	591.021	3875.670	1902.8	-	1646	1374	95	3316	1179.525	63.242	11.268	317.732
 2026-11-19	f4f96cf+	methods of impls for [T; N] / &[T; N] / &[T]	0.873	591.044	3875.539	1902.8	-	1646	1374	95	3317	1179.886	63.283	11.270	317.702
 2026-11-19	a55841b+	lifetime-only GAT args (Self::F<'a>); default fns through blanket impls; T::f via the trait	0.868	590.898	3875.286	1902.8	-	1648	1390	95	3321	1180.030	63.235	11.242	317.737
+2026-11-19	ad70905+	impl Trait inside a declared type (Result<(), impl Debug>) inferred with the declared parts; self-recursive impl Trait bodies	0.871	590.703	3875.429	1902.8	-	1649	1391	95	3321	1179.913	63.290	11.257	317.838

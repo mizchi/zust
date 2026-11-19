@@ -228,6 +228,12 @@ def main():
     if a.baseline:
         now = {(k, os.path.relpath(p, ui)): r for p, k, r in res}
         passing = {key for key, r in now.items() if r == "pass"}
+        # (compile-fail tests rejected at the annotated line for another reason than the one they test: not counted
+        #  as passing in the baseline, see bench/rust_ui_accidental.txt)
+        acc = os.path.join(os.path.dirname(os.path.abspath(a.baseline)), "rust_ui_accidental.txt")
+        if os.path.exists(acc):
+            skip = {tuple(l.rstrip("\n").split("\t")[:2]) for l in open(acc) if l.strip() and not l.startswith("#")}
+            passing -= skip
         if a.write_baseline:
             with open(a.baseline, "w") as f:
                 f.write(f"# tests/ui tests zustc passes (rust-lang/rust {TAG}, {COMMIT[:9]}); bench/rust_ui.py --write-baseline\n")
