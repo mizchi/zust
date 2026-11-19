@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795059564694,
+  "lastUpdate": 1795059566493,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -24429,6 +24429,85 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/mizchi/zust/commit/45579fca0287f68e246fca6b35e24ce3ce13d824"
         },
         "date": 1795055621844,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "parity documentSymbol (名前の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity workspace/symbol (上位 20 の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity definition (行き先の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity hover (名前を含む)",
+            "value": 92.5,
+            "unit": "%"
+          },
+          {
+            "name": "parity references (数の一致)",
+            "value": 97.297,
+            "unit": "%"
+          },
+          {
+            "name": "parity documentHighlight (数の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity rename (書き換えの一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity signatureHelp (名前・引数の数・今の引数の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity completion `x.\\|` (書いてある名前を含む)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity completion `na\\|me` (同)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity 一致の平均",
+            "value": 98.98,
+            "unit": "%"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "committer": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "distinct": true,
+          "id": "cd35e07e3cc17a15ef5bc148ce84bd3869c8927a",
+          "message": "KPI log per change: bench/kpi_log.md, linked from the README\n\nRows for 927540d, b0edbd7, 042f17d and 89d9fe9, each built and measured on its own\n(tests/ui counts per commit too). kpi_track does not count its own log as a change.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-19T03:30:40Z",
+          "tree_id": "bb5d04de7bea1220ccd2d886f1c663ed28525f4a",
+          "url": "https://github.com/mizchi/zust/commit/cd35e07e3cc17a15ef5bc148ce84bd3869c8927a"
+        },
+        "date": 1795059566040,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
