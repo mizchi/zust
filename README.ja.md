@@ -30,11 +30,11 @@ Rust のサブセットを速くインクリメンタルにビルドするコン
 
 | gen1000 | cold | no-op | 1 関数を編集 | ディスク | バイナリ (strip 後) | 実行 |
 |---|---:|---:|---:|---:|---:|---:|
-| zustc | 122 ms | 19 ms | 25 ms | 766 KiB | 324 KiB | 13 ms |
-| zustc `-O` | 423 ms | 70 ms | 68 ms | 1199 KiB | 341 KiB | 4 ms |
-| rustc `-C incremental` | 763 ms | 213 ms | 417 ms | 10.8 MiB | 1038 KiB | 7 ms |
-| rustc `-O` | 18760 ms | - | - | - | 377 KiB | 2 ms |
-| **zustc の rustc `-C incremental` 比** | **6.3 倍速い** | **11 倍速い** | **17 倍速い** | **1/14** | **1/3.2** | |
+| zustc | 166 ms | 21 ms | 30 ms | 766 KiB | 324 KiB | 12 ms |
+| zustc `-O` | 403 ms | 66 ms | 66 ms | 1199 KiB | 341 KiB | 4 ms |
+| rustc `-C incremental` | 746 ms | 201 ms | 403 ms | 10.8 MiB | 1038 KiB | 8 ms |
+| rustc `-O` | 18567 ms | - | - | - | 377 KiB | 2 ms |
+| **zustc の rustc `-C incremental` 比** | **4.5 倍速い** | **9.6 倍速い** | **13 倍速い** | **1/14** | **1/3.2** | |
 
 小さなプログラム (`bench/rt`: fib、hashmap、matmul、nbody、sieve、sort、strings) と実際のクレート (cratebench: fnv、
 adler2、hex、itoa、rustc-hash、cfg-if。6 つとも rustc と同じ出力を出す):
@@ -75,7 +75,8 @@ adler2、hex、itoa、rustc-hash、cfg-if。6 つとも rustc と同じ出力を
 | 2026-11-19、3 つの並行の lane：構文解析、std、アイテムの要約 (9effaaa)。コンテナの再起動後の遅いマシン (rustc `-O` は 18.5 秒、前は 14.4 秒) | 142 ms | 691 ms | 4.9 倍 | 24 ms | 370 ms | 15.4 倍 |
 | 2026-11-19、`impl Tr for Box<S>`、シフトと `reverse_bits`、`..b` の値 (962f2a6) | 150 ms | 847 ms | 5.6 倍 | 27 ms | 447 ms | 16.6 倍 |
 | 2026-11-19、`as _` / `as *const _` (75630e2) | 127 ms | 859 ms | 6.8 倍 | 31 ms | 399 ms | 12.9 倍 |
-| 2026-11-19、数値の演算子トレイト、`dyn Tr: Tr` | 122 ms | 763 ms | 6.3 倍 | 25 ms | 417 ms | 16.7 倍 |
+| 2026-11-19、数値の演算子トレイト、`dyn Tr: Tr` (a6c8ba5) | 122 ms | 763 ms | 6.3 倍 | 25 ms | 417 ms | 16.7 倍 |
+| 2026-11-19、`dyn Tr<Y = T>` の束縛を関連型の境界で検査 | 166 ms | 746 ms | 4.5 倍 | 30 ms | 403 ms | 13.4 倍 |
 
 zustc のコードの実行速度は rustc の debug ビルドに近く、7 つの小さなプログラムのすべてでそれより速い (そこでは rustc の debug
 ビルドは rustc `-O` の 3〜26 倍遅い)。
@@ -143,7 +144,8 @@ KPI はビルドの速度、ビルドキャッシュのサイズ、LSP の応答
 | 3 つの並行の lane：構文解析、std、アイテムの要約 (9effaaa) | 668.7 M | 626.3 M | 3906.9 M | 1902.8 KiB | 387.2 KiB | 51.4 MiB |
 | `impl Tr for Box<S>`、シフトと `reverse_bits`、`..b` の値 (962f2a6) | 666.0 M | 626.3 M | 3907.0 M | 1902.8 KiB | 387.2 KiB | 51.8 MiB |
 | `as _` / `as *const _` (75630e2) | 662.8 M | 626.2 M | 3906.8 M | 1902.8 KiB | 387.2 KiB | 52.0 MiB |
-| 今: 数値の演算子トレイト、`dyn Tr: Tr` | 668.7 M | 626.3 M | 3906.8 M | 1902.8 KiB | 387.2 KiB | 51.7 MiB |
+| 数値の演算子トレイト、`dyn Tr: Tr` (a6c8ba5) | 668.7 M | 626.3 M | 3906.8 M | 1902.8 KiB | 387.2 KiB | 51.7 MiB |
+| 今: `dyn Tr<Y = T>` の束縛を関連型の境界で検査 | 666.2 M | 626.2 M | 3906.1 M | 1902.8 KiB | 387.2 KiB | 52.1 MiB |
 | **借用検査を入れた後からの変化** | **-11.3%** | **-12.2%** | **-2.0%** | **0%** | **0%** | **-32%** |
 
 LSP (zustc 自身のソースに対する `bench/lsp_parity.py` の p50。実時間):
@@ -175,7 +177,8 @@ LSP (zustc 自身のソースに対する `bench/lsp_parity.py` の p50。実時
 | 3 つの並行の lane：構文解析、std、アイテムの要約 (9effaaa) | 0.94 ms | 0.77 ms | 1.65 ms | 15.79 ms | 141 ms (遅いマシン。そこで d01898b と 6 回交互に比べると references は 16.4 ms と 14.4 ms、起動は 140 ms と 134 ms。ただし LSP の 1 回分を cachegrind で数えると命令数は 10.953 G と 10.955 G で、走るコードは同じ) |
 | `impl Tr for Box<S>`、シフトと `reverse_bits`、`..b` の値 (962f2a6) | 0.93 ms | 0.77 ms | 1.84 ms | 15.16 ms | 128 ms |
 | `as _` / `as *const _` (75630e2) | 0.98 ms | 0.89 ms | 1.86 ms | 16.81 ms | 130 ms |
-| 今: 数値の演算子トレイト、`dyn Tr: Tr` | 0.99 ms | 0.87 ms | 1.71 ms | 16.72 ms | 161 ms |
+| 数値の演算子トレイト、`dyn Tr: Tr` (a6c8ba5) | 0.99 ms | 0.87 ms | 1.71 ms | 16.72 ms | 161 ms |
+| 今: `dyn Tr<Y = T>` の束縛を関連型の境界で検査 | 0.88 ms | 0.80 ms | 1.63 ms | 17.57 ms | 152 ms |
 
 どの変更も、これらが悪くならないときだけ残す。全体の計測で LSP の時間が上がったときは、同じマシンで 2 つのビルドを
 交互に走らせて比べ直してから、揺れかどうかを決める。e598fdf の行はそうして比べた値で、起動の時間は 2 つの対象のファイルの合計。ほかの行は `bench/ci_bench.py` の全体の計測。
@@ -193,7 +196,7 @@ zustc に求められるもの (nightly の機能・補助のクレート・特�
 | run-pass (ビルドでき、実行して同じ出力) | 2413 | 1535 (63.6%) |
 | check-pass (`zustc check` が通す) | 1807 | 1269 (70.2%) |
 | build-pass | 135 | 88 (65.2%) |
-| compile-fail (注釈の行で拒む) | 7358 | 2841 (38.6%) |
+| compile-fail (注釈の行で拒む) | 7358 | 2844 (38.7%) |
 
 分野ごとの内訳はチェックリストの形で [SUPPORTED.ja.md](SUPPORTED.ja.md) にある。
 

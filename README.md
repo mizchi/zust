@@ -35,11 +35,11 @@ medians of 3 runs). They are measured again with each round of work. gen1000 is 
 
 | gen1000 | cold | no-op | edit one function | on disk | binary (stripped) | run |
 |---|---:|---:|---:|---:|---:|---:|
-| zustc | 122 ms | 19 ms | 25 ms | 766 KiB | 324 KiB | 13 ms |
-| zustc `-O` | 423 ms | 70 ms | 68 ms | 1199 KiB | 341 KiB | 4 ms |
-| rustc `-C incremental` | 763 ms | 213 ms | 417 ms | 10.8 MiB | 1038 KiB | 7 ms |
-| rustc `-O` | 18760 ms | - | - | - | 377 KiB | 2 ms |
-| **zustc vs rustc `-C incremental`** | **6.3x faster** | **11x faster** | **17x faster** | **14x smaller** | **3.2x smaller** | |
+| zustc | 166 ms | 21 ms | 30 ms | 766 KiB | 324 KiB | 12 ms |
+| zustc `-O` | 403 ms | 66 ms | 66 ms | 1199 KiB | 341 KiB | 4 ms |
+| rustc `-C incremental` | 746 ms | 201 ms | 403 ms | 10.8 MiB | 1038 KiB | 8 ms |
+| rustc `-O` | 18567 ms | - | - | - | 377 KiB | 2 ms |
+| **zustc vs rustc `-C incremental`** | **4.5x faster** | **9.6x faster** | **13x faster** | **14x smaller** | **3.2x smaller** | |
 
 Small programs (`bench/rt`: fib, hashmap, matmul, nbody, sieve, sort, strings) and real crates (cratebench: fnv,
 adler2, hex, itoa, rustc-hash, cfg-if; all six give the same output as rustc):
@@ -80,7 +80,8 @@ the previous commit, 1501b30 and 8e797a9 have the same cold median, 96 and 98 ms
 | 2026-11-19, three parallel lanes: parser, std, item summaries (9effaaa); a slower machine after a container restart (rustc `-O` 18.5 s, was 14.4 s) | 142 ms | 691 ms | 4.9x | 24 ms | 370 ms | 15.4x |
 | 2026-11-19, `impl Tr for Box<S>`, shifts and `reverse_bits`, `..b` values (962f2a6) | 150 ms | 847 ms | 5.6x | 27 ms | 447 ms | 16.6x |
 | 2026-11-19, `as _` / `as *const _` (75630e2) | 127 ms | 859 ms | 6.8x | 31 ms | 399 ms | 12.9x |
-| 2026-11-19, operator traits of numbers, `dyn Tr: Tr` | 122 ms | 763 ms | 6.3x | 25 ms | 417 ms | 16.7x |
+| 2026-11-19, operator traits of numbers, `dyn Tr: Tr` (a6c8ba5) | 122 ms | 763 ms | 6.3x | 25 ms | 417 ms | 16.7x |
+| 2026-11-19, bounds of associated types checked for `dyn Tr<Y = T>` | 166 ms | 746 ms | 4.5x | 30 ms | 403 ms | 13.4x |
 
 zustc's code is close to rustc's debug build at run time, and faster than it in all seven small programs (rustc's
 debug build is 3–26x slower than rustc `-O` there).
@@ -150,7 +151,8 @@ the shared machine vary by about ±20%.
 | three parallel lanes: parser, std, item summaries (9effaaa) | 668.7 M | 626.3 M | 3906.9 M | 1902.8 KiB | 387.2 KiB | 51.4 MiB |
 | `impl Tr for Box<S>`, shifts and `reverse_bits`, `..b` values (962f2a6) | 666.0 M | 626.3 M | 3907.0 M | 1902.8 KiB | 387.2 KiB | 51.8 MiB |
 | `as _` / `as *const _` (75630e2) | 662.8 M | 626.2 M | 3906.8 M | 1902.8 KiB | 387.2 KiB | 52.0 MiB |
-| now: operator traits of numbers, `dyn Tr: Tr` | 668.7 M | 626.3 M | 3906.8 M | 1902.8 KiB | 387.2 KiB | 51.7 MiB |
+| operator traits of numbers, `dyn Tr: Tr` (a6c8ba5) | 668.7 M | 626.3 M | 3906.8 M | 1902.8 KiB | 387.2 KiB | 51.7 MiB |
+| now: bounds of associated types checked for `dyn Tr<Y = T>` | 666.2 M | 626.2 M | 3906.1 M | 1902.8 KiB | 387.2 KiB | 52.1 MiB |
 | **change since borrow checking** | **-11.3%** | **-12.2%** | **-2.0%** | **0%** | **0%** | **-32%** |
 
 LSP (p50 of `bench/lsp_parity.py` on zustc's own sources; these are wall-clock times):
@@ -182,7 +184,8 @@ LSP (p50 of `bench/lsp_parity.py` on zustc's own sources; these are wall-clock t
 | three parallel lanes: parser, std, item summaries (9effaaa) | 0.94 ms | 0.77 ms | 1.65 ms | 15.79 ms | 141 ms (slower machine; against d01898b on it, 6 alternating runs: references 16.4 vs 14.4 ms, ready 140 vs 134 ms, but one LSP run under cachegrind is 10.953 G vs 10.955 G instructions: the code run is the same) |
 | `impl Tr for Box<S>`, shifts and `reverse_bits`, `..b` values (962f2a6) | 0.93 ms | 0.77 ms | 1.84 ms | 15.16 ms | 128 ms |
 | `as _` / `as *const _` (75630e2) | 0.98 ms | 0.89 ms | 1.86 ms | 16.81 ms | 130 ms |
-| now: operator traits of numbers, `dyn Tr: Tr` | 0.99 ms | 0.87 ms | 1.71 ms | 16.72 ms | 161 ms |
+| operator traits of numbers, `dyn Tr: Tr` (a6c8ba5) | 0.99 ms | 0.87 ms | 1.71 ms | 16.72 ms | 161 ms |
+| now: bounds of associated types checked for `dyn Tr<Y = T>` | 0.88 ms | 0.80 ms | 1.63 ms | 17.57 ms | 152 ms |
 
 Each change is kept only if these do not get worse. When an LSP time rises in a full run, the two builds are
 compared again on the same machine, alternating runs, before it is called noise. The last row comes from such a
@@ -202,7 +205,7 @@ only the tests it can be asked to handle (no nightly features, auxiliary crates 
 | run-pass (builds, runs, same output) | 2413 | 1535 (63.6%) |
 | check-pass (accepted by `zustc check`) | 1807 | 1269 (70.2%) |
 | build-pass | 135 | 88 (65.2%) |
-| compile-fail (rejected at an annotated line) | 7358 | 2841 (38.6%) |
+| compile-fail (rejected at an annotated line) | 7358 | 2844 (38.7%) |
 
 [SUPPORTED.md](SUPPORTED.md) breaks this down by area as a checklist.
 

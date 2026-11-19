@@ -341,6 +341,8 @@ pub struct Summary {
     pub closures: Vec<ClosureSyn>,
     /// impl の関連型 (`type Item = u32;`)
     pub assocs: Vec<AssocSyn>,
+    /// a trait's associated type declaration with bounds (`type Y: Clone;`): (trait, name, bounds)
+    pub assoc_bounds: Vec<(String, String, Vec<String>)>,
     /// `type Key = u128;` / `type R<T> = Result<T, E>;` の (名前, 型パラメータ, 中身)
     pub aliases: Vec<(String, Vec<String>, TySyn)>,
     /// The concrete (non-parameter, non-primitive) types bounded in the item's where clauses (`where Local: Any`):

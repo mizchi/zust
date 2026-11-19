@@ -278,6 +278,8 @@ pub struct Program {
     pub has_drop: bool,
     /// impl の関連型の定義
     pub assocs: Vec<AssocDef>,
+    /// (trait, associated type) -> the bounds of its declaration (`type Y: Clone;`)
+    pub assoc_bounds: HashMap<(String, String), Vec<String>>,
     /// 右辺の型を持つ比較の impl の eq (`Vec::<PartialEq<[T;N]>>::eq` など)。`a == b` の型が違うとき探す
     pub peq: Vec<u32>,
     /// 型の別名: 名前 → (型パラメータ, 中身)
@@ -575,6 +577,7 @@ impl Program {
             drop_impls: Default::default(),
             has_drop: false,
             assocs: vec![],
+            assoc_bounds: Default::default(),
             peq: vec![],
             aliases: FxMap::default(),
             pord: vec![],
@@ -590,6 +593,9 @@ impl Program {
             p.unions.extend(sm.unions.iter().cloned());
             for (n, ps, b) in &sm.const_fns {
                 p.const_fns.insert(n.clone(), (ps.clone(), b.clone()));
+            }
+            for (tr, n, bs) in &sm.assoc_bounds {
+                p.assoc_bounds.insert((tr.clone(), n.clone()), bs.clone());
             }
             for (n, t) in &sm.reprs {
                 if let Some(t) = Ty::from_suffix(t) {
@@ -1320,11 +1326,16 @@ impl Program {
                     || self.prim_impls.contains(&(Ty::Str, tr.to_string()))
             }
             Ty::Slice(e) => matches!(tr, "PartialEq" | "Eq" | "PartialOrd" | "Ord" | "Debug" | "Hash") && self.implements(*e, tr),
-            // (`dyn Tr` implements Tr, and the other traits written in it: `dyn Tr + Send`)
+            // (`dyn Tr` implements Tr, and the other traits written in it: `dyn Tr + Send`; the bindings of
+            // `dyn Tr<Y = T>` must meet the bounds of `type Y: B;`)
             Ty::Dyn(d) => d.split('+').any(|p| {
                 let p = p.trim();
-                let p = p.split('<').next().unwrap_or(p).trim();
-                p.rsplit("::").next() == Some(tr)
+                let (name, args) = match p.find('<') {
+                    Some(i) => (p[..i].trim(), p[i + 1..].trim_end_matches('>')),
+                    None => (p, ""),
+                };
+                let name = name.rsplit("::").next().unwrap_or(name);
+                name == tr && self.dyn_bindings_ok(name, args)
             }),
             // 関数ポインタ: Fn 系 (引数の数が合うもの) と Copy
             Ty::Fn(f) => match parse_fn_bound(tr) {
@@ -1367,6 +1378,28 @@ impl Program {
             }
             _ => matches!(tr, "Copy" | "Clone" | "Sized") || self.prim_impls.contains(&(t, tr.to_string())),
         }
+    }
+
+    /// `Y = str, Z = S` (the arguments of `dyn Tr<..>`): each binding's type meets the bounds the trait declares
+    /// for it (types other than a primitive, `str` or a struct name are not checked)
+    fn dyn_bindings_ok(&self, tr: &str, args: &str) -> bool {
+        if self.assoc_bounds.is_empty() {
+            return true;
+        }
+        args.split(',').all(|a| {
+            let Some((n, t)) = a.split_once('=') else { return true };
+            let (n, t) = (n.trim(), t.trim());
+            let Some(bs) = self.assoc_bounds.get(&(tr.to_string(), n.to_string())) else { return true };
+            let ty = match Ty::prim(t) {
+                Some(p) => p,
+                None if t == "str" => Ty::Str,
+                None => match self.struct_index.get(t) {
+                    Some(&sid) => Ty::Struct(sid),
+                    None => return true,
+                },
+            };
+            bs.iter().all(|b| self.implements(ty, b))
+        })
     }
 
     fn auto_trait(&self, t: Ty, sync: bool, d: u32) -> bool {

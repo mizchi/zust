@@ -144,6 +144,7 @@ crate::enc_struct!(Summary {
     aliases,
     where_types,
     impl_trait_args,
+    assoc_bounds,
 });
 crate::enc_struct!(AssocSyn {
     name,

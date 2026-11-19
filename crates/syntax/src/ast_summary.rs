@@ -1337,7 +1337,15 @@ pub fn parse_and_summarize(src: &str, it: &SrcItem, owner: Option<&Owner>) -> R<
     if let LexKind::TraitMember(_) = it.kind {
         let ow = owner.ok_or("trait member without trait")?;
         match &item.kind {
-            // `type Item;` (関連型の宣言) は何も持たない
+            // `type Item: Clone;` (関連型の宣言): its bounds (a binding `dyn Tr<Item = T>` must meet them)
+            ItemKind::Type(n, _, bs, None) if !bs.is_empty() => {
+                let names = bound_names(bs)?;
+                let mut sm = Summary::default();
+                if !names.is_empty() {
+                    sm.assoc_bounds.push((ow.base.clone(), n.clone(), names));
+                }
+                return Ok(sm);
+            }
             ItemKind::Type(..) => return Ok(Summary::default()),
             // `const K: i32 = 3;` (既定値があれば `Trait::K` という const)
             ItemKind::Const(n, t, e) => {
