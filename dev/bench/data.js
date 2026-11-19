@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795101809919,
+  "lastUpdate": 1795103990387,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -23213,6 +23213,165 @@ window.BENCHMARK_DATA = {
           {
             "name": "rt/strings run (-O)",
             "value": 34.437,
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "committer": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "distinct": true,
+          "id": "f4f96cfd1ea6752b2fda82fa9bd8f3443ac84402",
+          "message": "A program's own Iterator / Iter / Add / Hasher ..: renamed against the prelude's; impls for &[T; N]\n\n- A struct / enum / trait / union the program defines under a name the prelude also defines, and the compiler refers\n  to by name (`Iterator`, `Iter`, `Add`, `Hasher`, `HashMap`, `Copy` ..), collided with the prelude's (\"duplicate\n  definition of `Iterator::next`\"). The program's own is renamed `__u_<name>` in its source (not inside strings,\n  comments or attributes, nor where a `std::` / `core::` / `alloc::` path names the std one); derive(Debug),\n  `type_name` and diagnostics print the name as written. The collisions are found on the split items (the prelude's\n  type names come from build.rs), and the source is split again only when there is one.\n- `impl<'a, T> Tr for &'a [T; 3]` (or `&[T]`) of a trait of the program's meets a bound `X: Tr` (the self type is\n  kept with the impl's parameters and matched), and prim_method finds such an impl's methods for a reference type.\n\ntests/ui: 16 newly passing (run-pass associated-types/associated-types-impl-redirect.rs, associated-types-where-\nclause-impl-ambiguity.rs, issue-25700-2.rs, iterators/iter-map-fold-type-length.rs, methods/method-normalize-bounds-\nissue-20604.rs, self/explicit-self-generic.rs, traits/inheritance/subst.rs, subst2.rs; check-pass\nassociated-types/issue-19081.rs, drop/lint-if-let-rescope-false-positives.rs, lazy-type-alias-impl-trait/\ninfer_cross_function.rs, lifetimes/unconstrained-lifetime-in-impl-bound.rs; compile-fail async-await/issue-67651.rs,\ngenerics/generic-impl-more-params-with-defaults.rs, generic-type-more-params-with-defaults.rs,\ntraits/trait-selection-ice-84727.rs), 0 regressions. Not added (fail at the annotated line for another reason):\nsuggestions/dont-wrap-ambiguous-receivers.rs, generics/generic-type-less-params-with-defaults.rs.\nKPIs: traits edit +0.14%, crates no-op +0.12%, edit +0.15% (the look at each item's name).\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-19T15:54:51Z",
+          "tree_id": "462f2cca21ef285d35b27347d3fa841f017756e6",
+          "url": "https://github.com/mizchi/zust/commit/f4f96cfd1ea6752b2fda82fa9bd8f3443ac84402"
+        },
+        "date": 1795103989861,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "gen1000 build cold",
+            "value": 155.073,
+            "unit": "ms"
+          },
+          {
+            "name": "gen1000 build noop",
+            "value": 1.155,
+            "unit": "ms"
+          },
+          {
+            "name": "gen1000 build edit 1 fn",
+            "value": 24.92,
+            "unit": "ms"
+          },
+          {
+            "name": "gen1000 check",
+            "value": 122.933,
+            "unit": "ms"
+          },
+          {
+            "name": "gen1000 build cold peak RSS",
+            "value": 17.816,
+            "unit": "MiB"
+          },
+          {
+            "name": "gen1000 binary",
+            "value": 323.977,
+            "unit": "KiB"
+          },
+          {
+            "name": "gen1000 cache",
+            "value": 387.21,
+            "unit": "KiB"
+          },
+          {
+            "name": "gen1000 build noop instructions",
+            "value": 0.728,
+            "unit": "M instr"
+          },
+          {
+            "name": "gen1000 build edit 1 fn instructions",
+            "value": 133.487,
+            "unit": "M instr"
+          },
+          {
+            "name": "gen1000 check instructions",
+            "value": 784.776,
+            "unit": "M instr"
+          },
+          {
+            "name": "gen5000 build cold",
+            "value": 682.933,
+            "unit": "ms"
+          },
+          {
+            "name": "gen5000 build noop",
+            "value": 1.103,
+            "unit": "ms"
+          },
+          {
+            "name": "gen5000 build edit 1 fn",
+            "value": 84.359,
+            "unit": "ms"
+          },
+          {
+            "name": "gen5000 check",
+            "value": 604.91,
+            "unit": "ms"
+          },
+          {
+            "name": "gen5000 build cold peak RSS",
+            "value": 51.98,
+            "unit": "MiB"
+          },
+          {
+            "name": "gen5000 binary",
+            "value": 1558.336,
+            "unit": "KiB"
+          },
+          {
+            "name": "gen5000 cache",
+            "value": 1902.835,
+            "unit": "KiB"
+          },
+          {
+            "name": "gen5000 build noop instructions",
+            "value": 0.728,
+            "unit": "M instr"
+          },
+          {
+            "name": "gen5000 build edit 1 fn instructions",
+            "value": 626.631,
+            "unit": "M instr"
+          },
+          {
+            "name": "gen5000 check instructions",
+            "value": 3870.307,
+            "unit": "M instr"
+          },
+          {
+            "name": "rt/fib run (-O)",
+            "value": 72.679,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/hashmap run (-O)",
+            "value": 110.402,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/matmul run (-O)",
+            "value": 46.674,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/nbody run (-O)",
+            "value": 91.578,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/sieve run (-O)",
+            "value": 91.911,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/sort run (-O)",
+            "value": 232.255,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/strings run (-O)",
+            "value": 76.604,
             "unit": "ms"
           }
         ]
