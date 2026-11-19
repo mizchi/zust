@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795055042303,
+  "lastUpdate": 1795055044196,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -28367,6 +28367,70 @@ window.BENCHMARK_DATA = {
           {
             "name": "tests/ui compile-fail passing",
             "value": 2841,
+            "unit": "tests"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "committer": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "distinct": true,
+          "id": "509b25d33c853d3755e53cb708152162097cb084",
+          "message": "Check the bindings of `dyn Tr<Y = T>` against `type Y: Bound;`\n\nA trait's associated type declarations with bounds are now in the item summary\n(empty for other items: the cache size is unchanged), and `dyn Tr<Y = T>` meets a\n`Tr` bound only when T meets Y's bounds (T a primitive, `str` or a struct name).\ntests/ui compile-fail +3 (three of the tests the previous commit took out of the\nbaseline now pass for the right reason). KPIs unchanged.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-19T02:09:41Z",
+          "tree_id": "a634ee5799f893823b4718fa2cfa676be039130b",
+          "url": "https://github.com/mizchi/zust/commit/509b25d33c853d3755e53cb708152162097cb084"
+        },
+        "date": 1795055043802,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tests/ui run-pass pass rate",
+            "value": 63.61,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui run-pass passing",
+            "value": 1535,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui check-pass pass rate",
+            "value": 70.23,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui check-pass passing",
+            "value": 1269,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui build-pass pass rate",
+            "value": 65.19,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui build-pass passing",
+            "value": 88,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui compile-fail pass rate",
+            "value": 38.65,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui compile-fail passing",
+            "value": 2844,
             "unit": "tests"
           }
         ]
