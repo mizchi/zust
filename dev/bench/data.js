@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795105419126,
+  "lastUpdate": 1795105421674,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -45612,6 +45612,85 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/mizchi/zust/commit/a55841b018ebe2907ed9533c7ff118beced2964b"
         },
         "date": 1795104727761,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "parity documentSymbol (名前の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity workspace/symbol (上位 20 の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity definition (行き先の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity hover (名前を含む)",
+            "value": 85,
+            "unit": "%"
+          },
+          {
+            "name": "parity references (数の一致)",
+            "value": 91.429,
+            "unit": "%"
+          },
+          {
+            "name": "parity documentHighlight (数の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity rename (書き換えの一致)",
+            "value": 86.667,
+            "unit": "%"
+          },
+          {
+            "name": "parity signatureHelp (名前・引数の数・今の引数の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity completion `x.\\|` (書いてある名前を含む)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity completion `na\\|me` (同)",
+            "value": 87.5,
+            "unit": "%"
+          },
+          {
+            "name": "parity 一致の平均",
+            "value": 95.06,
+            "unit": "%"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "committer": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "distinct": true,
+          "id": "ad709059a4e804ea9d64d9f24778af0d645db59f",
+          "message": "GATs with lifetime arguments; a trait's default fns through blanket impls; T::f in a generic body\n\n- `Self::F<'a>` (a generic associated type whose arguments are lifetimes) is the associated type `Self::F`\n  (\"cannot find type `F`\" before).\n- `<i32 as Fun>::id(3)` / `T::id(4)` with `impl<T> Fun for T {}`: the trait's default fn is found for a type that\n  implements the trait (it was looked for among the type's own methods only).\n- `T::identity(t)` where T is still a parameter: the one trait fn of that name.\n\ntests/ui: 21 newly passing (16 check-pass and 2 run-pass under generic-associated-types, async-await, borrowck,\nhigher-ranked, impl-trait, derives; compile-fail borrowck/trait-impl-argument-difference-ice.rs,\ncoercion/hr_alias_normalization_leaking_vars.rs, generic-associated-types/issue-68648-2.rs). Removed (they failed on\nthe unresolved GAT, not on what they test): compile-fail generic-associated-types/\ngeneric_associated_type_undeclared_lifetimes.rs, wf/issue-103573.rs. Not added (lifetime errors zustc does not\ncheck): generic-associated-types/issue-74684-1.rs, issue-74684-2.rs, projection-type-lifetime-mismatch.rs.\nKPIs: no change outside noise.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-19T16:18:35Z",
+          "tree_id": "ef9e0e873261d67e0ada5630fdcfa218437abeac",
+          "url": "https://github.com/mizchi/zust/commit/ad709059a4e804ea9d64d9f24778af0d645db59f"
+        },
+        "date": 1795105421185,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
