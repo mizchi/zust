@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795126678867,
+  "lastUpdate": 1795126680950,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -62128,6 +62128,70 @@ window.BENCHMARK_DATA = {
           {
             "name": "tests/ui compile-fail passing",
             "value": 3322,
+            "unit": "tests"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "committer": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "distinct": true,
+          "id": "a0a6c394573e872bf3ce337883a4b074a167b3aa",
+          "message": "Debug of raw pointers: the address in hex\n\n`{:?}` of a `*const T` / `*mut T` (or a reference to one, as\nassert_eq! formats it) prints `0x..`, padded by the spec's width and\nalignment, through a prelude helper (`__exr_fmt_ptr`) that is selected\nonly when the program writes `*const` or `*mut`.\n\ntests/ui: +8 genuine run-pass passes.\nKPI: within noise (all deltas <= +0.09%).\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-19T22:12:52Z",
+          "tree_id": "caddeee9ab1cb031653244736374d9bc03c8ed21",
+          "url": "https://github.com/mizchi/zust/commit/a0a6c394573e872bf3ce337883a4b074a167b3aa"
+        },
+        "date": 1795126680493,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tests/ui run-pass pass rate",
+            "value": 71.11,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui run-pass passing",
+            "value": 1696,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui check-pass pass rate",
+            "value": 77.86,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui check-pass passing",
+            "value": 1407,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui build-pass pass rate",
+            "value": 70.37,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui build-pass passing",
+            "value": 95,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui compile-fail pass rate",
+            "value": 45.13,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui compile-fail passing",
+            "value": 3321,
             "unit": "tests"
           }
         ]
