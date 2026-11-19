@@ -26,7 +26,7 @@
 
 ## Status
 
-Numbers measured <!-- measured -->2026-11-19, fb2070b<!-- /measured --> by CI on each push to main (bench.yml runs
+Numbers measured <!-- measured -->2026-11-19, 5e449f6<!-- /measured --> by CI on each push to main (bench.yml runs
 `bench/ci_bench.py` and `bench/rust_ui.py`, then `scripts/update_readme.py` writes them here). Times come from shared
 GitHub Actions runners and vary by about ±20%; the instruction counts (valgrind) do not.
 
@@ -38,10 +38,10 @@ only the tests it can be asked to handle (no nightly features, auxiliary crates 
 <!-- auto:ui -->
 | kind | applicable | pass |
 |---|---:|---:|
-| run-pass (builds, runs, same output) | 2385 | 1678 (70.4%) |
-| check-pass (accepted by `zustc check`) | 1807 | 1404 (77.7%) |
+| run-pass (builds, runs, same output) | 2385 | 1679 (70.4%) |
+| check-pass (accepted by `zustc check`) | 1807 | 1405 (77.8%) |
 | build-pass | 135 | 95 (70.4%) |
-| compile-fail (rejected at an annotated line) | 7358 | 3323 (45.2%) |
+| compile-fail (rejected at an annotated line) | 7358 | 3324 (45.2%) |
 <!-- /auto:ui -->
 
 [What is supported](#what-is-supported) breaks this down by area.
@@ -53,22 +53,22 @@ Build speed, build cache size and LSP latency on generated programs of 1000 / 50
 <!-- auto:kpi -->
 | KPI | gen1000 | gen5000 |
 |---|---:|---:|
-| cold build | 154 ms | 685 ms |
-| no-op build | 1.3 ms | 1.2 ms |
-| build after editing one function | 25.4 ms | 86.8 ms |
-| `check` | 125 ms | 599 ms |
+| cold build | 120 ms | 542 ms |
+| no-op build | 0.9 ms | 0.9 ms |
+| build after editing one function | 17.8 ms | 67.3 ms |
+| `check` | 80 ms | 392 ms |
 | no-op build (instructions) | 0.7 M | 0.7 M |
-| edit one function (instructions) | 133.9 M | 628.3 M |
-| `check` (instructions) | 788.0 M | 3875.1 M |
+| edit one function (instructions) | 133.9 M | 632.3 M |
+| `check` (instructions) | 786.9 M | 3874.7 M |
 | build cache on disk | 387.2 KiB | 1902.8 KiB |
 | binary | 324.0 KiB | 1558.3 KiB |
-| cold build peak RSS | 17.9 MiB | 52.0 MiB |
+| cold build peak RSS | 17.9 MiB | 52.2 MiB |
 
 | zust-analyzer (zustc's own sources) | |
 |---|---:|
-| p50: definition, hover, completion, references, rename | 0.76 ms / 0.56 ms / 1.07 ms / 5.46 ms / 0.56 ms |
-| startup until indexed | 142 ms |
-| peak RSS | 72.2 MiB |
+| p50: definition, hover, completion, references, rename | 0.52 ms / 0.39 ms / 0.91 ms / 4.44 ms / 0.41 ms |
+| startup until indexed | 115 ms |
+| peak RSS | 72.4 MiB |
 <!-- /auto:kpi -->
 
 Every change is also measured on its own with `python3 bench/kpi_track.py`, so that small increases that add up stay
@@ -332,10 +332,10 @@ the measured numbers. The [reports](docs/reports/) explain each step.
 
 ### Overall
 
-- [x] tests/ui run-pass: <!-- total:run-pass -->70.4% (1678 / 2385)
-- [x] tests/ui check-pass: <!-- total:check-pass -->77.7% (1404 / 1807)
+- [x] tests/ui run-pass: <!-- total:run-pass -->70.4% (1679 / 2385)
+- [x] tests/ui check-pass: <!-- total:check-pass -->77.8% (1405 / 1807)
 - [x] tests/ui build-pass: <!-- total:build-pass -->70.4% (95 / 135)
-- [ ] tests/ui compile-fail (an error on an annotated line): <!-- total:compile-fail -->45.2% (3323 / 7358)
+- [ ] tests/ui compile-fail (an error on an annotated line): <!-- total:compile-fail -->45.2% (3324 / 7358)
 - [x] real crates: fnv, adler2, hex, itoa, rustc-hash and cfg-if build and give the same output (6 / 6)
 - [x] zust-analyzer answers like rust-analyzer: 95.4% (rust-analyzer: 96.2%)
 
@@ -345,7 +345,7 @@ the measured numbers. The [reports](docs/reports/) explain each step.
 - [x] `for` / `while` / `loop`, labels: <!-- ui:for-loop-while,loops,label -->91.7%
 - [x] enums, `#[repr(u8)]`, auto-sized tags: <!-- ui:enum,enum-discriminant -->83.3%
 - [x] `cfg`: <!-- ui:cfg -->81.2%
-- [x] bindings, patterns, slice patterns, or-patterns (also with guards): <!-- ui:binding,pattern,or-patterns -->85.9%
+- [x] bindings, patterns, slice patterns, or-patterns (also with guards): <!-- ui:binding,pattern,or-patterns -->86.5%
 - [x] `match`: <!-- ui:match -->82.9%
 - [x] name resolution: <!-- ui:resolve -->82.9%
 - [x] statics: ints, floats, raw pointers, fn pointers, `const fn` calls: <!-- ui:statics -->75.0%
