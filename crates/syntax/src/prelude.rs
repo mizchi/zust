@@ -1528,6 +1528,8 @@ pub fn select_with(user_src: &str, user_items: &[SrcItem], cache: &mut SelectCac
                 }
                 if is_op_trait(h as usize)
                     && !all[h as usize].0.idents.iter().any(|&(a, b)| op_impls.contains(&&PRELUDE[a as usize..b as usize]))
+                    // (the Error trait for the prelude's own `impl Error for IoError ..`)
+                    && !(name.as_deref() == Some("__err_mark") && need.contains("Error"))
                 {
                     continue;
                 }
@@ -1595,8 +1597,17 @@ pub fn select_with(user_src: &str, user_items: &[SrcItem], cache: &mut SelectCac
             {
                 continue;
             }
+            // (`impl Error for IoError { fn __err_mark .. }`: when the program names Error and that type)
+            // (and the trait itself with them)
+            let err_impl = name.as_deref() == Some("__err_mark")
+                && need.contains("Error")
+                && match it.kind {
+                    ItemKind::ImplMember(h) => all[h as usize].0.idents.get(3).is_some_and(|&(a, b)| need.contains(&PRELUDE[a as usize..b as usize])),
+                    ItemKind::TraitMember(_) => true,
+                    _ => false,
+                };
             // バリアント名 (Some など) で enum が要る
-            let wanted = drop_member || match name {
+            let wanted = err_impl || drop_member || match name {
                 Some(n) => need.contains(n.as_str()),
                 None => false,
             } || (name.as_deref() == Some("Option")

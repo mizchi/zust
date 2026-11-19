@@ -3449,6 +3449,15 @@ impl Program {
         if let Some(r) = self.fn_by_p_inner(p, self_sid) {
             return Some(r);
         }
+        // (`str::from_utf8` with `use core::str;`: the module's fn, as `std::str::from_utf8`)
+        if p.segs.len() == 2 && !p.global && matches!(p.segs[0].name.as_str(), "str" | "char") && !p.segs[0].args {
+            let mut q = p.clone();
+            q.segs.insert(0, q.segs[0].clone());
+            q.segs[0].name = "core".into();
+            if let Some(r) = self.fn_by_p_inner(&q, self_sid).or_else(|| self.strip_mods_p(&q).and_then(|q| self.fn_by_p_inner(&q, self_sid))) {
+                return Some(r);
+            }
+        }
         let q = self.strip_mods_p(p)?;
         self.fn_by_p_inner(&q, self_sid)
     }

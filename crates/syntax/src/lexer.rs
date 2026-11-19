@@ -383,6 +383,33 @@ pub fn split(src: &str) -> Result<Vec<SrcItem>, String> {
         return Err("unterminated impl block".into());
     }
     if let Some((sp, ln, ..)) = st.cur {
+        // (attributes with no item after them at the end: those of a `macro_rules!` that expansion took out
+        // (`#[macro_export] macro_rules! m { .. }` last in a file))
+        let mut rest = std::str::from_utf8(&s[sp as usize..]).unwrap_or("").trim_start();
+        while let Some(r) = rest.strip_prefix("#[") {
+            let mut d = 1;
+            let mut end = None;
+            for (i, c) in r.char_indices() {
+                match c {
+                    '[' => d += 1,
+                    ']' => {
+                        d -= 1;
+                        if d == 0 {
+                            end = Some(i);
+                            break;
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            match end {
+                Some(e) => rest = r[e + 1..].trim_start(),
+                None => break,
+            }
+        }
+        if rest.is_empty() {
+            return Ok(items);
+        }
         return Err(format!(
             "{ln}:1: unterminated item starting here (byte {sp})"
         ));

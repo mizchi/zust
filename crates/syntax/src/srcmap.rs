@@ -117,8 +117,22 @@ fn load_file(path: &Path, display: &str, mod_dir: &Path, disp_dir: &str, start: 
         return Ok(text);
     }
     text.push('\n');
-    for (name, is_cfg_test) in kids {
-        let _ = is_cfg_test;
+    for (name, path_attr) in kids {
+        // (`#[path = "x.rs"] mod m;`: that file, beside this one; its own modules are beside it too)
+        if let Some(pa) = path_attr {
+            let here = path.parent().unwrap_or(Path::new("."));
+            let p = here.join(pa.as_str());
+            map.probes.push(p.clone());
+            let disp = join_disp(disp_dir, &pa);
+            let sub = p.parent().map(|d| d.to_path_buf()).unwrap_or_default();
+            text.push_str(&format!("pub mod {name} {{\n"));
+            let at = start + line_count(&text);
+            let body = load_file(p.as_path(), &disp, sub.as_path(), disp_dir, at, map, cfg)?;
+            text.push_str(&body);
+            text.push_str("\n}\n");
+            map.segs.push((start + line_count(&text) - 1, fi, 1 + line_count(&src)));
+            continue;
+        }
         let a = mod_dir.join(format!("{name}.rs").as_str());
         let b = mod_dir.join(name.as_str()).join("mod.rs");
         map.probes.push(a.clone());
@@ -146,7 +160,7 @@ fn join_disp(dir: &str, rest: &str) -> String {
 }
 
 /// トップレベルの `[pub[(..)]] mod x;` を空白にし、(名前, #[cfg(test)] か) の列を返す。`#[cfg(test)]` のものは読まない
-fn blank_mod_decls(src: &str) -> Result<(String, Vec<(String, bool)>), String> {
+fn blank_mod_decls(src: &str) -> Result<(String, Vec<(String, Option<String>)>), String> {
     if !src.contains("mod") {
         return Ok((src.to_string(), vec![]));
     }
@@ -181,6 +195,7 @@ fn blank_mod_decls(src: &str) -> Result<(String, Vec<(String, bool)>), String> {
                 b -= 1;
             }
             let mut cfg_test = false;
+            let mut path_attr: Option<String> = None;
             while b >= 1 && is_sym(b - 1, b']') {
                 let mut j = b - 1;
                 while j > 0 && !is_sym(j, b'[') {
@@ -190,6 +205,15 @@ fn blank_mod_decls(src: &str) -> Result<(String, Vec<(String, bool)>), String> {
                     let attr = &src[toks[j].1..toks[b - 1].2];
                     if attr.contains("cfg") && attr.contains("test") {
                         cfg_test = true;
+                    }
+                    // (`#[path = "bool.rs"]`: the file to read, relative to this file's directory)
+                    let a = attr.trim_start_matches('[').trim();
+                    if let Some(r) = a.strip_prefix("path") {
+                        if let (Some(i), Some(j)) = (r.find('"'), r.rfind('"')) {
+                            if j > i {
+                                path_attr = Some(r[i + 1..j].to_string());
+                            }
+                        }
                     }
                     b = j - 1;
                 } else {
@@ -202,7 +226,7 @@ fn blank_mod_decls(src: &str) -> Result<(String, Vec<(String, bool)>), String> {
                 }
             }
             if !cfg_test {
-                kids.push((String::from_utf8_lossy(tok(k + 1)).into_owned(), false));
+                kids.push((String::from_utf8_lossy(tok(k + 1)).into_owned(), path_attr));
             }
             k += 3;
             continue;

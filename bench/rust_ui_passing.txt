@@ -3642,12 +3642,14 @@ run-pass	modules/mod-view-items.rs
 run-pass	modules/mod_dir_implicit.rs
 run-pass	modules/mod_file.rs
 compile-fail	modules/mod_file_correct_spans.rs
+run-pass	modules/mod_file_with_path_attr.rs
 run-pass	modules/module-qualified-paths-basic.rs
 run-pass	modules/module-super-access.rs
 run-pass	modules/nested-modules-basic.rs
 check-pass	modules/path-attr-inner-attr-nested-mod-rs/path-attr-inner-attr-nested-mod-rs.rs
 check-pass	modules/pub-use-handling-in-modules-56128.rs
 check-pass	modules/pub-use-module-alias-5950.rs
+run-pass	modules/special_module_name_ignore.rs
 run-pass	modules/use-statement-duplicate-check-7663.rs
 compile-fail	moves/arc-consumed-in-looped-closure.rs
 compile-fail	moves/invalid-suggestions-destructuring-assignment-drop.rs
@@ -5110,6 +5112,7 @@ check-pass	rfcs/rfc-2396-target_feature-11/closures-inherit-target_feature.rs
 check-pass	rfcs/rfc-2396-target_feature-11/issue-108655-inline-always-closure.rs
 check-pass	rfcs/rfc-2396-target_feature-11/issue-99876.rs
 run-pass	rfcs/rfc-2421-unreserve-pure-offsetof-sizeof-alignof/offsetof-alignof-sizeof-pure-can-be-used-as-idents.rs
+check-pass	rfcs/rfc-2457-non-ascii-idents/mod_file_nonascii_with_path_allowed.rs
 check-pass	rfcs/rfc-2457-non-ascii-idents/mod_inline_nonascii_allowed.rs
 check-pass	rfcs/rfc-2457-non-ascii-idents/utf8_idents.rs
 run-pass	rfcs/rfc-2497-if-let-chains/ast-lowering-does-not-wrap-let-chains.rs
