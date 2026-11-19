@@ -487,7 +487,8 @@ fn owner(h: usize) -> Option<&'static str> {
                         | "HashSet" | "SetIntoIter" | "BTreeMap" | "BTreeSet" | "BtEntry" | "BtIter" | "BtIterMut"
                         | "BtIntoIter" | "VecDeque" | "DqIter" | "DqIntoIter" | "f64" | "f32" | "ParseFloatError" | "i128" | "u128" | "FromUtf8Error" | "Utf8Error" | "Rc" | "Arc" | "ManuallyDrop" | "Pin" | "NonNull" | "UnsafeCell" | "RefCell" | "Cell" | "JoinHandle" | "__Sndr" | "__SyncSndr" | "__Rcvr__" | "__RecvIter" | "AtomicUsize" | "AtomicIsize" | "AtomicU8" | "AtomicU16" | "AtomicU32" | "AtomicU64" | "AtomicI8" | "AtomicI16" | "AtomicI32" | "AtomicI64" | "AtomicBool" | "OnceLock" | "Mutex" | "MutexGuard" | "RangeFrom" | "TryFromIntError" | "TryFromSliceError" | "Stdin" | "StdinLock" | "StdinLines" | "Stdout" | "StdoutLock"
                         | "BufWriter" | "IoError" | "__DynError" | "Args" | "DefaultHasher" | "VarError"
-                        | "PathBuf" | "__PathExt" | "__AsPathStr" | "Command" | "__ExitStatus" | "Cow" | "__CowStr" => Some(w),
+                        | "PathBuf" | "__PathExt" | "__AsPathStr" | "Command" | "__ExitStatus" | "Cow" | "__CowStr"
+                        | "Duration" | "AtomicPtr" | "RangeTo" | "RangeToInclusive" | "Fuse" => Some(w),
                         // HashMap のイテレータ (HmIter など) は HashMap を使うときだけ
                         w if w.starts_with("Hm") => Some("HashMap"),
                         _ => None,
@@ -503,8 +504,13 @@ fn defined_name(src: &str, it: &SrcItem) -> Option<String> {
     let mut ids = it.idents.iter().map(|&(a, b)| &src[a as usize..b as usize]);
     // (型の別名 `pub type Path = str;` も。impl の中の関連型 `type Item` は除く)
     let alias = matches!(it.kind, ItemKind::Normal);
-    ids.find(|w| matches!(*w, "fn" | "struct" | "enum" | "static") || (alias && *w == "type"))?;
-    ids.next().map(|s| s.strip_prefix("__core_").unwrap_or(s).to_string())
+    // (関連定数 `const ZERO: Duration` も。`const fn` は fn の名前)
+    ids.find(|w| matches!(*w, "fn" | "struct" | "enum" | "static" | "const") || (alias && *w == "type"))?;
+    let mut n = ids.next()?;
+    if n == "fn" {
+        n = ids.next()?;
+    }
+    Some(n.strip_prefix("__core_").unwrap_or(n).to_string())
 }
 
 /// ユーザのコードから (識別子を辿って) 使われうる prelude のアイテムだけを、ソースとして返す。
@@ -514,7 +520,8 @@ fn defined_name(src: &str, it: &SrcItem) -> Option<String> {
 const SHADOWABLE: &[&str] = &[
     "Chain", "Entry", "Enumerate", "Filter", "FilterMap", "Map", "OptIter", "Scan", "Skip", "Take", "TakeWhile", "Zip",
     "Command", "Mutex", "VarError", "Rev", "StepBy", "Peekable", "Cloned", "Flatten", "FlatMap", "Inspect", "SkipWhile",
-    "PathBuf", "Args", "BufWriter", "Pin",
+    "PathBuf", "Args", "BufWriter", "Pin", "Duration", "Fuse", "Empty", "RangeTo", "RangeToInclusive", "RangeFull",
+    "AtomicPtr", "TryReserveError",
 ];
 
 pub fn rename_shadowed(user_src: &str, prelude: String) -> String {
@@ -750,6 +757,15 @@ pub fn select_with(user_src: &str, user_items: &[SrcItem], cache: &mut SelectCac
     // (std のプログラムは panic のハンドラを必ず使うので、何も使わなくても prelude を付ける)
     if need.is_empty() && sc.has("no_std") {
         return String::new();
+    }
+    // (Duration is not in std's prelude: without `time` written (`use std::time::Duration` / `time::Duration`),
+    // `Duration` is the program's own or an error)
+    if need.contains("Duration") && !sc.has("time") {
+        need.remove("Duration");
+    }
+    // (`iter::Empty` likewise: `Empty` alone is usually a variant of the program's own enum)
+    if need.contains("Empty") && !sc.has("iter::") {
+        need.remove("Empty");
     }
     // (`a.zip(&v)` / `a.chain([x])`: 引数の Vec / 配列は codegen が `.iter()` / `.into_iter()` にする)
     if need.contains("zip") || need.contains("chain") {
@@ -1001,6 +1017,10 @@ pub fn select_with(user_src: &str, user_items: &[SrcItem], cache: &mut SelectCac
         need.extend(["__exr_rt_init", "__exr_on_trap", "__exr_sigaction", "__EXR_TRAP_TABLE", "__EXR_KIND_MSG", "__EXR_KIND_OFF", "__EXR_SA", "__exr_err_num", "__exr_panic_index", "__exr_tab_uv", "__EXR_CALLER", "__exr_tab_file", "__exr_panic_head_at", "__exr_trap_search"]);
 
     }
+    // (Duration の as_millis / as_micros / as_nanos は u128 を返す)
+    if need.contains("Duration") && (need.contains("as_millis") || need.contains("as_micros") || need.contains("as_nanos")) {
+        need.insert("u128");
+    }
     // (`42u128` の接尾辞は識別子として現れない)
     for t in ["u128", "i128"] {
         if sc.has(t) {
@@ -1116,7 +1136,9 @@ pub fn select_with(user_src: &str, user_items: &[SrcItem], cache: &mut SelectCac
         }
         found
     });
-    if float_named || float_lit {
+    // (`d.as_secs_f64()`: the float comes from the prelude's Duration)
+    let float_dur = need.contains("Duration") && (sc.has("_f64") || sc.has("_f32"));
+    if float_named || float_lit || float_dur {
         need.extend(["__exr_fmt_float", "__exr_powi", "__exr_powif", "__exr_ordering"]);
         // (`f64::max` などのパス: 名前の後ろが一致する wrapper)
         for (a, bb) in [("f64", "__exr_f64_"), ("f32", "__exr_f32_")] {
@@ -1280,8 +1302,16 @@ pub fn select_with(user_src: &str, user_items: &[SrcItem], cache: &mut SelectCac
     if !sc.has("no_std") && need.contains("__exr_formatter") {
         need.insert("__exr_panic_fmt");
     }
+    let mut dur_ops = false;
     loop {
         let mut changed = false;
+        // (prelude の Duration は + - * / と += -= を impl する: Duration は `thread::sleep` の引数としても
+        // 選ばれるので、ループの中で見る)
+        if !dur_ops && need.contains("Duration") {
+            dur_ops = true;
+            op_impls.extend(["Add", "Sub", "Mul", "Div", "AddAssign", "SubAssign"]);
+            need.extend(["add", "sub", "mul", "div", "add_assign", "sub_assign"]);
+        }
         for (i, (it, name, core_only)) in all.iter().enumerate() {
             if chosen[i] || matches!(it.kind, ItemKind::ImplHeader | ItemKind::TraitHeader) {
                 continue;
