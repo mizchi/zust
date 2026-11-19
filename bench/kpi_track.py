@@ -1,0 +1,162 @@
+#!/usr/bin/env python3
+"""Measure the KPIs after one change and append them to bench/kpi_log.tsv, so that what each change did, and how far
+the KPIs have drifted in total, stays visible (small increases add up).
+
+usage: python3 bench/kpi_track.py "short label of the change" [--lsp] [--dry-run]
+(run from the repository root after cargo build --release --workspace; with tests/ui numbers, run
+ bench/rust_ui.py first: its out/rust_ui.json is read)
+
+Only deterministic numbers are logged (wall-clock times move by 10-30% between runs on a shared machine):
+- gen5000 (bench/gen.py, 5000 fns): instructions of a no-op build, a build after editing one function, and `check`,
+  counted by cachegrind; and the build cache size. The work directory is always ~/.cache/zust-kpi-track (whatever
+  checkout runs it), so paths do not change the counts.
+- with --lsp: the instructions of one zust-analyzer session of bench/lsp_parity.py on zustc's own sources (slow).
+- tests/ui pass counts from out/rust_ui.json, when it is newer than target/release/zustc.
+
+Each run prints the change against the previous row and against the first row (the reference), and rewrites
+bench/kpi_log.md from the log.
+"""
+import argparse, datetime, json, os, shutil, subprocess, sys
+
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, os.path.join(ROOT, "bench"))
+from ci_bench import ZUSTC, gen, instructions, run_measured  # noqa: E402
+
+LOG = os.path.join(ROOT, "bench/kpi_log.tsv")
+MD = os.path.join(ROOT, "bench/kpi_log.md")
+# (a fixed place, whichever checkout runs this: the source path goes into the build and its counts)
+WORK = os.environ.get("ZUST_KPI_WORK") or os.path.expanduser("~/.cache/zust-kpi-track")
+COLS = ["date", "commit", "change", "noop_M", "edit_M", "check_M", "cache_KiB", "lsp_G", "run", "check", "build", "cfail"]
+
+
+def build_kpis():
+    d = os.path.join(WORK, "gen5000")
+    shutil.rmtree(d, ignore_errors=True)
+    os.makedirs(d)
+    src, exe = os.path.join(d, "p.rs"), os.path.join(d, "p")
+    build = [ZUSTC, src, "-o", exe]
+    gen(5000, 0, src)
+    run_measured(build)
+    run_measured(build)
+    noop = instructions(build)
+    gen(5000, 3, src)
+    edit = instructions(build)
+    gen(5000, 0, src)
+    run_measured(build)
+    check = instructions([ZUSTC, "check", src])
+    cache = os.path.getsize(exe + ".crcache2") / 1024
+    return noop, edit, check, cache
+
+
+def lsp_kpi():
+    """instructions (G) of one zust-analyzer session: the server binary is wrapped in cachegrind for one run"""
+    za = os.path.join(ROOT, "target/release/zust-analyzer")
+    real = os.path.join(WORK, "zust-analyzer.real")
+    out = os.path.join(WORK, "lsp.cg")
+    shutil.copy(za, real)
+    try:
+        with open(za + ".wrap", "w") as f:
+            f.write(f'#!/bin/sh\nexec valgrind --tool=cachegrind --cache-sim=no --cachegrind-out-file={out} {real} "$@"\n')
+        os.chmod(za + ".wrap", 0o755)
+        os.replace(za + ".wrap", za)
+        subprocess.run([sys.executable, os.path.join(ROOT, "bench/lsp_parity.py"), "--servers", "zustc", "--targets", "zustc",
+                        "--timeout", "600", "--json", os.path.join(WORK, "lsp.json"), "--out", os.path.join(WORK, "lsp.md")],
+                       check=True, capture_output=True, cwd=ROOT)
+    finally:
+        shutil.copy(real, za)
+    for line in open(out):
+        if line.startswith("summary:"):
+            return int(line.split()[1]) / 1e9
+    return None
+
+
+def ui_counts():
+    j = os.path.join(ROOT, "out/rust_ui.json")
+    if not os.path.exists(j) or os.path.getmtime(j) < os.path.getmtime(ZUSTC):
+        return [None] * 4
+    k = json.load(open(j))["kinds"]
+    return [k[x]["pass"] for x in ("run-pass", "check-pass", "build-pass", "compile-fail")]
+
+
+def read_log():
+    if not os.path.exists(LOG):
+        return []
+    rows = []
+    for line in open(LOG).read().splitlines()[1:]:
+        if line.strip():
+            rows.append(dict(zip(COLS, line.split("\t"))))
+    return rows
+
+
+def num(r, k):
+    v = r.get(k, "")
+    return float(v) if v not in ("", "-", "None") else None
+
+
+def pct(a, b):
+    return "-" if a is None or b is None or b == 0 else f"{(a - b) / b * 100:+.2f}%"
+
+
+def write_md(rows):
+    first = rows[0]
+    out = ["# KPI log (one row per change)",
+           "",
+           "Written by `python3 bench/kpi_track.py` after each change (deterministic counts only; see the script). "
+           "Δ is against the row before, Σ against the first row.",
+           "",
+           "| date | commit | change | no-op build (M instr) | edit one fn (M instr) | check (M instr) | cache (KiB) | LSP session (G instr) | tests/ui run / check / build / compile-fail |",
+           "|---|---|---|---:|---:|---:|---:|---:|---|"]
+    prev = None
+    for r in rows:
+        cells = []
+        for k in ("noop_M", "edit_M", "check_M", "cache_KiB", "lsp_G"):
+            v = num(r, k)
+            if v is None:
+                cells.append("-")
+                continue
+            s = f"{v:.1f}" if k != "lsp_G" else f"{v:.3f}"
+            if prev is not None and num(prev, k) is not None:
+                s += f" (Δ {pct(v, num(prev, k))}, Σ {pct(v, num(first, k))})"
+            cells.append(s)
+        ui = " / ".join(r.get(k, "-") or "-" for k in ("run", "check", "build", "cfail"))
+        out.append(f"| {r['date']} | {r['commit']} | {r['change']} | " + " | ".join(cells) + f" | {ui} |")
+        prev = r
+    open(MD, "w").write("\n".join(out) + "\n")
+
+
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("change")
+    ap.add_argument("--lsp", action="store_true")
+    ap.add_argument("--dry-run", action="store_true")
+    a = ap.parse_args()
+    os.makedirs(WORK, exist_ok=True)
+    noop, edit, check, cache = build_kpis()
+    lsp = lsp_kpi() if a.lsp else None
+    ui = ui_counts()
+    commit = subprocess.run(["git", "rev-parse", "--short", "HEAD"], capture_output=True, text=True, cwd=ROOT).stdout.strip()
+    dirty = subprocess.run(["git", "status", "--porcelain", "--untracked-files=no"], capture_output=True, text=True, cwd=ROOT).stdout.strip()
+    row = {"date": datetime.date.today().isoformat(), "commit": commit + ("+" if dirty else ""), "change": a.change.replace("\t", " "),
+           "noop_M": f"{noop:.3f}", "edit_M": f"{edit:.3f}", "check_M": f"{check:.3f}", "cache_KiB": f"{cache:.1f}",
+           "lsp_G": "-" if lsp is None else f"{lsp:.4f}", "run": str(ui[0] or "-"), "check": str(ui[1] or "-"),
+           "build": str(ui[2] or "-"), "cfail": str(ui[3] or "-")}
+    rows = read_log()
+    prev = rows[-1] if rows else None
+    first = rows[0] if rows else row
+    for k, name in (("noop_M", "no-op build"), ("edit_M", "edit one fn"), ("check_M", "check"), ("cache_KiB", "cache"), ("lsp_G", "LSP session")):
+        v = num(row, k)
+        if v is None:
+            continue
+        print(f"{name:14} {v:12.3f}   Δ {pct(v, num(prev, k)) if prev else '-':>8}   Σ {pct(v, num(first, k)):>8}")
+    if a.dry_run:
+        return
+    new = not os.path.exists(LOG)
+    with open(LOG, "a") as f:
+        if new:
+            f.write("\t".join(COLS) + "\n")
+        f.write("\t".join(row[c] for c in COLS) + "\n")
+    write_md(read_log())
+
+
+if __name__ == "__main__":
+    main()
