@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795121534650,
+  "lastUpdate": 1795121536615,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -50217,6 +50217,85 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/mizchi/zust/commit/afa825835b690b05782057132e6472c76503172c"
         },
         "date": 1795120853421,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "parity documentSymbol (名前の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity workspace/symbol (上位 20 の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity definition (行き先の一致)",
+            "value": 97.143,
+            "unit": "%"
+          },
+          {
+            "name": "parity hover (名前を含む)",
+            "value": 87.5,
+            "unit": "%"
+          },
+          {
+            "name": "parity references (数の一致)",
+            "value": 86.111,
+            "unit": "%"
+          },
+          {
+            "name": "parity documentHighlight (数の一致)",
+            "value": 97.143,
+            "unit": "%"
+          },
+          {
+            "name": "parity rename (書き換えの一致)",
+            "value": 83.333,
+            "unit": "%"
+          },
+          {
+            "name": "parity signatureHelp (名前・引数の数・今の引数の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity completion `x.\\|` (書いてある名前を含む)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity completion `na\\|me` (同)",
+            "value": 92.857,
+            "unit": "%"
+          },
+          {
+            "name": "parity 一致の平均",
+            "value": 94.409,
+            "unit": "%"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "committer": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "distinct": true,
+          "id": "fb2070be86af0e9e7dcb65939b28258f31deb5c0",
+          "message": "Integer literals typed by method resolution; methods through nested Boxes\n\n- `3.double()` / `let x = 3; x.double()` with `impl Double for usize`\n  only: the one integer type whose impl has the method fixes the\n  literal's type (rustc's probe of `{integer}`).\n- `&self` methods of a number reached through `Box<Box<..>>`, and\n  `self: Box<Self>` methods on `Box<number>`.\n\ntests/ui: +4 genuine passes (3 run-pass, 1 compile-fail).\nKPI: unchanged (no-op back within the band).\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-19T20:47:16Z",
+          "tree_id": "8b6d9f169cffd31add21848a84f258dac20932c0",
+          "url": "https://github.com/mizchi/zust/commit/fb2070be86af0e9e7dcb65939b28258f31deb5c0"
+        },
+        "date": 1795121536351,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
