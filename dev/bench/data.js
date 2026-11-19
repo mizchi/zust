@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795114844883,
+  "lastUpdate": 1795114847160,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -35728,6 +35728,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "lsp peak RSS",
             "value": 72.277,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "committer": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "distinct": true,
+          "id": "a3ceff5e1f4e4135adac5a793fd9995ace4875c2",
+          "message": "E0507: moving out of `*x` for an Rc / a Deref type of the program's\n\n`let x = *rc;` (rc: Rc<NonCopy>) was accepted: the place is `*rc.deref()`, reached through the returned reference, so\nno move of a local was seen, and the program freed the value twice. A by-value read of `*x` whose type is not Copy,\nwith x of a Deref type other than Box, is now \"cannot move out of an `Rc`\" / \"cannot move out of dereference of `T`\"\n(reading a Copy value, `(*rc).len()` and `(*rc).clone()` are unchanged). A pattern moving out of `*rc`\n(`let (a,) = *rc;`) is not caught yet.\n\ntests/ui: compile-fail borrowck/borrowck-move-out-of-overloaded-deref.rs passes; 0 regressions. cratebench: same\noutput. KPIs: no change outside noise.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-19T18:56:01Z",
+          "tree_id": "9b493ed4d5412570928eb3b020f3ff6d85028d75",
+          "url": "https://github.com/mizchi/zust/commit/a3ceff5e1f4e4135adac5a793fd9995ace4875c2"
+        },
+        "date": 1795114846710,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "lsp definition p50",
+            "value": 0.54,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp hover p50",
+            "value": 0.392,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp completion p50",
+            "value": 1.057,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp references p50",
+            "value": 4.474,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp rename p50",
+            "value": 0.401,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp signatureHelp p50",
+            "value": 0.881,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp documentHighlight p50",
+            "value": 0.797,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp ready (startup to indexed)",
+            "value": 117.815,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp peak RSS",
+            "value": 72.098,
             "unit": "MiB"
           }
         ]
