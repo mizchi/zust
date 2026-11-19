@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795078825647,
+  "lastUpdate": 1795078827800,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -26380,6 +26380,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "lsp peak RSS",
             "value": 70.625,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "committer": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "distinct": true,
+          "id": "5178a1d99b045bb2683a21fe27de63342104ef71",
+          "message": "rust_ui.py: //~v annotations (one line down per v), as compiletest reads them\n\nA fix of the harness, not of zustc: compile-fail 3275 -> 3293 counts tests whose annotation points down.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-19T08:48:01Z",
+          "tree_id": "6623bfffae96997d7bce526f75c466238e1e354a",
+          "url": "https://github.com/mizchi/zust/commit/5178a1d99b045bb2683a21fe27de63342104ef71"
+        },
+        "date": 1795078827278,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "lsp definition p50",
+            "value": 0.422,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp hover p50",
+            "value": 0.355,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp completion p50",
+            "value": 0.688,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp references p50",
+            "value": 1.397,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp rename p50",
+            "value": 0.611,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp signatureHelp p50",
+            "value": 0.583,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp documentHighlight p50",
+            "value": 0.571,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp ready (startup to indexed)",
+            "value": 85.398,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp peak RSS",
+            "value": 70.574,
             "unit": "MiB"
           }
         ]
