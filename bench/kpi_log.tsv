@@ -21,3 +21,4 @@ date	commit	change	noop_M	edit_M	check_M	cache_KiB	lsp_G	run	check	build	cfail
 2026-11-19	b0a0794	match *x on slices; *slice as a value is E0277	625.241	626.594	3907.294	1902.8	-	1572	1324	94	2858
 2026-11-19	c54a325	match exhaustiveness (E0004)	625.241	626.595	3907.292	1902.8	10.9010	1572	1324	94	2886
 2026-11-19	e44eb9f	qualified paths: trait-default consts, impls for ()	625.245	626.598	3907.428	1902.8	-	1577	1324	94	2885
+2026-11-19	9b7d57d	impl Trait nested in return types	626.673	627.612	3905.348	1902.8	-	1577	1334	94	2883
