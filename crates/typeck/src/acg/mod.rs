@@ -29,6 +29,7 @@ mod p6_match_drop;
 mod p7_fmt_hash_cmp;
 mod p8_misc;
 mod p9_inline;
+mod exhaust;
 pub use p9_inline::{inline_candidate, Inline, MAX_TOKENS};
 #[allow(unused_imports)]
 pub use p1_expr::*;

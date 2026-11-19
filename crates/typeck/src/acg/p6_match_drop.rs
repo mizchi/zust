@@ -95,6 +95,12 @@ impl Cx<'_> {
         let Some(place) = self.bk_scrutinee(scrut, None, &pats)? else {
             return Ok((None, Ty::Never));
         };
+        // (E0004: the arms must cover the scrutinee's type; user code only)
+        if self.user_code {
+            if let Some(w) = self.non_exhaustive(arms, place.ty()) {
+                return Err(self.at(expr_start(scrut), format!("non-exhaustive patterns: `{w}` not covered (E0004)")));
+            }
+        }
         let bk_ss = self.bk.scrut.clone();
         let bk_sp = self.bk.scrut_place.clone();
         let sflag = self.last_scrut;

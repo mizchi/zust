@@ -1797,6 +1797,8 @@ compile-fail	env-macro/env-too-many-args.rs
 compile-fail	env-macro/option_env-no-args.rs
 compile-fail	env-macro/option_env-not-string-literal.rs
 compile-fail	env-macro/option_env-too-many-args.rs
+compile-fail	error-codes/E0004-2.rs
+compile-fail	error-codes/E0004.rs
 compile-fail	error-codes/E0023.rs
 compile-fail	error-codes/E0029.rs
 compile-fail	error-codes/E0033.rs
@@ -3181,6 +3183,7 @@ compile-fail	methods/trait-method-resolution-over-inherent-22684.rs
 compile-fail	methods/tuple-suggestions-issue-142488.rs
 compile-fail	methods/untrimmed-path-type.rs
 compile-fail	methods/vec-autoderef-autoref.rs
+compile-fail	mir/build-async-error-body-correctly.rs
 build-pass	mir/field-projection-invariant.rs
 build-pass	mir/field-ty-ascription-enums.rs
 build-pass	mir/field-ty-ascription.rs
@@ -3541,6 +3544,7 @@ check-pass	or-patterns/exhaustiveness-pass.rs
 run-pass	or-patterns/for-loop.rs
 run-pass	or-patterns/if-let-while-let.rs
 check-pass	or-patterns/issue-67514-irrefutable-param.rs
+compile-fail	or-patterns/issue-69875-should-have-been-expanded-earlier-non-exhaustive.rs
 check-pass	or-patterns/issue-69875-should-have-been-expanded-earlier.rs
 run-pass	or-patterns/issue-70413-no-unreachable-pat-and-guard.rs
 run-pass	or-patterns/lazy-and-or.rs
@@ -4185,6 +4189,7 @@ check-pass	pattern/issue-74954.rs
 compile-fail	pattern/issue-80186-mut-binding-help-suggestion.rs
 run-pass	pattern/issue-8351-1.rs
 run-pass	pattern/issue-8351-2.rs
+compile-fail	pattern/issue-94866.rs
 run-pass	pattern/match-array-against-slice.rs
 run-pass	pattern/match-constant-and-byte-literal.rs
 compile-fail	pattern/missing_lifetime.rs
@@ -4215,6 +4220,7 @@ run-pass	pattern/struct-pattern-in-fn-arg.rs
 compile-fail	pattern/struct-pattern-on-non-struct-resolve-error.rs
 compile-fail	pattern/struct-pattern-with-missing-fields-resolve-error.rs
 run-pass	pattern/struct-wildcard-pattern-14308.rs
+compile-fail	pattern/suggest-adding-appropriate-missing-pattern-excluding-comments.rs
 run-pass	pattern/tuple-enum-match-15129.rs
 compile-fail	pattern/uninit-trivial.rs
 run-pass	pattern/unit-pattern-matching-in-function-argument-7519.rs
@@ -4226,7 +4232,13 @@ check-pass	pattern/usefulness/integer-ranges/issue-117648-overlapping_range_endp
 run-pass	pattern/usefulness/integer-ranges/regression-switchint-sorting-with-ranges.rs
 run-pass	pattern/usefulness/irrefutable-let-patterns.rs
 run-pass	pattern/usefulness/irrefutable-unit.rs
+compile-fail	pattern/usefulness/issue-30240.rs
+compile-fail	pattern/usefulness/issue-3096-2.rs
+compile-fail	pattern/usefulness/issue-39362.rs
+compile-fail	pattern/usefulness/issue-40221.rs
+compile-fail	pattern/usefulness/issue-4321.rs
 check-pass	pattern/usefulness/issue-53820-slice-pattern-large-array.rs
+compile-fail	pattern/usefulness/issue-56379.rs
 check-pass	pattern/usefulness/issue-65413-constants-and-slices-exhaustiveness.rs
 check-pass	pattern/usefulness/issue-66501.rs
 check-pass	pattern/usefulness/issue-71930-type-of-match-scrutinee.rs
@@ -4234,9 +4246,20 @@ check-pass	pattern/usefulness/issue-72476-and-89393-associated-type.rs
 check-pass	pattern/usefulness/issue-78549-ref-pat-and-str.rs
 check-pass	pattern/usefulness/issue-80501-or-pat-and-macro.rs
 compile-fail	pattern/usefulness/issue-82772-match-box-as-struct.rs
+compile-fail	pattern/usefulness/issue-85222-types-containing-non-exhaustive-types.rs
 check-pass	pattern/usefulness/issue-88747.rs
+compile-fail	pattern/usefulness/match-arm-statics-2.rs
+compile-fail	pattern/usefulness/match-byte-array-patterns-2.rs
+compile-fail	pattern/usefulness/match-non-exhaustive.rs
 run-pass	pattern/usefulness/nested-exhaustive-match.rs
+compile-fail	pattern/usefulness/non-exhaustive-match-nested.rs
+compile-fail	pattern/usefulness/non-exhaustive-match.rs
+compile-fail	pattern/usefulness/non-exhaustive-pattern-witness.rs
+compile-fail	pattern/usefulness/slice-patterns-exhaustiveness.rs
 check-pass	pattern/usefulness/slice-patterns-irrefutable.rs
+compile-fail	pattern/usefulness/struct-like-enum-nonexhaustive.rs
+compile-fail	pattern/usefulness/tuple-struct-nonexhaustive.rs
+compile-fail	pattern/usefulness/type_polymorphic_byte_str_literals.rs
 compile-fail	pin-ergonomics/raw-ident.rs
 compile-fail	pin-macro/lifetime_errors_on_promotion_misusage.rs
 compile-fail	pin/pin-deref-target-partial-eq-67039.rs
@@ -4597,6 +4620,8 @@ run-pass	rfcs/rfc-2005-default-binding-mode/struct.rs
 run-pass	rfcs/rfc-2005-default-binding-mode/tuple-struct.rs
 run-pass	rfcs/rfc-2005-default-binding-mode/tuple.rs
 run-pass	rfcs/rfc-2008-non-exhaustive/enum_same_crate.rs
+compile-fail	rfcs/rfc-2008-non-exhaustive/enum_same_crate_empty_match.rs
+compile-fail	rfcs/rfc-2008-non-exhaustive/shadowed-non-exhaustive.rs
 compile-fail	rfcs/rfc-2008-non-exhaustive/uninhabited/coercions_same_crate.rs
 check-pass	rfcs/rfc-2008-non-exhaustive/uninhabited/indirect_match_same_crate.rs
 check-pass	rfcs/rfc-2008-non-exhaustive/uninhabited/indirect_match_with_exhaustive_patterns_same_crate.rs
@@ -4611,6 +4636,7 @@ compile-fail	rfcs/rfc-2126-crate-paths/crate-path-non-absolute.rs
 compile-fail	rfcs/rfc-2126-extern-absolute-paths/non-existent-2.rs
 run-pass	rfcs/rfc-2175-or-if-while-let/basic.rs
 check-pass	rfcs/rfc-2294-if-let-guard/drop-scope-let-chains.rs
+compile-fail	rfcs/rfc-2294-if-let-guard/exhaustive.rs
 check-pass	rfcs/rfc-2294-if-let-guard/guard-lifetime-2.rs
 compile-fail	rfcs/rfc-2294-if-let-guard/let-chains-gated-correctly-in-guard.rs
 check-pass	rfcs/rfc-2294-if-let-guard/loop-mutability.rs
@@ -5731,6 +5757,7 @@ check-pass	uninhabited/exhaustive-wo-nevertype-issue-51221.rs
 compile-fail	uninhabited/missing-if-let-or-let-else.rs
 compile-fail	uninhabited/privately-uninhabited-mir-call.rs
 check-pass	uninhabited/uninhabited-enum-cast.rs
+compile-fail	uninhabited/uninhabited-matches-feature-gated.rs
 compile-fail	union/access_union_field.rs
 check-pass	union/issue-99375.rs
 check-pass	union/projection-as-union-type.rs
@@ -5761,6 +5788,7 @@ check-pass	union/union_wild_or_wild.rs
 compile-fail	unop/unop-neg-bool.rs
 check-pass	unsafe/edition-2024-unsafe_op_in_unsafe_fn.rs
 compile-fail	unsafe/foreign-unsafe-fn-called.rs
+compile-fail	unsafe/issue-115348-false-positive-warning-of-unnecessary-unsafe.rs
 compile-fail	unsafe/issue-3080.rs
 compile-fail	unsafe/issue-45087-unreachable-unsafe.rs
 compile-fail	unsafe/issue-47412.rs
