@@ -2173,6 +2173,11 @@ pub trait ExactSizeIterator {
     fn len(&self) -> usize;
 }
 
+// (a marker: the default method only lets the selection find the trait)
+pub trait FusedIterator {
+    fn __fused_mark(&self) {}
+}
+
 pub trait Iterator {
     type Item;
     fn next(&mut self) -> Option<Self::Item>;
@@ -2232,6 +2237,9 @@ pub trait Iterator {
     fn __flat_prep(&mut self) {}
     fn __flat_next(&mut self) -> Option<Self::Item> {
         self.next()
+    }
+    fn by_ref(&mut self) -> &mut Self {
+        self
     }
     fn fuse(self) -> Fuse<Self> {
         Fuse { iter: Some(self) }
@@ -11516,6 +11524,13 @@ impl Display for TryFromIntError {
         __exr_fmt_str::<()>(f, "out of range integral type conversion attempted");
         Ok(())
     }
+}
+
+// `std::ffi::c_void` (only behind a pointer)
+#[repr(u8)]
+pub enum c_void {
+    __variant1,
+    __variant2,
 }
 
 // `v.try_reserve(n)` の失敗 (malloc が失敗すると abort するので作られない)

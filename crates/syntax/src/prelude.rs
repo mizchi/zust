@@ -121,7 +121,19 @@ fn iter_chain(src: &str) -> bool {
 
 /// src[a..b] の識別子がメソッド呼び出し (`.name(` / `.name::<`) の位置にあるか (フィールド `.next` は除く)
 fn method_call_at(src: &[u8], a: usize, b: usize) -> bool {
-    a > 0 && src[a - 1] == b'.' && b < src.len() && (src[b] == b'(' || src[b] == b':')
+    if a > 0 && src[a - 1] == b'.' && b < src.len() && (src[b] == b'(' || src[b] == b':') {
+        return true;
+    }
+    // (macro expansions put spaces between the tokens: `p1 . zip (p2)`)
+    let mut i = a;
+    while i > 0 && src[i - 1] == b' ' {
+        i -= 1;
+    }
+    let mut j = b;
+    while j < src.len() && src[j] == b' ' {
+        j += 1;
+    }
+    (i < a || j > b) && i > 0 && src[i - 1] == b'.' && (i < 2 || src[i - 2] != b'.') && j < src.len() && (src[j] == b'(' || src[j] == b':')
 }
 
 /// Iterator の trait / impl (と IntoIter の Drop) のヘッダか
@@ -521,7 +533,7 @@ const SHADOWABLE: &[&str] = &[
     "Chain", "Entry", "Enumerate", "Filter", "FilterMap", "Map", "OptIter", "Scan", "Skip", "Take", "TakeWhile", "Zip",
     "Command", "Mutex", "VarError", "Rev", "StepBy", "Peekable", "Cloned", "Flatten", "FlatMap", "Inspect", "SkipWhile",
     "PathBuf", "Args", "BufWriter", "Pin", "Duration", "Fuse", "Empty", "RangeTo", "RangeToInclusive", "RangeFull",
-    "AtomicPtr", "TryReserveError",
+    "AtomicPtr", "TryReserveError", "c_void",
 ];
 
 pub fn rename_shadowed(user_src: &str, prelude: String) -> String {
@@ -1058,6 +1070,13 @@ pub fn select_with(user_src: &str, user_items: &[SrcItem], cache: &mut SelectCac
         need.extend(["__exr_dyn_display", "__exr_dyn_debug"]);
     }
     // (ManuallyDrop is used through Deref: `m.0`, `*m`)
+    // (`io::Error` / `io::Result<T>` は prelude の IoError: 名前が現れないので)
+    if sc.has("io::Error") || sc.has("io::Result") {
+        need.extend(["IoError", "Result"]);
+    }
+    if sc.has("FusedIterator") {
+        need.insert("__fused_mark");
+    }
     if sc.has("ManuallyDrop") {
         need.extend(["Deref", "deref", "deref_mut"]);
     }
