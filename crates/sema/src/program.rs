@@ -1443,7 +1443,10 @@ impl Program {
     /// prim_method for a method call: of the functions of that name, one that takes self (`impl Foo for isize`
     /// with `fn new() -> bool` and `impl Bar for isize` with `fn new(&self) -> bool`: `1.new()` is Bar's)
     pub fn prim_self_method(&self, t: Ty, name: &str) -> Option<u32> {
-        let id = self.prim_method(t, name)?;
+        // (`impl<T> Fake for T {}`: the trait's methods are methods of every type, numbers too)
+        let Some(id) = self.prim_method(t, name) else {
+            return self.blanket.get(name).copied().filter(|&i| self.sigs[i as usize].has_self);
+        };
         if self.sigs[id as usize].has_self {
             return Some(id);
         }

@@ -829,7 +829,12 @@ impl Cx<'_> {
         if !(t.is_int() || matches!(t, Ty::Bool | Ty::Char | Ty::Box(_))) {
             return Ok(None);
         }
-        let Some(id) = self.prog.prim_self_method(t, &name) else {
+        // (`b.inc()` with `impl Inc for i32` and b: Box<i32>: the number's method, when the Box has none)
+        let boxed_num = |t: Ty| matches!(t, Ty::Box(i) if i.is_int() || i.is_float() || matches!(*i, Ty::Bool | Ty::Char));
+        let Some(id) = self.prog.prim_self_method(t, &name).or_else(|| match t {
+            Ty::Box(i) if boxed_num(t) => self.prog.prim_self_method(*i, &name),
+            _ => None,
+        }) else {
             return Ok(None);
         };
         // (`impl Tr for Box<S>`: only when the impl's self type is this Box; else the method is S's, through deref)
@@ -837,6 +842,26 @@ impl Cx<'_> {
             let st = self.prog.sigs[id as usize].self_ty;
             let mut sol = vec![None; self.prog.sigs[id as usize].generics.len()];
             if !st.is_some_and(|st| matches!(st, Ty::Box(_)) && self.prog.match_ty(st, t, &mut sol)) {
+                // (a blanket impl's method on `Box<i32>`: the number's, through the deref (`(*b).m()`))
+                // (the Box's value is the address of the number: it is the `&self` / `&mut self` receiver itself)
+                if let Ty::Box(inner) = t {
+                    if inner.is_int() || inner.is_float() || matches!(*inner, Ty::Bool | Ty::Char) {
+                        // (the receiver is borrowed, not moved: the Box stays the caller's)
+                        let (v, vt) = self.read_no_move(recv)?;
+                        let Some(mut v) = v else { return Ok(Some((None, Ty::Never))) };
+                        let mut vt = vt;
+                        while let Ty::Ref(_, i) = vt {
+                            v = self.b.ins().load(PTR, mf(), v, 0);
+                            vt = *i;
+                        }
+                        let recv_arg = match self.prog.sigs[id as usize].params.first() {
+                            Some(Ty::Ref(m, _)) => (v, Ty::Ref(*m, intern(*inner))),
+                            _ => (self.b.ins().load(clif_ty(*inner).unwrap(), mf(), v, 0), *inner),
+                        };
+                        let args: Vec<&Expr> = margs.iter().collect();
+                        return self.call_fn(id, Some(recv_arg), &args, tf, expected, SP).map(Some);
+                    }
+                }
                 return Ok(None);
             }
         }
