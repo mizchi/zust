@@ -15,3 +15,4 @@ date	commit	change	noop_M	edit_M	check_M	cache_KiB	lsp_G	run	check	build	cfail
 2026-11-19	6477f49	generic fns returning impl Trait (a parameter type)	625.185	626.788	3905.335	1902.8	10.8943	1559	1290	89	2851
 2026-11-19	a9f1a01	generic impl Trait returns typed per instance	625.191	626.794	3905.274	1902.8	10.8942	1560	1300	89	2854
 2026-11-19	9568d59	Box::pin and Pin<Box<dyn Future<Output = T>>>	625.191	626.794	3905.841	1902.8	10.8958	1560	1307	89	2856
+2026-11-19	0902b52	inline const, if-let guards	625.127	626.729	3905.424	1902.8	10.8962	1567	1323	93	2861
