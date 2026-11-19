@@ -649,7 +649,7 @@ fn hoist_parts_at(src: &str, redo: u32) -> Option<(String, Vec<(usize, String)>)
     // (速く飛ばす: 字下げした行頭の `fn ` などがなければ入れ子のアイテムはない)
     let indented = src.split('\n').any(|l| {
         let t = l.trim_start();
-        t.len() < l.len() && ["fn ", "struct ", "enum ", "use ", "const ", "static ", "mod ", "trait ", "impl", "type ", "union ", "pub fn ", "pub struct ", "pub enum ", "pub const ", "pub static ", "pub trait ", "pub type ", "pub(crate) "].iter().any(|k| t.starts_with(k))
+        t.len() < l.len() && ["fn ", "struct ", "enum ", "use ", "const ", "static ", "mod ", "trait ", "impl", "type ", "union ", "pub fn ", "pub struct ", "pub enum ", "pub const ", "pub static ", "pub trait ", "pub type ", "pub(crate) ", "extern ", "async fn ", "unsafe fn ", "unsafe extern ", "const fn ", "const unsafe fn "].iter().any(|k| t.starts_with(k))
     });
     if !indented {
         return None;
@@ -706,15 +706,29 @@ fn hoist_parts_at(src: &str, redo: u32) -> Option<(String, Vec<(usize, String)>)
             } else {
                 k
             };
+            // (`async fn` / `unsafe fn` / `extern "C" fn` / `const unsafe fn`: the item starts at the qualifiers, its
+            // kind is the `fn`; `extern "C" { .. }` / `extern { .. }` is an item too)
+            let ik = {
+                let mut j = ik;
+                while j + 1 < toks.len() && toks[j].0 == 0 && matches!(tok(j), b"async" | b"unsafe" | b"extern" | b"safe") {
+                    j += 1;
+                    if toks[j].0 == 2 {
+                        j += 1;
+                    }
+                }
+                if j != ik && j < toks.len() && (tok(j) == b"fn" || (tok(ik) == b"extern" && is_sym(j, b"{"))) { j } else { ik }
+            };
+            let extern_block = tok(ik) == b"{" && tok(k) == b"extern";
+            let ik = if extern_block { k } else { ik };
             let pt = t;
-            let t = tok(ik);
+            let t = if extern_block { &b"mod"[..] } else { tok(ik) };
             // (`mod m { .. }` / `trait T { .. }` / `impl S { .. }` / `type A = ..;` / `union U { .. }` too; `union` is a
             // keyword only before a name)
             let item_kw = matches!(t, b"fn" | b"struct" | b"enum" | b"const" | b"use" | b"static" | b"mod" | b"trait" | b"impl" | b"type")
                 || (t == b"union" && ik + 1 < toks.len() && toks[ik + 1].0 == 0);
             let impl_like = t == b"impl";
             // (`const` の後ろに `fn` や `|` (const クロージャ) が来るものは別扱い: `const fn` は fn で見る)
-            if in_body && stmt_start && item_kw && ik + 1 < toks.len() && (toks[ik + 1].0 == 0 || (impl_like && is_sym(ik + 1, b"<"))) {
+            if in_body && stmt_start && item_kw && ik + 1 < toks.len() && (toks[ik + 1].0 == 0 || extern_block || (impl_like && is_sym(ik + 1, b"<"))) {
                 // アイテムの終わり: `{ .. }` (fn / struct / enum) か `;`
                 let mut j = ik + 1;
                 let mut d = 0i32;

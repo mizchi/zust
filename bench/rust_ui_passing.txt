@@ -282,6 +282,7 @@ check-pass	associated-types/supertrait-bound-references-own-associated-type.rs
 check-pass	associated-types/unioned-keys-with-associated-type-23442.rs
 check-pass	associated-types/wf-cycle-2.rs
 check-pass	associated-types/wf-cycle.rs
+check-pass	async-await/async-assoc-fn-anon-lifetimes.rs
 compile-fail	async-await/async-block-control-flow-static-semantics.rs
 compile-fail	async-await/async-borrowck-escaping-closure-error.rs
 build-pass	async-await/async-closure-matches-expr.rs
@@ -420,6 +421,7 @@ run-pass	async-await/multiple-lifetimes/partial-relation.rs
 run-pass	async-await/multiple-lifetimes/ret-impl-trait-fg.rs
 compile-fail	async-await/multiple-lifetimes/ret-ref.rs
 run-pass	async-await/multiple-lifetimes/variance.rs
+check-pass	async-await/nested-in-impl.rs
 check-pass	async-await/no-params-non-move-async-closure.rs
 check-pass	async-await/no-std.rs
 compile-fail	async-await/partial-initialization-across-await.rs
@@ -427,6 +429,8 @@ compile-fail	async-await/pin-needed-to-poll.rs
 compile-fail	async-await/proper-span-for-type-error.rs
 check-pass	async-await/recursive-async-auto-trait-overflow-only-parent-args.rs
 check-pass	async-await/recursive-async-auto-trait-overflow.rs
+check-pass	async-await/return-ty-raw-ptr-coercion.rs
+check-pass	async-await/return-ty-unsize-coercion.rs
 compile-fail	async-await/suggest-switching-edition-on-await.rs
 check-pass	async-await/track-caller/issue-105134.rs
 compile-fail	async-await/try-on-option-in-async.rs
