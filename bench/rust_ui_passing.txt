@@ -191,6 +191,7 @@ run-pass	associated-types/associated-types-in-default-method.rs
 run-pass	associated-types/associated-types-in-fn.rs
 run-pass	associated-types/associated-types-in-impl-generics.rs
 run-pass	associated-types/associated-types-in-inherent-method.rs
+compile-fail	associated-types/associated-types-incomplete-object.rs
 run-pass	associated-types/associated-types-issue-20220.rs
 check-pass	associated-types/associated-types-issue-20371.rs
 run-pass	associated-types/associated-types-issue-21212.rs
@@ -5801,6 +5802,7 @@ check-pass	traits/bound/recursive-trait-bound-on-type-param.rs
 compile-fail	traits/bound/unknown-assoc-with-const-arg.rs
 run-pass	traits/bug-7295.rs
 run-pass	traits/cache-issue-18209.rs
+compile-fail	traits/cast-as-dyn-trait-wo-assoc-type-issue-21950.rs
 compile-fail	traits/closure-capture-not-send.rs
 compile-fail	traits/closure-rc-not-send.rs
 run-pass	traits/coercion-generic.rs

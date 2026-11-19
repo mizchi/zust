@@ -1522,6 +1522,7 @@ impl Cx<'_> {
             fns.push(iid);
         } else {
             // (`dyn Foo<isize>`: the trait's own parameters are the arguments written)
+            let tr0 = tr;
             let (trn, targs) = self.dyn_trait_args(tr);
             let tr = trn.as_str();
             if !self.prog.traits.contains_key(tr) {
@@ -1530,6 +1531,17 @@ impl Cx<'_> {
             let decls = self.prog.dyn_methods(tr);
             if !self.prog.implements(t, tr) {
                 return err(span, format!("the trait `{tr}` is not implemented for `{}`", self.prog.tn(t)));
+            }
+            // (E0191: every associated type of the trait is bound in the dyn type: `dyn Iterator<Item = u32>`)
+            {
+                let full = tr0;
+                let mut missing: Vec<&str> = self.prog.assoc_bounds.keys().filter(|(t, _)| t == tr).map(|(_, n)| n.as_str()).filter(|n| {
+                    !full.split(|c: char| c == '<' || c == ',').any(|a| a.trim().split('=').next().is_some_and(|x| x.trim() == *n) && a.contains('='))
+                }).collect();
+                missing.sort();
+                if let Some(n) = missing.first() {
+                    return err(span, format!("the value of the associated type `{n}` in `{tr}` must be specified (E0191)"));
+                }
             }
             // (E0038 too: a supertrait of the program's trait that takes Self by default (`trait Expr: PartialEq`))
             {

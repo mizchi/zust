@@ -1483,12 +1483,12 @@ pub fn parse_and_summarize(src: &str, it: &SrcItem, owner: Option<&Owner>) -> R<
         let ow = owner.ok_or("trait member without trait")?;
         match &item.kind {
             // `type Item: Clone;` (関連型の宣言): its bounds (a binding `dyn Tr<Item = T>` must meet them)
-            ItemKind::Type(n, _, bs, None) if !bs.is_empty() => {
-                let names = bound_names(bs)?;
+            // (one without bounds too: a `dyn Tr` must bind every associated type the trait leaves without a
+            // default (E0191))
+            ItemKind::Type(n, _, bs, None) => {
+                let names = if bs.is_empty() { vec![] } else { bound_names(bs)? };
                 let mut sm = Summary::default();
-                if !names.is_empty() {
-                    sm.assoc_bounds.push((ow.base.clone(), n.clone(), names));
-                }
+                sm.assoc_bounds.push((ow.base.clone(), n.clone(), names));
                 return Ok(sm);
             }
             ItemKind::Type(..) => return Ok(Summary::default()),
