@@ -228,13 +228,11 @@ compile-fail	associated-types/cache/poison-copy-via-projection.rs
 compile-fail	associated-types/dyn-impl-missing-assoc-type-ice-152668.rs
 check-pass	associated-types/enum-variant-with-assoc-type-and-lifetimes.rs
 compile-fail	associated-types/hr-associated-type-bound-object.rs
-compile-fail	associated-types/hr-associated-type-bound-param-1.rs
 compile-fail	associated-types/hr-associated-type-bound-param-2.rs
 compile-fail	associated-types/hr-associated-type-bound-param-3.rs
 compile-fail	associated-types/hr-associated-type-bound-param-4.rs
 compile-fail	associated-types/hr-associated-type-bound-param-5.rs
 compile-fail	associated-types/hr-associated-type-bound-param-6.rs
-compile-fail	associated-types/hr-associated-type-projection-1.rs
 check-pass	associated-types/impl-trait-member-type-resolution-57399.rs
 check-pass	associated-types/imply-relevant-nested-item-bounds-for-gat.rs
 compile-fail	associated-types/invalid-ctor.rs
@@ -1369,7 +1367,10 @@ check-pass	const-generics/issues/issue-64519.rs
 check-pass	const-generics/issues/issue-66906.rs
 check-pass	const-generics/issues/issue-67185-1.rs
 check-pass	const-generics/issues/issue-68596.rs
+run-pass	const-generics/issues/issue-70125-1.rs
+run-pass	const-generics/issues/issue-70125-2.rs
 check-pass	const-generics/issues/issue-70167.rs
+check-pass	const-generics/issues/issue-70225.rs
 check-pass	const-generics/issues/issue-71986.rs
 check-pass	const-generics/issues/issue-74906.rs
 compile-fail	const-generics/issues/issue-76701-ty-param-in-const.rs
@@ -5921,6 +5922,7 @@ check-pass	traits/issue-33187.rs
 run-pass	traits/issue-3683.rs
 compile-fail	traits/issue-38604.rs
 run-pass	traits/issue-40085.rs
+run-pass	traits/issue-4107.rs
 run-pass	traits/issue-43132.rs
 run-pass	traits/issue-5008-borrowed-traitobject-method-call.rs
 compile-fail	traits/issue-50480.rs
@@ -6044,6 +6046,7 @@ run-pass	traits/virtual-call-parameter-handling.rs
 compile-fail	traits/wf-object/no-duplicates.rs
 check-pass	traits/where-clause-on-self-assoc-type.rs
 run-pass	traits/where-clause-vs-impl.rs
+run-pass	traits/with-bounds-default.rs
 check-pass	transmutability/transmute-copy-associated-type.rs
 check-pass	transmute/lifetimes.rs
 compile-fail	transmute/main.rs

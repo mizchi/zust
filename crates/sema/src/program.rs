@@ -263,6 +263,9 @@ pub struct Program {
     pub trait_supers: FxMap<String, Vec<String>>,
     /// the generics a method of the trait starts with: Self and the trait's own parameters
     pub trait_ngen: FxMap<String, usize>,
+    /// a generic trait's impls: trait → (self type, the trait's arguments, both with the impl's parameters as
+    /// `Param(i)`, and their number) (`impl Getter<isize> for isize`: a default method's T for an isize receiver)
+    pub impl_targs: FxMap<String, Vec<(Ty, Vec<Ty>, usize)>>,
     /// (型, trait) の実装
     pub impls: HashSet<(u32, String)>,
     /// `#[panic_handler]` の関数 (no_std)。panic (範囲外アクセス・unwrap など) はここを呼ぶ
@@ -609,6 +612,7 @@ impl Program {
             overflow_checks: false,
             trait_supers: FxMap::default(),
             trait_ngen: FxMap::default(),
+            impl_targs: FxMap::default(),
             ref_impls: Default::default(),
             ref_impl_pats: vec![],
             fnptr_impls: Default::default(),
@@ -1150,6 +1154,13 @@ impl Program {
                         if e.starts_with("cannot find type") {
                             return Err(format!("{}:1: {e}", it.line));
                         }
+                    }
+                }
+                if !sm.impl_trait_args.is_empty() {
+                    let st = sm.impl_self_ty.as_ref().and_then(|t| p.resolve_g(t, &gn).ok());
+                    let args: Option<Vec<Ty>> = sm.impl_trait_args.iter().map(|a| p.resolve_g(a, &gn).ok()).collect();
+                    if let (Some(st), Some(args)) = (st, args) {
+                        p.impl_targs.entry(tr.clone()).or_default().push((st, args, gn.len()));
                     }
                 }
             }
