@@ -60,7 +60,7 @@ pub fn const_arg_syn(e: &Expr) -> R<TySyn> {
 }
 
 /// 整数の定数式のテキスト (リテラル・パス・二項演算・単項の `-`・括弧・引数のないメソッド)。それ以外は None
-fn const_expr_text(e: &Expr) -> Option<String> {
+pub(crate) fn const_expr_text(e: &Expr) -> Option<String> {
     Some(match e {
         Expr::Lit(t, _) => t.clone(),
         Expr::Path(None, p) if !p.global && p.segs.iter().all(|s| s.args.is_empty() && s.fn_args.is_none()) => {
@@ -77,6 +77,25 @@ fn const_expr_text(e: &Expr) -> Option<String> {
             Stmt::Expr(x, false) => const_expr_text(x)?,
             _ => return None,
         },
+        // (`{ let x = 2; 5 }`: the `let`s and the value. Items and closures in it do not change the value)
+        Expr::Block(None, false, b) | Expr::Const(b) if !b.stmts.is_empty() => {
+            let mut out = String::from("{ ");
+            let n = b.stmts.len();
+            for (k, s) in b.stmts.iter().enumerate() {
+                match s {
+                    Stmt::Let(crate::parse::Pat::Ident(false, _, v, None), _, Some(init), None) => {
+                        out.push_str(&format!("let {v} = {}; ", const_expr_text(init)?));
+                    }
+                    Stmt::Item(_) | Stmt::Expr(Expr::Closure(..) | Expr::Lit(..), true) => {}
+                    Stmt::Expr(x, false) if k + 1 == n => out.push_str(&const_expr_text(x)?),
+                    _ => return None,
+                }
+            }
+            out.push_str(" }");
+            out
+        }
+        Expr::Ref(false, x) => const_expr_text(x)?,
+        Expr::Unary(op, x, _) if op == "*" => const_expr_text(x)?,
         Expr::Index(b, i, _) => format!("{}[{}]", const_expr_text(b)?, const_expr_text(i)?),
         // (a `const fn` call: `[i32; add(1, 2)]`)
         Expr::Call(f, args) if matches!(&**f, Expr::Path(None, p) if single(p).is_some()) => {

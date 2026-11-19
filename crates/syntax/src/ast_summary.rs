@@ -213,11 +213,36 @@ fn collect_generics(g: &Generics, out: &mut Vec<(String, Vec<String>)>) -> R<()>
         let bs = bound_names(bs)?;
         match out.iter_mut().find(|g| g.0 == id) {
             Some(g) => g.1.extend(bs),
-            None if id == "Self" => {}
-            None => return err("where clause on an unknown type parameter"),
+            // (a bound on a concrete type, `where i32: Add<T>`: Program checks that the type exists (where_types))
+            None => {}
         }
     }
     Ok(())
+}
+
+/// The names of the concrete types bounded in the where clauses of an item (`where u64: Sized` → u64 is not a
+/// parameter): Program checks that each names a type. Primitive types are left out
+fn where_types(item: &Item, owner: Option<&Owner>, out: &mut Vec<String>) {
+    let g = match &item.kind {
+        ItemKind::Fn(fs, _) => &fs.generics,
+        ItemKind::Struct(_, g, _) | ItemKind::Enum(_, g, _) | ItemKind::Union(_, g, _) | ItemKind::Impl(g, ..) | ItemKind::Trait(_, g, ..) => g,
+        _ => return,
+    };
+    for (t, _) in &g.preds {
+        let PTy::Path(None, p) = t else { continue };
+        if p.global || p.segs.len() != 1 || !p.segs[0].args.is_empty() || p.segs[0].fn_args.is_some() {
+            continue;
+        }
+        let n = p.segs[0].name.as_str();
+        if n.starts_with('\'') || n == "Self" || n == "str" || Ty::prim(n).is_some() || crate::ast_types::ffi_alias(n).is_some() {
+            continue;
+        }
+        let param = g.params.iter().any(|q| matches!(q, GParam::Ty(x, ..) | GParam::Const(x, _) if x == n));
+        if param || owner.is_some_and(|o| o.generics.iter().any(|x| x.0 == n)) || out.iter().any(|x| x == n) {
+            continue;
+        }
+        out.push(n.to_string());
+    }
 }
 
 fn adt_params(g: &Generics) -> R<Vec<String>> {
@@ -1028,6 +1053,18 @@ pub fn summarize(item: &Item, owner: Option<&Owner>) -> R<Summary> {
                 }
                 let last = tp.segs.last().ok_or("unsupported trait path")?;
                 sm.impl_trait = Some(last.name.clone());
+                // (the trait's arguments `impl From<u8> for S`: Program tells two impls of the trait apart with them)
+                let args: Option<Vec<TySyn>> = last
+                    .args
+                    .iter()
+                    .filter(|a| matches!(a, crate::parse::GArg::Ty(_) | crate::parse::GArg::Const(_)))
+                    .map(|a| match a {
+                        crate::parse::GArg::Ty(t) => tysyn(t, None).ok(),
+                        crate::parse::GArg::Const(e) => crate::ast_types::const_arg_syn(e).ok(),
+                        _ => None,
+                    })
+                    .collect();
+                sm.impl_trait_args = args.unwrap_or_default();
                 // `impl PartialEq<[U; N]> for Vec<T>`: 右辺の型が self 型と違う比較は trait 名に型引数を残す
                 if (last.name == "PartialEq" || last.name == "PartialOrd") && !last.args.is_empty() {
                     let rhs = compact(&last.text[last.name.len()..]);
@@ -1119,7 +1156,14 @@ pub fn summarize(item: &Item, owner: Option<&Owner>) -> R<Summary> {
                 return err("unsupported impl self type");
             };
             if tp.segs.len() != 1 {
-                return err("unsupported impl self type");
+                // (`impl foo::Point` / `impl Tr for std::result::Result<O, E>`: the type the path names, as in a
+                // signature)
+                let (TySyn::Named(n) | TySyn::App(n, _)) = tysyn(self_path, None)? else {
+                    return err("unsupported impl self type");
+                };
+                sm.impl_self = Some(n);
+                sm.impl_self_ty = Some(tysyn(self_ty, None)?);
+                return Ok(sm);
             }
             sm.impl_self = Some(tp.segs[0].name.clone());
             sm.impl_self_ty = Some(tysyn(self_ty, None)?);
@@ -1214,11 +1258,19 @@ pub fn summarize(item: &Item, owner: Option<&Owner>) -> R<Summary> {
                         (VariantKind::Struct, fs)
                     }
                 };
+                let mut discr_src = String::new();
                 let discr = match d {
                     None => None,
-                    Some(e) => Some(const_int(e)?),
+                    Some(e) => match const_int(e) {
+                        Ok(v) => Some(v),
+                        // (`Bar = QUUX` / `Y = Foo::X as isize - 3`: Program evaluates it with the constants)
+                        Err(er) => {
+                            discr_src = crate::ast_types::const_expr_text(e).ok_or(er)?;
+                            Some(0)
+                        }
+                    },
                 };
-                vs.push(VariantSyn { name: vn.clone(), kind: kind, fields: fs, discr: discr });
+                vs.push(VariantSyn { name: vn.clone(), kind: kind, fields: fs, discr: discr, discr_src });
             }
             let d = derive_names(&item.attrs);
             if !d.is_empty() {
@@ -1305,12 +1357,15 @@ pub fn parse_and_summarize(src: &str, it: &SrcItem, owner: Option<&Owner>) -> R<
                 }
                 let mut sm = Summary::default();
                 sm.fns.push((format!("{}::{}", ow.base, fs.name), sig));
+                where_types(item, Some(ow), &mut sm.where_types);
                 return Ok(sm);
             }
             _ => return err("unsupported trait member"),
         }
     }
-    summarize(item, owner)
+    let mut sm = summarize(item, owner)?;
+    where_types(item, owner, &mut sm.where_types);
+    Ok(sm)
 }
 
 /// impl / trait のヘッダの要約からメンバの所有者を作る (driver.rs と同じ)

@@ -283,6 +283,8 @@ pub struct VariantSyn {
     pub kind: VariantKind,
     pub fields: Vec<(String, TySyn)>,
     pub discr: Option<i64>,
+    /// A discriminant that names constants (`Bar = QUUX`): the text of the expression, for Program to evaluate
+    pub discr_src: String,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Default)]
@@ -329,6 +331,8 @@ pub struct Summary {
     /// impl ヘッダの型パラメータと self 型 (`impl<T> Option<T>`)
     pub impl_generics: Vec<(String, Vec<String>)>,
     pub impl_self_ty: Option<TySyn>,
+    /// The type arguments of the trait of an `impl Trait<A, B> for S` header
+    pub impl_trait_args: Vec<TySyn>,
     /// `const N: T = e;` の (名前, 型, 式のソース)。使う側で式として埋め込む
     pub consts: Vec<(String, TySyn, String)>,
     /// `static [mut] N: T = e;` の (名前, 型, 初期値のソース, mut)
@@ -339,6 +343,9 @@ pub struct Summary {
     pub assocs: Vec<AssocSyn>,
     /// `type Key = u128;` / `type R<T> = Result<T, E>;` の (名前, 型パラメータ, 中身)
     pub aliases: Vec<(String, Vec<String>, TySyn)>,
+    /// The concrete (non-parameter, non-primitive) types bounded in the item's where clauses (`where Local: Any`):
+    /// Program checks that they exist
+    pub where_types: Vec<String>,
 }
 
 #[derive(Clone, Debug, Default)]
