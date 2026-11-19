@@ -9,8 +9,8 @@
 
 ## 全体
 
-- [x] tests/ui run-pass：64.7%（1544 / 2385）
-- [x] tests/ui check-pass：70.4%（1273 / 1807）
+- [x] tests/ui run-pass：65.1%（1552 / 2385）
+- [x] tests/ui check-pass：70.6%（1276 / 1807）
 - [x] tests/ui build-pass：65.9%（89 / 135）
 - [ ] tests/ui compile-fail（注釈の行でエラー）：38.7%（2850 / 7358）
 - [x] 実際のクレート：fnv、adler2、hex、itoa、rustc-hash、cfg-if がビルドでき、同じ出力を出す（6 / 6）
@@ -79,7 +79,7 @@
   `.map(Result::unwrap)`）は推論するようになった。`iter::empty().collect()`、`let f = id;`、パターンから決まる const
   パラメータはまだ（約 35 テスト）
 - [ ] ブロックの中のアイテム：関数の本体の中の `mod`、`trait`、`impl`、`type`、`union`、`pub` のアイテムは外へ移すようになった。
-  本体の中でマクロの展開から出るアイテムはまだ（約 30 テスト）
+  文の位置のマクロの展開から出るアイテムも外へ移す。式の位置のマクロから出るものはまだ（約 12 テスト）
 - [ ] 組み込みマクロ：`offset_of!`、`addr_of!` / `addr_of_mut!`、`try!`、`stringify!`、`concat!`、`line!`、`column!`、
   `option_env!`、`assert_matches!`、`format_args!` は使えるようになった。`module_path!`、`file!`、`include!`、`asm!` はまだ（約 8 テスト）
 - [ ] ジェネリックな関数が返す `impl Trait`：約 21 テスト

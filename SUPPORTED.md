@@ -9,8 +9,8 @@ Status as of 2026-11-18, updated with each round of work. The percentages are ru
 
 ## Overall
 
-- [x] tests/ui run-pass: 64.7% (1544 / 2385)
-- [x] tests/ui check-pass: 70.4% (1273 / 1807)
+- [x] tests/ui run-pass: 65.1% (1552 / 2385)
+- [x] tests/ui check-pass: 70.6% (1276 / 1807)
 - [x] tests/ui build-pass: 65.9% (89 / 135)
 - [ ] tests/ui compile-fail (an error on an annotated line): 38.7% (2850 / 7358)
 - [x] real crates: fnv, adler2, hex, itoa, rustc-hash and cfg-if build and give the same output (6 / 6)
@@ -78,8 +78,8 @@ Status as of 2026-11-18, updated with each round of work. The percentages are ru
 - [ ] type parameters: `let v: Vec<Box<_>> = ..` (holes in an annotation) and generic fns passed as values
   (`.map(drop)`, `.map(Result::unwrap)`) now infer; `iter::empty().collect()`, `let f = id;` and const parameters
   inferred from patterns do not (~35 tests)
-- [ ] items inside blocks: `mod`, `trait`, `impl`, `type`, `union` and `pub` items in a fn body now move out; items that
-  macro expansion produces inside a body do not yet (~30 tests)
+- [ ] items inside blocks: `mod`, `trait`, `impl`, `type`, `union` and `pub` items in a fn body now move out; items a
+  macro expands to in statement position move out too; from a macro in expression position not yet (~12 tests)
 - [ ] builtin macros: `offset_of!`, `addr_of!` / `addr_of_mut!`, `try!`, `stringify!`, `concat!`, `line!`, `column!`,
   `option_env!`, `assert_matches!`, `format_args!` now work; `module_path!`, `file!`, `include!`, `asm!` do not (~8 tests)
 - [ ] `impl Trait` returned by generic functions: ~21 tests
