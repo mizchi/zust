@@ -1654,6 +1654,37 @@ impl Cx<'_> {
         (n.trim().to_string(), args)
     }
 
+    /// the associated type bindings of `dyn Tr<A, Out = u32>`: (name, type)
+    pub(crate) fn dyn_bindings(&mut self, tr: &str) -> Vec<(String, Ty)> {
+        let Some((_, rest)) = tr.split_once('<') else { return vec![] };
+        let inner = rest.trim_end().strip_suffix('>').unwrap_or(rest);
+        let mut out = vec![];
+        let (mut d, mut cur) = (0i32, String::new());
+        let mut parts = vec![];
+        for c in inner.chars() {
+            match c {
+                '<' | '(' | '[' => d += 1,
+                '>' | ')' | ']' => d -= 1,
+                ',' if d == 0 => {
+                    parts.push(std::mem::take(&mut cur));
+                    continue;
+                }
+                _ => {}
+            }
+            cur.push(c);
+        }
+        parts.push(cur);
+        for a in &parts {
+            let Some((n, t)) = a.split_once('=') else { continue };
+            if let Ok(Expr::Cast(_, pt)) = crate::parse::parse_expr(&format!("0 as {}", t.trim())) {
+                if let Ok(t) = self.parse_ty(&pt) {
+                    out.push((n.trim().to_string(), t));
+                }
+            }
+        }
+        out
+    }
+
     /// `&dyn Fn(A) -> B` の呼び出し (vtable の 0 番目がクロージャの本体)
     pub(crate) fn dyn_fn_call(&mut self, fat: Value, s: &str, args: &[&Expr], span: Sp) -> R<V> {
         let (ps, r) = self.dyn_fn_sig(s).or_else(|e| err(span, e))?;
@@ -1664,6 +1695,7 @@ impl Cx<'_> {
     pub(crate) fn dyn_method_call(&mut self, fat: Value, tr: &str, mc: &Expr) -> R<V> {
         let Expr::MethodCall(_, name, _, margs, _) = mc else { return err(SP, "internal: expected a method call") };
         let (trn, targs) = self.dyn_trait_args(tr);
+        let binds = if tr.contains('=') { self.dyn_bindings(tr) } else { vec![] };
         let tr = trn.as_str();
         let decls = self.prog.dyn_methods(tr);
         let Some(idx) = decls.iter().position(|&d| self.prog.names[d as usize].rsplit("::").next() == Some(name.as_str())) else {
@@ -1679,6 +1711,14 @@ impl Cx<'_> {
         }
         let ps: Vec<Ty> = ds.params[1..].iter().map(|&t| self.prog.partial_subst(t, &sol)).collect();
         let ret = self.prog.partial_subst(ds.ret, &sol);
+        // (`Self::Out` of `dyn Tr<Out = u32>`: the type bound in the dyn type)
+        let bound = |t: Ty| match t {
+            Ty::Assoc(a) if a.base == Ty::Param(0) => binds.iter().find(|b| b.0 == a.name).map(|b| b.1).unwrap_or(t),
+            Ty::Ref(m, Ty::Assoc(a)) if a.base == Ty::Param(0) => binds.iter().find(|b| b.0 == a.name).map(|b| Ty::Ref(m, intern(b.1))).unwrap_or(t),
+            t => t,
+        };
+        let ps: Vec<Ty> = ps.into_iter().map(bound).collect();
+        let ret = bound(ret);
         if ps.iter().chain([&ret]).any(|&t| self.prog.has_param(t)) {
             return err(SP, format!("`{name}` cannot be called through `dyn {tr}` (it uses `Self` or generics)"));
         }

@@ -178,6 +178,7 @@ run-pass	associated-types/associated-types-duplicate-binding-in-env-hrtb.rs
 run-pass	associated-types/associated-types-duplicate-binding-in-env.rs
 compile-fail	associated-types/associated-types-eq-3.rs
 compile-fail	associated-types/associated-types-eq-expr-path.rs
+run-pass	associated-types/associated-types-eq-obj.rs
 compile-fail	associated-types/associated-types-in-ambiguous-context.rs
 check-pass	associated-types/associated-types-in-bound-type-arg.rs
 run-pass	associated-types/associated-types-in-default-method.rs
@@ -267,6 +268,7 @@ build-pass	associated-types/normalization-debruijn-2.rs
 check-pass	associated-types/normalization-probe-cycle.rs
 check-pass	associated-types/normalize-cycle-in-eval-no-region.rs
 check-pass	associated-types/normalize-cycle-in-eval.rs
+run-pass	associated-types/object-method-numbering.rs
 check-pass	associated-types/object-normalization.rs
 check-pass	associated-types/param-env-normalize-cycle.rs
 run-pass	associated-types/project-defer-unification.rs
