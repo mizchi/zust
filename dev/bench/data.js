@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795077335401,
+  "lastUpdate": 1795077337587,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -34560,6 +34560,85 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/mizchi/zust/commit/b82d030553588a3999a603f97e869bdb34841a1e"
         },
         "date": 1795076736321,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "parity documentSymbol (名前の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity workspace/symbol (上位 20 の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity definition (行き先の一致)",
+            "value": 91.667,
+            "unit": "%"
+          },
+          {
+            "name": "parity hover (名前を含む)",
+            "value": 90,
+            "unit": "%"
+          },
+          {
+            "name": "parity references (数の一致)",
+            "value": 87.179,
+            "unit": "%"
+          },
+          {
+            "name": "parity documentHighlight (数の一致)",
+            "value": 89.189,
+            "unit": "%"
+          },
+          {
+            "name": "parity rename (書き換えの一致)",
+            "value": 66.667,
+            "unit": "%"
+          },
+          {
+            "name": "parity signatureHelp (名前・引数の数・今の引数の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity completion `x.\\|` (書いてある名前を含む)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity completion `na\\|me` (同)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity 一致の平均",
+            "value": 92.47,
+            "unit": "%"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "committer": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "distinct": true,
+          "id": "f32af8ad537994f7c7a9c46aa71e3cc6ed2eba25",
+          "message": "KPI log: lazy statement positions\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-19T08:30:08Z",
+          "tree_id": "0bb2e4ec8efd924a4c1f96004717c2967b72ceb8",
+          "url": "https://github.com/mizchi/zust/commit/f32af8ad537994f7c7a9c46aa71e3cc6ed2eba25"
+        },
+        "date": 1795077337000,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
