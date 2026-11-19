@@ -468,6 +468,13 @@ impl Cx<'_> {
                 _ => {}
             }
         }
+        // (`for x in &[S { .. }]`: the array is a temporary the loop borrows; it is dropped at the end of the
+        // statement, after the loop)
+        if mode.is_some() && !sub && !is_place_expr(base_e) && self.needs_drop(elem) {
+            if let Some(at @ Ty::Array(..)) = self.peek(base_e) {
+                self.own_temp(ptr, at);
+            }
+        }
         // 値で回す (`for x in arr`): 要素は x にムーブするので、配列は drop しない。
         // Vec なら長さを 0 にしておき、バッファの解放だけを Vec の drop に任せる
         if mode.is_none() {
@@ -563,6 +570,12 @@ impl Cx<'_> {
             self.pat_bind(&tp[1], pv, BindMode::Move)?;
         } else {
             let place = to_place(self, val, vt);
+            // (`for _ in arr`: `_` binds nothing; the element moved out of arr is dropped at once)
+            if let (Pat::Wild, Place::Mem(a, 0, t)) = (&**fpat, place) {
+                if !matches!(t, Ty::Ref(..)) && self.needs_drop(t) {
+                    self.drop_in_place(a, t);
+                }
+            }
             self.pat_bind(fpat, place, BindMode::Move)?;
         }
         let bound = self.pending_bound.take();
