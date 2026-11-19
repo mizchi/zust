@@ -26,7 +26,7 @@
 
 ## Status
 
-Numbers measured <!-- measured -->2026-11-19, 731f606<!-- /measured --> by CI on each push to main (bench.yml runs
+Numbers measured <!-- measured -->2026-11-19, f86ca09<!-- /measured --> by CI on each push to main (bench.yml runs
 `bench/ci_bench.py` and `bench/rust_ui.py`, then `scripts/update_readme.py` writes them here). Times come from shared
 GitHub Actions runners and vary by about ±20%; the instruction counts (valgrind) do not.
 
@@ -38,10 +38,10 @@ only the tests it can be asked to handle (no nightly features, auxiliary crates 
 <!-- auto:ui -->
 | kind | applicable | pass |
 |---|---:|---:|
-| run-pass (builds, runs, same output) | 2385 | 1626 (68.2%) |
+| run-pass (builds, runs, same output) | 2385 | 1628 (68.3%) |
 | check-pass (accepted by `zustc check`) | 1807 | 1368 (75.7%) |
 | build-pass | 135 | 95 (70.4%) |
-| compile-fail (rejected at an annotated line) | 7358 | 3307 (44.9%) |
+| compile-fail (rejected at an annotated line) | 7358 | 3303 (44.9%) |
 <!-- /auto:ui -->
 
 [What is supported](#what-is-supported) breaks this down by area.
@@ -53,22 +53,22 @@ Build speed, build cache size and LSP latency on generated programs of 1000 / 50
 <!-- auto:kpi -->
 | KPI | gen1000 | gen5000 |
 |---|---:|---:|
-| cold build | 119 ms | 531 ms |
-| no-op build | 0.8 ms | 0.8 ms |
-| build after editing one function | 17.5 ms | 64.9 ms |
-| `check` | 78 ms | 377 ms |
+| cold build | 129 ms | 561 ms |
+| no-op build | 1.4 ms | 1.3 ms |
+| build after editing one function | 22.9 ms | 80.0 ms |
+| `check` | 99 ms | 472 ms |
 | no-op build (instructions) | 0.7 M | 0.7 M |
-| edit one function (instructions) | 133.6 M | 627.9 M |
-| `check` (instructions) | 784.2 M | 3869.1 M |
+| edit one function (instructions) | 133.0 M | 624.8 M |
+| `check` (instructions) | 786.0 M | 3869.4 M |
 | build cache on disk | 387.2 KiB | 1902.8 KiB |
 | binary | 324.0 KiB | 1558.3 KiB |
-| cold build peak RSS | 17.8 MiB | 51.9 MiB |
+| cold build peak RSS | 17.6 MiB | 52.1 MiB |
 
 | zust-analyzer (zustc's own sources) | |
 |---|---:|
-| p50: definition, hover, completion, references, rename | 0.44 ms / 0.36 ms / 1.02 ms / 1.73 ms / 0.59 ms |
-| startup until indexed | 121 ms |
-| peak RSS | 71.6 MiB |
+| p50: definition, hover, completion, references, rename | 0.67 ms / 0.47 ms / 0.98 ms / 2.21 ms / 0.62 ms |
+| startup until indexed | 122 ms |
+| peak RSS | 71.7 MiB |
 <!-- /auto:kpi -->
 
 Every change is also measured on its own with `python3 bench/kpi_track.py`, so that small increases that add up stay
@@ -332,10 +332,10 @@ the measured numbers. The [reports](docs/reports/) explain each step.
 
 ### Overall
 
-- [x] tests/ui run-pass: <!-- total:run-pass -->68.2% (1626 / 2385)
+- [x] tests/ui run-pass: <!-- total:run-pass -->68.3% (1628 / 2385)
 - [x] tests/ui check-pass: <!-- total:check-pass -->75.7% (1368 / 1807)
 - [x] tests/ui build-pass: <!-- total:build-pass -->70.4% (95 / 135)
-- [ ] tests/ui compile-fail (an error on an annotated line): <!-- total:compile-fail -->44.9% (3307 / 7358)
+- [ ] tests/ui compile-fail (an error on an annotated line): <!-- total:compile-fail -->44.9% (3303 / 7358)
 - [x] real crates: fnv, adler2, hex, itoa, rustc-hash and cfg-if build and give the same output (6 / 6)
 - [x] zust-analyzer answers like rust-analyzer: 95.4% (rust-analyzer: 96.2%)
 
@@ -364,9 +364,9 @@ the measured numbers. The [reports](docs/reports/) explain each step.
   parameter known only from the expected type is not inferred)
 - [ ] consts: <!-- ui:consts -->71.1% (no heap values, no generic `const fn`; a const of a generic impl (`const C: Option<T> = None`) takes its type at each use)
 - [ ] drop: <!-- ui:drop -->62.3% (the drop order of some temporaries differs)
-- [ ] traits: <!-- ui:traits -->64.7% (generic traits, blanket impls, `dyn` (also `dyn Tr<A>`), `impl .. for dyn Tr` work; `impl<T> Tr for &T` only without functions; no coherence)
+- [ ] traits: <!-- ui:traits -->65.1% (generic traits, blanket impls, `dyn` (also `dyn Tr<A>`), `impl .. for dyn Tr` work; `impl<T> Tr for &T` only without functions; no coherence)
 - [ ] `macro_rules!`: <!-- ui:macros -->66.4% (hygiene for `let`, labels, arm bindings; not every fragment kind)
-- [ ] unions: <!-- ui:union -->57.7% (no `repr(packed)`)
+- [ ] unions: <!-- ui:union -->61.5% (no `repr(packed)`)
 - [ ] const generics: <!-- ui:const-generics -->51.5% (no `generic_const_exprs`)
 - [ ] generic associated types: <!-- ui:generic-associated-types -->46.7%
 - [ ] casts (`as _` / `as *const _` take the source or expected type; a pointer of unknown kind is E0641): <!-- ui:cast -->44.8%
