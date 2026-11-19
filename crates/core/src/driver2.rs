@@ -588,19 +588,22 @@ impl Session2 {
             }
         }
         // (`#![crate_type = "lib"]`: a library, no `main` needed)
+        let mut deny_unreachable = false;
         let lib_attr = {
             let mut end = src.len().min(4096);
             while !src.is_char_boundary(end) {
                 end -= 1;
             }
             let c: String = src[..end].chars().filter(|c| !c.is_whitespace()).collect();
+            // (`#![deny(unreachable_patterns)]`: inner attributes come first in the file, so the head is enough)
+            deny_unreachable = (c.contains("#![deny(") || c.contains("#![forbid(")) && c.contains("unreachable_patterns");
             ["lib", "rlib", "dylib", "cdylib", "staticlib", "proc-macro"].iter().any(|k| c.contains(&format!("#![crate_type=\"{k}\"]")))
         };
         let mut prog = Program::build_with(&items, &sums, self.ctx.lib.is_none() && !lib_attr)?;
         tm.lap("program", String::new());
         prog.prelude_from = user as u32;
         prog.overflow_checks = !self.opts.opt;
-        prog.deny_unreachable = src.contains("deny(unreachable_patterns") || src.contains("forbid(unreachable_patterns");
+        prog.deny_unreachable = deny_unreachable;
         prog.opt = self.opts.opt;
         resolve_opaque(&mut prog, &src, &items)?;
         let ol = self.ctx.own_lines as usize;
