@@ -1811,6 +1811,47 @@ fn __exr_bsearch_by<T, F: FnMut(&T) -> Ordering>(p: *mut T, n: usize, f: F) -> R
 }
 
 // 配列・スライスの sort / binary_search (codegen が `a.sort()` をこれにする)
+fn __exr_slice_reverse<T>(s: &mut [T]) {
+    let n = s.len();
+    let p = s.as_mut_ptr();
+    let mut i = 0;
+    while i + 1 < n - i {
+        unsafe {
+            let x = p.add(i).read();
+            p.add(i).write(p.add(n - 1 - i).read());
+            p.add(n - 1 - i).write(x);
+        }
+        i += 1;
+    }
+}
+fn __exr_slice_fill<T: Clone>(s: &mut [T], x: T) {
+    let n = s.len();
+    let p = s.as_mut_ptr();
+    let mut i = 0;
+    while i < n {
+        unsafe {
+            *p.add(i) = x.clone();
+        }
+        i += 1;
+    }
+}
+fn __exr_slice_rotate_left<T>(s: &mut [T], k: usize) {
+    let n = s.len();
+    if n == 0 {
+        return;
+    }
+    let k = k % n;
+    __exr_slice_reverse(&mut s[..k]);
+    __exr_slice_reverse(&mut s[k..]);
+    __exr_slice_reverse(s);
+}
+fn __exr_slice_rotate_right<T>(s: &mut [T], k: usize) {
+    let n = s.len();
+    if n == 0 {
+        return;
+    }
+    __exr_slice_rotate_left(s, n - k % n);
+}
 fn __exr_slice_sort<T: Ord>(s: &mut [T]) {
     __exr_sort_lt(s.as_mut_ptr(), s.len());
 }
@@ -3380,6 +3421,9 @@ impl<T> Iterator for IntoIter<T> {
 }
 
 impl<T> IntoIter<T> {
+    pub fn len(&self) -> usize {
+        self.v.len - self.i
+    }
     pub fn next_back(&mut self) -> Option<T> {
         if self.i < self.v.len {
             self.v.len -= 1;

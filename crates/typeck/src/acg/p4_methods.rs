@@ -35,6 +35,10 @@ impl Cx<'_> {
             "clone_from_slice" => Some(("__exr_slice_clone_from", true)),
             "split_at" => Some(("__exr_slice_split_at", false)),
             "split_at_mut" => Some(("__exr_slice_split_at_mut", true)),
+            "reverse" => Some(("__exr_slice_reverse", true)),
+            "fill" => Some(("__exr_slice_fill", true)),
+            "rotate_left" => Some(("__exr_slice_rotate_left", true)),
+            "rotate_right" => Some(("__exr_slice_rotate_right", true)),
             _ => None,
         }
         .filter(|(f, _)| self.prog.index.contains_key(*f));
@@ -684,6 +688,11 @@ impl Cx<'_> {
             "try_into",
             "checked_abs",
             "checked_neg",
+            "wrapping_abs",
+            "saturating_abs",
+            "saturating_neg",
+            "overflowing_neg",
+            "overflowing_abs",
             "leading_ones",
             "trailing_ones",
             "saturating_add",
@@ -776,6 +785,28 @@ impl Cx<'_> {
                 (Some(self.b.ins().imul(a, b)), t)
             }
             "wrapping_neg" => (Some(self.b.ins().ineg(a)), t),
+            "wrapping_abs" => (Some(if s { self.b.ins().iabs(a) } else { a }), t),
+            // (MIN saturates to MAX)
+            "saturating_abs" | "saturating_neg" if s => {
+                let v = if name == "saturating_abs" { self.b.ins().iabs(a) } else { self.b.ins().ineg(a) };
+                let min = self.int_const(t, crate::program::prim_assoc_const(t, "MIN").unwrap());
+                let max = self.int_const(t, crate::program::prim_assoc_const(t, "MAX").unwrap());
+                let bad = self.b.ins().icmp(IntCC::Equal, a, min);
+                (Some(self.b.ins().select(bad, max, v)), t)
+            }
+            // (signed: only MIN overflows; unsigned neg: everything but 0)
+            "overflowing_neg" | "overflowing_abs" => {
+                let v = if name == "overflowing_abs" { if s { self.b.ins().iabs(a) } else { a } } else { self.b.ins().ineg(a) };
+                let of = if s {
+                    let min = self.int_const(t, crate::program::prim_assoc_const(t, "MIN").unwrap());
+                    self.b.ins().icmp(IntCC::Equal, a, min)
+                } else if name == "overflowing_neg" {
+                    self.b.ins().icmp_imm_u(IntCC::NotEqual, a, 0)
+                } else {
+                    self.b.ins().iconst(types::I8, 0)
+                };
+                self.pair_with_bool(v, t, of)?
+            }
             "min" | "max" => {
                 let b = arg(self, 0, t)?;
                 let ins = self.b.ins();

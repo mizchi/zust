@@ -1299,6 +1299,17 @@ pub fn select_with(user_src: &str, user_items: &[SrcItem], cache: &mut SelectCac
             }
         }
     }
+    // (mutating methods of arrays and slices; Vec has its own)
+    for (m, f) in [
+        ("reverse", "__exr_slice_reverse"),
+        ("fill", "__exr_slice_fill"),
+        ("rotate_left", "__exr_slice_rotate_left"),
+        ("rotate_right", "__exr_slice_rotate_right"),
+    ] {
+        if need.contains(m) {
+            need.insert(f);
+        }
+    }
     if iter_lib {
         need.insert("Iterator");
         if need.contains("iter") {

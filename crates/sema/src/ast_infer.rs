@@ -49,6 +49,11 @@ fn is_builtin_scalar_method(n: &str) -> bool {
             | "try_into"
             | "checked_abs"
             | "checked_neg"
+            | "wrapping_abs"
+            | "saturating_abs"
+            | "saturating_neg"
+            | "overflowing_neg"
+            | "overflowing_abs"
             | "leading_ones"
             | "trailing_ones"
             | "saturating_add"
@@ -2179,6 +2184,12 @@ impl Inf<'_> {
             }
             "leading_ones" | "trailing_ones" => self.known(Ty::U32),
             "checked_abs" | "checked_neg" => self.option_of(rv),
+            "wrapping_abs" | "saturating_abs" | "saturating_neg" => rv,
+            "overflowing_neg" | "overflowing_abs" => {
+                let b = self.known(Ty::Bool);
+                let tb = self.prog.tuple_base(2);
+                self.adt(tb, vec![rv, b])
+            }
             "try_into" => match (self.prog.struct_index.get("Result").copied(), self.prog.struct_index.get("TryFromIntError").copied()) {
                 (Some(rb), Some(eb)) => {
                     let t = self.var();

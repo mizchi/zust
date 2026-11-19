@@ -1595,7 +1595,7 @@ impl Cx<'_> {
                         "count_ones" | "count_zeros" | "leading_zeros" | "trailing_zeros" | "leading_ones" | "trailing_ones" => Some(Ty::U32),
                         "is_power_of_two" | "is_positive" | "is_negative" | "is_nan" | "is_finite" | "is_infinite" | "is_sign_negative"
                         | "is_sign_positive" => Some(Ty::Bool),
-                        "pow" | "wrapping_add" | "wrapping_sub" | "wrapping_mul" | "wrapping_neg" | "saturating_add" | "saturating_sub" | "abs" | "min"
+                        "pow" | "wrapping_add" | "wrapping_sub" | "wrapping_mul" | "wrapping_neg" | "wrapping_abs" | "saturating_abs" | "saturating_neg" | "saturating_add" | "saturating_sub" | "abs" | "min"
                         | "max" | "rem_euclid" | "div_euclid" | "next_multiple_of" | "next_power_of_two" | "rotate_left" | "rotate_right"
                         | "swap_bytes" | "signum" | "wrapping_pow" | "saturating_pow" | "isqrt" | "sqrt" | "floor" | "ceil" | "round" | "trunc"
                         | "powi" | "powf" | "exp" | "ln" | "sin" | "cos" | "tan" | "clamp" => Some(t),

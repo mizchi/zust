@@ -1221,10 +1221,13 @@ impl Program {
                     p.method(*sid, m).is_some()
                 };
                 if !p.sigs[d as usize].has_body && !found {
-                    return Err(format!(
-                        "not all trait items implemented, missing: `{m}` in `impl {tr} for {}`",
-                        p.structs[*sid as usize].name
-                    ));
+                    let sn = &p.structs[*sid as usize].name;
+                    // (the line of the impl block)
+                    let line = sums
+                        .iter()
+                        .position(|sm| sm.impl_trait.as_deref() == Some(tr.as_str()) && sm.impl_self.as_deref() == Some(sn.as_str()))
+                        .map_or(String::new(), |ii| format!("{}:1: ", items[ii].line));
+                    return Err(format!("{line}not all trait items implemented, missing: `{m}` in `impl {tr} for {sn}`"));
                 }
             }
         }
