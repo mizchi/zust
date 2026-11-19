@@ -70,3 +70,4 @@ date	commit	change	noop_M	edit_M	check_M	cache_KiB	lsp_G	run	check	build	cfail
 2026-11-19	bc3181b+	cfg item ends; brace macro statements spliced; local bindings not renamed as crate items; ManuallyDrop field; thread::panicking; unit-struct instances	0.871	590.633	3873.105	1902.8	-	1650	1392	95	3322	1179.998	63.263	11.259	318.883
 2026-11-19	32dacd1+	byteorder: to_be/from_be, ptr::copy*, <T>::f, chunks_mut, io::Result<T>, io::Write/Read::read_exact/Cursor, fmt::Write	0.872	591.493	3877.977	1902.8	-	-	-	-	-	1180.398	63.430	11.262	319.562
 2026-11-19	61f478f+	#[path] mod files, str::from_utf8 via use core::str, Utf8Error::error_len, impl Error for std error types, attributes left at the end of a file	0.872	591.197	3878.293	1902.8	-	1658	1395	95	3318	1180.310	63.496	11.261	320.207
+2026-11-19	19d10c0+	borrowck: an assigned value of a type without references carries no loans	0.872	591.198	3879.088	1902.8	-	1658	1395	95	3319	1180.041	63.497	11.261	320.259

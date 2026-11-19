@@ -673,6 +673,8 @@ impl Cx<'_> {
                 if rt == Ty::Never {
                     return Ok((None, Ty::Never));
                 }
+                // (a value of a type that holds no references carries no loans: `self.i = I::new(buf);`)
+                let srcs = if self.bk_on() && !self.bk_ty(t).1 { vec![] } else { srcs };
                 self.bk_assign(left, &srcs);
                 self.same(SP, rt, t)?;
                 let refill = if self.needs_drop(t) { self.drop_before_assign(left, p) } else { None };
