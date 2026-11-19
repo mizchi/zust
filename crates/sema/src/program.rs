@@ -509,6 +509,11 @@ pub fn self_of(name: &str, generics: &[String]) -> TySyn {
     }
 }
 
+/// arithmetic operator traits of integers and floats (core implements them)
+const NUM_OPS: &[&str] = &["Add", "Sub", "Mul", "Div", "Rem", "Neg", "AddAssign", "SubAssign", "MulAssign", "DivAssign", "RemAssign", "Sum", "Product"];
+/// bit operator traits of integers
+const INT_OPS: &[&str] = &["BitAnd", "BitOr", "BitXor", "Shl", "Shr", "Not", "BitAndAssign", "BitOrAssign", "BitXorAssign", "ShlAssign", "ShrAssign"];
+
 impl Program {
     /// The type an alias names, as an impl's self type: `type A = Foo<'static>` -> `Foo`, `type T = u32` -> `u32`
     fn alias_base(&self, n: &str) -> Option<String> {
@@ -1315,7 +1320,12 @@ impl Program {
                     || self.prim_impls.contains(&(Ty::Str, tr.to_string()))
             }
             Ty::Slice(e) => matches!(tr, "PartialEq" | "Eq" | "PartialOrd" | "Ord" | "Debug" | "Hash") && self.implements(*e, tr),
-            Ty::Dyn(_) => false,
+            // (`dyn Tr` implements Tr, and the other traits written in it: `dyn Tr + Send`)
+            Ty::Dyn(d) => d.split('+').any(|p| {
+                let p = p.trim();
+                let p = p.split('<').next().unwrap_or(p).trim();
+                p.rsplit("::").next() == Some(tr)
+            }),
             // 関数ポインタ: Fn 系 (引数の数が合うもの) と Copy
             Ty::Fn(f) => match parse_fn_bound(tr) {
                 Some((_, ps, _)) => ps.len() == f.params.len(),
@@ -1335,7 +1345,10 @@ impl Program {
             Ty::F32 | Ty::F64 => matches!(
                 tr,
                 "Copy" | "Clone" | "Sized" | "PartialEq" | "PartialOrd" | "Default" | "Debug" | "Display"
-            ) || self.prim_impls.contains(&(t, tr.to_string())),
+            ) || NUM_OPS.contains(&tr) || matches!(tr, "FromStr" | "ToString") || self.prim_impls.contains(&(t, tr.to_string())),
+            // (the operators core implements for integers: `T: Add<Output = T>` with T = i32)
+            t if t.is_int() && (NUM_OPS.contains(&tr) || INT_OPS.contains(&tr) || matches!(tr, "FromStr" | "ToString")) => true,
+            Ty::Bool | Ty::Char if matches!(tr, "FromStr" | "ToString") || (t == Ty::Bool && matches!(tr, "Not" | "BitAnd" | "BitOr" | "BitXor")) => true,
             t if t.is_int() || matches!(t, Ty::Bool | Ty::Char) => {
                 matches!(
                     tr,

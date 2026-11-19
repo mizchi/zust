@@ -38,6 +38,7 @@ run-pass	array-slice-vec/driftsort-off-by-one-issue-136103.rs
 run-pass	array-slice-vec/empty-mutable-vec.rs
 run-pass	array-slice-vec/estr-slice.rs
 run-pass	array-slice-vec/evec-slice.rs
+run-pass	array-slice-vec/fixed-length-vector-pattern-matching-7784.rs
 run-pass	array-slice-vec/fixed_length_copy.rs
 run-pass	array-slice-vec/issue-15730.rs
 run-pass	array-slice-vec/issue-18425.rs
@@ -196,6 +197,7 @@ check-pass	associated-types/cache/elision.rs
 compile-fail	associated-types/cache/poison-copy-via-projection.rs
 compile-fail	associated-types/dyn-impl-missing-assoc-type-ice-152668.rs
 check-pass	associated-types/enum-variant-with-assoc-type-and-lifetimes.rs
+compile-fail	associated-types/hr-associated-type-bound-object.rs
 compile-fail	associated-types/hr-associated-type-bound-param-1.rs
 compile-fail	associated-types/hr-associated-type-bound-param-2.rs
 compile-fail	associated-types/hr-associated-type-bound-param-3.rs
@@ -1831,6 +1833,7 @@ run-pass	expr/block-fn.rs
 run-pass	expr/block-generic.rs
 run-pass	expr/block.rs
 run-pass	expr/copy.rs
+run-pass	expr/early-return-in-binop.rs
 run-pass	expr/if-bot.rs
 run-pass	expr/if-generic.rs
 run-pass	expr/if-panic-all.rs
@@ -5122,12 +5125,6 @@ run-pass	traits/assoc-type-in-supertrait.rs
 compile-fail	traits/associated-item-unsatisfied-trait-bounds.rs
 compile-fail	traits/associated_type_bound/116464-invalid-assoc-type-suggestion-in-trait-impl.rs
 check-pass	traits/associated_type_bound/assoc-type-via-another-trait-issue-19479.rs
-compile-fail	traits/associated_type_bound/check-trait-object-bounds-1.rs
-compile-fail	traits/associated_type_bound/check-trait-object-bounds-2.rs
-compile-fail	traits/associated_type_bound/check-trait-object-bounds-3.rs
-compile-fail	traits/associated_type_bound/check-trait-object-bounds-4.rs
-compile-fail	traits/associated_type_bound/check-trait-object-bounds-5.rs
-compile-fail	traits/associated_type_bound/check-trait-object-bounds-6.rs
 check-pass	traits/associated_type_bound/hrtb-associated.rs
 check-pass	traits/associated_type_bound/impl-is-shadowed.rs
 run-pass	traits/astconv-cycle-between-and-type.rs
@@ -5270,13 +5267,16 @@ run-pass	traits/normalize/normalize-associated-type-in-where-clause.rs
 compile-fail	traits/not-suggest-non-existing-fully-qualified-path.rs
 compile-fail	traits/object-does-not-impl-trait.rs
 compile-fail	traits/object/auto-dedup-in-impl.rs
+check-pass	traits/object/bounds-cycle-1.rs
+check-pass	traits/object/bounds-cycle-2.rs
+check-pass	traits/object/bounds-cycle-3.rs
+check-pass	traits/object/bounds-cycle-4.rs
 check-pass	traits/object/constrain-via-unnecessary-bound.rs
 check-pass	traits/object/crash-due-to-projections-modulo-norm.rs
 run-pass	traits/object/dyn-iterator-with-non-ord-item.rs
 compile-fail	traits/object/elaborated-predicates-unconstrained-late-bound.rs
 compile-fail	traits/object/enforce-supertrait-projection.rs
 check-pass	traits/object/infer-shadows-implied-projection.rs
-compile-fail	traits/object/issue-44454-1.rs
 compile-fail	traits/object/issue-44454-2.rs
 run-pass	traits/object/lifetime-first.rs
 compile-fail	traits/object/macro-matcher.rs
@@ -5317,6 +5317,7 @@ compile-fail	traits/suggest-dereferences/root-obligation.rs
 compile-fail	traits/suggest-dereferences/suggest-dereferencing-receiver-argument.rs
 compile-fail	traits/suggest-fully-qualified-path-with-adjustment.rs
 compile-fail	traits/suggest-fully-qualified-path-without-adjustment.rs
+run-pass	traits/superdefault-generics.rs
 compile-fail	traits/test-2.rs
 compile-fail	traits/test.rs
 compile-fail	traits/trait-impl-overflow-with-where-clause-20413.rs
@@ -5674,7 +5675,6 @@ compile-fail	unsized-locals/suggest-borrow.rs
 compile-fail	unsized/box-instead-of-dyn-fn.rs
 run-pass	unsized/enum-struct-optimization.rs
 build-pass	unsized/issue-23649-3.rs
-compile-fail	unsized/issue-75707.rs
 compile-fail	unsized/relaxed-bounds-invalid-places.rs
 compile-fail	unsized/thin-ptr-to-unsized-projection.rs
 check-pass	unsized/unsize-coerce-multiple-adt-params.rs
