@@ -586,6 +586,13 @@ impl Session2 {
         // (struct / enum / union definitions of the program: unused parameters, union fields ..)
         for (it, sm) in items[..user].iter().zip(&sums[..user]) {
             if let Some(e) = &sm.adt_err {
+                // (`\u{1}field\u{1}msg`: at the line of the field `field:`)
+                if let Some((f, m)) = e.strip_prefix('\u{1}').and_then(|r| r.split_once('\u{1}')) {
+                    let text = src.get(it.start..it.end).unwrap_or("");
+                    let pat = format!("{f}:");
+                    let line = text.find(pat.as_str()).map(|i| it.line + text[..i].matches('\n').count()).unwrap_or(it.line);
+                    return Err(format!("{line}:1: {m}"));
+                }
                 return Err(format!("{}:1: {e}", it.line));
             }
         }

@@ -1431,6 +1431,40 @@ impl Cx<'_> {
                 self.b.ins().jump(out, &[]);
                 self.b.switch_to_block(out);
             }
+            Ty::Box(Ty::Slice(e)) => {
+                // (pointer, length): each element, then the allocation. A null pointer is moved out
+                let ptr = self.b.ins().load(PTR, mf(), p, 0);
+                let live = self.b.create_block();
+                let out = self.b.create_block();
+                self.b.ins().brif(ptr, live, &[], out, &[]);
+                self.b.switch_to_block(live);
+                if self.needs_drop(**e) {
+                    let n = self.b.ins().load(types::I64, mf(), p, 8);
+                    let (size, _) = self.prog.size_align(**e);
+                    let i = self.b.declare_var(types::I64);
+                    let z = self.b.ins().iconst(types::I64, 0);
+                    self.b.def_var(i, z);
+                    let head = self.b.create_block();
+                    let body = self.b.create_block();
+                    let done = self.b.create_block();
+                    self.b.ins().jump(head, &[]);
+                    self.b.switch_to_block(head);
+                    let iv = self.b.use_var(i);
+                    let more = self.b.ins().icmp(IntCC::UnsignedLessThan, iv, n);
+                    self.b.ins().brif(more, body, &[], done, &[]);
+                    self.b.switch_to_block(body);
+                    let off = self.b.ins().imul_imm_s(iv, size as i64);
+                    let a = self.b.ins().iadd(ptr, off);
+                    self.drop_in_place(a, **e);
+                    let next = self.b.ins().iadd_imm_s(iv, 1);
+                    self.b.def_var(i, next);
+                    self.b.ins().jump(head, &[]);
+                    self.b.switch_to_block(done);
+                }
+                self.free(ptr);
+                self.b.ins().jump(out, &[]);
+                self.b.switch_to_block(out);
+            }
             Ty::Box(inner) => {
                 let ptr = self.b.ins().load(PTR, mf(), p, 0);
                 let live = self.b.create_block();

@@ -197,7 +197,7 @@ impl Cx<'_> {
                     // (`match *x { [a, b] => .. }` with x: &[T]: the slice itself, as a place that holds its fat pointer;
                     // patterns on it bind by value)
                     // (a fat pointer's value is the address of its two words, which is what a slice place holds)
-                    (Some(fat), Ty::Ref(_, Ty::Slice(e))) => Ok(Place::Mem(fat, 0, Ty::Slice(e))),
+                    (Some(fat), Ty::Ref(_, Ty::Slice(e)) | Ty::Box(Ty::Slice(e))) => Ok(Place::Mem(fat, 0, Ty::Slice(e))),
                     (Some(_), t) if t.is_fat() => err(SP, "dereferencing a slice is not supported (index it instead)"),
                     (Some(_), Ty::Ptr(..)) if self.unsafe_ok == 0 && sp.start.line != 0 => {
                         err(sp.start, "dereference of raw pointer is unsafe and requires unsafe block (E0133)")
@@ -330,7 +330,7 @@ impl Cx<'_> {
         })?;
         // `&Box<T>` → `&T` (deref の強制変換: `e = x;` で x: &Box<Expr>)
         if let (Some(want @ Ty::Ref(m2, we)), Some(val), Ty::Ref(m1, Ty::Box(bi))) = (expected, v, t) {
-            if *we == **bi && !bi.is_fat() && (m1 || !m2) {
+            if *we == **bi && !matches!(bi, Ty::Slice(_) | Ty::Str | Ty::Dyn(_)) && (m1 || !m2) {
                 let p = self.b.ins().load(PTR, mf(), val, 0);
                 return Ok((Some(p), want));
             }
@@ -366,6 +366,19 @@ impl Cx<'_> {
         if let (Some(want @ Ty::Ref(false, wi)), Ty::Ref(true, gi)) = (expected, t) {
             if wi == gi {
                 return Ok((v, want));
+            }
+        }
+        // `&Box<[T]>` → `&[T]` (what the reference points to is the (pointer, length) pair, a `&[T]`'s value)
+        if let (Some(want @ Ty::Ref(m2, Ty::Slice(we))), Some(v), Ty::Ref(m1, Ty::Box(Ty::Slice(ge)))) = (expected, v, t) {
+            if we == ge && (m1 || !m2) {
+                return Ok((Some(v), want));
+            }
+        }
+        // `Box<[T; N]>` → `Box<[T]>` (the pointer and N)
+        if let (Some(want @ Ty::Box(Ty::Slice(we))), Some(v), Ty::Box(Ty::Array(ge, n))) = (expected, v, t) {
+            if we == ge {
+                let fat = self.make_fat(v, *n as i64);
+                return Ok((Some(fat), want));
             }
         }
         // `Box<T>` → `Box<dyn Trait>`
@@ -1058,7 +1071,7 @@ impl Cx<'_> {
             }
             return match pl {
                 // `&mut v[i]` (v: Vec<Box<T>>) を `&mut T` の位置に: Box の中身を指す (deref の強制変換)
-                Place::Mem(a, o, Ty::Box(x)) if matches!(expected, Some(Ty::Ref(_, e)) if *e == *x) && !x.is_fat() => {
+                Place::Mem(a, o, Ty::Box(x)) if matches!(expected, Some(Ty::Ref(_, e)) if *e == *x) && !matches!(x, Ty::Slice(_) | Ty::Str | Ty::Dyn(_)) => {
                     let p = self.b.ins().load(PTR, mf(), a, o);
                     Ok((Some(p), Ty::Ref(m, x)))
                 }

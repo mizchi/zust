@@ -54,6 +54,7 @@ run-pass	array-slice-vec/nested-vec-1.rs
 run-pass	array-slice-vec/nested-vec-2.rs
 run-pass	array-slice-vec/new-style-fixed-length-vec.rs
 run-pass	array-slice-vec/repeated-vector-syntax.rs
+run-pass	array-slice-vec/show-boxed-slice.rs
 compile-fail	array-slice-vec/slice-2.rs
 compile-fail	array-slice-vec/slice-mut.rs
 run-pass	array-slice-vec/slice-of-multi-ref.rs
@@ -661,6 +662,7 @@ run-pass	borrowck/borrowck-closures-two-imm.rs
 compile-fail	borrowck/borrowck-closures-two-mut-fail.rs
 compile-fail	borrowck/borrowck-closures-two-mut.rs
 compile-fail	borrowck/borrowck-closures-unique.rs
+compile-fail	borrowck/borrowck-consume-unsize-vec.rs
 compile-fail	borrowck/borrowck-consume-upcast-box.rs
 compile-fail	borrowck/borrowck-deref-pattern-assignment.rs
 compile-fail	borrowck/borrowck-drop-from-guard.rs
@@ -924,6 +926,7 @@ check-pass	cast/cast-pointee-projection.rs
 run-pass	cast/cast-ptr-to-fat-ptr.rs
 run-pass	cast/cast-region-to-uint.rs
 compile-fail	cast/cast-to-bare-fn.rs
+run-pass	cast/cast-to-box-arr.rs
 check-pass	cast/cast-to-char-compare.rs
 compile-fail	cast/cast-to-dyn-any.rs
 compile-fail	cast/cast-to-nil.rs
@@ -936,6 +939,7 @@ compile-fail	cast/casts-issue-46365.rs
 run-pass	cast/constant-expression-cast-9942.rs
 check-pass	cast/dyn-tails-need-normalization.rs
 compile-fail	cast/enum-to-numeric-cast.rs
+compile-fail	cast/fat-ptr-cast.rs
 compile-fail	cast/ice-cast-type-with-error-124848.rs
 compile-fail	cast/issue-106883-is-empty.rs
 compile-fail	cast/issue-10991.rs
@@ -1123,6 +1127,7 @@ run-pass	codegen/arm-collect-into-vec-codegen-regression.rs
 run-pass	codegen/assign-expr-unit-type.rs
 run-pass	codegen/bitvec-to-bools-opt-miscompile.rs
 run-pass	codegen/box-deref-segfault-misopt.rs
+run-pass	codegen/box-str-drop-glue.rs
 build-pass	codegen/codegen-binder-not-ignored-in-generic-fn.rs
 run-pass	codegen/correctly-monomorphize-generic-drop-impl.rs
 run-pass	codegen/dont-miscompile-enums.rs
@@ -1423,6 +1428,7 @@ run-pass	consts/const-enum-tuplestruct.rs
 run-pass	consts/const-enum-vec-ptr.rs
 run-pass	consts/const-enum-vector.rs
 run-pass	consts/const-err-rpass.rs
+compile-fail	consts/const-eval/array-len-mismatch-type.rs
 compile-fail	consts/const-eval/const_panic-normalize-tabs-115498.rs
 check-pass	consts/const-eval/const_prop_errors.rs
 check-pass	consts/const-eval/const_signed_pat.rs
@@ -6319,6 +6325,8 @@ compile-fail	unsized-locals/by-value-trait-dyn-compatibility.rs
 compile-fail	unsized-locals/ice-size_and_align_of-closure-not-supported-88212.rs
 compile-fail	unsized-locals/issue-30276.rs
 compile-fail	unsized-locals/issue-50940.rs
+compile-fail	unsized-locals/reference-unsized-locals.rs
+compile-fail	unsized-locals/simple-unsized-locals.rs
 compile-fail	unsized-locals/suggest-borrow.rs
 compile-fail	unsized/box-instead-of-dyn-fn.rs
 run-pass	unsized/enum-struct-optimization.rs
@@ -6368,6 +6376,7 @@ compile-fail	wf/issue-110157.rs
 compile-fail	wf/issue-95665.rs
 compile-fail	wf/let-pat-inferred-non-wf.rs
 compile-fail	wf/range-expr-root-of-constant-issue-40749.rs
+compile-fail	wf/wf-array-elem-sized.rs
 compile-fail	wf/wf-associated-const.rs
 check-pass	wf/wf-dyn-in-hrtb-bound-issue-157122.rs
 compile-fail	wf/wf-fn-def-check-sig-2.rs

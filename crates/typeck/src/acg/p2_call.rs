@@ -81,6 +81,27 @@ impl Cx<'_> {
     pub(crate) fn method_call(&mut self, e: &Expr, expected: Option<Ty>) -> R<V> {
         let Expr::MethodCall(recv, method, gargs, margs, msp) = e else { unreachable!() };
         let msp = *msp;
+        // (`b.m()` with b: Box<[T]>: the slice's method, through `&*b` / `&mut *b`)
+        let local_ty = match &**recv {
+            Expr::Path(None, p) => ident_of(p).and_then(|n| self.lookup(n)).map(|x| x.1),
+            _ => None,
+        };
+        if let Some(Ty::Box(Ty::Slice(el))) = local_ty.or_else(|| self.peek(recv)) {
+            let mutating = matches!(method.as_str(), "sort" | "sort_unstable" | "sort_by" | "sort_by_key" | "reverse" | "swap" | "fill" | "iter_mut" | "copy_from_slice" | "clone_from_slice" | "rotate_left" | "rotate_right" | "as_mut_ptr" | "first_mut" | "last_mut" | "get_mut" | "split_at_mut" | "chunks_mut");
+            if !matches!(method.as_str(), "clone" | "into_vec" | "into_iter") {
+                let r = Expr::Ref(mutating, Box::new(Expr::Unary("*".into(), recv.clone(), Default::default())));
+                let ne: &Expr = self.keep_expr(Expr::MethodCall(Box::new(paren(r)), method.to_string(), gargs.clone(), margs.clone(), msp));
+                // (the new receiver's type, for what looks the method up by it)
+                if let Expr::MethodCall(r, ..) = ne {
+                    let rt = Ty::Ref(mutating, intern(Ty::Slice(el)));
+                    self.lets.insert(&**r as *const Expr as usize, rt);
+                    if let Expr::Paren(i) = &**r {
+                        self.lets.insert(&**i as *const Expr as usize, rt);
+                    }
+                }
+                return self.expr(ne, expected);
+            }
+        }
         // `let b: Box<_> = 22.into();` (`From<T> for Box<T>`): `Box::new(22)`
         if method == "into" && margs.is_empty() && matches!(expected, Some(Ty::Box(_))) {
             let rt = self.peek(recv);

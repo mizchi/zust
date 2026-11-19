@@ -498,7 +498,37 @@ fn parse_sig(sig: &PSig, is_extern: bool, is_main: bool, owner: Option<&Owner>) 
 }
 
 /// Checks on a struct / enum / union definition: unused parameters (E0392), `Self` in defaults (E0735), union fields
+/// a slice or array whose element is unsized (`[[T]]`, `[str; 2]`, `[dyn Tr]`), anywhere in t: its text
+fn unsized_elem(t: &PTy) -> Option<String> {
+    fn is_unsized(t: &PTy) -> bool {
+        matches!(t, PTy::Slice(_) | PTy::Dyn(_)) || matches!(t, PTy::Path(None, p) if p.segs.len() == 1 && p.segs[0].name == "str")
+    }
+    match t {
+        PTy::Slice(e) | PTy::Array(e, _) => {
+            if is_unsized(e) {
+                return Some(match &**e {
+                    PTy::Slice(_) => "[..]".to_string(),
+                    PTy::Dyn(_) => "dyn ..".to_string(),
+                    _ => "str".to_string(),
+                });
+            }
+            unsized_elem(e)
+        }
+        PTy::Ref(_, _, e) | PTy::Ptr(_, e) => unsized_elem(e),
+        PTy::Tuple(xs) => xs.iter().find_map(unsized_elem),
+        PTy::Path(_, p) => p.segs.iter().flat_map(|s| s.args.iter()).find_map(|a| match a {
+            crate::parse::GArg::Ty(t) => unsized_elem(t),
+            _ => None,
+        }),
+        _ => None,
+    }
+}
+
 fn adt_checks(attrs: &[String], g: &Generics, tys: &[&PTy], union: bool, nfields: usize) -> R<()> {
+    // (E0277: a slice's or array's element must be Sized)
+    if let Some(t) = tys.iter().find_map(|t| unsized_elem(t)) {
+        return Err(format!("the size for values of type `{t}` cannot be known at compilation time (E0277)"));
+    }
     let mut names = vec![];
     let mut lts = vec![];
     for t in tys {
@@ -1393,6 +1423,14 @@ pub fn summarize(item: &Item, owner: Option<&Owner>) -> R<Summary> {
                 }
                 // (PhantomData itself is the one type whose parameter needs no use)
                 sm.adt_err = adt_checks(&item.attrs, g, &tys, union, tys.len()).err();
+                // (an unsized element: at its field's line, which the driver finds by the field's name)
+                if let (Some(e), Fields::Named(v)) = (&sm.adt_err, fields) {
+                    if e.ends_with("(E0277)") {
+                        if let Some((n, _)) = v.iter().find(|x| unsized_elem(&x.1).is_some()) {
+                            sm.adt_err = Some(format!("\u{1}{n}\u{1}{e}"));
+                        }
+                    }
+                }
             }
             if union {
                 sm.unions.push(sn.clone());

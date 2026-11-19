@@ -1339,10 +1339,16 @@ impl Cx<'_> {
                     let len = self.b.ins().iconst(types::I64, n as i64);
                     return Ok((base, len, *t));
                 }
-                Place::Mem(a, o, Ty::Ref(_, Ty::Slice(t))) => {
+                // (`&[T]` / `Box<[T]>` in memory, or a slice place: the (pointer, length) pair)
+                Place::Mem(a, o, Ty::Ref(_, Ty::Slice(t)) | Ty::Box(Ty::Slice(t))) => {
                     let base = self.b.ins().load(PTR, mf(), a, o);
                     let len = self.b.ins().load(types::I64, mf(), a, o + 8);
                     return Ok((base, len, **t));
+                }
+                Place::Mem(a, o, Ty::Slice(t)) => {
+                    let base = self.b.ins().load(PTR, mf(), a, o);
+                    let len = self.b.ins().load(types::I64, mf(), a, o + 8);
+                    return Ok((base, len, *t));
                 }
                 // Vec<T>: (ptr, len) フィールド
                 Place::Mem(a, o, Ty::Struct(sid)) if self.vec_fields(sid).is_some() => {
