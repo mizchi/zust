@@ -11,3 +11,4 @@ date	commit	change	noop_M	edit_M	check_M	cache_KiB	lsp_G	run	check	build	cfail
 2026-11-19	6c8b074	expand_reference follows the statement-position rules (test fix)	625.185	626.787	3905.063	1902.8	-	1553	1278	89	2850
 2026-11-19	a593fd0	Box::into_raw / from_raw, *mut T for a let written *const T	625.186	626.788	3905.063	1902.8	-	1555	1278	89	2850
 2026-11-19	2ddc076	closures with no captures as fn pointers	625.185	626.788	3905.285	1902.8	-	1559	1283	89	2851
+2026-11-19	a474393	LSP measured on a fixed snapshot (closures as fn pointers included)	625.125	626.728	3905.165	1902.8	10.8931	1559	1283	89	2851
