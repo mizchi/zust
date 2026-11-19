@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795126064313,
+  "lastUpdate": 1795126066337,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -51445,6 +51445,85 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/mizchi/zust/commit/e468530437e44ea1b2692a2382daff0eac06c3c9"
         },
         "date": 1795124920998,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "parity documentSymbol (名前の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity workspace/symbol (上位 20 の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity definition (行き先の一致)",
+            "value": 97.143,
+            "unit": "%"
+          },
+          {
+            "name": "parity hover (名前を含む)",
+            "value": 87.5,
+            "unit": "%"
+          },
+          {
+            "name": "parity references (数の一致)",
+            "value": 86.111,
+            "unit": "%"
+          },
+          {
+            "name": "parity documentHighlight (数の一致)",
+            "value": 97.143,
+            "unit": "%"
+          },
+          {
+            "name": "parity rename (書き換えの一致)",
+            "value": 83.333,
+            "unit": "%"
+          },
+          {
+            "name": "parity signatureHelp (名前・引数の数・今の引数の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity completion `x.\\|` (書いてある名前を含む)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity completion `na\\|me` (同)",
+            "value": 92.857,
+            "unit": "%"
+          },
+          {
+            "name": "parity 一致の平均",
+            "value": 94.409,
+            "unit": "%"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "committer": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "distinct": true,
+          "id": "b51ec2ccf0efe16d819ee2f3cf79c171ff192c13",
+          "message": "Default methods of generic traits: trait arguments from the receiver's impl\n\n`trait Getter<T> { fn do_get2(&self) -> (T, T) { .. } }` called on a\ntype with `impl Getter<isize> for isize` (or `impl<T> Getter<T> for\nOption<T>`): the program records each generic trait impl's self type\nand trait arguments, and a default method's trait parameters that\nnothing else solved come from the one impl whose self type fits.\n\ntests/ui: +5 genuine passes (4 run-pass, 1 check-pass); two\ncompile-fail tests that passed for the wrong reason (an inference\nerror on the expected line) go to rust_ui_accidental.txt.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-19T22:01:16Z",
+          "tree_id": "d523de068b90f1505aaf624ee126fd90c5f3b1e2",
+          "url": "https://github.com/mizchi/zust/commit/b51ec2ccf0efe16d819ee2f3cf79c171ff192c13"
+        },
+        "date": 1795126065863,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
