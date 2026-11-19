@@ -366,6 +366,7 @@ check-pass	async-await/issue-63832-await-short-temporary-lifetime-1.rs
 check-pass	async-await/issue-63832-await-short-temporary-lifetime.rs
 check-pass	async-await/issue-64391.rs
 compile-fail	async-await/issue-66387-if-without-else.rs
+compile-fail	async-await/issue-67765-async-diagnostic.rs
 compile-fail	async-await/issue-69446-fnmut-capture.rs
 compile-fail	async-await/issue-70594.rs
 compile-fail	async-await/issue-72590-type-error-sized.rs
@@ -477,6 +478,7 @@ compile-fail	autoref-autoderef/deref-ambiguity-becomes-nonambiguous.rs
 run-pass	autoref-autoderef/deref-chain-method-calls-13264.rs
 check-pass	autoref-autoderef/reborrow-mut-self-to-ref-self-method.rs
 run-pass	binding/bind-field-short-with-modifiers.rs
+run-pass	binding/borrowed-ptr-pattern-2.rs
 run-pass	binding/borrowed-ptr-pattern-3.rs
 run-pass	binding/borrowed-ptr-pattern-infallible.rs
 run-pass	binding/borrowed-ptr-pattern-option.rs
@@ -862,6 +864,8 @@ run-pass	borrowck/region-checker-map-closure-13665.rs
 run-pass	borrowck/rvalue-lifetime-match-equivalence-7660.rs
 check-pass	borrowck/self-field-consume-with-drop-type.rs
 check-pass	borrowck/static-trait-bound-lost.rs
+check-pass	borrowck/string-borrowing-pattern-matching-11869.rs
+check-pass	borrowck/string-literal-match-patterns-11869.rs
 check-pass	borrowck/struct-field-move-with-drop-borrow.rs
 run-pass	borrowck/struct-with-reference-to-trait-5708.rs
 compile-fail	borrowck/suggest-as-ref-on-mut-closure.rs
@@ -3205,6 +3209,7 @@ compile-fail	liveness/liveness-missing-ret2.rs
 compile-fail	liveness/liveness-move-call-arg.rs
 compile-fail	liveness/liveness-move-in-loop.rs
 compile-fail	liveness/liveness-return-last-stmt-semi.rs
+compile-fail	liveness/liveness-use-after-move.rs
 compile-fail	liveness/liveness-use-after-send.rs
 run-pass	liveness/unused-assignments-diverging-branch-issue-156416.rs
 check-pass	liveness/unused-assignments-match-guard-issue-80954.rs
@@ -3702,6 +3707,7 @@ check-pass	nll/issue-21114-ebfull.rs
 compile-fail	nll/issue-21232-partial-init-and-erroneous-use.rs
 compile-fail	nll/issue-21232-partial-init-and-use.rs
 check-pass	nll/issue-22323-temp-destruction.rs
+run-pass	nll/issue-24535-allow-mutable-borrow-in-match-guard.rs
 compile-fail	nll/issue-27868.rs
 check-pass	nll/issue-30104.rs
 compile-fail	nll/issue-30438-c.rs
@@ -3797,6 +3803,7 @@ run-pass	numbers-arithmetic/apfloat-modulo-wrong.rs
 run-pass	numbers-arithmetic/arith-unsigned.rs
 run-pass	numbers-arithmetic/bitwise-ops-platform.rs
 run-pass	numbers-arithmetic/div-mod.rs
+run-pass	numbers-arithmetic/f32-literal-rounding-32805.rs
 run-pass	numbers-arithmetic/float-int-invalid-const-cast.rs
 run-pass	numbers-arithmetic/float-literal-inference.rs
 run-pass	numbers-arithmetic/float-nan.rs
@@ -4522,6 +4529,7 @@ run-pass	pattern/bindings-after-at/or-patterns.rs
 run-pass	pattern/bindings-after-at/slice-patterns.rs
 check-pass	pattern/byte-string-inference.rs
 check-pass	pattern/check-struct-pat-fields-stability-issue-138319.rs
+run-pass	pattern/const-pattern-str-match-lifetime.rs
 compile-fail	pattern/constructor-type-mismatch.rs
 compile-fail	pattern/deref-patterns/deref-non-pointer.rs
 compile-fail	pattern/deref-patterns/deref-pointer-cast-mutability-71676.rs
@@ -4826,7 +4834,6 @@ check-pass	regions/regions-outlives-projection-hrtype.rs
 check-pass	regions/regions-outlives-projection-trait-def.rs
 check-pass	regions/regions-outlives-scalar.rs
 run-pass	regions/regions-params.rs
-compile-fail	regions/regions-pattern-typing-issue-19552.rs
 compile-fail	regions/regions-pattern-typing-issue-19997.rs
 run-pass	regions/regions-reassign-let-bound-pointer.rs
 run-pass	regions/regions-reassign-match-bound-pointer.rs

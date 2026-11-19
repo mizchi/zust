@@ -1361,7 +1361,9 @@ impl Cx<'_> {
                                     let Ty::Ref(m, _) = a else { unreachable!() };
                                     Some(Ty::Ref(m, intern(Ty::Slice(*e))))
                                 }
-                                Some(inf) if has_hole(self.prog, a) && !has_hole(self.prog, inf) && !self.prog.has_param(inf) => Some(inf),
+                                // (only an instance of the annotation: `Box<_>` is not filled with a `bool`)
+                                Some(inf) if has_hole(self.prog, a) && !has_hole(self.prog, inf) && !self.prog.has_param(inf) && std::mem::discriminant(&inf) == std::mem::discriminant(&a)
+                                    && !matches!((inf, a), (Ty::Struct(x), Ty::Struct(y)) if self.prog.base_of(x) != self.prog.base_of(y)) => Some(inf),
                                 _ => Some(a),
                             }
                         }

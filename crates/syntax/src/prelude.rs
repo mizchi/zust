@@ -1041,6 +1041,10 @@ pub fn select_with(user_src: &str, user_items: &[SrcItem], cache: &mut SelectCac
     if need.contains("vec") && sc.any_pre("vec_repeat_nonliteral", &["vec!["], &vec_repeat_nonliteral) {
         need.extend(["resize", "new", "__exr_clone"]);
     }
+    // (`&*s` / `&**s` / `&s[..]` with s a String / &String: acg rewrites it to `s.as_str()`)
+    if need.contains("String") && (sc.has("&*") || sc.has("[..]")) {
+        need.insert("as_str");
+    }
     // String への collect は要素が &str / String なら push_str を使う
     if need.contains("collect") && need.contains("String") {
         need.extend(["push_str", "as_str"]);

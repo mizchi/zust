@@ -1549,8 +1549,14 @@ impl Cx<'_> {
                     "f64" => Ty::F64,
                     _ => expected.filter(|t| t.is_float()).unwrap_or(Ty::F64),
                 };
-                let x: f64 = digits.parse().map_err(|e: std::num::ParseFloatError| e.to_string())?;
-                let v = if ty == Ty::F32 { self.b.ins().f32const(x as f32) } else { self.b.ins().f64const(x) };
+                // (an f32 literal is rounded once, from its digits: through f64 it can round twice)
+                let v = if ty == Ty::F32 {
+                    let x: f32 = digits.parse().map_err(|e: std::num::ParseFloatError| e.to_string())?;
+                    self.b.ins().f32const(x)
+                } else {
+                    let x: f64 = digits.parse().map_err(|e: std::num::ParseFloatError| e.to_string())?;
+                    self.b.ins().f64const(x)
+                };
                 Ok((Some(v), ty))
             }
             Lit::Int(i) => {
