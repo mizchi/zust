@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795055622306,
+  "lastUpdate": 1795055624182,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -28728,6 +28728,70 @@ window.BENCHMARK_DATA = {
           {
             "name": "tests/ui build-pass passing",
             "value": 88,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui compile-fail pass rate",
+            "value": 38.65,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui compile-fail passing",
+            "value": 2844,
+            "unit": "tests"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "committer": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "distinct": true,
+          "id": "45579fca0287f68e246fca6b35e24ce3ce13d824",
+          "message": "Consts of generic impls (`impl<T> S<T> { const C: Option<T> = None; }`)\n\nA const declared in an impl whose type names the impl's parameters gets a hole\nfor its type; each use types the inlined expression with the expected type there.\nA projection (`C::M`) is still an error. tests/ui: run-pass +1, check-pass +2,\nbuild-pass +1, no regressions. KPIs unchanged.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-19T02:24:14Z",
+          "tree_id": "a0eed351db77e60cf666d51e12ecf25f1bee0a1f",
+          "url": "https://github.com/mizchi/zust/commit/45579fca0287f68e246fca6b35e24ce3ce13d824"
+        },
+        "date": 1795055623710,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tests/ui run-pass pass rate",
+            "value": 63.66,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui run-pass passing",
+            "value": 1536,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui check-pass pass rate",
+            "value": 70.34,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui check-pass passing",
+            "value": 1271,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui build-pass pass rate",
+            "value": 65.93,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui build-pass passing",
+            "value": 89,
             "unit": "tests"
           },
           {
