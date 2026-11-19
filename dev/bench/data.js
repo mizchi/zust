@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795114539632,
+  "lastUpdate": 1795114542132,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -47761,6 +47761,85 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/mizchi/zust/commit/5d5bcd0282ca48bbd01ab2676e540f3da81316ee"
         },
         "date": 1795112338266,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "parity documentSymbol (名前の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity workspace/symbol (上位 20 の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity definition (行き先の一致)",
+            "value": 97.143,
+            "unit": "%"
+          },
+          {
+            "name": "parity hover (名前を含む)",
+            "value": 87.5,
+            "unit": "%"
+          },
+          {
+            "name": "parity references (数の一致)",
+            "value": 86.111,
+            "unit": "%"
+          },
+          {
+            "name": "parity documentHighlight (数の一致)",
+            "value": 97.143,
+            "unit": "%"
+          },
+          {
+            "name": "parity rename (書き換えの一致)",
+            "value": 83.333,
+            "unit": "%"
+          },
+          {
+            "name": "parity signatureHelp (名前・引数の数・今の引数の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity completion `x.\\|` (書いてある名前を含む)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity completion `na\\|me` (同)",
+            "value": 92.857,
+            "unit": "%"
+          },
+          {
+            "name": "parity 一致の平均",
+            "value": 94.409,
+            "unit": "%"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "committer": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "distinct": true,
+          "id": "0b564442fae8737a2336b070cc6d5f175ca92f0e",
+          "message": "Destructuring assignment; `let (a, b);` and `let _: T;` without a value\n\n- `(a, b) = (b, a);`, `[x, _] = arr;`, nested tuples / arrays and `_`: the parser writes\n  `{ let (t0, t1) = rhs; a = t0; b = t1; }` (the right side first, then the places in order).\n- `let (a, mut b);` / `let (c, d): (u8, String);`: a `let` without a value for each name.\n- `let _: T;`: T must name a type, nothing else happens (it was \"`let` without initializer is not supported\").\nThe parser looks at a statement again only when it starts with `let (` (moving every statement once more cost\n`check` +0.2% in copies).\n\ntests/ui: 13 newly passing (run-pass associated-types/associated-types-from-supertrait.rs,\ndestructuring-assignment/warn-unused-duplication.rs, drop/nondrop-cycle.rs, generics/empty-generic-brackets-equiv.rs,\nmodules/module-use-nested-groups.rs; check-pass x6; compile-fail destructuring-assignment/note-unsupported.rs,\nslice_destructure_fail.rs). Removed (they failed only on the unsupported `let x;` / `(a, b) = ..`, not on what they\ntest): compile-fail destructuring-assignment/default-match-bindings-forbidden.rs (`(x, y) = &(1, 2)` is accepted\nthrough default binding modes), error-codes/E0719.rs, generic-associated-types/multiple-type-params-with-unmet-bounds.rs,\nown-bound-span.rs, lint/non-snake-case/lint-uppercase-variables.rs, nll/ty-outlives/wf-unreachable.rs,\nsuggestions/borrow-from-overloaded-deref-assign-issue-154826.rs (a move out of `*rc` through a pattern is not caught).\nKPIs: check +0.09%, the rest noise.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-19T18:45:48Z",
+          "tree_id": "fb15e1eafab680ecf3fcd57129a9b1603404e9d5",
+          "url": "https://github.com/mizchi/zust/commit/0b564442fae8737a2336b070cc6d5f175ca92f0e"
+        },
+        "date": 1795114541653,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
