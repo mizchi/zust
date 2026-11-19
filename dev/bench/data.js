@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795109481103,
+  "lastUpdate": 1795111321819,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -24167,6 +24167,165 @@ window.BENCHMARK_DATA = {
           {
             "name": "rt/strings run (-O)",
             "value": 34.299,
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "committer": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "distinct": true,
+          "id": "19d10c0fa8723752e8a7c65baa0a40d83ae5140b",
+          "message": "Found building rust-utf8 (SimonSapin/rust-utf8) and static-assertions (nvzqz) with zustc:\n- `#[path = \"bool.rs\"] pub mod _bool;`: the file the attribute names, beside the declaring file.\n- `str::from_utf8(..)` with `use core::str;` / `use std::str;`: the module's fn (as `std::str::from_utf8`).\n- Utf8Error::error_len.\n- std's error types (io::Error, Utf8Error, FromUtf8Error, ParseIntError, ParseFloatError, TryFromIntError)\n  implement Error (`Some(err)` as `&dyn Error`); the prelude includes these impls, and the trait, only when the\n  program names Error and the type.\n- The item splitter: attributes with no item after them at the end of a file (those of a `#[macro_export]\n  macro_rules!` that expansion took out, last in a lib crate) are no unterminated item.\nrust-utf8's lib now builds (its app still meets a borrow-checker false positive: a loan returned after a loop is taken\nas live inside the loop); static-assertions stops at associated consts of two impls for `[(); 0]` / `[(); 1]`.\n\ntests/ui: run-pass modules/mod_file_with_path_attr.rs, modules/special_module_name_ignore.rs, check-pass\nrfcs/rfc-2457-non-ascii-idents/mod_file_nonascii_with_path_allowed.rs; 0 regressions. cratebench: the 6 crates give\nthe same output. README: tests/ui coverage measured on 61f478f+ (the benchmark tables stay CI's).\nKPIs: no change outside noise (traits edit +0.10%, crates edit +0.20%).\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-19T17:54:44Z",
+          "tree_id": "98d34361f515608b9e2619109a5aec5d04aa4505",
+          "url": "https://github.com/mizchi/zust/commit/19d10c0fa8723752e8a7c65baa0a40d83ae5140b"
+        },
+        "date": 1795111321256,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "gen1000 build cold",
+            "value": 120.21,
+            "unit": "ms"
+          },
+          {
+            "name": "gen1000 build noop",
+            "value": 0.801,
+            "unit": "ms"
+          },
+          {
+            "name": "gen1000 build edit 1 fn",
+            "value": 16.734,
+            "unit": "ms"
+          },
+          {
+            "name": "gen1000 check",
+            "value": 76.526,
+            "unit": "ms"
+          },
+          {
+            "name": "gen1000 build cold peak RSS",
+            "value": 17.934,
+            "unit": "MiB"
+          },
+          {
+            "name": "gen1000 binary",
+            "value": 323.977,
+            "unit": "KiB"
+          },
+          {
+            "name": "gen1000 cache",
+            "value": 387.21,
+            "unit": "KiB"
+          },
+          {
+            "name": "gen1000 build noop instructions",
+            "value": 0.728,
+            "unit": "M instr"
+          },
+          {
+            "name": "gen1000 build edit 1 fn instructions",
+            "value": 133.871,
+            "unit": "M instr"
+          },
+          {
+            "name": "gen1000 check instructions",
+            "value": 787.18,
+            "unit": "M instr"
+          },
+          {
+            "name": "gen5000 build cold",
+            "value": 533.819,
+            "unit": "ms"
+          },
+          {
+            "name": "gen5000 build noop",
+            "value": 0.769,
+            "unit": "ms"
+          },
+          {
+            "name": "gen5000 build edit 1 fn",
+            "value": 65.997,
+            "unit": "ms"
+          },
+          {
+            "name": "gen5000 check",
+            "value": 374.971,
+            "unit": "ms"
+          },
+          {
+            "name": "gen5000 build cold peak RSS",
+            "value": 52.098,
+            "unit": "MiB"
+          },
+          {
+            "name": "gen5000 binary",
+            "value": 1558.336,
+            "unit": "KiB"
+          },
+          {
+            "name": "gen5000 cache",
+            "value": 1902.835,
+            "unit": "KiB"
+          },
+          {
+            "name": "gen5000 build noop instructions",
+            "value": 0.728,
+            "unit": "M instr"
+          },
+          {
+            "name": "gen5000 build edit 1 fn instructions",
+            "value": 627.781,
+            "unit": "M instr"
+          },
+          {
+            "name": "gen5000 check instructions",
+            "value": 3875.092,
+            "unit": "M instr"
+          },
+          {
+            "name": "rt/fib run (-O)",
+            "value": 54.219,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/hashmap run (-O)",
+            "value": 89.297,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/matmul run (-O)",
+            "value": 39.403,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/nbody run (-O)",
+            "value": 52.404,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/sieve run (-O)",
+            "value": 93.976,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/sort run (-O)",
+            "value": 141.457,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/strings run (-O)",
+            "value": 34.09,
             "unit": "ms"
           }
         ]
