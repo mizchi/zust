@@ -9,10 +9,10 @@
 
 ## 全体
 
-- [x] tests/ui run-pass：65.2%（1555 / 2385）
-- [x] tests/ui check-pass：70.7%（1278 / 1807）
+- [x] tests/ui run-pass：65.4%（1559 / 2385）
+- [x] tests/ui check-pass：71.0%（1283 / 1807）
 - [x] tests/ui build-pass：65.9%（89 / 135）
-- [ ] tests/ui compile-fail（注釈の行でエラー）：38.7%（2850 / 7358）
+- [ ] tests/ui compile-fail（注釈の行でエラー）：38.7%（2851 / 7358）
 - [x] 実際のクレート：fnv、adler2、hex、itoa、rustc-hash、cfg-if がビルドでき、同じ出力を出す（6 / 6）
 - [x] zust-analyzer が rust-analyzer と同じように答える：95.4%（rust-analyzer は 96.2%）
 
@@ -32,7 +32,7 @@
 - [x] `impl Tr for Box<S>` のメソッド（Box への impl とブランケット impl の衝突は E0119）、`..b` / `..=b` / `..` の値、`wrapping_shl` / `checked_shl` / `overflowing_shl` / `reverse_bits`
 - [x] let チェーン（`if let A = x && cond`）、`&raw const` / `&raw mut`
 - [x] 構文解析：73.7%
-- [x] クロージャ（キャプチャ、`Fn` トレイト、`move`）：71.7%
+- [x] クロージャ（キャプチャ、`Fn` トレイト、`move`。キャプチャがなければ関数ポインタとしても）：71.7%
 - [x] derive：`Debug`、`Clone`、`Copy`、`PartialEq`/`Eq`、`PartialOrd`/`Ord`、`Hash`、`Default`：68.2%
 - [x] import、`use`：67.0%
 - [x] 関連型：63.6%
