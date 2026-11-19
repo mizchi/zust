@@ -39,3 +39,4 @@ date	commit	change	noop_M	edit_M	check_M	cache_KiB	lsp_G	run	check	build	cfail
 2026-11-19	f7bd02b	unit structs through module paths	625.233	626.899	3905.262	1902.8	-	1599	1354	94	3304
 2026-11-19	9f34243	supertrait methods through dyn	625.518	627.166	3908.350	1902.8	10.8874	1603	1356	94	3307
 2026-11-19	4ed6b24	supertraits without a Summary field	625.171	626.762	3907.087	1902.8	-	1603	1356	94	3307
+2026-11-19	f9d67f9	nested items with qualifiers	627.040	628.631	3908.958	1902.8	-	1603	1360	94	3307
