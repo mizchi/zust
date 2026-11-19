@@ -80,8 +80,11 @@ def traits_kpis(n=50):
 def crates_kpis():
     """cratebench's crates (fnv, adler2, hex, itoa, rustc-hash, cfg-if: real code, built as a lib and the app that uses
     it): the sum over them of a no-op build (the least of 3) and of a build after editing the app"""
-    sys.path.insert(0, os.path.join(ROOT, "cratebench"))
-    import run as cb  # noqa: E402
+    # (by its path: bench/ has a run.py of its own)
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("cratebench_run", os.path.join(ROOT, "cratebench/run.py"))
+    cb = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(cb)
     noop = edit = 0.0
     for name, ed, feats in cb.crates():
         d = os.path.join(WORK, "crates", name)
