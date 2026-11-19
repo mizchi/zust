@@ -26,7 +26,7 @@
 
 ## Status
 
-Numbers measured <!-- measured -->2026-11-19, f86ca09<!-- /measured --> by CI on each push to main (bench.yml runs
+Numbers measured <!-- measured -->2026-11-19, 9af93dd<!-- /measured --> by CI on each push to main (bench.yml runs
 `bench/ci_bench.py` and `bench/rust_ui.py`, then `scripts/update_readme.py` writes them here). Times come from shared
 GitHub Actions runners and vary by about ±20%; the instruction counts (valgrind) do not.
 
@@ -38,10 +38,10 @@ only the tests it can be asked to handle (no nightly features, auxiliary crates 
 <!-- auto:ui -->
 | kind | applicable | pass |
 |---|---:|---:|
-| run-pass (builds, runs, same output) | 2385 | 1628 (68.3%) |
+| run-pass (builds, runs, same output) | 2385 | 1631 (68.4%) |
 | check-pass (accepted by `zustc check`) | 1807 | 1368 (75.7%) |
 | build-pass | 135 | 95 (70.4%) |
-| compile-fail (rejected at an annotated line) | 7358 | 3303 (44.9%) |
+| compile-fail (rejected at an annotated line) | 7358 | 3309 (45.0%) |
 <!-- /auto:ui -->
 
 [What is supported](#what-is-supported) breaks this down by area.
@@ -53,22 +53,22 @@ Build speed, build cache size and LSP latency on generated programs of 1000 / 50
 <!-- auto:kpi -->
 | KPI | gen1000 | gen5000 |
 |---|---:|---:|
-| cold build | 129 ms | 561 ms |
-| no-op build | 1.4 ms | 1.3 ms |
-| build after editing one function | 22.9 ms | 80.0 ms |
-| `check` | 99 ms | 472 ms |
+| cold build | 130 ms | 542 ms |
+| no-op build | 1.2 ms | 1.1 ms |
+| build after editing one function | 21.7 ms | 72.6 ms |
+| `check` | 96 ms | 455 ms |
 | no-op build (instructions) | 0.7 M | 0.7 M |
-| edit one function (instructions) | 133.0 M | 624.8 M |
-| `check` (instructions) | 786.0 M | 3869.4 M |
+| edit one function (instructions) | 133.3 M | 625.8 M |
+| `check` (instructions) | 786.2 M | 3870.1 M |
 | build cache on disk | 387.2 KiB | 1902.8 KiB |
 | binary | 324.0 KiB | 1558.3 KiB |
-| cold build peak RSS | 17.6 MiB | 52.1 MiB |
+| cold build peak RSS | 18.0 MiB | 52.2 MiB |
 
 | zust-analyzer (zustc's own sources) | |
 |---|---:|
-| p50: definition, hover, completion, references, rename | 0.67 ms / 0.47 ms / 0.98 ms / 2.21 ms / 0.62 ms |
-| startup until indexed | 122 ms |
-| peak RSS | 71.7 MiB |
+| p50: definition, hover, completion, references, rename | 0.48 ms / 0.41 ms / 0.83 ms / 2.42 ms / 0.42 ms |
+| startup until indexed | 111 ms |
+| peak RSS | 71.4 MiB |
 <!-- /auto:kpi -->
 
 Every change is also measured on its own with `python3 bench/kpi_track.py`, so that small increases that add up stay
@@ -332,10 +332,10 @@ the measured numbers. The [reports](docs/reports/) explain each step.
 
 ### Overall
 
-- [x] tests/ui run-pass: <!-- total:run-pass -->68.3% (1628 / 2385)
+- [x] tests/ui run-pass: <!-- total:run-pass -->68.4% (1631 / 2385)
 - [x] tests/ui check-pass: <!-- total:check-pass -->75.7% (1368 / 1807)
 - [x] tests/ui build-pass: <!-- total:build-pass -->70.4% (95 / 135)
-- [ ] tests/ui compile-fail (an error on an annotated line): <!-- total:compile-fail -->44.9% (3303 / 7358)
+- [ ] tests/ui compile-fail (an error on an annotated line): <!-- total:compile-fail -->45.0% (3309 / 7358)
 - [x] real crates: fnv, adler2, hex, itoa, rustc-hash and cfg-if build and give the same output (6 / 6)
 - [x] zust-analyzer answers like rust-analyzer: 95.4% (rust-analyzer: 96.2%)
 
@@ -369,13 +369,13 @@ the measured numbers. The [reports](docs/reports/) explain each step.
 - [ ] unions: <!-- ui:union -->61.5% (no `repr(packed)`)
 - [ ] const generics: <!-- ui:const-generics -->51.5% (no `generic_const_exprs`)
 - [ ] generic associated types: <!-- ui:generic-associated-types -->46.7%
-- [ ] casts (`as _` / `as *const _` take the source or expected type; a pointer of unknown kind is E0641): <!-- ui:cast -->44.8%
+- [ ] casts (`as _` / `as *const _` take the source or expected type; a pointer of unknown kind is E0641): <!-- ui:cast -->48.3%
 - [ ] `impl Trait`: <!-- ui:impl-trait -->62.7% (return position, also nested (`-> Option<impl Debug>`), in trait methods and generic fns (typed per instance); no TAIT)
 - [ ] layout: `repr(packed)` / `repr(align)` are ignored: <!-- ui:packed,layout -->38.7%
 
 ### Checks (compile-fail)
 
-- [x] borrow checking: moves, conflicting loans, escapes, mutability: borrowck <!-- cf:borrowck -->54.5%
+- [x] borrow checking: moves, conflicting loans, escapes, mutability: borrowck <!-- cf:borrowck -->54.8%
   ([report 08](docs/reports/2026-11-18-08-borrow-checking.md))
 - [x] type errors, missing items, generics declarations (E0403, E0207, E0392, E0072 ..): typeck <!-- cf:typeck -->67.2%, structs <!-- cf:structs -->70.8%
 - [x] unsafe operations outside `unsafe` (E0133): calls to `unsafe fn` and extern fns, raw pointer derefs, `static mut`,
