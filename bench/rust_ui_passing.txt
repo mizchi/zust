@@ -2433,7 +2433,6 @@ run-pass	imports/import6.rs
 run-pass	imports/import7.rs
 run-pass	imports/import8.rs
 check-pass	imports/issue-18083.rs
-run-pass	imports/issue-26873-multifile/issue-26873-onefile.rs
 check-pass	imports/issue-26930.rs
 check-pass	imports/issue-32119.rs
 check-pass	imports/issue-32222.rs

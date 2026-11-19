@@ -9,7 +9,7 @@
 
 ## 全体
 
-- [x] tests/ui run-pass：64.0%（1545 / 2413）
+- [x] tests/ui run-pass：64.7%（1544 / 2385）
 - [x] tests/ui check-pass：70.4%（1273 / 1807）
 - [x] tests/ui build-pass：65.9%（89 / 135）
 - [ ] tests/ui compile-fail（注釈の行でエラー）：38.7%（2850 / 7358）

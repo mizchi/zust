@@ -177,6 +177,10 @@ def main():
     tests, skipped = [], {}
     for d, dirs, fs in os.walk(ui):
         dirs[:] = sorted(x for x in dirs if x != "auxiliary")
+        # (as compiletest: a directory with `compiletest-ignore-dir` holds module files of another test, not tests)
+        if "compiletest-ignore-dir" in fs:
+            dirs[:] = []
+            continue
         for f in sorted(fs):
             if not f.endswith(".rs"):
                 continue
