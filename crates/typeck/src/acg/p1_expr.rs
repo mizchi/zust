@@ -592,6 +592,15 @@ impl Cx<'_> {
                     return err(expr_start(e), format!("the size for values of type `{}` cannot be known at compilation time", self.prog.tn(p.ty())));
                 }
                 if self.bk_on() && !self.bk_ty(p.ty()).0 {
+                    // (`*rc` with rc an Rc / a Deref type of the program's: its deref gives a reference, which cannot
+                    // be moved out of (Box is the one type whose `*` moves))
+                    if let Some(Ty::Struct(sid)) = self.peek(x).map(|t| self.strip_refs(t)) {
+                        if self.user_deref_sid(x, sid).is_some() && self.bk.level >= 1 {
+                            let n = self.prog.structs[self.prog.base_of(sid) as usize].name.clone();
+                            let what = if matches!(n.as_str(), "Rc" | "Arc") { format!("an `{n}`") } else { format!("dereference of `{}`", self.prog.tn(Ty::Struct(sid))) };
+                            return err(expr_start(e), format!("cannot move out of {what} (E0507)"));
+                        }
+                    }
                     self.bk_acc(e, borrowck::Acc::Move);
                 }
                 // `*b` (b: Box<T>、T は drop が要る): 中身のムーブ。b は drop しない

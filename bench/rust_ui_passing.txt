@@ -725,6 +725,7 @@ check-pass	borrowck/borrowck-move-out-from-array-no-overlap.rs
 check-pass	borrowck/borrowck-move-out-from-array-use-no-overlap-match.rs
 check-pass	borrowck/borrowck-move-out-from-array-use-no-overlap.rs
 compile-fail	borrowck/borrowck-move-out-of-overloaded-auto-deref.rs
+compile-fail	borrowck/borrowck-move-out-of-overloaded-deref.rs
 run-pass	borrowck/borrowck-multiple-borrows-interior-boxes.rs
 compile-fail	borrowck/borrowck-multiple-captures.rs
 compile-fail	borrowck/borrowck-mut-addr-of-imm-var.rs
