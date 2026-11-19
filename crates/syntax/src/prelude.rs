@@ -69,7 +69,15 @@ fn iter_chain(src: &str) -> bool {
     let mut i = 0;
     while let Some(k) = src[i..].find("..") {
         let mut j = i + k + 2;
-        while j < b.len() && !matches!(b[j], b'(' | b')' | b';' | b'{' | b'}' | b'\n') {
+        // (`(0..v.len())`: calls inside the range's end are skipped over)
+        let mut depth = 0u32;
+        while j < b.len() && !matches!(b[j], b';' | b'{' | b'}' | b'\n') {
+            match b[j] {
+                b'(' => depth += 1,
+                b')' if depth == 0 => break,
+                b')' => depth -= 1,
+                _ => {}
+            }
             j += 1;
         }
         if j < b.len() && b[j] == b')' {
