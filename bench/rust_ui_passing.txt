@@ -2995,6 +2995,7 @@ compile-fail	lint/invalid_null_args.rs
 check-pass	lint/issue-103317.rs
 compile-fail	lint/issue-103435-extra-parentheses.rs
 compile-fail	lint/issue-104392.rs
+compile-fail	lint/issue-104897.rs
 check-pass	lint/issue-108155.rs
 check-pass	lint/issue-110573.rs
 check-pass	lint/issue-14837.rs
@@ -3123,6 +3124,7 @@ check-pass	lint/unused/unused_assignments_across_match_guards.rs
 run-pass	lint/unused/unused_parens/unused-parens-in-macro-issue-120642.rs
 check-pass	lint/unused_braces_borrow.rs
 check-pass	lint/unused_labels.rs
+compile-fail	lint/unused_parens_multibyte_recovery.rs
 check-pass	lint/use-redundant/use-redundant-glob-parent.rs
 check-pass	lint/use-redundant/use-redundant-glob.rs
 check-pass	lint/use-redundant/use-redundant-issue-71450.rs
@@ -3316,6 +3318,7 @@ compile-fail	macros/undefined-macro-in-impl.rs
 check-pass	macros/user-defined-macro-rules.rs
 compile-fail	macros/vec-macro-in-pattern.rs
 compile-fail	macros/write-missing-destination.rs
+compile-fail	malformed/issue-107423-unused-delim-only-one-no-pair.rs
 compile-fail	match/borrowck-uninhabited.rs
 check-pass	match/const_non_normal_zst_ref_pattern.rs
 run-pass	match/guard-arm-and-or-arm.rs
@@ -4062,12 +4065,17 @@ compile-fail	parser/issues/issue-56031.rs
 compile-fail	parser/issues/issue-57198.rs
 compile-fail	parser/issues/issue-57684.rs
 compile-fail	parser/issues/issue-57819.rs
+compile-fail	parser/issues/issue-58094-missing-right-square-bracket.rs
 compile-fail	parser/issues/issue-61858.rs
 compile-fail	parser/issues/issue-62546.rs
+compile-fail	parser/issues/issue-62554.rs
 compile-fail	parser/issues/issue-62660.rs
 compile-fail	parser/issues/issue-62881.rs
 compile-fail	parser/issues/issue-62913.rs
+compile-fail	parser/issues/issue-62973.rs
 check-pass	parser/issues/issue-63115-range-pat-interpolated.rs
+compile-fail	parser/issues/issue-63116.rs
+compile-fail	parser/issues/issue-63135.rs
 compile-fail	parser/issues/issue-64732.rs
 check-pass	parser/issues/issue-65041-empty-vis-matcher-in-enum.rs
 check-pass	parser/issues/issue-65041-empty-vis-matcher-in-trait.rs
@@ -4080,6 +4088,8 @@ compile-fail	parser/issues/issue-66473.rs
 compile-fail	parser/issues/issue-67146-negative-outlives-bound-syntactic-fail.rs
 compile-fail	parser/issues/issue-68000-unicode-ident-after-missing-comma.rs
 compile-fail	parser/issues/issue-68092-unicode-ident-after-incomplete-expr.rs
+compile-fail	parser/issues/issue-68629.rs
+compile-fail	parser/issues/issue-68730.rs
 check-pass	parser/issues/issue-68788-in-trait-item-propagation.rs
 compile-fail	parser/issues/issue-68890-2.rs
 compile-fail	parser/issues/issue-68890.rs
@@ -4106,9 +4116,13 @@ compile-fail	parser/issues/issue-76437-const.rs
 compile-fail	parser/issues/issue-76437-pub-crate-unsafe.rs
 compile-fail	parser/issues/issue-76437-unsafe.rs
 compile-fail	parser/issues/issue-76597.rs
+compile-fail	parser/issues/issue-81804.rs
 compile-fail	parser/issues/issue-81806.rs
+compile-fail	parser/issues/issue-81827.rs
+compile-fail	parser/issues/issue-84104.rs
 compile-fail	parser/issues/issue-84117.rs
 compile-fail	parser/issues/issue-84148-1.rs
+compile-fail	parser/issues/issue-84148-2.rs
 compile-fail	parser/issues/issue-86895.rs
 compile-fail	parser/issues/issue-87086-colon-path-sep.rs
 compile-fail	parser/issues/issue-87197-missing-semicolon.rs
@@ -4169,6 +4183,7 @@ compile-fail	parser/macro/issue-33569.rs
 compile-fail	parser/macro/kw-in-item-pos-recovery-149692.rs
 compile-fail	parser/macro/macro-bad-delimiter-ident.rs
 check-pass	parser/macro/macro-bare-trait-object-maybe-trait-bound.rs
+compile-fail	parser/macro/macro-missing-right-paren.rs
 compile-fail	parser/macro/macros-no-semicolon.rs
 compile-fail	parser/macro/misspelled-macro-rules.rs
 compile-fail	parser/macro/pub-method-macro.rs
@@ -4190,6 +4205,7 @@ compile-fail	parser/missing-fn-issue-65381-2.rs
 compile-fail	parser/missing-fn-issue-65381-3.rs
 compile-fail	parser/missing-operator-after-float.rs
 compile-fail	parser/missing-struct-issue-125446.rs
+compile-fail	parser/missing_right_paren.rs
 compile-fail	parser/misspelled-keywords/async-move.rs
 compile-fail	parser/misspelled-keywords/const-fn.rs
 compile-fail	parser/misspelled-keywords/const-generics.rs
@@ -4415,6 +4431,8 @@ compile-fail	parser/unsized.rs
 compile-fail	parser/unsized2.rs
 compile-fail	parser/use-as-where-use-ends-with-mod-sep.rs
 compile-fail	parser/use-ends-with-mod-sep.rs
+compile-fail	parser/utf16-be-without-bom.rs
+compile-fail	parser/utf16-le-without-bom.rs
 run-pass	parser/utf8_idents-rpass.rs
 compile-fail	parser/variadic-ffi-nested-syntactic-fail.rs
 compile-fail	parser/variadic-ffi-semantic-restrictions.rs
