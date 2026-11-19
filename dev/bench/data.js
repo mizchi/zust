@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795051687991,
+  "lastUpdate": 1795051689784,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -22280,6 +22280,85 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/mizchi/zust/commit/d01898bb08569c261f1707f742734efc3c94cdde"
         },
         "date": 1795046073501,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "parity documentSymbol (名前の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity workspace/symbol (上位 20 の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity definition (行き先の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity hover (名前を含む)",
+            "value": 92.5,
+            "unit": "%"
+          },
+          {
+            "name": "parity references (数の一致)",
+            "value": 97.297,
+            "unit": "%"
+          },
+          {
+            "name": "parity documentHighlight (数の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity rename (書き換えの一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity signatureHelp (名前・引数の数・今の引数の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity completion `x.\\|` (書いてある名前を含む)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity completion `na\\|me` (同)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity 一致の平均",
+            "value": 98.98,
+            "unit": "%"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "committer": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "distinct": true,
+          "id": "df3bd6627474c075e8ef29f3b824d76183b48c6a",
+          "message": "Baseline and docs after merging the parser, std and item-summary lanes\n\ntests/ui: run-pass 1463 -> 1525, check-pass 1171 -> 1260, build-pass 84 -> 88,\ncompile-fail 2828 -> 2849. 36 compile-fail tests leave the baseline; each lane\nlisted them in its commit as passing only by accident before (an unrelated zustc\nerror on the annotated line; rustc's real error is a check zustc lacks).\nKPIs against d01898b: gen5000 check +0.29%, no-op +1.0%, edit +0.7%, cache\nunchanged; LSP instructions unchanged.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-19T01:14:05Z",
+          "tree_id": "da2e41545723da52be4e953b129ade4d481f8e43",
+          "url": "https://github.com/mizchi/zust/commit/df3bd6627474c075e8ef29f3b824d76183b48c6a"
+        },
+        "date": 1795051689309,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
