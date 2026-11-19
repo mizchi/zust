@@ -595,6 +595,11 @@ impl Inf<'_> {
                 let tb = self.prog.tuple_base(args.len());
                 self.adt(tb, args)
             }
+            // (`&[_]`: a slice of a new variable, so an array initializer coerces to it)
+            PTy::Slice(i) => {
+                let i = self.ty_var(i);
+                self.with(Shape::Slc(i))
+            }
             _ => self.var(),
         }
     }
@@ -775,6 +780,30 @@ impl Inf<'_> {
                 for (name, fp) in fps {
                     if let Some(&(_, ft)) = fields.iter().find(|f| &f.0 == name) {
                         self.pat(fp, ft, mode);
+                    }
+                }
+            }
+            // `[a, b, rest @ ..]`: the elements take the element type; a binding of `..` is a slice of them
+            Pat::Slice(elems) => {
+                let (v, mode) = self.auto_deref(v, mode);
+                let mut t = self.resolve(v);
+                while let Some(Ty::Ref(_, i)) = t {
+                    t = Some(*i);
+                }
+                let root = self.find(v);
+                let elem = match (t, self.shape[root as usize]) {
+                    (Some(Ty::Slice(e)) | Some(Ty::Array(e, _)), _) => self.known(*e),
+                    (_, Some(Shape::Slc(e)) | Some(Shape::Arr(e, _))) => e,
+                    _ => return,
+                };
+                for p in elems {
+                    match p {
+                        Pat::Rest => {}
+                        Pat::Ident(_, _, _, Some(sub)) if matches!(&**sub, Pat::Rest) => {
+                            let sl = self.with(Shape::Slc(elem));
+                            self.pat(p, sl, mode);
+                        }
+                        p => self.pat(p, elem, mode),
                     }
                 }
             }

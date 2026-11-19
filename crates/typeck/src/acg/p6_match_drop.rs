@@ -110,7 +110,8 @@ impl Cx<'_> {
         // 各 arm を上から順に試す (判定 → 束縛 → ガード → 本体)
         for arm in arms {
             let next = self.b.create_block();
-            self.pat_test(&arm.pat, place, next)?;
+            // (a pattern has no position of its own: an error in it is reported at the arm's body)
+            self.pat_test(&arm.pat, place, next).map_err(|m| self.at(expr_start(&arm.body), m))?;
             self.scopes.push(vec![]);
             let ob = self.owned_binds;
             self.bk.scrut = bk_ss.clone();
@@ -431,9 +432,22 @@ impl Cx<'_> {
                 self.pat_test(inner, q, fail)
             }
             Pat::Slice(_) => {
-                let (base, len, elem, _) = self.slice_scrutinee(p, SP)?;
+                // (an array's length is known: a pattern of another length is an error (E0527 / E0528))
+                let mut at = p.ty();
+                while let Ty::Ref(_, i) = at {
+                    at = *i;
+                }
                 let (pre, rest, post) = slice_parts(pat);
                 let fixed = (pre.len() + post.len()) as i64;
+                if let Ty::Array(_, n) = at {
+                    if rest.is_none() && fixed != n as i64 {
+                        return err(SP, format!("pattern requires {fixed} elements but array has {n} (E0527)"));
+                    }
+                    if rest.is_some() && fixed > n as i64 {
+                        return err(SP, format!("pattern requires at least {fixed} elements but array has {n} (E0528)"));
+                    }
+                }
+                let (base, len, elem, _) = self.slice_scrutinee(p, SP)?;
                 let c = if rest.is_some() {
                     self.b.ins().icmp_imm_u(IntCC::UnsignedGreaterThanOrEqual, len, fixed)
                 } else {

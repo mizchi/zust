@@ -837,6 +837,8 @@ compile-fail	borrowck/use-moved-value-in-match-guard-drop.rs
 compile-fail	borrowck/writing-to-immutable-vec.rs
 run-pass	box/box-deref-in-match-arm-no-invalid-ir.rs
 run-pass	box/box-deref-match-arm.rs
+compile-fail	box/boxed-value-matching-57741.rs
+compile-fail	box/dereferencing-boxed-enum-in-match-57741.rs
 run-pass	box/empty-alloc-deref-rvalue.rs
 run-pass	box/match-box-deref-codegen.rs
 run-pass	box/new-box.rs
@@ -1829,6 +1831,7 @@ compile-fail	error-codes/E0120.rs
 compile-fail	error-codes/E0121.rs
 compile-fail	error-codes/E0131.rs
 compile-fail	error-codes/E0133.rs
+compile-fail	error-codes/E0164.rs
 compile-fail	error-codes/E0201.rs
 compile-fail	error-codes/E0207.rs
 compile-fail	error-codes/E0214.rs
@@ -3135,6 +3138,8 @@ compile-fail	match/issue-82866.rs
 check-pass	match/issue-84434.rs
 run-pass	match/match-borrowed-str.rs
 run-pass	match/match-cloned-string.rs
+compile-fail	match/match-fn-call.rs
+compile-fail	match/match-ill-type2.rs
 compile-fail	match/match-join.rs
 run-pass	match/match-large-array.rs
 run-pass	match/match-nested-enum-box-3121.rs
@@ -3146,6 +3151,7 @@ compile-fail	match/match-tag-nullary.rs
 compile-fail	match/match-tag-unary.rs
 run-pass	match/match-tuple-slice.rs
 run-pass	match/multiple-refutable-patterns-13867.rs
+compile-fail	match/option-result-type-param-mismatch-13466.rs
 run-pass	match/overeager-sub-match-pruning-13027.rs
 run-pass	match/pattern-deref-miscompile.rs
 compile-fail	match/single-line.rs
@@ -4206,6 +4212,7 @@ compile-fail	pattern/issue-106862.rs
 run-pass	pattern/issue-11577.rs
 check-pass	pattern/issue-117626.rs
 run-pass	pattern/issue-12582.rs
+run-pass	pattern/issue-15080.rs
 run-pass	pattern/issue-27320.rs
 run-pass	pattern/issue-6449.rs
 compile-fail	pattern/issue-66270-pat-struct-parser-recovery.rs
@@ -4241,6 +4248,7 @@ check-pass	pattern/rfc-3627-match-ergonomics-2024/min_match_ergonomics_success.r
 compile-fail	pattern/rfc-3637-guard-patterns/only-resolve-top-level-guard-expr-once-ice-141265.rs
 run-pass	pattern/size-and-align.rs
 run-pass	pattern/slice-pattern-recursion-15104.rs
+compile-fail	pattern/string-match-as-str-suggestion.rs
 compile-fail	pattern/struct-parser-recovery-issue-126344.rs
 run-pass	pattern/struct-pattern-in-fn-arg.rs
 compile-fail	pattern/struct-pattern-on-non-struct-resolve-error.rs
@@ -4542,6 +4550,7 @@ compile-fail	resolve/issue-35675.rs
 compile-fail	resolve/issue-5035.rs
 compile-fail	resolve/issue-54379.rs
 check-pass	resolve/issue-57523.rs
+compile-fail	resolve/issue-5927.rs
 compile-fail	resolve/issue-60057.rs
 compile-fail	resolve/issue-6702.rs
 compile-fail	resolve/issue-69401-trait-fn-no-body-ty-local.rs
@@ -5695,6 +5704,7 @@ compile-fail	typeck/issue-90027-async-fn-return-suggestion.rs
 compile-fail	typeck/issue-90101.rs
 compile-fail	typeck/issue-90319.rs
 compile-fail	typeck/issue-91210-ptr-method.rs
+compile-fail	typeck/issue-91328.rs
 compile-fail	typeck/issue-91450-inner-ty-error.rs
 check-pass	typeck/issue-91633.rs
 compile-fail	typeck/issue-93486.rs

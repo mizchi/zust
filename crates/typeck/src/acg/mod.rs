@@ -1296,6 +1296,11 @@ impl Cx<'_> {
                         Some(t) => {
                             let a = self.parse_ty(t)?;
                             match self.lets.get(&crate::ast_infer::stmt_key(st)).copied() {
+                                // (`&[_]` that inference unified with the array it is initialized from: the slice of its elements)
+                                Some(Ty::Ref(_, Ty::Array(e, _))) if matches!(a, Ty::Ref(_, Ty::Slice(_))) => {
+                                    let Ty::Ref(m, _) = a else { unreachable!() };
+                                    Some(Ty::Ref(m, intern(Ty::Slice(*e))))
+                                }
                                 Some(inf) if has_hole(self.prog, a) && !has_hole(self.prog, inf) && !self.prog.has_param(inf) => Some(inf),
                                 _ => Some(a),
                             }
@@ -1350,6 +1355,14 @@ impl Cx<'_> {
                         self.bk.mut_next = pat_mut(pat);
                         self.bind(name, ty, v);
                         continue;
+                    };
+                    // (`let x: &[_] = &[1, 2];`: the slice of the array's element type)
+                    let ann = match ann {
+                        Some(Ty::Ref(m, Ty::Slice(e))) if has_hole(self.prog, **e) => match self.peek(init) {
+                            Some(Ty::Ref(_, Ty::Array(ae, _))) => Some(Ty::Ref(m, intern(Ty::Slice(*ae)))),
+                            _ => ann,
+                        },
+                        a => a,
                     };
                     self.bk_frame();
                     self.bk.move_mut_next = ann_ty.is_none();
