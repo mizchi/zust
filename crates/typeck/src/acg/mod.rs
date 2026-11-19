@@ -1789,8 +1789,30 @@ impl Cx<'_> {
                 return None;
             }
         }
-        let i = self.prog.fn_by_p(&PPath::of(p), self.self_sid)?;
+        let i = match self.prog.fn_by_p(&PPath::of(p), self.self_sid) {
+            Some(i) => i,
+            // (`S::f()` where f is a default fn of a trait S implements)
+            None => {
+                let t = self.path_self_ty(p)?;
+                let i = by_ty(t, &p.segs[1].name)?;
+                self.prog.sigs[i as usize].trait_of.as_ref()?;
+                i
+            }
+        };
         Some((i, &self.prog.sigs[i as usize]))
+    }
+
+    /// the type `S` of a path `S::f` (two segments, the first a type the program knows), or None
+    pub fn path_self_ty(&self, p: &Path) -> Option<Ty> {
+        if p.segs.len() != 2 {
+            return None;
+        }
+        let seg = p.segs[0].clone();
+        if self.lookup(&seg.name).is_some() {
+            return None;
+        }
+        let ty = crate::parse::Ty::Path(None, Path { global: false, segs: vec![seg], pos: Default::default() });
+        self.parse_ty(&ty).ok().filter(|t| !matches!(t, Ty::Param(_)))
     }
 
     /// 関数 id (インスタンスも) を呼ぶための参照

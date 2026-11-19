@@ -2056,6 +2056,16 @@ impl Cx<'_> {
                 self.seg_self = self.parse_ty(&ty).ok().filter(|&t| !self.prog.has_param(t));
             }
         }
+        // (a trait's default fn called through a type (`S::f()` / `<S as Tr>::f()`): Self is that type)
+        if self.seg_self.is_none() && self.prog.sigs[id as usize].trait_of.is_some() && matches!(self.prog.sigs[id as usize].self_ty, None | Some(Ty::Param(0))) && !self.prog.sigs[id as usize].generics.is_empty() {
+            if let Expr::Path(q, p) = &**func {
+                self.seg_self = match q {
+                    Some(q) => self.parse_ty(q).ok(),
+                    None => self.path_self_ty(p),
+                }
+                .filter(|&t| !self.prog.has_param(t));
+            }
+        }
         // (期待型が無ければ型推論の記録から: `x = Tr::dec(r)?` の Self)
         let expected = expected.or_else(|| {
             let sig = &self.prog.sigs[id as usize];

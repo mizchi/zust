@@ -1664,6 +1664,13 @@ impl Inf<'_> {
                         return self.known(t);
                     }
                 }
+                // `f64::from_bits(u)`
+                if segs.len() == 2 && args.len() == 1 && segs[1].name == "from_bits" && matches!(segs[0].name.as_str(), "f64" | "f32") {
+                    let a = self.expr(&args[0]);
+                    let k = self.known(if segs[0].name == "f64" { Ty::U64 } else { Ty::U32 });
+                    self.unify(a, k);
+                    return self.known(if segs[0].name == "f64" { Ty::F64 } else { Ty::F32 });
+                }
                 if let Some((sid, vi)) = self.variant_by(p) {
                     let mut xs = vec![];
                     for (i, a) in args.iter().enumerate() {

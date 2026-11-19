@@ -1542,6 +1542,14 @@ impl Cx<'_> {
                 return Ok(Some((Some(x), t)));
             }
         }
+        // `f64::from_bits(u)` / `f32::from_bits(u)`
+        if name == "from_bits" && p.segs.len() == 2 && cargs.len() == 1 && matches!(p.segs[0].name.as_str(), "f64" | "f32") {
+            let f64_ = p.segs[0].name == "f64";
+            let (v, _) = self.expr(&cargs[0], Some(if f64_ { Ty::U64 } else { Ty::U32 }))?;
+            let Some(a) = v else { return Ok(Some((None, Ty::Never))) };
+            let ft = if f64_ { types::F64 } else { types::F32 };
+            return Ok(Some((Some(self.b.ins().bitcast(ft, MemFlagsData::new(), a)), if f64_ { Ty::F64 } else { Ty::F32 })));
+        }
         let n = p.segs.len();
         // `Box::leak(b)`: Box の指す先をそのまま `&'static mut T` に (解放しない)
         if name == "leak" && n >= 2 && p.segs[n - 2].name == "Box" && cargs.len() == 1 {
@@ -1757,7 +1765,14 @@ impl Cx<'_> {
                 return None;
             }
         }
-        let id = self.prog.fn_by_p(&PPath::of(p), self.self_sid)?;
+        let id = match self.prog.fn_by_p(&PPath::of(p), self.self_sid) {
+            Some(id) => id,
+            // (`S::f` where f is a default fn of a trait S implements)
+            None => match self.path_self_ty(p)? {
+                Ty::Struct(sid) => self.prog.default_method(sid, &p.segs[1].name)?,
+                t => self.prog.prim_method(t, &p.segs[1].name)?,
+            },
+        };
         let s = &self.prog.sigs[id as usize];
         (s.has_body || s.is_extern).then_some(id)
     }
@@ -1769,6 +1784,12 @@ impl Cx<'_> {
         let last = p.segs.last().unwrap();
         let tf: Option<&[GArg]> = if last.args.is_empty() { None } else { Some(&last.args[..]) };
         let mut sol = self.turbofish_sol(&sig0, tf)?;
+        // (a trait's default fn through a type: `S::f`)
+        if sig0.trait_of.is_some() && sol.first() == Some(&None) {
+            if let Some(t) = self.path_self_ty(p).filter(|&t| !self.prog.has_param(t)) {
+                sol[0] = Some(t);
+            }
+        }
         if let Some(Ty::Fn(f)) = expected {
             for (&a, &b) in sig0.params.iter().zip(&f.params) {
                 self.prog.match_ty(a, b, &mut sol);

@@ -1004,6 +1004,11 @@ impl Cx<'_> {
         let mut sol: Vec<Option<Ty>> = vec![None; sig.generics.len()];
         if let (Some(t), Some(st)) = (self.seg_self, sig.self_ty) {
             self.prog.match_ty(st, t, &mut sol);
+        } else if let (Some(t), None, Some(_)) = (self.seg_self, sig.self_ty, &sig.trait_of) {
+            // (a trait's default fn: Self is its first type parameter)
+            if let Some(s0) = sol.first_mut() {
+                *s0 = Some(t);
+            }
         }
         // trait メソッドは先頭が Self なので、turbofish はその後ろの型パラメータに当たる
         let first = sig.trait_of.is_some() as usize;

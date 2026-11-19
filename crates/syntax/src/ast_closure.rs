@@ -20,11 +20,32 @@ pub fn macro_args_at(g: &str, base: Pos) -> Option<Vec<Expr>> {
         return Some(out);
     }
     // (`,` で分けてから式として読む: 括弧の中の `,` は分けない)
-    for (off, part) in split_top_commas_at(inner)? {
+    let parts = split_top_commas_at(inner)?;
+    let mut i = 0;
+    while i < parts.len() {
+        let (off, part) = &parts[i];
+        i += 1;
         if part.trim().is_empty() {
             continue;
         }
-        out.push(parse_expr_at(&part, pos_at(g, ioff + off, base)).ok()?);
+        match parse_expr_at(part, pos_at(g, ioff + off, base)) {
+            Ok(e) => out.push(e),
+            // (a `,` inside `<..>` (`f::<A, B>()`): join the parts that follow until they read as one expression)
+            Err(_) => {
+                let mut joined = part.clone();
+                let mut got = None;
+                while i < parts.len() {
+                    joined.push(',');
+                    joined.push_str(&parts[i].1);
+                    i += 1;
+                    if let Ok(e) = parse_expr_at(&joined, pos_at(g, ioff + off, base)) {
+                        got = Some(e);
+                        break;
+                    }
+                }
+                out.push(got?);
+            }
+        }
     }
     Some(out)
 }

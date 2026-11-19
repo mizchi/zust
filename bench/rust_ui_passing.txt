@@ -149,7 +149,6 @@ check-pass	associated-type-bounds/supertrait-where-referencing-self.rs
 check-pass	associated-type-bounds/traits-assoc-anonymized.rs
 check-pass	associated-type-bounds/traits-assoc-type-macros.rs
 compile-fail	associated-types/ambiguous-associated-type-error-78622.rs
-compile-fail	associated-types/assoc-type-element-mismatch-in-hrtb.rs
 check-pass	associated-types/assoc-type-in-generic-struct-bound.rs
 check-pass	associated-types/assoc-type-in-unused-where-clause.rs
 run-pass	associated-types/assoc-type-layout-unsized-allowed-sized-used.rs
@@ -251,7 +250,6 @@ check-pass	associated-types/issue-38917.rs
 check-pass	associated-types/issue-39532.rs
 check-pass	associated-types/issue-40093.rs
 check-pass	associated-types/issue-43475.rs
-compile-fail	associated-types/issue-44153.rs
 run-pass	associated-types/issue-47139-1.rs
 run-pass	associated-types/issue-47139-2.rs
 check-pass	associated-types/issue-48010.rs
@@ -4653,7 +4651,6 @@ compile-fail	privacy/locally-pub-private-module-access.rs
 run-pass	privacy/privacy-ns.rs
 compile-fail	privacy/privacy-ns1.rs
 compile-fail	privacy/privacy-ns2.rs
-compile-fail	privacy/privacy-ufcs.rs
 run-pass	privacy/privacy1-rpass.rs
 run-pass	privacy/private-class-field.rs
 compile-fail	privacy/private-field-access-in-mutex-54062.rs
@@ -5843,6 +5840,7 @@ check-pass	traits/issue-90195.rs
 check-pass	traits/issue-92292.rs
 run-pass	traits/issue-9394-inherited-calls.rs
 check-pass	traits/issue-96665.rs
+run-pass	traits/item-inside-macro.rs
 check-pass	traits/make-sure-to-filter-projections-by-def-id.rs
 compile-fail	traits/map-types.rs
 compile-fail	traits/method-on-deeply-nested-struct-perf-2.rs
@@ -6282,6 +6280,7 @@ compile-fail	union/union-move.rs
 compile-fail	union/union-no-derive-suggestion.rs
 run-pass	union/union-nodrop.rs
 compile-fail	union/union-nonrepresentable.rs
+run-pass	union/union-nonzero.rs
 compile-fail	union/union-pat-in-param.rs
 compile-fail	union/union-suggest-field.rs
 run-pass	union/union-trait-impl.rs
