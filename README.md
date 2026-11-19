@@ -35,11 +35,11 @@ medians of 3 runs). They are measured again with each round of work. gen1000 is 
 
 | gen1000 | cold | no-op | edit one function | on disk | binary (stripped) | run |
 |---|---:|---:|---:|---:|---:|---:|
-| zustc | 150 ms | 21 ms | 27 ms | 766 KiB | 324 KiB | 11 ms |
-| zustc `-O` | 358 ms | 61 ms | 82 ms | 1199 KiB | 341 KiB | 3 ms |
-| rustc `-C incremental` | 847 ms | 192 ms | 447 ms | 10.8 MiB | 1038 KiB | 8 ms |
-| rustc `-O` | 18580 ms | - | - | - | 377 KiB | 2 ms |
-| **zustc vs rustc `-C incremental`** | **5.6x faster** | **9.1x faster** | **17x faster** | **14x smaller** | **3.2x smaller** | |
+| zustc | 127 ms | 19 ms | 31 ms | 766 KiB | 324 KiB | 11 ms |
+| zustc `-O` | 393 ms | 79 ms | 66 ms | 1199 KiB | 341 KiB | 3 ms |
+| rustc `-C incremental` | 859 ms | 198 ms | 399 ms | 10.8 MiB | 1038 KiB | 7 ms |
+| rustc `-O` | 18142 ms | - | - | - | 377 KiB | 2 ms |
+| **zustc vs rustc `-C incremental`** | **6.8x faster** | **10x faster** | **13x faster** | **14x smaller** | **3.2x smaller** | |
 
 Small programs (`bench/rt`: fib, hashmap, matmul, nbody, sieve, sort, strings) and real crates (cratebench: fnv,
 adler2, hex, itoa, rustc-hash, cfg-if; all six give the same output as rustc):
@@ -78,7 +78,8 @@ the previous commit, 1501b30 and 8e797a9 have the same cold median, 96 and 98 ms
 | 2026-11-18, diverging `let`, Option in `for`, `2.eq(&3)` (5ecf037) | 93 ms | 621 ms | 6.7x | 21 ms | 309 ms | 14.7x |
 | 2026-11-18, let chains, `&raw const` / `&raw mut` (d01898b) | 88 ms | 631 ms | 7.2x | 20 ms | 314 ms | 15.7x |
 | 2026-11-19, three parallel lanes: parser, std, item summaries (9effaaa); a slower machine after a container restart (rustc `-O` 18.5 s, was 14.4 s) | 142 ms | 691 ms | 4.9x | 24 ms | 370 ms | 15.4x |
-| 2026-11-19, `impl Tr for Box<S>`, shifts and `reverse_bits`, `..b` values | 150 ms | 847 ms | 5.6x | 27 ms | 447 ms | 16.6x |
+| 2026-11-19, `impl Tr for Box<S>`, shifts and `reverse_bits`, `..b` values (962f2a6) | 150 ms | 847 ms | 5.6x | 27 ms | 447 ms | 16.6x |
+| 2026-11-19, `as _` / `as *const _` | 127 ms | 859 ms | 6.8x | 31 ms | 399 ms | 12.9x |
 
 zustc's code is close to rustc's debug build at run time, and faster than it in all seven small programs (rustc's
 debug build is 3–26x slower than rustc `-O` there).
@@ -146,7 +147,8 @@ the shared machine vary by about ±20%.
 | diverging `let`, Option in `for`, `2.eq(&3)` (5ecf037) | 664.9 M | 621.8 M | 3895.2 M | 1902.8 KiB | 387.2 KiB | 51.7 MiB |
 | let chains, `&raw const` / `&raw mut` (d01898b) | 662.2 M | 621.8 M | 3895.6 M | 1902.8 KiB | 387.2 KiB | 51.8 MiB |
 | three parallel lanes: parser, std, item summaries (9effaaa) | 668.7 M | 626.3 M | 3906.9 M | 1902.8 KiB | 387.2 KiB | 51.4 MiB |
-| now: `impl Tr for Box<S>`, shifts and `reverse_bits`, `..b` values | 666.0 M | 626.3 M | 3907.0 M | 1902.8 KiB | 387.2 KiB | 51.8 MiB |
+| `impl Tr for Box<S>`, shifts and `reverse_bits`, `..b` values (962f2a6) | 666.0 M | 626.3 M | 3907.0 M | 1902.8 KiB | 387.2 KiB | 51.8 MiB |
+| now: `as _` / `as *const _` | 662.8 M | 626.2 M | 3906.8 M | 1902.8 KiB | 387.2 KiB | 52.0 MiB |
 | **change since borrow checking** | **-11.3%** | **-12.2%** | **-2.0%** | **0%** | **0%** | **-32%** |
 
 LSP (p50 of `bench/lsp_parity.py` on zustc's own sources; these are wall-clock times):
@@ -176,7 +178,8 @@ LSP (p50 of `bench/lsp_parity.py` on zustc's own sources; these are wall-clock t
 | diverging `let`, Option in `for`, `2.eq(&3)` (5ecf037) | 0.61 ms | 0.50 ms | 1.12 ms | 12.27 ms | 108 ms |
 | let chains, `&raw const` / `&raw mut` (d01898b) | 0.57 ms | 0.46 ms | 1.08 ms | 10.41 ms | 108 ms |
 | three parallel lanes: parser, std, item summaries (9effaaa) | 0.94 ms | 0.77 ms | 1.65 ms | 15.79 ms | 141 ms (slower machine; against d01898b on it, 6 alternating runs: references 16.4 vs 14.4 ms, ready 140 vs 134 ms, but one LSP run under cachegrind is 10.953 G vs 10.955 G instructions: the code run is the same) |
-| now: `impl Tr for Box<S>`, shifts and `reverse_bits`, `..b` values | 0.93 ms | 0.77 ms | 1.84 ms | 15.16 ms | 128 ms |
+| `impl Tr for Box<S>`, shifts and `reverse_bits`, `..b` values (962f2a6) | 0.93 ms | 0.77 ms | 1.84 ms | 15.16 ms | 128 ms |
+| now: `as _` / `as *const _` | 0.98 ms | 0.89 ms | 1.86 ms | 16.81 ms | 130 ms |
 
 Each change is kept only if these do not get worse. When an LSP time rises in a full run, the two builds are
 compared again on the same machine, alternating runs, before it is called noise. The last row comes from such a
@@ -193,10 +196,10 @@ only the tests it can be asked to handle (no nightly features, auxiliary crates 
 
 | kind | applicable | pass |
 |---|---:|---:|
-| run-pass (builds, runs, same output) | 2413 | 1527 (63.3%) |
-| check-pass (accepted by `zustc check`) | 1807 | 1262 (69.8%) |
+| run-pass (builds, runs, same output) | 2413 | 1532 (63.5%) |
+| check-pass (accepted by `zustc check`) | 1807 | 1265 (70.0%) |
 | build-pass | 135 | 88 (65.2%) |
-| compile-fail (rejected at an annotated line) | 7358 | 2852 (38.8%) |
+| compile-fail (rejected at an annotated line) | 7358 | 2848 (38.7%) |
 
 [SUPPORTED.md](SUPPORTED.md) breaks this down by area as a checklist.
 

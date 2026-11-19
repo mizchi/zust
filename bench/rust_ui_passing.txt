@@ -831,6 +831,7 @@ compile-fail	c-variadic/issue-86053-1.rs
 compile-fail	c-variadic/no-closure.rs
 build-pass	c-variadic/variadic-ffi-no-fixed-args.rs
 compile-fail	cast/ambiguous-raw-pointer-cast-errors.rs
+check-pass	cast/associated-type-bounds-cast-54094.rs
 compile-fail	cast/cast-array-issue-138836.rs
 compile-fail	cast/cast-as-bool.rs
 run-pass	cast/cast-does-fallback.rs
@@ -861,9 +862,7 @@ compile-fail	cast/issue-89497.rs
 compile-fail	cast/non-primitive-cast-suggestion.rs
 compile-fail	cast/non-primitive-isize-ref-cast.rs
 run-pass	cast/owned-struct-to-trait-cast-6318.rs
-compile-fail	cast/ptr-to-ptr-different-regions.rs
-compile-fail	cast/ptr-to-ptr-indirect-different-regions.rs
-compile-fail	cast/ptr-to-trait-obj-wrap-upcast.rs
+check-pass	cast/ptr-ptr-to-ptr-ptr-different-regions.rs
 build-pass	cast/raw-pointer-from-str-comparison.rs
 compile-fail	cast/trait-object-size-error-14366.rs
 run-pass	cast/u8-to-char-cast-9918.rs
@@ -1073,6 +1072,7 @@ run-pass	coercion/coerce-unify-return.rs
 run-pass	coercion/coerce-unsize-subtype.rs
 compile-fail	coercion/coercion-missing-tail-expected-type.rs
 check-pass	coercion/constrain-expectation-in-arg.rs
+check-pass	coercion/fake-sized-ptr-cast.rs
 build-pass	coercion/fudge-inference/fudge-eager-resolve-breakage-2.rs
 check-pass	coercion/fudge-inference/fudge-eager-resolve-breakage-3.rs
 check-pass	coercion/index-coercion-over-indexmut-72002.rs
@@ -1320,7 +1320,6 @@ check-pass	consts/const-eval/nonnull_as_ref.rs
 run-pass	consts/const-eval/nrvo.rs
 check-pass	consts/const-eval/promote-static.rs
 check-pass	consts/const-eval/promote_mutable_zst_mir_borrowck.rs
-compile-fail	consts/const-eval/promoted_raw_ptr_ops.rs
 check-pass	consts/const-eval/simple_with_undef.rs
 check-pass	consts/const-eval/stable-metric/dominators-edge-case.rs
 run-pass	consts/const-eval/variance-const-eval-cycle.rs
@@ -1396,6 +1395,7 @@ run-pass	consts/issue-17718-borrow-interior.rs
 check-pass	consts/issue-17718-references.rs
 run-pass	consts/issue-17756.rs
 build-pass	consts/issue-21562.rs
+run-pass	consts/issue-21721.rs
 run-pass	consts/issue-23833.rs
 run-pass	consts/issue-23968-const-not-overflow.rs
 check-pass	consts/issue-28822.rs
@@ -1424,6 +1424,7 @@ check-pass	consts/issue-88649.rs
 check-pass	consts/issue-94371.rs
 run-pass	consts/issue-broken-mir.rs
 check-pass	consts/let-irrefutable-pattern-ice-120337.rs
+run-pass	consts/load-preserves-partial-init.rs
 check-pass	consts/manually_drop_structural_eq.rs
 run-pass	consts/match-const-fn-structs.rs
 run-pass	consts/method-reference-in-const-dyn-fn.rs
@@ -3387,6 +3388,7 @@ run-pass	numbers-arithmetic/i128-min-literal-parses.rs
 run-pass	numbers-arithmetic/i32-sub.rs
 run-pass	numbers-arithmetic/i8-incr.rs
 run-pass	numbers-arithmetic/integer-literal-radix.rs
+run-pass	numbers-arithmetic/integer-literal-suffix-inference-2.rs
 run-pass	numbers-arithmetic/integer-literal-suffix-inference-3.rs
 run-pass	numbers-arithmetic/integer-literal-suffix-inference.rs
 run-pass	numbers-arithmetic/isize-base.rs
@@ -4294,6 +4296,7 @@ run-pass	regions/regions-infer-contravariance-due-to-ret.rs
 run-pass	regions/regions-infer-reborrow-ref-mut-recurse.rs
 run-pass	regions/regions-infer-region-in-fn-but-not-type.rs
 run-pass	regions/regions-infer-static-from-proc.rs
+run-pass	regions/regions-issue-21422.rs
 run-pass	regions/regions-issue-22246.rs
 compile-fail	regions/regions-lifetime-bounds-on-fns.rs
 run-pass	regions/regions-lifetime-static-items-enclosing-scopes.rs
@@ -5649,6 +5652,7 @@ compile-fail	unsafe/issue-45087-unreachable-unsafe.rs
 compile-fail	unsafe/issue-47412.rs
 check-pass	unsafe/issue-85435-unsafe-op-in-let-under-unsafe-under-closure.rs
 build-pass	unsafe/maybe-uninit-zero-sized-types.rs
+run-pass	unsafe/new-unsafe-pointers.rs
 compile-fail	unsafe/raw-pointer-field-access-error.rs
 compile-fail	unsafe/unsafe-block-without-braces.rs
 compile-fail	unsafe/unsafe-fn-assign-deref-ptr.rs

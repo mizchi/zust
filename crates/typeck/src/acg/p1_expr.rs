@@ -802,11 +802,32 @@ impl Cx<'_> {
                     self.same(SP, t, to)?;
                     return Ok((v, t));
                 }
-                let hint = self.peek(x).or(match &**x {
-                    Expr::Lit(l, _) if matches!(lit::lit(l), Some(Lit::Float(_))) => Some(Ty::F64),
-                    _ => Some(Ty::I32),
-                });
+                let int_lit = matches!(strip_paren(x), Expr::Lit(l, _) if matches!(lit::lit(l), Some(Lit::Int(i)) if i.suffix().is_empty()));
+                let hint = if int_lit && matches!(to, Ty::Ptr(..)) {
+                    // (`0 as *mut u8`: an address)
+                    Some(Ty::Usize)
+                } else {
+                    self.peek(x).or(match &**x {
+                        Expr::Lit(l, _) if matches!(lit::lit(l), Some(Lit::Float(_))) => Some(Ty::F64),
+                        _ => Some(Ty::I32),
+                    })
+                };
                 let (v, from) = self.expr(x, hint)?;
+                // `x as _` (the expected type, else the same type) / `&x as *const _` (the pointee of the source)
+                let to = match to {
+                    Ty::Param(h) if h == crate::program::HOLE => expected.filter(|&e| !has_hole(self.prog, e)).unwrap_or(from),
+                    Ty::Ptr(m, i) if has_hole(self.prog, *i) => match from {
+                        Ty::Ref(_, a) | Ty::Ptr(_, a) if matches!(*i, Ty::Param(_)) => Ty::Ptr(m, a),
+                        _ => match expected {
+                            Some(e @ Ty::Ptr(..)) if !has_hole(self.prog, e) => e,
+                            _ => to,
+                        },
+                    },
+                    t => t,
+                };
+                if matches!(to, Ty::Ptr(..)) && has_hole(self.prog, to) {
+                    return err(SP, "cannot cast to a pointer of an unknown kind (E0641)");
+                }
                 // (a cast to the same type: `f as fn()` with f: fn())
                 if from == to && !from.is_int() && !from.is_float() {
                     return Ok((v, to));

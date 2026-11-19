@@ -9,10 +9,10 @@ Status as of 2026-11-18, updated with each round of work. The percentages are ru
 
 ## Overall
 
-- [x] tests/ui run-pass: 63.3% (1527 / 2413)
-- [x] tests/ui check-pass: 69.8% (1262 / 1807)
+- [x] tests/ui run-pass: 63.5% (1532 / 2413)
+- [x] tests/ui check-pass: 70.0% (1265 / 1807)
 - [x] tests/ui build-pass: 65.2% (88 / 135)
-- [ ] tests/ui compile-fail (an error on an annotated line): 38.8% (2852 / 7358)
+- [ ] tests/ui compile-fail (an error on an annotated line): 38.7% (2848 / 7358)
 - [x] real crates: fnv, adler2, hex, itoa, rustc-hash and cfg-if build and give the same output (6 / 6)
 - [x] zust-analyzer answers like rust-analyzer: 95.4% (rust-analyzer: 96.2%)
 
@@ -45,7 +45,7 @@ Status as of 2026-11-18, updated with each round of work. The percentages are ru
 - [ ] unions: 46.2% (no `repr(packed)`)
 - [ ] const generics: 43.6% (no `generic_const_exprs`)
 - [ ] generic associated types: 40.0%
-- [ ] casts: 34.5%
+- [ ] casts (`as _` / `as *const _` take the source or expected type; a pointer of unknown kind is E0641): 34.5%
 - [ ] `impl Trait`: 29.7% (return position, also in trait methods; not from generic fns, not nested, no TAIT)
 - [ ] layout: `repr(packed)` / `repr(align)` are ignored: 12–33%
 
@@ -113,8 +113,8 @@ Status as of 2026-11-18, updated with each round of work. The percentages are ru
 
 ## Speed against rustc (2026-11-18)
 
-- [x] cold build: 5.6x faster than rustc `-C incremental` on gen1000, 2.5–4.0x on small programs, 2.9–4.2x on real crates
-- [x] edit and rebuild: 17x faster on gen1000, 12–17x on small programs, 4.8–7.0x on real crates
+- [x] cold build: 6.8x faster than rustc `-C incremental` on gen1000, 2.5–4.0x on small programs, 2.9–4.2x on real crates
+- [x] edit and rebuild: 13x faster on gen1000, 12–17x on small programs, 4.8–7.0x on real crates
 - [x] build cache on disk: 14x smaller (766 KiB vs 10.8 MiB on gen1000)
 - [x] binary: 3.2x smaller on gen1000, 93–550x on real crates
 - [ ] run time: zustc is 1.2–3.6x slower than rustc `-O` on small programs (faster than rustc's debug build);
@@ -129,9 +129,9 @@ The tables are in the [README](README.md#against-rustc).
 
 | KPI | now | before this work |
 |---|---:|---:|
-| gen5000 no-op build | 666.0 M instr | 746.0 M |
+| gen5000 no-op build | 662.8 M instr | 746.0 M |
 | gen5000 build after editing one function | 626.3 M instr | 709.3 M |
-| gen5000 `check` | 3907.0 M instr | 3971.0 M |
+| gen5000 `check` | 3906.8 M instr | 3971.0 M |
 | gen5000 build cache | 1902.8 KiB | 1902.8 KiB |
-| LSP definition / hover / completion / references p50 | 0.93 / 0.77 / 1.84 / 15.16 ms (a slower machine after a restart; the instruction count is unchanged) | — |
-| LSP ready (startup to indexed, zustc + ide targets) | 128 ms | — |
+| LSP definition / hover / completion / references p50 | 0.98 / 0.89 / 1.86 / 16.81 ms (a slower machine after a restart; the instruction count is unchanged) | — |
+| LSP ready (startup to indexed, zustc + ide targets) | 130 ms | — |
