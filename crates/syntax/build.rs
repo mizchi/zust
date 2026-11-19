@@ -48,6 +48,20 @@ fn main() {
         out.push_str("]),\n");
     }
     out.push_str("];\n");
+    // (the names the prelude gives a struct / enum / trait / union: prelude::rename_user_collisions)
+    out.push_str("pub static PRELUDE_TYPE_NAMES: &[&str] = &[\n");
+    for it in &items {
+        if !matches!(it.kind, lexer::ItemKind::Normal | lexer::ItemKind::TraitHeader) {
+            continue;
+        }
+        let mut ids = it.idents.iter().take(6).map(|&(a, b)| &src[a as usize..b as usize]);
+        if ids.any(|w| matches!(w, "struct" | "enum" | "trait" | "union")) {
+            if let Some(n) = ids.next() {
+                write!(out, "{n:?},").unwrap();
+            }
+        }
+    }
+    out.push_str("];\n");
     let dst = std::path::Path::new(&std::env::var("OUT_DIR").unwrap()).join("prelude_items.rs");
     std::fs::write(dst, out).unwrap();
 }

@@ -1567,7 +1567,8 @@ impl Cx<'_> {
                 let t = self.parse_ty(t)?;
                 let tn = self.prog.tn(t);
                 let e = if name == "type_name" {
-                    Expr::Lit(format!("{tn:?}"), Default::default())
+                    // (a program's type renamed against the prelude's: its own name, crate::prelude::rename_user_collisions)
+                    Expr::Lit(format!("{:?}", tn.replace("__u_", "")), Default::default())
                 } else {
                     let mut h: u64 = 0xcbf2_9ce4_8422_2325;
                     for b in tn.bytes() {

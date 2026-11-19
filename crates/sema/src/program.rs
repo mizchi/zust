@@ -255,6 +255,8 @@ pub struct Program {
     pub traits: FxMap<String, Vec<u32>>,
     /// impls whose self type is a reference to a concrete type (`impl Tr for &i32` / `for &S`): (that type, trait)
     pub ref_impls: std::collections::HashSet<(Ty, String)>,
+    /// generic impls for references: (self type with the impl's parameters, trait, number of parameters)
+    pub ref_impl_pats: Vec<(Ty, String, usize)>,
     /// traits implemented for fn pointers (`impl Tr for fn(A) -> B`; generic ones count for every fn pointer)
     pub fnptr_impls: std::collections::HashSet<(Option<Ty>, String)>,
     /// 親トレイト (`trait Bar: Foo`)
@@ -605,6 +607,7 @@ impl Program {
             overflow_checks: false,
             trait_supers: FxMap::default(),
             ref_impls: Default::default(),
+            ref_impl_pats: vec![],
             fnptr_impls: Default::default(),
             deny_unreachable: false,
             opt: false,
@@ -1110,6 +1113,14 @@ impl Program {
                 if sn == "__slice" && matches!(sm.impl_self_ty, Some(TySyn::Ref(false, _))) && !tr.contains('<') {
                     p.ref_slice_traits.insert(tr.clone());
                 }
+                // (`impl<'a, T> Tr for &'a [T; 3]` of a trait of the program's: the self type with the impl's
+                // parameters, matched against a type for bounds)
+                if (sn == "__array" || sn == "__slice") && matches!(sm.impl_self_ty, Some(TySyn::Ref(..))) && !tr.contains('<') && p.traits.contains_key(tr) {
+                    let gn: Vec<&str> = sm.impl_generics.iter().map(|g| g.0.as_str()).collect();
+                    if let Some(t) = sm.impl_self_ty.as_ref().and_then(|t| p.resolve_g(t, &gn).ok()) {
+                        p.ref_impl_pats.push((t, tr.clone(), gn.len()));
+                    }
+                }
                 continue;
             }
             // (marker traits the compiler knows without a declaration: `unsafe impl Send for P {}`)
@@ -1432,6 +1443,9 @@ impl Program {
         if matches!(t, Ty::Ref(..)) && !self.ref_impls.is_empty() && self.ref_impls.contains(&(t, tr.to_string())) {
             return true;
         }
+        if matches!(t, Ty::Ref(..)) && self.ref_impl_pats.iter().any(|(pt, ptr, n)| ptr == tr && self.match_ty(*pt, t, &mut vec![None; *n])) {
+            return true;
+        }
         if let Some(r) = self.implements_std(t, tr) {
             return r;
         }
@@ -1712,6 +1726,21 @@ impl Program {
             Ty::Unit => Some("#tuple0"),
             _ => None,
         };
+        // (`impl<T> Tr for &[T; 3]` / `for &[T]`: also `__array::m` / `__slice::m`, the impl's self type a reference
+        // that t fits)
+        if let Ty::Ref(_, i @ (Ty::Array(..) | Ty::Slice(_))) = t {
+            let g = if matches!(i, Ty::Array(..)) { "__array" } else { "__slice" };
+            if let Some(&id) = self.index.get(&format!("{g}::{name}")) {
+                let ids: Vec<u32> = self.overloads.get(&self.names[id as usize]).cloned().unwrap_or_else(|| vec![id]);
+                let fit = ids.into_iter().find(|&i| match self.sigs[i as usize].self_ty {
+                    Some(st @ Ty::Ref(..)) => self.match_ty(st, t, &mut vec![None; self.sigs[i as usize].generics.len()]),
+                    _ => false,
+                });
+                if fit.is_some() {
+                    return fit;
+                }
+            }
+        }
         // (`impl dyn Tr { fn m(&self) }`: `__dyn_Tr::m`)
         if let Ty::Dyn(s) = t {
             let p = s.split('+').next().unwrap_or("").trim();

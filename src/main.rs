@@ -17,7 +17,8 @@ fn usage() -> ! {
 }
 
 fn die(msg: String) -> ! {
-    eprintln!("error: {msg}");
+    // (a program's type renamed against the prelude's: its own name, zust_syntax::prelude::rename_user_collisions)
+    eprintln!("error: {}", msg.replace("__u_", ""));
     std::process::exit(1)
 }
 
@@ -84,7 +85,7 @@ fn main() {
         let (src, _) = zustc::srcmap::load_crate(&input, "src/main.rs", &o.cfg_with(&o.features)).unwrap_or_else(|e| die(e));
         let diags = Session2::new(Options2 { no_cache: true, jobs: 1, ..o }).check(&src);
         for d in &diags {
-            eprintln!("error: {}:{}:{}: {}", input.display(), d.line, d.col, d.msg);
+            eprintln!("error: {}:{}:{}: {}", input.display(), d.line, d.col, d.msg.replace("__u_", ""));
         }
         std::process::exit(if diags.is_empty() { 0 } else { 1 });
     }

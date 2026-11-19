@@ -824,7 +824,8 @@ impl Cx<'_> {
                 self.b.ins().brif(c, yes, &[], next, &[]);
                 self.b.switch_to_block(yes);
             }
-            let nm = self.str_const(&name);
+            // (a program's type renamed against the prelude's prints its own name)
+            let nm = self.str_const(name.strip_prefix("__u_").unwrap_or(&name));
             let str_ref = Ty::Ref(false, intern(Ty::Str));
             if fields.is_empty() && !tuple {
                 self.call_named("__exr_fmt_lit", vec![Ty::Unit], &[(f, fref), (nm, str_ref)], span)?;

@@ -152,9 +152,17 @@ pub fn with_prelude_in(src: &str, crates: &[String], fix: &mut Vec<(u32, u32, i3
     let renamed = crate::prep::std_renames(src);
     let src: &str = renamed.as_deref().unwrap_or(src);
     let pre = crate::prep::prep(src, crates, fix, cfg, &mut cache.prep)?;
-    let src: &str = &pre;
     tm.lap("prep", String::new());
-    let mut items = split_inc(src, &mut cache.split)?;
+    let mut items = split_inc(&pre, &mut cache.split)?;
+    // (the program's types named as the prelude's: renamed, and split again)
+    let pre = match crate::prelude::rename_user_collisions(&pre, &items) {
+        Some(r) => {
+            items = split_inc(&r, &mut cache.split)?;
+            r
+        }
+        None => pre,
+    };
+    let src: &str = &pre;
     let user = items.len();
     tm.lap("split", String::new());
     let extra = crate::prelude::select_with(src, &items, &mut cache.sel);

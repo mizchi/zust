@@ -538,6 +538,98 @@ const SHADOWABLE: &[&str] = &[
     "AtomicPtr", "TryReserveError", "c_void", "Cycle", "JoinHandle", "Chars", "Poll", "Waker", "Context", "Future",
 ];
 
+/// The name a struct / enum / trait / union item defines (from its first identifiers: `pub struct Name`)
+fn type_def_name<'a>(src: &'a str, it: &SrcItem) -> Option<&'a str> {
+    if !matches!(it.kind, ItemKind::Normal | ItemKind::TraitHeader) {
+        return None;
+    }
+    let mut ids = it.idents.iter().take(6).map(|&(a, b)| &src[a as usize..b as usize]);
+    ids.find(|w| matches!(*w, "struct" | "enum" | "trait" | "union"))?;
+    ids.next()
+}
+
+/// The names the prelude gives a struct / enum / trait / union (build.rs lists them)
+fn prelude_type_names() -> &'static crate::fxhash::FxSet<&'static str> {
+    static S: OnceLock<crate::fxhash::FxSet<&'static str>> = OnceLock::new();
+    S.get_or_init(|| PRELUDE_TYPE_NAMES.iter().copied().collect())
+}
+
+/// The program defines a struct / enum / trait / union under a name the prelude also uses for one, which the compiler
+/// refers to by name (`Iterator`, `Iter`, `Add`, `Hasher` ..; the SHADOWABLE ones are renamed in the prelude
+/// instead): the program's own is renamed `__u_<name>` in its source, wherever the name is not reached through a
+/// `std::` / `core::` / `alloc::` path, nor in an attribute. Debug output, `type_name` and diagnostics drop the prefix
+/// again. None if there is no such name. user_items: src split into items
+pub fn rename_user_collisions(src: &str, user_items: &[SrcItem]) -> Option<String> {
+    let mut hit: Vec<&str> = vec![];
+    for it in user_items {
+        if let Some(w) = type_def_name(src, it) {
+            if prelude_type_names().contains(w) && !SHADOWABLE.contains(&w) && !hit.contains(&w) {
+                hit.push(w);
+            }
+        }
+    }
+    if hit.is_empty() {
+        return None;
+    }
+    // (then exactly, on the tokens: not in strings or comments, nor where the definition sits in a std path)
+    let b = src.as_bytes();
+    let toks = crate::lexer::tokenize(b);
+    let defined: Vec<&str> = toks
+        .windows(2)
+        .filter(|w| w[0].0 == 0 && w[1].0 == 0 && matches!(&src[w[0].1..w[0].2], "struct" | "enum" | "trait" | "union"))
+        .map(|w| &src[w[1].1..w[1].2])
+        .filter(|w| hit.contains(w))
+        .collect();
+    if defined.is_empty() {
+        return None;
+    }
+    // (attributes keep their names: `#[derive(Copy)]` next to a `struct Copy;`)
+    let mut in_attr = vec![false; toks.len()];
+    let mut k = 0;
+    while k < toks.len() {
+        let p = |i: usize, c: &str| toks.get(i).is_some_and(|t| t.0 == 1 && &src[t.1..t.2] == c);
+        if p(k, "#") && (p(k + 1, "[") || (p(k + 1, "!") && p(k + 2, "["))) {
+            let mut j = if p(k + 1, "[") { k + 1 } else { k + 2 };
+            let mut depth = 0;
+            while j < toks.len() {
+                if p(j, "[") {
+                    depth += 1;
+                } else if p(j, "]") {
+                    depth -= 1;
+                    if depth == 0 {
+                        break;
+                    }
+                }
+                in_attr[j] = true;
+                j += 1;
+            }
+            k = j + 1;
+            continue;
+        }
+        k += 1;
+    }
+    let mut out = String::with_capacity(src.len() + 64);
+    let mut at = 0;
+    for (k, t) in toks.iter().enumerate() {
+        if t.0 != 0 || in_attr[k] || !defined.contains(&&src[t.1..t.2]) {
+            continue;
+        }
+        // (`std::iter::Iterator`: the path's first segment)
+        let mut j = k;
+        while j >= 3 && toks[j - 1].0 == 1 && toks[j - 2].0 == 1 && &src[toks[j - 2].1..toks[j - 1].2] == "::" && toks[j - 3].0 == 0 {
+            j -= 3;
+        }
+        if j < k && matches!(&src[toks[j].1..toks[j].2], "std" | "core" | "alloc") {
+            continue;
+        }
+        out.push_str(&src[at..t.1]);
+        out.push_str("__u_");
+        at = t.1;
+    }
+    out.push_str(&src[at..]);
+    Some(out)
+}
+
 pub fn rename_shadowed(user_src: &str, prelude: String) -> String {
     // (one pass over the bytes: the name after `struct ` / `enum ` / `trait ` / `type ` / `union `. It replaces a
     // search for each name: those were most of the cost of a no-op build of a large program)
