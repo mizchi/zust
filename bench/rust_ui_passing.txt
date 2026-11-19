@@ -229,6 +229,7 @@ compile-fail	associated-types/hr-associated-type-bound-param-5.rs
 compile-fail	associated-types/hr-associated-type-bound-param-6.rs
 compile-fail	associated-types/hr-associated-type-projection-1.rs
 check-pass	associated-types/impl-trait-member-type-resolution-57399.rs
+check-pass	associated-types/imply-relevant-nested-item-bounds-for-gat.rs
 compile-fail	associated-types/invalid-ctor.rs
 check-pass	associated-types/issue-19081.rs
 check-pass	associated-types/issue-19129-1.rs
@@ -337,6 +338,7 @@ compile-fail	async-await/field-assign-nonsend.rs
 build-pass	async-await/field-assign.rs
 check-pass	async-await/format-await-send.rs
 compile-fail	async-await/future-contains-err-issue-115188.rs
+check-pass	async-await/gat-is-send-across-await.rs
 compile-fail	async-await/impl-future-escaping-bound-vars-ice.rs
 check-pass	async-await/in-trait/async-associated-types.rs
 check-pass	async-await/in-trait/async-example-desugared-boxed.rs
@@ -352,6 +354,7 @@ check-pass	async-await/in-trait/early-bound-1.rs
 check-pass	async-await/in-trait/early-bound-2.rs
 check-pass	async-await/in-trait/fn-not-async-err2.rs
 check-pass	async-await/in-trait/hir-hash.rs
+check-pass	async-await/in-trait/implied-bounds.rs
 check-pass	async-await/in-trait/issue-102138.rs
 check-pass	async-await/in-trait/issue-102310.rs
 check-pass	async-await/in-trait/issue-104678.rs
@@ -618,6 +621,7 @@ compile-fail	block-result/issue-13624.rs
 compile-fail	block-result/issue-20862.rs
 compile-fail	block-result/unexpected-return-on-unit.rs
 check-pass	borrowck/alias-liveness/escaping-bounds.rs
+check-pass	borrowck/alias-liveness/gat-static.rs
 check-pass	borrowck/alias-liveness/higher-ranked.rs
 check-pass	borrowck/alias-liveness/opaque-capture.rs
 check-pass	borrowck/alias-liveness/rpit-static.rs
@@ -880,6 +884,7 @@ compile-fail	borrowck/suggest-ref-mut-issue-118596.rs
 compile-fail	borrowck/suggestions/overloaded-index-not-mut-but-should-be-mut.rs
 compile-fail	borrowck/suggestions/overloaded-index-without-indexmut.rs
 compile-fail	borrowck/tainted-promoteds.rs
+compile-fail	borrowck/trait-impl-argument-difference-ice.rs
 check-pass	borrowck/tuple-field-move-with-drop-borrow.rs
 compile-fail	borrowck/two-phase-across-loop.rs
 run-pass	borrowck/two-phase-baseline.rs
@@ -1194,6 +1199,7 @@ check-pass	coercion/constrain-expectation-in-arg.rs
 check-pass	coercion/fake-sized-ptr-cast.rs
 build-pass	coercion/fudge-inference/fudge-eager-resolve-breakage-2.rs
 check-pass	coercion/fudge-inference/fudge-eager-resolve-breakage-3.rs
+compile-fail	coercion/hr_alias_normalization_leaking_vars.rs
 check-pass	coercion/index-coercion-over-indexmut-72002.rs
 check-pass	coercion/infer-coerce-unsized-trait-object.rs
 compile-fail	coercion/intrinsic-in-unifying-coercion-149143.rs
@@ -1668,6 +1674,7 @@ check-pass	derives/debug/derive-debug-newtype-unsized-slice.rs
 run-pass	derives/default/deriving-default-enum.rs
 compile-fail	derives/derive-assoc-type-not-impl.rs
 check-pass	derives/derive-compound-arities.rs
+run-pass	derives/derive-hrtb-for-bare-fn-field-with-lifetime.rs
 run-pass	derives/derive-hygiene-struct-builder.rs
 check-pass	derives/derive-macro-const-default.rs
 check-pass	derives/derive-multiple-with-packed.rs
@@ -2349,7 +2356,6 @@ compile-fail	generic-associated-types/empty_generics.rs
 check-pass	generic-associated-types/gat-bound-mismatch-106832.rs
 compile-fail	generic-associated-types/gat-trait-path-generic-type-arg.rs
 compile-fail	generic-associated-types/gat-trait-path-parenthesised-args.rs
-compile-fail	generic-associated-types/generic_associated_type_undeclared_lifetimes.rs
 check-pass	generic-associated-types/higher-ranked-self-impl-requirement.rs
 check-pass	generic-associated-types/ice-add-outlives-bounds-unexpected-regions-113793.rs
 check-pass	generic-associated-types/issue-102333.rs
@@ -2357,20 +2363,31 @@ compile-fail	generic-associated-types/issue-47206-where-clause.rs
 check-pass	generic-associated-types/issue-58694-parameter-out-of-range.rs
 check-pass	generic-associated-types/issue-62326-parameter-out-of-range.rs
 check-pass	generic-associated-types/issue-67424.rs
+check-pass	generic-associated-types/issue-68648-1.rs
+compile-fail	generic-associated-types/issue-68648-2.rs
+check-pass	generic-associated-types/issue-68649-pass.rs
 check-pass	generic-associated-types/issue-68653.rs
+check-pass	generic-associated-types/issue-70303.rs
 check-pass	generic-associated-types/issue-76407.rs
+run-pass	generic-associated-types/issue-76826.rs
 compile-fail	generic-associated-types/issue-78671.rs
 compile-fail	generic-associated-types/issue-79636-1.rs
+check-pass	generic-associated-types/issue-80433-reduced.rs
 build-pass	generic-associated-types/issue-81487.rs
 check-pass	generic-associated-types/issue-85921.rs
 check-pass	generic-associated-types/issue-86483.rs
 check-pass	generic-associated-types/issue-87429-2.rs
 check-pass	generic-associated-types/issue-87429.rs
+check-pass	generic-associated-types/issue-87748.rs
 check-pass	generic-associated-types/issue-88405.rs
+check-pass	generic-associated-types/issue-88459.rs
+check-pass	generic-associated-types/issue-89352.rs
 check-pass	generic-associated-types/issue-90729.rs
 check-pass	generic-associated-types/issue-92280.rs
+check-pass	generic-associated-types/issue-92954.rs
 check-pass	generic-associated-types/issue-93141.rs
 check-pass	generic-associated-types/issue-93262.rs
+check-pass	generic-associated-types/issue-93341.rs
 compile-fail	generic-associated-types/multiple-type-params-with-unmet-bounds.rs
 compile-fail	generic-associated-types/own-bound-span.rs
 compile-fail	generic-associated-types/parse/trait-path-expected-token.rs
@@ -2379,6 +2396,7 @@ compile-fail	generic-associated-types/parse/trait-path-missing-gen_arg.rs
 compile-fail	generic-associated-types/parse/trait-path-segments.rs
 compile-fail	generic-associated-types/parse/trait-path-types.rs
 compile-fail	generic-associated-types/type-param-defaults.rs
+check-pass	generic-associated-types/variance_constraints.rs
 compile-fail	generic-const-items/feature-gate-generic_const_items.rs
 compile-fail	generic-const-items/wfcheck_err_leak_issue_118179.rs
 run-pass	generics/autobind.rs
@@ -2497,6 +2515,7 @@ check-pass	higher-ranked/trait-bounds/normalize-under-binder/issue-74261.rs
 check-pass	higher-ranked/trait-bounds/normalize-under-binder/issue-76956.rs
 check-pass	higher-ranked/trait-bounds/normalize-under-binder/issue-80956.rs
 check-pass	higher-ranked/trait-bounds/normalize-under-binder/issue-81809.rs
+check-pass	higher-ranked/trait-bounds/normalize-under-binder/issue-90612.rs
 check-pass	higher-ranked/trait-bounds/normalize-under-binder/issue-90875.rs
 check-pass	higher-ranked/trait-bounds/normalize-under-binder/norm-before-method-resolution.rs
 compile-fail	hygiene/expansion-info-reset.rs
@@ -2545,6 +2564,7 @@ compile-fail	impl-trait/impl-trait-in-generic-param.rs
 compile-fail	impl-trait/impl_trait_projections.rs
 check-pass	impl-trait/in-ctfe/fully_monomorphic_const_eval.rs
 check-pass	impl-trait/in-ctfe/match-arm-exhaustive.rs
+check-pass	impl-trait/in-trait/assumed-wf-bounds-in-impl.rs
 compile-fail	impl-trait/in-trait/bad-item-bound-within-rpitit-2.rs
 compile-fail	impl-trait/in-trait/bad-projection-from-opaque.rs
 check-pass	impl-trait/in-trait/deep-match-works.rs
@@ -6398,7 +6418,6 @@ check-pass	variance/variance-use-covariant-struct-2.rs
 compile-fail	variants/variant-result-noresult-used-as-type.rs
 compile-fail	variants/variant-used-as-type.rs
 compile-fail	wf/ice-hir-wf-check-anon-const-issue-122199.rs
-compile-fail	wf/issue-103573.rs
 compile-fail	wf/issue-110157.rs
 compile-fail	wf/issue-95665.rs
 compile-fail	wf/let-pat-inferred-non-wf.rs

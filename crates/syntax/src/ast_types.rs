@@ -225,7 +225,9 @@ fn no_args(s: &crate::parse::Seg) -> bool {
 fn path_ty(p: &Path, self_ty: Option<&TySyn>) -> R<TySyn> {
     let n = p.segs.len();
     // `Self::Item` / `I::Item` (大文字で始まる 2 セグメントのパス)
-    if !p.global && n == 2 && no_args(&p.segs[0]) && no_args(&p.segs[1]) && p.segs[0].name.starts_with(|c: char| c.is_ascii_uppercase()) {
+    // (`Self::F<'a>`: a generic associated type with lifetime arguments only is the same type for every lifetime)
+    let lifetimes_only = |s: &crate::parse::Seg| s.fn_args.is_none() && s.args.iter().all(|a| matches!(a, GArg::Lifetime(_)));
+    if !p.global && n == 2 && no_args(&p.segs[0]) && lifetimes_only(&p.segs[1]) && p.segs[0].name.starts_with(|c: char| c.is_ascii_uppercase()) {
         let b = p.segs[0].name.clone();
         let base = if b == "Self" { self_ty.cloned().unwrap_or(TySyn::Named("Self".into())) } else { TySyn::Named(b) };
         return Ok(TySyn::Assoc(Box::new(base), p.segs[1].name.clone()));

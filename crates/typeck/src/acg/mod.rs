@@ -1764,7 +1764,15 @@ impl Cx<'_> {
         let by_ty = |t: Ty, m: &str| -> Option<u32> {
             match t {
                 Ty::Struct(sid) => self.prog.method(sid, m).or_else(|| self.prog.default_method(sid, m)),
-                t => self.prog.prim_method(t, m),
+                // (else a default fn of a trait t implements: a blanket `impl<T> Tr for T {}`)
+                t => self.prog.prim_method(t, m).or_else(|| {
+                    if matches!(t, Ty::Param(_)) {
+                        return None;
+                    }
+                    self.prog.traits.iter().find_map(|(tr, ids)| {
+                        ids.iter().copied().find(|&d| self.prog.sigs[d as usize].has_body && self.prog.names[d as usize].rsplit("::").next() == Some(m)).filter(|_| self.prog.implements(t, tr))
+                    })
+                }),
             }
         };
         // `<T as Trait>::m` / `<T>::m`
@@ -1782,6 +1790,15 @@ impl Cx<'_> {
                 if let Ok(t) = self.parse_ty(&ty) {
                     if let Some(i) = by_ty(t, &p.segs[1].name) {
                         return Some((i, &self.prog.sigs[i as usize]));
+                    }
+                    // (still a parameter (`T::identity(t)` in a generic body): the one trait fn of that name, as
+                    // `<T as Tr>::m`)
+                    if let Ty::Param(_) = t {
+                        let m = &p.segs[1].name;
+                        let mut found = self.prog.traits.values().flatten().filter(|&&d| self.prog.names[d as usize].rsplit("::").next() == Some(m.as_str()));
+                        if let (Some(&d), None) = (found.next(), found.next()) {
+                            return Some((d, &self.prog.sigs[d as usize]));
+                        }
                     }
                 }
             }
