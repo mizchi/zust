@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795132297253,
+  "lastUpdate": 1795132299582,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -53594,6 +53594,85 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/mizchi/zust/commit/3fbfec86b28d73e22cbfd9a39e174333502361ce"
         },
         "date": 1795131630932,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "parity documentSymbol (名前の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity workspace/symbol (上位 20 の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity definition (行き先の一致)",
+            "value": 96.97,
+            "unit": "%"
+          },
+          {
+            "name": "parity hover (名前を含む)",
+            "value": 92.5,
+            "unit": "%"
+          },
+          {
+            "name": "parity references (数の一致)",
+            "value": 94.595,
+            "unit": "%"
+          },
+          {
+            "name": "parity documentHighlight (数の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity rename (書き換えの一致)",
+            "value": 85.714,
+            "unit": "%"
+          },
+          {
+            "name": "parity signatureHelp (名前・引数の数・今の引数の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity completion `x.\\|` (書いてある名前を含む)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity completion `na\\|me` (同)",
+            "value": 88.889,
+            "unit": "%"
+          },
+          {
+            "name": "parity 一致の平均",
+            "value": 95.867,
+            "unit": "%"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "committer": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "distinct": true,
+          "id": "904658b2939c57b3bb23f8eac470f262b88dfa1c",
+          "message": "Vec::into_boxed_slice, Range::is_empty, chains after (0..v.len())\n\n- `v.into_boxed_slice()`: the Vec's buffer becomes the Box<[T]> (its\n  pointer and length; the Vec is forgotten).\n- `Range::is_empty` / `RangeInclusive::is_empty`.\n- The prelude selection sees an iterator chain after a range whose end\n  has calls in it (`(0..self.points.len()).filter_map(..)`).\n\ntests/ui: +3 genuine check-pass passes.\nKPI: traits edit +0.29%, crates edit +0.30% (three more prelude fns).\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-19T23:47:13Z",
+          "tree_id": "087d76e715b3043e2047fd757d02246710fbbd36",
+          "url": "https://github.com/mizchi/zust/commit/904658b2939c57b3bb23f8eac470f262b88dfa1c"
+        },
+        "date": 1795132299199,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
