@@ -301,6 +301,8 @@ pub struct AssocDef {
 
 /// 型推論に任せる `_` の印 (型パラメータの番号としては使わない値)
 pub const HOLE: u8 = 250;
+/// the key mark of a closure's fn-pointer instance in the instance table (not a type parameter)
+pub const FNPTR_MARK: u8 = 251;
 
 /// 持ち上げたクロージャ ([`crate::closure`])
 pub struct ClosureDef {
@@ -325,6 +327,8 @@ pub struct Inst {
     pub base: u32,
     pub args: Vec<Ty>,
     pub sig: FnSig,
+    /// a closure with no captures called through a fn pointer: no environment parameter (`let f: fn(i32) -> i32 = |x| x;`)
+    pub fnptr: bool,
 }
 
 /// インスタンス表。関数 ID は Program の関数の後ろに続けて振る。
@@ -414,8 +418,30 @@ impl Insts {
             base,
             args: args.clone(),
             sig,
+            fnptr: false,
         });
         self.map.insert((base, args), id);
+        self.pending.push(id);
+        Ok(id)
+    }
+
+    /// The fn-pointer instance of a closure with no captures: its signature without the environment parameter
+    pub fn request_fnptr(&mut self, prog: &Program, base: u32, args: Vec<Ty>) -> R<u32> {
+        let mut key = args.clone();
+        key.push(Ty::Param(FNPTR_MARK));
+        if let Some(&id) = self.map.get(&(base, key.clone())) {
+            return Ok(id);
+        }
+        let id0 = self.request(prog, base, args.clone())?;
+        let mut sig = self.sig(prog, id0).clone();
+        if !sig.params.is_empty() {
+            sig.params.remove(0);
+        }
+        sig.has_self = false;
+        sig.symbol = format!("{}#fnptr", sig.symbol);
+        let id = self.n_fns + self.list.len() as u32;
+        self.list.push(Inst { base, args, sig, fnptr: true });
+        self.map.insert((base, key), id);
         self.pending.push(id);
         Ok(id)
     }

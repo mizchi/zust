@@ -201,9 +201,21 @@ pub const TRAP_SITE_MAX: usize = 245;
 
 /// 1 関数をコンパイルする。返り値は (Blob, 要求したインスタンス)
 pub fn compile(prog: &Program, insts: &Mutex<Insts>, id: u32, f: &ItemFn, line_base: u32, inl: &Inline) -> R<(Compiled, Vec<u32>)> {
-    let (sig, env, body_id) = {
+    let (sig, env, body_id, fnptr) = {
         let g = insts.lock().unwrap();
-        (g.sig(prog, id).clone(), g.env(prog, id), g.body_of(id))
+        (g.sig(prog, id).clone(), g.env(prog, id), g.body_of(id), g.get(id).is_some_and(|i| i.fnptr))
+    };
+    // (a closure's fn-pointer instance: the body without the `__env` parameter (it has no captures))
+    let f_np;
+    let f = if fnptr {
+        let mut g = f.clone();
+        if !g.sig.params.is_empty() {
+            g.sig.params.remove(0);
+        }
+        f_np = g;
+        &f_np
+    } else {
+        f
     };
     // クロージャの本体: キャプチャ (名前, 変数の型, by-ref か, オフセット)
     let mut caps: Vec<(String, Ty, bool, u32)> = vec![];

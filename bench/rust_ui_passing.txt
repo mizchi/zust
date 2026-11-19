@@ -970,9 +970,11 @@ run-pass	closures/closure-mut-argument-6153.rs
 compile-fail	closures/closure-ref-fn-kind-mismatch-issue-161327.rs
 compile-fail	closures/closure-reform-bad.rs
 compile-fail	closures/closure-return-type-mismatch.rs
+compile-fail	closures/closure-to-fn-pointer-lifetime-error.rs
 run-pass	closures/closure-type-inference-in-context-9129.rs
 run-pass	closures/closure-upvar-trait-caching.rs
 run-pass	closures/closure-with-fixed-size-array-param.rs
+run-pass	closures/closure_no_cap_coerce_many_unsafe_1.rs
 check-pass	closures/closure_promotion.rs
 check-pass	closures/closure_requires_expectation.rs
 compile-fail	closures/correct-args-on-call-suggestion.rs
@@ -991,6 +993,7 @@ run-pass	closures/issue-22864-1.rs
 run-pass	closures/issue-22864-2.rs
 compile-fail	closures/issue-25439.rs
 check-pass	closures/issue-41366.rs
+check-pass	closures/issue-48109.rs
 compile-fail	closures/issue-6801.rs
 check-pass	closures/issue-68025.rs
 check-pass	closures/issue-72408-nested-closures-exponential.rs
@@ -1344,6 +1347,7 @@ check-pass	consts/const-eval/zst_operand_eval.rs
 run-pass	consts/const-expr-in-fixed-length-vec.rs
 run-pass	consts/const-expr-in-vec-repeat.rs
 compile-fail	consts/const-extern-fn/const-extern-fn-requires-unsafe.rs
+run-pass	consts/const-extern-fn/const-extern-fn.rs
 run-pass	consts/const-extern-function.rs
 run-pass	consts/const-fields-and-indexing.rs
 run-pass	consts/const-fn-const-eval.rs
@@ -1448,6 +1452,7 @@ run-pass	consts/match-const-fn-structs.rs
 run-pass	consts/method-reference-in-const-dyn-fn.rs
 check-pass	consts/min_const_fn/address_of_const.rs
 check-pass	consts/min_const_fn/allow_raw_ptr_dereference_const_fn.rs
+check-pass	consts/min_const_fn/cast_fn.rs
 compile-fail	consts/min_const_fn/cmp_fn_pointers.rs
 compile-fail	consts/min_const_fn/min_const_fn.rs
 check-pass	consts/min_const_fn/min_const_fn_dyn.rs
@@ -2097,6 +2102,7 @@ run-pass	functions-closures/closure-inference.rs
 run-pass	functions-closures/closure-inference2.rs
 run-pass	functions-closures/closure-reform.rs
 run-pass	functions-closures/closure-returning-closure.rs
+run-pass	functions-closures/closure_to_fn_coercion-expected-types.rs
 run-pass	functions-closures/copy-closure.rs
 run-pass	functions-closures/fn-bare-assign.rs
 run-pass	functions-closures/fn-bare-coerce-to-block.rs
@@ -2222,6 +2228,7 @@ check-pass	higher-ranked/hrtb-projection-closure-62201.rs
 compile-fail	higher-ranked/hrtb-with-assoc-type-projection.rs
 check-pass	higher-ranked/leak-check/leak-check-in-selection-7-coherence.rs
 check-pass	higher-ranked/region-leak-rc-and-mut-ptr.rs
+check-pass	higher-ranked/subtype/placeholder-pattern.rs
 check-pass	higher-ranked/trait-bounds/complex.rs
 compile-fail	higher-ranked/trait-bounds/hang-on-deeply-nested-dyn.rs
 compile-fail	higher-ranked/trait-bounds/higher-trait-bounds-ice-60218.rs
@@ -2372,6 +2379,7 @@ run-pass	impl-trait/universal_multiple_bounds.rs
 compile-fail	impl-trait/where-allowed-2.rs
 check-pass	implied-bounds/gluon_salsa.rs
 compile-fail	implied-bounds/hrlt-implied-trait-bounds-guard.rs
+check-pass	implied-bounds/hrlt-implied-trait-bounds-roundtrip.rs
 check-pass	implied-bounds/ice-unbound-region-vars.rs
 check-pass	implied-bounds/implied-bounds-entailment-wf-vars-issue-114783-1.rs
 check-pass	implied-bounds/implied-bounds-entailment-wf-vars-issue-114783-2.rs
@@ -3615,6 +3623,7 @@ compile-fail	parser/fn-defined-using-func.rs
 compile-fail	parser/fn-defined-using-function.rs
 compile-fail	parser/fn-field-parse-error-ice.rs
 check-pass	parser/fn-header-syntactic-pass.rs
+check-pass	parser/fn-returns-fn-pointer.rs
 check-pass	parser/foreign-static-syntactic-pass.rs
 check-pass	parser/foreign-ty-syntactic-pass.rs
 check-pass	parser/generic-param-default-in-binder.rs
@@ -5596,6 +5605,7 @@ compile-fail	typeck/terr-in-field.rs
 compile-fail	typeck/terr-sorts.rs
 compile-fail	typeck/type-arguments-on-local-variable-60989.rs
 compile-fail	typeck/type-inference-for-associated-types-69683.rs
+run-pass	typeck/typeck-closure-to-unsafe-fn-ptr.rs
 run-pass	typeck/typeck-fn-to-unsafe-fn-ptr.rs
 compile-fail	typeck/typeck-inner-expr-on-field-access-error.rs
 compile-fail	typeck/typeck_type_placeholder_item_help.rs

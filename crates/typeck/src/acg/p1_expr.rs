@@ -803,6 +803,12 @@ impl Cx<'_> {
                     self.same(SP, t, to)?;
                     return Ok((v, t));
                 }
+                // (`|x| x + 1 as fn(i32) -> i32` / `f as fn()` with a closure: the closure's fn pointer)
+                if matches!(to, Ty::Fn(_)) && matches!(strip_paren(x), Expr::Closure(..)) {
+                    let (v, t) = self.expr(x, Some(to))?;
+                    self.same(SP, t, to)?;
+                    return Ok((v, t));
+                }
                 let int_lit = matches!(strip_paren(x), Expr::Lit(l, _) if matches!(lit::lit(l), Some(Lit::Int(i)) if i.suffix().is_empty()));
                 let hint = if int_lit && matches!(to, Ty::Ptr(..)) {
                     // (`0 as *mut u8`: an address)
@@ -1196,8 +1202,11 @@ impl Cx<'_> {
             Some(Ty::Struct(sid)) if prog.base_of(sid) == cd.sid => Some(prog.structs[sid as usize].args.clone()),
             _ => None,
         };
-        // 期待型が `dyn Fn(A) -> B` なら引数と戻り値の手がかりにする
+        // 期待型が `dyn Fn(A) -> B` なら引数と戻り値の手がかりにする (`fn(A) -> B` も)
         let hint = hint.or_else(|| {
+            if let Some(Ty::Fn(ft)) = expected {
+                return Some((ft.params.clone(), Some(ft.ret)));
+            }
             let s = match expected {
                 Some(Ty::Dyn(s)) => s,
                 Some(Ty::Ref(_, Ty::Dyn(s))) => *s,
@@ -1288,6 +1297,19 @@ impl Cx<'_> {
         let Some(args) = sol.into_iter().collect::<Option<Vec<Ty>>>() else {
             return err(SP, "cannot infer the return type of this closure; annotate it (`|..| -> T { .. }`)");
         };
+        // (a closure with no captures where a fn pointer is expected: the address of its fn-pointer instance)
+        if matches!(expected, Some(Ty::Fn(_))) && cd.captures.is_empty() {
+            let (iid, sig) = {
+                let mut g = self.insts.lock().unwrap();
+                let iid = g.request_fnptr(prog, cid, args).or_else(|e| err(SP, e))?;
+                (iid, g.sig(prog, iid).clone())
+            };
+            self.requested.push(iid);
+            let fr = self.fref(iid, &sig);
+            let v = self.b.ins().func_addr(PTR, fr);
+            let t = Ty::Fn(crate::types::intern_fn(crate::types::FnTy { params: sig.params.clone(), ret: sig.ret }));
+            return Ok((Some(v), t));
+        }
         let sid = prog.instantiate(cd.sid, args.clone()).or_else(|e| err(SP, e))?;
         // 呼ばれなくても本体を検査・コンパイルする (未使用なら --gc-sections で消える)
         {
