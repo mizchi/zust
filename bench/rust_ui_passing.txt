@@ -264,11 +264,13 @@ check-pass	associated-types/unioned-keys-with-associated-type-23442.rs
 check-pass	associated-types/wf-cycle-2.rs
 check-pass	associated-types/wf-cycle.rs
 compile-fail	async-await/async-block-control-flow-static-semantics.rs
+compile-fail	async-await/async-borrowck-escaping-closure-error.rs
 build-pass	async-await/async-closure-matches-expr.rs
 compile-fail	async-await/async-closures/async-future-out-must-be-sized.rs
 check-pass	async-await/async-closures/different-projection-lengths-for-different-upvars.rs
 compile-fail	async-await/async-closures/dont-ice-when-body-tainted-by-errors.rs
 compile-fail	async-await/async-closures/fn-exception-target-features.rs
+compile-fail	async-await/async-closures/fn-exception.rs
 compile-fail	async-await/async-closures/ice-async-closure-variance-issue-148488.rs
 build-pass	async-await/async-closures/implements-fnmut.rs
 compile-fail	async-await/async-closures/kind-due-to-arg-with-box-wrap.rs
@@ -305,9 +307,11 @@ compile-fail	async-await/drop-track-bad-field-in-fru.rs
 check-pass	async-await/expansion-in-attrs.rs
 compile-fail	async-await/field-assign-nonsend.rs
 build-pass	async-await/field-assign.rs
+check-pass	async-await/format-await-send.rs
 compile-fail	async-await/future-contains-err-issue-115188.rs
 compile-fail	async-await/impl-future-escaping-bound-vars-ice.rs
 check-pass	async-await/in-trait/async-associated-types.rs
+check-pass	async-await/in-trait/async-example-desugared-boxed.rs
 check-pass	async-await/in-trait/async-example-desugared-in-trait.rs
 check-pass	async-await/in-trait/async-example-desugared.rs
 check-pass	async-await/in-trait/async-example.rs
@@ -384,6 +388,8 @@ check-pass	async-await/no-params-non-move-async-closure.rs
 check-pass	async-await/no-std.rs
 compile-fail	async-await/partial-initialization-across-await.rs
 compile-fail	async-await/proper-span-for-type-error.rs
+check-pass	async-await/recursive-async-auto-trait-overflow-only-parent-args.rs
+check-pass	async-await/recursive-async-auto-trait-overflow.rs
 compile-fail	async-await/suggest-switching-edition-on-await.rs
 check-pass	async-await/track-caller/issue-105134.rs
 compile-fail	async-await/try-on-option-in-async.rs
@@ -943,6 +949,7 @@ run-pass	closures/2229_closure_analysis/run_pass/edition.rs
 run-pass	closures/2229_closure_analysis/run_pass/filter-on-struct-member.rs
 check-pass	closures/2229_closure_analysis/run_pass/issue-87378.rs
 run-pass	closures/2229_closure_analysis/run_pass/issue-88372.rs
+check-pass	closures/2229_closure_analysis/run_pass/issue-88431.rs
 check-pass	closures/2229_closure_analysis/run_pass/issue-88476.rs
 run-pass	closures/2229_closure_analysis/run_pass/move_closure.rs
 run-pass	closures/2229_closure_analysis/run_pass/multilevel-path-1.rs
@@ -1660,6 +1667,7 @@ run-pass	drop/same-alloca-reassigned-match-binding-16151.rs
 run-pass	drop/static-issue-17302.rs
 build-pass	drop/static-variable-with-drop-trait-9243.rs
 run-pass	drop/struct-field-drop-order.rs
+check-pass	drop/tail_expr_drop_order-on-recursive-boxed-fut.rs
 run-pass	dropck/cleanup-arm-conditional.rs
 check-pass	dropck/constrained_by_assoc_type_equality.rs
 compile-fail	dropck/drop-on-non-struct.rs
@@ -5324,6 +5332,7 @@ run-pass	traits/mut-trait-in-struct-8249.rs
 compile-fail	traits/negative-impls/feature-gate-negative_impls.rs
 compile-fail	traits/next-solver/coherence/issue-102048.rs
 check-pass	traits/next-solver/normalize/normalize-type-outlives.rs
+check-pass	traits/next-solver/opaques/revealing-use-in-nested-body.rs
 compile-fail	traits/no-fallback-multiple-impls.rs
 check-pass	traits/non_lifetime_binders/disqualifying-object-candidates.rs
 check-pass	traits/normalize/assoc-type-hrtb-normalization-30472.rs

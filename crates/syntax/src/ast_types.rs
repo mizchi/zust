@@ -125,6 +125,14 @@ fn single(p: &Path) -> Option<&str> {
 }
 
 pub fn tysyn(t: &PTy, self_ty: Option<&TySyn>) -> R<TySyn> {
+    // (the parser's marker of `dyn Future<Output = T>` behind Box / Pin: futures run at once, so it is T)
+    if let PTy::Path(None, p) = t {
+        if p.segs.len() == 1 && p.segs[0].name == "__exr_fut" {
+            if let [crate::parse::GArg::Ty(o)] = &p.segs[0].args[..] {
+                return tysyn(o, self_ty);
+            }
+        }
+    }
     Ok(match t {
         PTy::Never => TySyn::Prim(Ty::Never),
         PTy::Tuple(v) if v.is_empty() => TySyn::Prim(Ty::Unit),

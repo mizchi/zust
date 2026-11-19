@@ -1540,6 +1540,11 @@ impl Cx<'_> {
             }
             return err(SP, "`Box::leak` needs a Box");
         }
+        // `Box::pin(fut)`: futures run at once (`async` is its value, `.await` takes it as is), so the value itself
+        // (`Pin<Box<dyn Future<Output = T>>>` is T, see the parser)
+        if name == "pin" && n >= 2 && p.segs[n - 2].name == "Box" && cargs.len() == 1 && !self.prog.struct_index.contains_key("Box") {
+            return self.expr(&cargs[0], expected).map(Some);
+        }
         // `Box::into_raw(b)` / `Box::from_raw(p)`: the same pointer as a raw pointer / as the Box (the Box is not dropped)
         if matches!(name.as_str(), "into_raw" | "from_raw") && n >= 2 && p.segs[n - 2].name == "Box" && cargs.len() == 1 && !self.prog.struct_index.contains_key("Box") {
             let want = match (name.as_str(), expected) {

@@ -607,6 +607,22 @@ pub fn parse_pat_guard_at(src: &str, base: Pos) -> Option<(Pat, Option<Expr>)> {
     Some((pat, guard))
 }
 
+/// `Box<F>` / `Pin<F>` / `Pin<&mut F>` around the marker F of `dyn Future<Output = T>`: the marker (it is T, see
+/// ast_types::tysyn)
+fn fut_output(p: &Path) -> Option<Ty> {
+    let last = p.segs.last()?;
+    if !matches!(last.name.as_str(), "Box" | "Pin") {
+        return None;
+    }
+    let [GArg::Ty(t)] = &last.args[..] else { return None };
+    let marker = |t: &Ty| matches!(t, Ty::Path(None, q) if q.segs.len() == 1 && q.segs[0].name == "__exr_fut");
+    match t {
+        t if marker(t) => Some(t.clone()),
+        Ty::Ref(_, _, i) if last.name == "Pin" && marker(i) => Some((**i).clone()),
+        _ => None,
+    }
+}
+
 impl Parser {
     fn err(&self, msg: &str) -> String {
         match self.toks.get(self.i) {
@@ -1163,6 +1179,18 @@ impl Parser {
             if atb {
                 return Err(self.err("associated type bounds are not allowed in `dyn` types"));
             }
+            // (`dyn Future<Output = T>` (+ Send ..): futures run at once, so behind `Box` / `Pin<Box<..>>` the type is T;
+            // a marker type until the Box or Pin around it)
+            let out = bs.iter().find_map(|b| match b {
+                Bound::Trait(_, p) if p.segs.last().is_some_and(|s| s.name == "Future") => p.segs.last().unwrap().args.iter().find_map(|a| match a {
+                    GArg::Bind(n, t) if n == "Output" => Some(t.clone()),
+                    _ => None,
+                }),
+                _ => None,
+            });
+            if let Some(t) = out {
+                return Ok(Ty::Path(None, Path { global: false, segs: vec![Seg { name: "__exr_fut".into(), args: vec![GArg::Ty(t)], fn_args: None, text: String::new() }], pos: self.pos() }));
+            }
             return Ok(Ty::Dyn(bs));
         }
         if self.is_ident("fn") || self.is_ident("unsafe") || self.is_ident("extern") {
@@ -1224,6 +1252,10 @@ impl Parser {
                 self.i += 1;
                 bs.extend(self.bounds()?);
                 return Ok(Ty::Dyn(bs));
+            }
+            // (`Box<dyn Future<Output = T>>` / `Pin<Box<..>>`: T, see `dyn`)
+            if let Some(t) = fut_output(&p) {
+                return Ok(t);
             }
             return Ok(Ty::Path(None, p));
         }
