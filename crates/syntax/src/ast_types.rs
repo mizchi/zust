@@ -87,6 +87,16 @@ pub(crate) fn const_expr_text(e: &Expr) -> Option<String> {
                         out.push_str(&format!("let {v} = {}; ", const_expr_text(init)?));
                     }
                     Stmt::Item(_) | Stmt::Expr(Expr::Closure(..) | Expr::Lit(..), true) => {}
+                    // (`x = 3;` / `x += 1;` to a local of the block)
+                    Stmt::Expr(Expr::Assign(l, r), _) if matches!(&**l, Expr::Path(None, p) if single(p).is_some()) => {
+                        let Expr::Path(None, p) = &**l else { unreachable!() };
+                        out.push_str(&format!("{} = {}; ", single(p)?, const_expr_text(r)?));
+                    }
+                    Stmt::Expr(Expr::AssignOp(op, l, r, _), _) if matches!(&**l, Expr::Path(None, p) if single(p).is_some()) => {
+                        let Expr::Path(None, p) = &**l else { unreachable!() };
+                        let v = single(p)?;
+                        out.push_str(&format!("{v} = ({v} {op} {}); ", const_expr_text(r)?));
+                    }
                     Stmt::Expr(x, false) if k + 1 == n => out.push_str(&const_expr_text(x)?),
                     _ => return None,
                 }

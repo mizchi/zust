@@ -2012,6 +2012,18 @@ impl Program {
                     env.push((name.clone(), v));
                 }
                 Stmt::Expr(x, false) if k + 1 == n => return self.eval_const(&subst_consts(x, env), depth),
+                // (`x = 3;` to a local: its new value)
+                Stmt::Expr(crate::parse::Expr::Assign(l, r), _) => {
+                    let crate::parse::Expr::Path(None, p) = &**l else { return Err("unsupported statement in a const fn".into()) };
+                    let Some(name) = (p.segs.len() == 1).then(|| p.segs[0].name.clone()) else {
+                        return Err("unsupported statement in a const fn".into());
+                    };
+                    let v = self.eval_const(&subst_consts(r, env), depth)?;
+                    match env.iter_mut().rev().find(|(n, _)| *n == name) {
+                        Some(slot) => slot.1 = v,
+                        None => return Err("unsupported statement in a const fn".into()),
+                    }
+                }
                 _ => return Err("unsupported statement in a const fn".into()),
             }
         }

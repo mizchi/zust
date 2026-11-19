@@ -92,3 +92,4 @@ date	commit	change	noop_M	edit_M	check_M	cache_KiB	lsp_G	run	check	build	cfail
 2026-11-19	ca0796b+	Debug for Range/RangeInclusive (without the .next() selection heuristic)	0.876	591.841	3879.175	1902.8	-	1698	1408	95	3321	1181.928	63.463	11.285	321.385
 2026-11-19	ca0796b+	Debug for Range/RangeInclusive, gated on Debug formatting	0.874	591.679	3879.025	1902.8	-	1	-	-	-	1181.649	63.574	11.273	321.099
 2026-11-19	ca0796b+	Debug for ranges (gated); selection: name-only items decided by one lookup, header-only classification tables	0.874	591.131	3879.121	1902.8	-	1698	1408	95	3322	1181.488	63.351	11.273	319.238
+2026-11-19	5dea15e+	const blocks: assignments to the block's locals in array lengths	0.874	591.190	3879.257	1902.8	-	1698	1409	95	3322	1181.744	63.324	11.273	319.414

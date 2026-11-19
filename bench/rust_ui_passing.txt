@@ -1448,6 +1448,7 @@ run-pass	consts/const-big-enum.rs
 run-pass	consts/const-bitshift-rhs-inference.rs
 run-pass	consts/const-block-non-item-statement-3.rs
 run-pass	consts/const-block-non-item-statement-rpass.rs
+check-pass	consts/const-block-non-item-statement.rs
 check-pass	consts/const-blocks/const-block-in-array-size.rs
 run-pass	consts/const-blocks/const-repeat.rs
 run-pass	consts/const-blocks/fn-call-in-const.rs
