@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795118264149,
+  "lastUpdate": 1795118266664,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -49296,6 +49296,85 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/mizchi/zust/commit/bd7f2c710e0b275838afa8d2f1ecf84459f02231"
         },
         "date": 1795117709638,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "parity documentSymbol (名前の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity workspace/symbol (上位 20 の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity definition (行き先の一致)",
+            "value": 97.143,
+            "unit": "%"
+          },
+          {
+            "name": "parity hover (名前を含む)",
+            "value": 87.5,
+            "unit": "%"
+          },
+          {
+            "name": "parity references (数の一致)",
+            "value": 86.111,
+            "unit": "%"
+          },
+          {
+            "name": "parity documentHighlight (数の一致)",
+            "value": 97.143,
+            "unit": "%"
+          },
+          {
+            "name": "parity rename (書き換えの一致)",
+            "value": 83.333,
+            "unit": "%"
+          },
+          {
+            "name": "parity signatureHelp (名前・引数の数・今の引数の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity completion `x.\\|` (書いてある名前を含む)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity completion `na\\|me` (同)",
+            "value": 92.857,
+            "unit": "%"
+          },
+          {
+            "name": "parity 一致の平均",
+            "value": 94.409,
+            "unit": "%"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "committer": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "distinct": true,
+          "id": "e6166560e71ab659e1f719c30fe4a9ab6f997c51",
+          "message": "E0191: a dyn type binds every associated type of its trait\n\n`Box<dyn T>` for `trait T { type A; .. }` was accepted. The summary of a trait member `type A;` now records every\nassociated type declared without a default (also those without bounds), and coercing to `dyn T` without `A = ..` is\n\"the value of the associated type `A` in `T` must be specified (E0191)\". (`dyn Iterator` coercions go through\nanother path and are not checked yet.)\n\ntests/ui: compile-fail associated-types/associated-types-incomplete-object.rs,\ntraits/cast-as-dyn-trait-wo-assoc-type-issue-21950.rs pass; 0 regressions. KPIs: no change outside noise.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-19T19:52:19Z",
+          "tree_id": "cffd26f18892f5a42d7bdc10b40aba0afab9121b",
+          "url": "https://github.com/mizchi/zust/commit/e6166560e71ab659e1f719c30fe4a9ab6f997c51"
+        },
+        "date": 1795118266082,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
