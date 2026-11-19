@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795131626929,
+  "lastUpdate": 1795131629380,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -39604,6 +39604,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "lsp peak RSS",
             "value": 72.715,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "committer": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "distinct": true,
+          "id": "3fbfec86b28d73e22cbfd9a39e174333502361ce",
+          "message": "impl Iterator<Item = T> returning a range literal\n\n`fn it() -> impl Iterator<Item = u32> { 0..3 }` (or `1..=n`): the body\nis inferred against `Range<u32>` / `RangeInclusive<u32>`, so the\nliterals take the declared Item type instead of defaulting to i32.\n\ntests/ui: no change in passes.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-19T23:33:06Z",
+          "tree_id": "43f2d4459ec70764a65001d389c8e59a40ff3531",
+          "url": "https://github.com/mizchi/zust/commit/3fbfec86b28d73e22cbfd9a39e174333502361ce"
+        },
+        "date": 1795131628902,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "lsp definition p50",
+            "value": 0.493,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp hover p50",
+            "value": 0.379,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp completion p50",
+            "value": 0.925,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp references p50",
+            "value": 2.973,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp rename p50",
+            "value": 0.727,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp signatureHelp p50",
+            "value": 0.746,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp documentHighlight p50",
+            "value": 0.818,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp ready (startup to indexed)",
+            "value": 112.524,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp peak RSS",
+            "value": 73.07,
             "unit": "MiB"
           }
         ]
