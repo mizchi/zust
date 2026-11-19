@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795130145970,
+  "lastUpdate": 1795130148109,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -39148,6 +39148,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "lsp peak RSS",
             "value": 72.824,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "committer": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "distinct": true,
+          "id": "b1ef5f1ecd23a9c97eb119d5a3c73c2257e69daf",
+          "message": "Array lengths: assignments in a block constant\n\n`[u32; { let mut x = 2; x = 3; x }]` / `{ let mut y = 1; y += 4; y * 2 }`:\nthe block's text keeps `x = ..;` (and `y = (y + ..);` for a compound\nassignment), and the constant evaluator updates the local.\n\ntests/ui: +1 genuine check-pass pass.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-19T23:11:37Z",
+          "tree_id": "7bfca83452b52458912492257d01515887f3edb3",
+          "url": "https://github.com/mizchi/zust/commit/b1ef5f1ecd23a9c97eb119d5a3c73c2257e69daf"
+        },
+        "date": 1795130147697,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "lsp definition p50",
+            "value": 0.544,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp hover p50",
+            "value": 0.422,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp completion p50",
+            "value": 0.8,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp references p50",
+            "value": 3.913,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp rename p50",
+            "value": 0.438,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp signatureHelp p50",
+            "value": 0.645,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp documentHighlight p50",
+            "value": 0.772,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp ready (startup to indexed)",
+            "value": 113.059,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp peak RSS",
+            "value": 72.836,
             "unit": "MiB"
           }
         ]
