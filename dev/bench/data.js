@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795126066337,
+  "lastUpdate": 1795126068548,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -61757,6 +61757,70 @@ window.BENCHMARK_DATA = {
           {
             "name": "tests/ui compile-fail passing",
             "value": 3324,
+            "unit": "tests"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "committer": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "distinct": true,
+          "id": "b51ec2ccf0efe16d819ee2f3cf79c171ff192c13",
+          "message": "Default methods of generic traits: trait arguments from the receiver's impl\n\n`trait Getter<T> { fn do_get2(&self) -> (T, T) { .. } }` called on a\ntype with `impl Getter<isize> for isize` (or `impl<T> Getter<T> for\nOption<T>`): the program records each generic trait impl's self type\nand trait arguments, and a default method's trait parameters that\nnothing else solved come from the one impl whose self type fits.\n\ntests/ui: +5 genuine passes (4 run-pass, 1 check-pass); two\ncompile-fail tests that passed for the wrong reason (an inference\nerror on the expected line) go to rust_ui_accidental.txt.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-19T22:01:16Z",
+          "tree_id": "d523de068b90f1505aaf624ee126fd90c5f3b1e2",
+          "url": "https://github.com/mizchi/zust/commit/b51ec2ccf0efe16d819ee2f3cf79c171ff192c13"
+        },
+        "date": 1795126067994,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tests/ui run-pass pass rate",
+            "value": 70.78,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui run-pass passing",
+            "value": 1688,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui check-pass pass rate",
+            "value": 77.86,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui check-pass passing",
+            "value": 1407,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui build-pass pass rate",
+            "value": 70.37,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui build-pass passing",
+            "value": 95,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui compile-fail pass rate",
+            "value": 45.15,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui compile-fail passing",
+            "value": 3322,
             "unit": "tests"
           }
         ]
