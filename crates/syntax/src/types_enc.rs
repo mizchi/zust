@@ -132,7 +132,6 @@ crate::enc_struct!(Summary {
     enums,
     trait_decl,
     trait_generics,
-    trait_supers,
     impl_trait,
     derives,
     adt_generics,

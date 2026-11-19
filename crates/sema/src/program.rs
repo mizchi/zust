@@ -1072,8 +1072,8 @@ impl Program {
             }
             if let Some(tr) = &sm.trait_decl {
                 p.traits.entry(tr.clone()).or_default();
-                if !sm.trait_supers.is_empty() {
-                    p.trait_supers.insert(tr.clone(), sm.trait_supers.clone());
+                if let Some((_, sup)) = sm.trait_generics.iter().find(|g| g.0 == "#supers") {
+                    p.trait_supers.insert(tr.clone(), sup.clone());
                 }
             }
         }

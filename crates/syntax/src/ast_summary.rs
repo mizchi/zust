@@ -1112,11 +1112,12 @@ pub fn summarize(item: &Item, owner: Option<&Owner>) -> R<Summary> {
             sm.aliases.push((n.clone(), gs.into_iter().map(|x| x.0).collect(), tysyn(t, None)?));
         }
         ItemKind::Trait(n, g, supers, _) => {
+            let mut sup = vec![];
             for b in supers {
                 if let Bound::Trait(false, p) = b {
                     if let Some(s) = p.segs.last() {
                         if !matches!(s.name.as_str(), "Sized" | "Send" | "Sync" | "Copy" | "Clone" | "Unpin" | "Any" | "Debug" | "Display") {
-                            sm.trait_supers.push(s.name.clone());
+                            sup.push(s.name.clone());
                         }
                     }
                 }
@@ -1132,6 +1133,9 @@ pub fn summarize(item: &Item, owner: Option<&Owner>) -> R<Summary> {
                 }
             }
             collect_generics(g, &mut sm.trait_generics)?;
+            if !sup.is_empty() {
+                sm.trait_generics.push(("#supers".to_string(), sup));
+            }
             sm.trait_decl = Some(n.clone());
         }
         ItemKind::Impl(g, tr, self_ty, _) => {
@@ -1479,7 +1483,7 @@ pub fn owner_of(it: &SrcItem, sums: &[Summary]) -> Option<Owner> {
         }
         LexKind::TraitMember(h) => sums[h as usize].trait_decl.clone().map(|n| Owner {
             self_ty: TySyn::Named("Self".into()),
-            generics: std::iter::once(("Self".to_string(), vec![n.clone()])).chain(sums[h as usize].trait_generics.iter().cloned()).collect(),
+            generics: std::iter::once(("Self".to_string(), vec![n.clone()])).chain(sums[h as usize].trait_generics.iter().filter(|g| g.0 != "#supers").cloned()).collect(),
             base: n,
             impl_trait: None,
             is_trait: true,
