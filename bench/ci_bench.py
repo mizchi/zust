@@ -28,10 +28,10 @@ def run_measured(cmd, cwd=ROOT):
     return float(ms), int(kib) / 1024
 
 
-def instructions(cmd, cwd=ROOT):
+def instructions(cmd, cwd=ROOT, env=None):
     """valgrind (cachegrind、キャッシュの模擬なし) で数えた命令数 (百万)。子プロセス (リンカ) は数えない"""
     r = subprocess.run(["valgrind", "--tool=cachegrind", "--cache-sim=no", "--cachegrind-out-file=/dev/null", *cmd],
-                       capture_output=True, text=True, cwd=cwd)
+                       capture_output=True, text=True, cwd=cwd, env=None if env is None else {**os.environ, **env})
     for line in r.stderr.splitlines():
         if "I" in line and "refs:" in line:
             return int(line.split(":")[1].strip().replace(",", "")) / 1e6

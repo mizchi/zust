@@ -58,3 +58,4 @@ date	commit	change	noop_M	edit_M	check_M	cache_KiB	lsp_G	run	check	build	cfail
 2026-11-19	118d4ef	let _ = unit struct drops	625.265	626.856	3907.728	1902.8	-	1623	1368	95	3307
 2026-11-19	15a06b9	drops of for-loop temporaries	625.260	626.927	3909.618	1902.8	-	1624	1368	95	3306
 2026-11-19	7f430ff	dyn bindings; KPIs now also on traits and crates	625.264	626.930	3907.460	1902.8	10.8765	1626	1368	95	3306	1178.212	62.888	11.224	317.391
+2026-11-19	eaf8aa7+	no-op: stat stamps short-circuit (blaze-vfs rule); prelude select: byte index for has + prefilters for any	0.870	589.829	3872.803	1902.8	-	-	-	-	-	1178.494	63.044	11.253	317.374

@@ -21,9 +21,11 @@ import os, resource, shutil, statistics, subprocess, sys, time
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from vs_rustc import du, source  # noqa: E402
 
-ZUSTC = os.path.abspath("target/release/zustc")
+ZUSTC = os.environ.get("ZUSTC") or os.path.abspath("target/release/zustc")
 BLAZE = os.environ.get("BLAZE") or shutil.which("blaze") or os.path.expanduser("~/.cargo/bin/blaze")
 W = os.path.abspath("out/vs_blaze")
+# (rustc overflows its stack on gen5000's main)
+os.environ.setdefault("RUST_MIN_STACK", str(256 << 20))
 
 
 def run(cmd, cwd=None):
@@ -87,6 +89,9 @@ def bench(name):
             write(0)
             run(build, cwd)
             out = run([exe])[1]
+            if not mem:
+                # (an edit build's: the build before it left the output fresh, and a no-op build does nothing)
+                write(k[0] + 1)
             m = mem() if mem else peak_rss_mib(build, cwd)
             rows.append((label, c, noop, e, du(*store), m, out == want))
         except RuntimeError as ex:

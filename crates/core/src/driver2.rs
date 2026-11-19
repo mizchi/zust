@@ -352,11 +352,13 @@ pub struct Session2 {
     chk: Option<ChkMemo>,
     /// 複数のクレートのうちの 1 つをコンパイルするとき
     pub ctx: CrateCtx,
+    /// the files the last build_path read (for the CLI's stamp file)
+    pub last_map: Option<crate::srcmap::SrcMap>,
 }
 
 impl Session2 {
     pub fn new(opts: Options2) -> Session2 {
-        Session2 { opts, cid: compiler_id(), disk: crate::cache2::Cache2::empty(), mem: FxMap::default(), used: FxSet::default(), fresh: vec![], ctx: CrateCtx::default(), sel: Default::default(), sum_fp: FxMap::default(), chk: None }
+        Session2 { opts, cid: compiler_id(), disk: crate::cache2::Cache2::empty(), mem: FxMap::default(), used: FxSet::default(), fresh: vec![], ctx: CrateCtx::default(), last_map: None, sel: Default::default(), sum_fp: FxMap::default(), chk: None }
     }
 
     pub fn load_cache(&mut self, path: &std::path::Path) {

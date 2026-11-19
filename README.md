@@ -123,18 +123,30 @@ number: rustc's debug build runs slowly, so relax beats it on five of the seven 
 Against blaze ([indexable-inc/blaze](https://github.com/indexable-inc/blaze) 0.20261027.0, a replacement for cargo
 whose daemon keeps the workspace compiled and builds only what an edit changed), on this machine and the same
 programs: each program as a cargo package for `blaze build` (dev profile, the daemon left running between builds as it
-is meant to be used; cold also stops it), `python3 bench/vs_blaze.py` (2026-11-19, 4 cores; medians of 3; every output
-matches rustc `-O`). Memory is the peak RSS of one build for zustc and rustc, and what blaze's daemon holds:
+is meant to be used; cold also stops it), `python3 bench/vs_blaze.py` (2026-11-19, 4 cores, with other jobs running;
+medians of 3; every output matches rustc `-O`). Memory is the peak RSS of one edit build for zustc and rustc, and what
+blaze's daemon holds:
 
 | | cold | no-op | edit one function | on disk | memory |
 |---|---:|---:|---:|---:|---:|
-| gen1000: zustc | 148 ms | 18 ms | 28 ms | 766 KiB | 13 MiB |
-| gen1000: rustc `-C incremental` | 767 ms | 207 ms | 408 ms | 10.8 MiB | 115 MiB |
-| gen1000: blaze | 2691 ms | 30 ms | 141 ms | 259 MiB | 443 MiB |
-| bench/rt (6 programs): zustc | 29–59 ms | 5–7 ms | 5–9 ms | 36–90 KiB | 13 MiB |
-| bench/rt: rustc `-C incremental` | 82–162 ms | 70–92 ms | 67–100 ms | 0.1–0.9 MiB | 75–85 MiB |
-| bench/rt: blaze | 1439–1669 ms | 29–38 ms | 35–42 ms | 244 MiB | 348–390 MiB |
-| **zustc vs blaze** | **18–56x faster** | **1.7–6x faster** | **3.9–8.4x faster** | **1/345 (gen1000)–1/6900** | **1/27–1/34** |
+| gen5000: zustc | 719 ms | 2 ms | 100 ms | 3.6 MiB | 37 MiB |
+| gen5000: rustc `-C incremental` | 3656 ms | 829 ms | 2245 ms | 55.8 MiB | 482 MiB |
+| gen5000: blaze | 9400 ms | 32 ms | 773 ms | 304 MiB | 661 MiB |
+| gen1000: zustc | 214 ms | 2 ms | 34 ms | 766 KiB | 17 MiB |
+| gen1000: rustc `-C incremental` | 828 ms | 202 ms | 468 ms | 10.8 MiB | 157 MiB |
+| gen1000: blaze | 2834 ms | 29 ms | 218 ms | 259 MiB | 442 MiB |
+| bench/rt (6 programs): zustc | 34–54 ms | 2 ms | 5–12 ms | 36–90 KiB | 13 MiB |
+| bench/rt: rustc `-C incremental` | 81–203 ms | 65–126 ms | 75–168 ms | 0.1–0.9 MiB | 82–94 MiB |
+| bench/rt: blaze | 1705–2311 ms | 32–60 ms | 41–74 ms | 244 MiB | 342–389 MiB |
+| **zustc vs blaze** | **13–61x faster** | **15–30x faster** | **6–11x faster** | **1/83 (gen5000)–1/6900** | **1/18–1/30** |
+
+A no-op build reads no source: like blaze's file watcher (`crates/blaze-vfs/src/watch.rs`: a file whose stat stamp
+did not move is never read or hashed), zustc keeps `<output>.stamp` with the stat stamps of every file the last
+successful build read, of the places `mod x;` looked, of the zustc binary and of the output, and stops when the
+command line, the `ZUSTC_*` environment and every stamp are as kept (a stamp taken within 20 ms of its file's change,
+or 2 s on a file system with whole-second times, is not trusted: git's racy rule, as blaze-vfs's `window_ns`).
+Before it, a no-op build did the front end over the whole source with every function a cache hit (84 ms on gen5000,
+against blaze's 29 ms). `ZUSTC_NO_STAMP=1` turns it off.
 
 hashmap is left out of bench/rt's rows: blaze does not build it (`HashMap::new` reaches a thread-local static it cannot
 compile yet). blaze builds real cargo projects that zustc cannot build yet (ripgrep, nushell, bun: its own

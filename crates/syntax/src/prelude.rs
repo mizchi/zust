@@ -414,8 +414,10 @@ const FMT_NAMES: &[&str] = &[
 ];
 
 /// 書式の引数つきの panic 系マクロ (`panic!("bad {}", x)` など) があるか
+const PANIC_MACROS: [&str; 7] = ["panic!(", "unreachable!(", "todo!(", "unimplemented!(", "assert!(", "assert_eq!(", "assert_ne!("];
+
 fn panic_with_args(src: &str) -> bool {
-    ["panic!(", "unreachable!(", "todo!(", "unimplemented!(", "assert!(", "assert_eq!(", "assert_ne!("].iter().any(|m| {
+    PANIC_MACROS.iter().any(|m| {
         src.match_indices(m).any(|(i, _)| {
             let rest = &src[i + m.len()..];
             let line = rest.split('\n').next().unwrap_or("");
@@ -618,6 +620,56 @@ struct PreludeScan<'a> {
     /// アイテムの外の本文 (改行でつなぐ)
     gaps: String,
     memo: &'a mut crate::fxhash::FxMap<(crate::key::Key, u64), bool>,
+    /// where each byte that is not a lowercase letter or white space is (built at the first `has` of a large source)
+    idx: Option<ByteIdx>,
+}
+
+/// the positions of each indexed byte, in order (`start[b]..start[b + 1]` of `pos`)
+struct ByteIdx {
+    start: Vec<u32>,
+    pos: Vec<u32>,
+}
+
+fn indexed_byte(b: u8) -> bool {
+    !(b.is_ascii_lowercase() || b == b' ' || b == b'\n' || b == b'\t' || b >= 0x80)
+}
+
+impl ByteIdx {
+    fn new(src: &[u8]) -> ByteIdx {
+        let mut start = vec![0u32; 257];
+        for &b in src {
+            start[b as usize + 1] += 1;
+        }
+        for b in 0..256 {
+            if !indexed_byte(b as u8) {
+                start[b + 1] = 0;
+            }
+            start[b + 1] += start[b];
+        }
+        let mut pos = vec![0u32; start[256] as usize];
+        let mut at = start.clone();
+        for (i, &b) in src.iter().enumerate() {
+            if indexed_byte(b) {
+                pos[at[b as usize] as usize] = i as u32;
+                at[b as usize] += 1;
+            }
+        }
+        ByteIdx { start, pos }
+    }
+
+    /// src.contains(pat), looking only where pat's rarest indexed byte is (None: pat has no indexed byte)
+    fn contains(&self, src: &[u8], pat: &[u8]) -> Option<bool> {
+        let (j, b) = pat
+            .iter()
+            .enumerate()
+            .filter(|(_, b)| indexed_byte(**b))
+            .min_by_key(|(_, b)| self.start[**b as usize + 1] - self.start[**b as usize])?;
+        let ps = &self.pos[self.start[*b as usize] as usize..self.start[*b as usize + 1] as usize];
+        Some(ps.iter().any(|&p| {
+            let p = p as usize;
+            p >= j && src.len() - (p - j) >= pat.len() && &src[p - j..p - j + pat.len()] == pat
+        }))
+    }
 }
 
 impl<'a> PreludeScan<'a> {
@@ -640,7 +692,16 @@ impl<'a> PreludeScan<'a> {
         if memo.len() > 1 << 20 {
             memo.clear();
         }
-        PreludeScan { src, spans, gaps, memo }
+        PreludeScan { src, spans, gaps, memo, idx: None }
+    }
+
+    /// any, when f can be true only where one of `pre` is in the source (looked up in the byte index first: most of
+    /// these are in no source, and f reads all of it)
+    fn any_pre(&mut self, key: &str, pre: &[&str], f: &dyn Fn(&str) -> bool) -> bool {
+        if self.src.len() >= 1 << 18 && !pre.iter().any(|p| self.has(p)) {
+            return false;
+        }
+        self.any(key, f)
     }
 
     /// どこかのアイテム (かアイテムの外) で f が真か。key は f の名前 (結果を覚えるキー)
@@ -675,8 +736,18 @@ impl<'a> PreludeScan<'a> {
 
     /// (the same as asking every item and the text between them, except for a match across an item boundary: one
     /// search of the whole source is cheaper than a memo per item, even when only one item changed)
+    /// (a large source is searched through its byte index: most patterns are not there, and each such search would
+    /// read the whole source)
     fn has(&mut self, pat: &str) -> bool {
-        self.src.contains(pat)
+        if self.src.len() < 1 << 18 {
+            return self.src.contains(pat);
+        }
+        let src = self.src.as_bytes();
+        let idx = self.idx.get_or_insert_with(|| ByteIdx::new(src));
+        match idx.contains(src, pat.as_bytes()) {
+            Some(x) => x,
+            None => self.src.contains(pat),
+        }
     }
 }
 
@@ -788,8 +859,8 @@ pub fn select_with(user_src: &str, user_items: &[SrcItem], cache: &mut SelectCac
     if ["format", "print", "println", "eprint", "eprintln", "write", "writeln", "fmt", "Formatter"]
         .iter()
         .any(|n| need.contains(n))
-        || sc.any("nonliteral_to_string", &nonliteral_to_string)
-        || sc.any("panic_with_args", &panic_with_args)
+        || sc.any_pre("nonliteral_to_string", &[".to_string()"], &nonliteral_to_string)
+        || sc.any_pre("panic_with_args", &PANIC_MACROS, &panic_with_args)
         // (assert_eq! / assert_ne! は失敗したとき left / right を {:?} で出す。no_std は panic_handler を呼ぶだけ)
         || ((sc.has("assert_eq!(") || sc.has("assert_ne!(")) && !sc.has("no_std"))
     {
@@ -897,7 +968,7 @@ pub fn select_with(user_src: &str, user_items: &[SrcItem], cache: &mut SelectCac
     }
     // `s.split("ab")` (char 以外の区切り)
     if need.contains("split")
-        && sc.any("split_str", &|user_src: &str| user_src.match_indices(".split(").any(|(i, m)| user_src.as_bytes().get(i + m.len()) != Some(&b'\'')))
+        && sc.any_pre("split_str", &[".split("], &|user_src: &str| user_src.match_indices(".split(").any(|(i, m)| user_src.as_bytes().get(i + m.len()) != Some(&b'\'')))
     {
         need.extend(["__exr_str_split_str", "Iterator"]);
     }
@@ -967,7 +1038,7 @@ pub fn select_with(user_src: &str, user_items: &[SrcItem], cache: &mut SelectCac
         need.insert("Option");
     }
     // `vec![x; n]` で x が Copy でなさそうなら (リテラルでない) resize で並べる
-    if need.contains("vec") && sc.any("vec_repeat_nonliteral", &vec_repeat_nonliteral) {
+    if need.contains("vec") && sc.any_pre("vec_repeat_nonliteral", &["vec!["], &vec_repeat_nonliteral) {
         need.extend(["resize", "new", "__exr_clone"]);
     }
     // String への collect は要素が &str / String なら push_str を使う
@@ -996,7 +1067,7 @@ pub fn select_with(user_src: &str, user_items: &[SrcItem], cache: &mut SelectCac
     }
     if need.contains("BTreeMap") && sc.has(".range(") {
         need.extend(["range", "__bt_span", "Range", "RangeInclusive"]);
-        if sc.any("open_range", &open_range) || sc.has("..))") {
+        if sc.any_pre("open_range", &["..)"], &open_range) || sc.has("..))") {
             need.insert("RangeFrom");
         }
     }
@@ -1101,11 +1172,11 @@ pub fn select_with(user_src: &str, user_items: &[SrcItem], cache: &mut SelectCac
     if sc.has("try_into") || sc.has("try_from") {
         need.extend(["TryFromIntError", "TryFromSliceError", "Result", "try_into"]);
     }
-    if sc.any("open_range", &open_range) {
+    if sc.any_pre("open_range", &["..)"], &open_range) {
         need.insert("RangeFrom");
     }
     // `{:e}` / `{:.3E}`: 指数表記
-    if sc.any("fmt_uses_exp", &fmt_uses_exp) {
+    if sc.any_pre("fmt_uses_exp", &["e}", "E}"], &fmt_uses_exp) {
         need.extend(["__exr_fmt_exp", "__exr_fmt_exp_int", "__exr_udiv128", "__exr_fmt_float"]);
     }
     // `x.into()` は期待型の from を呼ぶ
@@ -1124,7 +1195,7 @@ pub fn select_with(user_src: &str, user_items: &[SrcItem], cache: &mut SelectCac
     }
     // 浮動小数点: 書式化・powi・libm の宣言 (f64 / f32 の名前か、`1.5` のようなリテラルがあるとき)
     // (`fn f64(..)` のような関数の名前は数えない: 型の位置 (`: f64` / `as f64` / `f64::` など) だけ)
-    let float_named = (need.contains("f64") || need.contains("f32")) && sc.any("float_named", &|user_src: &str| {
+    let float_named = (need.contains("f64") || need.contains("f32")) && sc.any_pre("float_named", &["f64", "f32"], &|user_src: &str| {
         let b = user_src.as_bytes();
         ["f64", "f32"].iter().any(|w| {
             user_src.match_indices(w).any(|(i, _)| {

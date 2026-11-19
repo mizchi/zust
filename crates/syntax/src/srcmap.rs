@@ -14,6 +14,10 @@ pub struct SrcMap {
     pub files: Vec<String>,
     /// 読んだファイル
     pub inputs: Vec<PathBuf>,
+    /// `mod x;` で探した場所 (`x.rs` と `x/mod.rs`; 無いものも): ここに現れる・消えるファイルは読むものを変える
+    pub probes: Vec<PathBuf>,
+    /// 読んだファイルの外のもの (include_str!, include_bytes!) に依るか: ファイルのスタンプだけでは新しさが言えない
+    pub volatile: bool,
     /// モジュールの名前を変えて桁がずれた所: (行, 桁, ずれ) (lexer::rename_module_collisions_fix)
     pub colfix: Vec<(u32, u32, i32)>,
 }
@@ -21,7 +25,7 @@ pub struct SrcMap {
 impl SrcMap {
     /// 1 ファイルだけ (区間 1 つ)
     pub fn single(name: &str) -> SrcMap {
-        SrcMap { segs: vec![(1, 0, 1)], files: vec![name.to_string()], inputs: vec![], colfix: vec![] }
+        SrcMap { segs: vec![(1, 0, 1)], files: vec![name.to_string()], inputs: vec![], probes: vec![], volatile: false, colfix: vec![] }
     }
 
     /// 結合したソースの行 → (ファイルの名前, ファイルの中の行)
@@ -98,7 +102,10 @@ fn load_file(path: &Path, display: &str, mod_dir: &Path, disp_dir: &str, start: 
     };
     map.inputs.push(path.to_path_buf());
     let src = match crate::macros::expand_includes(&src, path.parent().unwrap_or(Path::new("."))) {
-        Ok(Some(s)) => s,
+        Ok(Some(s)) => {
+            map.volatile = true;
+            s
+        }
         Ok(None) => src,
         Err(e) => return Err(format!("{display}: {e}")),
     };
@@ -114,6 +121,8 @@ fn load_file(path: &Path, display: &str, mod_dir: &Path, disp_dir: &str, start: 
         let _ = is_cfg_test;
         let a = mod_dir.join(format!("{name}.rs").as_str());
         let b = mod_dir.join(name.as_str()).join("mod.rs");
+        map.probes.push(a.clone());
+        map.probes.push(b.clone());
         let (p, disp, sub, sub_disp) = if a.exists() {
             (a, join_disp(disp_dir, &format!("{name}.rs")), mod_dir.join(name.as_str()), join_disp(disp_dir, &name))
         } else if b.exists() {

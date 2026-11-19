@@ -49,6 +49,9 @@ def build_kpis():
     run_measured(build)
     run_measured(build)
     noop = min(instructions(build) for _ in range(3))
+    # (the cache's compiler id is the stat of /proc/self/exe, which under valgrind is valgrind's: a no-op build under it,
+    #  not short-circuited by the stamps, leaves the cache the measured edit build reads as its own)
+    instructions(build, env={"ZUSTC_NO_STAMP": "1"})
     gen(5000, 3, src)
     edit = instructions(build)
     gen(5000, 0, src)

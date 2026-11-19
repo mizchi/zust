@@ -846,6 +846,7 @@ impl Session2 {
         // (1 ファイルなら場所は `行:桁:` のまま (呼ぶ側がファイル名を付ける))
         let r = self.build(&src, output).map_err(|e| if map.files.len() > 1 { self.ctx.map.relocate_err(&e) } else { e });
         self.ctx = CrateCtx::default();
+        self.last_map = Some(map);
         r
     }
 
