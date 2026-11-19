@@ -188,6 +188,7 @@ run-pass	associated-types/associated-types-issue-20220.rs
 check-pass	associated-types/associated-types-issue-20371.rs
 run-pass	associated-types/associated-types-issue-21212.rs
 run-pass	associated-types/associated-types-method.rs
+run-pass	associated-types/associated-types-nested-projections.rs
 run-pass	associated-types/associated-types-normalize-in-bounds-binding.rs
 check-pass	associated-types/associated-types-normalize-in-bounds-ufcs.rs
 check-pass	associated-types/associated-types-normalize-in-bounds.rs
@@ -2564,6 +2565,7 @@ compile-fail	impl-trait/issues/issue-86642.rs
 compile-fail	impl-trait/issues/issue-87295.rs
 check-pass	impl-trait/issues/issue-93788.rs
 compile-fail	impl-trait/issues/issue-99073-2.rs
+compile-fail	impl-trait/issues/issue-99073.rs
 compile-fail	impl-trait/issues/issue-99914.rs
 check-pass	impl-trait/lazy_subtyping_of_opaques.rs
 check-pass	impl-trait/mapping-duplicated-lifetimes-issue-114597.rs
@@ -2729,6 +2731,7 @@ check-pass	inference/bitwise-integer-inference-68951.rs
 run-pass	inference/bivariant-param.rs
 compile-fail	inference/cannot-infer-closure-circular.rs
 compile-fail	inference/char-as-str-single.rs
+check-pass	inference/closure-arg-lifetime-by-ref.rs
 compile-fail	inference/deref-suggestion.rs
 compile-fail	inference/dont-collect-stmts-from-parent-body.rs
 compile-fail	inference/erase-type-params-in-label.rs
@@ -3716,6 +3719,7 @@ compile-fail	nll/match-on-borrowed.rs
 check-pass	nll/maybe-initialized-drop-uninitialized.rs
 compile-fail	nll/move-errors.rs
 compile-fail	nll/move-subpaths-moves-root.rs
+run-pass	nll/mutating_references.rs
 compile-fail	nll/nested-bodies-in-dead-code.rs
 check-pass	nll/normalization-bounds.rs
 run-pass	nll/process_or_insert_default.rs
@@ -5393,7 +5397,6 @@ compile-fail	suggestions/copied-and-cloned.rs
 compile-fail	suggestions/count2len.rs
 compile-fail	suggestions/derive-trait-for-method-call.rs
 compile-fail	suggestions/do-not-attempt-to-add-suggestions-with-no-changes.rs
-compile-fail	suggestions/dont-suggest-borrow-whole-call-issue-155088.rs
 compile-fail	suggestions/dont-suggest-borrowing-existing-borrow.rs
 compile-fail	suggestions/dont-suggest-boxing-async-closure-body.rs
 compile-fail	suggestions/dont-suggest-pin-array-dot-set.rs
@@ -5986,6 +5989,7 @@ run-pass	type-inference/dropper_has_sigdrop.rs
 run-pass	type-inference/float-type-inference-unification-14382.rs
 check-pass	type-inference/generalize-subtyped-variables.rs
 compile-fail	type-inference/index-expr-ambiguous-type.rs
+run-pass	type-inference/issue-113283-alllocator-trait-eq.rs
 compile-fail	type-inference/swap-with-unspecified-type.rs
 compile-fail	type-inference/type-inference-none-in-generic-ref.rs
 compile-fail	type-inference/type-inference-unconstrained-none.rs

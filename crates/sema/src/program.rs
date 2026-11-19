@@ -1338,12 +1338,63 @@ impl Program {
     }
 
     /// 型 t が trait tr を実装しているか
+    /// What core / std implement for references, smart pointers and iterables (None: not decided here)
+    fn implements_std(&self, t: Ty, tr: &str) -> Option<bool> {
+        let base_name = |t: Ty| match t {
+            Ty::Struct(sid) => Some(self.structs[self.base_of(sid) as usize].name.as_str()),
+            _ => None,
+        };
+        match (t, tr) {
+            // (`&str: ToString`, `&T: ToString` for T: Display)
+            (Ty::Ref(_, i), "ToString") => Some(*i == Ty::Str || self.implements(*i, "Display") || self.implements(*i, "ToString")),
+            // (`&mut T` compares, formats and hashes as T does)
+            (Ty::Ref(true, i), "PartialEq" | "Eq" | "PartialOrd" | "Ord" | "Debug" | "Display" | "Hash") => Some(self.implements(*i, tr)),
+            // (`&mut I` is an iterator when I is)
+            (Ty::Ref(true, i), "Iterator") => Some(self.implements(*i, "Iterator")),
+            // (`&dyn Fn(..)` / `&mut dyn FnMut(..)` call as the trait object does)
+            (Ty::Ref(_, Ty::Dyn(_)), _) if parse_fn_bound(tr).is_some() || matches!(tr, "Fn" | "FnMut" | "FnOnce") => Some(self.implements(match t {
+                Ty::Ref(_, i) => *i,
+                _ => t,
+            }, tr)),
+            // (Rc / Arc compare, format and hash as their contents)
+            (Ty::Struct(sid), "PartialEq" | "Eq" | "PartialOrd" | "Ord" | "Debug" | "Display" | "Hash")
+                if matches!(base_name(t), Some("Rc" | "Arc")) =>
+            {
+                Some(self.structs[sid as usize].args.first().is_some_and(|&a| self.implements(a, tr)))
+            }
+            (Ty::Box(_), "Deref" | "DerefMut") => Some(true),
+            // (iterables: iterators, `&[T; N]` / `&[T]` / `&Vec<T>`, Option, ranges and the collections with into_iter)
+            (_, "IntoIterator") => {
+                if self.implements(t, "Iterator") {
+                    return Some(true);
+                }
+                let inner = match t {
+                    Ty::Ref(_, i) => *i,
+                    t => t,
+                };
+                match inner {
+                    Ty::Array(..) | Ty::Slice(_) => Some(true),
+                    Ty::Struct(sid) => Some(
+                        self.method(sid, "into_iter").is_some()
+                            || self.method(sid, "__ref_into_iter").is_some()
+                            || (matches!(t, Ty::Ref(..)) && self.method(sid, "iter").is_some()),
+                    ),
+                    _ => None,
+                }
+            }
+            _ => None,
+        }
+    }
+
     pub fn implements(&self, t: Ty, tr: &str) -> bool {
         if self.blanket_traits.contains(tr) {
             return true;
         }
         if matches!(t, Ty::Ref(..)) && !self.ref_impls.is_empty() && self.ref_impls.contains(&(t, tr.to_string())) {
             return true;
+        }
+        if let Some(r) = self.implements_std(t, tr) {
+            return r;
         }
         // (every type is Sized but str, slices and dyn Trait)
         if tr == "Sized" {
