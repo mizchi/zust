@@ -159,17 +159,21 @@ impl Cx<'_> {
             // `{ log(L); x }.0 += { log(R); 0 }` logs R, L))
             // (in a generic fn, `x += y` with x of a type parameter is a call of `add_assign` (left first), even when
             // the instance's type is primitive)
-            let lt0 = self.peek(left);
             // (a left side whose type is not known ahead (`(*r.borrow_mut()).y`) is placed first: its type is the
-            // hint for a literal on the right)
-            let generic = lt0.is_some_and(|t| self.env.params.iter().any(|(_, pt)| *pt == t));
-            let mut lhs = None;
+            // hint for a literal on the right. One of only a variable and fields has no effects: placing it first is
+            // not observable, and needs no type lookup ahead)
             let mut root = strip_paren(left);
+            let mut plain = true;
             while let Expr::Field(x, _, _) | Expr::Index(x, _, _) = root {
+                plain &= matches!(root, Expr::Field(..));
                 root = strip_paren(x);
             }
+            plain &= matches!(root, Expr::Path(..));
+            let lt0 = if plain { None } else { self.peek(left) };
+            let generic = lt0.is_some_and(|t| self.env.params.iter().any(|(_, pt)| *pt == t));
+            let mut lhs = None;
             let simple = matches!(root, Expr::Path(..) | Expr::Block(..));
-            if generic || lt0.is_none() || !simple {
+            if plain || generic || lt0.is_none() || !simple {
                 let p = self.place(left)?;
                 lhs = Some(p);
             }
