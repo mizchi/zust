@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795054157229,
+  "lastUpdate": 1795054158692,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -27625,6 +27625,70 @@ window.BENCHMARK_DATA = {
           {
             "name": "tests/ui compile-fail passing",
             "value": 2848,
+            "unit": "tests"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "committer": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "distinct": true,
+          "id": "a6c8ba590419fd478b7597b58ac72f5a3dcf5133",
+          "message": "Numbers implement the operator traits; `dyn Tr` implements Tr\n\nIntegers and floats meet `Add` / `Sub` / .. / `*Assign` / `Sum` / `Product` bounds\n(`T: Add<Output = T>` with T = i32), integers also the bit operators, numbers, bool\nand char `FromStr` / `ToString`; `dyn A + B` implements the traits written in it.\ntests/ui: run-pass +3, check-pass +4. Eight compile-fail tests leave the baseline:\nthey passed only because `dyn X<Y = T>: X` was wrongly unsatisfied on the annotated\nline; their real errors (the binding's type does not meet the associated type's\nbound, a lifetime error) are not checked yet. KPIs unchanged.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-19T01:58:16Z",
+          "tree_id": "0953af43a65ea70d199f4cbfcfcfec3530b596a5",
+          "url": "https://github.com/mizchi/zust/commit/a6c8ba590419fd478b7597b58ac72f5a3dcf5133"
+        },
+        "date": 1795054158509,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tests/ui run-pass pass rate",
+            "value": 63.61,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui run-pass passing",
+            "value": 1535,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui check-pass pass rate",
+            "value": 70.23,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui check-pass passing",
+            "value": 1269,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui build-pass pass rate",
+            "value": 65.19,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui build-pass passing",
+            "value": 88,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui compile-fail pass rate",
+            "value": 38.61,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui compile-fail passing",
+            "value": 2841,
             "unit": "tests"
           }
         ]
