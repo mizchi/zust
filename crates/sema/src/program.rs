@@ -1363,6 +1363,17 @@ impl Program {
                 Some(self.structs[sid as usize].args.first().is_some_and(|&a| self.implements(a, tr)))
             }
             (Ty::Box(_), "Deref" | "DerefMut") => Some(true),
+            // (a derived Copy of a generic type holds when its arguments are Copy, as `#[derive(Copy)]` bounds them:
+            // `Option<String>` is not Copy; PhantomData<T> always is)
+            (Ty::Struct(sid), "Copy")
+                if !self.structs[sid as usize].args.is_empty()
+                    && base_name(t) != Some("PhantomData")
+                    && !self.closure_of_struct.contains_key(&self.base_of(sid))
+                    && !self.is_tuple(sid)
+                    && self.impls.contains(&(self.base_of(sid), "Copy".to_string())) =>
+            {
+                Some(self.structs[sid as usize].args.iter().all(|&a| self.implements(a, "Copy")))
+            }
             // (iterables: iterators, `&[T; N]` / `&[T]` / `&Vec<T>`, Option, ranges and the collections with into_iter)
             (_, "IntoIterator") => {
                 if self.implements(t, "Iterator") {

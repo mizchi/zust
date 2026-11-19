@@ -859,6 +859,7 @@ check-pass	borrowck/self-field-consume-with-drop-type.rs
 check-pass	borrowck/static-trait-bound-lost.rs
 check-pass	borrowck/struct-field-move-with-drop-borrow.rs
 run-pass	borrowck/struct-with-reference-to-trait-5708.rs
+compile-fail	borrowck/suggest-as-ref-on-mut-closure.rs
 compile-fail	borrowck/suggest-assign-rvalue.rs
 compile-fail	borrowck/suggest-mut-iterator.rs
 compile-fail	borrowck/suggest-ref-mut-issue-118596.rs
@@ -1631,6 +1632,7 @@ compile-fail	derived-errors/issue-30580.rs
 compile-fail	derived-errors/issue-31997-1.rs
 compile-fail	derived-errors/issue-31997.rs
 compile-fail	derived-errors/no-spurious-unconstrained-param.rs
+compile-fail	derives/clone-copy/deriving-copyclone.rs
 run-pass	derives/clone-copy/misbehaving-clone-impl.rs
 check-pass	derives/clone-include-gat-hrtb.rs
 run-pass	derives/debug/derive-Debug-enum-variants.rs

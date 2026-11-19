@@ -627,7 +627,9 @@ impl Cx<'_> {
         // (`r.take()` with `fn take(self)` and r: &S, S not Copy: moving out of what r points to (E0507))
         if through_ref && !via_deref && self.user_code {
             let p0 = self.prog.sigs[id as usize].params.first().copied();
-            if matches!(p0, Some(Ty::Struct(_) | Ty::Param(_))) && self.prog.sigs[id as usize].has_self && !self.prog.implements(st, "Copy") {
+            // (a derived Copy of a generic type holds only when its arguments are Copy: `Option<String>` is not)
+            let copy = self.prog.implements(st, "Copy") && self.prog.structs[sid as usize].args.iter().all(|&a| self.prog.implements(a, "Copy"));
+            if matches!(p0, Some(Ty::Struct(_) | Ty::Param(_))) && self.prog.sigs[id as usize].has_self && !copy {
                 let sname = self.prog.tn(st);
                 return err(SP, format!("cannot move out of a shared reference: `{name}` takes `self` by value and `{sname}` is not `Copy` (E0507)"));
             }
