@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795130150216,
+  "lastUpdate": 1795130152399,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -63221,6 +63221,70 @@ window.BENCHMARK_DATA = {
           {
             "name": "tests/ui check-pass passing",
             "value": 1408,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui build-pass pass rate",
+            "value": 70.37,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui build-pass passing",
+            "value": 95,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui compile-fail pass rate",
+            "value": 45.15,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui compile-fail passing",
+            "value": 3322,
+            "unit": "tests"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "committer": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "distinct": true,
+          "id": "b1ef5f1ecd23a9c97eb119d5a3c73c2257e69daf",
+          "message": "Array lengths: assignments in a block constant\n\n`[u32; { let mut x = 2; x = 3; x }]` / `{ let mut y = 1; y += 4; y * 2 }`:\nthe block's text keeps `x = ..;` (and `y = (y + ..);` for a compound\nassignment), and the constant evaluator updates the local.\n\ntests/ui: +1 genuine check-pass pass.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-19T23:11:37Z",
+          "tree_id": "7bfca83452b52458912492257d01515887f3edb3",
+          "url": "https://github.com/mizchi/zust/commit/b1ef5f1ecd23a9c97eb119d5a3c73c2257e69daf"
+        },
+        "date": 1795130151977,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tests/ui run-pass pass rate",
+            "value": 71.19,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui run-pass passing",
+            "value": 1698,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui check-pass pass rate",
+            "value": 77.97,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui check-pass passing",
+            "value": 1409,
             "unit": "tests"
           },
           {
