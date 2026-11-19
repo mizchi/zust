@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795132299582,
+  "lastUpdate": 1795132301601,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -64334,6 +64334,70 @@ window.BENCHMARK_DATA = {
           {
             "name": "tests/ui check-pass passing",
             "value": 1413,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui build-pass pass rate",
+            "value": 70.37,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui build-pass passing",
+            "value": 95,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui compile-fail pass rate",
+            "value": 45.11,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui compile-fail passing",
+            "value": 3319,
+            "unit": "tests"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "committer": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "distinct": true,
+          "id": "904658b2939c57b3bb23f8eac470f262b88dfa1c",
+          "message": "Vec::into_boxed_slice, Range::is_empty, chains after (0..v.len())\n\n- `v.into_boxed_slice()`: the Vec's buffer becomes the Box<[T]> (its\n  pointer and length; the Vec is forgotten).\n- `Range::is_empty` / `RangeInclusive::is_empty`.\n- The prelude selection sees an iterator chain after a range whose end\n  has calls in it (`(0..self.points.len()).filter_map(..)`).\n\ntests/ui: +3 genuine check-pass passes.\nKPI: traits edit +0.29%, crates edit +0.30% (three more prelude fns).\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-19T23:47:13Z",
+          "tree_id": "087d76e715b3043e2047fd757d02246710fbbd36",
+          "url": "https://github.com/mizchi/zust/commit/904658b2939c57b3bb23f8eac470f262b88dfa1c"
+        },
+        "date": 1795132301194,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tests/ui run-pass pass rate",
+            "value": 71.19,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui run-pass passing",
+            "value": 1698,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui check-pass pass rate",
+            "value": 78.36,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui check-pass passing",
+            "value": 1416,
             "unit": "tests"
           },
           {
