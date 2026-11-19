@@ -272,6 +272,7 @@ pub fn compile(prog: &Program, insts: &Mutex<Insts>, id: u32, f: &ItemFn, line_b
         overflow_checks: prog.overflow_checks && (user_code || f.attrs.iter().any(|a| a.contains("rustc_inherit_overflow_checks"))),
         traps: vec![],
         line_base,
+        fn_aliases: vec![],
         stmt_i: 0,
         loc_used: false,
         index_panic_block: None,
@@ -623,6 +624,8 @@ pub struct Cx<'p> {
     pub overflow_checks: bool,
     pub traps: Vec<(u32, u32)>,
     pub line_base: u32,
+    /// `let f1 = f;` with f a generic fn: f1 stands for the path f (each call picks its own instance)
+    pub fn_aliases: Vec<(String, &'static Expr)>,
     /// the index of the statement being compiled in the innermost block, for errors that carry no position of their own
     pub stmt_i: usize,
     pub loc_used: bool,
@@ -1003,6 +1006,9 @@ impl Cx<'_> {
 
     /// ローカル変数を作る。v はスカラー値か、struct ならコピー元のアドレス。
     pub fn bind(&mut self, name: String, ty: Ty, v: Option<Value>) {
+        if !self.fn_aliases.is_empty() {
+            self.fn_aliases.retain(|a| a.0 != name);
+        }
         let loc = match ty {
             t if t.is_agg() => {
                 // (呼び出しの戻り値の一時領域はそのまま変数の場所にする)
@@ -1389,6 +1395,16 @@ impl Cx<'_> {
                         self.bind(name, ty, v);
                         continue;
                     };
+                    // (`let f1 = f;` with f a generic fn and no annotation: f1 is f, instantiated at each call)
+                    if let (None, Some(id)) = (ann_ty, self.fn_item(init)) {
+                        let tf = matches!(init, Expr::Path(_, ip) if ip.segs.last().is_some_and(|s| !s.args.is_empty()));
+                        if self.prog.sigs[id as usize].is_generic() && !tf && !matches!(pat, Pat::Ident(_, true, ..)) {
+                            let a: &Expr = self.keep_expr(init.clone());
+                            self.fn_aliases.retain(|x| x.0 != name);
+                            self.fn_aliases.push((name.clone(), a));
+                            continue;
+                        }
+                    }
                     // (`let x: &[_] = &[1, 2];`: the slice of the array's element type)
                     let ann = match ann {
                         Some(Ty::Ref(m, Ty::Slice(e))) if has_hole(self.prog, **e) => match self.peek(init) {

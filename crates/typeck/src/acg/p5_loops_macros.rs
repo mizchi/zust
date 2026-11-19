@@ -1786,6 +1786,10 @@ impl Cx<'_> {
 
     pub(crate) fn path_value(&mut self, e: &Expr, _expected: Option<Ty>) -> R<V> {
         let Expr::Path(q, p) = e else { unreachable!() };
+        // (`g(f1)` after `let f1 = f;`: the fn f, its instance from the expected type)
+        if let Some(&(_, target)) = ident_of(p).and_then(|n| self.fn_aliases.iter().rev().find(|a| a.0 == n)) {
+            return self.expr(target, _expected);
+        }
         if p.segs.iter().skip(1).any(|s| s.name == "crate") {
             return err(SP, "`crate` in paths can only be used in start position (E0433)");
         }

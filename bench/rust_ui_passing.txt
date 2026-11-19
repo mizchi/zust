@@ -2349,6 +2349,7 @@ compile-fail	generic-associated-types/parse/trait-path-types.rs
 compile-fail	generic-associated-types/type-param-defaults.rs
 compile-fail	generic-const-items/feature-gate-generic_const_items.rs
 compile-fail	generic-const-items/wfcheck_err_leak_issue_118179.rs
+run-pass	generics/autobind.rs
 compile-fail	generics/bad-mid-path-type-params.rs
 compile-fail	generics/box-missing-generics-14092.rs
 compile-fail	generics/cyclic-default-type-param-via-alias.rs
@@ -5396,7 +5397,6 @@ compile-fail	suggestions/dont-suggest-private-trait-method.rs
 compile-fail	suggestions/dont-suggest-ref/simple.rs
 compile-fail	suggestions/dont-suggest-ufcs-for-const.rs
 run-pass	suggestions/dont-try-removing-the-field.rs
-compile-fail	suggestions/dont-wrap-ambiguous-receivers.rs
 compile-fail	suggestions/double-reference-ty-in-self-ty.rs
 compile-fail	suggestions/dyn-incompatible-trait-should-use-self-2021-without-dyn.rs
 compile-fail	suggestions/dyn-incompatible-trait-should-use-self-2021.rs

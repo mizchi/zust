@@ -417,6 +417,12 @@ impl Cx<'_> {
                 self.unsafe_ok -= *uns as u32;
                 r
             }
+            // (`[a, a]` after `let a = foo;` (foo generic): the fn foo)
+            Expr::Path(None, p) if !self.fn_aliases.is_empty() && ident_of(p).is_some_and(|n| self.fn_aliases.iter().any(|a| a.0 == n)) => {
+                let n = ident_of(p).unwrap();
+                let target = self.fn_aliases.iter().rev().find(|a| a.0 == n).unwrap().1;
+                self.expr(target, expected)
+            }
             Expr::Path(_, p) if self.is_variant_path(p) || p.segs.len() >= 2 => {
                 let Some((sid, vi)) = self.prog.variant_by_p(&PPath::of(p), self.self_sid) else {
                     return self.path_value(e, expected);
@@ -1838,6 +1844,13 @@ impl Cx<'_> {
 
     pub(crate) fn call(&mut self, c: &Expr, expected: Option<Ty>) -> R<V> {
         let Expr::Call(func, cargs) = c else { return err(SP, "internal: expected a call") };
+        // (`f1(x)` after `let f1 = f;` (f generic): `f(x)`)
+        if let (false, Expr::Path(None, p)) = (self.fn_aliases.is_empty(), strip_paren(func)) {
+            if let Some(&(_, target)) = ident_of(p).and_then(|n| self.fn_aliases.iter().rev().find(|a| a.0 == n)) {
+                let ne: &Expr = self.keep_expr(Expr::Call(Box::new(target.clone()), cargs.clone()));
+                return self.expr(ne, expected);
+            }
+        }
         // `(*f)(x)` with f: `Box<dyn Fn ..>` / `&dyn Fn ..` / a closure behind a reference: `f(x)`
         if let Expr::Unary(op, inner, _) = strip_paren(func) {
             if op == "*" && matches!(self.peek(inner), Some(Ty::Box(_) | Ty::Ref(..))) {
