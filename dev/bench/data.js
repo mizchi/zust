@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795052694422,
+  "lastUpdate": 1795052696220,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -26883,6 +26883,70 @@ window.BENCHMARK_DATA = {
           {
             "name": "tests/ui compile-fail passing",
             "value": 2849,
+            "unit": "tests"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "committer": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "distinct": true,
+          "id": "962f2a6bd13ec1ac6f5d9534a1e570504793fb70",
+          "message": "`impl Tr for Box<S>`, integer shifts and `reverse_bits`, `..b` / `..=b` / `..` values\n\n- Methods of a trait implemented for a Box type are found by the Box receiver\n  (only when that impl's self type is a Box; a blanket impl's method still goes\n  through deref, and a user's own `struct Box` is a struct). A Box impl next to\n  `impl<T> Tr for T` is E0119.\n- `wrapping_shl/shr`, `checked_shl/shr`, `overflowing_shl/shr`, `reverse_bits`.\n- `..b`, `..=b` and `..` build RangeTo / RangeToInclusive / RangeFull values.\ntests/ui: run-pass +2, check-pass +2, compile-fail +3; two compile-fail tests\nleave the baseline (consts/const-int-wrapping.rs and lint/lint-unconditional-recursion.rs\npassed only because these methods / Box impls were missing on the annotated line;\ntheir errors are a temporary-lifetime error and a lint zustc does not check).\nKPIs unchanged.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-19T01:31:58Z",
+          "tree_id": "bba00d632011bb3ee85dc9cc5c92306abc59db88",
+          "url": "https://github.com/mizchi/zust/commit/962f2a6bd13ec1ac6f5d9534a1e570504793fb70"
+        },
+        "date": 1795052695767,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tests/ui run-pass pass rate",
+            "value": 63.28,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui run-pass passing",
+            "value": 1527,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui check-pass pass rate",
+            "value": 69.84,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui check-pass passing",
+            "value": 1262,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui build-pass pass rate",
+            "value": 65.19,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui build-pass passing",
+            "value": 88,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui compile-fail pass rate",
+            "value": 38.76,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui compile-fail passing",
+            "value": 2852,
             "unit": "tests"
           }
         ]
