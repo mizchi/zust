@@ -26,3 +26,4 @@ date	commit	change	noop_M	edit_M	check_M	cache_KiB	lsp_G	run	check	build	cfail
 2026-11-19	d1718df	associated functions through type aliases	625.250	626.604	3907.597	1902.8	-	1579	1334	94	2883
 2026-11-19	3123e91	slice methods, integer abs/neg variants, impl line (prelude +50 lines)	625.597	626.655	3906.342	1902.8	-	1585	1339	94	2894
 2026-11-19	2e73c1f	impls for &T of a type parameter	625.352	626.411	3906.158	1902.8	-	1586	1342	94	2895
+2026-11-19	0aa45a9	slice patterns in inference, E0527/E0528	625.350	626.409	3906.603	1902.8	10.8969	1587	1342	94	2904
