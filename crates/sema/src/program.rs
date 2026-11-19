@@ -460,6 +460,43 @@ impl Insts {
 }
 
 
+/// The summary with the items of `impl Alias { .. }` moved to the aliased type (`Alias::f` -> `Foo::f`)
+fn rebase_aliased(sm: &Summary, map: &FxMap<String, String>) -> Summary {
+    let mut sm = sm.clone();
+    let re = |n: &mut String| {
+        if let Some((a, rest)) = n.split_once("::") {
+            if let Some(b) = map.get(a) {
+                *n = format!("{b}::{rest}");
+            }
+        }
+    };
+    // (not a type parameter of the same name: `impl<T> Tr for T` beside `type T = S;`)
+    if let Some(n) = &mut sm.impl_self {
+        if let Some(b) = map.get(n.as_str()).filter(|_| !sm.impl_generics.iter().any(|g| g.0 == *n)) {
+            *n = b.clone();
+        }
+    }
+    for (n, s) in &mut sm.fns {
+        if let Some(o) = &mut s.impl_of {
+            if let Some(b) = map.get(o.as_str()).filter(|_| !s.generics.iter().any(|g| g.0 == *o)) {
+                *o = b.clone();
+                re(n);
+            }
+        }
+    }
+    for c in &mut sm.closures {
+        if let Some(o) = &mut c.sig.impl_of {
+            if let Some(b) = map.get(o.as_str()) {
+                *o = b.clone();
+            }
+        }
+    }
+    for c in &mut sm.consts {
+        re(&mut c.0);
+    }
+    sm
+}
+
 /// struct / enum 定義の中での `Self`
 pub fn self_of(name: &str, generics: &[String]) -> TySyn {
     if generics.is_empty() {
@@ -473,6 +510,25 @@ pub fn self_of(name: &str, generics: &[String]) -> TySyn {
 }
 
 impl Program {
+    /// The type an alias names, as an impl's self type: `type A = Foo<'static>` -> `Foo`, `type T = u32` -> `u32`
+    fn alias_base(&self, n: &str) -> Option<String> {
+        let mut t = &self.aliases.get(n)?.1;
+        for _ in 0..8 {
+            match t {
+                TySyn::Named(s) | TySyn::App(s, _) => match self.aliases.get(s) {
+                    Some(a) => t = &a.1,
+                    None => return Some(s.clone()),
+                },
+                TySyn::Prim(Ty::Unit) => return Some("#tuple0".into()),
+                TySyn::Tuple(v) => return Some(format!("#tuple{}", v.len())),
+                TySyn::Prim(pt) => return Some(format!("{pt:?}").to_lowercase()),
+                TySyn::Str => return Some("str".into()),
+                _ => return None,
+            }
+        }
+        None
+    }
+
     pub fn build(items: &[SrcItem], sums: &[Summary]) -> R<Program> {
         Program::build_with(items, sums, true)
     }
@@ -541,6 +597,22 @@ impl Program {
                 }
             }
         }
+        // (`type Alias = Foo<'static>; impl Alias { .. }`: the impl's items belong to the aliased type)
+        let alias_owner: FxMap<String, String> = if p.aliases.is_empty() {
+            FxMap::default()
+        } else {
+            sums.iter()
+                .filter_map(|sm| sm.impl_self.as_ref())
+                .filter_map(|n| p.alias_base(n).map(|b| (n.clone(), b)))
+                .collect()
+        };
+        let owned_sums;
+        let sums: &[Summary] = if alias_owner.is_empty() {
+            sums
+        } else {
+            owned_sums = sums.iter().map(|sm| rebase_aliased(sm, &alias_owner)).collect::<Vec<_>>();
+            &owned_sums
+        };
         // 0. const / static の名前 (配列の長さで使うので型より先に)
         for (ii, sm) in sums.iter().enumerate() {
             let cs = sm
@@ -598,11 +670,46 @@ impl Program {
             }
         }
         p.struct_item = sdefs.iter().map(|d| d.0 as u32).collect();
+        // (the concrete types in where clauses: `where Missing: Trait`)
+        for (it, sm) in items.iter().zip(sums) {
+            // (and an impl's self type, at its header: `impl Tr for xyz::T`)
+            if let Some(sn) = &sm.impl_self {
+                let builtin = Ty::prim(sn).is_some() || sn == "str" || sn == "Box" || sn.starts_with("#tuple") || sn.starts_with("__");
+                if !builtin && !p.struct_index.contains_key(sn) && !p.aliases.contains_key(sn) && !sm.impl_generics.iter().any(|g| g.0 == *sn) {
+                    return Err(format!("{}:1: cannot find type `{sn}` in this scope", it.line));
+                }
+            }
+            for n in &sm.where_types {
+                if !p.struct_index.contains_key(n) && !p.aliases.contains_key(n) && !p.traits.contains_key(n) {
+                    return Err(format!("{}:1: cannot find type `{n}` in this scope", it.line));
+                }
+            }
+        }
         // 2. フィールド型を解決し、依存順にレイアウトを決める
         for (_, n, sh, g) in &sdefs {
             let mut d = StructDef::blank(n.clone(), matches!(sh, AdtShape::Enum(_)));
             d.generics = g.clone();
             p.structs.push(d);
+        }
+        // (associated types without generic structs, `impl Tr for i32 { type Ty = i32; }`, before the fields: a field
+        // or a const may be `<i32 as Tr>::Ty`. The others below, once the definitions are laid out)
+        let mut early = vec![];
+        for (ii, sm) in sums.iter().enumerate() {
+            // (of a trait impl: an inherent `impl S { type P = (); }` is unstable, `S::P` is not looked up through it)
+            let of_trait = matches!(items[ii].kind, crate::lexer::ItemKind::ImplMember(h) if sums[h as usize].impl_trait.is_some());
+            if sm.assocs.is_empty() || !of_trait {
+                continue;
+            }
+            for (k, a) in sm.assocs.iter().enumerate() {
+                if syn_has_app(&a.self_ty, &p.aliases) || syn_has_app(&a.value, &p.aliases) {
+                    continue;
+                }
+                let gn: Vec<&str> = a.generics.iter().map(|g| g.as_str()).collect();
+                if let (Ok(self_ty), Ok(value)) = (p.resolve_g(&a.self_ty, &gn), p.resolve_g(&a.value, &gn)) {
+                    p.assocs.push(AssocDef { name: a.name.clone(), self_ty, value, ngen: gn.len() });
+                    early.push((ii, k));
+                }
+            }
         }
         // ジェネリックな定義を先に (フィールドの型を Param で解決するだけ。レイアウトはインスタンスごと)
         let mut state = vec![0u8; sdefs.len()]; // 0 未処理, 1 処理中, 2 済み
@@ -709,8 +816,14 @@ impl Program {
             }
         }
         // 関連型 (関数のシグネチャの `Self::Item` を解決するので先に)
-        for (it, sm) in items.iter().zip(sums) {
-            for a in &sm.assocs {
+        let mut next_early = 0;
+        for (ii, (it, sm)) in items.iter().zip(sums).enumerate() {
+            for (k, a) in sm.assocs.iter().enumerate() {
+                // (`early` is in the same order as this loop)
+                if early.get(next_early) == Some(&(ii, k)) {
+                    next_early += 1;
+                    continue;
+                }
                 let gn: Vec<&str> = a.generics.iter().map(|g| g.as_str()).collect();
                 let self_ty = p
                     .resolve_g(&a.self_ty, &gn)
@@ -726,6 +839,8 @@ impl Program {
                 });
             }
         }
+        // (the impls of each trait for each type so far: their self types and trait arguments, and parameters)
+        let mut self_tys: FxMap<(&str, &str), Vec<usize>> = FxMap::default();
         // 3. 関数
         for (ii, (it, sm)) in items.iter().zip(sums).enumerate() {
             let first = p.names.len() as u32;
@@ -738,18 +853,23 @@ impl Program {
             for (name, ss) in fns {
                 let mut sym_suffix = String::new();
                 let name = &if let Some(&prev) = p.index.get(name) {
-                    if ss.impl_trait.is_none() || p.sigs[prev as usize].impl_trait.is_none() {
-                        // (in two impl blocks, E0592 is reported at the first definition)
-                        let line = match p.item_of.get(prev as usize).copied().flatten().map(|k| &items[k as usize]) {
-                            Some(pit) if matches!((pit.kind, it.kind), (crate::lexer::ItemKind::ImplMember(a), crate::lexer::ItemKind::ImplMember(b)) if a != b) => pit.line,
-                            _ => it.line,
-                        };
-                        return Err(format!("{line}:1: duplicate definition of `{name}`"));
+                    if ss.is_extern && p.sigs[prev as usize].is_extern {
+                        // (the same foreign fn declared in two `extern` blocks: one more name for the same symbol)
+                        format!("{name}#extern{}", p.names.len())
+                    } else {
+                        if ss.impl_trait.is_none() && p.sigs[prev as usize].impl_trait.is_none() {
+                            // (in two impl blocks, E0592 is reported at the first definition)
+                            let line = match p.item_of.get(prev as usize).copied().flatten().map(|k| &items[k as usize]) {
+                                Some(pit) if matches!((pit.kind, it.kind), (crate::lexer::ItemKind::ImplMember(a), crate::lexer::ItemKind::ImplMember(b)) if a != b) => pit.line,
+                                _ => it.line,
+                            };
+                            return Err(format!("{line}:1: duplicate definition of `{name}`"));
+                        }
+                        let k = p.overloads.entry(name.clone()).or_insert_with(|| vec![prev]);
+                        k.push(p.names.len() as u32);
+                        sym_suffix = format!("#{}", k.len() - 1);
+                        format!("{name}{sym_suffix}")
                     }
-                    let k = p.overloads.entry(name.clone()).or_insert_with(|| vec![prev]);
-                    k.push(p.names.len() as u32);
-                    sym_suffix = format!("#{}", k.len() - 1);
-                    format!("{name}{sym_suffix}")
                 } else {
                     name.clone()
                 };
@@ -891,7 +1011,7 @@ impl Program {
             })
             .collect();
         // 4. trait の実装 (impl ヘッダの要約から)
-        for (it, sm) in items.iter().zip(sums) {
+        for (ii, (it, sm)) in items.iter().zip(sums).enumerate() {
             let (Some(sn), Some(tr)) = (&sm.impl_self, &sm.impl_trait) else {
                 continue;
             };
@@ -918,10 +1038,22 @@ impl Program {
             if !p.traits.contains_key(tr) {
                 return Err(format!("{}:1: cannot find trait `{tr}`", it.line));
             }
+            // (the trait's arguments name types: `impl Generic<Type> for S` without a `Type`)
+            {
+                let gn: Vec<&str> = sm.impl_generics.iter().map(|g| g.0.as_str()).collect();
+                for a in sm.impl_trait_args.iter().chain(sm.impl_self_ty.as_ref()) {
+                    if let Err(e) = p.resolve_g(a, &gn) {
+                        if e.starts_with("cannot find type") {
+                            return Err(format!("{}:1: {e}", it.line));
+                        }
+                    }
+                }
+            }
             // プリミティブ型への trait 実装 (`impl Tr for u32`)
             // (`impl Hash for str`: str も組み込みの型として持つ)
             if let Some(pt) = Ty::prim(sn).or((sn == "str").then_some(Ty::Str)).or((sn == "#tuple0").then_some(Ty::Unit)) {
-                if !p.prim_impls.insert((pt, tr.clone())) {
+                let dup = !p.prim_impls.insert((pt, tr.clone()));
+                if impl_overlaps(&mut self_tys, sums, ii, sn, tr, dup) {
                     return Err(format!(
                         "{}:1: conflicting implementations of trait `{tr}` for `{sn}`",
                         it.line
@@ -955,7 +1087,10 @@ impl Program {
                 continue;
             }
             // (型引数を取る trait は別々の引数で何度も実装できる: `impl From<&str> for P` と `impl From<String> for P`)
-            if !p.impls.insert((sid, tr.clone()))
+            // (a trait with parameters, `impl Tr<u8> for S` and `impl Tr<u16> for S`, or self types that differ in their
+            // arguments, `impl Tr for Vec<i32>` and `impl Tr for Vec<Box<i32>>`)
+            let dup = !p.impls.insert((sid, tr.clone()));
+            if impl_overlaps(&mut self_tys, sums, ii, sn, tr, dup)
                 && !matches!(
                     tr.as_str(),
                     "From" | "TryFrom" | "Add" | "Sub" | "Mul" | "Div" | "Rem" | "BitAnd" | "BitOr" | "BitXor" | "Shl" | "Shr"
@@ -1549,6 +1684,9 @@ impl Program {
                 crate::parse::Stmt::Expr(x, false) => self.eval_const(x, depth)?,
                 _ => return Err("unsupported expression in constant".into()),
             },
+            // (`{ let x = 2; 5 }`)
+            Expr::Block(None, false, b) if b.stmts.len() > 1 => self.eval_block_env(b, &mut vec![], depth + 1)?,
+            Expr::Ref(false, x) => self.eval_const(x, depth)?,
             Expr::If(c, t, Some(els)) => {
                 let tail = |b: &crate::parse::Block| match b.stmts.as_slice() {
                     [crate::parse::Stmt::Expr(x, false)] => Some(x.clone()),
@@ -1610,6 +1748,7 @@ impl Program {
                 match op.as_str() {
                     "-" => -v,
                     "!" => !v,
+                    "*" => v,
                     _ => return Err("not an integer constant".into()),
                 }
             }
@@ -2293,8 +2432,20 @@ impl Program {
             AdtShape::Enum(vs) => {
                 let mut discrs = vec![];
                 let mut next = 0i64;
+                let mut env: Vec<(String, i128)> = vec![];
                 for v in vs {
-                    let d = v.discr.unwrap_or(next);
+                    let d = if v.discr_src.is_empty() {
+                        v.discr.unwrap_or(next)
+                    } else {
+                        // (other constants, and the variants before it: `Y = Foo::X as isize - 3`)
+                        let e = crate::parse::parse_expr(&v.discr_src).map_err(|e| format!("{line}:1: {e}"))?;
+                        let x = self.eval_const(&subst_consts(&e, &env), 1).map_err(|e| format!("{line}:1: {e}"))?;
+                        i64::try_from(x).or_else(|_| u64::try_from(x).map(|u| u as i64)).map_err(|_| format!("{line}:1: discriminant out of range"))?
+                    };
+                    if !v.discr_src.is_empty() || vs.iter().any(|w| !w.discr_src.is_empty()) {
+                        env.push((format!("{}::{}", sdefs[id].1, v.name), d as i128));
+                        env.push((format!("Self::{}", v.name), d as i128));
+                    }
                     if discrs.contains(&d) {
                         return Err(format!(
                             "{line}:1: discriminant value `{d}` assigned more than once"
@@ -2726,6 +2877,82 @@ pub fn char_lit(s: &str) -> Option<char> {
     })
 }
 
+/// The impl of header sm overlaps an earlier impl of trait tr for sn: their self types and trait arguments unify
+/// (`impl<T> Tr for (T, T)` and `impl Tr for (usize, isize)` do not; nor `impl Tr<u8> for S` and `impl Tr<u16> for S`)
+fn impl_overlaps<'a>(seen: &mut FxMap<(&'a str, &'a str), Vec<usize>>, sums: &[Summary], ii: usize, sn: &'a str, tr: &'a str, dup: bool) -> bool {
+    let list = seen.entry((sn, tr)).or_default();
+    // (only compared when the type already implements the trait: most impls are the first of their pair)
+    let key = |sm: &Summary| {
+        let mut v = vec![sm.impl_self_ty.clone().unwrap_or(TySyn::Named(sn.to_string()))];
+        v.extend(sm.impl_trait_args.iter().cloned());
+        let gs: Vec<String> = sm.impl_generics.iter().map(|g| g.0.clone()).collect();
+        (TySyn::Tuple(v), gs)
+    };
+    let r = dup && {
+        let (t, gs) = key(&sums[ii]);
+        list.iter().any(|&k| {
+            let (u, g) = key(&sums[k]);
+            syn_unify(&u, &g, &t, &gs, &mut vec![])
+        })
+    };
+    list.push(ii);
+    r
+}
+
+/// The self types of two impls can be the same type: a and b unify, with the names in ga / gb (the impls' parameters)
+/// as variables (bound in `sub`, keyed by side)
+fn syn_unify(a: &TySyn, ga: &[String], b: &TySyn, gb: &[String], sub: &mut Vec<((bool, String), (bool, TySyn))>) -> bool {
+    fn go(a: &TySyn, sa: bool, b: &TySyn, sb: bool, g: [&[String]; 2], sub: &mut Vec<((bool, String), (bool, TySyn))>, d: u32) -> bool {
+        if d > 32 {
+            return true;
+        }
+        let var = |t: &TySyn, s: bool| match t {
+            TySyn::Named(n) if g[s as usize].iter().any(|x| x.strip_prefix('?').unwrap_or(x) == n) => Some(n.clone()),
+            _ => None,
+        };
+        if let Some(n) = var(a, sa) {
+            let sized = !g[sa as usize].iter().any(|x| x.strip_prefix('?') == Some(n.as_str()));
+            if sized && matches!(b, TySyn::Slice(_) | TySyn::Str | TySyn::Dyn(_)) {
+                return false;
+            }
+            if let Some((_, (s2, t2))) = sub.iter().find(|x| x.0 == (sa, n.clone())).cloned() {
+                return go(&t2, s2, b, sb, g, sub, d + 1);
+            }
+            if var(b, sb).as_ref() == Some(&n) && sa == sb {
+                return true;
+            }
+            sub.push(((sa, n), (sb, b.clone())));
+            return true;
+        }
+        if var(b, sb).is_some() {
+            return go(b, sb, a, sa, g, sub, d + 1);
+        }
+        match (a, b) {
+            (TySyn::Infer, _) | (_, TySyn::Infer) | (TySyn::Assoc(..), _) | (_, TySyn::Assoc(..)) => true,
+            (TySyn::Ref(m, x), TySyn::Ref(n, y)) | (TySyn::Ptr(m, x), TySyn::Ptr(n, y)) => m == n && go(x, sa, y, sb, g, sub, d + 1),
+            (TySyn::Slice(x), TySyn::Slice(y)) => go(x, sa, y, sb, g, sub, d + 1),
+            (TySyn::Array(x, l), TySyn::Array(y, k)) => go(x, sa, y, sb, g, sub, d + 1) && (l == k || matches!((l, k), (ArrLen::Const(_), _) | (_, ArrLen::Const(_)))),
+            (TySyn::App(n, xs), TySyn::App(m, ys)) => n == m && xs.len() == ys.len() && xs.iter().zip(ys).all(|(x, y)| go(x, sa, y, sb, g, sub, d + 1)),
+            (TySyn::Tuple(xs), TySyn::Tuple(ys)) | (TySyn::FnPtr(xs), TySyn::FnPtr(ys)) => {
+                xs.len() == ys.len() && xs.iter().zip(ys).all(|(x, y)| go(x, sa, y, sb, g, sub, d + 1))
+            }
+            (x, y) => x == y,
+        }
+    }
+    go(a, false, b, true, [ga, gb], sub, 0)
+}
+
+/// t names a generic type (`Vec<u8>`) or an alias (one may stand for one)
+fn syn_has_app(t: &TySyn, aliases: &FxMap<String, (Vec<String>, TySyn)>) -> bool {
+    match t {
+        TySyn::App(..) | TySyn::Dyn(_) => true,
+        TySyn::Named(n) => aliases.contains_key(n),
+        TySyn::Ref(_, i) | TySyn::Ptr(_, i) | TySyn::Slice(i) | TySyn::Array(i, _) | TySyn::Assoc(i, _) => syn_has_app(i, aliases),
+        TySyn::Tuple(v) | TySyn::FnPtr(v) => v.iter().any(|x| syn_has_app(x, aliases)),
+        _ => false,
+    }
+}
+
 /// 型 t が型パラメータ g を値として含むか (参照・ポインタ・Box の先は含まない。ほかの型の引数は含むとみなす)
 fn syn_holds_by_value(t: &TySyn, g: &str) -> bool {
     match t {
@@ -2978,6 +3205,15 @@ fn subst_consts(e: &crate::parse::Expr, env: &[(String, i128)]) -> crate::parse:
     match e {
         Expr::Path(None, p) if p.segs.len() == 1 && p.segs[0].args.is_empty() => {
             match env.iter().rev().find(|(n, _)| *n == p.segs[0].name) {
+                Some((_, v)) if *v < 0 => Expr::Paren(Box::new(Expr::Unary("-".into(), Box::new(Expr::Lit((-*v).to_string(), p.pos)), Default::default()))),
+                Some((_, v)) => Expr::Lit(v.to_string(), p.pos),
+                None => e.clone(),
+            }
+        }
+        // (`Foo::X`: an earlier variant's discriminant, for an enum's discriminant)
+        Expr::Path(None, p) if p.segs.len() == 2 && p.segs.iter().all(|s| s.args.is_empty()) && !env.is_empty() => {
+            let n = format!("{}::{}", p.segs[0].name, p.segs[1].name);
+            match env.iter().rev().find(|(x, _)| *x == n) {
                 Some((_, v)) if *v < 0 => Expr::Paren(Box::new(Expr::Unary("-".into(), Box::new(Expr::Lit((-*v).to_string(), p.pos)), Default::default()))),
                 Some((_, v)) => Expr::Lit(v.to_string(), p.pos),
                 None => e.clone(),

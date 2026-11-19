@@ -100,7 +100,8 @@ crate::enc_struct!(VariantSyn {
     name,
     kind,
     fields,
-    discr
+    discr,
+    discr_src
 });
 crate::enc_struct!(SigSyn {
     params,
@@ -141,6 +142,8 @@ crate::enc_struct!(Summary {
     closures,
     assocs,
     aliases,
+    where_types,
+    impl_trait_args,
 });
 crate::enc_struct!(AssocSyn {
     name,
