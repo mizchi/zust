@@ -2022,8 +2022,16 @@ impl Inf<'_> {
             let root = self.find(rv);
             if self.shape[root as usize].is_none() && self.int_lit[root as usize] && !is_builtin_scalar_method(n) {
                 let mut hit = None;
+                // (or a default method of a trait the integer type implements: `3.hi()`)
+                let dtraits: Vec<&String> = self
+                    .prog
+                    .traits
+                    .iter()
+                    .filter(|(_, ds)| ds.iter().any(|&d| self.prog.sigs[d as usize].has_body && self.prog.names[d as usize].rsplit("::").next() == Some(n)))
+                    .map(|(tr, _)| tr)
+                    .collect();
                 for t in [Ty::I8, Ty::I16, Ty::I32, Ty::I64, Ty::I128, Ty::Isize, Ty::U8, Ty::U16, Ty::U32, Ty::U64, Ty::U128, Ty::Usize] {
-                    if self.prog.prim_method(t, n).is_some() {
+                    if self.prog.prim_method(t, n).is_some() || dtraits.iter().any(|tr| self.prog.implements(t, tr)) {
                         hit = if hit.is_none() { Some(t) } else { Some(Ty::Never) };
                     }
                 }
