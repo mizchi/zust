@@ -72,3 +72,4 @@ date	commit	change	noop_M	edit_M	check_M	cache_KiB	lsp_G	run	check	build	cfail
 2026-11-19	61f478f+	#[path] mod files, str::from_utf8 via use core::str, Utf8Error::error_len, impl Error for std error types, attributes left at the end of a file	0.872	591.197	3878.293	1902.8	-	1658	1395	95	3318	1180.310	63.496	11.261	320.207
 2026-11-19	19d10c0+	borrowck: an assigned value of a type without references carries no loans	0.872	591.198	3879.088	1902.8	-	1658	1395	95	3319	1180.041	63.497	11.261	320.259
 2026-11-19	4c7e69a+	errors in a dependency crate's functions at their file's lines; (at L:C) relocated too	0.872	591.227	3879.380	1902.8	-	1658	1395	95	3318	1180.379	63.489	11.262	320.316
+2026-11-19	5d5bcd0+	destructuring assignment; let (a, b); without a value; let _: T;	0.872	591.476	3882.919	1902.8	-	-	-	-	-	1180.327	63.504	11.262	320.311

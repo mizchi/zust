@@ -442,6 +442,35 @@ pub struct Block {
     pub stmts: Vec<Stmt>,
 }
 
+/// `(a, b) = e;` / `[a, _] = e;` (destructuring assignment): `{ let (t0, t1) = e; a = t0; b = t1; }` (the right side
+/// first, then the places in order). None for a left side this does not cover (`..`, struct patterns)
+fn destructure_assign(l: &Expr, r: &Expr, at: Pos) -> Option<Expr> {
+    fn pat(l: &Expr, n: &mut usize, assigns: &mut Vec<(Expr, String)>, line: u32) -> Option<Pat> {
+        match l {
+            Expr::Tuple(xs) => Some(Pat::Tuple(xs.iter().map(|x| pat(x, n, assigns, line)).collect::<Option<Vec<_>>>()?)),
+            Expr::Array(xs) => Some(Pat::Slice(xs.iter().map(|x| pat(x, n, assigns, line)).collect::<Option<Vec<_>>>()?)),
+            Expr::Path(None, p) if p.segs.len() == 1 && p.segs[0].name == "_" => Some(Pat::Wild),
+            Expr::Range(..) => None,
+            Expr::Paren(x) => pat(x, n, assigns, line),
+            e => {
+                let t = format!("__exr_da{}_{}", line, *n);
+                *n += 1;
+                assigns.push((e.clone(), t.clone()));
+                Some(Pat::Ident(false, false, t, None))
+            }
+        }
+    }
+    let mut n = 0;
+    let mut assigns = vec![];
+    let p = pat(l, &mut n, &mut assigns, at.line as u32)?;
+    let mut stmts = vec![Stmt::Let(p, None, Some(r.clone()), None, at)];
+    for (place, t) in assigns {
+        let v = Expr::Path(None, Path { global: false, segs: vec![Seg { name: t.clone(), args: Vec::new(), fn_args: None, text: t }], pos: at });
+        stmts.push(Stmt::Expr(Expr::Assign(Box::new(place), Box::new(v)), true));
+    }
+    Some(Expr::Block(None, false, Block { stmts }))
+}
+
 #[derive(Clone, Debug)]
 pub enum Stmt {
     /// (the last field: where `let` starts)
@@ -1522,6 +1551,11 @@ impl Parser {
         if self.is_punct("=") && !self.punct_at(0, "==") && !self.punct_at(0, "=>") {
             self.i += 1;
             let r = self.assign_expr(ss)?;
+            if matches!(l, Expr::Tuple(_) | Expr::Array(_)) {
+                if let Some(e) = destructure_assign(&l, &r, start) {
+                    return Ok(e);
+                }
+            }
             return Ok(Expr::Assign(Box::new(l), Box::new(r)));
         }
         for op in ["<<=", ">>=", "+=", "-=", "*=", "/=", "%=", "^=", "&=", "|="] {
@@ -2138,7 +2172,31 @@ impl Parser {
                 self.attr()?;
                 continue;
             }
-            stmts.push(self.stmt()?);
+            // (`let (a, mut b);` / `let (a, b): (T, U);`: a `let` for each name, without a value yet. Only a `let (`
+            // is looked at: moving every statement once more costs a copy of it)
+            if !(self.is_ident("let") && self.peek_is(1, "(")) {
+                stmts.push(self.stmt()?);
+                continue;
+            }
+            let st = self.stmt()?;
+            if let Stmt::Let(Pat::Tuple(ps), ann, None, None, lp) = &st {
+                if ps.iter().all(|p| matches!(p, Pat::Ident(false, _, _, None) | Pat::Wild))
+                    && ann.as_ref().is_none_or(|t| matches!(t, Ty::Tuple(ts) if ts.len() == ps.len()))
+                {
+                    for (k, p) in ps.iter().enumerate() {
+                        if matches!(p, Pat::Wild) {
+                            continue;
+                        }
+                        let t = match ann {
+                            Some(Ty::Tuple(ts)) => Some(ts[k].clone()),
+                            _ => None,
+                        };
+                        stmts.push(Stmt::Let(p.clone(), t, None, None, *lp));
+                    }
+                    continue;
+                }
+            }
+            stmts.push(st);
         }
         self.expect_close("}")?;
         Ok(Block { stmts: stmts })

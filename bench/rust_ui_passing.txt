@@ -183,6 +183,7 @@ run-pass	associated-types/associated-types-duplicate-binding-in-env.rs
 compile-fail	associated-types/associated-types-eq-3.rs
 compile-fail	associated-types/associated-types-eq-expr-path.rs
 run-pass	associated-types/associated-types-eq-obj.rs
+run-pass	associated-types/associated-types-from-supertrait.rs
 run-pass	associated-types/associated-types-impl-redirect.rs
 compile-fail	associated-types/associated-types-in-ambiguous-context.rs
 check-pass	associated-types/associated-types-in-bound-type-arg.rs
@@ -1401,6 +1402,7 @@ run-pass	const-generics/uninferred-consts-during-codegen-2.rs
 compile-fail	const-generics/unknown_adt.rs
 check-pass	const-generics/unused-const-param.rs
 compile-fail	const-generics/unused-type-param-suggestion.rs
+check-pass	const-generics/unused_braces.rs
 check-pass	const-generics/using-static-as-const-arg.rs
 compile-fail	const-generics/wrong-normalization.rs
 check-pass	const_prop/const-prop-overflowing-casts.rs
@@ -1716,11 +1718,13 @@ run-pass	derives/no-spurious-unused-variable-warning-on-derive-hash.rs
 build-pass	derives/six-hundred-fields.rs
 compile-fail	destructuring-assignment/bad-expr-lhs.rs
 compile-fail	destructuring-assignment/bad-let-in-destructure.rs
-compile-fail	destructuring-assignment/default-match-bindings-forbidden.rs
 run-pass	destructuring-assignment/let-binding-tuple-destructuring.rs
 compile-fail	destructuring-assignment/non-exhaustive-destructure.rs
+compile-fail	destructuring-assignment/note-unsupported.rs
 compile-fail	destructuring-assignment/refutable-enum-assignment.rs
+compile-fail	destructuring-assignment/slice_destructure_fail.rs
 compile-fail	destructuring-assignment/struct_destructure_fail.rs
+run-pass	destructuring-assignment/warn-unused-duplication.rs
 check-pass	diagnostic_namespace/can_use_the_diagnostic_name_in_other_places.rs
 check-pass	diagnostic_namespace/do_not_recommend/malformed-diagnostic-attributes-if-expression.rs
 compile-fail	diagnostic_namespace/do_not_recommend/single-impl-candidate.rs
@@ -1818,6 +1822,7 @@ check-pass	drop/lint-tail-expr-drop-order-gated.rs
 compile-fail	drop/missing-drop-method.rs
 run-pass	drop/nested-return-drop-order.rs
 run-pass	drop/no-drop-flag-size.rs
+run-pass	drop/nondrop-cycle.rs
 run-pass	drop/rc-trait-object-double-drop.rs
 compile-fail	drop/repeat-drop-2.rs
 run-pass	drop/same-alloca-reassigned-match-binding-16151.rs
@@ -2035,7 +2040,6 @@ compile-fail	error-codes/E0618.rs
 compile-fail	error-codes/E0620.rs
 compile-fail	error-codes/E0637.rs
 compile-fail	error-codes/E0659.rs
-compile-fail	error-codes/E0719.rs
 compile-fail	error-codes/E0746.rs
 compile-fail	error-codes/E0767.rs
 compile-fail	error-codes/E0790.rs
@@ -2395,8 +2399,6 @@ check-pass	generic-associated-types/issue-92954.rs
 check-pass	generic-associated-types/issue-93141.rs
 check-pass	generic-associated-types/issue-93262.rs
 check-pass	generic-associated-types/issue-93341.rs
-compile-fail	generic-associated-types/multiple-type-params-with-unmet-bounds.rs
-compile-fail	generic-associated-types/own-bound-span.rs
 compile-fail	generic-associated-types/parse/trait-path-expected-token.rs
 compile-fail	generic-associated-types/parse/trait-path-expressions.rs
 compile-fail	generic-associated-types/parse/trait-path-missing-gen_arg.rs
@@ -2411,6 +2413,7 @@ compile-fail	generics/bad-mid-path-type-params.rs
 compile-fail	generics/box-missing-generics-14092.rs
 compile-fail	generics/cyclic-default-type-param-via-alias.rs
 run-pass	generics/default-type-params-well-formedness.rs
+run-pass	generics/empty-generic-brackets-equiv.rs
 compile-fail	generics/generic-arg-mismatch-recover.rs
 run-pass	generics/generic-derived-type.rs
 compile-fail	generics/generic-enum-errors.rs
@@ -2761,6 +2764,7 @@ check-pass	imports/issue-56263.rs
 check-pass	imports/issue-62767.rs
 check-pass	imports/local-modularized.rs
 check-pass	imports/no-ambiguous-trait-lint-on-redundant-import.rs
+check-pass	imports/no-pub-reexports-but-used.rs
 check-pass	imports/overwrite-deep-glob.rs
 check-pass	imports/overwrite-different-ambig.rs
 check-pass	imports/overwrite-different-vis-2.rs
@@ -3148,7 +3152,6 @@ check-pass	lint/non-local-defs/weird-exprs.rs
 check-pass	lint/non-snake-case/allow-snake-case-field-destructuring-issue-89469.rs
 check-pass	lint/non-snake-case/field-lint-expectation-issue-159323.rs
 check-pass	lint/non-snake-case/lint-non-snake-case-no-lowercase-equivalent.rs
-compile-fail	lint/non-snake-case/lint-uppercase-variables.rs
 check-pass	lint/non-snake-case/non-snake-ffi-issue-31924.rs
 run-pass	lint/overflowing-literals-valid.rs
 check-pass	lint/pre-expansion-expect.rs
@@ -3225,6 +3228,7 @@ check-pass	lint/unused/unused-var-in-unreachable-code.rs
 check-pass	lint/unused/unused-variable-with-raw-identifier-in-struct-pattern.rs
 check-pass	lint/unused/unused_assignments_across_match_guards.rs
 run-pass	lint/unused/unused_parens/unused-parens-in-macro-issue-120642.rs
+check-pass	lint/unused_braces.rs
 check-pass	lint/unused_braces_borrow.rs
 check-pass	lint/unused_labels.rs
 compile-fail	lint/unused_parens_multibyte_recovery.rs
@@ -3645,6 +3649,7 @@ compile-fail	modules/mod_file_correct_spans.rs
 run-pass	modules/mod_file_with_path_attr.rs
 run-pass	modules/module-qualified-paths-basic.rs
 run-pass	modules/module-super-access.rs
+run-pass	modules/module-use-nested-groups.rs
 run-pass	modules/nested-modules-basic.rs
 check-pass	modules/path-attr-inner-attr-nested-mod-rs/path-attr-inner-attr-nested-mod-rs.rs
 check-pass	modules/pub-use-handling-in-modules-56128.rs
@@ -3816,7 +3821,6 @@ check-pass	nll/ty-outlives/issue-55756.rs
 check-pass	nll/ty-outlives/projection-body.rs
 check-pass	nll/ty-outlives/projection-where-clause-env.rs
 check-pass	nll/ty-outlives/projection-where-clause-trait.rs
-compile-fail	nll/ty-outlives/wf-unreachable.rs
 compile-fail	nll/type-check-pointer-coercions.rs
 check-pass	nll/unexpected-inference-var-ice-116599.rs
 compile-fail	nll/user-annotations/adt-brace-structs.rs
@@ -5461,7 +5465,6 @@ compile-fail	suggestions/assoc_fn_without_self.rs
 compile-fail	suggestions/async-fn-ctor-passed-as-arg-where-it-should-have-been-called.rs
 compile-fail	suggestions/bool_typo_err_suggest.rs
 compile-fail	suggestions/borrow-cast-or-binexpr-with-parens.rs
-compile-fail	suggestions/borrow-from-overloaded-deref-assign-issue-154826.rs
 compile-fail	suggestions/box-future-wrong-output.rs
 compile-fail	suggestions/boxed-variant-field.rs
 compile-fail	suggestions/call-boxed.rs
@@ -6031,6 +6034,7 @@ compile-fail	try-trait/try-on-option.rs
 run-pass	try-trait/try-operator-expansion-hygiene.rs
 compile-fail	tuple/add-tuple-within-arguments.rs
 compile-fail	tuple/array-diagnostics.rs
+check-pass	tuple/coercion-never.rs
 check-pass	tuple/index-float.rs
 compile-fail	tuple/index-invalid.rs
 check-pass	tuple/indexing-in-macro.rs
@@ -6363,6 +6367,7 @@ compile-fail	unsafe/issue-3080.rs
 compile-fail	unsafe/issue-45087-unreachable-unsafe.rs
 compile-fail	unsafe/issue-47412.rs
 check-pass	unsafe/issue-85435-unsafe-op-in-let-under-unsafe-under-closure.rs
+check-pass	unsafe/issue-87414-query-cycle.rs
 build-pass	unsafe/maybe-uninit-zero-sized-types.rs
 run-pass	unsafe/new-unsafe-pointers.rs
 compile-fail	unsafe/raw-pointer-field-access-error.rs
@@ -6433,6 +6438,7 @@ compile-fail	wf/issue-110157.rs
 compile-fail	wf/issue-95665.rs
 compile-fail	wf/let-pat-inferred-non-wf.rs
 compile-fail	wf/range-expr-root-of-constant-issue-40749.rs
+check-pass	wf/unnormalized-projection-guides-inference.rs
 compile-fail	wf/wf-array-elem-sized.rs
 compile-fail	wf/wf-associated-const.rs
 check-pass	wf/wf-dyn-in-hrtb-bound-issue-157122.rs

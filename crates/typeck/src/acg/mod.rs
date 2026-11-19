@@ -1323,10 +1323,14 @@ impl Cx<'_> {
                     }
                     self.extend_temps(t0);
                 }
-                Stmt::Let(Pat::Wild, _, init, None, ..) => {
+                Stmt::Let(Pat::Wild, ann_ty, init, None, ..) => {
                     // `let _ = e;`: 場所ならムーブしない。値ならすぐ drop する
                     let Some(init) = init else {
-                        return err(SP, "`let` without initializer is not supported");
+                        // (`let _: T;`: T must name a type; nothing else happens)
+                        if let Some(t) = ann_ty {
+                            self.parse_ty(t)?;
+                        }
+                        continue;
                     };
                     // (`let _ = Foo;` with Foo a unit struct (or a const) is a value: dropped at once)
                     let local = !matches!(init, Expr::Path(None, p) if ident_of(p).is_some_and(|n| self.lookup(n).is_none()
