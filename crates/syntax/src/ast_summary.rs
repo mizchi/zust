@@ -456,6 +456,8 @@ fn parse_sig(sig: &PSig, is_extern: bool, is_main: bool, owner: Option<&Owner>) 
         Some(PTy::Impl(_)) => TySyn::Named(IMPL_RET.into()),
         // (`-> Option<impl Debug>`: the whole type comes from the body, as for `-> impl Trait`)
         Some(PTy::Path(Some(q), _)) if nested_impl(q) => return err("`impl Trait` is not allowed in paths"),
+        Some(PTy::Dyn(_)) => return err("return type cannot be a trait object without pointer indirection (E0746)"),
+        Some(t) if has_infer(t) => return err("the placeholder `_` is not allowed within types on item signatures for return types (E0121)"),
         Some(t) if nested_impl(t) => {
             TySyn::App(OPAQUE_NESTED.into(), vec![tysyn(&impl_as_infer(t), self_ty)?])
         }
@@ -872,6 +874,24 @@ fn nested_impl(t: &PTy) -> bool {
         PTy::Ref(_, _, i) | PTy::Ptr(_, i) | PTy::Slice(i) | PTy::Array(i, _) => nested_impl(i),
         PTy::Tuple(v) => v.iter().any(nested_impl),
         PTy::Fn(v, r) => v.iter().any(nested_impl) || nested_impl(r),
+        _ => false,
+    }
+}
+
+/// whether a `_` appears in t (not inside `impl Trait`, whose bounds are not types)
+fn has_infer(t: &PTy) -> bool {
+    match t {
+        PTy::Infer => true,
+        PTy::Path(q, p) => {
+            q.as_deref().is_some_and(has_infer)
+                || p.segs.iter().any(|s| {
+                    s.args.iter().any(|a| matches!(a, crate::parse::GArg::Ty(t) | crate::parse::GArg::Bind(_, t) if has_infer(t)))
+                        || s.fn_args.as_ref().is_some_and(|(v, r)| v.iter().any(has_infer) || r.as_deref().is_some_and(has_infer))
+                })
+        }
+        PTy::Ref(_, _, i) | PTy::Ptr(_, i) | PTy::Slice(i) | PTy::Array(i, _) => has_infer(i),
+        PTy::Tuple(v) => v.iter().any(has_infer),
+        PTy::Fn(v, r) => v.iter().any(has_infer) || has_infer(r),
         _ => false,
     }
 }
