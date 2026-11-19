@@ -703,6 +703,7 @@ compile-fail	borrowck/borrowck-mut-borrow-of-mut-base-ptr.rs
 compile-fail	borrowck/borrowck-mut-slice-of-imm-vec.rs
 run-pass	borrowck/borrowck-mut-uniq.rs
 run-pass	borrowck/borrowck-mut-vec-as-imm-slice.rs
+compile-fail	borrowck/borrowck-no-cycle-in-exchange-heap.rs
 compile-fail	borrowck/borrowck-overloaded-index-autoderef.rs
 compile-fail	borrowck/borrowck-overloaded-index-move-index.rs
 compile-fail	borrowck/borrowck-overloaded-index-ref-index.rs
