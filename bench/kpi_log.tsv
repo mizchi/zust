@@ -94,3 +94,4 @@ date	commit	change	noop_M	edit_M	check_M	cache_KiB	lsp_G	run	check	build	cfail
 2026-11-19	ca0796b+	Debug for ranges (gated); selection: name-only items decided by one lookup, header-only classification tables	0.874	591.131	3879.121	1902.8	-	1698	1408	95	3322	1181.488	63.351	11.273	319.238
 2026-11-19	5dea15e+	const blocks: assignments to the block's locals in array lengths	0.874	591.190	3879.257	1902.8	-	1698	1409	95	3322	1181.744	63.324	11.273	319.414
 2026-11-19	b1ef5f1+	RPITIT: a trait's default method returning impl Trait takes its body's type	0.874	591.130	3879.257	1902.8	-	1698	1413	95	3320	1181.687	63.360	11.273	319.383
+2026-11-19	28d1228+	impl Iterator<Item = T> returning a range: the range's literals take T	0.876	591.205	3879.257	1902.8	-	1698	1413	95	3319	1181.468	63.329	11.287	319.518

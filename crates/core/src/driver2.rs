@@ -760,6 +760,24 @@ fn resolve_opaque(prog: &mut Program, src: &str, items: &[SrcItem]) -> R<()> {
                 let ts = crate::ast_types::tysyn(&holes(t), None).ok()?;
                 prog.resolve_env(&ts, &env).ok()
             });
+            // (`-> impl Iterator<Item = u32> { 0..3 }`: a range at the tail is a Range of the declared Item, so its
+            // literals take that type)
+            let decl = decl.or_else(|| {
+                use crate::parse::{Bound, Expr, GArg, Stmt, Ty as P};
+                let Some(P::Impl(bs)) = &f.sig.ret else { return None };
+                let item = bs.iter().find_map(|b| match b {
+                    Bound::Trait(_, p) if p.segs.last().is_some_and(|s| s.name == "Iterator") => p.segs.last()?.args.iter().find_map(|a| match a {
+                        GArg::Bind(n, t) if n == "Item" => Some(t.clone()),
+                        _ => None,
+                    }),
+                    _ => None,
+                })?;
+                let Some(Stmt::Expr(Expr::Range(Some(_), Some(_), incl), false)) = f.block.stmts.last() else { return None };
+                let rn = if *incl { "RangeInclusive" } else { "Range" };
+                let it = prog.resolve_env(&crate::ast_types::tysyn(&item, None).ok()?, &env).ok()?;
+                let rid = *prog.struct_index.get(rn)?;
+                prog.instantiate(rid, vec![it]).ok().map(Ty::Struct)
+            });
             let (_, r, _) = crate::ast_infer::infer_ctx(prog, f.sig.recv.is_some(), &f.sig.params, &f.block, &sig, &env, &[], decl, Some((id, 0)));
             let sig = match decl {
                 Some(d) => crate::program::FnSig { ret: d, ..sig },
