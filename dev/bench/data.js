@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795099082409,
+  "lastUpdate": 1795099084439,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -32536,6 +32536,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "lsp peak RSS",
             "value": 71.582,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "committer": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "distinct": true,
+          "id": "f86ca0953e3b085608e3b38391d47b651d60b952",
+          "message": "Default fns of a trait through a type; f64::from_bits; turbofish commas in macro args\n\n- `S::f()`, `<S as Tr>::f()` and `S::f` as a value, where f is a default fn of a trait S implements (no `self`):\n  the callee is found through the type, and Self is bound to it (it used to be \"cannot find value\" / \"cannot infer\n  type parameter Self\").\n- `f64::from_bits` / `f32::from_bits`.\n- Macro arguments split at top-level commas: a part that does not parse is joined with the next ones\n  (`assert_eq!(-86, sub::<Abc, Def>())`).\n\ntests/ui: run-pass traits/item-inside-macro.rs, union/union-nonzero.rs pass. Removed from the baseline (they passed\nonly because the call used to fail): compile-fail associated-types/assoc-type-element-mismatch-in-hrtb.rs,\nassociated-types/issue-44153.rs (an impl whose where-clause does not hold), privacy/privacy-ufcs.rs (zustc has no\nprivacy check).\nKPIs: no change outside noise.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-19T14:33:55Z",
+          "tree_id": "09bd6c308fa84d4a8e4bc2465a71bf7514b1a937",
+          "url": "https://github.com/mizchi/zust/commit/f86ca0953e3b085608e3b38391d47b651d60b952"
+        },
+        "date": 1795099084160,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "lsp definition p50",
+            "value": 0.674,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp hover p50",
+            "value": 0.475,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp completion p50",
+            "value": 0.978,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp references p50",
+            "value": 2.209,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp rename p50",
+            "value": 0.616,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp signatureHelp p50",
+            "value": 0.695,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp documentHighlight p50",
+            "value": 0.762,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp ready (startup to indexed)",
+            "value": 122.469,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp peak RSS",
+            "value": 71.676,
             "unit": "MiB"
           }
         ]
