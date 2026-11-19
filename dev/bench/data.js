@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795052985395,
+  "lastUpdate": 1795052987373,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -17032,6 +17032,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "lsp peak RSS",
             "value": 69.789,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "committer": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "distinct": true,
+          "id": "75630e2cce177b9ddee6b7d452a290d18bc93836",
+          "message": "Casts to `_` and `*const _` / `*mut _`\n\n`x as _` takes the expected type (else the source type); `&x as *const _` takes\nthe source's pointee, `0 as *const _` the expected pointer type; an integer literal\ncast to a pointer is a usize. A pointer whose pointee stays unknown is E0641, as in\nrustc (this also stops a crash on such casts). tests/ui: run-pass +5, check-pass +3,\ncompile-fail +2. Four compile-fail tests leave the baseline: they passed only because\n`as _` was unsupported on the annotated line (their errors are lifetime errors, a\ntemporary dropped while borrowed, and an invalid dyn-pointer cast).\nKPIs unchanged.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-19T01:45:17Z",
+          "tree_id": "d0b8766e4b4642ad9de1c42d0027905fa941cdfd",
+          "url": "https://github.com/mizchi/zust/commit/75630e2cce177b9ddee6b7d452a290d18bc93836"
+        },
+        "date": 1795052986937,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "lsp definition p50",
+            "value": 0.467,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp hover p50",
+            "value": 0.395,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp completion p50",
+            "value": 1.11,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp references p50",
+            "value": 10.075,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp rename p50",
+            "value": 0.43,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp signatureHelp p50",
+            "value": 0.791,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp documentHighlight p50",
+            "value": 0.888,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp ready (startup to indexed)",
+            "value": 116.734,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp peak RSS",
+            "value": 69.727,
             "unit": "MiB"
           }
         ]
