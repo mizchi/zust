@@ -685,6 +685,10 @@ fn resolve_opaque(prog: &mut Program, src: &str, items: &[SrcItem]) -> R<()> {
                 _ => false,
             };
             let no_value = no_value || unit_tail;
+            // (`-> Vec<impl Debug> { panic!() }`: nothing says what the type is)
+            if no_value && !matches!(f.sig.ret, Some(crate::parse::Ty::Impl(_))) {
+                return Err(format!("{}:1: type annotations needed (the return type of `{}` is not known from its body)", items[ii as usize].line, f.sig.name));
+            }
             if let Some(t) = r.filter(|&t| (t != Ty::Unit || no_value) && !prog.has_param(t) && !has_hole_ty(t)) {
                 prog.sigs[id as usize].ret = t;
                 done[k] = true;

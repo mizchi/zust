@@ -941,6 +941,9 @@ impl Program {
                     );
                 }
                 // (本体から決める `impl Trait` はいったん () にして、後で resolve_opaque が入れる)
+                if let Some(d) = &ss.ret_decl {
+                    p.resolve_g(d, &gnames).map_err(|e| format!("{}:1: {e}", it.line))?;
+                }
                 let ret = if ss.ret == TySyn::Named(OPAQUE_RET.into()) {
                     p.opaque.push(p.names.len() as u32);
                     Ty::Unit

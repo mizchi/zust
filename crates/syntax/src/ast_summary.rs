@@ -445,6 +445,7 @@ fn parse_sig(sig: &PSig, is_extern: bool, is_main: bool, owner: Option<&Owner>) 
             params.push(tysyn(t, self_ty)?);
         }
     }
+    let mut ret_decl = None;
     let ret = match &sig.ret {
         None => TySyn::Prim(Ty::Unit),
         // (`-> impl ?Sized` with no other trait: a return value must have a size)
@@ -454,6 +455,12 @@ fn parse_sig(sig: &PSig, is_extern: bool, is_main: bool, owner: Option<&Owner>) 
             return err("the size for values of type `impl ?Sized` cannot be known at compilation time");
         }
         Some(PTy::Impl(_)) => TySyn::Named(IMPL_RET.into()),
+        // (`-> Option<impl Debug>`: the whole type comes from the body, as for `-> impl Trait`)
+        Some(PTy::Path(Some(q), _)) if nested_impl(q) => return err("`impl Trait` is not allowed in paths"),
+        Some(t) if nested_impl(t) => {
+            ret_decl = Some(tysyn(&impl_as_infer(t), self_ty)?);
+            TySyn::Named(IMPL_RET.into())
+        }
         Some(t) => tysyn(t, self_ty)?,
     };
     let name = sig.name.clone();
@@ -486,6 +493,7 @@ fn parse_sig(sig: &PSig, is_extern: bool, is_main: bool, owner: Option<&Owner>) 
         export: false,
         panic_handler: false,
         ret_from: ret_from(sig),
+        ret_decl,
         is_unsafe: sig.quals.iter().any(|q| q == "unsafe") || (is_extern && !sig.quals.iter().any(|q| q == "safe")),
     })
 }
@@ -851,6 +859,60 @@ fn lit_ty(t: &str, int_hint: Option<Ty>) -> Option<TySyn> {
         return Some(TySyn::Prim(if suffix == "f32" { Ty::F32 } else { Ty::F64 }));
     }
     Some(TySyn::Prim(Ty::from_suffix(suffix).or(int_hint).unwrap_or(Ty::I32)))
+}
+
+/// whether an `impl Trait` appears inside t
+fn nested_impl(t: &PTy) -> bool {
+    match t {
+        PTy::Impl(_) => true,
+        PTy::Path(q, p) => {
+            q.as_deref().is_some_and(nested_impl)
+                || p.segs.iter().any(|s| {
+                    s.args.iter().any(|a| matches!(a, crate::parse::GArg::Ty(t) | crate::parse::GArg::Bind(_, t) if nested_impl(t)))
+                        || s.fn_args.as_ref().is_some_and(|(v, r)| v.iter().any(nested_impl) || r.as_deref().is_some_and(nested_impl))
+                })
+        }
+        PTy::Ref(_, _, i) | PTy::Ptr(_, i) | PTy::Slice(i) | PTy::Array(i, _) => nested_impl(i),
+        PTy::Tuple(v) => v.iter().any(nested_impl),
+        PTy::Fn(v, r) => v.iter().any(nested_impl) || nested_impl(r),
+        _ => false,
+    }
+}
+
+/// t with each `impl Trait` in it as `_`
+fn impl_as_infer(t: &PTy) -> PTy {
+    use crate::parse::GArg;
+    let b = |i: &PTy| Box::new(impl_as_infer(i));
+    match t {
+        PTy::Impl(_) => PTy::Infer,
+        PTy::Path(q, p) => {
+            let mut p = p.clone();
+            for s in &mut p.segs {
+                for a in &mut s.args {
+                    match a {
+                        GArg::Ty(t) | GArg::Bind(_, t) => *t = impl_as_infer(t),
+                        _ => {}
+                    }
+                }
+                if let Some((v, r)) = &mut s.fn_args {
+                    for t in v.iter_mut() {
+                        *t = impl_as_infer(t);
+                    }
+                    if let Some(r) = r {
+                        **r = impl_as_infer(r);
+                    }
+                }
+            }
+            PTy::Path(q.as_deref().map(b), p)
+        }
+        PTy::Ref(l, m, i) => PTy::Ref(l.clone(), *m, b(i)),
+        PTy::Ptr(m, i) => PTy::Ptr(*m, b(i)),
+        PTy::Slice(i) => PTy::Slice(b(i)),
+        PTy::Array(i, n) => PTy::Array(b(i), n.clone()),
+        PTy::Tuple(v) => PTy::Tuple(v.iter().map(impl_as_infer).collect()),
+        PTy::Fn(v, r) => PTy::Fn(v.iter().map(impl_as_infer).collect(), b(r)),
+        t => t.clone(),
+    }
 }
 
 /// 引数の名前 (識別子のパターンなら)

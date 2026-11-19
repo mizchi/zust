@@ -274,6 +274,9 @@ pub struct SigSyn {
     /// Which reference arguments the return value may borrow from (borrow checking): bit i for argument i (self
     /// first), bit 63 set when known. 0: not known (any of them)
     pub ret_from: u64,
+    /// `-> Option<impl Debug>`: the declared type with each `impl Trait` as `_` (ret, inferred from the body,
+    /// is the opaque marker); checked for names it does not find
+    pub ret_decl: Option<TySyn>,
 }
 
 /// enum のバリアント (要約に保存する形)
