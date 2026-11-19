@@ -1081,6 +1081,8 @@ impl Program {
             })
             .collect();
         // 4. trait の実装 (impl ヘッダの要約から)
+        // (traits with an impl for `&T` of a type parameter T)
+        let mut ref_blankets: std::collections::HashSet<String> = Default::default();
         // (impls for Box: (trait, line), checked against blanket impls of the same trait after the loop)
         let mut box_impls: Vec<(String, usize)> = vec![];
         for (ii, (it, sm)) in items.iter().zip(sums).enumerate() {
@@ -1142,7 +1144,29 @@ impl Program {
                 continue;
             }
             // (`impl<T> Tr for T`, with or without members)
+            // (`impl<T: Tr> Tr for &T` / `&mut T` with no functions (only types and consts), and a trait with no default
+            // methods: nothing to call, so it counts as a blanket impl. With functions, calls on `&T` would reach T's
+            // methods instead: not supported)
+            let ref_of_param = matches!(&sm.impl_self_ty, Some(TySyn::Ref(_, i)) if matches!(&**i, TySyn::Named(n) if n == sn))
+                && sm.impl_generics.iter().any(|g| g.0 == *sn);
+            if ref_of_param {
+                let defaults = p.traits.get(tr).is_some_and(|ids| ids.iter().any(|&id| p.sigs[id as usize].has_body));
+                if !sm.fns.is_empty() || defaults {
+                    return Err(format!("{}:1: impls for references to a type parameter (`impl<T> {tr} for &T`) are not supported", it.line));
+                }
+                // (`impl<T> Foo for T` covers `&U` too)
+                if p.blanket_traits.contains(tr) {
+                    return Err(format!("{}:1: conflicting implementations of trait `{tr}` for type `&_` (E0119)", it.line));
+                }
+                ref_blankets.insert(tr.clone());
+                p.blanket_selfs.insert(sn.clone());
+                p.blanket_traits.insert(tr.clone());
+                continue;
+            }
             if sm.impl_generics.iter().any(|g| g.0 == *sn) && matches!(sm.impl_self_ty, Some(TySyn::Named(_))) {
+                if ref_blankets.contains(tr) {
+                    return Err(format!("{}:1: conflicting implementations of trait `{tr}` for type `&_` (E0119)", it.line));
+                }
                 p.blanket_selfs.insert(sn.clone());
                 p.blanket_traits.insert(tr.clone());
                 // (the trait's default methods are methods of every type)

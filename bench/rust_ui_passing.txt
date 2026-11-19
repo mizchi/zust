@@ -361,6 +361,7 @@ compile-fail	async-await/issues/issue-51751.rs
 run-pass	async-await/issues/issue-54752-async-block.rs
 check-pass	async-await/issues/issue-54974.rs
 check-pass	async-await/issues/issue-55324.rs
+run-pass	async-await/issues/issue-55809.rs
 check-pass	async-await/issues/issue-58885.rs
 check-pass	async-await/issues/issue-59001.rs
 check-pass	async-await/issues/issue-60518.rs
@@ -2003,6 +2004,7 @@ compile-fail	feature-gates/feature-gate-try_blocks_heterogeneous.rs
 compile-fail	feature-gates/feature-gate-type_alias_impl_trait.rs
 compile-fail	feature-gates/feature-gate-type_ascription.rs
 check-pass	feature-gates/feature-gate-unqualified-local-imports.rs
+compile-fail	feature-gates/feature-gate-with_negative_coherence.rs
 compile-fail	feature-gates/feature-gate-yeet_expr.rs
 check-pass	feature-gates/issue-43106-gating-of-deprecated.rs
 compile-fail	feature-gates/issue-43106-gating-of-derive-2.rs
@@ -2043,6 +2045,7 @@ compile-fail	fn/fn-recover-return-sign2.rs
 compile-fail	fn/fn-trait-formatting.rs
 compile-fail	fn/fn-trait-use-named-params-issue-140169.rs
 run-pass	fn/fun-call-variants.rs
+check-pass	fn/implied-bounds-unnorm-associated-type-3.rs
 run-pass	fn/issue-1451.rs
 compile-fail	fn/issue-3044.rs
 compile-fail	fn/issue-3099.rs
@@ -2373,6 +2376,7 @@ check-pass	impl-trait/issues/issue-100187.rs
 compile-fail	impl-trait/issues/issue-102605.rs
 compile-fail	impl-trait/issues/issue-103181-2.rs
 compile-fail	impl-trait/issues/issue-103599.rs
+check-pass	impl-trait/issues/issue-104815.rs
 compile-fail	impl-trait/issues/issue-21659-show-relevant-trait-impls-3.rs
 check-pass	impl-trait/issues/issue-42479.rs
 check-pass	impl-trait/issues/issue-46959.rs
@@ -4451,6 +4455,7 @@ check-pass	regions/regions-no-variance-from-fn-generics.rs
 run-pass	regions/regions-nullary-variant.rs
 check-pass	regions/regions-outlives-nominal-type.rs
 check-pass	regions/regions-outlives-projection-hrtype.rs
+check-pass	regions/regions-outlives-projection-trait-def.rs
 check-pass	regions/regions-outlives-scalar.rs
 run-pass	regions/regions-params.rs
 compile-fail	regions/regions-pattern-typing-issue-19552.rs
