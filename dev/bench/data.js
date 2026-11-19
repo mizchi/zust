@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795095402889,
+  "lastUpdate": 1795095404978,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -51740,6 +51740,70 @@ window.BENCHMARK_DATA = {
           {
             "name": "tests/ui compile-fail passing",
             "value": 3306,
+            "unit": "tests"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "committer": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "distinct": true,
+          "id": "eaf8aa7b2850d226264166dc057a14210f9c271d",
+          "message": "kpi_track: cratebench/run.py loaded by its path (bench/ has a run.py of its own)\n\nMeasured on the reference 45579fc against now, the two new workloads show what gen5000 hid: check of gen_traits\n(without dyn, which 45579fc cannot build) 955.1 M -> 959.6 M (+0.47%), crates' edit builds 315.3 M -> 317.6 M\n(+0.70%), where gen5000's check moved +0.06%.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-19T13:30:35Z",
+          "tree_id": "d9f84e733a539ec2d4f8f393d4d8f573bd80a82e",
+          "url": "https://github.com/mizchi/zust/commit/eaf8aa7b2850d226264166dc057a14210f9c271d"
+        },
+        "date": 1795095404526,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tests/ui run-pass pass rate",
+            "value": 68.18,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui run-pass passing",
+            "value": 1626,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui check-pass pass rate",
+            "value": 75.71,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui check-pass passing",
+            "value": 1368,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui build-pass pass rate",
+            "value": 70.37,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui build-pass passing",
+            "value": 95,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui compile-fail pass rate",
+            "value": 44.94,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui compile-fail passing",
+            "value": 3307,
             "unit": "tests"
           }
         ]
