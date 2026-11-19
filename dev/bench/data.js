@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795107489361,
+  "lastUpdate": 1795107491873,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -55450,6 +55450,70 @@ window.BENCHMARK_DATA = {
           {
             "name": "tests/ui compile-fail passing",
             "value": 3321,
+            "unit": "tests"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "committer": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "distinct": true,
+          "id": "32dacd1579ede7004db3ceceeaa749c40e80ea70",
+          "message": "Fixes found building scopeguard (bluss/scopeguard 1.2.0) with zustc\n\nscopeguard now builds as a lib + app workspace and its program prints what rustc's does (it is not added to\ncratebench: the crate would be a new submodule). What it needed:\n\n- cfg::strip: an item with a keyword (`#[cfg(feature = \"x\")] pub fn g<T, F>(..) where F: FnOnce(T), {..}`) ended at\n  the first `,` of its generics; it ends at its `;` or block.\n- `defer! { .. }` followed by more statements: a brace-delimited macro call in statement position is spliced into the\n  block as a statement (it was wrapped as an expression with no `;`, and its `let` guard dropped at once).\n- The crate-item renamer (`guard` -> `scopeguard__guard`) also renamed a fn's own parameter / `let` of that name in\n  its body (`fn into_inner(guard: Self) { ManuallyDrop::new(guard) }`); names a fn binds itself are left alone.\n- The prelude's ManuallyDrop kept its value in a field named `value`, which shadowed the field of the type it derefs\n  to (`guard.value`); it is `__md_value`. `*x` of a Deref struct the type records did not name goes through its deref.\n- `std::thread::panicking()` (false: a panic stops the process without unwinding).\n- `strategy: PhantomData` where `PhantomData<fn(S) -> S>` is expected: a generic unit struct is the expected instance.\n\ncratebench: the 6 crates build and give the same output as before. tests/ui: run-pass\nassociated-types/self-type-projection-dyn-coerce.rs, check-pass macros/panic-temporaries.rs, compile-fail\nborrowck/multiple-mutable-borrows-error-65131.rs; 0 regressions (async-await/edition-deny-async-fns-2015.rs fails at\nits line for another reason: bench/rust_ui_accidental.txt).\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-19T16:52:04Z",
+          "tree_id": "58ff2c8ebe3ec0ca9f604807a0e89881146097e1",
+          "url": "https://github.com/mizchi/zust/commit/32dacd1579ede7004db3ceceeaa749c40e80ea70"
+        },
+        "date": 1795107491406,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tests/ui run-pass pass rate",
+            "value": 69.18,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui run-pass passing",
+            "value": 1650,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui check-pass pass rate",
+            "value": 77.03,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui check-pass passing",
+            "value": 1392,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui build-pass pass rate",
+            "value": 70.37,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui build-pass passing",
+            "value": 95,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui compile-fail pass rate",
+            "value": 45.15,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui compile-fail passing",
+            "value": 3322,
             "unit": "tests"
           }
         ]
