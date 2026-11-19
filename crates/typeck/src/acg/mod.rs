@@ -1328,7 +1328,10 @@ impl Cx<'_> {
                     let Some(init) = init else {
                         return err(SP, "`let` without initializer is not supported");
                     };
-                    if is_place_expr(init) {
+                    // (`let _ = Foo;` with Foo a unit struct (or a const) is a value: dropped at once)
+                    let local = !matches!(init, Expr::Path(None, p) if ident_of(p).is_some_and(|n| self.lookup(n).is_none()
+                        && !self.prog.const_index.get(n).is_some_and(|&ci| self.prog.consts[ci as usize].stat.is_some())));
+                    if is_place_expr(init) && local {
                         // (`let _ = x;` does not read x)
                         self.bk.place_depth += 1;
                         let r = self.place(init);

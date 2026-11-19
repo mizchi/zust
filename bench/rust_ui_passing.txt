@@ -1033,6 +1033,7 @@ check-pass	closures/boxed-closure-captures-fnmut-with-ref.rs
 run-pass	closures/boxed-closure-lifetime-13808.rs
 check-pass	closures/boxed-closure-with-borrowed-param.rs
 run-pass	closures/call-closure-through-lifetime-generic-struct.rs
+run-pass	closures/call-fnmut-trait-object-via-ref-mut.rs
 compile-fail	closures/closure-arg-type-mismatch-method-receiver.rs
 compile-fail	closures/closure-expected.rs
 compile-fail	closures/closure-immutable-outer-variable.rs
@@ -1745,6 +1746,7 @@ run-pass	drop-bounds/drop-bounds-impl-drop.rs
 run-pass	drop/box-drop-unused-value-statement-regression.rs
 run-pass	drop/conditional-drop-10734.rs
 run-pass	drop/destructor-run-for-expression-4734.rs
+run-pass	drop/destructor-run-for-let-ignore-6892.rs
 compile-fail	drop/drop-conflicting-impls.rs
 run-pass	drop/drop-count-assertion-16151.rs
 run-pass	drop/drop-immediate-non-box-ty-9446.rs
@@ -2845,6 +2847,7 @@ check-pass	late-bound-lifetimes/downgraded_to_early_through_alias.rs
 run-pass	late-bound-lifetimes/issue-36381.rs
 check-pass	late-bound-lifetimes/issue-47511.rs
 compile-fail	late-bound-lifetimes/issue-80618.rs
+check-pass	late-bound-lifetimes/late_bound_through_alias.rs
 check-pass	late-bound-lifetimes/predicate-is-global.rs
 run-pass	layout/aggregate-lang/struct-align.rs
 run-pass	layout/aggregate-lang/struct-offsets.rs
@@ -4755,8 +4758,6 @@ compile-fail	regions/outlives-with-missing.rs
 run-pass	regions/owned-implies-static.rs
 check-pass	regions/region-bound-extra-bound-in-inherent-impl.rs
 check-pass	regions/region-bound-same-bounds-in-trait-and-impl.rs
-compile-fail	regions/region-lifetime-bounds-on-fns-where-clause.rs
-compile-fail	regions/region-multiple-lifetime-bounds-on-fns-where-clause.rs
 check-pass	regions/region-object-lifetime-1.rs
 check-pass	regions/region-object-lifetime-3.rs
 compile-fail	regions/regions-addr-of-arg.rs
@@ -4803,7 +4804,6 @@ run-pass	regions/regions-infer-region-in-fn-but-not-type.rs
 run-pass	regions/regions-infer-static-from-proc.rs
 run-pass	regions/regions-issue-21422.rs
 run-pass	regions/regions-issue-22246.rs
-compile-fail	regions/regions-lifetime-bounds-on-fns.rs
 run-pass	regions/regions-lifetime-static-items-enclosing-scopes.rs
 run-pass	regions/regions-link-fn-args.rs
 run-pass	regions/regions-lub-ref-ref-rc.rs
@@ -5294,6 +5294,7 @@ compile-fail	structs-enums/issue-103869.rs
 run-pass	structs-enums/issue-1701.rs
 compile-fail	structs-enums/issue-3008-3.rs
 run-pass	structs-enums/issue-38002.rs
+run-pass	structs-enums/issue-50731.rs
 run-pass	structs-enums/ivec-tag.rs
 check-pass	structs-enums/nested-enum-same-names.rs
 run-pass	structs-enums/rec-extend.rs
@@ -5422,6 +5423,7 @@ compile-fail	suggestions/dont-suggest-private-trait-method.rs
 compile-fail	suggestions/dont-suggest-ref/simple.rs
 compile-fail	suggestions/dont-suggest-ufcs-for-const.rs
 run-pass	suggestions/dont-try-removing-the-field.rs
+compile-fail	suggestions/dont-wrap-ambiguous-receivers.rs
 compile-fail	suggestions/double-reference-ty-in-self-ty.rs
 compile-fail	suggestions/dyn-incompatible-trait-should-use-self-2021-without-dyn.rs
 compile-fail	suggestions/dyn-incompatible-trait-should-use-self-2021.rs
@@ -5636,6 +5638,7 @@ compile-fail	sync/mutexguard-sync.rs
 compile-fail	sync/suggest-cell.rs
 compile-fail	sync/suggest-once-cell.rs
 compile-fail	sync/suggest-ref-cell.rs
+check-pass	target-feature/const-target-feature-fn-ptr-coercion.rs
 build-pass	target-feature/implied-features.rs
 check-pass	thread-local/long-docs.rs
 check-pass	thread-local/name-collision.rs
