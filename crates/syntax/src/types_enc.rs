@@ -120,7 +120,6 @@ crate::enc_struct!(SigSyn {
     panic_handler,
     ret_from,
     is_unsafe,
-    ret_decl,
 });
 crate::enc_struct!(Summary {
     fns,

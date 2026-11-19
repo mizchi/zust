@@ -7,7 +7,7 @@ use crate::ast_types::tysyn;
 use crate::lexer::{ItemKind as LexKind, SrcItem};
 use crate::parse::{Block, Bound, Expr, Fields, FnSig as PSig, GParam, Generics, Item, ItemKind, Pat, Path, Stmt, Ty as PTy, parse_file};
 use crate::types::{
-    AssocSyn, CONST_GENERIC, ClosureSyn, IMPL_RET, OPAQUE_RET, Owner, SigSyn, Summary, Ty, TySyn, VariantKind, VariantSyn,
+    AssocSyn, CONST_GENERIC, ClosureSyn, IMPL_RET, OPAQUE_NESTED, OPAQUE_RET, Owner, SigSyn, Summary, Ty, TySyn, VariantKind, VariantSyn,
 };
 
 pub type R<T> = Result<T, String>;
@@ -445,7 +445,6 @@ fn parse_sig(sig: &PSig, is_extern: bool, is_main: bool, owner: Option<&Owner>) 
             params.push(tysyn(t, self_ty)?);
         }
     }
-    let mut ret_decl = None;
     let ret = match &sig.ret {
         None => TySyn::Prim(Ty::Unit),
         // (`-> impl ?Sized` with no other trait: a return value must have a size)
@@ -458,8 +457,7 @@ fn parse_sig(sig: &PSig, is_extern: bool, is_main: bool, owner: Option<&Owner>) 
         // (`-> Option<impl Debug>`: the whole type comes from the body, as for `-> impl Trait`)
         Some(PTy::Path(Some(q), _)) if nested_impl(q) => return err("`impl Trait` is not allowed in paths"),
         Some(t) if nested_impl(t) => {
-            ret_decl = Some(tysyn(&impl_as_infer(t), self_ty)?);
-            TySyn::Named(IMPL_RET.into())
+            TySyn::App(OPAQUE_NESTED.into(), vec![tysyn(&impl_as_infer(t), self_ty)?])
         }
         Some(t) => tysyn(t, self_ty)?,
     };
@@ -493,7 +491,6 @@ fn parse_sig(sig: &PSig, is_extern: bool, is_main: bool, owner: Option<&Owner>) 
         export: false,
         panic_handler: false,
         ret_from: ret_from(sig),
-        ret_decl,
         is_unsafe: sig.quals.iter().any(|q| q == "unsafe") || (is_extern && !sig.quals.iter().any(|q| q == "safe")),
     })
 }

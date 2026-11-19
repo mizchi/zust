@@ -941,10 +941,17 @@ impl Program {
                     );
                 }
                 // (本体から決める `impl Trait` はいったん () にして、後で resolve_opaque が入れる)
-                if let Some(d) = &ss.ret_decl {
-                    p.resolve_g(d, &gnames).map_err(|e| format!("{}:1: {e}", it.line))?;
-                }
-                let ret = if ss.ret == TySyn::Named(OPAQUE_RET.into()) {
+                let nested = match &ss.ret {
+                    TySyn::App(n, d) if n == OPAQUE_NESTED => {
+                        p.resolve_g(&d[0], &gnames).map_err(|e| format!("{}:1: {e}", it.line))?;
+                        true
+                    }
+                    _ => false,
+                };
+                // (a trait's declaration without a body: a placeholder, as for `-> impl Tr;`)
+                let ret = if nested && !ss.has_body {
+                    Ty::Unit
+                } else if nested || ss.ret == TySyn::Named(OPAQUE_RET.into()) {
                     p.opaque.push(p.names.len() as u32);
                     Ty::Unit
                 } else {

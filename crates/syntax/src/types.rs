@@ -274,9 +274,6 @@ pub struct SigSyn {
     /// Which reference arguments the return value may borrow from (borrow checking): bit i for argument i (self
     /// first), bit 63 set when known. 0: not known (any of them)
     pub ret_from: u64,
-    /// `-> Option<impl Debug>`: the declared type with each `impl Trait` as `_` (ret, inferred from the body,
-    /// is the opaque marker); checked for names it does not find
-    pub ret_decl: Option<TySyn>,
 }
 
 /// enum のバリアント (要約に保存する形)
@@ -401,6 +398,9 @@ pub const CONST_LEN_BASE: u32 = 0xFFFF_FF00;
 pub const IMPL_RET: &str = "impl Trait";
 /// クロージャでない `impl Trait` の戻り値 (`-> impl Iterator<Item = u32>`): 本体の型推論で決める
 pub const OPAQUE_RET: &str = "impl Trait (opaque)";
+/// `-> Option<impl Debug>`: `App(OPAQUE_NESTED, [the declared type with each impl Trait as _])`. The whole type comes
+/// from the body, as for OPAQUE_RET; the declared type is resolved only for the names it does not find
+pub const OPAQUE_NESTED: &str = "impl Trait (nested)";
 
 impl Default for TySyn {
     fn default() -> Self {
