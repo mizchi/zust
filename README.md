@@ -26,7 +26,7 @@
 
 ## Status
 
-Numbers measured <!-- measured -->2026-11-19, b0e509d<!-- /measured --> by CI on each push to main (bench.yml runs
+Numbers measured <!-- measured -->2026-11-19, a3af0e6<!-- /measured --> by CI on each push to main (bench.yml runs
 `bench/ci_bench.py` and `bench/rust_ui.py`, then `scripts/update_readme.py` writes them here). Times come from shared
 GitHub Actions runners and vary by about ±20%; the instruction counts (valgrind) do not.
 
@@ -39,9 +39,9 @@ only the tests it can be asked to handle (no nightly features, auxiliary crates 
 | kind | applicable | pass |
 |---|---:|---:|
 | run-pass (builds, runs, same output) | 2385 | 1603 (67.2%) |
-| check-pass (accepted by `zustc check`) | 1807 | 1356 (75.0%) |
+| check-pass (accepted by `zustc check`) | 1807 | 1360 (75.3%) |
 | build-pass | 135 | 94 (69.6%) |
-| compile-fail (rejected at an annotated line) | 7358 | 3306 (44.9%) |
+| compile-fail (rejected at an annotated line) | 7358 | 3307 (44.9%) |
 <!-- /auto:ui -->
 
 [What is supported](#what-is-supported) breaks this down by area.
@@ -53,22 +53,22 @@ Build speed, build cache size and LSP latency on generated programs of 1000 / 50
 <!-- auto:kpi -->
 | KPI | gen1000 | gen5000 |
 |---|---:|---:|
-| cold build | 116 ms | 526 ms |
-| no-op build | 13.0 ms | 60.6 ms |
-| build after editing one function | 19.4 ms | 69.1 ms |
-| `check` | 77 ms | 376 ms |
-| no-op build (instructions) | 141.0 M | 665.8 M |
-| edit one function (instructions) | 134.1 M | 625.1 M |
-| `check` (instructions) | 792.7 M | 3904.8 M |
+| cold build | 119 ms | 534 ms |
+| no-op build | 12.6 ms | 59.5 ms |
+| build after editing one function | 17.2 ms | 65.4 ms |
+| `check` | 75 ms | 369 ms |
+| no-op build (instructions) | 141.4 M | 670.7 M |
+| edit one function (instructions) | 134.5 M | 626.8 M |
+| `check` (instructions) | 792.7 M | 3906.6 M |
 | build cache on disk | 387.2 KiB | 1902.8 KiB |
 | binary | 324.0 KiB | 1558.3 KiB |
-| cold build peak RSS | 17.7 MiB | 51.9 MiB |
+| cold build peak RSS | 17.8 MiB | 52.0 MiB |
 
 | zust-analyzer (zustc's own sources) | |
 |---|---:|
-| p50: definition, hover, completion, references, rename | 0.50 ms / 0.38 ms / 0.93 ms / 2.76 ms / 0.54 ms |
-| startup until indexed | 110 ms |
-| peak RSS | 70.6 MiB |
+| p50: definition, hover, completion, references, rename | 0.43 ms / 0.35 ms / 1.01 ms / 2.28 ms / 0.51 ms |
+| startup until indexed | 106 ms |
+| peak RSS | 71.0 MiB |
 <!-- /auto:kpi -->
 
 Every change is also measured on its own with `python3 bench/kpi_track.py`, so that small increases that add up stay
@@ -298,9 +298,9 @@ the measured numbers. The [reports](docs/reports/) explain each step.
 ### Overall
 
 - [x] tests/ui run-pass: <!-- total:run-pass -->67.2% (1603 / 2385)
-- [x] tests/ui check-pass: <!-- total:check-pass -->75.0% (1356 / 1807)
+- [x] tests/ui check-pass: <!-- total:check-pass -->75.3% (1360 / 1807)
 - [x] tests/ui build-pass: <!-- total:build-pass -->69.6% (94 / 135)
-- [ ] tests/ui compile-fail (an error on an annotated line): <!-- total:compile-fail -->44.9% (3306 / 7358)
+- [ ] tests/ui compile-fail (an error on an annotated line): <!-- total:compile-fail -->44.9% (3307 / 7358)
 - [x] real crates: fnv, adler2, hex, itoa, rustc-hash and cfg-if build and give the same output (6 / 6)
 - [x] zust-analyzer answers like rust-analyzer: 95.4% (rust-analyzer: 96.2%)
 
@@ -361,7 +361,7 @@ the measured numbers. The [reports](docs/reports/) explain each step.
   `BTreeMap`/`BTreeSet`, `VecDeque`, `BinaryHeap`, `Rc`/`Arc`, `Cell`/`RefCell`, `Mutex`, `OnceLock`, `ManuallyDrop`,
   `Duration`, `AtomicPtr`, `RangeTo` / `RangeFull` as types, `Fuse`, `iter::Empty`, `NonNull`, `Pin` (a plain pointer: `Pin::new`, `get_mut`, `into_inner`, deref), `std::task` (`Poll`, `Context`, `Waker::noop`) and the `Future` trait for futures implemented and polled by hand, `UnsafeCell`, `PhantomData`, atomics, `mpsc`, `mem::*`, `ptr::{read, write, drop_in_place, null}`,
   `iter::{repeat, once, empty, repeat_with, successors}`, `reverse` / `fill` / `rotate_left` / `rotate_right` on arrays and slices, formatting, stdin/stdout/fs/env/process basics
-- [ ] async / await: <!-- ui:async-await -->74.8%. It runs at once, with no executor (no `poll`, `Waker`, `Pin<Box<dyn Future>>`)
+- [ ] async / await: <!-- ui:async-await -->78.6%. It runs at once, with no executor (no `poll`, `Waker`, `Pin<Box<dyn Future>>`)
 - [ ] threads: <!-- ui:threads-sendsync -->66.7%. One thread: `thread::spawn` runs the closure at once
 - [ ] iterators: <!-- ui:iterators -->41.2% (`iter::empty()` cannot infer its item from the target)
 - [ ] FFI: <!-- ui:abi -->14.3%. Scalars only, no structs by value
