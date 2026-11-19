@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795099084439,
+  "lastUpdate": 1795099086204,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -43770,6 +43770,85 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/mizchi/zust/commit/731f606a24f9802316ed348e6c595c2313902807"
         },
         "date": 1795098142878,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "parity documentSymbol (名前の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity workspace/symbol (上位 20 の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity definition (行き先の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity hover (名前を含む)",
+            "value": 87.5,
+            "unit": "%"
+          },
+          {
+            "name": "parity references (数の一致)",
+            "value": 94.286,
+            "unit": "%"
+          },
+          {
+            "name": "parity documentHighlight (数の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity rename (書き換えの一致)",
+            "value": 94.737,
+            "unit": "%"
+          },
+          {
+            "name": "parity signatureHelp (名前・引数の数・今の引数の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity completion `x.\\|` (書いてある名前を含む)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity completion `na\\|me` (同)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity 一致の平均",
+            "value": 97.652,
+            "unit": "%"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "committer": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "distinct": true,
+          "id": "f86ca0953e3b085608e3b38391d47b651d60b952",
+          "message": "Default fns of a trait through a type; f64::from_bits; turbofish commas in macro args\n\n- `S::f()`, `<S as Tr>::f()` and `S::f` as a value, where f is a default fn of a trait S implements (no `self`):\n  the callee is found through the type, and Self is bound to it (it used to be \"cannot find value\" / \"cannot infer\n  type parameter Self\").\n- `f64::from_bits` / `f32::from_bits`.\n- Macro arguments split at top-level commas: a part that does not parse is joined with the next ones\n  (`assert_eq!(-86, sub::<Abc, Def>())`).\n\ntests/ui: run-pass traits/item-inside-macro.rs, union/union-nonzero.rs pass. Removed from the baseline (they passed\nonly because the call used to fail): compile-fail associated-types/assoc-type-element-mismatch-in-hrtb.rs,\nassociated-types/issue-44153.rs (an impl whose where-clause does not hold), privacy/privacy-ufcs.rs (zustc has no\nprivacy check).\nKPIs: no change outside noise.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-19T14:33:55Z",
+          "tree_id": "09bd6c308fa84d4a8e4bc2465a71bf7514b1a937",
+          "url": "https://github.com/mizchi/zust/commit/f86ca0953e3b085608e3b38391d47b651d60b952"
+        },
+        "date": 1795099085950,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
