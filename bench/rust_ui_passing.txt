@@ -2600,12 +2600,12 @@ compile-fail	impl-trait/impl_trait_projections.rs
 check-pass	impl-trait/in-ctfe/fully_monomorphic_const_eval.rs
 check-pass	impl-trait/in-ctfe/match-arm-exhaustive.rs
 check-pass	impl-trait/in-trait/assumed-wf-bounds-in-impl.rs
-compile-fail	impl-trait/in-trait/bad-item-bound-within-rpitit-2.rs
 compile-fail	impl-trait/in-trait/bad-projection-from-opaque.rs
+check-pass	impl-trait/in-trait/box-coerce-span-in-default.rs
 check-pass	impl-trait/in-trait/deep-match-works.rs
-compile-fail	impl-trait/in-trait/default-body-type-err.rs
 check-pass	impl-trait/in-trait/default-body.rs
 check-pass	impl-trait/in-trait/default-method-binder-shifting.rs
+check-pass	impl-trait/in-trait/default-method-constraint.rs
 compile-fail	impl-trait/in-trait/dont-probe-missing-item-name-3.rs
 check-pass	impl-trait/in-trait/early.rs
 compile-fail	impl-trait/in-trait/ensure-rpitits-are-created-before-freezing.rs
@@ -2623,8 +2623,10 @@ check-pass	impl-trait/in-trait/rpitit-cycle-in-generics-of.rs
 compile-fail	impl-trait/in-trait/rpitit-duplicate-associated-fn-with-nested.rs
 compile-fail	impl-trait/in-trait/rpitit-duplicate-associated-fn.rs
 check-pass	impl-trait/in-trait/shorthand-projection-in-rpitit-bound.rs
+check-pass	impl-trait/in-trait/sized-rpits-dont-need-pointer-like.rs
 check-pass	impl-trait/in-trait/success.rs
 compile-fail	impl-trait/in-trait/suggest-missing-item.rs
+check-pass	impl-trait/in-trait/variances-of-gat.rs
 check-pass	impl-trait/in-trait/where-clause.rs
 check-pass	impl-trait/inside-item-nested-in-anon-const.rs
 compile-fail	impl-trait/issues/issue-100075-2.rs

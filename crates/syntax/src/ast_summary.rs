@@ -1508,6 +1508,10 @@ pub fn parse_and_summarize(src: &str, it: &SrcItem, owner: Option<&Owner>) -> R<
                 if sig.ret == TySyn::Named(IMPL_RET.into()) && body.is_none() {
                     sig.ret = TySyn::Prim(Ty::Unit);
                 }
+                // (a default method `fn bar() -> impl Sized { .. }`: the type is its body's, as for a free fn)
+                if sig.ret == TySyn::Named(IMPL_RET.into()) {
+                    sig.ret = TySyn::Named(OPAQUE_RET.into());
+                }
                 let mut sm = Summary::default();
                 sm.fns.push((format!("{}::{}", ow.base, fs.name), sig));
                 where_types(item, Some(ow), &mut sm.where_types);
