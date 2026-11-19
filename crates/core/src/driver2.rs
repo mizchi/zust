@@ -599,7 +599,7 @@ impl Session2 {
             deny_unreachable = (c.contains("#![deny(") || c.contains("#![forbid(")) && c.contains("unreachable_patterns");
             ["lib", "rlib", "dylib", "cdylib", "staticlib", "proc-macro"].iter().any(|k| c.contains(&format!("#![crate_type=\"{k}\"]")))
         };
-        let mut prog = Program::build_with(&items, &sums, self.ctx.lib.is_none() && !lib_attr)?;
+        let mut prog = Program::build_with(&items, &sums, self.ctx.lib.is_none() && !lib_attr).map_err(|e| name_line(&e, &src, &items))?;
         tm.lap("program", String::new());
         prog.prelude_from = user as u32;
         prog.overflow_checks = !self.opts.opt;
@@ -1005,6 +1005,28 @@ impl Session2 {
         }
     }
 
+}
+
+/// An error at an item's first line about a name it does not find (`L:1: cannot find type \`X\``): at the line of the
+/// item where X is first written instead (a field, a parameter), when that is another line
+fn name_line(e: &str, src: &str, items: &[SrcItem]) -> String {
+    let Some((l, rest)) = e.split_once(":1: ") else { return e.to_string() };
+    let Ok(line) = l.parse::<usize>() else { return e.to_string() };
+    let name = ["cannot find type `", "cannot find trait `", "cannot find value `", "cannot find struct `"]
+        .iter()
+        .find_map(|p| rest.strip_prefix(p))
+        .and_then(|r| r.split('`').next());
+    let (Some(name), Some(it)) = (name, items.iter().find(|it| it.line == line)) else { return e.to_string() };
+    let text = &src[it.start..it.end.min(src.len())];
+    let word = |i: usize| {
+        let before = text[..i].chars().next_back().is_none_or(|c| !(c.is_alphanumeric() || c == '_'));
+        let after = text[i + name.len()..].chars().next().is_none_or(|c| !(c.is_alphanumeric() || c == '_'));
+        before && after
+    };
+    match text.match_indices(name).map(|(i, _)| i).find(|&i| word(i)) {
+        Some(i) => format!("{}:1: {rest}", line + text[..i].matches('\n').count()),
+        None => e.to_string(),
+    }
 }
 
 /// compile_id と、コード生成が要求した (総称関数の) インスタンス

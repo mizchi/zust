@@ -12,6 +12,7 @@ compile-fail	argument-suggestions/basic.rs
 compile-fail	argument-suggestions/complex.rs
 compile-fail	argument-suggestions/disjoint-spans-issue-151607.rs
 compile-fail	argument-suggestions/display-is-suggestable.rs
+compile-fail	argument-suggestions/extern-fn-arg-names.rs
 compile-fail	argument-suggestions/invalid_arguments.rs
 compile-fail	argument-suggestions/issue-100154.rs
 compile-fail	argument-suggestions/issue-100478.rs
@@ -360,6 +361,7 @@ check-pass	async-await/issue-64391.rs
 compile-fail	async-await/issue-66387-if-without-else.rs
 compile-fail	async-await/issue-69446-fnmut-capture.rs
 compile-fail	async-await/issue-70594.rs
+compile-fail	async-await/issue-72590-type-error-sized.rs
 check-pass	async-await/issue-73050.rs
 compile-fail	async-await/issue-73741-type-err.rs
 compile-fail	async-await/issue-74047.rs
@@ -424,7 +426,6 @@ compile-fail	async-await/unconstrained-lifetimes.rs
 check-pass	async-await/unreachable-lint.rs
 compile-fail	async-await/unresolved_type_param.rs
 compile-fail	async-await/unsized-across-await.rs
-compile-fail	attributes/ambiguous_derive_helpers.rs
 compile-fail	attributes/attr-bad-crate-attr.rs
 compile-fail	attributes/attrs-with-no-formal-in-generics-3.rs
 check-pass	attributes/builtin-attr-macro-value-issue-145922.rs
@@ -914,6 +915,7 @@ compile-fail	cast/cast-to-unsized-trait-object-suggestion.rs
 compile-fail	cast/cast-to-unsized-type.rs
 compile-fail	cast/cast_lit_suffix-issue-138392.rs
 compile-fail	cast/casts-differing-anon.rs
+compile-fail	cast/casts-issue-46365.rs
 run-pass	cast/constant-expression-cast-9942.rs
 check-pass	cast/dyn-tails-need-normalization.rs
 compile-fail	cast/enum-to-numeric-cast.rs
@@ -1066,6 +1068,7 @@ check-pass	closures/issue-97607.rs
 compile-fail	closures/issue-99565.rs
 compile-fail	closures/labeled-break-inside-closure-62480.rs
 compile-fail	closures/local-type-mismatch-attribution-issue-127048.rs
+compile-fail	closures/local-type-mix.rs
 compile-fail	closures/missing-body.rs
 run-pass	closures/module-path-not-confused-with-upvar.rs
 check-pass	closures/move-closure-can-call-captured-fnmut.rs
@@ -1493,6 +1496,9 @@ run-pass	consts/deref_in_pattern.rs
 compile-fail	consts/do-not-ice-on-field-access-of-err-type.rs
 build-pass	consts/drop-maybe_uninit.rs
 build-pass	consts/enclosing-scope-rule.rs
+compile-fail	consts/erroneous_type_in_const_return_value.rs
+compile-fail	consts/erroneous_type_in_promoted.rs
+compile-fail	consts/error-is-freeze.rs
 check-pass	consts/int_ptr_for_zst_slices.rs
 compile-fail	consts/invalid-const-in-body.rs
 check-pass	consts/issue-104155.rs
@@ -1811,12 +1817,14 @@ compile-fail	dyn-compatibility/reference-to-bare-trait-in-fn-inputs-and-outputs-
 compile-fail	dyn-compatibility/require-assoc-for-all-super-substs.rs
 compile-fail	dyn-compatibility/supertrait-mentions-GAT.rs
 compile-fail	dyn-keyword/dyn-2015-edition-keyword-ident-lint.rs
+compile-fail	dyn-keyword/dyn-2018-edition-lint.rs
 compile-fail	dyn-keyword/dyn-2021-edition-error.rs
 compile-fail	dyn-keyword/dyn-angle-brackets.rs
 compile-fail	dyn-keyword/issue-5153.rs
 check-pass	dyn-keyword/issue-56327-dyn-trait-in-macro-is-okay.rs
 compile-fail	dyn-keyword/misspelled-associated-item.rs
 compile-fail	dyn-keyword/suggest-dyn-on-bare-trait-in-pat.rs
+compile-fail	dyn-keyword/suggest-struct-or-union-add-generic-impl-trait.rs
 compile-fail	dyn-keyword/unresolved-associated-item.rs
 compile-fail	editions/dyn-trait-sugg-2021.rs
 run-pass	editions/edition-specific-identifier-shadowing-53333.rs
@@ -2802,6 +2810,7 @@ run-pass	layout/aggregate-lang/struct-size.rs
 run-pass	layout/aggregate-lang/union-align.rs
 run-pass	layout/aggregate-lang/union-offsets.rs
 run-pass	layout/aggregate-lang/union-size.rs
+compile-fail	layout/cannot-transmute-unnormalizable-type.rs
 compile-fail	layout/failed-to-get-layout-for-type-error-ice-92979.rs
 compile-fail	layout/issue-unsized-tail-restatic-ice-122488.rs
 compile-fail	layout/malformed-unsized-type-in-union.rs
@@ -2972,10 +2981,12 @@ compile-fail	lint/ice-array-into-iter-lint-issue-121532.rs
 build-pass	lint/ice-unions-known-panics-lint-issue-121534.rs
 run-pass	lint/improper-ctypes/allow-phantomdata-in-ffi.rs
 check-pass	lint/improper-ctypes/ice-irregular-recursive-types.rs
+compile-fail	lint/improper-ctypes/lint-cstr.rs
 check-pass	lint/improper-ctypes/mustpass-113436.rs
 check-pass	lint/improper-ctypes/mustpass-113900.rs
 check-pass	lint/improper-ctypes/mustpass-134060.rs
 check-pass	lint/improper-ctypes/mustpass-73747.rs
+compile-fail	lint/improper-ctypes/nonzero-char.rs
 check-pass	lint/inert-attr-macro.rs
 check-pass	lint/int_to_ptr-no_std.rs
 check-pass	lint/int_to_ptr.rs
@@ -2988,6 +2999,7 @@ check-pass	lint/issue-110573.rs
 check-pass	lint/issue-14837.rs
 build-pass	lint/issue-1866.rs
 check-pass	lint/issue-19102.rs
+compile-fail	lint/issue-35075.rs
 check-pass	lint/issue-47775-nested-macro-unnecessary-parens-arg.rs
 run-pass	lint/issue-49588-non-shorthand-field-patterns-in-pattern-macro.rs
 check-pass	lint/issue-54099-camel-case-underscore-types.rs
@@ -3415,6 +3427,7 @@ compile-fail	mir/build-async-error-body-correctly.rs
 build-pass	mir/field-projection-invariant.rs
 build-pass	mir/field-ty-ascription-enums.rs
 build-pass	mir/field-ty-ascription.rs
+compile-fail	mir/gvn-opt-138225.rs
 compile-fail	mir/ice-mir-const-qualif-125837.rs
 check-pass	mir/issue-101844.rs
 compile-fail	mir/issue-102389.rs
@@ -3776,6 +3789,7 @@ compile-fail	offset-of/offset-of-output-type.rs
 compile-fail	offset-of/offset-of-self.rs
 build-pass	offset-of/offset-of-temporaries.rs
 run-pass	offset-of/offset-of-tuple-nested.rs
+compile-fail	offset-of/offset-of-unsized-trait-object-missing-lifetime.rs
 compile-fail	on-unimplemented/slice-index.rs
 compile-fail	on-unimplemented/suggest_tuple_wrap.rs
 compile-fail	on-unimplemented/suggest_tuple_wrap_root_obligation.rs
@@ -4586,12 +4600,16 @@ check-pass	privacy/trait_more_private_than_item.rs
 compile-fail	privacy/unreachable-issue-121455.rs
 check-pass	privacy/use-in-impl-scope-12729.rs
 check-pass	privacy/where-pub-type-impls-priv-trait.rs
-compile-fail	proc-macro/attribute.rs
 check-pass	proc-macro/derive-multiple-with-packed.rs
 check-pass	proc-macro/extern-prelude-extern-crate-proc-macro.rs
-compile-fail	proc-macro/illegal-proc-macro-derive-use.rs
-compile-fail	proc-macro/invalid-attributes.rs
 compile-fail	proc-macro/macro-namespace-reserved-2.rs
+compile-fail	proc-macro/proc-macro-abi.rs
+compile-fail	proc-macro/pub-at-crate-root.rs
+compile-fail	proc-macro/reserved-macro-names.rs
+compile-fail	proc-macro/signature-proc-macro-attribute.rs
+compile-fail	proc-macro/signature-proc-macro-derive.rs
+compile-fail	proc-macro/signature-proc-macro.rs
+compile-fail	proc-macro/visibility-path.rs
 run-pass	process-termination/process-termination-simple.rs
 run-pass	process/windows-exit-code-still-active.rs
 run-pass	ptr_ops/ptr-swap-basic.rs
@@ -4660,6 +4678,7 @@ run-pass	regions/issue-5243.rs
 check-pass	regions/issue-56537-closure-uses-region-from-container.rs
 check-pass	regions/issue-72051-member-region-hang.rs
 compile-fail	regions/multiple-sources-for-outlives-requirement.rs
+compile-fail	regions/outlives-with-missing.rs
 run-pass	regions/owned-implies-static.rs
 check-pass	regions/region-bound-extra-bound-in-inherent-impl.rs
 check-pass	regions/region-bound-same-bounds-in-trait-and-impl.rs
@@ -5523,6 +5542,7 @@ compile-fail	suggestions/type-ascription-instead-of-variant.rs
 compile-fail	suggestions/type-mismatch-byte-literal.rs
 compile-fail	suggestions/type-mismatch-struct-field-shorthand-2.rs
 compile-fail	suggestions/type-mismatch-struct-field-shorthand.rs
+compile-fail	suggestions/type-not-found-in-adt-field.rs
 compile-fail	suggestions/types/dont-suggest-path-names.rs
 compile-fail	suggestions/types/into-inference-needs-type.rs
 compile-fail	suggestions/ufcs-for-deref-inner-clone.rs
@@ -5954,6 +5974,7 @@ compile-fail	typeck/assign-non-lval-mut-ref.rs
 compile-fail	typeck/assign-non-lval-needs-deref.rs
 compile-fail	typeck/associated-type-ice-recovery-66353.rs
 compile-fail	typeck/attempted-access-non-fatal.rs
+compile-fail	typeck/autoderef-with-param-env-error.rs
 compile-fail	typeck/bad-index-modulo-higher-ranked-regions.rs
 compile-fail	typeck/bad-recursive-type-sig-infer.rs
 compile-fail	typeck/call-block.rs
@@ -6045,6 +6066,7 @@ compile-fail	typeck/missing-private-fields-in-struct-literal.rs
 compile-fail	typeck/missing-type-annotation.rs
 compile-fail	typeck/no-type-for-node-ice.rs
 compile-fail	typeck/non-function-call-error.rs
+compile-fail	typeck/nonexistent-field-not-ambiguous.rs
 run-pass	typeck/osstring-str-equality.rs
 compile-fail	typeck/output-type-mismatch.rs
 compile-fail	typeck/parenthesized-type-param.rs
@@ -6171,6 +6193,7 @@ compile-fail	union/union-unsafe.rs
 compile-fail	union/union.rs
 check-pass	union/union_access_through_block.rs
 check-pass	union/union_wild_or_wild.rs
+compile-fail	union/unresolved-field-isnt-copy.rs
 compile-fail	unop/unop-neg-bool.rs
 compile-fail	unsafe/break-inside-unsafe-block-issue-128604.rs
 check-pass	unsafe/edition-2024-unsafe_op_in_unsafe_fn.rs
@@ -6229,6 +6252,7 @@ check-pass	use/use-mod/use-mod-5.rs
 check-pass	use/use-mod/use-mod-6.rs
 compile-fail	variance/leaking-unnameables.rs
 check-pass	variance/smart-pointers-covariant.rs
+compile-fail	variance/type-resolve-error-two-structs-deep.rs
 compile-fail	variance/variance-contravariant-arg-object.rs
 compile-fail	variance/variance-covariant-arg-object.rs
 run-pass	variance/variance-intersection-of-ref-and-opt-ref.rs
@@ -6251,10 +6275,12 @@ compile-fail	wf/range-expr-root-of-constant-issue-40749.rs
 compile-fail	wf/wf-associated-const.rs
 check-pass	wf/wf-dyn-in-hrtb-bound-issue-157122.rs
 compile-fail	wf/wf-fn-def-check-sig-2.rs
+compile-fail	where-clauses/ignore-err-clauses.rs
 check-pass	where-clauses/impl-method-where-clause-resolution.rs
 check-pass	where-clauses/issue-50825-1.rs
 run-pass	where-clauses/issue-50825.rs
 compile-fail	where-clauses/method-suggestion-no-duplication.rs
+compile-fail	where-clauses/normalization-of-unknown-type.rs
 run-pass	where-clauses/obligation-error-propagation.rs
 check-pass	where-clauses/where-clause-bounds-inconsistency.rs
 run-pass	where-clauses/where-clause-early-bound-lifetimes.rs
