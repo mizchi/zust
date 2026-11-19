@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795123172422,
+  "lastUpdate": 1795123174717,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -50524,6 +50524,85 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/mizchi/zust/commit/fb2070be86af0e9e7dcb65939b28258f31deb5c0"
         },
         "date": 1795121536351,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "parity documentSymbol (名前の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity workspace/symbol (上位 20 の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity definition (行き先の一致)",
+            "value": 97.143,
+            "unit": "%"
+          },
+          {
+            "name": "parity hover (名前を含む)",
+            "value": 87.5,
+            "unit": "%"
+          },
+          {
+            "name": "parity references (数の一致)",
+            "value": 86.111,
+            "unit": "%"
+          },
+          {
+            "name": "parity documentHighlight (数の一致)",
+            "value": 97.143,
+            "unit": "%"
+          },
+          {
+            "name": "parity rename (書き換えの一致)",
+            "value": 83.333,
+            "unit": "%"
+          },
+          {
+            "name": "parity signatureHelp (名前・引数の数・今の引数の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity completion `x.\\|` (書いてある名前を含む)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity completion `na\\|me` (同)",
+            "value": 92.857,
+            "unit": "%"
+          },
+          {
+            "name": "parity 一致の平均",
+            "value": 94.409,
+            "unit": "%"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "committer": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "distinct": true,
+          "id": "5e449f68357f47f0b5571f6fafcba01de173a182",
+          "message": "ops: Bit*Assign / Shl / Shr traits; cache per-item trait lookups in the prelude selection\n\n- The prelude declares BitAndAssign, BitOrAssign, BitXorAssign,\n  ShlAssign, ShrAssign, Shl and Shr for user impls (`b &= x`,\n  `b <<= 1`, `b << 2` on a user type).\n- The selection's fixpoint loop asked is_cmp_trait / is_op_trait /\n  gated_trait for every trait member on every round, scanning the\n  header's identifiers each time; they are now computed once per item.\n  This pays for the longer operator-trait list and more.\n\ntests/ui: no change in passes (wf-misc-methods-issue-28609 is a\nwrong-reason pass, now in rust_ui_accidental.txt).\nKPI: traits edit -1.5%, crates edit -1.1%, check -0.06%, no-op -0.1%.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-19T21:12:11Z",
+          "tree_id": "5d80dc198284d5b9c49b8ca725ddb754f9f92af3",
+          "url": "https://github.com/mizchi/zust/commit/5e449f68357f47f0b5571f6fafcba01de173a182"
+        },
+        "date": 1795123174200,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
