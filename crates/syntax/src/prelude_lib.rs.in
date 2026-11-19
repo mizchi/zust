@@ -8424,6 +8424,57 @@ pub struct Pin<P> {
     pointer: P,
 }
 
+// (std::task: futures run at once (see `async`), so nothing here is polled by zustc itself; these let a program
+// implement Future and poll by hand)
+pub enum Poll<T> {
+    Ready(T),
+    Pending,
+}
+
+impl<T> Poll<T> {
+    pub fn is_ready(&self) -> bool {
+        match self {
+            Poll::Ready(_) => true,
+            Poll::Pending => false,
+        }
+    }
+    pub fn is_pending(&self) -> bool {
+        !self.is_ready()
+    }
+}
+
+pub struct Waker {
+    _w: u8,
+}
+
+static __EXR_NOOP_WAKER: Waker = Waker { _w: 0 };
+
+impl Waker {
+    pub fn noop() -> &'static Waker {
+        &__EXR_NOOP_WAKER
+    }
+    pub fn wake(self) {}
+    pub fn wake_by_ref(&self) {}
+}
+
+pub struct Context<'a> {
+    waker: &'a Waker,
+}
+
+impl<'a> Context<'a> {
+    pub fn from_waker(waker: &'a Waker) -> Context<'a> {
+        Context { waker: waker }
+    }
+    pub fn waker(&self) -> &'a Waker {
+        self.waker
+    }
+}
+
+pub trait Future {
+    type Output;
+    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output>;
+}
+
 impl<P> Pin<P> {
     pub fn new(pointer: P) -> Pin<P> {
         Pin { pointer }

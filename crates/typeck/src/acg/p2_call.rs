@@ -511,6 +511,8 @@ impl Cx<'_> {
             }
         }
         let mut recv_temp = None;
+        // (a Box value that is not a place: `Box::new(s).m()`, for `self: Box<Self>`)
+        let mut recv_box: Option<(Value, Ty)> = None;
         let mut p = if is_place_expr(recv) {
             self.place(recv)?
         } else {
@@ -524,13 +526,20 @@ impl Cx<'_> {
             match r {
                 (_, Ty::Never) => return Ok((None, Ty::Never)),
                 (Some(a), t) if t.is_agg() => Place::Mem(a, 0, t),
-                (Some(v), Ty::Ref(_, i) | Ty::Box(i)) => Place::Mem(v, 0, *i),
+                (Some(v), t @ (Ty::Ref(_, i) | Ty::Box(i))) => {
+                    if matches!(t, Ty::Box(_)) {
+                        recv_box = Some((v, t));
+                    }
+                    Place::Mem(v, 0, *i)
+                }
                 (_, t) => {
                     return err(SP, format!("no method `{}` on type `{}`", method, self.prog.tn(t)));
                 }
             }
         };
         let name = method.to_string();
+        // (the receiver before any deref: a `self: Pin<&mut Self>` method takes the Pin itself)
+        let p0 = p;
         // (メソッドがなく `impl Deref` があれば、deref した先で探す: `rc.borrow_mut()`)
         let mut via_deref = false;
         let mut derefs = 0;
@@ -598,6 +607,33 @@ impl Cx<'_> {
             Ty::Ref(m, _) => Ty::Ref(m, intern(st)),
             _ => st,
         };
+        // (`Pin::new(&mut s).poll(cx)` with `fn poll(self: Pin<&mut Self>, ..)`: the Pin value, not what it points to)
+        let p0t = p0.ty();
+        // (`self: Box<Self>`: the Box itself)
+        if let Ty::Box(bi) = self.prog.sigs[id as usize].params[0] {
+            let bv = match recv_box {
+                Some((v, t)) if t == Ty::Box(bi) => Some(v),
+                _ if p0t == Ty::Box(bi) => self.read(p0).0,
+                _ => None,
+            };
+            if *bi == st {
+                if let Some(bv) = bv {
+                    match recv_temp {
+                        Some(f) => self.clear_flag(f),
+                        None => self.mark_moved(recv),
+                    }
+                    return self.call_fn(id, Some((bv, p0t)), &margs.iter().collect::<Vec<_>>(), tf, expected, SP);
+                }
+            }
+        }
+        if let (Ty::Struct(ps), true) = (self.prog.sigs[id as usize].params[0], via_deref) {
+            if self.prog.structs[self.prog.base_of(ps) as usize].name == "Pin" && p0t == Ty::Struct(ps) {
+                if let Place::Mem(a0, o0, _) = p0 {
+                    let v0 = self.addr_plus(a0, o0);
+                    return self.call_fn(id, Some((v0, p0t)), &margs.iter().collect::<Vec<_>>(), tf, expected, SP);
+                }
+            }
+        }
         // (`self` by value out of a capture held by value (`move || foo.unwrap()`): the value moves to a temporary
         // and the capture's slot becomes empty)
         if !matches!(recv_ty, Ty::Ref(..)) && recv_temp.is_none() && self.needs_drop(st) && self.zeroable(st) {

@@ -317,6 +317,7 @@ compile-fail	async-await/async-unsafe-fn-call-in-safe.rs
 compile-fail	async-await/await-keyword/await-macro-rustfix.rs
 compile-fail	async-await/await-keyword/incorrect-syntax-suggestions.rs
 check-pass	async-await/bound-normalization.rs
+compile-fail	async-await/clone-suggestion.rs
 compile-fail	async-await/coroutine-desc.rs
 build-pass	async-await/default-struct-update.rs
 compile-fail	async-await/dont-print-desugared-async.rs
@@ -334,6 +335,7 @@ compile-fail	async-await/impl-future-escaping-bound-vars-ice.rs
 check-pass	async-await/in-trait/async-associated-types.rs
 check-pass	async-await/in-trait/async-example-desugared-boxed.rs
 check-pass	async-await/in-trait/async-example-desugared-in-trait.rs
+check-pass	async-await/in-trait/async-example-desugared-manual.rs
 check-pass	async-await/in-trait/async-example-desugared.rs
 check-pass	async-await/in-trait/async-example.rs
 check-pass	async-await/in-trait/async-lifetimes-and-bounds.rs
@@ -352,7 +354,9 @@ compile-fail	async-await/in-trait/return-not-existing-pair.rs
 compile-fail	async-await/in-trait/return-not-existing-type-wrapping-rpitit.rs
 check-pass	async-await/in-trait/returning-possibly-unsized-self.rs
 compile-fail	async-await/incorrect-move-async-order-issue-79694.rs
+compile-fail	async-await/issue-108572.rs
 check-pass	async-await/issue-54239-private-type-triggers-lint.rs
+compile-fail	async-await/issue-61076.rs
 compile-fail	async-await/issue-61452.rs
 build-pass	async-await/issue-61793.rs
 build-pass	async-await/issue-62658.rs
@@ -369,6 +373,7 @@ compile-fail	async-await/issue-74047.rs
 compile-fail	async-await/issue-74072-lifetime-name-annotations.rs
 compile-fail	async-await/issue-74497-lifetime-in-opaque.rs
 compile-fail	async-await/issue-75785-confusing-named-region.rs
+compile-fail	async-await/issue-76547.rs
 compile-fail	async-await/issue-77993-2.rs
 check-pass	async-await/issue-78115.rs
 compile-fail	async-await/issue-84841.rs
@@ -401,6 +406,7 @@ build-pass	async-await/issues/issue-67611-static-mut-refs.rs
 check-pass	async-await/issues/issue-69307-nested.rs
 check-pass	async-await/issues/issue-69307.rs
 check-pass	async-await/issues/issue-78600.rs
+compile-fail	async-await/issues/issue-78938-async-block.rs
 compile-fail	async-await/issues/issue-95307.rs
 compile-fail	async-await/issues/non-async-enclosing-span.rs
 compile-fail	async-await/labeled-break-in-async-fn-ice-66702.rs
@@ -417,6 +423,7 @@ run-pass	async-await/multiple-lifetimes/variance.rs
 check-pass	async-await/no-params-non-move-async-closure.rs
 check-pass	async-await/no-std.rs
 compile-fail	async-await/partial-initialization-across-await.rs
+compile-fail	async-await/pin-needed-to-poll.rs
 compile-fail	async-await/proper-span-for-type-error.rs
 check-pass	async-await/recursive-async-auto-trait-overflow-only-parent-args.rs
 check-pass	async-await/recursive-async-auto-trait-overflow.rs
@@ -772,6 +779,7 @@ run-pass	borrowck/fsu-moves-and-copies.rs
 compile-fail	borrowck/ice-mutability-error-slicing-121807.rs
 compile-fail	borrowck/immut-function-arguments.rs
 compile-fail	borrowck/immutable-arg.rs
+compile-fail	borrowck/implementation-not-general-enough-ice-133252.rs
 run-pass	borrowck/incorrect-loan-error-on-local-update-5550.rs
 compile-fail	borrowck/index-mut-help-with-impl.rs
 compile-fail	borrowck/index-mut-help.rs
@@ -1904,6 +1912,7 @@ compile-fail	error-codes/E0026.rs
 compile-fail	error-codes/E0027.rs
 compile-fail	error-codes/E0029.rs
 compile-fail	error-codes/E0033.rs
+compile-fail	error-codes/E0050.rs
 compile-fail	error-codes/E0054.rs
 compile-fail	error-codes/E0057.rs
 compile-fail	error-codes/E0060.rs
@@ -3472,6 +3481,7 @@ run-pass	mir/mir_temp_promotions.rs
 run-pass	mir/mir_void_return.rs
 run-pass	mir/mir_void_return_2.rs
 run-pass	mir/simplify-branch-same.rs
+compile-fail	mismatched_types/E0053.rs
 compile-fail	mismatched_types/abridged.rs
 compile-fail	mismatched_types/array-arg-expected-usize.rs
 compile-fail	mismatched_types/array-len-is-closure.rs
@@ -3493,6 +3503,7 @@ compile-fail	mismatched_types/float-literal-inference-restrictions.rs
 compile-fail	mismatched_types/fn-pointer-mismatch-diagnostics.rs
 compile-fail	mismatched_types/generic-mismatch-reporting-issue-116615.rs
 compile-fail	mismatched_types/issue-106182.rs
+compile-fail	mismatched_types/issue-112036.rs
 compile-fail	mismatched_types/issue-118145-unwrap-for-shorthand.rs
 compile-fail	mismatched_types/issue-118510.rs
 compile-fail	mismatched_types/issue-1362.rs
@@ -5043,6 +5054,7 @@ check-pass	rust-2021/inherent-dyn-collision.rs
 check-pass	rust-2021/prelude2021.rs
 check-pass	rust-2021/reserved-prefixes-migration.rs
 compile-fail	rust-2021/reserved-prefixes.rs
+compile-fail	rust-2024/prelude-migration/in_2024_compatibility.rs
 check-pass	rust-2024/raw-gen-lt.rs
 compile-fail	rust-2024/reserved-guarded-strings.rs
 compile-fail	rust-2024/safe-outside-extern.rs
@@ -5059,6 +5071,7 @@ compile-fail	rustdoc/unterminated-doc-comment.rs
 compile-fail	self/arbitrary-self-types-dyn-incompatible.rs
 compile-fail	self/arbitrary_self_type_mut_difference.rs
 compile-fail	self/arbitrary_self_types_needing_mut_pin.rs
+check-pass	self/arbitrary_self_types_pin_lifetime-async.rs
 compile-fail	self/arbitrary_self_types_pin_needing_borrow.rs
 run-pass	self/by-value-self-in-mut-slot.rs
 compile-fail	self/class-missing-self.rs
@@ -5105,7 +5118,9 @@ compile-fail	self/self_type_macro_name.rs
 run-pass	self/string-self-append.rs
 compile-fail	self/suggest-self-2.rs
 compile-fail	self/suggest-self.rs
+run-pass	self/ufcs-explicit-self.rs
 run-pass	self/ufcs-self-method-in-method-body.rs
+run-pass	self/uniq-self-in-mut-slot.rs
 check-pass	shadowed/primitive-type-shadowing.rs
 compile-fail	shadowed/shadowed-trait-methods.rs
 run-pass	shadowed/use-shadows-reexport.rs
@@ -5938,6 +5953,7 @@ compile-fail	type-alias-impl-trait/coherence/orphanck-tait-with-projection-arg.r
 check-pass	type-alias-impl-trait/cross_inference_rpit.rs
 check-pass	type-alias-impl-trait/implied_bounds3.rs
 compile-fail	type-alias-impl-trait/issue-60371.rs
+check-pass	type-alias-impl-trait/issue-87455-static-lifetime-ice.rs
 check-pass	type-alias-impl-trait/nested-rpit-with-lifetimes.rs
 check-pass	type-alias-impl-trait/wf-check-rpit-lifetimes.rs
 check-pass	type-alias/issue-14933.rs
@@ -6093,6 +6109,7 @@ compile-fail	typeck/issue-98982.rs
 compile-fail	typeck/main-termination-lifetime-issue-148421.rs
 run-pass	typeck/method-call-on-computed-array-index.rs
 compile-fail	typeck/minus-string.rs
+compile-fail	typeck/mismatched-map-under-self.rs
 compile-fail	typeck/mismatched-types-ref-binding.rs
 compile-fail	typeck/missing-private-fields-in-struct-literal.rs
 compile-fail	typeck/missing-type-annotation.rs

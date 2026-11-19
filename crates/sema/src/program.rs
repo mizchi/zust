@@ -1247,6 +1247,30 @@ impl Program {
                 } else {
                     p.method(*sid, m).is_some()
                 };
+                // (the impl's method against the trait's: the number of parameters (E0050) and the kind of receiver (E0053))
+                if !matches!(tr.as_str(), "Display" | "Debug") {
+                    if let Some(mi) = p.method(*sid, m).filter(|&mi| p.sigs[mi as usize].impl_trait.as_deref() == Some(tr.as_str()) && mi != d) {
+                        let (ds, ms) = (&p.sigs[d as usize], &p.sigs[mi as usize]);
+                        let line = p.item_of[mi as usize].map_or(String::new(), |ii| format!("{}:1: ", items[ii as usize].line));
+                        if ds.params.len() != ms.params.len() && ds.has_self == ms.has_self {
+                            return Err(format!(
+                                "{line}method `{m}` has {} parameters but the declaration in trait `{tr}::{m}` has {} (E0050)",
+                                ms.params.len(),
+                                ds.params.len()
+                            ));
+                        }
+                        let kind = |prog: &Program, t: Ty| match t {
+                            Ty::Ref(false, _) => 1,
+                            Ty::Ref(true, _) => 2,
+                            Ty::Box(_) => 3,
+                            Ty::Struct(x) if prog.structs[prog.base_of(x) as usize].name == "Pin" => 4,
+                            _ => 0,
+                        };
+                        if ds.has_self && ms.has_self && kind(&p, ds.params[0]) != kind(&p, ms.params[0]) {
+                            return Err(format!("{line}method `{m}` has an incompatible type for trait `{tr}` (E0053)"));
+                        }
+                    }
+                }
                 if !p.sigs[d as usize].has_body && !found {
                     let sn = &p.structs[*sid as usize].name;
                     // (the line of the impl block)

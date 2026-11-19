@@ -533,7 +533,7 @@ const SHADOWABLE: &[&str] = &[
     "Chain", "Entry", "Enumerate", "Filter", "FilterMap", "Map", "OptIter", "Scan", "Skip", "Take", "TakeWhile", "Zip",
     "Command", "Mutex", "VarError", "Rev", "StepBy", "Peekable", "Cloned", "Flatten", "FlatMap", "Inspect", "SkipWhile",
     "PathBuf", "Args", "BufWriter", "Pin", "Windows", "Bytes", "MatchIndices", "MutexGuard", "Chunks", "Duration", "Fuse", "Empty", "RangeTo", "RangeToInclusive", "RangeFull",
-    "AtomicPtr", "TryReserveError", "c_void", "Cycle", "JoinHandle", "Chars",
+    "AtomicPtr", "TryReserveError", "c_void", "Cycle", "JoinHandle", "Chars", "Poll", "Waker", "Context", "Future",
 ];
 
 pub fn rename_shadowed(user_src: &str, prelude: String) -> String {
