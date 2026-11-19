@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795124340676,
+  "lastUpdate": 1795124342424,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -50831,6 +50831,85 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/mizchi/zust/commit/5e449f68357f47f0b5571f6fafcba01de173a182"
         },
         "date": 1795123174200,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "parity documentSymbol (名前の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity workspace/symbol (上位 20 の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity definition (行き先の一致)",
+            "value": 97.143,
+            "unit": "%"
+          },
+          {
+            "name": "parity hover (名前を含む)",
+            "value": 87.5,
+            "unit": "%"
+          },
+          {
+            "name": "parity references (数の一致)",
+            "value": 86.111,
+            "unit": "%"
+          },
+          {
+            "name": "parity documentHighlight (数の一致)",
+            "value": 97.143,
+            "unit": "%"
+          },
+          {
+            "name": "parity rename (書き換えの一致)",
+            "value": 83.333,
+            "unit": "%"
+          },
+          {
+            "name": "parity signatureHelp (名前・引数の数・今の引数の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity completion `x.\\|` (書いてある名前を含む)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity completion `na\\|me` (同)",
+            "value": 92.857,
+            "unit": "%"
+          },
+          {
+            "name": "parity 一致の平均",
+            "value": 94.409,
+            "unit": "%"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "committer": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "distinct": true,
+          "id": "ee10b39515413c67539400a56671d99fa8c35f0d",
+          "message": "Empty arrays typed from context; methods of Box<[T; N]>\n\n- `f(&[], &[1, 2])` / `f(None, Some(x))` for a generic f: the other\n  (non-closure) arguments' types solve the type parameters the empty\n  argument's type mentions (`&[i32; 2]` coerces to a `&[T]` parameter).\n- `Box::<[bool; 0]>::new([])`: the turbofish is the content's type.\n- `let _: [(); 0] = [];`: the annotation types an array literal.\n- `b.len()` / `b.iter()` / `b.sort()` with b: Box<[T; N]>: the array's\n  (or the slice's, for the mutating ones) method through the deref.\n\ntests/ui: +4 genuine passes (3 run-pass, 1 check-pass).\nKPI: within noise (all deltas <= +0.12%).\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-19T21:32:15Z",
+          "tree_id": "ee4937910590ca779365fbf6fad2ee2f027c2feb",
+          "url": "https://github.com/mizchi/zust/commit/ee10b39515413c67539400a56671d99fa8c35f0d"
+        },
+        "date": 1795124342206,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
