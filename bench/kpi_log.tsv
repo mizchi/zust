@@ -48,3 +48,4 @@ date	commit	change	noop_M	edit_M	check_M	cache_KiB	lsp_G	run	check	build	cfail
 2026-11-19	c6cb509	into_iter on references	625.169	626.835	3906.040	1902.8	-	1611	1361	95	3302
 2026-11-19	7c07b8f	E0507 for self by value through a reference	625.168	626.835	3908.188	1902.8	-	1611	1361	95	3305
 2026-11-19	734f305	derived Copy needs Copy arguments	625.171	626.837	3906.222	1902.8	-	1611	1361	95	3307
+2026-11-19	eed5907	&*String / &*Vec reborrows	625.167	626.758	3908.001	1902.8	10.8927	1616	1361	95	3307
