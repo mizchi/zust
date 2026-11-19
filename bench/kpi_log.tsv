@@ -34,3 +34,4 @@ date	commit	change	noop_M	edit_M	check_M	cache_KiB	lsp_G	run	check	build	cfail
 2026-11-19	92f21c4	statement positions on the error path only	625.595	626.653	3907.647	1902.8	-	1587	1342	94	3248
 2026-11-19	539a660	missing names at their line in the item	625.541	626.600	3907.583	1902.8	-	1587	1342	94	3274
 2026-11-19	e456175	shadowable Cycle, JoinHandle, Chars	625.422	626.481	3907.557	1902.8	-	1587	1342	94	3275
+2026-11-19	be5ab51	unit struct values in inference, E0055	625.294	626.353	3907.619	1902.8	10.8942	1593	1347	94	3296
