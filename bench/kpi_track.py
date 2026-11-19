@@ -145,6 +145,24 @@ def write_md(rows):
     open(MD, "w").write("\n".join(out) + "\n")
 
 
+def band_check(rows, row, last=7, floor=0.001):
+    out = []
+    for k, name in (("noop_M", "no-op build"), ("edit_M", "edit one fn"), ("check_M", "check"), ("cache_KiB", "cache"), ("lsp_G", "LSP session")):
+        v = num(row, k)
+        hist = [num(r, k) for r in rows[-last:] if num(r, k) is not None]
+        if v is None or len(hist) < 3:
+            continue
+        hist.sort()
+        med = hist[len(hist) // 2]
+        mad = sorted(abs(h - med) for h in hist)[len(hist) // 2]
+        band = max(floor * med, 3 * 1.4826 * mad)
+        if v > med + band:
+            out.append(f"REGRESSION {name}: {v:.3f} against the median {med:.3f} of the last {len(hist)} (band {band / med * 100:.2f}%)")
+        elif v < med - band:
+            out.append(f"improved {name}: {v:.3f} against the median {med:.3f} of the last {len(hist)}")
+    return out
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("change")
@@ -171,6 +189,11 @@ def main():
         if v is None:
             continue
         print(f"{name:14} {v:12.3f}   Δ {pct(v, num(prev, k)) if prev else '-':>8}   Σ {pct(v, num(first, k)):>8}")
+    # (as blaze's benchhistory check: against the median of the last 7 rows, a move past the noise band (0.1%, or
+    # three times the spread the history shows, whichever is larger) is reported)
+    flags = band_check(rows, row)
+    for f in flags:
+        print(f)
     if a.dry_run:
         return
     new = not os.path.exists(LOG)
