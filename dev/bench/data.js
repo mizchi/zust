@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795091321205,
+  "lastUpdate": 1795091323117,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -49474,6 +49474,70 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/mizchi/zust/commit/3a3d91351866062429c3de2b03dd89568afa9a41"
         },
         "date": 1795090365467,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tests/ui run-pass pass rate",
+            "value": 67.92,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui run-pass passing",
+            "value": 1620,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui check-pass pass rate",
+            "value": 75.59,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui check-pass passing",
+            "value": 1366,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui build-pass pass rate",
+            "value": 70.37,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui build-pass passing",
+            "value": 95,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui compile-fail pass rate",
+            "value": 44.97,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui compile-fail passing",
+            "value": 3309,
+            "unit": "tests"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "committer": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "distinct": true,
+          "id": "42856961525f8defc57eb2a4122023deee2c4bc0",
+          "message": "README: blaze's published numbers next to zustc's (not yet run here), and its way of tracking regressions\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-19T12:20:19Z",
+          "tree_id": "1e373d2e85dd70f6ccf16194223d207eda69570f",
+          "url": "https://github.com/mizchi/zust/commit/42856961525f8defc57eb2a4122023deee2c4bc0"
+        },
+        "date": 1795091322818,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
