@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795054731664,
+  "lastUpdate": 1795054733466,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -23508,6 +23508,85 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/mizchi/zust/commit/a6c8ba590419fd478b7597b58ac72f5a3dcf5133"
         },
         "date": 1795054157042,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "parity documentSymbol (名前の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity workspace/symbol (上位 20 の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity definition (行き先の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity hover (名前を含む)",
+            "value": 92.5,
+            "unit": "%"
+          },
+          {
+            "name": "parity references (数の一致)",
+            "value": 97.297,
+            "unit": "%"
+          },
+          {
+            "name": "parity documentHighlight (数の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity rename (書き換えの一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity signatureHelp (名前・引数の数・今の引数の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity completion `x.\\|` (書いてある名前を含む)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity completion `na\\|me` (同)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity 一致の平均",
+            "value": 98.98,
+            "unit": "%"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "committer": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "distinct": true,
+          "id": "38ea62c3e9ca1b9fcc94b983d7aa3344b237a8bf",
+          "message": "SUPPORTED: numbers for a6c8ba5 (the script stopped before these files)\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-19T01:58:38Z",
+          "tree_id": "0a893aa5cfb410933c4fb448d9c71e9174c6c000",
+          "url": "https://github.com/mizchi/zust/commit/38ea62c3e9ca1b9fcc94b983d7aa3344b237a8bf"
+        },
+        "date": 1795054733006,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
