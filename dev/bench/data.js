@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795117709845,
+  "lastUpdate": 1795117711742,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -58769,6 +58769,70 @@ window.BENCHMARK_DATA = {
           {
             "name": "tests/ui check-pass passing",
             "value": 1401,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui build-pass pass rate",
+            "value": 70.37,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui build-pass passing",
+            "value": 95,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui compile-fail pass rate",
+            "value": 45.07,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui compile-fail passing",
+            "value": 3316,
+            "unit": "tests"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "committer": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "distinct": true,
+          "id": "bd7f2c710e0b275838afa8d2f1ecf84459f02231",
+          "message": "E0038: rules only for the program's own traits; no false positives from the prelude or supertraits\n\nThe dyn-compatibility check of 55b8640 also counted a supertrait's parameters as a method's own generics, and the\nprelude's Iterator methods (which leave out `where Self: Sized`) as using Self, so `Box<dyn Iterator<Item = i32>>` /\n`trait A: PartialEq<Foo>` / `trait X<T> { fn dummy(&self) -> T }` read as not dyn compatible. Now a method without\n`where Self: Sized` makes the trait not dyn compatible when it has no `self`, or, for a trait of the program's own,\nwhen it has generics beyond Self and its trait's parameters (Program::trait_ngen) or names Self in its parameters or\nresult (methods of the dyn trait itself). A supertrait `PartialEq` / `PartialOrd` with no arguments (Rhs = Self) is\nmarked (`#SelfRhs`) and also makes it not dyn compatible.\n\ntests/ui: check-pass impl-trait/issues/issue-99642.rs passes; compile-fail suggestions/trait-hidden-method.rs is no\nlonger rejected (it wants E0191, `dyn Iterator` without `Item = ..`, which zustc does not check; it failed before on\nthe vtable error only). cratebench: same output. KPIs: no change outside noise.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-19T19:41:47Z",
+          "tree_id": "06baf2d2c161a7938706ea5d9f742747bf1dd76b",
+          "url": "https://github.com/mizchi/zust/commit/bd7f2c710e0b275838afa8d2f1ecf84459f02231"
+        },
+        "date": 1795117711520,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tests/ui run-pass pass rate",
+            "value": 70.06,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui run-pass passing",
+            "value": 1671,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui check-pass pass rate",
+            "value": 77.59,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui check-pass passing",
+            "value": 1402,
             "unit": "tests"
           },
           {
