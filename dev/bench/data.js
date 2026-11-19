@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795055040451,
+  "lastUpdate": 1795055042303,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -23815,6 +23815,85 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/mizchi/zust/commit/38ea62c3e9ca1b9fcc94b983d7aa3344b237a8bf"
         },
         "date": 1795054733006,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "parity documentSymbol (名前の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity workspace/symbol (上位 20 の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity definition (行き先の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity hover (名前を含む)",
+            "value": 92.5,
+            "unit": "%"
+          },
+          {
+            "name": "parity references (数の一致)",
+            "value": 97.297,
+            "unit": "%"
+          },
+          {
+            "name": "parity documentHighlight (数の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity rename (書き換えの一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity signatureHelp (名前・引数の数・今の引数の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity completion `x.\\|` (書いてある名前を含む)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity completion `na\\|me` (同)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity 一致の平均",
+            "value": 98.98,
+            "unit": "%"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "committer": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "distinct": true,
+          "id": "509b25d33c853d3755e53cb708152162097cb084",
+          "message": "Check the bindings of `dyn Tr<Y = T>` against `type Y: Bound;`\n\nA trait's associated type declarations with bounds are now in the item summary\n(empty for other items: the cache size is unchanged), and `dyn Tr<Y = T>` meets a\n`Tr` bound only when T meets Y's bounds (T a primitive, `str` or a struct name).\ntests/ui compile-fail +3 (three of the tests the previous commit took out of the\nbaseline now pass for the right reason). KPIs unchanged.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-19T02:09:41Z",
+          "tree_id": "a634ee5799f893823b4718fa2cfa676be039130b",
+          "url": "https://github.com/mizchi/zust/commit/509b25d33c853d3755e53cb708152162097cb084"
+        },
+        "date": 1795055041952,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
