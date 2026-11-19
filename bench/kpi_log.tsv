@@ -96,3 +96,4 @@ date	commit	change	noop_M	edit_M	check_M	cache_KiB	lsp_G	run	check	build	cfail
 2026-11-19	b1ef5f1+	RPITIT: a trait's default method returning impl Trait takes its body's type	0.874	591.130	3879.257	1902.8	-	1698	1413	95	3320	1181.687	63.360	11.273	319.383
 2026-11-19	28d1228+	impl Iterator<Item = T> returning a range: the range's literals take T	0.876	591.205	3879.257	1902.8	-	1698	1413	95	3319	1181.468	63.329	11.287	319.518
 2026-11-19	3fbfec8+	Vec::into_boxed_slice; Range::is_empty; iterator chains after (0..v.len())	0.874	590.846	3879.610	1902.8	-	1698	1416	95	3320	1181.971	63.511	11.274	320.484
+2026-11-19	904658b+	for x in an Option / Result value: an if let, no iterator from the prelude	0.877	590.848	3879.613	1902.8	-	1698	1416	95	3319	1181.851	63.492	11.287	320.470

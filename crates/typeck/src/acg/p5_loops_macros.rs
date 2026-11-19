@@ -313,16 +313,29 @@ impl Cx<'_> {
         let Expr::For(label, fpat, fexpr, fbody) = f else { unreachable!() };
         // `for p in opt.iter() { .. }` (Option, with no iterator in the prelude): a loop of at most one turn,
         // `for _ in 0..1 { if let Some(__x) = &opt { let p = __x; .. } }` (`into_iter`: the Option itself)
-        if let Expr::MethodCall(recv, m, _, margs, _) = strip_paren(fexpr) {
-            if margs.is_empty() && matches!(m.as_str(), "iter" | "iter_mut" | "into_iter") {
+        // (`for x in Some(1)` / `for x in ok_value`: the Option / Result itself, as `into_iter`)
+        let direct: Option<(&Expr, &str)> = match self.peek(fexpr) {
+            Some(Ty::Struct(sid)) if matches!(self.prog.structs[self.prog.base_of(sid) as usize].name.as_str(), "Option" | "Result") => {
+                Some((&**fexpr, "into_iter"))
+            }
+            _ => None,
+        };
+        let call: Option<(&Expr, &str)> = match strip_paren(fexpr) {
+            Expr::MethodCall(recv, m, _, margs, _) if margs.is_empty() && matches!(m.as_str(), "iter" | "iter_mut" | "into_iter") => Some((&**recv, m.as_str())),
+            _ => direct,
+        };
+        if let Some((recv, m)) = call {
+            {
                 if let Some(Ty::Struct(sid)) = self.peek(recv) {
-                    if self.prog.structs[self.prog.base_of(sid) as usize].name == "Option" && self.prog.method(sid, m).is_none() {
-                        let scrut = match m.as_str() {
-                            "iter" => Expr::Ref(false, Box::new(Expr::Paren(recv.clone()))),
-                            "iter_mut" => Expr::Ref(true, Box::new(Expr::Paren(recv.clone()))),
-                            _ => Expr::Paren(recv.clone()),
+                    let tyname = self.prog.structs[self.prog.base_of(sid) as usize].name.as_str();
+                    if matches!(tyname, "Option" | "Result") && self.prog.method(sid, m).is_none() {
+                        let ctor = if tyname == "Option" { "Some" } else { "Ok" };
+                        let scrut = match m {
+                            "iter" => Expr::Ref(false, Box::new(Expr::Paren(Box::new(recv.clone())))),
+                            "iter_mut" => Expr::Ref(true, Box::new(Expr::Paren(Box::new(recv.clone())))),
+                            _ => Expr::Paren(Box::new(recv.clone())),
                         };
-                        let some = Pat::TupleStruct(path_of("Some"), vec![Pat::Ident(false, false, "__exr_ox".into(), None)]);
+                        let some = Pat::TupleStruct(path_of(ctor), vec![Pat::Ident(false, false, "__exr_ox".into(), None)]);
                         let mut stmts = vec![Stmt::Let((**fpat).clone(), None, Some(path_expr("__exr_ox")), None, Default::default())];
                         stmts.extend(fbody.stmts.iter().cloned());
                         let iflet = Expr::If(Box::new(Expr::Let(Box::new(some), Box::new(scrut))), crate::parse::Block { stmts }, None);
