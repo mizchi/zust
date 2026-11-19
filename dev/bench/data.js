@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795098139327,
+  "lastUpdate": 1795098141359,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -32308,6 +32308,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "lsp peak RSS",
             "value": 71.211,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "committer": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "distinct": true,
+          "id": "731f606a24f9802316ed348e6c595c2313902807",
+          "message": "No-op builds read no source (stat stamps); prelude selection searches a byte index\n\nWhere zustc was clearly slower than blaze was the no-op build at scale (gen5000: 84 ms against 29 ms): it ran the\nfront end over the whole source with every function a cache hit. blaze's daemon never reads a file whose stat stamp\ndid not move (crates/blaze-vfs/src/watch.rs, with git's racy-stamp rule in disk.rs window_ns).\n\n- zustc keeps <output>.stamp: the stat stamps (dev, ino, size, mtime, ctime, mode) of every file the last\n  successful build read, of both places each `mod x;` looked, of the zustc binary and of the output, under a key of\n  the command line, the working directory and the ZUSTC_/ACG_/MINCLIF_/PATH environment. When all match, the build\n  stops (gen5000 no-op: 625 M -> 0.87 M instructions, 84 ms -> 2 ms). A stamp within 20 ms (2 s for whole-second\n  times) of its file's change is not trusted, a crate using include_str!/include_bytes! keeps none, and the file is\n  removed before a build that does the work. ZUSTC_NO_STAMP=1 turns it off.\n- Prelude selection asked `src.contains` ~90 times per build, and most patterns are in no source, so each read all of\n  it. A source of 256 KiB or more is now searched through an index of the positions of every byte that is not a\n  lowercase letter or white space (each search looks only where the pattern's rarest such byte is), and the\n  whole-source scanners behind `any` first look up a pattern they need (`panic!(`, `..)`, `vec![`, ...).\n  gen5000 edit -5.9%, check -0.9%.\n- kpi_track: the cache's compiler id is the stat of /proc/self/exe, which under valgrind is valgrind's, so the\n  measured edit build used to read a cache its own (valgrind) no-op runs had rewritten. The no-op runs no longer\n  write it, so one unshort-circuited no-op build under valgrind now comes before the edit (otherwise edit read as +7%).\n- vs_blaze: the memory column measured a no-op build; it now measures an edit build. Adds gen5000, and ZUSTC= picks\n  the binary. README's blaze table is measured again.\n\nFixed cost of the stamp file: traits edit +0.25%, crates no-op +0.26% (~0.15 M / 0.03 M instructions).\ntests/ui: 0 regressions. selfhost.sh: the same two failures as before this change (prelude, macros).\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-19T14:17:28Z",
+          "tree_id": "714fb83aed9d3b00eca80b20d814aa5f777b3e08",
+          "url": "https://github.com/mizchi/zust/commit/731f606a24f9802316ed348e6c595c2313902807"
+        },
+        "date": 1795098140865,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "lsp definition p50",
+            "value": 0.437,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp hover p50",
+            "value": 0.365,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp completion p50",
+            "value": 1.018,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp references p50",
+            "value": 1.731,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp rename p50",
+            "value": 0.59,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp signatureHelp p50",
+            "value": 0.74,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp documentHighlight p50",
+            "value": 0.606,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp ready (startup to indexed)",
+            "value": 121.495,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp peak RSS",
+            "value": 71.582,
             "unit": "MiB"
           }
         ]
