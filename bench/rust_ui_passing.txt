@@ -5241,6 +5241,7 @@ compile-fail	str/str-lit-type-mismatch.rs
 compile-fail	str/str-mut-idx.rs
 run-pass	str/str-static-literal.rs
 run-pass	structs-enums/borrow-tuple-fields.rs
+run-pass	structs-enums/call-tuple-struct-ctor-as-fn.rs
 check-pass	structs-enums/class-dtor.rs
 run-pass	structs-enums/class-impl-very-parameterized-trait.rs
 run-pass	structs-enums/class-poly-methods.rs
@@ -5294,6 +5295,7 @@ run-pass	structs-enums/tag-disr-val-shape.rs
 run-pass	structs-enums/tag-exports.rs
 check-pass	structs-enums/tag-in-block.rs
 run-pass	structs-enums/tag.rs
+run-pass	structs-enums/tuple-struct-constructor-pointer.rs
 run-pass	structs-enums/tuple-struct-destructuring.rs
 compile-fail	structs-enums/tuple-variant-as-struct-variant.rs
 compile-fail	structs/default-field-values/non-exhaustive-ctor-not-found.rs
@@ -5394,6 +5396,7 @@ compile-fail	suggestions/dont-suggest-private-trait-method.rs
 compile-fail	suggestions/dont-suggest-ref/simple.rs
 compile-fail	suggestions/dont-suggest-ufcs-for-const.rs
 run-pass	suggestions/dont-try-removing-the-field.rs
+compile-fail	suggestions/dont-wrap-ambiguous-receivers.rs
 compile-fail	suggestions/double-reference-ty-in-self-ty.rs
 compile-fail	suggestions/dyn-incompatible-trait-should-use-self-2021-without-dyn.rs
 compile-fail	suggestions/dyn-incompatible-trait-should-use-self-2021.rs
