@@ -1312,7 +1312,7 @@ pub fn select_with(user_src: &str, user_items: &[SrcItem], cache: &mut SelectCac
     }
     if iter_lib {
         need.insert("Iterator");
-        if need.contains("iter") {
+        if need.contains("iter") || need.contains("into_iter") {
             need.insert("__exr_slice_iter");
         }
         if need.contains("iter_mut") {

@@ -3510,7 +3510,6 @@ compile-fail	mismatched_types/async-unwrap-suggestion.rs
 compile-fail	mismatched_types/binops.rs
 compile-fail	mismatched_types/closure-arg-count-expected-type-issue-47244.rs
 compile-fail	mismatched_types/closure-parameter-type-inference-mismatch.rs
-compile-fail	mismatched_types/collect-method-type-mismatch-66923.rs
 compile-fail	mismatched_types/deref-fn-ptr-arg-type-mismatch.rs
 compile-fail	mismatched_types/diagnostic-method-lookup-returns-sig-with-fewer-args.rs
 compile-fail	mismatched_types/elide-on-tuple-mismatch.rs
@@ -5404,7 +5403,6 @@ compile-fail	suggestions/dont-suggest-private-trait-method.rs
 compile-fail	suggestions/dont-suggest-ref/simple.rs
 compile-fail	suggestions/dont-suggest-ufcs-for-const.rs
 run-pass	suggestions/dont-try-removing-the-field.rs
-compile-fail	suggestions/dont-wrap-ambiguous-receivers.rs
 compile-fail	suggestions/double-reference-ty-in-self-ty.rs
 compile-fail	suggestions/dyn-incompatible-trait-should-use-self-2021-without-dyn.rs
 compile-fail	suggestions/dyn-incompatible-trait-should-use-self-2021.rs

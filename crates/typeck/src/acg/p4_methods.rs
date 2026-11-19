@@ -448,6 +448,14 @@ impl Cx<'_> {
                     Ty::Ptr(name == "as_mut_ptr", intern(elem)),
                 )))
             }
+            // (`r.into_iter()` with r: `&[T; N]` / `&[T]` (a generic fn's `I: IntoIterator`): `r.iter()`)
+            "into_iter"
+                if matches!(self.peek(mc_recv), Some(Ty::Ref(false, Ty::Array(..) | Ty::Slice(_))))
+                    && self.prog.index.contains_key("__exr_slice_iter") =>
+            {
+                let e: &Expr = self.keep_expr(mcall(Expr::Paren(Box::new(mc_recv.clone())), "iter", vec![]));
+                self.expr(e, None).map(Some)
+            }
             "iter" | "iter_mut" | "into_iter" | "enumerate" | "rev" | "copied" | "cloned" => err(
                 SP,
                 format!("`.{name}()` is only supported directly in a `for` loop"),

@@ -510,6 +510,22 @@ impl Cx<'_> {
                 }
             }
         }
+        // (`r.into_iter()` with r: `&Vec<T>` / `&HashMap<..>` (a generic fn's `I: IntoIterator`): what `for x in r`
+        // does, `r.iter()` (or the collection's `__ref_into_iter`); `Vec::into_iter` takes the collection by value)
+        if method == "into_iter" && margs.is_empty() {
+            if let Some(Ty::Ref(false, Ty::Struct(sid))) = self.peek(recv) {
+                let sid = *sid;
+                let by_value = self.prog.method(sid, "into_iter").is_some_and(|id| !matches!(self.prog.sigs[id as usize].params.first(), Some(Ty::Ref(..))));
+                if by_value {
+                    let m = if self.prog.method(sid, "__ref_into_iter").is_some() { "__ref_into_iter" } else { "iter" };
+                    if self.prog.method(sid, m).is_some() {
+                        let ne: &Expr = self.keep_expr(mcall(Expr::Paren(Box::new(recv.clone())), m, vec![]));
+                        return self.expr(ne, expected);
+                    }
+                    return err(SP, "cannot move out of a shared reference (E0507): `into_iter` takes the collection by value");
+                }
+            }
+        }
         let mut recv_temp = None;
         // (a Box value that is not a place: `Box::new(s).m()`, for `self: Box<Self>`)
         let mut recv_box: Option<(Value, Ty)> = None;
