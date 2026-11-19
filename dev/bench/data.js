@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795124338792,
+  "lastUpdate": 1795124340676,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -37780,6 +37780,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "lsp peak RSS",
             "value": 72.422,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "committer": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "distinct": true,
+          "id": "ee10b39515413c67539400a56671d99fa8c35f0d",
+          "message": "Empty arrays typed from context; methods of Box<[T; N]>\n\n- `f(&[], &[1, 2])` / `f(None, Some(x))` for a generic f: the other\n  (non-closure) arguments' types solve the type parameters the empty\n  argument's type mentions (`&[i32; 2]` coerces to a `&[T]` parameter).\n- `Box::<[bool; 0]>::new([])`: the turbofish is the content's type.\n- `let _: [(); 0] = [];`: the annotation types an array literal.\n- `b.len()` / `b.iter()` / `b.sort()` with b: Box<[T; N]>: the array's\n  (or the slice's, for the mutating ones) method through the deref.\n\ntests/ui: +4 genuine passes (3 run-pass, 1 check-pass).\nKPI: within noise (all deltas <= +0.12%).\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-19T21:32:15Z",
+          "tree_id": "ee4937910590ca779365fbf6fad2ee2f027c2feb",
+          "url": "https://github.com/mizchi/zust/commit/ee10b39515413c67539400a56671d99fa8c35f0d"
+        },
+        "date": 1795124340451,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "lsp definition p50",
+            "value": 0.61,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp hover p50",
+            "value": 0.383,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp completion p50",
+            "value": 0.96,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp references p50",
+            "value": 4.783,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp rename p50",
+            "value": 0.408,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp signatureHelp p50",
+            "value": 0.769,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp documentHighlight p50",
+            "value": 0.789,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp ready (startup to indexed)",
+            "value": 113.672,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp peak RSS",
+            "value": 72.469,
             "unit": "MiB"
           }
         ]
