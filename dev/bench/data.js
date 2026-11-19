@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795120851801,
+  "lastUpdate": 1795120853908,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -49910,6 +49910,85 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/mizchi/zust/commit/36f5544e37dd72f5567fa63f193bee19eeb6b8b6"
         },
         "date": 1795119277448,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "parity documentSymbol (名前の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity workspace/symbol (上位 20 の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity definition (行き先の一致)",
+            "value": 97.143,
+            "unit": "%"
+          },
+          {
+            "name": "parity hover (名前を含む)",
+            "value": 87.5,
+            "unit": "%"
+          },
+          {
+            "name": "parity references (数の一致)",
+            "value": 86.111,
+            "unit": "%"
+          },
+          {
+            "name": "parity documentHighlight (数の一致)",
+            "value": 97.143,
+            "unit": "%"
+          },
+          {
+            "name": "parity rename (書き換えの一致)",
+            "value": 83.333,
+            "unit": "%"
+          },
+          {
+            "name": "parity signatureHelp (名前・引数の数・今の引数の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity completion `x.\\|` (書いてある名前を含む)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity completion `na\\|me` (同)",
+            "value": 92.857,
+            "unit": "%"
+          },
+          {
+            "name": "parity 一致の平均",
+            "value": 94.409,
+            "unit": "%"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "committer": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "distinct": true,
+          "id": "afa825835b690b05782057132e6472c76503172c",
+          "message": "macros: textual scope, `pub m!()`, fmt macros in expanded text\n\n- A `macro_rules!` macro called above its only (non-exported, not\n  `use`d) definition reports \"cannot find macro `m` in this scope\".\n- `pub m!(..)` in an item list reports \"can't qualify macro invocation\n  with `pub`\".\n- The prelude selection sees `println ! (` in expanded macro output, so\n  formatting macros passed to a macro no longer miss the Formatter.\n\ntests/ui: +9 genuine passes (5 run-pass, 3 check-pass, 1 compile-fail);\ntwo wrong-reason passes go to rust_ui_accidental.txt.\nKPI: no-op +0.3% (3k instructions; the no-op path does not expand macros).\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-19T20:34:55Z",
+          "tree_id": "27022061b39ddcc5b721ef26f214959fa3fca305",
+          "url": "https://github.com/mizchi/zust/commit/afa825835b690b05782057132e6472c76503172c"
+        },
+        "date": 1795120853421,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
