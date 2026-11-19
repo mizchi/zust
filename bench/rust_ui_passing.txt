@@ -531,6 +531,7 @@ run-pass	binding/match-ref-binding-in-guard-3256.rs
 run-pass	binding/match-ref-binding-mut-option.rs
 run-pass	binding/match-ref-binding-mut.rs
 run-pass	binding/match-ref-binding.rs
+run-pass	binding/match-str.rs
 run-pass	binding/match-struct-0.rs
 run-pass	binding/match-tag.rs
 run-pass	binding/match-unsized.rs
@@ -624,6 +625,7 @@ compile-fail	borrowck/bad-drop-side-effects.rs
 run-pass	borrowck/borrow-box-in-map-3026.rs
 compile-fail	borrowck/borrow-checker-lifetime-error-46471.rs
 compile-fail	borrowck/borrow-immutable-deref-box.rs
+run-pass	borrowck/borrow-in-match-with-format-string.rs
 compile-fail	borrowck/borrow-raw-address-of-borrowed.rs
 check-pass	borrowck/borrow-raw-address-of-deref-mutability-ok.rs
 compile-fail	borrowck/borrow-raw-address-of-deref-mutability.rs
@@ -1598,6 +1600,7 @@ compile-fail	consts/size_of-requires-type-annotation-in-const.rs
 check-pass	consts/static-cycle-error.rs
 check-pass	consts/static-default-lifetime/inner-item.rs
 check-pass	consts/static-default-lifetime/static-trait-impl.rs
+run-pass	consts/static-lifetime-inference-from-const-array.rs
 run-pass	consts/static-mut-refs.rs
 check-pass	consts/static-promoted-to-mutable-static.rs
 run-pass	consts/static-raw-pointer-interning.rs
@@ -3390,6 +3393,7 @@ run-pass	match/match-range-char-const.rs
 compile-fail	match/match-range-fail.rs
 run-pass	match/match-ref-option-pattern.rs
 compile-fail	match/match-static-pattern.rs
+run-pass	match/match-string-slice.rs
 compile-fail	match/match-struct.rs
 compile-fail	match/match-tag-nullary.rs
 compile-fail	match/match-tag-unary.rs
@@ -6221,6 +6225,7 @@ run-pass	unboxed-closures/unboxed-closures-infer-fnmut.rs
 run-pass	unboxed-closures/unboxed-closures-infer-kind.rs
 run-pass	unboxed-closures/unboxed-closures-infer-upvar.rs
 run-pass	unboxed-closures/unboxed-closures-move-mutable.rs
+run-pass	unboxed-closures/unboxed-closures-move-some-upvars-in-by-ref-closure.rs
 run-pass	unboxed-closures/unboxed-closures-prelude.rs
 run-pass	unboxed-closures/unboxed-closures-simple.rs
 run-pass	unboxed-closures/unboxed-closures-single-word-env.rs

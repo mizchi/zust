@@ -574,6 +574,23 @@ impl Cx<'_> {
                 Ok(self.read(p))
             }
             Expr::Unary(..) => self.unary(e, expected),
+            // (`&*s` / `&**r` with s: String or Vec<T> (through Deref): `s.as_str()` / `&s[..]`)
+            Expr::Ref(m, x)
+                if matches!(strip_paren(x), Expr::Unary(op, _, _) if op == "*")
+                    && matches!(strip_paren(x), Expr::Unary(_, y, _) if matches!(self.peek(y), Some(Ty::Struct(sid))
+                        if matches!(self.prog.structs[self.prog.base_of(sid) as usize].name.as_str(), "String" | "Vec"))) =>
+            {
+                let Expr::Unary(_, y, _) = strip_paren(x) else { unreachable!() };
+                let Some(Ty::Struct(sid)) = self.peek(y) else { unreachable!() };
+                let yb = Expr::Paren(Box::new((**y).clone()));
+                let ne = if self.prog.structs[self.prog.base_of(sid) as usize].name == "String" {
+                    mcall(yb, if *m { "as_mut_str" } else { "as_str" }, vec![])
+                } else {
+                    Expr::Ref(*m, Box::new(Expr::Index(Box::new(yb), Box::new(Expr::Range(None, None, false)), crate::parse::Span::default())))
+                };
+                let ne: &Expr = self.keep_expr(ne);
+                self.expr(ne, expected)
+            }
             Expr::Ref(..) => self.reference(e, expected),
             // `&raw const p` / `&raw mut p`: the address of the place, as a raw pointer (also of a `static mut`)
             Expr::RawRef(m, x) => {
