@@ -120,6 +120,25 @@ relax's numbers include starting its runtime and loading its own std; its streng
 program, keeping its state) is not measured here. On the small programs, the run itself is a large part of every
 number: rustc's debug build runs slowly, so relax beats it on five of the seven after an edit.
 
+Against blaze ([indexable-inc/blaze](https://github.com/indexable-inc/blaze), a replacement for cargo whose daemon
+compiles only what an edit changed, with its own front end and rustc's language as its target): not run here yet,
+so these are blaze's own published numbers (v1, 2026-10-25, Linux x86-64 on 16 cores of an AMD EPYC 9R45; its
+[benchmarks](https://github.com/indexable-inc/blaze/blob/main/docs/benchmarks.md)) next to zustc's on this machine.
+They are different programs on different machines: blaze builds real cargo projects that zustc cannot build yet
+(ripgrep, nushell, bun), and zustc's numbers are a generated single-crate program:
+
+| edit one function, then build | before | after |
+|---|---:|---:|
+| blaze: ripgrep (cargo → blaze) | 508 ms | 56 ms |
+| blaze: helix (cargo → blaze) | 2.15 s | 116 ms |
+| blaze: bun, 1.25M lines (cargo → blaze) | 9.11 s | 451 ms |
+| zustc: gen1000 (rustc `-C incremental` → zustc) | 406 ms | 27 ms |
+
+blaze's daemon holds a few GB for a small project (16 GB after a ripgrep run, by its own ledger) where zustc's cache
+for gen1000 is 766 KiB on disk and nothing stays in memory between builds. Its way of tracking its numbers (each
+merge's instruction counts against the median of the last runs, with a noise band) is what `bench/kpi_track.py`
+now does too. A run of both on the same machine and the same program (gen1000 as a cargo project) is the next step.
+
 zust-analyzer against rust-analyzer and rust-glancer on zustc's own sources (40 query points,
 `python3 bench/lsp_parity.py --servers zustc,rust-analyzer,rust-glancer --targets zustc`, 2026-11-18, e45ee10;
 rust-glancer is github.com/rust-glancer/rust-glancer 50dd51a):
