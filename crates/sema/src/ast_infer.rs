@@ -266,6 +266,28 @@ pub fn infer_ctx_margs(
     ret: Option<Ty>,
     root: Option<(u32, u32)>,
 ) -> (Full, MacroArgs, TextTypes) {
+    infer_ctx_impl(prog, recv, params, body, sig, env, extra, ret, root, false)
+}
+
+/// As infer_ctx, with the parameters of a generic fn known as themselves (`x: T` is T, not a variable): the type of a
+/// generic fn's body in terms of its own parameters (`fn show<T: Display>(x: T) -> impl Display { x }` returns T)
+pub fn infer_ctx_generic(prog: &Program, recv: bool, params: &[(Pat, PTy)], body: &Block, sig: &FnSig, env: &TyEnv, root: Option<(u32, u32)>) -> Full {
+    infer_ctx_impl(prog, recv, params, body, sig, env, &[], None, root, true).0
+}
+
+#[allow(clippy::too_many_arguments)]
+fn infer_ctx_impl(
+    prog: &Program,
+    recv: bool,
+    params: &[(Pat, PTy)],
+    body: &Block,
+    sig: &FnSig,
+    env: &TyEnv,
+    extra: &[(String, Ty)],
+    ret: Option<Ty>,
+    root: Option<(u32, u32)>,
+    known_params: bool,
+) -> (Full, MacroArgs, TextTypes) {
     let clo_root = root.map(|(r, base)| (r, base, body as *const Block));
     let mut s = Inf { s: Solver::new(prog, env), pending: vec![], keep: vec![], turbofish: None, clo_root, clo_keys: None, margs: Default::default(), exprs: vec![], mbase: Default::default() };
     s.ret = match ret {
@@ -294,7 +316,7 @@ pub fn infer_ctx_margs(
             pvars.push(v);
             continue;
         };
-        let v = if prog.has_param(t) { s.var() } else { s.known(t) };
+        let v = if prog.has_param(t) && !known_params { s.var() } else { s.known(t) };
         pvars.push(v);
         s.scopes[0].push((name, v));
     }

@@ -632,6 +632,25 @@ impl Session2 {
 }
 
 /// `-> impl Iterator<..>` の戻り値を本体の型推論で決める (front.rs の resolve_opaque と同じ)
+/// a type that names a generic fn's parameters only directly (`T`, `&T`, `Box<T>`): an instance substitutes it as is
+/// (a struct of the parameters (`(T, T)`) is not taken yet: its instance's arguments are not put in correctly)
+fn simple_param_ty(prog: &Program, t: Ty) -> bool {
+    match t {
+        Ty::Param(i) => i != crate::program::HOLE,
+        Ty::Ref(_, i) | Ty::Box(i) => simple_param_ty(prog, *i),
+        t => !prog.has_param(t),
+    }
+}
+
+/// a `_` left in a type (inference did not decide it)
+fn has_hole_ty(t: Ty) -> bool {
+    match t {
+        Ty::Param(i) => i == crate::program::HOLE,
+        Ty::Ref(_, i) | Ty::Ptr(_, i) | Ty::Array(i, _) | Ty::Slice(i) | Ty::Box(i) => has_hole_ty(*i),
+        _ => false,
+    }
+}
+
 fn resolve_opaque(prog: &mut Program, src: &str, items: &[SrcItem]) -> R<()> {
     if prog.opaque.is_empty() {
         return Ok(());
@@ -645,13 +664,14 @@ fn resolve_opaque(prog: &mut Program, src: &str, items: &[SrcItem]) -> R<()> {
                 continue;
             }
             let sig = prog.sigs[id as usize].clone();
-            if sig.is_generic() {
-                return Err(format!("`{}`: generic functions returning `impl Trait` are not supported", prog.names[id as usize]));
-            }
             let Some(ii) = prog.item_of[id as usize] else { continue };
             let Some(f) = parse_fn(src, &items[ii as usize])? else { continue };
             let env = TyEnv { self_sid: sig.impl_of, params: vec![], self_ty: sig.self_ty };
-            let (_, r, _) = crate::ast_infer::infer_ctx(prog, f.sig.recv.is_some(), &f.sig.params, &f.block, &sig, &env, &[], None, Some((id, 0)));
+            let (_, r, _) = if sig.is_generic() {
+                crate::ast_infer::infer_ctx_generic(prog, f.sig.recv.is_some(), &f.sig.params, &f.block, &sig, &env, Some((id, 0)))
+            } else {
+                crate::ast_infer::infer_ctx(prog, f.sig.recv.is_some(), &f.sig.params, &f.block, &sig, &env, &[], None, Some((id, 0)))
+            };
             // (a body with no value (`-> impl Sized {}`) returns `()`)
             let no_value = !matches!(f.block.stmts.last(), Some(crate::parse::Stmt::Expr(_, false))) && !format!("{:?}", f.block).contains("Return(Some");
             // (a body ending in `()` itself, or in a diverging macro (`panic!()` / `todo!()`), is `()` too)
@@ -663,7 +683,9 @@ fn resolve_opaque(prog: &mut Program, src: &str, items: &[SrcItem]) -> R<()> {
                 _ => false,
             };
             let no_value = no_value || unit_tail;
-            if let Some(t) = r.filter(|&t| (t != Ty::Unit || no_value) && !prog.has_param(t)) {
+            // (a generic fn's type may name its own parameters: each instance puts its arguments in)
+            let generic = sig.is_generic();
+            if let Some(t) = r.filter(|&t| (t != Ty::Unit || no_value) && (!prog.has_param(t) || (generic && simple_param_ty(prog, t))) && !has_hole_ty(t)) {
                 prog.sigs[id as usize].ret = t;
                 done[k] = true;
                 progress = true;
