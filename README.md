@@ -26,7 +26,7 @@
 
 ## Status
 
-Numbers measured <!-- measured -->2026-11-19, 64564af<!-- /measured --> by CI on each push to main (bench.yml runs
+Numbers measured <!-- measured -->2026-11-19, f4f96cf<!-- /measured --> by CI on each push to main (bench.yml runs
 `bench/ci_bench.py` and `bench/rust_ui.py`, then `scripts/update_readme.py` writes them here). Times come from shared
 GitHub Actions runners and vary by about ±20%; the instruction counts (valgrind) do not.
 
@@ -38,10 +38,10 @@ only the tests it can be asked to handle (no nightly features, auxiliary crates 
 <!-- auto:ui -->
 | kind | applicable | pass |
 |---|---:|---:|
-| run-pass (builds, runs, same output) | 2385 | 1638 (68.7%) |
-| check-pass (accepted by `zustc check`) | 1807 | 1370 (75.8%) |
+| run-pass (builds, runs, same output) | 2385 | 1645 (69.0%) |
+| check-pass (accepted by `zustc check`) | 1807 | 1373 (76.0%) |
 | build-pass | 135 | 95 (70.4%) |
-| compile-fail (rejected at an annotated line) | 7358 | 3310 (45.0%) |
+| compile-fail (rejected at an annotated line) | 7358 | 3316 (45.1%) |
 <!-- /auto:ui -->
 
 [What is supported](#what-is-supported) breaks this down by area.
@@ -53,22 +53,22 @@ Build speed, build cache size and LSP latency on generated programs of 1000 / 50
 <!-- auto:kpi -->
 | KPI | gen1000 | gen5000 |
 |---|---:|---:|
-| cold build | 122 ms | 533 ms |
-| no-op build | 0.9 ms | 0.8 ms |
-| build after editing one function | 18.3 ms | 64.6 ms |
-| `check` | 79 ms | 372 ms |
+| cold build | 155 ms | 683 ms |
+| no-op build | 1.2 ms | 1.1 ms |
+| build after editing one function | 24.9 ms | 84.4 ms |
+| `check` | 123 ms | 605 ms |
 | no-op build (instructions) | 0.7 M | 0.7 M |
-| edit one function (instructions) | 133.6 M | 627.9 M |
-| `check` (instructions) | 786.3 M | 3870.9 M |
+| edit one function (instructions) | 133.5 M | 626.6 M |
+| `check` (instructions) | 784.8 M | 3870.3 M |
 | build cache on disk | 387.2 KiB | 1902.8 KiB |
 | binary | 324.0 KiB | 1558.3 KiB |
-| cold build peak RSS | 18.0 MiB | 52.0 MiB |
+| cold build peak RSS | 17.8 MiB | 52.0 MiB |
 
 | zust-analyzer (zustc's own sources) | |
 |---|---:|
-| p50: definition, hover, completion, references, rename | 0.41 ms / 0.34 ms / 0.96 ms / 2.89 ms / 0.39 ms |
-| startup until indexed | 114 ms |
-| peak RSS | 71.6 MiB |
+| p50: definition, hover, completion, references, rename | 0.59 ms / 0.52 ms / 1.04 ms / 3.31 ms / 0.57 ms |
+| startup until indexed | 127 ms |
+| peak RSS | 71.5 MiB |
 <!-- /auto:kpi -->
 
 Every change is also measured on its own with `python3 bench/kpi_track.py`, so that small increases that add up stay
@@ -332,10 +332,10 @@ the measured numbers. The [reports](docs/reports/) explain each step.
 
 ### Overall
 
-- [x] tests/ui run-pass: <!-- total:run-pass -->68.7% (1638 / 2385)
-- [x] tests/ui check-pass: <!-- total:check-pass -->75.8% (1370 / 1807)
+- [x] tests/ui run-pass: <!-- total:run-pass -->69.0% (1645 / 2385)
+- [x] tests/ui check-pass: <!-- total:check-pass -->76.0% (1373 / 1807)
 - [x] tests/ui build-pass: <!-- total:build-pass -->70.4% (95 / 135)
-- [ ] tests/ui compile-fail (an error on an annotated line): <!-- total:compile-fail -->45.0% (3310 / 7358)
+- [ ] tests/ui compile-fail (an error on an annotated line): <!-- total:compile-fail -->45.1% (3316 / 7358)
 - [x] real crates: fnv, adler2, hex, itoa, rustc-hash and cfg-if build and give the same output (6 / 6)
 - [x] zust-analyzer answers like rust-analyzer: 95.4% (rust-analyzer: 96.2%)
 
@@ -345,7 +345,7 @@ the measured numbers. The [reports](docs/reports/) explain each step.
 - [x] `for` / `while` / `loop`, labels: <!-- ui:for-loop-while,loops,label -->91.7%
 - [x] enums, `#[repr(u8)]`, auto-sized tags: <!-- ui:enum,enum-discriminant -->83.3%
 - [x] `cfg`: <!-- ui:cfg -->81.2%
-- [x] bindings, patterns, slice patterns, or-patterns (also with guards): <!-- ui:binding,pattern,or-patterns -->86.5%
+- [x] bindings, patterns, slice patterns, or-patterns (also with guards): <!-- ui:binding,pattern,or-patterns -->85.9%
 - [x] `match`: <!-- ui:match -->82.9%
 - [x] name resolution: <!-- ui:resolve -->82.9%
 - [x] statics: ints, floats, raw pointers, fn pointers, `const fn` calls: <!-- ui:statics -->75.0%
@@ -359,12 +359,12 @@ the measured numbers. The [reports](docs/reports/) explain each step.
 - [x] closures (capture, `Fn` traits, `move`; with no captures also as fn pointers): <!-- ui:closures,unboxed-closures,functions-closures -->77.1%
 - [x] derives: `Debug`, `Clone`, `Copy`, `PartialEq`/`Eq`, `PartialOrd`/`Ord`, `Hash`, `Default`: <!-- ui:derives,deriving -->79.5%
 - [x] imports, `use`: <!-- ui:imports -->77.3%
-- [x] associated types: <!-- ui:associated-types -->72.0%
+- [x] associated types: <!-- ui:associated-types -->74.8%
 - [x] generics: <!-- ui:generics -->76.2% (an integer literal for `T: Foo` takes the one integer type that implements Foo; a type
   parameter known only from the expected type is not inferred)
 - [ ] consts: <!-- ui:consts -->71.4% (no heap values, no generic `const fn`; a const of a generic impl (`const C: Option<T> = None`) takes its type at each use)
-- [ ] drop: <!-- ui:drop -->62.3% (the drop order of some temporaries differs)
-- [ ] traits: <!-- ui:traits -->65.1% (generic traits, blanket impls, `dyn` (also `dyn Tr<A>`), `impl .. for dyn Tr` work; `impl<T> Tr for &T` only without functions; no coherence)
+- [ ] drop: <!-- ui:drop -->63.8% (the drop order of some temporaries differs)
+- [ ] traits: <!-- ui:traits -->66.0% (generic traits, blanket impls, `dyn` (also `dyn Tr<A>`), `impl .. for dyn Tr` work; `impl<T> Tr for &T` only without functions; no coherence)
 - [ ] `macro_rules!`: <!-- ui:macros -->66.4% (hygiene for `let`, labels, arm bindings; not every fragment kind)
 - [ ] unions: <!-- ui:union -->61.5% (no `repr(packed)`)
 - [ ] const generics: <!-- ui:const-generics -->51.5% (no `generic_const_exprs`)
@@ -398,7 +398,7 @@ the measured numbers. The [reports](docs/reports/) explain each step.
   `iter::{repeat, once, empty, repeat_with, successors}`, `reverse` / `fill` / `rotate_left` / `rotate_right` on arrays and slices, formatting, stdin/stdout/fs/env/process basics
 - [ ] async / await: <!-- ui:async-await -->74.8%. It runs at once, with no executor (no `poll`, `Waker`, `Pin<Box<dyn Future>>`)
 - [ ] threads: <!-- ui:threads-sendsync -->66.7%. One thread: `thread::spawn` runs the closure at once
-- [ ] iterators: <!-- ui:iterators -->41.2% (`iter::empty()` cannot infer its item from the target)
+- [ ] iterators: <!-- ui:iterators -->47.1% (`iter::empty()` cannot infer its item from the target)
 - [ ] FFI: <!-- ui:abi -->14.3%. Scalars only, no structs by value
 - [ ] panics: <!-- ui:panics -->11.1%. A panic aborts: no unwinding, `catch_unwind`, `set_hook`
 
