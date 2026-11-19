@@ -1254,6 +1254,24 @@ impl Cx<'_> {
     }
 
     fn block_stmts(&mut self, blk: &crate::parse::Block, expected: Option<Ty>) -> R<V> {
+        // (`let V(s) = cap else { .. };` with cap held by value by the closure: `let t = cap;` first, as for match)
+        if !self.caps.is_empty()
+            && blk.stmts.iter().any(|st| matches!(st, Stmt::Let(pat, _, Some(init), els, ..) if (!is_simple_let(pat) || els.is_some()) && self.takes_capture(init, &[pat])))
+        {
+            let mut stmts = vec![];
+            for (k, st) in blk.stmts.iter().enumerate() {
+                match st {
+                    Stmt::Let(pat, ann, Some(init), els, lp) if (!is_simple_let(pat) || els.is_some()) && self.takes_capture(init, &[pat]) => {
+                        let tk = format!("__exr_tk{k}");
+                        stmts.push(Stmt::Let(Pat::Ident(false, false, tk.clone(), None), None, Some(init.clone()), None, *lp));
+                        stmts.push(Stmt::Let(pat.clone(), ann.clone(), Some(path_expr(&tk)), els.clone(), *lp));
+                    }
+                    st => stmts.push(st.clone()),
+                }
+            }
+            let nb: &'static crate::parse::Block = Box::leak(Box::new(crate::parse::Block { stmts }));
+            return self.block_stmts(nb, expected);
+        }
         self.scopes.push(vec![]);
         let mut diverged = false;
         let mut result: V = (None, Ty::Unit);

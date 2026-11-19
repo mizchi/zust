@@ -921,7 +921,7 @@ impl EHash {
 }
 
 /// The pattern binds a part of the value by value (`x`, `Some(x)`), not only by reference or not at all
-fn binds_by_value(p: &Pat) -> bool {
+pub fn binds_by_value(p: &Pat) -> bool {
     match p {
         Pat::Ident(by_ref, _, n, sub) => {
             (!*by_ref && n.starts_with(|c: char| c.is_ascii_lowercase() || c == '_') && n != "_") || sub.as_deref().is_some_and(binds_by_value)

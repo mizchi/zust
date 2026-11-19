@@ -66,6 +66,15 @@ impl Cx<'_> {
         })
     }
 
+    /// e is a capture the closure holds by value, of a type that needs drop, and a pattern binds part of it by value
+    pub(crate) fn takes_capture(&self, e: &Expr, pats: &[&Pat]) -> bool {
+        let Expr::Path(None, p) = strip_paren(e) else { return false };
+        let Some(id) = ident_of(p) else { return false };
+        self.caps.iter().any(|c| c.0 == id && !c.2)
+            && self.lookup(id).is_some_and(|(l, t)| self.is_value_cap(id, l) && self.needs_drop(t))
+            && pats.iter().any(|p| crate::ast_closure::binds_by_value(p))
+    }
+
     pub(crate) fn match_(&mut self, m: &Expr, expected: Option<Ty>) -> R<V> {
         let Expr::Match(scrut, arms) = m else {
             return err(SP, "internal: match_ on a non-match expression");
@@ -92,6 +101,19 @@ impl Cx<'_> {
             }
         }
         let pats: Vec<&Pat> = arms.iter().map(|a| &a.pat).collect();
+        // (`match cap { V(s) => .. }` in a closure that holds `cap` by value: move it to a local first
+        // (`let t = cap;` empties the closure's slot), then match the local; in place, both would drop `s`)
+        if self.takes_capture(scrut, &pats) {
+            let tk = format!("__exr_tk{}", self.temps.len());
+            let blk = crate::parse::Block {
+                stmts: vec![
+                    crate::parse::Stmt::Let(Pat::Ident(false, false, tk.clone(), None), None, Some((**scrut).clone()), None, Default::default()),
+                    crate::parse::Stmt::Expr(Expr::Match(Box::new(path_expr(&tk)), arms.clone()), false),
+                ],
+            };
+            let ne: &Expr = self.keep_expr(Expr::Block(None, false, blk));
+            return self.expr(ne, expected);
+        }
         let Some(place) = self.bk_scrutinee(scrut, None, &pats)? else {
             return Ok((None, Ty::Never));
         };
