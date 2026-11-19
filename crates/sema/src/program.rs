@@ -1820,7 +1820,7 @@ impl Program {
         let n = b.stmts.len();
         for (k, s) in b.stmts.iter().enumerate() {
             match s {
-                Stmt::Let(Pat::Ident(false, _, name, None), _, Some(init), None) => {
+                Stmt::Let(Pat::Ident(false, _, name, None), _, Some(init), None, ..) => {
                     let v = self.eval_const(&subst_consts(init, env), depth)?;
                     env.push((name.clone(), v));
                 }

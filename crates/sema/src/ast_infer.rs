@@ -831,7 +831,7 @@ impl Inf<'_> {
         let n = b.stmts.len();
         for (i, st) in b.stmts.iter().enumerate() {
             match st {
-                Stmt::Let(pat, ann_ty, init, _) => {
+                Stmt::Let(pat, ann_ty, init, _, ..) => {
                     let ann = ann_ty.as_ref().and_then(|t| self.parse_ty(t));
                     let v = match init {
                         Some(init) => self.expr(init),
@@ -2254,7 +2254,7 @@ impl Inf<'_> {
 pub fn lets_in_order(b: &Block, out: &mut Vec<*const Stmt>) {
     for st in &b.stmts {
         match st {
-            Stmt::Let(_, _, init, els) => {
+            Stmt::Let(_, _, init, els, ..) => {
                 out.push(st as *const Stmt);
                 if let Some(e) = init {
                     lets_in_expr(e, out);

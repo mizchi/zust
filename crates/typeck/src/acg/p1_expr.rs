@@ -22,7 +22,7 @@ pub(crate) fn closure_synth(c: &Expr) -> ItemFn {
             pat.clone()
         } else {
             let id = format!("__p{i}");
-            stmts.push(Stmt::Let(pat.clone(), None, Some(path_expr(&id)), None));
+            stmts.push(Stmt::Let(pat.clone(), None, Some(path_expr(&id)), None, Default::default()));
             Pat::Ident(false, false, id, None)
         };
         params.push((pat_in, ty.clone().unwrap_or(crate::parse::Ty::Infer)));

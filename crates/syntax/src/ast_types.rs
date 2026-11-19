@@ -83,7 +83,7 @@ pub(crate) fn const_expr_text(e: &Expr) -> Option<String> {
             let n = b.stmts.len();
             for (k, s) in b.stmts.iter().enumerate() {
                 match s {
-                    Stmt::Let(crate::parse::Pat::Ident(false, _, v, None), _, Some(init), None) => {
+                    Stmt::Let(crate::parse::Pat::Ident(false, _, v, None), _, Some(init), None, ..) => {
                         out.push_str(&format!("let {v} = {}; ", const_expr_text(init)?));
                     }
                     Stmt::Item(_) | Stmt::Expr(Expr::Closure(..) | Expr::Lit(..), true) => {}

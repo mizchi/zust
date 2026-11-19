@@ -14,7 +14,7 @@ fn paren(e: Expr) -> Expr {
 
 /// `let name = init;`
 fn let_stmt(name: &str, init: Expr) -> Stmt {
-    Stmt::Let(Pat::Ident(false, false, name.to_string(), None), None, Some(init), None)
+    Stmt::Let(Pat::Ident(false, false, name.to_string(), None), None, Some(init), None, Default::default())
 }
 
 /// `..` (添字の全範囲)
@@ -229,7 +229,7 @@ impl Cx<'_> {
                         )?;
                         // (テンプレートの `0` の所に、状態と受け手を入れる)
                         if let Expr::Block(_, _, b) = &mut e {
-                            if let Some(Stmt::Let(_, _, init, _)) = b.stmts.get_mut(0) {
+                            if let Some(Stmt::Let(_, _, init, _, ..)) = b.stmts.get_mut(0) {
                                 *init = Some(st.clone());
                             }
                             if let Some(Stmt::Expr(Expr::Match(s, _), _)) = b.stmts.get_mut(1) {

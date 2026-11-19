@@ -213,7 +213,7 @@ fn each_child(e: &Expr, f: &mut dyn FnMut(&Expr)) {
 fn block_exprs(b: &Block, f: &mut dyn FnMut(&Expr)) {
     for s in &b.stmts {
         match s {
-            Stmt::Let(_, _, init, els) => {
+            Stmt::Let(_, _, init, els, ..) => {
                 if let Some(e) = init {
                     f(e);
                 }
@@ -362,7 +362,7 @@ impl Free {
         self.scopes.push(vec![]);
         for s in &b.stmts {
             match s {
-                Stmt::Let(p, _, init, els) => {
+                Stmt::Let(p, _, init, els, ..) => {
                     if let Some(e) = init {
                         self.expr(e);
                     }
@@ -502,7 +502,7 @@ fn moves_in(e: &Expr, caps: &[String]) -> bool {
         Expr::Return(Some(v)) if is_cap(v, caps) => return true,
         Expr::Block(_, _, b) | Expr::Const(b) | Expr::Loop(_, b) => {
             // (`let C(ref mut r, _) = c;` binds by reference: not a move)
-            if b.stmts.iter().any(|s| matches!(s, Stmt::Let(p, _, Some(x), _) if is_cap(x, caps) && binds_by_value(p))) {
+            if b.stmts.iter().any(|s| matches!(s, Stmt::Let(p, _, Some(x), _, ..) if is_cap(x, caps) && binds_by_value(p))) {
                 return true;
             }
         }
@@ -681,7 +681,7 @@ impl EHash {
         self.n(0xb0 + b.stmts.len() as u64);
         for st in &b.stmts {
             match st {
-                Stmt::Let(p, t, e, els) => {
+                Stmt::Let(p, t, e, els, ..) => {
                     self.n(1);
                     self.pat(p);
                     match t {

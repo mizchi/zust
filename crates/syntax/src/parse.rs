@@ -444,7 +444,8 @@ pub struct Block {
 
 #[derive(Clone, Debug)]
 pub enum Stmt {
-    Let(Pat, Option<Ty>, Option<Expr>, Option<Block>),
+    /// (the last field: where `let` starts)
+    Let(Pat, Option<Ty>, Option<Expr>, Option<Block>, Pos),
     Expr(Expr, bool),
     Item(Item),
 }
@@ -2167,6 +2168,7 @@ impl Parser {
 
     fn stmt(&mut self) -> R<Stmt> {
         let attrs = self.attrs()?;
+        let spos = self.pos();
         if self.item_follows() {
             let mut it = self.item()?;
             let mut a = attrs;
@@ -2176,9 +2178,9 @@ impl Parser {
             match it.kind {
                 ItemKind::Const(n, t, Some(e)) => {
                     let p = if n == "_" { Pat::Wild } else { Pat::Ident(false, false, n, None) };
-                    return Ok(Stmt::Let(p, t, Some(e), None));
+                    return Ok(Stmt::Let(p, t, Some(e), None, spos));
                 }
-                ItemKind::Static(false, n, t, e) => return Ok(Stmt::Let(Pat::Ident(false, false, n, None), Some(t), Some(e), None)),
+                ItemKind::Static(false, n, t, e) => return Ok(Stmt::Let(Pat::Ident(false, false, n, None), Some(t), Some(e), None, spos)),
                 k => it.kind = k,
             }
             return Ok(Stmt::Item(it));
@@ -2189,7 +2191,7 @@ impl Parser {
             let init = if self.eat_punct("=") { Some(self.expr(true)?) } else { None };
             let els = if self.eat_ident("else") { Some(self.block()?) } else { None };
             self.expect_punct(";")?;
-            return Ok(Stmt::Let(p, t, init, els));
+            return Ok(Stmt::Let(p, t, init, els, spos));
         }
         // (`if .. {}` / `match .. {}` / `{ .. }` などで始まる文はそこで終わる: 次の `*p = 1;` を掛け算にしない)
         if self.blocky_start() {
@@ -2847,7 +2849,7 @@ impl Counts {
     fn block(&mut self, b: &Block) {
         for s in &b.stmts {
             match s {
-                Stmt::Let(_, _, init, els) => {
+                Stmt::Let(_, _, init, els, ..) => {
                     self.lets += 1;
                     if let Some(e) = init {
                         self.expr(e);

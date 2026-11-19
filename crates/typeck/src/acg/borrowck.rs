@@ -1517,7 +1517,7 @@ impl Cx<'_> {
             Expr::Block(_, _, b) => {
                 for st in &b.stmts {
                     match st {
-                        crate::parse::Stmt::Let(pat, _, Some(init), els) => {
+                        crate::parse::Stmt::Let(pat, _, Some(init), els, ..) => {
                             match self.bk_rooted_at(init, n) {
                                 Some((p, t)) if !matches!(pat, Pat::Ident(..)) => {
                                     out.push((seen.clone(), None, CapMode::Use, super::SP));

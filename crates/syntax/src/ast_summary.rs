@@ -726,7 +726,7 @@ pub fn assoc_bindings(s: &str) -> Vec<(String, TySyn)> {
 fn pats_in_block(b: &Block, out: &mut Vec<String>) {
     for s in &b.stmts {
         match s {
-            Stmt::Let(p, _, init, els) => {
+            Stmt::Let(p, _, init, els, ..) => {
                 ast_closure::pat_idents(p, out);
                 if let Some(e) = init {
                     pats_in_expr(e, out);
@@ -808,7 +808,7 @@ fn bound_in_fn(sig: &PSig, body: &Block) -> Vec<String> {
 fn local_ty_syn(b: &Block, n: &str, int_hint: Option<Ty>) -> Option<TySyn> {
     let mut found = None;
     for st in &b.stmts {
-        let Stmt::Let(pat, ann, init, _) = st else { continue };
+        let Stmt::Let(pat, ann, init, _, ..) = st else { continue };
         let Pat::Ident(_, _, name, None) = pat else { continue };
         if name != n {
             continue;

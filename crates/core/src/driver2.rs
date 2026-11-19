@@ -732,7 +732,7 @@ pub fn parse_fn(src: &str, it: &SrcItem) -> R<Option<ItemFn>> {
         }
         let name = format!("__exr_arg{k}");
         let pat = std::mem::replace(p, Pat::Ident(false, false, name.clone(), None));
-        lets.push(Stmt::Let(pat, None, Some(acg::path_expr(&name)), None));
+        lets.push(Stmt::Let(pat, None, Some(acg::path_expr(&name)), None, Default::default()));
     }
     if !lets.is_empty() {
         lets.append(&mut block.stmts);
@@ -753,7 +753,7 @@ pub fn synth_closure(c: &Expr) -> ItemFn {
             p.clone()
         } else {
             let id = format!("__p{i}");
-            stmts.push(Stmt::Let(p.clone(), None, Some(acg::path_expr(&id)), None));
+            stmts.push(Stmt::Let(p.clone(), None, Some(acg::path_expr(&id)), None, Default::default()));
             Pat::Ident(false, false, id, None)
         };
         params.push((pin, unit.clone()));

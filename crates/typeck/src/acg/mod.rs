@@ -272,6 +272,7 @@ pub fn compile(prog: &Program, insts: &Mutex<Insts>, id: u32, f: &ItemFn, line_b
         overflow_checks: prog.overflow_checks && (user_code || f.attrs.iter().any(|a| a.contains("rustc_inherit_overflow_checks"))),
         traps: vec![],
         line_base,
+        stmt_sp: SP,
         loc_used: false,
         index_panic_block: None,
         caller_loc: matches!(
@@ -339,6 +340,8 @@ pub fn compile(prog: &Program, insts: &Mutex<Insts>, id: u32, f: &ItemFn, line_b
     } else {
         cx.body(f, &sig)
     };
+    // (an error with no position: the statement it came from, when known (a user fn's))
+    let r = r.map_err(|m| if user_code { cx.at(cx.stmt_sp, m) } else { m });
     r?;
     cx.bk_check()?;
     // (入口以外で作った drop フラグは入口で 0 にする: minclif はフラグのスロットを関数の最初に 0 にする)
@@ -622,6 +625,8 @@ pub struct Cx<'p> {
     pub overflow_checks: bool,
     pub traps: Vec<(u32, u32)>,
     pub line_base: u32,
+    /// the start of the statement being compiled (innermost), for errors that carry no position of their own
+    pub stmt_sp: Sp,
     pub loc_used: bool,
     pub index_panic_block: Option<Block>,
     pub caller_loc: bool,
@@ -1221,15 +1226,32 @@ impl Cx<'_> {
     }
 
     pub fn block(&mut self, blk: &crate::parse::Block, expected: Option<Ty>) -> R<V> {
+        let sp = self.stmt_sp;
+        let r = self.block_stmts(blk, expected);
+        // (back to the statement that holds the block; an error keeps the innermost one)
+        if r.is_ok() {
+            self.stmt_sp = sp;
+        }
+        r
+    }
+
+    fn block_stmts(&mut self, blk: &crate::parse::Block, expected: Option<Ty>) -> R<V> {
         self.scopes.push(vec![]);
         let mut diverged = false;
         let mut result: V = (None, Ty::Unit);
         let n = blk.stmts.len();
+        let outer_sp = self.stmt_sp;
         for (i, st) in blk.stmts.iter().enumerate() {
             let last = i + 1 == n;
             let t0 = self.temps.len();
+            // (after an inner block, the statement holding it again)
+            self.stmt_sp = match st {
+                Stmt::Let(.., p) if p.line > 0 => *p,
+                Stmt::Expr(e, _) if expr_start(e).line > 0 => expr_start(e),
+                _ => outer_sp,
+            };
             match st {
-                Stmt::Let(pat, ann_ty, init, els) if !is_simple_let(pat) || els.is_some() => {
+                Stmt::Let(pat, ann_ty, init, els, ..) if !is_simple_let(pat) || els.is_some() => {
                     // 分解する let (`let S { x, y } = s;`): 反駁不能パターンとして束縛だけ行う
                     let Some(init) = init else {
                         return err(SP, "`let` without initializer is not supported");
@@ -1271,7 +1293,7 @@ impl Cx<'_> {
                     }
                     self.extend_temps(t0);
                 }
-                Stmt::Let(Pat::Wild, _, init, None) => {
+                Stmt::Let(Pat::Wild, _, init, None, ..) => {
                     // `let _ = e;`: 場所ならムーブしない。値ならすぐ drop する
                     let Some(init) = init else {
                         return err(SP, "`let` without initializer is not supported");
@@ -1294,7 +1316,7 @@ impl Cx<'_> {
                     }
                     self.drop_temps(t0);
                 }
-                Stmt::Let(pat, ann_ty, init, _) => {
+                Stmt::Let(pat, ann_ty, init, _, ..) => {
                     let name = pat_name(pat)?;
                     let ann = match ann_ty {
                         // (`let v: Vec<Box<_>> = Vec::new();`: the holes are what inference found, when it did)

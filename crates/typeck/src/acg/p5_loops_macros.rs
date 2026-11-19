@@ -97,7 +97,7 @@ fn str_lit(e: &Expr) -> Option<String> {
 }
 
 fn let_stmt(name: &str, init: Expr) -> Stmt {
-    Stmt::Let(Pat::Ident(false, false, name.to_string(), None), None, Some(init), None)
+    Stmt::Let(Pat::Ident(false, false, name.to_string(), None), None, Some(init), None, Default::default())
 }
 
 /// hoist_index_bases の走査 (関数の中に置くと zustc の入れ子のアイテムの持ち上げが impl を扱えないので外に置く)
@@ -209,7 +209,7 @@ impl HoistScan {
     fn visit_block(&mut self, b: &PBlock) {
         for s in &b.stmts {
             match s {
-                Stmt::Let(p, _, init, els) => {
+                Stmt::Let(p, _, init, els, ..) => {
                     self.visit_pat(p);
                     if let Some(e) = init {
                         self.visit_expr(e);
@@ -323,7 +323,7 @@ impl Cx<'_> {
                             _ => Expr::Paren(recv.clone()),
                         };
                         let some = Pat::TupleStruct(path_of("Some"), vec![Pat::Ident(false, false, "__exr_ox".into(), None)]);
-                        let mut stmts = vec![Stmt::Let((**fpat).clone(), None, Some(path_expr("__exr_ox")), None)];
+                        let mut stmts = vec![Stmt::Let((**fpat).clone(), None, Some(path_expr("__exr_ox")), None, Default::default())];
                         stmts.extend(fbody.stmts.iter().cloned());
                         let iflet = Expr::If(Box::new(Expr::Let(Box::new(some), Box::new(scrut))), crate::parse::Block { stmts }, None);
                         // (with no `break` / `continue` in the body, no loop: a value moved in is not moved in a loop)
