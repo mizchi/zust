@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795116613383,
+  "lastUpdate": 1795117706105,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -25280,6 +25280,165 @@ window.BENCHMARK_DATA = {
           {
             "name": "rt/strings run (-O)",
             "value": 34.147,
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "committer": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "distinct": true,
+          "id": "bd7f2c710e0b275838afa8d2f1ecf84459f02231",
+          "message": "E0038: rules only for the program's own traits; no false positives from the prelude or supertraits\n\nThe dyn-compatibility check of 55b8640 also counted a supertrait's parameters as a method's own generics, and the\nprelude's Iterator methods (which leave out `where Self: Sized`) as using Self, so `Box<dyn Iterator<Item = i32>>` /\n`trait A: PartialEq<Foo>` / `trait X<T> { fn dummy(&self) -> T }` read as not dyn compatible. Now a method without\n`where Self: Sized` makes the trait not dyn compatible when it has no `self`, or, for a trait of the program's own,\nwhen it has generics beyond Self and its trait's parameters (Program::trait_ngen) or names Self in its parameters or\nresult (methods of the dyn trait itself). A supertrait `PartialEq` / `PartialOrd` with no arguments (Rhs = Self) is\nmarked (`#SelfRhs`) and also makes it not dyn compatible.\n\ntests/ui: check-pass impl-trait/issues/issue-99642.rs passes; compile-fail suggestions/trait-hidden-method.rs is no\nlonger rejected (it wants E0191, `dyn Iterator` without `Item = ..`, which zustc does not check; it failed before on\nthe vtable error only). cratebench: same output. KPIs: no change outside noise.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-19T19:41:47Z",
+          "tree_id": "06baf2d2c161a7938706ea5d9f742747bf1dd76b",
+          "url": "https://github.com/mizchi/zust/commit/bd7f2c710e0b275838afa8d2f1ecf84459f02231"
+        },
+        "date": 1795117705862,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "gen1000 build cold",
+            "value": 118.817,
+            "unit": "ms"
+          },
+          {
+            "name": "gen1000 build noop",
+            "value": 0.83,
+            "unit": "ms"
+          },
+          {
+            "name": "gen1000 build edit 1 fn",
+            "value": 18.543,
+            "unit": "ms"
+          },
+          {
+            "name": "gen1000 check",
+            "value": 79.015,
+            "unit": "ms"
+          },
+          {
+            "name": "gen1000 build cold peak RSS",
+            "value": 17.844,
+            "unit": "MiB"
+          },
+          {
+            "name": "gen1000 binary",
+            "value": 323.977,
+            "unit": "KiB"
+          },
+          {
+            "name": "gen1000 cache",
+            "value": 387.21,
+            "unit": "KiB"
+          },
+          {
+            "name": "gen1000 build noop instructions",
+            "value": 0.728,
+            "unit": "M instr"
+          },
+          {
+            "name": "gen1000 build edit 1 fn instructions",
+            "value": 134.345,
+            "unit": "M instr"
+          },
+          {
+            "name": "gen1000 check instructions",
+            "value": 786.706,
+            "unit": "M instr"
+          },
+          {
+            "name": "gen5000 build cold",
+            "value": 534.943,
+            "unit": "ms"
+          },
+          {
+            "name": "gen5000 build noop",
+            "value": 0.822,
+            "unit": "ms"
+          },
+          {
+            "name": "gen5000 build edit 1 fn",
+            "value": 65.274,
+            "unit": "ms"
+          },
+          {
+            "name": "gen5000 check",
+            "value": 383.279,
+            "unit": "ms"
+          },
+          {
+            "name": "gen5000 build cold peak RSS",
+            "value": 51.887,
+            "unit": "MiB"
+          },
+          {
+            "name": "gen5000 binary",
+            "value": 1558.336,
+            "unit": "KiB"
+          },
+          {
+            "name": "gen5000 cache",
+            "value": 1902.835,
+            "unit": "KiB"
+          },
+          {
+            "name": "gen5000 build noop instructions",
+            "value": 0.728,
+            "unit": "M instr"
+          },
+          {
+            "name": "gen5000 build edit 1 fn instructions",
+            "value": 627.329,
+            "unit": "M instr"
+          },
+          {
+            "name": "gen5000 check instructions",
+            "value": 3879.717,
+            "unit": "M instr"
+          },
+          {
+            "name": "rt/fib run (-O)",
+            "value": 54.402,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/hashmap run (-O)",
+            "value": 90.476,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/matmul run (-O)",
+            "value": 39.613,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/nbody run (-O)",
+            "value": 52.715,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/sieve run (-O)",
+            "value": 93.589,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/sort run (-O)",
+            "value": 146.627,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/strings run (-O)",
+            "value": 34.178,
             "unit": "ms"
           }
         ]
