@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795054733466,
+  "lastUpdate": 1795054735413,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -27956,6 +27956,70 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/mizchi/zust/commit/a6c8ba590419fd478b7597b58ac72f5a3dcf5133"
         },
         "date": 1795054158509,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tests/ui run-pass pass rate",
+            "value": 63.61,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui run-pass passing",
+            "value": 1535,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui check-pass pass rate",
+            "value": 70.23,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui check-pass passing",
+            "value": 1269,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui build-pass pass rate",
+            "value": 65.19,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui build-pass passing",
+            "value": 88,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui compile-fail pass rate",
+            "value": 38.61,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui compile-fail passing",
+            "value": 2841,
+            "unit": "tests"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "committer": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "distinct": true,
+          "id": "38ea62c3e9ca1b9fcc94b983d7aa3344b237a8bf",
+          "message": "SUPPORTED: numbers for a6c8ba5 (the script stopped before these files)\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-19T01:58:38Z",
+          "tree_id": "0a893aa5cfb410933c4fb448d9c71e9174c6c000",
+          "url": "https://github.com/mizchi/zust/commit/38ea62c3e9ca1b9fcc94b983d7aa3344b237a8bf"
+        },
+        "date": 1795054734961,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
