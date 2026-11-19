@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795131093032,
+  "lastUpdate": 1795131095090,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -52980,6 +52980,85 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/mizchi/zust/commit/b1ef5f1ecd23a9c97eb119d5a3c73c2257e69daf"
         },
         "date": 1795130149787,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "parity documentSymbol (名前の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity workspace/symbol (上位 20 の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity definition (行き先の一致)",
+            "value": 97.143,
+            "unit": "%"
+          },
+          {
+            "name": "parity hover (名前を含む)",
+            "value": 87.5,
+            "unit": "%"
+          },
+          {
+            "name": "parity references (数の一致)",
+            "value": 86.111,
+            "unit": "%"
+          },
+          {
+            "name": "parity documentHighlight (数の一致)",
+            "value": 97.143,
+            "unit": "%"
+          },
+          {
+            "name": "parity rename (書き換えの一致)",
+            "value": 83.333,
+            "unit": "%"
+          },
+          {
+            "name": "parity signatureHelp (名前・引数の数・今の引数の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity completion `x.\\|` (書いてある名前を含む)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity completion `na\\|me` (同)",
+            "value": 92.857,
+            "unit": "%"
+          },
+          {
+            "name": "parity 一致の平均",
+            "value": 94.409,
+            "unit": "%"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "committer": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "distinct": true,
+          "id": "28d12286ad59ad5ecae75d84582fede2a613bbb5",
+          "message": "RPITIT: a trait's default method returning impl Trait\n\n`trait Foo { fn bar(&self) -> impl Display { 42 } }`: the default\nmethod's return type is its body's, as for a free fn (it was left as\nan unresolved `impl Trait`).\n\ntests/ui: +4 genuine check-pass passes; two compile-fail tests that\npassed only through that unresolved type (at the expected line) go to\nrust_ui_accidental.txt.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-19T23:23:40Z",
+          "tree_id": "cd21e9d5030c57aec68ce11882160d384ab65494",
+          "url": "https://github.com/mizchi/zust/commit/28d12286ad59ad5ecae75d84582fede2a613bbb5"
+        },
+        "date": 1795131094581,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
