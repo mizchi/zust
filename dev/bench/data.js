@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795100300463,
+  "lastUpdate": 1795100303036,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -52853,6 +52853,70 @@ window.BENCHMARK_DATA = {
           {
             "name": "tests/ui compile-fail passing",
             "value": 3303,
+            "unit": "tests"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "committer": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "distinct": true,
+          "id": "9af93dd27826747f75a33827352452f9fb9063b2",
+          "message": "Box<[T]>: coercion from Box<[T; N]>, drop glue, deref / index / methods; unsized elements are E0277\n\n- `Box<[T; N]>` coerces to `Box<[T]>` (the pointer and N) where `Box<[T]>` is expected: let, arguments, struct\n  fields, `as Box<[T]>`.\n- Dropping a `Box<[T]>` drops each element (when T needs it) and frees the allocation.\n- `*b` is the slice place, `b[i]` indexes it (also for writes), `&b` coerces to `&[T]`, and a method call on it is the\n  slice's (`b.len()`, `b.iter()`, `b.sort()` through `&*b` / `&mut *b`). `{:?}` prints it.\n- Two deref coercions (`&Box<T>` -> `&T`) took `!is_fat()` of the pointee to mean \"sized\", which a bare `[T]` is not:\n  they loaded the data pointer in place of the (pointer, length) pair.\n- E0277 for a slice or array whose element is unsized (`[[T]]`, `[str; 2]`), at the field's line.\n\ntests/ui: 9 newly passing (run-pass array-slice-vec/show-boxed-slice.rs, cast/cast-to-box-arr.rs,\ncodegen/box-str-drop-glue.rs; compile-fail borrowck/borrowck-consume-unsize-vec.rs, cast/fat-ptr-cast.rs,\nconsts/const-eval/array-len-mismatch-type.rs, unsized-locals/reference-unsized-locals.rs,\nunsized-locals/simple-unsized-locals.rs, wf/wf-array-elem-sized.rs), 0 regressions. KPIs: no change outside noise.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-19T14:53:55Z",
+          "tree_id": "fd6af84dca093ef9e76bfb0cd42ce997e38e8e9e",
+          "url": "https://github.com/mizchi/zust/commit/9af93dd27826747f75a33827352452f9fb9063b2"
+        },
+        "date": 1795100302387,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tests/ui run-pass pass rate",
+            "value": 68.39,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui run-pass passing",
+            "value": 1631,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui check-pass pass rate",
+            "value": 75.71,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui check-pass passing",
+            "value": 1368,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui build-pass pass rate",
+            "value": 70.37,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui build-pass passing",
+            "value": 95,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui compile-fail pass rate",
+            "value": 44.97,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui compile-fail passing",
+            "value": 3309,
             "unit": "tests"
           }
         ]
