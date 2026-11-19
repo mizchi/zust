@@ -4,4 +4,4 @@ date	commit	change	noop_M	edit_M	check_M	cache_KiB	lsp_G	run	check	build	cfail
 2026-11-19	b0edbd7	`_` in an annotation is a new inference variable (with a Debug-printing check)	625.130	626.989	3963.523	1902.8	11.2486	1545	1273	89	2843
 2026-11-19	042f17d	methods of numbers in a Box, blanket-impl methods of numbers	625.130	626.990	3963.563	1902.8	11.2621	1545	1273	89	2850
 2026-11-19	89d9fe9	drop the Debug-printing check on annotated lets	625.127	626.729	3905.088	1902.8	11.0232	1545	1273	89	2850
-2026-11-19	1d950d2+	tests/ui: skip compiletest-ignore-dir directories (module files of other tests; run-pass 2413 -> 2385 applicable)	625.187	626.789	3905.209	1902.8	-	1544	1273	89	2850
+2026-11-19	6f5a272	tests/ui: skip compiletest-ignore-dir directories (module files of other tests; run-pass 2413 -> 2385 applicable)	625.187	626.789	3905.209	1902.8	-	1544	1273	89	2850

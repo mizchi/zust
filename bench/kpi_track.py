@@ -103,7 +103,8 @@ def write_md(rows):
     out = ["# KPI log (one row per change)",
            "",
            "Written by `python3 bench/kpi_track.py` after each change (deterministic counts only; see the script). "
-           "Δ is against the row before, Σ against the first row.",
+           "Δ is against the row before, Σ against the first row. The same binary measured again moves by up to "
+           "~0.01%, so differences below ~0.02% are noise.",
            "",
            "| date | commit | change | no-op build (M instr) | edit one fn (M instr) | check (M instr) | cache (KiB) | LSP session (G instr) | tests/ui run / check / build / compile-fail |",
            "|---|---|---|---:|---:|---:|---:|---:|---|"]
