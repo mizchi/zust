@@ -548,12 +548,21 @@ impl Cx<'_> {
             }
         }
         // (`f.m()` with f a fn pointer and `impl Tr for fn(..)`: the `__fnptr` method whose self type is f's)
-        if let Some(ft @ (Ty::Fn(_) | Ty::Ptr(..))) = self.peek(recv) {
-            if let Some(id) = self.prog.prim_method(ft, method) {
+        // (or with f a `&[T; N]` / `&[T]` and `impl<T> Tr for &[T; N]`: the method of that impl)
+        let ref_seq = |t: Ty| matches!(t, Ty::Ref(_, Ty::Array(..) | Ty::Slice(_)) | Ty::Array(..));
+        if let Some(ft) = local_ty.filter(|&t| ref_seq(t)).or_else(|| self.peek(recv)).filter(|&t| matches!(t, Ty::Fn(_) | Ty::Ptr(..)) || ref_seq(t)) {
+            let id = self.prog.prim_method(ft, method).filter(|&id| match ft {
+                Ty::Ref(..) if ref_seq(ft) => matches!(self.prog.sigs[id as usize].self_ty, Some(Ty::Ref(..))),
+                // (a by-value impl for arrays: `impl<T> Tr for [T; 3]`, whose method takes self)
+                Ty::Array(..) => matches!(self.prog.sigs[id as usize].self_ty, Some(Ty::Array(..))) && self.prog.sigs[id as usize].has_self,
+                _ => true,
+            });
+            if let Some(id) = id {
                 let (v, t) = self.expr(recv, Some(ft))?;
                 let v = v.ok_or("internal: fn pointer without a value")?;
                 let (rv, rt) = match self.prog.sigs[id as usize].params.first() {
-                    Some(Ty::Ref(m, _)) => {
+                    // (`&self` of the receiver's type; `self` of an impl for `&[T; 3]` is the reference itself)
+                    Some(Ty::Ref(m, pi)) if std::mem::discriminant(*pi) == std::mem::discriminant(&ft) => {
                         let tmp = self.temp(t);
                         self.b.ins().store(mf(), v, tmp, 0);
                         (tmp, Ty::Ref(*m, intern(t)))

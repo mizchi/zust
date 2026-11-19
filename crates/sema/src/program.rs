@@ -1730,7 +1730,7 @@ impl Program {
         // that t fits)
         if let Ty::Ref(_, i @ (Ty::Array(..) | Ty::Slice(_))) = t {
             let g = if matches!(i, Ty::Array(..)) { "__array" } else { "__slice" };
-            if let Some(&id) = self.index.get(&format!("{g}::{name}")) {
+            if let Some(&id) = self.index.get(&format!("{g}::__ref_{name}")).or_else(|| self.index.get(&format!("{g}::{name}"))) {
                 let ids: Vec<u32> = self.overloads.get(&self.names[id as usize]).cloned().unwrap_or_else(|| vec![id]);
                 let fit = ids.into_iter().find(|&i| match self.sigs[i as usize].self_ty {
                     Some(st @ Ty::Ref(..)) => self.match_ty(st, t, &mut vec![None; self.sigs[i as usize].generics.len()]),

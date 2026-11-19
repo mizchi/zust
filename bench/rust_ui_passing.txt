@@ -5801,6 +5801,7 @@ compile-fail	traits/error-reporting/incomplete-partial-ord-impl.rs
 compile-fail	traits/explicit-reference-cast-unrelated-leaf.rs
 run-pass	traits/false-ambiguity-where-clause-builtin-bound.rs
 check-pass	traits/fn-pointer/hrtb-assoc-fn-traits-28994.rs
+compile-fail	traits/fn-pointer/suggest-wrap-parens-method.rs
 run-pass	traits/fnonce-repro-trait-impl-13434.rs
 compile-fail	traits/fully-qualified-syntax-cast.rs
 check-pass	traits/hrtb-related-type-params-30867.rs
