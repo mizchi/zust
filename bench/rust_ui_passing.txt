@@ -3128,6 +3128,7 @@ compile-fail	lint/issue-104392.rs
 compile-fail	lint/issue-104897.rs
 check-pass	lint/issue-108155.rs
 check-pass	lint/issue-110573.rs
+check-pass	lint/issue-121070-let-range.rs
 check-pass	lint/issue-14837.rs
 build-pass	lint/issue-1866.rs
 check-pass	lint/issue-19102.rs
@@ -4804,6 +4805,7 @@ compile-fail	pub/pub-restricted.rs
 compile-fail	query-system/fn-sig-cycle-arity.rs
 compile-fail	query-system/no-query-in-printing-during-query-descr.rs
 compile-fail	query-system/query-cycle-printing-issue-151226.rs
+run-pass	range/inclusive-range-in-closure.rs
 compile-fail	range/issue-54505-no-literals.rs
 compile-fail	range/issue-54505.rs
 compile-fail	range/misleading-field-access-hint.rs
@@ -6082,6 +6084,7 @@ check-pass	tuple/coercion-never.rs
 check-pass	tuple/index-float.rs
 compile-fail	tuple/index-invalid.rs
 check-pass	tuple/indexing-in-macro.rs
+run-pass	tuple/nested-index.rs
 run-pass	tuple/nested-zst-tuple-fields.rs
 check-pass	tuple/never-to-any-coercion-in-collection-issue-100727.rs
 run-pass	tuple/one-tuple.rs

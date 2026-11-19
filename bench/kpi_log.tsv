@@ -88,3 +88,7 @@ date	commit	change	noop_M	edit_M	check_M	cache_KiB	lsp_G	run	check	build	cfail
 2026-11-19	e468530+	default methods of generic traits: the trait's arguments from the receiver type's impl	0.874	591.348	3878.938	1902.8	-	1688	1407	95	3321	1181.506	63.257	11.272	319.963
 2026-11-19	b51ec2c+	{:?} of raw pointers (hex address via __exr_fmt_ptr, selected only with *const/*mut)	0.874	591.752	3881.031	1902.8	-	1696	1407	95	3321	1181.351	63.311	11.272	319.961
 2026-11-19	a0a6c39+	integer literal typed by a default method of a trait an integer type implements (3.hi())	0.874	591.826	3881.076	1902.8	-	1696	1407	95	3321	1181.005	63.337	11.272	320.011
+2026-11-19	ca0796b+	Debug for Range/RangeInclusive; a range used by itself with .next() selects Iterator	0.874	591.839	3879.173	1902.8	-	1698	1408	95	3321	1182.227	63.409	11.273	321.305
+2026-11-19	ca0796b+	Debug for Range/RangeInclusive (without the .next() selection heuristic)	0.876	591.841	3879.175	1902.8	-	1698	1408	95	3321	1181.928	63.463	11.285	321.385
+2026-11-19	ca0796b+	Debug for Range/RangeInclusive, gated on Debug formatting	0.874	591.679	3879.025	1902.8	-	1	-	-	-	1181.649	63.574	11.273	321.099
+2026-11-19	ca0796b+	Debug for ranges (gated); selection: name-only items decided by one lookup, header-only classification tables	0.874	591.131	3879.121	1902.8	-	1698	1408	95	3322	1181.488	63.351	11.273	319.238

@@ -143,7 +143,11 @@ fn is_iterator_trait(h: usize) -> bool {
     T.get_or_init(|| {
         items()
             .iter()
-            .map(|(it, _, _)| it.idents.iter().any(|&(a, b)| matches!(&PRELUDE[a as usize..b as usize], "Iterator" | "IntoIter")))
+            // (asked for headers only: other items are not scanned)
+            .map(|(it, _, _)| {
+                matches!(it.kind, ItemKind::ImplHeader | ItemKind::TraitHeader)
+                    && it.idents.iter().any(|&(a, b)| matches!(&PRELUDE[a as usize..b as usize], "Iterator" | "IntoIter"))
+            })
             .collect()
     })[h]
 }
@@ -170,6 +174,38 @@ fn helper_suffixes() -> &'static HashMap<&'static str, Vec<&'static str>> {
 }
 
 /// 比較の trait (PartialEq / Eq / PartialOrd / Ord) の宣言か
+/// selection の `wanted` が名前のほかの条件でも真になりうる item か (それ以外は名前が要るときだけ選ばれる)
+fn by_more_than_name(i: usize) -> bool {
+    static T: OnceLock<Vec<bool>> = OnceLock::new();
+    T.get_or_init(|| {
+        items()
+            .iter()
+            .map(|(it, name, _)| {
+                let special = matches!(
+                    name.as_deref(),
+                    Some("Option" | "Result" | "__exr_str_cmp" | "Range" | "RangeInclusive" | "__err_mark" | "eq")
+                ) || name.as_deref().is_some_and(|n| n == BOX_ALLOC || n == BOX_FREE || n == DROP_GLUE || n.starts_with("__exr_fnptr"));
+                special
+                    || match it.kind {
+                        ItemKind::ImplMember(h) => is_seq_eq_impl(h as usize) || (owner(h as usize).is_some() && is_drop_impl(h as usize)),
+                        _ => false,
+                    }
+            })
+            .collect()
+    })[i]
+}
+
+/// `impl Drop for ..` の header か (item ごとに 1 回だけ計算する)
+fn is_drop_impl(h: usize) -> bool {
+    static T: OnceLock<Vec<bool>> = OnceLock::new();
+    T.get_or_init(|| {
+        items()
+            .iter()
+            .map(|(it, _, _)| matches!(it.kind, ItemKind::ImplHeader) && it.idents.iter().any(|&(a, b)| &PRELUDE[a as usize..b as usize] == "Drop"))
+            .collect()
+    })[h]
+}
+
 fn is_cmp_trait(h: usize) -> bool {
     // (computed once per item: asked for every trait member on each round of the selection)
     static T: OnceLock<Vec<bool>> = OnceLock::new();
@@ -242,6 +278,8 @@ fn gated_impl(h: usize) -> Option<&'static str> {
                 let ws: Vec<&'static str> = it.idents.iter().map(|&(a, b)| &PRELUDE[a as usize..b as usize]).collect();
                 match ws.as_slice() {
                     ["impl", t, "for", ..] if matches!(*t, "Read" | "BufRead" | "Write" | "__FWr") => Some(*t),
+                    // (`{:?}` of a range: only for a program that formats with Debug)
+                    ["impl", "T", "Debug", "for", r, ..] if matches!(*r, "Range" | "RangeInclusive") => Some("__range_debug"),
                     _ => None,
                 }
             })
@@ -981,6 +1019,9 @@ pub fn select_with(user_src: &str, user_items: &[SrcItem], cache: &mut SelectCac
         || ((sc.has("assert_eq!(") || sc.has("assert_ne!(")) && !sc.has("no_std"))
     {
         need.extend(FMT_NAMES.iter().copied());
+        if sc.has("{:?}") || sc.has("assert_eq!") || sc.has("assert_ne!") || sc.has("dbg!") {
+            need.insert("__range_debug");
+        }
         // (`{:?}` of a raw pointer)
         if sc.has("*const") || sc.has("*mut") {
             need.insert("__exr_fmt_ptr");
@@ -1545,6 +1586,10 @@ pub fn select_with(user_src: &str, user_items: &[SrcItem], cache: &mut SelectCac
             if chosen[i] || matches!(it.kind, ItemKind::ImplHeader | ItemKind::TraitHeader) {
                 continue;
             }
+            // (most items are wanted only by their name: one lookup decides them before the gates below)
+            if !by_more_than_name(i) && !name.as_deref().is_some_and(|n| need.contains(n)) {
+                continue;
+            }
             // Iterator の (デフォルト) メソッドは Iterator を使うときだけ (`a.max(b)` の max では引かない)
             if let ItemKind::TraitMember(h) = it.kind {
                 if !iter_lib && is_iterator_trait(h as usize) {
@@ -1608,12 +1653,7 @@ pub fn select_with(user_src: &str, user_items: &[SrcItem], cache: &mut SelectCac
                         continue;
                     }
                     // (`==` は識別子として現れないので eq も)
-                    drop_member = name.as_deref() == Some("eq")
-                        || all[h as usize]
-                            .0
-                            .idents
-                            .iter()
-                            .any(|&(a, b)| &PRELUDE[a as usize..b as usize] == "Drop");
+                    drop_member = name.as_deref() == Some("eq") || is_drop_impl(h as usize);
                 }
             }
             // core::cmp::max などは `core` / `std` という識別子 (パスか use) がなければ使えない

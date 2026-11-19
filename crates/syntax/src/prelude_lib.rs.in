@@ -6834,6 +6834,28 @@ impl<T> Drop for Rc<T> {
     }
 }
 
+// (`{:?}` of a range: `1..5` / `1..=5`)
+impl<T> Debug for Range<T> {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError> {
+        __exr_debug(&self.start, f);
+        f.buf.push_str("..");
+        __exr_debug(&self.end, f);
+        Ok(())
+    }
+}
+
+impl<T> Debug for RangeInclusive<T> {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError> {
+        __exr_debug(&self.start, f);
+        f.buf.push_str("..=");
+        __exr_debug(&self.end, f);
+        if self.done {
+            f.buf.push_str(" (exhausted)");
+        }
+        Ok(())
+    }
+}
+
 impl<T> Debug for Rc<T> {
     fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError> {
         __exr_debug(self.as_ref(), f);
