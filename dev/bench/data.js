@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795121536615,
+  "lastUpdate": 1795121538505,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -60273,6 +60273,70 @@ window.BENCHMARK_DATA = {
           {
             "name": "tests/ui compile-fail passing",
             "value": 3321,
+            "unit": "tests"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "committer": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "distinct": true,
+          "id": "fb2070be86af0e9e7dcb65939b28258f31deb5c0",
+          "message": "Integer literals typed by method resolution; methods through nested Boxes\n\n- `3.double()` / `let x = 3; x.double()` with `impl Double for usize`\n  only: the one integer type whose impl has the method fixes the\n  literal's type (rustc's probe of `{integer}`).\n- `&self` methods of a number reached through `Box<Box<..>>`, and\n  `self: Box<Self>` methods on `Box<number>`.\n\ntests/ui: +4 genuine passes (3 run-pass, 1 compile-fail).\nKPI: unchanged (no-op back within the band).\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-19T20:47:16Z",
+          "tree_id": "8b6d9f169cffd31add21848a84f258dac20932c0",
+          "url": "https://github.com/mizchi/zust/commit/fb2070be86af0e9e7dcb65939b28258f31deb5c0"
+        },
+        "date": 1795121538231,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tests/ui run-pass pass rate",
+            "value": 70.36,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui run-pass passing",
+            "value": 1678,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui check-pass pass rate",
+            "value": 77.7,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui check-pass passing",
+            "value": 1404,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui build-pass pass rate",
+            "value": 70.37,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui build-pass passing",
+            "value": 95,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui compile-fail pass rate",
+            "value": 45.16,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui compile-fail passing",
+            "value": 3323,
             "unit": "tests"
           }
         ]
