@@ -134,7 +134,7 @@ matches rustc `-O`). Memory is the peak RSS of one build for zustc and rustc, an
 | bench/rt (6 programs): zustc | 29–59 ms | 5–7 ms | 5–9 ms | 36–90 KiB | 13 MiB |
 | bench/rt: rustc `-C incremental` | 82–162 ms | 70–92 ms | 67–100 ms | 0.1–0.9 MiB | 75–85 MiB |
 | bench/rt: blaze | 1439–1669 ms | 29–38 ms | 35–42 ms | 244 MiB | 348–390 MiB |
-| **zustc vs blaze** | **18–54x faster** | **1.7–6x faster** | **4.6–7.4x faster** | **1/345 (gen1000)–1/6900** | **1/27–1/34** |
+| **zustc vs blaze** | **18–56x faster** | **1.7–6x faster** | **3.9–8.4x faster** | **1/345 (gen1000)–1/6900** | **1/27–1/34** |
 
 hashmap is left out of bench/rt's rows: blaze does not build it (`HashMap::new` reaches a thread-local static it cannot
 compile yet). blaze builds real cargo projects that zustc cannot build yet (ripgrep, nushell, bun: its own
