@@ -202,9 +202,9 @@ zustc に求められるもの (nightly の機能・補助のクレート・特�
 | 種類 | 対象 | 通った |
 |---|---:|---:|
 | run-pass (ビルドでき、実行して同じ出力) | 2385 | 1560 (65.4%) |
-| check-pass (`zustc check` が通す) | 1807 | 1300 (71.9%) |
+| check-pass (`zustc check` が通す) | 1807 | 1307 (72.3%) |
 | build-pass | 135 | 89 (65.9%) |
-| compile-fail (注釈の行で拒む) | 7358 | 2854 (38.8%) |
+| compile-fail (注釈の行で拒む) | 7358 | 2856 (38.8%) |
 
 分野ごとの内訳はチェックリストの形で [SUPPORTED.ja.md](SUPPORTED.ja.md) にある。
 

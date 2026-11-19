@@ -10,9 +10,9 @@ Status as of 2026-11-18, updated with each round of work. The percentages are ru
 ## Overall
 
 - [x] tests/ui run-pass: 65.4% (1560 / 2385)
-- [x] tests/ui check-pass: 71.9% (1300 / 1807)
+- [x] tests/ui check-pass: 72.3% (1307 / 1807)
 - [x] tests/ui build-pass: 65.9% (89 / 135)
-- [ ] tests/ui compile-fail (an error on an annotated line): 38.8% (2854 / 7358)
+- [ ] tests/ui compile-fail (an error on an annotated line): 38.8% (2856 / 7358)
 - [x] real crates: fnv, adler2, hex, itoa, rustc-hash and cfg-if build and give the same output (6 / 6)
 - [x] zust-analyzer answers like rust-analyzer: 95.4% (rust-analyzer: 96.2%)
 
@@ -83,7 +83,8 @@ Status as of 2026-11-18, updated with each round of work. The percentages are ru
 - [ ] builtin macros: `offset_of!`, `addr_of!` / `addr_of_mut!`, `try!`, `stringify!`, `concat!`, `line!`, `column!`,
   `option_env!`, `assert_matches!`, `format_args!` now work; `module_path!`, `file!`, `include!`, `asm!` do not (~8 tests)
 - [ ] `repr(packed)` / `repr(align)`: ~16 tests
-- [ ] `Pin`: `Pin<&T>` / `Pin<&mut T>` work as the pointer; `Box::pin`, `pin!` and `self: Pin<&Self>` receivers do not
+- [ ] `Pin`: `Pin<&T>` / `Pin<&mut T>` work as the pointer; `Box::pin(fut)` and `Pin<Box<dyn Future<Output = T>>>` work (the future's value, as async runs at once); `pin!` and
+  `self: Pin<&Self>` receivers do not
 - [ ] dyn compatibility (E0038), generic argument counts of traits
 - [ ] closures that capture `&mut` are not `Copy`
 
