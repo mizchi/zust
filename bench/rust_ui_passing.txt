@@ -86,8 +86,11 @@ run-pass	associated-consts/associated-const-marks-live-code.rs
 check-pass	associated-consts/associated-const-outer-ty-refs.rs
 run-pass	associated-consts/associated-const-overwrite-default.rs
 run-pass	associated-consts/associated-const-public-impl.rs
+run-pass	associated-consts/associated-const-use-default.rs
 run-pass	associated-consts/associated-const.rs
 check-pass	associated-consts/constant-trait-item-reference-selection-26095.rs
+run-pass	associated-consts/defaults-cyclic-pass.rs
+run-pass	associated-consts/defaults-not-assumed-pass.rs
 check-pass	associated-consts/double-elided.rs
 compile-fail	associated-consts/issue-58022.rs
 compile-fail	associated-consts/issue-63496.rs
@@ -256,6 +259,7 @@ run-pass	associated-types/projection-as-type-alias.rs
 compile-fail	associated-types/recursive-associated-type-overflow-21946.rs
 compile-fail	associated-types/report-unsatisfied-where-bound-error.rs
 compile-fail	associated-types/resolve-method-with-missing-assoc-type.rs
+run-pass	associated-types/same-name-assoc-type-and-method.rs
 check-pass	associated-types/self-type-alias-for-assoc-type.rs
 check-pass	associated-types/simple-associated-type-impl.rs
 check-pass	associated-types/size-of-assoc-type-output.rs
@@ -2413,6 +2417,7 @@ check-pass	impl-trait/transmute/in-defining-scope.rs
 check-pass	impl-trait/transmute/outside-of-defining-scope.rs
 run-pass	impl-trait/universal_hrtb_anon.rs
 run-pass	impl-trait/universal_hrtb_named.rs
+run-pass	impl-trait/universal_in_trait_defn_parameters.rs
 run-pass	impl-trait/universal_multiple_bounds.rs
 check-pass	impl-trait/wf-eval-order.rs
 compile-fail	impl-trait/where-allowed-2.rs
@@ -5856,7 +5861,6 @@ compile-fail	wf/issue-95665.rs
 compile-fail	wf/wf-associated-const.rs
 check-pass	wf/wf-dyn-in-hrtb-bound-issue-157122.rs
 compile-fail	wf/wf-fn-def-check-sig-2.rs
-compile-fail	wf/wf-static-method.rs
 check-pass	where-clauses/impl-method-where-clause-resolution.rs
 check-pass	where-clauses/issue-50825-1.rs
 run-pass	where-clauses/issue-50825.rs

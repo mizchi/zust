@@ -1525,6 +1525,8 @@ impl Program {
             Ty::Slice(_) => Some("__slice"),
             Ty::Array(..) => Some("__array"),
             Ty::Box(_) => Some("Box"),
+            // (`impl Tr for ()`: the methods of `#tuple0`)
+            Ty::Unit => Some("#tuple0"),
             _ => None,
         };
         // (`impl dyn Tr { fn m(&self) }`: `__dyn_Tr::m`)

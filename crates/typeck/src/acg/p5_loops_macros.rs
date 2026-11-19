@@ -1789,12 +1789,36 @@ impl Cx<'_> {
         // `<u64 as Integer>::MAX_STR_LEN`: impl の関連 const `u64::MAX_STR_LEN`
         if let (Some(q), Some(last)) = (q, p.segs.last()) {
             if let Ok(t) = self.parse_ty(q) {
-                let tn = self.prog.tn(t);
+                let tn = if t == Ty::Unit { "#tuple0".to_string() } else { self.prog.tn(t) };
                 if self.prog.const_index.contains_key(&format!("{tn}::{}", last.name)) {
                     let seg = |n: &str| crate::parse::Seg { name: n.to_string(), args: vec![], fn_args: None, text: n.to_string() };
                     let np = crate::parse::Path { global: false, segs: vec![seg(&tn), seg(&last.name)], pos: p.pos };
                     let ne: &Expr = self.keep_expr(Expr::Path(None, np));
                     return self.expr(ne, _expected);
+                }
+                // the trait's default (`<i32 as Foo>::ID` with `const ID: i32 = 1;` in Foo, not in the impl)
+                if p.segs.len() >= 2 {
+                    let tr = &p.segs[p.segs.len() - 2].name;
+                    if let Some(&ci) = self.prog.const_index.get(&format!("{tr}::{}", last.name)) {
+                        let c = &self.prog.consts[ci as usize];
+                        if !c.expr.contains("Self") {
+                            return self.const_value(e, ci);
+                        }
+                        // (`const B: u8 = Self::A;`: Self is the qualified type; a cycle is cut by a depth limit)
+                        thread_local!(static DEPTH: std::cell::Cell<u32> = const { std::cell::Cell::new(0) });
+                        if DEPTH.get() < 16 && !self.prog.has_param(c.ty) {
+                            let tq = self.prog.tn(t);
+                            let src = c.expr.replace("Self ::", "Self::").replace("Self::", &format!("<{tq} as {tr}>::"));
+                            let ty = c.ty;
+                            if let Ok(ce) = crate::parse::parse_expr(&src) {
+                                let ce: &Expr = self.keep_expr(ce);
+                                DEPTH.set(DEPTH.get() + 1);
+                                let r = self.expr(ce, Some(ty));
+                                DEPTH.set(DEPTH.get() - 1);
+                                return r;
+                            }
+                        }
+                    }
                 }
             }
         }
