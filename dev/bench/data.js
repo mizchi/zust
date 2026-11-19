@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795116606448,
+  "lastUpdate": 1795116608696,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -36184,6 +36184,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "lsp peak RSS",
             "value": 72.336,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "committer": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "distinct": true,
+          "id": "55b86401eb74560511347b0cfefe90692c211408",
+          "message": "dyn: methods dyn cannot call have no vtable entry; self: Box<Self>; E0038\n\n- Coercing to `dyn Tr` failed when any method of Tr could not go through dyn (\"`Foo::f` cannot be called through\n  `dyn` (it needs `&self`)\"), also for `fn make() -> Self where Self: Sized` / `fn by(self) where Self: Sized`, which\n  rustc leaves out of the vtable. Such methods now get an empty entry, and calling one through dyn is the error.\n- `self: Box<Self>` methods are callable on `Box<dyn Tr>`: the box goes to the method (the receiver is moved). On a\n  `&dyn Tr` they are \"no method named .. found for reference\".\n- E0038 (not dyn compatible) at the coercion: a method without `where Self: Sized` that has no `self`, generics of its\n  own, or `Self` in its parameters or result.\n\ntests/ui: 10 newly passing (run-pass autoref-autoderef/autoderef-method-on-trait.rs, self/dyn-compatibility-sized-self-\nby-value-self.rs, -generic-method.rs, -return-Self.rs, self/explicit-self-objects-uniq.rs,\nself/objects-owned-object-owned-method.rs, traits/object/exclusion.rs, traits/object/extern-c-trait-object-methods.rs;\ncompile-fail dyn-compatibility/mentions-Self-in-super-predicates.rs, error-codes/E0161.rs); 0 regressions.\nKPIs: no change outside noise.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-19T19:24:00Z",
+          "tree_id": "685bd592934cfc64e24843fed572d3d61361c6cf",
+          "url": "https://github.com/mizchi/zust/commit/55b86401eb74560511347b0cfefe90692c211408"
+        },
+        "date": 1795116608225,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "lsp definition p50",
+            "value": 0.451,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp hover p50",
+            "value": 0.357,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp completion p50",
+            "value": 0.913,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp references p50",
+            "value": 4.513,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp rename p50",
+            "value": 0.396,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp signatureHelp p50",
+            "value": 0.773,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp documentHighlight p50",
+            "value": 0.766,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp ready (startup to indexed)",
+            "value": 115.988,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp peak RSS",
+            "value": 72.242,
             "unit": "MiB"
           }
         ]
