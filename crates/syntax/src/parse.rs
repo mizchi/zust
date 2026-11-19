@@ -2168,8 +2168,8 @@ impl Parser {
 
     fn stmt(&mut self) -> R<Stmt> {
         let attrs = self.attrs()?;
-        let spos = self.pos();
         if self.item_follows() {
+            let spos = self.pos();
             let mut it = self.item()?;
             let mut a = attrs;
             a.extend(it.attrs);
@@ -2185,7 +2185,9 @@ impl Parser {
             }
             return Ok(Stmt::Item(it));
         }
-        if self.eat_ident("let") {
+        if self.is_ident("let") {
+            let spos = self.pos();
+            self.i += 1;
             let p = self.pat()?;
             let t = if self.eat_punct(":") { Some(self.ty()?) } else { None };
             let init = if self.eat_punct("=") { Some(self.expr(true)?) } else { None };
