@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795116610792,
+  "lastUpdate": 1795116613383,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -58418,6 +58418,70 @@ window.BENCHMARK_DATA = {
           {
             "name": "tests/ui compile-fail passing",
             "value": 3314,
+            "unit": "tests"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "committer": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "distinct": true,
+          "id": "55b86401eb74560511347b0cfefe90692c211408",
+          "message": "dyn: methods dyn cannot call have no vtable entry; self: Box<Self>; E0038\n\n- Coercing to `dyn Tr` failed when any method of Tr could not go through dyn (\"`Foo::f` cannot be called through\n  `dyn` (it needs `&self`)\"), also for `fn make() -> Self where Self: Sized` / `fn by(self) where Self: Sized`, which\n  rustc leaves out of the vtable. Such methods now get an empty entry, and calling one through dyn is the error.\n- `self: Box<Self>` methods are callable on `Box<dyn Tr>`: the box goes to the method (the receiver is moved). On a\n  `&dyn Tr` they are \"no method named .. found for reference\".\n- E0038 (not dyn compatible) at the coercion: a method without `where Self: Sized` that has no `self`, generics of its\n  own, or `Self` in its parameters or result.\n\ntests/ui: 10 newly passing (run-pass autoref-autoderef/autoderef-method-on-trait.rs, self/dyn-compatibility-sized-self-\nby-value-self.rs, -generic-method.rs, -return-Self.rs, self/explicit-self-objects-uniq.rs,\nself/objects-owned-object-owned-method.rs, traits/object/exclusion.rs, traits/object/extern-c-trait-object-methods.rs;\ncompile-fail dyn-compatibility/mentions-Self-in-super-predicates.rs, error-codes/E0161.rs); 0 regressions.\nKPIs: no change outside noise.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-19T19:24:00Z",
+          "tree_id": "685bd592934cfc64e24843fed572d3d61361c6cf",
+          "url": "https://github.com/mizchi/zust/commit/55b86401eb74560511347b0cfefe90692c211408"
+        },
+        "date": 1795116612896,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tests/ui run-pass pass rate",
+            "value": 70.06,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui run-pass passing",
+            "value": 1671,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui check-pass pass rate",
+            "value": 77.53,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui check-pass passing",
+            "value": 1401,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui build-pass pass rate",
+            "value": 70.37,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui build-pass passing",
+            "value": 95,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui compile-fail pass rate",
+            "value": 45.07,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui compile-fail passing",
+            "value": 3316,
             "unit": "tests"
           }
         ]
