@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795131631410,
+  "lastUpdate": 1795131633608,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -63983,6 +63983,70 @@ window.BENCHMARK_DATA = {
           {
             "name": "tests/ui compile-fail passing",
             "value": 3320,
+            "unit": "tests"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "committer": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "distinct": true,
+          "id": "3fbfec86b28d73e22cbfd9a39e174333502361ce",
+          "message": "impl Iterator<Item = T> returning a range literal\n\n`fn it() -> impl Iterator<Item = u32> { 0..3 }` (or `1..=n`): the body\nis inferred against `Range<u32>` / `RangeInclusive<u32>`, so the\nliterals take the declared Item type instead of defaulting to i32.\n\ntests/ui: no change in passes.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-19T23:33:06Z",
+          "tree_id": "43f2d4459ec70764a65001d389c8e59a40ff3531",
+          "url": "https://github.com/mizchi/zust/commit/3fbfec86b28d73e22cbfd9a39e174333502361ce"
+        },
+        "date": 1795131633068,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tests/ui run-pass pass rate",
+            "value": 71.19,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui run-pass passing",
+            "value": 1698,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui check-pass pass rate",
+            "value": 78.2,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui check-pass passing",
+            "value": 1413,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui build-pass pass rate",
+            "value": 70.37,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui build-pass passing",
+            "value": 95,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui compile-fail pass rate",
+            "value": 45.11,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui compile-fail passing",
+            "value": 3319,
             "unit": "tests"
           }
         ]
