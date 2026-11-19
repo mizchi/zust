@@ -5383,6 +5383,7 @@ run-pass	traits/object/dyn-iterator-with-non-ord-item.rs
 compile-fail	traits/object/elaborated-predicates-unconstrained-late-bound.rs
 compile-fail	traits/object/enforce-supertrait-projection.rs
 check-pass	traits/object/infer-shadows-implied-projection.rs
+build-pass	traits/object/inherent-method-on-dyn-with-rc-coercion.rs
 compile-fail	traits/object/issue-44454-2.rs
 run-pass	traits/object/lifetime-first.rs
 compile-fail	traits/object/macro-matcher.rs

@@ -1540,6 +1540,25 @@ impl Cx<'_> {
             }
             return err(SP, "`Box::leak` needs a Box");
         }
+        // `TypeId::of::<T>()` (a hash of T's name) / `type_name::<T>()` (T's name)
+        if (name == "of" && n >= 2 && p.segs[n - 2].name == "TypeId" && self.prog.struct_index.contains_key("TypeId")) || name == "type_name" {
+            if let (Some(GArg::Ty(t)), true) = (p.segs[n - 1].args.first(), cargs.is_empty()) {
+                let t = self.parse_ty(t)?;
+                let tn = self.prog.tn(t);
+                let e = if name == "type_name" {
+                    Expr::Lit(format!("{tn:?}"), Default::default())
+                } else {
+                    let mut h: u64 = 0xcbf2_9ce4_8422_2325;
+                    for b in tn.bytes() {
+                        h = (h ^ b as u64).wrapping_mul(0x0100_0000_01b3);
+                    }
+                    let seg = |n: &str| crate::parse::Seg { name: n.to_string(), args: vec![], fn_args: None, text: n.to_string() };
+                    Expr::Struct(crate::parse::Path { global: false, segs: vec![seg("TypeId")], pos: Default::default() }, vec![("t".into(), Expr::Lit(format!("{h}u64"), Default::default()))], None)
+                };
+                let e = self.keep_expr(e);
+                return self.expr(e, expected).map(Some);
+            }
+        }
         // `Box::pin(fut)`: futures run at once (`async` is its value, `.await` takes it as is), so the value itself
         // (`Pin<Box<dyn Future<Output = T>>>` is T, see the parser)
         if name == "pin" && n >= 2 && p.segs[n - 2].name == "Box" && cargs.len() == 1 && !self.prog.struct_index.contains_key("Box") {

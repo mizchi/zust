@@ -8410,6 +8410,12 @@ impl<P> Pin<P> {
     }
 }
 
+/// `std::any::TypeId` (`TypeId::of::<T>()` is made by the compiler: a hash of the type's name)
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
+pub struct TypeId {
+    t: u64,
+}
+
 /// `std::ptr::NonNull`
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct NonNull<T> {
