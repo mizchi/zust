@@ -714,6 +714,18 @@ impl Inf<'_> {
                 let e = self.lit_var(&t);
                 self.unify(v, e);
             }
+            // (a const that is not a literal (`const X: u64 = !0 as u16 as u64;`): the scrutinee has its type)
+            Pat::Ident(false, false, n, None)
+                if n.starts_with(|c: char| c.is_ascii_uppercase())
+                    && self.lookup(n).is_none()
+                    && self.prog.const_index.get(n.as_str()).is_some_and(|&ci| self.prog.consts[ci as usize].stat.is_none()) =>
+            {
+                let ci = self.prog.const_index[n.as_str()];
+                let t = self.prog.consts[ci as usize].ty;
+                let (v, _) = self.auto_deref(v, mode);
+                let k = self.known(t);
+                self.unify(v, k);
+            }
             Pat::Ident(r, m, n, sub) => {
                 if let Some(sub) = sub {
                     self.pat(sub, v, mode);

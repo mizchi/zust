@@ -56,6 +56,13 @@ impl Cx<'_> {
         }
         Ok(match (v, t) {
             (_, Ty::Never) => None,
+            // (a fat reference's value is the address of its two words, which can be another variable's (`&*x`): a
+            // pattern that binds it by reference (`let ref mut y = &*x;`) must not reach that variable)
+            (Some(a), t @ Ty::Ref(..)) if t.is_fat() => {
+                let tmp = self.temp(t);
+                self.copy(tmp, a, t);
+                Some(Place::Mem(tmp, 0, t))
+            }
             (Some(a), t) if t.is_agg() => Some(Place::Mem(a, 0, t)),
             (Some(v), t) => {
                 let var = self.b.declare_var(clif_ty(t).unwrap());
@@ -1182,6 +1189,28 @@ impl Cx<'_> {
 
     /// パターンが match 対象 e から値でムーブした (flag は e が一時値のときのフラグ)
     pub(crate) fn release(&mut self, e: &Expr, flag: Option<StackSlot>) {
+        // (a pattern moved out of a field of a local (`match a.1 { Some(v) => .. }`): the field becomes "empty" (0), as
+        // `let v = a.1;` leaves it, so the owner's drop and a later `a.1 = ..` free nothing twice)
+        if let Expr::Field(b, _, _) = strip_paren(e) {
+            let mut root: &Expr = b;
+            while let Expr::Field(r, _, _) = strip_paren(root) {
+                root = r;
+            }
+            let local = matches!(strip_paren(root), Expr::Path(_, p) if ident_of(p).and_then(|id| self.lookup(id)).is_some_and(|(_, t)| !matches!(t, Ty::Ref(..) | Ty::Ptr(..))));
+            if local {
+                // (reaching the place again is no access of the program's)
+                let on = std::mem::replace(&mut self.bk.on, false);
+                let pl = self.place_inner(e);
+                self.bk.on = on;
+                if let Ok(Place::Mem(a, o, t)) = pl {
+                    if self.needs_drop(t) && self.zeroable(t) {
+                        let dst = self.addr_plus(a, o);
+                        self.zero(dst, t);
+                        return;
+                    }
+                }
+            }
+        }
         if is_place_expr(e) {
             self.mark_moved(e);
             // (a pattern moved out of a capture held by value: its slot becomes empty, as for moving the capture

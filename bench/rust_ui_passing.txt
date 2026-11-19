@@ -856,6 +856,7 @@ compile-fail	borrowck/reassignment_immutable_fields_twice.rs
 check-pass	borrowck/reborrow-in-loop-match-recursive-enum.rs
 run-pass	borrowck/reborrow-in-match-ref-mut-option.rs
 compile-fail	borrowck/reborrow-in-match-suggest-deref.rs
+run-pass	borrowck/ref-mut-rebind-does-not-affect-outer.rs
 run-pass	borrowck/refcell-borrow-comparison-12033.rs
 run-pass	borrowck/region-checker-map-closure-13665.rs
 run-pass	borrowck/rvalue-lifetime-match-equivalence-7660.rs
@@ -1533,6 +1534,7 @@ check-pass	consts/issue-104155.rs
 compile-fail	consts/issue-104609.rs
 check-pass	consts/issue-13837.rs
 run-pass	consts/issue-13902.rs
+run-pass	consts/issue-17074.rs
 run-pass	consts/issue-17718-borrow-interior.rs
 check-pass	consts/issue-17718-references.rs
 run-pass	consts/issue-17756.rs
@@ -3400,6 +3402,7 @@ check-pass	match/issue-84434.rs
 compile-fail	match/issue-91058.rs
 run-pass	match/match-borrowed-str.rs
 run-pass	match/match-cloned-string.rs
+run-pass	match/match-field-reassign.rs
 compile-fail	match/match-fn-call.rs
 compile-fail	match/match-ill-type2.rs
 compile-fail	match/match-join.rs
