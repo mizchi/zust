@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795054154360,
+  "lastUpdate": 1795054155855,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -17260,6 +17260,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "lsp peak RSS",
             "value": 69.727,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "committer": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "distinct": true,
+          "id": "a6c8ba590419fd478b7597b58ac72f5a3dcf5133",
+          "message": "Numbers implement the operator traits; `dyn Tr` implements Tr\n\nIntegers and floats meet `Add` / `Sub` / .. / `*Assign` / `Sum` / `Product` bounds\n(`T: Add<Output = T>` with T = i32), integers also the bit operators, numbers, bool\nand char `FromStr` / `ToString`; `dyn A + B` implements the traits written in it.\ntests/ui: run-pass +3, check-pass +4. Eight compile-fail tests leave the baseline:\nthey passed only because `dyn X<Y = T>: X` was wrongly unsatisfied on the annotated\nline; their real errors (the binding's type does not meet the associated type's\nbound, a lifetime error) are not checked yet. KPIs unchanged.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-19T01:58:16Z",
+          "tree_id": "0953af43a65ea70d199f4cbfcfcfec3530b596a5",
+          "url": "https://github.com/mizchi/zust/commit/a6c8ba590419fd478b7597b58ac72f5a3dcf5133"
+        },
+        "date": 1795054155672,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "lsp definition p50",
+            "value": 0.482,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp hover p50",
+            "value": 0.382,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp completion p50",
+            "value": 1.031,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp references p50",
+            "value": 11.405,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp rename p50",
+            "value": 0.494,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp signatureHelp p50",
+            "value": 0.878,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp documentHighlight p50",
+            "value": 0.865,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp ready (startup to indexed)",
+            "value": 107.509,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp peak RSS",
+            "value": 69.914,
             "unit": "MiB"
           }
         ]
