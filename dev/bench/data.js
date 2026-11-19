@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795104724601,
+  "lastUpdate": 1795104726321,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -33676,6 +33676,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "lsp peak RSS",
             "value": 71.539,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "committer": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "distinct": true,
+          "id": "a55841b018ebe2907ed9533c7ff118beced2964b",
+          "message": "Methods of impls for [T; N], &[T; N] and &[T]\n\n`impl<T> Tr for [T; 3] { fn f(self) .. }` and `impl<'a, T> Tr for &'a [T; 3]` (registered as `__array::__ref_f`)\nhad no method call: `[1, 2, 3].f()` and `x.f()` with x: &[i32; 3] (also in a generic fn's instance) now call them.\nA receiver is wrapped in a reference only for a `&self` of its own type.\n\ntests/ui: compile-fail traits/fn-pointer/suggest-wrap-parens-method.rs passes (the run-pass case above had no test of\nits own); 0 regressions. KPIs: no change outside noise.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-19T16:06:52Z",
+          "tree_id": "0c1e04556398c82d49b7513fa99b3b803a245e60",
+          "url": "https://github.com/mizchi/zust/commit/a55841b018ebe2907ed9533c7ff118beced2964b"
+        },
+        "date": 1795104726099,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "lsp definition p50",
+            "value": 0.441,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp hover p50",
+            "value": 0.353,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp completion p50",
+            "value": 0.911,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp references p50",
+            "value": 2.896,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp rename p50",
+            "value": 0.392,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp signatureHelp p50",
+            "value": 0.607,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp documentHighlight p50",
+            "value": 0.635,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp ready (startup to indexed)",
+            "value": 107.717,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp peak RSS",
+            "value": 71.672,
             "unit": "MiB"
           }
         ]
