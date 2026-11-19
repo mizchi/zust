@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795092968064,
+  "lastUpdate": 1795092969963,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -30940,6 +30940,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "lsp peak RSS",
             "value": 71.504,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "committer": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "distinct": true,
+          "id": "f291655ae6a4ccc477127ebe732d334812d30e40",
+          "message": "bench/vs_blaze.py: zustc / rustc / blaze on the same programs on this machine (cold, no-op, edit, disk, memory);\nREADME's blaze section from it\n\nblaze 0.20261027.0 as a cargo package per program, its daemon left running. gen1000: zustc 148 / 18 / 28 ms, 766 KiB,\n13 MiB; blaze 2691 / 30 / 141 ms, 259 MiB on disk, 443 MiB in its daemon. blaze does not build bench/rt/hashmap.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-19T12:51:13Z",
+          "tree_id": "a8c2c5d61907c90b91a8d829aab358581bd12be0",
+          "url": "https://github.com/mizchi/zust/commit/f291655ae6a4ccc477127ebe732d334812d30e40"
+        },
+        "date": 1795092969677,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "lsp definition p50",
+            "value": 0.589,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp hover p50",
+            "value": 0.542,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp completion p50",
+            "value": 1.081,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp references p50",
+            "value": 2.34,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp rename p50",
+            "value": 0.668,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp signatureHelp p50",
+            "value": 0.846,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp documentHighlight p50",
+            "value": 0.831,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp ready (startup to indexed)",
+            "value": 136.902,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp peak RSS",
+            "value": 71.293,
             "unit": "MiB"
           }
         ]
