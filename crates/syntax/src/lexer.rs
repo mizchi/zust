@@ -1430,10 +1430,90 @@ pub fn rename_module_collisions_fix(src: &str, crates: &[String], fix: &mut Vec<
     for i in &imports {
         interest.insert(name_hash(&i.1));
     }
+    // (a name a fn binds itself, a parameter `guard: Self` or a `let guard = ..`, is that local in the fn's body, not
+    // the item of that name: `fn into_inner(guard: Self) { ManuallyDrop::new(guard) }` next to `pub fn guard`)
+    let mut local_tok: Vec<bool> = vec![false; toks.len()];
+    {
+        let mut close: Vec<usize> = vec![usize::MAX; toks.len()];
+        let mut st: Vec<usize> = vec![];
+        for k in 0..toks.len() {
+            if is_sym(k, b'(') || is_sym(k, b'{') || is_sym(k, b'[') {
+                st.push(k);
+            } else if is_sym(k, b')') || is_sym(k, b'}') || is_sym(k, b']') {
+                if let Some(o) = st.pop() {
+                    close[o] = k;
+                }
+            }
+        }
+        let renamed_names: Vec<&[u8]> = renamed.iter().map(|r| r.1.as_slice()).collect();
+        let mut k = 0;
+        while k + 2 < toks.len() {
+            if !is_id(k, b"fn") || toks[k + 1].0 != 0 {
+                k += 1;
+                continue;
+            }
+            // (the parameters: `(`, after the generics)
+            let mut p = k + 2;
+            if is_sym(p, b'<') {
+                let mut d = 0;
+                while p < toks.len() {
+                    if is_sym(p, b'<') {
+                        d += 1;
+                    } else if is_sym(p, b'>') && !(p >= 1 && is_sym(p - 1, b'-')) {
+                        d -= 1;
+                        if d == 0 {
+                            p += 1;
+                            break;
+                        }
+                    }
+                    p += 1;
+                }
+            }
+            if p >= toks.len() || !is_sym(p, b'(') || close[p] == usize::MAX {
+                k += 1;
+                continue;
+            }
+            let pe = close[p];
+            let mut bound: Vec<&[u8]> = vec![];
+            for q in p + 1..pe {
+                if toks[q].0 == 0 && q + 2 <= pe && is_sym(q + 1, b':') && !is_sym(q + 2, b':') && renamed_names.contains(&tok(q)) {
+                    bound.push(tok(q));
+                }
+            }
+            // (the body: the first `{` after the parameters, or none (`;`))
+            let mut b = pe + 1;
+            while b < toks.len() && !is_sym(b, b'{') && !is_sym(b, b';') {
+                b += 1;
+            }
+            if b >= toks.len() || !is_sym(b, b'{') || close[b] == usize::MAX {
+                k = pe;
+                continue;
+            }
+            let be = close[b];
+            for q in b + 1..be {
+                if is_id(q, b"let") {
+                    let n = if q + 1 < be && is_id(q + 1, b"mut") { q + 2 } else { q + 1 };
+                    // (a plain name: `let FnvHasher(mut h) = ..` is a pattern of the struct)
+                    let plain = n + 1 < be && (is_sym(n + 1, b'=') || is_sym(n + 1, b';') || (is_sym(n + 1, b':') && !is_sym(n + 2, b':')));
+                    if n < be && toks[n].0 == 0 && plain && renamed_names.contains(&tok(n)) {
+                        bound.push(tok(n));
+                    }
+                }
+            }
+            if !bound.is_empty() {
+                for q in p + 1..be {
+                    if toks[q].0 == 0 && bound.contains(&tok(q)) && !(q >= 2 && is_sym(q - 1, b':') && is_sym(q - 2, b':')) && !is_sym(q + 1, b':') || (toks[q].0 == 0 && bound.contains(&tok(q)) && q + 2 <= be && is_sym(q + 1, b':') && !is_sym(q + 2, b':')) {
+                        local_tok[q] = true;
+                    }
+                }
+            }
+            k = b;
+        }
+    }
     let mut repl: Vec<(usize, usize, Vec<u8>)> = vec![]; // (開始トークン, 終了トークン (含む), 新しいテキスト)
     let mut k = 0;
     while k < toks.len() {
-        if toks[k].0 != 0 || skip[k] {
+        if toks[k].0 != 0 || skip[k] || local_tok[k] {
             k += 1;
             continue;
         }

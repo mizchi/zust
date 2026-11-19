@@ -138,6 +138,8 @@ fn thing_end(s: &[u8], toks: &[Tok], mut i: usize) -> usize {
         j += 1;
     }
     let semi_item = matches!(t(j), b"const" | b"static" | b"use" | b"let" | b"type") && t(j + 1) != b"fn";
+    // (an item with a keyword ends at its `;` or its block, not at a `,` of `<T, F>` or of its where clause)
+    let keyword_item = matches!(t(j), b"fn" | b"struct" | b"enum" | b"union" | b"impl" | b"trait" | b"mod" | b"const" | b"static" | b"type" | b"use");
     let mut k = i;
     while k < toks.len() {
         let b = t(k);
@@ -145,7 +147,7 @@ fn thing_end(s: &[u8], toks: &[Tok], mut i: usize) -> usize {
             // (包んでいるものの終わり: その手前まで)
             return k - 1;
         }
-        if toks[k].0 == 1 && (b == b"," || b == b";") {
+        if toks[k].0 == 1 && (b == b";" || (b == b"," && !keyword_item)) {
             return k;
         }
         if toks[k].0 == 1 && is_open(b) {

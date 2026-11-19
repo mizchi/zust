@@ -282,6 +282,7 @@ compile-fail	associated-types/report-unsatisfied-where-bound-error.rs
 compile-fail	associated-types/resolve-method-with-missing-assoc-type.rs
 run-pass	associated-types/same-name-assoc-type-and-method.rs
 check-pass	associated-types/self-type-alias-for-assoc-type.rs
+run-pass	associated-types/self-type-projection-dyn-coerce.rs
 check-pass	associated-types/simple-associated-type-impl.rs
 check-pass	associated-types/size-of-assoc-type-output.rs
 run-pass	associated-types/sized-recursive-type-via-associated-type.rs
@@ -851,6 +852,7 @@ compile-fail	borrowck/move-from-union-field-issue-66500.rs
 compile-fail	borrowck/move-in-pattern-mut.rs
 compile-fail	borrowck/move-in-pattern.rs
 compile-fail	borrowck/moved-value-in-thread-loop-12041.rs
+compile-fail	borrowck/multiple-mutable-borrows-error-65131.rs
 compile-fail	borrowck/mut-borrow-of-mut-ref.rs
 compile-fail	borrowck/mutability-errors.rs
 compile-fail	borrowck/mutate-vec-while-iterating.rs
@@ -3401,6 +3403,7 @@ check-pass	macros/non-fmt-panic-no_std.rs
 compile-fail	macros/non-function-call-in-macro.rs
 check-pass	macros/none-delim-lookahead.rs
 check-pass	macros/out-of-scope-macro-calls-lint-registered.rs
+check-pass	macros/panic-temporaries.rs
 check-pass	macros/pub-item-inside-macro.rs
 check-pass	macros/pub-method-inside-macro.rs
 compile-fail	macros/recovery-allowed.rs

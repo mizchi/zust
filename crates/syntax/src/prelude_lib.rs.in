@@ -8113,6 +8113,8 @@ pub fn __core_spawn<T, F: FnOnce() -> T>(f: F) -> JoinHandle<T> {
 }
 
 pub fn __core_yield_now() {}
+// (`thread::panicking()`: a panic stops the process without unwinding, so no drop ever runs while panicking)
+pub fn __core_panicking() -> bool { false }
 
 // `std::time::Duration` (seconds and nanoseconds, as std)
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
@@ -8394,27 +8396,28 @@ impl<T> Iterator for __RecvIter<T> {
 
 /// `std::mem::ManuallyDrop` (the value is not dropped: Program::needs_drop knows the name)
 pub struct ManuallyDrop<T> {
-    value: T,
+    // (not `value`: a field of the type it derefs to may have that name, and std's field is private)
+    __md_value: T,
 }
 
 impl<T> ManuallyDrop<T> {
     pub const fn new(v: T) -> ManuallyDrop<T> {
-        ManuallyDrop { value: v }
+        ManuallyDrop { __md_value: v }
     }
     pub fn into_inner(slot: ManuallyDrop<T>) -> T {
-        unsafe { (&slot.value as *const T).read() }
+        unsafe { (&slot.__md_value as *const T).read() }
     }
     pub unsafe fn drop(slot: &mut ManuallyDrop<T>) {
-        __exr_drop_in_place(&mut slot.value as *mut T);
+        __exr_drop_in_place(&mut slot.__md_value as *mut T);
     }
     pub unsafe fn take(slot: &mut ManuallyDrop<T>) -> T {
-        (&slot.value as *const T).read()
+        (&slot.__md_value as *const T).read()
     }
     pub fn deref(&self) -> &T {
-        &self.value
+        &self.__md_value
     }
     pub fn deref_mut(&mut self) -> &mut T {
-        &mut self.value
+        &mut self.__md_value
     }
 }
 

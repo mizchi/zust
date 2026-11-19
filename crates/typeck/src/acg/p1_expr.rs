@@ -203,6 +203,14 @@ impl Cx<'_> {
                         err(sp.start, "dereference of raw pointer is unsafe and requires unsafe block (E0133)")
                     }
                     (Some(p), Ty::Ref(_, inner) | Ty::Ptr(_, inner) | Ty::Box(inner)) => Ok(Place::Mem(p, 0, *inner)),
+                    // (a Deref type the type records did not name (`*guard.value` in a generic instance): through
+                    // its deref, as above; x is a place, so reaching it again reads nothing new)
+                    (_, Ty::Struct(sid)) if is_place_expr(x) && self.user_deref_sid(x, sid).is_some() => {
+                        let d = self.user_deref_sid(x, sid).unwrap();
+                        let d = self.keep_expr(d);
+                        self.deref_shared(d);
+                        self.place(d)
+                    }
                     _ => err(SP, format!("type `{}` cannot be dereferenced", self.prog.tn(t))),
                 }
             }
@@ -365,6 +373,13 @@ impl Cx<'_> {
         // `&mut T` → `&T` (`Box<T>` も `&mut T` なのでここで `&T` になる)
         if let (Some(want @ Ty::Ref(false, wi)), Ty::Ref(true, gi)) = (expected, t) {
             if wi == gi {
+                return Ok((v, want));
+            }
+        }
+        // (`strategy: PhantomData` for a `PhantomData<fn(S) -> S>`: a generic unit struct, with no fields, is the
+        // instance it is expected to be)
+        if let (Some(want @ Ty::Struct(x)), Ty::Struct(y)) = (expected, t) {
+            if x != y && self.prog.base_of(x) == self.prog.base_of(y) && !self.prog.structs[y as usize].is_enum && self.prog.structs[y as usize].fields.is_empty() && self.prog.structs[x as usize].fields.is_empty() && !matches!(e, Expr::Call(..) | Expr::MethodCall(..)) {
                 return Ok((v, want));
             }
         }

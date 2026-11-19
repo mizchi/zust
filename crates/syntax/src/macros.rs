@@ -866,7 +866,9 @@ pub fn expand_cfg(src: &str, cfg: Option<&crate::cfg::CfgSet>) -> Result<Option<
                     // of the `({ .. })` around the rest: `fn main() { m!(); S }` with `struct S;` from m)
                     let stmt_pos = i == 0 || sym(i - 1, b';') || sym(i - 1, b'{') || sym(i - 1, b'}');
                     // (not with attributes: a `#[cfg(false)]` item removed later would leave the attributes before it)
-                    let spliced = !top && stmt_pos && (sym(ge + 1, b';') || sym(ge + 1, b'}')) && !body.contains('#');
+                    // (`m! { .. }` in statement position is a statement by itself, whatever follows: `defer! { .. }
+                    // let x = ..;`)
+                    let spliced = !top && stmt_pos && (sym(ge + 1, b';') || sym(ge + 1, b'}') || sym(ge, b'}')) && !body.contains('#');
                     // (the call's own `;` goes when the expansion ends a statement itself: no stray `;` after attributes)
                     let drop_semi = spliced && sym(ge + 1, b';') && body.trim_end().ends_with(';');
                     let rep = if top {
