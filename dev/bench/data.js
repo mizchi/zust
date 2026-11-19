@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795112334346,
+  "lastUpdate": 1795112336523,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -35272,6 +35272,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "lsp peak RSS",
             "value": 72.551,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "committer": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "distinct": true,
+          "id": "5d5bcd0282ca48bbd01ab2676e540f3da81316ee",
+          "message": "Errors in a dependency crate's functions at their own file's lines\n\nA function of a dependency compiled in the app's build has its lines counted from that crate's start, tagged with the\ncrate (`tag << 20 | line`, for panic locations that do not depend on where the crate sits in the combined source).\nIts errors carried those tagged lines (`lib/src/lib.rs:2428502019:5`). They are put back at the combined source's\nlines before relocation, and relocation now also maps the second place a message names (`(at L:C)`: the same file's\nline, or `file:L:C`).\n\ntests/ui: 0 regressions. KPIs: no change outside noise.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-19T18:13:03Z",
+          "tree_id": "71fd14f48e827b567aa54b370ad7b97e14b7c5e0",
+          "url": "https://github.com/mizchi/zust/commit/5d5bcd0282ca48bbd01ab2676e540f3da81316ee"
+        },
+        "date": 1795112336058,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "lsp definition p50",
+            "value": 0.507,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp hover p50",
+            "value": 0.387,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp completion p50",
+            "value": 0.94,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp references p50",
+            "value": 4.601,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp rename p50",
+            "value": 0.414,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp signatureHelp p50",
+            "value": 0.802,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp documentHighlight p50",
+            "value": 0.769,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp ready (startup to indexed)",
+            "value": 118.676,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp peak RSS",
+            "value": 72.203,
             "unit": "MiB"
           }
         ]
