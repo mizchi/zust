@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795101062350,
+  "lastUpdate": 1795101064090,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -32992,6 +32992,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "lsp peak RSS",
             "value": 71.441,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "committer": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "distinct": true,
+          "id": "08086f5c6dff728e84ebb986a2726f5e83f61c82",
+          "message": "Moves out of a field through a pattern, fat-reference scrutinees, non-literal const patterns\n\n- `match a.1 { Some(v) => { a.1 = ..; v } }`: the pattern moved the field out, but the field kept its value, so the\n  assignment (and the owner's drop) freed it again. The field is now zeroed (\"empty\", as `let v = a.1;` leaves it).\n- `let ref mut x = &*x;`: the value of a fat reference is the address of its two words, which was the outer x's own\n  slot, so `*x = ..` overwrote the outer variable. A fat-reference scrutinee that is not a place is copied first.\n- A const pattern whose value is not a literal (`const X: u64 = !0 as u16 as u64;`) gives the scrutinee its type\n  (`match 1 { X => .. }` compared an i32 with it).\n\ntests/ui: run-pass borrowck/ref-mut-rebind-does-not-affect-outer.rs, consts/issue-17074.rs,\nmatch/match-field-reassign.rs pass; 0 regressions. (compile-fail suggestions/dont-wrap-ambiguous-receivers.rs fails\nat the annotated line for another reason; not added.) KPIs: no change outside noise.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-19T15:05:58Z",
+          "tree_id": "3bbe00d6c68f95f1db21c44cad237d251d4a72f6",
+          "url": "https://github.com/mizchi/zust/commit/08086f5c6dff728e84ebb986a2726f5e83f61c82"
+        },
+        "date": 1795101063864,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "lsp definition p50",
+            "value": 0.414,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp hover p50",
+            "value": 0.323,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp completion p50",
+            "value": 1.101,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp references p50",
+            "value": 2.931,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp rename p50",
+            "value": 0.35,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp signatureHelp p50",
+            "value": 0.634,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp documentHighlight p50",
+            "value": 0.642,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp ready (startup to indexed)",
+            "value": 114.805,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp peak RSS",
+            "value": 71.523,
             "unit": "MiB"
           }
         ]
