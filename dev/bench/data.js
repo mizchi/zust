@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795184150294,
+  "lastUpdate": 1795184152610,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -70172,6 +70172,85 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/mizchi/zust/commit/4ed592f653ee0ed264c8688f9df34a3ae347b90a"
         },
         "date": 1795183153276,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "parity documentSymbol (名前の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity workspace/symbol (上位 20 の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity definition (行き先の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity hover (名前を含む)",
+            "value": 90,
+            "unit": "%"
+          },
+          {
+            "name": "parity references (数の一致)",
+            "value": 97.297,
+            "unit": "%"
+          },
+          {
+            "name": "parity documentHighlight (数の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity rename (書き換えの一致)",
+            "value": 94.118,
+            "unit": "%"
+          },
+          {
+            "name": "parity signatureHelp (名前・引数の数・今の引数の一致)",
+            "value": 94.737,
+            "unit": "%"
+          },
+          {
+            "name": "parity completion `x.\\|` (書いてある名前を含む)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity completion `na\\|me` (同)",
+            "value": 92.593,
+            "unit": "%"
+          },
+          {
+            "name": "parity 一致の平均",
+            "value": 96.874,
+            "unit": "%"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "committer": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "distinct": true,
+          "id": "2126394cfa8ea16f24d4237dae93db8770ec17ff",
+          "message": "into_iter: arrays by value, iterators as themselves\n\n- `arr.into_iter()` on an array variable is rewritten to\n  `arr.iter().copied()`. When the prelude left Copied out, it fell back to\n  the by-reference Iter (2018's meaning), and `.sum()` then failed. A\n  program that uses into_iter now always gets `copied`.\n- `(0..3).into_iter()`, `map.into_iter()` and a generic\n  `x.into_iter()` with x an iterator: the iterator itself, as std's\n  `impl<I: Iterator> IntoIterator for I` (a copy when nothing in it needs\n  drop).\n\ntests/ui: +1 run-pass. KPI: edit one fn back to 547.12 (4ed592f's 547.97\nwas not that change's code, as its A/B showed).\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-20T14:10:41Z",
+          "tree_id": "6b58e276a37b789c68d679a4e9ede14148c418a7",
+          "url": "https://github.com/mizchi/zust/commit/2126394cfa8ea16f24d4237dae93db8770ec17ff"
+        },
+        "date": 1795184152153,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
