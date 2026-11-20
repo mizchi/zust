@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795165752782,
+  "lastUpdate": 1795165756253,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -65567,6 +65567,85 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/mizchi/zust/commit/2ba1b4c4e97a32aa68d39e4f7704de00f63ef172"
         },
         "date": 1795165257801,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "parity documentSymbol (名前の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity workspace/symbol (上位 20 の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity definition (行き先の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity hover (名前を含む)",
+            "value": 95,
+            "unit": "%"
+          },
+          {
+            "name": "parity references (数の一致)",
+            "value": 95,
+            "unit": "%"
+          },
+          {
+            "name": "parity documentHighlight (数の一致)",
+            "value": 97.143,
+            "unit": "%"
+          },
+          {
+            "name": "parity rename (書き換えの一致)",
+            "value": 93.75,
+            "unit": "%"
+          },
+          {
+            "name": "parity signatureHelp (名前・引数の数・今の引数の一致)",
+            "value": 94.737,
+            "unit": "%"
+          },
+          {
+            "name": "parity completion `x.\\|` (書いてある名前を含む)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity completion `na\\|me` (同)",
+            "value": 89.655,
+            "unit": "%"
+          },
+          {
+            "name": "parity 一致の平均",
+            "value": 96.528,
+            "unit": "%"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "committer": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "distinct": true,
+          "id": "81d4bd0227f04001fd6e1c8c3e0bfab88099db5c",
+          "message": "driver2/build.rs and the lexer's glob set: Fx maps\n\nThe multi-crate build's maps and the set added in 0043490 were the last\nstd random-seeded hash maps in the compiler.\n\nKPI: crates edit -0.80% (314.9), the rest unchanged.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-20T09:04:15Z",
+          "tree_id": "0ae34359870af03688443022904ebff4c1a89f00",
+          "url": "https://github.com/mizchi/zust/commit/81d4bd0227f04001fd6e1c8c3e0bfab88099db5c"
+        },
+        "date": 1795165755761,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
