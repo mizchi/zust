@@ -784,7 +784,8 @@ struct PreludeScan<'a> {
     /// アイテムの外の本文 (改行でつなぐ)
     gaps: String,
     memo: &'a mut crate::fxhash::FxMap<(crate::key::Key, u64), bool>,
-    /// where each byte that is not a lowercase letter or white space is (built at the first `has` of a large source)
+    /// where each byte that is not white space is (built at the first `has` of a large source)
+    /// (lowercase letters too: an all-lowercase pattern (`stdout`, `dyn`) would otherwise read the whole source)
     idx: Option<ByteIdx>,
 }
 
@@ -795,7 +796,7 @@ struct ByteIdx {
 }
 
 fn indexed_byte(b: u8) -> bool {
-    !(b.is_ascii_lowercase() || b == b' ' || b == b'\n' || b == b'\t' || b >= 0x80)
+    !(b == b' ' || b == b'\n' || b == b'\t' || b >= 0x80)
 }
 
 impl ByteIdx {
