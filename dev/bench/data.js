@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795139059321,
+  "lastUpdate": 1795139061078,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -56412,6 +56412,85 @@ window.BENCHMARK_DATA = {
           {
             "name": "parity 一致の平均",
             "value": 97.155,
+            "unit": "%"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "committer": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "distinct": true,
+          "id": "83f2912ff0fa44ff33d946b604e079c1585c7d16",
+          "message": "lint: deny(unused_must_use) for a dropped Result and #[must_use] fns\n\nWith `#![deny(unused_must_use)]` (or `unused` / `warnings`), a\nstatement whose value is a `Result` is \"unused `Result` that must be\nused\", and a statement calling one of the program's `#[must_use]` fns\nis \"unused return value of `f` that must be used\" (`let _ = ..` is\nfine, as in rustc).\n\ntests/ui: +4 genuine compile-fail passes.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-20T01:35:36Z",
+          "tree_id": "d173bdcce474837d85bdbfbcbe450b26f2e20825",
+          "url": "https://github.com/mizchi/zust/commit/83f2912ff0fa44ff33d946b604e079c1585c7d16"
+        },
+        "date": 1795139060870,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "parity documentSymbol (名前の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity workspace/symbol (上位 20 の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity definition (行き先の一致)",
+            "value": 92.308,
+            "unit": "%"
+          },
+          {
+            "name": "parity hover (名前を含む)",
+            "value": 82.5,
+            "unit": "%"
+          },
+          {
+            "name": "parity references (数の一致)",
+            "value": 86.111,
+            "unit": "%"
+          },
+          {
+            "name": "parity documentHighlight (数の一致)",
+            "value": 93.548,
+            "unit": "%"
+          },
+          {
+            "name": "parity rename (書き換えの一致)",
+            "value": 88.235,
+            "unit": "%"
+          },
+          {
+            "name": "parity signatureHelp (名前・引数の数・今の引数の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity completion `x.\\|` (書いてある名前を含む)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity completion `na\\|me` (同)",
+            "value": 84.615,
+            "unit": "%"
+          },
+          {
+            "name": "parity 一致の平均",
+            "value": 92.732,
             "unit": "%"
           }
         ]
