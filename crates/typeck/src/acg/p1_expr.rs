@@ -2127,6 +2127,20 @@ impl Cx<'_> {
                     return err(SP, format!("variant `{}` takes {} fields", v.name, v.fields.len()));
                 }
                 let args: Vec<(usize, &Expr)> = cargs.iter().enumerate().collect();
+                // (`Ok::<_, ()>(1)` / `Some::<u8>(3)`: the turbofish gives the type arguments it names)
+                if let Some(ta) = p.segs.iter().rev().find_map(|s| if s.args.is_empty() { None } else { Some(&s.args) }) {
+                    let ts: Vec<Option<Ty>> = ta
+                        .iter()
+                        .filter_map(|a| match a {
+                            GArg::Ty(crate::parse::Ty::Infer) => Some(None),
+                            GArg::Ty(t) => Some(self.parse_ty(t).ok().filter(|&t| !has_hole(self.prog, t))),
+                            _ => None,
+                        })
+                        .collect();
+                    if ts.len() == self.prog.structs[self.prog.base_of(sid) as usize].generics.len() {
+                        self.adt_targs = Some(ts);
+                    }
+                }
                 return self.variant_value(sid, vi, &args, expected);
             }
             // タプル構造体の構築 `P(1, 2)`

@@ -285,6 +285,7 @@ pub fn compile(prog: &Program, insts: &Mutex<Insts>, id: u32, f: &ItemFn, line_b
         fresh: Default::default(),
         ret_call: None,
         dst_hint: None,
+        adt_targs: None,
         frefs: HashMap::default(),
         lets,
         addr_taken: taken,
@@ -639,6 +640,8 @@ pub struct Cx<'p> {
     pub ret_call: Option<usize>,
     /// call_fn の入口で取る: この呼び出しの戻り値を書く先
     pub dst_hint: Option<Value>,
+    /// `Ok::<_, ()>(x)`: the turbofish's type arguments (None for `_`), for the next adt_value
+    pub adt_targs: Option<Vec<Option<Ty>>>,
     pub frefs: HashMap<u32, FuncRef>,
     pub lets: crate::ast_infer::LetTypes,
     pub addr_taken: HashSet<String>,

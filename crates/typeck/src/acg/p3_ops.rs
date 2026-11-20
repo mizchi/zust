@@ -1124,6 +1124,9 @@ impl Cx<'_> {
         };
         let gen_fields = fields_of(self, self.prog.base_of(base));
         let mut sol: Vec<Option<Ty>> = vec![None; n_gen];
+        if let Some(ta) = self.adt_targs.take().filter(|t| t.len() == n_gen) {
+            sol = ta;
+        }
         let mut vals = vec![];
         for &(fi, e) in args {
             let exp = match inst {

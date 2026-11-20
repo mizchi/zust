@@ -97,3 +97,4 @@ date	commit	change	noop_M	edit_M	check_M	cache_KiB	lsp_G	run	check	build	cfail
 2026-11-19	28d1228+	impl Iterator<Item = T> returning a range: the range's literals take T	0.876	591.205	3879.257	1902.8	-	1698	1413	95	3319	1181.468	63.329	11.287	319.518
 2026-11-19	3fbfec8+	Vec::into_boxed_slice; Range::is_empty; iterator chains after (0..v.len())	0.874	590.846	3879.610	1902.8	-	1698	1416	95	3320	1181.971	63.511	11.274	320.484
 2026-11-19	904658b+	for x in an Option / Result value: an if let, no iterator from the prelude	0.877	590.848	3879.613	1902.8	-	1698	1416	95	3319	1181.851	63.492	11.287	320.470
+2026-11-20	4a6120d+	turbofish on enum constructors: Ok::<_, ()>(x) / Some::<u8>(3)	0.875	590.868	3879.719	1902.8	-	1698	1417	95	3319	1181.945	63.432	11.274	320.458

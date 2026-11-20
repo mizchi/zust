@@ -3143,6 +3143,7 @@ check-pass	lint/issue-54099-camel-case-underscore-types.rs
 check-pass	lint/issue-57410-1.rs
 check-pass	lint/issue-57410.rs
 check-pass	lint/issue-81218.rs
+check-pass	lint/issue-87274-paren-parent.rs
 check-pass	lint/issue-90614-accept-allow-text-direction-codepoint-in-comment-lint.rs
 check-pass	lint/let_underscore/let_underscore_drop.rs
 build-pass	lint/linker-warning-bin.rs
@@ -3241,7 +3242,6 @@ check-pass	lint/unused/must-use-block-expr.rs
 check-pass	lint/unused/must-use-box-from-raw.rs
 check-pass	lint/unused/must-use-macros.rs
 check-pass	lint/unused/must-use-ops.rs
-compile-fail	lint/unused/must_use-tuple.rs
 run-pass	lint/unused/no-unused-parens-return-block.rs
 check-pass	lint/unused/underscore-capture-issue-149889.rs
 check-pass	lint/unused/unused-allocation-box-cmp-issue-134186.rs
@@ -3626,6 +3626,7 @@ compile-fail	mismatched_types/closure-arg-count-expected-type-issue-47244.rs
 compile-fail	mismatched_types/closure-parameter-type-inference-mismatch.rs
 compile-fail	mismatched_types/deref-fn-ptr-arg-type-mismatch.rs
 compile-fail	mismatched_types/diagnostic-method-lookup-returns-sig-with-fewer-args.rs
+compile-fail	mismatched_types/dont-point-return-on-E0308.rs
 compile-fail	mismatched_types/elide-on-tuple-mismatch.rs
 compile-fail	mismatched_types/expectation-from-return-type.rs
 compile-fail	mismatched_types/float-integer-subtraction-error-24352.rs
