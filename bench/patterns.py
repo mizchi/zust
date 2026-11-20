@@ -16,11 +16,11 @@ usage: python3 bench/patterns.py [--n 4] [--patterns interp,records,..|all] [--r
 The exit status is 1 when a pattern does not build (or an edit of it does not), a program exits with an error, or it
 prints something else than rustc's build.
 """
-import argparse, json, os, shutil, statistics, subprocess, sys, tempfile
+import argparse, json, os, shutil, statistics, subprocess, sys, tempfile, time
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(ROOT, "bench"))
-from ci_bench import ZUSTC, instructions, run_measured  # noqa: E402
+from ci_bench import ZUSTC, instructions  # noqa: E402
 import gen_patterns  # noqa: E402
 
 
@@ -56,14 +56,14 @@ def measure(pattern, n, reps, vg, rustc, work):
             row["error"] = f"rustc's build exited with {want.returncode}"
             return row
         row["same_as_rustc"] = run.stdout == want.stdout
-    # (a phase whose command fails is a failed row naming the phase, with zustc's error; the rows of the patterns before
-    # and after are kept)
+    # (a phase whose command fails is a failed row naming the phase, with that run's own stderr; the samples taken
+    # before it stay in the row, and the rows of the other patterns are kept)
     def timed(phase, cmd):
-        try:
-            return run_measured(cmd)[0]
-        except subprocess.CalledProcessError:
-            e = subprocess.run(cmd, capture_output=True, text=True)
-            raise PhaseError(f"{phase}: " + (e.stderr.strip().splitlines() or ["failed"])[0])
+        t = time.perf_counter()
+        r = subprocess.run(cmd, capture_output=True, text=True)
+        if r.returncode != 0:
+            raise PhaseError(f"{phase}: " + (r.stderr.strip().splitlines() or [f"exit {r.returncode}"])[0])
+        return (time.perf_counter() - t) * 1e3
 
     def counted(phase, cmd, env=None):
         try:
@@ -71,27 +71,35 @@ def measure(pattern, n, reps, vg, rustc, work):
         except RuntimeError as e:
             raise PhaseError(f"{phase}: {str(e).splitlines()[0]}")
 
+    # (key -> the samples so far; a key's value is their median, or for counts their least)
+    samples = {}
+
+    def take(key, phase, cmd, env=None):
+        v = counted(phase, cmd, env) if key.endswith("_M") else timed(phase, cmd)
+        samples.setdefault(key, []).append(v)
+
     try:
-        row["cold_ms"] = statistics.median(timed("cold build", build + ["--no-cache"]) for _ in range(reps))
-        row["check_ms"] = statistics.median(timed("check", [ZUSTC, "check", src]) for _ in range(reps))
+        for _ in range(reps):
+            take("cold_ms", "cold build", build + ["--no-cache"])
+        for _ in range(reps):
+            take("check_ms", "check", [ZUSTC, "check", src])
         timed("build", build)
-        edits = []
         for k in range(reps):
             write(src, pattern, n, k % 2 + 1)
-            edits.append(timed("edit", build))
-        row["edit_ms"] = statistics.median(edits)
+            take("edit_ms", "edit", build)
         if vg:
             write(src, pattern, n, 0)
             timed("build", build)
-            row["check_M"] = min(counted("check (counted)", [ZUSTC, "check", src]) for _ in range(2))
+            for _ in range(2):
+                take("check_M", "check (counted)", [ZUSTC, "check", src])
             # (as kpi_track.py: a build under valgrind does not take the stamps' shortcut, and leaves the cache it reads)
             counted("build (counted)", build, env={"ZUSTC_NO_STAMP": "1"})
             write(src, pattern, n, 3)
-            row["edit_M"] = counted("edit (counted)", build)
+            take("edit_M", "edit (counted)", build)
     except PhaseError as e:
         row["error"] = str(e)
-        for k in ("cold_ms", "check_ms", "edit_ms", "check_M", "edit_M"):
-            row.pop(k, None)
+    for k, v in samples.items():
+        row[k] = min(v) if k.endswith("_M") else statistics.median(v)
     return row
 
 

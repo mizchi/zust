@@ -1215,7 +1215,8 @@ pub fn trait_scopes(src: &str) -> Vec<(u32, u32, Vec<String>)> {
     // (scope, name used there, the flattened trait, by a glob): what each scope imported, including what it
     // re-exports
     let mut imported: Vec<(usize, Vec<u8>, String, bool)> = vec![];
-    for _ in 0..8 {
+    // (until nothing changes: each pass adds at least one entry, and there are at most uses × traits of them)
+    loop {
         let mut progress = false;
         for (sc, mpath, name, local) in &uses {
             let Some(m) = resolve(*sc, mpath) else { continue };

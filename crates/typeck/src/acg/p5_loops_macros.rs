@@ -2048,15 +2048,15 @@ impl Cx<'_> {
                 }
             }
         }
+        // `m::S` / `crate::m::S` (モジュールの中の static): the static itself, by its index (a local of the same name must not answer)
+        if self.static_of(e).is_some() {
+            let p = self.place(e)?;
+            return Ok(self.read(p));
+        }
         // `core::...::NAME` (const / static) は最後のセグメントで
         if segs.len() >= 2 && matches!(segs[0].as_str(), "core" | "crate" | "self") {
             let e: &Expr = self.keep_expr(path_expr(&p.segs.last().unwrap().name));
             return self.expr(e, _expected);
-        }
-        // `m::S` (モジュールの中の static): the static itself, by its index (a local of the same name must not answer)
-        if self.static_of(e).is_some() {
-            let p = self.place(e)?;
-            return Ok(self.read(p));
         }
         // (`std::marker::PhantomData` / `m::S`: a unit struct through a module path)
         if segs.len() >= 2 && p.segs.iter().all(|s| s.args.is_empty()) {

@@ -2,15 +2,37 @@
 #![cfg(feature = "acg")]
 
 /// A new directory only this user can enter, made where nothing was: a directory that is there already (another
-/// user's, made before the test started) is never reused, so nothing the test writes goes through it
-fn private_dir(prefix: &str) -> std::path::PathBuf {
+/// user's, made before the test started) is never reused, so nothing the test writes goes through it. It is removed
+/// when the guard is dropped, a failing assertion's unwinding too
+struct PrivateDir(std::path::PathBuf);
+
+impl std::ops::Deref for PrivateDir {
+    type Target = std::path::Path;
+    fn deref(&self) -> &std::path::Path {
+        &self.0
+    }
+}
+
+impl AsRef<std::path::Path> for PrivateDir {
+    fn as_ref(&self) -> &std::path::Path {
+        &self.0
+    }
+}
+
+impl Drop for PrivateDir {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.0);
+    }
+}
+
+fn private_dir(prefix: &str) -> PrivateDir {
     use std::os::unix::fs::DirBuilderExt;
     let base = std::env::temp_dir();
     for k in 0..100u32 {
         let t = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.subsec_nanos()).unwrap_or(0);
         let dir = base.join(format!("{prefix}_{}_{t}_{k}", std::process::id()));
         match std::fs::DirBuilder::new().mode(0o700).create(&dir) {
-            Ok(()) => return dir,
+            Ok(()) => return PrivateDir(dir),
             Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => continue,
             Err(e) => panic!("{}: {e}", dir.display()),
         }

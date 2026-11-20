@@ -17,6 +17,10 @@ fn main() {
     // (a local of the same name is not the static: `config::SIZES` is the static's, `SIZES` the local's)
     let SIZES: [u16; 2] = [300, 400];
     println!("{} {} {}", config::SIZES[0], config::SIZES.len(), SIZES[1]);
+    let got: u32 = crate::config::SIZES[0];
+    let got2: usize = self::config::SIZES.len();
+    let TITLE: &str = "local";
+    println!("{} {} {} {}", got, got2, crate::config::TITLE, TITLE);
     println!("{} {} {}", config::NAMES.len(), config::NAMES[1].len(), config::TITLE.len());
     println!("{}", config::SIZES[2].count_ones());
     println!("{:?}", service::widths());
