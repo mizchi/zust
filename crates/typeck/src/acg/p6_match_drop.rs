@@ -44,7 +44,8 @@ impl Cx<'_> {
                 return Ok(Some(Place::Mem(v, 0, Ty::Slice(el))));
             }
         }
-        if is_place_expr(e) {
+        let bare_none = expected.is_some() && matches!(strip_paren(e), Expr::Path(None, pa) if pa.segs.len() == 1 && pa.segs[0].name == "None");
+        if is_place_expr(e) && !bare_none {
             return Ok(Some(self.place(e)?));
         }
         let (v, t) = self.expr(e, expected)?;
@@ -80,6 +81,48 @@ impl Cx<'_> {
         self.caps.iter().any(|c| c.0 == id && !c.2)
             && self.lookup(id).is_some_and(|(l, t)| self.is_value_cap(id, l) && self.needs_drop(t))
             && pats.iter().any(|p| crate::ast_closure::binds_by_value(p))
+    }
+
+    /// `match None { Some(3u8) => .. }` / `if let Some(x) = None`: the Option type, its payload from a `Some(..)`
+    /// pattern; with none, `()` (rustc's `!` fallback for `Some(v) => v` in a diverging context)
+    pub(crate) fn bare_none_ty(&mut self, scrut: &Expr, pats: &[&Pat]) -> R<Option<Ty>> {
+        if !matches!(strip_paren(scrut), Expr::Path(None, pa) if pa.segs.len() == 1 && pa.segs[0].name == "None" && pa.segs[0].args.is_empty()) {
+            return Ok(None);
+        }
+        // (a local or const named `None` is not the variant)
+        if self.lookup("None").is_some() {
+            return Ok(None);
+        }
+        // (the type inference saw the uses: `if let Some(x) = None { match x { E::V => .. } }`)
+        if let Some(&t) = self.lets.get(&(strip_paren(scrut) as *const Expr as usize)).or_else(|| self.lets.get(&(scrut as *const Expr as usize))) {
+            if matches!(t, Ty::Struct(_)) && !self.prog.has_param(t) {
+                return Ok(Some(t));
+            }
+        }
+        let inner = pats.iter().find_map(|p| match p {
+            Pat::TupleStruct(sp, a) if a.len() == 1 && sp.segs.len() == 1 && sp.segs[0].name == "Some" => self.payload_pat_ty(&a[0]),
+            _ => None,
+        });
+        let ob = *self.prog.struct_index.get("Option").ok_or("Option is not available")?;
+        Ok(Some(Ty::Struct(self.prog.instantiate(ob, vec![inner.unwrap_or(Ty::Unit)])?)))
+    }
+
+    /// the type a pattern pins down by itself (a literal, a const, a variant of a non-generic enum)
+    fn payload_pat_ty(&mut self, p: &Pat) -> Option<Ty> {
+        match p {
+            Pat::Lit(e) => self.peek(e),
+            Pat::Path(pa) | Pat::TupleStruct(pa, _) | Pat::Struct(pa, _, _) if pa.segs.len() == 2 => {
+                let &sid = self.prog.struct_index.get(pa.segs[0].name.as_str())?;
+                self.prog.structs[sid as usize].generics.is_empty().then_some(Ty::Struct(sid))
+            }
+            p => {
+                let n = match p {
+                    Pat::Path(pa) if pa.segs.len() == 1 => pa.segs[0].name.as_str(),
+                    p => const_ident_pat(self.prog, p)?,
+                };
+                self.prog.const_index.get(n).map(|&ci| self.prog.consts[ci as usize].ty)
+            }
+        }
     }
 
     pub(crate) fn match_(&mut self, m: &Expr, expected: Option<Ty>) -> R<V> {
@@ -130,7 +173,9 @@ impl Cx<'_> {
                 };
                 self.prog.const_index.get(n).map(|&ci| self.prog.consts[ci as usize].ty).filter(|t| matches!(t, Ty::Array(..)))
             }),
-            _ => None,
+            // (`match None { Some(3u8) => .. }`: the payload type comes from a `Some(..)` pattern; with none, `()`
+            // (rustc's `!` fallback for `Some(v) => v` in a diverging context))
+            _ => self.bare_none_ty(scrut, &pats)?,
         };
         let Some(place) = self.bk_scrutinee(scrut, scrut_exp, &pats)? else {
             return Ok((None, Ty::Never));
@@ -190,7 +235,7 @@ impl Cx<'_> {
                 }
                 for c in cs {
                     if let Expr::Let(lpat, lexpr) = c {
-                        let Some(lplace) = self.bk_scrutinee(lexpr, None, &[&**lpat])? else {
+                        let Some(lplace) = ({ let ex = self.bare_none_ty(lexpr, &[&**lpat])?; self.bk_scrutinee(lexpr, ex, &[&**lpat])? }) else {
                             break;
                         };
                         self.pat_test(lpat, lplace, next)?;
@@ -230,7 +275,7 @@ impl Cx<'_> {
         let Expr::Let(lpat, lexpr) = l else {
             return err(SP, "internal: if_let without `let`");
         };
-        let Some(place) = self.bk_scrutinee(lexpr, None, &[&**lpat])? else {
+        let Some(place) = ({ let ex = self.bare_none_ty(lexpr, &[&**lpat])?; self.bk_scrutinee(lexpr, ex, &[&**lpat])? }) else {
             return Ok((None, Ty::Never));
         };
         let sflag = self.last_scrut;
@@ -283,7 +328,7 @@ impl Cx<'_> {
         self.b.switch_to_block(header);
         // 毎回 match 対象を評価し直す (一時値は 1 回ごとに drop する)
         let t0 = self.temps.len();
-        let Some(place) = self.bk_scrutinee(e, None, &[pat])? else {
+        let Some(place) = ({ let ex = self.bare_none_ty(e, &[pat])?; self.bk_scrutinee(e, ex, &[pat])? }) else {
             return Ok((None, Ty::Never));
         };
         let sflag = self.last_scrut;

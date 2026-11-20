@@ -663,6 +663,7 @@ check-pass	borrowck/alias-liveness/rpitit-static.rs
 compile-fail	borrowck/argument_number_mismatch_ice.rs
 check-pass	borrowck/array-disjoint-borrows-issue-135671.rs
 compile-fail	borrowck/assign-imm-local-twice.rs
+check-pass	borrowck/assign-never-type.rs
 compile-fail	borrowck/assign_mutable_fields.rs
 compile-fail	borrowck/assignment-to-immutable-ref.rs
 compile-fail	borrowck/async-trait-proposes-let-binding.rs
@@ -1600,6 +1601,7 @@ build-pass	consts/enclosing-scope-rule.rs
 compile-fail	consts/erroneous_type_in_const_return_value.rs
 compile-fail	consts/erroneous_type_in_promoted.rs
 compile-fail	consts/error-is-freeze.rs
+run-pass	consts/ice-48279.rs
 compile-fail	consts/ice-extra-args-fn-abi-issue-127423.rs
 check-pass	consts/int_ptr_for_zst_slices.rs
 compile-fail	consts/invalid-const-in-body.rs
@@ -3628,6 +3630,7 @@ compile-fail	match/match-join.rs
 run-pass	match/match-large-array.rs
 run-pass	match/match-nested-enum-box-3121.rs
 run-pass	match/match-on-negative-integer-ranges.rs
+compile-fail	match/match-option-result-mismatch.rs
 run-pass	match/match-range-char-const.rs
 compile-fail	match/match-range-fail.rs
 run-pass	match/match-ref-option-pattern.rs
@@ -5365,6 +5368,7 @@ check-pass	rfcs/rfc-2497-if-let-chains/chains-without-let.rs
 compile-fail	rfcs/rfc-2497-if-let-chains/edition-gate.rs
 compile-fail	rfcs/rfc-2497-if-let-chains/ensure-that-let-else-does-not-interact-with-let-chains.rs
 run-pass	rfcs/rfc-2497-if-let-chains/if_let_guard_indirect_let_chains.rs
+check-pass	rfcs/rfc-2497-if-let-chains/issue-88498.rs
 check-pass	rfcs/rfc-2497-if-let-chains/issue-90722.rs
 check-pass	rfcs/rfc-2497-if-let-chains/issue-92145.rs
 check-pass	rfcs/rfc-2497-if-let-chains/no-double-assigments.rs
