@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795146196057,
+  "lastUpdate": 1795146197856,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -69919,6 +69919,70 @@ window.BENCHMARK_DATA = {
           {
             "name": "tests/ui compile-fail passing",
             "value": 3422,
+            "unit": "tests"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "committer": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "distinct": true,
+          "id": "7add9a981fa6d50c6f3966e917f486ea33c709aa",
+          "message": "E0252 / E0255 check: linear, and skipped without a crate-root use\n\nThe clash check of c26b695 compared each name with every one before it\n(quadratic in the crate's items: check +8% on the 5000-fn benchmark).\nNames now go into a hash of string slices, and a crate whose root has\nno `use` returns after a look at each item's first bytes.\n\nKPI: check back to 3880.2 (-7.45% against c26b695, +0.02% against\nbefore it); traits check -0.07%.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-20T03:37:33Z",
+          "tree_id": "2d1863f68919b88d5b431efcaa324a2df1a0ca5e",
+          "url": "https://github.com/mizchi/zust/commit/7add9a981fa6d50c6f3966e917f486ea33c709aa"
+        },
+        "date": 1795146197647,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tests/ui run-pass pass rate",
+            "value": 71.19,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui run-pass passing",
+            "value": 1698,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui check-pass pass rate",
+            "value": 78.42,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui check-pass passing",
+            "value": 1417,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui build-pass pass rate",
+            "value": 70.37,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui build-pass passing",
+            "value": 95,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui compile-fail pass rate",
+            "value": 46.52,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui compile-fail passing",
+            "value": 3423,
             "unit": "tests"
           }
         ]
