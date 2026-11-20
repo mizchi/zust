@@ -1552,6 +1552,7 @@ compile-fail	consts/const-pattern-rewrite-error-32086.rs
 run-pass	consts/const-rec-and-tup.rs
 run-pass	consts/const-region-ptrs-noncopy.rs
 run-pass	consts/const-region-ptrs.rs
+compile-fail	consts/const-slice-array-deref.rs
 check-pass	consts/const-static-ref-to-closure.rs
 run-pass	consts/const-struct-offsets.rs
 run-pass	consts/const-struct.rs
@@ -1559,6 +1560,7 @@ run-pass	consts/const-trait-to-trait.rs
 run-pass	consts/const-tuple-struct.rs
 run-pass	consts/const-unit-struct.rs
 run-pass	consts/const-unsafe-fn.rs
+compile-fail	consts/const-unsized.rs
 run-pass	consts/const-vec-syntax.rs
 run-pass	consts/const-vecs-and-slices.rs
 check-pass	consts/const_forget.rs
@@ -1585,6 +1587,7 @@ run-pass	consts/control-flow/short-circuit.rs
 check-pass	consts/control-flow/single_variant_match_ice.rs
 run-pass	consts/deref_in_pattern.rs
 compile-fail	consts/do-not-ice-on-field-access-of-err-type.rs
+compile-fail	consts/dont-ctfe-unsized-initializer.rs
 build-pass	consts/drop-maybe_uninit.rs
 build-pass	consts/enclosing-scope-rule.rs
 compile-fail	consts/erroneous_type_in_const_return_value.rs
@@ -2233,6 +2236,7 @@ compile-fail	feature-gates/feature-gate-try_blocks_heterogeneous.rs
 compile-fail	feature-gates/feature-gate-type_alias_impl_trait.rs
 compile-fail	feature-gates/feature-gate-type_ascription.rs
 check-pass	feature-gates/feature-gate-unqualified-local-imports.rs
+compile-fail	feature-gates/feature-gate-unsized_locals.rs
 compile-fail	feature-gates/feature-gate-with_negative_coherence.rs
 compile-fail	feature-gates/feature-gate-yeet_expr.rs
 check-pass	feature-gates/issue-43106-gating-of-deprecated.rs
@@ -3707,6 +3711,8 @@ run-pass	mir/mir_temp_promotions.rs
 run-pass	mir/mir_void_return.rs
 run-pass	mir/mir_void_return_2.rs
 run-pass	mir/simplify-branch-same.rs
+compile-fail	mir/static-by-value-slice.rs
+compile-fail	mir/static-by-value-str.rs
 compile-fail	mismatched_types/E0053.rs
 compile-fail	mismatched_types/abridged.rs
 compile-fail	mismatched_types/array-arg-expected-usize.rs
@@ -5408,6 +5414,7 @@ check-pass	single-use-lifetime/two-uses-in-inherent-impl-header.rs
 check-pass	single-use-lifetime/two-uses-in-trait-impl.rs
 compile-fail	sized/ensure-overriding-bindings-in-pattern-with-ty-err-doesnt-ice.rs
 check-pass	sized/recursive-type-pass.rs
+compile-fail	sized/reject-unsized-fn-params.rs
 compile-fail	sized/relaxing-default-bound-error-37534.rs
 run-pass	sized/sized-box-unsized-content.rs
 run-pass	sized/sized-reference-to-unsized.rs
@@ -5866,6 +5873,7 @@ compile-fail	suggestions/types/into-inference-needs-type.rs
 compile-fail	suggestions/ufcs-for-deref-inner-clone.rs
 compile-fail	suggestions/undeclared-module-alloc.rs
 compile-fail	suggestions/unnecessary_dot_for_floating_point_literal.rs
+compile-fail	suggestions/unsized-function-parameter.rs
 check-pass	suggestions/unused-imports.rs
 compile-fail	suggestions/use-parentheses-to-call-closure-issue-145404.rs
 compile-fail	suggestions/while-let-typo.rs
@@ -5961,6 +5969,7 @@ check-pass	traits/bound/impl-comparison-duplicates.rs
 check-pass	traits/bound/implicit-assoc-type.rs
 run-pass	traits/bound/multiple.rs
 compile-fail	traits/bound/not-on-bare-trait-2021.rs
+compile-fail	traits/bound/not-on-bare-trait.rs
 compile-fail	traits/bound/not-on-struct.rs
 run-pass	traits/bound/on-structs-and-enums-rpass.rs
 check-pass	traits/bound/recursion.rs

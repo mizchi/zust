@@ -428,6 +428,12 @@ fn parse_sig(sig: &PSig, is_extern: bool, is_main: bool, owner: Option<&Owner>) 
         params.push(tysyn(rt, self_ty)?);
     }
     for (_, t) in &sig.params {
+        // (E0277: a parameter's value needs a size; a trait's declaration without a body does not)
+        if !owner.is_some_and(|o| o.is_trait) && !is_extern {
+            if let Some(u) = unsized_value(t) {
+                return Err(format!("the size for values of type `{u}` cannot be known at compilation time (E0277)"));
+            }
+        }
         // 引数位置の `impl Trait` は名前のない型パラメータ
         let (inner, rf) = match t {
             PTy::Ref(_, m, i) => (&**i, Some(*m)),
@@ -499,6 +505,24 @@ fn parse_sig(sig: &PSig, is_extern: bool, is_main: bool, owner: Option<&Owner>) 
 
 /// Checks on a struct / enum / union definition: unused parameters (E0392), `Self` in defaults (E0735), union fields
 /// a slice or array whose element is unsized (`[[T]]`, `[str; 2]`, `[dyn Tr]`), anywhere in t: its text
+/// A type that is unsized itself (`str`, `[T]`, `dyn Tr`, or a tuple with one of them), as its text
+fn unsized_value(t: &PTy) -> Option<String> {
+    match t {
+        PTy::Slice(e) => Some(format!("[{}]", ty_text(e))),
+        PTy::Dyn(_) => Some("dyn ..".to_string()),
+        PTy::Path(None, p) if p.segs.len() == 1 && p.segs[0].name == "str" && p.segs[0].args.is_empty() => Some("str".to_string()),
+        PTy::Tuple(xs) => xs.iter().find_map(unsized_value),
+        _ => None,
+    }
+}
+
+fn ty_text(t: &PTy) -> String {
+    match t {
+        PTy::Path(None, p) if p.segs.len() == 1 && p.segs[0].args.is_empty() => p.segs[0].name.clone(),
+        _ => "..".to_string(),
+    }
+}
+
 fn unsized_elem(t: &PTy) -> Option<String> {
     fn is_unsized(t: &PTy) -> bool {
         matches!(t, PTy::Slice(_) | PTy::Dyn(_)) || matches!(t, PTy::Path(None, p) if p.segs.len() == 1 && p.segs[0].name == "str")
@@ -1338,6 +1362,9 @@ pub fn summarize(item: &Item, owner: Option<&Owner>) -> R<Summary> {
         }
         ItemKind::Use(_) => {}
         ItemKind::Const(n, Some(t), Some(_)) => {
+            if let Some(u) = unsized_value(t) {
+                return Err(format!("the size for values of type `{u}` cannot be known at compilation time (E0277)"));
+            }
             let name = match owner {
                 Some(ow) => format!("{}::{}", ow.base, n),
                 None => n.clone(),
@@ -1345,6 +1372,9 @@ pub fn summarize(item: &Item, owner: Option<&Owner>) -> R<Summary> {
             sm.consts.push((name, tysyn(t, owner.map(|o| &o.self_ty))?, item.init_text.clone()));
         }
         ItemKind::Static(m, n, t, _) => {
+            if let Some(u) = unsized_value(t) {
+                return Err(format!("the size for values of type `{u}` cannot be known at compilation time (E0277)"));
+            }
             sm.statics.push((n.clone(), tysyn(t, None)?, item.init_text.clone(), *m));
         }
         ItemKind::Extern(items) => {

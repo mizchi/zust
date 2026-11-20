@@ -28,3 +28,7 @@ compile-fail	attributes/crate-name-macro-call.rs
 compile-fail	attributes/lint_on_root.rs
 compile-fail	feature-gates/issue-43106-gating-of-builtin-attrs-error.rs
 compile-fail	imports/extern-crate-self/extern-crate-self-fail.rs
+compile-fail	associated-types/issue-59324.rs
+compile-fail	layout/issue-84108.rs
+compile-fail	lifetimes/raw/use-of-undeclared-raw-lifetimes.rs
+compile-fail	typeck/issue-75889.rs
