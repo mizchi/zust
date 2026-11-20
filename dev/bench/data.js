@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795176029236,
+  "lastUpdate": 1795176031346,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -50776,6 +50776,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "lsp peak RSS",
             "value": 74.516,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "committer": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "distinct": true,
+          "id": "174b0fe451d5a2e9f1e2ec0ac0d0a17f62f32a7f",
+          "message": "include!(..) of code: as items / a statement, or as an expression\n\ninclude!(\"f.rs\") and include!(concat!(\"a\", \"b\")) are expanded when the\nsource is loaded, relative to the including file. This uses the same\npass as include_str! / include_bytes!, which is now skipped by one\nsearch for \"include\".\n- `include!(..);` puts the file's code in place.\n- Anywhere else, the code goes in as a parenthesized expression.\n- A shebang line is dropped only outside any braces (item context), as\n  rustc does.\n- `mod m;` in a file included from another directory gets\n  #[path = \"<dir>/m.rs\"].\n\ntests/ui: +3 check-pass, +1 run-pass. KPI: edit one fn -0.18% (one\nsearch of the source in place of two).\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-20T11:55:50Z",
+          "tree_id": "10e7108750f1816b080387394f9fedf797b62f6b",
+          "url": "https://github.com/mizchi/zust/commit/174b0fe451d5a2e9f1e2ec0ac0d0a17f62f32a7f"
+        },
+        "date": 1795176030856,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "lsp definition p50",
+            "value": 0.474,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp hover p50",
+            "value": 0.366,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp completion p50",
+            "value": 0.958,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp references p50",
+            "value": 4.104,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp rename p50",
+            "value": 0.487,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp signatureHelp p50",
+            "value": 0.837,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp documentHighlight p50",
+            "value": 0.932,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp ready (startup to indexed)",
+            "value": 126.74,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp peak RSS",
+            "value": 74.535,
             "unit": "MiB"
           }
         ]
