@@ -1215,9 +1215,21 @@ pub fn trait_scopes(src: &str) -> Vec<(u32, u32, Vec<String>)> {
     // (scope, name used there, the flattened trait, by a glob): what each scope imported, including what it
     // re-exports
     let mut imported: Vec<(usize, Vec<u8>, String, bool)> = vec![];
-    // (until nothing changes: each pass adds at least one entry, and there are at most uses × traits of them)
-    loop {
-        let mut progress = false;
+    // (a name a scope defines or imports by name shadows the same name from a glob: `use a::*; use b::M;` is b's M)
+    let named_in = |imported: &[(usize, Vec<u8>, String, bool)], sc: usize, n: &[u8]| {
+        traits.iter().any(|(t, tsc)| *tsc == sc && t.as_slice() == n) || imported.iter().any(|(isc, i, _, g)| *isc == sc && i.as_slice() == n && !g)
+    };
+    // (each pass computes every binding again from what the previous pass found, so one forwarded before a named
+    // import shadowed it is dropped when it is: `pub use a::*; mod g { use super::M; } pub use b::M;` gives g only
+    // b's M. The bindings grow pass by pass to the fixed point, as rustc's import resolution; a cycle that does not
+    // settle stops after enough passes for any chain)
+    let max_passes = (uses.len() + 1) * (traits.len() + 1) + 1;
+    for _ in 0..max_passes {
+        // (what m passes on: its bindings, less a glob's that a named one shadows)
+        let effective = |m: usize| -> Vec<(Vec<u8>, String)> {
+            imported.iter().filter(|(isc, n, _, g)| *isc == m && !(*g && named_in(&imported, m, n))).map(|(_, n, f, _)| (n.clone(), f.clone())).collect()
+        };
+        let mut next: Vec<(usize, Vec<u8>, String, bool)> = vec![];
         for (sc, mpath, name, local) in &uses {
             let Some(m) = resolve(*sc, mpath) else { continue };
             let glob = name.as_slice() == b"*";
@@ -1225,7 +1237,7 @@ pub fn trait_scopes(src: &str) -> Vec<(u32, u32, Vec<String>)> {
                 // (a glob: the module's traits of a colliding name, and what it imported)
                 let mut v: Vec<(Vec<u8>, String)> =
                     traits.iter().filter(|(n, tsc)| *tsc == m && colliding.contains(&n)).map(|(n, _)| (n.clone(), flat(m, n))).collect();
-                v.extend(imported.iter().filter(|(isc, _, _, _)| *isc == m).map(|(_, n, f, _)| (n.clone(), f.clone())));
+                v.extend(effective(m));
                 v
             } else if traits.iter().any(|(n, tsc)| n == name && *tsc == m) {
                 if !colliding.contains(&name) {
@@ -1233,39 +1245,23 @@ pub fn trait_scopes(src: &str) -> Vec<(u32, u32, Vec<String>)> {
                 }
                 vec![(local.clone(), flat(m, name))]
             } else {
-                // (what m binds to the name: what it imported by name, or else what came by a glob; a named import
-                // shadows a glob's there as it does here)
-                let by_name: Vec<&String> = imported.iter().filter(|(isc, n, _, g)| *isc == m && n == name && !g).map(|(_, _, f, _)| f).collect();
-                let pick: Vec<&String> = if by_name.is_empty() {
-                    imported.iter().filter(|(isc, n, _, _)| *isc == m && n == name).map(|(_, _, f, _)| f).collect()
-                } else {
-                    by_name
-                };
-                pick.into_iter().map(|f| (local.clone(), f.clone())).collect()
+                // (what m binds to the name)
+                effective(m).into_iter().filter(|(n, _)| n == name).map(|(_, f)| (local.clone(), f)).collect()
             };
             for (n, f) in found {
-                match imported.iter_mut().find(|(isc, n2, f2, _)| isc == sc && *n2 == n && *f2 == f) {
-                    // (one that came by a glob first and now by name as well: it is a named binding)
-                    Some(e) if e.3 && !glob => {
-                        e.3 = false;
-                        progress = true;
-                    }
-                    Some(_) => {}
-                    None => {
-                        imported.push((*sc, n, f, glob));
-                        progress = true;
-                    }
+                match next.iter_mut().find(|(isc, n2, f2, _)| isc == sc && *n2 == n && *f2 == f) {
+                    // (one that came by a glob and by name as well: it is a named binding)
+                    Some(e) => e.3 &= glob,
+                    None => next.push((*sc, n, f, glob)),
                 }
             }
         }
-        if !progress {
+        if next == imported {
             break;
         }
+        imported = next;
     }
-    // (a name a scope defines or imports by name shadows the same name from a glob: `use a::*; use b::M;` is b's M)
-    let named = |sc: usize, n: &[u8]| {
-        traits.iter().any(|(t, tsc)| *tsc == sc && t.as_slice() == n) || imported.iter().any(|(isc, i, _, g)| *isc == sc && i.as_slice() == n && !g)
-    };
+    let named = |sc: usize, n: &[u8]| named_in(&imported, sc, n);
     for (sc, n, f, glob) in &imported {
         if *glob && named(*sc, n) {
             continue;
