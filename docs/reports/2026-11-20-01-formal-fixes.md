@@ -48,12 +48,9 @@ The Kani harnesses copy the fixed code and check it. The `bug_*` harnesses are r
 - `reserve_any_size`
 - `alloc_failure_stops`
 
-Each is `#[kani::should_panic]` and ends with `kani::assume(false)`, which drops the paths that do not stop. They show two things:
+Each is `#[kani::should_panic]` and ends with `kani::assume(false)`, which drops every path that does not panic, whether it would go on or return. So they show one thing: no size, and no failing malloc, makes a path that writes outside the block or through null. Kani's pointer checks do not count as panics, so one such path makes the harness fail.
 
-- No size, and no failing malloc, makes a path that writes outside the block or through null. Kani's pointer checks do not count as panics, so one such path makes the harness fail, whether it would go on or stop afterwards.
-- The sizes that cannot be allocated, and a failing malloc, stop with a panic or an abort.
-
-A size that fits allocates and pushes as usual. These harnesses do not check that path; `reserve_gives_room` does.
+They do not show that the sizes that cannot be allocated stop. That is shown for given sizes by `tests/alloc_limits.rs` (`with_capacity(1 << 61)`, `reserve(usize::MAX)`, `reserve(usize::MAX / 4)`). A successful `reserve` is checked by `reserve_gives_room`, for `Vec<u8>` and `n < 7`.
 
 - On the prelude before the fix, all three were checked to fail with "failures other than panics".
 - What a Vec holds is still checked by the `*_matches_model` harnesses.

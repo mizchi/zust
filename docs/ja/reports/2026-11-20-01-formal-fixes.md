@@ -48,12 +48,9 @@ Kani のハーネスは、修正後のコードを写して調べる。`bug_*` �
 - `reserve_any_size`
 - `alloc_failure_stops`
 
-どれも `#[kani::should_panic]` で、最後の `kani::assume(false)` が、止まらない経路を除く。示すのは次の 2 つである。
+どれも `#[kani::should_panic]` で、最後の `kani::assume(false)` が、panic しない経路をすべて捨てる。先へ進む経路も、そのまま戻る経路も捨てる。だから示すのは 1 つだけで、どんな大きさでも、また malloc が失敗しても、ブロックの外や null に書く経路はない、ということである。Kani のポインタ検査は panic として数えないので、そういう経路が 1 つでもあれば失敗する。
 
-- どんな大きさでも、また malloc が失敗しても、ブロックの外や null に書く経路はない。Kani のポインタ検査は panic として数えないので、そういう経路が 1 つでもあれば、その後に続くか止まるかによらず失敗する。
-- 確保できない大きさと malloc の失敗は、panic か abort で止まる。
-
-入る大きさなら普通に確保して push する。この経路はこれらのハーネスでは調べず、`reserve_gives_room` が調べる。
+確保できない大きさで止まることは、これらのハーネスでは示せていない。それを示すのは `tests/alloc_limits.rs` で、決まった大きさ（`with_capacity(1 << 61)`、`reserve(usize::MAX)`、`reserve(usize::MAX / 4)`）について調べる。`reserve` がうまくいく場合は `reserve_gives_room` が調べる（`Vec<u8>` で `n < 7`）。
 
 - 直す前の prelude では、3 つとも「panic 以外の失敗」で落ちることを確かめた。
 - 中身の正しさは、これまでどおり `*_matches_model` が調べる。

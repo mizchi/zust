@@ -39,12 +39,15 @@ if [ "${1:-all}" != tla ]; then
             continue
         fi
         if [ $rc -ne 0 ]; then
-            echo "FAIL kani $dir: cargo kani exited with $rc"; fail=1
+            echo "FAIL kani $dir: cargo kani exited with $rc"; echo "$out" | tail -20; fail=1
         fi
         while read -r h; do
-            if echo "$out" | grep -q "Verification failed for - $h\$"; then r=failed; else r=verified; fi
-            want=verified
-            if [ $r = $want ]; then echo "ok   kani $h ($r)"; else echo "FAIL kani $h ($r, expected $want)"; fail=1; fi
+            # (a harness is verified only when cargo kani finished without a failure: after a nonzero exit, one not
+            # named as failed may have been interrupted)
+            if echo "$out" | grep -q "Verification failed for - $h\$"; then r=failed
+            elif [ $rc -ne 0 ]; then r=unknown
+            else r=verified; fi
+            if [ $r = verified ]; then echo "ok   kani $h ($r)"; else echo "FAIL kani $h ($r, expected verified)"; fail=1; fi
         done < <(echo "$out" | sed -n 's/^Checking harness \(.*\)\.\.\.$/\1/p')
     done
 fi
