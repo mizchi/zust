@@ -4285,6 +4285,7 @@ compile-fail	parser/bounds-lifetime-2.rs
 compile-fail	parser/bounds-lifetime-where-1.rs
 compile-fail	parser/bounds-lifetime-where.rs
 check-pass	parser/bounds-obj-parens.rs
+compile-fail	parser/brace-in-let-chain.rs
 compile-fail	parser/cast-angle-bracket-precedence.rs
 compile-fail	parser/chained-comparison-suggestion.rs
 compile-fail	parser/char/whitespace-character-literal.rs
@@ -4307,6 +4308,8 @@ compile-fail	parser/diff-markers/item-with-attr.rs
 compile-fail	parser/diff-markers/item.rs
 compile-fail	parser/diff-markers/long-conflict-markers.rs
 compile-fail	parser/diff-markers/struct.rs
+compile-fail	parser/diff-markers/unclosed-delims-in-macro.rs
+compile-fail	parser/diff-markers/unclosed-delims.rs
 compile-fail	parser/do-not-suggest-semicolon-before-array.rs
 compile-fail	parser/doc-before-attr.rs
 compile-fail	parser/doc-before-bad-variant.rs
@@ -4359,6 +4362,7 @@ compile-fail	parser/ice-issue-127600.rs
 compile-fail	parser/ident-recovery.rs
 check-pass	parser/if-block-unreachable-expr.rs
 compile-fail	parser/if-in-in.rs
+compile-fail	parser/if-let-chain-unclosed-delim.rs
 compile-fail	parser/if-semi-before-block.rs
 check-pass	parser/impl-item-const-pass.rs
 compile-fail	parser/impl-item-const-semantic-fail.rs
@@ -4399,6 +4403,7 @@ compile-fail	parser/issues/issue-101540.rs
 compile-fail	parser/issues/issue-102182-impl-trait-recover.rs
 compile-fail	parser/issues/issue-102806.rs
 compile-fail	parser/issues/issue-103143.rs
+compile-fail	parser/issues/issue-103451.rs
 compile-fail	parser/issues/issue-103748-ICE-wrong-braces.rs
 compile-fail	parser/issues/issue-10392-2.rs
 compile-fail	parser/issues/issue-10392.rs
@@ -4438,6 +4443,7 @@ run-pass	parser/issues/issue-21475.rs
 compile-fail	parser/issues/issue-22647.rs
 compile-fail	parser/issues/issue-22712.rs
 compile-fail	parser/issues/issue-2354-1.rs
+compile-fail	parser/issues/issue-2354.rs
 compile-fail	parser/issues/issue-23620-invalid-escapes.rs
 compile-fail	parser/issues/issue-24197.rs
 compile-fail	parser/issues/issue-24375.rs
@@ -4473,10 +4479,12 @@ compile-fail	parser/issues/issue-57684.rs
 compile-fail	parser/issues/issue-57819.rs
 compile-fail	parser/issues/issue-58094-missing-right-square-bracket.rs
 compile-fail	parser/issues/issue-61858.rs
+compile-fail	parser/issues/issue-62524.rs
 compile-fail	parser/issues/issue-62546.rs
 compile-fail	parser/issues/issue-62554.rs
 compile-fail	parser/issues/issue-62660.rs
 compile-fail	parser/issues/issue-62881.rs
+compile-fail	parser/issues/issue-62894.rs
 compile-fail	parser/issues/issue-62913.rs
 compile-fail	parser/issues/issue-62973.rs
 check-pass	parser/issues/issue-63115-range-pat-interpolated.rs
@@ -4539,6 +4547,7 @@ compile-fail	parser/issues/issue-87694-duplicated-pub.rs
 compile-fail	parser/issues/issue-87694-misplaced-pub.rs
 compile-fail	parser/issues/issue-88276-unary-plus.rs
 check-pass	parser/issues/issue-88583-union-as-ident.rs
+compile-fail	parser/issues/issue-88770.rs
 compile-fail	parser/issues/issue-88818.rs
 compile-fail	parser/issues/issue-89388.rs
 compile-fail	parser/issues/issue-89396.rs
@@ -4625,6 +4634,7 @@ compile-fail	parser/match-arm-comma-typo-issue-140991.rs
 compile-fail	parser/match-arm-without-braces.rs
 compile-fail	parser/match-arrows-block-then-binop.rs
 compile-fail	parser/match-refactor-to-expr.rs
+compile-fail	parser/mismatched-braces/missing-close-brace-in-struct.rs
 compile-fail	parser/mismatched-delim-brace-empty-block.rs
 compile-fail	parser/missing-closing-angle-bracket-eq-constraint.rs
 compile-fail	parser/missing-closing-angle-bracket-struct-field-ty.rs
@@ -4844,6 +4854,7 @@ compile-fail	parser/type-ascription-in-pattern.rs
 compile-fail	parser/type-parameters-in-field-exprs.rs
 compile-fail	parser/typod-const-in-const-param-def.rs
 run-pass	parser/ufcs-return-unused-parens.rs
+compile-fail	parser/unclosed-braces.rs
 compile-fail	parser/underscore-suffix-for-float.rs
 compile-fail	parser/underscore-suffix-for-string.rs
 compile-fail	parser/underscore_item_not_const.rs
@@ -4863,6 +4874,7 @@ compile-fail	parser/unsized.rs
 compile-fail	parser/unsized2.rs
 compile-fail	parser/use-as-where-use-ends-with-mod-sep.rs
 compile-fail	parser/use-ends-with-mod-sep.rs
+compile-fail	parser/use-unclosed-brace.rs
 compile-fail	parser/utf16-be-without-bom.rs
 compile-fail	parser/utf16-le-without-bom.rs
 run-pass	parser/utf8_idents-rpass.rs
@@ -6497,6 +6509,7 @@ compile-fail	type/issue-103271.rs
 check-pass	type/issue-67690-type-alias-bound-diagnostic-crash.rs
 compile-fail	type/issue-7607-1.rs
 check-pass	type/issue-7607-2.rs
+compile-fail	type/issue-91268.rs
 compile-fail	type/missing-let-in-binding-2.rs
 compile-fail	type/missing-let-in-binding-3.rs
 compile-fail	type/missing-let-in-binding-4.rs
