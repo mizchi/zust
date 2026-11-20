@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795138219813,
+  "lastUpdate": 1795138221457,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -56050,6 +56050,85 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/mizchi/zust/commit/3c46afb72e7938f4d911f0140859d30d23081f35"
         },
         "date": 1795136914876,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "parity documentSymbol (名前の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity workspace/symbol (上位 20 の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity definition (行き先の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity hover (名前を含む)",
+            "value": 97.5,
+            "unit": "%"
+          },
+          {
+            "name": "parity references (数の一致)",
+            "value": 92.308,
+            "unit": "%"
+          },
+          {
+            "name": "parity documentHighlight (数の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity rename (書き換えの一致)",
+            "value": 88.889,
+            "unit": "%"
+          },
+          {
+            "name": "parity signatureHelp (名前・引数の数・今の引数の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity completion `x.\\|` (書いてある名前を含む)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity completion `na\\|me` (同)",
+            "value": 92.857,
+            "unit": "%"
+          },
+          {
+            "name": "parity 一致の平均",
+            "value": 97.155,
+            "unit": "%"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "committer": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "distinct": true,
+          "id": "a14943c30a6929d77e3e223e046e408401f32159",
+          "message": "Link zustc and zust-analyzer as non-PIE executables\n\nA PIE binary spends about a tenth of a no-op build (~0.17M of 1.69M\ninstructions) in the dynamic loader's relocations at every start, and\nthe count grows with the binary. Each package's build.rs passes\n`-no-pie` to its own binaries on x86-64 Linux (rustc-link-arg-bins),\nso proc-macro dependencies stay shared objects and the code itself\nstays position-independent.\n\nKPI: no-op build -20.6%, crates no-op -9.6%, traits edit -0.19%,\ncrates edit -0.34%; check / edit / cache unchanged.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-20T01:25:15Z",
+          "tree_id": "784bb1aef4da584c66f6583b55c4b5876b19c659",
+          "url": "https://github.com/mizchi/zust/commit/a14943c30a6929d77e3e223e046e408401f32159"
+        },
+        "date": 1795138221244,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
