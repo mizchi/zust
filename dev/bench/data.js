@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795179915995,
+  "lastUpdate": 1795179918247,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -51460,6 +51460,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "lsp peak RSS",
             "value": 74.945,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "committer": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "distinct": true,
+          "id": "d855b2ace843f4353497bd4c77367262df578c22",
+          "message": "&CONST, &CONST.f, &CONST[i] and &(42,).0 borrow static data\n\nA shared borrow of a constant used to point at a copy in the function's\nframe, so `fn f(i: usize) -> &'static u32 { &NUMS[i] }` returned a\ndangling reference. Now:\n- `&CONST` borrows the constant promoted to static data.\n- A field or an element of a constant expression is borrowed out of that\n  promoted value: `&(*&B).f` / `&(*&B)[i]`.\nPromotion applies only when the constant evaluator reads the expression\nexactly (literals and constructors, through consts of the same kind, no\n`..base`). It never applies to a type that needs drop (a temporary is\ndropped there, as in rustc) or one with interior mutability (Cell,\natomics ..: each `&C` is a fresh value).\n\ntests/ui: +1 run-pass.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-20T13:01:13Z",
+          "tree_id": "0694b9b2114fdb1640fbf167db5ce955a5811460",
+          "url": "https://github.com/mizchi/zust/commit/d855b2ace843f4353497bd4c77367262df578c22"
+        },
+        "date": 1795179917798,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "lsp definition p50",
+            "value": 0.567,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp hover p50",
+            "value": 0.444,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp completion p50",
+            "value": 0.937,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp references p50",
+            "value": 4.37,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp rename p50",
+            "value": 0.472,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp signatureHelp p50",
+            "value": 0.729,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp documentHighlight p50",
+            "value": 1.111,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp ready (startup to indexed)",
+            "value": 121.292,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp peak RSS",
+            "value": 74.973,
             "unit": "MiB"
           }
         ]
