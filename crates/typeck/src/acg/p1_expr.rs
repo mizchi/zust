@@ -968,6 +968,22 @@ impl Cx<'_> {
                 if from == Ty::Never {
                     return Ok((None, Ty::Never));
                 }
+                // (`#![deny(trivial_casts)]`: `&T as *const T`, `&mut T as *mut T`, `&[T; N] as *const [T]` are
+                // coercions; `#![deny(trivial_numeric_casts)]`: a number cast to its own type)
+                if self.user_code {
+                    let (tc, tn) = self.prog.deny_trivial_casts;
+                    if tn && from == to && (from.is_int() || from.is_float()) {
+                        let n = self.prog.tn(from);
+                        return err(SP, format!("trivial numeric cast: `{n}` as `{n}`"));
+                    }
+                    let trivial = match (from, to) {
+                        (Ty::Ref(m, a), Ty::Ptr(pm, b)) => (m || !pm) && (a == b || matches!((*a, *b), (Ty::Array(e, _), Ty::Slice(e2)) if e == e2)),
+                        _ => false,
+                    };
+                    if tc && trivial {
+                        return err(SP, format!("trivial cast: `{}` as `{}`", self.prog.tn(from), self.prog.tn(to)));
+                    }
+                }
                 // 参照 → 生ポインタ、生ポインタ ⇔ 生ポインタ / usize
                 match (from, to) {
                     (Ty::Ref(_, a), Ty::Ptr(_, b)) if a == b || matches!(*a, Ty::Array(e, _) if e == b) => {
@@ -985,6 +1001,21 @@ impl Cx<'_> {
                     }
                     (t, Ty::Ptr(..)) if matches!(t, Ty::Usize | Ty::U64 | Ty::Isize | Ty::I64) => {
                         return Ok((v, to));
+                    }
+                    // (`&[T; N]` / `*const [T; N]` as `*const [T]`: the fat pointer (address, N))
+                    (Ty::Ref(_, Ty::Array(e, n)) | Ty::Ptr(_, Ty::Array(e, n)), Ty::Ptr(_, Ty::Slice(e2))) if e == e2 => {
+                        let Some(a) = v else { return Ok((None, to)) };
+                        let len = self.b.ins().iconst(types::I64, *n as i64);
+                        return Ok((Some(self.make_fat_v(a, len)), to));
+                    }
+                    // (`&[T]` as `*const [T]`: the same fat pointer)
+                    (Ty::Ref(_, Ty::Slice(e)), Ty::Ptr(_, Ty::Slice(e2))) if e == e2 => return Ok((v, to)),
+                    // (a narrower or wider integer and a raw pointer: through usize, as `as` does)
+                    (t, Ty::Ptr(_, i)) if t.is_int() && t.bits() <= 64 && !i.is_fat() && !matches!(i, Ty::Slice(_) | Ty::Str | Ty::Dyn(_)) => {
+                        return Ok((v.map(|x| self.convert(x, t, Ty::Usize)), to));
+                    }
+                    (Ty::Ptr(_, i), t) if t.is_int() && t.bits() <= 64 && !matches!(i, Ty::Slice(_) | Ty::Str | Ty::Dyn(_)) => {
+                        return Ok((v.map(|x| self.convert(x, Ty::Usize, t)), to));
                     }
                     _ => {}
                 }

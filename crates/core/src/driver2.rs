@@ -649,6 +649,7 @@ impl Session2 {
         let mut deny_unused_imports = false;
         let mut deny_unreachable_code = false;
         let mut deny_must_use = false;
+        let mut deny_trivial_casts = (false, false);
         // (non_snake_case, non_camel_case_types, non_upper_case_globals)
         let mut deny_style = [false; 3];
         let lib_attr = {
@@ -677,6 +678,7 @@ impl Session2 {
             deny_unused_imports = levels.iter().any(|l| matches!(*l, "unused_imports" | "unused" | "warnings")) && !c.contains("#![allow(unused");
             deny_unreachable_code = levels.iter().any(|l| matches!(*l, "unreachable_code" | "unused" | "warnings")) && !c.contains("#![allow(unreachable_code");
             deny_must_use = levels.iter().any(|l| matches!(*l, "unused_must_use" | "unused" | "warnings")) && !c.contains("#![allow(unused_must_use");
+            deny_trivial_casts = (levels.contains(&"trivial_casts"), levels.contains(&"trivial_numeric_casts"));
             for (k, n) in ["non_snake_case", "non_camel_case_types", "non_upper_case_globals"].iter().enumerate() {
                 deny_style[k] = levels.iter().any(|l| l == n || *l == "nonstandard_style" || *l == "warnings") && !c.contains(&format!("#![allow({n}"));
             }
@@ -753,6 +755,7 @@ impl Session2 {
         prog.overflow_checks = !self.opts.opt;
         prog.deny_unreachable = deny_unreachable;
         prog.deny_must_use = deny_must_use;
+        prog.deny_trivial_casts = deny_trivial_casts;
         if deny_must_use {
             for it in &items[..user] {
                 let text = src.get(it.start..it.end).unwrap_or("");
