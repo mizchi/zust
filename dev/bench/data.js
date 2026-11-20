@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795139725232,
+  "lastUpdate": 1795139727086,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -42112,6 +42112,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "lsp peak RSS",
             "value": 73.305,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "committer": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "distinct": true,
+          "id": "fdd2ee3e5e7f4cfa8461f9367deeb4887cafa31b",
+          "message": "lint: naming conventions (snake / camel / upper case)\n\nWith `#![deny(non_snake_case)]`, `non_camel_case_types`,\n`non_upper_case_globals` (or `nonstandard_style` / `warnings`), the\nprogram's fns and methods, types, traits and associated types, statics,\nconsts and associated consts are checked before building, with rustc's\nmessages (\"function `CamelCase` should have a snake case name\", \"type\n`ONE_TWO` should have an upper camel case name\", \"static variable\n`foo` should have an upper case name\", ..). Items allowing the lint,\ncfg'd, no_mangle and extern \"C\" ones are skipped; the names are shown\nwithout the flattened modules' prefix and the hoisting suffix.\n\ntests/ui: +11 genuine compile-fail passes.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-20T01:51:11Z",
+          "tree_id": "cccca8d4615c5de74ec9cb170919eeefa190439e",
+          "url": "https://github.com/mizchi/zust/commit/fdd2ee3e5e7f4cfa8461f9367deeb4887cafa31b"
+        },
+        "date": 1795139726825,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "lsp definition p50",
+            "value": 0.546,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp hover p50",
+            "value": 0.456,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp completion p50",
+            "value": 0.916,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp references p50",
+            "value": 4.133,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp rename p50",
+            "value": 0.487,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp signatureHelp p50",
+            "value": 0.627,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp documentHighlight p50",
+            "value": 0.953,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp ready (startup to indexed)",
+            "value": 119.708,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp peak RSS",
+            "value": 73.672,
             "unit": "MiB"
           }
         ]
