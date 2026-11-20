@@ -24,3 +24,6 @@ compile-fail	resolve/issue-105069.rs
 compile-fail	cfg/reserved-macro-names-rename.rs
 compile-fail	imports/issue-13404.rs
 compile-fail	simd/portable-intrinsics-arent-exposed.rs
+compile-fail	attributes/crate-name-macro-call.rs
+compile-fail	attributes/lint_on_root.rs
+compile-fail	feature-gates/issue-43106-gating-of-builtin-attrs-error.rs

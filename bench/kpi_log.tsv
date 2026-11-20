@@ -110,3 +110,4 @@ date	commit	change	noop_M	edit_M	check_M	cache_KiB	lsp_G	run	check	build	cfail
 2026-11-20	c311508+	E0432: a top-level use whose first segment names nothing	0.693	590.971	3879.979	1902.8	-	1698	1417	95	3404	1181.831	63.288	10.183	319.355
 2026-11-20	1e843fc+	E0252/E0255: a top-level use and another use or item of one name	0.695	591.057	4192.565	1902.8	-	1698	1417	95	3422	1183.547	63.229	10.196	319.388
 2026-11-20	c26b695+	E0252/E0255 check: names in a hash, skipped without a crate-root use (fixes the +8% check of c26b695)	0.697	590.798	3880.225	1902.8	-	1698	1417	95	3422	1182.767	63.233	10.210	319.466
+2026-11-20	7add9a9+	malformed built-in attributes (E0539/E0565)	0.695	591.043	3880.546	1902.8	-	1698	1417	95	3452	1183.051	63.287	10.196	319.339
