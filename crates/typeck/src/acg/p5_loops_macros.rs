@@ -1373,6 +1373,13 @@ impl Cx<'_> {
             }
             // `option_env!("X")`: no build-time environment here
             "option_env" => {
+                let args = self.macro_args(p, g)?;
+                if args.len() != 1 {
+                    return err(SP, "option_env! takes 1 argument");
+                }
+                if str_lit(&args[0]).is_none() {
+                    return err(SP, "argument must be a string literal");
+                }
                 // (always an `Option<&'static str>`)
                 let ob = *self.prog.struct_index.get("Option").ok_or("Option is not available")?;
                 let t = Ty::Struct(self.prog.instantiate(ob, vec![Ty::Ref(false, intern(Ty::Str))])?);
