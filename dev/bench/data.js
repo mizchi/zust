@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795190213033,
+  "lastUpdate": 1795190215605,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -86574,6 +86574,70 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/mizchi/zust/commit/b0618707eb43a9fb304b42ea2b2b4232f9130685"
         },
         "date": 1795189482556,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tests/ui run-pass pass rate",
+            "value": 73.54,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui run-pass passing",
+            "value": 1754,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui check-pass pass rate",
+            "value": 80.3,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui check-pass passing",
+            "value": 1451,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui build-pass pass rate",
+            "value": 71.85,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui build-pass passing",
+            "value": 97,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui compile-fail pass rate",
+            "value": 48.63,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui compile-fail passing",
+            "value": 3578,
+            "unit": "tests"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "committer": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "distinct": true,
+          "id": "d9294dc961e59727cda4a420beec3983d197bc4a",
+          "message": "bench/blaze_ui.py: blaze and zustc on the same sample of tests/ui\n\nblaze has no tests/ui harness of its own. This script picks the tests\nbench/rust_ui.py counts as applicable, N of each of run-pass, check-pass\nand build-pass with a fixed seed. It builds each one as src/main.rs of one\ncargo package with `blaze build`, with the edition from `//@ edition:`\nelse 2015, and runs the run-pass ones (exit 0, `.run.stdout`). zustc's\nresult on the same tests is read from out/rust_ui_results.txt. The table\ngoes to stdout and to bench/blaze_ui_result.md, for README's comparison.\n\nBetween tests it waits out blaze's ~20 ms racy-stamp window and removes\nthe last binary. Without that, a build right after the copy kept the\nprevious test's program and the run-pass count came out too low.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-20T15:51:58Z",
+          "tree_id": "dea836c1affe7294f467eb8fc2156455c3457da4",
+          "url": "https://github.com/mizchi/zust/commit/d9294dc961e59727cda4a420beec3983d197bc4a"
+        },
+        "date": 1795190215084,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
