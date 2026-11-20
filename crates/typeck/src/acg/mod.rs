@@ -1865,6 +1865,13 @@ impl Cx<'_> {
         if let Some(q) = q {
             let t = self.parse_ty(q).ok()?;
             let m = p.segs.last()?.name.clone();
+            // (`<S as Tr>::m`: Tr's impl, also beside an inherent `S::m` of the same name)
+            if p.segs.len() >= 2 {
+                let tr = &p.segs[p.segs.len() - 2].name;
+                if let Some(i) = self.trait_candidate(&format!("{}::{m}", self.ty_key(t)), tr) {
+                    return Some((i, &self.prog.sigs[i as usize]));
+                }
+            }
             let i = by_ty(t, &m)?;
             return Some((i, &self.prog.sigs[i as usize]));
         }
@@ -1905,6 +1912,22 @@ impl Cx<'_> {
             }
         };
         Some((i, &self.prog.sigs[i as usize]))
+    }
+
+    /// The name methods of t are indexed under (`S` for a struct's instances too, `u8`, `#tuple0`)
+    pub fn ty_key(&self, t: Ty) -> String {
+        match t {
+            Ty::Struct(sid) => self.prog.structs[self.prog.base_of(sid) as usize].name.clone(),
+            Ty::Unit => "#tuple0".to_string(),
+            t => self.prog.tn(t),
+        }
+    }
+
+    /// The method named `name` (`S::m`, among its overloads) that is an impl of trait tr
+    pub fn trait_candidate(&self, name: &str, tr: &str) -> Option<u32> {
+        let of_tr = |i: u32| self.prog.sigs[i as usize].impl_trait.as_deref().is_some_and(|t| t.split('<').next().unwrap_or(t).trim() == tr);
+        let first = self.prog.index.get(name).copied();
+        first.filter(|&i| of_tr(i)).or_else(|| self.prog.overloads.get(name).and_then(|cs| cs.iter().copied().find(|&c| of_tr(c))))
     }
 
     /// the type `S` of a path `S::f` (two segments, the first a type the program knows), or None
