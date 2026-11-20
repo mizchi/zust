@@ -17,6 +17,10 @@ pub fn ffi_alias(s: &str) -> Option<Ty> {
         "c_uint" => Ty::U32,
         "c_long" | "c_longlong" => Ty::I64,
         "c_ulong" | "c_ulonglong" => Ty::U64,
+        "c_float" => Ty::F32,
+        "c_double" => Ty::F64,
+        "c_size_t" => Ty::Usize,
+        "c_ssize_t" | "c_ptrdiff_t" => Ty::Isize,
         _ => return None,
     })
 }

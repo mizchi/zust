@@ -2224,6 +2224,7 @@ build-pass	extern/issue-10763.rs
 run-pass	extern/issue-10764-rpass.rs
 build-pass	extern/issue-1251.rs
 compile-fail	extern/issue-18819.rs
+run-pass	extern/lgamma-linkage.rs
 compile-fail	extern/not-in-block.rs
 run-pass	extern/windows-tcb-trash-13259.rs
 compile-fail	feature-gates/feature-gate-adt_const_params.rs

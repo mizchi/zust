@@ -1438,6 +1438,8 @@ pub fn rename_module_collisions_fix(src: &str, crates: &[String], fix: &mut Vec<
     }
     // 各スコープのトップレベルのアイテムの名前 (そのスコープの深さの `fn x` / `struct X` など)
     let mut defs: Vec<(Vec<u8>, usize, usize)> = vec![]; // (名前, スコープ, 名前のトークン)
+    let mut extern_close: Vec<i32> = vec![];
+    let mut extern_defs: Vec<(usize, Vec<u8>, usize)> = vec![]; // (スコープ, 名前, 宣言の先頭のトークン)
     let mut depth = 0i32;
     let mut scope_depth: Vec<(usize, i32)> = vec![(usize::MAX, 0)];
     let mut k = 0;
@@ -1450,8 +1452,19 @@ pub fn rename_module_collisions_fix(src: &str, crates: &[String], fix: &mut Vec<
         }
         if is_sym(k, b'{') {
             depth += 1;
+            // (`extern "C" { fn f(); }` at a module's level: its fns are the module's items)
+            let at_scope = scope_depth.last().is_some_and(|&(_, d)| d == depth - 1);
+            let ext = k >= 1 && (is_id(k - 1, b"extern") || (k >= 2 && toks[k - 1].0 == 2 && is_id(k - 2, b"extern")));
+            if at_scope && ext {
+                let m = scope_depth.last().unwrap().0;
+                scope_depth.push((m, depth));
+                extern_close.push(depth);
+            }
         } else if is_sym(k, b'}') {
-            if scope_depth.last().is_some_and(|&(m, _)| m != usize::MAX && mods[m].2 == k) {
+            if extern_close.last() == Some(&depth) {
+                extern_close.pop();
+                scope_depth.pop();
+            } else if scope_depth.last().is_some_and(|&(m, _)| m != usize::MAX && mods[m].2 == k) {
                 scope_depth.pop();
             }
             depth -= 1;
@@ -1466,6 +1479,24 @@ pub fn rename_module_collisions_fix(src: &str, crates: &[String], fix: &mut Vec<
                 if nk < toks.len() && toks[nk].0 == 0 && !(kw == b"const" && is_id(nk, b"fn")) && tok(nk) != b"_" {
                     let sc = scope_depth.last().unwrap().0;
                     defs.push((tok(nk).to_vec(), sc, nk));
+                    // (a fn of an extern block: renamed, it keeps its symbol through a `#[link_name]` before the
+                    // item (its `pub` or `fn`), unless it has one)
+                    if kw == b"fn" && !extern_close.is_empty() {
+                        let start = if k >= 1 && is_id(k - 1, b"pub") { k - 1 } else { k };
+                        let mut j = start;
+                        let mut has_ln = false;
+                        while j >= 1 && is_sym(j - 1, b']') {
+                            let mut a = j - 1;
+                            while a > 0 && !is_sym(a, b'[') {
+                                a -= 1;
+                            }
+                            has_ln |= (a..j).any(|x| is_id(x, b"link_name"));
+                            j = a.saturating_sub(1);
+                        }
+                        if !has_ln {
+                            extern_defs.push((sc, tok(nk).to_vec(), start));
+                        }
+                    }
                 }
             }
         }
@@ -1870,6 +1901,13 @@ pub fn rename_module_collisions_fix(src: &str, crates: &[String], fix: &mut Vec<
             }
         }
         k += 1;
+    }
+    for (sc, n, start) in &extern_defs {
+        if renamed_map.contains_key(&(*sc, n.clone())) {
+            let mut t = format!("#[link_name = \"{}\"] ", String::from_utf8_lossy(n)).into_bytes();
+            t.extend_from_slice(tok(*start));
+            repl.push((*start, *start, t));
+        }
     }
     if repl.is_empty() {
         return None;
