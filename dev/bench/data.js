@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795170091937,
+  "lastUpdate": 1795170094090,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -49408,6 +49408,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "lsp peak RSS",
             "value": 74.215,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "committer": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "distinct": true,
+          "id": "6edddd09055cf9e02b5e77b3a20b98c0bb35ad17",
+          "message": "mem::discriminant, array::from_fn; large copies and zeroed() via libc\n\n- std::mem::discriminant returns a prelude Discriminant<T> (Clone, Copy,\n  Eq, Hash, Debug) holding the enum's tag, read by a new __exr_tag_of\n  intrinsic.\n- std::array::from_fn(|i| ..) takes N from the expected array type.\n- A value larger than 4 KiB is copied with one memcpy call and zeroed\n  with one memset call, in place of a load and a store per word. Checking\n  a 1.5 GB array argument went from minutes (and an OOM) to 8 ms.\n\ntests/ui: +2 run-pass, +1 check-pass.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-20T10:16:38Z",
+          "tree_id": "b358dde77b815c4a0bf4f12cb768a7f2780cdd0e",
+          "url": "https://github.com/mizchi/zust/commit/6edddd09055cf9e02b5e77b3a20b98c0bb35ad17"
+        },
+        "date": 1795170093565,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "lsp definition p50",
+            "value": 0.628,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp hover p50",
+            "value": 0.425,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp completion p50",
+            "value": 0.964,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp references p50",
+            "value": 6.549,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp rename p50",
+            "value": 0.434,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp signatureHelp p50",
+            "value": 0.815,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp documentHighlight p50",
+            "value": 1.008,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp ready (startup to indexed)",
+            "value": 125.605,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp peak RSS",
+            "value": 74.492,
             "unit": "MiB"
           }
         ]
