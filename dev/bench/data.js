@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795178955596,
+  "lastUpdate": 1795178957630,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -51232,6 +51232,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "lsp peak RSS",
             "value": 74.719,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "committer": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "distinct": true,
+          "id": "5c7cdc54ef3ed30ffe4429608aae998486ef5995",
+          "message": "stringify! spaces tokens as rustc prints them; dbg!() and dbg!(a, b)\n\n- stringify! keeps tokens together where they touch in the text\n  (`(2*3) + 5`). Elsewhere it follows rustc's printer: no space around\n  `::`, before `,` `;` `.`, after `.`, between a name and its `(`, after\n  `#` before `[`, or just inside `( )` and `[ ]`. It used to print\n  `std :: option`.\n- A `$e:expr` fragment passed straight to stringify! loses the\n  parentheses the expander adds to keep its precedence (`1 + 2`, not\n  `(1 + 2)`).\n- dbg!() prints only the place. dbg!(a, b) prints each argument and\n  returns the tuple.\n\ntests/ui: +2 run-pass. KPI: crates no-op stays at 10.270 (the std startup\nvariation, as in aa059e7).\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-20T12:40:56Z",
+          "tree_id": "462753dc48765d8eee315d0d521de5ba9da8bae3",
+          "url": "https://github.com/mizchi/zust/commit/5c7cdc54ef3ed30ffe4429608aae998486ef5995"
+        },
+        "date": 1795178957197,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "lsp definition p50",
+            "value": 0.557,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp hover p50",
+            "value": 0.446,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp completion p50",
+            "value": 0.896,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp references p50",
+            "value": 4.309,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp rename p50",
+            "value": 0.52,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp signatureHelp p50",
+            "value": 0.717,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp documentHighlight p50",
+            "value": 1.159,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp ready (startup to indexed)",
+            "value": 128.943,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp peak RSS",
+            "value": 74.945,
             "unit": "MiB"
           }
         ]
