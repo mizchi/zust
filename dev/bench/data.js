@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795148257092,
+  "lastUpdate": 1795148259501,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -71403,6 +71403,70 @@ window.BENCHMARK_DATA = {
           {
             "name": "tests/ui compile-fail passing",
             "value": 3452,
+            "unit": "tests"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "committer": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "distinct": true,
+          "id": "fbf1812be6e016b2fef6388d0439473200e070c0",
+          "message": "Attributes on items they cannot be used on\n\nAn attribute in front of an item of a kind it does not apply to is\n\"`#[x]` attribute cannot be used on <kind>s\": inline / cold /\ntrack_caller on anything but a fn, repr on anything but a struct, enum\nor union, non_exhaustive off structs and enums, must_use off fns,\ntypes and traits, macro_use off modules, no_mangle off fns and\nstatics. Comment lines between the attributes and the item are\nskipped.\n\ntests/ui: +8 compile-fail passes; extern-crate-self-fail.rs (the item\nkind read wrong) goes to rust_ui_accidental.txt.\nKPI: unchanged (no-op within its usual 0.695 / 0.697 alternation).\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-20T04:04:50Z",
+          "tree_id": "7c0883743bf3830c4b33d59c050d2d7161999a15",
+          "url": "https://github.com/mizchi/zust/commit/fbf1812be6e016b2fef6388d0439473200e070c0"
+        },
+        "date": 1795148258969,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tests/ui run-pass pass rate",
+            "value": 71.28,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui run-pass passing",
+            "value": 1700,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui check-pass pass rate",
+            "value": 78.42,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui check-pass passing",
+            "value": 1417,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui build-pass pass rate",
+            "value": 70.37,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui build-pass passing",
+            "value": 95,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui compile-fail pass rate",
+            "value": 47.04,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui compile-fail passing",
+            "value": 3461,
             "unit": "tests"
           }
         ]
