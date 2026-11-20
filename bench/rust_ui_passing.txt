@@ -2483,6 +2483,7 @@ run-pass	functions-closures/fn-item-type-coerce.rs
 run-pass	functions-closures/fn-lval.rs
 run-pass	functions-closures/fn-type-infer.rs
 run-pass	functions-closures/implied-bounds-closure-arg-outlives.rs
+run-pass	functions-closures/return-from-closure.rs
 check-pass	generic-associated-types/bugs/issue-88460.rs
 check-pass	generic-associated-types/construct_with_other_type.rs
 compile-fail	generic-associated-types/empty_generics.rs
@@ -2972,6 +2973,7 @@ compile-fail	inference/ice-ifer-var-leaked-out-of-rollback-122098.rs
 check-pass	inference/infer-binary-operand-behind-reference.rs
 run-pass	inference/infer-fn-tail-expr.rs
 check-pass	inference/infer-result-type-through-dead-code.rs
+check-pass	inference/inference-thread-loop-closure.rs
 compile-fail	inference/issue-103587.rs
 compile-fail	inference/issue-107090.rs
 compile-fail	inference/issue-113354.rs
@@ -3061,6 +3063,7 @@ compile-fail	keyword/keyword-self-as-type-param.rs
 compile-fail	keyword/meta-is-not-reserved.rs
 run-pass	keyword/raw-identifier-for-function-57198.rs
 check-pass	label/label-beginning-with-underscore.rs
+run-pass	label/label-in-closure-no-self-shadow.rs
 compile-fail	label/label_break_value_illegal_uses.rs
 compile-fail	label/label_misspelled.rs
 compile-fail	label/label_misspelled_2.rs
@@ -3472,6 +3475,7 @@ check-pass	liveness/liveness-consts.rs
 check-pass	liveness/liveness-derive.rs
 compile-fail	liveness/liveness-forgot-ret.rs
 compile-fail	liveness/liveness-missing-ret2.rs
+compile-fail	liveness/liveness-move-call-arg-2.rs
 compile-fail	liveness/liveness-move-call-arg.rs
 compile-fail	liveness/liveness-move-in-loop.rs
 compile-fail	liveness/liveness-return-last-stmt-semi.rs

@@ -1592,6 +1592,11 @@ impl Cx<'_> {
                 return err(SP, "cannot infer the type of this closure parameter; add a type annotation");
             }
         }
+        // (a body that ends by diverging (`panic!()`, `loop { .. }`, `return`), with no value to say otherwise: `()`,
+        // rustc's fallback for `!`)
+        if sol[ri].is_none() && diverging_tail(&c_body(c)) {
+            sol[ri] = Some(Ty::Unit);
+        }
         let Some(args) = sol.into_iter().collect::<Option<Vec<Ty>>>() else {
             return err(SP, "cannot infer the return type of this closure; annotate it (`|..| -> T { .. }`)");
         };
@@ -2424,6 +2429,48 @@ fn place_has_block(e: &Expr) -> bool {
         Expr::Block(..) => true,
         Expr::Paren(x) | Expr::Unary(_, x, _) | Expr::Field(x, _, _) => place_has_block(x),
         Expr::Index(b, i, _) => place_has_block(b) || place_has_block(i),
+        _ => false,
+    }
+}
+
+/// a closure expression's body
+fn c_body(c: &Expr) -> Expr {
+    match c {
+        Expr::Closure(_, _, _, b, ..) => (**b).clone(),
+        e => e.clone(),
+    }
+}
+
+/// whether a closure body ends by diverging in a way that makes `()` its return type: a `loop` with no `break`, a
+/// `return`, or a `panic!`-like macro when a `return;` elsewhere says the type is `()` (a bare `|| panic!()` stays
+/// open: passed to `fn f<R: Tr>(_: impl Fn() -> R)` rustc's fallback is `!`, not `()`)
+fn diverging_tail(e: &Expr) -> bool {
+    fn has_break(e: &Expr) -> bool {
+        let mut found = false;
+        crate::ast_closure::each_child_pub(e, &mut |c| found |= matches!(c, Expr::Break(..)) || has_break(c));
+        found
+    }
+    fn has_unit_return(e: &Expr) -> bool {
+        let mut found = false;
+        crate::ast_closure::each_child_pub(e, &mut |c| {
+            found |= matches!(c, Expr::Return(None)) || (!matches!(c, Expr::Closure(..)) && has_unit_return(c))
+        });
+        found
+    }
+    fn tail(e: &Expr) -> &Expr {
+        match e {
+            Expr::Paren(x) => tail(x),
+            Expr::Block(_, _, b) => match b.stmts.last() {
+                Some(Stmt::Expr(x, _)) => tail(x),
+                _ => e,
+            },
+            e => e,
+        }
+    }
+    match tail(e) {
+        Expr::Loop(..) => !has_break(tail(e)),
+        Expr::Return(_) => true,
+        Expr::Macro(p, _, _) if p.segs.last().is_some_and(|s| matches!(s.name.as_str(), "panic" | "unreachable" | "todo" | "unimplemented")) => has_unit_return(e),
         _ => false,
     }
 }
