@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795160739549,
+  "lastUpdate": 1795160741920,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -47128,6 +47128,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "lsp peak RSS",
             "value": 74.285,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "committer": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "distinct": true,
+          "id": "0043490a67a2eec6a87796dcc38d13b985ead107",
+          "message": "Module flattening: a glob import is shadowed by the scope's own item\n\n`use thing::*;` beside the crate root's own `enum Thing` renamed the\nroot's item to `thing__Thing` as well (\"duplicate definition of\n`thing__Thing`\"): a glob import now gives way to an item of that name\nthe importing scope defines, as in rustc. The scopes' items are looked\nup in a set built only when the program has a glob import.\n\ntests/ui: +6 passes (5 check-pass, 1 run-pass).\nKPI: within ±0.13% of the row before (traits edit's flag is within its\nrecent 63.37 - 63.47 range; the program has no module).\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-20T07:40:44Z",
+          "tree_id": "319169b5dac059b1fa34607133b9d71bee5eec4c",
+          "url": "https://github.com/mizchi/zust/commit/0043490a67a2eec6a87796dcc38d13b985ead107"
+        },
+        "date": 1795160741456,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "lsp definition p50",
+            "value": 0.491,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp hover p50",
+            "value": 0.404,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp completion p50",
+            "value": 1.117,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp references p50",
+            "value": 5.806,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp rename p50",
+            "value": 0.465,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp signatureHelp p50",
+            "value": 0.947,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp documentHighlight p50",
+            "value": 0.993,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp ready (startup to indexed)",
+            "value": 132.766,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp peak RSS",
+            "value": 74.301,
             "unit": "MiB"
           }
         ]
