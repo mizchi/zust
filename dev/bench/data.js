@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795139727086,
+  "lastUpdate": 1795139728866,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -56719,6 +56719,85 @@ window.BENCHMARK_DATA = {
           {
             "name": "parity 一致の平均",
             "value": 92.732,
+            "unit": "%"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "committer": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "distinct": true,
+          "id": "fdd2ee3e5e7f4cfa8461f9367deeb4887cafa31b",
+          "message": "lint: naming conventions (snake / camel / upper case)\n\nWith `#![deny(non_snake_case)]`, `non_camel_case_types`,\n`non_upper_case_globals` (or `nonstandard_style` / `warnings`), the\nprogram's fns and methods, types, traits and associated types, statics,\nconsts and associated consts are checked before building, with rustc's\nmessages (\"function `CamelCase` should have a snake case name\", \"type\n`ONE_TWO` should have an upper camel case name\", \"static variable\n`foo` should have an upper case name\", ..). Items allowing the lint,\ncfg'd, no_mangle and extern \"C\" ones are skipped; the names are shown\nwithout the flattened modules' prefix and the hoisting suffix.\n\ntests/ui: +11 genuine compile-fail passes.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-20T01:51:11Z",
+          "tree_id": "cccca8d4615c5de74ec9cb170919eeefa190439e",
+          "url": "https://github.com/mizchi/zust/commit/fdd2ee3e5e7f4cfa8461f9367deeb4887cafa31b"
+        },
+        "date": 1795139728589,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "parity documentSymbol (名前の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity workspace/symbol (上位 20 の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity definition (行き先の一致)",
+            "value": 93.75,
+            "unit": "%"
+          },
+          {
+            "name": "parity hover (名前を含む)",
+            "value": 85,
+            "unit": "%"
+          },
+          {
+            "name": "parity references (数の一致)",
+            "value": 86.111,
+            "unit": "%"
+          },
+          {
+            "name": "parity documentHighlight (数の一致)",
+            "value": 93.939,
+            "unit": "%"
+          },
+          {
+            "name": "parity rename (書き換えの一致)",
+            "value": 68.421,
+            "unit": "%"
+          },
+          {
+            "name": "parity signatureHelp (名前・引数の数・今の引数の一致)",
+            "value": 94.737,
+            "unit": "%"
+          },
+          {
+            "name": "parity completion `x.\\|` (書いてある名前を含む)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity completion `na\\|me` (同)",
+            "value": 84.615,
+            "unit": "%"
+          },
+          {
+            "name": "parity 一致の平均",
+            "value": 90.657,
             "unit": "%"
           }
         ]
