@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795185112786,
+  "lastUpdate": 1795185115312,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -52372,6 +52372,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "lsp peak RSS",
             "value": 75.125,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "committer": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "distinct": true,
+          "id": "7a588e0143f9c2f06761b7282a16809e0da31303",
+          "message": "Option/Result::inspect, overflowing/wrapping div and rem, Iterator::unzip\n\n- Option::inspect, Result::inspect, Result::inspect_err.\n- Integer overflowing_div / overflowing_rem / wrapping_div / wrapping_rem:\n  MIN / -1 gives (MIN, true) / (0, true), and a zero divisor panics as `/`\n  does.\n- Iterator::unzip into two Vecs.\n\ntests/ui: +1 check-pass.\n\nKPI: crates edit +0.16% (outside its 0.14% band). Removing the new\ninspect methods alone takes 0.19M of it back. The crates name `inspect`,\nso the prelude's name-driven selection now picks them as candidates; the\nrest is the other new prelude items. Σ for crates edit is still -0.25%.\nno-op / crates no-op are the std startup variation seen before.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-20T14:27:46Z",
+          "tree_id": "e8dfc77afe0dbe131652e1136cacdcae9bdf7e51",
+          "url": "https://github.com/mizchi/zust/commit/7a588e0143f9c2f06761b7282a16809e0da31303"
+        },
+        "date": 1795185114833,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "lsp definition p50",
+            "value": 0.565,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp hover p50",
+            "value": 0.385,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp completion p50",
+            "value": 0.746,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp references p50",
+            "value": 3.541,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp rename p50",
+            "value": 0.398,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp signatureHelp p50",
+            "value": 0.619,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp documentHighlight p50",
+            "value": 0.958,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp ready (startup to indexed)",
+            "value": 106.164,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp peak RSS",
+            "value": 75.117,
             "unit": "MiB"
           }
         ]
