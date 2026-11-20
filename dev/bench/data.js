@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795185117715,
+  "lastUpdate": 1795185120216,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -84739,6 +84739,70 @@ window.BENCHMARK_DATA = {
           {
             "name": "tests/ui check-pass passing",
             "value": 1448,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui build-pass pass rate",
+            "value": 71.85,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui build-pass passing",
+            "value": 97,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui compile-fail pass rate",
+            "value": 48.48,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui compile-fail passing",
+            "value": 3567,
+            "unit": "tests"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "committer": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "distinct": true,
+          "id": "7a588e0143f9c2f06761b7282a16809e0da31303",
+          "message": "Option/Result::inspect, overflowing/wrapping div and rem, Iterator::unzip\n\n- Option::inspect, Result::inspect, Result::inspect_err.\n- Integer overflowing_div / overflowing_rem / wrapping_div / wrapping_rem:\n  MIN / -1 gives (MIN, true) / (0, true), and a zero divisor panics as `/`\n  does.\n- Iterator::unzip into two Vecs.\n\ntests/ui: +1 check-pass.\n\nKPI: crates edit +0.16% (outside its 0.14% band). Removing the new\ninspect methods alone takes 0.19M of it back. The crates name `inspect`,\nso the prelude's name-driven selection now picks them as candidates; the\nrest is the other new prelude items. Σ for crates edit is still -0.25%.\nno-op / crates no-op are the std startup variation seen before.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-20T14:27:46Z",
+          "tree_id": "e8dfc77afe0dbe131652e1136cacdcae9bdf7e51",
+          "url": "https://github.com/mizchi/zust/commit/7a588e0143f9c2f06761b7282a16809e0da31303"
+        },
+        "date": 1795185119663,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tests/ui run-pass pass rate",
+            "value": 73.5,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui run-pass passing",
+            "value": 1753,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui check-pass pass rate",
+            "value": 80.19,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui check-pass passing",
+            "value": 1449,
             "unit": "tests"
           },
           {
