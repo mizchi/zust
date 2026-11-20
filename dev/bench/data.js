@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795151576903,
+  "lastUpdate": 1795151579568,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -45304,6 +45304,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "lsp peak RSS",
             "value": 74.207,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "committer": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "distinct": true,
+          "id": "4c648ae0fb015dc1c659dfb6e7981f3adc76ef43",
+          "message": "E0106: missing lifetime specifiers in free fn returns and in fields\n\nA free fn whose return type has an elided lifetime (`&T`, `'_`) needs\nexactly one lifetime position among its parameters (rustc's elision\nrule without `self`); a struct's or enum's field cannot elide one.\nEither is \"missing lifetime specifier\", at the field (named fields) or\nthe first `&` (others). fn pointer, `impl` and `dyn` types are not\nlooked into, extern fns and the prelude's `__` helpers are skipped.\n\ntests/ui: +14 compile-fail passes; impl-trait-missing-lifetime-gated.rs\n(expects the feature-gate message) goes to rust_ui_accidental.txt.\nKPI: all within ±0.3% of the row before.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-20T05:07:50Z",
+          "tree_id": "5e8255a0349c0e1ea102d2e2a522f3c945a0a1cb",
+          "url": "https://github.com/mizchi/zust/commit/4c648ae0fb015dc1c659dfb6e7981f3adc76ef43"
+        },
+        "date": 1795151578890,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "lsp definition p50",
+            "value": 0.727,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp hover p50",
+            "value": 0.592,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp completion p50",
+            "value": 1.259,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp references p50",
+            "value": 2.515,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp rename p50",
+            "value": 0.664,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp signatureHelp p50",
+            "value": 0.845,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp documentHighlight p50",
+            "value": 1.037,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp ready (startup to indexed)",
+            "value": 153.128,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp peak RSS",
+            "value": 74.418,
             "unit": "MiB"
           }
         ]
