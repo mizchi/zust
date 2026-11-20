@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795184152610,
+  "lastUpdate": 1795184154985,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -84358,6 +84358,70 @@ window.BENCHMARK_DATA = {
           {
             "name": "tests/ui run-pass passing",
             "value": 1752,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui check-pass pass rate",
+            "value": 80.13,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui check-pass passing",
+            "value": 1448,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui build-pass pass rate",
+            "value": 71.85,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui build-pass passing",
+            "value": 97,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui compile-fail pass rate",
+            "value": 48.48,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui compile-fail passing",
+            "value": 3567,
+            "unit": "tests"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "committer": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "distinct": true,
+          "id": "2126394cfa8ea16f24d4237dae93db8770ec17ff",
+          "message": "into_iter: arrays by value, iterators as themselves\n\n- `arr.into_iter()` on an array variable is rewritten to\n  `arr.iter().copied()`. When the prelude left Copied out, it fell back to\n  the by-reference Iter (2018's meaning), and `.sum()` then failed. A\n  program that uses into_iter now always gets `copied`.\n- `(0..3).into_iter()`, `map.into_iter()` and a generic\n  `x.into_iter()` with x an iterator: the iterator itself, as std's\n  `impl<I: Iterator> IntoIterator for I` (a copy when nothing in it needs\n  drop).\n\ntests/ui: +1 run-pass. KPI: edit one fn back to 547.12 (4ed592f's 547.97\nwas not that change's code, as its A/B showed).\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-20T14:10:41Z",
+          "tree_id": "6b58e276a37b789c68d679a4e9ede14148c418a7",
+          "url": "https://github.com/mizchi/zust/commit/2126394cfa8ea16f24d4237dae93db8770ec17ff"
+        },
+        "date": 1795184154509,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tests/ui run-pass pass rate",
+            "value": 73.5,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui run-pass passing",
+            "value": 1753,
             "unit": "tests"
           },
           {
