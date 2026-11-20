@@ -26,7 +26,7 @@
 
 ## Status
 
-Numbers measured <!-- measured -->2026-11-20, 09ae27c<!-- /measured --> by CI on each push to main (bench.yml runs
+Numbers measured <!-- measured -->2026-11-20, 8dba29d<!-- /measured --> by CI on each push to main (bench.yml runs
 `bench/ci_bench.py` and `bench/rust_ui.py`, then `scripts/update_readme.py` writes them here). Times come from shared
 GitHub Actions runners and vary by about ±20%; the instruction counts (valgrind) do not.
 
@@ -38,8 +38,8 @@ only the tests it can be asked to handle (no nightly features, auxiliary crates 
 <!-- auto:ui -->
 | kind | applicable | pass |
 |---|---:|---:|
-| run-pass (builds, runs, same output) | 2385 | 1707 (71.6%) |
-| check-pass (accepted by `zustc check`) | 1807 | 1436 (79.5%) |
+| run-pass (builds, runs, same output) | 2385 | 1719 (72.1%) |
+| check-pass (accepted by `zustc check`) | 1807 | 1435 (79.4%) |
 | build-pass | 135 | 95 (70.4%) |
 | compile-fail (rejected at an annotated line) | 7358 | 3564 (48.4%) |
 <!-- /auto:ui -->
@@ -53,22 +53,22 @@ Build speed, build cache size and LSP latency on generated programs of 1000 / 50
 <!-- auto:kpi -->
 | KPI | gen1000 | gen5000 |
 |---|---:|---:|
-| cold build | 118 ms | 529 ms |
-| no-op build | 0.7 ms | 0.7 ms |
-| build after editing one function | 16.7 ms | 60.9 ms |
-| `check` | 76 ms | 371 ms |
+| cold build | 156 ms | 691 ms |
+| no-op build | 1.1 ms | 1.1 ms |
+| build after editing one function | 24.6 ms | 85.0 ms |
+| `check` | 115 ms | 572 ms |
 | no-op build (instructions) | 0.6 M | 0.6 M |
-| edit one function (instructions) | 124.3 M | 590.4 M |
-| `check` (instructions) | 776.2 M | 3832.4 M |
+| edit one function (instructions) | 124.0 M | 590.1 M |
+| `check` (instructions) | 776.3 M | 3832.7 M |
 | build cache on disk | 387.2 KiB | 1902.8 KiB |
 | binary | 324.0 KiB | 1558.3 KiB |
-| cold build peak RSS | 18.0 MiB | 52.0 MiB |
+| cold build peak RSS | 18.0 MiB | 51.8 MiB |
 
 | zust-analyzer (zustc's own sources) | |
 |---|---:|
-| p50: definition, hover, completion, references, rename | 0.46 ms / 0.35 ms / 0.92 ms / 5.79 ms / 0.49 ms |
-| startup until indexed | 121 ms |
-| peak RSS | 74.5 MiB |
+| p50: definition, hover, completion, references, rename | 0.69 ms / 0.55 ms / 1.19 ms / 5.55 ms / 0.66 ms |
+| startup until indexed | 162 ms |
+| peak RSS | 74.4 MiB |
 <!-- /auto:kpi -->
 
 Every change is also measured on its own with `python3 bench/kpi_track.py`, so that small increases that add up stay
@@ -332,8 +332,8 @@ the measured numbers. The [reports](docs/reports/) explain each step.
 
 ### Overall
 
-- [x] tests/ui run-pass: <!-- total:run-pass -->71.6% (1707 / 2385)
-- [x] tests/ui check-pass: <!-- total:check-pass -->79.5% (1436 / 1807)
+- [x] tests/ui run-pass: <!-- total:run-pass -->72.1% (1719 / 2385)
+- [x] tests/ui check-pass: <!-- total:check-pass -->79.4% (1435 / 1807)
 - [x] tests/ui build-pass: <!-- total:build-pass -->70.4% (95 / 135)
 - [ ] tests/ui compile-fail (an error on an annotated line): <!-- total:compile-fail -->48.4% (3564 / 7358)
 - [x] real crates: fnv, adler2, hex, itoa, rustc-hash and cfg-if build and give the same output (6 / 6)
@@ -345,7 +345,7 @@ the measured numbers. The [reports](docs/reports/) explain each step.
 - [x] `for` / `while` / `loop`, labels: <!-- ui:for-loop-while,loops,label -->93.3%
 - [x] enums, `#[repr(u8)]`, auto-sized tags: <!-- ui:enum,enum-discriminant -->85.7%
 - [x] `cfg`: <!-- ui:cfg -->81.2%
-- [x] bindings, patterns, slice patterns, or-patterns (also with guards): <!-- ui:binding,pattern,or-patterns -->88.6%
+- [x] bindings, patterns, slice patterns, or-patterns (also with guards): <!-- ui:binding,pattern,or-patterns -->88.1%
 - [x] `match`: <!-- ui:match -->82.9%
 - [x] name resolution: <!-- ui:resolve -->85.7%
 - [x] statics: ints, floats, raw pointers, fn pointers, `const fn` calls: <!-- ui:statics -->75.0%
@@ -399,7 +399,7 @@ the measured numbers. The [reports](docs/reports/) explain each step.
 - [ ] async / await: <!-- ui:async-await -->76.7%. It runs at once, with no executor (no `poll`, `Waker`, `Pin<Box<dyn Future>>`)
 - [ ] threads: <!-- ui:threads-sendsync -->70.2%. Green threads on one OS thread: each spawned thread has its own stack and runs until it waits (`join`, `recv`, a held `Mutex`, `sleep`, `yield_now`, an atomic `load`); no parallelism
 - [ ] iterators: <!-- ui:iterators -->47.1% (`iter::empty()` cannot infer its item from the target)
-- [ ] FFI: <!-- ui:abi -->14.3%. Scalars only, no structs by value
+- [ ] FFI: <!-- ui:abi -->42.9%. Scalars only, no structs by value
 - [ ] panics: <!-- ui:panics -->11.1%. A panic aborts: no unwinding, `catch_unwind`, `set_hook`
 
 ### In sight (known approach, small cost)
