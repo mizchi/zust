@@ -1679,11 +1679,31 @@ impl Program {
     /// (checked the same way). An impl this cannot read (a where clause, a self type that does not resolve) counts as
     /// applying. Other traits (std's) are asked of `implements`
     pub fn bound_holds(&self, sums: &[Summary], user: usize, t: Ty, tr: &str, depth: u32) -> bool {
+        self.bound_holds_in(sums, user, t, tr, depth, &mut vec![])
+    }
+
+    /// bound_holds, with the obligations being proved (active): one that comes back around (`impl<T: B> A for T` with
+    /// `impl<T: A> B for T`) is no proof, and that candidate fails
+    fn bound_holds_in(&self, sums: &[Summary], user: usize, t: Ty, tr: &str, depth: u32, active: &mut Vec<(Ty, String)>) -> bool {
         // (the program's own traits: the first `user` summaries are its items, the rest the prelude's, whose traits
         // (Default ..) builtin types implement without an impl to find)
-        if depth > 8 || matches!(t, Ty::Ref(..) | Ty::Ptr(..) | Ty::Param(_)) || self.has_param(t) || !sums[..user.min(sums.len())].iter().any(|s| s.trait_decl.as_deref() == Some(tr)) {
+        if matches!(t, Ty::Param(_)) || self.has_param(t) || !sums[..user.min(sums.len())].iter().any(|s| s.trait_decl.as_deref() == Some(tr)) {
             return self.implements(t, tr);
         }
+        if active.iter().any(|(at, atr)| *at == t && atr == tr) {
+            return false;
+        }
+        // (a proof deeper than this (types that grow at each step) is not followed: it counts as holding)
+        if depth > 16 {
+            return true;
+        }
+        active.push((t, tr.to_string()));
+        let r = self.bound_impls(sums, user, t, tr, depth, active);
+        active.pop();
+        r
+    }
+
+    fn bound_impls(&self, sums: &[Summary], user: usize, t: Ty, tr: &str, depth: u32, active: &mut Vec<(Ty, String)>) -> bool {
         let readable = |b: &str| b.chars().all(|c| c.is_alphanumeric() || c == '_');
         for s in sums.iter().filter(|s| s.impl_trait.as_deref() == Some(tr)) {
             let gn: Vec<&str> = s.impl_generics.iter().map(|g| g.0.as_str()).collect();
@@ -1707,7 +1727,7 @@ impl Program {
             let bounds_hold = s.impl_generics.iter().zip(&sol).all(|((_, bs), a)| match a {
                 Some(a) => bs.iter().all(|b| {
                     let b = b.trim();
-                    !readable(b) || self.bound_holds(sums, user, *a, b, depth + 1)
+                    !readable(b) || self.bound_holds_in(sums, user, *a, b, depth + 1, active)
                 }),
                 None => true,
             });
