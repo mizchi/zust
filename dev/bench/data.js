@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795181030293,
+  "lastUpdate": 1795181032129,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -51688,6 +51688,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "lsp peak RSS",
             "value": 74.973,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "committer": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "distinct": true,
+          "id": "cdb2f0ff02c761be3549a11b1081cb4c1a332a96",
+          "message": "Wrong code: assignment order, condition temporaries, &mut self of numbers\n\nThree cases that compiled and then ran wrong:\n- `*{ x = z; &mut *y } = x`: a place with a block in it was evaluated\n  before the right side, which then read the new x. The right side now\n  goes first, into a temporary.\n- `while borrow().ok() { .. }` / `if borrow().ok() { .. }`: the\n  condition's temporaries lived until the loop / if ended. They are now\n  dropped right after the condition, as rustc does.\n- `x.inc()` with `impl Inc for i32 { fn inc(&mut self) }` (also\n  `v[0].inc()`, `(&mut f[1]).inc()` and `Inc::inc(r)`) changed a copy of\n  x. The method now gets the address of the place itself. A local that\n  calls such a method (names collected once per program) is kept in\n  memory.\n\ntests/ui: +3 run-pass.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-20T13:19:09Z",
+          "tree_id": "d49f2a9ad2cb330b123b3585391ed5544d8a107c",
+          "url": "https://github.com/mizchi/zust/commit/cdb2f0ff02c761be3549a11b1081cb4c1a332a96"
+        },
+        "date": 1795181031897,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "lsp definition p50",
+            "value": 0.526,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp hover p50",
+            "value": 0.419,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp completion p50",
+            "value": 0.974,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp references p50",
+            "value": 4.619,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp rename p50",
+            "value": 0.465,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp signatureHelp p50",
+            "value": 0.938,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp documentHighlight p50",
+            "value": 1.06,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp ready (startup to indexed)",
+            "value": 128.283,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp peak RSS",
+            "value": 75.047,
             "unit": "MiB"
           }
         ]
