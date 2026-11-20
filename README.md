@@ -26,7 +26,7 @@
 
 ## Status
 
-Numbers measured <!-- measured -->2026-11-20, 20055f9<!-- /measured --> by CI on each push to main (bench.yml runs
+Numbers measured <!-- measured -->2026-11-20, 707a395<!-- /measured --> by CI on each push to main (bench.yml runs
 `bench/ci_bench.py` and `bench/rust_ui.py`, then `scripts/update_readme.py` writes them here). Times come from shared
 GitHub Actions runners and vary by about ±20%; the instruction counts (valgrind) do not.
 
@@ -38,7 +38,7 @@ only the tests it can be asked to handle (no nightly features, auxiliary crates 
 <!-- auto:ui -->
 | kind | applicable | pass |
 |---|---:|---:|
-| run-pass (builds, runs, same output) | 2385 | 1734 (72.7%) |
+| run-pass (builds, runs, same output) | 2385 | 1736 (72.8%) |
 | check-pass (accepted by `zustc check`) | 1807 | 1443 (79.9%) |
 | build-pass | 135 | 97 (71.9%) |
 | compile-fail (rejected at an annotated line) | 7358 | 3564 (48.4%) |
@@ -53,22 +53,22 @@ Build speed, build cache size and LSP latency on generated programs of 1000 / 50
 <!-- auto:kpi -->
 | KPI | gen1000 | gen5000 |
 |---|---:|---:|
-| cold build | 118 ms | 529 ms |
-| no-op build | 0.7 ms | 0.7 ms |
-| build after editing one function | 17.4 ms | 60.4 ms |
-| `check` | 76 ms | 368 ms |
+| cold build | 87 ms | 370 ms |
+| no-op build | 1.1 ms | 1.1 ms |
+| build after editing one function | 17.7 ms | 58.3 ms |
+| `check` | 73 ms | 358 ms |
 | no-op build (instructions) | 0.6 M | 0.6 M |
-| edit one function (instructions) | 124.3 M | 590.4 M |
-| `check` (instructions) | 776.3 M | 3832.7 M |
+| edit one function (instructions) | 124.1 M | 590.1 M |
+| `check` (instructions) | 776.3 M | 3832.9 M |
 | build cache on disk | 387.2 KiB | 1902.8 KiB |
 | binary | 324.0 KiB | 1558.3 KiB |
-| cold build peak RSS | 18.0 MiB | 51.7 MiB |
+| cold build peak RSS | 18.0 MiB | 51.8 MiB |
 
 | zust-analyzer (zustc's own sources) | |
 |---|---:|
-| p50: definition, hover, completion, references, rename | 0.47 ms / 0.39 ms / 1.04 ms / 4.20 ms / 0.45 ms |
-| startup until indexed | 124 ms |
-| peak RSS | 74.4 MiB |
+| p50: definition, hover, completion, references, rename | 0.50 ms / 0.38 ms / 0.76 ms / 3.40 ms / 0.40 ms |
+| startup until indexed | 99 ms |
+| peak RSS | 74.5 MiB |
 <!-- /auto:kpi -->
 
 Every change is also measured on its own with `python3 bench/kpi_track.py`, so that small increases that add up stay
@@ -332,7 +332,7 @@ the measured numbers. The [reports](docs/reports/) explain each step.
 
 ### Overall
 
-- [x] tests/ui run-pass: <!-- total:run-pass -->72.7% (1734 / 2385)
+- [x] tests/ui run-pass: <!-- total:run-pass -->72.8% (1736 / 2385)
 - [x] tests/ui check-pass: <!-- total:check-pass -->79.9% (1443 / 1807)
 - [x] tests/ui build-pass: <!-- total:build-pass -->71.9% (97 / 135)
 - [ ] tests/ui compile-fail (an error on an annotated line): <!-- total:compile-fail -->48.4% (3564 / 7358)
@@ -346,7 +346,7 @@ the measured numbers. The [reports](docs/reports/) explain each step.
 - [x] enums, `#[repr(u8)]`, auto-sized tags: <!-- ui:enum,enum-discriminant -->85.7%
 - [x] `cfg`: <!-- ui:cfg -->87.5%
 - [x] bindings, patterns, slice patterns, or-patterns (also with guards): <!-- ui:binding,pattern,or-patterns -->88.6%
-- [x] `match`: <!-- ui:match -->82.9%
+- [x] `match`: <!-- ui:match -->85.4%
 - [x] name resolution: <!-- ui:resolve -->85.7%
 - [x] statics: ints, floats, raw pointers, fn pointers, `const fn` calls: <!-- ui:statics -->75.0%
 - [x] structs, `..base` (field by field): <!-- ui:structs,structs-enums -->85.4%
@@ -355,7 +355,7 @@ the measured numbers. The [reports](docs/reports/) explain each step.
 - [x] methods of `impl Tr for Box<S>` (a Box impl next to a blanket impl of the same trait is E0119), `..b` / `..=b` / `..` values, `wrapping_shl` / `checked_shl` / `overflowing_shl` / `reverse_bits`, `wrapping_abs` / `saturating_abs` / `saturating_neg` / `overflowing_neg` / `overflowing_abs`
 - [x] qualified paths: `<T as Tr>::C` for a trait's default constant (its `Self::` is the qualified type), `<() as Tr>::f()`, associated functions through a type alias (`type Ham = m::Qux; Ham::new()`)
 - [x] let chains (`if let A = x && cond`), also in match guards (`P if let Q = e =>`); inline `const { .. }`, `&raw const` / `&raw mut`
-- [x] parser: <!-- ui:parser -->88.9%
+- [x] parser: <!-- ui:parser -->89.9%
 - [x] closures (capture, `Fn` traits, `move`; with no captures also as fn pointers): <!-- ui:closures,unboxed-closures,functions-closures -->77.6%
 - [x] derives: `Debug`, `Clone`, `Copy`, `PartialEq`/`Eq`, `PartialOrd`/`Ord`, `Hash`, `Default`: <!-- ui:derives,deriving -->86.4%
 - [x] imports, `use`: <!-- ui:imports -->84.1%
