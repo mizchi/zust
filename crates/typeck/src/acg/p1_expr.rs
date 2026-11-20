@@ -918,8 +918,10 @@ impl Cx<'_> {
                     // coercion)
                     if self.user_code && self.prog.deny_trivial_casts.0 {
                         if let Some(ft) = self.peek(x) {
+                            // (`&mut [u8] as &[u8]` too: the same pointee, a mutable reference to a shared one)
                             let trivial = ft == to
-                                || matches!((ft, to), (Ty::Ref(m, Ty::Array(e, _)), Ty::Ref(tm, Ty::Slice(e2))) if e == e2 && (m || !tm));
+                                || matches!((ft, to), (Ty::Ref(m, Ty::Array(e, _)), Ty::Ref(tm, Ty::Slice(e2))) if e == e2 && (m || !tm))
+                                || matches!((ft, to), (Ty::Ref(true, a), Ty::Ref(false, b)) if a == b);
                             if trivial {
                                 return err(SP, format!("trivial cast: `{}` as `{}`", self.prog.tn(ft), self.prog.tn(to)));
                             }
@@ -972,8 +974,13 @@ impl Cx<'_> {
                 if matches!(to, Ty::Ptr(..)) && has_hole(self.prog, to) {
                     return err(SP, "cannot cast to a pointer of an unknown kind (E0641)");
                 }
-                // (a cast to the same type: `f as fn()` with f: fn())
+                // (a cast to the same type: `f as fn()` with f: fn(); under `#![deny(trivial_casts)]` a reference's is
+                // one, as `r as &u8` with r: &u8)
                 if from == to && !from.is_int() && !from.is_float() {
+                    if self.user_code && self.prog.deny_trivial_casts.0 && matches!(from, Ty::Ref(..)) {
+                        let n = self.prog.tn(from);
+                        return err(SP, format!("trivial cast: `{n}` as `{n}`"));
+                    }
                     return Ok((v, to));
                 }
                 if from == Ty::Never {
