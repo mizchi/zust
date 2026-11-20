@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795158890798,
+  "lastUpdate": 1795158893176,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -75835,6 +75835,70 @@ window.BENCHMARK_DATA = {
           {
             "name": "tests/ui check-pass passing",
             "value": 1417,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui build-pass pass rate",
+            "value": 70.37,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui build-pass passing",
+            "value": 95,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui compile-fail pass rate",
+            "value": 48.41,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui compile-fail passing",
+            "value": 3562,
+            "unit": "tests"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "committer": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "distinct": true,
+          "id": "255fde7b338979c75934edcd582cb6d6d4f2dc58",
+          "message": "prelude: AsRef, AsMut, Into, Borrow, BorrowMut, FromIterator declared\n\nA program's own `impl AsRef<str> for S` / `impl Into<i64> for W` /\n`impl FromIterator<T> for C` .. failed with \"cannot find trait\": the\ncompiler gives these traits their meaning for the std types itself and\nthe prelude had no declaration. They are now declared, and as the\noperator traits, selected only for a program that implements them.\n\ntests/ui: +6 passes (5 check-pass, 1 compile-fail);\nerror-codes/e0119/issue-27403.rs passed only through the missing\n`Into` and goes to rust_ui_accidental.txt.\nKPI: check +0.05%, traits check +0.02%, edit -0.02%.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-20T07:10:20Z",
+          "tree_id": "ea34024e95041e0339e9d3b472c75391e233bfb3",
+          "url": "https://github.com/mizchi/zust/commit/255fde7b338979c75934edcd582cb6d6d4f2dc58"
+        },
+        "date": 1795158892766,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tests/ui run-pass pass rate",
+            "value": 71.32,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui run-pass passing",
+            "value": 1701,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui check-pass pass rate",
+            "value": 78.69,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui check-pass passing",
+            "value": 1422,
             "unit": "tests"
           },
           {
