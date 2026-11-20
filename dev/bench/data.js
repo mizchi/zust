@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795136412454,
+  "lastUpdate": 1795136414598,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -66580,6 +66580,70 @@ window.BENCHMARK_DATA = {
           {
             "name": "tests/ui compile-fail passing",
             "value": 3340,
+            "unit": "tests"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "committer": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "distinct": true,
+          "id": "fab1fd3826a9b9add6735846c10913e1d1345fb5",
+          "message": "lint: deny(unused_imports) reports a top-level use nothing mentions\n\nWith `#![deny(unused_imports)]` (or `unused` / `warnings`), a top-level\n`use a::B;` / `use a::{B, C as D};` whose name (or alias) no other\nitem mentions is \"unused import: `B`\" at its line. Traits (std's usual\nones and the program's) are skipped, since method calls use them\nwithout naming them; globs, `as _`, cfg'd and allowed uses too.\n\ntests/ui: +3 genuine compile-fail passes; unresolved-imports-used.rs\nmatches only by line and goes to rust_ui_accidental.txt.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-20T00:54:49Z",
+          "tree_id": "4352fd0fb0ad6c296b63d6e02714c6c95eb06c1b",
+          "url": "https://github.com/mizchi/zust/commit/fab1fd3826a9b9add6735846c10913e1d1345fb5"
+        },
+        "date": 1795136414135,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tests/ui run-pass pass rate",
+            "value": 71.19,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui run-pass passing",
+            "value": 1698,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui check-pass pass rate",
+            "value": 78.42,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui check-pass passing",
+            "value": 1417,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui build-pass pass rate",
+            "value": 70.37,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui build-pass passing",
+            "value": 95,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui compile-fail pass rate",
+            "value": 45.46,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui compile-fail passing",
+            "value": 3345,
             "unit": "tests"
           }
         ]
