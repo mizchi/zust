@@ -200,6 +200,14 @@
     "docs_reports_2026-11-20-01-formal-fixes.ja": {
       "path": "docs/ja/reports/2026-11-20-01-formal-fixes.md",
       "role": "historical"
+    },
+    "docs_reports_2026-11-20-02-green-threads.en": {
+      "path": "docs/reports/2026-11-20-02-green-threads.md",
+      "role": "historical"
+    },
+    "docs_reports_2026-11-20-02-green-threads.ja": {
+      "path": "docs/ja/reports/2026-11-20-02-green-threads.md",
+      "role": "historical"
     }
   },
   "comparisons": [
@@ -476,6 +484,17 @@
       },
       "target": {
         "source": "docs_reports_2026-11-20-01-formal-fixes.ja"
+      }
+    },
+    {
+      "id": "docs_reports_2026-11-20-02-green-threads",
+      "topic": "The Japanese file docs/ja/reports/2026-11-20-02-green-threads.md is a faithful translation of docs/reports/2026-11-20-02-green-threads.md",
+      "mode": "translation",
+      "reference": {
+        "source": "docs_reports_2026-11-20-02-green-threads.en"
+      },
+      "target": {
+        "source": "docs_reports_2026-11-20-02-green-threads.ja"
       }
     }
   ]

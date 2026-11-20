@@ -397,7 +397,7 @@ the measured numbers. The [reports](docs/reports/) explain each step.
   `Duration`, `AtomicPtr`, `RangeTo` / `RangeFull` as types, `Fuse`, `iter::Empty`, `NonNull`, `Pin` (a plain pointer: `Pin::new`, `get_mut`, `into_inner`, deref), `std::task` (`Poll`, `Context`, `Waker::noop`) and the `Future` trait for futures implemented and polled by hand, `UnsafeCell`, `PhantomData`, atomics, `mpsc`, `mem::*`, `ptr::{read, write, drop_in_place, null}`,
   `iter::{repeat, once, empty, repeat_with, successors}`, `reverse` / `fill` / `rotate_left` / `rotate_right` on arrays and slices, formatting, stdin/stdout/fs/env/process basics
 - [ ] async / await: <!-- ui:async-await -->76.7%. It runs at once, with no executor (no `poll`, `Waker`, `Pin<Box<dyn Future>>`)
-- [ ] threads: <!-- ui:threads-sendsync -->66.7%. One thread: `thread::spawn` runs the closure at once
+- [ ] threads: <!-- ui:threads-sendsync -->66.7%. Green threads on one OS thread: each spawned thread has its own stack and runs until it waits (`join`, `recv`, a held `Mutex`, `sleep`, `yield_now`, an atomic `load`); no parallelism
 - [ ] iterators: <!-- ui:iterators -->47.1% (`iter::empty()` cannot infer its item from the target)
 - [ ] FFI: <!-- ui:abi -->14.3%. Scalars only, no structs by value
 - [ ] panics: <!-- ui:panics -->11.1%. A panic aborts: no unwinding, `catch_unwind`, `set_hook`
@@ -429,7 +429,7 @@ the measured numbers. The [reports](docs/reports/) explain each step.
 
 ### Large features not started
 
-- [ ] real concurrency (parallel threads, a blocking `Mutex`)
+- [ ] real concurrency (threads on several OS threads, in parallel: atomic `Arc` and atomics, a thread-safe runtime)
 - [ ] executors: `Future::poll`, `Waker`, `Pin<Box<dyn Future>>` (~25 tests)
 - [ ] unwinding: `catch_unwind`, panic hooks (~22 tests)
 - [ ] FFI: structs by value, other ABIs (~27 tests)

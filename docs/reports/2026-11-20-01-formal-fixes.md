@@ -2,7 +2,7 @@
 
 Date: 2026-11-20
 
-This fixes defects 1–4 of [report 2026-11-19-01](2026-11-19-01-formal-models.md). It also fixes a crash on circular modules that made CI's rust-ui job red (section 5). Each failure was reproduced by a test or a model before it was fixed. Each fix is one commit, with one row of KPIs (`bench/kpi_log.md`). Defect 5 (`std::thread::spawn` running the closure at once) is a design question and is left as it is.
+This fixes defects 1–4 of [report 2026-11-19-01](2026-11-19-01-formal-models.md). It also fixes a crash on circular modules that made CI's rust-ui job red (section 5). Each failure was reproduced by a test or a model before it was fixed. Each fix is one commit, with one row of KPIs (`bench/kpi_log.md`). Defect 5 (`std::thread::spawn` running the closure at once) is fixed in [report 2026-11-20-02](2026-11-20-02-green-threads.md).
 
 ## 1. Borrow checking: the fixpoint runs to its end
 
@@ -100,7 +100,7 @@ The KPIs are the four rows of 2026-11-20 in `bench/kpi_log.md`:
 
 ## What is left
 
-- Defect 5: `std::thread::spawn` runs the closure at once. Real threads would need `Arc` changed as the atomic version of `ArcDrop.tla` does.
+- Defect 5: fixed with green threads in [report 2026-11-20-02](2026-11-20-02-green-threads.md).
 - Allocation failure in `Box`.
 - A checksum for the cache. With a tmp file per process, a mixed file is no longer read, but a checksum is still needed to discard a file corrupted on disk.
 - The tmp name tells processes apart, not threads. Two `Cache2::save` calls running at once in one process would share it. zustc has no threads that save: one process saves its caches one after another, and the forked children of a workspace build have pids of their own, so this does not happen today, and `CacheSave.tla` models separate processes only.
