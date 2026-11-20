@@ -1,6 +1,7 @@
 ---------------------------- MODULE CacheSave ----------------------------
 (* Two zustc processes save the build cache at the same time.
-   Code: crates/typeck/src/cache2.rs `Cache2::save` (write `<path>.tmp`, then rename it over `<path>`) and
+   Code: crates/typeck/src/cache2.rs `Cache2::save` (write a tmp file, then rename it over `<path>`; src/stamp.rs
+   saves the stamps the same way) and
    `Cache2::open` (accepts a file whose header and lengths are in bounds; there is no checksum).
 
    A file is a sequence of cells. Writer w writes the cells <<w, 1>> .. <<w, Size[w]>>; cell 1 is the header, which
@@ -9,8 +10,10 @@
    A reader that finds the header and that many cells accepts the file: Integrity says that what it accepts is one
    writer's file.
 
-   SharedTmp = TRUE is the code as it is (one tmp name for every process). FALSE is the fix: a tmp name per process
-   (`<path>.<pid>.tmp`). *)
+   SharedTmp = FALSE is the code (CacheSave.cfg): a tmp name per process, `<path>.<pid>.tmp`.
+   SharedTmp = TRUE is the code before 2026-11-20 (CacheSaveShared.cfg): one tmp name for every process. Then B can
+   reopen A's tmp with O_TRUNC, A renames it, B goes on writing into what is now <path>, and a reader accepts B's
+   header with the rest of A's file: Integrity fails. *)
 EXTENDS Naturals, Sequences
 
 CONSTANTS SharedTmp

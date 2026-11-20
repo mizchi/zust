@@ -16,8 +16,8 @@ expect() { # expect <ok|violation> <spec.tla> <cfg>
 }
 if [ "${1:-all}" != kani ]; then
     cargo build --release --quiet --manifest-path tla-check/Cargo.toml || exit 1
-    expect violation CacheSave.tla CacheSave.cfg
-    expect ok        CacheSave.tla CacheSaveFixed.cfg
+    expect ok        CacheSave.tla CacheSave.cfg
+    expect violation CacheSave.tla CacheSaveShared.cfg
     expect ok        ForkPool.tla  ForkPool.cfg
     expect ok        ForkPool.tla  ForkPool3.cfg
     expect violation ForkPool.tla  ForkPoolCloseLate.cfg

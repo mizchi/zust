@@ -18,6 +18,8 @@ const MAGIC: &[u8; 8] = b"CRCD0001";
 unsafe extern "C" {
     #[link_name = "rename"]
     fn c_rename(old: *const u8, new: *const u8) -> i32;
+    #[link_name = "getpid"]
+    fn c_getpid() -> i32;
 }
 
 /// キャッシュファイル: MAGIC, エントリの数 (可変長), (キーの下位 64 bit, 長さ (可変長), 中身) *
@@ -130,6 +132,8 @@ impl Cache2 {
     }
 
     /// エントリを書く (一時ファイルに書いて rename)。書いたバイト数
+    /// (一時ファイルの名前はプロセスごと: 同じ出力に同時に保存する別の zustc が、rename した後のファイルに書き続けると、
+    ///  読む側が 2 つの書き込みの混ざったものを受け付けうる。formal/tla/CacheSave.tla)
     pub fn save(path: &std::path::Path, entries: &[(Key, &[u8])]) -> Result<usize, String> {
         let mut out = MAGIC.to_vec();
         put_uv(&mut out, entries.len() as u64);
@@ -137,13 +141,18 @@ impl Cache2 {
             out.extend_from_slice(&(*k as u64).to_le_bytes());
             put_bytes(&mut out, b);
         }
-        let tmp = format!("{}.tmp", path.display());
-        std::fs::write(&tmp, &out).map_err(|e| format!("{tmp}: {e}"))?;
+        // SAFETY: getpid は引数を取らず、失敗しない
+        let tmp = format!("{}.{}.tmp", path.display(), unsafe { c_getpid() });
+        if let Err(e) = std::fs::write(&tmp, &out) {
+            let _ = std::fs::remove_file(&tmp);
+            return Err(format!("{tmp}: {e}"));
+        }
         let a = format!("{tmp}\0");
         let b = format!("{}\0", path.display());
         // SAFETY: どちらも NUL で終わる文字列
         let r = unsafe { c_rename(a.as_bytes().as_ptr(), b.as_bytes().as_ptr()) };
         if r != 0 {
+            let _ = std::fs::remove_file(&tmp);
             return Err(format!("{}: rename failed", path.display()));
         }
         Ok(out.len())
@@ -322,4 +331,29 @@ pub fn decode_blob(d: &[u8], prog: &Program, insts: &Mutex<Insts>) -> Option<Blo
         l => Some(l as u32 - 1),
     };
     Some(Blob { align, code, relocs, datas, vtables, traps, line_base, code_ref: None })
+}
+
+#[cfg(test)]
+mod save_tests {
+    use super::Cache2;
+
+    /// save writes through a tmp file of this process's own and leaves none behind; open reads back what was saved.
+    /// (Two processes saving at once each rename their own complete file: formal/tla/CacheSave.tla)
+    #[test]
+    fn save_then_open() {
+        let dir = std::env::temp_dir().join(format!("cache2_save_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("p.crcache2");
+        // (a tmp file of the name every process used before: it is not ours, and is left alone)
+        std::fs::write(dir.join("p.crcache2.tmp"), b"partial").unwrap();
+        Cache2::save(&path, &[(1, b"one".as_slice()), (2, b"two".as_slice())]).unwrap();
+        let c = Cache2::open(&path);
+        assert_eq!(c.get(1), Some(b"one".as_slice()));
+        assert_eq!(c.get(2), Some(b"two".as_slice()));
+        let mut names: Vec<String> = std::fs::read_dir(&dir).unwrap().map(|e| e.unwrap().file_name().to_string_lossy().into_owned()).collect();
+        names.sort();
+        assert_eq!(names, ["p.crcache2", "p.crcache2.tmp"]);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }

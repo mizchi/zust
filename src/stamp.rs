@@ -108,8 +108,9 @@ pub fn save(file: &Path, key: &str, inputs: &[PathBuf], probes: &[PathBuf], outp
         out.push_str(s);
         out.push('\n');
     }
-    let tmp = file.with_extension("stamp.tmp");
-    if std::fs::write(&tmp, out).is_ok() {
-        let _ = std::fs::rename(&tmp, file);
+    // (a tmp name of this process's own: another zustc saving the same stamp must not write into the file we rename)
+    let tmp = file.with_extension(format!("stamp.{}.tmp", std::process::id()));
+    if std::fs::write(&tmp, out).is_err() || std::fs::rename(&tmp, file).is_err() {
+        let _ = std::fs::remove_file(&tmp);
     }
 }

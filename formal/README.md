@@ -9,7 +9,7 @@ Nothing here is part of the zust workspace or of the zustc build.
 
 | path | what | tool |
 |---|---|---|
-| `tla/CacheSave.tla` | two zustc processes saving the build cache (`Cache2::save`: write `<path>.tmp`, rename) and a reader (`Cache2::open`) | idealis |
+| `tla/CacheSave.tla` | two zustc processes saving the build cache (`Cache2::save`: write a tmp file of the process's own, rename) and a reader (`Cache2::open`) | idealis |
 | `tla/ForkPool.tla` | the fork/pipe worker pool of the driver: fork failure, a child dying mid-record, full pipes, inherited write ends | idealis |
 | `tla/ArcDrop.tla` | the prelude's `Arc` refcount if zustc had threads, against `fetch_sub` | idealis |
 | `kani-prelude/` | the prelude's `Vec<T>`, copied from `crates/syntax/src/prelude_lib.rs.in` by `build.rs`, over a model of `realloc` / `free` | Kani |
@@ -29,7 +29,9 @@ cargo install --locked kani-verifier && cargo kani setup
 formal/run.sh kani
 ```
 
-`run.sh` checks every result against what is expected: the configurations and harnesses that model the code as it is
-and have a bug (`CacheSave.cfg`, `ForkPoolCloseLate.cfg` (a counterfactual), `ArcDropPrelude.cfg`, `bug_*`) must find it,
-the others must pass. The TLA+ checks take milliseconds; the Kani harnesses take about 8 minutes and 5–10 GiB.
+`run.sh` checks every result against what is expected. Configurations that model a design zustc does not use (or
+no longer uses) must find its bug: `CacheSaveShared.cfg` (one tmp name for every process, as before 2026-11-20),
+`ForkPoolCloseLate.cfg` (closing the pipe write ends late), `ArcDropPrelude.cfg` (the prelude's `Arc` if there were
+threads). The others, and every Kani harness, must pass. The TLA+ checks take milliseconds; the Kani harnesses take
+about 8 minutes and 5–10 GiB.
 `formal/run.sh` with no argument also runs `cargo test -p zust-typeck props`.
