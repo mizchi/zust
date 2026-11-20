@@ -87,8 +87,8 @@ impl Cx<'_> {
             Expr::Path(_, p) => {
                 // (`m::S`: the static by its index; a local of the same name, `S`, is not it)
                 if let Some(ci) = self.static_of(e) {
-                    if self.prog.consts[ci as usize].stat == Some(true) && self.unsafe_ok == 0 && p.pos.line != 0 && self.raw_ref == 0 {
-                        return err(p.pos, "use of mutable static is unsafe and requires unsafe block (E0133)");
+                    if let Some(m) = self.unsafe_static_read(ci).filter(|_| self.unsafe_ok == 0 && p.pos.line != 0 && self.raw_ref == 0) {
+                        return err(p.pos, m);
                     }
                     let t = self.prog.consts[ci as usize].ty;
                     let a = self.static_sym(ci);
@@ -107,8 +107,8 @@ impl Cx<'_> {
                     None => match self.prog.const_index.get(id) {
                         // static はデータのアドレス
                         Some(&ci) if self.prog.consts[ci as usize].stat.is_some() => {
-                            if self.prog.consts[ci as usize].stat == Some(true) && self.unsafe_ok == 0 && p.pos.line != 0 && self.raw_ref == 0 {
-                                return err(p.pos, "use of mutable static is unsafe and requires unsafe block (E0133)");
+                            if let Some(m) = self.unsafe_static_read(ci).filter(|_| self.unsafe_ok == 0 && p.pos.line != 0 && self.raw_ref == 0) {
+                                return err(p.pos, m);
                             }
                             let t = self.prog.consts[ci as usize].ty;
                             let a = self.static_sym(ci);
@@ -2226,6 +2226,18 @@ impl Cx<'_> {
         r
     }
 
+    /// Why reading static ci needs `unsafe` (E0133): a `static mut`, or an extern block's static (foreign memory)
+    pub(crate) fn unsafe_static_read(&self, ci: u32) -> Option<&'static str> {
+        let c = &self.prog.consts[ci as usize];
+        if c.stat == Some(true) {
+            Some("use of mutable static is unsafe and requires unsafe block (E0133)")
+        } else if c.stat.is_some() && crate::parse::extern_static(&c.expr).is_some() {
+            Some("use of extern static is unsafe and requires unsafe block (E0133)")
+        } else {
+            None
+        }
+    }
+
     pub(crate) fn call(&mut self, c: &Expr, expected: Option<Ty>) -> R<V> {
         let Expr::Call(func, cargs) = c else { return err(SP, "internal: expected a call") };
         // (`f1(x)` after `let f1 = f;` (f generic): `f(x)`)
@@ -2252,11 +2264,14 @@ impl Cx<'_> {
                 match (p.segs[n - 2].name.as_str(), p.segs[n - 1].name.as_str()) {
                     ("Into", "into") if self.lookup("Into").is_none() => {
                         let e = self.keep_expr(mcall(x.clone(), "into", vec![]));
+                        self.explicit_traits.insert(e as *const Expr as usize, "Into".to_string());
                         return self.expr(e, expected);
                     }
                     ("From", "from") => {
                         let simple = |t: Ty| t.is_int() || t.is_float() || matches!(t, Ty::Bool | Ty::Char) || matches!(t, Ty::Struct(sid) if self.prog.structs[sid as usize].base.is_none());
-                        if let Some(t) = expected.filter(|&t| simple(t) && !self.prog.has_param(t)) {
+                        // (only when `T::from` is the From impl's: an inherent `from` of T would answer that path)
+                        let from_impl = |t: Ty| self.prog.index.get(&format!("{}::from", self.prog.tn(t))).is_some_and(|&i| self.prog.sigs[i as usize].impl_trait.as_deref().is_some_and(|tr| tr.starts_with("From")));
+                        if let Some(t) = expected.filter(|&t| simple(t) && !self.prog.has_param(t) && from_impl(t)) {
                             if let Ok(Expr::Path(None, tp)) = crate::parse::parse_expr(&format!("{}::from", self.prog.tn(t))) {
                                 let ne = self.keep_expr(Expr::Call(Box::new(Expr::Path(None, crate::parse::Path { pos: p.pos, ..tp })), cargs.clone()));
                                 return self.expr(ne, expected);

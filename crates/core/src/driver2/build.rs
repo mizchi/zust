@@ -1409,6 +1409,12 @@ fn static_fns(prog: &crate::program::Program, e: &crate::parse::Expr, out: &mut 
     }
     match e {
         Expr::Paren(x) | Expr::Ref(_, x) | Expr::Cast(x, _) => static_fns(prog, x, out, depth + 1),
+        // (a block of only its tail (`{ f }`), as the constant evaluation reads it)
+        Expr::Block(None, _, b) if b.stmts.len() == 1 => {
+            if let crate::parse::Stmt::Expr(x, false) = &b.stmts[0] {
+                static_fns(prog, x, out, depth + 1);
+            }
+        }
         Expr::Array(xs) | Expr::Tuple(xs) | Expr::Call(_, xs) => xs.iter().for_each(|x| static_fns(prog, x, out, depth + 1)),
         Expr::Struct(_, fs, _) => fs.iter().for_each(|f| static_fns(prog, &f.1, out, depth + 1)),
         _ => {}

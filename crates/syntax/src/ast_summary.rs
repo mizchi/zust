@@ -262,6 +262,31 @@ fn adt_bounds(g: &Generics) -> Vec<(String, Vec<String>)> {
             }
         }
     }
+    // (`where T: Tr`: the same, for a parameter named by a one-segment path)
+    for (t, bs) in &g.preds {
+        let PTy::Path(None, tp) = t else { continue };
+        if tp.segs.len() != 1 || !tp.segs[0].args.is_empty() {
+            continue;
+        }
+        let n = &tp.segs[0].name;
+        if !g.params.iter().any(|p| matches!(p, GParam::Ty(pn, ..) if pn == n)) {
+            continue;
+        }
+        let trs: Vec<String> = bs
+            .iter()
+            .filter_map(|b| match b {
+                Bound::Trait(false, bp) if bp.segs.len() == 1 && bp.segs[0].args.is_empty() && bp.segs[0].fn_args.is_none() => Some(bp.segs[0].name.clone()),
+                _ => None,
+            })
+            .collect();
+        if trs.is_empty() {
+            continue;
+        }
+        match v.iter_mut().find(|x| &x.0 == n) {
+            Some(e) => e.1.extend(trs),
+            None => v.push((n.clone(), trs)),
+        }
+    }
     v
 }
 
