@@ -161,3 +161,4 @@ date	commit	change	noop_M	edit_M	check_M	cache_KiB	lsp_G	run	check	build	cfail	t
 2026-11-20	6e8f085+	casts: arrays to slice pointers, integers and pointers; trivial_casts lints	0.697	547.827	3836.753	1902.8	-	1758	1453	97	3579	1165.301	63.550	10.296	316.745	696.935	263.043
 2026-11-20	e2e6525+	review fixes: casts, link_name placement, allow, lint levels in cache keys	0.695	548.284	3837.257	1902.8	-	1758	1453	97	3579	1166.630	63.643	10.283	316.728	696.876	262.946
 2026-11-20	534cbf2+	review: wide raw slice pointer to thin; trivial_casts on &[T; N] as &[T]; int to pointer guard	0.695	548.335	3837.408	1902.8	-	1758	1453	97	3579	1166.619	63.532	10.283	316.710	696.873	262.929
+2026-11-20	95989af+	closures whose body diverges: () as the return type	0.695	548.288	3837.248	1902.8	-	1760	1454	97	3580	1166.645	63.569	10.282	316.792	696.908	262.964
