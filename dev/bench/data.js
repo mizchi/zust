@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795144356444,
+  "lastUpdate": 1795144358167,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -57640,6 +57640,85 @@ window.BENCHMARK_DATA = {
           {
             "name": "parity 一致の平均",
             "value": 96.275,
+            "unit": "%"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "committer": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "distinct": true,
+          "id": "1e843fc07f54fb7351245f21767d92d5313d88ec",
+          "message": "E0432: a use whose first segment names nothing\n\nA `use a::..` item (top level, or in a module) whose first segment is\nnot std / core / proc_macro / a name of std's prelude, a dependency,\n`crate` / `self` / `super`, nor a module, item, `extern crate` or\n`as` name the original text defines (outside `//` comments) is\n\"unresolved import `a`\" at its line. The `use` items come from the\nitem split the build makes anyway, so a program without such a `use`\npays nothing (a first version that searched the whole text cost +0.5%\non the 1.6 MB check benchmark).\n\ntests/ui: +30 compile-fail passes (3404, 46.26%); four that match only\nby line go to rust_ui_accidental.txt.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-20T03:04:19Z",
+          "tree_id": "dd1a0b9f59359bce5471225595376cac8caaaa7d",
+          "url": "https://github.com/mizchi/zust/commit/1e843fc07f54fb7351245f21767d92d5313d88ec"
+        },
+        "date": 1795144357964,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "parity documentSymbol (名前の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity workspace/symbol (上位 20 の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity definition (行き先の一致)",
+            "value": 96.875,
+            "unit": "%"
+          },
+          {
+            "name": "parity hover (名前を含む)",
+            "value": 97.5,
+            "unit": "%"
+          },
+          {
+            "name": "parity references (数の一致)",
+            "value": 92.308,
+            "unit": "%"
+          },
+          {
+            "name": "parity documentHighlight (数の一致)",
+            "value": 96.97,
+            "unit": "%"
+          },
+          {
+            "name": "parity rename (書き換えの一致)",
+            "value": 93.75,
+            "unit": "%"
+          },
+          {
+            "name": "parity signatureHelp (名前・引数の数・今の引数の一致)",
+            "value": 94.444,
+            "unit": "%"
+          },
+          {
+            "name": "parity completion `x.\\|` (書いてある名前を含む)",
+            "value": 95,
+            "unit": "%"
+          },
+          {
+            "name": "parity completion `na\\|me` (同)",
+            "value": 86.207,
+            "unit": "%"
+          },
+          {
+            "name": "parity 一致の平均",
+            "value": 95.305,
             "unit": "%"
           }
         ]
