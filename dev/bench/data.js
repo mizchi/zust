@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795133271421,
+  "lastUpdate": 1795133273545,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -40060,6 +40060,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "lsp peak RSS",
             "value": 73.25,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "committer": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "distinct": true,
+          "id": "4a6120db4c3cb47ef7a8c9b8509f20c003993f47",
+          "message": "for loops over an Option or Result value\n\n`for x in Some(1) { .. }` / `for y in result { .. }` (and the existing\n`opt.iter()` / `.into_iter()` forms, now also for Result): lowered to\n`if let Some(x) = ..` / `if let Ok(y) = ..` (a one-turn loop when the\nbody breaks or continues), without the prelude's iterator types.\n\ntests/ui: no change in passes.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-19T23:58:49Z",
+          "tree_id": "9485af93797ebe205c5148b11d2b6f55dc32b203",
+          "url": "https://github.com/mizchi/zust/commit/4a6120db4c3cb47ef7a8c9b8509f20c003993f47"
+        },
+        "date": 1795133273033,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "lsp definition p50",
+            "value": 0.612,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp hover p50",
+            "value": 0.444,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp completion p50",
+            "value": 1.126,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp references p50",
+            "value": 3.466,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp rename p50",
+            "value": 0.795,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp signatureHelp p50",
+            "value": 0.931,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp documentHighlight p50",
+            "value": 0.823,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp ready (startup to indexed)",
+            "value": 127.067,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp peak RSS",
+            "value": 73.23,
             "unit": "MiB"
           }
         ]
