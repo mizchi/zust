@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795164839261,
+  "lastUpdate": 1795164841573,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -65008,6 +65008,85 @@ window.BENCHMARK_DATA = {
           {
             "name": "parity 一致の平均",
             "value": 96.237,
+            "unit": "%"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "committer": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "distinct": true,
+          "id": "9cc1886dec17eee904988eddfb95dd9035a4559a",
+          "message": "Fx maps in place of std HashMap / HashSet in the compiler\n\nprogram.rs, types.rs (the interning tables), macros.rs, prelude.rs and\ndriver2's checks used std's HashMap / HashSet: SipHash per lookup, and\na random seed per process, so their iteration order and the\ninstruction counts moved from one run to the next (the edit KPI's\nintermittent +0.15%). They are Fx maps now (deterministic, cheaper).\n\nKPI: traits check -1.82%, crates edit -1.27%, check -0.28%; edit one fn\ngives 559.731 on three runs in a row; LSP session 10.898 G (unchanged).\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-20T08:49:20Z",
+          "tree_id": "5f91e4533852ffa10c2dcc34f798015a81c666d2",
+          "url": "https://github.com/mizchi/zust/commit/9cc1886dec17eee904988eddfb95dd9035a4559a"
+        },
+        "date": 1795164841089,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "parity documentSymbol (名前の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity workspace/symbol (上位 20 の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity definition (行き先の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity hover (名前を含む)",
+            "value": 95,
+            "unit": "%"
+          },
+          {
+            "name": "parity references (数の一致)",
+            "value": 95,
+            "unit": "%"
+          },
+          {
+            "name": "parity documentHighlight (数の一致)",
+            "value": 97.143,
+            "unit": "%"
+          },
+          {
+            "name": "parity rename (書き換えの一致)",
+            "value": 93.75,
+            "unit": "%"
+          },
+          {
+            "name": "parity signatureHelp (名前・引数の数・今の引数の一致)",
+            "value": 94.737,
+            "unit": "%"
+          },
+          {
+            "name": "parity completion `x.\\|` (書いてある名前を含む)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity completion `na\\|me` (同)",
+            "value": 89.655,
+            "unit": "%"
+          },
+          {
+            "name": "parity 一致の平均",
+            "value": 96.528,
             "unit": "%"
           }
         ]
