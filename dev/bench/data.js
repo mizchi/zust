@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795135572108,
+  "lastUpdate": 1795135574498,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -40744,6 +40744,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "lsp peak RSS",
             "value": 72.965,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "committer": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "distinct": true,
+          "id": "00f1a60309370b7aa317cb638f36a244a068f17f",
+          "message": "lint: deny(dead_code) reports the first unused top-level item\n\nWith `#![deny(dead_code)]` (or `unused` / `warnings`; not under\n`allow` / `expect(dead_code)`), the program's top-level fns, structs,\nenums, consts, statics and traits are checked before building: an item\nwhose name appears nowhere but in its own definition and in `impl`\nheaders is \"function `f` is never used\" / \"struct `S` is never\nconstructed\" / .. at its line. `pub` items count as used unless the\nbinary denies dead_code_pub_in_binary; `main`, `_names`, `#[test]`,\n`no_mangle`, derives and cfg'd items are skipped.\n\ntests/ui: +13 compile-fail passes; lint/issue-17718-const-naming.rs\nmatches only by line (it expects the naming lint) and goes to\nrust_ui_accidental.txt.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-20T00:41:48Z",
+          "tree_id": "c23685c18c8785714c27204a7abe5c89062dcf6d",
+          "url": "https://github.com/mizchi/zust/commit/00f1a60309370b7aa317cb638f36a244a068f17f"
+        },
+        "date": 1795135574083,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "lsp definition p50",
+            "value": 0.6,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp hover p50",
+            "value": 0.426,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp completion p50",
+            "value": 0.937,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp references p50",
+            "value": 3.751,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp rename p50",
+            "value": 0.537,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp signatureHelp p50",
+            "value": 0.581,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp documentHighlight p50",
+            "value": 0.806,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp ready (startup to indexed)",
+            "value": 122.922,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp peak RSS",
+            "value": 72.855,
             "unit": "MiB"
           }
         ]
