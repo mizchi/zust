@@ -17,7 +17,7 @@ The work found five defects:
 4. The cache's temporary file name is shared by every process, so a mixed file can be accepted.
 5. `std::thread::spawn` runs the closure at once, which differs from rustc's semantics.
 
-zustc's code is not changed here. Each section gives a proposed fix.
+zustc's code is not changed here. Each section gives a proposed fix. Defects 1–4 were fixed the next day: [2026-11-20-01](2026-11-20-01-formal-fixes.md).
 
 ## Prior work
 

@@ -1,6 +1,6 @@
 {
   "schema": "jev-lint-documents-1",
-  "snapshotDigest": "81405e8506542f6791ef0048f9d0bd89f15d5d414520fe73b7c27f6672d7be40",
+  "snapshotDigest": "40bcdbab98a233b35f77400cf0e253172e8140d1626b956f6d924e9e59ced816",
   "questionDigest": "209d6df378ccb747fcb0e821998fcd6105bc76638a88d22488d3b398d6a21595",
   "model": "jev-1.14.0",
   "snapshotChanged": false,
@@ -66,10 +66,10 @@
       "contextHash": "7c7b286af72e5d19978bdcefe4ac1812afb0557f682df47ae767fa9324a36f5c",
       "judgment": {
         "choice": "supports",
-        "confidence": 0.99,
+        "confidence": 1,
         "probabilities": {
-          "supports": 0.99,
-          "contradicts": 0.01,
+          "supports": 1,
+          "contradicts": 0,
           "unrelated": 0,
           "insufficient_context": 0
         }
@@ -100,10 +100,10 @@
       "contextHash": "a068452334ef52150a1932e9d45207a4c156e3a5c60d69e061e986b1aa86d889",
       "judgment": {
         "choice": "supports",
-        "confidence": 0.95,
+        "confidence": 0.96,
         "probabilities": {
-          "supports": 0.96,
-          "contradicts": 0.03,
+          "supports": 0.97,
+          "contradicts": 0.02,
           "unrelated": 0,
           "insufficient_context": 0.01
         }
@@ -168,10 +168,10 @@
       "contextHash": "ecee8f597e8c6093bcea35ffd84dafe505685fb3c77901bd2a2a9e033883360c",
       "judgment": {
         "choice": "supports",
-        "confidence": 0.99,
+        "confidence": 1,
         "probabilities": {
-          "supports": 0.99,
-          "contradicts": 0.01,
+          "supports": 1,
+          "contradicts": 0,
           "unrelated": 0,
           "insufficient_context": 0
         }
@@ -236,12 +236,12 @@
       "contextHash": "68facf70966b576a1dde106a31fd37de8e21bda46e6439878b91e7bce57154b6",
       "judgment": {
         "choice": "supports",
-        "confidence": 0.96,
+        "confidence": 0.97,
         "probabilities": {
-          "supports": 0.97,
+          "supports": 0.98,
           "contradicts": 0.02,
           "unrelated": 0,
-          "insufficient_context": 0.01
+          "insufficient_context": 0
         }
       }
     },
@@ -338,10 +338,10 @@
       "contextHash": "b91a1cf01d33b66ef15111899d22ac963d6abc38c4242e6d72ebc80aefe2aecd",
       "judgment": {
         "choice": "supports",
-        "confidence": 0.99,
+        "confidence": 1,
         "probabilities": {
-          "supports": 0.99,
-          "contradicts": 0.01,
+          "supports": 1,
+          "contradicts": 0,
           "unrelated": 0,
           "insufficient_context": 0
         }
@@ -372,12 +372,12 @@
       "contextHash": "65d03eec8a642fb4c59c7bacc74397f936864091105bba631e8977b9ca9c1612",
       "judgment": {
         "choice": "supports",
-        "confidence": 0.99,
+        "confidence": 0.95,
         "probabilities": {
-          "supports": 0.99,
-          "contradicts": 0.01,
+          "supports": 0.96,
+          "contradicts": 0.03,
           "unrelated": 0,
-          "insufficient_context": 0
+          "insufficient_context": 0.01
         }
       }
     },
@@ -440,10 +440,10 @@
       "contextHash": "d77f2024ffc7a01c94e005a23cd8538534ebb4abb40df15020d2f6eb96f550b6",
       "judgment": {
         "choice": "supports",
-        "confidence": 1,
+        "confidence": 0.99,
         "probabilities": {
-          "supports": 1,
-          "contradicts": 0,
+          "supports": 0.99,
+          "contradicts": 0.01,
           "unrelated": 0,
           "insufficient_context": 0
         }
@@ -610,10 +610,10 @@
       "contextHash": "60cba8f9920a12369db8088d9da4aba7831509e04aeed3ec12052847209a00f4",
       "judgment": {
         "choice": "supports",
-        "confidence": 1,
+        "confidence": 0.99,
         "probabilities": {
-          "supports": 1,
-          "contradicts": 0,
+          "supports": 0.99,
+          "contradicts": 0.01,
           "unrelated": 0,
           "insufficient_context": 0
         }
@@ -644,10 +644,10 @@
       "contextHash": "1275e8de4d291bc21dd7f5b87a5196cba9cca33005a1ac6eca77fa3d0892971e",
       "judgment": {
         "choice": "supports",
-        "confidence": 0.96,
+        "confidence": 0.97,
         "probabilities": {
-          "supports": 0.97,
-          "contradicts": 0.03,
+          "supports": 0.98,
+          "contradicts": 0.02,
           "unrelated": 0,
           "insufficient_context": 0
         }
@@ -678,10 +678,10 @@
       "contextHash": "f1894d506a5e66f92906b403c8a6a69c60e6e1bad8273b43b0489836c39d482f",
       "judgment": {
         "choice": "supports",
-        "confidence": 0.97,
+        "confidence": 0.99,
         "probabilities": {
-          "supports": 0.98,
-          "contradicts": 0.02,
+          "supports": 0.99,
+          "contradicts": 0.01,
           "unrelated": 0,
           "insufficient_context": 0
         }
@@ -746,12 +746,12 @@
       "contextHash": "74cd923d61e00b7739f80b534b652a909070bb949bfb007a464579050da1d263",
       "judgment": {
         "choice": "supports",
-        "confidence": 0.97,
+        "confidence": 0.99,
         "probabilities": {
-          "supports": 0.98,
+          "supports": 0.99,
           "contradicts": 0.01,
           "unrelated": 0,
-          "insufficient_context": 0.01
+          "insufficient_context": 0
         }
       }
     },
@@ -780,20 +780,88 @@
       "contextHash": "54b56e94027819b91287b9766c4872faa76c4344146540b341b4389c6b8dd7ce",
       "judgment": {
         "choice": "supports",
-        "confidence": 0.95,
+        "confidence": 0.92,
         "probabilities": {
-          "supports": 0.96,
-          "contradicts": 0.03,
+          "supports": 0.94,
+          "contradicts": 0.05,
           "unrelated": 0,
           "insufficient_context": 0.01
+        }
+      }
+    },
+    {
+      "id": "docs_reports_2026-11-19-01-formal-models",
+      "topic": "The Japanese file docs/ja/reports/2026-11-19-01-formal-models.md is a faithful translation of docs/reports/2026-11-19-01-formal-models.md",
+      "mode": "translation",
+      "reference": {
+        "source": "docs_reports_2026-11-19-01-formal-models.en",
+        "path": "docs/reports/2026-11-19-01-formal-models.md",
+        "startLine": 1,
+        "endLine": 169,
+        "quote": "# Formal models and bounded proofs: borrow checking, the thread model, the allocator\n\nDate: 2026-11-19\n\nThis report formalizes three important parts of zustc: borrow checking, concurrency, and the memory management of `Vec`. It uses two tools:\n\n- [idealis](https://github.com/mizchi/idealis): finite TLA+ model checking in Rust, through rtla → rtla-compiler → rtlc.\n- [Kani](https://github.com/model-checking/kani): bounded model checking of Rust code with CBMC.\n\nThe models and harnesses are in [formal/](../../formal/README.md), and `formal/run.sh` runs them again.\n\nThe work found five defects:\n\n1. The borrow checker, when it stops its fixpoint at a round limit, accepts the program as error-free.\n2. The capacity computation of `Vec::with_capacity` overflows, so safe code corrupts the heap.\n3. A failed `realloc` (null) is not checked.\n4. The cache's temporary file name is shared by every process, so a mixed file can be accepted.\n5. `std::thread::spawn` runs the closure at once, which differs from rustc's semantics.\n\nzustc's code is not changed here. Each section gives a proposed fix. Defects 1–4 were fixed the next day: [2026-11-20-01](2026-11-20-01-formal-fixes.md).\n\n## Prior work\n\n| area | prior work | how it is used here |\n|---|---|---|\n| borrow checking | [Wu, Wang, Chen: Verified Implementation of the Next-gen Borrow Checking Algorithm for Rust via Abstract Interpretation (arXiv 2611.06319, 2026)](https://arxiv.org/abs/2611.06319) states Polonius as forward abstract interpretation and proves it sound in Rocq | the closest to zustc's design (a forward analysis over the CFG, one origin per local); a template for stating the domain's lattice and monotonicity |\n| | [RustCompCert (arXiv 2602.07455, 2026)](https://arxiv.org/abs/2602.07455) implements Polonius as Kildall-style transfer functions and proves the domain a semilattice | a template for proving that the fixpoint is well defined and terminates; the lattice checks in this report are a finite version of it |\n| | [Polonius rules](https://rust-lang.github.io/polonius/), [Oxide (arXiv 1903.00982)](https://arxiv.org/abs/1903.00982), RustBelt (POPL 2018) | the specification; candidate oracles for differential testing on small CFGs |\n| threads | RustBelt's Send/Sync, RbRlx (POPL 2020), [RustMC / GenMC (arXiv 2502.06293)](https://arxiv.org/abs/2502.06293), Loom, Shuttle | Kani handles sequential code only ([the Kani paper, arXiv 2607.01504](https://arxiv.org/abs/2607.01504), and its documentation), so concurrency is done in TLA+ |\n| builds and caches | Build systems à la carte (ICFP 2018), [Forward Build Systems, Formally (CPP 2022)](https://arxiv.org/abs/2202.05328), [CloudMake (FM 2014)](https://www.microsoft.com/en-us/research/wp-content/uploads/2014/05/krml235.pdf) | correctness means \"what comes from the cache is what a rebuild would make\"; no TLA+ model of a fork/pipe worker pool, or of how a content-addressed cache is saved, was found |\n| allocators | [verify-rust-std](https://github.com/model-checking/verify-rust-std) (challenge 19, RawVec, solved with VeriFast; 23/24, Vec, open), [RefinedRust (PLDI 2024)](https://plv.mpi-sws.org/refinedrust), [verified-memory-allocator (Verus)](https://github.com/verus-lang/verified-memory-allocator), Gillian-Rust (PLDI 2025) | verify-rust-std's harnesses for out-of-bounds accesses, invalid derefs and uninitialized reads are the template for the prelude's `Vec` |\n| linking spec and code | quint-connect, tla-connect, Using Lightweight Formal Methods to Validate a Key-Value Storage Node in Amazon S3 (SOSP 2021) | the next step (replaying the spec's traces against the implementation) |\n\nThe survey checked the URL and abstract of each entry. RustBelt, RbRlx, Build systems à la carte and the S3 paper are well-known works, cited from memory.\n\n## 1. Borrow checking (the lifetime analysis)\n\nThe analysis of [report 08](2026-11-18-08-borrow-checking.md) is a worklist fixpoint that grows the state at each block's entry with `State::join`. For it to be right, the lattice operations need the following properties:\n\n- The sorted sets stay sorted and without duplicates (`binary_search` relies on this).\n- The result of a join is exactly the union of both sides.\n- Whenever the state changes as a set, the join reports a change.\n- Joining the same thing again changes nothing, so the loop stops.\n- The place order (`prefix`) is reflexive, transitive and antisymmetric, and `overlap` is symmetric.\n\n`crates/typeck/src/acg/borrowck_props.rs` checks this exhaustively over a small universe (`cargo test -p zust-typeck props`, 0.04 s):\n\n- `add_sorted` is tried with every set over 0..6 and every value.\n- `join` is tried with every pair of values of each of its five parts, over 10,000 pairs.\n  - `join` handles each part in its own loop, and its change flag is the or of the parts. So enumerating each part covers the whole.\n  - For holds, the values include a local that is absent, a local whose set is empty, and locals in reverse order.\n- The place order is tried on every pair and every triple of paths of length up to 2.\n\nEverything holds.\n\nThese checks were first written as Kani harnesses. CBMC ran out of memory (about 15 GiB, while converting to propositional form) on a single `insert` at a symbolic index into a `Vec<u32>` of 4 elements. The same function in a crate of its own did the same. Kani does not suit properties of values such as `State`, which nest `Vec`s.\n\n**Defect 1: stopping the fixpoint misses errors.** `Bk::check` returns `None` (no error) once the worklist has run more than `50 * blocks + 1000` rounds. The comment says \"should not happen: the states only grow\".\n\n- Termination itself holds: join is monotone, and the lattice has finite height.\n- The number of rounds, though, grows with the product of the lattice height and the number of blocks. The limit is proportional to the number of blocks alone.\n- To reproduce, run `formal/repro/borrowck_rounds.py K`. It shifts K references by one step in a loop, in reverse order, so each round moves the loan one step. Then it writes `x = 1`.\n  - rustc reports E0506 for every K.\n  - zustc finds the error up to K = 259, and from K = 260 on misses it and accepts the program.\n\nProposed fixes:\n\n- Replace the limit with a provable bound, `n * (H + 1) + 1`. H is the lattice height: moved places + locals + loans × (locals + 2).\n- Or, when the limit is exceeded, report an error instead of accepting.\n- A reverse-postorder worklist would also lower the number of rounds.\n\n## 2. The thread model\n\n### zustc's runtime\n\nThe prelude's `std::thread::spawn` runs the closure at once. `Arc` is the same as `Rc`, and atomics are plain cells. With one thread, `Arc`'s reference count is safe, but the semantics differ in two ways (`formal/repro/`):\n\n- `thread_spawn_channel.rs`: the child calls `rx.recv()` and the parent sends after the spawn. rustc prints `child got 42`. With zustc, the child calls `recv` on an empty channel, gets `Err`, and panics. Running the child at once is only one of Rust's schedules. It does not hold when the child waits for something the parent does after the spawn.\n- `thread_spawn_mutex.rs`: the parent spawns while it holds a lock, and the child locks too. With rustc the child waits until the parent unlocks. With zustc the child takes the lock anyway and prints 1. The output is the same, but mutual exclusion is broken (`Mutex` does not block).\n\n`formal/tla/ArcDrop.tla` is the check to pass before real threads come in. Two threads each drop a clone.\n\n- With the prelude's `strong -= 1; if strong == 0 { free }` (a separate load and store), rtlc finds a counterexample in 7 steps. The store of a clone is overwritten by the store of a drop, and the box is freed while a clone is still held (use after free).\n- With `fetch_sub(1) == 1`, the whole state space passes. This assumes sequential consistency: the Release/Acquire argument belongs to RbRlx and is outside the model.\n\n### The compiler's own concurrency\n\nzustc uses no threads. What runs concurrently is the forked child processes, and other zustc processes running at the same time on the same output.\n\n`formal/tla/ForkPool.tla` (driver2.rs's summaries, and build.rs's functions and crates) models what can happen:\n\n- fork fails;\n- a child dies at any point, or its write stops in the middle of a record (a signal, a short write);\n- a writer waits while its pipe is full;\n- a child inherits every pipe write end the parent holds at the time of the fork.\n\nOn top of that it checks three things: the values the parent takes are right (NoWrongValue), every item is right at the end (Correct), and there is no deadlock.\n\n- With the code's order (the parent closes the write end of pipe k right after forking child k), these hold for 2 children and 4 items (257 states) and for 3 children and 6 items (1862 states).\n- As a control, the model also checks a version that closes the write ends only after forking every child. Child 2 holds pipe 1's write end while it waits for room in pipe 2, and the parent waits for EOF on pipe 1. rtlc finds this deadlock in 6 steps. This confirms that the code avoids exactly this trap.\n\n**Defect 4: saving the cache.** See `formal/tla/CacheSave.tla`. `Cache2::save` writes `<path>.tmp` and then renames it. `Cache2::open` accepts a file whose header and lengths are in bounds; there is no checksum. When two zustc processes save to the same output at the same time (a build and a `zustc check` side by side, for example), this can happen:\n\n- Since the tmp name is the same, B reopens A's half-written tmp with O_TRUNC.\n- After A renames it, B keeps writing into that file, which is now `<path>`.\n- A reader can accept a file that is structurally valid but mixes B's header with the rest of A's file. rtlc gives an 8-step counterexample.\n- An entry then has B's key and contents partly made of A's bytes, so wrong machine code could come out of the cache.\n- B's rename also fails, which only gives a warning.\n\nThe window is narrow, but POSIX allows it. With a tmp name per process (`<path>.<pid>.tmp`), the whole state space passes (72 states). A checksum in the saved file would also let a torn read be discarded.\n\nReading the code also confirmed the following (not in the model):\n\n- `read_all` and `write_all` also stop on EINTR. Both fall back to the parent rebuilding the item, so the result is right; it is only slower.\n- When fork or pipe fails during build.rs's function compilation, it returns `Err` without waiting for the children already forked.\n\n## 3. The allocator (the prelude's `Vec`)\n\nThe `build.rs` of `formal/kani-prelude` copies `Vec<T>`, 16 of its methods and its `Drop` from `crates/syntax/src/prelude_lib.rs.in` as they are. The harnesses therefore check the code zustc compiles, and follow the prelude when it changes.\n\nWhat zustc supplies is modelled:\n\n- `realloc` / `free` are a model in which a block knows its size. `realloc` copies `min(old, new)` bytes and, when allowed, returns null.\n- `__exr_drop_in_place` is the drop of T.\n\nWhat is verified (up to capacity 4, from any state reached by `with_capacity(0..4)` followed by 0..3 pushes):\n\n- `push`, `pop`, `insert` (positions 0/1/2, one harness each), `remove`, `swap_remove`, `truncate` and `reverse` each give the same contents as an array reference model.\n- `len <= cap` holds.\n- Nothing outside the allocated range is touched (Kani's pointer checks).\n- The drop frees every block.\n- `drops_each_element_once`: after any operation, every element is dropped exactly once.\n\nWhat was found:\n\n- **Defect 2:** `bug_with_capacity_overflow`. `reserve`'s `c * size_of::<T>()` (and `len + extra`) can overflow.\n  - The block is then small while `cap` stays large, and a push writes outside the block.\n  - `formal/repro/vec_capacity_overflow.rs` (`Vec::<u64>::with_capacity(1 << 61)` followed by pushes) is a segmentation fault with zustc. rustc panics with \"capacity overflow\".\n  - This is heap corruption in safe code. The proposed fix is `checked_add` / `checked_mul`, with a panic on failure.\n- **Defect 3:** `bug_alloc_failure_unchecked`. When `realloc` returns null, `reserve` uses it anyway and a push writes through null. std aborts in `handle_alloc_error`.\n\nLimits of Kani here:\n\n- With std's `Vec` as the reference model, CBMC ran out of memory, so a fixed-size array is used instead.\n- `insert` at a symbolic index also ran out of memory, so it is split into one harness per position.\n- The proofs are bounded, up to capacity 4. Any length would need Kani's loop contracts (`-Z loop-contracts`) or deductive verification such as Verus or RefinedRust.\n\n## Running again\n\n```bash\nformal/run.sh tla\n```\n\n```bash\nformal/run.sh kani\n```\n\n```bash\ncargo test -p zust-typeck props\n```\n\nEach of the 7 TLA+ configurations takes about 1 ms. The 12 Kani harnesses take about 8 minutes (10 are verified, and the 2 `bug_*` harnesses fail as expected) and 5–10 GiB. idealis is pinned by git rev (89f54a9).\n\n## Next steps\n\n- Fix defects 1–4: a provable bound for the borrow checker, overflow and null checks in `Vec`, and a per-process tmp name for the cache.\n- Differential testing of the borrow checker. Generate every small CFG and event list, and compare against a reference that applies the Polonius rules path by path. Where gen/kill is distributive, the meet over all paths (MOP) should equal the fixpoint (MFP).\n- Linking the specs to the code. Replay the traces of ForkPool / CacheSave against the real driver2, as quint-connect does, with idealis's Driver / `idealis-testing`.\n- Before threads come in, `ArcDrop.tla` must pass with the atomic version, and `spawn` must stop running the closure at once.",
+        "contentHash": "eadc358f04b6fc86094ec04195531959c54e766b5fc74a4ba864e79f432a5311"
+      },
+      "target": {
+        "source": "docs_reports_2026-11-19-01-formal-models.ja",
+        "path": "docs/ja/reports/2026-11-19-01-formal-models.md",
+        "startLine": 1,
+        "endLine": 164,
+        "quote": "# 形式モデルと有界な証明: 借用検査・スレッドモデル・アロケータ\n\nDate: 2026-11-19\n\nzustc の重要な部分（借用検査、並行性、`Vec` のメモリ管理）を、[idealis](https://github.com/mizchi/idealis)（TLA+ の有限モデル検査を Rust で行う: rtla → rtla-compiler → rtlc）と [Kani](https://github.com/model-checking/kani)（CBMC による Rust の有界モデル検査）で形式化した。モデルとハーネスは [formal/](../../../formal/README.md) にあり、`formal/run.sh` で再実行できる。\n\nこの作業で、次の 5 つの欠陥が見つかった。\n\n1. 借用検査が不動点の回数上限で打ち切ると、誤りなしとして受け付ける。\n2. `Vec::with_capacity` の容量計算が桁あふれし、安全なコードがヒープを壊す。\n3. `realloc` の失敗（null）を検査していない。\n4. キャッシュの一時ファイル名を全プロセスで共有しているため、混ざったファイルを受け付けうる。\n5. `std::thread::spawn` を即時実行にしているので、意味が rustc と違う。\n\nzustc のコードは変えていない（修正案は各節にある）。欠陥 1〜4 は翌日に直した: [2026-11-20-01](2026-11-20-01-formal-fixes.md)。\n\n## 先行研究\n\n| 分野 | 先行研究 | ここでの使い方 |\n|---|---|---|\n| 借用検査 | [Wu, Wang, Chen: Verified Implementation of the Next-gen Borrow Checking Algorithm for Rust via Abstract Interpretation (arXiv 2611.06319, 2026)](https://arxiv.org/abs/2611.06319): Polonius を前向きの抽象解釈として定式化し、Rocq で健全性を証明 | zustc の設計（CFG 上の前向き解析、origin はローカル変数ごとに 1 つ）に最も近い。領域の束と単調性を述べる型紙 |\n| | [RustCompCert (arXiv 2602.07455, 2026)](https://arxiv.org/abs/2602.07455): Polonius を Kildall の枠組みの transfer 関数として実装し、領域が半束であることを証明 | 不動点が定義され停止することの証明の型紙。本報告の束の検査はその有限版 |\n| | [Polonius の規則](https://rust-lang.github.io/polonius/)、[Oxide (arXiv 1903.00982)](https://arxiv.org/abs/1903.00982)、RustBelt (POPL 2018) | 参照する仕様。小さな CFG での差分テストのオラクルの候補 |\n| スレッド | RustBelt の Send/Sync、RbRlx (POPL 2020)、[RustMC / GenMC (arXiv 2502.06293)](https://arxiv.org/abs/2502.06293)、Loom、Shuttle | Kani は逐次実行だけを扱う（[Kani の論文 arXiv 2607.01504](https://arxiv.org/abs/2607.01504) とドキュメント）。そのため並行性は TLA+ で扱う |\n| ビルドとキャッシュ | Build systems à la carte (ICFP 2018)、[Forward Build Systems, Formally (CPP 2022)](https://arxiv.org/abs/2202.05328)、[CloudMake (FM 2014)](https://www.microsoft.com/en-us/research/wp-content/uploads/2014/05/krml235.pdf) | 「キャッシュから読んだ結果は、作り直した結果と同じ」が正しさの定義。fork/pipe のワーカーや、内容でアドレスするキャッシュの保存手順を TLA+ で書いた例は見つからなかった |\n| アロケータ | [verify-rust-std](https://github.com/model-checking/verify-rust-std)（challenge 19: RawVec は VeriFast で解決済み、23/24: Vec は未解決）、[RefinedRust (PLDI 2024)](https://plv.mpi-sws.org/refinedrust)、[verified-memory-allocator (Verus)](https://github.com/verus-lang/verified-memory-allocator)、Gillian-Rust (PLDI 2025) | verify-rust-std の境界外アクセス・不正な deref・未初期化読み出しのハーネスを、prelude の `Vec` 用の型紙にした |\n| 仕様と実装の接続 | quint-connect、tla-connect、Using Lightweight Formal Methods to Validate a Key-Value Storage Node in Amazon S3 (SOSP 2021) | 次の一手（仕様のトレースを実装で再生する） |\n\n調査では、各文献の URL と要旨を確かめた。RustBelt・RbRlx・Build systems à la carte・S3 の論文は、よく知られた文献として記憶から挙げた。\n\n## 1. 借用検査（ライフタイムの解析）\n\n[報告 08](2026-11-18-08-borrow-checking.md) の解析は、ブロックの入口の状態を `State::join` で大きくしていく worklist 不動点である。これが正しいには、束の演算について次が成り立つ必要がある。\n\n- ソート済みの集合が、ソート済みで重複なしのまま保たれる（`binary_search` がそれを前提にしている）。\n- join の結果がちょうど両辺の和集合になる。\n- 集合として変わったときは、必ず「変わった」と報告する。\n- 同じものをもう一度 join しても何も変わらない（ループが止まる）。\n- 場所の順序（`prefix`）が反射的・推移的・反対称であり、`overlap` が対称である。\n\n`crates/typeck/src/acg/borrowck_props.rs` は、これを小さな宇宙で全数検査する（`cargo test -p zust-typeck props`、0.04 秒）。\n\n- `add_sorted` は、0..6 のすべての集合とすべての値で調べる。\n- `join` は、5 つの成分それぞれのすべての値の組で調べる（1 万組以上）。\n  - `join` は成分ごとに独立したループで、変更の印はその論理和なので、成分ごとの全数で全体を覆う。\n  - holds では、局所変数がない場合・空の場合・順序が逆の場合も含める。\n- 場所の順序は、長さ 2 までのすべての経路の組と 3 つ組で調べる。\n\nすべて成り立った。\n\n最初はこれを Kani で書いた。しかし CBMC は、要素 4 個の `Vec<u32>` に記号的な位置で `insert` するだけでメモリを使い切った（約 15 GiB、命題への変換の段階）。同じ関数を単独の crate に移しても同じだった。`State` のように `Vec` を入れ子にした値の性質には、Kani は向かなかった。\n\n**欠陥 1: 不動点の打ち切りが誤りを見逃す。** `Bk::check` は worklist の回数が `50 * ブロック数 + 1000` を超えると `return None`（誤りなし）を返す。コメントには「起きないはず: 状態は大きくなるだけ」とある。\n\n- 停止すること自体は正しい。join は単調で、束の高さは有限だからである。\n- しかし回数は、束の高さとブロック数の積で増える。上限はブロック数にしか比例しない。\n- 再現は `formal/repro/borrowck_rounds.py K` で行う。K 個の参照をループの中で逆順に 1 つずつずらすと、1 周ごとにローンが 1 段進む。その後で `x = 1` と書く。\n  - rustc はどの K でも E0506 を出す。\n  - zustc は K = 259 までは見つけ、K = 260 からは見逃して受け付ける。\n\n修正案:\n\n- 上限を、束の高さ H（ムーブした場所・ローカル変数・ローン × (ローカル変数 + 2) の個数）を使った、証明できる上限 `n * (H + 1) + 1` に変える。\n- または上限を超えたら受け付けずに誤りにする。\n- 逆後順（reverse postorder）の worklist にすれば、回数自体も減る。\n\n## 2. スレッドモデル\n\n### zustc の実行時\n\nprelude の `std::thread::spawn` は、クロージャをその場で実行する。`Arc` は `Rc` と同じで、atomic はただのセルである。スレッドが 1 本なので `Arc` の参照数は安全だが、意味の違いが 2 つある（`formal/repro/`）。\n\n- `thread_spawn_channel.rs`: 子が `rx.recv()` し、親が spawn の後で `send` する。rustc は `child got 42` を出す。zustc では、子が空のチャネルで `recv` するので `Err` になり、panic する。即時実行は Rust の実行順の 1 つでしかない。子が、親が spawn の後に行うことを待つと成り立たない。\n- `thread_spawn_mutex.rs`: 親がロックを持ったまま spawn し、子もロックする。rustc は親が解放するまで待つ。zustc では子がそのままロックを取り、1 を出す。結果は同じだが、相互排他は破られている（`Mutex` はブロックしない）。\n\n`formal/tla/ArcDrop.tla` は、本物のスレッドを入れる前に通すべき検査である。2 スレッドがそれぞれ clone を drop する。\n\n- prelude の今の `strong -= 1; if strong == 0 { free }`（読みと書きが別）では、rtlc が 7 手で反例を出した。clone の書き込みが drop の書き込みに上書きされ、clone をまだ持っているのに解放される（use after free）。\n- `fetch_sub(1) == 1` では全探索で成り立つ（逐次一貫性の下。Release/Acquire の議論は RbRlx の範囲で、このモデルの外）。\n\n### コンパイラ自身の並行性\n\nzustc はスレッドを使わない。並行して走るのは、fork した子プロセスと、同じ出力に対して同時に走る別の zustc プロセスである。\n\n`formal/tla/ForkPool.tla`（driver2.rs の要約、build.rs の関数とクレート）は、次の起こりうることをモデル化した。\n\n- fork の失敗。\n- 子がどこでも死ぬこと、またはレコードの途中で書き込みが止まること（シグナル、短い write）。\n- pipe が満杯なら、書く側が待つこと。\n- 子は、fork の時点で親が持っている pipe の書き込み端をすべて受け継ぐこと。\n\nその上で、親が受け取る値が正しいこと（NoWrongValue）、最後にすべての項目が正しいこと（Correct）、デッドロックがないことを検査した。\n\n- 今のコードの順序（子 k を fork した直後に、親が pipe k の書き込み端を閉じる）では、子 2 人・項目 4（257 状態）でも、子 3 人・項目 6（1862 状態）でも成り立つ。\n- 対照として、すべての子を fork した後で閉じる版も検査した。子 2 が pipe 1 の書き込み端を持ったまま pipe 2 の空きを待ち、親が pipe 1 の EOF を待つ。rtlc はこのデッドロックを 6 手で見つけた。今のコードが、まさにこの落とし穴を避けていることの確認になる。\n\n**欠陥 4: キャッシュの保存。** `formal/tla/CacheSave.tla`。`Cache2::save` は `<path>.tmp` に書いてから rename する。`Cache2::open` は、ヘッダと長さが範囲内なら受け付ける（チェックサムはない）。2 つの zustc が同じ出力に同時に保存する（ビルドと `zustc check` を並べて走らせるなど）と、次のことが起きる。\n\n- 一時ファイル名が同じなので、B が A の書きかけの tmp を O_TRUNC で開き直す。\n- A が rename した後も、B はそのファイル（もう `<path>`）に書き続ける。\n- 読み手は、B のヘッダと A の残りが混ざった、構造としては正しいファイルを受け付けうる。rtlc は 8 手の反例を出した。\n- このときエントリは B のキーを持ち、中身の一部が A のバイトになる。間違った機械語がキャッシュから出る可能性がある。\n- また B の rename は失敗する（警告が出るだけ）。\n\n窓は狭いが、POSIX の上では起こりうる。一時ファイル名をプロセスごとに分ける（`<path>.<pid>.tmp`）と、全探索で成り立つ（72 状態）。保存するファイルにチェックサムを入れれば、壊れた読み込みも捨てられる。\n\nあわせて、コードを読んで次の点を確かめた（モデルには入れていない）。\n\n- `read_all` / `write_all` は、EINTR でも打ち切る。どちらも親が作り直す経路に落ちるので、結果は正しい（遅くなるだけ）。\n- build.rs の関数のコンパイルでは、fork や pipe が失敗すると、すでに fork した子を待たずに `Err` を返す。\n\n## 3. アロケータ（prelude の `Vec`）\n\n`formal/kani-prelude` の `build.rs` は、`crates/syntax/src/prelude_lib.rs.in` から `Vec<T>` とその 16 個のメソッド、`Drop` をそのまま写す。こうすると、zustc がコンパイルするコードそのものを検査できる。prelude が変わればハーネスも変わる。\n\nzustc が与えるものはモデルにした。\n\n- `realloc` / `free` は、ブロックが自分の大きさを知っているモデルにした。`realloc` は `min(旧, 新)` バイトを写し、許せば null を返す。\n- `__exr_drop_in_place` は T の drop にした。\n\n検証できたこと（容量 4 まで、`with_capacity(0..4)` の後に 0..3 回 push した任意の状態から）:\n\n- `push`・`pop`・`insert`（位置 0/1/2 ごと）・`remove`・`swap_remove`・`truncate`・`reverse` は、どれも配列の参照モデルと同じ中身になる。\n- `len <= cap` が保たれる。\n- 割り当てた範囲の外に触れない（Kani のポインタ検査）。\n- drop がすべてのブロックを解放する。\n- `drops_each_element_once`: どの操作の後でも、各要素はちょうど 1 回 drop される。\n\n見つかったこと:\n\n- **欠陥 2:** `bug_with_capacity_overflow`。`reserve` の `c * size_of::<T>()`（と `len + extra`）が桁あふれする。\n  - 小さなブロックなのに `cap` が大きいままになり、push がブロックの外に書く。\n  - `formal/repro/vec_capacity_overflow.rs`（`Vec::<u64>::with_capacity(1 << 61)` の後に push）は、zustc では segmentation fault になる。rustc は \"capacity overflow\" で panic する。\n  - 安全なコードでヒープが壊れる。修正案は `checked_add` / `checked_mul` で、失敗したら panic する。\n- **欠陥 3:** `bug_alloc_failure_unchecked`。`realloc` が null を返しても `reserve` はそれを使い、push が null に書く。std は `handle_alloc_error` で abort する。\n\nKani の限界:\n\n- 参照モデルに std の `Vec` を使うと、CBMC がメモリを使い切った。固定長の配列にした。\n- 記号的な位置での `insert` も、メモリを使い切った。位置ごとのハーネスに分けた。\n- 証明は容量 4 までの有界なものである。任意の長さへは、Kani のループ契約（`-Z loop-contracts`）か、Verus・RefinedRust のような演繹的な検証が要る。\n\n## 再実行\n\n```bash\nformal/run.sh tla\n```\n\n```bash\nformal/run.sh kani\n```\n\n```bash\ncargo test -p zust-typeck props\n```\n\nTLA+ の 7 構成はそれぞれ 1 ms 前後で終わる。Kani の 12 ハーネスは約 8 分かかり（10 が検証され、`bug_*` の 2 つは期待どおり失敗する）、5〜10 GiB を使う。idealis は git の rev（89f54a9）で固定している。\n\n## 次の一手\n\n- 欠陥 1〜4 の修正。借用検査の上限を証明できる式にし、`Vec` の桁あふれと null を検査し、キャッシュの tmp 名をプロセスごとにする。\n- 借用検査の差分テスト。小さな CFG とイベント列を全数生成し、Polonius の規則を経路ごとに素直に実装した参照と比べる。gen/kill が分配的な部分では、経路ごとの結果を合わせたもの（MOP）と不動点（MFP）が一致するはずである。\n- 仕様と実装の接続。ForkPool / CacheSave のトレースを、quint-connect のように実際の driver2 で再生する。idealis の Driver / `idealis-testing` を使う。\n- スレッドを入れるときは、`ArcDrop.tla` を atomic 版で通すことと、`spawn` の即時実行をやめることが前提になる。",
+        "contentHash": "80fc9dc4a03768846666554896c984334be9d9b47fe4ca41f3c90a8202302756"
+      },
+      "context": [],
+      "candidateId": "ca858a11d422288d1b12ce77f3507d929ba45970460dd54548532b04644c87c9",
+      "contextHash": "7438e0bb6ac3c01bf6beaa56051a35abf5a2f30ee56334c8cd754b996d6bd4e6",
+      "judgment": {
+        "choice": "supports",
+        "confidence": 0.89,
+        "probabilities": {
+          "supports": 0.92,
+          "contradicts": 0.07,
+          "unrelated": 0,
+          "insufficient_context": 0.01
+        }
+      }
+    },
+    {
+      "id": "docs_reports_2026-11-20-01-formal-fixes",
+      "topic": "The Japanese file docs/ja/reports/2026-11-20-01-formal-fixes.md is a faithful translation of docs/reports/2026-11-20-01-formal-fixes.md",
+      "mode": "translation",
+      "reference": {
+        "source": "docs_reports_2026-11-20-01-formal-fixes.en",
+        "path": "docs/reports/2026-11-20-01-formal-fixes.md",
+        "startLine": 1,
+        "endLine": 95,
+        "quote": "# Fixing what the formal models found: the borrow checker giving up, Vec overflow and allocation failure, the cache's tmp file\n\nDate: 2026-11-20\n\nThis fixes defects 1–4 of [report 2026-11-19-01](2026-11-19-01-formal-models.md). Each failure was reproduced by a test or a model before it was fixed. Each fix is one commit, with one row of KPIs (`bench/kpi_log.md`). Defect 5 (`std::thread::spawn` running the closure at once) is a design question and is left as it is.\n\n## 1. Borrow checking: the fixpoint runs to its end\n\n`Bk::check` returned no error (`None`) once the worklist had run more than `50 * blocks + 1000` rounds.\n\nThe limit is now a formula derived from the lattice's height:\n\n- The state at a block's entry only grows by join, and it grows at most H times, the lattice's height.\n- H is the sum of the numbers of: moved paths (from moves and uninitialized binds), immutable locals already assigned, holds entries and their loans, and dead and escaped loans.\n- A block goes on the worklist only when the state at its entry grew.\n- So there are at most `n * (H + 1) + 1` rounds.\n\nGoing past that cannot happen, but if it did, the program is rejected with an error instead of accepted (an assert in debug builds).\n\n- The test is `fixpoint_does_not_give_up` in `borrowck_props.rs`. It builds a chain of 700 references directly as events. It failed before the fix.\n- `formal/repro/borrowck_rounds.py` now finds E0506 at K = 260 and at K = 1000.\n\n## 2. Vec capacity overflow\n\n`Vec::reserve` changes as follows:\n\n- It panics with `panic!(\"capacity overflow\")` when `len + extra` does not fit in usize, or when the block would be larger than isize::MAX bytes (the same limit as std).\n- The doubling saturates.\n- This computation is in `__exr_vec_new_cap`, a function that is not generic, so it is not checked and compiled per element type (see the KPI section).\n\n`Vec::<u64>::with_capacity(1 << 61)` followed by a push was a segmentation fault. It now ends with \"capacity overflow\" and exit code 101, as with rustc. `tests/alloc_limits.rs` tests these three cases, and a Vec that grows normally:\n\n- `with_capacity(1 << 61)`\n- `reserve(usize::MAX)` on a Vec with elements\n- `reserve(usize::MAX / 4)`\n\n## 3. Allocation failure\n\nThe prelude's 12 calls to `realloc` (Vec, sort buffers, HashMap, VecDeque and others) now go through `__exr_realloc_ok`:\n\n- When realloc returns null, it prints a message (\"memory allocation failed\") and aborts, as std's `handle_alloc_error` does.\n- `realloc(p, 0)` may return null; that is not a failure and is not treated as one.\n- `Box`'s malloc is called directly by the code generator and is not changed here.\n\nThe Kani harnesses copy the fixed code and check it. The `bug_*` harnesses are replaced by three:\n\n- `with_capacity_any_size`\n- `reserve_any_size`\n- `alloc_failure_stops`\n\nEach is `#[kani::should_panic]`, and shows that any size, and a failing malloc, stop with a panic or an abort. Kani's pointer checks (out of bounds, a null dereference) do not count as panics, so a single path that writes out of bounds makes the harness fail.\n\n- On the prelude before the fix, all three were checked to fail with \"failures other than panics\".\n- What a Vec holds is still checked by the `*_matches_model` harnesses.\n\n## 4. The tmp file of the cache and the stamps\n\n`Cache2::save` wrote `<path>.tmp` and then renamed it, and every process used the same tmp name.\n\n- The name is now `<path>.<pid>.tmp`. `cache2.rs` is also compiled by zustc itself, so the pid comes from libc's `getpid`.\n- When the write or the rename fails, the tmp file is removed.\n- `src/stamp.rs` saved the stamps the same way and gets the same change.\n\n`formal/tla/CacheSave.cfg` checks the code as it is now (a name per process), and the whole state space passes (72 states). The old way is kept as `CacheSaveShared.cfg`, and `formal/run.sh` checks that it still gives the counterexample (8 steps). The test is `save_tests::save_then_open` in `cache2.rs`.\n\n## What was checked\n\n- `cargo test --release --workspace` passes.\n  - Without rust-src, two of zust-analyzer's LSP tests fail, before the fix too. They were run with rust-src installed, as the README requires.\n- `tests/compare.sh`: all 42 ok (with valgrind).\n- The tests/ui baseline check: 0 regressions. `--check` fails on 2 crashes (a stack overflow on circular modules, `parser/circular_modules_main.rs` and one more), which zustc before the change has too.\n- `formal/run.sh`: the 7 TLA+ configurations, the `props` tests and the 13 Kani harnesses all give their expected results.\n\nThe KPIs are the four rows of 2026-11-20 in `bench/kpi_log.md`:\n\n- The first row is a reference: the code before the change (main + formal/), measured again on this machine. The row before it was measured on another machine, so the difference shows up there.\n- The other three rows are the differences of fixes 1–3, one each.\n\n| change | no-op build | edit one fn | check | traits check | traits edit | crates no-op | crates edit | tests/ui (run / check / build / compile-fail) |\n|---|---:|---:|---:|---:|---:|---:|---:|---|\n| reference (0765679) | 0.9 M | 580.8 M | 3851.5 M | 1178.8 M | 61.0 M | 10.8 M | 316.2 M | 1698 / 1417 / 95 / 3327 |\n| 1. borrow checking | +0.00% | -0.09% | -0.06% | +0.03% | -0.01% | +0.00% | -0.03% | 1698 / 1417 / 95 / 3326 |\n| 4. cache | +0.00% | +0.02% | -0.00% | -0.03% | +0.00% | +0.00% | +0.02% | 1698 / 1417 / 95 / 3327 |\n| 2 and 3. Vec | +0.23% | -0.06% | +0.09% | -0.26% | +0.23% | +0.13% | +0.60% | 1698 / 1417 / 95 / 3327 |\n\n- Every change is below the 5% threshold. The cache size does not change.\n- A program that uses Vec is about 540 bytes larger, for the two checks and their panic / abort paths. `macros.cache_bytes` in `bench/budget.txt` had only 0.8% left (66655 of 67160) and is now 67398. That entry alone is raised to 70768 by the rule `UPDATE_BUDGET=1` follows (the current value + 5%). The other entries are the sizes with CI's wild and are left as they are (all within their limits).\n- compile-fail goes between 3327 and 3326 by one test from row to row. It goes back with the cache fix too, which has nothing to do with borrow checking, so the test is timing-dependent. The baseline check finds 0 regressions.\n- The Vec fix first put its checks in `reserve` itself. `reserve` gets an instance per element type, and traits check went up 2.65%. With the overflow computation moved to a function that is not generic, `__exr_vec_new_cap`, it is -0.26%.\n\n## What is left\n\n- Defect 5: `std::thread::spawn` runs the closure at once. Real threads would need `Arc` changed as the atomic version of `ArcDrop.tla` does.\n- Allocation failure in `Box`.\n- A checksum for the cache. With a tmp file per process, a mixed file is no longer read, but a checksum is still needed to discard a file corrupted on disk.",
+        "contentHash": "b82f0158cf41697c5908a2515667863b5123265ff41e251c394488672194da83"
+      },
+      "target": {
+        "source": "docs_reports_2026-11-20-01-formal-fixes.ja",
+        "path": "docs/ja/reports/2026-11-20-01-formal-fixes.md",
+        "startLine": 1,
+        "endLine": 95,
+        "quote": "# 形式モデルが見つけた欠陥の修正: 借用検査の打ち切り・Vec の桁あふれと割り当て失敗・キャッシュの一時ファイル\n\nDate: 2026-11-20\n\n[報告 2026-11-19-01](2026-11-19-01-formal-models.md) の欠陥 1〜4 を直した。どれも、直す前の失敗をテストかモデルで再現してから直した。修正は 1 つにつき 1 コミットに分け、KPI を 1 行ずつ記録した（`bench/kpi_log.md`）。欠陥 5（`std::thread::spawn` の即時実行）は設計の問題として残す。\n\n## 1. 借用検査: 不動点を最後まで回す\n\n`Bk::check` は worklist の回数が `50 * ブロック数 + 1000` を超えると、誤りなし（`None`）を返していた。\n\n上限は、束の高さから導いた次の式に変えた。\n\n- ブロックの入口の状態は join で大きくなるだけで、大きくなる回数は束の高さ H 以下である。\n- H は、ムーブした場所（ムーブと未初期化の束縛から）、immutable で代入済みのローカル、holds の項目とそのローン、dead と escaped のローンの数の和である。\n- worklist に入るのは、入口の状態が大きくなったときだけである。\n- したがって回数は `n * (H + 1) + 1` を超えない。\n\nこれを超えることは起こりえないが、超えたら受け付けずに誤りにする（debug ビルドでは assert）。\n\n- テストは `borrowck_props.rs` の `fixpoint_does_not_give_up`。長さ 700 の参照の連鎖を、イベント列として直接組み立てる。直す前は失敗した。\n- `formal/repro/borrowck_rounds.py` は、K = 260 でも 1000 でも E0506 を見つけるようになった。\n\n## 2. Vec の容量の桁あふれ\n\n`Vec::reserve` を次のように変えた。\n\n- `len + extra` が usize に入らないとき、または確保するブロックが isize::MAX バイトを超えるとき（std と同じ上限）は、`panic!(\"capacity overflow\")` にする。\n- 倍にする計算は飽和させる。\n- この計算は総称でない関数 `__exr_vec_new_cap` に置く（要素の型ごとに検査・コンパイルしないため。KPI の節を参照）。\n\n`Vec::<u64>::with_capacity(1 << 61)` の後に push すると、segmentation fault だったのが、rustc と同じく \"capacity overflow\" で終了コード 101 になった。テストは `tests/alloc_limits.rs` で、次の 3 つと、普通に伸びる場合を調べる。\n\n- `with_capacity(1 << 61)`\n- 要素のある Vec への `reserve(usize::MAX)`\n- `reserve(usize::MAX / 4)`\n\n## 3. 割り当ての失敗\n\nprelude の `realloc` の呼び出し 12 箇所（Vec、整列の作業領域、HashMap、VecDeque など）を `__exr_realloc_ok` に替えた。\n\n- null が返ったら、std の `handle_alloc_error` と同じく、メッセージ（\"memory allocation failed\"）を出して abort する。\n- `realloc(p, 0)` は null を返しうるが、これは失敗ではないので扱わない。\n- `Box` の malloc はコード生成が直接呼ぶので、今回は変えていない。\n\nKani のハーネスは、修正後のコードを写して調べる。`bug_*` を次の 3 つに替えた。\n\n- `with_capacity_any_size`\n- `reserve_any_size`\n- `alloc_failure_stops`\n\nどれも `#[kani::should_panic]` で、どんな大きさでも、また malloc が失敗しても、panic か abort で止まることを示す。Kani のポインタ検査（範囲外・null の参照）は panic として数えないので、範囲外に書く経路が 1 つでもあれば失敗する。\n\n- 直す前の prelude では、3 つとも「panic 以外の失敗」で落ちることを確かめた。\n- 中身の正しさは、これまでどおり `*_matches_model` が調べる。\n\n## 4. キャッシュとスタンプの一時ファイル\n\n`Cache2::save` は `<path>.tmp` に書いてから rename していた。一時ファイル名は全プロセスで同じだった。\n\n- 名前を `<path>.<pid>.tmp` に変えた。`cache2.rs` は zustc 自身でもコンパイルするので、pid は libc の `getpid` で取る。\n- 書き込みか rename に失敗したら、一時ファイルを消す。\n- `src/stamp.rs` のスタンプの保存も同じやり方だったので、同じように直した。\n\n`formal/tla/CacheSave.cfg` は今のコード（プロセスごとの名前）を検査し、全探索で成り立つ（72 状態）。前のやり方は `CacheSaveShared.cfg` として残し、反例（8 手）を出すことを `formal/run.sh` が確かめる。テストは `cache2.rs` の `save_tests::save_then_open`。\n\n## 確かめたこと\n\n- `cargo test --release --workspace` はすべて通った。\n  - rust-src のない環境では、zust-analyzer の LSP テスト 2 件が直す前から落ちる。README の要件どおり rust-src を入れて回した。\n- `tests/compare.sh` は 42 件すべて ok（valgrind あり）。\n- tests/ui のベースライン検査は、退行 0。`--check` は crash 2 件（`parser/circular_modules_main.rs` などの循環モジュールでスタックあふれ）で失敗するが、変更前の zustc でも同じように落ちる。\n- `formal/run.sh` は、TLA+ の 7 構成、`props` のテスト、Kani の 13 ハーネスがすべて期待どおりの結果になった。\n\nKPI は `bench/kpi_log.md` の 2026-11-20 の 4 行にある。\n\n- 1 行目は、変更の前（main + formal/）をこの機械で測り直した基準である。前の行とは機械が違うので、その差が出ている。\n- 残りの 3 行が、修正 1〜3 それぞれの差分である。\n\n| 変更 | no-op build | edit one fn | check | traits check | traits edit | crates no-op | crates edit | tests/ui (run / check / build / compile-fail) |\n|---|---:|---:|---:|---:|---:|---:|---:|---|\n| 基準（0765679） | 0.9 M | 580.8 M | 3851.5 M | 1178.8 M | 61.0 M | 10.8 M | 316.2 M | 1698 / 1417 / 95 / 3327 |\n| 1. 借用検査 | +0.00% | -0.09% | -0.06% | +0.03% | -0.01% | +0.00% | -0.03% | 1698 / 1417 / 95 / 3326 |\n| 4. キャッシュ | +0.00% | +0.02% | -0.00% | -0.03% | +0.00% | +0.00% | +0.02% | 1698 / 1417 / 95 / 3327 |\n| 2・3. Vec | +0.23% | -0.06% | +0.09% | -0.26% | +0.23% | +0.13% | +0.60% | 1698 / 1417 / 95 / 3327 |\n\n- どれも判定の閾値（5%）より小さい。キャッシュの大きさは変わらない。\n- Vec を使うプログラムは、2 つの検査と panic / abort の経路の分だけ約 540 バイト大きくなった。`bench/budget.txt` の `macros.cache_bytes` は、もともと余裕が 0.8%（67160 のうち 66655）しかなく、67398 になった。この項目だけ、`UPDATE_BUDGET=1` と同じ規則（現在値 + 5%）で 70768 にした。ほかの項目は CI の wild での大きさなので、そのままにしてある（どれも上限内）。\n- compile-fail の 3327 / 3326 は、どの行でも 1 件が行き来している。キャッシュの修正（借用検査に関係しない）でも戻っているので、時間で揺れるテストである。ベースラインの検査は退行 0。\n- Vec の修正は、最初は検査を `reserve` の中に書いた。`reserve` は要素の型ごとにインスタンスができるので、traits check が +2.65% になった。桁あふれの計算を総称でない関数 `__exr_vec_new_cap` に移すと、-0.26% になった。\n\n## 残ったこと\n\n- 欠陥 5: `std::thread::spawn` の即時実行。本物のスレッドを入れるなら、`ArcDrop.tla` の atomic 版のとおり `Arc` を変える必要がある。\n- `Box` の割り当ての失敗。\n- キャッシュのチェックサム。プロセスごとの一時ファイルで、混ざったファイルは読まれなくなった。それでも、ディスクの上で壊れたファイルを捨てるには要る。",
+        "contentHash": "846787166ae206dece2a4155a52132549d1ca26d253efbdc5c60e677b412f6fe"
+      },
+      "context": [],
+      "candidateId": "95761fde134e75a2cf4cfaaaeee1e662243184a3aefe4b2b77bb0fa61d310187",
+      "contextHash": "69bb00b22d7750f550a3cc8c88fe9bb13831eb841a4ba0ab7e9a7c12927dca30",
+      "judgment": {
+        "choice": "supports",
+        "confidence": 0.99,
+        "probabilities": {
+          "supports": 0.99,
+          "contradicts": 0.01,
+          "unrelated": 0,
+          "insufficient_context": 0
         }
       }
     }
   ],
   "coverage": {
-    "expected": 23,
-    "selected": 23,
-    "answered": 23,
+    "expected": 25,
+    "selected": 25,
+    "answered": 25,
     "missing": 0,
     "contradictions": 0,
     "unassessed": 0,
@@ -802,9 +870,9 @@
     "unboundDocuments": 0
   },
   "usage": {
-    "requests": 23,
-    "inputTokens": 92443,
-    "usd": 0.0038826060000000003
+    "requests": 25,
+    "inputTokens": 109526,
+    "usd": 0.004600092
   },
   "errors": []
 }
