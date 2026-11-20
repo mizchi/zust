@@ -914,6 +914,17 @@ impl Cx<'_> {
                 // `&x as &dyn Trait` は期待型つきの評価 (強制変換) と同じ
                 // (`&mut a as &mut [u8]` (a: 配列) も強制変換)
                 if let Ty::Ref(_, Ty::Dyn(_) | Ty::Slice(_)) = to {
+                    // (`#![deny(trivial_casts)]`: `&a as &[u8]` with a: [u8; N], or a cast to the type it has, is a
+                    // coercion)
+                    if self.user_code && self.prog.deny_trivial_casts.0 {
+                        if let Some(ft) = self.peek(x) {
+                            let trivial = ft == to
+                                || matches!((ft, to), (Ty::Ref(m, Ty::Array(e, _)), Ty::Ref(tm, Ty::Slice(e2))) if e == e2 && (m || !tm));
+                            if trivial {
+                                return err(SP, format!("trivial cast: `{}` as `{}`", self.prog.tn(ft), self.prog.tn(to)));
+                            }
+                        }
+                    }
                     let (v, t) = self.expr(x, Some(to))?;
                     self.same(SP, t, to)?;
                     return Ok((v, t));
@@ -1001,6 +1012,11 @@ impl Cx<'_> {
                     (Ty::Ref(_, a), Ty::Ptr(_, b)) if a == b || matches!(*a, Ty::Array(e, _) if e == b) => {
                         return Ok((v, to));
                     }
+                    // (a raw slice pointer is the address of its (data, length) pair here: as a thin pointer, the data
+                    // word)
+                    (Ty::Ptr(_, Ty::Slice(_) | Ty::Str), Ty::Ptr(_, b)) if !matches!(b, Ty::Slice(_) | Ty::Str | Ty::Dyn(_)) => {
+                        return Ok((v.map(|a| self.b.ins().load(PTR, mf(), a, 0)), to));
+                    }
                     (Ty::Ptr(..), Ty::Ptr(..)) => return Ok((v, to)),
                     // (a fn pointer as a raw pointer: the same address)
                     (Ty::Fn(_), Ty::Ptr(..)) => return Ok((v, to)),
@@ -1015,7 +1031,7 @@ impl Cx<'_> {
                         return Ok((v, to));
                     }
                     // (a narrower or wider integer and a raw pointer: through usize, as `as` does)
-                    (t, Ty::Ptr(_, i)) if t.is_int() && t.bits() <= 64 && !i.is_fat() && !matches!(i, Ty::Slice(_) | Ty::Str | Ty::Dyn(_)) => {
+                    (t, Ty::Ptr(_, i)) if t.is_int() && t.bits() <= 64 && !matches!(i, Ty::Slice(_) | Ty::Str | Ty::Dyn(_)) => {
                         return Ok((v.map(|x| self.convert(x, t, Ty::Usize)), to));
                     }
                     (Ty::Ptr(_, i), t) if t.is_int() && t.bits() <= 64 && !matches!(i, Ty::Slice(_) | Ty::Str | Ty::Dyn(_)) => {
