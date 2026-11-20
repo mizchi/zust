@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795169394898,
+  "lastUpdate": 1795169397200,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -66181,6 +66181,85 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/mizchi/zust/commit/b88ba4eb8bd214321108226ecd9a334fb491142c"
         },
         "date": 1795167623723,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "parity documentSymbol (名前の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity workspace/symbol (上位 20 の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity definition (行き先の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity hover (名前を含む)",
+            "value": 95,
+            "unit": "%"
+          },
+          {
+            "name": "parity references (数の一致)",
+            "value": 95,
+            "unit": "%"
+          },
+          {
+            "name": "parity documentHighlight (数の一致)",
+            "value": 97.143,
+            "unit": "%"
+          },
+          {
+            "name": "parity rename (書き換えの一致)",
+            "value": 93.75,
+            "unit": "%"
+          },
+          {
+            "name": "parity signatureHelp (名前・引数の数・今の引数の一致)",
+            "value": 94.737,
+            "unit": "%"
+          },
+          {
+            "name": "parity completion `x.\\|` (書いてある名前を含む)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity completion `na\\|me` (同)",
+            "value": 89.655,
+            "unit": "%"
+          },
+          {
+            "name": "parity 一致の平均",
+            "value": 96.528,
+            "unit": "%"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "committer": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "distinct": true,
+          "id": "e36b7fd88f7b596d70d0042e34aa5b02cb4de539",
+          "message": "match / if let on a bare None: take the Option type from the patterns\n\n`match None { Some(3u8) => .. }` and `if let Some(x) = None` used to fail\nwith \"cannot find value `None`\": the scrutinee went down the place path\nwith no type. The Option type now comes from type inference when it\nknows it, else from a `Some(..)` pattern's literal, const or enum\nvariant, else `Option<()>` (rustc's `!` fallback).\n\ntests/ui: +2 check-pass, +1 run-pass, +1 compile-fail (checked: the\nOption vs Result mismatch it tests). KPI: no-op +0.29% / crates no-op\n+0.14% is the 0.695 / 0.697 layout flip seen before on unrelated\ncommits; the no-op path does not run this code.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-20T09:56:18Z",
+          "tree_id": "d0f24556b85b924d8b24e7e3907c2a2f98922ddf",
+          "url": "https://github.com/mizchi/zust/commit/e36b7fd88f7b596d70d0042e34aa5b02cb4de539"
+        },
+        "date": 1795169396730,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
