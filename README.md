@@ -438,7 +438,8 @@ the measured numbers. The [reports](docs/reports/) explain each step.
 
 ### Expected to cost performance (measured before kept)
 
-- [ ] region checking against signatures: `check` time (borrowck costs +2.2% today)
+- [x] region checking against signatures: measured against cd5dccd (instructions): check +0.14%, edit one fn +0.28%,
+  traits check +0.36%, patterns check +0.91% (the region check itself ~0.5%), LSP session +0.06%, no-op and cache unchanged
 - [ ] coherence and bounds of blanket impls: `check` time, LSP
 - [ ] real async (state machines, `poll`, an executor): build time, binary size
 - [ ] unwinding (landing pads): build time, binary size

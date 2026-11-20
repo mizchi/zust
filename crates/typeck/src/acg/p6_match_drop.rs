@@ -862,7 +862,8 @@ impl Cx<'_> {
                 // (an explicit `&` pattern: what it binds is by value again)
                 self.rg.pat_ref = None;
                 let r = self.pat_bind(inner, q, BindMode::Move);
-                (self.rg.pat, self.rg.pat_ref) = rs;
+                self.rg.pat = rs.0;
+                    self.rg.pat_ref = rs.1;
                 self.bk.pat_path = saved;
                 r
             }
@@ -981,7 +982,8 @@ impl Cx<'_> {
                     let saved = self.bk_pat_field(deref, vname.as_deref(), &fname);
                     let rs = self.rg_pat_field(p.ty(), rvi, fi);
                     let r = self.pat_bind(sub, Self::field_place(p, fty, off)?, mode);
-                    (self.rg.pat, self.rg.pat_ref) = rs;
+                    self.rg.pat = rs.0;
+                    self.rg.pat_ref = rs.1;
                     self.bk.pat_path = saved;
                     r?;
                 }
@@ -997,7 +999,8 @@ impl Cx<'_> {
                     let saved = self.bk_pat_field(deref, None, &fname);
                     let rs = self.rg_pat_field(p.ty(), None, fi);
                     let r = self.pat_bind(sub, Self::field_place(p, fty, off)?, mode);
-                    (self.rg.pat, self.rg.pat_ref) = rs;
+                    self.rg.pat = rs.0;
+                    self.rg.pat_ref = rs.1;
                     self.bk.pat_path = saved;
                     r?;
                 }
