@@ -322,6 +322,17 @@ impl Cx<'_> {
         Ok((None, Ty::Unit))
     }
 
+    /// A path pattern that names a constant: a const of the program's (`Num::ZERO`) or a primitive type's
+    /// (`u8::MAX`)
+    pub(crate) fn path_const_pat(&self, p: &Path) -> bool {
+        if p.segs.len() != 2 {
+            return false;
+        }
+        let e = Expr::Path(None, p.clone());
+        self.const_of(&e).is_some()
+            || Ty::from_suffix(&p.segs[0].name).is_some_and(|t| crate::program::prim_assoc_const(t, &p.segs[1].name).is_some())
+    }
+
     pub(crate) fn no_variant_msg(&self, p: &Path) -> String {
         let segs: Vec<String> = p.segs.iter().map(|s| s.name.clone()).collect();
         match segs.as_slice() {
@@ -452,6 +463,17 @@ impl Cx<'_> {
             Pat::Ident(..) if const_lit_pat(self.prog, pat).is_some() => {
                 let lp = const_lit_pat(self.prog, pat).unwrap();
                 self.pat_test(&lp, p, fail)
+            }
+            // (`Num::ZERO => ..` / `u8::MAX`: a path to a constant, not a variant, is equal to its value)
+            Pat::Path(path) if self.variant_on(path, p.ty()).is_none() && self.path_const_pat(path) => {
+                let t = p.ty();
+                let (v, _) = self.read(p);
+                let ce = self.keep_expr(Expr::Path(None, path.clone()));
+                let (c, ct) = self.expr(ce, Some(t))?;
+                self.same(SP, ct, t)?;
+                let cond = self.eq_at(v.unwrap(), c.unwrap(), t, SP)?;
+                self.require(cond, fail);
+                Ok(())
             }
             // (`X => ..` with `const X: u64 = !0 as u16 as u64;` / `const FOO: &[u8] = b"foo";`: equal to its value)
             Pat::Ident(..) if self.const_pat_ok(pat, p.ty()) => {

@@ -133,3 +133,4 @@ date	commit	change	noop_M	edit_M	check_M	cache_KiB	lsp_G	run	check	build	cfail
 2026-11-20	cc8898f+	fn values of <S as Tr>::m; std::u32::MAX-style paths; float integer constants	0.697	559.833	3854.988	1902.8	-	1701	1417	95	3562	1179.610	63.378	10.272	321.204
 2026-11-20	ed757a9+	prelude: AsRef / AsMut / Into / Borrow / BorrowMut / FromIterator declared for a program's own impls	0.692	559.709	3856.799	1902.8	-	1701	1422	95	3562	1179.888	63.419	10.246	321.430
 2026-11-20	255fde7+	module flattening: a glob import is shadowed by the scope's own item	0.695	559.711	3856.801	1902.8	-	1702	1427	95	3562	1180.132	63.475	10.259	321.400
+2026-11-20	0043490+	patterns: a path to a constant (Num::ZERO / u8::MAX) is equal to its value	0.695	559.723	3856.801	1902.8	-	1702	1429	95	3559	1179.607	63.419	10.259	321.381

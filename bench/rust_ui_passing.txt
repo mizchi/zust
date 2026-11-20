@@ -1501,6 +1501,7 @@ check-pass	consts/const-eval/const_signed_pat.rs
 check-pass	consts/const-eval/double_check.rs
 check-pass	consts/const-eval/double_check2.rs
 compile-fail	consts/const-eval/field-access-after-const-eval-fail-in-ty.rs
+check-pass	consts/const-eval/ice-packed.rs
 compile-fail	consts/const-eval/ice-unhandled-type-122191.rs
 compile-fail	consts/const-eval/ice-unsized-struct-const-eval-123154.rs
 build-pass	consts/const-eval/issue-100878.rs
@@ -2536,6 +2537,7 @@ compile-fail	generics/wrong-number-of-args-in-macro.rs
 compile-fail	half-open-range-patterns/feature-gate-half-open-range-patterns-in-slices.rs
 compile-fail	half-open-range-patterns/half-open-range-pats-bad-types.rs
 compile-fail	half-open-range-patterns/half-open-range-pats-exhaustive-fail.rs
+check-pass	half-open-range-patterns/half-open-range-pats-exhaustive-pass.rs
 compile-fail	half-open-range-patterns/half-open-range-pats-inclusive-match-arrow.rs
 check-pass	half-open-range-patterns/half-open-range-pats-syntactic-pass.rs
 check-pass	half-open-range-patterns/pat-tuple-4.rs
@@ -4818,8 +4820,6 @@ compile-fail	pattern/move-ref-patterns/move-ref-patterns-closure-captures-inside
 check-pass	pattern/move-ref-patterns/move-ref-patterns-closure-captures-pass.rs
 compile-fail	pattern/mut-pattern-of-immutable-borrow.rs
 compile-fail	pattern/no-patterns-in-args.rs
-compile-fail	pattern/non-structural-match-types-cycle-err.rs
-compile-fail	pattern/non-structural-match-types.rs
 compile-fail	pattern/pat-struct-field-expr-has-type.rs
 compile-fail	pattern/pat-tuple-overfield.rs
 compile-fail	pattern/pat-tuple-underfield.rs
