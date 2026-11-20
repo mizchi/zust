@@ -962,6 +962,7 @@ compile-fail	borrowck/trait-impl-argument-difference-ice.rs
 check-pass	borrowck/tuple-field-move-with-drop-borrow.rs
 compile-fail	borrowck/two-phase-across-loop.rs
 run-pass	borrowck/two-phase-baseline.rs
+run-pass	borrowck/two-phase-bin-ops.rs
 run-pass	borrowck/two-phase-control-flow-split-before-activation.rs
 run-pass	borrowck/two-phase-method-receivers.rs
 run-pass	borrowck/two-phase-multiple-activations.rs
