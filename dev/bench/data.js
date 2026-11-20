@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795174069793,
+  "lastUpdate": 1795174071631,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -81410,6 +81410,70 @@ window.BENCHMARK_DATA = {
           {
             "name": "tests/ui build-pass passing",
             "value": 95,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui compile-fail pass rate",
+            "value": 48.44,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui compile-fail passing",
+            "value": 3564,
+            "unit": "tests"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "committer": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "distinct": true,
+          "id": "20055f979e93f664c41d36493a8dd08dd8927324",
+          "message": "extern \"C\" calls: structs of up to 16 bytes by value (System V)\n\nA call of a foreign fn that takes or returns a struct now follows the\nSystem V x86-64 convention. That used to be an error.\n- A struct of up to 16 bytes is passed as its eightbytes: SSE when every\n  scalar in the eightbyte is a float (f32 alone: F32), else INTEGER.\n- A struct of up to 16 bytes is returned in rax / rdx / xmm0 / xmm1 and\n  stored into the destination. A larger one comes back through the hidden\n  pointer, which is our sret.\n- minclif reads a second result from rdx or xmm1 by its class, also when\n  the first is a float.\n- Still errors: a larger struct argument, and a pointer to such an extern\n  fn (fn pointers use zustc's convention, which passes structs by address).\n\ntests/ui: +15 run-pass, +7 check-pass, +2 build-pass. Checked with both\nbackends.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-20T11:23:04Z",
+          "tree_id": "d8c1de6a02f0822fa6492218aca5f7fc76b48025",
+          "url": "https://github.com/mizchi/zust/commit/20055f979e93f664c41d36493a8dd08dd8927324"
+        },
+        "date": 1795174071387,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tests/ui run-pass pass rate",
+            "value": 72.7,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui run-pass passing",
+            "value": 1734,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui check-pass pass rate",
+            "value": 79.86,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui check-pass passing",
+            "value": 1443,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui build-pass pass rate",
+            "value": 71.85,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui build-pass passing",
+            "value": 97,
             "unit": "tests"
           },
           {
