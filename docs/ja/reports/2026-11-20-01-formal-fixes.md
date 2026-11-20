@@ -2,7 +2,7 @@
 
 Date: 2026-11-20
 
-[報告 2026-11-19-01](2026-11-19-01-formal-models.md) の欠陥 1〜4 を直した。どれも、直す前の失敗をテストかモデルで再現してから直した。修正は 1 つにつき 1 コミットに分け、KPI を 1 行ずつ記録した（`bench/kpi_log.md`）。欠陥 5（`std::thread::spawn` の即時実行）は設計の問題として残す。
+[報告 2026-11-19-01](2026-11-19-01-formal-models.md) の欠陥 1〜4 を直した。あわせて、CI の rust-ui ジョブを赤にしていた循環モジュールでの crash も直した（5 節）。どれも、直す前の失敗をテストかモデルで再現してから直した。修正は 1 つにつき 1 コミットに分け、KPI を 1 行ずつ記録した（`bench/kpi_log.md`）。欠陥 5（`std::thread::spawn` の即時実行）は設計の問題として残す。
 
 ## 1. 借用検査: 不動点を最後まで回す
 
@@ -68,12 +68,20 @@ Kani のハーネスは、修正後のコードを写して調べる。`bug_*` �
 
 `formal/tla/CacheSave.cfg` は今のコード（プロセスごとの名前）を検査し、全探索で成り立つ（72 状態）。前のやり方は `CacheSaveShared.cfg` として残し、反例（8 手）を出すことを `formal/run.sh` が確かめる。テストは `cache2.rs` の `save_tests::save_then_open`。
 
+## 5. 循環するモジュール
+
+2 つのファイルが `#[path]` で互いを読み込むと（ファイルが自分自身を読み込む場合も）、`load_file` がスタックがあふれるまで再帰していた。tests/ui の `parser/circular_modules_main.rs` と `circular-module-with-doc-comment-issue-97589` が crash し、`bench/rust_ui.py --check` は crash が 1 件でもあると失敗するので、CI の rust-ui ジョブが main（a14943c）でも赤だった。
+
+- `load_file` は、読んでいる途中のファイルを覚えておく。同じファイルがまた出てきたら、rustc と同じく "circular modules: a.rs -> b.rs -> a.rs" と報告する。256 段を超える入れ子も止める。
+- ファイルは、シンボリックリンクを解決したパスで見分ける。libc の `realpath` を使うのは、`srcmap.rs` を zustc でもコンパイルするためで、zustc の std には `canonicalize` がない。こうすると `link/../a.rs` は、link の指す先の隣の a.rs になる。realpath が失敗したときは、`.` と `x/..` を文字列の上で取り除いたパスを使う。
+- テストは `srcmap.rs` の `circular_tests::circular_modules`。互いを読み込む 2 つのファイル、自分自身を読み込むファイル、同じファイルを並べて 2 回読み込む場合、シンボリックリンクの後に `..` が続く場合を調べる。
+
 ## 確かめたこと
 
 - `cargo test --release --workspace` はすべて通った。
   - rust-src のない環境では、zust-analyzer の LSP テスト 2 件が直す前から落ちる。README の要件どおり rust-src を入れて回した。
 - `tests/compare.sh` は 42 件すべて ok（valgrind あり）。
-- tests/ui のベースライン検査は、退行 0。`--check` は crash 2 件（`parser/circular_modules_main.rs` などの循環モジュールでスタックあふれ）で失敗するが、変更前の zustc でも同じように落ちる。
+- tests/ui のベースライン検査は、退行 0。修正 4 までは、`--check` が crash 2 件でまだ失敗していた。これは main（a14943c）にもあったもので、5 節の修正（f9654df）で直した。それ以降は、`--check` も crash 0 で通る。
 - `formal/run.sh` は、TLA+ の 7 構成、`props` のテスト、Kani の 14 ハーネスがすべて期待どおりの結果になった。
 
 KPI は `bench/kpi_log.md` の 2026-11-20 の 4 行にある。

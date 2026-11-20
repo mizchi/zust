@@ -2,7 +2,7 @@
 
 Date: 2026-11-20
 
-This fixes defects 1–4 of [report 2026-11-19-01](2026-11-19-01-formal-models.md). Each failure was reproduced by a test or a model before it was fixed. Each fix is one commit, with one row of KPIs (`bench/kpi_log.md`). Defect 5 (`std::thread::spawn` running the closure at once) is a design question and is left as it is.
+This fixes defects 1–4 of [report 2026-11-19-01](2026-11-19-01-formal-models.md). It also fixes a crash on circular modules that made CI's rust-ui job red (section 5). Each failure was reproduced by a test or a model before it was fixed. Each fix is one commit, with one row of KPIs (`bench/kpi_log.md`). Defect 5 (`std::thread::spawn` running the closure at once) is a design question and is left as it is.
 
 ## 1. Borrow checking: the fixpoint runs to its end
 
@@ -68,12 +68,20 @@ A size that fits allocates and pushes as usual. These harnesses do not check tha
 
 `formal/tla/CacheSave.cfg` checks the code as it is now (a name per process), and the whole state space passes (72 states). The old way is kept as `CacheSaveShared.cfg`, and `formal/run.sh` checks that it still gives the counterexample (8 steps). The test is `save_tests::save_then_open` in `cache2.rs`.
 
+## 5. Circular modules
+
+Two files that include each other with `#[path]`, or a file that includes itself, made `load_file` recurse until the stack overflowed. tests/ui `parser/circular_modules_main.rs` and `circular-module-with-doc-comment-issue-97589` crashed, and `bench/rust_ui.py --check` fails on any crash, so CI's rust-ui job was red, on main (a14943c) too.
+
+- `load_file` now keeps the files it is reading. A file that comes again is reported as "circular modules: a.rs -> b.rs -> a.rs", as rustc does. More than 256 nested files also stop.
+- A file is identified by its path with symbolic links resolved, through libc `realpath`: `srcmap.rs` is also compiled by zustc, whose std has no `canonicalize`. `link/../a.rs` is then the a.rs beside where link points. When realpath fails, the path with `.` and `x/..` taken out as text is used instead.
+- The test is `circular_tests::circular_modules` in `srcmap.rs`: two files that include each other, a file that includes itself, the same file included twice side by side, and a symbolic link followed by `..`.
+
 ## What was checked
 
 - `cargo test --release --workspace` passes.
   - Without rust-src, two of zust-analyzer's LSP tests fail, before the fix too. They were run with rust-src installed, as the README requires.
 - `tests/compare.sh`: all 42 ok (with valgrind).
-- The tests/ui baseline check: 0 regressions. `--check` fails on 2 crashes (a stack overflow on circular modules, `parser/circular_modules_main.rs` and one more), which zustc before the change has too.
+- The tests/ui baseline check: 0 regressions. Up to fix 4, `--check` still failed on 2 crashes, which main had too (a14943c). They are fixed by section 5 (f9654df); from there on, `--check` passes with 0 crashes.
 - `formal/run.sh`: the 7 TLA+ configurations, the `props` tests and the 14 Kani harnesses all give their expected results.
 
 The KPIs are the four rows of 2026-11-20 in `bench/kpi_log.md`:
