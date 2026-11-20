@@ -1,158 +1,159 @@
-date	commit	change	noop_M	edit_M	check_M	cache_KiB	lsp_G	run	check	build	cfail
-2026-11-19	45579fc	reference: before per-change tracking	625.309	626.912	3905.245	1902.8	10.8855	1536	1271	89	2844
-2026-11-19	927540d	pointee as the expected type of `&x` coerced to a raw pointer	625.309	626.912	3905.365	1902.8	-	1538	1271	89	2845
-2026-11-19	b0edbd7	`_` in an annotation is a new inference variable (with a Debug-printing check)	625.130	626.989	3963.523	1902.8	-	1545	1273	89	2843
-2026-11-19	042f17d	methods of numbers in a Box, blanket-impl methods of numbers	625.130	626.990	3963.563	1902.8	-	1545	1273	89	2850
-2026-11-19	89d9fe9	drop the Debug-printing check on annotated lets	625.127	626.729	3905.088	1902.8	-	1545	1273	89	2850
-2026-11-19	6f5a272	tests/ui: skip compiletest-ignore-dir directories (module files of other tests; run-pass 2413 -> 2385 applicable)	625.187	626.789	3905.209	1902.8	-	1544	1273	89	2850
-2026-11-19	1271aae	skip `use` items in bodies (from macro expansions)	625.185	626.787	3904.932	1902.8	-	1547	1273	89	2850
-2026-11-19	5ae34e1	items from statement-position macro expansions	625.184	626.787	3905.089	1902.8	-	1552	1276	89	2850
-2026-11-19	9539e64	macro definitions from expansions; statement-position expansions into the block	625.185	626.787	3905.062	1902.8	-	1553	1278	89	2850
-2026-11-19	6c8b074	expand_reference follows the statement-position rules (test fix)	625.185	626.787	3905.063	1902.8	-	1553	1278	89	2850
-2026-11-19	a593fd0	Box::into_raw / from_raw, *mut T for a let written *const T	625.186	626.788	3905.063	1902.8	-	1555	1278	89	2850
-2026-11-19	2ddc076	closures with no captures as fn pointers	625.185	626.788	3905.285	1902.8	-	1559	1283	89	2851
-2026-11-19	a474393	LSP measured on a fixed snapshot (closures as fn pointers included)	625.125	626.728	3905.165	1902.8	10.8931	1559	1283	89	2851
-2026-11-19	6477f49	generic fns returning impl Trait (a parameter type)	625.185	626.788	3905.335	1902.8	10.8943	1559	1290	89	2851
-2026-11-19	a9f1a01	generic impl Trait returns typed per instance	625.191	626.794	3905.274	1902.8	10.8942	1560	1300	89	2854
-2026-11-19	9568d59	Box::pin and Pin<Box<dyn Future<Output = T>>>	625.191	626.794	3905.841	1902.8	10.8958	1560	1307	89	2856
-2026-11-19	0902b52	inline const, if-let guards	625.127	626.729	3905.424	1902.8	10.8962	1567	1323	93	2861
-2026-11-19	85225ee	reborrow of fat pointers through *, (*f)(x)	625.189	626.791	3905.638	1902.8	10.8944	1570	1323	93	2860
-2026-11-19	8fb090b	TypeId::of, type_name (check +0.04%: all in glibc malloc (_int_malloc, malloc_consolidate), zustc's own code is unchanged)	625.242	626.596	3907.370	1902.8	-	1570	1323	94	2860
-2026-11-19	b0a0794	match *x on slices; *slice as a value is E0277	625.241	626.594	3907.294	1902.8	-	1572	1324	94	2858
-2026-11-19	c54a325	match exhaustiveness (E0004)	625.241	626.595	3907.292	1902.8	10.9010	1572	1324	94	2886
-2026-11-19	e44eb9f	qualified paths: trait-default consts, impls for ()	625.245	626.598	3907.428	1902.8	-	1577	1324	94	2885
-2026-11-19	9b7d57d	impl Trait nested in return types	626.673	627.612	3905.348	1902.8	-	1577	1334	94	2883
-2026-11-19	47dc4e7	nested impl Trait without a SigSyn field	625.250	626.603	3907.597	1902.8	10.8943	1577	1334	94	2883
-2026-11-19	d1718df	associated functions through type aliases	625.250	626.604	3907.597	1902.8	-	1579	1334	94	2883
-2026-11-19	3123e91	slice methods, integer abs/neg variants, impl line (prelude +50 lines)	625.597	626.655	3906.342	1902.8	-	1585	1339	94	2894
-2026-11-19	2e73c1f	impls for &T of a type parameter	625.352	626.411	3906.158	1902.8	-	1586	1342	94	2895
-2026-11-19	0aa45a9	slice patterns in inference, E0527/E0528	625.350	626.409	3906.603	1902.8	10.8969	1587	1342	94	2904
-2026-11-19	1f1966e	unreachable patterns (deny), arm positions	627.309	628.367	3908.464	1902.8	10.8925	1587	1342	94	2967
-2026-11-19	8c2be84	deny attribute from the file head	625.356	626.415	3906.511	1902.8	-	1587	1342	94	2967
-2026-11-19	8b506a2	error positions for more expressions, E0121, E0746	625.358	626.417	3906.929	1902.8	-	1587	1342	94	3085
-2026-11-19	e44a8e6	errors at their statement (let positions)	625.595	626.655	3911.885	1902.8	10.8857	1587	1342	94	3248
-2026-11-19	92f21c4	statement positions on the error path only	625.595	626.653	3907.647	1902.8	-	1587	1342	94	3248
-2026-11-19	539a660	missing names at their line in the item	625.541	626.600	3907.583	1902.8	-	1587	1342	94	3274
-2026-11-19	e456175	shadowable Cycle, JoinHandle, Chars	625.422	626.481	3907.557	1902.8	-	1587	1342	94	3275
-2026-11-19	be5ab51	unit struct values in inference, E0055	625.294	626.353	3907.619	1902.8	10.8942	1593	1347	94	3296
-2026-11-19	e54e6a0	Pin/Box receivers, std::task, E0050/E0053	625.230	626.822	3907.199	1902.8	10.8929	1595	1350	94	3308
-2026-11-19	f7bd02b	unit structs through module paths	625.233	626.899	3905.262	1902.8	-	1599	1354	94	3304
-2026-11-19	9f34243	supertrait methods through dyn	625.518	627.166	3908.350	1902.8	10.8874	1603	1356	94	3307
-2026-11-19	4ed6b24	supertraits without a Summary field	625.171	626.762	3907.087	1902.8	-	1603	1356	94	3307
-2026-11-19	f9d67f9	nested items with qualifiers	627.040	628.631	3908.958	1902.8	-	1603	1360	94	3307
-2026-11-19	62e578f	revert qualifier hoisting (+0.30% for 4 tests)	625.171	626.837	3907.087	1902.8	-	1603	1356	94	3306
-2026-11-19	b9139df	tuple struct constructors as let values	625.171	626.837	3907.087	1902.8	-	1605	1356	94	3307
-2026-11-19	d7ffa57	generic fn values through let	625.169	626.835	3908.058	1902.8	-	1606	1356	94	3306
-2026-11-19	0586fb6	impls for references to concrete types	625.170	626.836	3908.224	1902.8	10.8901	1608	1360	95	3304
-2026-11-19	bf85c64	std bounds for references and iterables	625.169	626.761	3908.320	1902.8	-	1611	1361	95	3304
-2026-11-19	c6cb509	into_iter on references	625.169	626.835	3906.040	1902.8	-	1611	1361	95	3302
-2026-11-19	7c07b8f	E0507 for self by value through a reference	625.168	626.835	3908.188	1902.8	-	1611	1361	95	3305
-2026-11-19	734f305	derived Copy needs Copy arguments	625.171	626.837	3906.222	1902.8	-	1611	1361	95	3307
-2026-11-19	eed5907	&*String / &*Vec reborrows	625.167	626.758	3908.001	1902.8	10.8927	1616	1361	95	3307
-2026-11-19	535ab59	impls for fn pointers	625.171	626.762	3908.150	1902.8	-	1616	1366	95	3307
-2026-11-19	40a457e	impls for raw pointers and !	625.171	626.763	3906.213	1902.8	-	1617	1366	95	3309
-2026-11-19	534e950	destructuring by-value captures	625.171	626.762	3908.309	1902.8	-	1617	1366	95	3309
-2026-11-19	bf7e12c	compound assignment order	625.171	626.762	3907.739	1902.8	-	1618	1366	95	3310
-2026-11-19	a6204f3	struct literal field order before ..base	625.174	626.766	3909.763	1902.8	-	1620	1366	95	3309
-2026-11-19	395abc3	compound assignment without lookahead; check as the least of 3	625.175	626.767	3907.639	1902.8	-	1620	1366	95	3310
-2026-11-19	118d4ef	let _ = unit struct drops	625.265	626.856	3907.728	1902.8	-	1623	1368	95	3307
-2026-11-19	15a06b9	drops of for-loop temporaries	625.260	626.927	3909.618	1902.8	-	1624	1368	95	3306
-2026-11-19	7f430ff	dyn bindings; KPIs now also on traits and crates	625.264	626.930	3907.460	1902.8	10.8765	1626	1368	95	3306	1178.212	62.888	11.224	317.391
-2026-11-19	eaf8aa7+	no-op: stat stamps short-circuit (blaze-vfs rule); prelude select: byte index for has + prefilters for any	0.870	589.829	3872.803	1902.8	-	-	-	-	-	1178.494	63.044	11.253	317.374
-2026-11-19	731f606+	default fns through a type (S::f / <S as T>::f / S::f as value), f64::from_bits, macro args with turbofish commas	0.870	589.849	3872.959	1902.8	-	1628	1368	95	3303	1178.706	63.034	11.254	317.384
-2026-11-19	f86ca09+	Box<[T]>: unsize coercion from Box<[T; N]>, drop glue, deref/index/methods; E0277 for unsized slice/array elements	0.868	590.013	3873.856	1902.8	-	1631	1368	95	3309	1179.430	63.035	11.241	317.255
-2026-11-19	9af93dd+	match move out of a field zeroes it; fat ref scrutinee copied; non-literal const patterns type the scrutinee	0.870	590.133	3874.507	1902.8	-	1634	1368	95	3310	1179.527	63.032	11.255	317.299
-2026-11-19	08086f5+	f32 literals rounded once; as_str for &*String rewrites in the prelude; Box<_> annotation not replaced by another shape	0.870	590.133	3874.751	1902.8	-	1638	1370	95	3310	1179.852	63.152	11.255	317.519
-2026-11-19	64564af+	rename program types that collide with the prelude's (__u_); generic impls for &[T; N] / &[T] meet bounds	0.873	591.021	3875.670	1902.8	-	1646	1374	95	3316	1179.525	63.242	11.268	317.732
-2026-11-19	f4f96cf+	methods of impls for [T; N] / &[T; N] / &[T]	0.873	591.044	3875.539	1902.8	-	1646	1374	95	3317	1179.886	63.283	11.270	317.702
-2026-11-19	a55841b+	lifetime-only GAT args (Self::F<'a>); default fns through blanket impls; T::f via the trait	0.868	590.898	3875.286	1902.8	-	1648	1390	95	3321	1180.030	63.235	11.242	317.737
-2026-11-19	ad70905+	impl Trait inside a declared type (Result<(), impl Debug>) inferred with the declared parts; self-recursive impl Trait bodies	0.871	590.703	3875.429	1902.8	-	1649	1391	95	3321	1179.913	63.290	11.257	317.838
-2026-11-19	bc3181b+	cfg item ends; brace macro statements spliced; local bindings not renamed as crate items; ManuallyDrop field; thread::panicking; unit-struct instances	0.871	590.633	3873.105	1902.8	-	1650	1392	95	3322	1179.998	63.263	11.259	318.883
-2026-11-19	32dacd1+	byteorder: to_be/from_be, ptr::copy*, <T>::f, chunks_mut, io::Result<T>, io::Write/Read::read_exact/Cursor, fmt::Write	0.872	591.493	3877.977	1902.8	-	-	-	-	-	1180.398	63.430	11.262	319.562
-2026-11-19	61f478f+	#[path] mod files, str::from_utf8 via use core::str, Utf8Error::error_len, impl Error for std error types, attributes left at the end of a file	0.872	591.197	3878.293	1902.8	-	1658	1395	95	3318	1180.310	63.496	11.261	320.207
-2026-11-19	19d10c0+	borrowck: an assigned value of a type without references carries no loans	0.872	591.198	3879.088	1902.8	-	1658	1395	95	3319	1180.041	63.497	11.261	320.259
-2026-11-19	4c7e69a+	errors in a dependency crate's functions at their file's lines; (at L:C) relocated too	0.872	591.227	3879.380	1902.8	-	1658	1395	95	3318	1180.379	63.489	11.262	320.316
-2026-11-19	5d5bcd0+	destructuring assignment; let (a, b); without a value; let _: T;	0.872	591.476	3882.919	1902.8	-	-	-	-	-	1180.327	63.504	11.262	320.311
-2026-11-19	0b56444+	E0507: a move out of *x for a Deref type (Rc, ..)	0.872	592.058	3884.202	1902.8	-	1663	1401	95	3315	1180.401	63.468	11.262	320.338
-2026-11-19	a3ceff5+	E0507 also for a pattern moving out of *rc	0.870	592.224	3883.039	1902.8	-	1663	1401	95	3315	1180.507	63.504	11.249	320.312
-2026-11-19	807aa18+	dyn: no vtable entry for methods dyn cannot call, self: Box<Self> through Box<dyn>, E0038	0.872	591.610	3883.064	1902.8	-	1671	1401	95	3317	1180.743	63.506	11.263	320.328
-2026-11-19	55b8640+	E0038: own-trait rules (Self in signature, own generics, PartialEq supertrait)	0.872	591.506	3882.942	1902.8	-	1671	1402	95	3315	1180.927	63.472	11.263	320.397
-2026-11-19	bd7f2c7+	E0191: dyn Tr binds every associated type of Tr	0.872	592.132	3882.821	1902.8	-	1671	1402	95	3318	1180.704	63.499	11.264	320.458
-2026-11-19	e616656+	E0191 for dyn Iterator: the trait's type Item is selected with it	0.872	592.135	3884.061	1902.8	-	1671	1402	95	3318	1180.983	63.509	11.264	320.524
-2026-11-19	36f5544+	macros: textual scope (cannot find macro above its definition), pub m!(); fmt macros after expansion spacing	0.875	591.494	3882.753	1902.8	-	1676	1405	95	3321	1181.068	63.517	11.278	320.422
-2026-11-19	afa8258+	integer literal typed by the one integer impl with the method; methods through nested Box<number>, self: Box<Self> on numbers	0.873	591.511	3882.752	1902.8	-	1679	1405	95	3322	1180.894	63.510	11.265	320.366
-2026-11-19	fb2070b+	ops: BitAndAssign/BitOrAssign/BitXorAssign/ShlAssign/ShrAssign/Shl/Shr traits for user impls	0.873	592.023	3881.059	1902.8	-	1679	1405	95	3324	1181.280	64.135	11.269	323.453
-2026-11-19	fb2070b+	ops: Bit*Assign/Shl*/Shr* traits; selection caches op/cmp/gated trait lookups per item	0.871	591.396	3878.918	1902.8	-	1679	1405	95	3323	1180.711	63.168	11.258	319.880
-2026-11-19	5e449f6+	empty arrays: T from the other args, Box::<T>::new([]), let _: T = []; Box<[T; N]> methods	0.874	591.582	3879.054	1902.8	-	1682	1406	95	3324	1181.028	63.220	11.272	320.003
-2026-11-19	ee10b39+	Box<[T]> == Box<[T]>; match [] typed by its const pattern	0.876	591.641	3879.056	1902.8	-	1684	1406	95	3324	1181.534	63.265	11.286	319.962
-2026-11-19	e468530+	default methods of generic traits: the trait's arguments from the receiver type's impl	0.874	591.348	3878.938	1902.8	-	1688	1407	95	3321	1181.506	63.257	11.272	319.963
-2026-11-19	b51ec2c+	{:?} of raw pointers (hex address via __exr_fmt_ptr, selected only with *const/*mut)	0.874	591.752	3881.031	1902.8	-	1696	1407	95	3321	1181.351	63.311	11.272	319.961
-2026-11-19	a0a6c39+	integer literal typed by a default method of a trait an integer type implements (3.hi())	0.874	591.826	3881.076	1902.8	-	1696	1407	95	3321	1181.005	63.337	11.272	320.011
-2026-11-19	ca0796b+	Debug for Range/RangeInclusive; a range used by itself with .next() selects Iterator	0.874	591.839	3879.173	1902.8	-	1698	1408	95	3321	1182.227	63.409	11.273	321.305
-2026-11-19	ca0796b+	Debug for Range/RangeInclusive (without the .next() selection heuristic)	0.876	591.841	3879.175	1902.8	-	1698	1408	95	3321	1181.928	63.463	11.285	321.385
-2026-11-19	ca0796b+	Debug for Range/RangeInclusive, gated on Debug formatting	0.874	591.679	3879.025	1902.8	-	1	-	-	-	1181.649	63.574	11.273	321.099
-2026-11-19	ca0796b+	Debug for ranges (gated); selection: name-only items decided by one lookup, header-only classification tables	0.874	591.131	3879.121	1902.8	-	1698	1408	95	3322	1181.488	63.351	11.273	319.238
-2026-11-19	5dea15e+	const blocks: assignments to the block's locals in array lengths	0.874	591.190	3879.257	1902.8	-	1698	1409	95	3322	1181.744	63.324	11.273	319.414
-2026-11-19	b1ef5f1+	RPITIT: a trait's default method returning impl Trait takes its body's type	0.874	591.130	3879.257	1902.8	-	1698	1413	95	3320	1181.687	63.360	11.273	319.383
-2026-11-19	28d1228+	impl Iterator<Item = T> returning a range: the range's literals take T	0.876	591.205	3879.257	1902.8	-	1698	1413	95	3319	1181.468	63.329	11.287	319.518
-2026-11-19	3fbfec8+	Vec::into_boxed_slice; Range::is_empty; iterator chains after (0..v.len())	0.874	590.846	3879.610	1902.8	-	1698	1416	95	3320	1181.971	63.511	11.274	320.484
-2026-11-19	904658b+	for x in an Option / Result value: an if let, no iterator from the prelude	0.877	590.848	3879.613	1902.8	-	1698	1416	95	3319	1181.851	63.492	11.287	320.470
-2026-11-20	4a6120d+	turbofish on enum constructors: Ok::<_, ()>(x) / Some::<u8>(3)	0.875	590.868	3879.719	1902.8	-	1698	1417	95	3319	1181.945	63.432	11.274	320.458
-2026-11-20	05ea0c4+	lint: #![deny(unused_variables)] reports the first binding nothing reads	0.875	590.916	3881.428	1902.8	-	1698	1417	95	3327	1182.050	63.489	11.274	320.493
-2026-11-20	05ec776+	lint: #![deny(dead_code)] reports the first unused top-level item	0.875	591.151	3879.713	1902.8	-	1698	1417	95	3340	1181.980	63.496	11.275	320.553
-2026-11-20	38821f6+	lint: #![deny(unused_imports)] reports a top-level use nothing mentions	0.876	590.913	3879.694	1902.8	-	1698	1417	95	3345	1181.982	63.500	11.282	320.470
-2026-11-20	fab1fd3+	lint: #![deny(unreachable_code)] reports a statement after a diverging one	0.878	591.098	3879.451	1902.8	-	1698	1417	95	3351	1182.278	63.431	11.296	320.529
-2026-11-20	3c46afb	zustc / zust-analyzer linked non-PIE (build.rs: -no-pie for this package's bins): no loader relocations at start	0.697	590.833	3879.217	1902.8	10.8941	1698	1417	95	3352	1181.995	63.310	10.210	319.428
-2026-11-20	a14943c+	lint: #![deny(unused_must_use)] for a dropped Result and #[must_use] fns	0.697	591.046	3881.867	1902.8	-	1698	1417	95	3356	1181.721	63.259	10.210	319.440
-2026-11-20	83f2912+	lint: naming conventions (non_snake_case / non_camel_case_types / non_upper_case_globals)	0.695	590.942	3879.606	1902.8	-	1698	1417	95	3366	1181.702	63.284	10.196	319.379
-2026-11-20	fdd2ee3+	naming lints: struct / enum variant fields, parameters and lets	0.695	590.910	3879.582	1902.8	-	1698	1417	95	3368	1182.195	63.289	10.200	319.410
-2026-11-20	b4040ee+	naming lints: lifetime parameters	0.695	590.736	3879.594	1902.8	-	1698	1417	95	3370	1181.846	63.287	10.196	319.423
-2026-11-20	c311508+	E0432: a top-level use whose first segment names nothing	0.693	590.971	3879.979	1902.8	-	1698	1417	95	3404	1181.831	63.288	10.183	319.355
-2026-11-20	1e843fc+	E0252/E0255: a top-level use and another use or item of one name	0.695	591.057	4192.565	1902.8	-	1698	1417	95	3422	1183.547	63.229	10.196	319.388
-2026-11-20	c26b695+	E0252/E0255 check: names in a hash, skipped without a crate-root use (fixes the +8% check of c26b695)	0.697	590.798	3880.225	1902.8	-	1698	1417	95	3422	1182.767	63.233	10.210	319.466
-2026-11-20	7add9a9+	malformed built-in attributes (E0539/E0565)	0.695	591.043	3880.546	1902.8	-	1698	1417	95	3452	1183.051	63.287	10.196	319.339
-2026-11-20	e00a745+	duplicate-name check: skipped unless a crate-root item is a use (attributes alone no longer start it)	0.695	590.841	3880.615	1902.8	-	1698	1417	95	3453	1182.279	63.314	10.196	319.400
-2026-11-20	0765679	reference: 05ec776 with formal/ (no compiler change), measured again on this machine for the rows below	0.882	580.808	3851.454	1902.8	-	1698	1417	95	3327	1178.832	60.981	10.837	316.211
-2026-11-20	0765679+	borrowck: run the fixpoint to its end (a bound from the lattice's height)	0.882	580.299	3849.195	1902.8	-	1698	1417	95	3326	1179.225	60.973	10.837	316.127
-2026-11-20	98c6952+	cache: a tmp file per process when saving the cache and the stamps	0.882	580.437	3849.119	1902.8	-	1698	1417	95	3327	1178.897	60.975	10.837	316.198
-2026-11-20	985440c+	prelude: Vec capacity overflow panics, allocation failure aborts	0.884	580.076	3852.420	1902.8	-	1698	1417	95	3327	1175.882	61.114	10.851	318.080
-2026-11-20	e9f2440+	srcmap: circular modules are an error (they overflowed the stack); no-op and crates no-op are from the non-PIE link of a14943c, which the 4 rows above were measured without	0.703	580.420	3848.457	1902.8	-	1698	1417	95	3351	1176.189	60.907	9.792	317.000
-2026-11-20	cb39474+	srcmap: circular modules are found by realpath (a symbolic link then .. is another file)	0.703	580.134	3849.325	1902.8	-	1698	1417	95	3367	1175.739	61.003	9.826	316.982
-2026-11-20	623881a+	std::thread as green threads (makecontext / swapcontext): spawn, join, recv, Mutex, sleep, yield_now, atomic loads wait; static mut items of the prelude are named by their name	0.705	551.515	3822.905	1902.8	-	1700	1417	95	3404	1175.970	60.973	9.839	317.003
-2026-11-20	f371d7f+	attributes on items they cannot be used on	0.697	590.840	3880.642	1902.8	-	1698	1417	95	3462	1182.016	63.277	10.210	319.405
-2026-11-20	fbf1812+	E0277: unsized parameters, consts and statics	0.695	559.780	3850.450	1902.8	-	1700	1417	95	3474	1179.086	63.425	10.259	321.124
-2026-11-20	112b131	reference: 112b131 (after #9) measured again on this machine, for the rows below	0.695	559.828	3850.450	1902.8	-	-	-	-	-	1179.072	63.456	10.259	321.104
-2026-11-20	ad6d104+	E0432: use m::f with an inline mod m that defines no f	0.695	559.756	3850.456	1902.8	-	1700	1417	95	3479	1179.097	63.433	10.260	321.020
-2026-11-20	3c8f0b7+	E0261: undeclared lifetimes in free fns, structs, enums and statics	0.697	559.850	3851.539	1902.8	-	1700	1417	95	3490	1179.078	63.426	10.273	321.129
-2026-11-20	1b4b0ac+	E0106: missing lifetime specifiers (free fn returns, fields)	0.695	559.755	3851.910	1902.8	-	1700	1417	95	3503	1179.569	63.456	10.259	321.054
-2026-11-20	4c648ae	LSP check after the lint / resolution checks (no compiler change)	0.695	559.755	3851.910	1902.8	10.8992	1700	1417	95	3503	1179.486	63.376	10.259	321.020
-2026-11-20	d22d45f+	parser: a keyword is no declared name (expected identifier, found keyword)	0.697	559.824	3864.757	1902.8	-	1700	1417	95	3538	1181.703	63.447	10.273	321.242
-2026-11-20	8c012b2+	parser: reserved-keyword test by length (fixes check +0.33% of 8c012b2)	0.695	559.774	3854.649	1902.8	-	1700	1417	95	3537	1179.543	63.389	10.259	321.153
-2026-11-20	1328233+	cannot find attribute: an unknown attribute in a crate with no dependency	0.695	559.803	3854.826	1902.8	-	1700	1417	95	3559	1179.870	63.456	10.259	321.042
-2026-11-20	1e1f25f+	E0119: an unbounded blanket impl and an impl of its trait for a type	0.695	559.803	3854.910	1902.8	-	1700	1417	95	3562	1180.458	63.387	10.259	321.140
-2026-11-20	cc8898f+	fn values of <S as Tr>::m; std::u32::MAX-style paths; float integer constants	0.697	559.833	3854.988	1902.8	-	1701	1417	95	3562	1179.610	63.378	10.272	321.204
-2026-11-20	ed757a9+	prelude: AsRef / AsMut / Into / Borrow / BorrowMut / FromIterator declared for a program's own impls	0.692	559.709	3856.799	1902.8	-	1701	1422	95	3562	1179.888	63.419	10.246	321.430
-2026-11-20	255fde7+	module flattening: a glob import is shadowed by the scope's own item	0.695	559.711	3856.801	1902.8	-	1702	1427	95	3562	1180.132	63.475	10.259	321.400
-2026-11-20	0043490+	patterns: a path to a constant (Num::ZERO / u8::MAX) is equal to its value	0.695	559.723	3856.801	1902.8	-	1702	1429	95	3559	1179.607	63.419	10.259	321.381
-2026-11-20	75f44c7+	dyn Send / dyn Sync right behind a pointer	0.695	559.723	3856.822	1902.8	-	1703	1431	95	3561	1180.730	63.480	10.259	321.365
-2026-11-20	5ae4e4c+	an inherent and a trait impl's associated const of one name: Foo::C and <Foo as Tr>::C	0.697	559.733	3858.714	1902.8	-	1704	1432	95	3563	1181.000	63.476	10.273	321.510
-2026-11-20	6f4d8e6+	std HashMap / HashSet (random seeds, SipHash) -> Fx maps in program, types, macros, prelude, driver	0.695	559.731	3847.819	1902.8	10.8981	1704	1432	95	3563	1159.541	63.480	10.259	317.437
-2026-11-20	9cc1886+	zust-analyzer: Fx map in place of std HashMap	0.695	559.731	3847.819	1902.8	10.8498	-	-	-	-	1159.541	63.392	10.259	317.432
-2026-11-20	2ba1b4c+	driver2/build.rs and the lexer's glob set: Fx maps	0.695	559.726	3847.819	1902.8	-	1704	1432	95	3563	1159.534	63.446	10.259	314.906
-2026-11-20	81d4bd0+	slice is_sorted*, unary ops on numeric refs	0.695	559.648	3847.819	1902.8	-	1704	1433	95	3563	1159.659	63.394	10.259	314.915
-2026-11-20	b88ba4e+	match / if-let on a bare None: Option type from the patterns or inference	0.697	559.695	3847.841	1902.8	-	1705	1435	95	3564	1159.706	63.454	10.273	314.933
-2026-11-20	e36b7fd+	mem::discriminant, array::from_fn, big copies via memcpy	0.695	559.631	3847.089	1902.8	-	1707	1436	95	3564	1160.250	63.627	10.259	315.831
-2026-11-20	6edddd0+	prelude scan: the byte index covers lowercase letters too	0.694	548.563	3837.036	1902.8	-	-	-	-	-	1160.246	63.514	10.259	315.816
-2026-11-20	09ae27c+	#[link(name)] / -L; tests/ui links rust_test_helpers	0.696	548.916	3836.791	1902.8	-	1719	1436	95	3564	1160.186	63.549	10.273	315.849
-2026-11-20	ef67647+	extern C calls: structs of up to 16 bytes by value	0.695	548.115	3836.589	1902.8	-	1734	1443	97	3564	1160.175	63.639	10.259	315.898
-2026-11-20	20055f9+	match on unsuffixed literals: type from the patterns	0.695	548.176	3836.631	1902.8	-	1736	1443	97	3564	1160.210	63.550	10.259	315.917
-2026-11-20	707a395+	include!(..) of code, as items or an expression	0.695	547.166	3835.573	1902.8	-	1737	1446	97	3564	1160.142	63.491	10.259	315.887
-2026-11-20	174b0fe+	mod x; inside inline modules; cfg(true) / cfg(false); cfg_attr(p, cfg(q))	0.692	547.172	3835.668	1902.8	10.8483	1745	1448	97	3567	1160.165	63.605	10.270	316.105
-2026-11-20	aa059e7+	stringify! spacing as rustc prints; dbg!() / dbg!(a, b)	0.692	547.152	3835.704	1902.8	-	1747	1448	97	3567	1160.161	63.602	10.270	316.173
-2026-11-20	5c7cdc5+	&CONST / &CONST.f / &CONST[i] / &(42,).0 promoted to static data	0.692	547.080	3835.604	1902.8	-	1748	1448	97	3567	1160.139	63.425	10.270	315.925
-2026-11-20	d855b2a+	assignment eval order, condition temporaries, &mut self methods of numbers	0.695	547.137	3837.294	1902.8	-	1751	1448	97	3567	1160.420	63.431	10.283	315.985
-2026-11-20	cdb2f0f+	static data: const fn calls inlined; no silent zeros; Solver::lookup as loops	0.694	547.968	3837.321	1902.8	-	1752	1448	97	3567	1160.432	63.532	10.283	315.964
-2026-11-20	4ed592f+	into_iter of arrays (by value) and of iterators (identity)	0.692	547.124	3837.319	1902.8	-	1753	1448	97	3567	1160.421	63.438	10.270	316.082
-2026-11-20	2126394+	Option/Result::inspect, overflowing/wrapping div/rem, Iterator::unzip	0.695	547.075	3836.709	1902.8	-	-	-	-	-	1160.169	63.636	10.283	316.599
-2026-11-20	7a588e0+	thread_local keys: try_with and Cell/RefCell helpers; Cell::take, RefCell::take	0.692	546.999	3836.534	1902.8	-	1753	1450	97	3567	1159.753	63.665	10.270	316.653
-2026-11-20	d87684e+	Rc / Arc moved out of a closure's captures	0.692	546.986	3835.489	1902.8	-	1754	1451	97	3566	1160.573	63.632	10.270	316.491
+date	commit	change	noop_M	edit_M	check_M	cache_KiB	lsp_G	run	check	build	cfail	tr_check_M	tr_edit_M	cr_noop_M	cr_edit_M	pt_check_M	pt_edit_M
+2026-11-19	45579fc	reference: before per-change tracking	625.309	626.912	3905.245	1902.8	10.8855	1536	1271	89	2844	-	-	-	-	-	-
+2026-11-19	927540d	pointee as the expected type of `&x` coerced to a raw pointer	625.309	626.912	3905.365	1902.8	-	1538	1271	89	2845	-	-	-	-	-	-
+2026-11-19	b0edbd7	`_` in an annotation is a new inference variable (with a Debug-printing check)	625.130	626.989	3963.523	1902.8	-	1545	1273	89	2843	-	-	-	-	-	-
+2026-11-19	042f17d	methods of numbers in a Box, blanket-impl methods of numbers	625.130	626.990	3963.563	1902.8	-	1545	1273	89	2850	-	-	-	-	-	-
+2026-11-19	89d9fe9	drop the Debug-printing check on annotated lets	625.127	626.729	3905.088	1902.8	-	1545	1273	89	2850	-	-	-	-	-	-
+2026-11-19	6f5a272	tests/ui: skip compiletest-ignore-dir directories (module files of other tests; run-pass 2413 -> 2385 applicable)	625.187	626.789	3905.209	1902.8	-	1544	1273	89	2850	-	-	-	-	-	-
+2026-11-19	1271aae	skip `use` items in bodies (from macro expansions)	625.185	626.787	3904.932	1902.8	-	1547	1273	89	2850	-	-	-	-	-	-
+2026-11-19	5ae34e1	items from statement-position macro expansions	625.184	626.787	3905.089	1902.8	-	1552	1276	89	2850	-	-	-	-	-	-
+2026-11-19	9539e64	macro definitions from expansions; statement-position expansions into the block	625.185	626.787	3905.062	1902.8	-	1553	1278	89	2850	-	-	-	-	-	-
+2026-11-19	6c8b074	expand_reference follows the statement-position rules (test fix)	625.185	626.787	3905.063	1902.8	-	1553	1278	89	2850	-	-	-	-	-	-
+2026-11-19	a593fd0	Box::into_raw / from_raw, *mut T for a let written *const T	625.186	626.788	3905.063	1902.8	-	1555	1278	89	2850	-	-	-	-	-	-
+2026-11-19	2ddc076	closures with no captures as fn pointers	625.185	626.788	3905.285	1902.8	-	1559	1283	89	2851	-	-	-	-	-	-
+2026-11-19	a474393	LSP measured on a fixed snapshot (closures as fn pointers included)	625.125	626.728	3905.165	1902.8	10.8931	1559	1283	89	2851	-	-	-	-	-	-
+2026-11-19	6477f49	generic fns returning impl Trait (a parameter type)	625.185	626.788	3905.335	1902.8	10.8943	1559	1290	89	2851	-	-	-	-	-	-
+2026-11-19	a9f1a01	generic impl Trait returns typed per instance	625.191	626.794	3905.274	1902.8	10.8942	1560	1300	89	2854	-	-	-	-	-	-
+2026-11-19	9568d59	Box::pin and Pin<Box<dyn Future<Output = T>>>	625.191	626.794	3905.841	1902.8	10.8958	1560	1307	89	2856	-	-	-	-	-	-
+2026-11-19	0902b52	inline const, if-let guards	625.127	626.729	3905.424	1902.8	10.8962	1567	1323	93	2861	-	-	-	-	-	-
+2026-11-19	85225ee	reborrow of fat pointers through *, (*f)(x)	625.189	626.791	3905.638	1902.8	10.8944	1570	1323	93	2860	-	-	-	-	-	-
+2026-11-19	8fb090b	TypeId::of, type_name (check +0.04%: all in glibc malloc (_int_malloc, malloc_consolidate), zustc's own code is unchanged)	625.242	626.596	3907.370	1902.8	-	1570	1323	94	2860	-	-	-	-	-	-
+2026-11-19	b0a0794	match *x on slices; *slice as a value is E0277	625.241	626.594	3907.294	1902.8	-	1572	1324	94	2858	-	-	-	-	-	-
+2026-11-19	c54a325	match exhaustiveness (E0004)	625.241	626.595	3907.292	1902.8	10.9010	1572	1324	94	2886	-	-	-	-	-	-
+2026-11-19	e44eb9f	qualified paths: trait-default consts, impls for ()	625.245	626.598	3907.428	1902.8	-	1577	1324	94	2885	-	-	-	-	-	-
+2026-11-19	9b7d57d	impl Trait nested in return types	626.673	627.612	3905.348	1902.8	-	1577	1334	94	2883	-	-	-	-	-	-
+2026-11-19	47dc4e7	nested impl Trait without a SigSyn field	625.250	626.603	3907.597	1902.8	10.8943	1577	1334	94	2883	-	-	-	-	-	-
+2026-11-19	d1718df	associated functions through type aliases	625.250	626.604	3907.597	1902.8	-	1579	1334	94	2883	-	-	-	-	-	-
+2026-11-19	3123e91	slice methods, integer abs/neg variants, impl line (prelude +50 lines)	625.597	626.655	3906.342	1902.8	-	1585	1339	94	2894	-	-	-	-	-	-
+2026-11-19	2e73c1f	impls for &T of a type parameter	625.352	626.411	3906.158	1902.8	-	1586	1342	94	2895	-	-	-	-	-	-
+2026-11-19	0aa45a9	slice patterns in inference, E0527/E0528	625.350	626.409	3906.603	1902.8	10.8969	1587	1342	94	2904	-	-	-	-	-	-
+2026-11-19	1f1966e	unreachable patterns (deny), arm positions	627.309	628.367	3908.464	1902.8	10.8925	1587	1342	94	2967	-	-	-	-	-	-
+2026-11-19	8c2be84	deny attribute from the file head	625.356	626.415	3906.511	1902.8	-	1587	1342	94	2967	-	-	-	-	-	-
+2026-11-19	8b506a2	error positions for more expressions, E0121, E0746	625.358	626.417	3906.929	1902.8	-	1587	1342	94	3085	-	-	-	-	-	-
+2026-11-19	e44a8e6	errors at their statement (let positions)	625.595	626.655	3911.885	1902.8	10.8857	1587	1342	94	3248	-	-	-	-	-	-
+2026-11-19	92f21c4	statement positions on the error path only	625.595	626.653	3907.647	1902.8	-	1587	1342	94	3248	-	-	-	-	-	-
+2026-11-19	539a660	missing names at their line in the item	625.541	626.600	3907.583	1902.8	-	1587	1342	94	3274	-	-	-	-	-	-
+2026-11-19	e456175	shadowable Cycle, JoinHandle, Chars	625.422	626.481	3907.557	1902.8	-	1587	1342	94	3275	-	-	-	-	-	-
+2026-11-19	be5ab51	unit struct values in inference, E0055	625.294	626.353	3907.619	1902.8	10.8942	1593	1347	94	3296	-	-	-	-	-	-
+2026-11-19	e54e6a0	Pin/Box receivers, std::task, E0050/E0053	625.230	626.822	3907.199	1902.8	10.8929	1595	1350	94	3308	-	-	-	-	-	-
+2026-11-19	f7bd02b	unit structs through module paths	625.233	626.899	3905.262	1902.8	-	1599	1354	94	3304	-	-	-	-	-	-
+2026-11-19	9f34243	supertrait methods through dyn	625.518	627.166	3908.350	1902.8	10.8874	1603	1356	94	3307	-	-	-	-	-	-
+2026-11-19	4ed6b24	supertraits without a Summary field	625.171	626.762	3907.087	1902.8	-	1603	1356	94	3307	-	-	-	-	-	-
+2026-11-19	f9d67f9	nested items with qualifiers	627.040	628.631	3908.958	1902.8	-	1603	1360	94	3307	-	-	-	-	-	-
+2026-11-19	62e578f	revert qualifier hoisting (+0.30% for 4 tests)	625.171	626.837	3907.087	1902.8	-	1603	1356	94	3306	-	-	-	-	-	-
+2026-11-19	b9139df	tuple struct constructors as let values	625.171	626.837	3907.087	1902.8	-	1605	1356	94	3307	-	-	-	-	-	-
+2026-11-19	d7ffa57	generic fn values through let	625.169	626.835	3908.058	1902.8	-	1606	1356	94	3306	-	-	-	-	-	-
+2026-11-19	0586fb6	impls for references to concrete types	625.170	626.836	3908.224	1902.8	10.8901	1608	1360	95	3304	-	-	-	-	-	-
+2026-11-19	bf85c64	std bounds for references and iterables	625.169	626.761	3908.320	1902.8	-	1611	1361	95	3304	-	-	-	-	-	-
+2026-11-19	c6cb509	into_iter on references	625.169	626.835	3906.040	1902.8	-	1611	1361	95	3302	-	-	-	-	-	-
+2026-11-19	7c07b8f	E0507 for self by value through a reference	625.168	626.835	3908.188	1902.8	-	1611	1361	95	3305	-	-	-	-	-	-
+2026-11-19	734f305	derived Copy needs Copy arguments	625.171	626.837	3906.222	1902.8	-	1611	1361	95	3307	-	-	-	-	-	-
+2026-11-19	eed5907	&*String / &*Vec reborrows	625.167	626.758	3908.001	1902.8	10.8927	1616	1361	95	3307	-	-	-	-	-	-
+2026-11-19	535ab59	impls for fn pointers	625.171	626.762	3908.150	1902.8	-	1616	1366	95	3307	-	-	-	-	-	-
+2026-11-19	40a457e	impls for raw pointers and !	625.171	626.763	3906.213	1902.8	-	1617	1366	95	3309	-	-	-	-	-	-
+2026-11-19	534e950	destructuring by-value captures	625.171	626.762	3908.309	1902.8	-	1617	1366	95	3309	-	-	-	-	-	-
+2026-11-19	bf7e12c	compound assignment order	625.171	626.762	3907.739	1902.8	-	1618	1366	95	3310	-	-	-	-	-	-
+2026-11-19	a6204f3	struct literal field order before ..base	625.174	626.766	3909.763	1902.8	-	1620	1366	95	3309	-	-	-	-	-	-
+2026-11-19	395abc3	compound assignment without lookahead; check as the least of 3	625.175	626.767	3907.639	1902.8	-	1620	1366	95	3310	-	-	-	-	-	-
+2026-11-19	118d4ef	let _ = unit struct drops	625.265	626.856	3907.728	1902.8	-	1623	1368	95	3307	-	-	-	-	-	-
+2026-11-19	15a06b9	drops of for-loop temporaries	625.260	626.927	3909.618	1902.8	-	1624	1368	95	3306	-	-	-	-	-	-
+2026-11-19	7f430ff	dyn bindings; KPIs now also on traits and crates	625.264	626.930	3907.460	1902.8	10.8765	1626	1368	95	3306	1178.212	62.888	11.224	317.391	-	-
+2026-11-19	eaf8aa7+	no-op: stat stamps short-circuit (blaze-vfs rule); prelude select: byte index for has + prefilters for any	0.870	589.829	3872.803	1902.8	-	-	-	-	-	1178.494	63.044	11.253	317.374	-	-
+2026-11-19	731f606+	default fns through a type (S::f / <S as T>::f / S::f as value), f64::from_bits, macro args with turbofish commas	0.870	589.849	3872.959	1902.8	-	1628	1368	95	3303	1178.706	63.034	11.254	317.384	-	-
+2026-11-19	f86ca09+	Box<[T]>: unsize coercion from Box<[T; N]>, drop glue, deref/index/methods; E0277 for unsized slice/array elements	0.868	590.013	3873.856	1902.8	-	1631	1368	95	3309	1179.430	63.035	11.241	317.255	-	-
+2026-11-19	9af93dd+	match move out of a field zeroes it; fat ref scrutinee copied; non-literal const patterns type the scrutinee	0.870	590.133	3874.507	1902.8	-	1634	1368	95	3310	1179.527	63.032	11.255	317.299	-	-
+2026-11-19	08086f5+	f32 literals rounded once; as_str for &*String rewrites in the prelude; Box<_> annotation not replaced by another shape	0.870	590.133	3874.751	1902.8	-	1638	1370	95	3310	1179.852	63.152	11.255	317.519	-	-
+2026-11-19	64564af+	rename program types that collide with the prelude's (__u_); generic impls for &[T; N] / &[T] meet bounds	0.873	591.021	3875.670	1902.8	-	1646	1374	95	3316	1179.525	63.242	11.268	317.732	-	-
+2026-11-19	f4f96cf+	methods of impls for [T; N] / &[T; N] / &[T]	0.873	591.044	3875.539	1902.8	-	1646	1374	95	3317	1179.886	63.283	11.270	317.702	-	-
+2026-11-19	a55841b+	lifetime-only GAT args (Self::F<'a>); default fns through blanket impls; T::f via the trait	0.868	590.898	3875.286	1902.8	-	1648	1390	95	3321	1180.030	63.235	11.242	317.737	-	-
+2026-11-19	ad70905+	impl Trait inside a declared type (Result<(), impl Debug>) inferred with the declared parts; self-recursive impl Trait bodies	0.871	590.703	3875.429	1902.8	-	1649	1391	95	3321	1179.913	63.290	11.257	317.838	-	-
+2026-11-19	bc3181b+	cfg item ends; brace macro statements spliced; local bindings not renamed as crate items; ManuallyDrop field; thread::panicking; unit-struct instances	0.871	590.633	3873.105	1902.8	-	1650	1392	95	3322	1179.998	63.263	11.259	318.883	-	-
+2026-11-19	32dacd1+	byteorder: to_be/from_be, ptr::copy*, <T>::f, chunks_mut, io::Result<T>, io::Write/Read::read_exact/Cursor, fmt::Write	0.872	591.493	3877.977	1902.8	-	-	-	-	-	1180.398	63.430	11.262	319.562	-	-
+2026-11-19	61f478f+	#[path] mod files, str::from_utf8 via use core::str, Utf8Error::error_len, impl Error for std error types, attributes left at the end of a file	0.872	591.197	3878.293	1902.8	-	1658	1395	95	3318	1180.310	63.496	11.261	320.207	-	-
+2026-11-19	19d10c0+	borrowck: an assigned value of a type without references carries no loans	0.872	591.198	3879.088	1902.8	-	1658	1395	95	3319	1180.041	63.497	11.261	320.259	-	-
+2026-11-19	4c7e69a+	errors in a dependency crate's functions at their file's lines; (at L:C) relocated too	0.872	591.227	3879.380	1902.8	-	1658	1395	95	3318	1180.379	63.489	11.262	320.316	-	-
+2026-11-19	5d5bcd0+	destructuring assignment; let (a, b); without a value; let _: T;	0.872	591.476	3882.919	1902.8	-	-	-	-	-	1180.327	63.504	11.262	320.311	-	-
+2026-11-19	0b56444+	E0507: a move out of *x for a Deref type (Rc, ..)	0.872	592.058	3884.202	1902.8	-	1663	1401	95	3315	1180.401	63.468	11.262	320.338	-	-
+2026-11-19	a3ceff5+	E0507 also for a pattern moving out of *rc	0.870	592.224	3883.039	1902.8	-	1663	1401	95	3315	1180.507	63.504	11.249	320.312	-	-
+2026-11-19	807aa18+	dyn: no vtable entry for methods dyn cannot call, self: Box<Self> through Box<dyn>, E0038	0.872	591.610	3883.064	1902.8	-	1671	1401	95	3317	1180.743	63.506	11.263	320.328	-	-
+2026-11-19	55b8640+	E0038: own-trait rules (Self in signature, own generics, PartialEq supertrait)	0.872	591.506	3882.942	1902.8	-	1671	1402	95	3315	1180.927	63.472	11.263	320.397	-	-
+2026-11-19	bd7f2c7+	E0191: dyn Tr binds every associated type of Tr	0.872	592.132	3882.821	1902.8	-	1671	1402	95	3318	1180.704	63.499	11.264	320.458	-	-
+2026-11-19	e616656+	E0191 for dyn Iterator: the trait's type Item is selected with it	0.872	592.135	3884.061	1902.8	-	1671	1402	95	3318	1180.983	63.509	11.264	320.524	-	-
+2026-11-19	36f5544+	macros: textual scope (cannot find macro above its definition), pub m!(); fmt macros after expansion spacing	0.875	591.494	3882.753	1902.8	-	1676	1405	95	3321	1181.068	63.517	11.278	320.422	-	-
+2026-11-19	afa8258+	integer literal typed by the one integer impl with the method; methods through nested Box<number>, self: Box<Self> on numbers	0.873	591.511	3882.752	1902.8	-	1679	1405	95	3322	1180.894	63.510	11.265	320.366	-	-
+2026-11-19	fb2070b+	ops: BitAndAssign/BitOrAssign/BitXorAssign/ShlAssign/ShrAssign/Shl/Shr traits for user impls	0.873	592.023	3881.059	1902.8	-	1679	1405	95	3324	1181.280	64.135	11.269	323.453	-	-
+2026-11-19	fb2070b+	ops: Bit*Assign/Shl*/Shr* traits; selection caches op/cmp/gated trait lookups per item	0.871	591.396	3878.918	1902.8	-	1679	1405	95	3323	1180.711	63.168	11.258	319.880	-	-
+2026-11-19	5e449f6+	empty arrays: T from the other args, Box::<T>::new([]), let _: T = []; Box<[T; N]> methods	0.874	591.582	3879.054	1902.8	-	1682	1406	95	3324	1181.028	63.220	11.272	320.003	-	-
+2026-11-19	ee10b39+	Box<[T]> == Box<[T]>; match [] typed by its const pattern	0.876	591.641	3879.056	1902.8	-	1684	1406	95	3324	1181.534	63.265	11.286	319.962	-	-
+2026-11-19	e468530+	default methods of generic traits: the trait's arguments from the receiver type's impl	0.874	591.348	3878.938	1902.8	-	1688	1407	95	3321	1181.506	63.257	11.272	319.963	-	-
+2026-11-19	b51ec2c+	{:?} of raw pointers (hex address via __exr_fmt_ptr, selected only with *const/*mut)	0.874	591.752	3881.031	1902.8	-	1696	1407	95	3321	1181.351	63.311	11.272	319.961	-	-
+2026-11-19	a0a6c39+	integer literal typed by a default method of a trait an integer type implements (3.hi())	0.874	591.826	3881.076	1902.8	-	1696	1407	95	3321	1181.005	63.337	11.272	320.011	-	-
+2026-11-19	ca0796b+	Debug for Range/RangeInclusive; a range used by itself with .next() selects Iterator	0.874	591.839	3879.173	1902.8	-	1698	1408	95	3321	1182.227	63.409	11.273	321.305	-	-
+2026-11-19	ca0796b+	Debug for Range/RangeInclusive (without the .next() selection heuristic)	0.876	591.841	3879.175	1902.8	-	1698	1408	95	3321	1181.928	63.463	11.285	321.385	-	-
+2026-11-19	ca0796b+	Debug for Range/RangeInclusive, gated on Debug formatting	0.874	591.679	3879.025	1902.8	-	1	-	-	-	1181.649	63.574	11.273	321.099	-	-
+2026-11-19	ca0796b+	Debug for ranges (gated); selection: name-only items decided by one lookup, header-only classification tables	0.874	591.131	3879.121	1902.8	-	1698	1408	95	3322	1181.488	63.351	11.273	319.238	-	-
+2026-11-19	5dea15e+	const blocks: assignments to the block's locals in array lengths	0.874	591.190	3879.257	1902.8	-	1698	1409	95	3322	1181.744	63.324	11.273	319.414	-	-
+2026-11-19	b1ef5f1+	RPITIT: a trait's default method returning impl Trait takes its body's type	0.874	591.130	3879.257	1902.8	-	1698	1413	95	3320	1181.687	63.360	11.273	319.383	-	-
+2026-11-19	28d1228+	impl Iterator<Item = T> returning a range: the range's literals take T	0.876	591.205	3879.257	1902.8	-	1698	1413	95	3319	1181.468	63.329	11.287	319.518	-	-
+2026-11-19	3fbfec8+	Vec::into_boxed_slice; Range::is_empty; iterator chains after (0..v.len())	0.874	590.846	3879.610	1902.8	-	1698	1416	95	3320	1181.971	63.511	11.274	320.484	-	-
+2026-11-19	904658b+	for x in an Option / Result value: an if let, no iterator from the prelude	0.877	590.848	3879.613	1902.8	-	1698	1416	95	3319	1181.851	63.492	11.287	320.470	-	-
+2026-11-20	4a6120d+	turbofish on enum constructors: Ok::<_, ()>(x) / Some::<u8>(3)	0.875	590.868	3879.719	1902.8	-	1698	1417	95	3319	1181.945	63.432	11.274	320.458	-	-
+2026-11-20	05ea0c4+	lint: #![deny(unused_variables)] reports the first binding nothing reads	0.875	590.916	3881.428	1902.8	-	1698	1417	95	3327	1182.050	63.489	11.274	320.493	-	-
+2026-11-20	05ec776+	lint: #![deny(dead_code)] reports the first unused top-level item	0.875	591.151	3879.713	1902.8	-	1698	1417	95	3340	1181.980	63.496	11.275	320.553	-	-
+2026-11-20	38821f6+	lint: #![deny(unused_imports)] reports a top-level use nothing mentions	0.876	590.913	3879.694	1902.8	-	1698	1417	95	3345	1181.982	63.500	11.282	320.470	-	-
+2026-11-20	fab1fd3+	lint: #![deny(unreachable_code)] reports a statement after a diverging one	0.878	591.098	3879.451	1902.8	-	1698	1417	95	3351	1182.278	63.431	11.296	320.529	-	-
+2026-11-20	3c46afb	zustc / zust-analyzer linked non-PIE (build.rs: -no-pie for this package's bins): no loader relocations at start	0.697	590.833	3879.217	1902.8	10.8941	1698	1417	95	3352	1181.995	63.310	10.210	319.428	-	-
+2026-11-20	a14943c+	lint: #![deny(unused_must_use)] for a dropped Result and #[must_use] fns	0.697	591.046	3881.867	1902.8	-	1698	1417	95	3356	1181.721	63.259	10.210	319.440	-	-
+2026-11-20	83f2912+	lint: naming conventions (non_snake_case / non_camel_case_types / non_upper_case_globals)	0.695	590.942	3879.606	1902.8	-	1698	1417	95	3366	1181.702	63.284	10.196	319.379	-	-
+2026-11-20	fdd2ee3+	naming lints: struct / enum variant fields, parameters and lets	0.695	590.910	3879.582	1902.8	-	1698	1417	95	3368	1182.195	63.289	10.200	319.410	-	-
+2026-11-20	b4040ee+	naming lints: lifetime parameters	0.695	590.736	3879.594	1902.8	-	1698	1417	95	3370	1181.846	63.287	10.196	319.423	-	-
+2026-11-20	c311508+	E0432: a top-level use whose first segment names nothing	0.693	590.971	3879.979	1902.8	-	1698	1417	95	3404	1181.831	63.288	10.183	319.355	-	-
+2026-11-20	1e843fc+	E0252/E0255: a top-level use and another use or item of one name	0.695	591.057	4192.565	1902.8	-	1698	1417	95	3422	1183.547	63.229	10.196	319.388	-	-
+2026-11-20	c26b695+	E0252/E0255 check: names in a hash, skipped without a crate-root use (fixes the +8% check of c26b695)	0.697	590.798	3880.225	1902.8	-	1698	1417	95	3422	1182.767	63.233	10.210	319.466	-	-
+2026-11-20	7add9a9+	malformed built-in attributes (E0539/E0565)	0.695	591.043	3880.546	1902.8	-	1698	1417	95	3452	1183.051	63.287	10.196	319.339	-	-
+2026-11-20	e00a745+	duplicate-name check: skipped unless a crate-root item is a use (attributes alone no longer start it)	0.695	590.841	3880.615	1902.8	-	1698	1417	95	3453	1182.279	63.314	10.196	319.400	-	-
+2026-11-20	0765679	reference: 05ec776 with formal/ (no compiler change), measured again on this machine for the rows below	0.882	580.808	3851.454	1902.8	-	1698	1417	95	3327	1178.832	60.981	10.837	316.211	-	-
+2026-11-20	0765679+	borrowck: run the fixpoint to its end (a bound from the lattice's height)	0.882	580.299	3849.195	1902.8	-	1698	1417	95	3326	1179.225	60.973	10.837	316.127	-	-
+2026-11-20	98c6952+	cache: a tmp file per process when saving the cache and the stamps	0.882	580.437	3849.119	1902.8	-	1698	1417	95	3327	1178.897	60.975	10.837	316.198	-	-
+2026-11-20	985440c+	prelude: Vec capacity overflow panics, allocation failure aborts	0.884	580.076	3852.420	1902.8	-	1698	1417	95	3327	1175.882	61.114	10.851	318.080	-	-
+2026-11-20	e9f2440+	srcmap: circular modules are an error (they overflowed the stack); no-op and crates no-op are from the non-PIE link of a14943c, which the 4 rows above were measured without	0.703	580.420	3848.457	1902.8	-	1698	1417	95	3351	1176.189	60.907	9.792	317.000	-	-
+2026-11-20	cb39474+	srcmap: circular modules are found by realpath (a symbolic link then .. is another file)	0.703	580.134	3849.325	1902.8	-	1698	1417	95	3367	1175.739	61.003	9.826	316.982	-	-
+2026-11-20	623881a+	std::thread as green threads (makecontext / swapcontext): spawn, join, recv, Mutex, sleep, yield_now, atomic loads wait; static mut items of the prelude are named by their name	0.705	551.515	3822.905	1902.8	-	1700	1417	95	3404	1175.970	60.973	9.839	317.003	-	-
+2026-11-20	f371d7f+	attributes on items they cannot be used on	0.697	590.840	3880.642	1902.8	-	1698	1417	95	3462	1182.016	63.277	10.210	319.405	-	-
+2026-11-20	fbf1812+	E0277: unsized parameters, consts and statics	0.695	559.780	3850.450	1902.8	-	1700	1417	95	3474	1179.086	63.425	10.259	321.124	-	-
+2026-11-20	112b131	reference: 112b131 (after #9) measured again on this machine, for the rows below	0.695	559.828	3850.450	1902.8	-	-	-	-	-	1179.072	63.456	10.259	321.104	-	-
+2026-11-20	ad6d104+	E0432: use m::f with an inline mod m that defines no f	0.695	559.756	3850.456	1902.8	-	1700	1417	95	3479	1179.097	63.433	10.260	321.020	-	-
+2026-11-20	3c8f0b7+	E0261: undeclared lifetimes in free fns, structs, enums and statics	0.697	559.850	3851.539	1902.8	-	1700	1417	95	3490	1179.078	63.426	10.273	321.129	-	-
+2026-11-20	1b4b0ac+	E0106: missing lifetime specifiers (free fn returns, fields)	0.695	559.755	3851.910	1902.8	-	1700	1417	95	3503	1179.569	63.456	10.259	321.054	-	-
+2026-11-20	4c648ae	LSP check after the lint / resolution checks (no compiler change)	0.695	559.755	3851.910	1902.8	10.8992	1700	1417	95	3503	1179.486	63.376	10.259	321.020	-	-
+2026-11-20	d22d45f+	parser: a keyword is no declared name (expected identifier, found keyword)	0.697	559.824	3864.757	1902.8	-	1700	1417	95	3538	1181.703	63.447	10.273	321.242	-	-
+2026-11-20	8c012b2+	parser: reserved-keyword test by length (fixes check +0.33% of 8c012b2)	0.695	559.774	3854.649	1902.8	-	1700	1417	95	3537	1179.543	63.389	10.259	321.153	-	-
+2026-11-20	1328233+	cannot find attribute: an unknown attribute in a crate with no dependency	0.695	559.803	3854.826	1902.8	-	1700	1417	95	3559	1179.870	63.456	10.259	321.042	-	-
+2026-11-20	1e1f25f+	E0119: an unbounded blanket impl and an impl of its trait for a type	0.695	559.803	3854.910	1902.8	-	1700	1417	95	3562	1180.458	63.387	10.259	321.140	-	-
+2026-11-20	cc8898f+	fn values of <S as Tr>::m; std::u32::MAX-style paths; float integer constants	0.697	559.833	3854.988	1902.8	-	1701	1417	95	3562	1179.610	63.378	10.272	321.204	-	-
+2026-11-20	ed757a9+	prelude: AsRef / AsMut / Into / Borrow / BorrowMut / FromIterator declared for a program's own impls	0.692	559.709	3856.799	1902.8	-	1701	1422	95	3562	1179.888	63.419	10.246	321.430	-	-
+2026-11-20	255fde7+	module flattening: a glob import is shadowed by the scope's own item	0.695	559.711	3856.801	1902.8	-	1702	1427	95	3562	1180.132	63.475	10.259	321.400	-	-
+2026-11-20	0043490+	patterns: a path to a constant (Num::ZERO / u8::MAX) is equal to its value	0.695	559.723	3856.801	1902.8	-	1702	1429	95	3559	1179.607	63.419	10.259	321.381	-	-
+2026-11-20	75f44c7+	dyn Send / dyn Sync right behind a pointer	0.695	559.723	3856.822	1902.8	-	1703	1431	95	3561	1180.730	63.480	10.259	321.365	-	-
+2026-11-20	5ae4e4c+	an inherent and a trait impl's associated const of one name: Foo::C and <Foo as Tr>::C	0.697	559.733	3858.714	1902.8	-	1704	1432	95	3563	1181.000	63.476	10.273	321.510	-	-
+2026-11-20	6f4d8e6+	std HashMap / HashSet (random seeds, SipHash) -> Fx maps in program, types, macros, prelude, driver	0.695	559.731	3847.819	1902.8	10.8981	1704	1432	95	3563	1159.541	63.480	10.259	317.437	-	-
+2026-11-20	9cc1886+	zust-analyzer: Fx map in place of std HashMap	0.695	559.731	3847.819	1902.8	10.8498	-	-	-	-	1159.541	63.392	10.259	317.432	-	-
+2026-11-20	2ba1b4c+	driver2/build.rs and the lexer's glob set: Fx maps	0.695	559.726	3847.819	1902.8	-	1704	1432	95	3563	1159.534	63.446	10.259	314.906	-	-
+2026-11-20	81d4bd0+	slice is_sorted*, unary ops on numeric refs	0.695	559.648	3847.819	1902.8	-	1704	1433	95	3563	1159.659	63.394	10.259	314.915	-	-
+2026-11-20	b88ba4e+	match / if-let on a bare None: Option type from the patterns or inference	0.697	559.695	3847.841	1902.8	-	1705	1435	95	3564	1159.706	63.454	10.273	314.933	-	-
+2026-11-20	e36b7fd+	mem::discriminant, array::from_fn, big copies via memcpy	0.695	559.631	3847.089	1902.8	-	1707	1436	95	3564	1160.250	63.627	10.259	315.831	-	-
+2026-11-20	6edddd0+	prelude scan: the byte index covers lowercase letters too	0.694	548.563	3837.036	1902.8	-	-	-	-	-	1160.246	63.514	10.259	315.816	-	-
+2026-11-20	09ae27c+	#[link(name)] / -L; tests/ui links rust_test_helpers	0.696	548.916	3836.791	1902.8	-	1719	1436	95	3564	1160.186	63.549	10.273	315.849	-	-
+2026-11-20	ef67647+	extern C calls: structs of up to 16 bytes by value	0.695	548.115	3836.589	1902.8	-	1734	1443	97	3564	1160.175	63.639	10.259	315.898	-	-
+2026-11-20	20055f9+	match on unsuffixed literals: type from the patterns	0.695	548.176	3836.631	1902.8	-	1736	1443	97	3564	1160.210	63.550	10.259	315.917	-	-
+2026-11-20	707a395+	include!(..) of code, as items or an expression	0.695	547.166	3835.573	1902.8	-	1737	1446	97	3564	1160.142	63.491	10.259	315.887	-	-
+2026-11-20	174b0fe+	mod x; inside inline modules; cfg(true) / cfg(false); cfg_attr(p, cfg(q))	0.692	547.172	3835.668	1902.8	10.8483	1745	1448	97	3567	1160.165	63.605	10.270	316.105	-	-
+2026-11-20	aa059e7+	stringify! spacing as rustc prints; dbg!() / dbg!(a, b)	0.692	547.152	3835.704	1902.8	-	1747	1448	97	3567	1160.161	63.602	10.270	316.173	-	-
+2026-11-20	5c7cdc5+	&CONST / &CONST.f / &CONST[i] / &(42,).0 promoted to static data	0.692	547.080	3835.604	1902.8	-	1748	1448	97	3567	1160.139	63.425	10.270	315.925	-	-
+2026-11-20	d855b2a+	assignment eval order, condition temporaries, &mut self methods of numbers	0.695	547.137	3837.294	1902.8	-	1751	1448	97	3567	1160.420	63.431	10.283	315.985	-	-
+2026-11-20	cdb2f0f+	static data: const fn calls inlined; no silent zeros; Solver::lookup as loops	0.694	547.968	3837.321	1902.8	-	1752	1448	97	3567	1160.432	63.532	10.283	315.964	-	-
+2026-11-20	4ed592f+	into_iter of arrays (by value) and of iterators (identity)	0.692	547.124	3837.319	1902.8	-	1753	1448	97	3567	1160.421	63.438	10.270	316.082	-	-
+2026-11-20	2126394+	Option/Result::inspect, overflowing/wrapping div/rem, Iterator::unzip	0.695	547.075	3836.709	1902.8	-	-	-	-	-	1160.169	63.636	10.283	316.599	-	-
+2026-11-20	7a588e0+	thread_local keys: try_with and Cell/RefCell helpers; Cell::take, RefCell::take	0.692	546.999	3836.534	1902.8	-	1753	1450	97	3567	1159.753	63.665	10.270	316.653	-	-
+2026-11-20	d87684e+	Rc / Arc moved out of a closure's captures	0.692	546.986	3835.489	1902.8	-	1754	1451	97	3566	1160.573	63.632	10.270	316.491	-	-
+2026-11-20	0e9cf07+	borrow checker in closure bodies; by-value captures are its locals	0.695	547.876	3836.429	1902.8	-	-	-	-	-	1165.235	63.547	10.283	316.611	696.704	262.865

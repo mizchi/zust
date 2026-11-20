@@ -259,7 +259,7 @@ pub fn compile(prog: &Program, insts: &Mutex<Insts>, id: u32, f: &ItemFn, line_b
     let extra: Vec<(String, Ty)> = caps.iter().map(|c| (c.0.clone(), c.1)).collect();
     let user_code = prog.item_of.get(body_id as usize).copied().flatten().is_some_and(|i| i < prog.prelude_from);
     let ((lets, _, _), margs, texts) = crate::ast_infer::infer_ctx_margs(prog, f.sig.recv.is_some(), &f.sig.params, &f.block, &sig, &env, &extra, Some(sig.ret), Some((root, base_k)));
-    let bk_level = if user_code && prog.closures.get(&body_id).is_none() { borrowck::level() } else { 0 };
+    let bk_level = if user_code { borrowck::level() } else { 0 };
     let mut cx = Cx {
         b: FunctionBuilder::new(&clif_sig(&sig)),
         bk: borrowck::Bk { on: bk_level > 0, level: bk_level, line_base, ..Default::default() },
@@ -1139,6 +1139,11 @@ impl Cx<'_> {
             for (n, t, by_ref, off) in self.caps.clone() {
                 let a = if by_ref { self.b.ins().load(PTR, mf(), env, off as i32) } else { self.addr_plus(env, off as i32) };
                 let loc = if clif_ty(t).is_none() && !t.is_agg() { Loc::Zst(self.bk.fresh_zst()) } else { Loc::Ptr(a) };
+                // (a capture held by value is a local of the body for the borrow checker: moving it twice, or in a
+                // loop, is a use of a moved value)
+                if !by_ref {
+                    self.bk_local(loc, &n, t);
+                }
                 self.scopes.last_mut().unwrap().push((n, loc, t));
             }
         }

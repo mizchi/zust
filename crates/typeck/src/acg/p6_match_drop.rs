@@ -184,7 +184,12 @@ impl Cx<'_> {
                 ],
             };
             let ne: &Expr = self.keep_expr(Expr::Block(None, false, blk));
-            return self.expr(ne, expected);
+            // (the move into the local is the rewrite's, not the program's: `match cap { None => .., Some(x) => cap =
+            // Some(x) }` leaves cap whole on every path. The borrow checker does not look at this match)
+            let on = std::mem::replace(&mut self.bk.on, false);
+            let r = self.expr(ne, expected);
+            self.bk.on = on;
+            return r;
         }
         // (`match [] { FOO => .. }`: an empty array scrutinee takes its type from a const pattern)
         let scrut_exp = match strip_paren(scrut) {

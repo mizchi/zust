@@ -681,6 +681,7 @@ compile-fail	block-result/issue-13428.rs
 compile-fail	block-result/issue-13624.rs
 compile-fail	block-result/issue-20862.rs
 compile-fail	block-result/unexpected-return-on-unit.rs
+compile-fail	borrowck/access-mode-in-closures.rs
 check-pass	borrowck/alias-liveness/escaping-bounds.rs
 check-pass	borrowck/alias-liveness/gat-static.rs
 check-pass	borrowck/alias-liveness/higher-ranked.rs
@@ -749,6 +750,8 @@ run-pass	borrowck/borrowck-freeze-frozen-mut.rs
 compile-fail	borrowck/borrowck-if-no-else.rs
 compile-fail	borrowck/borrowck-if-with-else.rs
 compile-fail	borrowck/borrowck-imm-ref-to-mut-rec-field-issue-3162-c.rs
+compile-fail	borrowck/borrowck-init-in-called-fn-expr.rs
+compile-fail	borrowck/borrowck-init-in-fn-expr.rs
 compile-fail	borrowck/borrowck-init-in-fru.rs
 compile-fail	borrowck/borrowck-init-op-equal.rs
 compile-fail	borrowck/borrowck-init-plus-equal.rs
@@ -865,6 +868,7 @@ compile-fail	borrowck/index-mut-help-with-impl.rs
 compile-fail	borrowck/index-mut-help.rs
 check-pass	borrowck/index-self-with-arithmetic-on-self-item.rs
 compile-fail	borrowck/issue-103250.rs
+compile-fail	borrowck/issue-103624.rs
 check-pass	borrowck/issue-104639-lifetime-order.rs
 check-pass	borrowck/issue-10876.rs
 compile-fail	borrowck/issue-109271-pass-self-into-closure.rs
@@ -891,6 +895,7 @@ compile-fail	borrowck/issue-58776-borrowck-scans-children.rs
 run-pass	borrowck/issue-62007-assign-box.rs
 run-pass	borrowck/issue-62007-assign-field.rs
 compile-fail	borrowck/issue-62387-suggest-iter-mut-2.rs
+compile-fail	borrowck/issue-62387-suggest-iter-mut.rs
 check-pass	borrowck/issue-70919-drop-in-loop.rs
 check-pass	borrowck/issue-71546.rs
 check-pass	borrowck/issue-80772.rs
@@ -905,6 +910,7 @@ compile-fail	borrowck/issue-81365-8.rs
 compile-fail	borrowck/issue-81365-9.rs
 compile-fail	borrowck/issue-82126-mismatched-subst-and-hir.rs
 compile-fail	borrowck/issue-83309-ice-immut-in-for-loop.rs
+compile-fail	borrowck/issue-85765-closure.rs
 compile-fail	borrowck/issue-85765.rs
 compile-fail	borrowck/issue-91206.rs
 compile-fail	borrowck/issue-92015.rs
@@ -920,6 +926,7 @@ compile-fail	borrowck/mutability-errors.rs
 compile-fail	borrowck/mutate-vec-while-iterating.rs
 check-pass	borrowck/nested-closure-with-generic-ice.rs
 compile-fail	borrowck/non-ADT-struct-pattern-box-pattern-ice-121463.rs
+compile-fail	borrowck/option-inspect-mutation.rs
 compile-fail	borrowck/or-patterns.rs
 compile-fail	borrowck/ownership-struct-update-moved-error.rs
 run-pass	borrowck/pointer-reassignment-after-deref-78192.rs
@@ -1156,6 +1163,7 @@ run-pass	closures/fn-sugar-in-boxed-trait-object.rs
 compile-fail	closures/hrtb-closure-in-recursive-enum-type-error.rs
 check-pass	closures/issue-101696.rs
 check-pass	closures/issue-102089-multiple-opaque-cast.rs
+compile-fail	closures/issue-10398.rs
 run-pass	closures/issue-10682.rs
 compile-fail	closures/issue-109188.rs
 compile-fail	closures/issue-11873.rs
@@ -5988,6 +5996,7 @@ compile-fail	suggestions/suggest-let-and-typo-issue-132483.rs
 compile-fail	suggestions/suggest-let-for-assignment.rs
 compile-fail	suggestions/suggest-methods.rs
 compile-fail	suggestions/suggest-move-lifetimes.rs
+compile-fail	suggestions/suggest-mut-method-for-loop-closure.rs
 compile-fail	suggestions/suggest-mut-method-for-loop-hashmap.rs
 compile-fail	suggestions/suggest-mut-method-for-loop.rs
 compile-fail	suggestions/suggest-null-ptr.rs

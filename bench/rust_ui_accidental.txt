@@ -58,3 +58,4 @@ compile-fail	cast/ptr-to-trait-obj-drop-principal.rs
 compile-fail	methods/disambiguate-multiple-blanket-impl.rs
 compile-fail	methods/disambiguate-multiple-trait-2.rs
 compile-fail	borrowck/moved-value-in-thread-loop-12041.rs
+compile-fail	suggestions/dont-suggest-ref/move-into-closure.rs
