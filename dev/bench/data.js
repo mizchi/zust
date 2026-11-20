@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795186410308,
+  "lastUpdate": 1795186412803,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -70786,6 +70786,85 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/mizchi/zust/commit/7a588e0143f9c2f06761b7282a16809e0da31303"
         },
         "date": 1795185117199,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "parity documentSymbol (名前の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity workspace/symbol (上位 20 の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity definition (行き先の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity hover (名前を含む)",
+            "value": 90,
+            "unit": "%"
+          },
+          {
+            "name": "parity references (数の一致)",
+            "value": 97.297,
+            "unit": "%"
+          },
+          {
+            "name": "parity documentHighlight (数の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity rename (書き換えの一致)",
+            "value": 94.118,
+            "unit": "%"
+          },
+          {
+            "name": "parity signatureHelp (名前・引数の数・今の引数の一致)",
+            "value": 94.737,
+            "unit": "%"
+          },
+          {
+            "name": "parity completion `x.\\|` (書いてある名前を含む)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity completion `na\\|me` (同)",
+            "value": 92.593,
+            "unit": "%"
+          },
+          {
+            "name": "parity 一致の平均",
+            "value": 96.874,
+            "unit": "%"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "committer": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "distinct": true,
+          "id": "d87684e7182d5b404994365ad6127c8e9cee2cf0",
+          "message": "thread_local! keys: try_with and LocalKey<Cell> / LocalKey<RefCell> methods\n\n- Every key gets try_with (Ok of with).\n- A key of Cell<T> gets set / get / take / replace, and one of RefCell<T>\n  gets set / take / replace / with_borrow / with_borrow_mut, as std's\n  LocalKey has. They work on the slot once `with` has filled it, with no\n  closure that would move the value in.\n- Cell::take, Cell::get_mut, RefCell::take.\n\ntests/ui: +1 check-pass. KPI: crates edit +0.02% on the last row (the\nflag is 7a588e0's step still in the median).\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-20T14:48:18Z",
+          "tree_id": "b05fc8b3053170ede999cb268928b6862673fa92",
+          "url": "https://github.com/mizchi/zust/commit/d87684e7182d5b404994365ad6127c8e9cee2cf0"
+        },
+        "date": 1795186412293,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
