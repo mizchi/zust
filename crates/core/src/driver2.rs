@@ -632,6 +632,7 @@ impl Session2 {
         let mut deny_dead_pub = false;
         let mut deny_unused_imports = false;
         let mut deny_unreachable_code = false;
+        let mut deny_must_use = false;
         let lib_attr = {
             let mut end = src.len().min(4096);
             while !src.is_char_boundary(end) {
@@ -657,6 +658,7 @@ impl Session2 {
             deny_dead_pub = levels.contains(&"dead_code_pub_in_binary");
             deny_unused_imports = levels.iter().any(|l| matches!(*l, "unused_imports" | "unused" | "warnings")) && !c.contains("#![allow(unused");
             deny_unreachable_code = levels.iter().any(|l| matches!(*l, "unreachable_code" | "unused" | "warnings")) && !c.contains("#![allow(unreachable_code");
+            deny_must_use = levels.iter().any(|l| matches!(*l, "unused_must_use" | "unused" | "warnings")) && !c.contains("#![allow(unused_must_use");
             ["lib", "rlib", "dylib", "cdylib", "staticlib", "proc-macro"].iter().any(|k| c.contains(&format!("#![crate_type=\"{k}\"]")))
         };
         // (dead_code, in a binary: the first fn / struct / enum / const / static / trait of the program's whose name
@@ -714,6 +716,21 @@ impl Session2 {
         prog.prelude_from = user as u32;
         prog.overflow_checks = !self.opts.opt;
         prog.deny_unreachable = deny_unreachable;
+        prog.deny_must_use = deny_must_use;
+        if deny_must_use {
+            for it in &items[..user] {
+                let text = src.get(it.start..it.end).unwrap_or("");
+                if let Some(k) = text.find("#[must_use") {
+                    let after = &text[k..];
+                    if let Some(f) = after.find("fn ") {
+                        let name: String = after[f + 3..].trim_start().chars().take_while(|c| c.is_alphanumeric() || *c == '_').collect();
+                        if !name.is_empty() {
+                            prog.must_use_fns.push(name);
+                        }
+                    }
+                }
+            }
+        }
         prog.opt = self.opts.opt;
         resolve_opaque(&mut prog, &src, &items)?;
         let ol = self.ctx.own_lines as usize;

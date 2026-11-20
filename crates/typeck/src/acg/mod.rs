@@ -1543,6 +1543,22 @@ impl Cx<'_> {
                         if !*semi && !matches!(r.1, Ty::Unit | Ty::Never) {
                             return err(SP, "expected `;` after non-unit expression");
                         }
+                        // (unused_must_use: a `Result` dropped by its statement)
+                        if self.prog.deny_must_use && self.user_code {
+                            // (`foo();` with `#[must_use] fn foo() -> T`)
+                            if let Expr::Call(f, _) = strip_paren(e) {
+                                if let Expr::Path(None, p) = &**f {
+                                    if let Some(n) = p.segs.last().map(|s| s.name.as_str()).filter(|n| self.prog.must_use_fns.iter().any(|m| m == n)) {
+                                        return Err(self.at(expr_start(e), format!("unused return value of `{n}` that must be used")));
+                                    }
+                                }
+                            }
+                            if let Ty::Struct(sid) = r.1 {
+                                if self.prog.structs[self.prog.base_of(sid) as usize].name == "Result" {
+                                    return Err(self.at(expr_start(e), "unused `Result` that must be used".into()));
+                                }
+                            }
+                        }
                         if let (Some(v), t) = r {
                             if t != Ty::Never {
                                 self.own_temp(v, t);
