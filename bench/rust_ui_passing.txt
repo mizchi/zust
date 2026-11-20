@@ -2806,6 +2806,7 @@ check-pass	imports/overwritten-extern-flag-ambig.rs
 check-pass	imports/overwritten-glob-ambig.rs
 run-pass	imports/reexport-star.rs
 compile-fail	imports/underscore-imports/shadow.rs
+compile-fail	imports/underscore-imports/unused-2018.rs
 check-pass	imports/unused-import-issue-157420.rs
 run-pass	imports/use-declaration-no-path-segment-prefix.rs
 run-pass	imports/use-mod.rs
@@ -3247,6 +3248,7 @@ run-pass	lint/unused/ignored-allow-unused_variables.rs
 check-pass	lint/unused/import_remove_line.rs
 check-pass	lint/unused/issue-104397.rs
 check-pass	lint/unused/issue-117142-invalid-remove-parens.rs
+compile-fail	lint/unused/issue-30730.rs
 check-pass	lint/unused/issue-47390-unused-variable-in-struct-pattern.rs
 compile-fail	lint/unused/issue-54180-unused-ref-field.rs
 compile-fail	lint/unused/issue-67691-unused-field-in-or-pattern.rs
@@ -3254,6 +3256,7 @@ run-pass	lint/unused/issue-70041.rs
 check-pass	lint/unused/issue-71290-unused-paren-binop.rs
 compile-fail	lint/unused/issue-81314-unused-span-ident.rs
 check-pass	lint/unused/issue-90807-unused-paren.rs
+compile-fail	lint/unused/lint-unused-imports-self-single.rs
 check-pass	lint/unused/match_with_guard.rs
 check-pass	lint/unused/must-use-block-expr.rs
 check-pass	lint/unused/must-use-box-from-raw.rs

@@ -630,6 +630,7 @@ impl Session2 {
         let mut deny_unused_vars = false;
         let mut deny_dead_code = false;
         let mut deny_dead_pub = false;
+        let mut deny_unused_imports = false;
         let lib_attr = {
             let mut end = src.len().min(4096);
             while !src.is_char_boundary(end) {
@@ -653,6 +654,7 @@ impl Session2 {
             deny_unused_vars = levels.iter().any(|l| matches!(*l, "unused_variables" | "unused" | "warnings")) && !c.contains("#![allow(unused");
             deny_dead_code = levels.iter().any(|l| matches!(*l, "dead_code" | "unused" | "warnings")) && !c.contains("#![allow(dead_code") && !c.contains("#![expect(dead_code") && !c.contains("#![allow(unused");
             deny_dead_pub = levels.contains(&"dead_code_pub_in_binary");
+            deny_unused_imports = levels.iter().any(|l| matches!(*l, "unused_imports" | "unused" | "warnings")) && !c.contains("#![allow(unused");
             ["lib", "rlib", "dylib", "cdylib", "staticlib", "proc-macro"].iter().any(|k| c.contains(&format!("#![crate_type=\"{k}\"]")))
         };
         // (dead_code, in a binary: the first fn / struct / enum / const / static / trait of the program's whose name
@@ -661,6 +663,12 @@ impl Session2 {
             // (a `pub` item counts as used, except in a binary under `deny(dead_code_pub_in_binary)`)
             if let Some((line, msg)) = first_dead_item(&src, &items[..user], deny_dead_pub && !lib_attr) {
                 return Err(format!("{line}:1: {msg}"));
+            }
+        }
+        // (unused_imports: a top-level `use` whose name nothing else mentions)
+        if deny_unused_imports && self.ctx.lib.is_none() {
+            if let Some((line, col, msg)) = first_unused_import(&src, &items[..user]) {
+                return Err(format!("{line}:{col}: {msg}"));
             }
         }
         // (unused_variables: the first binding nothing reads, in the program's own fns)
@@ -893,6 +901,83 @@ fn relocate(e: String, it: &SrcItem) -> String {
 }
 
 /// アイテムの関数を自前の構文木で読む (本体がなければ None)。引数のパターンは本体の先頭の let にする
+/// `#![deny(unused_imports)]`: the first name a top-level `use` brings in that no other item mentions. Traits
+/// (std's usual ones and the program's) are left alone: their methods use them without naming them
+fn first_unused_import(src: &str, items: &[SrcItem]) -> Option<(usize, usize, String)> {
+    const TRAITS: &[&str] = &[
+        "Read", "Write", "BufRead", "Seek", "Hash", "Hasher", "BuildHasher", "FromStr", "Display", "Debug", "Iterator", "IntoIterator",
+        "DoubleEndedIterator", "ExactSizeIterator", "FromIterator", "Extend", "Deref", "DerefMut", "Borrow", "BorrowMut", "AsRef", "AsMut",
+        "Error", "Any", "TryFrom", "TryInto", "From", "Into", "ToString", "ToOwned", "Ord", "PartialOrd", "Eq", "PartialEq", "Add", "Sub",
+        "Mul", "Div", "Rem", "Neg", "Not", "AddAssign", "SubAssign", "MulAssign", "DivAssign", "Index", "IndexMut", "Drop", "Clone", "Copy",
+        "Default", "Fn", "FnMut", "FnOnce", "Future", "IntoFuture", "Sum", "Product", "Step", "Termination", "Pointer", "LowerHex", "UpperHex",
+        "Octal", "Binary", "LowerExp", "UpperExp", "Send", "Sync", "Sized", "Unpin", "SliceIndex", "Pattern", "ToSocketAddrs", "OsStrExt",
+        "OsStringExt", "PermissionsExt", "MetadataExt", "FileExt", "CommandExt", "ExitStatusExt", "AsRawFd", "FromRawFd", "IntoRawFd",
+    ];
+    let (Some(first), Some(last)) = (items.first(), items.last()) else { return None };
+    let region = &src[first.start..last.end];
+    let b = region.as_bytes();
+    let toks = crate::lexer::tokenize(b);
+    let word = |k: usize| -> &str { if toks[k].0 == 0 { &region[toks[k].1..toks[k].2] } else { "" } };
+    // (names mentioned outside `use` items, and the program's own traits)
+    let mut used: std::collections::HashSet<&str> = Default::default();
+    let mut traits: std::collections::HashSet<&str> = Default::default();
+    let mut in_use = false;
+    for k in 0..toks.len() {
+        let w = word(k);
+        if w == "use" {
+            in_use = true;
+        }
+        if in_use {
+            if toks[k].0 == 1 && b[toks[k].1] == b';' {
+                in_use = false;
+            }
+            continue;
+        }
+        if k > 0 && word(k - 1) == "trait" {
+            traits.insert(w);
+        }
+        if toks[k].0 == 0 {
+            used.insert(w);
+        }
+    }
+    for it in items {
+        if !matches!(it.kind, crate::lexer::ItemKind::Normal) {
+            continue;
+        }
+        let text = &src[it.start..it.end];
+        let t = text.trim_start();
+        if !t.starts_with("use ") || text.contains("allow(unused") || text.contains("#[cfg") || text.contains('*') {
+            continue;
+        }
+        let body = t["use ".len()..].trim_end().trim_end_matches(';').trim();
+        // (the names it brings in: `a::b::C`, `a::C as D`, `a::{B, C as D}` (one level of braces))
+        let (prefix, list): (&str, Vec<&str>) = match body.find('{') {
+            Some(i) if body.ends_with('}') => (&body[..i], body[i + 1..body.len() - 1].split(',').map(str::trim).filter(|x| !x.is_empty()).collect()),
+            Some(_) => continue,
+            None => ("", vec![body]),
+        };
+        let line = it.line + text[..text.len() - t.len()].matches('\n').count();
+        for entry in &list {
+            if entry.contains('{') || entry.contains('}') {
+                break;
+            }
+            let (path, alias) = match entry.split_once(" as ") {
+                Some((p, a)) => (p.trim(), Some(a.trim())),
+                None => (entry.trim(), None),
+            };
+            let name = alias.unwrap_or_else(|| path.rsplit("::").next().unwrap_or(path));
+            if name == "_" || name == "self" || name.is_empty() || TRAITS.contains(&name) || traits.contains(name) {
+                continue;
+            }
+            if !used.contains(name) {
+                let shown = if list.len() == 1 && prefix.is_empty() { (*entry).to_string() } else { (*entry).to_string() };
+                return Some((line, 1, format!("unused import: `{shown}`")));
+            }
+        }
+    }
+    None
+}
+
 /// `#![deny(dead_code)]`: the first top-level item of the program that nothing uses (see the caller)
 fn first_dead_item(src: &str, items: &[SrcItem], check_pub: bool) -> Option<(usize, String)> {
     let (Some(first), Some(last)) = (items.first(), items.last()) else { return None };
