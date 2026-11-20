@@ -1260,6 +1260,7 @@ compile-fail	coercion/type-errors.rs
 run-pass	coercion/unsafe-coercion.rs
 check-pass	coherence/clone-impl-unsized-slice.rs
 compile-fail	coherence/coherence-blanket-conflicts-with-specific-multidispatch.rs
+compile-fail	coherence/coherence-blanket-conflicts-with-specific.rs
 compile-fail	coherence/coherence-error-suppression.rs
 check-pass	coherence/coherence-fn-covariant-bound-vs-static.rs
 check-pass	coherence/coherence-fn-inputs.rs
@@ -2027,6 +2028,7 @@ compile-fail	error-codes/E0071.rs
 compile-fail	error-codes/E0081.rs
 compile-fail	error-codes/E0106.rs
 compile-fail	error-codes/E0117.rs
+compile-fail	error-codes/E0119.rs
 compile-fail	error-codes/E0120.rs
 compile-fail	error-codes/E0121.rs
 compile-fail	error-codes/E0131.rs
@@ -5514,6 +5516,7 @@ compile-fail	span/typo-suggestion.rs
 run-pass	span/unused-warning-point-at-identifier.rs
 compile-fail	specialization/feature-gate-specialization.rs
 run-pass	specialization/soundness/partial_ord_slice.rs
+compile-fail	specialization/specialization-feature-gate-overlap.rs
 compile-fail	stability-attribute/accidentally-stable-intrinsics.rs
 check-pass	stability-attribute/check-stability-issue-138319.rs
 check-pass	stability-attribute/issue-99286-stable-intrinsics.rs

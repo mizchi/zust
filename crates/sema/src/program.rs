@@ -598,11 +598,12 @@ impl Program {
     }
 
     pub fn build(items: &[SrcItem], sums: &[Summary]) -> R<Program> {
-        Program::build_with(items, sums, true)
+        Program::build_with(items, sums, true, items.len())
     }
 
     /// need_main: false ならライブラリ (main がなくてよい)
-    pub fn build_with(items: &[SrcItem], sums: &[Summary], need_main: bool) -> R<Program> {
+    /// `user`: how many of the items are the program's (the rest are the prelude's)
+    pub fn build_with(items: &[SrcItem], sums: &[Summary], need_main: bool, user: usize) -> R<Program> {
         let mut p = Program {
             names: vec![],
             index: FxMap::default(),
@@ -1117,10 +1118,17 @@ impl Program {
         let mut ref_blankets: std::collections::HashSet<String> = Default::default();
         // (impls for Box: (trait, line), checked against blanket impls of the same trait after the loop)
         let mut box_impls: Vec<(String, usize)> = vec![];
+        // (unbounded blanket impls (trait, line), and every impl of the program's (trait, line))
+        let mut unbounded_blankets: Vec<(String, usize)> = vec![];
+        let mut other_impls: Vec<(String, usize)> = vec![];
         for (ii, (it, sm)) in items.iter().zip(sums).enumerate() {
             let (Some(sn), Some(tr)) = (&sm.impl_self, &sm.impl_trait) else {
                 continue;
             };
+            // (an impl for a type, not another blanket one: whose where clauses the summary may not keep)
+            if ii < user && !sm.impl_generics.iter().any(|g| g.0 == *sn) {
+                other_impls.push((tr.clone(), it.line));
+            }
             // (右辺の型を持つ比較の impl と、配列・スライスへの impl は、`==` が関数を直接選ぶので数えない)
             if tr.starts_with("PartialEq<") || tr.starts_with("PartialOrd<") || sn == "__array" || sn == "__slice" || sn.starts_with("__dyn_") {
                 // (`impl BufRead for &[u8]`: 境界を満たすかのために覚える)
@@ -1227,6 +1235,10 @@ impl Program {
                 continue;
             }
             if sm.impl_generics.iter().any(|g| g.0 == *sn) && matches!(sm.impl_self_ty, Some(TySyn::Named(_))) {
+                // (`impl<T> Tr for T` with no bound and no where clause: every other impl of Tr overlaps it, E0119)
+                if ii < user && sm.impl_generics.iter().any(|g| g.0 == *sn && g.1.is_empty()) && sm.where_types.is_empty() && sm.impl_trait_args.is_empty() {
+                    unbounded_blankets.push((tr.clone(), it.line));
+                }
                 if ref_blankets.contains(tr) {
                     return Err(format!("{}:1: conflicting implementations of trait `{tr}` for type `&_` (E0119)", it.line));
                 }
@@ -1268,6 +1280,13 @@ impl Program {
                     "{}:1: conflicting implementations of trait `{tr}` for `{sn}`",
                     it.line
                 ));
+            }
+        }
+        // (an unbounded blanket impl and any other impl of its trait in the program)
+        for (tr, bl) in &unbounded_blankets {
+            if let Some(line) = other_impls.iter().filter(|(t, l)| t == tr && l != bl).map(|(_, l)| *l).min() {
+                let at = line.max(*bl);
+                return Err(format!("{at}:1: conflicting implementations of trait `{tr}` (E0119)"));
             }
         }
         // (`impl<T> Tr for T` and `impl Tr for Box<U>` overlap: Box<U> is one of the T, E0119)

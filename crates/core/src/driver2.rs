@@ -736,7 +736,7 @@ impl Session2 {
                 }
             }
         }
-        let mut prog = Program::build_with(&items, &sums, self.ctx.lib.is_none() && !lib_attr).map_err(|e| name_line(&e, &src, &items))?;
+        let mut prog = Program::build_with(&items, &sums, self.ctx.lib.is_none() && !lib_attr, user).map_err(|e| name_line(&e, &src, &items))?;
         tm.lap("program", String::new());
         prog.prelude_from = user as u32;
         prog.overflow_checks = !self.opts.opt;

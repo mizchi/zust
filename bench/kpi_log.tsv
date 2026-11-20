@@ -129,3 +129,4 @@ date	commit	change	noop_M	edit_M	check_M	cache_KiB	lsp_G	run	check	build	cfail
 2026-11-20	d22d45f+	parser: a keyword is no declared name (expected identifier, found keyword)	0.697	559.824	3864.757	1902.8	-	1700	1417	95	3538	1181.703	63.447	10.273	321.242
 2026-11-20	8c012b2+	parser: reserved-keyword test by length (fixes check +0.33% of 8c012b2)	0.695	559.774	3854.649	1902.8	-	1700	1417	95	3537	1179.543	63.389	10.259	321.153
 2026-11-20	1328233+	cannot find attribute: an unknown attribute in a crate with no dependency	0.695	559.803	3854.826	1902.8	-	1700	1417	95	3559	1179.870	63.456	10.259	321.042
+2026-11-20	1e1f25f+	E0119: an unbounded blanket impl and an impl of its trait for a type	0.695	559.803	3854.910	1902.8	-	1700	1417	95	3562	1180.458	63.387	10.259	321.140
