@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795186407516,
+  "lastUpdate": 1795186410308,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -52600,6 +52600,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "lsp peak RSS",
             "value": 75.117,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "committer": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "distinct": true,
+          "id": "d87684e7182d5b404994365ad6127c8e9cee2cf0",
+          "message": "thread_local! keys: try_with and LocalKey<Cell> / LocalKey<RefCell> methods\n\n- Every key gets try_with (Ok of with).\n- A key of Cell<T> gets set / get / take / replace, and one of RefCell<T>\n  gets set / take / replace / with_borrow / with_borrow_mut, as std's\n  LocalKey has. They work on the slot once `with` has filled it, with no\n  closure that would move the value in.\n- Cell::take, Cell::get_mut, RefCell::take.\n\ntests/ui: +1 check-pass. KPI: crates edit +0.02% on the last row (the\nflag is 7a588e0's step still in the median).\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-20T14:48:18Z",
+          "tree_id": "b05fc8b3053170ede999cb268928b6862673fa92",
+          "url": "https://github.com/mizchi/zust/commit/d87684e7182d5b404994365ad6127c8e9cee2cf0"
+        },
+        "date": 1795186409773,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "lsp definition p50",
+            "value": 0.579,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp hover p50",
+            "value": 0.414,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp completion p50",
+            "value": 1.094,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp references p50",
+            "value": 4.671,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp rename p50",
+            "value": 0.455,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp signatureHelp p50",
+            "value": 0.99,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp documentHighlight p50",
+            "value": 1.202,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp ready (startup to indexed)",
+            "value": 133.729,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp peak RSS",
+            "value": 75.203,
             "unit": "MiB"
           }
         ]
