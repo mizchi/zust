@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795170096377,
+  "lastUpdate": 1795170098973,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -79916,6 +79916,70 @@ window.BENCHMARK_DATA = {
           {
             "name": "tests/ui check-pass passing",
             "value": 1434,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui build-pass pass rate",
+            "value": 70.37,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui build-pass passing",
+            "value": 95,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui compile-fail pass rate",
+            "value": 48.44,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui compile-fail passing",
+            "value": 3564,
+            "unit": "tests"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "committer": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "distinct": true,
+          "id": "6edddd09055cf9e02b5e77b3a20b98c0bb35ad17",
+          "message": "mem::discriminant, array::from_fn; large copies and zeroed() via libc\n\n- std::mem::discriminant returns a prelude Discriminant<T> (Clone, Copy,\n  Eq, Hash, Debug) holding the enum's tag, read by a new __exr_tag_of\n  intrinsic.\n- std::array::from_fn(|i| ..) takes N from the expected array type.\n- A value larger than 4 KiB is copied with one memcpy call and zeroed\n  with one memset call, in place of a load and a store per word. Checking\n  a 1.5 GB array argument went from minutes (and an OOM) to 8 ms.\n\ntests/ui: +2 run-pass, +1 check-pass.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-20T10:16:38Z",
+          "tree_id": "b358dde77b815c4a0bf4f12cb768a7f2780cdd0e",
+          "url": "https://github.com/mizchi/zust/commit/6edddd09055cf9e02b5e77b3a20b98c0bb35ad17"
+        },
+        "date": 1795170098487,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tests/ui run-pass pass rate",
+            "value": 71.57,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui run-pass passing",
+            "value": 1707,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui check-pass pass rate",
+            "value": 79.47,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui check-pass passing",
+            "value": 1436,
             "unit": "tests"
           },
           {
