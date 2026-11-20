@@ -26,7 +26,7 @@
 
 ## Status
 
-Numbers measured <!-- measured -->2026-11-20, 68ebe19<!-- /measured --> by CI on each push to main (bench.yml runs
+Numbers measured <!-- measured -->2026-11-20, 1433239<!-- /measured --> by CI on each push to main (bench.yml runs
 `bench/ci_bench.py` and `bench/rust_ui.py`, then `scripts/update_readme.py` writes them here). Times come from shared
 GitHub Actions runners and vary by about ±20%; the instruction counts (valgrind) do not.
 
@@ -38,10 +38,10 @@ only the tests it can be asked to handle (no nightly features, auxiliary crates 
 <!-- auto:ui -->
 | kind | applicable | pass |
 |---|---:|---:|
-| run-pass (builds, runs, same output) | 2385 | 1766 (74.0%) |
-| check-pass (accepted by `zustc check`) | 1807 | 1458 (80.7%) |
+| run-pass (builds, runs, same output) | 2385 | 1776 (74.5%) |
+| check-pass (accepted by `zustc check`) | 1807 | 1459 (80.7%) |
 | build-pass | 135 | 98 (72.6%) |
-| compile-fail (rejected at an annotated line) | 7358 | 3584 (48.7%) |
+| compile-fail (rejected at an annotated line) | 7358 | 3587 (48.7%) |
 <!-- /auto:ui -->
 
 [What is supported](#what-is-supported) breaks this down by area.
@@ -53,22 +53,22 @@ Build speed, build cache size and LSP latency on generated programs of 1000 / 50
 <!-- auto:kpi -->
 | KPI | gen1000 | gen5000 |
 |---|---:|---:|
-| cold build | 154 ms | 690 ms |
-| no-op build | 1.1 ms | 1.0 ms |
-| build after editing one function | 24.6 ms | 85.0 ms |
-| `check` | 125 ms | 605 ms |
+| cold build | 124 ms | 546 ms |
+| no-op build | 0.9 ms | 0.9 ms |
+| build after editing one function | 20.1 ms | 70.3 ms |
+| `check` | 93 ms | 458 ms |
 | no-op build (instructions) | 0.6 M | 0.6 M |
-| edit one function (instructions) | 123.8 M | 588.0 M |
-| `check` (instructions) | 776.7 M | 3835.4 M |
+| edit one function (instructions) | 123.8 M | 589.2 M |
+| `check` (instructions) | 776.8 M | 3835.7 M |
 | build cache on disk | 387.2 KiB | 1902.8 KiB |
 | binary | 324.0 KiB | 1558.3 KiB |
-| cold build peak RSS | 18.2 MiB | 52.2 MiB |
+| cold build peak RSS | 17.9 MiB | 51.9 MiB |
 
 | zust-analyzer (zustc's own sources) | |
 |---|---:|
-| p50: definition, hover, completion, references, rename | 0.68 ms / 0.58 ms / 1.17 ms / 4.58 ms / 0.59 ms |
-| startup until indexed | 158 ms |
-| peak RSS | 75.7 MiB |
+| p50: definition, hover, completion, references, rename | 0.59 ms / 0.45 ms / 0.96 ms / 3.76 ms / 0.47 ms |
+| startup until indexed | 124 ms |
+| peak RSS | 76.4 MiB |
 <!-- /auto:kpi -->
 
 Every change is also measured on its own with `python3 bench/kpi_track.py`, so that small increases that add up stay
@@ -347,10 +347,10 @@ the measured numbers. The [reports](docs/reports/) explain each step.
 
 ### Overall
 
-- [x] tests/ui run-pass: <!-- total:run-pass -->74.0% (1766 / 2385)
-- [x] tests/ui check-pass: <!-- total:check-pass -->80.7% (1458 / 1807)
+- [x] tests/ui run-pass: <!-- total:run-pass -->74.5% (1776 / 2385)
+- [x] tests/ui check-pass: <!-- total:check-pass -->80.7% (1459 / 1807)
 - [x] tests/ui build-pass: <!-- total:build-pass -->72.6% (98 / 135)
-- [ ] tests/ui compile-fail (an error on an annotated line): <!-- total:compile-fail -->48.7% (3584 / 7358)
+- [ ] tests/ui compile-fail (an error on an annotated line): <!-- total:compile-fail -->48.7% (3587 / 7358)
 - [x] real crates: fnv, adler2, hex, itoa, rustc-hash and cfg-if build and give the same output (6 / 6)
 - [x] zust-analyzer answers like rust-analyzer: 95.4% (rust-analyzer: 96.2%)
 
@@ -360,11 +360,11 @@ the measured numbers. The [reports](docs/reports/) explain each step.
 - [x] `for` / `while` / `loop`, labels: <!-- ui:for-loop-while,loops,label -->96.7%
 - [x] enums, `#[repr(u8)]`, auto-sized tags: <!-- ui:enum,enum-discriminant -->85.7%
 - [x] `cfg`: <!-- ui:cfg -->93.8%
-- [x] bindings, patterns, slice patterns, or-patterns (also with guards): <!-- ui:binding,pattern,or-patterns -->88.1%
+- [x] bindings, patterns, slice patterns, or-patterns (also with guards): <!-- ui:binding,pattern,or-patterns -->88.6%
 - [x] `match`: <!-- ui:match -->85.4%
 - [x] name resolution: <!-- ui:resolve -->85.7%
 - [x] statics: ints, floats, raw pointers, fn pointers, `const fn` calls: <!-- ui:statics -->85.0%
-- [x] structs, `..base` (field by field): <!-- ui:structs,structs-enums -->85.4%
+- [x] structs, `..base` (field by field): <!-- ui:structs,structs-enums -->87.6%
 - [x] type aliases and paths (`impl foo::Point`) as impl self types, discriminants from constants and earlier variants, where clauses on concrete types
 - [x] syntax: GAT bindings, `dyn for<'a> Fn`, 2015 anonymous parameters, raw lifetimes `'r#a`, half-open range patterns, shebangs, Unicode white space; `macro_rules!` fragments matched by kind (`ident`, `literal`, `lifetime`, `vis`)
 - [x] methods of `impl Tr for Box<S>` (a Box impl next to a blanket impl of the same trait is E0119), `..b` / `..=b` / `..` values, `wrapping_shl` / `checked_shl` / `overflowing_shl` / `reverse_bits`, `wrapping_abs` / `saturating_abs` / `saturating_neg` / `overflowing_neg` / `overflowing_abs`
@@ -381,12 +381,12 @@ the measured numbers. The [reports](docs/reports/) explain each step.
 - [ ] drop: <!-- ui:drop -->65.2% (the drop order of some temporaries differs)
 - [ ] traits: <!-- ui:traits -->68.9% (generic traits, blanket impls, `dyn` (also `dyn Tr<A>`), `impl .. for dyn Tr` work; `impl<T> Tr for &T` only without functions; no coherence)
 - [ ] `macro_rules!`: <!-- ui:macros -->74.3% (hygiene for `let`, labels, arm bindings; not every fragment kind)
-- [ ] unions: <!-- ui:union -->61.5% (no `repr(packed)`)
+- [ ] unions: <!-- ui:union -->69.2% (no `repr(packed)`)
 - [ ] const generics: <!-- ui:const-generics -->55.4% (no `generic_const_exprs`)
 - [ ] generic associated types: <!-- ui:generic-associated-types -->71.1%
 - [ ] casts (`as _` / `as *const _` take the source or expected type; a pointer of unknown kind is E0641): <!-- ui:cast -->62.1%
 - [ ] `impl Trait`: <!-- ui:impl-trait -->70.3% (return position, also nested (`-> Option<impl Debug>`), in trait methods and generic fns (typed per instance); no TAIT)
-- [ ] layout: `repr(packed)` / `repr(align)` are ignored: <!-- ui:packed,layout -->38.7%
+- [ ] layout: `repr(packed)` / `repr(align)` are ignored: <!-- ui:packed,layout -->58.1%
 
 ### Checks (compile-fail)
 
