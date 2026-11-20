@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795183151482,
+  "lastUpdate": 1795183153777,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -69865,6 +69865,85 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/mizchi/zust/commit/cdb2f0ff02c761be3549a11b1081cb4c1a332a96"
         },
         "date": 1795181033594,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "parity documentSymbol (名前の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity workspace/symbol (上位 20 の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity definition (行き先の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity hover (名前を含む)",
+            "value": 90,
+            "unit": "%"
+          },
+          {
+            "name": "parity references (数の一致)",
+            "value": 97.297,
+            "unit": "%"
+          },
+          {
+            "name": "parity documentHighlight (数の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity rename (書き換えの一致)",
+            "value": 94.118,
+            "unit": "%"
+          },
+          {
+            "name": "parity signatureHelp (名前・引数の数・今の引数の一致)",
+            "value": 94.737,
+            "unit": "%"
+          },
+          {
+            "name": "parity completion `x.\\|` (書いてある名前を含む)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity completion `na\\|me` (同)",
+            "value": 92.593,
+            "unit": "%"
+          },
+          {
+            "name": "parity 一致の平均",
+            "value": 96.874,
+            "unit": "%"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "committer": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "distinct": true,
+          "id": "4ed592f653ee0ed264c8688f9df34a3ae347b90a",
+          "message": "Static data: a const fn call is evaluated, never silently zeroed\n\n`static C: (f64, u8) = m();` with `const fn m() -> (f64, u8)` was written\nas if m() were a tuple-struct constructor with no arguments: zeros. Now:\n- A call of a free const fn whose body is `let`s and a tail is evaluated:\n  the parameters and lets are put into the tail, for aggregate and float\n  results.\n- `f64::from_bits` / `f32::from_bits` work in float constants.\n- A free fn call that is neither a constructor nor such a const fn is an\n  error, not zeros.\n- `Type::new(..)` keeps its old reading (arguments as fields in order; an\n  empty OnceLock::new() is all zeros).\n\nSolver::lookup is two plain loops. The flat_map over the reversed scopes\nstopped being inlined once this changed the sema crate, which added 6.4M\ninstructions to check; with the loops, check is back to the parent's\n3836.9M.\n\ntests/ui: +1 run-pass (consts/issue-69532.rs).\n\nKPI: edit one fn reads 547.97 (+0.15%). A callgrind A/B of this binary\nagainst the parent's on the same edit build gives 588.875M vs 588.882M,\nso the difference is not in this change's code.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-20T13:54:05Z",
+          "tree_id": "daa1a4e56edfbe749eca9bc1ddefcaee50394219",
+          "url": "https://github.com/mizchi/zust/commit/4ed592f653ee0ed264c8688f9df34a3ae347b90a"
+        },
+        "date": 1795183153276,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
