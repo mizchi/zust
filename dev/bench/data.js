@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795149332438,
+  "lastUpdate": 1795149334189,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -60041,6 +60041,85 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/mizchi/zust/commit/112b131e6daf751a1cc9dfa7e04ff86888687412"
         },
         "date": 1795149069940,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "parity documentSymbol (名前の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity workspace/symbol (上位 20 の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity definition (行き先の一致)",
+            "value": 93.75,
+            "unit": "%"
+          },
+          {
+            "name": "parity hover (名前を含む)",
+            "value": 87.5,
+            "unit": "%"
+          },
+          {
+            "name": "parity references (数の一致)",
+            "value": 92.105,
+            "unit": "%"
+          },
+          {
+            "name": "parity documentHighlight (数の一致)",
+            "value": 93.939,
+            "unit": "%"
+          },
+          {
+            "name": "parity rename (書き換えの一致)",
+            "value": 84.211,
+            "unit": "%"
+          },
+          {
+            "name": "parity signatureHelp (名前・引数の数・今の引数の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity completion `x.\\|` (書いてある名前を含む)",
+            "value": 95,
+            "unit": "%"
+          },
+          {
+            "name": "parity completion `na\\|me` (同)",
+            "value": 95.833,
+            "unit": "%"
+          },
+          {
+            "name": "parity 一致の平均",
+            "value": 94.234,
+            "unit": "%"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "committer": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "distinct": true,
+          "id": "ad6d1047442991e217a3ef7b483413f4b047e26c",
+          "message": "kpi log: a reference row for this machine after #9\n\nThe rows of #9 were measured on another machine, so the band of the\nlast seven mixed machines; 112b131 measured again here starts the\ncomparisons for the rows below (no compiler change).\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-20T04:30:48Z",
+          "tree_id": "c059909f54dd8fcc9549ce62c3a6a343be920918",
+          "url": "https://github.com/mizchi/zust/commit/ad6d1047442991e217a3ef7b483413f4b047e26c"
+        },
+        "date": 1795149333956,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
