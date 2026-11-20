@@ -427,6 +427,24 @@ fn parse_sig(sig: &PSig, is_extern: bool, is_main: bool, owner: Option<&Owner>) 
         has_self = true;
         params.push(tysyn(rt, self_ty)?);
     }
+    // (E0261: a free fn's signature names only the lifetimes it declares; fn pointer, `impl` and `dyn` types may
+    // bind their own (`for<'a>`) and are not looked into)
+    if owner.is_none() {
+        let declared: Vec<&str> = sig.generics.params.iter().filter_map(|g| match g {
+            GParam::Lifetime(l) => Some(l.as_str()),
+            _ => None,
+        }).collect();
+        let mut used = vec![];
+        for (_, t) in &sig.params {
+            named_lifetimes(t, &mut used);
+        }
+        if let Some(r) = &sig.ret {
+            named_lifetimes(r, &mut used);
+        }
+        if let Some(l) = undeclared_lifetime(&used, &declared) {
+            return Err(format!("use of undeclared lifetime name `{l}` (E0261)"));
+        }
+    }
     for (_, t) in &sig.params {
         // (E0277: a parameter's value needs a size; a trait's declaration without a body does not)
         if !owner.is_some_and(|o| o.is_trait) && !is_extern {
@@ -505,6 +523,37 @@ fn parse_sig(sig: &PSig, is_extern: bool, is_main: bool, owner: Option<&Owner>) 
 
 /// Checks on a struct / enum / union definition: unused parameters (E0392), `Self` in defaults (E0735), union fields
 /// a slice or array whose element is unsized (`[[T]]`, `[str; 2]`, `[dyn Tr]`), anywhere in t: its text
+/// The lifetimes a type names, outside fn pointer, `impl` and `dyn` types (which may bind their own with `for<'a>`)
+fn named_lifetimes(t: &PTy, out: &mut Vec<String>) {
+    match t {
+        PTy::Ref(l, _, i) => {
+            if let Some(l) = l {
+                out.push(l.clone());
+            }
+            named_lifetimes(i, out);
+        }
+        PTy::Path(None, p) => {
+            for sg in &p.segs {
+                for a in &sg.args {
+                    match a {
+                        crate::parse::GArg::Lifetime(l) => out.push(l.clone()),
+                        crate::parse::GArg::Ty(t) => named_lifetimes(t, out),
+                        _ => {}
+                    }
+                }
+            }
+        }
+        PTy::Ptr(_, i) | PTy::Slice(i) | PTy::Array(i, _) => named_lifetimes(i, out),
+        PTy::Tuple(ts) => ts.iter().for_each(|t| named_lifetimes(t, out)),
+        _ => {}
+    }
+}
+
+/// The first of `used` that is not `'static` / `'_` nor in `declared` (E0261)
+fn undeclared_lifetime(used: &[String], declared: &[&str]) -> Option<String> {
+    used.iter().find(|l| !matches!(l.as_str(), "'static" | "'_") && !declared.contains(&l.as_str()) && !l.starts_with("'r#")).cloned()
+}
+
 /// A type that is unsized itself (`str`, `[T]`, `dyn Tr`, or a tuple with one of them), as its text
 fn unsized_value(t: &PTy) -> Option<String> {
     match t {
@@ -549,6 +598,20 @@ fn unsized_elem(t: &PTy) -> Option<String> {
 }
 
 fn adt_checks(attrs: &[String], g: &Generics, tys: &[&PTy], union: bool, nfields: usize) -> R<()> {
+    // (E0261: the fields name only the lifetimes the type declares)
+    {
+        let declared: Vec<&str> = g.params.iter().filter_map(|p| match p {
+            GParam::Lifetime(l) => Some(l.as_str()),
+            _ => None,
+        }).collect();
+        let mut used = vec![];
+        for t in tys {
+            named_lifetimes(t, &mut used);
+        }
+        if let Some(l) = undeclared_lifetime(&used, &declared) {
+            return Err(format!("use of undeclared lifetime name `{l}` (E0261)"));
+        }
+    }
     // (E0277: a slice's or array's element must be Sized)
     if let Some(t) = tys.iter().find_map(|t| unsized_elem(t)) {
         return Err(format!("the size for values of type `{t}` cannot be known at compilation time (E0277)"));
@@ -1372,6 +1435,11 @@ pub fn summarize(item: &Item, owner: Option<&Owner>) -> R<Summary> {
             sm.consts.push((name, tysyn(t, owner.map(|o| &o.self_ty))?, item.init_text.clone()));
         }
         ItemKind::Static(m, n, t, _) => {
+            let mut used = vec![];
+            named_lifetimes(t, &mut used);
+            if let Some(l) = undeclared_lifetime(&used, &[]) {
+                return Err(format!("use of undeclared lifetime name `{l}` (E0261)"));
+            }
             if let Some(u) = unsized_value(t) {
                 return Err(format!("the size for values of type `{u}` cannot be known at compilation time (E0277)"));
             }
@@ -1400,6 +1468,12 @@ pub fn summarize(item: &Item, owner: Option<&Owner>) -> R<Summary> {
                     }
                 }
                 sm.adt_err = adt_checks(&item.attrs, g, &tys, false, vars.len()).err();
+                // (an undeclared lifetime: at the line it is first written on)
+                if let Some(e) = sm.adt_err.as_ref().filter(|e| e.ends_with("(E0261)")) {
+                    if let Some(l) = e.split('`').nth(1) {
+                        sm.adt_err = Some(format!("\u{1}{l}\u{1}{e}"));
+                    }
+                }
                 if let Some(r) = int_repr(&item.attrs) {
                     sm.reprs.push((sn.clone(), r));
                 }
@@ -1459,6 +1533,12 @@ pub fn summarize(item: &Item, owner: Option<&Owner>) -> R<Summary> {
                 // (PhantomData itself is the one type whose parameter needs no use)
                 sm.adt_err = adt_checks(&item.attrs, g, &tys, union, tys.len()).err();
                 // (an unsized element: at its field's line, which the driver finds by the field's name)
+                // (an undeclared lifetime: at the line it is first written on)
+                if let Some(e) = sm.adt_err.as_ref().filter(|e| e.ends_with("(E0261)")) {
+                    if let Some(l) = e.split('`').nth(1) {
+                        sm.adt_err = Some(format!("\u{1}{l}\u{1}{e}"));
+                    }
+                }
                 if let (Some(e), Fields::Named(v)) = (&sm.adt_err, fields) {
                     if e.ends_with("(E0277)") {
                         if let Some((n, _)) = v.iter().find(|x| unsized_elem(&x.1).is_some()) {

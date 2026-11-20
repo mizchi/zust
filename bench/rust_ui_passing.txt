@@ -1593,6 +1593,7 @@ build-pass	consts/enclosing-scope-rule.rs
 compile-fail	consts/erroneous_type_in_const_return_value.rs
 compile-fail	consts/erroneous_type_in_promoted.rs
 compile-fail	consts/error-is-freeze.rs
+compile-fail	consts/ice-extra-args-fn-abi-issue-127423.rs
 check-pass	consts/int_ptr_for_zst_slices.rs
 compile-fail	consts/invalid-const-in-body.rs
 check-pass	consts/issue-104155.rs
@@ -2033,6 +2034,7 @@ compile-fail	error-codes/E0207.rs
 compile-fail	error-codes/E0214.rs
 compile-fail	error-codes/E0223.rs
 compile-fail	error-codes/E0252.rs
+compile-fail	error-codes/E0261.rs
 compile-fail	error-codes/E0262.rs
 compile-fail	error-codes/E0263.rs
 compile-fail	error-codes/E0267.rs
@@ -2897,6 +2899,7 @@ check-pass	inference/infer-binary-operand-behind-reference.rs
 run-pass	inference/infer-fn-tail-expr.rs
 check-pass	inference/infer-result-type-through-dead-code.rs
 compile-fail	inference/issue-103587.rs
+compile-fail	inference/issue-107090.rs
 compile-fail	inference/issue-113354.rs
 check-pass	inference/issue-28935.rs
 run-pass	inference/issue-36053.rs
@@ -3116,6 +3119,7 @@ run-pass	lifetimes/trait-method-lifetime-bounds.rs
 run-pass	lifetimes/trait-object-constructor-14821.rs
 check-pass	lifetimes/tuple-struct-vs-struct-with-fields-borrowck-10902.rs
 check-pass	lifetimes/unconstrained-lifetime-in-impl-bound.rs
+compile-fail	lifetimes/undeclared-lifetime-used-in-debug-macro-issue-70152.rs
 check-pass	lifetimes/unsafe-transmute-in-find-11740.rs
 compile-fail	lifetimes/unusual-rib-combinations.rs
 build-pass	limits/limit-huge-struct-derive-debug.rs
@@ -4107,6 +4111,7 @@ run-pass	parallel-rustc/read-stolen-value-issue-111520.rs
 compile-fail	parallel-rustc/recursive-struct-oncelock-issue-151226.rs
 compile-fail	parallel-rustc/ty-variance-issue-124423.rs
 compile-fail	parallel-rustc/ty-variance-issue-127971.rs
+compile-fail	parallel-rustc/undefined-function-issue-120760.rs
 compile-fail	parallel-rustc/unexpected-type-issue-120601.rs
 build-pass	parser/accept-lifetime-list-empty-or-trailing-comma.rs
 check-pass	parser/anon-enums-are-ambiguous.rs
@@ -5005,6 +5010,8 @@ run-pass	regions/regions-free-region-outlives-static-outlives-free-region.rs
 check-pass	regions/regions-implied-bounds-projection-gap-2.rs
 check-pass	regions/regions-implied-bounds-projection-gap-3.rs
 check-pass	regions/regions-implied-bounds-projection-gap-4.rs
+compile-fail	regions/regions-in-enums.rs
+compile-fail	regions/regions-in-structs.rs
 run-pass	regions/regions-infer-borrow-scope-addr-of.rs
 compile-fail	regions/regions-infer-borrow-scope-too-big.rs
 run-pass	regions/regions-infer-borrow-scope-view.rs
@@ -5023,6 +5030,7 @@ run-pass	regions/regions-link-fn-args.rs
 run-pass	regions/regions-lub-ref-ref-rc.rs
 compile-fail	regions/regions-name-duplicated.rs
 compile-fail	regions/regions-name-static.rs
+compile-fail	regions/regions-name-undeclared.rs
 run-pass	regions/regions-no-bound-in-argument-cleanup.rs
 check-pass	regions/regions-no-variance-from-fn-generics.rs
 run-pass	regions/regions-nullary-variant.rs
@@ -5045,6 +5053,7 @@ run-pass	regions/regions-static-bound-rpass.rs
 run-pass	regions/regions-static-closure.rs
 check-pass	regions/regions-trait-1.rs
 run-pass	regions/regions-trait-object-1.rs
+compile-fail	regions/regions-undeclared.rs
 run-pass	regions/regions-variance-contravariant-use-contravariant.rs
 run-pass	regions/regions-variance-covariant-use-covariant.rs
 check-pass	regions/relate-bound-region-ref-type-param.rs
@@ -5487,6 +5496,7 @@ build-pass	statics/issue-15261.rs
 run-pass	statics/issue-17233.rs
 run-pass	statics/issue-17718-static-unsafe-interior.rs
 check-pass	statics/issue-44373-2.rs
+compile-fail	statics/missing_lifetime.rs
 build-pass	statics/nested-allocations-dont-inherit-codegen-attrs.rs
 check-pass	statics/nested_struct.rs
 check-pass	statics/recursive_interior_mut.rs
