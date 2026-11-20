@@ -1541,7 +1541,7 @@ impl Program {
             for (pn, trs) in &sm.adt_bounds {
                 let Some(&a) = sm.adt_generics.iter().position(|g| g == pn).and_then(|i| sd.args.get(i)) else { continue };
                 for tr in trs {
-                    if sums.iter().any(|s| s.trait_decl.as_deref() == Some(tr.as_str())) && !p.bound_holds(sums, a, tr, 0) {
+                    if sums[..user.min(sums.len())].iter().any(|s| s.trait_decl.as_deref() == Some(tr.as_str())) && !p.bound_holds(sums, user, a, tr, 0) {
                         // (an extern static: at its own line in the block)
                         let line = items[c.item as usize].line + crate::parse::extern_static(&c.expr).map_or(0, |x| x.0.saturating_sub(1));
                         return Err(format!("{line}:1: the trait bound `{}: {tr}` is not satisfied (E0277)", p.tn(a)));
@@ -1678,22 +1678,25 @@ impl Program {
     /// a blanket `impl<P: B> Tr for P` matches any t) and the impl's bounds on its parameters hold for what they matched
     /// (checked the same way). An impl this cannot read (a where clause, a self type that does not resolve) counts as
     /// applying. Other traits (std's) are asked of `implements`
-    pub fn bound_holds(&self, sums: &[Summary], t: Ty, tr: &str, depth: u32) -> bool {
-        if depth > 8 || matches!(t, Ty::Ref(..) | Ty::Ptr(..) | Ty::Param(_)) || self.has_param(t) || !sums.iter().any(|s| s.trait_decl.as_deref() == Some(tr)) {
+    pub fn bound_holds(&self, sums: &[Summary], user: usize, t: Ty, tr: &str, depth: u32) -> bool {
+        // (the program's own traits: the first `user` summaries are its items, the rest the prelude's, whose traits
+        // (Default ..) builtin types implement without an impl to find)
+        if depth > 8 || matches!(t, Ty::Ref(..) | Ty::Ptr(..) | Ty::Param(_)) || self.has_param(t) || !sums[..user.min(sums.len())].iter().any(|s| s.trait_decl.as_deref() == Some(tr)) {
             return self.implements(t, tr);
         }
         let readable = |b: &str| b.chars().all(|c| c.is_alphanumeric() || c == '_');
         for s in sums.iter().filter(|s| s.impl_trait.as_deref() == Some(tr)) {
             let gn: Vec<&str> = s.impl_generics.iter().map(|g| g.0.as_str()).collect();
-            if !s.where_types.is_empty() {
-                return true;
-            }
             let Some(pt) = s.impl_self_ty.as_ref().and_then(|st| self.resolve_g(st, &gn).ok()) else {
                 return true;
             };
             let mut sol = vec![None; gn.len()];
             if !self.match_ty(pt, t, &mut sol) {
                 continue;
+            }
+            // (a where clause this does not read: the impl applies, once its self type matches)
+            if !s.where_types.is_empty() {
+                return true;
             }
             // (match_ty also lets `&mut` stand for `&` and the like: the impl applies only to its self type itself)
             if let Some(args) = sol.iter().copied().collect::<Option<Vec<Ty>>>() {
@@ -1704,7 +1707,7 @@ impl Program {
             let bounds_hold = s.impl_generics.iter().zip(&sol).all(|((_, bs), a)| match a {
                 Some(a) => bs.iter().all(|b| {
                     let b = b.trim();
-                    !readable(b) || self.bound_holds(sums, *a, b, depth + 1)
+                    !readable(b) || self.bound_holds(sums, user, *a, b, depth + 1)
                 }),
                 None => true,
             });

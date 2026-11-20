@@ -179,3 +179,4 @@ date	commit	change	noop_M	edit_M	check_M	cache_KiB	lsp_G	run	check	build	cfail	t
 2026-11-20	671d978+	two-phase compound assignment (shared reservation)	0.697	548.481	3840.484	1902.8	-	1778	1459	98	3588	1167.093	63.574	10.296	316.850	697.277	263.098
 2026-11-20	49771c3+	compat-next10 on main (cherry-picked)	0.695	548.412	3840.817	1902.8	-	1778	1459	98	3589	1167.812	63.552	10.282	316.933	697.595	263.090
 2026-11-20	bb7a65b+	PR18 review: bound_holds matches impls; activation inside call_fn	0.695	548.412	3840.974	1902.8	-	1778	1459	98	3589	1167.923	63.647	10.282	316.935	697.639	263.090
+2026-11-20	dab3faa+	PR18 review 2: program traits only, where after match, map index raw-ref	0.695	548.412	3840.974	1902.8	-	1778	1459	98	3589	1167.923	63.559	10.282	316.935	697.639	263.091

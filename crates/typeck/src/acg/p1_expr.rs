@@ -226,7 +226,11 @@ impl Cx<'_> {
                     Some(Ty::Struct(sid)) if self.prog.structs[self.prog.base_of(sid) as usize].name == "HashMap") =>
             {
                 let e = self.keep_expr(mcall(mcall(Expr::Paren(b.clone()), "get", vec![(**k).clone()]), "unwrap", vec![]));
-                let (v, t) = self.expr(e, None)?;
+                // (the map and key are values, not the place `&raw` takes: reading a static in them still needs unsafe)
+                let raw = std::mem::take(&mut self.raw_ref);
+                let r = self.expr(e, None);
+                self.raw_ref = raw;
+                let (v, t) = r?;
                 match (v, t) {
                     (Some(p), Ty::Ref(_, inner)) => Ok(Place::Mem(p, 0, *inner)),
                     _ => err(SP, "internal: bad map index"),
