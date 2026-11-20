@@ -1478,6 +1478,21 @@ impl Cx<'_> {
                             continue;
                         }
                     }
+                    // (`let g = Tr::m;`: a trait's method, whose impl only the calls choose: g is `Tr::m` at each call)
+                    if let (None, Expr::Path(None, ip)) = (ann_ty, init) {
+                        if ip.segs.len() == 2
+                            && ip.segs.iter().all(|s| s.args.is_empty())
+                            && self.prog.traits.contains_key(&ip.segs[0].name)
+                            && self.lookup(&ip.segs[0].name).is_none()
+                            && !matches!(pat, Pat::Ident(_, true, ..))
+                            && self.fn_item(init).is_none()
+                        {
+                            let a: &Expr = self.keep_expr(init.clone());
+                            self.fn_aliases.retain(|x| x.0 != name);
+                            self.fn_aliases.push((name.clone(), a));
+                            continue;
+                        }
+                    }
                     // (`let x: &[_] = &[1, 2];`: the slice of the array's element type)
                     let ann = match ann {
                         Some(Ty::Ref(m, Ty::Slice(e))) if has_hole(self.prog, **e) => match self.peek(init) {

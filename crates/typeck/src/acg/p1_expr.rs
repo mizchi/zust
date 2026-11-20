@@ -2245,6 +2245,28 @@ impl Cx<'_> {
         if let Some(r) = self.default_call(c, expected)? {
             return Ok(r);
         }
+        // `From::from(x)` to an expected type T: `T::from(x)`; `Into::into(x)`: `x.into()`
+        if let (Expr::Path(None, p), [x]) = (&**func, cargs.as_slice()) {
+            let n = p.segs.len();
+            if n >= 2 && p.segs.iter().all(|s| s.args.is_empty()) && (n == 2 || matches!(p.segs[0].name.as_str(), "std" | "core")) {
+                match (p.segs[n - 2].name.as_str(), p.segs[n - 1].name.as_str()) {
+                    ("Into", "into") if self.lookup("Into").is_none() => {
+                        let e = self.keep_expr(mcall(x.clone(), "into", vec![]));
+                        return self.expr(e, expected);
+                    }
+                    ("From", "from") => {
+                        let simple = |t: Ty| t.is_int() || t.is_float() || matches!(t, Ty::Bool | Ty::Char) || matches!(t, Ty::Struct(sid) if self.prog.structs[sid as usize].base.is_none());
+                        if let Some(t) = expected.filter(|&t| simple(t) && !self.prog.has_param(t)) {
+                            if let Ok(Expr::Path(None, tp)) = crate::parse::parse_expr(&format!("{}::from", self.prog.tn(t))) {
+                                let ne = self.keep_expr(Expr::Call(Box::new(Expr::Path(None, crate::parse::Path { pos: p.pos, ..tp })), cargs.clone()));
+                                return self.expr(ne, expected);
+                            }
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        }
         // `i32::try_from(x)` (an integer type): `x.try_into()` to that type
         if let (Expr::Path(None, p), [x]) = (&**func, cargs.as_slice()) {
             if p.segs.len() == 2 && p.segs[1].name == "try_from" {

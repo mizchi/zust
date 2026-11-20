@@ -6256,6 +6256,7 @@ check-pass	traits/inheritance/supertrait-operator-issue-18088.rs
 build-pass	traits/issue-104322.rs
 compile-fail	traits/issue-105231.rs
 run-pass	traits/issue-15155.rs
+run-pass	traits/issue-18412.rs
 run-pass	traits/issue-22019.rs
 run-pass	traits/issue-22110.rs
 compile-fail	traits/issue-22384.rs
