@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795146707617,
+  "lastUpdate": 1795146709694,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -58561,6 +58561,85 @@ window.BENCHMARK_DATA = {
           {
             "name": "parity 一致の平均",
             "value": 95.827,
+            "unit": "%"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "committer": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "distinct": true,
+          "id": "e00a7453dedf50aa016a3ee88e5845417404f79a",
+          "message": "Malformed built-in attributes (E0539 / E0565)\n\nA built-in attribute of a fixed shape written in another one is\n\"malformed `X` attribute input\" at its line: crate_type /\nrecursion_limit / crate_name need `= \"...\"`, inline is a word or\n(always) / (never), must_use a word or `= \"...\"`, cold / track_caller /\nnon_exhaustive / no_mangle words, repr a non-empty list without `=`,\ndeprecated not `= b\"..\"`, link a list, the lint levels lists,\nmacro_use a word or a list of names, cfg a predicate and cfg_attr a\npredicate with attributes. Read are the file's inner attributes and\nthose in front of the items, so the check costs nothing measurable\n(check +0.01%).\n\ntests/ui: +27 compile-fail passes; three whose expected message\ndiffers go to rust_ui_accidental.txt.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-20T03:48:07Z",
+          "tree_id": "777275cd14678adb8a3a0f0d3be8f77132220cf4",
+          "url": "https://github.com/mizchi/zust/commit/e00a7453dedf50aa016a3ee88e5845417404f79a"
+        },
+        "date": 1795146709255,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "parity documentSymbol (名前の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity workspace/symbol (上位 20 の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity definition (行き先の一致)",
+            "value": 96.774,
+            "unit": "%"
+          },
+          {
+            "name": "parity hover (名前を含む)",
+            "value": 95,
+            "unit": "%"
+          },
+          {
+            "name": "parity references (数の一致)",
+            "value": 89.744,
+            "unit": "%"
+          },
+          {
+            "name": "parity documentHighlight (数の一致)",
+            "value": 96.875,
+            "unit": "%"
+          },
+          {
+            "name": "parity rename (書き換えの一致)",
+            "value": 88.235,
+            "unit": "%"
+          },
+          {
+            "name": "parity signatureHelp (名前・引数の数・今の引数の一致)",
+            "value": 94.737,
+            "unit": "%"
+          },
+          {
+            "name": "parity completion `x.\\|` (書いてある名前を含む)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity completion `na\\|me` (同)",
+            "value": 85.185,
+            "unit": "%"
+          },
+          {
+            "name": "parity 一致の平均",
+            "value": 94.655,
             "unit": "%"
           }
         ]
