@@ -21,6 +21,10 @@ Only deterministic numbers are logged (wall-clock times move by 10-30% between r
 - with --lsp: the instructions of one zust-analyzer session of bench/lsp_parity.py on zustc's sources as of REF_COMMIT
   (a snapshot unpacked once under the work directory: the checkout's own sources grow with the code, which would move
   the count without any change to the server). It moves by ~0.1% run to run (the client polls until the index is ready).
+- patterns: bench/gen_patterns.py mix 4 (the shapes of application code: an interpreter, record processing, error
+  handling with `?`, state machines, trait-object plugins, zero-copy parsing with lifetimes, macro_rules!, nested
+  modules, generic containers; 2600 lines): `check` (the least of 3) and a build after editing one function.
+  bench/patterns.py measures each pattern alone.
 - tests/ui pass counts from out/rust_ui.json, when it is newer than target/release/zustc.
 
 Each run prints the change against the previous row and against the first row (the reference), and rewrites
@@ -37,7 +41,7 @@ MD = os.path.join(ROOT, "bench/kpi_log.md")
 # (a fixed place, whichever checkout runs this: the source path goes into the build and its counts)
 WORK = os.environ.get("ZUST_KPI_WORK") or os.path.expanduser("~/.cache/zust-kpi-track")
 COLS = ["date", "commit", "change", "noop_M", "edit_M", "check_M", "cache_KiB", "lsp_G", "run", "check", "build", "cfail",
-        "tr_check_M", "tr_edit_M", "cr_noop_M", "cr_edit_M"]
+        "tr_check_M", "tr_edit_M", "cr_noop_M", "cr_edit_M", "pt_check_M", "pt_edit_M"]
 # (columns added later: rows before them read as "-")
 
 
@@ -102,6 +106,26 @@ def crates_kpis():
         cb.toggle_edit(d, 0)
         edit += instructions(build, cwd=d)
     return noop, edit
+
+
+def patterns_kpis(n=4):
+    """bench/gen_patterns.py mix (every pattern, n groups each): `check` (the least of 3) and a build after editing one
+    function"""
+    d = os.path.join(WORK, "patterns")
+    shutil.rmtree(d, ignore_errors=True)
+    os.makedirs(d)
+    src, exe = os.path.join(d, "p.rs"), os.path.join(d, "p")
+    gen_p = lambda v: open(src, "w").write(subprocess.run([sys.executable, os.path.join(ROOT, "bench/gen_patterns.py"), "mix", str(n), str(v)],
+                                                          capture_output=True, text=True, check=True).stdout)
+    gen_p(0)
+    build = [ZUSTC, src, "-o", exe]
+    run_measured(build)
+    check = min(instructions([ZUSTC, "check", src]) for _ in range(3))
+    # (a build under valgrind does not take the stamps' shortcut, and leaves the cache the edit build reads)
+    instructions(build, env={"ZUSTC_NO_STAMP": "1"})
+    gen_p(3)
+    edit = instructions(build)
+    return check, edit
 
 
 REF_COMMIT = "45579fc"
@@ -182,14 +206,15 @@ def write_md(rows):
            "checkout's own sources and are left out. gen5000 is simple functions and reaches little of trait solving and "
            "inference, so since 2026-11-19 two more workloads are measured: traits (bench/gen_traits.py 50: generic "
            "traits with associated types, bounds, iterator chains, closures, dyn) and crates (cratebench's six crates, "
-           "real code, as a lib and its app; the sum over them).",
+           "real code, as a lib and its app; the sum over them). Since 2026-11-20, patterns (bench/gen_patterns.py mix 4: "
+           "the shapes of application code, check and an edit build).",
            "",
-           "| date | commit | change | no-op build (M instr) | edit one fn (M instr) | check (M instr) | cache (KiB) | LSP session (G instr) | traits check (M) | traits edit (M) | crates no-op (M) | crates edit (M) | tests/ui run / check / build / compile-fail |",
-           "|---|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---|"]
+           "| date | commit | change | no-op build (M instr) | edit one fn (M instr) | check (M instr) | cache (KiB) | LSP session (G instr) | traits check (M) | traits edit (M) | crates no-op (M) | crates edit (M) | patterns check (M) | patterns edit (M) | tests/ui run / check / build / compile-fail |",
+           "|---|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---|"]
     prev = None
     for r in rows:
         cells = []
-        for k in ("noop_M", "edit_M", "check_M", "cache_KiB", "lsp_G", "tr_check_M", "tr_edit_M", "cr_noop_M", "cr_edit_M"):
+        for k in ("noop_M", "edit_M", "check_M", "cache_KiB", "lsp_G", "tr_check_M", "tr_edit_M", "cr_noop_M", "cr_edit_M", "pt_check_M", "pt_edit_M"):
             v = num(r, k)
             if v is None:
                 cells.append("-")
@@ -205,7 +230,8 @@ def write_md(rows):
 
 
 KPIS = (("noop_M", "no-op build"), ("edit_M", "edit one fn"), ("check_M", "check"), ("cache_KiB", "cache"), ("lsp_G", "LSP session"),
-        ("tr_check_M", "traits check"), ("tr_edit_M", "traits edit"), ("cr_noop_M", "crates no-op"), ("cr_edit_M", "crates edit"))
+        ("tr_check_M", "traits check"), ("tr_edit_M", "traits edit"), ("cr_noop_M", "crates no-op"), ("cr_edit_M", "crates edit"),
+        ("pt_check_M", "patterns check"), ("pt_edit_M", "patterns edit"))
 
 
 def band_check(rows, row, last=7, floor=0.001):
@@ -236,6 +262,7 @@ def main():
     noop, edit, check, cache = build_kpis()
     tr_check, tr_edit = traits_kpis()
     cr_noop, cr_edit = crates_kpis()
+    pt_check, pt_edit = patterns_kpis()
     lsp = lsp_kpi() if a.lsp else None
     ui = ui_counts()
     commit = subprocess.run(["git", "rev-parse", "--short", "HEAD"], capture_output=True, text=True, cwd=ROOT).stdout.strip()
@@ -246,7 +273,8 @@ def main():
            "noop_M": f"{noop:.3f}", "edit_M": f"{edit:.3f}", "check_M": f"{check:.3f}", "cache_KiB": f"{cache:.1f}",
            "lsp_G": "-" if lsp is None else f"{lsp:.4f}", "run": str(ui[0] or "-"), "check": str(ui[1] or "-"),
            "build": str(ui[2] or "-"), "cfail": str(ui[3] or "-"),
-           "tr_check_M": f"{tr_check:.3f}", "tr_edit_M": f"{tr_edit:.3f}", "cr_noop_M": f"{cr_noop:.3f}", "cr_edit_M": f"{cr_edit:.3f}"}
+           "tr_check_M": f"{tr_check:.3f}", "tr_edit_M": f"{tr_edit:.3f}", "cr_noop_M": f"{cr_noop:.3f}", "cr_edit_M": f"{cr_edit:.3f}",
+           "pt_check_M": f"{pt_check:.3f}", "pt_edit_M": f"{pt_edit:.3f}"}
     rows = read_log()
     prev = rows[-1] if rows else None
     first = rows[0] if rows else row
