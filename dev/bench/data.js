@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795163479700,
+  "lastUpdate": 1795163481925,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -47812,6 +47812,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "lsp peak RSS",
             "value": 74.324,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "miz404@gmail.com",
+            "name": "Kotaro Chikuba",
+            "username": "mizchi"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "d2a2e93b528c83072e463728da5f6e83afc9f840",
+          "message": "Merge pull request #10 from mizchi/claude/sleepy-dijkstra-8sankk\n\nformal/connect: test the implementation against TLA+ models (idealis conformance); PRs commit no KPI log rows",
+          "timestamp": "2026-11-20T17:26:28+09:00",
+          "tree_id": "d7b1145806d6106f6bd9cb7704143cd1ffd34f61",
+          "url": "https://github.com/mizchi/zust/commit/d2a2e93b528c83072e463728da5f6e83afc9f840"
+        },
+        "date": 1795163481447,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "lsp definition p50",
+            "value": 0.507,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp hover p50",
+            "value": 0.398,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp completion p50",
+            "value": 1.045,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp references p50",
+            "value": 6.119,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp rename p50",
+            "value": 0.43,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp signatureHelp p50",
+            "value": 0.959,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp documentHighlight p50",
+            "value": 0.968,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp ready (startup to indexed)",
+            "value": 125.788,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp peak RSS",
+            "value": 74.211,
             "unit": "MiB"
           }
         ]
