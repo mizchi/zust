@@ -1212,7 +1212,17 @@ fn duplicate_import(src0: &str, split: &str, items: &[SrcItem]) -> Option<String
     if !items.iter().any(|it| {
         matches!(it.kind, ItemKind::Normal)
             && (it.start == 0 || split.as_bytes()[it.start - 1] == b'\n')
-            && (split[it.start..].starts_with("use ") || split[it.start..].starts_with("pub use ") || split[it.start..].starts_with("#["))
+            && {
+                // (past the item's attributes, which only a few items have)
+                let mut t = &split[it.start..it.end];
+                while t.starts_with("#[") {
+                    match t.find(']') {
+                        Some(e) => t = t[e + 1..].trim_start(),
+                        None => break,
+                    }
+                }
+                t.starts_with("use ") || t.starts_with("pub use ")
+            }
     }) {
         return None;
     }
@@ -1220,6 +1230,8 @@ fn duplicate_import(src0: &str, split: &str, items: &[SrcItem]) -> Option<String
     let mut seen: FxMap<&str, (bool, bool, usize)> = FxMap::default();
     // (the original file's last line: items past it were hoisted out of fn bodies, and are their blocks')
     let mut total: Option<usize> = None;
+    // (reused for each item: no allocation per item)
+    let mut names: Vec<(&str, bool)> = vec![];
     for it in items {
         if !matches!(it.kind, ItemKind::Normal) || !(it.start == 0 || split.as_bytes()[it.start - 1] == b'\n') {
             continue;
@@ -1236,7 +1248,7 @@ fn duplicate_import(src0: &str, split: &str, items: &[SrcItem]) -> Option<String
         }
         let line_shift = text[..text.len() - t.len()].matches('\n').count();
         let t = t.strip_prefix("pub ").unwrap_or(t);
-        let mut names: Vec<(&str, bool)> = vec![];
+        names.clear();
         if let Some(rest) = t.strip_prefix("use ") {
             let body = rest.trim_end().trim_end_matches(';').trim();
             let (prefix, list): (&str, Vec<&str>) = match body.find('{') {
@@ -1257,9 +1269,9 @@ fn duplicate_import(src0: &str, split: &str, items: &[SrcItem]) -> Option<String
                 }
             }
         } else {
-            let kw_name = t.split_whitespace().take(2).collect::<Vec<_>>();
-            if let [kw, name] = kw_name.as_slice() {
-                if matches!(*kw, "struct" | "enum" | "trait" | "type" | "union" | "fn" | "const" | "static") {
+            let mut ws = t.split_whitespace();
+            if let (Some(kw), Some(name)) = (ws.next(), ws.next()) {
+                if matches!(kw, "struct" | "enum" | "trait" | "type" | "union" | "fn" | "const" | "static") {
                     let end = name.find(|c: char| !(c.is_alphanumeric() || c == '_')).unwrap_or(name.len());
                     // (a user type renamed off a prelude type's name is still that name)
                     let n = &name[..end];
@@ -1271,7 +1283,7 @@ fn duplicate_import(src0: &str, split: &str, items: &[SrcItem]) -> Option<String
             }
         }
         let line = it.line + line_shift;
-        for (n, is_use) in names {
+        for &(n, is_use) in &names {
             // (two items of one name are the build's own duplicate check; here at least one is a `use`)
             if let Some(&(any_use, any_item, l0)) = seen.get(&n) {
                 if (any_use || is_use) && (any_use || any_item) {
