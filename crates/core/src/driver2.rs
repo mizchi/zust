@@ -1154,6 +1154,25 @@ fn first_bad_name(src: &str, items: &[SrcItem], deny: [bool; 3]) -> Option<(usiz
                 }
             }
         }
+        // (lifetime parameters in the header: `fn f<'FooBar>` / `struct S<'Ab>`)
+        if deny[0] {
+            let head = &text[..text.find('{').unwrap_or(text.len())];
+            let hb = head.as_bytes();
+            let mut i = 0;
+            while let Some(k) = head[i..].find('\'') {
+                let a = i + k + 1;
+                let e = a + head[a..].find(|c: char| !(c.is_alphanumeric() || c == '_')).unwrap_or(head.len() - a);
+                // (a lifetime, not a char literal `'a'`)
+                if e > a && hb.get(e) != Some(&b'\'') {
+                    let l = &head[a..e];
+                    if l != "static" && !snake(l) {
+                        let line = it.line + head[..a].matches('\n').count();
+                        return Some((line, format!("lifetime `'{l}` should have a snake case name")));
+                    }
+                }
+                i = e.max(a);
+            }
+        }
         // (a fn's parameters and `let`s: "variable `X`")
         if kw == "fn" && deny[0] {
             if let Ok(Some(f)) = parse_fn(src, it) {
