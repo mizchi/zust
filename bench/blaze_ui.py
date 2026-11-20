@@ -7,7 +7,10 @@ usage: python3 bench/blaze_ui.py [--per-kind N] [--seed S]
 The tests are the ones bench/rust_ui.py counts as applicable (the same filter), N of each of run-pass, check-pass and
 build-pass, picked with a fixed seed. Each is put as src/main.rs of one cargo package (the edition from its
 `//@ edition:` line, else 2015 as compiletest's default) and built with `blaze build`, the daemon kept up between the
-tests. run-pass must also exit 0 and print its `.run.stdout` if it has one; the others must build. compile-fail is
+tests (a fresh package after a failed build: blaze's incremental link state breaks with it). A test that uses the C
+helpers compiletest links into every test (tests/auxiliary/rust_test_helpers.c) gets them through a build script, as
+zustc gets them through -L. run-pass must also exit 0 and print its `.run.stdout` if it has one; the others must build.
+compile-fail is
 left out: blaze reports rust-analyzer's diagnostics, whose lines this harness does not compare.
 zustc's result on each test is read from out/rust_ui_results.txt (the last full run of bench/rust_ui.py).
 """
@@ -33,14 +36,24 @@ def package(edition):
     os.makedirs(os.path.join(W, "src"))
     with open(os.path.join(W, "Cargo.toml"), "w") as f:
         f.write(f'[package]\nname = "t"\nversion = "0.0.0"\nedition = "{edition}"\n\n[workspace]\n')
+        # (blaze's build-script sandbox: the helpers' directory may be linked from)
+        if rust_ui.HELPERS:
+            f.write(f'\n[workspace.metadata.blaze.sandbox]\nbuild-script-link-dirs = ["{rust_ui.HELPERS}"]\n')
 
 
 def run_one(path, kind, edition_now):
     text = open(path, errors="replace").read()
     eds = rust_ui.directives(text).get("edition", [])
-    edition = (eds[0] if eds else "2015") or "2015"
-    if edition != edition_now:
+    # (`2015..2021`: a range of editions, the first one)
+    edition = (eds[0].split("..")[0].strip() if eds else "2015") or "2015"
+    helpers = "rust_test_helpers" in text and rust_ui.HELPERS
+    if edition != edition_now or helpers or os.path.exists(os.path.join(W, "build.rs")):
         package(edition)
+        # (the C helpers compiletest links into every test, as zustc gets them through -L; blaze build scripts run in a
+        # sandbox, so the manifest names their directory)
+        if helpers:
+            with open(os.path.join(W, "build.rs"), "w") as f:
+                f.write(f'fn main() {{ println!("cargo:rustc-link-search=native={rust_ui.HELPERS}"); println!("cargo:rustc-link-lib=static=rust_test_helpers"); }}\n')
     shutil.copy(path, os.path.join(W, "src/main.rs"))
     # (blaze, like git, does not trust a file whose stat stamp is within ~20 ms of its change: wait it out, so that the
     # build sees the new main.rs; and remove the last test's binary, so that a build that kept it cannot pass)
@@ -53,7 +66,10 @@ def run_one(path, kind, edition_now):
     except subprocess.TimeoutExpired:
         return "timeout", edition
     if r.returncode != 0:
-        return "fail", edition
+        last = next((l for l in r.stderr.splitlines() if l.startswith("error")), "")
+        # (a failed link leaves blaze's incremental link state broken: every later link of the package failed too.
+        # The next test starts from a fresh package)
+        return "fail(build: " + last[:80] + ")", None
     if kind != "run-pass":
         return "pass", edition
     try:
@@ -61,10 +77,10 @@ def run_one(path, kind, edition_now):
     except subprocess.TimeoutExpired:
         return "timeout", edition
     if p.returncode != 0:
-        return "fail", edition
+        return f"fail(run: exit {p.returncode} {p.stderr[-80:]!r})", edition
     want = os.path.splitext(path)[0] + ".run.stdout"
     if os.path.exists(want) and p.stdout != open(want, "rb").read():
-        return "fail", edition
+        return "fail(run: stdout)", edition
     return "pass", edition
 
 
@@ -77,6 +93,7 @@ def main():
     for line in open(os.path.join(ROOT, "out/rust_ui_results.txt")):
         st, kind, rel = line.rstrip("\n").split("\t")
         zres[(kind, rel)] = st
+    rust_ui.HELPERS = rust_ui.test_helpers()
     ui = os.path.join(rust_ui.TESTS, "tests/ui")
     rng = random.Random(a.seed)
     edition = None

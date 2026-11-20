@@ -171,6 +171,10 @@ python3 bench/rust_ui.py --baseline bench/rust_ui_passing.txt --check
 python3 bench/rust_ui.py --baseline bench/rust_ui_passing.txt --write-baseline
 ```
 
+`bench/rust_ui_ratchet.txt` は通過数の ratchet で、zustc が通すべきテストの種類ごとの最低数。これを下回ると CI が
+失敗する。`--write-baseline` はこれをその実行の数まで上げるが、下げはしない。`bench/rust_ui_accidental.txt` の
+通過は数えない。
+
 `--filter 文字列` でパスが合うものだけ、`--kinds run-pass` で 1 つの種類だけを走らせる。すべてのテストの結果は
 `out/rust_ui_results.txt` にある。
 

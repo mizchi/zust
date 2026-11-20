@@ -177,6 +177,10 @@ makes more tests pass, rewrite the list:
 python3 bench/rust_ui.py --baseline bench/rust_ui_passing.txt --write-baseline
 ```
 
+`bench/rust_ui_ratchet.txt` is a ratchet on the counts: the least number of tests of each kind zustc must pass. CI
+fails below it, and `--write-baseline` raises it to the run's counts, never lowers it. Passes in
+`bench/rust_ui_accidental.txt` are not counted.
+
 `--filter SUBSTR` runs only matching paths, `--kinds run-pass` one kind, and `out/rust_ui_results.txt` has the result
 of every test.
 

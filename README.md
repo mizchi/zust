@@ -155,6 +155,21 @@ edit, against cargo's 508 ms, on 16 cores of an AMD EPYC 9R45), and compiles the
 most of its cold build and of its target directory here. Its way of tracking its numbers (each merge's instruction
 counts against the median of the last runs, with a noise band) is what `bench/kpi_track.py` does too.
 
+Compatibility against blaze on the same tests: rustc's tests/ui, 300 of the tests `bench/rust_ui.py` counts as
+applicable of each kind (all 135 build-pass), picked with a fixed seed, each built by `blaze build` as the `src/main.rs`
+of a cargo package (its `//@ edition:`, else 2015; the C helpers compiletest links linked through a build script), and
+run for run-pass (`python3 bench/blaze_ui.py --per-kind 300`, 2026-11-20, blaze 0.20261027.0, zustc d9294dc; the table
+is also in `bench/blaze_ui_result.md`). compile-fail is left out: blaze reports rust-analyzer's diagnostics, whose lines
+this harness does not compare. blaze passes more of each kind; its front end is rust-analyzer's with rustc's trait
+solver, where zustc's is its own. Most of blaze's misses here are functions its code generator does not compile yet
+(`thread::spawn` reaches a writable static it has no symbol for), and a few are its own type errors:
+
+| tests/ui kind | sample | blaze | zustc |
+|---|---:|---:|---:|
+| run-pass | 300 | 254 (84.7%) | 224 (74.7%) |
+| check-pass | 300 | 274 (91.3%) | 245 (81.7%) |
+| build-pass | 135 | 123 (91.1%) | 97 (71.9%) |
+
 zust-analyzer against rust-analyzer and rust-glancer on zustc's own sources (40 query points,
 `python3 bench/lsp_parity.py --servers zustc,rust-analyzer,rust-glancer --targets zustc`, 2026-11-18, e45ee10;
 rust-glancer is github.com/rust-glancer/rust-glancer 50dd51a):
