@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795156099885,
+  "lastUpdate": 1795156101515,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -62497,6 +62497,85 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/mizchi/zust/commit/1e1f25fa2713aacee57b6d14812759659dd18a21"
         },
         "date": 1795154773988,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "parity documentSymbol (名前の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity workspace/symbol (上位 20 の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity definition (行き先の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity hover (名前を含む)",
+            "value": 95,
+            "unit": "%"
+          },
+          {
+            "name": "parity references (数の一致)",
+            "value": 92.5,
+            "unit": "%"
+          },
+          {
+            "name": "parity documentHighlight (数の一致)",
+            "value": 97.143,
+            "unit": "%"
+          },
+          {
+            "name": "parity rename (書き換えの一致)",
+            "value": 93.333,
+            "unit": "%"
+          },
+          {
+            "name": "parity signatureHelp (名前・引数の数・今の引数の一致)",
+            "value": 94.737,
+            "unit": "%"
+          },
+          {
+            "name": "parity completion `x.\\|` (書いてある名前を含む)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity completion `na\\|me` (同)",
+            "value": 89.655,
+            "unit": "%"
+          },
+          {
+            "name": "parity 一致の平均",
+            "value": 96.237,
+            "unit": "%"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "committer": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "distinct": true,
+          "id": "cc8898f1512e79cc9be8be6782f0bc73f6932245",
+          "message": "E0119: an unbounded blanket impl and an impl of its trait for a type\n\n`impl<T> Tr for T` with no bound, no where clause and no trait\narguments covers every type, so another impl of Tr in the program for\na type (not another blanket impl, whose where clauses the summary may\nnot keep) is \"conflicting implementations of trait `Tr`\" at the later\nof the two. Program::build_with now takes how many items are the\nprogram's, so the prelude's impls are not compared.\n\ntests/ui: +3 compile-fail passes.\nKPI: within ±0.05% of the row before.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-20T06:19:49Z",
+          "tree_id": "33fbcee5c7b567972d8d6c56c310cc7b4301c1c3",
+          "url": "https://github.com/mizchi/zust/commit/cc8898f1512e79cc9be8be6782f0bc73f6932245"
+        },
+        "date": 1795156101300,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
