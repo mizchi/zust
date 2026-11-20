@@ -1311,11 +1311,25 @@ impl Cx<'_> {
         };
         // (impls of two traits of one name, `a::M` and `b::M` for u32: the one whose trait is in scope here)
         let base = |c: u32| self.prog.sigs[c as usize].impl_trait.as_deref().map(|t| t.split('<').next().unwrap_or(t).trim());
-        // (`a::M::m(&x)`: the impl of the trait the call named)
+        // (`&String` は `&str` の候補に: deref の強制変換)
+        let deref = match at {
+            Ty::Ref(m, Ty::Struct(sid)) if self.prog.structs[*sid as usize].name == "String" => Some(Ty::Ref(m, intern(Ty::Str))),
+            Ty::Ref(_, Ty::Ref(m, i)) => Some(Ty::Ref(*m, i)),
+            _ => None,
+        };
+        // (`a::M::m(&x)`: the impl of the trait the call named, also through the deref coercion; never an inherent
+        // method of the same name)
         if let Some((m, tr)) = &self.explicit_trait {
             let name = &self.prog.names[id as usize];
             if name.rsplit("::").next().map(|l| l.split('#').next().unwrap_or(l)) == Some(m.as_str()) {
-                if let Some(&c) = cands.iter().find(|&&c| base(c) == Some(tr.as_str()) && fits(c, at)) {
+                let of_tr = |c: u32| base(c) == Some(tr.as_str());
+                if let Some(&c) = cands.iter().find(|&&c| of_tr(c) && fits(c, at)) {
+                    return c;
+                }
+                if let Some(c) = deref.and_then(|d| cands.iter().copied().find(|&c| of_tr(c) && fits(c, d))) {
+                    return c;
+                }
+                if let Some(&c) = cands.iter().find(|&&c| of_tr(c)) {
                     return c;
                 }
             }
@@ -1330,12 +1344,6 @@ impl Cx<'_> {
         if let Some(&c) = cands.iter().find(|&&c| fits(c, at)) {
             return c;
         }
-        // (`&String` は `&str` の候補に: deref の強制変換)
-        let deref = match at {
-            Ty::Ref(m, Ty::Struct(sid)) if self.prog.structs[*sid as usize].name == "String" => Some(Ty::Ref(m, intern(Ty::Str))),
-            Ty::Ref(_, Ty::Ref(m, i)) => Some(Ty::Ref(*m, i)),
-            _ => None,
-        };
         deref.and_then(|d| cands.iter().copied().find(|&c| fits(c, d))).unwrap_or(id)
     }
 
