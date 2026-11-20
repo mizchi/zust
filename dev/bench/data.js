@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795186412803,
+  "lastUpdate": 1795186415030,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -85110,6 +85110,70 @@ window.BENCHMARK_DATA = {
           {
             "name": "tests/ui check-pass passing",
             "value": 1449,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui build-pass pass rate",
+            "value": 71.85,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui build-pass passing",
+            "value": 97,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui compile-fail pass rate",
+            "value": 48.48,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui compile-fail passing",
+            "value": 3567,
+            "unit": "tests"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "committer": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "distinct": true,
+          "id": "d87684e7182d5b404994365ad6127c8e9cee2cf0",
+          "message": "thread_local! keys: try_with and LocalKey<Cell> / LocalKey<RefCell> methods\n\n- Every key gets try_with (Ok of with).\n- A key of Cell<T> gets set / get / take / replace, and one of RefCell<T>\n  gets set / take / replace / with_borrow / with_borrow_mut, as std's\n  LocalKey has. They work on the slot once `with` has filled it, with no\n  closure that would move the value in.\n- Cell::take, Cell::get_mut, RefCell::take.\n\ntests/ui: +1 check-pass. KPI: crates edit +0.02% on the last row (the\nflag is 7a588e0's step still in the median).\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-20T14:48:18Z",
+          "tree_id": "b05fc8b3053170ede999cb268928b6862673fa92",
+          "url": "https://github.com/mizchi/zust/commit/d87684e7182d5b404994365ad6127c8e9cee2cf0"
+        },
+        "date": 1795186414536,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tests/ui run-pass pass rate",
+            "value": 73.5,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui run-pass passing",
+            "value": 1753,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui check-pass pass rate",
+            "value": 80.24,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui check-pass passing",
+            "value": 1450,
             "unit": "tests"
           },
           {
