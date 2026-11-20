@@ -479,6 +479,13 @@ impl Session2 {
         let cfg = self.opts.cfg_with(self.ctx.features.as_ref().unwrap_or(&self.opts.features));
         let (src, items, user, prelude_line0) = with_prelude_in(src0, &crates, &mut fix, Some(&cfg), &mut self.sel)?;
         self.ctx.map.colfix = fix;
+        // (E0432: a top-level `use` of a path whose first segment names nothing; the `use` items come from the item
+        // split, the names they could mean from the original text)
+        if self.ctx.map.inputs.is_empty() {
+            if let Some(e) = unresolved_import(src0, &src, &items[..user], &self.ctx.deps) {
+                return Err(e);
+            }
+        }
         let mut tm = Timer { on: std::env::var_os("ZUSTC_PROF").is_some(), last: now_ns(), start: now_ns() };
         if let Some(p) = std::env::var_os("ZUSTC_DUMP_SRC") {
             let _ = std::fs::write(p, &src);
@@ -1081,6 +1088,68 @@ fn first_unreachable(b: &crate::parse::Block) -> Option<(crate::parse::Pos, &'st
         }
     }
     block(b)
+}
+
+/// A top-level `use a::..` (at the start of a line) whose first segment is no crate the build knows (std, core,
+/// a dependency, an `extern crate`), no module or item of the program, nor `crate` / `self` / `super`:
+/// "unresolved import `a`" (E0432). Only read when such a `use` is there at all
+fn unresolved_import(src: &str, split: &str, items: &[SrcItem], deps: &[String]) -> Option<String> {
+    // (and the names std's prelude brings: `use Default::default` / `use Option::*`)
+    let known = |n: &str| {
+        matches!(
+            n,
+            "std" | "core" | "crate" | "self" | "super" | "" | "proc_macro" | "Default" | "Option" | "Result" | "Some" | "None" | "Ok" | "Err"
+                | "Vec" | "String" | "Box" | "Iterator" | "IntoIterator" | "ToString" | "From" | "Into" | "Clone" | "Copy" | "Drop" | "Fn" | "FnMut"
+                | "FnOnce" | "PartialEq" | "Eq" | "PartialOrd" | "Ord" | "AsRef" | "AsMut" | "Send" | "Sync" | "Sized" | "ToOwned" | "Extend"
+        ) || deps.iter().any(|d| d == n)
+    };
+    let mut firsts: Vec<(usize, String)> = vec![];
+    for it in items {
+        if !matches!(it.kind, ItemKind::Normal) {
+            continue;
+        }
+        let text = &split[it.start..it.end];
+        let t = text.trim_start();
+        let t = t.strip_prefix("pub ").unwrap_or(t);
+        let Some(rest) = t.strip_prefix("use ") else { continue };
+        let rest = rest.trim_start().trim_start_matches("::");
+        let first: String = rest.chars().take_while(|c| c.is_alphanumeric() || *c == '_').collect();
+        // (a fn's own `use`, hoisted out with a `__h<N>` suffix, is resolved in its block)
+        if !known(&first) && !first.starts_with("r#") && !first.contains("__") {
+            firsts.push((it.line + text[..text.len() - text.trim_start().len()].matches('\n').count(), first));
+        }
+    }
+    if firsts.is_empty() {
+        return None;
+    }
+    // (whether the program defines or brings in a name: a few substring searches per distinct candidate, not a
+    // tokenization of the whole file)
+    let b = src.as_bytes();
+    let is_id = |c: u8| c.is_ascii_alphanumeric() || c == b'_';
+    let defines = |n: &str| {
+        ["mod", "struct", "enum", "trait", "fn", "type", "const", "static", "union", "crate", "as", "macro_rules!"].iter().any(|kw| {
+            let pat = format!("{kw} {n}");
+            src.match_indices(pat.as_str()).any(|(i, _)| {
+                let before_ok = i == 0 || !is_id(b[i - 1]);
+                let after_ok = b.get(i + pat.len()).is_none_or(|&c| !is_id(c));
+                // (not in a `//` comment: `//~| SUGGESTION extern crate foo;`)
+                let ls = src[..i].rfind('\n').map(|k| k + 1).unwrap_or(0);
+                before_ok && after_ok && !src[ls..i].contains("//")
+            })
+        })
+    };
+    let mut defined: std::collections::HashSet<String> = Default::default();
+    for (_, f) in &firsts {
+        if defines(f) {
+            defined.insert(f.clone());
+        }
+    }
+    // (a macro could write items: leave such programs alone)
+    if src.contains("macro_rules!") && firsts.iter().any(|(_, f)| !defined.contains(f)) && src.contains("$") {
+        return None;
+    }
+    let (line, f) = firsts.into_iter().find(|(_, f)| !defined.contains(f))?;
+    Some(format!("{line}:1: unresolved import `{f}` (E0432)"))
 }
 
 /// The naming lints (`deny` = [non_snake_case, non_camel_case_types, non_upper_case_globals]): the first fn / method,
