@@ -591,7 +591,8 @@ fn defined_name(src: &str, it: &SrcItem) -> Option<String> {
     // (関連定数 `const ZERO: Duration` も。`const fn` は fn の名前)
     ids.find(|w| matches!(*w, "fn" | "struct" | "enum" | "static" | "const") || (alias && *w == "type"))?;
     let mut n = ids.next()?;
-    if n == "fn" {
+    // (`const fn f`: f; `static mut X`: X, not `mut`, which almost every program names)
+    if n == "fn" || n == "mut" {
         n = ids.next()?;
     }
     Some(n.strip_prefix("__core_").unwrap_or(n).to_string())

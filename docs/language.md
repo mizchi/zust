@@ -98,6 +98,12 @@ for building programs that already pass rustc quickly, not a replacement for rus
 - Collections (`examples/collections.rs`): `HashSet` (on top of HashMap<T, ()>; union, intersection, difference, collect), `BTreeMap` / `BTreeSet` (a Vec kept in key order, with binary search;
   iteration order, `entry().or_insert` / `or_default`, `first_key_value`, `pop_first` and `m[&k]` are the same as std), `VecDeque` (ring buffer; `d[i]`, push / pop at both ends).
   `get("k")` on a map with `&str` / String keys can look up by `&str`, the same as std's Borrow
+- Threads (`tests/green_threads/`): `thread::spawn` / `join` / `is_finished` / `yield_now` / `sleep`, `mpsc` channels, `Mutex`,
+  atomics. They are green threads: one OS thread, and each spawned thread has its own stack (libc `makecontext` /
+  `swapcontext`). A new thread runs at once, until it waits: `join`, `recv` on an empty channel, a `Mutex` another thread
+  holds, `sleep`, `yield_now`, an atomic `load` while other threads are alive. Then the next thread that is not done runs.
+  When every thread waits, `join` panics with "deadlock" and `recv` returns `Err`. There is no parallelism, and a thread
+  that never waits keeps the others from running
 - `impl Index` / `IndexMut`: `x[i]` becomes `*x.index_mut(i)` if x is a struct with `index` / `index_mut`
 - Associated constants (`examples/assoc_consts.rs`): `impl S { const N: usize = 4; }` / trait `const K: u32;` (also with default values). `S::N` / `Self::N` / `T::N` (type arguments), also in array lengths
 - Modules (`examples/modules.rs`): `mod m { .. }` within one file (nested, `pub(crate)`, `use self:: / super:: / crate::`, `m::f()` / `m::S` / `m::N`).

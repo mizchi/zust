@@ -5877,7 +5877,9 @@ run-pass	threads-sendsync/clone-with-exterior.rs
 run-pass	threads-sendsync/comm.rs
 run-pass	threads-sendsync/issue-29488.rs
 run-pass	threads-sendsync/issue-4446.rs
+run-pass	threads-sendsync/issue-4448.rs
 compile-fail	threads-sendsync/rc-is-not-send.rs
+run-pass	threads-sendsync/send-resource.rs
 run-pass	threads-sendsync/send-type-inference.rs
 run-pass	threads-sendsync/sendable-class.rs
 run-pass	threads-sendsync/sendfn-is-a-block.rs

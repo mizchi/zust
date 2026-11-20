@@ -1,0 +1,62 @@
+name: KPI
+
+# Every push to a pull request: the KPIs of bench/kpi_track.py (instruction counts of zustc on generated programs,
+# generic traits and cratebench's crates; build cache size) for the merge base and for the head, measured one after
+# the other on the same runner, and one comment on the PR that shows the change and keeps the result of every push
+# (bench/kpi_pr.py). A change past +1% is a ::warning::; the job does not fail.
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+# (a new push replaces the run of the one before)
+concurrency:
+  group: kpi-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  pull-requests: write
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  kpi:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+          submodules: true
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Install wild and valgrind
+        run: |
+          command -v wild || cargo install --locked wild-linker@0.11.0
+          sudo apt-get update && sudo apt-get install -y valgrind
+      - name: Find the merge base
+        id: base
+        run: echo "sha=$(git merge-base HEAD ${{ github.event.pull_request.base.sha }})" >> "$GITHUB_OUTPUT"
+      # (the base in a worktree beside the head; its own target directory)
+      - name: Measure the base
+        run: |
+          git worktree add ../base ${{ steps.base.outputs.sha }}
+          cd ../base
+          git submodule update --init --depth 1 cratebench/vendor
+          cargo build --release --workspace
+          python3 bench/kpi_track.py base --dry-run | tee "$RUNNER_TEMP/kpi_base.txt"
+      - name: Measure the head
+        run: |
+          cargo build --release --workspace
+          python3 bench/kpi_track.py head --dry-run | tee "$RUNNER_TEMP/kpi_head.txt"
+      - name: Update the KPI comment on the PR
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          python3 bench/kpi_pr.py --base "$RUNNER_TEMP/kpi_base.txt" --head "$RUNNER_TEMP/kpi_head.txt" \
+            --base-sha ${{ steps.base.outputs.sha }} --head-sha ${{ github.event.pull_request.head.sha }} \
+            --pr ${{ github.event.pull_request.number }} --repo ${{ github.repository }} \
+            --out "$RUNNER_TEMP/kpi.md"
+          cat "$RUNNER_TEMP/kpi.md" >> "$GITHUB_STEP_SUMMARY"

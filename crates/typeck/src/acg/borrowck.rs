@@ -548,13 +548,22 @@ impl Bk {
         let mut work: Vec<usize> = vec![0];
         let mut on_work = vec![false; n];
         on_work[0] = true;
+        // (the fixpoint is reached: a block is put on the worklist only when the state at its entry grew, and a state
+        // grows at most `height` times. It is the union of: moved paths (from Move accesses and uninitialized
+        // Binds, each moved or uninit), inited locals, a holds entry per local and its loans, dead and escaped loans.
+        // So there are at most n * (height + 1) + 1 rounds; past that the analysis would be wrong, and a program is
+        // not accepted on a wrong analysis)
+        let (nl, nloans) = (self.locals.len(), self.loans.len());
+        let nmoved = self.evs.iter().filter(|e| matches!(e.1, Ev::Acc(_, Acc::Move, _) | Ev::Bind(..))).count();
+        let height = (2 * nmoved).saturating_add(nl).saturating_add(nl.saturating_mul(nloans + 1)).saturating_add(2 * nloans);
+        let max_rounds = n.saturating_mul(height.saturating_add(1)).saturating_add(1);
         let mut rounds = 0usize;
         while let Some(b) = work.pop() {
             on_work[b] = false;
             rounds += 1;
-            if rounds > 50 * n + 1000 {
-                // (should not happen: the states only grow)
-                return None;
+            if rounds > max_rounds {
+                debug_assert!(false, "borrow check: no fixpoint after {rounds} rounds");
+                return Some(BkError { sp: super::SP, msg: "internal: the borrow check did not reach a fixpoint".to_string() });
             }
             let mut st = st_in[b].clone().unwrap();
             self.run_block(&evs[b], &mut st, None, &live_out[b], loans_on, &mut vec![]);
@@ -883,6 +892,10 @@ impl Bk {
         }
     }
 }
+
+#[cfg(test)]
+#[path = "borrowck_props.rs"]
+mod props;
 
 // ---------------------------------------------------------------------------
 // Recording, from acg

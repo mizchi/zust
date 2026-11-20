@@ -484,6 +484,22 @@ unsafe extern "C" {
 }
 
 unsafe extern "C" {
+    #[link_name = "abort"]
+    fn __exr_abort();
+}
+
+// `realloc` that does not return null: when the allocation fails, the program stops as std's handle_alloc_error
+// does (a message, then abort). (realloc(p, 0) may give null: that is not a failure)
+unsafe fn __exr_realloc_ok(p: *mut u8, size: usize) -> *mut u8 {
+    let q = unsafe { __exr_realloc(p, size) };
+    if q.is_null() && size != 0 {
+        __exr_err_str::<()>("memory allocation failed\n");
+        unsafe { __exr_abort() };
+    }
+    q
+}
+
+unsafe extern "C" {
     #[link_name = "memset"]
     fn __exr_memset(d: *mut u8, c: i32, n: usize) -> *mut u8;
 }
@@ -509,6 +525,27 @@ pub unsafe fn __core_write_bytes<T>(dst: *mut T, val: u8, count: usize) {
     unsafe { __exr_memset(dst as *mut u8, val as i32, count * core::mem::size_of::<T>()) };
 }
 
+// The capacity `Vec::reserve` grows to (twice the old one, or what is needed), or a panic when it does not fit:
+// len + extra past usize, or a block past isize::MAX bytes (as std). (Not generic: checked and compiled once,
+// not per element type)
+fn __exr_vec_new_cap(len: usize, cap: usize, extra: usize, sz: usize) -> usize {
+    if extra > usize::MAX - len {
+        panic!("capacity overflow");
+    }
+    let need = len + extra;
+    let mut c = if cap == 0 { 4 } else if cap > usize::MAX / 2 { usize::MAX } else { cap * 2 };
+    if c < need {
+        c = need;
+    }
+    if sz != 0 && c > isize::MAX as usize / sz {
+        if need > isize::MAX as usize / sz {
+            panic!("capacity overflow");
+        }
+        c = need;
+    }
+    c
+}
+
 pub struct Vec<T> {
     ptr: *mut T,
     cap: usize,
@@ -529,17 +566,14 @@ impl<T> Vec<T> {
         v
     }
     pub fn reserve(&mut self, extra: usize) {
-        let need = self.len + extra;
-        if need <= self.cap {
+        // (len <= cap: `len + extra` is not computed unless it fits)
+        if extra <= self.cap - self.len {
             return;
         }
-        let mut c = if self.cap == 0 { 4 } else { self.cap * 2 };
-        if c < need {
-            c = need;
-        }
         let sz = core::mem::size_of::<T>();
+        let c = __exr_vec_new_cap(self.len, self.cap, extra, sz);
         let bytes = if sz == 0 { 1 } else { c * sz };
-        self.ptr = unsafe { __exr_realloc(self.ptr as *mut u8, bytes) } as *mut T;
+        self.ptr = unsafe { __exr_realloc_ok(self.ptr as *mut u8, bytes) } as *mut T;
         self.cap = c;
     }
     pub fn try_reserve(&mut self, extra: usize) -> Result<(), TryReserveError> {
@@ -1368,7 +1402,7 @@ fn __exr_merge_sort<T, F: FnMut(&T, &T) -> bool>(p: *mut T, n: usize, lt: F) {
     if n <= run {
         return;
     }
-    let buf = unsafe { __exr_realloc(0usize as *mut u8, n * sz) } as *mut T;
+    let buf = unsafe { __exr_realloc_ok(0usize as *mut u8, n * sz) } as *mut T;
     let mut src = p;
     let mut dst = buf;
     let mut w = run;
@@ -1452,7 +1486,7 @@ fn __exr_merge_sort_lt<T>(p: *mut T, n: usize) {
     if n <= run {
         return;
     }
-    let buf = unsafe { __exr_realloc(0usize as *mut u8, n * sz) } as *mut T;
+    let buf = unsafe { __exr_realloc_ok(0usize as *mut u8, n * sz) } as *mut T;
     let mut src = p;
     let mut dst = buf;
     let mut w = run;
@@ -1548,8 +1582,8 @@ fn __exr_radix_unkey<K>(v: u64, out: *mut K) {
 // 安定な LSD 基数ソート: keys の順に (keys と) vals を並べる。全要素で同じバイトの桁は飛ばす
 fn __exr_radix_sort<T>(keys: *mut u64, vals: *mut T, n: usize, with_vals: bool) {
     let sz = core::mem::size_of::<T>();
-    let kb = unsafe { __exr_realloc(0usize as *mut u8, n * 8) } as *mut u64;
-    let vb = if with_vals && sz > 0 { (unsafe { __exr_realloc(0usize as *mut u8, n * sz) }) as *mut T } else { vals };
+    let kb = unsafe { __exr_realloc_ok(0usize as *mut u8, n * 8) } as *mut u64;
+    let vb = if with_vals && sz > 0 { (unsafe { __exr_realloc_ok(0usize as *mut u8, n * sz) }) as *mut T } else { vals };
     let mut diff: u64 = 0;
     let k0 = unsafe { *keys };
     let mut i: usize = 0;
@@ -1656,7 +1690,7 @@ fn __exr_sort_by_key<T, K: Ord, F: FnMut(&T) -> K>(p: *mut T, n: usize, f: F) {
         __exr_merge_sort_key(p, n, f);
         return;
     }
-    let keys = unsafe { __exr_realloc(0usize as *mut u8, n * 8) } as *mut u64;
+    let keys = unsafe { __exr_realloc_ok(0usize as *mut u8, n * 8) } as *mut u64;
     let mut i: usize = 0;
     while i < n {
         let k = f(unsafe { &*p.add(i) });
@@ -1677,7 +1711,7 @@ fn __exr_sort_lt<T>(p: *mut T, n: usize) {
         __exr_merge_sort_lt(p, n);
         return;
     }
-    let keys = unsafe { __exr_realloc(0usize as *mut u8, n * 8) } as *mut u64;
+    let keys = unsafe { __exr_realloc_ok(0usize as *mut u8, n * 8) } as *mut u64;
     let mut i: usize = 0;
     while i < n {
         unsafe {
@@ -1727,7 +1761,7 @@ fn __exr_merge_sort_key<T, K: Ord, F: FnMut(&T) -> K>(p: *mut T, n: usize, f: F)
     if n <= run {
         return;
     }
-    let buf = unsafe { __exr_realloc(0usize as *mut u8, n * sz) } as *mut T;
+    let buf = unsafe { __exr_realloc_ok(0usize as *mut u8, n * sz) } as *mut T;
     let mut src = p;
     let mut dst = buf;
     let mut w = run;
@@ -1803,7 +1837,7 @@ fn __exr_sort_cached<T, K: Ord, F: FnMut(&T) -> K>(p: *mut T, n: usize, f: F) {
     if sz == 0 {
         return;
     }
-    let buf = unsafe { __exr_realloc(0usize as *mut u8, n * sz) } as *mut T;
+    let buf = unsafe { __exr_realloc_ok(0usize as *mut u8, n * sz) } as *mut T;
     i = 0;
     while i < n {
         unsafe {
@@ -6976,6 +7010,7 @@ impl AtomicUsize {
         &self.v as *const usize as *mut usize
     }
     pub fn load(&self, _o: __AtOrd_) -> usize {
+        __exr_green_spin();
         self.v
     }
     pub fn store(&self, x: usize, _o: __AtOrd_) {
@@ -7094,6 +7129,7 @@ impl AtomicIsize {
         &self.v as *const isize as *mut isize
     }
     pub fn load(&self, _o: __AtOrd_) -> isize {
+        __exr_green_spin();
         self.v
     }
     pub fn store(&self, x: isize, _o: __AtOrd_) {
@@ -7212,6 +7248,7 @@ impl AtomicU8 {
         &self.v as *const u8 as *mut u8
     }
     pub fn load(&self, _o: __AtOrd_) -> u8 {
+        __exr_green_spin();
         self.v
     }
     pub fn store(&self, x: u8, _o: __AtOrd_) {
@@ -7330,6 +7367,7 @@ impl AtomicU16 {
         &self.v as *const u16 as *mut u16
     }
     pub fn load(&self, _o: __AtOrd_) -> u16 {
+        __exr_green_spin();
         self.v
     }
     pub fn store(&self, x: u16, _o: __AtOrd_) {
@@ -7448,6 +7486,7 @@ impl AtomicU32 {
         &self.v as *const u32 as *mut u32
     }
     pub fn load(&self, _o: __AtOrd_) -> u32 {
+        __exr_green_spin();
         self.v
     }
     pub fn store(&self, x: u32, _o: __AtOrd_) {
@@ -7566,6 +7605,7 @@ impl AtomicU64 {
         &self.v as *const u64 as *mut u64
     }
     pub fn load(&self, _o: __AtOrd_) -> u64 {
+        __exr_green_spin();
         self.v
     }
     pub fn store(&self, x: u64, _o: __AtOrd_) {
@@ -7684,6 +7724,7 @@ impl AtomicI8 {
         &self.v as *const i8 as *mut i8
     }
     pub fn load(&self, _o: __AtOrd_) -> i8 {
+        __exr_green_spin();
         self.v
     }
     pub fn store(&self, x: i8, _o: __AtOrd_) {
@@ -7802,6 +7843,7 @@ impl AtomicI16 {
         &self.v as *const i16 as *mut i16
     }
     pub fn load(&self, _o: __AtOrd_) -> i16 {
+        __exr_green_spin();
         self.v
     }
     pub fn store(&self, x: i16, _o: __AtOrd_) {
@@ -7920,6 +7962,7 @@ impl AtomicI32 {
         &self.v as *const i32 as *mut i32
     }
     pub fn load(&self, _o: __AtOrd_) -> i32 {
+        __exr_green_spin();
         self.v
     }
     pub fn store(&self, x: i32, _o: __AtOrd_) {
@@ -8038,6 +8081,7 @@ impl AtomicI64 {
         &self.v as *const i64 as *mut i64
     }
     pub fn load(&self, _o: __AtOrd_) -> i64 {
+        __exr_green_spin();
         self.v
     }
     pub fn store(&self, x: i64, _o: __AtOrd_) {
@@ -8156,6 +8200,7 @@ impl AtomicBool {
         &self.v as *const bool as *mut bool
     }
     pub fn load(&self, _o: __AtOrd_) -> bool {
+        __exr_green_spin();
         self.v
     }
     pub fn store(&self, x: bool, _o: __AtOrd_) {
@@ -8255,6 +8300,7 @@ impl<T> AtomicPtr<T> {
         &self.v as *const *mut T as *mut *mut T
     }
     pub fn load(&self, _o: __AtOrd_) -> *mut T {
+        __exr_green_spin();
         self.v
     }
     pub fn store(&self, x: *mut T, _o: __AtOrd_) {
@@ -8345,28 +8391,264 @@ impl<T> AtomicPtr<T> {
     }
 }
 
-// `std::thread` (one thread: `spawn` runs the closure at once; `join` gives its value)
+// `std::thread`: green threads. There is one OS thread; a spawned thread has a stack of its own (libc makecontext /
+// swapcontext) and runs from `spawn` until it waits: `join`, `recv` on an empty channel, a Mutex another thread
+// holds, `sleep`, `yield_now`, an atomic `load` while other threads are alive. Then the next thread that is not done
+// runs (round robin). Nothing runs between two of those points, so Arc (an Rc) and the atomics (plain cells) stay
+// sound. When every thread waits and nothing changes, that is a deadlock: `join` panics, `recv` gives Err (as if
+// every sender had hung up), `lock` goes on. There is no parallelism, and a thread that never waits keeps the others
+// from running. (formal/tla/ArcDrop.tla is the check to pass before threads become real OS threads)
+// (one function per extern block: the prelude is cut down to what a program uses, block by block)
+unsafe extern "C" {
+    #[link_name = "getcontext"]
+    fn __exr_getcontext(u: *mut u8) -> i32;
+}
+unsafe extern "C" {
+    #[link_name = "makecontext"]
+    fn __exr_makecontext(u: *mut u8, f: extern "C" fn(), argc: i32);
+}
+unsafe extern "C" {
+    #[link_name = "swapcontext"]
+    fn __exr_swapcontext(from: *mut u8, to: *mut u8) -> i32;
+}
+
+struct __GreenTh {
+    // (a ucontext_t: 968 bytes in glibc on x86-64)
+    ctx: *mut u8,
+    stack: *mut u8,
+    run: Option<Box<dyn FnMut()>>,
+    done: bool,
+    waiting: bool,
+}
+
+struct __GreenSched {
+    ths: Vec<__GreenTh>,
+    cur: usize,
+    live: usize,
+    // (grows whenever something another thread may wait for happens: a send, an unlock, a thread ending)
+    epoch: u64,
+}
+
+static mut __EXR_GREEN: *mut __GreenSched = 0usize as *mut __GreenSched;
+
+const __EXR_GREEN_STACK: usize = 1048576;
+
+fn __exr_green_alloc(n: usize) -> *mut u8 {
+    let p = unsafe { __exr_malloc(n) };
+    if p.is_null() {
+        __exr_err_str::<()>("memory allocation failed\n");
+        unsafe { __exr_abort() };
+    }
+    p
+}
+
+// (the scheduler, made with the main thread as thread 0 when the first thread is spawned)
+fn __exr_green() -> *mut __GreenSched {
+    unsafe {
+        if __EXR_GREEN.is_null() {
+            let mut ths: Vec<__GreenTh> = Vec::new();
+            ths.push(__GreenTh { ctx: __exr_green_alloc(1024), stack: 0usize as *mut u8, run: None, done: false, waiting: false });
+            let s = __exr_green_alloc(core::mem::size_of::<__GreenSched>()) as *mut __GreenSched;
+            s.write(__GreenSched { ths: ths, cur: 0, live: 1, epoch: 0 });
+            __EXR_GREEN = s;
+        }
+        __EXR_GREEN
+    }
+}
+
+fn __exr_green_progress() {
+    unsafe {
+        if !__EXR_GREEN.is_null() {
+            (*__EXR_GREEN).epoch += 1;
+        }
+    }
+}
+
+fn __exr_green_switch(s: *mut __GreenSched, to: usize) {
+    unsafe {
+        let from = (*s).cur;
+        if from == to {
+            return;
+        }
+        let a = (*s).ths[from].ctx;
+        let b = (*s).ths[to].ctx;
+        (*s).cur = to;
+        __exr_swapcontext(a, b);
+    }
+}
+
+// (run the next thread that is not done; false: there is none)
+fn __exr_green_yield() -> bool {
+    unsafe {
+        if __EXR_GREEN.is_null() {
+            return false;
+        }
+        let s = __EXR_GREEN;
+        let n = (*s).ths.len();
+        let cur = (*s).cur;
+        let mut k = 1;
+        while k < n {
+            let j = (cur + k) % n;
+            if !(*s).ths[j].done {
+                __exr_green_switch(s, j);
+                return true;
+            }
+            k += 1;
+        }
+        false
+    }
+}
+
+// (an atomic load: other threads may be waiting for what this thread spins on)
+fn __exr_green_spin() {
+    unsafe {
+        if !__EXR_GREEN.is_null() && (*__EXR_GREEN).live > 1 {
+            __exr_green_yield();
+        }
+    }
+}
+
+fn __exr_green_all_wait(s: *mut __GreenSched, me: usize) -> bool {
+    unsafe {
+        let n = (*s).ths.len();
+        let mut j = 0;
+        while j < n {
+            if j != me && !(*s).ths[j].done && !(*s).ths[j].waiting {
+                return false;
+            }
+            j += 1;
+        }
+        true
+    }
+}
+
+// (wait until ready() holds, running the other threads meanwhile; false: it cannot come (no other thread, or every
+// other one waits and a whole round changed nothing))
+fn __exr_green_wait<F: Fn() -> bool>(ready: F) -> bool {
+    loop {
+        if ready() {
+            return true;
+        }
+        unsafe {
+            if __EXR_GREEN.is_null() {
+                return false;
+            }
+            let s = __EXR_GREEN;
+            let me = (*s).cur;
+            let e = (*s).epoch;
+            (*s).ths[me].waiting = true;
+            let moved = __exr_green_yield();
+            (*s).ths[me].waiting = false;
+            if !moved {
+                return false;
+            }
+            if ready() {
+                return true;
+            }
+            if (*s).epoch == e && __exr_green_all_wait(s, me) {
+                return false;
+            }
+        }
+    }
+}
+
+extern "C" fn __exr_green_entry() {
+    unsafe {
+        let s = __EXR_GREEN;
+        let me = (*s).cur;
+        {
+            let mut f = (*s).ths[me].run.take().unwrap();
+            f();
+        }
+        (*s).ths[me].done = true;
+        (*s).live -= 1;
+        (*s).epoch += 1;
+        // (never comes back here: a done thread is not run again. The main thread is never done)
+        loop {
+            __exr_green_yield();
+        }
+    }
+}
+
+fn __exr_green_start(run: Box<dyn FnMut()>) -> usize {
+    unsafe {
+        let s = __exr_green();
+        let ctx = __exr_green_alloc(1024);
+        let stack = __exr_green_alloc(__EXR_GREEN_STACK);
+        __exr_getcontext(ctx);
+        // (uc_link, uc_stack.ss_sp, ss_flags, ss_size)
+        *(ctx.add(8) as *mut usize) = 0;
+        *(ctx.add(16) as *mut *mut u8) = stack;
+        *(ctx.add(24) as *mut i32) = 0;
+        *(ctx.add(32) as *mut usize) = __EXR_GREEN_STACK;
+        __exr_makecontext(ctx, __exr_green_entry, 0);
+        let id = (*s).ths.len();
+        (*s).ths.push(__GreenTh { ctx: ctx, stack: stack, run: Some(run), done: false, waiting: false });
+        (*s).live += 1;
+        // (the new thread runs at once, until it waits or ends: a thread that never waits runs as it did before
+        // there were green threads)
+        __exr_green_switch(s, id);
+        id
+    }
+}
+
+fn __exr_green_done(id: usize) -> bool {
+    unsafe { (*__EXR_GREEN).ths[id].done }
+}
+
 pub struct JoinHandle<T> {
-    v: Option<T>,
+    // (where the thread leaves its value: a block of its own, read and freed by join)
+    slot: *mut Option<T>,
+    id: usize,
 }
 
 impl<T> JoinHandle<T> {
     pub fn join(self) -> Result<T, ()> {
-        match self.v {
+        let id = self.id;
+        if !__exr_green_wait(|| __exr_green_done(id)) {
+            panic!("deadlock: every thread is waiting");
+        }
+        unsafe {
+            let s = __EXR_GREEN;
+            if !(*s).ths[id].stack.is_null() {
+                __exr_free((*s).ths[id].stack);
+                __exr_free((*s).ths[id].ctx);
+                (*s).ths[id].stack = 0usize as *mut u8;
+            }
+        }
+        let v = unsafe { self.slot.read() };
+        unsafe { __exr_free(self.slot as *mut u8) };
+        match v {
             Some(x) => Ok(x),
             None => Err(()),
         }
     }
     pub fn is_finished(&self) -> bool {
-        true
+        __exr_green_done(self.id)
     }
 }
 
 pub fn __core_spawn<T, F: FnOnce() -> T>(f: F) -> JoinHandle<T> {
-    JoinHandle { v: Some(f()) }
+    let slot = __exr_green_alloc(core::mem::size_of::<Option<T>>()) as *mut Option<T>;
+    unsafe {
+        slot.write(None);
+    }
+    let mut f = Some(f);
+    let run: Box<dyn FnMut()> = Box::new(move || {
+        if let Some(g) = f.take() {
+            let v = g();
+            unsafe {
+                slot.write(Some(v));
+            }
+        }
+    });
+    let id = __exr_green_start(run);
+    JoinHandle { slot: slot, id: id }
 }
 
-pub fn __core_yield_now() {}
+pub fn __core_yield_now() {
+    __exr_green_yield();
+}
 // (`thread::panicking()`: a panic stops the process without unwinding, so no drop ever runs while panicking)
 pub fn __core_panicking() -> bool { false }
 
@@ -8567,6 +8849,8 @@ unsafe extern "C" {
 }
 
 pub fn __core_sleep(d: Duration) {
+    // (the other threads run first: a thread that sleeps to wait for another one lets it run)
+    __exr_green_yield();
     let req = [d.secs as i64, d.nanos as i64];
     let mut rem = [0i64, 0i64];
     unsafe {
@@ -8574,8 +8858,9 @@ pub fn __core_sleep(d: Duration) {
     }
 }
 
-// `std::sync::mpsc` (one thread: a shared queue. `recv` on an empty queue is an error, as if every sender
-// had hung up)
+// `std::sync::mpsc` (a shared queue: the green threads are one OS thread. `recv` on an empty queue waits for the
+// other threads; when none of them can send any more (every one waits or is done), it is an error, as if every
+// sender had hung up)
 pub struct __Sndr<T> {
     q: Rc<RefCell<VecDeque<T>>>,
 }
@@ -8601,6 +8886,7 @@ pub fn __core_sync_channel<T>(_n: usize) -> (__SyncSndr<T>, __Rcvr__<T>) {
 impl<T> __Sndr<T> {
     pub fn send(&self, v: T) -> Result<(), T> {
         self.q.borrow_mut().push_back(v);
+        __exr_green_progress();
         Ok(())
     }
     pub fn clone(&self) -> __Sndr<T> {
@@ -8611,6 +8897,7 @@ impl<T> __Sndr<T> {
 impl<T> __SyncSndr<T> {
     pub fn send(&self, v: T) -> Result<(), T> {
         self.q.borrow_mut().push_back(v);
+        __exr_green_progress();
         Ok(())
     }
     pub fn clone(&self) -> __SyncSndr<T> {
@@ -8620,29 +8907,37 @@ impl<T> __SyncSndr<T> {
 
 impl<T> __Rcvr__<T> {
     pub fn recv(&self) -> Result<T, ()> {
+        let q = self.q.clone();
+        __exr_green_wait(|| !q.borrow().is_empty());
+        self.try_recv()
+    }
+    pub fn try_recv(&self) -> Result<T, ()> {
         match self.q.borrow_mut().pop_front() {
             Some(v) => Ok(v),
             None => Err(()),
         }
     }
-    pub fn try_recv(&self) -> Result<T, ()> {
-        self.recv()
-    }
     pub fn iter(&self) -> __RecvIter<T> {
-        __RecvIter { q: self.q.clone() }
+        __RecvIter { q: self.q.clone(), wait: true }
     }
     pub fn try_iter(&self) -> __RecvIter<T> {
-        __RecvIter { q: self.q.clone() }
+        __RecvIter { q: self.q.clone(), wait: false }
     }
 }
 
 pub struct __RecvIter<T> {
     q: Rc<RefCell<VecDeque<T>>>,
+    // (iter: wait for the next value as recv; try_iter: only what is there)
+    wait: bool,
 }
 
 impl<T> Iterator for __RecvIter<T> {
     type Item = T;
     fn next(&mut self) -> Option<T> {
+        if self.wait {
+            let q = self.q.clone();
+            __exr_green_wait(|| !q.borrow().is_empty());
+        }
         self.q.borrow_mut().pop_front()
     }
 }
@@ -8864,21 +9159,30 @@ pub fn __exr_ptr_eq<T>(a: &T, b: &T) -> bool {
     a as *const T == b as *const T
 }
 
-// `std::sync::Mutex` (スレッドは 1 本なので、lock は中身を指すだけ)
+// `std::sync::Mutex` (green threads: `lock` waits while another thread holds it; the guard's drop lets it go.
+// When it cannot be had (the thread itself holds it, or every other thread waits), `lock` goes on, as it did when
+// there was one thread)
 pub struct Mutex<T> {
     val: T,
+    locked: bool,
 }
 
 pub struct MutexGuard<T> {
     p: *mut T,
+    m: *mut bool,
 }
 
 impl<T> Mutex<T> {
     pub const fn new(v: T) -> Mutex<T> {
-        Mutex { val: v }
+        Mutex { val: v, locked: false }
     }
     pub fn lock(&self) -> Result<MutexGuard<T>, ()> {
-        Ok(MutexGuard { p: &self.val as *const T as *mut T })
+        let m = &self.locked as *const bool as *mut bool;
+        __exr_green_wait(|| unsafe { !*m });
+        unsafe {
+            *m = true;
+        }
+        Ok(MutexGuard { p: &self.val as *const T as *mut T, m: m })
     }
     pub fn into_inner(self) -> Result<T, ()> {
         Ok(self.val)
@@ -8892,6 +9196,15 @@ impl<T> Deref for MutexGuard<T> {
     type Target = T;
     fn deref(&self) -> &T {
         unsafe { &*self.p }
+    }
+}
+
+impl<T> Drop for MutexGuard<T> {
+    fn drop(&mut self) {
+        unsafe {
+            *self.m = false;
+        }
+        __exr_green_progress();
     }
 }
 
@@ -9419,9 +9732,9 @@ impl<K, V> HashMap<K, V> {
     fn alloc(&mut self, c: usize) {
         let ks = core::mem::size_of::<K>();
         let vs = core::mem::size_of::<V>();
-        self.st = unsafe { __exr_realloc(core::ptr::null_mut(), c) };
-        self.ks = unsafe { __exr_realloc(core::ptr::null_mut(), if ks == 0 { 1 } else { c * ks }) } as *mut K;
-        self.vs = unsafe { __exr_realloc(core::ptr::null_mut(), if vs == 0 { 1 } else { c * vs }) } as *mut V;
+        self.st = unsafe { __exr_realloc_ok(core::ptr::null_mut(), c) };
+        self.ks = unsafe { __exr_realloc_ok(core::ptr::null_mut(), if ks == 0 { 1 } else { c * ks }) } as *mut K;
+        self.vs = unsafe { __exr_realloc_ok(core::ptr::null_mut(), if vs == 0 { 1 } else { c * vs }) } as *mut V;
         let mut i = 0;
         while i < c {
             unsafe {
@@ -10495,7 +10808,7 @@ impl<T> VecDeque<T> {
         }
         let c = if n < 4 { 4 } else { n };
         let sz = core::mem::size_of::<T>();
-        let np = unsafe { __exr_realloc(0usize as *mut u8, if sz == 0 { 1 } else { c * sz }) } as *mut T;
+        let np = unsafe { __exr_realloc_ok(0usize as *mut u8, if sz == 0 { 1 } else { c * sz }) } as *mut T;
         let mut i = 0;
         while i < self.len {
             unsafe {

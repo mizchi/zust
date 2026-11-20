@@ -68,3 +68,6 @@ Japanese versions are in [../ja/reports/](../ja/reports/README.md).
 | 2026-11-18 | [rustc's own UI tests as a specification suite](2026-11-18-07-rustc-ui-tests.md) |
 | 2026-11-18 | [Borrow checking without MIR](2026-11-18-08-borrow-checking.md) |
 | 2026-11-18 | [Raising tests/ui compatibility while tracking the KPIs](2026-11-18-09-compat-with-kpis.md) |
+| 2026-11-19 | [Formal models and bounded proofs: borrow checking, the thread model, the allocator](2026-11-19-01-formal-models.md) |
+| 2026-11-20 | [Fixing what the formal models found: the borrow checker giving up, Vec overflow and allocation failure, the cache's tmp file](2026-11-20-01-formal-fixes.md) |
+| 2026-11-20 | [`std::thread` as green threads](2026-11-20-02-green-threads.md) |

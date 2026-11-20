@@ -112,3 +112,10 @@ date	commit	change	noop_M	edit_M	check_M	cache_KiB	lsp_G	run	check	build	cfail
 2026-11-20	c26b695+	E0252/E0255 check: names in a hash, skipped without a crate-root use (fixes the +8% check of c26b695)	0.697	590.798	3880.225	1902.8	-	1698	1417	95	3422	1182.767	63.233	10.210	319.466
 2026-11-20	7add9a9+	malformed built-in attributes (E0539/E0565)	0.695	591.043	3880.546	1902.8	-	1698	1417	95	3452	1183.051	63.287	10.196	319.339
 2026-11-20	e00a745+	duplicate-name check: skipped unless a crate-root item is a use (attributes alone no longer start it)	0.695	590.841	3880.615	1902.8	-	1698	1417	95	3453	1182.279	63.314	10.196	319.400
+2026-11-20	0765679	reference: 05ec776 with formal/ (no compiler change), measured again on this machine for the rows below	0.882	580.808	3851.454	1902.8	-	1698	1417	95	3327	1178.832	60.981	10.837	316.211
+2026-11-20	0765679+	borrowck: run the fixpoint to its end (a bound from the lattice's height)	0.882	580.299	3849.195	1902.8	-	1698	1417	95	3326	1179.225	60.973	10.837	316.127
+2026-11-20	98c6952+	cache: a tmp file per process when saving the cache and the stamps	0.882	580.437	3849.119	1902.8	-	1698	1417	95	3327	1178.897	60.975	10.837	316.198
+2026-11-20	985440c+	prelude: Vec capacity overflow panics, allocation failure aborts	0.884	580.076	3852.420	1902.8	-	1698	1417	95	3327	1175.882	61.114	10.851	318.080
+2026-11-20	e9f2440+	srcmap: circular modules are an error (they overflowed the stack); no-op and crates no-op are from the non-PIE link of a14943c, which the 4 rows above were measured without	0.703	580.420	3848.457	1902.8	-	1698	1417	95	3351	1176.189	60.907	9.792	317.000
+2026-11-20	cb39474+	srcmap: circular modules are found by realpath (a symbolic link then .. is another file)	0.703	580.134	3849.325	1902.8	-	1698	1417	95	3367	1175.739	61.003	9.826	316.982
+2026-11-20	623881a+	std::thread as green threads (makecontext / swapcontext): spawn, join, recv, Mutex, sleep, yield_now, atomic loads wait; static mut items of the prelude are named by their name	0.705	551.515	3822.905	1902.8	-	1700	1417	95	3404	1175.970	60.973	9.839	317.003
