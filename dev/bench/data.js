@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795171996760,
+  "lastUpdate": 1795171999069,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -80267,6 +80267,70 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/mizchi/zust/commit/6edddd09055cf9e02b5e77b3a20b98c0bb35ad17"
         },
         "date": 1795170098487,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tests/ui run-pass pass rate",
+            "value": 71.57,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui run-pass passing",
+            "value": 1707,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui check-pass pass rate",
+            "value": 79.47,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui check-pass passing",
+            "value": 1436,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui build-pass pass rate",
+            "value": 70.37,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui build-pass passing",
+            "value": 95,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui compile-fail pass rate",
+            "value": 48.44,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui compile-fail passing",
+            "value": 3564,
+            "unit": "tests"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "committer": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "distinct": true,
+          "id": "09ae27caa884889c50f22b2d14cd29c4365c5c82",
+          "message": "Prelude scan: the byte index covers lowercase letters too\n\nAn all-lowercase pattern (`stdout`, `stdin`, `mpsc`, `isqrt`, `dyn`) had\nno indexed byte, so `has` read the whole source with str::contains: about\n22M instructions of an edit build of the 1.6 MB program. Every byte but\nwhite space is now indexed, and such a pattern is checked only where its\nrarest letter is.\n\nKPI: edit one fn -1.98%, check -0.26%. traits edit is back inside its\nband (6edddd0's +0.27% was one noisy run; the prelude items it added\ncost about 0.1% there).\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-20T10:48:48Z",
+          "tree_id": "2d81b6006a431aa580a00441140576d8c1551f5f",
+          "url": "https://github.com/mizchi/zust/commit/09ae27caa884889c50f22b2d14cd29c4365c5c82"
+        },
+        "date": 1795171998579,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
