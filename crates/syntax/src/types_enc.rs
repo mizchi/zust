@@ -135,6 +135,7 @@ crate::enc_struct!(Summary {
     impl_trait,
     derives,
     adt_generics,
+    adt_bounds,
     impl_generics,
     impl_self_ty,
     consts,

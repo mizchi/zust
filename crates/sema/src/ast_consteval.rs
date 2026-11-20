@@ -134,8 +134,16 @@ fn write(prog: &Program, e: &Expr, ty: Ty, v: &mut DataVal, off: u32, depth: u32
         return Err("constant is too deeply nested".to_string());
     }
     let mut e = e;
-    while let Expr::Paren(x) = e {
-        e = x;
+    // (parentheses, and a block of only its tail (`unsafe { &X }`): the expression inside)
+    loop {
+        match e {
+            Expr::Paren(x) => e = x,
+            Expr::Block(None, _, b) if b.stmts.len() == 1 && matches!(&b.stmts[0], crate::parse::Stmt::Expr(_, false)) => {
+                let crate::parse::Stmt::Expr(x, _) = &b.stmts[0] else { unreachable!() };
+                e = x;
+            }
+            _ => break,
+        }
     }
     // (a call of a `const fn` whose body is `let`s and a tail: that tail with the parameters and lets put in)
     if let Expr::Call(f, args) = e {

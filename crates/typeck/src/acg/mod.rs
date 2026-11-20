@@ -1924,6 +1924,11 @@ impl Cx<'_> {
 
     /// static i のアドレス
     pub fn static_sym(&mut self, i: u32) -> Value {
+        // (a static of an extern block: the linked program's symbol)
+        if let Some((_, sym)) = crate::parse::extern_static(&self.prog.consts[i as usize].expr) {
+            let g = self.b.symbol(sym);
+            return self.b.ins().symbol_value(PTR, g);
+        }
         let g = self.b.symbol(&sym_name('s', i));
         self.b.ins().symbol_value(PTR, g)
     }

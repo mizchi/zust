@@ -373,6 +373,17 @@ pub enum Bound {
     Lifetime(String),
 }
 
+/// the initializer text of a `static X: T;` declared in an extern block
+pub const EXTERN_STATIC: &str = "__exr_extern_static";
+/// the initializer text Program keeps for such a static: this, then its line in the extern block, a space and the symbol
+pub const EXTERN_STATIC_SYM: &str = "\u{1}extern ";
+
+/// An extern static's (line in its extern block, symbol), from the initializer text Program keeps
+pub fn extern_static(expr: &str) -> Option<(usize, &str)> {
+    let (l, sym) = expr.strip_prefix(EXTERN_STATIC_SYM)?.split_once(' ')?;
+    Some((l.parse().ok()?, sym))
+}
+
 #[derive(Clone, Debug)]
 pub enum Pat {
     Wild,
@@ -560,6 +571,8 @@ pub struct Parser {
     async_on: bool,
     /// Inside an `async` fn / block / closure (a plain closure inside one is not)
     in_async: bool,
+    /// Inside an `extern "C" { .. }` block: a `static X: T;` without a value is allowed there only
+    in_extern: bool,
 }
 
 type R<T> = Result<T, String>;
@@ -581,7 +594,7 @@ fn bin_prec(op: &str) -> u32 {
 
 pub fn parse_file(src: &str) -> R<File> {
     let toks = tokenize(src)?;
-    let mut p = Parser { toks: toks, i: 0, init_text: String::new(), base: Pos::default(), async_on: true, in_async: false };
+    let mut p = Parser { toks: toks, i: 0, init_text: String::new(), base: Pos::default(), async_on: true, in_async: false, in_extern: false };
     let mut attrs = Vec::new();
     while p.is_punct("#") && p.peek_is(1, "!") {
         attrs.push(p.attr()?);
@@ -614,7 +627,7 @@ pub fn parse_expr(src: &str) -> R<Expr> {
 /// 式を読む。位置は base (src の先頭のソース上の位置) からの位置にする
 pub fn parse_expr_at(src: &str, base: Pos) -> R<Expr> {
     let toks = tokenize(src)?;
-    let mut p = Parser { toks: toks, i: 0, init_text: String::new(), base, async_on: false, in_async: false };
+    let mut p = Parser { toks: toks, i: 0, init_text: String::new(), base, async_on: false, in_async: false, in_extern: false };
     let e = p.expr(true)?;
     if p.i < p.toks.len() {
         return Err(p.err("unexpected token after expression"));
@@ -629,7 +642,7 @@ pub fn parse_pat_guard(src: &str) -> Option<(Pat, Option<Expr>)> {
 
 pub fn parse_pat_guard_at(src: &str, base: Pos) -> Option<(Pat, Option<Expr>)> {
     let toks = tokenize(src).ok()?;
-    let mut p = Parser { toks: toks, i: 0, init_text: String::new(), base, async_on: false, in_async: false };
+    let mut p = Parser { toks: toks, i: 0, init_text: String::new(), base, async_on: false, in_async: false, in_extern: false };
     let pat = p.pat().ok()?;
     let guard = if p.eat_ident("if") { Some(p.expr(true).ok()?) } else { None };
     p.eat_punct(",");
@@ -2717,6 +2730,15 @@ impl Parser {
                 let n = self.decl_ident()?;
                 self.expect_punct(":")?;
                 let t = self.ty()?;
+                // (`static X: T;` in an extern block: a symbol of the program it links with, no initializer)
+                if self.is_punct(";") && !self.in_extern {
+                    return Err(self.err("free static item without body"));
+                }
+                if self.eat_punct(";") {
+                    self.init_text = EXTERN_STATIC.to_string();
+                    let seg = Seg { name: EXTERN_STATIC.to_string(), args: vec![], fn_args: None, text: EXTERN_STATIC.to_string() };
+                    return Ok(ItemKind::Static(m, n, t, Expr::Path(None, Path { global: false, segs: vec![seg], pos: Default::default() })));
+                }
                 self.expect_punct("=")?;
                 let st = self.i;
                 let e = self.expr(true)?;
@@ -2757,7 +2779,10 @@ impl Parser {
                 if self.tok(0).is_some_and(|t| t.kind == TokKind::Lit) {
                     self.i += 1;
                 }
-                Ok(ItemKind::Extern(self.items_in_braces()?))
+                let outer = std::mem::replace(&mut self.in_extern, true);
+                let items = self.items_in_braces();
+                self.in_extern = outer;
+                Ok(ItemKind::Extern(items?))
             }
             "macro_rules" => {
                 self.i += 1;
