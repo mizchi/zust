@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795199696301,
+  "lastUpdate": 1795199698405,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -54196,6 +54196,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "lsp peak RSS",
             "value": 75.844,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "miz404@gmail.com",
+            "name": "Kotaro Chikuba",
+            "username": "mizchi"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "0868b6561ba94deae19917c586d93a36f526a87f",
+          "message": "Merge pull request #14 from mizchi/claude/compat-next4\n\nClosures whose body diverges: () as the return type",
+          "timestamp": "2026-11-21T03:30:05+09:00",
+          "tree_id": "b0e39b801f5e379fbeac307fb59b51024c784f69",
+          "url": "https://github.com/mizchi/zust/commit/0868b6561ba94deae19917c586d93a36f526a87f"
+        },
+        "date": 1795199698168,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "lsp definition p50",
+            "value": 0.453,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp hover p50",
+            "value": 0.394,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp completion p50",
+            "value": 1.052,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp references p50",
+            "value": 4.357,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp rename p50",
+            "value": 0.465,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp signatureHelp p50",
+            "value": 0.966,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp documentHighlight p50",
+            "value": 1.056,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp ready (startup to indexed)",
+            "value": 129.172,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp peak RSS",
+            "value": 75.691,
             "unit": "MiB"
           }
         ]
