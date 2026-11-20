@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795150026749,
+  "lastUpdate": 1795150028458,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -60403,6 +60403,85 @@ window.BENCHMARK_DATA = {
           {
             "name": "parity 一致の平均",
             "value": 94.234,
+            "unit": "%"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "committer": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "distinct": true,
+          "id": "3c8f0b7e00b228f9d0637c4bc1a0fd098cbf39fb",
+          "message": "E0432: use m::f with an inline mod m that defines no f\n\nWhen a `use`'s first segment is an inline module of the program\n(`mod m { .. }`), its second segment must be defined in that module's\nbody (an item, a `macro_rules!`, an `as` name, or a name a `use`\nthere brings in); else \"unresolved import `m::f`\". Bodies with a glob,\na macro or include! are left alone.\n\ntests/ui: +4 compile-fail passes; extern-crate-visibility.rs (privacy,\nnot resolution) goes to rust_ui_accidental.txt.\nKPI: all within ±0.04% of the row before (this machine).\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-20T04:40:24Z",
+          "tree_id": "1a69dbb80aa126130428cbeda883b8dfd9b49d96",
+          "url": "https://github.com/mizchi/zust/commit/3c8f0b7e00b228f9d0637c4bc1a0fd098cbf39fb"
+        },
+        "date": 1795150028250,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "parity documentSymbol (名前の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity workspace/symbol (上位 20 の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity definition (行き先の一致)",
+            "value": 90.625,
+            "unit": "%"
+          },
+          {
+            "name": "parity hover (名前を含む)",
+            "value": 87.5,
+            "unit": "%"
+          },
+          {
+            "name": "parity references (数の一致)",
+            "value": 84.211,
+            "unit": "%"
+          },
+          {
+            "name": "parity documentHighlight (数の一致)",
+            "value": 91.176,
+            "unit": "%"
+          },
+          {
+            "name": "parity rename (書き換えの一致)",
+            "value": 86.667,
+            "unit": "%"
+          },
+          {
+            "name": "parity signatureHelp (名前・引数の数・今の引数の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity completion `x.\\|` (書いてある名前を含む)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity completion `na\\|me` (同)",
+            "value": 90.323,
+            "unit": "%"
+          },
+          {
+            "name": "parity 一致の平均",
+            "value": 93.05,
             "unit": "%"
           }
         ]
