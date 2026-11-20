@@ -125,6 +125,28 @@ impl Cx<'_> {
         }
     }
 
+    /// the type a pattern of number literals / constants pins down (a tuple of them: each element's)
+    fn pat_ty(&mut self, p: &Pat) -> Option<Ty> {
+        match p {
+            Pat::Lit(e) if lit_suffix(e) == Some(true) => self.peek(e),
+            Pat::Path(pa) if pa.segs.len() == 2 => match Ty::from_suffix(&pa.segs[0].name) {
+                Some(t) if crate::program::prim_assoc_const(t, &pa.segs[1].name).is_some() => Some(t),
+                _ => self.const_of(&Expr::Path(None, pa.clone())).map(|ci| self.prog.consts[ci as usize].ty),
+            },
+            Pat::Path(pa) if pa.segs.len() == 1 => {
+                let n = pa.segs[0].name.as_str();
+                self.prog.const_index.get(n).map(|&ci| self.prog.consts[ci as usize].ty)
+            }
+            Pat::Range(Some(a), _, _) => self.pat_ty(&range_end_pat(a)?),
+            Pat::Tuple(ps) if !ps.is_empty() => {
+                let ts = ps.iter().map(|p| self.pat_ty(p)).collect::<Option<Vec<Ty>>>()?;
+                let base = self.prog.tuple_base(ts.len());
+                Some(Ty::Struct(self.prog.instantiate(base, ts).ok()?))
+            }
+            _ => None,
+        }
+    }
+
     pub(crate) fn match_(&mut self, m: &Expr, expected: Option<Ty>) -> R<V> {
         let Expr::Match(scrut, arms) = m else {
             return err(SP, "internal: match_ on a non-match expression");
@@ -175,6 +197,8 @@ impl Cx<'_> {
             }),
             // (`match None { Some(3u8) => .. }`: the payload type comes from a `Some(..)` pattern; with none, `()`
             // (rustc's `!` fallback for `Some(v) => v` in a diverging context))
+            // (`match (0, 0) { (usize::MIN, usize::MAX) => .. }`: unsuffixed literals take their type from a pattern)
+            e if lit_scrutinee(e) => pats.iter().find_map(|p| self.pat_ty(p).filter(|t| !self.prog.has_param(*t))),
             _ => self.bare_none_ty(scrut, &pats)?,
         };
         let Some(place) = self.bk_scrutinee(scrut, scrut_exp, &pats)? else {
@@ -1735,5 +1759,36 @@ fn or_alts(p: &Pat) -> Vec<Pat> {
                 .collect()
         }
         p => vec![p.clone()],
+    }
+}
+
+/// a number literal without a suffix, or a tuple of them (`(0, 0)`): its type is not fixed by itself
+fn lit_scrutinee(e: &Expr) -> bool {
+    match strip_paren(e) {
+        e @ (Expr::Lit(..) | Expr::Unary(..)) => lit_suffix(e) == Some(false),
+        Expr::Tuple(xs) => !xs.is_empty() && xs.iter().all(lit_scrutinee),
+        _ => false,
+    }
+}
+
+/// a range pattern's start as a pattern of its own (`usize::MIN..=5`: `usize::MIN`)
+fn range_end_pat(e: &Expr) -> Option<Pat> {
+    match strip_paren(e) {
+        Expr::Path(None, p) => Some(Pat::Path(p.clone())),
+        e @ Expr::Lit(..) => Some(Pat::Lit(Box::new(e.clone()))),
+        _ => None,
+    }
+}
+
+/// a number literal (or its negation): whether it has a type suffix. None: not a number literal
+fn lit_suffix(e: &Expr) -> Option<bool> {
+    match strip_paren(e) {
+        Expr::Lit(t, _) => match super::lit::lit(t)? {
+            super::lit::Lit::Int(i) => Some(!i.suffix().is_empty()),
+            super::lit::Lit::Float(f) => Some(!f.suffix().is_empty()),
+            _ => None,
+        },
+        Expr::Unary(op, x, _) if op == "-" => lit_suffix(x),
+        _ => None,
     }
 }

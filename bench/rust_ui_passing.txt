@@ -3675,6 +3675,7 @@ compile-fail	match/match-struct.rs
 compile-fail	match/match-tag-nullary.rs
 compile-fail	match/match-tag-unary.rs
 run-pass	match/match-tuple-slice.rs
+run-pass	match/match-usize-min-max-pattern.rs
 compile-fail	match/match-vec-mismatch-2.rs
 compile-fail	match/mismatched-types-in-match-5358.rs
 compile-fail	match/mismatched-types-in-match-7867.rs
@@ -4367,6 +4368,7 @@ compile-fail	parser/issues/issue-20616-7.rs
 compile-fail	parser/issues/issue-20616-8.rs
 compile-fail	parser/issues/issue-20616-9.rs
 compile-fail	parser/issues/issue-21153.rs
+run-pass	parser/issues/issue-21475.rs
 compile-fail	parser/issues/issue-22647.rs
 compile-fail	parser/issues/issue-22712.rs
 compile-fail	parser/issues/issue-2354-1.rs
