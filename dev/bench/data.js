@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795176033615,
+  "lastUpdate": 1795176035937,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -82142,6 +82142,70 @@ window.BENCHMARK_DATA = {
           {
             "name": "tests/ui check-pass passing",
             "value": 1443,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui build-pass pass rate",
+            "value": 71.85,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui build-pass passing",
+            "value": 97,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui compile-fail pass rate",
+            "value": 48.44,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui compile-fail passing",
+            "value": 3564,
+            "unit": "tests"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "committer": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "distinct": true,
+          "id": "174b0fe451d5a2e9f1e2ec0ac0d0a17f62f32a7f",
+          "message": "include!(..) of code: as items / a statement, or as an expression\n\ninclude!(\"f.rs\") and include!(concat!(\"a\", \"b\")) are expanded when the\nsource is loaded, relative to the including file. This uses the same\npass as include_str! / include_bytes!, which is now skipped by one\nsearch for \"include\".\n- `include!(..);` puts the file's code in place.\n- Anywhere else, the code goes in as a parenthesized expression.\n- A shebang line is dropped only outside any braces (item context), as\n  rustc does.\n- `mod m;` in a file included from another directory gets\n  #[path = \"<dir>/m.rs\"].\n\ntests/ui: +3 check-pass, +1 run-pass. KPI: edit one fn -0.18% (one\nsearch of the source in place of two).\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-20T11:55:50Z",
+          "tree_id": "10e7108750f1816b080387394f9fedf797b62f6b",
+          "url": "https://github.com/mizchi/zust/commit/174b0fe451d5a2e9f1e2ec0ac0d0a17f62f32a7f"
+        },
+        "date": 1795176035448,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tests/ui run-pass pass rate",
+            "value": 72.83,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui run-pass passing",
+            "value": 1737,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui check-pass pass rate",
+            "value": 80.02,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui check-pass passing",
+            "value": 1446,
             "unit": "tests"
           },
           {
