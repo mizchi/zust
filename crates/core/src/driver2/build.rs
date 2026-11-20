@@ -253,7 +253,10 @@ impl Session2 {
             tm.lap("link", "skipped (object unchanged)".to_string());
         } else {
             std::fs::write(&obj_path, &obj).map_err(|e| e.to_string())?;
-            let used = crate::link::link(self.opts.linker.as_deref(), obj_path.as_path(), output)?;
+            let libs = native_libs(&a.src, &a.items, &self.opts.lib_dirs);
+            let mut objs: Vec<&std::path::Path> = vec![obj_path.as_path()];
+            objs.extend(libs.iter().map(|l| l.as_path()));
+            let used = crate::link::link_many(self.opts.linker.as_deref(), &objs, output)?;
             rep.linked = true;
             tm.lap("link", used);
         }
@@ -1402,4 +1405,31 @@ fn static_fns(prog: &crate::program::Program, e: &crate::parse::Expr, out: &mut 
         Expr::Struct(_, fs, _) => fs.iter().for_each(|f| static_fns(prog, &f.1, out, depth + 1)),
         _ => {}
     }
+}
+
+/// The native libraries of the program's `#[link(name = "x")]` extern blocks: `lib<x>.a` in a `-L` directory, else
+/// `-lx` (passed to the linker as is). Only items that start with the attribute are read
+fn native_libs(src: &str, items: &[SrcItem], dirs: &[std::path::PathBuf]) -> Vec<std::path::PathBuf> {
+    let mut out: Vec<std::path::PathBuf> = vec![];
+    for it in items {
+        let Some(t) = src.get(it.start..it.end) else { continue };
+        let mut rest = t;
+        while let Some(r) = rest.trim_start().strip_prefix("#[") {
+            let Some(e) = r.find(']') else { break };
+            let attr = &r[..e];
+            rest = &r[e + 1..];
+            let Some(args) = attr.trim().strip_prefix("link").map(str::trim_start).and_then(|a| a.strip_prefix('(')) else { continue };
+            let Some(n) = args.find("name") else { continue };
+            let v = args[n + 4..].trim_start();
+            let Some(v) = v.strip_prefix('=').map(str::trim_start).and_then(|v| v.strip_prefix('"')) else { continue };
+            let Some(q) = v.find('"') else { continue };
+            let name = &v[..q];
+            let a = format!("lib{name}.a");
+            let lib = dirs.iter().map(|d| d.join(&a)).find(|p| p.is_file()).unwrap_or_else(|| format!("-l{name}").into());
+            if !out.contains(&lib) {
+                out.push(lib);
+            }
+        }
+    }
+    out
 }

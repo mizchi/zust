@@ -1,9 +1,21 @@
 # tests/ui tests zustc passes (rust-lang/rust 1.100.0, 0ef1bc386); bench/rust_ui.py --write-baseline
+run-pass	abi/anon-extern-mod.rs
 run-pass	abi/c-stack-as-value.rs
+run-pass	abi/cabi-int-widening.rs
 check-pass	abi/explicit_repr_rust.rs
 build-pass	abi/extern/extern-c-method-return-struct.rs
+run-pass	abi/extern/extern-call-deep.rs
+run-pass	abi/extern/extern-call-deep2.rs
 run-pass	abi/extern/extern-call-direct.rs
+run-pass	abi/extern/extern-call-indirect.rs
+run-pass	abi/extern/extern-call-scrub.rs
+run-pass	abi/extern/extern-pass-char.rs
+run-pass	abi/extern/extern-pass-double.rs
+run-pass	abi/extern/extern-pass-u32.rs
+run-pass	abi/extern/extern-pass-u64.rs
+run-pass	abi/issues/issue-97463-broken-abi-leaked-uninit-data.rs
 run-pass	abi/numbers-arithmetic/float-struct.rs
+run-pass	abi/numbers-arithmetic/i128-ffi.rs
 build-pass	abi/return-ref-as-immediate-in-codegen.rs
 run-pass	allocator/empty-alloc-nonnull-guarantee.rs
 compile-fail	anon-params/anon-params-denied-2018.rs

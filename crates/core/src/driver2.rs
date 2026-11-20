@@ -256,6 +256,8 @@ pub struct Options2 {
     /// 関数のコンパイルに使うプロセスの数 (fork する)
     pub jobs: usize,
     pub linker: Option<String>,
+    /// `-L` directories, searched for the `lib<name>.a` of a `#[link(name = "..")]`
+    pub lib_dirs: Vec<std::path::PathBuf>,
     pub no_cache: bool,
     /// 段階ごとの時間を stderr に出す
     pub time: bool,
@@ -267,7 +269,7 @@ pub struct Options2 {
 
 impl Default for Options2 {
     fn default() -> Self {
-        Options2 { opt: false, jobs: cpu_count(), linker: None, no_cache: false, time: false, backend: None, features: vec![] }
+        Options2 { opt: false, jobs: cpu_count(), linker: None, lib_dirs: vec![], no_cache: false, time: false, backend: None, features: vec![] }
     }
 }
 

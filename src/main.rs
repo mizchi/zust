@@ -11,7 +11,7 @@ mod stamp;
 
 fn usage() -> ! {
     eprintln!(
-        "usage: zustc <input.rs> [-o out] [-O] [--backend=cranelift|minclif] [--linker=NAME] [--features=a,b] [--time] [-j N] [--no-cache]\n       zustc build <workspace-file> [-o out-dir] [-O] [--backend=..] [-j N] [--time] [--no-cache]\n       zustc check <input.rs>"
+        "usage: zustc <input.rs> [-o out] [-O] [--backend=cranelift|minclif] [--linker=NAME] [--features=a,b] [-L dir] [--time] [-j N] [--no-cache]\n       zustc build <workspace-file> [-o out-dir] [-O] [--backend=..] [-j N] [--time] [--no-cache]\n       zustc check <input.rs>"
     );
     std::process::exit(2)
 }
@@ -52,6 +52,11 @@ fn main() {
             "-O" => o.opt = true,
             "--time" => o.time = true,
             "--no-cache" => o.no_cache = true,
+            // `-L dir` / `-L native=dir`: where `#[link(name = "x")]` looks for libx.a
+            "-L" => {
+                let d = args.next().unwrap_or_else(|| usage());
+                o.lib_dirs.push(d.strip_prefix("native=").or_else(|| d.strip_prefix("all=")).unwrap_or(&d).into());
+            }
             "-j" => o.jobs = args.next().and_then(|s| s.parse().ok()).unwrap_or_else(|| usage()),
             s if s.starts_with("--backend=") => backend = s["--backend=".len()..].to_string(),
             s if s.starts_with("--linker=") => o.linker = Some(s["--linker=".len()..].into()),

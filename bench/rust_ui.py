@@ -40,7 +40,7 @@ def fetch():
     os.makedirs(os.path.dirname(TESTS), exist_ok=True)
     subprocess.run(["git", "-c", "advice.detachedHead=false", "clone", "-q", "--depth", "1", "--filter=blob:none", "--sparse",
                     "--branch", TAG, REPO, TESTS], check=True)
-    subprocess.run(["git", "-C", TESTS, "sparse-checkout", "set", "tests/ui"], check=True)
+    subprocess.run(["git", "-C", TESTS, "sparse-checkout", "set", "tests/ui", "tests/auxiliary"], check=True)
     head = subprocess.run(["git", "-C", TESTS, "rev-parse", "HEAD"], capture_output=True, text=True).stdout.strip()
     if head != COMMIT:
         raise SystemExit(f"tag {TAG} is {head}, expected {COMMIT}")
@@ -114,6 +114,25 @@ def crashed(r):
     return r.returncode < 0 or "panicked at" in r.stderr or "RUST_BACKTRACE" in r.stderr
 
 
+def test_helpers():
+    """compiletest links every test with tests/auxiliary/rust_test_helpers.c (as librust_test_helpers.a, found
+    through `-L`): build it once, into out/rust_test_helpers/"""
+    c = os.path.join(TESTS, "tests/auxiliary/rust_test_helpers.c")
+    if not os.path.exists(c):
+        return None
+    d = os.path.join(ROOT, "out/rust_test_helpers")
+    a = os.path.join(d, "librust_test_helpers.a")
+    if not os.path.exists(a) or os.path.getmtime(a) < os.path.getmtime(c):
+        os.makedirs(d, exist_ok=True)
+        o = os.path.join(d, "rust_test_helpers.o")
+        subprocess.run(["cc", "-c", "-O2", "-fPIC", c, "-o", o], check=True)
+        subprocess.run(["ar", "crs", a, o], check=True)
+    return d
+
+
+HELPERS = None
+
+
 def run_one(path, kind, tmp):
     name = os.path.splitext(os.path.basename(path))[0]
     exe = os.path.join(tmp, re.sub(r"[^\w]", "_", os.path.relpath(path, TESTS)))
@@ -131,7 +150,8 @@ def run_one(path, kind, tmp):
             want = error_lines(open(path, errors="replace").read())
             got = {int(m.group(1)) for m in re.finditer(r"^error: [^\n]*?:(\d+):\d+:", r.stderr, re.M)}
             return "pass" if want & got else "wrong-line"
-        r = subprocess.run([*LIMIT, ZUSTC, path, "-o", exe, "--no-cache"], capture_output=True, text=True, timeout=60)
+        libs = ["-L", HELPERS] if HELPERS else []
+        r = subprocess.run([*LIMIT, ZUSTC, path, "-o", exe, "--no-cache", *libs], capture_output=True, text=True, timeout=60)
         if crashed(r):
             return "crash"
         if r.returncode != 0:
@@ -175,6 +195,8 @@ def main():
     ui = os.path.join(TESTS, "tests/ui")
     if not os.path.isdir(ui):
         raise SystemExit("tests/ui is missing: run python3 bench/rust_ui.py --fetch first")
+    global HELPERS
+    HELPERS = test_helpers()
     kinds = a.kinds.split(",")
     tests, skipped = [], {}
     for d, dirs, fs in os.walk(ui):
