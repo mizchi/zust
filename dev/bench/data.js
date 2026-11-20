@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795167620202,
+  "lastUpdate": 1795167622125,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -48952,6 +48952,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "lsp peak RSS",
             "value": 74.391,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "committer": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "distinct": true,
+          "id": "b88ba4eb8bd214321108226ecd9a334fb491142c",
+          "message": "Support slice is_sorted* and unary ops on numeric references\n\nis_sorted, is_sorted_by and is_sorted_by_key come from prelude helpers.\nUnary - and ! on &i32 / &f64 / &bool now read through the reference,\nin codegen, in peek and in type inference.\n\ntests/ui: +1 check-pass (slice_is_sorted_by_borrow.rs).\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-20T09:35:31Z",
+          "tree_id": "a5be2b285d6c29388b8c7ecbfcbc0810e42b7c5a",
+          "url": "https://github.com/mizchi/zust/commit/b88ba4eb8bd214321108226ecd9a334fb491142c"
+        },
+        "date": 1795167621916,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "lsp definition p50",
+            "value": 0.532,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp hover p50",
+            "value": 0.408,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp completion p50",
+            "value": 1.091,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp references p50",
+            "value": 6.118,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp rename p50",
+            "value": 0.487,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp signatureHelp p50",
+            "value": 0.885,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp documentHighlight p50",
+            "value": 1.001,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp ready (startup to indexed)",
+            "value": 124.87,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp peak RSS",
+            "value": 74.457,
             "unit": "MiB"
           }
         ]
