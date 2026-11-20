@@ -66,6 +66,18 @@ impl Enc for bool {
     }
 }
 
+impl Enc for u8 {
+    fn enc(&self, out: &mut Vec<u8>) {
+        out.push(*self);
+    }
+    fn dec(r: &mut Rd) -> Option<Self> {
+        Some(r.take(1)?[0])
+    }
+    fn is_empty_val(&self) -> bool {
+        *self == 0
+    }
+}
+
 impl Enc for u64 {
     fn enc(&self, out: &mut Vec<u8>) {
         put_varint(out, *self)

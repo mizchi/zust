@@ -120,7 +120,10 @@ crate::enc_struct!(SigSyn {
     panic_handler,
     ret_from,
     is_unsafe,
+    regions,
 });
+crate::enc_struct!(RSigSyn { lts, slots, outlives, ty_outlives });
+crate::enc_struct!(RImplSyn { lts, self_slots, outlives, ty_outlives, free });
 crate::enc_struct!(Summary {
     fns,
     structs,
@@ -146,7 +149,10 @@ crate::enc_struct!(Summary {
     where_types,
     impl_trait_args,
     assoc_bounds,
+    hdr_regions,
+    adt_regions,
 });
+crate::enc_struct!(RAdtSyn { lts, fields, outlives, ty_outlives });
 crate::enc_struct!(AssocSyn {
     name,
     self_ty,

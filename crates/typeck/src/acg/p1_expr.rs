@@ -731,6 +731,7 @@ impl Cx<'_> {
                 // (a value of a type that holds no references carries no loans: `self.i = I::new(buf);`)
                 let srcs = if self.bk_on() && !self.bk_ty(t).1 { vec![] } else { srcs };
                 self.bk_assign(left, &srcs);
+                self.rg_assign(left, right);
                 self.same(SP, rt, t)?;
                 let refill = if self.needs_drop(t) { self.drop_before_assign(left, p) } else { None };
                 self.write(p, v);
@@ -893,6 +894,7 @@ impl Cx<'_> {
                         if borrowck::has_refs(self.prog, ret, 0) {
                             { let _ = &srcs; self.bk_ret(e); }
                         }
+                        self.rg_ret(e);
                         self.same(expr_start(e), t, ret)?;
                         v
                     }
@@ -2488,6 +2490,7 @@ impl Cx<'_> {
             self.check_unsafe_call(id, p.pos)?;
         }
         let r = self.call_fn(id, None, &args, tf, expected, SP);
+        self.rg_took_call(c);
         self.seg_self = None;
         r
     }

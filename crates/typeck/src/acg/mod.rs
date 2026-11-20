@@ -18,6 +18,7 @@
 #![allow(clippy::too_many_arguments)]
 
 pub mod borrowck;
+pub mod regionck;
 pub mod clif;
 pub mod lit;
 mod p1_expr;
@@ -263,6 +264,8 @@ pub fn compile(prog: &Program, insts: &Mutex<Insts>, id: u32, f: &ItemFn, line_b
     let mut cx = Cx {
         b: FunctionBuilder::new(&clif_sig(&sig)),
         bk: borrowck::Bk { on: bk_level > 0, level: bk_level, line_base, ..Default::default() },
+        // (a function's own body, not a generic one's instance nor a closure's: see regionck)
+        rg: regionck::Rg { on: bk_level >= 2 && body_id == id && caps.is_empty() && prog.closures.get(&body_id).is_none() && std::env::var_os("ZUSTC_NO_REGIONCK").is_none(), ..Default::default() },
         prog,
         scopes: vec![vec![]],
         loops: vec![],
@@ -349,6 +352,7 @@ pub fn compile(prog: &Program, insts: &Mutex<Insts>, id: u32, f: &ItemFn, line_b
     };
     r?;
     cx.bk_check()?;
+    cx.rg_check()?;
     // (入口以外で作った drop フラグは入口で 0 にする: minclif はフラグのスロットを関数の最初に 0 にする)
     let late = std::mem::take(&mut cx.late_flags);
     let requested = std::mem::take(&mut cx.requested);
@@ -620,6 +624,8 @@ pub struct Cx<'p> {
     pub b: FunctionBuilder,
     /// 借用検査の記録
     pub bk: borrowck::Bk,
+    /// Region checking against the signature
+    pub rg: regionck::Rg,
     pub prog: &'p Program,
     pub scopes: Vec<Vec<(String, Loc, Ty)>>,
     pub loops: Vec<Loop>,
@@ -1129,6 +1135,37 @@ impl Cx<'_> {
             }
         }
         self.bk.params = (0..self.bk.locals.len() as u32).collect();
+        // (the gate, before any work: a signature with fewer than two regions and no lifetime named has no two
+        // universal regions to relate)
+        if self.rg.on && sig.regions.is_none() && sig.params.iter().map(|&t| regionck::count(self.prog, t, 0).unwrap_or(0)).sum::<usize>() < 2 {
+            self.rg.on = false;
+        }
+        if self.rg.on {
+            let mut ps = vec![];
+            if f.sig.recv.is_some() {
+                ps.push("self".to_string());
+            }
+            for (p, _) in &f.sig.params {
+                ps.push(pat_name(p)?);
+            }
+            let ps: Vec<(Loc, Ty)> = ps.iter().filter_map(|n| self.lookup(n)).collect();
+            if ps.len() == sig.params.len() {
+                // (elision from the receiver: `&self` / `&mut self`, or a receiver type that names `Self`)
+                let self_elides = match (&f.sig.recv, &f.sig.recv_ty) {
+                    (Some(r), _) if r.starts_with('&') => true,
+                    (Some(_), Some(t)) => format!("{t:?}").contains("\"Self\"") && format!("{t:?}").contains("Ref("),
+                    _ => false,
+                };
+                // (any other receiver with elided regions in the result: not followed)
+                let other_self = f.sig.recv.is_some() && !self_elides;
+                self.rg_begin(sig.regions.as_deref(), &ps, self_elides);
+                if other_self {
+                    self.rg.ret = None;
+                }
+            } else {
+                self.rg.on = false;
+            }
+        }
         // クロージャ: キャプチャを `__env` のフィールド (by-ref なら指す先) として見せる
         if !self.caps.is_empty() {
             let env = match self.lookup("__env") {
@@ -1547,6 +1584,7 @@ impl Cx<'_> {
                     self.bk.mut_next = pat_mut(pat);
                     self.bind(name.clone(), ty, v);
                     self.bk_def_named(&name, &srcs, init);
+                    self.rg_let(&name, ann_ty.as_ref(), init);
                     self.extend_temps(t0);
                 }
                 // (`;` の付いたマクロの文。末尾の `vec![]` などは式として期待型を渡す)
@@ -1576,6 +1614,9 @@ impl Cx<'_> {
                     }
                     self.bk.move_mut_next = last && !*semi;
                     let r = self.expr(e, exp);
+                    if last && !*semi && self.bk.tail == e as *const Expr as usize && r.is_ok() {
+                        self.rg_ret(e);
+                    }
                     if tail {
                         let srcs = self.bk_frame_end();
                         if borrowck::has_refs(self.prog, self.ret, 0) {

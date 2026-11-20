@@ -275,6 +275,62 @@ pub struct SigSyn {
     /// Which reference arguments the return value may borrow from (borrow checking): bit i for argument i (self
     /// first), bit 63 set when known. 0: not known (any of them)
     pub ret_from: u64,
+    /// The regions of the signature (None: it writes no reference and no lifetime, so every region in it is elided)
+    pub regions: Option<RSigSyn>,
+}
+
+// ---- regions of signatures (region checking; `Ty` itself carries none) ----
+//
+// The regions of a type are its *region slots*, in preorder: a reference's region, then those of its pointee; a
+// struct / enum's lifetime parameters, then the slots of its type arguments; a tuple's elements in order; the element
+// of a box, array, slice or raw pointer. A slot is written as a code: an index into the lifetimes in scope, or one of
+// the markers below.
+
+/// `'static`
+pub const R_STATIC: u8 = 0xF0;
+/// An elided region (`&T`, `'_`)
+pub const R_ELIDED: u8 = 0xF1;
+/// A path type written without lifetime arguments (`Parser` for `Parser<'a>`, `Vec<T>`): as many elided regions as the
+/// type has lifetime parameters (often none)
+pub const R_ELIDED_ADT: u8 = 0xF2;
+/// A type the checker does not follow (a projection, `dyn`, `impl`, a fn pointer, a macro): the whole parameter is
+/// not checked
+pub const R_UNKNOWN: u8 = 0xF3;
+
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Default)]
+pub struct RSigSyn {
+    /// The lifetime parameters in scope (the impl's or trait's, then the fn's)
+    pub lts: Vec<String>,
+    /// The region slots of each parameter (self first), then of the return type
+    pub slots: Vec<Vec<u8>>,
+    /// Declared `'a: 'b` (codes)
+    pub outlives: Vec<(u8, u8)>,
+    /// Declared `T: 'a` (type parameter, code)
+    pub ty_outlives: Vec<(String, u8)>,
+}
+
+/// The regions of a struct / enum definition
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Default)]
+pub struct RAdtSyn {
+    /// Its lifetime parameters
+    pub lts: Vec<String>,
+    /// The region slots of each field (an enum's: of each variant's fields, in order)
+    pub fields: Vec<Vec<u8>>,
+    pub outlives: Vec<(u8, u8)>,
+    pub ty_outlives: Vec<(String, u8)>,
+}
+
+/// The regions of an impl / trait header, for the signatures of its members
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Default)]
+pub struct RImplSyn {
+    pub lts: Vec<String>,
+    /// The region slots of `Self` (an impl's self type; empty in a trait)
+    pub self_slots: Vec<u8>,
+    pub outlives: Vec<(u8, u8)>,
+    pub ty_outlives: Vec<(String, u8)>,
+    /// An impl's lifetime parameters neither its self type nor its trait names (an associated type must not name
+    /// them, E0207)
+    pub free: Vec<String>,
 }
 
 /// enum のバリアント (要約に保存する形)
@@ -333,6 +389,10 @@ pub struct Summary {
     /// The plain trait bounds on those parameters (`struct S<T: Tr>`: ("T", ["Tr"])), only the parameters that have
     /// some: a static's type is checked against them
     pub adt_bounds: Vec<(String, Vec<String>)>,
+    /// The regions of an impl / trait header (None: it names no lifetime)
+    pub hdr_regions: Option<RImplSyn>,
+    /// The regions of the struct / enum defined (None: it names no lifetime, so it has no region of its own)
+    pub adt_regions: Option<RAdtSyn>,
     /// impl ヘッダの型パラメータと self 型 (`impl<T> Option<T>`)
     pub impl_generics: Vec<(String, Vec<String>)>,
     pub impl_self_ty: Option<TySyn>,
@@ -393,6 +453,8 @@ pub struct Owner {
     /// impl の型パラメータ (trait なら `Self`)
     pub generics: Vec<(String, Vec<String>)>,
     pub is_trait: bool,
+    /// The header's regions
+    pub regions: Option<RImplSyn>,
 }
 
 /// const ジェネリクスの印 (境界の名前の位置に入れる)
