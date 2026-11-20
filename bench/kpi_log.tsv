@@ -110,3 +110,4 @@ date	commit	change	noop_M	edit_M	check_M	cache_KiB	lsp_G	run	check	build	cfail
 2026-11-20	98c6952+	cache: a tmp file per process when saving the cache and the stamps	0.882	580.437	3849.119	1902.8	-	1698	1417	95	3327	1178.897	60.975	10.837	316.198
 2026-11-20	985440c+	prelude: Vec capacity overflow panics, allocation failure aborts	0.884	580.076	3852.420	1902.8	-	1698	1417	95	3327	1175.882	61.114	10.851	318.080
 2026-11-20	e9f2440+	srcmap: circular modules are an error (they overflowed the stack); no-op and crates no-op are from the non-PIE link of a14943c, which the 4 rows above were measured without	0.703	580.420	3848.457	1902.8	-	1698	1417	95	3351	1176.189	60.907	9.792	317.000
+2026-11-20	cb39474+	srcmap: circular modules are found by realpath (a symbolic link then .. is another file)	0.703	580.134	3849.325	1902.8	-	1698	1417	95	3367	1175.739	61.003	9.826	316.982

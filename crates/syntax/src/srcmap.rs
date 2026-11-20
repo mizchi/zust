@@ -119,6 +119,34 @@ pub fn load_crate(root: &Path, display: &str, cfg: &crate::cfg::CfgSet) -> Resul
     Ok((text, map))
 }
 
+unsafe extern "C" {
+    #[link_name = "realpath"]
+    fn c_realpath(path: *const u8, resolved: *mut u8) -> *mut u8;
+    #[link_name = "free"]
+    fn c_free(p: *mut u8);
+}
+
+/// Which file a path names, to find circular modules: the path with symbolic links resolved (libc realpath: this
+/// file is also compiled by zustc, whose std has no canonicalize). `link/../a.rs` is a.rs beside where link
+/// points, not beside link. When realpath fails, the path with `.` and `x/..` taken out as text
+fn file_key(p: &Path) -> String {
+    let c = format!("{}\0", p.display());
+    // SAFETY: c ends with NUL; with a null buffer realpath returns a malloc'd NUL-terminated string (or null)
+    let r = unsafe { c_realpath(c.as_bytes().as_ptr(), std::ptr::null_mut()) };
+    if r.is_null() {
+        return lexical(p);
+    }
+    let mut out: Vec<u8> = vec![];
+    let mut i = 0;
+    // SAFETY: r is NUL-terminated
+    while unsafe { *r.add(i) } != 0 {
+        out.push(unsafe { *r.add(i) });
+        i += 1;
+    }
+    unsafe { c_free(r) };
+    String::from_utf8_lossy(&out).into_owned()
+}
+
 /// The path with `.` and `x/..` taken out (as text: two spellings of one file compare equal)
 fn lexical(p: &Path) -> String {
     let s = p.to_string_lossy().into_owned();
@@ -142,7 +170,7 @@ fn lexical(p: &Path) -> String {
 /// open は読んでいる途中のファイル (根から): 同じファイルがまた出てきたら循環 (rustc と同じく "circular modules")
 #[allow(clippy::too_many_arguments)]
 fn load_file(path: &Path, display: &str, mod_dir: &Path, disp_dir: &str, start: u32, map: &mut SrcMap, cfg: &crate::cfg::CfgSet, open: &mut Vec<(String, String)>) -> Result<String, String> {
-    let key = lexical(path);
+    let key = file_key(path);
     if let Some(i) = open.iter().position(|o| o.0 == key) {
         let chain: Vec<&str> = open[i..].iter().chain(std::iter::once(&open[i])).map(|o| o.1.as_str()).collect();
         return Err(format!("{}: circular modules: {}", open[open.len() - 1].1, chain.join(" -> ")));
@@ -308,6 +336,7 @@ mod circular_tests {
     #[test]
     fn circular_modules() {
         let dir = std::env::temp_dir().join(format!("srcmap_circular_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(dir.join("a.rs"), "#[path = \"b.rs\"]\nmod b;\nfn main() {}\n").unwrap();
         std::fs::write(dir.join("b.rs"), "#[path = \"./a.rs\"]\nmod a;\n").unwrap();
@@ -322,6 +351,18 @@ mod circular_tests {
         assert!(e.ends_with("circular modules: src/s.rs -> src/s.rs"), "{e}");
         // (the same file twice, side by side, is not a cycle)
         assert!(super::load_crate(&dir.join("ok.rs"), "src/main.rs", &cfg).is_ok());
+        // (p/a.rs names `link/../a.rs` with p/link -> q/sub: that is q/a.rs, another file, not a cycle)
+        #[cfg(unix)]
+        {
+            for d in ["p", "q/sub"] {
+                std::fs::create_dir_all(dir.join(d)).unwrap();
+            }
+            std::os::unix::fs::symlink(dir.join("q/sub"), dir.join("p/link")).unwrap();
+            std::fs::write(dir.join("p/a.rs"), "#[path = \"link/../a.rs\"]\nmod child;\nfn main() {}\n").unwrap();
+            std::fs::write(dir.join("q/a.rs"), "pub fn f() {}\n").unwrap();
+            let r = super::load_crate(&dir.join("p/a.rs"), "src/main.rs", &cfg);
+            assert!(r.is_ok(), "{:?}", r.err());
+        }
         let _ = std::fs::remove_dir_all(&dir);
     }
 }
