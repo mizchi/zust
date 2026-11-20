@@ -1556,7 +1556,7 @@ impl Program {
                     }
                 }
                 for tr in trs {
-                    if sums.iter().any(|s| s.trait_decl.as_deref() == Some(tr.as_str())) && !p.implements(a, tr) {
+                    if sums.iter().any(|s| s.trait_decl.as_deref() == Some(tr.as_str())) && !p.bound_holds(sums, a, tr, 0) {
                         // (an extern static: at its own line in the block)
                         let line = items[c.item as usize].line + crate::parse::extern_static(&c.expr).map_or(0, |x| x.0.saturating_sub(1));
                         return Err(format!("{line}:1: the trait bound `{}: {tr}` is not satisfied (E0277)", p.tn(a)));
@@ -1686,6 +1686,33 @@ impl Program {
             }
             _ => None,
         }
+    }
+
+    /// Whether t: tr holds, for a static's bound: as `implements`, but a blanket `impl<T: B> Tr for T` counts only when t
+    /// meets its bounds (`implements` takes any blanket impl as covering every type)
+    pub fn bound_holds(&self, sums: &[Summary], t: Ty, tr: &str, depth: u32) -> bool {
+        if depth > 8 || !self.blanket_traits.contains(tr) || matches!(t, Ty::Ref(..) | Ty::Param(_)) {
+            return self.implements(t, tr);
+        }
+        let direct = match t {
+            Ty::Struct(sid) => self.impls.contains(&(self.base_of(sid), tr.to_string())),
+            t => self.prim_impls.contains(&(t, tr.to_string())),
+        };
+        if direct {
+            return true;
+        }
+        // (the blanket impls `impl<P: B1 + B2> Tr for P`: one whose bounds t meets; a bound this cannot read (with
+        // arguments, `?Sized`) or a where clause counts as met)
+        sums.iter()
+            .filter(|s| s.impl_trait.as_deref() == Some(tr) && matches!(s.impl_self_ty, Some(TySyn::Named(_))))
+            .filter_map(|s| s.impl_self.as_ref().and_then(|n| s.impl_generics.iter().find(|g| &g.0 == n)).map(|g| (s, g)))
+            .any(|(s, g)| {
+                !s.where_types.is_empty()
+                    || g.1.iter().all(|b| {
+                        let b = b.trim();
+                        !b.chars().all(|c| c.is_alphanumeric() || c == '_') || self.bound_holds(sums, t, b, depth + 1)
+                    })
+            })
     }
 
     pub fn implements(&self, t: Ty, tr: &str) -> bool {
