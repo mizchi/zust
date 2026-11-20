@@ -784,6 +784,7 @@ impl Cx<'_> {
             }
         }
         let mut bk_late = None;
+        let mut bk_reserved = false;
         let mut bk_op_temp = false;
         let t0 = self.bk.call_temps.len();
         if self.bk_on() && !via_deref {
@@ -795,7 +796,25 @@ impl Cx<'_> {
             }
             // (two-phase for a call written as a method call; an operator (`x += x` → `add_assign`, synthesized
             // without a position) borrows first)
-            if matches!(bk_recv_ty, Ty::Ref(true, _)) && self.bk.op_call != e as *const Expr as usize {
+            if let (true, true, Some(borrowck::Ev::Acc(place, borrowck::Acc::Borrow(ln), sp))) =
+                (matches!(bk_recv_ty, Ty::Ref(true, _)), self.bk.op_assign_call == e as *const Expr as usize, &ev)
+            {
+                // (the reservation: a shared loan of the place, ended once the arguments are evaluated; the
+                // `&mut` loan is taken then)
+                let l = &self.bk.loans[*ln as usize];
+                let res = borrowck::Loan { place: l.place.clone(), mutable: false, sp: l.sp, at: l.at, quiet: l.quiet };
+                let rs = self.bk.loans.len() as u32;
+                self.bk.loans.push(res);
+                self.bk_push(Some(borrowck::Ev::Acc(place.clone(), borrowck::Acc::Borrow(rs), *sp)));
+                self.bk_call_temp(&[borrowck::Src::Loan(rs)], true);
+                bk_reserved = true;
+                // (the `&mut` loan is taken at the call, after the right side: an error on the right side (`x += x`
+                // moves x while it is reserved) comes first)
+                bk_late = match (ev, margs.last()) {
+                    (Some(borrowck::Ev::Acc(p, a, _)), Some(r)) => Some(borrowck::Ev::Acc(p, a, err_pos(r))),
+                    (ev, _) => ev,
+                };
+            } else if matches!(bk_recv_ty, Ty::Ref(true, _)) && self.bk.op_call != e as *const Expr as usize {
                 bk_late = ev;
             } else {
                 // (an operator's `&mut self` lasts until the call: `x += x` moves x while it is borrowed)
@@ -828,6 +847,10 @@ impl Cx<'_> {
         if into_recv {
             let srcs = self.bk_frame_end();
             self.bk_flow_into(recv, &srcs);
+        }
+        // (a reservation ends before its `&mut` loan is taken)
+        if bk_reserved {
+            self.bk_call_temps_end(t0);
         }
         self.bk_push(bk_late);
         if bk_op_temp {

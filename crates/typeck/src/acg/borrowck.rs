@@ -153,6 +153,9 @@ pub struct Bk {
     pub pat_path: Option<BPlace>,
     /// The method call an operator was rewritten to (its address)
     pub op_call: usize,
+    /// The method call a compound assignment was rewritten to (`a += b` → `a.add_assign(b)`): its `&mut self` is
+    /// two-phase, a shared reservation while the right side is evaluated
+    pub op_assign_call: usize,
     /// The `index_mut` call acg makes to read an indexed place (its receiver is seen as shared)
     pub shared_recv: usize,
     /// Binding the pattern of an arm with a guard: a binding by value does not move until the guard holds (the next
