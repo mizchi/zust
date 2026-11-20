@@ -3585,6 +3585,7 @@ impl Program {
                 ("fs", "remove_file") => Some("__exr_fs_remove_file"),
                 ("Path", "new") => Some("__exr_path_new"),
                 ("ptr", "eq") => Some("__exr_ptr_eq"),
+                ("array", "from_fn") => Some("__exr_array_from_fn"),
                 _ => None,
             };
             if let Some(c) = core {

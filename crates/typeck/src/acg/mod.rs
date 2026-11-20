@@ -119,6 +119,9 @@ pub enum Target {
 }
 
 /// 再配置の名前 (`\x01f12` / `\x01d0` / `\x01s3` / `\x01v1`)
+/// values larger than this are copied / zeroed by a libc call
+pub(crate) const BIG_COPY: u32 = 4096;
+
 fn sym_name(kind: char, i: u32) -> String {
     format!("\x01{kind}{i}")
 }
@@ -916,6 +919,12 @@ impl Cx<'_> {
     }
 
     /// struct のコピー
+    /// a call of a libc function by its symbol (`memcpy` / `memset`), with one pointer-sized result
+    pub(crate) fn libc_call(&mut self, name: &str, args: &[Value]) {
+        let f = self.b.import_function(name, vec![PTR]);
+        self.b.ins().call(f, args);
+    }
+
     pub fn copy(&mut self, dst: Value, src: Value, t: Ty) {
         self.copy_at(dst, src, t, 0, 0);
     }
@@ -951,6 +960,14 @@ impl Cx<'_> {
             return;
         }
         let (size, _) = self.prog.size_align(t);
+        // (a large value: one libc memcpy, not a load and a store per word)
+        if size > BIG_COPY {
+            let d = if doff == 0 { dst } else { self.b.ins().iadd_imm(dst, doff as i64) };
+            let s = if soff == 0 { src } else { self.b.ins().iadd_imm(src, soff as i64) };
+            let n = self.b.ins().iconst(types::I64, size as i64);
+            self.libc_call("memcpy", &[d, s, n]);
+            return;
+        }
         let mut off = 0;
         for (n, ty) in [(8, types::I64), (4, types::I32), (2, types::I16), (1, types::I8)] {
             while off + n <= size {

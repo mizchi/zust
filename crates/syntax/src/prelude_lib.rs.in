@@ -63,6 +63,31 @@ pub fn __core_replace<T>(dest: &mut T, src: T) -> T {
 pub fn __core_take<T>(dest: &mut T) -> T {
     __core_replace(dest, __exr_default::<T>())
 }
+// `mem::discriminant(&e)`: the variant's tag, compared / hashed / printed as a number
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+pub struct Discriminant<T> {
+    d: u64,
+    _p: PhantomData<T>,
+}
+impl<T> Debug for Discriminant<T> {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError> {
+        write!(f, "Discriminant({})", self.d)
+    }
+}
+pub fn __core_discriminant<T>(v: &T) -> Discriminant<T> {
+    Discriminant { d: __exr_tag_of(v), _p: PhantomData }
+}
+// `std::array::from_fn(|i| ..)`: N from the expected array type
+pub fn __exr_array_from_fn<T, const N: usize, F: FnMut(usize) -> T>(mut f: F) -> [T; N] {
+    let mut a: [T; N] = unsafe { core::mem::zeroed() };
+    let p = &mut a as *mut [T; N] as *mut T;
+    let mut i = 0;
+    while i < N {
+        unsafe { p.add(i).write(f(i)) };
+        i += 1;
+    }
+    a
+}
 pub fn __core_forget<T>(x: T) {
     let _m = ManuallyDrop::new(x);
 }

@@ -1052,6 +1052,9 @@ pub fn select_with(user_src: &str, user_items: &[SrcItem], cache: &mut SelectCac
     if sc.has("ptr::eq") {
         need.insert("__exr_ptr_eq");
     }
+    if sc.has("array::from_fn") {
+        need.insert("__exr_array_from_fn");
+    }
     if sc.has("Cow") {
         need.extend(["Cow", "__CowStr", "Deref", "deref", "into_owned", "to_vec", "__exr_slice_to_vec", "Vec", "String"]);
     }

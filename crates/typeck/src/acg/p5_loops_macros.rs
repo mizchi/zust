@@ -1666,6 +1666,26 @@ impl Cx<'_> {
             self.same(SP, t, Ty::U32)?;
             return Ok(Some((v, Ty::Char)));
         }
+        // `__exr_tag_of(&e)` (prelude の mem::discriminant が使う): enum の tag (enum でなければ 0)
+        if name == "__exr_tag_of" && cargs.len() == 1 {
+            let (v, t) = self.expr(&cargs[0], None)?;
+            let v = match (v, t) {
+                (Some(a), Ty::Ref(_, Ty::Struct(sid))) if self.prog.structs[*sid as usize].is_enum => {
+                    let tag = self.prog.structs[*sid as usize].tag;
+                    let ct = clif_ty(tag).unwrap();
+                    let x = self.b.ins().load(ct, mf(), a, 0);
+                    if ct == types::I64 {
+                        x
+                    } else if tag.signed() {
+                        self.b.ins().sextend(types::I64, x)
+                    } else {
+                        self.b.ins().uextend(types::I64, x)
+                    }
+                }
+                _ => self.b.ins().iconst(types::I64, 0),
+            };
+            return Ok(Some((Some(v), Ty::U64)));
+        }
         // `core::slice::from_raw_parts(p, n)` / `_mut` と `core::str::from_utf8_unchecked(b)`
         if matches!(name.as_str(), "from_raw_parts" | "from_raw_parts_mut" | "from_utf8_unchecked") && !(p.segs.len() == 1 && self.prog.index.contains_key(&name)) {
             if name == "from_utf8_unchecked" {
@@ -1723,6 +1743,13 @@ impl Cx<'_> {
                 if t.is_agg() {
                     let a = self.temp(t);
                     let (size, _) = self.prog.size_align(t);
+                    // (a large value: one memset, not a store per word)
+                    if size > super::BIG_COPY {
+                        let c = self.b.ins().iconst(types::I32, 0);
+                        let nv = self.b.ins().iconst(types::I64, size as i64);
+                        self.libc_call("memset", &[a, c, nv]);
+                        return Ok(Some((Some(a), t)));
+                    }
                     let mut off = 0;
                     for (n, ty) in [(8u32, types::I64), (4, types::I32), (2, types::I16), (1, types::I8)] {
                         while off + n <= size {

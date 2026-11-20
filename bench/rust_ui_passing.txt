@@ -1571,6 +1571,7 @@ run-pass	consts/const-unsafe-fn.rs
 compile-fail	consts/const-unsized.rs
 run-pass	consts/const-vec-syntax.rs
 run-pass	consts/const-vecs-and-slices.rs
+run-pass	consts/const_discriminant.rs
 check-pass	consts/const_forget.rs
 check-pass	consts/const_in_pattern/const-bytes-slice-pattern.rs
 run-pass	consts/const_in_pattern/cyclic-const-dag-pass.rs
@@ -1957,6 +1958,7 @@ check-pass	entry-point/imported_main_conflict_lib.rs
 compile-fail	entry-point/main-with-invalid-signature.rs
 compile-fail	entry-point/return-ty-has-bound-vars.rs
 run-pass	enum-discriminant/const-implicit-enum-discriminant.rs
+run-pass	enum-discriminant/discriminant_value-wrapper.rs
 run-pass	enum-discriminant/enum-discriminant-const-eval-truncation-9837.rs
 run-pass	enum-discriminant/get_discr.rs
 run-pass	enum-discriminant/issue-104519.rs
@@ -3721,6 +3723,7 @@ compile-fail	mir/ice-mir-const-qualif-125837.rs
 check-pass	mir/issue-101844.rs
 compile-fail	mir/issue-102389.rs
 compile-fail	mir/issue-106062.rs
+check-pass	mir/issue-109004-drop-large-array.rs
 compile-fail	mir/issue-121103.rs
 run-pass	mir/issue-29227.rs
 run-pass	mir/issue-76803-branches-not-same.rs

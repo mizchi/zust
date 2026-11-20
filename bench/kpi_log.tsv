@@ -141,3 +141,4 @@ date	commit	change	noop_M	edit_M	check_M	cache_KiB	lsp_G	run	check	build	cfail
 2026-11-20	2ba1b4c+	driver2/build.rs and the lexer's glob set: Fx maps	0.695	559.726	3847.819	1902.8	-	1704	1432	95	3563	1159.534	63.446	10.259	314.906
 2026-11-20	81d4bd0+	slice is_sorted*, unary ops on numeric refs	0.695	559.648	3847.819	1902.8	-	1704	1433	95	3563	1159.659	63.394	10.259	314.915
 2026-11-20	b88ba4e+	match / if-let on a bare None: Option type from the patterns or inference	0.697	559.695	3847.841	1902.8	-	1705	1435	95	3564	1159.706	63.454	10.273	314.933
+2026-11-20	e36b7fd+	mem::discriminant, array::from_fn, big copies via memcpy	0.695	559.631	3847.089	1902.8	-	1707	1436	95	3564	1160.250	63.627	10.259	315.831
