@@ -632,7 +632,7 @@ impl Session2 {
                 if let Some((f, m)) = e.strip_prefix('\u{1}').and_then(|r| r.split_once('\u{1}')) {
                     let text = src.get(it.start..it.end).unwrap_or("");
                     // (a lifetime is found where it is written, a field by `name:`)
-                    let pat = if f.starts_with('\'') { f.to_string() } else { format!("{f}:") };
+                    let pat = if f.starts_with('\'') || f == "&" { f.to_string() } else { format!("{f}:") };
                     let line = text.find(pat.as_str()).map(|i| it.line + text[..i].matches('\n').count()).unwrap_or(it.line);
                     return Err(format!("{line}:1: {m}"));
                 }

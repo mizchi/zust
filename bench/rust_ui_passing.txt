@@ -958,6 +958,7 @@ compile-fail	c-variadic/fn-item-diagnostic-issue-69232.rs
 compile-fail	c-variadic/issue-32201.rs
 compile-fail	c-variadic/issue-86053-1.rs
 compile-fail	c-variadic/no-closure.rs
+compile-fail	c-variadic/variadic-ffi-6.rs
 build-pass	c-variadic/variadic-ffi-no-fixed-args.rs
 compile-fail	cast/ambiguous-raw-pointer-cast-errors.rs
 check-pass	cast/associated-type-bounds-cast-54094.rs
@@ -2022,6 +2023,7 @@ compile-fail	error-codes/E0067.rs
 compile-fail	error-codes/E0070.rs
 compile-fail	error-codes/E0071.rs
 compile-fail	error-codes/E0081.rs
+compile-fail	error-codes/E0106.rs
 compile-fail	error-codes/E0117.rs
 compile-fail	error-codes/E0120.rs
 compile-fail	error-codes/E0121.rs
@@ -3086,6 +3088,9 @@ compile-fail	lifetimes/issue-95023.rs
 compile-fail	lifetimes/keyword-self-lifetime-error-10412.rs
 run-pass	lifetimes/late-bound-lifetime-arguments-warning-72278.rs
 check-pass	lifetimes/lifetime-bound-whitespace-13703.rs
+compile-fail	lifetimes/lifetime-elision-return-type-requires-explicit-lifetime.rs
+compile-fail	lifetimes/lifetime-errors/elision-error-omits-lifetimeless-params.rs
+compile-fail	lifetimes/lifetime-errors/ex1b-return-no-names-if-else.rs
 compile-fail	lifetimes/lifetime-errors/ex3-both-anon-regions-one-is-struct-2.rs
 compile-fail	lifetimes/lifetime-errors/ex3-both-anon-regions-using-fn-items.rs
 compile-fail	lifetimes/lifetime-errors/ex3-both-anon-regions-using-trait-objects.rs
@@ -5010,7 +5015,9 @@ run-pass	regions/regions-free-region-outlives-static-outlives-free-region.rs
 check-pass	regions/regions-implied-bounds-projection-gap-2.rs
 check-pass	regions/regions-implied-bounds-projection-gap-3.rs
 check-pass	regions/regions-implied-bounds-projection-gap-4.rs
+compile-fail	regions/regions-in-enums-anon.rs
 compile-fail	regions/regions-in-enums.rs
+compile-fail	regions/regions-in-structs-anon.rs
 compile-fail	regions/regions-in-structs.rs
 run-pass	regions/regions-infer-borrow-scope-addr-of.rs
 compile-fail	regions/regions-infer-borrow-scope-too-big.rs
@@ -5195,6 +5202,7 @@ compile-fail	resolve/suggestions/sugg-field-in-format-string-issue-141136.rs
 compile-fail	resolve/suggestions/suggest-builder-fn.rs
 compile-fail	resolve/suggestions/suggest-path-for-tuple-struct.rs
 compile-fail	resolve/suggestions/suggest-path-instead-of-mod-dot-item.rs
+compile-fail	resolve/suggestions/suggest-vec-not-slice.rs
 compile-fail	resolve/token-error-correct-2.rs
 compile-fail	resolve/tool-import.rs
 compile-fail	resolve/tuple-struct-alias.rs
@@ -5746,11 +5754,13 @@ compile-fail	suggestions/issue-68049-2.rs
 compile-fail	suggestions/issue-71394-no-from-impl.rs
 compile-fail	suggestions/issue-82566-1.rs
 compile-fail	suggestions/issue-82566-2.rs
+compile-fail	suggestions/issue-84592.rs
 compile-fail	suggestions/issue-84700.rs
 compile-fail	suggestions/issue-84973-negative.rs
 compile-fail	suggestions/issue-84973.rs
 compile-fail	suggestions/issue-85945-check-where-clause-before-suggesting-unsized.rs
 compile-fail	suggestions/issue-86100-tuple-paren-comma.rs
+compile-fail	suggestions/issue-86667.rs
 compile-fail	suggestions/issue-88696.rs
 compile-fail	suggestions/issue-89064.rs
 compile-fail	suggestions/issue-89640.rs
@@ -5762,6 +5772,7 @@ compile-fail	suggestions/js-style-comparison-op-separate-eq-token.rs
 compile-fail	suggestions/js-style-comparison-op.rs
 compile-fail	suggestions/let-binding-init-expr-as-ty.rs
 compile-fail	suggestions/let-binding-suggest-issue-133713.rs
+compile-fail	suggestions/lifetimes/missing-lifetimes-in-signature-before-const.rs
 compile-fail	suggestions/many-type-ascription.rs
 compile-fail	suggestions/match-ergonomics.rs
 compile-fail	suggestions/match-with-different-arm-types-as-stmt-instead-of-expr.rs
@@ -5807,6 +5818,7 @@ compile-fail	suggestions/return-bindings.rs
 compile-fail	suggestions/return-closures.rs
 compile-fail	suggestions/return-cycle-2.rs
 compile-fail	suggestions/return-cycle.rs
+compile-fail	suggestions/return-elided-lifetime.rs
 compile-fail	suggestions/return-without-lifetime.rs
 compile-fail	suggestions/semi-suggestion-when-stmt-and-expr-span-equal.rs
 compile-fail	suggestions/silenced-binding-typo.rs
@@ -6524,6 +6536,8 @@ compile-fail	unboxed-closures/unboxed-closures-type-mismatch.rs
 run-pass	unboxed-closures/unboxed-closures-zero-args.rs
 run-pass	underscore-lifetime/basic-underscore-lifetime-elision.rs
 compile-fail	underscore-lifetime/in-binder.rs
+compile-fail	underscore-lifetime/in-fn-return-illegal.rs
+compile-fail	underscore-lifetime/in-struct.rs
 compile-fail	underscore-lifetime/raw-underscore-lifetime.rs
 compile-fail	underscore-lifetime/underscore-lifetime-binders.rs
 run-pass	uniform-paths/same-crate.rs

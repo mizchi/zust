@@ -444,6 +444,18 @@ fn parse_sig(sig: &PSig, is_extern: bool, is_main: bool, owner: Option<&Owner>) 
         if let Some(l) = undeclared_lifetime(&used, &declared) {
             return Err(format!("use of undeclared lifetime name `{l}` (E0261)"));
         }
+        // (E0106: an elided lifetime in the return type needs exactly one lifetime among the parameters)
+        // (not the prelude's own `__exr_` helpers, written against this compiler rather than rustc)
+        if sig.recv_ty.is_none() && !is_extern && !sig.name.starts_with("__") {
+            if let Some(r) = &sig.ret {
+                if lifetime_positions(r).0 > 0 {
+                    let inputs: usize = sig.params.iter().map(|(_, t)| lifetime_positions(t).1).sum();
+                    if inputs != 1 {
+                        return err("missing lifetime specifier (E0106)");
+                    }
+                }
+            }
+        }
     }
     for (_, t) in &sig.params {
         // (E0277: a parameter's value needs a size; a trait's declaration without a body does not)
@@ -549,6 +561,28 @@ fn named_lifetimes(t: &PTy, out: &mut Vec<String>) {
     }
 }
 
+/// The lifetime positions of a type, outside fn pointer, `impl` and `dyn` types: (elided ones (`&T`, `'_`), all)
+fn lifetime_positions(t: &PTy) -> (usize, usize) {
+    match t {
+        PTy::Ref(l, _, i) => {
+            let (e, a) = lifetime_positions(i);
+            let el = l.as_ref().is_none_or(|l| l == "'_") as usize;
+            (e + el, a + 1)
+        }
+        PTy::Path(None, p) => p.segs.iter().flat_map(|sg| sg.args.iter()).fold((0, 0), |(e, a), g| match g {
+            crate::parse::GArg::Lifetime(l) => (e + (l == "'_") as usize, a + 1),
+            crate::parse::GArg::Ty(t) => {
+                let (e2, a2) = lifetime_positions(t);
+                (e + e2, a + a2)
+            }
+            _ => (e, a),
+        }),
+        PTy::Ptr(_, i) | PTy::Slice(i) | PTy::Array(i, _) => lifetime_positions(i),
+        PTy::Tuple(ts) => ts.iter().map(lifetime_positions).fold((0, 0), |(e, a), (e2, a2)| (e + e2, a + a2)),
+        _ => (0, 0),
+    }
+}
+
 /// The first of `used` that is not `'static` / `'_` nor in `declared` (E0261)
 fn undeclared_lifetime(used: &[String], declared: &[&str]) -> Option<String> {
     used.iter().find(|l| !matches!(l.as_str(), "'static" | "'_") && !declared.contains(&l.as_str()) && !l.starts_with("'r#")).cloned()
@@ -610,6 +644,10 @@ fn adt_checks(attrs: &[String], g: &Generics, tys: &[&PTy], union: bool, nfields
         }
         if let Some(l) = undeclared_lifetime(&used, &declared) {
             return Err(format!("use of undeclared lifetime name `{l}` (E0261)"));
+        }
+        // (E0106: a field's reference names its lifetime)
+        if tys.iter().any(|t| lifetime_positions(t).0 > 0) {
+            return Err("missing lifetime specifier (E0106)".to_string());
         }
     }
     // (E0277: a slice's or array's element must be Sized)
@@ -1468,6 +1506,9 @@ pub fn summarize(item: &Item, owner: Option<&Owner>) -> R<Summary> {
                     }
                 }
                 sm.adt_err = adt_checks(&item.attrs, g, &tys, false, vars.len()).err();
+                if let Some(e) = sm.adt_err.clone().filter(|e| e.ends_with("(E0106)")) {
+                    sm.adt_err = Some(format!("\u{1}&\u{1}{e}"));
+                }
                 // (an undeclared lifetime: at the line it is first written on)
                 if let Some(e) = sm.adt_err.as_ref().filter(|e| e.ends_with("(E0261)")) {
                     if let Some(l) = e.split('`').nth(1) {
@@ -1538,6 +1579,14 @@ pub fn summarize(item: &Item, owner: Option<&Owner>) -> R<Summary> {
                     if let Some(l) = e.split('`').nth(1) {
                         sm.adt_err = Some(format!("\u{1}{l}\u{1}{e}"));
                     }
+                }
+                // (a missing lifetime: at the field it is missing in (named), or at the first `&`)
+                if let Some(e) = sm.adt_err.clone().filter(|e| e.ends_with("(E0106)")) {
+                    let at = match fields {
+                        Fields::Named(v) => v.iter().find(|x| lifetime_positions(&x.1).0 > 0).map(|x| x.0.clone()),
+                        _ => None,
+                    };
+                    sm.adt_err = Some(format!("\u{1}{}\u{1}{e}", at.unwrap_or_else(|| "&".to_string())));
                 }
                 if let (Some(e), Fields::Named(v)) = (&sm.adt_err, fields) {
                     if e.ends_with("(E0277)") {

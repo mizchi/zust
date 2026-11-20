@@ -33,3 +33,4 @@ compile-fail	layout/issue-84108.rs
 compile-fail	lifetimes/raw/use-of-undeclared-raw-lifetimes.rs
 compile-fail	typeck/issue-75889.rs
 compile-fail	extern/extern-crate-visibility.rs
+compile-fail	suggestions/impl-trait-missing-lifetime-gated.rs

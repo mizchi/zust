@@ -124,3 +124,4 @@ date	commit	change	noop_M	edit_M	check_M	cache_KiB	lsp_G	run	check	build	cfail
 2026-11-20	112b131	reference: 112b131 (after #9) measured again on this machine, for the rows below	0.695	559.828	3850.450	1902.8	-	-	-	-	-	1179.072	63.456	10.259	321.104
 2026-11-20	ad6d104+	E0432: use m::f with an inline mod m that defines no f	0.695	559.756	3850.456	1902.8	-	1700	1417	95	3479	1179.097	63.433	10.260	321.020
 2026-11-20	3c8f0b7+	E0261: undeclared lifetimes in free fns, structs, enums and statics	0.697	559.850	3851.539	1902.8	-	1700	1417	95	3490	1179.078	63.426	10.273	321.129
+2026-11-20	1b4b0ac+	E0106: missing lifetime specifiers (free fn returns, fields)	0.695	559.755	3851.910	1902.8	-	1700	1417	95	3503	1179.569	63.456	10.259	321.054
