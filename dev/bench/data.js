@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795164841573,
+  "lastUpdate": 1795164843793,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -78081,6 +78081,70 @@ window.BENCHMARK_DATA = {
           {
             "name": "tests/ui compile-fail passing",
             "value": 3562,
+            "unit": "tests"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "committer": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "distinct": true,
+          "id": "9cc1886dec17eee904988eddfb95dd9035a4559a",
+          "message": "Fx maps in place of std HashMap / HashSet in the compiler\n\nprogram.rs, types.rs (the interning tables), macros.rs, prelude.rs and\ndriver2's checks used std's HashMap / HashSet: SipHash per lookup, and\na random seed per process, so their iteration order and the\ninstruction counts moved from one run to the next (the edit KPI's\nintermittent +0.15%). They are Fx maps now (deterministic, cheaper).\n\nKPI: traits check -1.82%, crates edit -1.27%, check -0.28%; edit one fn\ngives 559.731 on three runs in a row; LSP session 10.898 G (unchanged).\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-20T08:49:20Z",
+          "tree_id": "5f91e4533852ffa10c2dcc34f798015a81c666d2",
+          "url": "https://github.com/mizchi/zust/commit/9cc1886dec17eee904988eddfb95dd9035a4559a"
+        },
+        "date": 1795164843283,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tests/ui run-pass pass rate",
+            "value": 71.45,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui run-pass passing",
+            "value": 1704,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui check-pass pass rate",
+            "value": 79.25,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui check-pass passing",
+            "value": 1432,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui build-pass pass rate",
+            "value": 70.37,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui build-pass passing",
+            "value": 95,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui compile-fail pass rate",
+            "value": 48.42,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui compile-fail passing",
+            "value": 3563,
             "unit": "tests"
           }
         ]
