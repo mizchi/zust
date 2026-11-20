@@ -40,8 +40,15 @@ impl Cx<'_> {
                 }
             }
         }
-        let (v, t) = self.expr(x, expected)?;
-        let Some(v) = v else { return Ok((None, t)) };
+        let (v, mut t) = self.expr(x, expected)?;
+        let Some(mut v) = v else { return Ok((None, t)) };
+        // `-&x` / `!&b` (impl Neg for &i32 など): 参照先の数値を読む
+        if let Ty::Ref(_, i) = t {
+            if i.is_int() || i.is_float() || *i == Ty::Bool {
+                v = self.b.ins().load(clif_ty(*i).unwrap(), mf(), v, 0);
+                t = *i;
+            }
+        }
         match op {
             "-" if t.is_int() && t.signed() => {
                 if self.overflow_checks {

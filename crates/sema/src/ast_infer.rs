@@ -1286,7 +1286,23 @@ impl Inf<'_> {
             },
             Expr::Unary(op, x, _) => {
                 let v = self.expr(x);
-                if op == "*" { self.deref_var(v) } else { v }
+                if op == "*" {
+                    self.deref_var(v)
+                } else {
+                    // `-&x` / `!&b`: 数値・bool への参照は中身の型 (impl Neg for &i32)
+                    let r = self.find(v);
+                    match self.shape[r as usize] {
+                        Some(Shape::Ref(_, i)) => {
+                            let ri = self.find(i);
+                            match self.shape[ri as usize] {
+                                Some(Shape::Known(t)) if t.is_int() || t.is_float() || t == Ty::Bool => i,
+                                _ => v,
+                            }
+                        }
+                        Some(Shape::Known(Ty::Ref(_, t))) if t.is_int() || t.is_float() || *t == Ty::Bool => self.with(Shape::Known(*t)),
+                        _ => v,
+                    }
+                }
             }
             Expr::Ref(m, x) => {
                 let v = self.expr(x);

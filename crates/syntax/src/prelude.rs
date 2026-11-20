@@ -933,7 +933,7 @@ pub fn select_with(user_src: &str, user_items: &[SrcItem], cache: &mut SelectCac
             "cloned", "format", "print", "println", "eprint", "eprintln", "write", "writeln",
             "split", "split_whitespace", "lines", "trim", "starts_with", "ends_with", "contains",
             "clamp", "from_u32", "char", "join", "concat", "drain", "default", "f64", "f32", "i128", "u128", "Iterator", "into", "split_at_mut",
-            "copy_from_slice", "clone_from_slice", "BufRead", "Read", "Write", "__FWr", "Cursor", "ExactSizeIterator", "BuildHasher", "split_first_chunk", "first_chunk", "chunks_exact", "chunks_mut", "chunks_exact_mut",
+            "copy_from_slice", "clone_from_slice", "BufRead", "Read", "Write", "__FWr", "Cursor", "ExactSizeIterator", "BuildHasher", "split_first_chunk", "first_chunk", "chunks_exact", "chunks_mut", "chunks_exact_mut", "is_sorted", "is_sorted_by", "is_sorted_by_key",
         ]);
         // (先頭の 1 byte, 長さ) ごとの候補。prelude の名前が増えても 1 識別子あたりの比較は 0〜1 回
         let mut t: Vec<Vec<&'static str>> = vec![vec![]; 256 * 32];
@@ -1190,6 +1190,9 @@ pub fn select_with(user_src: &str, user_items: &[SrcItem], cache: &mut SelectCac
     }
     for (m, f) in [
         ("windows", "__exr_slice_windows"),
+        ("is_sorted", "__exr_slice_is_sorted"),
+        ("is_sorted_by", "__exr_slice_is_sorted_by"),
+        ("is_sorted_by_key", "__exr_slice_is_sorted_by_key"),
         ("chunks", "__exr_slice_chunks"),
         ("chunks_exact", "__exr_slice_chunks_exact"),
         ("chunks_mut", "__exr_slice_chunks_mut"),

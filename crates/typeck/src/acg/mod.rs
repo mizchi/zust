@@ -1737,7 +1737,10 @@ impl Cx<'_> {
                 Ty::Ref(_, i) => Some(*i),
                 _ => None,
             },
-            Expr::Unary(_, x, _) => self.peek(x),
+            Expr::Unary(_, x, _) => match self.peek(x)? {
+                Ty::Ref(_, i) if i.is_int() || i.is_float() || *i == Ty::Bool => Some(*i),
+                t => Some(t),
+            },
             // `&v[a..b]`: スライス (文字列なら &str)
             Expr::Ref(m, x) if matches!(strip_paren(x), Expr::Index(_, ix, _) if matches!(&**ix, Expr::Range(..))) => {
                 let Expr::Index(b, _, _) = strip_paren(x) else { unreachable!() };

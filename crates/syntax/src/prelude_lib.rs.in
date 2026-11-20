@@ -1310,6 +1310,41 @@ fn __exr_slice_clone_from<T: Clone>(d: &mut [T], s: &[T]) {
     }
 }
 
+fn __exr_slice_is_sorted<T: PartialOrd>(s: &[T]) -> bool {
+    let mut i = 1;
+    while i < s.len() {
+        if s[i - 1] > s[i] {
+            return false;
+        }
+        i += 1;
+    }
+    true
+}
+
+fn __exr_slice_is_sorted_by<T, F: FnMut(&T, &T) -> bool>(s: &[T], f: F) -> bool {
+    let mut f = f;
+    let mut i = 1;
+    while i < s.len() {
+        if !f(&s[i - 1], &s[i]) {
+            return false;
+        }
+        i += 1;
+    }
+    true
+}
+
+fn __exr_slice_is_sorted_by_key<T, K: PartialOrd, F: FnMut(&T) -> K>(s: &[T], f: F) -> bool {
+    let mut f = f;
+    let mut i = 1;
+    while i < s.len() {
+        if f(&s[i - 1]) > f(&s[i]) {
+            return false;
+        }
+        i += 1;
+    }
+    true
+}
+
 fn __exr_slice_contains<T: PartialEq>(s: &[T], x: &T) -> bool {
     let mut i = 0;
     while i < s.len() {

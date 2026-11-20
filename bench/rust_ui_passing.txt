@@ -62,6 +62,7 @@ run-pass	array-slice-vec/slice-of-multi-ref.rs
 compile-fail	array-slice-vec/slice-pat-type-mismatches.rs
 check-pass	array-slice-vec/slice-subslice-ref-lifetime.rs
 compile-fail	array-slice-vec/slice-to-vec-comparison.rs
+check-pass	array-slice-vec/slice_is_sorted_by_borrow.rs
 check-pass	array-slice-vec/subslice-range-return-ref.rs
 run-pass	array-slice-vec/vec-dst.rs
 run-pass	array-slice-vec/vec-late-init.rs
