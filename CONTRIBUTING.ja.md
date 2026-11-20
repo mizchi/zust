@@ -5,31 +5,68 @@
 zust (zustc と zust-analyzer) を直す・足すときの手順。使い方は [README.md](README.md)、中のしくみは
 [docs/ja/architecture.md](docs/ja/architecture.md)。
 
-## 準備
+## はじめに
 
-README の「必要なもの」に加えて、次のものを使う。
+clone したばかりのところから、順に行う。終わると、この文書のコマンドがすべて動く。
 
-- rustc: tests/compare.sh や tests/probe.sh が、同じプログラムを rustc でもビルドして結果を比べる。
-- python3: ベンチマークのスクリプト (`bench/*.py`)。
-- valgrind (あれば): tests/compare.sh がメモリエラーとリークも見る。
-- rust-analyzer (あれば): `bench/lsp_parity.py` と `bench/ide_golden_ra.py` が答えを比べる。
-- cargo-mutants (あれば): ミューテーションテスト。
-- wild (あれば): リンクが速くなる。ベンチマークの数字は wild で測っている。
-- Node 24 以上と TypeSafe の API キー (あれば): 英語と日本語の文書が食い違っていないかの確認 (jev-lint)。
+1. ツールを入れる (Linux x86-64):
+   - edition 2024 に対応した Rust のツールチェイン (rustup の stable) と、zust-analyzer が std の定義を引くための
+     rust-src (`rustup component add rust-src`)
+   - `cc` (リンクの行を組み立てる) とリンカ。zustc は wild > mold > ld.lld > ld の順に選ぶ。ベンチマークの数字と CI の
+     サイズ予算は wild 0.11.0 で測っている (`cargo install --locked wild-linker --version 0.11.0`、またはリリースの
+     バイナリ)
+   - python3 (`bench/` と `scripts/` のスクリプト)
+   - valgrind: `tests/compare.sh` がメモリエラーとリークを見て、`bench/kpi_track.py` が cachegrind で命令数を数える
+   - あれば:
+     - rust-analyzer (`bench/lsp_parity.py`、`bench/ide_golden_ra.py`)
+     - cargo-mutants (ミューテーションテスト)
+     - blaze (`bench/vs_blaze.py`)
+     - Node 24 以上と TypeSafe の API キー (jev-lint。「英語の文書と日本語訳」を参照)
+2. submodule ごと clone する。`cratebench/` と `bench/deps_bench.py` は、そこにある実在のクレートをビルドする。
 
-```bash
-cargo build --release --workspace
-```
+   ```bash
+   git clone --recurse-submodules https://github.com/mizchi/zust.git
+   ```
 
-`cratebench/run.py` と `bench/deps_bench.py` は、実在のクレートのソースを git submodule から使う。最初に一度取ってくる
-(`git clone --recurse-submodules` で clone してもよい)。
+   すでにある clone では `git submodule update --init cratebench/vendor` を実行する。
+3. release ビルドの 2 つのバイナリ、`target/release/zustc` と `target/release/zust-analyzer` を作る。テストや
+   スクリプトの多くはこの 2 つを使う。
 
-```bash
-git submodule update --init cratebench/vendor
-```
+   ```bash
+   cargo build --release --workspace
+   ```
 
-`target/release/zustc` と `target/release/zust-analyzer` ができる。テストやスクリプトの多くは、この 2 つの release
-ビルドを使う。
+4. rustc の UI テストを取ってくる。`tests/ui` だけの sparse clone で、約 170 MB が `out/rust-tests` に入る。
+
+   ```bash
+   python3 bench/rust_ui.py --fetch
+   ```
+
+5. pre-commit フックを有効にする。英語と日本語の文書の食い違いを防ぐ。
+
+   ```bash
+   git config core.hooksPath .githooks
+   ```
+
+6. 何かを変える前に、すべて通ることを確かめる。
+
+   ```bash
+   cargo test --release --workspace
+   ```
+
+   ```bash
+   tests/compare.sh
+   ```
+
+   ```bash
+   python3 bench/rust_ui.py --baseline bench/rust_ui_passing.txt --check
+   ```
+
+7. KPI を書き込まずに一度取り、このマシンでの数字を見ておく。命令数はマシンの負荷によらないので、記録と比べられる。
+
+   ```bash
+   python3 bench/kpi_track.py "baseline" --dry-run
+   ```
 
 ## リポジトリの構成
 
@@ -144,6 +181,27 @@ UPDATE_GOLDEN=1 cargo test -p zust-ide --test golden
 python3 bench/ide_golden_ra.py --detail
 ```
 
+## KPI と残っている作業
+
+コンパイラか analyzer に触れる変更は、残す前に必ず測る。
+
+- `python3 bench/kpi_track.py "短い説明"` は、cachegrind で次の命令数を数える:
+  - 5000 関数の生成プログラムの no-op ビルド・1 関数の編集・`check`
+  - trait と型推論を多く使うプログラム (`bench/gen_traits.py`)
+  - cratebench のクレート
+  - `--lsp` を付けると、zust-analyzer のセッション
+
+  `bench/kpi_log.tsv` / `bench/kpi_log.md` に 1 行足す。直近 7 行のノイズの幅を外れた値は `REGRESSION` と出る。変更を
+  残す前に原因を突き止めるか、コストをコミットメッセージに書く。
+- `bench/rust_ui.py --check` は 0 regressions でなければならない。テストが通るようになったら、ベースラインを書き直す
+  (`--write-baseline`)。
+  - 新しく通った compile-fail のテストが何で拒否されたかを見る。注釈の行で拒否されても、そのテストが調べている理由と
+    違うなら `bench/rust_ui_accidental.txt` に入れる (ベースラインに入らなくなる)。
+- 実在のクレート: `python3 cratebench/run.py` は、それぞれのクレートとアプリを zustc と rustc でビルドし、出力を比べる。
+- 大きなブロッカー (ライフタイム、trait の検査、unwinding、メソッドを経由する型推論、未対応の型、prelude の大きさ、
+  wasm の出力、スレッドと async) は [issue](https://github.com/mizchi/zust/issues) にある。それぞれ、どこから始めるか、
+  どう測るか、何を悪化させてはいけないかを書いてある。
+
 ## ベンチマークと回帰監視
 
 ```bash
@@ -228,7 +286,7 @@ python3 bench/ci_bench.py --out-dir out/ci
 
 ## 英語の文書と日本語訳
 
-`README.md` は英語だけ (概要・測った数値・サポート範囲・ロードマップを 1 か所に持つ)。その中の測った数値
+`README.md` は英語だけ (概要・測った数値・サポート範囲を 1 か所に持つ。ロードマップはこの文書にある)。その中の測った数値
 (`<!-- auto:.. -->` の間と、`<!-- total:.. -->` / `<!-- ui:.. -->` / `<!-- cf:.. -->` の直後) は CI が書き直す
 (bench.yml が main への push ごとに `scripts/update_readme.py` を実行する) ので、手で直さない。英語の文書と日本語訳の組は
 `CONTRIBUTING.md` / `CONTRIBUTING.ja.md`、
@@ -276,7 +334,7 @@ Markdown を変えたコミットでは、フックが `scripts/docs_check.sh --
   速さやサイズに効く変更なら `bench/regress.sh` も通す。
 - LSP の答えを変えたら、`bench/lsp_parity.py` で一致の割合と時間が下がっていないことを見る。
 - まとまった作業をしたら、レポートを書く (次の節)。
-- rust-analyzer との違いや、残したことは README の [Roadmap](README.md#roadmap) に、サポート範囲は
+- rust-analyzer との違いや、残したことは下の [ロードマップ](#ロードマップ) (か issue) に、サポート範囲は README の
   [What is supported](README.md#what-is-supported) に書く (英語。割合のある新しい分野には tests/ui のディレクトリを
   書いた `<!-- ui:DIR -->` を付ける)。
 
@@ -306,6 +364,86 @@ What was done, why, how it was measured, the results (numbers), what was learned
 - 1 つのコミットは 1 つのまとまった変更にする。
 - メッセージは、どの部分か (`ide:` / `analyzer:` / `docs:` など) と、何を変えたかを書く。
 - 名前は zustc / zust-analyzer / zust-* に揃える。
+
+## ロードマップ
+
+### コンパイラ (zustc)
+
+- **rustc の tests/ui** (`python3 bench/rust_ui.py`。[レポート](docs/reports/2026-11-18-07-rustc-ui-tests.md))
+  - 通る割合を上げる ([Status](README.md#status))
+  - 大きな穴: unwinding (`catch_unwind`、`panic::set_hook`)、FFI の構造体の値渡し、型推論 (期待型からしか分からない
+    型パラメータ)、本体の中の式の位置の `type` 別名とマクロ、const の中のクロージャ、ほかの型の中の引数の型の
+    `impl Trait` (`&Vec<impl Display>`)
+  - compile-fail のテストに要る検査: 既定値と境界の well-formedness、coherence、ブランケット impl の境界、dyn / async を
+    通る Send、ライフタイムの shadowing、lint
+- **借用検査** ([レポート](docs/reports/2026-11-18-08-borrow-checking.md))
+  - シグネチャに対する region のエラー (E0621、E0521、"lifetime may not live long enough"): universal region と、本体の
+    宣言に対する outlives の検査
+  - 型を通って流れる借用: ローカル変数は読んだもの全部の借用を持つので、ブロックの外に運ばれる値の E0515 と E0597 は
+    直接借りているものしか見ていない
+  - E0716 (借りている間に drop される一時値)、E0510、スコープの終わりの `Drop` による使用、配列と構造体のパターンからの
+    部分的なムーブ
+  - 1 つの関数で 2 つ以上のエラー
+  - コスト: `zustc check` の命令数が +2.2%。ほとんどは lowering の間の記録
+- **言語**
+  - モジュール、`DoubleEndedIterator` (値としての `rev`)、`HashSet` / `BTreeMap`
+  - 単相化したインスタンスをレイアウトで共有する (`Vec<A>` と `Vec<B>` を 1 つにする。blaze の polymorph)
+  - 自前の最小の std (relax のやり方)
+- **インクリメンタル**
+  - alpha 正規化したハッシュ
+  - 依存するクレートの解析結果 (アイテムの要約、Program の一部) を、依存する側で使い回す (今はソースを解析し直す)
+  - 変わった `.o` だけを差し替えるリンク
+  - libwild を埋め込み、`.o` をメモリに持つ (`.o` を書かず、`exec` もしない)
+- **インクリメンタルなリンク**
+  - `.text` に余白を残し、変わった関数だけを差し替える
+  - ジャンプテーブルを通した呼び出し (blaze のやり方)
+- **コールドビルド**
+  - アイテムの要約と構文解析を並列にする
+  - コールドビルドで AST を 2 回解析するのをやめる
+- **サイズ**
+  - コンパイラの中の ICF (コード + 再配置先のハッシュ)
+  - 文字列のセクションをまとめる
+- **`-O`**
+  - 自前のインライン化とスタックスロットの転送 (Cranelift に SROA がないのを補う)
+
+### zust-analyzer: rust-analyzer との残った違い
+
+`bench/lsp_parity.py`・`bench/ide_golden_ra.py` で比べ、参照を 1 つずつ確かめた後に残ったもの
+([docs/reports/2026-11-18-06-remaining-differences.md](docs/reports/2026-11-18-06-remaining-differences.md))。
+
+#### 型推論
+
+- [ ] 依存するクレートの中でマクロが `Iterator` の impl を作るイテレータの `Item` (serde_json の `map::Iter`。
+  `delegate_iterator!` から)。zust-analyzer は、今はそこで間違った型ではなく何も答えない
+- [ ] 依存するクレートから返る、型引数のない `Iter` 型は、同じ名前の型とモジュールだけで見分けている。ジェネリックな型は
+  まだ名前と引数の数で合わせている
+
+#### 定義と参照
+
+- [ ] `x.to_string()` の定義へのジャンプ: rust-analyzer はその型の `Display::fmt` の impl に飛ぶ。zust-analyzer は
+  `ToString::to_string` に行く
+- [ ] `ToString::to_string` の参照で、rust-analyzer は trait の宣言 (string.rs:2956) ではなくブランケット impl の
+  メソッド (string.rs:2969) を挙げる
+- [ ] std のモジュール (`std::collections`、`std::sync`) の参照: rust-analyzer は std 自身のソースの中のパス
+  (`collections/mod.rs` の `self::hash_map`) も数える。zust-analyzer はライブラリのテキストを持たないので、ワーク
+  スペースだけを数える (fixture: 参照 627/629)
+- [ ] rust-analyzer は `crates/syntax/build.rs` の `-> Key` (ビルドスクリプト自身の `type Key = u128`) を
+  `zust_base::key::Key` の参照に数える。`lexer.rs` を `#[path]` でビルドスクリプトと共有していることから来る
+  rust-analyzer の癖に見える。zust-analyzer は数えない
+- [ ] マクロが作るアイテムの定義 (str のパターンのイテレータの `next`、`u32::MAX`): rust-analyzer はマクロの呼び出し
+  (`generate_pattern_iterators! {`、`uint_impl! {`) も挙げる。zust-analyzer はマクロの本体の中のアイテムだけを挙げる
+
+#### rename
+
+- [ ] `Default::default` の rename (rust-analyzer は依存するクレートの中も書き換える。こちらはワークスペースだけ。
+  意図した違い)
+- [ ] `use a::Point as Pt` の別名の rename (意図した違い)
+
+#### 速さとメモリ
+
+- [ ] zustc を対象にした参照の p90 が 32.8 ms (ファイルを複数のスレッドで走査する前は 65 ms)。遅いのは、どこにでも
+  出てくる名前のメソッド (`len`、`iter`) を、出てくる所ごとに解決する場合
+- [ ] 依存するクレートの索引でメモリが 55 MB から 66 MB に増えた。使わない定義を捨てる / 遅延して読む
 
 ## ライセンス
 

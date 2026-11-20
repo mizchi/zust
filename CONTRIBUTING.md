@@ -5,31 +5,70 @@ English | [日本語](CONTRIBUTING.ja.md)
 This document covers how to change and extend zust (zustc and zust-analyzer). See [README.md](README.md) for usage
 and [docs/architecture.md](docs/architecture.md) for how it works inside.
 
-## Setup
+## Getting started
 
-In addition to the requirements in the README, the following tools are used:
+Steps for a fresh clone, in order. After them, every command in this document works.
 
-- rustc: `tests/compare.sh` and `tests/probe.sh` build the same programs with rustc and compare the results.
-- python3: the benchmark scripts (`bench/*.py`).
-- valgrind (optional): `tests/compare.sh` also checks for memory errors and leaks.
-- rust-analyzer (optional): `bench/lsp_parity.py` and `bench/ide_golden_ra.py` compare answers against it.
-- cargo-mutants (optional): mutation testing.
-- wild (optional): faster linking. The benchmark numbers are measured with wild.
-- Node 24+ and a TypeSafe API key (optional): checking that English and Japanese documents agree (jev-lint).
+1. Install the tools (Linux x86-64):
+   - a Rust toolchain with edition 2024 (rustup stable), with rust-src (`rustup component add rust-src`) for
+     zust-analyzer's std definitions
+   - `cc` (it drives the link line) and a linker. zustc picks wild > mold > ld.lld > ld. The benchmark numbers and the
+     CI size budget are measured with wild 0.11.0 (`cargo install --locked wild-linker --version 0.11.0`, or a release
+     binary)
+   - python3 (the scripts under `bench/` and `scripts/`)
+   - valgrind: `tests/compare.sh` checks memory errors and leaks with it, and `bench/kpi_track.py` counts instructions
+     with cachegrind
+   - optional:
+     - rust-analyzer (`bench/lsp_parity.py`, `bench/ide_golden_ra.py`)
+     - cargo-mutants (mutation testing)
+     - blaze (`bench/vs_blaze.py`)
+     - Node 24+ and a TypeSafe API key (jev-lint, see "English and Japanese documents")
+2. Clone with the submodules. `cratebench/` and `bench/deps_bench.py` build real crates from them:
 
-```bash
-cargo build --release --workspace
-```
+   ```bash
+   git clone --recurse-submodules https://github.com/mizchi/zust.git
+   ```
 
-This builds `target/release/zustc` and `target/release/zust-analyzer`. Most tests and scripts use these two release
-builds.
+   In an existing clone, run `git submodule update --init cratebench/vendor`.
+3. Build the two release binaries, `target/release/zustc` and `target/release/zust-analyzer`. Most tests and scripts
+   use these:
 
-`cratebench/run.py` and `bench/deps_bench.py` use the sources of real crates from git submodules. Fetch them once
-(or clone with `git clone --recurse-submodules`):
+   ```bash
+   cargo build --release --workspace
+   ```
 
-```bash
-git submodule update --init cratebench/vendor
-```
+4. Fetch rustc's UI tests. This is a sparse clone of `tests/ui` only, about 170 MB, into `out/rust-tests`:
+
+   ```bash
+   python3 bench/rust_ui.py --fetch
+   ```
+
+5. Enable the pre-commit hook. It keeps the English / Japanese documents in agreement:
+
+   ```bash
+   git config core.hooksPath .githooks
+   ```
+
+6. Check that everything passes before changing anything:
+
+   ```bash
+   cargo test --release --workspace
+   ```
+
+   ```bash
+   tests/compare.sh
+   ```
+
+   ```bash
+   python3 bench/rust_ui.py --baseline bench/rust_ui_passing.txt --check
+   ```
+
+7. Take the KPIs once without writing them, to see this machine's numbers. Instruction counts do not depend on the
+   machine's load, so they can be compared with the log:
+
+   ```bash
+   python3 bench/kpi_track.py "baseline" --dry-run
+   ```
 
 ## Repository layout
 
@@ -147,6 +186,27 @@ Before rewriting, make sure the diff is an improvement. To see whether the answe
 python3 bench/ide_golden_ra.py --detail
 ```
 
+## KPIs and open work
+
+Every change that touches the compiler or the analyzer is measured before it is kept.
+
+- `python3 bench/kpi_track.py "short label"` counts instructions (cachegrind) for:
+  - a no-op build, a one-function edit and `check` of a generated program with 5000 functions;
+  - a trait- and inference-heavy program (`bench/gen_traits.py`);
+  - the cratebench crates;
+  - with `--lsp`, a zust-analyzer session.
+
+  It appends a row to `bench/kpi_log.tsv` / `bench/kpi_log.md`. A value outside the noise band of the last 7 rows is
+  printed as `REGRESSION`: find the cause before keeping the change, or state the cost in the commit message.
+- `bench/rust_ui.py --check` must report 0 regressions. When tests start passing, rewrite the baseline
+  (`--write-baseline`).
+  - Look at what a newly passing compile-fail test is rejected for: one rejected at its line for another reason than
+    the one it tests goes into `bench/rust_ui_accidental.txt`, which keeps it out of the baseline.
+- Real crates: `python3 cratebench/run.py` builds each crate and an app with zustc and rustc and compares the output.
+- The large blockers (lifetimes, trait checks, unwinding, inference through methods, unsupported types, the size of
+  the prelude, wasm output, threads and async) are tracked as [issues](https://github.com/mizchi/zust/issues).
+  Each one says where to start, how to measure it, and what it must not cost.
+
 ## Benchmarks and regression monitoring
 
 ```bash
@@ -235,8 +295,8 @@ python3 bench/ci_bench.py --out-dir out/ci
 
 ## English and Japanese documents
 
-`README.md` is in English only: it holds the overview, the measured numbers, what is supported and the roadmap in one
-place. The measured numbers in it (between `<!-- auto:.. -->` markers, and after `<!-- total:.. -->`, `<!-- ui:.. -->`
+`README.md` is in English only: it holds the overview, the measured numbers and what is supported in one
+place; the roadmap is in this document. The measured numbers in it (between `<!-- auto:.. -->` markers, and after `<!-- total:.. -->`, `<!-- ui:.. -->`
 and `<!-- cf:.. -->` markers) are rewritten by CI (`scripts/update_readme.py`, run by bench.yml after each push to
 main); do not edit them by hand. `CONTRIBUTING.md` / `CONTRIBUTING.ja.md` and `docs/X.md` / `docs/ja/X.md` (reports
 included) are English / Japanese pairs. When you change one, change the other
@@ -284,8 +344,8 @@ the code for the name to see what each one does.
   If the change affects speed or size, also pass `bench/regress.sh`.
 - If you changed LSP answers, check with `bench/lsp_parity.py` that agreement and times did not get worse.
 - After a substantial piece of work, write a report (next section).
-- Record differences from rust-analyzer and anything left undone in the [Roadmap](README.md#roadmap) of the README, and
-  what is supported in its [What is supported](README.md#what-is-supported) (a new area with a percentage gets a
+- Record differences from rust-analyzer and anything left undone in the [Roadmap](#roadmap) below (or an issue), and
+  what is supported in the README's [What is supported](README.md#what-is-supported) (a new area with a percentage gets a
   `<!-- ui:DIR -->` marker naming its tests/ui directories).
 
 ### Writing reports
@@ -316,6 +376,88 @@ list in [docs/reports/README.md](docs/reports/README.md) (and to
 - Keep one coherent change per commit.
 - In the message, name the area (`ide:` / `analyzer:` / `docs:` and so on) and say what changed.
 - Use the names zustc / zust-analyzer / zust-*.
+
+## Roadmap
+
+### Compiler (zustc)
+
+- **rustc's tests/ui** (`python3 bench/rust_ui.py`; [report](docs/reports/2026-11-18-07-rustc-ui-tests.md))
+  - Raise the pass rates ([Status](README.md#status))
+  - Largest gaps: unwinding (`catch_unwind`, `panic::set_hook`), structs by value through FFI, type inference (type
+    parameters known only from the expected type), `type` aliases and macros in expression position inside bodies,
+    closures in consts, `impl Trait` in argument types nested in other types (`&Vec<impl Display>`)
+  - Checks that compile-fail tests need: well-formedness of defaults and bounds, coherence, bounds of blanket
+    impls, Send through dyn / async, lifetime shadowing, lints
+- **Borrow checking** ([report](docs/reports/2026-11-18-08-borrow-checking.md))
+  - Region errors against signatures (E0621, E0521, "lifetime may not live long enough"): universal regions and
+    outlives checking of the body against the declaration
+  - Loans flowing through types: a local holds the loans of all it read, so E0515 and E0597 for values carried out
+    of a block only look at what is borrowed directly
+  - E0716 (temporaries dropped while borrowed), E0510, uses by `Drop` at the end of a scope, partial moves out of
+    arrays and struct patterns
+  - More than one error per function
+  - Cost: +2.2% instructions on `zustc check`, mostly the recording during lowering
+- **Language**
+  - Modules, `DoubleEndedIterator` (`rev` as a value), `HashSet` / `BTreeMap`
+  - Share monomorphized instances keyed by layout (make `Vec<A>` and `Vec<B>` one; blaze's polymorph)
+  - A minimal std of our own (the relax approach)
+- **Incremental**
+  - Alpha-normalized hashes
+  - Reuse the analysis results of dependency crates (item summaries, parts of Program) on the dependent side (today
+    the sources are analyzed again)
+  - Linking that replaces only the `.o` files that changed
+  - Embedding libwild and keeping `.o` files in memory (no `.o` writes and no `exec`)
+- **Incremental linking**
+  - Leave padding in `.text` and replace only the functions that changed
+  - Calls through a jump table (the blaze approach)
+- **Cold builds**
+  - Parallelize item summaries and parsing
+  - Stop parsing the AST twice in cold builds
+- **Size**
+  - ICF in the compiler (hash of code + relocation targets)
+  - Merge sections for strings
+- **`-O`**
+  - Our own inlining and stack-slot forwarding (to make up for Cranelift having no SROA)
+
+### zust-analyzer: remaining differences from rust-analyzer
+
+What is left after comparing with `bench/lsp_parity.py`, `bench/ide_golden_ra.py` and checking references one by one
+([docs/reports/2026-11-18-06-remaining-differences.md](docs/reports/2026-11-18-06-remaining-differences.md)).
+
+#### Type inference
+
+- [ ] The `Item` of iterators whose `Iterator` impl is generated by a macro inside a dependency (serde_json's
+  `map::Iter`, from `delegate_iterator!`). zust-analyzer now answers nothing there instead of a wrong type
+- [ ] An `Iter` type with no type arguments returned from a dependency is told apart from same-named types only by its
+  module; generic types are still matched by name and number of arguments
+
+#### Definitions and references
+
+- [ ] Go to definition on `x.to_string()`: rust-analyzer jumps to the type's `Display::fmt` impl; zust-analyzer goes
+  to `ToString::to_string`
+- [ ] In the references of `ToString::to_string`, rust-analyzer lists the blanket impl's method (string.rs:2969) instead
+  of the trait declaration (string.rs:2956)
+- [ ] References of std modules (`std::collections`, `std::sync`): rust-analyzer also counts the paths inside std's
+  own sources (`self::hash_map` in `collections/mod.rs`). zust-analyzer does not keep library text, so it only counts
+  the workspace (fixture: 627/629 references)
+- [ ] rust-analyzer counts `-> Key` in `crates/syntax/build.rs` (the build script's own `type Key = u128`) as a
+  reference of `zust_base::key::Key`. This looks like a rust-analyzer quirk from `lexer.rs` being shared into the
+  build script with `#[path]`; zust-analyzer does not count it
+- [ ] Definitions of items generated by a macro (the str pattern iterators' `next`, `u32::MAX`): rust-analyzer also
+  lists the macro call site (`generate_pattern_iterators! {`, `uint_impl! {`); zust-analyzer lists only the item inside
+  the macro body
+
+#### Rename
+
+- [ ] Renaming `Default::default` (rust-analyzer also rewrites inside dependency crates; we only rewrite the workspace.
+  An intended difference)
+- [ ] Renaming the alias in `use a::Point as Pt` (an intended difference)
+
+#### Speed and memory
+
+- [ ] References p90 on the zustc target is 32.8 ms (it was 65 ms before scanning files on several threads). The slow
+  cases are methods with common names (`len`, `iter`), resolved at every occurrence
+- [ ] The dependency-crate index raised memory from 55 MB to 66 MB. Drop unused definitions / load them lazily
 
 ## License
 
