@@ -630,7 +630,7 @@ fn parse_sig(sig: &PSig, is_extern: bool, is_main: bool, owner: Option<&Owner>) 
         ret_from: ret_from(sig),
         regions: {
             let otp: Vec<&str> = owner.map(|o| o.generics.iter().map(|g| g.0.as_str()).collect()).unwrap_or_default();
-            crate::regions::sig_regions(sig, owner.and_then(|o| o.regions.as_ref()), &otp)
+            crate::regions::sig_regions(sig, owner.and_then(|o| o.regions.as_deref()), &otp)
         },
         is_unsafe: sig.quals.iter().any(|q| q == "unsafe") || (is_extern && !sig.quals.iter().any(|q| q == "safe")),
     })

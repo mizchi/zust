@@ -182,7 +182,7 @@ impl<'a> Slots<'a> {
 }
 
 /// The regions of a fn signature (None when it names no lifetime: then every region in it is elided)
-pub fn sig_regions(sig: &PSig, outer: Option<&RImplSyn>, outer_tparams: &[&str]) -> Option<RSigSyn> {
+pub fn sig_regions(sig: &PSig, outer: Option<&RImplSyn>, outer_tparams: &[&str]) -> Option<Box<RSigSyn>> {
     if outer.is_none() && !sig_names_lt(sig) {
         return None;
     }
@@ -208,11 +208,11 @@ pub fn sig_regions(sig: &PSig, outer: Option<&RImplSyn>, outer_tparams: &[&str])
     if !s.any && outlives.is_empty() && ty_outlives.is_empty() {
         return None;
     }
-    Some(RSigSyn { lts: s.lts, slots, outlives, ty_outlives })
+    Some(Box::new(RSigSyn { lts: s.lts, slots, outlives, ty_outlives }))
 }
 
 /// The regions of a struct / enum definition with fields of types tys (all variants' in order)
-pub fn adt_regions(g: &Generics, tys: &[&PTy]) -> Option<RAdtSyn> {
+pub fn adt_regions(g: &Generics, tys: &[&PTy]) -> Option<Box<RAdtSyn>> {
     if !generics_name_lt(g) && !tys.iter().any(|t| names_lt(t)) {
         return None;
     }
@@ -228,11 +228,11 @@ pub fn adt_regions(g: &Generics, tys: &[&PTy]) -> Option<RAdtSyn> {
     if !s.any && outlives.is_empty() && ty_outlives.is_empty() {
         return None;
     }
-    Some(RAdtSyn { lts: s.lts, fields, outlives, ty_outlives })
+    Some(Box::new(RAdtSyn { lts: s.lts, fields, outlives, ty_outlives }))
 }
 
 /// The regions of an impl / trait header
-pub fn hdr_regions(g: &Generics, self_ty: Option<&PTy>) -> Option<RImplSyn> {
+pub fn hdr_regions(g: &Generics, self_ty: Option<&PTy>) -> Option<Box<RImplSyn>> {
     if !generics_name_lt(g) && !self_ty.is_some_and(names_lt) {
         return None;
     }
@@ -246,7 +246,7 @@ pub fn hdr_regions(g: &Generics, self_ty: Option<&PTy>) -> Option<RImplSyn> {
     if !s.any && outlives.is_empty() && ty_outlives.is_empty() {
         return None;
     }
-    Some(RImplSyn { lts: s.lts, self_slots, outlives, ty_outlives, free: vec![] })
+    Some(Box::new(RImplSyn { lts: s.lts, self_slots, outlives, ty_outlives, free: vec![] }))
 }
 
 #[cfg(test)]
@@ -255,16 +255,20 @@ mod tests {
     use crate::parse::{parse_file, ItemKind};
 
     fn sig_of(src: &str) -> Option<RSigSyn> {
+        sig_of_b(src).map(|b| *b)
+    }
+
+    fn sig_of_b(src: &str) -> Option<Box<RSigSyn>> {
         let f = parse_file(src).unwrap();
         let mut hdr = None;
         for it in &f.items {
             match &it.kind {
-                ItemKind::Fn(fs, _) => return sig_regions(fs, hdr.as_ref(), &[]),
+                ItemKind::Fn(fs, _) => return sig_regions(fs, hdr.as_deref(), &[]),
                 ItemKind::Impl(g, _, t, items) => {
                     hdr = hdr_regions(g, Some(t));
                     for m in items {
                         if let ItemKind::Fn(fs, _) = &m.kind {
-                            return sig_regions(fs, hdr.as_ref(), &[]);
+                            return sig_regions(fs, hdr.as_deref(), &[]);
                         }
                     }
                 }
@@ -303,7 +307,7 @@ mod tests {
         let f = parse_file("struct P<'a, T: 'a> { s: &'a str, t: &'a mut T, v: Vec<Tok<'a>>, n: u32 }").unwrap();
         let ItemKind::Struct(_, g, crate::parse::Fields::Named(fs)) = &f.items[0].kind else { panic!() };
         let tys: Vec<&PTy> = fs.iter().map(|x| &x.1).collect();
-        let r = adt_regions(g, &tys).unwrap();
+        let r = *adt_regions(g, &tys).unwrap();
         assert_eq!(r.lts, ["'a"]);
         assert_eq!(r.fields, vec![vec![0], vec![0], vec![R_ELIDED_ADT, 0], vec![]]);
         assert_eq!(r.ty_outlives, vec![("T".to_string(), 0)]);

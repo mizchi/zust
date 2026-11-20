@@ -134,6 +134,18 @@ impl<T: Enc> Enc for Vec<T> {
     }
 }
 
+impl<T: Enc> Enc for Box<T> {
+    fn enc(&self, out: &mut Vec<u8>) {
+        (**self).enc(out)
+    }
+    fn dec(r: &mut Rd) -> Option<Self> {
+        T::dec(r).map(Box::new)
+    }
+    fn is_empty_val(&self) -> bool {
+        (**self).is_empty_val()
+    }
+}
+
 impl<T: Enc> Enc for Option<T> {
     fn enc(&self, out: &mut Vec<u8>) {
         match self {

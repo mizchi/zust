@@ -276,7 +276,7 @@ pub struct SigSyn {
     /// first), bit 63 set when known. 0: not known (any of them)
     pub ret_from: u64,
     /// The regions of the signature (None: it writes no reference and no lifetime, so every region in it is elided)
-    pub regions: Option<RSigSyn>,
+    pub regions: Option<Box<RSigSyn>>,
 }
 
 // ---- regions of signatures (region checking; `Ty` itself carries none) ----
@@ -390,9 +390,9 @@ pub struct Summary {
     /// some: a static's type is checked against them
     pub adt_bounds: Vec<(String, Vec<String>)>,
     /// The regions of an impl / trait header (None: it names no lifetime)
-    pub hdr_regions: Option<RImplSyn>,
+    pub hdr_regions: Option<Box<RImplSyn>>,
     /// The regions of the struct / enum defined (None: it names no lifetime, so it has no region of its own)
-    pub adt_regions: Option<RAdtSyn>,
+    pub adt_regions: Option<Box<RAdtSyn>>,
     /// impl ヘッダの型パラメータと self 型 (`impl<T> Option<T>`)
     pub impl_generics: Vec<(String, Vec<String>)>,
     pub impl_self_ty: Option<TySyn>,
@@ -454,7 +454,7 @@ pub struct Owner {
     pub generics: Vec<(String, Vec<String>)>,
     pub is_trait: bool,
     /// The header's regions
-    pub regions: Option<RImplSyn>,
+    pub regions: Option<Box<RImplSyn>>,
 }
 
 /// const ジェネリクスの印 (境界の名前の位置に入れる)

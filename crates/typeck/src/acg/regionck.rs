@@ -85,6 +85,12 @@ pub struct Rg {
     pub variance: HashMap<u32, Vec<Var>>,
 }
 
+/// ZUSTC_NO_REGIONCK=1 turns the check off (read once: it is asked for each function)
+pub fn enabled() -> bool {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ON.get_or_init(|| std::env::var_os("ZUSTC_NO_REGIONCK").is_none())
+}
+
 fn lts_of(prog: &Program, base: u32) -> usize {
     prog.adt_regions.get(&base).map_or(0, |r| r.lts.len())
 }

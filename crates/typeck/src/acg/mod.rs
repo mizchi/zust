@@ -265,7 +265,7 @@ pub fn compile(prog: &Program, insts: &Mutex<Insts>, id: u32, f: &ItemFn, line_b
         b: FunctionBuilder::new(&clif_sig(&sig)),
         bk: borrowck::Bk { on: bk_level > 0, level: bk_level, line_base, ..Default::default() },
         // (a function's own body, not a generic one's instance nor a closure's: see regionck)
-        rg: regionck::Rg { on: bk_level >= 2 && body_id == id && caps.is_empty() && prog.closures.get(&body_id).is_none() && std::env::var_os("ZUSTC_NO_REGIONCK").is_none(), ..Default::default() },
+        rg: regionck::Rg { on: bk_level >= 2 && body_id == id && caps.is_empty() && prog.closures.get(&body_id).is_none() && regionck::enabled(), ..Default::default() },
         prog,
         scopes: vec![vec![]],
         loops: vec![],

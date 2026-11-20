@@ -902,7 +902,7 @@ impl Program {
                 }
                 p.struct_index.insert(name.clone(), sdefs.len() as u32);
                 if let Some(r) = &sm.adt_regions {
-                    p.adt_regions.insert(sdefs.len() as u32, std::sync::Arc::new(r.clone()));
+                    p.adt_regions.insert(sdefs.len() as u32, std::sync::Arc::new((**r).clone()));
                 }
                 sdefs.push((ii, name.clone(), shape, sm.adt_generics.clone()));
             }
@@ -1213,7 +1213,7 @@ impl Program {
                     panic_handler: ss.panic_handler,
                     ret_from: ss.ret_from,
                     is_unsafe: ss.is_unsafe,
-                    regions: ss.regions.clone().map(std::sync::Arc::new),
+                    regions: ss.regions.as_deref().map(|r| std::sync::Arc::new(r.clone())),
                 });
                 if ss.panic_handler {
                     p.panic_handler = Some(p.names.len() as u32 - 1);
