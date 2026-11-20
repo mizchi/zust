@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795187649177,
+  "lastUpdate": 1795187651629,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -71093,6 +71093,85 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/mizchi/zust/commit/d87684e7182d5b404994365ad6127c8e9cee2cf0"
         },
         "date": 1795186412293,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "parity documentSymbol (名前の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity workspace/symbol (上位 20 の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity definition (行き先の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity hover (名前を含む)",
+            "value": 90,
+            "unit": "%"
+          },
+          {
+            "name": "parity references (数の一致)",
+            "value": 97.297,
+            "unit": "%"
+          },
+          {
+            "name": "parity documentHighlight (数の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity rename (書き換えの一致)",
+            "value": 94.118,
+            "unit": "%"
+          },
+          {
+            "name": "parity signatureHelp (名前・引数の数・今の引数の一致)",
+            "value": 94.737,
+            "unit": "%"
+          },
+          {
+            "name": "parity completion `x.\\|` (書いてある名前を含む)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity completion `na\\|me` (同)",
+            "value": 92.593,
+            "unit": "%"
+          },
+          {
+            "name": "parity 一致の平均",
+            "value": 96.874,
+            "unit": "%"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "committer": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "distinct": true,
+          "id": "dd2f0105be0fc2918c7dadd66f9ab33f7642bbd8",
+          "message": "Rc / Arc can be moved out of a closure's captures\n\nA by-value capture is moved out of the closure by zeroing its slot, so\nthat the environment's drop frees nothing twice. That worked only for\ntypes whose drop treats zero as empty (Box, Vec, String). Rc and Arc's\nDrop now returns at once on a null pointer, so they count as zeroable too:\n`thread::spawn(move || take(arc))` and\n`move || { let x = rc; .. }` compile and run.\n\ntests/ui: +1 run-pass (traits/bound/in-arc.rs), +1 check-pass\n(closures/boxed-closure-sent-through-thread.rs).\nborrowck/moved-value-in-thread-loop-12041.rs moves to\nrust_ui_accidental.txt. It passed only because the move was unsupported\non the annotated line. Its own error, E0382 for a capture moved in a\nloop, needs the borrow checker in closure bodies, which is off there\ntoday (a closure's own locals are not checked either).\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-20T15:08:55Z",
+          "tree_id": "df51dcab0d6f366176a9b69af981a3fb1e161f05",
+          "url": "https://github.com/mizchi/zust/commit/dd2f0105be0fc2918c7dadd66f9ab33f7642bbd8"
+        },
+        "date": 1795187651094,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
