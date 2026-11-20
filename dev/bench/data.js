@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795162590511,
+  "lastUpdate": 1795162592623,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -47584,6 +47584,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "lsp peak RSS",
             "value": 74.309,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "committer": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "distinct": true,
+          "id": "5ae4e4c8634fa64922ec6db4e832a8e84abb79c6",
+          "message": "dyn Send / dyn Sync: an auto trait alone, right behind a pointer\n\n`Box<dyn Send>` / `&dyn Sync` / `*const (dyn Send + 'a)` were \"`dyn`\nneeds a trait\": an auto trait alone is now the object's trait there,\nwith a vtable of no methods (every type has the auto traits).\nElsewhere (`Rc<dyn Send>`, `Wrapper<dyn Send>`) it stays an error, as\nthe unsizing those need is not done (two run-pass tests that only drop\nsuch values would break otherwise).\n\ntests/ui: +3 passes (2 check-pass, 1 run-pass);\ncast/ptr-to-trait-obj-drop-principal.rs matches only by line and goes\nto rust_ui_accidental.txt.\nKPI: traits check +0.10%, traits edit +0.10% (within the band), the\nrest unchanged.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-20T08:12:42Z",
+          "tree_id": "6e2268a3ab7ad7ed73554c2163e8ff6eb879647c",
+          "url": "https://github.com/mizchi/zust/commit/5ae4e4c8634fa64922ec6db4e832a8e84abb79c6"
+        },
+        "date": 1795162592191,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "lsp definition p50",
+            "value": 0.552,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp hover p50",
+            "value": 0.424,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp completion p50",
+            "value": 0.773,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp references p50",
+            "value": 4.473,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp rename p50",
+            "value": 0.399,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp signatureHelp p50",
+            "value": 0.626,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp documentHighlight p50",
+            "value": 0.886,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp ready (startup to indexed)",
+            "value": 100.54,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp peak RSS",
+            "value": 74.324,
             "unit": "MiB"
           }
         ]
