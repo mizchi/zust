@@ -2274,6 +2274,7 @@ compile-fail	fn/fn-trait-formatting.rs
 compile-fail	fn/fn-trait-use-named-params-issue-140169.rs
 run-pass	fn/fun-call-variants.rs
 check-pass	fn/implied-bounds-unnorm-associated-type-3.rs
+compile-fail	fn/invalid-sugg-for-unused-fn-arg-147303.rs
 run-pass	fn/issue-1451.rs
 compile-fail	fn/issue-3044.rs
 compile-fail	fn/issue-3099.rs
@@ -2972,6 +2973,7 @@ run-pass	let-else/let-else-run-pass.rs
 compile-fail	let-else/let-else-slicing-error.rs
 run-pass	let-else/let-else-source-expr-nomove-pass.rs
 run-pass	let-else/let-else-temp-borrowck.rs
+compile-fail	let-else/let-else-then-diverge.rs
 run-pass	let-else/let-else.rs
 compile-fail	let-else/uninitialized-refutable-let-issue-123844.rs
 compile-fail	lexer/lex-bad-char-literals-2.rs
@@ -3233,9 +3235,11 @@ check-pass	lint/unused/import_remove_line.rs
 check-pass	lint/unused/issue-104397.rs
 check-pass	lint/unused/issue-117142-invalid-remove-parens.rs
 check-pass	lint/unused/issue-47390-unused-variable-in-struct-pattern.rs
+compile-fail	lint/unused/issue-54180-unused-ref-field.rs
 compile-fail	lint/unused/issue-67691-unused-field-in-or-pattern.rs
 run-pass	lint/unused/issue-70041.rs
 check-pass	lint/unused/issue-71290-unused-paren-binop.rs
+compile-fail	lint/unused/issue-81314-unused-span-ident.rs
 check-pass	lint/unused/issue-90807-unused-paren.rs
 check-pass	lint/unused/match_with_guard.rs
 check-pass	lint/unused/must-use-block-expr.rs
@@ -3256,12 +3260,14 @@ check-pass	lint/unused/unused-parens-issue-106413.rs
 check-pass	lint/unused/unused-results-unit-and-uninhabited.rs
 check-pass	lint/unused/unused-var-in-unreachable-code.rs
 check-pass	lint/unused/unused-variable-with-raw-identifier-in-struct-pattern.rs
+compile-fail	lint/unused/unused-variables-in-loop.rs
 check-pass	lint/unused/unused_assignments_across_match_guards.rs
 run-pass	lint/unused/unused_parens/unused-parens-in-macro-issue-120642.rs
 check-pass	lint/unused_braces.rs
 check-pass	lint/unused_braces_borrow.rs
 check-pass	lint/unused_labels.rs
 compile-fail	lint/unused_parens_multibyte_recovery.rs
+compile-fail	lint/unused_variables-issue-82488.rs
 check-pass	lint/use-redundant/use-redundant-glob-parent.rs
 check-pass	lint/use-redundant/use-redundant-glob.rs
 check-pass	lint/use-redundant/use-redundant-issue-71450.rs
@@ -6144,6 +6150,7 @@ compile-fail	type/ascription/issue-60933.rs
 compile-fail	type/binding-assigned-block-without-tail-expression.rs
 compile-fail	type/cannot-find-wrapper-with-impl-trait.rs
 compile-fail	type/inherent-impl-primitive-types-error.rs
+compile-fail	type/issue-100584.rs
 compile-fail	type/issue-101866.rs
 compile-fail	type/issue-102598.rs
 compile-fail	type/issue-103271.rs

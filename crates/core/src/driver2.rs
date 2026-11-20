@@ -627,6 +627,7 @@ impl Session2 {
         }
         // (`#![crate_type = "lib"]`: a library, no `main` needed)
         let mut deny_unreachable = false;
+        let mut deny_unused_vars = false;
         let lib_attr = {
             let mut end = src.len().min(4096);
             while !src.is_char_boundary(end) {
@@ -635,8 +636,42 @@ impl Session2 {
             let c: String = src[..end].chars().filter(|c| !c.is_whitespace()).collect();
             // (`#![deny(unreachable_patterns)]`: inner attributes come first in the file, so the head is enough)
             deny_unreachable = (c.contains("#![deny(") || c.contains("#![forbid(")) && c.contains("unreachable_patterns");
+            // (`#![deny(unused_variables)]` / `deny(unused)` / `deny(warnings)`)
+            // (only the lints inside `#![deny(..)]` / `#![forbid(..)]`, not an `#![allow(unused_variables)]`)
+            let mut levels: Vec<&str> = vec![];
+            for head in ["#![deny(", "#![forbid("] {
+                let mut rest = c.as_str();
+                while let Some(k) = rest.find(head) {
+                    rest = &rest[k + head.len()..];
+                    if let Some(e) = rest.find(')') {
+                        levels.extend(rest[..e].split(','));
+                    }
+                }
+            }
+            deny_unused_vars = levels.iter().any(|l| matches!(*l, "unused_variables" | "unused" | "warnings")) && !c.contains("#![allow(unused");
             ["lib", "rlib", "dylib", "cdylib", "staticlib", "proc-macro"].iter().any(|k| c.contains(&format!("#![crate_type=\"{k}\"]")))
         };
+        // (unused_variables: the first binding nothing reads, in the program's own fns)
+        if deny_unused_vars {
+            for it in &items[..user] {
+                let text = src.get(it.start..it.end).unwrap_or("");
+                if !text.contains("fn ") || text.contains("allow(unused") || text.contains("#[cfg") {
+                    continue;
+                }
+                let Ok(Some(f)) = parse_fn(&src, it) else { continue };
+                let params: Vec<String> = f.sig.params.iter().filter_map(|(p, _)| match p {
+                    Pat::Ident(_, _, n, None) => Some(n.clone()),
+                    _ => None,
+                }).collect();
+                if let Some((pos, n)) = crate::ast_closure::first_unused_binding(&params, &f.block) {
+                    let (line, col) = match pos {
+                        Some(p) if p.line > 0 => (it.line + p.line as usize - 1, p.col as usize + 1),
+                        _ => (it.line, 1),
+                    };
+                    return Err(format!("{line}:{col}: unused variable: `{n}`"));
+                }
+            }
+        }
         let mut prog = Program::build_with(&items, &sums, self.ctx.lib.is_none() && !lib_attr).map_err(|e| name_line(&e, &src, &items))?;
         tm.lap("program", String::new());
         prog.prelude_from = user as u32;

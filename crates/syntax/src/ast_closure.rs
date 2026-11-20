@@ -953,3 +953,79 @@ pub fn binds_by_value(p: &Pat) -> bool {
         _ => false,
     }
 }
+
+/// `#![deny(unused_variables)]`: the first `let` binding (or parameter) that nothing after it reads, with the
+/// position of its `let` (None for a parameter). Names starting with `_` and the compiler's own `__exr_` ones are
+/// not reported
+pub fn first_unused_binding(params: &[String], body: &Block) -> Option<(Option<Pos>, String)> {
+    fn names(p: &Pat, out: &mut Vec<String>) {
+        match p {
+            Pat::Ident(_, _, n, sub) => {
+                out.push(n.clone());
+                if let Some(s) = sub {
+                    names(s, out);
+                }
+            }
+            Pat::Tuple(ps) | Pat::TupleStruct(_, ps) | Pat::Slice(ps) => ps.iter().for_each(|q| names(q, out)),
+            Pat::Ref(_, q) => names(q, out),
+            Pat::Struct(_, fs, _) => fs.iter().for_each(|(_, q)| names(q, out)),
+            _ => {}
+        }
+    }
+    fn reportable(n: &str) -> bool {
+        !n.starts_with('_') && n.chars().next().is_some_and(|c| c.is_lowercase())
+    }
+    fn block(b: &Block, found: &mut Vec<(Pos, String)>) {
+        for (i, s) in b.stmts.iter().enumerate() {
+            if let Stmt::Let(p, _, init, els, pos) = s {
+                let mut ns = vec![];
+                names(p, &mut ns);
+                if ns.iter().any(|n| reportable(n)) {
+                    let rest = Expr::Block(None, false, Block { stmts: b.stmts[i + 1..].to_vec() });
+                    let fv = free_vars(&rest);
+                    for n in ns.iter().filter(|n| reportable(n)) {
+                        if !fv.contains(n) {
+                            found.push((*pos, n.clone()));
+                        }
+                    }
+                }
+                if let Some(e) = init {
+                    expr(e, found);
+                }
+                if let Some(eb) = els {
+                    block(eb, found);
+                }
+            } else if let Stmt::Expr(e, _) = s {
+                expr(e, found);
+            }
+        }
+    }
+    fn expr(e: &Expr, found: &mut Vec<(Pos, String)>) {
+        match e {
+            Expr::Block(_, _, b) | Expr::Const(b) | Expr::Loop(_, b) => block(b, found),
+            Expr::If(c, t, els) => {
+                expr(c, found);
+                block(t, found);
+                if let Some(x) = els {
+                    expr(x, found);
+                }
+            }
+            Expr::While(_, c, b) => {
+                expr(c, found);
+                block(b, found);
+            }
+            Expr::For(_, _, x, b) => {
+                expr(x, found);
+                block(b, found);
+            }
+            Expr::Macro(..) => {}
+            _ => each_child(e, &mut |c| expr(c, found)),
+        }
+    }
+    let mut found = vec![];
+    block(body, &mut found);
+    let fv = free_vars(&Expr::Block(None, false, body.clone()));
+    let param = params.iter().find(|n| reportable(n) && !fv.contains(*n)).map(|n| (None, n.clone()));
+    found.sort_by_key(|(p, _)| (p.line, p.col));
+    param.or_else(|| found.into_iter().next().map(|(p, n)| (Some(p), n)))
+}
