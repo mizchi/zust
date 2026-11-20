@@ -986,6 +986,18 @@ impl Cx<'_> {
                 }
                 // 参照 → 生ポインタ、生ポインタ ⇔ 生ポインタ / usize
                 match (from, to) {
+                    // (`&[T; N]` / `*const [T; N]` as `*const [T]`: the fat pointer (address, N). Before the arm of
+                    // pointer to pointer, which keeps the thin value; `&T` gives no `*mut`)
+                    (Ty::Ref(false, Ty::Array(..)), Ty::Ptr(true, Ty::Slice(_))) | (Ty::Ref(false, Ty::Slice(_)), Ty::Ptr(true, Ty::Slice(_))) => {
+                        return err(SP, format!("casting `{}` as `{}` is invalid (E0606)", self.prog.tn(from), self.prog.tn(to)));
+                    }
+                    (Ty::Ref(_, Ty::Array(e, n)) | Ty::Ptr(_, Ty::Array(e, n)), Ty::Ptr(_, Ty::Slice(e2))) if e == e2 => {
+                        let Some(a) = v else { return Ok((None, to)) };
+                        let len = self.b.ins().iconst(types::I64, *n as i64);
+                        return Ok((Some(self.make_fat_v(a, len)), to));
+                    }
+                    // (`&[T]` as `*const [T]`: the same fat pointer)
+                    (Ty::Ref(_, Ty::Slice(e)), Ty::Ptr(_, Ty::Slice(e2))) if e == e2 => return Ok((v, to)),
                     (Ty::Ref(_, a), Ty::Ptr(_, b)) if a == b || matches!(*a, Ty::Array(e, _) if e == b) => {
                         return Ok((v, to));
                     }
@@ -1002,14 +1014,6 @@ impl Cx<'_> {
                     (t, Ty::Ptr(..)) if matches!(t, Ty::Usize | Ty::U64 | Ty::Isize | Ty::I64) => {
                         return Ok((v, to));
                     }
-                    // (`&[T; N]` / `*const [T; N]` as `*const [T]`: the fat pointer (address, N))
-                    (Ty::Ref(_, Ty::Array(e, n)) | Ty::Ptr(_, Ty::Array(e, n)), Ty::Ptr(_, Ty::Slice(e2))) if e == e2 => {
-                        let Some(a) = v else { return Ok((None, to)) };
-                        let len = self.b.ins().iconst(types::I64, *n as i64);
-                        return Ok((Some(self.make_fat_v(a, len)), to));
-                    }
-                    // (`&[T]` as `*const [T]`: the same fat pointer)
-                    (Ty::Ref(_, Ty::Slice(e)), Ty::Ptr(_, Ty::Slice(e2))) if e == e2 => return Ok((v, to)),
                     // (a narrower or wider integer and a raw pointer: through usize, as `as` does)
                     (t, Ty::Ptr(_, i)) if t.is_int() && t.bits() <= 64 && !i.is_fat() && !matches!(i, Ty::Slice(_) | Ty::Str | Ty::Dyn(_)) => {
                         return Ok((v.map(|x| self.convert(x, t, Ty::Usize)), to));

@@ -678,7 +678,9 @@ impl Session2 {
             deny_unused_imports = levels.iter().any(|l| matches!(*l, "unused_imports" | "unused" | "warnings")) && !c.contains("#![allow(unused");
             deny_unreachable_code = levels.iter().any(|l| matches!(*l, "unreachable_code" | "unused" | "warnings")) && !c.contains("#![allow(unreachable_code");
             deny_must_use = levels.iter().any(|l| matches!(*l, "unused_must_use" | "unused" | "warnings")) && !c.contains("#![allow(unused_must_use");
-            deny_trivial_casts = (levels.contains(&"trivial_casts"), levels.contains(&"trivial_numeric_casts"));
+            // (an `#![allow(..)]` of the lint undoes a deny, as the levels apply in order; forbid cannot be undone)
+            let lint = |n: &str| levels.contains(&n) && (c.contains(&format!("#![forbid({n}")) || !c.contains(&format!("#![allow({n}")));
+            deny_trivial_casts = (lint("trivial_casts"), lint("trivial_numeric_casts"));
             for (k, n) in ["non_snake_case", "non_camel_case_types", "non_upper_case_globals"].iter().enumerate() {
                 deny_style[k] = levels.iter().any(|l| l == n || *l == "nonstandard_style" || *l == "warnings") && !c.contains(&format!("#![allow({n}"));
             }
@@ -1898,6 +1900,7 @@ impl Session2 {
             h.add(&self.cid);
             h.add(&3u8);
             h.add(&(self.opts.opt as u8));
+            h.add(&lint_bits(&a.prog));
             h.add(&(self.opts.backend_id()));
             h.add(&a.items[ii].hash);
             h.add(&a.sig_key(id as u32));
@@ -1935,6 +1938,7 @@ impl Session2 {
             h.add(&self.cid);
             h.add(&2u8);
             h.add(&(self.opts.opt as u8));
+            h.add(&lint_bits(&a.prog));
             h.add(&(self.opts.backend_id()));
             h.add(&a.items[ii].hash);
             h.add(&a.sig_key(id as u32));
@@ -1948,6 +1952,7 @@ impl Session2 {
         h.add(&self.cid);
         h.add(&1u8);
         h.add(&(self.opts.opt as u8));
+        h.add(&lint_bits(&a.prog));
         h.add(&(self.opts.backend_id()));
         h.add(&a.items[ii].hash);
         // (with traits of one name in two modules, which impl a method call takes depends on the traits in scope at the
@@ -2269,4 +2274,10 @@ impl Session2 {
         d.dedup();
         d
     }
+}
+
+/// The lint levels codegen checks (`#![deny(unused_must_use)]`, `trivial_casts` ..) as one byte for the cache keys: a
+/// function compiled before such a `#![deny]` was added is not reused without its check
+fn lint_bits(p: &Program) -> u8 {
+    p.deny_must_use as u8 | (p.deny_trivial_casts.0 as u8) << 1 | (p.deny_trivial_casts.1 as u8) << 2 | (p.deny_unreachable as u8) << 3
 }

@@ -1482,7 +1482,22 @@ pub fn rename_module_collisions_fix(src: &str, crates: &[String], fix: &mut Vec<
                     // (a fn of an extern block: renamed, it keeps its symbol through a `#[link_name]` before the
                     // item (its `pub` or `fn`), unless it has one)
                     if kw == b"fn" && !extern_close.is_empty() {
-                        let start = if k >= 1 && is_id(k - 1, b"pub") { k - 1 } else { k };
+                        // (the declaration's start: before `unsafe` / `safe` and the visibility, `pub(crate)` too)
+                        let mut start = k;
+                        while start >= 1 && (is_id(start - 1, b"unsafe") || is_id(start - 1, b"safe")) {
+                            start -= 1;
+                        }
+                        if start >= 1 && is_sym(start - 1, b')') {
+                            let mut j = start - 1;
+                            while j > 0 && !is_sym(j, b'(') {
+                                j -= 1;
+                            }
+                            if j >= 1 && is_id(j - 1, b"pub") {
+                                start = j - 1;
+                            }
+                        } else if start >= 1 && is_id(start - 1, b"pub") {
+                            start -= 1;
+                        }
                         let mut j = start;
                         let mut has_ln = false;
                         while j >= 1 && is_sym(j - 1, b']') {
