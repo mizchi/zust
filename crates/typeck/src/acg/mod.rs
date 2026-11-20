@@ -1626,6 +1626,10 @@ impl Cx<'_> {
                     if last && !*semi && self.bk.tail == e as *const Expr as usize && r.is_ok() {
                         self.rg_ret(e);
                     }
+                    // (a block's value: its tree, while the block's locals are in scope)
+                    if last && !*semi && r.is_ok() {
+                        self.rg_keep(e);
+                    }
                     if tail {
                         let srcs = self.bk_frame_end();
                         if borrowck::has_refs(self.prog, self.ret, 0) {

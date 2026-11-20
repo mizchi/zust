@@ -1061,6 +1061,7 @@ impl Cx<'_> {
         }
         let srcs = self.bk_frame_end();
         self.bk.scrut = srcs;
+        self.rg.scrut = if self.rg_on() { self.rt_expr(e) } else { None };
         self.bk.scrut_place = self.bk_place(e).map(|p| (p.0, err_pos(e)));
         r
     }
@@ -1129,12 +1130,15 @@ impl Cx<'_> {
 
     /// Bind a pattern against the last scrutinee
     pub(crate) fn bk_bind_begin(&mut self) {
+        self.rg.pat = self.rg.scrut.clone();
+        self.rg.pat_ref = None;
         if self.bk_on() {
             self.bk.bind_srcs = Some(self.bk.scrut.clone());
             self.bk.pat_path = self.bk.scrut_place.as_ref().map(|x| x.0.clone());
         }
     }
     pub(crate) fn bk_bind_end(&mut self) {
+        self.rg.pat = None;
         self.bk.bind_srcs = None;
         self.bk.pat_path = None;
     }

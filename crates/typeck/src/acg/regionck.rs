@@ -90,6 +90,11 @@ pub struct Rg {
     pub loans: Vec<(u32, String, Sp)>,
     /// ZUSTC_RG_DEBUG: the kinds of values not followed
     pub missed: Vec<&'static str>,
+    /// The last scrutinee's tree; the part of it the pattern being bound matches, and the region of the reference
+    /// matched through last (bindings in it are by reference)
+    pub scrut: Option<(Ty, RT)>,
+    pub pat: Option<(Ty, RT)>,
+    pub pat_ref: Option<u32>,
 }
 
 fn kind(e: &Expr) -> &'static str {
@@ -756,6 +761,9 @@ impl Cx<'_> {
     }
 
     fn rt_expr_inner(&mut self, e: &Expr) -> Option<(Ty, RT)> {
+        if let Some(x) = self.rg.calls.get(&(e as *const Expr as usize)) {
+            return Some(x.clone());
+        }
         match e {
             Expr::Paren(x) => self.rt_expr(x),
             Expr::Lit(s, _) if s.starts_with('"') || s.starts_with("r\"") || s.starts_with("r#") => Some((Ty::Ref(false, crate::types::intern(Ty::Str)), vec![STATIC])),
@@ -1089,6 +1097,77 @@ impl Cx<'_> {
             }
         }
         self.rg.last_call = Some((self.rg.depth + 1, t, tree));
+    }
+
+    /// The pattern matches through references (default binding modes) down to a value of type t
+    pub(crate) fn rg_pat_align(&mut self, t: Ty) {
+        let Some((mut pt, mut tr)) = self.rg.pat.take() else { return };
+        while pt != t {
+            let Ty::Ref(_, i) = pt else { return };
+            let Some(&r) = tr.first() else { return };
+            self.rg.pat_ref = Some(r);
+            tr.remove(0);
+            pt = *i;
+        }
+        self.rg.pat = Some((pt, tr));
+    }
+
+    /// Descend into field fi of the value the pattern matches (of type parent; vi: the variant); returns what to
+    /// restore
+    pub(crate) fn rg_pat_field(&mut self, parent: Ty, vi: Option<usize>, fi: usize) -> (Option<(Ty, RT)>, Option<u32>) {
+        let saved = (self.rg.pat.clone(), self.rg.pat_ref);
+        let prog = self.prog;
+        let next = (|| {
+            let (pt, tr) = self.rg.pat.clone()?;
+            let Ty::Struct(sid) = pt else { return None };
+            if pt != parent {
+                return None;
+            }
+            let sd = &prog.structs[sid as usize];
+            if prog.is_tuple(sid) {
+                let (_, args) = self.rg.split_adt(prog, sid, &tr)?;
+                return Some((*sd.args.get(fi)?, args.get(fi)?.clone()?));
+            }
+            let (off, ft) = match vi {
+                Some(vi) => (sd.fields.len() + sd.variants[..vi].iter().map(|v| v.fields.len()).sum::<usize>() + fi, sd.variants.get(vi)?.fields.get(fi)?.1),
+                None => (fi, sd.fields.get(fi)?.1),
+            };
+            let ftr = self.rg.field(prog, sid, off, &tr)?;
+            Some((ft, ftr))
+        })();
+        if debug() {
+            eprintln!("rg_pat_field {:?} vi={vi:?} fi={fi}: {:?} -> {:?}", self.prog.tn(parent), saved.0.as_ref().map(|x| (self.prog.tn(x.0), x.1.clone())), next.as_ref().map(|x| x.1.clone()));
+        }
+        self.rg.pat = next;
+        saved
+    }
+
+    /// The pattern binds name (by_ref: by reference, through the reference matched last)
+    pub(crate) fn rg_pat_bind(&mut self, name: &str, by_ref: bool) {
+        let Some((_, tr)) = self.rg.pat.clone() else { return };
+        let Some((loc, t)) = self.lookup(name) else { return };
+        let tree = if by_ref {
+            let Some(r) = self.rg.pat_ref else { return };
+            let mut v = vec![r];
+            v.extend(tr);
+            v
+        } else {
+            tr
+        };
+        if count(self.prog, t, 0) == Some(tree.len()) {
+            self.rg.locals.insert(loc, tree);
+        }
+    }
+
+    /// The tree of e, kept while what it names is in scope (an arm's or a block's value, related after the match or
+    /// block is lowered)
+    pub(crate) fn rg_keep(&mut self, e: &Expr) {
+        if !self.rg_on() || self.rg.calls.contains_key(&(e as *const Expr as usize)) {
+            return;
+        }
+        if let Some(t) = self.rt_expr(e) {
+            self.rg.calls.insert(e as *const Expr as usize, t);
+        }
     }
 
     /// Keep the tree of the call just lowered, as the value of e
