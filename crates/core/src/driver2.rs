@@ -1097,7 +1097,16 @@ fn first_unreachable(b: &crate::parse::Block) -> Option<(crate::parse::Pos, &'st
 /// defines ("the name `X` is defined multiple times", at the second). Top level = the item starts a line (the
 /// flattened modules' items keep their indentation)
 fn duplicate_import(src0: &str, split: &str, items: &[SrcItem]) -> Option<String> {
-    let mut seen: Vec<(String, bool, usize)> = vec![];
+    // (no crate-root `use`, no clash to look for: the common case costs one look at each item's first bytes)
+    if !items.iter().any(|it| {
+        matches!(it.kind, ItemKind::Normal)
+            && (it.start == 0 || split.as_bytes()[it.start - 1] == b'\n')
+            && (split[it.start..].starts_with("use ") || split[it.start..].starts_with("pub use ") || split[it.start..].starts_with("#["))
+    }) {
+        return None;
+    }
+    // (name → (some definition is a `use`, some definition is an item, a line): a hash, as a crate has thousands of items)
+    let mut seen: FxMap<&str, (bool, bool, usize)> = FxMap::default();
     // (the original file's last line: items past it were hoisted out of fn bodies, and are their blocks')
     let mut total: Option<usize> = None;
     for it in items {
@@ -1105,7 +1114,7 @@ fn duplicate_import(src0: &str, split: &str, items: &[SrcItem]) -> Option<String
             continue;
         }
         let text = &split[it.start..it.end];
-        if text.starts_with([' ', '\t']) || text.contains("#[cfg") || text.starts_with("#!") {
+        if text.starts_with([' ', '\t']) || text.starts_with("#!") || (text.starts_with('#') && text.contains("#[cfg")) {
             continue;
         }
         // (past the item's attributes: `#[allow(unused_imports)]`)
@@ -1116,7 +1125,7 @@ fn duplicate_import(src0: &str, split: &str, items: &[SrcItem]) -> Option<String
         }
         let line_shift = text[..text.len() - t.len()].matches('\n').count();
         let t = t.strip_prefix("pub ").unwrap_or(t);
-        let mut names: Vec<(String, bool)> = vec![];
+        let mut names: Vec<(&str, bool)> = vec![];
         if let Some(rest) = t.strip_prefix("use ") {
             let body = rest.trim_end().trim_end_matches(';').trim();
             let (prefix, list): (&str, Vec<&str>) = match body.find('{') {
@@ -1133,16 +1142,17 @@ fn duplicate_import(src0: &str, split: &str, items: &[SrcItem]) -> Option<String
                 let last = if path == "self" { prefix.trim_end_matches("::").rsplit("::").next().unwrap_or("") } else { path.rsplit("::").next().unwrap_or(path) };
                 let n = alias.unwrap_or(last);
                 if !n.is_empty() && n != "_" && n != "*" && !path.ends_with('*') {
-                    names.push((n.to_string(), true));
+                    names.push((n, true));
                 }
             }
         } else {
             let kw_name = t.split_whitespace().take(2).collect::<Vec<_>>();
             if let [kw, name] = kw_name.as_slice() {
                 if matches!(*kw, "struct" | "enum" | "trait" | "type" | "union" | "fn" | "const" | "static") {
-                    let n: String = name.chars().take_while(|c| c.is_alphanumeric() || *c == '_').collect();
+                    let end = name.find(|c: char| !(c.is_alphanumeric() || c == '_')).unwrap_or(name.len());
                     // (a user type renamed off a prelude type's name is still that name)
-                    let n = n.strip_prefix("__u_").map(str::to_string).unwrap_or(n);
+                    let n = &name[..end];
+                    let n = n.strip_prefix("__u_").unwrap_or(n);
                     if !n.is_empty() && !n.contains("__") {
                         names.push((n, false));
                     }
@@ -1152,13 +1162,20 @@ fn duplicate_import(src0: &str, split: &str, items: &[SrcItem]) -> Option<String
         let line = it.line + line_shift;
         for (n, is_use) in names {
             // (two items of one name are the build's own duplicate check; here at least one is a `use`)
-            if let Some(&(_, _, l0)) = seen.iter().find(|(m, u, _)| *m == n && (*u || is_use)) {
-                let last = *total.get_or_insert_with(|| src0.bytes().filter(|&c| c == b'\n').count() + 1);
-                if line <= last && l0 <= last {
-                    return Some(format!("{line}:1: the name `{n}` is defined multiple times"));
+            if let Some(&(any_use, any_item, l0)) = seen.get(&n) {
+                if (any_use || is_use) && (any_use || any_item) {
+                    let last = *total.get_or_insert_with(|| src0.bytes().filter(|&c| c == b'\n').count() + 1);
+                    if line <= last && l0 <= last {
+                        return Some(format!("{line}:1: the name `{n}` is defined multiple times"));
+                    }
                 }
             }
-            seen.push((n, is_use, line));
+            let e = seen.entry(n).or_insert((false, false, line));
+            if is_use {
+                e.0 = true;
+            } else {
+                e.1 = true;
+            }
         }
     }
     None
