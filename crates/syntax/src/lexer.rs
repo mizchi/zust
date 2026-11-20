@@ -1538,6 +1538,9 @@ pub fn rename_module_collisions_fix(src: &str, crates: &[String], fix: &mut Vec<
         }
     }
     let mut repl: Vec<(usize, usize, Vec<u8>)> = vec![]; // (開始トークン, 終了トークン (含む), 新しいテキスト)
+    // (the items each scope defines, for the glob imports they shadow: built only when there is a glob)
+    let own_defs: std::collections::HashSet<(usize, &[u8])> =
+        if globs.is_empty() { Default::default() } else { defs.iter().map(|d| (d.1, d.0.as_slice())).collect() };
     let mut k = 0;
     while k < toks.len() {
         if toks[k].0 != 0 || skip[k] || local_tok[k] {
@@ -1596,11 +1599,14 @@ pub fn rename_module_collisions_fix(src: &str, crates: &[String], fix: &mut Vec<
         let is_def = def_tok[k];
         if !next_colon || is_def {
             let n = tok(k);
+            // (a glob import is shadowed by the scope's own item of that name: the crate root's `enum Thing` beside
+            // `use thing::*;` stays the root's)
+            let own = || own_defs.contains(&(sc, n));
             let nn = renamed_in(sc, n)
                 .or_else(|| imported(sc, n))
-                .or_else(|| globs.iter().filter(|g| g.0 == sc).find_map(|g| renamed_in(g.1, n)))
+                .or_else(|| if own() { None } else { globs.iter().filter(|g| g.0 == sc).find_map(|g| renamed_in(g.1, n)) })
                 // (`use super::*;` は親が use で取り込んだ名前も見える)
-                .or_else(|| globs.iter().filter(|g| g.0 == sc).find_map(|g| imported(g.1, n)));
+                .or_else(|| if own() { None } else { globs.iter().filter(|g| g.0 == sc).find_map(|g| imported(g.1, n)) });
             if let Some(nn) = nn {
                 repl.push((k, k, nn));
             }

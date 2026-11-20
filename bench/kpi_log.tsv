@@ -132,3 +132,4 @@ date	commit	change	noop_M	edit_M	check_M	cache_KiB	lsp_G	run	check	build	cfail
 2026-11-20	1e1f25f+	E0119: an unbounded blanket impl and an impl of its trait for a type	0.695	559.803	3854.910	1902.8	-	1700	1417	95	3562	1180.458	63.387	10.259	321.140
 2026-11-20	cc8898f+	fn values of <S as Tr>::m; std::u32::MAX-style paths; float integer constants	0.697	559.833	3854.988	1902.8	-	1701	1417	95	3562	1179.610	63.378	10.272	321.204
 2026-11-20	ed757a9+	prelude: AsRef / AsMut / Into / Borrow / BorrowMut / FromIterator declared for a program's own impls	0.692	559.709	3856.799	1902.8	-	1701	1422	95	3562	1179.888	63.419	10.246	321.430
+2026-11-20	255fde7+	module flattening: a glob import is shadowed by the scope's own item	0.695	559.711	3856.801	1902.8	-	1702	1427	95	3562	1180.132	63.475	10.259	321.400

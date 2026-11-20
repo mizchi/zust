@@ -2797,6 +2797,10 @@ run-pass	imports/global-path-resolution-drop.rs
 check-pass	imports/import-after-macro-expand-1.rs
 check-pass	imports/import-after-macro-expand-10.rs
 check-pass	imports/import-after-macro-expand-11.rs
+check-pass	imports/import-after-macro-expand-12.rs
+check-pass	imports/import-after-macro-expand-2.rs
+check-pass	imports/import-after-macro-expand-3.rs
+check-pass	imports/import-after-macro-expand-4.rs
 check-pass	imports/import-after-macro-expand-5.rs
 check-pass	imports/import-after-macro-expand-8.rs
 check-pass	imports/import-after-macro-expand-9.rs
@@ -2822,6 +2826,7 @@ run-pass	imports/import5.rs
 run-pass	imports/import6.rs
 run-pass	imports/import7.rs
 run-pass	imports/import8.rs
+run-pass	imports/imports.rs
 compile-fail	imports/inaccessible_type_aliases.rs
 compile-fail	imports/issue-109343.rs
 compile-fail	imports/issue-113953.rs
@@ -3378,6 +3383,7 @@ check-pass	lint/unused_braces_borrow.rs
 check-pass	lint/unused_labels.rs
 compile-fail	lint/unused_parens_multibyte_recovery.rs
 compile-fail	lint/unused_variables-issue-82488.rs
+check-pass	lint/use-redundant/issue-92904.rs
 check-pass	lint/use-redundant/use-redundant-glob-parent.rs
 check-pass	lint/use-redundant/use-redundant-glob.rs
 check-pass	lint/use-redundant/use-redundant-issue-71450.rs
