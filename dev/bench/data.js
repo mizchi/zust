@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795151905722,
+  "lastUpdate": 1795151907910,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -61269,6 +61269,85 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/mizchi/zust/commit/4c648ae0fb015dc1c659dfb6e7981f3adc76ef43"
         },
         "date": 1795151581375,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "parity documentSymbol (名前の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity workspace/symbol (上位 20 の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity definition (行き先の一致)",
+            "value": 89.655,
+            "unit": "%"
+          },
+          {
+            "name": "parity hover (名前を含む)",
+            "value": 77.5,
+            "unit": "%"
+          },
+          {
+            "name": "parity references (数の一致)",
+            "value": 81.081,
+            "unit": "%"
+          },
+          {
+            "name": "parity documentHighlight (数の一致)",
+            "value": 83.871,
+            "unit": "%"
+          },
+          {
+            "name": "parity rename (書き換えの一致)",
+            "value": 85.714,
+            "unit": "%"
+          },
+          {
+            "name": "parity signatureHelp (名前・引数の数・今の引数の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity completion `x.\\|` (書いてある名前を含む)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity completion `na\\|me` (同)",
+            "value": 91.304,
+            "unit": "%"
+          },
+          {
+            "name": "parity 一致の平均",
+            "value": 90.913,
+            "unit": "%"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "committer": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "distinct": true,
+          "id": "d22d45f75e87b9ba1cdf9b2db1f44256448ec75e",
+          "message": "kpi log: LSP session measured after the lint and resolution checks\n\n10.899 G instructions, +0.05% against 3c46afb (within the LSP column's\n~0.1% noise); no compiler change.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-20T05:12:10Z",
+          "tree_id": "a5abaf2867de54a13b7034ca96d76df7d997f209",
+          "url": "https://github.com/mizchi/zust/commit/d22d45f75e87b9ba1cdf9b2db1f44256448ec75e"
+        },
+        "date": 1795151907416,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
