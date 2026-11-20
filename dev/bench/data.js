@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795176031346,
+  "lastUpdate": 1795176033615,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -68330,6 +68330,85 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/mizchi/zust/commit/707a3953e4e9d71650f873811e6506390864b8ad"
         },
         "date": 1795174930842,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "parity documentSymbol (名前の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity workspace/symbol (上位 20 の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity definition (行き先の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity hover (名前を含む)",
+            "value": 90,
+            "unit": "%"
+          },
+          {
+            "name": "parity references (数の一致)",
+            "value": 97.297,
+            "unit": "%"
+          },
+          {
+            "name": "parity documentHighlight (数の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity rename (書き換えの一致)",
+            "value": 94.118,
+            "unit": "%"
+          },
+          {
+            "name": "parity signatureHelp (名前・引数の数・今の引数の一致)",
+            "value": 94.737,
+            "unit": "%"
+          },
+          {
+            "name": "parity completion `x.\\|` (書いてある名前を含む)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity completion `na\\|me` (同)",
+            "value": 92.593,
+            "unit": "%"
+          },
+          {
+            "name": "parity 一致の平均",
+            "value": 96.874,
+            "unit": "%"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "committer": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "distinct": true,
+          "id": "174b0fe451d5a2e9f1e2ec0ac0d0a17f62f32a7f",
+          "message": "include!(..) of code: as items / a statement, or as an expression\n\ninclude!(\"f.rs\") and include!(concat!(\"a\", \"b\")) are expanded when the\nsource is loaded, relative to the including file. This uses the same\npass as include_str! / include_bytes!, which is now skipped by one\nsearch for \"include\".\n- `include!(..);` puts the file's code in place.\n- Anywhere else, the code goes in as a parenthesized expression.\n- A shebang line is dropped only outside any braces (item context), as\n  rustc does.\n- `mod m;` in a file included from another directory gets\n  #[path = \"<dir>/m.rs\"].\n\ntests/ui: +3 check-pass, +1 run-pass. KPI: edit one fn -0.18% (one\nsearch of the source in place of two).\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-20T11:55:50Z",
+          "tree_id": "10e7108750f1816b080387394f9fedf797b62f6b",
+          "url": "https://github.com/mizchi/zust/commit/174b0fe451d5a2e9f1e2ec0ac0d0a17f62f32a7f"
+        },
+        "date": 1795176033113,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
