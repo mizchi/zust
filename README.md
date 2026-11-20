@@ -26,7 +26,7 @@
 
 ## Status
 
-Numbers measured <!-- measured -->2026-11-20, ed757a9<!-- /measured --> by CI on each push to main (bench.yml runs
+Numbers measured <!-- measured -->2026-11-20, 255fde7<!-- /measured --> by CI on each push to main (bench.yml runs
 `bench/ci_bench.py` and `bench/rust_ui.py`, then `scripts/update_readme.py` writes them here). Times come from shared
 GitHub Actions runners and vary by about ±20%; the instruction counts (valgrind) do not.
 
@@ -39,7 +39,7 @@ only the tests it can be asked to handle (no nightly features, auxiliary crates 
 | kind | applicable | pass |
 |---|---:|---:|
 | run-pass (builds, runs, same output) | 2385 | 1701 (71.3%) |
-| check-pass (accepted by `zustc check`) | 1807 | 1417 (78.4%) |
+| check-pass (accepted by `zustc check`) | 1807 | 1422 (78.7%) |
 | build-pass | 135 | 95 (70.4%) |
 | compile-fail (rejected at an annotated line) | 7358 | 3562 (48.4%) |
 <!-- /auto:ui -->
@@ -53,22 +53,22 @@ Build speed, build cache size and LSP latency on generated programs of 1000 / 50
 <!-- auto:kpi -->
 | KPI | gen1000 | gen5000 |
 |---|---:|---:|
-| cold build | 119 ms | 540 ms |
-| no-op build | 0.7 ms | 0.7 ms |
-| build after editing one function | 18.0 ms | 65.3 ms |
-| `check` | 81 ms | 383 ms |
+| cold build | 124 ms | 542 ms |
+| no-op build | 1.1 ms | 1.0 ms |
+| build after editing one function | 20.8 ms | 72.2 ms |
+| `check` | 96 ms | 458 ms |
 | no-op build (instructions) | 0.6 M | 0.6 M |
-| edit one function (instructions) | 127.6 M | 600.1 M |
-| `check` (instructions) | 781.4 M | 3849.0 M |
+| edit one function (instructions) | 127.2 M | 599.5 M |
+| `check` (instructions) | 781.8 M | 3854.1 M |
 | build cache on disk | 387.2 KiB | 1902.8 KiB |
 | binary | 324.0 KiB | 1558.3 KiB |
-| cold build peak RSS | 18.0 MiB | 51.7 MiB |
+| cold build peak RSS | 18.0 MiB | 51.9 MiB |
 
 | zust-analyzer (zustc's own sources) | |
 |---|---:|
-| p50: definition, hover, completion, references, rename | 0.53 ms / 0.43 ms / 1.04 ms / 6.04 ms / 0.46 ms |
-| startup until indexed | 126 ms |
-| peak RSS | 74.1 MiB |
+| p50: definition, hover, completion, references, rename | 0.62 ms / 0.47 ms / 0.96 ms / 5.39 ms / 0.49 ms |
+| startup until indexed | 129 ms |
+| peak RSS | 74.3 MiB |
 <!-- /auto:kpi -->
 
 Every change is also measured on its own with `python3 bench/kpi_track.py`, so that small increases that add up stay
@@ -333,7 +333,7 @@ the measured numbers. The [reports](docs/reports/) explain each step.
 ### Overall
 
 - [x] tests/ui run-pass: <!-- total:run-pass -->71.3% (1701 / 2385)
-- [x] tests/ui check-pass: <!-- total:check-pass -->78.4% (1417 / 1807)
+- [x] tests/ui check-pass: <!-- total:check-pass -->78.7% (1422 / 1807)
 - [x] tests/ui build-pass: <!-- total:build-pass -->70.4% (95 / 135)
 - [ ] tests/ui compile-fail (an error on an annotated line): <!-- total:compile-fail -->48.4% (3562 / 7358)
 - [x] real crates: fnv, adler2, hex, itoa, rustc-hash and cfg-if build and give the same output (6 / 6)
@@ -345,7 +345,7 @@ the measured numbers. The [reports](docs/reports/) explain each step.
 - [x] `for` / `while` / `loop`, labels: <!-- ui:for-loop-while,loops,label -->91.7%
 - [x] enums, `#[repr(u8)]`, auto-sized tags: <!-- ui:enum,enum-discriminant -->83.3%
 - [x] `cfg`: <!-- ui:cfg -->81.2%
-- [x] bindings, patterns, slice patterns, or-patterns (also with guards): <!-- ui:binding,pattern,or-patterns -->88.1%
+- [x] bindings, patterns, slice patterns, or-patterns (also with guards): <!-- ui:binding,pattern,or-patterns -->88.6%
 - [x] `match`: <!-- ui:match -->82.9%
 - [x] name resolution: <!-- ui:resolve -->85.7%
 - [x] statics: ints, floats, raw pointers, fn pointers, `const fn` calls: <!-- ui:statics -->75.0%
@@ -370,7 +370,7 @@ the measured numbers. The [reports](docs/reports/) explain each step.
 - [ ] const generics: <!-- ui:const-generics -->55.4% (no `generic_const_exprs`)
 - [ ] generic associated types: <!-- ui:generic-associated-types -->71.1%
 - [ ] casts (`as _` / `as *const _` take the source or expected type; a pointer of unknown kind is E0641): <!-- ui:cast -->51.7%
-- [ ] `impl Trait`: <!-- ui:impl-trait -->68.6% (return position, also nested (`-> Option<impl Debug>`), in trait methods and generic fns (typed per instance); no TAIT)
+- [ ] `impl Trait`: <!-- ui:impl-trait -->69.5% (return position, also nested (`-> Option<impl Debug>`), in trait methods and generic fns (typed per instance); no TAIT)
 - [ ] layout: `repr(packed)` / `repr(align)` are ignored: <!-- ui:packed,layout -->38.7%
 
 ### Checks (compile-fail)
