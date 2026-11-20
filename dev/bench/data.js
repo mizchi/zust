@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795160741920,
+  "lastUpdate": 1795160744050,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -63418,6 +63418,85 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/mizchi/zust/commit/255fde7b338979c75934edcd582cb6d6d4f2dc58"
         },
         "date": 1795158890375,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "parity documentSymbol (名前の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity workspace/symbol (上位 20 の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity definition (行き先の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity hover (名前を含む)",
+            "value": 95,
+            "unit": "%"
+          },
+          {
+            "name": "parity references (数の一致)",
+            "value": 92.5,
+            "unit": "%"
+          },
+          {
+            "name": "parity documentHighlight (数の一致)",
+            "value": 97.143,
+            "unit": "%"
+          },
+          {
+            "name": "parity rename (書き換えの一致)",
+            "value": 93.333,
+            "unit": "%"
+          },
+          {
+            "name": "parity signatureHelp (名前・引数の数・今の引数の一致)",
+            "value": 94.737,
+            "unit": "%"
+          },
+          {
+            "name": "parity completion `x.\\|` (書いてある名前を含む)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity completion `na\\|me` (同)",
+            "value": 89.655,
+            "unit": "%"
+          },
+          {
+            "name": "parity 一致の平均",
+            "value": 96.237,
+            "unit": "%"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "committer": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "distinct": true,
+          "id": "0043490a67a2eec6a87796dcc38d13b985ead107",
+          "message": "Module flattening: a glob import is shadowed by the scope's own item\n\n`use thing::*;` beside the crate root's own `enum Thing` renamed the\nroot's item to `thing__Thing` as well (\"duplicate definition of\n`thing__Thing`\"): a glob import now gives way to an item of that name\nthe importing scope defines, as in rustc. The scopes' items are looked\nup in a set built only when the program has a glob import.\n\ntests/ui: +6 passes (5 check-pass, 1 run-pass).\nKPI: within ±0.13% of the row before (traits edit's flag is within its\nrecent 63.37 - 63.47 range; the program has no module).\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-20T07:40:44Z",
+          "tree_id": "319169b5dac059b1fa34607133b9d71bee5eec4c",
+          "url": "https://github.com/mizchi/zust/commit/0043490a67a2eec6a87796dcc38d13b985ead107"
+        },
+        "date": 1795160743543,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
