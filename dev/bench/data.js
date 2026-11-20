@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795193038764,
+  "lastUpdate": 1795193041370,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -72321,6 +72321,85 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/mizchi/zust/commit/d9294dc961e59727cda4a420beec3983d197bc4a"
         },
         "date": 1795190212553,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "parity documentSymbol (名前の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity workspace/symbol (上位 20 の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity definition (行き先の一致)",
+            "value": 93.75,
+            "unit": "%"
+          },
+          {
+            "name": "parity hover (名前を含む)",
+            "value": 87.5,
+            "unit": "%"
+          },
+          {
+            "name": "parity references (数の一致)",
+            "value": 89.744,
+            "unit": "%"
+          },
+          {
+            "name": "parity documentHighlight (数の一致)",
+            "value": 90.909,
+            "unit": "%"
+          },
+          {
+            "name": "parity rename (書き換えの一致)",
+            "value": 84.615,
+            "unit": "%"
+          },
+          {
+            "name": "parity signatureHelp (名前・引数の数・今の引数の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity completion `x.\\|` (書いてある名前を含む)",
+            "value": 95,
+            "unit": "%"
+          },
+          {
+            "name": "parity completion `na\\|me` (同)",
+            "value": 93.103,
+            "unit": "%"
+          },
+          {
+            "name": "parity 一致の平均",
+            "value": 93.462,
+            "unit": "%"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "miz404@gmail.com",
+            "name": "Kotaro Chikuba",
+            "username": "mizchi"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "cd5dccd84a49d1472326525bb622f6ff42871b88",
+          "message": "Merge pull request #12 from mizchi/claude/ui-ratchet-blaze\n\ntests/ui pass-count ratchet; blaze's tests/ui results in README",
+          "timestamp": "2026-11-21T01:38:22+09:00",
+          "tree_id": "6d47b21c4e8c4cc54c8f2abde62197f08b94beef",
+          "url": "https://github.com/mizchi/zust/commit/cd5dccd84a49d1472326525bb622f6ff42871b88"
+        },
+        "date": 1795193040700,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
