@@ -568,6 +568,22 @@ fn rebase_aliased(sm: &Summary, map: &FxMap<String, String>) -> Summary {
     sm
 }
 
+impl Program {
+    /// trait_scopes at item ii: the traits of a colliding name in scope there (the innermost scope around its source
+    /// line). None when no trait name collides
+    pub fn traits_at_item(&self, ii: u32) -> Option<&[String]> {
+        if self.trait_scopes.is_empty() {
+            return None;
+        }
+        let line = *self.item_lines.get(ii as usize)?;
+        self.trait_scopes
+            .iter()
+            .filter(|(lo, hi, _)| *lo <= line && line <= *hi)
+            .min_by_key(|(lo, hi, _)| hi - lo)
+            .map(|(_, _, v)| v.as_slice())
+    }
+}
+
 /// `from` (a type name) as `to` everywhere in t
 fn rename_tysyn(t: &mut TySyn, from: &str, to: &str) {
     match t {

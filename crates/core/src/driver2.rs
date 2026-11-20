@@ -1947,6 +1947,11 @@ impl Session2 {
         h.add(&(self.opts.opt as u8));
         h.add(&(self.opts.backend_id()));
         h.add(&a.items[ii].hash);
+        // (with traits of one name in two modules, which impl a method call takes depends on the traits in scope at the
+        // item: a `use` changed elsewhere changes it, with the body the same)
+        if let Some(vis) = a.prog.traits_at_item(ii as u32) {
+            h.add(&vis.join(","));
+        }
         if a.prog.closures.contains_key(&(id as u32)) {
             h.add(&a.prog.names[id]);
         }

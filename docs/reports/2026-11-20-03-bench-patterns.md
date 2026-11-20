@@ -106,6 +106,9 @@ showed up. Four are fixed here, each with a test in `tests/probe` whose expected
      quick look at the text ends it, without tokenizing.
    - `pick_overload`, which chooses among the impls of one method name, takes the one whose trait is in scope at the
      source line of the calling function's item.
+   - As in rustc, an inherent method of the type that fits comes before any trait's, and a name a module defines or
+     imports by name shadows the same name from a glob. The traits in scope at an item go into its cache key, so a
+     changed `use` rebuilds it. Test: `tests/probe/same_trait_precedence.rs`.
    - What it does not cover: the scope is a module, not a block, so two blocks of one function that each `use` a
      different `M` see both. Two modules written on one line share their lines. A build with dependency crates keeps
      the earlier choice (the first impl), since their lines are not the crate's.

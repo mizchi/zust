@@ -1255,7 +1255,9 @@ impl Cx<'_> {
             sig.params.first().is_some_and(|&pt| self.prog.match_ty(pt, at, &mut sol))
         };
         // (impls of two traits of one name, `a::M` and `b::M` for u32: the one whose trait is in scope here)
-        if let Some(vis) = self.traits_in_scope() {
+        // (an inherent method that fits comes first, as in rustc's method lookup: then nothing changes here)
+        let inherent = cands.iter().any(|&c| self.prog.sigs[c as usize].impl_trait.is_none() && fits(c, at));
+        if let Some(vis) = self.traits_in_scope().filter(|_| !inherent) {
             let base = |c: u32| self.prog.sigs[c as usize].impl_trait.as_deref().map(|t| t.split('<').next().unwrap_or(t).trim());
             if let Some(&c) = cands.iter().find(|&&c| base(c).is_some_and(|t| vis.iter().any(|v| v == t)) && fits(c, at)) {
                 return c;
@@ -1281,13 +1283,7 @@ impl Cx<'_> {
             return None;
         }
         let ii = self.prog.item_of.get(self.root as usize).copied().flatten()?;
-        let line = *self.prog.item_lines.get(ii as usize)?;
-        self.prog
-            .trait_scopes
-            .iter()
-            .filter(|(lo, hi, _)| *lo <= line && line <= *hi)
-            .min_by_key(|(lo, hi, _)| hi - lo)
-            .map(|(_, _, v)| v.as_slice())
+        self.prog.traits_at_item(ii)
     }
 
     /// E0133: a call written in the source (pos.line != 0) to an `unsafe fn` outside `unsafe`

@@ -1212,17 +1212,19 @@ pub fn trait_scopes(src: &str) -> Vec<(u32, u32, Vec<String>)> {
         }
         k = e + 1;
     }
-    // (scope, name used there) -> the flattened trait: what each scope imported, including what it re-exports
-    let mut imported: Vec<(usize, Vec<u8>, String)> = vec![];
+    // (scope, name used there, the flattened trait, by a glob): what each scope imported, including what it
+    // re-exports
+    let mut imported: Vec<(usize, Vec<u8>, String, bool)> = vec![];
     for _ in 0..8 {
         let mut progress = false;
         for (sc, mpath, name, local) in &uses {
             let Some(m) = resolve(*sc, mpath) else { continue };
-            let found: Vec<(Vec<u8>, String)> = if name.as_slice() == b"*" {
+            let glob = name.as_slice() == b"*";
+            let found: Vec<(Vec<u8>, String)> = if glob {
                 // (a glob: the module's traits of a colliding name, and what it imported)
                 let mut v: Vec<(Vec<u8>, String)> =
                     traits.iter().filter(|(n, tsc)| *tsc == m && colliding.contains(&n)).map(|(n, _)| (n.clone(), flat(m, n))).collect();
-                v.extend(imported.iter().filter(|(isc, _, _)| *isc == m).map(|(_, n, f)| (n.clone(), f.clone())));
+                v.extend(imported.iter().filter(|(isc, _, _, _)| *isc == m).map(|(_, n, f, _)| (n.clone(), f.clone())));
                 v
             } else if traits.iter().any(|(n, tsc)| n == name && *tsc == m) {
                 if !colliding.contains(&name) {
@@ -1230,11 +1232,11 @@ pub fn trait_scopes(src: &str) -> Vec<(u32, u32, Vec<String>)> {
                 }
                 vec![(local.clone(), flat(m, name))]
             } else {
-                imported.iter().filter(|(isc, n, _)| *isc == m && n == name).map(|(_, _, f)| (local.clone(), f.clone())).collect()
+                imported.iter().filter(|(isc, n, _, _)| *isc == m && n == name).map(|(_, _, f, _)| (local.clone(), f.clone())).collect()
             };
             for (n, f) in found {
-                if !imported.iter().any(|(isc, n2, f2)| isc == sc && *n2 == n && *f2 == f) {
-                    imported.push((*sc, n, f));
+                if !imported.iter().any(|(isc, n2, f2, _)| isc == sc && *n2 == n && *f2 == f) {
+                    imported.push((*sc, n, f, glob));
                     progress = true;
                 }
             }
@@ -1243,9 +1245,16 @@ pub fn trait_scopes(src: &str) -> Vec<(u32, u32, Vec<String>)> {
             break;
         }
     }
-    for (sc, _, f) in imported {
-        if !visible[ix(sc)].contains(&f) {
-            visible[ix(sc)].push(f);
+    // (a name a scope defines or imports by name shadows the same name from a glob: `use a::*; use b::M;` is b's M)
+    let named = |sc: usize, n: &[u8]| {
+        traits.iter().any(|(t, tsc)| *tsc == sc && t.as_slice() == n) || imported.iter().any(|(isc, i, _, g)| *isc == sc && i.as_slice() == n && !g)
+    };
+    for (sc, n, f, glob) in &imported {
+        if *glob && named(*sc, n) {
+            continue;
+        }
+        if !visible[ix(*sc)].contains(f) {
+            visible[ix(*sc)].push(f.clone());
         }
     }
     // (the line of token k: newline offsets found once, then a binary search)

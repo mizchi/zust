@@ -297,12 +297,14 @@ def main():
     if not new:
         lines = open(LOG).read().splitlines()
         if lines and lines[0].split("\t") != COLS and COLS[:len(lines[0].split("\t"))] == lines[0].split("\t"):
-            with open(LOG, "w") as f:
+            # (written beside it and renamed over it: a failed write leaves the log as it was)
+            with open(LOG + ".tmp", "w") as f:
                 f.write("\t".join(COLS) + "\n")
                 for l in lines[1:]:
                     if l.strip():
                         cells = l.split("\t")
                         f.write("\t".join(cells + ["-"] * (len(COLS) - len(cells))) + "\n")
+            os.replace(LOG + ".tmp", LOG)
     with open(LOG, "a") as f:
         if new:
             f.write("\t".join(COLS) + "\n")
