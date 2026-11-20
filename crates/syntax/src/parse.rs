@@ -743,6 +743,20 @@ impl Parser {
             Err(self.err(&format!("expected `{c}`")))
         }
     }
+    /// A declared name (an item's, a field's, a variant's, a binding's): not a reserved keyword (the 2018 ones
+    /// `async` / `await` / `dyn` / `try` stay names, as an edition 2015 file may use them)
+    fn decl_ident(&mut self) -> R<String> {
+        const KW: &[&str] = &[
+            "as", "break", "const", "continue", "crate", "else", "enum", "extern", "false", "fn", "for", "if", "impl", "in", "let",
+            "loop", "match", "mod", "move", "mut", "pub", "ref", "return", "self", "Self", "static", "struct", "super", "trait", "true",
+            "type", "unsafe", "use", "where", "while",
+        ];
+        if let Some(t) = self.tok(0).filter(|t| t.kind == TokKind::Ident && KW.contains(&t.text.as_str())) {
+            let k = t.text.clone();
+            return Err(self.err(&format!("expected identifier, found keyword `{k}`")));
+        }
+        self.ident()
+    }
     fn ident(&mut self) -> R<String> {
         match self.tok(0) {
             Some(t) if t.kind == TokKind::Ident => {
@@ -1479,7 +1493,7 @@ impl Parser {
         if self.is_ident("ref") || self.is_ident("mut") {
             let r = self.eat_ident("ref");
             let m = self.eat_ident("mut");
-            let n = self.ident()?;
+            let n = self.decl_ident()?;
             let sub = if self.eat_punct("@") { Some(Box::new(self.pat_one()?)) } else { None };
             return Ok(Pat::Ident(r, m, n, sub));
         }
@@ -1507,7 +1521,7 @@ impl Parser {
                 }
                 let r = self.eat_ident("ref");
                 let m = self.eat_ident("mut");
-                let n = self.ident()?;
+                let n = self.decl_ident()?;
                 if self.eat_punct(":") {
                     fs.push((n, self.pat()?));
                 } else {
@@ -1522,6 +1536,14 @@ impl Parser {
         }
         if path.segs.len() == 1 && !path.global && path.segs[0].args.is_empty() {
             let n = path.segs[0].name.clone();
+            // (a keyword is no binding: `let extern = 0;`; `Self` / `self` are a unit struct and a receiver here)
+            if matches!(
+                n.as_str(),
+                "as" | "break" | "const" | "continue" | "else" | "enum" | "extern" | "fn" | "for" | "if" | "impl" | "in" | "let" | "loop"
+                    | "match" | "mod" | "move" | "pub" | "return" | "static" | "struct" | "trait" | "type" | "unsafe" | "use" | "where" | "while"
+            ) {
+                return Err(self.err(&format!("expected identifier, found keyword `{n}`")));
+            }
             if self.eat_punct("@") {
                 return Ok(Pat::Ident(false, false, n, Some(Box::new(self.pat_one()?))));
             }
@@ -2397,7 +2419,7 @@ impl Parser {
             while !self.is_close() {
                 self.attrs()?;
                 self.vis()?;
-                let n = self.ident()?;
+                let n = self.decl_ident()?;
                 self.expect_punct(":")?;
                 v.push((n, self.ty()?));
                 if !self.eat_punct(",") {
@@ -2422,7 +2444,7 @@ impl Parser {
     }
 
     fn fn_sig(&mut self, quals: Vec<String>) -> R<FnSig> {
-        let name = self.ident()?;
+        let name = self.decl_ident()?;
         let mut g = self.generics()?;
         self.expect_open("(")?;
         let mut recv = None;
@@ -2602,7 +2624,7 @@ impl Parser {
             }
             "struct" | "union" => {
                 self.i += 1;
-                let n = self.ident()?;
+                let n = self.decl_ident()?;
                 let mut g = self.generics()?;
                 self.where_clause(&mut g)?;
                 let f = self.fields()?;
@@ -2615,14 +2637,14 @@ impl Parser {
             }
             "enum" => {
                 self.i += 1;
-                let n = self.ident()?;
+                let n = self.decl_ident()?;
                 let mut g = self.generics()?;
                 self.where_clause(&mut g)?;
                 self.expect_open("{")?;
                 let mut vs = Vec::new();
                 while !self.is_close() {
                     self.attrs()?;
-                    let vn = self.ident()?;
+                    let vn = self.decl_ident()?;
                     let f = self.fields()?;
                     let d = if self.eat_punct("=") { Some(self.expr(true)?) } else { None };
                     vs.push((vn, f, d));
@@ -2658,7 +2680,7 @@ impl Parser {
             }
             "trait" => {
                 self.i += 1;
-                let n = self.ident()?;
+                let n = self.decl_ident()?;
                 let mut g = self.generics()?;
                 let sup = if self.eat_punct(":") { self.bounds()? } else { Vec::new() };
                 self.where_clause(&mut g)?;
@@ -2701,7 +2723,7 @@ impl Parser {
             "static" => {
                 self.i += 1;
                 let m = self.eat_ident("mut");
-                let n = self.ident()?;
+                let n = self.decl_ident()?;
                 self.expect_punct(":")?;
                 let t = self.ty()?;
                 self.expect_punct("=")?;
@@ -2713,7 +2735,7 @@ impl Parser {
             }
             "type" => {
                 self.i += 1;
-                let n = self.ident()?;
+                let n = self.decl_ident()?;
                 let mut g = self.generics()?;
                 let bs = if self.eat_punct(":") { self.bounds()? } else { Vec::new() };
                 self.where_clause(&mut g)?;
@@ -2725,7 +2747,7 @@ impl Parser {
             }
             "mod" => {
                 self.i += 1;
-                let n = self.ident()?;
+                let n = self.decl_ident()?;
                 if self.eat_punct(";") {
                     return Ok(ItemKind::Mod(n, None));
                 }
