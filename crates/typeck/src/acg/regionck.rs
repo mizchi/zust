@@ -83,6 +83,8 @@ pub struct Rg {
     pub lt_names: Vec<String>,
     /// Variance of a struct / enum definition: its lifetime parameters, then its type parameters
     pub variance: HashMap<u32, Vec<Var>>,
+    /// Borrows of what the function owns (a local, not through a reference): (region, the place's text, where)
+    pub loans: Vec<(u32, String, Sp)>,
 }
 
 /// ZUSTC_NO_REGIONCK=1 turns the check off (read once: it is asked for each function)
@@ -125,6 +127,22 @@ pub fn count(prog: &Program, t: Ty, depth: u32) -> Option<usize> {
 
 fn recv_sp(r: &Option<Sp>, or: Sp) -> Sp {
     r.unwrap_or(or)
+}
+
+fn strip(e: &Expr) -> &Expr {
+    match e {
+        Expr::Paren(x) => strip(x),
+        e => e,
+    }
+}
+
+/// `x`, `x.f`: the text of a place for messages
+fn place_text(e: &Expr) -> Option<String> {
+    match strip(e) {
+        Expr::Path(None, p) if p.segs.len() == 1 => Some(p.segs[0].name.clone()),
+        Expr::Field(x, f, _) => Some(format!("{}.{f}", place_text(x)?)),
+        _ => None,
+    }
 }
 
 /// Reads region codes along a type (see `instantiate`)
@@ -527,7 +545,7 @@ impl Rg {
 
     /// The first universal region that must outlive another the function does not know it outlives
     pub fn check(&self) -> Option<(Sp, String)> {
-        if self.univ.is_empty() || self.edges.is_empty() {
+        if self.edges.is_empty() {
             return None;
         }
         // (the universal regions and 'static, as indices; what each is known to outlive, closed)
@@ -583,6 +601,29 @@ impl Rg {
                     }
                     st.push(y);
                 }
+            }
+        }
+        // (a borrow of what the function owns that must outlive a universal region (or be 'static): it does not
+        // live long enough)
+        for (r, name, lsp) in &self.loans {
+            let mut seen = vec![false; n];
+            seen[*r as usize] = true;
+            let mut st = vec![*r];
+            let mut bad = false;
+            while let Some(x) = st.pop() {
+                for &(y, _) in &adj[x as usize] {
+                    if seen[y as usize] {
+                        continue;
+                    }
+                    seen[y as usize] = true;
+                    if ix(y).is_some() {
+                        bad = true;
+                    }
+                    st.push(y);
+                }
+            }
+            if bad {
+                errs.push((*lsp, format!("`{name}` does not live long enough (borrowed value must outlive the function)")));
             }
         }
         errs.sort_by_key(|e| (e.0.line, e.0.col));
@@ -672,6 +713,12 @@ impl Cx<'_> {
                 let (t, tr, derefs) = self.rt_place(x)?;
                 let r = self.rg.var();
                 let sp = super::borrowck::pos(e);
+                // (of a place the function owns: the borrow ends with the function at the latest)
+                if derefs.is_empty() && !matches!(strip(x), Expr::Call(..) | Expr::MethodCall(..)) {
+                    if let Some(n) = place_text(x) {
+                        self.rg.loans.push((r, n, sp));
+                    }
+                }
                 // (a reborrow through references: it lives no longer than they do)
                 for d in derefs {
                     self.rg.edge(d, r, sp);
@@ -680,7 +727,7 @@ impl Cx<'_> {
                 out.extend(tr);
                 Some((Ty::Ref(*m, crate::types::intern(t)), out))
             }
-            Expr::Call(..) | Expr::MethodCall(..) => self.rg.calls.get(&(e as *const Expr as usize)).cloned(),
+            Expr::Call(..) | Expr::MethodCall(..) | Expr::Struct(..) => self.rg.calls.get(&(e as *const Expr as usize)).cloned(),
             Expr::Path(..) | Expr::Field(..) | Expr::Unary(..) => {
                 let (t, tr, _) = self.rt_place(e)?;
                 Some((t, tr))
@@ -932,6 +979,28 @@ impl Cx<'_> {
             _ => tr,
         };
         self.rg.recv = Some((tree, super::borrowck::pos(recv)));
+    }
+
+    /// A struct literal of type t: a fresh tree, the fields' values flow into its fields
+    pub(crate) fn rg_struct_lit(&mut self, e: &Expr, t: Ty) {
+        if !self.rg_on() {
+            return;
+        }
+        let (Expr::Struct(_, fs, None), Ty::Struct(sid)) = (e, t) else { return };
+        let prog = self.prog;
+        if prog.structs[sid as usize].is_enum {
+            return;
+        }
+        let Some(tree) = self.rg.fresh(prog, t) else { return };
+        for (n, v) in fs {
+            let Some(i) = prog.structs[sid as usize].fields.iter().position(|f| f.0 == *n) else { continue };
+            let ft = prog.structs[sid as usize].fields[i].1;
+            let Some(ftr) = self.rg.field(prog, sid, i, &tree) else { continue };
+            if let Some((_, vtr)) = self.rt_expr(v) {
+                self.rg.relate(prog, ft, &vtr, &ftr, super::borrowck::pos(v));
+            }
+        }
+        self.rg.calls.insert(e as *const Expr as usize, (t, tree));
     }
 
     /// Keep the tree of the call just lowered, as the value of e

@@ -1341,6 +1341,14 @@ impl Cx<'_> {
     }
 
     pub(crate) fn struct_lit(&mut self, e: &Expr, expected: Option<Ty>) -> R<V> {
+        let r = self.struct_lit_inner(e, expected);
+        if let Ok((_, t)) = &r {
+            self.rg_struct_lit(e, *t);
+        }
+        r
+    }
+
+    fn struct_lit_inner(&mut self, e: &Expr, expected: Option<Ty>) -> R<V> {
         let Expr::Struct(path, sfields, rest) = e else { return err(SP, "internal: expected a struct literal") };
         if let Some((sid, vi)) = self.prog.variant_by_p(&PPath::of(path), self.self_sid) {
             let v = &self.prog.structs[sid as usize].variants[vi];
