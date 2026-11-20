@@ -5238,6 +5238,7 @@ compile-fail	repr/invalid_repr_list_help.rs
 compile-fail	repr/issue-83505-repr-simd.rs
 run-pass	repr/packed-struct-with-enum-53728.rs
 compile-fail	repr/repr-align-assign.rs
+compile-fail	repr/repr-align.rs
 check-pass	repr/repr-transparent-issue-87496.rs
 compile-fail	repr/repr-transparent-other-items.rs
 compile-fail	repr/repr.rs

@@ -2250,19 +2250,19 @@ impl Cx<'_> {
     }
 
     pub(crate) fn call(&mut self, c: &Expr, expected: Option<Ty>) -> R<V> {
-        // (`<S as Tr>::m(..)`: Tr's impl among the overloads of `S::m`, as a call that named its trait)
-        if let Expr::Call(func, _) = c {
-            if let Expr::Path(Some(_), p) = &**func {
-                if p.segs.len() >= 2 {
-                    let forced = Some((p.segs[p.segs.len() - 1].name.clone(), p.segs[p.segs.len() - 2].name.clone()));
-                    let prev = std::mem::replace(&mut self.explicit_trait, forced);
-                    let r = self.call_inner(c, expected);
-                    self.explicit_trait = prev;
-                    return r;
-                }
-            }
-        }
-        self.call_inner(c, expected)
+        // (`<S as Tr>::m(..)`: Tr's impl among the overloads of `S::m`, as a call that named its trait; any other call
+        // names none, also inside the arguments of one that did)
+        let forced = match c {
+            Expr::Call(func, _) => match &**func {
+                Expr::Path(Some(_), p) if p.segs.len() >= 2 => Some((p.segs[p.segs.len() - 1].name.clone(), p.segs[p.segs.len() - 2].name.clone())),
+                _ => None,
+            },
+            _ => None,
+        };
+        let prev = std::mem::replace(&mut self.explicit_trait, forced);
+        let r = self.call_inner(c, expected);
+        self.explicit_trait = prev;
+        r
     }
 
     fn call_inner(&mut self, c: &Expr, expected: Option<Ty>) -> R<V> {

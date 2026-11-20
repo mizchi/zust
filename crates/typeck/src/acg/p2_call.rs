@@ -1296,7 +1296,9 @@ impl Cx<'_> {
 
     /// 同じ名前の trait impl の関数 (`P::from` が `From<&str>` と `From<String>`) から、最初の引数の型で選ぶ
     pub(crate) fn pick_overload(&self, id: u32, recv: Option<Ty>, args: &[&Expr]) -> u32 {
-        let Some(cands) = self.prog.overloads.get(&self.prog.names[id as usize]) else {
+        // (by the group's name: a candidate's own may carry an overload suffix, `S::from#1`)
+        let gname = &self.prog.names[id as usize];
+        let Some(cands) = self.prog.overloads.get(gname).or_else(|| self.prog.overloads.get(gname.split('#').next().unwrap_or(gname))) else {
             return id;
         };
         let Some(at) = recv.or_else(|| args.first().and_then(|a| self.peek(a))) else {

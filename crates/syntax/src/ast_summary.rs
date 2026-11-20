@@ -59,8 +59,28 @@ fn int_repr(attrs: &[String]) -> Option<String> {
 }
 
 /// `#[repr(packed)]` / `#[repr(packed(N))]` / `#[repr(align(N))]`: "packed:N" / "align:N" (Summary's reprs keeps them
-/// beside the integer type of an enum)
-fn layout_reprs(attrs: &[String]) -> Vec<String> {
+/// beside the integer type of an enum), and "C" for `#[repr(C)]`. N is an unsuffixed integer literal (`16`, `0x10`,
+/// `1_024`), a power of two up to 2^29 (E0589)
+fn layout_reprs(attrs: &[String]) -> R<Vec<String>> {
+    let value = |x: &str| -> R<u32> {
+        let x = x.replace('_', "");
+        let (digits, radix) = match x.get(..2) {
+            Some("0x") => (&x[2..], 16),
+            Some("0o") => (&x[2..], 8),
+            Some("0b") => (&x[2..], 2),
+            _ => (x.as_str(), 10),
+        };
+        let Ok(n) = u64::from_str_radix(digits, radix) else {
+            return err("invalid alignment value: not an unsuffixed integer (E0589)");
+        };
+        if n > 1 << 29 {
+            return err("invalid alignment value: larger than 2^29 (E0589)");
+        }
+        if !n.is_power_of_two() {
+            return err("invalid alignment value: not a power of two (E0589)");
+        }
+        Ok(n as u32)
+    };
     let mut v = vec![];
     for a in attrs {
         let c = compact(a);
@@ -70,14 +90,14 @@ fn layout_reprs(attrs: &[String]) -> Vec<String> {
                 v.push("C".to_string());
             } else if part == "packed" {
                 v.push("packed:1".to_string());
-            } else if let Some(n) = part.strip_prefix("packed(").and_then(|x| x.strip_suffix(')')).and_then(|x| x.parse::<u32>().ok()) {
-                v.push(format!("packed:{n}"));
-            } else if let Some(n) = part.strip_prefix("align(").and_then(|x| x.strip_suffix(')')).and_then(|x| x.parse::<u32>().ok()) {
-                v.push(format!("align:{n}"));
+            } else if let Some(n) = part.strip_prefix("packed(").and_then(|x| x.strip_suffix(')')) {
+                v.push(format!("packed:{}", value(n)?));
+            } else if let Some(n) = part.strip_prefix("align(").and_then(|x| x.strip_suffix(')')) {
+                v.push(format!("align:{}", value(n)?));
             }
         }
     }
-    v
+    Ok(v)
 }
 
 /// `#[link_name = "malloc"]` の名前
@@ -1613,7 +1633,7 @@ pub fn summarize(item: &Item, owner: Option<&Owner>) -> R<Summary> {
                 if let Some(r) = int_repr(&item.attrs) {
                     sm.reprs.push((sn.clone(), r));
                 }
-                for r in layout_reprs(&item.attrs) {
+                for r in layout_reprs(&item.attrs)? {
                     sm.reprs.push((sn.clone(), r));
                 }
             }
@@ -1698,7 +1718,7 @@ pub fn summarize(item: &Item, owner: Option<&Owner>) -> R<Summary> {
             if union {
                 sm.unions.push(sn.clone());
             }
-            for r in layout_reprs(&item.attrs) {
+            for r in layout_reprs(&item.attrs)? {
                 sm.reprs.push((sn.clone(), r));
             }
             sm.adt_generics = adt_params(g)?;
