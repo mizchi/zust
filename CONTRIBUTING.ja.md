@@ -36,10 +36,17 @@ clone したばかりのところから、順に行う。終わると、この�
    cargo build --release --workspace
    ```
 
-4. rustc の UI テストを取ってくる。`tests/ui` だけの sparse clone で、約 170 MB が `out/rust-tests` に入る。
+4. rustc の UI テストを取ってくる。`tests/ui` と `tests/auxiliary` だけの sparse clone で、約 170 MB が `out/rust-tests` に入る。
 
    ```bash
    python3 bench/rust_ui.py --fetch
+   ```
+
+   `tests/auxiliary` を加える前に取ってきたチェックアウトには、一度だけ追加する。compiletest がすべてのテストにリンクする
+   C のヘルパー (`rust_test_helpers.c`) が入っている。
+
+   ```bash
+   git -C out/rust-tests sparse-checkout add tests/auxiliary
    ```
 
 5. pre-commit フックを有効にする。英語と日本語の文書の食い違いを防ぐ。
@@ -142,7 +149,7 @@ tests/selfhost_compiler.sh
 ### rustc 自身のテスト集
 
 `bench/rust_ui.py` は、rustc の UI テスト (rust-lang/rust の `tests/ui`。rustc 1.100.0 のコミットに固定) を zustc で
-走らせる。最初に一度取ってくる (`tests/ui` だけの部分 clone、約 170 MB を `out/rust-tests` に):
+走らせる。最初に一度取ってくる (`tests/ui` と `tests/auxiliary` だけの部分 clone、約 170 MB を `out/rust-tests` に):
 
 ```bash
 python3 bench/rust_ui.py --fetch

@@ -37,10 +37,18 @@ Steps for a fresh clone, in order. After them, every command in this document wo
    cargo build --release --workspace
    ```
 
-4. Fetch rustc's UI tests. This is a sparse clone of `tests/ui` only, about 170 MB, into `out/rust-tests`:
+4. Fetch rustc's UI tests. This is a sparse clone of `tests/ui` and `tests/auxiliary` only, about 170 MB, into
+   `out/rust-tests`:
 
    ```bash
    python3 bench/rust_ui.py --fetch
+   ```
+
+   A checkout fetched before `tests/auxiliary` was added needs it added once. The C helpers that compiletest links
+   into every test (`rust_test_helpers.c`) are in it:
+
+   ```bash
+   git -C out/rust-tests sparse-checkout add tests/auxiliary
    ```
 
 5. Enable the pre-commit hook. It keeps the English / Japanese documents in agreement:
@@ -147,7 +155,7 @@ Compiles the whole compiler with both zustc and rustc and checks that the two re
 ### rustc's own test suite
 
 `bench/rust_ui.py` runs zustc against rustc's UI tests (rust-lang/rust `tests/ui`, pinned to the commit of rustc
-1.100.0). Fetch them once (a sparse clone of only `tests/ui`, about 170 MB, into `out/rust-tests`):
+1.100.0). Fetch them once (a sparse clone of only `tests/ui` and `tests/auxiliary`, about 170 MB, into `out/rust-tests`):
 
 ```bash
 python3 bench/rust_ui.py --fetch
