@@ -1097,7 +1097,7 @@ fn first_bad_name(src: &str, items: &[SrcItem], deny: [bool; 3]) -> Option<(usiz
     let upper = |n: &str| !n.chars().any(|c| c.is_lowercase());
     for it in items {
         let text = &src[it.start..it.end];
-        if text.contains("allow(non_") || text.contains("allow(nonstandard_style") || text.contains("#[cfg") || text.contains("no_mangle")
+        if text.contains("allow(non_") || text.contains("expect(non_") || text.contains("allow(nonstandard_style") || text.contains("#[cfg") || text.contains("no_mangle")
             || text.contains("extern \"C\"") || text.contains("export_name")
         {
             continue;
@@ -1133,6 +1133,45 @@ fn first_bad_name(src: &str, items: &[SrcItem], deny: [bool; 3]) -> Option<(usiz
             continue;
         }
         let member = matches!(it.kind, ItemKind::ImplMember(_) | ItemKind::TraitMember(_));
+        // (a struct's fields: `X: usize` is "structure field `X`")
+        if (kw == "struct" || kw == "enum") && deny[0] {
+            // (an enum's struct-like variants: their fields one level deeper)
+            let field_depth = if kw == "enum" { 2 } else { 1 };
+            let mut depth = 0;
+            for j in nk + 1..t.len() {
+                if t[j].0 == 1 {
+                    match text.as_bytes()[t[j].1] {
+                        b'{' | b'(' | b'<' | b'[' => depth += 1,
+                        b'}' | b')' | b'>' | b']' => depth -= 1,
+                        _ => {}
+                    }
+                    continue;
+                }
+                let f = tw(j);
+                if depth == field_depth && j + 1 < t.len() && t[j + 1].0 == 1 && text.as_bytes()[t[j + 1].1] == b':' && f != "pub" && !snake(f) && !f.starts_with('_') {
+                    let line = it.line + text[..t[j].1].matches('\n').count();
+                    return Some((line, format!("structure field `{f}` should have a snake case name")));
+                }
+            }
+        }
+        // (a fn's parameters and `let`s: "variable `X`")
+        if kw == "fn" && deny[0] {
+            if let Ok(Some(f)) = parse_fn(src, it) {
+                for (p, _) in &f.sig.params {
+                    if let Pat::Ident(_, _, n, None) = p {
+                        if !snake(n) && !n.starts_with("__exr") {
+                            return Some((it.line, format!("variable `{n}` should have a snake case name")));
+                        }
+                    }
+                }
+                for (pos, n) in crate::ast_closure::let_bindings(&f.block) {
+                    // (an upper-case name in a pattern may be a constant or a unit struct: only clear variables)
+                    if !snake(&n) && n.chars().any(|c| c.is_lowercase()) && !n.starts_with("__") && pos.line > 0 {
+                        return Some((it.line + pos.line as usize - 1, format!("variable `{n}` should have a snake case name")));
+                    }
+                }
+            }
+        }
         let in_trait = matches!(it.kind, ItemKind::TraitMember(_));
         let msg = match kw {
             "fn" if deny[0] && !snake(name) => {

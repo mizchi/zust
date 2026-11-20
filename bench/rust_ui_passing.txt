@@ -3212,6 +3212,8 @@ compile-fail	lint/non-snake-case/lint-non-snake-case-functions.rs
 compile-fail	lint/non-snake-case/lint-non-snake-case-identifiers-suggestion-reserved.rs
 check-pass	lint/non-snake-case/lint-non-snake-case-no-lowercase-equivalent.rs
 compile-fail	lint/non-snake-case/lint-nonstandard-style-unicode-2.rs
+compile-fail	lint/non-snake-case/lint-uppercase-variables.rs
+compile-fail	lint/non-snake-case/no-snake-case-warning-for-field-puns-issue-66362.rs
 check-pass	lint/non-snake-case/non-snake-ffi-issue-31924.rs
 run-pass	lint/overflowing-literals-valid.rs
 check-pass	lint/pre-expansion-expect.rs

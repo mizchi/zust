@@ -105,3 +105,4 @@ date	commit	change	noop_M	edit_M	check_M	cache_KiB	lsp_G	run	check	build	cfail
 2026-11-20	3c46afb	zustc / zust-analyzer linked non-PIE (build.rs: -no-pie for this package's bins): no loader relocations at start	0.697	590.833	3879.217	1902.8	10.8941	1698	1417	95	3352	1181.995	63.310	10.210	319.428
 2026-11-20	a14943c+	lint: #![deny(unused_must_use)] for a dropped Result and #[must_use] fns	0.697	591.046	3881.867	1902.8	-	1698	1417	95	3356	1181.721	63.259	10.210	319.440
 2026-11-20	83f2912+	lint: naming conventions (non_snake_case / non_camel_case_types / non_upper_case_globals)	0.695	590.942	3879.606	1902.8	-	1698	1417	95	3366	1181.702	63.284	10.196	319.379
+2026-11-20	fdd2ee3+	naming lints: struct / enum variant fields, parameters and lets	0.695	590.910	3879.582	1902.8	-	1698	1417	95	3368	1182.195	63.289	10.200	319.410
