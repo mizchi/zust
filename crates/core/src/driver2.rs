@@ -485,6 +485,9 @@ impl Session2 {
             if let Some(e) = unresolved_import(src0, &src, &items[..user], &self.ctx.deps) {
                 return Err(e);
             }
+            if let Some(e) = duplicate_import(src0, &src, &items[..user]) {
+                return Err(e);
+            }
         }
         let mut tm = Timer { on: std::env::var_os("ZUSTC_PROF").is_some(), last: now_ns(), start: now_ns() };
         if let Some(p) = std::env::var_os("ZUSTC_DUMP_SRC") {
@@ -1088,6 +1091,77 @@ fn first_unreachable(b: &crate::parse::Block) -> Option<(crate::parse::Pos, &'st
         }
     }
     block(b)
+}
+
+/// E0252 / E0255: a name a top-level `use` brings in that another top-level `use` or item of the crate root also
+/// defines ("the name `X` is defined multiple times", at the second). Top level = the item starts a line (the
+/// flattened modules' items keep their indentation)
+fn duplicate_import(src0: &str, split: &str, items: &[SrcItem]) -> Option<String> {
+    let mut seen: Vec<(String, bool, usize)> = vec![];
+    // (the original file's last line: items past it were hoisted out of fn bodies, and are their blocks')
+    let mut total: Option<usize> = None;
+    for it in items {
+        if !matches!(it.kind, ItemKind::Normal) || !(it.start == 0 || split.as_bytes()[it.start - 1] == b'\n') {
+            continue;
+        }
+        let text = &split[it.start..it.end];
+        if text.starts_with([' ', '\t']) || text.contains("#[cfg") || text.starts_with("#!") {
+            continue;
+        }
+        // (past the item's attributes: `#[allow(unused_imports)]`)
+        let mut t = text;
+        while t.starts_with("#[") {
+            let Some(e) = t.find(']') else { break };
+            t = t[e + 1..].trim_start();
+        }
+        let line_shift = text[..text.len() - t.len()].matches('\n').count();
+        let t = t.strip_prefix("pub ").unwrap_or(t);
+        let mut names: Vec<(String, bool)> = vec![];
+        if let Some(rest) = t.strip_prefix("use ") {
+            let body = rest.trim_end().trim_end_matches(';').trim();
+            let (prefix, list): (&str, Vec<&str>) = match body.find('{') {
+                Some(i) if body.ends_with('}') && !body[i + 1..].contains('{') => (&body[..i], body[i + 1..body.len() - 1].split(',').map(str::trim).filter(|x| !x.is_empty()).collect()),
+                Some(_) => continue,
+                None => ("", vec![body]),
+            };
+            for e in list {
+                let (path, alias) = match e.split_once(" as ") {
+                    Some((p, a)) => (p.trim(), Some(a.trim())),
+                    None => (e.trim(), None),
+                };
+                // (`use a::{self}` names `a`)
+                let last = if path == "self" { prefix.trim_end_matches("::").rsplit("::").next().unwrap_or("") } else { path.rsplit("::").next().unwrap_or(path) };
+                let n = alias.unwrap_or(last);
+                if !n.is_empty() && n != "_" && n != "*" && !path.ends_with('*') {
+                    names.push((n.to_string(), true));
+                }
+            }
+        } else {
+            let kw_name = t.split_whitespace().take(2).collect::<Vec<_>>();
+            if let [kw, name] = kw_name.as_slice() {
+                if matches!(*kw, "struct" | "enum" | "trait" | "type" | "union" | "fn" | "const" | "static") {
+                    let n: String = name.chars().take_while(|c| c.is_alphanumeric() || *c == '_').collect();
+                    // (a user type renamed off a prelude type's name is still that name)
+                    let n = n.strip_prefix("__u_").map(str::to_string).unwrap_or(n);
+                    if !n.is_empty() && !n.contains("__") {
+                        names.push((n, false));
+                    }
+                }
+            }
+        }
+        let line = it.line + line_shift;
+        for (n, is_use) in names {
+            // (two items of one name are the build's own duplicate check; here at least one is a `use`)
+            if let Some(&(_, _, l0)) = seen.iter().find(|(m, u, _)| *m == n && (*u || is_use)) {
+                let last = *total.get_or_insert_with(|| src0.bytes().filter(|&c| c == b'\n').count() + 1);
+                if line <= last && l0 <= last {
+                    return Some(format!("{line}:1: the name `{n}` is defined multiple times"));
+                }
+            }
+            seen.push((n, is_use, line));
+        }
+    }
+    None
 }
 
 /// A top-level `use a::..` (at the start of a line) whose first segment is no crate the build knows (std, core,
