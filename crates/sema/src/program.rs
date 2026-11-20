@@ -1541,7 +1541,12 @@ impl Program {
             for (pn, trs) in &sm.adt_bounds {
                 let Some(&a) = sm.adt_generics.iter().position(|g| g == pn).and_then(|i| sd.args.get(i)) else { continue };
                 for tr in trs {
-                    if sums[..user.min(sums.len())].iter().any(|s| s.trait_decl.as_deref() == Some(tr.as_str())) && !p.bound_holds(sums, user, a, tr, 0) {
+                    // (the program's own traits, for any argument; the prelude's (Eq ..), for the arguments `implements`
+                    // judges exactly: scalars and non-generic structs)
+                    let own = sums[..user.min(sums.len())].iter().any(|s| s.trait_decl.as_deref() == Some(tr.as_str()));
+                    let judged = a.is_int() || a.is_float() || matches!(a, Ty::Bool | Ty::Char | Ty::Unit) || matches!(a, Ty::Struct(x) if p.structs[x as usize].base.is_none() && p.structs[x as usize].generics.is_empty());
+                    let prelude = !own && judged && sums.iter().any(|s| s.trait_decl.as_deref() == Some(tr.as_str()));
+                    if (own || prelude) && !p.bound_holds(sums, user, a, tr, 0) {
                         // (an extern static: at its own line in the block)
                         let line = items[c.item as usize].line + crate::parse::extern_static(&c.expr).map_or(0, |x| x.0.saturating_sub(1));
                         return Err(format!("{line}:1: the trait bound `{}: {tr}` is not satisfied (E0277)", p.tn(a)));
@@ -1714,15 +1719,15 @@ impl Program {
             if !self.match_ty(pt, t, &mut sol) {
                 continue;
             }
-            // (a where clause this does not read: the impl applies, once its self type matches)
-            if !s.where_types.is_empty() {
-                return true;
-            }
             // (match_ty also lets `&mut` stand for `&` and the like: the impl applies only to its self type itself)
             if let Some(args) = sol.iter().copied().collect::<Option<Vec<Ty>>>() {
                 if self.subst(pt, &args) != t {
                     continue;
                 }
+            }
+            // (a where clause this does not read: the impl applies, once its self type matches)
+            if !s.where_types.is_empty() {
+                return true;
             }
             let bounds_hold = s.impl_generics.iter().zip(&sol).all(|((_, bs), a)| match a {
                 Some(a) => bs.iter().all(|b| {

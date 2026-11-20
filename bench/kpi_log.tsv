@@ -181,3 +181,4 @@ date	commit	change	noop_M	edit_M	check_M	cache_KiB	lsp_G	run	check	build	cfail	t
 2026-11-20	bb7a65b+	PR18 review: bound_holds matches impls; activation inside call_fn	0.695	548.412	3840.974	1902.8	-	1778	1459	98	3589	1167.923	63.647	10.282	316.935	697.639	263.090
 2026-11-20	dab3faa+	PR18 review 2: program traits only, where after match, map index raw-ref	0.695	548.412	3840.974	1902.8	-	1778	1459	98	3589	1167.923	63.559	10.282	316.935	697.639	263.091
 2026-11-20	818943c+	static bounds: cycles fail, references matched	0.695	548.406	3841.018	1902.8	-	1778	1459	98	3589	1167.921	63.651	10.282	316.904	697.636	263.085
+2026-11-20	22bf9fb+	PR18 review 3: exact match before where, prelude bounds on scalars	0.697	548.409	3841.020	1902.8	-	1778	1459	98	3589	1167.923	63.652	10.296	316.918	697.638	263.087
