@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795188041874,
+  "lastUpdate": 1795189476137,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -37046,6 +37046,165 @@ window.BENCHMARK_DATA = {
           {
             "name": "rt/strings run (-O)",
             "value": 37.46,
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "committer": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "distinct": true,
+          "id": "b0618707eb43a9fb304b42ea2b2b4232f9130685",
+          "message": "Borrow checker in closure bodies\n\nClosure bodies used to be left out of the borrow checker, so two moves\nof a local inside a closure, or of a capture, compiled. Now:\n- Closure bodies are checked as fn bodies are.\n- A capture held by value is one of the body's locals, so\n  `move || loop { let tx = tx; .. }` is E0382 (use of moved value).\n- The rewrite of `match cap { .. }` on a capture held by value (moved to a\n  local first) is not checked. That move is the rewrite's, and\n  `None => .., Some(x) => cap = Some(x)` leaves cap whole on every path.\n\ntests/ui: +9 compile-fail, each checked against its expected error\n(cannot move out of / E0381 / cannot borrow or assign behind `&` / use\nof moved value). suggestions/dont-suggest-ref/move-into-closure.rs goes\nto rust_ui_accidental.txt: it is rejected on an annotated line, but as a\nuse of a partially moved value, not \"cannot move\". borrowck/moved-value-\nin-thread-loop-12041.rs now fails for its own reason (E0382).\n\nKPI against main (0e9cf07) without this change: edit one fn +0.17%,\ntraits check +0.35%, patterns check +0.19%, from checking the closure\nbodies. The flagged no-op / crates no-op are the std startup variation.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-20T15:40:10Z",
+          "tree_id": "4ec17859b7205c5b85eae2a624e356b50cd2e986",
+          "url": "https://github.com/mizchi/zust/commit/b0618707eb43a9fb304b42ea2b2b4232f9130685"
+        },
+        "date": 1795189475614,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "gen1000 build cold",
+            "value": 89.922,
+            "unit": "ms"
+          },
+          {
+            "name": "gen1000 build noop",
+            "value": 0.93,
+            "unit": "ms"
+          },
+          {
+            "name": "gen1000 build edit 1 fn",
+            "value": 18.996,
+            "unit": "ms"
+          },
+          {
+            "name": "gen1000 check",
+            "value": 76.656,
+            "unit": "ms"
+          },
+          {
+            "name": "gen1000 build cold peak RSS",
+            "value": 18.004,
+            "unit": "MiB"
+          },
+          {
+            "name": "gen1000 binary",
+            "value": 323.977,
+            "unit": "KiB"
+          },
+          {
+            "name": "gen1000 cache",
+            "value": 387.21,
+            "unit": "KiB"
+          },
+          {
+            "name": "gen1000 build noop instructions",
+            "value": 0.554,
+            "unit": "M instr"
+          },
+          {
+            "name": "gen1000 build edit 1 fn instructions",
+            "value": 123.791,
+            "unit": "M instr"
+          },
+          {
+            "name": "gen1000 check instructions",
+            "value": 776.173,
+            "unit": "M instr"
+          },
+          {
+            "name": "gen5000 build cold",
+            "value": 395.201,
+            "unit": "ms"
+          },
+          {
+            "name": "gen5000 build noop",
+            "value": 1.173,
+            "unit": "ms"
+          },
+          {
+            "name": "gen5000 build edit 1 fn",
+            "value": 61.96,
+            "unit": "ms"
+          },
+          {
+            "name": "gen5000 check",
+            "value": 367.278,
+            "unit": "ms"
+          },
+          {
+            "name": "gen5000 build cold peak RSS",
+            "value": 51.887,
+            "unit": "MiB"
+          },
+          {
+            "name": "gen5000 binary",
+            "value": 1558.336,
+            "unit": "KiB"
+          },
+          {
+            "name": "gen5000 cache",
+            "value": 1902.835,
+            "unit": "KiB"
+          },
+          {
+            "name": "gen5000 build noop instructions",
+            "value": 0.554,
+            "unit": "M instr"
+          },
+          {
+            "name": "gen5000 build edit 1 fn instructions",
+            "value": 588.917,
+            "unit": "M instr"
+          },
+          {
+            "name": "gen5000 check instructions",
+            "value": 3832.917,
+            "unit": "M instr"
+          },
+          {
+            "name": "rt/fib run (-O)",
+            "value": 35.157,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/hashmap run (-O)",
+            "value": 100.473,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/matmul run (-O)",
+            "value": 33.737,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/nbody run (-O)",
+            "value": 50.628,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/sieve run (-O)",
+            "value": 56.266,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/sort run (-O)",
+            "value": 151.348,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/strings run (-O)",
+            "value": 42.852,
             "unit": "ms"
           }
         ]
