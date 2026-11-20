@@ -1029,3 +1029,65 @@ pub fn first_unused_binding(params: &[String], body: &Block) -> Option<(Option<P
     found.sort_by_key(|(p, _)| (p.line, p.col));
     param.or_else(|| found.into_iter().next().map(|(p, n)| (Some(p), n)))
 }
+
+/// Every `let` binding of a body (nested blocks too) with its `let`'s position, in order (the naming lint)
+pub fn let_bindings(body: &Block) -> Vec<(Pos, String)> {
+    fn names(p: &Pat, out: &mut Vec<String>) {
+        match p {
+            Pat::Ident(_, _, n, sub) => {
+                out.push(n.clone());
+                if let Some(s) = sub {
+                    names(s, out);
+                }
+            }
+            Pat::Tuple(ps) | Pat::TupleStruct(_, ps) | Pat::Slice(ps) => ps.iter().for_each(|q| names(q, out)),
+            Pat::Ref(_, q) => names(q, out),
+            Pat::Struct(_, fs, _) => fs.iter().for_each(|(_, q)| names(q, out)),
+            _ => {}
+        }
+    }
+    fn block(b: &Block, out: &mut Vec<(Pos, String)>) {
+        for s in &b.stmts {
+            match s {
+                Stmt::Let(p, _, init, els, pos) => {
+                    let mut ns = vec![];
+                    names(p, &mut ns);
+                    out.extend(ns.into_iter().map(|n| (*pos, n)));
+                    if let Some(e) = init {
+                        expr(e, out);
+                    }
+                    if let Some(eb) = els {
+                        block(eb, out);
+                    }
+                }
+                Stmt::Expr(e, _) => expr(e, out),
+                Stmt::Item(_) => {}
+            }
+        }
+    }
+    fn expr(e: &Expr, out: &mut Vec<(Pos, String)>) {
+        match e {
+            Expr::Block(_, _, b) | Expr::Const(b) | Expr::Loop(_, b) => block(b, out),
+            Expr::If(c, t, els) => {
+                expr(c, out);
+                block(t, out);
+                if let Some(x) = els {
+                    expr(x, out);
+                }
+            }
+            Expr::While(_, c, b) => {
+                expr(c, out);
+                block(b, out);
+            }
+            Expr::For(_, _, x, b) => {
+                expr(x, out);
+                block(b, out);
+            }
+            Expr::Macro(..) => {}
+            _ => each_child(e, &mut |c| expr(c, out)),
+        }
+    }
+    let mut out = vec![];
+    block(body, &mut out);
+    out
+}
