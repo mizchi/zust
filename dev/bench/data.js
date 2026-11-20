@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795187646814,
+  "lastUpdate": 1795187649177,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -52828,6 +52828,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "lsp peak RSS",
             "value": 75.203,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "committer": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "distinct": true,
+          "id": "dd2f0105be0fc2918c7dadd66f9ab33f7642bbd8",
+          "message": "Rc / Arc can be moved out of a closure's captures\n\nA by-value capture is moved out of the closure by zeroing its slot, so\nthat the environment's drop frees nothing twice. That worked only for\ntypes whose drop treats zero as empty (Box, Vec, String). Rc and Arc's\nDrop now returns at once on a null pointer, so they count as zeroable too:\n`thread::spawn(move || take(arc))` and\n`move || { let x = rc; .. }` compile and run.\n\ntests/ui: +1 run-pass (traits/bound/in-arc.rs), +1 check-pass\n(closures/boxed-closure-sent-through-thread.rs).\nborrowck/moved-value-in-thread-loop-12041.rs moves to\nrust_ui_accidental.txt. It passed only because the move was unsupported\non the annotated line. Its own error, E0382 for a capture moved in a\nloop, needs the borrow checker in closure bodies, which is off there\ntoday (a closure's own locals are not checked either).\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-20T15:08:55Z",
+          "tree_id": "df51dcab0d6f366176a9b69af981a3fb1e161f05",
+          "url": "https://github.com/mizchi/zust/commit/dd2f0105be0fc2918c7dadd66f9ab33f7642bbd8"
+        },
+        "date": 1795187648679,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "lsp definition p50",
+            "value": 0.502,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp hover p50",
+            "value": 0.389,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp completion p50",
+            "value": 1.036,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp references p50",
+            "value": 4.467,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp rename p50",
+            "value": 0.47,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp signatureHelp p50",
+            "value": 0.976,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp documentHighlight p50",
+            "value": 1.064,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp ready (startup to indexed)",
+            "value": 127.818,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp peak RSS",
+            "value": 74.98,
             "unit": "MiB"
           }
         ]
