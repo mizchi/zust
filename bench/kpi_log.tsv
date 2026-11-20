@@ -121,3 +121,4 @@ date	commit	change	noop_M	edit_M	check_M	cache_KiB	lsp_G	run	check	build	cfail
 2026-11-20	623881a+	std::thread as green threads (makecontext / swapcontext): spawn, join, recv, Mutex, sleep, yield_now, atomic loads wait; static mut items of the prelude are named by their name	0.705	551.515	3822.905	1902.8	-	1700	1417	95	3404	1175.970	60.973	9.839	317.003
 2026-11-20	f371d7f+	attributes on items they cannot be used on	0.697	590.840	3880.642	1902.8	-	1698	1417	95	3462	1182.016	63.277	10.210	319.405
 2026-11-20	fbf1812+	E0277: unsized parameters, consts and statics	0.695	559.780	3850.450	1902.8	-	1700	1417	95	3474	1179.086	63.425	10.259	321.124
+2026-11-20	112b131	reference: 112b131 (after #9) measured again on this machine, for the rows below	0.695	559.828	3850.450	1902.8	-	-	-	-	-	1179.072	63.456	10.259	321.104
