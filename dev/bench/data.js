@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795150657346,
+  "lastUpdate": 1795150659477,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -60710,6 +60710,85 @@ window.BENCHMARK_DATA = {
           {
             "name": "parity 一致の平均",
             "value": 93.05,
+            "unit": "%"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "committer": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "distinct": true,
+          "id": "1b4b0ac5fa36f05c4d4c699f42e3fc58615318c4",
+          "message": "E0261: undeclared lifetimes in free fns, structs, enums and statics\n\nA lifetime a free fn's signature, a struct's or enum's fields, or a\nstatic's type names that is neither declared there nor 'static / '_\nis \"use of undeclared lifetime name `'a`\". fn pointer, `impl` and\n`dyn` types are not looked into (they may bind their own with\n`for<'a>`); impl and trait members are left out (their outer lifetimes\nare not known here). A type's error is reported at the line the\nlifetime is first written on (the field-line marker now also takes a\nlifetime).\n\ntests/ui: +10 compile-fail passes.\nKPI: all within ±0.3% of the row before (no-op and crates no-op in\ntheir usual alternation).\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-20T04:52:26Z",
+          "tree_id": "f5ec9743ffbf4edb5ddbcbf2ba13d18827262045",
+          "url": "https://github.com/mizchi/zust/commit/1b4b0ac5fa36f05c4d4c699f42e3fc58615318c4"
+        },
+        "date": 1795150659092,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "parity documentSymbol (名前の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity workspace/symbol (上位 20 の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity definition (行き先の一致)",
+            "value": 89.655,
+            "unit": "%"
+          },
+          {
+            "name": "parity hover (名前を含む)",
+            "value": 82.5,
+            "unit": "%"
+          },
+          {
+            "name": "parity references (数の一致)",
+            "value": 83.784,
+            "unit": "%"
+          },
+          {
+            "name": "parity documentHighlight (数の一致)",
+            "value": 84.375,
+            "unit": "%"
+          },
+          {
+            "name": "parity rename (書き換えの一致)",
+            "value": 83.333,
+            "unit": "%"
+          },
+          {
+            "name": "parity signatureHelp (名前・引数の数・今の引数の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity completion `x.\\|` (書いてある名前を含む)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity completion `na\\|me` (同)",
+            "value": 92,
+            "unit": "%"
+          },
+          {
+            "name": "parity 一致の平均",
+            "value": 91.565,
             "unit": "%"
           }
         ]
