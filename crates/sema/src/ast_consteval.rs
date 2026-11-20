@@ -137,6 +137,17 @@ fn write(prog: &Program, e: &Expr, ty: Ty, v: &mut DataVal, off: u32, depth: u32
     while let Expr::Paren(x) = e {
         e = x;
     }
+    // (a call of a `const fn` whose body is `let`s and a tail: that tail with the parameters and lets put in)
+    if let Expr::Call(f, args) = e {
+        if let Expr::Path(None, p) = &**f {
+            if let Some((ps, body)) = ident(p).and_then(|n| prog.const_fns.get(n)) {
+                if !ty.is_int() && !matches!(ty, Ty::Bool | Ty::Char) {
+                    let tail = inline_const_fn(ps, body, args)?;
+                    return write(prog, &tail, ty, v, off, depth + 1);
+                }
+            }
+        }
+    }
     // 他の const / static は名前で辿る
     if let Expr::Path(None, p) = e {
         if let Some(id) = ident(p) {
@@ -277,6 +288,16 @@ fn write(prog: &Program, e: &Expr, ty: Ty, v: &mut DataVal, off: u32, depth: u32
                         return Err("unsupported constant".to_string());
                     };
                     let vi = if sd.is_enum { Some(vi_of(p)?) } else { None };
+                    // (only a constructor of this struct: a call of a const fn (`static C: (f64, u8) = m();`) is
+                    // not one, and its fields are not its arguments)
+                    // (`Type::new(x)` keeps the old reading, the arguments as the fields in order)
+                    if vi.is_none() {
+                        let base = prog.structs[prog.base_of(sid) as usize].name.split('<').next().unwrap_or("").to_string();
+                        let last = p.segs.last().map(|s| s.name.as_str()).unwrap_or("");
+                        if last != base && last != "Self" && p.segs.len() < 2 {
+                            return Err("unsupported constant (a call of a function)".to_string());
+                        }
+                    }
                     if let Some(vi) = vi {
                         put_int(v, off, tag_bytes, sd.variants[vi].discr as i128);
                     }
@@ -370,6 +391,51 @@ pub fn dump(dv: &DataVal, indent: usize, out: &mut Vec<String>) {
 }
 
 /// A float constant: a literal, `-x`, `+ - * /` of them, a cast of an integer constant, another const
+/// A `const fn`'s body (`let`s and a tail expression) as one expression of its arguments
+fn inline_const_fn(ps: &[String], body: &str, args: &[Expr]) -> R<Expr> {
+    if ps.len() != args.len() {
+        return Err("wrong number of arguments in a constant call".into());
+    }
+    let mut env: Vec<(String, Expr)> = ps.iter().cloned().zip(args.iter().map(|a| Expr::Paren(Box::new(a.clone())))).collect();
+    let Expr::Block(_, _, b) = crate::parse::parse_expr(body)? else { return Err("unsupported const fn".into()) };
+    let n = b.stmts.len();
+    for (i, st) in b.stmts.iter().enumerate() {
+        match st {
+            crate::parse::Stmt::Let(crate::parse::Pat::Ident(false, _, name, None), _, Some(init), None, _) if i + 1 < n => {
+                let x = subst(init, &env)?;
+                env.push((name.clone(), Expr::Paren(Box::new(x))));
+            }
+            crate::parse::Stmt::Expr(x, false) if i + 1 == n => return subst(x, &env),
+            _ => return Err("unsupported const fn body in a constant".into()),
+        }
+    }
+    Err("unsupported const fn body in a constant".into())
+}
+
+/// e with the names bound in env replaced by their expressions (only the shapes a constant is made of)
+fn subst(e: &Expr, env: &[(String, Expr)]) -> R<Expr> {
+    let r = |x: &Expr| subst(x, env).map(Box::new);
+    let all = |xs: &[Expr]| xs.iter().map(|x| subst(x, env)).collect::<R<Vec<Expr>>>();
+    Ok(match e {
+        Expr::Path(None, p) if p.segs.len() == 1 && p.segs[0].args.is_empty() => match env.iter().rev().find(|(n, _)| *n == p.segs[0].name) {
+            Some((_, x)) => x.clone(),
+            None => e.clone(),
+        },
+        Expr::Path(..) | Expr::Lit(..) => e.clone(),
+        Expr::Paren(x) => Expr::Paren(r(x)?),
+        Expr::Unary(op, x, sp) => Expr::Unary(op.clone(), r(x)?, *sp),
+        Expr::Binary(op, a, b, sp) => Expr::Binary(op.clone(), r(a)?, r(b)?, *sp),
+        Expr::Cast(x, t) => Expr::Cast(r(x)?, t.clone()),
+        Expr::Call(f, xs) => Expr::Call(f.clone(), all(xs)?),
+        Expr::Tuple(xs) => Expr::Tuple(all(xs)?),
+        Expr::Array(xs) => Expr::Array(all(xs)?),
+        Expr::Field(x, f, sp) => Expr::Field(r(x)?, f.clone(), *sp),
+        Expr::Index(x, i, sp) => Expr::Index(r(x)?, r(i)?, *sp),
+        Expr::Struct(p, fs, None) => Expr::Struct(p.clone(), fs.iter().map(|(n, x)| subst(x, env).map(|x| (n.clone(), x))).collect::<R<Vec<_>>>()?, None),
+        _ => return Err("unsupported expression in a const fn of a constant".into()),
+    })
+}
+
 fn eval_float(prog: &Program, e: &Expr, depth: u32) -> R<f64> {
     if depth > 64 {
         return Err("constant is too deeply nested".to_string());
@@ -391,6 +457,19 @@ fn eval_float(prog: &Program, e: &Expr, depth: u32) -> R<f64> {
                 "/" => l / r,
                 _ => return Err("unsupported operator in a float constant".to_string()),
             }
+        }
+        // (`f64::from_bits(u)` / `f32::from_bits(u)`)
+        Expr::Call(f, args) if args.len() == 1 && matches!(&**f, Expr::Path(None, p) if p.segs.len() == 2 && p.segs[1].name == "from_bits" && matches!(p.segs[0].name.as_str(), "f64" | "f32")) => {
+            let Expr::Path(None, p) = &**f else { unreachable!() };
+            let u = prog.eval_const(&args[0], 0)?;
+            if p.segs[0].name == "f64" { f64::from_bits(u as u64) } else { f32::from_bits(u as u32) as f64 }
+        }
+        // (a call of a const fn returning a float: its body inlined)
+        Expr::Call(f, args) if matches!(&**f, Expr::Path(None, p) if ident(p).is_some_and(|n| prog.const_fns.contains_key(n))) => {
+            let Expr::Path(None, p) = &**f else { unreachable!() };
+            let (ps, body) = &prog.const_fns[ident(p).unwrap()];
+            let tail = inline_const_fn(ps, body, args)?;
+            eval_float(prog, &tail, depth + 1)?
         }
         Expr::Cast(x, _) => match eval_float(prog, x, depth + 1) {
             Ok(f) => f,

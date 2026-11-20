@@ -1045,13 +1045,17 @@ impl Solver<'_> {
         self.scopes.last_mut().unwrap().push((name, v));
     }
 
+    /// (two plain loops: a `flat_map` over the reversed scopes was not inlined, and cost about 8M instructions of a
+    /// check of the 1.6 MB program)
     pub fn lookup(&self, n: &str) -> Option<u32> {
-        self.scopes
-            .iter()
-            .rev()
-            .flat_map(|s| s.iter().rev())
-            .find(|(x, _)| x == n)
-            .map(|&(_, v)| v)
+        for s in self.scopes.iter().rev() {
+            for (x, v) in s.iter().rev() {
+                if x.len() == n.len() && x.as_bytes() == n.as_bytes() {
+                    return Some(*v);
+                }
+            }
+        }
+        None
     }
 
 }

@@ -151,3 +151,4 @@ date	commit	change	noop_M	edit_M	check_M	cache_KiB	lsp_G	run	check	build	cfail
 2026-11-20	aa059e7+	stringify! spacing as rustc prints; dbg!() / dbg!(a, b)	0.692	547.152	3835.704	1902.8	-	1747	1448	97	3567	1160.161	63.602	10.270	316.173
 2026-11-20	5c7cdc5+	&CONST / &CONST.f / &CONST[i] / &(42,).0 promoted to static data	0.692	547.080	3835.604	1902.8	-	1748	1448	97	3567	1160.139	63.425	10.270	315.925
 2026-11-20	d855b2a+	assignment eval order, condition temporaries, &mut self methods of numbers	0.695	547.137	3837.294	1902.8	-	1751	1448	97	3567	1160.420	63.431	10.283	315.985
+2026-11-20	cdb2f0f+	static data: const fn calls inlined; no silent zeros; Solver::lookup as loops	0.694	547.968	3837.321	1902.8	-	1752	1448	97	3567	1160.432	63.532	10.283	315.964

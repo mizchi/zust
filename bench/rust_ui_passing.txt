@@ -1671,6 +1671,7 @@ check-pass	consts/issue-65348.rs
 compile-fail	consts/issue-66693-panic-in-array-len.rs
 compile-fail	consts/issue-69310-array-size-lit-wrong-ty.rs
 build-pass	consts/issue-69312.rs
+run-pass	consts/issue-69532.rs
 check-pass	consts/issue-6991.rs
 run-pass	consts/issue-70773-mir-typeck-lt-norm.rs
 compile-fail	consts/issue-76064.rs
