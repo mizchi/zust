@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795158210594,
+  "lastUpdate": 1795158212368,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -46672,6 +46672,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "lsp peak RSS",
             "value": 74.227,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "committer": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "distinct": true,
+          "id": "ed757a9bbb31931cb690bda7337a80a33550e093",
+          "message": "Paths: <S as Tr>::m as a value, std::u32::MAX, float integer constants\n\n- `<S as Tr>::m` as a fn value (`let h = <S as T>::tv;`): the method a\n  call to it would take, asked only when no other reading of the path\n  fits (just before \"cannot find value\").\n- `std::u32::MAX` / `core::i8::MIN` / `std::f64::MANTISSA_DIGITS`: the\n  deprecated modules of the primitive types read as the types.\n- f32 / f64's integer constants (RADIX, MANTISSA_DIGITS, DIGITS,\n  MIN_EXP, MAX_EXP, MIN_10_EXP, MAX_10_EXP) and more math constants\n  (FRAC_PI_3, FRAC_1_PI, LOG2_E, LOG10_2, ..). The new paths are cold\n  functions out of path_value.\n\ntests/ui: +1 run-pass pass (modules/primitive-type-module-deprecated-paths.rs).\nKPI: edit +0.01%, check +0.00% (no-op in its usual alternation).\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-20T06:56:26Z",
+          "tree_id": "03a2b8768afd7e8c40fa1d6be18f719956a889a9",
+          "url": "https://github.com/mizchi/zust/commit/ed757a9bbb31931cb690bda7337a80a33550e093"
+        },
+        "date": 1795158212135,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "lsp definition p50",
+            "value": 0.533,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp hover p50",
+            "value": 0.428,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp completion p50",
+            "value": 1.037,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp references p50",
+            "value": 6.039,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp rename p50",
+            "value": 0.461,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp signatureHelp p50",
+            "value": 0.952,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp documentHighlight p50",
+            "value": 1.005,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp ready (startup to indexed)",
+            "value": 125.523,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp peak RSS",
+            "value": 74.113,
             "unit": "MiB"
           }
         ]
