@@ -255,6 +255,12 @@ pub struct Program {
     pub unions: HashSet<String>,
     /// The tag type of enums with `#[repr(u8)]` and the like
     pub reprs: HashMap<String, Ty>,
+    /// `#[repr(packed(N))]` structs / unions: their fields aligned to at most N
+    pub packed: HashMap<String, u32>,
+    /// `#[repr(align(N))]` types: aligned to at least N
+    pub min_align: HashMap<String, u32>,
+    /// `#[repr(C)]` types (an enum's `#[repr(C, u8)]` lays its fields out after the tag, as one union)
+    pub repr_c: HashSet<String>,
     /// `const fn` bodies a constant may call: name -> (parameter names, body text)
     pub const_fns: HashMap<String, (Vec<String>, String)>,
     /// 同じ型への別々の trait impl が同じ名前の関数を持つもの (`impl From<&str> for P` と `impl From<String> for P`):
@@ -683,6 +689,9 @@ impl Program {
             blanket_traits: Default::default(),
             unions: Default::default(),
             reprs: Default::default(),
+            packed: Default::default(),
+            min_align: Default::default(),
+            repr_c: Default::default(),
             const_fns: Default::default(),
             overloads: Default::default(),
             trait_scopes: vec![],
@@ -727,6 +736,15 @@ impl Program {
             for (n, t) in &sm.reprs {
                 if let Some(t) = Ty::from_suffix(t) {
                     p.reprs.insert(n.clone(), t);
+                } else if t == "C" {
+                    p.repr_c.insert(n.clone());
+                } else if let Some(k) = t.strip_prefix("packed:").and_then(|x| x.parse::<u32>().ok()) {
+                    // (several: the least packing, the greatest alignment, as rustc takes them)
+                    let e = p.packed.entry(n.clone()).or_insert(k);
+                    *e = (*e).min(k);
+                } else if let Some(k) = t.strip_prefix("align:").and_then(|x| x.parse::<u32>().ok()) {
+                    let e = p.min_align.entry(n.clone()).or_insert(k);
+                    *e = (*e).max(k);
                 }
             }
             for (n, g, t) in &sm.aliases {
@@ -2448,7 +2466,7 @@ impl Program {
                         vs.push((v.name.clone(), v.kind, fs, v.discr));
                     }
                     let tag = b.tag;
-                    let (vs, size, align) = self.enum_layout(vs, tag);
+                    let (vs, size, align) = self.enum_layout(&b.name, vs, tag);
                     let d = self.structs.get_mut(id as usize);
                     if d.size != size || d.align != align {
                         changed = true;
@@ -2483,7 +2501,7 @@ impl Program {
                         .map(|v| (v.name.clone(), v.kind, v.fields.iter().map(|(n, t, _)| (n.clone(), *t)).collect::<Vec<(String, Ty)>>(), v.discr))
                         .collect();
                     let tag = b.tag;
-                    let (vs, size, align) = self.enum_layout(vs, tag);
+                    let (vs, size, align) = self.enum_layout(&b.name, vs, tag);
                     let d = self.structs.get_mut(id);
                     let moved = d.variants.iter().zip(&vs).any(|(a, b)| a.fields.iter().zip(&b.fields).any(|(x, y)| x.2 != y.2));
                     if d.size != size || d.align != align || moved {
@@ -2611,7 +2629,7 @@ impl Program {
                         .collect();
                     vs.push((v.name.clone(), v.kind, fs, v.discr));
                 }
-                let (vs, size, align) = self.enum_layout(vs, b.tag);
+                let (vs, size, align) = self.enum_layout(&b.name, vs, b.tag);
                 d.variants = vs;
                 d.size = size;
                 d.align = align;
@@ -2633,27 +2651,36 @@ impl Program {
     /// フィールドを宣言順に自然なアラインメントで並べる (repr(C) 相当)
     /// The layout of a struct named name (a union: every field at offset 0)
     fn adt_fields_layout(&self, name: &str, fields: Vec<(String, Ty)>) -> (Vec<(String, Ty, u32)>, u32, u32) {
+        // (`#[repr(packed(N))]`: each field aligned to at most N; `#[repr(align(N))]`: the whole to at least N)
+        let pack = self.packed.get(name).copied().unwrap_or(u32::MAX);
+        let min = self.min_align.get(name).copied().unwrap_or(1);
         if !self.unions.contains(name) {
-            return self.struct_layout(fields);
+            let (out, size, align) = self.struct_layout_packed(fields, pack);
+            let align = align.max(min);
+            return (out, size.next_multiple_of(align), align);
         }
-        let (mut size, mut align) = (0u32, 1u32);
+        let (mut size, mut align) = (0u32, min);
         let mut out = vec![];
         for (n, t) in fields {
             let (sz, al) = self.size_align(t);
             size = size.max(sz);
-            align = align.max(al.max(1));
+            align = align.max(al.max(1).min(pack));
             out.push((n, t, 0));
         }
         (out, size.next_multiple_of(align), align)
     }
 
     fn struct_layout(&self, fields: Vec<(String, Ty)>) -> (Vec<(String, Ty, u32)>, u32, u32) {
+        self.struct_layout_packed(fields, u32::MAX)
+    }
+
+    fn struct_layout_packed(&self, fields: Vec<(String, Ty)>, pack: u32) -> (Vec<(String, Ty, u32)>, u32, u32) {
         let mut out = vec![];
         let (mut off, mut align) = (0u32, 1u32);
         for (n, t) in fields {
             let (sz, al) = self.size_align(t);
             // (まだレイアウトの決まっていない型 (作っている途中の再帰する型) は揃えが 0: 揃えは 1 以上)
-            let al = al.max(1);
+            let al = al.max(1).min(pack);
             off = off.next_multiple_of(al);
             out.push((n, t, off));
             off += sz;
@@ -2665,10 +2692,26 @@ impl Program {
     /// タグ (判別値) は先頭、ペイロードは全バリアントで共有する領域に置く
     fn enum_layout(
         &self,
+        name: &str,
         vs: Vec<(String, VariantKind, Vec<(String, Ty)>, i64)>,
         tag: Ty,
     ) -> (Vec<VariantDef>, u32, u32) {
         let tag_size = tag.bits() / 8;
+        // (`#[repr(u8)]` and the like on an enum with fields (RFC 2195): each variant is laid out as a `#[repr(C)]`
+        // struct of the tag and its fields, the enum as their union)
+        if self.reprs.contains_key(name) && !self.repr_c.contains(name) && vs.iter().any(|v| !v.2.is_empty()) {
+            let (mut size, mut align) = (tag_size, tag_size.max(1).max(self.min_align.get(name).copied().unwrap_or(1)));
+            let mut out = vec![];
+            for (vn, kind, fs, discr) in vs {
+                let mut all = vec![("#tag".to_string(), tag)];
+                all.extend(fs);
+                let (f, sz, al) = self.struct_layout(all);
+                size = size.max(sz);
+                align = align.max(al);
+                out.push(VariantDef { name: vn, kind, fields: f.into_iter().skip(1).collect(), discr });
+            }
+            return (out, size.next_multiple_of(align), align);
+        }
         let mut laid = vec![];
         let (mut pmax, mut palign) = (0u32, 1u32);
         for (_, _, fs, _) in &vs {
@@ -2678,7 +2721,7 @@ impl Program {
             laid.push(f);
         }
         let poff = tag_size.next_multiple_of(palign.max(1));
-        let align = palign.max(tag_size).max(1);
+        let align = palign.max(tag_size).max(1).max(self.min_align.get(name).copied().unwrap_or(1));
         let out = vs
             .into_iter()
             .zip(laid)
@@ -3047,7 +3090,7 @@ impl Program {
                         })
                         .collect();
                 } else {
-                    let (vs, size, align) = self.enum_layout(rv, tag);
+                    let (vs, size, align) = self.enum_layout(&sdefs[id].1, rv, tag);
                     let sd = self.structs.get_mut(id);
                     sd.tag = tag;
                     sd.variants = vs;

@@ -4220,8 +4220,16 @@ run-pass	overloaded/overloaded-index.rs
 run-pass	overloaded/overloaded_deref_with_ref_pattern_issue15609.rs
 run-pass	overloaded/subtyping-both-lhs-and-rhs-in-add-impl.rs
 run-pass	packed/misaligned-reference-drop-field-99838.rs
+run-pass	packed/packed-c-style-struct.rs
 run-pass	packed/packed-struct-address-of-element.rs
+run-pass	packed/packed-struct-generic-layout.rs
+run-pass	packed/packed-struct-generic-size.rs
+compile-fail	packed/packed-struct-generic-transmute.rs
+run-pass	packed/packed-struct-layout.rs
 run-pass	packed/packed-struct-match.rs
+compile-fail	packed/packed-struct-transmute.rs
+run-pass	packed/packed-struct-vec.rs
+run-pass	packed/packed-tuple-struct-layout.rs
 check-pass	panics/panic-handler-closures.rs
 build-pass	parallel-rustc/assert-found_cycle-issue-115223.rs
 build-pass	parallel-rustc/export-symbols-deadlock-issue-118205.rs
@@ -5230,6 +5238,7 @@ compile-fail	repr/invalid_repr_list_help.rs
 compile-fail	repr/issue-83505-repr-simd.rs
 run-pass	repr/packed-struct-with-enum-53728.rs
 compile-fail	repr/repr-align-assign.rs
+compile-fail	repr/repr-align.rs
 check-pass	repr/repr-transparent-issue-87496.rs
 compile-fail	repr/repr-transparent-other-items.rs
 compile-fail	repr/repr.rs
@@ -5706,6 +5715,7 @@ run-pass	structs-enums/enum-discrim-autosizing.rs
 run-pass	structs-enums/enum-export-inheritance.rs
 run-pass	structs-enums/enum-non-c-like-repr-c-and-int.rs
 run-pass	structs-enums/enum-non-c-like-repr-c.rs
+run-pass	structs-enums/enum-non-c-like-repr-int.rs
 run-pass	structs-enums/enum-nullable-const-null-with-fields.rs
 compile-fail	structs-enums/enum-rec/issue-17431-7.rs
 run-pass	structs-enums/enum-vec-initializer.rs
@@ -5720,6 +5730,7 @@ compile-fail	structs-enums/issue-3008-3.rs
 run-pass	structs-enums/issue-38002.rs
 run-pass	structs-enums/issue-50731.rs
 run-pass	structs-enums/ivec-tag.rs
+run-pass	structs-enums/multiple-reprs.rs
 check-pass	structs-enums/nested-enum-same-names.rs
 run-pass	structs-enums/rec-extend.rs
 run-pass	structs-enums/rec-tup.rs
@@ -6717,6 +6728,7 @@ compile-fail	uninhabited/uninhabited-matches-feature-gated.rs
 compile-fail	union/access_union_field.rs
 check-pass	union/issue-99375.rs
 check-pass	union/projection-as-union-type.rs
+run-pass	union/union-align.rs
 compile-fail	union/union-assignop.rs
 compile-fail	union/union-borrow-move-parent-sibling.rs
 run-pass	union/union-const-codegen.rs
@@ -6736,6 +6748,7 @@ compile-fail	union/union-no-derive-suggestion.rs
 run-pass	union/union-nodrop.rs
 compile-fail	union/union-nonrepresentable.rs
 run-pass	union/union-nonzero.rs
+run-pass	union/union-packed.rs
 compile-fail	union/union-pat-in-param.rs
 compile-fail	union/union-suggest-field.rs
 run-pass	union/union-trait-impl.rs

@@ -2230,14 +2230,6 @@ impl Cx<'_> {
         r
     }
 
-    /// Whether every method named `name` (`S::m`, with its overloads) is an impl of trait tr: no inherent one, which a
-    /// rewritten `S::m` path would reach first
-    pub(crate) fn trait_only_method(&self, name: &str, tr: &str) -> bool {
-        let of_tr = |i: u32| self.prog.sigs[i as usize].impl_trait.as_deref().is_some_and(|t| t.split('<').next().unwrap_or(t).trim() == tr);
-        let Some(&i) = self.prog.index.get(name) else { return false };
-        of_tr(i) && self.prog.overloads.get(name).is_none_or(|cs| cs.iter().all(|&c| of_tr(c)))
-    }
-
     /// Whether the method named `name` (with its overloads) exists and none of them is a trait impl's
     pub(crate) fn no_trait_method(&self, name: &str) -> bool {
         let inh = |i: u32| self.prog.sigs[i as usize].impl_trait.is_none();
@@ -2258,6 +2250,22 @@ impl Cx<'_> {
     }
 
     pub(crate) fn call(&mut self, c: &Expr, expected: Option<Ty>) -> R<V> {
+        // (`<S as Tr>::m(..)`: Tr's impl among the overloads of `S::m`, as a call that named its trait; any other call
+        // names none, also inside the arguments of one that did)
+        let forced = match c {
+            Expr::Call(func, _) => match &**func {
+                Expr::Path(Some(_), p) if p.segs.len() >= 2 => Some((p.segs[p.segs.len() - 1].name.clone(), p.segs[p.segs.len() - 2].name.clone())),
+                _ => None,
+            },
+            _ => None,
+        };
+        let prev = std::mem::replace(&mut self.explicit_trait, forced);
+        let r = self.call_inner(c, expected);
+        self.explicit_trait = prev;
+        r
+    }
+
+    fn call_inner(&mut self, c: &Expr, expected: Option<Ty>) -> R<V> {
         let Expr::Call(func, cargs) = c else { return err(SP, "internal: expected a call") };
         // (`f1(x)` after `let f1 = f;` (f generic): `f(x)`)
         if let (false, Expr::Path(None, p)) = (self.fn_aliases.is_empty(), strip_paren(func)) {
@@ -2288,15 +2296,19 @@ impl Cx<'_> {
                     }
                     ("From", "from") => {
                         let simple = |t: Ty| t.is_int() || t.is_float() || matches!(t, Ty::Bool | Ty::Char) || matches!(t, Ty::Struct(sid) if self.prog.structs[sid as usize].base.is_none());
-                        // (only when `T::from` is the From impl's: an inherent `from` of T would answer that path)
-                        // (or none of them is: the prelude's `String::from` and the like stand for From)
-                        let from_impl = |t: Ty| {
-                            let n = format!("{}::from", self.prog.tn(t));
-                            self.trait_only_method(&n, "From") || self.no_trait_method(&n)
-                        };
-                        if let Some(t) = expected.filter(|&t| simple(t) && !self.prog.has_param(t) && from_impl(t)) {
-                            if let Ok(Expr::Path(None, tp)) = crate::parse::parse_expr(&format!("{}::from", self.prog.tn(t))) {
-                                let ne = self.keep_expr(Expr::Call(Box::new(Expr::Path(None, crate::parse::Path { pos: p.pos, ..tp })), cargs.clone()));
+                        // (`<T as From<_>>::from(x)`, which takes From's impl beside an inherent `from`; T's `from` with no
+                        // From impl at all (the prelude's `String::from` and the like stand for From): `T::from(x)`)
+                        if let Some(t) = expected.filter(|&t| simple(t) && !self.prog.has_param(t)) {
+                            let n = format!("{}::from", self.ty_key(t));
+                            let src = if self.trait_candidate(&n, "From").is_some() {
+                                Some(format!("<{} as From>::from", self.prog.tn(t)))
+                            } else if self.no_trait_method(&n) {
+                                Some(format!("{}::from", self.prog.tn(t)))
+                            } else {
+                                None
+                            };
+                            if let Some(Ok(Expr::Path(q, tp))) = src.map(|s| crate::parse::parse_expr(&s)) {
+                                let ne = self.keep_expr(Expr::Call(Box::new(Expr::Path(q, crate::parse::Path { pos: p.pos, ..tp })), cargs.clone()));
                                 return self.expr(ne, expected);
                             }
                         }
