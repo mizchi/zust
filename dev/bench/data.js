@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795174066302,
+  "lastUpdate": 1795174068066,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -50320,6 +50320,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "lsp peak RSS",
             "value": 74.527,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "committer": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "distinct": true,
+          "id": "20055f979e93f664c41d36493a8dd08dd8927324",
+          "message": "extern \"C\" calls: structs of up to 16 bytes by value (System V)\n\nA call of a foreign fn that takes or returns a struct now follows the\nSystem V x86-64 convention. That used to be an error.\n- A struct of up to 16 bytes is passed as its eightbytes: SSE when every\n  scalar in the eightbyte is a float (f32 alone: F32), else INTEGER.\n- A struct of up to 16 bytes is returned in rax / rdx / xmm0 / xmm1 and\n  stored into the destination. A larger one comes back through the hidden\n  pointer, which is our sret.\n- minclif reads a second result from rdx or xmm1 by its class, also when\n  the first is a float.\n- Still errors: a larger struct argument, and a pointer to such an extern\n  fn (fn pointers use zustc's convention, which passes structs by address).\n\ntests/ui: +15 run-pass, +7 check-pass, +2 build-pass. Checked with both\nbackends.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-20T11:23:04Z",
+          "tree_id": "d8c1de6a02f0822fa6492218aca5f7fc76b48025",
+          "url": "https://github.com/mizchi/zust/commit/20055f979e93f664c41d36493a8dd08dd8927324"
+        },
+        "date": 1795174067864,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "lsp definition p50",
+            "value": 0.468,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp hover p50",
+            "value": 0.386,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp completion p50",
+            "value": 1.04,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp references p50",
+            "value": 4.203,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp rename p50",
+            "value": 0.451,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp signatureHelp p50",
+            "value": 0.927,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp documentHighlight p50",
+            "value": 0.966,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp ready (startup to indexed)",
+            "value": 124.314,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp peak RSS",
+            "value": 74.41,
             "unit": "MiB"
           }
         ]
