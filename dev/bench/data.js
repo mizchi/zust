@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795177457945,
+  "lastUpdate": 1795177460584,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -51004,6 +51004,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "lsp peak RSS",
             "value": 74.535,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "committer": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "distinct": true,
+          "id": "aa059e720b3a933ab28bdabd6f11602194b61643",
+          "message": "mod x; inside inline modules and blocks; cfg(true) / cfg(false)\n\n- `mod x;` inside `mod a { .. }` (or in a fn body) used to be an error.\n  It now reads x's file from the directory the enclosing modules name:\n  their names, or their #[path] / inner #![path]. The file's code goes in\n  that place, and the source map takes the rest of the line up again after\n  the closing brace.\n- cfg(true) / cfg(false) are boolean predicates.\n- #[cfg_attr(p, cfg(q))] with p true is #[cfg(q)], so an inner one can\n  configure a whole module file away.\n\ntests/ui: +8 run-pass, +2 check-pass, +3 compile-fail (each checked\nagainst its expected error).\n\nKPI: crates no-op +0.11% (and no-op build -0.43%) is the std startup\n/proc/self/maps variation found in 8dba29d. The generated programs have\nno `mod`, so the new code returns early.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-20T12:20:17Z",
+          "tree_id": "3cab979aceadf0426a33fc258dbbdffccf51d8fd",
+          "url": "https://github.com/mizchi/zust/commit/aa059e720b3a933ab28bdabd6f11602194b61643"
+        },
+        "date": 1795177460146,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "lsp definition p50",
+            "value": 0.491,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp hover p50",
+            "value": 0.382,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp completion p50",
+            "value": 1.004,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp references p50",
+            "value": 3.968,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp rename p50",
+            "value": 0.453,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp signatureHelp p50",
+            "value": 0.864,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp documentHighlight p50",
+            "value": 1.008,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp ready (startup to indexed)",
+            "value": 123.745,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp peak RSS",
+            "value": 74.719,
             "unit": "MiB"
           }
         ]
