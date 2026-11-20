@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795150024980,
+  "lastUpdate": 1795150026749,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -44848,6 +44848,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "lsp peak RSS",
             "value": 74.09,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "committer": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "distinct": true,
+          "id": "3c8f0b7e00b228f9d0637c4bc1a0fd098cbf39fb",
+          "message": "E0432: use m::f with an inline mod m that defines no f\n\nWhen a `use`'s first segment is an inline module of the program\n(`mod m { .. }`), its second segment must be defined in that module's\nbody (an item, a `macro_rules!`, an `as` name, or a name a `use`\nthere brings in); else \"unresolved import `m::f`\". Bodies with a glob,\na macro or include! are left alone.\n\ntests/ui: +4 compile-fail passes; extern-crate-visibility.rs (privacy,\nnot resolution) goes to rust_ui_accidental.txt.\nKPI: all within ±0.04% of the row before (this machine).\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-20T04:40:24Z",
+          "tree_id": "1a69dbb80aa126130428cbeda883b8dfd9b49d96",
+          "url": "https://github.com/mizchi/zust/commit/3c8f0b7e00b228f9d0637c4bc1a0fd098cbf39fb"
+        },
+        "date": 1795150026549,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "lsp definition p50",
+            "value": 0.488,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp hover p50",
+            "value": 0.396,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp completion p50",
+            "value": 1.075,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp references p50",
+            "value": 6.32,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp rename p50",
+            "value": 0.462,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp signatureHelp p50",
+            "value": 0.959,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp documentHighlight p50",
+            "value": 0.863,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp ready (startup to indexed)",
+            "value": 121.874,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp peak RSS",
+            "value": 74.082,
             "unit": "MiB"
           }
         ]
