@@ -543,6 +543,7 @@ run-pass	autoref-autoderef/autoderef-vec-box-fn-36786.rs
 run-pass	autoref-autoderef/autoref-intermediate-types-issue-3585.rs
 compile-fail	autoref-autoderef/deref-ambiguity-becomes-nonambiguous.rs
 run-pass	autoref-autoderef/deref-chain-method-calls-13264.rs
+check-pass	autoref-autoderef/deref-into-array.rs
 check-pass	autoref-autoderef/reborrow-mut-self-to-ref-self-method.rs
 run-pass	binding/bind-field-short-with-modifiers.rs
 run-pass	binding/borrowed-ptr-pattern-2.rs
@@ -1404,6 +1405,7 @@ run-pass	const-generics/defaults/repr-c-issue-82792.rs
 compile-fail	const-generics/defaults/self-referential.rs
 compile-fail	const-generics/defaults/trait_objects_fail.rs
 compile-fail	const-generics/defaults/wfness.rs
+check-pass	const-generics/deref-into-array-generic.rs
 compile-fail	const-generics/early/closing-args-token.rs
 compile-fail	const-generics/early/const-expression-parameter.rs
 compile-fail	const-generics/early/const_arg_trivial_macro_expansion-2.rs
