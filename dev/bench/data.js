@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795151579568,
+  "lastUpdate": 1795151582026,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -61017,6 +61017,85 @@ window.BENCHMARK_DATA = {
           {
             "name": "parity 一致の平均",
             "value": 91.565,
+            "unit": "%"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "committer": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "distinct": true,
+          "id": "4c648ae0fb015dc1c659dfb6e7981f3adc76ef43",
+          "message": "E0106: missing lifetime specifiers in free fn returns and in fields\n\nA free fn whose return type has an elided lifetime (`&T`, `'_`) needs\nexactly one lifetime position among its parameters (rustc's elision\nrule without `self`); a struct's or enum's field cannot elide one.\nEither is \"missing lifetime specifier\", at the field (named fields) or\nthe first `&` (others). fn pointer, `impl` and `dyn` types are not\nlooked into, extern fns and the prelude's `__` helpers are skipped.\n\ntests/ui: +14 compile-fail passes; impl-trait-missing-lifetime-gated.rs\n(expects the feature-gate message) goes to rust_ui_accidental.txt.\nKPI: all within ±0.3% of the row before.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-20T05:07:50Z",
+          "tree_id": "5e8255a0349c0e1ea102d2e2a522f3c945a0a1cb",
+          "url": "https://github.com/mizchi/zust/commit/4c648ae0fb015dc1c659dfb6e7981f3adc76ef43"
+        },
+        "date": 1795151581375,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "parity documentSymbol (名前の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity workspace/symbol (上位 20 の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity definition (行き先の一致)",
+            "value": 89.655,
+            "unit": "%"
+          },
+          {
+            "name": "parity hover (名前を含む)",
+            "value": 77.5,
+            "unit": "%"
+          },
+          {
+            "name": "parity references (数の一致)",
+            "value": 81.081,
+            "unit": "%"
+          },
+          {
+            "name": "parity documentHighlight (数の一致)",
+            "value": 83.871,
+            "unit": "%"
+          },
+          {
+            "name": "parity rename (書き換えの一致)",
+            "value": 85.714,
+            "unit": "%"
+          },
+          {
+            "name": "parity signatureHelp (名前・引数の数・今の引数の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity completion `x.\\|` (書いてある名前を含む)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity completion `na\\|me` (同)",
+            "value": 91.304,
+            "unit": "%"
+          },
+          {
+            "name": "parity 一致の平均",
+            "value": 90.913,
             "unit": "%"
           }
         ]
