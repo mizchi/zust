@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795134717102,
+  "lastUpdate": 1795134718853,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -40516,6 +40516,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "lsp peak RSS",
             "value": 73.18,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "committer": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "distinct": true,
+          "id": "05ec7768f2cdc807218e473e8f4c9ca6f1a46e12",
+          "message": "lint: deny(unused_variables) reports the first unread binding\n\nWith `#![deny(unused_variables)]` (or `unused` / `warnings`, inside a\ndeny / forbid list), each of the program's fns is checked before\nbuilding: a parameter, or a `let` binding that no later statement of\nits block reads (free variables, so shadowing, closures and inline\nformat arguments count), is \"unused variable: `x`\" at its position.\nNames starting with `_`, upper-case ones and fns with an\n`allow(unused..)` or `#[cfg` are left alone.\n\ntests/ui: +7 genuine compile-fail passes.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-20T00:25:03Z",
+          "tree_id": "dbb24cfad004b547ebb82562b93a278cf188ad98",
+          "url": "https://github.com/mizchi/zust/commit/05ec7768f2cdc807218e473e8f4c9ca6f1a46e12"
+        },
+        "date": 1795134718643,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "lsp definition p50",
+            "value": 0.467,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp hover p50",
+            "value": 0.382,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp completion p50",
+            "value": 1.045,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp references p50",
+            "value": 4.27,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp rename p50",
+            "value": 0.382,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp signatureHelp p50",
+            "value": 0.72,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp documentHighlight p50",
+            "value": 0.88,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp ready (startup to indexed)",
+            "value": 116.279,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp peak RSS",
+            "value": 72.965,
             "unit": "MiB"
           }
         ]
