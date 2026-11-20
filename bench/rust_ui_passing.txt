@@ -682,6 +682,7 @@ compile-fail	block-result/issue-11714.rs
 compile-fail	block-result/issue-13428.rs
 compile-fail	block-result/issue-13624.rs
 compile-fail	block-result/issue-20862.rs
+compile-fail	block-result/issue-22645.rs
 compile-fail	block-result/unexpected-return-on-unit.rs
 compile-fail	borrowck/access-mode-in-closures.rs
 check-pass	borrowck/alias-liveness/escaping-bounds.rs
@@ -1561,6 +1562,7 @@ check-pass	consts/const-eval/issue-70804-fn-subtyping.rs
 check-pass	consts/const-eval/no_lint_for_statically_known_error.rs
 check-pass	consts/const-eval/nonnull_as_ref.rs
 run-pass	consts/const-eval/nrvo.rs
+compile-fail	consts/const-eval/panic-never-type.rs
 check-pass	consts/const-eval/promote-static.rs
 check-pass	consts/const-eval/promote_mutable_zst_mir_borrowck.rs
 check-pass	consts/const-eval/simple_with_undef.rs
@@ -6725,6 +6727,7 @@ compile-fail	uninhabited/missing-if-let-or-let-else.rs
 compile-fail	uninhabited/privately-uninhabited-mir-call.rs
 check-pass	uninhabited/uninhabited-enum-cast.rs
 compile-fail	uninhabited/uninhabited-matches-feature-gated.rs
+run-pass	uninhabited/uninhabited-unreachable-warning-149571.rs
 compile-fail	union/access_union_field.rs
 check-pass	union/issue-99375.rs
 check-pass	union/projection-as-union-type.rs
