@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795141342788,
+  "lastUpdate": 1795141345183,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -42568,6 +42568,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "lsp peak RSS",
             "value": 72.965,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "committer": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "distinct": true,
+          "id": "c31150877f665c72439947ed42d0a2a2500c2f96",
+          "message": "naming lints: lifetime parameters\n\nnon_snake_case covers the lifetimes an item's header names\n(`fn f<'FooBar>`: \"lifetime `'FooBar` should have a snake case name\").\n\ntests/ui: +1 genuine compile-fail pass.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-20T02:14:54Z",
+          "tree_id": "8290d8f45178ac5e60f30580656a7ed7d28afbdc",
+          "url": "https://github.com/mizchi/zust/commit/c31150877f665c72439947ed42d0a2a2500c2f96"
+        },
+        "date": 1795141344665,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "lsp definition p50",
+            "value": 0.49,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp hover p50",
+            "value": 0.385,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp completion p50",
+            "value": 1.035,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp references p50",
+            "value": 2.432,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp rename p50",
+            "value": 0.508,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp signatureHelp p50",
+            "value": 0.743,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp documentHighlight p50",
+            "value": 0.94,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp ready (startup to indexed)",
+            "value": 125.475,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp peak RSS",
+            "value": 73.301,
             "unit": "MiB"
           }
         ]
