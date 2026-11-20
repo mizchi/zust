@@ -48,7 +48,12 @@ The Kani harnesses copy the fixed code and check it. The `bug_*` harnesses are r
 - `reserve_any_size`
 - `alloc_failure_stops`
 
-Each is `#[kani::should_panic]`, and shows that any size, and a failing malloc, stop with a panic or an abort. Kani's pointer checks (out of bounds, a null dereference) do not count as panics, so a single path that writes out of bounds makes the harness fail.
+Each is `#[kani::should_panic]` and ends with `kani::assume(false)`, which drops the paths that do not stop. They show two things:
+
+- No size, and no failing malloc, makes a path that writes outside the block or through null. Kani's pointer checks do not count as panics, so one such path makes the harness fail, whether it would go on or stop afterwards.
+- The sizes that cannot be allocated, and a failing malloc, stop with a panic or an abort.
+
+A size that fits allocates and pushes as usual. These harnesses do not check that path; `reserve_gives_room` does.
 
 - On the prelude before the fix, all three were checked to fail with "failures other than panics".
 - What a Vec holds is still checked by the `*_matches_model` harnesses.
@@ -93,3 +98,4 @@ The KPIs are the four rows of 2026-11-20 in `bench/kpi_log.md`:
 - Defect 5: `std::thread::spawn` runs the closure at once. Real threads would need `Arc` changed as the atomic version of `ArcDrop.tla` does.
 - Allocation failure in `Box`.
 - A checksum for the cache. With a tmp file per process, a mixed file is no longer read, but a checksum is still needed to discard a file corrupted on disk.
+- The tmp name tells processes apart, not threads. Two `Cache2::save` calls running at once in one process would share it. zustc has no threads that save: one process saves its caches one after another, and the forked children of a workspace build have pids of their own, so this does not happen today, and `CacheSave.tla` models separate processes only.
