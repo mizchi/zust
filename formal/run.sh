@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Runs the formal checks in formal/. `formal/run.sh tla` (seconds), `formal/run.sh kani` (minutes, needs
+# Runs the formal checks in formal/. `formal/run.sh tla` (seconds), `formal/run.sh connect` (a minute: the
+# implementation against the models), `formal/run.sh kani` (minutes, needs
 # `cargo install --locked kani-verifier && cargo kani setup`), no argument: both.
 # Each check has an expected result: configurations that model a design zustc does not use must find its bug.
 set -u
@@ -15,7 +16,7 @@ expect() { # expect <ok|violation> <spec.tla> <cfg>
         echo "FAIL $2 $3 (expected $1)"; cat "$log"; fail=1
     fi
 }
-if [ "${1:-all}" != kani ]; then
+if [ "${1:-all}" = all ] || [ "${1:-all}" = tla ]; then
     cargo build --release --quiet --manifest-path tla-check/Cargo.toml || exit 1
     expect ok        CacheSave.tla CacheSave.cfg
     expect violation CacheSave.tla CacheSaveShared.cfg
@@ -24,11 +25,16 @@ if [ "${1:-all}" != kani ]; then
     expect violation ForkPool.tla  ForkPoolCloseLate.cfg
     expect violation ArcDrop.tla   ArcDropPrelude.cfg
     expect ok        ArcDrop.tla   ArcDropAtomic.cfg
+    expect ok        HashMapModel.tla HashMapModel.cfg
+fi
+if [ "${1:-all}" = all ] || [ "${1:-all}" = connect ]; then
+    # (zustc's prelude, compiled by zustc, against the TLA+ models: needs target/release/zustc)
+    cargo test --quiet --release --manifest-path connect/Cargo.toml || fail=1
 fi
 if [ "${1:-all}" = all ]; then
     (cd .. && cargo test --quiet -p zust-typeck --lib props) || fail=1
 fi
-if [ "${1:-all}" != tla ]; then
+if [ "${1:-all}" = all ] || [ "${1:-all}" = kani ]; then
     # (every harness is expected to pass)
     for dir in kani-prelude; do
         out=$( (cd "$dir" && cargo kani --output-format terse) 2>&1)
