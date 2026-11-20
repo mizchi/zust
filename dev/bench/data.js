@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795199698405,
+  "lastUpdate": 1795199700263,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -72935,6 +72935,85 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/mizchi/zust/commit/7123573a29bdcace0233ace09a8d78712dd53c96"
         },
         "date": 1795198802971,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "parity documentSymbol (名前の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity workspace/symbol (上位 20 の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity definition (行き先の一致)",
+            "value": 96.774,
+            "unit": "%"
+          },
+          {
+            "name": "parity hover (名前を含む)",
+            "value": 92.5,
+            "unit": "%"
+          },
+          {
+            "name": "parity references (数の一致)",
+            "value": 92.105,
+            "unit": "%"
+          },
+          {
+            "name": "parity documentHighlight (数の一致)",
+            "value": 93.939,
+            "unit": "%"
+          },
+          {
+            "name": "parity rename (書き換えの一致)",
+            "value": 88.235,
+            "unit": "%"
+          },
+          {
+            "name": "parity signatureHelp (名前・引数の数・今の引数の一致)",
+            "value": 94.737,
+            "unit": "%"
+          },
+          {
+            "name": "parity completion `x.\\|` (書いてある名前を含む)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity completion `na\\|me` (同)",
+            "value": 80.769,
+            "unit": "%"
+          },
+          {
+            "name": "parity 一致の平均",
+            "value": 93.906,
+            "unit": "%"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "miz404@gmail.com",
+            "name": "Kotaro Chikuba",
+            "username": "mizchi"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "0868b6561ba94deae19917c586d93a36f526a87f",
+          "message": "Merge pull request #14 from mizchi/claude/compat-next4\n\nClosures whose body diverges: () as the return type",
+          "timestamp": "2026-11-21T03:30:05+09:00",
+          "tree_id": "b0e39b801f5e379fbeac307fb59b51024c784f69",
+          "url": "https://github.com/mizchi/zust/commit/0868b6561ba94deae19917c586d93a36f526a87f"
+        },
+        "date": 1795199700031,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
