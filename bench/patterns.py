@@ -69,7 +69,8 @@ def measure(pattern, n, reps, vg, rustc, work):
         try:
             return instructions(cmd, env=env)
         except RuntimeError as e:
-            raise PhaseError(f"{phase}: {str(e).splitlines()[0]}")
+            # (the whole message: it ends with the command's stderr, the diagnostic)
+            raise PhaseError(f"{phase}: " + " | ".join(l.strip() for l in str(e).splitlines() if l.strip()))
 
     # (key -> the samples so far; a key's value is their median, or for counts their least)
     samples = {}

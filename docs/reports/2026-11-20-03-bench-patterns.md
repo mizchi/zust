@@ -51,12 +51,14 @@ constant in the first group, which is the edit of the "edit one function" KPI.
   - It then gives the median times of a cold build, `check` and a build after editing one function. With
     `--instructions`, `check` and the edit build are also counted by cachegrind.
   - The exit status is 1 when a pattern or its edit does not build, a program exits with an error, or the output
-    differs.
+    differs. Only the base program is run: the edits are built and timed, and their output is not checked.
   - It only prints the table (and `--json`). `bench/kpi_track.py` is what appends rows to the KPI log.
 - `bench/kpi_track.py` (and so the `KPI` workflow on every pull request) has two new KPIs: `patterns check` and
   `patterns edit`, for `mix 4` (2600 lines).
 - `tests/bench_patterns.rs` builds every pattern at N = 2, and `mix` with an edit. It checks that their output is
-  rustc's, so a pattern zustc stops building fails `cargo test`. That holds where python3 and rustc are on PATH, as
+  rustc's, so a pattern zustc stops building fails `cargo test`. The edited `mix` is built from fresh source: the test
+  checks the edited program's output, not an incremental build after the edit (which `patterns edit` measures, and
+  `tests/driver2_cache.rs` checks against a fresh build in general). That holds where python3 and rustc are on PATH, as
   in CI; without them the test says so and passes. It is part of the default `acg` feature.
 
 The patterns at N = 4 (2026-11-20, this machine):

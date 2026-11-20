@@ -1331,7 +1331,14 @@ impl Cx<'_> {
         }
         // (戻り値を書く先: 引数の中の呼び出しには渡さない)
         let hint = self.dst_hint.take();
+        let id0 = id;
         let id = self.pick_overload(id, recv.map(|r| r.1), args);
+        // (E0133 was checked on the fn found before the overload was chosen: an `unsafe fn` chosen in its place, by
+        // the traits in scope, needs the same check)
+        if id != id0 && self.prog.sigs[id as usize].is_unsafe && !self.prog.sigs[id0 as usize].is_unsafe && self.unsafe_ok == 0 && self.user_code {
+            let n = self.prog.names[id as usize].rsplit("::").next().unwrap_or("").split('#').next().unwrap_or("");
+            return err(span, format!("call to unsafe function `{n}` is unsafe and requires unsafe block (E0133)"));
+        }
         let sig0 = self.prog.sigs[id as usize].clone();
         let skip = recv.is_some() as usize;
         if sig0.params.len() != args.len() + skip {
