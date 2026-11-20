@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795148252487,
+  "lastUpdate": 1795148254741,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -44164,6 +44164,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "lsp peak RSS",
             "value": 74.242,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "committer": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "distinct": true,
+          "id": "fbf1812be6e016b2fef6388d0439473200e070c0",
+          "message": "Attributes on items they cannot be used on\n\nAn attribute in front of an item of a kind it does not apply to is\n\"`#[x]` attribute cannot be used on <kind>s\": inline / cold /\ntrack_caller on anything but a fn, repr on anything but a struct, enum\nor union, non_exhaustive off structs and enums, must_use off fns,\ntypes and traits, macro_use off modules, no_mangle off fns and\nstatics. Comment lines between the attributes and the item are\nskipped.\n\ntests/ui: +8 compile-fail passes; extern-crate-self-fail.rs (the item\nkind read wrong) goes to rust_ui_accidental.txt.\nKPI: unchanged (no-op within its usual 0.695 / 0.697 alternation).\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-20T04:04:50Z",
+          "tree_id": "7c0883743bf3830c4b33d59c050d2d7161999a15",
+          "url": "https://github.com/mizchi/zust/commit/fbf1812be6e016b2fef6388d0439473200e070c0"
+        },
+        "date": 1795148254222,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "lsp definition p50",
+            "value": 0.538,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp hover p50",
+            "value": 0.432,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp completion p50",
+            "value": 1.055,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp references p50",
+            "value": 1.749,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp rename p50",
+            "value": 0.442,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp signatureHelp p50",
+            "value": 0.776,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp documentHighlight p50",
+            "value": 0.736,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp ready (startup to indexed)",
+            "value": 135.028,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp peak RSS",
+            "value": 74.172,
             "unit": "MiB"
           }
         ]
