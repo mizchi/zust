@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795177467256,
+  "lastUpdate": 1795178955596,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -35615,6 +35615,165 @@ window.BENCHMARK_DATA = {
           {
             "name": "rt/strings run (-O)",
             "value": 34.739,
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "committer": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "distinct": true,
+          "id": "5c7cdc54ef3ed30ffe4429608aae998486ef5995",
+          "message": "stringify! spaces tokens as rustc prints them; dbg!() and dbg!(a, b)\n\n- stringify! keeps tokens together where they touch in the text\n  (`(2*3) + 5`). Elsewhere it follows rustc's printer: no space around\n  `::`, before `,` `;` `.`, after `.`, between a name and its `(`, after\n  `#` before `[`, or just inside `( )` and `[ ]`. It used to print\n  `std :: option`.\n- A `$e:expr` fragment passed straight to stringify! loses the\n  parentheses the expander adds to keep its precedence (`1 + 2`, not\n  `(1 + 2)`).\n- dbg!() prints only the place. dbg!(a, b) prints each argument and\n  returns the tuple.\n\ntests/ui: +2 run-pass. KPI: crates no-op stays at 10.270 (the std startup\nvariation, as in aa059e7).\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-20T12:40:56Z",
+          "tree_id": "462753dc48765d8eee315d0d521de5ba9da8bae3",
+          "url": "https://github.com/mizchi/zust/commit/5c7cdc54ef3ed30ffe4429608aae998486ef5995"
+        },
+        "date": 1795178955099,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "gen1000 build cold",
+            "value": 122.597,
+            "unit": "ms"
+          },
+          {
+            "name": "gen1000 build noop",
+            "value": 0.827,
+            "unit": "ms"
+          },
+          {
+            "name": "gen1000 build edit 1 fn",
+            "value": 19.314,
+            "unit": "ms"
+          },
+          {
+            "name": "gen1000 check",
+            "value": 91.974,
+            "unit": "ms"
+          },
+          {
+            "name": "gen1000 build cold peak RSS",
+            "value": 18.184,
+            "unit": "MiB"
+          },
+          {
+            "name": "gen1000 binary",
+            "value": 323.977,
+            "unit": "KiB"
+          },
+          {
+            "name": "gen1000 cache",
+            "value": 387.21,
+            "unit": "KiB"
+          },
+          {
+            "name": "gen1000 build noop instructions",
+            "value": 0.552,
+            "unit": "M instr"
+          },
+          {
+            "name": "gen1000 build edit 1 fn instructions",
+            "value": 123.864,
+            "unit": "M instr"
+          },
+          {
+            "name": "gen1000 check instructions",
+            "value": 776.126,
+            "unit": "M instr"
+          },
+          {
+            "name": "gen5000 build cold",
+            "value": 538.231,
+            "unit": "ms"
+          },
+          {
+            "name": "gen5000 build noop",
+            "value": 0.839,
+            "unit": "ms"
+          },
+          {
+            "name": "gen5000 build edit 1 fn",
+            "value": 67.187,
+            "unit": "ms"
+          },
+          {
+            "name": "gen5000 check",
+            "value": 455.534,
+            "unit": "ms"
+          },
+          {
+            "name": "gen5000 build cold peak RSS",
+            "value": 51.973,
+            "unit": "MiB"
+          },
+          {
+            "name": "gen5000 binary",
+            "value": 1558.336,
+            "unit": "KiB"
+          },
+          {
+            "name": "gen5000 cache",
+            "value": 1902.835,
+            "unit": "KiB"
+          },
+          {
+            "name": "gen5000 build noop instructions",
+            "value": 0.552,
+            "unit": "M instr"
+          },
+          {
+            "name": "gen5000 build edit 1 fn instructions",
+            "value": 589.156,
+            "unit": "M instr"
+          },
+          {
+            "name": "gen5000 check instructions",
+            "value": 3831.957,
+            "unit": "M instr"
+          },
+          {
+            "name": "rt/fib run (-O)",
+            "value": 63.343,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/hashmap run (-O)",
+            "value": 93.545,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/matmul run (-O)",
+            "value": 38.381,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/nbody run (-O)",
+            "value": 67.327,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/sieve run (-O)",
+            "value": 76.908,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/sort run (-O)",
+            "value": 173.335,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/strings run (-O)",
+            "value": 61.269,
             "unit": "ms"
           }
         ]
