@@ -1,7 +1,8 @@
 //! 型の表現 (front.rs から分けた、syn に依存しない部分)。`Ty` (解決済みの型) と `TySyn` (構文上の型) と intern。
 //! zustc 自身でもコンパイルできる書き方にしてある (セルフホストの対象)。
 
-use std::collections::HashSet;
+// (the interning tables: Fx hashing, deterministic and cheaper than the std maps' SipHash)
+type HashSet<K> = crate::fxhash::FxSet<K>;
 use std::sync::{Mutex, OnceLock};
 
 // ---------------------------------------------------------------------------
@@ -65,7 +66,7 @@ pub struct AssocTy {
 
 pub fn intern_assoc(a: AssocTy) -> &'static AssocTy {
     static TABLE: OnceLock<Mutex<HashSet<&'static AssocTy>>> = OnceLock::new();
-    let mut tab = TABLE.get_or_init(|| Mutex::new(HashSet::new())).lock().unwrap();
+    let mut tab = TABLE.get_or_init(|| Mutex::new(HashSet::default())).lock().unwrap();
     if let Some(&r) = tab.get(&a) {
         return r;
     }
@@ -92,7 +93,7 @@ impl Ty {
 /// (`Ty` を 16 byte に保つため、fat な `&str` ではなく `&String` を持つ)
 pub fn intern_str(s: &str) -> &'static String {
     static TABLE: OnceLock<Mutex<HashSet<&'static String>>> = OnceLock::new();
-    let mut tab = TABLE.get_or_init(|| Mutex::new(HashSet::new())).lock().unwrap();
+    let mut tab = TABLE.get_or_init(|| Mutex::new(HashSet::default())).lock().unwrap();
     if let Some(&r) = tab.get(&s.to_string()) {
         return r;
     }
@@ -110,7 +111,7 @@ pub struct FnTy {
 
 pub fn intern_fn(f: FnTy) -> &'static FnTy {
     static TABLE: OnceLock<Mutex<HashSet<&'static FnTy>>> = OnceLock::new();
-    let mut tab = TABLE.get_or_init(|| Mutex::new(HashSet::new())).lock().unwrap();
+    let mut tab = TABLE.get_or_init(|| Mutex::new(HashSet::default())).lock().unwrap();
     if let Some(&r) = tab.get(&f) {
         return r;
     }
@@ -122,7 +123,7 @@ pub fn intern_fn(f: FnTy) -> &'static FnTy {
 /// trait 境界を文字列にする (パスの最後のセグメントだけ。`core::ops::Fn(u8) -> u8` → `Fn (u8) -> u8`)
 pub fn intern(t: Ty) -> &'static Ty {
     static TABLE: OnceLock<Mutex<HashSet<&'static Ty>>> = OnceLock::new();
-    let mut tab = TABLE.get_or_init(|| Mutex::new(HashSet::new())).lock().unwrap();
+    let mut tab = TABLE.get_or_init(|| Mutex::new(HashSet::default())).lock().unwrap();
     if let Some(&r) = tab.get(&t) {
         return r;
     }

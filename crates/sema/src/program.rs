@@ -2,7 +2,9 @@
 //! アイテム要約 (`Summary`) から作る。syn に依存しない (zustc 自身でもコンパイルできる) 部分で、
 //! syn の構文木を引く検索 (`fn_by_path` など) は front.rs の別の `impl Program` にある。
 
-use std::collections::{HashMap, HashSet};
+// (Fx hashing throughout: deterministic iteration and instruction counts, unlike the std maps' random seeds)
+type HashMap<K, V> = crate::fxhash::FxMap<K, V>;
+type HashSet<K> = crate::fxhash::FxSet<K>;
 use std::sync::Mutex;
 
 use crate::fxhash::{FxMap, FxSet};
@@ -124,8 +126,8 @@ impl AdtTable {
     fn new() -> Self {
         AdtTable {
             v: Mutex::new(vec![]),
-            inst: Mutex::new(HashMap::new()),
-            tuples: Mutex::new(HashMap::new()),
+            inst: Mutex::new(HashMap::default()),
+            tuples: Mutex::new(HashMap::default()),
         }
     }
     pub fn len(&self) -> usize {
@@ -241,11 +243,11 @@ pub struct Program {
     pub opt: bool,
     /// ブランケット impl のメソッド (名前 → 関数 id) と、その self 型の型パラメータ名
     pub blanket: FxMap<String, u32>,
-    pub blanket_selfs: std::collections::HashSet<String>,
+    pub blanket_selfs: HashSet<String>,
     /// Traits with a blanket impl (`impl<T> Tr for T`): every type implements them (bounds are not checked)
-    pub blanket_traits: std::collections::HashSet<String>,
+    pub blanket_traits: HashSet<String>,
     /// The structs that are unions
-    pub unions: std::collections::HashSet<String>,
+    pub unions: HashSet<String>,
     /// The tag type of enums with `#[repr(u8)]` and the like
     pub reprs: HashMap<String, Ty>,
     /// `const fn` bodies a constant may call: name -> (parameter names, body text)
@@ -258,11 +260,11 @@ pub struct Program {
     /// trait 名 → その trait で宣言された関数
     pub traits: FxMap<String, Vec<u32>>,
     /// impls whose self type is a reference to a concrete type (`impl Tr for &i32` / `for &S`): (that type, trait)
-    pub ref_impls: std::collections::HashSet<(Ty, String)>,
+    pub ref_impls: HashSet<(Ty, String)>,
     /// generic impls for references: (self type with the impl's parameters, trait, number of parameters)
     pub ref_impl_pats: Vec<(Ty, String, usize)>,
     /// traits implemented for fn pointers (`impl Tr for fn(A) -> B`; generic ones count for every fn pointer)
-    pub fnptr_impls: std::collections::HashSet<(Option<Ty>, String)>,
+    pub fnptr_impls: HashSet<(Option<Ty>, String)>,
     /// 親トレイト (`trait Bar: Foo`)
     pub trait_supers: FxMap<String, Vec<String>>,
     /// the generics a method of the trait starts with: Self and the trait's own parameters
@@ -366,7 +368,7 @@ impl Insts {
         Insts {
             n_fns: prog.names.len() as u32,
             list: vec![],
-            map: HashMap::new(),
+            map: HashMap::default(),
             pending: vec![],
         }
     }
@@ -634,13 +636,13 @@ impl Program {
             overloads: Default::default(),
             by_last: FxMap::default(),
             traits: FxMap::default(),
-            impls: HashSet::new(),
+            impls: HashSet::default(),
             panic_handler: None,
             consts: vec![],
             const_index: FxMap::default(),
             const_by_last: FxMap::default(),
-            prim_impls: HashSet::new(),
-            ref_slice_traits: HashSet::new(),
+            prim_impls: HashSet::default(),
+            ref_slice_traits: HashSet::default(),
             closures: FxMap::default(),
             closure_by: FxMap::default(),
             closure_of_struct: FxMap::default(),
@@ -657,7 +659,7 @@ impl Program {
         };
         // 0. 型の別名 (struct のフィールドの型より先に)
         // (同じ名前の struct / enum があればそちら: ユーザの `struct Path` と prelude の `type Path = str`)
-        let adt_names: std::collections::HashSet<&str> = sums
+        let adt_names: HashSet<&str> = sums
             .iter()
             .flat_map(|sm| sm.structs.iter().map(|x| x.0.as_str()).chain(sm.enums.iter().map(|x| x.0.as_str())))
             .collect();
@@ -859,7 +861,7 @@ impl Program {
             .collect();
         let deeps: Vec<Key> = (0..n_defs)
             .map(|id| {
-                let mut seen = HashSet::new();
+                let mut seen = HashSet::default();
                 let mut stack = vec![Ty::Struct(id as u32)];
                 let mut hs = vec![];
                 while let Some(t) = stack.pop() {
@@ -1144,7 +1146,7 @@ impl Program {
             .collect();
         // 4. trait の実装 (impl ヘッダの要約から)
         // (traits with an impl for `&T` of a type parameter T)
-        let mut ref_blankets: std::collections::HashSet<String> = Default::default();
+        let mut ref_blankets: HashSet<String> = Default::default();
         // (impls for Box: (trait, line), checked against blanket impls of the same trait after the loop)
         let mut box_impls: Vec<(String, usize)> = vec![];
         // (unbounded blanket impls (trait, line), and every impl of the program's (trait, line))
@@ -2777,7 +2779,7 @@ impl Program {
             .into_iter()
             .map(|t| (t, generics.clone()))
             .collect();
-        let mut visited_bases = HashSet::new();
+        let mut visited_bases = HashSet::default();
         while let Some((t, gs)) = todo.pop() {
             match t {
                 TySyn::Named(n) if !gs.contains(&n) => {

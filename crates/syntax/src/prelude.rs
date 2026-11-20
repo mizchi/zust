@@ -13,7 +13,7 @@ pub const PRELUDE: &str = include_str!("prelude_lib.rs.in");
 
 include!(concat!(env!("OUT_DIR"), "/prelude_items.rs"));
 
-use std::collections::HashMap;
+type HashMap<K, V> = crate::fxhash::FxMap<K, V>;
 use std::sync::OnceLock;
 
 use crate::lexer::{ItemKind, SrcItem};
@@ -164,7 +164,7 @@ fn is_iterator_trait(h: usize) -> bool {
 fn helper_suffixes() -> &'static HashMap<&'static str, Vec<&'static str>> {
     static H: OnceLock<HashMap<&'static str, Vec<&'static str>>> = OnceLock::new();
     H.get_or_init(|| {
-        let mut m: HashMap<&'static str, Vec<&'static str>> = HashMap::new();
+        let mut m: HashMap<&'static str, Vec<&'static str>> = HashMap::default();
         for (_, name, _) in items() {
             let Some(n) = name.as_deref() else { continue };
             for pre in ["__exr_str_", "__exr_char_"] {

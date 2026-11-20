@@ -978,8 +978,8 @@ fn first_unused_import(src: &str, items: &[SrcItem]) -> Option<(usize, usize, St
     let toks = crate::lexer::tokenize(b);
     let word = |k: usize| -> &str { if toks[k].0 == 0 { &region[toks[k].1..toks[k].2] } else { "" } };
     // (names mentioned outside `use` items, and the program's own traits)
-    let mut used: std::collections::HashSet<&str> = Default::default();
-    let mut traits: std::collections::HashSet<&str> = Default::default();
+    let mut used: crate::fxhash::FxSet<&str> = Default::default();
+    let mut traits: crate::fxhash::FxSet<&str> = Default::default();
     let mut in_use = false;
     for k in 0..toks.len() {
         let w = word(k);
@@ -1441,7 +1441,7 @@ fn unresolved_import(src: &str, split: &str, items: &[SrcItem], deps: &[String])
             })
         })
     };
-    let mut defined: std::collections::HashSet<String> = Default::default();
+    let mut defined: crate::fxhash::FxSet<String> = Default::default();
     for (_, f) in &firsts {
         if defines(f) {
             defined.insert(f.clone());
@@ -1633,7 +1633,7 @@ fn first_dead_item(src: &str, items: &[SrcItem], check_pub: bool) -> Option<(usi
     let word = |k: usize| -> &str { if toks[k].0 == 0 { &region[toks[k].1..toks[k].2] } else { "" } };
     let sym = |k: usize, c: u8| toks[k].0 == 1 && b[toks[k].1] == c;
     // (uses of each name: every occurrence but the definition's, the one after `impl` / `for` in an impl header)
-    let mut uses: std::collections::HashMap<&str, usize> = Default::default();
+    let mut uses: crate::fxhash::FxMap<&str, usize> = Default::default();
     let mut in_impl_header = false;
     for k in 0..toks.len() {
         let w = word(k);

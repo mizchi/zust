@@ -10,7 +10,7 @@
 //! - 繰り返し `$( .. ) sep op` (op は `*` / `+` / `?`)。展開の中の呼び出しも (深さ 64 まで) 展開する
 
 use proc_macro2::{Delimiter, Spacing, TokenStream, TokenTree};
-use std::collections::HashMap;
+type HashMap<K, V> = crate::fxhash::FxMap<K, V>;
 use std::str::FromStr;
 
 /// パターン / 本体のトークン (区切りの付いた繰り返しは Rep)
@@ -329,7 +329,7 @@ fn match_prefix(pat: &[Pt], toks: &[TokenTree], binds: &mut HashMap<String, Bind
                             break;
                         }
                     }
-                    let mut b = HashMap::new();
+                    let mut b = HashMap::default();
                     let Some(n) = match_prefix(inner, &toks[i..], &mut b, sep.as_ref().or(stop.as_ref())) else {
                         break;
                     };
@@ -829,8 +829,8 @@ pub fn expand_cfg(src: &str, cfg: Option<&crate::cfg::CfgSet>) -> Result<Option<
         return Ok(None);
     }
     let mut text = src.to_string();
-    let mut macros: HashMap<String, Vec<Rule>> = HashMap::new();
-    let mut first: HashMap<String, usize> = HashMap::new();
+    let mut macros: HashMap<String, Vec<Rule>> = HashMap::default();
+    let mut first: HashMap<String, usize> = HashMap::default();
     collect_defs(&mut text, &mut macros, Some(&mut first))?;
     if macros.is_empty() {
         return Ok(Some(text));
@@ -889,7 +889,7 @@ pub fn expand_cfg(src: &str, cfg: Option<&crate::cfg::CfgSet>) -> Result<Option<
             let args: Vec<TokenTree> = ts.into_iter().collect();
             let mut done = false;
             for r in rules {
-                let mut binds = HashMap::new();
+                let mut binds = HashMap::default();
                 if match_pat(&r.pat, &args, &mut binds) {
                     let mut body = String::new();
                     transcribe_h(&r.body, &binds, &mut body)?;
@@ -984,7 +984,7 @@ pub fn expand_reference(src: &str) -> Result<Option<String>, String> {
         return Ok(None);
     }
     let mut text = src.to_string();
-    let mut macros: HashMap<String, Vec<Rule>> = HashMap::new();
+    let mut macros: HashMap<String, Vec<Rule>> = HashMap::default();
     // 1. 定義を集めて消す (関数の本体や `mod m { .. }` の中の定義も)
     {
         let ts = TokenStream::from_str(&text).map_err(|e| format!("1:1: {e}"))?;
@@ -1107,7 +1107,7 @@ fn find_calls(
                         let args: Vec<TokenTree> = g.stream().into_iter().collect();
                         let mut done = false;
                         for r in rules {
-                            let mut binds = HashMap::new();
+                            let mut binds = HashMap::default();
                             if match_pat(&r.pat, &args, &mut binds) {
                                 let mut body = String::new();
                                 transcribe_h(&r.body, &binds, &mut body)?;
