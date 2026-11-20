@@ -58,6 +58,26 @@ fn int_repr(attrs: &[String]) -> Option<String> {
     None
 }
 
+/// `#[repr(packed)]` / `#[repr(packed(N))]` / `#[repr(align(N))]`: "packed:N" / "align:N" (Summary's reprs keeps them
+/// beside the integer type of an enum)
+fn layout_reprs(attrs: &[String]) -> Vec<String> {
+    let mut v = vec![];
+    for a in attrs {
+        let c = compact(a);
+        let Some(inner) = c.strip_prefix("#[repr(").and_then(|x| x.strip_suffix(")]")) else { continue };
+        for part in inner.split(',') {
+            if part == "packed" {
+                v.push("packed:1".to_string());
+            } else if let Some(n) = part.strip_prefix("packed(").and_then(|x| x.strip_suffix(')')).and_then(|x| x.parse::<u32>().ok()) {
+                v.push(format!("packed:{n}"));
+            } else if let Some(n) = part.strip_prefix("align(").and_then(|x| x.strip_suffix(')')).and_then(|x| x.parse::<u32>().ok()) {
+                v.push(format!("align:{n}"));
+            }
+        }
+    }
+    v
+}
+
 /// `#[link_name = "malloc"]` の名前
 fn link_name(attrs: &[String]) -> Option<String> {
     for a in attrs {
@@ -1591,6 +1611,9 @@ pub fn summarize(item: &Item, owner: Option<&Owner>) -> R<Summary> {
                 if let Some(r) = int_repr(&item.attrs) {
                     sm.reprs.push((sn.clone(), r));
                 }
+                for r in layout_reprs(&item.attrs) {
+                    sm.reprs.push((sn.clone(), r));
+                }
             }
             sm.adt_generics = adt_params(g)?;
             sm.adt_bounds = adt_bounds(g);
@@ -1672,6 +1695,9 @@ pub fn summarize(item: &Item, owner: Option<&Owner>) -> R<Summary> {
             }
             if union {
                 sm.unions.push(sn.clone());
+            }
+            for r in layout_reprs(&item.attrs) {
+                sm.reprs.push((sn.clone(), r));
             }
             sm.adt_generics = adt_params(g)?;
             sm.adt_bounds = adt_bounds(g);

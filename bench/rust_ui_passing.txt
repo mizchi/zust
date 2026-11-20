@@ -4220,8 +4220,16 @@ run-pass	overloaded/overloaded-index.rs
 run-pass	overloaded/overloaded_deref_with_ref_pattern_issue15609.rs
 run-pass	overloaded/subtyping-both-lhs-and-rhs-in-add-impl.rs
 run-pass	packed/misaligned-reference-drop-field-99838.rs
+run-pass	packed/packed-c-style-struct.rs
 run-pass	packed/packed-struct-address-of-element.rs
+run-pass	packed/packed-struct-generic-layout.rs
+run-pass	packed/packed-struct-generic-size.rs
+compile-fail	packed/packed-struct-generic-transmute.rs
+run-pass	packed/packed-struct-layout.rs
 run-pass	packed/packed-struct-match.rs
+compile-fail	packed/packed-struct-transmute.rs
+run-pass	packed/packed-struct-vec.rs
+run-pass	packed/packed-tuple-struct-layout.rs
 check-pass	panics/panic-handler-closures.rs
 build-pass	parallel-rustc/assert-found_cycle-issue-115223.rs
 build-pass	parallel-rustc/export-symbols-deadlock-issue-118205.rs
@@ -6717,6 +6725,7 @@ compile-fail	uninhabited/uninhabited-matches-feature-gated.rs
 compile-fail	union/access_union_field.rs
 check-pass	union/issue-99375.rs
 check-pass	union/projection-as-union-type.rs
+run-pass	union/union-align.rs
 compile-fail	union/union-assignop.rs
 compile-fail	union/union-borrow-move-parent-sibling.rs
 run-pass	union/union-const-codegen.rs
@@ -6736,6 +6745,7 @@ compile-fail	union/union-no-derive-suggestion.rs
 run-pass	union/union-nodrop.rs
 compile-fail	union/union-nonrepresentable.rs
 run-pass	union/union-nonzero.rs
+run-pass	union/union-packed.rs
 compile-fail	union/union-pat-in-param.rs
 compile-fail	union/union-suggest-field.rs
 run-pass	union/union-trait-impl.rs

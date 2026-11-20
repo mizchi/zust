@@ -733,8 +733,18 @@ impl Cx<'_> {
                     }
                     let done = self.b.create_block();
                     let res = self.b.append_block_param(done, types::I8);
+                    // (a `#[repr(packed)]` struct's fields may be misaligned: an aggregate one is compared from aligned
+                    // copies, as rustc's derive copies them out)
+                    let packed = self.prog.packed.contains_key(&self.prog.structs[self.prog.base_of(sid) as usize].name);
                     for (_, ft, off) in fields {
-                        let (x, y) = self.load_field(a, b, ft, off);
+                        let (mut x, mut y) = self.load_field(a, b, ft, off);
+                        if packed && ft.is_agg() {
+                            let (tx, ty) = (self.temp(ft), self.temp(ft));
+                            self.copy(tx, x, ft);
+                            self.copy(ty, y, ft);
+                            x = tx;
+                            y = ty;
+                        }
                         let c = self.agg_or_scalar_eq(x, y, ft, span)?;
                         let next = self.b.create_block();
                         let z = self.b.ins().iconst(types::I8, 0);
