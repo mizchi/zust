@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795189476137,
+  "lastUpdate": 1795189478385,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -53284,6 +53284,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "lsp peak RSS",
             "value": 75.918,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "committer": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "distinct": true,
+          "id": "b0618707eb43a9fb304b42ea2b2b4232f9130685",
+          "message": "Borrow checker in closure bodies\n\nClosure bodies used to be left out of the borrow checker, so two moves\nof a local inside a closure, or of a capture, compiled. Now:\n- Closure bodies are checked as fn bodies are.\n- A capture held by value is one of the body's locals, so\n  `move || loop { let tx = tx; .. }` is E0382 (use of moved value).\n- The rewrite of `match cap { .. }` on a capture held by value (moved to a\n  local first) is not checked. That move is the rewrite's, and\n  `None => .., Some(x) => cap = Some(x)` leaves cap whole on every path.\n\ntests/ui: +9 compile-fail, each checked against its expected error\n(cannot move out of / E0381 / cannot borrow or assign behind `&` / use\nof moved value). suggestions/dont-suggest-ref/move-into-closure.rs goes\nto rust_ui_accidental.txt: it is rejected on an annotated line, but as a\nuse of a partially moved value, not \"cannot move\". borrowck/moved-value-\nin-thread-loop-12041.rs now fails for its own reason (E0382).\n\nKPI against main (0e9cf07) without this change: edit one fn +0.17%,\ntraits check +0.35%, patterns check +0.19%, from checking the closure\nbodies. The flagged no-op / crates no-op are the std startup variation.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-20T15:40:10Z",
+          "tree_id": "4ec17859b7205c5b85eae2a624e356b50cd2e986",
+          "url": "https://github.com/mizchi/zust/commit/b0618707eb43a9fb304b42ea2b2b4232f9130685"
+        },
+        "date": 1795189477912,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "lsp definition p50",
+            "value": 0.573,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp hover p50",
+            "value": 0.404,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp completion p50",
+            "value": 0.775,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp references p50",
+            "value": 4.584,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp rename p50",
+            "value": 0.395,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp signatureHelp p50",
+            "value": 0.573,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp documentHighlight p50",
+            "value": 0.919,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp ready (startup to indexed)",
+            "value": 120.122,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp peak RSS",
+            "value": 75.91,
             "unit": "MiB"
           }
         ]
