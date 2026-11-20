@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795193036202,
+  "lastUpdate": 1795193038764,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -53740,6 +53740,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "lsp peak RSS",
             "value": 75.746,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "miz404@gmail.com",
+            "name": "Kotaro Chikuba",
+            "username": "mizchi"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "cd5dccd84a49d1472326525bb622f6ff42871b88",
+          "message": "Merge pull request #12 from mizchi/claude/ui-ratchet-blaze\n\ntests/ui pass-count ratchet; blaze's tests/ui results in README",
+          "timestamp": "2026-11-21T01:38:22+09:00",
+          "tree_id": "6d47b21c4e8c4cc54c8f2abde62197f08b94beef",
+          "url": "https://github.com/mizchi/zust/commit/cd5dccd84a49d1472326525bb622f6ff42871b88"
+        },
+        "date": 1795193038125,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "lsp definition p50",
+            "value": 0.628,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp hover p50",
+            "value": 0.52,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp completion p50",
+            "value": 1.22,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp references p50",
+            "value": 6.684,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp rename p50",
+            "value": 0.54,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp signatureHelp p50",
+            "value": 0.884,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp documentHighlight p50",
+            "value": 1.212,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp ready (startup to indexed)",
+            "value": 161.951,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp peak RSS",
+            "value": 75.84,
             "unit": "MiB"
           }
         ]
