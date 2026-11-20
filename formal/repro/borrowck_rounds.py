@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
-"""zustc's borrow checker gives up after 50 * blocks + 1000 rounds of its fixpoint and then reports nothing.
+"""Before 2026-11-20, zustc's borrow checker gave up after 50 * blocks + 1000 rounds of its fixpoint and then
+reported nothing. It now runs to the fixpoint (a bound from the lattice's height: crates/typeck/src/acg/borrowck.rs;
+borrowck_props.rs `fixpoint_does_not_give_up`).
 
 Writes a program where K references are shifted along a chain in a loop (`r{i} = r{i-1}`, in reverse order, so each
 round of the fixpoint moves the loan of `x` one step), then assigns to `x` while `r{K}` is still used: rustc
-rejects it with E0506 for every K. With zustc (2026-11-19, 743c2a5) the error is found up to K = 259 and missed
+rejects it with E0506 for every K. With zustc at 743c2a5 (2026-11-19) the error was found up to K = 259 and missed
 from K = 260 on. Usage: borrowck_rounds.py [K] [path to zustc]
 """
 import subprocess, sys, tempfile, os

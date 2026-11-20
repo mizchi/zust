@@ -182,3 +182,55 @@ fn place_order() {
         }
     }
 }
+
+/// The fixpoint runs until nothing changes, however many rounds that takes (it once gave up after
+/// `50 * blocks + 1000` rounds and reported nothing). This is formal/repro/borrowck_rounds.py with K = 700:
+///
+/// ```text
+/// b0: r0 = &x; r1..rK = &z            b1: loop head -> b2, b3
+/// b2: rK = rK-1; ...; r1 = r0 -> b1   b3: x = 1; read rK      (E0506: x is still borrowed through rK)
+/// ```
+/// Each round moves the loan of x one step down the chain, so it needs about K rounds through b1 and b2.
+#[test]
+fn fixpoint_does_not_give_up() {
+    use super::super::Sp;
+    use super::{Acc, Bk, Ev, Loan, Local, Src};
+    use crate::ir::Block;
+    use crate::types::Ty;
+    const K: u32 = 700;
+    let sp = |line: u32| Sp { line, col: 0 };
+    let local = |name: String, refs: bool| Local { name, ty: Ty::Unit, copy: false, refs, mutable: Some(true) };
+    let place = |l: u32| BPlace { local: l, proj: vec![] };
+    // (locals: 0 = x, 1 = z, 2 + i = r{i})
+    let mut bk = Bk { on: true, level: 2, ..Bk::default() };
+    bk.locals.push(local("x".into(), false));
+    bk.locals.push(local("z".into(), false));
+    for i in 0..=K {
+        bk.locals.push(local(format!("r{i}"), true));
+    }
+    let r = |i: u32| 2 + i;
+    bk.loans.push(Loan { place: place(0), mutable: false, sp: sp(1), at: sp(1), quiet: false });
+    bk.loans.push(Loan { place: place(1), mutable: false, sp: sp(2), at: sp(2), quiet: false });
+    let (b0, b1, b2, b3) = (Block(0), Block(1), Block(2), Block(3));
+    bk.evs.push((b0, Ev::Bind(0, true)));
+    bk.evs.push((b0, Ev::Bind(1, true)));
+    bk.evs.push((b0, Ev::Acc(place(0), Acc::Borrow(0), sp(1))));
+    bk.evs.push((b0, Ev::Bind(r(0), true)));
+    bk.evs.push((b0, Ev::Def(r(0), vec![Src::Loan(0)])));
+    for i in 1..=K {
+        bk.evs.push((b0, Ev::Acc(place(1), Acc::Borrow(1), sp(2))));
+        bk.evs.push((b0, Ev::Bind(r(i), true)));
+        bk.evs.push((b0, Ev::Def(r(i), vec![Src::Loan(1)])));
+    }
+    for i in (1..=K).rev() {
+        bk.evs.push((b2, Ev::Acc(place(r(i - 1)), Acc::Read, sp(10 + i))));
+        bk.evs.push((b2, Ev::Acc(place(r(i)), Acc::Write, sp(10 + i))));
+        bk.evs.push((b2, Ev::Def(r(i), vec![Src::Local(r(i - 1))])));
+    }
+    bk.evs.push((b3, Ev::Acc(place(0), Acc::Write, sp(1000))));
+    bk.evs.push((b3, Ev::Acc(place(r(K)), Acc::Read, sp(1001))));
+    bk.edges = vec![(b0, b1), (b1, b2), (b2, b1), (b1, b3)];
+    let e = bk.check(4).expect("E0506 not found");
+    assert_eq!(e.sp, sp(1000), "{}", e.msg);
+    assert!(e.msg.contains("because it is borrowed"), "{}", e.msg);
+}
