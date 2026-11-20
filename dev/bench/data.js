@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795174931344,
+  "lastUpdate": 1795174933451,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -81761,6 +81761,70 @@ window.BENCHMARK_DATA = {
           {
             "name": "tests/ui run-pass passing",
             "value": 1734,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui check-pass pass rate",
+            "value": 79.86,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui check-pass passing",
+            "value": 1443,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui build-pass pass rate",
+            "value": 71.85,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui build-pass passing",
+            "value": 97,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui compile-fail pass rate",
+            "value": 48.44,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui compile-fail passing",
+            "value": 3564,
+            "unit": "tests"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "committer": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "distinct": true,
+          "id": "707a3953e4e9d71650f873811e6506390864b8ad",
+          "message": "match on unsuffixed number literals: the type comes from the patterns\n\n`match (0, 0) { (usize::MIN, usize::MAX) => .. }` used to type the\nscrutinee as (i32, i32) and then reject the pattern. A scrutinee of\nunsuffixed literals (or a tuple of them) now takes its type from the\nfirst pattern that pins one down: a suffixed literal, a primitive's\nassociated const, a const, a range's start, or a tuple of these.\n\ntests/ui: +2 run-pass.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-20T11:36:52Z",
+          "tree_id": "f777c56b4cbcc47ca06cea19663b367f3605bc13",
+          "url": "https://github.com/mizchi/zust/commit/707a3953e4e9d71650f873811e6506390864b8ad"
+        },
+        "date": 1795174932982,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tests/ui run-pass pass rate",
+            "value": 72.79,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui run-pass passing",
+            "value": 1736,
             "unit": "tests"
           },
           {
