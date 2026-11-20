@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795154770181,
+  "lastUpdate": 1795154772439,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -46216,6 +46216,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "lsp peak RSS",
             "value": 74.426,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "committer": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "distinct": true,
+          "id": "1e1f25fa2713aacee57b6d14812759659dd18a21",
+          "message": "cannot find attribute: unknown attributes in a crate with no dependency\n\nA crate built alone (no dependency, so no proc macro) knows only the\nbuilt-in attributes and tool paths (`rustfmt::`, `clippy::`): another\nattribute in front of an item is \"cannot find attribute `x` in this\nscope\" (`#[main]`, `#[deprcated]`, `#[fake_attr]`). `rustc_*` ones are\nbuilt-in under `feature(rustc_attrs)` (looked up only when one is\nthere), and an item with a merge's diff marker keeps its parse error.\n\ntests/ui: +4 compile-fail passes; 17 that expect a feature-gate error\nfor an internal or unstable attribute go to rust_ui_accidental.txt.\nKPI: check +0.00%, traits check +0.03%.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-20T06:00:03Z",
+          "tree_id": "d44f56ff6111ad9191265d9567ab0b1e9f0030cc",
+          "url": "https://github.com/mizchi/zust/commit/1e1f25fa2713aacee57b6d14812759659dd18a21"
+        },
+        "date": 1795154771970,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "lsp definition p50",
+            "value": 0.516,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp hover p50",
+            "value": 0.404,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp completion p50",
+            "value": 1,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp references p50",
+            "value": 6.06,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp rename p50",
+            "value": 0.41,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp signatureHelp p50",
+            "value": 0.929,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp documentHighlight p50",
+            "value": 0.936,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp ready (startup to indexed)",
+            "value": 127.68,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp peak RSS",
+            "value": 74.164,
             "unit": "MiB"
           }
         ]
