@@ -679,6 +679,14 @@ impl Cx<'_> {
                         Place::Mem(ptr, 0, *i)
                     }
                     p => {
+                        // (`impl Deref<Target = [T; N]>`: `t.len()` is `t.deref().len()`, the method of what it derefs to;
+                        // for a receiver that is a place, which evaluating again does not change)
+                        if via_deref && is_place_expr(recv) && matches!(p.ty(), Ty::Array(..) | Ty::Slice(_) | Ty::Str) {
+                            let d = Expr::MethodCall(Box::new(Expr::Paren(Box::new(recv.clone()))), "deref".to_string(), vec![], vec![], msp);
+                            let ne = Expr::MethodCall(Box::new(d), method.to_string(), gargs.clone(), margs.clone(), msp);
+                            let ne: &Expr = self.keep_expr(ne);
+                            return self.expr(ne, expected);
+                        }
                         let t = self.prog.tn(p.ty());
                         return err(SP, format!("no method `{}` on type `{t}`", method));
                     }
