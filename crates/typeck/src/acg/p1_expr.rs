@@ -244,7 +244,12 @@ impl Cx<'_> {
                 // (index_mut is used for reads too: the borrow checker sees a shared borrow; a write is checked on the
                 // place itself)
                 self.bk.shared_recv = e as *const Expr as usize;
-                let (v, t) = self.expr(e, None)?;
+                // (the call takes `&x` and its index by value: neither is the place `&raw` takes, so reading a static
+                // in them still needs unsafe)
+                let raw = std::mem::take(&mut self.raw_ref);
+                let r = self.expr(e, None);
+                self.raw_ref = raw;
+                let (v, t) = r?;
                 match (v, t) {
                     (Some(p), Ty::Ref(_, inner)) => Ok(Place::Mem(p, 0, *inner)),
                     _ => err(SP, "`index` must return a reference"),
