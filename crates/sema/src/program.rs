@@ -259,6 +259,8 @@ pub struct Program {
     pub packed: HashMap<String, u32>,
     /// `#[repr(align(N))]` types: aligned to at least N
     pub min_align: HashMap<String, u32>,
+    /// `#[repr(C)]` types (an enum's `#[repr(C, u8)]` lays its fields out after the tag, as one union)
+    pub repr_c: HashSet<String>,
     /// `const fn` bodies a constant may call: name -> (parameter names, body text)
     pub const_fns: HashMap<String, (Vec<String>, String)>,
     /// 同じ型への別々の trait impl が同じ名前の関数を持つもの (`impl From<&str> for P` と `impl From<String> for P`):
@@ -689,6 +691,7 @@ impl Program {
             reprs: Default::default(),
             packed: Default::default(),
             min_align: Default::default(),
+            repr_c: Default::default(),
             const_fns: Default::default(),
             overloads: Default::default(),
             trait_scopes: vec![],
@@ -733,10 +736,15 @@ impl Program {
             for (n, t) in &sm.reprs {
                 if let Some(t) = Ty::from_suffix(t) {
                     p.reprs.insert(n.clone(), t);
-                } else if let Some(k) = t.strip_prefix("packed:").and_then(|x| x.parse().ok()) {
-                    p.packed.insert(n.clone(), k);
-                } else if let Some(k) = t.strip_prefix("align:").and_then(|x| x.parse().ok()) {
-                    p.min_align.insert(n.clone(), k);
+                } else if t == "C" {
+                    p.repr_c.insert(n.clone());
+                } else if let Some(k) = t.strip_prefix("packed:").and_then(|x| x.parse::<u32>().ok()) {
+                    // (several: the least packing, the greatest alignment, as rustc takes them)
+                    let e = p.packed.entry(n.clone()).or_insert(k);
+                    *e = (*e).min(k);
+                } else if let Some(k) = t.strip_prefix("align:").and_then(|x| x.parse::<u32>().ok()) {
+                    let e = p.min_align.entry(n.clone()).or_insert(k);
+                    *e = (*e).max(k);
                 }
             }
             for (n, g, t) in &sm.aliases {
@@ -2689,6 +2697,21 @@ impl Program {
         tag: Ty,
     ) -> (Vec<VariantDef>, u32, u32) {
         let tag_size = tag.bits() / 8;
+        // (`#[repr(u8)]` and the like on an enum with fields (RFC 2195): each variant is laid out as a `#[repr(C)]`
+        // struct of the tag and its fields, the enum as their union)
+        if self.reprs.contains_key(name) && !self.repr_c.contains(name) && vs.iter().any(|v| !v.2.is_empty()) {
+            let (mut size, mut align) = (tag_size, tag_size.max(1).max(self.min_align.get(name).copied().unwrap_or(1)));
+            let mut out = vec![];
+            for (vn, kind, fs, discr) in vs {
+                let mut all = vec![("#tag".to_string(), tag)];
+                all.extend(fs);
+                let (f, sz, al) = self.struct_layout(all);
+                size = size.max(sz);
+                align = align.max(al);
+                out.push(VariantDef { name: vn, kind, fields: f.into_iter().skip(1).collect(), discr });
+            }
+            return (out, size.next_multiple_of(align), align);
+        }
         let mut laid = vec![];
         let (mut pmax, mut palign) = (0u32, 1u32);
         for (_, _, fs, _) in &vs {

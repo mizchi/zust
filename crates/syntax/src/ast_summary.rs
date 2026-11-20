@@ -66,7 +66,9 @@ fn layout_reprs(attrs: &[String]) -> Vec<String> {
         let c = compact(a);
         let Some(inner) = c.strip_prefix("#[repr(").and_then(|x| x.strip_suffix(")]")) else { continue };
         for part in inner.split(',') {
-            if part == "packed" {
+            if part == "C" {
+                v.push("C".to_string());
+            } else if part == "packed" {
                 v.push("packed:1".to_string());
             } else if let Some(n) = part.strip_prefix("packed(").and_then(|x| x.strip_suffix(')')).and_then(|x| x.parse::<u32>().ok()) {
                 v.push(format!("packed:{n}"));
