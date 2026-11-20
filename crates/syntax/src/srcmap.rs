@@ -205,12 +205,65 @@ fn load_file_in(path: &Path, display: &str, mod_dir: &Path, disp_dir: &str, star
     let fi = map.files.len() as u32;
     map.files.push(display.to_string());
     map.segs.push((start, fi, 1));
-    let (mut text, kids) = blank_mod_decls(&src).map_err(|e| format!("{display}: {e}"))?;
+    let (blanked, kids) = blank_mod_decls(&src).map_err(|e| format!("{display}: {e}"))?;
     if kids.is_empty() {
+        return Ok(blanked);
+    }
+    // (a `mod x;` inside inline modules: its file goes in that place, `pub mod x { .. }` on lines of its own; the
+    // rest of the line continues on the line of the closing brace)
+    let mut text = String::new();
+    let mut last = 0;
+    let mut top = vec![];
+    for (name, path_attr, nested) in kids {
+        let Some((pos, parts)) = nested else {
+            top.push((name, path_attr));
+            continue;
+        };
+        text.push_str(&blanked[last..pos]);
+        last = pos;
+        let file_line = 1 + line_count(&blanked[..pos]);
+        let mut dir = mod_dir.to_path_buf();
+        let mut ddisp = disp_dir.to_string();
+        for p in &parts {
+            let d = match p {
+                Ok(n) | Err(n) => n,
+            };
+            dir = dir.join(d);
+            ddisp = join_disp(&ddisp, d);
+        }
+        let (p, disp, sub, sub_disp) = match path_attr {
+            Some(pa) => {
+                let p = dir.join(&pa);
+                let sub = p.parent().map(|d| d.to_path_buf()).unwrap_or_default();
+                (p, join_disp(&ddisp, &pa), sub, ddisp.clone())
+            }
+            None => {
+                let a = dir.join(format!("{name}.rs"));
+                let b = dir.join(&name).join("mod.rs");
+                map.probes.push(a.clone());
+                map.probes.push(b.clone());
+                if a.exists() {
+                    (a, join_disp(&ddisp, &format!("{name}.rs")), dir.join(&name), join_disp(&ddisp, &name))
+                } else if b.exists() {
+                    (b, join_disp(&ddisp, &format!("{name}/mod.rs")), dir.join(&name), join_disp(&ddisp, &name))
+                } else {
+                    return Err(format!("{display}: file not found for module `{name}`"));
+                }
+            }
+        };
+        text.push_str(&format!("\npub mod {name} {{\n"));
+        let at = start + line_count(&text);
+        let body = load_file(p.as_path(), &disp, sub.as_path(), &sub_disp, at, map, cfg, open)?;
+        text.push_str(&body);
+        text.push_str("\n}");
+        map.segs.push((start + line_count(&text), fi, file_line));
+    }
+    text.push_str(&blanked[last..]);
+    if top.is_empty() {
         return Ok(text);
     }
     text.push('\n');
-    for (name, path_attr) in kids {
+    for (name, path_attr) in top {
         // (`#[path = "x.rs"] mod m;`: that file, beside this one; its own modules are beside it too)
         if let Some(pa) = path_attr {
             let here = path.parent().unwrap_or(Path::new("."));
@@ -253,7 +306,44 @@ fn join_disp(dir: &str, rest: &str) -> String {
 }
 
 /// トップレベルの `[pub[(..)]] mod x;` を空白にし、(名前, #[cfg(test)] か) の列を返す。`#[cfg(test)]` のものは読まない
-fn blank_mod_decls(src: &str) -> Result<(String, Vec<(String, Option<String>)>), String> {
+/// A `mod x;` inside inline modules (`mod a { #[path = "d"] mod b { mod x; } }`): where it is in the text and the
+/// directories of the modules around it, outermost first (Ok: the module's name, Err: its `#[path]`)
+type Nested = Option<(usize, Vec<Result<String, String>>)>;
+
+/// The `#[path = ".."]` among the attributes that end just before token b, and the first token of those attributes
+fn attrs_before(src: &str, s: &[u8], toks: &[(u8, usize, usize)], mut b: usize) -> (usize, bool, Option<String>) {
+    let is_sym = |k: usize, c: u8| toks[k].0 == 1 && toks[k].2 == toks[k].1 + 1 && s[toks[k].1] == c;
+    let mut cfg_test = false;
+    let mut path_attr: Option<String> = None;
+    while b >= 1 && is_sym(b - 1, b']') {
+        let mut j = b - 1;
+        while j > 0 && !is_sym(j, b'[') {
+            j -= 1;
+        }
+        if j >= 1 && is_sym(j - 1, b'#') {
+            let attr = &src[toks[j].1..toks[b - 1].2];
+            if attr.contains("cfg") && attr.contains("test") {
+                cfg_test = true;
+            }
+            // (`#[path = "bool.rs"]`: the file to read, relative to this file's directory)
+            let a = attr.trim_start_matches('[').trim();
+            if let Some(r) = a.strip_prefix("path") {
+                if let (Some(i), Some(j)) = (r.find('"'), r.rfind('"')) {
+                    if j > i {
+                        path_attr = Some(r[i + 1..j].to_string());
+                    }
+                }
+            }
+            b = j - 1;
+        } else {
+            break;
+        }
+    }
+    (b, cfg_test, path_attr)
+}
+
+#[allow(clippy::type_complexity)]
+fn blank_mod_decls(src: &str) -> Result<(String, Vec<(String, Option<String>, Nested)>), String> {
     if !src.contains("mod") {
         return Ok((src.to_string(), vec![]));
     }
@@ -264,16 +354,31 @@ fn blank_mod_decls(src: &str) -> Result<(String, Vec<(String, Option<String>)>),
     let mut out = s.to_vec();
     let mut kids = vec![];
     let mut depth = 0i32;
+    // (the inline modules open around here: (depth inside it, its directory part))
+    let mut inline: Vec<(i32, Result<String, String>)> = vec![];
     let mut k = 0;
     while k < toks.len() {
         if is_sym(k, b'{') {
             depth += 1;
         } else if is_sym(k, b'}') {
-            depth -= 1;
-        } else if toks[k].0 == 0 && tok(k) == b"mod" && k + 2 < toks.len() && toks[k + 1].0 == 0 && is_sym(k + 2, b';') {
-            if depth != 0 {
-                return Err(format!("`mod {};` inside a block is not supported", String::from_utf8_lossy(tok(k + 1))));
+            if inline.last().is_some_and(|m| m.0 == depth) {
+                inline.pop();
             }
+            depth -= 1;
+        } else if toks[k].0 == 0 && tok(k) == b"mod" && k + 2 < toks.len() && toks[k + 1].0 == 0 && is_sym(k + 2, b'{') {
+            let (_, _, mut pa) = attrs_before(src, s, &toks, k);
+            // (an inner `#![path = "d"]` right inside the braces)
+            if let Some(r) = src[toks[k + 2].2..].trim_start().strip_prefix("#![") {
+                if let Some(r) = r.trim_start().strip_prefix("path").map(str::trim_start).and_then(|r| r.strip_prefix('=')) {
+                    if let Some(v) = r.trim_start().strip_prefix('"').and_then(|v| v.find('"').map(|e| &v[..e])) {
+                        pa = Some(v.to_string());
+                    }
+                }
+            }
+            let name = String::from_utf8_lossy(tok(k + 1)).into_owned();
+            inline.push((depth + 1, pa.ok_or(name)));
+        } else if toks[k].0 == 0 && tok(k) == b"mod" && k + 2 < toks.len() && toks[k + 1].0 == 0 && is_sym(k + 2, b';') {
+            let nested = (depth != 0).then(|| (toks[k + 2].2, inline.iter().map(|m| m.1.clone()).collect::<Vec<_>>()));
             // (前の `pub` / `pub(crate)` と `#[..]` も消す)
             let mut b = k;
             if b >= 1 && is_sym(b - 1, b')') {
@@ -287,39 +392,15 @@ fn blank_mod_decls(src: &str) -> Result<(String, Vec<(String, Option<String>)>),
             } else if b >= 1 && toks[b - 1].0 == 0 && tok(b - 1) == b"pub" {
                 b -= 1;
             }
-            let mut cfg_test = false;
-            let mut path_attr: Option<String> = None;
-            while b >= 1 && is_sym(b - 1, b']') {
-                let mut j = b - 1;
-                while j > 0 && !is_sym(j, b'[') {
-                    j -= 1;
-                }
-                if j >= 1 && is_sym(j - 1, b'#') {
-                    let attr = &src[toks[j].1..toks[b - 1].2];
-                    if attr.contains("cfg") && attr.contains("test") {
-                        cfg_test = true;
-                    }
-                    // (`#[path = "bool.rs"]`: the file to read, relative to this file's directory)
-                    let a = attr.trim_start_matches('[').trim();
-                    if let Some(r) = a.strip_prefix("path") {
-                        if let (Some(i), Some(j)) = (r.find('"'), r.rfind('"')) {
-                            if j > i {
-                                path_attr = Some(r[i + 1..j].to_string());
-                            }
-                        }
-                    }
-                    b = j - 1;
-                } else {
-                    break;
-                }
-            }
+            let (b2, cfg_test, path_attr) = attrs_before(src, s, &toks, b);
+            b = b2;
             for c in &mut out[toks[b].1..toks[k + 2].2] {
                 if *c != b'\n' {
                     *c = b' ';
                 }
             }
             if !cfg_test {
-                kids.push((String::from_utf8_lossy(tok(k + 1)).into_owned(), path_attr));
+                kids.push((String::from_utf8_lossy(tok(k + 1)).into_owned(), path_attr, nested));
             }
             k += 3;
             continue;

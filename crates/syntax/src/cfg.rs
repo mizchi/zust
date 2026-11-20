@@ -73,6 +73,10 @@ fn eval(s: &[u8], toks: &[Tok], mut i: usize, c: &CfgSet) -> (bool, usize) {
         };
         return (v, i);
     }
+    // (`cfg(true)` / `cfg(false)`: boolean literals as predicates)
+    if name == b"true" || name == b"false" {
+        return (name == b"true", i);
+    }
     let name = String::from_utf8_lossy(name).into_owned();
     if t(i) == b"=" && toks.get(i + 1).is_some_and(|x| x.0 == 2) {
         let lit = t(i + 1);
@@ -241,8 +245,14 @@ pub fn strip(src: &str, c: &CfgSet) -> Option<String> {
         let name = t(lb + 1);
         if (name == b"cfg" || name == b"cfg_attr") && t(lb + 2) == b"(" {
             let pclose = matching(s, &toks, lb + 2);
-            let (v, after) = eval(s, &toks, lb + 3, c);
+            let (mut v, after) = eval(s, &toks, lb + 3, c);
             changed = true;
+            // (`#[cfg_attr(p, cfg(q))]` with p true is `#[cfg(q)]`)
+            let mut name = name;
+            if name == b"cfg_attr" && v && t(after) == b"," && t(after + 1) == b"cfg" && t(after + 2) == b"(" && matching(s, &toks, after + 2) + 1 == pclose {
+                v = eval(s, &toks, after + 3, c).0;
+                name = b"cfg";
+            }
             if name == b"cfg_attr" {
                 if v && t(after) == b"," {
                     // `#[cfg_attr(p, a, b)]` → `#[         a, b ]`

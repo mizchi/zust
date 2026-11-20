@@ -515,6 +515,7 @@ compile-fail	attributes/malformed-reprs.rs
 check-pass	attributes/mixed_export_name_and_no_mangle.rs
 check-pass	attributes/mixed_export_name_and_no_mangle_2024.rs
 compile-fail	attributes/obsolete-attr.rs
+check-pass	attributes/path-inline-module.rs
 compile-fail	attributes/repr-align-in-trait-issue-132391.rs
 run-pass	attributes/repr-on-single-variant-Enum.rs
 run-pass	attributes/tool_attributes.rs
@@ -1048,12 +1049,14 @@ compile-fail	cfg/cfg-method-receiver.rs
 run-pass	cfg/cfg-target-abi.rs
 build-pass	cfg/cfg-target-family.rs
 run-pass	cfg/cfg-target-vendor.rs
+run-pass	cfg/conditional-compilation-struct-11085.rs
 run-pass	cfg/conditional-compile-arch.rs
 run-pass	cfg/conditional-compile.rs
 compile-fail	cfg/diagnostics-not-a-def.rs
 compile-fail	cfg/diagnostics-reexport-2.rs
 compile-fail	cfg/diagnostics-reexport.rs
 check-pass	cfg/expanded-cfg.rs
+compile-fail	cfg/nested-cfg-attr-conditional-compilation.rs
 run-pass	cfg/struct-field-empty.rs
 check-pass	check-cfg/nested-cfg.rs
 check-pass	closure-expected-type/expect-fn-supply-fn-multiple.rs
@@ -1340,6 +1343,7 @@ compile-fail	conditional-compilation/cfg-attr-syntax-validation.rs
 compile-fail	conditional-compilation/cfg-empty-any-all.rs
 compile-fail	conditional-compilation/cfg-in-crate-1.rs
 compile-fail	conditional-compilation/cfg_attr-attr-syntax-validation.rs
+check-pass	conditional-compilation/cfg_attr_path.rs
 check-pass	conditional-compilation/inner-cfg-non-inline-mod.rs
 check-pass	conditional-compilation/issue-34028.rs
 compile-fail	confuse-field-and-method/issue-18343.rs
@@ -3859,6 +3863,12 @@ run-pass	modules/mod-pub-access.rs
 run-pass	modules/mod-same-item-names.rs
 run-pass	modules/mod-view-items.rs
 run-pass	modules/mod_dir_implicit.rs
+run-pass	modules/mod_dir_path.rs
+run-pass	modules/mod_dir_path2.rs
+run-pass	modules/mod_dir_path3.rs
+run-pass	modules/mod_dir_path_multi.rs
+run-pass	modules/mod_dir_recursive.rs
+run-pass	modules/mod_dir_simple.rs
 run-pass	modules/mod_file.rs
 compile-fail	modules/mod_file_correct_spans.rs
 run-pass	modules/mod_file_with_path_attr.rs
@@ -4057,6 +4067,7 @@ compile-fail	nll/user-annotations/method-ufcs-2.rs
 compile-fail	nll/user-annotations/method-ufcs-3.rs
 check-pass	nll/user-annotations/normalize-self-ty.rs
 check-pass	nll/user-annotations/type-annotation-with-hrtb.rs
+run-pass	non_modrs_mods/non_modrs_mods.rs
 compile-fail	not-panic/not-panic-safe-2.rs
 compile-fail	not-panic/not-panic-safe-3.rs
 compile-fail	not-panic/not-panic-safe-4.rs
@@ -4322,6 +4333,7 @@ compile-fail	parser/intersection-patterns-1.rs
 compile-fail	parser/intersection-patterns-2.rs
 compile-fail	parser/invalid-variable-definition-55587.rs
 compile-fail	parser/inverted-parameters.rs
+compile-fail	parser/issue-116781.rs
 compile-fail	parser/issue-12187-1.rs
 compile-fail	parser/issue-12187-2.rs
 compile-fail	parser/issues/closure-recovery-across-statements-issue-127223.rs
@@ -5727,6 +5739,7 @@ compile-fail	structs/struct-base-wrong-type.rs
 compile-fail	structs/struct-construct-with-call-issue-138931.rs
 compile-fail	structs/struct-duplicate-comma.rs
 compile-fail	structs/struct-field-access-errors-24365.rs
+compile-fail	structs/struct-field-cfg.rs
 compile-fail	structs/struct-field-init-syntax.rs
 compile-fail	structs/struct-fields-missing.rs
 compile-fail	structs/struct-fields-typo.rs
