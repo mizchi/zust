@@ -3210,6 +3210,7 @@ check-pass	lint/non-snake-case/allow-snake-case-field-destructuring-issue-89469.
 check-pass	lint/non-snake-case/field-lint-expectation-issue-159323.rs
 compile-fail	lint/non-snake-case/lint-non-snake-case-functions.rs
 compile-fail	lint/non-snake-case/lint-non-snake-case-identifiers-suggestion-reserved.rs
+compile-fail	lint/non-snake-case/lint-non-snake-case-lifetimes.rs
 check-pass	lint/non-snake-case/lint-non-snake-case-no-lowercase-equivalent.rs
 compile-fail	lint/non-snake-case/lint-nonstandard-style-unicode-2.rs
 compile-fail	lint/non-snake-case/lint-uppercase-variables.rs

@@ -106,6 +106,7 @@ date	commit	change	noop_M	edit_M	check_M	cache_KiB	lsp_G	run	check	build	cfail
 2026-11-20	a14943c+	lint: #![deny(unused_must_use)] for a dropped Result and #[must_use] fns	0.697	591.046	3881.867	1902.8	-	1698	1417	95	3356	1181.721	63.259	10.210	319.440
 2026-11-20	83f2912+	lint: naming conventions (non_snake_case / non_camel_case_types / non_upper_case_globals)	0.695	590.942	3879.606	1902.8	-	1698	1417	95	3366	1181.702	63.284	10.196	319.379
 2026-11-20	fdd2ee3+	naming lints: struct / enum variant fields, parameters and lets	0.695	590.910	3879.582	1902.8	-	1698	1417	95	3368	1182.195	63.289	10.200	319.410
+2026-11-20	b4040ee+	naming lints: lifetime parameters	0.695	590.736	3879.594	1902.8	-	1698	1417	95	3370	1181.846	63.287	10.196	319.423
 2026-11-20	0765679	reference: 05ec776 with formal/ (no compiler change), measured again on this machine for the rows below	0.882	580.808	3851.454	1902.8	-	1698	1417	95	3327	1178.832	60.981	10.837	316.211
 2026-11-20	0765679+	borrowck: run the fixpoint to its end (a bound from the lattice's height)	0.882	580.299	3849.195	1902.8	-	1698	1417	95	3326	1179.225	60.973	10.837	316.127
 2026-11-20	98c6952+	cache: a tmp file per process when saving the cache and the stamps	0.882	580.437	3849.119	1902.8	-	1698	1417	95	3327	1178.897	60.975	10.837	316.198
