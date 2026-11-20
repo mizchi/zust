@@ -1889,6 +1889,13 @@ impl Cx<'_> {
         if let (Some(q), Some(last)) = (q, p.segs.last()) {
             if let Ok(t) = self.parse_ty(q) {
                 let tn = if t == Ty::Unit { "#tuple0".to_string() } else { self.prog.tn(t) };
+                // (`<Foo as Tr>::C` where Foo has an inherent `C` too: the trait impl's, by its qualified name)
+                if p.segs.len() >= 2 {
+                    let tr = &p.segs[p.segs.len() - 2].name;
+                    if let Some(&ci) = self.prog.const_index.get(&format!("{tn} as {tr}::{}", last.name)) {
+                        return self.const_value(e, ci);
+                    }
+                }
                 if self.prog.const_index.contains_key(&format!("{tn}::{}", last.name)) {
                     let seg = |n: &str| crate::parse::Seg { name: n.to_string(), args: vec![], fn_args: None, text: n.to_string() };
                     let np = crate::parse::Path { global: false, segs: vec![seg(&tn), seg(&last.name)], pos: p.pos };

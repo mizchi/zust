@@ -98,6 +98,7 @@ run-pass	associated-consts/associated-const-marks-live-code.rs
 check-pass	associated-consts/associated-const-outer-ty-refs.rs
 run-pass	associated-consts/associated-const-overwrite-default.rs
 run-pass	associated-consts/associated-const-public-impl.rs
+run-pass	associated-consts/associated-const-resolution-order.rs
 run-pass	associated-consts/associated-const-self-type.rs
 run-pass	associated-consts/associated-const-ufcs-infer-trait.rs
 run-pass	associated-consts/associated-const-use-default.rs
@@ -1682,6 +1683,7 @@ run-pass	consts/short-circuit-or-with-const-bool.rs
 run-pass	consts/signed_enum_discr.rs
 compile-fail	consts/size_of-requires-type-annotation-in-const.rs
 check-pass	consts/static-cycle-error.rs
+check-pass	consts/static-default-lifetime/elided-lifetime.rs
 check-pass	consts/static-default-lifetime/inner-item.rs
 check-pass	consts/static-default-lifetime/static-trait-impl.rs
 run-pass	consts/static-lifetime-inference-from-const-array.rs

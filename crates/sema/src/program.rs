@@ -708,12 +708,41 @@ impl Program {
                 if anon_const(n) {
                     continue;
                 }
-                if p.const_index.contains_key(n) {
-                    return Err(format!(
-                        "{}:1: duplicate definition of `{n}`",
-                        items[ii].line
-                    ));
+                // (`impl Foo { const C }` beside `impl Tr for Foo { const C }`: rustc's `Foo::C` and `<Foo as Tr>::C`.
+                // The trait impl's goes by `Foo as Tr::C`, which a qualified path reads)
+                let trait_of = |k: usize| match items[k].kind {
+                    crate::lexer::ItemKind::ImplMember(h) => sums[h as usize].impl_trait.clone(),
+                    _ => None,
+                };
+                let mut n = n.clone();
+                if let Some(&prev) = p.const_index.get(&n) {
+                    let pk = p.consts[prev as usize].item as usize;
+                    match (trait_of(ii), trait_of(pk)) {
+                        // (two of one trait impl's: a real duplicate)
+                        (Some(a), Some(b)) if a == b => {
+                            return Err(format!("{}:1: duplicate definition of `{n}`", items[ii].line));
+                        }
+                        (Some(tr), _) => {
+                            let (base, last) = n.rsplit_once("::").map(|(a, b)| (a.to_string(), b.to_string())).unwrap_or_default();
+                            n = format!("{base} as {tr}::{last}");
+                        }
+                        (None, Some(tr)) => {
+                            // (the trait impl's came first: it moves to its qualified name)
+                            let (base, last) = n.rsplit_once("::").map(|(a, b)| (a.to_string(), b.to_string())).unwrap_or_default();
+                            let q = format!("{base} as {tr}::{last}");
+                            p.const_index.remove(&n);
+                            p.consts[prev as usize].name = q.clone();
+                            p.const_index.insert(q, prev);
+                        }
+                        (None, None) => {
+                            return Err(format!("{}:1: duplicate definition of `{n}`", items[ii].line));
+                        }
+                    }
+                    if p.const_index.contains_key(&n) {
+                        return Err(format!("{}:1: duplicate definition of `{n}`", items[ii].line));
+                    }
                 }
+                let n = &n;
                 if let Some((_, last)) = n.rsplit_once("::") {
                     p.const_by_last.entry(last.to_string()).or_default().push(p.consts.len() as u32);
                 }

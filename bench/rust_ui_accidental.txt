@@ -55,3 +55,5 @@ compile-fail	error-codes/e0119/issue-27403.rs
 compile-fail	pattern/non-structural-match-types-cycle-err.rs
 compile-fail	pattern/non-structural-match-types.rs
 compile-fail	cast/ptr-to-trait-obj-drop-principal.rs
+compile-fail	methods/disambiguate-multiple-blanket-impl.rs
+compile-fail	methods/disambiguate-multiple-trait-2.rs
