@@ -481,10 +481,12 @@ check-pass	attributes/issue-40962.rs
 compile-fail	attributes/issue-90873.rs
 check-pass	attributes/key-value-expansion-scope-pass.rs
 compile-fail	attributes/key-value-expansion-scope.rs
+compile-fail	attributes/main-removed-1.rs
 compile-fail	attributes/malformed-must_use.rs
 compile-fail	attributes/malformed-reprs.rs
 check-pass	attributes/mixed_export_name_and_no_mangle.rs
 check-pass	attributes/mixed_export_name_and_no_mangle_2024.rs
+compile-fail	attributes/obsolete-attr.rs
 compile-fail	attributes/repr-align-in-trait-issue-132391.rs
 run-pass	attributes/repr-on-single-variant-Enum.rs
 run-pass	attributes/tool_attributes.rs
@@ -2183,6 +2185,7 @@ compile-fail	feature-gates/feature-gate-cfg-version.rs
 compile-fail	feature-gates/feature-gate-closure_lifetime_binder.rs
 compile-fail	feature-gates/feature-gate-concat_bytes.rs
 compile-fail	feature-gates/feature-gate-const-c-variadic.rs
+compile-fail	feature-gates/feature-gate-custom_attribute.rs
 compile-fail	feature-gates/feature-gate-custom_attribute2.rs
 compile-fail	feature-gates/feature-gate-decl_macro.rs
 compile-fail	feature-gates/feature-gate-deref_patterns.rs
@@ -5698,6 +5701,7 @@ compile-fail	suggestions/assoc-ct-for-assoc-method.rs
 compile-fail	suggestions/assoc-type-in-method-return.rs
 compile-fail	suggestions/assoc_fn_without_self.rs
 compile-fail	suggestions/async-fn-ctor-passed-as-arg-where-it-should-have-been-called.rs
+compile-fail	suggestions/attribute-typos.rs
 compile-fail	suggestions/bool_typo_err_suggest.rs
 compile-fail	suggestions/borrow-cast-or-binexpr-with-parens.rs
 compile-fail	suggestions/box-future-wrong-output.rs

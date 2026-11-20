@@ -488,7 +488,7 @@ impl Session2 {
             if let Some(e) = duplicate_import(src0, &src, &items[..user]) {
                 return Err(e);
             }
-            if let Some(e) = malformed_attr(src0, &src, &items[..user]) {
+            if let Some(e) = malformed_attr(src0, &src, &items[..user], self.ctx.deps.is_empty() && self.ctx.lib.is_none()) {
                 return Err(e);
             }
         }
@@ -1099,7 +1099,35 @@ fn first_unreachable(b: &crate::parse::Block) -> Option<(crate::parse::Pos, &'st
 
 /// "malformed `X` attribute input" (E0539 / E0565): a built-in attribute of a fixed shape written in another one.
 /// Read are the file's inner attributes (its head) and the attributes in front of the items (no full-text scan)
-fn malformed_attr(src0: &str, split: &str, items: &[SrcItem]) -> Option<String> {
+fn malformed_attr(src0: &str, split: &str, items: &[SrcItem], standalone: bool) -> Option<String> {
+    // (a crate with no dependency (so no proc macro) knows only the built-in attributes and its tools' paths)
+    // (both looked up only when such an attribute is there: not a search of every file)
+    let rustc_attrs = || src0.contains("rustc_attrs");
+    let unknown = |name: &str| {
+        const BUILTIN: &[&str] = &[
+            "cfg", "cfg_attr", "test", "ignore", "should_panic", "bench", "derive", "automatically_derived", "macro_export", "macro_use",
+            "proc_macro", "proc_macro_derive", "proc_macro_attribute", "allow", "warn", "deny", "forbid", "expect", "deprecated", "must_use",
+            "diagnostic", "link", "link_name", "link_ordinal", "no_link", "repr", "export_name", "link_section", "no_mangle", "used", "crate_name",
+            "crate_type", "no_builtins", "no_main", "no_std", "no_implicit_prelude", "recursion_limit", "type_length_limit", "windows_subsystem",
+            "inline", "cold", "no_builtins", "target_feature", "track_caller", "instruction_set", "doc", "path", "non_exhaustive", "panic_handler",
+            "global_allocator", "default_lib_allocator", "feature", "unsafe", "naked", "debugger_visualizer", "collapse_debuginfo", "coverage",
+            "optimize", "rustfmt", "clippy", "unstable", "stable", "rustc_const_stable", "rustc_const_unstable", "register_tool", "macro_escape",
+            "may_dangle", "thread_local", "ffi_pure", "ffi_const", "linkage", "omit_gdb_pretty_printer_section", "patchable_function_entry",
+            "fundamental", "marker", "lang", "start", "custom_mir", "const_trait", "do_not_recommend", "on_unimplemented", "pointee",
+            "type_const", "define_opaque", "align", "loop_match", "const_continue", "sanitize", "no_sanitize", "export_stable", "rustc_align",
+            "async_trait", "allow_internal_unstable", "allow_internal_unsafe", "compiler_builtins", "needs_allocator", "panic_runtime",
+            "needs_panic_runtime", "profiler_runtime", "no_core", "prelude_import", "rustc_std_internal_symbol", "unstable_feature_bound",
+            "rustc_main", "test_runner", "reexport_test_harness_main", "default", "main", "plugin", "plugin_registrar",
+        ];
+        if name.contains("::") || name.is_empty() || (name.starts_with("rustc_") && rustc_attrs()) {
+            return false;
+        }
+        // (`#[default]` is the derive(Default) helper, `#[main]` was removed)
+        if name == "main" || name == "default" && !src0.contains("Default") {
+            return true;
+        }
+        !BUILTIN.contains(&name)
+    };
     // (an attribute's name and its input: None = a word, Some('(') = a list, Some('=') = `= value`)
     fn check(name: &str, input: &str) -> bool {
         let input = input.trim();
@@ -1200,6 +1228,11 @@ fn malformed_attr(src0: &str, split: &str, items: &[SrcItem]) -> Option<String> 
         for &(at, name, input) in &attrs {
             if !check(name, input) {
                 return Some(report(text, it.line, at, name));
+            }
+            // (a parse error, as a merge's diff marker, comes first in rustc)
+            if standalone && unknown(name) && !text.contains("<<<<<<<") {
+                let line = it.line + text[..at].matches('\n').count();
+                return Some(format!("{line}:1: cannot find attribute `{name}` in this scope"));
             }
         }
         // (an attribute on an item of a kind it does not apply to: `#[inline] struct S;`)
