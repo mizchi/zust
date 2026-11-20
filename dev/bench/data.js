@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795136407748,
+  "lastUpdate": 1795136409969,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -41200,6 +41200,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "lsp peak RSS",
             "value": 72.922,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "committer": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "distinct": true,
+          "id": "fab1fd3826a9b9add6735846c10913e1d1345fb5",
+          "message": "lint: deny(unused_imports) reports a top-level use nothing mentions\n\nWith `#![deny(unused_imports)]` (or `unused` / `warnings`), a top-level\n`use a::B;` / `use a::{B, C as D};` whose name (or alias) no other\nitem mentions is \"unused import: `B`\" at its line. Traits (std's usual\nones and the program's) are skipped, since method calls use them\nwithout naming them; globs, `as _`, cfg'd and allowed uses too.\n\ntests/ui: +3 genuine compile-fail passes; unresolved-imports-used.rs\nmatches only by line and goes to rust_ui_accidental.txt.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-20T00:54:49Z",
+          "tree_id": "4352fd0fb0ad6c296b63d6e02714c6c95eb06c1b",
+          "url": "https://github.com/mizchi/zust/commit/fab1fd3826a9b9add6735846c10913e1d1345fb5"
+        },
+        "date": 1795136409490,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "lsp definition p50",
+            "value": 0.461,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp hover p50",
+            "value": 0.356,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp completion p50",
+            "value": 0.944,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp references p50",
+            "value": 1.61,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp rename p50",
+            "value": 0.408,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp signatureHelp p50",
+            "value": 0.685,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp documentHighlight p50",
+            "value": 0.709,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp ready (startup to indexed)",
+            "value": 130.979,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp peak RSS",
+            "value": 73.184,
             "unit": "MiB"
           }
         ]
