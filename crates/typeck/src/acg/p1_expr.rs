@@ -1053,9 +1053,89 @@ impl Cx<'_> {
         }
     }
 
+    /// whether a value of t can change behind a shared reference (a Cell, an atomic ..): such a constant is not
+    /// promoted (its static data is read-only, and each `&C` is a value of its own)
+    fn interior_mut(&self, t: Ty, depth: u32) -> bool {
+        match t {
+            Ty::Struct(sid) if depth < 16 => {
+                let sd = &self.prog.structs[sid as usize];
+                let base = &self.prog.structs[self.prog.base_of(sid) as usize].name;
+                matches!(base.as_str(), "UnsafeCell" | "Cell" | "RefCell" | "Mutex" | "OnceLock" | "OnceCell")
+                    || base.starts_with("Atomic")
+                    || sd.fields.iter().any(|f| self.interior_mut(f.1, depth + 1))
+                    || sd.variants.iter().any(|v| v.fields.iter().any(|f| self.interior_mut(f.1, depth + 1)))
+            }
+            Ty::Array(e, _) => self.interior_mut(*e, depth + 1),
+            _ => false,
+        }
+    }
+
+    /// whether the constant expression e is made of parts the constant evaluator reads exactly (literals, struct /
+    /// tuple / array / variant constructors, and constants that are such too): only those are promoted
+    fn const_pure(&self, e: &Expr, depth: u32) -> bool {
+        if depth > 8 {
+            return false;
+        }
+        match e {
+            Expr::Lit(..) => is_promotable(self, e),
+            Expr::Paren(x) => self.const_pure(x, depth),
+            Expr::Unary(op, x, _) => op == "-" && self.const_pure(x, depth),
+            Expr::Struct(_, fs, rest) => rest.is_none() && fs.iter().all(|f| self.const_pure(&f.1, depth)),
+            Expr::Tuple(t) | Expr::Array(t) => t.iter().all(|x| self.const_pure(x, depth)),
+            Expr::Call(_, args) => is_promotable(self, e) && args.iter().all(|x| self.const_pure(x, depth)),
+            Expr::Path(..) => match self.const_of(e) {
+                Some(ci) => {
+                    let c = &self.prog.consts[ci as usize];
+                    c.stat.is_none() && crate::parse::parse_expr(&c.expr).is_ok_and(|x| self.const_pure(&x, depth + 1))
+                }
+                None => is_promotable(self, e),
+            },
+            _ => false,
+        }
+    }
+
+    /// a constant expression's value as static data: a reference to it
+    fn promote(&mut self, rexpr: &Expr, inner_exp: Option<Ty>) -> Option<V> {
+        let t = inner_exp.filter(|t| !matches!(t, Ty::Dyn(_) | Ty::Slice(_) | Ty::Str)).or_else(|| self.peek(rexpr));
+        let t = t.filter(|&t| !self.needs_drop(t) && !self.prog.has_param(t) && !self.interior_mut(t, 0))?;
+        let dv = crate::ast_consteval::eval(self.prog, rexpr, t).ok()?;
+        if !dv.relocs.is_empty() || dv.bytes.is_empty() {
+            return None;
+        }
+        let a = self.data_addr(dv.bytes);
+        Some((Some(a), Ty::Ref(false, intern(t))))
+    }
+
     pub(crate) fn reference(&mut self, e: &Expr, expected: Option<Ty>) -> R<V> {
         let Expr::Ref(m, rexpr) = e else { return err(SP, "internal: expected a reference") };
         let m = *m;
+        // (`&(42,).0` / `&NUMS[i]`: a field or an element of a constant is borrowed out of the constant promoted to
+        // static data, `&(*&B).f` / `&(*&B)[i]`, so the reference outlives the function)
+        // (`&CONST`: the constant's own static data, not a copy in this frame)
+        if !m && matches!(strip_paren(rexpr), Expr::Path(..)) && self.const_of(strip_paren(rexpr)).is_some() && self.const_pure(strip_paren(rexpr), 0) {
+            let inner_exp = match expected {
+                Some(Ty::Ref(_, i)) if !matches!(i, Ty::Dyn(_) | Ty::Slice(_) | Ty::Str) => Some(*i),
+                _ => None,
+            };
+            if let Some(r) = self.promote(strip_paren(rexpr), inner_exp) {
+                return Ok(r);
+            }
+        }
+        let plain = |cx: &Self, b: &Expr| cx.peek(b).is_some_and(|t| !cx.needs_drop(t) && !cx.prog.has_param(t) && !cx.interior_mut(t, 0));
+        if !m {
+            let promoted = |b: &Expr| Box::new(Expr::Paren(Box::new(Expr::Unary("*".into(), Box::new(Expr::Ref(false, Box::new(b.clone()))), Default::default()))));
+            let re = match strip_paren(rexpr) {
+                Expr::Field(b, f, sp) if !matches!(strip_paren(b), Expr::Unary(..)) && self.const_pure(b, 0) && plain(self, b) => Some(Expr::Field(promoted(b), f.clone(), *sp)),
+                Expr::Index(b, i, sp) if !matches!(&**i, Expr::Range(..)) && !matches!(strip_paren(b), Expr::Unary(..)) && self.const_pure(b, 0) && plain(self, b) => {
+                    Some(Expr::Index(promoted(b), i.clone(), *sp))
+                }
+                _ => None,
+            };
+            if let Some(re) = re {
+                let ne = self.keep_expr(Expr::Ref(false, Box::new(re)));
+                return self.expr(ne, expected);
+            }
+        }
         // `&*x` / `&mut *x` with x a fat pointer (`&[T]`, `&str`, `Box<dyn Tr>` ..): the reborrow is x's value itself
         if let Expr::Unary(op, inner, _) = strip_paren(rexpr) {
             if op == "*" {
@@ -1127,14 +1207,8 @@ impl Cx<'_> {
         };
         // 定数式への共有参照は静的データに昇格する (`fn f() -> &'static S { &S { x: 1 } }`)
         if !m && is_promotable(self, rexpr) {
-            let t = inner_exp.filter(|t| !matches!(t, Ty::Dyn(_) | Ty::Slice(_) | Ty::Str)).or_else(|| self.peek(rexpr));
-            if let Some(t) = t.filter(|&t| !self.needs_drop(t) && !self.prog.has_param(t)) {
-                if let Ok(dv) = crate::ast_consteval::eval(self.prog, rexpr, t) {
-                    if dv.relocs.is_empty() && !dv.bytes.is_empty() {
-                        let a = self.data_addr(dv.bytes);
-                        return Ok((Some(a), Ty::Ref(false, intern(t))));
-                    }
-                }
+            if let Some(r) = self.promote(rexpr, inner_exp) {
+                return Ok(r);
             }
         }
         let (v, t) = self.expr(rexpr, inner_exp)?;

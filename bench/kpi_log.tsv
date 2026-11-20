@@ -149,3 +149,4 @@ date	commit	change	noop_M	edit_M	check_M	cache_KiB	lsp_G	run	check	build	cfail
 2026-11-20	707a395+	include!(..) of code, as items or an expression	0.695	547.166	3835.573	1902.8	-	1737	1446	97	3564	1160.142	63.491	10.259	315.887
 2026-11-20	174b0fe+	mod x; inside inline modules; cfg(true) / cfg(false); cfg_attr(p, cfg(q))	0.692	547.172	3835.668	1902.8	10.8483	1745	1448	97	3567	1160.165	63.605	10.270	316.105
 2026-11-20	aa059e7+	stringify! spacing as rustc prints; dbg!() / dbg!(a, b)	0.692	547.152	3835.704	1902.8	-	1747	1448	97	3567	1160.161	63.602	10.270	316.173
+2026-11-20	5c7cdc5+	&CONST / &CONST.f / &CONST[i] / &(42,).0 promoted to static data	0.692	547.080	3835.604	1902.8	-	1748	1448	97	3567	1160.139	63.425	10.270	315.925

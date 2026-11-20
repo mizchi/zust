@@ -1725,6 +1725,7 @@ run-pass	consts/static-lifetime-inference-from-const-array.rs
 run-pass	consts/static-mut-refs.rs
 check-pass	consts/static-promoted-to-mutable-static.rs
 run-pass	consts/static-raw-pointer-interning.rs
+run-pass	consts/static-ref-to-const-array-element.rs
 compile-fail	consts/std/conjure_zst.rs
 run-pass	consts/std/iter.rs
 run-pass	consts/transmute-const.rs
