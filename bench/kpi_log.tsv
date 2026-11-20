@@ -152,3 +152,4 @@ date	commit	change	noop_M	edit_M	check_M	cache_KiB	lsp_G	run	check	build	cfail
 2026-11-20	5c7cdc5+	&CONST / &CONST.f / &CONST[i] / &(42,).0 promoted to static data	0.692	547.080	3835.604	1902.8	-	1748	1448	97	3567	1160.139	63.425	10.270	315.925
 2026-11-20	d855b2a+	assignment eval order, condition temporaries, &mut self methods of numbers	0.695	547.137	3837.294	1902.8	-	1751	1448	97	3567	1160.420	63.431	10.283	315.985
 2026-11-20	cdb2f0f+	static data: const fn calls inlined; no silent zeros; Solver::lookup as loops	0.694	547.968	3837.321	1902.8	-	1752	1448	97	3567	1160.432	63.532	10.283	315.964
+2026-11-20	4ed592f+	into_iter of arrays (by value) and of iterators (identity)	0.692	547.124	3837.319	1902.8	-	1753	1448	97	3567	1160.421	63.438	10.270	316.082

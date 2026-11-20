@@ -577,6 +577,15 @@ impl Cx<'_> {
                 }
             }
         }
+        // (`it.into_iter()` with `it` an iterator with no into_iter of its own (`(0..3).into_iter()`, a Map ..): std's
+        // `impl<I: Iterator> IntoIterator for I`, the iterator itself)
+        if method == "into_iter" && margs.is_empty() {
+            if let Some(Ty::Struct(sid)) = self.peek(recv) {
+                if self.prog.method(sid, "into_iter").is_none() && self.prog.method(sid, "next").is_some() {
+                    return self.expr(recv, expected);
+                }
+            }
+        }
         // (`f.m()` with f a fn pointer and `impl Tr for fn(..)`: the `__fnptr` method whose self type is f's)
         // (or with f a `&[T; N]` / `&[T]` and `impl<T> Tr for &[T; N]`: the method of that impl)
         let ref_seq = |t: Ty| matches!(t, Ty::Ref(_, Ty::Array(..) | Ty::Slice(_)) | Ty::Array(..));
@@ -690,6 +699,14 @@ impl Cx<'_> {
                     return err(SP, format!("reached the recursion limit while auto-dereferencing `{sname}` (E0055)"));
                 }
                 continue;
+            }
+            // (`(0..3).into_iter()`: an iterator is its own IntoIterator; a copy of it, when nothing in it needs drop)
+            if name == "into_iter" && margs.is_empty() && derefs == 0 && self.prog.method(sid, "next").is_some() && !self.needs_drop(Ty::Struct(sid)) {
+                let t = Ty::Struct(sid);
+                let tmp = self.temp_fresh(t);
+                let src = self.addr_plus(a, o);
+                self.copy(tmp, src, t);
+                return Ok((Some(tmp), t));
             }
             let sname = self.prog.structs[sid as usize].name.clone();
             return err(SP, format!("no method named `{name}` found for `{sname}`"));

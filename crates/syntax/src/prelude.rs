@@ -1020,6 +1020,10 @@ pub fn select_with(user_src: &str, user_items: &[SrcItem], cache: &mut SelectCac
         need.insert("into_iter");
         need.insert("iter");
     }
+    // (`arr.into_iter()` on an array variable is `arr.iter().copied()`, which codegen writes without the name)
+    if need.contains("into_iter") {
+        need.insert("copied");
+    }
     // 書式化のマクロ: Formatter と書き出しの関数一式 (codegen が名前を書かずに呼ぶ)
     if ["format", "print", "println", "eprint", "eprintln", "write", "writeln", "fmt", "Formatter"]
         .iter()

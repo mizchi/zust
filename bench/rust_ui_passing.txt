@@ -3594,6 +3594,7 @@ run-pass	macros/macro-nested_stmt_macros.rs
 compile-fail	macros/macro-non-lifetime.rs
 check-pass	macros/macro-nt-list.rs
 check-pass	macros/macro-pat-follow-2018.rs
+run-pass	macros/macro-pat-follow.rs
 run-pass	macros/macro-pat-neg-lit.rs
 run-pass	macros/macro-pat-pattern-followed-by-or.rs
 run-pass	macros/macro-pat.rs
