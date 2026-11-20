@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795140998562,
+  "lastUpdate": 1795141000318,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -68435,6 +68435,70 @@ window.BENCHMARK_DATA = {
           {
             "name": "tests/ui compile-fail passing",
             "value": 3367,
+            "unit": "tests"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "committer": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "distinct": true,
+          "id": "b4040ee73c74b214d92d61a3ad75e0085dca6d15",
+          "message": "naming lints: fields, parameters and let bindings\n\nnon_snake_case also covers struct fields and an enum's struct-like\nvariants' fields (\"structure field `X` should have a snake case\nname\"), and a fn's parameters and `let` bindings (\"variable `X`\"; an\nall-upper-case binding may be a constant pattern and is left alone).\n`#[expect(non_..)]` is treated as `allow`.\n\ntests/ui: +2 genuine compile-fail passes.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-20T02:05:24Z",
+          "tree_id": "35ac28de3a8229e2618f6b82950a74605e185190",
+          "url": "https://github.com/mizchi/zust/commit/b4040ee73c74b214d92d61a3ad75e0085dca6d15"
+        },
+        "date": 1795141000099,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tests/ui run-pass pass rate",
+            "value": 71.19,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui run-pass passing",
+            "value": 1698,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui check-pass pass rate",
+            "value": 78.42,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui check-pass passing",
+            "value": 1417,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui build-pass pass rate",
+            "value": 70.37,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui build-pass passing",
+            "value": 95,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui compile-fail pass rate",
+            "value": 45.77,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui compile-fail passing",
+            "value": 3368,
             "unit": "tests"
           }
         ]
