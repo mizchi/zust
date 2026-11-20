@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795156103191,
+  "lastUpdate": 1795158210594,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -32435,6 +32435,165 @@ window.BENCHMARK_DATA = {
           {
             "name": "rt/strings run (-O)",
             "value": 37.257,
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "committer": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "distinct": true,
+          "id": "ed757a9bbb31931cb690bda7337a80a33550e093",
+          "message": "Paths: <S as Tr>::m as a value, std::u32::MAX, float integer constants\n\n- `<S as Tr>::m` as a fn value (`let h = <S as T>::tv;`): the method a\n  call to it would take, asked only when no other reading of the path\n  fits (just before \"cannot find value\").\n- `std::u32::MAX` / `core::i8::MIN` / `std::f64::MANTISSA_DIGITS`: the\n  deprecated modules of the primitive types read as the types.\n- f32 / f64's integer constants (RADIX, MANTISSA_DIGITS, DIGITS,\n  MIN_EXP, MAX_EXP, MIN_10_EXP, MAX_10_EXP) and more math constants\n  (FRAC_PI_3, FRAC_1_PI, LOG2_E, LOG10_2, ..). The new paths are cold\n  functions out of path_value.\n\ntests/ui: +1 run-pass pass (modules/primitive-type-module-deprecated-paths.rs).\nKPI: edit +0.01%, check +0.00% (no-op in its usual alternation).\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-20T06:56:26Z",
+          "tree_id": "03a2b8768afd7e8c40fa1d6be18f719956a889a9",
+          "url": "https://github.com/mizchi/zust/commit/ed757a9bbb31931cb690bda7337a80a33550e093"
+        },
+        "date": 1795158210353,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "gen1000 build cold",
+            "value": 118.616,
+            "unit": "ms"
+          },
+          {
+            "name": "gen1000 build noop",
+            "value": 0.735,
+            "unit": "ms"
+          },
+          {
+            "name": "gen1000 build edit 1 fn",
+            "value": 18.033,
+            "unit": "ms"
+          },
+          {
+            "name": "gen1000 check",
+            "value": 80.685,
+            "unit": "ms"
+          },
+          {
+            "name": "gen1000 build cold peak RSS",
+            "value": 17.973,
+            "unit": "MiB"
+          },
+          {
+            "name": "gen1000 binary",
+            "value": 323.977,
+            "unit": "KiB"
+          },
+          {
+            "name": "gen1000 cache",
+            "value": 387.21,
+            "unit": "KiB"
+          },
+          {
+            "name": "gen1000 build noop instructions",
+            "value": 0.55,
+            "unit": "M instr"
+          },
+          {
+            "name": "gen1000 build edit 1 fn instructions",
+            "value": 127.57,
+            "unit": "M instr"
+          },
+          {
+            "name": "gen1000 check instructions",
+            "value": 781.367,
+            "unit": "M instr"
+          },
+          {
+            "name": "gen5000 build cold",
+            "value": 539.725,
+            "unit": "ms"
+          },
+          {
+            "name": "gen5000 build noop",
+            "value": 0.749,
+            "unit": "ms"
+          },
+          {
+            "name": "gen5000 build edit 1 fn",
+            "value": 65.291,
+            "unit": "ms"
+          },
+          {
+            "name": "gen5000 check",
+            "value": 382.565,
+            "unit": "ms"
+          },
+          {
+            "name": "gen5000 build cold peak RSS",
+            "value": 51.73,
+            "unit": "MiB"
+          },
+          {
+            "name": "gen5000 binary",
+            "value": 1558.336,
+            "unit": "KiB"
+          },
+          {
+            "name": "gen5000 cache",
+            "value": 1902.835,
+            "unit": "KiB"
+          },
+          {
+            "name": "gen5000 build noop instructions",
+            "value": 0.55,
+            "unit": "M instr"
+          },
+          {
+            "name": "gen5000 build edit 1 fn instructions",
+            "value": 600.119,
+            "unit": "M instr"
+          },
+          {
+            "name": "gen5000 check instructions",
+            "value": 3848.979,
+            "unit": "M instr"
+          },
+          {
+            "name": "rt/fib run (-O)",
+            "value": 54.442,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/hashmap run (-O)",
+            "value": 90.487,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/matmul run (-O)",
+            "value": 42.688,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/nbody run (-O)",
+            "value": 54.789,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/sieve run (-O)",
+            "value": 93.152,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/sort run (-O)",
+            "value": 155.849,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/strings run (-O)",
+            "value": 37.424,
             "unit": "ms"
           }
         ]
