@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795174926734,
+  "lastUpdate": 1795174929105,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -50548,6 +50548,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "lsp peak RSS",
             "value": 74.41,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "committer": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "distinct": true,
+          "id": "707a3953e4e9d71650f873811e6506390864b8ad",
+          "message": "match on unsuffixed number literals: the type comes from the patterns\n\n`match (0, 0) { (usize::MIN, usize::MAX) => .. }` used to type the\nscrutinee as (i32, i32) and then reject the pattern. A scrutinee of\nunsuffixed literals (or a tuple of them) now takes its type from the\nfirst pattern that pins one down: a suffixed literal, a primitive's\nassociated const, a const, a range's start, or a tuple of these.\n\ntests/ui: +2 run-pass.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-20T11:36:52Z",
+          "tree_id": "f777c56b4cbcc47ca06cea19663b367f3605bc13",
+          "url": "https://github.com/mizchi/zust/commit/707a3953e4e9d71650f873811e6506390864b8ad"
+        },
+        "date": 1795174928623,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "lsp definition p50",
+            "value": 0.497,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp hover p50",
+            "value": 0.382,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp completion p50",
+            "value": 0.756,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp references p50",
+            "value": 3.404,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp rename p50",
+            "value": 0.398,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp signatureHelp p50",
+            "value": 0.631,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp documentHighlight p50",
+            "value": 0.957,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp ready (startup to indexed)",
+            "value": 98.504,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp peak RSS",
+            "value": 74.516,
             "unit": "MiB"
           }
         ]
