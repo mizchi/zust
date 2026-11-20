@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795144358167,
+  "lastUpdate": 1795144359959,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -69177,6 +69177,70 @@ window.BENCHMARK_DATA = {
           {
             "name": "tests/ui compile-fail passing",
             "value": 3369,
+            "unit": "tests"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "committer": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "distinct": true,
+          "id": "1e843fc07f54fb7351245f21767d92d5313d88ec",
+          "message": "E0432: a use whose first segment names nothing\n\nA `use a::..` item (top level, or in a module) whose first segment is\nnot std / core / proc_macro / a name of std's prelude, a dependency,\n`crate` / `self` / `super`, nor a module, item, `extern crate` or\n`as` name the original text defines (outside `//` comments) is\n\"unresolved import `a`\" at its line. The `use` items come from the\nitem split the build makes anyway, so a program without such a `use`\npays nothing (a first version that searched the whole text cost +0.5%\non the 1.6 MB check benchmark).\n\ntests/ui: +30 compile-fail passes (3404, 46.26%); four that match only\nby line go to rust_ui_accidental.txt.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-20T03:04:19Z",
+          "tree_id": "dd1a0b9f59359bce5471225595376cac8caaaa7d",
+          "url": "https://github.com/mizchi/zust/commit/1e843fc07f54fb7351245f21767d92d5313d88ec"
+        },
+        "date": 1795144359735,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tests/ui run-pass pass rate",
+            "value": 71.19,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui run-pass passing",
+            "value": 1698,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui check-pass pass rate",
+            "value": 78.42,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui check-pass passing",
+            "value": 1417,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui build-pass pass rate",
+            "value": 70.37,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui build-pass passing",
+            "value": 95,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui compile-fail pass rate",
+            "value": 46.25,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui compile-fail passing",
+            "value": 3403,
             "unit": "tests"
           }
         ]
