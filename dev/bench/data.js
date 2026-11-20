@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795163823877,
+  "lastUpdate": 1795163826414,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -77710,6 +77710,70 @@ window.BENCHMARK_DATA = {
           {
             "name": "tests/ui compile-fail passing",
             "value": 3560,
+            "unit": "tests"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "committer": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "distinct": true,
+          "id": "6f4d8e6a44241bc7285bec8a5c142b23b6a0d1f8",
+          "message": "Associated consts: an inherent one beside a trait impl's of one name\n\n`impl Foo { const C }` and `impl Tr for Foo { const C }` were\n\"duplicate definition of `Foo::C`\"; they are rustc's `Foo::C` and\n`<Foo as Tr>::C`. The trait impl's now goes by `Foo as Tr::C`\n(whichever comes first), which `<Foo as Tr>::C` reads; two consts of\none trait impl stay a duplicate.\n\ntests/ui: +2 passes (1 run-pass, 1 check-pass); two compile-fail tests\nthat matched only by line (they expect \"multiple applicable items\")\ngo to rust_ui_accidental.txt.\nKPI: check +0.05%, traits +0.02%, edit +0.00% (no-op in its usual\nalternation).\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-20T08:30:25Z",
+          "tree_id": "8288e19a207c6c721973e1e2881221ee9badf87c",
+          "url": "https://github.com/mizchi/zust/commit/6f4d8e6a44241bc7285bec8a5c142b23b6a0d1f8"
+        },
+        "date": 1795163825803,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tests/ui run-pass pass rate",
+            "value": 71.45,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui run-pass passing",
+            "value": 1704,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui check-pass pass rate",
+            "value": 79.25,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui check-pass passing",
+            "value": 1432,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui build-pass pass rate",
+            "value": 70.37,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui build-pass passing",
+            "value": 95,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui compile-fail pass rate",
+            "value": 48.41,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui compile-fail passing",
+            "value": 3562,
             "unit": "tests"
           }
         ]
