@@ -26,7 +26,7 @@
 
 ## Status
 
-Numbers measured <!-- measured -->2026-11-20, 2ba1b4c<!-- /measured --> by CI on each push to main (bench.yml runs
+Numbers measured <!-- measured -->2026-11-20, 81d4bd0<!-- /measured --> by CI on each push to main (bench.yml runs
 `bench/ci_bench.py` and `bench/rust_ui.py`, then `scripts/update_readme.py` writes them here). Times come from shared
 GitHub Actions runners and vary by about ±20%; the instruction counts (valgrind) do not.
 
@@ -53,21 +53,21 @@ Build speed, build cache size and LSP latency on generated programs of 1000 / 50
 <!-- auto:kpi -->
 | KPI | gen1000 | gen5000 |
 |---|---:|---:|
-| cold build | 165 ms | 745 ms |
-| no-op build | 1.0 ms | 1.0 ms |
-| build after editing one function | 23.8 ms | 80.9 ms |
-| `check` | 104 ms | 492 ms |
+| cold build | 117 ms | 530 ms |
+| no-op build | 0.7 ms | 0.7 ms |
+| build after editing one function | 16.9 ms | 61.4 ms |
+| `check` | 76 ms | 377 ms |
 | no-op build (instructions) | 0.6 M | 0.6 M |
-| edit one function (instructions) | 126.9 M | 598.4 M |
+| edit one function (instructions) | 127.2 M | 600.0 M |
 | `check` (instructions) | 779.3 M | 3844.0 M |
 | build cache on disk | 387.2 KiB | 1902.8 KiB |
 | binary | 324.0 KiB | 1558.3 KiB |
-| cold build peak RSS | 17.8 MiB | 51.7 MiB |
+| cold build peak RSS | 17.9 MiB | 51.7 MiB |
 
 | zust-analyzer (zustc's own sources) | |
 |---|---:|
-| p50: definition, hover, completion, references, rename | 0.72 ms / 0.52 ms / 1.18 ms / 7.18 ms / 0.58 ms |
-| startup until indexed | 159 ms |
+| p50: definition, hover, completion, references, rename | 0.48 ms / 0.39 ms / 1.02 ms / 6.01 ms / 0.44 ms |
+| startup until indexed | 126 ms |
 | peak RSS | 74.4 MiB |
 <!-- /auto:kpi -->
 
