@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795160744050,
+  "lastUpdate": 1795160746609,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -76206,6 +76206,70 @@ window.BENCHMARK_DATA = {
           {
             "name": "tests/ui check-pass passing",
             "value": 1422,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui build-pass pass rate",
+            "value": 70.37,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui build-pass passing",
+            "value": 95,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui compile-fail pass rate",
+            "value": 48.41,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui compile-fail passing",
+            "value": 3562,
+            "unit": "tests"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "committer": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "distinct": true,
+          "id": "0043490a67a2eec6a87796dcc38d13b985ead107",
+          "message": "Module flattening: a glob import is shadowed by the scope's own item\n\n`use thing::*;` beside the crate root's own `enum Thing` renamed the\nroot's item to `thing__Thing` as well (\"duplicate definition of\n`thing__Thing`\"): a glob import now gives way to an item of that name\nthe importing scope defines, as in rustc. The scopes' items are looked\nup in a set built only when the program has a glob import.\n\ntests/ui: +6 passes (5 check-pass, 1 run-pass).\nKPI: within ±0.13% of the row before (traits edit's flag is within its\nrecent 63.37 - 63.47 range; the program has no module).\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-20T07:40:44Z",
+          "tree_id": "319169b5dac059b1fa34607133b9d71bee5eec4c",
+          "url": "https://github.com/mizchi/zust/commit/0043490a67a2eec6a87796dcc38d13b985ead107"
+        },
+        "date": 1795160746068,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tests/ui run-pass pass rate",
+            "value": 71.36,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui run-pass passing",
+            "value": 1702,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui check-pass pass rate",
+            "value": 78.97,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui check-pass passing",
+            "value": 1427,
             "unit": "tests"
           },
           {
