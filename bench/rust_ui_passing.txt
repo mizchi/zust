@@ -2058,6 +2058,7 @@ compile-fail	env-macro/env-not-string-literal.rs
 compile-fail	env-macro/env-too-many-args.rs
 compile-fail	env-macro/error-recovery-issue-55897.rs
 compile-fail	env-macro/option_env-no-args.rs
+run-pass	env-macro/option_env-not-defined.rs
 compile-fail	env-macro/option_env-not-string-literal.rs
 compile-fail	env-macro/option_env-too-many-args.rs
 compile-fail	error-codes/E0001.rs
