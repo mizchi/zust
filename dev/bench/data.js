@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795152650237,
+  "lastUpdate": 1795152652218,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -45760,6 +45760,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "lsp peak RSS",
             "value": 74.566,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "committer": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "distinct": true,
+          "id": "8c012b2bf30f145fa3f7da206af3ce8e7c36848d",
+          "message": "parser: a reserved keyword is no declared name\n\nAn item's, a field's, a variant's or a binding's name that is a\nreserved keyword (`fn false()`, `let for = ..`, `fn: u8`, `Self,` as a\nvariant) is \"expected identifier, found keyword `kw`\". The 2018\nkeywords async / await / dyn / try stay names (an edition 2015 file\nmay use them), and `Self` / `self` are still a unit struct or a\nreceiver as a pattern.\n\ntests/ui: +34 compile-fail passes (the generated\nparser/keyword-*-as-identifier tests among them).\nKPI: all within ±0.3% of the row before.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-20T05:25:46Z",
+          "tree_id": "a15bc7d8059e6b780c7f2bf27f7bb401f84f2a08",
+          "url": "https://github.com/mizchi/zust/commit/8c012b2bf30f145fa3f7da206af3ce8e7c36848d"
+        },
+        "date": 1795152651864,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "lsp definition p50",
+            "value": 0.69,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp hover p50",
+            "value": 0.503,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp completion p50",
+            "value": 1.164,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp references p50",
+            "value": 2.567,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp rename p50",
+            "value": 0.568,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp signatureHelp p50",
+            "value": 0.817,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp documentHighlight p50",
+            "value": 0.89,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp ready (startup to indexed)",
+            "value": 159.626,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp peak RSS",
+            "value": 74.551,
             "unit": "MiB"
           }
         ]
