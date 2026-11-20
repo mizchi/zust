@@ -516,7 +516,7 @@ const ITER_NAMES: &[&str] = &[
     "Iterator", "next", "map", "filter", "filter_map", "collect", "sum", "product", "count",
     "fold", "for_each", "any", "all", "find", "position", "rposition", "partition", "cycle", "nth", "zip", "chain", "take", "skip",
     "take_while", "copied", "cloned", "into_iter", "flat_map", "flatten", "step_by", "peekable", "skip_while", "scan",
-    "inspect", "find_map",
+    "inspect", "find_map", "unzip",
 ];
 
 /// prelude のアイテムの識別子を need に足す (Iterator のメソッド名はメソッド呼び出しの位置だけ)

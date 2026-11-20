@@ -692,6 +692,10 @@ impl Cx<'_> {
             "overflowing_add",
             "overflowing_sub",
             "overflowing_mul",
+            "overflowing_div",
+            "overflowing_rem",
+            "wrapping_div",
+            "wrapping_rem",
             "rem_euclid",
             "div_euclid",
             "next_multiple_of",
@@ -1122,6 +1126,35 @@ impl Cx<'_> {
                 }
                 let x = if t.bits() == 8 { x } else { self.b.ins().bswap(x) };
                 (Some(x), t)
+            }
+            // (`MIN / -1` overflows: (MIN, true) / (0, true); a zero divisor panics as `/` does)
+            "overflowing_div" | "overflowing_rem" | "wrapping_div" | "wrapping_rem" if t.bits() <= 64 => {
+                let b = arg(self, 0, t)?;
+                let zero = self.b.ins().icmp_imm_u(IntCC::Equal, b, 0);
+                let rem = name.ends_with("rem");
+                self.ovf_panic(zero, if rem { 4 } else { 3 }, SP);
+                let of = if s {
+                    let min = self.int_const(t, crate::program::prim_assoc_const(t, "MIN").unwrap());
+                    let a_min = self.b.ins().icmp(IntCC::Equal, a, min);
+                    let m1 = self.iconst_t(ct, -1);
+                    let b_m1 = self.b.ins().icmp(IntCC::Equal, b, m1);
+                    self.b.ins().band(a_min, b_m1)
+                } else {
+                    self.b.ins().iconst(types::I8, 0)
+                };
+                let one = self.iconst_t(ct, 1);
+                let sb = self.b.ins().select(of, one, b);
+                let v = match (rem, s) {
+                    (false, true) => self.b.ins().sdiv(a, sb),
+                    (false, false) => self.b.ins().udiv(a, sb),
+                    (true, true) => self.b.ins().srem(a, sb),
+                    (true, false) => self.b.ins().urem(a, sb),
+                };
+                if name.starts_with("wrapping") {
+                    (Some(v), t)
+                } else {
+                    self.pair_with_bool(v, t, of)?
+                }
             }
             "overflowing_add" | "overflowing_sub" | "overflowing_mul" => {
                 let b = arg(self, 0, t)?;

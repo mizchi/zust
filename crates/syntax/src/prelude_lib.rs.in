@@ -342,6 +342,12 @@ impl<T> Option<T> {
             None => false,
         }
     }
+    pub fn inspect<F: FnOnce(&T)>(self, f: F) -> Option<T> {
+        if let Some(v) = &self {
+            f(v);
+        }
+        self
+    }
     pub fn filter<P: FnOnce(&T) -> bool>(self, p: P) -> Option<T> {
         match self {
             Some(v) => {
@@ -409,6 +415,18 @@ impl<T, E> Result<T, E> {
             Ok(x) => f(x),
             Err(_) => false,
         }
+    }
+    pub fn inspect<F: FnOnce(&T)>(self, f: F) -> Result<T, E> {
+        if let Ok(v) = &self {
+            f(v);
+        }
+        self
+    }
+    pub fn inspect_err<F: FnOnce(&E)>(self, f: F) -> Result<T, E> {
+        if let Err(e) = &self {
+            f(e);
+        }
+        self
     }
     pub fn is_err_and<F: FnOnce(E) -> bool>(self, f: F) -> bool {
         match self {
@@ -2583,6 +2601,17 @@ pub trait Iterator {
             } else {
                 b.__push_auto(x);
             }
+        }
+        (a, b)
+    }
+    // `it.unzip()` of (a, b) pairs: the a's and the b's
+    fn unzip<A, B>(self) -> (Vec<A>, Vec<B>) {
+        let mut it = self;
+        let mut a: Vec<A> = Vec::new();
+        let mut b: Vec<B> = Vec::new();
+        while let Some((x, y)) = it.next() {
+            a.push(x);
+            b.push(y);
         }
         (a, b)
     }
