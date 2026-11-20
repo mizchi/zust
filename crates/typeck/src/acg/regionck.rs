@@ -88,6 +88,39 @@ pub struct Rg {
     pub inst_args: Vec<Ty>,
     /// Borrows of what the function owns (a local, not through a reference): (region, the place's text, where)
     pub loans: Vec<(u32, String, Sp)>,
+    /// ZUSTC_RG_DEBUG: the kinds of values not followed
+    pub missed: Vec<&'static str>,
+}
+
+fn kind(e: &Expr) -> &'static str {
+    match e {
+        Expr::Paren(x) => kind(x),
+        Expr::Lit(..) => "lit",
+        Expr::Path(..) => "path",
+        Expr::Unary(..) => "unary",
+        Expr::Binary(..) => "binary",
+        Expr::Call(..) => "call",
+        Expr::MethodCall(..) => "method",
+        Expr::Field(..) => "field",
+        Expr::Index(..) => "index",
+        Expr::Ref(..) => "ref",
+        Expr::Cast(..) => "cast",
+        Expr::Block(..) => "block",
+        Expr::If(..) => "if",
+        Expr::Match(..) => "match",
+        Expr::Closure(..) => "closure",
+        Expr::Tuple(..) => "tuple",
+        Expr::Array(..) => "array",
+        Expr::Struct(..) => "struct",
+        Expr::Macro(..) => "macro",
+        Expr::Try(..) => "try",
+        _ => "other",
+    }
+}
+
+pub fn debug() -> bool {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ON.get_or_init(|| std::env::var_os("ZUSTC_RG_DEBUG").is_some())
 }
 
 /// ZUSTC_NO_REGIONCK=1 turns the check off (read once: it is asked for each function)
@@ -715,6 +748,14 @@ impl Cx<'_> {
 
     /// The tree of a value (None: not followed)
     pub(crate) fn rt_expr(&mut self, e: &Expr) -> Option<(Ty, RT)> {
+        let r = self.rt_expr_inner(e);
+        if r.is_none() && debug() {
+            self.rg.missed.push(kind(e));
+        }
+        r
+    }
+
+    fn rt_expr_inner(&mut self, e: &Expr) -> Option<(Ty, RT)> {
         match e {
             Expr::Paren(x) => self.rt_expr(x),
             Expr::Lit(s, _) if s.starts_with('"') || s.starts_with("r\"") || s.starts_with("r#") => Some((Ty::Ref(false, crate::types::intern(Ty::Str)), vec![STATIC])),
@@ -750,10 +791,11 @@ impl Cx<'_> {
                 Some((Ty::Ref(*m, crate::types::intern(t)), out))
             }
             Expr::Call(..) | Expr::MethodCall(..) | Expr::Struct(..) => self.rg.calls.get(&(e as *const Expr as usize)).cloned(),
-            Expr::Path(..) | Expr::Field(..) | Expr::Unary(..) => {
-                let (t, tr, _) = self.rt_place(e)?;
-                Some((t, tr))
-            }
+            Expr::Path(..) | Expr::Field(..) | Expr::Unary(..) => match self.rt_place(e) {
+                Some((t, tr, _)) => Some((t, tr)),
+                // (a unit variant: `None`)
+                None => self.rg.calls.get(&(e as *const Expr as usize)).cloned(),
+            },
             _ => None,
         }
     }
@@ -1027,6 +1069,28 @@ impl Cx<'_> {
         self.rg.calls.insert(e as *const Expr as usize, (t, tree));
     }
 
+    /// A variant's value of type t (`Some(x)`, `None`): a fresh tree, the fields' values flow into its fields; kept as
+    /// a call's result (see rg_took_call)
+    pub(crate) fn rg_variant(&mut self, t: Ty, vi: usize, args: &[(usize, &Expr)]) {
+        if !self.rg_on() {
+            return;
+        }
+        let Ty::Struct(sid) = t else { return };
+        let prog = self.prog;
+        let Some(tree) = self.rg.fresh(prog, t) else { return };
+        let sd = &prog.structs[sid as usize];
+        let Some(v) = sd.variants.get(vi) else { return };
+        let off: usize = sd.fields.len() + sd.variants[..vi].iter().map(|v| v.fields.len()).sum::<usize>();
+        let fts: Vec<Ty> = v.fields.iter().map(|f| f.1).collect();
+        for &(fi, ex) in args {
+            let (Some(&ft), Some(ftr)) = (fts.get(fi), self.rg.field(prog, sid, off + fi, &tree)) else { continue };
+            if let Some((_, vtr)) = self.rt_expr(ex) {
+                self.rg.relate(prog, ft, &vtr, &ftr, super::borrowck::pos(ex));
+            }
+        }
+        self.rg.last_call = Some((self.rg.depth + 1, t, tree));
+    }
+
     /// Keep the tree of the call just lowered, as the value of e
     pub(crate) fn rg_took_call(&mut self, e: &Expr) {
         // (only the call made by this expression's own call_fn: one level below)
@@ -1039,6 +1103,9 @@ impl Cx<'_> {
 
     /// Report what the constraints require
     pub(crate) fn rg_check(&mut self) -> super::R<()> {
+        if debug() {
+            eprintln!("regionck {}: on={} univ={} edges={} loans={} missed={:?}", self.prog.names.get(self.rg.base as usize).map(|s| s.as_str()).unwrap_or("?"), self.rg.on, self.rg.univ.len(), self.rg.edges.len(), self.rg.loans.len(), self.rg.missed);
+        }
         if !self.rg.on {
             return Ok(());
         }

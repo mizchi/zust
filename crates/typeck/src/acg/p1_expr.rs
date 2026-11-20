@@ -488,7 +488,9 @@ impl Cx<'_> {
                     }
                     self.prog.instantiate(self.prog.base_of(sid), ts).ok().map(Ty::Struct)
                 });
-                self.variant_value(sid, vi, &[], expected)
+                let r = self.variant_value(sid, vi, &[], expected);
+                self.rg_took_call(e);
+                r
             }
             Expr::Match(..) => self.match_(e, expected),
             // const ジェネリクスの N: インスタンスの型引数の長さ
@@ -2433,7 +2435,9 @@ impl Cx<'_> {
                         self.adt_targs = Some(ts);
                     }
                 }
-                return self.variant_value(sid, vi, &args, expected);
+                let r = self.variant_value(sid, vi, &args, expected);
+                self.rg_took_call(c);
+                return r;
             }
             // タプル構造体の構築 `P(1, 2)`
             if let Some(sid) = self.prog.struct_by_p(&PPath::of(p), self.self_sid) {
