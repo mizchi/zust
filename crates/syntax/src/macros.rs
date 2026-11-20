@@ -506,6 +506,11 @@ fn transcribe(body: &[Pt], binds: &HashMap<String, Bind>, out: &mut String, lets
             }
             Pt::Var(name, _) => match binds.get(name) {
                 Some(Bind::One(ts, wrap)) => {
+                    // (`stringify!($e)`: the text of the expression, without the parentheses that keep its precedence)
+                    let wrap = &(*wrap && !{
+                        let tail: String = out[out.len().saturating_sub(40)..].chars().filter(|c| !c.is_whitespace()).collect();
+                        tail.ends_with("stringify!(")
+                    });
                     if *wrap {
                         out.push('(');
                     }

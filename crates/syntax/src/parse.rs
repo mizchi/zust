@@ -3075,7 +3075,7 @@ impl Counts {
 /// A reserved keyword (not the 2018 ones, which an edition 2015 file may use as names). `with_paths` also counts
 /// those a path may start with (`self` / `Self` / `crate` / `super`) and `true` / `false` / `mut` / `ref`. By length
 /// first: a few comparisons per name, as the parser asks for every declared name
-fn reserved_kw(s: &str, with_paths: bool) -> bool {
+pub fn reserved_kw(s: &str, with_paths: bool) -> bool {
     let b = s.as_bytes();
     if b.len() < 2 || b.len() > 8 || !(b[0].is_ascii_lowercase() || b[0] == b'S') {
         return false;

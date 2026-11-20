@@ -58,31 +58,44 @@ fn macro_arg_texts(g: &str) -> Vec<String> {
 fn tokens_text(src: &str) -> String {
     let Ok(toks) = tokenize(src) else { return src.trim().to_string() };
     let mut s = String::new();
-    let mut prev_joint = true;
-    let mut prev_open = false;
     for k in 0..toks.len() {
         let t = &toks[k];
-        if t.kind == TokKind::Close {
-            // (`{ .. }` は中身の両側に空白: proc_macro2 と同じ)
-            if t.text == "}" && !prev_open {
-                s.push(' ');
-            }
-            s.push_str(&t.text);
-            prev_joint = false;
-            prev_open = false;
-            continue;
-        }
-        if !s.is_empty() && !prev_joint && !prev_open {
-            s.push(' ');
-        }
-        if prev_open && s.ends_with('{') {
+        if k > 0 && space_between(&toks, k, src) {
             s.push(' ');
         }
         s.push_str(&t.text);
-        prev_open = t.kind == TokKind::Open;
-        prev_joint = t.kind == TokKind::Punct && t.joint && toks.get(k + 1).is_some_and(|n| n.kind == TokKind::Punct && n.text != ",");
     }
     s
+}
+
+/// `stringify!`: whether a space goes between two tokens. Tokens next to each other in the text stay together; else
+/// rustc's printer's rules: none inside a path (`a::b`), before `,` `;` `.`, after `.`, between a name and its `(`
+/// (`f(3)`), after `#` before `[`, just inside `(..)` / `[..]`, and between joined symbols (`->`, `>=`)
+fn space_between(toks: &[crate::parse::Tok], k: usize, src: &str) -> bool {
+    let (a, b) = (&toks[k - 1], &toks[k]);
+    // (`::` is two `:` tokens: the one before a joined `:`, and the one after)
+    let colon2_starts = |i: usize| toks.get(i).is_some_and(|t| t.text == ":" && t.joint) && toks.get(i + 1).is_some_and(|t| t.text == ":");
+    if colon2_starts(k) || (k >= 2 && colon2_starts(k - 2)) {
+        return false;
+    }
+    let end = a.lo as usize + a.text.len();
+    if src.get(end..b.lo as usize).is_some_and(|g| g.is_empty()) {
+        return false;
+    }
+    if a.kind == TokKind::Punct && a.joint && b.kind == TokKind::Punct {
+        return false;
+    }
+    let (x, y) = (a.text.as_str(), b.text.as_str());
+    if x == "::" || y == "::" || matches!(y, "," | ";" | ".") || x == "." || (x == "#" && y == "[") {
+        return false;
+    }
+    if (a.kind == TokKind::Open && x != "{") || (b.kind == TokKind::Close && y != "}") {
+        return false;
+    }
+    if y == "(" && a.kind == TokKind::Ident && (!crate::parse::reserved_kw(x, false) || matches!(x, "fn" | "Self" | "pub")) {
+        return false;
+    }
+    true
 }
 
 /// 文字列リテラルの式ならその中身
@@ -1055,10 +1068,20 @@ impl Cx<'_> {
             // `dbg!(e)`: `[file:line:col] e = {:#?}` を stderr に出して e を返す
             "dbg" => {
                 let args = self.macro_args(p, g)?;
-                let Some(e) = args.first() else {
-                    return err(SP, "`dbg!()` without arguments is not supported");
-                };
                 let (sl, sc) = self.loc(self.mstart);
+                // (`dbg!()`: only the place; `dbg!(a, b)`: each one, as a tuple)
+                if args.len() != 1 {
+                    let ex = if args.is_empty() {
+                        Expr::Macro(path_of("eprintln"), format!("(\"[src/main.rs:{sl}:{sc}]\")"), crate::parse::Span::default())
+                    } else {
+                        let texts = macro_arg_texts(g);
+                        let sp = crate::parse::Span { start: self.mstart, at: self.mstart };
+                        Expr::Tuple(texts.iter().map(|t| Expr::Macro(path_of("dbg"), format!("({t})"), sp)).collect())
+                    };
+                    let ex: &Expr = self.keep_expr(ex);
+                    return self.expr(ex, expected);
+                }
+                let e = &args[0];
                 let text = tokens_text(macro_arg_texts(g).first().map(|s| s.as_str()).unwrap_or(""));
                 let head = format!("[src/main.rs:{sl}:{sc}] {} = ", text);
                 let ex = Expr::Block(

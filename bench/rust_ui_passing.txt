@@ -2198,6 +2198,7 @@ run-pass	extern/empty-struct-extern-fn-16441.rs
 run-pass	extern/extern-1.rs
 check-pass	extern/extern-C-str-arg-ice-80125.rs
 build-pass	extern/extern-c-method-with-str-param.rs
+run-pass	extern/extern-compare-with-return-type.rs
 check-pass	extern/extern-fn-pointer-clone-copy.rs
 run-pass	extern/extern-foreign-crate.rs
 compile-fail	extern/extern-macro.rs
@@ -3537,6 +3538,7 @@ build-pass	macros/issue-78333.rs
 check-pass	macros/issue-78892-substitution-in-statement-attr.rs
 check-pass	macros/issue-84429-matches-edition.rs
 compile-fail	macros/issue-86865.rs
+run-pass	macros/issue-8709.rs
 run-pass	macros/issue-8851.rs
 check-pass	macros/issue-95267.rs
 check-pass	macros/issue-95533.rs
