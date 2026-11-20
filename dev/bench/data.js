@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795133275519,
+  "lastUpdate": 1795133277604,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -64685,6 +64685,70 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/mizchi/zust/commit/904658b2939c57b3bb23f8eac470f262b88dfa1c"
         },
         "date": 1795132301194,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tests/ui run-pass pass rate",
+            "value": 71.19,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui run-pass passing",
+            "value": 1698,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui check-pass pass rate",
+            "value": 78.36,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui check-pass passing",
+            "value": 1416,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui build-pass pass rate",
+            "value": 70.37,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui build-pass passing",
+            "value": 95,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui compile-fail pass rate",
+            "value": 45.11,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui compile-fail passing",
+            "value": 3319,
+            "unit": "tests"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "committer": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "distinct": true,
+          "id": "4a6120db4c3cb47ef7a8c9b8509f20c003993f47",
+          "message": "for loops over an Option or Result value\n\n`for x in Some(1) { .. }` / `for y in result { .. }` (and the existing\n`opt.iter()` / `.into_iter()` forms, now also for Result): lowered to\n`if let Some(x) = ..` / `if let Ok(y) = ..` (a one-turn loop when the\nbody breaks or continues), without the prelude's iterator types.\n\ntests/ui: no change in passes.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-19T23:58:49Z",
+          "tree_id": "9485af93797ebe205c5148b11d2b6f55dc32b203",
+          "url": "https://github.com/mizchi/zust/commit/4a6120db4c3cb47ef7a8c9b8509f20c003993f47"
+        },
+        "date": 1795133277087,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
