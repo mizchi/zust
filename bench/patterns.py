@@ -113,7 +113,9 @@ def table(rows, vg):
     out = ["| " + " | ".join(cols) + " |", "|---|" + "---:|" * (len(cols) - 1)]
     for r in rows:
         if "error" in r:
-            out.append(f"| {r['pattern']} | {r['lines']} | build failed: {r['error']} |" + " |" * (len(cols) - 3))
+            # (an error's own `|`, as in the joined lines of a counted phase's diagnostic, escaped so it stays one cell)
+            err = r["error"].replace("|", "\\|")
+            out.append(f"| {r['pattern']} | {r['lines']} | build failed: {err} |" + " |" * (len(cols) - 3))
             continue
         same = {True: "yes", False: "**no**"}.get(r.get("same_as_rustc"), "-")
         cells = [r["pattern"], str(r["lines"]), same, f"{r['cold_ms']:.0f}", f"{r['check_ms']:.0f}", f"{r['edit_ms']:.0f}"]
