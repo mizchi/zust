@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795173446411,
+  "lastUpdate": 1795174066302,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -34979,6 +34979,165 @@ window.BENCHMARK_DATA = {
           {
             "name": "rt/strings run (-O)",
             "value": 48.996,
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "committer": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "distinct": true,
+          "id": "20055f979e93f664c41d36493a8dd08dd8927324",
+          "message": "extern \"C\" calls: structs of up to 16 bytes by value (System V)\n\nA call of a foreign fn that takes or returns a struct now follows the\nSystem V x86-64 convention. That used to be an error.\n- A struct of up to 16 bytes is passed as its eightbytes: SSE when every\n  scalar in the eightbyte is a float (f32 alone: F32), else INTEGER.\n- A struct of up to 16 bytes is returned in rax / rdx / xmm0 / xmm1 and\n  stored into the destination. A larger one comes back through the hidden\n  pointer, which is our sret.\n- minclif reads a second result from rdx or xmm1 by its class, also when\n  the first is a float.\n- Still errors: a larger struct argument, and a pointer to such an extern\n  fn (fn pointers use zustc's convention, which passes structs by address).\n\ntests/ui: +15 run-pass, +7 check-pass, +2 build-pass. Checked with both\nbackends.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-20T11:23:04Z",
+          "tree_id": "d8c1de6a02f0822fa6492218aca5f7fc76b48025",
+          "url": "https://github.com/mizchi/zust/commit/20055f979e93f664c41d36493a8dd08dd8927324"
+        },
+        "date": 1795174066043,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "gen1000 build cold",
+            "value": 117.63,
+            "unit": "ms"
+          },
+          {
+            "name": "gen1000 build noop",
+            "value": 0.651,
+            "unit": "ms"
+          },
+          {
+            "name": "gen1000 build edit 1 fn",
+            "value": 17.375,
+            "unit": "ms"
+          },
+          {
+            "name": "gen1000 check",
+            "value": 75.75,
+            "unit": "ms"
+          },
+          {
+            "name": "gen1000 build cold peak RSS",
+            "value": 17.953,
+            "unit": "MiB"
+          },
+          {
+            "name": "gen1000 binary",
+            "value": 323.977,
+            "unit": "KiB"
+          },
+          {
+            "name": "gen1000 cache",
+            "value": 387.21,
+            "unit": "KiB"
+          },
+          {
+            "name": "gen1000 build noop instructions",
+            "value": 0.55,
+            "unit": "M instr"
+          },
+          {
+            "name": "gen1000 build edit 1 fn instructions",
+            "value": 124.279,
+            "unit": "M instr"
+          },
+          {
+            "name": "gen1000 check instructions",
+            "value": 776.278,
+            "unit": "M instr"
+          },
+          {
+            "name": "gen5000 build cold",
+            "value": 529.481,
+            "unit": "ms"
+          },
+          {
+            "name": "gen5000 build noop",
+            "value": 0.65,
+            "unit": "ms"
+          },
+          {
+            "name": "gen5000 build edit 1 fn",
+            "value": 60.402,
+            "unit": "ms"
+          },
+          {
+            "name": "gen5000 check",
+            "value": 367.736,
+            "unit": "ms"
+          },
+          {
+            "name": "gen5000 build cold peak RSS",
+            "value": 51.711,
+            "unit": "MiB"
+          },
+          {
+            "name": "gen5000 binary",
+            "value": 1558.336,
+            "unit": "KiB"
+          },
+          {
+            "name": "gen5000 cache",
+            "value": 1902.835,
+            "unit": "KiB"
+          },
+          {
+            "name": "gen5000 build noop instructions",
+            "value": 0.55,
+            "unit": "M instr"
+          },
+          {
+            "name": "gen5000 build edit 1 fn instructions",
+            "value": 590.394,
+            "unit": "M instr"
+          },
+          {
+            "name": "gen5000 check instructions",
+            "value": 3832.738,
+            "unit": "M instr"
+          },
+          {
+            "name": "rt/fib run (-O)",
+            "value": 53.994,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/hashmap run (-O)",
+            "value": 81.442,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/matmul run (-O)",
+            "value": 41.445,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/nbody run (-O)",
+            "value": 55.23,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/sieve run (-O)",
+            "value": 91.793,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/sort run (-O)",
+            "value": 144.22,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/strings run (-O)",
+            "value": 37.321,
             "unit": "ms"
           }
         ]
