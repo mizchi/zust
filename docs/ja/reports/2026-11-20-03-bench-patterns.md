@@ -44,14 +44,19 @@ KPI の「1 関数の編集」の編集である。
 
 ## 測り方
 
-- `python3 bench/patterns.py [--n 4] [--instructions]` は、パターンを 1 つずつと `mix` を測る。それぞれについて、
-  zustc と rustc でビルドし、出力を比べる。そのうえで、コールドビルド・`check`・1 関数を編集した後のビルドの時間の中央値を
-  出す。`--instructions` を付けると、`check` と編集後のビルドを cachegrind で数えた命令数も出す。ビルドできない
-  パターンか、違う出力のパターンがあれば、終了コードは 1 になる。
+- `python3 bench/patterns.py [--n 4] [--instructions]` は、パターンを 1 つずつと `mix` を測る。
+  `target/release/zustc` を使うので、リポジトリの根で `cargo build --release` してから実行する。
+  - それぞれのパターンについて、zustc と rustc でビルドし、出力を比べる。rustc が PATH にある必要がある。
+    `--no-rustc` を付けると比べないので、そのときは成功しても何も確かめていない。
+  - そのうえで、コールドビルド・`check`・1 関数を編集した後のビルドの時間の中央値を出す。`--instructions` を付けると、
+    `check` と編集後のビルドを cachegrind で数えた命令数も出す。
+  - 終了コードが 1 になるのは、パターンかその編集がビルドできないとき、プログラムがエラーで終わるとき、出力が違うときである。
+  - 書き出すのは表（と `--json`）だけで、KPI のログに行を足すのは `bench/kpi_track.py` である。
 - `bench/kpi_track.py`（つまり pull request ごとの `KPI` ワークフロー）に、2 つの KPI を足した。`patterns check` と
   `patterns edit` で、`mix 4`（2600 行）を測る。
 - `tests/bench_patterns.rs` は、すべてのパターンを N = 2 で、`mix` を編集つきでビルドし、出力が rustc のものと同じかを
-  確かめる。zustc がビルドできなくなったパターンがあれば、`cargo test` が失敗する。
+  確かめる。zustc がビルドできなくなったパターンがあれば、`cargo test` が失敗する。これは CI のように python3 と rustc が
+  PATH にある場合で、ないときはテストがそう出して通る。既定の `acg` feature に含まれる。
 
 N = 4 のパターン（2026-11-20、この機械）:
 
@@ -73,7 +78,7 @@ HashMap の entry API、イテレータの上のクロージャを通り、ど�
 
 ## 書いてみて zustc に見つかったこと
 
-パターンは最初、zustc が対応しているかを気にせず、rustc がビルドする Rust として書いた。問題が 6 つ出た。そのうち 2 つを
+パターンは最初、zustc が対応しているかを気にせず、rustc がビルドする Rust として書いた。問題が 6 つ出た。そのうち 4 つを
 ここで直し、それぞれに `tests/probe` のテストを足した（期待する出力は rustc のもの）。
 
 1. **直した:** モジュールのパスで指した static でメソッドを呼ぶと（`config::NAMES.len()`、`config::NAMES[i].len()`、
@@ -86,14 +91,25 @@ HashMap の entry API、イテレータの上のクロージャを通り、ど�
    持つので、読める `Item` がなかった。今は、`into_iter` が返すイテレータの Item を使う（`solve_assoc_bounds`、
    `crates/typeck/src/acg/p1_expr.rs`）。配列の引数は対象外。
    テスト: `tests/probe/into_iterator_item.rs`。
-3. **未解決、誤ったコード:** 2 つのモジュールが同じ名前の trait をそれぞれ定義し、同じ型に実装すると、1 つの impl を
-   共有してしまう。zustc はその 2 つの trait を区別しない。`mod a { trait M { .. } impl M for u32 { .. 1 } }` と
-   `mod b { trait M { .. } impl M for u32 { .. 2 } }` では、どちらのモジュールも同じ impl を呼び、rustc が `5 10` を
-   出すところ zustc は `5 5` を出す。プログラムがビルドできてしまうので、6 つの中でいちばん重い。
-4. **未解決:** クロージャは、それがある型とメソッドの名前で名付けられ（`Vec::m::{closure#0}`）、trait やモジュールの名前を
-   含まない。Vec への impl がどちらも、クロージャを含むメソッド `m` を持つ 2 つの trait があると、"duplicate
-   definition of `Vec::m::{closure#0}::call`" になる。2 つ目のクロージャの名前を変えると、3 の誤ったコードになるので、
-   3 と一緒に直す必要がある。
+3. **直した（誤ったコードだった）:** 2 つのモジュールが同じ名前の trait をそれぞれ定義し、同じ型に実装すると、1 つの impl を
+   共有していた。`mod a { trait M { .. } impl M for u32 { .. 1 } }` と `mod b { trait M { .. } impl M for u32 { .. 2 } }`
+   では、どちらのモジュールも最初の impl を呼び、rustc が `5 10` を出すところ zustc は `5 5` を出していた。プログラムが
+   ビルドできてしまうので、6 つの中でいちばん重かった。
+   - モジュールを平らにすると trait の名前は変わる（`a__M`、`b__M`）が、メソッド呼び出しは trait を名指ししない。どの
+     impl を指すかは呼び出しの場所で見える trait で決まるのに、平らにするとモジュールの情報が失われる。
+   - `lexer::trait_scopes` が、平らにする前のソースから、モジュールごとに見える trait を読むようにした。そこで定義した
+     もの、および `use`・`use .. as`・glob で取り込んだものである。読むのは、2 つのスコープが同じ名前の trait を定義
+     しているときだけで、それ以外はテキストを軽く見るだけで終わり、字句解析はしない。
+   - 同じ名前のメソッドの impl から 1 つを選ぶ `pick_overload` は、呼び出す関数の行で見える trait の impl を選ぶ。
+4. **直した:** クロージャは、それがある型とメソッドの名前で名付けられ（`Vec::m::{closure#0}`）、trait の名前を含まない。
+   Vec への impl がどちらも、クロージャを含むメソッド `m` を持つ 2 つの trait があると、"duplicate definition of
+   `Vec::m::{closure#0}::call`" になっていた。
+   - 2 つ目のそういうクロージャは、名前と、その `call` の型と、シンボルに、アイテムの番号を付けるようにした。シンボルは
+     `<関数のシンボル>.c<k>` で、2 つで同じだったので、片方のクロージャのコードが両方に使われていた。
+   - 名前を変えるのは、前はエラーになっていたプログラムだけである。
+   - 3 と 4 のテスト: `tests/probe/same_trait_two_modules.rs`。モジュールで定義した trait、`use super::M`、
+     `use crate::b::M as BM`、`use crate::a::*`、ルートの `use`、両方の impl の中のクロージャを含む。`-O` でも minclif でも
+     通る。
 5. **未解決:** `use super::model;` の後の `model::make()` は、クレートのどこかに `model` という名前のモジュールがもう 1 つ
    あると、"cannot find value (unsupported path)" になる。`use super::model::make;` と `super::model::make()` は通る。
 6. **未解決:** trait のメソッドを値として渡すこと（`.map(Tr::m)`、`.map(ToString::to_string)`）は、
@@ -102,21 +118,22 @@ HashMap の entry API、イテレータの上のクロージャを通り、ど�
 これらを切り分ける途中で、次も見つかった。`fn f<I: IntoIterator>(a: I) -> Option<I::Item>` で zustc が panic する
 （`crates/syntax/src/types_enc.rs:11`）。また、`IntoIterator` の境界のところに Range を渡せない。
 
-生成器は 3〜6 を避けて書いてあるので、パターンは今すぐ測れる。避け方はそれぞれ `bench/gen_patterns.py` に注記した。
+生成器は 5 と 6 を避けて書いてあるので、パターンは今すぐ測れる。避け方はそれぞれ `bench/gen_patterns.py` に注記した。
 
-- `generics` は trait とメソッドの名前をグループごとに変える。
 - `generics` は `Tr::m` ではなくクロージャを渡す。
 - `modules` はモジュールではなくアイテムを import する。
 
-どれかが直ったら、その避け方を外せば、パターンがその形も測るようになる。
+どれかが直ったら、その避け方を外せば、パターンがその形も測るようになる。3 と 4 を直したので、`generics` はまた、グループごとに
+同じ型への trait `Measure` を 1 つずつ持つ（前はグループごとに名前を変えていた）。
 
 出力の比較には限界がある。1 つのパターンのグループどうしは、いくつかの定数しか違わない。zustc が 2 つのグループのアイテムを
-取り違えても（3 のように）、チェックサムは正しいままのことがある。上の再現は、グループの 1 つを手で変えて作った。
+取り違えても（3 のように）、チェックサムは正しいままのことがある。上の再現は、グループの 1 つを手で変えて作った。`generics` は u32 の impl をグループごとに変えたので、別のグループの impl を
+取ると出力が変わる。
 
 ## 確かめたこと
 
 - すべてのパターンと `mix` を、N = 1、2、3、4 で、編集の有無の両方について: zustc の出力は rustc のものと同じ。
-- `tests/bench_patterns.rs` と、`tests/driver2.rs` の 2 つの probe。
+- `tests/bench_patterns.rs` と、`tests/driver2.rs` の 3 つの probe。
 - `cargo test --release --workspace`、`bench/rust_ui.py --check`。
 - KPI: pull request の `KPI` ワークフローのコメントに、ベースとの差がある。`patterns check` と `patterns edit` は
   新しいので、ベースには値がない。

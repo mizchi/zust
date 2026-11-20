@@ -44,14 +44,20 @@ constant in the first group, which is the edit of the "edit one function" KPI.
 
 ## How to measure
 
-- `python3 bench/patterns.py [--n 4] [--instructions]` measures each pattern alone, and `mix`. For each one it
-  builds the program with zustc and with rustc and compares their output. It then gives the median times of a cold
-  build, `check` and a build after editing one function. With `--instructions`, `check` and the edit build are also
-  counted by cachegrind. A pattern that does not build, or prints something else, makes the exit status 1.
+- `python3 bench/patterns.py [--n 4] [--instructions]` measures each pattern alone, and `mix`. Run it from the
+  repository root after `cargo build --release`, since it runs `target/release/zustc`.
+  - For each pattern it builds the program with zustc and with rustc, and compares their output. rustc must be on
+    PATH. With `--no-rustc` the comparison is skipped, and then a successful run checks nothing.
+  - It then gives the median times of a cold build, `check` and a build after editing one function. With
+    `--instructions`, `check` and the edit build are also counted by cachegrind.
+  - The exit status is 1 when a pattern or its edit does not build, a program exits with an error, or the output
+    differs.
+  - It only prints the table (and `--json`). `bench/kpi_track.py` is what appends rows to the KPI log.
 - `bench/kpi_track.py` (and so the `KPI` workflow on every pull request) has two new KPIs: `patterns check` and
   `patterns edit`, for `mix 4` (2600 lines).
 - `tests/bench_patterns.rs` builds every pattern at N = 2, and `mix` with an edit. It checks that their output is
-  rustc's, so a pattern zustc stops building fails `cargo test`.
+  rustc's, so a pattern zustc stops building fails `cargo test`. That holds where python3 and rustc are on PATH, as
+  in CI; without them the test says so and passes. It is part of the default `acg` feature.
 
 The patterns at N = 4 (2026-11-20, this machine):
 
@@ -74,7 +80,7 @@ through format!, the HashMap entry API and closures over iterators, all of which
 ## What writing them found in zustc
 
 The patterns were first written as Rust that rustc builds, without regard to what zustc supports. Six problems
-showed up. Two are fixed here, each with a test in `tests/probe` whose expected output is rustc's.
+showed up. Four are fixed here, each with a test in `tests/probe` whose expected output is rustc's.
 
 1. **Fixed:** a method on a static reached through a module path (`config::NAMES.len()`, `config::NAMES[i].len()`,
    `super::config::NAMES[i]`) was "no method `len` on type `str`". `peek_syn`, which gives an expression's type
@@ -86,15 +92,26 @@ showed up. Two are fixed here, each with a test in `tests/probe` whose expected 
    an IntoIterator impl, so there was no `Item` to read. The Item is now that of the iterator `into_iter` returns
    (`solve_assoc_bounds`, `crates/typeck/src/acg/p1_expr.rs`). An array argument is not covered.
    Test: `tests/probe/into_iterator_item.rs`.
-3. **Open, wrong code:** two modules that each define a trait of the same name, and implement it for the same type,
-   share one impl. zustc does not tell the traits apart. With
-   `mod a { trait M { .. } impl M for u32 { .. 1 } }` and `mod b { trait M { .. } impl M for u32 { .. 2 } }`,
-   both modules call one of the impls: zustc prints `5 5` where rustc prints `5 10`. This is the most serious of the
-   six, since the program builds.
-4. **Open:** a closure is named after the type and the method it is in (`Vec::m::{closure#0}`), not after its trait or
-   module. Two traits whose impls for Vec both have a method `m` with a closure in it fail with "duplicate
-   definition of `Vec::m::{closure#0}::call`". Renaming the second closure turns this into the wrong code of 3, so it
-   should be fixed together with 3.
+3. **Fixed (it was wrong code):** two modules that each define a trait of the same name, and implement it for the same
+   type, shared one impl. With `mod a { trait M { .. } impl M for u32 { .. 1 } }` and
+   `mod b { trait M { .. } impl M for u32 { .. 2 } }`, both modules called the first impl: zustc printed `5 5` where
+   rustc prints `5 10`. This was the most serious of the six, since the program built.
+   - Flattening the modules renames the traits (`a__M`, `b__M`), but a method call names no trait. Which impl it
+     means depends on the trait in scope at the call, and flattening loses the modules.
+   - `lexer::trait_scopes` now reads, from the source before flattening, the traits in scope in each module. That is
+     the traits defined there, and the ones brought in by `use`, `use .. as` and globs. It does this only when two
+     scopes define traits of one name; otherwise a quick look at the text ends it, without tokenizing.
+   - `pick_overload`, which chooses among the impls of one method name, takes the one whose trait is in scope at the
+     calling function's line.
+4. **Fixed:** a closure is named after the type and the method it is in (`Vec::m::{closure#0}`), not after its trait.
+   Two traits whose impls for Vec both have a method `m` with a closure in it failed with "duplicate definition of
+   `Vec::m::{closure#0}::call`".
+   - The second such closure now gets its item's number in its name, in the types of its `call`, and in its symbol.
+     The symbol is `<the fn's symbol>.c<k>`, which was the same for the two, so one closure's code was used for both.
+   - Only programs that were an error before are renamed.
+   - Test for 3 and 4: `tests/probe/same_trait_two_modules.rs`. It covers traits defined in the module, `use super::M`,
+     `use crate::b::M as BM`, `use crate::a::*`, a root `use`, and closures in both impls. It also passes with `-O`
+     and with minclif.
 5. **Open:** `use super::model;` followed by `model::make()` is "cannot find value (unsupported path)" when another
    module named `model` exists elsewhere in the crate. `use super::model::make;` and `super::model::make()` work.
 6. **Open:** a trait's method as a value, as in `.map(Tr::m)` or `.map(ToString::to_string)`, is "cannot find value
@@ -103,23 +120,23 @@ showed up. Two are fixed here, each with a test in `tests/probe` whose expected 
 Also seen while reducing these: `fn f<I: IntoIterator>(a: I) -> Option<I::Item>` makes zustc panic
 (`crates/syntax/src/types_enc.rs:11`), and a Range is not accepted where `IntoIterator` is bound.
 
-The generator works around 3–6, so the patterns can be measured now. Each workaround is commented in
+The generator works around 5 and 6, so the patterns can be measured now. Each workaround is commented in
 `bench/gen_patterns.py`:
 
-- `generics` names its trait and method per group;
 - `generics` passes a closure, not `Tr::m`;
 - `modules` imports the item, not the module.
 
-Once one of these is fixed, the workaround can be removed and the pattern covers that shape too.
+Once one of these is fixed, the workaround can be removed and the pattern covers that shape too. Since 3 and 4 are
+fixed, `generics` again has one trait `Measure` per group for the same types (it had named them per group).
 
 A limit of the output check: the groups of one pattern differ only in a few constants. A program in which zustc
 mixed up two groups' items (as in 3) can still print the right checksums. The probes above were made by changing one
-group by hand.
+group by hand. `generics` now makes its u32 impl differ per group, so taking another group's impl changes its output.
 
 ## What was checked
 
 - Every pattern and `mix`, at N = 1, 2, 3 and 4, with and without an edit: zustc's output is rustc's.
-- `tests/bench_patterns.rs`, and the two probes in `tests/driver2.rs`.
+- `tests/bench_patterns.rs`, and the three probes in `tests/driver2.rs`.
 - `cargo test --release --workspace`, `bench/rust_ui.py --check`.
 - KPIs: the `KPI` workflow's comment on the pull request has the change against the base. `patterns check` and
   `patterns edit` are new, so the base has no value for them.

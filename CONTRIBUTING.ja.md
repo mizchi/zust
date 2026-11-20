@@ -205,8 +205,9 @@ python3 bench/ide_golden_ra.py --detail
   `--instructions` を付けると命令数も)。zustc でビルドしたものが rustc でビルドしたものと同じ出力かも確かめる。
   新しいパターンは `bench/gen_patterns.py` に足す。`tests/bench_patterns.rs` がすべてのパターンをビルドする。
 
-  `bench/kpi_log.tsv` / `bench/kpi_log.md` に 1 行足す。直近 7 行のノイズの幅を外れた値は `REGRESSION` と出る。変更を
-  残す前に原因を突き止めるか、コストをコミットメッセージに書く。
+  `bench/kpi_track.py` は `bench/kpi_log.tsv` / `bench/kpi_log.md` に 1 行足す (`bench/patterns.py` は表を出すだけ)。
+  直近 7 行のノイズの幅を外れた値は `REGRESSION` と出る。変更を残す前に原因を突き止めるか、コストをコミットメッセージに
+  書く。
   pull request では `--dry-run` で測り、ログに行をコミットしない。`KPI` ワークフローが pull request をベースと比べて測り、
   結果をその pull request のコメントに残す (下の CI を参照)。行は main で作るコミットで足す。ブランチで足した行は、その間に
   main が足す行と毎回ぶつかる。

@@ -5,13 +5,16 @@ one function take.
 
 usage: python3 bench/patterns.py [--n 4] [--patterns interp,records,..|all] [--reps 3] [--instructions]
                                  [--json out.json] [--no-rustc]
-(from the repository root, after cargo build --release)
+(from the repository root, after `cargo build --release`: it runs target/release/zustc)
 
 - n: groups per pattern (each pattern's code repeated n times under its own names; `mix` has every pattern n times).
 - The times are the median of --reps runs (wall clock: they move by 10-30% on a shared machine). With
   --instructions, `check` and the edit build are also counted by cachegrind (deterministic to ~0.1%; needs valgrind).
-- rustc's output is the reference (rustc --edition 2021 -O); --no-rustc only builds and runs with zustc.
-The exit status is 1 when a pattern does not build or prints something else than rustc's build.
+- rustc's output is the reference (rustc --edition 2021 -O), and rustc must be on PATH; --no-rustc only builds and
+  runs with zustc (then nothing checks the output).
+- The table and --json are all it writes: bench/kpi_track.py is what appends KPI rows to the log.
+The exit status is 1 when a pattern does not build (or an edit of it does not), a program exits with an error, or it
+prints something else than rustc's build.
 """
 import argparse, json, os, shutil, statistics, subprocess, sys, tempfile
 
@@ -38,19 +41,31 @@ def measure(pattern, n, reps, vg, rustc, work):
     if r.returncode != 0:
         row["error"] = (r.stderr.strip().splitlines() or ["build failed"])[0]
         return row
-    got = subprocess.run([exe], capture_output=True, text=True).stdout
+    run = subprocess.run([exe], capture_output=True, text=True)
+    if run.returncode != 0:
+        row["error"] = f"zustc's build exited with {run.returncode}"
+        return row
     if rustc:
         ref = os.path.join(d, "ref")
         subprocess.run(["rustc", "--edition", "2021", "-Awarnings", "-O", src, "-o", ref], check=True, capture_output=True)
-        want = subprocess.run([ref], capture_output=True, text=True).stdout
-        row["same_as_rustc"] = got == want
+        want = subprocess.run([ref], capture_output=True, text=True)
+        if want.returncode != 0:
+            row["error"] = f"rustc's build exited with {want.returncode}"
+            return row
+        row["same_as_rustc"] = run.stdout == want.stdout
     row["cold_ms"] = statistics.median(run_measured(build + ["--no-cache"])[0] for _ in range(reps))
     row["check_ms"] = statistics.median(run_measured([ZUSTC, "check", src])[0] for _ in range(reps))
     run_measured(build)
     edits = []
     for k in range(reps):
         write(src, pattern, n, k % 2 + 1)
-        edits.append(run_measured(build)[0])
+        # (an edit that does not build is a failed row, with zustc's error, not an exception that ends the run)
+        try:
+            edits.append(run_measured(build)[0])
+        except subprocess.CalledProcessError:
+            e = subprocess.run(build, capture_output=True, text=True)
+            row["error"] = "edit: " + (e.stderr.strip().splitlines() or ["build failed"])[0]
+            return row
     row["edit_ms"] = statistics.median(edits)
     if vg:
         write(src, pattern, n, 0)
@@ -80,9 +95,14 @@ def table(rows, vg):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--n", type=int, default=4)
+    def at_least_1(s):
+        v = int(s)
+        if v < 1:
+            raise argparse.ArgumentTypeError(f"must be at least 1, not {v}")
+        return v
+    ap.add_argument("--n", type=at_least_1, default=4)
     ap.add_argument("--patterns", default="all")
-    ap.add_argument("--reps", type=int, default=3)
+    ap.add_argument("--reps", type=at_least_1, default=3)
     ap.add_argument("--instructions", action="store_true")
     ap.add_argument("--json")
     ap.add_argument("--no-rustc", action="store_true")
@@ -91,7 +111,9 @@ def main():
     for n in names:
         if n not in gen_patterns.PATTERNS and n != "mix":
             sys.exit(f"unknown pattern {n} (one of {', '.join(gen_patterns.PATTERNS)}, mix)")
-    rustc = not a.no_rustc and shutil.which("rustc") is not None
+    rustc = not a.no_rustc
+    if rustc and shutil.which("rustc") is None:
+        sys.exit("rustc is not on PATH: it gives the output to compare with (pass --no-rustc to skip the comparison)")
     work = tempfile.mkdtemp(prefix="zust-patterns-")
     try:
         rows = []

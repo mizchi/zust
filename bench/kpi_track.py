@@ -293,6 +293,16 @@ def main():
     if a.dry_run:
         return
     new = not os.path.exists(LOG)
+    # (a log whose header is from before columns were added: the header gets them, and the rows before get "-")
+    if not new:
+        lines = open(LOG).read().splitlines()
+        if lines and lines[0].split("\t") != COLS and COLS[:len(lines[0].split("\t"))] == lines[0].split("\t"):
+            with open(LOG, "w") as f:
+                f.write("\t".join(COLS) + "\n")
+                for l in lines[1:]:
+                    if l.strip():
+                        cells = l.split("\t")
+                        f.write("\t".join(cells + ["-"] * (len(COLS) - len(cells))) + "\n")
     with open(LOG, "a") as f:
         if new:
             f.write("\t".join(COLS) + "\n")
