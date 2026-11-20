@@ -330,6 +330,9 @@ pub struct Summary {
     pub derives: Vec<(String, Vec<String>)>,
     /// このアイテムの struct / enum の型パラメータ (`struct W<T>` なら ["T"])
     pub adt_generics: Vec<String>,
+    /// The plain trait bounds on those parameters (`struct S<T: Tr>`: ("T", ["Tr"])), only the parameters that have
+    /// some: a static's type is checked against them
+    pub adt_bounds: Vec<(String, Vec<String>)>,
     /// impl ヘッダの型パラメータと self 型 (`impl<T> Option<T>`)
     pub impl_generics: Vec<(String, Vec<String>)>,
     pub impl_self_ty: Option<TySyn>,

@@ -2095,6 +2095,25 @@ impl Cx<'_> {
                 }
             }
         }
+        // (`Tr::m` as a value of an expected `fn(&S, ..) -> R`: the impl's method of the first parameter's type, as
+        // `<S as Tr>::m`)
+        if q.is_none() && segs.len() == 2 && p.segs.iter().all(|s| s.args.is_empty()) && self.prog.traits.contains_key(&segs[0]) {
+            if let Some(Ty::Fn(f)) = _expected {
+                let st = match f.params.first() {
+                    Some(Ty::Ref(_, i)) => Some(**i),
+                    Some(&t) => Some(t),
+                    None => None,
+                };
+                // (only when `S::m` is Tr's impl: an inherent `m` of S would answer the qualified path)
+                let tr_impl = |t: Ty| self.trait_only_method(&format!("{}::{}", self.prog.tn(t), segs[1]), &segs[0]);
+                if let Some(st) = st.filter(|&t| !self.prog.has_param(t) && (t.is_int() || t.is_float() || matches!(t, Ty::Bool | Ty::Char | Ty::Str) || matches!(t, Ty::Struct(sid) if self.prog.structs[sid as usize].base.is_none())) && tr_impl(t)) {
+                    if let Ok(ne) = crate::parse::parse_expr(&format!("<{} as {}>::{}", self.prog.tn(st), segs[0], segs[1])) {
+                        let ne: &Expr = self.keep_expr(ne);
+                        return self.expr(ne, _expected);
+                    }
+                }
+            }
+        }
         err(SP, "cannot find value (unsupported path)")
     }
 

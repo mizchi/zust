@@ -417,6 +417,10 @@ fn emit_object(a: &Analysis, ctx: &CrateCtx, insts: &Insts, user_live: &[u32], b
     };
     // (ライブラリの panic の表は `_xT_<名前>` で外に見せる: 実行ファイルの表がそれを指す)
     let static_name = |ci: u32| match (&ctx.lib, prog.consts[ci as usize].name.as_str()) {
+        // (a static of an extern block: the linked program's symbol)
+        _ if prog.consts[ci as usize].expr.starts_with(crate::parse::EXTERN_STATIC_SYM) => {
+            crate::parse::extern_static(&prog.consts[ci as usize].expr).map_or_else(String::new, |x| x.1.to_string())
+        }
         (Some(l), "__EXR_TRAP_TABLE") => format!("_xT_{l}"),
         (None, "__EXR_TRAP_TABLE") | (_, "__EXR_EXE_TABLE") => "_xT__exe".to_string(),
         _ => format!("_xS{}", prog.consts[ci as usize].name),
@@ -443,6 +447,10 @@ fn emit_object(a: &Analysis, ctx: &CrateCtx, insts: &Insts, user_live: &[u32], b
             continue;
         }
         let c = &prog.consts[ci as usize];
+        // (an extern block's static is the linked program's: nothing to place)
+        if c.expr.starts_with(crate::parse::EXTERN_STATIC_SYM) {
+            continue;
+        }
         if c.name == "__EXR_TRAP_TABLE" {
             trap_table = Some(ci);
             continue;
@@ -1401,6 +1409,12 @@ fn static_fns(prog: &crate::program::Program, e: &crate::parse::Expr, out: &mut 
     }
     match e {
         Expr::Paren(x) | Expr::Ref(_, x) | Expr::Cast(x, _) => static_fns(prog, x, out, depth + 1),
+        // (a block of only its tail (`{ f }`), as the constant evaluation reads it)
+        Expr::Block(None, _, b) if b.stmts.len() == 1 => {
+            if let crate::parse::Stmt::Expr(x, false) = &b.stmts[0] {
+                static_fns(prog, x, out, depth + 1);
+            }
+        }
         Expr::Array(xs) | Expr::Tuple(xs) | Expr::Call(_, xs) => xs.iter().for_each(|x| static_fns(prog, x, out, depth + 1)),
         Expr::Struct(_, fs, _) => fs.iter().for_each(|f| static_fns(prog, &f.1, out, depth + 1)),
         _ => {}

@@ -30,6 +30,7 @@ run-pass	abi/issues/issue-97463-broken-abi-leaked-uninit-data.rs
 run-pass	abi/numbers-arithmetic/float-struct.rs
 run-pass	abi/numbers-arithmetic/i128-ffi.rs
 build-pass	abi/return-ref-as-immediate-in-codegen.rs
+run-pass	abi/statics/static-mut-foreign.rs
 run-pass	abi/union/union-c-interop.rs
 run-pass	allocator/empty-alloc-nonnull-guarantee.rs
 compile-fail	anon-params/anon-params-denied-2018.rs
@@ -516,6 +517,7 @@ check-pass	attributes/mixed_export_name_and_no_mangle.rs
 check-pass	attributes/mixed_export_name_and_no_mangle_2024.rs
 compile-fail	attributes/obsolete-attr.rs
 check-pass	attributes/path-inline-module.rs
+check-pass	attributes/positions/link-section.rs
 compile-fail	attributes/repr-align-in-trait-issue-132391.rs
 run-pass	attributes/repr-on-single-variant-Enum.rs
 run-pass	attributes/tool_attributes.rs
@@ -1600,6 +1602,7 @@ run-pass	consts/const-nullary-enum.rs
 run-pass	consts/const-nullary-univariant-enum.rs
 compile-fail	consts/const-pattern-rewrite-error-32086.rs
 run-pass	consts/const-rec-and-tup.rs
+check-pass	consts/const-ref-to-static-linux-vtable.rs
 run-pass	consts/const-region-ptrs-noncopy.rs
 run-pass	consts/const-region-ptrs.rs
 compile-fail	consts/const-slice-array-deref.rs
@@ -1646,6 +1649,7 @@ compile-fail	consts/erroneous_type_in_promoted.rs
 compile-fail	consts/error-is-freeze.rs
 run-pass	consts/ice-48279.rs
 compile-fail	consts/ice-extra-args-fn-abi-issue-127423.rs
+check-pass	consts/ice-zst-static-access.rs
 check-pass	consts/int_ptr_for_zst_slices.rs
 compile-fail	consts/invalid-const-in-body.rs
 check-pass	consts/issue-104155.rs
@@ -2218,6 +2222,7 @@ check-pass	extern/extern-fn-pointer-clone-copy.rs
 run-pass	extern/extern-foreign-crate.rs
 compile-fail	extern/extern-macro.rs
 run-pass	extern/extern-mod-abi.rs
+build-pass	extern/extern-no-mangle.rs
 run-pass	extern/extern-prelude-core.rs
 run-pass	extern/extern-prelude-std.rs
 run-pass	extern/extern-pub.rs
@@ -2443,6 +2448,7 @@ run-pass	for-loop-while/while-with-break.rs
 run-pass	for-loop-while/while.rs
 run-pass	foreign/foreign-fn-with-more-than-8-byte-arg-size.rs
 run-pass	foreign/foreign-int-types.rs
+run-pass	foreign/foreign-mod-unused-const.rs
 check-pass	foreign/foreign-pub-super.rs
 compile-fail	foreign/foreign-safe-fn-arg-mismatch.rs
 check-pass	foreign/issue-99276-same-type-lifetimes.rs
@@ -3256,6 +3262,7 @@ check-pass	lint/dead-code/offset-of-correct-param-env.rs
 check-pass	lint/dead-code/self-assign.rs
 check-pass	lint/dead-code/struct-used-as-pattern-issue-56750.rs
 check-pass	lint/dead-code/type-alias-used-in-impl-59333.rs
+check-pass	lint/dead-code/type-in-foreign.rs
 check-pass	lint/dead-code/type-in-transparent.rs
 compile-fail	lint/dead-code/unused-adt-impl-pub-trait-with-assoc-const.rs
 compile-fail	lint/dead-code/unused-enum.rs
@@ -5634,12 +5641,14 @@ run-pass	static/issue-1660.rs
 build-pass	static/issue-34194.rs
 compile-fail	static/missing-type.rs
 check-pass	static/raw-ref-deref-with-unsafe.rs
+check-pass	static/raw-ref-extern-static.rs
 check-pass	static/raw-ref-static-mut.rs
 run-pass	static/refer-to-other-statics-by-value.rs
 build-pass	static/static-array-shared-slice-references.rs
 compile-fail	static/static-closures.rs
 run-pass	static/static-list-initialization-5917.rs
 compile-fail	static/static-mut-bad-types.rs
+compile-fail	static/static-mut-foreign-requires-unsafe.rs
 compile-fail	static/static-mut-requires-unsafe.rs
 build-pass	static/static-str-deref-ref.rs
 check-pass	static/static-string-slice-9249.rs
@@ -5662,6 +5671,8 @@ run-pass	statics/static-methods-in-traits.rs
 check-pass	statics/static-mut-shared-parens.rs
 build-pass	statics/static-mut-unsafe-init.rs
 build-pass	statics/static-mut-with-assoc-type-field.rs
+run-pass	statics/static-promotion.rs
+run-pass	statics/static-recursive.rs
 compile-fail	statics/uninhabited-static.rs
 run-pass	std/issue-3563-3.rs
 run-pass	std/thread-sleep-ms.rs
@@ -6151,6 +6162,7 @@ compile-fail	traits/bound/not-on-bare-trait-2021.rs
 compile-fail	traits/bound/not-on-bare-trait.rs
 compile-fail	traits/bound/not-on-struct.rs
 run-pass	traits/bound/on-structs-and-enums-rpass.rs
+compile-fail	traits/bound/on-structs-and-enums-static.rs
 check-pass	traits/bound/recursion.rs
 check-pass	traits/bound/recursive-trait-bound-on-type-param.rs
 compile-fail	traits/bound/unknown-assoc-with-const-arg.rs
@@ -6244,6 +6256,7 @@ check-pass	traits/inheritance/supertrait-operator-issue-18088.rs
 build-pass	traits/issue-104322.rs
 compile-fail	traits/issue-105231.rs
 run-pass	traits/issue-15155.rs
+run-pass	traits/issue-18412.rs
 run-pass	traits/issue-22019.rs
 run-pass	traits/issue-22110.rs
 compile-fail	traits/issue-22384.rs

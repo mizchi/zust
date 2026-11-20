@@ -245,6 +245,51 @@ fn where_types(item: &Item, owner: Option<&Owner>, out: &mut Vec<String>) {
     }
 }
 
+/// The plain trait bounds (one-segment paths without arguments, not `?Sized`) on a struct / enum's parameters
+fn adt_bounds(g: &Generics) -> Vec<(String, Vec<String>)> {
+    let mut v = Vec::new();
+    for p in &g.params {
+        if let GParam::Ty(n, bs, _) = p {
+            let trs: Vec<String> = bs
+                .iter()
+                .filter_map(|b| match b {
+                    Bound::Trait(false, bp) if bp.segs.len() == 1 && bp.segs[0].args.is_empty() && bp.segs[0].fn_args.is_none() => Some(bp.segs[0].name.clone()),
+                    _ => None,
+                })
+                .collect();
+            if !trs.is_empty() {
+                v.push((n.clone(), trs));
+            }
+        }
+    }
+    // (`where T: Tr`: the same, for a parameter named by a one-segment path)
+    for (t, bs) in &g.preds {
+        let PTy::Path(None, tp) = t else { continue };
+        if tp.segs.len() != 1 || !tp.segs[0].args.is_empty() {
+            continue;
+        }
+        let n = &tp.segs[0].name;
+        if !g.params.iter().any(|p| matches!(p, GParam::Ty(pn, ..) if pn == n)) {
+            continue;
+        }
+        let trs: Vec<String> = bs
+            .iter()
+            .filter_map(|b| match b {
+                Bound::Trait(false, bp) if bp.segs.len() == 1 && bp.segs[0].args.is_empty() && bp.segs[0].fn_args.is_none() => Some(bp.segs[0].name.clone()),
+                _ => None,
+            })
+            .collect();
+        if trs.is_empty() {
+            continue;
+        }
+        match v.iter_mut().find(|x| &x.0 == n) {
+            Some(e) => e.1.extend(trs),
+            None => v.push((n.clone(), trs)),
+        }
+    }
+    v
+}
+
 fn adt_params(g: &Generics) -> R<Vec<String>> {
     let mut v = Vec::new();
     collect_generics(g, &mut v)?;
@@ -1485,9 +1530,37 @@ pub fn summarize(item: &Item, owner: Option<&Owner>) -> R<Summary> {
         }
         ItemKind::Extern(items) => {
             for fi in items {
+                // (`static X: T;`: the symbol X (or its link_name) of what the program links with)
+                if let ItemKind::Static(m, n, t, _) = &fi.kind {
+                    let sym = link_name(&fi.attrs).unwrap_or_else(|| n.clone());
+                    let at = |m: &str| format!("{}:1: {m}", fi.line);
+                    if sym.starts_with("__enzyme_") {
+                        return Err(at("linking to Enzyme intrinsics is experimental"));
+                    }
+                    if fi.attrs.iter().any(|a| compact(a).starts_with("#[linkage")) {
+                        return Err(at("the `linkage` attribute is experimental and not portable"));
+                    }
+                    if matches!(t, crate::parse::Ty::Infer) {
+                        return Err(at("the placeholder `_` is not allowed within types on item signatures for static items (E0121)"));
+                    }
+                    if let Some(u) = unsized_value(t) {
+                        return Err(at(&format!("the size for values of type `{u}` cannot be known at compilation time (E0277)")));
+                    }
+                    if matches!(t, crate::parse::Ty::Never) {
+                        return Err(at("static of uninhabited type"));
+                    }
+                    sm.statics.push((n.clone(), tysyn(t, None)?, format!("{}{} {sym}", crate::parse::EXTERN_STATIC_SYM, fi.line), *m));
+                    continue;
+                }
                 let ItemKind::Fn(fs, None) = &fi.kind else {
-                    return err("only fns are supported in extern blocks");
+                    return err("only fns and statics are supported in extern blocks");
                 };
+                if link_name(&fi.attrs).unwrap_or_else(|| fs.name.clone()).starts_with("__enzyme_") {
+                    return Err(format!("{}:1: linking to Enzyme intrinsics is experimental", fi.line));
+                }
+                if fi.attrs.iter().any(|a| compact(a).starts_with("#[linkage")) {
+                    return Err(format!("{}:1: the `linkage` attribute is experimental and not portable", fi.line));
+                }
                 let mut sig = parse_sig(fs, true, false, None)?;
                 if let Some(l) = link_name(&fi.attrs) {
                     sig.symbol = l;
@@ -1520,6 +1593,7 @@ pub fn summarize(item: &Item, owner: Option<&Owner>) -> R<Summary> {
                 }
             }
             sm.adt_generics = adt_params(g)?;
+            sm.adt_bounds = adt_bounds(g);
             let selft = self_of(sn, &sm.adt_generics);
             let mut vs = Vec::new();
             for (vn, fields, d) in vars {
@@ -1600,6 +1674,7 @@ pub fn summarize(item: &Item, owner: Option<&Owner>) -> R<Summary> {
                 sm.unions.push(sn.clone());
             }
             sm.adt_generics = adt_params(g)?;
+            sm.adt_bounds = adt_bounds(g);
             let selft = self_of(sn, &sm.adt_generics);
             let mut fs = Vec::new();
             match fields {

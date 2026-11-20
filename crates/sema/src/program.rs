@@ -1491,6 +1491,33 @@ impl Program {
                 }
             }
         }
+        // (a static's type is well-formed: the bounds of its struct's parameters hold, `static S: W<u8>` with
+        // `struct W<T: Tr>` and no `impl Tr for u8` (E0277))
+        for c in p.consts.iter().filter(|c| c.stat.is_some()) {
+            let Ty::Struct(sid) = c.ty else { continue };
+            let sd = &p.structs[sid as usize];
+            let Some(base) = sd.base.filter(|_| !sd.symbolic) else { continue };
+            let bn = &p.structs[base as usize].name;
+            let Some(sm) = sums.iter().find(|sm| !sm.adt_bounds.is_empty() && sm.structs.iter().map(|x| &x.0).chain(sm.enums.iter().map(|x| &x.0)).any(|n| n == bn)) else {
+                continue;
+            };
+            for (pn, trs) in &sm.adt_bounds {
+                let Some(&a) = sm.adt_generics.iter().position(|g| g == pn).and_then(|i| sd.args.get(i)) else { continue };
+                // (only arguments whose impls `implements` knows exactly: scalars and non-generic structs. An array's
+                // impl or one of a generic struct's instances (`impl Tr for G<u8>`) is not told apart here)
+                let judged = a.is_int() || a.is_float() || matches!(a, Ty::Bool | Ty::Char | Ty::Unit) || matches!(a, Ty::Struct(x) if p.structs[x as usize].base.is_none() && p.structs[x as usize].generics.is_empty());
+                if !judged {
+                    continue;
+                }
+                for tr in trs {
+                    if sums.iter().any(|s| s.trait_decl.as_deref() == Some(tr.as_str())) && !p.implements(a, tr) {
+                        // (an extern static: at its own line in the block)
+                        let line = items[c.item as usize].line + crate::parse::extern_static(&c.expr).map_or(0, |x| x.0.saturating_sub(1));
+                        return Err(format!("{line}:1: the trait bound `{}: {tr}` is not satisfied (E0277)", p.tn(a)));
+                    }
+                }
+            }
+        }
         if need_main && !p.index.contains_key("main") {
             return Err("no `main` function".into());
         }

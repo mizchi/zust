@@ -87,8 +87,8 @@ impl Cx<'_> {
             Expr::Path(_, p) => {
                 // (`m::S`: the static by its index; a local of the same name, `S`, is not it)
                 if let Some(ci) = self.static_of(e) {
-                    if self.prog.consts[ci as usize].stat == Some(true) && self.unsafe_ok == 0 && p.pos.line != 0 && self.raw_ref == 0 {
-                        return err(p.pos, "use of mutable static is unsafe and requires unsafe block (E0133)");
+                    if let Some(m) = self.unsafe_static_read(ci).filter(|_| self.unsafe_ok == 0 && p.pos.line != 0 && self.raw_ref == 0) {
+                        return err(p.pos, m);
                     }
                     let t = self.prog.consts[ci as usize].ty;
                     let a = self.static_sym(ci);
@@ -107,8 +107,8 @@ impl Cx<'_> {
                     None => match self.prog.const_index.get(id) {
                         // static はデータのアドレス
                         Some(&ci) if self.prog.consts[ci as usize].stat.is_some() => {
-                            if self.prog.consts[ci as usize].stat == Some(true) && self.unsafe_ok == 0 && p.pos.line != 0 && self.raw_ref == 0 {
-                                return err(p.pos, "use of mutable static is unsafe and requires unsafe block (E0133)");
+                            if let Some(m) = self.unsafe_static_read(ci).filter(|_| self.unsafe_ok == 0 && p.pos.line != 0 && self.raw_ref == 0) {
+                                return err(p.pos, m);
                             }
                             let t = self.prog.consts[ci as usize].ty;
                             let a = self.static_sym(ci);
@@ -253,7 +253,11 @@ impl Cx<'_> {
             Expr::Index(b, index, isp) if !matches!(&**index, Expr::Range(..)) => {
                 let isp = *isp;
                 let (base, len, elem) = self.indexable(b)?;
-                let (i, it) = self.expr(index, Some(Ty::Usize))?;
+                // (the index is a value, not the place `&raw` takes: reading a static in it still needs unsafe)
+                let raw = std::mem::take(&mut self.raw_ref);
+                let r = self.expr(index, Some(Ty::Usize));
+                self.raw_ref = raw;
+                let (i, it) = r?;
                 let Some(i) = i else {
                     return err(SP, "index diverges");
                 };
@@ -2226,6 +2230,33 @@ impl Cx<'_> {
         r
     }
 
+    /// Whether every method named `name` (`S::m`, with its overloads) is an impl of trait tr: no inherent one, which a
+    /// rewritten `S::m` path would reach first
+    pub(crate) fn trait_only_method(&self, name: &str, tr: &str) -> bool {
+        let of_tr = |i: u32| self.prog.sigs[i as usize].impl_trait.as_deref().is_some_and(|t| t.split('<').next().unwrap_or(t).trim() == tr);
+        let Some(&i) = self.prog.index.get(name) else { return false };
+        of_tr(i) && self.prog.overloads.get(name).is_none_or(|cs| cs.iter().all(|&c| of_tr(c)))
+    }
+
+    /// Whether the method named `name` (with its overloads) exists and none of them is a trait impl's
+    pub(crate) fn no_trait_method(&self, name: &str) -> bool {
+        let inh = |i: u32| self.prog.sigs[i as usize].impl_trait.is_none();
+        let Some(&i) = self.prog.index.get(name) else { return false };
+        inh(i) && self.prog.overloads.get(name).is_none_or(|cs| cs.iter().all(|&c| inh(c)))
+    }
+
+    /// Why reading static ci needs `unsafe` (E0133): a `static mut`, or an extern block's static (foreign memory)
+    pub(crate) fn unsafe_static_read(&self, ci: u32) -> Option<&'static str> {
+        let c = &self.prog.consts[ci as usize];
+        if c.stat == Some(true) {
+            Some("use of mutable static is unsafe and requires unsafe block (E0133)")
+        } else if c.stat.is_some() && crate::parse::extern_static(&c.expr).is_some() {
+            Some("use of extern static is unsafe and requires unsafe block (E0133)")
+        } else {
+            None
+        }
+    }
+
     pub(crate) fn call(&mut self, c: &Expr, expected: Option<Ty>) -> R<V> {
         let Expr::Call(func, cargs) = c else { return err(SP, "internal: expected a call") };
         // (`f1(x)` after `let f1 = f;` (f generic): `f(x)`)
@@ -2244,6 +2275,35 @@ impl Cx<'_> {
         }
         if let Some(r) = self.default_call(c, expected)? {
             return Ok(r);
+        }
+        // `From::from(x)` to an expected type T: `T::from(x)`; `Into::into(x)`: `x.into()`
+        if let (Expr::Path(None, p), [x]) = (&**func, cargs.as_slice()) {
+            let n = p.segs.len();
+            if n >= 2 && p.segs.iter().all(|s| s.args.is_empty()) && (n == 2 || matches!(p.segs[0].name.as_str(), "std" | "core")) {
+                match (p.segs[n - 2].name.as_str(), p.segs[n - 1].name.as_str()) {
+                    ("Into", "into") if self.lookup("Into").is_none() => {
+                        let e = self.keep_expr(mcall(x.clone(), "into", vec![]));
+                        self.explicit_traits.insert(e as *const Expr as usize, "Into".to_string());
+                        return self.expr(e, expected);
+                    }
+                    ("From", "from") => {
+                        let simple = |t: Ty| t.is_int() || t.is_float() || matches!(t, Ty::Bool | Ty::Char) || matches!(t, Ty::Struct(sid) if self.prog.structs[sid as usize].base.is_none());
+                        // (only when `T::from` is the From impl's: an inherent `from` of T would answer that path)
+                        // (or none of them is: the prelude's `String::from` and the like stand for From)
+                        let from_impl = |t: Ty| {
+                            let n = format!("{}::from", self.prog.tn(t));
+                            self.trait_only_method(&n, "From") || self.no_trait_method(&n)
+                        };
+                        if let Some(t) = expected.filter(|&t| simple(t) && !self.prog.has_param(t) && from_impl(t)) {
+                            if let Ok(Expr::Path(None, tp)) = crate::parse::parse_expr(&format!("{}::from", self.prog.tn(t))) {
+                                let ne = self.keep_expr(Expr::Call(Box::new(Expr::Path(None, crate::parse::Path { pos: p.pos, ..tp })), cargs.clone()));
+                                return self.expr(ne, expected);
+                            }
+                        }
+                    }
+                    _ => {}
+                }
+            }
         }
         // `i32::try_from(x)` (an integer type): `x.try_into()` to that type
         if let (Expr::Path(None, p), [x]) = (&**func, cargs.as_slice()) {
