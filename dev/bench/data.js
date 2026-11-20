@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795136911110,
+  "lastUpdate": 1795136913191,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -41428,6 +41428,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "lsp peak RSS",
             "value": 73.184,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "committer": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "distinct": true,
+          "id": "3c46afb72e7938f4d911f0140859d30d23081f35",
+          "message": "lint: deny(unreachable_code) reports a statement after a diverging one\n\nWith `#![deny(unreachable_code)]` (or `unused` / `warnings`), the\nprogram's fns are checked before building: in a block, the first\nstatement after `return` / `break` / `continue` / `panic!` (and\n`unreachable!` / `todo!` / `unimplemented!`) or a `loop` with no\n`break` is \"unreachable statement\" (\"unreachable expression\" for the\nblock's value), in nested blocks, ifs and loops too.\n\ntests/ui: +7 genuine compile-fail passes.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-20T01:04:21Z",
+          "tree_id": "7565c90552305e3d1a6f53e837b4c958823e1d2c",
+          "url": "https://github.com/mizchi/zust/commit/3c46afb72e7938f4d911f0140859d30d23081f35"
+        },
+        "date": 1795136912761,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "lsp definition p50",
+            "value": 0.478,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp hover p50",
+            "value": 0.377,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp completion p50",
+            "value": 0.857,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp references p50",
+            "value": 3.189,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp rename p50",
+            "value": 0.475,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp signatureHelp p50",
+            "value": 0.628,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp documentHighlight p50",
+            "value": 0.75,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp ready (startup to indexed)",
+            "value": 117.044,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp peak RSS",
+            "value": 73.961,
             "unit": "MiB"
           }
         ]
