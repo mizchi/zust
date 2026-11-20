@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795171993804,
+  "lastUpdate": 1795171996760,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -66795,6 +66795,85 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/mizchi/zust/commit/6edddd09055cf9e02b5e77b3a20b98c0bb35ad17"
         },
         "date": 1795170095891,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "parity documentSymbol (名前の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity workspace/symbol (上位 20 の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity definition (行き先の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity hover (名前を含む)",
+            "value": 95,
+            "unit": "%"
+          },
+          {
+            "name": "parity references (数の一致)",
+            "value": 95,
+            "unit": "%"
+          },
+          {
+            "name": "parity documentHighlight (数の一致)",
+            "value": 97.143,
+            "unit": "%"
+          },
+          {
+            "name": "parity rename (書き換えの一致)",
+            "value": 93.75,
+            "unit": "%"
+          },
+          {
+            "name": "parity signatureHelp (名前・引数の数・今の引数の一致)",
+            "value": 94.737,
+            "unit": "%"
+          },
+          {
+            "name": "parity completion `x.\\|` (書いてある名前を含む)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity completion `na\\|me` (同)",
+            "value": 89.655,
+            "unit": "%"
+          },
+          {
+            "name": "parity 一致の平均",
+            "value": 96.528,
+            "unit": "%"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "committer": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "distinct": true,
+          "id": "09ae27caa884889c50f22b2d14cd29c4365c5c82",
+          "message": "Prelude scan: the byte index covers lowercase letters too\n\nAn all-lowercase pattern (`stdout`, `stdin`, `mpsc`, `isqrt`, `dyn`) had\nno indexed byte, so `has` read the whole source with str::contains: about\n22M instructions of an edit build of the 1.6 MB program. Every byte but\nwhite space is now indexed, and such a pattern is checked only where its\nrarest letter is.\n\nKPI: edit one fn -1.98%, check -0.26%. traits edit is back inside its\nband (6edddd0's +0.27% was one noisy run; the prelude items it added\ncost about 0.1% there).\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-20T10:48:48Z",
+          "tree_id": "2d81b6006a431aa580a00441140576d8c1551f5f",
+          "url": "https://github.com/mizchi/zust/commit/09ae27caa884889c50f22b2d14cd29c4365c5c82"
+        },
+        "date": 1795171996176,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
