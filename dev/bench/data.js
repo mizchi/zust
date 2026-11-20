@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795178959693,
+  "lastUpdate": 1795178962163,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -82874,6 +82874,70 @@ window.BENCHMARK_DATA = {
           {
             "name": "tests/ui run-pass passing",
             "value": 1745,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui check-pass pass rate",
+            "value": 80.13,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui check-pass passing",
+            "value": 1448,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui build-pass pass rate",
+            "value": 71.85,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui build-pass passing",
+            "value": 97,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui compile-fail pass rate",
+            "value": 48.48,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui compile-fail passing",
+            "value": 3567,
+            "unit": "tests"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "committer": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "distinct": true,
+          "id": "5c7cdc54ef3ed30ffe4429608aae998486ef5995",
+          "message": "stringify! spaces tokens as rustc prints them; dbg!() and dbg!(a, b)\n\n- stringify! keeps tokens together where they touch in the text\n  (`(2*3) + 5`). Elsewhere it follows rustc's printer: no space around\n  `::`, before `,` `;` `.`, after `.`, between a name and its `(`, after\n  `#` before `[`, or just inside `( )` and `[ ]`. It used to print\n  `std :: option`.\n- A `$e:expr` fragment passed straight to stringify! loses the\n  parentheses the expander adds to keep its precedence (`1 + 2`, not\n  `(1 + 2)`).\n- dbg!() prints only the place. dbg!(a, b) prints each argument and\n  returns the tuple.\n\ntests/ui: +2 run-pass. KPI: crates no-op stays at 10.270 (the std startup\nvariation, as in aa059e7).\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-20T12:40:56Z",
+          "tree_id": "462753dc48765d8eee315d0d521de5ba9da8bae3",
+          "url": "https://github.com/mizchi/zust/commit/5c7cdc54ef3ed30ffe4429608aae998486ef5995"
+        },
+        "date": 1795178961743,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tests/ui run-pass pass rate",
+            "value": 73.25,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui run-pass passing",
+            "value": 1747,
             "unit": "tests"
           },
           {
