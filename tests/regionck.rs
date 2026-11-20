@@ -84,3 +84,33 @@ fn lifetime_only_change_rechecks_callers() {
     assert!(d.len() == 1 && d[0].line == 3 && d[0].msg.contains("lifetime may not live long enough"), "{d:?}");
     assert!(s.check(v1).is_empty());
 }
+
+/// A temporary borrowed by what a `let` keeps, dropped at the end of the statement (E0716), and the temporaries that
+/// live long enough: extended by the `let`, or not kept
+#[test]
+fn temporaries() {
+    let bad = "struct Defer<'a> { x: &'a [&'a str] }\nfn defer<'r>(x: &'r [&'r str]) -> Defer<'r> { Defer { x } }\nfn main() {\n    let x = defer(&vec![\"a\", \"b\"]);\n    println!(\"{}\", x.x[0]);\n}\n";
+    let d = check(bad);
+    assert!(d.len() == 1 && d[0].0 == 4 && d[0].1.contains("E0716"), "{d:?}");
+    let ok = r#"
+fn first(v: &Vec<String>) -> &String { &v[0] }
+fn len(s: &String) -> usize { s.len() }
+struct S<'a> { r: &'a String }
+struct K<'a>(&'a ());
+fn main() {
+    let a = &String::from("x");
+    let n = len(&String::from("yy"));
+    let s = S { r: &String::from("z") };
+    let t = (&String::from("w"), 1);
+    let f = first(&vec![String::from("q")]).clone();
+    let g = { let k = &String::from("k"); k.len() };
+    let k = K(&());
+    let _ = k.0;
+    println!("{} {} {} {} {} {}", a, n, s.r, t.0, f, g);
+}
+"#;
+    assert_eq!(check(ok), vec![]);
+    // (a borrow of a temporary that must be 'static)
+    let d = check("fn bar<'a>() -> &'a mut u32 {\n    &mut 4\n}\nfn main() {}\n");
+    assert!(d.len() == 1 && d[0].0 == 2, "{d:?}");
+}

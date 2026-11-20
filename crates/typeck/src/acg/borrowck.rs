@@ -40,6 +40,9 @@ pub struct BPlace {
     pub proj: Vec<Proj>,
 }
 
+/// The name of a temporary's hidden local
+pub const TEMP: &str = "<temporary>";
+
 /// The deref of a `&mut` / `&`
 pub fn ref_deref(m: bool) -> Proj {
     if m { Proj::Deref(false) } else { Proj::Shr }
@@ -182,6 +185,45 @@ pub struct Bk {
     pub params: Vec<u32>,
     /// Type → (Copy, may hold references)
     pub ty_info: HashMap<Ty, (bool, bool)>,
+    /// Hidden locals of temporaries borrowed in the statements being lowered (they go out of scope at the end of
+    /// their statement)
+    pub stmt_temps: Vec<u32>,
+    /// The temporaries of the `let` initializers being lowered that are followed (see direct_temps): their addresses
+    pub direct: Vec<usize>,
+}
+
+/// The temporaries of a `let` initializer that are followed: the operands of `&` passed directly to its outermost call
+/// (`let x = defer(&vec![..]);`). What a call returns borrows from those exactly as its signature says; other
+/// temporaries are left alone (the loans that flow into a local are approximated, and a temporary whose lifetime the
+/// `let` extends (`let x = &f();`, `S { r: &f() }`) lives as long as the block)
+pub fn direct_temps(e: &Expr, out: &mut Vec<usize>) {
+    fn strip(mut e: &Expr) -> &Expr {
+        while let Expr::Paren(p) = e {
+            e = p;
+        }
+        e
+    }
+    let args = match strip(e) {
+        Expr::Call(_, a) => a,
+        Expr::MethodCall(_, _, _, a, _) => a,
+        _ => return,
+    };
+    for a in args {
+        if let Expr::Ref(_, x) = strip(a) {
+            // (only what is never promoted to a static: the result of a call of a fn (not a struct's or variant's
+            // constructor), of a method, of `vec!` / `format!`)
+            let made = match strip(x) {
+                Expr::MethodCall(..) => true,
+                Expr::Call(f, _) => matches!(strip(f), Expr::Path(_, p) if p.segs.last().is_some_and(|s| s.name.starts_with(|c: char| c.is_ascii_lowercase() || c == '_'))),
+                Expr::Macro(p, ..) => p.segs.last().is_some_and(|s| s.name == "vec" || s.name == "format"),
+                _ => false,
+            };
+            if made {
+                out.push(&**x as *const Expr as usize);
+                out.push(strip(x) as *const Expr as usize);
+            }
+        }
+    }
 }
 
 pub fn level() -> u8 {
@@ -667,6 +709,10 @@ impl Bk {
                             add_sorted(&mut st.dead, ln as u32);
                             if let (true, Some(errs)) = (st.escaped.binary_search(&(ln as u32)).is_ok(), errs.as_deref_mut()) {
                                 let name = path_str(&self.locals, &lo.place);
+                                if name == TEMP {
+                                    errs.push(BkError { sp: lo.sp, msg: "temporary value dropped while borrowed (E0716)".to_string() });
+                                    continue;
+                                }
                                 errs.push(BkError { sp: lo.sp, msg: format!("`{name}` does not live long enough (stored where it outlives the function)") });
                             }
                         }
@@ -678,6 +724,10 @@ impl Bk {
                                 let lo = &self.loans[ln as usize];
                                 if lo.place.local == *l && lo.place.owned_len() == lo.place.proj.len() {
                                     let name = path_str(&self.locals, &BPlace { local: *l, proj: vec![] });
+                                    if name == TEMP {
+                                        errs.push(BkError { sp: lo.sp, msg: "temporary value dropped while borrowed: it is freed at the end of the statement (E0716)".to_string() });
+                                        continue;
+                                    }
                                     errs.push(BkError { sp: lo.sp, msg: if sp.line == 0 { format!("`{name}` does not live long enough (dropped while still borrowed)") } else { format!("`{name}` does not live long enough (borrowed value dropped at {} while still borrowed)", at(self.line_base, *sp)) } });
                                 }
                             }
@@ -1228,6 +1278,40 @@ impl Cx<'_> {
         // (reborrowing through a reference also carries the loans the reference holds)
         if self.bk.locals[l as usize].refs {
             self.bk.src(Src::Local(l));
+        }
+    }
+
+    /// `&e` of a temporary (not promoted to a static): a hidden local that goes out of scope at the end of the
+    /// statement (unless the `let` extends it), so a loan of it still live then is an error (E0716)
+    pub(crate) fn bk_temp_borrow(&mut self, e: &Expr, m: bool, t: Ty) {
+        if !self.bk_on() || self.bk.level < 2 || !self.bk.direct.contains(&(e as *const Expr as usize)) {
+            return;
+        }
+        let quiet = std::mem::take(&mut self.bk.no_loan_src);
+        let id = self.bk.locals.len() as u32;
+        let (copy, refs) = self.bk_ty(t);
+        self.bk.locals.push(Local { name: TEMP.to_string(), ty: t, copy, refs, mutable: Some(true) });
+        self.bk_ev(Ev::Bind(id, true));
+        let sp = err_pos(e);
+        let p = BPlace { local: id, proj: vec![] };
+        let ln = self.bk.loans.len() as u32;
+        self.bk.loan_of.insert(e as *const Expr as usize, ln);
+        self.bk.loans.push(Loan { place: p.clone(), mutable: m, sp, at: sp, quiet: true });
+        self.bk_ev(Ev::Acc(p, Acc::Borrow(ln), sp));
+        if !quiet {
+            self.bk.src(Src::Loan(ln));
+        }
+        self.bk.stmt_temps.push(id);
+    }
+
+    /// The statements from `mark` on are over: their temporaries go out of scope
+    pub(crate) fn bk_temps_end(&mut self, mark: usize) {
+        if self.bk.stmt_temps.len() <= mark {
+            return;
+        }
+        let ts: Vec<u32> = self.bk.stmt_temps.drain(mark..).collect();
+        for t in ts {
+            self.bk_ev(Ev::Dead(t, super::SP));
         }
     }
 

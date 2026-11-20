@@ -1337,6 +1337,7 @@ impl Cx<'_> {
         };
         // `&一時値`: 一時値は文 (let ならブロック) の終わりまで所有する
         self.own_temp_at(a, t);
+        self.bk_temp_borrow(rexpr, m, t);
         Ok((Some(a), Ty::Ref(m, intern(t))))
     }
 

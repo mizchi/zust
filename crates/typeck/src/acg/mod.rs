@@ -1352,7 +1352,10 @@ impl Cx<'_> {
         let mut diverged = false;
         let mut result: V = (None, Ty::Unit);
         let n = blk.stmts.len();
+        // (the borrowed temporaries of each statement end with it; the tail expression's, with the enclosing one)
+        let bk_mark = self.bk.stmt_temps.len();
         for (i, st) in blk.stmts.iter().enumerate() {
+            self.bk_temps_end(bk_mark);
             let last = i + 1 == n;
             let t0 = self.temps.len();
             self.stmt_i = i;
@@ -1541,7 +1544,12 @@ impl Cx<'_> {
                     };
                     self.bk_frame();
                     self.bk.move_mut_next = ann_ty.is_none();
+                    let ext0 = self.bk.direct.len();
+                    if self.bk_on() {
+                        borrowck::direct_temps(init, &mut self.bk.direct);
+                    }
                     let r = self.expr(init, ann.or(hint));
+                    self.bk.direct.truncate(ext0);
                     let srcs = self.bk_frame_end();
                     let (mut v, mut t) = r?;
                     if t == Ty::Never {

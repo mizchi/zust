@@ -626,7 +626,7 @@ impl Rg {
                 }
             }
             if bad {
-                errs.push((*lsp, format!("`{name}` does not live long enough (borrowed value must outlive the function)")));
+                errs.push((*lsp, if name.is_empty() { "temporary value dropped while borrowed (it must outlive the function)".to_string() } else { format!("`{name}` does not live long enough (borrowed value must outlive the function)") }));
             }
         }
         errs.sort_by_key(|e| (e.0.line, e.0.col));
@@ -718,6 +718,19 @@ impl Cx<'_> {
         match e {
             Expr::Paren(x) => self.rt_expr(x),
             Expr::Lit(s, _) if s.starts_with('"') || s.starts_with("r\"") || s.starts_with("r#") => Some((Ty::Ref(false, crate::types::intern(Ty::Str)), vec![STATIC])),
+            // (`&f(..)` / `&mut 4`: a temporary the function owns (a `&` of a literal is promoted to a static))
+            Expr::Ref(m, x) if matches!(strip(x), Expr::Call(..) | Expr::MethodCall(..)) || (*m && matches!(strip(x), Expr::Lit(..))) => {
+                let (t, tr) = match strip(x) {
+                    Expr::Lit(..) => (Ty::U8, vec![]),
+                    x => self.rg.calls.get(&(x as *const Expr as usize)).cloned()?,
+                };
+                let r = self.rg.var();
+                let sp = super::borrowck::pos(e);
+                self.rg.loans.push((r, String::new(), sp));
+                let mut out = vec![r];
+                out.extend(tr);
+                Some((Ty::Ref(*m, crate::types::intern(t)), out))
+            }
             Expr::Ref(m, x) => {
                 let (t, tr, derefs) = self.rt_place(x)?;
                 let r = self.rg.var();
