@@ -83,6 +83,9 @@ pub struct Rg {
     pub lt_names: Vec<String>,
     /// Variance of a struct / enum definition: its lifetime parameters, then its type parameters
     pub variance: HashMap<u32, Vec<Var>>,
+    /// The function's own definition (of an instance: the generic one) and an instance's type arguments
+    pub base: u32,
+    pub inst_args: Vec<Ty>,
     /// Borrows of what the function owns (a local, not through a reference): (region, the place's text, where)
     pub loans: Vec<(u32, String, Sp)>,
 }
@@ -650,17 +653,22 @@ impl Cx<'_> {
             rg.lt_names.push(l.clone());
         }
         let lts = rg.lts.clone();
+        // (an instance: the generic signature's types, with fresh trees for the type parameters)
+        let gsig = &prog.sigs[rg.base as usize];
+        let generic = !rg.inst_args.is_empty() && gsig.params.len() == params.len();
+        let targs: Vec<Option<RT>> = if generic { rg.inst_args.clone().into_iter().map(|t| rg.fresh(prog, t)).collect() } else { vec![] };
         let mut trees: Vec<Option<RT>> = vec![];
         let mut inputs: Vec<u32> = vec![];
         for (i, &(_, t)) in params.iter().enumerate() {
+            let t = if generic { gsig.params[i] } else { t };
             let mut el = |me: &mut Rg| {
                 let v = me.var();
                 me.univ.push((v, "'_".to_string()));
                 v
             };
-            let tr = rg.instantiate(prog, t, codes(i), &lts, &[], &mut el);
+            let tr = rg.instantiate(prog, t, codes(i), &lts, &targs, &mut el);
             if let Some(tr) = &tr {
-                inputs.extend(tr.iter().copied().filter(|&v| v != STATIC));
+                inputs.extend(tr.iter().copied().filter(|&v| v != STATIC && rg.univ.iter().any(|u| u.0 == v)));
             }
             trees.push(tr);
         }
@@ -678,7 +686,8 @@ impl Cx<'_> {
                 STATIC
             }
         };
-        let ret = rg.instantiate(prog, ret_t, codes(params.len()), &lts, &[], &mut el);
+        let gret = if generic { gsig.ret } else { ret_t };
+        let ret = rg.instantiate(prog, gret, codes(params.len()), &lts, &targs, &mut el);
         rg.ret = ret.filter(|_| !bad);
         let nuniv = rg.univ.len();
         rg.on = nuniv >= 2 || (nuniv >= 1 && rs.is_some());
@@ -906,8 +915,10 @@ impl Cx<'_> {
                 rg.relate(prog, ty, at, pt, *asp);
             }
         }
-        // (the callee's declared bounds hold of its arguments)
-        if let Some(r) = rs.as_deref() {
+        // (the callee's declared bounds hold of its arguments; not those of a trait's impl called from a generic
+        // function's instance: the generic body called the trait's method, under its own bounds)
+        let through_trait = !rg.inst_args.is_empty() && (sig0.impl_trait.is_some() || sig0.trait_of.is_some());
+        if let Some(r) = rs.as_deref().filter(|_| !through_trait) {
             let m = |c: u8| if c == R_STATIC { Some(STATIC) } else { lts.get(c as usize).copied() };
             for &(a, b) in &r.outlives {
                 if let (Some(x), Some(y)) = (m(a), m(b)) {

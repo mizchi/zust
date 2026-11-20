@@ -206,9 +206,9 @@ pub const TRAP_SITE_MAX: usize = 245;
 
 /// 1 関数をコンパイルする。返り値は (Blob, 要求したインスタンス)
 pub fn compile(prog: &Program, insts: &Mutex<Insts>, id: u32, f: &ItemFn, line_base: u32, inl: &Inline) -> R<(Compiled, Vec<u32>)> {
-    let (sig, env, body_id, fnptr) = {
+    let (sig, env, body_id, fnptr, inst_args) = {
         let g = insts.lock().unwrap();
-        (g.sig(prog, id).clone(), g.env(prog, id), g.body_of(id), g.get(id).is_some_and(|i| i.fnptr))
+        (g.sig(prog, id).clone(), g.env(prog, id), g.body_of(id), g.get(id).is_some_and(|i| i.fnptr), g.get(id).map(|i| i.args.clone()))
     };
     // (a closure's fn-pointer instance: the body without the `__env` parameter (it has no captures))
     let f_np;
@@ -265,7 +265,8 @@ pub fn compile(prog: &Program, insts: &Mutex<Insts>, id: u32, f: &ItemFn, line_b
         b: FunctionBuilder::new(&clif_sig(&sig)),
         bk: borrowck::Bk { on: bk_level > 0, level: bk_level, line_base, ..Default::default() },
         // (a function's own body, not a generic one's instance nor a closure's: see regionck)
-        rg: regionck::Rg { on: bk_level >= 2 && body_id == id && caps.is_empty() && prog.closures.get(&body_id).is_none() && regionck::enabled(), ..Default::default() },
+        // (a generic function's instance: the generic signature, its type parameters' regions not followed)
+        rg: regionck::Rg { on: bk_level >= 2 && !fnptr && caps.is_empty() && prog.closures.get(&body_id).is_none() && regionck::enabled(), base: body_id, inst_args: inst_args.unwrap_or_default(), ..Default::default() },
         prog,
         scopes: vec![vec![]],
         loops: vec![],
