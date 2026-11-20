@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795136048122,
+  "lastUpdate": 1795136049845,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -66209,6 +66209,70 @@ window.BENCHMARK_DATA = {
           {
             "name": "tests/ui compile-fail passing",
             "value": 3341,
+            "unit": "tests"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "committer": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "distinct": true,
+          "id": "38821f60169f0a199e7de362b78276d5f725ebd1",
+          "message": "docs: split CONTRIBUTING.md out of README, with setup steps\n\nREADME keeps usage; CONTRIBUTING.md (and its Japanese pair) gets the\ndevelopment guide: a \"Getting started\" sequence for a fresh clone\n(tools, submodules, release build, fetching rustc's UI tests, the\npre-commit hook, the checks to run first, a dry KPI run), the KPI\nworkflow and open work, benchmarks, and the roadmap moved from README.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-20T00:47:36Z",
+          "tree_id": "613f0dfbad9c9e8318cecb8e1f00621090069ef6",
+          "url": "https://github.com/mizchi/zust/commit/38821f60169f0a199e7de362b78276d5f725ebd1"
+        },
+        "date": 1795136049624,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tests/ui run-pass pass rate",
+            "value": 71.19,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui run-pass passing",
+            "value": 1698,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui check-pass pass rate",
+            "value": 78.42,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui check-pass passing",
+            "value": 1417,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui build-pass pass rate",
+            "value": 70.37,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui build-pass passing",
+            "value": 95,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui compile-fail pass rate",
+            "value": 45.39,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui compile-fail passing",
+            "value": 3340,
             "unit": "tests"
           }
         ]
