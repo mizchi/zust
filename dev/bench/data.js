@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795179918247,
+  "lastUpdate": 1795179920373,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -69251,6 +69251,85 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/mizchi/zust/commit/5c7cdc54ef3ed30ffe4429608aae998486ef5995"
         },
         "date": 1795178959269,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "parity documentSymbol (名前の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity workspace/symbol (上位 20 の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity definition (行き先の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity hover (名前を含む)",
+            "value": 90,
+            "unit": "%"
+          },
+          {
+            "name": "parity references (数の一致)",
+            "value": 97.297,
+            "unit": "%"
+          },
+          {
+            "name": "parity documentHighlight (数の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity rename (書き換えの一致)",
+            "value": 94.118,
+            "unit": "%"
+          },
+          {
+            "name": "parity signatureHelp (名前・引数の数・今の引数の一致)",
+            "value": 94.737,
+            "unit": "%"
+          },
+          {
+            "name": "parity completion `x.\\|` (書いてある名前を含む)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity completion `na\\|me` (同)",
+            "value": 92.593,
+            "unit": "%"
+          },
+          {
+            "name": "parity 一致の平均",
+            "value": 96.874,
+            "unit": "%"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "committer": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "distinct": true,
+          "id": "d855b2ace843f4353497bd4c77367262df578c22",
+          "message": "&CONST, &CONST.f, &CONST[i] and &(42,).0 borrow static data\n\nA shared borrow of a constant used to point at a copy in the function's\nframe, so `fn f(i: usize) -> &'static u32 { &NUMS[i] }` returned a\ndangling reference. Now:\n- `&CONST` borrows the constant promoted to static data.\n- A field or an element of a constant expression is borrowed out of that\n  promoted value: `&(*&B).f` / `&(*&B)[i]`.\nPromotion applies only when the constant evaluator reads the expression\nexactly (literals and constructors, through consts of the same kind, no\n`..base`). It never applies to a type that needs drop (a temporary is\ndropped there, as in rustc) or one with interior mutability (Cell,\natomics ..: each `&C` is a fresh value).\n\ntests/ui: +1 run-pass.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-20T13:01:13Z",
+          "tree_id": "0694b9b2114fdb1640fbf167db5ce955a5811460",
+          "url": "https://github.com/mizchi/zust/commit/d855b2ace843f4353497bd4c77367262df578c22"
+        },
+        "date": 1795179919917,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
