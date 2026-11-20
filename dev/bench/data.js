@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795139057527,
+  "lastUpdate": 1795139059321,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -41884,6 +41884,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "lsp peak RSS",
             "value": 73.688,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "committer": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "distinct": true,
+          "id": "83f2912ff0fa44ff33d946b604e079c1585c7d16",
+          "message": "lint: deny(unused_must_use) for a dropped Result and #[must_use] fns\n\nWith `#![deny(unused_must_use)]` (or `unused` / `warnings`), a\nstatement whose value is a `Result` is \"unused `Result` that must be\nused\", and a statement calling one of the program's `#[must_use]` fns\nis \"unused return value of `f` that must be used\" (`let _ = ..` is\nfine, as in rustc).\n\ntests/ui: +4 genuine compile-fail passes.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-20T01:35:36Z",
+          "tree_id": "d173bdcce474837d85bdbfbcbe450b26f2e20825",
+          "url": "https://github.com/mizchi/zust/commit/83f2912ff0fa44ff33d946b604e079c1585c7d16"
+        },
+        "date": 1795139059120,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "lsp definition p50",
+            "value": 0.476,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp hover p50",
+            "value": 0.362,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp completion p50",
+            "value": 0.978,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp references p50",
+            "value": 3.263,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp rename p50",
+            "value": 0.384,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp signatureHelp p50",
+            "value": 0.694,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp documentHighlight p50",
+            "value": 0.669,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp ready (startup to indexed)",
+            "value": 121.028,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp peak RSS",
+            "value": 73.305,
             "unit": "MiB"
           }
         ]
