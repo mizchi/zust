@@ -51,3 +51,4 @@ compile-fail	tool-attributes/diagnostic_item.rs
 compile-fail	traits/const-traits/const_derives/derive-const-gate.rs
 compile-fail	traits/const-traits/partial/attr-gate.rs
 compile-fail	traits/default-method/rustc_must_implement_one_of_gated.rs
+compile-fail	error-codes/e0119/issue-27403.rs

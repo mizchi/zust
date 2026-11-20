@@ -2048,6 +2048,7 @@ compile-fail	error-codes/E0277-2.rs
 compile-fail	error-codes/E0277-3.rs
 compile-fail	error-codes/E0277.rs
 compile-fail	error-codes/E0282.rs
+compile-fail	error-codes/E0283.rs
 compile-fail	error-codes/E0308-4.rs
 compile-fail	error-codes/E0389.rs
 compile-fail	error-codes/E0390.rs
@@ -2106,7 +2107,6 @@ compile-fail	error-codes/E0790.rs
 compile-fail	error-codes/E0799.rs
 compile-fail	error-codes/E0800.rs
 compile-fail	error-codes/e0119/conflict-with-std.rs
-compile-fail	error-codes/e0119/issue-27403.rs
 compile-fail	error-codes/e0119/issue-28981.rs
 compile-fail	error-codes/ex-E0612.rs
 compile-fail	error-emitter/error-festival.rs
@@ -2633,6 +2633,7 @@ compile-fail	impl-trait/explicit-generic-args-with-impl-trait/not-enough-args.rs
 compile-fail	impl-trait/extra-impl-in-trait-impl.rs
 check-pass	impl-trait/fallback.rs
 compile-fail	impl-trait/feature-self-return-type.rs
+check-pass	impl-trait/fresh-lifetime-from-bare-trait-obj-114664.rs
 check-pass	impl-trait/impl-subtyper.rs
 check-pass	impl-trait/impl-subtyper2.rs
 compile-fail	impl-trait/impl-trait-in-generic-param.rs
@@ -3955,6 +3956,7 @@ compile-fail	nll/issue-57843.rs
 run-pass	nll/issue-57960.rs
 compile-fail	nll/issue-57989.rs
 check-pass	nll/issue-61311-normalize.rs
+check-pass	nll/issue-61320-normalize.rs
 check-pass	nll/lint-no-err.rs
 compile-fail	nll/match-cfg-fake-edges.rs
 compile-fail	nll/match-cfg-fake-edges2.rs
@@ -4832,6 +4834,7 @@ compile-fail	pattern/rfc-3637-guard-patterns/only-resolve-top-level-guard-expr-o
 compile-fail	pattern/self-ctor-133272.rs
 run-pass	pattern/size-and-align.rs
 run-pass	pattern/slice-pattern-recursion-15104.rs
+check-pass	pattern/slice-patterns-nested.rs
 compile-fail	pattern/string-match-as-str-suggestion.rs
 compile-fail	pattern/struct-mismatch-destructure-14541.rs
 compile-fail	pattern/struct-parser-recovery-issue-126344.rs
@@ -5370,8 +5373,10 @@ compile-fail	rust-2018/uniform-paths/prelude-fail.rs
 run-pass	rust-2018/uniform-paths/redundant.rs
 compile-fail	rust-2018/unresolved-asterisk-imports.rs
 check-pass	rust-2021/future-prelude-collision-generic-trait.rs
+check-pass	rust-2021/future-prelude-collision-generic.rs
 check-pass	rust-2021/future-prelude-collision-imported.rs
 check-pass	rust-2021/future-prelude-collision-macros.rs
+check-pass	rust-2021/future-prelude-collision-unneeded.rs
 check-pass	rust-2021/generic-type-collision.rs
 compile-fail	rust-2021/ice-return-unsized-can-impl-2.rs
 compile-fail	rust-2021/ice-return-unsized-can-impl.rs

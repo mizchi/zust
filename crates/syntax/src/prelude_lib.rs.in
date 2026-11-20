@@ -9399,6 +9399,27 @@ pub trait IntoIterator {
 
 // `impl From<X> for S`: trait は名前だけ (型パラメータのある trait はまだないので、impl のシグネチャを使う)
 // (宣言の引数の型は使わない。メソッドがないと trait ごと選ばれないので 1 つ置く)
+// (declared only for a program's own impls of them, as the operator traits: the compiler gives `x.into()`,
+// `s.as_ref()`, `b.borrow()` and `collect()` their meaning for the std types itself)
+pub trait AsRef {
+    fn as_ref(&self) -> &Self;
+}
+pub trait AsMut {
+    fn as_mut(&mut self) -> &mut Self;
+}
+pub trait Into {
+    fn into(self) -> Self;
+}
+pub trait Borrow {
+    fn borrow(&self) -> &Self;
+}
+pub trait BorrowMut {
+    fn borrow_mut(&mut self) -> &mut Self;
+}
+pub trait FromIterator {
+    fn from_iter<I>(iter: I) -> Self;
+}
+
 pub trait From {
     fn from(t: Self) -> Self;
 }

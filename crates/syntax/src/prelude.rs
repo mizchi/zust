@@ -234,7 +234,8 @@ fn is_cmp_trait(h: usize) -> bool {
 const OP_TRAITS: &[&str] = &[
     "Add", "Sub", "Mul", "Div", "Rem", "Neg", "Not", "BitAnd", "BitOr", "BitXor", "AddAssign", "SubAssign",
     "MulAssign", "DivAssign", "RemAssign", "BitAndAssign", "BitOrAssign", "BitXorAssign", "ShlAssign", "ShrAssign",
-    "Shl", "Shr", "Index", "IndexMut", "From", "Deref", "IntoIterator", "Error",
+    "Shl", "Shr", "Index", "IndexMut", "From", "Deref", "IntoIterator", "Error", "AsRef", "AsMut", "Into", "Borrow", "BorrowMut",
+    "FromIterator",
 ];
 
 /// 演算子の trait の宣言なら、その trait の名前 (item ごとに 1 回だけ計算する)
