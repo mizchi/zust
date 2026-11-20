@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795165750660,
+  "lastUpdate": 1795165752782,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -48724,6 +48724,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "lsp peak RSS",
             "value": 74.355,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "committer": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "distinct": true,
+          "id": "81d4bd0227f04001fd6e1c8c3e0bfab88099db5c",
+          "message": "driver2/build.rs and the lexer's glob set: Fx maps\n\nThe multi-crate build's maps and the set added in 0043490 were the last\nstd random-seeded hash maps in the compiler.\n\nKPI: crates edit -0.80% (314.9), the rest unchanged.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-20T09:04:15Z",
+          "tree_id": "0ae34359870af03688443022904ebff4c1a89f00",
+          "url": "https://github.com/mizchi/zust/commit/81d4bd0227f04001fd6e1c8c3e0bfab88099db5c"
+        },
+        "date": 1795165752311,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "lsp definition p50",
+            "value": 0.477,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp hover p50",
+            "value": 0.389,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp completion p50",
+            "value": 1.02,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp references p50",
+            "value": 6.014,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp rename p50",
+            "value": 0.438,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp signatureHelp p50",
+            "value": 0.843,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp documentHighlight p50",
+            "value": 0.956,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp ready (startup to indexed)",
+            "value": 126.145,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp peak RSS",
+            "value": 74.391,
             "unit": "MiB"
           }
         ]
