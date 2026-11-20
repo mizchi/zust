@@ -2805,6 +2805,7 @@ run-pass	imports/import-trailing-comma.rs
 compile-fail	imports/import-trait-method.rs
 compile-fail	imports/import.rs
 run-pass	imports/import2-rpass.rs
+compile-fail	imports/import2.rs
 run-pass	imports/import3-rpass.rs
 run-pass	imports/import4-rpass.rs
 run-pass	imports/import5.rs
@@ -2822,6 +2823,7 @@ compile-fail	imports/issue-25396.rs
 compile-fail	imports/issue-26886.rs
 check-pass	imports/issue-26930.rs
 compile-fail	imports/issue-28388-1.rs
+compile-fail	imports/issue-2937.rs
 check-pass	imports/issue-32119.rs
 check-pass	imports/issue-32222.rs
 compile-fail	imports/issue-32354-suggest-import-rename.rs
@@ -2837,9 +2839,11 @@ run-pass	imports/issue-4865-2.rs
 run-pass	imports/issue-4865-3.rs
 check-pass	imports/issue-53140.rs
 compile-fail	imports/issue-53269.rs
+compile-fail	imports/issue-53512.rs
 compile-fail	imports/issue-55457.rs
 compile-fail	imports/issue-55884-1.rs
 check-pass	imports/issue-56263.rs
+compile-fail	imports/issue-57015.rs
 check-pass	imports/issue-62767.rs
 compile-fail	imports/issue-81413.rs
 check-pass	imports/local-modularized.rs

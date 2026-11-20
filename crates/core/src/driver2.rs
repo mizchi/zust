@@ -1364,6 +1364,7 @@ fn unresolved_import(src: &str, split: &str, items: &[SrcItem], deps: &[String])
         ) || deps.iter().any(|d| d == n)
     };
     let mut firsts: Vec<(usize, String)> = vec![];
+    let mut seconds: Vec<(usize, String, String)> = vec![];
     for it in items {
         if !matches!(it.kind, ItemKind::Normal) {
             continue;
@@ -1376,7 +1377,15 @@ fn unresolved_import(src: &str, split: &str, items: &[SrcItem], deps: &[String])
         let first: String = rest.chars().take_while(|c| c.is_alphanumeric() || *c == '_').collect();
         // (a fn's own `use`, hoisted out with a `__h<N>` suffix, is resolved in its block)
         if !known(&first) && !first.starts_with("r#") && !first.contains("__") {
-            firsts.push((it.line + text[..text.len() - text.trim_start().len()].matches('\n').count(), first));
+            let line = it.line + text[..text.len() - text.trim_start().len()].matches('\n').count();
+            // (`use m::f..`: the second segment, for a module of the program's)
+            if let Some(r2) = rest[first.len()..].strip_prefix("::") {
+                let second: String = r2.chars().take_while(|c| c.is_alphanumeric() || *c == '_').collect();
+                if !second.is_empty() && second != "self" && second != "super" {
+                    seconds.push((line, first.clone(), second));
+                }
+            }
+            firsts.push((line, first));
         }
     }
     if firsts.is_empty() {
@@ -1408,8 +1417,45 @@ fn unresolved_import(src: &str, split: &str, items: &[SrcItem], deps: &[String])
     if src.contains("macro_rules!") && firsts.iter().any(|(_, f)| !defined.contains(f)) && src.contains("$") {
         return None;
     }
-    let (line, f) = firsts.into_iter().find(|(_, f)| !defined.contains(f))?;
-    Some(format!("{line}:1: unresolved import `{f}` (E0432)"))
+    if let Some((line, f)) = firsts.into_iter().find(|(_, f)| !defined.contains(f)) {
+        return Some(format!("{line}:1: unresolved import `{f}` (E0432)"));
+    }
+    // (`use m::f` with an inline `mod m { .. }` that defines no `f`)
+    for (line, m, f) in seconds {
+        let pat = format!("mod {m} {{");
+        let Some(at) = src.match_indices(pat.as_str()).map(|(i, _)| i).find(|&i| i == 0 || !is_id(b[i - 1])) else { continue };
+        let open = at + pat.len();
+        let mut depth = 1;
+        let mut end = None;
+        for (k, c) in src[open..].char_indices() {
+            match c {
+                '{' => depth += 1,
+                '}' => {
+                    depth -= 1;
+                    if depth == 0 {
+                        end = Some(open + k);
+                        break;
+                    }
+                }
+                _ => {}
+            }
+        }
+        let Some(end) = end else { continue };
+        let body = &src[open..end];
+        // (defined there, or brought in by a `use` of it, or written by a macro / glob)
+        let bb = body.as_bytes();
+        let named = ["mod", "struct", "enum", "trait", "fn", "type", "const", "static", "union", "as", "macro_rules!"].iter().any(|kw| {
+            let p = format!("{kw} {f}");
+            body.match_indices(p.as_str()).any(|(i, _)| (i == 0 || !is_id(bb[i - 1])) && bb.get(i + p.len()).is_none_or(|&c| !is_id(c)))
+        }) || [format!("::{f};"), format!("::{f},"), format!("::{f} "), format!("{{{f}"), format!(" {f},"), format!(" {f}}}")].iter().any(|p| body.contains(p.as_str()))
+            || body.contains('*')
+            || body.contains('$')
+            || body.contains("include!");
+        if !named {
+            return Some(format!("{line}:1: unresolved import `{m}::{f}` (E0432)"));
+        }
+    }
+    None
 }
 
 /// The naming lints (`deny` = [non_snake_case, non_camel_case_types, non_upper_case_globals]): the first fn / method,
