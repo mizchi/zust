@@ -114,12 +114,51 @@ pub fn load_crate(root: &Path, display: &str, cfg: &crate::cfg::CfgSet) -> Resul
         Some(i) => display[..i].to_string(),
         None => String::new(),
     };
-    let text = load_file(root, display, dir.as_path(), &disp_dir, 1, &mut map, cfg)?;
+    let mut open = vec![];
+    let text = load_file(root, display, dir.as_path(), &disp_dir, 1, &mut map, cfg, &mut open)?;
     Ok((text, map))
 }
 
-/// ファイル path を読んで展開する。mod_dir は子のモジュールのファイルを探すディレクトリ。start は結合したソースでの開始行
-fn load_file(path: &Path, display: &str, mod_dir: &Path, disp_dir: &str, start: u32, map: &mut SrcMap, cfg: &crate::cfg::CfgSet) -> Result<String, String> {
+/// The path with `.` and `x/..` taken out (as text: two spellings of one file compare equal)
+fn lexical(p: &Path) -> String {
+    let s = p.to_string_lossy().into_owned();
+    let abs = s.starts_with('/');
+    let mut parts: Vec<&str> = vec![];
+    for c in s.split('/') {
+        if c.is_empty() || c == "." {
+            continue;
+        }
+        if c == ".." && parts.last().is_some_and(|l| *l != "..") {
+            parts.pop();
+            continue;
+        }
+        parts.push(c);
+    }
+    let j = parts.join("/");
+    if abs { format!("/{j}") } else { j }
+}
+
+/// ファイル path を読んで展開する。mod_dir は子のモジュールのファイルを探すディレクトリ。start は結合したソースでの開始行。
+/// open は読んでいる途中のファイル (根から): 同じファイルがまた出てきたら循環 (rustc と同じく "circular modules")
+#[allow(clippy::too_many_arguments)]
+fn load_file(path: &Path, display: &str, mod_dir: &Path, disp_dir: &str, start: u32, map: &mut SrcMap, cfg: &crate::cfg::CfgSet, open: &mut Vec<(String, String)>) -> Result<String, String> {
+    let key = lexical(path);
+    if let Some(i) = open.iter().position(|o| o.0 == key) {
+        let chain: Vec<&str> = open[i..].iter().chain(std::iter::once(&open[i])).map(|o| o.1.as_str()).collect();
+        return Err(format!("{}: circular modules: {}", open[open.len() - 1].1, chain.join(" -> ")));
+    }
+    // (spellings the text does not catch, such as symbolic links, still stop)
+    if open.len() >= 256 {
+        return Err(format!("{display}: modules nested more than 256 deep"));
+    }
+    open.push((key, display.to_string()));
+    let r = load_file_in(path, display, mod_dir, disp_dir, start, map, cfg, open);
+    open.pop();
+    r
+}
+
+#[allow(clippy::too_many_arguments)]
+fn load_file_in(path: &Path, display: &str, mod_dir: &Path, disp_dir: &str, start: u32, map: &mut SrcMap, cfg: &crate::cfg::CfgSet, open: &mut Vec<(String, String)>) -> Result<String, String> {
     let src = std::fs::read_to_string(path).map_err(|e| format!("{}: {e}", path.display()))?;
     // (cfg を先に評価する: 偽の `#[cfg(..)] mod x;` のファイルは読まない)
     let src = match crate::cfg::strip(&src, cfg) {
@@ -153,7 +192,7 @@ fn load_file(path: &Path, display: &str, mod_dir: &Path, disp_dir: &str, start: 
             let sub = p.parent().map(|d| d.to_path_buf()).unwrap_or_default();
             text.push_str(&format!("pub mod {name} {{\n"));
             let at = start + line_count(&text);
-            let body = load_file(p.as_path(), &disp, sub.as_path(), disp_dir, at, map, cfg)?;
+            let body = load_file(p.as_path(), &disp, sub.as_path(), disp_dir, at, map, cfg, open)?;
             text.push_str(&body);
             text.push_str("\n}\n");
             map.segs.push((start + line_count(&text) - 1, fi, 1 + line_count(&src)));
@@ -172,7 +211,7 @@ fn load_file(path: &Path, display: &str, mod_dir: &Path, disp_dir: &str, start: 
         };
         text.push_str(&format!("pub mod {name} {{\n"));
         let at = start + line_count(&text);
-        let body = load_file(p.as_path(), &disp, sub.as_path(), &sub_disp, at, map, cfg)?;
+        let body = load_file(p.as_path(), &disp, sub.as_path(), &sub_disp, at, map, cfg, open)?;
         text.push_str(&body);
         text.push_str("\n}\n");
         // (`}` の行は、元のファイルの最後の行の続きにしておく)
@@ -260,4 +299,29 @@ fn blank_mod_decls(src: &str) -> Result<(String, Vec<(String, Option<String>)>),
         k += 1;
     }
     Ok((String::from_utf8(out).map_err(|e| e.to_string())?, kids))
+}
+
+#[cfg(test)]
+mod circular_tests {
+    /// A module that includes itself, or two that include each other, is an error, not an endless recursion
+    /// (tests/ui parser/circular_modules_main.rs, circular-module-with-doc-comment-issue-97589)
+    #[test]
+    fn circular_modules() {
+        let dir = std::env::temp_dir().join(format!("srcmap_circular_{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("a.rs"), "#[path = \"b.rs\"]\nmod b;\nfn main() {}\n").unwrap();
+        std::fs::write(dir.join("b.rs"), "#[path = \"./a.rs\"]\nmod a;\n").unwrap();
+        std::fs::write(dir.join("r.rs"), "pub mod s;\n").unwrap();
+        std::fs::write(dir.join("s.rs"), "//! doc\n#[path = \"s.rs\"]\nmod s;\n").unwrap();
+        std::fs::write(dir.join("ok.rs"), "#[path = \"b2.rs\"]\nmod b2;\n#[path = \"b2.rs\"]\nmod b3;\nfn main() {}\n").unwrap();
+        std::fs::write(dir.join("b2.rs"), "pub fn f() {}\n").unwrap();
+        let cfg = crate::cfg::CfgSet::default();
+        let e = super::load_crate(&dir.join("a.rs"), "src/main.rs", &cfg).unwrap_err();
+        assert!(e.ends_with("circular modules: src/main.rs -> src/b.rs -> src/main.rs"), "{e}");
+        let e = super::load_crate(&dir.join("r.rs"), "src/lib.rs", &cfg).unwrap_err();
+        assert!(e.ends_with("circular modules: src/s.rs -> src/s.rs"), "{e}");
+        // (the same file twice, side by side, is not a cycle)
+        assert!(super::load_crate(&dir.join("ok.rs"), "src/main.rs", &cfg).is_ok());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }
