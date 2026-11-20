@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795139728866,
+  "lastUpdate": 1795139731108,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -68064,6 +68064,70 @@ window.BENCHMARK_DATA = {
           {
             "name": "tests/ui compile-fail passing",
             "value": 3355,
+            "unit": "tests"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "committer": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "distinct": true,
+          "id": "fdd2ee3e5e7f4cfa8461f9367deeb4887cafa31b",
+          "message": "lint: naming conventions (snake / camel / upper case)\n\nWith `#![deny(non_snake_case)]`, `non_camel_case_types`,\n`non_upper_case_globals` (or `nonstandard_style` / `warnings`), the\nprogram's fns and methods, types, traits and associated types, statics,\nconsts and associated consts are checked before building, with rustc's\nmessages (\"function `CamelCase` should have a snake case name\", \"type\n`ONE_TWO` should have an upper camel case name\", \"static variable\n`foo` should have an upper case name\", ..). Items allowing the lint,\ncfg'd, no_mangle and extern \"C\" ones are skipped; the names are shown\nwithout the flattened modules' prefix and the hoisting suffix.\n\ntests/ui: +11 genuine compile-fail passes.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-20T01:51:11Z",
+          "tree_id": "cccca8d4615c5de74ec9cb170919eeefa190439e",
+          "url": "https://github.com/mizchi/zust/commit/fdd2ee3e5e7f4cfa8461f9367deeb4887cafa31b"
+        },
+        "date": 1795139730850,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tests/ui run-pass pass rate",
+            "value": 71.19,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui run-pass passing",
+            "value": 1698,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui check-pass pass rate",
+            "value": 78.42,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui check-pass passing",
+            "value": 1417,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui build-pass pass rate",
+            "value": 70.37,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui build-pass passing",
+            "value": 95,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui compile-fail pass rate",
+            "value": 45.76,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui compile-fail passing",
+            "value": 3367,
             "unit": "tests"
           }
         ]
