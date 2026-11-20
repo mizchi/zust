@@ -198,6 +198,9 @@ Every change that touches the compiler or the analyzer is measured before it is 
 
   It appends a row to `bench/kpi_log.tsv` / `bench/kpi_log.md`. A value outside the noise band of the last 7 rows is
   printed as `REGRESSION`: find the cause before keeping the change, or state the cost in the commit message.
+  In a pull request, use `--dry-run` and do not commit rows to the log: the `KPI` workflow measures the pull request
+  against its base and keeps the result in a comment on it (see CI below). Rows go in with commits made on main;
+  rows added in a branch would conflict with every row main gets in the meantime.
 - `bench/rust_ui.py --check` must report 0 regressions. When tests start passing, rewrite the baseline
   (`--write-baseline`).
   - Look at what a newly passing compile-fail test is rejected for: one rejected at its line for another reason than
@@ -274,9 +277,9 @@ Mutants the tests miss are written to `mutants.out/missed.txt`; add tests to kil
   tests/ui baseline check on every push and pull request. The size budget depends on the linker, so CI installs wild 0.11.0 and measures with
   `ZUSTC_BENCH_LINKER=wild` (`bench/budget.txt` also holds wild sizes).
 - `.github/workflows/kpi.yml` runs on every push to a pull request. It builds the merge base and the head one after
-  the other on the same runner and measures both with `bench/kpi_track.py --dry-run`. `bench/kpi_pr.py` then keeps one
-  comment on the pull request up to date: the change of each KPI against the base, and one row per push with the change
-  against the push before. A KPI that grows by more than 1% is marked and gives a warning; the job does not fail.
+  the other on the same runner and measures both with `bench/kpi_track.py --lsp --dry-run` (a zust-analyzer session
+  included). `bench/kpi_pr.py` then keeps one comment on the pull request up to date: the change of each KPI against
+  the base, and one row per push with the change against the push before. A KPI that grows by more than 1% is marked and gives a warning; the job does not fail.
 - `.github/workflows/bench.yml` runs `bench/ci_bench.py` on every push to main and stores the results in `dev/bench/`
   on the gh-pages branch with
   [github-action-benchmark](https://github.com/benchmark-action/github-action-benchmark). The dashboard is at

@@ -1,0 +1,15 @@
+[package]
+name = "zust-connect"
+version = "0.0.0"
+edition = "2024"
+publish = false
+license = "MIT OR Apache-2.0"
+
+# (not a member of the zust workspace: `cargo test` here, after `cargo build --release` at the root)
+[workspace]
+
+[dependencies]
+idealis-connect = { git = "https://github.com/mizchi/idealis", rev = "1c7725ed8539dd05bf5af890d5d797646cef8727", features = ["tla"] }
+# (only for the type name FiniteModel, which idealis_connect::tla does not re-export)
+idealis-core = { git = "https://github.com/mizchi/idealis", rev = "1c7725ed8539dd05bf5af890d5d797646cef8727" }
+serde_json = "1"

@@ -146,7 +146,7 @@ dependencies = [
 [[package]]
 name = "rtla"
 version = "0.1.0-alpha.0"
-source = "git+https://github.com/mizchi/idealis?rev=89f54a90bfe9e5ba628e44656b905e0fb57dc8c7#89f54a90bfe9e5ba628e44656b905e0fb57dc8c7"
+source = "git+https://github.com/mizchi/idealis?rev=1c7725ed8539dd05bf5af890d5d797646cef8727#1c7725ed8539dd05bf5af890d5d797646cef8727"
 dependencies = [
  "serde",
  "serde_json",
@@ -155,7 +155,7 @@ dependencies = [
 [[package]]
 name = "rtla-compiler"
 version = "0.1.0-alpha.0"
-source = "git+https://github.com/mizchi/idealis?rev=89f54a90bfe9e5ba628e44656b905e0fb57dc8c7#89f54a90bfe9e5ba628e44656b905e0fb57dc8c7"
+source = "git+https://github.com/mizchi/idealis?rev=1c7725ed8539dd05bf5af890d5d797646cef8727#1c7725ed8539dd05bf5af890d5d797646cef8727"
 dependencies = [
  "rtla",
  "rtlc",
@@ -165,7 +165,7 @@ dependencies = [
 [[package]]
 name = "rtlc"
 version = "0.1.0-alpha.0"
-source = "git+https://github.com/mizchi/idealis?rev=89f54a90bfe9e5ba628e44656b905e0fb57dc8c7#89f54a90bfe9e5ba628e44656b905e0fb57dc8c7"
+source = "git+https://github.com/mizchi/idealis?rev=1c7725ed8539dd05bf5af890d5d797646cef8727#1c7725ed8539dd05bf5af890d5d797646cef8727"
 dependencies = [
  "rayon",
  "serde",

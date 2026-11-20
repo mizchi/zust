@@ -5,7 +5,7 @@ usage (from .github/workflows/kpi.yml):
   python3 bench/kpi_pr.py --base base.txt --head head.txt --base-sha SHA --head-sha SHA [--pr N --repo OWNER/NAME]
                           [--threshold 1.0] [--out summary.md]
 
-base.txt / head.txt are what `python3 bench/kpi_track.py <label> --dry-run` printed for the base (the merge base of
+base.txt / head.txt are what `python3 bench/kpi_track.py <label> --lsp --dry-run` printed for the base (the merge base of
 the PR) and for the PR head, measured on the same machine. The instruction counts are deterministic to about 0.1%,
 so a difference past --threshold (in %, default 1.0) is reported as a regression (a ::warning:: line; the job does not
 fail).
@@ -18,8 +18,8 @@ import argparse, json, os, re, subprocess, sys
 
 MARKER = "<!-- zust-kpi-pr -->"
 # (the names kpi_track.py prints, in its order)
-KPIS = ["no-op build", "edit one fn", "check", "cache", "traits check", "traits edit", "crates no-op", "crates edit"]
-UNITS = {"cache": "KiB"}
+KPIS = ["no-op build", "edit one fn", "check", "cache", "LSP session", "traits check", "traits edit", "crates no-op", "crates edit"]
+UNITS = {"cache": "KiB", "LSP session": "G"}
 
 
 def parse(path):
@@ -70,8 +70,8 @@ def render(hist, threshold):
     lines = [MARKER, "## KPI: this PR against its base", ""]
     lines.append(
         f"Measured by the `KPI` workflow on one runner: the merge base `{last['base_sha'][:7]}` and the head "
-        f"`{last['head_sha'][:7]}`, each with `bench/kpi_track.py --dry-run` (instruction counts of zustc, M = millions; "
-        f"deterministic to about 0.1%). A change past +{threshold:g}% is marked ⚠️. This comment is updated on every push.")
+        f"`{last['head_sha'][:7]}`, each with `bench/kpi_track.py --lsp --dry-run` (instruction counts of zustc, M = millions; "
+        f"of one zust-analyzer session, G = billions; deterministic to about 0.1%). A change past +{threshold:g}% is marked ⚠️. This comment is updated on every push.")
     lines += ["", "| KPI | base | head | change |", "|---|---:|---:|---:|"]
     for k in KPIS:
         b, h = last["base"].get(k), last["head"].get(k)

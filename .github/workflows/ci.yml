@@ -35,6 +35,9 @@ jobs:
         run: cargo test --release --workspace
       - name: Compare with rustc (examples)
         run: tests/compare.sh
+      # (zustc's prelude, compiled by zustc, against TLA+ models: formal/connect)
+      - name: Implementation against the models
+        run: cargo test --release --manifest-path formal/connect/Cargo.toml
 
   rust-ui:
     # (rustc's own tests/ui: fail if a test zustc passed (bench/rust_ui_passing.txt) no longer passes)

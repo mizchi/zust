@@ -9,6 +9,6 @@ license = "MIT OR Apache-2.0"
 [workspace]
 
 [dependencies]
-rtla = { git = "https://github.com/mizchi/idealis", rev = "89f54a90bfe9e5ba628e44656b905e0fb57dc8c7" }
-rtla-compiler = { git = "https://github.com/mizchi/idealis", rev = "89f54a90bfe9e5ba628e44656b905e0fb57dc8c7" }
-rtlc = { git = "https://github.com/mizchi/idealis", rev = "89f54a90bfe9e5ba628e44656b905e0fb57dc8c7" }
+rtla = { git = "https://github.com/mizchi/idealis", rev = "1c7725ed8539dd05bf5af890d5d797646cef8727" }
+rtla-compiler = { git = "https://github.com/mizchi/idealis", rev = "1c7725ed8539dd05bf5af890d5d797646cef8727" }
+rtlc = { git = "https://github.com/mizchi/idealis", rev = "1c7725ed8539dd05bf5af890d5d797646cef8727" }
