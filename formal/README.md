@@ -17,7 +17,7 @@ Nothing here is part of the zust workspace or of the zustc build.
 | `repro/` | programs that show the defects found (zustc against rustc) | |
 | `tla-check/` | the runner: parses a `.tla` / `.cfg` with idealis (pinned by git rev) and model-checks it | |
 | `tla/HashMapModel.tla` | what a HashMap does (insert / remove / get / len over 5 keys), as the model `connect/` tests the prelude's HashMap against | idealis |
-| `connect/` | the implementation against the models, in the way of Quint Connect: a spec's state graph becomes an idealis `FiniteModel`, idealis-testing generates action sequences from it (and shrinks a failure), and idealis-core's conformance session runs each one on the model and on a driver | idealis |
+| `connect/` | the implementation against the models, in the way of Quint Connect: with idealis-connect: a spec's state graph becomes an idealis `FiniteModel`, action sequences are generated from it (a failure is shrunk), and each runs on the model and on a driver | idealis |
 
 ```bash
 formal/run.sh tla
@@ -44,20 +44,21 @@ about 8 minutes and 5–10 GiB.
 
 ## connect: does the implementation follow the model?
 
-`connect/` (`zust-connect`) checks an implementation against a TLA+ spec:
+`connect/` (`zust-connect`) checks an implementation against a TLA+ spec with idealis-connect (its `tla` feature):
 
-1. `finite_model` model-checks the spec and takes its state graph from rtlc's expansion cache. The spec names each
-   step in a variable `act` (the action and its arguments) and what the step observes in `obs`; the states are keyed
-   by the other variables. Init sets `act` to `<<"reset">>`.
-2. `check` has idealis-testing generate action sequences from that graph (random walks from a seed, a failure shrunk
-   to a shortest sequence) and runs each through idealis-core's conformance `Session`. The model gives the
-   observations it allows after each action; a `Driver` runs the action on the implementation and returns what it
-   observed. The expected observations come from the spec, never from the implementation.
+1. `tla::finite_model` model-checks the spec and makes its reachable state graph an idealis `FiniteModel`. The spec
+   names each step in a variable `act` (the action and its arguments) and what the step observes in `obs`; the states
+   are keyed by the other variables. `CONSTRAINT` and `ACTION_CONSTRAINT` prune the graph as they prune the search.
+2. `tla::check` generates action sequences from that graph (`Generator::from_finite_model`: random walks from a seed,
+   a failure shrunk to a shortest sequence) and runs each through idealis-core's conformance session. The model gives
+   the observations it allows after each action; a `tla::Driver` runs the action on the implementation and returns
+   what it observed. The expected observations come from the spec, never from the implementation. A sequence that a
+   nondeterministic observation leaves the model on is invalid, not a failure.
 
 `connect/tests/hashmap.rs` builds `connect/drivers/hashmap.rs` with `target/release/zustc` and drives it over
 stdin / stdout, so what is checked is the prelude's HashMap as zustc compiles it: 200 sequences of up to 100 steps
 against `tla/HashMapModel.tla`. A second test checks that a map whose `remove` does nothing is caught: the failure
 shrinks to `insert 5 2`, `remove 5`, `get 5` (which sees 2 where the model allows only 0).
 
-A new target is a spec with `act` / `obs` and a `Driver`. idealis-testing takes up to 1024 states and 10,000
+A new target is a spec with `act` / `obs` and a `Driver`. The generator takes up to 1024 states and 10,000
 transitions, so the state the implementation is compared on has to stay that small.

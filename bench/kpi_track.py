@@ -255,7 +255,8 @@ def main():
         if v is None:
             continue
         ref = first_with(rows, k) if num(first_with(rows, k), k) is not None else row
-        print(f"{name:14} {v:12.3f}   Δ {pct(v, num(prev, k)) if prev else '-':>8}   Σ {pct(v, num(ref, k)):>8}")
+        # (the LSP session is in G: four decimals, as the log keeps it)
+        print(f"{name:14} {v:12.{4 if k == 'lsp_G' else 3}f}   Δ {pct(v, num(prev, k)) if prev else '-':>8}   Σ {pct(v, num(ref, k)):>8}")
     # (as blaze's benchhistory check: against the median of the last 7 rows, a move past the noise band (0.1%, or
     # three times the spread the history shows, whichever is larger) is reported)
     flags = band_check(rows, row)
