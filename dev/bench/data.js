@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795164837115,
+  "lastUpdate": 1795164839261,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -48268,6 +48268,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "lsp peak RSS",
             "value": 74.375,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "committer": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "distinct": true,
+          "id": "9cc1886dec17eee904988eddfb95dd9035a4559a",
+          "message": "Fx maps in place of std HashMap / HashSet in the compiler\n\nprogram.rs, types.rs (the interning tables), macros.rs, prelude.rs and\ndriver2's checks used std's HashMap / HashSet: SipHash per lookup, and\na random seed per process, so their iteration order and the\ninstruction counts moved from one run to the next (the edit KPI's\nintermittent +0.15%). They are Fx maps now (deterministic, cheaper).\n\nKPI: traits check -1.82%, crates edit -1.27%, check -0.28%; edit one fn\ngives 559.731 on three runs in a row; LSP session 10.898 G (unchanged).\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-20T08:49:20Z",
+          "tree_id": "5f91e4533852ffa10c2dcc34f798015a81c666d2",
+          "url": "https://github.com/mizchi/zust/commit/9cc1886dec17eee904988eddfb95dd9035a4559a"
+        },
+        "date": 1795164838747,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "lsp definition p50",
+            "value": 0.47,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp hover p50",
+            "value": 0.405,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp completion p50",
+            "value": 1.051,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp references p50",
+            "value": 5.624,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp rename p50",
+            "value": 0.444,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp signatureHelp p50",
+            "value": 0.881,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp documentHighlight p50",
+            "value": 0.977,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp ready (startup to indexed)",
+            "value": 122.287,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp peak RSS",
+            "value": 74.141,
             "unit": "MiB"
           }
         ]
