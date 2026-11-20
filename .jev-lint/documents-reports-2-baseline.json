@@ -1,6 +1,6 @@
 {
   "schema": "jev-lint-documents-1",
-  "snapshotDigest": "be435f2fa6d0f4bae7e8d5bd9481d4f0fe516135ff214382e1b7c99e24f77b2e",
+  "snapshotDigest": "5cfd2f5096c5147de6754226f17a3520c9711c064817684cdcaa36e24607fad7",
   "questionDigest": "209d6df378ccb747fcb0e821998fcd6105bc76638a88d22488d3b398d6a21595",
   "model": "jev-1.14.0",
   "snapshotChanged": false,
@@ -32,10 +32,10 @@
       "contextHash": "ec20e2ebdd2ae375a6636074c628c438138c77646a5be532bd01237081e3f660",
       "judgment": {
         "choice": "supports",
-        "confidence": 1,
+        "confidence": 0.99,
         "probabilities": {
-          "supports": 1,
-          "contradicts": 0,
+          "supports": 0.99,
+          "contradicts": 0.01,
           "unrelated": 0,
           "insufficient_context": 0
         }
@@ -66,10 +66,10 @@
       "contextHash": "7c7b286af72e5d19978bdcefe4ac1812afb0557f682df47ae767fa9324a36f5c",
       "judgment": {
         "choice": "supports",
-        "confidence": 1,
+        "confidence": 0.99,
         "probabilities": {
-          "supports": 1,
-          "contradicts": 0,
+          "supports": 0.99,
+          "contradicts": 0.01,
           "unrelated": 0,
           "insufficient_context": 0
         }
@@ -100,10 +100,10 @@
       "contextHash": "a068452334ef52150a1932e9d45207a4c156e3a5c60d69e061e986b1aa86d889",
       "judgment": {
         "choice": "supports",
-        "confidence": 0.97,
+        "confidence": 0.99,
         "probabilities": {
-          "supports": 0.98,
-          "contradicts": 0.02,
+          "supports": 0.99,
+          "contradicts": 0.01,
           "unrelated": 0,
           "insufficient_context": 0
         }
@@ -202,10 +202,10 @@
       "contextHash": "5b6ede2d00ec82893b1c63b36b593d1e9e7999236c2422416b8324666f265c93",
       "judgment": {
         "choice": "supports",
-        "confidence": 0.96,
+        "confidence": 0.97,
         "probabilities": {
-          "supports": 0.97,
-          "contradicts": 0.03,
+          "supports": 0.98,
+          "contradicts": 0.02,
           "unrelated": 0,
           "insufficient_context": 0
         }
@@ -236,12 +236,12 @@
       "contextHash": "68facf70966b576a1dde106a31fd37de8e21bda46e6439878b91e7bce57154b6",
       "judgment": {
         "choice": "supports",
-        "confidence": 0.97,
+        "confidence": 0.95,
         "probabilities": {
-          "supports": 0.98,
-          "contradicts": 0.02,
+          "supports": 0.96,
+          "contradicts": 0.03,
           "unrelated": 0,
-          "insufficient_context": 0
+          "insufficient_context": 0.01
         }
       }
     },
@@ -304,10 +304,10 @@
       "contextHash": "41c0a2541784f0e073e300bd96b1ad35979d31a7048a9c86dc0c9821eba76c55",
       "judgment": {
         "choice": "supports",
-        "confidence": 1,
+        "confidence": 0.99,
         "probabilities": {
-          "supports": 1,
-          "contradicts": 0,
+          "supports": 0.99,
+          "contradicts": 0.01,
           "unrelated": 0,
           "insufficient_context": 0
         }
@@ -372,12 +372,12 @@
       "contextHash": "65d03eec8a642fb4c59c7bacc74397f936864091105bba631e8977b9ca9c1612",
       "judgment": {
         "choice": "supports",
-        "confidence": 0.96,
+        "confidence": 0.97,
         "probabilities": {
-          "supports": 0.97,
+          "supports": 0.98,
           "contradicts": 0.02,
           "unrelated": 0,
-          "insufficient_context": 0.01
+          "insufficient_context": 0
         }
       }
     },
@@ -644,10 +644,10 @@
       "contextHash": "1275e8de4d291bc21dd7f5b87a5196cba9cca33005a1ac6eca77fa3d0892971e",
       "judgment": {
         "choice": "supports",
-        "confidence": 0.97,
+        "confidence": 0.96,
         "probabilities": {
-          "supports": 0.98,
-          "contradicts": 0.02,
+          "supports": 0.97,
+          "contradicts": 0.03,
           "unrelated": 0,
           "insufficient_context": 0
         }
@@ -678,10 +678,10 @@
       "contextHash": "f1894d506a5e66f92906b403c8a6a69c60e6e1bad8273b43b0489836c39d482f",
       "judgment": {
         "choice": "supports",
-        "confidence": 0.99,
+        "confidence": 0.97,
         "probabilities": {
-          "supports": 0.99,
-          "contradicts": 0.01,
+          "supports": 0.98,
+          "contradicts": 0.02,
           "unrelated": 0,
           "insufficient_context": 0
         }
@@ -746,12 +746,12 @@
       "contextHash": "74cd923d61e00b7739f80b534b652a909070bb949bfb007a464579050da1d263",
       "judgment": {
         "choice": "supports",
-        "confidence": 0.99,
+        "confidence": 0.97,
         "probabilities": {
-          "supports": 0.99,
+          "supports": 0.98,
           "contradicts": 0.01,
           "unrelated": 0,
-          "insufficient_context": 0
+          "insufficient_context": 0.01
         }
       }
     },
@@ -780,12 +780,12 @@
       "contextHash": "54b56e94027819b91287b9766c4872faa76c4344146540b341b4389c6b8dd7ce",
       "judgment": {
         "choice": "supports",
-        "confidence": 0.92,
+        "confidence": 0.93,
         "probabilities": {
-          "supports": 0.94,
+          "supports": 0.95,
           "contradicts": 0.04,
           "unrelated": 0,
-          "insufficient_context": 0.02
+          "insufficient_context": 0.01
         }
       }
     },
@@ -814,10 +814,10 @@
       "contextHash": "7438e0bb6ac3c01bf6beaa56051a35abf5a2f30ee56334c8cd754b996d6bd4e6",
       "judgment": {
         "choice": "supports",
-        "confidence": 0.88,
+        "confidence": 0.84,
         "probabilities": {
-          "supports": 0.91,
-          "contradicts": 0.08,
+          "supports": 0.88,
+          "contradicts": 0.11,
           "unrelated": 0,
           "insufficient_context": 0.01
         }
@@ -848,10 +848,10 @@
       "contextHash": "7982c179582830150e0121639bf13f758b8cd2967a8c41c2205db632219eb8e5",
       "judgment": {
         "choice": "supports",
-        "confidence": 0.96,
+        "confidence": 0.95,
         "probabilities": {
-          "supports": 0.97,
-          "contradicts": 0.03,
+          "supports": 0.96,
+          "contradicts": 0.04,
           "unrelated": 0,
           "insufficient_context": 0
         }
@@ -882,12 +882,12 @@
       "contextHash": "6ef3c783f7f2ee4aa85d450d7fc65f20f61a1aa01a222d8aeb9ddeda31a027f9",
       "judgment": {
         "choice": "supports",
-        "confidence": 0.85,
+        "confidence": 0.76,
         "probabilities": {
-          "supports": 0.89,
-          "contradicts": 0.06,
+          "supports": 0.82,
+          "contradicts": 0.08,
           "unrelated": 0,
-          "insufficient_context": 0.05
+          "insufficient_context": 0.1
         }
       }
     },
@@ -899,21 +899,21 @@
         "source": "docs_reports_2026-11-20-03-bench-patterns.en",
         "path": "docs/reports/2026-11-20-03-bench-patterns.md",
         "startLine": 1,
-        "endLine": 156,
-        "quote": "# Benchmarks in the shapes of application code\n\nDate: 2026-11-20\n\nThe programs the KPIs measured had little variety:\n\n- `bench/gen.py`: 5000 functions of integer arithmetic.\n- `bench/gen_traits.py`: generic traits and iterator chains.\n- cratebench: seven small crates (fnv, itoa, hex and others: hash functions and number formatting).\n- `bench/rt`: seven small runtime programs.\n\nNone of them has the code most applications are made of:\n\n- enums with data and the matches over them;\n- string processing;\n- error handling through `?`;\n- trait objects;\n- structs that borrow;\n- `macro_rules!`;\n- module trees.\n\nA change that slows one of those down did not show in the KPIs.\n\n## The patterns\n\n`bench/gen_patterns.py PATTERN N [variant]` writes a program in one of nine shapes. Each is valid Rust (edition\n2021), and main prints one checksum per group, so the output can be compared with rustc's. N is the number of\ngroups: the pattern's code is repeated under its own names, so the program grows linearly. `variant` changes one\nconstant in the first group, which is the edit of the \"edit one function\" KPI.\n\n| pattern | code of the kind it stands for | what it exercises |\n|---|---|---|\n| `interp` | compilers, interpreters, query engines | a lexer over chars; a recursive-descent parser into a Box'ed enum AST; an evaluator with exhaustive matches |\n| `records` | CLI tools, log and CSV processing | lines split and parsed into structs (Option, `?`); a HashMap with `entry().or_default()`; `sort_by`; `format!` |\n| `errors` | services, request handling | an error enum with Display and From; validation through Result and `?`; Option combinators |\n| `state` | protocols, games, workflow engines | enums carrying data; `match (state, event)` with guards; `..` patterns |\n| `plugins` | GUI and application frameworks, middleware | `Vec<Box<dyn Trait>>`; default methods; a context shared through `Rc<RefCell<..>>`; `?` on Option |\n| `borrows` | parsers, protocol decoders | a struct holding `&'a str`; methods returning slices of the input; `&mut` iteration |\n| `macros` | codegen-heavy crates (bitflags-style) | `macro_rules!` generating structs, impls and lookup tables, with repetition and recursion |\n| `modules` | the layout of large applications | nested modules; `pub(crate)` / `pub(super)`; `pub use`; `use crate::..`; statics; impls split across modules |\n| `generics` | library code | generic containers at several types; traits implemented for tuples, Vec and Option; `IntoIterator` bounds; an iterator adaptor written by hand |\n\n`mix` puts every pattern in one program, N groups each: one program of the shape of an application crate.\n\n## How to measure\n\n- `python3 bench/patterns.py [--n 4] [--instructions]` measures each pattern alone, and `mix`. Run it from the\n  repository root after `cargo build --release`, since it runs `target/release/zustc`.\n  - For each pattern it builds the program with zustc and with rustc, and compares their output. rustc must be on\n    PATH. With `--no-rustc` the comparison is skipped, and then a successful run checks nothing.\n  - It then gives the median times of a cold build, `check` and a build after editing one function. With\n    `--instructions`, `check` and the edit build are also counted by cachegrind.\n  - The exit status is 1 when a pattern or its edit does not build, a program exits with an error, or the output\n    differs.\n  - It only prints the table (and `--json`). `bench/kpi_track.py` is what appends rows to the KPI log.\n- `bench/kpi_track.py` (and so the `KPI` workflow on every pull request) has two new KPIs: `patterns check` and\n  `patterns edit`, for `mix 4` (2600 lines).\n- `tests/bench_patterns.rs` builds every pattern at N = 2, and `mix` with an edit. It checks that their output is\n  rustc's, so a pattern zustc stops building fails `cargo test`. That holds where python3 and rustc are on PATH, as\n  in CI; without them the test says so and passes. It is part of the default `acg` feature.\n\nThe patterns at N = 4 (2026-11-20, this machine):\n\n| pattern | lines | same as rustc | cold build ms | check ms | edit 1 fn ms | check M instr | edit M instr |\n|---|---:|---:|---:|---:|---:|---:|---:|\n| interp | 560 | yes | 54 | 40 | 42 | 133.2 | 53.0 |\n| records | 212 | yes | 65 | 38 | 39 | 156.2 | 57.7 |\n| errors | 292 | yes | 54 | 28 | 35 | 117.1 | 46.4 |\n| state | 260 | yes | 41 | 15 | 28 | 64.9 | 26.0 |\n| plugins | 320 | yes | 66 | 47 | 34 | 134.9 | 51.2 |\n| borrows | 252 | yes | 47 | 28 | 34 | 102.7 | 43.8 |\n| macros | 208 | yes | 39 | 22 | 35 | 86.0 | 41.6 |\n| modules | 256 | yes | 46 | 23 | 34 | 84.0 | 36.2 |\n| generics | 268 | yes | 60 | 39 | 43 | 134.0 | 56.8 |\n| mix | 2596 | yes | 199 | 144 | 77 | 669.2 | 240.0 |\n\nPer line, `records` costs the most to check: 0.74 M instructions a line, against 0.24 for `interp`. Its code goes\nthrough format!, the HashMap entry API and closures over iterators, all of which expand into prelude code.\n\n## What writing them found in zustc\n\nThe patterns were first written as Rust that rustc builds, without regard to what zustc supports. Six problems\nshowed up. Four are fixed here, each with a test in `tests/probe` whose expected output is rustc's.\n\n1. **Fixed:** a method on a static reached through a module path (`config::NAMES.len()`, `config::NAMES[i].len()`,\n   `super::config::NAMES[i]`) was \"no method `len` on type `str`\". `peek_syn`, which gives an expression's type\n   before it is compiled, did not read such a path, so the method was looked up on the wrong type. It now reads the\n   static the path names, by its index (`crates/typeck/src/acg/mod.rs`). `expr` and `place` did read it, but by its\n   bare name, so a local of the same name (`let VALUES = ..` beside `m::VALUES`) answered instead; they now take it by\n   its index too.\n   Test: `tests/probe/static_path_method.rs`.\n2. **Fixed:** a type parameter given only by `I: IntoIterator<Item = A>` could not be inferred when the argument was\n   a Vec or a HashMap (\"cannot infer type parameter `A`\"). The prelude's collections have an `into_iter` method, not\n   an IntoIterator impl, so there was no `Item` to read. The Item is now that of the iterator `into_iter` returns\n   (`solve_assoc_bounds`, `crates/typeck/src/acg/p1_expr.rs`). An array argument is not covered.\n   Test: `tests/probe/into_iterator_item.rs`.\n3. **Fixed (it was wrong code):** two modules that each define a trait of the same name, and implement it for the same\n   type, shared one impl. With `mod a { trait M { .. } impl M for u32 { .. 1 } }` and\n   `mod b { trait M { .. } impl M for u32 { .. 2 } }`, both modules called the first impl: zustc printed `5 5` where\n   rustc prints `5 10`. This was the most serious of the six, since the program built.\n   - Flattening the modules renames the traits (`a__M`, `b__M`), but a method call names no trait. Which impl it\n     means depends on the trait in scope at the call, and flattening loses the modules.\n   - `lexer::trait_scopes` now reads, from the source before flattening, the traits in scope in each module. That is\n     the traits defined there, and the ones brought in by `use`, `use .. as`, globs and re-exports (`pub use` in one\n     module, imported from it in another). It does this only when two scopes define traits of one name; otherwise a\n     quick look at the text ends it, without tokenizing.\n   - `pick_overload`, which chooses among the impls of one method name, takes the one whose trait is in scope at the\n     source line of the calling function's item.\n   - As in rustc, an inherent method of the type that fits comes before any trait's, and a name a module defines or\n     imports by name shadows the same name from a glob. The traits in scope at an item go into its cache key, so a\n     changed `use` rebuilds it. Test: `tests/probe/same_trait_precedence.rs`.\n   - What it does not cover: the scope is a module, not a block, so two blocks of one function that each `use` a\n     different `M` see both. Two modules written on one line share their lines. A build with dependency crates keeps\n     the earlier choice (the first impl), since their lines are not the crate's.\n4. **Fixed:** a closure is named after the type and the method it is in (`Vec::m::{closure#0}`), not after its trait.\n   Two traits whose impls for Vec both have a method `m` with a closure in it failed with \"duplicate definition of\n   `Vec::m::{closure#0}::call`\".\n   - The second such closure now gets its item's number in its name, in the types of its `call`, and in its symbol.\n     The symbol is `<the fn's symbol>.c<k>`, which was the same for the two, so one closure's code was used for both.\n   - Only programs that were an error before are renamed.\n   - Test for 3 and 4: `tests/probe/same_trait_two_modules.rs`. It covers traits defined in the module, `use super::M`,\n     `use crate::b::M as BM`, `use crate::a::*`, a root `use`, and closures in both impls. It also passes with `-O`\n     and with minclif. `tests/probe/same_trait_reexport.rs` adds a re-export through a facade (by name and by glob),\n     a newline between `trait` and the name, and impl methods returning `impl Fn` for a type both modules share\n     (their closures are named in the methods' return types, which the renaming now follows).\n5. **Open:** `use super::model;` followed by `model::make()` is \"cannot find value (unsupported path)\" when another\n   module named `model` exists elsewhere in the crate. `use super::model::make;` and `super::model::make()` work.\n6. **Open:** a trait's method as a value, as in `.map(Tr::m)` or `.map(ToString::to_string)`, is \"cannot find value\n   (unsupported path)\".\n\nAlso seen while reducing these: `fn f<I: IntoIterator>(a: I) -> Option<I::Item>` makes zustc panic\n(`crates/syntax/src/types_enc.rs:11`), and a Range is not accepted where `IntoIterator` is bound.\n\nThe generator works around 5 and 6, so the patterns can be measured now. Each workaround is commented in\n`bench/gen_patterns.py`:\n\n- `generics` passes a closure, not `Tr::m`;\n- `modules` imports the item, not the module.\n\nOnce one of these is fixed, the workaround can be removed and the pattern covers that shape too. Since 3 and 4 are\nfixed, `generics` again has one trait `Measure` per group for the same types (it had named them per group).\n\nA limit of the output check: the groups of one pattern differ only in a few constants. A program in which zustc\nmixed up two groups' items (as in 3) can still print the right checksums. The probes above were made by changing one\ngroup by hand. `generics` now makes its u32 impl differ per group, so taking another group's impl changes its output.\n\n## What was checked\n\n- Every pattern and `mix`, at N = 1, 2, 3 and 4, with and without an edit: zustc's output is rustc's.\n- `tests/bench_patterns.rs`, and the four probes in `tests/driver2.rs`.\n- The tests that build programs into a temporary directory (`tests/bench_patterns.rs`, `ast_codegen.rs`,\n  `driver2.rs`, `panic_loc.rs`) make a new one only the user can enter, and fail rather than reuse one that is there\n  (another user's, on a shared machine).\n- `cargo test --release --workspace`, `bench/rust_ui.py --check`.\n- KPIs: the `KPI` workflow's comment on the pull request has the change against the base. `patterns check` and\n  `patterns edit` are new, so the base has no value for them.",
-        "contentHash": "93f5dd2a8b3d2fbf58e4bdc00334cfc9f062a33fd059279d8653cc9ff3bcc1dc"
+        "endLine": 158,
+        "quote": "# Benchmarks in the shapes of application code\n\nDate: 2026-11-20\n\nThe programs the KPIs measured had little variety:\n\n- `bench/gen.py`: 5000 functions of integer arithmetic.\n- `bench/gen_traits.py`: generic traits and iterator chains.\n- cratebench: seven small crates (fnv, itoa, hex and others: hash functions and number formatting).\n- `bench/rt`: seven small runtime programs.\n\nNone of them has the code most applications are made of:\n\n- enums with data and the matches over them;\n- string processing;\n- error handling through `?`;\n- trait objects;\n- structs that borrow;\n- `macro_rules!`;\n- module trees.\n\nA change that slows one of those down did not show in the KPIs.\n\n## The patterns\n\n`bench/gen_patterns.py PATTERN N [variant]` writes a program in one of nine shapes. Each is valid Rust (edition\n2021), and main prints one checksum per group, so the output can be compared with rustc's. N is the number of\ngroups: the pattern's code is repeated under its own names, so the program grows linearly. `variant` changes one\nconstant in the first group, which is the edit of the \"edit one function\" KPI.\n\n| pattern | code of the kind it stands for | what it exercises |\n|---|---|---|\n| `interp` | compilers, interpreters, query engines | a lexer over chars; a recursive-descent parser into a Box'ed enum AST; an evaluator with exhaustive matches |\n| `records` | CLI tools, log and CSV processing | lines split and parsed into structs (Option, `?`); a HashMap with `entry().or_default()`; `sort_by`; `format!` |\n| `errors` | services, request handling | an error enum with Display and From; validation through Result and `?`; Option combinators |\n| `state` | protocols, games, workflow engines | enums carrying data; `match (state, event)` with guards; `..` patterns |\n| `plugins` | GUI and application frameworks, middleware | `Vec<Box<dyn Trait>>`; default methods; a context shared through `Rc<RefCell<..>>`; `?` on Option |\n| `borrows` | parsers, protocol decoders | a struct holding `&'a str`; methods returning slices of the input; `&mut` iteration |\n| `macros` | codegen-heavy crates (bitflags-style) | `macro_rules!` generating structs, impls and lookup tables, with repetition and recursion |\n| `modules` | the layout of large applications | nested modules; `pub(crate)` / `pub(super)`; `pub use`; `use crate::..`; statics; impls split across modules |\n| `generics` | library code | generic containers at several types; traits implemented for tuples, Vec and Option; `IntoIterator` bounds; an iterator adaptor written by hand |\n\n`mix` puts every pattern in one program, N groups each: one program of the shape of an application crate.\n\n## How to measure\n\n- `python3 bench/patterns.py [--n 4] [--instructions]` measures each pattern alone, and `mix`. Run it from the\n  repository root after `cargo build --release`, since it runs `target/release/zustc`.\n  - For each pattern it builds the program with zustc and with rustc, and compares their output. rustc must be on\n    PATH. With `--no-rustc` the comparison is skipped, and then a successful run checks nothing.\n  - It then gives the median times of a cold build, `check` and a build after editing one function. With\n    `--instructions`, `check` and the edit build are also counted by cachegrind.\n  - The exit status is 1 when a pattern or its edit does not build, a program exits with an error, or the output\n    differs.\n  - It only prints the table (and `--json`). `bench/kpi_track.py` is what appends rows to the KPI log.\n- `bench/kpi_track.py` (and so the `KPI` workflow on every pull request) has two new KPIs: `patterns check` and\n  `patterns edit`, for `mix 4` (2600 lines).\n- `tests/bench_patterns.rs` builds every pattern at N = 2, and `mix` with an edit. It checks that their output is\n  rustc's, so a pattern zustc stops building fails `cargo test`. That holds where python3 and rustc are on PATH, as\n  in CI; without them the test says so and passes. It is part of the default `acg` feature.\n\nThe patterns at N = 4 (2026-11-20, this machine):\n\n| pattern | lines | same as rustc | cold build ms | check ms | edit 1 fn ms | check M instr | edit M instr |\n|---|---:|---:|---:|---:|---:|---:|---:|\n| interp | 560 | yes | 54 | 40 | 42 | 133.2 | 53.0 |\n| records | 212 | yes | 65 | 38 | 39 | 156.2 | 57.7 |\n| errors | 292 | yes | 54 | 28 | 35 | 117.1 | 46.4 |\n| state | 260 | yes | 41 | 15 | 28 | 64.9 | 26.0 |\n| plugins | 320 | yes | 66 | 47 | 34 | 134.9 | 51.2 |\n| borrows | 252 | yes | 47 | 28 | 34 | 102.7 | 43.8 |\n| macros | 208 | yes | 39 | 22 | 35 | 86.0 | 41.6 |\n| modules | 256 | yes | 46 | 23 | 34 | 84.0 | 36.2 |\n| generics | 268 | yes | 60 | 39 | 43 | 134.0 | 56.8 |\n| mix | 2596 | yes | 199 | 144 | 77 | 669.2 | 240.0 |\n\nPer line, `records` costs the most to check: 0.74 M instructions a line, against 0.24 for `interp`. Its code goes\nthrough format!, the HashMap entry API and closures over iterators, all of which expand into prelude code.\n\n## What writing them found in zustc\n\nThe patterns were first written as Rust that rustc builds, without regard to what zustc supports. Six problems\nshowed up. Four are fixed here, each with a test in `tests/probe` whose expected output is rustc's.\n\n1. **Fixed:** a method on a static reached through a module path (`config::NAMES.len()`, `config::NAMES[i].len()`,\n   `super::config::NAMES[i]`) was \"no method `len` on type `str`\". `peek_syn`, which gives an expression's type\n   before it is compiled, did not read such a path, so the method was looked up on the wrong type. It now reads the\n   static the path names, by its index (`crates/typeck/src/acg/mod.rs`). `expr` and `place` did read it, but by its\n   bare name, so a local of the same name (`let VALUES = ..` beside `m::VALUES`) answered instead; they now take it by\n   its index too.\n   Test: `tests/probe/static_path_method.rs`.\n2. **Fixed:** a type parameter given only by `I: IntoIterator<Item = A>` could not be inferred when the argument was\n   a Vec or a HashMap (\"cannot infer type parameter `A`\"). The prelude's collections have an `into_iter` method, not\n   an IntoIterator impl, so there was no `Item` to read. The Item is now that of the iterator `into_iter` returns\n   (`solve_assoc_bounds`, `crates/typeck/src/acg/p1_expr.rs`). An array argument is not covered.\n   Test: `tests/probe/into_iterator_item.rs`.\n3. **Fixed (it was wrong code):** two modules that each define a trait of the same name, and implement it for the same\n   type, shared one impl. With `mod a { trait M { .. } impl M for u32 { .. 1 } }` and\n   `mod b { trait M { .. } impl M for u32 { .. 2 } }`, both modules called the first impl: zustc printed `5 5` where\n   rustc prints `5 10`. This was the most serious of the six, since the program built.\n   - Flattening the modules renames the traits (`a__M`, `b__M`), but a method call names no trait. Which impl it\n     means depends on the trait in scope at the call, and flattening loses the modules.\n   - `lexer::trait_scopes` now reads, from the source before flattening, the traits in scope in each module. That is\n     the traits defined there, and the ones brought in by `use`, `use .. as`, globs and re-exports (`pub use` in one\n     module, imported from it in another). It does this only when two scopes define traits of one name; otherwise a\n     quick look at the text ends it, without tokenizing.\n   - `pick_overload`, which chooses among the impls of one method name, takes the one whose trait is in scope at the\n     source line of the calling function's item.\n   - As in rustc, an inherent method of the type that fits comes before any trait's, and a name a module defines or\n     imports by name shadows the same name from a glob. The traits in scope at an item go into its cache key, so a\n     changed `use` rebuilds it (also when the item is inlined into another). A call that names its trait\n     (`crate::a::M::m(&x)`) takes that trait's impl. Tests: `tests/probe/same_trait_precedence.rs`,\n     `tests/probe/same_trait_explicit.rs`.\n   - What it does not cover: the scope is a module, not a block, so two blocks of one function that each `use` a\n     different `M` see both. Two modules written on one line share their lines. A build with dependency crates keeps\n     the earlier choice (the first impl), since their lines are not the crate's.\n4. **Fixed:** a closure is named after the type and the method it is in (`Vec::m::{closure#0}`), not after its trait.\n   Two traits whose impls for Vec both have a method `m` with a closure in it failed with \"duplicate definition of\n   `Vec::m::{closure#0}::call`\".\n   - The second such closure now gets its item's number in its name, in the types of its `call`, and in its symbol.\n     The symbol is `<the fn's symbol>.c<k>`, which was the same for the two, so one closure's code was used for both.\n   - Only programs that were an error before are renamed.\n   - Test for 3 and 4: `tests/probe/same_trait_two_modules.rs`. It covers traits defined in the module, `use super::M`,\n     `use crate::b::M as BM`, `use crate::a::*`, a root `use`, and closures in both impls. It also passes with `-O`\n     and with minclif. `tests/probe/same_trait_reexport.rs` adds a re-export through a facade (by name and by glob),\n     a newline between `trait` and the name, and impl methods returning `impl Fn` for a type both modules share\n     (their closures are named in the methods' return types, which the renaming now follows).\n5. **Open:** `use super::model;` followed by `model::make()` is \"cannot find value (unsupported path)\" when another\n   module named `model` exists elsewhere in the crate. `use super::model::make;` and `super::model::make()` work.\n6. **Open:** a trait's method as a value, as in `.map(Tr::m)` or `.map(ToString::to_string)`, is \"cannot find value\n   (unsupported path)\".\n\nAlso seen while reducing these: `fn f<I: IntoIterator>(a: I) -> Option<I::Item>` makes zustc panic\n(`crates/syntax/src/types_enc.rs:11`), and a Range is not accepted where `IntoIterator` is bound.\n\nThe generator works around 5 and 6, so the patterns can be measured now. Each workaround is commented in\n`bench/gen_patterns.py`:\n\n- `generics` passes a closure, not `Tr::m`;\n- `modules` imports the item, not the module.\n\nOnce one of these is fixed, the workaround can be removed and the pattern covers that shape too. Since 3 and 4 are\nfixed, `generics` again has one trait `Measure` per group for the same types (it had named them per group).\n\nA limit of the output check: the groups of one pattern differ only in a few constants. A program in which zustc\nmixed up two groups' items (as in 3) can still print the right checksums. The probes above were made by changing one\ngroup by hand. `generics` now makes its u32 impl differ per group, so taking another group's impl changes its output.\n\n## What was checked\n\n- Every pattern and `mix`, at N = 1, 2, 3 and 4, with and without an edit: zustc's output is rustc's.\n- `tests/bench_patterns.rs`, and the four probes in `tests/driver2.rs`.\n- The tests that build programs into a temporary directory (`tests/bench_patterns.rs`, `ast_codegen.rs`,\n  `driver2.rs`, `panic_loc.rs`) make a new one only the user can enter, and fail rather than reuse one that is there\n  (another user's, on a shared machine).\n- `cargo test --release --workspace`, `bench/rust_ui.py --check`.\n- KPIs: the `KPI` workflow's comment on the pull request has the change against the base. `patterns check` and\n  `patterns edit` are new, so the base has no value for them.",
+        "contentHash": "3c83de52a37f6f33d0c3ad28042793087f4ff2902aa49cc5401a3bdc22f514e6"
       },
       "target": {
         "source": "docs_reports_2026-11-20-03-bench-patterns.ja",
         "path": "docs/ja/reports/2026-11-20-03-bench-patterns.md",
         "startLine": 1,
-        "endLine": 154,
-        "quote": "# アプリケーションのコードの形のベンチマーク\n\nDate: 2026-11-20\n\nKPI が測っていたプログラムは、種類が少なかった。\n\n- `bench/gen.py`: 整数の計算をする 5000 個の関数。\n- `bench/gen_traits.py`: 総称の trait とイテレータの連鎖。\n- cratebench: 小さなクレート 7 つ（fnv、itoa、hex など。ハッシュ関数と数の書式）。\n- `bench/rt`: 実行時間を測る小さなプログラム 7 本。\n\nどれにも、ほとんどのアプリケーションを形作る次のようなコードがない。\n\n- データを持つ enum と、それに対する match\n- 文字列の処理\n- `?` によるエラー処理\n- trait object\n- 借用する構造体\n- `macro_rules!`\n- モジュールの木\n\nこれらのどれかを遅くする変更があっても、KPI には出なかった。\n\n## パターン\n\n`bench/gen_patterns.py PATTERN N [variant]` は、9 つの形のどれかのプログラムを書き出す。どれも正しい Rust（edition\n2021）で、main がグループごとに 1 つのチェックサムを出すので、rustc の出力と比べられる。N はグループの数で、パターンの\nコードを名前を変えて繰り返すので、プログラムは線形に大きくなる。`variant` は最初のグループの定数を 1 つ変える。これが\nKPI の「1 関数の編集」の編集である。\n\n| パターン | 代表するコード | 使うもの |\n|---|---|---|\n| `interp` | コンパイラ、インタプリタ、クエリエンジン | 文字の上の字句解析、Box を使う enum の AST への再帰下降の構文解析、網羅的な match による評価 |\n| `records` | CLI ツール、ログや CSV の処理 | 行を分けて構造体に読み込む（Option、`?`）、`entry().or_default()` を使う HashMap、`sort_by`、`format!` |\n| `errors` | サービス、リクエストの処理 | Display と From を持つエラーの enum、Result と `?` による検証、Option のコンビネータ |\n| `state` | プロトコル、ゲーム、ワークフローエンジン | データを持つ enum、ガードつきの `match (state, event)`、`..` のパターン |\n| `plugins` | GUI やアプリケーションのフレームワーク、ミドルウェア | `Vec<Box<dyn Trait>>`、既定のメソッド、`Rc<RefCell<..>>` で共有する文脈、Option への `?` |\n| `borrows` | 構文解析器、プロトコルのデコーダ | `&'a str` を持つ構造体、入力の一部を返すメソッド、`&mut` での走査 |\n| `macros` | コード生成の多いクレート（bitflags 風） | 構造体・impl・表を生成する `macro_rules!`（繰り返しと再帰） |\n| `modules` | 大きなアプリケーションの構成 | 入れ子のモジュール、`pub(crate)` / `pub(super)`、`pub use`、`use crate::..`、static、モジュールをまたぐ impl |\n| `generics` | ライブラリのコード | いくつもの型で使う総称のコンテナ、タプル・Vec・Option に実装した trait、`IntoIterator` の境界、手書きのイテレータのアダプタ |\n\n`mix` は、全パターンを N グループずつ 1 つのプログラムに入れる。アプリケーションのクレートの形をした 1 本のプログラムである。\n\n## 測り方\n\n- `python3 bench/patterns.py [--n 4] [--instructions]` は、パターンを 1 つずつと `mix` を測る。\n  `target/release/zustc` を使うので、リポジトリの根で `cargo build --release` してから実行する。\n  - それぞれのパターンについて、zustc と rustc でビルドし、出力を比べる。rustc が PATH にある必要がある。\n    `--no-rustc` を付けると比べないので、そのときは成功しても何も確かめていない。\n  - そのうえで、コールドビルド・`check`・1 関数を編集した後のビルドの時間の中央値を出す。`--instructions` を付けると、\n    `check` と編集後のビルドを cachegrind で数えた命令数も出す。\n  - 終了コードが 1 になるのは、パターンかその編集がビルドできないとき、プログラムがエラーで終わるとき、出力が違うときである。\n  - 書き出すのは表（と `--json`）だけで、KPI のログに行を足すのは `bench/kpi_track.py` である。\n- `bench/kpi_track.py`（つまり pull request ごとの `KPI` ワークフロー）に、2 つの KPI を足した。`patterns check` と\n  `patterns edit` で、`mix 4`（2600 行）を測る。\n- `tests/bench_patterns.rs` は、すべてのパターンを N = 2 で、`mix` を編集つきでビルドし、出力が rustc のものと同じかを\n  確かめる。zustc がビルドできなくなったパターンがあれば、`cargo test` が失敗する。これは CI のように python3 と rustc が\n  PATH にある場合で、ないときはテストがそう出して通る。既定の `acg` feature に含まれる。\n\nN = 4 のパターン（2026-11-20、この機械）:\n\n| パターン | 行 | rustc と同じ | コールドビルド ms | check ms | 1 関数の編集 ms | check M 命令 | 編集 M 命令 |\n|---|---:|---:|---:|---:|---:|---:|---:|\n| interp | 560 | yes | 54 | 40 | 42 | 133.2 | 53.0 |\n| records | 212 | yes | 65 | 38 | 39 | 156.2 | 57.7 |\n| errors | 292 | yes | 54 | 28 | 35 | 117.1 | 46.4 |\n| state | 260 | yes | 41 | 15 | 28 | 64.9 | 26.0 |\n| plugins | 320 | yes | 66 | 47 | 34 | 134.9 | 51.2 |\n| borrows | 252 | yes | 47 | 28 | 34 | 102.7 | 43.8 |\n| macros | 208 | yes | 39 | 22 | 35 | 86.0 | 41.6 |\n| modules | 256 | yes | 46 | 23 | 34 | 84.0 | 36.2 |\n| generics | 268 | yes | 60 | 39 | 43 | 134.0 | 56.8 |\n| mix | 2596 | yes | 199 | 144 | 77 | 669.2 | 240.0 |\n\n行あたりの検査がいちばん重いのは `records` で、1 行あたり 0.74 M 命令である（`interp` は 0.24）。このコードは format!、\nHashMap の entry API、イテレータの上のクロージャを通り、どれも prelude のコードに展開される。\n\n## 書いてみて zustc に見つかったこと\n\nパターンは最初、zustc が対応しているかを気にせず、rustc がビルドする Rust として書いた。問題が 6 つ出た。そのうち 4 つを\nここで直し、それぞれに `tests/probe` のテストを足した（期待する出力は rustc のもの）。\n\n1. **直した:** モジュールのパスで指した static でメソッドを呼ぶと（`config::NAMES.len()`、`config::NAMES[i].len()`、\n   `super::config::NAMES[i]`）、\"no method `len` on type `str`\" になった。式の型をコンパイルの前に出す `peek_syn` が、\n   そういうパスを読まなかったので、違う型の上でメソッドを探していた。今は、`expr` と `place` がすでにそうしていたように、\n   パスが指す static を番号で読む（`crates/typeck/src/acg/mod.rs`）。`expr` と `place` は読んでいたが、名前だけで\n   引いていたので、同じ名前のローカル変数（`m::VALUES` のそばの `let VALUES = ..`）のほうを読んでいた。これらも番号で\n   引くようにした。\n   テスト: `tests/probe/static_path_method.rs`。\n2. **直した:** `I: IntoIterator<Item = A>` でしか決まらない型引数が、引数が Vec か HashMap のときに推論できなかった\n   （\"cannot infer type parameter `A`\"）。prelude のコレクションは IntoIterator の impl ではなく `into_iter` メソッドを\n   持つので、読める `Item` がなかった。今は、`into_iter` が返すイテレータの Item を使う（`solve_assoc_bounds`、\n   `crates/typeck/src/acg/p1_expr.rs`）。配列の引数は対象外。\n   テスト: `tests/probe/into_iterator_item.rs`。\n3. **直した（誤ったコードだった）:** 2 つのモジュールが同じ名前の trait をそれぞれ定義し、同じ型に実装すると、1 つの impl を\n   共有していた。`mod a { trait M { .. } impl M for u32 { .. 1 } }` と `mod b { trait M { .. } impl M for u32 { .. 2 } }`\n   では、どちらのモジュールも最初の impl を呼び、rustc が `5 10` を出すところ zustc は `5 5` を出していた。プログラムが\n   ビルドできてしまうので、6 つの中でいちばん重かった。\n   - モジュールを平らにすると trait の名前は変わる（`a__M`、`b__M`）が、メソッド呼び出しは trait を名指ししない。どの\n     impl を指すかは呼び出しの場所で見える trait で決まるのに、平らにするとモジュールの情報が失われる。\n   - `lexer::trait_scopes` が、平らにする前のソースから、モジュールごとに見える trait を読むようにした。そこで定義した\n     もの、および `use`・`use .. as`・glob・再輸出（あるモジュールの `pub use` を、別のモジュールが取り込む）で取り込んだ\n     ものである。読むのは、2 つのスコープが同じ名前の trait を定義しているときだけで、それ以外はテキストを軽く見るだけで\n     終わり、字句解析はしない。\n   - 同じ名前のメソッドの impl から 1 つを選ぶ `pick_overload` は、呼び出す関数のアイテムのソースの行で見える trait の\n     impl を選ぶ。\n   - rustc と同じく、合う固有メソッドはどの trait のメソッドより先で、モジュールが定義するか名前で取り込んだ名前は、glob\n     から来る同じ名前を隠す。アイテムで見える trait はそのキャッシュのキーに入るので、`use` を変えればビルドし直す。\n     テスト: `tests/probe/same_trait_precedence.rs`。\n   - 扱わないもの: スコープはモジュールで、ブロックではないので、1 つの関数の 2 つのブロックがそれぞれ違う `M` を `use`\n     すると、両方が見える。1 行に書いた 2 つのモジュールは行を共有する。依存するクレートのあるビルドは前のまま（最初の\n     impl）で、それらの行はそのクレートの行ではないためである。\n4. **直した:** クロージャは、それがある型とメソッドの名前で名付けられ（`Vec::m::{closure#0}`）、trait の名前を含まない。\n   Vec への impl がどちらも、クロージャを含むメソッド `m` を持つ 2 つの trait があると、\"duplicate definition of\n   `Vec::m::{closure#0}::call`\" になっていた。\n   - 2 つ目のそういうクロージャは、名前と、その `call` の型と、シンボルに、アイテムの番号を付けるようにした。シンボルは\n     `<関数のシンボル>.c<k>` で、2 つで同じだったので、片方のクロージャのコードが両方に使われていた。\n   - 名前を変えるのは、前はエラーになっていたプログラムだけである。\n   - 3 と 4 のテスト: `tests/probe/same_trait_two_modules.rs`。モジュールで定義した trait、`use super::M`、\n     `use crate::b::M as BM`、`use crate::a::*`、ルートの `use`、両方の impl の中のクロージャを含む。`-O` でも minclif でも\n     通る。`tests/probe/same_trait_reexport.rs` は、facade を通した再輸出（名前と glob）、`trait` と名前の間の改行、両方の\n     モジュールが共有する型に `impl Fn` を返すメソッドを足す（そのクロージャはメソッドの戻り値の型に名前が出るので、名前の\n     付け替えはそこも直す）。\n5. **未解決:** `use super::model;` の後の `model::make()` は、クレートのどこかに `model` という名前のモジュールがもう 1 つ\n   あると、\"cannot find value (unsupported path)\" になる。`use super::model::make;` と `super::model::make()` は通る。\n6. **未解決:** trait のメソッドを値として渡すこと（`.map(Tr::m)`、`.map(ToString::to_string)`）は、\n   \"cannot find value (unsupported path)\" になる。\n\nこれらを切り分ける途中で、次も見つかった。`fn f<I: IntoIterator>(a: I) -> Option<I::Item>` で zustc が panic する\n（`crates/syntax/src/types_enc.rs:11`）。また、`IntoIterator` の境界のところに Range を渡せない。\n\n生成器は 5 と 6 を避けて書いてあるので、パターンは今すぐ測れる。避け方はそれぞれ `bench/gen_patterns.py` に注記した。\n\n- `generics` は `Tr::m` ではなくクロージャを渡す。\n- `modules` はモジュールではなくアイテムを import する。\n\nどれかが直ったら、その避け方を外せば、パターンがその形も測るようになる。3 と 4 を直したので、`generics` はまた、グループごとに\n同じ型への trait `Measure` を 1 つずつ持つ（前はグループごとに名前を変えていた）。\n\n出力の比較には限界がある。1 つのパターンのグループどうしは、いくつかの定数しか違わない。zustc が 2 つのグループのアイテムを\n取り違えても（3 のように）、チェックサムは正しいままのことがある。上の再現は、グループの 1 つを手で変えて作った。`generics` は u32 の impl をグループごとに変えたので、別のグループの impl を\n取ると出力が変わる。\n\n## 確かめたこと\n\n- すべてのパターンと `mix` を、N = 1、2、3、4 で、編集の有無の両方について: zustc の出力は rustc のものと同じ。\n- `tests/bench_patterns.rs` と、`tests/driver2.rs` の 4 つの probe。\n- 一時ディレクトリにプログラムをビルドするテスト（`tests/bench_patterns.rs`、`ast_codegen.rs`、`driver2.rs`、\n  `panic_loc.rs`）は、利用者だけが入れる新しいディレクトリを作り、既にあるもの（共有の機械で他の利用者が作ったもの）は\n  使わずに失敗する。\n- `cargo test --release --workspace`、`bench/rust_ui.py --check`。\n- KPI: pull request の `KPI` ワークフローのコメントに、ベースとの差がある。`patterns check` と `patterns edit` は\n  新しいので、ベースには値がない。",
-        "contentHash": "4453536ec63ed5c3e2889e922cbd15afd2e63c46a304002b1f10778b3e4328f6"
+        "endLine": 155,
+        "quote": "# アプリケーションのコードの形のベンチマーク\n\nDate: 2026-11-20\n\nKPI が測っていたプログラムは、種類が少なかった。\n\n- `bench/gen.py`: 整数の計算をする 5000 個の関数。\n- `bench/gen_traits.py`: 総称の trait とイテレータの連鎖。\n- cratebench: 小さなクレート 7 つ（fnv、itoa、hex など。ハッシュ関数と数の書式）。\n- `bench/rt`: 実行時間を測る小さなプログラム 7 本。\n\nどれにも、ほとんどのアプリケーションを形作る次のようなコードがない。\n\n- データを持つ enum と、それに対する match\n- 文字列の処理\n- `?` によるエラー処理\n- trait object\n- 借用する構造体\n- `macro_rules!`\n- モジュールの木\n\nこれらのどれかを遅くする変更があっても、KPI には出なかった。\n\n## パターン\n\n`bench/gen_patterns.py PATTERN N [variant]` は、9 つの形のどれかのプログラムを書き出す。どれも正しい Rust（edition\n2021）で、main がグループごとに 1 つのチェックサムを出すので、rustc の出力と比べられる。N はグループの数で、パターンの\nコードを名前を変えて繰り返すので、プログラムは線形に大きくなる。`variant` は最初のグループの定数を 1 つ変える。これが\nKPI の「1 関数の編集」の編集である。\n\n| パターン | 代表するコード | 使うもの |\n|---|---|---|\n| `interp` | コンパイラ、インタプリタ、クエリエンジン | 文字の上の字句解析、Box を使う enum の AST への再帰下降の構文解析、網羅的な match による評価 |\n| `records` | CLI ツール、ログや CSV の処理 | 行を分けて構造体に読み込む（Option、`?`）、`entry().or_default()` を使う HashMap、`sort_by`、`format!` |\n| `errors` | サービス、リクエストの処理 | Display と From を持つエラーの enum、Result と `?` による検証、Option のコンビネータ |\n| `state` | プロトコル、ゲーム、ワークフローエンジン | データを持つ enum、ガードつきの `match (state, event)`、`..` のパターン |\n| `plugins` | GUI やアプリケーションのフレームワーク、ミドルウェア | `Vec<Box<dyn Trait>>`、既定のメソッド、`Rc<RefCell<..>>` で共有する文脈、Option への `?` |\n| `borrows` | 構文解析器、プロトコルのデコーダ | `&'a str` を持つ構造体、入力の一部を返すメソッド、`&mut` での走査 |\n| `macros` | コード生成の多いクレート（bitflags 風） | 構造体・impl・表を生成する `macro_rules!`（繰り返しと再帰） |\n| `modules` | 大きなアプリケーションの構成 | 入れ子のモジュール、`pub(crate)` / `pub(super)`、`pub use`、`use crate::..`、static、モジュールをまたぐ impl |\n| `generics` | ライブラリのコード | いくつもの型で使う総称のコンテナ、タプル・Vec・Option に実装した trait、`IntoIterator` の境界、手書きのイテレータのアダプタ |\n\n`mix` は、全パターンを N グループずつ 1 つのプログラムに入れる。アプリケーションのクレートの形をした 1 本のプログラムである。\n\n## 測り方\n\n- `python3 bench/patterns.py [--n 4] [--instructions]` は、パターンを 1 つずつと `mix` を測る。\n  `target/release/zustc` を使うので、リポジトリの根で `cargo build --release` してから実行する。\n  - それぞれのパターンについて、zustc と rustc でビルドし、出力を比べる。rustc が PATH にある必要がある。\n    `--no-rustc` を付けると比べないので、そのときは成功しても何も確かめていない。\n  - そのうえで、コールドビルド・`check`・1 関数を編集した後のビルドの時間の中央値を出す。`--instructions` を付けると、\n    `check` と編集後のビルドを cachegrind で数えた命令数も出す。\n  - 終了コードが 1 になるのは、パターンかその編集がビルドできないとき、プログラムがエラーで終わるとき、出力が違うときである。\n  - 書き出すのは表（と `--json`）だけで、KPI のログに行を足すのは `bench/kpi_track.py` である。\n- `bench/kpi_track.py`（つまり pull request ごとの `KPI` ワークフロー）に、2 つの KPI を足した。`patterns check` と\n  `patterns edit` で、`mix 4`（2600 行）を測る。\n- `tests/bench_patterns.rs` は、すべてのパターンを N = 2 で、`mix` を編集つきでビルドし、出力が rustc のものと同じかを\n  確かめる。zustc がビルドできなくなったパターンがあれば、`cargo test` が失敗する。これは CI のように python3 と rustc が\n  PATH にある場合で、ないときはテストがそう出して通る。既定の `acg` feature に含まれる。\n\nN = 4 のパターン（2026-11-20、この機械）:\n\n| パターン | 行 | rustc と同じ | コールドビルド ms | check ms | 1 関数の編集 ms | check M 命令 | 編集 M 命令 |\n|---|---:|---:|---:|---:|---:|---:|---:|\n| interp | 560 | yes | 54 | 40 | 42 | 133.2 | 53.0 |\n| records | 212 | yes | 65 | 38 | 39 | 156.2 | 57.7 |\n| errors | 292 | yes | 54 | 28 | 35 | 117.1 | 46.4 |\n| state | 260 | yes | 41 | 15 | 28 | 64.9 | 26.0 |\n| plugins | 320 | yes | 66 | 47 | 34 | 134.9 | 51.2 |\n| borrows | 252 | yes | 47 | 28 | 34 | 102.7 | 43.8 |\n| macros | 208 | yes | 39 | 22 | 35 | 86.0 | 41.6 |\n| modules | 256 | yes | 46 | 23 | 34 | 84.0 | 36.2 |\n| generics | 268 | yes | 60 | 39 | 43 | 134.0 | 56.8 |\n| mix | 2596 | yes | 199 | 144 | 77 | 669.2 | 240.0 |\n\n行あたりの検査がいちばん重いのは `records` で、1 行あたり 0.74 M 命令である（`interp` は 0.24）。このコードは format!、\nHashMap の entry API、イテレータの上のクロージャを通り、どれも prelude のコードに展開される。\n\n## 書いてみて zustc に見つかったこと\n\nパターンは最初、zustc が対応しているかを気にせず、rustc がビルドする Rust として書いた。問題が 6 つ出た。そのうち 4 つを\nここで直し、それぞれに `tests/probe` のテストを足した（期待する出力は rustc のもの）。\n\n1. **直した:** モジュールのパスで指した static でメソッドを呼ぶと（`config::NAMES.len()`、`config::NAMES[i].len()`、\n   `super::config::NAMES[i]`）、\"no method `len` on type `str`\" になった。式の型をコンパイルの前に出す `peek_syn` が、\n   そういうパスを読まなかったので、違う型の上でメソッドを探していた。今は、`expr` と `place` がすでにそうしていたように、\n   パスが指す static を番号で読む（`crates/typeck/src/acg/mod.rs`）。`expr` と `place` は読んでいたが、名前だけで\n   引いていたので、同じ名前のローカル変数（`m::VALUES` のそばの `let VALUES = ..`）のほうを読んでいた。これらも番号で\n   引くようにした。\n   テスト: `tests/probe/static_path_method.rs`。\n2. **直した:** `I: IntoIterator<Item = A>` でしか決まらない型引数が、引数が Vec か HashMap のときに推論できなかった\n   （\"cannot infer type parameter `A`\"）。prelude のコレクションは IntoIterator の impl ではなく `into_iter` メソッドを\n   持つので、読める `Item` がなかった。今は、`into_iter` が返すイテレータの Item を使う（`solve_assoc_bounds`、\n   `crates/typeck/src/acg/p1_expr.rs`）。配列の引数は対象外。\n   テスト: `tests/probe/into_iterator_item.rs`。\n3. **直した（誤ったコードだった）:** 2 つのモジュールが同じ名前の trait をそれぞれ定義し、同じ型に実装すると、1 つの impl を\n   共有していた。`mod a { trait M { .. } impl M for u32 { .. 1 } }` と `mod b { trait M { .. } impl M for u32 { .. 2 } }`\n   では、どちらのモジュールも最初の impl を呼び、rustc が `5 10` を出すところ zustc は `5 5` を出していた。プログラムが\n   ビルドできてしまうので、6 つの中でいちばん重かった。\n   - モジュールを平らにすると trait の名前は変わる（`a__M`、`b__M`）が、メソッド呼び出しは trait を名指ししない。どの\n     impl を指すかは呼び出しの場所で見える trait で決まるのに、平らにするとモジュールの情報が失われる。\n   - `lexer::trait_scopes` が、平らにする前のソースから、モジュールごとに見える trait を読むようにした。そこで定義した\n     もの、および `use`・`use .. as`・glob・再輸出（あるモジュールの `pub use` を、別のモジュールが取り込む）で取り込んだ\n     ものである。読むのは、2 つのスコープが同じ名前の trait を定義しているときだけで、それ以外はテキストを軽く見るだけで\n     終わり、字句解析はしない。\n   - 同じ名前のメソッドの impl から 1 つを選ぶ `pick_overload` は、呼び出す関数のアイテムのソースの行で見える trait の\n     impl を選ぶ。\n   - rustc と同じく、合う固有メソッドはどの trait のメソッドより先で、モジュールが定義するか名前で取り込んだ名前は、glob\n     から来る同じ名前を隠す。アイテムで見える trait はそのキャッシュのキーに入るので、`use` を変えればビルドし直す。\n     （そのアイテムが別のアイテムにインライン展開されるときも）。trait を名指しした呼び出し（`crate::a::M::m(&x)`）は、\n     その trait の impl を取る。テスト: `tests/probe/same_trait_precedence.rs`、`tests/probe/same_trait_explicit.rs`。\n   - 扱わないもの: スコープはモジュールで、ブロックではないので、1 つの関数の 2 つのブロックがそれぞれ違う `M` を `use`\n     すると、両方が見える。1 行に書いた 2 つのモジュールは行を共有する。依存するクレートのあるビルドは前のまま（最初の\n     impl）で、それらの行はそのクレートの行ではないためである。\n4. **直した:** クロージャは、それがある型とメソッドの名前で名付けられ（`Vec::m::{closure#0}`）、trait の名前を含まない。\n   Vec への impl がどちらも、クロージャを含むメソッド `m` を持つ 2 つの trait があると、\"duplicate definition of\n   `Vec::m::{closure#0}::call`\" になっていた。\n   - 2 つ目のそういうクロージャは、名前と、その `call` の型と、シンボルに、アイテムの番号を付けるようにした。シンボルは\n     `<関数のシンボル>.c<k>` で、2 つで同じだったので、片方のクロージャのコードが両方に使われていた。\n   - 名前を変えるのは、前はエラーになっていたプログラムだけである。\n   - 3 と 4 のテスト: `tests/probe/same_trait_two_modules.rs`。モジュールで定義した trait、`use super::M`、\n     `use crate::b::M as BM`、`use crate::a::*`、ルートの `use`、両方の impl の中のクロージャを含む。`-O` でも minclif でも\n     通る。`tests/probe/same_trait_reexport.rs` は、facade を通した再輸出（名前と glob）、`trait` と名前の間の改行、両方の\n     モジュールが共有する型に `impl Fn` を返すメソッドを足す（そのクロージャはメソッドの戻り値の型に名前が出るので、名前の\n     付け替えはそこも直す）。\n5. **未解決:** `use super::model;` の後の `model::make()` は、クレートのどこかに `model` という名前のモジュールがもう 1 つ\n   あると、\"cannot find value (unsupported path)\" になる。`use super::model::make;` と `super::model::make()` は通る。\n6. **未解決:** trait のメソッドを値として渡すこと（`.map(Tr::m)`、`.map(ToString::to_string)`）は、\n   \"cannot find value (unsupported path)\" になる。\n\nこれらを切り分ける途中で、次も見つかった。`fn f<I: IntoIterator>(a: I) -> Option<I::Item>` で zustc が panic する\n（`crates/syntax/src/types_enc.rs:11`）。また、`IntoIterator` の境界のところに Range を渡せない。\n\n生成器は 5 と 6 を避けて書いてあるので、パターンは今すぐ測れる。避け方はそれぞれ `bench/gen_patterns.py` に注記した。\n\n- `generics` は `Tr::m` ではなくクロージャを渡す。\n- `modules` はモジュールではなくアイテムを import する。\n\nどれかが直ったら、その避け方を外せば、パターンがその形も測るようになる。3 と 4 を直したので、`generics` はまた、グループごとに\n同じ型への trait `Measure` を 1 つずつ持つ（前はグループごとに名前を変えていた）。\n\n出力の比較には限界がある。1 つのパターンのグループどうしは、いくつかの定数しか違わない。zustc が 2 つのグループのアイテムを\n取り違えても（3 のように）、チェックサムは正しいままのことがある。上の再現は、グループの 1 つを手で変えて作った。`generics` は u32 の impl をグループごとに変えたので、別のグループの impl を\n取ると出力が変わる。\n\n## 確かめたこと\n\n- すべてのパターンと `mix` を、N = 1、2、3、4 で、編集の有無の両方について: zustc の出力は rustc のものと同じ。\n- `tests/bench_patterns.rs` と、`tests/driver2.rs` の 4 つの probe。\n- 一時ディレクトリにプログラムをビルドするテスト（`tests/bench_patterns.rs`、`ast_codegen.rs`、`driver2.rs`、\n  `panic_loc.rs`）は、利用者だけが入れる新しいディレクトリを作り、既にあるもの（共有の機械で他の利用者が作ったもの）は\n  使わずに失敗する。\n- `cargo test --release --workspace`、`bench/rust_ui.py --check`。\n- KPI: pull request の `KPI` ワークフローのコメントに、ベースとの差がある。`patterns check` と `patterns edit` は\n  新しいので、ベースには値がない。",
+        "contentHash": "6e4fdc35a11e82d5cde9018d8277473018f3eb5fc0bbcd053a8622c7f6cb4336"
       },
       "context": [],
-      "candidateId": "35389c3856334e0585b801919d2ede1cc86ee2e3421d490e470ec704e25bf5fe",
-      "contextHash": "68f4e741255bf7ba4f16ae462b729e4824d2414f8a5bea3b011f77eb46ca22f4",
+      "candidateId": "d26f24b9ac8e7f892e43b56ecec415a595e2bec6b441f6e71984d3e042f3f84a",
+      "contextHash": "4b2abbdd26d065adfb6334b8f8cda5397dc70489337e711abbfa13ace460f692",
       "judgment": {
         "choice": "supports",
         "confidence": 0.99,
@@ -939,8 +939,8 @@
   },
   "usage": {
     "requests": 27,
-    "inputTokens": 125336,
-    "usd": 0.0052641120000000005
+    "inputTokens": 125466,
+    "usd": 0.005269572
   },
   "errors": []
 }

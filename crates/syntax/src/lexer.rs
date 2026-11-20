@@ -1233,12 +1233,28 @@ pub fn trait_scopes(src: &str) -> Vec<(u32, u32, Vec<String>)> {
                 }
                 vec![(local.clone(), flat(m, name))]
             } else {
-                imported.iter().filter(|(isc, n, _, _)| *isc == m && n == name).map(|(_, _, f, _)| (local.clone(), f.clone())).collect()
+                // (what m binds to the name: what it imported by name, or else what came by a glob; a named import
+                // shadows a glob's there as it does here)
+                let by_name: Vec<&String> = imported.iter().filter(|(isc, n, _, g)| *isc == m && n == name && !g).map(|(_, _, f, _)| f).collect();
+                let pick: Vec<&String> = if by_name.is_empty() {
+                    imported.iter().filter(|(isc, n, _, _)| *isc == m && n == name).map(|(_, _, f, _)| f).collect()
+                } else {
+                    by_name
+                };
+                pick.into_iter().map(|f| (local.clone(), f.clone())).collect()
             };
             for (n, f) in found {
-                if !imported.iter().any(|(isc, n2, f2, _)| isc == sc && *n2 == n && *f2 == f) {
-                    imported.push((*sc, n, f, glob));
-                    progress = true;
+                match imported.iter_mut().find(|(isc, n2, f2, _)| isc == sc && *n2 == n && *f2 == f) {
+                    // (one that came by a glob first and now by name as well: it is a named binding)
+                    Some(e) if e.3 && !glob => {
+                        e.3 = false;
+                        progress = true;
+                    }
+                    Some(_) => {}
+                    None => {
+                        imported.push((*sc, n, f, glob));
+                        progress = true;
+                    }
                 }
             }
         }

@@ -107,7 +107,8 @@ HashMap の entry API、イテレータの上のクロージャを通り、ど�
      impl を選ぶ。
    - rustc と同じく、合う固有メソッドはどの trait のメソッドより先で、モジュールが定義するか名前で取り込んだ名前は、glob
      から来る同じ名前を隠す。アイテムで見える trait はそのキャッシュのキーに入るので、`use` を変えればビルドし直す。
-     テスト: `tests/probe/same_trait_precedence.rs`。
+     （そのアイテムが別のアイテムにインライン展開されるときも）。trait を名指しした呼び出し（`crate::a::M::m(&x)`）は、
+     その trait の impl を取る。テスト: `tests/probe/same_trait_precedence.rs`、`tests/probe/same_trait_explicit.rs`。
    - 扱わないもの: スコープはモジュールで、ブロックではないので、1 つの関数の 2 つのブロックがそれぞれ違う `M` を `use`
      すると、両方が見える。1 行に書いた 2 つのモジュールは行を共有する。依存するクレートのあるビルドは前のまま（最初の
      impl）で、それらの行はそのクレートの行ではないためである。

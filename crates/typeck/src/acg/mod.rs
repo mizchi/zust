@@ -295,6 +295,8 @@ pub fn compile(prog: &Program, insts: &Mutex<Insts>, id: u32, f: &ItemFn, line_b
         caps,
         root,
         closure_ix,
+        explicit_traits: HashMap::default(),
+        explicit_trait: None,
         closure_hint: None,
         seg_self: None,
         loop_bounds: vec![],
@@ -658,6 +660,11 @@ pub struct Cx<'p> {
     pub root: u32,
     /// クロージャ式 (Debug の文字列) → 番号
     pub closure_ix: HashMap<String, u32>,
+    /// `a::M::m(&x)` rewritten as `x.m()`: the kept method call (by address) -> the trait it named, so the call takes
+    /// that trait's impl, whatever traits are in scope
+    pub explicit_traits: HashMap<usize, String>,
+    /// while a method call that named its trait is being resolved: (the method, the trait)
+    pub explicit_trait: Option<(String, String)>,
     pub closure_hint: Option<(Vec<Ty>, Option<Ty>)>,
     pub seg_self: Option<Ty>,
     pub loop_bounds: Vec<(Loc, u64)>,

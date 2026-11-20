@@ -2091,6 +2091,14 @@ impl Cx<'_> {
         }
         if let Some(e) = self.prim_method_call(c) {
             let e = self.keep_expr(e);
+            // (`crate::a::M::m(&x)`: the trait the path names, which a trait in scope must not replace)
+            if let (Expr::Path(None, p), Expr::MethodCall(..)) = (&**func, e) {
+                let pp = crate::program::PPath::of(p);
+                let q = self.prog.strip_mods_p(&pp).unwrap_or(pp);
+                if q.segs.len() == 2 && self.prog.traits.contains_key(&q.segs[0].name) {
+                    self.explicit_traits.insert(e as *const Expr as usize, q.segs[0].name.clone());
+                }
+            }
             return self.expr(e, expected);
         }
         // `Trait::method(x, args)` (`Clone::clone(&s)`, `Add::add(a, b)`): the method call `x.method(args)`

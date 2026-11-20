@@ -1966,6 +1966,20 @@ impl Session2 {
                 if let Some(ri) = a.prog.item_of[r as usize] {
                     h.add(&a.items[ri as usize].hash);
                     h.add(&lb);
+                    // (and the traits in scope there, which the inlined body's method calls resolve with; and those of
+                    // the user fns inlined into it in turn, inlining going two deep)
+                    if !a.prog.trait_scopes.is_empty() {
+                        if let Some(vis) = a.prog.traits_at_item(ri) {
+                            h.add(&vis.join(","));
+                        }
+                        for &r2 in &a.refs[r as usize] {
+                            if a.inl.user_lines.contains_key(&r2) {
+                                if let Some(vis) = a.prog.item_of[r2 as usize].and_then(|ri2| a.prog.traits_at_item(ri2)) {
+                                    h.add(&vis.join(","));
+                                }
+                            }
+                        }
+                    }
                 }
             }
         }
