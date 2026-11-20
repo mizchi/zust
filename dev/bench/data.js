@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795136044709,
+  "lastUpdate": 1795136046381,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -40972,6 +40972,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "lsp peak RSS",
             "value": 72.855,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "committer": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "distinct": true,
+          "id": "38821f60169f0a199e7de362b78276d5f725ebd1",
+          "message": "docs: split CONTRIBUTING.md out of README, with setup steps\n\nREADME keeps usage; CONTRIBUTING.md (and its Japanese pair) gets the\ndevelopment guide: a \"Getting started\" sequence for a fresh clone\n(tools, submodules, release build, fetching rustc's UI tests, the\npre-commit hook, the checks to run first, a dry KPI run), the KPI\nworkflow and open work, benchmarks, and the roadmap moved from README.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-20T00:47:36Z",
+          "tree_id": "613f0dfbad9c9e8318cecb8e1f00621090069ef6",
+          "url": "https://github.com/mizchi/zust/commit/38821f60169f0a199e7de362b78276d5f725ebd1"
+        },
+        "date": 1795136046167,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "lsp definition p50",
+            "value": 0.601,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp hover p50",
+            "value": 0.392,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp completion p50",
+            "value": 0.996,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp references p50",
+            "value": 3.879,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp rename p50",
+            "value": 0.466,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp signatureHelp p50",
+            "value": 0.659,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp documentHighlight p50",
+            "value": 0.86,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp ready (startup to indexed)",
+            "value": 125.45,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp peak RSS",
+            "value": 72.922,
             "unit": "MiB"
           }
         ]
