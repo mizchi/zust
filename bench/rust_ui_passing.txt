@@ -3809,6 +3809,7 @@ run-pass	modules/module-use-nested-groups.rs
 compile-fail	modules/module_suggestion_when_module_not_found/suggestion.rs
 run-pass	modules/nested-modules-basic.rs
 check-pass	modules/path-attr-inner-attr-nested-mod-rs/path-attr-inner-attr-nested-mod-rs.rs
+run-pass	modules/primitive-type-module-deprecated-paths.rs
 check-pass	modules/pub-use-handling-in-modules-56128.rs
 check-pass	modules/pub-use-module-alias-5950.rs
 run-pass	modules/special_module_name_ignore.rs

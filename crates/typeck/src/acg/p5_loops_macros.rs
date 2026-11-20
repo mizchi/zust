@@ -1846,6 +1846,33 @@ impl Cx<'_> {
         Ok((Some(v), t))
     }
 
+    /// `std::u32::MAX`: the primitive type's own path (out of path_value, which every path expression goes through)
+    #[cold]
+    #[inline(never)]
+    fn prim_module_path(&mut self, p: &crate::parse::Path, expected: Option<Ty>) -> R<V> {
+        let np = crate::parse::Path { global: false, segs: p.segs[1..].to_vec(), pos: p.pos };
+        let ne: &Expr = self.keep_expr(Expr::Path(None, np));
+        self.expr(ne, expected)
+    }
+
+    /// `f64::MANTISSA_DIGITS` (u32) / `f32::MAX_EXP` (i32) ..
+    #[cold]
+    #[inline(never)]
+    fn float_int_const(&mut self, t: Ty, name: &str) -> Option<V> {
+        let f32t = t == Ty::F32;
+        let (v, it): (i64, Ty) = match name {
+            "RADIX" => (2, Ty::U32),
+            "MANTISSA_DIGITS" => (if f32t { 24 } else { 53 }, Ty::U32),
+            "DIGITS" => (if f32t { 6 } else { 15 }, Ty::U32),
+            "MIN_EXP" => (if f32t { -125 } else { -1021 }, Ty::I32),
+            "MAX_EXP" => (if f32t { 128 } else { 1024 }, Ty::I32),
+            "MIN_10_EXP" => (if f32t { -37 } else { -307 }, Ty::I32),
+            "MAX_10_EXP" => (if f32t { 38 } else { 308 }, Ty::I32),
+            _ => return None,
+        };
+        Some((Some(self.int_const(it, v as i128)), it))
+    }
+
     pub(crate) fn path_value(&mut self, e: &Expr, _expected: Option<Ty>) -> R<V> {
         let Expr::Path(q, p) = e else { unreachable!() };
         // (`g(f1)` after `let f1 = f;`: the fn f, its instance from the expected type)
@@ -1900,6 +1927,11 @@ impl Cx<'_> {
         if let Some(id) = self.fn_item(e) {
             return self.fn_value(e, id, _expected);
         }
+        // (`std::u32::MAX` / `core::f64::MANTISSA_DIGITS`: the deprecated modules of the primitive types, the type's
+        // own constant)
+        if q.is_none() && p.segs.len() == 3 && matches!(p.segs[0].name.as_str(), "std" | "core") && Ty::prim(&p.segs[1].name).is_some() {
+            return self.prim_module_path(p, _expected);
+        }
         let segs: Vec<String> = p.segs.iter().map(|s| s.name.clone()).collect();
         // `f64::MAX` / `f64::consts::PI` / `std::f64::consts::E` など
         let fl = segs.iter().position(|s| s == "f64" || s == "f32");
@@ -1923,8 +1955,24 @@ impl Cx<'_> {
                 "FRAC_PI_2" => Some(std::f64::consts::FRAC_PI_2),
                 "FRAC_PI_4" => Some(std::f64::consts::FRAC_PI_4),
                 "FRAC_1_SQRT_2" => Some(std::f64::consts::FRAC_1_SQRT_2),
+                "FRAC_PI_3" => Some(std::f64::consts::FRAC_PI_3),
+                "FRAC_PI_6" => Some(std::f64::consts::FRAC_PI_6),
+                "FRAC_PI_8" => Some(std::f64::consts::FRAC_PI_8),
+                "FRAC_1_PI" => Some(std::f64::consts::FRAC_1_PI),
+                "FRAC_2_PI" => Some(std::f64::consts::FRAC_2_PI),
+                "FRAC_2_SQRT_PI" => Some(std::f64::consts::FRAC_2_SQRT_PI),
+                "LOG2_E" => Some(std::f64::consts::LOG2_E),
+                "LOG10_E" => Some(std::f64::consts::LOG10_E),
+                "LOG2_10" => Some(std::f64::consts::LOG2_10),
+                "LOG10_2" => Some(std::f64::consts::LOG10_2),
                 _ => None,
             };
+            // (the integer constants of a float type: `f64::MANTISSA_DIGITS` is a u32, `f64::MAX_EXP` an i32)
+            if x.is_none() {
+                if let Some(r) = self.float_int_const(t, name) {
+                    return Ok(r);
+                }
+            }
             if let Some(x) = x {
                 let v = if t == Ty::F32 { self.b.ins().f32const(x as f32) } else { self.b.ins().f64const(x) };
                 return Ok((Some(v), t));
@@ -1966,6 +2014,14 @@ impl Cx<'_> {
                     self.lets.insert(ne as *const Expr as usize, t);
                 }
                 return self.expr(ne, _expected);
+            }
+        }
+        // (`<S as Tr>::m` as a value: the impl's method, as for a call; asked only here, past every other reading)
+        if q.is_some() {
+            if let Some((id, sg)) = self.callee(e) {
+                if sg.has_body || sg.is_extern {
+                    return self.fn_value(e, id, _expected);
+                }
             }
         }
         err(SP, "cannot find value (unsupported path)")
