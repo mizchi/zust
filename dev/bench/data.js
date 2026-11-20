@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795133273545,
+  "lastUpdate": 1795133275519,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -53901,6 +53901,85 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/mizchi/zust/commit/904658b2939c57b3bb23f8eac470f262b88dfa1c"
         },
         "date": 1795132299199,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "parity documentSymbol (名前の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity workspace/symbol (上位 20 の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity definition (行き先の一致)",
+            "value": 96.97,
+            "unit": "%"
+          },
+          {
+            "name": "parity hover (名前を含む)",
+            "value": 92.5,
+            "unit": "%"
+          },
+          {
+            "name": "parity references (数の一致)",
+            "value": 94.595,
+            "unit": "%"
+          },
+          {
+            "name": "parity documentHighlight (数の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity rename (書き換えの一致)",
+            "value": 85.714,
+            "unit": "%"
+          },
+          {
+            "name": "parity signatureHelp (名前・引数の数・今の引数の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity completion `x.\\|` (書いてある名前を含む)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity completion `na\\|me` (同)",
+            "value": 88.889,
+            "unit": "%"
+          },
+          {
+            "name": "parity 一致の平均",
+            "value": 95.867,
+            "unit": "%"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "committer": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "distinct": true,
+          "id": "4a6120db4c3cb47ef7a8c9b8509f20c003993f47",
+          "message": "for loops over an Option or Result value\n\n`for x in Some(1) { .. }` / `for y in result { .. }` (and the existing\n`opt.iter()` / `.into_iter()` forms, now also for Result): lowered to\n`if let Some(x) = ..` / `if let Ok(y) = ..` (a one-turn loop when the\nbody breaks or continues), without the prelude's iterator types.\n\ntests/ui: no change in passes.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-19T23:58:49Z",
+          "tree_id": "9485af93797ebe205c5148b11d2b6f55dc32b203",
+          "url": "https://github.com/mizchi/zust/commit/4a6120db4c3cb47ef7a8c9b8509f20c003993f47"
+        },
+        "date": 1795133275012,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
