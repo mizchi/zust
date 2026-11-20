@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795179922578,
+  "lastUpdate": 1795181030293,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -35933,6 +35933,165 @@ window.BENCHMARK_DATA = {
           {
             "name": "rt/strings run (-O)",
             "value": 60.471,
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "committer": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "distinct": true,
+          "id": "cdb2f0ff02c761be3549a11b1081cb4c1a332a96",
+          "message": "Wrong code: assignment order, condition temporaries, &mut self of numbers\n\nThree cases that compiled and then ran wrong:\n- `*{ x = z; &mut *y } = x`: a place with a block in it was evaluated\n  before the right side, which then read the new x. The right side now\n  goes first, into a temporary.\n- `while borrow().ok() { .. }` / `if borrow().ok() { .. }`: the\n  condition's temporaries lived until the loop / if ended. They are now\n  dropped right after the condition, as rustc does.\n- `x.inc()` with `impl Inc for i32 { fn inc(&mut self) }` (also\n  `v[0].inc()`, `(&mut f[1]).inc()` and `Inc::inc(r)`) changed a copy of\n  x. The method now gets the address of the place itself. A local that\n  calls such a method (names collected once per program) is kept in\n  memory.\n\ntests/ui: +3 run-pass.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-20T13:19:09Z",
+          "tree_id": "d49f2a9ad2cb330b123b3585391ed5544d8a107c",
+          "url": "https://github.com/mizchi/zust/commit/cdb2f0ff02c761be3549a11b1081cb4c1a332a96"
+        },
+        "date": 1795181030033,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "gen1000 build cold",
+            "value": 118.235,
+            "unit": "ms"
+          },
+          {
+            "name": "gen1000 build noop",
+            "value": 0.766,
+            "unit": "ms"
+          },
+          {
+            "name": "gen1000 build edit 1 fn",
+            "value": 17.003,
+            "unit": "ms"
+          },
+          {
+            "name": "gen1000 check",
+            "value": 78.249,
+            "unit": "ms"
+          },
+          {
+            "name": "gen1000 build cold peak RSS",
+            "value": 18.125,
+            "unit": "MiB"
+          },
+          {
+            "name": "gen1000 binary",
+            "value": 323.977,
+            "unit": "KiB"
+          },
+          {
+            "name": "gen1000 cache",
+            "value": 387.21,
+            "unit": "KiB"
+          },
+          {
+            "name": "gen1000 build noop instructions",
+            "value": 0.55,
+            "unit": "M instr"
+          },
+          {
+            "name": "gen1000 build edit 1 fn instructions",
+            "value": 124.088,
+            "unit": "M instr"
+          },
+          {
+            "name": "gen1000 check instructions",
+            "value": 776.43,
+            "unit": "M instr"
+          },
+          {
+            "name": "gen5000 build cold",
+            "value": 536.72,
+            "unit": "ms"
+          },
+          {
+            "name": "gen5000 build noop",
+            "value": 0.652,
+            "unit": "ms"
+          },
+          {
+            "name": "gen5000 build edit 1 fn",
+            "value": 61.749,
+            "unit": "ms"
+          },
+          {
+            "name": "gen5000 check",
+            "value": 379.681,
+            "unit": "ms"
+          },
+          {
+            "name": "gen5000 build cold peak RSS",
+            "value": 52.016,
+            "unit": "MiB"
+          },
+          {
+            "name": "gen5000 binary",
+            "value": 1558.336,
+            "unit": "KiB"
+          },
+          {
+            "name": "gen5000 cache",
+            "value": 1902.835,
+            "unit": "KiB"
+          },
+          {
+            "name": "gen5000 build noop instructions",
+            "value": 0.55,
+            "unit": "M instr"
+          },
+          {
+            "name": "gen5000 build edit 1 fn instructions",
+            "value": 589.397,
+            "unit": "M instr"
+          },
+          {
+            "name": "gen5000 check instructions",
+            "value": 3833.472,
+            "unit": "M instr"
+          },
+          {
+            "name": "rt/fib run (-O)",
+            "value": 54.447,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/hashmap run (-O)",
+            "value": 89.438,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/matmul run (-O)",
+            "value": 41.968,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/nbody run (-O)",
+            "value": 52.794,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/sieve run (-O)",
+            "value": 93.189,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/sort run (-O)",
+            "value": 151.911,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/strings run (-O)",
+            "value": 37.615,
             "unit": "ms"
           }
         ]
