@@ -1510,6 +1510,24 @@ impl Program {
                 }
             }
         }
+        // (a free constant of an uninhabited type (`!`, an enum with no variants) has no value to evaluate to; an
+        // associated one is evaluated only where it is used)
+        for c in p.consts.iter().filter(|c| c.stat.is_none() && (c.item as usize) < user && !c.name.contains("::")) {
+            let empty = match c.ty {
+                Ty::Never => true,
+                Ty::Struct(sid) => p.structs[sid as usize].is_enum && p.structs[sid as usize].variants.is_empty(),
+                _ => false,
+            };
+            if empty {
+                // (`const C: ! = panic!();`: the panic is what its evaluation reaches)
+                let why = if c.expr.trim_start().starts_with("panic") {
+                    "evaluation panicked: explicit panic".to_string()
+                } else {
+                    format!("evaluation of constant value failed: attempted to instantiate uninhabited type `{}`", p.tn(c.ty))
+                };
+                return Err(format!("{}:1: {why} (E0080)", items[c.item as usize].line));
+            }
+        }
         // (a static's type is well-formed: the bounds of its struct's parameters hold, `static S: W<u8>` with
         // `struct W<T: Tr>` and no `impl Tr for u8` (E0277))
         for c in p.consts.iter().filter(|c| c.stat.is_some()) {

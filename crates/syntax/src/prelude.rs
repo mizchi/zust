@@ -333,7 +333,8 @@ fn user_impl_traits(src: &str) -> Vec<&str> {
             j += 1;
         }
         let name = src[start..j].rsplit("::").next().unwrap_or("");
-        // (`impl Mul<i32> for V` の型引数は飛ばす)
+        // (`impl Mul<i32> for V` の型引数は飛ばす; a macro's expansion spaces them out, `Mul  < i32 > for V`)
+        skip_ws(&mut j);
         if j < b.len() && b[j] == b'<' {
             let mut depth = 0;
             while j < b.len() {
@@ -607,7 +608,7 @@ const SHADOWABLE: &[&str] = &[
     "Chain", "Entry", "Enumerate", "Filter", "FilterMap", "Map", "OptIter", "Scan", "Skip", "Take", "TakeWhile", "Zip",
     "Command", "Mutex", "VarError", "Rev", "StepBy", "Peekable", "Cloned", "Flatten", "FlatMap", "Inspect", "SkipWhile",
     "PathBuf", "Args", "BufWriter", "Pin", "Windows", "Bytes", "MatchIndices", "MutexGuard", "Chunks", "Duration", "Fuse", "Empty", "RangeTo", "RangeToInclusive", "RangeFull",
-    "AtomicPtr", "TryReserveError", "c_void", "Cycle", "JoinHandle", "Chars", "Poll", "Waker", "Context", "Future",
+    "AtomicPtr", "TryReserveError", "c_void", "Infallible", "Cycle", "JoinHandle", "Chars", "Poll", "Waker", "Context", "Future",
 ];
 
 /// The name a struct / enum / trait / union item defines (from its first identifiers: `pub struct Name`)
