@@ -914,6 +914,19 @@ impl Cx<'_> {
                 // `&x as &dyn Trait` は期待型つきの評価 (強制変換) と同じ
                 // (`&mut a as &mut [u8]` (a: 配列) も強制変換)
                 if let Ty::Ref(_, Ty::Dyn(_) | Ty::Slice(_)) = to {
+                    // (`#![deny(trivial_casts)]`: `&a as &[u8]` with a: [u8; N], or a cast to the type it has, is a
+                    // coercion)
+                    if self.user_code && self.prog.deny_trivial_casts.0 {
+                        if let Some(ft) = self.peek(x) {
+                            // (`&mut [u8] as &[u8]` too: the same pointee, a mutable reference to a shared one)
+                            let trivial = ft == to
+                                || matches!((ft, to), (Ty::Ref(m, Ty::Array(e, _)), Ty::Ref(tm, Ty::Slice(e2))) if e == e2 && (m || !tm))
+                                || matches!((ft, to), (Ty::Ref(true, a), Ty::Ref(false, b)) if a == b);
+                            if trivial {
+                                return err(SP, format!("trivial cast: `{}` as `{}`", self.prog.tn(ft), self.prog.tn(to)));
+                            }
+                        }
+                    }
                     let (v, t) = self.expr(x, Some(to))?;
                     self.same(SP, t, to)?;
                     return Ok((v, t));
@@ -961,17 +974,55 @@ impl Cx<'_> {
                 if matches!(to, Ty::Ptr(..)) && has_hole(self.prog, to) {
                     return err(SP, "cannot cast to a pointer of an unknown kind (E0641)");
                 }
-                // (a cast to the same type: `f as fn()` with f: fn())
+                // (a cast to the same type: `f as fn()` with f: fn(); under `#![deny(trivial_casts)]` a reference's is
+                // one, as `r as &u8` with r: &u8)
                 if from == to && !from.is_int() && !from.is_float() {
+                    if self.user_code && self.prog.deny_trivial_casts.0 && matches!(from, Ty::Ref(..)) {
+                        let n = self.prog.tn(from);
+                        return err(SP, format!("trivial cast: `{n}` as `{n}`"));
+                    }
                     return Ok((v, to));
                 }
                 if from == Ty::Never {
                     return Ok((None, Ty::Never));
                 }
+                // (`#![deny(trivial_casts)]`: `&T as *const T`, `&mut T as *mut T`, `&[T; N] as *const [T]` are
+                // coercions; `#![deny(trivial_numeric_casts)]`: a number cast to its own type)
+                if self.user_code {
+                    let (tc, tn) = self.prog.deny_trivial_casts;
+                    if tn && from == to && (from.is_int() || from.is_float()) {
+                        let n = self.prog.tn(from);
+                        return err(SP, format!("trivial numeric cast: `{n}` as `{n}`"));
+                    }
+                    let trivial = match (from, to) {
+                        (Ty::Ref(m, a), Ty::Ptr(pm, b)) => (m || !pm) && (a == b || matches!((*a, *b), (Ty::Array(e, _), Ty::Slice(e2)) if e == e2)),
+                        _ => false,
+                    };
+                    if tc && trivial {
+                        return err(SP, format!("trivial cast: `{}` as `{}`", self.prog.tn(from), self.prog.tn(to)));
+                    }
+                }
                 // 参照 → 生ポインタ、生ポインタ ⇔ 生ポインタ / usize
                 match (from, to) {
+                    // (`&[T; N]` / `*const [T; N]` as `*const [T]`: the fat pointer (address, N). Before the arm of
+                    // pointer to pointer, which keeps the thin value; `&T` gives no `*mut`)
+                    (Ty::Ref(false, Ty::Array(..)), Ty::Ptr(true, Ty::Slice(_))) | (Ty::Ref(false, Ty::Slice(_)), Ty::Ptr(true, Ty::Slice(_))) => {
+                        return err(SP, format!("casting `{}` as `{}` is invalid (E0606)", self.prog.tn(from), self.prog.tn(to)));
+                    }
+                    (Ty::Ref(_, Ty::Array(e, n)) | Ty::Ptr(_, Ty::Array(e, n)), Ty::Ptr(_, Ty::Slice(e2))) if e == e2 => {
+                        let Some(a) = v else { return Ok((None, to)) };
+                        let len = self.b.ins().iconst(types::I64, *n as i64);
+                        return Ok((Some(self.make_fat_v(a, len)), to));
+                    }
+                    // (`&[T]` as `*const [T]`: the same fat pointer)
+                    (Ty::Ref(_, Ty::Slice(e)), Ty::Ptr(_, Ty::Slice(e2))) if e == e2 => return Ok((v, to)),
                     (Ty::Ref(_, a), Ty::Ptr(_, b)) if a == b || matches!(*a, Ty::Array(e, _) if e == b) => {
                         return Ok((v, to));
+                    }
+                    // (a raw slice pointer is the address of its (data, length) pair here: as a thin pointer, the data
+                    // word)
+                    (Ty::Ptr(_, Ty::Slice(_) | Ty::Str), Ty::Ptr(_, b)) if !matches!(b, Ty::Slice(_) | Ty::Str | Ty::Dyn(_)) => {
+                        return Ok((v.map(|a| self.b.ins().load(PTR, mf(), a, 0)), to));
                     }
                     (Ty::Ptr(..), Ty::Ptr(..)) => return Ok((v, to)),
                     // (a fn pointer as a raw pointer: the same address)
@@ -985,6 +1036,13 @@ impl Cx<'_> {
                     }
                     (t, Ty::Ptr(..)) if matches!(t, Ty::Usize | Ty::U64 | Ty::Isize | Ty::I64) => {
                         return Ok((v, to));
+                    }
+                    // (a narrower or wider integer and a raw pointer: through usize, as `as` does)
+                    (t, Ty::Ptr(_, i)) if t.is_int() && t.bits() <= 64 && !matches!(i, Ty::Slice(_) | Ty::Str | Ty::Dyn(_)) => {
+                        return Ok((v.map(|x| self.convert(x, t, Ty::Usize)), to));
+                    }
+                    (Ty::Ptr(_, i), t) if t.is_int() && t.bits() <= 64 && !matches!(i, Ty::Slice(_) | Ty::Str | Ty::Dyn(_)) => {
+                        return Ok((v.map(|x| self.convert(x, Ty::Usize, t)), to));
                     }
                     _ => {}
                 }

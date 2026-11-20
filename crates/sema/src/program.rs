@@ -237,6 +237,8 @@ pub struct Program {
     pub deny_unreachable: bool,
     /// `#![deny(unused_must_use)]`: a statement whose value is a `Result` is an error
     pub deny_must_use: bool,
+    /// `#![deny(trivial_casts)]` / `#![deny(trivial_numeric_casts)]`: a cast a coercion or nothing would do
+    pub deny_trivial_casts: (bool, bool),
     /// the program's `#[must_use]` fns (by name), for unused_must_use
     pub must_use_fns: Vec<String>,
     /// the names of the methods of numbers / bool / char that take `&mut self` (`impl Inc for i32 { fn inc(&mut
@@ -672,6 +674,7 @@ impl Program {
             fnptr_impls: Default::default(),
             deny_unreachable: false,
             deny_must_use: false,
+            deny_trivial_casts: (false, false),
             must_use_fns: vec![],
             prim_mut_methods: HashSet::default(),
             opt: false,

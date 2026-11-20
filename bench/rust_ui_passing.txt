@@ -1018,6 +1018,7 @@ compile-fail	cast/cast-to-bare-fn.rs
 run-pass	cast/cast-to-box-arr.rs
 check-pass	cast/cast-to-char-compare.rs
 compile-fail	cast/cast-to-dyn-any.rs
+run-pass	cast/cast-to-infer-ty.rs
 compile-fail	cast/cast-to-nil.rs
 compile-fail	cast/cast-to-slice.rs
 compile-fail	cast/cast-to-unsized-trait-object-suggestion.rs
@@ -1035,11 +1036,13 @@ compile-fail	cast/issue-10991.rs
 compile-fail	cast/issue-17444.rs
 compile-fail	cast/issue-84213.rs
 compile-fail	cast/issue-89497.rs
+run-pass	cast/negative-integer-cast-to-pointer.rs
 compile-fail	cast/non-primitive-cast-suggestion.rs
 compile-fail	cast/non-primitive-isize-ref-cast.rs
 run-pass	cast/owned-struct-to-trait-cast-6318.rs
 check-pass	cast/ptr-ptr-to-ptr-ptr-different-regions.rs
 build-pass	cast/raw-pointer-from-str-comparison.rs
+run-pass	cast/supported-cast.rs
 compile-fail	cast/trait-object-size-error-14366.rs
 run-pass	cast/u8-to-char-cast-9918.rs
 compile-fail	cast/unsupported-cast.rs
@@ -2224,6 +2227,7 @@ build-pass	extern/issue-10763.rs
 run-pass	extern/issue-10764-rpass.rs
 build-pass	extern/issue-1251.rs
 compile-fail	extern/issue-18819.rs
+run-pass	extern/lgamma-linkage.rs
 compile-fail	extern/not-in-block.rs
 run-pass	extern/windows-tcb-trash-13259.rs
 compile-fail	feature-gates/feature-gate-adt_const_params.rs
@@ -3308,6 +3312,7 @@ build-pass	lint/linker-warning-bin.rs
 check-pass	lint/linker-warning.rs
 compile-fail	lint/lint-attr-everywhere-early.rs
 compile-fail	lint/lint-attr-everywhere-late.rs
+check-pass	lint/lint-const-item-mutation.rs
 check-pass	lint/lint-double-negations-macro.rs
 check-pass	lint/lint-double-negations.rs
 run-pass	lint/lint-expr-stmt-attrs-for-early-lints.rs
@@ -3386,6 +3391,7 @@ check-pass	lint/rfc-2457-non-ascii-idents/lint-mixed-script-confusables-2.rs
 check-pass	lint/runtime-symbols-no-std.rs
 check-pass	lint/special-upper-lower-cases.rs
 compile-fail	lint/suggestions.rs
+compile-fail	lint/trivial-casts.rs
 compile-fail	lint/trivial_casts.rs
 check-pass	lint/type-overflow.rs
 check-pass	lint/unaligned_references_fake_borrow.rs
@@ -6193,6 +6199,7 @@ check-pass	traits/fn-pointer/hrtb-assoc-fn-traits-28994.rs
 compile-fail	traits/fn-pointer/suggest-wrap-parens-method.rs
 run-pass	traits/fnonce-repro-trait-impl-13434.rs
 compile-fail	traits/fully-qualified-syntax-cast.rs
+check-pass	traits/generic-trait-impl-aliased-array-58212.rs
 check-pass	traits/hrtb-related-type-params-30867.rs
 compile-fail	traits/ignore-err-impls.rs
 compile-fail	traits/impl-1.rs
