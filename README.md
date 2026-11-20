@@ -26,7 +26,7 @@
 
 ## Status
 
-Numbers measured <!-- measured -->2026-11-20, d87684e<!-- /measured --> by CI on each push to main (bench.yml runs
+Numbers measured <!-- measured -->2026-11-20, dd2f010<!-- /measured --> by CI on each push to main (bench.yml runs
 `bench/ci_bench.py` and `bench/rust_ui.py`, then `scripts/update_readme.py` writes them here). Times come from shared
 GitHub Actions runners and vary by about ±20%; the instruction counts (valgrind) do not.
 
@@ -38,10 +38,10 @@ only the tests it can be asked to handle (no nightly features, auxiliary crates 
 <!-- auto:ui -->
 | kind | applicable | pass |
 |---|---:|---:|
-| run-pass (builds, runs, same output) | 2385 | 1753 (73.5%) |
-| check-pass (accepted by `zustc check`) | 1807 | 1450 (80.2%) |
+| run-pass (builds, runs, same output) | 2385 | 1754 (73.5%) |
+| check-pass (accepted by `zustc check`) | 1807 | 1451 (80.3%) |
 | build-pass | 135 | 97 (71.9%) |
-| compile-fail (rejected at an annotated line) | 7358 | 3567 (48.5%) |
+| compile-fail (rejected at an annotated line) | 7358 | 3566 (48.5%) |
 <!-- /auto:ui -->
 
 [What is supported](#what-is-supported) breaks this down by area.
@@ -53,22 +53,22 @@ Build speed, build cache size and LSP latency on generated programs of 1000 / 50
 <!-- auto:kpi -->
 | KPI | gen1000 | gen5000 |
 |---|---:|---:|
-| cold build | 121 ms | 547 ms |
-| no-op build | 0.8 ms | 0.8 ms |
-| build after editing one function | 18.8 ms | 66.5 ms |
-| `check` | 80 ms | 381 ms |
-| no-op build (instructions) | 0.5 M | 0.5 M |
+| cold build | 119 ms | 534 ms |
+| no-op build | 0.7 ms | 0.7 ms |
+| build after editing one function | 17.2 ms | 64.1 ms |
+| `check` | 79 ms | 373 ms |
+| no-op build (instructions) | 0.6 M | 0.6 M |
 | edit one function (instructions) | 124.2 M | 589.4 M |
-| `check` (instructions) | 776.2 M | 3834.5 M |
+| `check` (instructions) | 776.0 M | 3831.9 M |
 | build cache on disk | 387.2 KiB | 1902.8 KiB |
 | binary | 324.0 KiB | 1558.3 KiB |
-| cold build peak RSS | 17.7 MiB | 51.5 MiB |
+| cold build peak RSS | 18.2 MiB | 52.0 MiB |
 
 | zust-analyzer (zustc's own sources) | |
 |---|---:|
-| p50: definition, hover, completion, references, rename | 0.58 ms / 0.41 ms / 1.09 ms / 4.67 ms / 0.46 ms |
-| startup until indexed | 134 ms |
-| peak RSS | 75.2 MiB |
+| p50: definition, hover, completion, references, rename | 0.50 ms / 0.39 ms / 1.04 ms / 4.47 ms / 0.47 ms |
+| startup until indexed | 128 ms |
+| peak RSS | 75.0 MiB |
 <!-- /auto:kpi -->
 
 Every change is also measured on its own with `python3 bench/kpi_track.py`, so that small increases that add up stay
@@ -332,10 +332,10 @@ the measured numbers. The [reports](docs/reports/) explain each step.
 
 ### Overall
 
-- [x] tests/ui run-pass: <!-- total:run-pass -->73.5% (1753 / 2385)
-- [x] tests/ui check-pass: <!-- total:check-pass -->80.2% (1450 / 1807)
+- [x] tests/ui run-pass: <!-- total:run-pass -->73.5% (1754 / 2385)
+- [x] tests/ui check-pass: <!-- total:check-pass -->80.3% (1451 / 1807)
 - [x] tests/ui build-pass: <!-- total:build-pass -->71.9% (97 / 135)
-- [ ] tests/ui compile-fail (an error on an annotated line): <!-- total:compile-fail -->48.5% (3567 / 7358)
+- [ ] tests/ui compile-fail (an error on an annotated line): <!-- total:compile-fail -->48.5% (3566 / 7358)
 - [x] real crates: fnv, adler2, hex, itoa, rustc-hash and cfg-if build and give the same output (6 / 6)
 - [x] zust-analyzer answers like rust-analyzer: 95.4% (rust-analyzer: 96.2%)
 
@@ -356,7 +356,7 @@ the measured numbers. The [reports](docs/reports/) explain each step.
 - [x] qualified paths: `<T as Tr>::C` for a trait's default constant (its `Self::` is the qualified type), `<() as Tr>::f()`, associated functions through a type alias (`type Ham = m::Qux; Ham::new()`)
 - [x] let chains (`if let A = x && cond`), also in match guards (`P if let Q = e =>`); inline `const { .. }`, `&raw const` / `&raw mut`
 - [x] parser: <!-- ui:parser -->89.9%
-- [x] closures (capture, `Fn` traits, `move`; with no captures also as fn pointers): <!-- ui:closures,unboxed-closures,functions-closures -->77.6%
+- [x] closures (capture, `Fn` traits, `move`; with no captures also as fn pointers): <!-- ui:closures,unboxed-closures,functions-closures -->78.1%
 - [x] derives: `Debug`, `Clone`, `Copy`, `PartialEq`/`Eq`, `PartialOrd`/`Ord`, `Hash`, `Default`: <!-- ui:derives,deriving -->86.4%
 - [x] imports, `use`: <!-- ui:imports -->84.1%
 - [x] associated types: <!-- ui:associated-types -->76.9%
@@ -364,7 +364,7 @@ the measured numbers. The [reports](docs/reports/) explain each step.
   parameter known only from the expected type is not inferred)
 - [ ] consts: <!-- ui:consts -->75.8% (no heap values, no generic `const fn`; a const of a generic impl (`const C: Option<T> = None`) takes its type at each use)
 - [ ] drop: <!-- ui:drop -->65.2% (the drop order of some temporaries differs)
-- [ ] traits: <!-- ui:traits -->67.6% (generic traits, blanket impls, `dyn` (also `dyn Tr<A>`), `impl .. for dyn Tr` work; `impl<T> Tr for &T` only without functions; no coherence)
+- [ ] traits: <!-- ui:traits -->68.0% (generic traits, blanket impls, `dyn` (also `dyn Tr<A>`), `impl .. for dyn Tr` work; `impl<T> Tr for &T` only without functions; no coherence)
 - [ ] `macro_rules!`: <!-- ui:macros -->74.3% (hygiene for `let`, labels, arm bindings; not every fragment kind)
 - [ ] unions: <!-- ui:union -->61.5% (no `repr(packed)`)
 - [ ] const generics: <!-- ui:const-generics -->55.4% (no `generic_const_exprs`)
@@ -375,7 +375,7 @@ the measured numbers. The [reports](docs/reports/) explain each step.
 
 ### Checks (compile-fail)
 
-- [x] borrow checking: moves, conflicting loans, escapes, mutability: borrowck <!-- cf:borrowck -->56.2%
+- [x] borrow checking: moves, conflicting loans, escapes, mutability: borrowck <!-- cf:borrowck -->55.9%
   ([report 08](docs/reports/2026-11-18-08-borrow-checking.md))
 - [x] type errors, missing items, generics declarations (E0403, E0207, E0392, E0072 ..): typeck <!-- cf:typeck -->67.7%, structs <!-- cf:structs -->75.0%
 - [x] unsafe operations outside `unsafe` (E0133): calls to `unsafe fn` and extern fns, raw pointer derefs, `static mut`,
