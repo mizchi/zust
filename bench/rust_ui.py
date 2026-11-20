@@ -266,13 +266,21 @@ def main():
                     k, n = l.split("\t")[:2]
                     ratchet[k] = int(n)
         counts = {k: sum(1 for kk, _ in passing if kk == k) for k in kinds}
+        # (only a run of every test of a kind counts against it: not one with --filter or --limit)
+        whole = not a.filter and not a.limit
         if a.write_baseline:
+            # (the kinds this run did not cover keep their entries)
+            new = dict(ratchet)
+            if whole:
+                for k in kinds:
+                    new[k] = max(counts[k], ratchet.get(k, 0))
             with open(ratchet_path, "w") as f:
                 f.write("# the least number of tests/ui tests of each kind zustc must pass (bench/rust_ui.py --check fails below it;\n")
                 f.write("# --write-baseline raises it, never lowers it). Accidental passes (rust_ui_accidental.txt) are not counted\n")
-                for k in kinds:
-                    f.write(f"{k}\t{max(counts[k], ratchet.get(k, 0))}\n")
-        else:
+                for k in PASS_KINDS + ("compile-fail",):
+                    if k in new:
+                        f.write(f"{k}\t{new[k]}\n")
+        elif whole:
             for k in kinds:
                 if k in ratchet and counts[k] < ratchet[k]:
                     print(f"ratchet: {k} passes {counts[k]}, below {ratchet[k]} (bench/rust_ui_ratchet.txt)")
