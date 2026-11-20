@@ -661,6 +661,33 @@ impl Cx<'_> {
                         }
                     }
                 }
+                // (`*{ x = z; &mut *y } = x`: a place with a block in it runs after the right side, which reads the
+                // old x. The value goes to a temporary first, an aggregate copied out of where it is)
+                if place_has_block(left) {
+                    if let Some(t) = self.peek(left) {
+                        let (v, rt) = self.expr(right, Some(t))?;
+                        if rt == Ty::Never {
+                            return Ok((None, Ty::Never));
+                        }
+                        self.same(SP, rt, t)?;
+                        let v = match v {
+                            Some(a) if t.is_agg() => {
+                                let tmp = self.temp(t);
+                                self.copy(tmp, a, t);
+                                Some(tmp)
+                            }
+                            v => v,
+                        };
+                        let p = self.place(left)?;
+                        let refill = if self.needs_drop(t) { self.drop_before_assign(left, p) } else { None };
+                        self.write(p, v);
+                        if let Some(f) = refill {
+                            let one = self.b.ins().iconst(types::I8, 1);
+                            self.b.ins().stack_store(one, f, 0);
+                        }
+                        return Ok((None, Ty::Unit));
+                    }
+                }
                 let (blk0, ev0) = (self.b.live_block(), self.bk.evs.len());
                 self.bk.place_depth += 1;
                 let pm = std::mem::replace(&mut self.bk.place_mut, true);
@@ -711,6 +738,10 @@ impl Cx<'_> {
                 let t0 = self.temps.len();
                 let (c, ct) = self.expr(cond, Some(Ty::Bool))?;
                 self.same(SP, ct, Ty::Bool)?;
+                // (the condition's temporaries are dropped before the body: `while borrow().ok() { .. }`)
+                if c.is_some() {
+                    self.drop_temps(t0);
+                }
                 match c {
                     Some(c) => {
                         self.b.ins().brif(c, body, &[], exit, &[]);
@@ -2295,6 +2326,16 @@ fn mentions_self(prog: &crate::program::Program, t: Ty) -> bool {
         Ty::Ref(_, x) | Ty::Ptr(_, x) | Ty::Array(x, _) | Ty::Slice(x) | Ty::Box(x) => mentions_self(prog, *x),
         Ty::Struct(sid) => prog.structs[sid as usize].symbolic && prog.structs[sid as usize].args.iter().any(|&a| mentions_self(prog, a)),
         Ty::Fn(f) => f.params.iter().chain([&f.ret]).any(|&a| mentions_self(prog, a)),
+        _ => false,
+    }
+}
+
+/// whether a place expression runs a block on the way (`*{ x = z; &mut *y }`)
+fn place_has_block(e: &Expr) -> bool {
+    match e {
+        Expr::Block(..) => true,
+        Expr::Paren(x) | Expr::Unary(_, x, _) | Expr::Field(x, _, _) => place_has_block(x),
+        Expr::Index(b, i, _) => place_has_block(b) || place_has_block(i),
         _ => false,
     }
 }

@@ -1067,6 +1067,30 @@ impl Cx<'_> {
                 return Ok(None);
             }
         }
+        // (`x.inc()` with `fn inc(&mut self)`: the address of x itself (through its references), not of a copy)
+        if matches!(self.prog.sigs[id as usize].params.first(), Some(Ty::Ref(true, _))) && (is_place_expr(recv) || matches!(self.peek(recv), Some(Ty::Ref(true, _)))) {
+            let mut rt = self.peek(recv);
+            let r = if matches!(rt, Some(Ty::Ref(true, _))) {
+                // (a `&mut i32` (or `&mut &mut i32`): its value is the address; one load per extra reference)
+                let (v, mut vt) = self.expr(recv, None)?;
+                let mut v = v.ok_or("internal: receiver without a value")?;
+                while let Ty::Ref(_, i @ Ty::Ref(..)) = vt {
+                    v = self.b.ins().load(PTR, mf(), v, 0);
+                    vt = *i;
+                }
+                rt = Some(vt);
+                v
+            } else {
+                let re = self.keep_expr(Expr::Ref(true, Box::new(recv.clone())));
+                let (v, vt) = self.expr(re, None)?;
+                rt = Some(vt);
+                v.ok_or("internal: receiver without an address")?
+            };
+            if rt == Some(Ty::Ref(true, intern(t))) {
+                let args: Vec<&Expr> = margs.iter().collect();
+                return self.call_fn(id, Some((r, Ty::Ref(true, intern(t)))), &args, tf, expected, SP).map(Some);
+            }
+        }
         // 受け手: 値ならそのまま、&self ならメモリに置いてそのアドレス
         let (v, vt) = self.expr(recv, lit_int.then_some(t))?;
         let mut v = v.unwrap();

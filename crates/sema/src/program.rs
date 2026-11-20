@@ -239,6 +239,9 @@ pub struct Program {
     pub deny_must_use: bool,
     /// the program's `#[must_use]` fns (by name), for unused_must_use
     pub must_use_fns: Vec<String>,
+    /// the names of the methods of numbers / bool / char that take `&mut self` (`impl Inc for i32 { fn inc(&mut
+    /// self) }`): a local that calls one is kept in memory, and the method gets its address
+    pub prim_mut_methods: HashSet<String>,
     /// -O (最適化ビルド)
     pub opt: bool,
     /// ブランケット impl のメソッド (名前 → 関数 id) と、その self 型の型パラメータ名
@@ -626,6 +629,7 @@ impl Program {
             deny_unreachable: false,
             deny_must_use: false,
             must_use_fns: vec![],
+            prim_mut_methods: HashSet::default(),
             opt: false,
             blanket: FxMap::default(),
             blanket_selfs: Default::default(),
@@ -1396,6 +1400,15 @@ impl Program {
             .map(|(sid, _)| *sid)
             .collect();
         p.has_drop = p.index.contains_key(crate::prelude::DROP_GLUE);
+        for (i, sg) in p.sigs.iter().enumerate() {
+            if let (true, Some(Ty::Ref(true, t))) = (sg.has_self, sg.params.first()) {
+                if t.is_int() || t.is_float() || matches!(t, Ty::Bool | Ty::Char) {
+                    if let Some(n) = p.names.get(i).and_then(|n| n.rsplit("::").next()) {
+                        p.prim_mut_methods.insert(n.split('#').next().unwrap_or(n).to_string());
+                    }
+                }
+            }
+        }
         Ok(p)
     }
 

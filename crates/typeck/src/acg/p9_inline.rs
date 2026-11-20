@@ -115,7 +115,7 @@ impl<'p> Cx<'p> {
         let s_self = std::mem::replace(&mut self.self_sid, env.self_sid);
         let s_sret = std::mem::replace(&mut self.sret, if sret { args.first().copied() } else { None });
         let s_lets = std::mem::replace(&mut self.lets, lets);
-        let s_taken = std::mem::replace(&mut self.addr_taken, addr_taken(&f.block));
+        let s_taken = std::mem::replace(&mut self.addr_taken, addr_taken(&f.block, &self.prog.prim_mut_methods));
         let s_env = std::mem::replace(&mut self.env, env);
         let s_caps = std::mem::replace(&mut self.caps, caps);
         let s_root = std::mem::replace(&mut self.root, root);

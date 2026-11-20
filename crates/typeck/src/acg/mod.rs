@@ -239,7 +239,7 @@ pub fn compile(prog: &Program, insts: &Mutex<Insts>, id: u32, f: &ItemFn, line_b
         None => (body_id, 0),
     };
     let mut closure_ix = HashMap::default();
-    let mut taken = addr_taken(&f.block);
+    let mut taken = addr_taken(&f.block, &prog.prim_mut_methods);
     for (i, (a, t)) in crate::ast_closure::closure_slots(&f.block).into_iter().enumerate() {
         let k = base_k + i as u32;
         // (本体に書かれたクロージャはアドレスで、マクロの引数の中のものは式の文字列で引く)
@@ -405,7 +405,7 @@ impl Compiled {
 }
 
 /// `&x` / `&mut x.f` などでアドレスを取られるローカル変数名 (shadowing は無視した過大近似)
-fn addr_taken(b: &crate::parse::Block) -> HashSet<String> {
+pub(crate) fn addr_taken(b: &crate::parse::Block, mut_methods: &crate::fxhash::FxSet<String>) -> HashSet<String> {
     fn root(e: &Expr) -> Option<String> {
         match e {
             Expr::Path(None, p) => ident_of(p).map(|s| s.to_string()),
@@ -414,10 +414,16 @@ fn addr_taken(b: &crate::parse::Block) -> HashSet<String> {
             _ => None,
         }
     }
-    fn visit(e: &Expr, out: &mut HashSet<String>) {
+    fn visit(e: &Expr, out: &mut HashSet<String>, mm: &crate::fxhash::FxSet<String>) {
         match e {
             Expr::Ref(_, x) | Expr::RawRef(_, x) => {
                 if let Some(n) = root(x) {
+                    out.insert(n);
+                }
+            }
+            // (`x.inc()` with `fn inc(&mut self)` of a number: x is borrowed mutably)
+            Expr::MethodCall(r, m, ..) if !mm.is_empty() && mm.contains(m.as_str()) => {
+                if let Some(n) = root(r) {
                     out.insert(n);
                 }
             }
@@ -444,25 +450,25 @@ fn addr_taken(b: &crate::parse::Block) -> HashSet<String> {
                     if let Some(es) = crate::ast_closure::macro_args(g) {
                         for e in &es {
                             match e {
-                                Expr::Ref(_, x) => visit(x, out),
+                                Expr::Ref(_, x) => visit(x, out, mm),
                                 Expr::Path(..) | Expr::Lit(_, _) => {}
-                                e => visit(e, out),
+                                e => visit(e, out, mm),
                             }
                         }
                     }
                 }
                 for e in &es {
-                    visit(e, out);
+                    visit(e, out, mm);
                 }
                 return;
             }
             _ => {}
         }
-        crate::ast_closure::each_child_pub(e, &mut |c| visit(c, out));
+        crate::ast_closure::each_child_pub(e, &mut |c| visit(c, out, mm));
     }
     let mut out = HashSet::default();
     let blk = Expr::Block(None, false, b.clone());
-    visit(&blk, &mut out);
+    visit(&blk, &mut out, mut_methods);
     out
 }
 

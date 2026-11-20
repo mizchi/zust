@@ -2372,6 +2372,7 @@ run-pass	for-loop-while/auto-loop.rs
 compile-fail	for-loop-while/break-outside-loop.rs
 run-pass	for-loop-while/break-value.rs
 run-pass	for-loop-while/break.rs
+run-pass	for-loop-while/cleanup-rvalue-during-if-and-while.rs
 compile-fail	for-loop-while/for-c-in-str.rs
 run-pass	for-loop-while/for-destruct.rs
 compile-fail	for-loop-while/for-else-err.rs
@@ -3778,6 +3779,7 @@ run-pass	mir/issue-89485.rs
 check-pass	mir/issue-99866.rs
 compile-fail	mir/mir-build-2021-closure-capture-ice-110453-2.rs
 run-pass	mir/mir-typeck-normalize-fn-sig.rs
+run-pass	mir/mir_assign_eval_order.rs
 run-pass	mir/mir_call_with_associated_type.rs
 run-pass	mir/mir_cast_fn_ret.rs
 run-pass	mir/mir_codegen_array.rs
@@ -4183,6 +4185,7 @@ run-pass	overloaded/overloaded-calls-object-zero-args.rs
 run-pass	overloaded/overloaded-deref.rs
 run-pass	overloaded/overloaded-index-assoc-list.rs
 run-pass	overloaded/overloaded-index-in-field.rs
+run-pass	overloaded/overloaded-index.rs
 run-pass	overloaded/overloaded_deref_with_ref_pattern_issue15609.rs
 run-pass	overloaded/subtyping-both-lhs-and-rhs-in-add-impl.rs
 run-pass	packed/misaligned-reference-drop-field-99838.rs
