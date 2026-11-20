@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795163484462,
+  "lastUpdate": 1795163486635,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -77299,6 +77299,70 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/mizchi/zust/commit/5ae4e4c8634fa64922ec6db4e832a8e84abb79c6"
         },
         "date": 1795162596355,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tests/ui run-pass pass rate",
+            "value": 71.4,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui run-pass passing",
+            "value": 1703,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui check-pass pass rate",
+            "value": 79.19,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui check-pass passing",
+            "value": 1431,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui build-pass pass rate",
+            "value": 70.37,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui build-pass passing",
+            "value": 95,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui compile-fail pass rate",
+            "value": 48.38,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui compile-fail passing",
+            "value": 3560,
+            "unit": "tests"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "miz404@gmail.com",
+            "name": "Kotaro Chikuba",
+            "username": "mizchi"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "d2a2e93b528c83072e463728da5f6e83afc9f840",
+          "message": "Merge pull request #10 from mizchi/claude/sleepy-dijkstra-8sankk\n\nformal/connect: test the implementation against TLA+ models (idealis conformance); PRs commit no KPI log rows",
+          "timestamp": "2026-11-20T17:26:28+09:00",
+          "tree_id": "d7b1145806d6106f6bd9cb7704143cd1ffd34f61",
+          "url": "https://github.com/mizchi/zust/commit/d2a2e93b528c83072e463728da5f6e83afc9f840"
+        },
+        "date": 1795163486189,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
