@@ -3315,6 +3315,7 @@ check-pass	lint/lint-non-camel-case-with-trailing-underscores.rs
 compile-fail	lint/lint-non-uppercase-associated-const.rs
 compile-fail	lint/lint-non-uppercase-statics.rs
 compile-fail	lint/lint-non-uppercase-trait-assoc-const.rs
+check-pass	lint/lint-non-uppercase-usages.rs
 compile-fail	lint/lint-nonstandard-style-unicode-1.rs
 compile-fail	lint/lint-nonstandard-style-unicode-2.rs
 compile-fail	lint/lint-nonstandard-style-unicode-3.rs

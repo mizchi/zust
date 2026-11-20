@@ -1015,10 +1015,32 @@ pub fn expand_thread_local(src: &str) -> Option<String> {
                 return None;
             }
             let init = text(i0, i1);
+            // (std's LocalKey<Cell<T>> / LocalKey<RefCell<T>> helpers, on the slot once `with` has filled it)
+            let tt = ty.trim();
+            let slot = format!("{{ self.with(|_| ()); #[allow(static_mut_refs)] unsafe {{ {name}__slot.as_ref().unwrap() }} }}");
+            let extra = if let Some(inner) = tt.strip_prefix("Cell<").and_then(|r| r.strip_suffix('>')) {
+                format!(
+                    "{vis} fn set(&'static self, v: {inner}) {{ {slot}.set(v) }} \
+                     {vis} fn get(&'static self) -> {inner} {{ {slot}.get() }} \
+                     {vis} fn take(&'static self) -> {inner} {{ {slot}.take() }} \
+                     {vis} fn replace(&'static self, v: {inner}) -> {inner} {{ {slot}.replace(v) }} "
+                )
+            } else if let Some(inner) = tt.strip_prefix("RefCell<").and_then(|r| r.strip_suffix('>')) {
+                format!(
+                    "{vis} fn set(&'static self, v: {inner}) {{ *{slot}.borrow_mut() = v; }} \
+                     {vis} fn take(&'static self) -> {inner} {{ {slot}.take() }} \
+                     {vis} fn replace(&'static self, v: {inner}) -> {inner} {{ {slot}.replace(v) }} \
+                     {vis} fn with_borrow<R, F: FnOnce(&{inner}) -> R>(&'static self, f: F) -> R {{ f(&*{slot}.borrow()) }} \
+                     {vis} fn with_borrow_mut<R, F: FnOnce(&mut {inner}) -> R>(&'static self, f: F) -> R {{ f(&mut *{slot}.borrow_mut()) }} "
+                )
+            } else {
+                String::new()
+            };
             expanded.push_str(&format!(
                 "#[allow(non_camel_case_types)] {vis} struct {name}__Key; static mut {name}__slot: Option<{ty}> = None; \
                  {vis} static {name}: {name}__Key = {name}__Key; impl {name}__Key {{ #[allow(static_mut_refs)] {vis} fn with<R, F: FnOnce(&{ty}) -> R>(&'static self, f: F) -> R \
-                 {{ unsafe {{ if {name}__slot.is_none() {{ {name}__slot = Some({init}); }} f({name}__slot.as_ref().unwrap()) }} }} }} "
+                 {{ unsafe {{ if {name}__slot.is_none() {{ {name}__slot = Some({init}); }} f({name}__slot.as_ref().unwrap()) }} }} \
+                 {vis} fn try_with<R, F: FnOnce(&{ty}) -> R>(&'static self, f: F) -> Result<R, ()> {{ Ok(self.with(f)) }} {extra}}} "
             ));
             j = i1 + 1;
         }

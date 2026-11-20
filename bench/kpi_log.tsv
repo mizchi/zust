@@ -154,3 +154,4 @@ date	commit	change	noop_M	edit_M	check_M	cache_KiB	lsp_G	run	check	build	cfail
 2026-11-20	cdb2f0f+	static data: const fn calls inlined; no silent zeros; Solver::lookup as loops	0.694	547.968	3837.321	1902.8	-	1752	1448	97	3567	1160.432	63.532	10.283	315.964
 2026-11-20	4ed592f+	into_iter of arrays (by value) and of iterators (identity)	0.692	547.124	3837.319	1902.8	-	1753	1448	97	3567	1160.421	63.438	10.270	316.082
 2026-11-20	2126394+	Option/Result::inspect, overflowing/wrapping div/rem, Iterator::unzip	0.695	547.075	3836.709	1902.8	-	-	-	-	-	1160.169	63.636	10.283	316.599
+2026-11-20	7a588e0+	thread_local keys: try_with and Cell/RefCell helpers; Cell::take, RefCell::take	0.692	546.999	3836.534	1902.8	-	1753	1450	97	3567	1159.753	63.665	10.270	316.653

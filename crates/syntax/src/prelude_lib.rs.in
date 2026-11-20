@@ -9223,6 +9223,9 @@ impl<T> RefCell<T> {
     pub fn replace(&self, v: T) -> T {
         __core_replace(self.borrow_mut(), v)
     }
+    pub fn take(&self) -> T {
+        __core_replace(self.borrow_mut(), __exr_default::<T>())
+    }
     pub fn get_mut(&mut self) -> &mut T {
         &mut self.val
     }
@@ -9355,6 +9358,12 @@ impl<T> Cell<T> {
     }
     pub fn into_inner(self) -> T {
         self.val
+    }
+    pub fn take(&self) -> T {
+        self.replace(__exr_default::<T>())
+    }
+    pub fn get_mut(&mut self) -> &mut T {
+        &mut self.val
     }
 }
 
