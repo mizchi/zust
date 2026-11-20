@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795190207842,
+  "lastUpdate": 1795190210464,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -53512,6 +53512,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "lsp peak RSS",
             "value": 75.91,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "committer": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "distinct": true,
+          "id": "d9294dc961e59727cda4a420beec3983d197bc4a",
+          "message": "bench/blaze_ui.py: blaze and zustc on the same sample of tests/ui\n\nblaze has no tests/ui harness of its own. This script picks the tests\nbench/rust_ui.py counts as applicable, N of each of run-pass, check-pass\nand build-pass with a fixed seed. It builds each one as src/main.rs of one\ncargo package with `blaze build`, with the edition from `//@ edition:`\nelse 2015, and runs the run-pass ones (exit 0, `.run.stdout`). zustc's\nresult on the same tests is read from out/rust_ui_results.txt. The table\ngoes to stdout and to bench/blaze_ui_result.md, for README's comparison.\n\nBetween tests it waits out blaze's ~20 ms racy-stamp window and removes\nthe last binary. Without that, a build right after the copy kept the\nprevious test's program and the run-pass count came out too low.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-20T15:51:58Z",
+          "tree_id": "dea836c1affe7294f467eb8fc2156455c3457da4",
+          "url": "https://github.com/mizchi/zust/commit/d9294dc961e59727cda4a420beec3983d197bc4a"
+        },
+        "date": 1795190209935,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "lsp definition p50",
+            "value": 0.598,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp hover p50",
+            "value": 0.425,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp completion p50",
+            "value": 1.384,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp references p50",
+            "value": 5.852,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp rename p50",
+            "value": 0.424,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp signatureHelp p50",
+            "value": 0.76,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp documentHighlight p50",
+            "value": 1.04,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp ready (startup to indexed)",
+            "value": 133.599,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp peak RSS",
+            "value": 75.746,
             "unit": "MiB"
           }
         ]
