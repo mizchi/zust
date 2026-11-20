@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795161390831,
+  "lastUpdate": 1795161392784,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -76597,6 +76597,70 @@ window.BENCHMARK_DATA = {
           {
             "name": "tests/ui compile-fail passing",
             "value": 3562,
+            "unit": "tests"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "committer": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "distinct": true,
+          "id": "75f44c72d625e3cd857df93e71c455ec3d9b5536",
+          "message": "Patterns: a path to a constant is equal to its value\n\n`Num::ZERO => ..` (an associated const of the program's) and\n`u8::MIN ..= u8::MAX` (a primitive type's) were read as enum variants\n(\"no variant named\"); a path pattern that names no variant of the\nscrutinee's type but a constant is now compared with that constant.\n\ntests/ui: +2 check-pass passes; pattern/non-structural-match-types*.rs\npassed only through the old \"no variant\" error at the expected line\n(they expect \"constant of non-structural type\") and go to\nrust_ui_accidental.txt.\nKPI: within ±0.09% of the row before.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-20T07:52:27Z",
+          "tree_id": "fd636fac617162fae1ccf22fbb4c1a6f8f568f63",
+          "url": "https://github.com/mizchi/zust/commit/75f44c72d625e3cd857df93e71c455ec3d9b5536"
+        },
+        "date": 1795161392411,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tests/ui run-pass pass rate",
+            "value": 71.36,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui run-pass passing",
+            "value": 1702,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui check-pass pass rate",
+            "value": 79.08,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui check-pass passing",
+            "value": 1429,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui build-pass pass rate",
+            "value": 70.37,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui build-pass passing",
+            "value": 95,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui compile-fail pass rate",
+            "value": 48.37,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui compile-fail passing",
+            "value": 3559,
             "unit": "tests"
           }
         ]
