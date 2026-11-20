@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795146194216,
+  "lastUpdate": 1795146196057,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -58254,6 +58254,85 @@ window.BENCHMARK_DATA = {
           {
             "name": "parity 一致の平均",
             "value": 94.662,
+            "unit": "%"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "committer": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "distinct": true,
+          "id": "7add9a981fa6d50c6f3966e917f486ea33c709aa",
+          "message": "E0252 / E0255 check: linear, and skipped without a crate-root use\n\nThe clash check of c26b695 compared each name with every one before it\n(quadratic in the crate's items: check +8% on the 5000-fn benchmark).\nNames now go into a hash of string slices, and a crate whose root has\nno `use` returns after a look at each item's first bytes.\n\nKPI: check back to 3880.2 (-7.45% against c26b695, +0.02% against\nbefore it); traits check -0.07%.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-20T03:37:33Z",
+          "tree_id": "2d1863f68919b88d5b431efcaa324a2df1a0ca5e",
+          "url": "https://github.com/mizchi/zust/commit/7add9a981fa6d50c6f3966e917f486ea33c709aa"
+        },
+        "date": 1795146195844,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "parity documentSymbol (名前の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity workspace/symbol (上位 20 の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity definition (行き先の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity hover (名前を含む)",
+            "value": 97.5,
+            "unit": "%"
+          },
+          {
+            "name": "parity references (数の一致)",
+            "value": 97.436,
+            "unit": "%"
+          },
+          {
+            "name": "parity documentHighlight (数の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity rename (書き換えの一致)",
+            "value": 95,
+            "unit": "%"
+          },
+          {
+            "name": "parity signatureHelp (名前・引数の数・今の引数の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity completion `x.\\|` (書いてある名前を含む)",
+            "value": 95,
+            "unit": "%"
+          },
+          {
+            "name": "parity completion `na\\|me` (同)",
+            "value": 73.333,
+            "unit": "%"
+          },
+          {
+            "name": "parity 一致の平均",
+            "value": 95.827,
             "unit": "%"
           }
         ]
