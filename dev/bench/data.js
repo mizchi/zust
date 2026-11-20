@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795146709694,
+  "lastUpdate": 1795146711771,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -70290,6 +70290,70 @@ window.BENCHMARK_DATA = {
           {
             "name": "tests/ui compile-fail passing",
             "value": 3423,
+            "unit": "tests"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "committer": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "distinct": true,
+          "id": "e00a7453dedf50aa016a3ee88e5845417404f79a",
+          "message": "Malformed built-in attributes (E0539 / E0565)\n\nA built-in attribute of a fixed shape written in another one is\n\"malformed `X` attribute input\" at its line: crate_type /\nrecursion_limit / crate_name need `= \"...\"`, inline is a word or\n(always) / (never), must_use a word or `= \"...\"`, cold / track_caller /\nnon_exhaustive / no_mangle words, repr a non-empty list without `=`,\ndeprecated not `= b\"..\"`, link a list, the lint levels lists,\nmacro_use a word or a list of names, cfg a predicate and cfg_attr a\npredicate with attributes. Read are the file's inner attributes and\nthose in front of the items, so the check costs nothing measurable\n(check +0.01%).\n\ntests/ui: +27 compile-fail passes; three whose expected message\ndiffers go to rust_ui_accidental.txt.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-20T03:48:07Z",
+          "tree_id": "777275cd14678adb8a3a0f0d3be8f77132220cf4",
+          "url": "https://github.com/mizchi/zust/commit/e00a7453dedf50aa016a3ee88e5845417404f79a"
+        },
+        "date": 1795146711338,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tests/ui run-pass pass rate",
+            "value": 71.19,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui run-pass passing",
+            "value": 1698,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui check-pass pass rate",
+            "value": 78.42,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui check-pass passing",
+            "value": 1417,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui build-pass pass rate",
+            "value": 70.37,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui build-pass passing",
+            "value": 95,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui compile-fail pass rate",
+            "value": 46.91,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui compile-fail passing",
+            "value": 3452,
             "unit": "tests"
           }
         ]
