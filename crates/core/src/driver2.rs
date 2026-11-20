@@ -488,6 +488,9 @@ impl Session2 {
             if let Some(e) = duplicate_import(src0, &src, &items[..user]) {
                 return Err(e);
             }
+            if let Some(e) = malformed_attr(src0, &src, &items[..user]) {
+                return Err(e);
+            }
         }
         let mut tm = Timer { on: std::env::var_os("ZUSTC_PROF").is_some(), last: now_ns(), start: now_ns() };
         if let Some(p) = std::env::var_os("ZUSTC_DUMP_SRC") {
@@ -1091,6 +1094,114 @@ fn first_unreachable(b: &crate::parse::Block) -> Option<(crate::parse::Pos, &'st
         }
     }
     block(b)
+}
+
+/// "malformed `X` attribute input" (E0539 / E0565): a built-in attribute of a fixed shape written in another one.
+/// Read are the file's inner attributes (its head) and the attributes in front of the items (no full-text scan)
+fn malformed_attr(src0: &str, split: &str, items: &[SrcItem]) -> Option<String> {
+    // (an attribute's name and its input: None = a word, Some('(') = a list, Some('=') = `= value`)
+    fn check(name: &str, input: &str) -> bool {
+        let input = input.trim();
+        let (form, inner) = if input.is_empty() {
+            (' ', "")
+        } else if let Some(r) = input.strip_prefix('(') {
+            ('(', r.strip_suffix(')').unwrap_or(r).trim())
+        } else if let Some(r) = input.strip_prefix('=') {
+            ('=', r.trim())
+        } else {
+            return true;
+        };
+        let str_lit = |v: &str| v.starts_with('"') && v.ends_with('"') && v.len() >= 2;
+        let idents = |v: &str| v.split(',').all(|x| {
+            let x = x.trim();
+            !x.is_empty() && x.chars().all(|c| c.is_alphanumeric() || c == '_')
+        });
+        match name {
+            "crate_type" | "recursion_limit" | "type_length_limit" | "crate_name" => form == '=' && str_lit(inner),
+            "inline" => form == ' ' || (form == '(' && matches!(inner, "always" | "never")),
+            "must_use" => form == ' ' || (form == '=' && str_lit(inner)),
+            "cold" | "track_caller" | "non_exhaustive" | "no_mangle" | "automatically_derived" | "no_implicit_prelude" => form == ' ',
+            "repr" => form == '(' && !inner.is_empty() && !inner.contains('='),
+            "deprecated" => form == ' ' || (form == '=' && str_lit(inner)) || form == '(',
+            "link" => form == '(' && !inner.is_empty() && !inner.contains("cfg()"),
+            "allow" | "warn" | "deny" | "forbid" | "expect" => form == '(',
+            "macro_use" => form == ' ' || (form == '(' && idents(inner)),
+            "cfg" => form == '(' && !inner.is_empty(),
+            "cfg_attr" => form == '(' && inner.contains(','),
+            _ => true,
+        }
+    }
+    // (the attributes at the start of a text: `#[name input]` / `#![name input]`, with their offsets)
+    fn leading(t: &str) -> Vec<(usize, &str, &str)> {
+        let mut out = vec![];
+        let mut i = 0;
+        loop {
+            let rest = &t[i..];
+            let ws = rest.len() - rest.trim_start().len();
+            let r = &rest[ws..];
+            let open = if r.starts_with("#![") { 3 } else if r.starts_with("#[") { 2 } else { break };
+            // (the matching `]`, past nested brackets and string literals)
+            let mut depth = 0i32;
+            let mut in_str = false;
+            let mut end = None;
+            for (k, c) in r.char_indices().skip(open) {
+                match c {
+                    '"' => in_str = !in_str,
+                    '[' | '(' if !in_str => depth += 1,
+                    ')' if !in_str => depth -= 1,
+                    ']' if !in_str && depth == 0 => {
+                        end = Some(k);
+                        break;
+                    }
+                    ']' if !in_str => depth -= 1,
+                    _ => {}
+                }
+            }
+            let Some(e) = end else { break };
+            let body = &r[open..e];
+            let n_end = body.find(|c: char| !(c.is_alphanumeric() || c == '_' || c == ':')).unwrap_or(body.len());
+            out.push((i + ws, &body[..n_end], &body[n_end..]));
+            i += ws + e + 1;
+        }
+        out
+    }
+    let report = |text: &str, base_line: usize, at: usize, name: &str| {
+        let line = base_line + text[..at].matches('\n').count();
+        format!("{line}:1: malformed `{name}` attribute input")
+    };
+    // (the file's inner attributes)
+    let mut head_end = src0.len().min(8192);
+    while !src0.is_char_boundary(head_end) {
+        head_end -= 1;
+    }
+    let head = &src0[..head_end];
+    // (comments between them: line by line, skipping `//` lines)
+    let mut off = 0;
+    for line in head.split_inclusive('\n') {
+        let t = line.trim_start();
+        if t.starts_with("#![") {
+            for (at, name, input) in leading(line) {
+                if !check(name, input) {
+                    return Some(report(head, 1, off + at, name));
+                }
+            }
+        } else if !(t.is_empty() || t.starts_with("//")) && !t.starts_with("#[") {
+            break;
+        }
+        off += line.len();
+    }
+    for it in items {
+        let text = &split[it.start..it.end];
+        if !text.trim_start().starts_with("#[") {
+            continue;
+        }
+        for (at, name, input) in leading(text) {
+            if !check(name, input) {
+                return Some(report(text, it.line, at, name));
+            }
+        }
+    }
+    None
 }
 
 /// E0252 / E0255: a name a top-level `use` brings in that another top-level `use` or item of the crate root also
