@@ -1525,11 +1525,13 @@ impl Cx<'_> {
             let tr0 = tr;
             let (trn, targs) = self.dyn_trait_args(tr);
             let tr = trn.as_str();
-            if !self.prog.traits.contains_key(tr) {
+            // (`dyn Send` / `dyn Sync`: an auto trait, every type of the program's has it; no methods)
+            let auto = matches!(tr, "Send" | "Sync");
+            if !auto && !self.prog.traits.contains_key(tr) {
                 return err(span, format!("cannot find trait `{tr}`"));
             }
-            let decls = self.prog.dyn_methods(tr);
-            if !self.prog.implements(t, tr) {
+            let decls = if auto { vec![] } else { self.prog.dyn_methods(tr) };
+            if !auto && !self.prog.implements(t, tr) {
                 return err(span, format!("the trait `{tr}` is not implemented for `{}`", self.prog.tn(t)));
             }
             // (E0191: every associated type of the trait is bound in the dyn type: `dyn Iterator<Item = u32>`)

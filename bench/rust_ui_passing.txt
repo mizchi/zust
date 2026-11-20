@@ -1729,6 +1729,7 @@ run-pass	derives/debug/derive-Debug-use-ufcs-tuple.rs
 run-pass	derives/debug/derive-debug-2.rs
 check-pass	derives/debug/derive-debug-generic-with-lifetime.rs
 check-pass	derives/debug/derive-debug-newtype-unsized-slice.rs
+run-pass	derives/debug/derive-debug.rs
 run-pass	derives/default/deriving-default-box.rs
 run-pass	derives/default/deriving-default-enum.rs
 compile-fail	derives/derive-assoc-type-not-impl.rs
@@ -2687,6 +2688,7 @@ compile-fail	impl-trait/issues/issue-54600.rs
 compile-fail	impl-trait/issues/issue-54840.rs
 compile-fail	impl-trait/issues/issue-54966.rs
 check-pass	impl-trait/issues/issue-55608-captures-empty-region.rs
+check-pass	impl-trait/issues/issue-57464-unexpected-regions.rs
 compile-fail	impl-trait/issues/issue-58956.rs
 compile-fail	impl-trait/issues/issue-62742.rs
 check-pass	impl-trait/issues/issue-65581.rs
@@ -3418,6 +3420,7 @@ run-pass	loops/issue-1974.rs
 compile-fail	loops/issue-43162.rs
 compile-fail	loops/label-on-block-suggest-move.rs
 compile-fail	loops/loop-break-never-type-mismatch.rs
+check-pass	loops/loop-break-unsize.rs
 compile-fail	loops/loop-break-value.rs
 compile-fail	loops/loop-else-err.rs
 compile-fail	loops/loop-if-else-break-issue-123261.rs

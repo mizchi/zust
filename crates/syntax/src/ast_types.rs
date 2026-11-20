@@ -134,6 +134,24 @@ fn single(p: &Path) -> Option<&str> {
     }
 }
 
+/// `dyn Send` / `dyn Sync + 'a`: a trait object of an auto trait alone, its trait. Read only right behind a pointer
+/// (`Box<dyn Send>`, `&dyn Sync`): other places (`Rc<dyn Send>`, `Wrapper<dyn Send>`) need unsizing this compiler
+/// does not do
+fn auto_dyn(t: &PTy) -> Option<String> {
+    let PTy::Dyn(bs) = t else { return None };
+    let mut auto = None;
+    for b in bs {
+        match b {
+            Bound::Trait(_, p) if p.segs.last().is_some_and(|s| s.name == "Send" || s.name == "Sync") => {
+                auto.get_or_insert_with(|| p.segs.last().unwrap().name.clone());
+            }
+            Bound::Lifetime(_) => {}
+            _ => return None,
+        }
+    }
+    auto
+}
+
 pub fn tysyn(t: &PTy, self_ty: Option<&TySyn>) -> R<TySyn> {
     // (the parser's marker of `dyn Future<Output = T>` behind Box / Pin: futures run at once, so it is T)
     if let PTy::Path(None, p) = t {
@@ -163,10 +181,14 @@ pub fn tysyn(t: &PTy, self_ty: Option<&TySyn>) -> R<TySyn> {
         }
         PTy::Dyn(bs) => {
             let mut tr: Option<String> = None;
+            // (`dyn Send`: an auto trait alone is the object's trait)
+            let mut auto: Option<String> = None;
             for b in bs {
                 match b {
                     // (`dyn Error + Send + Sync`: 自動 trait は読み飛ばす)
-                    Bound::Trait(_, p) if p.segs.last().is_some_and(|s| s.name == "Send" || s.name == "Sync") => {}
+                    Bound::Trait(_, p) if p.segs.last().is_some_and(|s| s.name == "Send" || s.name == "Sync") => {
+                        auto.get_or_insert_with(|| p.segs.last().map(|s| s.name.clone()).unwrap_or_default());
+                    }
                     Bound::Trait(_, p) if tr.is_none() => tr = Some(p.segs.last().map(|s| s.text.clone()).unwrap_or_default()),
                     Bound::Lifetime(_) => {}
                     _ => return Err("only one trait is supported in `dyn`".to_string()),
@@ -174,12 +196,16 @@ pub fn tysyn(t: &PTy, self_ty: Option<&TySyn>) -> R<TySyn> {
             }
             match tr {
                 Some(s) => TySyn::Dyn(s),
-                None => return Err("`dyn` needs a trait".to_string()),
+                // (an auto trait alone is read right behind a pointer only, see auto_dyn)
+                None => {
+                    let _ = auto;
+                    return Err("`dyn` needs a trait".to_string());
+                }
             }
         }
         // ライフタイムはコード生成に影響しないので消去する
-        PTy::Ref(_, m, i) => TySyn::Ref(*m, Box::new(tysyn(i, self_ty)?)),
-        PTy::Ptr(m, i) => TySyn::Ptr(*m, Box::new(tysyn(i, self_ty)?)),
+        PTy::Ref(_, m, i) => TySyn::Ref(*m, Box::new(auto_dyn(i).map(TySyn::Dyn).map(Ok).unwrap_or_else(|| tysyn(i, self_ty))?)),
+        PTy::Ptr(m, i) => TySyn::Ptr(*m, Box::new(auto_dyn(i).map(TySyn::Dyn).map(Ok).unwrap_or_else(|| tysyn(i, self_ty))?)),
         PTy::Slice(i) => TySyn::Slice(Box::new(tysyn(i, self_ty)?)),
         PTy::Array(e, n) => {
             let len = match &**n {
@@ -276,6 +302,8 @@ fn path_ty(p: &Path, self_ty: Option<&TySyn>) -> R<TySyn> {
     let mut generic_args = Vec::new();
     for a in &last.args {
         match a {
+            // (`Box<dyn Send>`: an auto trait alone, right in a Box)
+            GArg::Ty(t) if s == "Box" && auto_dyn(t).is_some() => generic_args.push(TySyn::Dyn(auto_dyn(t).unwrap())),
             GArg::Ty(t) => {
                 // (`Buf<N>`: 型の位置の 1 つの名前は型として読まれる (syn と同じ))
                 generic_args.push(tysyn(t, self_ty)?)
