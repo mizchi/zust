@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795167622125,
+  "lastUpdate": 1795167623921,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -65874,6 +65874,85 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/mizchi/zust/commit/81d4bd0227f04001fd6e1c8c3e0bfab88099db5c"
         },
         "date": 1795165755761,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "parity documentSymbol (名前の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity workspace/symbol (上位 20 の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity definition (行き先の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity hover (名前を含む)",
+            "value": 95,
+            "unit": "%"
+          },
+          {
+            "name": "parity references (数の一致)",
+            "value": 95,
+            "unit": "%"
+          },
+          {
+            "name": "parity documentHighlight (数の一致)",
+            "value": 97.143,
+            "unit": "%"
+          },
+          {
+            "name": "parity rename (書き換えの一致)",
+            "value": 93.75,
+            "unit": "%"
+          },
+          {
+            "name": "parity signatureHelp (名前・引数の数・今の引数の一致)",
+            "value": 94.737,
+            "unit": "%"
+          },
+          {
+            "name": "parity completion `x.\\|` (書いてある名前を含む)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity completion `na\\|me` (同)",
+            "value": 89.655,
+            "unit": "%"
+          },
+          {
+            "name": "parity 一致の平均",
+            "value": 96.528,
+            "unit": "%"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "committer": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "distinct": true,
+          "id": "b88ba4eb8bd214321108226ecd9a334fb491142c",
+          "message": "Support slice is_sorted* and unary ops on numeric references\n\nis_sorted, is_sorted_by and is_sorted_by_key come from prelude helpers.\nUnary - and ! on &i32 / &f64 / &bool now read through the reference,\nin codegen, in peek and in type inference.\n\ntests/ui: +1 check-pass (slice_is_sorted_by_borrow.rs).\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-20T09:35:31Z",
+          "tree_id": "a5be2b285d6c29388b8c7ecbfcbc0810e42b7c5a",
+          "url": "https://github.com/mizchi/zust/commit/b88ba4eb8bd214321108226ecd9a334fb491142c"
+        },
+        "date": 1795167623723,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
