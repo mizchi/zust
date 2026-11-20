@@ -11,7 +11,8 @@
 //! 持ち、超えた分のファイルは定義と名前の集合だけにする (参照・hover で要るときに読み直し、同じだけの大きさの LRU で覚える)。
 
 use std::cell::RefCell;
-use std::collections::HashMap;
+// (Fx hashing: deterministic and cheaper than the std map's random-seeded SipHash)
+type HashMap<K, V> = zust_core::fxhash::FxMap<K, V>;
 use std::rc::Rc;
 use std::io::{self, BufRead, Write};
 use std::path::{Path, PathBuf};
@@ -71,13 +72,13 @@ impl Default for Server {
 impl Server {
     pub fn new() -> Server {
         Server {
-            docs: HashMap::new(),
+            docs: HashMap::default(),
             root: None,
-            files: HashMap::new(),
+            files: HashMap::default(),
             lib_job: None,
             lib: vec![],
             layout: None,
-            feats: HashMap::new(),
+            feats: HashMap::default(),
             budget: std::env::var("ZUST_ANALYZER_MEM_MB").ok().and_then(|v| v.parse::<f64>().ok()).map(|m| (m * 1048576.0) as usize).unwrap_or(4 << 20),
             cache: RefCell::new(vec![]),
             crates: vec![],
@@ -408,7 +409,7 @@ impl Server {
             let mut changed = false;
             // (本文を持つファイルの大きさの合計: budget を超えたら、そこからのファイルは slim)
             let mut full: usize = self.files.values().filter(|f| !f.idx.slim).map(|f| f.idx.text_len()).sum();
-            let mut keep: HashMap<PathBuf, WsFile> = HashMap::new();
+            let mut keep: HashMap<PathBuf, WsFile> = HashMap::default();
             for (p, pm, kr, main) in paths {
                 if open.contains(&p) {
                     continue;
@@ -469,7 +470,7 @@ impl Server {
         // (候補: (名前, 種類, uri, 範囲, 囲むもの))
         let mut hits: Vec<(String, u32, String, [u32; 4], String)> = vec![];
         // (名前 → 種類: use の別名・再エクスポートの種類に)
-        let mut kind_of: HashMap<&str, u32> = HashMap::new();
+        let mut kind_of: HashMap<&str, u32> = HashMap::default();
         for (_, f) in &ws {
             for d in &f.defs {
                 if d.owner.is_empty() {
@@ -548,8 +549,8 @@ impl Server {
 
     /// 位置の列 → (uri, LSP の範囲)。slim なファイルの中の位置は、読み直した本文で行と桁にする (定義の名前の位置は索引が覚えている)
     fn ranges(&self, ws: &[(String, &FileIndex)], idx: &[&FileIndex], locs: &[Loc]) -> Vec<(String, Value)> {
-        let mut lis: HashMap<usize, Option<LineIndex>> = HashMap::new();
-        let mut held: HashMap<usize, Rc<FileIndex>> = HashMap::new();
+        let mut lis: HashMap<usize, Option<LineIndex>> = HashMap::default();
+        let mut held: HashMap<usize, Rc<FileIndex>> = HashMap::default();
         locs.iter()
             .map(|l| {
                 let mut f = idx[l.file];
@@ -776,7 +777,7 @@ fn index_deps(root: &Path) -> Vec<(String, FileIndex)> {
         }
     }
     let lock = std::fs::read_to_string(root.join("Cargo.lock")).unwrap_or_default();
-    let mut vers: HashMap<String, String> = HashMap::new();
+    let mut vers: HashMap<String, String> = HashMap::default();
     let mut cur: Option<String> = None;
     for l in lock.lines() {
         if let Some(n) = l.strip_prefix("name = ") {
@@ -970,7 +971,7 @@ pub fn run<R: BufRead, W: Write>(mut r: R, mut w: W) -> io::Result<()> {
 /// Cargo.toml がなければ None
 /// Cargo.toml の `[features]` の default から有効になる feature (default が含むものもたどる。`dep:` は除く)
 fn default_features(toml: &str) -> Vec<String> {
-    let mut table: HashMap<String, Vec<String>> = HashMap::new();
+    let mut table: HashMap<String, Vec<String>> = HashMap::default();
     let mut in_feat = false;
     for l in toml.lines() {
         let l = l.trim();
@@ -1027,8 +1028,8 @@ fn cargo_files(root: &Path) -> Option<(Vec<(PathBuf, Vec<String>, u32, bool)>, H
         }
     }
     let mut out: Vec<(PathBuf, Vec<String>, u32, bool)> = vec![];
-    let mut feats: HashMap<u32, Vec<String>> = HashMap::new();
-    let mut seen: std::collections::HashSet<PathBuf> = std::collections::HashSet::new();
+    let mut feats: HashMap<u32, Vec<String>> = HashMap::default();
+    let mut seen: zust_core::fxhash::FxSet<PathBuf> = Default::default();
     let mut krate = 0u32;
     let mut names: Vec<(String, PathBuf)> = vec![];
     for pkg in pkgs {

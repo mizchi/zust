@@ -137,3 +137,4 @@ date	commit	change	noop_M	edit_M	check_M	cache_KiB	lsp_G	run	check	build	cfail
 2026-11-20	75f44c7+	dyn Send / dyn Sync right behind a pointer	0.695	559.723	3856.822	1902.8	-	1703	1431	95	3561	1180.730	63.480	10.259	321.365
 2026-11-20	5ae4e4c+	an inherent and a trait impl's associated const of one name: Foo::C and <Foo as Tr>::C	0.697	559.733	3858.714	1902.8	-	1704	1432	95	3563	1181.000	63.476	10.273	321.510
 2026-11-20	6f4d8e6+	std HashMap / HashSet (random seeds, SipHash) -> Fx maps in program, types, macros, prelude, driver	0.695	559.731	3847.819	1902.8	10.8981	1704	1432	95	3563	1159.541	63.480	10.259	317.437
+2026-11-20	9cc1886+	zust-analyzer: Fx map in place of std HashMap	0.695	559.731	3847.819	1902.8	10.8498	-	-	-	-	1159.541	63.392	10.259	317.432
