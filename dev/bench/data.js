@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795173095108,
+  "lastUpdate": 1795173097942,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -49864,6 +49864,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "lsp peak RSS",
             "value": 74.492,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "committer": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "distinct": true,
+          "id": "8dba29d7ea3eed5353a39c25151b13b45956ff33",
+          "message": "#[link(name = \"..\")] and -L; tests/ui links rust_test_helpers\n\n- zustc takes `-L dir` (also `-L native=dir`). An extern block's\n  `#[link(name = \"x\")]` links lib<x>.a from those directories, else\n  passes -lx to the linker. Only the attributes at the start of items\n  are read, and only when the program is linked.\n- bench/rust_ui.py fetches tests/auxiliary as well, builds\n  rust_test_helpers.c into out/rust_test_helpers/librust_test_helpers.a\n  once, and passes -L to every build, as compiletest does.\n\ntests/ui: +12 run-pass (extern calls into the C helpers).\n\nKPI: no-op build 0.696 / crates no-op +0.14% are outside the 0.10% band.\nDiffing cachegrind's per-function counts against a build of the parent\ncommit shows the difference is in std's startup, not in zustc:\npthread_getattr_np sscanf()s /proc/self/maps to find the main thread's\nstack, and that file's lines change with the binary's layout and path.\nzustc's own code differs by 29 instructions (dropping Options2).\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-20T11:06:56Z",
+          "tree_id": "0db5fef0cd9bf96710560b8e04908305ba80e0ac",
+          "url": "https://github.com/mizchi/zust/commit/8dba29d7ea3eed5353a39c25151b13b45956ff33"
+        },
+        "date": 1795173097358,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "lsp definition p50",
+            "value": 0.686,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp hover p50",
+            "value": 0.553,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp completion p50",
+            "value": 1.188,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp references p50",
+            "value": 5.547,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp rename p50",
+            "value": 0.664,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp signatureHelp p50",
+            "value": 0.963,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp documentHighlight p50",
+            "value": 1.364,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp ready (startup to indexed)",
+            "value": 162.371,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp peak RSS",
+            "value": 74.355,
             "unit": "MiB"
           }
         ]
