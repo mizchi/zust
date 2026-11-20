@@ -1,0 +1,1 @@
+22:14: call to unsafe function `m` is unsafe and requires unsafe block (E0133)

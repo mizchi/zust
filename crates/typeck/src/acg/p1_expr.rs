@@ -85,8 +85,14 @@ impl Cx<'_> {
                 }
             }
             Expr::Path(_, p) => {
-                if let Some(q) = self.static_path(e) {
-                    return self.place(&q);
+                // (`m::S`: the static by its index; a local of the same name, `S`, is not it)
+                if let Some(ci) = self.static_of(e) {
+                    if self.prog.consts[ci as usize].stat == Some(true) && self.unsafe_ok == 0 && p.pos.line != 0 && self.raw_ref == 0 {
+                        return err(p.pos, "use of mutable static is unsafe and requires unsafe block (E0133)");
+                    }
+                    let t = self.prog.consts[ci as usize].ty;
+                    let a = self.static_sym(ci);
+                    return Ok(Place::Mem(a, 0, t));
                 }
                 let Some(id) = ident_of(p) else {
                     return err(SP, "unsupported path");
@@ -1987,7 +1993,23 @@ impl Cx<'_> {
                 for b in bounds {
                     let Some((name, want)) = assoc_constraint(b) else { continue };
                     let Ok(want) = self.prog.resolve_g(&want, &names) else { continue };
-                    if let Some(actual) = self.prog.assoc_of(gt, &name) {
+                    // (`I: IntoIterator<Item = A>` with a Vec or a HashMap: the prelude's collections have an `into_iter`
+                    // method, not an IntoIterator impl; the Item is that of the iterator it returns)
+                    let actual = self.prog.assoc_of(gt, &name).or_else(|| {
+                        if name != "Item" || !b.trim_start().starts_with("IntoIterator") {
+                            return None;
+                        }
+                        let Ty::Struct(sid) = gt else { return None };
+                        let id = self.prog.method(sid, "into_iter")?;
+                        // (the method is the generic one, `IntoIter<T0>`: the instance's arguments go in)
+                        let args = self.prog.structs[sid as usize].args.clone();
+                        let ret = self.prog.subst(self.prog.sigs[id as usize].ret, &args);
+                        if self.prog.has_param(ret) {
+                            return None;
+                        }
+                        self.prog.assoc_of(ret, "Item")
+                    });
+                    if let Some(actual) = actual {
                         self.prog.match_ty(want, actual, sol);
                     }
                 }
@@ -2174,6 +2196,14 @@ impl Cx<'_> {
         }
         if let Some(e) = self.prim_method_call(c) {
             let e = self.keep_expr(e);
+            // (`crate::a::M::m(&x)`: the trait the path names, which a trait in scope must not replace)
+            if let (Expr::Path(None, p), Expr::MethodCall(..)) = (&**func, e) {
+                let pp = crate::program::PPath::of(p);
+                let q = self.prog.strip_mods_p(&pp).unwrap_or(pp);
+                if q.segs.len() == 2 && self.prog.traits.contains_key(&q.segs[0].name) {
+                    self.explicit_traits.insert(e as *const Expr as usize, q.segs[0].name.clone());
+                }
+            }
             return self.expr(e, expected);
         }
         // `Trait::method(x, args)` (`Clone::clone(&s)`, `Add::add(a, b)`): the method call `x.method(args)`

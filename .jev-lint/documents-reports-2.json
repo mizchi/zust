@@ -208,6 +208,14 @@
     "docs_reports_2026-11-20-02-green-threads.ja": {
       "path": "docs/ja/reports/2026-11-20-02-green-threads.md",
       "role": "historical"
+    },
+    "docs_reports_2026-11-20-03-bench-patterns.en": {
+      "path": "docs/reports/2026-11-20-03-bench-patterns.md",
+      "role": "historical"
+    },
+    "docs_reports_2026-11-20-03-bench-patterns.ja": {
+      "path": "docs/ja/reports/2026-11-20-03-bench-patterns.md",
+      "role": "historical"
     }
   },
   "comparisons": [
@@ -495,6 +503,17 @@
       },
       "target": {
         "source": "docs_reports_2026-11-20-02-green-threads.ja"
+      }
+    },
+    {
+      "id": "docs_reports_2026-11-20-03-bench-patterns",
+      "topic": "The Japanese file docs/ja/reports/2026-11-20-03-bench-patterns.md is a faithful translation of docs/reports/2026-11-20-03-bench-patterns.md",
+      "mode": "translation",
+      "reference": {
+        "source": "docs_reports_2026-11-20-03-bench-patterns.en"
+      },
+      "target": {
+        "source": "docs_reports_2026-11-20-03-bench-patterns.ja"
       }
     }
   ]

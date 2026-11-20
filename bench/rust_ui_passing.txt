@@ -2088,6 +2088,7 @@ compile-fail	error-codes/E0263.rs
 compile-fail	error-codes/E0267.rs
 compile-fail	error-codes/E0277-2.rs
 compile-fail	error-codes/E0277-3.rs
+compile-fail	error-codes/E0277-4.rs
 compile-fail	error-codes/E0277.rs
 compile-fail	error-codes/E0282.rs
 compile-fail	error-codes/E0283.rs

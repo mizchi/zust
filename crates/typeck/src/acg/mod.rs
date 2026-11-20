@@ -295,6 +295,8 @@ pub fn compile(prog: &Program, insts: &Mutex<Insts>, id: u32, f: &ItemFn, line_b
         caps,
         root,
         closure_ix,
+        explicit_traits: HashMap::default(),
+        explicit_trait: None,
         closure_hint: None,
         seg_self: None,
         loop_bounds: vec![],
@@ -664,6 +666,11 @@ pub struct Cx<'p> {
     pub root: u32,
     /// クロージャ式 (Debug の文字列) → 番号
     pub closure_ix: HashMap<String, u32>,
+    /// `a::M::m(&x)` rewritten as `x.m()`: the kept method call (by address) -> the trait it named, so the call takes
+    /// that trait's impl, whatever traits are in scope
+    pub explicit_traits: HashMap<usize, String>,
+    /// while a method call that named its trait is being resolved: (the method, the trait)
+    pub explicit_trait: Option<(String, String)>,
     pub closure_hint: Option<(Vec<Ty>, Option<Ty>)>,
     pub seg_self: Option<Ty>,
     pub loop_bounds: Vec<(Loc, u64)>,
@@ -1665,6 +1672,8 @@ impl Cx<'_> {
                 let ci = self.prog.const_index[ident_of(p).unwrap()];
                 Some(self.prog.consts[ci as usize].ty)
             }
+            // `m::S` (a static in a module): the type of `S`, as `expr` / `place` read it
+            Expr::Path(None, p) if p.segs.len() >= 2 && self.static_of(e).is_some() => Some(self.prog.consts[self.static_of(e)? as usize].ty),
             Expr::Path(None, p) if p.segs.len() == 2 => self.prog.variant_by_p(&PPath::of(p), self.self_sid).map(|v| Ty::Struct(v.0)),
             // タプル構造体の構築 `V(1, 2)` (ジェネリックでないもの)
             Expr::Call(f, _)

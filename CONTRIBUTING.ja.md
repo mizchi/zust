@@ -196,10 +196,18 @@ python3 bench/ide_golden_ra.py --detail
   - 5000 関数の生成プログラムの no-op ビルド・1 関数の編集・`check`
   - trait と型推論を多く使うプログラム (`bench/gen_traits.py`)
   - cratebench のクレート
+  - アプリケーションのコードの形 (`bench/gen_patterns.py mix`): インタプリタ、レコードの処理、`?` によるエラー処理、
+    状態機械、trait object のプラグイン、ライフタイムを使うコピーなしの構文解析、`macro_rules!`、入れ子のモジュール、
+    総称のコンテナ
   - `--lsp` を付けると、zust-analyzer のセッション
 
-  `bench/kpi_log.tsv` / `bench/kpi_log.md` に 1 行足す。直近 7 行のノイズの幅を外れた値は `REGRESSION` と出る。変更を
-  残す前に原因を突き止めるか、コストをコミットメッセージに書く。
+  `python3 bench/patterns.py` は、それぞれのパターンを 1 つずつ測る (コールドビルド・`check`・編集後のビルド。
+  `--instructions` を付けると命令数も)。zustc でビルドしたものが rustc でビルドしたものと同じ出力かも確かめる。
+  新しいパターンは `bench/gen_patterns.py` に足す。`tests/bench_patterns.rs` がすべてのパターンをビルドする。
+
+  `bench/kpi_track.py` は `bench/kpi_log.tsv` / `bench/kpi_log.md` に 1 行足す (`bench/patterns.py` は表を出すだけ)。
+  直近 7 行のノイズの幅を外れた値は `REGRESSION` と出る。変更を残す前に原因を突き止めるか、コストをコミットメッセージに
+  書く。
   pull request では `--dry-run` で測り、ログに行をコミットしない。`KPI` ワークフローが pull request をベースと比べて測り、
   結果をその pull request のコメントに残す (下の CI を参照)。行は main で作るコミットで足す。ブランチで足した行は、その間に
   main が足す行と毎回ぶつかる。

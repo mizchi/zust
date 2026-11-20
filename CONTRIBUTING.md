@@ -202,10 +202,18 @@ Every change that touches the compiler or the analyzer is measured before it is 
   - a no-op build, a one-function edit and `check` of a generated program with 5000 functions;
   - a trait- and inference-heavy program (`bench/gen_traits.py`);
   - the cratebench crates;
+  - the shapes of application code (`bench/gen_patterns.py mix`): an interpreter, record processing, error handling
+    with `?`, state machines, trait-object plugins, zero-copy parsing with lifetimes, `macro_rules!`, nested modules
+    and generic containers;
   - with `--lsp`, a zust-analyzer session.
 
-  It appends a row to `bench/kpi_log.tsv` / `bench/kpi_log.md`. A value outside the noise band of the last 7 rows is
-  printed as `REGRESSION`: find the cause before keeping the change, or state the cost in the commit message.
+  `python3 bench/patterns.py` measures each of those patterns alone (a cold build, `check`, an edit build; with
+  `--instructions`, counted) and checks that zustc's build prints what rustc's does. A new pattern goes in
+  `bench/gen_patterns.py`; `tests/bench_patterns.rs` builds every one of them.
+
+  `bench/kpi_track.py` appends a row to `bench/kpi_log.tsv` / `bench/kpi_log.md` (`bench/patterns.py` only prints).
+  A value outside the noise band of the last 7 rows is printed as `REGRESSION`: find the cause before keeping the
+  change, or state the cost in the commit message.
   In a pull request, use `--dry-run` and do not commit rows to the log: the `KPI` workflow measures the pull request
   against its base and keeps the result in a comment on it (see CI below). Rows go in with commits made on main;
   rows added in a branch would conflict with every row main gets in the meantime.

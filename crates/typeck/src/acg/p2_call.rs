@@ -79,6 +79,18 @@ impl Cx<'_> {
     /// `recv.m(args)`: レシーバを自動 deref して struct を見つけ、
     /// メソッドの self 型に合わせて自動参照 (`&self` / `&mut self`) かコピー (`self`) で渡す
     pub(crate) fn method_call(&mut self, e: &Expr, expected: Option<Ty>) -> R<V> {
+        // (a call that named its trait: set while this call is resolved, and the outer call's back after)
+        let forced = match e {
+            Expr::MethodCall(_, m, ..) => self.explicit_traits.get(&(e as *const Expr as usize)).map(|t| (m.clone(), t.clone())),
+            _ => None,
+        };
+        let prev = std::mem::replace(&mut self.explicit_trait, forced);
+        let r = self.method_call_inner(e, expected);
+        self.explicit_trait = prev;
+        r
+    }
+
+    fn method_call_inner(&mut self, e: &Expr, expected: Option<Ty>) -> R<V> {
         let Expr::MethodCall(recv, method, gargs, margs, msp) = e else { unreachable!() };
         let msp = *msp;
         // (`b.m()` with b: Box<[T]>: the slice's method, through `&*b` / `&mut *b`)
@@ -1295,6 +1307,24 @@ impl Cx<'_> {
             let mut sol = vec![None; sig.generics.len()];
             sig.params.first().is_some_and(|&pt| self.prog.match_ty(pt, at, &mut sol))
         };
+        // (impls of two traits of one name, `a::M` and `b::M` for u32: the one whose trait is in scope here)
+        let base = |c: u32| self.prog.sigs[c as usize].impl_trait.as_deref().map(|t| t.split('<').next().unwrap_or(t).trim());
+        // (`a::M::m(&x)`: the impl of the trait the call named)
+        if let Some((m, tr)) = &self.explicit_trait {
+            let name = &self.prog.names[id as usize];
+            if name.rsplit("::").next().map(|l| l.split('#').next().unwrap_or(l)) == Some(m.as_str()) {
+                if let Some(&c) = cands.iter().find(|&&c| base(c) == Some(tr.as_str()) && fits(c, at)) {
+                    return c;
+                }
+            }
+        }
+        // (an inherent method that fits comes first, as in rustc's method lookup: then nothing changes here)
+        let inherent = cands.iter().any(|&c| self.prog.sigs[c as usize].impl_trait.is_none() && fits(c, at));
+        if let Some(vis) = self.traits_in_scope().filter(|_| !inherent) {
+            if let Some(&c) = cands.iter().find(|&&c| base(c).is_some_and(|t| vis.iter().any(|v| v == t)) && fits(c, at)) {
+                return c;
+            }
+        }
         if let Some(&c) = cands.iter().find(|&&c| fits(c, at)) {
             return c;
         }
@@ -1305,6 +1335,17 @@ impl Cx<'_> {
             _ => None,
         };
         deref.and_then(|d| cands.iter().copied().find(|&c| fits(c, d))).unwrap_or(id)
+    }
+
+    /// Program::trait_scopes at this function: the traits of a colliding name in scope where it is (the innermost
+    /// scope around the source line of its item; a closure is in its fn's). None for the prelude, or when no trait
+    /// name collides
+    pub(crate) fn traits_in_scope(&self) -> Option<&[String]> {
+        if self.prog.trait_scopes.is_empty() || !self.user_code {
+            return None;
+        }
+        let ii = self.prog.item_of.get(self.root as usize).copied().flatten()?;
+        self.prog.traits_at_item(ii)
     }
 
     /// E0133: a call written in the source (pos.line != 0) to an `unsafe fn` outside `unsafe`
@@ -1331,7 +1372,14 @@ impl Cx<'_> {
         }
         // (戻り値を書く先: 引数の中の呼び出しには渡さない)
         let hint = self.dst_hint.take();
+        let id0 = id;
         let id = self.pick_overload(id, recv.map(|r| r.1), args);
+        // (E0133 was checked on the fn found before the overload was chosen: an `unsafe fn` chosen in its place, by
+        // the traits in scope, needs the same check)
+        if id != id0 && self.prog.sigs[id as usize].is_unsafe && !self.prog.sigs[id0 as usize].is_unsafe && self.unsafe_ok == 0 && self.user_code {
+            let n = self.prog.names[id as usize].rsplit("::").next().unwrap_or("").split('#').next().unwrap_or("");
+            return err(span, format!("call to unsafe function `{n}` is unsafe and requires unsafe block (E0133)"));
+        }
         let sig0 = self.prog.sigs[id as usize].clone();
         let skip = recv.is_some() as usize;
         if sig0.params.len() != args.len() + skip {

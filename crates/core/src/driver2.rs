@@ -741,6 +741,15 @@ impl Session2 {
         let mut prog = Program::build_with(&items, &sums, self.ctx.lib.is_none() && !lib_attr, user).map_err(|e| name_line(&e, &src, &items))?;
         tm.lap("program", String::new());
         prog.prelude_from = user as u32;
+        // (traits of one name in two modules: which one a method call means depends on where it is. Read from the
+        // crate's source (its files joined, as the items' lines count); a build with dependency crates keeps the earlier
+        // choice, the first impl)
+        if self.ctx.deps.is_empty() && self.ctx.lib.is_none() {
+            prog.trait_scopes = lexer::trait_scopes(src0);
+            if !prog.trait_scopes.is_empty() {
+                prog.item_lines = items.iter().map(|it| it.line as u32).collect();
+            }
+        }
         prog.overflow_checks = !self.opts.opt;
         prog.deny_unreachable = deny_unreachable;
         prog.deny_must_use = deny_must_use;
@@ -1938,6 +1947,11 @@ impl Session2 {
         h.add(&(self.opts.opt as u8));
         h.add(&(self.opts.backend_id()));
         h.add(&a.items[ii].hash);
+        // (with traits of one name in two modules, which impl a method call takes depends on the traits in scope at the
+        // item: a `use` changed elsewhere changes it, with the body the same)
+        if let Some(vis) = a.prog.traits_at_item(ii as u32) {
+            h.add(&vis.join(","));
+        }
         if a.prog.closures.contains_key(&(id as u32)) {
             h.add(&a.prog.names[id]);
         }
@@ -1952,6 +1966,20 @@ impl Session2 {
                 if let Some(ri) = a.prog.item_of[r as usize] {
                     h.add(&a.items[ri as usize].hash);
                     h.add(&lb);
+                    // (and the traits in scope there, which the inlined body's method calls resolve with; and those of
+                    // the user fns inlined into it in turn, inlining going two deep)
+                    if !a.prog.trait_scopes.is_empty() {
+                        if let Some(vis) = a.prog.traits_at_item(ri) {
+                            h.add(&vis.join(","));
+                        }
+                        for &r2 in &a.refs[r as usize] {
+                            if a.inl.user_lines.contains_key(&r2) {
+                                if let Some(vis) = a.prog.item_of[r2 as usize].and_then(|ri2| a.prog.traits_at_item(ri2)) {
+                                    h.add(&vis.join(","));
+                                }
+                            }
+                        }
+                    }
                 }
             }
         }

@@ -18,7 +18,8 @@ import argparse, json, os, re, subprocess, sys
 
 MARKER = "<!-- zust-kpi-pr -->"
 # (the names kpi_track.py prints, in its order)
-KPIS = ["no-op build", "edit one fn", "check", "cache", "LSP session", "traits check", "traits edit", "crates no-op", "crates edit"]
+KPIS = ["no-op build", "edit one fn", "check", "cache", "LSP session", "traits check", "traits edit", "crates no-op", "crates edit",
+        "patterns check", "patterns edit"]
 UNITS = {"cache": "KiB", "LSP session": "G"}
 
 
