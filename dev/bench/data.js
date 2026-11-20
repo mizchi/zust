@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795152654200,
+  "lastUpdate": 1795152656232,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -74000,6 +74000,70 @@ window.BENCHMARK_DATA = {
           {
             "name": "tests/ui compile-fail passing",
             "value": 3504,
+            "unit": "tests"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "committer": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "distinct": true,
+          "id": "8c012b2bf30f145fa3f7da206af3ce8e7c36848d",
+          "message": "parser: a reserved keyword is no declared name\n\nAn item's, a field's, a variant's or a binding's name that is a\nreserved keyword (`fn false()`, `let for = ..`, `fn: u8`, `Self,` as a\nvariant) is \"expected identifier, found keyword `kw`\". The 2018\nkeywords async / await / dyn / try stay names (an edition 2015 file\nmay use them), and `Self` / `self` are still a unit struct or a\nreceiver as a pattern.\n\ntests/ui: +34 compile-fail passes (the generated\nparser/keyword-*-as-identifier tests among them).\nKPI: all within ±0.3% of the row before.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-20T05:25:46Z",
+          "tree_id": "a15bc7d8059e6b780c7f2bf27f7bb401f84f2a08",
+          "url": "https://github.com/mizchi/zust/commit/8c012b2bf30f145fa3f7da206af3ce8e7c36848d"
+        },
+        "date": 1795152655860,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tests/ui run-pass pass rate",
+            "value": 71.28,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui run-pass passing",
+            "value": 1700,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui check-pass pass rate",
+            "value": 78.42,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui check-pass passing",
+            "value": 1417,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui build-pass pass rate",
+            "value": 70.37,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui build-pass passing",
+            "value": 95,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui compile-fail pass rate",
+            "value": 48.07,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui compile-fail passing",
+            "value": 3537,
             "unit": "tests"
           }
         ]
