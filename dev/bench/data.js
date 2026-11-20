@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795169397200,
+  "lastUpdate": 1795169399445,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -79565,6 +79565,70 @@ window.BENCHMARK_DATA = {
           {
             "name": "tests/ui compile-fail passing",
             "value": 3563,
+            "unit": "tests"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "committer": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "distinct": true,
+          "id": "e36b7fd88f7b596d70d0042e34aa5b02cb4de539",
+          "message": "match / if let on a bare None: take the Option type from the patterns\n\n`match None { Some(3u8) => .. }` and `if let Some(x) = None` used to fail\nwith \"cannot find value `None`\": the scrutinee went down the place path\nwith no type. The Option type now comes from type inference when it\nknows it, else from a `Some(..)` pattern's literal, const or enum\nvariant, else `Option<()>` (rustc's `!` fallback).\n\ntests/ui: +2 check-pass, +1 run-pass, +1 compile-fail (checked: the\nOption vs Result mismatch it tests). KPI: no-op +0.29% / crates no-op\n+0.14% is the 0.695 / 0.697 layout flip seen before on unrelated\ncommits; the no-op path does not run this code.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-20T09:56:18Z",
+          "tree_id": "d0f24556b85b924d8b24e7e3907c2a2f98922ddf",
+          "url": "https://github.com/mizchi/zust/commit/e36b7fd88f7b596d70d0042e34aa5b02cb4de539"
+        },
+        "date": 1795169399010,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tests/ui run-pass pass rate",
+            "value": 71.45,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui run-pass passing",
+            "value": 1704,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui check-pass pass rate",
+            "value": 79.36,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui check-pass passing",
+            "value": 1434,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui build-pass pass rate",
+            "value": 70.37,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui build-pass passing",
+            "value": 95,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui compile-fail pass rate",
+            "value": 48.44,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui compile-fail passing",
+            "value": 3564,
             "unit": "tests"
           }
         ]
