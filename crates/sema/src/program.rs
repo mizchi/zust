@@ -1417,6 +1417,7 @@ impl Program {
             // (a trait with parameters, `impl Tr<u8> for S` and `impl Tr<u16> for S`, or self types that differ in their
             // arguments, `impl Tr for Vec<i32>` and `impl Tr for Vec<Box<i32>>`)
             let dup = !p.impls.insert((sid, tr.clone()));
+
             if impl_overlaps(&mut self_tys, sums, ii, sn, tr, dup)
                 && !matches!(
                     tr.as_str(),
@@ -1521,11 +1522,38 @@ impl Program {
             };
             for (pn, trs) in &sm.adt_bounds {
                 let Some(&a) = sm.adt_generics.iter().position(|g| g == pn).and_then(|i| sd.args.get(i)) else { continue };
-                // (only arguments whose impls `implements` knows exactly: scalars and non-generic structs. An array's
-                // impl or one of a generic struct's instances (`impl Tr for G<u8>`) is not told apart here)
-                let judged = a.is_int() || a.is_float() || matches!(a, Ty::Bool | Ty::Char | Ty::Unit) || matches!(a, Ty::Struct(x) if p.structs[x as usize].base.is_none() && p.structs[x as usize].generics.is_empty());
+                // (only arguments whose impls are known exactly: scalars, structs, and a generic struct's instances
+                // matched against the self types of its impls (`impl Tr for G<u8>` is not one for G<u16>). An array's
+                // impl is not told apart here)
+                let inst = match a {
+                    Ty::Struct(x) => p.structs[x as usize].base.filter(|_| !p.structs[x as usize].symbolic),
+                    _ => None,
+                };
+                let judged = a.is_int() || a.is_float() || matches!(a, Ty::Bool | Ty::Char | Ty::Unit) || matches!(a, Ty::Struct(x) if p.structs[x as usize].base.is_none() && p.structs[x as usize].generics.is_empty()) || inst.is_some();
                 if !judged {
                     continue;
+                }
+                if let Some(b) = inst {
+                    let bn = &p.structs[b as usize].name;
+                    for tr in trs {
+                        // (the self types of the impls of tr for the struct, with their parameters: resolved only here,
+                        // for a static of such a type)
+                        let selfs: Vec<(Ty, usize)> = sums
+                            .iter()
+                            .filter(|s| s.impl_trait.as_deref() == Some(tr.as_str()) && s.impl_self.as_deref() == Some(bn.as_str()))
+                            .filter_map(|s| {
+                                let gn: Vec<&str> = s.impl_generics.iter().map(|g| g.0.as_str()).collect();
+                                s.impl_self_ty.as_ref().and_then(|t| p.resolve_g(t, &gn).ok()).map(|t| (t, gn.len()))
+                            })
+                            .collect();
+                        if selfs.is_empty() {
+                            continue;
+                        }
+                        if !selfs.iter().any(|&(pt, n)| p.match_ty(pt, a, &mut vec![None; n])) {
+                            let line = items[c.item as usize].line + crate::parse::extern_static(&c.expr).map_or(0, |x| x.0.saturating_sub(1));
+                            return Err(format!("{line}:1: the trait bound `{}: {tr}` is not satisfied (E0277)", p.tn(a)));
+                        }
+                    }
                 }
                 for tr in trs {
                     if sums.iter().any(|s| s.trait_decl.as_deref() == Some(tr.as_str())) && !p.implements(a, tr) {
