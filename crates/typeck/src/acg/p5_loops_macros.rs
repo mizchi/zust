@@ -2105,7 +2105,7 @@ impl Cx<'_> {
                     None => None,
                 };
                 // (only when `S::m` is Tr's impl: an inherent `m` of S would answer the qualified path)
-                let tr_impl = |t: Ty| self.prog.index.get(&format!("{}::{}", self.prog.tn(t), segs[1])).is_some_and(|&i| self.prog.sigs[i as usize].impl_trait.as_deref() == Some(segs[0].as_str()));
+                let tr_impl = |t: Ty| self.trait_only_method(&format!("{}::{}", self.prog.tn(t), segs[1]), &segs[0]);
                 if let Some(st) = st.filter(|&t| !self.prog.has_param(t) && (t.is_int() || t.is_float() || matches!(t, Ty::Bool | Ty::Char | Ty::Str) || matches!(t, Ty::Struct(sid) if self.prog.structs[sid as usize].base.is_none())) && tr_impl(t)) {
                     if let Ok(ne) = crate::parse::parse_expr(&format!("<{} as {}>::{}", self.prog.tn(st), segs[0], segs[1])) {
                         let ne: &Expr = self.keep_expr(ne);

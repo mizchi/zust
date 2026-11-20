@@ -1505,7 +1505,7 @@ impl Program {
                 let Some(&a) = sm.adt_generics.iter().position(|g| g == pn).and_then(|i| sd.args.get(i)) else { continue };
                 // (only arguments whose impls `implements` knows exactly: scalars and non-generic structs. An array's
                 // impl or one of a generic struct's instances (`impl Tr for G<u8>`) is not told apart here)
-                let judged = a.is_int() || a.is_float() || matches!(a, Ty::Bool | Ty::Char) || matches!(a, Ty::Struct(x) if p.structs[x as usize].base.is_none() && p.structs[x as usize].generics.is_empty());
+                let judged = a.is_int() || a.is_float() || matches!(a, Ty::Bool | Ty::Char | Ty::Unit) || matches!(a, Ty::Struct(x) if p.structs[x as usize].base.is_none() && p.structs[x as usize].generics.is_empty());
                 if !judged {
                     continue;
                 }

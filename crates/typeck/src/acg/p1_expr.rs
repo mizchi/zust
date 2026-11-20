@@ -253,7 +253,11 @@ impl Cx<'_> {
             Expr::Index(b, index, isp) if !matches!(&**index, Expr::Range(..)) => {
                 let isp = *isp;
                 let (base, len, elem) = self.indexable(b)?;
-                let (i, it) = self.expr(index, Some(Ty::Usize))?;
+                // (the index is a value, not the place `&raw` takes: reading a static in it still needs unsafe)
+                let raw = std::mem::take(&mut self.raw_ref);
+                let r = self.expr(index, Some(Ty::Usize));
+                self.raw_ref = raw;
+                let (i, it) = r?;
                 let Some(i) = i else {
                     return err(SP, "index diverges");
                 };
@@ -2226,6 +2230,21 @@ impl Cx<'_> {
         r
     }
 
+    /// Whether every method named `name` (`S::m`, with its overloads) is an impl of trait tr: no inherent one, which a
+    /// rewritten `S::m` path would reach first
+    pub(crate) fn trait_only_method(&self, name: &str, tr: &str) -> bool {
+        let of_tr = |i: u32| self.prog.sigs[i as usize].impl_trait.as_deref().is_some_and(|t| t.split('<').next().unwrap_or(t).trim() == tr);
+        let Some(&i) = self.prog.index.get(name) else { return false };
+        of_tr(i) && self.prog.overloads.get(name).is_none_or(|cs| cs.iter().all(|&c| of_tr(c)))
+    }
+
+    /// Whether the method named `name` (with its overloads) exists and none of them is a trait impl's
+    pub(crate) fn no_trait_method(&self, name: &str) -> bool {
+        let inh = |i: u32| self.prog.sigs[i as usize].impl_trait.is_none();
+        let Some(&i) = self.prog.index.get(name) else { return false };
+        inh(i) && self.prog.overloads.get(name).is_none_or(|cs| cs.iter().all(|&c| inh(c)))
+    }
+
     /// Why reading static ci needs `unsafe` (E0133): a `static mut`, or an extern block's static (foreign memory)
     pub(crate) fn unsafe_static_read(&self, ci: u32) -> Option<&'static str> {
         let c = &self.prog.consts[ci as usize];
@@ -2270,7 +2289,11 @@ impl Cx<'_> {
                     ("From", "from") => {
                         let simple = |t: Ty| t.is_int() || t.is_float() || matches!(t, Ty::Bool | Ty::Char) || matches!(t, Ty::Struct(sid) if self.prog.structs[sid as usize].base.is_none());
                         // (only when `T::from` is the From impl's: an inherent `from` of T would answer that path)
-                        let from_impl = |t: Ty| self.prog.index.get(&format!("{}::from", self.prog.tn(t))).is_some_and(|&i| self.prog.sigs[i as usize].impl_trait.as_deref().is_some_and(|tr| tr.starts_with("From")));
+                        // (or none of them is: the prelude's `String::from` and the like stand for From)
+                        let from_impl = |t: Ty| {
+                            let n = format!("{}::from", self.prog.tn(t));
+                            self.trait_only_method(&n, "From") || self.no_trait_method(&n)
+                        };
                         if let Some(t) = expected.filter(|&t| simple(t) && !self.prog.has_param(t) && from_impl(t)) {
                             if let Ok(Expr::Path(None, tp)) = crate::parse::parse_expr(&format!("{}::from", self.prog.tn(t))) {
                                 let ne = self.keep_expr(Expr::Call(Box::new(Expr::Path(None, crate::parse::Path { pos: p.pos, ..tp })), cargs.clone()));
