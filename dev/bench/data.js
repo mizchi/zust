@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795133651296,
+  "lastUpdate": 1795133653612,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -65076,6 +65076,70 @@ window.BENCHMARK_DATA = {
           {
             "name": "tests/ui check-pass passing",
             "value": 1416,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui build-pass pass rate",
+            "value": 70.37,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui build-pass passing",
+            "value": 95,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui compile-fail pass rate",
+            "value": 45.11,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui compile-fail passing",
+            "value": 3319,
+            "unit": "tests"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "committer": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "distinct": true,
+          "id": "05ea0c4ce98e0a52a59f2ec3e39fe71987bc5ec1",
+          "message": "Turbofish on enum constructors: Ok::<_, ()>(x), Some::<u8>(3)\n\nThe turbofish of a tuple variant's constructor gives the type arguments\nit names (`_` left to the fields), as the unit variants' `None::<i64>`\nalready did.\n\ntests/ui: +2 genuine passes (1 check-pass, 1 compile-fail);\nlint/unused/must_use-tuple.rs passed only through the old inference\nerror at the expected line (there is no unused_must_use lint) and goes\nto rust_ui_accidental.txt.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-20T00:08:41Z",
+          "tree_id": "89e991090590defa8fe549e1935195f0d9f3ed87",
+          "url": "https://github.com/mizchi/zust/commit/05ea0c4ce98e0a52a59f2ec3e39fe71987bc5ec1"
+        },
+        "date": 1795133653038,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tests/ui run-pass pass rate",
+            "value": 71.19,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui run-pass passing",
+            "value": 1698,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui check-pass pass rate",
+            "value": 78.42,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui check-pass passing",
+            "value": 1417,
             "unit": "tests"
           },
           {
