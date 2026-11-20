@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795147164902,
+  "lastUpdate": 1795147166615,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -70661,6 +70661,70 @@ window.BENCHMARK_DATA = {
           {
             "name": "tests/ui compile-fail passing",
             "value": 3452,
+            "unit": "tests"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "committer": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "distinct": true,
+          "id": "f371d7f03b6c0bd322b3467a9ac58ab0537d6998",
+          "message": "Duplicate-name check: only for a crate root with a use\n\nThe early exit of the E0252 / E0255 check looked for an item starting\nwith `use` or with an attribute, so any `#[derive]` ran the whole\nwalk; it now looks past an item's attributes for the `use` itself, and\nthe walk reuses one buffer and no longer collects each item's first\nwords.\n\nKPI: traits check -0.07% (the +0.10% REGRESSION since 7add9a9 is\ngone), the others unchanged.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-20T03:54:50Z",
+          "tree_id": "7dcbb67a1174201db944f7acfbd4fe0aa2d3ea12",
+          "url": "https://github.com/mizchi/zust/commit/f371d7f03b6c0bd322b3467a9ac58ab0537d6998"
+        },
+        "date": 1795147166382,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tests/ui run-pass pass rate",
+            "value": 71.19,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui run-pass passing",
+            "value": 1698,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui check-pass pass rate",
+            "value": 78.42,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui check-pass passing",
+            "value": 1417,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui build-pass pass rate",
+            "value": 70.37,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui build-pass passing",
+            "value": 95,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui compile-fail pass rate",
+            "value": 46.93,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui compile-fail passing",
+            "value": 3453,
             "unit": "tests"
           }
         ]
