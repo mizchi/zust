@@ -26,7 +26,7 @@
 
 ## Status
 
-Numbers measured <!-- measured -->2026-11-20, d855b2a<!-- /measured --> by CI on each push to main (bench.yml runs
+Numbers measured <!-- measured -->2026-11-20, cdb2f0f<!-- /measured --> by CI on each push to main (bench.yml runs
 `bench/ci_bench.py` and `bench/rust_ui.py`, then `scripts/update_readme.py` writes them here). Times come from shared
 GitHub Actions runners and vary by about ±20%; the instruction counts (valgrind) do not.
 
@@ -38,7 +38,7 @@ only the tests it can be asked to handle (no nightly features, auxiliary crates 
 <!-- auto:ui -->
 | kind | applicable | pass |
 |---|---:|---:|
-| run-pass (builds, runs, same output) | 2385 | 1748 (73.3%) |
+| run-pass (builds, runs, same output) | 2385 | 1751 (73.4%) |
 | check-pass (accepted by `zustc check`) | 1807 | 1448 (80.1%) |
 | build-pass | 135 | 97 (71.9%) |
 | compile-fail (rejected at an annotated line) | 7358 | 3567 (48.5%) |
@@ -53,21 +53,21 @@ Build speed, build cache size and LSP latency on generated programs of 1000 / 50
 <!-- auto:kpi -->
 | KPI | gen1000 | gen5000 |
 |---|---:|---:|
-| cold build | 122 ms | 544 ms |
-| no-op build | 0.9 ms | 0.9 ms |
-| build after editing one function | 20.6 ms | 67.6 ms |
-| `check` | 91 ms | 459 ms |
+| cold build | 118 ms | 537 ms |
+| no-op build | 0.8 ms | 0.7 ms |
+| build after editing one function | 17.0 ms | 61.7 ms |
+| `check` | 78 ms | 380 ms |
 | no-op build (instructions) | 0.6 M | 0.6 M |
-| edit one function (instructions) | 123.9 M | 589.1 M |
-| `check` (instructions) | 776.1 M | 3831.9 M |
+| edit one function (instructions) | 124.1 M | 589.4 M |
+| `check` (instructions) | 776.4 M | 3833.5 M |
 | build cache on disk | 387.2 KiB | 1902.8 KiB |
 | binary | 324.0 KiB | 1558.3 KiB |
 | cold build peak RSS | 18.1 MiB | 52.0 MiB |
 
 | zust-analyzer (zustc's own sources) | |
 |---|---:|
-| p50: definition, hover, completion, references, rename | 0.57 ms / 0.44 ms / 0.94 ms / 4.37 ms / 0.47 ms |
-| startup until indexed | 121 ms |
+| p50: definition, hover, completion, references, rename | 0.53 ms / 0.42 ms / 0.97 ms / 4.62 ms / 0.47 ms |
+| startup until indexed | 128 ms |
 | peak RSS | 75.0 MiB |
 <!-- /auto:kpi -->
 
@@ -332,7 +332,7 @@ the measured numbers. The [reports](docs/reports/) explain each step.
 
 ### Overall
 
-- [x] tests/ui run-pass: <!-- total:run-pass -->73.3% (1748 / 2385)
+- [x] tests/ui run-pass: <!-- total:run-pass -->73.4% (1751 / 2385)
 - [x] tests/ui check-pass: <!-- total:check-pass -->80.1% (1448 / 1807)
 - [x] tests/ui build-pass: <!-- total:build-pass -->71.9% (97 / 135)
 - [ ] tests/ui compile-fail (an error on an annotated line): <!-- total:compile-fail -->48.5% (3567 / 7358)
@@ -342,7 +342,7 @@ the measured numbers. The [reports](docs/reports/) explain each step.
 ### Language
 
 - [x] numbers, arithmetic, overflow checks: <!-- ui:numbers-arithmetic -->96.6%
-- [x] `for` / `while` / `loop`, labels: <!-- ui:for-loop-while,loops,label -->93.3%
+- [x] `for` / `while` / `loop`, labels: <!-- ui:for-loop-while,loops,label -->95.0%
 - [x] enums, `#[repr(u8)]`, auto-sized tags: <!-- ui:enum,enum-discriminant -->85.7%
 - [x] `cfg`: <!-- ui:cfg -->93.8%
 - [x] bindings, patterns, slice patterns, or-patterns (also with guards): <!-- ui:binding,pattern,or-patterns -->88.6%
