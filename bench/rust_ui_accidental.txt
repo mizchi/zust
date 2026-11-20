@@ -27,3 +27,4 @@ compile-fail	simd/portable-intrinsics-arent-exposed.rs
 compile-fail	attributes/crate-name-macro-call.rs
 compile-fail	attributes/lint_on_root.rs
 compile-fail	feature-gates/issue-43106-gating-of-builtin-attrs-error.rs
+compile-fail	imports/extern-crate-self/extern-crate-self-fail.rs

@@ -1195,9 +1195,55 @@ fn malformed_attr(src0: &str, split: &str, items: &[SrcItem]) -> Option<String> 
         if !text.trim_start().starts_with("#[") {
             continue;
         }
-        for (at, name, input) in leading(text) {
+        let attrs = leading(text);
+        for &(at, name, input) in &attrs {
             if !check(name, input) {
                 return Some(report(text, it.line, at, name));
+            }
+        }
+        // (an attribute on an item of a kind it does not apply to: `#[inline] struct S;`)
+        let after = attrs.last().map(|&(at, _, _)| {
+            let r = &text[at..];
+            let e = r.find(']').map(|k| at + k + 1).unwrap_or(text.len());
+            // (past comment lines between the attributes and the item)
+            let mut r = text[e..].trim_start();
+            while r.starts_with("//") {
+                r = r[r.find('\n').unwrap_or(r.len())..].trim_start();
+            }
+            r
+        });
+        let Some(after) = after else { continue };
+        let mut ws = after.split_whitespace().filter(|w| !matches!(*w, "pub" | "unsafe" | "async" | "const" | "extern" | "default") && !w.starts_with("pub(") && !w.starts_with('"'));
+        let Some(kw) = ws.next() else { continue };
+        let kw = if after.starts_with("const ") && !after.starts_with("const fn") { "const" } else { kw };
+        let kind = match kw {
+            "fn" => "functions",
+            "struct" => "structs",
+            "enum" => "enums",
+            "union" => "unions",
+            "trait" => "traits",
+            "impl" => "inherent impl blocks",
+            "mod" => "modules",
+            "static" => "statics",
+            "const" => "constants",
+            "type" => "type aliases",
+            "use" => "use statements",
+            "macro_rules!" => "macro defs",
+            _ => continue,
+        };
+        for &(at, name, _) in &attrs {
+            let ok = match name {
+                "inline" | "cold" | "track_caller" => kw == "fn",
+                "repr" => matches!(kw, "struct" | "enum" | "union"),
+                "non_exhaustive" => matches!(kw, "struct" | "enum"),
+                "must_use" => matches!(kw, "fn" | "struct" | "enum" | "union" | "trait"),
+                "macro_use" => matches!(kw, "mod"),
+                "no_mangle" => matches!(kw, "fn" | "static"),
+                _ => true,
+            };
+            if !ok {
+                let line = it.line + text[..at].matches('\n').count();
+                return Some(format!("{line}:1: `#[{name}]` attribute cannot be used on {kind}"));
             }
         }
     }

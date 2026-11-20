@@ -458,6 +458,7 @@ compile-fail	attributes/attrs-with-no-formal-in-generics-3.rs
 check-pass	attributes/builtin-attr-macro-value-issue-145922.rs
 check-pass	attributes/cfg-attr-feature-gate-and-rustc-dummy.rs
 compile-fail	attributes/check-cfg_attr-ice.rs
+compile-fail	attributes/cold-attribute-application-54044.rs
 compile-fail	attributes/crate-type-delimited.rs
 compile-fail	attributes/crate-type-empty.rs
 compile-fail	attributes/crate-type-macro-not-crate.rs
@@ -467,10 +468,13 @@ compile-fail	attributes/expected-word.rs
 compile-fail	attributes/export/crate-type.rs
 check-pass	attributes/fn-align-nameres-ambiguity-143834.rs
 run-pass	attributes/inline-main.rs
+compile-fail	attributes/inline/attr-usage-inline.rs
 compile-fail	attributes/inline/invalid-inline.rs
 check-pass	attributes/inner-attr-metavar.rs
 compile-fail	attributes/invalid-macro-use.rs
+compile-fail	attributes/invalid-repr.rs
 compile-fail	attributes/invalid-reprs.rs
+compile-fail	attributes/issue-105594-invalid-attr-validation.rs
 check-pass	attributes/issue-115264-expr-field.rs
 check-pass	attributes/issue-115264-pat-field.rs
 check-pass	attributes/issue-40962.rs
@@ -481,6 +485,7 @@ compile-fail	attributes/malformed-must_use.rs
 compile-fail	attributes/malformed-reprs.rs
 check-pass	attributes/mixed_export_name_and_no_mangle.rs
 check-pass	attributes/mixed_export_name_and_no_mangle_2024.rs
+compile-fail	attributes/repr-align-in-trait-issue-132391.rs
 run-pass	attributes/repr-on-single-variant-Enum.rs
 run-pass	attributes/tool_attributes.rs
 check-pass	attributes/unnamed-field-attributes-dup.rs
@@ -3288,6 +3293,7 @@ check-pass	lint/rfc-2383-lint-reason/multiple_expect_attrs.rs
 check-pass	lint/rfc-2457-non-ascii-idents/lint-mixed-script-confusables-2.rs
 check-pass	lint/runtime-symbols-no-std.rs
 check-pass	lint/special-upper-lower-cases.rs
+compile-fail	lint/suggestions.rs
 compile-fail	lint/trivial_casts.rs
 check-pass	lint/type-overflow.rs
 check-pass	lint/unaligned_references_fake_borrow.rs
@@ -5050,6 +5056,7 @@ compile-fail	repr/invalid_repr_list_help.rs
 compile-fail	repr/issue-83505-repr-simd.rs
 run-pass	repr/packed-struct-with-enum-53728.rs
 compile-fail	repr/repr-align-assign.rs
+compile-fail	repr/repr-transparent-other-items.rs
 compile-fail	repr/repr.rs
 compile-fail	resolve/112590-2.rs
 compile-fail	resolve/associated-fn-called-as-fn.rs
@@ -5243,6 +5250,7 @@ run-pass	rfcs/rfc-2008-non-exhaustive/variants_same_crate.rs
 compile-fail	rfcs/rfc-2091-track-caller/error-odd-syntax.rs
 compile-fail	rfcs/rfc-2091-track-caller/error-with-main.rs
 check-pass	rfcs/rfc-2091-track-caller/macro-declaration.rs
+compile-fail	rfcs/rfc-2091-track-caller/only-for-fns.rs
 check-pass	rfcs/rfc-2093-infer-outlives/issue-54467.rs
 run-pass	rfcs/rfc-2093-infer-outlives/privacy.rs
 compile-fail	rfcs/rfc-2126-crate-paths/crate-path-non-absolute.rs
