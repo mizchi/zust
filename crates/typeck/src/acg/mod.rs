@@ -1660,7 +1660,7 @@ impl Cx<'_> {
                 Some(self.prog.consts[ci as usize].ty)
             }
             // `m::S` (a static in a module): the type of `S`, as `expr` / `place` read it
-            Expr::Path(None, p) if p.segs.len() >= 2 && self.static_path(e).is_some() => self.peek_syn(&self.static_path(e)?),
+            Expr::Path(None, p) if p.segs.len() >= 2 && self.static_of(e).is_some() => Some(self.prog.consts[self.static_of(e)? as usize].ty),
             Expr::Path(None, p) if p.segs.len() == 2 => self.prog.variant_by_p(&PPath::of(p), self.self_sid).map(|v| Ty::Struct(v.0)),
             // タプル構造体の構築 `V(1, 2)` (ジェネリックでないもの)
             Expr::Call(f, _)

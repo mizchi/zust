@@ -741,8 +741,15 @@ impl Session2 {
         let mut prog = Program::build_with(&items, &sums, self.ctx.lib.is_none() && !lib_attr, user).map_err(|e| name_line(&e, &src, &items))?;
         tm.lap("program", String::new());
         prog.prelude_from = user as u32;
-        // (traits of one name in two modules: which one a method call means depends on where it is)
-        prog.trait_scopes = lexer::trait_scopes(src0);
+        // (traits of one name in two modules: which one a method call means depends on where it is. Read from the
+        // crate's source (its files joined, as the items' lines count); a build with dependency crates keeps the earlier
+        // choice, the first impl)
+        if self.ctx.deps.is_empty() && self.ctx.lib.is_none() {
+            prog.trait_scopes = lexer::trait_scopes(src0);
+            if !prog.trait_scopes.is_empty() {
+                prog.item_lines = items.iter().map(|it| it.line as u32).collect();
+            }
+        }
         prog.overflow_checks = !self.opts.opt;
         prog.deny_unreachable = deny_unreachable;
         prog.deny_must_use = deny_must_use;

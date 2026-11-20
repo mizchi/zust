@@ -258,6 +258,9 @@ pub struct Program {
     /// zust_syntax::lexer::trait_scopes of the program's own source: where two scopes define traits of one name, the
     /// traits in scope on each line (pick_overload chooses the impl of the one in scope at the call)
     pub trait_scopes: Vec<(u32, u32, Vec<String>)>,
+    /// The source line (1-based) of each item, for trait_scopes: the diagnostic line base of a function is not it (a
+    /// dependency's is tagged, and it is the line before). Empty when trait_scopes is
+    pub item_lines: Vec<u32>,
     /// 名前の最後のセグメント → 関数 ID 群 (`len` → `A::len`, `B::len`)。参照の過大近似用
     pub by_last: FxMap<String, Vec<u32>>,
     /// trait 名 → その trait で宣言された関数
@@ -660,6 +663,7 @@ impl Program {
             const_fns: Default::default(),
             overloads: Default::default(),
             trait_scopes: vec![],
+            item_lines: vec![],
             by_last: FxMap::default(),
             traits: FxMap::default(),
             impls: HashSet::default(),
@@ -738,6 +742,7 @@ impl Program {
                     .enumerate()
                     .map(|(ii, sm)| {
                         let mut sm = sm.clone();
+                        let mut renames: Vec<(String, String)> = vec![];
                         for c in &mut sm.closures {
                             if *first.entry(c.name.clone()).or_insert(ii) != ii {
                                 let to = format!("{}_{ii}", c.name);
@@ -751,6 +756,20 @@ impl Program {
                                 }
                                 // (and its symbol, `<the fn's symbol>.c<k>`, which is the same for the two too)
                                 c.sig.symbol = format!("{}_{ii}", c.sig.symbol);
+                                renames.push((from, to));
+                            }
+                        }
+                        // (the fn a closure is in names it in its return type when it returns it, `-> impl Fn`)
+                        for (from, to) in &renames {
+                            for (_, sig) in &mut sm.fns {
+                                for t in sig.params.iter_mut().chain(std::iter::once(&mut sig.ret)) {
+                                    rename_tysyn(t, from, to);
+                                }
+                            }
+                            for c in &mut sm.closures {
+                                for t in c.sig.params.iter_mut().chain(std::iter::once(&mut c.sig.ret)) {
+                                    rename_tysyn(t, from, to);
+                                }
                             }
                         }
                         sm

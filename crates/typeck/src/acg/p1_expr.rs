@@ -85,8 +85,14 @@ impl Cx<'_> {
                 }
             }
             Expr::Path(_, p) => {
-                if let Some(q) = self.static_path(e) {
-                    return self.place(&q);
+                // (`m::S`: the static by its index; a local of the same name, `S`, is not it)
+                if let Some(ci) = self.static_of(e) {
+                    if self.prog.consts[ci as usize].stat == Some(true) && self.unsafe_ok == 0 && p.pos.line != 0 && self.raw_ref == 0 {
+                        return err(p.pos, "use of mutable static is unsafe and requires unsafe block (E0133)");
+                    }
+                    let t = self.prog.consts[ci as usize].ty;
+                    let a = self.static_sym(ci);
+                    return Ok(Place::Mem(a, 0, t));
                 }
                 let Some(id) = ident_of(p) else {
                     return err(SP, "unsupported path");

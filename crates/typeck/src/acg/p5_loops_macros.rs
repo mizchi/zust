@@ -2053,10 +2053,10 @@ impl Cx<'_> {
             let e: &Expr = self.keep_expr(path_expr(&p.segs.last().unwrap().name));
             return self.expr(e, _expected);
         }
-        // `m::S` (モジュールの中の static): モジュールの部分を外す
-        if let Some(q) = self.static_path(e) {
-            let q: &Expr = self.keep_expr(q);
-            return self.expr(q, _expected);
+        // `m::S` (モジュールの中の static): the static itself, by its index (a local of the same name must not answer)
+        if self.static_of(e).is_some() {
+            let p = self.place(e)?;
+            return Ok(self.read(p));
         }
         // (`std::marker::PhantomData` / `m::S`: a unit struct through a module path)
         if segs.len() >= 2 && p.segs.iter().all(|s| s.args.is_empty()) {
@@ -2099,6 +2099,12 @@ impl Cx<'_> {
         let ci = *self.prog.const_index.get(&id)?;
         self.prog.consts[ci as usize].stat?;
         Some(Expr::Path(None, q))
+    }
+
+    /// static_path's static, by its index in consts
+    pub(crate) fn static_of(&self, e: &Expr) -> Option<u32> {
+        let Expr::Path(None, q) = self.static_path(e)? else { return None };
+        self.prog.const_index.get(ident_of(&q)?).copied()
     }
 
     /// `strip_mods_p` の結果を自前の構文木のパスに戻す (後ろのセグメントをそのまま使う)

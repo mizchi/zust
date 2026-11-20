@@ -84,7 +84,9 @@ HashMap の entry API、イテレータの上のクロージャを通り、ど�
 1. **直した:** モジュールのパスで指した static でメソッドを呼ぶと（`config::NAMES.len()`、`config::NAMES[i].len()`、
    `super::config::NAMES[i]`）、"no method `len` on type `str`" になった。式の型をコンパイルの前に出す `peek_syn` が、
    そういうパスを読まなかったので、違う型の上でメソッドを探していた。今は、`expr` と `place` がすでにそうしていたように、
-   パスが指す static を読む（`crates/typeck/src/acg/mod.rs`）。
+   パスが指す static を番号で読む（`crates/typeck/src/acg/mod.rs`）。`expr` と `place` は読んでいたが、名前だけで
+   引いていたので、同じ名前のローカル変数（`m::VALUES` のそばの `let VALUES = ..`）のほうを読んでいた。これらも番号で
+   引くようにした。
    テスト: `tests/probe/static_path_method.rs`。
 2. **直した:** `I: IntoIterator<Item = A>` でしか決まらない型引数が、引数が Vec か HashMap のときに推論できなかった
    （"cannot infer type parameter `A`"）。prelude のコレクションは IntoIterator の impl ではなく `into_iter` メソッドを
@@ -98,9 +100,14 @@ HashMap の entry API、イテレータの上のクロージャを通り、ど�
    - モジュールを平らにすると trait の名前は変わる（`a__M`、`b__M`）が、メソッド呼び出しは trait を名指ししない。どの
      impl を指すかは呼び出しの場所で見える trait で決まるのに、平らにするとモジュールの情報が失われる。
    - `lexer::trait_scopes` が、平らにする前のソースから、モジュールごとに見える trait を読むようにした。そこで定義した
-     もの、および `use`・`use .. as`・glob で取り込んだものである。読むのは、2 つのスコープが同じ名前の trait を定義
-     しているときだけで、それ以外はテキストを軽く見るだけで終わり、字句解析はしない。
-   - 同じ名前のメソッドの impl から 1 つを選ぶ `pick_overload` は、呼び出す関数の行で見える trait の impl を選ぶ。
+     もの、および `use`・`use .. as`・glob・再輸出（あるモジュールの `pub use` を、別のモジュールが取り込む）で取り込んだ
+     ものである。読むのは、2 つのスコープが同じ名前の trait を定義しているときだけで、それ以外はテキストを軽く見るだけで
+     終わり、字句解析はしない。
+   - 同じ名前のメソッドの impl から 1 つを選ぶ `pick_overload` は、呼び出す関数のアイテムのソースの行で見える trait の
+     impl を選ぶ。
+   - 扱わないもの: スコープはモジュールで、ブロックではないので、1 つの関数の 2 つのブロックがそれぞれ違う `M` を `use`
+     すると、両方が見える。1 行に書いた 2 つのモジュールは行を共有する。依存するクレートのあるビルドは前のまま（最初の
+     impl）で、それらの行はそのクレートの行ではないためである。
 4. **直した:** クロージャは、それがある型とメソッドの名前で名付けられ（`Vec::m::{closure#0}`）、trait の名前を含まない。
    Vec への impl がどちらも、クロージャを含むメソッド `m` を持つ 2 つの trait があると、"duplicate definition of
    `Vec::m::{closure#0}::call`" になっていた。
@@ -109,7 +116,9 @@ HashMap の entry API、イテレータの上のクロージャを通り、ど�
    - 名前を変えるのは、前はエラーになっていたプログラムだけである。
    - 3 と 4 のテスト: `tests/probe/same_trait_two_modules.rs`。モジュールで定義した trait、`use super::M`、
      `use crate::b::M as BM`、`use crate::a::*`、ルートの `use`、両方の impl の中のクロージャを含む。`-O` でも minclif でも
-     通る。
+     通る。`tests/probe/same_trait_reexport.rs` は、facade を通した再輸出（名前と glob）、`trait` と名前の間の改行、両方の
+     モジュールが共有する型に `impl Fn` を返すメソッドを足す（そのクロージャはメソッドの戻り値の型に名前が出るので、名前の
+     付け替えはそこも直す）。
 5. **未解決:** `use super::model;` の後の `model::make()` は、クレートのどこかに `model` という名前のモジュールがもう 1 つ
    あると、"cannot find value (unsupported path)" になる。`use super::model::make;` と `super::model::make()` は通る。
 6. **未解決:** trait のメソッドを値として渡すこと（`.map(Tr::m)`、`.map(ToString::to_string)`）は、
@@ -133,7 +142,10 @@ HashMap の entry API、イテレータの上のクロージャを通り、ど�
 ## 確かめたこと
 
 - すべてのパターンと `mix` を、N = 1、2、3、4 で、編集の有無の両方について: zustc の出力は rustc のものと同じ。
-- `tests/bench_patterns.rs` と、`tests/driver2.rs` の 3 つの probe。
+- `tests/bench_patterns.rs` と、`tests/driver2.rs` の 4 つの probe。
+- 一時ディレクトリにプログラムをビルドするテスト（`tests/bench_patterns.rs`、`ast_codegen.rs`、`driver2.rs`、
+  `panic_loc.rs`）は、利用者だけが入れる新しいディレクトリを作り、既にあるもの（共有の機械で他の利用者が作ったもの）は
+  使わずに失敗する。
 - `cargo test --release --workspace`、`bench/rust_ui.py --check`。
 - KPI: pull request の `KPI` ワークフローのコメントに、ベースとの差がある。`patterns check` と `patterns edit` は
   新しいので、ベースには値がない。

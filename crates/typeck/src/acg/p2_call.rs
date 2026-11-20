@@ -1274,12 +1274,14 @@ impl Cx<'_> {
     }
 
     /// Program::trait_scopes at this function: the traits of a colliding name in scope where it is (the innermost
-    /// scope around its first line). None for the prelude, or when no trait name collides
+    /// scope around the source line of its item; a closure is in its fn's). None for the prelude, or when no trait
+    /// name collides
     pub(crate) fn traits_in_scope(&self) -> Option<&[String]> {
         if self.prog.trait_scopes.is_empty() || !self.user_code {
             return None;
         }
-        let line = self.line_base.max(1);
+        let ii = self.prog.item_of.get(self.root as usize).copied().flatten()?;
+        let line = *self.prog.item_lines.get(ii as usize)?;
         self.prog
             .trait_scopes
             .iter()

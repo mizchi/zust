@@ -47,35 +47,56 @@ def measure(pattern, n, reps, vg, rustc, work):
         return row
     if rustc:
         ref = os.path.join(d, "ref")
-        subprocess.run(["rustc", "--edition", "2021", "-Awarnings", "-O", src, "-o", ref], check=True, capture_output=True)
+        rc = subprocess.run(["rustc", "--edition", "2021", "-Awarnings", "-O", src, "-o", ref], capture_output=True, text=True)
+        if rc.returncode != 0:
+            row["error"] = "rustc: " + (rc.stderr.strip().splitlines() or ["build failed"])[0]
+            return row
         want = subprocess.run([ref], capture_output=True, text=True)
         if want.returncode != 0:
             row["error"] = f"rustc's build exited with {want.returncode}"
             return row
         row["same_as_rustc"] = run.stdout == want.stdout
-    row["cold_ms"] = statistics.median(run_measured(build + ["--no-cache"])[0] for _ in range(reps))
-    row["check_ms"] = statistics.median(run_measured([ZUSTC, "check", src])[0] for _ in range(reps))
-    run_measured(build)
-    edits = []
-    for k in range(reps):
-        write(src, pattern, n, k % 2 + 1)
-        # (an edit that does not build is a failed row, with zustc's error, not an exception that ends the run)
+    # (a phase whose command fails is a failed row naming the phase, with zustc's error; the rows of the patterns before
+    # and after are kept)
+    def timed(phase, cmd):
         try:
-            edits.append(run_measured(build)[0])
+            return run_measured(cmd)[0]
         except subprocess.CalledProcessError:
-            e = subprocess.run(build, capture_output=True, text=True)
-            row["error"] = "edit: " + (e.stderr.strip().splitlines() or ["build failed"])[0]
-            return row
-    row["edit_ms"] = statistics.median(edits)
-    if vg:
-        write(src, pattern, n, 0)
-        run_measured(build)
-        row["check_M"] = min(instructions([ZUSTC, "check", src]) for _ in range(2))
-        # (as kpi_track.py: a build under valgrind does not take the stamps' shortcut, and leaves the cache it reads)
-        instructions(build, env={"ZUSTC_NO_STAMP": "1"})
-        write(src, pattern, n, 3)
-        row["edit_M"] = instructions(build)
+            e = subprocess.run(cmd, capture_output=True, text=True)
+            raise PhaseError(f"{phase}: " + (e.stderr.strip().splitlines() or ["failed"])[0])
+
+    def counted(phase, cmd, env=None):
+        try:
+            return instructions(cmd, env=env)
+        except RuntimeError as e:
+            raise PhaseError(f"{phase}: {str(e).splitlines()[0]}")
+
+    try:
+        row["cold_ms"] = statistics.median(timed("cold build", build + ["--no-cache"]) for _ in range(reps))
+        row["check_ms"] = statistics.median(timed("check", [ZUSTC, "check", src]) for _ in range(reps))
+        timed("build", build)
+        edits = []
+        for k in range(reps):
+            write(src, pattern, n, k % 2 + 1)
+            edits.append(timed("edit", build))
+        row["edit_ms"] = statistics.median(edits)
+        if vg:
+            write(src, pattern, n, 0)
+            timed("build", build)
+            row["check_M"] = min(counted("check (counted)", [ZUSTC, "check", src]) for _ in range(2))
+            # (as kpi_track.py: a build under valgrind does not take the stamps' shortcut, and leaves the cache it reads)
+            counted("build (counted)", build, env={"ZUSTC_NO_STAMP": "1"})
+            write(src, pattern, n, 3)
+            row["edit_M"] = counted("edit (counted)", build)
+    except PhaseError as e:
+        row["error"] = str(e)
+        for k in ("cold_ms", "check_ms", "edit_ms", "check_M", "edit_M"):
+            row.pop(k, None)
     return row
+
+
+class PhaseError(Exception):
+    pass
 
 
 def table(rows, vg):

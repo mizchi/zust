@@ -5,10 +5,26 @@
 use std::os::unix::process::ExitStatusExt;
 use std::path::PathBuf;
 
+/// A new directory only this user can enter, made where nothing was: a directory that is there already (another
+/// user's, made before the test started) is never reused, so nothing the test writes goes through it
+fn private_dir(prefix: &str) -> std::path::PathBuf {
+    use std::os::unix::fs::DirBuilderExt;
+    let base = std::env::temp_dir();
+    for k in 0..100u32 {
+        let t = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.subsec_nanos()).unwrap_or(0);
+        let dir = base.join(format!("{prefix}_{}_{t}_{k}", std::process::id()));
+        match std::fs::DirBuilder::new().mode(0o700).create(&dir) {
+            Ok(()) => return dir,
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => continue,
+            Err(e) => panic!("{}: {e}", dir.display()),
+        }
+    }
+    panic!("no new directory under {}", base.display());
+}
+
 #[test]
 fn driver2_matches_expected() {
-    let dir = std::env::temp_dir().join(format!("drv2_{}", std::process::id()));
-    std::fs::create_dir_all(&dir).unwrap();
+    let dir = private_dir("drv2");
     let mut files: Vec<PathBuf> = vec![];
     for d in ["tests/probe", "examples", "tests/acg"] {
         for e in std::fs::read_dir(d).unwrap() {

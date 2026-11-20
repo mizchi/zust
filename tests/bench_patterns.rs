@@ -9,6 +9,23 @@ fn have(cmd: &str) -> bool {
     Command::new(cmd).arg("--version").output().is_ok_and(|o| o.status.success())
 }
 
+/// A new directory only this user can enter, made where nothing was: a directory that is there already (another
+/// user's, made before the test started) is never reused, so nothing the test writes goes through it
+fn private_dir(prefix: &str) -> std::path::PathBuf {
+    use std::os::unix::fs::DirBuilderExt;
+    let base = std::env::temp_dir();
+    for k in 0..100u32 {
+        let t = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.subsec_nanos()).unwrap_or(0);
+        let dir = base.join(format!("{prefix}_{}_{t}_{k}", std::process::id()));
+        match std::fs::DirBuilder::new().mode(0o700).create(&dir) {
+            Ok(()) => return dir,
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => continue,
+            Err(e) => panic!("{}: {e}", dir.display()),
+        }
+    }
+    panic!("no new directory under {}", base.display());
+}
+
 #[test]
 fn bench_patterns_like_rustc() {
     if !have("python3") || !have("rustc") {
@@ -19,8 +36,7 @@ fn bench_patterns_like_rustc() {
     let mut cases: Vec<(String, &str, &str)> = String::from_utf8(list.stdout).unwrap().lines().map(|p| (p.to_string(), "2", "0")).collect();
     assert!(cases.len() >= 9, "{cases:?}");
     cases.push(("mix".into(), "2", "3"));
-    let dir = std::env::temp_dir().join(format!("bench_patterns_{}", std::process::id()));
-    std::fs::create_dir_all(&dir).unwrap();
+    let dir = private_dir("bench_patterns");
     let mut bad = vec![];
     for (name, n, variant) in &cases {
         let g = Command::new("python3").args(["bench/gen_patterns.py", name, n, variant]).output().unwrap();
@@ -31,7 +47,9 @@ fn bench_patterns_like_rustc() {
         let reference = dir.join(format!("{name}.rustc"));
         let r = Command::new("rustc").args(["--edition", "2021", "-Awarnings"]).arg(&path).arg("-o").arg(&reference).output().unwrap();
         assert!(r.status.success(), "rustc {name}: {}", String::from_utf8_lossy(&r.stderr));
-        let want = Command::new(&reference).output().unwrap().stdout;
+        let r = Command::new(&reference).output().unwrap();
+        assert!(r.status.success(), "rustc's build of {name} exited with {:?}: {}", r.status.code(), String::from_utf8_lossy(&r.stderr));
+        let want = r.stdout;
         let exe = dir.join(name);
         if let Err(e) = zustc::driver2::build(&src, &exe, false, None) {
             bad.push(format!("{name}: build: {e}"));

@@ -85,7 +85,9 @@ showed up. Four are fixed here, each with a test in `tests/probe` whose expected
 1. **Fixed:** a method on a static reached through a module path (`config::NAMES.len()`, `config::NAMES[i].len()`,
    `super::config::NAMES[i]`) was "no method `len` on type `str`". `peek_syn`, which gives an expression's type
    before it is compiled, did not read such a path, so the method was looked up on the wrong type. It now reads the
-   static the path names, as `expr` and `place` already did (`crates/typeck/src/acg/mod.rs`).
+   static the path names, by its index (`crates/typeck/src/acg/mod.rs`). `expr` and `place` did read it, but by its
+   bare name, so a local of the same name (`let VALUES = ..` beside `m::VALUES`) answered instead; they now take it by
+   its index too.
    Test: `tests/probe/static_path_method.rs`.
 2. **Fixed:** a type parameter given only by `I: IntoIterator<Item = A>` could not be inferred when the argument was
    a Vec or a HashMap ("cannot infer type parameter `A`"). The prelude's collections have an `into_iter` method, not
@@ -99,10 +101,14 @@ showed up. Four are fixed here, each with a test in `tests/probe` whose expected
    - Flattening the modules renames the traits (`a__M`, `b__M`), but a method call names no trait. Which impl it
      means depends on the trait in scope at the call, and flattening loses the modules.
    - `lexer::trait_scopes` now reads, from the source before flattening, the traits in scope in each module. That is
-     the traits defined there, and the ones brought in by `use`, `use .. as` and globs. It does this only when two
-     scopes define traits of one name; otherwise a quick look at the text ends it, without tokenizing.
+     the traits defined there, and the ones brought in by `use`, `use .. as`, globs and re-exports (`pub use` in one
+     module, imported from it in another). It does this only when two scopes define traits of one name; otherwise a
+     quick look at the text ends it, without tokenizing.
    - `pick_overload`, which chooses among the impls of one method name, takes the one whose trait is in scope at the
-     calling function's line.
+     source line of the calling function's item.
+   - What it does not cover: the scope is a module, not a block, so two blocks of one function that each `use` a
+     different `M` see both. Two modules written on one line share their lines. A build with dependency crates keeps
+     the earlier choice (the first impl), since their lines are not the crate's.
 4. **Fixed:** a closure is named after the type and the method it is in (`Vec::m::{closure#0}`), not after its trait.
    Two traits whose impls for Vec both have a method `m` with a closure in it failed with "duplicate definition of
    `Vec::m::{closure#0}::call`".
@@ -111,7 +117,9 @@ showed up. Four are fixed here, each with a test in `tests/probe` whose expected
    - Only programs that were an error before are renamed.
    - Test for 3 and 4: `tests/probe/same_trait_two_modules.rs`. It covers traits defined in the module, `use super::M`,
      `use crate::b::M as BM`, `use crate::a::*`, a root `use`, and closures in both impls. It also passes with `-O`
-     and with minclif.
+     and with minclif. `tests/probe/same_trait_reexport.rs` adds a re-export through a facade (by name and by glob),
+     a newline between `trait` and the name, and impl methods returning `impl Fn` for a type both modules share
+     (their closures are named in the methods' return types, which the renaming now follows).
 5. **Open:** `use super::model;` followed by `model::make()` is "cannot find value (unsupported path)" when another
    module named `model` exists elsewhere in the crate. `use super::model::make;` and `super::model::make()` work.
 6. **Open:** a trait's method as a value, as in `.map(Tr::m)` or `.map(ToString::to_string)`, is "cannot find value
@@ -136,7 +144,10 @@ group by hand. `generics` now makes its u32 impl differ per group, so taking ano
 ## What was checked
 
 - Every pattern and `mix`, at N = 1, 2, 3 and 4, with and without an edit: zustc's output is rustc's.
-- `tests/bench_patterns.rs`, and the three probes in `tests/driver2.rs`.
+- `tests/bench_patterns.rs`, and the four probes in `tests/driver2.rs`.
+- The tests that build programs into a temporary directory (`tests/bench_patterns.rs`, `ast_codegen.rs`,
+  `driver2.rs`, `panic_loc.rs`) make a new one only the user can enter, and fail rather than reuse one that is there
+  (another user's, on a shared machine).
 - `cargo test --release --workspace`, `bench/rust_ui.py --check`.
 - KPIs: the `KPI` workflow's comment on the pull request has the change against the base. `patterns check` and
   `patterns edit` are new, so the base has no value for them.

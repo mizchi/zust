@@ -1056,18 +1056,30 @@ pub fn trait_scopes(src: &str) -> Vec<(u32, u32, Vec<String>)> {
     if !src.contains("mod") || !src.contains("trait") {
         return vec![];
     }
-    // (a quick look first: the names after `trait `, by text; no name twice, nothing to do. Most programs stop here,
-    // without tokenizing)
+    // (a quick look first: the names after the word `trait` and any whitespace, newlines too, by text; no name twice,
+    // nothing to do. Most programs stop here, without tokenizing. A comment after `trait` leaves it to the tokens)
     {
-        let mut names: Vec<&str> = src
-            .match_indices("trait ")
-            .filter(|(i, _)| *i == 0 || !src.as_bytes()[i - 1].is_ascii_alphanumeric() && src.as_bytes()[i - 1] != b'_')
-            .map(|(i, _)| src[i + 6..].trim_start())
-            .map(|r| &r[..r.find(|c: char| !c.is_alphanumeric() && c != '_').unwrap_or(r.len())])
-            .filter(|n| !n.is_empty())
-            .collect();
+        let b = src.as_bytes();
+        let mut names: Vec<&str> = vec![];
+        let mut unsure = false;
+        for (i, _) in src.match_indices("trait") {
+            let before_ok = i == 0 || !(b[i - 1].is_ascii_alphanumeric() || b[i - 1] == b'_');
+            let after = &src[i + 5..];
+            if !before_ok || !after.starts_with(|c: char| c.is_whitespace() || c == '/') {
+                continue;
+            }
+            let r = after.trim_start();
+            if r.starts_with('/') {
+                unsure = true;
+                break;
+            }
+            let n = &r[..r.find(|c: char| !c.is_alphanumeric() && c != '_').unwrap_or(r.len())];
+            if !n.is_empty() {
+                names.push(n);
+            }
+        }
         names.sort_unstable();
-        if !names.windows(2).any(|w| w[0] == w[1]) {
+        if !unsure && !names.windows(2).any(|w| w[0] == w[1]) {
             return vec![];
         }
     }
@@ -1175,6 +1187,9 @@ pub fn trait_scopes(src: &str) -> Vec<(u32, u32, Vec<String>)> {
             visible[ix(*sc)].push(flat(*sc, n));
         }
     }
+    // (the `use` items: (scope, module path, name or `*`, the name used). Resolved below to a fixed point, so a trait
+    // re-exported by `pub use` in one module and imported from there in another is followed)
+    let mut uses: Vec<(usize, Vec<Vec<u8>>, Vec<u8>, Vec<u8>)> = vec![];
     let mut k = 0;
     while k < toks.len() {
         if !is_id(k, b"use") {
@@ -1190,28 +1205,52 @@ pub fn trait_scopes(src: &str) -> Vec<(u32, u32, Vec<String>)> {
         use_walk(&toks, s, k + 1, e, vec![], &mut items);
         for (path, local) in items {
             if local.as_slice() == b"*" {
-                if let Some(m) = resolve(sc, &path) {
-                    for (n, tsc) in &traits {
-                        if *tsc == m && colliding.contains(&n) {
-                            visible[ix(sc)].push(flat(m, n));
-                        }
-                    }
-                }
-                continue;
-            }
-            let Some((name, mpath)) = path.split_last() else { continue };
-            if !colliding.contains(&name) {
-                continue;
-            }
-            if let Some(m) = resolve(sc, mpath) {
-                if traits.iter().any(|(n, tsc)| n == name && *tsc == m) {
-                    visible[ix(sc)].push(flat(m, name));
-                }
+                uses.push((sc, path, b"*".to_vec(), local));
+            } else if let Some((name, mpath)) = path.split_last() {
+                uses.push((sc, mpath.to_vec(), name.clone(), local));
             }
         }
         k = e + 1;
     }
-    let line_of = |k: usize| -> u32 { (s[..toks[k.min(toks.len() - 1)].1].iter().filter(|&&c| c == b'\n').count() + 1) as u32 };
+    // (scope, name used there) -> the flattened trait: what each scope imported, including what it re-exports
+    let mut imported: Vec<(usize, Vec<u8>, String)> = vec![];
+    for _ in 0..8 {
+        let mut progress = false;
+        for (sc, mpath, name, local) in &uses {
+            let Some(m) = resolve(*sc, mpath) else { continue };
+            let found: Vec<(Vec<u8>, String)> = if name.as_slice() == b"*" {
+                // (a glob: the module's traits of a colliding name, and what it imported)
+                let mut v: Vec<(Vec<u8>, String)> =
+                    traits.iter().filter(|(n, tsc)| *tsc == m && colliding.contains(&n)).map(|(n, _)| (n.clone(), flat(m, n))).collect();
+                v.extend(imported.iter().filter(|(isc, _, _)| *isc == m).map(|(_, n, f)| (n.clone(), f.clone())));
+                v
+            } else if traits.iter().any(|(n, tsc)| n == name && *tsc == m) {
+                if !colliding.contains(&name) {
+                    continue;
+                }
+                vec![(local.clone(), flat(m, name))]
+            } else {
+                imported.iter().filter(|(isc, n, _)| *isc == m && n == name).map(|(_, _, f)| (local.clone(), f.clone())).collect()
+            };
+            for (n, f) in found {
+                if !imported.iter().any(|(isc, n2, f2)| isc == sc && *n2 == n && *f2 == f) {
+                    imported.push((*sc, n, f));
+                    progress = true;
+                }
+            }
+        }
+        if !progress {
+            break;
+        }
+    }
+    for (sc, _, f) in imported {
+        if !visible[ix(sc)].contains(&f) {
+            visible[ix(sc)].push(f);
+        }
+    }
+    // (the line of token k: newline offsets found once, then a binary search)
+    let nls: Vec<usize> = s.iter().enumerate().filter(|(_, c)| **c == b'\n').map(|(i, _)| i).collect();
+    let line_of = |k: usize| -> u32 { (nls.partition_point(|&p| p < toks[k.min(toks.len() - 1)].1) + 1) as u32 };
     let mut out = vec![(1, u32::MAX, std::mem::take(&mut visible[mods.len()]))];
     for (i, m) in mods.iter().enumerate() {
         out.push((line_of(m.1), line_of(m.2), std::mem::take(&mut visible[i])));
