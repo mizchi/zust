@@ -242,3 +242,28 @@ fn alloc_failure_stops() {
     v.push(1);
     kani::assume(false);
 }
+
+/// What `reserve` promises when it does not stop (the should_panic harnesses above only show that it never writes
+/// outside the block): `reserve(n)` gives `capacity() >= len + n`, and n pushes after it fit in that block
+/// (no reallocation, every write inside it: Kani's pointer checks).
+#[kani::proof]
+#[kani::unwind(8)]
+fn reserve_gives_room() {
+    unsafe { LIVE = 0 };
+    {
+        let mut v: Vec<u8> = Vec::new();
+        v.push(1);
+        let n = (kani::any::<u8>() as usize) % 7;
+        v.reserve(n);
+        let cap = v.capacity();
+        assert!(cap >= 1 + n);
+        for k in 0..6 {
+            if k < n {
+                v.push(k as u8);
+            }
+        }
+        assert!(v.capacity() == cap);
+        assert!(v.len() == 1 + n);
+    }
+    assert!(unsafe { LIVE } == 0, "a block was not freed");
+}

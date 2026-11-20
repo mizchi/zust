@@ -1,18 +1,19 @@
 #!/usr/bin/env bash
 # Runs the formal checks in formal/. `formal/run.sh tla` (seconds), `formal/run.sh kani` (minutes, needs
 # `cargo install --locked kani-verifier && cargo kani setup`), no argument: both.
-# Each check has an expected result: specs and harnesses named after a bug are expected to find it.
+# Each check has an expected result: configurations that model a design zustc does not use must find its bug.
 set -u
 cd "$(dirname "$0")"
 fail=0
+log=$(mktemp) || exit 2
+trap 'rm -f "$log"' EXIT
 expect() { # expect <ok|violation> <spec.tla> <cfg>
     local flag=""; [ "$1" = violation ] && flag=--expect-violation
-    if tla-check/target/release/zust-tla-check "tla/$2" "tla/$3" $flag > /tmp/zust-tla.$$ 2>&1; then
-        echo "ok   $2 $3 ($1): $(head -1 /tmp/zust-tla.$$ | sed 's/^[^:]*: //')"
+    if tla-check/target/release/zust-tla-check "tla/$2" "tla/$3" $flag > "$log" 2>&1; then
+        echo "ok   $2 $3 ($1): $(head -1 "$log" | sed 's/^[^:]*: //')"
     else
-        echo "FAIL $2 $3 (expected $1)"; cat /tmp/zust-tla.$$; fail=1
+        echo "FAIL $2 $3 (expected $1)"; cat "$log"; fail=1
     fi
-    rm -f /tmp/zust-tla.$$
 }
 if [ "${1:-all}" != kani ]; then
     cargo build --release --quiet --manifest-path tla-check/Cargo.toml || exit 1
@@ -31,6 +32,15 @@ if [ "${1:-all}" != tla ]; then
     # (every harness is expected to pass)
     for dir in kani-prelude; do
         out=$( (cd "$dir" && cargo kani --output-format terse) 2>&1)
+        rc=$?
+        # (cargo kani exits nonzero when a harness fails, and when it cannot run at all: then there is no harness)
+        if ! echo "$out" | grep -q "^Checking harness "; then
+            echo "FAIL kani $dir: no harness was checked (exit $rc)"; echo "$out" | tail -20; fail=1
+            continue
+        fi
+        if [ $rc -ne 0 ]; then
+            echo "FAIL kani $dir: cargo kani exited with $rc"; fail=1
+        fi
         while read -r h; do
             if echo "$out" | grep -q "Verification failed for - $h\$"; then r=failed; else r=verified; fi
             want=verified

@@ -69,7 +69,7 @@ Kani のハーネスは、修正後のコードを写して調べる。`bug_*` �
   - rust-src のない環境では、zust-analyzer の LSP テスト 2 件が直す前から落ちる。README の要件どおり rust-src を入れて回した。
 - `tests/compare.sh` は 42 件すべて ok（valgrind あり）。
 - tests/ui のベースライン検査は、退行 0。`--check` は crash 2 件（`parser/circular_modules_main.rs` などの循環モジュールでスタックあふれ）で失敗するが、変更前の zustc でも同じように落ちる。
-- `formal/run.sh` は、TLA+ の 7 構成、`props` のテスト、Kani の 13 ハーネスがすべて期待どおりの結果になった。
+- `formal/run.sh` は、TLA+ の 7 構成、`props` のテスト、Kani の 14 ハーネスがすべて期待どおりの結果になった。
 
 KPI は `bench/kpi_log.md` の 2026-11-20 の 4 行にある。
 

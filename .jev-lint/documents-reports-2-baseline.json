@@ -1,6 +1,6 @@
 {
   "schema": "jev-lint-documents-1",
-  "snapshotDigest": "40bcdbab98a233b35f77400cf0e253172e8140d1626b956f6d924e9e59ced816",
+  "snapshotDigest": "86a65706409087cc8d77777b3b6db57475186ab56f64ddc6ba2200a90b4cb1c6",
   "questionDigest": "209d6df378ccb747fcb0e821998fcd6105bc76638a88d22488d3b398d6a21595",
   "model": "jev-1.14.0",
   "snapshotChanged": false,
@@ -100,12 +100,12 @@
       "contextHash": "a068452334ef52150a1932e9d45207a4c156e3a5c60d69e061e986b1aa86d889",
       "judgment": {
         "choice": "supports",
-        "confidence": 0.96,
+        "confidence": 0.97,
         "probabilities": {
-          "supports": 0.97,
+          "supports": 0.98,
           "contradicts": 0.02,
           "unrelated": 0,
-          "insufficient_context": 0.01
+          "insufficient_context": 0
         }
       }
     },
@@ -168,12 +168,12 @@
       "contextHash": "ecee8f597e8c6093bcea35ffd84dafe505685fb3c77901bd2a2a9e033883360c",
       "judgment": {
         "choice": "supports",
-        "confidence": 1,
+        "confidence": 0.97,
         "probabilities": {
-          "supports": 1,
-          "contradicts": 0,
+          "supports": 0.98,
+          "contradicts": 0.01,
           "unrelated": 0,
-          "insufficient_context": 0
+          "insufficient_context": 0.01
         }
       }
     },
@@ -202,10 +202,10 @@
       "contextHash": "5b6ede2d00ec82893b1c63b36b593d1e9e7999236c2422416b8324666f265c93",
       "judgment": {
         "choice": "supports",
-        "confidence": 0.97,
+        "confidence": 0.99,
         "probabilities": {
-          "supports": 0.98,
-          "contradicts": 0.02,
+          "supports": 0.99,
+          "contradicts": 0.01,
           "unrelated": 0,
           "insufficient_context": 0
         }
@@ -372,12 +372,12 @@
       "contextHash": "65d03eec8a642fb4c59c7bacc74397f936864091105bba631e8977b9ca9c1612",
       "judgment": {
         "choice": "supports",
-        "confidence": 0.95,
+        "confidence": 0.97,
         "probabilities": {
-          "supports": 0.96,
-          "contradicts": 0.03,
+          "supports": 0.98,
+          "contradicts": 0.02,
           "unrelated": 0,
-          "insufficient_context": 0.01
+          "insufficient_context": 0
         }
       }
     },
@@ -440,10 +440,10 @@
       "contextHash": "d77f2024ffc7a01c94e005a23cd8538534ebb4abb40df15020d2f6eb96f550b6",
       "judgment": {
         "choice": "supports",
-        "confidence": 0.99,
+        "confidence": 1,
         "probabilities": {
-          "supports": 0.99,
-          "contradicts": 0.01,
+          "supports": 1,
+          "contradicts": 0,
           "unrelated": 0,
           "insufficient_context": 0
         }
@@ -678,10 +678,10 @@
       "contextHash": "f1894d506a5e66f92906b403c8a6a69c60e6e1bad8273b43b0489836c39d482f",
       "judgment": {
         "choice": "supports",
-        "confidence": 0.99,
+        "confidence": 0.96,
         "probabilities": {
-          "supports": 0.99,
-          "contradicts": 0.01,
+          "supports": 0.97,
+          "contradicts": 0.03,
           "unrelated": 0,
           "insufficient_context": 0
         }
@@ -746,12 +746,12 @@
       "contextHash": "74cd923d61e00b7739f80b534b652a909070bb949bfb007a464579050da1d263",
       "judgment": {
         "choice": "supports",
-        "confidence": 0.99,
+        "confidence": 0.96,
         "probabilities": {
-          "supports": 0.99,
+          "supports": 0.97,
           "contradicts": 0.01,
           "unrelated": 0,
-          "insufficient_context": 0
+          "insufficient_context": 0.02
         }
       }
     },
@@ -783,9 +783,9 @@
         "confidence": 0.92,
         "probabilities": {
           "supports": 0.94,
-          "contradicts": 0.05,
+          "contradicts": 0.04,
           "unrelated": 0,
-          "insufficient_context": 0.01
+          "insufficient_context": 0.02
         }
       }
     },
@@ -814,10 +814,10 @@
       "contextHash": "7438e0bb6ac3c01bf6beaa56051a35abf5a2f30ee56334c8cd754b996d6bd4e6",
       "judgment": {
         "choice": "supports",
-        "confidence": 0.89,
+        "confidence": 0.87,
         "probabilities": {
-          "supports": 0.92,
-          "contradicts": 0.07,
+          "supports": 0.9,
+          "contradicts": 0.09,
           "unrelated": 0,
           "insufficient_context": 0.01
         }
@@ -832,20 +832,20 @@
         "path": "docs/reports/2026-11-20-01-formal-fixes.md",
         "startLine": 1,
         "endLine": 95,
-        "quote": "# Fixing what the formal models found: the borrow checker giving up, Vec overflow and allocation failure, the cache's tmp file\n\nDate: 2026-11-20\n\nThis fixes defects 1–4 of [report 2026-11-19-01](2026-11-19-01-formal-models.md). Each failure was reproduced by a test or a model before it was fixed. Each fix is one commit, with one row of KPIs (`bench/kpi_log.md`). Defect 5 (`std::thread::spawn` running the closure at once) is a design question and is left as it is.\n\n## 1. Borrow checking: the fixpoint runs to its end\n\n`Bk::check` returned no error (`None`) once the worklist had run more than `50 * blocks + 1000` rounds.\n\nThe limit is now a formula derived from the lattice's height:\n\n- The state at a block's entry only grows by join, and it grows at most H times, the lattice's height.\n- H is the sum of the numbers of: moved paths (from moves and uninitialized binds), immutable locals already assigned, holds entries and their loans, and dead and escaped loans.\n- A block goes on the worklist only when the state at its entry grew.\n- So there are at most `n * (H + 1) + 1` rounds.\n\nGoing past that cannot happen, but if it did, the program is rejected with an error instead of accepted (an assert in debug builds).\n\n- The test is `fixpoint_does_not_give_up` in `borrowck_props.rs`. It builds a chain of 700 references directly as events. It failed before the fix.\n- `formal/repro/borrowck_rounds.py` now finds E0506 at K = 260 and at K = 1000.\n\n## 2. Vec capacity overflow\n\n`Vec::reserve` changes as follows:\n\n- It panics with `panic!(\"capacity overflow\")` when `len + extra` does not fit in usize, or when the block would be larger than isize::MAX bytes (the same limit as std).\n- The doubling saturates.\n- This computation is in `__exr_vec_new_cap`, a function that is not generic, so it is not checked and compiled per element type (see the KPI section).\n\n`Vec::<u64>::with_capacity(1 << 61)` followed by a push was a segmentation fault. It now ends with \"capacity overflow\" and exit code 101, as with rustc. `tests/alloc_limits.rs` tests these three cases, and a Vec that grows normally:\n\n- `with_capacity(1 << 61)`\n- `reserve(usize::MAX)` on a Vec with elements\n- `reserve(usize::MAX / 4)`\n\n## 3. Allocation failure\n\nThe prelude's 12 calls to `realloc` (Vec, sort buffers, HashMap, VecDeque and others) now go through `__exr_realloc_ok`:\n\n- When realloc returns null, it prints a message (\"memory allocation failed\") and aborts, as std's `handle_alloc_error` does.\n- `realloc(p, 0)` may return null; that is not a failure and is not treated as one.\n- `Box`'s malloc is called directly by the code generator and is not changed here.\n\nThe Kani harnesses copy the fixed code and check it. The `bug_*` harnesses are replaced by three:\n\n- `with_capacity_any_size`\n- `reserve_any_size`\n- `alloc_failure_stops`\n\nEach is `#[kani::should_panic]`, and shows that any size, and a failing malloc, stop with a panic or an abort. Kani's pointer checks (out of bounds, a null dereference) do not count as panics, so a single path that writes out of bounds makes the harness fail.\n\n- On the prelude before the fix, all three were checked to fail with \"failures other than panics\".\n- What a Vec holds is still checked by the `*_matches_model` harnesses.\n\n## 4. The tmp file of the cache and the stamps\n\n`Cache2::save` wrote `<path>.tmp` and then renamed it, and every process used the same tmp name.\n\n- The name is now `<path>.<pid>.tmp`. `cache2.rs` is also compiled by zustc itself, so the pid comes from libc's `getpid`.\n- When the write or the rename fails, the tmp file is removed.\n- `src/stamp.rs` saved the stamps the same way and gets the same change.\n\n`formal/tla/CacheSave.cfg` checks the code as it is now (a name per process), and the whole state space passes (72 states). The old way is kept as `CacheSaveShared.cfg`, and `formal/run.sh` checks that it still gives the counterexample (8 steps). The test is `save_tests::save_then_open` in `cache2.rs`.\n\n## What was checked\n\n- `cargo test --release --workspace` passes.\n  - Without rust-src, two of zust-analyzer's LSP tests fail, before the fix too. They were run with rust-src installed, as the README requires.\n- `tests/compare.sh`: all 42 ok (with valgrind).\n- The tests/ui baseline check: 0 regressions. `--check` fails on 2 crashes (a stack overflow on circular modules, `parser/circular_modules_main.rs` and one more), which zustc before the change has too.\n- `formal/run.sh`: the 7 TLA+ configurations, the `props` tests and the 13 Kani harnesses all give their expected results.\n\nThe KPIs are the four rows of 2026-11-20 in `bench/kpi_log.md`:\n\n- The first row is a reference: the code before the change (main + formal/), measured again on this machine. The row before it was measured on another machine, so the difference shows up there.\n- The other three rows are the differences of fixes 1–3, one each.\n\n| change | no-op build | edit one fn | check | traits check | traits edit | crates no-op | crates edit | tests/ui (run / check / build / compile-fail) |\n|---|---:|---:|---:|---:|---:|---:|---:|---|\n| reference (0765679) | 0.9 M | 580.8 M | 3851.5 M | 1178.8 M | 61.0 M | 10.8 M | 316.2 M | 1698 / 1417 / 95 / 3327 |\n| 1. borrow checking | +0.00% | -0.09% | -0.06% | +0.03% | -0.01% | +0.00% | -0.03% | 1698 / 1417 / 95 / 3326 |\n| 4. cache | +0.00% | +0.02% | -0.00% | -0.03% | +0.00% | +0.00% | +0.02% | 1698 / 1417 / 95 / 3327 |\n| 2 and 3. Vec | +0.23% | -0.06% | +0.09% | -0.26% | +0.23% | +0.13% | +0.60% | 1698 / 1417 / 95 / 3327 |\n\n- Every change is below the 5% threshold. The cache size does not change.\n- A program that uses Vec is about 540 bytes larger, for the two checks and their panic / abort paths. `macros.cache_bytes` in `bench/budget.txt` had only 0.8% left (66655 of 67160) and is now 67398. That entry alone is raised to 70768 by the rule `UPDATE_BUDGET=1` follows (the current value + 5%). The other entries are the sizes with CI's wild and are left as they are (all within their limits).\n- compile-fail goes between 3327 and 3326 by one test from row to row. It goes back with the cache fix too, which has nothing to do with borrow checking, so the test is timing-dependent. The baseline check finds 0 regressions.\n- The Vec fix first put its checks in `reserve` itself. `reserve` gets an instance per element type, and traits check went up 2.65%. With the overflow computation moved to a function that is not generic, `__exr_vec_new_cap`, it is -0.26%.\n\n## What is left\n\n- Defect 5: `std::thread::spawn` runs the closure at once. Real threads would need `Arc` changed as the atomic version of `ArcDrop.tla` does.\n- Allocation failure in `Box`.\n- A checksum for the cache. With a tmp file per process, a mixed file is no longer read, but a checksum is still needed to discard a file corrupted on disk.",
-        "contentHash": "b82f0158cf41697c5908a2515667863b5123265ff41e251c394488672194da83"
+        "quote": "# Fixing what the formal models found: the borrow checker giving up, Vec overflow and allocation failure, the cache's tmp file\n\nDate: 2026-11-20\n\nThis fixes defects 1–4 of [report 2026-11-19-01](2026-11-19-01-formal-models.md). Each failure was reproduced by a test or a model before it was fixed. Each fix is one commit, with one row of KPIs (`bench/kpi_log.md`). Defect 5 (`std::thread::spawn` running the closure at once) is a design question and is left as it is.\n\n## 1. Borrow checking: the fixpoint runs to its end\n\n`Bk::check` returned no error (`None`) once the worklist had run more than `50 * blocks + 1000` rounds.\n\nThe limit is now a formula derived from the lattice's height:\n\n- The state at a block's entry only grows by join, and it grows at most H times, the lattice's height.\n- H is the sum of the numbers of: moved paths (from moves and uninitialized binds), immutable locals already assigned, holds entries and their loans, and dead and escaped loans.\n- A block goes on the worklist only when the state at its entry grew.\n- So there are at most `n * (H + 1) + 1` rounds.\n\nGoing past that cannot happen, but if it did, the program is rejected with an error instead of accepted (an assert in debug builds).\n\n- The test is `fixpoint_does_not_give_up` in `borrowck_props.rs`. It builds a chain of 700 references directly as events. It failed before the fix.\n- `formal/repro/borrowck_rounds.py` now finds E0506 at K = 260 and at K = 1000.\n\n## 2. Vec capacity overflow\n\n`Vec::reserve` changes as follows:\n\n- It panics with `panic!(\"capacity overflow\")` when `len + extra` does not fit in usize, or when the block would be larger than isize::MAX bytes (the same limit as std).\n- The doubling saturates.\n- This computation is in `__exr_vec_new_cap`, a function that is not generic, so it is not checked and compiled per element type (see the KPI section).\n\n`Vec::<u64>::with_capacity(1 << 61)` followed by a push was a segmentation fault. It now ends with \"capacity overflow\" and exit code 101, as with rustc. `tests/alloc_limits.rs` tests these three cases, and a Vec that grows normally:\n\n- `with_capacity(1 << 61)`\n- `reserve(usize::MAX)` on a Vec with elements\n- `reserve(usize::MAX / 4)`\n\n## 3. Allocation failure\n\nThe prelude's 12 calls to `realloc` (Vec, sort buffers, HashMap, VecDeque and others) now go through `__exr_realloc_ok`:\n\n- When realloc returns null, it prints a message (\"memory allocation failed\") and aborts, as std's `handle_alloc_error` does.\n- `realloc(p, 0)` may return null; that is not a failure and is not treated as one.\n- `Box`'s malloc is called directly by the code generator and is not changed here.\n\nThe Kani harnesses copy the fixed code and check it. The `bug_*` harnesses are replaced by three:\n\n- `with_capacity_any_size`\n- `reserve_any_size`\n- `alloc_failure_stops`\n\nEach is `#[kani::should_panic]`, and shows that any size, and a failing malloc, stop with a panic or an abort. Kani's pointer checks (out of bounds, a null dereference) do not count as panics, so a single path that writes out of bounds makes the harness fail.\n\n- On the prelude before the fix, all three were checked to fail with \"failures other than panics\".\n- What a Vec holds is still checked by the `*_matches_model` harnesses.\n\n## 4. The tmp file of the cache and the stamps\n\n`Cache2::save` wrote `<path>.tmp` and then renamed it, and every process used the same tmp name.\n\n- The name is now `<path>.<pid>.tmp`. `cache2.rs` is also compiled by zustc itself, so the pid comes from libc's `getpid`.\n- When the write or the rename fails, the tmp file is removed.\n- `src/stamp.rs` saved the stamps the same way and gets the same change.\n\n`formal/tla/CacheSave.cfg` checks the code as it is now (a name per process), and the whole state space passes (72 states). The old way is kept as `CacheSaveShared.cfg`, and `formal/run.sh` checks that it still gives the counterexample (8 steps). The test is `save_tests::save_then_open` in `cache2.rs`.\n\n## What was checked\n\n- `cargo test --release --workspace` passes.\n  - Without rust-src, two of zust-analyzer's LSP tests fail, before the fix too. They were run with rust-src installed, as the README requires.\n- `tests/compare.sh`: all 42 ok (with valgrind).\n- The tests/ui baseline check: 0 regressions. `--check` fails on 2 crashes (a stack overflow on circular modules, `parser/circular_modules_main.rs` and one more), which zustc before the change has too.\n- `formal/run.sh`: the 7 TLA+ configurations, the `props` tests and the 14 Kani harnesses all give their expected results.\n\nThe KPIs are the four rows of 2026-11-20 in `bench/kpi_log.md`:\n\n- The first row is a reference: the code before the change (main + formal/), measured again on this machine. The row before it was measured on another machine, so the difference shows up there.\n- The other three rows are the differences of fixes 1–3, one each.\n\n| change | no-op build | edit one fn | check | traits check | traits edit | crates no-op | crates edit | tests/ui (run / check / build / compile-fail) |\n|---|---:|---:|---:|---:|---:|---:|---:|---|\n| reference (0765679) | 0.9 M | 580.8 M | 3851.5 M | 1178.8 M | 61.0 M | 10.8 M | 316.2 M | 1698 / 1417 / 95 / 3327 |\n| 1. borrow checking | +0.00% | -0.09% | -0.06% | +0.03% | -0.01% | +0.00% | -0.03% | 1698 / 1417 / 95 / 3326 |\n| 4. cache | +0.00% | +0.02% | -0.00% | -0.03% | +0.00% | +0.00% | +0.02% | 1698 / 1417 / 95 / 3327 |\n| 2 and 3. Vec | +0.23% | -0.06% | +0.09% | -0.26% | +0.23% | +0.13% | +0.60% | 1698 / 1417 / 95 / 3327 |\n\n- Every change is below the 5% threshold. The cache size does not change.\n- A program that uses Vec is about 540 bytes larger, for the two checks and their panic / abort paths. `macros.cache_bytes` in `bench/budget.txt` had only 0.8% left (66655 of 67160) and is now 67398. That entry alone is raised to 70768 by the rule `UPDATE_BUDGET=1` follows (the current value + 5%). The other entries are the sizes with CI's wild and are left as they are (all within their limits).\n- compile-fail goes between 3327 and 3326 by one test from row to row. It goes back with the cache fix too, which has nothing to do with borrow checking, so the test is timing-dependent. The baseline check finds 0 regressions.\n- The Vec fix first put its checks in `reserve` itself. `reserve` gets an instance per element type, and traits check went up 2.65%. With the overflow computation moved to a function that is not generic, `__exr_vec_new_cap`, it is -0.26%.\n\n## What is left\n\n- Defect 5: `std::thread::spawn` runs the closure at once. Real threads would need `Arc` changed as the atomic version of `ArcDrop.tla` does.\n- Allocation failure in `Box`.\n- A checksum for the cache. With a tmp file per process, a mixed file is no longer read, but a checksum is still needed to discard a file corrupted on disk.",
+        "contentHash": "910353deb7535b81b6ce7b6511ecdabba723d9d923c09da3718dd5c687bbdd9a"
       },
       "target": {
         "source": "docs_reports_2026-11-20-01-formal-fixes.ja",
         "path": "docs/ja/reports/2026-11-20-01-formal-fixes.md",
         "startLine": 1,
         "endLine": 95,
-        "quote": "# 形式モデルが見つけた欠陥の修正: 借用検査の打ち切り・Vec の桁あふれと割り当て失敗・キャッシュの一時ファイル\n\nDate: 2026-11-20\n\n[報告 2026-11-19-01](2026-11-19-01-formal-models.md) の欠陥 1〜4 を直した。どれも、直す前の失敗をテストかモデルで再現してから直した。修正は 1 つにつき 1 コミットに分け、KPI を 1 行ずつ記録した（`bench/kpi_log.md`）。欠陥 5（`std::thread::spawn` の即時実行）は設計の問題として残す。\n\n## 1. 借用検査: 不動点を最後まで回す\n\n`Bk::check` は worklist の回数が `50 * ブロック数 + 1000` を超えると、誤りなし（`None`）を返していた。\n\n上限は、束の高さから導いた次の式に変えた。\n\n- ブロックの入口の状態は join で大きくなるだけで、大きくなる回数は束の高さ H 以下である。\n- H は、ムーブした場所（ムーブと未初期化の束縛から）、immutable で代入済みのローカル、holds の項目とそのローン、dead と escaped のローンの数の和である。\n- worklist に入るのは、入口の状態が大きくなったときだけである。\n- したがって回数は `n * (H + 1) + 1` を超えない。\n\nこれを超えることは起こりえないが、超えたら受け付けずに誤りにする（debug ビルドでは assert）。\n\n- テストは `borrowck_props.rs` の `fixpoint_does_not_give_up`。長さ 700 の参照の連鎖を、イベント列として直接組み立てる。直す前は失敗した。\n- `formal/repro/borrowck_rounds.py` は、K = 260 でも 1000 でも E0506 を見つけるようになった。\n\n## 2. Vec の容量の桁あふれ\n\n`Vec::reserve` を次のように変えた。\n\n- `len + extra` が usize に入らないとき、または確保するブロックが isize::MAX バイトを超えるとき（std と同じ上限）は、`panic!(\"capacity overflow\")` にする。\n- 倍にする計算は飽和させる。\n- この計算は総称でない関数 `__exr_vec_new_cap` に置く（要素の型ごとに検査・コンパイルしないため。KPI の節を参照）。\n\n`Vec::<u64>::with_capacity(1 << 61)` の後に push すると、segmentation fault だったのが、rustc と同じく \"capacity overflow\" で終了コード 101 になった。テストは `tests/alloc_limits.rs` で、次の 3 つと、普通に伸びる場合を調べる。\n\n- `with_capacity(1 << 61)`\n- 要素のある Vec への `reserve(usize::MAX)`\n- `reserve(usize::MAX / 4)`\n\n## 3. 割り当ての失敗\n\nprelude の `realloc` の呼び出し 12 箇所（Vec、整列の作業領域、HashMap、VecDeque など）を `__exr_realloc_ok` に替えた。\n\n- null が返ったら、std の `handle_alloc_error` と同じく、メッセージ（\"memory allocation failed\"）を出して abort する。\n- `realloc(p, 0)` は null を返しうるが、これは失敗ではないので扱わない。\n- `Box` の malloc はコード生成が直接呼ぶので、今回は変えていない。\n\nKani のハーネスは、修正後のコードを写して調べる。`bug_*` を次の 3 つに替えた。\n\n- `with_capacity_any_size`\n- `reserve_any_size`\n- `alloc_failure_stops`\n\nどれも `#[kani::should_panic]` で、どんな大きさでも、また malloc が失敗しても、panic か abort で止まることを示す。Kani のポインタ検査（範囲外・null の参照）は panic として数えないので、範囲外に書く経路が 1 つでもあれば失敗する。\n\n- 直す前の prelude では、3 つとも「panic 以外の失敗」で落ちることを確かめた。\n- 中身の正しさは、これまでどおり `*_matches_model` が調べる。\n\n## 4. キャッシュとスタンプの一時ファイル\n\n`Cache2::save` は `<path>.tmp` に書いてから rename していた。一時ファイル名は全プロセスで同じだった。\n\n- 名前を `<path>.<pid>.tmp` に変えた。`cache2.rs` は zustc 自身でもコンパイルするので、pid は libc の `getpid` で取る。\n- 書き込みか rename に失敗したら、一時ファイルを消す。\n- `src/stamp.rs` のスタンプの保存も同じやり方だったので、同じように直した。\n\n`formal/tla/CacheSave.cfg` は今のコード（プロセスごとの名前）を検査し、全探索で成り立つ（72 状態）。前のやり方は `CacheSaveShared.cfg` として残し、反例（8 手）を出すことを `formal/run.sh` が確かめる。テストは `cache2.rs` の `save_tests::save_then_open`。\n\n## 確かめたこと\n\n- `cargo test --release --workspace` はすべて通った。\n  - rust-src のない環境では、zust-analyzer の LSP テスト 2 件が直す前から落ちる。README の要件どおり rust-src を入れて回した。\n- `tests/compare.sh` は 42 件すべて ok（valgrind あり）。\n- tests/ui のベースライン検査は、退行 0。`--check` は crash 2 件（`parser/circular_modules_main.rs` などの循環モジュールでスタックあふれ）で失敗するが、変更前の zustc でも同じように落ちる。\n- `formal/run.sh` は、TLA+ の 7 構成、`props` のテスト、Kani の 13 ハーネスがすべて期待どおりの結果になった。\n\nKPI は `bench/kpi_log.md` の 2026-11-20 の 4 行にある。\n\n- 1 行目は、変更の前（main + formal/）をこの機械で測り直した基準である。前の行とは機械が違うので、その差が出ている。\n- 残りの 3 行が、修正 1〜3 それぞれの差分である。\n\n| 変更 | no-op build | edit one fn | check | traits check | traits edit | crates no-op | crates edit | tests/ui (run / check / build / compile-fail) |\n|---|---:|---:|---:|---:|---:|---:|---:|---|\n| 基準（0765679） | 0.9 M | 580.8 M | 3851.5 M | 1178.8 M | 61.0 M | 10.8 M | 316.2 M | 1698 / 1417 / 95 / 3327 |\n| 1. 借用検査 | +0.00% | -0.09% | -0.06% | +0.03% | -0.01% | +0.00% | -0.03% | 1698 / 1417 / 95 / 3326 |\n| 4. キャッシュ | +0.00% | +0.02% | -0.00% | -0.03% | +0.00% | +0.00% | +0.02% | 1698 / 1417 / 95 / 3327 |\n| 2・3. Vec | +0.23% | -0.06% | +0.09% | -0.26% | +0.23% | +0.13% | +0.60% | 1698 / 1417 / 95 / 3327 |\n\n- どれも判定の閾値（5%）より小さい。キャッシュの大きさは変わらない。\n- Vec を使うプログラムは、2 つの検査と panic / abort の経路の分だけ約 540 バイト大きくなった。`bench/budget.txt` の `macros.cache_bytes` は、もともと余裕が 0.8%（67160 のうち 66655）しかなく、67398 になった。この項目だけ、`UPDATE_BUDGET=1` と同じ規則（現在値 + 5%）で 70768 にした。ほかの項目は CI の wild での大きさなので、そのままにしてある（どれも上限内）。\n- compile-fail の 3327 / 3326 は、どの行でも 1 件が行き来している。キャッシュの修正（借用検査に関係しない）でも戻っているので、時間で揺れるテストである。ベースラインの検査は退行 0。\n- Vec の修正は、最初は検査を `reserve` の中に書いた。`reserve` は要素の型ごとにインスタンスができるので、traits check が +2.65% になった。桁あふれの計算を総称でない関数 `__exr_vec_new_cap` に移すと、-0.26% になった。\n\n## 残ったこと\n\n- 欠陥 5: `std::thread::spawn` の即時実行。本物のスレッドを入れるなら、`ArcDrop.tla` の atomic 版のとおり `Arc` を変える必要がある。\n- `Box` の割り当ての失敗。\n- キャッシュのチェックサム。プロセスごとの一時ファイルで、混ざったファイルは読まれなくなった。それでも、ディスクの上で壊れたファイルを捨てるには要る。",
-        "contentHash": "846787166ae206dece2a4155a52132549d1ca26d253efbdc5c60e677b412f6fe"
+        "quote": "# 形式モデルが見つけた欠陥の修正: 借用検査の打ち切り・Vec の桁あふれと割り当て失敗・キャッシュの一時ファイル\n\nDate: 2026-11-20\n\n[報告 2026-11-19-01](2026-11-19-01-formal-models.md) の欠陥 1〜4 を直した。どれも、直す前の失敗をテストかモデルで再現してから直した。修正は 1 つにつき 1 コミットに分け、KPI を 1 行ずつ記録した（`bench/kpi_log.md`）。欠陥 5（`std::thread::spawn` の即時実行）は設計の問題として残す。\n\n## 1. 借用検査: 不動点を最後まで回す\n\n`Bk::check` は worklist の回数が `50 * ブロック数 + 1000` を超えると、誤りなし（`None`）を返していた。\n\n上限は、束の高さから導いた次の式に変えた。\n\n- ブロックの入口の状態は join で大きくなるだけで、大きくなる回数は束の高さ H 以下である。\n- H は、ムーブした場所（ムーブと未初期化の束縛から）、immutable で代入済みのローカル、holds の項目とそのローン、dead と escaped のローンの数の和である。\n- worklist に入るのは、入口の状態が大きくなったときだけである。\n- したがって回数は `n * (H + 1) + 1` を超えない。\n\nこれを超えることは起こりえないが、超えたら受け付けずに誤りにする（debug ビルドでは assert）。\n\n- テストは `borrowck_props.rs` の `fixpoint_does_not_give_up`。長さ 700 の参照の連鎖を、イベント列として直接組み立てる。直す前は失敗した。\n- `formal/repro/borrowck_rounds.py` は、K = 260 でも 1000 でも E0506 を見つけるようになった。\n\n## 2. Vec の容量の桁あふれ\n\n`Vec::reserve` を次のように変えた。\n\n- `len + extra` が usize に入らないとき、または確保するブロックが isize::MAX バイトを超えるとき（std と同じ上限）は、`panic!(\"capacity overflow\")` にする。\n- 倍にする計算は飽和させる。\n- この計算は総称でない関数 `__exr_vec_new_cap` に置く（要素の型ごとに検査・コンパイルしないため。KPI の節を参照）。\n\n`Vec::<u64>::with_capacity(1 << 61)` の後に push すると、segmentation fault だったのが、rustc と同じく \"capacity overflow\" で終了コード 101 になった。テストは `tests/alloc_limits.rs` で、次の 3 つと、普通に伸びる場合を調べる。\n\n- `with_capacity(1 << 61)`\n- 要素のある Vec への `reserve(usize::MAX)`\n- `reserve(usize::MAX / 4)`\n\n## 3. 割り当ての失敗\n\nprelude の `realloc` の呼び出し 12 箇所（Vec、整列の作業領域、HashMap、VecDeque など）を `__exr_realloc_ok` に替えた。\n\n- null が返ったら、std の `handle_alloc_error` と同じく、メッセージ（\"memory allocation failed\"）を出して abort する。\n- `realloc(p, 0)` は null を返しうるが、これは失敗ではないので扱わない。\n- `Box` の malloc はコード生成が直接呼ぶので、今回は変えていない。\n\nKani のハーネスは、修正後のコードを写して調べる。`bug_*` を次の 3 つに替えた。\n\n- `with_capacity_any_size`\n- `reserve_any_size`\n- `alloc_failure_stops`\n\nどれも `#[kani::should_panic]` で、どんな大きさでも、また malloc が失敗しても、panic か abort で止まることを示す。Kani のポインタ検査（範囲外・null の参照）は panic として数えないので、範囲外に書く経路が 1 つでもあれば失敗する。\n\n- 直す前の prelude では、3 つとも「panic 以外の失敗」で落ちることを確かめた。\n- 中身の正しさは、これまでどおり `*_matches_model` が調べる。\n\n## 4. キャッシュとスタンプの一時ファイル\n\n`Cache2::save` は `<path>.tmp` に書いてから rename していた。一時ファイル名は全プロセスで同じだった。\n\n- 名前を `<path>.<pid>.tmp` に変えた。`cache2.rs` は zustc 自身でもコンパイルするので、pid は libc の `getpid` で取る。\n- 書き込みか rename に失敗したら、一時ファイルを消す。\n- `src/stamp.rs` のスタンプの保存も同じやり方だったので、同じように直した。\n\n`formal/tla/CacheSave.cfg` は今のコード（プロセスごとの名前）を検査し、全探索で成り立つ（72 状態）。前のやり方は `CacheSaveShared.cfg` として残し、反例（8 手）を出すことを `formal/run.sh` が確かめる。テストは `cache2.rs` の `save_tests::save_then_open`。\n\n## 確かめたこと\n\n- `cargo test --release --workspace` はすべて通った。\n  - rust-src のない環境では、zust-analyzer の LSP テスト 2 件が直す前から落ちる。README の要件どおり rust-src を入れて回した。\n- `tests/compare.sh` は 42 件すべて ok（valgrind あり）。\n- tests/ui のベースライン検査は、退行 0。`--check` は crash 2 件（`parser/circular_modules_main.rs` などの循環モジュールでスタックあふれ）で失敗するが、変更前の zustc でも同じように落ちる。\n- `formal/run.sh` は、TLA+ の 7 構成、`props` のテスト、Kani の 14 ハーネスがすべて期待どおりの結果になった。\n\nKPI は `bench/kpi_log.md` の 2026-11-20 の 4 行にある。\n\n- 1 行目は、変更の前（main + formal/）をこの機械で測り直した基準である。前の行とは機械が違うので、その差が出ている。\n- 残りの 3 行が、修正 1〜3 それぞれの差分である。\n\n| 変更 | no-op build | edit one fn | check | traits check | traits edit | crates no-op | crates edit | tests/ui (run / check / build / compile-fail) |\n|---|---:|---:|---:|---:|---:|---:|---:|---|\n| 基準（0765679） | 0.9 M | 580.8 M | 3851.5 M | 1178.8 M | 61.0 M | 10.8 M | 316.2 M | 1698 / 1417 / 95 / 3327 |\n| 1. 借用検査 | +0.00% | -0.09% | -0.06% | +0.03% | -0.01% | +0.00% | -0.03% | 1698 / 1417 / 95 / 3326 |\n| 4. キャッシュ | +0.00% | +0.02% | -0.00% | -0.03% | +0.00% | +0.00% | +0.02% | 1698 / 1417 / 95 / 3327 |\n| 2・3. Vec | +0.23% | -0.06% | +0.09% | -0.26% | +0.23% | +0.13% | +0.60% | 1698 / 1417 / 95 / 3327 |\n\n- どれも判定の閾値（5%）より小さい。キャッシュの大きさは変わらない。\n- Vec を使うプログラムは、2 つの検査と panic / abort の経路の分だけ約 540 バイト大きくなった。`bench/budget.txt` の `macros.cache_bytes` は、もともと余裕が 0.8%（67160 のうち 66655）しかなく、67398 になった。この項目だけ、`UPDATE_BUDGET=1` と同じ規則（現在値 + 5%）で 70768 にした。ほかの項目は CI の wild での大きさなので、そのままにしてある（どれも上限内）。\n- compile-fail の 3327 / 3326 は、どの行でも 1 件が行き来している。キャッシュの修正（借用検査に関係しない）でも戻っているので、時間で揺れるテストである。ベースラインの検査は退行 0。\n- Vec の修正は、最初は検査を `reserve` の中に書いた。`reserve` は要素の型ごとにインスタンスができるので、traits check が +2.65% になった。桁あふれの計算を総称でない関数 `__exr_vec_new_cap` に移すと、-0.26% になった。\n\n## 残ったこと\n\n- 欠陥 5: `std::thread::spawn` の即時実行。本物のスレッドを入れるなら、`ArcDrop.tla` の atomic 版のとおり `Arc` を変える必要がある。\n- `Box` の割り当ての失敗。\n- キャッシュのチェックサム。プロセスごとの一時ファイルで、混ざったファイルは読まれなくなった。それでも、ディスクの上で壊れたファイルを捨てるには要る。",
+        "contentHash": "6e73f17ff30155546c44b63258fc4eb008ea3d062b2ff09f51207e03b3747020"
       },
       "context": [],
-      "candidateId": "95761fde134e75a2cf4cfaaaeee1e662243184a3aefe4b2b77bb0fa61d310187",
-      "contextHash": "69bb00b22d7750f550a3cc8c88fe9bb13831eb841a4ba0ab7e9a7c12927dca30",
+      "candidateId": "2756f3bfe0331e1e1880f56baf31ded7238b7368d456c31f7bee58106a476f74",
+      "contextHash": "97f5ade1a95787da01a05b7b778bf6774a0de896320509372c48094515700828",
       "judgment": {
         "choice": "supports",
         "confidence": 0.99,
@@ -871,8 +871,8 @@
   },
   "usage": {
     "requests": 25,
-    "inputTokens": 109526,
-    "usd": 0.004600092
+    "inputTokens": 109519,
+    "usd": 0.004599798
   },
   "errors": []
 }

@@ -69,7 +69,7 @@ Each is `#[kani::should_panic]`, and shows that any size, and a failing malloc, 
   - Without rust-src, two of zust-analyzer's LSP tests fail, before the fix too. They were run with rust-src installed, as the README requires.
 - `tests/compare.sh`: all 42 ok (with valgrind).
 - The tests/ui baseline check: 0 regressions. `--check` fails on 2 crashes (a stack overflow on circular modules, `parser/circular_modules_main.rs` and one more), which zustc before the change has too.
-- `formal/run.sh`: the 7 TLA+ configurations, the `props` tests and the 13 Kani harnesses all give their expected results.
+- `formal/run.sh`: the 7 TLA+ configurations, the `props` tests and the 14 Kani harnesses all give their expected results.
 
 The KPIs are the four rows of 2026-11-20 in `bench/kpi_log.md`:
 
