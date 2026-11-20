@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795184154985,
+  "lastUpdate": 1795185112786,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -36410,6 +36410,165 @@ window.BENCHMARK_DATA = {
           {
             "name": "rt/strings run (-O)",
             "value": 60.198,
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "committer": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "distinct": true,
+          "id": "7a588e0143f9c2f06761b7282a16809e0da31303",
+          "message": "Option/Result::inspect, overflowing/wrapping div and rem, Iterator::unzip\n\n- Option::inspect, Result::inspect, Result::inspect_err.\n- Integer overflowing_div / overflowing_rem / wrapping_div / wrapping_rem:\n  MIN / -1 gives (MIN, true) / (0, true), and a zero divisor panics as `/`\n  does.\n- Iterator::unzip into two Vecs.\n\ntests/ui: +1 check-pass.\n\nKPI: crates edit +0.16% (outside its 0.14% band). Removing the new\ninspect methods alone takes 0.19M of it back. The crates name `inspect`,\nso the prelude's name-driven selection now picks them as candidates; the\nrest is the other new prelude items. Σ for crates edit is still -0.25%.\nno-op / crates no-op are the std startup variation seen before.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-20T14:27:46Z",
+          "tree_id": "e8dfc77afe0dbe131652e1136cacdcae9bdf7e51",
+          "url": "https://github.com/mizchi/zust/commit/7a588e0143f9c2f06761b7282a16809e0da31303"
+        },
+        "date": 1795185112137,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "gen1000 build cold",
+            "value": 88.67,
+            "unit": "ms"
+          },
+          {
+            "name": "gen1000 build noop",
+            "value": 1.08,
+            "unit": "ms"
+          },
+          {
+            "name": "gen1000 build edit 1 fn",
+            "value": 18.398,
+            "unit": "ms"
+          },
+          {
+            "name": "gen1000 check",
+            "value": 77.008,
+            "unit": "ms"
+          },
+          {
+            "name": "gen1000 build cold peak RSS",
+            "value": 17.918,
+            "unit": "MiB"
+          },
+          {
+            "name": "gen1000 binary",
+            "value": 323.977,
+            "unit": "KiB"
+          },
+          {
+            "name": "gen1000 cache",
+            "value": 387.21,
+            "unit": "KiB"
+          },
+          {
+            "name": "gen1000 build noop instructions",
+            "value": 0.549,
+            "unit": "M instr"
+          },
+          {
+            "name": "gen1000 build edit 1 fn instructions",
+            "value": 123.839,
+            "unit": "M instr"
+          },
+          {
+            "name": "gen1000 check instructions",
+            "value": 777.341,
+            "unit": "M instr"
+          },
+          {
+            "name": "gen5000 build cold",
+            "value": 370.744,
+            "unit": "ms"
+          },
+          {
+            "name": "gen5000 build noop",
+            "value": 1.138,
+            "unit": "ms"
+          },
+          {
+            "name": "gen5000 build edit 1 fn",
+            "value": 59.819,
+            "unit": "ms"
+          },
+          {
+            "name": "gen5000 check",
+            "value": 358.17,
+            "unit": "ms"
+          },
+          {
+            "name": "gen5000 build cold peak RSS",
+            "value": 51.723,
+            "unit": "MiB"
+          },
+          {
+            "name": "gen5000 binary",
+            "value": 1558.336,
+            "unit": "KiB"
+          },
+          {
+            "name": "gen5000 cache",
+            "value": 1902.835,
+            "unit": "KiB"
+          },
+          {
+            "name": "gen5000 build noop instructions",
+            "value": 0.55,
+            "unit": "M instr"
+          },
+          {
+            "name": "gen5000 build edit 1 fn instructions",
+            "value": 589.208,
+            "unit": "M instr"
+          },
+          {
+            "name": "gen5000 check instructions",
+            "value": 3832.578,
+            "unit": "M instr"
+          },
+          {
+            "name": "rt/fib run (-O)",
+            "value": 34.016,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/hashmap run (-O)",
+            "value": 102.286,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/matmul run (-O)",
+            "value": 32.637,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/nbody run (-O)",
+            "value": 49.213,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/sieve run (-O)",
+            "value": 56.185,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/sort run (-O)",
+            "value": 149.339,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/strings run (-O)",
+            "value": 41.57,
             "unit": "ms"
           }
         ]
