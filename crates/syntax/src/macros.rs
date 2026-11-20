@@ -1185,8 +1185,14 @@ fn find_calls(
 /// `include_str!("path")` / `include_bytes!("path")` (path は文字列リテラル、`dir` からの相対) を、ファイルの中身の
 /// リテラル (改行などはエスケープして 1 行に収める: 後ろの行番号を変えない) に置き換える。無ければ None
 pub fn expand_includes(src: &str, dir: &std::path::Path) -> Result<Option<String>, String> {
-    if !src.contains("include_str!(") && !src.contains("include_bytes!(") {
+    // (one look at the source for all three macros)
+    if !src.contains("include") {
         return Ok(None);
+    }
+    let code = expand_include_code(src, dir, 0)?;
+    let src = code.as_deref().unwrap_or(src);
+    if !src.contains("include_str!(") && !src.contains("include_bytes!(") {
+        return Ok(code);
     }
     let mut out = String::with_capacity(src.len());
     let mut rest = src;
@@ -1257,5 +1263,107 @@ pub fn expand_includes(src: &str, dir: &std::path::Path) -> Result<Option<String
         changed = true;
     }
     out.push_str(rest);
+    Ok(if changed { Some(out) } else { code })
+}
+
+/// The path of `include!("a")` / `include!(concat!("a", "b"))`: (path, the rest after the closing paren)
+fn include_path(after: &str) -> Option<(String, &str)> {
+    let mut t = after.trim_start();
+    let concat = t.starts_with("concat!(");
+    if concat {
+        t = t["concat!(".len()..].trim_start();
+    }
+    let mut path = String::new();
+    loop {
+        let r = t.strip_prefix('"')?;
+        let e = r.find('"')?;
+        if r[..e].contains('\\') {
+            return None;
+        }
+        path.push_str(&r[..e]);
+        t = r[e + 1..].trim_start();
+        match t.strip_prefix(',') {
+            Some(x) if concat => t = x.trim_start(),
+            _ => break,
+        }
+    }
+    if concat {
+        t = t.strip_prefix(')')?.trim_start();
+    }
+    Some((path, t.strip_prefix(')')?))
+}
+
+/// `include!("file.rs")`: the file's code in its place, its own includes expanded relative to it. As a statement /
+/// item (`include!(..);`) the code goes in as is, as an expression in parentheses
+fn expand_include_code(src: &str, dir: &std::path::Path, depth: u32) -> Result<Option<String>, String> {
+    if !src.contains("include!(") {
+        return Ok(None);
+    }
+    if depth > 32 {
+        return Err("include! nests too deep".into());
+    }
+    let mut out = String::with_capacity(src.len());
+    let mut at = 0;
+    let mut changed = false;
+    while let Some(k) = src[at..].find("include!(") {
+        let i = at + k;
+        let line_start = src[..i].rfind('\n').map(|k| k + 1).unwrap_or(0);
+        let skip = src[line_start..i].contains("//") || src[..i].ends_with(|c: char| c == '"' || c == '_' || c == ':' || c.is_alphanumeric());
+        let parsed = (!skip).then(|| include_path(&src[i + "include!(".len()..])).flatten();
+        let Some((p, tail)) = parsed else {
+            out.push_str(&src[at..i + "include!(".len()]);
+            at = i + "include!(".len();
+            continue;
+        };
+        let path = dir.join(&p);
+        let code = std::fs::read_to_string(&path).map_err(|e| format!("couldn't read `{}`: {e}", path.display()))?;
+        // (a `#!` line that is not an inner attribute is a shebang: dropped where items go (outside any braces),
+        // kept, as rustc does, in an expression or a statement)
+        let top = src[..i].bytes().fold(0i32, |d, b| d + (b == b'{') as i32 - (b == b'}') as i32) == 0;
+        let code = match code.strip_prefix("#!") {
+            Some(r) if top && !r.trim_start().starts_with('[') => r.split_once('\n').map(|x| x.1).unwrap_or("").to_string(),
+            _ => code,
+        };
+        let sub = dir.join(&p);
+        let code = match expand_include_code(&code, sub.parent().unwrap_or(dir), depth + 1)? {
+            Some(c) => c,
+            None => code,
+        };
+        // (`mod m;` in a file included from another directory: m's file is beside the included file)
+        let rel = std::path::Path::new(&p).parent().filter(|r| !r.as_os_str().is_empty());
+        let code = match rel {
+            Some(rel) if code.contains("mod ") && !code.contains("#[path") => code
+                .lines()
+                .map(|l| {
+                    let t = l.trim_start();
+                    let decl = t.strip_prefix("pub ").unwrap_or(t).strip_prefix("mod ").and_then(|r| r.trim_end().strip_suffix(';'));
+                    match decl.map(str::trim).filter(|n| !n.is_empty() && n.chars().all(|c| c == '_' || c.is_alphanumeric())) {
+                        Some(n) => {
+                            let file = if sub.parent().unwrap_or(dir).join(format!("{n}.rs")).exists() { format!("{n}.rs") } else { format!("{n}/mod.rs") };
+                            format!("#[path = \"{}\"] {l}", rel.join(file).display())
+                        }
+                        None => l.to_string(),
+                    }
+                })
+                .collect::<Vec<_>>()
+                .join("\n"),
+            _ => code,
+        };
+        let end = src.len() - tail.len();
+        let stmt = tail.trim_start().starts_with(';');
+        out.push_str(&src[at..i]);
+        if stmt {
+            out.push_str(&code);
+            out.push('\n');
+            at = end + tail.find(';').unwrap() + 1;
+        } else {
+            out.push('(');
+            out.push_str(code.trim());
+            out.push(')');
+            at = end;
+        }
+        changed = true;
+    }
+    out.push_str(&src[at..]);
     Ok(changed.then_some(out))
 }

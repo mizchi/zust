@@ -146,3 +146,4 @@ date	commit	change	noop_M	edit_M	check_M	cache_KiB	lsp_G	run	check	build	cfail
 2026-11-20	09ae27c+	#[link(name)] / -L; tests/ui links rust_test_helpers	0.696	548.916	3836.791	1902.8	-	1719	1436	95	3564	1160.186	63.549	10.273	315.849
 2026-11-20	ef67647+	extern C calls: structs of up to 16 bytes by value	0.695	548.115	3836.589	1902.8	-	1734	1443	97	3564	1160.175	63.639	10.259	315.898
 2026-11-20	20055f9+	match on unsuffixed literals: type from the patterns	0.695	548.176	3836.631	1902.8	-	1736	1443	97	3564	1160.210	63.550	10.259	315.917
+2026-11-20	707a395+	include!(..) of code, as items or an expression	0.695	547.166	3835.573	1902.8	-	1737	1446	97	3564	1160.142	63.491	10.259	315.887

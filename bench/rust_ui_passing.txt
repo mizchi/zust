@@ -2924,6 +2924,7 @@ run-pass	imports/use-mod.rs
 compile-fail	include-macros/mismatched-types.rs
 run-pass	include-macros/normalization.rs
 compile-fail	include-macros/shebang-in-expr-ctxt.rs
+check-pass	include-macros/shebang-in-item-ctxt.rs
 compile-fail	indexing/index-bot.rs
 compile-fail	indexing/index-help.rs
 compile-fail	indexing/index-with-wrong-type.rs
@@ -3517,6 +3518,7 @@ check-pass	macros/issue-33185.rs
 compile-fail	macros/issue-35450.rs
 run-pass	macros/issue-37175.rs
 check-pass	macros/issue-39467.rs
+check-pass	macros/issue-40469.rs
 check-pass	macros/issue-40770.rs
 compile-fail	macros/issue-41776.rs
 compile-fail	macros/issue-46438.rs
@@ -3525,6 +3527,7 @@ run-pass	macros/issue-52169.rs
 compile-fail	macros/issue-61033-1.rs
 check-pass	macros/issue-68058.rs
 compile-fail	macros/issue-68060.rs
+check-pass	macros/issue-69838-mods-relative-to-included-path.rs
 check-pass	macros/issue-70446.rs
 build-pass	macros/issue-78333.rs
 check-pass	macros/issue-78892-substitution-in-statement-attr.rs
@@ -3561,6 +3564,7 @@ compile-fail	macros/macro-fragment-ident-underscore-error.rs
 compile-fail	macros/macro-hygiene-help-issue-149604.rs
 run-pass	macros/macro-in-array-len-expr.rs
 run-pass	macros/macro-in-or-pattern.rs
+run-pass	macros/macro-include-items.rs
 check-pass	macros/macro-invocation-in-count-expr-fixed-array-type.rs
 compile-fail	macros/macro-invocation-span-error-7970.rs
 check-pass	macros/macro-invocation-with-curly-braces-34418.rs
