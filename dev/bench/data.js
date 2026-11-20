@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795162592623,
+  "lastUpdate": 1795162594649,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -64032,6 +64032,85 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/mizchi/zust/commit/75f44c72d625e3cd857df93e71c455ec3d9b5536"
         },
         "date": 1795161390448,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "parity documentSymbol (名前の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity workspace/symbol (上位 20 の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity definition (行き先の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity hover (名前を含む)",
+            "value": 95,
+            "unit": "%"
+          },
+          {
+            "name": "parity references (数の一致)",
+            "value": 92.5,
+            "unit": "%"
+          },
+          {
+            "name": "parity documentHighlight (数の一致)",
+            "value": 97.143,
+            "unit": "%"
+          },
+          {
+            "name": "parity rename (書き換えの一致)",
+            "value": 93.333,
+            "unit": "%"
+          },
+          {
+            "name": "parity signatureHelp (名前・引数の数・今の引数の一致)",
+            "value": 94.737,
+            "unit": "%"
+          },
+          {
+            "name": "parity completion `x.\\|` (書いてある名前を含む)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity completion `na\\|me` (同)",
+            "value": 89.655,
+            "unit": "%"
+          },
+          {
+            "name": "parity 一致の平均",
+            "value": 96.237,
+            "unit": "%"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "committer": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "distinct": true,
+          "id": "5ae4e4c8634fa64922ec6db4e832a8e84abb79c6",
+          "message": "dyn Send / dyn Sync: an auto trait alone, right behind a pointer\n\n`Box<dyn Send>` / `&dyn Sync` / `*const (dyn Send + 'a)` were \"`dyn`\nneeds a trait\": an auto trait alone is now the object's trait there,\nwith a vtable of no methods (every type has the auto traits).\nElsewhere (`Rc<dyn Send>`, `Wrapper<dyn Send>`) it stays an error, as\nthe unsizing those need is not done (two run-pass tests that only drop\nsuch values would break otherwise).\n\ntests/ui: +3 passes (2 check-pass, 1 run-pass);\ncast/ptr-to-trait-obj-drop-principal.rs matches only by line and goes\nto rust_ui_accidental.txt.\nKPI: traits check +0.10%, traits edit +0.10% (within the band), the\nrest unchanged.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-20T08:12:42Z",
+          "tree_id": "6e2268a3ab7ad7ed73554c2163e8ff6eb879647c",
+          "url": "https://github.com/mizchi/zust/commit/5ae4e4c8634fa64922ec6db4e832a8e84abb79c6"
+        },
+        "date": 1795162594199,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
