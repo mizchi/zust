@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795145129080,
+  "lastUpdate": 1795145131642,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -69548,6 +69548,70 @@ window.BENCHMARK_DATA = {
           {
             "name": "tests/ui compile-fail passing",
             "value": 3403,
+            "unit": "tests"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "committer": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "distinct": true,
+          "id": "c26b695f74e739a37a0e7d5efb3db4ade2767370",
+          "message": "E0252 / E0255: a top-level use clashing with another use or item\n\nA name a crate-root `use` brings in (its last segment, alias, or the\nmodule of `{self}`) that another crate-root `use` or item (struct,\nenum, trait, type, union, fn, const, static) also defines is \"the name\n`X` is defined multiple times\" at the second. Crate root = the item\nstarts a line (flattened modules' items keep their indentation);\nattributes before a `use` are skipped, items hoisted out of fn bodies\n(past the file's last line) do not count, and a type renamed off a\nprelude name is compared by its own name.\n\ntests/ui: +17 compile-fail passes; two that match only by line go to\nrust_ui_accidental.txt.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-20T03:20:59Z",
+          "tree_id": "edf9e21923e0f671e2d33db3f92f387aa84934f1",
+          "url": "https://github.com/mizchi/zust/commit/c26b695f74e739a37a0e7d5efb3db4ade2767370"
+        },
+        "date": 1795145131020,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tests/ui run-pass pass rate",
+            "value": 71.19,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui run-pass passing",
+            "value": 1698,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui check-pass pass rate",
+            "value": 78.42,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui check-pass passing",
+            "value": 1417,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui build-pass pass rate",
+            "value": 70.37,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui build-pass passing",
+            "value": 95,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui compile-fail pass rate",
+            "value": 46.51,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui compile-fail passing",
+            "value": 3422,
             "unit": "tests"
           }
         ]
