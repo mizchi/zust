@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795153274259,
+  "lastUpdate": 1795153276757,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -61883,6 +61883,85 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/mizchi/zust/commit/8c012b2bf30f145fa3f7da206af3ce8e7c36848d"
         },
         "date": 1795152653817,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "parity documentSymbol (名前の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity workspace/symbol (上位 20 の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity definition (行き先の一致)",
+            "value": 89.655,
+            "unit": "%"
+          },
+          {
+            "name": "parity hover (名前を含む)",
+            "value": 77.5,
+            "unit": "%"
+          },
+          {
+            "name": "parity references (数の一致)",
+            "value": 81.081,
+            "unit": "%"
+          },
+          {
+            "name": "parity documentHighlight (数の一致)",
+            "value": 83.871,
+            "unit": "%"
+          },
+          {
+            "name": "parity rename (書き換えの一致)",
+            "value": 85.714,
+            "unit": "%"
+          },
+          {
+            "name": "parity signatureHelp (名前・引数の数・今の引数の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity completion `x.\\|` (書いてある名前を含む)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity completion `na\\|me` (同)",
+            "value": 91.304,
+            "unit": "%"
+          },
+          {
+            "name": "parity 一致の平均",
+            "value": 90.913,
+            "unit": "%"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "committer": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "distinct": true,
+          "id": "1328233927f9eadbb98e95c75deb2f1f682fb9a7",
+          "message": "parser: test for reserved keywords by length\n\n8c012b2 compared every declared name with 35 keywords one after\nanother (check +0.33%, traits check +0.19%); `reserved_kw` now\ndispatches on the name's length and first byte, a few comparisons per\nname.\n\nKPI: check 3854.6 (+0.07% against 4c648ae's 3851.9), traits check\n+0.05%; the rest unchanged.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-20T05:36:07Z",
+          "tree_id": "682e3365a39ecbbe29c5969c4a5cd70e3fae6066",
+          "url": "https://github.com/mizchi/zust/commit/1328233927f9eadbb98e95c75deb2f1f682fb9a7"
+        },
+        "date": 1795153276100,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
