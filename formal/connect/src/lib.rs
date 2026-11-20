@@ -26,6 +26,11 @@ pub trait Driver {
 pub fn finite_model(name: &str, tla: &str, cfg: &str) -> Result<FiniteModel, String> {
     let module = rtla::parse_module(tla).map_err(|e| format!("{e:?}"))?;
     let config = rtla::parse_config(cfg).map_err(|e| format!("{e:?}"))?;
+    // (the expansion cache keeps each state's successors before CONSTRAINT and ACTION_CONSTRAINT prune them, so the
+    // graph read from it would not be the constrained spec's)
+    if !config.constraints.is_empty() || !config.action_constraints.is_empty() {
+        return Err("the cfg declares CONSTRAINT or ACTION_CONSTRAINT, which the state graph does not apply".into());
+    }
     let program = rtla_compiler::compile(&module, &config).map_err(|e| format!("{e:?}"))?;
     let vars = program.variables.clone();
     let ia = vars.iter().position(|v| v == "act").ok_or("the spec has no variable `act`")?;
@@ -49,7 +54,8 @@ pub fn finite_model(name: &str, tla: &str, cfg: &str) -> Result<FiniteModel, Str
     for (key, e) in entries {
         let vals: Vec<Value> = serde_json::from_str(key).map_err(|e| format!("state key: {e}"))?;
         let from = project(&vals);
-        if vals[ia] == Value::List(vec![Value::String("reset".into())]) && !initial.iter().any(|i| i.key == from) {
+        // (one entry per initial state and observation: a nondeterministic Init may allow several observations of a state)
+        if vals[ia] == Value::List(vec![Value::String("reset".into())]) && !initial.iter().any(|i| i.key == from && i.observation == vals[io]) {
             initial.push(Initial { key: from.clone(), observation: vals[io].clone() });
         }
         let edges = states.entry(from).or_default();
@@ -110,7 +116,7 @@ pub fn check(model: &FiniteModel, driver: &mut dyn Driver, seed: u32, cases: u32
     let generator = Generator {
         id: model.name.clone(),
         version: "1".into(),
-        initial: model.initial.iter().map(|i| i.key.clone()).collect(),
+        initial: model.initial.iter().map(|i| i.key.clone()).collect::<std::collections::BTreeSet<_>>().into_iter().collect(),
         states: model
             .states
             .iter()
@@ -133,6 +139,9 @@ pub fn check(model: &FiniteModel, driver: &mut dyn Driver, seed: u32, cases: u32
                     Ok((_, r)) if r.status == Status::Matched => Verdict::Matched {},
                     // (one signature for every mismatch: shrinking may then cut the sequence down to any shorter one
                     // that still fails)
+                    // (Invalid: the sequence left the model after an allowed observation of a nondeterministic step; not
+                    // the implementation's failure)
+                    Ok((_, r)) if r.status == Status::Invalid => Verdict::Invalid {},
                     Ok((_, r)) => Verdict::Mismatch { signature: format!("{:?}", r.status) },
                     Err(e) => Verdict::Error { message: e },
                 };

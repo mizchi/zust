@@ -115,3 +115,15 @@ fn a_broken_map_is_caught() {
     assert!(actions.len() <= 3, "{actions:?}");
     assert_eq!(result.status, idealis_core::Status::Mismatch);
 }
+
+#[test]
+fn a_constrained_cfg_is_rejected() {
+    // (the state graph is read before CONSTRAINT / ACTION_CONSTRAINT prune it)
+    let dir = root().join("formal/tla");
+    let tla = std::fs::read_to_string(dir.join("HashMapModel.tla")).unwrap();
+    let cfg = std::fs::read_to_string(dir.join("HashMapModel.cfg")).unwrap();
+    for extra in ["CONSTRAINT TypeOK", "ACTION_CONSTRAINT TypeOK"] {
+        let err = finite_model("HashMapModel", &tla, &format!("{cfg}\n{extra}\n")).unwrap_err();
+        assert!(err.contains("CONSTRAINT"), "{err}");
+    }
+}

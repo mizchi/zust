@@ -28,7 +28,8 @@ if [ "${1:-all}" = all ] || [ "${1:-all}" = tla ]; then
     expect ok        HashMapModel.tla HashMapModel.cfg
 fi
 if [ "${1:-all}" = all ] || [ "${1:-all}" = connect ]; then
-    # (zustc's prelude, compiled by zustc, against the TLA+ models: needs target/release/zustc)
+    # (zustc's prelude, compiled by zustc, against the TLA+ models: the tests use target/release/zustc)
+    (cd .. && cargo build --release --quiet) || exit 1
     cargo test --quiet --release --manifest-path connect/Cargo.toml || fail=1
 fi
 if [ "${1:-all}" = all ]; then

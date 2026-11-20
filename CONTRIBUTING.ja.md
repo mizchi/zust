@@ -271,8 +271,8 @@ origin/main からの差分の行だけを変異させ、テストで見つか�
   `tests/compare.sh`、tests/ui の一覧との比較を走らせる。サイズ予算はリンカで変わるので、CI は wild 0.11.0 を入れて `ZUSTC_BENCH_LINKER=wild` で測る
   (`bench/budget.txt` も wild の大きさ)。
 - `.github/workflows/kpi.yml`: pull request への push ごとに走る。分岐点 (merge base) と head を同じランナーで順にビルドし、
-  どちらも `bench/kpi_track.py --dry-run` で測る。`bench/kpi_pr.py` が pull request のコメントを 1 件だけ保ち、更新する。
-  そこには KPI ごとのベースとの差と、push ごとの行 (前の push との差つき) が載る。1% を超えて増えた KPI には印を付け、
+  どちらも `bench/kpi_track.py --lsp --dry-run` で測る (zust-analyzer のセッションも含む)。`bench/kpi_pr.py` が
+  pull request のコメントを 1 件だけ保ち、更新する。そこには KPI ごとのベースとの差と、push ごとの行 (前の push との差つき) が載る。1% を超えて増えた KPI には印を付け、
   警告を出す。ジョブは失敗にしない。
 - `.github/workflows/bench.yml`: main への push ごとに `bench/ci_bench.py` を走らせ、
   [github-action-benchmark](https://github.com/benchmark-action/github-action-benchmark) で gh-pages ブランチの `dev/bench/` に
