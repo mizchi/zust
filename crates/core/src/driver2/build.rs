@@ -4,7 +4,8 @@
 use super::*;
 use crate::acg::Target;
 use crate::minclif::{DataDef, Reloc};
-use std::collections::HashMap;
+// (Fx hashing: deterministic and cheaper than the std map's random-seeded SipHash)
+type HashMap<K, V> = crate::fxhash::FxMap<K, V>;
 
 /// 記録を機械語にして Blob を作る
 pub(super) fn lower_blob(a: &Analysis, c: acg::Compiled, req: Vec<u32>) -> R<(Blob, Vec<u32>)> {
@@ -318,7 +319,7 @@ fn emit_object(a: &Analysis, ctx: &CrateCtx, insts: &Insts, user_live: &[u32], b
     let mut fold: FxMap<u32, u32> = FxMap::default();
     for _ in 0..4 {
         let canon = |f: u32, fold: &FxMap<u32, u32>| *fold.get(&f).unwrap_or(&f);
-        let mut seen: HashMap<Vec<u8>, u32> = HashMap::new();
+        let mut seen: HashMap<Vec<u8>, u32> = HashMap::default();
         let mut changed = false;
         for &iid in &order {
             if fold.contains_key(&iid) {
@@ -401,7 +402,7 @@ fn emit_object(a: &Analysis, ctx: &CrateCtx, insts: &Insts, user_live: &[u32], b
     };
     // static: コードから参照されているもの (と、その初期値から参照されているもの)
     let mut datas: Vec<DataDef> = vec![];
-    let mut anon: HashMap<Vec<u8>, String> = HashMap::new();
+    let mut anon: HashMap<Vec<u8>, String> = HashMap::default();
     let mut anon_data = |bytes: &[u8], datas: &mut Vec<DataDef>| -> String {
         if let Some(n) = anon.get(&bytes.to_vec()) {
             return n.clone();
@@ -494,7 +495,7 @@ fn emit_object(a: &Analysis, ctx: &CrateCtx, insts: &Insts, user_live: &[u32], b
     }
     // 関数とその再配置
     let mut funcs: Vec<(String, Vec<u8>, Vec<Reloc>, bool)> = vec![];
-    let mut vts: HashMap<Vec<u32>, String> = HashMap::new();
+    let mut vts: HashMap<Vec<u32>, String> = HashMap::default();
     let mut fn_off: Vec<(u32, u64)> = vec![];
     let mut text_end = 0u64;
     for &uid in &placed {

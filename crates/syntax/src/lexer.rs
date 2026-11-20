@@ -1539,7 +1539,7 @@ pub fn rename_module_collisions_fix(src: &str, crates: &[String], fix: &mut Vec<
     }
     let mut repl: Vec<(usize, usize, Vec<u8>)> = vec![]; // (開始トークン, 終了トークン (含む), 新しいテキスト)
     // (the items each scope defines, for the glob imports they shadow: built only when there is a glob)
-    let own_defs: std::collections::HashSet<(usize, &[u8])> =
+    let own_defs: LSet<(usize, &[u8])> =
         if globs.is_empty() { Default::default() } else { defs.iter().map(|d| (d.1, d.0.as_slice())).collect() };
     let mut k = 0;
     while k < toks.len() {
