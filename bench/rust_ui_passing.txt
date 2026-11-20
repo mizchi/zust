@@ -914,7 +914,6 @@ compile-fail	borrowck/mismatched-pointer-type-in-self-7061.rs
 compile-fail	borrowck/move-from-union-field-issue-66500.rs
 compile-fail	borrowck/move-in-pattern-mut.rs
 compile-fail	borrowck/move-in-pattern.rs
-compile-fail	borrowck/moved-value-in-thread-loop-12041.rs
 compile-fail	borrowck/multiple-mutable-borrows-error-65131.rs
 compile-fail	borrowck/mut-borrow-of-mut-ref.rs
 compile-fail	borrowck/mutability-errors.rs
@@ -1122,6 +1121,7 @@ check-pass	closures/at-pattern-weirdness-issue-137553.rs
 run-pass	closures/basic-closure-syntax.rs
 check-pass	closures/boxed-closure-captures-fnmut-with-ref.rs
 run-pass	closures/boxed-closure-lifetime-13808.rs
+check-pass	closures/boxed-closure-sent-through-thread.rs
 check-pass	closures/boxed-closure-with-borrowed-param.rs
 run-pass	closures/call-closure-through-lifetime-generic-struct.rs
 run-pass	closures/call-fnmut-trait-object-via-ref-mut.rs
@@ -6124,6 +6124,7 @@ compile-fail	traits/bound/assoc-fn-bound-root-obligation.rs
 run-pass	traits/bound/basic.rs
 check-pass	traits/bound/impl-comparison-duplicates.rs
 check-pass	traits/bound/implicit-assoc-type.rs
+run-pass	traits/bound/in-arc.rs
 run-pass	traits/bound/multiple.rs
 compile-fail	traits/bound/not-on-bare-trait-2021.rs
 compile-fail	traits/bound/not-on-bare-trait.rs

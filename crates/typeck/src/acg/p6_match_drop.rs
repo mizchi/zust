@@ -1062,9 +1062,9 @@ impl Cx<'_> {
             Ty::Box(_) => true,
             Ty::Array(e, _) => !self.needs_drop(*e) || self.zeroable(*e),
             Ty::Struct(sid) => {
-                // (prelude の Vec / String は 0 (null の ptr、長さ 0) でも drop が何もしない)
+                // (prelude の Vec / String / Rc / Arc は 0 (null の ptr、長さ 0) でも drop が何もしない)
                 let bname = &self.prog.structs[self.prog.base_of(sid) as usize].name;
-                if bname == "Vec" || bname == "String" {
+                if bname == "Vec" || bname == "String" || bname == "Rc" || bname == "Arc" {
                     return true;
                 }
                 if self.prog.drop_impls.contains(&self.prog.base_of(sid)) {

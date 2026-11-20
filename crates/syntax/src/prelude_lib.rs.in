@@ -6959,6 +6959,10 @@ impl<T> Rc<T> {
 
 impl<T> Drop for Rc<T> {
     fn drop(&mut self) {
+        // (a null pointer is a moved-out Rc: codegen zeroes a value moved out of a closure's captures)
+        if self.p as usize == 0 {
+            return;
+        }
         unsafe {
             let b = self.__bx();
             (*b).strong -= 1;
@@ -7050,6 +7054,10 @@ impl<T> Arc<T> {
 
 impl<T> Drop for Arc<T> {
     fn drop(&mut self) {
+        // (a null pointer is a moved-out Arc: codegen zeroes a value moved out of a closure's captures)
+        if self.p as usize == 0 {
+            return;
+        }
         unsafe {
             let b = self.__bx();
             (*b).strong -= 1;
