@@ -99,3 +99,4 @@ date	commit	change	noop_M	edit_M	check_M	cache_KiB	lsp_G	run	check	build	cfail
 2026-11-19	904658b+	for x in an Option / Result value: an if let, no iterator from the prelude	0.877	590.848	3879.613	1902.8	-	1698	1416	95	3319	1181.851	63.492	11.287	320.470
 2026-11-20	4a6120d+	turbofish on enum constructors: Ok::<_, ()>(x) / Some::<u8>(3)	0.875	590.868	3879.719	1902.8	-	1698	1417	95	3319	1181.945	63.432	11.274	320.458
 2026-11-20	05ea0c4+	lint: #![deny(unused_variables)] reports the first binding nothing reads	0.875	590.916	3881.428	1902.8	-	1698	1417	95	3327	1182.050	63.489	11.274	320.493
+2026-11-20	05ec776+	lint: #![deny(dead_code)] reports the first unused top-level item	0.875	591.151	3879.713	1902.8	-	1698	1417	95	3340	1181.980	63.496	11.275	320.553

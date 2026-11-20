@@ -628,6 +628,8 @@ impl Session2 {
         // (`#![crate_type = "lib"]`: a library, no `main` needed)
         let mut deny_unreachable = false;
         let mut deny_unused_vars = false;
+        let mut deny_dead_code = false;
+        let mut deny_dead_pub = false;
         let lib_attr = {
             let mut end = src.len().min(4096);
             while !src.is_char_boundary(end) {
@@ -649,8 +651,18 @@ impl Session2 {
                 }
             }
             deny_unused_vars = levels.iter().any(|l| matches!(*l, "unused_variables" | "unused" | "warnings")) && !c.contains("#![allow(unused");
+            deny_dead_code = levels.iter().any(|l| matches!(*l, "dead_code" | "unused" | "warnings")) && !c.contains("#![allow(dead_code") && !c.contains("#![expect(dead_code") && !c.contains("#![allow(unused");
+            deny_dead_pub = levels.contains(&"dead_code_pub_in_binary");
             ["lib", "rlib", "dylib", "cdylib", "staticlib", "proc-macro"].iter().any(|k| c.contains(&format!("#![crate_type=\"{k}\"]")))
         };
+        // (dead_code, in a binary: the first fn / struct / enum / const / static / trait of the program's whose name
+        // appears nowhere but in its own definition and in `impl` headers)
+        if deny_dead_code && self.ctx.lib.is_none() {
+            // (a `pub` item counts as used, except in a binary under `deny(dead_code_pub_in_binary)`)
+            if let Some((line, msg)) = first_dead_item(&src, &items[..user], deny_dead_pub && !lib_attr) {
+                return Err(format!("{line}:1: {msg}"));
+            }
+        }
         // (unused_variables: the first binding nothing reads, in the program's own fns)
         if deny_unused_vars {
             for it in &items[..user] {
@@ -881,6 +893,85 @@ fn relocate(e: String, it: &SrcItem) -> String {
 }
 
 /// アイテムの関数を自前の構文木で読む (本体がなければ None)。引数のパターンは本体の先頭の let にする
+/// `#![deny(dead_code)]`: the first top-level item of the program that nothing uses (see the caller)
+fn first_dead_item(src: &str, items: &[SrcItem], check_pub: bool) -> Option<(usize, String)> {
+    let (Some(first), Some(last)) = (items.first(), items.last()) else { return None };
+    let region = &src[first.start..last.end];
+    let b = region.as_bytes();
+    let toks = crate::lexer::tokenize(b);
+    let word = |k: usize| -> &str { if toks[k].0 == 0 { &region[toks[k].1..toks[k].2] } else { "" } };
+    let sym = |k: usize, c: u8| toks[k].0 == 1 && b[toks[k].1] == c;
+    // (uses of each name: every occurrence but the definition's, the one after `impl` / `for` in an impl header)
+    let mut uses: std::collections::HashMap<&str, usize> = Default::default();
+    let mut in_impl_header = false;
+    for k in 0..toks.len() {
+        let w = word(k);
+        if w == "impl" {
+            in_impl_header = true;
+        }
+        if in_impl_header && sym(k, b'{') {
+            in_impl_header = false;
+        }
+        if toks[k].0 != 0 {
+            continue;
+        }
+        let defn = k > 0 && matches!(word(k - 1), "fn" | "struct" | "enum" | "const" | "static" | "trait" | "union" | "type");
+        let impl_self = in_impl_header && k > 0 && (word(k - 1) == "impl" || word(k - 1) == "for" || sym(k - 1, b'>'));
+        if !defn && !impl_self {
+            *uses.entry(w).or_default() += 1;
+        }
+    }
+    for it in items {
+        // (top-level items only: impl and trait members are a type's, not free items)
+        if !matches!(it.kind, crate::lexer::ItemKind::Normal) {
+            continue;
+        }
+        let text = &src[it.start..it.end];
+        if text.contains("allow(dead_code") || text.contains("expect(dead_code") || text.contains("allow(unused") || text.contains("no_mangle") || text.contains("#[test]")
+            || text.contains("#[derive") || text.contains("export_name") || text.contains("#[cfg")
+        {
+            continue;
+        }
+        let t = crate::lexer::tokenize(text.as_bytes());
+        let tw = |k: usize| -> &str { if t[k].0 == 0 { &text[t[k].1..t[k].2] } else { "" } };
+        // (the item's keyword and name, after its attributes and visibility)
+        let mut k = 0;
+        while k < t.len() && (tw(k) == "pub" || tw(k) == "unsafe" || tw(k) == "async" || tw(k) == "extern" || t[k].0 != 0) {
+            if tw(k) == "extern" || tw(k) == "impl" || tw(k) == "mod" || tw(k) == "use" || tw(k) == "macro_rules" {
+                break;
+            }
+            k += 1;
+        }
+        if k + 1 >= t.len() {
+            continue;
+        }
+        let (kw, name) = (tw(k), tw(k + 1));
+        if !check_pub && (0..k).any(|j| tw(j) == "pub") {
+            continue;
+        }
+        if name.is_empty() || name.starts_with('_') || name == "main" {
+            continue;
+        }
+        // (the name as written: without the flattened modules' `a__` prefix and the renamer's `__u_`)
+        let shown = name.rsplit("__").next().unwrap_or(name).trim_start_matches("u_");
+        let shown = if name.contains("__") { shown } else { name };
+        let what = match kw {
+            "fn" => format!("function `{shown}` is never used"),
+            "struct" => format!("struct `{shown}` is never constructed"),
+            "enum" => format!("enum `{shown}` is never used"),
+            "const" => format!("constant `{shown}` is never used"),
+            "static" => format!("static `{shown}` is never used"),
+            "trait" => format!("trait `{shown}` is never used"),
+            _ => continue,
+        };
+        if uses.get(name).copied().unwrap_or(0) == 0 {
+            let line = it.line + text[..t[k].1].matches('\n').count();
+            return Some((line, what));
+        }
+    }
+    None
+}
+
 pub fn parse_fn(src: &str, it: &SrcItem) -> R<Option<ItemFn>> {
     let text = &src[it.start..it.end];
     let f = crate::parse::parse_file(text).map_err(|e| relocate(e, it))?;
