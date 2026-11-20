@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795150028458,
+  "lastUpdate": 1795150030143,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -72516,6 +72516,70 @@ window.BENCHMARK_DATA = {
           {
             "name": "tests/ui compile-fail passing",
             "value": 3475,
+            "unit": "tests"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "committer": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "distinct": true,
+          "id": "3c8f0b7e00b228f9d0637c4bc1a0fd098cbf39fb",
+          "message": "E0432: use m::f with an inline mod m that defines no f\n\nWhen a `use`'s first segment is an inline module of the program\n(`mod m { .. }`), its second segment must be defined in that module's\nbody (an item, a `macro_rules!`, an `as` name, or a name a `use`\nthere brings in); else \"unresolved import `m::f`\". Bodies with a glob,\na macro or include! are left alone.\n\ntests/ui: +4 compile-fail passes; extern-crate-visibility.rs (privacy,\nnot resolution) goes to rust_ui_accidental.txt.\nKPI: all within ±0.04% of the row before (this machine).\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-20T04:40:24Z",
+          "tree_id": "1a69dbb80aa126130428cbeda883b8dfd9b49d96",
+          "url": "https://github.com/mizchi/zust/commit/3c8f0b7e00b228f9d0637c4bc1a0fd098cbf39fb"
+        },
+        "date": 1795150029944,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tests/ui run-pass pass rate",
+            "value": 71.28,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui run-pass passing",
+            "value": 1700,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui check-pass pass rate",
+            "value": 78.42,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui check-pass passing",
+            "value": 1417,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui build-pass pass rate",
+            "value": 70.37,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui build-pass passing",
+            "value": 95,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui compile-fail pass rate",
+            "value": 47.28,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui compile-fail passing",
+            "value": 3479,
             "unit": "tests"
           }
         ]
