@@ -448,6 +448,7 @@ compile-fail	async-await/suggest-switching-edition-on-await.rs
 check-pass	async-await/track-caller/issue-105134.rs
 compile-fail	async-await/try-on-option-in-async.rs
 compile-fail	async-await/unconstrained-lifetimes.rs
+compile-fail	async-await/unreachable-lint-1.rs
 check-pass	async-await/unreachable-lint.rs
 compile-fail	async-await/unresolved_type_param.rs
 compile-fail	async-await/unsized-across-await.rs
@@ -4846,13 +4847,19 @@ check-pass	raw-ref-op/amp-raw-without-mut-const-is-a-normal-borrow.rs
 run-pass	reachable/artificial-block.rs
 run-pass	reachable/boolean-negation-in-unreachable-code-7344.rs
 run-pass	reachable/diverging-expressions-unreachable-code.rs
+compile-fail	reachable/expr_again.rs
 check-pass	reachable/expr_andand.rs
+compile-fail	reachable/expr_block.rs
+compile-fail	reachable/expr_loop.rs
 check-pass	reachable/expr_oror.rs
 compile-fail	reachable/expr_unary.rs
 check-pass	reachable/never-assign-dead-code.rs
 compile-fail	reachable/unreachable-bool-read-7246.rs
 check-pass	reachable/unreachable-by-call-arguments-issue-139627.rs
 run-pass	reachable/unreachable-code-diverging-expressions.rs
+compile-fail	reachable/unreachable-code-ret.rs
+compile-fail	reachable/unreachable-code.rs
+compile-fail	reachable/unreachable-ret-after-panic.rs
 run-pass	reborrow/reborrow-mutable-reference.rs
 run-pass	recursion/instantiable.rs
 build-pass	recursion/issue-86784.rs

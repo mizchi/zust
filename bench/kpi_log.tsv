@@ -101,3 +101,4 @@ date	commit	change	noop_M	edit_M	check_M	cache_KiB	lsp_G	run	check	build	cfail
 2026-11-20	05ea0c4+	lint: #![deny(unused_variables)] reports the first binding nothing reads	0.875	590.916	3881.428	1902.8	-	1698	1417	95	3327	1182.050	63.489	11.274	320.493
 2026-11-20	05ec776+	lint: #![deny(dead_code)] reports the first unused top-level item	0.875	591.151	3879.713	1902.8	-	1698	1417	95	3340	1181.980	63.496	11.275	320.553
 2026-11-20	38821f6+	lint: #![deny(unused_imports)] reports a top-level use nothing mentions	0.876	590.913	3879.694	1902.8	-	1698	1417	95	3345	1181.982	63.500	11.282	320.470
+2026-11-20	fab1fd3+	lint: #![deny(unreachable_code)] reports a statement after a diverging one	0.878	591.098	3879.451	1902.8	-	1698	1417	95	3351	1182.278	63.431	11.296	320.529

@@ -631,6 +631,7 @@ impl Session2 {
         let mut deny_dead_code = false;
         let mut deny_dead_pub = false;
         let mut deny_unused_imports = false;
+        let mut deny_unreachable_code = false;
         let lib_attr = {
             let mut end = src.len().min(4096);
             while !src.is_char_boundary(end) {
@@ -655,6 +656,7 @@ impl Session2 {
             deny_dead_code = levels.iter().any(|l| matches!(*l, "dead_code" | "unused" | "warnings")) && !c.contains("#![allow(dead_code") && !c.contains("#![expect(dead_code") && !c.contains("#![allow(unused");
             deny_dead_pub = levels.contains(&"dead_code_pub_in_binary");
             deny_unused_imports = levels.iter().any(|l| matches!(*l, "unused_imports" | "unused" | "warnings")) && !c.contains("#![allow(unused");
+            deny_unreachable_code = levels.iter().any(|l| matches!(*l, "unreachable_code" | "unused" | "warnings")) && !c.contains("#![allow(unreachable_code");
             ["lib", "rlib", "dylib", "cdylib", "staticlib", "proc-macro"].iter().any(|k| c.contains(&format!("#![crate_type=\"{k}\"]")))
         };
         // (dead_code, in a binary: the first fn / struct / enum / const / static / trait of the program's whose name
@@ -669,6 +671,21 @@ impl Session2 {
         if deny_unused_imports && self.ctx.lib.is_none() {
             if let Some((line, col, msg)) = first_unused_import(&src, &items[..user]) {
                 return Err(format!("{line}:{col}: {msg}"));
+            }
+        }
+        // (unreachable_code: a statement after one that diverges)
+        if deny_unreachable_code && self.ctx.lib.is_none() {
+            for it in &items[..user] {
+                let text = src.get(it.start..it.end).unwrap_or("");
+                if !text.contains("fn ") || text.contains("allow(unreachable") || text.contains("#[cfg") {
+                    continue;
+                }
+                let Ok(Some(f)) = parse_fn(&src, it) else { continue };
+                if let Some((p, what)) = first_unreachable(&f.block) {
+                    if p.line > 0 {
+                        return Err(format!("{}:{}: unreachable {what}", it.line + p.line as usize - 1, p.col + 1));
+                    }
+                }
             }
         }
         // (unused_variables: the first binding nothing reads, in the program's own fns)
@@ -976,6 +993,66 @@ fn first_unused_import(src: &str, items: &[SrcItem]) -> Option<(usize, usize, St
         }
     }
     None
+}
+
+/// `#![deny(unreachable_code)]`: the first statement of a block after one that always diverges (`return`,
+/// `break`, `continue`, `panic!` and its kin, a `loop` with no `break`), and whether it is a statement or the
+/// block's value
+fn first_unreachable(b: &crate::parse::Block) -> Option<(crate::parse::Pos, &'static str)> {
+    use crate::parse::{Expr, Stmt};
+    fn diverges(e: &Expr) -> bool {
+        match e {
+            Expr::Return(_) | Expr::Break(..) | Expr::Continue(_) => true,
+            Expr::Macro(p, _, _) => matches!(p.segs.last().map(|s| s.name.as_str()), Some("panic" | "unreachable" | "todo" | "unimplemented")),
+            Expr::Loop(_, body) => !format!("{body:?}").contains("Break("),
+            Expr::Paren(x) => diverges(x),
+            _ => false,
+        }
+    }
+    fn block(b: &crate::parse::Block) -> Option<(crate::parse::Pos, &'static str)> {
+        let n = b.stmts.len();
+        for (i, s) in b.stmts.iter().enumerate() {
+            let e = match s {
+                Stmt::Expr(e, _) => Some(e),
+                Stmt::Let(_, _, Some(e), _, _) => Some(e),
+                _ => None,
+            };
+            if let Some(e) = e {
+                if let Some(r) = inner(e) {
+                    return Some(r);
+                }
+            }
+            let div = match s {
+                Stmt::Expr(e, _) => diverges(e),
+                Stmt::Let(_, _, Some(e), None, _) => diverges(e),
+                _ => false,
+            };
+            if div {
+                // (the next statement that is not an item)
+                for (j, t) in b.stmts.iter().enumerate().skip(i + 1) {
+                    match t {
+                        Stmt::Item(_) => continue,
+                        Stmt::Let(_, _, _, _, p) => return Some((*p, "statement")),
+                        Stmt::Expr(e, semi) => {
+                            let what = if !*semi && j + 1 == n { "expression" } else { "statement" };
+                            return Some((acg::expr_start(e), what));
+                        }
+                    }
+                }
+                return None;
+            }
+        }
+        None
+    }
+    fn inner(e: &Expr) -> Option<(crate::parse::Pos, &'static str)> {
+        match e {
+            Expr::Block(_, _, b) | Expr::Loop(_, b) => block(b),
+            Expr::If(_, t, els) => block(t).or_else(|| els.as_deref().and_then(inner)),
+            Expr::While(_, _, b) | Expr::For(_, _, _, b) => block(b),
+            _ => None,
+        }
+    }
+    block(b)
 }
 
 /// `#![deny(dead_code)]`: the first top-level item of the program that nothing uses (see the caller)
