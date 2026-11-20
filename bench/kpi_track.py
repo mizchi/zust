@@ -3,6 +3,8 @@
 the KPIs have drifted in total, stays visible (small increases add up).
 
 usage: python3 bench/kpi_track.py "short label of the change" [--lsp] [--dry-run]
+(in a pull request, measure with --dry-run and commit no rows: .github/workflows/kpi.yml compares the pull request
+ with its base and keeps the result in a comment on it; rows go in with commits made on main)
 (run from the repository root after cargo build --release --workspace; with tests/ui numbers, run
  bench/rust_ui.py first: its out/rust_ui.json is read)
 

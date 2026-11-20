@@ -198,6 +198,9 @@ Every change that touches the compiler or the analyzer is measured before it is 
 
   It appends a row to `bench/kpi_log.tsv` / `bench/kpi_log.md`. A value outside the noise band of the last 7 rows is
   printed as `REGRESSION`: find the cause before keeping the change, or state the cost in the commit message.
+  In a pull request, use `--dry-run` and do not commit rows to the log: the `KPI` workflow measures the pull request
+  against its base and keeps the result in a comment on it (see CI below). Rows go in with commits made on main;
+  rows added in a branch would conflict with every row main gets in the meantime.
 - `bench/rust_ui.py --check` must report 0 regressions. When tests start passing, rewrite the baseline
   (`--write-baseline`).
   - Look at what a newly passing compile-fail test is rejected for: one rejected at its line for another reason than

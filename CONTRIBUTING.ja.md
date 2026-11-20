@@ -193,6 +193,9 @@ python3 bench/ide_golden_ra.py --detail
 
   `bench/kpi_log.tsv` / `bench/kpi_log.md` に 1 行足す。直近 7 行のノイズの幅を外れた値は `REGRESSION` と出る。変更を
   残す前に原因を突き止めるか、コストをコミットメッセージに書く。
+  pull request では `--dry-run` で測り、ログに行をコミットしない。`KPI` ワークフローが pull request をベースと比べて測り、
+  結果をその pull request のコメントに残す (下の CI を参照)。行は main で作るコミットで足す。ブランチで足した行は、その間に
+  main が足す行と毎回ぶつかる。
 - `bench/rust_ui.py --check` は 0 regressions でなければならない。テストが通るようになったら、ベースラインを書き直す
   (`--write-baseline`)。
   - 新しく通った compile-fail のテストが何で拒否されたかを見る。注釈の行で拒否されても、そのテストが調べている理由と
