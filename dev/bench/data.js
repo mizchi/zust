@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795181033806,
+  "lastUpdate": 1795181035620,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -83616,6 +83616,70 @@ window.BENCHMARK_DATA = {
           {
             "name": "tests/ui run-pass passing",
             "value": 1748,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui check-pass pass rate",
+            "value": 80.13,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui check-pass passing",
+            "value": 1448,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui build-pass pass rate",
+            "value": 71.85,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui build-pass passing",
+            "value": 97,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui compile-fail pass rate",
+            "value": 48.48,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui compile-fail passing",
+            "value": 3567,
+            "unit": "tests"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "committer": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "distinct": true,
+          "id": "cdb2f0ff02c761be3549a11b1081cb4c1a332a96",
+          "message": "Wrong code: assignment order, condition temporaries, &mut self of numbers\n\nThree cases that compiled and then ran wrong:\n- `*{ x = z; &mut *y } = x`: a place with a block in it was evaluated\n  before the right side, which then read the new x. The right side now\n  goes first, into a temporary.\n- `while borrow().ok() { .. }` / `if borrow().ok() { .. }`: the\n  condition's temporaries lived until the loop / if ended. They are now\n  dropped right after the condition, as rustc does.\n- `x.inc()` with `impl Inc for i32 { fn inc(&mut self) }` (also\n  `v[0].inc()`, `(&mut f[1]).inc()` and `Inc::inc(r)`) changed a copy of\n  x. The method now gets the address of the place itself. A local that\n  calls such a method (names collected once per program) is kept in\n  memory.\n\ntests/ui: +3 run-pass.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-20T13:19:09Z",
+          "tree_id": "d49f2a9ad2cb330b123b3585391ed5544d8a107c",
+          "url": "https://github.com/mizchi/zust/commit/cdb2f0ff02c761be3549a11b1081cb4c1a332a96"
+        },
+        "date": 1795181035391,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tests/ui run-pass pass rate",
+            "value": 73.42,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui run-pass passing",
+            "value": 1751,
             "unit": "tests"
           },
           {
