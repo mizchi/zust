@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795134718853,
+  "lastUpdate": 1795134720479,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -54570,6 +54570,85 @@ window.BENCHMARK_DATA = {
           {
             "name": "parity 一致の平均",
             "value": 95.867,
+            "unit": "%"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "committer": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "distinct": true,
+          "id": "05ec7768f2cdc807218e473e8f4c9ca6f1a46e12",
+          "message": "lint: deny(unused_variables) reports the first unread binding\n\nWith `#![deny(unused_variables)]` (or `unused` / `warnings`, inside a\ndeny / forbid list), each of the program's fns is checked before\nbuilding: a parameter, or a `let` binding that no later statement of\nits block reads (free variables, so shadowing, closures and inline\nformat arguments count), is \"unused variable: `x`\" at its position.\nNames starting with `_`, upper-case ones and fns with an\n`allow(unused..)` or `#[cfg` are left alone.\n\ntests/ui: +7 genuine compile-fail passes.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-20T00:25:03Z",
+          "tree_id": "dbb24cfad004b547ebb82562b93a278cf188ad98",
+          "url": "https://github.com/mizchi/zust/commit/05ec7768f2cdc807218e473e8f4c9ca6f1a46e12"
+        },
+        "date": 1795134720261,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "parity documentSymbol (名前の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity workspace/symbol (上位 20 の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity definition (行き先の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity hover (名前を含む)",
+            "value": 87.5,
+            "unit": "%"
+          },
+          {
+            "name": "parity references (数の一致)",
+            "value": 82.857,
+            "unit": "%"
+          },
+          {
+            "name": "parity documentHighlight (数の一致)",
+            "value": 97.143,
+            "unit": "%"
+          },
+          {
+            "name": "parity rename (書き換えの一致)",
+            "value": 82.353,
+            "unit": "%"
+          },
+          {
+            "name": "parity signatureHelp (名前・引数の数・今の引数の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity completion `x.\\|` (書いてある名前を含む)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity completion `na\\|me` (同)",
+            "value": 88.462,
+            "unit": "%"
+          },
+          {
+            "name": "parity 一致の平均",
+            "value": 93.831,
             "unit": "%"
           }
         ]
