@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795161388815,
+  "lastUpdate": 1795161390831,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -63725,6 +63725,85 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/mizchi/zust/commit/0043490a67a2eec6a87796dcc38d13b985ead107"
         },
         "date": 1795160743543,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "parity documentSymbol (名前の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity workspace/symbol (上位 20 の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity definition (行き先の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity hover (名前を含む)",
+            "value": 95,
+            "unit": "%"
+          },
+          {
+            "name": "parity references (数の一致)",
+            "value": 92.5,
+            "unit": "%"
+          },
+          {
+            "name": "parity documentHighlight (数の一致)",
+            "value": 97.143,
+            "unit": "%"
+          },
+          {
+            "name": "parity rename (書き換えの一致)",
+            "value": 93.333,
+            "unit": "%"
+          },
+          {
+            "name": "parity signatureHelp (名前・引数の数・今の引数の一致)",
+            "value": 94.737,
+            "unit": "%"
+          },
+          {
+            "name": "parity completion `x.\\|` (書いてある名前を含む)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity completion `na\\|me` (同)",
+            "value": 89.655,
+            "unit": "%"
+          },
+          {
+            "name": "parity 一致の平均",
+            "value": 96.237,
+            "unit": "%"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "committer": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "distinct": true,
+          "id": "75f44c72d625e3cd857df93e71c455ec3d9b5536",
+          "message": "Patterns: a path to a constant is equal to its value\n\n`Num::ZERO => ..` (an associated const of the program's) and\n`u8::MIN ..= u8::MAX` (a primitive type's) were read as enum variants\n(\"no variant named\"); a path pattern that names no variant of the\nscrutinee's type but a constant is now compared with that constant.\n\ntests/ui: +2 check-pass passes; pattern/non-structural-match-types*.rs\npassed only through the old \"no variant\" error at the expected line\n(they expect \"constant of non-structural type\") and go to\nrust_ui_accidental.txt.\nKPI: within ±0.09% of the row before.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-20T07:52:27Z",
+          "tree_id": "fd636fac617162fae1ccf22fbb4c1a6f8f568f63",
+          "url": "https://github.com/mizchi/zust/commit/75f44c72d625e3cd857df93e71c455ec3d9b5536"
+        },
+        "date": 1795161390448,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
