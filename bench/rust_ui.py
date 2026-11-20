@@ -256,6 +256,36 @@ def main():
         if os.path.exists(acc):
             skip = {tuple(l.rstrip("\n").split("\t")[:2]) for l in open(acc) if l.strip() and not l.startswith("#")}
             passing -= skip
+        # (the ratchet: the least number of passing tests of each kind. It only goes up (--write-baseline raises it
+        #  to the counts of the run), and --check fails below it)
+        ratchet_path = os.path.join(os.path.dirname(os.path.abspath(a.baseline)), "rust_ui_ratchet.txt")
+        ratchet = {}
+        if os.path.exists(ratchet_path):
+            for l in open(ratchet_path):
+                if l.strip() and not l.startswith("#"):
+                    k, n = l.split("\t")[:2]
+                    ratchet[k] = int(n)
+        counts = {k: sum(1 for kk, _ in passing if kk == k) for k in kinds}
+        # (only a run of every test of a kind counts against it: not one with --filter or --limit)
+        whole = not a.filter and not a.limit
+        if a.write_baseline:
+            # (the kinds this run did not cover keep their entries)
+            new = dict(ratchet)
+            if whole:
+                for k in kinds:
+                    new[k] = max(counts[k], ratchet.get(k, 0))
+            with open(ratchet_path, "w") as f:
+                f.write("# the least number of tests/ui tests of each kind zustc must pass (bench/rust_ui.py --check fails below it;\n")
+                f.write("# --write-baseline raises it, never lowers it). Accidental passes (rust_ui_accidental.txt) are not counted\n")
+                for k in PASS_KINDS + ("compile-fail",):
+                    if k in new:
+                        f.write(f"{k}\t{new[k]}\n")
+        elif whole:
+            for k in kinds:
+                if k in ratchet and counts[k] < ratchet[k]:
+                    print(f"ratchet: {k} passes {counts[k]}, below {ratchet[k]} (bench/rust_ui_ratchet.txt)")
+                    if a.check:
+                        status = 1
         if a.write_baseline:
             with open(a.baseline, "w") as f:
                 f.write(f"# tests/ui tests zustc passes (rust-lang/rust {TAG}, {COMMIT[:9]}); bench/rust_ui.py --write-baseline\n")
