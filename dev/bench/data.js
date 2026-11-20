@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795135576500,
+  "lastUpdate": 1795135578482,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -65838,6 +65838,70 @@ window.BENCHMARK_DATA = {
           {
             "name": "tests/ui compile-fail passing",
             "value": 3326,
+            "unit": "tests"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "committer": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "distinct": true,
+          "id": "00f1a60309370b7aa317cb638f36a244a068f17f",
+          "message": "lint: deny(dead_code) reports the first unused top-level item\n\nWith `#![deny(dead_code)]` (or `unused` / `warnings`; not under\n`allow` / `expect(dead_code)`), the program's top-level fns, structs,\nenums, consts, statics and traits are checked before building: an item\nwhose name appears nowhere but in its own definition and in `impl`\nheaders is \"function `f` is never used\" / \"struct `S` is never\nconstructed\" / .. at its line. `pub` items count as used unless the\nbinary denies dead_code_pub_in_binary; `main`, `_names`, `#[test]`,\n`no_mangle`, derives and cfg'd items are skipped.\n\ntests/ui: +13 compile-fail passes; lint/issue-17718-const-naming.rs\nmatches only by line (it expects the naming lint) and goes to\nrust_ui_accidental.txt.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-20T00:41:48Z",
+          "tree_id": "c23685c18c8785714c27204a7abe5c89062dcf6d",
+          "url": "https://github.com/mizchi/zust/commit/00f1a60309370b7aa317cb638f36a244a068f17f"
+        },
+        "date": 1795135578069,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tests/ui run-pass pass rate",
+            "value": 71.19,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui run-pass passing",
+            "value": 1698,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui check-pass pass rate",
+            "value": 78.42,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui check-pass passing",
+            "value": 1417,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui build-pass pass rate",
+            "value": 70.37,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui build-pass passing",
+            "value": 95,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui compile-fail pass rate",
+            "value": 45.41,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui compile-fail passing",
+            "value": 3341,
             "unit": "tests"
           }
         ]
