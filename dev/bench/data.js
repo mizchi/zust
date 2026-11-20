@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795212861085,
+  "lastUpdate": 1795212863483,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -54880,6 +54880,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "lsp peak RSS",
             "value": 75.746,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "miz404@gmail.com",
+            "name": "Kotaro Chikuba",
+            "username": "mizchi"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "143323981aa57c9742aca98db9253b3e39270e74",
+          "message": "Merge pull request #17 from mizchi/claude/compat-next8\n\nrepr(packed/align) layouts, RFC 2195 enum layout, trait-qualified path resolution",
+          "timestamp": "2026-11-21T07:10:21+09:00",
+          "tree_id": "333f621877c1b939a9d4061a96672684aa7a0c7b",
+          "url": "https://github.com/mizchi/zust/commit/143323981aa57c9742aca98db9253b3e39270e74"
+        },
+        "date": 1795212862989,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "lsp definition p50",
+            "value": 0.591,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp hover p50",
+            "value": 0.449,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp completion p50",
+            "value": 0.958,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp references p50",
+            "value": 3.758,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp rename p50",
+            "value": 0.466,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp signatureHelp p50",
+            "value": 0.648,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp documentHighlight p50",
+            "value": 1.026,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp ready (startup to indexed)",
+            "value": 124.434,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp peak RSS",
+            "value": 76.395,
             "unit": "MiB"
           }
         ]
