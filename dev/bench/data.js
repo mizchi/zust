@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795154774459,
+  "lastUpdate": 1795154776581,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -74742,6 +74742,70 @@ window.BENCHMARK_DATA = {
           {
             "name": "tests/ui compile-fail passing",
             "value": 3537,
+            "unit": "tests"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "committer": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "distinct": true,
+          "id": "1e1f25fa2713aacee57b6d14812759659dd18a21",
+          "message": "cannot find attribute: unknown attributes in a crate with no dependency\n\nA crate built alone (no dependency, so no proc macro) knows only the\nbuilt-in attributes and tool paths (`rustfmt::`, `clippy::`): another\nattribute in front of an item is \"cannot find attribute `x` in this\nscope\" (`#[main]`, `#[deprcated]`, `#[fake_attr]`). `rustc_*` ones are\nbuilt-in under `feature(rustc_attrs)` (looked up only when one is\nthere), and an item with a merge's diff marker keeps its parse error.\n\ntests/ui: +4 compile-fail passes; 17 that expect a feature-gate error\nfor an internal or unstable attribute go to rust_ui_accidental.txt.\nKPI: check +0.00%, traits check +0.03%.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-20T06:00:03Z",
+          "tree_id": "d44f56ff6111ad9191265d9567ab0b1e9f0030cc",
+          "url": "https://github.com/mizchi/zust/commit/1e1f25fa2713aacee57b6d14812759659dd18a21"
+        },
+        "date": 1795154776090,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tests/ui run-pass pass rate",
+            "value": 71.28,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui run-pass passing",
+            "value": 1700,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui check-pass pass rate",
+            "value": 78.42,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui check-pass passing",
+            "value": 1417,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui build-pass pass rate",
+            "value": 70.37,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui build-pass passing",
+            "value": 95,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui compile-fail pass rate",
+            "value": 48.37,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui compile-fail passing",
+            "value": 3559,
             "unit": "tests"
           }
         ]
