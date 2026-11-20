@@ -746,12 +746,7 @@ impl Parser {
     /// A declared name (an item's, a field's, a variant's, a binding's): not a reserved keyword (the 2018 ones
     /// `async` / `await` / `dyn` / `try` stay names, as an edition 2015 file may use them)
     fn decl_ident(&mut self) -> R<String> {
-        const KW: &[&str] = &[
-            "as", "break", "const", "continue", "crate", "else", "enum", "extern", "false", "fn", "for", "if", "impl", "in", "let",
-            "loop", "match", "mod", "move", "mut", "pub", "ref", "return", "self", "Self", "static", "struct", "super", "trait", "true",
-            "type", "unsafe", "use", "where", "while",
-        ];
-        if let Some(t) = self.tok(0).filter(|t| t.kind == TokKind::Ident && KW.contains(&t.text.as_str())) {
+        if let Some(t) = self.tok(0).filter(|t| t.kind == TokKind::Ident && reserved_kw(&t.text, true)) {
             let k = t.text.clone();
             return Err(self.err(&format!("expected identifier, found keyword `{k}`")));
         }
@@ -1537,11 +1532,7 @@ impl Parser {
         if path.segs.len() == 1 && !path.global && path.segs[0].args.is_empty() {
             let n = path.segs[0].name.clone();
             // (a keyword is no binding: `let extern = 0;`; `Self` / `self` are a unit struct and a receiver here)
-            if matches!(
-                n.as_str(),
-                "as" | "break" | "const" | "continue" | "else" | "enum" | "extern" | "fn" | "for" | "if" | "impl" | "in" | "let" | "loop"
-                    | "match" | "mod" | "move" | "pub" | "return" | "static" | "struct" | "trait" | "type" | "unsafe" | "use" | "where" | "while"
-            ) {
+            if reserved_kw(&n, false) {
                 return Err(self.err(&format!("expected identifier, found keyword `{n}`")));
             }
             if self.eat_punct("@") {
@@ -3079,4 +3070,24 @@ impl Counts {
             Expr::Macro(..) => self.macros += 1,
         }
     }
+}
+
+/// A reserved keyword (not the 2018 ones, which an edition 2015 file may use as names). `with_paths` also counts
+/// those a path may start with (`self` / `Self` / `crate` / `super`) and `true` / `false` / `mut` / `ref`. By length
+/// first: a few comparisons per name, as the parser asks for every declared name
+fn reserved_kw(s: &str, with_paths: bool) -> bool {
+    let b = s.as_bytes();
+    if b.len() < 2 || b.len() > 8 || !(b[0].is_ascii_lowercase() || b[0] == b'S') {
+        return false;
+    }
+    let core = match b.len() {
+        2 => matches!(s, "as" | "fn" | "if" | "in"),
+        3 => matches!(s, "for" | "let" | "mod" | "pub" | "use"),
+        4 => matches!(s, "else" | "enum" | "impl" | "loop" | "move" | "type"),
+        5 => matches!(s, "break" | "const" | "match" | "trait" | "where" | "while"),
+        6 => matches!(s, "extern" | "return" | "static" | "struct" | "unsafe"),
+        8 => s == "continue",
+        _ => false,
+    };
+    core || (with_paths && matches!(s, "self" | "Self" | "crate" | "super" | "true" | "false" | "mut" | "ref"))
 }
