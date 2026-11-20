@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795146192465,
+  "lastUpdate": 1795146194216,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -43252,6 +43252,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "lsp peak RSS",
             "value": 73.523,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "committer": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "distinct": true,
+          "id": "7add9a981fa6d50c6f3966e917f486ea33c709aa",
+          "message": "E0252 / E0255 check: linear, and skipped without a crate-root use\n\nThe clash check of c26b695 compared each name with every one before it\n(quadratic in the crate's items: check +8% on the 5000-fn benchmark).\nNames now go into a hash of string slices, and a crate whose root has\nno `use` returns after a look at each item's first bytes.\n\nKPI: check back to 3880.2 (-7.45% against c26b695, +0.02% against\nbefore it); traits check -0.07%.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-20T03:37:33Z",
+          "tree_id": "2d1863f68919b88d5b431efcaa324a2df1a0ca5e",
+          "url": "https://github.com/mizchi/zust/commit/7add9a981fa6d50c6f3966e917f486ea33c709aa"
+        },
+        "date": 1795146194006,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "lsp definition p50",
+            "value": 0.44,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp hover p50",
+            "value": 0.372,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp completion p50",
+            "value": 0.932,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp references p50",
+            "value": 2.764,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp rename p50",
+            "value": 0.709,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp signatureHelp p50",
+            "value": 0.667,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp documentHighlight p50",
+            "value": 0.732,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp ready (startup to indexed)",
+            "value": 119.681,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp peak RSS",
+            "value": 73.594,
             "unit": "MiB"
           }
         ]
