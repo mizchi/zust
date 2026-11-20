@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795165258344,
+  "lastUpdate": 1795165260710,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -78412,6 +78412,70 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/mizchi/zust/commit/9cc1886dec17eee904988eddfb95dd9035a4559a"
         },
         "date": 1795164843283,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tests/ui run-pass pass rate",
+            "value": 71.45,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui run-pass passing",
+            "value": 1704,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui check-pass pass rate",
+            "value": 79.25,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui check-pass passing",
+            "value": 1432,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui build-pass pass rate",
+            "value": 70.37,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui build-pass passing",
+            "value": 95,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui compile-fail pass rate",
+            "value": 48.42,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui compile-fail passing",
+            "value": 3563,
+            "unit": "tests"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "committer": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "distinct": true,
+          "id": "2ba1b4c4e97a32aa68d39e4f7704de00f63ef172",
+          "message": "zust-analyzer: Fx map in place of std HashMap\n\nThe analyzer's maps used std's random-seeded SipHash, as the compiler's\ndid before 9cc1886.\n\nKPI: LSP session 10.850 G (-0.44%); the builds unchanged.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-20T08:55:53Z",
+          "tree_id": "a23a8042e7578e58d58bbbca34ff53e8d7e9ca44",
+          "url": "https://github.com/mizchi/zust/commit/2ba1b4c4e97a32aa68d39e4f7704de00f63ef172"
+        },
+        "date": 1795165260193,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
