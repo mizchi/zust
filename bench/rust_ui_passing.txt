@@ -5714,6 +5714,7 @@ run-pass	structs-enums/enum-discrim-autosizing.rs
 run-pass	structs-enums/enum-export-inheritance.rs
 run-pass	structs-enums/enum-non-c-like-repr-c-and-int.rs
 run-pass	structs-enums/enum-non-c-like-repr-c.rs
+run-pass	structs-enums/enum-non-c-like-repr-int.rs
 run-pass	structs-enums/enum-nullable-const-null-with-fields.rs
 compile-fail	structs-enums/enum-rec/issue-17431-7.rs
 run-pass	structs-enums/enum-vec-initializer.rs
@@ -5728,6 +5729,7 @@ compile-fail	structs-enums/issue-3008-3.rs
 run-pass	structs-enums/issue-38002.rs
 run-pass	structs-enums/issue-50731.rs
 run-pass	structs-enums/ivec-tag.rs
+run-pass	structs-enums/multiple-reprs.rs
 check-pass	structs-enums/nested-enum-same-names.rs
 run-pass	structs-enums/rec-extend.rs
 run-pass	structs-enums/rec-tup.rs
