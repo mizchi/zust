@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795136915353,
+  "lastUpdate": 1795136917542,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -66951,6 +66951,70 @@ window.BENCHMARK_DATA = {
           {
             "name": "tests/ui compile-fail passing",
             "value": 3345,
+            "unit": "tests"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "committer": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "distinct": true,
+          "id": "3c46afb72e7938f4d911f0140859d30d23081f35",
+          "message": "lint: deny(unreachable_code) reports a statement after a diverging one\n\nWith `#![deny(unreachable_code)]` (or `unused` / `warnings`), the\nprogram's fns are checked before building: in a block, the first\nstatement after `return` / `break` / `continue` / `panic!` (and\n`unreachable!` / `todo!` / `unimplemented!`) or a `loop` with no\n`break` is \"unreachable statement\" (\"unreachable expression\" for the\nblock's value), in nested blocks, ifs and loops too.\n\ntests/ui: +7 genuine compile-fail passes.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-20T01:04:21Z",
+          "tree_id": "7565c90552305e3d1a6f53e837b4c958823e1d2c",
+          "url": "https://github.com/mizchi/zust/commit/3c46afb72e7938f4d911f0140859d30d23081f35"
+        },
+        "date": 1795136917094,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tests/ui run-pass pass rate",
+            "value": 71.19,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui run-pass passing",
+            "value": 1698,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui check-pass pass rate",
+            "value": 78.42,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui check-pass passing",
+            "value": 1417,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui build-pass pass rate",
+            "value": 70.37,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui build-pass passing",
+            "value": 95,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui compile-fail pass rate",
+            "value": 45.56,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui compile-fail passing",
+            "value": 3352,
             "unit": "tests"
           }
         ]
