@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795179920373,
+  "lastUpdate": 1795179922578,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -83245,6 +83245,70 @@ window.BENCHMARK_DATA = {
           {
             "name": "tests/ui run-pass passing",
             "value": 1747,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui check-pass pass rate",
+            "value": 80.13,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui check-pass passing",
+            "value": 1448,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui build-pass pass rate",
+            "value": 71.85,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui build-pass passing",
+            "value": 97,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui compile-fail pass rate",
+            "value": 48.48,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui compile-fail passing",
+            "value": 3567,
+            "unit": "tests"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "committer": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "distinct": true,
+          "id": "d855b2ace843f4353497bd4c77367262df578c22",
+          "message": "&CONST, &CONST.f, &CONST[i] and &(42,).0 borrow static data\n\nA shared borrow of a constant used to point at a copy in the function's\nframe, so `fn f(i: usize) -> &'static u32 { &NUMS[i] }` returned a\ndangling reference. Now:\n- `&CONST` borrows the constant promoted to static data.\n- A field or an element of a constant expression is borrowed out of that\n  promoted value: `&(*&B).f` / `&(*&B)[i]`.\nPromotion applies only when the constant evaluator reads the expression\nexactly (literals and constructors, through consts of the same kind, no\n`..base`). It never applies to a type that needs drop (a temporary is\ndropped there, as in rustc) or one with interior mutability (Cell,\natomics ..: each `&C` is a fresh value).\n\ntests/ui: +1 run-pass.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-20T13:01:13Z",
+          "tree_id": "0694b9b2114fdb1640fbf167db5ce955a5811460",
+          "url": "https://github.com/mizchi/zust/commit/d855b2ace843f4353497bd4c77367262df578c22"
+        },
+        "date": 1795179922121,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tests/ui run-pass pass rate",
+            "value": 73.29,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui run-pass passing",
+            "value": 1748,
             "unit": "tests"
           },
           {
