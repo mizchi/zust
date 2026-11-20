@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795207631733,
+  "lastUpdate": 1795207633619,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -73549,6 +73549,85 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/mizchi/zust/commit/bc0659cd067e012190bc90e301f17ed0ced5c066"
         },
         "date": 1795202570704,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "parity documentSymbol (名前の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity workspace/symbol (上位 20 の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity definition (行き先の一致)",
+            "value": 96.774,
+            "unit": "%"
+          },
+          {
+            "name": "parity hover (名前を含む)",
+            "value": 92.5,
+            "unit": "%"
+          },
+          {
+            "name": "parity references (数の一致)",
+            "value": 92.105,
+            "unit": "%"
+          },
+          {
+            "name": "parity documentHighlight (数の一致)",
+            "value": 93.939,
+            "unit": "%"
+          },
+          {
+            "name": "parity rename (書き換えの一致)",
+            "value": 88.235,
+            "unit": "%"
+          },
+          {
+            "name": "parity signatureHelp (名前・引数の数・今の引数の一致)",
+            "value": 94.737,
+            "unit": "%"
+          },
+          {
+            "name": "parity completion `x.\\|` (書いてある名前を含む)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity completion `na\\|me` (同)",
+            "value": 80.769,
+            "unit": "%"
+          },
+          {
+            "name": "parity 一致の平均",
+            "value": 93.906,
+            "unit": "%"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "miz404@gmail.com",
+            "name": "Kotaro Chikuba",
+            "username": "mizchi"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "68ebe197a034c8487b1e9a51d19010d15f8ce7c8",
+          "message": "Merge pull request #16 from mizchi/claude/compat-next6\n\nExtern statics, static WF bounds, trait method paths as values",
+          "timestamp": "2026-11-21T05:42:28+09:00",
+          "tree_id": "7d7a5a9c17fc71a786ad54845336b7dac1a9e2ac",
+          "url": "https://github.com/mizchi/zust/commit/68ebe197a034c8487b1e9a51d19010d15f8ce7c8"
+        },
+        "date": 1795207633355,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
