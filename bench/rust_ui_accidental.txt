@@ -18,3 +18,7 @@ compile-fail	impl-trait/in-trait/default-body-type-err.rs
 compile-fail	lint/unused/must_use-tuple.rs
 compile-fail	lint/issue-17718-const-naming.rs
 compile-fail	imports/unresolved-imports-used.rs
+compile-fail	imports/redundant-import-lang-prelude-attr.rs
+compile-fail	keyword/extern/keyword-extern-as-identifier-use.rs
+compile-fail	resolve/issue-105069.rs
+compile-fail	cfg/reserved-macro-names-rename.rs
