@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795158886467,
+  "lastUpdate": 1795158888571,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -46900,6 +46900,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "lsp peak RSS",
             "value": 74.113,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "committer": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "distinct": true,
+          "id": "255fde7b338979c75934edcd582cb6d6d4f2dc58",
+          "message": "prelude: AsRef, AsMut, Into, Borrow, BorrowMut, FromIterator declared\n\nA program's own `impl AsRef<str> for S` / `impl Into<i64> for W` /\n`impl FromIterator<T> for C` .. failed with \"cannot find trait\": the\ncompiler gives these traits their meaning for the std types itself and\nthe prelude had no declaration. They are now declared, and as the\noperator traits, selected only for a program that implements them.\n\ntests/ui: +6 passes (5 check-pass, 1 compile-fail);\nerror-codes/e0119/issue-27403.rs passed only through the missing\n`Into` and goes to rust_ui_accidental.txt.\nKPI: check +0.05%, traits check +0.02%, edit -0.02%.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-20T07:10:20Z",
+          "tree_id": "ea34024e95041e0339e9d3b472c75391e233bfb3",
+          "url": "https://github.com/mizchi/zust/commit/255fde7b338979c75934edcd582cb6d6d4f2dc58"
+        },
+        "date": 1795158888160,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "lsp definition p50",
+            "value": 0.623,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp hover p50",
+            "value": 0.466,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp completion p50",
+            "value": 0.957,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp references p50",
+            "value": 5.386,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp rename p50",
+            "value": 0.488,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp signatureHelp p50",
+            "value": 0.75,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp documentHighlight p50",
+            "value": 1.062,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp ready (startup to indexed)",
+            "value": 128.825,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp peak RSS",
+            "value": 74.285,
             "unit": "MiB"
           }
         ]
