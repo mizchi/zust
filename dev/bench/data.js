@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795156101515,
+  "lastUpdate": 1795156103191,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -75113,6 +75113,70 @@ window.BENCHMARK_DATA = {
           {
             "name": "tests/ui compile-fail passing",
             "value": 3559,
+            "unit": "tests"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "committer": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "distinct": true,
+          "id": "cc8898f1512e79cc9be8be6782f0bc73f6932245",
+          "message": "E0119: an unbounded blanket impl and an impl of its trait for a type\n\n`impl<T> Tr for T` with no bound, no where clause and no trait\narguments covers every type, so another impl of Tr in the program for\na type (not another blanket impl, whose where clauses the summary may\nnot keep) is \"conflicting implementations of trait `Tr`\" at the later\nof the two. Program::build_with now takes how many items are the\nprogram's, so the prelude's impls are not compared.\n\ntests/ui: +3 compile-fail passes.\nKPI: within ±0.05% of the row before.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-20T06:19:49Z",
+          "tree_id": "33fbcee5c7b567972d8d6c56c310cc7b4301c1c3",
+          "url": "https://github.com/mizchi/zust/commit/cc8898f1512e79cc9be8be6782f0bc73f6932245"
+        },
+        "date": 1795156102990,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tests/ui run-pass pass rate",
+            "value": 71.28,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui run-pass passing",
+            "value": 1700,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui check-pass pass rate",
+            "value": 78.42,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui check-pass passing",
+            "value": 1417,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui build-pass pass rate",
+            "value": 70.37,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui build-pass passing",
+            "value": 95,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui compile-fail pass rate",
+            "value": 48.41,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui compile-fail passing",
+            "value": 3562,
             "unit": "tests"
           }
         ]
