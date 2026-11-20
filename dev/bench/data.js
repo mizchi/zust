@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795134720479,
+  "lastUpdate": 1795134722289,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -65467,6 +65467,70 @@ window.BENCHMARK_DATA = {
           {
             "name": "tests/ui compile-fail passing",
             "value": 3319,
+            "unit": "tests"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "committer": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "distinct": true,
+          "id": "05ec7768f2cdc807218e473e8f4c9ca6f1a46e12",
+          "message": "lint: deny(unused_variables) reports the first unread binding\n\nWith `#![deny(unused_variables)]` (or `unused` / `warnings`, inside a\ndeny / forbid list), each of the program's fns is checked before\nbuilding: a parameter, or a `let` binding that no later statement of\nits block reads (free variables, so shadowing, closures and inline\nformat arguments count), is \"unused variable: `x`\" at its position.\nNames starting with `_`, upper-case ones and fns with an\n`allow(unused..)` or `#[cfg` are left alone.\n\ntests/ui: +7 genuine compile-fail passes.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-20T00:25:03Z",
+          "tree_id": "dbb24cfad004b547ebb82562b93a278cf188ad98",
+          "url": "https://github.com/mizchi/zust/commit/05ec7768f2cdc807218e473e8f4c9ca6f1a46e12"
+        },
+        "date": 1795134722060,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tests/ui run-pass pass rate",
+            "value": 71.19,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui run-pass passing",
+            "value": 1698,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui check-pass pass rate",
+            "value": 78.42,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui check-pass passing",
+            "value": 1417,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui build-pass pass rate",
+            "value": 70.37,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui build-pass passing",
+            "value": 95,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui compile-fail pass rate",
+            "value": 45.2,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui compile-fail passing",
+            "value": 3326,
             "unit": "tests"
           }
         ]
