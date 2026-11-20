@@ -784,7 +784,6 @@ impl Cx<'_> {
             }
         }
         let mut bk_late = None;
-        let mut bk_reserved = false;
         let mut bk_op_temp = false;
         let t0 = self.bk.call_temps.len();
         if self.bk_on() && !via_deref {
@@ -807,13 +806,15 @@ impl Cx<'_> {
                 self.bk.loans.push(res);
                 self.bk_push(Some(borrowck::Ev::Acc(place.clone(), borrowck::Acc::Borrow(rs), *sp)));
                 self.bk_call_temp(&[borrowck::Src::Loan(rs)], true);
-                bk_reserved = true;
-                // (the `&mut` loan is taken at the call, after the right side: an error on the right side (`x += x`
-                // moves x while it is reserved) comes first)
-                bk_late = match (ev, margs.last()) {
+                // (the `&mut` loan is taken at the call (call_fn), after the right side: an error on the right side
+                // (`x += x` moves x while it is reserved) comes first)
+                let act = match (ev, margs.last()) {
                     (Some(borrowck::Ev::Acc(p, a, _)), Some(r)) => Some(borrowck::Ev::Acc(p, a, err_pos(r))),
                     (ev, _) => ev,
                 };
+                if let (Some(act), Some(&tid)) = (act, self.bk.call_temps.last()) {
+                    self.bk.activate = Some((act, tid));
+                }
             } else if matches!(bk_recv_ty, Ty::Ref(true, _)) && self.bk.op_call != e as *const Expr as usize {
                 bk_late = ev;
             } else {
@@ -847,10 +848,6 @@ impl Cx<'_> {
         if into_recv {
             let srcs = self.bk_frame_end();
             self.bk_flow_into(recv, &srcs);
-        }
-        // (a reservation ends before its `&mut` loan is taken)
-        if bk_reserved {
-            self.bk_call_temps_end(t0);
         }
         self.bk_push(bk_late);
         if bk_op_temp {
@@ -1391,8 +1388,21 @@ impl Cx<'_> {
     }
 
     pub(crate) fn call_fn(&mut self, id: u32, recv: Option<(Value, Ty)>, args: &[&Expr], turbofish: Option<&[GArg]>, expected: Option<Ty>, span: Sp) -> R<V> {
+        // (a compound assignment's: taken here, so that a call among its arguments does not)
+        let act = self.bk.activate.take();
         let t0 = self.bk.call_temps.len();
         let r = self.call_fn_inner(id, recv, args, turbofish, expected, span);
+        // (the arguments are evaluated and their loans still live: the reservation ends, the `&mut` loan is taken)
+        if let Some((ev, tid)) = act {
+            if self.bk_on() {
+                self.bk_ev(borrowck::Ev::Acc(borrowck::BPlace { local: tid, proj: vec![] }, borrowck::Acc::Read, SP));
+                self.bk_ev(borrowck::Ev::Dead(tid, SP));
+                if let Some(t) = self.bk.call_temps.iter_mut().rev().find(|t| **t == tid) {
+                    *t = u32::MAX;
+                }
+            }
+            self.bk_push(Some(ev));
+        }
         self.bk_call_temps_end(t0);
         r
     }

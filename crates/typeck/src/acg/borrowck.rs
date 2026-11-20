@@ -156,6 +156,9 @@ pub struct Bk {
     /// The method call a compound assignment was rewritten to (`a += b` → `a.add_assign(b)`): its `&mut self` is
     /// two-phase, a shared reservation while the right side is evaluated
     pub op_assign_call: usize,
+    /// A compound assignment's `&mut self` loan and the call temporary of its reservation: the next call_fn takes the
+    /// loan once its arguments are evaluated, before their loans end (`s += &s` conflicts), ending the reservation first
+    pub activate: Option<(Ev, u32)>,
     /// The `index_mut` call acg makes to read an indexed place (its receiver is seen as shared)
     pub shared_recv: usize,
     /// Binding the pattern of an arm with a guard: a binding by value does not move until the guard holds (the next
@@ -945,7 +948,7 @@ impl Cx<'_> {
         self.bk.on && self.inline_depth == 0
     }
 
-    fn bk_ev(&mut self, e: Ev) {
+    pub(crate) fn bk_ev(&mut self, e: Ev) {
         let b = self.b.live_block();
         self.bk.ev(b, e);
     }

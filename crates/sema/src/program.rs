@@ -1540,39 +1540,6 @@ impl Program {
             };
             for (pn, trs) in &sm.adt_bounds {
                 let Some(&a) = sm.adt_generics.iter().position(|g| g == pn).and_then(|i| sd.args.get(i)) else { continue };
-                // (only arguments whose impls are known exactly: scalars, structs, and a generic struct's instances
-                // matched against the self types of its impls (`impl Tr for G<u8>` is not one for G<u16>). An array's
-                // impl is not told apart here)
-                let inst = match a {
-                    Ty::Struct(x) => p.structs[x as usize].base.filter(|_| !p.structs[x as usize].symbolic),
-                    _ => None,
-                };
-                let judged = a.is_int() || a.is_float() || matches!(a, Ty::Bool | Ty::Char | Ty::Unit) || matches!(a, Ty::Struct(x) if p.structs[x as usize].base.is_none() && p.structs[x as usize].generics.is_empty()) || inst.is_some();
-                if !judged {
-                    continue;
-                }
-                if let Some(b) = inst {
-                    let bn = &p.structs[b as usize].name;
-                    for tr in trs {
-                        // (the self types of the impls of tr for the struct, with their parameters: resolved only here,
-                        // for a static of such a type)
-                        let selfs: Vec<(Ty, usize)> = sums
-                            .iter()
-                            .filter(|s| s.impl_trait.as_deref() == Some(tr.as_str()) && s.impl_self.as_deref() == Some(bn.as_str()))
-                            .filter_map(|s| {
-                                let gn: Vec<&str> = s.impl_generics.iter().map(|g| g.0.as_str()).collect();
-                                s.impl_self_ty.as_ref().and_then(|t| p.resolve_g(t, &gn).ok()).map(|t| (t, gn.len()))
-                            })
-                            .collect();
-                        if selfs.is_empty() {
-                            continue;
-                        }
-                        if !selfs.iter().any(|&(pt, n)| p.match_ty(pt, a, &mut vec![None; n])) {
-                            let line = items[c.item as usize].line + crate::parse::extern_static(&c.expr).map_or(0, |x| x.0.saturating_sub(1));
-                            return Err(format!("{line}:1: the trait bound `{}: {tr}` is not satisfied (E0277)", p.tn(a)));
-                        }
-                    }
-                }
                 for tr in trs {
                     if sums.iter().any(|s| s.trait_decl.as_deref() == Some(tr.as_str())) && !p.bound_holds(sums, a, tr, 0) {
                         // (an extern static: at its own line in the block)
@@ -1706,31 +1673,46 @@ impl Program {
         }
     }
 
-    /// Whether t: tr holds, for a static's bound: as `implements`, but a blanket `impl<T: B> Tr for T` counts only when t
-    /// meets its bounds (`implements` takes any blanket impl as covering every type)
+    /// Whether t: tr holds, for a static's bound. For a trait the program declares, one of its impls in the program must
+    /// apply: its self type matches t exactly (`impl Tr for G<u8>` is not one for G<u16>, nor `&mut u8`'s for `&u8`;
+    /// a blanket `impl<P: B> Tr for P` matches any t) and the impl's bounds on its parameters hold for what they matched
+    /// (checked the same way). An impl this cannot read (a where clause, a self type that does not resolve) counts as
+    /// applying. Other traits (std's) are asked of `implements`
     pub fn bound_holds(&self, sums: &[Summary], t: Ty, tr: &str, depth: u32) -> bool {
-        if depth > 8 || !self.blanket_traits.contains(tr) || matches!(t, Ty::Ref(..) | Ty::Param(_)) {
+        if depth > 8 || matches!(t, Ty::Ref(..) | Ty::Ptr(..) | Ty::Param(_)) || self.has_param(t) || !sums.iter().any(|s| s.trait_decl.as_deref() == Some(tr)) {
             return self.implements(t, tr);
         }
-        let direct = match t {
-            Ty::Struct(sid) => self.impls.contains(&(self.base_of(sid), tr.to_string())),
-            t => self.prim_impls.contains(&(t, tr.to_string())),
-        };
-        if direct {
-            return true;
+        let readable = |b: &str| b.chars().all(|c| c.is_alphanumeric() || c == '_');
+        for s in sums.iter().filter(|s| s.impl_trait.as_deref() == Some(tr)) {
+            let gn: Vec<&str> = s.impl_generics.iter().map(|g| g.0.as_str()).collect();
+            if !s.where_types.is_empty() {
+                return true;
+            }
+            let Some(pt) = s.impl_self_ty.as_ref().and_then(|st| self.resolve_g(st, &gn).ok()) else {
+                return true;
+            };
+            let mut sol = vec![None; gn.len()];
+            if !self.match_ty(pt, t, &mut sol) {
+                continue;
+            }
+            // (match_ty also lets `&mut` stand for `&` and the like: the impl applies only to its self type itself)
+            if let Some(args) = sol.iter().copied().collect::<Option<Vec<Ty>>>() {
+                if self.subst(pt, &args) != t {
+                    continue;
+                }
+            }
+            let bounds_hold = s.impl_generics.iter().zip(&sol).all(|((_, bs), a)| match a {
+                Some(a) => bs.iter().all(|b| {
+                    let b = b.trim();
+                    !readable(b) || self.bound_holds(sums, *a, b, depth + 1)
+                }),
+                None => true,
+            });
+            if bounds_hold {
+                return true;
+            }
         }
-        // (the blanket impls `impl<P: B1 + B2> Tr for P`: one whose bounds t meets; a bound this cannot read (with
-        // arguments, `?Sized`) or a where clause counts as met)
-        sums.iter()
-            .filter(|s| s.impl_trait.as_deref() == Some(tr) && matches!(s.impl_self_ty, Some(TySyn::Named(_))))
-            .filter_map(|s| s.impl_self.as_ref().and_then(|n| s.impl_generics.iter().find(|g| &g.0 == n)).map(|g| (s, g)))
-            .any(|(s, g)| {
-                !s.where_types.is_empty()
-                    || g.1.iter().all(|b| {
-                        let b = b.trim();
-                        !b.chars().all(|c| c.is_alphanumeric() || c == '_') || self.bound_holds(sums, t, b, depth + 1)
-                    })
-            })
+        false
     }
 
     pub fn implements(&self, t: Ty, tr: &str) -> bool {
