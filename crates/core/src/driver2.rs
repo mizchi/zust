@@ -632,6 +632,9 @@ impl Session2 {
         let mut deny_dead_pub = false;
         let mut deny_unused_imports = false;
         let mut deny_unreachable_code = false;
+        let mut deny_must_use = false;
+        // (non_snake_case, non_camel_case_types, non_upper_case_globals)
+        let mut deny_style = [false; 3];
         let lib_attr = {
             let mut end = src.len().min(4096);
             while !src.is_char_boundary(end) {
@@ -657,6 +660,10 @@ impl Session2 {
             deny_dead_pub = levels.contains(&"dead_code_pub_in_binary");
             deny_unused_imports = levels.iter().any(|l| matches!(*l, "unused_imports" | "unused" | "warnings")) && !c.contains("#![allow(unused");
             deny_unreachable_code = levels.iter().any(|l| matches!(*l, "unreachable_code" | "unused" | "warnings")) && !c.contains("#![allow(unreachable_code");
+            deny_must_use = levels.iter().any(|l| matches!(*l, "unused_must_use" | "unused" | "warnings")) && !c.contains("#![allow(unused_must_use");
+            for (k, n) in ["non_snake_case", "non_camel_case_types", "non_upper_case_globals"].iter().enumerate() {
+                deny_style[k] = levels.iter().any(|l| l == n || *l == "nonstandard_style" || *l == "warnings") && !c.contains(&format!("#![allow({n}"));
+            }
             ["lib", "rlib", "dylib", "cdylib", "staticlib", "proc-macro"].iter().any(|k| c.contains(&format!("#![crate_type=\"{k}\"]")))
         };
         // (dead_code, in a binary: the first fn / struct / enum / const / static / trait of the program's whose name
@@ -671,6 +678,12 @@ impl Session2 {
         if deny_unused_imports && self.ctx.lib.is_none() {
             if let Some((line, col, msg)) = first_unused_import(&src, &items[..user]) {
                 return Err(format!("{line}:{col}: {msg}"));
+            }
+        }
+        // (naming lints: the first item whose name breaks its case convention)
+        if deny_style.iter().any(|&d| d) && self.ctx.lib.is_none() {
+            if let Some((line, msg)) = first_bad_name(&src, &items[..user], deny_style) {
+                return Err(format!("{line}:1: {msg}"));
             }
         }
         // (unreachable_code: a statement after one that diverges)
@@ -714,6 +727,21 @@ impl Session2 {
         prog.prelude_from = user as u32;
         prog.overflow_checks = !self.opts.opt;
         prog.deny_unreachable = deny_unreachable;
+        prog.deny_must_use = deny_must_use;
+        if deny_must_use {
+            for it in &items[..user] {
+                let text = src.get(it.start..it.end).unwrap_or("");
+                if let Some(k) = text.find("#[must_use") {
+                    let after = &text[k..];
+                    if let Some(f) = after.find("fn ") {
+                        let name: String = after[f + 3..].trim_start().chars().take_while(|c| c.is_alphanumeric() || *c == '_').collect();
+                        if !name.is_empty() {
+                            prog.must_use_fns.push(name);
+                        }
+                    }
+                }
+            }
+        }
         prog.opt = self.opts.opt;
         resolve_opaque(&mut prog, &src, &items)?;
         let ol = self.ctx.own_lines as usize;
@@ -1053,6 +1081,80 @@ fn first_unreachable(b: &crate::parse::Block) -> Option<(crate::parse::Pos, &'st
         }
     }
     block(b)
+}
+
+/// The naming lints (`deny` = [non_snake_case, non_camel_case_types, non_upper_case_globals]): the first fn / method,
+/// type / trait or static / const of the program whose name breaks its case convention, with rustc's message
+fn first_bad_name(src: &str, items: &[SrcItem], deny: [bool; 3]) -> Option<(usize, String)> {
+    let snake = |n: &str| !n.chars().any(|c| c.is_uppercase());
+    let camel = |n: &str| {
+        let t = n.trim_matches('_');
+        t.is_empty()
+            || (!t.chars().next().is_some_and(|c| c.is_lowercase())
+                && !t.contains("__")
+                && !t.as_bytes().windows(2).any(|w| w[0] == b'_' && !w[1].is_ascii_digit()))
+    };
+    let upper = |n: &str| !n.chars().any(|c| c.is_lowercase());
+    for it in items {
+        let text = &src[it.start..it.end];
+        if text.contains("allow(non_") || text.contains("allow(nonstandard_style") || text.contains("#[cfg") || text.contains("no_mangle")
+            || text.contains("extern \"C\"") || text.contains("export_name")
+        {
+            continue;
+        }
+        let t = crate::lexer::tokenize(text.as_bytes());
+        let tw = |k: usize| -> &str { if t[k].0 == 0 { &text[t[k].1..t[k].2] } else { "" } };
+        let mut k = 0;
+        while k < t.len() && (t[k].0 != 0 || matches!(tw(k), "pub" | "unsafe" | "async" | "crate" | "default")) {
+            // (skip attributes and visibility: `#[..]`, `pub(crate)`)
+            if tw(k) == "impl" {
+                break;
+            }
+            k += 1;
+        }
+        if k + 1 >= t.len() {
+            continue;
+        }
+        let kw = tw(k);
+        let kw = if kw == "const" && tw(k + 1) == "fn" { "fn" } else { kw };
+        let nk = if tw(k) == "const" && tw(k + 1) == "fn" { k + 2 } else { k + 1 };
+        if nk >= t.len() {
+            continue;
+        }
+        let raw = tw(nk);
+        // (a fn-local item hoisted out has a `__h<N>` suffix; a module's item a `mod__` prefix)
+        let raw = match raw.rfind("__h") {
+            Some(i) if i > 0 && raw[i + 3..].chars().all(|c| c.is_ascii_digit()) && raw.len() > i + 3 => &raw[..i],
+            _ => raw,
+        };
+        let name = raw.rsplit("__").next().unwrap_or(raw);
+        let name = if raw.contains("__") { name.trim_start_matches("u_") } else { raw };
+        if name.is_empty() || name == "_" || name.starts_with("r#") {
+            continue;
+        }
+        let member = matches!(it.kind, ItemKind::ImplMember(_) | ItemKind::TraitMember(_));
+        let in_trait = matches!(it.kind, ItemKind::TraitMember(_));
+        let msg = match kw {
+            "fn" if deny[0] && !snake(name) => {
+                let what = if in_trait { "trait method" } else if member { "method" } else { "function" };
+                format!("{what} `{name}` should have a snake case name")
+            }
+            "struct" | "enum" | "union" | "type" if deny[1] && !camel(name) => {
+                let what = if kw == "type" && member { "associated type" } else { "type" };
+                format!("{what} `{name}` should have an upper camel case name")
+            }
+            "trait" if deny[1] && !camel(name) => format!("trait `{name}` should have an upper camel case name"),
+            "static" if deny[2] && !upper(name) => format!("static variable `{name}` should have an upper case name"),
+            "const" if deny[2] && !upper(name) => {
+                let what = if member { "associated constant" } else { "constant" };
+                format!("{what} `{name}` should have an upper case name")
+            }
+            _ => continue,
+        };
+        let line = it.line + text[..t[nk].1].matches('\n').count();
+        return Some((line, msg));
+    }
+    None
 }
 
 /// `#![deny(dead_code)]`: the first top-level item of the program that nothing uses (see the caller)

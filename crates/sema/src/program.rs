@@ -233,6 +233,10 @@ pub struct Program {
     pub overflow_checks: bool,
     /// `#![deny(unreachable_patterns)]` (or forbid) in the source: an arm no value can reach is an error
     pub deny_unreachable: bool,
+    /// `#![deny(unused_must_use)]`: a statement whose value is a `Result` is an error
+    pub deny_must_use: bool,
+    /// the program's `#[must_use]` fns (by name), for unused_must_use
+    pub must_use_fns: Vec<String>,
     /// -O (最適化ビルド)
     pub opt: bool,
     /// ブランケット impl のメソッド (名前 → 関数 id) と、その self 型の型パラメータ名
@@ -617,6 +621,8 @@ impl Program {
             ref_impl_pats: vec![],
             fnptr_impls: Default::default(),
             deny_unreachable: false,
+            deny_must_use: false,
+            must_use_fns: vec![],
             opt: false,
             blanket: FxMap::default(),
             blanket_selfs: Default::default(),
