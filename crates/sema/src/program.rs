@@ -255,6 +255,9 @@ pub struct Program {
     /// 同じ型への別々の trait impl が同じ名前の関数を持つもの (`impl From<&str> for P` と `impl From<String> for P`):
     /// 最初の名前 → 候補の関数 (2 つ目以降は `P::from#1` のような名前)。呼び出し側が引数の型で選ぶ
     pub overloads: FxMap<String, Vec<u32>>,
+    /// zust_syntax::lexer::trait_scopes of the program's own source: where two scopes define traits of one name, the
+    /// traits in scope on each line (pick_overload chooses the impl of the one in scope at the call)
+    pub trait_scopes: Vec<(u32, u32, Vec<String>)>,
     /// 名前の最後のセグメント → 関数 ID 群 (`len` → `A::len`, `B::len`)。参照の過大近似用
     pub by_last: FxMap<String, Vec<u32>>,
     /// trait 名 → その trait で宣言された関数
@@ -562,6 +565,28 @@ fn rebase_aliased(sm: &Summary, map: &FxMap<String, String>) -> Summary {
     sm
 }
 
+/// `from` (a type name) as `to` everywhere in t
+fn rename_tysyn(t: &mut TySyn, from: &str, to: &str) {
+    match t {
+        TySyn::Named(n) if n == from => *n = to.to_string(),
+        TySyn::App(n, args) => {
+            if n == from {
+                *n = to.to_string();
+            }
+            for a in args {
+                rename_tysyn(a, from, to);
+            }
+        }
+        TySyn::Ref(_, i) | TySyn::Ptr(_, i) | TySyn::Slice(i) | TySyn::Array(i, _) | TySyn::Assoc(i, _) => rename_tysyn(i, from, to),
+        TySyn::Tuple(v) | TySyn::FnPtr(v) => {
+            for a in v {
+                rename_tysyn(a, from, to);
+            }
+        }
+        _ => {}
+    }
+}
+
 /// struct / enum 定義の中での `Self`
 pub fn self_of(name: &str, generics: &[String]) -> TySyn {
     if generics.is_empty() {
@@ -634,6 +659,7 @@ impl Program {
             reprs: Default::default(),
             const_fns: Default::default(),
             overloads: Default::default(),
+            trait_scopes: vec![],
             by_last: FxMap::default(),
             traits: FxMap::default(),
             impls: HashSet::default(),
@@ -697,6 +723,43 @@ impl Program {
         } else {
             owned_sums = sums.iter().map(|sm| rebase_aliased(sm, &alias_owner)).collect::<Vec<_>>();
             &owned_sums
+        };
+        // (a closure is named after the fn it is in, `Vec::m::{closure#0}`, which leaves out the trait: two traits of
+        // one name (in two modules) implemented for Vec, each with a closure in `m`, would share the name. A later
+        // one also gets its item's number. It was an error before, so no program that built is renamed)
+        let owned_unique;
+        let sums: &[Summary] = {
+            let mut seen: FxMap<&str, usize> = FxMap::default();
+            let dup = sums.iter().enumerate().any(|(ii, sm)| sm.closures.iter().any(|c| *seen.entry(c.name.as_str()).or_insert(ii) != ii));
+            if dup {
+                let mut first: FxMap<String, usize> = FxMap::default();
+                owned_unique = sums
+                    .iter()
+                    .enumerate()
+                    .map(|(ii, sm)| {
+                        let mut sm = sm.clone();
+                        for c in &mut sm.closures {
+                            if *first.entry(c.name.clone()).or_insert(ii) != ii {
+                                let to = format!("{}_{ii}", c.name);
+                                // (its `call` takes the closure struct by name)
+                                let from = std::mem::replace(&mut c.name, to.clone());
+                                for t in c.sig.params.iter_mut().chain(std::iter::once(&mut c.sig.ret)).chain(c.sig.self_ty.iter_mut()) {
+                                    rename_tysyn(t, &from, &to);
+                                }
+                                if c.sig.impl_of.as_deref() == Some(from.as_str()) {
+                                    c.sig.impl_of = Some(to.clone());
+                                }
+                                // (and its symbol, `<the fn's symbol>.c<k>`, which is the same for the two too)
+                                c.sig.symbol = format!("{}_{ii}", c.sig.symbol);
+                            }
+                        }
+                        sm
+                    })
+                    .collect::<Vec<_>>();
+                &owned_unique
+            } else {
+                sums
+            }
         };
         // 0. const / static の名前 (配列の長さで使うので型より先に)
         for (ii, sm) in sums.iter().enumerate() {

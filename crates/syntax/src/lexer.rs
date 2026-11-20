@@ -1046,6 +1046,237 @@ pub fn expand_thread_local(src: &str) -> Option<String> {
     Some(out)
 }
 
+/// Which traits are in scope where, when two scopes (modules, or a module and the root) define traits of one name
+/// (`mod a { trait M }`, `mod b { trait M }`): flattening renames them (`a__M`, `b__M`), but a method call `x.m()`
+/// names no trait, and the call has to use the impl of the trait in scope at it. For each scope, its lines (1-based,
+/// inclusive; the root is 1..=u32::MAX, the modules inside it narrower) and the flattened names of the traits of a
+/// colliding name that are in scope there: defined in it, or brought in by `use` (also `as`, and globs). Empty when no
+/// trait name collides (then nothing needs it).
+pub fn trait_scopes(src: &str) -> Vec<(u32, u32, Vec<String>)> {
+    if !src.contains("mod") || !src.contains("trait") {
+        return vec![];
+    }
+    // (a quick look first: the names after `trait `, by text; no name twice, nothing to do. Most programs stop here,
+    // without tokenizing)
+    {
+        let mut names: Vec<&str> = src
+            .match_indices("trait ")
+            .filter(|(i, _)| *i == 0 || !src.as_bytes()[i - 1].is_ascii_alphanumeric() && src.as_bytes()[i - 1] != b'_')
+            .map(|(i, _)| src[i + 6..].trim_start())
+            .map(|r| &r[..r.find(|c: char| !c.is_alphanumeric() && c != '_').unwrap_or(r.len())])
+            .filter(|n| !n.is_empty())
+            .collect();
+        names.sort_unstable();
+        if !names.windows(2).any(|w| w[0] == w[1]) {
+            return vec![];
+        }
+    }
+    let s = src.as_bytes();
+    let toks = tokenize(s);
+    let tok = |k: usize| -> &[u8] { &s[toks[k].1..toks[k].2] };
+    let is_sym = |k: usize, c: u8| toks[k].0 == 1 && s[toks[k].1] == c && toks[k].2 == toks[k].1 + 1;
+    let is_id = |k: usize, w: &[u8]| toks[k].0 == 0 && tok(k) == w;
+    // (modules: path, opening `{`, closing `}`; as rename_module_collisions_fix finds them)
+    let mut mods: Vec<(Vec<Vec<u8>>, usize, usize)> = vec![];
+    let mut stack: Vec<(usize, i32)> = vec![];
+    // (traits: name, scope; usize::MAX is the root)
+    let mut traits: Vec<(Vec<u8>, usize)> = vec![];
+    let mut depth = 0i32;
+    let mut k = 0;
+    while k < toks.len() {
+        if is_id(k, b"mod") && k + 2 < toks.len() && toks[k + 1].0 == 0 && is_sym(k + 2, b'{') {
+            let mut path = stack.last().map(|&(m, _)| mods[m].0.clone()).unwrap_or_default();
+            path.push(tok(k + 1).to_vec());
+            mods.push((path, k + 2, usize::MAX));
+            stack.push((mods.len() - 1, depth));
+            depth += 1;
+            k += 3;
+            continue;
+        }
+        if is_sym(k, b'{') {
+            depth += 1;
+        } else if is_sym(k, b'}') {
+            depth -= 1;
+            if stack.last().is_some_and(|&(_, d)| d == depth) {
+                let (m, _) = stack.pop().unwrap();
+                mods[m].2 = k;
+            }
+        } else if is_id(k, b"trait") && k + 1 < toks.len() && toks[k + 1].0 == 0 && stack.last().is_none_or(|&(_, d)| d + 1 == depth) {
+            traits.push((tok(k + 1).to_vec(), stack.last().map_or(usize::MAX, |&(m, _)| m)));
+        }
+        k += 1;
+    }
+    let colliding: Vec<&Vec<u8>> = traits
+        .iter()
+        .filter(|(n, sc)| traits.iter().any(|(n2, sc2)| n2 == n && sc2 != sc))
+        .map(|(n, _)| n)
+        .collect();
+    if colliding.is_empty() {
+        return vec![];
+    }
+    // (the flattened name: `a__b__M`, or `M` at the root, which keeps its name)
+    let flat = |m: usize, n: &[u8]| -> String {
+        let mut v = String::new();
+        if m != usize::MAX {
+            for p in &mods[m].0 {
+                v.push_str(&String::from_utf8_lossy(p));
+                v.push_str("__");
+            }
+        }
+        v.push_str(&String::from_utf8_lossy(n));
+        v
+    };
+    let mod_of_path = |p: &[Vec<u8>]| -> Option<usize> {
+        if p.is_empty() {
+            return Some(usize::MAX);
+        }
+        mods.iter().position(|m| m.0 == p)
+    };
+    let scope_of = |k: usize| -> usize {
+        // (the innermost module around token k: the last one opened before it that closes after it)
+        let mut best = usize::MAX;
+        for (i, m) in mods.iter().enumerate() {
+            if m.1 < k && k < m.2 {
+                best = i;
+            }
+        }
+        best
+    };
+    let resolve = |from: usize, segs: &[Vec<u8>]| -> Option<usize> {
+        let mut base: Vec<Vec<u8>> = if from == usize::MAX { vec![] } else { mods[from].0.clone() };
+        let mut rest = segs;
+        if rest.first().is_some_and(|x| x.as_slice() == b"crate") {
+            base.clear();
+            rest = &rest[1..];
+        } else if rest.first().is_some_and(|x| x.as_slice() == b"self") {
+            rest = &rest[1..];
+        } else if rest.first().is_some_and(|x| x.as_slice() == b"super") {
+            while rest.first().is_some_and(|x| x.as_slice() == b"super") {
+                base.pop();
+                rest = &rest[1..];
+            }
+        } else {
+            // (a relative path; failing that, from the crate root (edition 2015 style))
+            let mut rel = base.clone();
+            rel.extend(rest.iter().cloned());
+            if let Some(m) = mod_of_path(&rel) {
+                return Some(m);
+            }
+            base.clear();
+        }
+        base.extend(rest.iter().cloned());
+        mod_of_path(&base)
+    };
+    let n_scopes = mods.len() + 1;
+    let ix = |sc: usize| if sc == usize::MAX { mods.len() } else { sc };
+    let mut visible: Vec<Vec<String>> = vec![vec![]; n_scopes];
+    for (n, sc) in &traits {
+        if colliding.contains(&n) {
+            visible[ix(*sc)].push(flat(*sc, n));
+        }
+    }
+    let mut k = 0;
+    while k < toks.len() {
+        if !is_id(k, b"use") {
+            k += 1;
+            continue;
+        }
+        let sc = scope_of(k);
+        let mut e = k;
+        while e < toks.len() && !is_sym(e, b';') {
+            e += 1;
+        }
+        let mut items = vec![];
+        use_walk(&toks, s, k + 1, e, vec![], &mut items);
+        for (path, local) in items {
+            if local.as_slice() == b"*" {
+                if let Some(m) = resolve(sc, &path) {
+                    for (n, tsc) in &traits {
+                        if *tsc == m && colliding.contains(&n) {
+                            visible[ix(sc)].push(flat(m, n));
+                        }
+                    }
+                }
+                continue;
+            }
+            let Some((name, mpath)) = path.split_last() else { continue };
+            if !colliding.contains(&name) {
+                continue;
+            }
+            if let Some(m) = resolve(sc, mpath) {
+                if traits.iter().any(|(n, tsc)| n == name && *tsc == m) {
+                    visible[ix(sc)].push(flat(m, name));
+                }
+            }
+        }
+        k = e + 1;
+    }
+    let line_of = |k: usize| -> u32 { (s[..toks[k.min(toks.len() - 1)].1].iter().filter(|&&c| c == b'\n').count() + 1) as u32 };
+    let mut out = vec![(1, u32::MAX, std::mem::take(&mut visible[mods.len()]))];
+    for (i, m) in mods.iter().enumerate() {
+        out.push((line_of(m.1), line_of(m.2), std::mem::take(&mut visible[i])));
+    }
+    out
+}
+
+/// The names a `use` tree brings in: (the path, the name used). `*` for a glob. (a tree walk: the current prefix,
+/// the position)
+fn use_walk(
+    toks: &[(u8, usize, usize)],
+    s: &[u8],
+    mut j: usize,
+    end: usize,
+    prefix: Vec<Vec<u8>>,
+    out: &mut Vec<(Vec<Vec<u8>>, Vec<u8>)>,
+) -> usize {
+    let tk = |k: usize| -> &[u8] { &s[toks[k].1..toks[k].2] };
+    let mut path = prefix.clone();
+    while j < end {
+        let t = tk(j);
+        if toks[j].0 == 0 {
+            if t == b"as" {
+                // 別名
+                if j + 1 < end {
+                    let alias = tk(j + 1).to_vec();
+                    out.push((path.clone(), alias));
+                    path = prefix.clone();
+                    j += 2;
+                    continue;
+                }
+            }
+            path.push(t.to_vec());
+            j += 1;
+            let next_is_sep = j + 1 < end && tk(j) == b":" && tk(j + 1) == b":";
+            let next_is_as = j < end && toks[j].0 == 0 && tk(j) == b"as";
+            if !next_is_sep && !next_is_as {
+                let last = path.last().cloned().unwrap_or_default();
+                out.push((path.clone(), last));
+                path = prefix.clone();
+            }
+        } else if t == b":" {
+            j += 1;
+        } else if t == b"{" {
+            j = use_walk(toks, s, j + 1, end, path.clone(), out);
+            path = prefix.clone();
+        } else if t == b"}" {
+            return j + 1;
+        } else {
+            // `,` / `*` (`use m::*`: 名前の代わりに `*` を記録する)
+            if t == b"*" {
+                out.push((path.clone(), b"*".to_vec()));
+            }
+            if t != b"," {
+                path = prefix.clone();
+            }
+            j += 1;
+            if t == b"," {
+                path = prefix.clone();
+            }
+        }
+    }
+    j
+}
+
 /// モジュールの中の名前を平らにしてもぶつからないようにする: 2 つ以上のスコープ (モジュール・ルート) で定義される名前は、
 /// モジュールの中の定義を `m__Name` (入れ子なら `a__b__Name`) に変え、参照も直す:
 /// - そのモジュールの中の裸の名前、`use crate::m::{Name, X as Y}` で取り込んだ名前 (別名も)
@@ -1286,64 +1517,8 @@ pub fn rename_module_collisions_fix(src: &str, crates: &[String], fix: &mut Vec<
             e += 1;
         }
         use_ranges.push((k, e));
-        // 木を辿る: (今の接頭辞, 位置)
-        fn walk(
-            toks: &[(u8, usize, usize)],
-            s: &[u8],
-            mut j: usize,
-            end: usize,
-            prefix: Vec<Vec<u8>>,
-            out: &mut Vec<(Vec<Vec<u8>>, Vec<u8>)>,
-        ) -> usize {
-            let tk = |k: usize| -> &[u8] { &s[toks[k].1..toks[k].2] };
-            let mut path = prefix.clone();
-            while j < end {
-                let t = tk(j);
-                if toks[j].0 == 0 {
-                    if t == b"as" {
-                        // 別名
-                        if j + 1 < end {
-                            let alias = tk(j + 1).to_vec();
-                            out.push((path.clone(), alias));
-                            path = prefix.clone();
-                            j += 2;
-                            continue;
-                        }
-                    }
-                    path.push(t.to_vec());
-                    j += 1;
-                    let next_is_sep = j + 1 < end && tk(j) == b":" && tk(j + 1) == b":";
-                    let next_is_as = j < end && toks[j].0 == 0 && tk(j) == b"as";
-                    if !next_is_sep && !next_is_as {
-                        let last = path.last().cloned().unwrap_or_default();
-                        out.push((path.clone(), last));
-                        path = prefix.clone();
-                    }
-                } else if t == b":" {
-                    j += 1;
-                } else if t == b"{" {
-                    j = walk(toks, s, j + 1, end, path.clone(), out);
-                    path = prefix.clone();
-                } else if t == b"}" {
-                    return j + 1;
-                } else {
-                    // `,` / `*` (`use m::*`: 名前の代わりに `*` を記録する)
-                    if t == b"*" {
-                        out.push((path.clone(), b"*".to_vec()));
-                    }
-                    if t != b"," {
-                        path = prefix.clone();
-                    }
-                    j += 1;
-                    if t == b"," {
-                        path = prefix.clone();
-                    }
-                }
-            }
-            j
-        }
         let mut items = vec![];
-        walk(&toks, s, k + 1, e, vec![], &mut items);
+        use_walk(&toks, s, k + 1, e, vec![], &mut items);
         for (path, local) in items {
             if local.as_slice() == b"*" {
                 if let Some(m) = resolve_mod(sc, &path) {

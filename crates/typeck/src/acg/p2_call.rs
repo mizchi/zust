@@ -1254,6 +1254,13 @@ impl Cx<'_> {
             let mut sol = vec![None; sig.generics.len()];
             sig.params.first().is_some_and(|&pt| self.prog.match_ty(pt, at, &mut sol))
         };
+        // (impls of two traits of one name, `a::M` and `b::M` for u32: the one whose trait is in scope here)
+        if let Some(vis) = self.traits_in_scope() {
+            let base = |c: u32| self.prog.sigs[c as usize].impl_trait.as_deref().map(|t| t.split('<').next().unwrap_or(t).trim());
+            if let Some(&c) = cands.iter().find(|&&c| base(c).is_some_and(|t| vis.iter().any(|v| v == t)) && fits(c, at)) {
+                return c;
+            }
+        }
         if let Some(&c) = cands.iter().find(|&&c| fits(c, at)) {
             return c;
         }
@@ -1264,6 +1271,21 @@ impl Cx<'_> {
             _ => None,
         };
         deref.and_then(|d| cands.iter().copied().find(|&c| fits(c, d))).unwrap_or(id)
+    }
+
+    /// Program::trait_scopes at this function: the traits of a colliding name in scope where it is (the innermost
+    /// scope around its first line). None for the prelude, or when no trait name collides
+    pub(crate) fn traits_in_scope(&self) -> Option<&[String]> {
+        if self.prog.trait_scopes.is_empty() || !self.user_code {
+            return None;
+        }
+        let line = self.line_base.max(1);
+        self.prog
+            .trait_scopes
+            .iter()
+            .filter(|(lo, hi, _)| *lo <= line && line <= *hi)
+            .min_by_key(|(lo, hi, _)| hi - lo)
+            .map(|(_, _, v)| v.as_slice())
     }
 
     /// E0133: a call written in the source (pos.line != 0) to an `unsafe fn` outside `unsafe`

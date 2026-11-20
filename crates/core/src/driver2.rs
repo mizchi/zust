@@ -741,6 +741,8 @@ impl Session2 {
         let mut prog = Program::build_with(&items, &sums, self.ctx.lib.is_none() && !lib_attr, user).map_err(|e| name_line(&e, &src, &items))?;
         tm.lap("program", String::new());
         prog.prelude_from = user as u32;
+        // (traits of one name in two modules: which one a method call means depends on where it is)
+        prog.trait_scopes = lexer::trait_scopes(src0);
         prog.overflow_checks = !self.opts.opt;
         prog.deny_unreachable = deny_unreachable;
         prog.deny_must_use = deny_must_use;
