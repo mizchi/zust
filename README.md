@@ -26,7 +26,7 @@
 
 ## Status
 
-Numbers measured <!-- measured -->2026-11-20, 0868b65<!-- /measured --> by CI on each push to main (bench.yml runs
+Numbers measured <!-- measured -->2026-11-20, bc0659c<!-- /measured --> by CI on each push to main (bench.yml runs
 `bench/ci_bench.py` and `bench/rust_ui.py`, then `scripts/update_readme.py` writes them here). Times come from shared
 GitHub Actions runners and vary by about ±20%; the instruction counts (valgrind) do not.
 
@@ -38,7 +38,7 @@ only the tests it can be asked to handle (no nightly features, auxiliary crates 
 <!-- auto:ui -->
 | kind | applicable | pass |
 |---|---:|---:|
-| run-pass (builds, runs, same output) | 2385 | 1760 (73.8%) |
+| run-pass (builds, runs, same output) | 2385 | 1761 (73.8%) |
 | check-pass (accepted by `zustc check`) | 1807 | 1454 (80.5%) |
 | build-pass | 135 | 97 (71.9%) |
 | compile-fail (rejected at an annotated line) | 7358 | 3580 (48.7%) |
@@ -53,21 +53,21 @@ Build speed, build cache size and LSP latency on generated programs of 1000 / 50
 <!-- auto:kpi -->
 | KPI | gen1000 | gen5000 |
 |---|---:|---:|
-| cold build | 119 ms | 534 ms |
-| no-op build | 0.7 ms | 0.6 ms |
-| build after editing one function | 17.3 ms | 63.1 ms |
-| `check` | 77 ms | 371 ms |
+| cold build | 119 ms | 531 ms |
+| no-op build | 0.6 ms | 0.6 ms |
+| build after editing one function | 16.5 ms | 64.0 ms |
+| `check` | 77 ms | 364 ms |
 | no-op build (instructions) | 0.6 M | 0.6 M |
 | edit one function (instructions) | 124.1 M | 589.2 M |
-| `check` (instructions) | 776.3 M | 3833.5 M |
+| `check` (instructions) | 776.3 M | 3833.6 M |
 | build cache on disk | 387.2 KiB | 1902.8 KiB |
 | binary | 324.0 KiB | 1558.3 KiB |
-| cold build peak RSS | 18.4 MiB | 52.1 MiB |
+| cold build peak RSS | 18.3 MiB | 52.1 MiB |
 
 | zust-analyzer (zustc's own sources) | |
 |---|---:|
-| p50: definition, hover, completion, references, rename | 0.45 ms / 0.39 ms / 1.05 ms / 4.36 ms / 0.47 ms |
-| startup until indexed | 129 ms |
+| p50: definition, hover, completion, references, rename | 0.45 ms / 0.39 ms / 1.05 ms / 4.08 ms / 0.38 ms |
+| startup until indexed | 124 ms |
 | peak RSS | 75.7 MiB |
 <!-- /auto:kpi -->
 
@@ -347,7 +347,7 @@ the measured numbers. The [reports](docs/reports/) explain each step.
 
 ### Overall
 
-- [x] tests/ui run-pass: <!-- total:run-pass -->73.8% (1760 / 2385)
+- [x] tests/ui run-pass: <!-- total:run-pass -->73.8% (1761 / 2385)
 - [x] tests/ui check-pass: <!-- total:check-pass -->80.5% (1454 / 1807)
 - [x] tests/ui build-pass: <!-- total:build-pass -->71.9% (97 / 135)
 - [ ] tests/ui compile-fail (an error on an annotated line): <!-- total:compile-fail -->48.7% (3580 / 7358)
