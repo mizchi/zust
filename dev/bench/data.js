@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795147807202,
+  "lastUpdate": 1795147809625,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -71032,6 +71032,70 @@ window.BENCHMARK_DATA = {
           {
             "name": "tests/ui compile-fail passing",
             "value": 3453,
+            "unit": "tests"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "miz404@gmail.com",
+            "name": "Kotaro Chikuba",
+            "username": "mizchi"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "90a87bee95fa8f4b1eb5e313e8121a94c3eb816d",
+          "message": "Merge #9: formal models (TLA+ / Kani), fixes for the 5 defects they found, green threads, KPI workflow\n\nformal/: TLA+ (idealis) and Kani models, fixes for the 5 defects they found, a KPI workflow for PRs",
+          "timestamp": "2026-11-20T13:03:32+09:00",
+          "tree_id": "cd2df6e847f9c51808c162fb2f1d95bdf6f9b482",
+          "url": "https://github.com/mizchi/zust/commit/90a87bee95fa8f4b1eb5e313e8121a94c3eb816d"
+        },
+        "date": 1795147809102,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tests/ui run-pass pass rate",
+            "value": 71.28,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui run-pass passing",
+            "value": 1700,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui check-pass pass rate",
+            "value": 78.42,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui check-pass passing",
+            "value": 1417,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui build-pass pass rate",
+            "value": 70.37,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui build-pass passing",
+            "value": 95,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui compile-fail pass rate",
+            "value": 46.91,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui compile-fail passing",
+            "value": 3452,
             "unit": "tests"
           }
         ]
