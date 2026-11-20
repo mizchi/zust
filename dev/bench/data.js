@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795149068400,
+  "lastUpdate": 1795149070356,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -59734,6 +59734,85 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/mizchi/zust/commit/fbf1812be6e016b2fef6388d0439473200e070c0"
         },
         "date": 1795148256601,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "parity documentSymbol (名前の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity workspace/symbol (上位 20 の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity definition (行き先の一致)",
+            "value": 93.75,
+            "unit": "%"
+          },
+          {
+            "name": "parity hover (名前を含む)",
+            "value": 87.5,
+            "unit": "%"
+          },
+          {
+            "name": "parity references (数の一致)",
+            "value": 92.105,
+            "unit": "%"
+          },
+          {
+            "name": "parity documentHighlight (数の一致)",
+            "value": 93.939,
+            "unit": "%"
+          },
+          {
+            "name": "parity rename (書き換えの一致)",
+            "value": 84.211,
+            "unit": "%"
+          },
+          {
+            "name": "parity signatureHelp (名前・引数の数・今の引数の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity completion `x.\\|` (書いてある名前を含む)",
+            "value": 95,
+            "unit": "%"
+          },
+          {
+            "name": "parity completion `na\\|me` (同)",
+            "value": 95.833,
+            "unit": "%"
+          },
+          {
+            "name": "parity 一致の平均",
+            "value": 94.234,
+            "unit": "%"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "committer": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "distinct": true,
+          "id": "112b131e6daf751a1cc9dfa7e04ff86888687412",
+          "message": "E0277: unsized parameters, consts and statics\n\nA fn parameter (not of a trait's declaration or an extern fn), a const\nor a static whose type is unsized itself (`str`, `[T]`, `dyn Tr`, or a\ntuple holding one) is \"the size for values of type `..` cannot be\nknown at compilation time\".\n\ntests/ui: +9 compile-fail passes; four whose expected message differs\ngo to rust_ui_accidental.txt.\nKPI: the log's median now mixes rows of #9 measured on another\nmachine; against fbf1812 built and measured here, the change is check\n+0.01%, traits check +0.04%, the rest unchanged.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-20T04:26:52Z",
+          "tree_id": "846afdc38587b6ab209e55f5293af9752cbd803b",
+          "url": "https://github.com/mizchi/zust/commit/112b131e6daf751a1cc9dfa7e04ff86888687412"
+        },
+        "date": 1795149069940,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
