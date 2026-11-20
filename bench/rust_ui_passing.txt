@@ -2013,6 +2013,7 @@ compile-fail	error-codes/E0201.rs
 compile-fail	error-codes/E0207.rs
 compile-fail	error-codes/E0214.rs
 compile-fail	error-codes/E0223.rs
+compile-fail	error-codes/E0252.rs
 compile-fail	error-codes/E0262.rs
 compile-fail	error-codes/E0263.rs
 compile-fail	error-codes/E0267.rs
@@ -2034,6 +2035,7 @@ compile-fail	error-codes/E0423.rs
 compile-fail	error-codes/E0424.rs
 compile-fail	error-codes/E0428.rs
 check-pass	error-codes/E0429.rs
+compile-fail	error-codes/E0430.rs
 compile-fail	error-codes/E0432.rs
 compile-fail	error-codes/E0433.rs
 compile-fail	error-codes/E0435.rs
@@ -2748,6 +2750,7 @@ check-pass	imports/ambiguous-trait-and-struct-in-scope.rs
 check-pass	imports/ambiguous-trait-with-mixed-import-paths.rs
 check-pass	imports/cycle-import-in-diff-module-0.rs
 check-pass	imports/cycle-import-in-diff-module-1.rs
+compile-fail	imports/double-import.rs
 check-pass	imports/duplicate-empty-imports.rs
 check-pass	imports/empty-import-prefix-pass-2015.rs
 check-pass	imports/empty-import-prefix-pass.rs
@@ -2791,12 +2794,22 @@ compile-fail	imports/issue-109343.rs
 compile-fail	imports/issue-113953.rs
 compile-fail	imports/issue-1697.rs
 check-pass	imports/issue-18083.rs
+compile-fail	imports/issue-24081.rs
 check-pass	imports/issue-24883.rs
+compile-fail	imports/issue-25396.rs
+compile-fail	imports/issue-26886.rs
 check-pass	imports/issue-26930.rs
 compile-fail	imports/issue-28388-1.rs
 check-pass	imports/issue-32119.rs
 check-pass	imports/issue-32222.rs
+compile-fail	imports/issue-32354-suggest-import-rename.rs
 compile-fail	imports/issue-33464.rs
+compile-fail	imports/issue-45829/import-self.rs
+compile-fail	imports/issue-45829/import-twice.rs
+compile-fail	imports/issue-45829/issue-45829.rs
+compile-fail	imports/issue-45829/rename-use-with-tabs.rs
+compile-fail	imports/issue-45829/rename-with-path.rs
+compile-fail	imports/issue-45829/rename.rs
 run-pass	imports/issue-4865-1.rs
 run-pass	imports/issue-4865-2.rs
 run-pass	imports/issue-4865-3.rs
@@ -5106,6 +5119,9 @@ run-pass	resolve/reference-clone-nonclone-11820.rs
 compile-fail	resolve/regression-struct-called-as-function-148919.rs
 compile-fail	resolve/resolve-assoc-suggestions.rs
 compile-fail	resolve/resolve-bad-import-prefix.rs
+compile-fail	resolve/resolve-conflict-import-vs-import.rs
+compile-fail	resolve/resolve-conflict-item-vs-import.rs
+compile-fail	resolve/resolve-conflict-type-vs-import.rs
 compile-fail	resolve/resolve-dont-hint-macro.rs
 compile-fail	resolve/resolve-hint-macro.rs
 run-pass	resolve/resolve-issue-2428.rs
@@ -6551,6 +6567,7 @@ compile-fail	use/use-after-move-self.rs
 check-pass	use/use-keyword.rs
 check-pass	use/use-mod/use-mod-5.rs
 check-pass	use/use-mod/use-mod-6.rs
+compile-fail	use/use-paths-as-items.rs
 compile-fail	variance/leaking-unnameables.rs
 check-pass	variance/smart-pointers-covariant.rs
 compile-fail	variance/type-resolve-error-two-structs-deep.rs

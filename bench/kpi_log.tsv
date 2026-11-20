@@ -108,6 +108,8 @@ date	commit	change	noop_M	edit_M	check_M	cache_KiB	lsp_G	run	check	build	cfail
 2026-11-20	fdd2ee3+	naming lints: struct / enum variant fields, parameters and lets	0.695	590.910	3879.582	1902.8	-	1698	1417	95	3368	1182.195	63.289	10.200	319.410
 2026-11-20	b4040ee+	naming lints: lifetime parameters	0.695	590.736	3879.594	1902.8	-	1698	1417	95	3370	1181.846	63.287	10.196	319.423
 2026-11-20	c311508+	E0432: a top-level use whose first segment names nothing	0.693	590.971	3879.979	1902.8	-	1698	1417	95	3404	1181.831	63.288	10.183	319.355
+2026-11-20	1e843fc+	E0252/E0255: a top-level use and another use or item of one name	0.695	591.057	4192.565	1902.8	-	1698	1417	95	3422	1183.547	63.229	10.196	319.388
+2026-11-20	c26b695+	E0252/E0255 check: names in a hash, skipped without a crate-root use (fixes the +8% check of c26b695)	0.697	590.798	3880.225	1902.8	-	1698	1417	95	3422	1182.767	63.233	10.210	319.466
 2026-11-20	0765679	reference: 05ec776 with formal/ (no compiler change), measured again on this machine for the rows below	0.882	580.808	3851.454	1902.8	-	1698	1417	95	3327	1178.832	60.981	10.837	316.211
 2026-11-20	0765679+	borrowck: run the fixpoint to its end (a bound from the lattice's height)	0.882	580.299	3849.195	1902.8	-	1698	1417	95	3326	1179.225	60.973	10.837	316.127
 2026-11-20	98c6952+	cache: a tmp file per process when saving the cache and the stamps	0.882	580.437	3849.119	1902.8	-	1698	1417	95	3327	1178.897	60.975	10.837	316.198
