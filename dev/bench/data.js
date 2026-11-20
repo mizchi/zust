@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795171991706,
+  "lastUpdate": 1795171993804,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -49631,6 +49631,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "lsp ready (startup to indexed)",
             "value": 125.605,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp peak RSS",
+            "value": 74.492,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "committer": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "distinct": true,
+          "id": "09ae27caa884889c50f22b2d14cd29c4365c5c82",
+          "message": "Prelude scan: the byte index covers lowercase letters too\n\nAn all-lowercase pattern (`stdout`, `stdin`, `mpsc`, `isqrt`, `dyn`) had\nno indexed byte, so `has` read the whole source with str::contains: about\n22M instructions of an edit build of the 1.6 MB program. Every byte but\nwhite space is now indexed, and such a pattern is checked only where its\nrarest letter is.\n\nKPI: edit one fn -1.98%, check -0.26%. traits edit is back inside its\nband (6edddd0's +0.27% was one noisy run; the prelude items it added\ncost about 0.1% there).\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-20T10:48:48Z",
+          "tree_id": "2d81b6006a431aa580a00441140576d8c1551f5f",
+          "url": "https://github.com/mizchi/zust/commit/09ae27caa884889c50f22b2d14cd29c4365c5c82"
+        },
+        "date": 1795171993318,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "lsp definition p50",
+            "value": 0.462,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp hover p50",
+            "value": 0.354,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp completion p50",
+            "value": 0.923,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp references p50",
+            "value": 5.793,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp rename p50",
+            "value": 0.487,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp signatureHelp p50",
+            "value": 0.797,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp documentHighlight p50",
+            "value": 0.947,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp ready (startup to indexed)",
+            "value": 121.414,
             "unit": "ms"
           },
           {
