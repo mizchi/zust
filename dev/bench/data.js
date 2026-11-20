@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795185115312,
+  "lastUpdate": 1795185117715,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -70479,6 +70479,85 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/mizchi/zust/commit/2126394cfa8ea16f24d4237dae93db8770ec17ff"
         },
         "date": 1795184152153,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "parity documentSymbol (名前の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity workspace/symbol (上位 20 の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity definition (行き先の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity hover (名前を含む)",
+            "value": 90,
+            "unit": "%"
+          },
+          {
+            "name": "parity references (数の一致)",
+            "value": 97.297,
+            "unit": "%"
+          },
+          {
+            "name": "parity documentHighlight (数の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity rename (書き換えの一致)",
+            "value": 94.118,
+            "unit": "%"
+          },
+          {
+            "name": "parity signatureHelp (名前・引数の数・今の引数の一致)",
+            "value": 94.737,
+            "unit": "%"
+          },
+          {
+            "name": "parity completion `x.\\|` (書いてある名前を含む)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity completion `na\\|me` (同)",
+            "value": 92.593,
+            "unit": "%"
+          },
+          {
+            "name": "parity 一致の平均",
+            "value": 96.874,
+            "unit": "%"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "committer": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "distinct": true,
+          "id": "7a588e0143f9c2f06761b7282a16809e0da31303",
+          "message": "Option/Result::inspect, overflowing/wrapping div and rem, Iterator::unzip\n\n- Option::inspect, Result::inspect, Result::inspect_err.\n- Integer overflowing_div / overflowing_rem / wrapping_div / wrapping_rem:\n  MIN / -1 gives (MIN, true) / (0, true), and a zero divisor panics as `/`\n  does.\n- Iterator::unzip into two Vecs.\n\ntests/ui: +1 check-pass.\n\nKPI: crates edit +0.16% (outside its 0.14% band). Removing the new\ninspect methods alone takes 0.19M of it back. The crates name `inspect`,\nso the prelude's name-driven selection now picks them as candidates; the\nrest is the other new prelude items. Σ for crates edit is still -0.25%.\nno-op / crates no-op are the std startup variation seen before.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-20T14:27:46Z",
+          "tree_id": "e8dfc77afe0dbe131652e1136cacdcae9bdf7e51",
+          "url": "https://github.com/mizchi/zust/commit/7a588e0143f9c2f06761b7282a16809e0da31303"
+        },
+        "date": 1795185117199,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
