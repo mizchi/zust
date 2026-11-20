@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795150659477,
+  "lastUpdate": 1795150661603,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -72887,6 +72887,70 @@ window.BENCHMARK_DATA = {
           {
             "name": "tests/ui compile-fail passing",
             "value": 3479,
+            "unit": "tests"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "committer": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "distinct": true,
+          "id": "1b4b0ac5fa36f05c4d4c699f42e3fc58615318c4",
+          "message": "E0261: undeclared lifetimes in free fns, structs, enums and statics\n\nA lifetime a free fn's signature, a struct's or enum's fields, or a\nstatic's type names that is neither declared there nor 'static / '_\nis \"use of undeclared lifetime name `'a`\". fn pointer, `impl` and\n`dyn` types are not looked into (they may bind their own with\n`for<'a>`); impl and trait members are left out (their outer lifetimes\nare not known here). A type's error is reported at the line the\nlifetime is first written on (the field-line marker now also takes a\nlifetime).\n\ntests/ui: +10 compile-fail passes.\nKPI: all within ±0.3% of the row before (no-op and crates no-op in\ntheir usual alternation).\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-20T04:52:26Z",
+          "tree_id": "f5ec9743ffbf4edb5ddbcbf2ba13d18827262045",
+          "url": "https://github.com/mizchi/zust/commit/1b4b0ac5fa36f05c4d4c699f42e3fc58615318c4"
+        },
+        "date": 1795150661230,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tests/ui run-pass pass rate",
+            "value": 71.24,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui run-pass passing",
+            "value": 1699,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui check-pass pass rate",
+            "value": 78.36,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui check-pass passing",
+            "value": 1416,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui build-pass pass rate",
+            "value": 70.37,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui build-pass passing",
+            "value": 95,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui compile-fail pass rate",
+            "value": 47.43,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui compile-fail passing",
+            "value": 3490,
             "unit": "tests"
           }
         ]
