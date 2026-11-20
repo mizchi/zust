@@ -1867,6 +1867,10 @@ impl Cx<'_> {
         } else {
             (id, sig0)
         };
+        // (a fn pointer is called with zustc's own convention, which passes structs by address)
+        if sig.is_extern && (sig.ret.is_agg() || sig.params.iter().any(|p| p.is_agg())) {
+            return err(SP, "a pointer to an extern fn that takes or returns a struct by value is not supported");
+        }
         let f = self.fref(target, &sig);
         let v = self.b.ins().func_addr(PTR, f);
         let t = Ty::Fn(crate::types::intern_fn(crate::types::FnTy { params: sig.params.clone(), ret: sig.ret }));

@@ -144,3 +144,4 @@ date	commit	change	noop_M	edit_M	check_M	cache_KiB	lsp_G	run	check	build	cfail
 2026-11-20	e36b7fd+	mem::discriminant, array::from_fn, big copies via memcpy	0.695	559.631	3847.089	1902.8	-	1707	1436	95	3564	1160.250	63.627	10.259	315.831
 2026-11-20	6edddd0+	prelude scan: the byte index covers lowercase letters too	0.694	548.563	3837.036	1902.8	-	-	-	-	-	1160.246	63.514	10.259	315.816
 2026-11-20	09ae27c+	#[link(name)] / -L; tests/ui links rust_test_helpers	0.696	548.916	3836.791	1902.8	-	1719	1436	95	3564	1160.186	63.549	10.273	315.849
+2026-11-20	ef67647+	extern C calls: structs of up to 16 bytes by value	0.695	548.115	3836.589	1902.8	-	1734	1443	97	3564	1160.175	63.639	10.259	315.898

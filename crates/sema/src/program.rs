@@ -1046,12 +1046,6 @@ impl Program {
                     },
                     None => None,
                 };
-                if ss.is_extern && params.iter().chain([&ret]).any(|t| t.is_agg()) {
-                    return Err(format!(
-                        "{}:1: passing structs by value to extern fns is not supported",
-                        it.line
-                    ));
-                }
                 // (同名の trait impl の関数 `P::from#1` も `from` で引く)
                 let last = name.rsplit("::").next().unwrap().split('#').next().unwrap().to_string();
                 // (`io::stdin()` / `mem::swap(..)` は prelude の `__core_*`: 名前の後ろで引けるようにする)

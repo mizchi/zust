@@ -1289,8 +1289,21 @@ impl Emitter {
             self.emit_disp(&[0x48, 0x81, 0xC4], 8 * n); // add rsp, 8n
         }
         let mut out = vec![];
+        // (two results (a C struct returned in registers): the second integer is in rdx and the second float in xmm1.
+        // Each result is read through rax / xmm0, so move them out of the way first: (f, i) keeps the int in rdx,
+        // (f, f) keeps xmm1 in rdx and moves it to xmm0 before reading it)
+        if let [a, b] = rets {
+            match (a.is_float(), b.is_float()) {
+                (true, false) => self.emit(&[0x48, 0x89, 0xC2]),       // mov rdx, rax
+                (true, true) => self.emit(&[0x66, 0x48, 0x0F, 0x7E, 0xCA]), // movq rdx, xmm1
+                _ => {}
+            }
+        }
         for (i, &t) in rets.iter().enumerate() {
             if t.is_float() {
+                if i == 1 && rets[0].is_float() {
+                    self.emit(&[0x66, 0x48, 0x0F, 0x6E, 0xC2]); // movq xmm0, rdx
+                }
                 out.push(self.xmm0_result(t));
                 continue;
             }

@@ -1613,6 +1613,10 @@ impl Cx<'_> {
             self.same(sp, t, pt)?;
             self.push_arg(&mut cv, v, pt);
         }
+        // (a foreign fn that takes or returns a struct by value: the C calling convention)
+        if sig.is_extern && (sig.ret.is_agg() || sig.params.iter().any(|p| p.is_agg())) {
+            return self.c_call(target, &sig, cv, sret, span);
+        }
         // (-O: 小さい prelude の関数は呼ばずに本体を展開する)
         if let Some(r) = self.try_inline(target, &sig, &cv)? {
             if let Some(a) = sret {
@@ -1631,6 +1635,127 @@ impl Cx<'_> {
         }
         let r = self.b.inst_results(call).first().copied();
         Ok((r, sig.ret))
+    }
+
+    /// The scalars at the leaves of a C struct: (offset, float, size). None: a type C cannot take by value (an enum ..)
+    fn c_leaves(&self, t: Ty, off: u32, out: &mut Vec<(u32, bool, u32)>) -> Option<()> {
+        match t {
+            Ty::Struct(sid) => {
+                let sd = &self.prog.structs[sid as usize];
+                if sd.is_enum {
+                    return None;
+                }
+                for &(_, ft, fo) in &sd.fields {
+                    self.c_leaves(ft, off + fo, out)?;
+                }
+            }
+            Ty::Array(e, n) => {
+                let (es, _) = self.prog.size_align(*e);
+                for i in 0..n {
+                    self.c_leaves(*e, off + i * es, out)?;
+                }
+            }
+            t if t.is_fat() => return None,
+            t => {
+                let ct = clif_ty(t)?;
+                if ct == types::I128 {
+                    return None;
+                }
+                out.push((off, t.is_float(), self.prog.size_align(t).0));
+            }
+        }
+        Some(())
+    }
+
+    /// System V x86-64: how a struct of at most 16 bytes goes in registers (one scalar per eightbyte: SSE when every
+    /// scalar in it is a float, else INTEGER). None: in memory (larger, or not C-shaped)
+    fn c_classes(&self, t: Ty) -> Option<Vec<Type>> {
+        let (size, _) = self.prog.size_align(t);
+        if size > 16 {
+            return None;
+        }
+        let mut leaves = vec![];
+        self.c_leaves(t, 0, &mut leaves)?;
+        Some(
+            (0..size.div_ceil(8))
+                .map(|k| {
+                    let lv: Vec<_> = leaves.iter().filter(|l| l.0 / 8 == k).collect();
+                    if !lv.is_empty() && lv.iter().all(|l| l.1) {
+                        if lv.len() == 1 && lv[0].2 == 4 { types::F32 } else { types::F64 }
+                    } else {
+                        types::I64
+                    }
+                })
+                .collect(),
+        )
+    }
+
+    /// A call of a foreign fn with structs by value: a struct of at most 16 bytes is passed as its eightbytes and
+    /// returned in rax / rdx / xmm0 / xmm1; a larger return comes through the hidden pointer (our sret, as in C)
+    fn c_call(&mut self, target: u32, sig: &FnSig, cv: Vec<Value>, sret: Option<Value>, span: Sp) -> R<V> {
+        let mut it = cv.into_iter();
+        let mut args = vec![];
+        let ret_regs = match sret {
+            Some(_) => {
+                let p = it.next().unwrap();
+                match self.c_classes(sig.ret) {
+                    Some(c) => Some(c),
+                    None => {
+                        args.push(p);
+                        None
+                    }
+                }
+            }
+            None => None,
+        };
+        let pair = Ty::Array(intern(Ty::U64), 2);
+        for &pt in &sig.params {
+            if !pt.is_agg() && clif_ty(pt).is_none() {
+                continue;
+            }
+            let v = it.next().unwrap();
+            if !pt.is_agg() {
+                args.push(v);
+                continue;
+            }
+            let Some(cls) = self.c_classes(pt) else {
+                return err(span, "passing this struct by value to an extern fn is not supported (only C structs of up to 16 bytes are)");
+            };
+            if cls.is_empty() {
+                continue;
+            }
+            let tmp = self.temp(pair);
+            self.copy(tmp, v, pt);
+            for (k, &ct) in cls.iter().enumerate() {
+                args.push(self.b.ins().load(ct, mf(), tmp, 8 * k as i32));
+            }
+        }
+        let rets: Vec<Type> = match &ret_regs {
+            Some(c) => c.clone(),
+            None if !sig.ret.is_agg() => clif_ty(sig.ret).into_iter().collect(),
+            None => vec![],
+        };
+        let f = self.b.import_function(&sym_name('f', target), rets);
+        let call = self.b.ins().call(f, &args);
+        if sig.ret == Ty::Never {
+            self.b.ins().trap(TrapCode::unwrap_user(1));
+            return Ok(self.dead());
+        }
+        if let (Some(a), Some(c)) = (sret, &ret_regs) {
+            let rs: Vec<Value> = self.b.inst_results(call).to_vec();
+            if !c.is_empty() {
+                let tmp = self.temp(pair);
+                for (k, r) in rs.into_iter().enumerate() {
+                    self.b.ins().store(mf(), r, tmp, 8 * k as i32);
+                }
+                self.copy(a, tmp, sig.ret);
+            }
+            return Ok((Some(a), sig.ret));
+        }
+        if let Some(a) = sret {
+            return Ok((Some(a), sig.ret));
+        }
+        Ok((self.b.inst_results(call).first().copied(), sig.ret))
     }
 
     pub(crate) fn push_arg(&mut self, vals: &mut Vec<Value>, v: Value, pt: Ty) {
