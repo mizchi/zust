@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795181035620,
+  "lastUpdate": 1795183149013,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -36092,6 +36092,165 @@ window.BENCHMARK_DATA = {
           {
             "name": "rt/strings run (-O)",
             "value": 37.615,
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "committer": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "distinct": true,
+          "id": "4ed592f653ee0ed264c8688f9df34a3ae347b90a",
+          "message": "Static data: a const fn call is evaluated, never silently zeroed\n\n`static C: (f64, u8) = m();` with `const fn m() -> (f64, u8)` was written\nas if m() were a tuple-struct constructor with no arguments: zeros. Now:\n- A call of a free const fn whose body is `let`s and a tail is evaluated:\n  the parameters and lets are put into the tail, for aggregate and float\n  results.\n- `f64::from_bits` / `f32::from_bits` work in float constants.\n- A free fn call that is neither a constructor nor such a const fn is an\n  error, not zeros.\n- `Type::new(..)` keeps its old reading (arguments as fields in order; an\n  empty OnceLock::new() is all zeros).\n\nSolver::lookup is two plain loops. The flat_map over the reversed scopes\nstopped being inlined once this changed the sema crate, which added 6.4M\ninstructions to check; with the loops, check is back to the parent's\n3836.9M.\n\ntests/ui: +1 run-pass (consts/issue-69532.rs).\n\nKPI: edit one fn reads 547.97 (+0.15%). A callgrind A/B of this binary\nagainst the parent's on the same edit build gives 588.875M vs 588.882M,\nso the difference is not in this change's code.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-20T13:54:05Z",
+          "tree_id": "daa1a4e56edfbe749eca9bc1ddefcaee50394219",
+          "url": "https://github.com/mizchi/zust/commit/4ed592f653ee0ed264c8688f9df34a3ae347b90a"
+        },
+        "date": 1795183148463,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "gen1000 build cold",
+            "value": 117.986,
+            "unit": "ms"
+          },
+          {
+            "name": "gen1000 build noop",
+            "value": 0.674,
+            "unit": "ms"
+          },
+          {
+            "name": "gen1000 build edit 1 fn",
+            "value": 17.394,
+            "unit": "ms"
+          },
+          {
+            "name": "gen1000 check",
+            "value": 78.081,
+            "unit": "ms"
+          },
+          {
+            "name": "gen1000 build cold peak RSS",
+            "value": 17.938,
+            "unit": "MiB"
+          },
+          {
+            "name": "gen1000 binary",
+            "value": 323.977,
+            "unit": "KiB"
+          },
+          {
+            "name": "gen1000 cache",
+            "value": 387.21,
+            "unit": "KiB"
+          },
+          {
+            "name": "gen1000 build noop instructions",
+            "value": 0.55,
+            "unit": "M instr"
+          },
+          {
+            "name": "gen1000 build edit 1 fn instructions",
+            "value": 124.087,
+            "unit": "M instr"
+          },
+          {
+            "name": "gen1000 check instructions",
+            "value": 776.427,
+            "unit": "M instr"
+          },
+          {
+            "name": "gen5000 build cold",
+            "value": 535.103,
+            "unit": "ms"
+          },
+          {
+            "name": "gen5000 build noop",
+            "value": 0.669,
+            "unit": "ms"
+          },
+          {
+            "name": "gen5000 build edit 1 fn",
+            "value": 62.519,
+            "unit": "ms"
+          },
+          {
+            "name": "gen5000 check",
+            "value": 380.602,
+            "unit": "ms"
+          },
+          {
+            "name": "gen5000 build cold peak RSS",
+            "value": 51.738,
+            "unit": "MiB"
+          },
+          {
+            "name": "gen5000 binary",
+            "value": 1558.336,
+            "unit": "KiB"
+          },
+          {
+            "name": "gen5000 cache",
+            "value": 1902.835,
+            "unit": "KiB"
+          },
+          {
+            "name": "gen5000 build noop instructions",
+            "value": 0.55,
+            "unit": "M instr"
+          },
+          {
+            "name": "gen5000 build edit 1 fn instructions",
+            "value": 589.392,
+            "unit": "M instr"
+          },
+          {
+            "name": "gen5000 check instructions",
+            "value": 3833.453,
+            "unit": "M instr"
+          },
+          {
+            "name": "rt/fib run (-O)",
+            "value": 54.294,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/hashmap run (-O)",
+            "value": 91.226,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/matmul run (-O)",
+            "value": 42.576,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/nbody run (-O)",
+            "value": 55.585,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/sieve run (-O)",
+            "value": 93.94,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/sort run (-O)",
+            "value": 158.241,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/strings run (-O)",
+            "value": 37.842,
             "unit": "ms"
           }
         ]
