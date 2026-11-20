@@ -1,4 +1,4 @@
-//! Copies `Vec<T>` from zustc's prelude (crates/syntax/src/prelude_lib.rs.in) into `$OUT_DIR/vec.rs`, so the
+//! Copies `Vec<T>` (and `__exr_realloc_ok` / `__exr_vec_new_cap`, which it calls) from zustc's prelude (crates/syntax/src/prelude_lib.rs.in) into `$OUT_DIR/vec.rs`, so the
 //! harnesses check the code zustc compiles, not a copy of it. Only the listed methods are taken (the rest of the
 //! prelude needs zustc's own intrinsics); the build fails if one of them is not found.
 
@@ -45,6 +45,10 @@ fn main() {
     }
     writeln!(out, "}}\n").unwrap();
     let d = src.find("impl<T> Drop for Vec<T> {").expect("Drop for Vec");
-    writeln!(out, "{}", braced(&src, d)).unwrap();
+    writeln!(out, "{}\n", braced(&src, d)).unwrap();
+    for f in ["unsafe fn __exr_realloc_ok(", "fn __exr_vec_new_cap("] {
+        let r = src.find(f).unwrap_or_else(|| panic!("{f} not found in the prelude"));
+        writeln!(out, "{}\n", braced(&src, r)).unwrap();
+    }
     std::fs::write(std::path::Path::new(&std::env::var("OUT_DIR").unwrap()).join("vec.rs"), out).unwrap();
 }

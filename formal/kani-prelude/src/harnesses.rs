@@ -206,24 +206,39 @@ fn drops_each_element_once() {
     }
 }
 
-/// `reserve(extra)` gives room for `len + extra` elements whenever that many fit in memory.
-/// Expected to FAIL: `c * size_of::<T>()` (and `len + extra`) can wrap, which leaves `cap` larger than the block
-/// (std panics with "capacity overflow" instead). A `push` then writes past the block: the program
-/// `let mut v: Vec<u64> = Vec::with_capacity(1 << 61); v.push(1);` is a heap overflow in safe code.
+/// `with_capacity(n)` for any n either gives room for n elements or stops (`panic!("capacity overflow")` past
+/// isize::MAX bytes, as std; abort when malloc fails): never a block smaller than `cap`. (Before 2026-11-20,
+/// `c * size_of::<T>()` wrapped: `Vec::<u64>::with_capacity(1 << 61)` then `push` wrote past a tiny block.)
 #[kani::proof]
-fn bug_with_capacity_overflow() {
+#[kani::should_panic]
+fn with_capacity_any_size() {
     let n: usize = kani::any();
     let mut v: Vec<u64> = Vec::with_capacity(n);
     v.push(7);
-    assert_eq!(*v.get(0).unwrap(), 7);
+    // (Kani's pointer checks are not panics: should_panic passes only if every size that does not stop writes
+    // inside the block. What a Vec holds is checked by the *_matches_model harnesses)
+    kani::assume(false);
 }
 
-/// When malloc fails, `reserve` keeps the null pointer it gets and a `push` writes through it (std calls
-/// `handle_alloc_error`, which aborts). Expected to FAIL.
+/// `reserve(extra)` for any extra on a non-empty Vec, then a push: inside the block, or a stop (len + extra never wraps).
 #[kani::proof]
-fn bug_alloc_failure_unchecked() {
+#[kani::should_panic]
+fn reserve_any_size() {
+    let mut v: Vec<u8> = Vec::new();
+    v.push(1);
+    let extra: usize = kani::any();
+    v.reserve(extra);
+    v.push(2);
+    kani::assume(false);
+}
+
+/// When malloc fails, the program stops (std calls `handle_alloc_error`, which aborts). (Before 2026-11-20,
+/// `reserve` kept the null pointer and `push` wrote through it.)
+#[kani::proof]
+#[kani::should_panic]
+fn alloc_failure_stops() {
     unsafe { ALLOC_MAY_FAIL = true };
     let mut v: Vec<u32> = Vec::new();
     v.push(1);
-    assert_eq!(v.len(), 1);
+    kani::assume(false);
 }

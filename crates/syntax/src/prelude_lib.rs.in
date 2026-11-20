@@ -484,6 +484,22 @@ unsafe extern "C" {
 }
 
 unsafe extern "C" {
+    #[link_name = "abort"]
+    fn __exr_abort();
+}
+
+// `realloc` that does not return null: when the allocation fails, the program stops as std's handle_alloc_error
+// does (a message, then abort). (realloc(p, 0) may give null: that is not a failure)
+unsafe fn __exr_realloc_ok(p: *mut u8, size: usize) -> *mut u8 {
+    let q = unsafe { __exr_realloc(p, size) };
+    if q.is_null() && size != 0 {
+        __exr_err_str::<()>("memory allocation failed\n");
+        unsafe { __exr_abort() };
+    }
+    q
+}
+
+unsafe extern "C" {
     #[link_name = "memset"]
     fn __exr_memset(d: *mut u8, c: i32, n: usize) -> *mut u8;
 }
@@ -509,6 +525,27 @@ pub unsafe fn __core_write_bytes<T>(dst: *mut T, val: u8, count: usize) {
     unsafe { __exr_memset(dst as *mut u8, val as i32, count * core::mem::size_of::<T>()) };
 }
 
+// The capacity `Vec::reserve` grows to (twice the old one, or what is needed), or a panic when it does not fit:
+// len + extra past usize, or a block past isize::MAX bytes (as std). (Not generic: checked and compiled once,
+// not per element type)
+fn __exr_vec_new_cap(len: usize, cap: usize, extra: usize, sz: usize) -> usize {
+    if extra > usize::MAX - len {
+        panic!("capacity overflow");
+    }
+    let need = len + extra;
+    let mut c = if cap == 0 { 4 } else if cap > usize::MAX / 2 { usize::MAX } else { cap * 2 };
+    if c < need {
+        c = need;
+    }
+    if sz != 0 && c > isize::MAX as usize / sz {
+        if need > isize::MAX as usize / sz {
+            panic!("capacity overflow");
+        }
+        c = need;
+    }
+    c
+}
+
 pub struct Vec<T> {
     ptr: *mut T,
     cap: usize,
@@ -529,17 +566,14 @@ impl<T> Vec<T> {
         v
     }
     pub fn reserve(&mut self, extra: usize) {
-        let need = self.len + extra;
-        if need <= self.cap {
+        // (len <= cap: `len + extra` is not computed unless it fits)
+        if extra <= self.cap - self.len {
             return;
         }
-        let mut c = if self.cap == 0 { 4 } else { self.cap * 2 };
-        if c < need {
-            c = need;
-        }
         let sz = core::mem::size_of::<T>();
+        let c = __exr_vec_new_cap(self.len, self.cap, extra, sz);
         let bytes = if sz == 0 { 1 } else { c * sz };
-        self.ptr = unsafe { __exr_realloc(self.ptr as *mut u8, bytes) } as *mut T;
+        self.ptr = unsafe { __exr_realloc_ok(self.ptr as *mut u8, bytes) } as *mut T;
         self.cap = c;
     }
     pub fn try_reserve(&mut self, extra: usize) -> Result<(), TryReserveError> {
@@ -1368,7 +1402,7 @@ fn __exr_merge_sort<T, F: FnMut(&T, &T) -> bool>(p: *mut T, n: usize, lt: F) {
     if n <= run {
         return;
     }
-    let buf = unsafe { __exr_realloc(0usize as *mut u8, n * sz) } as *mut T;
+    let buf = unsafe { __exr_realloc_ok(0usize as *mut u8, n * sz) } as *mut T;
     let mut src = p;
     let mut dst = buf;
     let mut w = run;
@@ -1452,7 +1486,7 @@ fn __exr_merge_sort_lt<T>(p: *mut T, n: usize) {
     if n <= run {
         return;
     }
-    let buf = unsafe { __exr_realloc(0usize as *mut u8, n * sz) } as *mut T;
+    let buf = unsafe { __exr_realloc_ok(0usize as *mut u8, n * sz) } as *mut T;
     let mut src = p;
     let mut dst = buf;
     let mut w = run;
@@ -1548,8 +1582,8 @@ fn __exr_radix_unkey<K>(v: u64, out: *mut K) {
 // 安定な LSD 基数ソート: keys の順に (keys と) vals を並べる。全要素で同じバイトの桁は飛ばす
 fn __exr_radix_sort<T>(keys: *mut u64, vals: *mut T, n: usize, with_vals: bool) {
     let sz = core::mem::size_of::<T>();
-    let kb = unsafe { __exr_realloc(0usize as *mut u8, n * 8) } as *mut u64;
-    let vb = if with_vals && sz > 0 { (unsafe { __exr_realloc(0usize as *mut u8, n * sz) }) as *mut T } else { vals };
+    let kb = unsafe { __exr_realloc_ok(0usize as *mut u8, n * 8) } as *mut u64;
+    let vb = if with_vals && sz > 0 { (unsafe { __exr_realloc_ok(0usize as *mut u8, n * sz) }) as *mut T } else { vals };
     let mut diff: u64 = 0;
     let k0 = unsafe { *keys };
     let mut i: usize = 0;
@@ -1656,7 +1690,7 @@ fn __exr_sort_by_key<T, K: Ord, F: FnMut(&T) -> K>(p: *mut T, n: usize, f: F) {
         __exr_merge_sort_key(p, n, f);
         return;
     }
-    let keys = unsafe { __exr_realloc(0usize as *mut u8, n * 8) } as *mut u64;
+    let keys = unsafe { __exr_realloc_ok(0usize as *mut u8, n * 8) } as *mut u64;
     let mut i: usize = 0;
     while i < n {
         let k = f(unsafe { &*p.add(i) });
@@ -1677,7 +1711,7 @@ fn __exr_sort_lt<T>(p: *mut T, n: usize) {
         __exr_merge_sort_lt(p, n);
         return;
     }
-    let keys = unsafe { __exr_realloc(0usize as *mut u8, n * 8) } as *mut u64;
+    let keys = unsafe { __exr_realloc_ok(0usize as *mut u8, n * 8) } as *mut u64;
     let mut i: usize = 0;
     while i < n {
         unsafe {
@@ -1727,7 +1761,7 @@ fn __exr_merge_sort_key<T, K: Ord, F: FnMut(&T) -> K>(p: *mut T, n: usize, f: F)
     if n <= run {
         return;
     }
-    let buf = unsafe { __exr_realloc(0usize as *mut u8, n * sz) } as *mut T;
+    let buf = unsafe { __exr_realloc_ok(0usize as *mut u8, n * sz) } as *mut T;
     let mut src = p;
     let mut dst = buf;
     let mut w = run;
@@ -1803,7 +1837,7 @@ fn __exr_sort_cached<T, K: Ord, F: FnMut(&T) -> K>(p: *mut T, n: usize, f: F) {
     if sz == 0 {
         return;
     }
-    let buf = unsafe { __exr_realloc(0usize as *mut u8, n * sz) } as *mut T;
+    let buf = unsafe { __exr_realloc_ok(0usize as *mut u8, n * sz) } as *mut T;
     i = 0;
     while i < n {
         unsafe {
@@ -9419,9 +9453,9 @@ impl<K, V> HashMap<K, V> {
     fn alloc(&mut self, c: usize) {
         let ks = core::mem::size_of::<K>();
         let vs = core::mem::size_of::<V>();
-        self.st = unsafe { __exr_realloc(core::ptr::null_mut(), c) };
-        self.ks = unsafe { __exr_realloc(core::ptr::null_mut(), if ks == 0 { 1 } else { c * ks }) } as *mut K;
-        self.vs = unsafe { __exr_realloc(core::ptr::null_mut(), if vs == 0 { 1 } else { c * vs }) } as *mut V;
+        self.st = unsafe { __exr_realloc_ok(core::ptr::null_mut(), c) };
+        self.ks = unsafe { __exr_realloc_ok(core::ptr::null_mut(), if ks == 0 { 1 } else { c * ks }) } as *mut K;
+        self.vs = unsafe { __exr_realloc_ok(core::ptr::null_mut(), if vs == 0 { 1 } else { c * vs }) } as *mut V;
         let mut i = 0;
         while i < c {
             unsafe {
@@ -10495,7 +10529,7 @@ impl<T> VecDeque<T> {
         }
         let c = if n < 4 { 4 } else { n };
         let sz = core::mem::size_of::<T>();
-        let np = unsafe { __exr_realloc(0usize as *mut u8, if sz == 0 { 1 } else { c * sz }) } as *mut T;
+        let np = unsafe { __exr_realloc_ok(0usize as *mut u8, if sz == 0 { 1 } else { c * sz }) } as *mut T;
         let mut i = 0;
         while i < self.len {
             unsafe {

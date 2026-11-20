@@ -69,7 +69,7 @@ iterators.binary_bytes 39958
 iterators.cache_bytes 74995
 iterators.object_bytes 57624
 macros.binary_bytes 33457
-macros.cache_bytes 67160
+macros.cache_bytes 70768
 macros.object_bytes 46502
 methods.binary_bytes 12238
 methods.cache_bytes 11517

@@ -1,10 +1,10 @@
 //! Kani harnesses for zustc's prelude `Vec<T>` (the allocator side of the runtime).
 //!
 //! `build.rs` copies the prelude's code; this file gives it what zustc gives it: libc `realloc` / `free` (here a
-//! model of them: a block knows its size, `realloc` copies `min(old, new)` bytes and may return null when
-//! `ALLOC_MAY_FAIL` is set) and `__exr_drop_in_place` (zustc lowers it to the drop of T).
+//! model of them: a block knows its size, `realloc` copies `min(old, new)` bytes and returns null when the size
+//! is too large, or when `ALLOC_MAY_FAIL` is set and the solver chooses so), `abort` (a panic) and `__exr_drop_in_place` (zustc lowers it to the drop of T).
 //!
-//! `cargo kani` runs every harness; the ones named `bug_*` are expected to fail (see README).
+//! `cargo kani` runs every harness (all are expected to pass).
 
 #![allow(dead_code, clippy::all)]
 
@@ -26,7 +26,9 @@ pub mod alloc_model {
             if ALLOC_MAY_FAIL && kani::any() {
                 return core::ptr::null_mut();
             }
-            assert!(size <= isize::MAX as usize - HDR, "realloc: size out of range");
+            if size > isize::MAX as usize - 2 * HDR {
+                return core::ptr::null_mut();
+            }
             let q = alloc(layout(size));
             assert!(!q.is_null());
             *(q as *mut usize) = size;
@@ -60,6 +62,11 @@ unsafe fn __exr_realloc(p: *mut u8, size: usize) -> *mut u8 {
 unsafe fn __exr_free(p: *mut u8) {
     unsafe { alloc_model::free(p) }
 }
+/// (abort: the program stops. A panic here, so that `#[kani::should_panic]` tells it from undefined behaviour)
+unsafe fn __exr_abort() {
+    panic!("abort");
+}
+fn __exr_err_str<G>(_s: &str) {}
 fn __exr_drop_in_place<T>(p: *mut T) {
     unsafe { core::ptr::drop_in_place(p) }
 }
