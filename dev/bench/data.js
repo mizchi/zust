@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795149066393,
+  "lastUpdate": 1795149068400,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -44392,6 +44392,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "lsp peak RSS",
             "value": 74.172,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "committer": {
+            "email": "noreply@anthropic.com",
+            "name": "Claude",
+            "username": "claude"
+          },
+          "distinct": true,
+          "id": "112b131e6daf751a1cc9dfa7e04ff86888687412",
+          "message": "E0277: unsized parameters, consts and statics\n\nA fn parameter (not of a trait's declaration or an extern fn), a const\nor a static whose type is unsized itself (`str`, `[T]`, `dyn Tr`, or a\ntuple holding one) is \"the size for values of type `..` cannot be\nknown at compilation time\".\n\ntests/ui: +9 compile-fail passes; four whose expected message differs\ngo to rust_ui_accidental.txt.\nKPI: the log's median now mixes rows of #9 measured on another\nmachine; against fbf1812 built and measured here, the change is check\n+0.01%, traits check +0.04%, the rest unchanged.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-20T04:26:52Z",
+          "tree_id": "846afdc38587b6ab209e55f5293af9752cbd803b",
+          "url": "https://github.com/mizchi/zust/commit/112b131e6daf751a1cc9dfa7e04ff86888687412"
+        },
+        "date": 1795149067962,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "lsp definition p50",
+            "value": 0.529,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp hover p50",
+            "value": 0.489,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp completion p50",
+            "value": 1,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp references p50",
+            "value": 1.361,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp rename p50",
+            "value": 0.492,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp signatureHelp p50",
+            "value": 0.613,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp documentHighlight p50",
+            "value": 0.76,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp ready (startup to indexed)",
+            "value": 127.478,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp peak RSS",
+            "value": 74.25,
             "unit": "MiB"
           }
         ]
