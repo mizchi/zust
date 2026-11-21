@@ -1095,6 +1095,7 @@ compile-fail	closure-expected-type/expect-two-infer-vars-supply-ty-with-bound-re
 check-pass	closure-expected-type/issue-24421.rs
 compile-fail	closure-expected-type/trait-bound-expects-closure-returns-itself.rs
 compile-fail	closures/2229_closure_analysis/array_subslice.rs
+compile-fail	closures/2229_closure_analysis/bad-pattern.rs
 run-pass	closures/2229_closure_analysis/capture-enum-field.rs
 compile-fail	closures/2229_closure_analysis/diagnostics/arrays.rs
 compile-fail	closures/2229_closure_analysis/diagnostics/borrowck/borrowck-1.rs
@@ -2090,6 +2091,7 @@ compile-fail	env-macro/option_env-too-many-args.rs
 compile-fail	error-codes/E0001.rs
 compile-fail	error-codes/E0004-2.rs
 compile-fail	error-codes/E0004.rs
+compile-fail	error-codes/E0005.rs
 compile-fail	error-codes/E0023.rs
 compile-fail	error-codes/E0025.rs
 compile-fail	error-codes/E0026.rs
@@ -2130,6 +2132,7 @@ compile-fail	error-codes/E0277-4.rs
 compile-fail	error-codes/E0277.rs
 compile-fail	error-codes/E0282.rs
 compile-fail	error-codes/E0283.rs
+compile-fail	error-codes/E0297.rs
 compile-fail	error-codes/E0308-4.rs
 compile-fail	error-codes/E0389.rs
 compile-fail	error-codes/E0390.rs
@@ -2428,6 +2431,7 @@ run-pass	for-loop-while/for-loop-macro.rs
 run-pass	for-loop-while/for-loop-mut-ref-element.rs
 run-pass	for-loop-while/for-loop-no-std.rs
 run-pass	for-loop-while/for-loop-panic.rs
+compile-fail	for-loop-while/for-loop-refutable-pattern-error-message.rs
 run-pass	for-loop-while/for-loop-unconstrained-element-type-i32-fallback.rs
 compile-fail	for-loop-while/for-loop-unconstrained-element-type.rs
 run-pass	for-loop-while/foreach-external-iterators-break.rs
@@ -3100,7 +3104,9 @@ compile-fail	iterators/vec-on-unimplemented.rs
 compile-fail	keyword/extern/keyword-extern-as-identifier-expr.rs
 compile-fail	keyword/extern/keyword-extern-as-identifier-pat.rs
 compile-fail	keyword/extern/keyword-extern-as-identifier-type.rs
+compile-fail	keyword/keyword-false-as-identifier.rs
 compile-fail	keyword/keyword-self-as-type-param.rs
+compile-fail	keyword/keyword-true-as-identifier.rs
 compile-fail	keyword/meta-is-not-reserved.rs
 run-pass	keyword/raw-identifier-for-function-57198.rs
 check-pass	label/label-beginning-with-underscore.rs
@@ -4061,6 +4067,7 @@ check-pass	never_type/basic/never-type-arg.rs
 build-pass	never_type/basic/never-type-in-nested-fn-decl.rs
 run-pass	never_type/basic/never-type-rvalues.rs
 check-pass	never_type/basic/never_transmute_never.rs
+compile-fail	never_type/empty-never-array.rs
 compile-fail	never_type/fallback_change/dependency-on-fallback-to-unit.rs
 compile-fail	never_type/fallback_change/diverging-fallback-unconstrained-return.rs
 compile-fail	never_type/fallback_change/fallback-closure-ret.rs
@@ -5001,6 +5008,7 @@ run-pass	pattern/ignore-all-the-things.rs
 run-pass	pattern/inc-range-pat.rs
 run-pass	pattern/integer-range-binding.rs
 run-pass	pattern/issue-10392.rs
+compile-fail	pattern/issue-106552.rs
 compile-fail	pattern/issue-106862.rs
 run-pass	pattern/issue-11577.rs
 check-pass	pattern/issue-117626.rs
@@ -5085,6 +5093,7 @@ compile-fail	pattern/usefulness/issue-2111.rs
 compile-fail	pattern/usefulness/issue-30240.rs
 compile-fail	pattern/usefulness/issue-3096-2.rs
 compile-fail	pattern/usefulness/issue-31221.rs
+compile-fail	pattern/usefulness/issue-31561.rs
 compile-fail	pattern/usefulness/issue-35609.rs
 compile-fail	pattern/usefulness/issue-39362.rs
 compile-fail	pattern/usefulness/issue-40221.rs
@@ -5226,6 +5235,7 @@ compile-fail	recursion/recursion_limit/no-value.rs
 run-pass	recursion/recursive-enum-box.rs
 compile-fail	recursion/recursive-enum.rs
 run-pass	recursion/recursive-struct-with-raw-pointer-field.rs
+compile-fail	recursion/recursive-types-are-not-uninhabited.rs
 compile-fail	reflection/feature_gate.rs
 check-pass	regions/closure-prop-issue-104477-case1.rs
 check-pass	regions/closure-prop-issue-104477-case2.rs

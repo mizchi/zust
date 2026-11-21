@@ -602,6 +602,12 @@ impl Cx<'_> {
                     self.drop_in_place(a, t);
                 }
             }
+            // (E0005: the pattern of a `for` must cover the element type, `for Some(x) in xs` does not)
+            if self.user_code && !super::plainly_irrefutable(fpat) {
+                if let Some(w) = self.non_exhaustive_pats(&[&**fpat], place.ty()) {
+                    return err(SP, format!("refutable pattern in `for` loop binding: `{w}` not covered (E0005)"));
+                }
+            }
             self.pat_bind(fpat, place, BindMode::Move)?;
         }
         let bound = self.pending_bound.take();

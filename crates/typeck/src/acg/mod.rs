@@ -1374,6 +1374,27 @@ impl Cx<'_> {
                         diverged = true;
                         continue;
                     };
+                    // (E0005: without `else`, the pattern must cover the value's type)
+                    if els.is_none() && self.user_code && !plainly_irrefutable(pat) {
+                        // (`let false = 22;`: the literal's type first)
+                        let lit_ty = match pat {
+                            Pat::Lit(e) => match &**e {
+                                Expr::Lit(t, _) if t == "true" || t == "false" => Some(Ty::Bool),
+                                Expr::Lit(t, _) if t.starts_with('\'') => Some(Ty::Char),
+                                _ => None,
+                            },
+                            _ => None,
+                        };
+                        if let Some(pt) = lit_ty {
+                            let vt = place.ty();
+                            if vt != pt && (vt.is_int() || vt.is_float() || matches!(vt, Ty::Bool | Ty::Char)) {
+                                return err(SP, format!("mismatched types: expected `{}`, found `{}`", self.prog.tn(vt), self.prog.tn(pt)));
+                            }
+                        }
+                        if let Some(w) = self.non_exhaustive_pats(&[pat], place.ty()) {
+                            return err(SP, format!("refutable pattern in local binding: `{w}` not covered (E0005)"));
+                        }
+                    }
                     // `let PAT = e else { .. };`: 合わなければ else の (発散する) ブロックへ
                     // (the else block may match other scrutinees: the pattern binds from this one)
                     let scrut_saved = (self.bk.scrut.clone(), self.bk.scrut_place.clone(), self.rg.scrut.clone());
@@ -2057,4 +2078,16 @@ pub(crate) fn generic_args_of(prog: &Program, params: &[(crate::parse::Pat, crat
             (tp.segs.len() == 1 && tp.segs[0].args.is_empty() && rs.generics.iter().any(|g| g.0 == tp.segs[0].name)).then(|| (n.clone(), tp.segs[0].name.clone()))
         })
         .collect()
+}
+
+/// A pattern of bindings, `_` and tuples of them, which matches any value (no exhaustiveness check needed: a parameter
+/// `(_, _, ..)` of thousands of elements). A lowercase name binds; an uppercase one may be a constant or a unit variant
+pub(crate) fn plainly_irrefutable(p: &Pat) -> bool {
+    match p {
+        Pat::Wild | Pat::Rest => true,
+        Pat::Ident(_, _, n, sub) => n.starts_with(|c: char| c.is_lowercase() || c == '_') && sub.as_deref().is_none_or(plainly_irrefutable),
+        Pat::Tuple(ps) => ps.iter().all(plainly_irrefutable),
+        Pat::Ref(_, i) => plainly_irrefutable(i),
+        _ => false,
+    }
 }
