@@ -1614,6 +1614,7 @@ run-pass	consts/const-negative.rs
 run-pass	consts/const-nullary-enum.rs
 run-pass	consts/const-nullary-univariant-enum.rs
 compile-fail	consts/const-pattern-rewrite-error-32086.rs
+compile-fail	consts/const-ptr-nonnull.rs
 run-pass	consts/const-rec-and-tup.rs
 check-pass	consts/const-ref-to-static-linux-vtable.rs
 run-pass	consts/const-region-ptrs-noncopy.rs
@@ -1724,6 +1725,7 @@ check-pass	consts/min_const_fn/cast_fn.rs
 compile-fail	consts/min_const_fn/cmp_fn_pointers.rs
 compile-fail	consts/min_const_fn/min_const_fn.rs
 check-pass	consts/min_const_fn/min_const_fn_dyn.rs
+compile-fail	consts/min_const_fn/promotion.rs
 compile-fail	consts/missing_assoc_const_type.rs
 compile-fail	consts/missing_assoc_const_type2.rs
 run-pass	consts/module-const-array-size-13763.rs
@@ -1734,6 +1736,7 @@ run-pass	consts/oncecell-const-init-57781.rs
 run-pass	consts/packed_pattern.rs
 run-pass	consts/packed_pattern2.rs
 run-pass	consts/promote_borrowed_field.rs
+compile-fail	consts/promote_const_let.rs
 run-pass	consts/promoted_const_call4.rs
 check-pass	consts/promotion-drop-type-static-lifetime-86672.rs
 check-pass	consts/raw-ptr-const.rs
@@ -3059,6 +3062,7 @@ check-pass	inline-const/expr-with-block.rs
 compile-fail	inline-const/in-pat-recovery.rs
 check-pass	inline-const/instance-doesnt-depend-on-type.rs
 check-pass	inline-const/interpolated.rs
+compile-fail	inline-const/promotion.rs
 compile-fail	inline-const/uninit-local.rs
 compile-fail	intrinsics/incorrect-read_via_copy-defn.rs
 compile-fail	intrinsics/incorrect-transmute.rs

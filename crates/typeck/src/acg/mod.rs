@@ -1141,6 +1141,7 @@ impl Cx<'_> {
         self.bk.params = (0..self.bk.locals.len() as u32).collect();
         // (the gate, before any work: a signature with fewer than two regions and no lifetime named has no two
         // universal regions to relate)
+        self.rg.eligible = self.rg.on;
         if self.rg.on && sig.regions.is_none() && sig.params.iter().map(|&t| regionck::count(self.prog, t, 0).unwrap_or(0)).sum::<usize>() < 2 {
             self.rg.on = false;
         }
@@ -1448,7 +1449,7 @@ impl Cx<'_> {
                     }
                     self.drop_temps(t0);
                 }
-                Stmt::Let(pat, ann_ty, init, _, ..) => {
+                Stmt::Let(pat, ann_ty, init, _, let_at) => {
                     let name = pat_name(pat)?;
                     let ann = match ann_ty {
                         // (`let v: Vec<Box<_>> = Vec::new();`: the holes are what inference found, when it did)
@@ -1556,6 +1557,12 @@ impl Cx<'_> {
                     if self.bk_on() {
                         borrowck::direct_temps(init, &mut self.bk.direct);
                     }
+                    // (a function the gate left out, with `let x: &'static T = ..`: from here on, a borrow of what it
+                    // owns must not have to be 'static. What came before has no trees and adds no constraint)
+                    if !self.rg.on && self.rg.eligible && ann_ty.as_ref().is_some_and(crate::regions::mentions_static) {
+                        self.rg.on = true;
+                    }
+                    let let_sp0 = std::mem::replace(&mut self.rg.let_sp, *let_at);
                     let r = self.expr(init, ann.or(hint));
                     self.bk.direct.truncate(ext0);
                     let srcs = self.bk_frame_end();
@@ -1603,6 +1610,7 @@ impl Cx<'_> {
                     self.bind(name.clone(), ty, v);
                     self.bk_def_named(&name, &srcs, init);
                     self.rg_let(&name, ann_ty.as_ref(), init, rg_init);
+                    self.rg.let_sp = let_sp0;
                     self.extend_temps(t0);
                 }
                 // (`;` の付いたマクロの文。末尾の `vec![]` などは式として期待型を渡す)

@@ -59,6 +59,10 @@ impl Var {
 #[derive(Default)]
 pub struct Rg {
     pub on: bool,
+    /// The function may be checked (its own body, not a closure's), though the gate may have left it out
+    pub eligible: bool,
+    /// The `let` being lowered: where an error is reported for what has no position of its own (a block)
+    pub let_sp: Sp,
     /// Region variables made (0 is `'static`)
     pub n: u32,
     /// The universal regions (not `'static`), with their names
@@ -801,14 +805,23 @@ impl Cx<'_> {
         match e {
             Expr::Paren(x) => self.rt_expr(x),
             Expr::Lit(s, _) if s.starts_with('"') || s.starts_with("r\"") || s.starts_with("r#") => Some((Ty::Ref(false, crate::types::intern(Ty::Str)), vec![STATIC])),
-            // (`&f(..)` / `&mut 4`: a temporary the function owns (a `&` of a literal is promoted to a static))
-            Expr::Ref(m, x) if matches!(strip(x), Expr::Call(..) | Expr::MethodCall(..)) || (*m && matches!(strip(x), Expr::Lit(..))) => {
+            // (`&f(..)` / `&mut 4` / `&{ let y = ..; y }`: a temporary the function owns (a `&` of a literal is
+            // promoted to a static, and so may be a block of a constant alone))
+            Expr::Ref(m, x)
+                if matches!(strip(x), Expr::Call(..) | Expr::MethodCall(..))
+                    || (*m && matches!(strip(x), Expr::Lit(..)))
+                    || matches!(strip(x), Expr::Block(None, false, b) if b.stmts.len() > 1) =>
+            {
                 let (t, tr) = match strip(x) {
                     Expr::Lit(..) => (Ty::U8, vec![]),
+                    Expr::Block(_, _, b) => match b.stmts.last() {
+                        Some(Stmt::Expr(tail, false)) => self.rt_expr(tail)?,
+                        _ => return None,
+                    },
                     x => self.rg.calls.get(&(x as *const Expr as usize)).cloned()?,
                 };
                 let r = self.rg.var();
-                let sp = super::borrowck::pos(e);
+                let sp = Some(super::borrowck::pos(e)).filter(|s| s.line != 0).unwrap_or(self.rg.let_sp);
                 self.rg.loans.push((r, String::new(), sp));
                 let mut out = vec![r];
                 out.extend(tr);
@@ -833,6 +846,11 @@ impl Cx<'_> {
                 Some((Ty::Ref(*m, crate::types::intern(t)), out))
             }
             Expr::Call(..) | Expr::MethodCall(..) | Expr::Struct(..) => self.rg.calls.get(&(e as *const Expr as usize)).cloned(),
+            // (a block's value: its tail's, kept while the block's locals were in scope)
+            Expr::Block(None, false, b) => match b.stmts.last() {
+                Some(Stmt::Expr(t, false)) => self.rt_expr(t),
+                _ => None,
+            },
             Expr::Path(..) | Expr::Field(..) | Expr::Unary(..) => match self.rt_place(e) {
                 Some((t, tr, _)) => Some((t, tr)),
                 // (a unit variant: `None`)

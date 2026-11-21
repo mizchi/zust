@@ -169,3 +169,14 @@ fn recursive_variance() {
     let d = check("struct S<'a: 'missing>(&'a u8);\nfn main() {}\n");
     assert!(d.len() == 1 && d[0].1.contains("E0261"), "{d:?}");
 }
+
+/// A function the gate leaves out (no two regions in its signature) is checked from a `let` annotated with `'static`:
+/// a borrow of a local or of a temporary block cannot be 'static
+#[test]
+fn static_annotations() {
+    let d = check("fn main() {\n    let x: &'static u32 = {\n        let y = 42;\n        &y\n    };\n    println!(\"{}\", x);\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 4 && d[0].1.contains("does not live long enough"), "{d:?}");
+    let d = check("fn main() {\n    let x: &'static u32 = &{\n        let y = 42;\n        y\n    };\n    println!(\"{}\", x);\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 2 && d[0].1.contains("temporary"), "{d:?}");
+    assert_eq!(check("fn main() {\n    let x: &'static u32 = &42;\n    let s: &'static str = \"a\";\n    println!(\"{} {}\", x, s);\n}\n"), vec![]);
+}

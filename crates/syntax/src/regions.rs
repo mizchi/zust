@@ -39,6 +39,23 @@ fn bounds_name_lt(bs: &[Bound]) -> bool {
     })
 }
 
+/// t writes `'static` somewhere (outside fn pointer, `impl` and `dyn` types)
+pub fn mentions_static(t: &PTy) -> bool {
+    match t {
+        PTy::Ref(l, _, i) => l.as_deref() == Some("'static") || mentions_static(i),
+        PTy::Ptr(_, i) | PTy::Slice(i) | PTy::Array(i, _) => mentions_static(i),
+        PTy::Tuple(ts) => ts.iter().any(mentions_static),
+        PTy::Path(None, p) => p.segs.iter().any(|s| {
+            s.args.iter().any(|a| match a {
+                GArg::Lifetime(l) => l == "'static",
+                GArg::Ty(t) => mentions_static(t),
+                _ => false,
+            })
+        }),
+        _ => false,
+    }
+}
+
 /// Generics declare or bound with a lifetime
 pub fn generics_name_lt(g: &Generics) -> bool {
     g.params.iter().any(|p| match p {
