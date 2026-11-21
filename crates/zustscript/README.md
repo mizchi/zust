@@ -11,6 +11,7 @@ zust を土台にした、フロントエンド向け言語の試作。目標は
   - CI も独立した workflow(`.github/workflows/zustscript.yml`)。`crates/zustscript/**` が変わったときだけ動き、zust の CI と KPI には関わらない
   - zustc は外部コマンドとして呼ぶだけ。zust の crate には依存しない
   - 計画メモ: [docs/plan.md](docs/plan.md)
+  - あとで決めることと、次にやること: [TODO.md](TODO.md)(文法の提案は [evals/syntax/](evals/syntax/README.md))
 - テスト: `cargo test --release`
   - **Node 26** を使う(PATH 上の `node`。計測も Node 26.13.1。relaxed SIMD はフラグなしで動く)
   - app の例は zust 側の `target/release/zustc` を使う
