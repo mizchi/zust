@@ -266,6 +266,7 @@ compile-fail	associated-types/hr-associated-type-bound-param-6.rs
 check-pass	associated-types/impl-trait-member-type-resolution-57399.rs
 check-pass	associated-types/imply-relevant-nested-item-bounds-for-gat.rs
 compile-fail	associated-types/invalid-ctor.rs
+run-pass	associated-types/issue-18655.rs
 check-pass	associated-types/issue-19081.rs
 check-pass	associated-types/issue-19129-1.rs
 check-pass	associated-types/issue-19129-2.rs
@@ -546,6 +547,7 @@ run-pass	autoref-autoderef/autoderef-vec-box-fn-36786.rs
 run-pass	autoref-autoderef/autoref-intermediate-types-issue-3585.rs
 compile-fail	autoref-autoderef/deref-ambiguity-becomes-nonambiguous.rs
 run-pass	autoref-autoderef/deref-chain-method-calls-13264.rs
+check-pass	autoref-autoderef/deref-into-array.rs
 check-pass	autoref-autoderef/reborrow-mut-self-to-ref-self-method.rs
 run-pass	binding/bind-field-short-with-modifiers.rs
 run-pass	binding/borrowed-ptr-pattern-2.rs
@@ -1411,6 +1413,7 @@ run-pass	const-generics/defaults/repr-c-issue-82792.rs
 compile-fail	const-generics/defaults/self-referential.rs
 compile-fail	const-generics/defaults/trait_objects_fail.rs
 compile-fail	const-generics/defaults/wfness.rs
+check-pass	const-generics/deref-into-array-generic.rs
 compile-fail	const-generics/early/closing-args-token.rs
 compile-fail	const-generics/early/const-expression-parameter.rs
 compile-fail	const-generics/early/const_arg_trivial_macro_expansion-2.rs
@@ -3001,6 +3004,7 @@ compile-fail	inference/issue-107090.rs
 compile-fail	inference/issue-113354.rs
 check-pass	inference/issue-28935.rs
 run-pass	inference/issue-36053.rs
+run-pass	inference/issue-3743.rs
 compile-fail	inference/issue-71309.rs
 compile-fail	inference/issue-72690.rs
 compile-fail	inference/issue-83606.rs
@@ -3137,6 +3141,7 @@ run-pass	let-else/let-else-temp-borrowck.rs
 compile-fail	let-else/let-else-then-diverge.rs
 run-pass	let-else/let-else.rs
 compile-fail	let-else/uninitialized-refutable-let-issue-123844.rs
+compile-fail	lexer/lex-bad-binary-literal.rs
 compile-fail	lexer/lex-bad-char-literals-2.rs
 compile-fail	lexer/lex-bad-char-literals-3.rs
 compile-fail	lexer/lex-bad-char-literals-4.rs
@@ -3144,6 +3149,7 @@ compile-fail	lexer/lex-bad-char-literals-5.rs
 compile-fail	lexer/lex-bad-char-literals-6.rs
 compile-fail	lexer/lex-bad-char-literals-7.rs
 compile-fail	lexer/lex-bad-numeric-literals.rs
+compile-fail	lexer/lex-bad-octal-literal.rs
 compile-fail	lexer/lex-bad-str-literal-as-char-1.rs
 compile-fail	lexer/lex-bad-str-literal-as-char-2.rs
 compile-fail	lexer/lex-bad-token.rs
@@ -4223,6 +4229,7 @@ compile-fail	numeric/numeric-suffix/numeric-suffix.rs
 run-pass	numeric/ref-int.rs
 run-pass	numeric/type-limit-comparisons-6130.rs
 compile-fail	numeric/uppercase-base-prefix-invalid-no-fix.rs
+compile-fail	numeric/uppercase-base-prefix.rs
 check-pass	object-lifetime/object-lifetime-default-assoc-ty-self-ty-static.rs
 run-pass	object-lifetime/object-lifetime-default-default-to-static.rs
 compile-fail	object-lifetime/object-lifetime-default-from-box-error.rs
@@ -4344,6 +4351,7 @@ compile-fail	parser/bounds-lifetime-2.rs
 compile-fail	parser/bounds-lifetime-where-1.rs
 compile-fail	parser/bounds-lifetime-where.rs
 check-pass	parser/bounds-obj-parens.rs
+compile-fail	parser/brace-in-let-chain.rs
 compile-fail	parser/cast-angle-bracket-precedence.rs
 compile-fail	parser/chained-comparison-suggestion.rs
 compile-fail	parser/char/whitespace-character-literal.rs
@@ -4366,6 +4374,8 @@ compile-fail	parser/diff-markers/item-with-attr.rs
 compile-fail	parser/diff-markers/item.rs
 compile-fail	parser/diff-markers/long-conflict-markers.rs
 compile-fail	parser/diff-markers/struct.rs
+compile-fail	parser/diff-markers/unclosed-delims-in-macro.rs
+compile-fail	parser/diff-markers/unclosed-delims.rs
 compile-fail	parser/do-not-suggest-semicolon-before-array.rs
 compile-fail	parser/doc-before-attr.rs
 compile-fail	parser/doc-before-bad-variant.rs
@@ -4418,6 +4428,7 @@ compile-fail	parser/ice-issue-127600.rs
 compile-fail	parser/ident-recovery.rs
 check-pass	parser/if-block-unreachable-expr.rs
 compile-fail	parser/if-in-in.rs
+compile-fail	parser/if-let-chain-unclosed-delim.rs
 compile-fail	parser/if-semi-before-block.rs
 check-pass	parser/impl-item-const-pass.rs
 compile-fail	parser/impl-item-const-semantic-fail.rs
@@ -4458,6 +4469,7 @@ compile-fail	parser/issues/issue-101540.rs
 compile-fail	parser/issues/issue-102182-impl-trait-recover.rs
 compile-fail	parser/issues/issue-102806.rs
 compile-fail	parser/issues/issue-103143.rs
+compile-fail	parser/issues/issue-103451.rs
 compile-fail	parser/issues/issue-103748-ICE-wrong-braces.rs
 compile-fail	parser/issues/issue-10392-2.rs
 compile-fail	parser/issues/issue-10392.rs
@@ -4497,6 +4509,7 @@ run-pass	parser/issues/issue-21475.rs
 compile-fail	parser/issues/issue-22647.rs
 compile-fail	parser/issues/issue-22712.rs
 compile-fail	parser/issues/issue-2354-1.rs
+compile-fail	parser/issues/issue-2354.rs
 compile-fail	parser/issues/issue-23620-invalid-escapes.rs
 compile-fail	parser/issues/issue-24197.rs
 compile-fail	parser/issues/issue-24375.rs
@@ -4532,10 +4545,12 @@ compile-fail	parser/issues/issue-57684.rs
 compile-fail	parser/issues/issue-57819.rs
 compile-fail	parser/issues/issue-58094-missing-right-square-bracket.rs
 compile-fail	parser/issues/issue-61858.rs
+compile-fail	parser/issues/issue-62524.rs
 compile-fail	parser/issues/issue-62546.rs
 compile-fail	parser/issues/issue-62554.rs
 compile-fail	parser/issues/issue-62660.rs
 compile-fail	parser/issues/issue-62881.rs
+compile-fail	parser/issues/issue-62894.rs
 compile-fail	parser/issues/issue-62913.rs
 compile-fail	parser/issues/issue-62973.rs
 check-pass	parser/issues/issue-63115-range-pat-interpolated.rs
@@ -4598,6 +4613,7 @@ compile-fail	parser/issues/issue-87694-duplicated-pub.rs
 compile-fail	parser/issues/issue-87694-misplaced-pub.rs
 compile-fail	parser/issues/issue-88276-unary-plus.rs
 check-pass	parser/issues/issue-88583-union-as-ident.rs
+compile-fail	parser/issues/issue-88770.rs
 compile-fail	parser/issues/issue-88818.rs
 compile-fail	parser/issues/issue-89388.rs
 compile-fail	parser/issues/issue-89396.rs
@@ -4684,6 +4700,7 @@ compile-fail	parser/match-arm-comma-typo-issue-140991.rs
 compile-fail	parser/match-arm-without-braces.rs
 compile-fail	parser/match-arrows-block-then-binop.rs
 compile-fail	parser/match-refactor-to-expr.rs
+compile-fail	parser/mismatched-braces/missing-close-brace-in-struct.rs
 compile-fail	parser/mismatched-delim-brace-empty-block.rs
 compile-fail	parser/missing-closing-angle-bracket-eq-constraint.rs
 compile-fail	parser/missing-closing-angle-bracket-struct-field-ty.rs
@@ -4742,6 +4759,7 @@ compile-fail	parser/not-a-pred.rs
 compile-fail	parser/nt-parsing-has-recovery.rs
 compile-fail	parser/numeric-lifetime.rs
 compile-fail	parser/obsolete-syntax-impl-for-dotdot.rs
+compile-fail	parser/old-suffixes-are-really-forbidden.rs
 compile-fail	parser/omitted-arg-in-item-fn.rs
 run-pass	parser/operator-associativity.rs
 run-pass	parser/operator-precedence-braces-exprs.rs
@@ -4903,6 +4921,7 @@ compile-fail	parser/type-ascription-in-pattern.rs
 compile-fail	parser/type-parameters-in-field-exprs.rs
 compile-fail	parser/typod-const-in-const-param-def.rs
 run-pass	parser/ufcs-return-unused-parens.rs
+compile-fail	parser/unclosed-braces.rs
 compile-fail	parser/underscore-suffix-for-float.rs
 compile-fail	parser/underscore-suffix-for-string.rs
 compile-fail	parser/underscore_item_not_const.rs
@@ -4922,6 +4941,7 @@ compile-fail	parser/unsized.rs
 compile-fail	parser/unsized2.rs
 compile-fail	parser/use-as-where-use-ends-with-mod-sep.rs
 compile-fail	parser/use-ends-with-mod-sep.rs
+compile-fail	parser/use-unclosed-brace.rs
 compile-fail	parser/utf16-be-without-bom.rs
 compile-fail	parser/utf16-le-without-bom.rs
 run-pass	parser/utf8_idents-rpass.rs
@@ -5761,6 +5781,7 @@ run-pass	statics/static-function-pointer.rs
 compile-fail	statics/static-generic-param-soundness.rs
 run-pass	statics/static-method-in-trait-with-tps-intracrate.rs
 run-pass	statics/static-methods-in-traits.rs
+run-pass	statics/static-methods-in-traits2.rs
 check-pass	statics/static-mut-shared-parens.rs
 build-pass	statics/static-mut-unsafe-init.rs
 build-pass	statics/static-mut-with-assoc-type-field.rs
@@ -6339,10 +6360,12 @@ run-pass	traits/inheritance/num.rs
 run-pass	traits/inheritance/num0.rs
 run-pass	traits/inheritance/num1.rs
 run-pass	traits/inheritance/num2.rs
+run-pass	traits/inheritance/num3.rs
 run-pass	traits/inheritance/num5.rs
 run-pass	traits/inheritance/overloading-simple.rs
 run-pass	traits/inheritance/overloading.rs
 compile-fail	traits/inheritance/repeated-supertrait-ambig.rs
+run-pass	traits/inheritance/self-in-supertype.rs
 run-pass	traits/inheritance/self.rs
 run-pass	traits/inheritance/simple.rs
 run-pass	traits/inheritance/static.rs
@@ -6360,6 +6383,7 @@ compile-fail	traits/issue-22384.rs
 run-pass	traits/issue-22655.rs
 check-pass	traits/issue-23003-overflow.rs
 run-pass	traits/issue-23003.rs
+run-pass	traits/issue-23825.rs
 check-pass	traits/issue-2611-3.rs
 compile-fail	traits/issue-32963.rs
 check-pass	traits/issue-33187.rs
@@ -6579,6 +6603,7 @@ compile-fail	type/issue-103271.rs
 check-pass	type/issue-67690-type-alias-bound-diagnostic-crash.rs
 compile-fail	type/issue-7607-1.rs
 check-pass	type/issue-7607-2.rs
+compile-fail	type/issue-91268.rs
 compile-fail	type/missing-let-in-binding-2.rs
 compile-fail	type/missing-let-in-binding-3.rs
 compile-fail	type/missing-let-in-binding-4.rs

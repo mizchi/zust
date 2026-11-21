@@ -119,6 +119,8 @@ impl<'p> Cx<'p> {
         let s_env = std::mem::replace(&mut self.env, env);
         let s_caps = std::mem::replace(&mut self.caps, caps);
         let s_root = std::mem::replace(&mut self.root, root);
+        // (the callee's own: its parameters declared as its type parameters)
+        let s_gargs = std::mem::replace(&mut self.generic_args, generic_args_of(self.prog, &f.sig.params, root));
         let s_cix = std::mem::take(&mut self.closure_ix);
         let s_hint = self.closure_hint.take();
         let s_seg = self.seg_self.take();
@@ -156,6 +158,7 @@ impl<'p> Cx<'p> {
         self.env = s_env;
         self.caps = s_caps;
         self.root = s_root;
+        self.generic_args = s_gargs;
         self.closure_ix = s_cix;
         self.closure_hint = s_hint;
         self.seg_self = s_seg;

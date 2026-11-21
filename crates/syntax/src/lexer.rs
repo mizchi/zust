@@ -410,11 +410,87 @@ pub fn split(src: &str) -> Result<Vec<SrcItem>, String> {
         if rest.is_empty() {
             return Ok(items);
         }
+        // (more delimiters opened than closed to the end: rustc's error at the end of the file, its last line)
+        if unclosed_delims(rest.as_bytes()) {
+            let src = std::str::from_utf8(s).unwrap_or("");
+            let last = src.lines().enumerate().filter(|(_, l)| !l.trim().is_empty()).map(|(i, _)| i + 1).last().unwrap_or(1);
+            return Err(format!("{last}:1: this file contains an unclosed delimiter"));
+        }
         return Err(format!(
             "{ln}:1: unterminated item starting here (byte {sp})"
         ));
     }
     Ok(items)
+}
+
+/// Whether b leaves `(` `[` `{` open at its end with every closer matching, outside strings, chars and comments (roughly: a lifetime's `'`
+/// is told from a char's by the closing quote two or three bytes on)
+fn unclosed_delims(b: &[u8]) -> bool {
+    let mut stack: Vec<u8> = vec![];
+    let mut i = 0;
+    while i < b.len() {
+        match b[i] {
+            b'/' if b.get(i + 1) == Some(&b'/') => {
+                while i < b.len() && b[i] != b'\n' {
+                    i += 1;
+                }
+            }
+            // (block comments nest: `/* a /* b */ } */`)
+            b'/' if b.get(i + 1) == Some(&b'*') => {
+                i += 2;
+                let mut depth = 1;
+                while i + 1 < b.len() && depth > 0 {
+                    if b[i] == b'/' && b[i + 1] == b'*' {
+                        depth += 1;
+                        i += 2;
+                    } else if b[i] == b'*' && b[i + 1] == b'/' {
+                        depth -= 1;
+                        i += 2;
+                    } else {
+                        i += 1;
+                    }
+                }
+                continue;
+            }
+            // (a raw string `r#".."#` (or `br"..")`: its end as the lexer reads it, quotes inside and all)
+            b'r' | b'b' if (i == 0 || !(b[i - 1].is_ascii_alphanumeric() || b[i - 1] == b'_')) && matches!(b.get(i + 1), Some(b'"' | b'#' | b'r')) => {
+                match string_lit(b, i) {
+                    Some(e) if e > i => {
+                        i = e;
+                        continue;
+                    }
+                    _ => {}
+                }
+            }
+            b'"' => {
+                i += 1;
+                while i < b.len() && b[i] != b'"' {
+                    if b[i] == b'\\' {
+                        i += 1;
+                    }
+                    i += 1;
+                }
+            }
+            b'\'' if b.get(i + 2) == Some(&b'\'') || (b.get(i + 1) == Some(&b'\\') && b.get(i + 3) == Some(&b'\'')) => {
+                i += if b[i + 1] == b'\\' { 3 } else { 2 };
+            }
+            c @ (b'(' | b'[' | b'{') => stack.push(c),
+            c @ (b')' | b']' | b'}') => {
+                let open = match c {
+                    b')' => b'(',
+                    b']' => b'[',
+                    _ => b'{',
+                };
+                // (a closer that does not match: a mismatched delimiter, reported where the item starts)
+                if stack.pop() != Some(open) {
+                    return false;
+                }
+            }
+            _ => {}
+        }
+        i += 1;
+    }
+    !stack.is_empty()
 }
 
 fn utf8_len(b: u8) -> usize {

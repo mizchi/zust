@@ -453,6 +453,62 @@ pub struct Block {
     pub stmts: Vec<Stmt>,
 }
 
+/// The suffix of a number literal that is not a numeric type (`123X1a3`: `X1a3`; `0XYZ`: `XYZ`, an uppercase base
+/// prefix being no prefix), or None (not a number, or a valid suffix)
+pub fn bad_num_suffix(text: &str) -> Option<&str> {
+    let b = text.as_bytes();
+    if !b.first().is_some_and(|c| c.is_ascii_digit()) {
+        return None;
+    }
+    // (digits, then letters only at the end: `0u32` / `1_000usize`, the common suffixed literal, decided by its tail)
+    let k = b.iter().position(|c| c.is_ascii_alphabetic()).unwrap_or(b.len());
+    if k == b.len() {
+        return None;
+    }
+    if b[..k].iter().all(|c| c.is_ascii_digit() || *c == b'_') && b[k] != b'e' && b[k] != b'E' && !(k == 1 && b[0] == b'0') {
+        let sfx = &text[k..];
+        let ok = matches!(sfx, "i8" | "i16" | "i32" | "i64" | "i128" | "isize" | "u8" | "u16" | "u32" | "u64" | "u128" | "usize" | "f16" | "f32" | "f64" | "f128");
+        return (!ok).then_some(sfx);
+    }
+    let (mut i, digit): (usize, fn(u8) -> bool) = match text.get(..2) {
+        Some("0x") => (2, |c| c.is_ascii_hexdigit() || c == b'_'),
+        Some("0o") => (2, |c| (b'0'..=b'7').contains(&c) || c == b'_'),
+        Some("0b") => (2, |c| c == b'0' || c == b'1' || c == b'_'),
+        _ => (0, |c| c.is_ascii_digit() || c == b'_'),
+    };
+    let dec = i == 0;
+    while i < b.len() && digit(b[i]) {
+        i += 1;
+    }
+    if dec {
+        if i < b.len() && b[i] == b'.' {
+            i += 1;
+            while i < b.len() && (b[i].is_ascii_digit() || b[i] == b'_') {
+                i += 1;
+            }
+        }
+        if i < b.len() && (b[i] == b'e' || b[i] == b'E') {
+            let mut j = i + 1;
+            if j < b.len() && (b[j] == b'+' || b[j] == b'-') {
+                j += 1;
+            }
+            // (`1e_2`: underscores before the exponent's first digit)
+            while j < b.len() && b[j] == b'_' {
+                j += 1;
+            }
+            if j < b.len() && b[j].is_ascii_digit() {
+                i = j;
+                while i < b.len() && (b[i].is_ascii_digit() || b[i] == b'_') {
+                    i += 1;
+                }
+            }
+        }
+    }
+    let sfx = &text[i..];
+    let ok = matches!(sfx, "" | "i8" | "i16" | "i32" | "i64" | "i128" | "isize" | "u8" | "u16" | "u32" | "u64" | "u128" | "usize" | "f16" | "f32" | "f64" | "f128");
+    (!ok).then_some(sfx)
+}
+
 /// `(a, b) = e;` / `[a, _] = e;` (destructuring assignment): `{ let (t0, t1) = e; a = t0; b = t1; }` (the right side
 /// first, then the places in order). None for a left side this does not cover (`..`, struct patterns)
 fn destructure_assign(l: &Expr, r: &Expr, at: Pos) -> Option<Expr> {
@@ -1577,9 +1633,11 @@ impl Parser {
         if self.is_punct("=") && !self.punct_at(0, "==") && !self.punct_at(0, "=>") {
             self.i += 1;
             let r = self.assign_expr(ss)?;
-            if matches!(l, Expr::Tuple(_) | Expr::Array(_)) {
+            // (`_ = e;` too: `{ let _ = e; }`)
+            if matches!(&l, Expr::Tuple(_) | Expr::Array(_)) || matches!(&l, Expr::Path(None, p) if p.segs.len() == 1 && p.segs[0].name == "_") {
                 if let Some(e) = destructure_assign(&l, &r, start) {
-                    return Ok(e);
+                    // (in parentheses: an assignment, not a block, so a statement of it still needs its `;`)
+                    return Ok(Expr::Paren(Box::new(e)));
                 }
             }
             return Ok(Expr::Assign(Box::new(l), Box::new(r)));
@@ -1898,6 +1956,31 @@ impl Parser {
         match t.kind {
             TokKind::Lit => {
                 let lp = self.pos();
+                // (most number literals are one digit or digits only: no suffix to look at)
+                let tb = t.text.as_bytes();
+                let suffixed = tb.len() > 1 && tb[0].is_ascii_digit() && tb.iter().any(|c| c.is_ascii_alphabetic());
+                if let Some(sfx) = if suffixed { bad_num_suffix(&t.text) } else { None } {
+                    let base = match t.text.get(..2) {
+                        Some("0b") => 2,
+                        Some("0o") => 8,
+                        _ => 0,
+                    };
+                    // (`0b121`: a digit the base does not have; `0XFF`: an uppercase base prefix before digits of it)
+                    let upper = t.text.get(..2).and_then(|p| match p {
+                        "0X" => Some(16),
+                        "0O" => Some(8),
+                        "0B" => Some(2),
+                        _ => None,
+                    });
+                    let msg = if base > 0 && sfx.starts_with(|c: char| c.is_ascii_digit()) {
+                        format!("invalid digit for a base {base} literal")
+                    } else if upper.is_some_and(|r| !t.text[2..].is_empty() && t.text[2..].chars().all(|c| c == '_' || c.to_digit(r).is_some())) {
+                        "invalid base prefix for number literal".to_string()
+                    } else {
+                        format!("invalid suffix `{sfx}` for number literal")
+                    };
+                    return Err(self.err(&msg));
+                }
                 self.i += 1;
                 return Ok(Expr::Lit(t.text, lp));
             }

@@ -653,6 +653,7 @@ impl Session2 {
         let mut deny_unused_imports = false;
         let mut deny_unreachable_code = false;
         let mut deny_must_use = false;
+        let mut deny_unused_alloc = false;
         let mut deny_trivial_casts = (false, false);
         // (non_snake_case, non_camel_case_types, non_upper_case_globals)
         let mut deny_style = [false; 3];
@@ -683,8 +684,25 @@ impl Session2 {
             deny_unreachable_code = levels.iter().any(|l| matches!(*l, "unreachable_code" | "unused" | "warnings")) && !c.contains("#![allow(unreachable_code");
             deny_must_use = levels.iter().any(|l| matches!(*l, "unused_must_use" | "unused" | "warnings")) && !c.contains("#![allow(unused_must_use");
             // (an `#![allow(..)]` of the lint undoes a deny, as the levels apply in order; forbid cannot be undone)
-            let lint = |n: &str| levels.contains(&n) && (c.contains(&format!("#![forbid({n}")) || !c.contains(&format!("#![allow({n}")));
+            // (the last of them wins: `#![allow(x)]` then `#![deny(x)]` denies)
+            let lint = |n: &str| {
+                // (the last `#![a(..)]` naming n anywhere in its list: `#![allow(dead_code, n)]`)
+                let last = |a: &str| {
+                    let open = format!("#![{a}(");
+                    c.match_indices(&open)
+                        .filter(|(i, _)| {
+                            let rest = &c[i + open.len()..];
+                            let list = &rest[..rest.find(')').unwrap_or(rest.len())];
+                            list.split(',').any(|x| x.trim() == n)
+                        })
+                        .map(|(i, _)| i)
+                        .last()
+                };
+                levels.contains(&n) && (last("forbid").is_some() || last("allow") < last("deny"))
+            };
             deny_trivial_casts = (lint("trivial_casts"), lint("trivial_numeric_casts"));
+            deny_unused_alloc = lint("unused_allocation")
+                || (!levels.contains(&"unused_allocation") && levels.iter().any(|l| matches!(*l, "unused" | "warnings")) && !c.contains("#![allow(unused"));
             for (k, n) in ["non_snake_case", "non_camel_case_types", "non_upper_case_globals"].iter().enumerate() {
                 deny_style[k] = levels.iter().any(|l| l == n || *l == "nonstandard_style" || *l == "warnings") && !c.contains(&format!("#![allow({n}"));
             }
@@ -761,6 +779,7 @@ impl Session2 {
         prog.overflow_checks = !self.opts.opt;
         prog.deny_unreachable = deny_unreachable;
         prog.deny_must_use = deny_must_use;
+        prog.deny_unused_alloc = deny_unused_alloc;
         prog.deny_trivial_casts = deny_trivial_casts;
         if deny_must_use {
             for it in &items[..user] {
@@ -2283,5 +2302,5 @@ impl Session2 {
 /// The lint levels codegen checks (`#![deny(unused_must_use)]`, `trivial_casts` ..) as one byte for the cache keys: a
 /// function compiled before such a `#![deny]` was added is not reused without its check
 fn lint_bits(p: &Program) -> u8 {
-    p.deny_must_use as u8 | (p.deny_trivial_casts.0 as u8) << 1 | (p.deny_trivial_casts.1 as u8) << 2 | (p.deny_unreachable as u8) << 3
+    p.deny_must_use as u8 | (p.deny_trivial_casts.0 as u8) << 1 | (p.deny_trivial_casts.1 as u8) << 2 | (p.deny_unreachable as u8) << 3 | (p.deny_unused_alloc as u8) << 4
 }
