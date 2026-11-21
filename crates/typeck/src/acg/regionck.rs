@@ -108,6 +108,8 @@ pub struct Rg {
     pub pat_ref: Option<u32>,
     /// A match lowered as another (its or-pattern arms with guards split): the one lowered
     pub alias: HashMap<usize, &'static Expr>,
+    /// Values of no region borrowed as temporaries no constant promotion makes static (`&(x + 1)`, `&(5.f())`)
+    pub temps: HashMap<usize, Ty>,
 }
 
 fn kind(e: &Expr) -> &'static str {
@@ -833,6 +835,7 @@ impl Cx<'_> {
         let r = self.rt_expr_inner(e);
         if r.is_none() && debug() {
             self.rg.missed.push(kind(e));
+            eprintln!("regionck: {} not followed at line {}", kind(e), super::borrowck::pos(e).line);
             if let Expr::Path(_, p) = strip(e) {
                 let n = p.segs.iter().map(|s| s.name.as_str()).collect::<Vec<_>>().join("::");
                 let lt = p.segs.last().and_then(|s| self.lookup(&s.name)).map(|(_, t)| self.prog.tn(t));
@@ -853,11 +856,13 @@ impl Cx<'_> {
             // promoted to a static, and so may be a block of a constant alone))
             Expr::Ref(m, x)
                 if matches!(strip(x), Expr::Call(..) | Expr::MethodCall(..))
+                    || self.rg.temps.contains_key(&(strip(x) as *const Expr as usize))
                     || (*m && matches!(strip(x), Expr::Lit(..)))
                     || matches!(strip(x), Expr::Block(None, false, b) if b.stmts.len() > 1)
                     || (matches!(strip(x), Expr::Ref(..) | Expr::Struct(..) | Expr::Tuple(..)) && self.mentions_local(x)) =>
             {
                 let (t, tr) = match strip(x) {
+                    x if self.rg.temps.contains_key(&(x as *const Expr as usize)) => (self.rg.temps[&(x as *const Expr as usize)], vec![]),
                     Expr::Lit(..) => (Ty::U8, vec![]),
                     Expr::Block(_, _, b) => match b.stmts.last() {
                         Some(Stmt::Expr(tail, false)) => self.rt_expr(tail)?,
@@ -912,8 +917,8 @@ impl Cx<'_> {
                 self.rg.relate(prog, to, &itr, &tree, super::borrowck::pos(x));
                 Some((to, tree))
             }
-            // (a block's value: its tail's, kept while the block's locals were in scope)
-            Expr::Block(None, false, b) => match b.stmts.last() {
+            // (a block's value (an `unsafe` one's too): its tail's, kept while the block's locals were in scope)
+            Expr::Block(None, _, b) => match b.stmts.last() {
                 Some(Stmt::Expr(t, false)) => self.rt_expr(t),
                 _ => None,
             },
@@ -926,11 +931,49 @@ impl Cx<'_> {
         }
     }
 
+    /// `&e` borrows a temporary of e's value of type t (not a place, not promoted): one the region check follows when
+    /// e is no constant (a call of a function, an operation on a local) and t holds no region
+    pub(crate) fn rg_temp(&mut self, e: &Expr, t: Ty) {
+        if !self.rg_on() {
+            return;
+        }
+        let x = strip(e);
+        let k = x as *const Expr as usize;
+        if self.rg.calls.contains_key(&k) || !self.not_const(x) || super::borrowck::has_refs(self.prog, t, 0) {
+            return;
+        }
+        self.rg.temps.insert(k, t);
+    }
+
+    /// e is not a constant expression a `&` would promote to a static: it reads a local, calls a function (not the
+    /// few promoted ones: `ptr::null()`, `mem::size_of()`), or compares, reads or casts to integers raw pointers
+    fn not_const(&self, e: &Expr) -> bool {
+        let ptr_cast = |x: &Expr| matches!(strip(x), Expr::Cast(_, t) if matches!(**t, crate::parse::Ty::Ptr(..) | crate::parse::Ty::Fn(..)));
+        match strip(e) {
+            Expr::Path(None, p) => p.segs.len() == 1 && self.lookup(&p.segs[0].name).is_some(),
+            Expr::MethodCall(..) => true,
+            Expr::Call(f, args) => match strip(f) {
+                Expr::Path(_, p) if self.prog.variant_by_p(&crate::program::PPath::of(p), self.self_sid).is_some() || self.prog.struct_by_p(&crate::program::PPath::of(p), self.self_sid).is_some() => args.iter().any(|a| self.not_const(a)),
+                Expr::Path(_, p) => p.segs.last().is_none_or(|s| !matches!(s.name.as_str(), "null" | "null_mut" | "size_of" | "align_of" | "max_value" | "min_value" | "new" | "from_secs" | "from_millis" | "from_micros" | "from_nanos")),
+                _ => true,
+            },
+            Expr::Binary(op, a, b, _) => self.not_const(a) || self.not_const(b) || (matches!(op.as_str(), "==" | "!=" | "<" | "<=" | ">" | ">=") && (ptr_cast(a) || ptr_cast(b))),
+            Expr::Unary(op, x, _) => op == "*" || self.not_const(x),
+            Expr::Cast(x, to) => self.not_const(x) || (matches!(**to, crate::parse::Ty::Path(..)) && ptr_cast(x)),
+            Expr::Field(x, _, _) => self.not_const(x),
+            Expr::Block(None, _, b) if b.stmts.len() == 1 => matches!(&b.stmts[0], Stmt::Expr(t, false) if self.not_const(t)),
+            Expr::Tuple(xs) | Expr::Array(xs) => xs.iter().any(|x| self.not_const(x)),
+            Expr::Struct(_, fs, _) => fs.iter().any(|f| self.not_const(&f.1)),
+            _ => false,
+        }
+    }
+
     /// e reads a local (so it is not a constant a `&` would promote to a static)
     fn mentions_local(&self, e: &Expr) -> bool {
         match strip(e) {
             Expr::Path(None, p) => p.segs.len() == 1 && self.lookup(&p.segs[0].name).is_some(),
             Expr::Ref(_, x) | Expr::Unary(_, x, _) | Expr::Field(x, _, _) | Expr::Cast(x, _) => self.mentions_local(x),
+            Expr::Binary(_, a, b, _) => self.mentions_local(a) || self.mentions_local(b),
             Expr::Tuple(xs) | Expr::Array(xs) => xs.iter().any(|x| self.mentions_local(x)),
             Expr::Struct(_, fs, _) => fs.iter().any(|f| self.mentions_local(&f.1)),
             _ => false,

@@ -940,6 +940,7 @@ compile-fail	borrowck/mutability-errors.rs
 compile-fail	borrowck/mutate-vec-while-iterating.rs
 check-pass	borrowck/nested-closure-with-generic-ice.rs
 compile-fail	borrowck/non-ADT-struct-pattern-box-pattern-ice-121463.rs
+compile-fail	borrowck/non-promotable-static-ref.rs
 compile-fail	borrowck/option-inspect-mutation.rs
 compile-fail	borrowck/or-patterns.rs
 compile-fail	borrowck/ownership-struct-update-moved-error.rs
@@ -1579,8 +1580,12 @@ run-pass	consts/const-eval/nrvo.rs
 compile-fail	consts/const-eval/panic-never-type.rs
 check-pass	consts/const-eval/promote-static.rs
 check-pass	consts/const-eval/promote_mutable_zst_mir_borrowck.rs
+compile-fail	consts/const-eval/promoted_const_fn_fail.rs
+compile-fail	consts/const-eval/promoted_const_fn_fail_deny_const_err.rs
+compile-fail	consts/const-eval/promoted_raw_ptr_ops.rs
 check-pass	consts/const-eval/simple_with_undef.rs
 check-pass	consts/const-eval/stable-metric/dominators-edge-case.rs
+compile-fail	consts/const-eval/transmute-const-promotion.rs
 run-pass	consts/const-eval/variance-const-eval-cycle.rs
 run-pass	consts/const-eval/write-to-uninhabited-enum-variant.rs
 check-pass	consts/const-eval/zst_operand_eval.rs
@@ -1600,11 +1605,16 @@ build-pass	consts/const-fn-zst-args.rs
 run-pass	consts/const-fn.rs
 run-pass	consts/const-index-feature-gate.rs
 run-pass	consts/const-int-conversion-rpass.rs
+compile-fail	consts/const-int-conversion.rs
 run-pass	consts/const-int-overflowing-rpass.rs
+compile-fail	consts/const-int-overflowing.rs
 run-pass	consts/const-int-rotate-rpass.rs
+compile-fail	consts/const-int-rotate.rs
 run-pass	consts/const-int-saturating-arith.rs
 run-pass	consts/const-int-sign-rpass.rs
+compile-fail	consts/const-int-sign.rs
 run-pass	consts/const-int-wrapping-rpass.rs
+compile-fail	consts/const-int-wrapping.rs
 compile-fail	consts/const-item-no-type/with-colon.rs
 run-pass	consts/const-labeled-break.rs
 compile-fail	consts/const-len-underflow-subspans.rs

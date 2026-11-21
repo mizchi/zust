@@ -1333,6 +1333,9 @@ impl Cx<'_> {
         if t == Ty::Never {
             return Ok((None, Ty::Never));
         }
+        if !matches!(expected, Some(Ty::Ptr(..))) {
+            self.rg_temp(rexpr, t);
+        }
         let a = match (v, t) {
             (Some(a), t) if t.is_agg() => a,
             (v, t) => {

@@ -7,6 +7,11 @@ fn check(src: &str) -> Vec<(usize, String)> {
     s.check(src).into_iter().map(|d| (d.line, d.msg)).collect()
 }
 
+fn temp_error(src: &str, line: usize) {
+    let d = check(src);
+    assert!(d.len() == 1 && d[0].0 == line && d[0].1.contains("temporary value dropped while borrowed"), "{src}\n{d:?}");
+}
+
 fn one_error(src: &str, line: usize) {
     let d = check(src);
     assert!(d.len() == 1 && d[0].0 == line && d[0].1.contains("lifetime may not live long enough"), "{src}\n{d:?}");
@@ -259,6 +264,31 @@ fn c<'a>(t: Ref<'a, dyn Test + 'a>, mut ss: SomeStruct<'a>) { ss.t = t; }
 fn d<'a>(x: &'a (dyn Test + 'a)) -> &'a dyn Test { x }
 fn e(x: Box<dyn Test>) -> Box<dyn Test + 'static> { x }
 fn main() {}
+"#;
+    assert_eq!(check(ok), vec![]);
+}
+
+/// `&e` of a value no constant promotion makes static (a call, an operation on a local, a raw pointer comparison):
+/// a temporary; a constant expression is promoted
+#[test]
+fn unpromoted_temporaries() {
+    temp_error("fn main() {\n    let x: &'static i32 = &(5_i32.reverse_bits());\n    let _ = x;\n}\n", 2);
+    temp_error("fn foo(_: &'static u32) {}\nfn id<T>(t: T) -> T { t }\nfn main() {\n    foo(&id(5u32));\n}\n", 4);
+    temp_error("fn main() {\n    let n = 3;\n    let x: &'static i32 = &(n + 1);\n    let _ = x;\n}\n", 3);
+    temp_error("fn main() {\n    let x: &'static bool = &(42 as *const i32 == 43 as *const i32);\n    let _ = x;\n}\n", 2);
+    temp_error("fn main() {\n    let x: &'static u32 = unsafe { &std::mem::transmute(3.0f32) };\n    let _ = x;\n}\n", 2);
+    let ok = r#"
+const C: i32 = 4;
+fn main() {
+    let a: &'static i32 = &(1 + 2);
+    let b: &'static i32 = &(C * 2);
+    let c: &'static (i32, bool) = &(3, true);
+    let d: &'static usize = &std::mem::size_of::<u64>();
+    let n = 3;
+    let e = &(n + 1);
+    let f = &(5_i32.reverse_bits());
+    println!("{} {} {:?} {} {} {}", a, b, c, d, e, f);
+}
 "#;
     assert_eq!(check(ok), vec![]);
 }

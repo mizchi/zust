@@ -1472,6 +1472,11 @@ impl Cx<'_> {
             return err(span, format!("call to unsafe function `{n}` is unsafe and requires unsafe block (E0133)"));
         }
         let sig0 = self.prog.sigs[id as usize].clone();
+        // (a callee that requires 'static (`fn f<T: 'static>`, `&'static T`): checked from its arguments on
+        // (`f(&g())`: the temporary))
+        if !self.rg.on && self.rg.eligible && self.inline_depth == 0 && sig0.regions.as_deref().is_some_and(Self::needs_static) {
+            self.rg_late_on();
+        }
         let skip = recv.is_some() as usize;
         if sig0.params.len() != args.len() + skip {
             return err(span, format!("expected {} arguments, found {}", sig0.params.len().saturating_sub(skip), args.len()));
