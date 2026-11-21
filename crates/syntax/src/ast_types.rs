@@ -219,21 +219,12 @@ pub fn tysyn(t: &PTy, self_ty: Option<&TySyn>) -> R<TySyn> {
                 },
                 Expr::Path(None, p) if single(p).is_some() => ArrLen::Const(single(p).unwrap().to_string()),
                 // 関連定数 `[u8; Buf::CAP]` / `[u8; Self::CAP]`
-                Expr::Path(None, p) if !p.global && p.segs.len() == 2 => {
-                    let a = p.segs[0].name.clone();
-                    let a = match (a.as_str(), self_ty) {
-                        ("Self", Some(TySyn::Named(n))) => n.clone(),
-                        // (プリミティブ型への impl の中: `impl Sealed for u8` の `Self::MAX_STR_LEN` は `u8::MAX_STR_LEN`)
-                        ("Self", Some(TySyn::Prim(t))) => {
-                            let names = ["u8", "u16", "u32", "u64", "u128", "usize", "i8", "i16", "i32", "i64", "i128", "isize", "bool", "char", "f32", "f64"];
-                            match names.iter().find(|n| Ty::prim(n) == Some(*t)) {
-                                Some(n) => n.to_string(),
-                                None => a,
-                            }
-                        }
-                        _ => a,
-                    };
-                    ArrLen::Const(format!("{a}::{}", p.segs[1].name))
+                Expr::Path(None, p) if !p.global && p.segs.len() == 2 => ArrLen::Const(format!("{}::{}", self_name(&p.segs[0].name, self_ty), p.segs[1].name)),
+                // (`[u8; <Foo as Bar>::SIZE]`: the impl's associated const, `Foo as Bar::SIZE` when an inherent
+                // `Foo::SIZE` took the plain name, else `Foo::SIZE`)
+                Expr::Path(Some(q), p) if p.segs.len() == 2 && matches!(&**q, PTy::Path(None, qp) if qp.segs.len() == 1 && qp.segs[0].args.is_empty()) => {
+                    let PTy::Path(None, qp) = &**q else { unreachable!() };
+                    ArrLen::Const(format!("{} as {}::{}", self_name(&qp.segs[0].name, self_ty), p.segs[0].name, p.segs[1].name))
                 }
                 // (a constant expression of literals: `[u8; 1 + 1]`, `[T; 4 as usize]`)
                 x => match crate::ast_summary::const_int(x) {
@@ -332,4 +323,20 @@ fn path_ty(p: &Path, self_ty: Option<&TySyn>) -> R<TySyn> {
             None => TySyn::Named(s),
         },
     })
+}
+
+/// The type name an associated const's path starts with: `Self` in an impl is its self type (`impl Sealed for u8`:
+/// `Self::MAX_STR_LEN` is `u8::MAX_STR_LEN`)
+fn self_name(a: &str, self_ty: Option<&TySyn>) -> String {
+    match (a, self_ty) {
+        ("Self", Some(TySyn::Named(n))) => n.clone(),
+        ("Self", Some(TySyn::Prim(t))) => {
+            let names = ["u8", "u16", "u32", "u64", "u128", "usize", "i8", "i16", "i32", "i64", "i128", "isize", "bool", "char", "f32", "f64"];
+            match names.iter().find(|n| Ty::prim(n) == Some(*t)) {
+                Some(n) => n.to_string(),
+                None => a.to_string(),
+            }
+        }
+        _ => a.to_string(),
+    }
 }
