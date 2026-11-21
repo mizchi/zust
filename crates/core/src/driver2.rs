@@ -2717,6 +2717,10 @@ fn gated_attrs_len(b: &[u8]) -> Option<usize> {
 /// An extern block starts at b[i..]: `extern "C" {` / `unsafe extern {`, not an `extern "C" fn` (whose body's macro
 /// arguments are no attributes)
 fn extern_block(b: &[u8], i: usize) -> bool {
+    // (most items start with neither `extern` nor `unsafe`)
+    if !matches!(b.get(i), Some(b'e' | b'u')) {
+        return false;
+    }
     let mut j = i;
     if b[j..].starts_with(b"unsafe") {
         j = skip_space(b, j + 6);
