@@ -1330,6 +1330,8 @@ check-pass	coercion/struct-literal-field-type-coercion-to-expected-type.rs
 compile-fail	coercion/type-errors.rs
 run-pass	coercion/unsafe-coercion.rs
 check-pass	coherence/clone-impl-unsized-slice.rs
+compile-fail	coherence/coherence-blanket-conflicts-with-blanket-implemented.rs
+compile-fail	coherence/coherence-blanket-conflicts-with-blanket-unimplemented.rs
 compile-fail	coherence/coherence-blanket-conflicts-with-specific-multidispatch.rs
 compile-fail	coherence/coherence-blanket-conflicts-with-specific.rs
 compile-fail	coherence/coherence-error-suppression.rs
@@ -1339,7 +1341,9 @@ compile-fail	coherence/coherence-impl-trait-for-trait-dyn-compatible.rs
 compile-fail	coherence/coherence-impl-trait-for-trait.rs
 compile-fail	coherence/coherence-inherited-subtyping.rs
 check-pass	coherence/coherence-multidispatch-tuple.rs
+compile-fail	coherence/coherence-no-direct-lifetime-dispatch.rs
 compile-fail	coherence/coherence-overlap-downstream-inherent.rs
+compile-fail	coherence/coherence-overlap-downstream.rs
 compile-fail	coherence/coherence-overlap-issue-23516-inherent.rs
 compile-fail	coherence/coherence-overlap-issue-23516.rs
 compile-fail	coherence/coherence-overlap-messages.rs
@@ -2355,6 +2359,7 @@ compile-fail	feature-gates/feature-gate-no_core.rs
 compile-fail	feature-gates/feature-gate-non_lifetime_binders.rs
 compile-fail	feature-gates/feature-gate-offset-of-enum.rs
 compile-fail	feature-gates/feature-gate-optimize_attribute.rs
+compile-fail	feature-gates/feature-gate-overlapping_marker_traits.rs
 compile-fail	feature-gates/feature-gate-patchable-function-entry.rs
 compile-fail	feature-gates/feature-gate-pin_ergonomics.rs
 compile-fail	feature-gates/feature-gate-postfix_match.rs

@@ -672,6 +672,40 @@ impl Session2 {
                 }
             }
         }
+        // (E0119: two blanket impls of one trait for a bare parameter, `impl<T: A> Tr for T` and `impl<T: B> Tr for T`,
+        // overlap whatever their bounds say. Only the program's own traits declared once (modules flatten names),
+        // without trait arguments, and not under the features that allow overlapping impls)
+        {
+            // (a `where` clause only on the parameter itself: `where (): Mirror<Assoc = T>` can make the impls disjoint)
+            let plain_where = |ii: usize, st: &str| {
+                let it = &items[ii];
+                let head = src.get(it.start..it.end).unwrap_or("");
+                let head = &head[..head.find('{').unwrap_or(head.len())];
+                let w = head.match_indices("where").find(|&(i, _)| {
+                    let b = head.as_bytes();
+                    (i == 0 || !(b[i - 1].is_ascii_alphanumeric() || b[i - 1] == b'_')) && b.get(i + 5).is_none_or(|c| !(c.is_ascii_alphanumeric() || *c == b'_'))
+                });
+                w.is_none_or(|(i, _)| head[i + 5..].split(',').all(|p| p.trim().is_empty() || p.split(':').next().map(str::trim) == Some(st)))
+            };
+            let mut first: FxMap<&str, (usize, &str)> = FxMap::default();
+            for (ii, sm) in sums[..user].iter().enumerate() {
+                let (Some(tr), Some(st)) = (sm.impl_trait.as_deref(), sm.impl_self.as_deref()) else { continue };
+                if !sm.impl_trait_args.is_empty() || tr.contains(['<', ':']) || !sm.impl_generics.iter().any(|g| g.0 == st) {
+                    continue;
+                }
+                let Some((i0, st0)) = first.insert(tr, (ii, st)) else { continue };
+                if !plain_where(i0, st0) || !plain_where(ii, st) {
+                    continue;
+                }
+                let once = sums[..user].iter().filter(|s| s.trait_decl.as_deref() == Some(tr)).count() == 1;
+                const OVERLAP: [&str; 6] =
+                    ["specialization", "min_specialization", "marker_trait_attr", "negative_impls", "with_negative_coherence", "rustc_attrs"];
+                let enabled = feats.get_or_insert_with(|| enabled_features(&src));
+                if once && !enabled.iter().any(|f| OVERLAP.contains(&f.as_str())) {
+                    return Err(format!("{}:1: conflicting implementations of trait `{tr}` (E0119)", items[ii].line));
+                }
+            }
+        }
         // (`#![crate_type = "lib"]`: a library, no `main` needed)
         let mut deny_unreachable = false;
         let mut deny_unused_vars = false;
