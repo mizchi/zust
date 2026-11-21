@@ -18,7 +18,7 @@
 
 use super::{Cx, Loc, Sp};
 use crate::fxhash::FxMap as HashMap;
-use crate::parse::{Expr, Stmt, Ty as PTy};
+use crate::parse::{Expr, GArg, Stmt, Ty as PTy};
 use crate::program::Program;
 use crate::types::{RSigSyn, Ty, R_DYN_DEFAULT, R_ELIDED, R_ELIDED_ADT, R_STATIC, R_UNKNOWN};
 
@@ -110,6 +110,8 @@ pub struct Rg {
     pub alias: HashMap<usize, &'static Expr>,
     /// Values of no region borrowed as temporaries no constant promotion makes static (`&(x + 1)`, `&(5.f())`)
     pub temps: HashMap<usize, Ty>,
+    /// The method call being made (call_fn is given no span for it)
+    pub call_sp: Sp,
 }
 
 /// t holds a trait object (whose lifetime a signature may leave to the default)
@@ -1223,13 +1225,14 @@ impl Cx<'_> {
 
     /// A call of id (generic signature sig0, type arguments sol, instance's parameter types params) with these
     /// arguments (the receiver's tree is rg.recv): relate the arguments to the parameters, and keep the result's tree
-    pub(crate) fn rg_call(&mut self, id: u32, sol: &[Option<Ty>], args: &[&Expr], params: &[Ty], ret: Ty, recv: Option<(RT, Sp)>, has_recv: bool, sp: Sp) {
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn rg_call(&mut self, id: u32, sol: &[Option<Ty>], turbofish: Option<&[GArg]>, args: &[&Expr], params: &[Ty], ret: Ty, recv: Option<(RT, Sp)>, has_recv: bool, sp: Sp) {
         if !self.rg_on() {
             return;
         }
         let recv_info = recv.as_ref().map(|r| r.1);
         // (a call whose span is not known: at its first argument)
-        let sp = if sp.line == 0 { args.first().map(|a| super::borrowck::pos(a)).filter(|s| s.line != 0).unwrap_or(sp) } else { sp };
+        let sp = if sp.line == 0 { recv_info.into_iter().chain(args.first().map(|a| super::borrowck::pos(a))).find(|s| s.line != 0).unwrap_or(sp) } else { sp };
         self.rg.last_call = None;
         let prog = self.prog;
         let sig0 = &prog.sigs[id as usize];
@@ -1239,7 +1242,27 @@ impl Cx<'_> {
         let prelude = prog.item_of.get(id as usize).copied().flatten().is_none_or(|i| i >= prog.prelude_from);
         let mut rg = std::mem::take(&mut self.rg);
         let lts: Vec<u32> = rs.as_deref().map(|r| r.lts.iter().map(|_| rg.var()).collect()).unwrap_or_default();
-        let targs: Vec<Option<RT>> = sol.iter().map(|t| t.and_then(|t| rg.fresh(prog, t))).collect();
+        let mut targs: Vec<Option<RT>> = sol.iter().map(|t| t.and_then(|t| rg.fresh(prog, t))).collect();
+        // (type arguments written (`f::<&'a u8>()`): with the regions they name)
+        if let Some(tf) = turbofish {
+            let first = sig0.trait_of.is_some() as usize;
+            for (i, a) in tf.iter().enumerate() {
+                let (GArg::Ty(pt), Some(Some(t))) = (a, sol.get(first + i)) else { continue };
+                if !crate::regions::names_lt(pt) {
+                    continue;
+                }
+                let mut s = crate::regions::Slots { lts: rg.lt_names.clone(), tparams: vec![], self_slots: &[], any: false };
+                let mut codes = vec![];
+                s.slots(pt, false, &mut codes);
+                let flts = rg.lts.clone();
+                rg.dyn_infer = true;
+                let tr = rg.instantiate(prog, *t, Some(&codes), &flts, &[], &mut |me| me.var());
+                rg.dyn_infer = false;
+                if let Some(tr) = tr {
+                    targs[first + i] = Some(tr);
+                }
+            }
+        }
         // (the regions a type argument brings are not the signature's own: elision does not see them)
         let substituted: Vec<u32> = targs.iter().flatten().flatten().copied().collect();
         let mut ptrees: Vec<Option<RT>> = vec![];

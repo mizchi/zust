@@ -4146,6 +4146,7 @@ run-pass	nll/issue-53123-raw-pointer-cast.rs
 compile-fail	nll/issue-53807.rs
 compile-fail	nll/issue-54302-cases.rs
 compile-fail	nll/issue-54556-wrap-it-up.rs
+compile-fail	nll/issue-54943.rs
 check-pass	nll/issue-55288.rs
 check-pass	nll/issue-55344.rs
 check-pass	nll/issue-55651.rs
@@ -4209,6 +4210,8 @@ compile-fail	nll/user-annotations/method-call.rs
 compile-fail	nll/user-annotations/method-ufcs-1.rs
 compile-fail	nll/user-annotations/method-ufcs-2.rs
 compile-fail	nll/user-annotations/method-ufcs-3.rs
+compile-fail	nll/user-annotations/method-ufcs-inherent-2.rs
+compile-fail	nll/user-annotations/method-ufcs-inherent-4.rs
 check-pass	nll/user-annotations/normalize-self-ty.rs
 compile-fail	nll/user-annotations/patterns.rs
 compile-fail	nll/user-annotations/region-error-ice-109072.rs
@@ -5286,6 +5289,8 @@ run-pass	regions/regions-borrow-uniq.rs
 run-pass	regions/regions-bot.rs
 run-pass	regions/regions-bound-lists-feature-gate-2.rs
 run-pass	regions/regions-bound-lists-feature-gate.rs
+compile-fail	regions/regions-bounded-by-trait-requiring-static.rs
+compile-fail	regions/regions-bounded-method-type-parameters.rs
 compile-fail	regions/regions-bounds.rs
 run-pass	regions/regions-copy-closure.rs
 run-pass	regions/regions-creating-enums2.rs

@@ -2519,6 +2519,10 @@ impl Cx<'_> {
         if let Expr::Path(_, p) = &**func {
             self.check_unsafe_call(id, p.pos)?;
         }
+        // (the region check reports at the call: call_fn is given no span for it)
+        if self.rg_on() {
+            self.rg.call_sp = borrowck::pos(c);
+        }
         let r = self.call_fn(id, None, &args, tf, expected, SP);
         self.rg_took_call(c);
         self.seg_self = None;

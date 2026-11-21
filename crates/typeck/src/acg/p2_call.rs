@@ -883,6 +883,10 @@ impl Cx<'_> {
         if !via_deref {
             self.rg_recv(recv, recv_ty, sid);
         }
+        // (the region check reports at the method call: call_fn is given no span for it)
+        if self.rg_on() {
+            self.rg.call_sp = borrowck::pos(e);
+        }
         let r = self.call_fn(id, Some((recv_v, recv_ty)), &args, tf, expected, SP);
         self.rg_took_call(e);
         if into_recv {
@@ -1456,6 +1460,7 @@ impl Cx<'_> {
     fn call_fn_inner(&mut self, id: u32, recv: Option<(Value, Ty)>, args: &[&Expr], turbofish: Option<&[GArg]>, expected: Option<Ty>, span: Sp) -> R<V> {
         // (the receiver's region tree is this call's: the calls in the arguments must not take it)
         let rg_recv = if recv.is_some() { self.rg.recv.take() } else { None };
+        let rg_sp = std::mem::take(&mut self.rg.call_sp);
         if self.prog.names.get(id as usize).is_some_and(|n| n == "__core_spawn") {
             if let Some(c) = args.first() {
                 self.check_spawn_closure(c)?;
@@ -1776,7 +1781,7 @@ impl Cx<'_> {
         let sol_rg = if self.rg_on() { Some(sol0.clone()) } else { None };
         let (target, sig) = self.resolve_call(id, &arg_tys, sol0, expected, span)?;
         if let Some(sol) = sol_rg {
-            self.rg_call(id, &sol, args, &sig.params, sig.ret, rg_recv, skip == 1, span);
+            self.rg_call(id, &sol, turbofish, args, &sig.params, sig.ret, rg_recv, skip == 1, if span.line == 0 { rg_sp } else { span });
         }
         if self.prog.names[id as usize] == "__core_transmute" && sig.params.len() == 1 {
             self.check_transmute(sig.params[0], sig.ret, span)?;
