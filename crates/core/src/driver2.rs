@@ -663,7 +663,7 @@ impl Session2 {
         for it in &items[..user] {
             let head = src.get(it.start..it.end).unwrap_or("");
             // (and an extern block's items: `extern "C" { #[unsafe(ffi_const)] fn f(); }`)
-            let ext = head.starts_with("extern") || head.starts_with("unsafe extern");
+            let ext = extern_block(head.as_bytes(), 0);
             if ext || head.starts_with('#') {
                 // (an item's outer attributes, not its body; an extern block's items are read whole)
                 let end = if ext { Some(it.end) } else { gated_attrs_len(head.as_bytes()).map(|n| it.start + n) };
@@ -2581,8 +2581,7 @@ fn gated_attrs_len(b: &[u8]) -> Option<usize> {
         i = skip_space(b, i);
         if i >= b.len() || b[i] != b'#' {
             // (an extern block after its outer attributes: its items' attributes are read too, the whole item)
-            let rest = &b[i..];
-            if rest.starts_with(b"extern") || rest.starts_with(b"unsafe") && b[skip_space(b, i + 6)..].starts_with(b"extern") {
+            if extern_block(b, i) {
                 return Some(b.len());
             }
             return gated.then_some(i);
@@ -2640,6 +2639,27 @@ fn gated_attrs_len(b: &[u8]) -> Option<usize> {
         }
         i = i.min(b.len());
     }
+}
+
+/// An extern block starts at b[i..]: `extern "C" {` / `unsafe extern {`, not an `extern "C" fn` (whose body's macro
+/// arguments are no attributes)
+fn extern_block(b: &[u8], i: usize) -> bool {
+    let mut j = i;
+    if b[j..].starts_with(b"unsafe") {
+        j = skip_space(b, j + 6);
+    }
+    if !b[j..].starts_with(b"extern") {
+        return false;
+    }
+    j = skip_space(b, j + 6);
+    if b.get(j) == Some(&b'"') {
+        j += 1;
+        while j < b.len() && b[j] != b'"' {
+            j += 1;
+        }
+        j = skip_space(b, j + 1);
+    }
+    b.get(j) == Some(&b'{')
 }
 
 /// The index of the first byte at or after i that is not whitespace or a comment (`//..`, nested `/* .. */`)
