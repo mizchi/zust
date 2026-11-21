@@ -11,6 +11,8 @@ pub enum Type {
     I128,
     F32,
     F64,
+    /// 128-bit SIMD vector. Its lanes are not part of the type: each [`VOp`] says which [`Lanes`] it reads it as
+    V128,
 }
 
 impl Type {
@@ -20,7 +22,7 @@ impl Type {
             Type::I16 => 2,
             Type::I32 => 4,
             Type::I64 | Type::F64 => 8,
-            Type::I128 => 16,
+            Type::I128 | Type::V128 => 16,
             Type::F32 => 4,
         }
     }
@@ -29,6 +31,196 @@ impl Type {
     }
     pub fn bits(self) -> u32 {
         self.bytes() * 8
+    }
+}
+
+/// How a [`Type::V128`] is read by a SIMD instruction: lane type and count
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Hash)]
+pub enum Lanes {
+    I8x16,
+    I16x8,
+    I32x4,
+    I64x2,
+    F32x4,
+    F64x2,
+}
+
+impl Lanes {
+    /// the scalar type of one lane (what splat takes and extract_lane gives)
+    pub fn lane(self) -> Type {
+        match self {
+            Lanes::I8x16 => Type::I8,
+            Lanes::I16x8 => Type::I16,
+            Lanes::I32x4 => Type::I32,
+            Lanes::I64x2 => Type::I64,
+            Lanes::F32x4 => Type::F32,
+            Lanes::F64x2 => Type::F64,
+        }
+    }
+    pub fn count(self) -> u32 {
+        16 / self.lane().bytes()
+    }
+    pub fn is_float(self) -> bool {
+        matches!(self, Lanes::F32x4 | Lanes::F64x2)
+    }
+}
+
+/// A SIMD instruction (issue #30). The operands are V128 unless noted; the result is V128 unless [`VOp::result`] says
+/// otherwise. The set is what wasm SIMD and SSE4.1 / NEON have in common, and the relaxed instructions separately (their
+/// results may differ between engines and CPUs: a program opts into them by name)
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum VOp {
+    // bitwise, whatever the lanes
+    Not,
+    And,
+    /// a & !b
+    AndNot,
+    Or,
+    Xor,
+    /// (a & c) | (b & !c)
+    Bitselect,
+    /// any bit set (result I8: 0 / 1)
+    AnyTrue,
+    /// (scalar of the lane type) to every lane
+    Splat(Lanes),
+    /// one lane (result: the lane type; i8 / i16 lanes as their bits)
+    Extract(Lanes, u8),
+    /// (vector, scalar of the lane type)
+    Replace(Lanes, u8),
+    /// bytes of (a, b) picked by 16 indices < 32 (byte i of the u128 is the index of result byte i)
+    Shuffle(u128),
+    /// bytes of a picked by the bytes of b (an index >= 16 gives 0)
+    Swizzle,
+    Add(Lanes),
+    Sub(Lanes),
+    /// (not for i8x16)
+    Mul(Lanes),
+    /// (floats)
+    Div(Lanes),
+    Neg(Lanes),
+    Abs(Lanes),
+    /// (floats)
+    Sqrt(Lanes),
+    Ceil(Lanes),
+    Floor(Lanes),
+    Trunc(Lanes),
+    Nearest(Lanes),
+    /// (lanes, unsigned): integers; floats propagate NaN, -0 < +0
+    Min(Lanes, bool),
+    Max(Lanes, bool),
+    /// pseudo-min / max of floats: b < a ? b : a / a < b ? b : a
+    Pmin(Lanes),
+    Pmax(Lanes),
+    /// saturating, i8x16 / i16x8 (lanes, unsigned)
+    AddSat(Lanes, bool),
+    SubSat(Lanes, bool),
+    /// unsigned rounding average, i8x16 / i16x8
+    Avgr(Lanes),
+    /// lanewise compare to a mask of all ones / zeros
+    Icmp(Lanes, IntCC),
+    Fcmp(Lanes, FloatCC),
+    /// (vector, I32 amount mod the lane width)
+    Shl(Lanes),
+    /// (lanes, unsigned)
+    Shr(Lanes, bool),
+    /// every lane non-zero (result I8: 0 / 1)
+    AllTrue(Lanes),
+    /// the top bit of each lane (result I32)
+    Bitmask(Lanes),
+    /// i8x16
+    Popcnt,
+    /// (result lanes, unsigned): two vectors of twice as wide lanes narrowed with saturation (I8x16 / I16x8)
+    Narrow(Lanes, bool),
+    /// (result lanes, high half, unsigned): half the lanes widened (I16x8 / I32x4 / I64x2)
+    Extend(Lanes, bool, bool),
+    /// (result lanes, high half, unsigned): the widened product of half the lanes
+    ExtMul(Lanes, bool, bool),
+    /// (result lanes, unsigned): sums of adjacent pairs, widened (I16x8 / I32x4)
+    ExtAddPairwise(Lanes, bool),
+    /// i32x4 from the products of adjacent i16 pairs, summed
+    Dot,
+    /// i16x8 q15 rounding saturating multiply
+    Q15MulrSat,
+    /// (result F32x4 from I32x4 / F64x2 from the low two I32 lanes, unsigned)
+    FcvtFromInt(Lanes, bool),
+    /// (source F32x4 / F64x2 (into the low lanes, the rest 0), unsigned): to I32x4, saturating
+    FcvtToIntSat(Lanes, bool),
+    /// f64x2 to the low lanes of f32x4 (the rest 0)
+    Demote,
+    /// the low two f32 lanes to f64x2
+    Promote,
+    // relaxed SIMD (results may differ between engines): wasm's relaxed-simd proposal
+    /// a * b + c, fused or not (F32x4 / F64x2)
+    RelaxedMadd(Lanes),
+    /// -(a * b) + c, fused or not
+    RelaxedNmadd(Lanes),
+    RelaxedMin(Lanes),
+    RelaxedMax(Lanes),
+    /// (a, b, mask): bitselect, or by the top bit of each lane
+    RelaxedLaneselect(Lanes),
+    RelaxedSwizzle,
+    /// (source F32x4 / F64x2, unsigned)
+    RelaxedTrunc(Lanes, bool),
+    RelaxedQ15Mulr,
+    /// i16x8 from i8x16 x i7x16
+    RelaxedDot,
+    /// i32x4 from i8x16 x i7x16, plus an i32x4
+    RelaxedDotAdd,
+}
+
+impl VOp {
+    /// the type of the result
+    pub fn result(self) -> Type {
+        match self {
+            VOp::AnyTrue | VOp::AllTrue(_) => Type::I8,
+            VOp::Bitmask(_) => Type::I32,
+            VOp::Extract(l, _) => l.lane(),
+            _ => Type::V128,
+        }
+    }
+    /// how many operands it takes
+    pub fn arity(self) -> usize {
+        match self {
+            VOp::Not
+            | VOp::AnyTrue
+            | VOp::Splat(_)
+            | VOp::Extract(..)
+            | VOp::Neg(_)
+            | VOp::Abs(_)
+            | VOp::Sqrt(_)
+            | VOp::Ceil(_)
+            | VOp::Floor(_)
+            | VOp::Trunc(_)
+            | VOp::Nearest(_)
+            | VOp::AllTrue(_)
+            | VOp::Bitmask(_)
+            | VOp::Popcnt
+            | VOp::Extend(..)
+            | VOp::ExtAddPairwise(..)
+            | VOp::FcvtFromInt(..)
+            | VOp::FcvtToIntSat(..)
+            | VOp::Demote
+            | VOp::Promote
+            | VOp::RelaxedTrunc(..) => 1,
+            VOp::Bitselect | VOp::RelaxedMadd(_) | VOp::RelaxedNmadd(_) | VOp::RelaxedLaneselect(_) | VOp::RelaxedDotAdd => 3,
+            _ => 2,
+        }
+    }
+    /// whether it is a relaxed instruction
+    pub fn relaxed(self) -> bool {
+        matches!(
+            self,
+            VOp::RelaxedMadd(_)
+                | VOp::RelaxedNmadd(_)
+                | VOp::RelaxedMin(_)
+                | VOp::RelaxedMax(_)
+                | VOp::RelaxedLaneselect(_)
+                | VOp::RelaxedSwizzle
+                | VOp::RelaxedTrunc(..)
+                | VOp::RelaxedQ15Mulr
+                | VOp::RelaxedDot
+                | VOp::RelaxedDotAdd
+        )
     }
 }
 
@@ -214,6 +406,17 @@ pub enum Op {
     Trapnz(Value),
     CallIndirect(Value, Vec<Value>, Vec<Type>),
     SymbolAddr(String),
+    /// a V128 constant (byte i is bits 8i..8i+8)
+    Vconst(u128),
+    /// a SIMD instruction
+    Simd(VOp, Vec<Value>),
+}
+
+impl Op {
+    /// whether it is a SIMD instruction (the native backends reject a function that has one, or a V128 value)
+    pub fn is_simd(&self) -> bool {
+        matches!(self, Op::Vconst(_) | Op::Simd(..))
+    }
 }
 
 // --- Recorder: 命令を記録するだけの組み立て (acg が使う) -----------------------------------------------
@@ -886,6 +1089,18 @@ impl Recorder {
     pub fn symbol_addr(&mut self, name: &str) -> Value {
         self.ops.push(Op::SymbolAddr(name.to_string()));
         let r = self.val(Type::I64);
+        self.res.push(vec![r.0]);
+        r
+    }
+    pub fn vconst(&mut self, x: u128) -> Value {
+        self.ops.push(Op::Vconst(x));
+        let r = self.val(Type::V128);
+        self.res.push(vec![r.0]);
+        r
+    }
+    pub fn simd(&mut self, op: VOp, args: &[Value]) -> Value {
+        self.ops.push(Op::Simd(op, args.to_vec()));
+        let r = self.val(op.result());
         self.res.push(vec![r.0]);
         r
     }

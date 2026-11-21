@@ -63,7 +63,7 @@ impl Enc for TySyn {
     }
     fn dec(r: &mut Rd) -> Option<Self> {
         Some(match r.u8()? {
-            c @ 0..18 => TySyn::Prim(TYS[c as usize]),
+            c @ 0..19 => TySyn::Prim(TYS[c as usize]),
             c @ (20 | 21) => TySyn::Ref(c == 21, Box::new(TySyn::dec(r)?)),
             22 => TySyn::Named(String::dec(r)?),
             23 => TySyn::App(String::dec(r)?, Vec::dec(r)?),

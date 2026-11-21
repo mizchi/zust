@@ -33,6 +33,8 @@ pub enum Ty {
     /// 浮動小数点 (IEEE 754)
     F32,
     F64,
+    /// a 128-bit SIMD vector (`core::arch::wasm32::v128`): one value, its lanes are views given by the operations
+    V128,
     /// `&T` (false) / `&mut T` (true)
     Ref(bool, &'static Ty),
     /// Program::structs の index
@@ -159,6 +161,7 @@ impl Ty {
             "char" => Some(Ty::Char),
             "f32" => Some(Ty::F32),
             "f64" => Some(Ty::F64),
+            "v128" => Some(Ty::V128),
             _ => None,
         })
     }
@@ -196,7 +199,7 @@ impl Ty {
             Ty::I16 | Ty::U16 => 16,
             Ty::I32 | Ty::U32 | Ty::Char | Ty::F32 => 32,
             Ty::I64 | Ty::U64 | Ty::Isize | Ty::Usize | Ty::Ptr(..) | Ty::Fn(_) | Ty::F64 => 64,
-            Ty::I128 | Ty::U128 => 128,
+            Ty::I128 | Ty::U128 | Ty::V128 => 128,
             Ty::Ref(..) | Ty::Box(_) if self.is_fat() => 0,
             Ty::Ref(..) | Ty::Box(_) => 64,
             Ty::Unit
@@ -478,7 +481,7 @@ impl Default for TySyn {
 }
 
 /// 組み込みの型 (キャッシュの直列化での番号の順)
-pub const TYS: [Ty; 18] = [
+pub const TYS: [Ty; 19] = [
     Ty::I8,
     Ty::I16,
     Ty::I32,
@@ -497,4 +500,5 @@ pub const TYS: [Ty; 18] = [
     Ty::F64,
     Ty::I128,
     Ty::U128,
+    Ty::V128,
 ];

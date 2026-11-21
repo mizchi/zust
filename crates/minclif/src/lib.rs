@@ -39,7 +39,7 @@ pub type FMap<K, V> = std::collections::HashMap<K, V, std::hash::BuildHasherDefa
 pub type FSet<K> = std::collections::HashSet<K, std::hash::BuildHasherDefault<FxHasher>>;
 
 /// 値の型
-pub use zust_ir::{Block, FloatCC, FuncRef, IntCC, Op, Reloc, StackSlot, Type, Value, Variable};
+pub use zust_ir::{Block, FloatCC, FuncRef, IntCC, Lanes, Op, Reloc, StackSlot, Type, VOp, Value, Variable};
 
 /// 1 関数分の機械語の組み立て (FunctionBuilder が 2 回使う: 解析 (track) と、割り当てを使った本番)
 pub struct Emitter {
@@ -237,7 +237,7 @@ impl Emitter {
                 continue;
             }
             // (i128 はレジスタ 2 つ (下位, 上位)。2 つ残っていなければ全体をスタックで)
-            let parts = if t == Type::I128 { 2 } else { 1 };
+            let parts = if t.bytes() == 16 { 2 } else { 1 };
             if ni + parts <= 6 {
                 for k in 0..parts {
                     b.code.extend_from_slice(&ARG_STORE[ni + k]);
@@ -257,7 +257,7 @@ impl Emitter {
             }
             b.entry_params.push(v);
             // (整数の引数はレジスタに置ける: 入口 (命令 0) で書いたことにし、本番では下でレジスタへ読む)
-            if t == Type::I128 {
+            if t.bytes() == 16 {
                 b.force_mem(v);
             } else {
                 b.ev_def(v.0);
@@ -289,13 +289,13 @@ impl Emitter {
     }
 
     fn new_value(&mut self, t: Type) -> Value {
-        let off = if t == Type::I128 { self.alloc(16, 16) } else { self.alloc(8, 8) };
+        let off = if t.bytes() == 16 { self.alloc(16, 16) } else { self.alloc(8, 8) };
         self.values.push((off, t));
         self.paddr.push(None);
         self.kval.push(None);
         if let Some(tr) = &mut self.track {
             tr.addr_uses.push(0);
-            tr.mem_only.push(t == Type::I128);
+            tr.mem_only.push(t.bytes() == 16);
             tr.vfloat.push(t.is_float());
         }
         Value(self.values.len() as u32 - 1)
@@ -353,11 +353,11 @@ impl Emitter {
     }
 
     pub fn declare_var(&mut self, t: Type) -> Variable {
-        let off = if t == Type::I128 { self.alloc(16, 16) } else { self.alloc(8, 8) };
+        let off = if t.bytes() == 16 { self.alloc(16, 16) } else { self.alloc(8, 8) };
         self.vars.push((off, t));
         self.var_paddr.push(None);
         if let Some(tr) = &mut self.track {
-            tr.var_mem_only.push(t == Type::I128);
+            tr.var_mem_only.push(t.bytes() == 16);
             tr.varfloat.push(t.is_float());
         }
         Variable(self.vars.len() as u32 - 1)
@@ -407,7 +407,7 @@ impl Emitter {
         } else {
             self.store_rax_at(off);
         }
-        if t == Type::I128 {
+        if t.bytes() == 16 {
             let o = self.off(v);
             self.load_rax_at(o + 8);
             self.store_rax_at(off + 8);
@@ -446,7 +446,7 @@ impl Emitter {
         } else {
             self.load_rax_at(off);
         }
-        if t == Type::I128 {
+        if t.bytes() == 16 {
             self.force_mem(v);
             let o = self.values[v.0 as usize].0;
             self.store_rax_at(o);
@@ -552,7 +552,7 @@ impl Emitter {
             let off = self.values[v.0 as usize].0;
             self.store_rax_at(off);
         }
-        if self.values[v.0 as usize].1 != Type::I128 {
+        if self.values[v.0 as usize].1.bytes() != 16 {
             self.rax_holds = Some((v.0, self.code.len()));
         }
     }
@@ -604,7 +604,7 @@ impl Emitter {
     fn iconst_inner(&mut self, t: Type, x: i64) -> Value {
         // (結果をレジスタに置くなら直接書く: 型の幅で 0 拡張した値)
         let d = self.next_loc();
-        if d != MEM && t != Type::I128 && !t.is_float() {
+        if d != MEM && t.bytes() != 16 && !t.is_float() {
             let xv: u64 = match t {
                 Type::I8 => x as u64 & 0xFF,
                 Type::I16 => x as u64 & 0xFFFF,
@@ -935,7 +935,7 @@ impl Emitter {
             Type::I32 | Type::F32 => self.emit_disp(&[0x8B, 0x80], off),
             Type::I16 => self.emit_disp(&[0x48, 0x0F, 0xB7, 0x80], off),
             Type::I8 => self.emit_disp(&[0x48, 0x0F, 0xB6, 0x80], off),
-            Type::I128 => {
+            Type::I128 | Type::V128 => {
                 // 下位を rcx、上位を rax に読んで書く
                 self.emit_disp(&[0x48, 0x8B, 0x88], off);
                 self.emit_disp(&[0x48, 0x8B, 0x80], off + 8);
@@ -987,7 +987,7 @@ impl Emitter {
             Type::I32 | Type::F32 => self.emit_disp(&[0x89, 0x88], off),
             Type::I16 => self.emit_disp(&[0x66, 0x89, 0x88], off),
             Type::I8 => self.emit_disp(&[0x88, 0x88], off),
-            Type::I128 => {
+            Type::I128 | Type::V128 => {
                 self.emit_disp(&[0x48, 0x89, 0x88], off);
                 let o = self.off(v);
                 self.emit_disp(&[0x48, 0x8B, 0x8D], o + 8);
@@ -1104,7 +1104,7 @@ impl Emitter {
     fn pass_args(&mut self, b: Block, args: &[Value]) {
         let ps = self.blocks[b.0 as usize].params.clone();
         // (1 つだけなら入れ替わりは起きない: そのまま書く)
-        if args.len() == 1 && ps.len() >= 1 && self.value_type(args[0]) != Type::I128 {
+        if args.len() == 1 && ps.len() >= 1 && self.value_type(args[0]).bytes() != 16 {
             self.load_rax(args[0]);
             self.store_rax(ps[0]);
             return;
@@ -1113,14 +1113,14 @@ impl Emitter {
         for &a in args {
             self.load_rax(a);
             self.emit(&[0x50]); // push rax
-            if self.value_type(a) == Type::I128 {
+            if self.value_type(a).bytes() == 16 {
                 let o = self.off(a);
                 self.load_rax_at(o + 8);
                 self.emit(&[0x50]);
             }
         }
         for &p in ps.iter().rev().take(args.len()) {
-            if self.value_type(p) == Type::I128 {
+            if self.value_type(p).bytes() == 16 {
                 let o = self.off(p);
                 self.emit(&[0x58]);
                 self.store_rax_at(o + 8);
@@ -1173,7 +1173,7 @@ impl Emitter {
             } else {
                 self.load_rax(v);
             }
-            if self.value_type(v) == Type::I128 {
+            if self.value_type(v).bytes() == 16 {
                 // (上位は rdx)
                 let off = self.off(v);
                 self.emit_disp(&[0x48, 0x8B, 0x95], off + 8);
@@ -1215,7 +1215,7 @@ impl Emitter {
         let mut regs: Vec<(Value, bool)> = vec![];
         let mut stack_parts: Vec<i32> = vec![];
         for &a in &args {
-            let wide = self.value_type(a) == Type::I128;
+            let wide = self.value_type(a).bytes() == 16;
             let n = if wide { 2 } else { 1 };
             if regs.len() + n <= 6 && stack_parts.is_empty() {
                 regs.push((a, false));
@@ -1241,10 +1241,10 @@ impl Emitter {
         }
         const ARG_REG: [u8; 6] = [7, 6, 2, 1, 8, 9];
         // (引数の値が引数のレジスタにあると、順に書くと先に書いたもので壊れる: そのときはスタックを経由する)
-        let clash = regs.iter().any(|&(v, hi)| !hi && self.value_type(v) != Type::I128 && ARG_REG.contains(&self.loc(v)));
+        let clash = regs.iter().any(|&(v, hi)| !hi && self.value_type(v).bytes() != 16 && ARG_REG.contains(&self.loc(v)));
         if clash {
             for &(v, hi) in regs.iter() {
-                if hi || self.value_type(v) == Type::I128 {
+                if hi || self.value_type(v).bytes() == 16 {
                     let off = self.off(v) + if hi { 8 } else { 0 };
                     self.load_rax_at(off);
                 } else {
@@ -1264,7 +1264,7 @@ impl Emitter {
             self.rax_holds = None;
         } else {
             for (i, &(v, hi)) in regs.iter().enumerate() {
-                if hi || self.value_type(v) == Type::I128 {
+                if hi || self.value_type(v).bytes() == 16 {
                     let off = self.off(v) + if hi { 8 } else { 0 };
                     self.emit_disp(&ARG_LOAD[i], off);
                 } else {
@@ -1307,7 +1307,7 @@ impl Emitter {
                 out.push(self.xmm0_result(t));
                 continue;
             }
-            if t == Type::I128 {
+            if t.bytes() == 16 {
                 // rax (下位) と rdx (上位)
                 let v = self.new_value(t);
                 let o = self.off(v);
@@ -2133,6 +2133,38 @@ impl Emitter {
         self.store_rax(v);
         v
     }
+
+    // --- SIMD (issue #30) ---------------------------------------------------
+    // A V128 value is 16 bytes in its slot, moved like an i128 (so loads, stores, variables and block parameters
+    // are right). minclif has no vector instructions yet: a SIMD op is `ud2`, and codegen's lower rejects a
+    // function that has one before it is emitted natively (the wasm backend and Cranelift read the recording).
+
+    /// a V128 constant
+    pub fn vconst(&mut self, x: u128) -> Value {
+        let v = self.new_value(Type::V128);
+        let o = self.off(v);
+        for k in 0..2 {
+            let w = (x >> (64 * k)) as u64;
+            self.emit(&[0x48, 0xB8]);
+            self.emit(&w.to_le_bytes());
+            self.store_rax_at(o + 8 * k);
+        }
+        v
+    }
+
+    /// a SIMD op: not supported here (`ud2`)
+    pub fn simd(&mut self, op: VOp, args: &[Value]) -> Value {
+        for &a in args {
+            self.load_rax(a);
+        }
+        self.emit(&[0x0F, 0x0B]);
+        let t = op.result();
+        let v = self.new_value(t);
+        if t.bytes() != 16 {
+            self.store_rax(v);
+        }
+        v
+    }
 }
 
 // --- ELF64 の再配置可能オブジェクト ------------------------------------------
@@ -2362,7 +2394,7 @@ pub fn sroa(tr: &Track, nvals: usize, paddr: &[Option<(u32, i32)>], nslots: usiz
         if !prom[su] {
             continue;
         }
-        if t == Type::I128 || off < 0 {
+        if t.bytes() == 16 || off < 0 {
             prom[su] = false;
             continue;
         }
@@ -3516,6 +3548,23 @@ impl FunctionBuilder {
         let r = self.dry.symbol_addr(name);
         self.res.push(vec![r.0]);
         r
+    }    pub fn vconst(&mut self, x: u128) -> Value {
+        self.dry.op = self.ops.len() as u32;
+        self.ops.push(Op::Vconst(x));
+        let r = self.dry.vconst(x);
+        self.res.push(vec![r.0]);
+        r
+    }
+    pub fn simd(&mut self, op: VOp, args: &[Value]) -> Value {
+        self.dry.op = self.ops.len() as u32;
+        self.ops.push(Op::Simd(op, args.to_vec()));
+        let r = self.dry.simd(op, args);
+        self.res.push(vec![r.0]);
+        r
+    }
+    /// whether it has a SIMD op or a V128 value (minclif cannot emit them natively)
+    pub fn has_simd(&self) -> bool {
+        self.ops.iter().any(|o| o.is_simd()) || self.dry.values.iter().any(|v| v.1 == Type::V128) || self.dry.vars.iter().any(|v| v.1 == Type::V128)
     }
 }
 
@@ -3963,6 +4012,14 @@ pub fn from_recording(rec: &zust_ir::Recorder) -> (FunctionBuilder, Vec<u32>) {
                 let r = fb.symbol_addr(f0.as_str());
                 put(&mut vm, out[0], r.0);
             }
+            Op::Vconst(f0) => {
+                let r = fb.vconst(*f0);
+                put(&mut vm, out[0], r.0);
+            }
+            Op::Simd(f0, f1) => {
+                let r = fb.simd(*f0, &f1.iter().map(|x| mv(&vm, *x)).collect::<Vec<Value>>());
+                put(&mut vm, out[0], r.0);
+            }
         }
         if verify && !matches!(op, Op::CreateBlock | Op::DeclareVar(_) | Op::CreateStackSlot(..) | Op::ImportFunction(_)) {
             for &x in out {
@@ -4290,6 +4347,12 @@ fn replay(e: &mut Emitter, op: &Op) {
         }
         Op::SymbolAddr(f0) => {
             let _ = e.symbol_addr(f0.as_str());
+        }
+        Op::Vconst(f0) => {
+            let _ = e.vconst(*f0);
+        }
+        Op::Simd(f0, f1) => {
+            let _ = e.simd(*f0, f1);
         }
     }
 }

@@ -31,6 +31,7 @@ mod p7_fmt_hash_cmp;
 mod p8_misc;
 mod p9_inline;
 mod exhaust;
+mod simd;
 pub use p9_inline::{inline_candidate, Inline, MAX_TOKENS};
 #[allow(unused_imports)]
 pub use p1_expr::*;
@@ -150,6 +151,7 @@ pub fn clif_ty(t: Ty) -> Option<Type> {
         Ty::Ref(..) | Ty::Ptr(..) => PTR,
         Ty::F32 => types::F32,
         Ty::F64 => types::F64,
+        Ty::V128 => types::V128,
         t => match t.bits() {
             0 => return None,
             8 => types::I8,

@@ -15,6 +15,47 @@ stays in it:
 | `wasm_host_denies` | `deny/*.rs`: spawning a process (the module imports `fork` / `execvp` and is not run at all), reading and writing host files (they fail; no file appears), the host's environment (empty) |
 | `wasm_contains_faults` | `contain/*.rs`: unsafe code that writes past 4 GiB (would wrap onto the stack), reads the null page, writes past the end of memory, copies or fills such addresses in bulk, calls an integer as a function, calls a function pointer with bits past 32 set, calls through a pointer of another signature, overflows the stack, or allocates more than memory: each run ends in a trap or an abort, before its next line |
 
+## SIMD (`core::arch::wasm32`, issue #30)
+
+zustc's IR has a vector type, `Type::V128`, and SIMD instructions (`Op::Simd(VOp, ..)`, `Op::Vconst`), taken from
+what wasm SIMD and SSE4.1 / NEON have in common, with the relaxed instructions apart. The wasm backend emits each one
+as its `0xFD` opcode (the relaxed ones from `0xFD 0x100`); Node 22 and 26 run both without flags.
+
+- `v128` is a primitive type (16 bytes, aligned to 16), held in one wasm local, passed and returned as a `v128`
+  parameter or result. It can be a struct field, an array or `Vec` element, an `Option` payload, a closure capture or a
+  generic argument.
+- The intrinsics of `core::arch::wasm32` (rustc's names and types: `f32x4_add`, `u8x16_shr`, `i32x4_extract_lane::<N>`,
+  `i8x16_shuffle::<..>`, `v128_load`, `f32x4_relaxed_madd`, ..: the whole `simd128` and `relaxed-simd` sets) are
+  lowered in place to one instruction each, or a few (a constructor is a splat and lane replacements). They are not
+  prelude functions: a program that names none of them compiles as before. One that defines a function of the same
+  name calls its own. An intrinsic cannot be used as a function value (`apply(f32x4_add, ..)`: write a closure).
+- `cfg(target_feature = "simd128")` and `"relaxed-simd"` are true for wasm32.
+- Loads and stores of `v128` check their address as scalar ones do (`contain/simd_*.rs`).
+- Native builds do not support SIMD yet: the Cranelift and minclif backends reject a function with a `v128` value or
+  a SIMD instruction ("SIMD (v128) is supported only with --target wasm32-unknown-unknown so far").
+
+`tests/wasm.rs`'s `wasm_simd_like_rustc` checks that `simd/*.rs` (every intrinsic, on edge cases: NaN, ±0, saturation,
+out-of-range shifts and swizzle indices, and `v128` as a value) print what rustc's wasm32-wasip1 builds print under
+Node's WASI (`wasi.mjs`; needs `rustup target add wasm32-wasip1`). rustc's build is unoptimized there: with -O, LLVM
+folds `f32x4_pmin` / `f32x4_pmax` of constants with the operands swapped, which differs from its definition and
+from the wasm spec on NaN and ±0 lanes. Relaxed results are compared on inputs where every allowed result agrees, and
+by whether a result is one of the allowed ones.
+
+The kernels of experiments/zustscript written against `core::arch::wasm32` (`simd/kernels.rs` has them), timed
+in place of zsc's hand-written v128 module with the same JS glue (`tests/ml_bench.mjs`, Node 22.23, 1e6 elements;
+zustc without -O):
+
+| kernel | hand-written v128 | zustc, `core::arch::wasm32` | zustc, scalar (before) |
+|---|---|---|---|
+| dense 512×512 | 0.11 ms | 0.20 ms | 3.69 ms |
+| relu | 2.7 ms | 4.0 ms | 42.0 ms |
+| saxpy (relaxed madd) | 2.1 ms | 3.7–4.1 ms | 29.0 ms |
+| sum of squares | 0.55 ms | 0.91 ms | 14.6 ms |
+
+The instructions are the same as the hand-written module's; the 1.5–1.8x left is the backend's: the `loop` +
+`br_table` dispatcher between blocks and the address checks (with `ZUSTC_WASM_NO_ADDR_CHECK=1` and -O, the sum of
+squares takes 0.70 ms), and zustc's `vec![0.0; n]` for the outputs.
+
 ## The sandbox
 
 `run.mjs` is the host. The module can do only what the host's imports let it:
@@ -50,6 +91,7 @@ table index or signature mismatch) and for `abort`; 126 for a module that needs 
 - `usize` and pointers are 8 bytes (the layouts are those of x86-64), so `cfg(target_pointer_width = "64")` is true.
   Exported functions take and return i64 for them.
 - Traps carry no panic message (the native build prints the location from its trap table).
+- SIMD is wasm only (see above); the native backends reject it.
 - Not supported yet: i128 division and float conversions, threads (green threads need `swapcontext`), processes,
   files other than the arguments, workspace builds (`zustc build`), and self-hosting zustc as wasm.
 - Speed: every block is a case of one `loop` + `br_table` dispatcher and every value a local, so bench/rt runs 3 to 15

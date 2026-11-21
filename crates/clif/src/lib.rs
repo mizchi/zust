@@ -46,8 +46,12 @@ fn ty(t: Type) -> ir::Type {
         Type::I128 => types::I128,
         Type::F32 => types::F32,
         Type::F64 => types::F64,
+        Type::V128 => types::I8X16,
     }
 }
+
+/// what a native backend says about a function with SIMD ops (issue #30: only the wasm32 backend emits them yet)
+pub const NO_SIMD: &str = "SIMD (v128) is supported only with --target wasm32-unknown-unknown so far (issue #30)";
 
 fn icc(c: IntCC) -> CIntCC {
     match c {
@@ -90,6 +94,9 @@ pub fn compile(fb: &FunctionBuilder, zero: &[StackSlot], opt: bool) -> Result<(V
 }
 
 fn build(fb: &FunctionBuilder, zero: &[StackSlot], isa: &dyn cranelift_codegen::isa::TargetIsa) -> Result<(Vec<u8>, Vec<Reloc>, Vec<(u32, u8)>), String> {
+    if fb.has_simd() {
+        return Err(NO_SIMD.into());
+    }
     let mut sig = Signature::new(CallConv::SystemV);
     for &p in &fb.params {
         sig.params.push(AbiParam::new(ty(p)));
@@ -599,6 +606,7 @@ fn build(fb: &FunctionBuilder, zero: &[StackSlot], isa: &dyn cranelift_codegen::
                     }
                 }
             }
+            Op::Vconst(_) | Op::Simd(..) => return Err(NO_SIMD.into()),
             Op::SymbolAddr(n) => {
                 let gv = match gvs.get(n) {
                     Some(&g) => g,

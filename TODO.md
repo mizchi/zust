@@ -75,6 +75,20 @@ behavior: `cve_2020_36323_join_borrow` (join over a `Borrow<str>` of the program
   - zustc built as wasm by itself.
 - Traps carry no panic message (the native build prints the location from its trap table).
 
+## SIMD (issue #30)
+
+Done: `Type::V128` and the SIMD instructions in the IR (`VOp`), the wasm backend, `core::arch::wasm32` (all of
+`simd128` and `relaxed-simd`), tests against rustc's wasm32-wasip1 builds (tests/wasm/README.md). Left:
+
+- Cranelift lowering of `VOp` (I8X16 .. F64X2), and `core::arch::x86_64`'s SSE / SSE2 subset on native. Both native
+  backends reject SIMD today.
+- minclif: scalarize each `VOp` (one lane at a time), so that every backend accepts every instruction.
+- A `core::simd` subset (`f32x4`, `Simd<T, N>`, lanewise operators) as generic code over the intrinsics.
+- Intrinsics as function values (`map(f32x4_add)`): they are lowered at the call, not functions.
+- The kernels of experiments/zustscript are 1.5–1.8x the hand-written v128 module: the dispatcher between blocks and
+  the address checks (the relooper / stackifier above).
+- Auto-vectorization of simple slice loops (map / sum).
+
 ## Tooling
 
 - `scripts/docs_check.sh` without an API key skips a manifest whose record is out of date. jev-lint rejects the whole

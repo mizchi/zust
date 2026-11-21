@@ -1703,6 +1703,27 @@ impl Inf<'_> {
                         return self.known(t);
                     }
                 }
+                // `core::arch::wasm32`'s SIMD intrinsics (`f32x4_add(a, b)`; acg lowers them in place)
+                let last = &segs[segs.len() - 1].name;
+                if crate::simd_sig::maybe_simd(last) && self.fn_by(p).is_none() {
+                    if let Some((ps, r)) = crate::simd_sig::simd_sig(last).filter(|(ps, _)| ps.len() == args.len()) {
+                        for (a, k) in args.iter().zip(ps) {
+                            let av = self.expr(a);
+                            match k {
+                                crate::simd_sig::SArg::V => {
+                                    let kv = self.known(Ty::V128);
+                                    self.unify(av, kv);
+                                }
+                                crate::simd_sig::SArg::S(t) => {
+                                    let kv = self.known(t);
+                                    self.unify(av, kv);
+                                }
+                                crate::simd_sig::SArg::P => {}
+                            }
+                        }
+                        return self.known(r);
+                    }
+                }
                 // `f64::from_bits(u)`
                 if segs.len() == 2 && args.len() == 1 && segs[1].name == "from_bits" && matches!(segs[0].name.as_str(), "f64" | "f32") {
                     let a = self.expr(&args[0]);

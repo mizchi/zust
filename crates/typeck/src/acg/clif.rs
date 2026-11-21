@@ -15,6 +15,7 @@ pub mod types {
     pub const I128: Type = Type::I128;
     pub const F32: Type = Type::F32;
     pub const F64: Type = Type::F64;
+    pub const V128: Type = Type::V128;
 }
 
 /// メモリアクセスの印 (minclif では意味を持たない)
@@ -201,6 +202,9 @@ impl Ins<'_> {
     }
     pub fn iconst(self, t: Type, x: i64) -> Value {
         let m = &mut self.0.m;
+        if t == Type::V128 {
+            return m.vconst(x as u64 as u128);
+        }
         if t == Type::I128 {
             let lo = m.iconst(Type::I64, x);
             let hi = m.iconst(Type::I64, 0);

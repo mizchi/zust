@@ -16,6 +16,9 @@ pub fn lower(rec: &Recorder, late: &[StackSlot], opt: bool, cl: Option<ClBackend
         // (Cranelift のバックエンド: 記録した命令の列を Cranelift の IR にしてコンパイルする)
         Some(cl) => cl(&fb, late, opt),
         None => {
+            if fb.has_simd() {
+                return Err("SIMD (v128) is supported only with --target wasm32-unknown-unknown so far (issue #30)".into());
+            }
             fb.set_zero(late);
             let t = fb.traps();
             let (c, r) = fb.finish_zeroing(late);
