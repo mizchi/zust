@@ -244,3 +244,21 @@ fn tuples_and_ref_bindings() {
     one_error("struct S<'b>(&'b i32);\nimpl<'b> S<'b> {\n    fn bar<'a>(&'a mut self) -> &'a mut &'a i32 {\n        let ref mut x = self.0;\n        x\n    }\n}\nfn main() {}\n", 5);
     assert_eq!(check("fn pair<'a>(x: &'a u8, y: &'a u8) -> (&'a u8, &'a u8) { (x, y) }\nfn main() { let (a, b) = (1, 2); let p = pair(&a, &b); let ref q = p.0; println!(\"{} {}\", p.1, q); }\n"), vec![]);
 }
+
+/// A trait object's lifetime: written, or the default (the reference around it, the type parameter's one bound,
+/// else 'static in a signature)
+#[test]
+fn object_lifetimes() {
+    one_error("trait Test {}\nfn f<'a>(x: Box<dyn Test + 'a>) -> Box<dyn Test> {\n    x\n}\nfn main() {}\n", 3);
+    one_error("trait Test {}\nfn f<'a, 'b>(x: &'a dyn Test) -> &'b dyn Test {\n    x\n}\nfn main() {}\n", 3);
+    let ok = r#"
+trait Test {}
+struct Ref<'a, T: 'a + ?Sized> { r: &'a T }
+struct SomeStruct<'a> { t: Ref<'a, dyn Test>, u: Ref<'a, dyn Test + 'a> }
+fn c<'a>(t: Ref<'a, dyn Test + 'a>, mut ss: SomeStruct<'a>) { ss.t = t; }
+fn d<'a>(x: &'a (dyn Test + 'a)) -> &'a dyn Test { x }
+fn e(x: Box<dyn Test>) -> Box<dyn Test + 'static> { x }
+fn main() {}
+"#;
+    assert_eq!(check(ok), vec![]);
+}

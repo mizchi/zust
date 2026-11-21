@@ -2,7 +2,7 @@
 //! summaries (`TySyn`) and of the program (`Ty`) carry no regions: the region checker reads these beside them.
 
 use crate::parse::{Bound, FnSig as PSig, GArg, GParam, Generics, Ty as PTy};
-use crate::types::{RAdtSyn, RImplSyn, RSigSyn, R_ELIDED, R_ELIDED_ADT, R_STATIC, R_UNKNOWN};
+use crate::types::{RAdtSyn, RImplSyn, RSigSyn, R_DYN_DEFAULT, R_ELIDED, R_ELIDED_ADT, R_STATIC, R_UNKNOWN};
 
 const PRIMS: &[&str] = &[
     "i8", "i16", "i32", "i64", "i128", "isize", "u8", "u16", "u32", "u64", "u128", "usize", "f32", "f64", "bool", "char", "str",
@@ -169,7 +169,16 @@ impl<'a> Slots<'a> {
             }
             // (`impl Trait` as a parameter's type is a type parameter of its own)
             PTy::Impl(_) if arg => {}
-            PTy::Path(Some(_), _) | PTy::Fn(..) | PTy::Dyn(_) | PTy::Impl(_) | PTy::Infer | PTy::Macro(_) => out.push(R_UNKNOWN),
+            // (a trait object's lifetime: the one written as a bound, else the default; the regions in the trait's
+            // own arguments are not followed)
+            PTy::Dyn(bs) => {
+                let code = match bs.iter().find_map(|b| if let Bound::Lifetime(l) = b { Some(l.clone()) } else { None }) {
+                    Some(l) => self.code(Some(&l)),
+                    None => R_DYN_DEFAULT,
+                };
+                out.push(code);
+            }
+            PTy::Path(Some(_), _) | PTy::Fn(..) | PTy::Impl(_) | PTy::Infer | PTy::Macro(_) => out.push(R_UNKNOWN),
             PTy::Never => {}
         }
     }
@@ -313,7 +322,8 @@ mod tests {
         assert_eq!(t.slots, vec![vec![R_ELIDED], vec![R_STATIC], vec![]]);
         assert_eq!(t.ty_outlives, vec![("T".to_string(), R_STATIC)]);
         assert_eq!(sig_of("fn k(f: &dyn Fn(u8)) {}"), None);
-        assert_eq!(sig_of("fn k<'a>(f: &'a dyn Fn(u8)) {}").unwrap().slots[0], vec![0, R_UNKNOWN]);
+        assert_eq!(sig_of("fn k<'a>(f: &'a dyn Fn(u8)) {}").unwrap().slots[0], vec![0, R_DYN_DEFAULT]);
+        assert_eq!(sig_of("fn k<'a>(f: Box<dyn Fn(u8) + 'a>) {}").unwrap().slots[0], vec![R_ELIDED_ADT, 0]);
     }
 
     #[test]

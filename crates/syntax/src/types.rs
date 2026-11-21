@@ -296,6 +296,9 @@ pub const R_ELIDED_ADT: u8 = 0xF2;
 /// A type the checker does not follow (a projection, `dyn`, `impl`, a fn pointer, a macro): the whole parameter is
 /// not checked
 pub const R_UNKNOWN: u8 = 0xF3;
+/// A trait object's lifetime not written (`&'a dyn Tr`, `Box<dyn Tr>`): the default (the reference's region directly
+/// around it, else 'static in a signature; inferred in a body)
+pub const R_DYN_DEFAULT: u8 = 0xF4;
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Default)]
 pub struct RSigSyn {

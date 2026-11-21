@@ -444,6 +444,7 @@ compile-fail	async-await/issues/issue-62009-1.rs
 compile-fail	async-await/issues/issue-62009-2.rs
 check-pass	async-await/issues/issue-62517-1.rs
 check-pass	async-await/issues/issue-62517-2.rs
+compile-fail	async-await/issues/issue-63388-1.rs
 check-pass	async-await/issues/issue-63388-3.rs
 check-pass	async-await/issues/issue-63388-4.rs
 check-pass	async-await/issues/issue-64391-2.rs
@@ -4257,13 +4258,17 @@ compile-fail	numeric/uppercase-base-prefix-invalid-no-fix.rs
 compile-fail	numeric/uppercase-base-prefix.rs
 check-pass	object-lifetime/object-lifetime-default-assoc-ty-self-ty-static.rs
 run-pass	object-lifetime/object-lifetime-default-default-to-static.rs
+compile-fail	object-lifetime/object-lifetime-default-elision.rs
 compile-fail	object-lifetime/object-lifetime-default-from-box-error.rs
 run-pass	object-lifetime/object-lifetime-default-from-ref-struct.rs
+compile-fail	object-lifetime/object-lifetime-default-from-rptr-box-error.rs
 run-pass	object-lifetime/object-lifetime-default-from-rptr-box.rs
 run-pass	object-lifetime/object-lifetime-default-from-rptr-mut.rs
+compile-fail	object-lifetime/object-lifetime-default-from-rptr-struct-error.rs
 run-pass	object-lifetime/object-lifetime-default-from-rptr-struct.rs
 run-pass	object-lifetime/object-lifetime-default-from-rptr.rs
 check-pass	object-lifetime/object-lifetime-default-inferred-args.rs
+compile-fail	object-lifetime/object-lifetime-default-mybox.rs
 check-pass	object-lifetime/object-lifetime-default-resolved-gat.rs
 compile-fail	object-lifetime/undeclared-object-lifetime.rs
 compile-fail	offset-of/offset-of-arg-count.rs
@@ -5292,6 +5297,7 @@ compile-fail	regions/regions-in-enums-anon.rs
 compile-fail	regions/regions-in-enums.rs
 compile-fail	regions/regions-in-structs-anon.rs
 compile-fail	regions/regions-in-structs.rs
+compile-fail	regions/regions-infer-at-fn-not-param.rs
 run-pass	regions/regions-infer-borrow-scope-addr-of.rs
 compile-fail	regions/regions-infer-borrow-scope-too-big.rs
 run-pass	regions/regions-infer-borrow-scope-view.rs
@@ -5338,6 +5344,7 @@ compile-fail	regions/regions-static-bound.rs
 run-pass	regions/regions-static-closure.rs
 check-pass	regions/regions-trait-1.rs
 run-pass	regions/regions-trait-object-1.rs
+compile-fail	regions/regions-trait-object-subtyping.rs
 compile-fail	regions/regions-undeclared.rs
 run-pass	regions/regions-variance-contravariant-use-contravariant.rs
 run-pass	regions/regions-variance-covariant-use-covariant.rs

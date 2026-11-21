@@ -20,7 +20,7 @@ use super::{Cx, Loc, Sp};
 use crate::fxhash::FxMap as HashMap;
 use crate::parse::{Expr, Stmt, Ty as PTy};
 use crate::program::Program;
-use crate::types::{RSigSyn, Ty, R_ELIDED, R_ELIDED_ADT, R_STATIC, R_UNKNOWN};
+use crate::types::{RSigSyn, Ty, R_DYN_DEFAULT, R_ELIDED, R_ELIDED_ADT, R_STATIC, R_UNKNOWN};
 
 /// Region variables of a value, aligned with the region slots of its type
 pub type RT = Vec<u32>;
@@ -97,6 +97,8 @@ pub struct Rg {
     pub inst_args: Vec<Ty>,
     /// Borrows of what the function owns (a local, not through a reference): (region, the place's text, where)
     pub loans: Vec<(u32, String, Sp)>,
+    /// Instantiating a type written in a body (`let` annotation, cast): a trait object's default lifetime is inferred
+    pub dyn_infer: bool,
     /// ZUSTC_RG_DEBUG: the kinds of values not followed
     pub missed: Vec<&'static str>,
     /// The last scrutinee's tree; the part of it the pattern being bound matches, and the region of the reference
@@ -202,6 +204,8 @@ struct Codes<'a> {
     codes: Option<&'a [u8]>,
     pos: usize,
     ok: bool,
+    /// The region of the reference directly around the type being read (a trait object's default lifetime)
+    parent: Option<u32>,
 }
 
 impl Codes<'_> {
@@ -300,7 +304,7 @@ impl Rg {
             let mut acc = vec![Var::Bi; nl + ng];
             for (i, &ft) in fields.iter().enumerate() {
                 let codes = ar.as_ref().map(|r| r.fields.get(i).map(|c| c.as_slice()).unwrap_or(&[]));
-                let mut c = Codes { codes, pos: 0, ok: true };
+                let mut c = Codes { codes, pos: 0, ok: true, parent: None };
                 self.var_walk(prog, ft, &mut c, Var::Co, nl, &mut acc, 0);
             }
             let again = self.var_cycle && acc != cur;
@@ -376,7 +380,7 @@ impl Rg {
             }
             Ty::Fn(ft) => {
                 c.next();
-                let mut none = Codes { codes: Some(&[]), pos: 0, ok: true };
+                let mut none = Codes { codes: Some(&[]), pos: 0, ok: true, parent: None };
                 for &p in &ft.params {
                     // (the regions in a fn pointer's types are not followed, its type parameters are)
                     none.codes = None;
@@ -401,6 +405,7 @@ impl Rg {
             c.ok = false;
             return;
         }
+        let parent = c.parent.take();
         let region = |me: &mut Rg, c: &mut Codes, elided: &mut dyn FnMut(&mut Rg) -> u32| -> u32 {
             match c.next() {
                 R_STATIC => STATIC,
@@ -416,6 +421,7 @@ impl Rg {
             Ty::Ref(_, i) => {
                 let r = region(self, c, elided);
                 out.push(r);
+                c.parent = Some(r);
                 self.inst(prog, *i, c, lts, targs, elided, out, depth + 1);
             }
             Ty::Ptr(_, i) | Ty::Array(i, _) | Ty::Slice(i) => self.inst(prog, *i, c, lts, targs, elided, out, depth + 1),
@@ -430,6 +436,7 @@ impl Rg {
                 }
                 let base = prog.base_of(sid);
                 let n = lts_of(prog, base);
+                let own0 = out.len();
                 if !prog.is_tuple(sid) {
                     if n == 0 {
                         c.elided_adt();
@@ -445,7 +452,21 @@ impl Rg {
                         }
                     }
                 }
-                for &a in &prog.structs[sid as usize].args {
+                let ar = prog.adt_regions.get(&base).cloned();
+                for (j, &a) in prog.structs[sid as usize].args.clone().iter().enumerate() {
+                    // (a trait object as a type argument: its default lifetime is the parameter's one lifetime bound
+                    // (`struct Ref<'a, T: 'a>` makes `Ref<'a, dyn Tr>` `dyn Tr + 'a`); with two, a variable of its own)
+                    if matches!(a, Ty::Dyn(_)) {
+                        if let (Some(ar), Some(gn)) = (&ar, prog.structs[base as usize].generics.get(j)) {
+                            let bs: Vec<u8> = ar.ty_outlives.iter().filter(|x| x.0 == *gn).map(|x| x.1).collect();
+                            match bs.as_slice() {
+                                [] => {}
+                                [R_STATIC] => c.parent = Some(STATIC),
+                                [k] if (*k as usize) < n => c.parent = out.get(own0 + *k as usize).copied(),
+                                _ => c.parent = Some(self.var()),
+                            }
+                        }
+                    }
                     self.inst(prog, a, c, lts, targs, elided, out, depth + 1);
                 }
             }
@@ -454,8 +475,26 @@ impl Rg {
                 Some(None) => c.ok = false,
                 None => {}
             },
-            Ty::Dyn(_) | Ty::Fn(_) => {
-                // (a trait object's or fn pointer's regions are not followed: a variable of its own)
+            Ty::Dyn(_) => {
+                // (its lifetime: written, or the default: the reference's around it, else 'static in a signature and
+                // inferred in a body)
+                let v = match c.next() {
+                    R_DYN_DEFAULT | R_ELIDED => match parent {
+                        Some(r) => r,
+                        None if self.dyn_infer => self.var(),
+                        None => STATIC,
+                    },
+                    R_STATIC => STATIC,
+                    x if (x as usize) < lts.len() => lts[x as usize],
+                    _ => {
+                        c.ok = false;
+                        0
+                    }
+                };
+                out.push(v);
+            }
+            Ty::Fn(_) => {
+                // (a fn pointer's regions are not followed: a variable of its own)
                 let _ = c.next();
                 let v = self.var();
                 out.push(v);
@@ -472,7 +511,7 @@ impl Rg {
         if codes.is_some_and(|c| c.contains(&R_UNKNOWN)) {
             return None;
         }
-        let mut c = Codes { codes, pos: 0, ok: true };
+        let mut c = Codes { codes, pos: 0, ok: true, parent: None };
         let mut out = vec![];
         self.inst(prog, t, &mut c, lts, targs, elided, &mut out, 0);
         (c.ok && codes.is_none_or(|x| c.pos == x.len())).then_some(out)
@@ -794,6 +833,11 @@ impl Cx<'_> {
         let r = self.rt_expr_inner(e);
         if r.is_none() && debug() {
             self.rg.missed.push(kind(e));
+            if let Expr::Path(_, p) = strip(e) {
+                let n = p.segs.iter().map(|s| s.name.as_str()).collect::<Vec<_>>().join("::");
+                let lt = p.segs.last().and_then(|s| self.lookup(&s.name)).map(|(_, t)| self.prog.tn(t));
+                eprintln!("regionck: path {n} not followed (local: {lt:?})");
+            }
         }
         r
     }
@@ -861,7 +905,10 @@ impl Cx<'_> {
                 let mut codes = vec![];
                 s.slots(ty, false, &mut codes);
                 let lts = self.rg.lts.clone();
-                let tree = self.rg.instantiate(prog, to, Some(&codes), &lts, &[], &mut |me| me.var())?;
+                self.rg.dyn_infer = true;
+                let tree = self.rg.instantiate(prog, to, Some(&codes), &lts, &[], &mut |me| me.var());
+                self.rg.dyn_infer = false;
+                let tree = tree?;
                 self.rg.relate(prog, to, &itr, &tree, super::borrowck::pos(x));
                 Some((to, tree))
             }
@@ -976,7 +1023,10 @@ impl Cx<'_> {
                 let mut codes = vec![];
                 s.slots(a, false, &mut codes);
                 let lts = self.rg.lts.clone();
-                self.rg.instantiate(prog, t, Some(&codes), &lts, &[], &mut |me| me.var())
+                self.rg.dyn_infer = true;
+                let tr = self.rg.instantiate(prog, t, Some(&codes), &lts, &[], &mut |me| me.var());
+                self.rg.dyn_infer = false;
+                tr
             }
             None => self.rg.fresh(prog, t),
         };
