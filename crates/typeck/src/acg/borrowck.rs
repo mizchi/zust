@@ -128,6 +128,8 @@ pub struct BkError {
 
 #[derive(Default)]
 pub struct Bk {
+    /// The loans of implicit reborrows (`f(x)` with x: `&mut T`: bk_reborrow_arg)
+    pub implicit: Vec<u32>,
     /// The loans that are two-phase borrows' reservations (shared loans of a `&mut self` receiver while the arguments
     /// are evaluated)
     pub reserved: Vec<u32>,
@@ -1103,6 +1105,10 @@ impl Bk {
             let lo_mut = lo.mutable || self.reserved.contains(&ln);
             let lk = if lo_mut { "mutable" } else { "immutable" };
             let msg = match a {
+                // (the reference read for an implicit reborrow of the previous round of a loop: `f(x)` again)
+                Acc::Read if lo.sp == sp && self.implicit.contains(&ln) => {
+                    format!("cannot borrow `*{name}` as mutable more than once at a time (first borrow at {at}, in the previous iteration of the loop)")
+                }
                 Acc::Read | Acc::Drop => format!("cannot use `{name}` because it was mutably borrowed (at {at})"),
                 Acc::Move => format!("cannot move out of `{name}` because it is borrowed (at {at})"),
                 Acc::Write | Acc::Modify => format!("cannot assign to `{name}` because it is borrowed (at {at})"),
@@ -1530,6 +1536,23 @@ impl Cx<'_> {
         if self.bk.locals[l as usize].refs {
             self.bk.src(Src::Local(l));
         }
+    }
+
+    /// A `&mut` local passed where a `&mut` is expected is reborrowed (`f(x)` is `f(&mut *x)`): the loan of `*x`, which
+    /// lives as long as the region check finds it must (Rg::forever, Rg::holders), by the argument's address. Only when
+    /// the region check is on: it is what makes such a loan outlive the call
+    pub(crate) fn bk_reborrow_arg(&mut self, a: &Expr) {
+        if !self.bk_on() || !self.rg.on || !matches!(strip_paren(a), Expr::Path(..)) {
+            return;
+        }
+        let Some((mut p, Some(Ty::Ref(true, _)))) = self.bk_place(a) else { return };
+        p.proj.push(ref_deref(true));
+        let sp = err_pos(a);
+        let ln = self.bk.loans.len() as u32;
+        self.bk.loan_of.insert(a as *const Expr as usize, ln);
+        self.bk.loans.push(Loan { place: p.clone(), mutable: true, sp, at: sp, quiet: false, capture: false });
+        self.bk.implicit.push(ln);
+        self.bk_ev(Ev::Acc(p, Acc::Borrow(ln), sp));
     }
 
     /// `&e` of a temporary (not promoted to a static): a hidden local that goes out of scope at the end of the

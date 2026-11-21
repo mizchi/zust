@@ -975,6 +975,16 @@ impl RgSt {
         if sub.is_empty() || sup.is_empty() {
             return;
         }
+        // (`&mut (dyn Tr + 'a)` to `&mut (dyn Tr + 'b)` with 'a: 'b, `Box` too: an unsizing coercion. The object's
+        // lifetime right under the pointer shortens, though `&mut` is invariant)
+        if let (Ty::Ref(_, Ty::Dyn(_)), Ty::Ref(_, Ty::Dyn(_))) | (Ty::Box(Ty::Dyn(_)), Ty::Box(Ty::Dyn(_))) = (from, to) {
+            if from == to && sub.len() == sup.len() {
+                for (&x, &y) in sub.iter().zip(sup) {
+                    self.constrain(x, y, Var::Co, sp);
+                }
+                return;
+            }
+        }
         if from == to {
             return self.relate(prog, to, sub, sup, sp);
         }
@@ -2149,6 +2159,20 @@ impl Cx<'_> {
 
     /// A call through a fn pointer (f: the callee's value, of type t once dereferenced): the arguments flow into its
     /// parameters' regions, the result is of its result's
+    /// A `&mut` local passed where a `&mut` is expected is reborrowed (`f(x)` is `f(&mut *x)`): a region of its own,
+    /// that the reference's outlives, recorded as a reborrow (the borrow check's loan of the argument: see
+    /// Rg::forever)
+    fn rg_reborrow_arg(&mut self, a: &Expr, t: &mut Option<(Ty, RT)>) {
+        let Some((Ty::Ref(true, _), tr)) = t else { return };
+        if tr.is_empty() || self.rg.closure.is_some() || !matches!(strip(a), Expr::Path(..)) {
+            return;
+        }
+        let r = self.rg.var();
+        self.rg.edge(tr[0], r, super::borrowck::pos(a));
+        tr[0] = r;
+        self.rg.reborrows.push((a as *const Expr as usize, r));
+    }
+
     pub(crate) fn rg_fnptr_call(&mut self, f: &Expr, t: Ty, args: &[&Expr]) {
         if !self.rg_on() {
             return;
@@ -2171,7 +2195,11 @@ impl Cx<'_> {
             let Some(n) = count(prog, pt, 0) else { return };
             let Some(ptr) = tr.get(k..k + n).map(|x| x.to_vec()) else { return };
             k += n;
-            if let Some((at, atr)) = self.rt_expr(a) {
+            let mut t = self.rt_expr(a);
+            if matches!(pt, Ty::Ref(true, _)) {
+                self.rg_reborrow_arg(a, &mut t);
+            }
+            if let Some((at, atr)) = t {
                 self.rg.flow(prog, at, pt, &atr, &ptr, super::borrowck::pos(a));
             }
         }
@@ -2424,9 +2452,12 @@ impl Cx<'_> {
         if has_recv {
             atrees.push((recv.map(|r| (None, r.0)), recv_sp(&recv_info, sp)));
         }
-        for a in args {
-            let t = self.rt_expr(a).map(|x| (Some(x.0), x.1));
-            atrees.push((t, super::borrowck::pos(a)));
+        for (i, a) in args.iter().enumerate() {
+            let mut t = self.rt_expr(a);
+            if params.get(i + has_recv as usize).is_some_and(|p| matches!(p, Ty::Ref(true, _))) {
+                self.rg_reborrow_arg(a, &mut t);
+            }
+            atrees.push((t.map(|x| (Some(x.0), x.1)), super::borrowck::pos(a)));
         }
         let rg = &mut self.rg;
         for (i, ((at, asp), pt)) in atrees.iter().zip(&ptrees).enumerate() {

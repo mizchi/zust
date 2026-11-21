@@ -1741,6 +1741,9 @@ impl Cx<'_> {
                 self.bk_frame();
             }
             let r = self.expr(a, exp);
+            if matches!(pt, Ty::Ref(true, _)) {
+                self.bk_reborrow_arg(a);
+            }
             if top_ref {
                 // (the loan of an argument `&x` / `&mut x` lasts until the call: `f(&mut x, &x)` conflicts)
                 let srcs = self.bk_frame_end_quiet();

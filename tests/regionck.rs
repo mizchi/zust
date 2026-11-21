@@ -1032,3 +1032,18 @@ fn closure_capture_by_mut_method() {
         vec![]
     );
 }
+
+/// A `&mut` local passed where a `&mut` is expected is reborrowed: one that must outlive a lifetime of the signature
+/// lives to the function's end, so passing it again in a loop is E0499. `&mut dyn Tr` passed on to `&mut dyn Tr` may
+/// shorten the object's lifetime (an unsizing coercion), and is no such reborrow
+#[test]
+fn implicit_reborrow_of_a_mut_argument() {
+    let d = check("struct W<'a> {\n    func: fn(&'a mut u8),\n}\nimpl<'a> W<'a> {\n    fn in_loop(self, arg: &'a mut u8) {\n        loop {\n            (self.func)(arg)\n        }\n    }\n}\nfn main() {\n    let mut a = 1;\n    let w = W { func: |_| {} };\n    w.in_loop(&mut a);\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 7 && d[0].1.contains("more than once"), "{d:?}");
+    let d = check("fn keep<'a>(v: &mut Vec<&'a mut u8>, x: &'a mut u8) {\n    for _ in 0..2 {\n        push(v, x);\n    }\n}\nfn push<'a>(v: &mut Vec<&'a mut u8>, x: &'a mut u8) {\n    v.push(x);\n}\nfn main() {}\n");
+    assert!(d.len() == 1 && d[0].0 == 3, "{d:?}");
+    assert_eq!(
+        check("fn bump(x: &mut u8) {\n    *x += 1;\n}\nfn ok(x: &mut u8) {\n    for _ in 0..2 {\n        bump(x);\n    }\n    *x += 1;\n}\nfn each(v: &[i32], f: &mut dyn FnMut(&i32)) {\n    for x in v {\n        f(x);\n    }\n}\nfn twice<'a>(v: &'a [i32], f: &mut dyn FnMut(&i32)) -> &'a i32 {\n    each(v, f);\n    each(v, f);\n    &v[0]\n}\nfn main() {\n    let mut b = 2;\n    ok(&mut b);\n    let mut n = 0;\n    twice(&[1], &mut |_| n += 1);\n}\n"),
+        vec![]
+    );
+}

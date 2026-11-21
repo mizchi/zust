@@ -1955,6 +1955,9 @@ impl Cx<'_> {
             if t == Ty::Never {
                 return Ok((None, Ty::Never));
             }
+            if matches!(pt, Ty::Ref(true, _)) {
+                self.bk_reborrow_arg(a);
+            }
             // (`&Box<T>` / `&&T` を `&T` の引数に: deref の強制変換)
             while let (Ty::Ref(_, _), Ty::Ref(m, inner @ (Ty::Ref(..) | Ty::Box(_))), Some(val)) = (pt, t, v) {
                 if t == pt || self.prog.has_param(pt) {
