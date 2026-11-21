@@ -408,9 +408,25 @@ impl Cx<'_> {
             }
             bt = Some(*i);
         }
+        // (`for x in c.borrow().iter()` / `for x in g.iter_mut()` with g a guard (`Ref<Vec<T>>`) of a Vec or an array:
+        // the elements of what it guards, indexed through its deref; a guard that is a temporary lives to the end
+        // of the statement, after the loop)
+        let guard_seq = match (bt, adapters.first().map(|a| a.as_str())) {
+            (Some(t), Some(a @ ("iter" | "iter_mut"))) => match self.guard_of(t) {
+                Some((sid, target, gm)) if matches!(target, Ty::Array(..)) || matches!(target, Ty::Struct(v) if self.vec_fields(v).is_some()) => {
+                    if a == "iter_mut" && !gm {
+                        let g = self.prog.tn(Ty::Struct(sid));
+                        return err(expr_start(e), format!("cannot borrow data in dereference of `{g}` as mutable (E0596)"));
+                    }
+                    true
+                }
+                _ => false,
+            },
+            _ => false,
+        };
         // (型が分からないメソッド・関数呼び出し (`s.split(' ')` など) もイテレータとみなす)
         let iterator = match bt {
-            Some(Ty::Struct(sid)) => self.vec_fields(sid).is_none(),
+            Some(Ty::Struct(sid)) => self.vec_fields(sid).is_none() && !guard_seq,
             None => matches!(e, Expr::MethodCall(..) | Expr::Call(..)),
             _ => false,
         };

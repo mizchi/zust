@@ -1392,6 +1392,8 @@ impl Cx<'_> {
         // (`g[i]` (g: MutexGuard<Vec<T>> など): `(*g)[i]`)
         if let Some(d) = self.user_deref(e) {
             let d = self.keep_expr(d);
+            // (a read through `deref_mut` (a RefMut's) borrows the guard shared, as `*g` does: `let g = ..; g[0]`)
+            self.deref_shared(d);
             return self.indexable(d);
         }
         // (-O: ループの前で読んでおいたもの)

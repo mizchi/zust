@@ -19,6 +19,7 @@ These are in the type and borrow checks that the compat and region-check work ch
 | `borrow_slice_into_vec_then_clear` | `&v[..]` is not a loan of `v`: a `clear` (dropping the elements) is accepted under it |
 | `region_temporary_dropped` | E0716 is not found when the reference is assigned after its `let` |
 | `region_dropck` | no drop check: a value with Drop may outlive what it borrows |
+| `region_block_tail_escapes` | a loan held by a block's local, or by what a by-value method returns (`Some(&v).unwrap()`), is not followed out of the block's tail (E0597) |
 | `borrow_uninit_read` | rejected, but reported at the function's first line instead of the read |
 
 ### Privacy
@@ -49,9 +50,9 @@ invariants.
 
 | case | what goes wrong |
 |---|---|
-| `rt_refcell` | `RefCell` hands out plain references with no borrow flag, so two `borrow_mut` alias. Fixing it needs `Ref` / `RefMut` guards, which need deref coercion through user `Deref` types to work in more places |
 | `rt_box_move_out` | `let x = *b;` moves the value but never frees the Box's block (a leak; valgrind) |
 | `rt_box_move_patterns` | the same leak through patterns (`let Pair { a, b } = *b`, `match *b`); no double free (valgrind) |
+| `rt_pattern_partial_move` | what a pattern leaves to `_` / `..` (`let (a, _) = pair();`, `let W { a, .. } = w;`) is never dropped (a leak) |
 
 ## Security: CVEs whose API zustc does not have (`expect: unsupported`)
 

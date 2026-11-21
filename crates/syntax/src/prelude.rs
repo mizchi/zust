@@ -571,7 +571,7 @@ fn owner(h: usize) -> Option<&'static str> {
                         | "Bytes" | "ToCase" | "ParseIntError" | "IntErrorKind" | "Rev" | "StepBy" | "Peekable"
                         | "SkipWhile" | "PreludeScan" | "Inspect" | "FlatMap" | "Flatten" | "Cloned" | "Windows" | "Chunks" | "ChunksExact" | "ChunksMut" | "Iter" | "IterMut" | "MaybeUninit"
                         | "HashSet" | "SetIntoIter" | "BTreeMap" | "BTreeSet" | "BtEntry" | "BtIter" | "BtIterMut"
-                        | "BtIntoIter" | "VecDeque" | "DqIter" | "DqIntoIter" | "f64" | "f32" | "ParseFloatError" | "i128" | "u128" | "FromUtf8Error" | "Utf8Error" | "Rc" | "Arc" | "ManuallyDrop" | "Pin" | "NonNull" | "UnsafeCell" | "RefCell" | "Cell" | "JoinHandle" | "__Sndr" | "__SyncSndr" | "__Rcvr__" | "__RecvIter" | "AtomicUsize" | "AtomicIsize" | "AtomicU8" | "AtomicU16" | "AtomicU32" | "AtomicU64" | "AtomicI8" | "AtomicI16" | "AtomicI32" | "AtomicI64" | "AtomicBool" | "OnceLock" | "Mutex" | "MutexGuard" | "RangeFrom" | "TryFromIntError" | "TryFromSliceError" | "Stdin" | "StdinLock" | "StdinLines" | "Stdout" | "StdoutLock"
+                        | "BtIntoIter" | "VecDeque" | "DqIter" | "DqIntoIter" | "f64" | "f32" | "ParseFloatError" | "i128" | "u128" | "FromUtf8Error" | "Utf8Error" | "Rc" | "Arc" | "ManuallyDrop" | "Pin" | "NonNull" | "UnsafeCell" | "RefCell" | "Ref" | "RefMut" | "BorrowError" | "BorrowMutError" | "Cell" | "JoinHandle" | "__Sndr" | "__SyncSndr" | "__Rcvr__" | "__RecvIter" | "AtomicUsize" | "AtomicIsize" | "AtomicU8" | "AtomicU16" | "AtomicU32" | "AtomicU64" | "AtomicI8" | "AtomicI16" | "AtomicI32" | "AtomicI64" | "AtomicBool" | "OnceLock" | "Mutex" | "MutexGuard" | "RangeFrom" | "TryFromIntError" | "TryFromSliceError" | "Stdin" | "StdinLock" | "StdinLines" | "Stdout" | "StdoutLock"
                         | "BufWriter" | "Cursor" | "ChunksMut" | "IoError" | "__DynError" | "Args" | "DefaultHasher" | "VarError"
                         | "PathBuf" | "__PathExt" | "__AsPathStr" | "Command" | "__ExitStatus" | "Cow" | "__CowStr"
                         | "Duration" | "AtomicPtr" | "RangeTo" | "RangeToInclusive" | "Fuse" => Some(w),
@@ -607,7 +607,7 @@ fn defined_name(src: &str, it: &SrcItem) -> Option<String> {
 const SHADOWABLE: &[&str] = &[
     "Chain", "Entry", "Enumerate", "Filter", "FilterMap", "Map", "OptIter", "Scan", "Skip", "Take", "TakeWhile", "Zip",
     "Command", "Mutex", "VarError", "Rev", "StepBy", "Peekable", "Cloned", "Flatten", "FlatMap", "Inspect", "SkipWhile",
-    "PathBuf", "Args", "BufWriter", "Pin", "Windows", "Bytes", "MatchIndices", "MutexGuard", "Chunks", "Duration", "Fuse", "Empty", "RangeTo", "RangeToInclusive", "RangeFull",
+    "PathBuf", "Args", "BufWriter", "Pin", "Windows", "Bytes", "MatchIndices", "MutexGuard", "Ref", "RefMut", "BorrowError", "BorrowMutError", "Chunks", "Duration", "Fuse", "Empty", "RangeTo", "RangeToInclusive", "RangeFull",
     "AtomicPtr", "TryReserveError", "c_void", "Infallible", "Cycle", "JoinHandle", "Chars", "Poll", "Waker", "Context", "Future",
 ];
 
@@ -1057,6 +1057,11 @@ pub fn select_with(user_src: &str, user_items: &[SrcItem], cache: &mut SelectCac
     let producer = ["iter", "iter_mut", "into_iter"].iter().any(|n| need.contains(n));
     if sc.has("ptr::eq") {
         need.insert("__exr_ptr_eq");
+    }
+    for (path, f) in [("Ref::map", "__exr_ref_map"), ("RefMut::map", "__exr_refmut_map"), ("Ref::clone", "__exr_ref_clone")] {
+        if sc.has(path) {
+            need.extend([f, "__core_forget", "forget"]);
+        }
     }
     if sc.has("array::from_fn") {
         need.insert("__exr_array_from_fn");
@@ -1525,6 +1530,10 @@ pub fn select_with(user_src: &str, user_items: &[SrcItem], cache: &mut SelectCac
     }
     if need.contains("Mutex") {
         need.extend(["MutexGuard", "Deref", "deref", "Result"]);
+    }
+    // (RefCell の borrow / borrow_mut はガードを返す: その型と deref / drop)
+    if need.contains("RefCell") {
+        need.extend(["Ref", "RefMut", "deref", "deref_mut", "Drop", "drop"]);
     }
     if op_impls.contains(&"IntoIterator") {
         need.extend(["__into_iter_mark", "Iterator", "next", "iter"]);

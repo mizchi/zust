@@ -286,8 +286,12 @@ pub fn compile(prog: &Program, insts: &Mutex<Insts>, id: u32, f: &ItemFn, line_b
         index_panic_block: None,
         caller_loc: matches!(
             prog.names.get(body_id as usize).map(|n| n.as_str()),
-            Some("Option::unwrap" | "Option::expect" | "Result::unwrap" | "Result::expect" | "Result::unwrap_err" | "Result::expect_err")
+            Some(
+                "Option::unwrap" | "Option::expect" | "Result::unwrap" | "Result::expect" | "Result::unwrap_err" | "Result::expect_err"
+                    | "RefCell::borrow" | "RefCell::borrow_mut"
+            )
         ) && prog.item_of.get(body_id as usize).copied().flatten().is_some_and(|i| i >= prog.prelude_from),
+        caller_locs: vec![],
         self_sid: env.self_sid,
         sret: None,
         fresh: Default::default(),
@@ -652,6 +656,9 @@ pub struct Cx<'p> {
     pub loc_used: bool,
     pub index_panic_block: Option<Block>,
     pub caller_loc: bool,
+    /// The method calls being lowered that store their location for a panic in the callee (`unwrap`, a RefCell's
+    /// `borrow`): (the method's name, line << 16 | column)
+    pub caller_locs: Vec<(String, i64)>,
     pub self_sid: Option<u32>,
     pub sret: Option<Value>,
     /// 呼び出しの戻り値を書かせた一時領域 (まだ誰も使っていない): 値渡し・let ではコピーせずにそのまま使う
@@ -829,6 +836,26 @@ pub fn is_simple_let(p: &Pat) -> bool {
     match p {
         Pat::Ident(by_ref, _, _, sub) => sub.is_none() && !*by_ref,
         Pat::Wild => true,
+        _ => false,
+    }
+}
+
+/// rustc's temporary lifetime extension by the initializer's syntax (the Reference, "Extending based on
+/// expressions"): e borrows a temporary that then lives to the end of the block, `&temp()`, also inside a tuple, an
+/// array, a cast, a braced struct, a block's tail, an if / else or a match arm (`let p: *const S = &S::new();`)
+pub fn extends_temps(e: &Expr) -> bool {
+    let tail = |b: &crate::parse::Block| match b.stmts.last() {
+        Some(Stmt::Expr(t, false)) => extends_temps(t),
+        _ => false,
+    };
+    match e {
+        Expr::Ref(..) => true,
+        Expr::Paren(x) | Expr::Cast(x, _) => extends_temps(x),
+        Expr::Tuple(xs) | Expr::Array(xs) => xs.iter().any(extends_temps),
+        Expr::Struct(_, fs, _) => fs.iter().any(|f| extends_temps(&f.1)),
+        Expr::Block(_, _, b) => tail(b),
+        Expr::If(_, t, els) => tail(t) || els.as_deref().is_some_and(extends_temps),
+        Expr::Match(_, arms) => arms.iter().any(|a| extends_temps(&a.body)),
         _ => false,
     }
 }
@@ -1449,6 +1476,9 @@ impl Cx<'_> {
                         let cur = self.b.create_block();
                         self.b.ins().jump(cur, &[]);
                         self.b.switch_to_block(else_blk);
+                        // (the scrutinee's temporaries are dropped before the else block, as in rustc: `let Some(x) =
+                        // c.borrow().first().copied() else { c.borrow_mut().push(1); return }` does not panic)
+                        self.drop_for_exit(usize::MAX, t0);
                         let (_, et) = self.block(else_b, Some(Ty::Never))?;
                         if et != Ty::Never {
                             return err(SP, "the `else` block of `let ... else` must diverge (return / break / panic)");
@@ -1475,7 +1505,13 @@ impl Cx<'_> {
                             }
                         }
                     }
-                    self.extend_temps(t0);
+                    // (as for a plain let: what the bindings may borrow (a `ref` binding, a reference in the value)
+                    // lives to the end of the block, the rest is dropped here: `let (n, _) = (c.borrow().len(), 0);`)
+                    if extends_temps(init) || borrowck::has_refs(self.prog, place.ty(), 0) || format!("{pat:?}").contains("Ident(true") {
+                        self.extend_temps(t0);
+                    } else {
+                        self.drop_temps(t0);
+                    }
                 }
                 Stmt::Let(Pat::Wild, ann_ty, init, None, ..) => {
                     // `let _ = e;`: 場所ならムーブしない。値ならすぐ drop する
@@ -1669,7 +1705,15 @@ impl Cx<'_> {
                     self.bind(name.clone(), ty, v);
                     self.bk_def_named(&name, &srcs, init);
                     self.rg_let(&name, ann_ty.as_ref(), init, rg_init);
-                    self.extend_temps(t0);
+                    // (rustc drops a let initializer's temporaries at the end of the statement, unless the initializer
+                    // extends them (`let r = &f();`, `let p: *const S = &S::new();`). zustc also keeps them when the
+                    // bound value may hold a reference, which rustc rejects when it borrows a temporary (E0716) and
+                    // zustc does not see yet. A RefCell guard in `let n = *c.borrow();` must not outlive the let)
+                    if extends_temps(init) || borrowck::has_refs(self.prog, ty, 0) {
+                        self.extend_temps(t0);
+                    } else {
+                        self.drop_temps(t0);
+                    }
                 }
                 // (`;` の付いたマクロの文。末尾の `vec![]` などは式として期待型を渡す)
                 Stmt::Expr(Expr::Macro(p, g, sp), semi) if *semi => {
