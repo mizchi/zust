@@ -74,3 +74,4 @@ Japanese versions are in [../ja/reports/](../ja/reports/README.md).
 | 2026-11-20 | [Benchmarks in the shapes of application code](2026-11-20-03-bench-patterns.md) |
 | 2026-11-20 | [Region (lifetime) checking: approach and steps (issue #1)](2026-11-20-01-region-check.md) |
 | 2026-11-21 | [Region (lifetime) checking, part 2: what the first version left out](2026-11-21-01-region-check-2.md) |
+| 2026-11-21 | [Region (lifetime) checking, part 3: closures, loans that outlive the function, lints](2026-11-21-02-region-check-3.md) |
