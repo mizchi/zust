@@ -80,3 +80,9 @@ pub fn re(r: ReactElement) -> i32 { r.value }
   let uu__zs_y = __zs_x - u__zs_x;
   uu__zs_y
 }
+
+// a keyword and the same name with the escape's `_` stay distinct
+@wasm pub fn kw_inj(async: i32, async_: i32) -> i32 {
+  let move = async - async_;
+  move
+}

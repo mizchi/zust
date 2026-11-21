@@ -31,9 +31,10 @@ const RUST_KW: &[&str] = &[
 
 /// A source name in Rust: keywords get a `_`, and names in the generated `__zs` namespace are moved out of it, so
 /// no source name can meet a temporary the lowering makes. A name of the form `u..u__zs..` (any number of `u`s) gets
-/// one more `u`, so the mapping stays injective (`__zs_x` -> `u__zs_x`, `u__zs_x` -> `uu__zs_x`)
+/// one more `u`, so the mapping stays injective (`__zs_x` -> `u__zs_x`, `u__zs_x` -> `uu__zs_x`). Likewise a keyword
+/// followed by any number of `_`s gets one more (`async` -> `async_`, `async_` -> `async__`)
 fn local(n: &str) -> String {
-    if RUST_KW.contains(&n) {
+    if RUST_KW.contains(&n.trim_end_matches('_')) {
         format!("{n}_")
     } else if n.trim_start_matches('u').starts_with("__zs") {
         format!("u{n}")
