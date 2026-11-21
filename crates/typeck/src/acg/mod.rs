@@ -330,6 +330,7 @@ fn compile_once(prog: &Program, insts: &Mutex<Insts>, id: u32, f: &ItemFn, line_
         closure_bound: None,
         closure_prelude: false,
         hr_lost: vec![],
+        clo_ret_param: vec![],
         seg_self: None,
         loop_bounds: vec![],
         pending_bound: None,
@@ -720,6 +721,8 @@ pub struct Cx<'p> {
     /// Closures made where nothing was expected (their kind, signature: from the body), by their definition: the
     /// parameters with no type written that are references (one region each, not higher-ranked)
     pub hr_lost: Vec<(u32, Vec<usize>)>,
+    /// Of those, the ones whose body is one of their parameters (`|y| y`): that parameter's type argument
+    pub clo_ret_param: Vec<(u32, usize)>,
     pub seg_self: Option<Ty>,
     pub loop_bounds: Vec<(Loc, u64)>,
     pub pending_bound: Option<u64>,

@@ -4182,6 +4182,7 @@ run-pass	nll/issue-47589.rs
 run-pass	nll/issue-48070.rs
 compile-fail	nll/issue-48238.rs
 run-pass	nll/issue-48623-closure.rs
+compile-fail	nll/issue-48697.rs
 compile-fail	nll/issue-48803.rs
 run-pass	nll/issue-50343.rs
 run-pass	nll/issue-50461-used-mut-from-moves.rs
@@ -4243,6 +4244,7 @@ compile-fail	nll/outlives-suggestion-more.rs
 compile-fail	nll/outlives-suggestion-simple.rs
 run-pass	nll/process_or_insert_default.rs
 check-pass	nll/promotable-mutable-zst-doesnt-conflict.rs
+compile-fail	nll/promoted-closure-pair.rs
 check-pass	nll/promoted-liveness.rs
 run-pass	nll/rc-loop.rs
 compile-fail	nll/ref-suggestion.rs

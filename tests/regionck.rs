@@ -865,3 +865,12 @@ fn undeclared_lifetimes_in_bodies_and_traits() {
     assert!(d.len() == 1 && d[0].0 == 3 && d[0].1.contains("E0261"), "{d:?}");
     assert_eq!(check("struct S<'a>(&'a u8);\nimpl<'a> S<'a> {\n    fn f<'b>(&self, x: &'b u8) {\n        let _y: &'a u8 = self.0;\n        let _z: &'b u8 = x;\n        let _w: &'static str = \"\";\n    }\n}\ntrait Tr<'a, T: 'a> where T: 'static {}\nfn main() {}\n"), vec![]);
 }
+
+/// A closure made where nothing was expected has one region for its parameters' references in all its calls:
+/// `|y| y` called with a local's borrow, then with a parameter returned, returns the local's
+#[test]
+fn closure_signature_regions_shared_by_its_calls() {
+    let d = check("fn foo(x: &i32) -> &i32 {\n    let z = 4;\n    let f = |y| y;\n    let _k = f(&z);\n    f(x)\n}\nfn main() {}\n");
+    assert!(d.len() == 1 && d[0].0 == 5 && d[0].1.contains("E0515"), "{d:?}");
+    assert_eq!(check("fn foo(x: &i32) -> &i32 {\n    let f = |y| y;\n    let _k = f(x);\n    f(x)\n}\nfn bar(x: &i32) -> &i32 {\n    let z = 4;\n    let f = |y: &i32| y;\n    let _k = f(&z);\n    f(x)\n}\nfn main() {}\n"), vec![]);
+}

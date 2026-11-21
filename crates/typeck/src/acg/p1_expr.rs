@@ -1688,6 +1688,16 @@ impl Cx<'_> {
             if !refs.is_empty() {
                 self.hr_lost.retain(|x| x.0 != cd.sid);
                 self.hr_lost.push((cd.sid, refs));
+                // (`|y| y`: its result's type is its parameter's, regions and all)
+                let Expr::Closure(_, ins, _, body, _) = c else { unreachable!() };
+                let ret_param = match strip_paren(body) {
+                    Expr::Path(None, bp) if bp.segs.len() == 1 => ins.iter().position(|(p, _)| matches!(p, Pat::Ident(_, _, n, None) if *n == bp.segs[0].name)),
+                    _ => None,
+                };
+                self.clo_ret_param.retain(|x| x.0 != cd.sid);
+                if let Some(&(_, g)) = ret_param.and_then(|i| pslots.iter().find(|x| x.0 == i)) {
+                    self.clo_ret_param.push((cd.sid, g));
+                }
             }
         }
         // (the region signature its body is checked with: from a bound not the prelude's, else from annotated
@@ -2310,7 +2320,19 @@ impl Cx<'_> {
                     return err(SP, format!("expected a function, found `{}`", self.prog.tn(t)));
                 };
                 let recv = (v, Ty::Ptr(true, intern(t)));
-                self.call_fn(cid, Some(recv), &args, None, expected, SP)
+                // (a closure made where nothing was expected, a parameter of it a reference: its signature's regions
+                // are one for all its calls (rustc's inference variables), not each call's own)
+                let base = self.prog.base_of(sid);
+                if self.hr_lost.iter().any(|h| h.0 == base) {
+                    if !self.rg.on && self.rg.eligible && self.inline_depth == 0 {
+                        self.rg_late_on();
+                    }
+                    self.rg.shared_clo = Some((base, self.clo_ret_param.iter().find(|x| x.0 == base).map(|x| x.1)));
+                }
+                let r = self.call_fn(cid, Some(recv), &args, None, expected, SP);
+                self.rg.shared_clo = None;
+                self.rg_took_call(c);
+                r
             }
             Ty::Ref(_, Ty::Dyn(s)) | Ty::Box(Ty::Dyn(s)) => self.dyn_fn_call(v, s, &args, SP),
             Ty::Fn(f) => self.indirect_call(Indirect::Ptr(v), &f.params, f.ret, &args, SP),

@@ -148,6 +148,12 @@ pub struct Rg {
     pub owned_borrows: Vec<(usize, u32)>,
     /// A closure's body: the regions of its captures of the function's locals (from outside)
     pub cap_regions: Vec<u32>,
+    /// The call being made is of a closure made where nothing was expected (by its definition): the regions of its
+    /// signature are one for all its calls (clo_shared)
+    pub shared_clo: Option<(u32, Option<usize>)>,
+    pub clo_shared: Vec<(u32, Vec<u32>)>,
+    /// The trees of the type arguments of such a closure's calls (its parameters' and result's types)
+    pub clo_targs: Vec<(u32, Vec<Option<RT>>)>,
 }
 
 /// Closure region codes (Rg::closure): a placeholder (a region the expected signature binds), one from outside
@@ -1982,8 +1988,9 @@ impl Cx<'_> {
         let sig0 = &prog.sigs[id as usize];
         let rs = sig0.regions.clone();
         let codes = |i: usize| rs.as_deref().map(|r| r.slots.get(i).map(|c| c.as_slice()).unwrap_or(&[]));
-        // (the prelude writes no lifetimes: what its results borrow is not known from elision)
-        let prelude = prog.item_of.get(id as usize).copied().flatten().is_none_or(|i| i >= prog.prelude_from);
+        // (the prelude writes no lifetimes: what its results borrow is not known from elision. A closure's call
+        // elides as a fn)
+        let prelude = prog.item_of.get(id as usize).copied().flatten().is_none_or(|i| i >= prog.prelude_from) && !prog.closures.contains_key(&id);
         let mut rg = std::mem::take(&mut self.rg);
         let lts: Vec<u32> = rs.as_deref().map(|r| r.lts.iter().map(|_| rg.var()).collect()).unwrap_or_default();
         let mut targs: Vec<Option<RT>> = sol.iter().map(|t| t.and_then(|t| rg.fresh(prog, t))).collect();
@@ -2011,8 +2018,48 @@ impl Cx<'_> {
         let substituted: Vec<u32> = targs.iter().flatten().flatten().copied().collect();
         let mut ptrees: Vec<Option<RT>> = vec![];
         let mut inputs = vec![];
+        // (a closure's of one region for all its calls: the same variables, in order)
+        let shared = rg.shared_clo.take();
+        // (its parameters' and result's types: the same trees at each call; the result's its parameter's for `|y| y`)
+        if let Some((b, link)) = shared {
+            match rg.clo_targs.iter().find(|x| x.0 == b) {
+                Some((_, t)) if t.len() == targs.len() => targs = t.clone(),
+                _ => {
+                    if let (Some(g), Some(last)) = (link, targs.len().checked_sub(1)) {
+                        if let Some(t) = targs.get(g).cloned() {
+                            targs[last] = t;
+                        }
+                    }
+                    rg.clo_targs.retain(|x| x.0 != b);
+                    rg.clo_targs.push((b, targs.clone()));
+                }
+            }
+        }
+        let shared = shared.map(|s| s.0);
+        let mut k = 0usize;
         for (i, &pt) in sig0.params.iter().enumerate() {
-            let tr = rg.instantiate(prog, pt, codes(i), &lts, &targs, &mut |me| me.var());
+            let tr = rg.instantiate(prog, pt, codes(i), &lts, &targs, &mut |me| match shared {
+                Some(b) => {
+                    let pos = match me.clo_shared.iter().position(|x| x.0 == b) {
+                        Some(p) => p,
+                        None => {
+                            me.clo_shared.push((b, vec![]));
+                            me.clo_shared.len() - 1
+                        }
+                    };
+                    let v = match me.clo_shared[pos].1.get(k) {
+                        Some(&v) => v,
+                        None => {
+                            let v = me.var();
+                            me.clo_shared[pos].1.push(v);
+                            v
+                        }
+                    };
+                    k += 1;
+                    v
+                }
+                None => me.var(),
+            });
             if let Some(t) = &tr {
                 inputs.extend(t.iter().copied().filter(|&v| v != STATIC && !substituted.contains(&v)));
             }
@@ -2721,6 +2768,9 @@ impl Cx<'_> {
     pub(crate) fn rg_check(&mut self) -> super::R<()> {
         if debug() {
             eprintln!("regionck {}: on={} univ={} edges={} loans={} missed={:?}", self.prog.names.get(self.rg.base as usize).map(|s| s.as_str()).unwrap_or("?"), self.rg.on, self.rg.univ.len(), self.rg.edges.len(), self.rg.loans.len(), self.rg.missed);
+            if std::env::var_os("ZUSTC_RG_EDGES").is_some() {
+                eprintln!("  univ {:?} loans {:?} edges {:?} ret {:?}", self.rg.univ, self.rg.loans.iter().map(|l| (l.0, &l.1)).collect::<Vec<_>>(), self.rg.edges.iter().map(|e| (e.0, e.1, e.2.line)).collect::<Vec<_>>(), self.rg.ret);
+            }
         }
         if !self.rg.on {
             return Ok(());
