@@ -569,6 +569,8 @@ fn trait_self_outlives() {
     // (a struct's own requirements on its arguments are not seen: `V<A>` may require `A: 'static`)
     let d = first("pub trait Arbitrary: 'static {}\nstruct V<A>(A);\nimpl<A: Clone> Arbitrary for Vec<A> {}\nfn main() {}\n");
     assert!(d.0 == 3 && d.1.contains("E0310"), "{d:?}");
+    // (a lifetime used only in a bound's `Fn(..)` arguments is used)
+    assert_eq!(check("struct Inv<'a> { f: Box<dyn FnOnce(&mut &'a isize) + 'static> }\nfn main() {}\n"), vec![]);
     let ok = r#"
 trait Wedding<'t>: 't {}
 struct Prince<'kiss, 'snow: 'kiss> { child: Box<dyn Wedding<'kiss> + 'snow> }

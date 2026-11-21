@@ -1004,6 +1004,13 @@ fn lifetimes(t: &PTy, out: &mut Vec<String>, elided: &mut bool, opaque: &mut boo
                         _ => {}
                     }
                 }
+                // (`Fn(&'a u8) -> &'a u8`: as a fn pointer type, its own elided ones aside)
+                if let Some((ps, r)) = &s.fn_args {
+                    let (mut e, mut o) = (false, false);
+                    for t in ps.iter().chain(r.as_deref()) {
+                        lifetimes(t, out, &mut e, &mut o);
+                    }
+                }
             }
         }
         PTy::Ptr(_, i) | PTy::Slice(i) | PTy::Array(i, _) => lifetimes(i, out, elided, opaque),

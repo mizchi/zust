@@ -5367,6 +5367,7 @@ compile-fail	regions/regions-infer-contravariance-due-to-decl.rs
 run-pass	regions/regions-infer-contravariance-due-to-ret.rs
 compile-fail	regions/regions-infer-covariance-due-to-decl.rs
 compile-fail	regions/regions-infer-invariance-due-to-decl.rs
+compile-fail	regions/regions-infer-not-param.rs
 compile-fail	regions/regions-infer-proc-static-upvar.rs
 run-pass	regions/regions-infer-reborrow-ref-mut-recurse.rs
 run-pass	regions/regions-infer-region-in-fn-but-not-type.rs
