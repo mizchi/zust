@@ -2287,7 +2287,7 @@ impl Program {
     fn const_usize(&self, name: &str) -> R<u64> {
         // (`<Foo as Bar>::SIZE`: the trait's under its qualified name, else the only `Foo::SIZE`; an expression with a
         // cast in it, `(1 as usize) + Foo::SIZE`, is not one)
-        let word = |s: &str| !s.is_empty() && s.bytes().all(|c| c.is_ascii_alphanumeric() || c == b'_');
+        let word = |s: &str| !s.is_empty() && s.chars().all(|c| c.is_alphanumeric() || c == '_');
         if let Some((base, rest)) = name.split_once(" as ").filter(|(b, r)| word(b) && r.split("::").all(word) && r.contains("::")) {
             if !self.const_index.contains_key(name) {
                 // (`type Alias = Foo;`: the impl's under `Foo`)
@@ -2486,6 +2486,13 @@ impl Program {
             // `<u64 as Integer>::MAX_STR_LEN`
             Expr::Path(Some(q), p) if matches!(&**q, crate::parse::Ty::Path(None, tp) if tp.segs.len() == 1) && !p.segs.is_empty() => {
                 let crate::parse::Ty::Path(None, tp) = &**q else { unreachable!() };
+                // (the trait impl's under its qualified name first, where an inherent const took the plain one)
+                if p.segs.len() == 2 {
+                    let q = format!("{} as {}::{}", tp.segs[0].name, p.segs[0].name, p.segs[1].name);
+                    if self.const_index.contains_key(&q) {
+                        return self.const_int(&q, depth);
+                    }
+                }
                 let full = format!("{}::{}", tp.segs[0].name, p.segs.last().unwrap().name);
                 if self.const_index.contains_key(&full) {
                     return self.const_int(&full, depth);
