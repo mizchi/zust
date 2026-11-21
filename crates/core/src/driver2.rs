@@ -807,6 +807,7 @@ impl Session2 {
         }
         prog.overflow_checks = !self.opts.opt;
         prog.deny_unreachable = deny_unreachable;
+        prog.has_mods = src.contains("mod ");
         prog.deny_must_use = deny_must_use;
         prog.deny_unused_alloc = deny_unused_alloc;
         prog.deny_trivial_casts = deny_trivial_casts;
@@ -2497,7 +2498,7 @@ fn lint_bits(p: &Program) -> u8 {
 }
 
 /// An attribute that needs a `#![feature(..)]` the source does not have: `line:col: the `x` attribute is an
-/// experimental feature (E0658)`. Only the places of `#` are looked at
+/// experimental feature (E0658)`. Read from the tokens of src[from..] (literals and comments are not attributes)
 fn gated_attr(src: &str, from: usize) -> Option<String> {
     const GATED: &[(&str, &str)] = &[
         ("default_lib_allocator", "allocator_internals"),
@@ -2516,39 +2517,57 @@ fn gated_attr(src: &str, from: usize) -> Option<String> {
         ("thread_local", "thread_local"),
     ];
     let b = src.as_bytes();
-    for (i, _) in src[from..].match_indices('#').map(|(k, m)| (from + k, m)) {
-        // (not in a line comment or after a quote on its line: `// see #[thread_local]`, `"#[x]"`)
-        let ls = src[..i].rfind('\n').map_or(0, |n| n + 1);
-        if src[ls..i].contains("//") || src[ls..i].contains('"') {
+    let toks = lexer::tokenize(&b[from..]);
+    let tx = |k: usize| &src[from + toks[k].1..from + toks[k].2];
+    let sym = |k: usize, c: &str| k < toks.len() && toks[k].0 == 1 && tx(k) == c;
+    for k in 0..toks.len() {
+        if !sym(k, "#") {
             continue;
         }
-        let mut j = i + 1;
-        if b.get(j) == Some(&b'!') {
+        let mut j = k + 1;
+        if sym(j, "!") {
             j += 1;
         }
-        if b.get(j) != Some(&b'[') {
+        if !sym(j, "[") {
             continue;
         }
         j += 1;
-        let rest = &src[j..];
-        let rest = rest.strip_prefix("unsafe(").unwrap_or(rest);
-        let name_len = rest.bytes().take_while(|c| c.is_ascii_alphanumeric() || *c == b'_').count();
-        let name = &rest[..name_len];
-        // (not a path: `#[thread_local]`, not `#[foo::thread_local]`)
-        if rest[name_len..].starts_with("::") {
+        // (`#[unsafe(ffi_const)]`)
+        if j + 1 < toks.len() && toks[j].0 == 0 && tx(j) == "unsafe" && sym(j + 1, "(") {
+            j += 2;
+        }
+        if j >= toks.len() || toks[j].0 != 0 || sym(j + 1, ":") {
             continue;
         }
+        let name = tx(j);
         let Some(&(_, feat)) = GATED.iter().find(|g| g.0 == name) else { continue };
-        let enabled = src.match_indices("feature(").any(|(k, _)| {
-            let list = &src[k + 8..];
-            let end = list.find(')').unwrap_or(list.len());
-            list[..end].split(',').any(|f| f.trim() == feat)
-        });
-        if !enabled {
+        if !feature_enabled(src, feat) {
+            let i = from + toks[k].1;
             let line = src[..i].matches('\n').count() + 1;
             let col = i - src[..i].rfind('\n').map_or(0, |n| n + 1) + 1;
             return Some(format!("{line}:{col}: the `{name}` attribute is an experimental feature (E0658)"));
         }
     }
     None
+}
+
+/// Whether `#![feature(.., f, ..)]` is among the source's tokens (not a comment's or a string's text)
+fn feature_enabled(src: &str, f: &str) -> bool {
+    let b = src.as_bytes();
+    let toks = lexer::tokenize(b);
+    let tx = |k: usize| &src[toks[k].1..toks[k].2];
+    let sym = |k: usize, c: &str| k < toks.len() && toks[k].0 == 1 && tx(k) == c;
+    (0..toks.len()).any(|k| {
+        if !(sym(k, "#") && sym(k + 1, "!") && sym(k + 2, "[") && k + 3 < toks.len() && tx(k + 3) == "feature" && sym(k + 4, "(")) {
+            return false;
+        }
+        let mut j = k + 5;
+        while j < toks.len() && !sym(j, ")") {
+            if toks[j].0 == 0 && tx(j) == f {
+                return true;
+            }
+            j += 1;
+        }
+        false
+    })
 }
