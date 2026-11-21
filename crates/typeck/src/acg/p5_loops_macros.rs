@@ -1448,6 +1448,16 @@ impl Cx<'_> {
                 let e: &Expr = self.keep_expr(path_expr("None"));
                 self.expr(e, Some(t))
             }
+            // `cfg!(..)` left by the cfg pass: `version(..)` (unstable), or a cfg! the pass did not reach
+            "cfg" if g.to_string().contains("version") => err(SP, "`cfg(version)` is experimental and subject to change (E0658)"),
+            // `compile_error!("msg")`: the error, as written
+            "compile_error" => {
+                let args = self.macro_args(p, g)?;
+                match args.first().and_then(|a| str_lit(a)) {
+                    Some(m) => err(SP, m),
+                    None => err(SP, "compile_error! takes 1 argument"),
+                }
+            }
             // `env!("X")` left by the preprocessor (macros::expand_env): X is not set
             "env" => {
                 let args = self.macro_args(p, g)?;

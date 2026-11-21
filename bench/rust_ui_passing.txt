@@ -6332,6 +6332,7 @@ compile-fail	sync/suggest-ref-cell.rs
 check-pass	target-feature/const-target-feature-fn-ptr-coercion.rs
 compile-fail	target-feature/gate.rs
 build-pass	target-feature/implied-features.rs
+run-pass	target-feature/target-feature-detection.rs
 check-pass	thread-local/long-docs.rs
 check-pass	thread-local/name-collision.rs
 run-pass	thread-local/thread-local-with-attributes-30756.rs

@@ -141,12 +141,18 @@ fn single(p: &Path) -> Option<&str> {
 /// `dyn Send` / `dyn Sync + 'a`: a trait object of an auto trait alone, its trait. Read only right behind a pointer
 /// (`Box<dyn Send>`, `&dyn Sync`): other places (`Rc<dyn Send>`, `Wrapper<dyn Send>`) need unsizing this compiler
 /// does not do
+/// std's auto traits: no methods, so a `dyn` type has them beside its one trait (`dyn Error + Send + Sync +
+/// UnwindSafe`)
+pub fn is_auto_trait(name: &str) -> bool {
+    matches!(name, "Send" | "Sync" | "Unpin" | "UnwindSafe" | "RefUnwindSafe")
+}
+
 fn auto_dyn(t: &PTy) -> Option<String> {
     let PTy::Dyn(bs) = t else { return None };
     let mut auto = None;
     for b in bs {
         match b {
-            Bound::Trait(_, p) if p.segs.last().is_some_and(|s| s.name == "Send" || s.name == "Sync") => {
+            Bound::Trait(_, p) if p.segs.last().is_some_and(|s| is_auto_trait(&s.name)) => {
                 auto.get_or_insert_with(|| p.segs.last().unwrap().name.clone());
             }
             Bound::Lifetime(_) => {}
@@ -190,7 +196,7 @@ pub fn tysyn(t: &PTy, self_ty: Option<&TySyn>) -> R<TySyn> {
             for b in bs {
                 match b {
                     // (`dyn Error + Send + Sync`: 自動 trait は読み飛ばす)
-                    Bound::Trait(_, p) if p.segs.last().is_some_and(|s| s.name == "Send" || s.name == "Sync") => {
+                    Bound::Trait(_, p) if p.segs.last().is_some_and(|s| is_auto_trait(&s.name)) => {
                         auto.get_or_insert_with(|| p.segs.last().map(|s| s.name.clone()).unwrap_or_default());
                     }
                     Bound::Trait(_, p) if tr.is_none() => tr = Some(p.segs.last().map(|s| s.text.clone()).unwrap_or_default()),
@@ -281,6 +287,10 @@ fn path_ty(p: &Path, self_ty: Option<&TySyn>) -> R<TySyn> {
         if let Some(GArg::Ty(a)) = last.args.first() {
             return Ok(TySyn::App("Result".into(), vec![tysyn(a, self_ty)?, TySyn::Named("IoError".into())]));
         }
+    }
+    // `path::Display<'a>` (what `Path::display` returns): a Path is a str here, and its display the &str
+    if n >= 2 && p.segs[n - 2].name == "path" && last.name == "Display" {
+        return Ok(TySyn::Ref(false, Box::new(TySyn::Str)));
     }
     // `fmt::Result` / `fmt::Error`
     if n >= 2 && p.segs[n - 2].name == "fmt" && (last.name == "Result" || last.name == "Error") {

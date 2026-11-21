@@ -201,6 +201,17 @@ fn thing_end(s: &[u8], toks: &[Tok], mut i: usize) -> usize {
     toks.len() - 1
 }
 
+/// std's macros whose arguments are expressions zustc reads as they are (no macro_rules expansion follows): their
+/// `cfg!` is evaluated with the rest of the code
+fn format_like(name: &[u8]) -> bool {
+    matches!(
+        name,
+        b"println" | b"print" | b"eprintln" | b"eprint" | b"format" | b"format_args" | b"write" | b"writeln" | b"panic" | b"assert"
+            | b"assert_eq" | b"assert_ne" | b"debug_assert" | b"debug_assert_eq" | b"debug_assert_ne" | b"unreachable"
+            | b"unimplemented" | b"todo" | b"vec" | b"dbg"
+    )
+}
+
 /// src の cfg を評価する。変わらなければ None
 pub fn strip(src: &str, c: &CfgSet) -> Option<String> {
     if !src.contains("cfg") && !src.contains("extern crate") {
@@ -221,6 +232,11 @@ pub fn strip(src: &str, c: &CfgSet) -> Option<String> {
         // `cfg!(p)` → `true` / `false`
         if t(i) == b"cfg" && t(i + 1) == b"!" && t(i + 2) == b"(" {
             let close = matching(s, &toks, i + 2);
+            // (`cfg!(version(..))` is unstable: left for acg, which says so (E0658))
+            if (i + 3..close).any(|k| t(k) == b"version" && t(k + 1) == b"(") {
+                i = close + 1;
+                continue;
+            }
             let (v, _) = eval(s, &toks, i + 3, c);
             let (a, b) = (toks[i].1, toks[close].2);
             blank(&mut out, a, b);
@@ -232,8 +248,9 @@ pub fn strip(src: &str, c: &CfgSet) -> Option<String> {
             i = close + 1;
             continue;
         }
-        // マクロの呼び出しと macro_rules! の中は見ない (展開してから評価する: cfg_if! の `if #[cfg(..)] { .. }`)
-        if toks[i].0 == 0 && t(i) != b"cfg" && t(i + 1) == b"!" {
+        // マクロの呼び出しと macro_rules! の中は見ない (展開してから評価する: cfg_if! の `if #[cfg(..)] { .. }`)。
+        // std の書式のマクロ (`println!("{}", cfg!(unix))`) は後で展開されないので、中も評価する
+        if toks[i].0 == 0 && t(i) != b"cfg" && t(i + 1) == b"!" && !format_like(t(i)) {
             let g = if t(i + 2) == b"(" || t(i + 2) == b"[" || t(i + 2) == b"{" {
                 Some(i + 2)
             } else if toks.get(i + 2).is_some_and(|x| x.0 == 0) && t(i + 3) == b"{" {
@@ -341,6 +358,9 @@ mod tests {
         assert_eq!(run("#[cfg_attr(feature = \"std\", derive(Debug))] struct S;", &["std"]), "#[ derive(Debug) ] struct S;");
         assert_eq!(run("#![cfg_attr(not(feature = \"std\"), no_std)] fn f() {}", &["std"]), "fn f() {}");
         assert_eq!(run("let a = cfg!(all(unix, target_pointer_width = \"64\"));", &[]), "let a = true ;");
+        // (in the arguments of std's format macros too; a user macro's are left for after its expansion)
+        assert_eq!(run("println!(\"{}\", cfg!(unix));", &[]), "println!(\"{}\", true );");
+        assert_eq!(run("m!(cfg!(unix));", &[]), "m!(cfg!(unix));");
         assert_eq!(run("fn f() { #[cfg(test)] g(); h(); }", &[]), "fn f() { h(); }");
         assert_eq!(run("[1, #[cfg(test)] 2, 3]", &[]), "[1, 3]");
         assert_eq!(run("m! { if #[cfg(test)] { a } } macro_rules! n { () => { #[cfg(test)] fn f() {} } }", &[]), "m! { if #[cfg(test)] { a } } macro_rules! n { () => { #[cfg(test)] fn f() {} } }");
