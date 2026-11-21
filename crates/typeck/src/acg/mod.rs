@@ -1497,7 +1497,10 @@ impl Cx<'_> {
                         let Some(ty) = ann.filter(|&t| !self.prog.has_param(t)) else {
                             return err(SP, "cannot infer the type of this `let`; annotate it");
                         };
-                        if self.needs_drop(ty) && !self.zeroable(ty) {
+                        // (the zeroed value stands for "not initialized yet", which a value that is dropped must be
+                        // able to: a build cannot make it of such a type. A check runs nothing: the zeroed value is
+                        // only a placeholder)
+                        if self.needs_drop(ty) && !self.zeroable(ty) && !self.inl.check_only {
                             return err(SP, "`let` without initializer is not supported for this type");
                         }
                         let v = if ty.is_agg() {

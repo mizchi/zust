@@ -811,6 +811,7 @@ compile-fail	borrowck/borrowck-overloaded-index-ref-index.rs
 compile-fail	borrowck/borrowck-partial-reinit-1.rs
 compile-fail	borrowck/borrowck-partial-reinit-2.rs
 compile-fail	borrowck/borrowck-partial-reinit-3.rs
+compile-fail	borrowck/borrowck-partial-reinit-4.rs
 run-pass	borrowck/borrowck-pat-enum.rs
 compile-fail	borrowck/borrowck-pat-reassign-binding.rs
 run-pass	borrowck/borrowck-pat-reassign-no-binding.rs
@@ -5728,8 +5729,11 @@ compile-fail	span/borrowck-call-method-from-mut-aliasable.rs
 compile-fail	span/borrowck-let-suggestion-suffixes.rs
 compile-fail	span/coerce-suggestions.rs
 compile-fail	span/drop-location-span-error-rust-2021-incompatible-closure-captures-96258.rs
+compile-fail	span/dropck_misc_variants.rs
 compile-fail	span/impl-wrong-item-for-trait.rs
 check-pass	span/issue-24690.rs
+compile-fail	span/issue-24805-dropck-child-has-items-via-parent.rs
+compile-fail	span/issue-24895-copy-clone-dropck.rs
 compile-fail	span/issue-29106.rs
 compile-fail	span/issue-29595.rs
 compile-fail	span/issue-34264.rs
@@ -5737,6 +5741,9 @@ compile-fail	span/issue-36537.rs
 compile-fail	span/issue-39018.rs
 compile-fail	span/issue-42234-unknown-receiver-type.rs
 compile-fail	span/issue-81800.rs
+compile-fail	span/issue28498-reject-lifetime-param.rs
+compile-fail	span/issue28498-reject-passed-to-fn.rs
+compile-fail	span/issue28498-reject-trait-bound.rs
 check-pass	span/let-offset-of.rs
 compile-fail	span/lint-unused-unsafe.rs
 check-pass	span/macro-span-replacement.rs
