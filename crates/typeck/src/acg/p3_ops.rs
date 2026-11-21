@@ -106,17 +106,6 @@ impl Cx<'_> {
             let pos = if let Expr::Binary(_, _, _, sp) = e { sp.start } else { SP };
             return err(pos, format!("binary operation `{op}` cannot be applied to a fn item (cast it to a fn pointer)"));
         }
-        // (E0369: `X == X` for a struct of the program that is not PartialEq (`<` and the others: PartialOrd), also as an
-        // element of an array, a slice, a tuple or behind a reference)
-        if !assign && self.user_code && is_cmp(op) {
-            if let Some(t) = self.peek(left) {
-                let tr = if op == "==" || op == "!=" { "PartialEq" } else { "PartialOrd" };
-                if self.lacks_cmp(t, tr, 0) {
-                    let pos = if let Expr::Binary(_, _, _, sp) = e { sp.start } else { SP };
-                    return err(pos, format!("binary operation `{op}` cannot be applied to type `{}` (E0369)", self.prog.tn(t)));
-                }
-            }
-        }
         // 短絡評価
         if !assign && (op == "&&" || op == "||") {
             let (l, lt) = self.expr(left, Some(Ty::Bool))?;
@@ -286,6 +275,12 @@ impl Cx<'_> {
         let Some(mut l) = l else {
             return Ok((None, Ty::Never));
         };
+        // (E0369: `X == X` for a struct of the program that is not PartialEq (`<` and the others: PartialOrd), also as an
+        // element of an array, a slice, a tuple or behind a reference)
+        if cmp && !assign && self.user_code && !lt.is_int() && self.lacks_cmp(lt, if op == "==" || op == "!=" { "PartialEq" } else { "PartialOrd" }, 0) {
+            let pos = if let Expr::Binary(_, _, _, sp) = e { sp.start } else { SP };
+            return err(pos, format!("binary operation `{op}` cannot be applied to type `{}` (E0369)", self.prog.tn(lt)));
+        }
         // (a fat raw pointer's pair, copied before the right side runs: `p == { p = q; p }` compares the old p)
         if lt.is_fat() && matches!(lt, Ty::Ptr(..)) {
             let tmp = self.temp(lt);
