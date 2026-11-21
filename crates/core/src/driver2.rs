@@ -2630,8 +2630,13 @@ fn gated_attr(src: &str, from: usize, to: usize, feats: &mut Option<Vec<String>>
 /// predicates
 fn top_level_split(s: &str) -> Vec<&str> {
     let (mut out, mut depth, mut from) = (vec![], 0i32, 0);
+    let mut prev = '\0';
     for (i, c) in s.char_indices() {
+        let arrow = c == '>' && prev == '-';
+        prev = c;
         match c {
+            // (the `>` of `-> R` closes nothing)
+            '>' if arrow => {}
             '<' | '(' | '[' => depth += 1,
             '>' | ')' | ']' => depth -= 1,
             ',' if depth == 0 => {
@@ -2667,7 +2672,8 @@ fn str_lit_value(t: &str) -> Option<String> {
             '0' => out.push('\0'),
             'x' => out.push(u8::from_str_radix(&cs.by_ref().take(2).collect::<String>(), 16).ok()? as char),
             'u' => {
-                let hex: String = cs.by_ref().skip(1).take_while(|&c| c != '}').collect();
+                // (`\u{3_8}`: underscores may separate the digits)
+                let hex: String = cs.by_ref().skip(1).take_while(|&c| c != '}').filter(|&c| c != '_').collect();
                 out.push(char::from_u32(u32::from_str_radix(&hex, 16).ok()?)?);
             }
             '\n' => {

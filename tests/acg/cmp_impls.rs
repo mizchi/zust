@@ -27,14 +27,14 @@ fn main() {
     println!("{}", v[0] == Q { a: 1 });
     println!("{:?}", by_ref());
 }
-// (`impl PartialEq for &X` only: `&X(1) == &X(1)` compares through it)
+// (`impl PartialEq for &X` only: `&X(1) == &X(2)` compares through it, not by the fields)
 struct RX(i32);
 impl PartialEq for &RX {
     fn eq(&self, o: &Self) -> bool {
-        self.0 == o.0
+        self.0 % 2 == o.0 % 2
     }
 }
 #[allow(dead_code)]
-fn by_ref() -> (bool, bool) {
-    (&RX(1) == &RX(1), &RX(1) == &RX(2))
+fn by_ref() -> (bool, bool, bool) {
+    (&RX(1) == &RX(3), &RX(1) == &RX(2), &RX(2) != &RX(4))
 }

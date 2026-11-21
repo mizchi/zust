@@ -197,6 +197,13 @@ impl Cx<'_> {
                 let ne = self.keep_expr(ne);
                 return self.expr(ne, expected);
             }
+            // (`&a == &b` with `impl PartialEq for &X`: that impl's eq, `(&a).eq(&&b)`, not X's fields)
+            if matches!(op, "==" | "!=") && !assign && self.prog.method(*sid, "__ref_eq").is_some() {
+                let call = mcall(paren(left), "eq", vec![Expr::Ref(false, Box::new(paren(right)))]);
+                let ne = if op == "!=" { Expr::Unary("!".into(), Box::new(Expr::Paren(Box::new(call))), Default::default()) } else { call };
+                let ne = self.keep_expr(ne);
+                return self.expr(ne, expected);
+            }
         }
         // 複合代入 a op= b
         let compound = match op {
