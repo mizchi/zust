@@ -442,6 +442,7 @@ check-pass	async-await/issues/issue-60518.rs
 compile-fail	async-await/issues/issue-61187.rs
 compile-fail	async-await/issues/issue-62009-1.rs
 compile-fail	async-await/issues/issue-62009-2.rs
+compile-fail	async-await/issues/issue-62097.rs
 check-pass	async-await/issues/issue-62517-1.rs
 check-pass	async-await/issues/issue-62517-2.rs
 compile-fail	async-await/issues/issue-63388-1.rs
@@ -1157,6 +1158,7 @@ check-pass	closures/boxed-closure-with-borrowed-param.rs
 run-pass	closures/call-closure-through-lifetime-generic-struct.rs
 run-pass	closures/call-fnmut-trait-object-via-ref-mut.rs
 compile-fail	closures/closure-arg-type-mismatch-method-receiver.rs
+compile-fail	closures/closure-bounds-static-cant-capture-borrowed.rs
 compile-fail	closures/closure-expected.rs
 compile-fail	closures/closure-immutable-outer-variable.rs
 run-pass	closures/closure-last-use-move.rs
@@ -3227,6 +3229,7 @@ compile-fail	lifetimes/lifetime-doesnt-live-long-enough.rs
 compile-fail	lifetimes/lifetime-elision-return-type-requires-explicit-lifetime.rs
 compile-fail	lifetimes/lifetime-errors/42701_one_named_and_one_anonymous.rs
 compile-fail	lifetimes/lifetime-errors/e0621-mut-ref-aliases-pointee-lifetime-distinct.rs
+compile-fail	lifetimes/lifetime-errors/e0621-mut-ref-aliases-pointee-lifetime.rs
 compile-fail	lifetimes/lifetime-errors/elision-error-omits-lifetimeless-params.rs
 compile-fail	lifetimes/lifetime-errors/ex1-return-one-existing-name-early-bound-in-struct.rs
 compile-fail	lifetimes/lifetime-errors/ex1-return-one-existing-name-if-else-2.rs
@@ -5284,6 +5287,7 @@ compile-fail	regions/region-object-lifetime-in-coercion.rs
 compile-fail	regions/regions-addr-of-arg.rs
 run-pass	regions/regions-addr-of-interior-of-unique-box.rs
 run-pass	regions/regions-addr-of-ret.rs
+compile-fail	regions/regions-addr-of-self.rs
 compile-fail	regions/regions-adjusted-lvalue-op.rs
 run-pass	regions/regions-assoc-type-region-bound.rs
 run-pass	regions/regions-assoc-type-static-bound.rs
@@ -5852,6 +5856,7 @@ build-pass	statics/issue-15261.rs
 run-pass	statics/issue-17233.rs
 run-pass	statics/issue-17718-static-unsafe-interior.rs
 check-pass	statics/issue-44373-2.rs
+compile-fail	statics/issue-44373.rs
 compile-fail	statics/missing_lifetime.rs
 build-pass	statics/nested-allocations-dont-inherit-codegen-attrs.rs
 check-pass	statics/nested_struct.rs

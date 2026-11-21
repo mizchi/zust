@@ -114,6 +114,9 @@ pub struct Rg {
     pub call_sp: Sp,
     /// Where values are returned (a borrow that escapes there is reported there: E0515)
     pub ret_sps: Vec<Sp>,
+    /// A function the gate left out: how its receiver elides (`&self`), and whether another receiver leaves the
+    /// result's regions unknown, for a check begun later (rg_late_on)
+    pub late: Option<(bool, bool)>,
 }
 
 /// t holds a trait object (whose lifetime a signature may leave to the default)
@@ -212,6 +215,16 @@ pub fn count(prog: &Program, t: Ty, depth: u32) -> Option<usize> {
     })
 }
 
+/// A deref of a reference of region r on the way to a place: a reborrow of the place lives no longer than r. Through
+/// a shared reference, no longer than it alone (NLL's supporting prefixes stop there: `&**p` with p: &mut &'y T lives
+/// as long as 'y)
+fn deref(ds: &mut Vec<u32>, r: u32, mutable: bool) {
+    if !mutable {
+        ds.clear();
+    }
+    ds.push(r);
+}
+
 fn recv_sp(r: &Option<Sp>, or: Sp) -> Sp {
     r.unwrap_or(or)
 }
@@ -228,6 +241,7 @@ fn place_text(e: &Expr) -> Option<String> {
     match strip(e) {
         Expr::Path(None, p) if p.segs.len() == 1 => Some(p.segs[0].name.clone()),
         Expr::Field(x, f, _) => Some(format!("{}.{f}", place_text(x)?)),
+        Expr::Index(x, _, _) => place_text(x),
         _ => None,
     }
 }
@@ -860,7 +874,7 @@ impl Cx<'_> {
 
     /// At the start of the body: the universal regions of the signature, the trees of the parameters and of the
     /// return type. Only a function with at least two regions in its signature (or a named one) is checked
-    pub(crate) fn rg_begin(&mut self, regions: Option<&RSigSyn>, params: &[(Loc, Ty)], self_elides: bool) {
+    pub(crate) fn rg_begin(&mut self, regions: Option<&RSigSyn>, params: &[(Loc, Ty)], self_elides: bool, force: bool) {
         let prog = self.prog;
         let rs = regions;
         let codes = |i: usize| rs.map(|r| r.slots.get(i).map(|c| c.as_slice()).unwrap_or(&[]));
@@ -909,7 +923,7 @@ impl Cx<'_> {
         let ret = rg.instantiate(prog, gret, codes(params.len()), &lts, &targs, &mut el);
         rg.ret = ret.filter(|_| !bad);
         let nuniv = rg.univ.len();
-        rg.on = nuniv >= 2 || (nuniv >= 1 && (rs.is_some() || has_dyn(prog, ret_t, 0)));
+        rg.on = force || nuniv >= 2 || (nuniv >= 1 && (rs.is_some() || has_dyn(prog, ret_t, 0)));
         if rg.on {
             for (i, &(loc, t)) in params.iter().enumerate() {
                 if let Some(tr) = trees[i].clone() {
@@ -961,7 +975,7 @@ impl Cx<'_> {
                     || self.rg.temps.contains_key(&(strip(x) as *const Expr as usize))
                     || (*m && matches!(strip(x), Expr::Lit(..)))
                     || matches!(strip(x), Expr::Block(None, false, b) if b.stmts.len() > 1)
-                    || (matches!(strip(x), Expr::Ref(..) | Expr::Struct(..) | Expr::Tuple(..)) && self.mentions_local(x)) =>
+                    || (matches!(strip(x), Expr::Ref(..) | Expr::Struct(..) | Expr::Tuple(..) | Expr::Array(..)) && (self.mentions_local(x) || self.not_const(x))) =>
             {
                 let (t, tr) = match strip(x) {
                     x if self.rg.temps.contains_key(&(x as *const Expr as usize)) => (self.rg.temps[&(x as *const Expr as usize)], vec![]),
@@ -970,7 +984,7 @@ impl Cx<'_> {
                         Some(Stmt::Expr(tail, false)) => self.rt_expr(tail)?,
                         _ => return None,
                     },
-                    x @ (Expr::Ref(..) | Expr::Struct(..) | Expr::Tuple(..)) => self.rt_expr(x)?,
+                    x @ (Expr::Ref(..) | Expr::Struct(..) | Expr::Tuple(..) | Expr::Array(..)) => self.rt_expr(x)?,
                     x => self.rg.calls.get(&(x as *const Expr as usize)).cloned()?,
                 };
                 let r = self.rg.var();
@@ -998,7 +1012,7 @@ impl Cx<'_> {
                 out.extend(tr);
                 Some((Ty::Ref(*m, crate::types::intern(t)), out))
             }
-            Expr::Call(..) | Expr::MethodCall(..) | Expr::Struct(..) | Expr::Tuple(..) | Expr::Closure(..) => self.rg.calls.get(&(e as *const Expr as usize)).cloned(),
+            Expr::Call(..) | Expr::MethodCall(..) | Expr::Struct(..) | Expr::Tuple(..) | Expr::Array(..) | Expr::Closure(..) => self.rg.calls.get(&(e as *const Expr as usize)).cloned(),
             // (`e as &'static T`: the cast's type, with the regions written in it; e flows into it)
             Expr::Cast(x, ty) => {
                 let (it, itr) = self.rt_expr(x)?;
@@ -1062,7 +1076,12 @@ impl Cx<'_> {
     fn not_const(&self, e: &Expr) -> bool {
         let ptr_cast = |x: &Expr| matches!(strip(x), Expr::Cast(_, t) if matches!(**t, crate::parse::Ty::Ptr(..) | crate::parse::Ty::Fn(..)));
         match strip(e) {
-            Expr::Path(None, p) => p.segs.len() == 1 && self.lookup(&p.segs[0].name).is_some(),
+            // (a static: a constant expression does not borrow one)
+            Expr::Path(None, p) if p.segs.len() == 1 => {
+                self.lookup(&p.segs[0].name).is_some() || self.prog.const_index.get(&p.segs[0].name).is_some_and(|&ci| self.prog.consts[ci as usize].stat.is_some())
+            }
+            Expr::Path(None, _) => self.static_of(e).is_some(),
+            Expr::Ref(_, x) => self.not_const(x),
             Expr::MethodCall(..) => true,
             Expr::Call(f, args) => match strip(f) {
                 Expr::Path(_, p) if self.prog.variant_by_p(&crate::program::PPath::of(p), self.self_sid).is_some() || self.prog.struct_by_p(&crate::program::PPath::of(p), self.self_sid).is_some() => args.iter().any(|a| self.not_const(a)),
@@ -1097,7 +1116,34 @@ impl Cx<'_> {
     pub(crate) fn rg_late_on(&mut self) {
         if !self.rg.on && self.rg.eligible {
             self.rg.on = true;
+            // (the parameters' trees: those the signature gives them)
+            if let Some((self_elides, other_self)) = self.rg.late.take() {
+                // (a parameter's binding is the outermost of its name: a later `let` may shadow it)
+                let ps: Vec<(Loc, Ty)> = self
+                    .bk
+                    .params
+                    .iter()
+                    .filter_map(|&l| {
+                        let n = &self.bk.locals[l as usize].name;
+                        self.scopes.iter().find_map(|s| s.iter().find(|b| b.0 == *n)).map(|b| (b.1, b.2))
+                    })
+                    .collect();
+                if debug() {
+                    eprintln!("regionck: late begin with {} of {} parameters ({:?})", ps.len(), self.bk.params.len(), self.inst_params_len());
+                }
+                if ps.len() == self.bk.params.len() && self.inst_params_len() == Some(ps.len()) {
+                    self.rg_begin(None, &ps, self_elides, true);
+                    if other_self {
+                        self.rg.ret = None;
+                    }
+                }
+            }
         }
+    }
+
+    /// The number of parameters of the function being checked
+    fn inst_params_len(&self) -> Option<usize> {
+        self.prog.sigs.get(self.rg.base as usize).map(|s| s.params.len())
     }
 
     /// The signature requires a region of it to be 'static
@@ -1115,15 +1161,20 @@ impl Cx<'_> {
                     Some(tr) => tr.clone(),
                     // (a local whose type has no region (bound before the check began): its tree is empty)
                     None if count(self.prog, t, 0) == Some(0) => vec![],
-                    None => return None,
+                    None => {
+                        if debug() {
+                            eprintln!("regionck: local {} ({:?}) has no tree", p.segs[0].name, loc);
+                        }
+                        return None;
+                    }
                 };
                 Some((t, tr, vec![]))
             }
             Expr::Unary(op, x, _) if op == "*" => {
                 let (t, tr, mut ds) = self.rt_place(x)?;
                 match t {
-                    Ty::Ref(_, i) => {
-                        ds.push(*tr.first()?);
+                    Ty::Ref(m, i) => {
+                        deref(&mut ds, *tr.first()?, m);
                         Some((*i, tr[1..].to_vec(), ds))
                     }
                     Ty::Box(i) => Some((*i, tr, ds)),
@@ -1135,8 +1186,8 @@ impl Cx<'_> {
                 // (auto-deref)
                 loop {
                     match t {
-                        Ty::Ref(_, i) => {
-                            ds.push(*tr.first()?);
+                        Ty::Ref(m, i) => {
+                            deref(&mut ds, *tr.first()?, m);
                             tr = tr[1..].to_vec();
                             t = *i;
                         }
@@ -1154,6 +1205,34 @@ impl Cx<'_> {
                 let prog = self.prog;
                 let fr = self.rg.field(prog, sid, i, &tr)?;
                 Some((ft, fr, ds))
+            }
+            // (an element of an array, a slice or a Vec (`&mut v[..]`): its tree is the element type's)
+            Expr::Index(x, ix, _) => {
+                let (mut t, mut tr, mut ds) = self.rt_place(x)?;
+                loop {
+                    match t {
+                        Ty::Ref(m, i) => {
+                            deref(&mut ds, *tr.first()?, m);
+                            tr = tr[1..].to_vec();
+                            t = *i;
+                        }
+                        Ty::Box(i) => t = *i,
+                        _ => break,
+                    }
+                }
+                let et = match t {
+                    Ty::Array(e, _) | Ty::Slice(e) => *e,
+                    Ty::Struct(sid) => {
+                        let sd = &self.prog.structs[sid as usize];
+                        if sd.name != "Vec" || sd.args.len() != 1 || lts_of(self.prog, self.prog.base_of(sid)) != 0 {
+                            return None;
+                        }
+                        sd.args[0]
+                    }
+                    _ => return None,
+                };
+                let t = if matches!(strip(ix), Expr::Range(..)) { Ty::Slice(crate::types::intern(et)) } else { et };
+                Some((t, tr, ds))
             }
             Expr::Call(..) | Expr::MethodCall(..) => {
                 let (t, tr) = self.rg.calls.get(&(e as *const Expr as usize)).cloned()?;
@@ -1479,6 +1558,22 @@ impl Cx<'_> {
         if count(prog, t, 0) == Some(tree.len()) {
             self.rg.calls.insert(c as *const Expr as usize, (t, tree));
         }
+    }
+
+    /// An array literal of type t: every element flows into the element's tree
+    pub(crate) fn rg_array(&mut self, e: &Expr, t: Ty) {
+        if !self.rg_on() {
+            return;
+        }
+        let (Expr::Array(xs), Ty::Array(et, _)) = (e, t) else { return };
+        let prog = self.prog;
+        let Some(tree) = self.rg.fresh(prog, t) else { return };
+        for x in xs {
+            if let Some((xty, xt)) = self.rt_expr(x) {
+                self.rg.flow(prog, xty, *et, &xt, &tree, super::borrowck::pos(x));
+            }
+        }
+        self.rg.calls.insert(e as *const Expr as usize, (t, tree));
     }
 
     /// `Box::new(x)` (x of type t): the box's tree is x's

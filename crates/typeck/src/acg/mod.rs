@@ -1147,6 +1147,8 @@ impl Cx<'_> {
             let n: usize = sig.params.iter().map(|&t| regionck::count(self.prog, t, 0).unwrap_or(0)).sum();
             if n < 2 && !(n == 1 && regionck::has_dyn(self.prog, sig.ret, 0)) {
                 self.rg.on = false;
+                let se = f.sig.recv.as_ref().is_some_and(|r| r.starts_with('&'));
+                self.rg.late = Some((se, f.sig.recv.is_some() && !se));
             }
         }
         if self.rg.on {
@@ -1167,7 +1169,7 @@ impl Cx<'_> {
                 };
                 // (any other receiver with elided regions in the result: not followed)
                 let other_self = f.sig.recv.is_some() && !self_elides;
-                self.rg_begin(sig.regions.as_deref(), &ps, self_elides);
+                self.rg_begin(sig.regions.as_deref(), &ps, self_elides, false);
                 if other_self {
                     self.rg.ret = None;
                 }
@@ -1568,7 +1570,7 @@ impl Cx<'_> {
                     // owns must not have to be 'static. What came before has no trees and adds no constraint)
                     let static_cast = matches!(strip_paren(init), Expr::Cast(_, t) if crate::regions::mentions_static(t));
                     if !self.rg.on && self.rg.eligible && (static_cast || ann_ty.as_ref().is_some_and(crate::regions::mentions_static)) {
-                        self.rg.on = true;
+                        self.rg_late_on();
                     }
                     let let_sp0 = std::mem::replace(&mut self.rg.let_sp, *let_at);
                     let r = self.expr(init, ann.or(hint));

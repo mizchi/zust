@@ -920,7 +920,13 @@ impl Cx<'_> {
                 }
                 r
             }
-            Expr::Array(_) => self.array_lit(e, expected),
+            Expr::Array(_) => {
+                let r = self.array_lit(e, expected);
+                if let Ok((_, t)) = &r {
+                    self.rg_array(e, *t);
+                }
+                r
+            }
             Expr::Repeat(..) => self.repeat_lit(e, expected),
             Expr::Index(_, ix, _) if matches!(&**ix, Expr::Range(..)) => err(SP, "range indexing needs a reference: `&a[lo..hi]`"),
             Expr::Index(..) => {

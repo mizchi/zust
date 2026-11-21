@@ -400,3 +400,27 @@ fn main() {}
 "#;
     assert_eq!(check(ok), vec![]);
 }
+
+/// A check begun late (a `'static` annotation in a function the gate left out) knows its parameters; array literals
+/// and indexed places are followed; a reborrow through a shared reference lives as long as it alone
+#[test]
+fn late_params_arrays_indexes() {
+    one_error("struct Dog { c: usize }\nimpl Dog {\n    fn chase(&mut self) {\n        let p: &'static mut usize = &mut self.c;\n        *p += 1;\n    }\n}\nfn main() {}\n", 4);
+    temp_error("static FOO: u32 = 50;\nfn main() {\n    let v: &'static [&'static u32; 1] = &[&FOO];\n    let _ = v;\n}\n", 3);
+    one_error("pub struct Buffer<'a> { buf: &'a mut [u8] }\npub fn foo<'a>(buffer: &mut Buffer<'a>) {\n    buffer.buf = &mut buffer.buf[..];\n}\nfn main() {}\n", 3);
+    let ok = r#"
+fn read(buf: &mut &[u8]) -> u8 {
+    let v = buf[0];
+    *buf = &buf[1..];
+    v
+}
+fn first<'a>(xs: &'a [u32]) -> &'a u32 { &xs[0] }
+fn mid<'a>(v: &'a Vec<u8>) -> &'a [u8] { &v[1..] }
+fn main() {
+    let a: &'static [u32; 3] = &[1, 2, 3];
+    let mut s: &[u8] = &[1, 2];
+    println!("{} {} {:?}", read(&mut s), first(a), mid(&vec![1, 2]));
+}
+"#;
+    assert_eq!(check(ok), vec![]);
+}
