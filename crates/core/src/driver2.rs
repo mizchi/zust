@@ -2578,35 +2578,13 @@ fn gated_attrs_len(b: &[u8]) -> Option<usize> {
     let mut i = 0;
     let mut gated = false;
     loop {
-        loop {
-            while i < b.len() && b[i].is_ascii_whitespace() {
-                i += 1;
-            }
-            if b[i..].starts_with(b"//") {
-                while i < b.len() && b[i] != b'\n' {
-                    i += 1;
-                }
-            } else if b[i..].starts_with(b"/*") {
-                let mut depth = 0;
-                while i < b.len() {
-                    if b[i..].starts_with(b"/*") {
-                        depth += 1;
-                        i += 2;
-                    } else if b[i..].starts_with(b"*/") {
-                        depth -= 1;
-                        i += 2;
-                        if depth == 0 {
-                            break;
-                        }
-                    } else {
-                        i += 1;
-                    }
-                }
-            } else {
-                break;
-            }
-        }
+        i = skip_space(b, i);
         if i >= b.len() || b[i] != b'#' {
+            // (an extern block after its outer attributes: its items' attributes are read too, the whole item)
+            let rest = &b[i..];
+            if rest.starts_with(b"extern") || rest.starts_with(b"unsafe") && b[skip_space(b, i + 6)..].starts_with(b"extern") {
+                return Some(b.len());
+            }
             return gated.then_some(i);
         }
         i += 1;
@@ -2617,11 +2595,7 @@ fn gated_attrs_len(b: &[u8]) -> Option<usize> {
                     depth = 1;
                     // (the attribute's name: `#[name`, `#[unsafe(name`; not a path `#[tool::name`)
                     let mut j = i + 1;
-                    let skip = |j: &mut usize| {
-                        while *j < b.len() && b[*j].is_ascii_whitespace() {
-                            *j += 1;
-                        }
-                    };
+                    let skip = |j: &mut usize| *j = skip_space(b, *j);
                     skip(&mut j);
                     if b[j..].starts_with(b"unsafe") && !b.get(j + 6).is_some_and(|&c| ident(c)) {
                         let mut k = j + 6;
@@ -2665,6 +2639,38 @@ fn gated_attrs_len(b: &[u8]) -> Option<usize> {
             i += 1;
         }
         i = i.min(b.len());
+    }
+}
+
+/// The index of the first byte at or after i that is not whitespace or a comment (`//..`, nested `/* .. */`)
+fn skip_space(b: &[u8], mut i: usize) -> usize {
+    loop {
+        while i < b.len() && b[i].is_ascii_whitespace() {
+            i += 1;
+        }
+        if b.get(i..).is_some_and(|r| r.starts_with(b"//")) {
+            while i < b.len() && b[i] != b'\n' {
+                i += 1;
+            }
+        } else if b.get(i..).is_some_and(|r| r.starts_with(b"/*")) {
+            let mut depth = 0;
+            while i < b.len() {
+                if b[i..].starts_with(b"/*") {
+                    depth += 1;
+                    i += 2;
+                } else if b[i..].starts_with(b"*/") {
+                    depth -= 1;
+                    i += 2;
+                    if depth == 0 {
+                        break;
+                    }
+                } else {
+                    i += 1;
+                }
+            }
+        } else {
+            return i.min(b.len());
+        }
     }
 }
 
