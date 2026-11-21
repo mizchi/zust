@@ -896,11 +896,13 @@ compile-fail	borrowck/issue-24267-flow-exit.rs
 compile-fail	borrowck/issue-41962.rs
 compile-fail	borrowck/issue-42344.rs
 compile-fail	borrowck/issue-45199.rs
+compile-fail	borrowck/issue-45983.rs
 run-pass	borrowck/issue-46095.rs
 compile-fail	borrowck/issue-46471.rs
 compile-fail	borrowck/issue-51117.rs
 run-pass	borrowck/issue-51348-multi-ref-mut-in-guard.rs
 compile-fail	borrowck/issue-52713-bug.rs
+compile-fail	borrowck/issue-53432-nested-closure-outlives-borrowed-value.rs
 compile-fail	borrowck/issue-54499-field-mutation-marks-mut-as-used.rs
 compile-fail	borrowck/issue-54499-field-mutation-of-moved-out-with-mut.rs
 compile-fail	borrowck/issue-54499-field-mutation-of-moved-out.rs
@@ -915,6 +917,7 @@ compile-fail	borrowck/issue-62387-suggest-iter-mut-2.rs
 compile-fail	borrowck/issue-62387-suggest-iter-mut.rs
 check-pass	borrowck/issue-70919-drop-in-loop.rs
 check-pass	borrowck/issue-71546.rs
+compile-fail	borrowck/issue-7573.rs
 check-pass	borrowck/issue-80772.rs
 compile-fail	borrowck/issue-81365-1.rs
 compile-fail	borrowck/issue-81365-10.rs
@@ -959,6 +962,8 @@ compile-fail	borrowck/reborrow-in-match-suggest-deref.rs
 run-pass	borrowck/ref-mut-rebind-does-not-affect-outer.rs
 run-pass	borrowck/refcell-borrow-comparison-12033.rs
 run-pass	borrowck/region-checker-map-closure-13665.rs
+compile-fail	borrowck/regions-escape-bound-fn-2.rs
+compile-fail	borrowck/regions-escape-bound-fn.rs
 compile-fail	borrowck/return-ref-to-temporary.rs
 run-pass	borrowck/rvalue-lifetime-match-equivalence-7660.rs
 check-pass	borrowck/self-field-consume-with-drop-type.rs
@@ -1065,6 +1070,8 @@ compile-fail	cast/non-primitive-cast-suggestion.rs
 compile-fail	cast/non-primitive-isize-ref-cast.rs
 run-pass	cast/owned-struct-to-trait-cast-6318.rs
 check-pass	cast/ptr-ptr-to-ptr-ptr-different-regions.rs
+compile-fail	cast/ptr-to-ptr-different-regions.rs
+compile-fail	cast/ptr-to-ptr-indirect-different-regions.rs
 build-pass	cast/raw-pointer-from-str-comparison.rs
 run-pass	cast/supported-cast.rs
 compile-fail	cast/trait-object-size-error-14366.rs
@@ -1102,6 +1109,7 @@ compile-fail	closures/2229_closure_analysis/array_subslice.rs
 run-pass	closures/2229_closure_analysis/capture-enum-field.rs
 compile-fail	closures/2229_closure_analysis/diagnostics/arrays.rs
 compile-fail	closures/2229_closure_analysis/diagnostics/borrowck/borrowck-1.rs
+compile-fail	closures/2229_closure_analysis/diagnostics/borrowck/borrowck-3.rs
 compile-fail	closures/2229_closure_analysis/diagnostics/borrowck/borrowck-closures-mut-and-imm.rs
 compile-fail	closures/2229_closure_analysis/diagnostics/box.rs
 compile-fail	closures/2229_closure_analysis/diagnostics/cant-mutate-imm.rs
@@ -1162,6 +1170,7 @@ run-pass	closures/call-closure-through-lifetime-generic-struct.rs
 run-pass	closures/call-fnmut-trait-object-via-ref-mut.rs
 compile-fail	closures/closure-arg-type-mismatch-method-receiver.rs
 compile-fail	closures/closure-bounds-static-cant-capture-borrowed.rs
+compile-fail	closures/closure-expected-type/expect-region-supply-region.rs
 compile-fail	closures/closure-expected.rs
 compile-fail	closures/closure-immutable-outer-variable.rs
 run-pass	closures/closure-last-use-move.rs
@@ -3296,6 +3305,7 @@ compile-fail	lifetimes/missing-lifetime-in-assoc-type-4.rs
 compile-fail	lifetimes/missing-lifetime-in-assoc-type-5.rs
 compile-fail	lifetimes/missing-lifetime-in-assoc-type-6.rs
 compile-fail	lifetimes/missing-lifetime-in-return.rs
+compile-fail	lifetimes/missing-lifetime-specifier-13497.rs
 compile-fail	lifetimes/mut-ref-owned-suggestion.rs
 compile-fail	lifetimes/nested-binder-print.rs
 check-pass	lifetimes/nested.rs
@@ -4146,6 +4156,7 @@ check-pass	nll/issue-30104.rs
 compile-fail	nll/issue-30438-a.rs
 compile-fail	nll/issue-30438-b.rs
 compile-fail	nll/issue-30438-c.rs
+compile-fail	nll/issue-40510-1.rs
 check-pass	nll/issue-40510-2.rs
 check-pass	nll/issue-40510-4.rs
 run-pass	nll/issue-45696-long-live-borrows-in-boxes.rs
@@ -4176,6 +4187,7 @@ compile-fail	nll/issue-52663-span-decl-captured-variable.rs
 compile-fail	nll/issue-52669.rs
 compile-fail	nll/issue-52742.rs
 check-pass	nll/issue-52992.rs
+compile-fail	nll/issue-53040.rs
 run-pass	nll/issue-53123-raw-pointer-cast.rs
 compile-fail	nll/issue-53807.rs
 compile-fail	nll/issue-54302-cases.rs
@@ -4183,6 +4195,7 @@ compile-fail	nll/issue-54556-wrap-it-up.rs
 compile-fail	nll/issue-54943.rs
 check-pass	nll/issue-55288.rs
 check-pass	nll/issue-55344.rs
+compile-fail	nll/issue-55394.rs
 check-pass	nll/issue-55651.rs
 compile-fail	nll/issue-57100.rs
 compile-fail	nll/issue-57280-1-flipped.rs
@@ -4195,6 +4208,7 @@ check-pass	nll/issue-61311-normalize.rs
 check-pass	nll/issue-61320-normalize.rs
 compile-fail	nll/issue-67007-escaping-data.rs
 compile-fail	nll/issue-95272.rs
+compile-fail	nll/issue-98170.rs
 check-pass	nll/lint-no-err.rs
 compile-fail	nll/lub-if.rs
 compile-fail	nll/lub-match.rs
@@ -4229,6 +4243,7 @@ check-pass	nll/ty-outlives/issue-55756.rs
 check-pass	nll/ty-outlives/projection-body.rs
 check-pass	nll/ty-outlives/projection-where-clause-env.rs
 check-pass	nll/ty-outlives/projection-where-clause-trait.rs
+compile-fail	nll/ty-outlives/wf-unreachable.rs
 compile-fail	nll/type-check-pointer-coercions.rs
 compile-fail	nll/type-check-pointer-comparisons.rs
 check-pass	nll/unexpected-inference-var-ice-116599.rs
@@ -5388,6 +5403,8 @@ compile-fail	regions/regions-infer-contravariance-due-to-decl.rs
 run-pass	regions/regions-infer-contravariance-due-to-ret.rs
 compile-fail	regions/regions-infer-covariance-due-to-decl.rs
 compile-fail	regions/regions-infer-invariance-due-to-decl.rs
+compile-fail	regions/regions-infer-invariance-due-to-mutability-3.rs
+compile-fail	regions/regions-infer-invariance-due-to-mutability-4.rs
 compile-fail	regions/regions-infer-not-param.rs
 compile-fail	regions/regions-infer-proc-static-upvar.rs
 run-pass	regions/regions-infer-reborrow-ref-mut-recurse.rs
@@ -5412,6 +5429,7 @@ check-pass	regions/regions-outlives-projection-hrtype.rs
 check-pass	regions/regions-outlives-projection-trait-def.rs
 check-pass	regions/regions-outlives-scalar.rs
 run-pass	regions/regions-params.rs
+compile-fail	regions/regions-pattern-typing-issue-19552.rs
 compile-fail	regions/regions-pattern-typing-issue-19997.rs
 compile-fail	regions/regions-proc-bound-capture.rs
 run-pass	regions/regions-reassign-let-bound-pointer.rs
@@ -5423,6 +5441,7 @@ run-pass	regions/regions-relate-bound-regions-on-closures-to-inference-variables
 compile-fail	regions/regions-ret-borrowed-1.rs
 compile-fail	regions/regions-ret-borrowed.rs
 run-pass	regions/regions-return-interior-of-option.rs
+compile-fail	regions/regions-return-ref-to-upvar-issue-17403.rs
 compile-fail	regions/regions-return-stack-allocated-vec.rs
 run-pass	regions/regions-scope-chain-example.rs
 run-pass	regions/regions-self-impls.rs
@@ -6945,6 +6964,7 @@ run-pass	unboxed-closures/issue-18661.rs
 compile-fail	unboxed-closures/unboxed-closure-feature-gate.rs
 compile-fail	unboxed-closures/unboxed-closure-immutable-capture.rs
 compile-fail	unboxed-closures/unboxed-closure-no-cyclic-sig.rs
+compile-fail	unboxed-closures/unboxed-closure-region.rs
 compile-fail	unboxed-closures/unboxed-closure-sugar-used-on-struct-1.rs
 compile-fail	unboxed-closures/unboxed-closure-sugar-used-on-struct-3.rs
 compile-fail	unboxed-closures/unboxed-closure-sugar-used-on-struct.rs

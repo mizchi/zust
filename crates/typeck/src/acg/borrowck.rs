@@ -1568,8 +1568,10 @@ impl Cx<'_> {
             let pt = if p.proj.is_empty() { Some(t) } else { pt };
             if mode == CapMode::Val {
                 let copy = pt.is_none_or(|t| self.bk_ty(t).0);
-                // (a copy a closure with no `move` holds of what it only reads: rustc's closure borrows it)
-                if !(copy && !move_kw && pt.is_some()) {
+                // (a copy a closure with no `move` holds of what it only reads: rustc's closure borrows it. Not of a
+                // reference: one passed where a reference is expected is reborrowed (`f(b)` is `f(&*b)`), and the
+                // closure holds a copy of it then (rustc's capture of `*b` by reference, truncated))
+                if !(copy && !move_kw && pt.is_some_and(|t| !matches!(t, Ty::Ref(..) | Ty::Ptr(..) | Ty::Fn(_)))) {
                     self.bk_acc_place(p, if copy { Acc::Read } else { Acc::Move }, sp);
                     continue;
                 }
