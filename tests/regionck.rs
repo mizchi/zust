@@ -607,7 +607,8 @@ fn closure_captures_regions() {
 trait B {}
 impl<F> B for F {}
 fn produce<'a, 'b: 'a>(data: &'a mut Vec<&'a u32>, value: &'b u32) -> impl B + 'a {
-    move || { let value: &'a u32 = value; data.push(value); }
+    let x = move || { let value: &'a u32 = value; data.push(value); };
+    x
 }
 pub fn f<'a>(_: &'a i32, _: impl FnOnce(&mut &mut &'a i32)) {}
 pub fn h<'a>(p: &'a i32) { f(p, |x: &mut &mut &'a i32| { let _: &mut &mut &'a i32 = x; }) }
