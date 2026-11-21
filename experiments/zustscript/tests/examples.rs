@@ -1,6 +1,6 @@
-//! The prototype's tests: examples/*.rys compile and run under node with the expected output, the output passes
-//! `node --check`, and tests/errors/*.rys fail with the message their first line expects.
-//! (app.rys needs zustc: built in the zust checkout this crate sits in, `cargo build --release` there)
+//! The prototype's tests: examples/*.zsc compile and run under node with the expected output, the output passes
+//! `node --check`, and tests/errors/*.zsc fail with the message their first line expects.
+//! (app.zsc needs zustc: built in the zust checkout this crate sits in, `cargo build --release` there)
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -9,8 +9,8 @@ fn root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
 }
 
-fn rsc(input: &Path, out: &Path) -> std::process::Output {
-    Command::new(env!("CARGO_BIN_EXE_rsc")).arg(input).arg("-o").arg(out).output().unwrap()
+fn zsc(input: &Path, out: &Path) -> std::process::Output {
+    Command::new(env!("CARGO_BIN_EXE_zsc")).arg(input).arg("-o").arg(out).output().unwrap()
 }
 
 fn out_dir(name: &str) -> PathBuf {
@@ -36,8 +36,8 @@ fn node(dir: &Path, script: &str) -> String {
 
 fn build(name: &str) -> PathBuf {
     let d = out_dir(name);
-    let o = rsc(&root().join(format!("examples/{name}.rys")), &d);
-    assert!(o.status.success(), "rsc failed:\n{}", String::from_utf8_lossy(&o.stderr));
+    let o = zsc(&root().join(format!("examples/{name}.zsc")), &d);
+    assert!(o.status.success(), "zsc failed:\n{}", String::from_utf8_lossy(&o.stderr));
     let c = Command::new("node").arg("--check").arg(d.join(format!("{name}.js"))).output().unwrap();
     assert!(c.status.success(), "the output is not valid JS:\n{}", String::from_utf8_lossy(&c.stderr));
     d
@@ -63,7 +63,7 @@ fn basics() {
     assert!(dts.contains("export type Filter = \"All\" | \"Active\" | \"Done\";"));
     assert!(dts.contains("export declare function sum$i64(xs: readonly bigint[]): bigint;"));
     assert!(dts.contains("export declare function sum$i32(xs: readonly i32[]): i32;"));
-    assert!(dts.contains("export type i32 = number & { readonly __rsx_num: \"i32\" };"));
+    assert!(dts.contains("export type i32 = number & { readonly __zsc_num: \"i32\" };"));
     let js = std::fs::read_to_string(d.join("basics.js")).unwrap();
     assert!(!js.contains("class "), "the output uses no classes");
     // the brands' constructors check at the boundary
@@ -117,7 +117,7 @@ fn errors() {
         let f = f.unwrap().path();
         let src = std::fs::read_to_string(&f).unwrap();
         let want = src.lines().next().unwrap().strip_prefix("// expect: ").expect("first line: // expect: <message>");
-        let o = rsc(&f, &root().join("target/test-out/errors"));
+        let o = zsc(&f, &root().join("target/test-out/errors"));
         let err = String::from_utf8_lossy(&o.stderr);
         assert!(!o.status.success(), "{} compiled", f.display());
         assert!(err.contains(want), "{}: expected `{want}` in:\n{err}", f.display());
@@ -137,11 +137,11 @@ fn dts_typechecks() {
     }
     let d = out_dir("ts");
     for name in ["basics", "app"] {
-        let o = rsc(&root().join(format!("examples/{name}.rys")), &d);
-        assert!(o.status.success(), "rsc failed:\n{}", String::from_utf8_lossy(&o.stderr));
+        let o = zsc(&root().join(format!("examples/{name}.zsc")), &d);
+        assert!(o.status.success(), "zsc failed:\n{}", String::from_utf8_lossy(&o.stderr));
     }
     std::fs::copy(root().join("tests/consumer.ts"), d.join("consumer.ts")).unwrap();
-    // (rsc's output is ES modules)
+    // (zsc's output is ES modules)
     std::fs::write(d.join("package.json"), "{ \"type\": \"module\" }\n").unwrap();
     let o = Command::new(&tsc)
         .current_dir(&d)

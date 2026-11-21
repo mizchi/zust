@@ -1,4 +1,4 @@
-//! rustyscript's syntax tree. Every expression carries an id: the checker records what it resolved (callee kind,
+//! zustscript's syntax tree. Every expression carries an id: the checker records what it resolved (callee kind,
 //! types) in side tables keyed by it, and the JS emitter reads those tables. (A small stand-in for the typed IR the
 //! design calls for: zust's acg has no such layer, it type-checks and records low-level instructions in one pass.)
 

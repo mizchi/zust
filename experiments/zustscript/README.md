@@ -1,8 +1,8 @@
-# rustyscript (試作)
+# zustscript (試作)
 
 zust を土台にした、フロントエンド向け言語の試作。目標は、表面は TS 風の高水準な言語で、必要な箇所だけ Rust と同じ低レベルで書け、境界(コールバックの寿命を含む)をコンパイラが面倒を見ること。
 
-- `rsc x.rys -o out/` は次を書き出す
+- `zsc x.zsc -o out/` は次を書き出す
   - `x.js`: 読める ES module。JS 層の本体と、wasm 層のグルー
   - `x.d.ts`
   - `x.wasm.rs` と `x.wasm`: `wasm fn` があるときだけ。zustc でコンパイルする
@@ -58,7 +58,7 @@ extern "react" fn useState<T>(init: T) -> (T, fn(T) -> ()) = "useState";
 | `f64` | number | そのまま |
 
 - `.d.ts` では branded type になる。TS 側でも整数と小数が混ざらない
-  - 例: `export type i32 = number & { readonly __rsx_num: "i32" }`
+  - 例: `export type i32 = number & { readonly __zsc_num: "i32" }`
   - brand は文字列リテラルのプロパティで付けるので、モジュールが違っても互換になる(`unique symbol` だとモジュールごとに別の型になる)
   - 値は number のままなので、`i32` は `number` に代入できる。逆向きは、モジュールが export するコンストラクタ `i32(x)` / `u32(x)` / `f64(x)` を通す
   - コンストラクタは変換せず検査だけする: `i32(1.5)` は RangeError。境界で混入したら誤りとして止める
@@ -124,7 +124,7 @@ wasm { fn sq(x: f64) -> f64 { x * x } }                              // wasm 側
 | `&str` | String | UTF-16 → UTF-8 に変換してコピー | グルーが呼び出し後に解放 |
 | `String` / `Vec<..>`(戻り値) | String / Array | wrapper が (ptr, len, cap) を書き、グルーがコピーで受け取る | グルーがコピーの後に解放 |
 | `&dyn Fn(A) -> R` | `(A) => R` | 表に登録した id | **呼び出しが返ったらグルーが解除**(借用なので呼び出しより長く生きられない) |
-| `Box<dyn Fn(A) -> R>` | `(A) => R` | 表に登録した id | **Rust が Box を drop した時点で解除**(`Drop` が import の `__rsx_cb_drop` を呼ぶ) |
+| `Box<dyn Fn(A) -> R>` | `(A) => R` | 表に登録した id | **Rust が Box を drop した時点で解除**(`Drop` が import の `__zsc_cb_drop` を呼ぶ) |
 
 - コールバックの寿命の推論は、Rust の型(借用か所有か)をそのまま寿命の宣言として読む
   - wasm_bindgen では `Closure::forget` や `Closure` の保持を手で書く必要があるが、ここではそれが要らない
@@ -137,7 +137,7 @@ wasm { fn sq(x: f64) -> f64 { x * x } }                              // wasm 側
 
 | 項目 | 値 |
 |---|---|
-| rsc のフロント(parse、検査、JS と .d.ts の生成)、examples/app.rys | 0.4 ms |
+| zsc のフロント(parse、検査、JS と .d.ts の生成)、examples/app.zsc | 0.4 ms |
 | zustc による wasm 層のコンパイル(7 関数) | 37 ms |
 | app.js | 5.0 KB(gzip 1.8 KB) |
 | app.wasm(既定、-O なし) | 36 KB(gzip 12.6 KB) |

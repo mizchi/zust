@@ -1,5 +1,5 @@
 [package]
-name = "rustyscript"
+name = "zustscript"
 version = "0.0.1"
 edition = "2024"
 license = "MIT OR Apache-2.0"
@@ -9,5 +9,5 @@ description = "Prototype: a frontend language whose JS layer compiles to readabl
 [workspace]
 
 [[bin]]
-name = "rsc"
+name = "zsc"
 path = "src/main.rs"

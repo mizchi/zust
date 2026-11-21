@@ -1,4 +1,4 @@
-// A TS module using rsc's output: the .d.ts must type-check, and the numeric brands must keep i32 and f64 apart.
+// A TS module using zsc's output: the .d.ts must type-check, and the numeric brands must keep i32 and f64 apart.
 // (tests/examples.rs runs tsc on it when tsc is available)
 import { sum$i32, sum$f64, i32, f64, mean, area, visible, type Todo, type Shape } from "./basics.js";
 import { App, Row, stats, map_sum, histogram, type Sample } from "./app.js";

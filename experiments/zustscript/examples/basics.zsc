@@ -1,4 +1,4 @@
-// rustyscript: the JS layer (records, enums, match, |>, numbers that keep their types)
+// zustscript: the JS layer (records, enums, match, |>, numbers that keep their types)
 
 extern fn log(s: String) = "console.log";
 
