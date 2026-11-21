@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795287742181,
+  "lastUpdate": 1795287744335,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -77847,6 +77847,85 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/mizchi/zust/commit/68b749734276a69c000c134e5975ed8f9e195e24"
         },
         "date": 1795286496531,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "parity documentSymbol (名前の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity workspace/symbol (上位 20 の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity definition (行き先の一致)",
+            "value": 97.059,
+            "unit": "%"
+          },
+          {
+            "name": "parity hover (名前を含む)",
+            "value": 85,
+            "unit": "%"
+          },
+          {
+            "name": "parity references (数の一致)",
+            "value": 89.744,
+            "unit": "%"
+          },
+          {
+            "name": "parity documentHighlight (数の一致)",
+            "value": 97.222,
+            "unit": "%"
+          },
+          {
+            "name": "parity rename (書き換えの一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity signatureHelp (名前・引数の数・今の引数の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity completion `x.\\|` (書いてある名前を含む)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity completion `na\\|me` (同)",
+            "value": 84,
+            "unit": "%"
+          },
+          {
+            "name": "parity 一致の平均",
+            "value": 95.302,
+            "unit": "%"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "miz404@gmail.com",
+            "name": "Kotaro Chikuba",
+            "username": "mizchi"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "a5996966ddff7363cc2af8785021d22103dbe264",
+          "message": "Merge pull request #34 from mizchi/claude/clever-pasteur-11fjnw\n\nUI frameworks for wasm32: what is missing; zurgo M0 (Cargo-compatible driver); a dispatch regression",
+          "timestamp": "2026-11-22T03:58:12+09:00",
+          "tree_id": "5c2cbded785601dafed67260ec7825e746cda54e",
+          "url": "https://github.com/mizchi/zust/commit/a5996966ddff7363cc2af8785021d22103dbe264"
+        },
+        "date": 1795287743829,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
