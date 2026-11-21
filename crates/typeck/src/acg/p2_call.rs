@@ -844,7 +844,11 @@ impl Cx<'_> {
             self.bk_frame();
         }
         self.check_unsafe_call(id, msp.start)?;
+        if !via_deref {
+            self.rg_recv(recv, recv_ty, sid);
+        }
         let r = self.call_fn(id, Some((recv_v, recv_ty)), &args, tf, expected, SP);
+        self.rg_took_call(e);
         if into_recv {
             let srcs = self.bk_frame_end();
             self.bk_flow_into(recv, &srcs);
@@ -1391,6 +1395,7 @@ impl Cx<'_> {
         // (a compound assignment's: taken here, so that a call among its arguments does not)
         let act = self.bk.activate.take();
         let t0 = self.bk.call_temps.len();
+        self.rg.depth += 1;
         let r = self.call_fn_inner(id, recv, args, turbofish, expected, span);
         // (the arguments are evaluated and their loans still live: the reservation ends, the `&mut` loan is taken)
         if let Some((ev, tid)) = act {
@@ -1403,11 +1408,14 @@ impl Cx<'_> {
             }
             self.bk_push(Some(ev));
         }
+        self.rg.depth -= 1;
         self.bk_call_temps_end(t0);
         r
     }
 
     fn call_fn_inner(&mut self, id: u32, recv: Option<(Value, Ty)>, args: &[&Expr], turbofish: Option<&[GArg]>, expected: Option<Ty>, span: Sp) -> R<V> {
+        // (the receiver's region tree is this call's: the calls in the arguments must not take it)
+        let rg_recv = if recv.is_some() { self.rg.recv.take() } else { None };
         if self.prog.names.get(id as usize).is_some_and(|n| n == "__core_spawn") {
             if let Some(c) = args.first() {
                 self.check_spawn_closure(c)?;
@@ -1706,7 +1714,11 @@ impl Cx<'_> {
                 return Ok((None, Ty::Unit));
             }
         }
+        let sol_rg = if self.rg_on() { Some(sol0.clone()) } else { None };
         let (target, sig) = self.resolve_call(id, &arg_tys, sol0, expected, span)?;
+        if let Some(sol) = sol_rg {
+            self.rg_call(id, &sol, args, &sig.params, sig.ret, rg_recv, skip == 1, span);
+        }
         if self.prog.names[id as usize] == "__core_transmute" && sig.params.len() == 1 {
             self.check_transmute(sig.params[0], sig.ret, span)?;
         }

@@ -21,7 +21,7 @@
 > **Status**: experimental.
 >
 > - zustc only targets Linux x86-64 and does not support all of Rust ([supported language](docs/language.md)).
-> - zustc's checks (types, borrow checking without region errors) are partial, so it is not a replacement for rustc for checking correctness.
+> - zustc's checks (types, borrow checking, region errors against signatures) are partial, so it is not a replacement for rustc for checking correctness.
 > - zust-analyzer implements only part of what rust-analyzer does.
 
 ## Status
@@ -400,7 +400,11 @@ the measured numbers. The [reports](docs/reports/) explain each step.
 - [x] impl methods against the trait's declaration: parameter count (E0050), kind of receiver (E0053)
 - [x] unreachable match arms under `#![deny(unreachable_patterns)]` (the same usefulness check, arm by arm);
   array patterns of the wrong length (E0527, E0528)
-- [ ] region errors against signatures (E0621, E0521): regions <!-- cf:regions -->13.8%, lifetimes <!-- cf:lifetimes -->23.4%
+- [ ] region errors against signatures ("lifetime may not live long enough", E0621): the universal regions of a fn's
+  signature against the constraints its body needs (calls, `let`, assignments, struct / variant values, patterns),
+  borrows of locals and temporaries that must outlive the fn (E0597, E0716), undeclared / shadowed / unconstrained
+  lifetimes (E0261, E0496, E0207), missing ones in fn pointer types (E0106). Not yet: closures, `impl Trait` /
+  `dyn` lifetimes, `T: 'a` (E0310), higher-ranked bounds. regions <!-- cf:regions -->13.8%, lifetimes <!-- cf:lifetimes -->23.4%
 - [ ] coherence, bounds of blanket impls, dyn compatibility (E0038), the bindings of `dyn Tr<A = T>` against the associated type's bounds (done when T is a primitive, `str` or a struct name)
 - [ ] lints and warnings: lint <!-- cf:lint -->30.6%
 - [ ] editions (2015-only errors)
@@ -434,7 +438,8 @@ the measured numbers. The [reports](docs/reports/) explain each step.
 
 ### Expected to cost performance (measured before kept)
 
-- [ ] region checking against signatures: `check` time (borrowck costs +2.2% today)
+- [x] region checking against signatures: measured against cd5dccd (instructions): check +0.14%, edit one fn +0.28%,
+  traits check +0.36%, patterns check +0.91% (the region check itself ~0.5%), LSP session +0.06%, no-op and cache unchanged
 - [ ] coherence and bounds of blanket impls: `check` time, LSP
 - [ ] real async (state machines, `poll`, an executor): build time, binary size
 - [ ] unwinding (landing pads): build time, binary size

@@ -1122,7 +1122,11 @@ impl Cx<'_> {
 
     /// 一時領域にタグと各フィールドを書いて enum の値を作る。args は (フィールド番号, 式)
     pub(crate) fn variant_value(&mut self, sid: u32, vi: usize, args: &[(usize, &Expr)], expected: Option<Ty>) -> R<V> {
-        self.adt_value(sid, Some(vi), args, expected, SP)
+        let r = self.adt_value(sid, Some(vi), args, expected, SP);
+        if let Ok((_, t)) = &r {
+            self.rg_variant(*t, vi, args);
+        }
+        r
     }
 
     /// struct (vi = None) / enum のバリアント (vi = Some) の値を一時領域に作る。args は (フィールド番号, 式)。

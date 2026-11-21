@@ -39,6 +39,8 @@ pub struct FnSig {
     pub is_unsafe: bool,
     /// SigSyn::ret_from (which reference arguments the return value may borrow from)
     pub ret_from: u64,
+    /// SigSyn::regions
+    pub regions: Option<std::sync::Arc<crate::types::RSigSyn>>,
 }
 
 impl FnSig {
@@ -328,6 +330,8 @@ pub struct Program {
     pub pord: Vec<u32>,
     /// struct / enum の定義 (番号の若いもの) を書いたアイテムの番号
     pub struct_item: Vec<u32>,
+    /// The regions of the struct / enum definitions that name lifetimes (by definition id): region checking
+    pub adt_regions: FxMap<u32, std::sync::Arc<RAdtSyn>>,
 }
 
 /// `impl<..> Trait for S<..> { type Name = Value; }`
@@ -452,6 +456,8 @@ impl Insts {
             panic_handler: false,
             ret_from: b.ret_from,
             is_unsafe: b.is_unsafe,
+            // (of the generic signature: its slots leave out the type parameters' own)
+            regions: b.regions.clone(),
         };
         // (a generic fn returning `impl Trait`: the type of this instance's body)
         let mut sig = sig;
@@ -718,6 +724,7 @@ impl Program {
             aliases: FxMap::default(),
             pord: vec![],
             struct_item: vec![],
+            adt_regions: FxMap::default(),
         };
         // 0. 型の別名 (struct のフィールドの型より先に)
         // (同じ名前の struct / enum があればそちら: ユーザの `struct Path` と prelude の `type Path = str`)
@@ -894,6 +901,9 @@ impl Program {
                     return Err(format!("{}:1: duplicate definition of `{name}`", it.line));
                 }
                 p.struct_index.insert(name.clone(), sdefs.len() as u32);
+                if let Some(r) = &sm.adt_regions {
+                    p.adt_regions.insert(sdefs.len() as u32, std::sync::Arc::new((**r).clone()));
+                }
                 sdefs.push((ii, name.clone(), shape, sm.adt_generics.clone()));
             }
             for c in &sm.closures {
@@ -1203,6 +1213,7 @@ impl Program {
                     panic_handler: ss.panic_handler,
                     ret_from: ss.ret_from,
                     is_unsafe: ss.is_unsafe,
+                    regions: ss.regions.as_deref().map(|r| std::sync::Arc::new(r.clone())),
                 });
                 if ss.panic_handler {
                     p.panic_handler = Some(p.names.len() as u32 - 1);
@@ -3368,6 +3379,14 @@ impl Program {
             self.hash_ty(p, h);
         }
         self.hash_ty(s.ret, h);
+        // (what the borrow and region checkers read of the signature: a caller is checked again when it changes)
+        // (most fns return no reference: ret_from is "known, none", not hashed)
+        if s.ret_from != 1 << 63 {
+            h.add(&s.ret_from);
+        }
+        if let Some(r) = &s.regions {
+            h.add(&**r);
+        }
     }
 
     /// アイテム内の識別子のうち関数名に一致するもの (ソート済み) と struct 名に一致するもの。

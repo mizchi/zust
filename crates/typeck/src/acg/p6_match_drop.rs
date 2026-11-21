@@ -169,6 +169,10 @@ impl Cx<'_> {
             }
             if changed {
                 let m2 = self.keep_expr(Expr::Match(scrut.clone(), out));
+                // (the region check follows the arms that were lowered)
+                if self.rg_on() {
+                    self.rg.alias.insert(m as *const Expr as usize, m2);
+                }
                 return self.match_(m2, expected);
             }
         }
@@ -222,6 +226,7 @@ impl Cx<'_> {
         }
         let bk_ss = self.bk.scrut.clone();
         let bk_sp = self.bk.scrut_place.clone();
+        let rg_ss = self.rg.scrut.clone();
         let sflag = self.last_scrut;
         let merge = self.b.create_block();
         let mut result_ty: Option<Ty> = None;
@@ -235,6 +240,7 @@ impl Cx<'_> {
             let ob = self.owned_binds;
             self.bk.scrut = bk_ss.clone();
             self.bk.scrut_place = bk_sp.clone();
+            self.rg.scrut = rg_ss.clone();
             self.bk_bind_begin();
             self.bk.guard_arm = arm.guard.is_some();
             let r = self.pat_bind(&arm.pat, place, BindMode::Move);
@@ -283,6 +289,7 @@ impl Cx<'_> {
             }
             let t0 = self.temps.len();
             let (v, t) = self.expr(&arm.body, result_ty.or(expected))?;
+            self.rg_keep(&arm.body);
             self.drop_tail_temps(t0, (v, t));
             self.pop_scope();
             self.finish_arm(v, t, merge, &mut result_ty, &mut param, SP)?;
@@ -833,7 +840,8 @@ impl Cx<'_> {
                         let (v, t) = self.read(p);
                         self.bk_pat_move(t, &name);
                         self.bk.mut_next = Some(*mutable);
-                        self.bind(name, t, v);
+                        self.bind(name.clone(), t, v);
+                        self.rg_pat_bind(&name, false);
                     }
                     BindMode::Ref(m) => {
                         let Place::Mem(a, o, t) = p else {
@@ -841,8 +849,11 @@ impl Cx<'_> {
                         };
                         let addr = self.addr_plus(a, o);
                         let saved = self.bk_pat_ref(m, *by_ref);
-                        self.bind(name, Ty::Ref(m, intern(t)), Some(addr));
+                        self.bind(name.clone(), Ty::Ref(m, intern(t)), Some(addr));
                         self.bk.bind_srcs = saved;
+                        if !*by_ref {
+                            self.rg_pat_bind(&name, true);
+                        }
                     }
                 }
                 Ok(())
@@ -850,7 +861,13 @@ impl Cx<'_> {
             Pat::Ref(pm, inner) => {
                 let (q, _) = self.pat_deref_once(p);
                 let saved = self.bk_pat_proj(borrowck::ref_deref(*pm));
+                let rs = (self.rg.pat.clone(), self.rg.pat_ref);
+                self.rg_pat_align(q.ty());
+                // (an explicit `&` pattern: what it binds is by value again)
+                self.rg.pat_ref = None;
                 let r = self.pat_bind(inner, q, BindMode::Move);
+                self.rg.pat = rs.0;
+                    self.rg.pat_ref = rs.1;
                 self.bk.pat_path = saved;
                 r
             }
@@ -858,6 +875,8 @@ impl Cx<'_> {
                 if !cases.iter().any(has_bindings) {
                     return Ok(());
                 }
+                // (the bindings of `|` alternatives are not followed)
+                self.rg.pat = None;
                 // どの選択肢に合ったかを判定し直し、その選択肢で束縛した値を merge の引数で渡す
                 let mut names = vec![];
                 crate::ast_closure::pat_idents(&cases[0], &mut names);
@@ -915,8 +934,10 @@ impl Cx<'_> {
             Pat::Slice(_) => {
                 // (moving out of an array by a pattern is allowed: not tracked)
                 let saved = self.bk.pat_path.take();
+                let rs = self.rg.pat.take();
                 let r = self.pat_bind_slice(pat, p, mode);
                 self.bk.pat_path = saved;
+                self.rg.pat = rs;
                 r
             }
             _ => self.pat_bind_rest(pat, p, mode),
@@ -951,18 +972,22 @@ impl Cx<'_> {
         match pat {
             Pat::TupleStruct(path, elems) => {
                 let (p, mode) = self.pat_deref(p, mode);
-                let (fields, vname) = match self.variant_on(path, p.ty()) {
+                self.rg_pat_align(p.ty());
+                let (fields, vname, rvi) = match self.variant_on(path, p.ty()) {
                     Some((sid, vi)) => {
                         let v = &self.prog.structs[sid as usize].variants[vi];
-                        (v.fields.clone(), Some(v.name.clone()))
+                        (v.fields.clone(), Some(v.name.clone()), Some(vi))
                     }
-                    None => (self.tuple_struct_fields(path, p.ty(), SP)?, None),
+                    None => (self.tuple_struct_fields(path, p.ty(), SP)?, None, None),
                 };
                 let deref = matches!(mode, BindMode::Ref(_));
                 for (fi, sub) in Self::tuple_fields(elems.iter(), fields.len(), SP).map_err(|m| self.at(path.pos, m))? {
                     let (fname, fty, off) = fields[fi].clone();
                     let saved = self.bk_pat_field(deref, vname.as_deref(), &fname);
+                    let rs = self.rg_pat_field(p.ty(), rvi, fi);
                     let r = self.pat_bind(sub, Self::field_place(p, fty, off)?, mode);
+                    self.rg.pat = rs.0;
+                    self.rg.pat_ref = rs.1;
                     self.bk.pat_path = saved;
                     r?;
                 }
@@ -970,12 +995,16 @@ impl Cx<'_> {
             }
             Pat::Tuple(elems) => {
                 let (p, mode) = self.pat_deref(p, mode);
+                self.rg_pat_align(p.ty());
                 let fields = self.tuple_pat_fields(p, elems.len(), SP)?;
                 let deref = matches!(mode, BindMode::Ref(_));
                 for (fi, sub) in Self::tuple_fields(elems.iter(), fields.len(), SP)? {
                     let (fname, fty, off) = fields[fi].clone();
                     let saved = self.bk_pat_field(deref, None, &fname);
+                    let rs = self.rg_pat_field(p.ty(), None, fi);
                     let r = self.pat_bind(sub, Self::field_place(p, fty, off)?, mode);
+                    self.rg.pat = rs.0;
+                    self.rg.pat_ref = rs.1;
                     self.bk.pat_path = saved;
                     r?;
                 }
@@ -985,6 +1014,7 @@ impl Cx<'_> {
                 let (p, mode) = self.pat_deref(p, mode);
                 // (the parts are not tracked: the field names are not at hand here)
                 let saved = self.bk.pat_path.take();
+                let rs = self.rg.pat.take();
                 let r = (|| {
                     for (sub, fp) in self.struct_pat_fields(pat, p, None)? {
                         self.pat_bind(sub, fp, mode)?;
@@ -992,6 +1022,7 @@ impl Cx<'_> {
                     Ok(())
                 })();
                 self.bk.pat_path = saved;
+                self.rg.pat = rs;
                 r
             }
             _ => err(SP, "unsupported pattern"),

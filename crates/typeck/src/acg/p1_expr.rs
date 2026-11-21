@@ -488,7 +488,9 @@ impl Cx<'_> {
                     }
                     self.prog.instantiate(self.prog.base_of(sid), ts).ok().map(Ty::Struct)
                 });
-                self.variant_value(sid, vi, &[], expected)
+                let r = self.variant_value(sid, vi, &[], expected);
+                self.rg_took_call(e);
+                r
             }
             Expr::Match(..) => self.match_(e, expected),
             // const ジェネリクスの N: インスタンスの型引数の長さ
@@ -731,6 +733,7 @@ impl Cx<'_> {
                 // (a value of a type that holds no references carries no loans: `self.i = I::new(buf);`)
                 let srcs = if self.bk_on() && !self.bk_ty(t).1 { vec![] } else { srcs };
                 self.bk_assign(left, &srcs);
+                self.rg_assign(left, right);
                 self.same(SP, rt, t)?;
                 let refill = if self.needs_drop(t) { self.drop_before_assign(left, p) } else { None };
                 self.write(p, v);
@@ -893,6 +896,7 @@ impl Cx<'_> {
                         if borrowck::has_refs(self.prog, ret, 0) {
                             { let _ = &srcs; self.bk_ret(e); }
                         }
+                        self.rg_ret(e);
                         self.same(expr_start(e), t, ret)?;
                         v
                     }
@@ -1335,10 +1339,26 @@ impl Cx<'_> {
         };
         // `&一時値`: 一時値は文 (let ならブロック) の終わりまで所有する
         self.own_temp_at(a, t);
+        // (coerced to a raw pointer: not a loan, as for a place)
+        if !matches!(expected, Some(Ty::Ptr(..))) {
+            self.bk_temp_borrow(rexpr, m, t);
+        }
         Ok((Some(a), Ty::Ref(m, intern(t))))
     }
 
     pub(crate) fn struct_lit(&mut self, e: &Expr, expected: Option<Ty>) -> R<V> {
+        let r = self.struct_lit_inner(e, expected);
+        if let Ok((_, t)) = &r {
+            self.rg_struct_lit(e, *t);
+            // (a struct-like variant (`E::V { r: x }`): its value's tree, which variant_value made last)
+            if matches!(t, Ty::Struct(s) if self.prog.structs[*s as usize].is_enum) {
+                self.rg_took_call(e);
+            }
+        }
+        r
+    }
+
+    fn struct_lit_inner(&mut self, e: &Expr, expected: Option<Ty>) -> R<V> {
         let Expr::Struct(path, sfields, rest) = e else { return err(SP, "internal: expected a struct literal") };
         if let Some((sid, vi)) = self.prog.variant_by_p(&PPath::of(path), self.self_sid) {
             let v = &self.prog.structs[sid as usize].variants[vi];
@@ -2422,7 +2442,9 @@ impl Cx<'_> {
                         self.adt_targs = Some(ts);
                     }
                 }
-                return self.variant_value(sid, vi, &args, expected);
+                let r = self.variant_value(sid, vi, &args, expected);
+                self.rg_took_call(c);
+                return r;
             }
             // タプル構造体の構築 `P(1, 2)`
             if let Some(sid) = self.prog.struct_by_p(&PPath::of(p), self.self_sid) {
@@ -2488,6 +2510,7 @@ impl Cx<'_> {
             self.check_unsafe_call(id, p.pos)?;
         }
         let r = self.call_fn(id, None, &args, tf, expected, SP);
+        self.rg_took_call(c);
         self.seg_self = None;
         r
     }
