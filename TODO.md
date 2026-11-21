@@ -98,6 +98,11 @@ rustc's wasm32-wasip1 builds (tests/wasm/README.md). Left:
   claims the address is aligned) although `ptr::read_unaligned` and a gather off an unaligned base (scale >= the
   element size) use them too. x86 scalar moves do not need alignment, so the code is right today; an alignment
   operand (or an unaligned load op) on `Op::Load` / `Op::Store` would make the flag true.
+- The constant evaluator (`Program::eval_const`) holds values as untyped i128: a cast wraps to its target type, and
+  `count_ones` / `trailing_zeros` count the bits of a written type (a cast, a suffixed literal), but an operation on a
+  typed value does not keep its width: `!0u8` is -1 (so `!0u8 as u16` is 65535), and `X.count_ones()` of a
+  `const X: i8 = -1` counts 128 bits. Typed values (an integer type with each) would fix both. Pre-existing (main
+  ignored casts in constants altogether); found by the review of the SIMD immediates.
 - Nested generic aliases (`type T1 = D<T0, T0>; type T2 = D<T1, T1>; ..`) take time exponential in the depth to
   compile (about 3x per two levels; 0.7 s at depth 20), with or without `TypeId` (whose key is the fixed-size
   `hash_ty`). Pre-existing (not SIMD): probably the aliases' expansion.
