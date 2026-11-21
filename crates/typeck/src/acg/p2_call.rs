@@ -584,6 +584,7 @@ impl Cx<'_> {
             }
         }
         if let Some(r) = self.builtin_method(e)? {
+            self.rg_builtin(e, recv, r.1);
             return Ok(r);
         }
         if let Some(r) = self.prim_trait_method(e, expected)? {
@@ -1479,7 +1480,7 @@ impl Cx<'_> {
         let sig0 = self.prog.sigs[id as usize].clone();
         // (a callee that requires 'static (`fn f<T: 'static>`, `&'static T`): checked from its arguments on
         // (`f(&g())`: the temporary))
-        if !self.rg.on && self.rg.eligible && self.inline_depth == 0 && sig0.regions.as_deref().is_some_and(Self::needs_static) {
+        if !self.rg.on && self.rg.eligible && self.inline_depth == 0 && (sig0.regions.as_deref().is_some_and(Self::needs_static) || sig0.params.iter().any(|&p| Self::static_object(p))) {
             self.rg_late_on();
         }
         let skip = recv.is_some() as usize;

@@ -130,8 +130,9 @@ pub struct Rg {
     pub soft: Vec<u32>,
     /// The elements' tree of the array or slice a slice pattern matches
     pub pat_elem: Option<(Ty, RT)>,
-    /// Rg::wf: imp's relations are required, at this span
+    /// Rg::wf: imp's relations are required, at this span (not those of the fields: wf_declared)
     pub wf_sp: Option<Sp>,
+    pub wf_no_fields: bool,
     /// The check is on from the function's start whatever the gate says (compile's second run); the check began late
     /// (rg_late_on); a local bound before it with no tree was met (the function is compiled again)
     pub force: bool,
@@ -956,6 +957,14 @@ impl Rg {
         self.wf_sp = None;
     }
 
+    /// wf of a struct's value its fields' values flowed into: only what the definition declares (what its fields
+    /// imply already holds of them)
+    pub fn wf_declared(&mut self, prog: &Program, t: Ty, tree: &[u32], sp: Sp) {
+        self.wf_no_fields = true;
+        self.wf(prog, t, tree, sp);
+        self.wf_no_fields = false;
+    }
+
     /// x outlives y: known (implied bounds), or required (wf)
     fn imp_rel(&mut self, x: u32, y: u32) {
         match self.wf_sp {
@@ -1004,7 +1013,7 @@ impl Rg {
                 let base = prog.base_of(sid);
                 if prog.adt_regions.contains_key(&base) && depth < 3 {
                     let bd = &prog.structs[base as usize];
-                    let nf = bd.fields.len() + bd.variants.iter().map(|v| v.fields.len()).sum::<usize>();
+                    let nf = if self.wf_no_fields { 0 } else { bd.fields.len() + bd.variants.iter().map(|v| v.fields.len()).sum::<usize>() };
                     let fts: Vec<Ty> = prog.structs[sid as usize].fields.iter().map(|f| f.1).chain(prog.structs[sid as usize].variants.iter().flat_map(|v| v.fields.iter().map(|f| f.1))).collect();
                     for i in 0..nf {
                         let n0 = self.n;
@@ -1475,6 +1484,15 @@ impl Cx<'_> {
         self.prog.sigs.get(self.rg.base as usize).map(|s| s.params.len())
     }
 
+    /// A parameter's trait object not behind a reference (`Box<dyn Tr>`): 'static by default, written or not
+    pub(crate) fn static_object(t: Ty) -> bool {
+        match t {
+            Ty::Dyn(_) => true,
+            Ty::Box(i) => Self::static_object(*i),
+            _ => false,
+        }
+    }
+
     /// The signature requires a region of it to be 'static
     pub(crate) fn needs_static(r: &RSigSyn) -> bool {
         r.slots.iter().flatten().any(|&c| c == R_STATIC) || r.ty_outlives.iter().any(|x| x.1 == R_STATIC) || r.outlives.iter().any(|x| x.1 == R_STATIC)
@@ -1894,12 +1912,20 @@ impl Cx<'_> {
             }
         }
         // (the definition's bounds hold of the value built: `struct Foo<'a: 'b, 'b>`)
-        self.rg.wf(prog, t, &tree, lit_sp);
+        self.rg.wf_declared(prog, t, &tree, lit_sp);
         self.rg.calls.insert(e as *const Expr as usize, (t, tree));
     }
 
     /// A tuple struct's value of type t built by its constructor (`B(a)`): the arguments flow into its fields
     pub(crate) fn rg_ctor(&mut self, c: &Expr, t: Ty, args: &[(usize, &Expr)]) {
+        // (a field of a type written `'static`: from here on, checked)
+        if !self.rg.on && self.rg.eligible && self.inline_depth == 0 {
+            if let Ty::Struct(sid) = t {
+                if self.prog.adt_regions.get(&self.prog.base_of(sid)).is_some_and(|r| r.fields.iter().flatten().any(|&c| c == R_STATIC)) {
+                    self.rg_late_on();
+                }
+            }
+        }
         if !self.rg_on() {
             return;
         }
@@ -2243,6 +2269,19 @@ impl Cx<'_> {
             }
         }
         self.rg.calls.insert(e as *const Expr as usize, (t, tree));
+    }
+
+    /// A builtin method of a reference (`buf.split_at(2)` of a slice, `s.trim()`): the references in its result (of
+    /// type t) borrow what the receiver does
+    pub(crate) fn rg_builtin(&mut self, e: &Expr, recv: &Expr, t: Ty) {
+        if !self.rg_on() {
+            return;
+        }
+        let prog = self.prog;
+        let Some(n) = count(prog, t, 0).filter(|&n| n > 0) else { return };
+        let Some((Ty::Ref(..), rtr)) = self.rt_expr(recv) else { return };
+        let Some(&r) = rtr.first() else { return };
+        self.rg.calls.insert(e as *const Expr as usize, (t, vec![r; n]));
     }
 
     /// `Box::new(x)` (x of type t): the box's tree is x's

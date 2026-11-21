@@ -5283,6 +5283,7 @@ compile-fail	recursion/recursive-enum.rs
 run-pass	recursion/recursive-struct-with-raw-pointer-field.rs
 compile-fail	reflection/feature_gate.rs
 compile-fail	regions/account-for-lifetimes-in-closure-suggestion.rs
+compile-fail	regions/better-blame-constraint-for-outlives-static.rs
 check-pass	regions/closure-prop-issue-104477-case1.rs
 check-pass	regions/closure-prop-issue-104477-case2.rs
 check-pass	regions/forall-wf-reflexive.rs
@@ -6637,6 +6638,7 @@ run-pass	traits/trait-implementation-for-primitive-type-5280.rs
 run-pass	traits/trait-implementation-for-usize-5321.rs
 check-pass	traits/trait-implementation-generic-access-6898.rs
 run-pass	traits/trait-object-lifetime-bounds-7563.rs
+compile-fail	traits/trait-object-lifetime-default-note.rs
 run-pass	traits/trait-object-method-call-2935.rs
 compile-fail	traits/trait-object-method-receiver-rules.rs
 run-pass	traits/trait-object-mut-to-shared-coercion.rs
