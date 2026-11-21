@@ -133,7 +133,7 @@ for building programs that already pass rustc quickly, not a replacement for rus
   - `impl Drop for S` (also generic impls), `drop(x)`
   - Drops in reverse declaration order at the end of a scope. This covers scopes exited by return / `?` / break / continue, expression statements that discard a value, `let _ = e`, and old values overwritten by assignment
   - Tracks moves: reading as a value, `self` taken by value, `move` captures, patterns that bind by value (`if let Some(b) = o`), `for x in arr`
-  - Temporaries (`make().area()`, `&Box::new(..)`, match scrutinees) are dropped at the end of the statement. Temporaries in a let initializer are extended to the end of the block
+  - Temporaries (`make().area()`, `&Box::new(..)`, match scrutinees) are dropped at the end of the statement. Temporaries in a let initializer are dropped at the end of the let, unless the initializer extends them by its syntax (`&temp()`, also inside a tuple, array, cast, struct literal or block tail) or the bound value's type holds a reference; then they last to the end of the block. Those of an `if let` scrutinee are dropped at the end of the `if let` (Rust 2024)
   - A move of only a field (`self.top = n.next`) fills the original field with 0 and drops the owner
 - Types:
   - Integers (`i8`–`i64`, `u8`–`u64`, `isize`, `usize`), `bool`, `char`, `()`, `!`
@@ -288,6 +288,7 @@ The prelude attaches only the items reachable from identifiers in the user's cod
 
 ## Not supported
 
+- async: `async fn` / `async {}` / `.await` are accepted but compiled as plain code. An `async fn` runs its body when called and returns its value (not a future), so a future that is never polled still runs, and `pin!` / `Future::poll` on an async block do not work
 - `Box<[T]>`, and Box functions such as `Box::into_raw` (other than `new`)
 - `String + &str` / some `Vec` slice methods (other than those written in the prelude; turning `&v` into `&[T]` gives access to the built-in slice methods)
 - Iterator limitations: the `DoubleEndedIterator` / `ExactSizeIterator` traits (`rev` only works on prelude types that have next_back); `collect` only into what the prelude has, such as Vec / String / HashMap / HashSet / BTreeMap / `Option<Vec<T>>` / `Result<Vec<T>, E>`
@@ -300,7 +301,7 @@ The prelude attaches only the items reachable from identifiers in the user's cod
   - If a pattern moves only some fields of a type with `impl Drop`, the remaining fields leak (`b` in `let Pair { a, .. } = p;`)
   - Moving a value captured with `move` out of the closure body (consuming it as FnOnce) is an error
   - Moving a field out of a `Box`'s contents (`let n = boxed; n.val`) leaks the Box's allocation
-  - Temporary lifetimes approximate rustc's rules (temporaries in a let initializer are always extended to the end of the block)
+  - Temporary lifetimes approximate rustc's rules (a value that borrows a temporary dropped at the end of its let is not rejected: E0716)
 - Closure limitations
   - Fn / FnMut / FnOnce are not distinguished (turning an `FnMut` closure into `&dyn Fn` is not an error)
   - When returning a closure that captures local variables as `impl Fn`, variables whose type cannot be determined from an annotation or a literal (`let v = Vec::new();` and so on)

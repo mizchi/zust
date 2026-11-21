@@ -75,6 +75,22 @@ behavior: `cve_2020_36323_join_borrow` (join over a `Borrow<str>` of the program
   - zustc built as wasm by itself.
 - Traps carry no panic message (the native build prints the location from its trap table).
 
+## UI frameworks for wasm32 (dioxus, leptos)
+
+Neither builds yet. `python3 cratebench/ui/run.py` builds their wasm32 crate graphs leaves first and lists the first
+error of each failing crate. Details and the order of the work: [docs/reports/2026-11-21-03-ui-frameworks-wasm.md](docs/reports/2026-11-21-03-ui-frameworks-wasm.md).
+
+- Cargo graphs: Cargo.toml / Cargo.lock, two versions of one crate, an edition per crate, build scripts (cfgs,
+  `rustc-env`, `OUT_DIR`), `env!` / `option_env!`, and workspace builds for wasm32.
+- Proc macros: none can run. Unknown attributes are dropped silently (`#[wasm_bindgen]`, `#[component]`).
+- async is erased: an `async fn` runs when called and returns its value. Needs a state-machine lowering, `Pin`,
+  `Waker` / `Context`.
+- wasm-bindgen's ABI: 32-bit pointers and `usize` on wasm32, imports from JS, exports called after `main`, its custom
+  section and describe functions, reference types.
+- Macros: `$($t:ty)*`, larger tt-munchers (`pin_project!`, `bitflags!`), `#[macro_use] extern crate`, `#[macro_use]
+  mod` in a file, `#![recursion_limit]`, doc comments before items removed by `#[cfg]` (E0585).
+- Language and std: the tables of sections 2.5 and 2.7 of the report.
+
 ## Tooling
 
 - `scripts/docs_check.sh` without an API key skips a manifest whose record is out of date. jev-lint rejects the whole

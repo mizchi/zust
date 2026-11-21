@@ -240,6 +240,14 @@
     "docs_reports_2026-11-21-02-refcell-guards.ja": {
       "path": "docs/ja/reports/2026-11-21-02-refcell-guards.md",
       "role": "historical"
+    },
+    "docs_reports_2026-11-21-03-ui-frameworks-wasm.en": {
+      "path": "docs/reports/2026-11-21-03-ui-frameworks-wasm.md",
+      "role": "historical"
+    },
+    "docs_reports_2026-11-21-03-ui-frameworks-wasm.ja": {
+      "path": "docs/ja/reports/2026-11-21-03-ui-frameworks-wasm.md",
+      "role": "historical"
     }
   },
   "comparisons": [
@@ -571,6 +579,17 @@
       },
       "target": {
         "source": "docs_reports_2026-11-21-02-refcell-guards.ja"
+      }
+    },
+    {
+      "id": "docs_reports_2026-11-21-03-ui-frameworks-wasm",
+      "topic": "The Japanese file docs/ja/reports/2026-11-21-03-ui-frameworks-wasm.md is a faithful translation of docs/reports/2026-11-21-03-ui-frameworks-wasm.md",
+      "mode": "translation",
+      "reference": {
+        "source": "docs_reports_2026-11-21-03-ui-frameworks-wasm.en"
+      },
+      "target": {
+        "source": "docs_reports_2026-11-21-03-ui-frameworks-wasm.ja"
       }
     }
   ]
