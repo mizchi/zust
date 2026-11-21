@@ -3496,6 +3496,7 @@ check-pass	lint/unused/concat-in-crate-deprecated-issue-137687.rs
 check-pass	lint/unused/const-local-var.rs
 run-pass	lint/unused/ignored-allow-unused_variables.rs
 check-pass	lint/unused/import_remove_line.rs
+check-pass	lint/unused/issue-103320-must-use-ops.rs
 check-pass	lint/unused/issue-104397.rs
 check-pass	lint/unused/issue-117142-invalid-remove-parens.rs
 compile-fail	lint/unused/issue-30730.rs
@@ -4219,6 +4220,7 @@ run-pass	numbers-arithmetic/integer-literal-suffix-inference-3.rs
 run-pass	numbers-arithmetic/integer-literal-suffix-inference.rs
 run-pass	numbers-arithmetic/isize-base.rs
 compile-fail	numbers-arithmetic/not-suggest-float-literal.rs
+run-pass	numbers-arithmetic/numeric-method-autoexport.rs
 run-pass	numbers-arithmetic/shift-various-types.rs
 run-pass	numbers-arithmetic/shift.rs
 run-pass	numbers-arithmetic/signed-shift-const-eval.rs

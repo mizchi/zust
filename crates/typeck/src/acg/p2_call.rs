@@ -185,7 +185,7 @@ impl Cx<'_> {
         }
         // `2.eq(&3)` / `x.lt(&y)` on a number, bool or char: the operator (`2 == *&3`)
         if margs.len() == 1 {
-            let op = match method.as_str() {
+            let op = match &method[..] {
                 "eq" => "==",
                 "ne" => "!=",
                 "lt" => "<",
@@ -597,6 +597,32 @@ impl Cx<'_> {
                         let d = mcall(paren(recv.clone()), "deref", vec![]);
                         let e = Expr::MethodCall(Box::new(d), method.to_string(), gargs.clone(), margs.clone(), crate::parse::Span::default());
                         return self.expr(&e, expected);
+                    }
+                }
+            }
+        }
+        // (`15_isize.add(6)` with `use std::ops::Add`: the operator trait's method on a number is the operator, when no
+        // trait of the program gives the number that method)
+        if margs.len() == 1 && gargs.is_empty() {
+            let op = match &method[..] {
+                "add" => "+",
+                "sub" => "-",
+                "mul" => "*",
+                "div" => "/",
+                "rem" => "%",
+                "bitand" => "&",
+                "bitor" => "|",
+                "bitxor" => "^",
+                "shl" => "<<",
+                "shr" => ">>",
+                _ => "",
+            };
+            if !op.is_empty() {
+                if let Some(t) = self.peek(recv) {
+                    if (t.is_int() || t.is_float()) && self.prog.prim_self_method(t, method).is_none() {
+                        let b = Expr::Binary(op.to_string(), Box::new(paren((*recv).clone())), Box::new(paren(margs[0].clone())), msp);
+                        let b: &Expr = self.keep_expr(b);
+                        return self.expr(b, expected);
                     }
                 }
             }
