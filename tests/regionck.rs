@@ -1089,6 +1089,9 @@ fn uncalled_generic_fns() {
     assert!(d.len() == 1 && d[0].0 == 7 && d[0].1.contains("more than once"), "{d:?}");
     let d = check("fn baz<'a, 'b, T>(x: &mut Vec<&'a T>, y: &T) {\n    x.push(y);\n}\nfn main() {}\n");
     assert!(d.len() == 1 && d[0].0 == 2 && d[0].1.contains("lifetime may not live long enough"), "{d:?}");
+    // (an error of the borrow check's kind lowering returns is reported in a placeholder instance too)
+    let d = check("use std::collections::HashMap;\nfn put<T>(m: &HashMap<u8, u8>, _t: T) {\n    m[&1] = 2;\n}\nfn main() {}\n");
+    assert!(d.len() == 1 && d[0].0 == 3 && d[0].1.contains("E0594"), "{d:?}");
     // (a generic fn's call of a concrete impl's method whose trait declares 'static too is followed)
     let d = check("struct S;\ntrait Tr {\n    fn take(x: &'static u8);\n}\nimpl Tr for S {\n    fn take(_: &'static u8) {}\n}\nfn f<T>(x: &u8) {\n    S::take(x);\n}\nfn main() {\n    let n = 0u8;\n    f::<u8>(&n);\n}\n");
     assert!(d.len() == 1 && d[0].0 == 9, "{d:?}");

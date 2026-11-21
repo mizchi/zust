@@ -907,6 +907,7 @@ check-pass	borrowck/issue-10876.rs
 compile-fail	borrowck/issue-109271-pass-self-into-closure.rs
 compile-fail	borrowck/issue-111554.rs
 compile-fail	borrowck/issue-11493.rs
+compile-fail	borrowck/issue-119915-bad-clone-suggestion.rs
 check-pass	borrowck/issue-17263.rs
 run-pass	borrowck/issue-23338-params-outlive-temps-of-body.rs
 compile-fail	borrowck/issue-24267-flow-exit.rs
