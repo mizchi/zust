@@ -895,7 +895,9 @@ impl Bk {
                                     let what = if self.locals[lo.place.local as usize].name == "self" { "a value owned by the function" } else { "a local variable" };
                                     let name = path_str(&self.locals, &lo.place);
                                     // (a closure that borrows it: at the closure, E0373)
-                                    errs.push(if lo.capture {
+                                    errs.push(if name == TEMP {
+                                        BkError { sp: *sp, msg: "cannot return reference to temporary value (E0515)".to_string() }
+                                    } else if lo.capture {
                                         BkError { sp: lo.sp, msg: format!("closure may outlive the current function, but it borrows `{name}`, which is owned by the current function (E0373)") }
                                     } else {
                                         BkError { sp: *sp, msg: format!("cannot return a reference to {what}: `{name}` is dropped when the function returns") }
@@ -1962,6 +1964,29 @@ impl Cx<'_> {
         }
         let mut srcs = vec![];
         self.bk_direct(e, &mut srcs);
+        // (`&f()`: a borrow of a temporary, which is not promoted to a static (as direct_temps))
+        let mut x = e;
+        while let Expr::Paren(i) = x {
+            x = i;
+        }
+        if let Expr::Ref(m, t) = x {
+            let made = match &**t {
+                Expr::MethodCall(..) => true,
+                Expr::Call(f, _) => matches!(&**f, Expr::Path(_, p) if p.segs.last().is_some_and(|s| s.name.starts_with(|c: char| c.is_ascii_lowercase() || c == '_'))),
+                Expr::Macro(p, ..) => p.segs.last().is_some_and(|s| s.name == "vec" || s.name == "format"),
+                _ => false,
+            };
+            // (not of a reference: `&h()` with h returning `&'static str` is deref-coerced to what h returns)
+            if made && self.bk.level >= 2 && self.peek(t).is_some_and(|ty| !matches!(ty, Ty::Ref(..) | Ty::Ptr(..))) {
+                let id = self.bk.locals.len() as u32;
+                self.bk.locals.push(Local { name: TEMP.to_string(), ty: Ty::Unit, copy: true, refs: false, mutable: Some(true) });
+                self.bk_ev(Ev::Bind(id, true));
+                let ln = self.bk.loans.len() as u32;
+                let sp = err_pos(t);
+                self.bk.loans.push(Loan { place: BPlace { local: id, proj: vec![] }, mutable: *m, sp, at: sp, quiet: true, capture: false });
+                srcs.push(Src::Loan(ln));
+            }
+        }
         if !srcs.is_empty() {
             self.bk_ev(Ev::Ret(srcs, pos(e)));
         }

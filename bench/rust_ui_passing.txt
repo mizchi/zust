@@ -324,6 +324,7 @@ check-pass	associated-types/size-of-assoc-type-output.rs
 run-pass	associated-types/sized-recursive-type-via-associated-type.rs
 check-pass	associated-types/supertrait-bound-references-own-associated-type.rs
 compile-fail	associated-types/unconstrained-lifetime-assoc-type.rs
+compile-fail	associated-types/unconstrained-lifetime-in-projection.rs
 check-pass	associated-types/unioned-keys-with-associated-type-23442.rs
 check-pass	associated-types/wf-cycle-2.rs
 check-pass	associated-types/wf-cycle.rs
@@ -5440,6 +5441,7 @@ run-pass	regions/regions-refcell.rs
 run-pass	regions/regions-relate-bound-regions-on-closures-to-inference-variables.rs
 compile-fail	regions/regions-ret-borrowed-1.rs
 compile-fail	regions/regions-ret-borrowed.rs
+compile-fail	regions/regions-ret.rs
 run-pass	regions/regions-return-interior-of-option.rs
 compile-fail	regions/regions-return-ref-to-upvar-issue-17403.rs
 compile-fail	regions/regions-return-stack-allocated-vec.rs
