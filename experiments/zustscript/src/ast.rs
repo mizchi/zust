@@ -73,6 +73,14 @@ pub enum EK {
     Array(Vec<Expr>),
     Tuple(Vec<Expr>),
     Jsx(Box<Jsx>),
+    /// `x = e` (`x += e` is `x = x + e`): only a local declared `let mut`
+    Assign(String, Box<Expr>),
+    /// `while c { .. }`
+    While(Box<Expr>, Box<Expr>),
+    /// `for x in xs { .. }` / `for i in range(a, b) { .. }`
+    For(String, Box<Expr>, Box<Expr>),
+    Break,
+    Continue,
     /// `xs[i]` (i32 index; out of range is an error, in JS as in wasm)
     Index(Box<Expr>, Box<Expr>),
     /// `x as f64` (numeric conversions only: there is no implicit one)
@@ -111,6 +119,9 @@ pub enum JsxChild {
 #[derive(Clone, Debug)]
 pub enum Stmt {
     Let(Pat, Option<TyS>, Expr),
+    /// `let mut x = e;`: a local that can be assigned. Mutation stays local: records and arrays are immutable,
+    /// and a closure cannot capture a mutable local, so a function stays pure from the outside
+    LetMut(String, Option<TyS>, Expr),
     Expr(Expr),
 }
 
@@ -130,10 +141,35 @@ pub enum WTy {
     /// `String` / `Vec<f64>` / ... (result: copied out, then freed by the glue)
     String,
     Vec(Elem),
+    /// A record or an enum of a `@wasm fn`'s signature: crosses as its scalar slots (no linear memory for an
+    /// argument; a result is written to the glue's out area, 8 bytes a slot)
+    Value(Box<VTy>),
     /// A JS function handed to wasm. `&dyn Fn(A) -> R` (false): borrowed for the call, the glue releases it when the
     /// call returns. `Box<dyn Fn(A) -> R>` (true): owned by the wasm side, released when Rust drops it.
     /// Arguments and result are scalars (i32 u32 f64 bool ()).
     Callback(Vec<WTy>, Box<WTy>, bool),
+}
+
+/// The shape of a value that crosses the boundary as slots
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum VTy {
+    /// i32 u32 i64 f64 bool
+    Scalar(WTy),
+    /// (Rust type, fields)
+    Record(String, Vec<(String, VTy)>),
+    /// (Rust type, emitted as JS strings, variants with their fields): one i32 slot for the tag, then the slots of
+    /// every variant's fields
+    Enum(String, bool, Vec<(String, Vec<VTy>)>),
+}
+
+impl VTy {
+    pub fn slots(&self) -> usize {
+        match self {
+            VTy::Scalar(_) => 1,
+            VTy::Record(_, fs) => fs.iter().map(|f| f.1.slots()).sum(),
+            VTy::Enum(_, _, vs) => 1 + vs.iter().flat_map(|v| v.1.iter()).map(|f| f.slots()).sum::<usize>(),
+        }
+    }
 }
 
 /// An element type of an array that crosses the boundary

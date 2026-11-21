@@ -33,7 +33,7 @@ pub struct Parser {
 pub type PResult<X> = Result<X, (Pos, String)>;
 
 const PUNCTS: &[&str] = &[
-    "|>", "..", "::", "->", "=>", "==", "!=", "<=", ">=", "&&", "||", "+", "-", "*", "/", "%", "=", "<", ">", "!", "(", ")",
+    "|>", "..", "::", "->", "=>", "+=", "-=", "*=", "/=", "%=", "==", "!=", "<=", ">=", "&&", "||", "+", "-", "*", "/", "%", "=", "<", ">", "!", "(", ")",
     "{", "}", "[", "]", ",", ";", ":", ".", "|", "&", "#", "@",
 ];
 
@@ -550,6 +550,16 @@ impl Parser {
             }
             if self.is_kw("let")? {
                 self.next()?;
+                if self.is_kw("mut")? {
+                    self.next()?;
+                    let (n, _) = self.ident()?;
+                    let t = if self.eat(":")? { Some(self.ty()?) } else { None };
+                    self.expect("=")?;
+                    let e = self.expr(false)?;
+                    self.expect(";")?;
+                    stmts.push(Stmt::LetMut(n, t, e));
+                    continue;
+                }
                 let p = self.pat()?;
                 let t = if self.eat(":")? { Some(self.ty()?) } else { None };
                 self.expect("=")?;
@@ -558,14 +568,35 @@ impl Parser {
                 stmts.push(Stmt::Let(p, t, e));
                 continue;
             }
-            let e = self.expr(false)?;
+            let mut e = self.expr(false)?;
+            // `x = e;` / `x += e;`
+            let t = self.peek()?.clone();
+            if let T::P(op @ ("=" | "+=" | "-=" | "*=" | "/=" | "%=")) = t.t {
+                let EK::Var(n) = &e.kind else { return Err((t.pos, "only a local variable can be assigned".into())) };
+                let n = n.clone();
+                self.next()?;
+                let mut r = self.expr(false)?;
+                if op != "=" {
+                    let lhs = self.mk(e.pos, EK::Var(n.clone()));
+                    let bop: &'static str = &op[..1];
+                    let bop = match bop {
+                        "+" => "+",
+                        "-" => "-",
+                        "*" => "*",
+                        "/" => "/",
+                        _ => "%",
+                    };
+                    r = self.mk(t.pos, EK::Bin(bop, Box::new(lhs), Box::new(r)));
+                }
+                e = self.mk(t.pos, EK::Assign(n, Box::new(r)));
+            }
             if self.eat(";")? {
                 stmts.push(Stmt::Expr(e));
             } else if self.is("}")? {
                 self.next()?;
                 tail = Some(Box::new(e));
                 break;
-            } else if matches!(e.kind, EK::If(..) | EK::Match(..) | EK::Block(..)) {
+            } else if matches!(e.kind, EK::If(..) | EK::Match(..) | EK::Block(..) | EK::While(..) | EK::For(..)) {
                 stmts.push(Stmt::Expr(e));
             } else {
                 let t = self.peek()?.clone();
@@ -793,6 +824,23 @@ impl Parser {
                 };
                 self.mk(pos, EK::If(Box::new(c), Box::new(th), el))
             }
+            T::Ident(k) if k == "while" => {
+                let c = self.expr(true)?;
+                let body = self.block()?;
+                self.mk(pos, EK::While(Box::new(c), Box::new(body)))
+            }
+            T::Ident(k) if k == "for" => {
+                let (x, _) = self.ident()?;
+                let (kw, kpos) = self.ident()?;
+                if kw != "in" {
+                    return Err((kpos, "expected `in`".into()));
+                }
+                let it = self.expr(true)?;
+                let body = self.block()?;
+                self.mk(pos, EK::For(x, Box::new(it), Box::new(body)))
+            }
+            T::Ident(k) if k == "break" => self.mk(pos, EK::Break),
+            T::Ident(k) if k == "continue" => self.mk(pos, EK::Continue),
             T::Ident(k) if k == "perform" => {
                 let (n, npos) = self.ident()?;
                 let (en, v) = if self.eat("::")? { (Some(n), self.ident()?.0) } else { (None, n) };

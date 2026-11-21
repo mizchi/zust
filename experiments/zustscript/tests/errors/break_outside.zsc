@@ -1,0 +1,2 @@
+// expect: `break` / `continue` outside a loop
+fn f() -> i32 { break; 1 }

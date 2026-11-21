@@ -130,6 +130,8 @@ pub fn generate(items: &[Item], lowered: Vec<WFn>, raw: &str, wasm_file: &str) -
     rs.push_str("#[no_mangle]\npub extern \"C\" fn __zsc_alloc(n: usize) -> *mut u8 {\n    unsafe { malloc(if n == 0 { 1 } else { n }) }\n}\n#[no_mangle]\npub extern \"C\" fn __zsc_free(p: *mut u8) {\n    unsafe { free(p) }\n}\n\n");
     let mut glue = String::new();
     let mut names = vec![];
+    // (the out area: 3 words for a String / Vec, 8 bytes a slot for a record / enum)
+    let mut out_slots = 3;
     for (name, args, ret, _, rs_name) in &fns {
         // (`$` is not in Rust names: the wrapper of `sum$f64` is `__zsc_w_sum__f64`)
         let wname = name.replace('$', "__");
@@ -145,8 +147,23 @@ pub fn generate(items: &[Item], lowered: Vec<WFn>, raw: &str, wasm_file: &str) -
             ps.push("__out: *mut usize".to_string());
             jargs.push("$out".to_string());
         }
+        if let WTy::Value(v) = ret {
+            out_slots = out_slots.max(v.slots());
+            ps.push("__vout: *mut u8".to_string());
+            jargs.push("$out".to_string());
+        }
         for (a, w) in args.iter() {
             match w {
+                WTy::Value(v) => {
+                    // a record / enum: one parameter per scalar slot, rebuilt on the Rust side
+                    let mut slots = vec![];
+                    flat_params(v, a, a, &mut slots);
+                    for (rn, rt, js) in slots {
+                        ps.push(format!("{rn}: {rt}"));
+                        jargs.push(js);
+                    }
+                    call.push(build(v, a));
+                }
                 WTy::I32 | WTy::U32 | WTy::F64 | WTy::I64 => {
                     ps.push(format!("{a}: {}", rs_scalar(w)));
                     call.push(a.clone());
@@ -213,7 +230,11 @@ pub fn generate(items: &[Item], lowered: Vec<WFn>, raw: &str, wasm_file: &str) -
         for p in &pre {
             let _ = writeln!(rs, "    {p}");
         }
-        if out {
+        if let WTy::Value(v) = ret {
+            let _ = writeln!(rs, "    let r = {rs_name}({});", call.join(", "));
+            let mut off = 0;
+            store(v, "r", &mut off, 0, &mut rs);
+        } else if out {
             let _ = writeln!(rs, "    let r = {rs_name}({});", call.join(", "));
             let ptr = if *ret == WTy::String { "r.as_bytes().as_ptr()" } else { "r.as_ptr()" };
             let _ = write!(rs, "    let (p, l, c) = ({ptr} as usize, r.len(), r.capacity());");
@@ -236,6 +257,12 @@ pub fn generate(items: &[Item], lowered: Vec<WFn>, raw: &str, wasm_file: &str) -
         }
         let pad = if has_post { "    " } else { "  " };
         match ret {
+            WTy::Value(v) => {
+                let _ = writeln!(glue, "{pad}{callw};");
+                let _ = writeln!(glue, "{pad}const $o = new DataView($w.memory.buffer, Number($out), {});", 8 * v.slots());
+                let mut off = 0;
+                let _ = writeln!(glue, "{pad}return {};", decode(v, &mut off));
+            }
             WTy::Unit => {
                 let _ = writeln!(glue, "{pad}{callw};");
             }
@@ -303,6 +330,148 @@ pub fn generate(items: &[Item], lowered: Vec<WFn>, raw: &str, wasm_file: &str) -
     );
     head.push_str("for (const i of WebAssembly.Module.imports($mod)) {\n  if (!(i.name in $env)) $env[i.name] = () => {\n    throw new Error(\"zustscript: the wasm layer called \" + i.name + \", which this host does not provide\");\n  };\n}\n");
     head.push_str("const $w = (await WebAssembly.instantiate($mod, { env: $env })).exports;\n");
-    head.push_str("// (the area a wrapper writes a returned String / Vec's (ptr, len, cap) to)\nconst $out = $w.__zsc_alloc(24n);\n\n");
+    let _ = writeln!(head, "const $outSlots = {out_slots};");
+    head.push_str("// (the area a wrapper writes a returned String / Vec's (ptr, len, cap) to)\nconst $out = $w.__zsc_alloc(BigInt(8 * $outSlots));\n\n");
     Some(Wasm { rust: rs, glue: format!("{head}{glue}"), names })
+}
+
+fn rs_scalar_of(w: &WTy) -> &'static str {
+    rs_scalar(w)
+}
+
+/// The base name of a Rust type (`ZsOption<f64>` → `ZsOption`): what constructs and matches it, the type
+/// arguments inferred
+fn base(rt: &str) -> &str {
+    rt.split('<').next().unwrap_or(rt)
+}
+
+/// The scalar slots of a record / enum argument: (Rust parameter, its type, the JS value)
+fn flat_params(v: &VTy, rn: &str, js: &str, out: &mut Vec<(String, String, String)>) {
+    match v {
+        VTy::Scalar(w) => {
+            let j = if *w == WTy::Bool { format!("{js} ? 1 : 0") } else { js.to_string() };
+            out.push((rn.to_string(), rs_scalar_of(w).to_string(), j));
+        }
+        VTy::Record(_, fs) => {
+            for (f, fv) in fs {
+                flat_params(fv, &format!("{rn}__{f}"), &format!("{js}.{f}"), out);
+            }
+        }
+        VTy::Enum(_, string_enum, vs) => {
+            let names: Vec<String> = vs.iter().map(|v| format!("{:?}", v.0)).collect();
+            let tag = if *string_enum { format!("[{}].indexOf({js})", names.join(", ")) } else { format!("[{}].indexOf({js}.TAG)", names.join(", ")) };
+            out.push((format!("{rn}__tag"), "i32".into(), tag));
+            for (vn, fs) in vs {
+                for (k, fv) in fs.iter().enumerate() {
+                    let mut inner = vec![];
+                    flat_params(fv, &format!("{rn}__{vn}_{k}"), &format!("{js}._{k}"), &mut inner);
+                    for (r, t, j) in inner {
+                        let zero = if t == "i64" { "0n" } else { "0" };
+                        out.push((r, t, format!("({js}.TAG === {vn:?} ? {j} : {zero})")));
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// The Rust expression that rebuilds an argument from its slots
+fn build(v: &VTy, rn: &str) -> String {
+    match v {
+        VTy::Scalar(_) => rn.to_string(),
+        VTy::Record(rt, fs) => {
+            let parts: Vec<String> = fs.iter().map(|(f, fv)| format!("{f}: {}", build(fv, &format!("{rn}__{f}")))).collect();
+            format!("{} {{ {} }}", base(rt), parts.join(", "))
+        }
+        VTy::Enum(rt, _, vs) => {
+            let mut s = format!("match {rn}__tag {{ ");
+            for (k, (vn, fs)) in vs.iter().enumerate() {
+                if fs.is_empty() {
+                    let _ = write!(s, "{k} => {}::{vn}, ", base(rt));
+                } else {
+                    let a: Vec<String> = fs.iter().enumerate().map(|(i, fv)| build(fv, &format!("{rn}__{vn}_{i}"))).collect();
+                    let _ = write!(s, "{k} => {}::{vn}({}), ", base(rt), a.join(", "));
+                }
+            }
+            s.push_str("_ => panic!(\"zustscript: not a variant\") }");
+            s
+        }
+    }
+}
+
+/// Rust statements that write a result's slots to `__vout` (8 bytes a slot: f64 as f64, the others as i64)
+fn store(v: &VTy, e: &str, off: &mut usize, depth: usize, out: &mut String) {
+    match v {
+        VTy::Scalar(w) => {
+            let t = if *w == WTy::F64 { "f64" } else { "i64" };
+            let _ = writeln!(out, "    unsafe {{ *(__vout as *mut {t}).add({off}) = ({e}) as {t}; }}");
+            *off += 1;
+        }
+        VTy::Record(_, fs) => {
+            for (f, fv) in fs {
+                store(fv, &format!("{e}.{f}"), off, depth, out);
+            }
+        }
+        VTy::Enum(rt, _, vs) => {
+            let tag = *off;
+            *off += 1;
+            let _ = writeln!(out, "    match {e} {{");
+            for (k, (vn, fs)) in vs.iter().enumerate() {
+                let binds: Vec<String> = (0..fs.len()).map(|i| format!("__v{depth}_{i}")).collect();
+                if fs.is_empty() {
+                    let _ = writeln!(out, "    {}::{vn} => {{", base(rt));
+                } else {
+                    let _ = writeln!(out, "    {}::{vn}({}) => {{", base(rt), binds.join(", "));
+                }
+                let _ = writeln!(out, "    unsafe {{ *(__vout as *mut i64).add({tag}) = {k}; }}");
+                for (fv, b) in fs.iter().zip(&binds) {
+                    store(fv, b, off, depth + 1, out);
+                }
+                out.push_str("    }\n");
+            }
+            out.push_str("    }\n");
+        }
+    }
+}
+
+/// The JS expression that reads a result back from the out area (`$o`, a DataView of it)
+fn decode(v: &VTy, off: &mut usize) -> String {
+    match v {
+        VTy::Scalar(w) => {
+            let at = 8 * *off;
+            *off += 1;
+            match w {
+                WTy::F64 => format!("$o.getFloat64({at}, true)"),
+                WTy::I64 => format!("$o.getBigInt64({at}, true)"),
+                WTy::Bool => format!("$o.getBigInt64({at}, true) !== 0n"),
+                _ => format!("Number($o.getBigInt64({at}, true))"),
+            }
+        }
+        VTy::Record(_, fs) => {
+            let parts: Vec<String> = fs.iter().map(|(f, fv)| format!("{f}: {}", decode(fv, off))).collect();
+            format!("{{ {} }}", parts.join(", "))
+        }
+        VTy::Enum(_, string_enum, vs) => {
+            let tag = format!("Number($o.getBigInt64({}, true))", 8 * *off);
+            *off += 1;
+            if *string_enum {
+                let names: Vec<String> = vs.iter().map(|v| format!("{:?}", v.0)).collect();
+                return format!("[{}][{tag}]", names.join(", "));
+            }
+            let mut alts = vec![];
+            for (vn, fs) in vs {
+                let mut o = format!("{{ TAG: {vn:?}");
+                for (k, fv) in fs.iter().enumerate() {
+                    let _ = write!(o, ", _{k}: {}", decode(fv, off));
+                }
+                o.push_str(" }");
+                alts.push(o);
+            }
+            let mut s = alts.pop().unwrap();
+            for (k, a) in alts.into_iter().enumerate().rev() {
+                s = format!("{tag} === {k} ? {a} : {s}");
+            }
+            format!("({s})")
+        }
+    }
 }

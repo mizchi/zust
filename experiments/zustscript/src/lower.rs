@@ -77,7 +77,7 @@ fn show(t: &Ty) -> String {
 type LResult<X> = Result<X, (Pos, String)>;
 
 fn not_in_subset<X>(pos: Pos, what: &str) -> LResult<X> {
-    Err((pos, format!("{what} is not in the @wasm subset (numbers, bools, arrays of them, let / if / match, map / filter / fold)")))
+    Err((pos, format!("{what} is not in the @wasm subset (numbers, bools, arrays of numbers, records and enums of them, let / let mut / if / match / loops, map / filter / fold)")))
 }
 
 pub struct Lower<'a> {
@@ -88,6 +88,15 @@ pub struct Lower<'a> {
     slices: HashSet<String>,
     queue: Vec<(String, Vec<Ty>)>,
     done: HashSet<String>,
+    /// the records and enums the lowered code uses (their Rust definitions are written once, generic as declared)
+    used: std::collections::BTreeSet<String>,
+    /// where each record and enum is declared (for errors in their definitions)
+    type_pos: HashMap<String, Pos>,
+}
+
+/// The Rust name of a record or enum: `ZsPoint`
+fn rs_type(n: &str) -> String {
+    format!("Zs{n}")
 }
 
 /// Lowers the wanted `@wasm` instances (those the JS layer calls, and the public ones) and every instance they
@@ -100,7 +109,12 @@ pub fn lower(items: &[Item], info: &Info, wanted: &[(String, Vec<Ty>)]) -> Resul
             _ => None,
         })
         .collect();
-    let mut l = Lower { info, fns, subst: HashMap::new(), slices: HashSet::new(), queue: vec![], done: HashSet::new() };
+    let mut l = Lower { info, fns, subst: HashMap::new(), slices: HashSet::new(), queue: vec![], done: HashSet::new(), used: Default::default(), type_pos: HashMap::new() };
+    for it in items {
+        if let Item::Record { name, pos, .. } | Item::Enum { name, pos, .. } = it {
+            l.type_pos.insert(name.clone(), *pos);
+        }
+    }
     let mut errors = vec![];
     let mut out = vec![];
     let wanted_names: HashSet<String> = wanted.iter().map(|(n, t)| rs_name(n, t)).collect();
@@ -114,7 +128,7 @@ pub fn lower(items: &[Item], info: &Info, wanted: &[(String, Vec<Ty>)]) -> Resul
             Ok((text, args, ret)) => {
                 if wanted_names.contains(&rs) {
                     let Item::Fn { public, pos, .. } = l.fns[name.as_str()] else { unreachable!() };
-                    match boundary(&args, &ret, *pos) {
+                    match l.boundary(&args, &ret, *pos) {
                         Ok((wargs, wret)) => out.push(WFn { js: inst_name(&name, &targs), rs, args: wargs, ret: wret, text, public: *public }),
                         Err(e) => errors.push(e),
                     }
@@ -126,12 +140,108 @@ pub fn lower(items: &[Item], info: &Info, wanted: &[(String, Vec<Ty>)]) -> Resul
             Err(e) => errors.push(e),
         }
     }
-    if errors.is_empty() { Ok((out, internal)) } else { Err(errors) }
+    // the records and enums used (a definition can use more of them: to a fixed point)
+    let mut written = HashSet::new();
+    let mut defs = String::new();
+    loop {
+        let todo: Vec<String> = l.used.iter().filter(|n| !written.contains(*n)).cloned().collect();
+        if todo.is_empty() {
+            break;
+        }
+        for n in todo {
+            written.insert(n.clone());
+            match l.type_def(&n) {
+                Ok(d) => defs.push_str(&d),
+                Err(e) => errors.push(e),
+            }
+        }
+    }
+    if errors.is_empty() { Ok((out, defs + &internal)) } else { Err(errors) }
 }
 
-/// The boundary types of a lowered function's signature (what its glue converts)
-fn boundary(args: &[(String, Ty)], ret: &Ty, pos: Pos) -> LResult<(Vec<(String, WTy)>, WTy)> {
-    let w = |t: &Ty, arg: bool| -> LResult<WTy> {
+impl Lower<'_> {
+    /// The Rust definition of record or enum `n`: Copy, so that it is passed and returned by value like a number
+    fn type_def(&mut self, n: &str) -> LResult<String> {
+        let pos = self.type_pos.get(n).copied().unwrap_or_default();
+        let mut s = String::from("#[derive(Clone, Copy, PartialEq)]\n");
+        if let Some(r) = self.info.records.get(n) {
+            let g = if r.params.is_empty() { String::new() } else { format!("<{}>", r.params.join(", ")) };
+            let _ = writeln!(s, "struct {}{g} {{", rs_type(n));
+            for (f, t) in r.fields.clone() {
+                let _ = writeln!(s, "    {}: {},", local(&f), self.field_ty(&t, n, pos)?);
+            }
+            s.push_str("}\n\n");
+        } else {
+            let e = &self.info.enums[n];
+            let g = if e.params.is_empty() { String::new() } else { format!("<{}>", e.params.join(", ")) };
+            let _ = writeln!(s, "enum {}{g} {{", rs_type(n));
+            for (v, fs) in e.variants.clone() {
+                if fs.is_empty() {
+                    let _ = writeln!(s, "    {v},");
+                } else {
+                    let ts = fs.iter().map(|t| self.field_ty(t, n, pos)).collect::<LResult<Vec<_>>>()?;
+                    let _ = writeln!(s, "    {v}({}),", ts.join(", "));
+                }
+            }
+            s.push_str("}\n\n");
+        }
+        Ok(s)
+    }
+
+    /// A field's type: a scalar, a record or enum, or a type parameter (an array would not be Copy)
+    fn field_ty(&mut self, t: &Ty, owner: &str, pos: Pos) -> LResult<String> {
+        match t {
+            Ty::Param(p) => Ok(p.clone()),
+            Ty::Array(_) => not_in_subset(pos, &format!("`{owner}` (a record or enum with an array field)")),
+            t => self.rty(t, pos, false),
+        }
+    }
+
+    /// The shape a record or enum crosses the boundary in
+    fn vty(&mut self, t: &Ty, pos: Pos) -> LResult<VTy> {
+        let sc = |w: WTy| Ok(VTy::Scalar(w));
+        match t {
+            Ty::I32 => sc(WTy::I32),
+            Ty::U32 => sc(WTy::U32),
+            Ty::I64 => sc(WTy::I64),
+            Ty::F64 => sc(WTy::F64),
+            Ty::Bool => sc(WTy::Bool),
+            Ty::Named(n, targs) => {
+                let rt = self.rty(t, pos, false)?;
+                if let Some(r) = self.info.records.get(n) {
+                    let m: HashMap<String, Ty> = r.params.iter().cloned().zip(targs.iter().cloned()).collect();
+                    let fields: Vec<(String, Ty)> = r.fields.iter().map(|(f, ft)| (f.clone(), subst_ty(ft, &m))).collect();
+                    let fs = fields.iter().map(|(f, ft)| Ok((f.clone(), self.vty(ft, pos)?))).collect::<LResult<Vec<_>>>()?;
+                    Ok(VTy::Record(rt, fs))
+                } else {
+                    let e = &self.info.enums[n];
+                    let m: HashMap<String, Ty> = e.params.iter().cloned().zip(targs.iter().cloned()).collect();
+                    let string_enum = e.unit_only() && !e.is_effect();
+                    let vs: Vec<(String, Vec<Ty>)> = e.variants.iter().map(|(v, fs)| (v.clone(), fs.iter().map(|t| subst_ty(t, &m)).collect())).collect();
+                    let vs = vs
+                        .iter()
+                        .map(|(v, fs)| Ok((v.clone(), fs.iter().map(|t| self.vty(t, pos)).collect::<LResult<Vec<_>>>()?)))
+                        .collect::<LResult<Vec<_>>>()?;
+                    Ok(VTy::Enum(rt, string_enum, vs))
+                }
+            }
+            _ => Err((pos, format!("{} cannot be inside a record or enum that crosses to wasm", show(t)))),
+        }
+    }
+
+    /// The boundary types of a lowered function's signature (what its glue converts)
+    fn boundary(&mut self, args: &[(String, Ty)], ret: &Ty, pos: Pos) -> LResult<(Vec<(String, WTy)>, WTy)> {
+        let mut a = vec![];
+        for (n, t) in args {
+            a.push((n.clone(), self.wty(t, true, pos)?));
+        }
+        Ok((a, self.wty(ret, false, pos)?))
+    }
+
+    fn wty(&mut self, t: &Ty, arg: bool, pos: Pos) -> LResult<WTy> {
+        if let Ty::Named(..) = t {
+            return Ok(WTy::Value(Box::new(self.vty(t, pos)?)));
+        }
         Ok(match t {
             Ty::I32 => WTy::I32,
             Ty::U32 => WTy::U32,
@@ -143,11 +253,9 @@ fn boundary(args: &[(String, Ty)], ret: &Ty, pos: Pos) -> LResult<(Vec<(String, 
                 let el = scalar(e).and_then(Elem::parse).unwrap();
                 if arg { WTy::Slice(el) } else { WTy::Vec(el) }
             }
-            _ => return Err((pos, format!("{} cannot cross from JS to a @wasm function yet (numbers, bools, arrays of numbers)", show(t)))),
+            _ => return Err((pos, format!("{} cannot cross from JS to a @wasm function yet (numbers, bools, arrays of numbers, records, enums)", show(t)))),
         })
-    };
-    let a = args.iter().map(|(n, t)| Ok((n.clone(), w(t, true)?))).collect::<LResult<Vec<_>>>()?;
-    Ok((a, w(ret, false)?))
+    }
 }
 
 impl<'a> Lower<'a> {
@@ -159,11 +267,22 @@ impl<'a> Lower<'a> {
         rs
     }
 
-    fn rty(&self, t: &Ty, pos: Pos, param: bool) -> LResult<String> {
+    fn rty(&mut self, t: &Ty, pos: Pos, param: bool) -> LResult<String> {
         if let Some(s) = scalar(t) {
             return Ok(s.into());
         }
         match t {
+            // (in a generic record's or enum's definition)
+            Ty::Param(p) => Ok(p.clone()),
+            Ty::Named(n, targs) if self.info.records.contains_key(n) || self.info.enums.get(n).is_some_and(|e| !e.is_effect()) => {
+                self.used.insert(n.clone());
+                if targs.is_empty() {
+                    Ok(rs_type(n))
+                } else {
+                    let a = targs.iter().map(|t| self.rty(t, pos, false)).collect::<LResult<Vec<_>>>()?;
+                    Ok(format!("{}<{}>", rs_type(n), a.join(", ")))
+                }
+            }
             Ty::Array(e) => match scalar(e) {
                 Some(s) if s != "()" => Ok(if param { format!("&[{s}]") } else { format!("Vec<{s}>") }),
                 _ => not_in_subset(pos, &format!("an array of {}", show(e))),
@@ -239,6 +358,10 @@ impl<'a> Lower<'a> {
                 Ok(format!("let {} = {};\n", local(n), self.expr(x)?))
             }
             Stmt::Let(Pat::Wild, _, x) => Ok(format!("let _ = {};\n", self.expr(x)?)),
+            Stmt::LetMut(n, _, x) => {
+                self.slices.remove(n);
+                Ok(format!("let mut {} = {};\n", local(n), self.owned(x)?))
+            }
             Stmt::Let(_, _, x) => not_in_subset(x.pos, "a destructuring `let`"),
             Stmt::Expr(x) => Ok(format!("{};\n", self.expr(x)?)),
         }
@@ -286,13 +409,7 @@ impl<'a> Lower<'a> {
     fn match_(&mut self, sc: &Expr, arms: &[(Pat, Expr)], array: bool) -> LResult<String> {
         let mut s = format!("match {} {{\n", self.expr(sc)?);
         for (p, body) in arms {
-            let ps = match p {
-                Pat::Wild => "_".to_string(),
-                Pat::Bind(n) => local(n),
-                Pat::Lit(Lit::Int(n)) => n.to_string(),
-                Pat::Lit(Lit::Bool(b)) => b.to_string(),
-                _ => return not_in_subset(body.pos, "this pattern"),
-            };
+            let ps = self.pat(p, body.pos)?;
             let b = if array { self.ret_expr(body, true)? } else { self.expr(body)? };
             let _ = writeln!(s, "{ps} => {b},");
         }
@@ -300,10 +417,42 @@ impl<'a> Lower<'a> {
         Ok(s)
     }
 
+    fn pat(&mut self, p: &Pat, pos: Pos) -> LResult<String> {
+        Ok(match p {
+            Pat::Wild => "_".to_string(),
+            Pat::Bind(n) => local(n),
+            Pat::Lit(Lit::Int(n)) => n.to_string(),
+            Pat::Lit(Lit::Bool(b)) => b.to_string(),
+            Pat::Variant(_, v, subs, _) => {
+                let en = &self.info.variant_of[v];
+                self.used.insert(en.clone());
+                let ps = subs.iter().map(|p| self.pat(p, pos)).collect::<LResult<Vec<_>>>()?;
+                if ps.is_empty() { format!("{}::{v}", rs_type(en)) } else { format!("{}::{v}({})", rs_type(en), ps.join(", ")) }
+            }
+            _ => return not_in_subset(pos, "this pattern (a tuple or a float)"),
+        })
+    }
+
+    /// A variant as a value: `ZsShape::Circle(c, r)`
+    fn variant(&mut self, en: &str, v: &str, args: Vec<String>, pos: Pos) -> LResult<String> {
+        if self.info.enums[en].is_effect() {
+            return not_in_subset(pos, "an effect");
+        }
+        self.used.insert(en.to_string());
+        Ok(if args.is_empty() { format!("{}::{v}", rs_type(en)) } else { format!("{}::{v}({})", rs_type(en), args.join(", ")) })
+    }
+
     fn expr(&mut self, e: &Expr) -> LResult<String> {
         let pos = e.pos;
         Ok(match &e.kind {
             EK::Lit(l) => self.lit(l, e.id, pos)?,
+            EK::Var(n) | EK::Path(_, n) if matches!(self.info.callee.get(&e.id), Some(Callee::Variant(_))) => {
+                let Some(Callee::Variant(en)) = self.info.callee.get(&e.id).cloned() else { unreachable!() };
+                if self.info.enums[&en].variants.iter().any(|x| x.0 == *n && !x.1.is_empty()) {
+                    return not_in_subset(pos, "a variant constructor as a function value");
+                }
+                self.variant(&en, n, vec![], pos)?
+            }
             EK::Var(n) => match self.info.callee.get(&e.id) {
                 Some(Callee::Local) => local(n),
                 _ => return not_in_subset(pos, &format!("`{n}` as a value")),
@@ -317,6 +466,12 @@ impl<'a> Lower<'a> {
                         Ty::F64 => (if c == "one" { "1.0f64" } else { "0.0f64" }).into(),
                         t => format!("{}{}", if c == "one" { 1 } else { 0 }, scalar(&t).unwrap_or("")),
                     });
+                }
+                if let EK::Var(n) | EK::Path(_, n) = &f.kind
+                    && let Some(Callee::Variant(en)) = self.info.callee.get(&f.id).cloned()
+                {
+                    let a = args.iter().map(|x| self.expr(x)).collect::<LResult<Vec<_>>>()?;
+                    return self.variant(&en, n, a, pos);
                 }
                 let EK::Var(n) = &f.kind else { return not_in_subset(pos, "calling this") };
                 if let Some((a, b)) = self.range_args(e)? {
@@ -432,6 +587,21 @@ impl<'a> Lower<'a> {
                 s.push('}');
                 s
             }
+            EK::Assign(n, x) => format!("{} = {}", local(n), self.owned(x)?),
+            EK::While(c, body) => format!("while {} {}", self.expr(c)?, self.block(body)?),
+            EK::For(x, it, body) => {
+                let iter = match self.range_args(it)? {
+                    Some((a, b)) => format!("({a})..({b})"),
+                    None => {
+                        let v = self.expr(it)?;
+                        let v = if matches!(it.kind, EK::Var(_)) { v } else { format!("({v})") };
+                        format!("{v}.iter().copied()")
+                    }
+                };
+                format!("for {} in {iter} {}", local(x), self.block(body)?)
+            }
+            EK::Break => "break".into(),
+            EK::Continue => "continue".into(),
             EK::Index(x, i) => {
                 let a = self.expr(x)?;
                 let a = if matches!(x.kind, EK::Var(_)) { a } else { format!("({a})") };
@@ -443,9 +613,24 @@ impl<'a> Lower<'a> {
                 format!("vec![{}]", v.join(", "))
             }
             EK::Closure(..) => return not_in_subset(pos, "a closure outside map / filter / fold / any / all"),
-            EK::Field(..) | EK::Record(..) => return not_in_subset(pos, "a record"),
+            EK::Field(x, f) => {
+                if f.parse::<usize>().is_ok() {
+                    return not_in_subset(pos, "a tuple");
+                }
+                let s = self.expr(x)?;
+                let s = if matches!(x.kind, EK::Var(_) | EK::Field(..)) { s } else { format!("({s})") };
+                format!("{s}.{}", local(f))
+            }
+            EK::Record(n, fields, base) => {
+                self.used.insert(n.clone());
+                let mut parts = fields.iter().map(|(f, x)| Ok(format!("{}: {}", local(f), self.expr(x)?))).collect::<LResult<Vec<_>>>()?;
+                if let Some(b) = base {
+                    parts.push(format!("..{}", self.expr(b)?));
+                }
+                format!("{} {{ {} }}", rs_type(n), parts.join(", "))
+            }
             EK::Tuple(_) => return not_in_subset(pos, "a tuple"),
-            EK::Path(..) => return not_in_subset(pos, "an enum"),
+            EK::Path(..) => return not_in_subset(pos, "this path"),
             EK::Jsx(_) => return not_in_subset(pos, "JSX"),
             EK::Perform(..) | EK::Handle(..) => return not_in_subset(pos, "an effect"),
         })
@@ -459,6 +644,12 @@ impl<'a> Lower<'a> {
             return Ok(Some((self.expr(&args[0])?, self.expr(&args[1])?)));
         }
         Ok(None)
+    }
+
+    /// A value to store in a mutable local: an array owned (a borrowed one copied)
+    fn owned(&mut self, x: &Expr) -> LResult<String> {
+        let s = self.expr(x)?;
+        Ok(if matches!(&x.kind, EK::Var(v) if self.slices.contains(v)) { format!("{s}.to_vec()") } else { s })
     }
 
     fn block(&mut self, e: &Expr) -> LResult<String> {

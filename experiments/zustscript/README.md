@@ -24,6 +24,10 @@ zust を土台にした、フロントエンド向け言語の試作。目標は
 - class は持たない
 - effect 多相は入れず、簡単な制約で済ませる(将来の拡張の余地は残す)
 - 配列は TS の `readonly T[]` そのもの。JS の配列をコピーも変換もなしに渡せるので、コードサイズとブリッジの両面で有利。不変として扱い、`push` は新しい配列を作る
+- 可変性はローカル変数に限る(Koka の `var` に近い)
+  - `let mut` の変数への代入と `+=` などの複合代入、`while`、`for x in xs` / `for i in range(a, b)`、`break` / `continue` を書ける
+  - レコードと配列は不変のまま。可変のローカル変数はクロージャから捕捉できない
+  - そのため関数は外から見て純粋なまま。JS ではただの `let` と `for` になり、Rust では `let mut` になるので、借用の問題も起きない
 - `.d.ts` の数値は branded type にする
 
 ```rust
@@ -70,6 +74,27 @@ extern "react" fn useState<T>(init: T) -> (T, fn(T) -> ()) = "useState";
 - 数値の bound(`Num` / `Integer` / `Float`)付きの総称関数は、使われた型ごとに別の JS 関数として書き出す(演算の JS 表現が型ごとに違うので、型消去ではなく単相化する)
   - pub なものは、bound が許すすべての型の分を export する
   - `.d.ts` も型ごとに出す
+
+### ローカルな可変性とループ
+
+```zsc
+pub fn primes_below(n: i32) -> i32 {
+  let mut count = 0;
+  for k in range(2, n) {            // JS: for (let k = 2; k < n; k++)    Rust: for k in (2i32)..(n)
+    let mut d = 2;
+    let mut prime = true;
+    while d * d <= k {
+      if k % d == 0 { prime = false; break; }
+      d += 1;                       // JS: d = (d + 1) | 0                Rust: d = d.wrapping_add(1)
+    }
+    if prime { count += 1; }
+  }
+  count
+}
+```
+
+- `let mut` でない変数への代入、可変のローカル変数をクロージャが捕捉すること、ループの外の `break` はエラーになる
+- ループの本体は `()` を返す
 
 ### パイプライン `|>`
 
@@ -153,15 +178,25 @@ wasm { fn sq(x: f64) -> f64 { x * x } }                              // wasm 側
   - `as` は Rust 自身が飽和するので、そのまま使える
   - 添字 `xs[i]` は、JS では範囲を検査する `$at`、Rust では `xs[i as usize]`(負の添字は巨大な usize になり、範囲外として止まる)
 - 部分集合(外れると、その構文の名前を出してエラーにする)
-  - 型: 数値、bool、それらの配列(引数は `&[T]`、戻り値は `Vec<T>`)
-  - 構文: `let` / `if` / 数値と bool の `match`、`as`、`T::zero()` / `T::one()`
+  - 型: 数値、bool、数値の配列(引数は `&[T]`、戻り値は `Vec<T>`)
+    - それらを組み合わせたレコードと enum も使える(総称の `Option<T>` なども可)
+    - レコードと enum は Rust では `#[derive(Clone, Copy, PartialEq)]` の struct / enum(`ZsVec2`、`ZsShape`)になり、値で渡す
+    - 配列や文字列を含むレコードは、Copy にできないので外す
+  - 構文: `let` / `let mut` と代入、`while` / `for` / `break` / `continue`、`if`、`match`(数値、bool、enum のバリアント、入れ子のパターン)、レコードの生成・フィールド・`..base` での更新、`as`、`T::zero()` / `T::one()`
   - 配列の操作: `len` `map` `filter` `fold` `any` `all` `push` `concat`、添字、`range(a, b)`(Rust では配列を作らずイテレータ `a..b` になる)
   - 呼び出し: 他の `@wasm` 関数、`wasm fn`、再帰
-  - 使えないもの: 文字列、レコード、enum、effect、値としての関数
+  - 使えないもの: 文字列、タプル、effect、値としての関数
 - `T: Num` の関数は、wasm でもインスタンスごとに単相化する(`zs_total__f64`、`zs_total__i64` など)
   - JS から呼ばれるインスタンスだけに wrapper とグルーを付ける
   - 他の `@wasm` 関数からだけ呼ばれるもの(例の `step`)は、ただの Rust 関数になる
 - 境界を越えられる配列は、i32 / u32 / i64 / f64 のもの(`Int32Array` / `Uint32Array` / `BigInt64Array` / `Float64Array` でコピーする)
+- レコードと enum は、境界を**スカラーのスロットに分解して**越える。線形メモリへのコピーも、それを解放する処理も要らない
+  - 引数: フィールドごとに wasm の引数にする。`p: Vec2` は `p__x: f64, p__y: f64` になる
+    - enum は、i32 のタグと、全バリアントのフィールドのスロットになる。選ばれていないバリアントの分は 0 で埋める
+    - Rust 側の wrapper が値に組み立て直す
+  - 戻り値: wrapper が glue の out 領域に、1 スロット 8 byte で書き込む。glue はそれを `DataView` で読み、`{ TAG: "Some", _0: { .. } }` を組み立てる
+  - 例: `nearest(xs, ys, p: Vec2, mode: Mode) -> Option<Hit>`
+- 差分テスト `shapes_same_in_js_and_wasm`: examples/shapes.zsc で、レコード、enum、総称の `Option<T>`、ループ、可変のローカル変数の結果が、JS と wasm で一致することを確かめている
 
 同じソースを JS と wasm で走らせた速さ(node 22、examples/numeric.zsc、`tests/numeric_bench.mjs`)。両方の結果は一致している。
 
@@ -178,6 +213,23 @@ wasm { fn sq(x: f64) -> f64 { x * x } }                              // wasm 側
   - `--wasm-O` を付けてもほぼ同じで、サイズは 46 KB → 69 KB に増える
   - 後述のメモリモデルの改善が入れば、差はさらに開く見込み
 - JS 側にも改善の余地がある。`range(..).fold` は今、配列を作ってから畳み込んでいるので、`for` ループにすれば JS も速くなる
+
+ループを入れた後の計測(examples/shapes.zsc。JS 側もネイティブの `for` になった)。
+
+| 処理 | wasm | JS |
+|---|---|---|
+| `collatz_max(300000)`(i64 の while ループ。JS では BigInt) | 242 ms | 465 ms |
+| `nearest`、2e5 点、f64 のループ(2 本の配列をコピー) | 5.9 ms | 1.2 ms |
+| `grow` を 1e5 回呼ぶ(呼び出しごとに enum とレコードが境界を往復) | 14.6 ms | 1.2 ms |
+
+**ここから見えた現実的なライン**:
+
+- f64 のループは、JS に `for` で出せば V8 の JIT が十分に速い。今の zustc の wasm 出力(振り分けの形、アドレス検査あり)とコピーの分を考えると、JS のほうが速い
+- wasm が明確に勝つのは i64 / u64 を多用する計算(JS では BigInt になる)と、整数の wrap を多用する計算
+- 小さい関数を何度も呼ぶ場合は、境界のコスト(スロットへの分解、`DataView` での読み戻し、オブジェクトの生成)が支配的になる。V8 は JS 同士ならインライン化できるので、JS のほうが速い
+- したがって `@wasm` は「速くするための既定」ではなく、使いどころを選ぶ道具になる
+  - 次の段階として、コンパイラがコピーの量や呼び出しの回数から判断材料を出すこと(候補 2)の価値は高い
+  - zust の wasm バックエンドの改善(stackifier、wasm32 レイアウト)は、この境界線を wasm 寄りに動かす
 
 ## 測ったこと
 
@@ -243,7 +295,7 @@ zust は到達しない関数をそもそも出さないので、`wasm-gc` に�
 | 1 | 言語として固める: モジュールと import、無名のレコード型、`Option`/`Result` の標準化、文字列の補間、エラーの改善、TS からの型名の衝突回避 | 2〜3 週 | |
 | 2 | 道具: 増分ビルド(アイテム単位のハッシュは zust の lexer の考え方を流用)、LSP(診断、hover、定義へ移動)、source map | 3〜5 週 | zust の `ide` / `analyzer` の作りを参考に別 crate で |
 | 3 | effect 多相(関数型の effect 行)、async の effect(Promise で継続を再開) | 2〜4 週 | 生成はジェネレータのまま |
-| 4 | 方向 A の合流: `@wasm fn` の部分集合を広げる(レコードを値で渡す、enum、可変のローカル変数とループ)、JS 側の `for` への最適化、どの関数を wasm に置くかの判断材料(コピーの量の見積もり) | 2〜4 週 | 最小の形は試作済み |
+| 4 | 方向 A の合流の続き: どの関数を wasm に置くかの判断材料(コピーの量と呼び出しの回数の見積もり)、`range(..).fold` などの JS 側での `for` への最適化、文字列やタプルへの部分集合の拡張、データを wasm 側に置いたまま繰り返し処理する仕組み(ハンドル) | 2〜4 週 | 数値、レコード、enum、ループまでは試作済み |
 | 5 | wasm バックエンドの改善(reactor、stackifier、wasm32 レイアウト) | 1〜2 か月 | zust 本体の作業 |
 | 6 | TS の型の取り込み(限定した部分集合、tsc API による抽出) | 範囲次第 | 今は手書きの extern |
 

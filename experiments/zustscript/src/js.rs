@@ -300,18 +300,90 @@ impl<'a> Js<'a> {
     fn complex(e: &Expr) -> bool {
         match &e.kind {
             EK::Block(s, t) => !s.is_empty() || t.as_ref().is_some_and(|t| Self::complex(t)),
-            EK::Match(..) => true,
+            EK::Match(..) | EK::Assign(..) | EK::While(..) | EK::For(..) | EK::Break | EK::Continue => true,
             EK::If(_, t, el) => Self::complex(t) || el.as_ref().is_none_or(|x| Self::complex(x)),
             _ => false,
         }
     }
 
+    /// A loop's body: its statements, the value dropped
+    fn loop_body(&mut self, body: &Expr) {
+        self.ind += 1;
+        self.stmt_expr(body, &Dest::Discard);
+        self.ind -= 1;
+        self.line("}");
+    }
+
     fn stmt_expr(&mut self, e: &Expr, d: &Dest) {
+        // (the statements that have no value: `()` for a destination that wants one)
+        let unit = |js: &mut Js| {
+            if let Dest::Assign(t) = d {
+                js.line(&format!("{t} = undefined;"));
+            }
+        };
+        match &e.kind {
+            EK::Assign(n, x) => {
+                if Self::complex(x) {
+                    self.stmt_expr(x, &Dest::Assign(ident(n)));
+                } else {
+                    let v = self.expr(x);
+                    self.line(&format!("{} = {v};", ident(n)));
+                }
+                unit(self);
+                return;
+            }
+            EK::While(c, body) => {
+                let c = self.expr(c);
+                self.line(&format!("while ({c}) {{"));
+                self.loop_body(body);
+                unit(self);
+                return;
+            }
+            EK::For(x, it, body) => {
+                let range = match &it.kind {
+                    EK::Call(f, args) if matches!(self.info.callee.get(&f.id), Some(Callee::Range)) => Some(args),
+                    _ => None,
+                };
+                match range {
+                    Some(args) => {
+                        // `for i in range(a, b)`: a counting loop (the end evaluated once)
+                        let a = self.expr(&args[0]);
+                        let mut b = self.expr(&args[1]);
+                        if !b.chars().all(|c| c.is_alphanumeric() || c == '_' || c == '$' || c == '.') {
+                            let t = self.fresh();
+                            self.line(&format!("const {t} = {b};"));
+                            b = t;
+                        }
+                        let x = ident(x);
+                        self.line(&format!("for (let {x} = {a}; {x} < {b}; {x}++) {{"));
+                    }
+                    None => {
+                        let v = self.expr(it);
+                        self.line(&format!("for (const {} of {v}) {{", ident(x)));
+                    }
+                }
+                self.loop_body(body);
+                unit(self);
+                return;
+            }
+            EK::Break => return self.line("break;"),
+            EK::Continue => return self.line("continue;"),
+            _ => {}
+        }
         match &e.kind {
             EK::Block(stmts, tail) => {
                 for s in stmts {
                     match s {
                         Stmt::Let(p, _, x) => self.let_(p, x),
+                        Stmt::LetMut(n, _, x) => {
+                            if Self::complex(x) {
+                                self.line(&format!("let {};", ident(n)));
+                                self.stmt_expr(x, &Dest::Assign(ident(n)));
+                            } else {
+                                let v = self.expr(x);
+                                self.line(&format!("let {} = {v};", ident(n)));
+                            }
+                        }
                         Stmt::Expr(x) => self.stmt_expr(x, &Dest::Discard),
                     }
                 }
@@ -698,7 +770,7 @@ impl<'a> Js<'a> {
             }
             EK::Block(_, Some(t)) => self.expr(t),
             EK::Block(_, None) => "undefined".into(),
-            EK::Match(..) => unreachable!(),
+            EK::Match(..) | EK::Assign(..) | EK::While(..) | EK::For(..) | EK::Break | EK::Continue => unreachable!(),
             EK::Closure(ps, body) => {
                 let saved = (self.gen_, std::mem::take(&mut self.conts));
                 self.gen_ = false;

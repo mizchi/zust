@@ -174,3 +174,31 @@ fn numeric_same_in_js_and_wasm() {
          escape [50,2,33]\ncollatz [111,410]\nlcg 350778849\nedge_cases [473956351,2147418112,0]\nout_of_bounds error\n"
     );
 }
+
+/// examples/shapes.zsc: records, enums (a generic one too), loops and mutable locals in `@wasm fn`s give the same
+/// results as wasm and as JS (records and enums cross the boundary as their scalar slots)
+#[test]
+fn shapes_same_in_js_and_wasm() {
+    let src = root().join("examples/shapes.zsc");
+    let mut outs = vec![];
+    for (name, flags) in [("shapes-wasm", &[][..]), ("shapes-js", &["--all-js"][..])] {
+        let d = out_dir(name);
+        let o = zsc(&src, &d, flags);
+        assert!(o.status.success(), "zsc failed:\n{}", String::from_utf8_lossy(&o.stderr));
+        let c = Command::new("node").arg("--check").arg(d.join("shapes.js")).output().unwrap();
+        assert!(c.status.success(), "{}", String::from_utf8_lossy(&c.stderr));
+        let r = Command::new("node").arg(root().join("tests/shapes_driver.mjs")).arg(d.join("shapes.js")).output().unwrap();
+        assert!(r.status.success(), "{}", String::from_utf8_lossy(&r.stderr));
+        outs.push(String::from_utf8(r.stdout).unwrap());
+    }
+    assert_eq!(outs[0], outs[1], "wasm and JS differ");
+    assert_eq!(
+        outs[0],
+        r#"area [28.274333882308138,8,0]
+center [{"x":1,"y":2},{"x":2,"y":-1},{"x":5,"y":5}]
+grow [{"TAG":"Circle","_0":{"x":1,"y":2},"_1":6},{"TAG":"Rect","_0":{"x":0,"y":0},"_1":{"x":8,"y":-4}},{"TAG":"Circle","_0":{"x":5,"y":5},"_1":2}]
+nearest [{"TAG":"Some","_0":{"index":3,"dist":0.7071067811865476,"inside":true}},{"TAG":"Some","_0":{"index":2,"dist":9,"inside":false}},{"TAG":"None"}]
+collatz_max [{"TAG":"Some","_0":"6171n"},{"TAG":"None"}]
+"#
+    );
+}

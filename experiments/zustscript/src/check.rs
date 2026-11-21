@@ -137,6 +137,12 @@ pub struct Checker {
     bounds: HashMap<String, String>,
     insts: Vec<(Id, Vec<Ty>)>,
     bound_checks: Vec<(Pos, Ty, String)>,
+    /// mutable locals: (scope index, name)
+    muts: HashSet<(usize, String)>,
+    /// the scope count where each enclosing closure starts (a mutable local below it cannot be captured)
+    closure_bases: Vec<usize>,
+    /// how many loops enclose the expression (in the current closure)
+    loops: u32,
 }
 
 pub const BOUNDS: &[&str] = &["Num", "Integer", "Float"];
@@ -166,6 +172,8 @@ pub fn wty_to_ty(w: &WTy) -> Ty {
         })),
         WTy::Str | WTy::String => Ty::Str,
         WTy::Callback(a, r, _) => Ty::Fn(a.iter().map(wty_to_ty).collect(), Box::new(wty_to_ty(r))),
+        // (only lowered `@wasm fn`s have these, and their types come from their zustscript signature)
+        WTy::Value(_) => Ty::Unit,
     }
 }
 
@@ -192,6 +200,9 @@ impl Checker {
             bounds: HashMap::new(),
             insts: vec![],
             bound_checks: vec![],
+            muts: HashSet::new(),
+            closure_bases: vec![],
+            loops: 0,
         }
     }
 
@@ -449,6 +460,7 @@ impl Checker {
             if let Item::Fn { generics, args, body, pos, name, .. } = it {
                 self.generics = generics.clone();
                 self.scopes = vec![HashMap::new()];
+                self.muts.clear();
                 let sig = &self.info.fns[name];
                 self.bounds = sig.bounds.clone();
                 let (at, ret) = (sig.args.clone(), sig.ret.clone());
@@ -544,8 +556,15 @@ impl Checker {
         is_num(t) || matches!(t, Ty::Param(p) if self.bounds.contains_key(p))
     }
 
-    fn lookup(&self, n: &str) -> Option<Ty> {
-        self.scopes.iter().rev().find_map(|s| s.get(n).cloned())
+    fn lookup_idx(&self, n: &str) -> Option<(usize, Ty)> {
+        self.scopes.iter().enumerate().rev().find_map(|(k, s)| s.get(n).map(|t| (k, t.clone())))
+    }
+
+    /// A use of local `n` (found in scope `idx`): a mutable local cannot be captured by a closure
+    fn check_capture(&mut self, pos: Pos, idx: usize, n: &str) {
+        if self.muts.contains(&(idx, n.to_string())) && self.closure_bases.last().is_some_and(|b| idx < *b) {
+            self.err(pos, format!("a closure cannot capture the mutable local `{n}` (mutation stays local: copy it into a `let` first)"));
+        }
     }
 
     // ------------------------------------------------------------ patterns
@@ -636,7 +655,8 @@ impl Checker {
                 t
             }
             EK::Var(n) => {
-                if let Some(t) = self.lookup(n) {
+                if let Some((idx, t)) = self.lookup_idx(n) {
+                    self.check_capture(pos, idx, n);
                     self.info.callee.insert(e.id, Callee::Local);
                     return t;
                 }
@@ -825,6 +845,47 @@ impl Checker {
                 }
                 t
             }
+            EK::Assign(n, x) => {
+                let Some((idx, t)) = self.lookup_idx(n) else {
+                    self.err(pos, format!("unknown name `{n}`"));
+                    return Ty::Unit;
+                };
+                if !self.muts.contains(&(idx, n.clone())) {
+                    self.err(pos, format!("`{n}` is not mutable (declare it `let mut {n} = ..`)"));
+                }
+                self.check_capture(pos, idx, n);
+                let xt = self.infer(x, Some(&t));
+                self.unify(x.pos, &xt, &t);
+                Ty::Unit
+            }
+            EK::While(c, body) => {
+                let ct = self.infer(c, None);
+                self.unify(c.pos, &ct, &Ty::Bool);
+                self.loops += 1;
+                let bt = self.infer(body, Some(&Ty::Unit));
+                self.loops -= 1;
+                self.unify(body.pos, &bt, &Ty::Unit);
+                Ty::Unit
+            }
+            EK::For(x, it, body) => {
+                let itt = self.infer(it, None);
+                let el = self.fresh();
+                self.unify(it.pos, &itt, &Ty::Array(Box::new(el.clone())));
+                self.scopes.push([(x.clone(), el)].into_iter().collect());
+                self.loops += 1;
+                let bt = self.infer(body, Some(&Ty::Unit));
+                self.loops -= 1;
+                self.scopes.pop();
+                self.unify(body.pos, &bt, &Ty::Unit);
+                Ty::Unit
+            }
+            EK::Break | EK::Continue => {
+                if self.loops == 0 {
+                    self.err(pos, "`break` / `continue` outside a loop");
+                }
+                // (it does not return: any type)
+                self.fresh()
+            }
             EK::Index(x, i) => {
                 let xt = self.infer(x, None);
                 let it = self.infer(i, Some(&Ty::I32));
@@ -958,10 +1019,24 @@ impl Checker {
                             }
                             let mut binds = vec![];
                             self.check_pat(p, &t, x.pos, &mut binds);
-                            let sc = self.scopes.last_mut().unwrap();
+                            let k = self.scopes.len() - 1;
                             for (n, t) in binds {
-                                sc.insert(n, t);
+                                self.muts.remove(&(k, n.clone()));
+                                self.scopes[k].insert(n, t);
                             }
+                        }
+                        Stmt::LetMut(n, ann, x) => {
+                            let at = ann.as_ref().map(|t| {
+                                let g = self.generics.clone();
+                                self.ty_of(t, &g)
+                            });
+                            let t = self.infer(x, at.as_ref());
+                            if let Some(a) = &at {
+                                self.unify(x.pos, &t, a);
+                            }
+                            let k = self.scopes.len() - 1;
+                            self.muts.insert((k, n.clone()));
+                            self.scopes[k].insert(n.clone(), t);
                         }
                         Stmt::Expr(x) => {
                             self.infer(x, None);
@@ -997,9 +1072,13 @@ impl Checker {
                     Some(Ty::Fn(_, r)) => Some((**r).clone()),
                     _ => None,
                 };
+                self.closure_bases.push(self.scopes.len());
+                let loops = std::mem::take(&mut self.loops);
                 self.scopes.push(sc);
                 let rt = self.infer(body, rexp.as_ref());
                 self.scopes.pop();
+                self.loops = loops;
+                self.closure_bases.pop();
                 Ty::Fn(pts, Box::new(rt))
             }
             EK::Record(n, fields, base) => {
@@ -1311,10 +1390,12 @@ impl EffWalk<'_> {
                 }
             }
             EK::Field(x, _) | EK::Un(_, x) | EK::Cast(x, _) => out.extend(self.expr(x)),
-            EK::Index(x, i) => {
+            EK::Index(x, i) | EK::While(x, i) | EK::For(_, x, i) => {
                 out.extend(self.expr(x));
                 out.extend(self.expr(i));
             }
+            EK::Assign(_, x) => out.extend(self.expr(x)),
+            EK::Break | EK::Continue => {}
             EK::Bin(_, l, r) => {
                 out.extend(self.expr(l));
                 out.extend(self.expr(r));
@@ -1335,7 +1416,7 @@ impl EffWalk<'_> {
             EK::Block(stmts, tail) => {
                 for s in stmts {
                     match s {
-                        Stmt::Let(_, _, x) | Stmt::Expr(x) => out.extend(self.expr(x)),
+                        Stmt::Let(_, _, x) | Stmt::LetMut(_, _, x) | Stmt::Expr(x) => out.extend(self.expr(x)),
                     }
                 }
                 if let Some(t) = tail {
