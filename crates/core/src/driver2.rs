@@ -646,8 +646,27 @@ impl Session2 {
             if !adts.is_empty() {
                 for (it, sm) in items[..user].iter().zip(&sums[..user]) {
                     let kind = !sm.structs.is_empty() || !sm.enums.is_empty() || !sm.aliases.is_empty() || !sm.consts.is_empty() || !sm.statics.is_empty() || !sm.assocs.is_empty();
-                    let Some(text) = src.get(it.start..it.end).filter(|_| kind) else { continue };
-                    if !adts.keys().any(|n| text.contains(n)) {
+                    if !kind {
+                        continue;
+                    }
+                    // (from the summary's types: only an item whose types name such a struct or enum is read again)
+                    fn names(t: &crate::types::TySyn, adts: &crate::fxhash::FxMap<&str, usize>) -> bool {
+                        use crate::types::TySyn as T;
+                        match t {
+                            T::Named(n) => adts.contains_key(n.as_str()),
+                            T::App(n, a) => adts.contains_key(n.as_str()) || a.iter().any(|t| names(t, adts)),
+                            T::Ref(_, i) | T::Ptr(_, i) | T::Slice(i) | T::Array(i, _) => names(i, adts),
+                            T::Tuple(a) => a.iter().any(|t| names(t, adts)),
+                            _ => false,
+                        }
+                    }
+                    let named = sm.structs.iter().any(|s| s.1.iter().any(|f| names(&f.1, &adts)))
+                        || sm.enums.iter().any(|e| e.1.iter().any(|v| v.fields.iter().any(|f| names(&f.1, &adts))))
+                        || sm.aliases.iter().any(|a| names(&a.2, &adts))
+                        || sm.assocs.iter().any(|a| names(&a.value, &adts))
+                        || sm.consts.iter().any(|c| names(&c.1, &adts))
+                        || sm.statics.iter().any(|c| names(&c.1, &adts));
+                    if !named {
                         continue;
                     }
                     if let Some(e) = crate::ast_summary::hidden_lifetimes(&src, it, &adts) {
