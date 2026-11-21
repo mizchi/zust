@@ -734,6 +734,11 @@ impl Cx<'_> {
                 let srcs = if self.bk_on() && !self.bk_ty(t).1 { vec![] } else { srcs };
                 self.bk_assign(left, &srcs);
                 self.rg_assign(left, right);
+                // (`p = ptr::null_mut()` into a `*const T`: `*mut T` coerces to `*const T`)
+                let rt = match (rt, t) {
+                    (Ty::Ptr(true, a), Ty::Ptr(false, b)) if a == b => t,
+                    _ => rt,
+                };
                 self.same(SP, rt, t)?;
                 let refill = if self.needs_drop(t) { self.drop_before_assign(left, p) } else { None };
                 self.write(p, v);
@@ -948,6 +953,17 @@ impl Cx<'_> {
                     self.same(SP, t, to)?;
                     return Ok((v, t));
                 }
+                // (`&s as *const dyn Tr`: the unsizing coercion to `&dyn Tr`, whose fat value the raw pointer shares)
+                if let Ty::Ptr(pm, d @ Ty::Dyn(_)) = to {
+                    if let Some(Ty::Ref(m, inner)) = self.peek(x) {
+                        if !matches!(inner, Ty::Dyn(_) | Ty::Slice(_) | Ty::Str) && (m || !pm) {
+                            let want = Ty::Ref(m, d);
+                            let (v, t) = self.expr(x, Some(want))?;
+                            self.same(SP, t, want)?;
+                            return Ok((v, to));
+                        }
+                    }
+                }
                 // (`Box::new(s) as Box<dyn Tr>` / `as Rc<dyn Tr>`: the unsizing coercion too)
                 let unsizing = match to {
                     Ty::Box(Ty::Dyn(_) | Ty::Slice(_)) => true,
@@ -969,6 +985,24 @@ impl Cx<'_> {
                 let hint = if int_lit && matches!(to, Ty::Ptr(..)) {
                     // (`0 as *mut u8`: an address)
                     Some(Ty::Usize)
+                } else if int_lit && to == Ty::Char {
+                    // (`0x51 as char`: the literal is a `u8`; a larger one is the deny-by-default `overflowing_literals`)
+                    if let Expr::Lit(l, _) = strip_paren(x) {
+                        if let Some(Lit::Int(i)) = lit::lit(l) {
+                            let n: u64 = i.base10_digits().parse().unwrap_or(u64::MAX);
+                            if n > 0xFF {
+                                let m = if (0xD800..=0xDFFF).contains(&n) {
+                                    "surrogate values are not valid for `char`"
+                                } else if n > 0x10FFFF {
+                                    "value exceeds maximum `char` value"
+                                } else {
+                                    "only `u8` can be cast into `char`"
+                                };
+                                return err(SP, m.to_string());
+                            }
+                        }
+                    }
+                    Some(Ty::U8)
                 } else {
                     self.peek(x).or(match &**x {
                         Expr::Lit(l, _) if matches!(lit::lit(l), Some(Lit::Float(_))) => Some(Ty::F64),
@@ -1031,8 +1065,9 @@ impl Cx<'_> {
                         let len = self.b.ins().iconst(types::I64, *n as i64);
                         return Ok((Some(self.make_fat_v(a, len)), to));
                     }
-                    // (`&[T]` as `*const [T]`: the same fat pointer)
+                    // (`&[T]` as `*const [T]` / `&dyn Tr` as `*const dyn Tr`: the same fat pointer)
                     (Ty::Ref(_, Ty::Slice(e)), Ty::Ptr(_, Ty::Slice(e2))) if e == e2 => return Ok((v, to)),
+                    (Ty::Ref(m, Ty::Dyn(a)), Ty::Ptr(pm, Ty::Dyn(b))) if a == b && (m || !pm) => return Ok((v, to)),
                     (Ty::Ref(_, a), Ty::Ptr(_, b)) if a == b || matches!(*a, Ty::Array(e, _) if e == b) => {
                         return Ok((v, to));
                     }
@@ -1141,6 +1176,9 @@ impl Cx<'_> {
                 }
                 // 整数 ⇔ char / bool → 整数 (char には u8 からだけ)
                 let ok = (to.is_int() && (from.is_int() || matches!(from, Ty::Bool | Ty::Char))) || (to == Ty::Char && matches!(from, Ty::U8 | Ty::Char));
+                if !ok && to == Ty::Char && from.is_int() {
+                    return err(SP, format!("only `u8` can be cast as `char`, not `{}` (E0604)", self.prog.tn(from)));
+                }
                 if !ok {
                     return err(SP, format!("unsupported cast `{}` as `{}`", self.prog.tn(from), self.prog.tn(to)));
                 }

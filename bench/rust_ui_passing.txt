@@ -1037,9 +1037,11 @@ compile-fail	cast/cast-to-nil.rs
 compile-fail	cast/cast-to-slice.rs
 compile-fail	cast/cast-to-unsized-trait-object-suggestion.rs
 compile-fail	cast/cast-to-unsized-type.rs
+run-pass	cast/cast.rs
 compile-fail	cast/cast_lit_suffix-issue-138392.rs
 compile-fail	cast/casts-differing-anon.rs
 compile-fail	cast/casts-issue-46365.rs
+run-pass	cast/coercion-as-explicit-cast.rs
 run-pass	cast/constant-expression-cast-9942.rs
 check-pass	cast/dyn-tails-need-normalization.rs
 compile-fail	cast/enum-to-numeric-cast.rs
@@ -1055,6 +1057,7 @@ compile-fail	cast/non-primitive-cast-suggestion.rs
 compile-fail	cast/non-primitive-isize-ref-cast.rs
 run-pass	cast/owned-struct-to-trait-cast-6318.rs
 check-pass	cast/ptr-ptr-to-ptr-ptr-different-regions.rs
+check-pass	cast/ptr-to-trait-obj-add-super-auto.rs
 build-pass	cast/raw-pointer-from-str-comparison.rs
 run-pass	cast/supported-cast.rs
 compile-fail	cast/trait-object-size-error-14366.rs

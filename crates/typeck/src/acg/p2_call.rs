@@ -652,6 +652,19 @@ impl Cx<'_> {
                 return self.call_fn(id, Some((rv, rt)), &args, None, expected, SP);
             }
         }
+        // (`(*p).m()` with p: `&dyn Tr` / `*const dyn Tr`: the vtable call on the fat pointer itself)
+        if let Expr::Unary(op, inner, sp) = strip_paren(recv) {
+            if op == "*" {
+                if let Some(t @ (Ty::Ref(_, Ty::Dyn(tr)) | Ty::Ptr(_, Ty::Dyn(tr)))) = self.peek(inner) {
+                    if matches!(t, Ty::Ptr(..)) && self.unsafe_ok == 0 && sp.start.line != 0 {
+                        return err(sp.start, "dereference of raw pointer is unsafe and requires unsafe block (E0133)");
+                    }
+                    if let (Some(v), _) = self.expr(inner, None)? {
+                        return self.dyn_method_call(v, tr, e);
+                    }
+                }
+            }
+        }
         let mut recv_temp = None;
         // (whether the receiver was reached through a reference: a `self` by value there moves out of it)
         let mut through_ref = false;
