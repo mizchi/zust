@@ -496,6 +496,11 @@ fn check_impl_ret(sig: &PSig, owner: Option<&Owner>) -> R<()> {
 
 fn parse_sig(sig: &PSig, is_extern: bool, is_main: bool, owner: Option<&Owner>) -> R<SigSyn> {
     check_impl_ret(sig, owner)?;
+    // (E0106 in fn pointer types and `Fn() -> &T` bounds of the signature: also of trait and extern declarations,
+    // which are not summarized as items)
+    if generics_elision_err(&sig.generics) || sig.params.iter().any(|p| fn_elision_err(&p.1)) || sig.ret.as_ref().is_some_and(fn_elision_err) {
+        return err("missing lifetime specifier (E0106)");
+    }
     let mut generics = owner.map(|o| o.generics.clone()).unwrap_or_default();
     collect_generics(&sig.generics, &mut generics)?;
     if is_extern && !generics.is_empty() {
@@ -516,21 +521,33 @@ fn parse_sig(sig: &PSig, is_extern: bool, is_main: bool, owner: Option<&Owner>) 
     }
     // (E0261: a free fn's signature names only the lifetimes it declares; fn pointer, `impl` and `dyn` types may
     // bind their own (`for<'a>`) and are not looked into)
-    if owner.is_none() {
-        let declared: Vec<&str> = sig.generics.params.iter().filter_map(|g| match g {
+    // (a method's: its own and its impl's or trait's)
+    if crate::regions::sig_names_lt(sig) {
+        let outer: &[String] = owner.and_then(|o| o.regions.as_ref()).map(|r| r.lts.as_slice()).unwrap_or(&[]);
+        let own: Vec<&str> = sig.generics.params.iter().filter_map(|g| match g {
             GParam::Lifetime(l) => Some(l.as_str()),
             _ => None,
         }).collect();
+        if let Some(l) = own.iter().find(|l| outer.iter().any(|o| o == *l)) {
+            return Err(format!("lifetime name `{l}` shadows a lifetime name that is already in scope (E0496)"));
+        }
+        let declared: Vec<&str> = outer.iter().map(|s| s.as_str()).chain(own.iter().copied()).collect();
         let mut used = vec![];
+        if let Some(r) = &sig.recv_ty {
+            named_lifetimes(r, &mut used);
+        }
         for (_, t) in &sig.params {
             named_lifetimes(t, &mut used);
         }
         if let Some(r) = &sig.ret {
             named_lifetimes(r, &mut used);
         }
+        bound_lifetimes(&sig.generics, &mut used);
         if let Some(l) = undeclared_lifetime(&used, &declared) {
             return Err(format!("use of undeclared lifetime name `{l}` (E0261)"));
         }
+    }
+    if owner.is_none() {
         // (E0106: an elided lifetime in the return type needs exactly one lifetime among the parameters)
         // (not the prelude's own `__exr_` helpers, written against this compiler rather than rustc)
         if sig.recv_ty.is_none() && !is_extern && !sig.name.starts_with("__") {
@@ -616,6 +633,10 @@ fn parse_sig(sig: &PSig, is_extern: bool, is_main: bool, owner: Option<&Owner>) 
         export: false,
         panic_handler: false,
         ret_from: ret_from(sig),
+        regions: {
+            let otp: Vec<&str> = owner.map(|o| o.generics.iter().map(|g| g.0.as_str()).collect()).unwrap_or_default();
+            crate::regions::sig_regions(sig, owner.and_then(|o| o.regions.as_deref()), &otp)
+        },
         is_unsafe: sig.quals.iter().any(|q| q == "unsafe") || (is_extern && !sig.quals.iter().any(|q| q == "safe")),
     })
 }
@@ -645,6 +666,38 @@ fn named_lifetimes(t: &PTy, out: &mut Vec<String>) {
         PTy::Ptr(_, i) | PTy::Slice(i) | PTy::Array(i, _) => named_lifetimes(i, out),
         PTy::Tuple(ts) => ts.iter().for_each(|t| named_lifetimes(t, out)),
         _ => {}
+    }
+}
+
+/// The lifetimes generics bound with: `T: 'a`, `'a: 'b` (a trait bound may bind its own with `for<'a>`, which the
+/// parser does not keep: those are not looked into)
+fn bound_lifetimes(g: &Generics, out: &mut Vec<String>) {
+    let bs_of = |bs: &[Bound], out: &mut Vec<String>| {
+        for b in bs {
+            if let Bound::Lifetime(l) = b {
+                out.push(l.clone());
+            }
+        }
+    };
+    for p in &g.params {
+        if let GParam::Ty(_, bs, _) = p {
+            bs_of(bs, out);
+        }
+    }
+    for (t, bs) in &g.preds {
+        if let PTy::Path(None, p) = t {
+            if let [sg] = p.segs.as_slice() {
+                if sg.name.starts_with('\'') {
+                    out.push(sg.name.clone());
+                    bs_of(bs, out);
+                    continue;
+                }
+            }
+        }
+        // (`where for<'a> &'a T: Tr` binds its own: only the bounds of a type that is a plain parameter)
+        if matches!(t, PTy::Path(None, p) if p.segs.len() == 1 && p.segs[0].args.is_empty()) {
+            bs_of(bs, out);
+        }
     }
 }
 
@@ -1315,12 +1368,144 @@ fn lift_closures(sig_ast: &PSig, body: &Block, fname: &str, sig: &mut SigSyn, se
 
 // ---------------------------------------------------------------- 要約
 
+/// E0106 in a fn pointer type or an `Fn(..) -> R` bound: its return type elides a lifetime, and its parameters do not
+/// have exactly one lifetime to take it from
+/// The input lifetimes of a fn pointer type / `Fn(..)` bound for elision: each elided one counts by itself, a named
+/// one once however often it is written. With the count, whether every input was understood: a path type written
+/// without lifetime arguments may have lifetime parameters of its own (`fn(View) -> &u8` with `struct View<'a>`)
+fn input_lifetimes(ps: &[PTy]) -> (usize, bool) {
+    const NO_LTS: &[&str] = &[
+        "i8", "i16", "i32", "i64", "i128", "isize", "u8", "u16", "u32", "u64", "u128", "usize", "f32", "f64", "bool", "char", "str",
+        "String", "Vec", "Option", "Result", "Box", "Rc", "Arc", "HashMap", "HashSet", "BTreeMap", "BTreeSet", "VecDeque", "Self",
+    ];
+    fn go(t: &PTy, named: &mut Vec<String>, elided: &mut usize) -> bool {
+        match t {
+            PTy::Ref(l, _, i) => {
+                match l.as_deref() {
+                    None | Some("'_") => *elided += 1,
+                    Some(l) => {
+                        if !named.iter().any(|x| x == l) {
+                            named.push(l.to_string());
+                        }
+                    }
+                }
+                go(i, named, elided)
+            }
+            PTy::Path(None, p) => {
+                let mut lts = 0;
+                for sg in &p.segs {
+                    for a in &sg.args {
+                        match a {
+                            crate::parse::GArg::Lifetime(l) if l == "'_" => {
+                                *elided += 1;
+                                lts += 1;
+                            }
+                            crate::parse::GArg::Lifetime(l) => {
+                                lts += 1;
+                                if !named.iter().any(|x| x == l) {
+                                    named.push(l.clone());
+                                }
+                            }
+                            crate::parse::GArg::Ty(t) => {
+                                if !go(t, named, elided) {
+                                    return false;
+                                }
+                            }
+                            _ => {}
+                        }
+                    }
+                }
+                // (a type parameter (one letter) or a type known to have no lifetime parameter)
+                let last = p.segs.last().map(|s| s.name.as_str()).unwrap_or("");
+                lts > 0 || last.len() == 1 || NO_LTS.contains(&last)
+            }
+            PTy::Ptr(_, i) | PTy::Slice(i) | PTy::Array(i, _) => go(i, named, elided),
+            PTy::Tuple(ts) => ts.iter().all(|t| go(t, named, elided)),
+            PTy::Never => true,
+            // (a nested fn pointer or a trait object binds or hides its own)
+            _ => false,
+        }
+    }
+    let (mut named, mut elided, mut complete) = (vec![], 0, true);
+    for p in ps {
+        complete &= go(p, &mut named, &mut elided);
+    }
+    (named.len() + elided, complete)
+}
+
+/// The elided output of a fn type with these inputs has no lifetime to take: more than one is known (an input not
+/// understood can only add more), or all are understood and there is not exactly one
+fn elision_fails(ps: &[PTy]) -> bool {
+    let (n, complete) = input_lifetimes(ps);
+    n > 1 || (complete && n != 1)
+}
+
+fn fn_elision_err(t: &PTy) -> bool {
+    let sig = |ps: &[PTy], r: Option<&PTy>| r.is_some_and(|r| lifetime_positions(r).0 > 0) && elision_fails(ps);
+    match t {
+        PTy::Fn(ps, r) => sig(ps, Some(r)) || ps.iter().any(fn_elision_err) || fn_elision_err(r),
+        PTy::Ref(_, _, i) | PTy::Ptr(_, i) | PTy::Slice(i) | PTy::Array(i, _) => fn_elision_err(i),
+        PTy::Tuple(ts) => ts.iter().any(fn_elision_err),
+        PTy::Path(q, p) => q.as_deref().is_some_and(fn_elision_err) || path_elision_err(p),
+        PTy::Dyn(bs) | PTy::Impl(bs) => bounds_elision_err(bs),
+        _ => false,
+    }
+}
+
+fn path_elision_err(p: &Path) -> bool {
+    p.segs.iter().any(|sg| {
+        sg.args.iter().any(|a| matches!(a, crate::parse::GArg::Ty(t) | crate::parse::GArg::Bind(_, t) if fn_elision_err(t)))
+            || sg.fn_args.as_ref().is_some_and(|(ps, r)| {
+                (r.as_deref().is_some_and(|r| lifetime_positions(r).0 > 0) && elision_fails(ps))
+                    || ps.iter().any(fn_elision_err)
+                    || r.as_deref().is_some_and(fn_elision_err)
+            })
+    })
+}
+
+fn bounds_elision_err(bs: &[Bound]) -> bool {
+    bs.iter().any(|b| matches!(b, Bound::Trait(_, p) if path_elision_err(p)))
+}
+
+fn generics_elision_err(g: &Generics) -> bool {
+    g.params.iter().any(|p| matches!(p, GParam::Ty(_, bs, d) if bounds_elision_err(bs) || d.as_ref().is_some_and(fn_elision_err)))
+        || g.preds.iter().any(|(t, bs)| fn_elision_err(t) || bounds_elision_err(bs))
+}
+
+fn item_elision_err(item: &Item) -> bool {
+    let fields = |f: &Fields| match f {
+        Fields::Unit => false,
+        Fields::Tuple(v) => v.iter().any(fn_elision_err),
+        Fields::Named(v) => v.iter().any(|x| fn_elision_err(&x.1)),
+    };
+    match &item.kind {
+        ItemKind::Fn(fs, _) => {
+            generics_elision_err(&fs.generics) || fs.params.iter().any(|p| fn_elision_err(&p.1)) || fs.ret.as_ref().is_some_and(fn_elision_err)
+        }
+        ItemKind::Struct(_, g, f) | ItemKind::Union(_, g, f) => generics_elision_err(g) || fields(f),
+        ItemKind::Enum(_, g, vs) => generics_elision_err(g) || vs.iter().any(|v| fields(&v.1)),
+        ItemKind::Type(_, g, bs, t) => generics_elision_err(g) || bounds_elision_err(bs) || t.as_ref().is_some_and(fn_elision_err),
+        ItemKind::Const(_, Some(t), _) | ItemKind::Static(_, _, t, _) => fn_elision_err(t),
+        _ => false,
+    }
+}
+
 /// 1 つのアイテムの要約 (front.rs の summarize)
 pub fn summarize(item: &Item, owner: Option<&Owner>) -> R<Summary> {
+    if item_elision_err(item) {
+        return err("missing lifetime specifier (E0106)");
+    }
     let mut sm = Summary::default();
     match &item.kind {
         ItemKind::Type(n, _, _, Some(t)) if owner.is_some() => {
             let ow = owner.unwrap();
+            if let Some(r) = &ow.regions {
+                let mut used = vec![];
+                named_lifetimes(t, &mut used);
+                if let Some(l) = used.iter().find(|l| r.free.contains(l)) {
+                    return Err(format!("\u{2}the lifetime parameter `{l}` is not constrained by the impl trait, self type, or predicates (E0207)"));
+                }
+            }
             sm.assocs.push(AssocSyn {
                 name: n.clone(),
                 self_ty: ow.self_ty.clone(),
@@ -1354,6 +1539,7 @@ pub fn summarize(item: &Item, owner: Option<&Owner>) -> R<Summary> {
             sm.aliases.push((n.clone(), gs.into_iter().map(|x| x.0).collect(), tysyn(t, None)?));
         }
         ItemKind::Trait(n, g, supers, _) => {
+            sm.hdr_regions = crate::regions::hdr_regions(g, None);
             let mut sup = vec![];
             for b in supers {
                 if let Bound::Trait(false, p) = b {
@@ -1386,6 +1572,30 @@ pub fn summarize(item: &Item, owner: Option<&Owner>) -> R<Summary> {
             sm.trait_decl = Some(n.clone());
         }
         ItemKind::Impl(g, tr, self_ty, _) => {
+            sm.hdr_regions = crate::regions::hdr_regions(g, Some(self_ty));
+            // (E0261: the header names only the lifetimes it declares; E0207: a lifetime parameter an associated type
+            // names must be constrained by the self type or the trait)
+            if crate::regions::generics_name_lt(g) || crate::regions::names_lt(self_ty) || tr.as_ref().is_some_and(|(_, p)| crate::regions::path_names_lt(p)) {
+                let declared: Vec<&str> = g.params.iter().filter_map(|p| if let GParam::Lifetime(l) = p { Some(l.as_str()) } else { None }).collect();
+                let mut used = vec![];
+                named_lifetimes(self_ty, &mut used);
+                if let Some((_, tp)) = tr {
+                    named_lifetimes(&PTy::Path(None, tp.clone()), &mut used);
+                }
+                // (constrained: written anywhere in the self type or the trait (`dyn Tr + 'a` too), or in a where
+                // clause (`T: Tr<Ty = &'x ()>`))
+                let constrained: Vec<String> = {
+                    let text = format!("{self_ty:?} {tr:?} {:?} {:?}", g.preds, g.params.iter().filter(|p| matches!(p, GParam::Ty(..))).collect::<Vec<_>>());
+                    declared.iter().filter(|l| text.contains(&format!("\"{l}\""))).map(|l| l.to_string()).collect()
+                };
+                bound_lifetimes(g, &mut used);
+                if let Some(l) = undeclared_lifetime(&used, &declared) {
+                    return Err(format!("use of undeclared lifetime name `{l}` (E0261)"));
+                }
+                if let Some(r) = &mut sm.hdr_regions {
+                    r.free = declared.iter().filter(|l| !constrained.iter().any(|x| x == *l)).map(|l| l.to_string()).collect();
+                }
+            }
             if let Some((neg, tp)) = tr {
                 if *neg {
                     return err("negative impls are not supported");
@@ -1639,6 +1849,14 @@ pub fn summarize(item: &Item, owner: Option<&Owner>) -> R<Summary> {
             }
             sm.adt_generics = adt_params(g)?;
             sm.adt_bounds = adt_bounds(g);
+            {
+                let tys: Vec<&PTy> = vars.iter().flat_map(|(_, f, _)| match f {
+                    Fields::Unit => vec![],
+                    Fields::Tuple(v) => v.iter().collect(),
+                    Fields::Named(v) => v.iter().map(|x| &x.1).collect(),
+                }).collect();
+                sm.adt_regions = crate::regions::adt_regions(g, &tys);
+            }
             let selft = self_of(sn, &sm.adt_generics);
             let mut vs = Vec::new();
             for (vn, fields, d) in vars {
@@ -1723,6 +1941,14 @@ pub fn summarize(item: &Item, owner: Option<&Owner>) -> R<Summary> {
             }
             sm.adt_generics = adt_params(g)?;
             sm.adt_bounds = adt_bounds(g);
+            {
+                let tys: Vec<&PTy> = match fields {
+                    Fields::Named(v) => v.iter().map(|x| &x.1).collect(),
+                    Fields::Tuple(v) => v.iter().collect(),
+                    Fields::Unit => vec![],
+                };
+                sm.adt_regions = crate::regions::adt_regions(g, &tys);
+            }
             let selft = self_of(sn, &sm.adt_generics);
             let mut fs = Vec::new();
             match fields {
@@ -1818,6 +2044,7 @@ pub fn owner_of(it: &SrcItem, sums: &[Summary]) -> Option<Owner> {
                 impl_trait: hs.impl_trait.clone(),
                 generics: hs.impl_generics.clone(),
                 is_trait: false,
+                regions: hs.hdr_regions.clone(),
             })
         }
         LexKind::TraitMember(h) => sums[h as usize].trait_decl.clone().map(|n| Owner {
@@ -1826,6 +2053,7 @@ pub fn owner_of(it: &SrcItem, sums: &[Summary]) -> Option<Owner> {
             base: n,
             impl_trait: None,
             is_trait: true,
+            regions: sums[h as usize].hdr_regions.clone(),
         }),
         _ => None,
     }

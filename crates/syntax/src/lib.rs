@@ -18,6 +18,7 @@ pub mod macros;
 pub mod parse;
 pub mod prelude;
 pub mod prep;
+pub mod regions;
 pub mod srcmap;
 pub mod stub;
 pub mod types;

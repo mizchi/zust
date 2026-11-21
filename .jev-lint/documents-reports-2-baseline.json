@@ -1,6 +1,6 @@
 {
   "schema": "jev-lint-documents-1",
-  "snapshotDigest": "aa358ddcfdd3498b968228e6d45bd559f0e0888ccafd0981e182525c58b2f374",
+  "snapshotDigest": "1a549268830ffb91f0aab13d138bcaa6ff8210e5f00827a4acf8e72782714855",
   "questionDigest": "209d6df378ccb747fcb0e821998fcd6105bc76638a88d22488d3b398d6a21595",
   "model": "jev-1.14.0",
   "snapshotChanged": false,
@@ -100,12 +100,12 @@
       "contextHash": "a068452334ef52150a1932e9d45207a4c156e3a5c60d69e061e986b1aa86d889",
       "judgment": {
         "choice": "supports",
-        "confidence": 0.97,
+        "confidence": 0.96,
         "probabilities": {
-          "supports": 0.98,
+          "supports": 0.97,
           "contradicts": 0.02,
           "unrelated": 0,
-          "insufficient_context": 0
+          "insufficient_context": 0.01
         }
       }
     },
@@ -168,12 +168,12 @@
       "contextHash": "ecee8f597e8c6093bcea35ffd84dafe505685fb3c77901bd2a2a9e033883360c",
       "judgment": {
         "choice": "supports",
-        "confidence": 0.99,
+        "confidence": 0.97,
         "probabilities": {
-          "supports": 0.99,
+          "supports": 0.98,
           "contradicts": 0.01,
           "unrelated": 0,
-          "insufficient_context": 0
+          "insufficient_context": 0.01
         }
       }
     },
@@ -202,10 +202,10 @@
       "contextHash": "5b6ede2d00ec82893b1c63b36b593d1e9e7999236c2422416b8324666f265c93",
       "judgment": {
         "choice": "supports",
-        "confidence": 0.96,
+        "confidence": 0.97,
         "probabilities": {
-          "supports": 0.97,
-          "contradicts": 0.03,
+          "supports": 0.98,
+          "contradicts": 0.02,
           "unrelated": 0,
           "insufficient_context": 0
         }
@@ -236,10 +236,10 @@
       "contextHash": "68facf70966b576a1dde106a31fd37de8e21bda46e6439878b91e7bce57154b6",
       "judgment": {
         "choice": "supports",
-        "confidence": 0.99,
+        "confidence": 0.96,
         "probabilities": {
-          "supports": 0.99,
-          "contradicts": 0.01,
+          "supports": 0.97,
+          "contradicts": 0.03,
           "unrelated": 0,
           "insufficient_context": 0
         }
@@ -338,10 +338,10 @@
       "contextHash": "b91a1cf01d33b66ef15111899d22ac963d6abc38c4242e6d72ebc80aefe2aecd",
       "judgment": {
         "choice": "supports",
-        "confidence": 1,
+        "confidence": 0.99,
         "probabilities": {
-          "supports": 1,
-          "contradicts": 0,
+          "supports": 0.99,
+          "contradicts": 0.01,
           "unrelated": 0,
           "insufficient_context": 0
         }
@@ -372,12 +372,12 @@
       "contextHash": "65d03eec8a642fb4c59c7bacc74397f936864091105bba631e8977b9ca9c1612",
       "judgment": {
         "choice": "supports",
-        "confidence": 0.97,
+        "confidence": 0.96,
         "probabilities": {
-          "supports": 0.98,
+          "supports": 0.97,
           "contradicts": 0.02,
           "unrelated": 0,
-          "insufficient_context": 0
+          "insufficient_context": 0.01
         }
       }
     },
@@ -440,10 +440,10 @@
       "contextHash": "d77f2024ffc7a01c94e005a23cd8538534ebb4abb40df15020d2f6eb96f550b6",
       "judgment": {
         "choice": "supports",
-        "confidence": 1,
+        "confidence": 0.99,
         "probabilities": {
-          "supports": 1,
-          "contradicts": 0,
+          "supports": 0.99,
+          "contradicts": 0.01,
           "unrelated": 0,
           "insufficient_context": 0
         }
@@ -678,10 +678,10 @@
       "contextHash": "f1894d506a5e66f92906b403c8a6a69c60e6e1bad8273b43b0489836c39d482f",
       "judgment": {
         "choice": "supports",
-        "confidence": 0.99,
+        "confidence": 0.97,
         "probabilities": {
-          "supports": 0.99,
-          "contradicts": 0.01,
+          "supports": 0.98,
+          "contradicts": 0.02,
           "unrelated": 0,
           "insufficient_context": 0
         }
@@ -746,12 +746,12 @@
       "contextHash": "74cd923d61e00b7739f80b534b652a909070bb949bfb007a464579050da1d263",
       "judgment": {
         "choice": "supports",
-        "confidence": 0.99,
+        "confidence": 0.97,
         "probabilities": {
-          "supports": 0.99,
+          "supports": 0.98,
           "contradicts": 0.01,
           "unrelated": 0,
-          "insufficient_context": 0
+          "insufficient_context": 0.01
         }
       }
     },
@@ -780,10 +780,10 @@
       "contextHash": "54b56e94027819b91287b9766c4872faa76c4344146540b341b4389c6b8dd7ce",
       "judgment": {
         "choice": "supports",
-        "confidence": 0.93,
+        "confidence": 0.92,
         "probabilities": {
-          "supports": 0.95,
-          "contradicts": 0.04,
+          "supports": 0.94,
+          "contradicts": 0.05,
           "unrelated": 0,
           "insufficient_context": 0.01
         }
@@ -814,10 +814,10 @@
       "contextHash": "7438e0bb6ac3c01bf6beaa56051a35abf5a2f30ee56334c8cd754b996d6bd4e6",
       "judgment": {
         "choice": "supports",
-        "confidence": 0.83,
+        "confidence": 0.87,
         "probabilities": {
-          "supports": 0.87,
-          "contradicts": 0.12,
+          "supports": 0.9,
+          "contradicts": 0.09,
           "unrelated": 0,
           "insufficient_context": 0.01
         }
@@ -858,6 +858,40 @@
       }
     },
     {
+      "id": "docs_reports_2026-11-20-01-region-check",
+      "topic": "The Japanese file docs/ja/reports/2026-11-20-01-region-check.md is a faithful translation of docs/reports/2026-11-20-01-region-check.md",
+      "mode": "translation",
+      "reference": {
+        "source": "docs_reports_2026-11-20-01-region-check.en",
+        "path": "docs/reports/2026-11-20-01-region-check.md",
+        "startLine": 1,
+        "endLine": 196,
+        "quote": "# Region (lifetime) checking: approach and steps (issue #1)\n\nDate: 2026-11-20\n\n## 1. Measurements before the change\n\n- All counts below are instructions, counted by callgrind.\n- **gen5000 `check`: 3793M.** The breakdown (inclusive):\n  - per-function acg (`compile_id_req`): 60%\n  - `analyze` (parsing, summaries, prep): 35%\n  - `Bk::check`: under 0.1%. Its location-insensitive pre-pass stops it early.\n- **patterns `check`: 685M.** The breakdown:\n  - `compile_id_req`: 56%\n  - `Bk::check`: 2.7%\n  - `bk_scrutinee`: 1.1%\n  - The whole borrow checker costs about what the README says (\"+2.2%\").\n- **How check works:**\n  - It processes functions one at a time, wave by wave.\n  - Each function's result stays in the check memo (`driver2.rs`) and the cache, so editing one function re-checks only that function.\n  - build runs in parallel, in forked child processes (`compile_many`).\n- **Types and the lifetimes of signatures:**\n  - `Ty` carries no regions.\n  - Of a signature's lifetimes, only `SigSyn::ret_from` is kept: a bit mask of which arguments the return value may borrow from.\n  - So **the interface fingerprint (`iface_fp`) does not include lifetimes**. For example, changing `-> &'a T` into `-> &'static T` does not get the callers checked again.\n  - That is no problem today (nothing checks them), but with a region check it becomes a correctness problem.\n- **tests/ui compile-fail tests with region-related annotations that do not pass today:**\n\n| category | not passing (fail + wrong line) | without ADT lifetimes, HRTB, closures, dyn/impl |\n|---|---:|---:|\n| lifetime may not live long enough | 189 | 44 |\n| does not live long enough (E0597) | 89 | 30 |\n| temporaries (E0716) | 55 | 37 |\n| `T: 'a` (E0310/E0309) | 50 | 10 |\n| E0621/E0623/E0700 and the like | 24 | 3 |\n| E0515 / E0373 / E0478 / E0521 / E0713 | 25 / 12 / 11 / 1 / 3 | - |\n| syntax only (E0261 undeclared, E0106 missing, E0195/E0207/E0263/E0496 and the like) | 18 / 21 / 31 | - |\n\n- Two things follow from the table:\n  - Without the lifetime parameters of ADTs (`struct S<'a>`), only about a quarter of them can be reached.\n  - About 70 need only the syntax, at almost no cost.\n\n## 2. What recent research and implementations suggest\n\n- **NLL's (rustc) check of universal regions:**\n  - A region's value is \"a set of CFG points + end('a)\".\n  - It propagates `'a: 'b` constraints, collapsed into SCCs, and `check_universal_regions` looks for a required `'a: 'b` that is not declared.\n  - A universal region contains every point of the function body anyway. So the checks against a signature (\"lifetime may not live long enough\" and the like) **are decided by location-insensitive reachability alone**.\n  - [rustc-dev-guide: region inference](https://rustc-dev-guide.rust-lang.org/borrow-check/region-inference.html)\n- **Polonius alpha (the 2025H2–2026 project goals):**\n  - It finds whether a loan is live by reachability, in a constraint graph whose nodes are (region, point).\n  - The graph is not materialized (**lazy**). Constraints that hold everywhere are kept as \"logical edges\" and expanded while traversing. A region's liveness, too, is computed the first time a traversal touches it.\n  - It builds no graph for a function with no loans. The number of loans is a single digit in 90% of the benchmarks.\n  - The goal is \"up to +10–20% over NLL\".\n  - [goals 2026/polonius](https://goals.rust-lang.org/2026/polonius.html)\n  - [rustc_borrowck::polonius](https://doc.rust-lang.org/nightly/nightly-rustc/src/rustc_borrowck/polonius/mod.rs.html)\n- **How this relates to zust's borrow checker:**\n  - It already works the Polonius way: one origin per local, and a loan is live by the liveness of locals.\n  - What is missing is only **the universal regions (the signature's side) and the lifetime parameters of ADTs**.\n\n## 3. Hypotheses on where the cost would be\n\n- **H1 Most of the cost is in *collecting* constraints, not in solving them.**\n  - acg walks every expression, so the cost of hooks that collect constraints is proportional to the number of expressions.\n  - Solving is a small graph per function (SCCs and reachability, O(edges)).\n  - → Stop collecting at a gate (H2). Solve only once, at the end of the function.\n- **H2 A function without types that hold regions can cost nothing.**\n  - If neither the signature nor the types of locals have references or ADTs with lifetime parameters, no check of universal regions is needed. This is decided once, at summary time.\n  - Almost all of gen5000 and crates stop at the gate; patterns and traits pay the cost.\n- **H3 Adding regions to `Ty` would make every KPI worse.**\n  - `Ty` is used in instance keys, in the encoding of the cache, and in hashes.\n  - So, as rustc erases regions for codegen, `Ty` stays erased, and only the check keeps **a \"shadow\" of regions (region slots) beside it**.\n  - Region slots are the positions of the references and of ADT lifetime parameters in a type, in order.\n  - → The no-op build, the cache size and the edit KPIs cannot move, by construction.\n- **H4 Errors against universal regions need no location-sensitive check.**\n  - That covers most of may-not-live, E0310, E0621, E0478, and E0597 where `'static` is required.\n  - Only local loans (the existing borrow checker) and temporaries (E0716, a hidden local that dies at the end of the statement) need locations. Both fit the existing dataflow.\n- **H5 The variance of ADTs is computed once, at summary time, and cached.**\n  - It costs only on a cold build, in proportion to the number of ADTs.\n- **H6 The regions of a signature go into `SigSyn`.**\n  - Without them, incremental builds are wrong (§1).\n  - They are empty for fns without lifetimes, so summaries and the cache do not grow.\n- **H7 LSP rides on the per-function memo.**\n  - What one edit adds is the region check of that function only.\n\n### On a separate multi-threaded path\n\n- **Option A: solve the region check on another thread.**\n  - Solving is a few percent of the total (H1), so handing work between threads would cost more. Not taken.\n- **Option B: run check's per-function acg in parallel with `std::thread::scope`.**\n  - The functions of a wave are independent. `Insts` is already a `Mutex`. The only other state is thread_local.\n  - It helps a cold check and the first LSP check, that is, wall-clock time (vs_blaze).\n  - cachegrind counts the instructions of all threads, so the instruction-count KPIs do not improve.\n  - So it goes last, as a path independent of the region check, and is done only if the margin of acceptance criterion 1 (faster than blaze) shrinks.\n\n## 4. Approach\n\nEach step is measured before it is kept. Each reports an error only when it is certain; where precision falls short, the program is accepted silently. Regressions on run-pass and check-pass stay at 0.\n\n- **R0 Groundwork**\n  - The regions of signatures (into `SigSyn`, for the interface fingerprint and correct incremental builds).\n  - ADT lifetime parameters, each field's region slots and variance in the summaries.\n  - A mark for the gate.\n- **R1 Checks on the syntax alone** (at summary time, almost no cost): E0261, E0106, E0263/E0496/E0195 and the like.\n- **R2 Check of universal regions** (location-insensitive, per function):\n  - One origin per local, today's granularity, is not enough.\n    - `fn foo(x: &mut Vec<&u8>, y: &u8) { x.push(y) }` needs `'y: 'x's element` through the `T` of `Vec<T>::push` (invariant, under `&mut`).\n    - The typical tests/ui test has this shape.\n  - So, only in the functions that pass the gate, **each value of an expression gets a region tree**.\n    - A region tree puts region variables on the sequence of a type's region slots.\n    - A call instantiates the callee's generic signature with fresh variables, and puts outlives constraints between them and the arguments' trees, following variance.\n    - A construct that is not understood is Unknown, and constraints touching Unknown are dropped. That way there are no false errors.\n  - It finds SCCs and reachability; when an `'a: 'b` that is neither declared nor implied is required, it reports \"lifetime may not live long enough\".\n  - When a local's loan flows into `'static` or a universal region, it reports E0597.\n- **R3 Temporaries (E0716):** a hidden local that dies at the end of the statement, in the existing dataflow.\n- **R4 `T: 'a` of generics (E0310/E0309), the lifetimes of `impl`, some closures and HRTB.**\n- **R5 (only if needed)** check's per-function work in parallel (option B).\n\n## 5. Steps for each stage\n\n1. Collect the tests/ui tests concerned with `--filter`, and put small reproductions in tests/: both ones that must be errors and ones that must not.\n2. Implement.\n3. Check:\n   - `cargo test --release`\n   - `python3 bench/rust_ui.py --baseline bench/rust_ui_passing.txt --check`, with 0 regressions.\n   - The gain in compile-fail: the tests newly passing, and the entries `bench/rust_ui_accidental.txt` can lose.\n4. Run `python3 bench/kpi_track.py \"label\" --dry-run`, with `--lsp` at milestones. Compare with the row before, and write down why what moved moved.\n5. When a cost misses its hypothesis, find the cause with callgrind.\n6. Commit and push.\n\n## 6. Results (first version)\n\n### What was built\n\n- **R0**\n  - The region slots of signatures, impl/trait headers and struct/enum fields are in the summaries (`crates/syntax/src/regions.rs`).\n  - They are empty for items that write no lifetime.\n  - The per-function cache key (`hash_sig`) has the regions and `ret_from`. The callers of a callee whose lifetimes alone changed are now checked again.\n- **R1**\n  - E0261 is wider: methods, impl headers and `T: 'x`; the `for<'a>` of where clauses are kept apart.\n  - E0496, E0207 (impl lifetimes only associated types use) and E0106 (fn pointer types and `Fn() -> &T`) are added.\n- **R2** (`crates/typeck/src/acg/regionck.rs`)\n  - NLL's check of universal regions, with no control flow.\n  - The values followed: parameters, let, assignments, calls, struct literals, variant values, pattern bindings, returned values. It applies to generic functions' instances too.\n  - When a borrow of a local the function owns, or of a temporary, reaches a universal region, it is reported as E0597.\n- **R3**\n  - A temporary passed by `&` straight to the outermost call of a let initializer is a hidden local that dies at the end of the statement (E0716).\n\n### tests/ui (0 regressions)\n\n- compile-fail went from 3587 to 3674 (+87; the counts after the rebase onto main's 98d5167).\n- Nearly all of the gain is \"lifetime may not live long enough\" and E0261/E0106/E0207/E0496/E0716.\n\n### KPIs (instruction counts)\n\nMeasured with `bench/kpi_track.py --dry-run --lsp` on the same machine. The baseline is cd5dccd, before the rebase.\n\n| KPI | cd5dccd | this change | change |\n|---|---:|---:|---:|\n| no-op build (M) | 0.706 | 0.702 | ±0 |\n| edit one fn (M) | 539.6 | 541.1 | +0.28% |\n| check (M) | 3808.3 | 3813.6 | +0.14% |\n| cache (KiB) | 1902.8 | 1902.8 | ±0 |\n| LSP session (G) | 10.906 | 10.912 | +0.06% (run-to-run noise ~0.1%) |\n| traits check (M) | 1161.7 | 1165.9 | +0.36% |\n| traits edit (M) | 61.00 | 61.05 | +0.08% |\n| crates no-op (M) | 9.88 | 9.87 | ±0 |\n| crates edit (M) | 312.3 | 312.9 | +0.19% |\n| patterns check (M) | 688.0 | 694.2 | +0.91% |\n| patterns edit (M) | 255.8 | 257.3 | +0.59% |\n\n- The largest increase is on patterns, which writes the most lifetimes. About 0.5% of it is the region check itself; the rest is summary-time work.\n- blaze is not installed in this environment, so `bench/vs_blaze.py` was not run again. The margins in the README are 6–61x, and the instruction counts changed by less than 1%.\n\n### How the hypotheses held\n\n| hypothesis | result |\n|---|---|\n| H1 | Held. Of the increase on patterns, collecting is about 0.5%, and solving a part of that. |\n| H2 | Held. gen5000 pays +0.1%, for the gate's decision alone. |\n| H3 | Held. `Ty` was not changed, so the no-op build and the cache size did not move. |\n| H6 | Held. Without the regions in `hash_sig`, the incremental check was wrong (`tests/regionck.rs`). |\n| H5 | Changed. Not at summary time: computed lazily, only for the ADTs the check reaches. |\n\n- What was not expected:\n  - A `getenv` per function cost +5.7M instructions.\n  - The larger summary structs made more copies (now boxed).\n- **Multi-threading (R5):** not done, since it does not improve the instruction-count KPIs, and given the margin over blaze (6–61x).\n\n### Not covered yet\n\n- closures\n- the lifetimes of `impl Trait` and `dyn`\n- `T: 'a` (E0310)\n- higher-ranked bounds\n- temporaries other than those passed by `&` straight to the outermost call of a let initializer\n- errors in functions with fewer than two regions in their signature (for example a `main` that makes a call requiring `'static`). 158 of the failing lifetime tests are of this kind",
+        "contentHash": "ec6f5feb0e8239cb3c2085ca828d64066404eb1ea71fc8a0821d77c01980a212"
+      },
+      "target": {
+        "source": "docs_reports_2026-11-20-01-region-check.ja",
+        "path": "docs/ja/reports/2026-11-20-01-region-check.md",
+        "startLine": 1,
+        "endLine": 196,
+        "quote": "# リージョン (ライフタイム) 検査の方針と手順 (issue #1)\n\n日付: 2026-11-20\n\n## 1. 現状の計測\n\n- 次の数え方はすべて callgrind による命令数。\n- **gen5000 の `check`: 3793M。** 内訳は次のとおり (包含)。\n  - 関数ごとの acg (`compile_id_req`): 60%\n  - `analyze` (構文解析・要約・prep): 35%\n  - `Bk::check`: 0.1% 未満。前段の、位置を見ない検査で打ち切られている。\n- **patterns の `check`: 685M。** 内訳は次のとおり。\n  - `compile_id_req`: 56%\n  - `Bk::check`: 2.7%\n  - `bk_scrutinee`: 1.1%\n  - borrowck 全体の費用は README にある「+2.2%」と同じ程度。\n- **check の作り:**\n  - 波 (wave) ごとに関数を 1 つずつ逐次に処理する。\n  - 関数ごとの結果は check memo (`driver2.rs`) とキャッシュに残るので、関数 1 つの編集では再検査はその関数だけで済む。\n  - build は、fork した子プロセスで並列にしている (`compile_many`)。\n- **型とシグネチャのライフタイム:**\n  - `Ty` はリージョンを持たない。\n  - シグネチャのライフタイムで残るのは `SigSyn::ret_from` だけ。戻り値がどの引数を借りるかを示すビットマスク。\n  - そのため **iface 指紋 (`iface_fp`) はライフタイムを含まない**。たとえば `-> &'a T` を `-> &'static T` にしても、呼び出し側は再検査されない。\n  - これは今は問題にならない (検査しないから) が、リージョン検査を入れると正しさの問題になる。\n- **tests/ui の compile-fail で、リージョン関係の注記があって今は通らないもの:**\n\n| 分類 | 不通過 (fail + 行違い) | ADT のライフタイム・HRTB・クロージャ・dyn/impl なしの数 |\n|---|---:|---:|\n| lifetime may not live long enough | 189 | 44 |\n| does not live long enough (E0597) | 89 | 30 |\n| 一時値 (E0716) | 55 | 37 |\n| `T: 'a` (E0310/E0309) | 50 | 10 |\n| E0621/E0623/E0700 など | 24 | 3 |\n| E0515 / E0373 / E0478 / E0521 / E0713 | 25 / 12 / 11 / 1 / 3 | - |\n| 構文だけで分かるもの (E0261 未宣言, E0106 欠落, E0195/E0207/E0263/E0496 など) | 18 / 21 / 31 | - |\n\n- 表から次の 2 点が読み取れる。\n  - ADT のライフタイム引数 (`struct S<'a>`) を扱わないと、取れるのは全体の 1/4 程度。\n  - 構文だけの検査が、費用ほぼ 0 で ~70 件ある。\n\n## 2. 最近の研究と実装からの示唆\n\n- **NLL (rustc) の universal region の検査:**\n  - リージョンの値は「CFG の点の集合 + end('a)」。\n  - `'a: 'b` 制約を SCC にまとめて伝播し、`check_universal_regions` で、宣言にない `'a: 'b` が必要になっていないかを見る。\n  - universal region はもともと関数本体のすべての点を含む。そのため、シグネチャに対する検査 (「lifetime may not live long enough」など) は、**位置を見ない到達可能性だけで決まる**。\n  - [rustc-dev-guide: region inference](https://rustc-dev-guide.rust-lang.org/borrow-check/region-inference.html)\n- **Polonius alpha (2025H2〜2026 の project goal):**\n  - 節点が (リージョン, 点) の制約グラフ上で、ローンが生きているかを到達可能性で求める。\n  - グラフは実体化しない (**lazy**)。どこでも成り立つ制約は「論理辺」として持ち、たどるときに展開する。リージョンの liveness も、たどって初めて触れたときに計算する。\n  - ローンがない関数ではグラフを作らない。ローン数はベンチの 90% で 1 桁。\n  - 目標は「NLL 比 +10〜20% まで許容」。\n  - [goals 2026/polonius](https://goals.rust-lang.org/2026/polonius.html)\n  - [rustc_borrowck::polonius](https://doc.rust-lang.org/nightly/nightly-rustc/src/rustc_borrowck/polonius/mod.rs.html)\n- **zust の borrowck との関係:**\n  - すでに Polonius 流で、origin を局所変数ごとに 1 つ持ち、ローンが生きているかを局所変数の liveness で決めている。\n  - 足りないのは **universal region (シグネチャ側) と、ADT のライフタイム引数** だけ。\n\n## 3. 性能上のボトルネックの仮説\n\n- **H1 費用の大半は制約の「収集」で、「解く」ほうではない。**\n  - acg は式を全部たどるので、制約を収集するフックの費用は式の数に比例する。\n  - 解く側は関数ごとの小さいグラフ (SCC と到達可能性、O(辺)) で済む。\n  - → 収集はゲートで止める (H2)。解くのは、関数の終わりに 1 回だけにする。\n- **H2 リージョンを持つ型がない関数は、0 の費用にできる。**\n  - シグネチャにも局所変数の型にも参照やライフタイム引数を持つ ADT がなければ、universal region の検査は要らない。この判定は要約の時点で一度だけ行う。\n  - gen5000 と crates はほぼ全部ゲートで落ち、patterns と traits が費用を払う。\n- **H3 `Ty` にリージョンを足すと、全 KPI が悪くなる。**\n  - `Ty` は、インスタンスのキー・キャッシュの符号化・ハッシュに使われている。\n  - そこで rustc の「codegen では erased」と同じく、`Ty` は消去したまま、検査のときだけ **リージョンの「影」(region slots) を横に持つ**。\n  - region slots は型の中の参照と、ADT のライフタイム引数の位置の列。\n  - → no-op build・キャッシュ量・edit の KPI は、原理的に動かない。\n- **H4 universal region の誤りは、位置を見ない検査で足りる。**\n  - これで取れるのは may-not-live、E0310、E0621、E0478、`'static` が要る E0597 の大半。\n  - 位置が要るのは、局所のローン (既存の borrowck) と、一時値 (E0716、文の終わりで死ぬ隠れ局所) だけ。どちらも既存のデータフローに乗る。\n- **H5 ADT の変位 (variance) は要約の段階で一度だけ計算し、キャッシュする。**\n  - 費用は cold の時だけで、ADT の数に比例する。\n- **H6 リージョンのシグネチャは `SigSyn` に入れる。**\n  - 入れないと、増分ビルドが不正確になる (§1)。\n  - ライフタイムのない fn では空にして、要約とキャッシュの大きさを増やさない。\n- **H7 LSP は関数ごとの memo に乗る。**\n  - 1 回の編集で増える費用は、その関数のリージョン検査だけ。\n\n### マルチスレッドの別経路について\n\n- **候補 A: リージョン検査を別スレッドで解く。**\n  - 解く部分は全体の数% (H1) なので、スレッドの受け渡しの費用のほうが大きい。採らない。\n- **候補 B: check の関数ごとの acg を、`std::thread::scope` で並列にする。**\n  - 波の中の関数は独立している。`Insts` はもう `Mutex`。状態は thread_local だけ。\n  - 効くのは cold の check と LSP の初回、つまり実時間 (vs_blaze)。\n  - cachegrind は全スレッドの命令を数えるので、命令数の KPI は良くならない。\n  - そこで、リージョン検査とは独立した経路として最後に置き、受け入れ基準 1 (blaze より速い) の余裕が減ったときだけ行う。\n\n## 4. 方針\n\n段階ごとに、計測してから残す。どれも、誤りを出すのは確実な場合だけにする。精度が足りない形なら、黙って受け入れる。run-pass と check-pass の退行は 0 にする。\n\n- **R0 基盤**\n  - リージョンのシグネチャ (`SigSyn` へ。iface 指紋と増分ビルドの正しさのため)。\n  - ADT のライフタイム引数・各フィールドの region slots・変位を要約に入れる。\n  - ゲートの印。\n- **R1 構文だけの検査** (要約の時点、費用ほぼ 0): E0261、E0106、E0263/E0496/E0195 など。\n- **R2 universal region の検査** (位置を見ない、関数ごと):\n  - 局所ごとに origin 1 つ、という今の粒度では足りない。\n    - `fn foo(x: &mut Vec<&u8>, y: &u8) { x.push(y) }` は、`Vec<T>::push` の `T` を通して `'y: 'x の要素` が要る (`&mut` の下なので不変)。\n    - tests/ui の典型はこの形。\n  - そこで、ゲートを通った関数の中だけ、**式の値ごとに region tree** を作る。\n    - region tree は、型の region slots の並びにリージョン変数を置いたもの。\n    - 呼び出しでは、callee の汎用シグネチャを新しい変数で具体化する。引数の tree との間に、変位に従って outlives 制約を張る。\n    - 分からない構文は Unknown にする。Unknown に触れる制約は捨てる。こうして、誤検出を出さない。\n  - SCC と到達可能性を求め、宣言にも暗黙の境界にもない `'a: 'b` が要れば、「lifetime may not live long enough」を出す。\n  - 局所のローンが `'static` / universal に流れたら E0597 を出す。\n- **R3 一時値 (E0716):** 文の終わりで死ぬ隠れ局所を置く。既存のデータフローに乗せる。\n- **R4 ジェネリクスの `T: 'a` (E0310/E0309)、`impl` のライフタイム、クロージャ・HRTB の一部。**\n- **R5 (必要なときだけ)** check の関数ごとの並列化 (候補 B)。\n\n## 5. 1 段ごとの手順\n\n1. 対象の tests/ui を `--filter` で集め、小さい再現を tests/ に置く。誤りを出すもの、出してはいけないものの両方を置く。\n2. 実装する。\n3. 次を確認する。\n   - `cargo test --release`\n   - `python3 bench/rust_ui.py --baseline bench/rust_ui_passing.txt --check`。退行 0 にする。\n   - compile-fail の増分。新しく通るものと、`bench/rust_ui_accidental.txt` から外せるもの。\n4. `python3 bench/kpi_track.py \"label\" --dry-run` を流し、マイルストーンでは `--lsp` も流す。前の行と比べて、動いた分の理由を書く。\n5. 費用が仮説を外れたら、callgrind で原因を見る。\n6. commit・push する。\n\n## 6. 結果 (第 1 版)\n\n### 入れたもの\n\n- **R0**\n  - シグネチャ・impl/trait ヘッダ・struct/enum フィールドの region slots を要約に入れた (`crates/syntax/src/regions.rs`)。\n  - ライフタイムを書かない項目では空にした。\n  - 関数ごとのキャッシュキー (`hash_sig`) に、リージョンと `ret_from` を加えた。これで、ライフタイムだけを変えた callee の呼び出し側も検査し直される。\n- **R1**\n  - E0261 を広げた。メソッド・impl ヘッダ・`T: 'x` が対象で、where 句の `for<'a>` は別扱いにした。\n  - E0496、E0207 (関連型だけが使う impl のライフタイム)、E0106 (fn ポインタ型と `Fn() -> &T`) を加えた。\n- **R2** (`crates/typeck/src/acg/regionck.rs`)\n  - NLL の universal region 検査を、制御フローなしで行う。\n  - 対象の値: 引数、let、代入、呼び出し、struct リテラル、バリアント値、パターンの束縛、戻り値。ジェネリック関数のインスタンスにも適用する。\n  - 自分が持つ局所の借用、または一時値の借用が universal に届いたら、E0597 として報告する。\n- **R3**\n  - let 初期化子の一番外の呼び出しに `&` で直接渡した一時値を、文の終わりで死ぬ隠れ局所にした (E0716)。\n\n### tests/ui (退行 0)\n\n- compile-fail は 3587 から 3674 に増えた (+87。main の 98d5167 に rebase した後の数)。\n- 増えた分は、ほぼ全部が「lifetime may not live long enough」と E0261/E0106/E0207/E0496/E0716。\n\n### KPI (命令数)\n\n`bench/kpi_track.py --dry-run --lsp` で、同じマシンで測った。基準は rebase 前の cd5dccd。\n\n| KPI | cd5dccd | この変更 | 差 |\n|---|---:|---:|---:|\n| no-op build (M) | 0.706 | 0.702 | ±0 |\n| edit one fn (M) | 539.6 | 541.1 | +0.28% |\n| check (M) | 3808.3 | 3813.6 | +0.14% |\n| cache (KiB) | 1902.8 | 1902.8 | ±0 |\n| LSP session (G) | 10.906 | 10.912 | +0.06% (ゆらぎは約 0.1%) |\n| traits check (M) | 1161.7 | 1165.9 | +0.36% |\n| traits edit (M) | 61.00 | 61.05 | +0.08% |\n| crates no-op (M) | 9.88 | 9.87 | ±0 |\n| crates edit (M) | 312.3 | 312.9 | +0.19% |\n| patterns check (M) | 688.0 | 694.2 | +0.91% |\n| patterns edit (M) | 255.8 | 257.3 | +0.59% |\n\n- 一番増えたのは、ライフタイムを一番多く書く patterns。そのうち約 0.5% がリージョン検査そのもので、残りは要約時の処理。\n- blaze はこの環境に入っていないので、`bench/vs_blaze.py` は流し直していない。README の差は 6〜61 倍で、命令数の変化は 1% 未満。\n\n### 仮説の検証\n\n| 仮説 | 結果 |\n|---|---|\n| H1 | 正しかった。patterns の増分は、収集が約 0.5%、解くのはその一部だった。 |\n| H2 | 正しかった。gen5000 は、ゲートの判定だけで +0.1%。 |\n| H3 | 正しかった。`Ty` を変えなかったので、no-op とキャッシュ量は不変。 |\n| H6 | 正しかった。`hash_sig` にリージョンがないと、増分検査が誤っていた (`tests/regionck.rs`)。 |\n| H5 | 変えた。要約時ではなく、検査が触れた ADT だけを遅延で計算した。 |\n\n- 予想外だったこと:\n  - 関数ごとの `getenv` が +5.7M 命令かかっていた。\n  - 要約の struct が大きくなったせいで、コピーが増えていた (Box にした)。\n- **マルチスレッド (R5):** 命令数の KPI は改善しないことと、blaze との差 (6–61 倍) を踏まえ、見送った。\n\n### まだ扱わないもの\n\n- クロージャ\n- `impl Trait` と `dyn` のライフタイム\n- `T: 'a` (E0310)\n- 高階の境界\n- let 初期化子の一番外の呼び出しに `&` で直接渡したもの以外の一時値\n- シグネチャのリージョンが 2 つ未満の関数での誤り (たとえば `'static` を要る呼び出しをする `main`)。落ちているライフタイムのテストのうち 158 件がこれ",
+        "contentHash": "c886d6f5ebf4375edf3bad45d47a0780820ddb740aea0dda99d0416f1e72abf6"
+      },
+      "context": [],
+      "candidateId": "3089b236212eaac2374d775834f8003f915705e72c85ca22ed764c7f715b4e97",
+      "contextHash": "536786479dc0803408f0444fb2041d9e5a569289c775017759c4867ead02b09b",
+      "judgment": {
+        "choice": "supports",
+        "confidence": 0.97,
+        "probabilities": {
+          "supports": 0.98,
+          "contradicts": 0.02,
+          "unrelated": 0,
+          "insufficient_context": 0
+        }
+      }
+    },
+    {
       "id": "docs_reports_2026-11-20-02-green-threads",
       "topic": "The Japanese file docs/ja/reports/2026-11-20-02-green-threads.md is a faithful translation of docs/reports/2026-11-20-02-green-threads.md",
       "mode": "translation",
@@ -882,12 +916,12 @@
       "contextHash": "6ef3c783f7f2ee4aa85d450d7fc65f20f61a1aa01a222d8aeb9ddeda31a027f9",
       "judgment": {
         "choice": "supports",
-        "confidence": 0.76,
+        "confidence": 0.84,
         "probabilities": {
-          "supports": 0.82,
+          "supports": 0.88,
           "contradicts": 0.06,
           "unrelated": 0,
-          "insufficient_context": 0.12
+          "insufficient_context": 0.06
         }
       }
     },
@@ -927,9 +961,9 @@
     }
   ],
   "coverage": {
-    "expected": 27,
-    "selected": 27,
-    "answered": 27,
+    "expected": 28,
+    "selected": 28,
+    "answered": 28,
     "missing": 0,
     "contradictions": 0,
     "unassessed": 0,
@@ -938,9 +972,9 @@
     "unboundDocuments": 0
   },
   "usage": {
-    "requests": 27,
-    "inputTokens": 125705,
-    "usd": 0.0052796100000000006
+    "requests": 28,
+    "inputTokens": 136222,
+    "usd": 0.005721324000000001
   },
   "errors": []
 }

@@ -581,7 +581,11 @@ impl Session2 {
                     Some(sm) => sm,
                     None => {
                         let ow = if pass == 1 { crate::ast_summary::owner_of(it, &sums) } else { None };
-                        crate::ast_summary::parse_and_summarize(&src, it, ow.as_ref()).map_err(|e| relocate(e, it))?
+                        crate::ast_summary::parse_and_summarize(&src, it, ow.as_ref()).map_err(|e| match (e.strip_prefix('\u{2}'), it.kind) {
+                            // (`\u{2}msg`: an impl member's error that is at its impl's header)
+                            (Some(m), ItemKind::ImplMember(h)) => format!("{}:1: {m}", items[h as usize].line),
+                            _ => relocate(e.trim_start_matches('\u{2}').to_string(), it),
+                        })?
                     }
                 };
                 n_parsed += 1;

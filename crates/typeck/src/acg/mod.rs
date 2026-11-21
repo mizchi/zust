@@ -18,6 +18,7 @@
 #![allow(clippy::too_many_arguments)]
 
 pub mod borrowck;
+pub mod regionck;
 pub mod clif;
 pub mod lit;
 mod p1_expr;
@@ -205,9 +206,9 @@ pub const TRAP_SITE_MAX: usize = 245;
 
 /// 1 関数をコンパイルする。返り値は (Blob, 要求したインスタンス)
 pub fn compile(prog: &Program, insts: &Mutex<Insts>, id: u32, f: &ItemFn, line_base: u32, inl: &Inline) -> R<(Compiled, Vec<u32>)> {
-    let (sig, env, body_id, fnptr) = {
+    let (sig, env, body_id, fnptr, inst_args) = {
         let g = insts.lock().unwrap();
-        (g.sig(prog, id).clone(), g.env(prog, id), g.body_of(id), g.get(id).is_some_and(|i| i.fnptr))
+        (g.sig(prog, id).clone(), g.env(prog, id), g.body_of(id), g.get(id).is_some_and(|i| i.fnptr), g.get(id).map(|i| i.args.clone()))
     };
     // (a closure's fn-pointer instance: the body without the `__env` parameter (it has no captures))
     let f_np;
@@ -263,6 +264,9 @@ pub fn compile(prog: &Program, insts: &Mutex<Insts>, id: u32, f: &ItemFn, line_b
     let mut cx = Cx {
         b: FunctionBuilder::new(&clif_sig(&sig)),
         bk: borrowck::Bk { on: bk_level > 0, level: bk_level, line_base, ..Default::default() },
+        // (a function's own body, not a generic one's instance nor a closure's: see regionck)
+        // (a generic function's instance: the generic signature, its type parameters' regions not followed)
+        rg: regionck::Rg { on: bk_level >= 2 && !fnptr && caps.is_empty() && prog.closures.get(&body_id).is_none() && regionck::enabled(), base: body_id, inst_args: inst_args.unwrap_or_default(), ..Default::default() },
         prog,
         scopes: vec![vec![]],
         loops: vec![],
@@ -350,6 +354,7 @@ pub fn compile(prog: &Program, insts: &Mutex<Insts>, id: u32, f: &ItemFn, line_b
     };
     r?;
     cx.bk_check()?;
+    cx.rg_check()?;
     // (入口以外で作った drop フラグは入口で 0 にする: minclif はフラグのスロットを関数の最初に 0 にする)
     let late = std::mem::take(&mut cx.late_flags);
     let requested = std::mem::take(&mut cx.requested);
@@ -621,6 +626,8 @@ pub struct Cx<'p> {
     pub b: FunctionBuilder,
     /// 借用検査の記録
     pub bk: borrowck::Bk,
+    /// Region checking against the signature
+    pub rg: regionck::Rg,
     pub prog: &'p Program,
     pub scopes: Vec<Vec<(String, Loc, Ty)>>,
     pub loops: Vec<Loop>,
@@ -1132,6 +1139,37 @@ impl Cx<'_> {
             }
         }
         self.bk.params = (0..self.bk.locals.len() as u32).collect();
+        // (the gate, before any work: a signature with fewer than two regions and no lifetime named has no two
+        // universal regions to relate)
+        if self.rg.on && sig.regions.is_none() && sig.params.iter().map(|&t| regionck::count(self.prog, t, 0).unwrap_or(0)).sum::<usize>() < 2 {
+            self.rg.on = false;
+        }
+        if self.rg.on {
+            let mut ps = vec![];
+            if f.sig.recv.is_some() {
+                ps.push("self".to_string());
+            }
+            for (p, _) in &f.sig.params {
+                ps.push(pat_name(p)?);
+            }
+            let ps: Vec<(Loc, Ty)> = ps.iter().filter_map(|n| self.lookup(n)).collect();
+            if ps.len() == sig.params.len() {
+                // (elision from the receiver: `&self` / `&mut self`, or a receiver type that names `Self`)
+                let self_elides = match (&f.sig.recv, &f.sig.recv_ty) {
+                    (Some(r), _) if r.starts_with('&') => true,
+                    (Some(_), Some(t)) => format!("{t:?}").contains("\"Self\"") && format!("{t:?}").contains("Ref("),
+                    _ => false,
+                };
+                // (any other receiver with elided regions in the result: not followed)
+                let other_self = f.sig.recv.is_some() && !self_elides;
+                self.rg_begin(sig.regions.as_deref(), &ps, self_elides);
+                if other_self {
+                    self.rg.ret = None;
+                }
+            } else {
+                self.rg.on = false;
+            }
+        }
         // クロージャ: キャプチャを `__env` のフィールド (by-ref なら指す先) として見せる
         if !self.caps.is_empty() {
             let env = match self.lookup("__env") {
@@ -1317,7 +1355,10 @@ impl Cx<'_> {
         let mut diverged = false;
         let mut result: V = (None, Ty::Unit);
         let n = blk.stmts.len();
+        // (the borrowed temporaries of each statement end with it; the tail expression's, with the enclosing one)
+        let bk_mark = self.bk.stmt_temps.len();
         for (i, st) in blk.stmts.iter().enumerate() {
+            self.bk_temps_end(bk_mark);
             let last = i + 1 == n;
             let t0 = self.temps.len();
             self.stmt_i = i;
@@ -1334,6 +1375,8 @@ impl Cx<'_> {
                         continue;
                     };
                     // `let PAT = e else { .. };`: 合わなければ else の (発散する) ブロックへ
+                    // (the else block may match other scrutinees: the pattern binds from this one)
+                    let scrut_saved = (self.bk.scrut.clone(), self.bk.scrut_place.clone(), self.rg.scrut.clone());
                     if let Some(else_b) = els {
                         let else_blk = self.b.create_block();
                         self.pat_test(pat, place, else_blk)?;
@@ -1347,6 +1390,9 @@ impl Cx<'_> {
                         self.b.ins().trap(TrapCode::unwrap_user(2));
                         self.b.switch_to_block(cur);
                     }
+                    self.bk.scrut = scrut_saved.0;
+                    self.bk.scrut_place = scrut_saved.1;
+                    self.rg.scrut = scrut_saved.2;
                     let ob = self.owned_binds;
                     let pre = if is_place_expr(init) { self.moved_flag(init) } else { None };
                     self.bk_bind_begin();
@@ -1506,7 +1552,12 @@ impl Cx<'_> {
                     };
                     self.bk_frame();
                     self.bk.move_mut_next = ann_ty.is_none();
+                    let ext0 = self.bk.direct.len();
+                    if self.bk_on() {
+                        borrowck::direct_temps(init, &mut self.bk.direct);
+                    }
                     let r = self.expr(init, ann.or(hint));
+                    self.bk.direct.truncate(ext0);
                     let srcs = self.bk_frame_end();
                     let (mut v, mut t) = r?;
                     if t == Ty::Never {
@@ -1548,8 +1599,10 @@ impl Cx<'_> {
                     }
                     self.same(SP, t, ty).map_err(|m| self.at(expr_start(init), m))?;
                     self.bk.mut_next = pat_mut(pat);
+                    let rg_init = if self.rg_on() { self.rt_expr(init) } else { None };
                     self.bind(name.clone(), ty, v);
                     self.bk_def_named(&name, &srcs, init);
+                    self.rg_let(&name, ann_ty.as_ref(), init, rg_init);
                     self.extend_temps(t0);
                 }
                 // (`;` の付いたマクロの文。末尾の `vec![]` などは式として期待型を渡す)
@@ -1579,6 +1632,13 @@ impl Cx<'_> {
                     }
                     self.bk.move_mut_next = last && !*semi;
                     let r = self.expr(e, exp);
+                    if last && !*semi && self.bk.tail == e as *const Expr as usize && r.is_ok() {
+                        self.rg_ret(e);
+                    }
+                    // (a block's value: its tree, while the block's locals are in scope)
+                    if last && !*semi && r.is_ok() {
+                        self.rg_keep(e);
+                    }
                     if tail {
                         let srcs = self.bk_frame_end();
                         if borrowck::has_refs(self.prog, self.ret, 0) {

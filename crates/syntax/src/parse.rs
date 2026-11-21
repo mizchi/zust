@@ -2428,7 +2428,9 @@ impl Parser {
             }
             if let Some(l) = self.lifetime() {
                 if self.eat_punct(":") {
-                    let _ = self.bounds()?;
+                    // (`'a: 'b` as the where clause has it)
+                    let bs = self.bounds()?;
+                    g.preds.push((Ty::Path(None, Path { global: false, segs: vec![Seg { name: l.clone(), args: Vec::new(), fn_args: None, text: String::new() }], pos: Default::default() }), bs));
                 }
                 g.params.push(GParam::Lifetime(l));
             } else if self.eat_ident("const") {
@@ -2468,14 +2470,17 @@ impl Parser {
                 let bs = self.bounds()?;
                 g.preds.push((Ty::Path(None, Path { global: false, segs: vec![Seg { name: l, args: Vec::new(), fn_args: None, text: String::new() }], pos: Default::default() }), bs));
             } else {
+                let mut binder = vec![];
                 if self.eat_ident("for") {
                     self.expect_punct("<")?;
-                    let _ = self.generic_args()?;
+                    binder = self.generic_args()?;
                 }
                 // (`dyn A + 'static: B`: a trait object type takes its bounds)
                 let t = if self.is_ident("dyn") { self.ty()? } else { self.ty_no_bounds()? };
                 self.expect_punct(":")?;
-                let bs = self.bounds()?;
+                let mut bs = self.bounds()?;
+                // (`for<'a> T: 'a`: the bound is of a lifetime the predicate binds, not one of the item)
+                bs.retain(|b| !matches!(b, Bound::Lifetime(l) if binder.iter().any(|a| matches!(a, GArg::Lifetime(x) if x == l))));
                 g.preds.push((t, bs));
             }
             if !self.eat_punct(",") {

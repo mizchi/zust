@@ -13,7 +13,6 @@ compile-fail	recursion/recursion_limit/invalid_macro.rs
 compile-fail	wf/wf-misc-methods-issue-28609.rs
 compile-fail	associated-types/hr-associated-type-bound-param-1.rs
 compile-fail	associated-types/hr-associated-type-projection-1.rs
-compile-fail	impl-trait/in-trait/bad-item-bound-within-rpitit-2.rs
 compile-fail	impl-trait/in-trait/default-body-type-err.rs
 compile-fail	lint/unused/must_use-tuple.rs
 compile-fail	lint/issue-17718-const-naming.rs
