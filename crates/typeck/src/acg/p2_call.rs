@@ -830,6 +830,10 @@ impl Cx<'_> {
             if let (true, Some(borrowck::Ev::Acc(_, borrowck::Acc::Borrow(ln), _))) = (flows, &ev) {
                 self.bk.loan_of.insert(e as *const Expr as usize, *ln);
             }
+            // (the receiver's loan, for what the region check finds it must outlive (Rg::holders))
+            if let (true, Some(borrowck::Ev::Acc(_, borrowck::Acc::Borrow(ln), _))) = (self.rg.on, &ev) {
+                self.bk.recv_loans.insert(e as *const Expr as usize, *ln);
+            }
             // (two-phase for a call written as a method call; an operator (`x += x` → `add_assign`, synthesized
             // without a position) borrows first)
             if let (true, true, Some(borrowck::Ev::Acc(place, borrowck::Acc::Borrow(ln), sp))) =
@@ -881,8 +885,23 @@ impl Cx<'_> {
             self.bk_frame();
         }
         self.check_unsafe_call(id, msp.start)?;
+        // (a receiver borrowed for a lifetime the signature names (`fn insert(&'a mut self)` in `impl<'a> Foo<'a>`):
+        // checked from here on, as the borrow may last as long as the value)
+        if !self.rg.on && self.rg.eligible && self.inline_depth == 0 && matches!(recv_ty, Ty::Ref(..)) {
+            // (or an argument borrowed for a lifetime of the impl: `fn set(&mut self, x: &'a mut u8)` stores it)
+            let named = self.prog.sigs[id as usize].regions.as_deref().is_some_and(|r| {
+                let n = r.slots.len().saturating_sub(1);
+                r.slots.first().and_then(|s| s.first()).is_some_and(|&c| c < crate::types::R_STATIC) || r.slots[..n].iter().skip(1).flatten().any(|&c| c < r.outer)
+            });
+            if named {
+                self.rg_late_on();
+            }
+        }
         if !via_deref {
-            self.rg_recv(recv, recv_ty, sid);
+            // (the receiver's borrow is followed for the program's methods: the prelude's results are tied to self
+            // as an approximation, `Iterator::next`'s too)
+            let user = self.prog.item_of.get(id as usize).copied().flatten().is_some_and(|i| i < self.prog.prelude_from);
+            self.rg_recv(recv, recv_ty, sid, user.then_some(e));
         }
         // (the region check reports at the method call: call_fn is given no span for it)
         if self.rg_on() {

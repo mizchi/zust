@@ -844,3 +844,14 @@ fn statement_temporaries() {
     assert!(d.len() == 1 && d[0].0 == 6 && d[0].1.contains("E0716"), "{d:?}");
     assert_eq!(check("fn id<T>(x: T) -> T {\n    x\n}\nfn main() {\n    let mut v: Vec<i32> = Vec::new();\n    v.push(*&id(3));\n    let x = &id(3);\n    let _ = (*x, v.len());\n}\n"), vec![]);
 }
+
+/// A borrow that must outlive a region of a local's type is held by that local (as NLL: live while the local is):
+/// `fn insert(&'a mut self)` in `impl<'a> Foo<'a>`, an argument a `&mut self` method stores
+#[test]
+fn borrows_held_through_the_regions_of_a_type() {
+    let d = check("struct Foo<'a> {\n    v: Vec<&'a str>,\n}\nimpl<'a> Foo<'a> {\n    fn insert(&'a mut self) {}\n}\nfn main() {\n    let mut foo = Foo { v: Vec::new() };\n    foo.insert();\n    foo.insert();\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 10, "{d:?}");
+    let d = check("struct S<'a> {\n    r: Option<&'a mut u8>,\n}\nimpl<'a> S<'a> {\n    fn set(&mut self, x: &'a mut u8) {\n        self.r = Some(x);\n    }\n    fn get(&self) -> u8 {\n        0\n    }\n}\nfn main() {\n    let mut y = 1;\n    let mut s = S { r: None };\n    s.set(&mut y);\n    y += 1;\n    let _ = s.get();\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 16, "{d:?}");
+    assert_eq!(check("struct S<'a> {\n    r: Option<&'a mut u8>,\n}\nimpl<'a> S<'a> {\n    fn set(&mut self, x: &'a mut u8) {\n        self.r = Some(x);\n    }\n    fn get(&self) -> u8 {\n        0\n    }\n}\nfn main() {\n    let mut y = 1;\n    let mut s = S { r: None };\n    s.set(&mut y);\n    let _ = s.get();\n    let _ = s.get();\n    y += 1;\n}\n"), vec![]);
+}

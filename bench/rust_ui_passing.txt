@@ -2699,6 +2699,7 @@ compile-fail	higher-ranked/trait-bounds/hang-on-deeply-nested-dyn.rs
 compile-fail	higher-ranked/trait-bounds/higher-trait-bounds-ice-60218.rs
 run-pass	higher-ranked/trait-bounds/hrtb-binder-levels-in-object-types.rs
 run-pass	higher-ranked/trait-bounds/hrtb-closure-lifetime-infer.rs
+compile-fail	higher-ranked/trait-bounds/hrtb-debruijn-in-receiver.rs
 run-pass	higher-ranked/trait-bounds/hrtb-debruijn-object-types-in-closures.rs
 run-pass	higher-ranked/trait-bounds/hrtb-fn-like-trait.rs
 compile-fail	higher-ranked/trait-bounds/hrtb-malformed-lifetime-generics.rs

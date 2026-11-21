@@ -200,6 +200,10 @@ pub struct Bk {
     pub forever: Vec<u32>,
     /// The loans of each closure's captures by reference, by the closure's address
     pub cap_loans: HashMap<usize, Vec<u32>>,
+    /// Loans the region check found must outlive a region of locals' types (sorted by loan): those locals hold them
+    pub held_by: Vec<(u32, Vec<u32>)>,
+    /// The loan of each method call's receiver, by the call's address (while the region check is on)
+    pub recv_loans: HashMap<usize, u32>,
 }
 
 /// The temporaries of a `let` initializer that are followed: the operands of `&` passed directly to its outermost call
@@ -845,6 +849,13 @@ impl Bk {
                             }
                             if self.forever.binary_search(ln).is_ok() {
                                 add_sorted(&mut st.escaped, *ln);
+                            }
+                            if let Ok(k) = self.held_by.binary_search_by_key(ln, |x| x.0) {
+                                for &h in &self.held_by[k].1 {
+                                    let mut ls = st.held(h).to_vec();
+                                    ls.push(*ln);
+                                    st.set_holds(h, ls);
+                                }
                             }
                         }
                         Acc::Move => {
@@ -2072,10 +2083,23 @@ impl Cx<'_> {
         bk.edges = self.b.cfg_edges();
         // (the reborrows the region check found must outlive the function)
         if self.rg.on && !self.rg.rerun && self.rg.closure.is_none() {
-            let mut f: Vec<u32> = self.rg.forever().into_iter().filter_map(|p| bk.loan_of.get(&p).copied()).collect();
+            let loan = |p: usize| bk.loan_of.get(&p).or_else(|| bk.recv_loans.get(&p)).copied();
+            let mut f: Vec<u32> = self.rg.forever().into_iter().filter_map(loan).collect();
             f.sort_unstable();
             f.dedup();
             bk.forever = f;
+            // (and those that must outlive a region of a local's type: held by the local)
+            let mut hb: Vec<(u32, Vec<u32>)> = vec![];
+            for (p, locs) in self.rg.holders() {
+                let Some(ln) = loan(p) else { continue };
+                let ls: Vec<u32> = locs.iter().filter_map(|l| bk.by_loc.get(l).copied()).filter(|&l| bk.locals[l as usize].refs).collect();
+                if !ls.is_empty() {
+                    hb.push((ln, ls));
+                }
+            }
+            hb.sort_by_key(|x| x.0);
+            hb.dedup_by_key(|x| x.0);
+            bk.held_by = hb;
         }
         let r = bk.check(self.b.n_blocks());
         self.bk = bk;

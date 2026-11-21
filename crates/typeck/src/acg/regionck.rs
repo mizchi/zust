@@ -143,6 +143,9 @@ pub struct Rg {
     /// The region of each reborrow through a reference (`&mut *x`, `&v[0]` with v a reference), by the address of
     /// its place: one that must outlive a universal region lives to the function's end (Rg::forever)
     pub reborrows: Vec<(usize, u32)>,
+    /// Borrows of places the function owns, as reborrows (Rg::holders only: the region check reports those that
+    /// outlive the function)
+    pub owned_borrows: Vec<(usize, u32)>,
     /// A closure's body: the regions of its captures of the function's locals (from outside)
     pub cap_regions: Vec<u32>,
 }
@@ -1084,6 +1087,48 @@ impl Rg {
         self.reborrows.iter().filter(|&&(_, r)| seen.get(r as usize).copied().unwrap_or(false)).map(|&(p, _)| p).collect()
     }
 
+    /// The locals whose types' regions the reborrows (and borrows of receivers) must outlive, by the reborrow's
+    /// address: as NLL, such a borrow is live while the local is (`foo.insert()` with `fn insert(&'a mut self)` in
+    /// `impl<'a> Foo<'a>` borrows foo for as long as foo is used)
+    pub fn holders(&self) -> Vec<(usize, Vec<Loc>)> {
+        if (self.reborrows.is_empty() && self.owned_borrows.is_empty()) || self.locals.is_empty() {
+            return vec![];
+        }
+        let n = self.n as usize + 1;
+        // (the locals (the first 64) whose types' regions each variable must outlive: those of its own, and those of
+        // what it outlives, to a fixpoint)
+        let locs: Vec<(Loc, &RT)> = self.locals.iter().map(|(&l, t)| (l, t)).take(64).collect();
+        let mut reach = vec![0u64; n];
+        for (i, (_, tr)) in locs.iter().enumerate() {
+            for &v in tr.iter() {
+                if v != STATIC && (v as usize) < n {
+                    reach[v as usize] |= 1 << i;
+                }
+            }
+        }
+        for _ in 0..n.min(64) {
+            let mut changed = false;
+            for &(a, b, _) in &self.edges {
+                let (a, b) = (a as usize, b as usize);
+                if a < n && b < n && reach[b] & !reach[a] != 0 {
+                    reach[a] |= reach[b];
+                    changed = true;
+                }
+            }
+            if !changed {
+                break;
+            }
+        }
+        let mut out = vec![];
+        for &(p, r) in self.reborrows.iter().chain(&self.owned_borrows) {
+            let m = reach.get(r as usize).copied().unwrap_or(0);
+            if m != 0 {
+                out.push((p, (0..locs.len()).filter(|&i| m >> i & 1 == 1).map(|i| locs[i].0).collect()));
+            }
+        }
+        out
+    }
+
     /// x outlives y: known (implied bounds), or required (wf)
     fn imp_rel(&mut self, x: u32, y: u32) {
         match self.wf_sp {
@@ -1426,8 +1471,12 @@ impl Cx<'_> {
                     }
                 }
                 // (a reborrow through references: it lives no longer than they do)
-                if !derefs.is_empty() && self.rg.closure.is_none() {
-                    self.rg.reborrows.push((&**x as *const Expr as usize, r));
+                if self.rg.closure.is_none() {
+                    if derefs.is_empty() {
+                        self.rg.owned_borrows.push((&**x as *const Expr as usize, r));
+                    } else {
+                        self.rg.reborrows.push((&**x as *const Expr as usize, r));
+                    }
                 }
                 for d in derefs {
                     self.rg.edge(d, r, sp);
@@ -2022,7 +2071,7 @@ impl Cx<'_> {
 
     /// The tree of a method call's receiver as passed: recv's place, through `derefs` references, then borrowed again
     /// when the method takes `&self` / `&mut self` (passed as recv_ty)
-    pub(crate) fn rg_recv(&mut self, recv: &Expr, recv_ty: Ty, sid: u32) {
+    pub(crate) fn rg_recv(&mut self, recv: &Expr, recv_ty: Ty, sid: u32, call: Option<&Expr>) {
         self.rg.recv = None;
         if !self.rg_on() {
             return;
@@ -2047,6 +2096,10 @@ impl Cx<'_> {
                 let sp = super::borrowck::pos(recv);
                 for d in ds {
                     self.rg.edge(d, r, sp);
+                }
+                // (the borrow of the receiver, by the call (the borrow check's loan of it): see Rg::holders)
+                if let (None, Some(c)) = (&self.rg.closure, call) {
+                    self.rg.reborrows.push((c as *const Expr as usize, r));
                 }
                 let mut v = vec![r];
                 v.extend(tr);
