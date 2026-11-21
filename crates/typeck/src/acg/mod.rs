@@ -1438,7 +1438,11 @@ impl Cx<'_> {
                     };
                     let ann = ann_ty.as_ref().and_then(|t| self.parse_ty(t).ok());
                     // (destructuring reads the parts the pattern binds, not the whole value)
-                    let Some(place) = self.bk_scrutinee(init, ann, &[pat])? else {
+                    // (a `let`'s temporary bound by `ref` lives as long as the block: not one of the statement)
+                    self.bk.let_scrut = true;
+                    let sc = self.bk_scrutinee(init, ann, &[pat]);
+                    self.bk.let_scrut = false;
+                    let Some(place) = sc? else {
                         diverged = true;
                         continue;
                     };

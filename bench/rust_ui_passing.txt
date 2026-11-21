@@ -5898,6 +5898,7 @@ compile-fail	span/borrowck-borrow-overloaded-auto-deref-mut.rs
 compile-fail	span/borrowck-borrow-overloaded-deref-mut.rs
 compile-fail	span/borrowck-call-method-from-mut-aliasable.rs
 compile-fail	span/borrowck-let-suggestion-suffixes.rs
+compile-fail	span/borrowck-ref-into-rvalue.rs
 compile-fail	span/coerce-suggestions.rs
 compile-fail	span/drop-location-span-error-rust-2021-incompatible-closure-captures-96258.rs
 compile-fail	span/dropck_misc_variants.rs

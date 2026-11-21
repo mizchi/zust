@@ -204,6 +204,8 @@ pub struct Bk {
     pub held_by: Vec<(u32, Vec<u32>)>,
     /// The loan of each method call's receiver, by the call's address (while the region check is on)
     pub recv_loans: HashMap<usize, u32>,
+    /// The scrutinee being lowered is a `let`'s initializer (its temporary is extended)
+    pub let_scrut: bool,
 }
 
 /// The temporaries of a `let` initializer that are followed: the operands of `&` passed directly to its outermost call
@@ -1088,6 +1090,28 @@ pub enum CapMode {
 }
 
 /// The pattern looks at the value (a discriminant, a literal, a length), so matching reads the scrutinee
+/// p binds by reference somewhere (`ref x`, `ref mut x`)
+fn pat_binds_ref(p: &Pat) -> bool {
+    pat_any(p, &|q| matches!(q, Pat::Ident(true, ..)))
+}
+
+fn pat_binds_ref_mut(p: &Pat) -> bool {
+    pat_any(p, &|q| matches!(q, Pat::Ident(true, true, ..)))
+}
+
+fn pat_any(p: &Pat, f: &dyn Fn(&Pat) -> bool) -> bool {
+    if f(p) {
+        return true;
+    }
+    match p {
+        Pat::Ident(_, _, _, Some(s)) => pat_any(s, f),
+        Pat::Tuple(ps) | Pat::TupleStruct(_, ps) | Pat::Or(ps) | Pat::Slice(ps) => ps.iter().any(|q| pat_any(q, f)),
+        Pat::Struct(_, fs, _) => fs.iter().any(|(_, q)| pat_any(q, f)),
+        Pat::Ref(_, q) => pat_any(q, f),
+        _ => false,
+    }
+}
+
 fn pat_reads(p: &Pat) -> bool {
     match p {
         Pat::Wild | Pat::Rest => false,
@@ -1131,6 +1155,8 @@ impl Cx<'_> {
     /// looks at the value (`let (a, _) = t;` and `match x { _ => .. }` do not read t / x); what it holds flows into the
     /// bindings (see bind_srcs)
     pub(crate) fn bk_scrutinee(&mut self, e: &Expr, expected: Option<Ty>, pats: &[&Pat]) -> super::R<Option<super::Place>> {
+        // (read first: the scrutinee may hold matches of its own)
+        let in_let = std::mem::take(&mut self.bk.let_scrut);
         if !self.bk_on() {
             return self.scrutinee_as(e, expected);
         }
@@ -1163,6 +1189,20 @@ impl Cx<'_> {
                 self.bk_ev(Ev::Acc(p, Acc::Borrow(ln), sp));
                 self.bk.src(Src::Loan(ln));
             }
+        }
+        // (a temporary bound by `ref` (`match f() { Some(ref m) => .. }`): borrowed, it goes away at the end of the
+        // statement)
+        if self.bk.level >= 2 && !in_let && !super::is_place_expr(e) && pats.iter().any(|p| pat_binds_ref(p)) {
+            let id = self.bk.locals.len() as u32;
+            self.bk.locals.push(Local { name: TEMP.to_string(), ty: Ty::Unit, copy: true, refs: false, mutable: Some(true) });
+            self.bk_ev(Ev::Bind(id, true));
+            let sp = err_pos(e);
+            let ln = self.bk.loans.len() as u32;
+            let m = pats.iter().any(|p| pat_binds_ref_mut(p));
+            self.bk.loans.push(Loan { place: BPlace { local: id, proj: vec![] }, mutable: m, sp, at: sp, quiet: true, capture: false });
+            self.bk_ev(Ev::Acc(BPlace { local: id, proj: vec![] }, Acc::Borrow(ln), sp));
+            self.bk.src(Src::Loan(ln));
+            self.bk.stmt_temps.push(id);
         }
         let srcs = self.bk_frame_end();
         self.bk.scrut = srcs;

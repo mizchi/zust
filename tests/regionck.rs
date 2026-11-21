@@ -874,3 +874,11 @@ fn closure_signature_regions_shared_by_its_calls() {
     assert!(d.len() == 1 && d[0].0 == 5 && d[0].1.contains("E0515"), "{d:?}");
     assert_eq!(check("fn foo(x: &i32) -> &i32 {\n    let f = |y| y;\n    let _k = f(x);\n    f(x)\n}\nfn bar(x: &i32) -> &i32 {\n    let z = 4;\n    let f = |y: &i32| y;\n    let _k = f(&z);\n    f(x)\n}\nfn main() {}\n"), vec![]);
 }
+
+/// A temporary a `match` binds by `ref` goes away at the end of the statement; a `let`'s lives as long as the block
+#[test]
+fn scrutinee_temporaries_bound_by_ref() {
+    let d = check("fn main() {\n    let msg;\n    match Some(\"Hello\".to_string()) {\n        Some(ref m) => {\n            msg = m;\n        }\n        None => panic!(),\n    }\n    println!(\"{}\", *msg);\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 3 && d[0].1.contains("E0716"), "{d:?}");
+    assert_eq!(check("fn main() {\n    let ref x = String::new();\n    match Some(String::new()) {\n        Some(ref m) => println!(\"{} {}\", m, x),\n        None => {}\n    }\n}\n"), vec![]);
+}
