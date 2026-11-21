@@ -92,3 +92,7 @@ R5 は 3.3 → 4.0。E(struct 名)は評価の途中で 2 回変わった(ハッ
 | props のフィールド名を 2 回書く | rust-dev | **採用** | 推奨の形として `type TodoListProps = { … }` と `fn TodoList({ … }: TodoListProps)` を載せる |
 | 余分なプロパティ、`void`、複数の spread、レコードの `==` | 全員 | 保留 | 未決のまま。spread が 1 つの間の書き方の例を足す |
 | formatter: 戻り値が関数型なら括弧 | ts-dev, rust-dev | **採用** | `-> ((x: i32) => i32) {` を formatter の方針にする |
+
+### r4 の決定(ユーザー)
+
+10. JSX の `{{ x }}`: **属性ではレコード**。JSX の属性の `={` の直後の `{` は常にレコードとして読む(`style={{ color }}` は `{ color: color }`)
