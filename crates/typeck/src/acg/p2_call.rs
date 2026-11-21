@@ -1313,7 +1313,11 @@ impl Cx<'_> {
             let m = self.prog.names[id as usize].rsplit("::").next().unwrap().to_string();
             let imp = match args[0] {
                 Ty::Struct(sid) => self.prog.method(sid, &m),
-                t if t.is_int() || t.is_float() || matches!(t, Ty::Bool | Ty::Char) => self.prog.index.get(&format!("{}::{m}", self.prog.tn(t))).copied(),
+                // (only an impl of the trait the call named: `A::m(&0.0f32)` is not B's `f32::m`)
+                t if t.is_int() || t.is_float() || matches!(t, Ty::Bool | Ty::Char) => self.prog.index.get(&format!("{}::{m}", self.prog.tn(t))).copied().filter(|&i| {
+                    let it = self.prog.sigs[i as usize].impl_trait.as_deref().map(|t| t.split('<').next().unwrap_or(t).trim());
+                    it.is_none() || it == sig.trait_of.as_deref().map(|t| t.split('<').next().unwrap_or(t).trim())
+                }),
                 _ => None,
             };
             if let Some(imp) = imp {
@@ -2133,6 +2137,10 @@ impl Cx<'_> {
         let Expr::Path(None, rp) = strip_paren(recv) else { return None };
         let rn = ident_of(rp)?;
         let declared = self.generic_args.iter().find(|a| a.0 == rn).map(|a| a.1.clone())?;
+        // (the parameter itself: its binding is the fn's outermost one, not a `let x = ..` shadowing it)
+        if self.scopes.iter().rposition(|s| s.iter().any(|b| b.0 == rn)) != Some(0) {
+            return None;
+        }
         let t = self.peek(recv)?;
         let (t, by_ref) = match t {
             Ty::Ref(_, i) => (*i, true),
@@ -2201,9 +2209,17 @@ impl Cx<'_> {
                         // (a primitive receiver with an impl of this trait: `<u32 as Tr>::m(&x)`, which a builtin
                         // method of the same name (`to_string`) cannot take over as `x.m()` would let it)
                         if let Some(t) = self.peek(&recv).map(|t| self.strip_refs(t)) {
-                            if (t.is_int() || t.is_float() || matches!(t, Ty::Bool | Ty::Char)) && self.trait_candidate(&format!("{}::{ms}", self.ty_key(t)), &tr).is_some() {
-                                if let Ok(Expr::Path(q, qp)) = crate::parse::parse_expr(&format!("<{} as {tr}>::{ms}", self.prog.tn(t))) {
-                                    return Some(Expr::Call(Box::new(Expr::Path(q, qp)), cargs.clone()));
+                            if t.is_int() || t.is_float() || matches!(t, Ty::Bool | Ty::Char) {
+                                let key = format!("{}::{ms}", self.ty_key(t));
+                                if self.trait_candidate(&key, &tr).is_some() {
+                                    if let Ok(Expr::Path(q, qp)) = crate::parse::parse_expr(&format!("<{} as {tr}>::{ms}", self.prog.tn(t))) {
+                                        return Some(Expr::Call(Box::new(Expr::Path(q, qp)), cargs.clone()));
+                                    }
+                                }
+                                // (`A::m(&0.0f32)` taking A's default, beside another trait's `f32::m`: not `x.m()`, which
+                                // would reach that one; the path call keeps the trait)
+                                if self.prog.index.get(&key).is_some_and(|&i| self.prog.sigs[i as usize].impl_trait.as_deref().is_some_and(|it| it.split('<').next().unwrap_or(it).trim() != tr)) {
+                                    return None;
                                 }
                             }
                         }
