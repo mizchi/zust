@@ -1128,11 +1128,22 @@ impl Cx<'_> {
                 // (the Box's value is the address of the number: it is the `&self` / `&mut self` receiver itself)
                 if let Ty::Box(mut inner) = t {
                     let nested = matches!(inner, Ty::Box(_));
-                    if nested {
-                        // (a `self: Box<Self>` method would move the inner Box out of the outer one)
-                        if matches!(self.prog.sigs[id as usize].params.first(), Some(Ty::Box(_))) {
+                    // (`x.m()` with x: `Box<Box<i32>>` and `self: Box<Self>`: the inner Box moves out of the outer ones, whose
+                    // memory is freed)
+                    if nested && matches!(self.prog.sigs[id as usize].params.first(), Some(Ty::Box(_))) {
+                        if !boxed_num(t) {
                             return Ok(None);
                         }
+                        let (v, mut vt) = self.expr(recv, Some(t))?;
+                        let Some(mut v) = v else { return Ok(Some((None, Ty::Never))) };
+                        while let Ty::Box(Ty::Box(i)) = vt {
+                            let next = self.b.ins().load(PTR, mf(), v, 0);
+                            self.free(v);
+                            v = next;
+                            vt = Ty::Box(i);
+                        }
+                        let args: Vec<&Expr> = margs.iter().collect();
+                        return self.call_fn(id, Some((v, vt)), &args, tf, expected, SP).map(Some);
                     }
                     while let Ty::Box(i) = inner {
                         inner = i;
