@@ -90,6 +90,7 @@ compile-fail	array-slice-vec/slice-pat-type-mismatches.rs
 check-pass	array-slice-vec/slice-subslice-ref-lifetime.rs
 compile-fail	array-slice-vec/slice-to-vec-comparison.rs
 check-pass	array-slice-vec/slice_is_sorted_by_borrow.rs
+compile-fail	array-slice-vec/subslice-only-once-semantic-restriction.rs
 check-pass	array-slice-vec/subslice-range-return-ref.rs
 run-pass	array-slice-vec/vec-dst.rs
 run-pass	array-slice-vec/vec-late-init.rs
@@ -1992,6 +1993,7 @@ compile-fail	dst/issue-90528-unsizing-suggestion-4.rs
 check-pass	dst/tuple-with-unsized-tail-field.rs
 run-pass	dst/unsized-str-mutability.rs
 check-pass	dst/unsized-tuple-trait-tail.rs
+compile-fail	duplicate/duplicate-parameter.rs
 compile-fail	duplicate/duplicate-type-parameter.rs
 compile-fail	dyn-compatibility/almost-supertrait-associated-type.rs
 check-pass	dyn-compatibility/assoc_type_bounds_sized.rs
@@ -2114,6 +2116,7 @@ compile-fail	error-codes/E0117.rs
 compile-fail	error-codes/E0119.rs
 compile-fail	error-codes/E0120.rs
 compile-fail	error-codes/E0121.rs
+compile-fail	error-codes/E0124.rs
 compile-fail	error-codes/E0131.rs
 compile-fail	error-codes/E0133.rs
 compile-fail	error-codes/E0161.rs
@@ -2143,6 +2146,8 @@ compile-fail	error-codes/E0404.rs
 compile-fail	error-codes/E0405.rs
 compile-fail	error-codes/E0411.rs
 compile-fail	error-codes/E0412.rs
+compile-fail	error-codes/E0415.rs
+compile-fail	error-codes/E0416.rs
 compile-fail	error-codes/E0423-struct-literal-comment.rs
 compile-fail	error-codes/E0423.rs
 compile-fail	error-codes/E0424.rs
@@ -4284,6 +4289,7 @@ compile-fail	offset-of/offset-of-unsized-trait-object-missing-lifetime.rs
 compile-fail	on-unimplemented/slice-index.rs
 compile-fail	on-unimplemented/suggest_tuple_wrap.rs
 compile-fail	on-unimplemented/suggest_tuple_wrap_root_obligation.rs
+compile-fail	or-patterns/already-bound-name.rs
 run-pass	or-patterns/basic-switch.rs
 run-pass	or-patterns/basic-switchint.rs
 run-pass	or-patterns/bindings-runpass-1.rs
@@ -4994,6 +5000,7 @@ compile-fail	pattern/bindings-after-at/nested-binding-modes-mut.rs
 run-pass	pattern/bindings-after-at/nested-patterns.rs
 run-pass	pattern/bindings-after-at/or-patterns-slice-patterns.rs
 run-pass	pattern/bindings-after-at/or-patterns.rs
+compile-fail	pattern/bindings-after-at/pat-at-same-name-both.rs
 run-pass	pattern/bindings-after-at/slice-patterns.rs
 check-pass	pattern/byte-string-inference.rs
 check-pass	pattern/check-struct-pat-fields-stability-issue-138319.rs
@@ -5042,6 +5049,7 @@ check-pass	pattern/move-ref-patterns/by-move-sub-pat-unreachable.rs
 check-pass	pattern/move-ref-patterns/issue-53840.rs
 compile-fail	pattern/move-ref-patterns/move-ref-patterns-closure-captures-inside.rs
 check-pass	pattern/move-ref-patterns/move-ref-patterns-closure-captures-pass.rs
+compile-fail	pattern/multiple-bindings-on-var.rs
 compile-fail	pattern/mut-pattern-of-immutable-borrow.rs
 compile-fail	pattern/no-patterns-in-args.rs
 compile-fail	pattern/pat-struct-field-expr-has-type.rs
@@ -5720,6 +5728,7 @@ run-pass	self/uniq-self-in-mut-slot.rs
 check-pass	shadowed/primitive-type-shadowing.rs
 compile-fail	shadowed/shadowed-lifetime.rs
 compile-fail	shadowed/shadowed-trait-methods.rs
+compile-fail	shadowed/shadowing-in-the-same-pattern.rs
 run-pass	shadowed/use-shadows-reexport.rs
 compile-fail	share-trait/share-trait-no-feature.rs
 build-pass	simd/wasm-simd-indirect.rs
@@ -5769,6 +5778,7 @@ compile-fail	span/move-closure.rs
 check-pass	span/multispan-import-lint.rs
 compile-fail	span/mut-arg-hint.rs
 compile-fail	span/mutability-suggestion-fullwidth-ampersand.rs
+compile-fail	span/pub-struct-field.rs
 compile-fail	span/range-2.rs
 compile-fail	span/regionck-unboxed-closure-lifetimes.rs
 compile-fail	span/regions-escape-loop-via-variable.rs
@@ -5785,6 +5795,8 @@ compile-fail	stability-attribute/accidentally-stable-intrinsics.rs
 check-pass	stability-attribute/check-stability-issue-138319.rs
 check-pass	stability-attribute/issue-99286-stable-intrinsics.rs
 compile-fail	stability-attribute/stability-in-private-module.rs
+compile-fail	static/duplicated-fields-issue-124464.rs
+compile-fail	static/duplicated-fields-issue-125842.rs
 compile-fail	static/extern-static-normalization-failure-issue-148161.rs
 run-pass	static/issue-1660.rs
 build-pass	static/issue-34194.rs
@@ -5935,6 +5947,7 @@ compile-fail	structs/struct-duplicate-comma.rs
 compile-fail	structs/struct-field-access-errors-24365.rs
 compile-fail	structs/struct-field-cfg.rs
 compile-fail	structs/struct-field-init-syntax.rs
+compile-fail	structs/struct-fields-decl-dupe.rs
 compile-fail	structs/struct-fields-missing.rs
 compile-fail	structs/struct-fields-typo.rs
 compile-fail	structs/struct-fn-in-definition.rs
