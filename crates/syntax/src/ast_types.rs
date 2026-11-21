@@ -259,6 +259,8 @@ fn gat_app(base: TySyn, seg: &crate::parse::Seg, self_ty: Option<&TySyn>) -> R<T
     let mut parts = vec![base];
     for a in &seg.args {
         match a {
+            // (`M::Box<dyn Send>`: an auto trait alone, right in a Box, as for the last segment of a path)
+            GArg::Ty(t) if seg.name == "Box" && auto_dyn(t).is_some() => parts.push(TySyn::Dyn(auto_dyn(t).unwrap())),
             GArg::Ty(t) => parts.push(tysyn(t, self_ty)?),
             GArg::Lifetime(_) => {}
             // (`M::S<3>`: a module-qualified type with a const argument also comes here; `Program` resolves it as `S<3>`)
