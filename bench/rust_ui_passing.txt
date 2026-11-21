@@ -138,6 +138,7 @@ check-pass	associated-consts/constant-trait-item-reference-selection-26095.rs
 run-pass	associated-consts/defaults-cyclic-pass.rs
 run-pass	associated-consts/defaults-not-assumed-pass.rs
 check-pass	associated-consts/double-elided.rs
+compile-fail	associated-consts/infer-placeholder-in-non-suggestable-pos.rs
 compile-fail	associated-consts/issue-58022.rs
 compile-fail	associated-consts/issue-63496.rs
 check-pass	associated-consts/trait-associated-const-usage-43483.rs
@@ -1680,6 +1681,7 @@ check-pass	consts/int_ptr_for_zst_slices.rs
 compile-fail	consts/invalid-const-in-body.rs
 check-pass	consts/issue-104155.rs
 compile-fail	consts/issue-104609.rs
+compile-fail	consts/issue-104768.rs
 check-pass	consts/issue-13837.rs
 run-pass	consts/issue-13902.rs
 run-pass	consts/issue-17074.rs
@@ -3641,6 +3643,7 @@ compile-fail	macros/issue-106837.rs
 check-pass	macros/issue-112342-2.rs
 compile-fail	macros/issue-11692-1.rs
 compile-fail	macros/issue-11692-2.rs
+compile-fail	macros/issue-118048.rs
 check-pass	macros/issue-22463.rs
 run-pass	macros/issue-25274.rs
 compile-fail	macros/issue-26094.rs
@@ -5716,6 +5719,7 @@ compile-fail	self/point-at-arbitrary-self-type-trait-method.rs
 check-pass	self/self-ctor-nongeneric.rs
 check-pass	self/self-in-method-body-resolves.rs
 run-pass	self/self-in-mut-slot-immediate-value.rs
+compile-fail	self/self-infer.rs
 run-pass	self/self-re-assign.rs
 run-pass	self/self-shadowing-import.rs
 check-pass	self/self-type-in-inherent-fn.rs
@@ -5998,6 +6002,7 @@ compile-fail	suggestions/assoc-type-in-method-return.rs
 compile-fail	suggestions/assoc_fn_without_self.rs
 compile-fail	suggestions/async-fn-ctor-passed-as-arg-where-it-should-have-been-called.rs
 compile-fail	suggestions/attribute-typos.rs
+compile-fail	suggestions/bad-infer-in-trait-impl.rs
 compile-fail	suggestions/bool_typo_err_suggest.rs
 compile-fail	suggestions/borrow-cast-or-binexpr-with-parens.rs
 compile-fail	suggestions/box-future-wrong-output.rs
@@ -6469,6 +6474,7 @@ check-pass	traits/issue-96665.rs
 run-pass	traits/item-inside-macro.rs
 check-pass	traits/make-sure-to-filter-projections-by-def-id.rs
 compile-fail	traits/map-types.rs
+compile-fail	traits/method-argument-mismatch-variance-ice-119867.rs
 run-pass	traits/method-on-deeply-nested-struct-perf.rs
 run-pass	traits/monad.rs
 run-pass	traits/multidispatch-conditional-impl-not-considered.rs
@@ -6760,6 +6766,7 @@ compile-fail	typeck/issue-7813.rs
 check-pass	typeck/issue-80207-unsized-return.rs
 compile-fail	typeck/issue-80779.rs
 compile-fail	typeck/issue-81293.rs
+compile-fail	typeck/issue-81885.rs
 compile-fail	typeck/issue-82772.rs
 compile-fail	typeck/issue-83621-placeholder-static-in-extern.rs
 compile-fail	typeck/issue-84160.rs
@@ -6828,6 +6835,7 @@ compile-fail	typeck/terr-in-field.rs
 compile-fail	typeck/terr-sorts.rs
 compile-fail	typeck/type-arguments-on-local-variable-60989.rs
 compile-fail	typeck/type-inference-for-associated-types-69683.rs
+compile-fail	typeck/type-placeholder-fn-in-const.rs
 compile-fail	typeck/typeck-cast-pointer-to-float.rs
 run-pass	typeck/typeck-closure-to-unsafe-fn-ptr.rs
 run-pass	typeck/typeck-fn-to-unsafe-fn-ptr.rs
@@ -7013,6 +7021,7 @@ compile-fail	variance/variance-use-invariant-struct-1.rs
 compile-fail	variants/variant-result-noresult-used-as-type.rs
 compile-fail	variants/variant-used-as-type.rs
 compile-fail	wf/ice-hir-wf-check-anon-const-issue-122199.rs
+compile-fail	wf/ice-hir-wf-issue-135341.rs
 compile-fail	wf/issue-110157.rs
 compile-fail	wf/issue-95665.rs
 compile-fail	wf/let-pat-inferred-non-wf.rs
