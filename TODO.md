@@ -81,7 +81,8 @@ Neither builds yet. `python3 cratebench/ui/run.py` builds their wasm32 crate gra
 error of each failing crate. Details and the order of the work: [docs/reports/2026-11-21-03-ui-frameworks-wasm.md](docs/reports/2026-11-21-03-ui-frameworks-wasm.md).
 
 - Cargo graphs: Cargo.toml / Cargo.lock, two versions of one crate, an edition per crate, build scripts (cfgs,
-  `rustc-env`, `OUT_DIR`), `env!` / `option_env!`, and workspace builds for wasm32.
+  `rustc-env`, `OUT_DIR`), `env!` / `option_env!`, and workspace builds for wasm32. Planned as `crates/zargo`, a
+  Cargo-compatible driver: [#28](https://github.com/mizchi/zust/issues/28).
 - Proc macros: none can run. Unknown attributes are dropped silently (`#[wasm_bindgen]`, `#[component]`).
 - async is erased: an `async fn` runs when called and returns its value. Needs a state-machine lowering, `Pin`,
   `Waker` / `Context`.
