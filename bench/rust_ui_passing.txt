@@ -673,6 +673,7 @@ compile-fail	binop/borrow-suggestion-109352-2.rs
 compile-fail	binop/box-arithmetic-14915.rs
 check-pass	binop/can-have-side-effects-consider-operands.rs
 run-pass	binop/compound-assign-by-ref.rs
+compile-fail	binop/eq-arr.rs
 compile-fail	binop/eq-vec.rs
 compile-fail	binop/function-comparison-errors-59488.rs
 run-pass	binop/infer-rhs-type.rs

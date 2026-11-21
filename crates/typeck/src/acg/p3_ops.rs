@@ -65,6 +65,35 @@ impl Cx<'_> {
         }
     }
 
+    /// A struct of the program in t that does not implement tr (PartialEq / PartialOrd), the type of a comparison's
+    /// operands: itself, the elements of an array / slice / tuple, behind references. A prelude type or a generic
+    /// struct's instance is left to the impls it has
+    fn lacks_cmp(&self, t: Ty, tr: &str, depth: u32) -> bool {
+        if depth > 8 {
+            return false;
+        }
+        match t {
+            Ty::Ref(_, i) | Ty::Array(i, _) | Ty::Slice(i) => self.lacks_cmp(*i, tr, depth + 1),
+            Ty::Struct(sid) => {
+                let b = self.prog.base_of(sid);
+                if self.prog.is_tuple(b) {
+                    return self.prog.structs[sid as usize].fields.iter().any(|f| self.lacks_cmp(f.1, tr, depth + 1));
+                }
+                let user = self.prog.struct_item.get(b as usize).is_some_and(|&i| i < self.prog.prelude_from);
+                // (`impl PartialEq<i32> for S`: an impl for another right-hand side counts, looked for only when the
+                // plain one is missing)
+                user && b == sid && !self.prog.implements(t, tr)
+                    && !{
+                        // (`impl PartialEq<i32> for S`: the functions `S::<PartialEq<i32>>::eq`, which `==` picks directly)
+                        let fs = if tr == "PartialEq" { &self.prog.peq } else { &self.prog.pord };
+                        let n = &self.prog.structs[b as usize].name;
+                        fs.iter().any(|&f| self.prog.names[f as usize].strip_prefix(n.as_str()).is_some_and(|r| r.starts_with("::<")))
+                    }
+            }
+            _ => false,
+        }
+    }
+
     /// `a op b` (Expr::Binary) と複合代入 `a op= b` (Expr::AssignOp)
     pub(crate) fn binary(&mut self, e: &Expr, expected: Option<Ty>) -> R<V> {
         let (op, left, right, assign) = match e {
@@ -76,6 +105,17 @@ impl Cx<'_> {
         if !assign && self.user_code && is_cmp(op) && self.fn_item(strip_paren(left)).is_some() {
             let pos = if let Expr::Binary(_, _, _, sp) = e { sp.start } else { SP };
             return err(pos, format!("binary operation `{op}` cannot be applied to a fn item (cast it to a fn pointer)"));
+        }
+        // (E0369: `X == X` for a struct of the program that is not PartialEq (`<` and the others: PartialOrd), also as an
+        // element of an array, a slice, a tuple or behind a reference)
+        if !assign && self.user_code && is_cmp(op) {
+            if let Some(t) = self.peek(left) {
+                let tr = if op == "==" || op == "!=" { "PartialEq" } else { "PartialOrd" };
+                if self.lacks_cmp(t, tr, 0) {
+                    let pos = if let Expr::Binary(_, _, _, sp) = e { sp.start } else { SP };
+                    return err(pos, format!("binary operation `{op}` cannot be applied to type `{}` (E0369)", self.prog.tn(t)));
+                }
+            }
         }
         // 短絡評価
         if !assign && (op == "&&" || op == "||") {
