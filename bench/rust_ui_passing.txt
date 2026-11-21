@@ -1436,6 +1436,7 @@ check-pass	const-generics/early/trivial-const-arg-macro-param.rs
 compile-fail	const-generics/early/trivial-const-arg-macro-res-error.rs
 check-pass	const-generics/early/trivial-const-arg-macro.rs
 compile-fail	const-generics/exhaustive-value.rs
+compile-fail	const-generics/foreign-item-const-parameter.rs
 compile-fail	const-generics/gca/suggest-const-item-for-generic-expr.rs
 compile-fail	const-generics/generic_arg_infer/in-signature.rs
 compile-fail	const-generics/generic_arg_infer/infer-arg-test.rs
@@ -2114,6 +2115,7 @@ compile-fail	error-codes/E0026.rs
 compile-fail	error-codes/E0027.rs
 compile-fail	error-codes/E0029.rs
 compile-fail	error-codes/E0033.rs
+compile-fail	error-codes/E0044.rs
 compile-fail	error-codes/E0050.rs
 compile-fail	error-codes/E0054.rs
 compile-fail	error-codes/E0057.rs
@@ -2133,6 +2135,7 @@ compile-fail	error-codes/E0131.rs
 compile-fail	error-codes/E0133.rs
 compile-fail	error-codes/E0161.rs
 compile-fail	error-codes/E0164.rs
+compile-fail	error-codes/E0195.rs
 compile-fail	error-codes/E0201.rs
 compile-fail	error-codes/E0207.rs
 compile-fail	error-codes/E0214.rs
@@ -2257,6 +2260,7 @@ compile-fail	expr/malformed_closure/missing-braces-before-close-brace.rs
 compile-fail	expr/malformed_closure/missing_block_in_fn_call.rs
 compile-fail	expr/malformed_closure/ruby_style_closure_successful_parse.rs
 run-pass	expr/return-in-block-tuple.rs
+compile-fail	extern/bad-external-async-fn-issue-146754.rs
 run-pass	extern/empty-struct-extern-fn-16441.rs
 run-pass	extern/extern-1.rs
 check-pass	extern/extern-C-str-arg-ice-80125.rs
@@ -2492,6 +2496,7 @@ run-pass	for-loop-while/while-loop-constraints-2.rs
 run-pass	for-loop-while/while-prelude-drop.rs
 run-pass	for-loop-while/while-with-break.rs
 run-pass	for-loop-while/while.rs
+compile-fail	foreign/foreign-fn-return-lifetime.rs
 run-pass	foreign/foreign-fn-with-more-than-8-byte-arg-size.rs
 run-pass	foreign/foreign-int-types.rs
 run-pass	foreign/foreign-mod-unused-const.rs
@@ -2596,6 +2601,8 @@ compile-fail	generics/generic-arg-mismatch-recover.rs
 run-pass	generics/generic-derived-type.rs
 compile-fail	generics/generic-enum-errors.rs
 run-pass	generics/generic-exterior-unique.rs
+compile-fail	generics/generic-extern-lifetime.rs
+compile-fail	generics/generic-extern.rs
 run-pass	generics/generic-fn-infer.rs
 run-pass	generics/generic-fn-twice.rs
 run-pass	generics/generic-fn-unique.rs
@@ -4946,6 +4953,7 @@ compile-fail	parser/removed-syntax/removed-syntax-with-1.rs
 compile-fail	parser/removed-syntax/removed-syntax-with-2.rs
 compile-fail	parser/require-parens-for-chained-comparison.rs
 check-pass	parser/return-without-semicolon-in-match.rs
+compile-fail	parser/self-param-semantic-fail.rs
 check-pass	parser/self-param-syntactic-pass.rs
 compile-fail	parser/semi-in-let-chain.rs
 compile-fail	parser/shebang/issue-71471-ignore-tidy.rs
@@ -6970,6 +6978,7 @@ compile-fail	unboxed-closures/unboxed-closures-type-mismatch-closure-from-anothe
 compile-fail	unboxed-closures/unboxed-closures-type-mismatch.rs
 run-pass	unboxed-closures/unboxed-closures-zero-args.rs
 run-pass	underscore-lifetime/basic-underscore-lifetime-elision.rs
+compile-fail	underscore-lifetime/dyn-trait-underscore-in-struct.rs
 compile-fail	underscore-lifetime/in-binder.rs
 compile-fail	underscore-lifetime/in-fn-return-illegal.rs
 compile-fail	underscore-lifetime/in-struct.rs

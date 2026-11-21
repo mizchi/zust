@@ -599,7 +599,7 @@ fn parse_sig(sig: &PSig, is_extern: bool, is_main: bool, owner: Option<&Owner>) 
     if owner.is_none() {
         // (E0106: an elided lifetime in the return type needs exactly one lifetime among the parameters)
         // (not the prelude's own `__exr_` helpers, written against this compiler rather than rustc)
-        if sig.recv_ty.is_none() && !is_extern && !sig.name.starts_with("__") {
+        if sig.recv_ty.is_none() && !sig.name.starts_with("__") {
             if let Some(r) = &sig.ret {
                 if lifetime_positions(r).0 > 0 {
                     let inputs: usize = sig.params.iter().map(|(_, t)| lifetime_positions(t).1).sum();
@@ -747,6 +747,17 @@ fn bound_lifetimes(g: &Generics, out: &mut Vec<String>) {
         if matches!(t, PTy::Path(None, p) if p.segs.len() == 1 && p.segs[0].args.is_empty()) {
             bs_of(bs, out);
         }
+    }
+}
+
+/// A trait object in t is bounded by `'_`
+fn anon_dyn(t: &PTy) -> bool {
+    match t {
+        PTy::Dyn(bs) => bs.iter().any(|b| matches!(b, Bound::Lifetime(l) if l == "'_")),
+        PTy::Ref(_, _, i) | PTy::Ptr(_, i) | PTy::Slice(i) | PTy::Array(i, _) => anon_dyn(i),
+        PTy::Tuple(ts) => ts.iter().any(anon_dyn),
+        PTy::Path(None, p) => p.segs.iter().flat_map(|s| s.args.iter()).any(|a| matches!(a, crate::parse::GArg::Ty(t) if anon_dyn(t))),
+        _ => false,
     }
 }
 
@@ -926,8 +937,8 @@ fn adt_checks(attrs: &[String], g: &Generics, tys: &[&PTy], union: bool, nfields
         if let Some(l) = undeclared_lifetime(&used, &declared) {
             return Err(format!("use of undeclared lifetime name `{l}` (E0261)"));
         }
-        // (E0106: a field's reference names its lifetime)
-        if tys.iter().any(|t| lifetime_positions(t).0 > 0) {
+        // (E0106: a field's reference names its lifetime, and so does its trait object: `Box<dyn Debug + '_>`)
+        if tys.iter().any(|t| lifetime_positions(t).0 > 0 || anon_dyn(t)) {
             return Err("missing lifetime specifier (E0106)".to_string());
         }
     }
@@ -2050,7 +2061,8 @@ pub fn summarize(item: &Item, owner: Option<&Owner>) -> R<Summary> {
                 if fi.attrs.iter().any(|a| compact(a).starts_with("#[linkage")) {
                     return Err(format!("{}:1: the `linkage` attribute is experimental and not portable", fi.line));
                 }
-                let mut sig = parse_sig(fs, true, false, None)?;
+                // (an error at the fn's line in the block)
+                let mut sig = parse_sig(fs, true, false, None).map_err(|e| if e.starts_with(|c: char| c.is_ascii_digit()) { e } else { format!("{}:1: {e}", fi.line) })?;
                 if let Some(l) = link_name(&fi.attrs) {
                     sig.symbol = l;
                 }
@@ -2157,7 +2169,7 @@ pub fn summarize(item: &Item, owner: Option<&Owner>) -> R<Summary> {
                 // (a missing lifetime: at the field it is missing in (named), or at the first `&`)
                 if let Some(e) = sm.adt_err.clone().filter(|e| e.ends_with("(E0106)")) {
                     let at = match fields {
-                        Fields::Named(v) => v.iter().find(|x| lifetime_positions(&x.1).0 > 0).map(|x| x.0.clone()),
+                        Fields::Named(v) => v.iter().find(|x| lifetime_positions(&x.1).0 > 0 || anon_dyn(&x.1)).map(|x| x.0.clone()),
                         _ => None,
                     };
                     sm.adt_err = Some(format!("\u{1}{}\u{1}{e}", at.unwrap_or_else(|| "&".to_string())));

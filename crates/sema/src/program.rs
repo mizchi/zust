@@ -1532,6 +1532,18 @@ impl Program {
                         if ds.has_self && ms.has_self && kind(&p, ds.params[0]) != kind(&p, ms.params[0]) {
                             return Err(format!("{line}method `{m}` has an incompatible type for trait `{tr}` (E0053)"));
                         }
+                        // (E0195: the method's own lifetimes that bounds make early-bound, and how many bounds each has,
+                        // are the trait's: `fn bar<'a, 'b: 'a>` in the trait, `fn bar<'a, 'b>` in the impl)
+                        {
+                            let early = |r: Option<&crate::types::RSigSyn>| -> Vec<usize> {
+                                let Some(r) = r else { return vec![] };
+                                (r.outer as usize..r.lts.len()).map(|i| r.outlives.iter().filter(|&&(a, b)| a as usize == i || b as usize == i).count()).filter(|&n| n > 0).collect()
+                            };
+                            let (de, me) = (early(ds.regions.as_deref()), early(ms.regions.as_deref()));
+                            if de != me {
+                                return Err(format!("{line}lifetime parameters or bounds on method `{m}` do not match the trait declaration (E0195)"));
+                            }
+                        }
                         // (a parameter's reference the trait leaves to the caller (elided, or the method's own lifetime)
                         // that the impl ties to one of its header's (`fn next(&'a mut self)`): less general, E0308)
                         if let Some(mr) = ms.regions.as_deref().filter(|r| r.outer > 0) {
