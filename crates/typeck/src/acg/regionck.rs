@@ -1691,7 +1691,7 @@ impl Cx<'_> {
         if !self.rg_on() {
             return;
         }
-        let Some((it, itr)) = self.rt_expr(init) else { return };
+        let init_tree = self.rt_expr(init);
         let Ok(t) = self.parse_ty(ann) else { return };
         let prog = self.prog;
         let names = self.rg.lt_names.clone();
@@ -1705,7 +1705,9 @@ impl Cx<'_> {
         if let Some(tree) = tree {
             let sp = Some(super::borrowck::pos(init)).filter(|s| s.line != 0).unwrap_or(self.rg.let_sp);
             self.rg.wf(prog, t, &tree, sp);
-            self.rg.flow(prog, it, t, &itr, &tree, sp);
+            if let Some((it, itr)) = init_tree {
+                self.rg.flow(prog, it, t, &itr, &tree, sp);
+            }
         }
     }
 
