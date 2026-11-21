@@ -1,0 +1,109 @@
+[
+  {
+    "proposal": "001-variants",
+    "persona": "implementer",
+    "scores": {
+      "R1": {
+        "score": 4,
+        "why": "名前付きフィールド `Circle { center, r }`、`Circle { r, .. }`、`c @ Circle { center, .. } => Circle { ...c, center: add(center) }` は Rust と TS のどちらの経験でも読める。`.d.ts` の `Shape.Circle` も分かりやすい。減点は、修飾しない `None` / `At` がどの enum かを、関数の後ろまで読まないと決められない場合があること(describe_later)"
+      },
+      "R2": {
+        "score": 3,
+        "why": "例外が複数ある。effect の操作名だけは一意のまま。同名の fn とバリアントは期待する型で優先が変わる。浮動小数点のリテラルパターンは書けない。パターンの残りは `..` なのに、更新は `...c`(002)と記号が分かれる。名前付きと位置引数を enum の中で混ぜられるのは、Rust と同じで自然"
+      },
+      "R3": {
+        "score": 2,
+        "why": "期待する型に依存すること自体は rubric の 3 に当たる。ただし規則が明快でない。(1) 候補が 1 つになったら決まるのか(describe_later は決まる前提で書かれていて、「1 つだけでも修飾」と矛盾する)。(2) match のパターンは照合する値の型で決まるとあるので、遅らせた値を match では決められないはずだが、本文は match で決まると書く。(3) フィールドや引数の型が候補の絞り込みに加わるのかが書かれていない。(4) fn とバリアントの優先が期待する型で変わる"
+      },
+      "R4": {
+        "score": 4,
+        "why": "`Label { .. } => 0.0`、`l @ Label { at, .. } => Label { ...l, at: add(at) }` で、全フィールドを書き直す必要がなくなった。`None` を複数の enum で使える。失うものはほぼない。位置引数のバリアントに `Pair(..)` の残りの書き方があるかは書かれていない"
+      },
+      "R5": {
+        "score": 3,
+        "why": "`..` なしの書き漏らしと判別キーとの衝突がエラーになり、直し方も示されるのは良い。一方、遅らせた解決では誤りの出る位置がずれる。最初の使い方で候補が絞られ、不一致は後の使い方の位置で報告される。引数を持つバリアントを遅らせると、引数の中の EK::Field(check.rs の 925 行目付近)が『cannot infer ... add an annotation』を誤った位置で出し、typed array のリテラルは型の不一致になる。本当の直し方(修飾する)が示されない"
+      },
+      "R6": {
+        "score": 4,
+        "why": "名前付きフィールドが名前のままプロパティになり、`.d.ts` には同名の namespace で `Shape.Circle` が出るので、TS から 1 つのバリアントを受けられる。総称的な enum の namespace(`Option.Some<T>`)は示されていない。`{ ...c }` の展開は、表現の決定(`@tag`)に依存する"
+      },
+      "R7": {
+        "score": 4,
+        "why": "Rust の struct バリアント、`@` 束縛、`..`、TS の分割代入と spread が、そのまま使える。新しく覚えるのは、修飾が要る場面の規則だけ"
+      },
+      "R8": {
+        "score": 3,
+        "why": "関数の中で閉じるので、アイテム単位の増分検査は保てる。依存は、関数からバリアント名の索引への辺で足りる。ただし実装は軽くない。候補を持つ型変数を intv と同じように足し、check_pat、網羅性の検査、callee / pat_enum の記録を finish_fn まで遅らせ、固定点まで回す順序も決める必要がある。期待する型で決める処理(typed_lit、range の map、クロージャの引数)は遅らせられない。EffWalk は名前だけで fn とバリアントを区別する。補完では、期待する型がない場所で候補を修飾つきで出すことになる。parse.rs にはエラー回復がないので、クイックフィックスには回復する構文解析器が先に要る"
+      }
+    },
+    "blocker": [],
+    "issues": [
+      {
+        "severity": "high",
+        "where": "A.2 と、変更後の describe_later(`let h = if c { None } else { At { index: 1 } }`)",
+        "problem": "else 側の `At { index: 1 }` にも期待する型はなく、Hit に決まるのは At を持つ enum が 1 つしかないからである。これは A.3 の『名前を持つ enum が 1 つだけでも、修飾を求める』と矛盾する。候補の積が 1 つになったら決める実装にすると、別の場所に `enum Foo { None, At { index: i32 } }` を足しただけで describe_later が壊れる。r1 で全員が high に挙げた非局所性が、遅らせた解決を通して戻る。`match h` で決まるという説明も、今の EK::Match(`infer(s, None)` の後に `check_pat(p, &st, ..)`)とパターンを照合する値の型で決める規則とでは循環し、成り立たない",
+        "suggestion": "候補は、注釈、signature、修飾したパス、引数の型などの具体的な Named 型と単一化したときだけ決まり、候補の数では決めない、と明記する。describe_later は『cannot tell which enum `None` is』のエラーにし、クイックフィックスで `let h: Hit = ..` か `Hit::None` を足す例に直す。照合する値が決まっていない match のパターンでは決めない、とも書く"
+      },
+      {
+        "severity": "high",
+        "where": "A.2(遅らせる対象)と、check.rs の EK::Field / EK::Method / EK::Array(typed_lit)/ EK::Closure",
+        "problem": "引数を持つバリアントを遅らせると、その引数には期待する型が届かない。今の checker は期待する型をその場で使って決める。typed array のリテラル、`range(..).map`、クロージャの引数の型がそうで、型変数に対するフィールドの読み出しとメソッドの呼び出しは、その場でエラーにする。そのため、フィールドの型が F32Array の `W { w: [0.5, 1.0] }` は、後で Array<f64> と Typed の不一致になる。`Btn { onClick: (e) => e.x }` は `e.x` の位置に『add an annotation』を出す。どちらも、本当の原因と直し方(バリアントを修飾する)を示さない",
+        "suggestion": "遅らせるのは引数のないバリアント(`None` など、動機の中心)だけにする。引数を持つバリアントは、その場の期待する型で決まらなければ、すぐに修飾を求める。少なくとも、遅らせたバリアントの中で出たエラーには『`W` がこの時点で決まっていないため。`E::W` と書く』という注を付ける"
+      },
+      {
+        "severity": "medium",
+        "where": "実装の注意『finish_fn で決める』",
+        "problem": "finish_fn には順序の制約がある。バリアントを決めると、フィールドの型との単一化が新しく起き、それが別の候補を決めることがある。整数リテラルの既定値(i32)より前に決めないと、`At { index: 1 }` の 1 の型が先に i32 に固定される。eq / ord の deferred、casts、bound_checks、網羅性の検査(今は EK::Match の中ですぐに走る)、Info.callee と pat_enum の記録も、すべて決めた後でないといけない",
+        "suggestion": "finish_fn の最初に、候補を持つ型変数の固定点を回す段を置く。その後に、整数と小数の既定値、deferred、casts、網羅性の検査(EK::Match から finish_fn に移す)、side table の書き出しを、この順で行うと提案に書く"
+      },
+      {
+        "severity": "medium",
+        "where": "A.2 とエラーの位置",
+        "problem": "候補は最初の使い方で絞られ、矛盾は後の使い方の位置で『expected Hit, found Parsed』と報告される。原因である `None` の位置は出ない。候補を持つ型変数を show() でどう表示するか(`?3` ではなく `Hit | Parsed`)も決まっていない",
+        "suggestion": "候補を絞った単一化の位置を記録し、エラーに『`None` はここで `Parsed::None` に決まった』という注を付ける。show() は、候補を持つ型変数を候補の一覧で表示する"
+      },
+      {
+        "severity": "medium",
+        "where": "check.rs の infer_effects / EffWalk(EK::Call(Var(n)) を、fn があれば関数の呼び出しとして扱う)",
+        "problem": "『期待する型が enum ならバリアントを優先する』は型検査の中で決まるが、effect の推論はその前に名前だけで動く。effect を持つ fn `Label` と、バリアント `Label(..)` があると、バリアントの生成に fn の effect が付く。EK::Var の『cannot be used as a value』のエラーも誤って出る",
+        "suggestion": "同名の fn とバリアントがあるときは、バリアントの側に修飾を求める(宣言だけを見る、局所的な検査)。または、effect の推論を型検査の後に回し、Info.callee を引くようにする"
+      },
+      {
+        "severity": "medium",
+        "where": "C『同じ名前のレコード型とバリアントは、期待する型で決める』と、002 の構造的な `type`",
+        "problem": "002 で `type Vec2 = {..}` は別名になり、期待する型は Ty::Rec に展開されて名前が消える。そのため『期待する型が Vec2 ならレコード』を名前で判定できない。形が同じかどうかで比べることになり、規則が込み入る",
+        "suggestion": "同じファイルで、レコードの別名とバリアントに同じ名前を付けることを禁じる(宣言だけを見る検査で、使う場所には影響しない)か、`Name {` はレコードの別名があればレコードと読み、バリアントは修飾する、と決める"
+      },
+      {
+        "severity": "low",
+        "where": "『期待する型が伝わる場所』の `return e`",
+        "problem": "zustscript には return がない(ast.rs の EK に Return がない)",
+        "suggestion": "列挙から外すか、return を入れる提案を別に立てる"
+      },
+      {
+        "severity": "low",
+        "where": "B『@ 束縛と絞り込み』と lower.rs",
+        "problem": "Ty にはバリアントで絞り込んだ型がない。lower.rs では、Rust の enum に対して `ZsShape::Circle { center: .., ..c }` と書けない(Rust の struct 更新は struct にしか使えない)",
+        "suggestion": "絞り込みは、型ではなく、スコープの束縛に付けるメタ情報(name → (enum, variant))として持つ。`let d = c` では引き継がない、と明記する。lower.rs は、パターンで全フィールドを束縛し直して組み立て直す。例: `c @ ZsShape::Circle { center, r: c_r } => ZsShape::Circle { center: add(center), r: c_r }`"
+      },
+      {
+        "severity": "low",
+        "where": "パターンの `..` と更新の `...c`",
+        "problem": "残りは `..`、展開は `...` と記号が分かれる。lexer の PUNCTS には `...` がなく、`..` と `.` に分かれてしまう。逆に書き間違えたときの診断も、両方の向きに要る",
+        "suggestion": "PUNCTS の `..` より前に `...` を足す。パターンの中の `...` と、式の中の `..` には、直し方つきの専用のエラーを出す"
+      }
+    ],
+    "questions": [
+      "候補が 1 つになったら決まるのか。決まるなら、enum を足したときの非局所的な破壊をどう避けるか",
+      "照合する値の型が決まっていない `match h { None => .., At { index } => .. }` は、パターンで候補を絞るのか、エラーにするのか",
+      "フィールドや引数の型は、候補を選ぶのに使うのか(使うなら探索になる)",
+      "位置引数のバリアントに、残りのパターン `Pair(..)` はあるか",
+      "総称的な enum の `.d.ts` の namespace(`Option.Some<T>`)はどうなるか",
+      "effect の操作と、データを持つ enum のバリアントが同じ名前でもよいか"
+    ],
+    "alternative": {
+      "summary": "遅らせる対象を、引数のないバリアントに限る。候補の数では決めず、具体的な型との単一化でだけ決める。引数を持つバリアントは、その場の期待する型で決まらなければ修飾を求める。checker の変更は intv と同じ型変数の集合 1 つと、finish_fn の段 1 つで済み、誤りは引数の中ではなくバリアントの位置に出る",
+      "example": "fn describe_later(c: bool) -> i32 {\n  let h: Hit = if c { None } else { At { index: 1 } };   // 注釈で決まる\n  match h { None => 0, At { index } => index }\n}\n// 注釈がなければ:\n// let h = if c { None } else { At { index: 1 } };\n//                              ^^ cannot tell which enum `At` is: write `Hit::At` (quick fix)\n// 引数のない None は遅らせる。後で `takes_hit(h)` のような具体的な型との単一化があれば決まる"
+    }
+  }
+]

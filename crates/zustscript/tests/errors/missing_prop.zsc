@@ -1,0 +1,4 @@
+// expect: missing prop `title` of <Item>
+type ItemProps = { title: String, n: i32 }
+fn Item(p: ItemProps) -> Jsx { <li>{p.title}</li> }
+fn App() -> Jsx { <ul><Item n={1} /></ul> }

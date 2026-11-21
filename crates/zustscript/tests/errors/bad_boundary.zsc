@@ -1,0 +1,2 @@
+// expect: cannot cross the JS / wasm boundary
+wasm fn f(v: Vec<String>) -> i32 { 0 }

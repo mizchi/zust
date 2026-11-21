@@ -1,0 +1,56 @@
+// corpus: enums (the current grammar). A drawing app's shapes, and a parse result that also has a "nothing" case.
+
+type Vec2 = { x: f64, y: f64 }
+
+// positional fields: what each f64 means is only in the comments
+enum Shape {
+  Circle(Vec2, f64),          // center, radius
+  Rect(Vec2, Vec2),           // top-left, bottom-right
+  Label(Vec2, String, f64),   // at, text, size
+}
+
+// variant names are unique in a file: this enum cannot also have `None` if another enum has it,
+// so the "nothing" case is named Missing / NoShape / ..
+enum Parsed { Ok(Shape), Missing, Bad(String) }
+enum Hit { NoHit, Hit(i32) }
+
+pub fn area(s: Shape) -> f64 {
+  match s {
+    Circle(_, r) => 3.141592653589793 * r * r,
+    Rect(a, b) => ((b.x - a.x) * (b.y - a.y)).abs(),
+    Label(_, _, _) => 0.0,
+  }
+}
+
+pub fn moved(s: Shape, d: Vec2) -> Shape {
+  let add = (p: Vec2) => Vec2 { x: p.x + d.x, y: p.y + d.y };
+  match s {
+    Circle(c, r) => Circle(add(c), r),
+    Rect(a, b) => Rect(add(a), add(b)),
+    Label(at, text, size) => Label(add(at), text, size),
+  }
+}
+
+pub fn describe(p: Parsed) -> String {
+  match p {
+    Ok(s) => "shape with area " + area(s).to_string(),
+    Missing => "nothing",
+    Bad(why) => "error: " + why,
+  }
+}
+
+pub fn first_hit(shapes: Array<Shape>, at: Vec2) -> Hit {
+  let mut found = -1;
+  for i in range(0, shapes.len()) {
+    if found < 0 && contains(shapes[i], at) { found = i; }
+  }
+  if found < 0 { NoHit } else { Hit(found) }
+}
+
+fn contains(s: Shape, p: Vec2) -> bool {
+  match s {
+    Circle(c, r) => (p.x - c.x) * (p.x - c.x) + (p.y - c.y) * (p.y - c.y) <= r * r,
+    Rect(a, b) => p.x >= a.x && p.x <= b.x && p.y >= a.y && p.y <= b.y,
+    Label(_, _, _) => false,
+  }
+}

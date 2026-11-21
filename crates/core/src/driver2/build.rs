@@ -702,10 +702,13 @@ pub struct CrateSpec {
     pub deps: Vec<String>,
     /// 有効な feature (`features=a,b`)
     pub features: Vec<String>,
+    /// (a bin: the name of the executable, when it is not `name`. A Cargo package's lib and bin share the package's
+    /// name, so zurgo gives the bin another crate name and keeps the executable's here)
+    pub exe: Option<String>,
 }
 
 /// ワークスペースの説明ファイルを読む。1 行に 1 クレート: `lib <名前> <根のファイル> [依存...]` / `bin <名前> <根のファイル> [依存...]`
-/// (依存の代わりに `features=a,b` で feature を有効にする)
+/// (依存の代わりに `features=a,b` で feature を有効にする。bin の `exe=NAME` は実行ファイルの名前)
 /// (`#` から後ろはコメント。パスは説明ファイルのディレクトリから)
 pub fn read_workspace(path: &std::path::Path) -> R<Vec<CrateSpec>> {
     let text = std::fs::read_to_string(path).map_err(|e| format!("{}: {e}", path.display()))?;
@@ -728,7 +731,7 @@ pub fn read_workspace(path: &std::path::Path) -> R<Vec<CrateSpec>> {
             root: dir.join(w[2]),
             display: w[2].to_string(),
             lib: w[0] == "lib",
-            deps: w[3..].iter().filter(|s| !s.starts_with("features=")).map(|s| s.to_string()).collect(),
+            deps: w[3..].iter().filter(|s| !s.starts_with("features=") && !s.starts_with("exe=")).map(|s| s.to_string()).collect(),
             features: w[3..]
                 .iter()
                 .filter_map(|s| s.strip_prefix("features="))
@@ -736,6 +739,7 @@ pub fn read_workspace(path: &std::path::Path) -> R<Vec<CrateSpec>> {
                 .filter(|s| !s.is_empty())
                 .map(|s| s.to_string())
                 .collect(),
+            exe: w[3..].iter().find_map(|s| s.strip_prefix("exe=")).map(str::to_string),
         });
     }
     Ok(out)
@@ -1391,8 +1395,19 @@ impl Session2 {
                 continue;
             }
             let deps = all_deps(i);
-            let exe = out_dir.join(c.name.as_str());
-            if !changed[i] && !deps.iter().any(|&j| changed[j]) && exe.exists() {
+            let exe_name = c.exe.as_deref().unwrap_or(c.name.as_str());
+            let exe = out_dir.join(exe_name);
+            // (what this executable is linked from: the crates' names and fingerprints, kept next to it. An unchanged
+            //  object is not enough when another bin crate wrote this executable last (`exe=` moved between crates))
+            let mut stamp = String::new();
+            for j in std::iter::once(i).chain(deps.iter().copied()) {
+                stamp.push_str(&crates[j].name);
+                stamp.push(' ');
+                stamp.push_str(&std::fs::read_to_string(out_dir.join(format!("{}.fp", crates[j].name).as_str())).unwrap_or_default());
+                stamp.push('\n');
+            }
+            let stamp_path = out_dir.join(format!("{exe_name}.linked").as_str());
+            if !changed[i] && !deps.iter().any(|&j| changed[j]) && exe.exists() && std::fs::read_to_string(stamp_path.as_path()).is_ok_and(|s| s == stamp) {
                 continue;
             }
             let t1 = now_ns();
@@ -1400,6 +1415,7 @@ impl Session2 {
             objs.extend(deps.iter().map(|&j| out_dir.join(format!("{}.o", crates[j].name).as_str())));
             let refs: Vec<&std::path::Path> = objs.iter().map(|p| p.as_path()).collect();
             crate::link::link_many(self.opts.linker.as_deref(), &refs, exe.as_path())?;
+            let _ = std::fs::write(stamp_path.as_path(), &stamp);
             rep.linked += 1;
             if self.opts.time {
                 eprintln!("  {:<12} {:>8.2} ms  link {} objects", format!("link {}", c.name), (now_ns() - t1) as f64 / 1e6, objs.len());

@@ -1,0 +1,116 @@
+[
+  {
+    "proposal": "003-option-result",
+    "persona": "ts-dev",
+    "scores": {
+      "R1": {
+        "score": 4,
+        "why": "`type Todo = { id: i32, title: String, note?: String, done: bool }` は TS の任意のプロパティそのままで、説明なしで読める。`validate` の `non_empty(\"title\", d.title)?` も、一度説明を読めば「Err なら return」と読める。`find(todos, id) |> .map((t) => t.title) |> .unwrap_or(\"(none)\")` も左から右へ読める。減点は 2 つ。`ok_or` / `and_then` / `map_err` は Rust の名前で、TS の人は意味をすぐには取れない(JS なら `flatMap`)。`t.note` の型が、書いた型 `String` ではなく `Option<String>` になることは、hover を見ないと分からない"
+      },
+      "R2": {
+        "score": 3,
+        "why": "`?` の型の規則、メソッドの組み込み、prelude の既定値は、001 の「期待する型」と整数リテラルの既定値の延長になっている。ただし例外が 1 つより多い。(1) `{ note?: String }` と `{ note: Option<String> }` は、読み書きの型が同じなのに別の型になる(C「型の等しさ」)。002 の D は今も「`title: Option<String>` の略記」と書いており、食い違っている。(2) 境界での「無い」の表し方が、任意のフィールドは `undefined`、`pub fn` の `Option` は `{ TAG: \"None\" }` と 2 通り。(3) 出力で、レコードのリテラルは省略しても `note: undefined` を書き、JSX の props は省略したら書かない。似た場面で規則が違う"
+      },
+      "R3": {
+        "score": 4,
+        "why": "後置の `?` は postfix の 1 トークンで決まる。`?.` と `??` を lexer で別のトークンにして予約するので、TS の読み方と Rust の読み方が黙って入れ替わることはない(B「予約する字面」)。`|>` と `?` の結び付きも `s |> trimmed()? |> shorter_than(80)?` の脱糖で明記されている。減点は 2 つ。任意のフィールドを省略できるかが期待する型で決まり(`let r = { id: 1, title: \"a\", done: false }` は `Todo` にならない)、人には予想しにくい。三項演算子 `a ? b : c` を書いたとき、`a?` が try として読まれてから、分かりにくい構文エラーになりそう"
+      },
+      "R4": {
+        "score": 4,
+        "why": "`validate` と `rename` の入れ子の match が 2〜3 行の `?` になり、`map_opt` と `unwrap_or` の手書きも消える。`Placeholder` では prop とフィールドを省略できる。大きく短くなる。それでも TS より長い所が残る。書くときに毎回 `Some(…)` が要る(`{ ...t, note: Some(\"x\") }`、`subtitle={Some(\"x\")}`)。`TodoRow` の「あれば描く」は `match subtitle { Some(s) => <small>{s}</small>, None => <small /> }` で、TS の `subtitle && …` より長い。`is_some()` で分けても値は取り出せず、`??` も書けない"
+      },
+      "R5": {
+        "score": 4,
+        "why": "E が違うときの `.map_err(message)?` の提案、`Option` に `?` を付けたときの `.ok_or(e)?`、クロージャの中の `?` のエラー(`titles` の例)、`note: \"x\"` に `Some(\"x\")` を勧めるエラーは、どれも位置と直し方がついている。`?.` を予約にしたので、意味が黙って変わることもない。5 にしない理由は 3 つ。(1) `?.` のエラーは、`shout` のように `Option` を返さない関数でも `(e?).f` を最初に勧め、TS の人を間違った方へ誘う。(2) 出力が `note: undefined` のキーを書くので、TS 側の `{ ...defaults, ...todo }` で既定値が黙って消える。(3) 三項演算子を書いたときのエラーが決まっていない"
+      },
+      "R6": {
+        "score": 3,
+        "why": "`readonly note?: string | undefined` と、`TodoRow(props: { readonly todo: Todo; readonly subtitle?: string | undefined })` は、TS のコードからそのまま使える(省略でき、`exactOptionalPropertyTypes` でも合う)。配列の中のレコードも作り直さずに渡せる。それでも TS 側で一手間が残る。`pub fn` の引数と戻り値の `Option` / `Result` は `{ readonly TAG: \"Some\"; readonly _0: T }` のままで、TS から作るコンストラクタもない(未決事項)。同じ「無いかもしれない」が、型の位置によって別の形になる。`Option` / `Result` がモジュールの `.d.ts` ごとに `export type` されるので、2 つのモジュールから import すると名前がぶつかり、別名を付けることになる。出力が `note: undefined` を書くので、`'note' in todo` が true になり、TS 側の spread で既定値が消える。`Option<Jsx>` を JSX の子にしたときの出力も決まっていない"
+      },
+      "R7": {
+        "score": 3,
+        "why": "`note?:` と JSX の props を省略できることは、TS の経験がそのまま通じる。ただし、新しく覚えることが TS の人にはそれなりに多い。後置の `?` の意味と、それがクロージャから返ること。書くときの `Some(…)`。読むと `Option` になること。`?.` / `??` が使えず、代わりに `.map` / `.unwrap_or` を使うこと。絞り込みがないので match を使うこと。`and_then` / `ok_or` / `map_err` という名前。`?` を書けない場所(`handle` の中、`Jsx` を返すコンポーネント)。「TS なら `t.note ?? \"\"` と書けるのに」と最初に思う場面が多い"
+      },
+      "R8": {
+        "score": 3,
+        "why": "大筋は局所的で、無理がない。parse.rs の PUNCTS(35 行目)に `?.` / `??` / `?` を足し、postfix() の loop(742 行目〜)に `EK::Try` を足す。check.rs は戻り値の型のスタックを持つ。jsx() の足りない prop の検査(1356 行目)から任意のフィールドを外す。どれも関数の中で閉じる。気になる点は 4 つ。(1) pipe()(707 行目)の `.m(a)` の枝は postfix() を通らず Method を返して終わるので、`x |> .m(a)?` の `?` は、提案に書いてある「右辺を postfix() で読んだ後」の付け直しとは別に扱う必要がある。(2) 「総称の `{ value?: T }` で T を `Option` や `()` にしたらその場でエラー」は、総称の関数を経由して型引数が渡るときに制約として伝える必要がある。どう伝えるかが書かれていない。(3) `t.note` の JS は、使われ方(match、`?`、メソッドの受け手、値として使う)で包むかどうかが変わる。hover の型(`Option<String>`)と実際の値の形が食い違い、デバッグ表示の説明が要る。(4) 注釈のないレコードのリテラルを任意のフィールドに合わせるには、`None` と同じような遅延が要る"
+      }
+    },
+    "blocker": [],
+    "issues": [
+      {
+        "severity": "high",
+        "where": "C「型の等しさ」/ C「省略」(`let r = { id: 1, title: \"a\", done: false }`)",
+        "problem": "`{ note?: String }` と `{ note: Option<String> }` が別の型なので、注釈なしの `let r = { id, title, note: t.note, done };` は、フィールドを全部書いても `Todo` を受ける関数に渡せない(r の型が `note: Option<String>` になるため)。002 の「構造的なので無名の値をそのまま渡せる」が、任意のフィールドを持つ型では成り立たない。TS の人には理由が見えない",
+        "suggestion": "期待する型のないリテラルでは、`Option` 型のフィールドを「任意かどうか未定」の印つきにし、`None` と同じく関数の終わりまで決定を遅らせる。単一化で `?:` の側と合えば、任意のフィールドとして出力する。少なくとも、エラーの注で「`note` は `Todo` では任意: `let r: Todo = …` と注釈する」と示す"
+      },
+      {
+        "severity": "high",
+        "where": "C「書くときの値の型」/ 代替案 7 / `draft_of` の例",
+        "problem": "`{ note: \"x\" }` と `<TodoRow subtitle=\"x\" />` がエラーになり、毎回 `Some(…)` を書く。TS/React でいちばん多く書く形なので、毎日当たる。ただ、`?:` は宣言の時点で「T か、無いか」を明示している。数値の暗黙の変換とは性質が違い、混ぜない理由として弱い",
+        "suggestion": "期待する型が `note?: T` の所(レコードのリテラルのフィールドの値と、JSX の属性の値)に限り、値の型が `T` なら Some として受け、`Option<T>` ならそのまま受ける。変数を経由した値や、関数の引数には広げない。T が型変数なら `Option<T>` だけを受ける"
+      },
+      {
+        "severity": "medium",
+        "where": "C「TS へ渡す値」(省略したリテラルでも `note: undefined` を書く)",
+        "problem": "TS 側で `{ ...defaults, ...todo }` や `Object.assign` を使うと、キーのある `undefined` が既定値を上書きする。`'note' in todo` も true になる。React の props のマージでよく踏む。spread で値を確実に消すためなら、`{ ...t, note: None }` のときだけ書けば足りる",
+        "suggestion": "`note: undefined` を書くのは、明示の `None` と spread の上書きのときだけにする。省略したら、JSX の props と同じくキーを書かない。2 つの規則も 1 つにそろう。JS エンジンの扱いやすさ(オブジェクトの形がそろう)を優先するなら、TS 側の spread の注意を `.d.ts` のコメントに書く"
+      },
+      {
+        "severity": "medium",
+        "where": "D の表 / 変更後の `TodoRow`",
+        "problem": "React の「あれば描く」(`{subtitle && <small>{subtitle}</small>}`)に当たる短い書き方がない。`subtitle.map((s) => <small>{s}</small>)` は `Option<Jsx>` になるが、それを JSX の子に置けるか、置いたら何が出るかが書かれていない。今の表現のままだと `{ TAG: \"Some\" }` が React に渡り、実行時に `Objects are not valid as a React child` になる",
+        "suggestion": "`Option<Jsx>` を JSX の子として受け付ける。出力は `Some` なら値、`None` なら `undefined` にする(React は `undefined` を何も描かない)。そうすれば `{subtitle.map((s) => <small>{s}</small>)}` と書ける"
+      },
+      {
+        "severity": "medium",
+        "where": "B「予約する字面」の `?.` のエラーと `shout` の例",
+        "problem": "`?.` のエラーが、`Option` も `Result` も返さない関数の中でも「write `(e?).f` to return early」を最初に勧める。TS の人は optional chaining のつもりで書いているので、まず関係のない書き方へ誘われる",
+        "suggestion": "囲む関数の戻り値の型で、メッセージを変える。`Option` / `Result` を返さない関数では `e.map((x) => x.f)` だけを示す。LSP のクイックフィックスも `.map` を先にする"
+      },
+      {
+        "severity": "medium",
+        "where": "B「予約する字面」の `??` / 未決事項",
+        "problem": "`??` を予約にする理由は `e??` との重なりだけで、それは `(e?)?` と書くと決めてある。TS の人が最もよく使う書き方が r1 から使えず、R7 を下げている",
+        "suggestion": "r1 で `e ?? d` を `Option<T>` に限って入れる。右辺は遅らせて評価し(TS の `??` と同じ。`unwrap_or_else` に当たる)、優先順位は `||` と同じにする。`Result` に付けたら、直し方つきのエラー。`?.` は予約のまま残す"
+      },
+      {
+        "severity": "medium",
+        "where": "出力「.d.ts」(`Option` / `Result` をモジュールごとに書き出す)",
+        "problem": "TS のファイルが 2 つのモジュールから `Option` を import すると名前がぶつかり、`import { Option as AOption }` が要る。TS 側の既存の `Option`(fp-ts など)ともぶつかりやすい",
+        "suggestion": "共通の型の宣言モジュール(例: `zustscript/prelude.d.ts`)を 1 つ出し、各モジュールの `.d.ts` はそこから `import type` する。再 export は、使うものに限る"
+      },
+      {
+        "severity": "low",
+        "where": "B「書き方」/ 決定事項(三項演算子がない)",
+        "problem": "TS の人は `cond ? a : b` を書く。後置の `?` を入れると、`cond?` が try として読まれてから構文エラーになり、何が悪いのか分かりにくい",
+        "suggestion": "`e? <式の始まり>` のように `?` の直後に式が続き、その後に `:` が来たら、``error: there is no `? :`; write `if cond { a } else { b }` `` という専用のエラーを出す"
+      },
+      {
+        "severity": "low",
+        "where": "実装の注意「構文」の pipe()",
+        "problem": "pipe()(parse.rs の 707 行目)の `.m(a)` の枝は postfix() を呼ばず、その場で Method を返す。そのため、提案にある「右辺を postfix() で読んだ後に `?` を付け直す」だけでは、`x |> .m(a)?` を扱えない",
+        "suggestion": "`.m(a)` の枝でも、引数の後の `?` を読んで、脱糖した Method の外側に `EK::Try` を付ける。この枝の後に postfix の続き(`.len()` など)を許すかも合わせて決める"
+      },
+      {
+        "severity": "low",
+        "where": "002 の D「任意のフィールド」と 003 の C「型の等しさ」",
+        "problem": "002 は今も「`title: Option<String>` の略記」と書き、003 は別の型にしている。読む人が混乱する",
+        "suggestion": "002 の改訂で、記述を 003 に合わせて直す(「003 で入れる。`Option<T>` とは別の型」)"
+      }
+    ],
+    "questions": [
+      "`Option<Jsx>`(と `Option<String>`)を JSX の子に置けるか。置けるなら、JS では何を出すか",
+      "総称の `{ value?: T }` で、T が `Option` / `()` でないという制約は、総称の関数を経由して型引数が渡るとき(`fn g<U>(u: U) { f(u) }`)、どう伝わってどこでエラーになるか",
+      "注釈のない `{ …, note: t.note }` を `Todo` に渡すときのエラーメッセージと、遅延して合わせるかどうか",
+      "`pub fn` の引数の任意のフィールドに TS から `null` が来たとき(`JSON.parse` の結果など)、zsc の中で読むと `None` になるが、`{ ...t }` でそのまま TS に返すと `null` のままになる。`.d.ts` の型と食い違ってよいか",
+      "`is_some()` / `is_none()` で分けた後の絞り込み(TS の `if (x !== undefined)`)を、001 の絞り込みの仕組みで入れる予定はあるか",
+      "三項演算子 `a ? b : c` を書いたときのエラーをどうするか",
+      "JSX の属性に明示した `subtitle={None}` は、キーを書かないのか、`subtitle: undefined` と書くのか"
+    ],
+    "alternative": {
+      "summary": "任意のフィールドに書く値は、期待する型が `?:` の所(リテラルのフィールドと JSX の属性)に限り、`T` と `Option<T>` の両方を受ける。`??` は r1 から `Option` に限って遅延の `unwrap_or` として入れる。`Option<Jsx>` を JSX の子に置けるようにする。省略したフィールドは、JSX の props と同じくキーを書かない。`?.` は予約のまま残す",
+      "example": "type Todo = { id: i32, title: String, note?: String, done: bool }\n\nfn draft_of(t: Todo) -> Todo { { ...t, note: \"x\" } }        // 期待する型が note?: String なので Some として受ける\nfn cleared(t: Todo) -> Todo { { ...t, note: None } }        // JS: { ...t, note: undefined }\n\npub fn TodoRow({ todo, subtitle }: { todo: Todo, subtitle?: String }) -> Jsx {\n  <li>\n    {todo.title}\n    {subtitle.map((s) => <small>{s}</small>)}            // Option<Jsx> を子に置ける。None は undefined になり、何も描かない\n  </li>\n}\n\npub fn label(t: Todo) -> String { t.note ?? \"(no note)\" }   // 右辺は None のときだけ評価する\n\npub fn Demo() -> Jsx { <ul><TodoRow todo={{ id: 0, title: \"a\", done: false }} subtitle=\"hi\" /></ul> }\n// JS: _jsx(TodoRow, { todo: { id: 0, title: \"a\", done: false }, subtitle: \"hi\" })  省略した note はキーを書かない"
+    }
+  }
+]

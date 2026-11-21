@@ -636,6 +636,7 @@ impl Cx<'_> {
             }
         }
         if let Some(r) = self.builtin_method(e)? {
+            self.rg_builtin(e, recv, r.1);
             return Ok(r);
         }
         if let Some(r) = self.prim_trait_method(e, expected)? {
@@ -923,6 +924,10 @@ impl Cx<'_> {
             if let (true, Some(borrowck::Ev::Acc(_, borrowck::Acc::Borrow(ln), _))) = (flows, &ev) {
                 self.bk.loan_of.insert(e as *const Expr as usize, *ln);
             }
+            // (the receiver's loan, for what the region check finds it must outlive (Rg::holders))
+            if let (true, Some(borrowck::Ev::Acc(_, borrowck::Acc::Borrow(ln), _))) = (self.rg.on, &ev) {
+                self.bk.recv_loans.insert(e as *const Expr as usize, *ln);
+            }
             // (two-phase for a call written as a method call; an operator (`x += x` → `add_assign`, synthesized
             // without a position) borrows first)
             if let (true, true, Some(borrowck::Ev::Acc(place, borrowck::Acc::Borrow(ln), sp))) =
@@ -931,7 +936,7 @@ impl Cx<'_> {
                 // (the reservation: a shared loan of the place, ended once the arguments are evaluated; the
                 // `&mut` loan is taken then)
                 let l = &self.bk.loans[*ln as usize];
-                let res = borrowck::Loan { place: l.place.clone(), mutable: false, sp: l.sp, at: l.at, quiet: l.quiet };
+                let res = borrowck::Loan { place: l.place.clone(), mutable: false, sp: l.sp, at: l.at, quiet: l.quiet, capture: l.capture };
                 let rs = self.bk.loans.len() as u32;
                 self.bk.loans.push(res);
                 self.bk_push(Some(borrowck::Ev::Acc(place.clone(), borrowck::Acc::Borrow(rs), *sp)));
@@ -946,6 +951,20 @@ impl Cx<'_> {
                     self.bk.activate = Some((act, tid));
                 }
             } else if matches!(bk_recv_ty, Ty::Ref(true, _)) && self.bk.op_call != e as *const Expr as usize {
+                // (an argument that names the receiver (`v.push(v.pop().unwrap())`): the two-phase borrow's
+                // reservation, a shared loan of the place, lasts while the arguments are evaluated)
+                if let (Some(borrowck::Ev::Acc(place, borrowck::Acc::Borrow(ln), sp)), Some(n)) = (&ev, borrowck::root_local(recv)) {
+                    if margs.iter().any(|a| borrowck::mentions(a, n)) {
+                        let l = &self.bk.loans[*ln as usize];
+                        let res = borrowck::Loan { place: l.place.clone(), mutable: false, sp: l.sp, at: l.at, quiet: l.quiet, capture: l.capture };
+                        let rs = self.bk.loans.len() as u32;
+                        self.bk.loans.push(res);
+                        self.bk.reserved.push(rs);
+                        self.bk_push(Some(borrowck::Ev::Acc(place.clone(), borrowck::Acc::Borrow(rs), *sp)));
+                        self.bk_call_temp(&[borrowck::Src::Loan(rs)], true);
+                        bk_op_temp = true;
+                    }
+                }
                 bk_late = ev;
             } else {
                 // (an operator's `&mut self` lasts until the call: `x += x` moves x while it is borrowed)
@@ -955,7 +974,17 @@ impl Cx<'_> {
                     self.bk_call_temp(&[borrowck::Src::Loan(ln)], true);
                     bk_op_temp = true;
                 } else {
+                    // (a shared receiver an argument names (`v.get({ v.push(2); 0 })`): its loan lasts while the
+                    // arguments are evaluated)
+                    let hold = match (&ev, borrowck::root_local(recv)) {
+                        (Some(borrowck::Ev::Acc(_, borrowck::Acc::Borrow(ln), _)), Some(n)) if margs.iter().any(|a| borrowck::mentions(a, n)) => Some(*ln),
+                        _ => None,
+                    };
                     self.bk_push(ev);
+                    if let Some(ln) = hold {
+                        self.bk_call_temp(&[borrowck::Src::Loan(ln)], true);
+                        bk_op_temp = true;
+                    }
                 }
             }
         }
@@ -974,8 +1003,27 @@ impl Cx<'_> {
             self.bk_frame();
         }
         self.check_unsafe_call(id, msp.start)?;
+        // (a receiver borrowed for a lifetime the signature names (`fn insert(&'a mut self)` in `impl<'a> Foo<'a>`):
+        // checked from here on, as the borrow may last as long as the value)
+        if !self.rg.on && self.rg.eligible && self.inline_depth == 0 && matches!(recv_ty, Ty::Ref(..)) {
+            // (or an argument borrowed for a lifetime of the impl: `fn set(&mut self, x: &'a mut u8)` stores it)
+            let named = self.prog.sigs[id as usize].regions.as_deref().is_some_and(|r| {
+                let n = r.slots.len().saturating_sub(1);
+                r.slots.first().and_then(|s| s.first()).is_some_and(|&c| c < crate::types::R_STATIC) || r.slots[..n].iter().skip(1).flatten().any(|&c| c < r.outer)
+            });
+            if named {
+                self.rg_late_on();
+            }
+        }
         if !via_deref {
-            self.rg_recv(recv, recv_ty, sid);
+            // (the receiver's borrow is followed for the program's methods: the prelude's results are tied to self
+            // as an approximation, `Iterator::next`'s too)
+            let user = self.prog.item_of.get(id as usize).copied().flatten().is_some_and(|i| i < self.prog.prelude_from);
+            self.rg_recv(recv, recv_ty, sid, user.then_some(e));
+        }
+        // (the region check reports at the method call: call_fn is given no span for it)
+        if self.rg_on() {
+            self.rg.call_sp = borrowck::pos(e);
         }
         let r = self.call_fn(id, Some((recv_v, recv_ty)), &args, tf, expected, SP);
         self.rg_took_call(e);
@@ -983,10 +1031,11 @@ impl Cx<'_> {
             let srcs = self.bk_frame_end();
             self.bk_flow_into(recv, &srcs);
         }
-        self.bk_push(bk_late);
+        // (the arguments' and the reservation's loans end at the call, before a `&mut self` borrow is taken)
         if bk_op_temp {
             self.bk_call_temps_end(t0);
         }
+        self.bk_push(bk_late);
         r
     }
 
@@ -1490,6 +1539,20 @@ impl Cx<'_> {
         let Some(cands) = self.prog.overloads.get(gname).or_else(|| self.prog.overloads.get(gname.split('#').next().unwrap_or(gname))) else {
             return id;
         };
+        // (a function without `self` in impls for other self types (`impl L for [u8; 4]` / `[u8; 2]`, `fn n<T>(x: T)`):
+        // not an overload of this one. The caller chose it by the self type, and its first argument says nothing of
+        // that. Methods with `self` are told apart by the receiver below)
+        let own = &self.prog.sigs[id as usize];
+        let same_self: Vec<u32>;
+        let cands: &Vec<u32> = if own.has_self || cands.iter().all(|&c| self.prog.sigs[c as usize].self_ty == own.self_ty) {
+            cands
+        } else {
+            same_self = cands.iter().copied().filter(|&c| self.prog.sigs[c as usize].self_ty == own.self_ty).collect();
+            if same_self.len() <= 1 {
+                return id;
+            }
+            &same_self
+        };
         let Some(at) = recv.or_else(|| args.first().and_then(|a| self.peek(a))) else {
             return id;
         };
@@ -1593,6 +1656,7 @@ impl Cx<'_> {
     fn call_fn_inner(&mut self, id: u32, recv: Option<(Value, Ty)>, args: &[&Expr], turbofish: Option<&[GArg]>, expected: Option<Ty>, span: Sp) -> R<V> {
         // (the receiver's region tree is this call's: the calls in the arguments must not take it)
         let rg_recv = if recv.is_some() { self.rg.recv.take() } else { None };
+        let rg_sp = std::mem::take(&mut self.rg.call_sp);
         if self.prog.names.get(id as usize).is_some_and(|n| n == "__core_spawn") {
             if let Some(c) = args.first() {
                 self.check_spawn_closure(c)?;
@@ -1609,6 +1673,11 @@ impl Cx<'_> {
             return err(span, format!("call to unsafe function `{n}` is unsafe and requires unsafe block (E0133)"));
         }
         let sig0 = self.prog.sigs[id as usize].clone();
+        // (a callee that requires 'static (`fn f<T: 'static>`, `&'static T`): checked from its arguments on
+        // (`f(&g())`: the temporary))
+        if !self.rg.on && self.rg.eligible && self.inline_depth == 0 && (sig0.regions.as_deref().is_some_and(Self::callee_needs_static) || sig0.params.iter().any(|&p| Self::static_object(p))) {
+            self.rg_late_on();
+        }
         let skip = recv.is_some() as usize;
         if sig0.params.len() != args.len() + skip {
             return err(span, format!("expected {} arguments, found {}", sig0.params.len().saturating_sub(skip), args.len()));
@@ -1752,7 +1821,39 @@ impl Cx<'_> {
                 }
             }
             // `F: Fn(A) -> B` の引数にクロージャを渡すなら、A / B をクロージャの型の手がかりにする
-            let fb = self.fn_bound_of(&sig0, pt);
+            let fbt = self.fn_bound_with_text(&sig0, pt);
+            let fb = fbt.as_ref().map(|x| (x.0.clone(), x.1));
+            // (a closure made where nothing was expected, passed by name where a bound takes a reference (for any
+            // region: `FnOnce(&u32)`): its parameter of one region is not general enough. Not the prelude's bounds,
+            // which write no lifetimes)
+            if let (Some(x), Expr::Path(None, ap), false) = (&fbt, strip_paren(a), self.hr_lost.is_empty()) {
+                let prelude = self.prog.item_of.get(id as usize).copied().flatten().is_none_or(|i| i >= self.prog.prelude_from);
+                if !prelude && !x.2.contains('\'') && ap.segs.len() == 1 {
+                    if let Some((_, Ty::Struct(csid))) = self.lookup(&ap.segs[0].name) {
+                        let base = self.prog.base_of(csid);
+                        if let Some((_, refs)) = self.hr_lost.iter().find(|h| h.0 == base) {
+                            if refs.iter().any(|&i| matches!(x.0.get(i), Some(Ty::Ref(..)))) {
+                                let k = x.2.split('(').next().unwrap_or("FnOnce").trim().to_string();
+                                return Err(self.at(super::borrowck::pos(a), format!("implementation of `{k}` is not general enough (the closure's parameter has one lifetime: write its type, `|x: &T|`)")));
+                            }
+                        }
+                    }
+                }
+            }
+            // (a fn item whose result borrows from a parameter the bound gives for any region (`FnMut(&String) -> T`),
+            // where the bound's result is a type parameter: one type for every region, which the fn's is not)
+            if let (Some(x), Expr::Path(..)) = (&fbt, strip_paren(a)) {
+                if let (Ty::Param(_), Some(fid), false) = (x.1, self.fn_item(a), x.2.contains('\'')) {
+                    let user = |i: u32| self.prog.item_of.get(i as usize).copied().flatten().is_some_and(|i| i < self.prog.prelude_from);
+                    let fs = &self.prog.sigs[fid as usize];
+                    let rf = fs.ret_from;
+                    let borrows = |i: usize| rf >> 63 & 1 == 1 && rf >> i & 1 == 1;
+                    if user(id) && user(fid) && matches!(fs.ret, Ty::Ref(..)) && (0..x.0.len().min(62)).any(|i| matches!(x.0[i], Ty::Ref(..)) && borrows(i)) {
+                        let k = x.2.split('(').next().unwrap_or("FnOnce").trim().to_string();
+                        return Err(self.at(super::borrowck::pos(a), format!("implementation of `{k}` is not general enough (the fn's result borrows from its parameter, the bound's result is one type for every lifetime)")));
+                    }
+                }
+            }
             // 関数アイテム (`or_insert_with(Vec::new)`) なら、境界を関数ポインタの期待型にして型引数を決める
             if let (Some((bps, bret)), None, Expr::Path(..)) = (&fb, exp, strip_paren(a)) {
                 let ft = crate::types::FnTy {
@@ -1768,6 +1869,21 @@ impl Cx<'_> {
                 let ps = bps.iter().map(|&t| self.prog.partial_subst(t, &sol)).collect();
                 let r = Some(self.prog.partial_subst(*bret, &sol));
                 self.closure_hint = Some((ps, r));
+                // (the bound for the closure's region check: not one of the prelude's, which writes no lifetimes
+                // (`is_sorted_by_key`'s is `FnMut(&'a T)` in std, not higher-ranked))
+                let prelude = self.prog.item_of.get(id as usize).copied().flatten().is_none_or(|i| i >= self.prog.prelude_from);
+                // (those of the prelude whose bound is higher-ranked in std as written (`FnMut(&T) -> K`), K one type
+                // for every region: `v.sort_by_key(|x| &x.name)` is an error)
+                let by_key = prelude && self.prog.names.get(id as usize).is_some_and(|n| ["::sort_by_key", "::sort_unstable_by_key", "::sort_by_cached_key", "::max_by_key", "::min_by_key"].iter().any(|k| n.ends_with(k)));
+                let prelude = prelude && !by_key;
+                self.closure_bound = None;
+                self.closure_prelude = prelude;
+                if !prelude && self.user_code && self.bk.level >= 2 && regionck::enabled() {
+                    if let Some(x) = &fbt {
+                        let lts = sig0.regions.as_deref().map(|r| r.lts.clone()).unwrap_or_default();
+                        self.closure_bound = Some(Box::new((x.2.to_string(), lts, sig0.generics.iter().map(|g| g.0.clone()).collect())));
+                    }
+                }
             }
             let top_ref = self.bk_on() && matches!(strip_paren(a), Expr::Ref(..));
             // (an argument `&x` the result does not borrow from: its loan ends with the call)
@@ -1776,6 +1892,9 @@ impl Cx<'_> {
                 self.bk_frame();
             }
             let r = self.expr(a, exp);
+            if matches!(pt, Ty::Ref(true, _)) {
+                self.bk_reborrow_arg(a);
+            }
             if top_ref {
                 // (the loan of an argument `&x` / `&mut x` lasts until the call: `f(&mut x, &x)` conflicts)
                 let srcs = self.bk_frame_end_quiet();
@@ -1789,6 +1908,8 @@ impl Cx<'_> {
             }
             let (v, mut t) = r?;
             self.closure_hint = None;
+            self.closure_bound = None;
+            self.closure_prelude = false;
             // クロージャの実際の引数・戻り値の型から境界の型パラメータを解く (`map<U, F: FnOnce(T) -> U>`)
             if let Some((bps, bret)) = &fb {
                 let mut ct = t;
@@ -1901,10 +2022,14 @@ impl Cx<'_> {
                 return Ok((None, Ty::Unit));
             }
         }
+        // (a callee that requires 'static (`fn f<T: 'static>`, `&'static T`): from here on, checked)
+        if !self.rg.on && self.rg.eligible && self.inline_depth == 0 && self.prog.sigs[id as usize].regions.as_deref().is_some_and(Self::callee_needs_static) {
+            self.rg_late_on();
+        }
         let sol_rg = if self.rg_on() { Some(sol0.clone()) } else { None };
         let (target, sig) = self.resolve_call(id, &arg_tys, sol0, expected, span)?;
         if let Some(sol) = sol_rg {
-            self.rg_call(id, &sol, args, &sig.params, sig.ret, rg_recv, skip == 1, span);
+            self.rg_call(id, &sol, turbofish, args, &sig.params, sig.ret, rg_recv, skip == 1, if span.line == 0 { rg_sp } else { span });
         }
         if self.prog.names[id as usize] == "__core_transmute" && sig.params.len() == 1 {
             self.check_transmute(sig.params[0], sig.ret, span)?;

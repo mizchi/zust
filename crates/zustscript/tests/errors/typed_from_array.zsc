@@ -1,0 +1,3 @@
+// expect: type mismatch: expected F64Array, found Array<f64>
+fn f(xs: F64Array) -> f64 { 1.0 }
+fn g(ys: Array<f64>) -> f64 { f(ys) }

@@ -1,0 +1,90 @@
+[
+  {
+    "proposal": "002-anonymous-records",
+    "persona": "ts-dev",
+    "scores": {
+      "R1": {
+        "score": 4,
+        "why": "`fn TodoItem({ todo, onToggle }: { todo: Todo, onToggle: OnToggle }) -> Jsx`、`{ ...t, done: !t.done }`、`{ total, done }`、`type OnToggle = (id: i32) => ()` は、React / TS のコードとほぼ同じ字面。減点は 3 つ。戻り値の `()` が void に見えない。`if c { { ...t, done: x } } else { t }` の二重の波括弧。`-> { total: i32, done: i32 } {` で、型の波括弧と本体の波括弧が並ぶ"
+      },
+      "R2": {
+        "score": 4,
+        "why": "spread とパターンの残りが 001 と同じ `...` になった。`type` は関数型とタプルにも使える。更新の規則は 001 のバリアントにもそのまま効く。r2 の 3 から上げた。例外は 2 つ。再帰する型と `@nominal` の型は名前で区別される(どちらも理由と書き方は明確)。`{ x }` だけは、レコードの字面に見えてもブロックで警告になる。`.d.ts` の出力例は、構造的な別名なのに今も `interface`"
+      },
+      "R3": {
+        "score": 4,
+        "why": "ブロックかレコードかは、`{` の次の 2 トークン(`ident :` / `ident ,` / `...`)だけで決まり、型に依存しない。関数型の `(T)` も `=>` の有無で決まる。1 要素のタプルの型は `(T,)`。人にとって紛らわしいのは `{ x }` だけで、それには警告が出る"
+      },
+      "R4": {
+        "score": 4,
+        "why": "props の型の名前 3 つと `Stats` が消え、`props.` もなくなった。型の `=>` が右結合になり、カリー化した型も TS と同じ長さで書ける。TS より書けないものは 4 つ。spread は 1 つだけ(`{ ...defaults, ...props }` は書けない)。spread でフィールドを足せない。幅の部分型がない。props の型とパターンでフィールド名を 2 回書く(未決)"
+      },
+      "R5": {
+        "score": 3,
+        "why": "r2 の high『`let r = { x };` が静かに `x` になる』は、警告で捕まるようになった。後ろに置いた `...t`、`..t`、`fn(…) -> ()`、ブロックの先頭のレコードの形にも、直し方つきの診断がある。ただし警告は block() の先頭でも出ると書いてあり、このままでは誤検出が多い。提案自身の `toggle` の `else { t }`、001 の `{ None }`、React の `style={{ color }}` が該当する。正しいコードに出る警告は無視されるようになり、本当の誤りも見落とされる。警告を式の位置に絞れば 4"
+      },
+      "R6": {
+        "score": 4,
+        "why": "`export declare function TodoItem(props: { readonly todo: Todo; readonly onToggle: OnToggle }): $ReactElement` は、TS からそのまま使える。分割代入した引数の名前も、`props` / `arg0` と決まった。JS は普通のオブジェクトと spread で、予想どおり。一手間残る点は 4 つ。構造的な別名なのに `interface` を出す(TS では宣言のマージや代入可能性で `type` と挙動が違う)。無名の戻り値の型に名前がなく、`ReturnType<typeof stats>` が要る。`@nominal` の `.d.ts` の形が未決。`() => void` でなく `()` の扱い(`void` の別名)も未決"
+      },
+      "R7": {
+        "score": 4,
+        "why": "React の書き方(props の分割代入、省略形、spread、`=>` の関数型、右結合)がそのまま通じる。覚えることは少し残る。幅の部分型がない。spread は 1 つだけ。二重の波括弧。宣言だけ `-> R`。一番引っかかるのは、001 の『`...` なしの書き漏らしはエラー』がレコードのパターンにも効くことだ。TS では毎日書く `fn Item({ todo }: Props)` のような一部だけの分割代入が、`...` を足すまでエラーになる"
+      },
+      "R8": {
+        "score": 4,
+        "why": "構文の判定は 1 つの関数で、`try_arrow_params` と同じ保存と巻き戻しで足りる(今の parse.rs の primary の `T::P(\"{\")` から block() に入る所に差し込める)。`Ty::Rec` の単一化で差分を出す方針、再帰の強連結成分、`Ty::Fn` の引数名を等価性から外すことも、具体的に書かれている。気になる点: 表示名を『形から逆に引く』と、hover のたびに別名の表を引くことになる。増分ビルドで別名が増減すると、表示名と `@wasm` の struct 名(最初に宣言した別名)が変わる"
+      }
+    },
+    "blocker": [],
+    "issues": [
+      {
+        "severity": "high",
+        "where": "B. 『`{ x }` は常に警告』と『判定は式の `{` と block() の先頭の両方で呼ぶ』",
+        "problem": "文字どおりに読むと、if / else / fn / match の腕の本体の `{ t }` にも警告が出る。提案自身の `toggle` の `else { t }`、001 の `if found < 0 { None }`、JSX の `style={{ color }}`(React の定番)が該当する。正しいコードに出る警告は無視されるようになり、本当に `let r = { x };` と書き誤ったときの警告も見落とされる",
+        "suggestion": "警告は、式の位置に置いた `{`(`let` の右辺、引数、フィールドの値、配列の要素、`=>` の直後、JSX の `{…}` の中)に限る。if / else / while / for / fn の本体の波括弧は対象外と明記する。JSX の `{{ color }}` は、JSX の式コンテナの中なのでレコードにする案も検討する"
+      },
+      {
+        "severity": "medium",
+        "where": "D. 引数の位置の分割代入 / 001 の C『レコードのパターンも `...` なしで書き漏らしたらエラー』",
+        "problem": "TS では `function Item({ todo }: Props)` や `const { x } = p` のように、一部だけ取り出すのが普通で、残りを書く必要はない。この規則では、props の分割代入のたびに `{ todo, ... }` と書かされる。バリアントの match ではフィールドの追加に気づける利点があるが、引数と `let` のレコードのパターンには、その利点が薄い",
+        "suggestion": "書き漏らしのエラーは match のバリアントのパターンに限る。`let` と引数の位置のレコードのパターンは、TS と同じく一部だけでよいことにする(lint で切り替えられる警告にしてもよい)"
+      },
+      {
+        "severity": "medium",
+        "where": "出力 / `.d.ts` の `export interface Todo`",
+        "problem": "本文では `type` は構造的な別名なのに、出力は `interface`。TS では、interface は同名の宣言とマージされ、index signature を持つ型への代入可能性でも `type` と挙動が違う。r2 の質問に答えていない",
+        "suggestion": "`export type Todo = { readonly id: i32; … }` を出す。interface にするなら、理由を書く"
+      },
+      {
+        "severity": "low",
+        "where": "B. 更新(spread は先頭に 1 つだけ)",
+        "problem": "React の既定値のマージ `{ ...defaults, ...props }` が書けない。代わりの書き方も示されていない",
+        "suggestion": "同じ型同士の複数の spread を許すかを未決事項に足す。書けない間の代わり(フィールドを並べ直す、`merge` の関数)を例で示す"
+      },
+      {
+        "severity": "low",
+        "where": "未決事項 `void`",
+        "problem": "関数型は TS にそろったのに、`(next: T) => ()` だけが TS から読めない。2 回続けて未決のまま",
+        "suggestion": "型の位置でだけ `void` を `()` の別名として受け付ける。`.d.ts` は今までどおり `void` を出す"
+      },
+      {
+        "severity": "low",
+        "where": "E / A の表示名",
+        "problem": "struct 名は『最初に宣言した別名』、表示名は『形から逆に引く(別名が 1 つのときだけ)』。後から同じ形の別名を足すと、離れた所の hover とエラーの表示、`@wasm` の Rust の名前が変わる",
+        "suggestion": "表示名は、注釈から来た名前を優先する(すでにそう書いてある)。逆に引くのは、同じファイルの別名に限ると明記する"
+      }
+    ],
+    "questions": [
+      "`{ x }` の警告は、if / else / fn の本体の波括弧にも出るか。JSX の `style={{ color }}` はどう扱うか",
+      "引数と `let` のレコードのパターンでも、`...` なしの書き漏らしはエラーか(TS の一部だけの分割代入)",
+      "`.d.ts` は `interface` と `type` のどちらを出すか",
+      "同じ型同士なら、複数の spread を許すか",
+      "`void` を型の位置で受け付けるか"
+    ],
+    "alternative": {
+      "summary": "`{ x }` の警告は式の位置にだけ出す。引数と let のレコードのパターンは、TS と同じく一部だけでよいことにする。`.d.ts` は `type` で出す",
+      "example": "fn toggle(todos: Array<Todo>, id: i32) -> Array<Todo> {\n  todos |> .map((t) => if t.id == id { { ...t, done: !t.done } } else { t })   // else の本体なので警告なし\n}\nlet r = { x };          // 式の位置なので警告: `{ x, }` か `x`\npub fn TodoItem({ todo }: { todo: Todo, onToggle: OnToggle }) -> Jsx { … }   // 一部だけの分割代入(TS と同じ)\n// .d.ts\nexport type Todo = { readonly id: i32; readonly title: string; readonly done: boolean };"
+    }
+  }
+]

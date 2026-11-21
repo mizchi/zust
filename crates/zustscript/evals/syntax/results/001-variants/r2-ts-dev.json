@@ -1,0 +1,98 @@
+[
+  {
+    "proposal": "001-variants",
+    "persona": "ts-dev",
+    "scores": {
+      "R1": {
+        "score": 4,
+        "why": "`Circle { center: Vec2, r: f64 }` と `Circle { r, .. } => 3.14.. * r * r` は、TS の判別共用体を知っていれば説明なしで読める。.d.ts も `center` / `r` の名前のまま出る。減点は 2 つ。r2 で足した `c @ Circle { center, .. }` の `@` は、TS ではデコレータ(このファイルでも `@wasm`)に見える。パターンの `..` と更新の `...c` が同じ腕に並ぶ(`l @ Label { at, .. } => Label { ...l, at: add(at) }`)のも初見では迷う"
+      },
+      "R2": {
+        "score": 3,
+        "why": "規則 A.1 の廃止で、解決の規則は 1 本になった。ただし r2 の改訂で次の不揃いが出た。(1) パターンでは残りを `..`、式では spread を `...` と書く。JS では `{ a, ...rest }` も `{ ...t, a }` も同じ `...` なので、ずれる。(2) `@` が、ディレクティブ(`@wasm` / `@simd` / `@tag`)とパターンの束縛の 2 つの意味を持つ。(3) effect の操作名だけは、一意の制約が残る。(3) には理由があるが、例外が 1 つより多い"
+      },
+      "R3": {
+        "score": 3,
+        "why": "構文はどれも先読み 1〜2 トークンで決まる(`::`、`{`、`@`)。修飾しない名前は、期待する型と関数の終わりまでの遅延で決まる。伝わる場所も列挙されていて、規則は明快。ただし、どの enum かは型の文脈に依存する。`describe_later` の `let h = if c { None } else { .. }` のように、then 側を読んだだけでは人にも決められない字面が残る。そのためルーブリックでは 3"
+      },
+      "R4": {
+        "score": 4,
+        "why": "`Label(_, _, _)` が `Label { .. }` になり、`c @ Circle { center, .. } => Circle { ...c, center: add(center) }` で、全フィールドの書き直しがなくなった。`None` も enum ごとに使える。一方で、TS なら `{ ...s, center }` だけで済むところに、名前の付け直し(`c @`)とバリアント名の再記述(`Circle { ...c, .. }`)が要る。`Rect { min, max } => Rect { min: add(min), max: add(max) }` は、今までどおり全部書く"
+      },
+      "R5": {
+        "score": 4,
+        "why": "決まらない `None` は修飾を求めるエラーになり、クイックフィックスもある。書き漏らした `..`、判別キーとの衝突、浮動小数点のリテラルパターンもコンパイル時に止まる。遅延した解決には弱点がある。後の使い方を書き違える(別の enum を受ける関数に渡すなど)と、その enum に決まってしまう。その結果、離れた前の行の `At { index: 1 }` で『Parsed に At はない』という誤りになりうる。誤りが出る位置と、原因の位置がずれる"
+      },
+      "R6": {
+        "score": 4,
+        "why": "名前付きのフィールドが名前のままのプロパティになり、`export declare namespace Shape { type Circle = .. }` で、TS 側から `Shape.Circle` を受けられる。r1 で要った `Extract<..>` が要らなくなった。残る一手間: TS 側で値を作るには `TAG: \"Circle\"` と `f64(2)` の brand を自分で書く(コンストラクタが export されない)。`Hit { None, At {..} }` のように、データのないバリアントとあるバリアントが混ざる enum で `None` がどう出るかは、表現の決定待ち"
+      },
+      "R7": {
+        "score": 3,
+        "why": "`let { x, y } = p` と `.d.ts` の改善で、TS に近づいた。それでも、TS の経験からは来ない概念が 4 つ残る。`Shape::Circle` の `::`、`@` 束縛、パターンの `..`、絞り込みが scrutinee(`s`)に効かないこと。TS の判別共用体は `switch (s.kind)` の中で `s` そのものが絞り込まれるので、`s.r` が書けない理由は最初に必ず引っかかる"
+      },
+      "R8": {
+        "score": 3,
+        "why": "遅延は関数の中で閉じる(finish_fn)。アイテム単位の増分検査は変わらない。パターンの Id と side table の方針も書かれている。一方で、編集の途中では決まっていない `None` が多い。そのため hover と補完は、候補つきの型変数を見せる必要がある。match の scrutinee 自体が遅延しているときに、パターンから決めるのか(`describe_later`)も、実装の詳細に依存する"
+      }
+    },
+    "blocker": [],
+    "issues": [
+      {
+        "severity": "high",
+        "where": "B. `@` 束縛と絞り込み / `moved` の変更後",
+        "problem": "TS の開発者は、match の腕の中で `s` そのものが Circle に絞り込まれると期待する(TS の switch での絞り込みと同じ)。この提案では `s.r` も `Circle { ...s, .. }` も書けず、`c @` で別名を付ける必要がある。`@` は TS ではデコレータの記号で、このファイルでも `@wasm fn` と同じ字面になる。r1 の『書き直しが長い』は解決したが、TS から来る人には新しく覚える概念になった",
+        "suggestion": "scrutinee が変数(またはフィールドの経路)なら、腕の中ではその変数を絞り込んだ型にする: `Circle { center, .. } => Circle { ...s, center: add(center) }`。`@` は、入れ子のパターンで部分に名前を付けるときだけに残す(あるいは r3 まで入れない)"
+      },
+      {
+        "severity": "medium",
+        "where": "B. パターンの `..` と、002 の更新の `...t`",
+        "problem": "002 で更新を JS 式の `...t` にしたため、パターンの『残りを捨てる』`..` と字面が近く、意味も違う。TS の人はパターンに `{ r, ...rest }` と書き、更新に `{ ..t, r }` と書いてしまいやすい。同じ腕の左右に `..` と `...` が並ぶ(`l @ Label { at, .. } => Label { ...l, .. }`)",
+        "suggestion": "パターンでも `...` を受け付ける(`Circle { r, ... }` を『捨てる』、`Circle { r, ...rest }` を『残りを束縛』にする)。`..` は Rust の書き方として許すか、`...` への直し方つきのエラーにする。r1 の『書き漏らしがエラー』も、JS の `...rest` の延長になって覚えやすくなる"
+      },
+      {
+        "severity": "medium",
+        "where": "A.2 遅延した解決 / `describe_later`",
+        "problem": "遅延によって、決まる位置と誤りが出る位置が離れる。`let h = if c { None } else { At { index: 1 } }` の後で `h` を Parsed を受ける関数に渡し間違えると、h は Parsed に決まり、離れた前の行の `At` で『Parsed に At はない』のようなエラーになる。r1 の『非局所的に壊れる』の関数内版が残っている。また、scrutinee が遅延している match で、パターンの `At { index }` から決めるのか、A の『match のパターンでは照合する値の型で決まる』と循環するのかが書かれていない",
+        "suggestion": "候補が 1 つに絞られたときのエラーで、『ここで決まった』使い方の位置も一緒に示す(secondary label)。遅延したまま scrutinee になったときは、パターンの中のバリアント名からも候補を絞る、と規則に明記する"
+      },
+      {
+        "severity": "medium",
+        "where": "A. 期待する型が伝わる場所",
+        "problem": "列挙に JSX の属性の値(`<Marker hit={None} />`。props は型検査されるのに)、タプルの要素、`|>` の左辺と右辺、`perform` の引数、`push` / `concat` の引数がない。『これ以外では伝わらない』とあるので、React で一番よく書く JSX の属性で `None` に修飾が要ることになる",
+        "suggestion": "JSX の属性の値(props の型から)とタプルの要素を列挙に足す。`|>` は脱糖の後の引数の位置として扱う、と書く"
+      },
+      {
+        "severity": "medium",
+        "where": "B. 更新 `Circle { ...c, .. }` と、002 の構造的なレコード",
+        "problem": "spread の元が何なら許されるかが書かれていない。(1) 構造的なレコード `rec: { center: Vec2, r: f64 }` を `Circle { ...rec, r: 1.0 }` に spread できるか。そのとき JS は `{ ...rec, r: 1.0 }` だけでは `TAG` が付かない。(2) `{ ...c, center: x }`(バリアント名なし)で c が Circle に絞り込まれているとき、Shape になるのか、無名のレコードになるのか。TS の人は後者を書く。(3) TS から余分なプロパティを持って渡された値の spread で、その余分なプロパティが enum の値に紛れ込む",
+        "suggestion": "出力では判別キーを常に明示する(`{ ...c, TAG: \"Circle\", center }`。判別キーは spread の後に置く)。絞り込んだバリアントを spread した、名前なしの `{ ...c, x }` はそのバリアント(Shape)にする。レコードからバリアントへの spread は許すか禁じるか、明記する"
+      },
+      {
+        "severity": "low",
+        "where": "出力 / `.d.ts`",
+        "problem": "TS 側でバリアントの値を作るには、`{ TAG: \"Circle\", center, r: f64(2) }` を手で書く必要がある。判別キーの名前が `@tag` で変わると、TS 側のコードも壊れる。`declare namespace` は、eslint の `no-namespace` に当たるプロジェクトもある",
+        "suggestion": "`Shape.Circle(..)` のようなコンストラクタ関数を JS に export する(表現が変わっても TS 側は壊れない)か、少なくとも未決事項に挙げる"
+      },
+      {
+        "severity": "low",
+        "where": "A. 同名のコンポーネント関数より、バリアントを優先",
+        "problem": "期待する型が enum のときだけバリアントを優先するので、`let x = Label { .. }`(注釈なし)ではどちらになるかが、遅延と組み合わさって分かりにくい",
+        "suggestion": "コンポーネントは `fn Label(props) -> Jsx` で、`Label { .. }` と書く呼び方はない。そのため、`Name { ..}` の字面は常にレコード / バリアントだと明記する。衝突するのは `Label(..)` の呼び出しの字面だけだと絞って書く"
+      }
+    ],
+    "questions": [
+      "scrutinee が変数のとき、腕の中でその変数を絞り込まない理由は何か(TS の switch での絞り込みとの差)",
+      "遅延した値を match したとき、パターンのバリアント名から enum を決めるか",
+      "絞り込んだバリアントを、バリアント名なしで `{ ...c, center }` と spread したら、何の型になるか。構造的なレコードからバリアントへの spread は書けるか",
+      "パターンで `...rest`(残りを束縛)は書けるか。`..` と `...` の両方を受けるか",
+      "JSX の属性の値とタプルの要素に、期待する型は伝わるか",
+      "トップレベルの定数(あれば)での遅延は、どの範囲で閉じるか",
+      "TS 側でバリアントの値を作るためのコンストラクタを export するか"
+    ],
+    "alternative": {
+      "summary": "scrutinee の変数を、腕の中で TS と同じく絞り込む。`@` は入れ子のときだけに残し、パターンの残りも JS と同じ `...` で書く。絞り込んだ値の名前なしの spread はそのバリアントになる",
+      "example": "pub fn moved(s: Shape, d: Vec2) -> Shape {\n  let add = (p: Vec2) => Vec2 { x: p.x + d.x, y: p.y + d.y };\n  match s {\n    Circle { center, ... } => { ...s, center: add(center) },   // s は Shape.Circle に絞り込まれている\n    Rect { min, max } => { ...s, min: add(min), max: add(max) },\n    Label { at, ... } => { ...s, at: add(at) },\n  }\n}\n// JS: if (s.TAG === \"Circle\") return { ...s, TAG: \"Circle\", center: add(s.center) };"
+    }
+  }
+]

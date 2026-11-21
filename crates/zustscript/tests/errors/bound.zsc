@@ -1,0 +1,3 @@
+// expect: f64 does not satisfy the bound `Integer`
+fn half<T: Integer>(x: T) -> T { x / 2 }
+fn g() -> f64 { half(3.0) }

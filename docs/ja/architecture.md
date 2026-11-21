@@ -16,6 +16,7 @@
 | `crates/core` (`zust-core`) | driver2 (Session2: 解析・check・キャッシュ) と、feature `build` (既定) の driver2/build.rs (機械語・fork の並列化・オブジェクト・リンク・ワークスペース)。下の層を公開し直す | typeck、(build なら) codegen |
 | `crates/ide` (`zust-ide`) | エディタ向けの解析: symbols (documentSymbol / workspace/symbol のシンボル) / navigate (定義・参照・hover・補完。字句の列と定義の表からの軽い型の推定)。コンパイラ本体からは使わない | syntax |
 | `crates/analyzer` (`zust-analyzer`) | LSP サーバ (バイナリ `zust-analyzer`)。診断は driver2 の check、それ以外は ide。ワークスペースの本文はメモリの上限まで | core (build なし)、ide、serde_json |
+| `crates/zurgo` (`zurgo`) | Cargo と互換のドライバ (バイナリ `zurgo`、[zurgo.md](zurgo.md)): 自前の TOML のパーサ、Cargo.toml / Cargo.lock、ソース (メンバー、path、`$CARGO_HOME/registry/src`、index のキャッシュ)、cargo と同じ feature の有効にし方 (ビルドには feature のリゾルバ、`metadata` には依存のリゾルバ)、同じプロセスでビルドする zustc のワークスペース (`CrateSpec`) | `zustc` (根のクレート) |
 | `crates/minclif` | Cranelift に似た API の小さな x86-64 バックエンド (レジスタ割り当て・スタックの struct のフィールドの変数化・ELF の .o)。`from_recording` で記録を組み立て直す | ir |
 | `crates/clif` (`zust-clif`) | driver2 の Cranelift バックエンド: minclif が組み立てた命令の列を Cranelift の IR にしてコンパイルする | minclif、cranelift |
 | `.` (`zustc`) | CLI と、上のものの再輸出 (テスト・ベンチ)。ide と lsp には依存しない (ベンチの lsp/* だけが dev-dependency で使う) | 上のもの (ide・lsp を除く) |

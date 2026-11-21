@@ -1,0 +1,90 @@
+[
+ {
+  "proposal": "002-anonymous-records",
+  "persona": "rust-dev",
+  "scores": {
+   "R1": {
+    "score": 3,
+    "why": "`props: { todo: Todo, onToggle: (id: i32) => () }` は TS 開発者には読めるが、Rust 開発者には型位置の `{ .. }` 自体が新しい。`toggle` の `if t.id == id { { done: !t.done, ..t } } else { t }` の二重波括弧は Rust の目ではブロックの中のブロックに見えて読み違えやすい(提案自身も認めている)。戻り値型 `-> { total: i32, done: i32 } {` の直後に関数本体の `{` が続く字面も紛らわしい。"
+   },
+   "R2": {
+    "score": 2,
+    "why": "関数型が `fn(i32) -> ()` と `(id: i32) => ()` の 2 通り併存し、1 つの extern 宣言の中で `-> (T, (next: T) => ())` と `->` と `=>` が混ざる。レコードの値も `Todo { .. }`(名前付き)、`{ .. }`(期待する型で名前付きになる)、`{ .. }`(無名)の 3 通りになり、同じ字面の型が文脈で変わる。期待する型で作る規則は typed array と揃っているが、似た機能に別の書き方が混在する。"
+   },
+   "R3": {
+    "score": 2,
+    "why": "`{ name:` の 2 トークン先読みでブロック/レコードは決まるが、そのために `{ todo, onToggle }`(全部省略形)を禁止し `{ todo, onToggle: f }` は許すという、人には理由の見えない非対称が生じる。未決事項の案(期待する型がレコードならレコードとして読む)は構文解析が型に依存する。`{}` は空ブロック(`()`)か空レコードか、`match { a: 1 } { .. }` / `if` の条件で現行の `no_rec` が無名レコードにどう効くかも書かれていない。型の `(i32)` は現 parse.rs では 1 要素タプルになるので、`=>` を見るまで関数型か決まらない。"
+   },
+   "R4": {
+    "score": 3,
+    "why": "props 型と `Stats` の名前が不要になりコンポーネントは短くなる。一方で `{ total, done }` のような Rust の `Stats { total, done }` 相当の省略形が書けず `{ total: total, done: done }` と長くなる。`@wasm` で無名レコードが使えないため `--all-js`/`@wasm` を切り替えられる前提が型を無名にした時点で崩れる。省略可能フィールド(`title?:`)もなく JSX props で表現力が足りない。"
+   },
+   "R5": {
+    "score": 3,
+    "why": "幅の部分型を入れず余分なフィールドもエラーにするのは誤りにくく Rust 開発者には好ましい。ただし `let t: Todo = { id: 1, .. }` は通るのに `let a = { id: 1, .. }; let t: Todo = a;` は型エラー(無名と名前付きは別の型)になり、式を変数に切り出すリファクタリングで型エラーが出て、メッセージが分かりにくくなる。`type Celsius = { v: f64 }` と `type Meters = { v: f64 }` のような同形の名前付き型があると、期待する型が違うだけで同じリテラルがどちらにもなる。"
+   },
+   "R6": {
+    "score": 4,
+    "why": "JS は今までどおりプレーンなオブジェクトで、`.d.ts` は `{ readonly total: i32; readonly done: i32 }` と `(id: i32) => void` に引数名が入り、TS 側から見て自然で予想どおり。ただし TS 側から余分なプロパティを持つオブジェクト(変数経由なら excess property check を通る)が渡ってきたとき、zustscript 側で余分なフィールドが見えないことが問題にならないかは書かれていない。"
+   },
+   "R7": {
+    "score": 3,
+    "why": "Rust には無名 struct がなく関数型も `fn(i32) -> ()` / `impl Fn(i32)` が普通。提案は TS 寄りに倒すので Rust 開発者には新しく覚えることが増える(`=> ()` で unit を返す型、省略形が全部のときだけ書けない、期待する型で名前付きレコードになる)。`fn(..) -> ..` を将来警告にする方針は Rust 経験を積極的に捨てる方向。"
+   },
+   "R8": {
+    "score": 3,
+    "why": "構造的同一性はフィールド集合を整列して比べればよく、幅の部分型なしなので単一化に無理はない。しかし省略形の扱いを型依存にする案を採ると構文解析が型検査に依存し、エラー回復と補完が難しくなる。長い無名型がエラーメッセージや hover に出る問題も未決のまま。将来の effect 行 `fn(A) -> B / e` を `(A) => B` の書き方にどう載せるかも示されていない。"
+   }
+  },
+  "blocker": [],
+  "issues": [
+   {
+    "severity": "high",
+    "where": "出力の節『`@wasm` では無名のレコードは使えない』",
+    "problem": "props 以外(`stats` の戻り値 `{ total: i32, done: i32 }` など)で無名レコードを使った関数は `@wasm` を付けた途端エラーになり、言語の柱である『同じ zustscript を JS でも wasm でも実行する』が型の書き方の選択で壊れる。",
+    "suggestion": "最初からフィールド名と型の集合から決定的に名前を作る(例: `ZsAnon_done_i32_total_i32`)。同形は同名の 1 つの struct に。後回しにするなら `@wasm` 関数から到達可能なシグネチャでの無名レコードを早期に警告する。"
+   },
+   {
+    "severity": "high",
+    "where": "B『期待する型が名前付きのレコードなら、その型の値になる』と A『名前付きと無名は別の型』",
+    "problem": "`let t: Todo = { id: 1, title: \"a\", done: false };` は通るが `let x = { id: 1, title: \"a\", done: false }; let t: Todo = x;` は型エラー。式を変数に切り出すだけで壊れ、エラーは `{ id: i32, title: String, done: bool }` と `Todo` の不一致という分かりにくい形になる。",
+    "suggestion": "注釈なし `let` に入る無名レコード値は型を確定させず、最初に使われた場所の期待する型で確定させる(数値リテラルと同じ扱い)。または、エラーメッセージに『`Todo { .. }` と書く / `let x: Todo` と注釈する』直し方を必ず出すと規定する。"
+   },
+   {
+    "severity": "medium",
+    "where": "B『`{ todo, onToggle }` だけは書けない』",
+    "problem": "最初のフィールドが `name:` かどうかで省略形の可否が変わる規則は人には理由が見えない。Rust 開発者が普段書く `Stats { total, done }` 相当が書けず `{ total: total, done: done }` と冗長になる。",
+    "suggestion": "代替案 2 の印(`#{ total, done }`)を採るか、名前付き型を書く `Stats { total, done }` の形に寄せる。印なら先読み 1 トークンで決まり、`if c { #{ done: !t.done, ..t } }` の二重波括弧も解消する。"
+   },
+   {
+    "severity": "medium",
+    "where": "C の TS 風関数型と `fn(i32) -> ()` の併存",
+    "problem": "`extern \"react\" fn useState<T>(init: T) -> (T, (next: T) => ())` のように `->` と `=>` が 1 行に混ざる。2 通りの書き方が長く併存する。また型の `(i32)` は現 parse.rs では 1 要素タプルで、`=>` を見るまで関数型か決まらない。",
+    "suggestion": "引数名が目的なら `fn(id: i32) -> ()` と既存の書き方に名前を許すだけで `.d.ts` の改善は同じく得られる。TS 風に変えるなら 1 要素タプル型を廃止し `(T) =>` だけが関数型、と明記する。"
+   },
+   {
+    "severity": "medium",
+    "where": "未決事項『任意のフィールド `title?: String`』",
+    "problem": "JSX の props で無名レコードを使う動機の中心なのに省略可能 prop が書けず、結局名前付き型に戻る場面が多くなる。",
+    "suggestion": "`title?: String` を `Option<String>` として入れ、JSX で省略された prop は `None` にする規則をこの提案に含める。"
+   },
+   {
+    "severity": "low",
+    "where": "B の値の構文全般",
+    "problem": "`{}` が空ブロック(`()`)か空レコードか、`if` の条件/`match` の照合する値の位置(現 `no_rec`)で無名レコード値が書けるかが書かれていない。",
+    "suggestion": "`{}` は常にブロック、条件位置の無名レコードは括弧が必要、と明記する。"
+   }
+  ],
+  "questions": [
+   "001 のレコードパターン `let Vec2 { x, y } = p;` に対応して、無名レコードの分割代入 `let { total, done } = stats(todos);` は書けるか(この場合はブロックとの曖昧さがない)",
+   "無名レコード同士の `==` は使えるか。フィールド順の違う 2 つの型を同じ型として比較するか",
+   "総称型の中の無名レコード(`Array<{ id: i32 }>`、`Option<{ x: f64 }>`)の構造的同一性と単相化(`@wasm`)はどうなるか",
+   "将来の effect 行 `fn(A) -> B / e` を TS 風の `(A) => B` ではどう書くか",
+   "TS 側から余分なプロパティを持つオブジェクトが渡されたとき、`{ ..t }` の更新で余分なプロパティはコピーされるか(JS のスプレッドならされる)、それは zustscript の型と食い違わないか"
+  ],
+  "alternative": {
+   "summary": "無名レコード値には `#{ .. }` の印を付けて全部省略形も書けるようにし二重波括弧も消す。関数型は既存の `fn(..) -> ..` に引数名を許すだけにする。`@wasm` では無名レコードにフィールド集合から決定的な名前を付ける。",
+   "example": "extern \"react\" fn useState<T>(init: T) -> (T, fn(next: T) -> ()) = \"useState\";\n\npub fn TodoItem(props: { todo: Todo, onToggle: fn(id: i32) -> () }) -> Jsx { .. }\n\nfn toggle(todos: Array<Todo>, id: i32) -> Array<Todo> {\n  todos |> .map((t) => if t.id == id { #{ done: !t.done, ..t } } else { t })\n}\n\npub fn stats(todos: Array<Todo>) -> { total: i32, done: i32 } {\n  let total = todos.len();\n  let done = todos.filter((t) => t.done).len();\n  #{ total, done }\n}\n\nlet #{ total, done } = stats(todos);   // 分割代入も同じ印で"
+  }
+ }
+]

@@ -1,0 +1,98 @@
+// corpus: Option / Result (the current grammar). Each file declares its own Option and Result, writes its own
+// helpers for them, passes every error on by hand with a nested match, and must pass a field that may be absent.
+
+enum Option<T> { None, Some(T) }
+enum Result<T, E> { Ok(T), Err(E) }
+
+enum FormError { Empty(String), TooLong(String, i32), NotFound(i32) }
+
+type Todo = { id: i32, title: String, note: Option<String>, done: bool }
+type Draft = { title: String, note: String }
+
+// helpers every file writes again (there is no method on a user enum)
+fn map_opt<T, U>(o: Option<T>, f: fn(T) -> U) -> Option<U> {
+  match o { Some(x) => Some(f(x)), None => None }
+}
+fn unwrap_or<T>(o: Option<T>, d: T) -> T {
+  match o { Some(x) => x, None => d }
+}
+
+fn find(todos: Array<Todo>, id: i32) -> Option<Todo> {
+  let hits = todos.filter((t) => t.id == id);
+  if hits.len() == 0 { None } else { Some(hits[0]) }
+}
+
+fn non_empty(field: String, s: String) -> Result<String, FormError> {
+  let t = s.trim();
+  if t.len() == 0 { Err(Empty(field)) } else { Ok(t) }
+}
+
+fn at_most(field: String, s: String, n: i32) -> Result<String, FormError> {
+  if s.len() > n { Err(TooLong(field, n)) } else { Ok(s) }
+}
+
+// each step is a match that only passes the error on: the main path moves one level deeper per step
+fn validate(d: Draft, id: i32) -> Result<Todo, FormError> {
+  match non_empty("title", d.title) {
+    Err(e) => Err(e),
+    Ok(t) => match at_most("title", t, 80) {
+      Err(e) => Err(e),
+      Ok(title) => {
+        let n = d.note.trim();
+        let note = if n.len() == 0 { None } else { Some(n) };
+        Ok(Todo { id: id, title: title, note: note, done: false })
+      },
+    },
+  }
+}
+
+// checking every element: the first error is carried out of the loop by hand, and push builds a new array each time (O(n²))
+fn titles(ds: Array<Draft>) -> Result<Array<String>, FormError> {
+  let mut out = [];
+  let mut err = None;
+  for d in ds {
+    match non_empty("title", d.title) {
+      Err(e) => { err = Some(e); break; },
+      Ok(t) => { out = out.push(t); },
+    }
+  }
+  match err { Some(e) => Err(e), None => Ok(out) }
+}
+
+fn rename(todos: Array<Todo>, id: i32, d: Draft) -> Result<Array<Todo>, FormError> {
+  match find(todos, id) {
+    None => Err(NotFound(id)),
+    Some(old) => match validate(d, id) {
+      Err(e) => Err(e),
+      Ok(t) => Ok(todos.map((x) => if x.id == id { Todo { done: old.done, ..t } } else { x })),
+    },
+  }
+}
+
+pub fn title_of(todos: Array<Todo>, id: i32) -> String {
+  unwrap_or(map_opt(find(todos, id), (t) => t.title), "(none)")
+}
+
+pub fn message(e: FormError) -> String {
+  match e {
+    Empty(f) => f + " is empty",
+    TooLong(f, n) => f + " is longer than " + n.to_string(),
+    NotFound(id) => "no todo " + id.to_string(),
+  }
+}
+
+// a prop that may be absent is still a prop: every caller passes it, even when there is none
+type TodoRowProps = { todo: Todo, subtitle: Option<String> }
+
+pub fn TodoRow(props: TodoRowProps) -> Jsx {
+  <li>
+    {props.todo.title}
+    {match props.subtitle { Some(s) => <small>{s}</small>, None => <small /> }}
+  </li>
+}
+
+type TodoListProps = { todos: Array<Todo> }
+
+pub fn TodoList(props: TodoListProps) -> Jsx {
+  <ul>{props.todos |> .map((t) => <TodoRow key={t.id} todo={t} subtitle={None} />)}</ul>
+}

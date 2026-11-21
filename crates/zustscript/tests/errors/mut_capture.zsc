@@ -1,0 +1,5 @@
+// expect: a closure cannot capture the mutable local `total`
+fn f(xs: Array<i32>) -> Array<i32> {
+  let mut total = 0;
+  xs.map((x) => x + total)
+}

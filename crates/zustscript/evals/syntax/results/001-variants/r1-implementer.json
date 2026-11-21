@@ -1,0 +1,111 @@
+[
+ {
+  "proposal": "001-variants",
+  "persona": "implementer",
+  "note": "condensed from the evaluator's report (scores verbatim, findings summarized)",
+  "scores": {
+   "R1": {
+    "score": 4,
+    "why": "Rust の struct バリアント / TS のオブジェクトの形で読める。修飾なしの None は期待する型を知らないと読めない"
+   },
+   "R2": {
+    "score": 4,
+    "why": "生成は今のレコードと同じ字面で primary() がそのまま EK::Record として読む。位置引数との混在と ..s の不可が例外"
+   },
+   "R3": {
+    "score": 3,
+    "why": "パターンの Name { は 1 トークンで決まる。式の Name { は同名のレコードとバリアントの規則がない。修飾なしの解決は型に依存"
+   },
+   "R4": {
+    "score": 4,
+    "why": "Label(_, _, _) が短くなり、フィールド追加に強い。s.r と ..s は書けない"
+   },
+   "R5": {
+    "score": 4,
+    "why": "書き漏らしエラーと ambiguous エラーで静かに解決されない。検査の順番で余計な曖昧エラー、同名のコンポーネント Label がバリアントを隠す"
+   },
+   "R6": {
+    "score": 4,
+    "why": "_0 が名前になり予想しやすい。TAG という名前のフィールドの衝突に答えていない"
+   },
+   "R7": {
+    "score": 4,
+    "why": "新しく覚えるのは解決の順番だけ"
+   },
+   "R8": {
+    "score": 3,
+    "why": "構文は小さいが、infer_effects が型検査の前に名前だけで解決、Pat に Id がない、EK::Call が callee に期待する型を渡さない、規則 1 がファイル全体の enum に依存"
+   }
+  },
+  "blocker": [],
+  "issues": [
+   {
+    "severity": "high",
+    "where": "infer_effects / EffWalk(型検査の前に名前だけで perform と handle を解決)",
+    "problem": "一意性をなくすと effect の操作をどの effect に結ぶか決められない。handle の arm に修飾の書き方もない",
+    "suggestion": "effect の操作名だけ一意のまま(別の表 op_of)、または handle の arm に E::Op の修飾を足す"
+   },
+   {
+    "severity": "high",
+    "where": "Pat::Variant に Id がない。js.rs pat_cond / EK::Perform、lower.rs pat が variant_of[v] を直接引く",
+    "problem": "checker が解決した enum を emitter に渡す side table が作れない",
+    "suggestion": "Pat に Id を持たせ Info.pat_enum に記録"
+   },
+   {
+    "severity": "high",
+    "where": "規則 2 と infer(EK::Call は infer(f, None)、if の then に期待する型なし、match の out が fresh)",
+    "problem": "期待する型が届くかが推論の順番に依存。`let h = if c { None } else { At(1) }` が then 側で曖昧になる。At(found) には規則 2 が効かない",
+    "suggestion": "Call で callee に expect を渡す。曖昧なものは候補つきの Var で finish_fn まで遅らせる。match では一意なパターンで先に照合する値の型を決める"
+   },
+   {
+    "severity": "medium",
+    "where": "出力の TAG",
+    "problem": "TAG という名前のフィールドが判別キーを上書きする",
+    "suggestion": "判別キーと同名のフィールドをエラーに(@tag で変えたら対象も変える)"
+   },
+   {
+    "severity": "medium",
+    "where": "同名のレコードとバリアント",
+    "problem": "名前空間を 1 つにする案は一意性の制約をレコードとバリアントの間に戻す",
+    "suggestion": "バリアントと同じ規則: 期待する型が X を持つ enum ならバリアント、それ以外はレコード、決まらなければ ambiguous"
+   },
+   {
+    "severity": "medium",
+    "where": "規則 1",
+    "problem": "他の enum の有無に依存し、増分ビルドで広く再検査。prelude / import で範囲が変わる",
+    "suggestion": "期待する型を優先し、一意性は最後の手段。依存はバリアント名の索引に限る"
+   },
+   {
+    "severity": "medium",
+    "where": "irrefutable が構文だけを見る",
+    "problem": "let Vec2 { x, y } が通るかはレコードかバリアントかで決まる",
+    "suggestion": "checker のメソッドにする。Pat のフィールドを Pos | Named(.., rest) に"
+   },
+   {
+    "severity": "low",
+    "where": "VTy::Enum",
+    "problem": "フィールド名がない",
+    "suggestion": "Vec<(String, VTy)> に"
+   },
+   {
+    "severity": "low",
+    "where": "EK::Var の解決順(fn がバリアントより先)",
+    "problem": "同名のコンポーネントがバリアントを隠す",
+    "suggestion": "期待する型が enum なら警告かバリアントを優先"
+   }
+  ],
+  "questions": [
+   "effect の操作も対象か。handle の arm の修飾は",
+   "期待する型が Var のときエラーか遅延か",
+   "規則 1 の「ファイル」は import / prelude を含むか",
+   "空の名前付きバリアント `Empty {}` を許すか",
+   "パターンで `Shape::Circle { r, .. }` は書けるか",
+   "共通フィールドの s.at は将来も不可か",
+   "補完のためのエラー回復をどこまで入れるか"
+  ],
+  "alternative": {
+   "summary": "期待する型を優先し、決まらない引数なしのバリアントは finish_fn まで遅らせる。effect の操作だけ一意のまま。Pat に Id",
+   "example": "let h = if c { None } else { At(1) };   // finish_fn で Hit::None に決める"
+  }
+ }
+]
