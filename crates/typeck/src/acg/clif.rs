@@ -15,6 +15,7 @@ pub mod types {
     pub const I128: Type = Type::I128;
     pub const F32: Type = Type::F32;
     pub const F64: Type = Type::F64;
+    pub const V128: Type = Type::Vec(crate::ir::VBits::B128);
 }
 
 /// メモリアクセスの印 (minclif では意味を持たない)
@@ -201,6 +202,14 @@ impl Ins<'_> {
     }
     pub fn iconst(self, t: Type, x: i64) -> Value {
         let m = &mut self.0.m;
+        // (a vector of zeros, for a default value: a 128-bit constant, or a splat of a wider vector)
+        if let Type::Vec(w) = t {
+            if w == crate::ir::VBits::B128 {
+                return m.vconst(x as u64 as u128);
+            }
+            let z = m.iconst(Type::I64, x);
+            return m.simd(crate::ir::Shape::new(crate::ir::Lane::I64, w), crate::ir::VOp::Splat, &[z]);
+        }
         if t == Type::I128 {
             let lo = m.iconst(Type::I64, x);
             let hi = m.iconst(Type::I64, 0);

@@ -2298,7 +2298,11 @@ impl Program {
                     Some(_) => return Err(format!("missing generics for `{n}`")),
                     // (`zeros::<K>()` / `Buf<K>`: const の名前は const ジェネリクスの引数)
                     None if self.const_index.contains_key(n) => Ty::Array(intern(Ty::Unit), self.const_usize(n)? as u32),
-                    None => return Err(format!("cannot find type `{n}`")),
+                    // (core::arch's vector types, when the program has no type of the name: `v128`, `__m256`)
+                    None => match crate::simd_sig::vector_name(n) {
+                        Some(t) => t,
+                        None => return Err(format!("cannot find type `{n}`")),
+                    },
                 }
             }
             // `Box<dyn Error>`: prelude の __DynError (表示と Debug の文字列を持つ)
@@ -2370,7 +2374,7 @@ impl Program {
             .cloned()
     }
 
-    fn const_usize(&self, name: &str) -> R<u64> {
+    pub fn const_usize(&self, name: &str) -> R<u64> {
         // (`<Foo as Bar>::SIZE`: the trait's under its qualified name, else the only `Foo::SIZE`; an expression with a
         // cast in it, `(1 as usize) + Foo::SIZE`, is not one)
         let word = |s: &str| !s.is_empty() && s.chars().all(|c| c.is_alphanumeric() || c == '_');
@@ -2477,7 +2481,25 @@ impl Program {
         Ok(match e {
             Expr::Lit(t, _) => lit_int(t).ok_or("not an integer constant")?,
             Expr::Paren(x) => self.eval_const(x, depth)?,
-            Expr::Cast(x, _) => self.eval_const(x, depth)?,
+            // (an integer `as` wraps to its type, as rustc's: `4294967297u64 as i32` is 1)
+            Expr::Cast(x, t) => {
+                let v = self.eval_const(x, depth)?;
+                let prim = match &**t {
+                    crate::parse::Ty::Path(None, p) if p.segs.len() == 1 && p.segs[0].args.is_empty() => p.segs[0].name.as_str(),
+                    _ => "",
+                };
+                match prim {
+                    "u8" => v as u8 as i128,
+                    "u16" => v as u16 as i128,
+                    "u32" => v as u32 as i128,
+                    "u64" | "usize" => v as u64 as i128,
+                    "i8" => v as i8 as i128,
+                    "i16" => v as i16 as i128,
+                    "i32" => v as i32 as i128,
+                    "i64" | "isize" => v as i64 as i128,
+                    _ => v,
+                }
+            }
             // (`{ 3 }` / `{ let x = ..; }` is not: a block of one expression; `if c { a } else { b }`)
             Expr::Block(None, false, b) if b.stmts.len() == 1 => match &b.stmts[0] {
                 crate::parse::Stmt::Expr(x, false) => self.eval_const(x, depth)?,
@@ -3405,6 +3427,8 @@ impl Program {
             Ty::Struct(id) => self.structs[id as usize].name.clone(),
             Ty::Unit => "()".into(),
             Ty::Never => "!".into(),
+            Ty::Vec(128) => "v128".into(),
+            Ty::Vec(b) => format!("__m{b}"),
             Ty::Param(i) => format!("T{i}"),
             Ty::Ptr(false, i) => format!("*const {}", self.tn(*i)),
             Ty::Ptr(true, i) => format!("*mut {}", self.tn(*i)),
@@ -3495,6 +3519,7 @@ impl Program {
                     self.hash_ty(p, h);
                 }
             }
+            Ty::Vec(b) => h.add(&(112u8, b)),
             t => h.add(&ty_code(t)),
         }
     }

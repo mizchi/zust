@@ -33,6 +33,10 @@ pub enum Ty {
     /// 浮動小数点 (IEEE 754)
     F32,
     F64,
+    /// A SIMD vector of this many bits: one value, whose lanes are views given by the operations (issue #30).
+    /// `Vec(128)` is `core::arch::wasm32::v128`; 256 and 512 are for wider targets (AVX's `__m256` / `__m512`), which
+    /// no backend emits yet
+    Vec(u16),
     /// `&T` (false) / `&mut T` (true)
     Ref(bool, &'static Ty),
     /// Program::structs の index
@@ -135,6 +139,9 @@ pub fn intern(t: Ty) -> &'static Ty {
 }
 
 impl Ty {
+    /// `v128`
+    pub const V128: Ty = Ty::Vec(128);
+
     pub fn from_suffix(s: &str) -> Option<Ty> {
         Some(match s {
             "i8" => Ty::I8,
@@ -197,6 +204,7 @@ impl Ty {
             Ty::I32 | Ty::U32 | Ty::Char | Ty::F32 => 32,
             Ty::I64 | Ty::U64 | Ty::Isize | Ty::Usize | Ty::Ptr(..) | Ty::Fn(_) | Ty::F64 => 64,
             Ty::I128 | Ty::U128 => 128,
+            Ty::Vec(b) => b as u32,
             Ty::Ref(..) | Ty::Box(_) if self.is_fat() => 0,
             Ty::Ref(..) | Ty::Box(_) => 64,
             Ty::Unit

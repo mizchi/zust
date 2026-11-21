@@ -75,6 +75,41 @@ behavior: `cve_2020_36323_join_borrow` (join over a `Borrow<str>` of the program
   - zustc built as wasm by itself.
 - Traps carry no panic message (the native build prints the location from its trap table).
 
+## SIMD (issue #30)
+
+Done: vector types of 128 / 256 / 512 bits and the SIMD instructions in the IR (`Type::Vec`, `Op::Simd(Shape, VOp,
+..)`), the wasm backend (128-bit only), `core::arch::wasm32` (all of `simd128` and `relaxed-simd`), tests against
+rustc's wasm32-wasip1 builds (tests/wasm/README.md). Left:
+
+- Cranelift: 128- and 256-bit vectors are done (tests/simd/README.md); a 256-bit one is two 128-bit halves (Cranelift
+  has no ymm registers yet): real AVX2 code when Cranelift has it. 512-bit vectors (four halves) are not tested, and
+  nothing produces them while AVX-512 is skipped.
+- `core::arch::x86_64`: rounding-mode forms (`round_ps`, `floor_ps`), `rcp_ps` /
+  `rsqrt_ps`, `sign_epi*`, string / CRC / AES / F16C (tests/simd/README.md has the subset done). Integer `hadd` is
+  two `pshufb`s and an add, not `phaddw`; gathers and `sllv` are lane by lane, not `vpgatherdd` / `vpsllvd`.
+- AVX-512 (intrinsics, 512-bit registers): skipped for now. Few machines have it and implementations of it differ in
+  problems; the Cranelift ISA leaves it out.
+- `macro_rules!`: a local that one macro's body declares (`let mut s = 0;`) and passes to another macro as
+  `$s:ident` is not found there ("cannot find value `s`"); rustc accepts it. Found by tests/simd/shuffle.rs, which
+  avoids it.
+- `{:x}` of a negative signed integer prints `-1` where rustc prints `ffffffff` (the prelude's formatting; found by
+  the SIMD tests, which print `as u32`).
+- The IR's scalar `Load` / `Store` carry no alignment: Cranelift lowers them with `MemFlagsData::trusted()` (which
+  claims the address is aligned) although `ptr::read_unaligned` and a gather off an unaligned base (scale >= the
+  element size) use them too. x86 scalar moves do not need alignment, so the code is right today; an alignment
+  operand (or an unaligned load op) on `Op::Load` / `Op::Store` would make the flag true.
+- Wider byte shuffles and constants: `Shuffle` / `Swizzle` / `Vconst` are 128-bit only.
+- Wasm flexible vectors (proposal, phase 3), when engines have them: a width the engine sets at run time, an
+  instruction for the lane count, lane shifts and half concatenations (the IR's SIMD section has the plan). Until
+  then wasm stays at 128 bits.
+- minclif: scalarize each `VOp` (one lane at a time), so that every backend accepts every instruction (it rejects
+  vectors today).
+- A `core::simd` subset (`f32x4`, `Simd<T, N>`, lanewise operators) as generic code over the intrinsics.
+- Intrinsics as function values (`map(f32x4_add)`): they are lowered at the call, not functions.
+- The kernels of experiments/zustscript are 1.5–1.8x the hand-written v128 module: the dispatcher between blocks and
+  the address checks (the relooper / stackifier above).
+- Auto-vectorization of simple slice loops (map / sum).
+
 ## UI frameworks for wasm32 (dioxus, leptos)
 
 Neither builds yet. `python3 cratebench/ui/run.py` builds their wasm32 crate graphs leaves first and lists the first
