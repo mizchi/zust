@@ -227,3 +227,4 @@ date	commit	change	noop_M	edit_M	check_M	cache_KiB	lsp_G	run	check	build	cfail	t
 2026-11-21	60d001d	Review of #26 (3): outer attributes, whole-source features, _X constants, the mod keyword	0.700	553.170	3854.610	1902.8	-	1796	1471	98	3792	1179.758	63.672	10.312	318.328	708.832	264.537
 2026-11-21	8033cf6	Trait arguments in qualified paths; reserved keywords	0.695	553.177	3855.718	1902.8	10.8502	1799	1474	98	3799	1179.699	63.649	10.285	318.276	708.980	264.529
 2026-11-21	513602b	Review of #26 (4): E0658 in attributed extern blocks, comments	0.698	553.160	3855.710	1902.8	-	1799	1474	98	3799	1179.697	63.646	10.298	318.256	708.972	264.520
+2026-11-21	53d536b	merge main (#26) into compat-next22	0.698	553.643	3859.787	1902.8	-	1800	1475	98	3800	1184.279	63.988	10.298	319.237	717.171	267.199
