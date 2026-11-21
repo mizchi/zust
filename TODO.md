@@ -81,14 +81,18 @@ Done: vector types of 128 / 256 / 512 bits and the SIMD instructions in the IR (
 ..)`), the wasm backend (128-bit only), `core::arch::wasm32` (all of `simd128` and `relaxed-simd`), tests against
 rustc's wasm32-wasip1 builds (tests/wasm/README.md). Left:
 
-- Cranelift lowering of `VOp` at 128 bits (I8X16 .. F64X2) and at 256 / 512 bits where the CPU has AVX2 / AVX-512
-  (I32X8 ..), and `core::arch::x86_64`'s SSE / SSE2 and AVX(2) intrinsics (`__m128` / `__m256` as `Ty::Vec(128)` /
-  `Ty::Vec(256)`). Both native backends reject SIMD today.
+- Cranelift: 128- and 256-bit vectors are done (tests/simd/README.md); a 256-bit one is two 128-bit halves (Cranelift
+  has no ymm registers yet): real AVX2 code when Cranelift has it. 512-bit vectors (four halves) are not tested.
+- `core::arch::x86_64`: shuffles and permutes, horizontal adds, `mul_epu32`, shifts by a vector count, gathers,
+  masked loads, AVX-512 (tests/simd/README.md has the subset done).
+- `{:x}` of a negative signed integer prints `-1` where rustc prints `ffffffff` (the prelude's formatting; found by
+  the SIMD tests, which print `as u32`).
 - Wider byte shuffles and constants: `Shuffle` / `Swizzle` / `Vconst` are 128-bit only.
 - Wasm flexible vectors (proposal, phase 3), when engines have them: a width the engine sets at run time, an
   instruction for the lane count, lane shifts and half concatenations (the IR's SIMD section has the plan). Until
   then wasm stays at 128 bits.
-- minclif: scalarize each `VOp` (one lane at a time), so that every backend accepts every instruction.
+- minclif: scalarize each `VOp` (one lane at a time), so that every backend accepts every instruction (it rejects
+  vectors today).
 - A `core::simd` subset (`f32x4`, `Simd<T, N>`, lanewise operators) as generic code over the intrinsics.
 - Intrinsics as function values (`map(f32x4_add)`): they are lowered at the call, not functions.
 - The kernels of experiments/zustscript are 1.5–1.8x the hand-written v128 module: the dispatcher between blocks and

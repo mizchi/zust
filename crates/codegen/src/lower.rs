@@ -17,7 +17,7 @@ pub fn lower(rec: &Recorder, late: &[StackSlot], opt: bool, cl: Option<ClBackend
         Some(cl) => cl(&fb, late, opt),
         None => {
             if fb.has_simd() {
-                return Err("SIMD (vectors) is supported only with --target wasm32-unknown-unknown so far (issue #30)".into());
+                return Err("minclif has no SIMD yet: build with the Cranelift backend (the default) or for wasm32 (issue #30)".into());
             }
             fb.set_zero(late);
             let t = fb.traps();

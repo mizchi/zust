@@ -425,20 +425,51 @@ fn wasm_simd_like_rustc() {
     assert!(bad.is_empty(), "\n{}", bad.join("\n"));
 }
 
-/// A program with SIMD builds only as wasm so far: the native backends say so (they do not miscompile it)
+/// The same programs built natively (the Cranelift backend; core::arch::wasm32's intrinsics are lowered to the same
+/// IR instructions on every target) print what rustc's wasm32 builds print: Cranelift's vector instructions have
+/// wasm's semantics
 #[test]
-fn simd_native_is_an_error() {
-    let dir = private_dir("simd_native");
-    for backend in [None, Some("--backend=minclif")] {
-        let mut c = Command::new(env!("CARGO_BIN_EXE_zustc"));
-        c.arg("--no-cache");
-        if let Some(b) = backend {
-            c.arg(b);
-        }
-        let o = c.arg("tests/wasm/simd/kernels.rs").arg("-o").arg(dir.0.join("k")).output().unwrap();
-        let e = String::from_utf8_lossy(&o.stderr);
-        assert!(!o.status.success() && e.contains("only with --target wasm32-unknown-unknown"), "{backend:?}: {e}");
+fn simd_natively_like_rustc_wasm() {
+    if !ready() || !have_wasip1() {
+        return;
     }
+    let dir = private_dir("simd_native");
+    let mut bad = vec![];
+    for p in &files("tests/wasm/simd", "") {
+        let n = p.file_stem().unwrap().to_string_lossy().into_owned();
+        let rmod = dir.0.join(format!("{n}.rustc.wasm"));
+        let r = Command::new("rustc")
+            .args(["-Awarnings", "--edition", "2021", "--target", "wasm32-wasip1", "-C", "target-feature=+simd128,+relaxed-simd"])
+            .arg(p)
+            .arg("-o")
+            .arg(&rmod)
+            .output()
+            .unwrap();
+        assert!(r.status.success(), "{n}: rustc: {}", String::from_utf8_lossy(&r.stderr));
+        let mut c = Command::new("node");
+        c.arg(WASI_RUNNER).arg(&rmod).current_dir(&dir.0);
+        let want = run_limited(c, Duration::from_secs(60)).expect("rustc's module timed out");
+        for opt in [false, true] {
+            let exe = dir.0.join(format!("{n}{}", if opt { "_o" } else { "" }));
+            let mut c = Command::new(env!("CARGO_BIN_EXE_zustc"));
+            c.arg("--no-cache");
+            if opt {
+                c.arg("-O");
+            }
+            let o = c.arg(p).arg("-o").arg(&exe).output().unwrap();
+            if !o.status.success() {
+                bad.push(format!("{n} (-O {opt}): zustc: {}", String::from_utf8_lossy(&o.stderr).trim()));
+                continue;
+            }
+            let got = run_limited(Command::new(&exe), Duration::from_secs(60)).expect("timed out");
+            if got.status.code() != want.status.code() || got.stdout != want.stdout {
+                let (w, g) = (String::from_utf8_lossy(&want.stdout).into_owned(), String::from_utf8_lossy(&got.stdout).into_owned());
+                let first = w.lines().zip(g.lines()).find(|(a, b)| a != b).map(|(a, b)| format!("rustc: {a}\n  zustc: {b}")).unwrap_or_default();
+                bad.push(format!("{n} (-O {opt}): exit {:?} / {:?}, first difference:\n  {first}", want.status.code(), got.status.code()));
+            }
+        }
+    }
+    assert!(bad.is_empty(), "\n{}", bad.join("\n"));
 }
 
 /// The wasm SIMD module has v128 in function signatures and locals, and imports and exports what any module does

@@ -42,8 +42,9 @@ an instruction for the lane count and the lane shifts and half concatenations (`
   name calls its own. An intrinsic cannot be used as a function value (`apply(f32x4_add, ..)`: write a closure).
 - `cfg(target_feature = "simd128")` and `"relaxed-simd"` are true for wasm32.
 - Loads and stores of `v128` check their address as scalar ones do (`contain/simd_*.rs`).
-- Native builds do not support SIMD yet: the Cranelift and minclif backends reject a function with a `v128` value or
-  a SIMD instruction ("SIMD (vectors) is supported only with --target wasm32-unknown-unknown so far").
+- Native builds: the Cranelift backend emits the same instructions (128- and 256-bit vectors, `core::arch::x86_64`
+  too: tests/simd/README.md), and `core::arch::wasm32`'s intrinsics give the wasm results natively. minclif rejects a
+  function with a vector.
 
 `tests/wasm.rs`'s `wasm_simd_like_rustc` checks that `simd/*.rs` (every intrinsic, on edge cases: NaN, ±0, saturation,
 out-of-range shifts and swizzle indices, and `v128` as a value) print what rustc's wasm32-wasip1 builds print under
@@ -102,7 +103,6 @@ table index or signature mismatch) and for `abort`; 126 for a module that needs 
 - `usize` and pointers are 8 bytes (the layouts are those of x86-64), so `cfg(target_pointer_width = "64")` is true.
   Exported functions take and return i64 for them.
 - Traps carry no panic message (the native build prints the location from its trap table).
-- SIMD is wasm only (see above); the native backends reject it.
 - Not supported yet: i128 division and float conversions, threads (green threads need `swapcontext`), processes,
   files other than the arguments, workspace builds (`zustc build`), and self-hosting zustc as wasm.
 - Speed: every block is a case of one `loop` + `br_table` dispatcher and every value a local, so bench/rt runs 3 to 15

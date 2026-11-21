@@ -2394,7 +2394,8 @@ pub fn sroa(tr: &Track, nvals: usize, paddr: &[Option<(u32, i32)>], nslots: usiz
         if !prom[su] {
             continue;
         }
-        if t.bytes() == 16 || off < 0 {
+        // (an i128 or a vector stays in memory)
+        if t.bytes() >= 16 || off < 0 {
             prom[su] = false;
             continue;
         }

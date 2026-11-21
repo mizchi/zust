@@ -1710,8 +1710,8 @@ impl Inf<'_> {
                         for (a, k) in args.iter().zip(ps) {
                             let av = self.expr(a);
                             match k {
-                                crate::simd_sig::SArg::V => {
-                                    let kv = self.known(Ty::V128);
+                                crate::simd_sig::SArg::V(w) => {
+                                    let kv = self.known(Ty::Vec(w));
                                     self.unify(av, kv);
                                 }
                                 crate::simd_sig::SArg::S(t) => {

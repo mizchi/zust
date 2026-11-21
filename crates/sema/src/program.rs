@@ -3380,6 +3380,8 @@ impl Program {
             Ty::Struct(id) => self.structs[id as usize].name.clone(),
             Ty::Unit => "()".into(),
             Ty::Never => "!".into(),
+            Ty::Vec(128) => "v128".into(),
+            Ty::Vec(b) => format!("__m{b}"),
             Ty::Param(i) => format!("T{i}"),
             Ty::Ptr(false, i) => format!("*const {}", self.tn(*i)),
             Ty::Ptr(true, i) => format!("*mut {}", self.tn(*i)),

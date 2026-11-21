@@ -167,6 +167,10 @@ impl Ty {
             "f32" => Some(Ty::F32),
             "f64" => Some(Ty::F64),
             "v128" => Some(Ty::V128),
+            // (core::arch::x86_64's vectors: the lane type is the intrinsics', not the vector's)
+            "__m128" | "__m128i" | "__m128d" => Some(Ty::Vec(128)),
+            "__m256" | "__m256i" | "__m256d" => Some(Ty::Vec(256)),
+            "__m512" | "__m512i" | "__m512d" => Some(Ty::Vec(512)),
             _ => None,
         })
     }

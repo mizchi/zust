@@ -45,6 +45,9 @@ impl Type {
 //
 // Two kinds of instruction do not scale with the width and are 128-bit only: `Shuffle` / `Swizzle` (a byte index
 // table; AVX's shuffles work within 128-bit halves) and `Vconst` of more than 16 bytes (a wider constant is a splat).
+// `Half` / `Concat` change the width (a 256-bit vector's 128-bit halves); with them an instruction that works per
+// 128-bit lane on x86 (`_mm256_packs_epi32`) is written from 128-bit ones. A backend with narrower registers than a
+// vector holds it in parts: Cranelift (no 256-bit registers on x86-64 yet) as 128-bit values, wasm not at all.
 //
 // Wasm's flexible-vectors proposal (phase 3: `vec.i32` and the like, whose length the engine sets: a runtime
 // constant, read by `vec.i32.length`) fits the same instructions with a width that is not known until the program
@@ -72,6 +75,14 @@ impl VBits {
     }
     pub fn bytes(self) -> u32 {
         self.bits() / 8
+    }
+    /// the width of a half (none below 128 bits)
+    pub fn half(self) -> Option<VBits> {
+        match self {
+            VBits::B128 => None,
+            VBits::B256 => Some(VBits::B128),
+            VBits::B512 => Some(VBits::B256),
+        }
     }
     pub fn from_bits(b: u32) -> Option<VBits> {
         Some(match b {
@@ -229,6 +240,12 @@ pub enum VOp {
     Demote,
     /// the low half of f32 lanes to f64 lanes
     Promote,
+    /// a * b + c rounded once (floats; x86's FMA). Not in wasm (only the relaxed form)
+    Fma,
+    /// the low / high half of a vector of shape s: a vector of half the width (x86's `_mm256_extractf128_ps`)
+    Half(bool),
+    /// (low, high): two vectors of half the width of shape s, as one
+    Concat,
     // relaxed SIMD (results may differ between engines): wasm's relaxed-simd proposal
     /// a * b + c, fused or not (floats)
     RelaxedMadd,
@@ -256,6 +273,7 @@ impl VOp {
             VOp::AnyTrue | VOp::AllTrue => Type::I8,
             VOp::Bitmask => Type::I32,
             VOp::Extract(_) => s.lane.ty(),
+            VOp::Half(_) => Type::Vec(s.bits.half().unwrap_or(s.bits)),
             _ => s.ty(),
         }
     }
@@ -282,8 +300,9 @@ impl VOp {
             | VOp::FcvtToIntSat(..)
             | VOp::Demote
             | VOp::Promote
+            | VOp::Half(_)
             | VOp::RelaxedTrunc(..) => 1,
-            VOp::Bitselect | VOp::RelaxedMadd | VOp::RelaxedNmadd | VOp::RelaxedLaneselect | VOp::RelaxedDotAdd => 3,
+            VOp::Bitselect | VOp::Fma | VOp::RelaxedMadd | VOp::RelaxedNmadd | VOp::RelaxedLaneselect | VOp::RelaxedDotAdd => 3,
             _ => 2,
         }
     }

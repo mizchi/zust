@@ -1410,6 +1410,8 @@ fn simd_opcode(l: Lane, op: VOp) -> Result<u32, String> {
         VOp::RelaxedQ15Mulr => 0x111,
         VOp::RelaxedDot => 0x112,
         VOp::RelaxedDotAdd => 0x113,
+        // (no fused multiply-add in wasm SIMD but the relaxed one; no vector wider than 128 bits to split or join)
+        VOp::Fma | VOp::Half(_) | VOp::Concat => return Err(format!("wasm32: no {op:?} in wasm SIMD")),
     })
 }
 
