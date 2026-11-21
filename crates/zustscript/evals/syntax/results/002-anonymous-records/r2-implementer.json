@@ -1,0 +1,105 @@
+[
+  {
+    "proposal": "002-anonymous-records",
+    "persona": "implementer",
+    "scores": {
+      "R1": {
+        "score": 4,
+        "why": "`{ todo, onToggle }: { todo: Todo, onToggle: (id: i32) => () }`、`{ ...t, done: !t.done }`、`(id: i32) => ()` は TS と同じに読める。減点は、`if c { { ...t, done: x } }` の二重の波括弧と、`{ x }` がブロックで `{ x, }` がレコードになる差"
+      },
+      "R2": {
+        "score": 3,
+        "why": "宣言は `->`、型とクロージャは `=>` という区別には理由がある。ただし例外が残る。再帰する型だけは名前で区別する。`type` はレコード専用の別名のまま(`type H = (id: i32) => ()` は parse.rs の `expect(\"{\")` で書けない)。パターンの `..` と更新の `...` が分かれる。`(T)` が、今の 1 要素のタプル(parse.rs の ty())から、ただの括弧に変わる"
+      },
+      "R3": {
+        "score": 3,
+        "why": "型に依存せず構文だけで決まるようになったのは r1 からの大きな改善。ただし先読みは 2 トークン(rubric の 5 は 1 トークン)で、型の位置の `(ident :` でも同じ先読みが要る。`{ x }` と `{ x, }` は末尾のカンマで意味が変わる。同じ `{ done, x }` が、腕やクロージャの本体(primary)ではレコード、if や fn の本体(block() を直接呼ぶ)ではエラーになり、場所で読み方が変わる"
+      },
+      "R4": {
+        "score": 4,
+        "why": "props の型名、Stats、引数名のない関数型が要らなくなる。`{ total, done }` と引数の位置の分割代入で短く書ける。空のレコードが書けないこと以外に、失うものはない"
+      },
+      "R5": {
+        "score": 3,
+        "why": "`..t` の後置や `...t` を後ろに書いたとき、旧式の `fn(..) -> ..`、ブロックの先頭の `ident :` には、直し方つきのエラーが出るのは良い。一方、`{ x }` の did-you-mean は、その場で期待する型が Rec と分かっているときにしか出ない。期待する型が型変数のときは、後で別の位置から型の不一致が出る。幅の部分型がないので、TS 由来の余分なプロパティは型では見えず、`{ ...t }` で黙ってコピーされる"
+      },
+      "R6": {
+        "score": 4,
+        "why": "JS はプレーンなオブジェクトと分割代入のままで、出力を予想できる。`.d.ts` には引数名が出る(`onToggle: (id: i32) => void`)。無名の戻り値の型に名前がないこと、分割代入した引数の `.d.ts` での名前(`props` をどこから取るか)は未決"
+      },
+      "R7": {
+        "score": 4,
+        "why": "TS の構造的な型の別名、spread、分割代入、関数型の書き方がそのまま通じる。覚えるのは、二重の波括弧、幅の部分型がないこと、再帰する型の例外"
+      },
+      "R8": {
+        "score": 3,
+        "why": "Ty::Rec(フィールドを名前で整列)の単一化は Named より素直で、`let { x, y } = p` も `..` がなければパターンから Rec を作って推論できる。重いのは次の点。別名の展開に、check_file での順序と再帰の判定(SCC)が要る。lower.rs の rs_type / used / type_def は名前で引いているので、形を鍵に変える必要がある。Ty は derive(PartialEq) なので、Ty::Fn に引数名を持たせるには等価性から外す工夫が要る。lexer は 1 トークンしか先読みしないので、`{` と `(` のたびに保存と巻き戻しをする"
+      }
+    },
+    "blocker": [],
+    "issues": [
+      {
+        "severity": "medium",
+        "where": "B『`{ x }` だけはブロックのまま』",
+        "problem": "`{ x }` はブロックで `{ x, }` はレコードと、末尾のカンマ 1 つで意味が変わる。整形器が末尾のカンマを消すと意味が変わる。did-you-mean は、その場で期待する型が Rec と分かっているときしか出せない(EK::Block の時点で expect が Var のことが多い)",
+        "suggestion": "変数 1 つだけのブロック `{ x }` は値が `x` と同じで書く意味がないので、型に関係なく構文だけで常に警告にする。直し方は『レコードなら `{ x: x }` か `{ x, }`、値なら `x`』。整形器は `{ x, }` の末尾のカンマを保つ、と決める"
+      },
+      {
+        "severity": "medium",
+        "where": "B『ブロックの最初が `ident :` なら専用のエラー』と、parse.rs の block() / primary の `{`",
+        "problem": "if / else / while / for / fn の本体は block() を直接呼び、腕・クロージャ・末尾の式は primary を通る。同じ `{ done, x }` や `{ ...t, done }` が、前者ではエラー(今のメッセージは『expected `;` or `}`, found `,`』や『expected an expression, found `..`』)、後者ではレコードになる。専用のエラーは `ident :` にしか出ない",
+        "suggestion": "block() の先頭で、primary と同じ 2 トークンの判定(`ident :` / `ident ,` / `...`)を行い、3 つのどれでも『レコードの値は、もう 1 組の波括弧で囲む』を出す。判定は 1 つの関数にまとめ、両方から呼ぶ"
+      },
+      {
+        "severity": "medium",
+        "where": "A『再帰するレコード型だけは名前で区別する』",
+        "problem": "(1) 何を再帰と呼ぶかが決まっていない。`type L = { next: Option<L> }` のように enum の型引数を通る循環は、展開が止まらないので再帰に入れる必要がある。`type Node = { kids: Array<Tree> }` と `enum Tree { N(Node) }` のように enum の定義を通る循環は入れなくてよい。判定には、check_file で別名の SCC を ty_of より前に取る必要がある(今は先に名前を登録し、後からフィールドを ty_of で決めている)。(2) 名前で区別すると、`{ children: [], label: \"a\" }` を Node に渡せず、r1 の high が再帰する型にだけ残る。(3) 自分自身を参照するフィールドを足すと、Node を使うすべての場所で等しさの規則が変わる",
+        "suggestion": "再帰の定義を『enum の定義を通らない、別名と型引数の循環』と書く。単一化では、Rec と再帰する Named を比べるときに Named を 1 段だけ展開する(名前で止まるので必ず終わる)。これでリテラルを再帰する型にも渡せる"
+      },
+      {
+        "severity": "medium",
+        "where": "E と lower.rs の rs_type / used / type_def / EK::Record(n)",
+        "problem": "『`type` の名前を使う(ZsTodo)』と『同じ形には同じ struct を 1 つ』は、同じ形の別名が 2 つあるとき(`type A = { x: f64 }` と `type B = { x: f64 }`)や、別名と無名の型が同じ形のときに両立しない。A と B は同じ型なので、`@wasm` の中で A の値を B を受ける関数に渡せるが、struct を ZsA と ZsB の 2 つ作ると Rust の型エラーになる。lower.rs は、レコードの式でも、書いてある名前から `rs_type(n)` を作っている",
+        "suggestion": "形(整列したフィールドと型)を鍵にして struct を 1 つ作り、名前は最初に宣言された別名から取る。他の別名は `type ZsB = ZsA;` にする。無名の struct は、`ZsRec_done_total` のように読めて決定的な名前にする。checker は、レコードの式の型を Id ごとに side table に記録し、lower はそれを引く。総称的な無名のレコードは、自由な型引数を struct の型引数にする"
+      },
+      {
+        "severity": "medium",
+        "where": "C『引数名は型の等しさに関わらない』と、実装の注意の Ty::Fn",
+        "problem": "Ty は derive(PartialEq) で、unify_inner の最後は `a == b`、resolve / subst_params / occurs / js.rs の subst_ty が Ty::Fn を組み立て直す。名前を Vec の中に入れると、等価性に名前が混ざりやすい。『注釈から来た方の名前』を選ぶには、単一化で束縛する順に優先度が要る(今は先に束縛した方が残る)。check.rs の show() は `fn(..) -> ..`、js.rs の ts() は `a{k}` を出す",
+        "suggestion": "名前は、手で書いた PartialEq で無視する別のフィールド(`Option<Rc<[String]>>`)に持つ。`.d.ts` は注釈された signature から作るので、名前を選ぶ規則が効くのは hover だけ、と範囲を明記する。show() は `(id: i32) => ()` で表示する"
+      },
+      {
+        "severity": "low",
+        "where": "A『名前は、エラーメッセージや hover での表示に使う』",
+        "problem": "無名の値と単一化すると、Ty::Rec に付けた別名の名前は、束縛した順によって消える。エラーには展開された長い形が出る",
+        "suggestion": "表示するときに、形から別名を逆に引く(1 つに決まるときだけ)。不一致の差分(実装の注意)と組み合わせる"
+      },
+      {
+        "severity": "low",
+        "where": "C『`(T)` の後に `=>` が続かなければ、ただの括弧』と『関数型を返す関数型は括弧で囲む』",
+        "problem": "今の ty() は `(T)` を 1 要素のタプル(TyS::Tuple)にしているので、意味が黙って変わる。関数型を返す関数型を括弧で囲む規則には、構文解析の上の理由がない(ty() を右結合にすれば `(a: i32) => (b: i32) => ()` は 1 通りに読める)",
+        "suggestion": "1 要素のタプルの型は、式と揃えて `(T,)` と書くと明記する。括弧の規則は、エラーにするのか書き方の推奨なのかを書く。理由がなければ外す"
+      },
+      {
+        "severity": "low",
+        "where": "D の引数の位置の分割代入と、check.rs の jsx()(1332 行目)",
+        "problem": "Item::Fn の引数が `(String, TyS)` から `(Pat, TyS)` になり、js.rs、lower.rs、simd.rs、wasm.rs、dts、境界のグルーの引数名まで変わる。jsx() は props の型として `Ty::Named` しか受けないので、Ty::Rec を足す必要がある。`.d.ts` の `props` という名前をどこから取るかも決まっていない",
+        "suggestion": "分割代入した引数には、内部で `$p0` のような名前を付け、本体の先頭で let のパターンに展開する(lower.rs と simd.rs はそれを読むだけになる)。`.d.ts` では `props` か、TS と同じ `{ todo, onToggle }: ..` を出すと決める"
+      }
+    ],
+    "questions": [
+      "再帰の判定に、enum の型引数を通る循環(`Option<L>`)は入るか",
+      "再帰する別名にリテラル(無名の値)を渡せるか(1 段だけ展開するか)",
+      "同じ形の別名が 2 つあるとき、`@wasm` の struct の名前と hover の表示はどちらになるか",
+      "`type` は、関数型やタプルの別名にも使えるか",
+      "1 要素のタプルの型は `(T,)` と書くのか",
+      "関数型を返す関数型を括弧で囲まないとエラーになるのか",
+      "整形器は `{ x, }` の末尾のカンマを保つか",
+      "分割代入した引数の、`.d.ts` での名前"
+    ],
+    "alternative": {
+      "summary": "構造的な型の等しさは形で決め、名前は表示と出力だけに使う、と徹底する。`@wasm` では形ごとに struct を 1 つ作り、他の別名は Rust の type 別名にする。再帰する別名は名前で区別したまま、単一化で 1 段だけ展開して無名の値を受ける。1 変数だけのブロックは、構文だけで常に警告する",
+      "example": "type A = { x: f64 }\ntype B = { x: f64 }            // A と同じ型\ntype Node = { label: String, children: Array<Node> }   // 再帰: 名前で区別\n\nfn leaf() -> Node { { label: \"a\", children: [] } }    // Rec と Node を、Node を 1 段だけ展開して単一化する\nfn f(r: B) -> f64 { r.x }\nfn g(r: A) -> f64 { f(r) }     // 通る\n\n// lower.rs:\n// #[derive(Clone, Copy, PartialEq)] struct ZsA { x: f64 }\n// type ZsB = ZsA;\n// 無名の `{ total: i32, done: i32 }` は struct ZsRec_done_total { done: i32, total: i32 }\n\n// fn h(x: i32) -> i32 { { x } }\n//                       ^^^^^ warning: a block with only `x` is `x`; for a record write `{ x, }` or `{ x: x }`"
+    }
+  }
+]

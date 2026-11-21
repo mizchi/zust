@@ -15,10 +15,7 @@ These are in the type and borrow checks that the compat and region-check work ch
 | case | what is accepted that rustc rejects |
 |---|---|
 | `borrow_closure_escapes` | E0373 is only checked for `thread::spawn`: a boxed closure borrowing a local is returned |
-| `borrow_closure_mut_and_shared` | a closure's captures are not loans: `v` is read while a closure holds `&mut v` |
 | `borrow_slice_into_vec_then_clear` | `&v[..]` is not a loan of `v`: a `clear` (dropping the elements) is accepted under it |
-| `region_temporary_dropped` | E0716 is not found when the reference is assigned after its `let` |
-| `region_dropck` | no drop check: a value with Drop may outlive what it borrows |
 | `region_block_tail_escapes` | a loan held by a block's local, or by what a by-value method returns (`Some(&v).unwrap()`), is not followed out of the block's tail (E0597) |
 | `borrow_uninit_read` | rejected, but reported at the function's first line instead of the read |
 
@@ -74,6 +71,25 @@ behavior: `cve_2020_36323_join_borrow` (join over a `Borrow<str>` of the program
   - workspace builds (`zustc build`);
   - zustc built as wasm by itself.
 - Traps carry no panic message (the native build prints the location from its trap table).
+
+## UI frameworks for wasm32 (dioxus, leptos)
+
+Neither builds yet. `python3 cratebench/ui/run.py` builds their wasm32 crate graphs leaves first and lists the first
+error of each failing crate. Details and the order of the work: [docs/reports/2026-11-21-03-ui-frameworks-wasm.md](docs/reports/2026-11-21-03-ui-frameworks-wasm.md).
+
+- Cargo graphs: `crates/zurgo` ([#28](https://github.com/mizchi/zust/issues/28), [docs/zurgo.md](docs/zurgo.md))
+  reads Cargo.toml / Cargo.lock, turns on features as cargo does and builds path and crates.io packages (M0). Left:
+  build scripts (cfgs, `rustc-env`, `OUT_DIR`), two versions of one crate and renamed dependencies (zustc's workspace
+  has one name per crate), an edition per crate, `env!` / `option_env!`, workspace builds for wasm32.
+- Proc macros ([#29](https://github.com/mizchi/zust/issues/29)): none can run. Unknown attributes are dropped silently
+  (`#[wasm_bindgen]`, `#[component]`).
+- async is erased: an `async fn` runs when called and returns its value. Needs a state-machine lowering, `Pin`,
+  `Waker` / `Context`.
+- wasm-bindgen's ABI: 32-bit pointers and `usize` on wasm32, imports from JS, exports called after `main`, its custom
+  section and describe functions, reference types.
+- Macros: `$($t:ty)*`, larger tt-munchers (`pin_project!`, `bitflags!`), `#[macro_use] extern crate`, `#[macro_use]
+  mod` in a file, `#![recursion_limit]`, doc comments before items removed by `#[cfg]` (E0585).
+- Language and std: the tables of sections 2.5 and 2.7 of the report.
 
 ## Tooling
 

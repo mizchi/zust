@@ -1,0 +1,91 @@
+[
+  {
+    "proposal": "002-anonymous-records",
+    "persona": "rust-dev",
+    "scores": {
+      "R1": {
+        "score": 3,
+        "why": "`{ total, done }`、`{ ...t, done: !t.done }`、`(id: i32) => ()`、`@nominal type Meters = { v: f64 }`、`fn adder(n: i32) -> (x: i32) => i32 { (x) => x + n }` は読める。ただし `toggle` の二重の波括弧 `{ { ...t, done: !t.done } }` と、`TodoList` でフィールド名を 2 回読むことは残っている。"
+      },
+      "R2": {
+        "score": 4,
+        "why": "部分型の書き方が 001 と揃い、spread の規則も共通。書き漏らしのエラーは match だけで、001 の C と同じ規則。例外は 3 つ。同じレコードのパターンが、`let` と引数では一部だけでよく、match では `...` が要る。宣言は `->`、型とクロージャは `=>`。再帰する型だけは名前で区別する。"
+      },
+      "R3": {
+        "score": 4,
+        "why": "ブロックかレコードかは、2 トークンの先読みで、型によらず決まる。警告は『primary の `{` から読むもの』と構文の位置で定義され、block() の本体には出ない(`larger`、`id`、`title_of` の例)。関数型は右結合で、`(T,)` と、名前のある引数とない引数の混在のエラーも決まった。減点は 2 つ。`{ x }` と `{ x, }` はカンマ 1 つで意味が分かれる。関数型は `=>` まで見ないと決まらない(巻き戻し)。"
+      },
+      "R4": {
+        "score": 4,
+        "why": "props と小さな戻り値の型名が要らなくなった(`stats`、`title_of({ title }: Todo)`)。newtype は `@nominal` で書ける。長いもの、書けないものは 3 つ。spread は 1 つだけ。props のフィールド名を 2 回書く。数値の newtype はこの提案では書けない。"
+      },
+      "R5": {
+        "score": 4,
+        "why": "`{ x }` の警告が式の位置だけになり、誤検出に本当の誤りが埋もれなくなった(r3 の high は解消)。spread でフィールドを足す、型を変える、`..t`、後ろの `...t`、旧式の関数型、引数名の混在は、どれも直し方つきのエラー。`@nominal` は `.d.ts` の brand で、TS 側でも区別される。減点は 3 つ。レコードの `==` が未決。余分なプロパティが JS では残り wasm では落ちる。`@nominal` の値を、同じ形の構造的な型に渡せるかが書かれていない。"
+      },
+      "R6": {
+        "score": 3,
+        "why": "JS と `.d.ts`(`export type`、引数名つきの関数型、brand とコンストラクタ)は予想しやすい。`@wasm` の struct 名も、別名があれば `ZsTodo` と読める名前になった。しかし 8816491 の E では、名前はモジュールの中の宣言と最初に現れた順で決まる。同じファイルの上の方に、同じフィールド名で型の違う形を足すと、離れた項目の `ZsRec_done_total` が `_2` に変わり、出力を見ないと名前が分からない。import 先に同じ形があればそちらを使うので、互いを import しないモジュールの同じ形は、別々の Rust の struct になる。例の `struct ZsTodo { …, title: String }` は、README の `@wasm` の部分集合(文字列を含むレコードは外す。lower.rs の `type_def` は Copy を derive する)と矛盾する。"
+      },
+      "R7": {
+        "score": 3,
+        "why": "既定が構造的なのは、Rust の『名前が違えば別の型』と逆で、同じ形の別名が混ざっても静かに通る。`@nominal` を付けることを覚えておく必要がある。Rust の `..t` の癖は、直し方つきのエラーで直せる。`void` は要らない。"
+      },
+      "R8": {
+        "score": 3,
+        "why": "構文の判定(block() は 3 つの形の専用エラー、警告は primary の側だけ)と、巻き戻しの `try_arrow_params` は無理がない。r3 の『プログラム全体の最初の別名』より、範囲がモジュールとその import 先に閉じた点は良い。しかし struct 名が『最初に現れた順』で決まるので、ある項目の lower の結果が、同じモジュールの他の項目の追加や並べ替えに依存する。アイテム単位の増分ビルドと合わない。import 先の形を優先する規則のため、import 先に別名を足すと、import する側の struct が置き換わる。『他のファイルの変更では変わらない』(E)と矛盾する。互いを import しない 2 つのモジュールに同じ形があり、両方を import する場合、どちらの struct を使うか、別の struct の値同士をどう変換するかが決まっていない。lower.rs の `rs_type`(`Zs{n}`)を、モジュールの名前空間つきの命名に変える作業も要る。"
+      }
+    },
+    "blocker": [],
+    "issues": [
+      {
+        "severity": "high",
+        "where": "E『同じ形が import 先にもあれば、import 先の struct を使う』と『名前はモジュールの名前空間に置く』",
+        "problem": "互いを import しないモジュール A と C が同じ形(別名 `type Pt = { x: f64, y: f64 }` など)を持つと、`a::ZsPt` と `c::ZsPt` は別の Rust の型になる。両方を import する D で、A の関数の戻り値を C の関数に渡すと、zustscript では同じ型なのに Rust では型が合わない。D がどちらの struct を使うかも決まらない。構造的な型の意味(A)と、`@wasm` の出力が食い違う。",
+        "suggestion": "形ごとの struct は、モジュールでなくプログラム(crate)で 1 つにする。名前は形だけから決める(例: `ZsRec_x_f64_y_f64`)。別名はモジュールごとの Rust の `type` 別名にする(`pub type ZsPt = ZsRec_x_f64_y_f64;`)。こうすれば読める名前は別名に残り、struct 名はどこを変えても変わらない。"
+      },
+      {
+        "severity": "medium",
+        "where": "E『モジュールの中で最初に現れた順に `_2`、`_3` を付ける』",
+        "problem": "同じファイルの上の方に `{ total: f64, done: f64 }` を返す関数を 1 つ足すと、下にある関係のない `@wasm` 関数の struct が `ZsRec_done_total` から `_2` に変わる。項目の Rust の出力が、他の項目に依存する(アイテム単位の増分ビルドと合わない)。代替案 5 で避けたかった非局所性が、ファイルの中に残っている。",
+        "suggestion": "番号の代わりに、フィールドの型も名前に入れる(`ZsRec_done_f64_total_f64`)。番号を残すなら、決める単位を宣言された別名だけにし、無名の形は型つきの名前にする。"
+      },
+      {
+        "severity": "medium",
+        "where": "E の例『`struct ZsTodo { done: bool, id: i32, title: String }`』",
+        "problem": "README の `@wasm` の部分集合では、文字列を含むレコードは外れる(lower.rs の `type_def` は `#[derive(Clone, Copy, PartialEq)]`、`field_ty` は Copy にできない型を拒む)。例が今の制約と矛盾し、無名のレコードなら文字列も渡せると誤解させる。",
+        "suggestion": "例を Copy にできる形だけにする。derive を付けること、文字列を含む形のエラーの文面を書く。"
+      },
+      {
+        "severity": "medium",
+        "where": "未決事項『TS から余分なプロパティを持つオブジェクトが渡されたとき』",
+        "problem": "差分テストでは見えなくなったが、同じソースで JS と wasm の戻り値のプロパティの集合は変わる。",
+        "suggestion": "`pub` な関数の入口でだけ作り直す案を既定にするか、`.d.ts` のコメントで明示する。"
+      },
+      {
+        "severity": "low",
+        "where": "A『`@nominal type`』",
+        "problem": "`Meters` を `{ v: f64 }` を受ける関数に渡せるか、`type M2 = Meters` を書けるかが書かれていない。",
+        "suggestion": "渡せない(名前で区別する型は、自分の名前としか単一化しない)と明記する。別名は許す。"
+      },
+      {
+        "severity": "low",
+        "where": "D『フィールド名を 2 回書く』",
+        "problem": "r3 からの持ち越し。推奨の形が書かれていない。",
+        "suggestion": "当面は `type TodoListProps = { … }` を書いて `fn TodoList({ todos, onToggle, title }: TodoListProps)` とする形を推奨として載せる。"
+      }
+    ],
+    "questions": [
+      "互いを import しない 2 つのモジュールの同じ形は、Rust で同じ struct か。両方を import するモジュールはどちらを使うか",
+      "import 先に同じ形の別名を足したとき、import する側の struct 名が変わるのは『他のファイルの変更』に当たらないか",
+      "無名の形が『最初に現れた』とは、宣言の順か、関数の本体の中の式も含めた出現の順か",
+      "構造的なレコードの `==` は使えるか。`derive(PartialEq)` と結果が一致するか",
+      "`@nominal` の値を、同じ形の構造的な型に渡せるか",
+      "文字列を含む無名のレコードを `@wasm` の関数で使うと、どのエラーになるか"
+    ],
+    "alternative": {
+      "summary": "struct は形ごとにプログラムで 1 つにし、名前は形(フィールドの名前と型)だけから作る。読める名前は、モジュールごとの `type` 別名で出す。",
+      "example": "// a.zsc: type Pt = { x: f64, y: f64 }      c.zsc: type Point = { x: f64, y: f64 }\n#[allow(non_camel_case_types)]\n#[derive(Clone, Copy, PartialEq)]\npub struct ZsRec_x_f64_y_f64 { x: f64, y: f64 }   // 1 つだけ。他のファイルや項目を足しても名前は変わらない\npub mod a { pub type ZsPt = super::ZsRec_x_f64_y_f64; }\npub mod c { pub type ZsPoint = super::ZsRec_x_f64_y_f64; }\n// { total: i32, done: i32 } -> ZsRec_done_i32_total_i32、{ total: f64, done: f64 } -> ZsRec_done_f64_total_f64"
+    }
+  }
+]

@@ -408,6 +408,25 @@ pub struct Insts {
     pub list: Vec<Inst>,
     map: HashMap<(u32, Vec<Ty>), u32>,
     pub pending: Vec<u32>,
+    /// A closure's region signature, by its fn id, from the bound it is passed to or its annotations, and the regions
+    /// of the function it is in that its captures hold (typeck's regionck)
+    pub closure_rg: HashMap<u32, Box<CloRg>>,
+    /// The region check's implied relations of struct types, by position (typeck's Rg::imp_cache): kept between
+    /// the functions of a build
+    pub imp_cache: HashMap<(u32, u32, bool), Option<Vec<(u32, u32)>>>,
+}
+
+/// Insts::closure_rg (codes: see typeck's regionck)
+#[derive(Clone, Debug, Default)]
+pub struct CloRg {
+    /// The parameters' codes, then the result's
+    pub codes: Vec<Vec<u8>>,
+    /// Each capture's codes (None: not followed)
+    pub caps: Vec<Option<Vec<u8>>>,
+    /// What the function it is in knows of those of its regions: (longer, shorter)
+    pub known: Vec<(u8, u8)>,
+    /// The function's named lifetimes (a `let` annotation in the closure names them)
+    pub lts: Vec<(String, u8)>,
 }
 
 impl Insts {
@@ -417,6 +436,8 @@ impl Insts {
             list: vec![],
             map: HashMap::default(),
             pending: vec![],
+            closure_rg: HashMap::default(),
+            imp_cache: HashMap::default(),
         }
     }
 
@@ -1550,6 +1571,40 @@ impl Program {
                         };
                         if ds.has_self && ms.has_self && kind(&p, ds.params[0]) != kind(&p, ms.params[0]) {
                             return Err(format!("{line}method `{m}` has an incompatible type for trait `{tr}` (E0053)"));
+                        }
+                        // (E0195: the method's own lifetimes that bounds make early-bound, and how many bounds each has,
+                        // are the trait's: `fn bar<'a, 'b: 'a>` in the trait, `fn bar<'a, 'b>` in the impl)
+                        {
+                            // (a lifetime a type parameter's bound names (`T: Test<'p>`) is early-bound too)
+                            let early = |r: Option<&crate::types::RSigSyn>, g: &[(String, Vec<String>)]| -> Vec<usize> {
+                                let Some(r) = r else { return vec![] };
+                                let in_bounds = |l: &str| {
+                                    g.iter().flat_map(|x| x.1.iter()).any(|b| b.match_indices(l).any(|(k, _)| !b[k + l.len()..].starts_with(|c: char| c.is_alphanumeric() || c == '_')))
+                                };
+                                (r.outer as usize..r.lts.len())
+                                    .map(|i| r.outlives.iter().filter(|&&(a, b)| a as usize == i || b as usize == i).count() + in_bounds(&r.lts[i]) as usize)
+                                    .filter(|&n| n > 0)
+                                    .collect()
+                            };
+                            let (de, me) = (early(ds.regions.as_deref(), &ds.generics), early(ms.regions.as_deref(), &ms.generics));
+                            if de != me {
+                                return Err(format!("{line}lifetime parameters or bounds on method `{m}` do not match the trait declaration (E0195)"));
+                            }
+                        }
+                        // (a parameter's reference the trait leaves to the caller (elided, or the method's own lifetime)
+                        // that the impl ties to one of its header's (`fn next(&'a mut self)`): less general, E0308)
+                        if let Some(mr) = ms.regions.as_deref().filter(|r| r.outer > 0) {
+                            let dr = ds.regions.as_deref();
+                            for (i, (&dt, &mt)) in ds.params.iter().zip(&ms.params).enumerate() {
+                                if !(matches!(dt, Ty::Ref(..)) && matches!(mt, Ty::Ref(..))) {
+                                    continue;
+                                }
+                                let dc = dr.and_then(|r| r.slots.get(i)).and_then(|s| s.first().copied()).unwrap_or(crate::types::R_ELIDED);
+                                let free = dc == crate::types::R_ELIDED || dr.is_some_and(|r| dc >= r.outer && (dc as usize) < r.lts.len());
+                                if free && mr.slots.get(i).and_then(|s| s.first()).is_some_and(|&c| c < mr.outer) {
+                                    return Err(format!("{line}method not compatible with trait: lifetime mismatch in `{m}` of `{tr}` (E0308)"));
+                                }
+                            }
                         }
                     }
                 }

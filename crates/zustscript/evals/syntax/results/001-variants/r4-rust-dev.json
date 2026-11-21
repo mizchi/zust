@@ -1,0 +1,78 @@
+[
+  {
+    "proposal": "001-variants",
+    "persona": "rust-dev",
+    "scores": {
+      "R1": {
+        "score": 4,
+        "why": "`Circle { center: Vec2, r: f64 }`、`Circle { r, ... } =>`、`fn grow(c: Shape::Circle) -> Shape::Circle` は Rust の struct variant と同じ形で、説明なしに読める。値の型は常に `Shape` と一言で言える。減点は 2 つ。scrutinee の `s` が腕の中で絞り込まれる読み方は Rust にない。残りが `..` でなく `...` なのも一瞬引っかかる。"
+      },
+      "R2": {
+        "score": 4,
+        "why": "部分型がなくなり、r3 の『部分型が 1 つだけある』例外が消えた(単一化は等式だけ。002 と同じ書き方)。`...` と `Circle { ...c, … }` は 002 の spread と揃っている。残る例外は 3 つ。effect の操作名は effect の間で一意。同名の関数があるファイルでは、修飾しない `Circle` が関数になる(`view` の例)。`None` は遅らせるが、`Ok(s)` は prelude に即決する。"
+      },
+      "R3": {
+        "score": 3,
+        "why": "決まる方法は単一化と prelude の既定値の 2 つだけで、期待する型が伝わる場所も網羅的に挙がっている。決まっていない値の match はその場でエラーで、循環しない。ただし解決は期待する型に依存する(ルーブリックの 3)。`let x = None; report(x)` は遅延で `Parsed` に決まるのに、`let p = Ok(s); describe(p)` はその場で `Result` に決まってエラーになる。この非対称は、規則を読まないと予想できない。"
+      },
+      "R4": {
+        "score": 4,
+        "why": "`let x = Some(1);`、`best = Some(i)` が通る(`last_positive`)。`moved` は `Label { ...s, at: add(at) }` で短くなった。`fn Circle` コンポーネントと `Shape::Circle` も共存できる。減点は 3 つ。or パターンとガードがない(004)。`Shape::Circle` を `Array<…>`、`Option<…>`、フィールドの型に書けない(ただし Rust でもバリアントは型ではないので、Rust より書けないことは増えていない)。決まっていない `None` をすぐ match にかけられない。"
+      },
+      "R5": {
+        "score": 4,
+        "why": "網羅性と到達可能性はパターン行列で検査し、入れ子とリテラルも扱う(r3 の medium は解消)。`grow(shapes[0])` は ``expected `Shape::Circle`, found `Shape` (narrow it with `match`)`` になる。prelude と遅延で決まったものには、決まった場所の注が付く。`let mut` への代入、`..`、浮動小数点のリテラルパターン、TAG との衝突、レコードからバリアントへの spread は、どれも直し方つきのエラー。減点は 2 つ。`c: Shape::Circle` の match の網羅性が未決。クロージャの中の絞り込みも未決。"
+      },
+      "R6": {
+        "score": 4,
+        "why": "名前付きフィールドは名前のままプロパティになり、更新では TAG を spread の後に書く。`.d.ts` は `Shape.Circle` の namespace。`@wasm` の `ZsShape::Circle { center, r: s_r }` と、`let … else { unreachable!() }` での分解も書かれている。位置引数のバリアントの `_0` と、同名のバリアントの TAG は、表現の決定に移ったまま。"
+      },
+      "R7": {
+        "score": 4,
+        "why": "Rust の enum、struct variant、`@`、パスでの修飾がそのまま使え、`Some` / `Ok` / `None` も修飾なしで通る。新しく覚えることは 3 つ。`...`、scrutinee の絞り込み、そして prelude と同名のバリアントを持つユーザーの enum が、期待する型で勝つこと。"
+      },
+      "R8": {
+        "score": 4,
+        "why": "部分型をやめたので `unify_inner` は変えずに済み、絞り込みは束縛のメタデータで閉じる。prelude の既定値は、今の finish_fn の intv / floatv と同じ形で入る。`EK::If` は then 側の型を else 側の expect に渡すので、`describe_later_b` はそのまま通る。遅延は関数の中で閉じるので、増分検査とも合う。ただし `exhaustive()`(最上位のバリアントだけを見る)をパターン行列に書き換える必要があり、実装量は小さくない。"
+      }
+    },
+    "blocker": [],
+    "issues": [
+      {
+        "severity": "medium",
+        "where": "未決事項『型が `Shape::Circle` の値の match の網羅性』",
+        "problem": "`fn f(c: Shape::Circle)` の中で、`match c { Circle { r, ... } => r }` は `_` の腕なしで網羅的か、`let Circle { r, ... } = c;` は反駁不能として通るかが決まっていない。決まらないと、`c.r` を何度も書くか、使わない腕を書くことになる。",
+        "suggestion": "絞り込まれた値の match では、絞り込まれたバリアントの腕だけで網羅的とし、他の腕は到達しない警告にする。`let` のパターンも、絞り込みがあれば反駁不能とする。"
+      },
+      {
+        "severity": "medium",
+        "where": "未決事項『絞り込まれた変数をクロージャが捕まえたとき』",
+        "problem": "`Circle { ... } => xs.map((x) => s.r * x)` は普通に書く形。絞り込みが外れると `s.r` がエラーになる。let の変数は不変で、`let mut` の変数はクロージャから捕捉できないので、保っても健全なはず。",
+        "suggestion": "不変の束縛の絞り込みは、クロージャの中にも写すと決める。"
+      },
+      {
+        "severity": "low",
+        "where": "A『決まっていない値は、使う前に決める』",
+        "problem": "`let x = None; match x { Some(v) => v, None => 0 }` がエラーになる。Rust なら Option として推論される。",
+        "suggestion": "照合する値が候補つきの型変数で、パターンが prelude のバリアントだけなら、その場で prelude の既定値を当てる。"
+      },
+      {
+        "severity": "low",
+        "where": "出力 / lower.rs の `s_r`",
+        "problem": "生成名が、ユーザーの変数名と衝突しうる。",
+        "suggestion": "生成名には、衝突しない接頭辞を付ける。"
+      }
+    ],
+    "questions": [
+      "`c: Shape::Circle` の match と `let Circle { r, ... } = c` は、`_` なしで網羅的 / 反駁不能か",
+      "腕の中のクロージャは、捕まえた変数の絞り込みを保つか",
+      "決まっていない `None` を match にかけたとき、パターンが prelude のバリアントだけでもエラーか",
+      "`xs.map(At)` / `xs.map(Some)` のように、バリアントを関数値として渡せるか",
+      "`==` で enum の値を比べられるか"
+    ],
+    "alternative": {
+      "summary": "絞り込みを、網羅性・反駁不能・クロージャの捕捉にまで一貫して使う。",
+      "example": "fn radius(c: Shape::Circle) -> f64 {\n  let Circle { r, ... } = c;   // 反駁不能\n  r\n}\nfn scale(s: Shape, xs: Array<f64>) -> Array<f64> {\n  match s { Circle { ... } => xs.map((x) => s.r * x), _ => xs }\n}\nlet x = None;\nmatch x { Some(v) => v, None => 0 }   // Option<i32>"
+    }
+  }
+]

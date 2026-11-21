@@ -1,0 +1,11 @@
+[package]
+name = "ui-leptos"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+# (not a member of zust's workspace)
+[workspace]
+
+[dependencies]
+leptos = { version = "=0.8.23", features = ["csr"] }

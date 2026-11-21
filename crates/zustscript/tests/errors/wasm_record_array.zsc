@@ -1,0 +1,3 @@
+// expect: `Poly` (a record or enum with an array field) is not in the @wasm subset
+type Poly = { xs: Array<f64> }
+@wasm pub fn f(p: Poly) -> f64 { 1.0 }

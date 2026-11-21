@@ -648,9 +648,11 @@ impl Cx<'_> {
                     self.drop_in_place(a, t);
                 }
             }
+            self.rg_for_item(f, vt);
             self.for_pat_check(fpat, place.ty())?;
             self.runtime_pat_guard(fpat, place)?;
             self.pat_bind(fpat, place, BindMode::Move)?;
+            self.rg.pat = None;
         }
         let bound = self.pending_bound.take();
         let nb = self.loop_bounds.len();
@@ -1078,7 +1080,14 @@ impl Cx<'_> {
         let mut vals = vec![];
         for a in args {
             let a: &Expr = self.keep_expr(a);
-            let (v, t) = self.expr(a, elem)?;
+            // (`vec![&f()]`: a macro's arguments are not extended, the temporary goes away with the statement)
+            let d0 = self.bk.direct.len();
+            if self.bk_on() && !self.bk.macro_let {
+                borrowck::direct_ref(a, &mut self.bk.direct);
+            }
+            let r = self.expr(a, elem);
+            self.bk.direct.truncate(d0);
+            let (v, t) = r?;
             if t == Ty::Never {
                 return Ok((None, Ty::Never));
             }
@@ -1757,6 +1766,7 @@ impl Cx<'_> {
             let call = self.b.ins().call(fr, &[sz]);
             let ptr = self.b.inst_results(call)[0];
             self.write(Place::Mem(ptr, 0, t), v);
+            self.rg_box(c, &cargs[0], t);
             return Ok(Some((Some(ptr), Ty::Box(intern(t)))));
         }
         // prelude の Chars が使う u32 → char (検査しない)

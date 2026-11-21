@@ -1,0 +1,111 @@
+[
+ {
+  "proposal": "002-anonymous-records",
+  "persona": "implementer",
+  "note": "condensed from the evaluator's report (scores verbatim, findings summarized)",
+  "scores": {
+   "R1": {
+    "score": 3,
+    "why": "props の型は読める。二重の波括弧、`-> { .. } {`、{ todo } がブロックという規則"
+   },
+   "R2": {
+    "score": 2,
+    "why": "-> と => と旧式 fn(..) の混在。type が名前で区別される一方 TS の別名と同じ字面。if の本体ではブロック、match の arm とクロージャの本体ではレコードになる"
+   },
+   "R3": {
+    "score": 3,
+    "why": "2 トークンの先読みが要り巻き戻しが必要。値の型は期待する型で決まる。型依存の構文解析案は 1〜2 点"
+   },
+   "R4": {
+    "score": 4,
+    "why": "4 つの型宣言が消える。全部省略形が書けない、名前付きと無名の間の変換がない"
+   },
+   "R5": {
+    "score": 3,
+    "why": "部分型なしで静かに通らない。期待する型が届かないと不一致、unify が bool で差分を示せない"
+   },
+   "R6": {
+    "score": 4,
+    "why": "プレーンなオブジェクト、.d.ts は予想どおり。引数名が出るのは改善"
+   },
+   "R7": {
+    "score": 3,
+    "why": "TS と違う点(部分型、互換性、{ x }、=> ())が多い"
+   },
+   "R8": {
+    "score": 3,
+    "why": "Ty::Rec の追加は局所的で増分ビルドに有利。Ty::Fn に引数名がなく約 10 か所の match、巻き戻し、エラー回復がない"
+   }
+  },
+  "blocker": [],
+  "issues": [
+   {
+    "severity": "high",
+    "where": "未決事項「期待する型がレコードならレコードとして読む」",
+    "problem": "構文が型に依存するとアイテム単位の解析、エラー回復、LSP の部分再解析が成り立たない。しかも不要: `{ ident ,` は今の block() でもエラーになる字面",
+    "suggestion": "採らない。`{ ident :` / `{ ident ,` / `{ ..` ならレコード、曖昧なのは `{ x }` だけ"
+   },
+   {
+    "severity": "high",
+    "where": "B「期待する型が名前付きならその型」と、期待する型が届かない箇所",
+    "problem": "`let init = [{ .. }]; <App initial={init} />` が不一致になる。JS は同じなのに型検査の上だけで失敗",
+    "suggestion": "intv / floatv と同じく、レコードのリテラルに「このフィールドの集合を持つレコード」という制約つきの Var。Named とも Rec とも単一化でき、finish_fn で決まらなければ Rec"
+   },
+   {
+    "severity": "high",
+    "where": "C の引数名と Ty::Fn",
+    "problem": "ty_of の時点で引数名を失うので .d.ts にも hover にも届かない",
+    "suggestion": "TyS::Fn と Ty::Fn に名前(unify では無視)。触る match を提案に列挙"
+   },
+   {
+    "severity": "medium",
+    "where": "`if c { { .. } }` と、if の本体は block()、arm とクロージャの本体は primary",
+    "problem": "同じ `{ done: .. }` が場所によってレコードにもエラーにもなり、エラーが原因を示さない",
+    "suggestion": "block() の最初が `ident :` なら専用のエラー。#{ } を採るなら消える"
+   },
+   {
+    "severity": "medium",
+    "where": "A「名前付きと無名は別の型」",
+    "problem": "TS の type は別名なので Todo の値を同じ形の無名の型に渡せないと驚く",
+    "suggestion": "type X = {..} を構造的な別名にし、名前は表示と wasm の struct 名だけに使う(再帰する型は別)"
+   },
+   {
+    "severity": "medium",
+    "where": "C の旧式の併存と show()",
+    "problem": "1 つの宣言に -> と => が混ざり、エラー表示も fn(..) -> .. でずれる",
+    "suggestion": "show() を TS 風に。宣言の -> を残す理由と旧式の期限を書く"
+   },
+   {
+    "severity": "medium",
+    "where": "unify_inner が bool",
+    "problem": "長い構造的な型の不一致で、どのフィールドが違うか分からない",
+    "suggestion": "Rec 同士は missing / extra / 型違いの差分を返す"
+   },
+   {
+    "severity": "low",
+    "where": "`-> { .. } {` と空の {}",
+    "problem": "エラー回復で本体の { を型の続きと読む。空の {} の扱いが未定",
+    "suggestion": "空の {} を決める。長い戻り値の型には type を案内"
+   },
+   {
+    "severity": "low",
+    "where": "@wasm で無名レコードが使えない",
+    "problem": "本体のローカルな値でも型名が要る。検出場所が書かれていない",
+    "suggestion": "lower.rs の EK::Record と vty で not_in_subset"
+   }
+  ],
+  "questions": [
+   "空の {} の扱い",
+   "{ todo } をブロックとするときの警告",
+   "名前付きと同じフィールドの無名の型の間で代入を許すか",
+   "unify の後でどちらの引数名を表示するか",
+   "t の型が Var のときの更新",
+   "JSX の style={{ color: \"red\" }} が無名レコードになるのは意図どおりか",
+   "optional なフィールドと構造的同一性の両立"
+  ],
+  "alternative": {
+   "summary": "ブロックかレコードかは構文だけで決め、レコードのリテラルの型は制約つきの Var で遅らせる。type X = {..} は構造的な別名",
+   "example": "let extra = [{ id: 9, title: \"x\", done: false }];   // 後で Todo と単一化できる\n{ todo, onToggle }   // `{ ident ,` なのでレコード"
+  }
+ }
+]

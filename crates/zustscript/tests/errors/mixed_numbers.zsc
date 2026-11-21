@@ -1,0 +1,2 @@
+// expect: type mismatch: expected f64, found {integer}
+fn f(x: f64) -> f64 { x + 1 }

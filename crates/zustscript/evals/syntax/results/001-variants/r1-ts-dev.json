@@ -1,0 +1,104 @@
+[
+ {
+  "proposal": "001-variants",
+  "persona": "ts-dev",
+  "note": "condensed from the evaluator's report (scores verbatim, findings summarized)",
+  "scores": {
+   "R1": {
+    "score": 4,
+    "why": "名前付きフィールドで意味が型に書ける。`..` は TS にない記号で `Label { .. }` は説明が要る。`Shape::Circle` の `::` も TS の人は `Shape.Circle` と書きたくなる"
+   },
+   "R2": {
+    "score": 4,
+    "why": "レコードの生成・更新の延長。位置引数との混在で書き方が 2 通り、`let Vec2 { x, y } = p` の型名必須が TS の `const { x, y } = p` とずれる"
+   },
+   "R3": {
+    "score": 3,
+    "why": "修飾なしはファイル全体の宣言と期待する型の両方で決まる。if の両枝への期待する型の伝播、`Circle {` がレコードかバリアントかが未決"
+   },
+   "R4": {
+    "score": 4,
+    "why": "`..` でフィールド追加に強い。共通フィールド `s.at` を読めず match 必須で、TS の絞り込みより長い場面がある"
+   },
+   "R5": {
+    "score": 4,
+    "why": "曖昧エラーは直し方つきで良い。A-1 で離れた場所が壊れるのが減点"
+   },
+   "R6": {
+    "score": 4,
+    "why": "名前のまま出る判別共用体は TS で switch できる。`_0` が残る、TAG 固定、バリアントごとの型が export されない"
+   },
+   "R7": {
+    "score": 3,
+    "why": "struct バリアント、`..`、`::`、全フィールド規則を覚える必要。`Rect { min }` がエラーになるたびに引っかかる"
+   },
+   "R8": {
+    "score": 3,
+    "why": "期待する型依存の解決、`Name {` の決定待ちで補完が難しい。A-1 はファイル全体の表に依存し増分検査に響く"
+   }
+  },
+  "blocker": [],
+  "issues": [
+   {
+    "severity": "high",
+    "where": "A 規則 1(ファイル内で一意)",
+    "problem": "enum を足すと離れた場所の修飾なし `None` がまとめてエラーになる。import が入るとさらに悪化",
+    "suggestion": "規則 1 を外し、期待する型で決まらなければ修飾必須。決めたときはエディタが修飾を補う"
+   },
+   {
+    "severity": "high",
+    "where": "A と代数的エフェクト(`perform Ask(..)`、handler の `Print(s), k =>`)",
+    "problem": "effect の操作もバリアントだが、perform と handler の arm には期待する型がない。解決が書かれていない",
+    "suggestion": "effect の操作は一意性を保つか、`perform Console::Ask(..)` / `Console::Print(s), k =>` の修飾を必須にする"
+   },
+   {
+    "severity": "medium",
+    "where": "B「`..` がなく書き漏らしたらエラー」",
+    "problem": "TS の分割代入は余ったフィールドを書かなくても通るので、毎回引っかかる",
+    "suggestion": "直し方(`add ..`)つきのメッセージと LSP のクイックフィックス。または警告にとどめる"
+   },
+   {
+    "severity": "medium",
+    "where": ".d.ts の `_0`",
+    "problem": "位置引数のバリアントは `_0` のまま。動機 1 が半分残る",
+    "suggestion": "`pub` な enum での位置引数を未決事項に足す。混在の制限か警告"
+   },
+   {
+    "severity": "medium",
+    "where": ".d.ts 全体",
+    "problem": "バリアントごとの型が export されず、TS 側で `Extract<Shape, { TAG: \"Circle\" }>` を書くことになる",
+    "suggestion": "`export type Shape_Circle = ..` と union を出す。必要ならコンストラクタも"
+   },
+   {
+    "severity": "medium",
+    "where": "B「`s.r` は書けない」",
+    "problem": "全バリアントに共通のフィールドを読むだけで match が要る",
+    "suggestion": "全バリアントが同名同型で持つフィールドに限って `s.at` を許す。絞り込みは将来の課題に"
+   },
+   {
+    "severity": "low",
+    "where": "`let Vec2 { x, y } = p;`",
+    "problem": "型名必須で TS の `const { x, y } = p` と揃わない",
+    "suggestion": "`let { x, y } = p;` を許す"
+   },
+   {
+    "severity": "low",
+    "where": "同名のレコードとバリアント",
+    "problem": "`type Circle` と `Shape::Circle` が同じファイルにあると迷う",
+    "suggestion": "名前空間を 1 つにして同名を禁止"
+   }
+  ],
+  "questions": [
+   "effect の操作は一意性の制約から外れるのか。perform と handler の arm でどう解決するか",
+   "総称 enum の修飾は `Option::None` か `Option<i32>::None` か",
+   "`Some(None)` の内側へ期待する型は伝わるか",
+   "期待する型が `Shape` の位置で無名レコード `{ center, r }` をバリアントとして受け付けるか",
+   "unit だけの enum にデータ付きのバリアントを 1 つ足すと .d.ts の形が文字列から `{ TAG }` に変わり TS 側が壊れる。これを扱うか",
+   "モジュールの import が入ったとき、規則 1 の「そのファイル」は import した enum を含むか"
+  ],
+  "alternative": {
+   "summary": "修飾なしは期待する型でだけ解決(規則 1 を外す)。`..` 漏れはクイックフィックスつき警告。分割代入は型名なし。.d.ts にバリアントごとの型",
+   "example": "enum Hit { None, At { index: i32 } }\nif found < 0 { None } else { At { index: found } }   // 戻り値の型で決まる\nlet h = Hit::None;                                   // 期待する型がなければ修飾\nlet { x, y } = p;\n// .d.ts\nexport type Hit_None = { readonly TAG: \"None\" };\nexport type Hit_At = { readonly TAG: \"At\"; readonly index: i32 };\nexport type Hit = Hit_None | Hit_At;"
+  }
+ }
+]

@@ -1,0 +1,116 @@
+[
+  {
+    "proposal": "003-option-result",
+    "persona": "rust-dev",
+    "scores": {
+      "R1": {
+        "score": 4,
+        "why": "`let t = non_empty(\"title\", d.title)?;`、`find(todos, id).ok_or(NotFound { id })?`、`.map_err(message)?` は、Rust の開発者なら説明なしで読める。`title_of` の `|> .map(..) |> .unwrap_or(..)` も左から右に読める。ただし、`(t.note?)` や `(perform Ask(q))?` の括弧、`(e?).f` という書き方は Rust にはなく、一度戸惑う。また、`note?: String` を読むと型が `Option<String>` になる一方で `{ note: Option<String> }` とは別の型、という点は、説明を読まないと分からない。"
+      },
+      "R2": {
+        "score": 3,
+        "why": "Option / Result を『ふつうの enum と同じに扱う』のは既存の規則の延長になっている。ただし例外がいくつかある。(1) `x |> f(a)?` を `(x |> f(a))?` と読む。後置の `?` は呼び出しと同じ強さという規則に、`|>` だけ例外を作っている。(2) 任意のフィールドは、読み書きの型が `Option<T>` なのに、型の等しさでは別の型になる。002 の D 節は今も『`title: Option<String>` の略記』と書いているので、文書の間で食い違っている。(3) 001 の『決まっていない値を match にかけると修飾を求めるエラー』と、003 の『候補に prelude の enum があれば、その時点で既定値に決める』は、001 の本文の側がまだ合っていない。(4) 型の名前 `Option` / `Result` を予約しているが、Rust では prelude の名前をユーザーの型で覆い隠せる。"
+      },
+      "R3": {
+        "score": 4,
+        "why": "後置の `?` は 1 トークンで決まる。`?.` と `??` は lexer で先に照合して予約のエラーにするので、TS の optional chaining との読み違いは起きない。`perform Ask(q)?` も、直し方つきのエラーで 1 通りにしている。`?` の左の式の期待する型を、囲む関数の戻り値から作る(`Result<_, E>`)のは文脈への依存だが、規則は明快。ただし、`|>` の右辺の末尾にある `?` を付け直す処理は構文上の特例になる(`pipe()` の `.m(a)` の枝は `args` を読んですぐ返すので、そこにも同じ処理が要る)。"
+      },
+      "R4": {
+        "score": 3,
+        "why": "`validate` / `rename` / `title_of` は大きく短くなり、map_opt と unwrap_or の自作も要らなくなる。一方で、Rust で書けるのにここでは書けない、または長くなるものが多い。`e?.len()` の連鎖(`(e?).len()` と書く)。`collect::<Result<Vec<_>,_>>()`(`for` と `let mut` で書くしかなく、`push` が新しい配列を作るので O(n²))。`ok()` / `ok_or_else` / `unwrap_or_else` / `or_else` / `filter`。`if let` と `let … else`(`return` がないので、早く抜ける方法は `?` しかない)。`handle` の本体と arm の中の `?`(関数に切り出すしかない)。`map_err(AppError::Form)` のように、バリアントのコンストラクタを関数として渡せるかも書かれていない。"
+      },
+      "R5": {
+        "score": 4,
+        "why": "E の不一致、Option と Result の取り違え、Option / Result を返さない関数での `?`、クロージャの中の `?`(`titles` の例)は、どれもコンパイル時のエラーで、直し方とクイックフィックスが付く。任意のフィールドに暗黙の `Some` を入れない点も、誤りが静かに通らない方向でよい。気になるのは 2 点。(1) 総称の `{ value?: T }` で T を Option や `()` にすると『その場でエラー』という規則。総称の関数の中では T は型引数なので、誤りは呼び出し側(しかも推移的に何段も先)で出る。Rust の単相化の後に出るエラーと同じく、どこを直せばよいか分かりにくい。(2) 構造が同じで任意かどうかだけが違う型が単一化で合わないと、エラーが増える。差分を表示するとは書かれているが、Rust には無い種類の誤り。"
+      },
+      "R6": {
+        "score": 3,
+        "why": "JS の `?` の出力(一時変数、`if ($t.TAG === \"Err\") return $t;`、即時関数にしない)と、`@wasm` で Rust の std の `Option` / `Result` と `?` にそのまま下ろす点は、見なくても予想できる。任意のフィールドの `.d.ts` が `readonly note?: string | undefined` になる点も、TS から自然に使える。ただし 3 点ある。(1) `pub fn` の引数と戻り値の Option / Result は `{ TAG: \"Ok\", _0 }` のままで、TS 側で開く一手間が要る。wasm_bindgen の慣習(`Option<T>` は `T | undefined`、`Result<T, JsError>` は例外)とも違う。(2) `lower.rs` の `closure()` は型注釈のない `|x| …` を出すので、`?` を含むクロージャ(`|x| { let y = f(x)?; Ok(y) }`)は、rustc がエラーの型を推論できず E0282 になりうる。(3) JS のヘルパ `$unwrap_or` が Option と Result で共用になっていて、`@tag` の表現次第で形が変わる。"
+      },
+      "R7": {
+        "score": 4,
+        "why": "名前(`map` / `and_then` / `map_err` / `ok_or` / `unwrap_or` / `is_some` …)、`?` の意味(クロージャの中ではクロージャから返る)、`unwrap_or` の引数をいつも評価すること、左から右の評価順は、どれも Rust と同じで、覚え直すことはほとんどない。新しく覚えるのは、`?.` の予約と `(e?).f`、`From` がなく `map_err` を明示すること、`unwrap` / `expect` / `if let` がないこと、任意のフィールドが `Option<T>` と別の型であること。"
+      },
+      "R8": {
+        "score": 3,
+        "why": "戻り値の型をスタックで持ち、`EK::Try` でその先頭を見る方法、`method_sig` に行を足す方法、prelude を enum の表に先に入れる方法は、どれも今の構造に素直に入る。重いのは 3 点。(1) js.rs で『`?` を含む式は即時関数にせず、文の形に持ち上げる』処理は、`&&` / `||` の短絡、`if` / `match` を式として使う所、ブロックの末尾、フィールドの値など、すべての式の形で評価順を保つ必要があり、範囲が広い。(2) 総称の任意のフィールドの制約(T は Option でない)を検査するには、総称の関数の境界をまたいで暗黙の制約を伝える必要があり、局所的に決まらない。(3) lower.rs では、`rs_type` が `Zs{n}` を作るパターンとバリアントの出力に prelude 用の分岐が要る。クロージャは今は配列のメソッドの引数に限っている(`EK::Closure` は not_in_subset)ので広げる必要があり、`?` を含むときは戻り値の型の注釈も出す必要がある。"
+      }
+    },
+    "blocker": [],
+    "issues": [
+      {
+        "severity": "high",
+        "where": "C. 型の規則: 『総称の `{ value?: T }` で、T を `()` や `Option<…>` にしたときも、その場でエラー』",
+        "problem": "総称の関数 `fn wrap<T>(x: T) -> { value?: T }` と、それを呼ぶ `fn g<U>(u: U) { wrap(u) }` があると、U にも『Option でない』という暗黙の制約が要る。これは関数をまたいで推論する bound になり、局所的に決まらない。誤りも単相化の後のように、呼び出しの深い所で出る。Rust の開発者は post-monomorphization のエラーを嫌う。",
+        "suggestion": "r1 では、任意のフィールドの型に型引数をそのまま書くこと(`value?: T`)を禁じ、具体的な型だけに限る。総称が要るなら `value: Option<T>` を使う。後で緩めても互換は壊れない。"
+      },
+      {
+        "severity": "high",
+        "where": "B. クロージャ / 未決事項『Array<Result<T, E>> を Result<Array<T>, E> にまとめる関数』",
+        "problem": "Rust の `xs.iter().map(f).collect::<Result<Vec<_>, _>>()?` に当たるものがない。代わりの `for` と `let mut acc = acc.push(x?)` は、`push` が新しい配列を作る(README)ので O(n²) になる。フォームの検証のように、配列の各要素を検査する処理はよくある。",
+        "suggestion": "組み込みの `xs.try_map((x) => Result<U, E>) -> Result<Array<U>, E>`(と、Option 版)を r1 に入れる。JS では最初の Err で抜ける `for` ループ、Rust では `iter().map().collect::<Result<Vec<_>,_>>()` に下ろす。"
+      },
+      {
+        "severity": "medium",
+        "where": "B. 予約する字面: `e?.f`、`e?.m()`",
+        "problem": "Rust の開発者にとって `a.b()?.len()` は最もよく書く形の 1 つで、`(a.b()?).len()` は冗長。読み違いを心配しているが、TS の意味だと式の型が `Option<typeof f>`、Rust の意味だと f の型になるので、具体的な型の所では型検査がほぼ必ず違いを捕まえる。",
+        "suggestion": "未決事項の (a)、Rust の意味を採る。式の型が型引数のままで区別できない所だけ警告を出す。TS の optional chaining に当たる書き方には `.map((x) => x.f)` を案内する。"
+      },
+      {
+        "severity": "medium",
+        "where": "D. 基本のメソッド",
+        "problem": "`ok()`、`ok_or_else`、`unwrap_or_else`、`or_else`、`filter` がない。Option を返す関数で Result に `?` を付けたときのエラーが『match を使え』になり、`?` で入れ子をなくすという動機と逆行する。`ok_or` の引数をいつも評価するので、重いエラー値を作る場合に代わりがない。",
+        "suggestion": "クロージャを受けるメソッドは `map` と同じ仕組みで足せるので、少なくとも `ok()`、`ok_or_else`、`unwrap_or_else` を r1 に入れる。"
+      },
+      {
+        "severity": "medium",
+        "where": "出力 / Rust / wasm: `map` / `and_then` / `map_err` のクロージャ",
+        "problem": "lower.rs の `closure()` は `|x| body` と型注釈なしで出す。`?` を含むクロージャ(`|x| { let y = f(x)?; Ok(y) }`)は、Rust の `?` が `From::from` を通るので、rustc がエラーの型を決められず E0282(type annotations needed)になることがある。zustscript の側で型は分かっているのに、生成した Rust がコンパイルできない。",
+        "suggestion": "`?` を含むクロージャを下ろすときは、検査器が決めた戻り値の型を `|x| -> Result<T, E> { … }` と必ず書き出す、と実装の注意に明記する。"
+      },
+      {
+        "severity": "medium",
+        "where": "出力 / .d.ts と未決事項の『pub な関数の Option<T> を T | undefined にするか』",
+        "problem": "wasm_bindgen では、`Option<T>` は `T | undefined`、`Result<T, JsError>` は JS の例外になる。この提案では、TS 側でいつも `{ TAG }` を開くことになる。Result を例外として出す選択肢が、未決事項にも載っていない。",
+        "suggestion": "未決事項に『pub な関数が返す Result を、境界で例外に変える(`@throws` のような印)か』を足す。`@tag` の決定と一緒に扱う。"
+      },
+      {
+        "severity": "medium",
+        "where": "C. 型の等しさ: `{ note?: String }` と `{ note: Option<String> }` は別の型",
+        "problem": "読み書きの型が同じなのに単一化で合わないので、`{ note: Option<String> }` を受ける総称のヘルパに Todo を渡せない。互いに変換するには、レコードを作り直すことになる。002 の D 節は『略記』と書いていて、文書の間でも食い違っている。",
+        "suggestion": "002 の記述を直す。エラーメッセージで『任意かどうかだけが違う』ことを示す(提案にはある)のに加えて、変換のクイックフィックス(`{ ...r, note: r.note }` を作り直す)を出す。r2 では『持ち方だけが違う同じ型』にして、境界の手前で正規化する案も比べる。"
+      },
+      {
+        "severity": "low",
+        "where": "B. effect: `handle` の本体と arm の中では、r1 では `?` を書けない",
+        "problem": "エラーの直し方 `let r = handle …; r?` だけでは、本体の中で何段も `?` を使いたい場合に足りない。",
+        "suggestion": "直し方に『本体を `?` を使う関数に切り出し、`handle f()` とする』も載せる。返る先は、Rust の開発者の直感に合う『`handle` を囲む関数』を第一候補にする。"
+      },
+      {
+        "severity": "low",
+        "where": "A. 名前の衝突: 型の名前 `Option` / `Result` を予約",
+        "problem": "Rust では prelude の名前をユーザーの型で覆い隠せる。`enum Result { Win, Lose }` のような、ゲームなどで自然な名前がエラーになる。",
+        "suggestion": "予約のままにするなら、エラーメッセージで改名を勧める。覆い隠しを許すなら、修飾しないバリアントの既定値はいつも prelude を指す、と明記する。"
+      },
+      {
+        "severity": "low",
+        "where": "出力 / JS: 『`?` を含む式は即時関数にしない』",
+        "problem": "`a && f()?`、`if c { g()? } else { … }` を式として使う場合、match の腕の中の `?` を文に持ち上げるときに、短絡と評価順をどう保つかが書かれていない。",
+        "suggestion": "`&&` / `||` の右辺に `?` があるときは `if` に展開する、と規則と例を足す。"
+      }
+    ],
+    "questions": [
+      "バリアントのコンストラクタ(`FormError::NotFound` や、位置引数のバリアント)を、`map_err` に関数の値として渡せるか。`@wasm` の部分集合では『値としての関数』が使えないので、`map_err(message)` は `@wasm` では書けないのか。",
+      "任意のフィールドを持つレコードの `==`: キーが無いものと `note: undefined` のものを等しいとみなすか。TS から来た `null` はどうか。",
+      "`?` が型を `Result<_, E>` に決めたクロージャを、`Array.map` 以外の所(変数に入れる、引数に渡す)で使ったときの型の表示と `.d.ts`。",
+      "`pub fn` が返す Result を、境界で JS の例外に変える選択肢を持つか(wasm_bindgen の `Result<T, JsError>` と同じ)。",
+      "`?` で関数を早く抜けたとき、effect を持つ関数(`function*`)の中で、外側の handler に何か後始末が要るか。継続を呼ばずに終わる場合の扱い。",
+      "`let … else` か `if let` を、`return` がない言語でどう扱うか。`?` 以外に早く抜ける方法を r2 以降で入れる予定があるか。",
+      "Option / Result に `PartialEq`(`==`)と `to_string` を使えるか。`@wasm` の derive との対応。"
+    ],
+    "alternative": {
+      "summary": "4 点を変える。(1) `?.` を Rust の意味(`(e?).f`)にし、型引数のままで区別できない所だけ警告する。(2) `try_map` と、`ok()` / `ok_or_else` / `unwrap_or_else` を r1 に入れる。(3) 任意のフィールドの型は具体的な型に限り(`value?: T` は禁止)、暗黙の bound を作らない。(4) `?` を含むクロージャを Rust に下ろすときは、戻り値の型を注釈する。",
+      "example": "fn titles(ds: Array<Draft>) -> Result<Array<String>, FormError> {\n  ds |> .try_map((d) => non_empty(\"title\", d.title))   // 最初の Err で抜ける。JS は for ループ、Rust は collect::<Result<Vec<_>,_>>()\n}\n\nfn first_len(todos: Array<Todo>) -> Option<i32> {\n  find(todos, 1)?.note?.len()   // Rust と同じく (e?).f の意味。TS の意味なら型が Option<…> になるので型検査で分かる\n}\n\nfn maybe_title(r: Result<Todo, FormError>) -> Option<String> {\n  Some(r.ok()?.title)   // match を書かずに、エラーを捨てる\n}\n\ntype Boxed<T> = { value?: T }        // error: an optional field needs a concrete type (write `value: Option<T>` for a generic field)\n\n// @wasm の出力: |d: ZsDraft| -> Result<i32, ZsFormError> { let t = zs_check(d)?; Ok(t) }"
+    }
+  }
+]

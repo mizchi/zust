@@ -1,0 +1,3 @@
+// expect: component `App` performs
+enum Ask { Name -> String }
+fn App() -> Jsx { <p>{perform Name}</p> }

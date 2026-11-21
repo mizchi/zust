@@ -29,7 +29,6 @@ compile-fail	feature-gates/issue-43106-gating-of-builtin-attrs-error.rs
 compile-fail	imports/extern-crate-self/extern-crate-self-fail.rs
 compile-fail	associated-types/issue-59324.rs
 compile-fail	layout/issue-84108.rs
-compile-fail	lifetimes/raw/use-of-undeclared-raw-lifetimes.rs
 compile-fail	typeck/issue-75889.rs
 compile-fail	extern/extern-crate-visibility.rs
 compile-fail	suggestions/impl-trait-missing-lifetime-gated.rs
@@ -65,4 +64,5 @@ compile-fail	typeck/issue-88643.rs
 compile-fail	nll/issue-54302-cases.rs
 compile-fail	nll/user-annotations/method-ufcs-2.rs
 compile-fail	coercion/unsize-lifetime-shrinking.rs
+compile-fail	generics/issue-65285-incorrect-explicit-lifetime-name-needed.rs
 compile-fail	privacy/projections.rs

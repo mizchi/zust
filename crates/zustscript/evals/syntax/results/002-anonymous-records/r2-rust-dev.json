@@ -1,0 +1,91 @@
+[
+  {
+    "proposal": "002-anonymous-records",
+    "persona": "rust-dev",
+    "scores": {
+      "R1": {
+        "score": 3,
+        "why": "`{ total, done }` と `{ ...t, done: !t.done }` は TS でも JS でも読め、r1 の `{ total: total, done: done }` より読みやすい。ただし `toggle` の `if t.id == id { { ...t, done: !t.done } } else { t }` の二重の波括弧は、Rust の目にはブロックの中のブロックに見える。`pub fn stats(..) -> { total: i32, done: i32 } {` は戻り値の型の直後に本体が続き、`-> (x: i32) => i32 {` のような関数型を返すシグネチャでは `->` と `=>` が 1 行に並ぶ。`TodoList({ todos, onToggle, title }: { todos: Array<Todo>, .. })` はフィールド名を 2 回読むことになる。"
+      },
+      "R2": {
+        "score": 3,
+        "why": "r1 からは大きく改善した。関数型は `(id: i32) => ()` の 1 通りで、更新は `...t` の 1 通り、名前付きと無名の型の 2 つの世界もなくなった。例外は 3 つ残る。(1) `type` は構造的だが、再帰するレコード型だけは名前で区別する。(2) 省略形は書けるが、1 つだけの `{ x }` はブロックになる。(3) 宣言は `->`、型とクロージャは `=>`(理由は書かれているが、1 つのシグネチャに両方が出る)。"
+      },
+      "R3": {
+        "score": 4,
+        "why": "ブロックかレコードかが、型に依存せず先読み 2 トークン(`ident :` / `ident ,` / `...`)で決まるようになり、r1 の最大の問題は解消した。`ident ,` で始まるブロックは元々エラーなので、既存のプログラムとも衝突しない。減点は 2 つ。`{ x }`(ブロック)と `{ x, }`(1 フィールドのレコード)がカンマ 1 つで分かれる(Rust の `(x)` と `(x,)` と同じ罠)。型の `(..)` は `)` の後の `=>` を見るまでタプルか関数型か決まらない(巻き戻しで足りるが、先読みは 1 トークンではない)。"
+      },
+      "R4": {
+        "score": 4,
+        "why": "props の型、`Stats`、`TodoItemProps` などの名前が不要になり、省略形と spread で `stats` と `toggle` が短くなった。無名のレコードも `@wasm` で使え、JS と wasm の切り替えが型の書き方で壊れなくなった(r1 の high は解消)。失ったものは 2 つ。`type` が構造的になり、レコードで newtype(`Meters` と `Celsius`)を作れなくなった。複数の spread(`{ ...a, ...b }`)が書けない。引数の位置の分割代入は、フィールド名をパターンと型で 2 回書くので、props が多いと長い。"
+      },
+      "R5": {
+        "score": 3,
+        "why": "良い点は 4 つ。幅の部分型がなく、余分なフィールドもエラーになる。`...t` を後ろに書く、`..t` を書く、旧式の `fn(..) -> ..` を書く、のどれも直し方つきのエラーになる。単一化の失敗で、足りない、余分、型が違うフィールドの差分を出す。悪い点は 3 つ。同じ形の `type Meters = { v: f64 }` と `type Celsius = { v: f64 }` が、何も言われずに入れ替え可能になる(Rust 開発者が型の安全のために使う newtype が、レコードでは効かない)。型が推論されるだけの所では `let r = { x };` が何の警告もなく `x` になり、エラーは遠くの使用箇所で出る。`{ ...t, done: 1 }` のように型を変える更新の扱いが書かれていない。"
+      },
+      "R6": {
+        "score": 4,
+        "why": "JS はプレーンなオブジェクトと分割代入で、`.d.ts` は `interface Todo`、`props: { readonly todo: Todo; readonly onToggle: (id: i32) => void }` と引数名つきになり、TS からも自然に使える。減点は 3 つ。(1) TS から余分なプロパティを持つ値が来たとき、JS 層の `{ ...t }` はそれをコピーするが、`@wasm` ではスロットに分解されて捨てられ、同じソースの JS 版と wasm 版で結果が変わる。(2) 同じ形の別名が 2 つあると、`@wasm` の Rust の struct 名(`ZsTodo` か他の名前か)が決まらない。(3) `pub` な関数の無名の戻り値の型に、`.d.ts` で名前がない。"
+      },
+      "R7": {
+        "score": 3,
+        "why": "Rust には無名の struct も構造的なレコードもないので、Rust 開発者には新しい概念。関数型は、クロージャ `(x) => e` が既に `=>` なので覚えやすい。逆に、Rust の `Todo { done: x, ..t }` の癖は毎回エラーになる(直し方つきなので軽い)。`=> ()` で unit を返す書き方はそのままで、`void` を足す必要は感じない。"
+      },
+      "R8": {
+        "score": 3,
+        "why": "`Ty::Rec`、`Ty::Fn` の引数名、`try_arrow_params` と同じ保存と巻き戻し、レコードの差分の表示と、実装の道筋は示されている。構造的な等しさも、フィールドを整列して比べれば済む。残る難しさは 2 つ。(1) 再帰するレコード型だけ名前で区別するので、型の宣言の強連結成分を求めることになる。enum を経由した再帰を数えるかも決める必要がある。(2) 同じ形の型に名前が複数あるとき、hover、エラー、`@wasm` の struct 名でどの名前を出すかの規則がない。別名を 1 つ足すと生成される Rust の名前が変わりうる。"
+      }
+    },
+    "blocker": [],
+    "issues": [
+      {
+        "severity": "medium",
+        "where": "A『`type Todo = { .. }` は、TS と同じく構造的な型の別名』",
+        "problem": "r1 の『名前付きと無名の値が混ざらない』は解消したが、代わりにレコードの newtype がなくなった。`type Meters = { v: f64 }` と `type Celsius = { v: f64 }` の値は、何も言われずに入れ替えられる。Rust 開発者は単位や ID の取り違えを防ぐために newtype を使うので、誤りが静かに通る(R5)。名前で区別できるのは、一つしかバリアントのない enum を使う場合と、型が再帰する場合だけで、再帰にした途端に等しさの意味が変わる。",
+        "suggestion": "名前で区別したい型の書き方を用意する。既存のディレクティブの形に合わせて `@nominal type Meters = { v: f64 }` とするか、一つしかバリアントのない enum を使うことを、ガイドラインとして提案に明記する。再帰する型を名前で区別する規則は、この書き方に寄せて説明する。"
+      },
+      {
+        "severity": "medium",
+        "where": "E『`type` で名前を付けていれば、その名前を使う(`ZsTodo`)』",
+        "problem": "構造的なので、`type Todo = { id: i32, title: String, done: bool }` と同じ形の `type Item = ..` は同じ型になる。どちらの名前で Rust の struct を作るかの規則がない。別名を 1 つ足すと生成される Rust のコードが変わりうる(r1 の A.1 と同じ種類の非局所的な影響)。hover とエラーの表示名も同じ問題を持つ。",
+        "suggestion": "Rust の struct 名は常に形から決める(`ZsRec_done_bool_id_i32_title_String` のようなもの)。`type` の名前は `pub type ZsTodo = ZsRec_..;` の Rust の型の別名として出す。表示名は『その式の注釈から来た名前、なければ形』と決める。"
+      },
+      {
+        "severity": "medium",
+        "where": "B『更新は JS と同じ』と、未決事項の『余分なプロパティ』",
+        "problem": "未定義のことが 3 つある。(1) `{ ...t, done: 1 }` のように型を変える更新。(2) `{ ...t, extra: 1 }` のようにフィールドを足す更新。(3) TS から来た余分なプロパティ。(3) は、JS 層では spread でコピーされるが、`@wasm` ではスロットに分解されて捨てられるので、`--all-js` との差分テストで同じ結果にならない。",
+        "suggestion": "結果の型は `t` の型と同じで、後に書くフィールドは `t` にあるフィールドだけ、型も同じ、とする(Rust の `..t` と同じ制約)。余分なプロパティは、JS 層でも `{ ...t }` でなくフィールドを列挙して作る(`{ id: t.id, title: t.title, done: x }`)ことで落とす。そのぶん出力は長くなるが、wasm と結果が揃う。"
+      },
+      {
+        "severity": "low",
+        "where": "B『`{ x }`(1 つだけの省略形)だけはブロックのまま』",
+        "problem": "`{ x, }` は 1 フィールドのレコード、`{ x }` はブロックで、カンマ 1 つで意味が変わる。期待する型がない所(`let r = { x };`)では、何の警告もなく `x` になる。",
+        "suggestion": "`{ x }` という字面のブロック(中身が 1 つの識別子だけ)に警告を出し、『ブロックなら括弧は要らない / レコードなら `{ x: x }` か `{ x, }`』と示す。did-you-mean では `{ x, }` の書き方も案内する。"
+      },
+      {
+        "severity": "low",
+        "where": "D『引数の位置にレコードのパターンを書ける』と変更後の `TodoList`",
+        "problem": "`fn TodoList({ todos, onToggle, title }: { todos: Array<Todo>, onToggle: (id: i32) => (), title: String })` はフィールド名を 2 回書くので、props が増えると長い。",
+        "suggestion": "未決事項に、パターンと型を一度に書く略記(例: `fn TodoList(props: { todos: Array<Todo>, .. })` のまま、本体で `let { todos, onToggle, title } = props;`)を推奨の形として残すか、略記を検討することを足す。"
+      },
+      {
+        "severity": "low",
+        "where": "C『関数の宣言は `fn f(..) -> R` のまま』",
+        "problem": "関数型を返す関数は `fn adder(n: i32) -> (x: i32) => i32 { (x) => x + n }` になり、`->`、`=>`、本体の `{` が 1 行に並ぶ。",
+        "suggestion": "変更後の例にこの形を 1 つ載せ、読み方を示す。関数型を返す場合は括弧を推奨する(`-> ((x: i32) => i32)`)ことを、フォーマッタの方針に入れる。"
+      }
+    ],
+    "questions": [
+      "『再帰するレコード型』は、enum を経由した再帰(`type Bin = { l: Expr, r: Expr }`、`enum Expr { Lit(f64), Add(Bin) }`)も数えるか",
+      "`{ ...t, .. }` で、フィールドの型を変える更新や、フィールドを足す更新は書けるか。結果の型は何か",
+      "複数の spread(`{ ...a, ...b }`)は書けるか",
+      "同じ形の別名が複数あるとき、hover、エラー、`@wasm` の struct 名、`.d.ts` でどの名前を使うか",
+      "無名のレコード同士の `==` は使えるか(フィールドの順序が違う 2 つの値を等しいとみなすか)",
+      "`Array<{ id: i32 }>` のような総称型の中の無名のレコードは、`@wasm` でも同じ struct に単相化されるか"
+    ],
+    "alternative": {
+      "summary": "`type` は構造的な別名のままにする。名前で区別したい型だけ `@nominal` で選べるようにし、Rust の struct 名は常に形から決めて、`type` の名前は Rust の型の別名として出す。spread は `t` と同じ型を返すものに限る。",
+      "example": "type Todo = { id: i32, title: String, done: bool }      // 構造的: 同じ形の無名の値と互換\n@nominal type Meters = { v: f64 }                       // 名前で区別: { v: f64 } や Celsius とは別の型\n@nominal type Celsius = { v: f64 }\n\nfn toggle(t: Todo) -> Todo { { ...t, done: !t.done } }  // OK: 結果の型は Todo のまま\nfn bad(t: Todo) -> Todo { { ...t, done: 1 } }\n// error: `done` is bool in Todo; a spread update keeps the type of `...t`\n\n// @wasm の出力(Rust)\n// struct ZsRec_done_bool_id_i32_title_String { .. }\n// pub type ZsTodo = ZsRec_done_bool_id_i32_title_String;\n// struct ZsMeters { v: f64 }   // @nominal は独自の struct"
+    }
+  }
+]

@@ -1,0 +1,3 @@
+// expect: a @wasm function cannot perform effects
+enum Log { Say(i32) -> () }
+@wasm pub fn f(n: i32) -> i32 { perform Say(n); n }

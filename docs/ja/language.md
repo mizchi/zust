@@ -133,7 +133,7 @@ Rc など) は、zustc が持つ組み込みの prelude (`crates/syntax/src/prel
   - `impl Drop for S`（ジェネリックな impl も）、`drop(x)`
   - スコープの終わりで宣言と逆順に drop する。対象は return / `?` / break / continue で抜けるスコープ、値を捨てる式文、`let _ = e`、代入で上書きされる古い値
   - ムーブを追跡する：値として読む・値で受ける `self`・`move` キャプチャ・値で束縛するパターン（`if let Some(b) = o`）・`for x in arr`
-  - 一時値（`make().area()`、`&Box::new(..)`、match 対象）は文の終わりで drop する。let の初期化式の一時値はブロックの終わりまで延ばす
+  - 一時値（`make().area()`、`&Box::new(..)`、match 対象）は文の終わりで drop する。let の初期化式の一時値は let の終わりで drop する。ただし初期化式がその構文で延ばすとき（`&temp()`。タプル・配列・キャスト・struct リテラル・ブロックの末尾の中のものも）と、束縛した値の型が参照を含むときは、ブロックの終わりまで残す。`if let` の match 対象の一時値は、Rust 2024 と同じく else のブロックの前で drop し、then のブロックの後でも drop する（その値が参照を含みうるときは文の終わりまで残す）
   - フィールドだけのムーブ（`self.top = n.next`）は、元のフィールドを 0 で埋めて持ち主を drop する
 - 型：
   - 整数（`i8`〜`i64`、`u8`〜`u64`、`isize`、`usize`）、`bool`、`char`、`()`、`!`
@@ -288,6 +288,7 @@ prelude は、ユーザのコードの識別子から辿れるアイテムだけ
 
 ## 未対応
 
+- async: `async fn` / `async {}` / `.await` は受け付けるが、ただのコードとしてコンパイルする。`async fn` は呼ばれた時に本体を実行してその値を返す（future ではない）。そのため一度も poll されない future も実行され、async ブロックに対する `pin!` / `Future::poll` は動かない
 - `Box<[T]>`、`Box::into_raw` などの Box の関数（`new` 以外）
 - `String + &str` / `Vec` のスライスメソッドの一部（prelude に書いたもの以外。`&v` を `&[T]` にすれば組み込みのスライスメソッドは使える）
 - イテレータの制限：`DoubleEndedIterator` / `ExactSizeIterator` の trait（`rev` は next_back を持つ prelude の型だけ）、`collect` は Vec / String / HashMap / HashSet / BTreeMap / `Option<Vec<T>>` / `Result<Vec<T>, E>` など prelude にあるもの
@@ -300,7 +301,7 @@ prelude は、ユーザのコードの識別子から辿れるアイテムだけ
   - `impl Drop` を持つ型のフィールドの一部だけをパターンでムーブすると、残りのフィールドはリークする（`let Pair { a, .. } = p;` の `b`）
   - クロージャの本体から `move` キャプチャした値をムーブすること（FnOnce として消費する使い方）はエラーにする
   - `Box` の中身のフィールドをムーブすると（`let n = boxed; n.val`）、Box の領域はリークする
-  - 一時値の寿命は rustc の規則の近似（let の初期化式の一時値は常にブロックの終わりまで延びる）
+  - 一時値の寿命は rustc の規則の近似（let の終わりで drop される一時値を借用する値を拒否しない: E0716）
 - クロージャの制限
   - Fn / FnMut / FnOnce を区別しない（`FnMut` のクロージャを `&dyn Fn` にしてもエラーにならない）
   - ローカル変数をキャプチャするクロージャを `impl Fn` で返すとき、型が注釈やリテラルから分からない変数（`let v = Vec::new();` など）

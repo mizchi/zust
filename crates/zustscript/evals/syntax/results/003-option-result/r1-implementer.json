@@ -1,0 +1,139 @@
+[
+  {
+    "proposal": "003-option-result",
+    "persona": "implementer",
+    "scores": {
+      "R1": {
+        "score": 4,
+        "why": "`let t = non_empty(\"title\", d.title)?;` は Rust の、`note?: String` は TS の知識でそのまま読める。`find(todos, id) |> .map(…) |> .unwrap_or(\"(none)\")` も左から右へ読める。ただし `?.` を予約しているので、TS の人が `t.note?.to_upper()` と書くとエラーになり、Rust の人には `(e?).f` という括弧が増える。また `{ note?: String }` と `{ note: Option<String> }` は、読み書きの型が同じ `Option<String>` なのに別の型で、初見では区別がつかない"
+      },
+      "R2": {
+        "score": 2,
+        "why": "prelude をふつうの enum として扱うこと、メソッドを Array と同じ組み込みにすることは、自然な延長。一方で例外と、他の提案との食い違いが複数ある。(1) `perform Ask(q)?` だけ括弧を求める。今の parse.rs では perform が primary の中で引数まで読むので、`perform Ask(q).len()` は括弧なしで通る。(2) 任意のフィールドを `Option` と別の型にしたことが、002 D の『`title: Option<String>` の略記』と、002 A の『フィールドの名前と型が同じなら同じ型』に反する。(3) A の『決まっていない値に match / メソッドを使ったら、その時点で既定値に決める』が、001 A の『その場で修飾を求めるエラー』(001 の 53〜54 行)と矛盾する。(4) `handle` の中だけ `?` を書けない"
+      },
+      "R3": {
+        "score": 3,
+        "why": "後置の `?` は今の字句に無い記号なので、postfix() で先読み 1 つで決まる。`?.` / `??` も PUNCTS の順で切り出せる。ただし次の 3 つが曖昧。(a) `?.` の予約は字句の上だけで、`e? .f` や改行をはさんだ `e?` `.f` は `(e?).f` として通る(空白で意味が変わる)。(b) pipe() は右辺を postfix() で読むので、`x |> f(a)?` は `Call(Try(f(a)), [x])` になる。末尾の `?` だけを付け直す規則では、`x |> f(a)?[0]` が今の `_ =>` の枝で『結果を呼ぶ』と読まれ、`.m` の枝はそもそも `?` を読まない。(c) 省略できるかどうかが期待する型で決まり、`if` の分岐では書いた順に依存する"
+      },
+      "R4": {
+        "score": 4,
+        "why": "corpus の `validate` / `rename` の match の入れ子がなくなり、`map_opt` / `unwrap_or` の自作も、`subtitle={None}` も要らなくなる。失うものは、`handle` の中の `?`、クロージャの中から外の関数へ返すこと、`collect` に当たる関数がないこと(`for` と `let mut` で書く)。どれも r1 として割り切られている"
+      },
+      "R5": {
+        "score": 3,
+        "why": "E の不一致、Option と Result の取り違え、`?.` の予約、暗黙の `Some` のエラーには、どれも直し方とクイックフィックスが付いていて良い。ただし、通るかどうかが書いた順で変わる箇所が 2 つある。(1) 省略を含むレコードのリテラルを `if` の先の分岐に置くと、missing field のエラーになる。(2) `let x = None; x.is_none(); report(x)` は、早く既定値に決めるため、`report` を先に呼ぶかどうかで結果が変わる。また `x |> f(a)?[0]` のような、静かに別の構文木になる字面が残る"
+      },
+      "R6": {
+        "score": 3,
+        "why": "任意のフィールドの `readonly note?: string | undefined` と、省略した prop を書かない出力は TS から自然に使える。`?` の出力も `if ($t.TAG === \"Err\") return $t;` と予想しやすい。ただし、(1) 同じ `Option<String>` が、任意のフィールドなら生の値、変数なら `{ TAG }` と、使われ方で表現が変わる。出力を見ないと分からない。(2) `Option` / `Result` をモジュールごとの `.d.ts` に `export type` で出すので、TS 側で `export *` を 2 つ並べると名前が衝突する(TS2308)。(3) `pub` な関数の `Option` は `{ TAG }` のまま"
+      },
+      "R7": {
+        "score": 4,
+        "why": "`?`、`map` / `and_then` / `ok_or` / `map_err` は Rust と同じ名前と意味。`title?:` は TS と同じ。新しく覚えるのは、E の自動変換がないこと、`?.` / `??` の予約、任意のフィールドに `Some(…)` で書くこと(TS の人には一手間)、`{ note?: T }` と `{ note: Option<T> }` が別の型であること"
+      },
+      "R8": {
+        "score": 2,
+        "why": "検査器の部分は局所的で無理がない。戻り値の型のスタック、`EK::Try`、`method_sig` の行の追加、期待する型を先に戻り値と単一化すること、どれも関数の中で閉じる。重いのは JS の出力。今の js.rs は式を文字列で組み、`complex()` なら `iife()` で即時関数にする(gen なら `yield* (function* …)()`)。`?` を含む式をすべて文へ持ち上げるには、ANF 化を一式入れる必要がある。そのうえ `&&` / `||`、三項演算子の if、`while` の条件では、評価の順と条件の評価を保つ変換が別に要る。ほかにも重い所がある。任意のフィールドの表現(生の値か、包んだ値か)を式ごとに運ぶ side table。総称の `{ value?: T }` で T が `Option` / `()` でないという制約を、総称の呼び出しを通して伝えること(数値の bound と同じ仕組みが要り、『その場で』では決まらない)。`@wasm` の `VTy` に任意のフィールドの形を足すこと。002 E の struct の名前に『任意かどうか』を入れること"
+      }
+    },
+    "blocker": [
+      "`?` の JS の出力が今の js.rs に入らない。js.rs は式を文字列で組み、`complex()` な式を `iife()` で即時関数にする(gen なら `(yield* (function* () {…})())`)。提案は『即時関数にせず文の形にし、左の兄弟を一時変数に置く』と書くが、そのためには Call / Method / Bin / Record / Array / JSX 属性 / If(三項演算子)/ while の条件のすべてに、持ち上げの処理が要る。`a() && g()?`、`if c { g()? } else { 0 }` を引数に置いたとき、`while f()? {…}` は、単純に持ち上げると意味が変わる。先例に挙げる `loop_exit` は変換ではなくエラーを出すだけで、AST には `return` もない。r1 では、どこで `?` を書けて、どう脱糖するか(または loop_exit と同じくエラーにするか)を列挙する必要がある"
+    ],
+    "issues": [
+      {
+        "severity": "high",
+        "where": "C. 省略 / check.rs の `EK::If`(`infer(el, Some(&tt))`)と、`EK::Record` の missing field の検査",
+        "problem": "『期待する型が分かっている所だけ省略できる』は、その期待する型がどこから来たかで結果が変わる。`todos |> .map((t) => if c { { id: 0, title: \"a\", done: false } } else { t })` は、先の分岐に期待する型が無いので `{ id, title, done }` に決まり、else の `t: Todo` との単一化で missing field `note` になる。分岐を入れ替えると通る。001 r4 が退けた『書いた順で結果が変わる』が戻ってくる",
+        "suggestion": "省略を含むリテラルの型を、001 の `None` と同じく候補つきの型変数(『必須のフィールドがこれで、残りは任意のフィールドであるような、レコードの型』)にし、単一化と finish_fn で決める。または、省略を認めるのを、注釈・総称でない signature の引数・JSX の属性・名前を持つレコードのフィールドのように、リテラルを検査する前に分かる期待する型だけに限り、分岐同士で伝わった型を数えないと明記する"
+      },
+      {
+        "severity": "high",
+        "where": "出力 / JS: 任意のフィールド、と `$unwrap_or` / `$opt_map`",
+        "problem": "型はどちらも `Option<T>` なのに、任意のフィールドを直接読んだ値は生の `T | undefined`、それ以外は `{ TAG }` で持つ。提案は『メソッドの受け手、match、`?` に直接 `t.note` を書いたら包まない』とする。しかし `$unwrap_or(o, d)` は `o.TAG` を見るので、`t.note.unwrap_or(\"x\")` は値があっても `\"x\"` を返す。Option の `?` も、生の値なら `return $t1` ではなく `return { TAG: \"None\" }` を作る必要がある",
+        "suggestion": "checker が『任意のフィールドを直接読んだ式』の Id を side table(例: `Info::raw_opt`)に記録する。js.rs は、メソッド・match・`?`・フィールドへの書き込みのそれぞれで、生の値用の出力を持つ(`t.note ?? d`、`if (t.note == null) return { TAG: \"None\" }`)。r1 では、包まない最適化を、構文上の直接の受け手だけに限ると明記する"
+      },
+      {
+        "severity": "high",
+        "where": "B. `|>` / 実装の注意『pipe() は…末尾の `?` を付け直す』",
+        "problem": "(1) pipe() の `.` の枝は `.m(args)` を読んですぐ返り、postfix のループを通らない。そのため、B に書いた `x |> .m(a)?` は今の実装では `?` が残って構文エラーになる。(2) 末尾の `Try` だけを付け直す規則では、`x |> f(a)?[0]` が `Index(Try(f(a)))` になり、`_ =>` の枝で `Call(Index(…), [x])`(結果を呼ぶ)になる",
+        "suggestion": "pipe の右辺を『`?` を読まない postfix』で読み、脱糖した呼び出しを作ってから、その上で `?`(と必要なら `[i]` / `.f`)の postfix のループを続ける。`.m` の枝も同じループに合流させる"
+      },
+      {
+        "severity": "medium",
+        "where": "A. 既定値 / 001 A『決まっていない値は、使う前に決める』",
+        "problem": "003 は『決まっていない値を match にかける、メソッドを呼ぶときは、候補に prelude の enum があれば、その時点で既定値に決める』とする。001 の本文(53〜54 行)は『その場で修飾を求めるエラー』のまま。また、早く決めるので `let x = None; x.is_none(); report(x)`(report は `Parsed` を取る)は、`report` を先に呼べば通り、後に呼べば失敗する",
+        "suggestion": "001 の本文を 003 の規則に合わせて書き換え、規則を持つのは 003 だけにする。早く決めたことが原因の型エラーには、『ここで `Option` に決まった(`.is_none()` のため)』という注を付けると、A に明記する"
+      },
+      {
+        "severity": "medium",
+        "where": "C. 型の等しさ / 002 A・D",
+        "problem": "002 D は『`title: Option<String>` の略記』、002 A は『フィールドの名前の集合とそれぞれの型が同じなら同じ型』。003 は任意かどうかを等しさに含めるので、002 の両方の文が変わる。002 は mid-revision で、003 の改訂履歴にしか書かれていない",
+        "suggestion": "002 A に『フィールドが任意かどうかも等しさに含む』、002 D に『表現が違う別の型(003)』と書き戻す。`Ty::Rec` のフィールドに `optional: bool` を持たせ、`derive(PartialEq)` に含めることを、002 の実装の注意にも入れる"
+      },
+      {
+        "severity": "medium",
+        "where": "C. 『T に Option と () は書けない…その場でエラー』",
+        "problem": "総称の `type Box<T> = { v?: T }` で T を型引数のまま使う関数(`fn wrap<T>(x: T) -> Box<T>`)は、呼ぶ側で T が `Option<i32>` になりうる。その場所は総称の呼び出しの連鎖の先にあるので、『その場』では決まらない。JS では型を消すので、実行時にも区別できない",
+        "suggestion": "`Num` と同じ仕組みで、『Option / () でない』という暗黙の bound を型引数に付け、instantiate のたびに bound_checks に積む。または r1 では、任意のフィールドの型に型引数を書けないことにする"
+      },
+      {
+        "severity": "medium",
+        "where": "B. effect: `(perform Ask(q))?` と括弧を求める規則",
+        "problem": "parse.rs の primary は `perform Ask(q)` を引数まで読み、その後の postfix のループで `.len()` などが全体に付く。`perform Ask(q).len()` が括弧なしで通るのに、`?` だけ括弧を求めるのは不整合。さらに、構文木に括弧の情報が残らないので、検出には専用の印が要る",
+        "suggestion": "`perform Ask(q)?` を `(perform Ask(q))?` として素直に通す(postfix はすべて perform の結果に付く、と一言書く)。紛らわしいとするなら、`?` だけでなくすべての postfix で括弧を求める"
+      },
+      {
+        "severity": "medium",
+        "where": "B. 予約する字面 `?.`",
+        "problem": "字句の上の予約なので、`e? .f` と、改行をはさんだ `e?` / `.f` は `(e?).f` として通る。空白で意味が変わり、formatter が空白を詰めると、それがエラーに変わる",
+        "suggestion": "予約を構文解析器の側でする(postfix で `?` の直後の `.` を、空白によらず同じに扱う)。改行をはさんだ連鎖を許すなら、その形を正規の形と決め、formatter が `?` と `.` の間を詰めないと明記する"
+      },
+      {
+        "severity": "medium",
+        "where": "B. `handle` の中では r1 で `?` を書けない",
+        "problem": "禁止の範囲がはっきりしない。handle の本体の中に置いたクロージャの中の `?`(クロージャから返るので、JS でも問題ない)は許すのか。JS では本体と arm が `$handle` に渡す `function*` なので、`return` は handle の式の値になってしまい、型(`out`)とも食い違う",
+        "suggestion": "『handle の本体と arm の中で、クロージャの境界の内側にない `?`』とだけ禁止する、と書く。checker の『handle の中にいるか』の印は、`closure_bases` と同じく、クロージャに入るたびに外す"
+      },
+      {
+        "severity": "medium",
+        "where": "出力 / Rust: `?` とクロージャ(lower.rs の `closure()`)",
+        "problem": "Rust の `?` は `From::from` を通るので、`.map(|x| { let y = f(x)?; Ok(y) })` では、クロージャの E が決まらず E0282 になることがある。lower.rs の `closure()` は `|x| body` を出すだけで、型を書かない",
+        "suggestion": "`?` を含むクロージャは、checker が決めた型から `|x: T| -> Result<U, E> { … }` と、戻り値の型を明示して出す。注釈のない `let r = Ok(1);` も、`let r: Result<i32, ZsE> = …` と型を書いて出す"
+      },
+      {
+        "severity": "low",
+        "where": "Rust / wasm: 任意のフィールドの境界と struct の名前",
+        "problem": "`VTy::Record` の `flat_params` は `{js}.{f}` をそのまま読み、`decode` はキーを書くだけ。任意のフィールドには、`== null` でタグを作る新しい VTy(例: `VTy::Opt`)が要る。また 002 E の形から作る struct の名前では、`{ x?: f64 }` と `{ x: Option<f64> }` の区別の仕方が決まっていない",
+        "suggestion": "`VTy::Opt(Box<VTy>)` を足す(JS 側は `== null` を見てタグと値のスロットを作り、戻すときは `undefined` か値を書く)。struct の名前には任意を表す印を入れる(例: `ZsRec_x_optf64`)か、Rust では同じ struct にまとめると決める"
+      },
+      {
+        "severity": "low",
+        "where": "A. 名前の衝突",
+        "problem": "001 r3 の決定 6(同じ名前の関数とバリアントがあれば、修飾しない名前は関数)によって、`fn Ok(…)` や `extern fn Some` を宣言すると、ファイル中の `Ok(x)` が静かに関数の呼び出しになる。また、警告になる『prelude と同じ形』が、バリアントの順(`{ Some(T), None }`)や型引数の名前(`<A>`)を含むのかが決まっていない",
+        "suggestion": "prelude のバリアント名(`None` / `Some` / `Ok` / `Err`)と同じ名前の関数・extern を、宣言の時点でエラーにする。『同じ形』は、バリアントの名前・順・フィールドの型が、型引数の名前を付け替えれば同じになること、と定義する"
+      },
+      {
+        "severity": "low",
+        "where": ".d.ts: `Option` / `Result` をモジュールごとに出す",
+        "problem": "TS 側で `export * from \"./a\"; export * from \"./b\"` と並べると、両方の `Option` が衝突する(TS2308)。今の数値の brand にも同じ問題がある",
+        "suggestion": "`zsc-prelude.d.ts` を 1 つだけ出し、各モジュールの `.d.ts` は `import type { Option, Result } from \"./zsc-prelude\"` と `export type { … }` で参照する。brand も同じ仕組みに寄せる"
+      }
+    ],
+    "questions": [
+      "`?` の左の式に渡す期待する型(`Result<_, E>`)は、単一化して型変数を決めるのか。それとも、バリアントを解決する手がかりにだけ使うのか。『`?` の時点で Option / Result に決まっていなければエラー』と両立させる規則はどれか",
+      "`?` を書ける式の位置の一覧はどれか(`&&` / `||` の右辺、`while` の条件、三項演算子の if の分岐、match の scrutinee、JSX の子、`for` の範囲)。そこを JS でどう脱糖するか、それともエラーにするか",
+      "`x |> f(a)?[0]` と `x |> f(a)?.len()` は、どう読むのか",
+      "handle の本体の中に置いたクロージャの中の `?` は許すのか",
+      "『prelude と同じ形の `enum Option`』は、バリアントの順と型引数の名前の違いを許すのか。許さない形は、エラーと警告のどちらか",
+      "`fn Some(…)` / `extern fn Ok` のような、prelude のバリアント名と同じ名前の関数は宣言できるのか(001 の決定 6 との関係)",
+      "総称の `{ value?: T }` で、T が Option / () でないことを、総称の呼び出しの連鎖を通してどう検査するのか",
+      "`@wasm` の struct の名前で、`{ x?: f64 }` と `{ x: Option<f64> }` を区別するのか、それとも同じ Rust の struct にまとめるのか",
+      "TS から `null` が来たとき、`{ ...t }` の spread はそれをそのまま写すのか(`.d.ts` は `string | undefined` なので、TS へ戻すときに型と合わなくなる)",
+      "式の途中で `?` が Err で返るとき、左の兄弟で作った一時の値に副作用はない、という前提でよいか(`perform` を含む左の兄弟の評価順)"
+    ],
+    "alternative": {
+      "summary": "(1) `?` は、型検査の後に、JS 向けの脱糖を 1 回の AST の書き換えとして行う。内部だけで使う `EK::Return`(表面の構文には出さない)を導入し、`?` を含む文を ANF にする。r1 で書ける位置は、let の右辺、文としての式、末尾の式、呼び出し・メソッド・レコード・配列の引数(左の兄弟は一時変数に置く)、if / match の分岐(文の形で出す)に限る。`&&` / `||` の右辺と `while` の条件は、loop_exit と同じく、直し方つきのエラーにする。lower.rs は Rust の `?` をそのまま使う。(2) pipe の右辺は、`?` を読まない postfix で読み、脱糖してから postfix のループを続ける。(3) `perform Ask(q)?` は括弧なしで通す。(4) 省略を含むレコードのリテラルは、候補つきの型変数にして、001 の finish_fn で決める",
+      "example": "// zsc\nfn rename(todos: Array<Todo>, id: i32, d: Draft) -> Result<Array<Todo>, FormError> {\n  let old = find(todos, id) |> .ok_or(NotFound { id })?;   // pipe: ok_or を脱糖した後に ? が付く\n  let ok = check(old) && validate(d, id)?.done;\n  //                    ^ error: `?` on the right of `&&` would run even when the left is false here:\n  //                      bind it first (`let t = validate(d, id)?;`)\n  Ok(todos |> .map((x) => if x.id == id { { ...old, done: true } } else { x }))\n}\n\n// 脱糖した後(内部の AST。EK::Return は表面に出ない)\n// let $t1 = Option::ok_or(find(todos, id), NotFound { id });\n// match $t1 { Err(_) => Return($t1), Ok($v1) => {} }\n// let old = $v1;\n\n// JS\nconst $t1 = $ok_or(find(todos, id), { TAG: \"NotFound\", id });\nif ($t1.TAG === \"Err\") return $t1;\nconst old = $t1._0;\n\n// 省略の候補つきの型変数: 分岐の順によらない\nlet r = if c { { id: 0, title: \"a\", done: false } } else { t };  // r: Todo(finish_fn で、note を省略した Todo に決まる)"
+    }
+  }
+]

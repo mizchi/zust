@@ -1,0 +1,51 @@
+// The same zustscript runs as wasm (default: the @wasm fns are lowered to Rust and compiled by zustc) or as JS
+// (zsc --all-js). The results are the same: numbers keep their meaning in both.
+
+@wasm pub fn dot(a: Array<f64>, b: Array<f64>) -> f64 {
+  range(0, a.len()).fold(0.0, (s, i) => s + a[i] * b[i])
+}
+
+// num-traits style: one source, an instance per type (in wasm too: zs_total__i64, zs_total__f64, ..)
+@wasm pub fn total<T: Num>(xs: Array<T>) -> T {
+  xs.fold(T::zero(), (acc, x) => acc + x)
+}
+
+@wasm pub fn mean(xs: Array<f64>) -> f64 {
+  if xs.len() == 0 { 0.0 } else { total(xs) / (xs.len() as f64) }
+}
+
+@wasm pub fn normalize(xs: Array<f64>) -> Array<f64> {
+  let hi = xs.fold(0.0, (m, x) => if x.abs() > m { x.abs() } else { m });
+  if hi == 0.0 { xs } else { xs.map((x) => x / hi) }
+}
+
+@wasm pub fn evens_squared(xs: Array<i32>) -> Array<i32> {
+  xs.filter((x) => x % 2 == 0).map((x) => x * x)
+}
+
+// the number of iterations before z = z² + c leaves the circle of radius 2 (at most `max`)
+@wasm pub fn escape(cx: f64, cy: f64, max: i32) -> i32 {
+  step(cx, cy, 0.0, 0.0, 0, max)
+}
+
+@wasm fn step(cx: f64, cy: f64, x: f64, y: f64, i: i32, max: i32) -> i32 {
+  if i == max || x * x + y * y > 4.0 { i } else { step(cx, cy, x * x - y * y + cx, 2.0 * x * y + cy, i + 1, max) }
+}
+
+// i64 arithmetic past 2^53 (BigInt in JS, i64 in wasm)
+@wasm pub fn collatz_steps(n: i64) -> i32 {
+  match n {
+    1 => 0,
+    _ => 1 + collatz_steps(if n % 2 == 0 { n / 2 } else { 3 * n + 1 }),
+  }
+}
+
+// u32 wrapping (a linear congruential generator)
+@wasm pub fn lcg(seed: u32, n: i32) -> u32 {
+  range(0, n).fold(seed, (s, _i) => s * 1664525 + 1013904223)
+}
+
+// i32 overflow wraps, `as` from f64 saturates: the same in both
+@wasm pub fn edge_cases(x: i32) -> i32 {
+  (x * 65536) + ((x as f64) * 1.0e10) as i32
+}

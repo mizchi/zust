@@ -1,0 +1,90 @@
+[
+ {
+  "proposal": "001-variants",
+  "persona": "rust-dev",
+  "scores": {
+   "R1": {
+    "score": 4,
+    "why": "`enum Shape { Circle { center: Vec2, r: f64 }, .. }` と `Circle { r, .. } =>` は Rust の struct variant と同じ字面で説明なしに読める。`Shape::Circle(..)` の修飾も Rust と同じ。ただし修飾なしの `None` がどの enum かは、読む側が期待する型を追わないと分からない(`first_hit` の `if found < 0 { None } else { At(found) }` は戻り値型 `Hit` まで目で戻る必要がある)。"
+   },
+   "R2": {
+    "score": 4,
+    "why": "生成 `Circle { center: c, r: 2.0 }`・省略形・`..` はレコードの生成/更新の既存の書き方の延長で、`Enum::Variant` は既存の `T::zero()` / `F64Array::zeros(n)` のパス記法と揃う。期待する型で解決する方針も typed array の『期待する型で作る』と同系統。例外は更新 `Circle { r: 2.0, ..s }` がバリアントでは書けないこと(レコードでは書ける)で、理由は妥当だが同じ字面で可否が分かれる。"
+   },
+   "R3": {
+    "score": 3,
+    "why": "パターン側は照合する値の型があるので明快に決まる。式側は A.1(ファイル内一意)→A.2(期待する型)→エラーの文脈依存 3 段規則で、規則自体は明快だが A.1 のせいで同じ `None` の意味がファイル内の他の宣言で変わる。さらにレコード型 `Circle` とバリアント `Circle` が同名のときの `Circle { center, r }` の決着が未決事項に残っている。"
+   },
+   "R4": {
+    "score": 4,
+    "why": "`Label(_, _, _) => 0.0` が `Label { .. } => 0.0` に、`Circle(_, r)` が `Circle { r, .. }` になり、フィールド追加に match が追従不要になる。位置引数バリアントも残るので失うものはほぼない。欠けているのは `s @ Circle { .. }` のような束縛パターンと or パターン(`Circle { .. } | Rect { .. } => ..`)で、match 内で値全体を使い回すには作り直すしかない(`moved` の `Label { at, text, size } => Label { at: add(at), text, size }` がそれで、3 フィールドを全部書き直している)。"
+   },
+   "R5": {
+    "score": 3,
+    "why": "良い点: `..` なしでフィールドを書き漏らすとエラー(Rust の E0027 と同じ)、大文字識別子は常にバリアントとして読む(parse.rs の `pat()`)ので Rust の『`None` が束縛になる』罠もない、曖昧時のエラーも直し方つき(`write the enum`)。悪い点: A.1 により、ファイルに `enum Parsed { None, .. }` を足しただけで離れた場所の注釈なし `let x = None;` がエラーに変わる。また `if`/`match` の分岐やクロージャ本体へ期待する型を伝えるかが書かれていないので、どこでエラーになるか予測できない。`Circle { r: 0.0, .. }` の f64 リテラル照合は NaN/-0.0 で直感とずれるが扱いの記述がない。"
+   },
+   "R6": {
+    "score": 4,
+    "why": "名前付きフィールドが名前のまま `{ readonly TAG: \"Circle\"; readonly center: Vec2; readonly r: f64 }` になり、予想どおりで TS からも使いやすい。`@wasm` では struct variant `ZsShape::Circle { center, r }` になり、スロット分解も位置引数と同じなので Rust 側の見通しもよい。位置引数バリアント(`At(i32)` → `_0`)は相変わらず `_0`。"
+   },
+   "R7": {
+    "score": 4,
+    "why": "Rust の enum/パターンの知識がそのまま使える。新しく覚えるのは修飾なしの解決規則(特に A.1)だけ。ただし Rust では `use Shape::*` しない限り修飾が要るので、Rust 開発者は『どこで修飾が要るか』を規則から推すことになる。"
+   },
+   "R8": {
+    "score": 3,
+    "why": "パターン側は照合する値の型で決まるので局所的。式側は `infer(e, expect)` の期待する型を `variant()` まで渡す必要がある(現 check.rs の `variant()` は `variant_of` の大域表だけで引いている)。A.1 はファイル全体の enum 表に依存するので、アイテム単位の増分ビルドで、enum を 1 つ足すとそのバリアント名を修飾なしで使う全アイテムを再検査することになる。`Circle {` 入力途中の補完も、期待する型が決まるまでフィールド候補を出せない。"
+   }
+  },
+  "blocker": [],
+  "issues": [
+   {
+    "severity": "high",
+    "where": "提案 A 解決規則 1(そのファイルで `Circle` を持つ enum が 1 つだけなら、それ)",
+    "problem": "解決結果が無関係な宣言の有無で変わる。`enum Hit { None, At(i32) }` しかないファイルで `let h = None;` は通るが、後から `enum Parsed { Ok(Shape), None, Bad(String) }` を足すとその行がエラーになり、変更箇所とエラー箇所が離れる。",
+    "suggestion": "期待する型を最優先にし、期待する型がなく一意なときだけ A.1 で解決し、その場合は LSP がインレイヒントで `Hit::` を表示する。あるいは A.1 を捨てて『期待する型がなければ修飾必須』にする。"
+   },
+   {
+    "severity": "high",
+    "where": "変更後の `first_hit` の `if found < 0 { None } else { At(found) }`",
+    "problem": "期待する型の出どころは『let の注釈、引数、戻り値、match の照合する値の型』だけが挙げられ、`if`/`match` の分岐やブロック末尾の式へ期待する型を伝えることが規則に書かれていない。提案自身の例が書かれていない規則に依存している。",
+    "suggestion": "期待する型の伝播規則を列挙する(ブロック末尾、`if`/`match` の各分岐、`return`、配列リテラルの要素、クロージャ本体など)。それ以外で曖昧ならエラー、と明記する。"
+   },
+   {
+    "severity": "medium",
+    "where": "B の『更新 `Circle { r: 2.0, ..s }` は書けない』と変更後の `moved`",
+    "problem": "match で取り出したバリアントを少し変えて返すには全フィールドの書き直しが要る(`Label { at, text, size } => Label { at: add(at), text, size }`)。フィールドの多いバリアントで冗長になり、`..` で追加に強くした利点が生成側で失われる。",
+    "suggestion": "match の腕での絞り込み(例: `c @ Circle { center, .. } => Circle { center: add(center), ..c }`)。`@` 束縛を入れ、腕の中ではその変数をバリアントに絞った値として扱い `..c` を許す。"
+   },
+   {
+    "severity": "medium",
+    "where": "未決事項『位置引数と名前付きのバリアントの混在』",
+    "problem": "Rust では混在が普通で、混在禁止は `Pair(Vec2, Vec2)` のような小さいバリアントにまで名前を強いる。",
+    "suggestion": "混在を許す。1 つのバリアント内で位置と名前を混ぜることだけ禁止(Rust と同じ)。"
+   },
+   {
+    "severity": "low",
+    "where": "B のパターン `Circle { r: 0.0, .. }`",
+    "problem": "f64 リテラルとの照合は NaN や -0.0 で直感とずれる(Rust でも長く lint 対象だった)。",
+    "suggestion": "f64 のリテラルパターンは警告にするか禁止し、ガード(`if r == 0.0`)を入れるならそちらへ誘導する。"
+   },
+   {
+    "severity": "low",
+    "where": "『同じ規則がレコードにも効く』の `let Vec2 { x, y } = p;`",
+    "problem": "単一バリアントの enum も常に一致するが `let` に書けるかが書かれていない。また『全フィールドを書かなくてよいときは `..` が要る』規則がレコードのパターンにも適用されるかが曖昧。",
+    "suggestion": "レコードパターンにも『`..` なしの書き漏らしはエラー』を明記し、単一バリアントの enum は対象外と明記する。"
+   }
+  ],
+  "questions": [
+   "期待する型は `if`/`match` の分岐、ブロック末尾、クロージャ本体、配列リテラルの要素、`==` の両辺のどこまで伝わるか",
+   "別ファイル(モジュール)の enum のバリアントは修飾なしの解決対象に入るか(A.1 の『そのファイル』は import した enum を含むか)",
+   "位置引数バリアントを関数値として渡す使い方(`xs.map(At)`)は、`At` が複数 enum にあるときどう解決するか。名前付きバリアントは関数値にできないと明記するか",
+   "`@` 束縛・or パターン・ガードを入れる予定はあるか(Rust 開発者が名前付きバリアントと一緒に使う機能)",
+   "`.d.ts` で別々の enum のバリアント `TAG: \"None\"` が同じ文字列になるのは、TS 側で問題にならないか(`Parsed` と `Hit` を 1 つの union に混ぜた場合)"
+  ],
+  "alternative": {
+   "summary": "期待する型を最優先にして A.1(ファイル内一意)を廃止し、期待する型がない場所は修飾必須(補完で `Hit::` を挿入)。あわせて `@` 束縛とバリアント更新を入れ、作り直しを短くする。",
+   "example": "pub fn moved(s: Shape, d: Vec2) -> Shape {\n  match s {\n    c @ Circle { center, .. } => Circle { center: add(center), ..c },\n    r @ Rect { min, max } => Rect { min: add(min), max: add(max), ..r },\n    l @ Label { at, .. } => Label { at: add(at), ..l },\n  }\n}\nlet h = Hit::None;            // 期待する型がないので修飾\nfn f() -> Hit { None }        // 戻り値型から Hit::None に決まる"
+  }
+ }
+]

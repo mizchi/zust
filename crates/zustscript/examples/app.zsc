@@ -1,0 +1,100 @@
+// A small app: the UI in the JS layer (JSX, records, enums), the number crunching in the wasm layer (Rust,
+// compiled by zustc). The boundary is generated from the wasm fns' Rust signatures.
+
+extern "react" fn useState<T>(init: T) -> (T, fn(T) -> ()) = "useState";
+
+type Sample = { label: String, values: Array<f64> }
+type Stats = { mean: f64, stddev: f64, max: f64 }
+type RowProps = { sample: Sample, onPick: fn(String) -> () }
+type AppProps = { samples: Array<Sample> }
+
+// ---- the wasm layer: Rust as it is (slices, loops, mutation, ownership)
+
+wasm {
+  fn sq(x: f64) -> f64 { x * x }
+}
+
+pub wasm fn mean(xs: &[f64]) -> f64 {
+    if xs.is_empty() { return 0.0; }
+    let mut s = 0.0;
+    for x in xs { s += *x; }
+    s / xs.len() as f64
+}
+
+pub wasm fn stddev(xs: &[f64]) -> f64 {
+    let m = mean(xs);
+    let mut s = 0.0;
+    for x in xs { s += sq(*x - m); }
+    (s / xs.len() as f64).sqrt()
+}
+
+/// a borrowed callback: valid only during the call (the glue releases it when the call returns)
+pub wasm fn map_sum(xs: &[f64], f: &dyn Fn(f64) -> f64) -> f64 {
+    let mut s = 0.0;
+    for x in xs { s += f(*x); }
+    s
+}
+
+/// an owned callback: the wasm side keeps it; JS releases it when Rust drops the Box
+pub wasm fn call_twice(f: Box<dyn Fn(i32) -> i32>, x: i32) -> i32 {
+    let g = f;
+    g(g(x))
+}
+
+pub wasm fn histogram(xs: &[f64], buckets: i32) -> Vec<i32> {
+    let mut h = vec![0i32; buckets as usize];
+    let mut lo = f64::MAX;
+    let mut hi = f64::MIN;
+    for x in xs { if *x < lo { lo = *x; } if *x > hi { hi = *x; } }
+    for x in xs {
+        let mut k = ((*x - lo) / (hi - lo) * buckets as f64) as usize;
+        if k >= buckets as usize { k = buckets as usize - 1; }
+        h[k] += 1;
+    }
+    h
+}
+
+pub wasm fn shout(s: &str) -> String {
+    let mut out = String::new();
+    for c in s.chars() { out.push(c.to_ascii_uppercase()); }
+    out.push_str("!");
+    out
+}
+
+// ---- the JS layer
+
+pub fn stats(s: Sample) -> Stats {
+  let m = mean(s.values);
+  Stats { mean: m, stddev: stddev(s.values), max: s.values.fold(0.0, (a, x) => if x > a { x } else { a }) }
+}
+
+// React's `style` takes an object (a record here)
+type BarStyle = { width: String }
+
+fn bar(n: i32) -> Jsx {
+  <span className="bar" style={BarStyle { width: (n * 10).to_string() + "px" }}>{n}</span>
+}
+
+pub fn Row(props: RowProps) -> Jsx {
+  let st = stats(props.sample);
+  <li onClick={() => props.onPick(props.sample.label)}>
+    <b>{props.sample.label}</b> mean {st.mean.to_string()}, stddev {st.stddev.to_string()}
+    <div>{histogram(props.sample.values, 4) |> .map(bar)}</div>
+  </li>
+}
+
+pub fn App(props: AppProps) -> Jsx {
+  let (picked, setPicked) = useState("none");
+  <>
+    <h1>{shout("samples")}</h1>
+    <ul>{props.samples |> .map((s) => <Row key={s.label} sample={s} onPick={(l) => setPicked(l)} />)}</ul>
+    <p>picked: {picked}</p>
+  </>
+}
+
+pub fn demo() -> String {
+  let xs = [1.0, 2.0, 3.0, 4.0];
+  let squares = map_sum(xs, (x) => x * x);
+  let twice = call_twice((x) => x * 3, 7);
+  "map_sum " + squares.to_string() + ", call_twice " + twice.to_string() + ", " + shout("héllo wörld")
+}

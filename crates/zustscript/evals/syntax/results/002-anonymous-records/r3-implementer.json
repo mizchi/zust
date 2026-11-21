@@ -1,0 +1,85 @@
+[
+  {
+    "proposal": "002-anonymous-records",
+    "persona": "implementer",
+    "scores": {
+      "R1": {
+        "score": 4,
+        "why": "`{ total, done }`、`{ ...t, done: !t.done }`、`(id: i32) => ()` は TS の見た目のまま読める。`if c { { ...t, done: x } } else { t }` の二重の波括弧だけは、説明が要る"
+      },
+      "R2": {
+        "score": 4,
+        "why": "`type` は構造的な別名に一本化され、関数型とタプルにも使える。名前で区別するのは `@nominal` だけ。spread の規則は 001 と共通で、`...` もそろった。宣言の `->` と型の `=>` の違いは、理由つきの意図的な例外"
+      },
+      "R3": {
+        "score": 4,
+        "why": "ブロックかレコードかは、`{` の次の 2 トークン(`ident :` / `ident ,` / `...`)だけで決まり、判定は 1 つの関数にまとまっている。型には依存しない。ty() では、`(` の後の `ident :` が引数名、`)` の後の `=>` が関数型、`(T,)` がタプル、右結合と、1 通りに読める。`::` は lexer で 1 つのトークンになるので、`{ A::B` とも衝突しない。5 点でないのは、`{ x }` の警告がどの `{` に出るのかが曖昧なため"
+      },
+      "R4": {
+        "score": 4,
+        "why": "props と戻り値の型の名前が要らなくなり、corpus から TodoItemProps / TodoListProps / AppProps / Stats が消えた。props の型とパターンで、フィールド名を 2 回書くことは残る(未決事項)"
+      },
+      "R5": {
+        "score": 3,
+        "why": "幅の部分型がなく、余分なフィールド、足りないフィールド、型の違いは差分つきのエラーになる。block() の先頭の専用エラーも入った。しかし `{ x }` の警告を書かれたとおり『常に』出すと、`if x > a { x } else { a }` のような普通のコードにも出る。誤検出が多い警告は無視されるようになり、本当に `{ total }` と書き誤った場合も見落とされる。TS から来た余分なプロパティが、JS では残り wasm では落ちる問題も未決"
+      },
+      "R6": {
+        "score": 4,
+        "why": "JS はプレーンなオブジェクト、`.d.ts` は interface / type 別名で、引数名は `props` / `arg0`。予想どおりの形になる。`@nominal` の `.d.ts`(brand を付けるか)と、無名の戻り値の型に名前を付けるかは、まだ決まっていない"
+      },
+      "R7": {
+        "score": 4,
+        "why": "TS の構造的な型、spread、アロー型がそのまま通じる。新しく覚えるのは、二重の波括弧、幅の部分型がないこと、`@nominal` の 3 つ"
+      },
+      "R8": {
+        "score": 4,
+        "why": "判定は `try_arrow_params` と同じ保存と巻き戻しで入る。Ty::Rec、手書きの PartialEq で名前を無視する Ty::Fn、SCC で見つけた再帰と出会うたびの 1 段の展開、レコードの式の型の side table、`$p0` の展開と、どこを変えるかが具体的に書かれている。lower.rs には 2 つ穴がある。`ZsRec_done_total` はフィールドの名前だけから作るので、型の違う同名の形で衝突する。『最初に宣言した別名』を struct 名にすると、別名を足すだけで他の項目の Rust の出力が変わる。表示名を形から逆に引く規則も、ファイル全体を見る"
+      }
+    },
+    "blocker": [],
+    "issues": [
+      {
+        "severity": "high",
+        "where": "B『`{ x }`(中身が識別子 1 つだけのブロック)は、常に警告 … 型によらず、構文だけで出す』",
+        "problem": "parse.rs では、fn / if / else / while / for の本体も block() で読む。書かれたとおりに実装すると、`if x > a { x } else { a }`(examples/app.zsc の 68 行目、numeric.zsc の 18〜19 行目と 32 行目)、`fn id(x: i32) -> i32 { x }`、この提案自身の corpus の `else { t }`、001 の `if found < 0 { None } else …` のすべてに警告が出る。警告がありふれたものになり、本来の対象である値の位置の `{ total }` を見落とす",
+        "suggestion": "警告は、primary の `{` から読む裸のブロック(式の位置のブロック。末尾の式、`let x = { … }`、引数、match の腕、クロージャの本体)で、中身が識別子 1 つだけのときに限る。block() を直接呼ぶ fn / if / else / while / for の本体には出さない、と明記する"
+      },
+      {
+        "severity": "medium",
+        "where": "E『フィールド名を並べる: { total: i32, done: i32 } は ZsRec_done_total … 同じ形からは、いつも同じ名前』",
+        "problem": "名前にフィールドの型が入っていない。`{ total: i32, done: i32 }` と `{ total: f64, done: f64 }` は別の形なのに、同じ `ZsRec_done_total` になり、Rust で struct が 2 重に定義される。総称的な無名のレコード `{ value: T }` の struct の型引数も決まっていない",
+        "suggestion": "名前をフィールド名だけで作り、衝突したときだけ、形を正規化した文字列の短いハッシュを付ける(`ZsRec_done_total_3fa1`)。形からの決定性は保てる。総称的なものは、自由な型引数を struct の型引数にする(r2 の案)"
+      },
+      {
+        "severity": "low",
+        "where": "E『名前は、その形を持つ別名のうち、最初に宣言したもの』と A『表示名 … 同じ形の別名が 1 つだけのときに、その名前』",
+        "problem": "どちらもファイル全体の宣言の順と個数で決まる。別名を 1 つ足すか並べ替えると、その形を使う、関係のない `@wasm` の項目の Rust の出力や、hover とエラーの表示が変わる。型検査には影響しないが、アイテム単位の増分のコード生成はやり直しになる",
+        "suggestion": "トレードオフとして受け入れるなら、そう明記する。避けるなら、struct 名は常に形から作り(上の衝突対策つき)、別名はすべて `type ZsTodo = ZsRec_…;` で出す。表示名は注釈から来た名前だけを使い、逆引きは hover の補足にとどめる"
+      },
+      {
+        "severity": "low",
+        "where": "C『引数名は省ける』と、ty() の `(` の中",
+        "problem": "`(a: i32, String) => ()` のように、名前のある引数とない引数が混ざる場合の扱いが書かれていない。構文解析は要素ごとに `ident :` を見ればどちらも読めるが、`.d.ts` の名前と警告の規則が決まらない",
+        "suggestion": "混在はエラーにする(全部に名前を付けるか、全部省く)、と書く"
+      },
+      {
+        "severity": "low",
+        "where": "A『`@nominal type`』",
+        "problem": "例はレコード(`{ v: f64 }`)だけ。`@nominal type UserId = i32` や関数型に付けられるか、付けたら値をどう作るのか(`UserId(1)`?)が書かれていない。rust-dev が望む newtype の多くは、数値を包むもの",
+        "suggestion": "r3 ではレコードだけ、と明記する。数値の newtype は別の提案で扱う"
+      }
+    ],
+    "questions": [
+      "`{ x }` の警告は、fn / if / else / while / for の本体にも出るのか",
+      "無名のレコードの struct 名が、型の違う同じフィールド名で衝突したらどうするか",
+      "`@nominal` はレコード以外(数値、関数型)にも付けられるか",
+      "名前のある引数とない引数が混ざった関数型 `(a: i32, String) => ()` は書けるか",
+      "match の腕での名前なしのレコードのパターン `{ x, y } => …` は書けるか(001 の C は `let` と引数の位置だけを挙げている)",
+      "再帰する型の展開は『出会うたびに 1 段』という意味か(入れ子のリテラル `{ children: [{ children: [] }] }` も Node に渡せるか)"
+    ],
+    "alternative": {
+      "summary": "`{ x }` の警告を、式の位置の裸のブロックに限る。無名の struct 名には、衝突したときだけ形のハッシュを付ける",
+      "example": "fn max(a: f64, x: f64) -> f64 { if x > a { x } else { a } }   // 警告なし(if の本体は block())\nfn id(x: i32) -> i32 { x }                                       // 警告なし(fn の本体)\n\nfn only_total(todos: Array<Todo>) -> { total: i32 } {\n  let total = todos.len();\n  { total }   // warning: 式の位置のブロックの中身が `total` だけ。レコードなら `{ total, }`\n}\nlet f = (t) => { t };   // warning: 同上(TS では undefined を返す書き方なので、警告が役に立つ)\n\n// lower.rs\n// struct ZsRec_done_total { done: i32, total: i32 }\n// struct ZsRec_done_total_9c2e { done: f64, total: f64 }   // 衝突したときだけハッシュを付ける"
+    }
+  }
+]
