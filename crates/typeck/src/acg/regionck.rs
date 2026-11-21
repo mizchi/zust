@@ -2079,10 +2079,16 @@ impl Cx<'_> {
     /// `place = value;`
     pub(crate) fn rg_assign(&mut self, place: &Expr, value: &Expr) {
         // (a static assigned (`BAR = &n;`): every region of its type is 'static)
+        // (a static first, then not a local of its name: the scopes are looked up for the rare static only)
         let stat = match strip(place) {
-            Expr::Path(None, p) if p.segs.len() == 1 && self.lookup(&p.segs[0].name).is_none() => {
-                self.prog.const_index.get(&p.segs[0].name).map(|&ci| &self.prog.consts[ci as usize]).filter(|c| c.stat.is_some()).map(|c| c.ty)
-            }
+            Expr::Path(None, p) if p.segs.len() == 1 && (self.rg.on || self.rg.eligible) => self
+                .prog
+                .const_index
+                .get(&p.segs[0].name)
+                .map(|&ci| &self.prog.consts[ci as usize])
+                .filter(|c| c.stat.is_some())
+                .map(|c| c.ty)
+                .filter(|_| self.lookup(&p.segs[0].name).is_none()),
             _ => None,
         };
         let stat = stat.and_then(|t| Some((t, count(self.prog, t, 0)?))).filter(|&(_, n)| n > 0);
