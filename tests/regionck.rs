@@ -1060,3 +1060,19 @@ fn ref_bindings_of_values() {
     assert!(d.len() == 1 && d[0].0 == 3 && d[0].1.contains("mismatched types"), "{d:?}");
     assert_eq!(check("fn main() {\n    let mut x = 5;\n    let ref mut y = x;\n    *y += 1;\n    let ref z = 7;\n    match x {\n        ref mut w => *w += 1,\n    }\n    assert_eq!(x + *z, 14);\n}\n"), vec![]);
 }
+
+/// Code rustc accepts that the review of #39 found rejected: one lifetime in two inputs of a method with no
+/// receiver, a getter through `&mut &'long S` borrowing for 'long, a lint in an allow list after another, a lifetime
+/// named in a string literal, a receiver of an impl for a reference, an impl's type parameter named like a struct
+#[test]
+fn accepted_review_39() {
+    assert_eq!(check("struct S;\nimpl S {\n    fn pick<'a>(x: &'a u8, _y: &'a u8) -> &u8 {\n        x\n    }\n}\nfn main() {\n    let a = 1;\n    let b = 2;\n    println!(\"{}\", S::pick(&a, &b));\n}\n"), vec![]);
+    assert_eq!(check("struct S {\n    v: u8,\n}\nimpl S {\n    fn get(&self) -> &u8 {\n        &self.v\n    }\n}\nfn f<'short, 'long>(x: &'short mut &'long S) -> &'long u8 {\n    x.get()\n}\nfn main() {\n    let s = S { v: 1 };\n    let mut r = &s;\n    println!(\"{}\", f(&mut r));\n}\n"), vec![]);
+    assert_eq!(check("#![deny(unused_lifetimes)]\n#[allow(dead_code, unused_lifetimes)]\nfn f<'a>() {}\nfn main() {\n    f();\n}\n"), vec![]);
+    assert_eq!(check("#![deny(single_use_lifetimes)]\nfn f<'a>() {\n    let _ = \"'a\";\n}\nfn main() {\n    f();\n}\n"), vec![]);
+    assert_eq!(check("struct View<'a>(&'a u8);\ntrait Read {\n    fn rd(self) -> u8;\n}\nimpl<'a> Read for &'a View<'static> {\n    fn rd(self: &'a View<'static>) -> u8 {\n        *self.0\n    }\n}\nstatic X: u8 = 1;\nfn main() {\n    let v = View(&X);\n    println!(\"{}\", (&v).rd());\n}\n"), vec![]);
+    assert_eq!(check("struct View<'a>(&'a u8);\nstruct Holder<T>(T);\ntrait Tr {\n    type Out;\n}\nimpl<View> Tr for Holder<View> {\n    type Out = View;\n}\nfn main() {\n    let _h: Holder<u8> = Holder(1);\n}\n"), vec![]);
+    // (still E0106: two lifetimes, and none)
+    let d = check("struct S;\nimpl S {\n    fn pick<'a, 'b>(x: &'a u8, _y: &'b u8) -> &u8 {\n        x\n    }\n}\nfn main() {}\n");
+    assert!(d.len() == 1 && d[0].1.contains("E0106"), "{d:?}");
+}

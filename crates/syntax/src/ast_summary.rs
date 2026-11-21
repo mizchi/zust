@@ -548,7 +548,8 @@ fn parse_sig(sig: &PSig, is_extern: bool, is_main: bool, owner: Option<&Owner>) 
         }
         // (E0308: a receiver of the self type names its lifetimes as the impl's self type does: `self: Foo<'b, 'a>`
         // in `impl<'a, 'b> Foo<'a, 'b>` is not Self)
-        if let (Some(o), Some(rt)) = (owner.filter(|o| !o.is_trait), &sig.recv_ty) {
+        // (not of an impl for a reference (`impl Tr for &'a View<'static>`): its slots begin with the reference's)
+        if let (Some(o), Some(rt)) = (owner.filter(|o| !o.is_trait && !matches!(o.self_ty, TySyn::Ref(..) | TySyn::Ptr(..))), &sig.recv_ty) {
             if let Some(r) = o.regions.as_deref() {
                 let mut t = rt;
                 loop {
@@ -874,7 +875,8 @@ fn unsized_elem(t: &PTy) -> Option<String> {
 /// A path in a field's, a type alias's, an associated type's or a const's type that names a struct or enum with
 /// lifetimes (adts: their numbers) and writes none (E0106: nothing to elide them to there), or writes another number
 /// of them (E0107): `line:col: msg`. Not in fn pointer, `dyn` and `impl` types, which elide
-pub fn hidden_lifetimes(src: &str, it: &SrcItem, adts: &crate::fxhash::FxMap<&str, usize>) -> Option<String> {
+/// (outer: the type parameters of the impl an associated type is in, which its own generics do not list)
+pub fn hidden_lifetimes(src: &str, it: &SrcItem, adts: &crate::fxhash::FxMap<&str, usize>, outer: &[String]) -> Option<String> {
     let text = src.get(it.start..it.end)?;
     let f = parse_file(text).ok()?;
     let item = f.items.first()?;
@@ -895,7 +897,8 @@ pub fn hidden_lifetimes(src: &str, it: &SrcItem, adts: &crate::fxhash::FxMap<&st
     };
     // (a const's or a static's elided lifetimes are 'static (RFC 1623): only a wrong number is an error)
     let statics = matches!(item.kind, ItemKind::Const(..) | ItemKind::Static(..));
-    let tparams: Vec<&str> = g.map(|g| g.params.iter().filter_map(|p| if let GParam::Ty(n, ..) = p { Some(n.as_str()) } else { None }).collect()).unwrap_or_default();
+    let mut tparams: Vec<&str> = g.map(|g| g.params.iter().filter_map(|p| if let GParam::Ty(n, ..) = p { Some(n.as_str()) } else { None }).collect()).unwrap_or_default();
+    tparams.extend(outer.iter().map(|x| x.as_str()));
     fn walk(t: &PTy, adts: &crate::fxhash::FxMap<&str, usize>, tparams: &[&str], statics: bool, depth: u32) -> Option<(crate::parse::Pos, String)> {
         if depth > 16 {
             return None;
@@ -1860,7 +1863,11 @@ pub fn summarize(item: &Item, owner: Option<&Owner>) -> R<Summary> {
             // lifetimes: the driver reports it of the program's items)
             if fs.recv_ty.is_none() && !fs.name.starts_with("__") {
                 if let Some(r) = fs.ret.as_ref().filter(|r| lifetime_positions(r).0 > 0) {
-                    if fs.params.iter().map(|(_, t)| lifetime_positions(t).1).sum::<usize>() != 1 {
+                    // (the distinct input lifetimes: `x: &'a u8, y: &'a u8` has one; a parameter whose type may hold
+                    // lifetimes not written leaves none known to be missing)
+                    let ps: Vec<PTy> = fs.params.iter().map(|(_, t)| t.clone()).collect();
+                    let (n, complete) = input_lifetimes(&ps);
+                    if n > 1 || n == 0 && complete {
                         sm.adt_err = Some(match crate::wf::pos_of(r) {
                             Some(p) => format!("\u{3}{}\u{3}missing lifetime specifier (E0106)", p.line),
                             None => "missing lifetime specifier (E0106)".to_string(),

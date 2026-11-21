@@ -681,7 +681,8 @@ impl Session2 {
                     if !named {
                         continue;
                     }
-                    if let Some(e) = crate::ast_summary::hidden_lifetimes(&src, it, &adts) {
+                    let outer: Vec<String> = sm.assocs.iter().flat_map(|a| a.generics.iter().cloned()).collect();
+                    if let Some(e) = crate::ast_summary::hidden_lifetimes(&src, it, &adts, &outer) {
                         return Err(e);
                     }
                 }
@@ -1934,11 +1935,19 @@ fn first_unused_lifetime(src: &str, items: &[SrcItem], (unused, single): (bool, 
             })
             .count()
     };
-    // (the text without its line comments, where a lifetime's name is no use of it)
-    let code = |t: &str| t.lines().map(|l| l.find("//").map_or(l, |i| &l[..i])).collect::<Vec<_>>().join("\n");
+    // (the text without its comments and string literals, where a lifetime's name is no use of it)
+    let code = |t: &str| strip_strings(&t.lines().map(|l| l.find("//").map_or(l, |i| &l[..i])).collect::<Vec<_>>().join("\n"));
+    // (`#[allow(dead_code, unused_lifetimes)]`: the lint anywhere in an allow list)
+    let allows = |t: &str, lint: &str| {
+        t.match_indices("allow(").any(|(i, _)| {
+            let rest = &t[i + 6..];
+            let list = &rest[..rest.find(')').unwrap_or(rest.len())];
+            list.split(',').any(|x| x.trim() == lint)
+        })
+    };
     for (k, it) in items.iter().enumerate() {
         let text = src.get(it.start..it.end).unwrap_or("");
-        if !text.contains('\'') || text.contains("allow(unused_lifetimes") || text.contains("allow(single_use_lifetimes") || text.contains("#[cfg") || text.contains("macro_rules") {
+        if !text.contains('\'') || allows(text, "unused_lifetimes") || allows(text, "single_use_lifetimes") || text.contains("#[cfg") || text.contains("macro_rules") {
             continue;
         }
         // (an impl's header, `impl<'a> S<'a> {`: its members name its lifetimes too)
@@ -1976,6 +1985,44 @@ fn first_unused_lifetime(src: &str, items: &[SrcItem], (unused, single): (bool, 
         }
     }
     None
+}
+
+/// t with the contents of its string literals (`"'a"`, raw ones too) blanked out
+fn strip_strings(t: &str) -> String {
+    let b = t.as_bytes();
+    let mut out = String::with_capacity(t.len());
+    let mut i = 0;
+    while i < b.len() {
+        // (`r"..."` / `r#"..."#`: to the quote and as many `#`)
+        if b[i] == b'r' && (i == 0 || !(b[i - 1].is_ascii_alphanumeric() || b[i - 1] == b'_')) {
+            let mut j = i + 1;
+            while j < b.len() && b[j] == b'#' {
+                j += 1;
+            }
+            if j < b.len() && b[j] == b'"' {
+                let hashes = j - i - 1;
+                let close: String = std::iter::once('"').chain(std::iter::repeat_n('#', hashes)).collect();
+                let end = t[j + 1..].find(close.as_str()).map_or(b.len(), |k| j + 1 + k + close.len());
+                out.push_str(&" ".repeat(end - i));
+                i = end;
+                continue;
+            }
+        }
+        if b[i] == b'"' {
+            let mut j = i + 1;
+            while j < b.len() && b[j] != b'"' {
+                j += if b[j] == b'\\' { 2 } else { 1 };
+            }
+            let end = (j + 1).min(b.len());
+            out.push_str(&" ".repeat(end - i));
+            i = end;
+            continue;
+        }
+        let c = t[i..].chars().next().unwrap();
+        out.push(c);
+        i += c.len_utf8();
+    }
+    out
 }
 
 /// t names l where eliding it is allowed: a reference's lifetime or a path's lifetime argument, not in an `impl` /

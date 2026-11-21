@@ -2534,9 +2534,11 @@ impl Cx<'_> {
         loop {
             match t {
                 Ty::Struct(s) if s == sid => break,
-                Ty::Ref(_, i) => {
+                // (through a shared reference the borrow lives no longer than it alone: `x.get()` with
+                // x: &'short mut &'long S borrows for 'long, as fields and indexes do)
+                Ty::Ref(m, i) => {
                     let Some(&r) = tr.first() else { return };
-                    ds.push(r);
+                    deref(&mut ds, r, m);
                     tr = tr[1..].to_vec();
                     t = *i;
                 }
