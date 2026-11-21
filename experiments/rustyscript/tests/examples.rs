@@ -62,8 +62,13 @@ fn basics() {
     let dts = std::fs::read_to_string(d.join("basics.d.ts")).unwrap();
     assert!(dts.contains("export type Filter = \"All\" | \"Active\" | \"Done\";"));
     assert!(dts.contains("export declare function sum$i64(xs: readonly bigint[]): bigint;"));
+    assert!(dts.contains("export declare function sum$i32(xs: readonly i32[]): i32;"));
+    assert!(dts.contains("export type i32 = number & { readonly __rsx_num: \"i32\" };"));
     let js = std::fs::read_to_string(d.join("basics.js")).unwrap();
     assert!(!js.contains("class "), "the output uses no classes");
+    // the brands' constructors check at the boundary
+    let out = node(&d, "const m = await import('./basics.js'); console.log(m.i32(3)); try { m.i32(1.5) } catch (e) { console.log(e.message) }");
+    assert_eq!(out, "3\nnot a 32-bit signed integer: 1.5\n");
 }
 
 #[test]
@@ -119,4 +124,29 @@ fn errors() {
         n += 1;
     }
     assert!(n >= 10);
+}
+
+/// The .d.ts files type-check from TS, and the numeric brands reject mixing (tests/consumer.ts). Needs tsc: the
+/// `TSC` variable, or `tsc` on PATH; skipped otherwise.
+#[test]
+fn dts_typechecks() {
+    let tsc = std::env::var("TSC").unwrap_or_else(|_| "tsc".into());
+    if Command::new(&tsc).arg("--version").output().is_err() {
+        eprintln!("skipped: no tsc (set TSC)");
+        return;
+    }
+    let d = out_dir("ts");
+    for name in ["basics", "app"] {
+        let o = rsc(&root().join(format!("examples/{name}.rys")), &d);
+        assert!(o.status.success(), "rsc failed:\n{}", String::from_utf8_lossy(&o.stderr));
+    }
+    std::fs::copy(root().join("tests/consumer.ts"), d.join("consumer.ts")).unwrap();
+    // (rsc's output is ES modules)
+    std::fs::write(d.join("package.json"), "{ \"type\": \"module\" }\n").unwrap();
+    let o = Command::new(&tsc)
+        .current_dir(&d)
+        .args(["--strict", "--noEmit", "--target", "es2022", "--module", "nodenext", "--moduleResolution", "nodenext", "consumer.ts"])
+        .output()
+        .unwrap();
+    assert!(o.status.success(), "tsc:\n{}{}", String::from_utf8_lossy(&o.stdout), String::from_utf8_lossy(&o.stderr));
 }

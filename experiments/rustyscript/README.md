@@ -10,7 +10,10 @@ zust を土台にした、フロントエンド向け言語の試作。目標は
   - zust のワークスペース外の独立した crate(`[workspace]` を自前で持つ)
   - zustc は外部コマンドとして呼ぶだけ
   - 本体側の変更は `.gitignore` の 2 行のみ
-- テスト: `cargo test --release`(node が必要。app の例は zust 側の `target/release/zustc` を使う)
+- テスト: `cargo test --release`
+  - node が必要
+  - app の例は zust 側の `target/release/zustc` を使う
+  - `.d.ts` の検査は tsc を使う(環境変数 `TSC` か PATH 上の `tsc`。なければ飛ばす)
 
 ## 文法(現時点の案と決定事項)
 
@@ -20,6 +23,8 @@ zust を土台にした、フロントエンド向け言語の試作。目標は
 - 数値は `i32` / `u32` / `i64` / `f64` で、暗黙変換はしない(`Int` / `Float` の別名は置かない)
 - class は持たない
 - effect 多相は入れず、簡単な制約で済ませる(将来の拡張の余地は残す)
+- 配列は TS の `readonly T[]` そのもの。JS の配列をコピーも変換もなしに渡せるので、コードサイズとブリッジの両面で有利。不変として扱い、`push` は新しい配列を作る
+- `.d.ts` の数値は branded type にする
 
 ```rust
 // データ: レコード、enum (代数的データ型)。class はなく、振る舞いは関数と match で書く
@@ -52,6 +57,13 @@ extern "react" fn useState<T>(init: T) -> (T, fn(T) -> ()) = "useState";
 | `i64` | BigInt | `BigInt.asIntN(64, ..)`。2^53 を超えても正確 |
 | `f64` | number | そのまま |
 
+- `.d.ts` では branded type になる。TS 側でも整数と小数が混ざらない
+  - 例: `export type i32 = number & { readonly __rsx_num: "i32" }`
+  - brand は文字列リテラルのプロパティで付けるので、モジュールが違っても互換になる(`unique symbol` だとモジュールごとに別の型になる)
+  - 値は number のままなので、`i32` は `number` に代入できる。逆向きは、モジュールが export するコンストラクタ `i32(x)` / `u32(x)` / `f64(x)` を通す
+  - コンストラクタは変換せず検査だけする: `i32(1.5)` は RangeError。境界で混入したら誤りとして止める
+  - `i64` は TS の `bigint` で、もともと number と区別されるので brand は付けない
+  - tests/consumer.ts を tsc(`--strict`)にかけて、`@ts-expect-error` で次が型エラーになることを確かめている: f64 を i32 に渡す、素の number を i32 に渡す、readonly のフィールドや配列を変更する
 - 整数リテラルは文脈の整数型になり、決まらなければ `i32` になる。`1.5` は `f64`
 - `x + 1`(x が f64)は型エラーになる
 - 変換は `as` だけ。f64 からの変換は Rust と同じく飽和する(`1e10 as i32 == 2147483647`)
@@ -192,9 +204,9 @@ zust は到達しない関数をそもそも出さないので、`wasm-gc` に�
 
 ## 未決事項
 
-- `Array` を TS の `readonly T[]` に寄せるか、永続データ構造にするか(今は不変として扱い、`push` は新しい配列を作る)
+- 配列の更新が多い箇所の計算量: `readonly T[]` に決めたので、`push` は O(n) のコピーになる。ループのように積み上げる用途には、`fold` で一度に作る、あるいは wasm 層に寄せる方針で足りるかを確かめる
 - 文字列の長さ(`len` は今 UTF-16 単位。Rust の byte 単位とずれる)
-- i32 などを `.d.ts` で区別するか(今は `number` の後ろにコメントを付けるだけ。branded type にする案もある)
+- brand のコンストラクタ名(`i32` など)が、利用者の関数名と衝突しうる。今は検査していない
 - wasm 層から JS 層の関数(コールバックでない普通の関数)を呼ぶ方向
 - wasm 側で panic したときに所有コールバックが漏れること(今は abort して例外になり、表に残る)
 - 試作の割り切り

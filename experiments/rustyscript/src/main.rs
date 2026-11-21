@@ -63,7 +63,7 @@ fn main() {
     let mut j = js::Js::new(&info, &jsx_runtime);
     let body = j.items(&items);
     let header = j.header();
-    let dts = js::dts(&items, &info);
+    let (dts, brands) = js::dts(&items, &info);
     let wasm_name = format!("{stem}.wasm");
     let w = wasm::generate(&items, &wasm_name);
     let t_front = t0.elapsed();
@@ -102,6 +102,7 @@ fn main() {
         t_wasm = Some(t1.elapsed());
         let _ = &w.names;
     }
+    out.push_str(&js::brand_runtime(&brands));
     std::fs::write(out_dir.join(format!("{stem}.js")), out).unwrap();
     std::fs::write(out_dir.join(format!("{stem}.d.ts")), dts).unwrap();
     eprint!("rsc: {} → {}/{stem}.js, .d.ts (front {:.1} ms", file, out_dir.display(), t_front.as_secs_f64() * 1e3);
