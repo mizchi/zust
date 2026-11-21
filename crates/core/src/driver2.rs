@@ -685,7 +685,7 @@ impl Session2 {
                     let b = head.as_bytes();
                     (i == 0 || !(b[i - 1].is_ascii_alphanumeric() || b[i - 1] == b'_')) && b.get(i + 5).is_none_or(|c| !(c.is_ascii_alphanumeric() || *c == b'_'))
                 });
-                w.is_none_or(|(i, _)| head[i + 5..].split(',').all(|p| p.trim().is_empty() || p.split(':').next().map(str::trim) == Some(st)))
+                w.is_none_or(|(i, _)| top_level_split(&head[i + 5..]).iter().all(|p| p.trim().is_empty() || p.split(':').next().map(str::trim) == Some(st)))
             };
             let mut first: FxMap<&str, (usize, &str)> = FxMap::default();
             for (ii, sm) in sums[..user].iter().enumerate() {
@@ -693,10 +693,11 @@ impl Session2 {
                 if !sm.impl_trait_args.is_empty() || tr.contains(['<', ':']) || !sm.impl_generics.iter().any(|g| g.0 == st) {
                     continue;
                 }
-                let Some((i0, st0)) = first.insert(tr, (ii, st)) else { continue };
-                if !plain_where(i0, st0) || !plain_where(ii, st) {
+                // (an impl whose `where` clause may make it disjoint is no candidate either way)
+                if !plain_where(ii, st) {
                     continue;
                 }
+                let Some((_, _)) = first.insert(tr, (ii, st)) else { continue };
                 let once = sums[..user].iter().filter(|s| s.trait_decl.as_deref() == Some(tr)).count() == 1;
                 const OVERLAP: [&str; 6] =
                     ["specialization", "min_specialization", "marker_trait_attr", "negative_impls", "with_negative_coherence", "rustc_attrs"];
@@ -2600,8 +2601,8 @@ fn gated_attr(src: &str, from: usize, to: usize, feats: &mut Option<Vec<String>>
         if name == "target_feature" {
             let mut q = j + 1;
             while q < toks.len() && !sym(q, "]") {
-                if toks[q].0 == 2 && tx(q).starts_with('"') {
-                    for tf in tx(q).trim_matches('"').split(',').map(str::trim) {
+                if let Some(text) = (toks[q].0 == 2).then(|| str_lit_value(tx(q))).flatten() {
+                    for tf in text.split(',').map(str::trim) {
                         let Some(gate) = unstable_target_feature(tf) else { continue };
                         let enabled = feats.get_or_insert_with(|| enabled_features(src));
                         if !enabled.iter().any(|f| f == gate) {
@@ -2623,6 +2624,61 @@ fn gated_attr(src: &str, from: usize, to: usize, feats: &mut Option<Vec<String>>
         }
     }
     None
+}
+
+/// The parts of s between its top-level commas (not those inside `<..>` / `(..)` / `[..]`): a `where` clause's
+/// predicates
+fn top_level_split(s: &str) -> Vec<&str> {
+    let (mut out, mut depth, mut from) = (vec![], 0i32, 0);
+    for (i, c) in s.char_indices() {
+        match c {
+            '<' | '(' | '[' => depth += 1,
+            '>' | ')' | ']' => depth -= 1,
+            ',' if depth == 0 => {
+                out.push(&s[from..i]);
+                from = i + 1;
+            }
+            _ => {}
+        }
+    }
+    out.push(&s[from..]);
+    out
+}
+
+/// The value of a string literal token: `"x87"`, `r"x87"` / `r#"x87"#`, with the escapes of an ordinary one decoded
+/// (`"x\x38\x37"`). None for another literal
+fn str_lit_value(t: &str) -> Option<String> {
+    if let Some(r) = t.strip_prefix('r') {
+        let h = r.len() - r.trim_start_matches('#').len();
+        return Some(r.get(h + 1..r.len().checked_sub(h + 1)?)?.to_string());
+    }
+    let inner = t.strip_prefix('"')?.strip_suffix('"')?;
+    let mut out = String::new();
+    let mut cs = inner.chars();
+    while let Some(c) = cs.next() {
+        if c != '\\' {
+            out.push(c);
+            continue;
+        }
+        match cs.next()? {
+            'n' => out.push('\n'),
+            't' => out.push('\t'),
+            'r' => out.push('\r'),
+            '0' => out.push('\0'),
+            'x' => out.push(u8::from_str_radix(&cs.by_ref().take(2).collect::<String>(), 16).ok()? as char),
+            'u' => {
+                let hex: String = cs.by_ref().skip(1).take_while(|&c| c != '}').collect();
+                out.push(char::from_u32(u32::from_str_radix(&hex, 16).ok()?)?);
+            }
+            '\n' => {
+                while cs.clone().next().is_some_and(char::is_whitespace) {
+                    cs.next();
+                }
+            }
+            c => out.push(c),
+        }
+    }
+    Some(out)
 }
 
 /// The feature gate of an x86 target feature that is unstable (rustc 1.100): `#[target_feature(enable = "x87")]`

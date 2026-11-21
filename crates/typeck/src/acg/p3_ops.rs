@@ -73,7 +73,13 @@ impl Cx<'_> {
             return false;
         }
         match t {
-            Ty::Ref(_, i) | Ty::Array(i, _) | Ty::Slice(i) => self.lacks_cmp(*i, tr, depth + 1),
+            // (`impl PartialEq for &X`: the reference's own impl, before its target's)
+            Ty::Ref(_, i) => {
+                let own = self.prog.ref_impls.contains(&(t, tr.to_string()))
+                    || self.prog.ref_impl_pats.iter().any(|(pt, ptr, n)| ptr == tr && self.prog.match_ty(*pt, t, &mut vec![None; *n]));
+                !own && self.lacks_cmp(*i, tr, depth + 1)
+            }
+            Ty::Array(i, _) | Ty::Slice(i) => self.lacks_cmp(*i, tr, depth + 1),
             Ty::Struct(sid) => {
                 let b = self.prog.base_of(sid);
                 if self.prog.is_tuple(b) {
@@ -82,7 +88,9 @@ impl Cx<'_> {
                 let user = self.prog.struct_item.get(b as usize).is_some_and(|&i| i < self.prog.prelude_from);
                 // (`impl PartialEq<i32> for S`: an impl for another right-hand side counts, looked for only when the
                 // plain one is missing)
-                user && b == sid && !self.prog.implements(t, tr)
+                // (an impl of the trait (derived or written), not an inherent `eq` / `partial_cmp`, which
+                // Program::implements also counts)
+                user && b == sid && !self.prog.impls.contains(&(b, tr.to_string())) && !self.prog.blanket_traits.contains(tr)
                     && !{
                         // (`impl PartialEq<i32> for S`: the functions `S::<PartialEq<i32>>::eq`, which `==` picks directly)
                         let fs = if tr == "PartialEq" { &self.prog.peq } else { &self.prog.pord };
