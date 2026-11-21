@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795287744335,
+  "lastUpdate": 1795287746519,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -93623,6 +93623,70 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/mizchi/zust/commit/68b749734276a69c000c134e5975ed8f9e195e24"
         },
         "date": 1795286498429,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tests/ui run-pass pass rate",
+            "value": 75.47,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui run-pass passing",
+            "value": 1800,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui check-pass pass rate",
+            "value": 81.63,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui check-pass passing",
+            "value": 1475,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui build-pass pass rate",
+            "value": 72.59,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui build-pass passing",
+            "value": 98,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui compile-fail pass rate",
+            "value": 51.89,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui compile-fail passing",
+            "value": 3818,
+            "unit": "tests"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "miz404@gmail.com",
+            "name": "Kotaro Chikuba",
+            "username": "mizchi"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "a5996966ddff7363cc2af8785021d22103dbe264",
+          "message": "Merge pull request #34 from mizchi/claude/clever-pasteur-11fjnw\n\nUI frameworks for wasm32: what is missing; zurgo M0 (Cargo-compatible driver); a dispatch regression",
+          "timestamp": "2026-11-22T03:58:12+09:00",
+          "tree_id": "5c2cbded785601dafed67260ec7825e746cda54e",
+          "url": "https://github.com/mizchi/zust/commit/a5996966ddff7363cc2af8785021d22103dbe264"
+        },
+        "date": 1795287745998,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
