@@ -610,6 +610,12 @@ impl Cx<'_> {
         let Expr::MethodCall(mc_recv, mc_name, mc_tf, mc_args, _) = mc else { unreachable!() };
         let mc_recv: &Expr = mc_recv;
         let _ = (mc_name, mc_tf, mc_args);
+        // (E0133: the pointer methods that are `unsafe fn` in std; the wrapping_* ones, is_null and cast are safe)
+        if matches!(mc_name.as_str(), "add" | "sub" | "offset" | "read" | "read_volatile" | "read_unaligned" | "write" | "write_volatile" | "write_unaligned") {
+            if let Expr::MethodCall(_, _, _, _, msp) = mc {
+                self.check_unsafe_op(mc_name, msp.at)?;
+            }
+        }
         let (p, _) = self.expr(&*mc_recv, Some(pt))?;
         let p = p.unwrap();
         let args: Vec<&Expr> = mc_args.iter().collect();

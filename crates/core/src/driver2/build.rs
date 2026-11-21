@@ -233,7 +233,7 @@ impl Session2 {
         if let Some(tm) = tm {
             tm.lap("codegen", format!("{} hit / {} compiled ({} generic instances, {} jobs)", rep.fns_hit, rep.fns_compiled, insts.list.len(), self.opts.jobs));
         }
-        emit_object(a, &self.ctx, &insts, &user_live, &blobs)
+        emit_object(a, &self.ctx, &insts, &user_live, &blobs, self.opts.module_writer)
     }
 
     /// ソースから実行ファイルを作る。前回と同じ .o ならリンクしない
@@ -247,6 +247,17 @@ impl Session2 {
         let obj = self.compile_object(&a, &mut rep, Some(&mut tm))?;
         tm.lap("object", format!("{} bytes", obj.len()));
         rep.object_bytes = obj.len();
+        // (wasm32: the module is the output, nothing to link)
+        if self.opts.module_writer.is_some() {
+            if !std::fs::read(output).is_ok_and(|old| old == obj) {
+                std::fs::write(output, &obj).map_err(|e| format!("{}: {e}", output.display()))?;
+                rep.linked = true;
+            }
+            if self.opts.time {
+                eprintln!("  {:<10} {:>8.2} ms", "total", (now_ns() - tm.start) as f64 / 1e6);
+            }
+            return Ok(rep);
+        }
         let obj_path = output.with_extension("o");
         let same = std::fs::read(&obj_path).is_ok_and(|old| old == obj) && std::fs::read(output).is_ok();
         if same {
@@ -273,7 +284,7 @@ fn compile_id(a: &Analysis, insts: &Mutex<Insts>, id: u32) -> R<Blob> {
 }
 
 
-fn emit_object(a: &Analysis, ctx: &CrateCtx, insts: &Insts, user_live: &[u32], blobs: &FxMap<u32, Blob>) -> R<Vec<u8>> {
+fn emit_object(a: &Analysis, ctx: &CrateCtx, insts: &Insts, user_live: &[u32], blobs: &FxMap<u32, Blob>, writer: Option<ModuleWriter>) -> R<Vec<u8>> {
     let prog = &a.prog;
     let sym_of = |id: u32| -> &str {
         match insts.get(id) {
@@ -668,7 +679,10 @@ fn emit_object(a: &Analysis, ctx: &CrateCtx, insts: &Insts, user_live: &[u32], b
         }
         datas.push((tname, bytes, rs, true));
     }
-    Ok(crate::minclif::write_object_full(&funcs, &datas))
+    match writer {
+        Some(w) => w(&funcs, &datas),
+        None => Ok(crate::minclif::write_object_full(&funcs, &datas)),
+    }
 }
 
 fn trap_table_ci(prog: &Program) -> u32 {
@@ -1049,6 +1063,9 @@ impl Session2 {
     /// ワークスペースをビルドする: クレートごとに .o を out_dir に作り (変わらなければ書かない)、
     /// bin ごとに自分と依存するクレートの .o をリンクする。キャッシュはこの Session2 のものを共有する
     pub fn build_workspace(&mut self, crates: &[CrateSpec], out_dir: &std::path::Path) -> R<WsReport> {
+        if self.opts.module_writer.is_some() {
+            return Err("wasm32-unknown-unknown: workspace builds are not supported yet (build one crate)".into());
+        }
         let t0 = now_ns();
         let order = topo(crates)?;
         mkdir_all(out_dir)?;

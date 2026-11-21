@@ -12,4 +12,5 @@
 
 pub use zust_core::*;
 pub use zust_clif as clif_backend;
+pub use zust_wasm as wasm_backend;
 pub use zust_core::driver2::{Diagnostic, Options2, Report2, Session2};

@@ -68,7 +68,8 @@ pub struct Analysis {
     /// 読んだ関数の本体 (関数 id → 構文木)
     pub asts: Mutex<FxMap<u32, ItemFn>>,
     /// 囲む関数 (アイテム番号) ごとのクロージャの式 (クロージャの本体を引くたびに囲む関数を読み直さない)
-    pub encl: Mutex<FxMap<u32, Vec<Expr>>>,
+    /// item → its closures, and whether each is written inside `unsafe { }`
+    pub encl: Mutex<FxMap<u32, Vec<(Expr, bool)>>>,
     /// 関数ごとのシグネチャのハッシュ (0 はまだ: キーを作るたびに参照先のシグネチャをたどり直さない)
     pub sig_keys: Mutex<Vec<Key>>,
     /// 依存するクレートのテキストの範囲と、そこから見えるクレート (CrateCtx::dep_ranges)
@@ -265,23 +266,34 @@ pub struct Options2 {
     pub backend: Option<Backend>,
     /// `#[cfg(feature = "..")]` で真になる feature (1 つのクレートのビルド。ワークスペースはクレートごとに CrateSpec が持つ)
     pub features: Vec<String>,
+    /// wasm32-unknown-unknown: writes the module instead of an ELF object, and does not link (zust_wasm::write_module;
+    /// `backend` is then zust_wasm::compile)
+    pub module_writer: Option<ModuleWriter>,
 }
+
+/// Writes the output from the functions and data build.rs lays out (in place of the ELF object)
+pub type ModuleWriter = fn(&[(String, Vec<u8>, Vec<crate::ir::Reloc>, bool)], &[(String, Vec<u8>, Vec<(u32, String, i64)>, bool)]) -> Result<Vec<u8>, String>;
 
 impl Default for Options2 {
     fn default() -> Self {
-        Options2 { opt: false, jobs: cpu_count(), linker: None, lib_dirs: vec![], no_cache: false, time: false, backend: None, features: vec![] }
+        Options2 { opt: false, jobs: cpu_count(), linker: None, lib_dirs: vec![], no_cache: false, time: false, backend: None, features: vec![], module_writer: None }
     }
 }
 
 impl Options2 {
     /// キャッシュのキーに入れるバックエンドの印 (Cranelift なら 1)
     pub fn backend_id(&self) -> u8 {
+        // (wasm: the address checks are part of the code, so a build without them (ZUSTC_WASM_NO_ADDR_CHECK, for
+        // measuring) has its own cache entries)
+        if self.module_writer.is_some() {
+            return if std::env::var_os("ZUSTC_WASM_NO_ADDR_CHECK").is_some() { 3 } else { 2 };
+        }
         self.backend.is_some() as u8
     }
 
     /// cfg の述語の設定 (features は与えたもの)
     pub fn cfg_with(&self, features: &[String]) -> crate::cfg::CfgSet {
-        crate::cfg::CfgSet { features: features.to_vec(), debug_assertions: !self.opt }
+        crate::cfg::CfgSet { features: features.to_vec(), debug_assertions: !self.opt, wasm: self.module_writer.is_some() }
     }
 }
 
@@ -764,9 +776,15 @@ impl Session2 {
                 }
             }
         }
+        unsafe_impls(&src, &items[..user])?;
         let mut prog = Program::build_with(&items, &sums, self.ctx.lib.is_none() && !lib_attr, user).map_err(|e| name_line(&e, &src, &items))?;
         tm.lap("program", String::new());
         prog.prelude_from = user as u32;
+        // (E0277: a static is reachable from every thread, so its type must be Sync)
+        if let Some((ci, tn)) = crate::acg::static_not_sync(&prog) {
+            let line = items.get(prog.consts[ci].item as usize).map_or(0, |it| it.line);
+            return Err(format!("{line}:1: `{tn}` cannot be shared between threads safely: the type of a `static` must be Sync (E0277)"));
+        }
         // (traits of one name in two modules: which one a method call means depends on where it is. Read from the
         // crate's source (its files joined, as the items' lines count); a build with dependency crates keeps the earlier
         // choice, the first impl)
@@ -1763,8 +1781,9 @@ pub fn parse_fn(src: &str, it: &SrcItem) -> R<Option<ItemFn>> {
     Ok(Some(ItemFn { attrs: item.attrs, sig, block }))
 }
 
-/// クロージャ式を関数にする (`fn call(__env: (), p0: (), ..) { 本体 }`: 型はシグネチャから決まる)
-pub fn synth_closure(c: &Expr) -> ItemFn {
+/// クロージャ式を関数にする (`fn call(__env: (), p0: (), ..) { 本体 }`: 型はシグネチャから決まる)。
+/// in_unsafe: the closure is written where `unsafe` operations are allowed, so its body is put in `unsafe { }`
+pub fn synth_closure(c: &Expr, in_unsafe: bool) -> ItemFn {
     let Expr::Closure(_, ps, _, body, _) = c else { unreachable!() };
     let unit = crate::parse::Ty::Tuple(vec![]);
     let mut params = vec![(Pat::Ident(false, false, "__env".into(), None), unit.clone())];
@@ -1784,6 +1803,9 @@ pub fn synth_closure(c: &Expr) -> ItemFn {
         Expr::Block(None, false, b) => stmts.extend(b.stmts.iter().cloned()),
         e => stmts.push(Stmt::Expr(e.clone(), false)),
     }
+    if in_unsafe {
+        stmts = vec![Stmt::Expr(Expr::Block(None, true, Block { stmts }), false)];
+    }
     let sig = crate::parse::FnSig {
         name: "call".into(),
         generics: crate::parse::Generics { params: vec![], preds: vec![] },
@@ -1796,6 +1818,161 @@ pub fn synth_closure(c: &Expr) -> ItemFn {
     ItemFn { attrs: vec![], sig, block: Block { stmts } }
 }
 
+/// The text of an item after its attributes and comments, and the number of lines skipped to get there
+fn after_attrs(text: &str) -> (&str, usize) {
+    let mut t = text;
+    loop {
+        let u = t.trim_start();
+        if let Some(r) = u.strip_prefix("//") {
+            t = r.find('\n').map(|k| &r[k..]).unwrap_or("");
+        } else if let Some(r) = u.strip_prefix("/*") {
+            t = r.find("*/").map(|k| &r[k + 2..]).unwrap_or("");
+        } else if let Some(r) = u.strip_prefix("#[").or_else(|| u.strip_prefix("#![")) {
+            t = &r[attr_end(r)..];
+        } else {
+            t = u;
+            break;
+        }
+    }
+    let skipped = &text[..text.len() - t.len()];
+    (t, skipped.matches('\n').count())
+}
+
+/// The length of an attribute's body up to and with its closing `]` (r is after `#[`). Brackets inside string, raw
+/// string and char literals do not count: `#[doc = "]"]` ends at the last `]`
+fn attr_end(r: &str) -> usize {
+    let b = r.as_bytes();
+    let mut depth = 1;
+    let mut i = 0;
+    while i < b.len() {
+        match b[i] {
+            b'[' => depth += 1,
+            b']' => {
+                depth -= 1;
+                if depth == 0 {
+                    return i + 1;
+                }
+            }
+            // a raw string `r"..."` / `r#"..."#`: to the quote followed by as many `#`
+            b'r' if i + 1 < b.len() && (b[i + 1] == b'"' || b[i + 1] == b'#') && (i == 0 || !(b[i - 1].is_ascii_alphanumeric() || b[i - 1] == b'_')) => {
+                let mut j = i + 1;
+                let mut hashes = 0;
+                while j < b.len() && b[j] == b'#' {
+                    hashes += 1;
+                    j += 1;
+                }
+                if j < b.len() && b[j] == b'"' {
+                    j += 1;
+                    while j < b.len() && !(b[j] == b'"' && b[j + 1..].iter().take(hashes).filter(|&&c| c == b'#').count() == hashes) {
+                        j += 1;
+                    }
+                    i = j + hashes;
+                }
+            }
+            b'"' => {
+                i += 1;
+                while i < b.len() && b[i] != b'"' {
+                    if b[i] == b'\\' {
+                        i += 1;
+                    }
+                    i += 1;
+                }
+            }
+            // a char literal ('x', '\'', '\\'): not a lifetime, which has no closing quote two or three bytes on
+            b'\'' if b.get(i + 2) == Some(&b'\'') || (b.get(i + 1) == Some(&b'\\') && b.get(i + 3) == Some(&b'\'')) => {
+                i += if b[i + 1] == b'\\' { 3 } else { 2 };
+            }
+            _ => {}
+        }
+        i += 1;
+    }
+    b.len()
+}
+
+/// t without its `// ..` and `/* .. */` comments (each one a space)
+fn strip_comments(t: &str) -> String {
+    let mut out = String::with_capacity(t.len());
+    let mut rest = t;
+    loop {
+        let (a, b) = (rest.find("//"), rest.find("/*"));
+        let k = match (a, b) {
+            (Some(x), Some(y)) => x.min(y),
+            (Some(x), None) | (None, Some(x)) => x,
+            (None, None) => break,
+        };
+        out.push_str(&rest[..k]);
+        out.push(' ');
+        rest = if rest[k..].starts_with("//") {
+            rest[k..].find('\n').map(|e| &rest[k + e..]).unwrap_or("")
+        } else {
+            rest[k + 2..].find("*/").map(|e| &rest[k + 2 + e + 2..]).unwrap_or("")
+        };
+    }
+    out.push_str(rest);
+    out
+}
+
+/// `t` without the keyword `w` at its start (and the spaces after it)
+fn after_word<'a>(t: &'a str, w: &str) -> Option<&'a str> {
+    let r = t.strip_prefix(w)?;
+    if r.starts_with(|c: char| c.is_alphanumeric() || c == '_') {
+        return None;
+    }
+    Some(r.trim_start())
+}
+
+/// E0200: an impl of an unsafe trait (`Send`, `Sync`, or an `unsafe trait` of the program) must be an `unsafe impl`.
+/// Implementing `Send` for a type holding an `Rc` is how safe code would otherwise share it between threads
+fn unsafe_impls(src: &str, items: &[SrcItem]) -> R<()> {
+    let mut unsafe_traits: Vec<&str> = vec!["Send", "Sync"];
+    for it in items {
+        let (t, _) = after_attrs(src.get(it.start..it.end).unwrap_or(""));
+        let t = after_word(t, "pub").map(|r| if r.starts_with('(') { r.find(')').map(|k| r[k + 1..].trim_start()).unwrap_or(r) } else { r }).unwrap_or(t);
+        if let Some(r) = after_word(t, "unsafe").and_then(|r| after_word(r, "trait")) {
+            let n = r.split(|c: char| !(c.is_alphanumeric() || c == '_')).next().unwrap_or("");
+            if !n.is_empty() {
+                unsafe_traits.push(n);
+            }
+        }
+    }
+    for it in items {
+        if !matches!(it.kind, ItemKind::Normal | ItemKind::ImplHeader) {
+            continue;
+        }
+        let (t, skipped) = after_attrs(src.get(it.start..it.end).unwrap_or(""));
+        let Some(mut r) = after_word(t, "impl") else { continue };
+        // (the impl's own generics: `impl<T: Send> Send for W<T>`)
+        if r.starts_with('<') {
+            let mut depth = 0;
+            let mut end = r.len();
+            for (k, c) in r.char_indices() {
+                match c {
+                    '<' => depth += 1,
+                    '>' if k > 0 && r.as_bytes()[k - 1] == b'-' => {}
+                    '>' => {
+                        depth -= 1;
+                        if depth == 0 {
+                            end = k + 1;
+                            break;
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            r = r[end..].trim_start();
+        }
+        // (the header without comments, in single spaces: `impl Send // ..\nfor S` is the same header)
+        let head = strip_comments(r.split('{').next().unwrap_or("")).split_whitespace().collect::<Vec<_>>().join(" ");
+        let Some(k) = head.find(" for ") else { continue };
+        let path = head[..k].trim();
+        let last = path.split('<').next().unwrap_or("").rsplit("::").next().unwrap_or("").trim();
+        if unsafe_traits.contains(&last) {
+            return Err(format!("{}:1: the trait `{last}` requires an `unsafe impl` declaration (E0200)", it.line + skipped));
+        }
+    }
+    Ok(())
+}
+
 /// 関数 (インスタンスも) id の本体
 fn fn_ast(a: &Analysis, body: u32) -> R<ItemFn> {
     let ii = a.prog.item_of[body as usize].ok_or("internal: no item")?;
@@ -1804,11 +1981,14 @@ fn fn_ast(a: &Analysis, body: u32) -> R<ItemFn> {
         let mut encl = a.encl.lock().unwrap();
         if !encl.contains_key(&ii) {
             let f = parse_fn(&a.src, it)?.ok_or_else(|| format!("`{}` has no body", a.prog.names[body as usize]))?;
-            encl.insert(ii, crate::ast_closure::closures_of(&f.block));
+            let u = crate::ast_closure::closures_in_unsafe(&f.block);
+            encl.insert(ii, crate::ast_closure::closures_of(&f.block).into_iter().zip(u).collect());
         }
         let cs = encl.get(&ii).unwrap();
-        let c = cs.get(cd.k as usize).ok_or("internal: closure not found")?;
-        return Ok(synth_closure(c));
+        let (c, in_unsafe) = cs.get(cd.k as usize).ok_or("internal: closure not found")?;
+        // (a closure written in `unsafe { }` or in an `unsafe fn` may do what its surroundings may)
+        let in_unsafe = *in_unsafe || a.prog.sigs.get(cd.parent as usize).is_some_and(|s| s.is_unsafe);
+        return Ok(synth_closure(c, in_unsafe));
     }
     let f = parse_fn(&a.src, it)?.ok_or_else(|| format!("`{}` has no body", a.prog.names[body as usize]))?;
     Ok(f)

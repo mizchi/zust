@@ -1180,6 +1180,7 @@ run-pass	closures/closure-with-fixed-size-array-param.rs
 run-pass	closures/closure_no_cap_coerce_many_unsafe_1.rs
 check-pass	closures/closure_promotion.rs
 check-pass	closures/closure_requires_expectation.rs
+compile-fail	closures/coerce-unsafe-closure-to-unsafe-fn-ptr.rs
 compile-fail	closures/correct-args-on-call-suggestion.rs
 build-pass	closures/deeply-nested_closures.rs
 run-pass	closures/destructure-newtype-closure.rs
@@ -2122,6 +2123,7 @@ compile-fail	error-codes/E0131.rs
 compile-fail	error-codes/E0133.rs
 compile-fail	error-codes/E0161.rs
 compile-fail	error-codes/E0164.rs
+compile-fail	error-codes/E0200.rs
 compile-fail	error-codes/E0201.rs
 compile-fail	error-codes/E0207.rs
 compile-fail	error-codes/E0214.rs
@@ -5801,6 +5803,7 @@ compile-fail	stability-attribute/stability-in-private-module.rs
 compile-fail	static/duplicated-fields-issue-124464.rs
 compile-fail	static/duplicated-fields-issue-125842.rs
 compile-fail	static/extern-static-normalization-failure-issue-148161.rs
+compile-fail	static/global-variable-promotion-error-7364.rs
 run-pass	static/issue-1660.rs
 build-pass	static/issue-34194.rs
 compile-fail	static/missing-type.rs
@@ -6521,6 +6524,7 @@ run-pass	traits/region-pointer-simple.rs
 compile-fail	traits/resolve-impl-before-constrain-check.rs
 compile-fail	traits/safety-fn-body.rs
 run-pass	traits/safety-ok.rs
+compile-fail	traits/safety-trait-impl.rs
 check-pass	traits/self-not-send-in-default-method-8171.rs
 compile-fail	traits/send-trait-objects-basic.rs
 compile-fail	traits/similarly_named_trait.rs
