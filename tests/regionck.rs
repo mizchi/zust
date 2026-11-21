@@ -993,3 +993,11 @@ fn closure_stores_its_parameter_in_a_capture() {
     assert!(d.len() == 1 && d[0].1.contains("does not live long enough"), "{d:?}");
     assert_eq!(check("fn extend<'a>(x: &mut (&'a str,), y: &'a str) {\n    let mut closure = |input| x.0 = input;\n    closure(y);\n}\nfn main() {}\n"), vec![]);
 }
+
+/// A destructuring `let` of `&f()` extends the temporary to its block: a binding into it returned is E0515
+#[test]
+fn destructuring_let_of_a_temporary() {
+    let d = check("fn id<T>(x: T) -> T {\n    x\n}\nstruct Foo(isize);\nfn foo<'a>() -> &'a isize {\n    let &Foo(ref x) = &id(Foo(3));\n    x\n}\nfn main() {}\n");
+    assert!(d.len() == 1 && d[0].0 == 7 && d[0].1.contains("E0515"), "{d:?}");
+    assert_eq!(check("fn id<T>(x: T) -> T {\n    x\n}\nstruct Foo(isize);\nfn main() {\n    let &Foo(ref x) = &id(Foo(3));\n    let _ = *x;\n}\n"), vec![]);
+}

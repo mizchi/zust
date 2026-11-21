@@ -738,6 +738,7 @@ compile-fail	borrowck/borrowck-block-uninit.rs
 run-pass	borrowck/borrowck-borrow-from-expr-block.rs
 compile-fail	borrowck/borrowck-borrow-from-owned-ptr.rs
 compile-fail	borrowck/borrowck-borrow-from-stack-variable.rs
+compile-fail	borrowck/borrowck-borrow-from-temporary.rs
 compile-fail	borrowck/borrowck-borrow-immut-deref-of-box-as-mut.rs
 compile-fail	borrowck/borrowck-borrow-mut-base-ptr-in-aliasable-loc.rs
 run-pass	borrowck/borrowck-borrow-of-mut-base-ptr-safe.rs

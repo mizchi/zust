@@ -380,6 +380,14 @@ fn compile_once(prog: &Program, insts: &Mutex<Insts>, id: u32, f: &ItemFn, line_
     } else {
         cx.body(f, &sig)
     };
+    // (the struct types' implied relations, for the next functions: taken when the check began)
+    if cx.rg.imp_taken {
+        let ic = std::mem::take(&mut cx.rg.imp_cache);
+        let mut g = insts.lock().unwrap();
+        if g.imp_cache.len() < ic.len() {
+            g.imp_cache = ic;
+        }
+    }
     r?;
     cx.bk_check()?;
     let rerun = cx.rg.rerun && !force_rg;
@@ -1443,7 +1451,13 @@ impl Cx<'_> {
                     // (destructuring reads the parts the pattern binds, not the whole value)
                     // (a `let`'s temporary bound by `ref` lives as long as the block: not one of the statement)
                     self.bk.let_scrut = true;
+                    // (`let &Foo(ref x) = &f();`: the temporary lives as long as the block)
+                    let ext1 = self.bk.extended.len();
+                    if self.bk_on() {
+                        borrowck::direct_ref(init, &mut self.bk.extended);
+                    }
                     let sc = self.bk_scrutinee(init, ann, &[pat]);
+                    self.bk.extended.truncate(ext1);
                     self.bk.let_scrut = false;
                     let Some(place) = sc? else {
                         diverged = true;

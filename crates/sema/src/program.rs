@@ -390,6 +390,9 @@ pub struct Insts {
     /// A closure's region signature, by its fn id, from the bound it is passed to or its annotations, and the regions
     /// of the function it is in that its captures hold (typeck's regionck)
     pub closure_rg: HashMap<u32, Box<CloRg>>,
+    /// The region check's implied relations of struct types, by position (typeck's Rg::imp_cache): kept between
+    /// the functions of a build
+    pub imp_cache: HashMap<(u32, u32, bool), Option<Vec<(u32, u32)>>>,
 }
 
 /// Insts::closure_rg (codes: see typeck's regionck)
@@ -413,6 +416,7 @@ impl Insts {
             map: HashMap::default(),
             pending: vec![],
             closure_rg: HashMap::default(),
+            imp_cache: HashMap::default(),
         }
     }
 

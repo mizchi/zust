@@ -1499,7 +1499,7 @@ impl Cx<'_> {
         let sig0 = self.prog.sigs[id as usize].clone();
         // (a callee that requires 'static (`fn f<T: 'static>`, `&'static T`): checked from its arguments on
         // (`f(&g())`: the temporary))
-        if !self.rg.on && self.rg.eligible && self.inline_depth == 0 && (sig0.regions.as_deref().is_some_and(Self::needs_static) || sig0.params.iter().any(|&p| Self::static_object(p))) {
+        if !self.rg.on && self.rg.eligible && self.inline_depth == 0 && (sig0.regions.as_deref().is_some_and(Self::callee_needs_static) || sig0.params.iter().any(|&p| Self::static_object(p))) {
             self.rg_late_on();
         }
         let skip = recv.is_some() as usize;
@@ -1844,7 +1844,7 @@ impl Cx<'_> {
             }
         }
         // (a callee that requires 'static (`fn f<T: 'static>`, `&'static T`): from here on, checked)
-        if !self.rg.on && self.rg.eligible && self.inline_depth == 0 && self.prog.sigs[id as usize].regions.as_deref().is_some_and(Self::needs_static) {
+        if !self.rg.on && self.rg.eligible && self.inline_depth == 0 && self.prog.sigs[id as usize].regions.as_deref().is_some_and(Self::callee_needs_static) {
             self.rg_late_on();
         }
         let sol_rg = if self.rg_on() { Some(sol0.clone()) } else { None };

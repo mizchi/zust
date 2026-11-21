@@ -148,6 +148,13 @@ pub struct Rg {
     pub owned_borrows: Vec<(usize, u32)>,
     /// A closure's body: the regions of its captures of the function's locals (from outside)
     pub cap_regions: Vec<u32>,
+    /// What imp finds of a struct's type below its own regions (its type arguments' and fields' relations), as
+    /// positions in its tree (u32::MAX: 'static), by (struct, depth, wf_no_fields); None: not by positions alone
+    pub imp_cache: HashMap<(u32, u32, bool), Option<Vec<(u32, u32)>>>,
+    /// The relations imp_rel makes, while imp computes entries of imp_cache
+    pub imp_rec: Vec<Vec<(u32, u32)>>,
+    /// imp_cache was taken from Insts (rg_begin), to be put back
+    pub imp_taken: bool,
     /// The call being made is of a closure made where nothing was expected (by its definition): the regions of its
     /// signature are one for all its calls (clo_shared)
     pub shared_clo: Option<(u32, Option<usize>)>,
@@ -1171,6 +1178,9 @@ impl Rg {
 
     /// x outlives y: known (implied bounds), or required (wf)
     fn imp_rel(&mut self, x: u32, y: u32) {
+        for r in self.imp_rec.iter_mut() {
+            r.push((x, y));
+        }
         match self.wf_sp {
             Some(sp) => self.edge(x, y, sp),
             None => self.known.push((x, y)),
@@ -1203,6 +1213,20 @@ impl Rg {
                     }
                 }
                 *k += c;
+                // (what follows depends on the struct's type and the depth alone: computed once, by positions)
+                let key = (sid, depth, self.wf_no_fields);
+                if let Some(Some(pairs)) = self.imp_cache.get(&key) {
+                    let pairs = pairs.clone();
+                    for (a, b) in pairs {
+                        let m = |i: u32| if i == u32::MAX { STATIC } else { me[i as usize] };
+                        self.imp_rel(m(a), m(b));
+                    }
+                    return;
+                }
+                let record = !self.imp_cache.contains_key(&key);
+                if record {
+                    self.imp_rec.push(vec![]);
+                }
                 // (its type arguments are well formed: `Option<&'s &'l ()>` implies 'l: 's)
                 if depth < 4 && !is_closure(prog, sid) {
                     if let Some((_, args)) = self.split_adt(prog, sid, &me) {
@@ -1244,6 +1268,12 @@ impl Rg {
                             }
                         }
                     }
+                }
+                if record {
+                    let rec = self.imp_rec.pop().unwrap_or_default();
+                    let pos = |v: u32| if v == STATIC { Some(u32::MAX) } else { me.iter().position(|&x| x == v).map(|p| p as u32) };
+                    let pairs: Option<Vec<(u32, u32)>> = rec.iter().map(|&(x, y)| Some((pos(x)?, pos(y)?))).collect();
+                    self.imp_cache.insert(key, pairs);
                 }
             }
             Ty::Dyn(_) => *k += 1,
@@ -1370,6 +1400,10 @@ impl Cx<'_> {
     /// return type. Only a function with at least two regions in its signature (or a named one) is checked
     pub(crate) fn rg_begin(&mut self, regions: Option<&RSigSyn>, params: &[(Loc, Ty)], self_elides: bool, force: bool) {
         let prog = self.prog;
+        if !self.rg.imp_taken {
+            self.rg.imp_cache = std::mem::take(&mut self.insts.lock().unwrap().imp_cache);
+            self.rg.imp_taken = true;
+        }
         let rs = regions;
         let codes = |i: usize| rs.map(|r| r.slots.get(i).map(|c| c.as_slice()).unwrap_or(&[]));
         let mut rg = std::mem::take(&mut self.rg);
@@ -1735,6 +1769,13 @@ impl Cx<'_> {
     }
 
     /// The signature requires a region of it to be 'static
+    /// Of a callee: what it requires of its arguments writes 'static (not its result's 'static, which requires
+    /// nothing of the caller)
+    pub(crate) fn callee_needs_static(r: &RSigSyn) -> bool {
+        let n = r.slots.len().saturating_sub(1);
+        r.slots[..n].iter().flatten().any(|&c| c == R_STATIC) || r.ty_outlives.iter().any(|x| x.1 == R_STATIC) || r.outlives.iter().any(|x| x.1 == R_STATIC) || r.self_slots.contains(&R_STATIC)
+    }
+
     pub(crate) fn needs_static(r: &RSigSyn) -> bool {
         r.slots.iter().flatten().any(|&c| c == R_STATIC) || r.ty_outlives.iter().any(|x| x.1 == R_STATIC) || r.outlives.iter().any(|x| x.1 == R_STATIC) || r.self_slots.contains(&R_STATIC)
     }

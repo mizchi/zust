@@ -917,12 +917,13 @@ impl Bk {
                     } else {
                         let kept = self.region_held(st, *l);
                         // (a loan of a local already gone that it holds through the regions of its type, and it is
-                        // used: `let d = { let p = ..; f.m(&p) };`)
+                        // used: `let d = { let p = ..; f.m(&p) };`. Not what the value computed flows from: an
+                        // over-approximation)
                         if let (Some(errs), true) = (errs.as_deref_mut(), loans_on && is_live(&live_at[i], *l)) {
-                            if let Some(&ln) = kept.iter().find(|ln| st.dead.binary_search(ln).is_ok()) {
+                            if let Some(&ln) = kept.iter().find(|ln| st.dead.binary_search(ln).is_ok() && self.loans[**ln as usize].place.owned_len() == self.loans[**ln as usize].place.proj.len()) {
                                 let lo = &self.loans[ln as usize];
                                 let name = path_str(&self.locals, &BPlace { local: lo.place.local, proj: vec![] });
-                                errs.push(BkError { sp: lo.sp, msg: format!("`{name}` does not live long enough (dropped while still borrowed)") });
+                                errs.push(BkError { sp: lo.sp, msg: if name == TEMP { "temporary value dropped while borrowed (E0716)".to_string() } else { format!("`{name}` does not live long enough (dropped while still borrowed)") } });
                             }
                         }
                         ls.extend(kept);
