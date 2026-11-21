@@ -682,8 +682,19 @@ impl Session2 {
             // (an `#![allow(..)]` of the lint undoes a deny, as the levels apply in order; forbid cannot be undone)
             // (the last of them wins: `#![allow(x)]` then `#![deny(x)]` denies)
             let lint = |n: &str| {
-                let last = |a: &str| c.rfind(&format!("#![{a}({n}"));
-                levels.contains(&n) && (c.contains(&format!("#![forbid({n}")) || last("allow") < last("deny").max(last("forbid")))
+                // (the last `#![a(..)]` naming n anywhere in its list: `#![allow(dead_code, n)]`)
+                let last = |a: &str| {
+                    let open = format!("#![{a}(");
+                    c.match_indices(&open)
+                        .filter(|(i, _)| {
+                            let rest = &c[i + open.len()..];
+                            let list = &rest[..rest.find(')').unwrap_or(rest.len())];
+                            list.split(',').any(|x| x.trim() == n)
+                        })
+                        .map(|(i, _)| i)
+                        .last()
+                };
+                levels.contains(&n) && (last("forbid").is_some() || last("allow") < last("deny"))
             };
             deny_trivial_casts = (lint("trivial_casts"), lint("trivial_numeric_casts"));
             deny_unused_alloc = lint("unused_allocation")

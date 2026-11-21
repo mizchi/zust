@@ -294,20 +294,7 @@ pub fn compile(prog: &Program, insts: &Mutex<Insts>, id: u32, f: &ItemFn, line_b
         addr_taken: taken,
         caps,
         root,
-        generic_args: f
-            .sig
-            .params
-            .iter()
-            .filter_map(|(p, t)| {
-                let crate::parse::Pat::Ident(_, _, n, None) = p else { return None };
-                let t = match t {
-                    crate::parse::Ty::Ref(_, _, i) => &**i,
-                    t => t,
-                };
-                let crate::parse::Ty::Path(None, tp) = t else { return None };
-                (tp.segs.len() == 1 && tp.segs[0].args.is_empty() && prog.sigs.get(root as usize).is_some_and(|rs| rs.generics.iter().any(|g| g.0 == tp.segs[0].name))).then(|| (n.clone(), tp.segs[0].name.clone()))
-            })
-            .collect(),
+        generic_args: generic_args_of(prog, &f.sig.params, root),
         closure_ix,
         explicit_traits: HashMap::default(),
         explicit_trait: None,
@@ -1992,4 +1979,22 @@ impl Cx<'_> {
         let g = self.b.symbol(&sym_name('v', i));
         self.b.ins().symbol_value(PTR, g)
     }
+}
+
+/// The parameters of a fn declared as one of its type parameters (`x: T` / `x: &T`), root being the fn whose generics
+/// they name: (name, type parameter)
+pub(crate) fn generic_args_of(prog: &Program, params: &[(crate::parse::Pat, crate::parse::Ty)], root: u32) -> Vec<(String, String)> {
+    let Some(rs) = prog.sigs.get(root as usize).filter(|rs| !rs.generics.is_empty()) else { return vec![] };
+    params
+        .iter()
+        .filter_map(|(p, t)| {
+            let crate::parse::Pat::Ident(_, _, n, None) = p else { return None };
+            let t = match t {
+                crate::parse::Ty::Ref(_, _, i) => &**i,
+                t => t,
+            };
+            let crate::parse::Ty::Path(None, tp) = t else { return None };
+            (tp.segs.len() == 1 && tp.segs[0].args.is_empty() && rs.generics.iter().any(|g| g.0 == tp.segs[0].name)).then(|| (n.clone(), tp.segs[0].name.clone()))
+        })
+        .collect()
 }
