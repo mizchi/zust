@@ -348,7 +348,8 @@ pub fn sig_regions(sig: &PSig, outer: Option<&RImplSyn>, outer_tparams: &[&str])
     if !s.any && outlives.is_empty() && ty_outlives.is_empty() {
         return None;
     }
-    Some(Box::new(RSigSyn { lts: s.lts, slots, outlives, ty_outlives }))
+    let outer = outer.map_or(0, |o| o.lts.len().min(u8::MAX as usize) as u8);
+    Some(Box::new(RSigSyn { lts: s.lts, slots, outlives, ty_outlives, outer }))
 }
 
 /// The regions of a struct / enum definition with fields of types tys (all variants' in order)

@@ -1519,6 +1519,21 @@ impl Program {
                         if ds.has_self && ms.has_self && kind(&p, ds.params[0]) != kind(&p, ms.params[0]) {
                             return Err(format!("{line}method `{m}` has an incompatible type for trait `{tr}` (E0053)"));
                         }
+                        // (a parameter's reference the trait leaves to the caller (elided, or the method's own lifetime)
+                        // that the impl ties to one of its header's (`fn next(&'a mut self)`): less general, E0308)
+                        if let Some(mr) = ms.regions.as_deref().filter(|r| r.outer > 0) {
+                            let dr = ds.regions.as_deref();
+                            for (i, (&dt, &mt)) in ds.params.iter().zip(&ms.params).enumerate() {
+                                if !(matches!(dt, Ty::Ref(..)) && matches!(mt, Ty::Ref(..))) {
+                                    continue;
+                                }
+                                let dc = dr.and_then(|r| r.slots.get(i)).and_then(|s| s.first().copied()).unwrap_or(crate::types::R_ELIDED);
+                                let free = dc == crate::types::R_ELIDED || dr.is_some_and(|r| dc >= r.outer && (dc as usize) < r.lts.len());
+                                if free && mr.slots.get(i).and_then(|s| s.first()).is_some_and(|&c| c < mr.outer) {
+                                    return Err(format!("{line}method not compatible with trait: lifetime mismatch in `{m}` of `{tr}` (E0308)"));
+                                }
+                            }
+                        }
                     }
                 }
                 if !p.sigs[d as usize].has_body && !found {

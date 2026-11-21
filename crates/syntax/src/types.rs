@@ -310,6 +310,8 @@ pub struct RSigSyn {
     pub outlives: Vec<(u8, u8)>,
     /// Declared `T: 'a` (type parameter, code)
     pub ty_outlives: Vec<(String, u8)>,
+    /// How many of lts are the impl's or trait's (the rest are the fn's own)
+    pub outer: u8,
 }
 
 /// The regions of a struct / enum definition

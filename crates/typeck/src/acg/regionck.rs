@@ -123,6 +123,8 @@ pub struct Rg {
     pub cap_locs: Vec<Loc>,
     pub env_r: u32,
     pub externals: Vec<u32>,
+    /// The elements' tree of the array or slice a slice pattern matches
+    pub pat_elem: Option<(Ty, RT)>,
 }
 
 /// Closure region codes (Rg::closure): a placeholder (a region the expected signature binds), one from outside
@@ -370,6 +372,8 @@ fn place_text(e: &Expr) -> Option<String> {
         Expr::Path(None, p) if p.segs.len() == 1 => Some(p.segs[0].name.clone()),
         Expr::Field(x, f, _) => Some(format!("{}.{f}", place_text(x)?)),
         Expr::Index(x, _, _) => place_text(x),
+        // (`*b` of a Box the function owns)
+        Expr::Unary(op, x, _) if op == "*" => Some(format!("*{}", place_text(x)?)),
         _ => None,
     }
 }
@@ -1052,7 +1056,8 @@ impl Cx<'_> {
         let ret = rg.instantiate(prog, gret, codes(params.len()), &lts, &targs, &mut el);
         rg.ret = ret.filter(|_| !bad);
         let nuniv = rg.univ.len();
-        rg.on = force || nuniv >= 2 || (nuniv >= 1 && (rs.is_some() || has_dyn(prog, ret_t, 0)));
+        // (or a signature that writes 'static: `fn f(x: isize) -> &'static [isize]`)
+        rg.on = force || nuniv >= 2 || (nuniv >= 1 && (rs.is_some() || has_dyn(prog, ret_t, 0))) || rs.is_some_and(Self::needs_static);
         if rg.on {
             for (i, &(loc, t)) in params.iter().enumerate() {
                 if let Some(tr) = trees[i].clone() {
@@ -1945,6 +1950,22 @@ impl Cx<'_> {
             }
         }
         self.rg.last_call = Some((self.rg.depth + 1, t, tree));
+    }
+
+    /// The element type and tree of an array or a slice matched (through references, as default binding modes)
+    pub(crate) fn rg_slice_elem(&mut self, p: (Ty, RT)) -> Option<(Ty, RT)> {
+        let (mut t, mut tr) = p;
+        loop {
+            match t {
+                Ty::Ref(_, i) => {
+                    self.rg.pat_ref = Some(*tr.first()?);
+                    tr.remove(0);
+                    t = *i;
+                }
+                Ty::Array(e, _) | Ty::Slice(e) => return Some((*e, tr)),
+                _ => return None,
+            }
+        }
     }
 
     /// The pattern matches through references (default binding modes) down to a value of type t

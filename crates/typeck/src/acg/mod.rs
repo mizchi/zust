@@ -1194,7 +1194,9 @@ impl Cx<'_> {
                     _ => false,
                 };
                 // (any other receiver with elided regions in the result: not followed)
-                let other_self = f.sig.recv.is_some() && !self_elides;
+                // (when the result has elided regions: `fn set(self, s: &str) -> Flag<'a>` names its own)
+                let ret_elides = sig.regions.as_deref().and_then(|r| r.slots.last()).is_none_or(|s| s.iter().any(|&c| c == crate::types::R_ELIDED || c == crate::types::R_ELIDED_ADT));
+                let other_self = f.sig.recv.is_some() && !self_elides && ret_elides;
                 self.rg_begin(sig.regions.as_deref(), &ps, self_elides, false);
                 if other_self {
                     self.rg.ret = None;
@@ -1554,10 +1556,13 @@ impl Cx<'_> {
                         self.bind(name, ty, v);
                         continue;
                     };
-                    // (`let f1 = f;` with f a generic fn and no annotation: f1 is f, instantiated at each call)
+                    // (`let f1 = f;` with f a generic fn and no annotation: f1 is f, instantiated at each call; so is a fn
+                    // with lifetime parameters, whose calls the region check sees then)
                     if let (None, Some(id)) = (ann_ty, self.fn_item(init)) {
                         let tf = matches!(init, Expr::Path(_, ip) if ip.segs.last().is_some_and(|s| !s.args.is_empty()));
-                        if self.prog.sigs[id as usize].is_generic() && !tf && !matches!(pat, Pat::Ident(_, true, ..)) {
+                        let s = &self.prog.sigs[id as usize];
+                        let lts = self.rg.on && s.regions.as_deref().is_some_and(|r| !r.lts.is_empty());
+                        if (s.is_generic() || lts) && !tf && !matches!(pat, Pat::Ident(_, true, ..)) {
                             let a: &Expr = self.keep_expr(init.clone());
                             self.fn_aliases.retain(|x| x.0 != name);
                             self.fn_aliases.push((name.clone(), a));

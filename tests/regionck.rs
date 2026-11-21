@@ -476,3 +476,30 @@ fn main() {
 "#;
     assert_eq!(check(ok), vec![]);
 }
+
+/// A signature that writes 'static is checked; a by-value `self` keeps the result's named regions; a borrow of a
+/// Box's content is a loan; a local bound to a fn with lifetime parameters is that fn at its calls; an impl method
+/// ties no region the trait leaves free to its header's lifetimes
+#[test]
+fn statics_selfs_boxes_aliases_impls() {
+    let d = check("fn function(x: isize) -> &'static [isize] {\n    &[x]\n}\nfn main() {}\n");
+    assert!(d.len() == 1 && d[0].0 == 2 && d[0].1.contains("E0515"), "{d:?}");
+    one_error("struct Flag<'a> { desc: &'a str }\nimpl<'a> Flag<'a> {\n    fn set(self, s: &str) -> Flag<'a> {\n        Flag { desc: s }\n    }\n}\nfn main() {}\n", 4);
+    let d = check("struct B { i: isize }\nstruct A<'r> { p: &'r B }\nfn make_a(p: &B) -> A { A { p } }\nfn mk<'a>() -> A<'a> {\n    let b: Box<B> = Box::new(B { i: 1 });\n    let bb: &B = &*b;\n    make_a(bb)\n}\nfn main() {}\n");
+    assert!(d.len() == 1 && d[0].0 == 7 && d[0].1.contains("E0515"), "{d:?}");
+    one_error("use std::cell::Cell;\nfn check<'a, 'b>(_x: Cell<&'a ()>, _y: Cell<&'b ()>) where 'a: 'b {}\nfn test<'a, 'b>(x: Cell<&'a ()>, y: Cell<&'b ()>) {\n    let f = check;\n    f(x, y);\n}\nfn main() {}\n", 5);
+    let d = check("struct R<'a, T>(T, &'a ());\nimpl<'a, T: 'a> Iterator for R<'a, T> {\n    type Item = &'a mut T;\n    fn next(&'a mut self) -> Option<Self::Item> { None }\n}\nfn main() {}\n");
+    assert!(d.len() == 1 && d[0].0 == 4 && d[0].1.contains("E0308"), "{d:?}");
+    let ok = r#"
+struct R<'a, T>(T, &'a T);
+impl<'a, T: 'a> Iterator for R<'a, T> {
+    type Item = &'a T;
+    fn next(&mut self) -> Option<Self::Item> { Some(self.1) }
+}
+struct Flag<'a> { desc: &'a str }
+impl<'a> Flag<'a> { fn set(self, s: &'a str) -> Flag<'a> { Flag { desc: s } } }
+fn s() -> &'static str { "a" }
+fn main() {}
+"#;
+    assert_eq!(check(ok), vec![]);
+}

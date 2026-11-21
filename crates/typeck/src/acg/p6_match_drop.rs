@@ -940,7 +940,10 @@ impl Cx<'_> {
                 // (moving out of an array by a pattern is allowed: not tracked)
                 let saved = self.bk.pat_path.take();
                 let rs = self.rg.pat.take();
+                // (the elements' tree: the array's or the slice's, through the references matched)
+                self.rg.pat_elem = rs.clone().and_then(|p| self.rg_slice_elem(p));
                 let r = self.pat_bind_slice(pat, p, mode);
+                self.rg.pat_elem = None;
                 self.bk.pat_path = saved;
                 self.rg.pat = rs;
                 r
@@ -956,8 +959,10 @@ impl Cx<'_> {
                 let mode = rmode.map(BindMode::Ref).unwrap_or(mode);
                 let (pre, rest, post) = slice_parts(pat);
                 for (q, sub) in self.slice_elems(base, len, elem, &pre, &post) {
+                    self.rg.pat = self.rg.pat_elem.clone();
                     self.pat_bind(sub, q, mode)?;
                 }
+                self.rg.pat = None;
                 // `rest @ ..`: 残りの部分スライス (`&[T]`)
                 if let Some(Pat::Ident(_, _, rname, _)) = rest {
                     let (es, _) = self.prog.size_align(elem);

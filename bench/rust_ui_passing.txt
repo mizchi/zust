@@ -1691,6 +1691,7 @@ check-pass	consts/issue-13837.rs
 run-pass	consts/issue-13902.rs
 run-pass	consts/issue-17074.rs
 run-pass	consts/issue-17718-borrow-interior.rs
+compile-fail	consts/issue-17718-constants-not-static.rs
 check-pass	consts/issue-17718-references.rs
 run-pass	consts/issue-17756.rs
 compile-fail	consts/issue-19244-1.rs
@@ -3266,6 +3267,7 @@ compile-fail	lifetimes/lifetime-errors/ex3-both-anon-regions-using-fn-items.rs
 compile-fail	lifetimes/lifetime-errors/ex3-both-anon-regions-using-impl-items.rs
 compile-fail	lifetimes/lifetime-errors/ex3-both-anon-regions-using-trait-objects.rs
 compile-fail	lifetimes/lifetime-errors/ex3-both-anon-regions.rs
+compile-fail	lifetimes/lifetime-errors/iterator-next-extra-named-lifetime.rs
 compile-fail	lifetimes/lifetime-errors/liveness-assign-imm-local-notes.rs
 check-pass	lifetimes/lifetime-in-unit-struct-pattern.rs
 check-pass	lifetimes/lifetime-inference-miss-15735.rs
@@ -4174,6 +4176,7 @@ compile-fail	nll/issue-58053.rs
 check-pass	nll/issue-61311-normalize.rs
 check-pass	nll/issue-61320-normalize.rs
 compile-fail	nll/issue-67007-escaping-data.rs
+compile-fail	nll/issue-95272.rs
 check-pass	nll/lint-no-err.rs
 compile-fail	nll/lub-if.rs
 compile-fail	nll/lub-match.rs
@@ -5335,6 +5338,7 @@ compile-fail	regions/regions-free-region-ordering-callee-4.rs
 compile-fail	regions/regions-free-region-ordering-callee.rs
 compile-fail	regions/regions-free-region-ordering-caller1.rs
 run-pass	regions/regions-free-region-outlives-static-outlives-free-region.rs
+compile-fail	regions/regions-glb-free-free.rs
 check-pass	regions/regions-implied-bounds-projection-gap-2.rs
 check-pass	regions/regions-implied-bounds-projection-gap-3.rs
 check-pass	regions/regions-implied-bounds-projection-gap-4.rs
@@ -5386,6 +5390,7 @@ run-pass	regions/regions-relate-bound-regions-on-closures-to-inference-variables
 compile-fail	regions/regions-ret-borrowed-1.rs
 compile-fail	regions/regions-ret-borrowed.rs
 run-pass	regions/regions-return-interior-of-option.rs
+compile-fail	regions/regions-return-stack-allocated-vec.rs
 run-pass	regions/regions-scope-chain-example.rs
 run-pass	regions/regions-self-impls.rs
 run-pass	regions/regions-self-in-enums.rs
@@ -5396,6 +5401,7 @@ run-pass	regions/regions-static-closure.rs
 check-pass	regions/regions-trait-1.rs
 run-pass	regions/regions-trait-object-1.rs
 compile-fail	regions/regions-trait-object-subtyping.rs
+compile-fail	regions/regions-trait-variance.rs
 compile-fail	regions/regions-undeclared.rs
 run-pass	regions/regions-variance-contravariant-use-contravariant.rs
 run-pass	regions/regions-variance-covariant-use-covariant.rs
