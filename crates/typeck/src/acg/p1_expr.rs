@@ -1569,6 +1569,16 @@ impl Cx<'_> {
             };
             self.dyn_fn_sig(s).ok().map(|(ps, r)| (ps, Some(r)))
         });
+        // (a closure whose kind nothing expected decides, returning a mutable borrow of what it captures by
+        // reference: it is `FnMut`, and the borrow is through the `&mut self` of a call)
+        let own_type = matches!(expected, Some(Ty::Struct(sid)) if prog.base_of(sid) == cd.sid);
+        if hint.is_none() && (expected.is_none() || own_type) && bound.is_none() && !to_prelude && self.user_code && self.bk.level >= 2 && regionck::enabled() {
+            let Expr::Closure(mv, _, _, body, _) = c else { unreachable!() };
+            let by_ref: Vec<&str> = cd.captures.iter().enumerate().filter(|(i, _)| !*mv && !cd.moved.get(*i).copied().unwrap_or(false)).map(|(_, n)| n.as_str()).collect();
+            if let Some(sp) = regionck::fnmut_escape(body, &by_ref) {
+                return Err(self.at(sp, "captured variable cannot escape `FnMut` closure body (a mutable borrow of what the closure captures is returned)".to_string()));
+            }
+        }
         let mut caps = vec![];
         for (i, n) in cd.captures.iter().enumerate() {
             let Some((loc, t)) = self.lookup(n) else {

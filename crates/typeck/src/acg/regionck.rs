@@ -414,6 +414,61 @@ fn epos(e: &Expr) -> Sp {
     }
 }
 
+/// A closure body's value (its tail, the branches of an `if` / `match` there, what a `return` returns) that is a
+/// mutable borrow of a place rooted at one of caps: its position
+pub fn fnmut_escape(body: &Expr, caps: &[&str]) -> Option<Sp> {
+    if caps.is_empty() {
+        return None;
+    }
+    fn root(e: &Expr) -> Option<&str> {
+        match strip(e) {
+            Expr::Path(None, p) if p.segs.len() == 1 && p.segs[0].args.is_empty() => Some(p.segs[0].name.as_str()),
+            Expr::Field(x, _, _) | Expr::Index(x, _, _) => root(x),
+            Expr::Unary(op, x, _) if op == "*" => root(x),
+            _ => None,
+        }
+    }
+    fn value(e: &Expr, caps: &[&str], depth: u32) -> Option<Sp> {
+        if depth > 16 {
+            return None;
+        }
+        match strip(e) {
+            Expr::Ref(true, x) if root(x).is_some_and(|r| caps.contains(&r)) => Some(super::borrowck::pos(e)).filter(|s| s.line != 0).or_else(|| Some(epos(x))),
+            Expr::Block(_, _, b) => {
+                for st in &b.stmts {
+                    if let Some(sp) = returns(st, caps, depth + 1) {
+                        return Some(sp);
+                    }
+                }
+                match b.stmts.last() {
+                    Some(Stmt::Expr(t, false)) => value(t, caps, depth + 1),
+                    _ => None,
+                }
+            }
+            Expr::If(_, b, els) => {
+                let t = match b.stmts.last() {
+                    Some(Stmt::Expr(t, false)) => value(t, caps, depth + 1),
+                    _ => None,
+                };
+                t.or_else(|| els.as_deref().and_then(|e| value(e, caps, depth + 1)))
+            }
+            Expr::Match(_, arms) => arms.iter().find_map(|a| value(&a.body, caps, depth + 1)),
+            _ => None,
+        }
+    }
+    // (a `return` among a block's statements: only as a statement of its own, not inside nested closures)
+    fn returns(st: &Stmt, caps: &[&str], depth: u32) -> Option<Sp> {
+        match st {
+            Stmt::Expr(e, _) => match strip(e) {
+                Expr::Return(Some(v)) => value(v, caps, depth + 1),
+                _ => None,
+            },
+            _ => None,
+        }
+    }
+    value(body, caps, 0)
+}
+
 /// e has no value: it panics, returns, breaks or continues (as written)
 fn diverges(e: &Expr) -> bool {
     match strip(e) {

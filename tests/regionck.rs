@@ -739,3 +739,15 @@ fn reborrows_into_universal_regions_live_to_the_end() {
     // (a reborrow for a shorter region ends where it is last used)
     assert_eq!(check("fn f<'a>(v: &'a mut Vec<u8>) {\n    let mut keep: Vec<&u8> = Vec::new();\n    keep.push(&v[0]);\n    keep.clear();\n    v.push(1);\n}\nfn main() {}\n"), vec![]);
 }
+
+/// A closure that returns a mutable borrow of what it captures by reference is `FnMut`: the borrow cannot escape
+/// the call
+#[test]
+fn fnmut_closure_returning_a_captured_borrow() {
+    let d = check("fn main() {\n    let mut x = 0;\n    let mut f = || &mut x;\n    let _ = f();\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 3 && d[0].1.contains("cannot escape `FnMut`"), "{d:?}");
+    let d = check("fn main() {\n    let mut v: Vec<()> = Vec::new();\n    || {\n        &mut v\n    };\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 4, "{d:?}");
+    // (a shared borrow, a closure passed where `FnOnce` is expected, one that returns a parameter)
+    assert_eq!(check("fn once<R>(f: impl FnOnce() -> R) -> R {\n    f()\n}\nfn main() {\n    let x = 0;\n    let f = || &x;\n    let _ = f();\n    let mut y = 0;\n    let _ = once(|| &mut y);\n    let g = |z: &mut u8| &mut *z;\n    let mut w = 0;\n    let _ = g(&mut w);\n}\n"), vec![]);
+}
