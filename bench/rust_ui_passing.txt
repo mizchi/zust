@@ -6611,6 +6611,7 @@ check-pass	traits/issue-92292.rs
 run-pass	traits/issue-9394-inherited-calls.rs
 check-pass	traits/issue-96665.rs
 run-pass	traits/item-inside-macro.rs
+compile-fail	traits/lifetime-mismatch-trait-impl-16048.rs
 check-pass	traits/make-sure-to-filter-projections-by-def-id.rs
 compile-fail	traits/map-types.rs
 run-pass	traits/method-on-deeply-nested-struct-perf.rs

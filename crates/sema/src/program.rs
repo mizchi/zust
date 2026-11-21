@@ -1535,11 +1535,18 @@ impl Program {
                         // (E0195: the method's own lifetimes that bounds make early-bound, and how many bounds each has,
                         // are the trait's: `fn bar<'a, 'b: 'a>` in the trait, `fn bar<'a, 'b>` in the impl)
                         {
-                            let early = |r: Option<&crate::types::RSigSyn>| -> Vec<usize> {
+                            // (a lifetime a type parameter's bound names (`T: Test<'p>`) is early-bound too)
+                            let early = |r: Option<&crate::types::RSigSyn>, g: &[(String, Vec<String>)]| -> Vec<usize> {
                                 let Some(r) = r else { return vec![] };
-                                (r.outer as usize..r.lts.len()).map(|i| r.outlives.iter().filter(|&&(a, b)| a as usize == i || b as usize == i).count()).filter(|&n| n > 0).collect()
+                                let in_bounds = |l: &str| {
+                                    g.iter().flat_map(|x| x.1.iter()).any(|b| b.match_indices(l).any(|(k, _)| !b[k + l.len()..].starts_with(|c: char| c.is_alphanumeric() || c == '_')))
+                                };
+                                (r.outer as usize..r.lts.len())
+                                    .map(|i| r.outlives.iter().filter(|&&(a, b)| a as usize == i || b as usize == i).count() + in_bounds(&r.lts[i]) as usize)
+                                    .filter(|&n| n > 0)
+                                    .collect()
                             };
-                            let (de, me) = (early(ds.regions.as_deref()), early(ms.regions.as_deref()));
+                            let (de, me) = (early(ds.regions.as_deref(), &ds.generics), early(ms.regions.as_deref(), &ms.generics));
                             if de != me {
                                 return Err(format!("{line}lifetime parameters or bounds on method `{m}` do not match the trait declaration (E0195)"));
                             }

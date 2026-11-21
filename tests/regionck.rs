@@ -901,3 +901,11 @@ fn hidden_lifetimes_in_items() {
     assert!(d.len() == 1 && d[0].0 == 3 && d[0].1.contains("E0107"), "{d:?}");
     assert_eq!(check("struct Foo<'a> {\n    b: &'a [bool],\n}\nstatic F: Foo = Foo { b: &[true] };\nstruct W<'a> {\n    f: Foo<'a>,\n    g: fn(Foo) -> u8,\n}\nfn h(_f: Foo) {}\nfn main() {\n    let _ = &F;\n}\n"), vec![]);
 }
+
+/// E0195: a lifetime a type parameter's bound names is early-bound, in the trait as in the impl
+#[test]
+fn early_bound_through_type_parameter_bounds() {
+    let d = check("trait Test<'p> {}\ntrait NoLifetime {\n    fn get<'p, T: Test<'p>>(&self) -> u8;\n}\nstruct Foo;\nimpl NoLifetime for Foo {\n    fn get<'p, T>(&self) -> u8 {\n        0\n    }\n}\nfn main() {}\n");
+    assert!(d.len() == 1 && d[0].0 == 7 && d[0].1.contains("E0195"), "{d:?}");
+    assert_eq!(check("trait Test<'p> {}\ntrait NoLifetime {\n    fn get<'p, T: Test<'p>>(&self) -> u8;\n}\nstruct Foo;\nimpl NoLifetime for Foo {\n    fn get<'p, T: Test<'p>>(&self) -> u8 {\n        0\n    }\n}\nfn main() {}\n"), vec![]);
+}
