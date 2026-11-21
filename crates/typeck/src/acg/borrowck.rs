@@ -2096,9 +2096,17 @@ impl Cx<'_> {
                     out.push(Src::Loan(ln));
                 }
             }
-            Expr::MethodCall(..) => {
+            Expr::MethodCall(_, name, _, args, _) => {
                 if let Some(&ln) = self.bk.loan_of.get(&(e as *const Expr as usize)) {
                     out.push(Src::Loan(ln));
+                }
+                // (a closure passed to an iterator adapter, which its result holds: `lines.filter_map(|l| .. self.x ..)`
+                // returned. Not `find(|a| ..)`, whose result does not)
+                let holds = matches!(name.as_str(), "map" | "filter" | "filter_map" | "flat_map" | "take_while" | "skip_while" | "map_while" | "inspect" | "scan");
+                for a in args.iter().filter(|_| holds) {
+                    if let Some(ls) = self.bk.cap_loans.get(&(super::strip_paren(a) as *const Expr as usize)) {
+                        out.extend(ls.iter().map(|&l| Src::Loan(l)));
+                    }
                 }
             }
             Expr::Path(..) => {

@@ -939,3 +939,11 @@ fn fn_pointer_calls_and_fn_item_values() {
     assert!(d.len() == 1 && d[0].0 == 4 && d[0].1.contains("does not live long enough"), "{d:?}");
     assert_eq!(check("fn take<'a>(f: fn(&'a i32), x: &'a i32) {\n    f(x);\n}\nfn id<T>(t: T) -> T {\n    t\n}\nfn g<'a>(a: &'a ()) {\n    let x = id::<&'a ()>;\n    let _: &'a () = x(a);\n}\nfn main() {}\n"), vec![]);
 }
+
+/// A returned iterator adapter holds the closure passed to it, and with it what the closure borrows (E0373)
+#[test]
+fn returned_adapter_holds_its_closure() {
+    let d = check("struct L {\n    line: u32,\n}\nimpl L {\n    fn lines<'a>(self, s: &'a str) -> impl Iterator<Item = &'a str> {\n        s.split('\\n').enumerate().filter_map(move |(i, l)| if self.line as usize <= i { Some(l) } else { None })\n    }\n    fn lines2<'a>(self, s: &'a str) -> impl Iterator<Item = &'a str> {\n        s.split('\\n').enumerate().filter_map(|(i, l)| if self.line as usize <= i { Some(l) } else { None })\n    }\n}\nfn main() {}\n");
+    assert!(d.len() == 1 && d[0].0 == 9 && d[0].1.contains("E0373"), "{d:?}");
+    assert_eq!(check("struct B {\n    v: Vec<u32>,\n}\nimpl B {\n    fn find(&mut self, id: u32) -> Option<&mut u32> {\n        self.v.iter_mut().find(|a| **a == id)\n    }\n}\nfn main() {}\n"), vec![]);
+}

@@ -2764,6 +2764,7 @@ compile-fail	impl-trait/captured-invalid-lifetime.rs
 check-pass	impl-trait/closure-calling-parent-fn.rs
 run-pass	impl-trait/closure-in-impl-trait-arg.rs
 check-pass	impl-trait/closure-in-type.rs
+compile-fail	impl-trait/confusing-lifetime-error-issue-79033.rs
 build-pass	impl-trait/defined-by-trait-resolution.rs
 compile-fail	impl-trait/diagnostics/fully-qualified-path-impl-trait.rs
 check-pass	impl-trait/different_where_bounds.rs
@@ -3349,6 +3350,7 @@ check-pass	lifetimes/tuple-struct-vs-struct-with-fields-borrowck-10902.rs
 check-pass	lifetimes/unconstrained-lifetime-in-impl-bound.rs
 compile-fail	lifetimes/undeclared-lifetime-used-in-debug-macro-issue-70152.rs
 compile-fail	lifetimes/unit-struct-as-rvalue.rs
+compile-fail	lifetimes/unnamed-closure-doesnt-life-long-enough-issue-67634.rs
 check-pass	lifetimes/unsafe-transmute-in-find-11740.rs
 compile-fail	lifetimes/unusual-rib-combinations.rs
 build-pass	limits/limit-huge-struct-derive-debug.rs
