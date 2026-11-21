@@ -964,7 +964,12 @@ impl Cx<'_> {
                         }
                     }
                 }
-                // (`Box::new(s) as Box<dyn Tr>` / `as Rc<dyn Tr>`: the unsizing coercion too)
+                // (`Box::new(s) as Box<dyn Tr>` / `as Rc<dyn Tr>`: the unsizing coercion too; `Box::new(()) as _` where a
+                // `Box<dyn Send>` is expected)
+                let to = match (to, expected) {
+                    (Ty::Param(h), Some(e @ Ty::Box(Ty::Dyn(_)))) if h == crate::program::HOLE => e,
+                    _ => to,
+                };
                 let unsizing = match to {
                     Ty::Box(Ty::Dyn(_) | Ty::Slice(_)) => true,
                     Ty::Struct(sid) => self.prog.structs[sid as usize].args.iter().any(|a| matches!(a, Ty::Dyn(_))),

@@ -362,6 +362,7 @@ check-pass	async-await/async-trait-fn.rs
 compile-fail	async-await/async-unsafe-fn-call-in-safe.rs
 compile-fail	async-await/await-keyword/await-macro-rustfix.rs
 compile-fail	async-await/await-keyword/incorrect-syntax-suggestions.rs
+check-pass	async-await/await-unsize.rs
 check-pass	async-await/bound-normalization.rs
 compile-fail	async-await/clone-suggestion.rs
 compile-fail	async-await/coroutine-desc.rs
