@@ -255,7 +255,9 @@ proc macro and its ABI come into play. After it come js-sys (23 k lines) and web
 
 ## 4. What it would take
 
-An order that removes one layer at a time. `cratebench/ui/run.py` measures each step.
+An order that removes one layer at a time. `cratebench/ui/run.py` measures steps 1 to 4 and 6: whether the crates
+build. Step 5 needs a build for wasm32 and a check of the ABI (the `wasm-bindgen` CLI on the module), which it does
+not do.
 
 1. The leaves. `run.py` ranks the failing crates by how many crates are above them:
    - dioxus: serde_core 43, memchr 42, futures-core 38, unicode-ident 37, futures-sink 33, and futures-io,

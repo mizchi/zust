@@ -133,7 +133,7 @@ for building programs that already pass rustc quickly, not a replacement for rus
   - `impl Drop for S` (also generic impls), `drop(x)`
   - Drops in reverse declaration order at the end of a scope. This covers scopes exited by return / `?` / break / continue, expression statements that discard a value, `let _ = e`, and old values overwritten by assignment
   - Tracks moves: reading as a value, `self` taken by value, `move` captures, patterns that bind by value (`if let Some(b) = o`), `for x in arr`
-  - Temporaries (`make().area()`, `&Box::new(..)`, match scrutinees) are dropped at the end of the statement. Temporaries in a let initializer are dropped at the end of the let, unless the initializer extends them by its syntax (`&temp()`, also inside a tuple, array, cast, struct literal or block tail) or the bound value's type holds a reference; then they last to the end of the block. Those of an `if let` scrutinee are dropped at the end of the `if let` (Rust 2024)
+  - Temporaries (`make().area()`, `&Box::new(..)`, match scrutinees) are dropped at the end of the statement. Temporaries in a let initializer are dropped at the end of the let, unless the initializer extends them by its syntax (`&temp()`, also inside a tuple, array, cast, struct literal or block tail) or the bound value's type holds a reference; then they last to the end of the block. Those of an `if let` scrutinee are dropped before its `else` block, as in Rust 2024, and after its then block (unless the value may hold a reference, when they last to the end of the statement)
   - A move of only a field (`self.top = n.next`) fills the original field with 0 and drops the owner
 - Types:
   - Integers (`i8`–`i64`, `u8`–`u64`, `isize`, `usize`), `bool`, `char`, `()`, `!`

@@ -29,7 +29,8 @@ zurgo run
   ワークスペースのビルドはまだそれを受け付けない。
 - `--bin <名前>`、`-j <n>`、`--time` (zustc の時間)、`--no-cache`。
 - `-v`: zurgo が zustc に渡すワークスペースを、`zustc build` の形で出す。`target/zust/<profile>/zurgo-ws.txt` にも
-  書くので、`zustc build` で同じビルドを繰り返せる。
+  書くので、`zustc build` で同じビルドを繰り返せる。クレート名と実行ファイルの名前が違う bin (パッケージの lib と
+  bin はパッケージの名前を共有するので、bin のクレートは `<名前>-bin` になる) には `exe=<名前>` が付く。
 - `--filter-platform <triple>` (metadata)。
 - `--locked`、`--offline`、`--frozen` は受け付ける。zurgo はいつも Cargo.lock をそのまま使い、何もダウンロードしない。
 
@@ -40,10 +41,16 @@ zurgo run
 
 - **マニフェスト。**
   - `[package]`。ワークスペースのメンバーが受け継ぐフィールド (`version.workspace = true` など) も。
-  - `[lib]` と `[[bin]]`、それに Cargo が自分で見つけるターゲット: `src/lib.rs`、`src/main.rs`、`src/bin/*.rs`、
-    `src/bin/*/main.rs`。
+  - `[lib]` と `[[bin]]`、それに Cargo が自分で見つけるターゲット: `src/lib.rs` (`autolib = false` でなければ)、
+    `src/main.rs`、`src/bin/*.rs`、`src/bin/*/main.rs` (`autobins = false` でなければ)。
+  - bin の `required-features`: それが無効な間は、既定のビルドはその bin を入れず、名前で求めると何が足りないかを
+    言う。`default-run` は `zurgo run` の bin を選ぶ。
   - 3 種類の依存。`[target.'cfg(..)']` の下のものも。名前の変更、`optional`、`default-features`、`features` も。
-  - `[features]` と `[workspace]` (`*` のグロブを使えるメンバー、`exclude`、`[workspace.dependencies]`)。
+  - `[features]` と `[workspace]`:
+    - `*` のグロブを使えるメンバー。ディレクトリごとに 1 つ;
+    - ワークスペースのディレクトリの中の path の依存。cargo と同じく、並べなくてもメンバーになる;
+    - `exclude`、`default-members`、`[workspace.dependencies]`;
+    - メンバー自身の Cargo.toml を渡したとき (`--manifest-path`) も、メンバーが受け継ぐフィールド。
   - TOML のパーサは zurgo 自身のもの (`crates/zurgo/src/toml.rs`)。
 - **Cargo.lock** (バージョン 1 から 4)。zurgo にはまだリゾルバがないので、版は lock のもの。lock がなければ、
   `cargo generate-lockfile` を実行するよう言う。

@@ -252,7 +252,8 @@ wasm-bindgen-shared (670 行) には 5 つの書き換えが要った。wasm-bin
 
 ## 4. 何が要るか
 
-層を 1 つずつ取り除く順序。それぞれの段階は `cratebench/ui/run.py` で測れる。
+層を 1 つずつ取り除く順序。`cratebench/ui/run.py` で測れるのは 1 から 4 と 6、つまりクレートがビルドできるか
+である。5 には wasm32 向けのビルドと ABI の確認 (モジュールに `wasm-bindgen` CLI をかける) が要り、それはしない。
 
 1. 葉。`run.py` は失敗するクレートを、その上にあるクレートの数で並べる:
    - dioxus: serde_core 43、memchr 42、futures-core 38、unicode-ident 37、futures-sink 33、futures-io、

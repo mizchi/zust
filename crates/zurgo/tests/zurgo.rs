@@ -27,6 +27,31 @@ fn tdir(name: &str) -> PathBuf {
     Path::new(env!("CARGO_TARGET_TMPDIR")).join("zurgo").join(name)
 }
 
+/// A directory of this invocation alone (two runs of the tests at once do not share it), removed when dropped
+struct Scratch(PathBuf);
+
+impl Scratch {
+    fn new(name: &str) -> Scratch {
+        let t = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();
+        let d = Path::new(env!("CARGO_TARGET_TMPDIR")).join("zurgo").join(format!("{name}-{}-{t}", std::process::id()));
+        std::fs::create_dir_all(&d).unwrap();
+        Scratch(d)
+    }
+    fn write(&self, files: &[(&str, &str)]) {
+        for (p, text) in files {
+            let f = self.0.join(p);
+            std::fs::create_dir_all(f.parent().unwrap()).unwrap();
+            std::fs::write(f, text).unwrap();
+        }
+    }
+}
+
+impl Drop for Scratch {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.0);
+    }
+}
+
 fn run(cmd: &mut Command) -> (bool, String, String) {
     let o = cmd.output().unwrap_or_else(|e| panic!("{cmd:?}: {e}"));
     (o.status.success(), String::from_utf8_lossy(&o.stdout).into_owned(), String::from_utf8_lossy(&o.stderr).into_owned())
@@ -148,14 +173,14 @@ fn metadata_matches_cargo() {
 
 #[test]
 fn errors() {
-    let d = tdir("errors");
-    let _ = std::fs::remove_dir_all(&d);
-    std::fs::create_dir_all(d.join("p/src")).unwrap();
-    std::fs::create_dir_all(d.join("pm/src")).unwrap();
-    std::fs::write(d.join("p/Cargo.toml"), "[package]\nname = \"p\"\nversion = \"0.1.0\"\nedition = \"2021\"\n[workspace]\n[dependencies]\npm = { path = \"../pm\" }\n").unwrap();
-    std::fs::write(d.join("p/src/main.rs"), "fn main() {}\n").unwrap();
-    std::fs::write(d.join("pm/Cargo.toml"), "[package]\nname = \"pm\"\nversion = \"0.1.0\"\nedition = \"2021\"\n[lib]\nproc-macro = true\n").unwrap();
-    std::fs::write(d.join("pm/src/lib.rs"), "").unwrap();
+    let sc = Scratch::new("errors");
+    let d = sc.0.clone();
+    sc.write(&[
+        ("p/Cargo.toml", "[package]\nname = \"p\"\nversion = \"0.1.0\"\nedition = \"2021\"\n[workspace]\n[dependencies]\npm = { path = \"../pm\" }\n"),
+        ("p/src/main.rs", "fn main() {}\n"),
+        ("pm/Cargo.toml", "[package]\nname = \"pm\"\nversion = \"0.1.0\"\nedition = \"2021\"\n[lib]\nproc-macro = true\n"),
+        ("pm/src/lib.rs", ""),
+    ]);
     let m = d.join("p/Cargo.toml");
     // (no Cargo.lock: zurgo has no resolver yet)
     let (ok, _, err) = zurgo(&["build"], &m, &d.join("t"));
@@ -168,4 +193,70 @@ fn errors() {
     // (but metadata works)
     let (ok, out, err) = zurgo(&["metadata"], &m, &d.join("t"));
     assert!(ok && out.contains("\"proc-macro\""), "{err}");
+}
+
+/// Workspace rules, against cargo: members from a glob and an explicit entry (one each), a path dependency inside the
+/// workspace that becomes a member without being listed, `default-members`, fields inherited by a member read
+/// through `--manifest-path`, `autolib = false`, `required-features`, `default-run`, a lib and a bin of one name, and a
+/// feature another member turns on that must not reach a build of `app` alone
+#[test]
+fn workspace_rules_match_cargo() {
+    let sc = Scratch::new("ws-rules");
+    sc.write(&[
+        (
+            "Cargo.toml",
+            "[workspace]\nmembers = [\"crates/*\", \"crates/util\"]\ndefault-members = [\"crates/app\"]\nresolver = \"2\"\n[workspace.package]\nversion = \"0.3.0\"\nedition = \"2021\"\n",
+        ),
+        (
+            "crates/app/Cargo.toml",
+            "[package]\nname = \"app\"\nversion.workspace = true\nedition.workspace = true\ndefault-run = \"app\"\n[dependencies]\nutil = { path = \"../util\" }\nhelper = { path = \"../../helper\" }\n[features]\nextra = []\n[[bin]]\nname = \"app\"\npath = \"src/main.rs\"\n[[bin]]\nname = \"extra\"\npath = \"src/extra.rs\"\nrequired-features = [\"extra\"]\n",
+        ),
+        ("crates/app/src/lib.rs", "pub fn hi() -> String {\n    format!(\"{} {}\", util::word(), helper::n())\n}\n"),
+        ("crates/app/src/main.rs", "fn main() {\n    println!(\"app: {}\", app::hi());\n}\n"),
+        ("crates/app/src/extra.rs", "fn main() {\n    println!(\"extra: {}\", app::hi());\n}\n"),
+        ("crates/util/Cargo.toml", "[package]\nname = \"util\"\nversion = \"0.1.0\"\nedition = \"2021\"\n[features]\nloud = []\n"),
+        ("crates/util/src/lib.rs", "pub fn word() -> &'static str {\n    if cfg!(feature = \"loud\") { \"LOUD\" } else { \"quiet\" }\n}\n"),
+        ("crates/tools/Cargo.toml", "[package]\nname = \"tools\"\nversion = \"0.1.0\"\nedition = \"2021\"\nautolib = false\n[dependencies]\nutil = { path = \"../util\", features = [\"loud\"] }\n"),
+        ("crates/tools/src/lib.rs", "compile_error!(\"autolib = false: not a library\");\n"),
+        ("crates/tools/src/main.rs", "fn main() {\n    println!(\"tools: {}\", util::word());\n}\n"),
+        ("helper/Cargo.toml", "[package]\nname = \"helper\"\nversion = \"0.1.0\"\nedition = \"2021\"\n"),
+        ("helper/src/lib.rs", "pub fn n() -> i32 {\n    7\n}\n"),
+    ]);
+    let root = sc.0.join("Cargo.toml");
+    let t = sc.0.join("target");
+    let (ok, _, err) = cargo(&["generate-lockfile", "--offline"], &root, &t);
+    assert!(ok, "{err}");
+    // (metadata from the root and from a member: the graph and the member lists are cargo's)
+    for m in [root.clone(), sc.0.join("crates/app/Cargo.toml")] {
+        let a = ["metadata", "--format-version", "1", "--offline"];
+        let (ok, want, err) = cargo(&a, &m, &t);
+        assert!(ok, "cargo metadata: {err}");
+        let (ok, got, err) = zurgo(&a, &m, &t);
+        assert!(ok, "zurgo metadata: {err}");
+        assert_eq!(graph(&got), graph(&want), "{}", m.display());
+        let members = |j: &str, k: &str| -> Vec<String> {
+            let v: serde_json::Value = serde_json::from_str(j).unwrap();
+            let mut x: Vec<String> = v[k].as_array().unwrap().iter().map(|i| i.as_str().unwrap().to_string()).collect();
+            x.sort();
+            x
+        };
+        for k in ["workspace_members", "workspace_default_members"] {
+            assert_eq!(members(&got, k), members(&want, k), "{k} of {}", m.display());
+        }
+    }
+    // (app alone: `default-run`, and util without the feature that tools turns on)
+    let app = sc.0.join("crates/app/Cargo.toml");
+    let (ok, out, err) = zurgo(&["run"], &app, &t);
+    assert!(ok, "{err}");
+    assert_eq!(out, "app: quiet 7\n");
+    // (`required-features`: left out of a default build, an error when asked for by name, built when on)
+    let (ok, _, err) = zurgo(&["build", "--bin", "extra"], &app, &t);
+    assert!(!ok && err.contains("required-features"), "{err}");
+    let (ok, out, err) = zurgo(&["run", "--bin", "extra", "--features", "extra"], &app, &t);
+    assert!(ok, "{err}");
+    assert_eq!(out, "extra: quiet 7\n");
+    // (tools: `autolib = false` builds no library from its src/lib.rs, and its util is loud)
+    let (ok, out, err) = zurgo(&["run"], &sc.0.join("crates/tools/Cargo.toml"), &t);
+    assert!(ok, "{err}");
+    assert_eq!(out, "tools: LOUD\n");
 }

@@ -90,6 +90,12 @@ fn main() {
             eprintln!("    Finished `{}` profile in {:.2}s (zustc)", if o.release { "release" } else { "dev" }, t0.elapsed().as_secs_f64());
         }
         "run" | "r" => {
+            // (without `--bin`: the package's `default-run`, as cargo chooses)
+            if o.bins.is_empty() {
+                if let Some(d) = g.root.and_then(|r| g.pkgs[r].m.default_run.clone()) {
+                    o.bins.push(d);
+                }
+            }
             let built = compile::build(&g, &o).unwrap_or_else(|e| die(&e));
             let exe = match built.bins.as_slice() {
                 [] => die("no binary to run"),
@@ -104,7 +110,16 @@ fn main() {
             let t = filter.as_deref().map(|t| Target::by_triple(t).unwrap_or_else(|| die(&format!("unknown platform `{t}`"))));
             let r = resolve::features(
                 &g,
-                &Opts { mode: Mode::Unified, dev: true, target: t.as_ref(), host: &host, features: o.features.clone(), all_features: o.all_features, no_default: o.no_default },
+                &Opts {
+                    mode: Mode::Unified,
+                    dev: true,
+                    target: t.as_ref(),
+                    host: &host,
+                    features: o.features.clone(),
+                    all_features: o.all_features,
+                    no_default: o.no_default,
+                    only: None,
+                },
             );
             println!("{}", zurgo::metadata::json(&g, &r, &compile::target_dir(&g), t.as_ref()));
         }

@@ -45,6 +45,8 @@ pub struct Graph {
     /// per package: its locked dependencies, of every kind and platform
     pub edges: Vec<Vec<Edge>>,
     pub members: Vec<usize>,
+    /// `default-members`, or the root package, or every member of a virtual workspace (as cargo chooses them)
+    pub default_members: Vec<usize>,
     pub root: Option<usize>,
     pub ws_dir: PathBuf,
     /// "1", "2" or "3"
@@ -102,24 +104,70 @@ fn members_of(ws: &Workspace) -> Vec<PathBuf> {
     out
 }
 
+/// The members of a workspace, each directory once: the root package (when the root manifest has one), the listed
+/// members, and, transitively, the path dependencies inside the workspace's directory (cargo makes those members
+/// too); none under `exclude`
+fn ws_members(w: &Workspace) -> R<Vec<PathBuf>> {
+    let excluded = |d: &Path| w.exclude.iter().any(|x| d.starts_with(manifest::normalize(&w.dir.join(x))));
+    let mut todo: Vec<PathBuf> = vec![];
+    if w.dir.join("Cargo.toml").is_file() && manifest::read(&w.dir.join("Cargo.toml"))?.contains_key("package") {
+        todo.push(w.dir.clone());
+    }
+    todo.extend(members_of(w));
+    let mut out: Vec<PathBuf> = vec![];
+    let mut i = 0;
+    while i < todo.len() {
+        let d = manifest::normalize(&todo[i]);
+        i += 1;
+        if out.contains(&d) || (d != w.dir && excluded(&d)) {
+            continue;
+        }
+        if let Ok(m) = manifest::load(&d.join("Cargo.toml"), Some(w)) {
+            for dep in m.package.iter().flat_map(|p| p.deps.iter()) {
+                if let Some(pd) = &dep.path {
+                    if pd.starts_with(&w.dir) && pd.join("Cargo.toml").is_file() {
+                        todo.push(pd.clone());
+                    }
+                }
+            }
+        }
+        out.push(d);
+    }
+    Ok(out)
+}
+
+/// A directory as a file URL, percent-encoded as cargo's (the url crate's) path segments are
+fn file_url(dir: &Path) -> String {
+    let mut s = String::from("file://");
+    for b in dir.to_string_lossy().bytes() {
+        if b < 0x20 || b >= 0x7f || b" \"#<>?`{}%".contains(&b) {
+            s.push_str(&format!("%{b:02X}"));
+        } else {
+            s.push(b as char);
+        }
+    }
+    s
+}
+
 fn path_id(dir: &Path, name: &str, version: &str) -> String {
     let last = dir.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
-    if last == name { format!("path+file://{}#{version}", dir.display()) } else { format!("path+file://{}#{name}@{version}", dir.display()) }
+    let url = file_url(dir);
+    if last == name { format!("path+{url}#{version}") } else { format!("path+{url}#{name}@{version}") }
 }
 
 /// Load the workspace of a manifest and the packages its Cargo.lock names
 pub fn load(manifest_path: &Path) -> R<Graph> {
-    let start = manifest::load(manifest_path, None)?;
-    let start_dir = manifest_path.parent().unwrap().to_path_buf();
-    // (the workspace root: this manifest, or a parent's that lists it)
-    let mut ws: Option<Workspace> = start.workspace.clone();
+    let start_dir = manifest::normalize(manifest_path.parent().unwrap());
+    // (the workspace first: this manifest's, or a parent's that has this package as a member; then the package,
+    //  whose fields may be inherited from it)
+    let mut ws: Option<Workspace> = manifest::workspace_of(&manifest::read(manifest_path)?, &start_dir);
     if ws.is_none() {
         let mut d = start_dir.clone();
         while d.pop() {
             let c = d.join("Cargo.toml");
             if c.is_file() {
                 if let Some(w) = manifest::workspace_of(&manifest::read(&c)?, &d) {
-                    if members_of(&w).contains(&start_dir) {
+                    if ws_members(&w)?.contains(&start_dir) {
                         ws = Some(w);
                     }
                     break;
@@ -127,16 +175,17 @@ pub fn load(manifest_path: &Path) -> R<Graph> {
             }
         }
     }
+    let start = manifest::load(manifest_path, ws.as_ref())?;
     let ws_dir = ws.as_ref().map(|w| w.dir.clone()).unwrap_or_else(|| start_dir.clone());
-    let mut member_dirs: Vec<PathBuf> = vec![];
-    if let Some(w) = &ws {
-        if ws_dir.join("Cargo.toml").is_file() && manifest::read(&ws_dir.join("Cargo.toml"))?.contains_key("package") {
-            member_dirs.push(ws_dir.clone());
-        }
-        member_dirs.extend(members_of(w));
-    } else {
-        member_dirs.push(start_dir.clone());
-    }
+    let member_dirs: Vec<PathBuf> = match &ws {
+        Some(w) => ws_members(w)?,
+        None => vec![start_dir.clone()],
+    };
+    let default_dirs: Vec<PathBuf> = match &ws {
+        Some(w) if !w.default_members.is_empty() => w.default_members.iter().map(|m| manifest::normalize(&w.dir.join(m))).collect(),
+        Some(w) if member_dirs.contains(&w.dir) => vec![w.dir.clone()],
+        _ => member_dirs.clone(),
+    };
     let lock_path = ws_dir.join("Cargo.lock");
     if !lock_path.is_file() {
         return Err(format!(
@@ -155,7 +204,7 @@ pub fn load(manifest_path: &Path) -> R<Graph> {
             Some("2021") => "2".into(),
             _ => "1".into(),
         });
-    let mut g = Graph { pkgs: vec![], edges: vec![], members: vec![], root: None, ws_dir: ws_dir.clone(), resolver };
+    let mut g = Graph { pkgs: vec![], edges: vec![], members: vec![], default_members: vec![], root: None, ws_dir: ws_dir.clone(), resolver };
     // (locked package → loaded package)
     let mut of_lock: BTreeMap<usize, usize> = BTreeMap::new();
     // (path packages: the directory of each name and version, found through the members' path dependencies)
@@ -172,6 +221,9 @@ pub fn load(manifest_path: &Path) -> R<Graph> {
         let k = g.pkgs.len();
         g.pkgs.push(Pkg { id: path_id(d, &p.name, &p.version), source: None, checksum: None, m: p, member: true, missing: false });
         g.members.push(k);
+        if default_dirs.contains(d) {
+            g.default_members.push(k);
+        }
         if d == &start_dir {
             g.root = Some(k);
         }
@@ -273,11 +325,8 @@ fn pick(lock: &Lock, ldeps: &[LockDep], d: &Dep) -> Option<usize> {
         v_ok && (d.path.is_some() == p.source.is_none() || d.path.is_none() && d.git.is_none() && p.source.is_none())
     };
     let fit: Vec<&usize> = cands.iter().filter(ok).collect();
-    match (fit.len(), cands.len()) {
-        (1, _) => Some(*fit[0]),
-        (0, 1) => Some(cands[0]),
-        _ => fit.first().map(|x| **x),
-    }
+    // (none fits: the lock is older than the manifest, and the caller says so)
+    fit.first().map(|x| **x)
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -297,6 +346,8 @@ pub struct Opts<'a> {
     pub features: Vec<String>,
     pub all_features: bool,
     pub no_default: bool,
+    /// the members whose features are activated (a build's selection); `None`: every member (metadata)
+    pub only: Option<Vec<usize>>,
 }
 
 /// A package on one side: `(package, built for the host)`
@@ -339,7 +390,7 @@ struct St<'g> {
 
 pub fn features(g: &Graph, o: &Opts) -> Resolved {
     let mut st = St { g, o, nodes: BTreeMap::new(), dep_feats: BTreeMap::new(), weak: BTreeMap::new() };
-    for &m in &g.members {
+    for &m in o.only.as_ref().unwrap_or(&g.members) {
         let n = (m, false);
         st.activate(n);
         let p = &g.pkgs[m].m;
@@ -570,21 +621,21 @@ mod tests {
         };
         // (unified, as cargo's dependency resolver: b's features from every side; the weak `c?/fc` pulls c in;
         //  w is resolved too (platforms are only a filter of what metadata shows))
-        let u = features(&g, &Opts { mode: Mode::Unified, dev: true, target: Some(&host), host: &host, features: vec![], all_features: false, no_default: false });
+        let u = features(&g, &Opts { mode: Mode::Unified, dev: true, target: Some(&host), host: &host, features: vec![], all_features: false, no_default: false, only: None });
         assert_eq!(by(&u, "a", false), Some(vec!["x".to_string()]));
         assert_eq!(by(&u, "b", false), Some(vec!["d".to_string(), "default".to_string(), "fb".to_string()]));
         assert_eq!(by(&u, "c", false), Some(vec!["fc".to_string()]));
         assert_eq!(by(&u, "w", false), Some(vec![]));
         // (split: c is not on (only weakly asked for), and w is not for this platform)
-        let s0 = features(&g, &Opts { mode: Mode::Split, dev: false, target: Some(&host), host: &host, features: vec![], all_features: false, no_default: false });
+        let s0 = features(&g, &Opts { mode: Mode::Split, dev: false, target: Some(&host), host: &host, features: vec![], all_features: false, no_default: false, only: None });
         assert_eq!(by(&s0, "c", false), None);
         assert_eq!(by(&s0, "w", false), None);
         // (split: the target side's b has no default features; the build dependency's b is its own node)
-        let s = features(&g, &Opts { mode: Mode::Split, dev: false, target: Some(&host), host: &host, features: vec![], all_features: false, no_default: false });
+        let s = features(&g, &Opts { mode: Mode::Split, dev: false, target: Some(&host), host: &host, features: vec![], all_features: false, no_default: false, only: None });
         assert_eq!(by(&s, "b", false), Some(vec!["fb".to_string()]));
         assert_eq!(by(&s, "b", true), Some(vec!["d".to_string(), "default".to_string()]));
         // (`a/y` turns c on through its implicit feature, and then the weak `c?/fc` applies)
-        let y = features(&g, &Opts { mode: Mode::Unified, dev: true, target: Some(&host), host: &host, features: vec!["a/y".into()], all_features: false, no_default: false });
+        let y = features(&g, &Opts { mode: Mode::Unified, dev: true, target: Some(&host), host: &host, features: vec!["a/y".into()], all_features: false, no_default: false, only: None });
         assert_eq!(by(&y, "a", false), Some(vec!["c".to_string(), "x".to_string(), "y".to_string()]));
         assert_eq!(by(&y, "c", false), Some(vec!["fc".to_string()]));
         let _ = std::fs::remove_dir_all(&dir);

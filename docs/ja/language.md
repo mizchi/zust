@@ -133,7 +133,7 @@ Rc など) は、zustc が持つ組み込みの prelude (`crates/syntax/src/prel
   - `impl Drop for S`（ジェネリックな impl も）、`drop(x)`
   - スコープの終わりで宣言と逆順に drop する。対象は return / `?` / break / continue で抜けるスコープ、値を捨てる式文、`let _ = e`、代入で上書きされる古い値
   - ムーブを追跡する：値として読む・値で受ける `self`・`move` キャプチャ・値で束縛するパターン（`if let Some(b) = o`）・`for x in arr`
-  - 一時値（`make().area()`、`&Box::new(..)`、match 対象）は文の終わりで drop する。let の初期化式の一時値は let の終わりで drop する。ただし初期化式がその構文で延ばすとき（`&temp()`。タプル・配列・キャスト・struct リテラル・ブロックの末尾の中のものも）と、束縛した値の型が参照を含むときは、ブロックの終わりまで残す。`if let` の match 対象の一時値は `if let` の終わりで drop する（Rust 2024）
+  - 一時値（`make().area()`、`&Box::new(..)`、match 対象）は文の終わりで drop する。let の初期化式の一時値は let の終わりで drop する。ただし初期化式がその構文で延ばすとき（`&temp()`。タプル・配列・キャスト・struct リテラル・ブロックの末尾の中のものも）と、束縛した値の型が参照を含むときは、ブロックの終わりまで残す。`if let` の match 対象の一時値は、Rust 2024 と同じく else のブロックの前で drop し、then のブロックの後でも drop する（その値が参照を含みうるときは文の終わりまで残す）
   - フィールドだけのムーブ（`self.top = n.next`）は、元のフィールドを 0 で埋めて持ち主を drop する
 - 型：
   - 整数（`i8`〜`i64`、`u8`〜`u64`、`isize`、`usize`）、`bool`、`char`、`()`、`!`

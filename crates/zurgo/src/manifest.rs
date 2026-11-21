@@ -56,6 +56,8 @@ pub struct Target {
     pub crate_types: Vec<String>,
     pub path: PathBuf,
     pub edition: String,
+    /// `required-features` (a bin is built only when they are all on)
+    pub required_features: Vec<String>,
 }
 
 impl Target {
@@ -77,6 +79,8 @@ pub struct Package {
     pub deps: Vec<Dep>,
     pub features: BTreeMap<String, Vec<String>>,
     pub resolver: Option<String>,
+    /// `default-run`: the bin `zurgo run` runs when there are several
+    pub default_run: Option<String>,
     pub manifest_path: PathBuf,
     pub dir: PathBuf,
     /// the rest of `[package]` (description, license, authors, rust-version ...), for `CARGO_PKG_*`
@@ -97,6 +101,7 @@ impl Package {
             deps: vec![],
             features: BTreeMap::new(),
             resolver: None,
+            default_run: None,
             manifest_path: PathBuf::new(),
             dir: PathBuf::new(),
             meta: Table::new(),
@@ -135,7 +140,14 @@ impl Package {
                 platform: toml::get_str(d, &["target"]).map(crate::platform::normalize),
             });
         }
-        p.lib = Some(Target { name: name.replace('-', "_"), kind: vec!["lib".into()], crate_types: vec!["lib".into()], path: PathBuf::new(), edition: "2015".into() });
+        p.lib = Some(Target {
+            name: name.replace('-', "_"),
+            kind: vec!["lib".into()],
+            crate_types: vec!["lib".into()],
+            path: PathBuf::new(),
+            edition: "2015".into(),
+            required_features: vec![],
+        });
         p
     }
     pub fn targets(&self) -> impl Iterator<Item = &Target> {
@@ -227,9 +239,14 @@ fn package(t: &Table, p: &Table, dir: &Path, path: &Path, ws: Option<&Workspace>
         _ => Some(dir.join("build.rs")).filter(|b| b.is_file()),
     };
     let auto = |k: &str| p.get(k).and_then(Value::as_bool).unwrap_or(true);
-    // (the library: `[lib]`, or src/lib.rs)
+    // (the library: `[lib]`, or src/lib.rs unless `autolib = false`)
     let lib_t = t.get("lib").and_then(Value::as_table);
-    let lib_path = lib_t.and_then(|l| toml::get_str(l, &["path"])).map(|x| dir.join(x)).or_else(|| Some(dir.join("src/lib.rs")).filter(|x| x.is_file()));
+    let default_lib = || Some(dir.join("src/lib.rs")).filter(|x| x.is_file());
+    let lib_path = match lib_t {
+        Some(l) => toml::get_str(l, &["path"]).map(|x| dir.join(x)).or_else(default_lib),
+        None if auto("autolib") => default_lib(),
+        None => None,
+    };
     let lib = match lib_path {
         Some(lp) => {
             let l = lib_t.cloned().unwrap_or_default();
@@ -242,6 +259,7 @@ fn package(t: &Table, p: &Table, dir: &Path, path: &Path, ws: Option<&Workspace>
                 crate_types,
                 path: lp,
                 edition: toml::get_str(&l, &["edition"]).unwrap_or(&edition).to_string(),
+                required_features: vec![],
             })
         }
         None => None,
@@ -259,7 +277,14 @@ fn package(t: &Table, p: &Table, dir: &Path, path: &Path, ws: Option<&Workspace>
                 .find(|x| x.is_file())
                 .unwrap_or_else(|| dir.join("src/main.rs")),
         };
-        bins.push(Target { name: bname, kind: vec!["bin".into()], crate_types: vec!["bin".into()], path: bpath, edition: toml::get_str(b, &["edition"]).unwrap_or(&edition).to_string() });
+        bins.push(Target {
+            name: bname,
+            kind: vec!["bin".into()],
+            crate_types: vec!["bin".into()],
+            path: bpath,
+            edition: toml::get_str(b, &["edition"]).unwrap_or(&edition).to_string(),
+            required_features: b.get("required-features").or_else(|| b.get("required_features")).map(Value::str_list).unwrap_or_default(),
+        });
     }
     if auto("autobins") {
         let mut found: Vec<(String, PathBuf)> = vec![];
@@ -279,7 +304,7 @@ fn package(t: &Table, p: &Table, dir: &Path, path: &Path, ws: Option<&Workspace>
         }
         for (n, x) in found {
             if !bins.iter().any(|b| b.name == n || b.path == x) {
-                bins.push(Target { name: n, kind: vec!["bin".into()], crate_types: vec!["bin".into()], path: x, edition: edition.clone() });
+                bins.push(Target { name: n, kind: vec!["bin".into()], crate_types: vec!["bin".into()], path: x, edition: edition.clone(), required_features: vec![] });
             }
         }
     }
@@ -310,6 +335,7 @@ fn package(t: &Table, p: &Table, dir: &Path, path: &Path, ws: Option<&Workspace>
         deps,
         features,
         resolver: s("resolver")?,
+        default_run: s("default-run")?,
         manifest_path: path.to_path_buf(),
         dir: dir.to_path_buf(),
         meta,
@@ -360,7 +386,7 @@ fn fill(d: &mut Dep, x: &Table, base: &Path) {
         d.req = v.to_string();
     }
     if let Some(p) = toml::get_str(x, &["path"]) {
-        d.path = Some(base.join(p));
+        d.path = Some(normalize(&base.join(p)));
     }
     if let Some(p) = toml::get_str(x, &["package"]) {
         d.package = p.to_string();
@@ -378,4 +404,21 @@ fn fill(d: &mut Dep, x: &Table, base: &Path) {
         d.default_features = f;
     }
     d.features.extend(x.get("features").map(Value::str_list).unwrap_or_default());
+}
+
+/// A path without `.` and `..` (lexically, as cargo writes the paths of path dependencies)
+pub fn normalize(p: &Path) -> PathBuf {
+    let mut out = PathBuf::new();
+    for c in p.components() {
+        match c {
+            std::path::Component::CurDir => {}
+            std::path::Component::ParentDir => {
+                if !out.pop() {
+                    out.push("..");
+                }
+            }
+            c => out.push(c.as_os_str()),
+        }
+    }
+    out
 }

@@ -30,7 +30,9 @@ Options:
   workspace build does not take it yet.
 - `--bin <name>`, `-j <n>`, `--time` (zustc's timings), `--no-cache`.
 - `-v`: prints the workspace zurgo gives zustc, in the format of `zustc build`. It is also written to
-  `target/zust/<profile>/zurgo-ws.txt`, so `zustc build` can repeat the build.
+  `target/zust/<profile>/zurgo-ws.txt`, so `zustc build` can repeat the build. A bin whose crate name differs from its
+  executable's (a package's lib and bin share the package's name, so the bin's crate is `<name>-bin`) carries
+  `exe=<name>`.
 - `--filter-platform <triple>` (metadata).
 - `--locked`, `--offline`, `--frozen` are accepted. zurgo always uses Cargo.lock as it is and never downloads.
 
@@ -41,11 +43,17 @@ output. A binary is `target/zust/debug/<name>`.
 
 - **Manifests.**
   - `[package]`, with the fields a workspace member inherits (`version.workspace = true` ...).
-  - `[lib]` and `[[bin]]`, and the targets Cargo finds by itself: `src/lib.rs`, `src/main.rs`, `src/bin/*.rs`,
-    `src/bin/*/main.rs`.
+  - `[lib]` and `[[bin]]`, and the targets Cargo finds by itself: `src/lib.rs` (unless `autolib = false`),
+    `src/main.rs`, `src/bin/*.rs`, `src/bin/*/main.rs` (unless `autobins = false`).
+  - A bin's `required-features`: a default build leaves the bin out while they are off, and asking for it by name
+    says which are missing. `default-run` chooses the bin of `zurgo run`.
   - Dependencies of the three kinds, also under `[target.'cfg(..)']`, with renames, `optional`,
     `default-features` and `features`.
-  - `[features]`, and `[workspace]` (members with `*` globs, `exclude`, `[workspace.dependencies]`).
+  - `[features]`, and `[workspace]`:
+    - members with `*` globs, each directory once;
+    - path dependencies inside the workspace's directory, which are members without being listed, as in cargo;
+    - `exclude`, `default-members`, `[workspace.dependencies]`;
+    - a member's inherited fields also when its own Cargo.toml is given (`--manifest-path`).
   - The TOML parser is zurgo's own (`crates/zurgo/src/toml.rs`).
 - **Cargo.lock** (versions 1 to 4). zurgo has no resolver yet, so the versions are the lock's. Without a lock, zurgo
   says to run `cargo generate-lockfile`.

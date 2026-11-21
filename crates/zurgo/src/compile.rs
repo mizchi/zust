@@ -55,16 +55,26 @@ pub fn plan(g: &Graph, o: &BuildOpts) -> R<Vec<CrateSpec>> {
         Some(t) => Target::by_triple(t).ok_or_else(|| format!("unknown target `{t}` (x86_64-unknown-linux-gnu, wasm32-unknown-unknown)"))?,
         None => host.clone(),
     };
-    let r = resolve::features(
-        g,
-        &Opts { mode: Mode::Split, dev: false, target: Some(&target), host: &host, features: o.features.clone(), all_features: o.all_features, no_default: o.no_default },
-    );
-    r.check_sources(g)?;
-    // (the members to build: the package of the manifest, or every member of a virtual workspace)
+    // (the members to build: the package of the manifest, or the default members of a virtual workspace. Their
+    //  features alone are activated: another member's do not leak into this build)
     let selected: Vec<usize> = match g.root {
         Some(r) => vec![r],
-        None => g.members.clone(),
+        None => g.default_members.clone(),
     };
+    let r = resolve::features(
+        g,
+        &Opts {
+            mode: Mode::Split,
+            dev: false,
+            target: Some(&target),
+            host: &host,
+            features: o.features.clone(),
+            all_features: o.all_features,
+            no_default: o.no_default,
+            only: Some(selected.clone()),
+        },
+    );
+    r.check_sources(g)?;
     // (the target side, dependencies first)
     let mut order: Vec<Node> = vec![];
     let mut state: BTreeMap<Node, u8> = BTreeMap::new();
@@ -124,19 +134,42 @@ pub fn plan(g: &Graph, o: &BuildOpts) -> R<Vec<CrateSpec>> {
             exe: None,
         });
     }
+    // (the requested binaries, over all the selected packages)
+    let mut found: Vec<&String> = vec![];
     for &m in &selected {
         let pk = &g.pkgs[m];
         let n = (m, false);
         for b in &pk.m.bins {
-            if !o.bins.is_empty() && !o.bins.contains(&b.name) {
+            let asked = o.bins.contains(&b.name);
+            if !o.bins.is_empty() && !asked {
+                continue;
+            }
+            found.extend(o.bins.iter().filter(|x| **x == b.name));
+            // (`required-features`: a bin is built only when they are all on; asking for it by name says which miss)
+            let on = &r.nodes[&n].features;
+            let missing: Vec<&String> = b.required_features.iter().filter(|f| !on.contains(*f)).collect();
+            if !missing.is_empty() {
+                if asked {
+                    return Err(format!(
+                        "the bin `{}` needs the features `{}` (`required-features`): turn them on with `--features`",
+                        b.name,
+                        missing.iter().map(|f| f.as_str()).collect::<Vec<_>>().join("`, `")
+                    ));
+                }
                 continue;
             }
             let mut deps = deps_of(g, &r, n)?;
             if let Some(l) = &pk.m.lib {
                 deps.insert(0, l.name.clone());
             }
-            // (a crate name of its own when the package's library has the same name)
-            let name = if lib_of.contains_key(&b.name) || crates.iter().any(|c| c.name == b.name) { format!("{}-bin", b.name) } else { b.name.clone() };
+            // (a crate name of its own when another crate has the bin's name: the package's library, or another
+            //  bin's crate name)
+            let mut name = b.name.clone();
+            let mut k = 0;
+            while lib_of.contains_key(&name) || crates.iter().any(|c| c.name == name) {
+                k += 1;
+                name = if k == 1 { format!("{}-bin", b.name) } else { format!("{}-bin{k}", b.name) };
+            }
             crates.push(CrateSpec {
                 name,
                 root: b.path.clone(),
@@ -147,9 +180,10 @@ pub fn plan(g: &Graph, o: &BuildOpts) -> R<Vec<CrateSpec>> {
                 exe: Some(b.name.clone()),
             });
         }
-        if !o.bins.is_empty() && !o.bins.iter().all(|b| pk.m.bins.iter().any(|x| &x.name == b)) {
-            return Err(format!("no bin target named `{}` in `{}`", o.bins.join("`, `"), pk.m.name));
-        }
+    }
+    let missing: Vec<&String> = o.bins.iter().filter(|b| !found.contains(b)).collect();
+    if !missing.is_empty() {
+        return Err(format!("no bin target named `{}`", missing.iter().map(|b| b.as_str()).collect::<Vec<_>>().join("`, `")));
     }
     Ok(crates)
 }
@@ -183,7 +217,11 @@ pub fn ws_text(crates: &[CrateSpec]) -> String {
     let mut s = String::new();
     for c in crates {
         let f = if c.features.is_empty() { String::new() } else { format!(" features={}", c.features.join(",")) };
-        s.push_str(&format!("{} {} {} {}{f}\n", if c.lib { "lib" } else { "bin" }, c.name, c.root.display(), c.deps.join(" ")));
+        let e = match &c.exe {
+            Some(e) if *e != c.name => format!(" exe={e}"),
+            _ => String::new(),
+        };
+        s.push_str(&format!("{} {} {} {}{f}{e}\n", if c.lib { "lib" } else { "bin" }, c.name, c.root.display(), c.deps.join(" ")));
     }
     s
 }

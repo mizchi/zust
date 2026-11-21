@@ -708,7 +708,7 @@ pub struct CrateSpec {
 }
 
 /// ワークスペースの説明ファイルを読む。1 行に 1 クレート: `lib <名前> <根のファイル> [依存...]` / `bin <名前> <根のファイル> [依存...]`
-/// (依存の代わりに `features=a,b` で feature を有効にする)
+/// (依存の代わりに `features=a,b` で feature を有効にする。bin の `exe=NAME` は実行ファイルの名前)
 /// (`#` から後ろはコメント。パスは説明ファイルのディレクトリから)
 pub fn read_workspace(path: &std::path::Path) -> R<Vec<CrateSpec>> {
     let text = std::fs::read_to_string(path).map_err(|e| format!("{}: {e}", path.display()))?;
@@ -731,7 +731,7 @@ pub fn read_workspace(path: &std::path::Path) -> R<Vec<CrateSpec>> {
             root: dir.join(w[2]),
             display: w[2].to_string(),
             lib: w[0] == "lib",
-            deps: w[3..].iter().filter(|s| !s.starts_with("features=")).map(|s| s.to_string()).collect(),
+            deps: w[3..].iter().filter(|s| !s.starts_with("features=") && !s.starts_with("exe=")).map(|s| s.to_string()).collect(),
             features: w[3..]
                 .iter()
                 .filter_map(|s| s.strip_prefix("features="))
@@ -739,7 +739,7 @@ pub fn read_workspace(path: &std::path::Path) -> R<Vec<CrateSpec>> {
                 .filter(|s| !s.is_empty())
                 .map(|s| s.to_string())
                 .collect(),
-            exe: None,
+            exe: w[3..].iter().find_map(|s| s.strip_prefix("exe=")).map(str::to_string),
         });
     }
     Ok(out)

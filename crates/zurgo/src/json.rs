@@ -137,12 +137,21 @@ impl P<'_> {
                                 u32::from_str_radix(h, 16).or_else(|_| p.err("bad \\u escape"))
                             };
                             let mut u = hex(self)?;
-                            // (a surrogate pair)
-                            if (0xd800..0xdc00).contains(&u) && self.lit("\\u") {
+                            // (a surrogate pair: the second half must be a low surrogate)
+                            if (0xd800..0xdc00).contains(&u) {
+                                if !self.lit("\\u") {
+                                    return self.err("a high surrogate without its low half");
+                                }
                                 let lo = hex(self)?;
-                                u = 0x10000 + ((u - 0xd800) << 10) + (lo.wrapping_sub(0xdc00) & 0x3ff);
+                                if !(0xdc00..0xe000).contains(&lo) {
+                                    return self.err("a high surrogate followed by no low surrogate");
+                                }
+                                u = 0x10000 + ((u - 0xd800) << 10) + (lo - 0xdc00);
                             }
-                            char::from_u32(u).unwrap_or('\u{fffd}')
+                            match char::from_u32(u) {
+                                Some(c) => c,
+                                None => return self.err("a lone surrogate"),
+                            }
                         }
                         _ => return self.err("bad escape"),
                     };
@@ -170,6 +179,7 @@ mod tests {
         assert!(!t.contains_key("z"));
         assert_eq!(t["arr"], Value::Array(vec![Value::Integer(1), Value::String("x".into())]));
         assert!(parse("{\"a\":1,}").is_err());
+        assert!(parse(r#""\ud83dabc""#).is_err() && parse(r#""\ud83d\u0041""#).is_err() && parse(r#""\ude00""#).is_err());
         assert!(parse("[1] 2").is_err());
     }
 }

@@ -239,7 +239,7 @@ pub fn json(g: &Graph, r: &Resolved, target_dir: &std::path::Path, filter: Optio
     let out = J::Obj(vec![
         ("packages", J::Arr(ids.iter().map(|&p| package(g, p)).collect())),
         ("workspace_members", members),
-        ("workspace_default_members", J::Arr(g.members.iter().map(|&m| s(&g.pkgs[m].id)).collect())),
+        ("workspace_default_members", J::Arr(g.default_members.iter().map(|&m| s(&g.pkgs[m].id)).collect())),
         (
             "resolve",
             J::Obj(vec![

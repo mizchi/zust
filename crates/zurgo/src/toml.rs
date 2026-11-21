@@ -88,6 +88,8 @@ pub fn parse(text: &str) -> R<Table> {
             if array {
                 p.expect(b']')?;
                 p.expect(b']')?;
+                // (a new element: the tables defined under the previous one may be defined again in it)
+                defined.retain(|d| !d.starts_with(&key));
                 let parent = walk(&mut root, &key[..key.len() - 1], p.line)?;
                 let last = key.last().unwrap().clone();
                 match parent.entry(last).or_insert_with(|| Value::Array(vec![])) {
@@ -517,6 +519,14 @@ x = true
         assert_eq!(t["d"], Value::Datetime("1979-05-27T07:32:00Z".into()));
         assert_eq!(t["e"], Value::Datetime("1979-05-27 07:32:00".into()));
         assert_eq!(t["f"], Value::Float(f64::INFINITY));
+    }
+
+    #[test]
+    fn tables_under_array_elements() {
+        let t = parse("[[items]]\nname = \"a\"\n[items.detail]\nx = 1\n[[items]]\nname = \"b\"\n[items.detail]\nx = 2\n").unwrap();
+        let items = t["items"].as_array().unwrap();
+        assert_eq!(get(items[1].as_table().unwrap(), &["detail", "x"]), Some(&Value::Integer(2)));
+        assert!(parse("[[items]]\n[items.detail]\n[items.detail]\n").is_err());
     }
 
     #[test]

@@ -1,6 +1,6 @@
 """Rust の UI フレームワーク (dioxus / leptos) を、wasm32 向けに依存するクレートの葉から順に zustc でビルドする。
 
-usage: python3 cratebench/ui/run.py [APP ...] [--rustc]   (リポジトリの根で。事前に cargo build --release)
+usage: python3 cratebench/ui/run.py [APP ...] [--rustc]   (リポジトリの根で。事前に cargo build --release --workspace)
   APP: apps/ の名前 (dioxus / leptos)。省くとすべて
   --rustc: 先に cargo build --target wasm32-unknown-unknown で、rustc ならビルドできることを確かめる
 
@@ -15,6 +15,7 @@ wasm に入るクレート (proc-macro を通らずに app から届くもの) �
 """
 import json
 import os
+import re
 import subprocess
 import sys
 import time
@@ -25,6 +26,43 @@ ZUSTC = os.path.join(ROOT, "target/release/zustc")
 ZURGO = os.path.join(ROOT, "target/release/zurgo")
 OUT = os.path.join(ROOT, "out/cratebench-ui")
 TARGET = "wasm32-unknown-unknown"
+
+
+# (`rustc --print cfg --target wasm32-unknown-unknown`)
+WASM_CFG = {("panic", "abort"), ("target_abi", ""), ("target_arch", "wasm32"), ("target_endian", "little"), ("target_env", ""),
+            ("target_family", "wasm"), ("target_os", "unknown"), ("target_pointer_width", "32"), ("target_vendor", "unknown"),
+            ("debug_assertions", None)} | {("target_feature", f) for f in ("bulk-memory", "multivalue", "mutable-globals",
+            "nontrapping-fptoint", "reference-types", "sign-ext")} | {("target_has_atomic", a) for a in ("8", "16", "32", "64", "ptr")}
+
+
+def on_target(platform):
+    """whether a `[target.<platform>]` key applies to wasm32 (a triple, or `cfg(..)`)"""
+    if platform is None:
+        return True
+    if not platform.startswith("cfg("):
+        return platform == TARGET
+    toks = re.findall(r'[A-Za-z_][A-Za-z0-9_]*|"[^"]*"|[(),=]', platform[4:-1])
+    pos = [0]
+
+    def ev():
+        name = toks[pos[0]]
+        pos[0] += 1
+        if name in ("all", "any", "not") and pos[0] < len(toks) and toks[pos[0]] == "(":
+            pos[0] += 1
+            vals = []
+            while toks[pos[0]] != ")":
+                vals.append(ev())
+                if toks[pos[0]] == ",":
+                    pos[0] += 1
+            pos[0] += 1
+            return all(vals) if name == "all" else any(vals) if name == "any" else not vals[0]
+        if pos[0] < len(toks) and toks[pos[0]] == "=":
+            val = toks[pos[0] + 1][1:-1]
+            pos[0] += 2
+            return (name, val) in WASM_CFG
+        return (name, None) in WASM_CFG
+
+    return ev()
 
 
 def metadata(app):
@@ -55,7 +93,9 @@ def graph(meta):
     for i, n in nodes.items():
         p = pk[i]
         t = next((t for t in p["targets"] if set(t["kind"]) & {"lib", "rlib", "proc-macro", "bin"}), p["targets"][0])
-        deps = [d["pkg"] for d in n["deps"] if any(k["kind"] is None for k in d["dep_kinds"])]
+        # (a normal dependency on wasm32: a `kind: null` declaration whose platform applies. metadata lists every
+        #  declaration of an edge it shows, also one for another platform beside a build dependency)
+        deps = [d["pkg"] for d in n["deps"] if any(k["kind"] is None and on_target(k["target"]) for k in d["dep_kinds"])]
         C[i] = {"name": p["name"], "version": p["version"], "edition": t["edition"],
                 "proc_macro": "proc-macro" in t["kind"], "build_rs": any("custom-build" in x["kind"] for x in p["targets"]),
                 "features": n["features"], "deps": deps, "src": t["src_path"], "root": i == root}

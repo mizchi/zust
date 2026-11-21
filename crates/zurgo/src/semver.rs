@@ -148,55 +148,94 @@ impl VersionReq {
     }
 }
 
+/// (as the semver crate's `eval.rs`: components are compared as given, so a partial bound such as `<1.2` covers the
+/// whole `1.2` line, and nothing is incremented (a component may be `u64::MAX`))
 impl Comparator {
     fn matches(&self, v: &Version) -> bool {
-        let lo = Version { major: self.major, minor: self.minor.unwrap_or(0), patch: self.patch.unwrap_or(0), pre: self.pre.clone() };
-        let ver = |a: u64, b: u64, c: u64| Version { major: a, minor: b, patch: c, pre: vec![] };
-        // (the smallest version above the range of a partial version: `1.2` → 1.3.0, `1` → 2.0.0)
-        let after = || match (self.minor, self.patch) {
-            (None, _) => ver(self.major + 1, 0, 0),
-            (Some(m), None) => ver(self.major, m + 1, 0),
-            (Some(m), Some(p)) => ver(self.major, m, p + 1),
-        };
-        let in_range = |hi: Version| *v >= lo && cmp_core(v, &hi) == Ordering::Less;
         match self.op {
-            Op::Exact => match (self.minor, self.patch) {
-                (Some(_), Some(_)) => *v == lo,
-                _ => in_range(after()),
-            },
-            Op::Greater => match (self.minor, self.patch) {
-                (Some(_), Some(_)) => *v > lo,
-                _ => *v >= after(),
-            },
-            Op::GreaterEq => *v >= lo,
-            Op::Less => cmp_core(v, &lo) == Ordering::Less || (*v < lo && !v.pre.is_empty()),
-            Op::LessEq => match (self.minor, self.patch) {
-                (Some(_), Some(_)) => *v <= lo,
-                _ => cmp_core(v, &after()) == Ordering::Less,
-            },
-            Op::Tilde => match self.minor {
-                None => in_range(ver(self.major + 1, 0, 0)),
-                Some(m) => in_range(ver(self.major, m + 1, 0)),
-            },
-            Op::Wildcard => in_range(after()),
-            Op::Caret => {
-                let hi = match (self.major, self.minor, self.patch) {
-                    (0, None, _) => ver(1, 0, 0),
-                    (0, Some(0), None) => ver(0, 1, 0),
-                    (0, Some(0), Some(p)) => ver(0, 0, p + 1),
-                    (0, Some(m), _) => ver(0, m + 1, 0),
-                    (a, _, _) => ver(a + 1, 0, 0),
-                };
-                in_range(hi)
-            }
+            Op::Exact | Op::Wildcard => self.exact(v),
+            Op::Greater => self.greater(v),
+            Op::GreaterEq => self.exact(v) || self.greater(v),
+            Op::Less => self.less(v),
+            Op::LessEq => self.exact(v) || self.less(v),
+            Op::Tilde => self.tilde(v),
+            Op::Caret => self.caret(v),
         }
     }
-}
 
-/// Compare as if `b` were a release: an upper bound `<2.0.0` excludes `2.0.0-alpha` too
-fn cmp_core(a: &Version, b: &Version) -> Ordering {
-    let o = (a.major, a.minor, a.patch).cmp(&(b.major, b.minor, b.patch));
-    if o == Ordering::Equal && b.pre.is_empty() { Ordering::Equal } else { o.then_with(|| cmp_pre(&a.pre, &b.pre)) }
+    fn exact(&self, v: &Version) -> bool {
+        v.major == self.major && self.minor.is_none_or(|m| v.minor == m) && self.patch.is_none_or(|p| v.patch == p) && v.pre == self.pre
+    }
+
+    fn greater(&self, v: &Version) -> bool {
+        if v.major != self.major {
+            return v.major > self.major;
+        }
+        let Some(m) = self.minor else { return false };
+        if v.minor != m {
+            return v.minor > m;
+        }
+        let Some(p) = self.patch else { return false };
+        if v.patch != p {
+            return v.patch > p;
+        }
+        cmp_pre(&v.pre, &self.pre) == Ordering::Greater
+    }
+
+    fn less(&self, v: &Version) -> bool {
+        if v.major != self.major {
+            return v.major < self.major;
+        }
+        let Some(m) = self.minor else { return false };
+        if v.minor != m {
+            return v.minor < m;
+        }
+        let Some(p) = self.patch else { return false };
+        if v.patch != p {
+            return v.patch < p;
+        }
+        cmp_pre(&v.pre, &self.pre) == Ordering::Less
+    }
+
+    fn tilde(&self, v: &Version) -> bool {
+        if v.major != self.major || self.minor.is_some_and(|m| v.minor != m) {
+            return false;
+        }
+        if let Some(p) = self.patch {
+            if v.patch != p {
+                return v.patch > p;
+            }
+        }
+        cmp_pre(&v.pre, &self.pre) != Ordering::Less
+    }
+
+    fn caret(&self, v: &Version) -> bool {
+        if v.major != self.major {
+            return false;
+        }
+        let Some(m) = self.minor else { return true };
+        let Some(p) = self.patch else {
+            return if self.major > 0 { v.minor >= m } else { v.minor == m };
+        };
+        if self.major > 0 {
+            if v.minor != m {
+                return v.minor > m;
+            }
+            if v.patch != p {
+                return v.patch > p;
+            }
+        } else if m > 0 {
+            if v.minor != m {
+                return false;
+            }
+            if v.patch != p {
+                return v.patch > p;
+            }
+        } else if v.minor != m || v.patch != p {
+            return false;
+        }
+        cmp_pre(&v.pre, &self.pre) != Ordering::Less
+    }
 }
 
 #[cfg(test)]
@@ -228,6 +267,9 @@ mod tests {
         assert!(m("<=1.2", "1.2.9") && !m("<=1.2", "1.3.0"));
         assert!(m("1.*", "1.4.0") && !m("1.*", "2.0.0") && m("*", "3.1.4"));
         assert!(m("1.2.*", "1.2.5") && !m("1.2.*", "1.3.0"));
+        // (no component is incremented: the largest major still matches)
+        let max = format!("{}.0.0", u64::MAX);
+        assert!(m(&format!("^{max}"), &max) && m(&format!("~{max}"), &max) && m(&format!("<={}", u64::MAX), &max));
     }
 
     #[test]
@@ -237,6 +279,9 @@ mod tests {
         assert!(!m("^1.5.0-alpha", "1.6.0-alpha"));
         assert!(m("^1.5.0-alpha", "1.6.0"));
         assert!(!m("<2.0.0", "2.0.0-rc.1"));
+        // (a partial upper bound covers its whole line, pre-releases too)
+        assert!(!m(">=1.2.0-alpha, <1.2", "1.2.0-alpha"));
+        assert!(m(">=1.2.0-alpha, <1.2.0", "1.2.0-alpha"));
         assert!(Version::parse("1.0.0-alpha.2").unwrap() < Version::parse("1.0.0-alpha.10").unwrap());
         assert!(Version::parse("1.0.0-rc.1").unwrap() < Version::parse("1.0.0").unwrap());
         assert_eq!(Version::parse("1.2.2+spec-1.1.0").unwrap().to_string(), "1.2.2");

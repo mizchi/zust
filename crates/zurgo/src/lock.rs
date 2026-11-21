@@ -40,7 +40,9 @@ pub fn parse(text: &str) -> Result<Lock, String> {
         _ => 1,
     };
     let mut packages = vec![];
-    for p in t.get("package").and_then(Value::as_array).unwrap_or(&[]) {
+    // (a version 1 lock keeps the root package in `[root]`)
+    let root = t.get("root").into_iter();
+    for p in root.chain(t.get("package").and_then(Value::as_array).unwrap_or(&[]).iter()) {
         let p = p.as_table().ok_or("`[[package]]` is not a table")?;
         let s = |k: &str| toml::get_str(p, &[k]).map(str::to_string);
         let deps = p
@@ -86,13 +88,24 @@ pub fn cargo_home() -> PathBuf {
     }
 }
 
+/// cargo's directories for crates.io under `registry/src` and `registry/index`: `index.crates.io-<hash>` (the sparse
+/// index) and `github.com-<hash>` (the git index). Only these, so that a package of the same name and version from
+/// another registry is never taken for the crates.io one
+fn crates_io_dirs(under: &Path) -> Vec<PathBuf> {
+    let mut ds: Vec<PathBuf> = std::fs::read_dir(under)
+        .into_iter()
+        .flatten()
+        .filter_map(|e| e.ok().map(|e| e.path()))
+        .filter(|d| d.file_name().and_then(|n| n.to_str()).is_some_and(|n| n.starts_with("index.crates.io-") || n.starts_with("github.com-")))
+        .collect();
+    ds.sort();
+    ds
+}
+
 /// The unpacked sources of a crates.io package (`$CARGO_HOME/registry/src/<index>/<name>-<version>`, where `cargo
 /// fetch` and `cargo build` put them)
 pub fn registry_dir(name: &str, version: &str) -> Option<PathBuf> {
-    let src = cargo_home().join("registry/src");
-    let mut idx: Vec<PathBuf> = std::fs::read_dir(&src).ok()?.filter_map(|e| e.ok().map(|e| e.path())).collect();
-    idx.sort();
-    idx.into_iter().map(|d| d.join(format!("{name}-{version}"))).find(|d| d.join("Cargo.toml").is_file())
+    crates_io_dirs(&cargo_home().join("registry/src")).into_iter().map(|d| d.join(format!("{name}-{version}"))).find(|d| d.join("Cargo.toml").is_file())
 }
 
 /// The registry index's entry for one version of a package, from cargo's cache of the sparse index
@@ -106,10 +119,7 @@ pub fn index_entry(name: &str, version: &str) -> Option<crate::toml::Table> {
         3 => format!("3/{}", &lower[..1]),
         _ => format!("{}/{}", &lower[..2], &lower[2..4]),
     };
-    let idx = cargo_home().join("registry/index");
-    let mut dirs: Vec<PathBuf> = std::fs::read_dir(&idx).ok()?.filter_map(|e| e.ok().map(|e| e.path())).collect();
-    dirs.sort();
-    for d in dirs {
+    for d in crates_io_dirs(&cargo_home().join("registry/index")) {
         let Ok(bytes) = std::fs::read(d.join(".cache").join(&prefix).join(&lower)) else { continue };
         let parts: Vec<&[u8]> = bytes.split(|&b| b == 0).collect();
         // (the header and the etag line come first; then the pairs)
@@ -175,5 +185,13 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
         assert_eq!(l.find(&app.deps[1]), Some(3));
         assert_eq!(l.find(&app.deps[2]), Some(1));
         assert_eq!(l.find(&LockDep { name: "rustc-hash".into(), version: None, source: None }), None);
+    }
+
+    #[test]
+    fn version_1_root() {
+        let l = parse("[root]\nname = \"app\"\nversion = \"0.1.0\"\ndependencies = [\"fnv 1.0.7 (registry+https://github.com/rust-lang/crates.io-index)\"]\n\n[[package]]\nname = \"fnv\"\nversion = \"1.0.7\"\nsource = \"registry+https://github.com/rust-lang/crates.io-index\"\n").unwrap();
+        assert_eq!(l.packages.len(), 2);
+        assert_eq!(l.packages[0].name, "app");
+        assert_eq!(l.find(&l.packages[0].deps[0]), Some(1));
     }
 }
