@@ -25,4 +25,16 @@ fn main() {
     println!("{}", m::R == m::R);
     let v = vec![Q { a: 1 }];
     println!("{}", v[0] == Q { a: 1 });
+    println!("{:?}", by_ref());
+}
+// (`impl PartialEq for &X` only: `&X(1) == &X(1)` compares through it)
+struct RX(i32);
+impl PartialEq for &RX {
+    fn eq(&self, o: &Self) -> bool {
+        self.0 == o.0
+    }
+}
+#[allow(dead_code)]
+fn by_ref() -> (bool, bool) {
+    (&RX(1) == &RX(1), &RX(1) == &RX(2))
 }
