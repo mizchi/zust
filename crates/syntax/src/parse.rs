@@ -2209,7 +2209,7 @@ impl Parser {
         if self.is_punct("!") && !self.punct_at(0, "!=") {
             self.i += 1;
             if !self.tok(0).is_some_and(|t| t.kind == TokKind::Open) {
-                return Err(self.err("expected macro arguments"));
+                return Err(self.err("expected one of `(`, `[`, or `{`"));
             }
             let at = self.pos();
             let g = self.group_text_laid_out()?;
