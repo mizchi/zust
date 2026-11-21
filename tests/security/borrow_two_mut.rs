@@ -1,4 +1,5 @@
 //! Two live `&mut` to the same place (E0499): the aliasing rule every other guarantee rests on.
+//@ rule: borrow checking (the loans and moves that keep references valid)
 //@ expect: reject
 fn main() {
     let mut v = vec![1, 2, 3];

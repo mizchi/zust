@@ -1,5 +1,6 @@
 //! `RefCell` checks its borrows at run time: a second `borrow_mut` (or a `borrow` while mutably
 //! borrowed) must panic, or two `&mut` to one value exist in safe code.
+//@ rule: RefCell's run-time borrow flags
 //@ expect: panic
 //@ args: 0 1 2
 use std::cell::RefCell;

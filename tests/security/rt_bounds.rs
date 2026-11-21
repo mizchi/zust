@@ -1,5 +1,6 @@
 //! Every safe access past the end of a buffer is a panic (exit 101), never a read or write out of
 //! bounds. One argument per case.
+//@ rule: bounds checks
 //@ expect: panic
 //@ args: 0 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20
 fn arg() -> usize {

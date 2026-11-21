@@ -1,4 +1,5 @@
 //! Taking `&mut` of an immutable binding (E0596).
+//@ rule: borrow checking (the loans and moves that keep references valid)
 //@ expect: reject
 fn main() {
     let v = vec![1];

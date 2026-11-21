@@ -11,6 +11,14 @@
 //! - `//@ expect: safe`: it builds, and every run either exits 0 printing only lines that start
 //!   with `ok`, or panics. (For cases where rustc itself may do either.)
 //! - `//@ expect: reject-or-panic`: rejected at a marked line, or built and every run panics.
+//! - `//@ expect: unsupported`: rustc builds it, and zustc rejects it because it does not have the API (the CVE cannot
+//!   happen). When zustc gets the API, the case fails: turn it into a test of the CVE's behavior.
+//!
+//! Every case names where it comes from: `//@ cve: CVE-..` (a std CVE; tests/security/cves.txt lists them all and
+//! the case of each), `//@ issue: rust-lang/rust#..` (a rustc soundness bug), `//@ pattern: ..` (a neighbor of a
+//! CVE or of a hole found here: the same implementation pattern elsewhere), or `//@ rule: ..` (a language rule
+//! every safe program relies on, with no CVE of its own). An error code after `//~ ERROR` must be the code zustc
+//! reports, when zustc's message has one.
 //!
 //! `//@ args: a b c` runs the program once per argument (one case per run, as a panic ends the
 //! process). rustc (edition 2024, debug) is the oracle: the header must agree with what rustc does,
@@ -34,6 +42,7 @@ enum Expect {
     Run,
     Safe,
     RejectOrPanic,
+    Unsupported,
 }
 
 struct Case {
@@ -41,8 +50,13 @@ struct Case {
     path: PathBuf,
     expect: Expect,
     args: Vec<String>,
-    /// lines (1-based) marked `//~ ERROR`
+    /// lines (1-based) marked `//~ ERROR`, with the error code the mark names (if any)
     error_lines: Vec<usize>,
+    error_codes: Vec<(usize, String)>,
+    /// (line, text the message must contain): `//~ ERROR E0133 "union field"`
+    error_texts: Vec<(usize, String)>,
+    /// `//@ cve:` ids
+    cves: Vec<String>,
 }
 
 fn parse_case(path: &Path) -> Case {
@@ -51,7 +65,18 @@ fn parse_case(path: &Path) -> Case {
     let mut expect = None;
     let mut args = vec![];
     let mut error_lines = vec![];
+    let mut error_codes = vec![];
+    let mut error_texts = vec![];
+    let mut cves = vec![];
+    let mut source = false;
     for (i, line) in src.lines().enumerate() {
+        if let Some(c) = line.strip_prefix("//@ cve:") {
+            cves.extend(c.split(',').map(|x| x.trim().to_string()).filter(|x| !x.is_empty()));
+            source = true;
+        }
+        if ["//@ issue:", "//@ pattern:", "//@ rule:"].iter().any(|p| line.starts_with(p)) {
+            source = true;
+        }
         if let Some(e) = line.strip_prefix("//@ expect:") {
             expect = Some(match e.trim() {
                 "reject" => Expect::Reject,
@@ -59,20 +84,31 @@ fn parse_case(path: &Path) -> Case {
                 "run" => Expect::Run,
                 "safe" => Expect::Safe,
                 "reject-or-panic" => Expect::RejectOrPanic,
+                "unsupported" => Expect::Unsupported,
                 o => panic!("{name}: unknown expect `{o}`"),
             });
         } else if let Some(a) = line.strip_prefix("//@ args:") {
             args = a.split_whitespace().map(str::to_string).collect();
         }
-        if line.contains("//~ ERROR") {
+        if let Some(k) = line.find("//~ ERROR") {
             error_lines.push(i + 1);
+            if let Some(code) = line[k + 9..].split_whitespace().next().filter(|w| w.len() == 5 && w.starts_with('E') && w[1..].chars().all(|c| c.is_ascii_digit())) {
+                error_codes.push((i + 1, code.to_string()));
+            }
+            let rest = &line[k + 9..];
+            if let (Some(a), Some(b)) = (rest.find('"'), rest.rfind('"')) {
+                if b > a {
+                    error_texts.push((i + 1, rest[a + 1..b].to_string()));
+                }
+            }
         }
     }
+    assert!(source, "{name}: no `//@ cve:` / `//@ issue:` / `//@ pattern:` / `//@ rule:` line (where does the case come from?)");
     let expect = expect.unwrap_or_else(|| panic!("{name}: no `//@ expect:` line"));
     if matches!(expect, Expect::Reject | Expect::RejectOrPanic) {
         assert!(!error_lines.is_empty(), "{name}: a rejected case needs a `//~ ERROR` line");
     }
-    Case { name, path: path.to_path_buf(), expect, args, error_lines }
+    Case { name, path: path.to_path_buf(), expect, args, error_lines, error_codes, error_texts, cves }
 }
 
 /// A new directory only this user can enter (as tests/panic_loc.rs), removed when dropped
@@ -148,16 +184,33 @@ fn code(o: &Option<Output>) -> Option<i32> {
     o.as_ref().and_then(|o| o.status.code())
 }
 
-/// The lines of zustc's errors (`error: <path>: L:C: message`)
-fn error_lines(stderr: &str) -> Vec<usize> {
+/// zustc's errors (`error: <path>: L:C: message`): (line, the `(Exxxx)` code in the message if any, the message)
+fn errors(stderr: &str) -> Vec<(usize, Option<String>, String)> {
     stderr
         .lines()
         .filter_map(|l| {
             let rest = l.strip_prefix("error: ")?;
             let after = rest.split(".rs: ").nth(1)?;
-            after.split(':').next()?.trim().parse().ok()
+            let line = after.split(':').next()?.trim().parse().ok()?;
+            let code = after.match_indices("(E").find_map(|(k, _)| {
+                let c = after.get(k + 1..k + 6)?;
+                (c[1..].chars().all(|x| x.is_ascii_digit()) && after.get(k + 6..k + 7) == Some(")")).then(|| c.to_string())
+            });
+            Some((line, code, after.to_string()))
         })
         .collect()
+}
+
+/// A rejection that counts: at a marked line, and with the mark's code when zustc's message names one
+fn rejected_as_marked(c: &Case, errs: &[(usize, Option<String>, String)]) -> bool {
+    errs.iter().any(|(l, code, msg)| {
+        c.error_lines.contains(l)
+            && match (code, c.error_codes.iter().find(|x| x.0 == *l)) {
+                (Some(got), Some((_, want))) => got == want,
+                _ => true,
+            }
+            && c.error_texts.iter().filter(|x| x.0 == *l).all(|(_, t)| msg.contains(t.as_str()))
+    })
 }
 
 fn have(tool: &str) -> bool {
@@ -178,6 +231,7 @@ fn check_case(c: &Case, dir: &Path, valgrind: bool) -> Result<(), String> {
     match (c.expect, rustc_rejects) {
         (Expect::Reject | Expect::RejectOrPanic, true) => {}
         (Expect::Reject | Expect::RejectOrPanic, false) => return Err("header says reject, but rustc accepts it (fix the case)".into()),
+        (Expect::Unsupported, false) => {}
         (_, true) => return Err(format!("rustc rejects the case (fix it):\n{}", String::from_utf8_lossy(&r.stderr))),
         (e, false) => {
             for a in &runs {
@@ -197,7 +251,7 @@ fn check_case(c: &Case, dir: &Path, valgrind: bool) -> Result<(), String> {
         }
     }
     let backends: &[&str] = match c.expect {
-        Expect::Reject => &["cranelift"],
+        Expect::Reject | Expect::Unsupported => &["cranelift"],
         _ => &["cranelift", "minclif"],
     };
     for be in backends {
@@ -207,13 +261,16 @@ fn check_case(c: &Case, dir: &Path, valgrind: bool) -> Result<(), String> {
         let b = run_limited(cmd, Duration::from_secs(120)).ok_or("zustc timed out")?;
         let stderr = String::from_utf8_lossy(&b.stderr).into_owned();
         if !b.status.success() {
-            let lines = error_lines(&stderr);
-            let at_marked = lines.iter().any(|l| c.error_lines.contains(l));
+            let at_marked = rejected_as_marked(c, &errors(&stderr));
             return match c.expect {
+                Expect::Unsupported => Ok(()),
                 Expect::Reject | Expect::RejectOrPanic if at_marked => Ok(()),
                 Expect::Reject | Expect::RejectOrPanic => Err(format!("rejected, but not at a marked line {:?}: {}", c.error_lines, stderr.trim())),
                 _ => Err(format!("zustc ({be}) does not build it: {}", stderr.trim())),
             };
+        }
+        if c.expect == Expect::Unsupported {
+            return Err("zustc builds it now: it has the API, so make this case a test of the CVE's behavior (expect run / panic)".into());
         }
         if c.expect == Expect::Reject {
             // say what the accepted program does: that is the hole
@@ -237,7 +294,7 @@ fn check_case(c: &Case, dir: &Path, valgrind: bool) -> Result<(), String> {
                     Some(101) => true,
                     _ => false,
                 },
-                Expect::Reject => unreachable!(),
+                Expect::Reject | Expect::Unsupported => unreachable!(),
             };
             if !ok {
                 let mut msg = format!("{what}: {} (want {:?})", describe(&o), c.expect);
@@ -319,5 +376,115 @@ fn security_regressions() {
         }
     }
     eprintln!("security: {pass} pass, {gap} known gaps, {} failing (valgrind: {valgrind})", bad.len());
+    assert!(bad.is_empty(), "\n{}", bad.join("\n"));
+}
+
+/// tests/security/cves.txt lists every std CVE (RustSec's advisories for `std`, and the Rust blog's) with the case
+/// that covers it, or `n/a: <why>`. Each named case exists and says `//@ cve:` of that id; each `//@ cve:` id is listed.
+#[test]
+fn every_std_cve_has_a_case() {
+    let text = std::fs::read_to_string("tests/security/cves.txt").unwrap();
+    let mut listed: Vec<String> = vec![];
+    let mut bad = vec![];
+    for line in text.lines().filter(|l| !l.starts_with('#') && !l.trim().is_empty()) {
+        let cols: Vec<&str> = line.split('\t').map(str::trim).collect();
+        let (id, cover) = (cols[0], *cols.last().unwrap());
+        listed.push(id.to_string());
+        if cover.starts_with("n/a:") {
+            continue;
+        }
+        for case in cover.split(',').map(str::trim) {
+            let p = PathBuf::from(format!("tests/security/{case}.rs"));
+            if !p.exists() {
+                bad.push(format!("{id}: no case {case}"));
+                continue;
+            }
+            if !parse_case(&p).cves.iter().any(|c| c == id) {
+                bad.push(format!("{id}: {case} does not say `//@ cve: {id}`"));
+            }
+        }
+    }
+    for e in std::fs::read_dir("tests/security").unwrap() {
+        let p = e.unwrap().path();
+        if p.extension().is_some_and(|x| x == "rs") {
+            for id in parse_case(&p).cves {
+                if !listed.contains(&id) {
+                    bad.push(format!("{}: `//@ cve: {id}` is not in cves.txt", p.display()));
+                }
+            }
+        }
+    }
+    assert!(bad.is_empty(), "\n{}", bad.join("\n"));
+}
+
+/// tests/security/unsafe_std_apis.txt: every unsafe std API needs `unsafe` in safe code. rustc must reject each with
+/// E0133; zustc must reject it too (with E0133, or as an API it does not have). Gaps are `unsafe_api:<name>` lines
+/// of known_gaps.txt
+#[test]
+fn unsafe_std_apis() {
+    if !have("rustc") {
+        eprintln!("security: rustc not found, skipped");
+        return;
+    }
+    let text = std::fs::read_to_string("tests/security/unsafe_std_apis.txt").unwrap();
+    let rows: Vec<(String, String, String)> = text
+        .lines()
+        .filter(|l| !l.starts_with('#') && !l.trim().is_empty())
+        .map(|l| {
+            let c: Vec<&str> = l.split('\t').collect();
+            assert_eq!(c.len(), 3, "unsafe_std_apis.txt: `{l}` is not name<TAB>setup<TAB>expression");
+            (c[0].to_string(), c[1].to_string(), c[2].to_string())
+        })
+        .collect();
+    let gaps_src = std::fs::read_to_string("tests/security/known_gaps.txt").unwrap();
+    let gaps: Vec<String> = gaps_src.lines().filter_map(|l| l.split('#').next().unwrap().trim().strip_prefix("unsafe_api:").map(str::to_string)).collect();
+    let dir = private_dir("security_unsafe_api");
+    let zustc = env!("CARGO_BIN_EXE_zustc");
+    let next = std::sync::atomic::AtomicUsize::new(0);
+    let out: std::sync::Mutex<Vec<(usize, Result<&'static str, String>)>> = std::sync::Mutex::new(vec![]);
+    std::thread::scope(|s| {
+        for _ in 0..std::thread::available_parallelism().map(|n| n.get()).unwrap_or(2).min(8) {
+            s.spawn(|| {
+                loop {
+                    let i = next.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                    let Some((name, setup, expr)) = rows.get(i) else { break };
+                    let src = format!("#![allow(unused)]\nfn main() {{\n    {setup}\n    let _r = {expr};\n}}\n");
+                    let path = dir.0.join(format!("{name}.rs"));
+                    std::fs::write(&path, &src).unwrap();
+                    let r = Command::new("rustc").args(["--edition", "2024", "--error-format=short"]).arg(&path).arg("-o").arg(dir.0.join(format!("{name}.rustc"))).output().unwrap();
+                    let rs = String::from_utf8_lossy(&r.stderr);
+                    let res = if r.status.success() || !rs.lines().any(|l| l.contains(":4:") && l.contains("E0133")) {
+                        Err(format!("rustc does not reject it with E0133 at the expression (fix the table): {}", rs.lines().next().unwrap_or("")))
+                    } else {
+                        let z = Command::new(zustc).arg("--no-cache").arg(&path).arg("-o").arg(dir.0.join(name.as_str())).output().unwrap();
+                        let zs = String::from_utf8_lossy(&z.stderr);
+                        if z.status.success() {
+                            Err("zustc accepts it in safe code".to_string())
+                        } else if zs.contains("(E0133)") {
+                            Ok("E0133")
+                        } else {
+                            Ok("unsupported")
+                        }
+                    };
+                    out.lock().unwrap().push((i, res));
+                }
+            });
+        }
+    });
+    let mut out = out.into_inner().unwrap();
+    out.sort_by_key(|x| x.0);
+    let (mut e0133, mut unsupported, mut bad) = (vec![], vec![], vec![]);
+    for (i, r) in out {
+        let name = &rows[i].0;
+        let gap = gaps.contains(name);
+        match (r, gap) {
+            (Ok("E0133"), false) => e0133.push(name.clone()),
+            (Ok(_), false) => unsupported.push(name.clone()),
+            (Ok(_), true) => bad.push(format!("{name}: rejected now; remove `unsafe_api:{name}` from known_gaps.txt")),
+            (Err(e), true) => eprintln!("known gap unsafe_api:{name}: {e}"),
+            (Err(e), false) => bad.push(format!("{name}: {e}")),
+        }
+    }
+    eprintln!("unsafe std APIs: {} need unsafe (E0133), {} not supported by zustc: {}", e0133.len(), unsupported.len(), unsupported.join(" "));
     assert!(bad.is_empty(), "\n{}", bad.join("\n"));
 }

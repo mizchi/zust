@@ -5751,6 +5751,7 @@ check-pass	stability-attribute/check-stability-issue-138319.rs
 check-pass	stability-attribute/issue-99286-stable-intrinsics.rs
 compile-fail	stability-attribute/stability-in-private-module.rs
 compile-fail	static/extern-static-normalization-failure-issue-148161.rs
+compile-fail	static/global-variable-promotion-error-7364.rs
 run-pass	static/issue-1660.rs
 build-pass	static/issue-34194.rs
 compile-fail	static/missing-type.rs

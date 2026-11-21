@@ -1,6 +1,7 @@
 //! CVE-2018-1000810 (`str::repeat`) and the size computations of every growable buffer: a length
 //! times an element size that overflows `usize` must panic ("capacity overflow"), not wrap to a
 //! small allocation that is then written past its end.
+//@ pattern: capacity arithmetic (the class of CVE-2018-1000810: a size computed with a wrapping multiply)
 //@ expect: panic
 //@ args: 0 1 2 3 4 5 6 7 8
 use std::collections::VecDeque;

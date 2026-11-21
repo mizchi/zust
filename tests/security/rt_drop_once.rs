@@ -1,5 +1,6 @@
 //! CVE-2021-31162 (`Vec::from_iter` in-place collection could drop elements twice) and the like:
 //! every value is dropped exactly once on every path that moves, collects, truncates or drains.
+//@ pattern: drops (each value dropped once: the class of CVE-2021-31162)
 //@ expect: run
 use std::cell::Cell;
 struct D<'a>(u32, &'a Cell<u32>);

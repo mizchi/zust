@@ -1,4 +1,5 @@
 //! `Rc` is not `Send` (E0277): moving it to another thread would race on its count.
+//@ rule: Send / Sync
 //@ expect: reject
 use std::rc::Rc;
 fn main() {

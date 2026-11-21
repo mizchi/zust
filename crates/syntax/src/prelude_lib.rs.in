@@ -760,6 +760,10 @@ impl<T> Vec<T> {
     // 3 回の反転で回す
     pub fn rotate_left(&mut self, k: usize) {
         let n = self.len;
+        // (as std: a count past the length is a caller's error, not taken modulo the length)
+        if k > n {
+            panic!("assertion failed: mid <= self.len()");
+        }
         if n == 0 {
             return;
         }
@@ -770,6 +774,9 @@ impl<T> Vec<T> {
     }
     pub fn rotate_right(&mut self, k: usize) {
         let n = self.len;
+        if k > n {
+            panic!("assertion failed: k <= self.len()");
+        }
         if n == 0 {
             return;
         }
@@ -5437,15 +5444,16 @@ impl<T> MaybeUninit<T> {
     pub fn as_mut_ptr(&mut self) -> *mut T {
         &mut self.value as *mut T
     }
-    pub fn assume_init(self) -> T {
+    // (unsafe as in std: the value may be zeroed or uninitialized. A zeroed `&T` is null)
+    pub unsafe fn assume_init(self) -> T {
         self.value
     }
-    pub fn assume_init_ref(&self) -> &T {
+    pub unsafe fn assume_init_ref(&self) -> &T {
         &self.value
     }
 }
 
-pub fn __core_unreachable_unchecked() -> ! {
+pub unsafe fn __core_unreachable_unchecked() -> ! {
     panic!("internal error: entered unreachable code")
 }
 
@@ -7058,6 +7066,11 @@ impl<T> Arc<T> {
     }
     pub fn ptr_eq(a: &Arc<T>, b: &Arc<T>) -> bool {
         a.p == b.p
+    }
+    // `&mut T` only while this is the one Arc (CVE-2018-25008 was this check, too weakly synchronized: zustc's
+    // threads are green threads on one OS thread, so the count cannot change under it)
+    pub fn get_mut(this: &mut Arc<T>) -> Option<&mut T> {
+        if unsafe { (*this.__bx()).strong } == 1 { Some(unsafe { &mut (*this.__bx()).val }) } else { None }
     }
     pub fn as_ref(&self) -> &T {
         unsafe { &(*self.__bx()).val }
@@ -9862,6 +9875,11 @@ impl<K, V> HashMap<K, V> {
     }
     pub fn with_capacity(n: usize) -> HashMap<K, V> {
         let mut m = HashMap::new();
+        // (the same pattern as CVE-2018-1000810: `n * 4` wrapped to a small table, and `c * 3` wrapping made `c`
+        // reach 0 and the loop never end. A count whose table does not fit is a panic, as in std)
+        if n > usize::MAX / 8 {
+            panic!("capacity overflow");
+        }
         let mut c = 8;
         while c * 3 < n * 4 {
             c *= 2;
@@ -9878,6 +9896,10 @@ impl<K, V> HashMap<K, V> {
     fn alloc(&mut self, c: usize) {
         let ks = core::mem::size_of::<K>();
         let vs = core::mem::size_of::<V>();
+        // (`c * ks` / `c * vs` past isize::MAX: a panic, not a wrapped small block)
+        if (ks != 0 && c > isize::MAX as usize / ks) || (vs != 0 && c > isize::MAX as usize / vs) {
+            panic!("capacity overflow");
+        }
         self.st = unsafe { __exr_realloc_ok(core::ptr::null_mut(), c) };
         self.ks = unsafe { __exr_realloc_ok(core::ptr::null_mut(), if ks == 0 { 1 } else { c * ks }) } as *mut K;
         self.vs = unsafe { __exr_realloc_ok(core::ptr::null_mut(), if vs == 0 { 1 } else { c * vs }) } as *mut V;
@@ -10976,6 +10998,42 @@ impl<T> VecDeque<T> {
         self.cap = c;
         self.head = 0;
     }
+    pub fn capacity(&self) -> usize {
+        self.cap
+    }
+    // (CVE-2018-1000657 was std's reserve mis-copying a wrapped buffer: dq_grow copies the elements in order into a
+    // new block, whatever the head)
+    pub fn reserve(&mut self, extra: usize) {
+        if extra > usize::MAX - self.len {
+            panic!("capacity overflow");
+        }
+        self.dq_grow(self.len + extra);
+    }
+    // The elements in order in one slice. (CVE-2020-36318 was std's make_contiguous popping an element twice for some
+    // layouts: here a wrapped buffer is copied in order into a new block of the same size, each element read once)
+    pub fn make_contiguous(&mut self) -> &mut [T] {
+        if self.head + self.len > self.cap {
+            let c = self.cap;
+            let sz = core::mem::size_of::<T>();
+            let np = unsafe { __exr_realloc_ok(0usize as *mut u8, if sz == 0 { 1 } else { c * sz }) } as *mut T;
+            let mut i = 0;
+            while i < self.len {
+                unsafe {
+                    np.add(i).write(self.dq_at(i).read());
+                }
+                i += 1;
+            }
+            unsafe {
+                __exr_free(self.ptr as *mut u8);
+            }
+            self.ptr = np;
+            self.head = 0;
+        }
+        if self.len == 0 {
+            return unsafe { core::slice::from_raw_parts_mut(self.ptr, 0) };
+        }
+        unsafe { core::slice::from_raw_parts_mut(self.ptr.add(self.head), self.len) }
+    }
     pub fn push_back(&mut self, x: T) {
         if self.len == self.cap {
             self.dq_grow(if self.cap == 0 { 4 } else { self.cap * 2 });
@@ -11175,6 +11233,26 @@ impl<T> Iterator for DqIter<T> {
         } else {
             None
         }
+    }
+}
+
+// (CVE-2019-1010299: std's Debug of vec_deque::Iter printed the whole buffer, uninitialized slots included. Only the
+// elements still to come)
+impl<T> Debug for DqIter<T> {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError> {
+        f.buf.push_str("Iter([");
+        let mut i = self.i;
+        while i < self.n {
+            if i > self.i {
+                f.buf.push_str(", ");
+            }
+            unsafe {
+                __exr_debug(&*(*self.d).dq_at(i), f);
+            }
+            i += 1;
+        }
+        f.buf.push_str("])");
+        Ok(())
     }
 }
 

@@ -1,5 +1,6 @@
 //! Integer overflow in a debug build is a panic, not a silently wrapped value that later sizes an
 //! allocation or an index. Each argument is one case; every case must panic (exit 101).
+//@ rule: overflow checks in debug builds
 //@ expect: panic
 //@ args: 0 1 2 3 4 5 6 7 8 9 10 11
 fn arg() -> i64 {

@@ -1,4 +1,5 @@
 //! Reading a union field from safe code (E0133): it reinterprets bytes, so a `&T` could be forged.
+//@ rule: the unsafe boundary (E0133 / E0200 / E0512)
 //@ expect: reject
 union U {
     i: usize,

@@ -1,4 +1,5 @@
 //! Writing through a shared reference (E0594).
+//@ rule: borrow checking (the loans and moves that keep references valid)
 //@ expect: reject
 fn set(x: &i32) {
     *x = 1; //~ ERROR E0594

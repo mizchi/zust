@@ -1,5 +1,7 @@
-//! CVE-2020-36317: `String::retain` could leave the String holding invalid UTF-8. The result of
-//! retain over multi-byte characters must be exactly the kept characters.
+//! CVE-2020-36317 (std, fixed in 1.49.0): `String::retain` was not panic safe; a panic in the predicate left the
+//! String holding invalid UTF-8. The result of retain over multi-byte characters must be exactly the kept
+//! characters (the panic path is cve_2020_36317_string_retain_panic).
+//@ cve: CVE-2020-36317
 //@ expect: run
 fn main() {
     let mut s = String::from("aé€😀bé€😀c");

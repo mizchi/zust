@@ -1,5 +1,6 @@
 //! Writing a private length field from outside (E0616): with it, safe code could make an
 //! unsafe `get_unchecked`-style accessor read out of bounds.
+//@ rule: privacy (a module's invariants are its own to keep)
 //@ expect: reject
 mod buf {
     pub struct Buf {

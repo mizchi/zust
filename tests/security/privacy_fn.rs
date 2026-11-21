@@ -1,5 +1,6 @@
 //! Calling a private function from outside its module (E0603): it may rely on invariants only its
 //! module upholds.
+//@ rule: privacy (a module's invariants are its own to keep)
 //@ expect: reject
 mod m {
     fn unchecked_get(v: &[u8], i: usize) -> u8 {

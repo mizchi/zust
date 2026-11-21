@@ -1,5 +1,6 @@
 //! The other side of unsafe_in_closure: a closure written inside `unsafe { }` or an `unsafe fn` may
 //! do unsafe operations (and so may closures nested in it). These must still build and run.
+//@ rule: the unsafe boundary (E0133 / E0200 / E0512)
 //@ expect: run
 unsafe fn in_unsafe_fn(p: *const u32) -> u32 {
     let f = || unsafe { *p } + 1;

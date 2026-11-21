@@ -1,5 +1,7 @@
-//! rust-lang/rust#10184 (I-unsound, fixed in 1.45): `f as i32` on NaN or an out-of-range float was
-//! LLVM `fptosi` poison, so safe code could produce an undefined integer. Casts now saturate.
+//! rust-lang/rust#10184 ("floating point to integer casts can cause undefined behaviour", I-unsound, closed by
+//! rust-lang/rust#71269): `f as i32` on NaN or an out-of-range float was LLVM poison, so safe code could produce an
+//! undefined integer. Casts now saturate (NaN is 0).
+//@ issue: rust-lang/rust#10184
 //@ expect: run
 fn main() {
     let args = std::env::args().count() as f64; // 1.0 at run time

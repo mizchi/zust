@@ -778,6 +778,11 @@ impl Session2 {
         let mut prog = Program::build_with(&items, &sums, self.ctx.lib.is_none() && !lib_attr, user).map_err(|e| name_line(&e, &src, &items))?;
         tm.lap("program", String::new());
         prog.prelude_from = user as u32;
+        // (E0277: a static is reachable from every thread, so its type must be Sync)
+        if let Some((ci, tn)) = crate::acg::static_not_sync(&prog) {
+            let line = items.get(prog.consts[ci].item as usize).map_or(0, |it| it.line);
+            return Err(format!("{line}:1: `{tn}` cannot be shared between threads safely: the type of a `static` must be Sync (E0277)"));
+        }
         // (traits of one name in two modules: which one a method call means depends on where it is. Read from the
         // crate's source (its files joined, as the items' lines count); a build with dependency crates keeps the earlier
         // choice, the first impl)

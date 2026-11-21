@@ -1,8 +1,8 @@
 //! wasm32-unknown-unknown output (`zustc --target wasm32-unknown-unknown`), run in a sandbox: Node's WebAssembly,
 //! with only the imports tests/wasm/run.mjs gives. Needs node (skipped without it) and rustc (the oracle).
 //!
-//! - `wasm_runs_like_rustc`: examples/*.rs and the runtime cases of tests/security build as modules and print what
-//!   rustc's builds print, with the same exit codes (a panic is 101 in both).
+//! - `wasm_runs_like_rustc`: examples/*.rs and the runtime cases of tests/security (the std CVE cases among them)
+//!   build as modules and print what rustc's builds print, with the same exit codes (a panic is 101 in both).
 //! - `wasm_module_shape`: a module imports only functions of `env`, and exports only `memory` and `main`.
 //! - `wasm_host_denies`: tests/wasm/deny/*.rs ask for what the host does not give (processes, files, the
 //!   environment) and get nothing: a module that imports fork / exec is not run, file access fails, no host file is
@@ -129,16 +129,22 @@ fn wasm_runs_like_rustc() {
         }
         progs.push(Prog { path: p, edition: None, args: vec![], safe: false });
     }
-    // the runtime cases of the security tests, except the ones zustc does not pass natively either
+    // the runtime cases of the security tests (the CVE cases among them), except the ones zustc does not pass natively
+    // either (a leak is not seen here: there is no valgrind)
     let gaps = std::fs::read_to_string("tests/security/known_gaps.txt").unwrap();
-    for p in files("tests/security", "rt_").into_iter().chain(files("tests/security", "unsafe_in_closure_ok")).chain(files("tests/security", "unsafe_impl_ok")) {
+    for p in files("tests/security", "") {
         let name = p.file_stem().unwrap().to_string_lossy().into_owned();
         let src = std::fs::read_to_string(&p).unwrap();
-        if gaps.lines().any(|l| l.split('#').next().unwrap().trim() == name) && name != "rt_box_move_out" {
+        let expect = src.lines().find_map(|l| l.strip_prefix("//@ expect:")).unwrap_or("").trim().to_string();
+        // (threads need swapcontext, which the sandbox does not give: such a module is not run)
+        if !matches!(expect.as_str(), "run" | "panic" | "safe") || src.contains("thread::spawn") {
+            continue;
+        }
+        if gaps.lines().any(|l| l.split('#').next().unwrap().trim() == name) && !name.starts_with("rt_box_move") {
             continue;
         }
         let args = src.lines().find_map(|l| l.strip_prefix("//@ args:")).map(|a| a.split_whitespace().map(str::to_string).collect()).unwrap_or_default();
-        progs.push(Prog { path: p, edition: Some("2024"), args, safe: src.contains("//@ expect: safe") });
+        progs.push(Prog { path: p, edition: Some("2024"), args, safe: expect == "safe" });
     }
     let dir = private_dir("wasm_cmp");
     let next = std::sync::atomic::AtomicUsize::new(0);

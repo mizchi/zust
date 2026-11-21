@@ -1,5 +1,6 @@
 //! `transmute` between types of different sizes is rejected at compile time (E0512), even in an
 //! `unsafe` block: otherwise it reads past the end of the source value.
+//@ rule: the unsafe boundary (E0133 / E0200 / E0512)
 //@ expect: reject
 fn main() {
     let x: u32 = 5;

@@ -1643,6 +1643,10 @@ impl Cx<'_> {
         }
         // `Box::into_raw(b)` / `Box::from_raw(p)`: the same pointer as a raw pointer / as the Box (the Box is not dropped)
         if matches!(name.as_str(), "into_raw" | "from_raw") && n >= 2 && p.segs[n - 2].name == "Box" && cargs.len() == 1 && !self.prog.struct_index.contains_key("Box") {
+            // (`Box::from_raw` is unsafe: it takes ownership of any pointer; into_raw is safe)
+            if name == "from_raw" {
+                self.check_unsafe_op("Box::from_raw", p.pos)?;
+            }
             let want = match (name.as_str(), expected) {
                 ("from_raw", Some(Ty::Box(i))) => Some(Ty::Ptr(true, i)),
                 _ => None,
@@ -1721,6 +1725,7 @@ impl Cx<'_> {
         }
         // `core::slice::from_raw_parts(p, n)` / `_mut` と `core::str::from_utf8_unchecked(b)`
         if matches!(name.as_str(), "from_raw_parts" | "from_raw_parts_mut" | "from_utf8_unchecked") && !(p.segs.len() == 1 && self.prog.index.contains_key(&name)) {
+            self.check_unsafe_op(&name, p.pos)?;
             if name == "from_utf8_unchecked" {
                 let u8s = Ty::Ref(false, intern(Ty::Slice(intern(Ty::U8))));
                 let (v, t) = self.expr(&cargs[0], Some(u8s))?;
@@ -1770,6 +1775,10 @@ impl Cx<'_> {
             }
             // `core::mem::zeroed::<T>()` (型は turbofish か期待型): 0 で埋めた値
             "zeroed" => {
+                // (`mem::zeroed` is unsafe: a zeroed `&T` or `Box<T>` is a null one. `MaybeUninit::zeroed` is not)
+                if p.segs.len() < 2 || p.segs[p.segs.len() - 2].name == "mem" {
+                    self.check_unsafe_op("zeroed", p.pos)?;
+                }
                 let Some(t) = targ.or(expected) else {
                     return err(SP, "cannot infer the type of `zeroed()`; annotate it");
                 };

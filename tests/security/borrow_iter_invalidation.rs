@@ -1,5 +1,6 @@
 //! Iterator invalidation (E0502): pushing to a Vec while iterating over it reallocates the buffer
 //! under the iterator, the classic use-after-free of C++.
+//@ rule: borrow checking (the loans and moves that keep references valid)
 //@ expect: reject
 fn main() {
     let mut v = vec![1, 2, 3];

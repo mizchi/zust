@@ -1,6 +1,7 @@
 //! `str::from_utf8` / `String::from_utf8` / `char::from_u32` are the gates from bytes and integers
 //! to `str` and `char`: overlong encodings, surrogates, values past U+10FFFF and truncated sequences
 //! must all be rejected, or later code that trusts the UTF-8 invariant reads out of bounds.
+//@ rule: str is UTF-8 (the invariant CVE-2020-36317 broke)
 //@ expect: run
 fn main() {
     let bad: [&[u8]; 9] = [

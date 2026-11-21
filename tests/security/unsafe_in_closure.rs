@@ -1,4 +1,5 @@
 //! A closure inside a safe function is safe code too: it may not dereference a raw pointer (E0133).
+//@ rule: the unsafe boundary (E0133 / E0200 / E0512)
 //@ expect: reject
 fn main() {
     let p = 0x20 as *const u64;

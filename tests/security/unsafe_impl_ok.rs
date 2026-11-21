@@ -1,5 +1,6 @@
 //! The other side of unsafe_impl_send: `unsafe impl` of `Send` / `Sync` / an `unsafe trait`, and
 //! safe impls whose headers mention those traits in bounds, must still build.
+//@ rule: the unsafe boundary (E0133 / E0200 / E0512)
 //@ expect: run
 use std::fmt;
 struct P(*mut u8);

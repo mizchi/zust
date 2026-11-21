@@ -1,4 +1,5 @@
 //! A closure holding `&mut` while another use reads the same value (E0502).
+//@ rule: borrow checking (the loans and moves that keep references valid)
 //@ expect: reject
 fn main() {
     let mut v = vec![1];

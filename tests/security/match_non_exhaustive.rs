@@ -1,4 +1,5 @@
 //! A non-exhaustive match (E0004): the unmatched case would run off the end of the match.
+//@ rule: exhaustive matches (E0004)
 //@ expect: reject
 enum E {
     A,

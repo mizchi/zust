@@ -1,6 +1,7 @@
 //! Sorting with a comparison that is not a total order must stay memory safe: the result is a
 //! permutation of the input (or a panic), never a duplicated or lost element (older std sorts
 //! had panic-safety bugs here).
+//@ pattern: trusting a user impl (an Ord that is not a total order: the class of CVE-2015-20001)
 //@ expect: safe
 fn main() {
     let mut v: Vec<String> = (0..50).map(|i| format!("{}", (i * 37) % 50)).collect();
