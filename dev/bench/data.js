@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795302339456,
+  "lastUpdate": 1795305503258,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -40703,6 +40703,165 @@ window.BENCHMARK_DATA = {
           {
             "name": "rt/strings run (-O)",
             "value": 65.686,
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "miz404@gmail.com",
+            "name": "Kotaro Chikuba",
+            "username": "mizchi"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "5248923ad4b786394fb913449d9e0039b0845510",
+          "message": "SIMD: vectors in the IR, wasm (v128) and Cranelift (128 / 256-bit), core::arch::wasm32 / x86_64 (#33)\n\nImplements #30's V0 (IR + wasm), V1 (Cranelift + core::arch::x86_64, extended to 256-bit AVX/AVX2/FMA) and the relaxed-SIMD part of V2. AVX-512 is skipped for now.\n\n- IR: Type::Vec(VBits) by width; Op::Simd(Shape, VOp, args) by lane shape; room for flexible vectors.\n- wasm: 128-bit vectors only (v128 locals, loads/stores, every simd128 / relaxed-simd opcode).\n- Cranelift: 128- and 256-bit vectors (a 256-bit one is two 128-bit parts); AVX-512 left out of the ISA.\n- Intrinsics lowered in place (core::arch::wasm32 all of simd128 + relaxed-simd; a core::arch::x86_64 SSE..AVX2/FMA subset), checked like rustc's (immediates, pointer types, unsafe, names the program owns).\n- Tests against rustc (wasm32-wasip1 under Node, native x86) and error cases; TODO.md lists what is left.\n\nCo-Authored-By: Claude Opus 5.5 &lt;noreply@anthropic.com&gt;\nClaude-Session: https://claude.ai/code/session_01JroQ9fRgwYNcgjEK4xh99N",
+          "timestamp": "2026-11-22T08:55:07+09:00",
+          "tree_id": "359830a2e814d560d27e8f2270d72ac9676055f2",
+          "url": "https://github.com/mizchi/zust/commit/5248923ad4b786394fb913449d9e0039b0845510"
+        },
+        "date": 1795305502647,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "gen1000 build cold",
+            "value": 89.077,
+            "unit": "ms"
+          },
+          {
+            "name": "gen1000 build noop",
+            "value": 0.915,
+            "unit": "ms"
+          },
+          {
+            "name": "gen1000 build edit 1 fn",
+            "value": 17.367,
+            "unit": "ms"
+          },
+          {
+            "name": "gen1000 check",
+            "value": 71.399,
+            "unit": "ms"
+          },
+          {
+            "name": "gen1000 build cold peak RSS",
+            "value": 18.824,
+            "unit": "MiB"
+          },
+          {
+            "name": "gen1000 binary",
+            "value": 323.977,
+            "unit": "KiB"
+          },
+          {
+            "name": "gen1000 cache",
+            "value": 387.21,
+            "unit": "KiB"
+          },
+          {
+            "name": "gen1000 build noop instructions",
+            "value": 0.554,
+            "unit": "M instr"
+          },
+          {
+            "name": "gen1000 build edit 1 fn instructions",
+            "value": 124.173,
+            "unit": "M instr"
+          },
+          {
+            "name": "gen1000 check instructions",
+            "value": 781.563,
+            "unit": "M instr"
+          },
+          {
+            "name": "gen5000 build cold",
+            "value": 372.668,
+            "unit": "ms"
+          },
+          {
+            "name": "gen5000 build noop",
+            "value": 0.973,
+            "unit": "ms"
+          },
+          {
+            "name": "gen5000 build edit 1 fn",
+            "value": 56.45,
+            "unit": "ms"
+          },
+          {
+            "name": "gen5000 check",
+            "value": 338.921,
+            "unit": "ms"
+          },
+          {
+            "name": "gen5000 build cold peak RSS",
+            "value": 52.41,
+            "unit": "MiB"
+          },
+          {
+            "name": "gen5000 binary",
+            "value": 1558.336,
+            "unit": "KiB"
+          },
+          {
+            "name": "gen5000 cache",
+            "value": 1902.835,
+            "unit": "KiB"
+          },
+          {
+            "name": "gen5000 build noop instructions",
+            "value": 0.555,
+            "unit": "M instr"
+          },
+          {
+            "name": "gen5000 build edit 1 fn instructions",
+            "value": 591.432,
+            "unit": "M instr"
+          },
+          {
+            "name": "gen5000 check instructions",
+            "value": 3855.612,
+            "unit": "M instr"
+          },
+          {
+            "name": "rt/fib run (-O)",
+            "value": 33.214,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/hashmap run (-O)",
+            "value": 89.054,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/matmul run (-O)",
+            "value": 31.694,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/nbody run (-O)",
+            "value": 50.143,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/sieve run (-O)",
+            "value": 57.264,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/sort run (-O)",
+            "value": 148.938,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/strings run (-O)",
+            "value": 41.134,
             "unit": "ms"
           }
         ]
