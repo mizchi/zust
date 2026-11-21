@@ -114,6 +114,7 @@ check-pass	associated-consts/assoc-const-and-type-same-name.rs
 compile-fail	associated-consts/assoc-const-equality-region-var-hash-ice.rs
 compile-fail	associated-consts/assoc-const-equality-unexpected-region.rs
 run-pass	associated-consts/assoc-const-in-array-initializer.rs
+run-pass	associated-consts/assoc-const-in-array-size.rs
 run-pass	associated-consts/assoc-const-in-static-array-size.rs
 check-pass	associated-consts/assoc-const-through-assoc-type-path.rs
 run-pass	associated-consts/associated-const-access.rs
