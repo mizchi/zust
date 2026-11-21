@@ -49,9 +49,9 @@ invariants.
 
 | case | what goes wrong |
 |---|---|
-| `rt_refcell` | `RefCell` hands out plain references with no borrow flag, so two `borrow_mut` alias. Fixing it needs `Ref` / `RefMut` guards, which need deref coercion through user `Deref` types to work in more places |
 | `rt_box_move_out` | `let x = *b;` moves the value but never frees the Box's block (a leak; valgrind) |
 | `rt_box_move_patterns` | the same leak through patterns (`let Pair { a, b } = *b`, `match *b`); no double free (valgrind) |
+| `rt_pattern_partial_move` | what a pattern leaves to `_` / `..` (`let (a, _) = pair();`, `let W { a, .. } = w;`) is never dropped (a leak) |
 
 ## Security: CVEs whose API zustc does not have (`expect: unsupported`)
 

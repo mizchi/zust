@@ -704,6 +704,11 @@ impl Solver<'_> {
                     let k = self.known(*t);
                     self.field(k, name)
                 }
+                // (a deref to the struct's own parameter, `Ref<T>` → `&T`: the argument's type variable)
+                Some(Ty::Ref(_, Ty::Param(i))) if (*i as usize) < vars.len() => {
+                    let k = vars[*i as usize];
+                    self.field(k, name)
+                }
                 _ => self.var(),
             },
         }
@@ -749,8 +754,23 @@ impl Solver<'_> {
             Some(Shape::Adt(b, st, l)) if self.is_vec(b) && l == 1 => {
                 Some(self.adt_args[st as usize])
             }
+            // (a RefCell's Ref / RefMut or a MutexGuard: the elements of what it guards, `for x in c.borrow().iter()`)
+            Some(Shape::Known(Ty::Struct(sid))) if self.is_guard(self.prog.base_of(sid)) => {
+                let a = *self.prog.structs[sid as usize].args.first()?;
+                let k = self.known(a);
+                self.elem_of(k)
+            }
+            Some(Shape::Adt(b, st, l)) if self.is_guard(b) && l == 1 => {
+                let a = self.adt_args[st as usize];
+                self.elem_of(a)
+            }
             _ => None,
         }
+    }
+
+    /// RefCell's Ref / RefMut, or MutexGuard: a guard that derefs to its one type argument
+    pub fn is_guard(&self, base: u32) -> bool {
+        matches!(self.prog.structs[base as usize].name.as_str(), "Ref" | "RefMut" | "MutexGuard")
     }
 
     pub fn is_vec(&self, base: u32) -> bool {

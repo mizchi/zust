@@ -61,3 +61,4 @@ compile-fail	suggestions/dont-suggest-ref/move-into-closure.rs
 compile-fail	consts/issue-16538.rs
 compile-fail	parser/issues/issue-87217-keyword-order/wrong-pub-const-unsafe-abi.rs
 compile-fail	typeck/issue-88643.rs
+compile-fail	coercion/unsize-lifetime-shrinking.rs

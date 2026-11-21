@@ -3906,6 +3906,7 @@ run-pass	mir/mir_codegen_switch.rs
 run-pass	mir/mir_codegen_switchint.rs
 run-pass	mir/mir_coercion_casts.rs
 run-pass	mir/mir_constval_adts.rs
+run-pass	mir/mir_early_return_scope.rs
 run-pass	mir/mir_match_arm_guard.rs
 run-pass	mir/mir_match_test.rs
 run-pass	mir/mir_small_agg_arg.rs
@@ -4135,6 +4136,7 @@ compile-fail	nll/issue-52669.rs
 compile-fail	nll/issue-52742.rs
 check-pass	nll/issue-52992.rs
 run-pass	nll/issue-53123-raw-pointer-cast.rs
+check-pass	nll/issue-53570.rs
 compile-fail	nll/issue-53807.rs
 compile-fail	nll/issue-54302-cases.rs
 check-pass	nll/issue-55288.rs

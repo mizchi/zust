@@ -9242,32 +9242,204 @@ impl<T> UnsafeCell<T> {
     }
 }
 
-// 内部可変性。借用の検査はしない (borrow / borrow_mut は参照をそのまま返す)
+// 内部可変性。借用は実行時に数える (std と同じ): flag は 0 で空き、正なら共有の借用の数、-1 なら可変の借用。
+// borrow / borrow_mut は Ref / RefMut (ガード) を返し、ガードが drop されると借用を返す。重なる借用は panic
+// (tests/security/rt_refcell.rs: 二つの borrow_mut が同じ値を指せば safe なコードで &mut が二つになる)
 pub struct RefCell<T> {
+    flag: isize,
     val: T,
 }
 
+pub struct BorrowError {
+    _p: (),
+}
+
+pub struct BorrowMutError {
+    _p: (),
+}
+
+impl Debug for BorrowError {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError> {
+        f.buf.push_str("BorrowError");
+        Ok(())
+    }
+}
+
+impl Debug for BorrowMutError {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError> {
+        f.buf.push_str("BorrowMutError");
+        Ok(())
+    }
+}
+
+impl Display for BorrowError {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError> {
+        f.buf.push_str("RefCell already mutably borrowed");
+        Ok(())
+    }
+}
+
+impl Display for BorrowMutError {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError> {
+        f.buf.push_str("RefCell already borrowed");
+        Ok(())
+    }
+}
+
 impl<T> RefCell<T> {
-    pub fn new(v: T) -> RefCell<T> {
-        RefCell { val: v }
+    pub const fn new(v: T) -> RefCell<T> {
+        RefCell { flag: 0, val: v }
     }
-    pub fn borrow(&self) -> &T {
-        &self.val
+    fn __flag(&self) -> *mut isize {
+        &self.flag as *const isize as *mut isize
     }
-    pub fn borrow_mut(&self) -> &mut T {
-        unsafe { &mut *(&self.val as *const T as *mut T) }
+    pub fn borrow(&self) -> Ref<T> {
+        let f = self.__flag();
+        if unsafe { *f } < 0 {
+            panic!("RefCell already mutably borrowed");
+        }
+        unsafe {
+            *f += 1;
+        }
+        Ref { __v: &self.val as *const T, __b: f }
+    }
+    pub fn borrow_mut(&self) -> RefMut<T> {
+        let f = self.__flag();
+        if unsafe { *f } != 0 {
+            panic!("RefCell already borrowed");
+        }
+        unsafe {
+            *f = -1;
+        }
+        RefMut { __v: &self.val as *const T as *mut T, __b: f }
+    }
+    pub fn try_borrow(&self) -> Result<Ref<T>, BorrowError> {
+        if unsafe { *self.__flag() } < 0 { Err(BorrowError { _p: () }) } else { Ok(self.borrow()) }
+    }
+    pub fn try_borrow_mut(&self) -> Result<RefMut<T>, BorrowMutError> {
+        if unsafe { *self.__flag() } != 0 { Err(BorrowMutError { _p: () }) } else { Ok(self.borrow_mut()) }
     }
     pub fn into_inner(self) -> T {
         self.val
     }
     pub fn replace(&self, v: T) -> T {
-        __core_replace(self.borrow_mut(), v)
+        let mut g = self.borrow_mut();
+        __core_replace(g.deref_mut(), v)
+    }
+    pub fn replace_with<F: FnOnce(&mut T) -> T>(&self, f: F) -> T {
+        let mut g = self.borrow_mut();
+        let v = f(g.deref_mut());
+        __core_replace(g.deref_mut(), v)
     }
     pub fn take(&self) -> T {
-        __core_replace(self.borrow_mut(), __exr_default::<T>())
+        let mut g = self.borrow_mut();
+        __core_replace(g.deref_mut(), __exr_default::<T>())
+    }
+    pub fn swap(&self, other: &RefCell<T>) {
+        let mut a = self.borrow_mut();
+        let mut b = other.borrow_mut();
+        __core_swap(a.deref_mut(), b.deref_mut());
     }
     pub fn get_mut(&mut self) -> &mut T {
         &mut self.val
+    }
+    pub fn as_ptr(&self) -> *mut T {
+        &self.val as *const T as *mut T
+    }
+}
+
+// `RefCell::borrow` のガード: 生きている間は共有の借用を一つ数える
+// (フィールドの名前は値のフィールドと重ならないもの: `guard.f` は値の f)
+pub struct Ref<T> {
+    __v: *const T,
+    __b: *mut isize,
+}
+
+impl<T> Ref<T> {
+    pub fn deref(&self) -> &T {
+        unsafe { &*self.__v }
+    }
+}
+
+impl<T> Drop for Ref<T> {
+    fn drop(&mut self) {
+        unsafe {
+            *self.__b -= 1;
+        }
+    }
+}
+
+// `RefCell::borrow_mut` のガード: 生きている間は可変の借用 (ほかの借用はすべて panic)
+pub struct RefMut<T> {
+    __v: *mut T,
+    __b: *mut isize,
+}
+
+impl<T> RefMut<T> {
+    pub fn deref(&self) -> &T {
+        unsafe { &*self.__v }
+    }
+    pub fn deref_mut(&mut self) -> &mut T {
+        unsafe { &mut *self.__v }
+    }
+}
+
+impl<T> Drop for RefMut<T> {
+    fn drop(&mut self) {
+        unsafe {
+            *self.__b = 0;
+        }
+    }
+}
+
+// `Ref::map(r, |v| &v.f)` / `RefMut::map(m, ..)` / `Ref::clone(&r)` (associated functions, not methods: `g.map(..)` is
+// the value's). The new guard holds the borrow of the old one, which is forgotten instead of dropped
+pub fn __exr_ref_map<T, U, F: FnOnce(&T) -> &U>(orig: Ref<T>, f: F) -> Ref<U> {
+    let v = f(unsafe { &*orig.__v }) as *const U;
+    let b = orig.__b;
+    __core_forget(orig);
+    Ref { __v: v, __b: b }
+}
+
+pub fn __exr_refmut_map<T, U, F: FnOnce(&mut T) -> &mut U>(orig: RefMut<T>, f: F) -> RefMut<U> {
+    let v = f(unsafe { &mut *orig.__v }) as *mut U;
+    let b = orig.__b;
+    __core_forget(orig);
+    RefMut { __v: v, __b: b }
+}
+
+pub fn __exr_ref_clone<T>(orig: &Ref<T>) -> Ref<T> {
+    unsafe {
+        *orig.__b += 1;
+    }
+    Ref { __v: orig.__v, __b: orig.__b }
+}
+
+impl<T> Debug for Ref<T> {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError> {
+        __exr_debug(self.deref(), f);
+        Ok(())
+    }
+}
+
+impl<T> Display for Ref<T> {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError> {
+        __exr_display(self.deref(), f);
+        Ok(())
+    }
+}
+
+impl<T> Debug for RefMut<T> {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError> {
+        __exr_debug(self.deref(), f);
+        Ok(())
+    }
+}
+
+impl<T> Display for RefMut<T> {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError> {
+        __exr_display(self.deref(), f);
+        Ok(())
     }
 }
 
@@ -9275,7 +9447,12 @@ impl<T> Debug for RefCell<T> {
     fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError> {
         __exr_dbg_begin::<()>(f, "RefCell", 0);
         __exr_dbg_item::<()>(f, 0, "value");
-        __exr_debug(&self.val, f);
+        // (borrowed mutably: what std prints instead of the value, which the RefMut may be changing)
+        if self.flag < 0 {
+            f.buf.push_str("<borrowed>");
+        } else {
+            __exr_debug(&self.val, f);
+        }
         __exr_dbg_item_end::<()>(f);
         __exr_dbg_end::<()>(f, 1, 0, false);
         Ok(())

@@ -73,3 +73,4 @@ Japanese versions are in [../ja/reports/](../ja/reports/README.md).
 | 2026-11-20 | [`std::thread` as green threads](2026-11-20-02-green-threads.md) |
 | 2026-11-20 | [Benchmarks in the shapes of application code](2026-11-20-03-bench-patterns.md) |
 | 2026-11-21 | [Security regression tests from Rust's CVEs, the same patterns elsewhere, and a wasm sandbox](2026-11-21-01-security-cves.md) |
+| 2026-11-21 | [RefCell's borrow flag and guards, and when temporaries are dropped](2026-11-21-02-refcell-guards.md) |

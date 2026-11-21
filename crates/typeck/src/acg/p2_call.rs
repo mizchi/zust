@@ -109,6 +109,26 @@ impl Cx<'_> {
                 }
             }
         }
+        // (`g.m()` with g a RefCell's Ref / RefMut or a MutexGuard, and m not the guard's own: `(*g).m()`, so the value's
+        // methods are found as for the value itself, the builtin ones of String / Vec / slices too)
+        if let Some((sid, target, mutable)) = self.peek(recv).and_then(|t| self.guard_of(self.strip_refs(t))) {
+            // (`(&*g).m()` / `(&mut *g).m()` for a RefMut: a method that takes self by value moves out of a
+            // reference, an error (E0507) as through any reference)
+            if self.prog.method(sid, method).is_none() {
+                let deref = Expr::Unary("*".into(), recv.clone(), Default::default());
+                let inner = Expr::Paren(Box::new(Expr::Ref(mutable, Box::new(deref))));
+                let target = Ty::Ref(mutable, intern(target));
+                let ne: &Expr = self.keep_expr(Expr::MethodCall(Box::new(inner), method.to_string(), gargs.clone(), margs.clone(), msp));
+                // (the new receiver's type, for what looks the method up by it: String's and Vec's builtin methods)
+                if let Expr::MethodCall(r, ..) = ne {
+                    self.lets.insert(&**r as *const Expr as usize, target);
+                    if let Expr::Paren(i) = &**r {
+                        self.lets.insert(&**i as *const Expr as usize, target);
+                    }
+                }
+                return self.expr(ne, expected);
+            }
+        }
         if let Some(ne) = self.bound_method_call(recv, method, gargs, margs) {
             let ne: &Expr = self.keep_expr(ne);
             return self.expr(ne, expected);
@@ -256,7 +276,11 @@ impl Cx<'_> {
         }
         let tf: Option<&[GArg]> = (!gargs.is_empty()).then_some(&gargs[..]);
         // `x.unwrap()` / `x.expect(..)`: panic の場所 (メソッド名の位置) を先に書いておく (#[track_caller] 相当)
-        if matches!(method, "unwrap" | "expect" | "unwrap_err" | "expect_err") && self.prog.panic_handler.is_none() {
+        // (and `c.borrow()` / `c.replace(..)` .. of a RefCell, whose overlapping borrow panics at the call, as in std)
+        let refcell = matches!(method, "borrow" | "borrow_mut" | "replace" | "replace_with" | "take" | "swap")
+            && self.user_code
+            && self.peek(recv).is_some_and(|t| self.is_refcell(t));
+        if (refcell || matches!(method, "unwrap" | "expect" | "unwrap_err" | "expect_err")) && self.prog.panic_handler.is_none() {
             if let Some(&ci) = self.prog.const_index.get("__EXR_CALLER") {
                 let (l, c) = self.loc(msp.at);
                 let v = self.b.ins().iconst(types::I64, ((l as i64) << 16) | c as i64);
