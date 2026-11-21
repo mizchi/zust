@@ -1,6 +1,6 @@
 # 001: バリアントの修飾と名前付きフィールド
 
-状態: 評価中 (r4)
+状態: 評価中 (r5)
 
 ## 動機
 
@@ -39,19 +39,26 @@
   3. 関数の終わりまで決まらないとき
      - prelude の `None` なら、prelude の `Option` に決める
      - それ以外はエラー: ``cannot tell which enum `Empty` is: write `Shape::Empty` or `Cell::Empty` ``
-     - LSP のクイックフィックスで修飾を足せる
+     - LSP のクイックフィックスで修飾を足せる。候補の enum ごとに 1 つずつ出す(`Shape::Empty`、`Cell::Empty`)
 - **prelude の Option / Result**(r3 の決定 5)
   - 対象は、003 で標準にする `Option` / `Result` のバリアント(`None` / `Some` / `Ok` / `Err`)だけ
   - 整数リテラルが、決まらなければ i32 になるのと同じ。決まらなければ prelude の型になる
   - 引数のあるもの(`Some(1)`)は、期待する型がなければ、その場で prelude の enum として推論する
     - 総称なので、引数の型が誤った位置でエラーになる心配はない
     - 期待する型が、まだ決まっていない候補つきの型変数(`let mut best = None` の `best`)のときも、期待する型がないものとして扱う
+    - そのために型が合わなくなったら、クイックフィックスに、候補の中で同じ名前のバリアントを持つ enum の修飾を出す(`p = Ok(s)` なら `Parsed::Ok(s)`。下の `h` の例)
+      - 候補の数で決めることはしない。直し方として示すだけ
   - 期待する型が、同じ名前のバリアントを持つユーザーの enum なら、そちらが勝つ(`describe` の `None`)
   - prelude は固定なので、enum を足しても離れた場所の意味は変わらない(r1 の A.1 の問題は戻らない)
   - prelude に決まったことが原因の型エラーには、「期待する型がないので、ここで `Result::Ok` に決まった」という注を付ける
   - ユーザーの enum のバリアントは、今までどおり修飾か期待する型で決める
 - **決まっていない値は、使う前に決める**
-  - 決まっていない値を match にかける、フィールドを読む、メソッドを呼ぶと、その場で修飾を求めるエラー
+  - 決まっていない値を match にかける、フィールドを読む、メソッドを呼ぶときは、その場で決める
+    - 候補に prelude の enum があれば、その場で既定値に決める(r5)
+      - 小数リテラルにメソッドを呼ぶと、その場で f64 に決まるのと同じ
+      - `let x = None; match x { Some(v) => v, None => 0 }` は通る(`Option`)
+      - 決まった場所に「ここで `Option::None` に決まった」の注を付ける
+    - 候補に prelude の enum がなければ(`Empty` など)、その場で修飾を求めるエラー
   - match のパターンから逆に決めることはしない(パターンの解決と循環するため)
   - 照合する値の型が、候補のない、ふつうの型変数のとき(総称的な関数の中、`|>` で型が後から決まるとき)
     - 修飾されたパターン(`Shape::Circle { … }`)があれば、それで決める
@@ -77,12 +84,20 @@
   - データの enum のバリアントとは、同じ名前でよい
   - 修飾(`perform Console::Print(…)`、handler の arm の `Console::Print(s), k =>`)は書けるが、必須ではない
   - 理由: effect の推論は型検査の前に名前だけで行う。操作名を effect の間で一意にすれば、名前だけで決まる
-- **同じ名前の関数とバリアント**(r3 の決定 6)
+- **同じ名前の関数とバリアント**(r3 の決定 6、r4 の決定 8 で狭めた)
   - 両方を宣言できる(`fn Circle(…) -> Jsx` と `Shape::Circle`)
-  - そのとき、バリアントは修飾したとき(`Shape::Circle`)だけ書ける。式でもパターンでも同じ
-  - 修飾しない `Circle` は関数。`<Circle />` も関数
-  - 修飾しない `Circle { … }` をパターンに書くと、直し方(`Shape::Circle { … }`)つきのエラー
-  - effect の推論には、修飾したパスを渡す。そのため、名前だけで関数とバリアントを取り違えない
+  - ここでの「関数」は、値の名前空間にあるものすべて: fn、extern、wasm fn、ローカルの変数
+  - **修飾が要るのは、関数と書き方が重なる形だけ**
+    - 重なるのは、呼び出しの形 `Circle(…)` と、裸の `Circle`
+    - 同じ名前の関数があれば、この 2 つは関数(ローカルの変数なら、その変数)。バリアントは `Shape::Circle(…)`、`Shape::Circle` と書く
+    - `<Circle />` も関数
+  - **`Circle { … }` の生成とパターンは、今までどおり期待する型でバリアントに決める**
+    - 関数は `Name {` の形にならないので、取り違えない
+    - parser は `Name {` を、バリアント(またはレコード)の生成として印を付ける(`EK::Record`)。そのため effect の推論は、これを関数の呼び出しとして見ない
+  - 修飾したパス(`Shape::Circle(…)`)は、パスのまま effect の推論に渡す。名前だけで関数とバリアントを取り違えない
+  - 同じ名前の関数を 1 つ足しても、離れた所の `Circle { … }` の生成とパターンは壊れない
+- **enum と同じ名前のバリアントは許す**: `enum Hit { Hit(i32) }`
+  - 型の名前とバリアントの名前は、書く位置が違うので重ならない
 - **宣言の時点でエラーにするのは、型の別名とバリアントの同名だけ**
   - `type Circle = { … }` や `@nominal type Circle = { … }` と、同じファイルの `Shape::Circle`
   - 理由
@@ -114,6 +129,7 @@ enum Shape {
     - Rust 式の `..` を書いたら、直し方(`...` にする)つきのエラー
     - 残りに名前を付ける `...rest` は、まだ入れない(未決事項)
   - `Circle { center: c, r }`: 名前を変えて束縛
+  - 位置引数のバリアントでも、残りは `...`: `Pair(...)` は書ける(どのフィールドも取り出さない)
   - `Label { text: "", ... }`: リテラルとの照合
     - 整数、文字列、bool だけ
     - 浮動小数点のリテラルパターンは、NaN と -0.0 の扱いが直感とずれるので書けない
@@ -128,32 +144,59 @@ enum Shape {
     - `Ok(c @ Circle { center, ... }) => …`: `c` は Circle に絞り込まれる
   - 絞り込みは、型ではなく束縛に付く情報(変数 → バリアント)
     - `s` の型は、腕の中でも `Shape` のまま
-    - `let d = s` の `d` も絞り込まれる(情報を写す)
+    - `let d = e` の `d` には、`narrow_of(e)` を写す(下)。`let d = s` の `d` も絞り込まれる
+  - **どの式が絞り込みを運ぶか**: `narrow_of(e)` を構文だけで決める(r5)
+    - 変数とフィールドのパス: その束縛の情報
+    - バリアントの生成 `Circle { … }`(更新 `Circle { ...c, … }` も): そのバリアント
+    - 戻り値の型が `Shape::Circle` の関数の呼び出し: Circle
+    - ブロック: 末尾の式の `narrow_of`
+    - `if` と `match`: すべての分岐が同じバリアントのときだけ、そのバリアント
+    - それ以外: なし
+  - **クロージャ**: 不変の束縛の絞り込みは、クロージャの中にも写す(r5)
+    - `Circle { ... } => xs.map((x) => s.r * x)` は通る
+    - `let mut` の変数はもともとクロージャから捕まえられないので、写しても値は変わらない
   - 絞り込まれた `let mut` の変数に、腕の中で代入するとエラー
     - 直し方: 別の変数に束縛する、または `@` で名前を付ける
     - 後で緩めることはできる(互換を壊さない)
+  - **絞り込まれた値の match と `let`**(r5)
+    - そのバリアントの腕だけで網羅的: `match c { Circle { r, ... } => r }`(`c: Shape::Circle`)
+    - 他のバリアントの腕は、到達しない警告
+    - `let Circle { r, ... } = c;` は反駁不能なので、`let` に書ける
 - **型 `Shape::Circle`**
   - 注釈、引数、戻り値の型の位置に書ける: `fn grow(c: Shape::Circle) -> Shape::Circle { Circle { ...c, r: c.r * 2.0 } }`
   - ただし、型検査の中の型(Ty)にはならない。値の型は常に `Shape`
-  - `Shape::Circle` と書いた所では、来る値が Circle に絞り込まれているかを確かめる
-    - 通るもの: 絞り込まれた変数、`Circle { … }` の生成、戻り値が `Shape::Circle` の関数の呼び出し
+  - `Shape::Circle` と書いた所では、来る式 `e` の `narrow_of(e)` が Circle かを確かめる
+    - 通るもの: 絞り込まれた変数、`Circle { … }` の生成、戻り値が `Shape::Circle` の関数の呼び出し、末尾がそれらのブロック、全分岐がそれらの `if` / `match`
     - それ以外はエラー: ``expected `Shape::Circle`, found `Shape` (narrow it with `match`)``
   - 型が `Shape::Circle` の引数と、注釈つきの `let` の変数は、絞り込まれた束縛になる
-  - 型引数の中(`Array<Shape::Circle>`)とレコードのフィールドの型には、r4 では書けない(未決事項)
+  - 型引数の中(`Array<Shape::Circle>`)とレコードのフィールドの型には、r5 でも書けない(未決事項)
+  - **引数に `Shape::Circle` を持つ関数は、直接呼ぶときだけ使える**(r5)
+    - 直接の呼び出しには、`|>` の右辺も含む(`c |> grow`)
+    - 値として使うとエラー: `shapes |> .map(grow)`、`let f = grow`
+      - ``error: `grow` takes a narrowed `Shape::Circle`, so it can only be called directly: wrap it in a match, `(s) => match s { Circle { ... } => grow(s), _ => s }` ``
+    - 理由: 値としての型は `(c: Shape) => Shape` になり、絞り込みの検査が消える。Rect が渡ると、JS では NaN が静かに返り、wasm では trap する
+    - クロージャの引数(`(c: Shape::Circle) => c.r`)と、関数型の中(`(c: Shape::Circle) => f64`)には、`Shape::Circle` を書けない
+    - 戻り値だけが `Shape::Circle` の関数は、値として使える。値としての型は `(…) => Shape` で、呼んだ結果は絞り込みを運ばない
+  - **TS から来る値**(r4 の決定 9)
+    - `Shape::Circle` を受ける `pub` な関数は、入口で TAG を確かめる。違えば TypeError
+    - TS からは型の上では Circle しか渡せないが、`as` や `any` を通すと Rect が届くため
+    - 内部の呼び出しでは確かめない(型検査で、絞り込まれていることが分かっているため)
+    - 出力は下の「出力」
 - **単一化に部分型はない**
   - 単一化のほかにある規則は、絞り込みの情報だけ
   - `if b { s } else { t }`、`[c, shape]`、match の腕の結果は、どれも `Shape`。書いた順で結果は変わらない
-  - 絞り込みの情報を見るのは、次の 3 つだけ
+  - 絞り込みの情報を見るのは、次の所だけ
     - フィールドの読み出し(`c.r`)
     - spread の元(`Circle { ...c, … }`)
     - 期待する型が `Shape::Circle` と書かれた所の検査(注釈、引数、戻り値)
+    - 絞り込まれた値の match の網羅性と、`let` のパターンの反駁不能の判定
 - **更新**
   - 002 の spread の規則に従う
     - `...` は先頭に 1 つだけ。後に書いたフィールドが勝つ(JS と同じ)
     - 結果の型は `Shape`。spread の元と同じ絞り込み(Circle)が付く
     - 後のフィールドは、c にあるフィールドを同じ型で上書きするだけ
   - バリアントからの更新には、バリアント名を書く: `Circle { ...c, center: x }`
-    - 名前なしの `{ ...c, center: x }` で `c` がバリアントなら、エラーにして `Circle { ...c, center: x }` を示す
+    - 名前なしの `{ ...c, center: x }` で `c` がバリアントなら、エラーにして `Circle { ...c, center: x }` を示す(LSP のクイックフィックスにする)
     - 名前なしの `{ … }` は 002 のレコードを作る書き方で、バリアントではないため
     - 名前を求めるのは spread の元がバリアントのときだけ(出力に判別キーを書くため)。`@nominal` のレコードは 002 の規則どおり、名前なしでも `...m` の型になる
   - レコードからバリアントへの spread(`Circle { ...rec, r: 1.0 }`、`rec` は 002 のレコード)はエラー
@@ -219,6 +262,11 @@ pub fn moved(s: Shape, d: Vec2) -> Shape {
 
 fn grow(c: Shape::Circle) -> Shape::Circle { Circle { ...c, r: c.r * 2.0 } }
 
+fn shrink(c: Shape::Circle, big: bool) -> Shape::Circle {
+  let r = c.r / 2.0;
+  if big { Circle { ...c, r } } else { c }   // 通る: 両方の分岐の narrow_of が Circle
+}
+
 pub fn grow_all(shapes: Array<Shape>) -> Array<Shape> {
   shapes |> .map((s) => match s {
     Circle { ... } => grow(s),     // 通る: s は Circle に絞り込まれている
@@ -229,6 +277,28 @@ pub fn grow_all(shapes: Array<Shape>) -> Array<Shape> {
 fn grow_first(shapes: Array<Shape>) -> Shape {
   grow(shapes[0])
   //   ^^^^^^^^^ error: expected `Shape::Circle`, found `Shape` (narrow it with `match`)
+}
+
+fn grow_each(shapes: Array<Shape>) -> Array<Shape> {
+  shapes |> .map(grow)
+  //             ^^^^ error: `grow` takes a narrowed `Shape::Circle`, so it can only be called directly
+  //                  (wrap it in a match, as in `grow_all`)
+}
+
+pub fn radius(c: Shape::Circle) -> f64 {
+  let Circle { r, ... } = c;   // c は Circle に絞り込まれているので、反駁不能
+  r
+}
+
+fn diameter(c: Shape::Circle) -> f64 {
+  match c { Circle { r, ... } => 2.0 * r }   // Circle の腕だけで網羅的。Rect の腕を書くと、到達しない警告
+}
+
+fn scaled(s: Shape, xs: Array<f64>) -> Array<f64> {
+  match s {
+    Circle { ... } => xs.map((x) => s.r * x),   // s は不変なので、クロージャの中でも Circle に絞り込まれている
+    _ => xs,
+  }
 }
 
 pub fn describe(p: Parsed) -> String {
@@ -255,6 +325,11 @@ fn last_positive(xs: Array<i32>) -> i32 {
   match best { Some(i) => i, None => -1 }
 }
 
+fn zero_or_value() -> i32 {
+  let x = None;                           // 候補: Option | Hit | Parsed
+  match x { Some(v) => v, None => 0 }     // match にかけた所で、prelude の Option に決まる(r5)
+}
+
 fn describe_later(c: bool) -> i32 {
   let h = if c { None } else { At { index: 1 } };
   //                           ^^ error: cannot tell which enum `At` is: write `Hit::At`
@@ -275,6 +350,8 @@ fn describe_later_b(c: bool) -> i32 {
 
 - `describe_later` の `At` は prelude のバリアントではないので、既定値はない。r3 と同じく、その場で修飾を求める
 - `last_positive` は、r3 では `Some(i)` に修飾が要った。r4 では prelude の既定値で通る
+- `zero_or_value` は、r4 ではエラーだった(決まっていない値の match)。r5 では、match の時点で既定値に決まる
+- `shrink` は、ブロックの末尾と `if` の両方の分岐から `narrow_of` を求めて通る
 - if の本体の `{ None }` には、002 の `{ x }` の警告は出ない(block() が直接読む本体のため)
 - 遅らせた `None` や prelude の既定値が原因で型が合わないときは、決まった場所に注が付く
 
@@ -293,31 +370,49 @@ fn g(s: Shape) -> String {
   describe(p)       // error: expected `Parsed`, found `Result<Shape, _>`
                     // (quick fix: `Parsed::Ok(s)`, or annotate `let p: Parsed = …`)
 }
+
+fn h(s: Shape) -> String {
+  let mut p = None; // 候補: Option | Hit | Parsed
+  p = Ok(s);        // error: expected `Option<_> | Hit | Parsed`, found `Result<Shape, _>`
+                    // (quick fix: `Parsed::Ok(s)`: `Parsed` is one of the candidates and has `Ok`)
+  describe(p)
+}
 ```
 
-同じ名前のコンポーネント関数があるファイルでは、次のように書く(r3 の決定 6)。
+同じ名前のコンポーネント関数があるファイルでは、次のように書く(r4 の決定 8)。
 
 ```zsc
 fn Circle({ r }: { r: f64 }) -> Jsx { <circle r={r} /> }   // Shape::Circle と同じ名前でよい
 
 fn view(s: Shape) -> Jsx {
   match s {
-    Shape::Circle { r, ... } => <Circle r={r} />,   // バリアントは修飾して書く。<Circle /> は関数
-    Rect { ... } => <rect />,                       // 同名の関数がないバリアントは、今までどおり
+    Circle { r, ... } => <Circle r={r} />,   // パターンの `Circle {` はバリアント(関数と書き方が重ならない)。<Circle /> は関数
+    Rect { ... } => <rect />,
     Label { text, ... } => <text>{text}</text>,
   }
 }
-// 修飾しない `Circle { r, ... } =>` は error: `Circle` is a function here: write `Shape::Circle`
-// このファイルでは、上の area / moved の `Circle` も `Shape::Circle` と書く
+// 上の area / moved の `Circle { … }` も、このファイルでそのまま書ける
+```
+
+修飾が要るのは、関数と書き方が重なる `Circle(…)` と裸の `Circle` だけ。上の B の `Shape` には位置引数の `Pair` とデータなしの `Empty` があるので、同じ名前の関数があれば次のようになる。
+
+```zsc
+fn Pair(a: Vec2, b: Vec2) -> Jsx { … }
+fn Empty() -> Jsx { … }
+
+fn sample(a: Vec2, b: Vec2) -> Array<Shape> {
+  [Shape::Pair(a, b), Shape::Empty]   // 修飾しない `Pair(a, b)` と `Empty` は関数
+}
 ```
 
 ## 出力
 
-表現(`TAG` をキーにすること)は保留中の決定に従う。この提案が決めるのは次の 3 つ。
+表現(`TAG` をキーにすること)は保留中の決定に従う。この提案が決めるのは次の 4 つ。
 
 - 名前付きフィールドが**名前のまま**プロパティになる
 - 更新では、判別キーを spread の後に明示する
 - `.d.ts` にバリアントごとの型を出す
+- `Shape::Circle` を受ける `pub` な関数は、入口で判別キーを確かめる(r4 の決定 9)
 
 ```js
 // Circle { center: c, r: 2.0 }
@@ -328,6 +423,35 @@ if (s.TAG === "Circle") { const center = s.center; return { ...s, TAG: "Circle",
 
 - 判別キーを spread の後に書くのは、結果のバリアントが、`...s` の中身によらず字面どおりになるようにするため
 - 同じ名前の関数とバリアントは、JS では関数 `Circle` とオブジェクトのリテラルになるので、衝突しない
+
+`pub fn radius(c: Shape::Circle) -> f64` の入口の検査(r4 の決定 9)。
+
+```js
+// 内部の呼び出しはこちら(検査しない)
+function radius(c) {
+  const r = c.r;
+  return r;
+}
+// TS から呼ばれる入口だけが確かめる
+function $pub_radius(c) {
+  if (c.TAG !== "Circle") throw new TypeError("radius: expected Shape.Circle, found " + c.TAG);
+  return radius(c);
+}
+export { $pub_radius as radius };
+```
+
+- 検査するのは、引数の型に `Shape::Circle` と書いた `pub` な関数だけ。それ以外の `pub` な関数の出力は今までどおり
+- `@wasm` の関数では、JS の glue の先頭で確かめる。スロットに分解する前なので、Rust の `unreachable!()` には届かない
+
+```js
+// @wasm pub fn radius(c: Shape::Circle) -> f64 の glue(Shape が @wasm で使える Copy の形だとして)
+export function radius(c) {
+  if (c.TAG !== "Circle") throw new TypeError("radius: expected Shape.Circle, found " + c.TAG);
+  return $w.__zsc_w_radius(["Circle", "Rect", "Label"].indexOf(c.TAG), (c.TAG === "Circle" ? c.center.x : 0), …);
+}
+```
+
+- wasm の中(Rust の関数どうし)の呼び出しは glue を通らないので、確かめない
 
 ```ts
 export type Shape = Shape.Circle | Shape.Rect | Shape.Label;
@@ -345,7 +469,8 @@ export declare namespace Shape {
   - 境界のスロットへの分解は、位置引数のバリアントと同じ(`VTy::Enum` にフィールド名を持たせる)
   - 型が `Shape::Circle` の引数と戻り値も、境界では `ZsShape` のまま渡す
   - Rust の enum にはフィールドの読み出しがないので、絞り込んだ変数は腕のパターンで全フィールドを束縛し直す
-    - パターンで名前を付けたフィールドはその名前、付けなかったフィールドは `s_r` のような名前にする
+    - パターンで名前を付けたフィールドはその名前、付けなかったフィールドは `__zs_s_r` のような名前にする
+      - 生成する名前は `__zs` の名前空間に置く。lower.rs の `local()` がソースの名前をこの名前空間の外へ移すので、利用者の変数と衝突しない
     - `s.r` は、その名前に下ろす
     - 腕の中で `s` そのものを値として使うときは、束縛したフィールドから組み立て直す
   - 型が `Shape::Circle` の引数は、本体の先頭で `let … else { unreachable!() }` で分解する
@@ -353,12 +478,12 @@ export declare namespace Shape {
 
 ```rust
 // moved の Circle の腕
-ZsShape::Circle { center, r: s_r } => ZsShape::Circle { center: add(center), r: s_r },
+ZsShape::Circle { center, r: __zs_s_r } => ZsShape::Circle { center: add(center), r: __zs_s_r },
 
 // fn grow(c: Shape::Circle) -> Shape::Circle { Circle { ...c, r: c.r * 2.0 } }
 fn grow(c: ZsShape) -> ZsShape {
-    let ZsShape::Circle { center: c_center, r: c_r } = c else { unreachable!() };
-    ZsShape::Circle { center: c_center, r: c_r * 2.0 }
+    let ZsShape::Circle { center: __zs_c_center, r: __zs_c_r } = c else { unreachable!() };
+    ZsShape::Circle { center: __zs_c_center, r: __zs_c_r * 2.0 }
 }
 ```
 
@@ -370,6 +495,9 @@ fn grow(c: ZsShape) -> ZsShape {
   - 候補つきの型変数の候補に、prelude の enum も入れる
   - 引数のあるものは、期待する型がなければ、その場で prelude の enum の型にする
 - 遅延した解決は関数の中で閉じる(finish_fn で決める)。アイテム単位の増分検査は変わらない
+- **使う地点での既定値**: `EK::Match` の照合する値、`EK::Field`、`EK::Method` の受け手が候補つきの型変数なら、その場で候補を見る
+  - 候補に prelude の enum があればそれに決める(`EK::Method` が小数のリテラルを f64 に決めているのと同じ所)。なければ修飾を求める
+- **クイックフィックス**: 候補つきの型変数との単一化に失敗したら、候補の中で同じ名前のバリアントを持つ enum の修飾(`Parsed::Ok(s)`)を出す
 - **finish_fn の順序**
   1. 残った候補つきの型変数を片付ける
      - 候補に prelude の enum があれば、それに決める(既定値)
@@ -384,17 +512,33 @@ fn grow(c: ZsShape) -> ZsShape {
   - 足りないものは `Ok(Circle { ... })` の形で示す。到達しない腕は警告
 - **絞り込みは束縛のメタデータ**(変数またはフィールドのパス → バリアント)
   - Ty にバリアントの型は入れない。単一化はすべて `Shape` で行う
-  - メタデータを見るのは、`EK::Field`、spread の元、期待する型が `Shape::Circle` と書かれた所の検査だけ
-  - `let d = s` では、メタデータを写す
-  - 型の位置の `Shape::Circle` は、(型 `Shape`、絞り込み Circle)の組として読む。型引数の中ならエラー
+  - scopes の値を `(Ty, Option<Narrow>)` にする(今は `HashMap<String, Ty>`)
+  - `narrow_of(e)` は構文だけで決める関数にする(B の定義のとおり)。infer の戻り値は Ty のまま
+  - メタデータを見るのは、`EK::Field`、spread の元、期待する型が `Shape::Circle` と書かれた所の検査、網羅性と `irrefutable` だけ
+  - `let d = e` では、`narrow_of(e)` を写す
+  - `EK::Closure` に入るとき、不変の束縛のメタデータはそのまま見える(可変の束縛は、もともと捕まえられない)
+  - 型の位置の `Shape::Circle` は、(型 `Shape`、絞り込み Circle)の組として読む。型引数の中、クロージャの引数、関数型の中ならエラー
+- **引数に `Shape::Circle` を持つ関数を値として使うこと**は、`EK::Var` で拒む
+  - effect を持つ関数を値として使うのを拒むのと同じ所で、呼び出しの callee の位置かどうかを見る
+  - `x |> f` / `x |> f(a)` は脱糖した後の呼び出しの callee なので、通る
+- **パターン行列**には、照合する値の絞り込みを渡す。絞り込まれた値では、そのバリアントだけを値の候補にする(他の腕は到達しない)
 - **effect の操作の表 `op_of`** を、`variant_of` から分ける
   - EffWalk、`EK::Perform`、`EK::Handle` は `op_of` を引く
   - parse.rs の handler の arm で、`Console::Print` の修飾を読めるようにする(`HArm` に enum 名を持たせる)
-- **同じ名前の関数とバリアント**
-  - 修飾しない名前は、同じ名前の関数があれば関数として解決する
+- **同じ名前の関数とバリアント**(決定 8)
+  - 修飾しない `Circle(…)` と裸の `Circle` は、値の名前空間(ローカル、fn、extern、wasm fn)に同じ名前があれば、それとして解決する。今の `EK::Var` の引き順(local → fns → externs → wasm → variant)と同じ
+  - `Name {` は parser が `EK::Record` にするので、関数の表を引かない。checker が期待する型でバリアントかレコードかを決める
   - 修飾したバリアントは、パスのまま EffWalk に渡る。EffWalk は関数の表を引かない
-- `irrefutable` を checker のメソッドにする(`let { x, y } = p` の判定には型が要る)
+- `irrefutable` を checker のメソッドにする(`let { x, y } = p` の判定には型が、`let Circle { r, ... } = c` の判定には絞り込みが要る)
 - lexer の `PUNCTS` に `...` を足す。前から順に照合するので、`..` より前に置く
+- **parse.rs**
+  - primary: `Ident ::` の後で `EK::Path` を返す所で、次が `{` で no_rec でなければ、レコードの形(`Shape::Circle { … }`)として読む
+  - pat(): `Pat::Record(Option<path>, fields, rest, Id)` を足す。`{ … }`、`Name { … }`、`Path { … }` と、残りの `...` を読む。位置引数の `Pair(...)` も読む
+  - ty(): `::` を読む(`Shape::Circle`)
+  - `EK::Record` に enum の修飾(`Option<path>`)を持たせる。`...` は先頭だけ。今の末尾の `..base` は、直し方つきのエラーにする
+- **入口の検査**(決定 9)
+  - js.rs: `pub` で、引数に `Shape::Circle` を持つ関数は、本体を export せず、`$pub_radius` の入口を足して `export { $pub_radius as radius }` にする
+  - wasm.rs: その関数の glue の先頭(jpre の前)に、TAG の検査を足す
 
 ## 代替案
 
@@ -413,26 +557,57 @@ fn grow(c: ZsShape) -> ZsShape {
 7. **同じ名前の関数とバリアントを宣言の時点でエラーにする**(r3)
    - UI では、`Shape::Circle` を描くコンポーネントを `Circle` と名付けることが多い
    - 廃止し、バリアントを修飾で書くことにした(r3 の決定 6)
+8. **同じ名前の関数があるとき、`Circle { … }` の生成とパターンにも修飾を求める**(r4、決定 6)
+   - 関数を 1 つ足すと、同じファイルの離れた `Circle { … }` が一斉にエラーになる(r1 の A.1 に近い)
+   - `Name {` の形には関数が来ないので、修飾は要らない
+   - 修飾を求めるのは、関数と書き方が重なる形だけに狭めた(r4 の決定 8)
+9. **名前なしの `{ ...s, center }` を、絞り込まれた `s` のバリアントの更新として読む**(r4 の ts-dev の案)
+   - TS の人は、絞り込んだ値に `{ ...s, center }` と書く
+   - 出力に書く判別キーは、`s` の絞り込みから分かる
+   - ただし、同じ字面の式の意味が、`s` が絞り込まれているかどうかで変わる(バリアントの更新か、002 のレコードか)
+   - r5 では選ばない。エラーとクイックフィックス(`Circle { ...s, center }`)のままにする(未決事項)
 
 ## 未決事項
 
 - 全バリアントに共通するフィールド(すべてに `at` がある)を、絞り込まずに `s.at` で読めるようにするか
 - 絞り込みを、`if` の条件(`if s is Circle { … }` のような形)にも広げるか
-- `Shape::Circle` を型引数の中(`Array<Shape::Circle>`)やフィールドの型に書けるようにするか
-- 型が `Shape::Circle` の値を match にかけたときの網羅性(`Circle` の腕 1 つで足りるとするか)
-- 絞り込まれた変数をクロージャが捕まえたとき、クロージャの中でも絞り込まれたままか
-- 同じ名前の関数があるとき、パターンでは修飾を省けるようにするか(パターンに関数は来ないため)
-- 型の別名とバリアントの同名のエラーを、関数と同じ規則(修飾でなら許す)に緩めるか
+- `Shape::Circle` を型引数の中(`Array<Shape::Circle>`)、フィールドの型、クロージャの引数、関数型の中に書けるようにするか
+- 名前なしの `{ ...s, center }` を、絞り込まれた `s` の更新として読むか(代替案 9。r5 では読まない)
+- 同じ名前の関数があるとき、位置引数のパターン `Pair(a, b)` と裸の `Empty` のパターンでも、修飾を省けるようにするか(パターンに関数は来ないため。r5 では、式と同じく修飾が要る)
+- 型の別名とバリアントの同名のエラーを、関数と同じ規則(重なる形だけ修飾)に緩めるか
+- enum の値の `==`(002 のレコードの構造的な等しさと一緒に決める)
 - 残りに名前を付ける `Circle { r, ...rest }` を入れるか。入れるなら `rest` の型は何か(TODO)
 - 別のファイル(モジュール)の enum のバリアントの解決(import と一緒に決める)
-- 総称的な enum の修飾は `Option::None` と書き、型引数は推論する(`Option::<i32>::None` とは書かない)でよいか
 - **他へ移したもの**
   - or パターン(`A | B =>`)とガード(`if` つきの腕): 新しい提案 004 で扱う
+  - バリアントを関数の値として渡すこと(`xs.map(Some)`、`xs.map(At)`): 同じく 004 で扱う
   - TS 側のコンストラクタ(TS から `Shape.Circle` の値を作る関数)と、別の enum の同名のバリアントが同じ TAG になること(`Parsed.None` と `Hit.None`): 表現の決定(`@tag`)で扱う
   - データなしの enum にデータつきのバリアントを足すと `.d.ts` の形が変わること: 同じく表現の決定で扱う
   - `Option` / `Result` を prelude に入れること自体: 003 で扱う(この提案の既定値は、それを前提にする)
+  - 総称的な enum の修飾(`Option::None` と書き、型引数は推論する): 003 で決めた
 
 ## 改訂履歴
+
+- r5(r4 の指摘と、決定事項から。summary.md の表を参照)
+  - 型 `Shape::Circle`
+    - 引数に `Shape::Circle` を持つ関数は、直接呼ぶ(`|>` を含む)ときだけ使えるとした。値として使うとエラー(直し方: match で包む)
+    - クロージャの引数と関数型の中には、`Shape::Circle` を書けないとした
+    - `pub` な関数は、入口で TAG を確かめ、違えば TypeError にした(決定 9)。内部の呼び出しは確かめない。JS と wasm の glue の出力を足した
+  - 絞り込み
+    - どの式が絞り込みを運ぶかを、`narrow_of(e)` として構文で決めた。scopes は `(Ty, Option<Narrow>)` を持つ
+    - 絞り込まれた値の match は、そのバリアントの腕だけで網羅的にした。他の腕は到達しない警告。`let Circle { r, ... } = c` は反駁不能
+    - 不変の束縛の絞り込みは、クロージャの中にも写すことにした
+    - `shrink`、`grow_each`、`radius`、`diameter`、`scaled` の例を足した
+  - 解決の規則
+    - 決まっていない値を match にかける、フィールドを読む、メソッドを呼ぶ所で、候補に prelude の enum があれば、その場で既定値に決めることにした。`zero_or_value` の例を足した
+    - 同じ名前の関数があるとき、修飾が要るのは `Circle(…)` と裸の `Circle` だけにした(決定 8)。`Circle { … }` の生成とパターンは、期待する型で決める。`view` の例を直し、`Pair` / `Empty` の例を足した
+    - 「関数」は値の名前空間のすべて(fn、extern、wasm fn、ローカル)と書いた
+    - 候補の enum から修飾を出すクイックフィックスを書いた(`Parsed::Ok(s)`)。`h` の例を足した
+  - 書き方: `Pair(...)` は書ける、`enum Hit { Hit(i32) }` は許す、と書いた
+  - 出力: lower の生成名を `__zs` の名前空間にした(`__zs_s_r`)
+  - 実装の注意: parse.rs の変更(`Path {`、`Pat::Record`、ty() の `::`、`EK::Record` の修飾と先頭の `...`)、使う地点の既定値、`EK::Var` での値としての使用の検査、入口の検査を足した
+  - 代替案: 同じ名前の関数があるときの修飾の広さと、名前なしの `{ ...s, center }` を足した
+  - 未決事項: 解決した網羅性とクロージャを外した。enum の `==` を足し(002 と一緒に)、`xs.map(Some)` を 004 に移した
 
 - r4(r3 の指摘と、決定事項から。summary.md の表を参照)
   - 型 `Shape::Circle`

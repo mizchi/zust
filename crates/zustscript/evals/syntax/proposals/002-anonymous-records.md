@@ -1,6 +1,6 @@
 # 002: 構造的なレコード型と、TS 風の関数型
 
-状態: 評価中 (r4)
+状態: 評価中 (r5)
 
 ## 動機
 
@@ -21,6 +21,7 @@
   - 例: `props: { todo: Todo, onToggle: (id: i32) => () }`
 - **`type Todo = { … }` は、TS と同じく構造的な型の別名**
   - フィールドの名前の集合とそれぞれの型が同じなら、同じ型(順序は問わない)
+    - 任意のフィールド(`note?: T`、003)は、任意かどうかも比べる
   - `Todo` の値を、同じ形の無名の型を受ける関数に渡せる。逆も同じ
   - 名前は、エラーメッセージや hover での表示と、`@wasm` の Rust の `type` 別名に使う(E)
 - **`type` はレコード以外にも書ける**
@@ -30,8 +31,14 @@
   - `@nominal type Meters = { v: f64 }` と `@nominal type Celsius = { v: f64 }` は別の型
   - 書き方は `@wasm fn` と同じ、宣言の前に付ける印
   - 値は名前を書いて作る: `Meters { v: 1.0 }`。無名の `{ v: 1.0 }` は `Meters` に渡せない
+  - 逆向きも渡せない: `Meters` の値を、`{ v: f64 }` を受ける関数に渡すとエラー(r5)
+    - 名前で区別する型は、自分の名前としか単一化しない
+    - 直し方: フィールドを読んで作り直す(`{ v: m.v }`)
+  - 別名は書ける: `type M2 = Meters` の `M2` は `Meters` と同じ型
+  - TS から値を作るコンストラクタは、型と同名の namespace の中に出す: `Meters.make({ v })`(r5。出力を参照)
+    - 同じ名前の `pub fn Meters` と衝突しない。001 の `.d.ts` の `Shape.Circle` と形がそろう
   - 印のない `type` は、今までどおり構造的
-  - r4 では、`@nominal` を付けられるのはレコードだけ
+  - r5 でも、`@nominal` を付けられるのはレコードだけ
     - `@nominal type UserId = i32` のような数値の newtype は、別の提案で扱う
 - **再帰する型**
   - 再帰とは、別名と型引数をたどって自分に戻ること(`type Node = { children: Array<Node> }`)
@@ -52,6 +59,8 @@
   - なければ、形そのもの(`{ total: i32, done: i32 }`)
   - 同じ形の別名は、hover の補足として出すだけ(`= Stats`)。表示名にはしない
     - 別名を 1 つ足しても、離れた所のエラーの表示が変わらないようにするため
+  - 表示名は型(Ty)には入れない。注釈と式の Id を鍵にした side table に置く(実装の注意)
+    - 型に入れると、型の等しさに混ざり、単一化の順で残る名前が変わるため
 
 ### B. レコードの値
 
@@ -60,6 +69,13 @@
     - `ident ,` で始まる中身は、ブロックとしては元々エラーになる字面なので、既存のプログラムとは衝突しない
   - それ以外はブロック
   - 判定は 1 つの関数にまとめ、式の `{` と block() の先頭の両方がそれを呼ぶ
+- **JSX の属性では、`{{` はレコード**(r4 の決定 10)
+  - JSX の属性の `={` の直後の `{` は、中身によらず常にレコードとして読む
+  - `style={{ color }}` は `{ color: color }`(React と同じ意味)
+  - `style={{ color, fontSize: size }}`、`todo={{ ...t, done: true }}` も今までどおりレコード
+  - 属性の値にブロックを書く理由はないので、失うものはない
+  - 属性の `={{}}` は空のレコードになるので、エラー(空のレコード型は書けない)
+  - JSX の子の `{…}`(`<p>{text}</p>`)は属性ではないので、この規則は使わない
 - **`{ x }`(中身が識別子 1 つだけのブロック)の警告**(r2 の決定 3、r4 で範囲を決めた)
   - 型によらず、構文だけで出す
   - 出すのは、式の位置のブロックだけ。primary の `{` から読むもの
@@ -67,7 +83,8 @@
     - 引数、フィールドの値、配列の要素
     - `=>` の後(クロージャの本体): `(t) => { t }`
     - match の腕の本体
-    - JSX の `{…}` の中に書いたブロック: `style={{ color }}`
+    - JSX の子の `{…}` の中に書いたブロック: `<p>{{ x }}</p>`
+      - JSX の属性の `={{ x }}` は、上の規則でレコードなので、対象外(r5)
       - JSX の `{text}` そのものはブロックではないので、対象外
     - ブロックの中の式として書いた `{ x }`(下の `only_total` の末尾)
   - block() が直接読む本体には出さない: fn / if / else / while / for の本体
@@ -77,6 +94,8 @@
 - **省略形**: `{ todo, onToggle }`、`{ total, done }`(全部が省略形でもよい)
 - **更新は JS と同じ**: `{ ...t, done: !t.done }`
   - `...` は先頭に 1 つだけ。spread を 2 つ以上書くことはできない(未決事項)
+    - それまでは、2 つ目の元のフィールドを並べて書く: `{ ...defaults, color: props.color, size: props.size }`
+    - `{ ...defaults, ...props }` は、直し方(フィールドを並べる)つきのエラー
   - 結果の型は `...t` の型と同じ
   - 後に書いたフィールドは、t にあるフィールドを同じ型で上書きするだけ
     - t にないフィールドを足す、フィールドの型を変える、はエラー
@@ -108,6 +127,9 @@
   - 宣言は `->`、値のクロージャと関数型は `=>` という区別にする(Rust と TS のそれぞれの慣習に合わせる)
   - 関数を返す関数: `fn adder(n: i32) -> (x: i32) => i32 { (x) => x + n }`
     - `->` の後が戻り値の型、型の中の `=>` は関数型、`{` からが本体
+    - **formatter は、戻り値が関数型なら括弧を付ける**(r5): `fn adder(n: i32) -> ((x: i32) => i32) { (x) => x + n }`
+      - 括弧がなくても同じ意味(構文としては任意)
+      - `-> (x: i32) => i32 {` は、TS の人には本体の始まりやクロージャにも読めるため
 - 引数名は、`.d.ts` と、エディタの hover / シグネチャの表示に使う
   - 型の等しさには関わらない(`(id: i32) => ()` と `(n: i32) => ()` は同じ型)
   - 表示には、注釈から来た方の名前を使う
@@ -124,22 +146,47 @@
 - `.d.ts` での引数名
   - コンポーネント(`Jsx` を返す関数)は `props`
   - それ以外は `arg0`、`arg1`(位置の番号)
+- **推奨の形**(r5): props が 2〜3 個を超えるなら、型に名前を付けて、パターンでは名前だけを書く
+  - `type TodoListProps = { todos: Array<Todo>, onToggle: OnToggle, title: String }`
+  - `pub fn TodoList({ todos, onToggle, title }: TodoListProps) -> Jsx`
+  - フィールドの型を 2 回書かずに済む。`type` は構造的な別名なので、`.d.ts` にも `TodoListProps` が出る
+  - 小さな props は、今までどおり無名の型をその場に書いてよい(`TodoItem`)
 - JSX の props の検査は今までどおり(足りない prop、余分な prop、型の違いはエラー)
-- **任意のフィールド** `title?: String` は、`Option` を標準にする提案(003)で入れる
-  - `title: Option<String>` の略記になり、JSX では省略できる
+- **任意のフィールド** `title?: String` は、003 で決める(003 の C を参照)
+  - 読むときの型は `Option<String>`。期待する型が分かっている所では、リテラルと JSX で省略できる
+  - ただし `{ title?: String }` と `{ title: Option<String> }` は**別の型**
+    - JS での持ち方が違うため(任意のフィールドは `undefined`、`Option` は `Option` の表現)
+  - A の構造的な等しさでも、任意かどうかを比べる
 
 ### E. `@wasm` での struct の名前
 
 - struct は形(フィールドの名前と型の集合)ごとに 1 つ
 - **struct はプログラム全体で、形ごとに 1 つ**(モジュールごとには作らない。構造的に同じ型は、Rust でも同じ型)
 - **struct 名は、形だけから作る**: フィールドの名前と型を、名前の順に並べる
-  - `{ total: i32, done: i32 }` は `ZsRec_done_i32_total_i32`、`{ total: f64, done: f64 }` は `ZsRec_done_f64_total_f64`
   - 宣言の順にも、他の項目やファイルにも依存しない。形を足しても、既存の struct 名は変わらない
-  - フィールドの型がレコードなら、その形の名前を入れる(別名の名前ではない。別名を足しても変わらないように)。長くなるのは受け入れる(読むときは別名の `type` を見る)。enum と `@nominal` は名前で区別される型なので、その名前を入れる
+- **名前の作り方は単射にする**(r5。違う形が同じ名前にならない)
+  - r4 の `ZsRec_a_i32_b_i32` は、`{ a: i32, b: i32 }` と `{ a_i32_b: i32 }` が同じ名前になった。区切りの `_` がフィールド名にも入るため
+  - フィールド名の前に、その長さを付ける: `4done`、`5total`
+  - フィールドの型
+    - 数値と bool は、そのまま(`i32`、`f64`、`bool` …)
+    - 入れ子のレコードは、その形を印 `R` と `E` で囲む(別名の名前ではない。別名を足しても変わらないように)
+    - enum と `@nominal` は名前で区別される型なので、その名前を、長さを前に付けて入れる(`5Shape`)
+  - 全体を `__zs` の名前空間に置く: `__zs_Rec_…`
+    - 利用者の型名からは `__zs` で始まる名前は作れないので、衝突しない(`type Rec_x` の別名は `ZsRec_x` になる)
+  - 例
+    - `{ total: i32, done: i32 }` は `__zs_Rec_4done_i32_5total_i32`
+    - `{ total: f64, done: f64 }` は `__zs_Rec_4done_f64_5total_f64`
+    - `{ a: i32, b: i32 }` は `__zs_Rec_1a_i32_1b_i32`、`{ a_i32_b: i32 }` は `__zs_Rec_7a_i32_b_i32`
+    - `{ p: { x: f64 }, y: f64 }` は `__zs_Rec_1p_R_1x_f64_E_1y_f64`、`{ p: { x: f64, y: f64 } }` は `__zs_Rec_1p_R_1x_f64_1y_f64_E`
+  - 長くなるのは受け入れる(読むときは別名の `type` を見る)
+  - 形から名前への写像が単射であることは、lower のテストで確かめる
   - `#[allow(non_camel_case_types)]` と `#[derive(Clone, Copy, PartialEq)]` を付ける
 - **読める名前は、別名ごとの Rust の `type` 別名で出す**
-  - `type Pt = { x: f64, y: f64 }`(モジュール a)は `pub type ZsPt = ZsRec_x_f64_y_f64;`(a の名前空間)
-  - 別のモジュールの `type Point` が同じ形なら、`pub type ZsPoint = ZsRec_x_f64_y_f64;`。同じ struct なので、値をそのまま渡せる
+  - `type Stats = { total: i32, done: i32 }` は `pub type ZsStats = __zs_Rec_4done_i32_5total_i32;`
+  - `type Pt = { x: f64, y: f64 }`(モジュール a)は `pub type ZsPt = __zs_Rec_1x_f64_1y_f64;`(a の名前空間)
+  - 別のモジュールの `type Point` が同じ形なら、`pub type ZsPoint = __zs_Rec_1x_f64_1y_f64;`。同じ struct なので、値をそのまま渡せる
+  - 総称的な別名(`type Box<T> = { value: T }`)は、r5 では Rust の別名を出さない
+    - lower は型引数ごとに単相化するので、出るのは単相化した形の名前(`__zs_Rec_5value_f64`)だけ
 - **`@wasm` で使えるのは、今の部分集合と同じく Copy にできる形だけ**(数値、bool、それらのレコード)
   - 文字列や配列を含む形は、エラー: ``error: `Todo` has a `String` field, which an @wasm fn cannot take (records there must be Copy)``
 - `@nominal` の型は、同じ形の別の型があっても、自分の struct(`ZsMeters`)を持つ
@@ -159,7 +206,9 @@ pub fn TodoItem({ todo, onToggle }: { todo: Todo, onToggle: OnToggle }) -> Jsx {
   </li>
 }
 
-pub fn TodoList({ todos, onToggle, title }: { todos: Array<Todo>, onToggle: OnToggle, title: String }) -> Jsx {
+type TodoListProps = { todos: Array<Todo>, onToggle: OnToggle, title: String }
+
+pub fn TodoList({ todos, onToggle, title }: TodoListProps) -> Jsx {   // 推奨の形: 型は名前で、パターンはフィールド名だけ
   <section>
     <h2>{title}</h2>
     <ul>{todos |> .map((t) => <TodoItem key={t.id} todo={t} onToggle={onToggle} />)}</ul>
@@ -183,7 +232,18 @@ pub fn stats(todos: Array<Todo>) -> { total: i32, done: i32 } {
 
 fn title_of({ title }: Todo) -> String { title }   // 一部だけの分割代入(TS と同じ)。fn の本体なので警告なし
 
-pub fn adder(n: i32) -> (x: i32) => i32 { (x) => x + n }
+pub fn adder(n: i32) -> ((x: i32) => i32) { (x) => x + n }   // formatter は戻り値の関数型に括弧を付ける
+
+type Style = { color: String, size: i32 }
+
+pub fn Badge({ color, text }: { color: String, text: String }) -> Jsx {
+  <span style={{ color }}>{text}</span>   // 属性の `={` の直後なので、{ color: color } のレコード(警告なし)
+}
+
+fn themed(defaults: Style, props: { color: String }) -> Style {
+  let s = { ...defaults, color: props.color };   // spread は 1 つだけ。2 つ目の元(props)は、フィールドを並べて書く
+  s
+}
 
 // 警告の出ない例(block() が直接読む本体)
 fn larger(a: i32, x: i32) -> i32 { if x > a { x } else { a } }
@@ -207,52 +267,71 @@ JS は今と同じプレーンなオブジェクト。分割代入した引数�
 ```js
 export function TodoItem(props) { const { todo, onToggle } = props; … }
 return { ...t, done: !t.done };
+// <span style={{ color }}> は、属性の中のレコード
+_jsx("span", { style: { color: color }, children: text });
 // @nominal type Meters = { v: f64 } の、TS から使うコンストラクタ(数値の brand と同じく、確かめるだけで変換しない)
-export function Meters(v) { … return v; }
+export const Meters = { make(v) { … return v; } };
 ```
+
+- 同じ名前の `pub fn Meters` もあるときは、関数に `make` を足す: `export function Meters(…) { … }` と `Meters.make = function (v) { … };`
 
 ```ts
 export type Todo = { readonly id: i32; readonly title: string; readonly done: boolean };
 export type OnToggle = (id: i32) => void;
+export type TodoListProps = { readonly todos: readonly Todo[]; readonly onToggle: OnToggle; readonly title: string };
 export declare function TodoItem(props: { readonly todo: Todo; readonly onToggle: OnToggle }): $ReactElement;
+export declare function TodoList(props: TodoListProps): $ReactElement;
 export declare function stats(todos: readonly Todo[]): { readonly total: i32; readonly done: i32 };
 export declare function adder(n: i32): (x: i32) => i32;
 
 // @nominal type Meters = { v: f64 }
 export type Meters = { readonly v: f64 } & { readonly __zsc_nominal: "Meters" };
-export declare function Meters(v: { readonly v: f64 }): Meters;
+export declare namespace Meters { function make(v: { readonly v: f64 }): Meters; }
 ```
 
 - `interface` ではなく `type` を出す(`type` は構造的な別名なので、TS でも同じ意味の書き方にする)
 - `@nominal` の型は、数値と同じく brand を付ける。TS から `Celsius` や素の `{ v }` を渡すと、TS の型エラーになる
-  - 値は `Meters({ v: 1.0 })` で作る
+  - 値は `Meters.make({ v: 1.0 })` で作る
+  - コンストラクタは型と同名の namespace の中にあるので、同じ名前の `pub fn Meters` と衝突しない(TS では関数と namespace が 1 つにまとまる)
+  - 001 の `Shape.Circle`(型と同名の namespace)と形がそろう
 
 ```rust
 // @wasm(lower.rs)
 // Todo は String を含むので @wasm では使えない(エラー)
 #[allow(non_camel_case_types)]
 #[derive(Clone, Copy, PartialEq)]
-struct ZsRec_done_i32_total_i32 { done: i32, total: i32 }   // stats の戻り値
-type ZsStats = ZsRec_done_i32_total_i32;                     // `type Stats = { … }` があれば
+struct __zs_Rec_4done_i32_5total_i32 { done: i32, total: i32 }   // stats の戻り値
+pub type ZsStats = __zs_Rec_4done_i32_5total_i32;                // `type Stats = { … }` があれば
 struct ZsMeters { v: f64 }   // @nominal は自分の struct
 ```
 
 ## 実装の注意(implementer の指摘から)
 
-- `Ty::Rec(フィールド)` を足す。`type` の名前は別名の表に置き、表示用に型に添える
+- `Ty::Rec(フィールド)` を足す。`type` の名前は別名の表に置く
+- **表示名は Ty に入れない**(r5)
+  - Ty は `derive(PartialEq)` で、unify_inner の最後も `a == b` で比べる。表示名を入れると等しさに混ざる
+  - 型変数は先に単一化した側に置き換わるので、Ty に入れると、残る名前が単一化の順で変わる
+  - 表示名は、注釈から来た束縛と式の Id を鍵にした side table に置く。エラーと hover はそれを引く
 - `@nominal` の型は、別名の表ではなく、名前を持つ型として登録する。レコード以外に付けたらエラー
+  - 単一化では、自分の名前としか等しくならない(同じ形の構造的な型とも等しくない)
+  - `type M2 = Meters` は別名の表に入り、`Meters` に展開される
+  - TS 向けのコンストラクタは namespace の `make` に出す。そのため、同じ名前の `pub fn` と JS の export が衝突しない
 - `Ty::Fn` の引数名は、等価性で無視する別のフィールドに持つ(`derive(PartialEq)` に混ざらないように)
   - ty() の `(` の中で、名前のある要素とない要素が混ざったらエラー
-- 分割代入した引数は、内部では `$p0` という名前の引数にして、本体の先頭で展開する
+- 分割代入した引数は、内部では `__zs_p0` という名前の引数にして、本体の先頭で展開する
+  - r4 の `$p0` は Rust の識別子にならないので、lower.rs が予約している `__zs` の名前空間にした
   - jsx() の props の検査が `Ty::Rec` を受けるようにする
   - `let` と引数のレコードのパターンは、書き漏らしを検査しない。match のパターンだけが検査する
 - レコード同士の単一化に失敗したら、差分(足りない / 余分 / 型が違うフィールド)を返して表示する
 - 再帰する型は、別名と型引数の依存の強連結成分で見つける(enum の定義は辺にしない)
 - checker はレコードの式の型を Id ごとに side table に記録し、lower はそれを引いて struct 名を決める
   - struct 名は形だけから作る(上の E)。形の表はプログラム全体で 1 つだが、名前を決めるのに他の項目を見る必要はない
-  - lower.rs の `rs_type`(`Zs{n}`)を、形からの名前と別名の `type` に変える
+  - lower.rs の `rs_type`(`Zs{n}`)を、形からの名前(`__zs_Rec_…`)と別名の `type` に変える
+  - 形から名前への写像が単射であることを、lower のテストで確かめる(r4 の衝突の例、入れ子の例、`_` を含むフィールド名、enum の名前を含む形)
+  - 総称的な別名には、Rust の `type` を出さない
 - 構文の判定のための先読みは、`try_arrow_params` と同じ保存と巻き戻しで足りる
 - `{ x }` の警告は primary の `{` の側だけで出す。block() は 3 つの形の専用エラーだけを出す
+- JSX の属性を読む所で、`={` の直後が `{` なら、判定の関数を通さずにレコードとして読む(決定 10)
 
 ## 代替案
 
@@ -269,22 +348,46 @@ struct ZsMeters { v: f64 }   // @nominal は自分の struct
 6. **`{ x }` の警告を、block() の本体にも出す**(r3)
    - `if x > a { x } else { a }` や `fn id(x) { x }` のような普通のコードに警告が出て、本当の誤りを見落とす
    - 廃止し、式の位置のブロックだけにした
+7. **struct 名の区切りを `_` だけにする**(r4)
+   - `{ a: i32, b: i32 }` と `{ a_i32_b: i32 }`、入れ子の形どうしが、同じ名前になる(単射でない)
+   - 2 つ目の形が 1 つ目の struct を使ってしまい、誤りが rustc のエラーとして離れた所に出る
+   - フィールド名に長さを付け、入れ子を印で囲むことにした
+8. **JSX の属性の `{{ x }}` もブロックとして読み、警告だけ出す**(r4)
+   - React では `style={{ color }}` はオブジェクト。小文字の要素の属性には期待する型がないので、型エラーにならず、文字列が渡る
+   - 属性ではレコードとして読むことにした(r4 の決定 10)
 
 ## 未決事項
 
 - `pub` な関数の無名の戻り値の型に、`.d.ts` で名前を付けるか(`export type stats_Result = …`)
 - `void` を `()` の別名として受け付けるか(型の位置だけ)
-- props の型とパターンで、フィールド名を 2 回書くこと(`{ todo, onToggle }: { todo: Todo, onToggle: … }`)を短くするか
 - 総称的な無名のレコード `{ value: T }` と、構造的な等しさ(型引数を含めて比べる)
+  - 総称的な別名 `type Box<T>` に、Rust の総称の別名を出すか(r5 では出さない)
 - spread を 2 つ以上書けるようにするか(`{ ...defaults, ...props }`。同じ型同士に限るか)
+  - それまでの書き方は B(`{ ...defaults, color: props.color }`)
+- レコードの値の `==`(構造的な等しさ。001 の enum の `==` と一緒に決める)
+  - `@wasm` の `derive(PartialEq)` と、JS での比べ方の結果を一致させる必要がある
 - TS から余分なプロパティを持つオブジェクトが渡されたとき
   - JS 層では残る。`{ ...t }` の更新でもコピーされる(JS の spread)
   - `@wasm` ではスロットに分解されて落ちる。同じソースで、JS と wasm の結果が変わりうる
   - 差分テストは型にあるフィールドだけを比べる(A)。今は JS の挙動のまま
   - 案: `pub` な関数の入口(TS から呼ばれる所)でだけ、型にあるフィールドを並べて作り直す
-- 戻り値が関数型のとき、formatter が括弧を付けるか(`-> ((x: i32) => i32)`)
 
 ## 改訂履歴
+
+- r5(r4 の指摘と、決定事項から。summary.md の表を参照)
+  - struct 名の作り方を単射にした。フィールド名に長さを付け、入れ子の形は `R` と `E` で囲み、enum と `@nominal` の名前にも長さを付ける。全体を `__zs` の名前空間に置く(`__zs_Rec_4done_i32_5total_i32`)。lower のテストで単射を確かめる
+  - 別名は `pub type ZsStats = __zs_Rec_…;`。総称的な別名には、r5 では Rust の別名を出さない
+  - 分割代入した引数の内部の名前を `$p0` から `__zs_p0` にした
+  - 表示名を Ty に入れず、注釈と式の Id の side table に置くことにした
+  - JSX の属性の `={` の直後の `{` は、常にレコードにした(決定 10)。`{ x }` の警告の範囲から属性を外し、`Badge` の例と出力を足した
+  - `@nominal` のコンストラクタを、型と同名の namespace の `Meters.make({ v })` にした。`.d.ts` と JS の出力を直した
+  - `@nominal` の値は同じ形の構造的な型に渡せない、`type M2 = Meters` は書ける、と書いた
+  - props の推奨の形(`type TodoListProps = { … }` と `fn TodoList({ … }: TodoListProps)`)を載せ、`TodoList` の例を直した
+  - formatter は戻り値の関数型に括弧を付けることにした(`-> ((x: i32) => i32) {`)。`adder` の例を直した
+  - spread が 1 つの間の書き方(`{ ...defaults, color: props.color }`)を書き、`themed` の例を足した
+  - 任意のフィールドは 003 に従うと書き直した。`title?: T` は `title: Option<T>` とは別の型(JS での持ち方が違う)。構造的な等しさでも任意かどうかを比べる
+  - 代替案に、`_` だけの struct 名と、JSX の属性の `{{ x }}` をブロックとして読む案を足した
+  - 未決事項: props の 2 回書きと formatter の括弧を外した。レコードの `==` を足した(001 の enum の `==` と一緒に)
 
 - r4(r3 の指摘と、決定事項から。summary.md の表を参照)
   - `{ x }` の警告を、primary の `{` から読む式の位置のブロックだけにした。block() が直接読む fn / if / else / while / for の本体には出さない
