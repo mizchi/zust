@@ -802,6 +802,11 @@ fn collect_defs(text: &mut String, macros: &mut HashMap<String, Vec<Rule>>, mut 
         let mut i = 0;
         while i + 3 < toks.len() {
             let is_def = toks[i].0 == 0 && tk(i) == b"macro_rules" && sym(i + 1, b'!') && toks[i + 2].0 == 0 && close[i + 3] != usize::MAX;
+            // (`stringify!(macro_rules! m { .. })`: the tokens of an opaque macro's arguments are text, not items)
+            if !is_def && toks[i].0 == 0 && matches!(tk(i), b"stringify" | b"concat_idents" | b"log_syntax") && sym(i + 1, b'!') && close[i + 2] != usize::MAX {
+                i = close[i + 2] + 1;
+                continue;
+            }
             if !is_def {
                 i += 1;
                 continue;

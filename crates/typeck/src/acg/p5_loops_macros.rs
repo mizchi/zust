@@ -1054,11 +1054,11 @@ impl Cx<'_> {
             None => {
                 // (the parser's own error for an argument that is no expression: `assert!({one! two})`)
                 let inner = g.get(1..g.len().saturating_sub(1)).unwrap_or("");
-                for part in inner.split(',') {
-                    if let Err(e) = crate::parse::parse_expr(part) {
-                        let msg = e.splitn(3, ':').nth(2).map(str::trim).filter(|m| !m.is_empty()).unwrap_or(&e).to_string();
-                        if msg.starts_with("expected one of") {
-                            return err(SP, msg);
+                for part in split_top(inner, ",").unwrap_or_default() {
+                    // (`L:C: expected one of ..` with a token there, `end of input: expected one of ..` at the end)
+                    if let Err(e) = crate::parse::parse_expr(&part) {
+                        if let Some(i) = e.find("expected one of") {
+                            return err(SP, e[i..].trim().to_string());
                         }
                     }
                 }

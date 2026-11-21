@@ -2285,6 +2285,14 @@ impl Program {
 
     /// 配列の長さに使う const (要約の const 表から整数の定数式として評価する)
     fn const_usize(&self, name: &str) -> R<u64> {
+        // (`<Foo as Bar>::SIZE`: the trait's under its qualified name, else the only `Foo::SIZE`)
+        if let Some((base, rest)) = name.split_once(" as ") {
+            if !self.const_index.contains_key(name) {
+                if let Some((_, last)) = rest.rsplit_once("::") {
+                    return self.const_usize(&format!("{base}::{last}"));
+                }
+            }
+        }
         // (const ジェネリクスの引数の式 `{ A - 16 }` は式のテキストで来る)
         let v = if !self.const_index.contains_key(name) && (name.starts_with(|c: char| c.is_ascii_digit()) || name.bytes().any(|c| !(c.is_ascii_alphanumeric() || c == b'_' || c == b':'))) {
             let e = crate::parse::parse_expr(name)?;

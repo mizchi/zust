@@ -235,10 +235,11 @@ pub fn tysyn(t: &PTy, self_ty: Option<&TySyn>) -> R<TySyn> {
                     };
                     ArrLen::Const(format!("{a}::{}", p.segs[1].name))
                 }
-                // (`[u8; <Foo as Bar>::SIZE]`: the impl's associated const `Foo::SIZE`)
+                // (`[u8; <Foo as Bar>::SIZE]`: the impl's associated const, `Foo as Bar::SIZE` when an inherent
+                // `Foo::SIZE` took the plain name, else `Foo::SIZE`)
                 Expr::Path(Some(q), p) if p.segs.len() == 2 && matches!(&**q, PTy::Path(None, qp) if qp.segs.len() == 1 && qp.segs[0].args.is_empty()) => {
                     let PTy::Path(None, qp) = &**q else { unreachable!() };
-                    ArrLen::Const(format!("{}::{}", qp.segs[0].name, p.segs[1].name))
+                    ArrLen::Const(format!("{} as {}::{}", qp.segs[0].name, p.segs[0].name, p.segs[1].name))
                 }
                 // (a constant expression of literals: `[u8; 1 + 1]`, `[T; 4 as usize]`)
                 x => match crate::ast_summary::const_int(x) {
