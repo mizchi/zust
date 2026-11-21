@@ -5149,6 +5149,7 @@ compile-fail	pattern/usefulness/issue-40221.rs
 compile-fail	pattern/usefulness/issue-4321.rs
 check-pass	pattern/usefulness/issue-53820-slice-pattern-large-array.rs
 compile-fail	pattern/usefulness/issue-56379.rs
+compile-fail	pattern/usefulness/issue-57472.rs
 check-pass	pattern/usefulness/issue-65413-constants-and-slices-exhaustiveness.rs
 check-pass	pattern/usefulness/issue-66501.rs
 check-pass	pattern/usefulness/issue-71930-type-of-match-scrutinee.rs
@@ -5163,6 +5164,7 @@ compile-fail	pattern/usefulness/match-arm-statics-2.rs
 compile-fail	pattern/usefulness/match-arm-statics.rs
 compile-fail	pattern/usefulness/match-byte-array-patterns-2.rs
 compile-fail	pattern/usefulness/match-non-exhaustive.rs
+compile-fail	pattern/usefulness/match-vec-fixed.rs
 run-pass	pattern/usefulness/nested-exhaustive-match.rs
 compile-fail	pattern/usefulness/non-exhaustive-match-nested.rs
 compile-fail	pattern/usefulness/non-exhaustive-match.rs
