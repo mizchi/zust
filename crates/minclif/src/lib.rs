@@ -39,7 +39,7 @@ pub type FMap<K, V> = std::collections::HashMap<K, V, std::hash::BuildHasherDefa
 pub type FSet<K> = std::collections::HashSet<K, std::hash::BuildHasherDefault<FxHasher>>;
 
 /// 値の型
-pub use zust_ir::{Block, FloatCC, FuncRef, IntCC, Lanes, Op, Reloc, StackSlot, Type, VOp, Value, Variable};
+pub use zust_ir::{Block, FloatCC, FuncRef, IntCC, Lane, Op, Reloc, Shape, StackSlot, Type, VBits, VOp, Value, Variable};
 
 /// 1 関数分の機械語の組み立て (FunctionBuilder が 2 回使う: 解析 (track) と、割り当てを使った本番)
 pub struct Emitter {
@@ -289,7 +289,7 @@ impl Emitter {
     }
 
     fn new_value(&mut self, t: Type) -> Value {
-        let off = if t.bytes() == 16 { self.alloc(16, 16) } else { self.alloc(8, 8) };
+        let off = if t.bytes() >= 16 { self.alloc(t.bytes(), 16) } else { self.alloc(8, 8) };
         self.values.push((off, t));
         self.paddr.push(None);
         self.kval.push(None);
@@ -353,7 +353,7 @@ impl Emitter {
     }
 
     pub fn declare_var(&mut self, t: Type) -> Variable {
-        let off = if t.bytes() == 16 { self.alloc(16, 16) } else { self.alloc(8, 8) };
+        let off = if t.bytes() >= 16 { self.alloc(t.bytes(), 16) } else { self.alloc(8, 8) };
         self.vars.push((off, t));
         self.var_paddr.push(None);
         if let Some(tr) = &mut self.track {
@@ -935,7 +935,7 @@ impl Emitter {
             Type::I32 | Type::F32 => self.emit_disp(&[0x8B, 0x80], off),
             Type::I16 => self.emit_disp(&[0x48, 0x0F, 0xB7, 0x80], off),
             Type::I8 => self.emit_disp(&[0x48, 0x0F, 0xB6, 0x80], off),
-            Type::I128 | Type::V128 => {
+            Type::I128 | Type::Vec(_) => {
                 // 下位を rcx、上位を rax に読んで書く
                 self.emit_disp(&[0x48, 0x8B, 0x88], off);
                 self.emit_disp(&[0x48, 0x8B, 0x80], off + 8);
@@ -987,7 +987,7 @@ impl Emitter {
             Type::I32 | Type::F32 => self.emit_disp(&[0x89, 0x88], off),
             Type::I16 => self.emit_disp(&[0x66, 0x89, 0x88], off),
             Type::I8 => self.emit_disp(&[0x88, 0x88], off),
-            Type::I128 | Type::V128 => {
+            Type::I128 | Type::Vec(_) => {
                 self.emit_disp(&[0x48, 0x89, 0x88], off);
                 let o = self.off(v);
                 self.emit_disp(&[0x48, 0x8B, 0x8D], o + 8);
@@ -2135,13 +2135,13 @@ impl Emitter {
     }
 
     // --- SIMD (issue #30) ---------------------------------------------------
-    // A V128 value is 16 bytes in its slot, moved like an i128 (so loads, stores, variables and block parameters
+    // A 128-bit vector is 16 bytes in its slot, moved like an i128 (so loads, stores, variables and block parameters
     // are right). minclif has no vector instructions yet: a SIMD op is `ud2`, and codegen's lower rejects a
-    // function that has one before it is emitted natively (the wasm backend and Cranelift read the recording).
+    // function with a vector before it is emitted natively (the wasm backend and Cranelift read the recording).
 
-    /// a V128 constant
+    /// a 128-bit vector constant
     pub fn vconst(&mut self, x: u128) -> Value {
-        let v = self.new_value(Type::V128);
+        let v = self.new_value(Type::Vec(VBits::B128));
         let o = self.off(v);
         for k in 0..2 {
             let w = (x >> (64 * k)) as u64;
@@ -2153,14 +2153,14 @@ impl Emitter {
     }
 
     /// a SIMD op: not supported here (`ud2`)
-    pub fn simd(&mut self, op: VOp, args: &[Value]) -> Value {
+    pub fn simd(&mut self, s: Shape, op: VOp, args: &[Value]) -> Value {
         for &a in args {
             self.load_rax(a);
         }
         self.emit(&[0x0F, 0x0B]);
-        let t = op.result();
+        let t = op.result(s);
         let v = self.new_value(t);
-        if t.bytes() != 16 {
+        if t.bytes() <= 8 {
             self.store_rax(v);
         }
         v
@@ -3555,16 +3555,17 @@ impl FunctionBuilder {
         self.res.push(vec![r.0]);
         r
     }
-    pub fn simd(&mut self, op: VOp, args: &[Value]) -> Value {
+    pub fn simd(&mut self, s: Shape, op: VOp, args: &[Value]) -> Value {
         self.dry.op = self.ops.len() as u32;
-        self.ops.push(Op::Simd(op, args.to_vec()));
-        let r = self.dry.simd(op, args);
+        self.ops.push(Op::Simd(s, op, args.to_vec()));
+        let r = self.dry.simd(s, op, args);
         self.res.push(vec![r.0]);
         r
     }
-    /// whether it has a SIMD op or a V128 value (minclif cannot emit them natively)
+    /// whether it has a SIMD op or a vector value (minclif cannot emit them natively)
     pub fn has_simd(&self) -> bool {
-        self.ops.iter().any(|o| o.is_simd()) || self.dry.values.iter().any(|v| v.1 == Type::V128) || self.dry.vars.iter().any(|v| v.1 == Type::V128)
+        let vec = |t: Type| matches!(t, Type::Vec(_));
+        self.ops.iter().any(|o| o.is_simd()) || self.dry.values.iter().any(|v| vec(v.1)) || self.dry.vars.iter().any(|v| vec(v.1))
     }
 }
 
@@ -4016,8 +4017,8 @@ pub fn from_recording(rec: &zust_ir::Recorder) -> (FunctionBuilder, Vec<u32>) {
                 let r = fb.vconst(*f0);
                 put(&mut vm, out[0], r.0);
             }
-            Op::Simd(f0, f1) => {
-                let r = fb.simd(*f0, &f1.iter().map(|x| mv(&vm, *x)).collect::<Vec<Value>>());
+            Op::Simd(f0, f1, f2) => {
+                let r = fb.simd(*f0, *f1, &f2.iter().map(|x| mv(&vm, *x)).collect::<Vec<Value>>());
                 put(&mut vm, out[0], r.0);
             }
         }
@@ -4351,8 +4352,8 @@ fn replay(e: &mut Emitter, op: &Op) {
         Op::Vconst(f0) => {
             let _ = e.vconst(*f0);
         }
-        Op::Simd(f0, f1) => {
-            let _ = e.simd(*f0, f1);
+        Op::Simd(f0, f1, f2) => {
+            let _ = e.simd(*f0, *f1, f2);
         }
     }
 }

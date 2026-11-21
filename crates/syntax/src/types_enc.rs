@@ -8,6 +8,10 @@ use crate::types::*;
 impl Enc for TySyn {
     fn enc(&self, out: &mut Vec<u8>) {
         match self {
+            TySyn::Prim(Ty::Vec(b)) => {
+                out.push(35);
+                (*b as u64).enc(out);
+            }
             TySyn::Prim(t) => out.push(TYS.iter().position(|x| x == t).unwrap() as u8),
             TySyn::Ref(m, i) => {
                 out.push(20 + *m as u8);
@@ -63,7 +67,7 @@ impl Enc for TySyn {
     }
     fn dec(r: &mut Rd) -> Option<Self> {
         Some(match r.u8()? {
-            c @ 0..19 => TySyn::Prim(TYS[c as usize]),
+            c @ 0..18 => TySyn::Prim(TYS[c as usize]),
             c @ (20 | 21) => TySyn::Ref(c == 21, Box::new(TySyn::dec(r)?)),
             22 => TySyn::Named(String::dec(r)?),
             23 => TySyn::App(String::dec(r)?, Vec::dec(r)?),
@@ -77,6 +81,7 @@ impl Enc for TySyn {
             32 => TySyn::FnPtr(Vec::dec(r)?),
             33 => TySyn::Assoc(Box::new(TySyn::dec(r)?), String::dec(r)?),
             34 => TySyn::Infer,
+            35 => TySyn::Prim(Ty::Vec(u16::try_from(u64::dec(r)?).ok()?)),
             _ => return None,
         })
     }

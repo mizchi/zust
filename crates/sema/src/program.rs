@@ -3470,6 +3470,7 @@ impl Program {
                     self.hash_ty(p, h);
                 }
             }
+            Ty::Vec(b) => h.add(&(112u8, b)),
             t => h.add(&ty_code(t)),
         }
     }

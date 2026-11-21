@@ -151,7 +151,7 @@ pub fn clif_ty(t: Ty) -> Option<Type> {
         Ty::Ref(..) | Ty::Ptr(..) => PTR,
         Ty::F32 => types::F32,
         Ty::F64 => types::F64,
-        Ty::V128 => types::V128,
+        Ty::Vec(b) => Type::Vec(crate::ir::VBits::from_bits(b as u32)?),
         t => match t.bits() {
             0 => return None,
             8 => types::I8,

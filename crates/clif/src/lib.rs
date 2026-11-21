@@ -46,12 +46,13 @@ fn ty(t: Type) -> ir::Type {
         Type::I128 => types::I128,
         Type::F32 => types::F32,
         Type::F64 => types::F64,
-        Type::V128 => types::I8X16,
+        // (not emitted yet: a function with a vector is rejected before its types are read)
+        Type::Vec(_) => types::I8X16,
     }
 }
 
 /// what a native backend says about a function with SIMD ops (issue #30: only the wasm32 backend emits them yet)
-pub const NO_SIMD: &str = "SIMD (v128) is supported only with --target wasm32-unknown-unknown so far (issue #30)";
+pub const NO_SIMD: &str = "SIMD (vectors) is supported only with --target wasm32-unknown-unknown so far (issue #30)";
 
 fn icc(c: IntCC) -> CIntCC {
     match c {

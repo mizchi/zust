@@ -17,11 +17,22 @@ stays in it:
 
 ## SIMD (`core::arch::wasm32`, issue #30)
 
-zustc's IR has a vector type, `Type::V128`, and SIMD instructions (`Op::Simd(VOp, ..)`, `Op::Vconst`), taken from
-what wasm SIMD and SSE4.1 / NEON have in common, with the relaxed instructions apart. The wasm backend emits each one
-as its `0xFD` opcode (the relaxed ones from `0xFD 0x100`); Node 22 and 26 run both without flags.
+zustc's IR has vector types of a fixed width, `Type::Vec(VBits)` (128, 256 or 512 bits), and SIMD instructions
+written per lane, not per width: `Op::Simd(Shape, VOp, ..)`, where the `Shape` is the lane type and the width
+(`f32x4.add` is `Add` on f32 lanes of 128 bits; AVX2's `vaddps ymm` would be the same `Add` at 256). The set is what
+wasm SIMD and SSE4.1 / AVX2 / NEON have in common, with the relaxed instructions apart. Only the byte shuffles
+(`Shuffle`, `Swizzle`) and `Vconst` are 128-bit only. The wasm backend emits 128-bit vectors only: each instruction as
+its `0xFD` opcode (the relaxed ones from `0xFD 0x100`), and a wider vector is an error, not split into several.
+Node 22 and 26 run both sets without flags.
 
-- `v128` is a primitive type (16 bytes, aligned to 16), held in one wasm local, passed and returned as a `v128`
+The design leaves room for wasm's flexible-vectors proposal (phase 3): its types (`vec.i32` ..) have a length the
+engine chooses, a runtime constant read by `vec.i32.length`, and its operations are lane-wise ones of the same kinds
+(arithmetic, compares to masks, `narrow`, `widen_low` / `widen_high`, splat, lane access by immediate within the
+low 128 bits), without a byte shuffle. That would be one more width whose size is the target's at run time, like
+Cranelift's dynamic vector types: vectors that can be locals and parameters but not fields of a laid-out struct, plus
+an instruction for the lane count and the lane shifts and half concatenations (`crates/ir`, the SIMD section).
+
+- `v128` is a primitive type (`Ty::Vec(128)`: 16 bytes, aligned to 16), held in one wasm local, passed and returned as a `v128`
   parameter or result. It can be a struct field, an array or `Vec` element, an `Option` payload, a closure capture or a
   generic argument.
 - The intrinsics of `core::arch::wasm32` (rustc's names and types: `f32x4_add`, `u8x16_shr`, `i32x4_extract_lane::<N>`,
@@ -32,7 +43,7 @@ as its `0xFD` opcode (the relaxed ones from `0xFD 0x100`); Node 22 and 26 run bo
 - `cfg(target_feature = "simd128")` and `"relaxed-simd"` are true for wasm32.
 - Loads and stores of `v128` check their address as scalar ones do (`contain/simd_*.rs`).
 - Native builds do not support SIMD yet: the Cranelift and minclif backends reject a function with a `v128` value or
-  a SIMD instruction ("SIMD (v128) is supported only with --target wasm32-unknown-unknown so far").
+  a SIMD instruction ("SIMD (vectors) is supported only with --target wasm32-unknown-unknown so far").
 
 `tests/wasm.rs`'s `wasm_simd_like_rustc` checks that `simd/*.rs` (every intrinsic, on edge cases: NaN, ±0, saturation,
 out-of-range shifts and swizzle indices, and `v128` as a value) print what rustc's wasm32-wasip1 builds print under

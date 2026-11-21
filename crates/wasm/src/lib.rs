@@ -25,7 +25,7 @@
 //!   module. Everything else the program calls is an import from module `env`: the host decides what to give it
 //!   (tests/wasm/run.mjs gives `write` to fd 1 and 2, `exit`, the program's arguments and `Math`).
 
-use minclif::{FloatCC, FunctionBuilder, IntCC, Lanes, Op, Reloc, StackSlot, Type, VOp, Value};
+use minclif::{FloatCC, FunctionBuilder, IntCC, Lane, Op, Reloc, Shape, StackSlot, Type, VBits, VOp, Value};
 
 /// Relocation kinds in a body (the ELF numbers the Blob keeps: 4 = PLT32, 1 = 64, 2 = PC32)
 /// `call` of a function: a 5-byte padded LEB function index; the addend is the callee's signature ([`sig_enc`])
@@ -62,7 +62,8 @@ fn wtys(t: Type) -> &'static [u8] {
         Type::I128 => &[T_I64, T_I64],
         Type::F32 => &[T_F32],
         Type::F64 => &[T_F64],
-        Type::V128 => &[T_V128],
+        // (wasm has 128-bit vectors only: compile rejects a function with a wider one first)
+        Type::Vec(_) => &[T_V128],
     }
 }
 
@@ -1194,7 +1195,7 @@ impl<'a> Body<'a> {
             Type::I64 => self.op(0x29),
             Type::F32 => self.op(0x2A),
             Type::F64 => self.op(0x2B),
-            Type::V128 => self.ops(&[0xFD, 0x00]),
+            Type::Vec(_) => self.ops(&[0xFD, 0x00]),
             Type::I128 => {
                 let p = self.tmp32(0);
                 self.ltee(p);
@@ -1233,7 +1234,7 @@ impl<'a> Body<'a> {
             Type::I32 => 0x36,
             Type::I64 => 0x37,
             Type::F32 => 0x38,
-            Type::V128 => {
+            Type::Vec(_) => {
                 self.ops(&[0xFD, 0x0B]);
                 self.memarg(0);
                 return Ok(());
@@ -1245,21 +1246,25 @@ impl<'a> Body<'a> {
     }
 
     /// a SIMD op: the operands pushed, the opcode after the 0xFD prefix, its immediates
-    fn simd(&mut self, op: VOp, args: &[Value]) -> Result<(), String> {
+    fn simd(&mut self, sh: Shape, op: VOp, args: &[Value]) -> Result<(), String> {
+        if sh.bits != VBits::B128 {
+            return Err(format!("wasm32: {op:?} on {}-bit vectors (wasm SIMD has 128-bit ones only)", sh.bits.bits()));
+        }
         if args.len() != op.arity() {
             return Err(format!("wasm32: {op:?} with {} operands", args.len()));
         }
+        let v = Type::Vec(VBits::B128);
         for (k, &a) in args.iter().enumerate() {
             let t = self.ty(a);
             // (the scalar operands: a splat's or replace_lane's lane, a shift amount (i32))
             let want = match (op, k) {
-                (VOp::Splat(l), 0) | (VOp::Replace(l, _), 1) => l.lane(),
-                (VOp::Shl(_) | VOp::Shr(..), 1) => Type::I32,
-                _ => Type::V128,
+                (VOp::Splat, 0) | (VOp::Replace(_), 1) => sh.lane.ty(),
+                (VOp::Shl | VOp::Shr(_), 1) => Type::I32,
+                _ => v,
             };
             match (want, t) {
-                (Type::V128, Type::V128) => self.get(a)?,
-                (Type::V128, _) | (_, Type::V128) => return Err(format!("wasm32: {op:?}: operand {k} is {t:?}")),
+                (w, t) if w == v && t == v => self.get(a)?,
+                (Type::Vec(_), _) | (_, Type::Vec(_)) => return Err(format!("wasm32: {op:?}: operand {k} is {t:?}")),
                 (Type::I8 | Type::I16 | Type::I32, Type::I8 | Type::I16 | Type::I32 | Type::I64 | Type::I128) => self.get_as(a, Type::I32)?,
                 (Type::I64, Type::I8 | Type::I16 | Type::I32 | Type::I64 | Type::I128) => self.get_as(a, Type::I64)?,
                 (w, t) if w == t => self.get(a)?,
@@ -1267,11 +1272,11 @@ impl<'a> Body<'a> {
             }
         }
         self.op(0xFD);
-        uleb(&mut self.code, simd_opcode(op)? as u64);
+        uleb(&mut self.code, simd_opcode(sh.lane, op)? as u64);
         match op {
-            VOp::Extract(l, i) | VOp::Replace(l, i) => {
-                if i as u32 >= l.count() {
-                    return Err(format!("wasm32: lane {i} of {l:?}"));
+            VOp::Extract(i) | VOp::Replace(i) => {
+                if i as u32 >= sh.count() {
+                    return Err(format!("wasm32: lane {i} of {sh:?}"));
                 }
                 self.op(i);
             }
@@ -1289,17 +1294,17 @@ impl<'a> Body<'a> {
 }
 
 /// The opcode of a SIMD op after the 0xFD prefix (the relaxed ones from 0x100)
-fn simd_opcode(op: VOp) -> Result<u32, String> {
-    use Lanes::*;
-    // (per shape: i8x16, i16x8, i32x4, i64x2, f32x4, f64x2; 0: none)
-    let by = |l: Lanes, t: [u32; 6]| -> Result<u32, String> {
+fn simd_opcode(l: Lane, op: VOp) -> Result<u32, String> {
+    use Lane::*;
+    // (per lane type of a 128-bit vector: i8x16, i16x8, i32x4, i64x2, f32x4, f64x2; 0: none)
+    let by = |l: Lane, t: [u32; 6]| -> Result<u32, String> {
         let k = match l {
-            I8x16 => t[0],
-            I16x8 => t[1],
-            I32x4 => t[2],
-            I64x2 => t[3],
-            F32x4 => t[4],
-            F64x2 => t[5],
+            I8 => t[0],
+            I16 => t[1],
+            I32 => t[2],
+            I64 => t[3],
+            F32 => t[4],
+            F64 => t[5],
         };
         if k == 0 { Err(format!("wasm32: no {op:?} in wasm SIMD")) } else { Ok(k) }
     };
@@ -1312,31 +1317,31 @@ fn simd_opcode(op: VOp) -> Result<u32, String> {
         VOp::Xor => 0x51,
         VOp::Bitselect => 0x52,
         VOp::AnyTrue => 0x53,
-        VOp::Splat(l) => by(l, [0x0F, 0x10, 0x11, 0x12, 0x13, 0x14])?,
+        VOp::Splat => by(l, [0x0F, 0x10, 0x11, 0x12, 0x13, 0x14])?,
         // (i8 / i16 lanes zero-extended: narrow values are held so)
-        VOp::Extract(l, _) => by(l, [0x16, 0x19, 0x1B, 0x1D, 0x1F, 0x21])?,
-        VOp::Replace(l, _) => by(l, [0x17, 0x1A, 0x1C, 0x1E, 0x20, 0x22])?,
+        VOp::Extract(_) => by(l, [0x16, 0x19, 0x1B, 0x1D, 0x1F, 0x21])?,
+        VOp::Replace(_) => by(l, [0x17, 0x1A, 0x1C, 0x1E, 0x20, 0x22])?,
         VOp::Shuffle(_) => 0x0D,
         VOp::Swizzle => 0x0E,
-        VOp::Add(l) => by(l, [0x6E, 0x8E, 0xAE, 0xCE, 0xE4, 0xF0])?,
-        VOp::Sub(l) => by(l, [0x71, 0x91, 0xB1, 0xD1, 0xE5, 0xF1])?,
-        VOp::Mul(l) => by(l, [0, 0x95, 0xB5, 0xD5, 0xE6, 0xF2])?,
-        VOp::Div(l) => by(l, [0, 0, 0, 0, 0xE7, 0xF3])?,
-        VOp::Neg(l) => by(l, [0x61, 0x81, 0xA1, 0xC1, 0xE1, 0xED])?,
-        VOp::Abs(l) => by(l, [0x60, 0x80, 0xA0, 0xC0, 0xE0, 0xEC])?,
-        VOp::Sqrt(l) => by(l, [0, 0, 0, 0, 0xE3, 0xEF])?,
-        VOp::Ceil(l) => by(l, [0, 0, 0, 0, 0x67, 0x74])?,
-        VOp::Floor(l) => by(l, [0, 0, 0, 0, 0x68, 0x75])?,
-        VOp::Trunc(l) => by(l, [0, 0, 0, 0, 0x69, 0x7A])?,
-        VOp::Nearest(l) => by(l, [0, 0, 0, 0, 0x6A, 0x94])?,
-        VOp::Min(l, u) => by(l, [su(u, 0x76, 0x77), su(u, 0x96, 0x97), su(u, 0xB6, 0xB7), 0, 0xE8, 0xF4])?,
-        VOp::Max(l, u) => by(l, [su(u, 0x78, 0x79), su(u, 0x98, 0x99), su(u, 0xB8, 0xB9), 0, 0xE9, 0xF5])?,
-        VOp::Pmin(l) => by(l, [0, 0, 0, 0, 0xEA, 0xF6])?,
-        VOp::Pmax(l) => by(l, [0, 0, 0, 0, 0xEB, 0xF7])?,
-        VOp::AddSat(l, u) => by(l, [su(u, 0x6F, 0x70), su(u, 0x8F, 0x90), 0, 0, 0, 0])?,
-        VOp::SubSat(l, u) => by(l, [su(u, 0x72, 0x73), su(u, 0x92, 0x93), 0, 0, 0, 0])?,
-        VOp::Avgr(l) => by(l, [0x7B, 0x9B, 0, 0, 0, 0])?,
-        VOp::Icmp(l, cc) => {
+        VOp::Add => by(l, [0x6E, 0x8E, 0xAE, 0xCE, 0xE4, 0xF0])?,
+        VOp::Sub => by(l, [0x71, 0x91, 0xB1, 0xD1, 0xE5, 0xF1])?,
+        VOp::Mul => by(l, [0, 0x95, 0xB5, 0xD5, 0xE6, 0xF2])?,
+        VOp::Div => by(l, [0, 0, 0, 0, 0xE7, 0xF3])?,
+        VOp::Neg => by(l, [0x61, 0x81, 0xA1, 0xC1, 0xE1, 0xED])?,
+        VOp::Abs => by(l, [0x60, 0x80, 0xA0, 0xC0, 0xE0, 0xEC])?,
+        VOp::Sqrt => by(l, [0, 0, 0, 0, 0xE3, 0xEF])?,
+        VOp::Ceil => by(l, [0, 0, 0, 0, 0x67, 0x74])?,
+        VOp::Floor => by(l, [0, 0, 0, 0, 0x68, 0x75])?,
+        VOp::Trunc => by(l, [0, 0, 0, 0, 0x69, 0x7A])?,
+        VOp::Nearest => by(l, [0, 0, 0, 0, 0x6A, 0x94])?,
+        VOp::Min(u) => by(l, [su(u, 0x76, 0x77), su(u, 0x96, 0x97), su(u, 0xB6, 0xB7), 0, 0xE8, 0xF4])?,
+        VOp::Max(u) => by(l, [su(u, 0x78, 0x79), su(u, 0x98, 0x99), su(u, 0xB8, 0xB9), 0, 0xE9, 0xF5])?,
+        VOp::Pmin => by(l, [0, 0, 0, 0, 0xEA, 0xF6])?,
+        VOp::Pmax => by(l, [0, 0, 0, 0, 0xEB, 0xF7])?,
+        VOp::AddSat(u) => by(l, [su(u, 0x6F, 0x70), su(u, 0x8F, 0x90), 0, 0, 0, 0])?,
+        VOp::SubSat(u) => by(l, [su(u, 0x72, 0x73), su(u, 0x92, 0x93), 0, 0, 0, 0])?,
+        VOp::Avgr => by(l, [0x7B, 0x9B, 0, 0, 0, 0])?,
+        VOp::Icmp(cc) => {
             // (eq, ne, lt_s, lt_u, gt_s, gt_u, le_s, le_u, ge_s, ge_u from each shape's first)
             let k = match cc {
                 IntCC::Equal => 0,
@@ -1351,11 +1356,11 @@ fn simd_opcode(op: VOp) -> Result<u32, String> {
                 IntCC::UnsignedGreaterThanOrEqual => 9,
             };
             match l {
-                I8x16 => 0x23 + k,
-                I16x8 => 0x2D + k,
-                I32x4 => 0x37 + k,
+                I8 => 0x23 + k,
+                I16 => 0x2D + k,
+                I32 => 0x37 + k,
                 // (i64x2: eq, ne, lt_s, gt_s, le_s, ge_s; no unsigned compares)
-                I64x2 => match cc {
+                I64 => match cc {
                     IntCC::Equal => 0xD6,
                     IntCC::NotEqual => 0xD7,
                     IntCC::SignedLessThan => 0xD8,
@@ -1367,7 +1372,7 @@ fn simd_opcode(op: VOp) -> Result<u32, String> {
                 _ => return Err(format!("wasm32: {op:?} of float lanes")),
             }
         }
-        VOp::Fcmp(l, cc) => {
+        VOp::Fcmp(cc) => {
             let k = match cc {
                 FloatCC::Equal => 0,
                 FloatCC::NotEqual => 1,
@@ -1379,29 +1384,29 @@ fn simd_opcode(op: VOp) -> Result<u32, String> {
             };
             by(l, [0, 0, 0, 0, 0x41, 0x47])? + k
         }
-        VOp::Shl(l) => by(l, [0x6B, 0x8B, 0xAB, 0xCB, 0, 0])?,
-        VOp::Shr(l, u) => by(l, [su(u, 0x6C, 0x6D), su(u, 0x8C, 0x8D), su(u, 0xAC, 0xAD), su(u, 0xCC, 0xCD), 0, 0])?,
-        VOp::AllTrue(l) => by(l, [0x63, 0x83, 0xA3, 0xC3, 0, 0])?,
-        VOp::Bitmask(l) => by(l, [0x64, 0x84, 0xA4, 0xC4, 0, 0])?,
+        VOp::Shl => by(l, [0x6B, 0x8B, 0xAB, 0xCB, 0, 0])?,
+        VOp::Shr(u) => by(l, [su(u, 0x6C, 0x6D), su(u, 0x8C, 0x8D), su(u, 0xAC, 0xAD), su(u, 0xCC, 0xCD), 0, 0])?,
+        VOp::AllTrue => by(l, [0x63, 0x83, 0xA3, 0xC3, 0, 0])?,
+        VOp::Bitmask => by(l, [0x64, 0x84, 0xA4, 0xC4, 0, 0])?,
         VOp::Popcnt => 0x62,
-        VOp::Narrow(l, u) => by(l, [su(u, 0x65, 0x66), su(u, 0x85, 0x86), 0, 0, 0, 0])?,
+        VOp::Narrow(u) => by(l, [su(u, 0x65, 0x66), su(u, 0x85, 0x86), 0, 0, 0, 0])?,
         // (low_s, high_s, low_u, high_u)
-        VOp::Extend(l, h, u) => by(l, [0, 0x87, 0xA7, 0xC7, 0, 0])? + h as u32 + 2 * u as u32,
-        VOp::ExtMul(l, h, u) => by(l, [0, 0x9C, 0xBC, 0xDC, 0, 0])? + h as u32 + 2 * u as u32,
-        VOp::ExtAddPairwise(l, u) => by(l, [0, su(u, 0x7C, 0x7D), su(u, 0x7E, 0x7F), 0, 0, 0])?,
+        VOp::Extend(h, u) => by(l, [0, 0x87, 0xA7, 0xC7, 0, 0])? + h as u32 + 2 * u as u32,
+        VOp::ExtMul(h, u) => by(l, [0, 0x9C, 0xBC, 0xDC, 0, 0])? + h as u32 + 2 * u as u32,
+        VOp::ExtAddPairwise(u) => by(l, [0, su(u, 0x7C, 0x7D), su(u, 0x7E, 0x7F), 0, 0, 0])?,
         VOp::Dot => 0xBA,
         VOp::Q15MulrSat => 0x82,
-        VOp::FcvtFromInt(l, u) => by(l, [0, 0, 0, 0, su(u, 0xFA, 0xFB), su(u, 0xFE, 0xFF)])?,
-        VOp::FcvtToIntSat(l, u) => by(l, [0, 0, 0, 0, su(u, 0xF8, 0xF9), su(u, 0xFC, 0xFD)])?,
+        VOp::FcvtFromInt(u) => by(l, [0, 0, 0, 0, su(u, 0xFA, 0xFB), su(u, 0xFE, 0xFF)])?,
+        VOp::FcvtToIntSat(f64, u) => if f64 { su(u, 0xFC, 0xFD) } else { su(u, 0xF8, 0xF9) },
         VOp::Demote => 0x5E,
         VOp::Promote => 0x5F,
         VOp::RelaxedSwizzle => 0x100,
-        VOp::RelaxedTrunc(l, u) => by(l, [0, 0, 0, 0, su(u, 0x101, 0x102), su(u, 0x103, 0x104)])?,
-        VOp::RelaxedMadd(l) => by(l, [0, 0, 0, 0, 0x105, 0x107])?,
-        VOp::RelaxedNmadd(l) => by(l, [0, 0, 0, 0, 0x106, 0x108])?,
-        VOp::RelaxedLaneselect(l) => by(l, [0x109, 0x10A, 0x10B, 0x10C, 0, 0])?,
-        VOp::RelaxedMin(l) => by(l, [0, 0, 0, 0, 0x10D, 0x10F])?,
-        VOp::RelaxedMax(l) => by(l, [0, 0, 0, 0, 0x10E, 0x110])?,
+        VOp::RelaxedTrunc(f64, u) => if f64 { su(u, 0x103, 0x104) } else { su(u, 0x101, 0x102) },
+        VOp::RelaxedMadd => by(l, [0, 0, 0, 0, 0x105, 0x107])?,
+        VOp::RelaxedNmadd => by(l, [0, 0, 0, 0, 0x106, 0x108])?,
+        VOp::RelaxedLaneselect => by(l, [0x109, 0x10A, 0x10B, 0x10C, 0, 0])?,
+        VOp::RelaxedMin => by(l, [0, 0, 0, 0, 0x10D, 0x10F])?,
+        VOp::RelaxedMax => by(l, [0, 0, 0, 0, 0x10E, 0x110])?,
         VOp::RelaxedQ15Mulr => 0x111,
         VOp::RelaxedDot => 0x112,
         VOp::RelaxedDotAdd => 0x113,
@@ -1416,6 +1421,13 @@ fn makes_values(op: &Op) -> bool {
 /// One function: the wasm body (after an 8-byte header holding the function's signature, [`sig_enc`]),
 /// its relocations (offsets in the returned bytes) and no trap sites (a trap is `unreachable`)
 pub fn compile(fb: &FunctionBuilder, zero: &[StackSlot], _opt: bool) -> Result<(Vec<u8>, Vec<Reloc>, Vec<(u32, u8)>), String> {
+    // (wasm SIMD has 128-bit vectors only: a wider one (an AVX-width type) is not split into several)
+    let wide = |t: Type| matches!(t, Type::Vec(w) if w != VBits::B128);
+    let values = fb.ops.iter().zip(&fb.res).filter(|(o, _)| makes_values(o)).flat_map(|(_, r)| r.iter().map(|&x| fb.value_type(Value(x))));
+    let vars = fb.ops.iter().filter_map(|o| if let Op::DeclareVar(t) = o { Some(*t) } else { None });
+    if let Some(Type::Vec(w)) = fb.params.iter().chain(&fb.rets).copied().chain(values).chain(vars).find(|&t| wide(t)) {
+        return Err(format!("wasm32: a {}-bit vector (wasm SIMD has 128-bit ones only)", w.bits()));
+    }
     let mut pw: Vec<u8> = vec![];
     for &p in &fb.params {
         pw.extend_from_slice(wtys(p));
@@ -1839,7 +1851,7 @@ fn lower_op(b: &mut Body, op: &Op, res: &[u32]) -> Result<(), String> {
                 b.get(*x)?;
                 b.get(*y)?;
                 b.cond(*c)?;
-                if b.ty(*x) == Type::V128 {
+                if matches!(b.ty(*x), Type::Vec(_)) {
                     // (a typed select: the untyped one takes only numbers)
                     b.ops(&[0x1C, 1, T_V128]);
                 } else {
@@ -1982,8 +1994,8 @@ fn lower_op(b: &mut Body, op: &Op, res: &[u32]) -> Result<(), String> {
             b.code.extend_from_slice(&x.to_le_bytes());
             b.set_id(res[0])?;
         }
-        Op::Simd(o, args) => {
-            b.simd(*o, args)?;
+        Op::Simd(sh, o, args) => {
+            b.simd(*sh, *o, args)?;
             b.set_id(res[0])?;
         }
         Op::SymbolAddr(n) => {
@@ -2749,6 +2761,37 @@ mod tests {
         let e = sig_enc(&p, &r).unwrap();
         assert_eq!(sig_dec(e), (p, r));
         assert_eq!(sig_dec(sig_enc(&[], &[]).unwrap()), (vec![], vec![]));
+    }
+
+    #[test]
+    fn v128_signatures_round_trip() {
+        let p = vec![T_V128, T_I64, T_F32, T_V128];
+        let r = vec![T_V128];
+        let e = sig_enc(&p, &r).unwrap();
+        assert!(e < 0);
+        assert_eq!(sig_dec(e), (p, r));
+        assert!(sig_enc(&[T_V128; 16], &[]).is_err());
+    }
+
+    /// f32 lanes: x + x of a splat, at a vector width
+    fn splat_add(w: VBits) -> Result<(Vec<u8>, Vec<Reloc>, Vec<(u32, u8)>), String> {
+        let s = Shape::new(Lane::F32, w);
+        let mut fb = FunctionBuilder::new(vec![Type::F32], vec![Type::F32]);
+        let x = fb.func_params()[0];
+        let v = fb.simd(s, VOp::Splat, &[x]);
+        let y = fb.simd(s, VOp::Add, &[v, v]);
+        let r = fb.simd(s, VOp::Extract(0), &[y]);
+        fb.return_(&[r]);
+        compile(&fb, &[], false)
+    }
+
+    #[test]
+    fn only_128_bit_vectors() {
+        assert!(splat_add(VBits::B128).is_ok());
+        for w in [VBits::B256, VBits::B512] {
+            let e = splat_add(w).unwrap_err();
+            assert!(e.contains(&format!("{}-bit vector", w.bits())) && e.contains("128-bit ones only"), "{e}");
+        }
     }
 
     #[test]

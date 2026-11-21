@@ -77,11 +77,17 @@ behavior: `cve_2020_36323_join_borrow` (join over a `Borrow<str>` of the program
 
 ## SIMD (issue #30)
 
-Done: `Type::V128` and the SIMD instructions in the IR (`VOp`), the wasm backend, `core::arch::wasm32` (all of
-`simd128` and `relaxed-simd`), tests against rustc's wasm32-wasip1 builds (tests/wasm/README.md). Left:
+Done: vector types of 128 / 256 / 512 bits and the SIMD instructions in the IR (`Type::Vec`, `Op::Simd(Shape, VOp,
+..)`), the wasm backend (128-bit only), `core::arch::wasm32` (all of `simd128` and `relaxed-simd`), tests against
+rustc's wasm32-wasip1 builds (tests/wasm/README.md). Left:
 
-- Cranelift lowering of `VOp` (I8X16 .. F64X2), and `core::arch::x86_64`'s SSE / SSE2 subset on native. Both native
-  backends reject SIMD today.
+- Cranelift lowering of `VOp` at 128 bits (I8X16 .. F64X2) and at 256 / 512 bits where the CPU has AVX2 / AVX-512
+  (I32X8 ..), and `core::arch::x86_64`'s SSE / SSE2 and AVX(2) intrinsics (`__m128` / `__m256` as `Ty::Vec(128)` /
+  `Ty::Vec(256)`). Both native backends reject SIMD today.
+- Wider byte shuffles and constants: `Shuffle` / `Swizzle` / `Vconst` are 128-bit only.
+- Wasm flexible vectors (proposal, phase 3), when engines have them: a width the engine sets at run time, an
+  instruction for the lane count, lane shifts and half concatenations (the IR's SIMD section has the plan). Until
+  then wasm stays at 128 bits.
 - minclif: scalarize each `VOp` (one lane at a time), so that every backend accepts every instruction.
 - A `core::simd` subset (`f32x4`, `Simd<T, N>`, lanewise operators) as generic code over the intrinsics.
 - Intrinsics as function values (`map(f32x4_add)`): they are lowered at the call, not functions.
