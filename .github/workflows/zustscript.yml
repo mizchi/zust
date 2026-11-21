@@ -1,0 +1,51 @@
+name: zustscript
+
+# The zustscript prototype (crates/zustscript): a standalone crate, outside zust's workspace, so that it does not
+# get in the way of zust's own CI and KPIs. It runs only when the prototype (or this file) changes, and uses zustc as
+# an external command (built here from the checkout).
+on:
+  push:
+    branches: [main]
+    paths:
+      - "crates/zustscript/**"
+      - ".github/workflows/zustscript.yml"
+  pull_request:
+    paths:
+      - "crates/zustscript/**"
+      - ".github/workflows/zustscript.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: zustscript-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  test:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            . -> target
+            crates/zustscript -> target
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 26
+      # (the wasm layer is compiled by zustc: the binary from this checkout)
+      - name: Build zustc
+        run: cargo build --release --bin zustc
+      - name: Install tsc (the .d.ts check)
+        run: npm install --prefix "$RUNNER_TEMP/tsc" --no-audit --no-fund typescript@5.6.3
+      - name: Test
+        working-directory: crates/zustscript
+        env:
+          TSC: ${{ runner.temp }}/tsc/node_modules/.bin/tsc
+        run: |
+          node --version
+          cargo test --release

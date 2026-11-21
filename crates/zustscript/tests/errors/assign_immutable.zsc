@@ -1,0 +1,2 @@
+// expect: `n` is not mutable (declare it `let mut n = ..`)
+fn f() -> i32 { let n = 1; n = 2; n }

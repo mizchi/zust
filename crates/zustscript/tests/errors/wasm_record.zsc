@@ -1,0 +1,3 @@
+// expect: the type String is not in the @wasm subset
+type P = { name: String, x: f64 }
+@wasm pub fn f(p: P) -> f64 { p.x }

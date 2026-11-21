@@ -1,0 +1,3 @@
+// expect: an effect cannot leave a closure
+enum Log { Say(String) -> () }
+fn f(xs: Array<String>) -> Array<()> { xs |> .map((x) => perform Say(x)) }

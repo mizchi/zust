@@ -1,0 +1,2 @@
+// expect: a closure is written `(x) => e`
+fn f(xs: Array<i32>) -> Array<i32> { xs.map(|x| x + 1) }

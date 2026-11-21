@@ -1,0 +1,3 @@
+// expect: non-exhaustive match: `Done` not covered
+enum Filter { All, Active, Done }
+fn f(x: Filter) -> i32 { match x { All => 1, Active => 2 } }
