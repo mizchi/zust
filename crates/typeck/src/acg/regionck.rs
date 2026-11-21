@@ -1736,7 +1736,7 @@ impl Cx<'_> {
 
     /// The signature requires a region of it to be 'static
     pub(crate) fn needs_static(r: &RSigSyn) -> bool {
-        r.slots.iter().flatten().any(|&c| c == R_STATIC) || r.ty_outlives.iter().any(|x| x.1 == R_STATIC) || r.outlives.iter().any(|x| x.1 == R_STATIC)
+        r.slots.iter().flatten().any(|&c| c == R_STATIC) || r.ty_outlives.iter().any(|x| x.1 == R_STATIC) || r.outlives.iter().any(|x| x.1 == R_STATIC) || r.self_slots.contains(&R_STATIC)
     }
 
     /// The tree of a place, and the regions of the references it goes through
@@ -2400,6 +2400,16 @@ impl Cx<'_> {
     /// else fresh
     fn self_tree(&mut self, t: Ty, of_self: bool) -> Option<RT> {
         let prog = self.prog;
+        // (an impl of an instance (`impl A<&'static u8>`): its self type's codes, on the type built)
+        if of_self && self.rg.self_tree.as_ref().is_none_or(|x| x.0 != t) {
+            let rs = prog.sigs.get(self.rg.base as usize).and_then(|s| s.regions.clone());
+            if let Some(r) = rs.filter(|r| !r.self_slots.is_empty()) {
+                let lts = self.rg.lts.clone();
+                if let Some(tr) = self.rg.instantiate(prog, t, Some(&r.self_slots), &lts, &[], &mut |me| me.var()) {
+                    return Some(tr);
+                }
+            }
+        }
         match &self.rg.self_tree {
             Some((st, tr)) if of_self && *st == t => Some(tr.clone()),
             _ => self.rg.fresh(prog, t),
@@ -2408,10 +2418,14 @@ impl Cx<'_> {
 
     /// A tuple struct's value of type t built by its constructor (`B(a)`): the arguments flow into its fields
     pub(crate) fn rg_ctor(&mut self, c: &Expr, t: Ty, args: &[(usize, &Expr)]) {
-        // (a field of a type written `'static`: from here on, checked)
+        // (c: the call `Self(..)`)
+        let of_self = matches!(strip(c), Expr::Call(f, _) if matches!(strip(f), Expr::Path(None, p) if p.segs.len() == 1 && p.segs[0].name == "Self"));
+        // (a field of a type written `'static`, or `Self` of an impl's self type that writes it: from here on,
+        // checked)
         if !self.rg.on && self.rg.eligible && self.inline_depth == 0 {
             if let Ty::Struct(sid) = t {
-                if self.prog.adt_regions.get(&self.prog.base_of(sid)).is_some_and(|r| r.fields.iter().flatten().any(|&c| c == R_STATIC)) {
+                let self_static = of_self && self.prog.sigs.get(self.rg.base as usize).and_then(|s| s.regions.as_deref()).is_some_and(|r| r.self_slots.contains(&R_STATIC));
+                if self_static || self.prog.adt_regions.get(&self.prog.base_of(sid)).is_some_and(|r| r.fields.iter().flatten().any(|&c| c == R_STATIC)) {
                     self.rg_late_on();
                 }
             }
@@ -2424,7 +2438,6 @@ impl Cx<'_> {
         if prog.structs[sid as usize].is_enum {
             return;
         }
-        let of_self = matches!(strip(c), Expr::Path(None, p) if p.segs.len() == 1 && p.segs[0].name == "Self");
         let Some(tree) = self.self_tree(t, of_self) else { return };
         for &(i, v) in args {
             let Some(&(_, ft, _)) = prog.structs[sid as usize].fields.get(i) else { continue };

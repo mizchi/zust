@@ -965,3 +965,11 @@ fn opaque_result_without_lifetimes_is_static() {
     assert!(d.len() == 1 && d[0].0 == 6, "{d:?}");
     assert_eq!(check("use std::fmt::Display;\npub trait T {}\nstruct S<'a>(&'a ());\nimpl<'a> T for S<'a> {}\nfn foo() -> impl T {\n    S(&())\n}\nfn bar() -> impl Display {\n    \"x\"\n}\nfn main() {\n    let _ = (foo(), bar());\n}\n"), vec![]);
 }
+
+/// `Self(..)` in an impl of an instance that writes 'static (`impl A<&'static u8>`) builds that type
+#[test]
+fn self_constructor_of_a_static_instance() {
+    let d = check("struct A<T>(T);\nimpl A<&'static u8> {\n    fn f() {\n        let x = 0;\n        Self(&x);\n    }\n}\nfn main() {\n    A::f();\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 5, "{d:?}");
+    assert_eq!(check("struct A<T>(T);\nimpl A<&'static u8> {\n    fn f() {\n        static X: u8 = 0;\n        Self(&X);\n        let y = 0;\n        let _ = A(&y);\n    }\n}\nfn main() {\n    A::f();\n}\n"), vec![]);
+}

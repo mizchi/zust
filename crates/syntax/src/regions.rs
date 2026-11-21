@@ -476,10 +476,12 @@ pub fn sig_regions(sig: &PSig, outer: Option<&RImplSyn>, outer_tparams: &[&str])
     for (_, t) in &sig.params {
         s.qself_implied(t, &mut outlives);
     }
-    if !s.any && outlives.is_empty() && ty_outlives.is_empty() {
+    // (or a self type that writes 'static: `impl A<&'static u8>`)
+    let self_static = outer.is_some_and(|o| o.self_slots.contains(&R_STATIC));
+    if !s.any && outlives.is_empty() && ty_outlives.is_empty() && !self_static {
         return None;
     }
-    let self_slots = outer.map(|o| o.self_slots.clone()).filter(|v| v.iter().any(|&c| c < R_STATIC)).unwrap_or_default();
+    let self_slots = outer.map(|o| o.self_slots.clone()).filter(|v| v.iter().any(|&c| c <= R_STATIC)).unwrap_or_default();
     let outer = outer.map_or(0, |o| o.lts.len().min(u8::MAX as usize) as u8);
     Some(Box::new(RSigSyn { lts: s.lts, slots, outlives, ty_outlives, outer, self_slots }))
 }

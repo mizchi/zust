@@ -5849,6 +5849,7 @@ check-pass	self/elision/struct.rs
 run-pass	self/explicit-self-generic.rs
 run-pass	self/explicit-self-objects-uniq.rs
 compile-fail	self/invalid-self-argument.rs
+compile-fail	self/issue-61882-2.rs
 compile-fail	self/lot-of-references-self.rs
 run-pass	self/move-self.rs
 run-pass	self/objects-owned-object-owned-method.rs
