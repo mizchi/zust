@@ -976,7 +976,7 @@ pub fn expand_cfg(src: &str, cfg: Option<&crate::cfg::CfgSet>) -> Result<Option<
         // 後ろから置き換える (1 行に収めるので、置き換えた範囲の改行は残す)
         reps.sort_by_key(|r| std::cmp::Reverse(r.0));
         // (展開したものの中にマクロの名前が無ければ、もう一周しなくてよい)
-        let again = reps.iter().any(|r| macros.keys().any(|m| r.2.contains(m.as_str())));
+        let again = reps.iter().any(|r| r.2.contains("macro_rules") || macros.keys().any(|m| r.2.contains(m.as_str())));
         let has_cfg = cfg.is_some() && reps.iter().any(|r| r.2.contains("cfg"));
         for (a, e, rep) in reps {
             let nl = text[a..e].bytes().filter(|&c| c == b'\n').count();
@@ -1093,7 +1093,7 @@ pub fn expand_reference(src: &str) -> Result<Option<String>, String> {
         // 後ろから置き換える (1 行に収めるので、置き換えた範囲の改行は残す)
         reps.sort_by_key(|r| std::cmp::Reverse(r.0));
         // (展開したものの中にマクロの名前が無ければ、もう一周しなくてよい)
-        let again = reps.iter().any(|r| macros.keys().any(|m| r.2.contains(m.as_str())));
+        let again = reps.iter().any(|r| r.2.contains("macro_rules") || macros.keys().any(|m| r.2.contains(m.as_str())));
         for (a, e, rep) in reps {
             let nl = text[a..e].bytes().filter(|&c| c == b'\n').count();
             let mut r = rep;
