@@ -2526,7 +2526,11 @@ impl Parser {
             while !self.is_close() {
                 self.attrs()?;
                 self.vis()?;
-                v.push(self.ty()?);
+                let ft = self.ty()?;
+                if ty_has_infer(&ft) {
+                    return Err(self.err_plain("the placeholder `_` is not allowed within types on item signatures for structs (E0121)"));
+                }
+                v.push(ft);
                 if !self.eat_punct(",") {
                     break;
                 }
@@ -2905,7 +2909,7 @@ impl Parser {
                 self.where_clause(&mut g)?;
                 let t = if self.eat_punct("=") { Some(self.ty()?) } else { None };
                 // (not the parser's own `type __B = dyn ..;`, which reads a bound's text)
-                if !n.starts_with("__") && t.as_ref().is_some_and(ty_has_infer) {
+                if n != "__B" && t.as_ref().is_some_and(ty_has_infer) {
                     return Err(self.err_plain("the placeholder `_` is not allowed within types on item signatures for type aliases (E0121)"));
                 }
                 // (a generic associated type's where clause after the value: `type Item<'a> = &'a T where T: 'a;`)
@@ -3309,7 +3313,11 @@ fn ty_has_infer(t: &Ty) -> bool {
     };
     match t {
         Ty::Infer => true,
-        Ty::Path(q, p) => q.as_deref().is_some_and(ty_has_infer) || p.segs.iter().any(|s| s.args.iter().any(arg)),
+        // (`Fn(_)` as a path in 2015: its parenthesized arguments too)
+        Ty::Path(q, p) => {
+            q.as_deref().is_some_and(ty_has_infer)
+                || p.segs.iter().any(|s| s.args.iter().any(arg) || s.fn_args.as_ref().is_some_and(|(ps, r)| ps.iter().any(ty_has_infer) || r.as_deref().is_some_and(ty_has_infer)))
+        }
         Ty::Ref(_, _, i) | Ty::Ptr(_, i) | Ty::Slice(i) | Ty::Array(i, _) => ty_has_infer(i),
         Ty::Tuple(ts) => ts.iter().any(ty_has_infer),
         Ty::Fn(ps, r) => ps.iter().any(ty_has_infer) || ty_has_infer(r),

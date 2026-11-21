@@ -1628,6 +1628,7 @@ run-pass	consts/const-negative.rs
 run-pass	consts/const-nullary-enum.rs
 run-pass	consts/const-nullary-univariant-enum.rs
 compile-fail	consts/const-pattern-rewrite-error-32086.rs
+compile-fail	consts/const-range-matching-76191.rs
 run-pass	consts/const-rec-and-tup.rs
 check-pass	consts/const-ref-to-static-linux-vtable.rs
 run-pass	consts/const-region-ptrs-noncopy.rs
@@ -3820,6 +3821,7 @@ check-pass	match/issue-84434.rs
 compile-fail	match/issue-91058.rs
 run-pass	match/match-borrowed-str.rs
 run-pass	match/match-cloned-string.rs
+compile-fail	match/match-const-tuple-type-mismatch.rs
 run-pass	match/match-field-reassign.rs
 compile-fail	match/match-fn-call.rs
 compile-fail	match/match-ill-type2.rs

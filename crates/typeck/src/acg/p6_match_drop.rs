@@ -533,8 +533,10 @@ impl Cx<'_> {
                 if !self.prog.is_tuple(base) && !std_structural && !self.prog.derived_peq.contains(&base) {
                     return Some(t);
                 }
-                let fields = sd.fields.iter().map(|f| f.1).chain(sd.variants.iter().flat_map(|v| v.fields.iter().map(|f| f.1)));
-                fields.collect::<Vec<Ty>>().into_iter().find_map(|f| self.non_structural(f, depth + 1))
+                // (an enum's variants are not looked into: only the variant the constant holds counts, which is not
+                // evaluated here; a struct's fields all are)
+                let fields: Vec<Ty> = if sd.is_enum { vec![] } else { sd.fields.iter().map(|f| f.1).collect() };
+                fields.into_iter().find_map(|f| self.non_structural(f, depth + 1))
             }
             _ => None,
         }
@@ -551,7 +553,8 @@ impl Cx<'_> {
             Ty::Ref(_, i) | Ty::Array(i, _) | Ty::Slice(i) => self.has_fn_or_raw_ptr(*i, depth + 1),
             Ty::Struct(sid) => {
                 let sd = &self.prog.structs[sid as usize];
-                let fs: Vec<Ty> = sd.fields.iter().map(|f| f.1).chain(sd.variants.iter().flat_map(|v| v.fields.iter().map(|f| f.1))).collect();
+                // (as for non_structural: not an enum's variants, only the one the constant holds would count)
+                let fs: Vec<Ty> = if sd.is_enum { vec![] } else { sd.fields.iter().map(|f| f.1).collect() };
                 fs.into_iter().any(|f| self.has_fn_or_raw_ptr(f, depth + 1))
             }
             _ => false,
@@ -618,7 +621,11 @@ impl Cx<'_> {
             Pat::Ident(_, _, n, None) if self.user_code && self.lookup(n).is_none() && self.prog.const_index.contains_key(n.as_str()) => {
                 let c = &self.prog.consts[self.prog.const_index[n.as_str()] as usize];
                 // (a static's name is not a pattern (E0530))
+                // (with modules, whose scopes are flattened away, the static may be another module's: a binding then)
                 if c.stat.is_some() {
+                    if self.prog.has_mods {
+                        return Ok(());
+                    }
                     return err(SP, format!("match bindings cannot shadow statics (E0530): `{n}`"));
                 }
                 let ct = c.ty;
@@ -638,16 +645,29 @@ impl Cx<'_> {
                 }
                 // (a structural constant of the scrutinee's type (`const C: [u8; 2]`, a struct deriving PartialEq):
                 // equal to its value, as `==` compares)
+                // (`match &[2u8] { C => .. }` with `const C: [u8; 1]`: the scrutinee through its references)
+                let mut p = p;
+                while p.ty() != ct && matches!(p.ty(), Ty::Ref(..)) {
+                    p = self.pat_deref_once(p).0;
+                }
                 let t = p.ty();
-                if ct == t {
-                    let (v, _) = self.read(p);
-                    let ce = self.keep_expr(path_expr(n));
-                    let (c, cty) = self.expr(ce, Some(t))?;
-                    self.same(SP, cty, t)?;
-                    if let (Some(v), Some(c)) = (v, c) {
-                        let cond = self.eq_at(v, c, t, SP)?;
-                        self.require(cond, fail);
-                    }
+                // (`match 0 { OR => .. }` with `const OR: usize`: rustc types the literal from the constant; here the
+                // scrutinee kept its own integer type, and the constant's value is compared in it)
+                let int_pair = ct.is_int() && t.is_int();
+                if ct != t && !int_pair {
+                    return err(SP, format!("mismatched types: expected `{}`, found `{}`", self.prog.tn(t), self.prog.tn(ct)));
+                }
+                let (v, _) = self.read(p);
+                let ce = self.keep_expr(path_expr(n));
+                let (c, cty) = self.expr(ce, Some(ct))?;
+                self.same(SP, cty, ct)?;
+                let c = match (c, int_pair && ct != t) {
+                    (Some(c), true) => Some(self.convert(c, ct, t)),
+                    (c, _) => c,
+                };
+                if let (Some(v), Some(c)) = (v, c) {
+                    let cond = self.eq_at(v, c, t, SP)?;
+                    self.require(cond, fail);
                 }
                 Ok(())
             }
@@ -912,6 +932,15 @@ impl Cx<'_> {
             Pat::Ident(..) if unit_variant_ident(self.prog, pat).is_some() => Ok(()),
             Pat::Ident(..) if const_lit_pat(self.prog, pat).is_some() => Ok(()),
             Pat::Ident(..) if self.const_pat_ok(pat, p.ty()) => Ok(()),
+            // (an aggregate constant, tested by pat_test: not a new name, so a nested match still compares with it)
+            Pat::Ident(_, _, n, None)
+                if self.user_code
+                    && (self.prog.lower_consts || n.starts_with(|c: char| c.is_uppercase()))
+                    && self.prog.const_index.get(n.as_str()).is_some_and(|&ci| self.prog.consts[ci as usize].stat.is_none())
+                    && self.lookup(n).is_none() =>
+            {
+                Ok(())
+            }
             Pat::Ident(by_ref, mutable, name, subpat) => {
                 if let Some(sub) = subpat {
                     self.pat_bind(sub, p, mode)?;

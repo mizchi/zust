@@ -659,11 +659,12 @@ impl Session2 {
         }
         // (E0658: an attribute behind a feature gate the file does not enable)
         // (attributes start items: only the text at the start of the program's items, not the whole source)
+        let mut feats: Option<Vec<String>> = None;
         for it in &items[..user] {
             let head = src.get(it.start..it.end).unwrap_or("");
             // (and an extern block's items: `extern "C" { #[unsafe(ffi_const)] fn f(); }`)
             if head.starts_with('#') || head.starts_with("extern") || head.starts_with("unsafe extern") {
-                if let Some(e) = gated_attr(&src[..it.end], it.start) {
+                if let Some(e) = gated_attr(&src[..it.end], it.start, &mut feats) {
                     return Err(e);
                 }
             }
@@ -799,14 +800,19 @@ impl Session2 {
         // (traits of one name in two modules: which one a method call means depends on where it is. Read from the
         // crate's source (its files joined, as the items' lines count); a build with dependency crates keeps the earlier
         // choice, the first impl)
+        // (whether the source has modules: one search, for trait scopes and for has_mods below)
+        let has_mod_word = src0.contains("mod");
         if self.ctx.deps.is_empty() && self.ctx.lib.is_none() {
-            prog.trait_scopes = lexer::trait_scopes(src0);
+            prog.trait_scopes = lexer::trait_scopes_with(src0, has_mod_word);
             if !prog.trait_scopes.is_empty() {
                 prog.item_lines = items.iter().map(|it| it.line as u32).collect();
             }
         }
         prog.overflow_checks = !self.opts.opt;
         prog.deny_unreachable = deny_unreachable;
+        // (the program has modules: read from its source as written, before flattening blanks their headers)
+        prog.has_mods = has_mod_word;
+        prog.lower_consts = prog.consts.iter().any(|c| !c.name.contains("::") && c.name.starts_with(|ch: char| ch.is_lowercase()));
         prog.deny_must_use = deny_must_use;
         prog.deny_unused_alloc = deny_unused_alloc;
         prog.deny_trivial_casts = deny_trivial_casts;
@@ -2497,8 +2503,8 @@ fn lint_bits(p: &Program) -> u8 {
 }
 
 /// An attribute that needs a `#![feature(..)]` the source does not have: `line:col: the `x` attribute is an
-/// experimental feature (E0658)`. Only the places of `#` are looked at
-fn gated_attr(src: &str, from: usize) -> Option<String> {
+/// experimental feature (E0658)`. Read from the tokens of src[from..] (literals and comments are not attributes)
+fn gated_attr(src: &str, from: usize, feats: &mut Option<Vec<String>>) -> Option<String> {
     const GATED: &[(&str, &str)] = &[
         ("default_lib_allocator", "allocator_internals"),
         ("export_stable", "export_stable"),
@@ -2516,39 +2522,60 @@ fn gated_attr(src: &str, from: usize) -> Option<String> {
         ("thread_local", "thread_local"),
     ];
     let b = src.as_bytes();
-    for (i, _) in src[from..].match_indices('#').map(|(k, m)| (from + k, m)) {
-        // (not in a line comment or after a quote on its line: `// see #[thread_local]`, `"#[x]"`)
-        let ls = src[..i].rfind('\n').map_or(0, |n| n + 1);
-        if src[ls..i].contains("//") || src[ls..i].contains('"') {
+    let toks = lexer::tokenize(&b[from..]);
+    let tx = |k: usize| &src[from + toks[k].1..from + toks[k].2];
+    let sym = |k: usize, c: &str| k < toks.len() && toks[k].0 == 1 && tx(k) == c;
+    for k in 0..toks.len() {
+        if !sym(k, "#") {
             continue;
         }
-        let mut j = i + 1;
-        if b.get(j) == Some(&b'!') {
+        let mut j = k + 1;
+        if sym(j, "!") {
             j += 1;
         }
-        if b.get(j) != Some(&b'[') {
+        if !sym(j, "[") {
             continue;
         }
         j += 1;
-        let rest = &src[j..];
-        let rest = rest.strip_prefix("unsafe(").unwrap_or(rest);
-        let name_len = rest.bytes().take_while(|c| c.is_ascii_alphanumeric() || *c == b'_').count();
-        let name = &rest[..name_len];
-        // (not a path: `#[thread_local]`, not `#[foo::thread_local]`)
-        if rest[name_len..].starts_with("::") {
+        // (`#[unsafe(ffi_const)]`)
+        if j + 1 < toks.len() && toks[j].0 == 0 && tx(j) == "unsafe" && sym(j + 1, "(") {
+            j += 2;
+        }
+        if j >= toks.len() || toks[j].0 != 0 || sym(j + 1, ":") {
             continue;
         }
+        let name = tx(j);
         let Some(&(_, feat)) = GATED.iter().find(|g| g.0 == name) else { continue };
-        let enabled = src.match_indices("feature(").any(|(k, _)| {
-            let list = &src[k + 8..];
-            let end = list.find(')').unwrap_or(list.len());
-            list[..end].split(',').any(|f| f.trim() == feat)
-        });
-        if !enabled {
+        // (the source's enabled features: read once, at the first gated attribute)
+        let enabled = feats.get_or_insert_with(|| enabled_features(src));
+        if !enabled.iter().any(|f| f == feat) {
+            let i = from + toks[k].1;
             let line = src[..i].matches('\n').count() + 1;
             let col = i - src[..i].rfind('\n').map_or(0, |n| n + 1) + 1;
             return Some(format!("{line}:{col}: the `{name}` attribute is an experimental feature (E0658)"));
         }
     }
     None
+}
+
+/// The features `#![feature(..)]` enables, read from the source's tokens (not a comment's or a string's text)
+fn enabled_features(src: &str) -> Vec<String> {
+    let b = src.as_bytes();
+    let toks = lexer::tokenize(b);
+    let tx = |k: usize| &src[toks[k].1..toks[k].2];
+    let sym = |k: usize, c: &str| k < toks.len() && toks[k].0 == 1 && tx(k) == c;
+    let mut out = vec![];
+    for k in 0..toks.len() {
+        if !(sym(k, "#") && sym(k + 1, "!") && sym(k + 2, "[") && k + 3 < toks.len() && tx(k + 3) == "feature" && sym(k + 4, "(")) {
+            continue;
+        }
+        let mut j = k + 5;
+        while j < toks.len() && !sym(j, ")") {
+            if toks[j].0 == 0 {
+                out.push(tx(j).to_string());
+            }
+            j += 1;
+        }
+    }
+    out
 }

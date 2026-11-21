@@ -240,6 +240,12 @@ pub struct Program {
     /// structs / enums with `#[derive(PartialEq)]` (base ids): a constant of such a type (with fields of such types) is
     /// structural, usable as a pattern
     pub derived_peq: FxSet<u32>,
+    /// the program's source declares modules (`mod m { .. }`), whose scopes are flattened away: a name's item may then
+    /// be out of scope where the name is written
+    pub has_mods: bool,
+    /// a constant with a lowercase name exists (`const or: usize`): an identifier pattern of any case may name one;
+    /// without, only an uppercase one is looked up
+    pub lower_consts: bool,
     /// `#![deny(unused_must_use)]`: a statement whose value is a `Result` is an error
     pub deny_must_use: bool,
     /// `#![deny(unused_allocation)]`: `Box::new(x).m()` with m of `&self` on what the box holds is an error
@@ -718,6 +724,8 @@ impl Program {
             consts: vec![],
             const_index: FxMap::default(),
             derived_peq: FxSet::default(),
+            has_mods: false,
+            lower_consts: false,
             const_by_last: FxMap::default(),
             prim_impls: HashSet::default(),
             ref_slice_traits: HashSet::default(),
