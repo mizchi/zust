@@ -245,3 +245,4 @@ date	commit	change	noop_M	edit_M	check_M	cache_KiB	lsp_G	run	check	build	cfail	t
 2026-11-21	b3475f1	PartialEq's eq among reference overloads; merge #36 work	0.702	553.798	3859.543	1902.8	-	1800	1480	98	3828	1184.934	64.076	10.326	319.426	717.405	267.224
 2026-11-21	699644c+	Review of #36: module types with const args, array impls matched to operands	0.699	553.786	3859.117	1902.8	-	1800	1480	98	3827	1184.794	63.966	10.311	319.407	717.333	267.216
 2026-11-21	ef664e2+	break / continue at their own position; a labeled while's label in its condition	0.697	553.933	3859.300	1902.8	-	1800	1481	98	3842	1184.873	63.975	10.298	319.509	717.396	267.286
+2026-11-21	38f699a+	Review of #36: an auto trait alone in a module-qualified Box	0.695	553.782	3859.114	1902.8	-	1800	1480	98	3827	1184.776	63.953	10.284	319.400	717.352	267.235

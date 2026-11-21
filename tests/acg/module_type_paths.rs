@@ -12,6 +12,17 @@ mod M {
 }
 use M::{S, W};
 
+// (`B::Box<dyn Send>`: an auto trait alone in a Box, as for a Box without a module)
+#[allow(non_snake_case)]
+mod B {
+    pub use std::boxed::Box;
+}
+
+fn h(b: B::Box<dyn Send>) -> u8 {
+    drop(b);
+    3
+}
+
 fn f(s: M::S<3>) -> usize {
     s.n()
 }
@@ -22,5 +33,5 @@ fn g(w: M::W<u8>) -> u8 {
 
 fn main() {
     let s: S<3> = S;
-    println!("{} {}", f(s), g(W(7)));
+    println!("{} {} {}", f(s), g(W(7)), h(Box::new(5u8)));
 }
