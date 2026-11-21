@@ -6,10 +6,11 @@ zust を土台にした、フロントエンド向け言語の試作。目標は
   - `x.js`: 読める ES module。JS 層の本体と、wasm 層のグルー
   - `x.d.ts`
   - `x.wasm.rs` と `x.wasm`: `wasm fn` があるときだけ。zustc でコンパイルする
-- **zust の crate には手を入れていない**
-  - zust のワークスペース外の独立した crate(`[workspace]` を自前で持つ)
-  - zustc は外部コマンドとして呼ぶだけ
-  - 本体側の変更は `.gitignore` の 2 行のみ
+- **zust の改善を妨げないように、独立させている**
+  - `crates/zustscript` に置いているが、zust のワークスペースには入れない(`[workspace]` を自前で持つ)。zust の `cargo build/test --workspace` には含まれない
+  - CI も独立した workflow(`.github/workflows/zustscript.yml`)。`crates/zustscript/**` が変わったときだけ動き、zust の CI と KPI には関わらない
+  - zustc は外部コマンドとして呼ぶだけ。zust の crate には依存しない
+  - 計画メモ: [docs/plan.md](docs/plan.md)
 - テスト: `cargo test --release`
   - **Node 26** を使う(PATH 上の `node`。計測も Node 26.13.1。relaxed SIMD はフラグなしで動く)
   - app の例は zust 側の `target/release/zustc` を使う

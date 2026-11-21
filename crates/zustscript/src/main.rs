@@ -150,7 +150,7 @@ fn main() {
     eprintln!(")");
 }
 
-/// zustc next to this binary's checkout: experiments/zustscript/target/<profile>/zsc → <zust>/target/release/zustc
+/// zustc next to this binary's checkout: crates/zustscript/target/<profile>/zsc → <zust>/target/release/zustc
 fn default_zustc() -> PathBuf {
     if let Ok(exe) = std::env::current_exe() {
         for anc in exe.ancestors() {
