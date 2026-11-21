@@ -71,7 +71,7 @@ fn alias_in_a_constant_invalidates() {
     };
     let src = |lane: &str| {
         format!(
-            "type Lane = {lane};\nconst INDEX: usize = ((257u32 as Lane) / 256) as usize;\nfn pick() -> u32 {{ let t = [10u32, 11, 12]; t[INDEX] }}\nfn main() {{ println!(\"{{}}\", pick()); }}\n"
+            "type Lane = {lane};\nconst INDEX: usize = (((257u32 as Lane) as u32) / 256) as usize;\nfn pick() -> u32 {{ let t = [10u32, 11, 12]; t[INDEX] }}\nfn main() {{ println!(\"{{}}\", pick()); }}\n"
         )
     };
     assert_eq!(run(&src("u8")), "10\n");
