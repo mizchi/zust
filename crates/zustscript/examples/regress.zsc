@@ -86,3 +86,9 @@ pub fn re(r: ReactElement) -> i32 { r.value }
   let move = async - async_;
   move
 }
+
+// a record field named like an escaped keyword crosses the wasm boundary both ways
+type Kw = { async_: i32, move: i32 }
+@wasm pub fn kw_rec(r: Kw) -> Kw {
+  Kw { async_: r.move, move: r.async_ }
+}

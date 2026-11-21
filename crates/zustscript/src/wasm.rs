@@ -383,7 +383,7 @@ fn build(v: &VTy, rn: &str) -> String {
     match v {
         VTy::Scalar(_) => rn.to_string(),
         VTy::Record(rt, fs) => {
-            let parts: Vec<String> = fs.iter().map(|(f, fv)| format!("{f}: {}", build(fv, &format!("{rn}__{f}")))).collect();
+            let parts: Vec<String> = fs.iter().map(|(f, fv)| format!("{}: {}", crate::lower::local(f), build(fv, &format!("{rn}__{f}")))).collect();
             format!("{} {{ {} }}", base(rt), parts.join(", "))
         }
         VTy::Enum(rt, _, vs) => {
@@ -412,7 +412,7 @@ fn store(v: &VTy, e: &str, off: &mut usize, depth: usize, out: &mut String) {
         }
         VTy::Record(_, fs) => {
             for (f, fv) in fs {
-                store(fv, &format!("{e}.{f}"), off, depth, out);
+                store(fv, &format!("{e}.{}", crate::lower::local(f)), off, depth, out);
             }
         }
         VTy::Enum(rt, _, vs) => {
