@@ -100,7 +100,9 @@ impl Cx<'_> {
         // lengths elsewhere keep their wrapping: `[u8; 4294967296]` may be declared and never used)
         let big = match &ts {
             crate::types::TySyn::Array(_, crate::types::ArrLen::Lit(n)) => *n > u32::MAX as u64,
-            crate::types::TySyn::Array(_, crate::types::ArrLen::Const(c)) => self.prog.const_usize(c).is_ok_and(|n| n > u32::MAX as u64),
+            crate::types::TySyn::Array(_, crate::types::ArrLen::Const(c)) => {
+                !self.env.params.iter().any(|p| &p.0 == c) && self.prog.const_usize(c).is_ok_and(|n| n > u32::MAX as u64)
+            }
             _ => false,
         };
         if big {

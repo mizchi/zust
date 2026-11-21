@@ -26,10 +26,24 @@ fn lane<const LANE: i32>(a: __m128i) -> i32 {
     _mm_extract_epi32::<LANE>(a)
 }
 
+// (a const parameter shadows a program constant too large for a lane, in braces)
+const BIG: i64 = 1 << 40;
+
+#[target_feature(enable = "avx2,fma")]
+fn blane<const BIG: i32>(a: __m128i) -> i32 {
+    _mm_extract_epi32::<{ BIG }>(a)
+}
+
 #[target_feature(enable = "avx2,fma")]
 fn run() {
     let l = _mm_setr_epi32(10, 11, 12, 13);
     println!("const lanes {} {} {} {}", _mm_extract_epi32::<LANE>(l), lane::<1>(l), lane::<3>(l), _mm_extract_epi32::<CAST>(l));
+    println!(
+        "inline casts {} {} {}",
+        _mm_extract_epi32::<{ ((-1i8 as i32) < 0) as i32 }>(l),
+        _mm_extract_epi32::<{ 4294967298u64 as i32 }>(l),
+        blane::<3>(l)
+    );
     let a16 = _mm_setr_epi16(1, -2, 32767, -32768, 1000, -1000, 255, -256);
     let a32 = _mm_setr_epi32(1, -2, i32::MAX, i32::MIN);
     let a64 = _mm_set_epi64x(-5, 0x1234_5678_9abc_def0);
