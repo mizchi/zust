@@ -1577,6 +1577,31 @@ impl Program {
                 }
             }
         }
+        // (E0391: a trait that is its own supertrait, through any number of them; reported at the first trait of the
+        // cycle in the source. A cycle through a name declared twice (in two modules, flattened to one name) is left
+        // out: counted only when a cycle is found)
+        if !user_traits.is_empty() && !p.trait_supers.is_empty() {
+            for (ii, sm) in sums[..user].iter().enumerate() {
+                let Some(tr) = sm.trait_decl.as_deref() else { continue };
+                let Some(sup) = p.trait_supers.get(tr) else { continue };
+                let mut seen: FxSet<&str> = FxSet::default();
+                let mut todo: Vec<&str> = sup.iter().map(|s| s.as_str()).collect();
+                let mut cycle = false;
+                while let Some(t) = todo.pop() {
+                    if t == tr {
+                        cycle = true;
+                        break;
+                    }
+                    if user_traits.contains(t) && seen.insert(t) {
+                        todo.extend(p.trait_supers.get(t).into_iter().flatten().map(|s| s.as_str()));
+                    }
+                }
+                let once = |t: &str| sums[..user].iter().filter(|s| s.trait_decl.as_deref() == Some(t)).count() == 1;
+                if cycle && once(tr) && seen.iter().all(|t| once(t)) {
+                    return Err(format!("{}:1: cycle detected when computing the super predicates of `{tr}` (E0391)", items[ii].line));
+                }
+            }
+        }
         // (a free constant of an uninhabited type (`!`, an enum with no variants) has no value to evaluate to; an
         // associated one is evaluated only where it is used)
         for c in p.consts.iter().filter(|c| c.stat.is_none() && (c.item as usize) < user && !c.name.contains("::")) {

@@ -672,6 +672,41 @@ impl Session2 {
                 }
             }
         }
+        // (E0119: two blanket impls of one trait for a bare parameter, `impl<T: A> Tr for T` and `impl<T: B> Tr for T`,
+        // overlap whatever their bounds say. Only the program's own traits declared once (modules flatten names),
+        // without trait arguments, and not under the features that allow overlapping impls)
+        {
+            // (a `where` clause only on the parameter itself: `where (): Mirror<Assoc = T>` can make the impls disjoint)
+            let plain_where = |ii: usize, st: &str| {
+                let it = &items[ii];
+                let head = src.get(it.start..it.end).unwrap_or("");
+                let head = &head[..head.find('{').unwrap_or(head.len())];
+                let w = head.match_indices("where").find(|&(i, _)| {
+                    let b = head.as_bytes();
+                    (i == 0 || !(b[i - 1].is_ascii_alphanumeric() || b[i - 1] == b'_')) && b.get(i + 5).is_none_or(|c| !(c.is_ascii_alphanumeric() || *c == b'_'))
+                });
+                w.is_none_or(|(i, _)| top_level_split(&head[i + 5..]).iter().all(|p| p.trim().is_empty() || p.split(':').next().map(str::trim) == Some(st)))
+            };
+            let mut first: FxMap<&str, (usize, &str)> = FxMap::default();
+            for (ii, sm) in sums[..user].iter().enumerate() {
+                let (Some(tr), Some(st)) = (sm.impl_trait.as_deref(), sm.impl_self.as_deref()) else { continue };
+                if !sm.impl_trait_args.is_empty() || tr.contains(['<', ':']) || !sm.impl_generics.iter().any(|g| g.0 == st) {
+                    continue;
+                }
+                // (an impl whose `where` clause may make it disjoint is no candidate either way)
+                if !plain_where(ii, st) {
+                    continue;
+                }
+                let Some((_, _)) = first.insert(tr, (ii, st)) else { continue };
+                let once = sums[..user].iter().filter(|s| s.trait_decl.as_deref() == Some(tr)).count() == 1;
+                const OVERLAP: [&str; 6] =
+                    ["specialization", "min_specialization", "marker_trait_attr", "negative_impls", "with_negative_coherence", "rustc_attrs"];
+                let enabled = feats.get_or_insert_with(|| enabled_features(&src));
+                if once && !enabled.iter().any(|f| OVERLAP.contains(&f.as_str())) {
+                    return Err(format!("{}:1: conflicting implementations of trait `{tr}` (E0119)", items[ii].line));
+                }
+            }
+        }
         // (`#![crate_type = "lib"]`: a library, no `main` needed)
         let mut deny_unreachable = false;
         let mut deny_unused_vars = false;
@@ -2557,17 +2592,117 @@ fn gated_attr(src: &str, from: usize, to: usize, feats: &mut Option<Vec<String>>
             continue;
         }
         let name = tx(j);
+        let at = |k: usize| {
+            let i = from + toks[k].1;
+            let line = src[..i].matches('\n').count() + 1;
+            (line, i - src[..i].rfind('\n').map_or(0, |n| n + 1) + 1)
+        };
+        // (`#[target_feature(enable = "apxf,avx2")]`: a feature of the target that is unstable)
+        if name == "target_feature" {
+            let mut q = j + 1;
+            while q < toks.len() && !sym(q, "]") {
+                if let Some(text) = (toks[q].0 == 2).then(|| str_lit_value(tx(q))).flatten() {
+                    for tf in text.split(',').map(str::trim) {
+                        let Some(gate) = unstable_target_feature(tf) else { continue };
+                        let enabled = feats.get_or_insert_with(|| enabled_features(src));
+                        if !enabled.iter().any(|f| f == gate) {
+                            let (line, col) = at(k);
+                            return Some(format!("{line}:{col}: the target feature `{tf}` is currently unstable (E0658)"));
+                        }
+                    }
+                }
+                q += 1;
+            }
+            continue;
+        }
         let Some(&(_, feat)) = GATED.iter().find(|g| g.0 == name) else { continue };
         // (the source's enabled features: read once, at the first gated attribute)
         let enabled = feats.get_or_insert_with(|| enabled_features(src));
         if !enabled.iter().any(|f| f == feat) {
-            let i = from + toks[k].1;
-            let line = src[..i].matches('\n').count() + 1;
-            let col = i - src[..i].rfind('\n').map_or(0, |n| n + 1) + 1;
+            let (line, col) = at(k);
             return Some(format!("{line}:{col}: the `{name}` attribute is an experimental feature (E0658)"));
         }
     }
     None
+}
+
+/// The parts of s between its top-level commas (not those inside `<..>` / `(..)` / `[..]`): a `where` clause's
+/// predicates
+fn top_level_split(s: &str) -> Vec<&str> {
+    let (mut out, mut depth, mut from) = (vec![], 0i32, 0);
+    let mut prev = '\0';
+    for (i, c) in s.char_indices() {
+        let arrow = c == '>' && prev == '-';
+        prev = c;
+        match c {
+            // (the `>` of `-> R` closes nothing)
+            '>' if arrow => {}
+            '<' | '(' | '[' => depth += 1,
+            '>' | ')' | ']' => depth -= 1,
+            ',' if depth == 0 => {
+                out.push(&s[from..i]);
+                from = i + 1;
+            }
+            _ => {}
+        }
+    }
+    out.push(&s[from..]);
+    out
+}
+
+/// The value of a string literal token: `"x87"`, `r"x87"` / `r#"x87"#`, with the escapes of an ordinary one decoded
+/// (`"x\x38\x37"`). None for another literal
+fn str_lit_value(t: &str) -> Option<String> {
+    if let Some(r) = t.strip_prefix('r') {
+        let h = r.len() - r.trim_start_matches('#').len();
+        return Some(r.get(h + 1..r.len().checked_sub(h + 1)?)?.to_string());
+    }
+    let inner = t.strip_prefix('"')?.strip_suffix('"')?;
+    let mut out = String::new();
+    let mut cs = inner.chars();
+    while let Some(c) = cs.next() {
+        if c != '\\' {
+            out.push(c);
+            continue;
+        }
+        match cs.next()? {
+            'n' => out.push('\n'),
+            't' => out.push('\t'),
+            'r' => out.push('\r'),
+            '0' => out.push('\0'),
+            'x' => out.push(u8::from_str_radix(&cs.by_ref().take(2).collect::<String>(), 16).ok()? as char),
+            'u' => {
+                // (`\u{3_8}`: underscores may separate the digits)
+                let hex: String = cs.by_ref().skip(1).take_while(|&c| c != '}').filter(|&c| c != '_').collect();
+                out.push(char::from_u32(u32::from_str_radix(&hex, 16).ok()?)?);
+            }
+            '\n' => {
+                while cs.clone().next().is_some_and(char::is_whitespace) {
+                    cs.next();
+                }
+            }
+            c => out.push(c),
+        }
+    }
+    Some(out)
+}
+
+/// The feature gate of an x86 target feature that is unstable (rustc 1.100): `#[target_feature(enable = "x87")]`
+/// needs `#![feature(x87_target_feature)]`. Only those whose gate tests/ui checks; the others count as stable
+fn unstable_target_feature(tf: &str) -> Option<&'static str> {
+    if tf.starts_with("amx-") {
+        return Some("x86_amx_intrinsics");
+    }
+    Some(match tf {
+        "apxf" => "apx_target_feature",
+        "avx10.1" | "avx10.2" => "avx10_target_feature",
+        "clflushopt" => "clflushopt_target_feature",
+        "fma4" => "fma4_target_feature",
+        "movrs" => "movrs_target_feature",
+        "x87" => "x87_target_feature",
+        "xop" => "xop_target_feature",
+        _ => return None,
+    })
 }
 
 /// The attributes `#[..]` / `#![..]` at the start of b, with the space and comments between them: Some(their length)
@@ -2611,7 +2746,7 @@ fn gated_attrs_len(b: &[u8]) -> Option<usize> {
                     }
                     let name = &b[n0..j];
                     skip(&mut j);
-                    if !name.is_empty() && b.get(j) != Some(&b':') && GATED.iter().any(|g| g.0.as_bytes() == name) {
+                    if !name.is_empty() && b.get(j) != Some(&b':') && (GATED.iter().any(|g| g.0.as_bytes() == name) || name == b"target_feature") {
                         gated = true;
                     }
                     i = j;
@@ -2644,6 +2779,10 @@ fn gated_attrs_len(b: &[u8]) -> Option<usize> {
 /// An extern block starts at b[i..]: `extern "C" {` / `unsafe extern {`, not an `extern "C" fn` (whose body's macro
 /// arguments are no attributes)
 fn extern_block(b: &[u8], i: usize) -> bool {
+    // (most items start with neither `extern` nor `unsafe`)
+    if !matches!(b.get(i), Some(b'e' | b'u')) {
+        return false;
+    }
     let mut j = i;
     if b[j..].starts_with(b"unsafe") {
         j = skip_space(b, j + 6);
@@ -2652,12 +2791,21 @@ fn extern_block(b: &[u8], i: usize) -> bool {
         return false;
     }
     j = skip_space(b, j + 6);
-    if b.get(j) == Some(&b'"') {
+    // (the ABI: `"C"`, or a raw string `r"C"` / `r#"C"#`)
+    let mut hashes = 0;
+    if b.get(j) == Some(&b'r') {
         j += 1;
-        while j < b.len() && b[j] != b'"' {
+        while b.get(j) == Some(&b'#') {
+            hashes += 1;
             j += 1;
         }
-        j = skip_space(b, j + 1);
+    }
+    if b.get(j) == Some(&b'"') {
+        j += 1;
+        while j < b.len() && !(b[j] == b'"' && b[j + 1..].iter().take(hashes).filter(|&&c| c == b'#').count() == hashes) {
+            j += 1;
+        }
+        j = skip_space(b, j + 1 + hashes);
     }
     b.get(j) == Some(&b'{')
 }
