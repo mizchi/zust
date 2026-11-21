@@ -98,4 +98,12 @@ fn main() {
         f();
     }
     println!("{}", shared.borrow());
+    // (a RefMut in a binding that is not `mut` is read through `deref`: `&self` methods, indexing, `*`)
+    let cells = RefCell::new(vec![3, 1, 2]);
+    let g = cells.borrow_mut();
+    let s: i32 = g.iter().sum();
+    println!("{s} {} {} {:?}", g[0], g.len(), *g);
+    drop(g);
+    cells.borrow_mut().sort();
+    println!("{:?}", cells.borrow());
 }

@@ -291,6 +291,7 @@ pub fn compile(prog: &Program, insts: &Mutex<Insts>, id: u32, f: &ItemFn, line_b
                     | "RefCell::borrow" | "RefCell::borrow_mut"
             )
         ) && prog.item_of.get(body_id as usize).copied().flatten().is_some_and(|i| i >= prog.prelude_from),
+        caller_locs: vec![],
         self_sid: env.self_sid,
         sret: None,
         fresh: Default::default(),
@@ -655,6 +656,9 @@ pub struct Cx<'p> {
     pub loc_used: bool,
     pub index_panic_block: Option<Block>,
     pub caller_loc: bool,
+    /// The method calls being lowered that store their location for a panic in the callee (`unwrap`, a RefCell's
+    /// `borrow`): (the method's name, line << 16 | column)
+    pub caller_locs: Vec<(String, i64)>,
     pub self_sid: Option<u32>,
     pub sret: Option<Value>,
     /// 呼び出しの戻り値を書かせた一時領域 (まだ誰も使っていない): 値渡し・let ではコピーせずにそのまま使う
@@ -789,6 +793,26 @@ pub fn is_simple_let(p: &Pat) -> bool {
     match p {
         Pat::Ident(by_ref, _, _, sub) => sub.is_none() && !*by_ref,
         Pat::Wild => true,
+        _ => false,
+    }
+}
+
+/// rustc's temporary lifetime extension by the initializer's syntax (the Reference, "Extending based on
+/// expressions"): e borrows a temporary that then lives to the end of the block, `&temp()`, also inside a tuple, an
+/// array, a cast, a braced struct, a block's tail, an if / else or a match arm (`let p: *const S = &S::new();`)
+pub fn extends_temps(e: &Expr) -> bool {
+    let tail = |b: &crate::parse::Block| match b.stmts.last() {
+        Some(Stmt::Expr(t, false)) => extends_temps(t),
+        _ => false,
+    };
+    match e {
+        Expr::Ref(..) => true,
+        Expr::Paren(x) | Expr::Cast(x, _) => extends_temps(x),
+        Expr::Tuple(xs) | Expr::Array(xs) => xs.iter().any(extends_temps),
+        Expr::Struct(_, fs, _) => fs.iter().any(|f| extends_temps(&f.1)),
+        Expr::Block(_, _, b) => tail(b),
+        Expr::If(_, t, els) => tail(t) || els.as_deref().is_some_and(extends_temps),
+        Expr::Match(_, arms) => arms.iter().any(|a| extends_temps(&a.body)),
         _ => false,
     }
 }
@@ -1418,7 +1442,7 @@ impl Cx<'_> {
                     }
                     // (as for a plain let: what the bindings may borrow (a `ref` binding, a reference in the value)
                     // lives to the end of the block, the rest is dropped here: `let (n, _) = (c.borrow().len(), 0);`)
-                    if borrowck::has_refs(self.prog, place.ty(), 0) || format!("{pat:?}").contains("Ident(true") {
+                    if extends_temps(init) || borrowck::has_refs(self.prog, place.ty(), 0) || format!("{pat:?}").contains("Ident(true") {
                         self.extend_temps(t0);
                     } else {
                         self.drop_temps(t0);
@@ -1616,10 +1640,11 @@ impl Cx<'_> {
                     self.bind(name.clone(), ty, v);
                     self.bk_def_named(&name, &srcs, init);
                     self.rg_let(&name, ann_ty.as_ref(), init, rg_init);
-                    // (rustc drops a let initializer's temporaries at the end of the statement, unless the bound value
-                    // may borrow from them (lifetime extension, `let r = &f();`). A value whose type holds no reference
-                    // cannot: its temporaries go now. A RefCell guard in `let n = *c.borrow();` must not outlive it)
-                    if borrowck::has_refs(self.prog, ty, 0) {
+                    // (rustc drops a let initializer's temporaries at the end of the statement, unless the initializer
+                    // extends them (`let r = &f();`, `let p: *const S = &S::new();`). zustc also keeps them when the
+                    // bound value may hold a reference, which rustc rejects when it borrows a temporary (E0716) and
+                    // zustc does not see yet. A RefCell guard in `let n = *c.borrow();` must not outlive the let)
+                    if extends_temps(init) || borrowck::has_refs(self.prog, ty, 0) {
                         self.extend_temps(t0);
                     } else {
                         self.drop_temps(t0);

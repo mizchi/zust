@@ -35,23 +35,34 @@ prelude の `RefCell<T>` は、std のものと同じく `isize` を持つよう
 - `*c.borrow()`: 一時値のガードの deref
 - `for x in c.borrow().iter()`・`for x in g.iter_mut()`: ガードが持つものを回すループ
 
+`RefMut` を通したメソッドが `&mut *g` を取るのは、そのメソッドが `&mut self` を受け取るときだけである。添字は、autoderef と
+同じくガードの共有の借用を通して読む。そのため `let g = c.borrow_mut(); g[0]` は受け付け、値を変えるときだけ `let mut g` が
+要る。
+
 ここで rustc が拒否するものは拒否する。
 
 - `Ref` を通した `iter_mut` や `&mut self` のメソッド (E0596)
 - ガードを通した、`self` を値で受け取るメソッド (E0507)
+- セルより長く生きるガード (E0597、E0515) と、ガードが生きている間のセルのムーブ (E0505)
+
+  ガードは生ポインタを持つので、借用検査はこれを prelude のビューの 1 つとして数える。ビューは `Iter` と同じく、作った元の
+  貸し出しを持つ。同じ確認で、`MutexGuard` が `lock()` の返す `Result` の中で Mutex の貸し出しを失っていたことが分かった。
+  今は持ち続ける。
 
 ## 3. 一時値を drop する時
 
 ガードがあると、遅すぎる一時値の drop は正しいプログラムの panic になる。そのため、zustc が一時値を drop する時を
 rustc に合わせる必要があった。合っていなかったのは 3 つである。
 
-- `let` の初期化式の一時値は、すべてブロックの終わりまで残していた。rustc は、束縛した値がそれを借用していなければ
-  `let` の終わりで drop する。zustc も今はそうする。束縛した値が借用しうるのは、その型が参照を含むときか、パターンに
-  `ref` の束縛があるときである。以前は `let n = c.borrow().len();` がガードを生かしたままにし、次の `c.borrow_mut()` が
-  panic した。
+- `let` の初期化式の一時値は、すべてブロックの終わりまで残していた。rustc は、初期化式がその構文で延ばすのでなければ、
+  `let` の終わりで drop する。延ばす構文は `&temp()` と、タプル・配列・キャスト・struct リテラル・ブロックの末尾の中の
+  それである。zustc も今はそうする。束縛した値の型が参照を含むときと、パターンに `ref` の束縛があるときも残す。drop
+  された一時値を借用する値は rustc が拒否する (E0716) が、zustc にはまだそれが見えない。以前は
+  `let n = c.borrow().len();` がガードを生かしたままにし、次の `c.borrow_mut()` が panic した。
 - 分解する `let` でも同じ: `let (n, _) = (c.borrow().len(), 0);`
-- `if let` と `let ... else` の match 対象の一時値は、Rust 2024 と同じく else のブロックの前で drop する。以前は else の
-  ブロックの中の `borrow_mut` が panic した。
+- `if let` の match 対象の一時値は、Rust 2024 と同じく `if let` の終わりで drop する。else のブロックの前と、then の
+  ブロックの後 (その値が参照を含みうるときを除く) である。`let ... else` のものは else のブロックの前で drop する。以前は
+  else のブロックの中や、同じ文のその後での `borrow_mut` が panic した。
 
 1 つ目の修正で tests/ui の 2 つのテストが通るようになった: `nll/issue-53570.rs` と `mir/mir_early_return_scope.rs`。
 `coercion/unsize-lifetime-shrinking.rs` は印の行で拒否されるようになったが、そのテストが確かめる理由とは別の理由なので、
@@ -66,11 +77,19 @@ rustc に合わせる必要があった。合っていなかったのは 3 つ�
   借用検査からは見えない (どちらの借用も共有の `&RefCell` のもの)。フラグが捕まえなければならない。
 - `rt_refcell_ok`: 2 節の形でセルを使い、rustc のビルドと同じに動かなければならない。
 - `rt_let_temporaries_drop`・`rt_scrutinee_temporaries_drop`: drop されると出力する値で、3 節の drop の時を確かめる。
+- `borrow_refcell_guard_outlives`・`borrow_refcell_guard_move_cell`・`borrow_mutex_guard_move_mutex`・
+  `borrow_refcell_guard_deref_outlives`・`borrow_mutex_guard_deref_outlives`: 2 節の拒否。ガードを通した参照 (`&g[0]`、
+  `&mut *g`) はガードを借用するので、その下でのガードの drop も拒否する。
 
 drop の時を確かめている間に、以前からのリークが見つかった。値の一部をムーブし、残りを `_` か `..` に任せるパターンは、
 その残りを drop しない: `let (a, _) = pair();`、`let W { a, .. } = w;`、`match pair() { (a, _) => .. }`。二重に drop
 されるものはない。直すには、ムーブを追う処理の中で、パターンごとにムーブしない部分を drop することになる。そのため
 `rt_pattern_partial_move` として残し、`todo` の印を付けて TODO.md に載せた。
+
+もう 1 つ、region check に以前からの穴がある。ブロックの値が、別のローカル変数を通して (`{ let v = ..; let r = &v; r }`)、
+または値で受け取るメソッドの戻り値を通して (`{ Some(&v).unwrap() }`)、そのブロック自身のローカル変数を借用していても
+受け付ける。`{ let v = ..; &v }` は拒否する。ガードだけでなく参照でも同じなので、`region_block_tail_escapes` として
+region check の作業に残した。
 
 ## 5. 確認
 

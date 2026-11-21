@@ -28,6 +28,11 @@ fn main() {
         let kept = mk(5);
         let r = &mk(6);
         println!("after the bindings {} {}", kept.0, r.0);
+        // (extended by the initializer's syntax, whatever the binding's type: a raw pointer to the temporary is valid
+        // to the end of the block)
+        let p: *const D = &mk(7);
+        println!("after let p");
+        println!("through p {}", unsafe { (*p).0 });
     }
     println!("end of the block");
 }

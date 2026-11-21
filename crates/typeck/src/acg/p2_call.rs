@@ -85,7 +85,9 @@ impl Cx<'_> {
             _ => None,
         };
         let prev = std::mem::replace(&mut self.explicit_trait, forced);
+        let n = self.caller_locs.len();
         let r = self.method_call_inner(e, expected);
+        self.caller_locs.truncate(n);
         self.explicit_trait = prev;
         r
     }
@@ -111,10 +113,12 @@ impl Cx<'_> {
         }
         // (`g.m()` with g a RefCell's Ref / RefMut or a MutexGuard, and m not the guard's own: `(*g).m()`, so the value's
         // methods are found as for the value itself, the builtin ones of String / Vec / slices too)
-        if let Some((sid, target, mutable)) = self.peek(recv).and_then(|t| self.guard_of(self.strip_refs(t))) {
-            // (`(&*g).m()` / `(&mut *g).m()` for a RefMut: a method that takes self by value moves out of a
-            // reference, an error (E0507) as through any reference)
-            if self.prog.method(sid, method).is_none() {
+        if let Some((sid, target, deref_mut)) = self.peek(recv).and_then(|t| self.guard_of(self.strip_refs(t))) {
+            // (`(&*g).m()`, or `(&mut *g).m()` for a RefMut's when m takes `&mut self` (as autoderef picks `deref` or
+            // `deref_mut`): a method that takes self by value moves out of a reference, an error (E0507) as through
+            // any reference)
+            if self.prog.method(sid, method).is_none() && self.prog.default_method(sid, method).is_none() {
+                let mutable = deref_mut && self.takes_mut_self(target, method);
                 let deref = Expr::Unary("*".into(), recv.clone(), Default::default());
                 let inner = Expr::Paren(Box::new(Expr::Ref(mutable, Box::new(deref))));
                 let target = Ty::Ref(mutable, intern(target));
@@ -283,9 +287,13 @@ impl Cx<'_> {
         if (refcell || matches!(method, "unwrap" | "expect" | "unwrap_err" | "expect_err")) && self.prog.panic_handler.is_none() {
             if let Some(&ci) = self.prog.const_index.get("__EXR_CALLER") {
                 let (l, c) = self.loc(msp.at);
-                let v = self.b.ins().iconst(types::I64, ((l as i64) << 16) | c as i64);
+                let loc = ((l as i64) << 16) | c as i64;
+                let v = self.b.ins().iconst(types::I64, loc);
                 let a = self.static_sym(ci);
                 self.b.ins().store(mf(), v, a, 0);
+                // (and again right before the call (call_fn_inner): a call in the receiver or the arguments,
+                // `c.borrow().get(9).unwrap()`, stores its own location in between)
+                self.caller_locs.push((method.to_string(), loc));
             }
         }
         // 受け手が `a.as_slice()` (a: 配列) なら `(&a[..])` にして呼び直す (`a.as_slice().len()`)
@@ -964,6 +972,22 @@ impl Cx<'_> {
     }
 
     /// `thread::spawn(|| ..)`: the closure must own what it uses (E0373) and be Send (see not_send)
+    /// Whether `x.m()` with x: t takes `&mut self` (a method of t's, or a builtin one of a slice / str that changes it)
+    pub(crate) fn takes_mut_self(&self, t: Ty, m: &str) -> bool {
+        if let Ty::Struct(ts) = self.strip_refs(t) {
+            if let Some(id) = self.prog.method(ts, m).or_else(|| self.prog.default_method(ts, m)) {
+                return matches!(self.prog.sigs[id as usize].params.first(), Some(Ty::Ref(true, _)));
+            }
+        }
+        matches!(
+            m,
+            "sort" | "sort_unstable" | "sort_by" | "sort_by_key" | "sort_unstable_by" | "sort_unstable_by_key" | "sort_by_cached_key"
+                | "reverse" | "swap" | "fill" | "iter_mut" | "copy_from_slice" | "clone_from_slice" | "rotate_left" | "rotate_right"
+                | "as_mut_ptr" | "as_mut_slice" | "as_mut_str" | "first_mut" | "last_mut" | "get_mut" | "split_at_mut" | "chunks_mut"
+                | "chunks_exact_mut" | "make_ascii_uppercase" | "make_ascii_lowercase"
+        )
+    }
+
     fn check_spawn_closure(&self, c: &Expr) -> R<()> {
         let Expr::Closure(mv, _, _, _, cpos) = strip_paren(c) else { return Ok(()) };
         for n in crate::ast_closure::free_vars(strip_paren(c)) {
@@ -1886,6 +1910,17 @@ impl Cx<'_> {
                 return Ok((Some(a), sig.ret));
             }
             return Ok((r, sig.ret));
+        }
+        // (the location of the method call that reaches target, written before the receiver and the arguments
+        // were evaluated, may have been overwritten by a call among them)
+        if let Some((m, loc)) = self.caller_locs.last() {
+            if self.prog.names.get(id as usize).is_some_and(|n| n.rsplit("::").next() == Some(m.as_str())) {
+                if let Some(&ci) = self.prog.const_index.get("__EXR_CALLER") {
+                    let v = self.b.ins().iconst(types::I64, *loc);
+                    let a = self.static_sym(ci);
+                    self.b.ins().store(mf(), v, a, 0);
+                }
+            }
         }
         let f = self.fref(target, &sig);
         let call = self.b.ins().call(f, &cv);

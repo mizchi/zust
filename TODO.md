@@ -19,6 +19,7 @@ These are in the type and borrow checks that the compat and region-check work ch
 | `borrow_slice_into_vec_then_clear` | `&v[..]` is not a loan of `v`: a `clear` (dropping the elements) is accepted under it |
 | `region_temporary_dropped` | E0716 is not found when the reference is assigned after its `let` |
 | `region_dropck` | no drop check: a value with Drop may outlive what it borrows |
+| `region_block_tail_escapes` | a loan held by a block's local, or by what a by-value method returns (`Some(&v).unwrap()`), is not followed out of the block's tail (E0597) |
 | `borrow_uninit_read` | rejected, but reported at the function's first line instead of the read |
 
 ### Privacy

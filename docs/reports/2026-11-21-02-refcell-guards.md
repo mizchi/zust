@@ -39,10 +39,19 @@ one each needed the deref through the guard in another place:
 - `*c.borrow()`, the deref of a guard that is a temporary;
 - `for x in c.borrow().iter()` and `for x in g.iter_mut()`, a loop over what the guard holds.
 
+A method through a `RefMut` takes `&mut *g` only when it takes `&mut self`, and indexing reads through a shared
+borrow of the guard, as autoderef does. So `let g = c.borrow_mut(); g[0]` is accepted, and only changing the value
+needs `let mut g`.
+
 What rustc rejects here is rejected:
 
 - `iter_mut` or a `&mut self` method through a `Ref` (E0596);
-- a by-value `self` method through a guard (E0507).
+- a by-value `self` method through a guard (E0507);
+- a guard that outlives its cell (E0597, E0515), and moving the cell while a guard of it is alive (E0505).
+
+  A guard holds raw pointers, so the borrow checker counts it among the prelude's views, which hold the loan of what
+  they were made from, as `Iter` does. The same check found that a `MutexGuard` lost the Mutex's loan inside the
+  `Result` that `lock()` returns; it now keeps it.
 
 ## 3. When temporaries are dropped
 
@@ -50,12 +59,15 @@ With guards, a temporary dropped too late is a panic in a correct program, so th
 to match rustc's. Three did not:
 
 - A `let` initializer's temporaries were all kept to the end of the block. rustc drops them at the end of the
-  `let` unless the bound value borrows from them, and zustc does the same now. The bound value may borrow if its type
-  holds a reference or the pattern has a `ref` binding. Before, `let n = c.borrow().len();` kept the guard alive,
-  and the next `c.borrow_mut()` panicked.
+  `let` unless the initializer extends them by its syntax: `&temp()`, also inside a tuple, an array, a cast, a struct
+  literal or a block's tail. zustc does the same now, and also keeps them when the bound value's type holds a
+  reference or the pattern has a `ref` binding. rustc rejects a value that borrows a dropped temporary (E0716), and
+  zustc does not see that yet. Before, `let n = c.borrow().len();` kept the guard alive, and the next
+  `c.borrow_mut()` panicked.
 - The same holds for a destructuring `let`: `let (n, _) = (c.borrow().len(), 0);`.
-- The temporaries of an `if let` or `let ... else` scrutinee are dropped before the else block, as in Rust 2024.
-  Before, a `borrow_mut` in the else block panicked.
+- The temporaries of an `if let` scrutinee are dropped at the end of the `if let`, as in Rust 2024: before the else
+  block, and after the then block unless its value may hold a reference. Those of a `let ... else` are dropped
+  before the else block. Before, a `borrow_mut` in the else block, or later in the same statement, panicked.
 
 Two tests/ui tests pass because of the first fix: `nll/issue-53570.rs` and `mir/mir_early_return_scope.rs`.
 `coercion/unsize-lifetime-shrinking.rs` is now rejected at its line, but for another reason than the one it tests,
@@ -71,11 +83,19 @@ In `tests/security/`:
 - `rt_refcell_ok` uses a cell in the ways of section 2, and must run as rustc's build does.
 - `rt_let_temporaries_drop` and `rt_scrutinee_temporaries_drop` check the drop times of section 3 with values that
   print when dropped.
+- `borrow_refcell_guard_outlives`, `borrow_refcell_guard_move_cell`, `borrow_mutex_guard_move_mutex`,
+  `borrow_refcell_guard_deref_outlives` and `borrow_mutex_guard_deref_outlives` are the rejections of section 2. A
+  reference through a guard (`&g[0]`, `&mut *g`) borrows the guard, so dropping the guard under it is rejected too.
 
 While checking the drop times, an older leak turned up. A pattern that moves some parts of a value out and leaves
 the rest to `_` or `..` never drops the rest: `let (a, _) = pair();`, `let W { a, .. } = w;`, `match pair() { (a, _)
 => .. }`. Nothing is dropped twice. Fixing it means dropping, for each pattern, the parts it does not move, in the
 code that tracks moves, so it was left as `rt_pattern_partial_move`, marked `todo` and listed in TODO.md.
+
+Another older gap is in the region check. A block whose value borrows one of its own locals through another local
+(`{ let v = ..; let r = &v; r }`), or through what a by-value method returns (`{ Some(&v).unwrap() }`), is accepted.
+`{ let v = ..; &v }` is rejected. It holds for references as much as for guards, so it is left to the region-check
+work as `region_block_tail_escapes`.
 
 ## 5. Checks
 

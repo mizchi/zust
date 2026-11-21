@@ -316,6 +316,7 @@ impl Cx<'_> {
             return Ok((None, Ty::Never));
         };
         let sflag = self.last_scrut;
+        let t1 = self.temps.len();
         let else_blk = self.b.create_block();
         let merge = self.b.create_block();
         let mut result_ty: Option<Ty> = None;
@@ -331,6 +332,17 @@ impl Cx<'_> {
             self.release_outer(lexpr, sflag)?;
         }
         let (tv, tt) = self.block(then_branch, expected)?;
+        // (Rust 2024: the scrutinee's temporaries are dropped at the end of the `if let`, on this path after the then
+        // block: `(if let Some(_) = c.borrow().first() { 1 } else { 0 }, c.borrow_mut().len())` does not panic. Not
+        // when the result may borrow from them, which rustc rejects (E0716) and zustc does not see yet; never the
+        // result itself)
+        if tt != Ty::Never && !borrowck::has_refs(self.prog, tt, 0) {
+            let n = self.temps.len();
+            let ts: Vec<Owned> = self.temps[t0.min(n)..t1.min(n)].iter().filter(|o| tv.is_none_or(|v| o.loc != Loc::Ptr(v))).copied().collect();
+            for o in ts.into_iter().rev() {
+                self.emit_owned_drop(o);
+            }
+        }
         self.pop_scope();
         self.finish_arm(tv, tt, merge, &mut result_ty, &mut param, SP)?;
         self.b.switch_to_block(else_blk);

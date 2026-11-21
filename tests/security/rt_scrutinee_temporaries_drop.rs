@@ -48,4 +48,7 @@ fn main() {
     }
     let v = if let Some(D(k)) = mk(4).as_ref() { *k } else { 0 };
     println!("v {v}");
+    // (dropped at the end of the `if let` on the then path too: the later element of the tuple borrows mutably)
+    let t = (if let Some(x) = c.borrow().first() { *x } else { 0 }, c.borrow_mut().len());
+    println!("{t:?}");
 }
