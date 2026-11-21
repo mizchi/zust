@@ -2475,6 +2475,46 @@ impl Program {
         Err("a const fn without a value".into())
     }
 
+    /// The name of a cast's target type, through aliases of it (`type Lane = i32` -> "i32"); "" for another type
+    fn cast_prim(&self, t: &crate::parse::Ty) -> String {
+        let mut prim = match t {
+            crate::parse::Ty::Path(None, p) if p.segs.len() == 1 && p.segs[0].args.is_empty() => p.segs[0].name.clone(),
+            _ => String::new(),
+        };
+        for _ in 0..16 {
+            match self.aliases.get(&prim) {
+                Some((g, crate::types::TySyn::Named(n))) if g.is_empty() => prim = n.clone(),
+                Some((g, crate::types::TySyn::Prim(p))) if g.is_empty() => prim = format!("{p:?}").to_lowercase(),
+                _ => break,
+            }
+        }
+        prim
+    }
+
+    /// The width in bits of a constant expression's integer type when it is written (a cast, a suffixed literal,
+    /// `-` of one): `count_ones` of `-1i8` counts 8 bits, not the 128 of the evaluator's i128
+    fn const_width(&self, e: &crate::parse::Expr) -> Option<u32> {
+        use crate::parse::Expr;
+        let of = |n: &str| match n {
+            "u8" | "i8" => Some(8),
+            "u16" | "i16" => Some(16),
+            "u32" | "i32" => Some(32),
+            "u64" | "i64" | "usize" | "isize" => Some(64),
+            "u128" | "i128" => Some(128),
+            _ => None,
+        };
+        match e {
+            Expr::Cast(_, t) => of(&self.cast_prim(t)),
+            Expr::Paren(x) => self.const_width(x),
+            Expr::Unary(op, x, _) if op == "-" || op == "!" => self.const_width(x),
+            Expr::Lit(t, _) => ["u128", "i128", "usize", "isize", "u64", "i64", "u32", "i32", "u16", "i16", "u8", "i8"]
+                .iter()
+                .find(|s| t.ends_with(*s))
+                .and_then(|s| of(s)),
+            _ => None,
+        }
+    }
+
     /// 自前の構文木の整数の定数式を評価する
     pub fn eval_const(&self, e: &crate::parse::Expr, depth: u32) -> R<i128> {
         use crate::parse::Expr;
@@ -2484,18 +2524,7 @@ impl Program {
             // (an integer `as` wraps to its type, as rustc's: `4294967297u64 as i32` is 1)
             Expr::Cast(x, t) => {
                 let v = self.eval_const(x, depth)?;
-                let mut prim = match &**t {
-                    crate::parse::Ty::Path(None, p) if p.segs.len() == 1 && p.segs[0].args.is_empty() => p.segs[0].name.clone(),
-                    _ => String::new(),
-                };
-                // (an alias of an integer type: `type Lane = i32`)
-                for _ in 0..16 {
-                    match self.aliases.get(&prim) {
-                        Some((g, crate::types::TySyn::Named(n))) if g.is_empty() => prim = n.clone(),
-                        Some((g, crate::types::TySyn::Prim(p))) if g.is_empty() => prim = format!("{p:?}").to_lowercase(),
-                        _ => break,
-                    }
-                }
+                let prim = self.cast_prim(t);
                 match prim.as_str() {
                     "u8" => v as u8 as i128,
                     "u16" => v as u16 as i128,
@@ -2650,7 +2679,9 @@ impl Program {
             Expr::MethodCall(recv, m, _, args, _) => {
                 let v = self.eval_const(recv, depth)?;
                 let unsigned = matches!(&**recv, Expr::Path(None, p) if p.segs.len() == 2 && Ty::prim(&p.segs[0].name).is_some_and(|t| !t.signed()));
-                let u = v as u128;
+                // (the bits of the receiver's type only: a negative i8 is 8 bits, not 128)
+                let bits = self.const_width(recv).unwrap_or(128);
+                let u = if bits < 128 { (v as u128) & ((1u128 << bits) - 1) } else { v as u128 };
                 let a: Vec<i128> = args.iter().map(|x| self.eval_const(x, depth)).collect::<R<Vec<i128>>>()?;
                 match (m.as_str(), a.as_slice()) {
                     ("ilog10", []) if unsigned || v > 0 => {
@@ -2664,7 +2695,7 @@ impl Program {
                     }
                     ("ilog2", []) if unsigned || v > 0 => (127 - (if unsigned { u } else { v as u128 }).leading_zeros()) as i128,
                     ("count_ones", []) => u.count_ones() as i128,
-                    ("trailing_zeros", []) => u.trailing_zeros() as i128,
+                    ("trailing_zeros", []) => u.trailing_zeros().min(bits) as i128,
                     ("pow", [e]) => v.checked_pow(*e as u32).ok_or("overflow in constant")?,
                     ("min", [b]) => v.min(*b),
                     ("max", [b]) => v.max(*b),

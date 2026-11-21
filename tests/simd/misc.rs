@@ -31,6 +31,7 @@ const BIG: i64 = 1 << 40;
 
 // (a cast to an alias of an integer type wraps as to the type)
 type Lane = i32;
+type Byte = i8;
 
 // (a constant of an intrinsic's name is the program's: called, not lowered)
 fn add(a: i32, b: i32) -> i32 {
@@ -59,6 +60,11 @@ fn run() {
         blane::<3>(l)
     );
     println!("alias cast {}", _mm_extract_epi32::<{ 4294967298u64 as Lane }>(l));
+    println!(
+        "count_ones at the width {} {}",
+        _mm_extract_epi32::<{ ((255u16 as Byte).count_ones() % 7) as i32 }>(l),
+        _mm_extract_epi32::<{ ((-1i8).count_ones() % 7) as i32 }>(l)
+    );
     let fa = _mm_setr_pd(1.0, 2.0);
     let fb = _mm_setr_pd(3.0, 4.0);
     h("blend_pd 3", _mm_castpd_si128(_mm_blend_pd::<3>(fa, fb)));
