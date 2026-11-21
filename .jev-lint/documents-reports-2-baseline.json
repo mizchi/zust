@@ -1,6 +1,6 @@
 {
   "schema": "jev-lint-documents-1",
-  "snapshotDigest": "1a549268830ffb91f0aab13d138bcaa6ff8210e5f00827a4acf8e72782714855",
+  "snapshotDigest": "f568358e05c196b4878b58229644a3bd7055885ea33c9658e6ffa66db5e687b3",
   "questionDigest": "209d6df378ccb747fcb0e821998fcd6105bc76638a88d22488d3b398d6a21595",
   "model": "jev-1.14.0",
   "snapshotChanged": false,
@@ -100,12 +100,12 @@
       "contextHash": "a068452334ef52150a1932e9d45207a4c156e3a5c60d69e061e986b1aa86d889",
       "judgment": {
         "choice": "supports",
-        "confidence": 0.96,
+        "confidence": 0.97,
         "probabilities": {
-          "supports": 0.97,
+          "supports": 0.98,
           "contradicts": 0.02,
           "unrelated": 0,
-          "insufficient_context": 0.01
+          "insufficient_context": 0
         }
       }
     },
@@ -168,12 +168,12 @@
       "contextHash": "ecee8f597e8c6093bcea35ffd84dafe505685fb3c77901bd2a2a9e033883360c",
       "judgment": {
         "choice": "supports",
-        "confidence": 0.97,
+        "confidence": 0.99,
         "probabilities": {
-          "supports": 0.98,
+          "supports": 0.99,
           "contradicts": 0.01,
           "unrelated": 0,
-          "insufficient_context": 0.01
+          "insufficient_context": 0
         }
       }
     },
@@ -236,10 +236,10 @@
       "contextHash": "68facf70966b576a1dde106a31fd37de8e21bda46e6439878b91e7bce57154b6",
       "judgment": {
         "choice": "supports",
-        "confidence": 0.96,
+        "confidence": 0.97,
         "probabilities": {
-          "supports": 0.97,
-          "contradicts": 0.03,
+          "supports": 0.98,
+          "contradicts": 0.02,
           "unrelated": 0,
           "insufficient_context": 0
         }
@@ -338,10 +338,10 @@
       "contextHash": "b91a1cf01d33b66ef15111899d22ac963d6abc38c4242e6d72ebc80aefe2aecd",
       "judgment": {
         "choice": "supports",
-        "confidence": 0.99,
+        "confidence": 1,
         "probabilities": {
-          "supports": 0.99,
-          "contradicts": 0.01,
+          "supports": 1,
+          "contradicts": 0,
           "unrelated": 0,
           "insufficient_context": 0
         }
@@ -372,12 +372,12 @@
       "contextHash": "65d03eec8a642fb4c59c7bacc74397f936864091105bba631e8977b9ca9c1612",
       "judgment": {
         "choice": "supports",
-        "confidence": 0.96,
+        "confidence": 0.97,
         "probabilities": {
-          "supports": 0.97,
+          "supports": 0.98,
           "contradicts": 0.02,
           "unrelated": 0,
-          "insufficient_context": 0.01
+          "insufficient_context": 0
         }
       }
     },
@@ -610,10 +610,10 @@
       "contextHash": "60cba8f9920a12369db8088d9da4aba7831509e04aeed3ec12052847209a00f4",
       "judgment": {
         "choice": "supports",
-        "confidence": 1,
+        "confidence": 0.99,
         "probabilities": {
-          "supports": 1,
-          "contradicts": 0,
+          "supports": 0.99,
+          "contradicts": 0.01,
           "unrelated": 0,
           "insufficient_context": 0
         }
@@ -644,10 +644,10 @@
       "contextHash": "1275e8de4d291bc21dd7f5b87a5196cba9cca33005a1ac6eca77fa3d0892971e",
       "judgment": {
         "choice": "supports",
-        "confidence": 0.97,
+        "confidence": 0.96,
         "probabilities": {
-          "supports": 0.98,
-          "contradicts": 0.02,
+          "supports": 0.97,
+          "contradicts": 0.03,
           "unrelated": 0,
           "insufficient_context": 0
         }
@@ -712,10 +712,10 @@
       "contextHash": "fee3dc6136c2d74a8f2b22992deee33ae5ead6cdbc19c240e51b7dcbe27e38cc",
       "judgment": {
         "choice": "supports",
-        "confidence": 0.96,
+        "confidence": 0.97,
         "probabilities": {
-          "supports": 0.97,
-          "contradicts": 0.02,
+          "supports": 0.98,
+          "contradicts": 0.01,
           "unrelated": 0,
           "insufficient_context": 0.01
         }
@@ -746,12 +746,12 @@
       "contextHash": "74cd923d61e00b7739f80b534b652a909070bb949bfb007a464579050da1d263",
       "judgment": {
         "choice": "supports",
-        "confidence": 0.97,
+        "confidence": 0.99,
         "probabilities": {
-          "supports": 0.98,
+          "supports": 0.99,
           "contradicts": 0.01,
           "unrelated": 0,
-          "insufficient_context": 0.01
+          "insufficient_context": 0
         }
       }
     },
@@ -783,9 +783,9 @@
         "confidence": 0.92,
         "probabilities": {
           "supports": 0.94,
-          "contradicts": 0.05,
+          "contradicts": 0.04,
           "unrelated": 0,
-          "insufficient_context": 0.01
+          "insufficient_context": 0.02
         }
       }
     },
@@ -814,10 +814,10 @@
       "contextHash": "7438e0bb6ac3c01bf6beaa56051a35abf5a2f30ee56334c8cd754b996d6bd4e6",
       "judgment": {
         "choice": "supports",
-        "confidence": 0.87,
+        "confidence": 0.84,
         "probabilities": {
-          "supports": 0.9,
-          "contradicts": 0.09,
+          "supports": 0.88,
+          "contradicts": 0.11,
           "unrelated": 0,
           "insufficient_context": 0.01
         }
@@ -882,10 +882,10 @@
       "contextHash": "536786479dc0803408f0444fb2041d9e5a569289c775017759c4867ead02b09b",
       "judgment": {
         "choice": "supports",
-        "confidence": 0.97,
+        "confidence": 0.99,
         "probabilities": {
-          "supports": 0.98,
-          "contradicts": 0.02,
+          "supports": 0.99,
+          "contradicts": 0.01,
           "unrelated": 0,
           "insufficient_context": 0
         }
@@ -916,12 +916,12 @@
       "contextHash": "6ef3c783f7f2ee4aa85d450d7fc65f20f61a1aa01a222d8aeb9ddeda31a027f9",
       "judgment": {
         "choice": "supports",
-        "confidence": 0.84,
+        "confidence": 0.81,
         "probabilities": {
-          "supports": 0.88,
-          "contradicts": 0.06,
+          "supports": 0.86,
+          "contradicts": 0.04,
           "unrelated": 0,
-          "insufficient_context": 0.06
+          "insufficient_context": 0.1
         }
       }
     },
@@ -950,6 +950,40 @@
       "contextHash": "4df342055803f33b6195c27c167f6f86d7071a5337af51009058f12b67f5035e",
       "judgment": {
         "choice": "supports",
+        "confidence": 0.95,
+        "probabilities": {
+          "supports": 0.96,
+          "contradicts": 0.04,
+          "unrelated": 0,
+          "insufficient_context": 0
+        }
+      }
+    },
+    {
+      "id": "docs_reports_2026-11-21-01-security-cves",
+      "topic": "The Japanese file docs/ja/reports/2026-11-21-01-security-cves.md is a faithful translation of docs/reports/2026-11-21-01-security-cves.md",
+      "mode": "translation",
+      "reference": {
+        "source": "docs_reports_2026-11-21-01-security-cves.en",
+        "path": "docs/reports/2026-11-21-01-security-cves.md",
+        "startLine": 1,
+        "endLine": 119,
+        "quote": "# Security regression tests from Rust's CVEs, the same patterns elsewhere, and a wasm sandbox\n\nDate: 2026-11-21\n\nIs zustc safe to use? To find out, this change takes the past security bugs of Rust (the CVEs of the standard\nlibrary and rustc's soundness bugs) as test programs, checks that zustc does not let the same holes through, and\nlooks for the same mistakes next to each hole it finds. It also adds wasm32-unknown-unknown output (#7) and tests\nthat a module runs inside a sandbox and stays in it. The tests are in `tests/security/` and `tests/wasm/` (their\nREADMEs say how to read a case).\n\n## 1. Cases and the oracle\n\nEach case says where it comes from and what safe behavior is:\n\n- the source: `//@ cve:` (a std CVE), `//@ issue:` (a rustc soundness bug), `//@ pattern:` (the same\n  implementation pattern elsewhere) or `//@ rule:` (a language rule with no CVE of its own);\n- the behavior: rejected at a marked line, a panic, a run that prints what rustc's build prints, or `unsupported`\n  (zustc does not have the API, so the CVE cannot happen).\n\nrustc 1.97 is the oracle: its build must agree with the header, and the output is compared with it. Runtime cases\nare built with both backends and run under valgrind. `known_gaps.txt` lists, with reasons, what zustc does not pass\nyet; it can only shrink.\n\nThere are 100 cases, plus a table of 51 unsafe std APIs that each must need `unsafe`.\n\n## 2. The std CVEs\n\n`tests/security/cves.txt` lists the 18 advisories RustSec has for the `std` package and CVE-2024-24576 from the Rust\nblog, each with its case. A test keeps the table and the cases in step. The CVE ids, APIs and fixed versions were\nchecked against the advisory pages.\n\n| result | CVEs |\n|---|---|\n| zustc had the same bug: fixed | CVE-2018-1000810 (`str::repeat`: `len * n` wrapped; zustc's build of the case looped writing past the buffer) |\n| pass | CVE-2015-20001, CVE-2017-20004, CVE-2018-1000657, CVE-2018-25008, CVE-2019-1010299, CVE-2020-36317, CVE-2020-36318, CVE-2020-36323 (ordinary strings), CVE-2021-28877, CVE-2021-28879, CVE-2021-31162 |\n| unsupported (no API, so no bug) | CVE-2020-36323 (a Borrow impl of the program's), CVE-2021-28875, CVE-2021-28876 / -28878, CVE-2021-29922, CVE-2022-21658 |\n| gap | CVE-2019-12083: an impl may define a method its trait does not declare (E0407). zustc has no downcast, so no type confusion follows |\n| not applicable | CVE-2024-24576 (Windows only) |\n\nFor four of them, the API had to be added before it could be checked: `VecDeque::reserve` / `capacity` /\n`make_contiguous`, `Arc::get_mut`, and Debug of `vec_deque::Iter`. Each one is written so that the CVE's mistake\ncannot happen: a wrapped deque is copied in order into a new block, and the iterator prints only the elements still\nto come.\n\nzustc does not unwind, so the panic-safety CVEs (CVE-2015-20001, CVE-2020-36317, CVE-2021-31162) become \"the panic\nends the program cleanly\" (exit 101, valgrind clean). The state they corrupted is never seen again.\n\n## 3. Holes found, and the same patterns next to them\n\n| pattern | first found in | found next to it | fixed |\n|---|---|---|---|\n| a size computed without overflow checks (the prelude is compiled without them) | `str::repeat` | VecDeque's block size; `HashMap::with_capacity` (`n * 4` wrapped, and `c * 3` wrapping made `c` reach 0, so the loop never ended) | all |\n| a String edit at a byte inside a char | `String::truncate` / `insert` / `insert_str` / `remove` / `replace_range` | slicing, `split_at`, `chars` of a slice (already checked) | all |\n| a lowering path that skips E0133 | closure bodies | raw pointer `add` / `sub` / `offset` / `read*` / `write*`, `slice::from_raw_parts(_mut)`, `str::from_utf8_unchecked`, `get_unchecked(_mut)`, `mem::zeroed`, `Box::from_raw` (codegen lowers these itself, never through `check_unsafe_call`); `MaybeUninit::assume_init*` and `hint::unreachable_unchecked` were safe fns in the prelude | all |\n| a check of one marker trait | `impl Send` without `unsafe` (E0200) | `impl` of the program's own `unsafe trait` | all |\n| Send judged by one type (only `Rc` was looked for) | | raw pointers, `Arc<T>` / `&T` of a T that is not Sync, `MutexGuard`; a `static` of a type that is not Sync (`static C: Cell<u32>`) | all but `dyn Trait`, whose `+ Send` zustc's types do not keep |\n| `rotate_left(k)` past the length | | it took k modulo the length | std's panic |\n\nThe table of unsafe std APIs ends with 30 rejected with E0133 and 21 that zustc does not have (rejected as unknown);\nnone is accepted in safe code. Before this change, the paths above accepted the raw pointer methods,\n`from_raw_parts`, `from_utf8_unchecked`, `get_unchecked`, `mem::zeroed`, `Box::from_raw` and `assume_init` in safe code\n(for `from_utf8_unchecked`, `get_unchecked` and `Box::from_raw` this was seen in a build, for the others in the code):\nsafe code could read and write any address.\n\nLooked for and not found: iterators kept across a mutation of a Vec, VecDeque, HashMap or String (all rejected,\nE0502); user iterators whose `size_hint` or `ExactSizeIterator::len` lie, and `Hash` / `Eq` / `Ord` impls that are not\nconsistent (collect, extend, HashMap, BinaryHeap and sort stay memory safe); VecDeque's index and remove paths\n(bounds checked).\n\nStill open (in `known_gaps.txt`):\n\n- privacy is not checked;\n- RefCell has no borrow flag;\n- closure captures are not loans;\n- `&v[..]` kept across `clear`;\n- E0716 and drop check;\n- unsafe fn pointers;\n- E0407;\n- `dyn Trait` losing `+ Send`;\n- a Box moved out of is not freed (a leak, by `let`, `let` patterns and `match`; no double free).\n\n## 4. wasm32-unknown-unknown in a sandbox\n\n`zustc --target wasm32-unknown-unknown` writes one wasm module. The backend reads the same recorded instructions as\nthe Cranelift backend, so caching and incremental rebuilds need no changes: a cold build of\nexamples/collections.rs takes 51 ms, and an edit of one function 16 ms.\n\nWhat keeps a module in its sandbox:\n\n- The host (`tests/wasm/run.mjs`) gives only fd 1 / 2, the program's arguments, `exit` and pure functions. A module\n  that imports anything else, such as `fork` or `execvp`, is not run.\n- Inside the module:\n  - a 4 KiB null page;\n  - a shadow stack checked at each function entry;\n  - memory capped at 2 GiB;\n  - one compare per load and store, which traps on the null page and on addresses past 32 bits (the pointers stay\n    64-bit, and narrowed they would wrap onto other memory).\n\n`tests/wasm.rs` checks:\n\n- examples and the runtime cases of `tests/security` (the CVE cases among them) print what rustc's builds print:\n  65 programs;\n- processes, host files and the environment are denied;\n- wild accesses, forged function pointers, signature mismatches, stack overflow and huge allocations trap or abort.\n\nIn examples, `tests/probe` and `bench/rt`, 135 programs match rustc. The 5 others need what the sandbox denies:\nthreads, processes, files and stdin. `bench/rt` runs 3–15x slower than native under Node, because every block is a\ncase of one `loop` + `br_table`; the address checks are 5–20% of that.\n\n## 5. What is left\n\n- Most of the gaps are type or borrow checks that the compat and region-check work changes. They were left there and\n  are listed with reasons.\n- RefCell needs `Ref` / `RefMut` guards, which need deref coercion through user `Deref` types to work in more places.\n- wasm:\n  - a relooper or stackifier instead of the dispatcher;\n  - i128 division;\n  - threads;\n  - zustc built as wasm by itself.",
+        "contentHash": "51ca06d9e87608d58dd205715697771ee005915fbf3dc28d21b1d57fe10d2b40"
+      },
+      "target": {
+        "source": "docs_reports_2026-11-21-01-security-cves.ja",
+        "path": "docs/ja/reports/2026-11-21-01-security-cves.md",
+        "startLine": 1,
+        "endLine": 116,
+        "quote": "# Rust の CVE から作るセキュリティの回帰テスト、同じパターンの点検、wasm のサンドボックス\n\n日付: 2026-11-21\n\nzustc は安全に使えるか。それを確かめるため、この変更では Rust の過去のセキュリティの不具合 (標準ライブラリの CVE と\nrustc の健全性の不具合) をテストのプログラムにし、zustc が同じ穴を通さないことを確かめ、見つけた穴ごとにその隣で同じ\n誤りをしていないかを探した。あわせて wasm32-unknown-unknown の出力 (#7) を足し、モジュールがサンドボックスの中で動き、\nそこから出ないことをテストした。テストは `tests/security/` と `tests/wasm/` にある (ケースの読み方はそれぞれの README)。\n\n## 1. ケースと正解\n\nケースはそれぞれ、出典と安全なふるまいを書く。\n\n- 出典: `//@ cve:` (std の CVE)、`//@ issue:` (rustc の健全性の不具合)、`//@ pattern:` (同じ実装のパターンの別の場所)、\n  `//@ rule:` (それ自身の CVE はない言語の規則)\n- ふるまい: 印を付けた行での拒否、panic、rustc のビルドと同じ出力の実行、`unsupported` (zustc にその API がないので、\n  その CVE は起こりえない)\n\n正解は rustc 1.97 で、そのビルドがヘッダと合っていることを確かめ、出力を比べる。実行するケースは 2 つのバックエンドで\nビルドし、valgrind の下で動かす。`known_gaps.txt` は zustc がまだ通らないものを理由付きで並べ、減ることしかできない。\n\nケースは 100 個あり、それに加えて、どれも `unsafe` が要るはずの std の unsafe API 51 個の表がある。\n\n## 2. std の CVE\n\n`tests/security/cves.txt` は、RustSec の `std` パッケージの 18 件のアドバイザリと、Rust のブログの CVE-2024-24576 を、\nそれぞれのケースと並べる。表とケースが合っていることはテストが確かめる。CVE の番号・API・直った版は、アドバイザリの\nページで確かめた。\n\n| 結果 | CVE |\n|---|---|\n| zustc に同じ不具合があった: 直した | CVE-2018-1000810 (`str::repeat`: `len * n` が wrap した。zustc のビルドはバッファの先へ書き続けた) |\n| 通る | CVE-2015-20001、CVE-2017-20004、CVE-2018-1000657、CVE-2018-25008、CVE-2019-1010299、CVE-2020-36317、CVE-2020-36318、CVE-2020-36323 (普通の文字列)、CVE-2021-28877、CVE-2021-28879、CVE-2021-31162 |\n| unsupported (API がないので不具合もない) | CVE-2020-36323 (プログラムの Borrow の impl)、CVE-2021-28875、CVE-2021-28876 / -28878、CVE-2021-29922、CVE-2022-21658 |\n| 未対応 | CVE-2019-12083: impl が、trait の宣言していないメソッドを定義できる (E0407)。zustc には downcast がないので、型の取り違えにはならない |\n| 当てはまらない | CVE-2024-24576 (Windows だけ) |\n\n4 件は、確かめる前に API を足す必要があった: `VecDeque::reserve` / `capacity` / `make_contiguous`、`Arc::get_mut`、\n`vec_deque::Iter` の Debug。どれも、その CVE の誤りが起こりえない書き方にした。wrap した deque は新しい領域へ順に写し、\nイテレータはまだ残っている要素だけを出す。\n\nzustc は unwind しないので、panic 安全性の CVE (CVE-2015-20001、CVE-2020-36317、CVE-2021-31162) は「panic がプログラムを\nきれいに終わらせる」(exit 101、valgrind で問題なし) ことになる。それらが壊した状態が後で見られることはない。\n\n## 3. 見つけた穴と、その隣の同じパターン\n\n| パターン | 最初に見つけた所 | 隣で見つけたもの | 直したか |\n|---|---|---|---|\n| 桁あふれの検査なしで計算したサイズ (prelude は検査なしでコンパイルされる) | `str::repeat` | VecDeque の領域のサイズ、`HashMap::with_capacity` (`n * 4` が wrap し、`c * 3` の wrap で `c` が 0 になってループが終わらなかった) | すべて |\n| 文字の途中のバイトでの String の編集 | `String::truncate` / `insert` / `insert_str` / `remove` / `replace_range` | スライス、`split_at`、スライスの `chars` (もとから検査あり) | すべて |\n| E0133 を飛ばす下ろし方の経路 | クロージャの本体 | 生ポインタの `add` / `sub` / `offset` / `read*` / `write*`、`slice::from_raw_parts(_mut)`、`str::from_utf8_unchecked`、`get_unchecked(_mut)`、`mem::zeroed`、`Box::from_raw` (codegen が自分で下ろし、`check_unsafe_call` を通らない)。`MaybeUninit::assume_init*` と `hint::unreachable_unchecked` は prelude で safe な fn だった | すべて |\n| marker trait 1 つだけの検査 | `unsafe` のない `impl Send` (E0200) | プログラム自身の `unsafe trait` の impl | すべて |\n| 1 つの型だけで決めていた Send (`Rc` だけを探していた) | | 生ポインタ、Sync でない T の `Arc<T>` / `&T`、`MutexGuard`、Sync でない型の `static` (`static C: Cell<u32>`) | `dyn Trait` 以外のすべて (zustc の型は `+ Send` を保たない) |\n| 長さを超える `rotate_left(k)` | | k を長さで割った余りにしていた | std と同じ panic にした |\n\nstd の unsafe API の表は、E0133 で拒否が 30、zustc にない (未知のものとして拒否) が 21 で、safe なコードで通るものは\nない。この変更の前は、上の経路が、生ポインタのメソッド・`from_raw_parts`・`from_utf8_unchecked`・`get_unchecked`・\n`mem::zeroed`・`Box::from_raw`・`assume_init` を safe なコードで受け付けていた (`from_utf8_unchecked`・`get_unchecked`・\n`Box::from_raw` はビルドで、ほかはコードで確かめた)。safe なコードが任意のアドレスを読み書きできた。\n\n探したが見つからなかったもの:\n\n- Vec・VecDeque・HashMap・String を変える間イテレータを持ち続けること (どれも拒否、E0502)\n- `size_hint` や `ExactSizeIterator::len` が嘘を言うユーザのイテレータ、食い違う `Hash` / `Eq` / `Ord` の impl\n  (collect・extend・HashMap・BinaryHeap・sort はメモリ安全なまま)\n- VecDeque の添字と remove の経路 (境界を検査している)\n\nまだ開いているもの (`known_gaps.txt`):\n\n- privacy を検査しない\n- RefCell に借用のフラグがない\n- クロージャのキャプチャが貸し出しにならない\n- `clear` の間 `&v[..]` を持ち続けられる\n- E0716 と drop check\n- unsafe な fn ポインタ\n- E0407\n- `dyn Trait` が `+ Send` を失う\n- move して出した Box の領域が解放されない (`let`・`let` のパターン・`match` でのリーク。二重解放はない)\n\n## 4. サンドボックスの中の wasm32-unknown-unknown\n\n`zustc --target wasm32-unknown-unknown` は 1 つの wasm モジュールを書く。バックエンドは Cranelift のバックエンドと同じ\n記録した命令を読むので、キャッシュとインクリメンタルな再ビルドに変更は要らない。examples/collections.rs の cold ビルドは\n51 ms、関数 1 つの編集は 16 ms。\n\nモジュールをサンドボックスに閉じ込めるもの:\n\n- ホスト (`tests/wasm/run.mjs`) が与えるのは、fd 1 / 2、プログラムの引数、`exit`、純粋な関数だけ。ほかのもの\n  (`fork` や `execvp` など) を import するモジュールは実行しない。\n- モジュールの中:\n  - 4 KiB の null ページ\n  - 関数の入口ごとに検査するシャドウスタック\n  - 2 GiB を上限とするメモリ\n  - load と store ごとに 1 回の比較。null ページと、32 ビットを超えるアドレスで trap する (ポインタは 64 ビットのままで、\n    縮めると別のメモリへ wrap するため)\n\n`tests/wasm.rs` が確かめること:\n\n- examples と `tests/security` の実行するケース (CVE のケースを含む) が rustc のビルドと同じものを出す: 65 個のプログラム\n- プロセス・ホストのファイル・環境は拒否される\n- でたらめなアクセス・偽の関数ポインタ・シグネチャの食い違い・スタックあふれ・巨大な確保は、trap か abort になる\n\nexamples・`tests/probe`・`bench/rt` では 135 個のプログラムが rustc と一致した。残りの 5 個は、サンドボックスが拒否する\nもの (スレッド・プロセス・ファイル・stdin) を必要とする。`bench/rt` は Node の下で native の 3〜15 倍遅い。ブロックが\nどれも 1 つの `loop` + `br_table` の場合分けになるためで、アドレスの検査はそのうち 5〜20% にあたる。\n\n## 5. 残っていること\n\n- 未対応のものの多くは、互換性と region check の作業が変えている型や借用の検査である。そちらに残し、理由付きで並べた。\n- RefCell には `Ref` / `RefMut` のガードが要る。それには、ユーザの `Deref` の型を通した deref coercion が、より多くの所で\n  働く必要がある。\n- wasm:\n  - ディスパッチャの代わりの relooper か stackifier\n  - i128 の割り算\n  - スレッド\n  - zustc 自身による、wasm にした zustc のビルド",
+        "contentHash": "281c9bf5f1bf7f57d0ca3db96bb95b3c462003b7c01635d7342a68e298fac594"
+      },
+      "context": [],
+      "candidateId": "34fa626917d4583d9a298e781400d8106763950730abd825a18b6a911f33b6b6",
+      "contextHash": "27807ba48d2e09f4713c7146be78c59e8faafc22a0b8f4e2f0ddac8d4dcb07ef",
+      "judgment": {
+        "choice": "supports",
         "confidence": 0.99,
         "probabilities": {
           "supports": 0.99,
@@ -961,9 +995,9 @@
     }
   ],
   "coverage": {
-    "expected": 28,
-    "selected": 28,
-    "answered": 28,
+    "expected": 29,
+    "selected": 29,
+    "answered": 29,
     "missing": 0,
     "contradictions": 0,
     "unassessed": 0,
@@ -972,9 +1006,9 @@
     "unboundDocuments": 0
   },
   "usage": {
-    "requests": 28,
-    "inputTokens": 136222,
-    "usd": 0.005721324000000001
+    "requests": 29,
+    "inputTokens": 143327,
+    "usd": 0.0060197340000000005
   },
   "errors": []
 }
