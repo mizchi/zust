@@ -120,12 +120,15 @@ impl Cx<'_> {
 
     /// Some(witness) when the arms (those without a guard) do not cover `ty`
     pub(crate) fn non_exhaustive(&self, arms: &[crate::parse::Arm], ty: Ty) -> Option<String> {
+        let pats: Vec<&crate::parse::Pat> = arms.iter().filter(|a| a.guard.is_none()).map(|a| &a.pat).collect();
+        self.non_exhaustive_pats(&pats, ty)
+    }
+
+    /// Some(witness) when the patterns do not cover `ty` (a `let` pattern that is refutable, E0005)
+    pub(crate) fn non_exhaustive_pats(&self, pats: &[&crate::parse::Pat], ty: Ty) -> Option<String> {
         let mut rows = vec![];
-        for a in arms {
-            if a.guard.is_some() {
-                continue;
-            }
-            rows.push(vec![self.norm(&a.pat, ty, 0).ok()?]);
+        for p in pats {
+            rows.push(vec![self.norm(p, ty, 0).ok()?]);
         }
         let mut work = 0;
         match self.useful(&rows, &[ty], &mut work) {
