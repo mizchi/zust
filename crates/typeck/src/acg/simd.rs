@@ -98,7 +98,9 @@ impl Cx<'_> {
                 match self.parse_ty(t)? {
                     // (a const parameter's value is a length on `()` (ast_types::const_arg_syn); a type parameter
                     // given an array type, `T = [u8; 1]`, is not one)
-                    Ty::Array(e, n) if *e == Ty::Unit => return Ok(n),
+                    // (and the name must be declared `const` where the function says: a type parameter given
+                    // `[(); 1]` has the same value)
+                    Ty::Array(e, n) if *e == Ty::Unit && self.const_param(&p.segs[0].name) => return Ok(n),
                     _ => return err(SP, format!("`{name}`: const argument {} is not a constant", k + 1)),
                 }
             }
@@ -120,6 +122,15 @@ impl Cx<'_> {
         match self.prog.resolve_env(&ts, &self.env).or_else(|er| err(SP, er))? {
             Ty::Array(_, n) => Ok(n),
             _ => err(SP, format!("`{name}`: const argument {} is not a constant", k + 1)),
+        }
+    }
+
+    /// Whether a generic parameter of the function is a `const` one (its declared kind, `CONST_GENERIC`); a name the
+    /// signature does not declare (an impl's) is taken as one
+    fn const_param(&self, n: &str) -> bool {
+        match self.prog.sigs.get(self.root as usize).and_then(|s| s.generics.iter().find(|g| g.0 == n)) {
+            Some((_, bs)) => bs.iter().any(|b| b == crate::types::CONST_GENERIC),
+            None => true,
         }
     }
 
