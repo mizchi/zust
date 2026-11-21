@@ -17,8 +17,19 @@ fn h2(name: &str, v: __m256i) {
     println!("{name}: {}", s.join(" "));
 }
 
+// (a function's const parameter shadows the program's constant of its name; a cast in a constant wraps)
+const LANE: i32 = 0;
+const CAST: i32 = 4294967298u64 as i32;
+
+#[target_feature(enable = "avx2,fma")]
+fn lane<const LANE: i32>(a: __m128i) -> i32 {
+    _mm_extract_epi32::<LANE>(a)
+}
+
 #[target_feature(enable = "avx2,fma")]
 fn run() {
+    let l = _mm_setr_epi32(10, 11, 12, 13);
+    println!("const lanes {} {} {} {}", _mm_extract_epi32::<LANE>(l), lane::<1>(l), lane::<3>(l), _mm_extract_epi32::<CAST>(l));
     let a16 = _mm_setr_epi16(1, -2, 32767, -32768, 1000, -1000, 255, -256);
     let a32 = _mm_setr_epi32(1, -2, i32::MAX, i32::MIN);
     let a64 = _mm_set_epi64x(-5, 0x1234_5678_9abc_def0);

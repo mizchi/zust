@@ -75,6 +75,8 @@ impl Cx<'_> {
             },
             _ => None,
         };
+        // (a const parameter of the function shadows the program's constants and the predicates: resolved below)
+        let one = one.filter(|n| !self.env.params.iter().any(|p| &p.0 == n));
         if let Some(n) = &one {
             if self.prog.const_index.contains_key(n) {
                 // (a constant of the program's: its value, which must fit (not truncated to another lane))

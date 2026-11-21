@@ -2456,7 +2456,25 @@ impl Program {
         Ok(match e {
             Expr::Lit(t, _) => lit_int(t).ok_or("not an integer constant")?,
             Expr::Paren(x) => self.eval_const(x, depth)?,
-            Expr::Cast(x, _) => self.eval_const(x, depth)?,
+            // (an integer `as` wraps to its type, as rustc's: `4294967297u64 as i32` is 1)
+            Expr::Cast(x, t) => {
+                let v = self.eval_const(x, depth)?;
+                let prim = match &**t {
+                    crate::parse::Ty::Path(None, p) if p.segs.len() == 1 && p.segs[0].args.is_empty() => p.segs[0].name.as_str(),
+                    _ => "",
+                };
+                match prim {
+                    "u8" => v as u8 as i128,
+                    "u16" => v as u16 as i128,
+                    "u32" => v as u32 as i128,
+                    "u64" | "usize" => v as u64 as i128,
+                    "i8" => v as i8 as i128,
+                    "i16" => v as i16 as i128,
+                    "i32" => v as i32 as i128,
+                    "i64" | "isize" => v as i64 as i128,
+                    _ => v,
+                }
+            }
             // (`{ 3 }` / `{ let x = ..; }` is not: a block of one expression; `if c { a } else { b }`)
             Expr::Block(None, false, b) if b.stmts.len() == 1 => match &b.stmts[0] {
                 crate::parse::Stmt::Expr(x, false) => self.eval_const(x, depth)?,
