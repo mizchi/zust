@@ -425,12 +425,18 @@ pub fn features(g: &Graph, o: &Opts) -> Resolved {
             }
         }
         // (`--features`: `member/feat` names a member's feature; anything else, `feat` or a dependency's `dep/feat`,
-        //  is for the selected packages (a build's selection; for metadata, the root package or the only member))
-        let selected = match &o.only {
-            Some(only) => only.contains(&m),
-            None => Some(m) == g.root || g.members.len() == 1,
+        //  is for the selected packages: a build's selection. Metadata selects the whole workspace, so there it goes to
+        //  every member that has the feature (or the dependency), as cargo's resolver 2 does; and to the root package
+        //  or the only member also when none has it, so that the error names it)
+        let has = |f: &str| match f.split_once('/') {
+            Some((dep, _)) => p.deps.iter().any(|d| d.name == dep.trim_end_matches('?')),
+            None => p.features.contains_key(f) || p.deps.iter().any(|d| d.optional && d.name == f),
         };
         for f in &o.features {
+            let selected = match &o.only {
+                Some(only) => only.contains(&m),
+                None => has(f) || Some(m) == g.root || g.members.len() == 1,
+            };
             match f.split_once('/') {
                 Some((pk, ff)) if g.pkgs[m].m.name == pk => st.entry(n, ff),
                 _ if selected => st.entry(n, f),

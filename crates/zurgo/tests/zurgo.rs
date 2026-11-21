@@ -249,13 +249,17 @@ fn workspace_rules_match_cargo() {
     let (ok, _, err) = cargo(&["generate-lockfile", "--offline"], &root, &t);
     assert!(ok, "{err}");
     // (metadata from the root and from a member: the graph and the member lists are cargo's)
-    for m in [root.clone(), sc.0.join("crates/app/Cargo.toml")] {
-        let a = ["metadata", "--format-version", "1", "--offline"];
+    // (also with features asked for: a member's feature, and a dependency's, at the virtual root)
+    let runs: [(&PathBuf, &[&str]); 4] = [(&root, &[]), (&sc.0.join("crates/app/Cargo.toml"), &[]), (&root, &["--features", "extra"]), (&root, &["--features", "util/loud"])];
+    for (m, more) in runs {
+        let m = m.clone();
+        let mut a = vec!["metadata", "--format-version", "1", "--offline"];
+        a.extend(more);
         let (ok, want, err) = cargo(&a, &m, &t);
         assert!(ok, "cargo metadata: {err}");
         let (ok, got, err) = zurgo(&a, &m, &t);
         assert!(ok, "zurgo metadata: {err}");
-        assert_eq!(graph(&got), graph(&want), "{}", m.display());
+        assert_eq!(graph(&got), graph(&want), "{} {more:?}", m.display());
         let members = |j: &str, k: &str| -> Vec<String> {
             let v: serde_json::Value = serde_json::from_str(j).unwrap();
             let mut x: Vec<String> = v[k].as_array().unwrap().iter().map(|i| i.as_str().unwrap().to_string()).collect();
