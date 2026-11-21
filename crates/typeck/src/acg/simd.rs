@@ -96,7 +96,9 @@ impl Cx<'_> {
                 if p.segs.len() == 1 && p.segs[0].args.is_empty() && self.env.params.iter().any(|q| q.0 == p.segs[0].name) =>
             {
                 match self.parse_ty(t)? {
-                    Ty::Array(_, n) => return Ok(n),
+                    // (a const parameter's value is a length on `()` (ast_types::const_arg_syn); a type parameter
+                    // given an array type, `T = [u8; 1]`, is not one)
+                    Ty::Array(e, n) if *e == Ty::Unit => return Ok(n),
                     _ => return err(SP, format!("`{name}`: const argument {} is not a constant", k + 1)),
                 }
             }
