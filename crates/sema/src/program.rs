@@ -1534,6 +1534,34 @@ impl Program {
                 }
             }
         }
+        // (E0407: a method of a trait impl that the trait does not declare; for the program's own traits)
+        let user_traits: FxSet<&str> = sums[..user].iter().filter_map(|sm| sm.trait_decl.as_deref()).collect();
+        if !user_traits.is_empty() {
+            for (fi, s) in p.sigs.iter().enumerate() {
+                let Some(tr) = s.impl_trait.as_deref() else { continue };
+                // (`impl Tr<u8> for S`: the trait's own name)
+                let tr = tr.split('<').next().unwrap_or(tr).trim();
+                let Some(ii) = p.item_of[fi] else { continue };
+                if ii as usize >= user || !user_traits.contains(tr) {
+                    continue;
+                }
+                // (the internal names of overloads `get#1` and of impls for references `__ref_foo`: the method's own)
+                let m = p.names[fi].rsplit("::").next().unwrap_or("");
+                let m = m.split('#').next().unwrap_or(m);
+                // (`__ref_foo` is the generated name of an impl for a reference; a method the trait declares with that
+                // name matches as written)
+                let bare = m.strip_prefix("__ref_").unwrap_or(m);
+                let decls = p.traits.get(tr).map(|v| v.as_slice()).unwrap_or(&[]);
+                let declared = |n: &str| decls.iter().any(|&d| p.names[d as usize].rsplit("::").next() == Some(n));
+                if declared(m) || declared(bare) {
+                    continue;
+                }
+                let m = bare;
+                {
+                    return Err(format!("{}:1: method `{m}` is not a member of trait `{tr}` (E0407)", items[ii as usize].line));
+                }
+            }
+        }
         // (a free constant of an uninhabited type (`!`, an enum with no variants) has no value to evaluate to; an
         // associated one is evaluated only where it is used)
         for c in p.consts.iter().filter(|c| c.stat.is_none() && (c.item as usize) < user && !c.name.contains("::")) {

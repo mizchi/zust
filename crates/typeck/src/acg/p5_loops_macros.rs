@@ -577,6 +577,32 @@ impl Cx<'_> {
     }
 
     /// ループ本体: パターンに値を束縛して本体を実行し、step (continue 先) へ
+    /// E0005: the pattern of a `for` must cover the element type (`for Some(x) in xs` does not)
+    pub(crate) fn for_pat_check(&self, p: &Pat, t: Ty) -> R<()> {
+        if self.user_code && !super::plainly_irrefutable(p) {
+            self.lit_pat_type_check(p, t)?;
+            if let Some(w) = self.non_exhaustive_pats(&[p], t) {
+                return err(SP, format!("refutable pattern in `for` loop binding: `{w}` not covered (E0005)"));
+            }
+        }
+        Ok(())
+    }
+
+    /// A pattern coverage does not model (`[Some(x)]`): tested at run time, a trap where it does not match, so nothing
+    /// binds from a payload that is not there
+    pub(crate) fn runtime_pat_guard(&mut self, p: &Pat, place: Place) -> R<()> {
+        if self.user_code && !super::plainly_irrefutable(p) && self.coverage(&[p], place.ty()).is_none() {
+            let trap = self.b.create_block();
+            self.pat_test(p, place, trap)?;
+            let cur = self.b.create_block();
+            self.b.ins().jump(cur, &[]);
+            self.b.switch_to_block(trap);
+            self.b.ins().trap(TrapCode::unwrap_user(2));
+            self.b.switch_to_block(cur);
+        }
+        Ok(())
+    }
+
     pub(crate) fn for_body(&mut self, f: &Expr, val: Option<Value>, vt: Ty, step: Block, exit: Block) -> R<()> {
         let Expr::For(_, fpat, _, fbody) = f else { unreachable!() };
         self.scopes.push(vec![]);
@@ -591,8 +617,12 @@ impl Cx<'_> {
         };
         if let (Some((idx, v, t)), Pat::Tuple(tp)) = (self.pending_pair.take(), &**fpat) {
             let pi = to_place(self, Some(idx), Ty::Usize);
+            self.for_pat_check(&tp[0], Ty::Usize)?;
+            self.runtime_pat_guard(&tp[0], pi)?;
             self.pat_bind(&tp[0], pi, BindMode::Move)?;
             let pv = to_place(self, v, t);
+            self.for_pat_check(&tp[1], t)?;
+            self.runtime_pat_guard(&tp[1], pv)?;
             self.pat_bind(&tp[1], pv, BindMode::Move)?;
         } else {
             let place = to_place(self, val, vt);
@@ -602,6 +632,8 @@ impl Cx<'_> {
                     self.drop_in_place(a, t);
                 }
             }
+            self.for_pat_check(fpat, place.ty())?;
+            self.runtime_pat_guard(fpat, place)?;
             self.pat_bind(fpat, place, BindMode::Move)?;
         }
         let bound = self.pending_bound.take();
@@ -676,6 +708,10 @@ impl Cx<'_> {
             if let (Some(l), Some(h)) = (self.iconst_of(lo), self.iconst_of(hi)) {
                 let h = h + inclusive as i64;
                 if l <= h && h - l <= 4 {
+                    // (E0005 also for a loop that runs no time: `for 0 in 0..0 {}`)
+                    if let Expr::For(_, fp, _, _) = f {
+                        self.for_pat_check(fp, lt)?;
+                    }
                     let bound = self.pending_bound;
                     let exit = self.b.create_block();
                     let vals: Vec<i64> = if rev { (l..h).rev().collect() } else { (l..h).collect() };

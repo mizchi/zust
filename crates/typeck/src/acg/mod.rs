@@ -782,6 +782,49 @@ pub fn is_place_expr(e: &Expr) -> bool {
 }
 
 /// `let x` / `let mut x` / `let _` のような単純な let か
+impl Cx<'_> {
+    /// (`let false = 22;` / `for 'a' in 0..3`: a bool / char literal pattern of another type is a mismatch, before any
+    /// E0005)
+    pub(crate) fn lit_pat_type_check(&self, pat: &Pat, vt: Ty) -> R<()> {
+        let lit_ty = match pat {
+            Pat::Lit(e) => match &**e {
+                Expr::Lit(t, _) if t == "true" || t == "false" => Some(Ty::Bool),
+                Expr::Lit(t, _) if t.starts_with('\'') => Some(Ty::Char),
+                _ => None,
+            },
+            _ => None,
+        };
+        if let Some(pt) = lit_ty {
+            if vt != pt && (vt.is_int() || vt.is_float() || matches!(vt, Ty::Bool | Ty::Char)) {
+                return err(SP, format!("mismatched types: expected `{}`, found `{}`", self.prog.tn(vt), self.prog.tn(pt)));
+            }
+        }
+        // (`let (false,) = (22u8,);`: a tuple's elements against its fields)
+        if let (Pat::Tuple(ps), Ty::Struct(sid)) = (pat, vt) {
+            if self.prog.is_tuple(self.prog.base_of(sid)) && !ps.iter().any(|p| matches!(p, Pat::Rest)) {
+                let fts: Vec<Ty> = self.prog.structs[sid as usize].fields.iter().map(|f| f.1).collect();
+                for (p, ft) in ps.iter().zip(fts) {
+                    self.lit_pat_type_check(p, ft)?;
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// `let None = ..` / `let MAX = ..`: an identifier pattern naming a unit variant or a constant
+    pub(crate) fn names_variant_or_const(&self, p: &Pat) -> bool {
+        let Pat::Ident(false, false, n, None) = p else { return false };
+        if !n.starts_with(|c: char| c.is_uppercase()) || self.lookup(n).is_some() {
+            return false;
+        }
+        if self.prog.const_index.contains_key(n.as_str()) {
+            return true;
+        }
+        let Expr::Path(None, path) = path_expr(n) else { return false };
+        self.prog.variant_by_p(&PPath::of(&path), self.self_sid).is_some()
+    }
+}
+
 pub fn is_simple_let(p: &Pat) -> bool {
     match p {
         Pat::Ident(by_ref, _, _, sub) => sub.is_none() && !*by_ref,
@@ -1364,7 +1407,8 @@ impl Cx<'_> {
             let t0 = self.temps.len();
             self.stmt_i = i;
             match st {
-                Stmt::Let(pat, ann_ty, init, els, ..) if !is_simple_let(pat) || els.is_some() => {
+                // (`let None = x;`: a unit variant or a constant, a pattern to test (E0005), not a new name)
+                Stmt::Let(pat, ann_ty, init, els, ..) if !is_simple_let(pat) || els.is_some() || self.names_variant_or_const(pat) => {
                     // 分解する let (`let S { x, y } = s;`): 反駁不能パターンとして束縛だけ行う
                     let Some(init) = init else {
                         return err(SP, "`let` without initializer is not supported");
@@ -1375,6 +1419,27 @@ impl Cx<'_> {
                         diverged = true;
                         continue;
                     };
+                    // (E0005: without `else`, the pattern must cover the value's type)
+                    if els.is_none() && self.user_code && !plainly_irrefutable(pat) {
+                        // (`let false = 22;`: the literal's type first)
+                        self.lit_pat_type_check(pat, place.ty())?;
+                        match self.coverage(&[pat], place.ty()) {
+                            Some(Some(w)) => return err(SP, format!("refutable pattern in local binding: `{w}` not covered (E0005)")),
+                            Some(None) => {}
+                            // (a pattern coverage does not model (`let [Some(x)] = xs;`): tested at run time, a trap where it
+                            // does not match, so nothing binds from a payload that is not there)
+                            None if els.is_none() => {
+                                let trap = self.b.create_block();
+                                self.pat_test(pat, place, trap)?;
+                                let cur = self.b.create_block();
+                                self.b.ins().jump(cur, &[]);
+                                self.b.switch_to_block(trap);
+                                self.b.ins().trap(TrapCode::unwrap_user(2));
+                                self.b.switch_to_block(cur);
+                            }
+                            None => {}
+                        }
+                    }
                     // `let PAT = e else { .. };`: 合わなければ else の (発散する) ブロックへ
                     // (the else block may match other scrutinees: the pattern binds from this one)
                     let scrut_saved = (self.bk.scrut.clone(), self.bk.scrut_place.clone(), self.rg.scrut.clone());
@@ -2058,4 +2123,16 @@ pub(crate) fn generic_args_of(prog: &Program, params: &[(crate::parse::Pat, crat
             (tp.segs.len() == 1 && tp.segs[0].args.is_empty() && rs.generics.iter().any(|g| g.0 == tp.segs[0].name)).then(|| (n.clone(), tp.segs[0].name.clone()))
         })
         .collect()
+}
+
+/// A pattern of bindings, `_` and tuples of them, which matches any value (no exhaustiveness check needed: a parameter
+/// `(_, _, ..)` of thousands of elements). A lowercase name binds; an uppercase one may be a constant or a unit variant
+pub(crate) fn plainly_irrefutable(p: &Pat) -> bool {
+    match p {
+        Pat::Wild | Pat::Rest => true,
+        Pat::Ident(_, _, n, sub) => n.starts_with(|c: char| c.is_lowercase() || c == '_') && sub.as_deref().is_none_or(plainly_irrefutable),
+        Pat::Tuple(ps) => ps.iter().all(plainly_irrefutable),
+        Pat::Ref(_, i) => plainly_irrefutable(i),
+        _ => false,
+    }
 }

@@ -629,6 +629,9 @@ pub struct Parser {
     in_async: bool,
     /// Inside an `extern "C" { .. }` block: a `static X: T;` without a value is allowed there only
     in_extern: bool,
+    /// E0416 is checked where a pattern is parsed; off while a fn parameter may still turn out to be a 2015 anonymous
+    /// one (`fn f((u8, u8));`, a type)
+    no_dup_check: bool,
 }
 
 type R<T> = Result<T, String>;
@@ -650,7 +653,7 @@ fn bin_prec(op: &str) -> u32 {
 
 pub fn parse_file(src: &str) -> R<File> {
     let toks = tokenize(src)?;
-    let mut p = Parser { toks: toks, i: 0, init_text: String::new(), base: Pos::default(), async_on: true, in_async: false, in_extern: false };
+    let mut p = Parser { toks: toks, i: 0, init_text: String::new(), base: Pos::default(), async_on: true, in_async: false, in_extern: false, no_dup_check: false };
     let mut attrs = Vec::new();
     while p.is_punct("#") && p.peek_is(1, "!") {
         attrs.push(p.attr()?);
@@ -683,7 +686,7 @@ pub fn parse_expr(src: &str) -> R<Expr> {
 /// 式を読む。位置は base (src の先頭のソース上の位置) からの位置にする
 pub fn parse_expr_at(src: &str, base: Pos) -> R<Expr> {
     let toks = tokenize(src)?;
-    let mut p = Parser { toks: toks, i: 0, init_text: String::new(), base, async_on: false, in_async: false, in_extern: false };
+    let mut p = Parser { toks: toks, i: 0, init_text: String::new(), base, async_on: false, in_async: false, in_extern: false, no_dup_check: false };
     let e = p.expr(true)?;
     if p.i < p.toks.len() {
         return Err(p.err("unexpected token after expression"));
@@ -698,7 +701,7 @@ pub fn parse_pat_guard(src: &str) -> Option<(Pat, Option<Expr>)> {
 
 pub fn parse_pat_guard_at(src: &str, base: Pos) -> Option<(Pat, Option<Expr>)> {
     let toks = tokenize(src).ok()?;
-    let mut p = Parser { toks: toks, i: 0, init_text: String::new(), base, async_on: false, in_async: false, in_extern: false };
+    let mut p = Parser { toks: toks, i: 0, init_text: String::new(), base, async_on: false, in_async: false, in_extern: false, no_dup_check: false };
     let pat = p.pat().ok()?;
     let guard = if p.eat_ident("if") { Some(p.expr(true).ok()?) } else { None };
     p.eat_punct(",");
@@ -1384,6 +1387,7 @@ impl Parser {
         self.eat_punct("|");
         let first = self.pat_one()?;
         if !self.is_punct("|") || self.punct_at(0, "||") {
+            self.no_double_binding(&first)?;
             return Ok(first);
         }
         let mut v = vec![first];
@@ -1391,7 +1395,25 @@ impl Parser {
             self.i += 1;
             v.push(self.pat_one()?);
         }
-        Ok(Pat::Or(v))
+        let p = Pat::Or(v);
+        self.no_double_binding(&p)?;
+        Ok(p)
+    }
+
+    /// E0416: a name bound twice in one pattern (`(x, x)`); the alternatives of `|` bind the same names
+    fn no_double_binding(&self, p: &Pat) -> R<()> {
+        if self.no_dup_check {
+            return Ok(());
+        }
+        // (most patterns bind one name or none: no set for them)
+        if matches!(p, Pat::Ident(_, _, _, None) | Pat::Wild | Pat::Rest | Pat::Lit(_) | Pat::Path(_) | Pat::Range(..) | Pat::Macro(_)) {
+            return Ok(());
+        }
+        let mut seen = crate::fxhash::FxSet::default();
+        if let Some(n) = double_binding(p, &mut seen) {
+            return Err(self.err(&format!("identifier `{n}` is bound more than once in the same pattern (E0416)")));
+        }
+        Ok(())
     }
 
     /// クロージャの引数 (`|` を区切りに使うので or パターンは取らない)
@@ -2512,6 +2534,9 @@ impl Parser {
                 self.attrs()?;
                 self.vis()?;
                 let n = self.decl_ident()?;
+                if v.iter().any(|(m, _): &(String, Ty)| *m == n) {
+                    return Err(self.err(&format!("field `{n}` is already declared (E0124)")));
+                }
                 self.expect_punct(":")?;
                 v.push((n, self.ty()?));
                 if !self.eat_punct(",") {
@@ -2593,8 +2618,14 @@ impl Parser {
                 break;
             }
             let save = self.i;
-            let p = match self.pat() {
-                Ok(p) if self.is_punct(":") && !self.punct_at(0, "::") => p,
+            let nd = std::mem::replace(&mut self.no_dup_check, true);
+            let p = self.pat();
+            self.no_dup_check = nd;
+            let p = match p {
+                Ok(p) if self.is_punct(":") && !self.punct_at(0, "::") => {
+                    self.no_double_binding(&p)?;
+                    p
+                }
                 // (an anonymous parameter of a 2015 trait method, `fn f(u8, u8);`: read as a pattern first, so that
                 // `fn f(&'a str)` is still an error)
                 Err(e) => return Err(e),
@@ -2702,6 +2733,14 @@ impl Parser {
                 let sig = self.fn_sig(quals)?;
                 if self.eat_punct(";") {
                     return Ok(ItemKind::Fn(sig, None));
+                }
+                // (E0415: a name bound by two parameters of a fn with a body; a declaration (a trait's, an extern
+                // one) may repeat one)
+                if sig.params.len() > 1 && !sig.params.iter().all(|(p, _)| matches!(p, Pat::Wild)) {
+                    let mut seen = crate::fxhash::FxSet::default();
+                    if let Some(n) = sig.params.iter().find_map(|(p, _)| double_binding(p, &mut seen)) {
+                        return Err(self.err(&format!("identifier `{n}` is bound more than once in this parameter list (E0415)")));
+                    }
                 }
                 let st = self.i;
                 let saved = std::mem::replace(&mut self.in_async, sig.quals.iter().any(|q| q == "async"));
@@ -3203,4 +3242,33 @@ pub fn reserved_kw(s: &str, with_paths: bool) -> bool {
         _ => false,
     };
     core || (with_paths && matches!(s, "self" | "Self" | "crate" | "super" | "true" | "false" | "mut" | "ref"))
+}
+
+/// The first name a pattern binds twice. A name binds when it starts in lowercase (an uppercase one may be a unit
+/// variant or a constant); of an or-pattern, the first alternative's names
+pub(crate) fn double_binding<'a>(p: &'a Pat, seen: &mut crate::fxhash::FxSet<&'a str>) -> Option<&'a str> {
+    match p {
+        Pat::Ident(_, _, n, sub) => {
+            if n.starts_with(|c: char| c.is_lowercase() || c == '_') && n != "_" && !seen.insert(n.as_str()) {
+                return Some(n);
+            }
+            sub.as_deref().and_then(|s| double_binding(s, seen))
+        }
+        Pat::Tuple(ps) | Pat::Slice(ps) | Pat::TupleStruct(_, ps) => ps.iter().find_map(|q| double_binding(q, seen)),
+        Pat::Struct(_, fs, _) => fs.iter().find_map(|(_, q)| double_binding(q, seen)),
+        Pat::Ref(_, q) => double_binding(q, seen),
+        // (each alternative on its own: `(x, y) | (y, x)` is fine, `(x, y) | (y, y)` is not; the first one's names
+        // stay bound for the rest of the pattern)
+        Pat::Or(ps) => {
+            let before = seen.clone();
+            for q in ps.iter().skip(1) {
+                let mut s2 = before.clone();
+                if let Some(n) = double_binding(q, &mut s2) {
+                    return Some(n);
+                }
+            }
+            ps.first().and_then(|q| double_binding(q, seen))
+        }
+        _ => None,
+    }
 }
