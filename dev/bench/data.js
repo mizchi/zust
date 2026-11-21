@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795236104817,
+  "lastUpdate": 1795236106828,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -75084,6 +75084,85 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/mizchi/zust/commit/d5eaaae9c46395dcacf6dbbe78a85b324e646672"
         },
         "date": 1795229258062,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "parity documentSymbol (名前の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity workspace/symbol (上位 20 の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity definition (行き先の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity hover (名前を含む)",
+            "value": 90,
+            "unit": "%"
+          },
+          {
+            "name": "parity references (数の一致)",
+            "value": 86.842,
+            "unit": "%"
+          },
+          {
+            "name": "parity documentHighlight (数の一致)",
+            "value": 96.774,
+            "unit": "%"
+          },
+          {
+            "name": "parity rename (書き換えの一致)",
+            "value": 83.333,
+            "unit": "%"
+          },
+          {
+            "name": "parity signatureHelp (名前・引数の数・今の引数の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity completion `x.\\|` (書いてある名前を含む)",
+            "value": 90,
+            "unit": "%"
+          },
+          {
+            "name": "parity completion `na\\|me` (同)",
+            "value": 84,
+            "unit": "%"
+          },
+          {
+            "name": "parity 一致の平均",
+            "value": 93.095,
+            "unit": "%"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "miz404@gmail.com",
+            "name": "Kotaro Chikuba",
+            "username": "mizchi"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "c14c9055a377d78384d405844c4ae2dc955641e0",
+          "message": "Merge pull request #21 from mizchi/claude/compat-next17\n\nMacros defined by expansions, unknown-macro errors, qualified array lengths, [v; _]",
+          "timestamp": "2026-11-21T13:37:15+09:00",
+          "tree_id": "17febc7b51847ac4baf66b4e3d51c5ea46d75e7d",
+          "url": "https://github.com/mizchi/zust/commit/c14c9055a377d78384d405844c4ae2dc955641e0"
+        },
+        "date": 1795236106342,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
