@@ -663,7 +663,7 @@ impl Session2 {
         for it in &items[..user] {
             let head = src.get(it.start..it.end).unwrap_or("");
             // (and an extern block's items: `extern "C" { #[unsafe(ffi_const)] fn f(); }`)
-            let ext = head.starts_with("extern") || head.starts_with("unsafe extern");
+            let ext = extern_block(head.as_bytes(), 0);
             if ext || head.starts_with('#') {
                 // (an item's outer attributes, not its body; an extern block's items are read whole)
                 let end = if ext { Some(it.end) } else { gated_attrs_len(head.as_bytes()).map(|n| it.start + n) };
@@ -2578,35 +2578,12 @@ fn gated_attrs_len(b: &[u8]) -> Option<usize> {
     let mut i = 0;
     let mut gated = false;
     loop {
-        loop {
-            while i < b.len() && b[i].is_ascii_whitespace() {
-                i += 1;
-            }
-            if b[i..].starts_with(b"//") {
-                while i < b.len() && b[i] != b'\n' {
-                    i += 1;
-                }
-            } else if b[i..].starts_with(b"/*") {
-                let mut depth = 0;
-                while i < b.len() {
-                    if b[i..].starts_with(b"/*") {
-                        depth += 1;
-                        i += 2;
-                    } else if b[i..].starts_with(b"*/") {
-                        depth -= 1;
-                        i += 2;
-                        if depth == 0 {
-                            break;
-                        }
-                    } else {
-                        i += 1;
-                    }
-                }
-            } else {
-                break;
-            }
-        }
+        i = skip_space(b, i);
         if i >= b.len() || b[i] != b'#' {
+            // (an extern block after its outer attributes: its items' attributes are read too, the whole item)
+            if extern_block(b, i) {
+                return Some(b.len());
+            }
             return gated.then_some(i);
         }
         i += 1;
@@ -2617,11 +2594,7 @@ fn gated_attrs_len(b: &[u8]) -> Option<usize> {
                     depth = 1;
                     // (the attribute's name: `#[name`, `#[unsafe(name`; not a path `#[tool::name`)
                     let mut j = i + 1;
-                    let skip = |j: &mut usize| {
-                        while *j < b.len() && b[*j].is_ascii_whitespace() {
-                            *j += 1;
-                        }
-                    };
+                    let skip = |j: &mut usize| *j = skip_space(b, *j);
                     skip(&mut j);
                     if b[j..].starts_with(b"unsafe") && !b.get(j + 6).is_some_and(|&c| ident(c)) {
                         let mut k = j + 6;
@@ -2665,6 +2638,59 @@ fn gated_attrs_len(b: &[u8]) -> Option<usize> {
             i += 1;
         }
         i = i.min(b.len());
+    }
+}
+
+/// An extern block starts at b[i..]: `extern "C" {` / `unsafe extern {`, not an `extern "C" fn` (whose body's macro
+/// arguments are no attributes)
+fn extern_block(b: &[u8], i: usize) -> bool {
+    let mut j = i;
+    if b[j..].starts_with(b"unsafe") {
+        j = skip_space(b, j + 6);
+    }
+    if !b[j..].starts_with(b"extern") {
+        return false;
+    }
+    j = skip_space(b, j + 6);
+    if b.get(j) == Some(&b'"') {
+        j += 1;
+        while j < b.len() && b[j] != b'"' {
+            j += 1;
+        }
+        j = skip_space(b, j + 1);
+    }
+    b.get(j) == Some(&b'{')
+}
+
+/// The index of the first byte at or after i that is not whitespace or a comment (`//..`, nested `/* .. */`)
+fn skip_space(b: &[u8], mut i: usize) -> usize {
+    loop {
+        while i < b.len() && b[i].is_ascii_whitespace() {
+            i += 1;
+        }
+        if b.get(i..).is_some_and(|r| r.starts_with(b"//")) {
+            while i < b.len() && b[i] != b'\n' {
+                i += 1;
+            }
+        } else if b.get(i..).is_some_and(|r| r.starts_with(b"/*")) {
+            let mut depth = 0;
+            while i < b.len() {
+                if b[i..].starts_with(b"/*") {
+                    depth += 1;
+                    i += 2;
+                } else if b[i..].starts_with(b"*/") {
+                    depth -= 1;
+                    i += 2;
+                    if depth == 0 {
+                        break;
+                    }
+                } else {
+                    i += 1;
+                }
+            }
+        } else {
+            return i.min(b.len());
+        }
     }
 }
 
