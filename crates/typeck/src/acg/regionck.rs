@@ -848,6 +848,23 @@ impl Cx<'_> {
                 Some((Ty::Ref(*m, crate::types::intern(t)), out))
             }
             Expr::Call(..) | Expr::MethodCall(..) | Expr::Struct(..) => self.rg.calls.get(&(e as *const Expr as usize)).cloned(),
+            // (`e as &'static T`: the cast's type, with the regions written in it; e flows into it)
+            Expr::Cast(x, ty) => {
+                let (it, itr) = self.rt_expr(x)?;
+                let to = self.parse_ty(ty).ok()?;
+                if to != it {
+                    return None;
+                }
+                let prog = self.prog;
+                let names = self.rg.lt_names.clone();
+                let mut s = crate::regions::Slots { lts: names, tparams: vec![], self_slots: &[], any: false };
+                let mut codes = vec![];
+                s.slots(ty, false, &mut codes);
+                let lts = self.rg.lts.clone();
+                let tree = self.rg.instantiate(prog, to, Some(&codes), &lts, &[], &mut |me| me.var())?;
+                self.rg.relate(prog, to, &itr, &tree, super::borrowck::pos(x));
+                Some((to, tree))
+            }
             // (a block's value: its tail's, kept while the block's locals were in scope)
             Expr::Block(None, false, b) => match b.stmts.last() {
                 Some(Stmt::Expr(t, false)) => self.rt_expr(t),

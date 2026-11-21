@@ -1562,7 +1562,8 @@ impl Cx<'_> {
                     }
                     // (a function the gate left out, with `let x: &'static T = ..`: from here on, a borrow of what it
                     // owns must not have to be 'static. What came before has no trees and adds no constraint)
-                    if !self.rg.on && self.rg.eligible && ann_ty.as_ref().is_some_and(crate::regions::mentions_static) {
+                    let static_cast = matches!(strip_paren(init), Expr::Cast(_, t) if crate::regions::mentions_static(t));
+                    if !self.rg.on && self.rg.eligible && (static_cast || ann_ty.as_ref().is_some_and(crate::regions::mentions_static)) {
                         self.rg.on = true;
                     }
                     let let_sp0 = std::mem::replace(&mut self.rg.let_sp, *let_at);
