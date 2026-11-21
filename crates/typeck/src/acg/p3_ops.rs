@@ -333,6 +333,35 @@ impl Cx<'_> {
                 }
             }
         }
+        // (fat raw pointers `*const [T]` / `*const dyn Tr`: their values, the data word then the metadata word, not the
+        // addresses of the pairs that hold them)
+        if lt.is_fat() && matches!(lt, Ty::Ptr(..)) && lt == rt && is_cmp(op) {
+            let (pa, pb) = (self.b.ins().load(PTR, mf(), l, 0), self.b.ins().load(PTR, mf(), r, 0));
+            let (ma, mb) = (self.b.ins().load(PTR, mf(), l, 8), self.b.ins().load(PTR, mf(), r, 8));
+            let v = match op {
+                "==" | "!=" => {
+                    let cc = if op == "==" { IntCC::Equal } else { IntCC::NotEqual };
+                    let d = self.b.ins().icmp(cc, pa, pb);
+                    let m = self.b.ins().icmp(cc, ma, mb);
+                    if op == "==" { self.b.ins().band(d, m) } else { self.b.ins().bor(d, m) }
+                }
+                _ => {
+                    let (strict, eq_ok) = match op {
+                        "<" => (IntCC::UnsignedLessThan, IntCC::UnsignedLessThan),
+                        "<=" => (IntCC::UnsignedLessThan, IntCC::UnsignedLessThanOrEqual),
+                        ">" => (IntCC::UnsignedGreaterThan, IntCC::UnsignedGreaterThan),
+                        _ => (IntCC::UnsignedGreaterThan, IntCC::UnsignedGreaterThanOrEqual),
+                    };
+                    // (data words differ: their order; equal: the metadata's)
+                    let d_ord = self.b.ins().icmp(strict, pa, pb);
+                    let d_eq = self.b.ins().icmp(IntCC::Equal, pa, pb);
+                    let m_ord = self.b.ins().icmp(eq_ok, ma, mb);
+                    let tie = self.b.ins().band(d_eq, m_ord);
+                    self.b.ins().bor(d_ord, tie)
+                }
+            };
+            return Ok((Some(v), Ty::Bool));
+        }
         // 型の違う `<` / `<=` / `>` / `>=`: `impl PartialOrd<R> for S` の partial_cmp (None ならどれも false)
         if matches!(op, "<" | "<=" | ">" | ">=") && lt != rt {
             let cands = self.prog.pord.clone();
@@ -652,6 +681,14 @@ impl Cx<'_> {
         let one = |this: &mut Self| this.b.ins().iconst(types::I8, 1);
         match t {
             Ty::Unit => Ok(one(self)),
+            // (a fat raw pointer: its data word and its metadata word)
+            t if t.is_fat() && matches!(t, Ty::Ptr(..)) => {
+                let (pa, pb) = (self.b.ins().load(PTR, mf(), a, 0), self.b.ins().load(PTR, mf(), b, 0));
+                let (ma, mb) = (self.b.ins().load(PTR, mf(), a, 8), self.b.ins().load(PTR, mf(), b, 8));
+                let d = self.b.ins().icmp(IntCC::Equal, pa, pb);
+                let m = self.b.ins().icmp(IntCC::Equal, ma, mb);
+                Ok(self.b.ins().band(d, m))
+            }
             t if t.is_int() || matches!(t, Ty::Bool | Ty::Char | Ty::Ptr(..)) => Ok(self.b.ins().icmp(IntCC::Equal, a, b)),
             t if t.is_float() => Ok(self.b.ins().fcmp(FloatCC::Equal, a, b)),
             // `&str` / `&[T]`: 長さと中身で比べる

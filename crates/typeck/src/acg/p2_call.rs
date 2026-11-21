@@ -686,7 +686,10 @@ impl Cx<'_> {
                         return err(sp.start, "dereference of raw pointer is unsafe and requires unsafe block (E0133)");
                     }
                     if let (Some(v), vt) = self.expr(inner, None)? {
-                        return self.dyn_method_call_on(v, tr, e, Some(vt));
+                        // (a copy of the pair: an argument that reassigns the pointer must not change the receiver)
+                        let tmp = self.temp(vt);
+                        self.copy(tmp, v, vt);
+                        return self.dyn_method_call_on(tmp, tr, e, Some(vt));
                     }
                 }
             }
