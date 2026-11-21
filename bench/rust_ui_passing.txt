@@ -265,6 +265,7 @@ compile-fail	associated-types/hr-associated-type-bound-param-6.rs
 check-pass	associated-types/impl-trait-member-type-resolution-57399.rs
 check-pass	associated-types/imply-relevant-nested-item-bounds-for-gat.rs
 compile-fail	associated-types/invalid-ctor.rs
+run-pass	associated-types/issue-18655.rs
 check-pass	associated-types/issue-19081.rs
 check-pass	associated-types/issue-19129-1.rs
 check-pass	associated-types/issue-19129-2.rs
@@ -2991,6 +2992,7 @@ compile-fail	inference/issue-107090.rs
 compile-fail	inference/issue-113354.rs
 check-pass	inference/issue-28935.rs
 run-pass	inference/issue-36053.rs
+run-pass	inference/issue-3743.rs
 compile-fail	inference/issue-71309.rs
 compile-fail	inference/issue-72690.rs
 compile-fail	inference/issue-83606.rs
@@ -5698,6 +5700,7 @@ run-pass	statics/static-function-pointer.rs
 compile-fail	statics/static-generic-param-soundness.rs
 run-pass	statics/static-method-in-trait-with-tps-intracrate.rs
 run-pass	statics/static-methods-in-traits.rs
+run-pass	statics/static-methods-in-traits2.rs
 check-pass	statics/static-mut-shared-parens.rs
 build-pass	statics/static-mut-unsafe-init.rs
 build-pass	statics/static-mut-with-assoc-type-field.rs
@@ -6274,10 +6277,12 @@ run-pass	traits/inheritance/num.rs
 run-pass	traits/inheritance/num0.rs
 run-pass	traits/inheritance/num1.rs
 run-pass	traits/inheritance/num2.rs
+run-pass	traits/inheritance/num3.rs
 run-pass	traits/inheritance/num5.rs
 run-pass	traits/inheritance/overloading-simple.rs
 run-pass	traits/inheritance/overloading.rs
 compile-fail	traits/inheritance/repeated-supertrait-ambig.rs
+run-pass	traits/inheritance/self-in-supertype.rs
 run-pass	traits/inheritance/self.rs
 run-pass	traits/inheritance/simple.rs
 run-pass	traits/inheritance/static.rs

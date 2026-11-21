@@ -189,3 +189,4 @@ date	commit	change	noop_M	edit_M	check_M	cache_KiB	lsp_G	run	check	build	cfail	t
 2026-11-20	ff5b3b5+	unclosed delimiter at the end of the file	0.695	548.410	3840.817	1902.8	10.8477	1778	1461	98	3602	1167.857	63.660	10.282	316.919	697.606	263.091
 2026-11-20	c7b4d4d+	_ = e; number literal suffixes; unused_allocation	0.697	548.510	3851.529	1902.8	-	1778	1461	98	3606	1168.289	63.605	10.295	317.024	697.924	263.122
 2026-11-21	c7b4d4d+	_ = e; number literal suffixes; unused_allocation (filtered)	0.695	548.514	3842.159	1902.8	-	1778	1461	98	3606	1168.022	63.575	10.282	316.995	697.743	263.111
+2026-11-21	4550a95+	user trait methods on floats; float literals by bound	0.697	548.515	3842.139	1902.8	-	1783	1461	98	3606	1168.050	63.552	10.296	317.008	697.757	263.110

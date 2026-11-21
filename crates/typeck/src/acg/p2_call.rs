@@ -1072,7 +1072,7 @@ impl Cx<'_> {
             let args: Vec<&Expr> = margs.iter().collect();
             return self.call_fn(id, Some((v, vt)), &args, tf, expected, SP).map(Some);
         }
-        if !(t.is_int() || matches!(t, Ty::Bool | Ty::Char | Ty::Box(_))) {
+        if !(t.is_int() || t.is_float() || matches!(t, Ty::Bool | Ty::Char | Ty::Box(_))) {
             return Ok(None);
         }
         // (`b.inc()` with `impl Inc for i32` and b: Box<i32>: the number's method, when the Box has none)
@@ -1297,7 +1297,7 @@ impl Cx<'_> {
             let m = self.prog.names[id as usize].rsplit("::").next().unwrap().to_string();
             let imp = match args[0] {
                 Ty::Struct(sid) => self.prog.method(sid, &m),
-                t if t.is_int() || matches!(t, Ty::Bool | Ty::Char) => self.prog.index.get(&format!("{}::{m}", self.prog.tn(t))).copied(),
+                t if t.is_int() || t.is_float() || matches!(t, Ty::Bool | Ty::Char) => self.prog.index.get(&format!("{}::{m}", self.prog.tn(t))).copied(),
                 _ => None,
             };
             if let Some(imp) = imp {
@@ -1566,6 +1566,16 @@ impl Cx<'_> {
                                 exp = Some(*t);
                                 sol[g as usize] = Some(*t);
                             }
+                        }
+                    }
+                }
+                // (a float literal likewise: f32 when it implements every bound and f64 does not)
+                if let (Ty::Param(g), true) = (pt, is_float_lit(a)) {
+                    if let Some((_, bounds)) = sig0.generics.get(g as usize) {
+                        let traits: Vec<&str> = bounds.iter().map(|b| b.split('<').next().unwrap_or(b).trim()).filter(|b| self.prog.traits.contains_key(*b)).collect();
+                        if !traits.is_empty() && !traits.iter().all(|tr| self.prog.implements(Ty::F64, tr)) && traits.iter().all(|tr| self.prog.implements(Ty::F32, tr)) {
+                            exp = Some(Ty::F32);
+                            sol[g as usize] = Some(Ty::F32);
                         }
                     }
                 }
@@ -2168,6 +2178,17 @@ fn is_int_lit(e: &Expr) -> bool {
     match strip_paren(e) {
         Expr::Lit(t, _) => t.starts_with(|c: char| c.is_ascii_digit()) && !t.contains('.') && !t.contains(['i', 'u']) && !t.contains('e'),
         Expr::Unary(op, x, _) => op == "-" && is_int_lit(x),
+        _ => false,
+    }
+}
+
+/// An unsuffixed float literal (`5.0`, `1e3`, `-2.5`)
+fn is_float_lit(e: &Expr) -> bool {
+    match strip_paren(e) {
+        Expr::Lit(t, _) => {
+            t.starts_with(|c: char| c.is_ascii_digit()) && !t.starts_with("0x") && !t.starts_with("0b") && !t.starts_with("0o") && (t.contains('.') || t.contains(['e', 'E'])) && !t.contains("f32") && !t.contains("f64")
+        }
+        Expr::Unary(op, x, _) => op == "-" && is_float_lit(x),
         _ => false,
     }
 }
