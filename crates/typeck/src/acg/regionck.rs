@@ -138,6 +138,8 @@ pub struct Rg {
     pub force: bool,
     pub began_late: bool,
     pub rerun: bool,
+    /// An impl's method: the tree of its self type (what `Self { .. }` builds)
+    pub self_tree: Option<(Ty, RT)>,
 }
 
 /// Closure region codes (Rg::closure): a placeholder (a region the expected signature binds), one from outside
@@ -1197,7 +1199,8 @@ impl Cx<'_> {
         let mut rg = std::mem::take(&mut self.rg);
         for l in rs.map(|r| r.lts.as_slice()).unwrap_or(&[]) {
             let v = rg.var();
-            rg.univ.push((v, l.clone()));
+            // (`'_0`: a `'_` of the impl's header)
+            rg.univ.push((v, if l.starts_with("'_") { "'_".to_string() } else { l.clone() }));
             rg.lts.push(v);
             rg.lt_names.push(l.clone());
         }
@@ -1253,6 +1256,7 @@ impl Cx<'_> {
                 if !r.self_slots.is_empty() {
                     if let Some(st) = rg.instantiate(prog, Ty::Struct(isid), Some(&r.self_slots), &lts, &targs, &mut |me| me.var()) {
                         rg.implied(prog, Ty::Struct(isid), &st, 0);
+                        rg.self_tree = Some((Ty::Struct(isid), st));
                     }
                 }
             }
@@ -1937,7 +1941,9 @@ impl Cx<'_> {
         if prog.structs[sid as usize].is_enum {
             return;
         }
-        let Some(tree) = self.rg.fresh(prog, t) else { return };
+        // (`Self { .. }` in an impl's method: of the impl's self type)
+        let of_self = matches!(e, Expr::Struct(p, ..) if p.segs.len() == 1 && p.segs[0].name == "Self");
+        let Some(tree) = self.self_tree(t, of_self) else { return };
         // (at a field's value, else at the literal: `Foo { x, y }` writes no value)
         let lit_sp = match e {
             Expr::Struct(p, ..) if p.pos.line != 0 => p.pos,
@@ -1955,6 +1961,16 @@ impl Cx<'_> {
         // (the definition's bounds hold of the value built: `struct Foo<'a: 'b, 'b>`)
         self.rg.wf_declared(prog, t, &tree, lit_sp);
         self.rg.calls.insert(e as *const Expr as usize, (t, tree));
+    }
+
+    /// The tree of a value of type t built by a struct literal or a constructor: the impl's self type's for `Self`,
+    /// else fresh
+    fn self_tree(&mut self, t: Ty, of_self: bool) -> Option<RT> {
+        let prog = self.prog;
+        match &self.rg.self_tree {
+            Some((st, tr)) if of_self && *st == t => Some(tr.clone()),
+            _ => self.rg.fresh(prog, t),
+        }
     }
 
     /// A tuple struct's value of type t built by its constructor (`B(a)`): the arguments flow into its fields
@@ -1975,7 +1991,8 @@ impl Cx<'_> {
         if prog.structs[sid as usize].is_enum {
             return;
         }
-        let Some(tree) = self.rg.fresh(prog, t) else { return };
+        let of_self = matches!(strip(c), Expr::Path(None, p) if p.segs.len() == 1 && p.segs[0].name == "Self");
+        let Some(tree) = self.self_tree(t, of_self) else { return };
         for &(i, v) in args {
             let Some(&(_, ft, _)) = prog.structs[sid as usize].fields.get(i) else { continue };
             let Some(ftr) = self.rg.field(prog, sid, i, &tree) else { continue };

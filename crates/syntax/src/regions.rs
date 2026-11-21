@@ -164,6 +164,54 @@ fn lifetimes_in(t: &PTy, out: &mut Vec<String>) {
     }
 }
 
+/// t writes `'_` (outside fn pointer, `dyn` and `impl` types)
+fn has_anon(t: &PTy) -> bool {
+    match t {
+        PTy::Ref(l, _, i) => l.as_deref() == Some("'_") || has_anon(i),
+        PTy::Ptr(_, i) | PTy::Slice(i) | PTy::Array(i, _) => has_anon(i),
+        PTy::Tuple(ts) => ts.iter().any(has_anon),
+        PTy::Path(None, p) => p.segs.iter().any(|s| {
+            s.args.iter().any(|a| match a {
+                GArg::Lifetime(l) => l == "'_",
+                GArg::Ty(t) => has_anon(t),
+                _ => false,
+            })
+        }),
+        _ => false,
+    }
+}
+
+/// Names each `'_` written in an impl's self type (outside fn pointer, `dyn` and `impl` types): `'_0`, `'_1`, ..
+fn name_anon(t: &mut PTy, out: &mut Vec<String>) {
+    let mut fresh = |out: &mut Vec<String>| {
+        let n = format!("'_{}", out.len());
+        out.push(n.clone());
+        n
+    };
+    match t {
+        PTy::Ref(l, _, i) => {
+            if l.as_deref() == Some("'_") {
+                *l = Some(fresh(out));
+            }
+            name_anon(i, out)
+        }
+        PTy::Ptr(_, i) | PTy::Slice(i) | PTy::Array(i, _) => name_anon(i, out),
+        PTy::Tuple(ts) => ts.iter_mut().for_each(|t| name_anon(t, out)),
+        PTy::Path(None, p) => {
+            for s in &mut p.segs {
+                for a in &mut s.args {
+                    match a {
+                        GArg::Lifetime(l) if l == "'_" => *l = fresh(out),
+                        GArg::Ty(t) => name_anon(t, out),
+                        _ => {}
+                    }
+                }
+            }
+        }
+        _ => {}
+    }
+}
+
 /// The lifetimes named anywhere in a path's arguments (with those of `Fn(..)` sugar)
 fn path_lts(p: &crate::parse::Path, out: &mut Vec<String>) {
     fn ty(t: &PTy, out: &mut Vec<String>) {
@@ -458,10 +506,19 @@ pub fn adt_regions(g: &Generics, tys: &[&PTy]) -> Option<Box<RAdtSyn>> {
 
 /// The regions of an impl / trait header
 pub fn hdr_regions(g: &Generics, self_ty: Option<&PTy>) -> Option<Box<RImplSyn>> {
+    // (`impl S<'_>`: each `'_` in the self type is a lifetime parameter of the impl of its own, named `'_0`, `'_1`, ..)
+    let mut anon = vec![];
+    let named = self_ty.filter(|t| has_anon(t)).map(|t| {
+        let mut t = t.clone();
+        name_anon(&mut t, &mut anon);
+        t
+    });
+    let self_ty = named.as_ref().or(self_ty);
     if !generics_name_lt(g) && !self_ty.is_some_and(names_lt) {
         return None;
     }
     let mut s = Slots::new(g, None, &[]);
+    s.lts.extend(anon);
     let mut self_slots = vec![];
     if let Some(t) = self_ty {
         s.slots(t, false, &mut self_slots);

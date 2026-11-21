@@ -699,3 +699,11 @@ fn pointer_casts_keep_the_object_lifetime() {
     assert!(d.len() == 1 && d[0].0 == 4, "{d:?}");
     assert_eq!(check("trait Trait {}\nfn f<'a>(p: *mut (dyn Trait + 'static)) -> *mut (dyn Trait + 'a) {\n    p as _\n}\nfn main() {}\n"), vec![]);
 }
+
+/// `Self { .. }` builds the impl's self type, whose `'_` is a lifetime of the impl
+#[test]
+fn self_literal_has_the_impl_lifetimes() {
+    let d = check("pub struct S<'a> {\n    f: &'a [u32],\n}\nimpl S<'_> {\n    pub fn new<'a>(f: &'a [u32]) -> S<'a> {\n        Self { f }\n    }\n}\nfn main() {}\n");
+    assert!(d.len() == 1 && d[0].0 == 6, "{d:?}");
+    assert_eq!(check("pub struct S<'a> {\n    f: &'a [u32],\n}\nimpl<'b> S<'b> {\n    pub fn new(f: &'b [u32]) -> Self {\n        Self { f }\n    }\n}\nimpl S<'_> {\n    pub fn new2<'a>(f: &'a [u32]) -> S<'a> {\n        S { f }\n    }\n}\nfn main() {}\n"), vec![]);
+}
