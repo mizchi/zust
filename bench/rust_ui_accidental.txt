@@ -65,3 +65,4 @@ compile-fail	typeck/issue-88643.rs
 compile-fail	nll/issue-54302-cases.rs
 compile-fail	nll/user-annotations/method-ufcs-2.rs
 compile-fail	coercion/unsize-lifetime-shrinking.rs
+compile-fail	privacy/projections.rs

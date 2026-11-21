@@ -354,7 +354,19 @@ pub struct AssocDef {
     /// impl の self 型と値 (impl の型パラメータを Param で含む)
     pub self_ty: Ty,
     pub value: Ty,
+    /// the impl's parameters
     pub ngen: usize,
+    /// a generic associated type's own parameters (`type Pointer<T>`: 1), Params after the impl's and a mark
+    pub ngat: usize,
+}
+
+/// (the impl's parameter count, the generic associated type's) of an associated type's parameter names: those after
+/// the mark `#gat` are its own
+fn gat_split(gn: &[&str]) -> (usize, usize) {
+    match gn.iter().position(|g| *g == "#gat") {
+        Some(k) => (k, gn.len() - k - 1),
+        None => (gn.len(), 0),
+    }
 }
 
 /// 型推論に任せる `_` の印 (型パラメータの番号としては使わない値)
@@ -978,7 +990,8 @@ impl Program {
                 }
                 let gn: Vec<&str> = a.generics.iter().map(|g| g.as_str()).collect();
                 if let (Ok(self_ty), Ok(value)) = (p.resolve_g(&a.self_ty, &gn), p.resolve_g(&a.value, &gn)) {
-                    p.assocs.push(AssocDef { name: a.name.clone(), self_ty, value, ngen: gn.len() });
+                    let (ngen, ngat) = gat_split(&gn);
+                    p.assocs.push(AssocDef { name: a.name.clone(), self_ty, value, ngen, ngat });
                     early.push((ii, k));
                 }
             }
@@ -1108,11 +1121,13 @@ impl Program {
                 let value = p
                     .resolve_g(&a.value, &gn)
                     .map_err(|e| format!("{}:1: {e}", it.line))?;
+                let (ngen, ngat) = gat_split(&gn);
                 p.assocs.push(AssocDef {
                     name: a.name.clone(),
                     self_ty,
                     value,
-                    ngen: gn.len(),
+                    ngen,
+                    ngat,
                 });
             }
         }
@@ -3014,8 +3029,34 @@ impl Program {
     }
 
     fn assoc_of0(&self, t: Ty, name: &str) -> Option<Ty> {
+        // (`P::Pointer<String>`: the associated type `#gat:Pointer` of `(P, String)`, the impl's for P with its own
+        // parameters String)
+        if let Some(gname) = name.strip_prefix(crate::ast_types::GAT_PREFIX) {
+            let Ty::Struct(sid) = t else { return None };
+            if !self.is_tuple(sid) {
+                return None;
+            }
+            let parts = self.structs[sid as usize].args.clone();
+            let (&base, gargs) = parts.split_first()?;
+            for a in &self.assocs {
+                if a.name != gname || a.ngat != gargs.len() {
+                    continue;
+                }
+                let mut sol = vec![None; a.ngen];
+                if self.match_ty(a.self_ty, base, &mut sol) {
+                    let Some(mut args) = sol.iter().copied().collect::<Option<Vec<Ty>>>() else { continue };
+                    // (the mark's place, then the associated type's own arguments)
+                    args.push(Ty::Unit);
+                    args.extend_from_slice(gargs);
+                    return Some(self.subst(a.value, &args));
+                }
+            }
+            return None;
+        }
         for a in &self.assocs {
-            if a.name != name {
+            // (a generic associated type without its arguments (`<() as Outer>::Ty` of a qualified path): its value
+            // when that does not use its own parameters)
+            if a.name != name || (a.ngat != 0 && self.uses_params_from(a.value, a.ngen as u8)) {
                 continue;
             }
             if let Ty::Assoc(v) = a.value {
@@ -3025,13 +3066,26 @@ impl Program {
             }
             let mut sol = vec![None; a.ngen];
             if self.match_ty(a.self_ty, t, &mut sol) {
-                let Some(args) = sol.iter().copied().collect::<Option<Vec<Ty>>>() else {
+                let Some(mut args) = sol.iter().copied().collect::<Option<Vec<Ty>>>() else {
                     continue;
                 };
+                args.extend(std::iter::repeat_n(Ty::Unit, if a.ngat > 0 { a.ngat + 1 } else { 0 }));
                 return Some(self.subst(a.value, &args));
             }
         }
         None
+    }
+
+    /// t names a type parameter numbered `from` or above
+    fn uses_params_from(&self, t: Ty, from: u8) -> bool {
+        match t {
+            Ty::Param(i) => i >= from && i != HOLE,
+            Ty::Ref(_, i) | Ty::Ptr(_, i) | Ty::Array(i, _) | Ty::Slice(i) | Ty::Box(i) => self.uses_params_from(*i, from),
+            Ty::Struct(sid) => self.structs[sid as usize].args.iter().any(|&a| self.uses_params_from(a, from)),
+            Ty::Assoc(a) => self.uses_params_from(a.base, from),
+            Ty::Fn(f) => f.params.iter().chain([&f.ret]).any(|&p| self.uses_params_from(p, from)),
+            _ => false,
+        }
     }
 
     /// 型パラメータに型引数を入れる

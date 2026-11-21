@@ -2567,10 +2567,13 @@ run-pass	functions-closures/fn-lval.rs
 run-pass	functions-closures/fn-type-infer.rs
 run-pass	functions-closures/implied-bounds-closure-arg-outlives.rs
 run-pass	functions-closures/return-from-closure.rs
+check-pass	generic-associated-types/anonymize-bound-vars.rs
+check-pass	generic-associated-types/bugs/issue-80626.rs
 check-pass	generic-associated-types/bugs/issue-88460.rs
 check-pass	generic-associated-types/construct_with_other_type.rs
 compile-fail	generic-associated-types/empty_generics.rs
 check-pass	generic-associated-types/gat-bound-mismatch-106832.rs
+check-pass	generic-associated-types/gat-bounds-normalize-pred.rs
 compile-fail	generic-associated-types/gat-trait-path-generic-type-arg.rs
 compile-fail	generic-associated-types/gat-trait-path-parenthesised-args.rs
 compile-fail	generic-associated-types/generic_associated_type_undeclared_lifetimes.rs
@@ -2611,6 +2614,7 @@ compile-fail	generic-associated-types/parse/trait-path-expressions.rs
 compile-fail	generic-associated-types/parse/trait-path-missing-gen_arg.rs
 compile-fail	generic-associated-types/parse/trait-path-segments.rs
 compile-fail	generic-associated-types/parse/trait-path-types.rs
+check-pass	generic-associated-types/pointer_family.rs
 compile-fail	generic-associated-types/type-param-defaults.rs
 check-pass	generic-associated-types/variance_constraints.rs
 compile-fail	generic-const-items/feature-gate-generic_const_items.rs
@@ -3087,6 +3091,7 @@ compile-fail	inference/need_type_info/channel.rs
 compile-fail	inference/need_type_info/concrete-impl.rs
 compile-fail	inference/need_type_info/do-not-suggest-generic-arguments-for-turbofish.rs
 compile-fail	inference/need_type_info/expr-struct-type-relative-enum.rs
+compile-fail	inference/need_type_info/expr-struct-type-relative-gat.rs
 compile-fail	inference/need_type_info/expr-struct-type-relative.rs
 compile-fail	inference/need_type_info/infer-var-for-self-param.rs
 compile-fail	inference/need_type_info/issue-107745-avoid-expr-from-macro-expansion.rs
@@ -5230,7 +5235,6 @@ run-pass	privacy/private-method-rpass.rs
 compile-fail	privacy/private-struct-field-in-module.rs
 compile-fail	privacy/private-tuple-struct-field-self-arg-issue-81447.rs
 compile-fail	privacy/private-unit-struct-assignment.rs
-compile-fail	privacy/projections.rs
 run-pass	privacy/pub-extern-privacy.rs
 run-pass	privacy/pub-priv-dep/std-pub.rs
 run-pass	privacy/pub-restricted-path-usage-55376.rs
