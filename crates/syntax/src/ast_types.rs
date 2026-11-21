@@ -261,7 +261,9 @@ fn gat_app(base: TySyn, seg: &crate::parse::Seg, self_ty: Option<&TySyn>) -> R<T
         match a {
             GArg::Ty(t) => parts.push(tysyn(t, self_ty)?),
             GArg::Lifetime(_) => {}
-            _ => return Err("unsupported argument of a generic associated type".to_string()),
+            // (`M::S<3>`: a module-qualified type with a const argument also comes here; `Program` resolves it as `S<3>`)
+            GArg::Const(e) => parts.push(const_arg_syn(e)?),
+            GArg::Bind(..) => return Err("unsupported argument of a generic associated type".to_string()),
         }
     }
     Ok(TySyn::Assoc(Box::new(TySyn::Tuple(parts)), format!("{GAT_PREFIX}{}", seg.name)))
