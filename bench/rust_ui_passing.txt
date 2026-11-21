@@ -5314,6 +5314,7 @@ compile-fail	regions/multiple-sources-for-outlives-requirement.rs
 compile-fail	regions/outlives-with-missing.rs
 run-pass	regions/owned-implies-static.rs
 compile-fail	regions/region-borrow-params-issue-29793-big.rs
+compile-fail	regions/region-borrow-params-issue-29793-small.rs
 check-pass	regions/region-bound-extra-bound-in-inherent-impl.rs
 check-pass	regions/region-bound-same-bounds-in-trait-and-impl.rs
 compile-fail	regions/region-bounds-on-objects-and-type-parameters.rs

@@ -838,7 +838,7 @@ impl Cx<'_> {
                 // (the reservation: a shared loan of the place, ended once the arguments are evaluated; the
                 // `&mut` loan is taken then)
                 let l = &self.bk.loans[*ln as usize];
-                let res = borrowck::Loan { place: l.place.clone(), mutable: false, sp: l.sp, at: l.at, quiet: l.quiet };
+                let res = borrowck::Loan { place: l.place.clone(), mutable: false, sp: l.sp, at: l.at, quiet: l.quiet, capture: l.capture };
                 let rs = self.bk.loans.len() as u32;
                 self.bk.loans.push(res);
                 self.bk_push(Some(borrowck::Ev::Acc(place.clone(), borrowck::Acc::Borrow(rs), *sp)));

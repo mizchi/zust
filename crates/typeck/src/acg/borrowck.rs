@@ -115,6 +115,8 @@ pub struct Loan {
     pub at: Sp,
     /// Made without an access of its own (`for x in &mut v`): the accesses acg makes at its position are its own
     pub quiet: bool,
+    /// A closure's borrow of what it captures by reference
+    pub capture: bool,
 }
 
 /// What the checker found (the first error by source position is reported)
@@ -880,7 +882,12 @@ impl Bk {
                                 if lo.place.owned_len() == lo.place.proj.len() {
                                     let what = if self.locals[lo.place.local as usize].name == "self" { "a value owned by the function" } else { "a local variable" };
                                     let name = path_str(&self.locals, &lo.place);
-                                    errs.push(BkError { sp: *sp, msg: format!("cannot return a reference to {what}: `{name}` is dropped when the function returns") });
+                                    // (a closure that borrows it: at the closure, E0373)
+                                    errs.push(if lo.capture {
+                                        BkError { sp: lo.sp, msg: format!("closure may outlive the current function, but it borrows `{name}`, which is owned by the current function (E0373)") }
+                                    } else {
+                                        BkError { sp: *sp, msg: format!("cannot return a reference to {what}: `{name}` is dropped when the function returns") }
+                                    });
                                     break;
                                 }
                             }
@@ -1117,7 +1124,7 @@ impl Cx<'_> {
                 p.proj.push(ref_deref(m));
                 let sp = err_pos(e);
                 let ln = self.bk.loans.len() as u32;
-                self.bk.loans.push(Loan { place: p.clone(), mutable: m, sp, at: sp, quiet: false });
+                self.bk.loans.push(Loan { place: p.clone(), mutable: m, sp, at: sp, quiet: false, capture: false });
                 self.bk_ev(Ev::Acc(p, Acc::Borrow(ln), sp));
                 self.bk.src(Src::Loan(ln));
             }
@@ -1162,7 +1169,7 @@ impl Cx<'_> {
         let Some(p) = self.bk.pat_path.clone() else { return saved };
         let sp = self.bk.scrut_place.as_ref().map(|x| x.1).unwrap_or(super::SP);
         let ln = self.bk.loans.len() as u32;
-        self.bk.loans.push(Loan { place: p.clone(), mutable: m, sp, at: sp, quiet: false });
+        self.bk.loans.push(Loan { place: p.clone(), mutable: m, sp, at: sp, quiet: false, capture: false });
         self.bk_ev(Ev::Acc(p, Acc::Borrow(ln), sp));
         let mut s = saved.clone().unwrap_or_default();
         s.push(Src::Loan(ln));
@@ -1364,7 +1371,7 @@ impl Cx<'_> {
         let Some((p, _)) = self.bk_place(e) else { return };
         let ln = self.bk.loans.len() as u32;
         self.bk.loan_of.insert(e as *const Expr as usize, ln);
-        self.bk.loans.push(Loan { place: p.clone(), mutable: m, sp, at: sp, quiet: false });
+        self.bk.loans.push(Loan { place: p.clone(), mutable: m, sp, at: sp, quiet: false, capture: false });
         let l = p.local;
         self.bk_ev(Ev::Acc(p, Acc::Borrow(ln), sp));
         if !quiet {
@@ -1391,7 +1398,7 @@ impl Cx<'_> {
         let p = BPlace { local: id, proj: vec![] };
         let ln = self.bk.loans.len() as u32;
         self.bk.loan_of.insert(e as *const Expr as usize, ln);
-        self.bk.loans.push(Loan { place: p.clone(), mutable: m, sp, at: sp, quiet: true });
+        self.bk.loans.push(Loan { place: p.clone(), mutable: m, sp, at: sp, quiet: true, capture: false });
         self.bk_ev(Ev::Acc(p, Acc::Borrow(ln), sp));
         if !quiet {
             self.bk.src(Src::Loan(ln));
@@ -1431,7 +1438,7 @@ impl Cx<'_> {
                     }
                 }
                 let ln = self.bk.loans.len() as u32;
-                self.bk.loans.push(Loan { place: p.clone(), mutable: m, sp, at: sp, quiet: false });
+                self.bk.loans.push(Loan { place: p.clone(), mutable: m, sp, at: sp, quiet: false, capture: false });
                 let l = p.local;
                 if flows {
                     self.bk.src(Src::Loan(ln));
@@ -1553,7 +1560,7 @@ impl Cx<'_> {
                 continue;
             }
             let ln = self.bk.loans.len() as u32;
-            self.bk.loans.push(Loan { place: p.clone(), mutable: mode == CapMode::RefMut, sp, at, quiet: false });
+            self.bk.loans.push(Loan { place: p.clone(), mutable: mode == CapMode::RefMut, sp, at, quiet: false, capture: true });
             self.bk_ev(Ev::Acc(p, Acc::Borrow(ln), sp));
             self.bk.src(Src::Loan(ln));
         }
@@ -1829,7 +1836,7 @@ impl Cx<'_> {
         let (p, _) = self.bk_place(e)?;
         let sp = err_pos(e);
         let ln = self.bk.loans.len() as u32;
-        self.bk.loans.push(Loan { place: p, mutable: m, sp, at: sp, quiet: true });
+        self.bk.loans.push(Loan { place: p, mutable: m, sp, at: sp, quiet: true, capture: false });
         Some(ln)
     }
 

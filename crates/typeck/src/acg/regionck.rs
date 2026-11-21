@@ -2099,7 +2099,7 @@ impl Cx<'_> {
             return (vec![None; cd.captures.len()], vec![], vec![]);
         }
         let mut us: Vec<u32> = vec![];
-        let mut code = |us: &mut Vec<u32>, v: u32| -> u8 {
+        let code = |us: &mut Vec<u32>, v: u32| -> u8 {
             match us.iter().position(|&x| x == v) {
                 Some(i) => CLO_U + i as u8,
                 None if us.len() < 0x3F => {
