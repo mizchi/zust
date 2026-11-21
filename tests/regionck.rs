@@ -557,3 +557,27 @@ fn late_check_from_the_start() {
     assert!(d.len() == 1 && d[0].0 == 4, "{d:?}");
     assert_eq!(check("fn main() {\n    let v = vec![1];\n    let r = &v;\n    let s: &'static str = \"a\";\n    println!(\"{:?} {}\", r, s);\n}\n"), vec![]);
 }
+
+/// A trait's `Self: 'x` bounds hold of the types that implement it and of its objects (E0478, E0310)
+#[test]
+fn trait_self_outlives() {
+    let first = |src: &str| check(src).into_iter().next().map(|d| (d.0, d.1)).unwrap_or_default();
+    let d = first("trait Wedding<'t>: 't {}\nstruct Prince<'kiss, 'snow> {\n    child: Box<dyn Wedding<'kiss> + 'snow>,\n}\nfn main() {}\n");
+    assert!(d.0 == 3 && d.1.contains("E0478"), "{d:?}");
+    let d = first("pub trait Arbitrary: Sized + 'static {}\nstruct W<'a, A>(&'a A);\nimpl<'a, A: Clone> Arbitrary for W<'a, A> {}\nfn main() {}\n");
+    assert!(d.0 == 3 && d.1.contains("E0478"), "{d:?}");
+    // (a struct's own requirements on its arguments are not seen: `V<A>` may require `A: 'static`)
+    let d = first("pub trait Arbitrary: 'static {}\nstruct V<A>(A);\nimpl<A: Clone> Arbitrary for Vec<A> {}\nfn main() {}\n");
+    assert!(d.0 == 3 && d.1.contains("E0310"), "{d:?}");
+    let ok = r#"
+trait Wedding<'t>: 't {}
+struct Prince<'kiss, 'snow: 'kiss> { child: Box<dyn Wedding<'kiss> + 'snow> }
+pub trait Arbitrary: 'static {}
+struct V<A>(A);
+impl<A: Clone + 'static> Arbitrary for V<A> {}
+struct W<'a, A>(&'a A);
+impl<'a, A: Clone> Clone for W<'a, A> { fn clone(&self) -> Self { W(self.0) } }
+fn main() {}
+"#;
+    assert_eq!(check(ok), vec![]);
+}

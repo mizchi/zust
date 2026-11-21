@@ -631,6 +631,48 @@ impl Session2 {
                 String::new()
             }
         });
+        // (what the program's types require of traits' `Self: 'x` bounds (E0478, E0310): the traits are known now)
+        {
+            let so: crate::fxhash::FxMap<&str, &[String]> = sums
+                .iter()
+                .filter_map(|sm| Some((sm.trait_decl.as_deref()?, sm.trait_generics.iter().find(|g| g.0 == crate::types::SELF_OUTLIVES)?.1.as_slice())))
+                .collect();
+            if !so.is_empty() {
+                for (it, sm) in items[..user].iter().zip(&sums[..user]) {
+                    // (an impl of such a trait, or a type whose fields write `dyn`: read again)
+                    let of_trait = sm.impl_trait.as_deref().is_some_and(|t| so.contains_key(t));
+                    let dyns = (!sm.structs.is_empty() || !sm.enums.is_empty() || !sm.unions.is_empty()) && src.get(it.start..it.end).is_some_and(|t| t.contains("dyn"));
+                    if !of_trait && !dyns {
+                        continue;
+                    }
+                    for o in &crate::ast_summary::trait_obls(&src, it) {
+                        let Some(req) = so.get(o.tr.as_str()) else { continue };
+                        let k = crate::wf::Known { pairs: o.known.clone(), vague: o.vague.clone(), ..Default::default() };
+                        for c in req.iter() {
+                            let x = if c == "static" {
+                                "'static".to_string()
+                            } else {
+                                match c.parse::<usize>().ok().and_then(|i| o.args.get(i)) {
+                                    Some(a) => a.clone(),
+                                    None => continue,
+                                }
+                            };
+                            for s in &o.sub {
+                                if o.vague.contains(s) || k.outlives(s, &x) {
+                                    continue;
+                                }
+                                let line = it.line + o.line.max(1) as usize - 1;
+                                return Err(if s.starts_with('\'') {
+                                    format!("{line}:1: lifetime bound not satisfied (`{s}` must outlive `{x}`, which trait `{}` requires) (E0478)", o.tr)
+                                } else {
+                                    format!("{line}:1: the parameter type `{s}` may not live long enough (E0{})", if x == "'static" { 310 } else { 309 })
+                                });
+                            }
+                        }
+                    }
+                }
+            }
+        }
         // (struct / enum / union definitions of the program: unused parameters, union fields ..)
         for (it, sm) in items[..user].iter().zip(&sums[..user]) {
             if let Some(e) = &sm.adt_err {

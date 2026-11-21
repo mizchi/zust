@@ -429,6 +429,26 @@ pub struct Summary {
     pub where_types: Vec<String>,
 }
 
+/// A trait's declaration: the lifetimes Self must outlive (`trait Wedding<'t>: 't`) are the item `#outlives` of
+/// Summary::trait_generics, as the indices of its lifetime parameters (`static`: 'static)
+pub const SELF_OUTLIVES: &str = "#outlives";
+
+/// A type that must outlive what a trait's declaration requires of Self: the self type of `impl Tr<'x> for S<'a, T>`,
+/// or a trait object `dyn Tr<'x> + 'r`
+#[derive(Clone, Debug, Default, PartialEq, Eq, Hash)]
+pub struct WfObl {
+    pub tr: String,
+    /// The trait's lifetime arguments as written
+    pub args: Vec<String>,
+    /// The lifetimes and type parameters that must outlive them
+    pub sub: Vec<String>,
+    /// What the item knows (crate::wf::Known): (longer, shorter), and the names it may not
+    pub known: Vec<(String, String)>,
+    pub vague: Vec<String>,
+    /// The line in the item (from 1)
+    pub line: u64,
+}
+
 #[derive(Clone, Debug, Default)]
 pub struct AssocSyn {
     pub name: String,

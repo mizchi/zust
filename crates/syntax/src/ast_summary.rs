@@ -782,6 +782,73 @@ fn unsized_elem(t: &PTy) -> Option<String> {
     }
 }
 
+/// What an item's types require of traits' `Self: 'x` bounds (the driver checks them against the traits, which
+/// only it sees, and only when a trait has such a bound): an impl's self type outlives what its trait requires; a
+/// field's trait object's lifetime (`Box<dyn Wedding<'k> + 'r>`), what its trait requires
+pub fn trait_obls(src: &str, it: &SrcItem) -> Vec<crate::types::WfObl> {
+    let text = &src[it.start..it.end];
+    let text = match it.kind {
+        LexKind::ImplHeader => format!("{text}}}"),
+        _ => text.to_string(),
+    };
+    let mut out = vec![];
+    let Ok(f) = parse_file(&text) else { return out };
+    let Some(item) = f.items.first() else { return out };
+    match &item.kind {
+        ItemKind::Impl(g, Some((false, tp)), self_ty, _) => {
+            let mut k = crate::wf::Known::default();
+            k.add_generics(g);
+            k.implied(self_ty, 0);
+            if let Some(sub) = k.sub_of(self_ty).filter(|s| !s.is_empty()) {
+                out.extend(k.obl(tp, sub, 1));
+            }
+        }
+        ItemKind::Struct(_, g, fields) | ItemKind::Union(_, g, fields) => {
+            let tys: Vec<&PTy> = match fields {
+                Fields::Named(v) => v.iter().map(|x| &x.1).collect(),
+                Fields::Tuple(v) => v.iter().collect(),
+                Fields::Unit => vec![],
+            };
+            dyn_obls(g, &tys, &mut out);
+        }
+        ItemKind::Enum(_, g, vars) => {
+            let mut tys: Vec<&PTy> = vec![];
+            for (_, f, _) in vars {
+                match f {
+                    Fields::Named(v) => tys.extend(v.iter().map(|x| &x.1)),
+                    Fields::Tuple(v) => tys.extend(v.iter()),
+                    Fields::Unit => {}
+                }
+            }
+            dyn_obls(g, &tys, &mut out);
+        }
+        _ => {}
+    }
+    out
+}
+
+fn dyn_obls(g: &Generics, tys: &[&PTy], out: &mut Vec<crate::types::WfObl>) {
+    let mut k = None;
+    for t in tys.iter().filter(|t| has_dyn_syn(t)) {
+        let k = k.get_or_insert_with(|| {
+            let mut k = crate::wf::Known::default();
+            k.add_generics(g);
+            k
+        });
+        k.dyn_obls(t, None, out, 0);
+    }
+}
+
+fn has_dyn_syn(t: &PTy) -> bool {
+    match t {
+        PTy::Dyn(_) => true,
+        PTy::Ref(_, _, i) | PTy::Ptr(_, i) | PTy::Slice(i) | PTy::Array(i, _) => has_dyn_syn(i),
+        PTy::Tuple(ts) => ts.iter().any(has_dyn_syn),
+        PTy::Path(_, p) => p.segs.iter().any(|s| s.args.iter().any(|a| matches!(a, crate::parse::GArg::Ty(t) if has_dyn_syn(t)))),
+        _ => false,
+    }
+}
+
 /// A field `&'static T` needs `T: 'static` declared (it is not inferred, E0310): `\u{3}line\u{3}msg`
 fn static_fields(g: &Generics, tys: &[&PTy]) -> Option<String> {
     if g.params.is_empty() {
@@ -1612,6 +1679,17 @@ pub fn summarize(item: &Item, owner: Option<&Owner>) -> R<Summary> {
         }
         ItemKind::Trait(n, g, supers, _) => {
             sm.hdr_regions = crate::regions::hdr_regions(g, None);
+            // (`trait Wedding<'t>: 't`: what Self must outlive)
+            let mut self_outlives = vec![];
+            for b in supers {
+                if let Bound::Lifetime(l) = b {
+                    if l == "'static" {
+                        self_outlives.push("static".to_string());
+                    } else if let Some(i) = g.params.iter().filter_map(|p| if let GParam::Lifetime(l) = p { Some(l) } else { None }).position(|x| x == l) {
+                        self_outlives.push(i.to_string());
+                    }
+                }
+            }
             let mut sup = vec![];
             for b in supers {
                 if let Bound::Trait(false, p) = b {
@@ -1640,6 +1718,9 @@ pub fn summarize(item: &Item, owner: Option<&Owner>) -> R<Summary> {
             collect_generics(g, &mut sm.trait_generics)?;
             if !sup.is_empty() {
                 sm.trait_generics.push(("#supers".to_string(), sup));
+            }
+            if !self_outlives.is_empty() {
+                sm.trait_generics.push((crate::types::SELF_OUTLIVES.to_string(), self_outlives));
             }
             sm.trait_decl = Some(n.clone());
         }
@@ -2160,7 +2241,7 @@ pub fn owner_of(it: &SrcItem, sums: &[Summary]) -> Option<Owner> {
         }
         LexKind::TraitMember(h) => sums[h as usize].trait_decl.clone().map(|n| Owner {
             self_ty: TySyn::Named("Self".into()),
-            generics: std::iter::once(("Self".to_string(), vec![n.clone()])).chain(sums[h as usize].trait_generics.iter().filter(|g| g.0 != "#supers").cloned()).collect(),
+            generics: std::iter::once(("Self".to_string(), vec![n.clone()])).chain(sums[h as usize].trait_generics.iter().filter(|g| !g.0.starts_with('#')).cloned()).collect(),
             base: n,
             impl_trait: None,
             is_trait: true,

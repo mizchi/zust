@@ -1011,6 +1011,7 @@ run-pass	box/unit/unique-swap.rs
 run-pass	builtin-superkinds/builtin-superkinds-capabilities-transitive.rs
 run-pass	builtin-superkinds/builtin-superkinds-capabilities.rs
 run-pass	builtin-superkinds/builtin-superkinds-phantom-typaram.rs
+compile-fail	builtin-superkinds/builtin-superkinds-self-type.rs
 check-pass	builtin-superkinds/builtin-superkinds-simple2.rs
 check-pass	builtin-superkinds/builtin-superkinds-typaram.rs
 compile-fail	c-variadic/fn-item-diagnostic-issue-69232.rs
@@ -2164,6 +2165,7 @@ compile-fail	error-codes/E0430.rs
 compile-fail	error-codes/E0432.rs
 compile-fail	error-codes/E0433.rs
 compile-fail	error-codes/E0435.rs
+compile-fail	error-codes/E0478.rs
 compile-fail	error-codes/E0496.rs
 compile-fail	error-codes/E0499.rs
 compile-fail	error-codes/E0503.rs
@@ -2417,6 +2419,7 @@ compile-fail	fn/fn-trait-use-named-params-issue-140169.rs
 run-pass	fn/fun-call-variants.rs
 check-pass	fn/implied-bounds-unnorm-associated-type-3.rs
 compile-fail	fn/implied-bounds-unnorm-associated-type-4.rs
+compile-fail	fn/implied-bounds-unnorm-associated-type-5.rs
 compile-fail	fn/invalid-sugg-for-unused-fn-arg-147303.rs
 run-pass	fn/issue-1451.rs
 compile-fail	fn/issue-3044.rs
@@ -5293,6 +5296,7 @@ run-pass	regions/owned-implies-static.rs
 compile-fail	regions/region-borrow-params-issue-29793-big.rs
 check-pass	regions/region-bound-extra-bound-in-inherent-impl.rs
 check-pass	regions/region-bound-same-bounds-in-trait-and-impl.rs
+compile-fail	regions/region-bounds-on-objects-and-type-parameters.rs
 compile-fail	regions/region-invariant-static-error-reporting.rs
 compile-fail	regions/region-lifetime-bounds-on-fns-where-clause.rs
 compile-fail	regions/region-multiple-lifetime-bounds-on-fns-where-clause.rs
@@ -5417,6 +5421,7 @@ compile-fail	regions/regions-variance-covariant-use-contravariant.rs
 run-pass	regions/regions-variance-covariant-use-covariant.rs
 compile-fail	regions/regions-variance-invariant-use-contravariant.rs
 compile-fail	regions/regions-variance-invariant-use-covariant.rs
+compile-fail	regions/regions-wf-trait-object.rs
 check-pass	regions/relate-bound-region-ref-type-param.rs
 check-pass	regions/type-param-outlives-reempty-issue-74429-2.rs
 check-pass	regions/type-param-outlives-reempty-issue-74429.rs
@@ -5882,6 +5887,7 @@ run-pass	static/refer-to-other-statics-by-value.rs
 build-pass	static/static-array-shared-slice-references.rs
 compile-fail	static/static-closures.rs
 compile-fail	static/static-lifetime-bound.rs
+compile-fail	static/static-lifetime.rs
 run-pass	static/static-list-initialization-5917.rs
 compile-fail	static/static-mut-bad-types.rs
 compile-fail	static/static-mut-foreign-requires-unsafe.rs

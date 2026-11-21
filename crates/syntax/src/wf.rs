@@ -4,7 +4,7 @@
 //! What another item decides (a struct's requirements, which its fields imply; a trait's `: 'a` supertraits) is not
 //! seen here: the names it could relate are left unchecked
 use crate::parse::{Bound, GArg, GParam, Generics, Pos, Ty as PTy};
-use crate::types::{Owner, R_STATIC};
+use crate::types::{Owner, WfObl, R_STATIC};
 
 /// What a scope knows of outlives, by name (a lifetime with its quote, a type parameter without)
 #[derive(Clone, Debug, Default, PartialEq, Eq, Hash)]
@@ -16,6 +16,12 @@ pub struct Known {
     /// The lifetimes and type parameters in scope
     pub lts: Vec<String>,
     pub tparams: Vec<String>,
+}
+
+/// A trait of this name may require Self to outlive a lifetime: not one of std's (Any aside, which no program
+/// implements)
+pub fn may_bound_self(name: &str) -> bool {
+    !(PLAIN.contains(&name) || matches!(name, "Drop" | "Fn" | "FnMut" | "FnOnce" | "Index" | "IndexMut" | "Iterator" | "IntoIterator"))
 }
 
 /// Traits of std with no outlives requirement on Self (a bound by another may imply one: `T: Any` is `T: 'static`)
@@ -308,6 +314,65 @@ impl Known {
                 Bound::Lifetime(_) => None,
             }),
             _ => None,
+        }
+    }
+
+    /// The lifetimes and type parameters a value of type t holds (None: a part of it is not followed)
+    pub fn sub_of(&self, t: &PTy) -> Option<Vec<String>> {
+        let (mut ls, ts, mut vague) = (vec![], vec![], false);
+        let mut ts = ts;
+        self.components(t, &mut ls, &mut ts, &mut vague, 0);
+        if vague {
+            return None;
+        }
+        ls.retain(|l| l != "'_" && l != "'static");
+        ls.extend(ts);
+        ls.sort();
+        ls.dedup();
+        Some(ls)
+    }
+
+    /// An obligation that the lifetimes and type parameters `sub` outlive what the trait tr (written with the
+    /// lifetime arguments of its path) requires of Self
+    pub fn obl(&self, tr: &crate::parse::Path, sub: Vec<String>, line: u64) -> Option<WfObl> {
+        let last = tr.segs.last()?;
+        if !may_bound_self(&last.name) {
+            return None;
+        }
+        let args = last.args.iter().filter_map(|a| if let GArg::Lifetime(l) = a { Some(l.clone()) } else { None }).collect();
+        Some(WfObl { tr: last.name.clone(), args, sub, known: self.pairs.clone(), vague: self.vague.clone(), line })
+    }
+
+    /// The trait objects in t: each object's lifetime (written, else the default: the reference around it, else
+    /// 'static) must outlive what its trait requires of Self
+    pub fn dyn_obls(&self, t: &PTy, parent: Option<&str>, out: &mut Vec<WfObl>, depth: u32) {
+        if depth > 12 {
+            return;
+        }
+        match t {
+            PTy::Ref(l, _, i) => self.dyn_obls(i, l.as_deref().or(Some("'_")), out, depth + 1),
+            PTy::Ptr(_, i) | PTy::Slice(i) | PTy::Array(i, _) => self.dyn_obls(i, None, out, depth + 1),
+            PTy::Tuple(ts) => ts.iter().for_each(|t| self.dyn_obls(t, None, out, depth + 1)),
+            PTy::Path(_, p) => {
+                for s in &p.segs {
+                    for a in &s.args {
+                        if let GArg::Ty(t) = a {
+                            self.dyn_obls(t, None, out, depth + 1);
+                        }
+                    }
+                }
+            }
+            PTy::Dyn(bs) => {
+                let Some(p) = bs.iter().find_map(|b| if let Bound::Trait(false, p) = b { Some(p) } else { None }) else { return };
+                let obj = bs.iter().find_map(|b| if let Bound::Lifetime(l) = b { Some(l.as_str()) } else { None }).or(parent).unwrap_or("'static");
+                if obj == "'_" || obj == "'static" || self.vague.iter().any(|v| v == obj) {
+                    return;
+                }
+                if let Some(o) = self.obl(p, vec![obj.to_string()], p.pos.line as u64) {
+                    out.push(o);
+                }
+            }
+            _ => {}
         }
     }
 
