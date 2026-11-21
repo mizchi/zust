@@ -329,6 +329,7 @@ fn compile_once(prog: &Program, insts: &Mutex<Insts>, id: u32, f: &ItemFn, line_
         closure_hint: None,
         closure_bound: None,
         closure_prelude: false,
+        hr_lost: vec![],
         seg_self: None,
         loop_bounds: vec![],
         pending_bound: None,
@@ -716,6 +717,9 @@ pub struct Cx<'p> {
     pub closure_bound: Option<Box<(String, Vec<String>, Vec<String>)>>,
     /// The closure being passed goes to a function of the prelude (whose bounds write no lifetimes)
     pub closure_prelude: bool,
+    /// Closures made where nothing was expected (their kind, signature: from the body), by their definition: the
+    /// parameters with no type written that are references (one region each, not higher-ranked)
+    pub hr_lost: Vec<(u32, Vec<usize>)>,
     pub seg_self: Option<Ty>,
     pub loop_bounds: Vec<(Loc, u64)>,
     pub pending_bound: Option<u64>,

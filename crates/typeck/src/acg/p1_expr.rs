@@ -1681,6 +1681,15 @@ impl Cx<'_> {
             return Ok((Some(v), t));
         }
         let sid = prog.instantiate(cd.sid, args.clone()).or_else(|e| err(SP, e))?;
+        // (made where nothing was expected: a parameter with no type written that is a reference has one region,
+        // not one for each call (see call_fn_inner))
+        if hint.is_none() && (expected.is_none() || own_type) && self.user_code && self.bk.level >= 2 && regionck::enabled() {
+            let refs: Vec<usize> = pslots.iter().filter(|&&(_, g)| matches!(args.get(g), Some(Ty::Ref(..)))).map(|&(i, _)| i).collect();
+            if !refs.is_empty() {
+                self.hr_lost.retain(|x| x.0 != cd.sid);
+                self.hr_lost.push((cd.sid, refs));
+            }
+        }
         // (the region signature its body is checked with: from a bound not the prelude's, else from annotated
         // parameters)
         if self.user_code && self.bk.level >= 2 && !to_prelude && (bound.is_some() || inputs.iter().any(|x| x.1.is_some()) || (self.rg_on() && !cd.captures.is_empty())) && regionck::enabled() {

@@ -1200,6 +1200,7 @@ check-pass	closures/explicit-closure-lifetime-issue-87290.rs
 run-pass	closures/explicit-return-in-closure-and-outer-fn.rs
 run-pass	closures/fn-sugar-in-boxed-trait-object.rs
 compile-fail	closures/hrtb-closure-in-recursive-enum-type-error.rs
+compile-fail	closures/hrtb-closure-suggest-type-annotation.rs
 check-pass	closures/issue-101696.rs
 check-pass	closures/issue-102089-multiple-opaque-cast.rs
 compile-fail	closures/issue-10398.rs
@@ -3236,6 +3237,7 @@ compile-fail	lifetimes/fullwidth-ampersand.rs
 check-pass	lifetimes/if-else-branches-lifetime-coercion.rs
 compile-fail	lifetimes/issue-103582-hint-for-missing-lifetime-bound-on-trait-object-using-type-alias.rs
 check-pass	lifetimes/issue-104432-unused-lifetimes-in-expansion.rs
+compile-fail	lifetimes/issue-105675.rs
 compile-fail	lifetimes/issue-107492-default-value-for-lifetime.rs
 compile-fail	lifetimes/issue-107988.rs
 compile-fail	lifetimes/issue-19707.rs
@@ -3247,6 +3249,7 @@ check-pass	lifetimes/issue-67498.rs
 check-pass	lifetimes/issue-76168-hr-outlives-2.rs
 check-pass	lifetimes/issue-77175.rs
 compile-fail	lifetimes/issue-79187-2.rs
+compile-fail	lifetimes/issue-79187.rs
 check-pass	lifetimes/issue-84398.rs
 compile-fail	lifetimes/issue-90170-elision-mismatch.rs
 check-pass	lifetimes/issue-93911.rs

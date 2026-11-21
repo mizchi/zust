@@ -1628,6 +1628,23 @@ impl Cx<'_> {
             // `F: Fn(A) -> B` の引数にクロージャを渡すなら、A / B をクロージャの型の手がかりにする
             let fbt = self.fn_bound_with_text(&sig0, pt);
             let fb = fbt.as_ref().map(|x| (x.0.clone(), x.1));
+            // (a closure made where nothing was expected, passed by name where a bound takes a reference (for any
+            // region: `FnOnce(&u32)`): its parameter of one region is not general enough. Not the prelude's bounds,
+            // which write no lifetimes)
+            if let (Some(x), Expr::Path(None, ap), false) = (&fbt, strip_paren(a), self.hr_lost.is_empty()) {
+                let prelude = self.prog.item_of.get(id as usize).copied().flatten().is_none_or(|i| i >= self.prog.prelude_from);
+                if !prelude && !x.2.contains('\'') && ap.segs.len() == 1 {
+                    if let Some((_, Ty::Struct(csid))) = self.lookup(&ap.segs[0].name) {
+                        let base = self.prog.base_of(csid);
+                        if let Some((_, refs)) = self.hr_lost.iter().find(|h| h.0 == base) {
+                            if refs.iter().any(|&i| matches!(x.0.get(i), Some(Ty::Ref(..)))) {
+                                let k = x.2.split('(').next().unwrap_or("FnOnce").trim().to_string();
+                                return Err(self.at(super::borrowck::pos(a), format!("implementation of `{k}` is not general enough (the closure's parameter has one lifetime: write its type, `|x: &T|`)")));
+                            }
+                        }
+                    }
+                }
+            }
             // 関数アイテム (`or_insert_with(Vec::new)`) なら、境界を関数ポインタの期待型にして型引数を決める
             if let (Some((bps, bret)), None, Expr::Path(..)) = (&fb, exp, strip_paren(a)) {
                 let ft = crate::types::FnTy {
