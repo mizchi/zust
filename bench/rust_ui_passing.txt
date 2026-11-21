@@ -1062,6 +1062,7 @@ run-pass	cast/owned-struct-to-trait-cast-6318.rs
 check-pass	cast/ptr-ptr-to-ptr-ptr-different-regions.rs
 check-pass	cast/ptr-to-trait-obj-add-super-auto.rs
 build-pass	cast/raw-pointer-from-str-comparison.rs
+compile-fail	cast/raw-ptr-to-dyn-fn-raw-ptr.rs
 run-pass	cast/supported-cast.rs
 compile-fail	cast/trait-object-size-error-14366.rs
 run-pass	cast/u8-to-char-cast-9918.rs

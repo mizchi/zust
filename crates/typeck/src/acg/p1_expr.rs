@@ -1127,6 +1127,21 @@ impl Cx<'_> {
                     (Ty::Ptr(_, Ty::Slice(_) | Ty::Str | Ty::Dyn(_)), t) if matches!(t, Ty::Usize | Ty::U64 | Ty::Isize | Ty::I64) => {
                         return Ok((v.map(|a| self.b.ins().load(PTR, mf(), a, 0)), to));
                     }
+                    // (`p as *const dyn Tr` with p: `*const S`: the unsizing to a (data, vtable) pair)
+                    (Ty::Ptr(m, inner), Ty::Ptr(pm, Ty::Dyn(tr))) if !matches!(inner, Ty::Dyn(_) | Ty::Slice(_) | Ty::Str) && (m || !pm) => {
+                        let Some(a) = v else { return Ok((None, to)) };
+                        // (a trait the program does not define (`dyn PartialEq<u8>`): no vtable to call through, a null
+                        // one; the data word still casts back)
+                        let fat = match self.to_dyn(a, *inner, tr.as_str(), SP) {
+                            Ok(f) => f,
+                            Err(e) if e.to_string().contains("cannot find trait") => {
+                                let z = self.b.ins().iconst(PTR, 0);
+                                self.make_fat_v(a, z)
+                            }
+                            Err(e) => return Err(e),
+                        };
+                        return Ok((Some(fat), to));
+                    }
                     (Ty::Ptr(..), Ty::Ptr(..)) => return Ok((v, to)),
                     // (a fn pointer as a raw pointer: the same address)
                     (Ty::Fn(_), Ty::Ptr(..)) => return Ok((v, to)),
