@@ -429,6 +429,18 @@ impl Cx<'_> {
                 return Ok((Some(fat), want));
             }
         }
+        // `&T` → `*const dyn Trait` (the same fat value as `&dyn Trait`)
+        if let (Some(want @ Ty::Ptr(m2, Ty::Dyn(tr))), Some(v), Ty::Ref(m1, inner)) = (expected, v, t) {
+            if m1 || !m2 {
+                if matches!(inner, Ty::Dyn(t2) if t2 == tr) {
+                    return Ok((Some(v), want));
+                }
+                if !matches!(inner, Ty::Dyn(_) | Ty::Slice(_) | Ty::Str) {
+                    let fat = self.to_dyn(v, *inner, tr.as_str(), SP)?;
+                    return Ok((Some(fat), want));
+                }
+            }
+        }
         Ok((v, t))
     }
 

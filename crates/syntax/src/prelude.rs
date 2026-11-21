@@ -1412,6 +1412,17 @@ pub fn select_with(user_src: &str, user_items: &[SrcItem], cache: &mut SelectCac
                     found = true;
                     break;
                 }
+                // (`3f32` / `1_000f64`: a suffixed literal; not `x1f32` or the hex `0x1f32`)
+                b'f' if !in_str && b[i - 1].is_ascii_digit() && (b[i + 1..].starts_with(b"32") || b[i + 1..].starts_with(b"64")) => {
+                    let mut k = i;
+                    while k > 0 && (b[k - 1].is_ascii_digit() || b[k - 1] == b'_') {
+                        k -= 1;
+                    }
+                    if b[k].is_ascii_digit() && !(k > 0 && (b[k - 1].is_ascii_alphanumeric() || b[k - 1] == b'_')) {
+                        found = true;
+                        break;
+                    }
+                }
                 _ => {}
             }
         }

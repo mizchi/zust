@@ -209,10 +209,10 @@ impl Cx<'_> {
                 return Ok((None, Ty::Never));
             };
             let (l, _) = self.read(p);
-            // `acc += x` (x: &i32): 整数への参照は値にする (core の `AddAssign<&i32>` 相当)
+            // `acc += x` (x: &i32 / &f32): 数への参照は値にする (core の `AddAssign<&i32>` 相当)
             let mut rt = rt;
             while let Ty::Ref(_, i) = rt {
-                if !(i.is_int() || matches!(i, Ty::Ref(..))) || rt.is_fat() {
+                if !(i.is_int() || i.is_float() || matches!(i, Ty::Ref(..))) || rt.is_fat() {
                     break;
                 }
                 r = self.b.ins().load(clif_ty(*i).unwrap_or(PTR), mf(), r, 0);
