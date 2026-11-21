@@ -131,15 +131,17 @@
 ### E. `@wasm` での struct の名前
 
 - struct は形(フィールドの名前と型の集合)ごとに 1 つ
-- **struct 名は、モジュールの中の宣言順で決める**(ハッシュは使わない)
-  - その形の別名がモジュールにあれば、最初に宣言した別名の名前(`type Todo` → `ZsTodo`)
-  - なければフィールド名を並べた名前: `{ total: i32, done: i32 }` は `ZsRec_done_total`
-  - 型の違う同じフィールド名の形が同じモジュールに複数あれば、モジュールの中で最初に現れた順に `_2`、`_3` を付ける
-    - `{ total: f64, done: f64 }` が後に現れたら `ZsRec_done_total_2`
-  - 名前はモジュールの名前空間に置く(`mod_a::ZsRec_done_total`)。決めるのに見るのは、そのモジュールの宣言と、それが import するモジュールだけ
-    - 同じ形が import 先にもあれば、import 先の struct を使う(依存の順で先に決まる)
-  - そのため、名前が変わるのは、同じファイルで別名を前に足したり、並べ替えたりしたときだけ。他のファイルの変更では変わらない
-- **他の別名は、Rust の `type` 別名にする**: `type ZsTask = ZsTodo;`
+- **struct はプログラム全体で、形ごとに 1 つ**(モジュールごとには作らない。構造的に同じ型は、Rust でも同じ型)
+- **struct 名は、形だけから作る**: フィールドの名前と型を、名前の順に並べる
+  - `{ total: i32, done: i32 }` は `ZsRec_done_i32_total_i32`、`{ total: f64, done: f64 }` は `ZsRec_done_f64_total_f64`
+  - 宣言の順にも、他の項目やファイルにも依存しない。形を足しても、既存の struct 名は変わらない
+  - フィールドの型がレコードなら、その形の名前を入れる(別名の名前ではない。別名を足しても変わらないように)。長くなるのは受け入れる(読むときは別名の `type` を見る)。enum と `@nominal` は名前で区別される型なので、その名前を入れる
+  - `#[allow(non_camel_case_types)]` と `#[derive(Clone, Copy, PartialEq)]` を付ける
+- **読める名前は、別名ごとの Rust の `type` 別名で出す**
+  - `type Pt = { x: f64, y: f64 }`(モジュール a)は `pub type ZsPt = ZsRec_x_f64_y_f64;`(a の名前空間)
+  - 別のモジュールの `type Point` が同じ形なら、`pub type ZsPoint = ZsRec_x_f64_y_f64;`。同じ struct なので、値をそのまま渡せる
+- **`@wasm` で使えるのは、今の部分集合と同じく Copy にできる形だけ**(数値、bool、それらのレコード)
+  - 文字列や配列を含む形は、エラー: ``error: `Todo` has a `String` field, which an @wasm fn cannot take (records there must be Copy)``
 - `@nominal` の型は、同じ形の別の型があっても、自分の struct(`ZsMeters`)を持つ
 
 ## 変更前 / 変更後(corpus/components.zsc)
@@ -227,8 +229,11 @@ export declare function Meters(v: { readonly v: f64 }): Meters;
 
 ```rust
 // @wasm(lower.rs)
-struct ZsTodo { done: bool, id: i32, title: String }   // 別名 Todo がこのモジュールにあるので、その名前
-struct ZsRec_done_total { done: i32, total: i32 }
+// Todo は String を含むので @wasm では使えない(エラー)
+#[allow(non_camel_case_types)]
+#[derive(Clone, Copy, PartialEq)]
+struct ZsRec_done_i32_total_i32 { done: i32, total: i32 }   // stats の戻り値
+type ZsStats = ZsRec_done_i32_total_i32;                     // `type Stats = { … }` があれば
 struct ZsMeters { v: f64 }   // @nominal は自分の struct
 ```
 
@@ -244,7 +249,8 @@ struct ZsMeters { v: f64 }   // @nominal は自分の struct
 - レコード同士の単一化に失敗したら、差分(足りない / 余分 / 型が違うフィールド)を返して表示する
 - 再帰する型は、別名と型引数の依存の強連結成分で見つける(enum の定義は辺にしない)
 - checker はレコードの式の型を Id ごとに side table に記録し、lower はそれを引いて struct 名を決める
-  - struct 名はモジュールごとに、宣言と最初に現れた順で決める(上の E)。プログラム全体は見ない
+  - struct 名は形だけから作る(上の E)。形の表はプログラム全体で 1 つだが、名前を決めるのに他の項目を見る必要はない
+  - lower.rs の `rs_type`(`Zs{n}`)を、形からの名前と別名の `type` に変える
 - 構文の判定のための先読みは、`try_arrow_params` と同じ保存と巻き戻しで足りる
 - `{ x }` の警告は primary の `{` の側だけで出す。block() は 3 つの形の専用エラーだけを出す
 
@@ -258,7 +264,8 @@ struct ZsMeters { v: f64 }   // @nominal は自分の struct
 4. **Rust 風の関数型 `fn(id: i32) -> ()`**: 宣言と矢印は揃うが、クロージャ `(x) => e` と揃わない。選ばない
 5. **struct 名をプログラム全体の最初に宣言した別名から取る**(r3)、**衝突したときだけ形のハッシュを付ける**(r4 の最初の案)
    - どちらも、どこか別のファイルに別名や同じフィールド名の形を足すと、既存の struct 名が変わる(非局所的)
-   - 決める範囲をモジュールとその import 先に閉じ、宣言順で決めることにした
+   - モジュールの中の宣言順で決める案(r4 の途中の案)も、同じファイルに形を足すと離れた項目の名前が変わり、互いを import しないモジュールの同じ形が Rust で別の型になる
+   - 名前を形(フィールドの名前と型)だけから作り、読める名前は別名の `type` で出すことにした
 6. **`{ x }` の警告を、block() の本体にも出す**(r3)
    - `if x > a { x } else { a }` や `fn id(x) { x }` のような普通のコードに警告が出て、本当の誤りを見落とす
    - 廃止し、式の位置のブロックだけにした
@@ -283,7 +290,8 @@ struct ZsMeters { v: f64 }   // @nominal は自分の struct
   - `{ x }` の警告を、primary の `{` から読む式の位置のブロックだけにした。block() が直接読む fn / if / else / while / for の本体には出さない
   - block() の先頭で見るのは、3 つの形の専用エラーだけにした
   - `let` と引数のレコードのパターンは一部だけでよいことにした。書き漏らしのエラーは match だけ(決定 7)
-  - struct 名を、モジュールの中の宣言順で決めるようにした(別名があればその名前、なければフィールド名、型の違う同名の形には `_2`)。決める範囲はモジュールとその import 先だけ。ハッシュは使わない
+  - struct はプログラム全体で形ごとに 1 つにし、名前はフィールドの名前と型だけから作るようにした(`ZsRec_done_i32_total_i32`)。読める名前は別名ごとの `type` で出す。順序にもハッシュにも依存しない
+  - `@wasm` で使える形は Copy にできるものだけと明記した
   - 表示名は注釈から来た名前だけにした。形からの逆引きは hover の補足
   - `.d.ts` を `interface` から `export type` にした
   - `@nominal` に `.d.ts` の brand とコンストラクタ `Meters({ v })` を足した。r4 ではレコードだけとした
