@@ -933,7 +933,14 @@ impl Cx<'_> {
             Pat::Ident(..) if const_lit_pat(self.prog, pat).is_some() => Ok(()),
             Pat::Ident(..) if self.const_pat_ok(pat, p.ty()) => Ok(()),
             // (an aggregate constant, tested by pat_test: not a new name, so a nested match still compares with it)
-            Pat::Ident(_, _, n, None) if self.user_code && self.lookup(n).is_none() && self.prog.const_index.get(n.as_str()).is_some_and(|&ci| self.prog.consts[ci as usize].stat.is_none()) => Ok(()),
+            Pat::Ident(_, _, n, None)
+                if self.user_code
+                    && (self.prog.lower_consts || n.starts_with(|c: char| c.is_uppercase()))
+                    && self.prog.const_index.get(n.as_str()).is_some_and(|&ci| self.prog.consts[ci as usize].stat.is_none())
+                    && self.lookup(n).is_none() =>
+            {
+                Ok(())
+            }
             Pat::Ident(by_ref, mutable, name, subpat) => {
                 if let Some(sub) = subpat {
                     self.pat_bind(sub, p, mode)?;
