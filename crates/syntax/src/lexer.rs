@@ -2169,3 +2169,18 @@ fn flatten_modules_inner(src: &str) -> Option<String> {
     }
     changed.then(|| String::from_utf8(out).unwrap_or_default())
 }
+
+/// The macros of std and core (and the compiler's builtin ones) a program may call without defining them: a call of any
+/// other name left after expansion is of a macro that does not exist
+pub fn is_std_macro(n: &str) -> bool {
+    matches!(
+        n,
+        "println" | "print" | "eprintln" | "eprint" | "format" | "format_args" | "write" | "writeln" | "panic" | "assert" | "assert_eq"
+            | "assert_ne" | "debug_assert" | "debug_assert_eq" | "debug_assert_ne" | "unreachable" | "unimplemented" | "todo" | "vec"
+            | "concat" | "stringify" | "env" | "option_env" | "include" | "include_str" | "include_bytes" | "file" | "line" | "column"
+            | "module_path" | "cfg" | "matches" | "dbg" | "compile_error" | "thread_local" | "const_format_args" | "concat_idents"
+            | "trace_macros" | "log_syntax" | "format_args_nl" | "assert_matches" | "debug_assert_matches" | "try" | "ready"
+            | "pin" | "addr_of" | "addr_of_mut" | "offset_of" | "cfg_select" | "cfg_match" | "global_asm" | "asm" | "naked_asm"
+            | "is_x86_feature_detected" | "select_unpredictable" | "join"
+    )
+}

@@ -3595,6 +3595,7 @@ check-pass	macros/doc-comment.rs
 run-pass	macros/edition-macro-pats.rs
 compile-fail	macros/empty-comment.rs
 compile-fail	macros/empty-trailing-stmt.rs
+compile-fail	macros/expand-full-no-resolution.rs
 check-pass	macros/expr_2021.rs
 check-pass	macros/expr_2021_cargo_fix_edition.rs
 compile-fail	macros/failed-to-reparse-issue-139445.rs
@@ -3605,6 +3606,7 @@ compile-fail	macros/format-parse-errors.rs
 compile-fail	macros/global-asm.rs
 compile-fail	macros/issue-102878.rs
 compile-fail	macros/issue-105011.rs
+compile-fail	macros/issue-10536.rs
 compile-fail	macros/issue-106837.rs
 check-pass	macros/issue-112342-2.rs
 compile-fail	macros/issue-11692-1.rs

@@ -1052,6 +1052,16 @@ impl Cx<'_> {
         match crate::ast_closure::macro_args_at(g, self.mbase) {
             Some(v) => Ok(v),
             None => {
+                // (the parser's own error for an argument that is no expression: `assert!({one! two})`)
+                let inner = g.get(1..g.len().saturating_sub(1)).unwrap_or("");
+                for part in inner.split(',') {
+                    if let Err(e) = crate::parse::parse_expr(part) {
+                        let msg = e.splitn(3, ':').nth(2).map(str::trim).filter(|m| !m.is_empty()).unwrap_or(&e).to_string();
+                        if msg.starts_with("expected one of") {
+                            return err(SP, msg);
+                        }
+                    }
+                }
                 let name = p.segs.last().map(|s| s.name.as_str()).unwrap_or("");
                 err(SP, format!("cannot parse the arguments of `{name}!`"))
             }

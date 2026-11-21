@@ -303,6 +303,10 @@ impl Cx<'_> {
                 _ => unreachable!(),
             },
             None if newline || dest.is_some() => String::new(),
+            // (`format_args!(a!())` with no macro `a`: that is the error, before the format string's)
+            Some(Expr::Macro(mp, _, _)) if mp.segs.len() == 1 && !crate::lexer::is_std_macro(&mp.segs[0].name) => {
+                return err(SP, format!("cannot find macro `{}` in this scope", mp.segs[0].name));
+            }
             Some(_) => return err(SP, "format argument must be a string literal"),
             None => return err(span, format!("`{name}!` needs a format string")),
         };
