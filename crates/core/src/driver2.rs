@@ -707,6 +707,44 @@ impl Session2 {
                 }
             }
         }
+        // (E0276: an impl's generic associated type with a `where` clause that its trait's declaration does not have:
+        // `type Assoc<T> = Vec<T> where T: Iterator;` for `type Assoc<T>;`. Only a trait declared once)
+        {
+            let word = |t: &str, w: &str| {
+                t.match_indices(w).any(|(i, _)| {
+                    let b = t.as_bytes();
+                    let id = |c: u8| c.is_ascii_alphanumeric() || c == b'_';
+                    (i == 0 || !id(b[i - 1])) && b.get(i + w.len()).is_none_or(|&c| !id(c))
+                })
+            };
+            for it in &items[..user] {
+                let crate::lexer::ItemKind::ImplMember(h) = it.kind else { continue };
+                let t = src.get(it.start..it.end).unwrap_or("").trim_start();
+                let Some(rest) = t.strip_prefix("type ") else { continue };
+                let name: String = rest.trim_start().chars().take_while(|c| c.is_alphanumeric() || *c == '_').collect();
+                // (a generic one, with a `where` after its value)
+                let gat = rest.trim_start()[name.len()..].trim_start().starts_with('<');
+                if !gat || !t.split_once('=').is_some_and(|(_, v)| word(v, "where")) {
+                    continue;
+                }
+                let Some(tr) = sums.get(h as usize).and_then(|s| s.impl_trait.as_deref()) else { continue };
+                if sums[..user].iter().filter(|s| s.trait_decl.as_deref() == Some(tr)).count() != 1 {
+                    continue;
+                }
+                let decl = items[..user].iter().find(|d| {
+                    matches!(d.kind, crate::lexer::ItemKind::TraitMember(th) if sums.get(th as usize).and_then(|s| s.trait_decl.as_deref()) == Some(tr))
+                        && src.get(d.start..d.end).unwrap_or("").trim_start().strip_prefix("type ").is_some_and(|r| {
+                            let r = r.trim_start();
+                            r.starts_with(name.as_str()) && !r[name.len()..].starts_with(|c: char| c.is_alphanumeric() || c == '_')
+                        })
+                });
+                if let Some(d) = decl {
+                    if !word(src.get(d.start..d.end).unwrap_or(""), "where") {
+                        return Err(format!("{}:1: impl has stricter requirements than trait (E0276)", it.line));
+                    }
+                }
+            }
+        }
         // (`#![crate_type = "lib"]`: a library, no `main` needed)
         let mut deny_unreachable = false;
         let mut deny_unused_vars = false;

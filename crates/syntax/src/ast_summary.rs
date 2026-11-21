@@ -1496,9 +1496,21 @@ pub fn summarize(item: &Item, owner: Option<&Owner>) -> R<Summary> {
         return err("missing lifetime specifier (E0106)");
     }
     let mut sm = Summary::default();
+    // (`type Assoc<T = u32>;` in a trait or an impl: an associated type's parameters take no defaults)
+    if let ItemKind::Type(_, g, ..) = &item.kind {
+        if owner.is_some() && g.params.iter().any(|p| matches!(p, GParam::Ty(_, _, Some(_)))) {
+            return err("defaults for generic parameters are not allowed here");
+        }
+    }
     match &item.kind {
-        ItemKind::Type(n, _, _, Some(t)) if owner.is_some() => {
+        ItemKind::Type(n, g, _, Some(t)) if owner.is_some() => {
             let ow = owner.unwrap();
+            // (`type Pointer<T> = Rc<T>;`: a generic associated type's own parameters follow the impl's, after the
+            // mark `#gat`)
+            let gat: Vec<String> = g.params.iter().filter_map(|p| match p {
+                GParam::Ty(n, ..) => Some(n.clone()),
+                _ => None,
+            }).collect();
             if let Some(r) = &ow.regions {
                 let mut used = vec![];
                 named_lifetimes(t, &mut used);
@@ -1506,10 +1518,15 @@ pub fn summarize(item: &Item, owner: Option<&Owner>) -> R<Summary> {
                     return Err(format!("\u{2}the lifetime parameter `{l}` is not constrained by the impl trait, self type, or predicates (E0207)"));
                 }
             }
+            let mut generics: Vec<String> = ow.generics.iter().map(|g| g.0.clone()).collect();
+            if !gat.is_empty() {
+                generics.push("#gat".to_string());
+                generics.extend(gat);
+            }
             sm.assocs.push(AssocSyn {
                 name: n.clone(),
                 self_ty: ow.self_ty.clone(),
-                generics: ow.generics.iter().map(|g| g.0.clone()).collect(),
+                generics,
                 value: tysyn(t, Some(&ow.self_ty))?,
             });
         }
