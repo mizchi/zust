@@ -1677,6 +1677,10 @@ impl Cx<'_> {
                 // (the bound for the closure's region check: not one of the prelude's, which writes no lifetimes
                 // (`is_sorted_by_key`'s is `FnMut(&'a T)` in std, not higher-ranked))
                 let prelude = self.prog.item_of.get(id as usize).copied().flatten().is_none_or(|i| i >= self.prog.prelude_from);
+                // (those of the prelude whose bound is higher-ranked in std as written (`FnMut(&T) -> K`), K one type
+                // for every region: `v.sort_by_key(|x| &x.name)` is an error)
+                let by_key = prelude && self.prog.names.get(id as usize).is_some_and(|n| ["::sort_by_key", "::sort_unstable_by_key", "::sort_by_cached_key", "::max_by_key", "::min_by_key"].iter().any(|k| n.ends_with(k)));
+                let prelude = prelude && !by_key;
                 self.closure_bound = None;
                 self.closure_prelude = prelude;
                 if !prelude && self.user_code && self.bk.level >= 2 && regionck::enabled() {

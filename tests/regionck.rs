@@ -824,3 +824,12 @@ fn higher_ranked_outlives_is_static() {
     assert!(d.len() == 1 && d[0].0 == 3, "{d:?}");
     assert_eq!(check("fn foo<T>() where for<'a> T: 'a {}\nfn main() {\n    foo::<&'static i32>();\n    foo::<u8>();\n}\n"), vec![]);
 }
+
+/// `sort_by_key` and the like take `FnMut(&T) -> K` for any region, K one type: a key borrowed from the element is an
+/// error
+#[test]
+fn by_key_closures_cannot_return_borrows() {
+    let d = check("struct P {\n    name: String,\n}\nfn main() {\n    let mut v: Vec<P> = Vec::new();\n    v.sort_by_key(|p| &p.name);\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 6, "{d:?}");
+    assert_eq!(check("struct P {\n    name: String,\n    age: u32,\n}\nfn main() {\n    let mut v: Vec<P> = Vec::new();\n    v.sort_by_key(|p| p.age);\n    v.sort_by_key(|p| p.name.clone());\n    let a = v.iter().max_by_key(|&p| &p.name);\n    let mut w: Vec<&str> = vec![\"a\"];\n    w.sort_by_key(|s| *s);\n    let _ = a;\n}\n"), vec![]);
+}

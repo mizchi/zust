@@ -1246,6 +1246,7 @@ run-pass	closures/old-closure-iter-2.rs
 check-pass	closures/or-patterns-issue-137467.rs
 run-pass	closures/pass-lifetime-fn-to-generic-fnonce.rs
 compile-fail	closures/print/closure-print-generic-2.rs
+compile-fail	closures/return-value-lifetime-error.rs
 run-pass	closures/semistatement-in-lambda.rs
 run-pass	closures/simple-capture-and-call.rs
 check-pass	closures/static-closures-with-nonstatic-return.rs
