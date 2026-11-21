@@ -531,20 +531,14 @@ impl<'a> Lower<'a> {
             EK::Method(r, _, args) => {
                 use Builtin as B;
                 let Some(b) = self.info.builtin.get(&e.id).copied() else { return not_in_subset(pos, "this method") };
-                // `range(a, b).fold(..)`: the iterator `a..b` directly, no array
-                let it = match self.range_args(r)? {
-                    Some((a, b)) => format!("({a}..{b})"),
+                // `range(a, b).fold(..)`: the iterator `a..b` directly, no array. (The receiver is lowered once: a chain
+                // of methods would otherwise lower its innermost receiver exponentially many times)
+                let (it, recv) = match self.range_args(r)? {
+                    Some((a, b)) => (format!("({a}..{b})"), format!("({a}..{b}).collect::<Vec<i32>>()")),
                     None => {
                         let recv = self.expr(r)?;
                         let recv = if matches!(r.kind, EK::Var(_)) { recv } else { format!("({recv})") };
-                        format!("{recv}.iter().copied()")
-                    }
-                };
-                let recv = match self.range_args(r)? {
-                    Some((a, b)) => format!("({a}..{b}).collect::<Vec<i32>>()"),
-                    None => {
-                        let recv = self.expr(r)?;
-                        if matches!(r.kind, EK::Var(_)) { recv } else { format!("({recv})") }
+                        (format!("{recv}.iter().copied()"), recv)
                     }
                 };
                 match b {
@@ -557,8 +551,8 @@ impl<'a> Lower<'a> {
                         let init = self.expr(&args[0])?;
                         format!("{it}.fold({init}, {})", self.closure(&args[1], &[false, false])?)
                     }
-                    B::Push => format!("{{ let mut v = {recv}.to_vec(); v.push({}); v }}", self.expr(&args[0])?),
-                    B::Concat => format!("{{ let mut v = {recv}.to_vec(); v.extend_from_slice({}); v }}", self.arg(&args[0], true)?),
+                    B::Push => format!("{{ let mut __zs_v = {recv}.to_vec(); __zs_v.push({}); __zs_v }}", self.expr(&args[0])?),
+                    B::Concat => format!("{{ let mut __zs_v = {recv}.to_vec(); __zs_v.extend_from_slice({}); __zs_v }}", self.arg(&args[0], true)?),
                     B::Sqrt => format!("{recv}.sqrt()"),
                     B::Abs => format!("{recv}.abs()"),
                     B::Max | B::Min => {

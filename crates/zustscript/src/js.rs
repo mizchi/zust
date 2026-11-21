@@ -41,6 +41,12 @@ pub struct Js<'a> {
     /// `@wasm fn`s that go to wasm (empty with --all-js): not written here, their uses are collected
     pub wasm_fns: HashSet<String>,
     pub wasm_wanted: Vec<(String, Vec<Ty>)>,
+    /// locals in scope: (source name, JS name), innermost last. Every JS name a function uses is unique in it
+    /// (`x`, then `x$1` for a second `x`), so flattened blocks, shadowing and match arms never collide
+    locals: Vec<(String, String)>,
+    declared: HashSet<String>,
+    /// what cannot be written as JS (a `break` the emitter would have to move into a function)
+    pub errors: Vec<(Pos, String)>,
 }
 
 /// The JS name of an instance of a numeric-bound function: `sum$f64`
@@ -133,6 +139,8 @@ const HELPERS: &[(&str, &str)] = &[
     ("$rangeFold", "function $rangeFold(a, b, acc, f) {\n  for (let i = a; i < b; i++) acc = f(acc, i);\n  return acc;\n}"),
     ("$rangeMap", "function $rangeMap(a, b, f) {\n  const r = new Array(Math.max(b - a, 0));\n  for (let i = a; i < b; i++) r[i - a] = f(i);\n  return r;\n}"),
     ("$rangeMapTo", "function $rangeMapTo(T, a, b, f) {\n  const r = new T(Math.max(b - a, 0));\n  for (let i = a; i < b; i++) r[i - a] = f(i);\n  return r;\n}"),
+    ("$arity1", "function $arity1(f) {\n  return (a) => f(a);\n}"),
+    ("$arity2", "function $arity2(f) {\n  return (a, b) => f(a, b);\n}"),
     ("$round", "function $round(x) {\n  return x < 0 ? -Math.round(-x) : Math.round(x);\n}"),
     (
         "$handle",
@@ -159,6 +167,9 @@ impl<'a> Js<'a> {
             queued: HashSet::new(),
             wasm_fns: HashSet::new(),
             wasm_wanted: vec![],
+            locals: vec![],
+            declared: HashSet::new(),
+            errors: vec![],
         }
     }
 
@@ -229,10 +240,41 @@ impl<'a> Js<'a> {
         n
     }
 
+    /// A JS name for a new local `n`, unique in the function (not in scope yet: see `push_local`)
+    fn reserve(&mut self, n: &str) -> String {
+        let base = ident(n);
+        let mut js = base.clone();
+        let mut k = 1;
+        while self.declared.contains(&js) {
+            js = format!("{base}${k}");
+            k += 1;
+        }
+        self.declared.insert(js.clone());
+        js
+    }
+
+    fn push_local(&mut self, n: &str, js: &str) {
+        self.locals.push((n.to_string(), js.to_string()));
+    }
+
+    /// Declares local `n` (in scope from here)
+    fn bind(&mut self, n: &str) -> String {
+        let js = self.reserve(n);
+        self.push_local(n, &js);
+        js
+    }
+
+    /// The JS name of local `n`
+    fn local(&self, n: &str) -> String {
+        self.locals.iter().rev().find(|x| x.0 == n).map_or_else(|| ident(n), |x| x.1.clone())
+    }
+
     fn function(&mut self, it: &Item, js_name: &str, public: bool) {
         let Item::Fn { name, args, body, .. } = it else { return };
         let gen_ = !self.info.effects[name].is_empty();
-        let ps: Vec<String> = args.iter().map(|a| ident(&a.0)).collect();
+        self.locals.clear();
+        self.declared.clear();
+        let ps: Vec<String> = args.iter().map(|a| self.bind(&a.0)).collect();
         let saved = std::mem::take(&mut self.out);
         self.line(&format!("{}function{} {js_name}({}) {{", if public { "export " } else { "" }, if gen_ { "*" } else { "" }, ps.join(", ")));
         self.ind += 1;
@@ -328,11 +370,12 @@ impl<'a> Js<'a> {
         };
         match &e.kind {
             EK::Assign(n, x) => {
+                let target = self.local(n);
                 if Self::complex(x) {
-                    self.stmt_expr(x, &Dest::Assign(ident(n)));
+                    self.stmt_expr(x, &Dest::Assign(target));
                 } else {
                     let v = self.expr(x);
-                    self.line(&format!("{} = {v};", ident(n)));
+                    self.line(&format!("{target} = {v};"));
                 }
                 unit(self);
                 return;
@@ -349,25 +392,35 @@ impl<'a> Js<'a> {
                     EK::Call(f, args) if matches!(self.info.callee.get(&f.id), Some(Callee::Range)) => Some(args),
                     _ => None,
                 };
+                let mark = self.locals.len();
                 match range {
                     Some(args) => {
-                        // `for i in range(a, b)`: a counting loop (the end evaluated once)
-                        let a = self.expr(&args[0]);
+                        // `for i in range(a, b)`: a counting loop. Both bounds are evaluated once, in order, before
+                        // the loop (the body may assign a variable the end was read from)
+                        let lit = |e: &Expr| matches!(e.kind, EK::Lit(Lit::Int(_)));
+                        let mut a = self.expr(&args[0]);
+                        if !lit(&args[0]) {
+                            let t = self.fresh();
+                            self.line(&format!("const {t} = {a};"));
+                            a = t;
+                        }
                         let mut b = self.expr(&args[1]);
-                        if !b.chars().all(|c| c.is_alphanumeric() || c == '_' || c == '$' || c == '.') {
+                        if !lit(&args[1]) {
                             let t = self.fresh();
                             self.line(&format!("const {t} = {b};"));
                             b = t;
                         }
-                        let x = ident(x);
+                        let x = self.bind(x);
                         self.line(&format!("for (let {x} = {a}; {x} < {b}; {x}++) {{"));
                     }
                     None => {
                         let v = self.expr(it);
-                        self.line(&format!("for (const {} of {v}) {{", ident(x)));
+                        let x = self.bind(x);
+                        self.line(&format!("for (const {x} of {v}) {{"));
                     }
                 }
                 self.loop_body(body);
+                self.locals.truncate(mark);
                 unit(self);
                 return;
             }
@@ -377,16 +430,21 @@ impl<'a> Js<'a> {
         }
         match &e.kind {
             EK::Block(stmts, tail) => {
+                let mark = self.locals.len();
                 for s in stmts {
                     match s {
                         Stmt::Let(p, _, x) => self.let_(p, x),
                         Stmt::LetMut(n, _, x) => {
+                            // (the initializer sees the names before this one)
                             if Self::complex(x) {
-                                self.line(&format!("let {};", ident(n)));
-                                self.stmt_expr(x, &Dest::Assign(ident(n)));
+                                let js = self.reserve(n);
+                                self.line(&format!("let {js};"));
+                                self.stmt_expr(x, &Dest::Assign(js.clone()));
+                                self.push_local(n, &js);
                             } else {
                                 let v = self.expr(x);
-                                self.line(&format!("let {} = {v};", ident(n)));
+                                let js = self.bind(n);
+                                self.line(&format!("let {js} = {v};"));
                             }
                         }
                         Stmt::Expr(x) => self.stmt_expr(x, &Dest::Discard),
@@ -400,6 +458,7 @@ impl<'a> Js<'a> {
                         }
                     }
                 }
+                self.locals.truncate(mark);
             }
             EK::If(c, t, el) if Self::complex(e) || matches!(d, Dest::Discard) => {
                 let c = self.expr(c);
@@ -427,8 +486,9 @@ impl<'a> Js<'a> {
                 self.line("}");
             }
             EK::Match(s, arms) => {
+                // (an arm's bindings get names of their own, so they never hide the subject)
                 let subj = match &s.kind {
-                    EK::Var(n) if matches!(self.info.callee.get(&s.id), Some(Callee::Local)) => ident(n),
+                    EK::Var(n) if matches!(self.info.callee.get(&s.id), Some(Callee::Local)) => self.local(n),
                     _ => {
                         let t = self.fresh();
                         let v = self.expr(s);
@@ -436,9 +496,13 @@ impl<'a> Js<'a> {
                         t
                     }
                 };
+                let mut opened = false;
                 for (k, (p, body)) in arms.iter().enumerate() {
                     let last = k + 1 == arms.len();
                     let conds = self.pat_cond(p, &subj);
+                    if k == 0 && !(conds.is_empty() || last) {
+                        opened = true;
+                    }
                     let head = if conds.is_empty() || last {
                         if k == 0 { None } else { Some("} else {".to_string()) }
                     } else {
@@ -449,12 +513,15 @@ impl<'a> Js<'a> {
                         self.line(&h);
                         self.ind += 1;
                     }
+                    let mark = self.locals.len();
                     let mut binds = vec![];
                     self.pat_binds(p, &subj, &mut binds);
                     for (n, v) in binds {
-                        self.line(&format!("const {} = {v};", ident(&n)));
+                        let js = self.bind(&n);
+                        self.line(&format!("const {js} = {v};"));
                     }
                     self.stmt_expr(body, d);
+                    self.locals.truncate(mark);
                     if open {
                         self.ind -= 1;
                     }
@@ -462,7 +529,8 @@ impl<'a> Js<'a> {
                         break;
                     }
                 }
-                if arms.len() > 1 || !self.pat_cond(&arms[0].0, &subj).is_empty() {
+                // (closed only if the first arm opened an `if`: a lone or irrefutable first arm opens nothing)
+                if opened {
                     self.line("}");
                 }
             }
@@ -478,13 +546,16 @@ impl<'a> Js<'a> {
 
     fn let_(&mut self, p: &Pat, x: &Expr) {
         if Self::complex(x) {
+            // (the initializer sees the names before this `let`: the new name is in scope after it)
             let t = match p {
-                Pat::Bind(n) => ident(n),
+                Pat::Bind(n) => self.reserve(n),
                 _ => self.fresh(),
             };
             self.line(&format!("let {t};"));
             self.stmt_expr(x, &Dest::Assign(t.clone()));
-            if !matches!(p, Pat::Bind(_)) {
+            if let Pat::Bind(n) = p {
+                self.push_local(n, &t);
+            } else {
                 let lhs = self.pat_lhs(p);
                 self.line(&format!("const {lhs} = {t};"));
             }
@@ -503,7 +574,7 @@ impl<'a> Js<'a> {
     /// An irrefutable pattern as a JS binding target (`[a, b]`)
     fn pat_lhs(&mut self, p: &Pat) -> String {
         match p {
-            Pat::Bind(n) => ident(n),
+            Pat::Bind(n) => self.bind(n),
             Pat::Tuple(ps) => format!("[{}]", ps.iter().map(|p| if matches!(p, Pat::Wild) { String::new() } else { self.pat_lhs(p) }).collect::<Vec<_>>().join(", ")),
             _ => self.fresh(),
         }
@@ -574,25 +645,28 @@ impl<'a> Js<'a> {
             EK::Lit(_) => 20,
             EK::Un(..) if s.ends_with("| 0") => 6,
             EK::Un(..) if s.ends_with(">>> 0") => 11,
-            EK::Un(..) => if s.starts_with("BigInt") { 17 } else { 14 },
+            EK::Un(..) => if single_call(s) { 17 } else { 14 },
             EK::Bin(op, ..) => {
                 if s.ends_with(") | 0") {
                     6
                 } else if s.ends_with(">>> 0") {
                     11
-                } else if s.starts_with("$") || s.starts_with("BigInt") || s.starts_with("Math.") {
+                } else if single_call(s) {
                     17
                 } else {
                     bin_prec(op)
                 }
             }
-            EK::Cast(..) => {
+            EK::Cast(x, _) => {
                 if s.ends_with("| 0") {
                     6
                 } else if s.ends_with(">>> 0") {
                     11
-                } else {
+                } else if single_call(s) {
                     17
+                } else {
+                    // (a cast that writes nothing: its operand's own precedence)
+                    self.js_prec(x, s)
                 }
             }
             _ => 2,
@@ -600,6 +674,9 @@ impl<'a> Js<'a> {
     }
 
     fn iife(&mut self, e: &Expr) -> String {
+        if let Some(pos) = loop_exit(e) {
+            self.errors.push((pos, "`break` / `continue` here would have to leave a function in the JS output: move this `if` / `match` into a statement of its own (`let v = if ..;`)".into()));
+        }
         let save = (std::mem::take(&mut self.out), self.ind);
         self.ind = 1;
         self.stmt_expr(e, &Dest::Return);
@@ -637,8 +714,14 @@ impl<'a> Js<'a> {
         if matches!(f.kind, EK::Closure(..)) {
             return s;
         }
-        let ps: Vec<String> = (0..arity).map(|k| format!("a{k}")).collect();
-        format!("({}) => {}({})", ps.join(", "), self.wrap_callee(&s), ps.join(", "))
+        if !s.chars().all(|c| c.is_alphanumeric() || c == '_' || c == '$' || c == '.') {
+            // (evaluated once, before the iteration)
+            let h = if arity == 1 { "$arity1" } else { "$arity2" };
+            self.helpers.insert(h);
+            return format!("{h}({s})");
+        }
+        let ps: Vec<String> = (0..arity).map(|k| format!("$x{k}")).collect();
+        format!("({}) => {}({})", ps.join(", "), s, ps.join(", "))
     }
 
     fn wrap_callee(&self, s: &str) -> String {
@@ -672,6 +755,7 @@ impl<'a> Js<'a> {
                     self.helpers.insert("$range");
                     "$range".into()
                 }
+                Some(Callee::Local) => self.local(n),
                 _ => ident(n),
             },
             EK::Call(f, args) => {
@@ -699,7 +783,7 @@ impl<'a> Js<'a> {
                         }
                         Some(Callee::Local) if self.conts.contains(n) => {
                             let a = if a.len() == 1 && a[0] == "undefined" { vec![] } else { a };
-                            return format!("(yield* {}({}))", ident(n), a.join(", "));
+                            return format!("(yield* {}({}))", self.local(n), a.join(", "));
                         }
                         Some(Callee::Extern(js)) => {
                             self.note_extern(n);
@@ -812,7 +896,8 @@ impl<'a> Js<'a> {
             EK::Closure(ps, body) => {
                 let saved = (self.gen_, std::mem::take(&mut self.conts));
                 self.gen_ = false;
-                let ps: Vec<String> = ps.iter().map(|p| ident(&p.0)).collect();
+                let mark = self.locals.len();
+                let ps: Vec<String> = ps.iter().map(|p| self.bind(&p.0)).collect();
                 let b = if Self::complex(body) {
                     let save = (std::mem::take(&mut self.out), self.ind);
                     self.ind += 1;
@@ -825,6 +910,7 @@ impl<'a> Js<'a> {
                     if b.starts_with('{') { format!("({b})") } else { b }
                 };
                 (self.gen_, self.conts) = saved;
+                self.locals.truncate(mark);
                 format!("({}) => {b}", ps.join(", "))
             }
             EK::Record(_, fs, base) => {
@@ -834,7 +920,7 @@ impl<'a> Js<'a> {
                 }
                 for (f, x) in fs {
                     let v = self.expr(x);
-                    parts.push(if matches!(&x.kind, EK::Var(n) if n == f) { ident(f) } else { format!("{f}: {v}") });
+                    parts.push(if v == *f { f.clone() } else { format!("{f}: {v}") });
                 }
                 format!("{{ {} }}", parts.join(", "))
             }
@@ -888,17 +974,21 @@ impl<'a> Js<'a> {
                     ops.push(js_str(&a.variant));
                     self.line(&format!("{}if ($op.TAG === {}) {{", if k == 0 { "" } else { "} else " }, js_str(&a.variant)));
                     self.ind += 1;
+                    let mark = self.locals.len();
                     let mut binds = vec![];
                     for (i, p) in a.pats.iter().enumerate() {
                         self.pat_binds(p, &format!("$op._{i}"), &mut binds);
                     }
                     for (n, v) in binds {
-                        self.line(&format!("const {} = {v};", ident(&n)));
+                        let js = self.bind(&n);
+                        self.line(&format!("const {js} = {v};"));
                     }
-                    self.line(&format!("const {} = $k;", ident(&a.k)));
+                    let k = self.bind(&a.k);
+                    self.line(&format!("const {k} = $k;"));
                     self.conts.push(a.k.clone());
                     self.stmt_expr(&a.body, &Dest::Return);
                     self.conts.pop();
+                    self.locals.truncate(mark);
                     self.ind -= 1;
                 }
                 self.line("}");
@@ -1010,6 +1100,54 @@ fn f32_lit(f: &str) -> String {
     let v = f.parse::<f64>().unwrap_or(0.0) as f32 as f64;
     let s = format!("{v}");
     if s.contains('.') || s.contains('e') || s.contains("inf") || s.contains("NaN") { s } else { format!("{s}.0") }
+}
+
+/// The expression is one call `f(..)` / `a.b(..)` (its last `)` closes its first `(`)
+fn single_call(s: &str) -> bool {
+    let Some(i) = s.find('(') else { return false };
+    if i == 0 || !s[..i].chars().all(|c| c.is_alphanumeric() || c == '_' || c == '$' || c == '.') || !s.ends_with(')') {
+        return false;
+    }
+    let mut d = 0i32;
+    for (k, c) in s[i..].char_indices() {
+        match c {
+            '(' => d += 1,
+            ')' => {
+                d -= 1;
+                if d == 0 {
+                    return i + k == s.len() - 1;
+                }
+            }
+            _ => {}
+        }
+    }
+    false
+}
+
+/// A `break` / `continue` in `e` that leaves a loop outside `e` (not one of its own loops, not in a closure)
+fn loop_exit(e: &Expr) -> Option<Pos> {
+    fn walk(e: &Expr) -> Option<Pos> {
+        match &e.kind {
+            EK::Break | EK::Continue => Some(e.pos),
+            EK::While(..) | EK::For(..) | EK::Closure(..) => None,
+            EK::Block(stmts, tail) => stmts
+                .iter()
+                .find_map(|s| match s {
+                    Stmt::Let(_, _, x) | Stmt::LetMut(_, _, x) | Stmt::Expr(x) => walk(x),
+                })
+                .or_else(|| tail.as_deref().and_then(walk)),
+            EK::If(c, t, el) => walk(c).or_else(|| walk(t)).or_else(|| el.as_deref().and_then(walk)),
+            EK::Match(s, arms) => walk(s).or_else(|| arms.iter().find_map(|a| walk(&a.1))),
+            EK::Assign(_, x) | EK::Un(_, x) | EK::Field(x, _) | EK::Cast(x, _) => walk(x),
+            EK::Bin(_, a, b) | EK::Index(a, b) => walk(a).or_else(|| walk(b)),
+            EK::Call(f, a) => walk(f).or_else(|| a.iter().find_map(walk)),
+            EK::Method(r, _, a) => walk(r).or_else(|| a.iter().find_map(walk)),
+            EK::Array(xs) | EK::Tuple(xs) => xs.iter().find_map(walk),
+            EK::Record(_, fs, b) => fs.iter().find_map(|f| walk(&f.1)).or_else(|| b.as_deref().and_then(walk)),
+            _ => None,
+        }
+    }
+    walk(e)
 }
 
 fn bin_prec(op: &str) -> u8 {
@@ -1179,7 +1317,7 @@ pub fn dts(items: &[Item], info: &Info) -> (String, Vec<&'static str>) {
     }
     let used: Vec<&'static str> = BRANDS.iter().map(|b| b.0).filter(|n| uses_word(&o, n)).collect();
     let mut h = String::from("// generated by zsc: the types of the module's exports\n");
-    if items.iter().any(|it| matches!(it, Item::Fn { public: true, ret: Some(TyS::Name(r, _, _)), .. } if r == "Jsx")) {
+    if uses_word(&o, "ReactElement") {
         h.push_str("import type { ReactElement } from \"react\";\n");
     }
     h.push('\n');

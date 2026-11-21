@@ -3,6 +3,11 @@ export const Fragment = Symbol("Fragment");
 export const jsx = (type, props, key) => ({ type, props, key });
 export const jsxs = jsx;
 const esc = (s) => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;");
+// (React's style objects: { width: "10px" } as "width:10px"; a string is what react-dom refuses)
+const css = (v) => {
+  if (typeof v !== "object" || v === null) throw new Error("style must be an object, as react-dom requires: " + JSON.stringify(v));
+  return Object.entries(v).map(([k, x]) => `${k.replace(/[A-Z]/g, (c) => "-" + c.toLowerCase())}:${x}`).join(";");
+};
 export function render(el) {
   if (el == null || el === false) return "";
   if (Array.isArray(el)) return el.map(render).join("");
@@ -12,7 +17,7 @@ export function render(el) {
   if (el.type === Fragment) return kids;
   const attrs = Object.entries(el.props)
     .filter(([k, v]) => k !== "children" && typeof v !== "function")
-    .map(([k, v]) => ` ${k === "className" ? "class" : k}="${esc(v)}"`).join("");
+    .map(([k, v]) => ` ${k === "className" ? "class" : k}="${esc(k === "style" ? css(v) : v)}"`).join("");
   const handlers = Object.keys(el.props).filter((k) => typeof el.props[k] === "function");
   return `<${el.type}${attrs}${handlers.length ? ` data-on="${handlers.join(",")}"` : ""}>${kids}</${el.type}>`;
 }

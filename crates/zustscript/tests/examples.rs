@@ -255,3 +255,23 @@ fn ml_kernels_agree() {
     assert!(outs[0].contains("relu [0,0.5,0,2,0,7,0.125]"));
     assert!(outs[0].contains("bounds_error true"));
 }
+
+/// The review of mizchi/zust#31: match bindings that shadow the subject, shadowing and nested blocks, a lone
+/// match arm, a range's end read once, precedence after a call, a callback evaluated once, a generated temporary
+/// named like a parameter (@wasm), ReactElement imported for a record's Jsx field
+#[test]
+fn regressions() {
+    let d = build("regress");
+    let out = node(
+        &d,
+        r#"
+const m = await import('./regress.js');
+console.log(m.unwrap_or({ TAG: "Some", _0: 4 }, 0), m.unwrap_or({ TAG: "None" }, 9));
+console.log(m.shadow(), m.only("One"), m.range_end_once(), m.prec(-1, 2, 3));
+console.log(m.add_all([1, 2]).join(","), m.push_v([1, 2], 3).join(","));
+"#,
+    );
+    assert_eq!(out, "4 9\n12 1 3 9\n2,3 1,2,3\n");
+    let dts = std::fs::read_to_string(d.join("regress.d.ts")).unwrap();
+    assert!(dts.contains("import type { ReactElement } from \"react\";"), "{dts}");
+}

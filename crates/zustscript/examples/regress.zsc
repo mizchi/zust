@@ -1,0 +1,54 @@
+// Regression cases from the review of mizchi/zust#31 (CodeRabbit): each function's expected value is in
+// tests/examples.rs (`regressions`)
+
+enum Option<T> { None, Some(T) }
+enum Only { One }
+type View = { node: Jsx }
+
+// a match arm's binding with the subject's own name
+pub fn unwrap_or(o: Option<i32>, d: i32) -> i32 {
+  match o { Some(o) => o, None => d }
+}
+
+// shadowing in one block, a nested block, a block as a value
+pub fn shadow() -> i32 {
+  let x = 1;
+  let x = x + 1;
+  { let x = 10; };
+  let y = { let x = 5; x * 2 };
+  x + y
+}
+
+// a match whose only arm opens no `if`
+pub fn only(o: Only) -> i32 {
+  match o { One => 1 }
+}
+
+// a range's end read once, before the loop
+pub fn range_end_once() -> i32 {
+  let mut end = 3;
+  let mut c = 0;
+  for i in range(0, end) { end = 0; c += 1; }
+  c
+}
+
+// precedence of a sum whose first operand is a call
+pub fn prec(x: f64, y: f64, z: f64) -> f64 {
+  (x.abs() + y) * z
+}
+
+// a callback expression evaluated once
+fn adder(k: i32) -> fn(i32) -> i32 {
+  (x) => x + k
+}
+pub fn add_all(xs: Array<i32>) -> Array<i32> {
+  xs.map(adder(1))
+}
+
+// a generated temporary named like a parameter (the Rust of @wasm)
+@wasm pub fn push_v(xs: Array<i32>, v: i32) -> Array<i32> {
+  xs.push(v)
+}
+
+// a record with a Jsx field: the .d.ts imports ReactElement
+pub fn view_of(v: View) -> i32 { 1 }

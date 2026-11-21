@@ -79,6 +79,13 @@ fn main() {
         }).collect();
     }
     let body = j.items(&items);
+    if !j.errors.is_empty() {
+        let mut errs = j.errors.clone();
+        errs.sort_by_key(|e| (e.0.line, e.0.col));
+        errs.dedup();
+        report(&file, &src, &errs);
+        std::process::exit(1);
+    }
     let header = j.header();
     let (dts, brands) = js::dts(&items, &info);
     let wasm_name = format!("{stem}.wasm");

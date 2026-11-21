@@ -68,8 +68,11 @@ pub fn stats(s: Sample) -> Stats {
   Stats { mean: m, stddev: stddev(s.values), max: s.values.fold(0.0, (a, x) => if x > a { x } else { a }) }
 }
 
+// React's `style` takes an object (a record here)
+type BarStyle = { width: String }
+
 fn bar(n: i32) -> Jsx {
-  <span className="bar" style={"width:" + (n * 10).to_string() + "px"}>{n}</span>
+  <span className="bar" style={BarStyle { width: (n * 10).to_string() + "px" }}>{n}</span>
 }
 
 pub fn Row(props: RowProps) -> Jsx {

@@ -644,6 +644,13 @@ impl Checker {
         self.scopes.iter().enumerate().rev().find_map(|(k, s)| s.get(n).map(|t| (k, t.clone())))
     }
 
+    /// Leaves a scope: its locals' mutability goes with it (the index is reused by the next scope)
+    fn pop_scope(&mut self) {
+        let k = self.scopes.len() - 1;
+        self.muts.retain(|(i, _)| *i != k);
+        self.scopes.pop();
+    }
+
     /// A use of local `n` (found in scope `idx`): a mutable local cannot be captured by a closure
     fn check_capture(&mut self, pos: Pos, idx: usize, n: &str) {
         if self.muts.contains(&(idx, n.to_string())) && self.closure_bases.last().is_some_and(|b| idx < *b) {
@@ -820,7 +827,13 @@ impl Checker {
             EK::Path(en, v) => self.variant(e.id, pos, Some(en), v),
             EK::Call(f, args) => {
                 let ft = self.infer(f, None);
-                let ft = self.resolve(&ft);
+                let mut ft = self.resolve(&ft);
+                // (a callee whose type is not known yet: a function of these arguments)
+                if let Ty::Var(_) = ft {
+                    let fnt = Ty::Fn(args.iter().map(|_| self.fresh()).collect(), Box::new(self.fresh()));
+                    self.unify(f.pos, &ft, &fnt);
+                    ft = self.resolve(&fnt);
+                }
                 let Ty::Fn(params, ret) = ft else {
                     if !matches!(ft, Ty::Var(_)) {
                         let s = self.show(&ft);
@@ -1002,7 +1015,7 @@ impl Checker {
                 self.loops += 1;
                 let bt = self.infer(body, Some(&Ty::Unit));
                 self.loops -= 1;
-                self.scopes.pop();
+                self.pop_scope();
                 self.unify(body.pos, &bt, &Ty::Unit);
                 Ty::Unit
             }
@@ -1083,13 +1096,16 @@ impl Checker {
                     }
                     let mut binds = vec![];
                     for (p, t) in a.pats.iter().zip(&ps) {
+                        if !irrefutable(p) {
+                            self.err(a.pos, "a handler's arm binds the operation's arguments (names or `_`): match on them in the arm's body");
+                        }
                         self.check_pat(p, t, a.pos, &mut binds);
                     }
                     binds.push((a.k.clone(), Ty::Fn(vec![ret], Box::new(out.clone()))));
                     self.scopes.push(binds.into_iter().collect());
                     let t = self.infer(&a.body, Some(&out));
                     self.unify(a.body.pos, &t, &out);
-                    self.scopes.pop();
+                    self.pop_scope();
                 }
                 for (en, vs) in covered {
                     let missing: Vec<String> = self.info.enums[&en].ops.keys().filter(|o| !vs.contains(o)).cloned().collect();
@@ -1127,7 +1143,7 @@ impl Checker {
                     self.scopes.push(binds.into_iter().collect());
                     let bt = self.infer(body, Some(&out));
                     self.unify(body.pos, &bt, &out);
-                    self.scopes.pop();
+                    self.pop_scope();
                 }
                 let pats: Vec<&Pat> = arms.iter().map(|a| &a.0).collect();
                 self.exhaustive(pos, &st, &pats);
@@ -1179,7 +1195,7 @@ impl Checker {
                     Some(x) => self.infer(x, expect),
                     None => Ty::Unit,
                 };
-                self.scopes.pop();
+                self.pop_scope();
                 t
             }
             EK::Closure(ps, body) => {
@@ -1208,7 +1224,7 @@ impl Checker {
                 let loops = std::mem::take(&mut self.loops);
                 self.scopes.push(sc);
                 let rt = self.infer(body, rexp.as_ref());
-                self.scopes.pop();
+                self.pop_scope();
                 self.loops = loops;
                 self.closure_bases.pop();
                 Ty::Fn(pts, Box::new(rt))
