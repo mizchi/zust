@@ -198,7 +198,11 @@ impl Cx<'_> {
                 return self.expr(ne, expected);
             }
             // (`&a == &b` with `impl PartialEq for &X`: that impl's eq, `(&a).eq(&&b)`, not X's fields)
-            if matches!(op, "==" | "!=") && !assign && self.prog.method(*sid, "__ref_eq").is_some() {
+            // (only PartialEq's `eq` for `&X` (another trait's `eq` gets the same name), and both sides `&X`)
+            let peq_ref = self.prog.method(*sid, "__ref_eq").is_some_and(|id| {
+                self.prog.sigs[id as usize].impl_trait.as_deref().is_some_and(|t| t == "PartialEq" || t.starts_with("PartialEq<"))
+            });
+            if matches!(op, "==" | "!=") && !assign && peq_ref && self.peek(right) == self.peek(left) {
                 let call = mcall(paren(left), "eq", vec![Expr::Ref(false, Box::new(paren(right)))]);
                 let ne = if op == "!=" { Expr::Unary("!".into(), Box::new(Expr::Paren(Box::new(call))), Default::default()) } else { call };
                 let ne = self.keep_expr(ne);
