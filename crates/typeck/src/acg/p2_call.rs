@@ -96,8 +96,9 @@ impl Cx<'_> {
         // (`x.m()` with x of a type parameter `T: Tr` in a generic fn, instantiated as a primitive: Tr's `m`, which a
         // builtin method of the same name (`to_string` ..) would otherwise answer: `<T as Tr>::m(&x, ..)`)
         // (`impl Deref<Target = [T; N]>` (or a slice, str) with no method m of its own: `t.m()` is `t.deref().m()`,
-        // decided before anything is evaluated, so the user's deref runs once)
-        if let Some(Ty::Struct(sid)) = self.peek(recv).map(|t| self.strip_refs(t)) {
+        // decided before anything is evaluated, so the user's deref runs once; only for the structs Program found such a
+        // deref of)
+        if let Some(Ty::Struct(sid)) = self.peek(recv).map(|t| self.strip_refs(t)).filter(|t| matches!(t, Ty::Struct(s) if !self.prog.deref_to_seq.is_empty() && self.prog.deref_to_seq.contains(&self.prog.base_of(*s)))) {
             if self.prog.method(sid, method).is_none() && self.prog.default_method(sid, method).is_none() {
                 if let Some(did) = self.prog.method(sid, "deref") {
                     if matches!(self.prog.sigs[did as usize].ret, Ty::Ref(_, Ty::Array(..) | Ty::Slice(_) | Ty::Str)) {

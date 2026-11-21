@@ -314,6 +314,9 @@ pub struct Program {
     pub inst_keys: std::sync::Mutex<FxMap<u32, Key>>,
     /// `impl Drop for S` のある struct / enum (ジェネリックなら元の定義)
     pub drop_impls: crate::fxhash::FxSet<u32>,
+    /// The structs (base ids) whose `deref` returns a reference to an array, slice or str: `t.len()` on one of them is
+    /// that target's method
+    pub deref_to_seq: crate::fxhash::FxSet<u32>,
     /// drop が要る型がありうるか (prelude に drop glue があるか。Box も Drop もなければ false)
     pub has_drop: bool,
     /// impl の関連型の定義
@@ -713,6 +716,7 @@ impl Program {
             closure_of_struct: FxMap::default(),
             inst_keys: Default::default(),
             drop_impls: Default::default(),
+            deref_to_seq: Default::default(),
             has_drop: false,
             assocs: vec![],
             assoc_bounds: Default::default(),
@@ -1560,6 +1564,13 @@ impl Program {
         if need_main && !p.index.contains_key("main") {
             return Err("no `main` function".into());
         }
+        p.deref_to_seq = p
+            .names
+            .iter()
+            .enumerate()
+            .filter(|(i, n)| n.ends_with("::deref") && matches!(p.sigs[*i].ret, Ty::Ref(_, Ty::Array(..) | Ty::Slice(_) | Ty::Str)))
+            .filter_map(|(_, n)| p.struct_index.get(n.trim_end_matches("::deref")).copied())
+            .collect();
         p.drop_impls = p
             .impls
             .iter()
