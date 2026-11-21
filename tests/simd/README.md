@@ -33,18 +33,26 @@ work within each 128-bit half (`_mm256_packs_epi32`). The subset, for `_mm_` (12
 | integer | `add`, `sub`, `mullo`, `adds` / `subs` (`epi` / `epu`), `avg_epu8` / `16`, `min` / `max` (`epi` / `epu`), `abs`, `and` / `or` / `xor` / `andnot`, `cmpeq`, `cmpgt`, `cmplt`, `slli` / `srli` / `srai::<N>`, `blendv_epi8`, `packs` / `packus`, `madd_epi16`, `movemask_epi8`, `testz`, `extract::<N>`, `cvtsi128_si32` / `si64` |
 | conversions | `cvtepi32_ps`, `cvtepi32_pd`, `cvtps_pd`, `cvtpd_ps`, `cvttps_epi32`, `cvtps_epi32`, `cvtepi8_epi16` .. `cvtepu32_epi64` |
 | halves | `cast*` (between lane types, to the low half, from a half: zero-extended), `zext*`, `extractf128` / `extracti128::<N>`, `insertf128` / `inserti128::<N>` |
+| shuffles by an immediate | `shuffle_ps` / `_pd` / `_epi32`, `shufflelo` / `shufflehi_epi16`, `unpacklo` / `unpackhi` (every lane type), `movehl_ps` / `movelh_ps`, `moveldup` / `movehdup_ps`, `movedup_pd`, `alignr_epi8`, `blend_ps` / `_pd` / `_epi16` / `_epi32`, `bslli` / `bsrli` / `slli_si128` / `srli_si128` (and `_epi128` / `_si256`), `permute_ps` / `_pd`, `permute2f128` / `permute2x128`, `permute4x64_epi64` / `_pd`, `broadcastss` / `sd` / `b` / `w` / `d` / `q` / `si128` |
+| shuffles by a vector | `shuffle_epi8` (pshufb), `permutevar_ps` / `_pd`, `permutevar8x32_epi32` / `_ps` |
 
-Not yet: shuffles and permutes (`shuffle_ps`, `unpacklo`, `permutevar8x32`, `permute2f128`), horizontal adds,
-`mul_epu32`, `sll` by a vector count, gathers, masked loads, AVX-512. `#[target_feature]` is accepted and changes
+A shuffle by an immediate is a table of the elements it picks (Intel's definitions; the 256-bit forms of most work
+within each 128-bit half), lowered to one 128-bit byte `Shuffle` per 128-bit half of the result, from the halves it
+reads (two at a time). Cranelift lowers those masks to the instruction that does it (`pshufd`, `shufps`, `punpck*`,
+`palignr`, `pblendw`, `pshuflw` / `pshufhw`; `pshufb` otherwise). A shuffle by a vector is a `Swizzle` with byte
+indices computed from the lane indices (`permutevar8x32` swizzles each half and joins them).
+
+Not yet: horizontal adds, `mul_epu32`, `sll` by a vector count, gathers, masked loads, AVX-512. `#[target_feature]` is accepted and changes
 nothing (the intrinsics are always available), and an intrinsic needs `unsafe` only when it reads or writes through a
 pointer.
 
 ## Tests
 
-`tests/simd.rs` (needs a CPU with AVX2 and FMA): `x86_simd_like_rustc` checks that `sse.rs`, `avx.rs` and
-`avx_usage.rs` (every intrinsic above on edge cases: NaN, ±0, saturation, shifts past the width, every comparison
-predicate; 256-bit values through parameters, results, branches, loops, structs, `Vec`, closures; the zustscript
-kernels at 8 lanes with FMA) print what rustc's builds print, with and without -O. `minclif_rejects_simd`. The
+`tests/simd.rs` (needs a CPU with AVX2 and FMA): `x86_simd_like_rustc` checks that `sse.rs`, `avx.rs`,
+`avx_usage.rs` and `shuffle.rs` (every intrinsic above on edge cases: NaN, ±0, saturation, shifts past the width,
+every comparison predicate, all 256 immediates of the 4-lane shuffles, out-of-range shuffle indices; 256-bit values
+through parameters, results, branches, loops, structs, `Vec`, closures; the zustscript kernels at 8 lanes with FMA; a
+4x4 transpose) print what rustc's builds print, with and without -O. `minclif_rejects_simd`. The
 binaries also run clean under valgrind.
 
 The 256-bit kernels (`avx_usage.rs`'s, 1e6 f32, -O): sum of squares 0.31 ms against rustc's 0.23 ms (AVX2) and

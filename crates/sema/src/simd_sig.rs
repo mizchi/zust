@@ -166,6 +166,12 @@ fn x86_sig(x: X86) -> Option<(Vec<SArg>, Ty)> {
         "add" | "sub" | "mul" | "div" | "min" | "max" | "and" | "or" | "xor" | "andnot" | "adds" | "subs" | "mullo" | "avg" | "cmpeq" | "cmpgt"
         | "cmplt" | "cmpneq" | "cmple" | "cmpge" | "madd" | "packs" | "packus" | "cmp" | "insertf128" | "inserti128" => vs(2),
         "sqrt" | "abs" | "slli" | "srli" | "srai" | "extractf128" | "extracti128" => vs(1),
+        // (shuffles and permutes: by an immediate, or by the indices in a vector (`shuffle_epi8`, `permutevar`))
+        "shuffle" if x.suffix == "epi8" => vs(2),
+        "shuffle" if matches!(x.suffix, "ps" | "pd") => vs(2),
+        "shuffle" | "shufflelo" | "shufflehi" | "permute" | "permute4x64" | "moveldup" | "movehdup" | "movedup" | "bslli" | "bsrli" => vs(1),
+        "unpacklo" | "unpackhi" | "movehl" | "movelh" | "alignr" | "blend" | "permute2f128" | "permute2x128" | "permutevar" | "permutevar8x32" => vs(2),
+        op if op.starts_with("broadcast") && op != "broadcast" => vs(1),
         "blendv" | "fmadd" | "fmsub" | "fnmadd" | "fnmsub" => vs(3),
         "movemask" | "testz" => to(if x.op == "testz" { 2 } else { 1 }, Ty::I32),
         "extract" => to(1, if x.suffix == "epi64" { Ty::I64 } else { Ty::I32 }),
@@ -188,6 +194,8 @@ pub fn x86_arg_width(x: X86, k: usize) -> u16 {
         op if op.starts_with("cast") || op.starts_with("zext") => x86_width(op).unwrap_or(x.bits),
         "set" | "setr" if x.suffix.starts_with("m128") => 128,
         "insertf128" | "inserti128" if k == 1 => 128,
+        // (a register broadcast reads lane 0 of a 128-bit vector)
+        op if op.starts_with("broadcast") && op != "broadcast" => 128,
         "cvtepi32" if x.suffix == "pd" && x.bits == 256 => half,
         "cvtps" if x.suffix == "pd" && x.bits == 256 => half,
         "cvtepi8" | "cvtepu8" | "cvtepi16" | "cvtepu16" | "cvtepu32" if x.bits == 256 => half,

@@ -107,7 +107,12 @@ impl Cx<'_> {
         let (pre, rest) = split(name);
         let plan = if let Some(x) = x86_split(name) {
             // (the const argument: a predicate, a lane, a shift, a half)
-            let imm = if matches!(x.op, "cmp" | "extract" | "slli" | "srli" | "srai" | "extractf128" | "extracti128" | "insertf128" | "inserti128") {
+            let imm = if matches!(
+                x.op,
+                "cmp" | "extract" | "slli" | "srli" | "srai" | "extractf128" | "extracti128" | "insertf128" | "inserti128" | "shufflelo" | "shufflehi"
+                    | "alignr" | "blend" | "bslli" | "bsrli" | "permute" | "permute2f128" | "permute2x128" | "permute4x64"
+            ) || (x.op == "shuffle" && x.suffix != "epi8")
+            {
                 self.simd_const(last, 0, name)?
             } else {
                 0
@@ -381,7 +386,7 @@ fn x86_emit(m: &mut crate::ir::Recorder, x: X86, imm: u32, v: &[Value]) -> R<Opt
         "si32" => Some((Shape::new(Lane::I32, w), false)),
         "si64" => Some((Shape::new(Lane::I64, w), false)),
         s if s.starts_with("m128") => Some((Shape::new(Lane::I8, w), false)),
-        s if s.starts_with("ps") || s.starts_with("pd") || s.starts_with("si") => Some((Shape::new(Lane::I8, w), false)),
+        s if s.starts_with("ps") || s.starts_with("pd") || s.starts_with("si") || s == "epi128" => Some((Shape::new(Lane::I8, w), false)),
         _ => None,
     }) else {
         return Ok(None);
@@ -511,7 +516,8 @@ fn x86_emit(m: &mut crate::ir::Recorder, x: X86, imm: u32, v: &[Value]) -> R<Opt
             if lb < 32 { m.uextend(Type::I32, e) } else { e }
         }
         "cvtss" | "cvtsd" | "cvtsi128" | "cvtsi256" => m.simd(sh, VOp::Extract(0), v),
-        "slli" | "srli" | "srai" if !f => {
+        // (`_mm_slli_si128` is a byte shift: below)
+        "slli" | "srli" | "srai" if !f && x.suffix.starts_with("epi") => {
             // (a shift by the lane width or more: 0, or every bit the sign)
             if imm >= lb && x.op != "srai" {
                 zero(m, w)
@@ -621,7 +627,233 @@ fn x86_emit(m: &mut crate::ir::Recorder, x: X86, imm: u32, v: &[Value]) -> R<Opt
             }
         }
         "madd" if l == Lane::I16 => m.simd(Shape::new(Lane::I32, w), VOp::Dot, v),
-        _ => return Ok(None),
+        // (pshufb: a byte's index is its low 4 bits, or 0 when its top bit is set; within each 128-bit half)
+        "shuffle" if x.suffix == "epi8" => {
+            let k = m.iconst(Type::I8, 0x8F);
+            let k = m.simd(Shape::new(Lane::I8, w), VOp::Splat, &[k]);
+            let idx = m.simd(Shape::new(Lane::I8, w), VOp::And, &[v[1], k]);
+            per_half(m, w, &[v[0], idx], |m, h| m.simd(Shape::I8X16, VOp::Swizzle, h))
+        }
+        // (vpermilps / vpermilpd by a vector: within each 128-bit half)
+        "permutevar" if f => {
+            let idx = lane_bytes(m, w, l, v[1], if l == Lane::F32 { 3 } else { 2 }, 0);
+            per_half(m, w, &[v[0], idx], |m, h| m.simd(Shape::I8X16, VOp::Swizzle, h))
+        }
+        // (vpermd / vpermps: any of the 8 lanes)
+        "permutevar8x32" if w == VBits::B256 => {
+            let idx = lane_bytes(m, w, Lane::I32, v[1], 7, 0);
+            let (alo, ahi) = (half(m, v[0], false), half(m, v[0], true));
+            let k16 = m.iconst(Type::I8, 16);
+            let k16 = m.simd(Shape::I8X16, VOp::Splat, &[k16]);
+            let mut hs = vec![];
+            for h in [false, true] {
+                // (indices 0..15 from the low half, 16..31 from the high one: swizzle gives 0 past 15)
+                let i = half(m, idx, h);
+                let lo = m.simd(Shape::I8X16, VOp::Swizzle, &[alo, i]);
+                let i2 = m.simd(Shape::I8X16, VOp::Sub, &[i, k16]);
+                let hi = m.simd(Shape::I8X16, VOp::Swizzle, &[ahi, i2]);
+                hs.push(m.simd(Shape::I8X16, VOp::Or, &[lo, hi]));
+            }
+            m.simd(Shape::new(Lane::I8, w), VOp::Concat, &hs)
+        }
+        op => {
+            let Some((es, sel)) = shuffle_table(op, x.suffix, x.bits, imm) else { return Ok(None) };
+            let widths: Vec<VBits> = (0..v.len()).map(|k| VBits::from_bits(crate::simd_sig::x86_arg_width(x, k) as u32).unwrap()).collect();
+            pick(m, w, v, &widths, es, &sel)
+        }
     };
     Ok(Some(r))
+}
+
+/// Applies f to each 128-bit half of the operands (all of width w) and joins the results
+fn per_half(m: &mut crate::ir::Recorder, w: VBits, v: &[Value], f: impl Fn(&mut crate::ir::Recorder, &[Value]) -> Value) -> Value {
+    if w == VBits::B128 {
+        return f(m, v);
+    }
+    let mut hs = vec![];
+    for h in [false, true] {
+        let xs: Vec<Value> = v.iter().map(|&a| m.simd(Shape::new(Lane::I8, w), VOp::Half(h), &[a])).collect();
+        hs.push(f(m, &xs));
+    }
+    m.simd(Shape::new(Lane::I8, w), VOp::Concat, &hs)
+}
+
+/// Byte indices for a swizzle from lane indices in `idx` (lanes of l): each lane's index (`& mask`, then `>> shift`
+/// first) times the lane's bytes, plus 0, 1, .. in its bytes
+fn lane_bytes(m: &mut crate::ir::Recorder, w: VBits, l: Lane, idx: Value, mask: i64, shift: u32) -> Value {
+    let li = match l {
+        Lane::F32 => Lane::I32,
+        Lane::F64 => Lane::I64,
+        l => l,
+    };
+    let s = Shape::new(li, w);
+    let es = li.bits() / 8;
+    let splat = |m: &mut crate::ir::Recorder, x: i64| {
+        let k = m.iconst(li.ty(), x);
+        m.simd(s, VOp::Splat, &[k])
+    };
+    let mut k = idx;
+    // (vpermilpd's index is bit 1 of each 64-bit lane)
+    let (mask, shift) = if li == Lane::I64 { (1, 1) } else { (mask, shift) };
+    if shift > 0 {
+        let a = m.iconst(Type::I32, shift as i64);
+        k = m.simd(s, VOp::Shr(true), &[k, a]);
+    }
+    let mk = splat(m, mask);
+    k = m.simd(s, VOp::And, &[k, mk]);
+    let a = m.iconst(Type::I32, es.trailing_zeros() as i64);
+    k = m.simd(s, VOp::Shl, &[k, a]);
+    // (the byte index into each byte of the lane, then + 0, 1, ..)
+    let (rep, offs): (i64, i64) = if es == 4 { (0x0101_0101, 0x0302_0100) } else { (0x0101_0101_0101_0101, 0x0706_0504_0302_0100) };
+    let r = splat(m, rep);
+    k = m.simd(s, VOp::Mul, &[k, r]);
+    let o = splat(m, offs);
+    m.simd(Shape::new(Lane::I8, w), VOp::Add, &[k, o])
+}
+
+/// An immediate shuffle as elements picked from the operands: (element bytes, for each result element its
+/// (operand, element) or None for 0). Intel's definitions; the 256-bit forms of most work within each 128-bit half
+fn shuffle_table(op: &str, suffix: &str, bits: u16, imm: u32) -> Option<(u32, Vec<Option<(usize, u32)>>)> {
+    let es: u32 = match suffix {
+        "ps" | "epi32" => 4,
+        "pd" | "epi64" => 8,
+        "epi16" => 2,
+        "epi8" | "si128" | "si256" | "epi128" => 1,
+        _ => return None,
+    };
+    // (a register broadcast's suffix names the result; its source is 128 bits)
+    let n = bits as u32 / 8 / es;
+    let m = 16 / es;
+    let a = |e: u32| Some((0usize, e));
+    let b = |e: u32| Some((1usize, e));
+    let f2 = |k: u32| (imm >> (2 * k)) & 3;
+    let mut out = vec![];
+    for i in 0..n {
+        let (base, k) = (i / m * m, i % m);
+        out.push(match op {
+            "shuffle" if es == 4 && suffix == "ps" => {
+                if k < 2 { a(base + f2(k)) } else { b(base + f2(k)) }
+            }
+            "shuffle" if es == 8 => {
+                let sel = (imm >> i) & 1;
+                if k == 0 { a(base + sel) } else { b(base + sel) }
+            }
+            "shuffle" | "permute" if es == 4 => a(base + f2(k)),
+            "permute" if es == 8 => a(base + ((imm >> i) & 1)),
+            "shufflelo" if es == 2 => {
+                if k < 4 { a(base + f2(k)) } else { a(base + k) }
+            }
+            "shufflehi" if es == 2 => {
+                if k >= 4 { a(base + 4 + f2(k - 4)) } else { a(base + k) }
+            }
+            "unpacklo" | "unpackhi" => {
+                let off = if op == "unpackhi" { m / 2 } else { 0 };
+                if k % 2 == 0 { a(base + off + k / 2) } else { b(base + off + k / 2) }
+            }
+            "movehl" if bits == 128 => [b(2), b(3), a(2), a(3)][k as usize],
+            "movelh" if bits == 128 => [a(0), a(1), b(0), b(1)][k as usize],
+            "alignr" if es == 1 => {
+                // (b's bytes, then a's, shifted down by imm)
+                let j = k + imm;
+                if j < 16 {
+                    b(base + j)
+                } else if j < 32 {
+                    a(base + j - 16)
+                } else {
+                    None
+                }
+            }
+            "blend" => {
+                // (blend_epi16's 8 bits are each 128-bit half's)
+                let bit = if es == 2 { k } else { i };
+                if (imm >> bit) & 1 == 1 { b(i) } else { a(i) }
+            }
+            "slli" | "bslli" if es == 1 => {
+                if k >= imm { a(base + k - imm) } else { None }
+            }
+            "srli" | "bsrli" if es == 1 => {
+                if k + imm < 16 { a(base + k + imm) } else { None }
+            }
+            "moveldup" if es == 4 => a(base + (k & !1)),
+            "movehdup" if es == 4 => a(base + (k | 1)),
+            "movedup" if es == 8 => a(base),
+            "permute2f128" | "permute2x128" if bits == 256 => {
+                // (each result half: one of a's or b's halves, or 0)
+                let c = (imm >> (4 * (i / m))) & 15;
+                if c & 8 != 0 {
+                    None
+                } else {
+                    Some(((c as usize & 3) / 2, (c & 1) * m + k))
+                }
+            }
+            "permute4x64" if es == 8 && bits == 256 => a(f2(i)),
+            "broadcastsi128" => a(i % 16),
+            op if op.starts_with("broadcast") => a(0),
+            _ => return None,
+        });
+    }
+    Some((es, out))
+}
+
+/// The elements `sel` picked from the operands (`es` bytes each; operand k of width ws[k]), as a vector of width w:
+/// one 128-bit byte shuffle per 128-bit half of the result, from the halves of the operands it reads
+fn pick(m: &mut crate::ir::Recorder, w: VBits, v: &[Value], ws: &[VBits], es: u32, sel: &[Option<(usize, u32)>]) -> Value {
+    // (the operands' 128-bit halves, in order)
+    let mut halves: Vec<Value> = vec![];
+    let mut first: Vec<usize> = vec![];
+    for (k, &a) in v.iter().enumerate() {
+        first.push(halves.len());
+        if ws[k] == VBits::B128 {
+            halves.push(a);
+        } else {
+            for h in [false, true] {
+                halves.push(m.simd(Shape::new(Lane::I8, ws[k]), VOp::Half(h), &[a]));
+            }
+        }
+    }
+    let bytes: Vec<Option<(usize, u32)>> = sel
+        .iter()
+        .flat_map(|e| (0..es).map(move |j| e.map(|(k, el)| (k, el * es + j))))
+        .map(|e| e.map(|(k, byte)| (first[k] + (byte / 16) as usize, byte % 16)))
+        .collect();
+    let mut parts = vec![];
+    for c in bytes.chunks(16) {
+        parts.push(pick128(m, &halves, c));
+    }
+    if parts.len() == 1 { parts[0] } else { m.simd(Shape::new(Lane::I8, w), VOp::Concat, &parts) }
+}
+
+/// 16 bytes from 128-bit vectors (half, byte), or 0: byte shuffles of two vectors at a time
+fn pick128(m: &mut crate::ir::Recorder, halves: &[Value], c: &[Option<(usize, u32)>]) -> Value {
+    let mut srcs: Vec<Option<usize>> = vec![];
+    for e in c {
+        let s = e.map(|(h, _)| h);
+        if !srcs.contains(&s) {
+            srcs.push(s);
+        }
+    }
+    let zero = if srcs.contains(&None) { Some(m.vconst(0)) } else { None };
+    let val = |s: Option<usize>| match s {
+        Some(h) => halves[h],
+        None => zero.unwrap(),
+    };
+    let byte = |e: &Option<(usize, u32)>| e.map(|(_, b)| b).unwrap_or(0);
+    let src_of = |e: &Option<(usize, u32)>| e.map(|(h, _)| h);
+    let mask = |f: &dyn Fn(usize) -> u32| -> u128 { (0..16).fold(0u128, |acc, i| acc | ((f(i) as u128) << (8 * i))) };
+    if srcs.len() == 1 {
+        let x = val(srcs[0]);
+        let mk = mask(&|i| byte(&c[i]));
+        return m.simd(Shape::I8X16, VOp::Shuffle(mk), &[x, x]);
+    }
+    // (the first two sources, then one more at a time: the bytes decided so far stay in place)
+    let (s0, s1) = (srcs[0], srcs[1]);
+    let mk = mask(&|i| if src_of(&c[i]) == s1 { 16 + byte(&c[i]) } else if src_of(&c[i]) == s0 { byte(&c[i]) } else { i as u32 });
+    let (x0, x1) = (val(s0), val(s1));
+    let mut acc = m.simd(Shape::I8X16, VOp::Shuffle(mk), &[x0, x1]);
+    for &s in &srcs[2..] {
+        let mk = mask(&|i| if src_of(&c[i]) == s { 16 + byte(&c[i]) } else { i as u32 });
+        let x = val(s);
+        acc = m.simd(Shape::I8X16, VOp::Shuffle(mk), &[acc, x]);
+    }
+    acc
 }

@@ -83,8 +83,11 @@ rustc's wasm32-wasip1 builds (tests/wasm/README.md). Left:
 
 - Cranelift: 128- and 256-bit vectors are done (tests/simd/README.md); a 256-bit one is two 128-bit halves (Cranelift
   has no ymm registers yet): real AVX2 code when Cranelift has it. 512-bit vectors (four halves) are not tested.
-- `core::arch::x86_64`: shuffles and permutes, horizontal adds, `mul_epu32`, shifts by a vector count, gathers,
-  masked loads, AVX-512 (tests/simd/README.md has the subset done).
+- `core::arch::x86_64`: horizontal adds, `mul_epu32`, shifts by a vector count, gathers, masked loads, AVX-512
+  (tests/simd/README.md has the subset done).
+- `macro_rules!`: a local that one macro's body declares (`let mut s = 0;`) and passes to another macro as
+  `$s:ident` is not found there ("cannot find value `s`"); rustc accepts it. Found by tests/simd/shuffle.rs, which
+  avoids it.
 - `{:x}` of a negative signed integer prints `-1` where rustc prints `ffffffff` (the prelude's formatting; found by
   the SIMD tests, which print `as u32`).
 - Wider byte shuffles and constants: `Shuffle` / `Swizzle` / `Vconst` are 128-bit only.
