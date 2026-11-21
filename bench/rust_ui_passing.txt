@@ -2810,6 +2810,7 @@ check-pass	impl-trait/mapping-duplicated-lifetimes-issue-114597.rs
 check-pass	impl-trait/member-constraints/min-choice.rs
 check-pass	impl-trait/member-constraints/placeholders_lift_to_static.rs
 check-pass	impl-trait/multiple-lifetimes/inverse-bounds.rs
+compile-fail	impl-trait/must_outlive_least_region_or_bound.rs
 check-pass	impl-trait/needs_least_region_or_bound.rs
 check-pass	impl-trait/nested-return-type.rs
 check-pass	impl-trait/nested-return-type3.rs
@@ -4165,6 +4166,7 @@ check-pass	nll/maybe-initialized-drop-uninitialized.rs
 compile-fail	nll/maybe-initialized-drop-with-fragment.rs
 compile-fail	nll/maybe-initialized-drop-with-uninitialized-fragments.rs
 compile-fail	nll/maybe-initialized-drop.rs
+compile-fail	nll/mir_check_cast_unsize.rs
 compile-fail	nll/move-errors.rs
 compile-fail	nll/move-subpaths-moves-root.rs
 run-pass	nll/mutating_references.rs
@@ -5267,6 +5269,7 @@ compile-fail	regions/region-lifetime-bounds-on-fns-where-clause.rs
 compile-fail	regions/region-multiple-lifetime-bounds-on-fns-where-clause.rs
 check-pass	regions/region-object-lifetime-1.rs
 check-pass	regions/region-object-lifetime-3.rs
+compile-fail	regions/region-object-lifetime-in-coercion.rs
 compile-fail	regions/regions-addr-of-arg.rs
 run-pass	regions/regions-addr-of-interior-of-unique-box.rs
 run-pass	regions/regions-addr-of-ret.rs

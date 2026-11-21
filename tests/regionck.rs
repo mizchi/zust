@@ -268,6 +268,26 @@ fn main() {}
     assert_eq!(check(ok), vec![]);
 }
 
+/// `Box::new(x)` holds what x does; a value coerced to a trait object outlives the object's lifetime (unsizing)
+#[test]
+fn unsizing_to_objects() {
+    one_error("use std::fmt::Debug;\nfn f<'a>(x: &'a i32) -> Box<dyn Debug> {\n    Box::new(x)\n}\nfn main() {}\n", 3);
+    one_error("trait Foo {}\nimpl<'a> Foo for &'a [u8] {}\nfn c(v: &[u8]) -> Box<dyn Foo> {\n    Box::new(v)\n}\nfn main() {}\n", 4);
+    one_error("trait Foo {}\nimpl<'a> Foo for &'a [u8] {}\nfn d<'a, 'b>(v: &'a [u8]) -> Box<dyn Foo + 'b> {\n    let x: Box<dyn Foo + 'b> = Box::new(v);\n    x\n}\nfn main() {}\n", 4);
+    one_error("fn f<'a, 'b>(x: &'a i32) -> Box<&'b i32> {\n    Box::new(x)\n}\nfn main() {}\n", 2);
+    let ok = r#"
+use std::fmt::Debug;
+trait Foo {}
+impl<'a> Foo for &'a [u8] {}
+fn e<'a: 'b, 'b>(v: &'a [u8]) -> Box<dyn Foo + 'b> { Box::new(v) }
+fn g<'a>(x: &'a i32) -> Box<dyn Debug + 'a> { Box::new(x) }
+fn h(x: &i32) -> Box<dyn Debug> { Box::new(*x) }
+fn k<'a>(x: &'a i32) -> Box<&'a i32> { Box::new(x) }
+fn main() {}
+"#;
+    assert_eq!(check(ok), vec![]);
+}
+
 /// `&e` of a value no constant promotion makes static (a call, an operation on a local, a raw pointer comparison):
 /// a temporary; a constant expression is promoted
 #[test]

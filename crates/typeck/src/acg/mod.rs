@@ -1141,9 +1141,13 @@ impl Cx<'_> {
         self.bk.params = (0..self.bk.locals.len() as u32).collect();
         // (the gate, before any work: a signature with fewer than two regions and no lifetime named has no two
         // universal regions to relate)
+        // (or one region and a trait object in the result, 'static by default: `fn f(x: &u8) -> Box<dyn Tr>`)
         self.rg.eligible = self.rg.on;
-        if self.rg.on && sig.regions.is_none() && sig.params.iter().map(|&t| regionck::count(self.prog, t, 0).unwrap_or(0)).sum::<usize>() < 2 {
-            self.rg.on = false;
+        if self.rg.on && sig.regions.is_none() {
+            let n: usize = sig.params.iter().map(|&t| regionck::count(self.prog, t, 0).unwrap_or(0)).sum();
+            if n < 2 && !(n == 1 && regionck::has_dyn(self.prog, sig.ret, 0)) {
+                self.rg.on = false;
+            }
         }
         if self.rg.on {
             let mut ps = vec![];

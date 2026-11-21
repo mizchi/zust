@@ -112,6 +112,16 @@ pub struct Rg {
     pub temps: HashMap<usize, Ty>,
 }
 
+/// t holds a trait object (whose lifetime a signature may leave to the default)
+pub fn has_dyn(prog: &Program, t: Ty, depth: u32) -> bool {
+    match t {
+        Ty::Dyn(_) => true,
+        Ty::Ref(_, i) | Ty::Ptr(_, i) | Ty::Box(i) | Ty::Array(i, _) | Ty::Slice(i) => has_dyn(prog, *i, depth + 1),
+        Ty::Struct(sid) if depth < 4 => prog.structs[sid as usize].args.iter().any(|&a| has_dyn(prog, a, depth + 1)),
+        _ => false,
+    }
+}
+
 fn kind(e: &Expr) -> &'static str {
     match e {
         Expr::Paren(x) => kind(x),
@@ -528,6 +538,56 @@ impl Rg {
         self.rel(prog, t, sub, sup, &mut k, Var::Co, sp, 0);
     }
 
+    /// A value of type from (tree sub) flows into a place of type to (tree sup), through the coercions that change
+    /// its type: to a trait object (every region of the value outlives the object's), an array to a slice, a
+    /// reference to one of what it derefs to (only the outer regions are related there)
+    pub fn flow(&mut self, prog: &Program, from: Ty, to: Ty, sub: &[u32], sup: &[u32], sp: Sp) {
+        if from == to {
+            return self.relate(prog, to, sub, sup, sp);
+        }
+        let (mut i, mut j) = (0, 0);
+        self.co(prog, from, to, sub, sup, (&mut i, &mut j), Var::Co, sp, 0);
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn co(&mut self, prog: &Program, from: Ty, to: Ty, sub: &[u32], sup: &[u32], ij: (&mut usize, &mut usize), v: Var, sp: Sp, depth: u32) -> bool {
+        let (i, j) = ij;
+        if depth > 24 {
+            return false;
+        }
+        if from == to {
+            let Some(c) = count(prog, to, 0) else { return false };
+            let (Some(a), Some(b)) = (sub.get(*i..*i + c), sup.get(*j..*j + c)) else { return false };
+            let mut k = 0;
+            self.rel(prog, to, a, b, &mut k, v, sp, depth);
+            *i += c;
+            *j += c;
+            return true;
+        }
+        match (from, to) {
+            (Ty::Ref(_, a), Ty::Ref(m, b)) => {
+                let (Some(&x), Some(&y)) = (sub.get(*i), sup.get(*j)) else { return false };
+                self.constrain(x, y, v, sp);
+                *i += 1;
+                *j += 1;
+                self.co(prog, *a, *b, sub, sup, (i, j), if m { v.then(Var::Inv) } else { v }, sp, depth + 1)
+            }
+            (Ty::Ptr(_, a), Ty::Ptr(m, b)) => self.co(prog, *a, *b, sub, sup, (i, j), if m { v.then(Var::Inv) } else { v }, sp, depth + 1),
+            (Ty::Box(a), Ty::Box(b)) | (Ty::Array(a, _), Ty::Slice(b)) => self.co(prog, *a, *b, sub, sup, (i, j), v, sp, depth + 1),
+            (_, Ty::Dyn(_)) => {
+                let Some(c) = count(prog, from, 0) else { return false };
+                let (Some(xs), Some(&y)) = (sub.get(*i..*i + c), sup.get(*j)) else { return false };
+                for &x in xs {
+                    self.constrain(x, y, Var::Co, sp);
+                }
+                *i += c;
+                *j += 1;
+                true
+            }
+            _ => false,
+        }
+    }
+
     #[allow(clippy::too_many_arguments)]
     fn rel(&mut self, prog: &Program, t: Ty, sub: &[u32], sup: &[u32], k: &mut usize, v: Var, sp: Sp, depth: u32) {
         if depth > 24 {
@@ -807,7 +867,7 @@ impl Cx<'_> {
         let ret = rg.instantiate(prog, gret, codes(params.len()), &lts, &targs, &mut el);
         rg.ret = ret.filter(|_| !bad);
         let nuniv = rg.univ.len();
-        rg.on = nuniv >= 2 || (nuniv >= 1 && rs.is_some());
+        rg.on = nuniv >= 2 || (nuniv >= 1 && (rs.is_some() || has_dyn(prog, ret_t, 0)));
         if rg.on {
             for (i, &(loc, t)) in params.iter().enumerate() {
                 if let Some(tr) = trees[i].clone() {
@@ -835,7 +895,7 @@ impl Cx<'_> {
         let r = self.rt_expr_inner(e);
         if r.is_none() && debug() {
             self.rg.missed.push(kind(e));
-            eprintln!("regionck: {} not followed at line {}", kind(e), super::borrowck::pos(e).line);
+            eprintln!("regionck: {} not followed at line {}", kind(e), self.line_base + super::borrowck::pos(e).line);
             if let Expr::Path(_, p) = strip(e) {
                 let n = p.segs.iter().map(|s| s.name.as_str()).collect::<Vec<_>>().join("::");
                 let lt = p.segs.last().and_then(|s| self.lookup(&s.name)).map(|(_, t)| self.prog.tn(t));
@@ -1076,9 +1136,7 @@ impl Cx<'_> {
         let Some(tree) = tree else { return };
         // (the initializer's tree was taken before the binding: `let y = y;` reads the y it shadows)
         if let Some((it, itr)) = init_tree {
-            if count(prog, it, 0) == Some(tree.len()) {
-                self.rg.relate(prog, t, &itr, &tree, super::borrowck::pos(init));
-            }
+            self.rg.flow(prog, it, t, &itr, &tree, super::borrowck::pos(init));
         }
         self.rg.locals.insert(loc, tree);
     }
@@ -1088,9 +1146,9 @@ impl Cx<'_> {
         if !self.rg_on() {
             return;
         }
-        let (Some((t, ptr, _)), Some((_, vtr))) = (self.rt_place(place), self.rt_expr(value)) else { return };
+        let (Some((t, ptr, _)), Some((vt, vtr))) = (self.rt_place(place), self.rt_expr(value)) else { return };
         let prog = self.prog;
-        self.rg.relate(prog, t, &vtr, &ptr, super::borrowck::pos(value));
+        self.rg.flow(prog, vt, t, &vtr, &ptr, super::borrowck::pos(value));
     }
 
     /// The value e is returned
@@ -1127,9 +1185,9 @@ impl Cx<'_> {
             _ => {}
         }
         let Some(rt) = self.rg.ret.clone() else { return };
-        let Some((_, tr)) = self.rt_expr(e) else { return };
+        let Some((et, tr)) = self.rt_expr(e) else { return };
         let (prog, t) = (self.prog, self.ret);
-        self.rg.relate(prog, t, &tr, &rt, super::borrowck::pos(e));
+        self.rg.flow(prog, et, t, &tr, &rt, super::borrowck::pos(e));
     }
 
     /// A call of id (generic signature sig0, type arguments sol, instance's parameter types params) with these
@@ -1161,19 +1219,19 @@ impl Cx<'_> {
             ptrees.push(tr);
         }
         // (the arguments flow into the parameters)
-        let mut atrees: Vec<(Option<RT>, Sp)> = vec![];
+        let mut atrees: Vec<(Option<(Option<Ty>, RT)>, Sp)> = vec![];
         if has_recv {
-            atrees.push((recv.map(|r| r.0), recv_sp(&recv_info, sp)));
+            atrees.push((recv.map(|r| (None, r.0)), recv_sp(&recv_info, sp)));
         }
         self.rg = rg;
         for a in args {
-            let t = self.rt_expr(a).map(|x| x.1);
+            let t = self.rt_expr(a).map(|x| (Some(x.0), x.1));
             atrees.push((t, super::borrowck::pos(a)));
         }
         let mut rg = std::mem::take(&mut self.rg);
         for (i, ((at, asp), pt)) in atrees.iter().zip(&ptrees).enumerate() {
-            if let (Some(at), Some(pt), Some(&ty)) = (at, pt, params.get(i)) {
-                rg.relate(prog, ty, at, pt, *asp);
+            if let (Some((aty, at)), Some(pt), Some(&ty)) = (at, pt, params.get(i)) {
+                rg.flow(prog, aty.unwrap_or(ty), ty, at, pt, *asp);
             }
         }
         // (the callee's declared bounds hold of its arguments; not those of a trait's impl called from a generic
@@ -1276,8 +1334,8 @@ impl Cx<'_> {
             let Some(i) = prog.structs[sid as usize].fields.iter().position(|f| f.0 == *n) else { continue };
             let ft = prog.structs[sid as usize].fields[i].1;
             let Some(ftr) = self.rg.field(prog, sid, i, &tree) else { continue };
-            if let Some((_, vtr)) = self.rt_expr(v) {
-                self.rg.relate(prog, ft, &vtr, &ftr, super::borrowck::pos(v));
+            if let Some((vt, vtr)) = self.rt_expr(v) {
+                self.rg.flow(prog, vt, ft, &vtr, &ftr, super::borrowck::pos(v));
             }
         }
         self.rg.calls.insert(e as *const Expr as usize, (t, tree));
@@ -1298,13 +1356,23 @@ impl Cx<'_> {
         let mut k = 0;
         for (x, &at) in xs.iter().zip(&args) {
             let Some(c) = count(prog, at, 0) else { return };
-            if let Some((_, xt)) = self.rt_expr(x) {
+            if let Some((xty, xt)) = self.rt_expr(x) {
                 let part = tree[k..k + c].to_vec();
-                self.rg.relate(prog, at, &xt, &part, super::borrowck::pos(x));
+                self.rg.flow(prog, xty, at, &xt, &part, super::borrowck::pos(x));
             }
             k += c;
         }
         self.rg.calls.insert(e as *const Expr as usize, (t, tree));
+    }
+
+    /// `Box::new(x)` (x of type t): the box's tree is x's
+    pub(crate) fn rg_box(&mut self, c: &Expr, x: &Expr, t: Ty) {
+        if !self.rg_on() {
+            return;
+        }
+        if let Some((_, tr)) = self.rt_expr(x) {
+            self.rg.calls.insert(c as *const Expr as usize, (Ty::Box(crate::types::intern(t)), tr));
+        }
     }
 
     /// A variant's value of type t (`Some(x)`, `None`): a fresh tree, the fields' values flow into its fields; kept as
@@ -1324,8 +1392,8 @@ impl Cx<'_> {
         let fts: Vec<Ty> = v.fields.iter().map(|f| f.1).collect();
         for &(fi, ex) in args {
             let (Some(&ft), Some(ftr)) = (fts.get(fi), self.rg.field(prog, sid, off + fi, &tree)) else { continue };
-            if let Some((_, vtr)) = self.rt_expr(ex) {
-                self.rg.relate(prog, ft, &vtr, &ftr, super::borrowck::pos(ex));
+            if let Some((vt, vtr)) = self.rt_expr(ex) {
+                self.rg.flow(prog, vt, ft, &vtr, &ftr, super::borrowck::pos(ex));
             }
         }
         self.rg.last_call = Some((self.rg.depth + 1, t, tree));

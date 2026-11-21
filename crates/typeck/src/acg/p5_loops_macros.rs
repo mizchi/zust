@@ -1691,6 +1691,7 @@ impl Cx<'_> {
             let call = self.b.ins().call(fr, &[sz]);
             let ptr = self.b.inst_results(call)[0];
             self.write(Place::Mem(ptr, 0, t), v);
+            self.rg_box(c, &cargs[0], t);
             return Ok(Some((Some(ptr), Ty::Box(intern(t)))));
         }
         // prelude の Chars が使う u32 → char (検査しない)
