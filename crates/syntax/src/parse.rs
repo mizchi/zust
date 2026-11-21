@@ -492,6 +492,10 @@ pub fn bad_num_suffix(text: &str) -> Option<&str> {
             if j < b.len() && (b[j] == b'+' || b[j] == b'-') {
                 j += 1;
             }
+            // (`1e_2`: underscores before the exponent's first digit)
+            while j < b.len() && b[j] == b'_' {
+                j += 1;
+            }
             if j < b.len() && b[j].is_ascii_digit() {
                 i = j;
                 while i < b.len() && (b[i].is_ascii_digit() || b[i] == b'_') {
@@ -1632,7 +1636,8 @@ impl Parser {
             // (`_ = e;` too: `{ let _ = e; }`)
             if matches!(&l, Expr::Tuple(_) | Expr::Array(_)) || matches!(&l, Expr::Path(None, p) if p.segs.len() == 1 && p.segs[0].name == "_") {
                 if let Some(e) = destructure_assign(&l, &r, start) {
-                    return Ok(e);
+                    // (in parentheses: an assignment, not a block, so a statement of it still needs its `;`)
+                    return Ok(Expr::Paren(Box::new(e)));
                 }
             }
             return Ok(Expr::Assign(Box::new(l), Box::new(r)));

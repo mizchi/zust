@@ -680,10 +680,14 @@ impl Session2 {
             deny_unreachable_code = levels.iter().any(|l| matches!(*l, "unreachable_code" | "unused" | "warnings")) && !c.contains("#![allow(unreachable_code");
             deny_must_use = levels.iter().any(|l| matches!(*l, "unused_must_use" | "unused" | "warnings")) && !c.contains("#![allow(unused_must_use");
             // (an `#![allow(..)]` of the lint undoes a deny, as the levels apply in order; forbid cannot be undone)
-            let lint = |n: &str| levels.contains(&n) && (c.contains(&format!("#![forbid({n}")) || !c.contains(&format!("#![allow({n}")));
+            // (the last of them wins: `#![allow(x)]` then `#![deny(x)]` denies)
+            let lint = |n: &str| {
+                let last = |a: &str| c.rfind(&format!("#![{a}({n}"));
+                levels.contains(&n) && (c.contains(&format!("#![forbid({n}")) || last("allow") < last("deny").max(last("forbid")))
+            };
             deny_trivial_casts = (lint("trivial_casts"), lint("trivial_numeric_casts"));
             deny_unused_alloc = lint("unused_allocation")
-                || (levels.iter().any(|l| matches!(*l, "unused" | "warnings")) && !c.contains("#![allow(unused") && !c.contains("#![allow(unused_allocation"));
+                || (!levels.contains(&"unused_allocation") && levels.iter().any(|l| matches!(*l, "unused" | "warnings")) && !c.contains("#![allow(unused"));
             for (k, n) in ["non_snake_case", "non_camel_case_types", "non_upper_case_globals"].iter().enumerate() {
                 deny_style[k] = levels.iter().any(|l| l == n || *l == "nonstandard_style" || *l == "warnings") && !c.contains(&format!("#![allow({n}"));
             }

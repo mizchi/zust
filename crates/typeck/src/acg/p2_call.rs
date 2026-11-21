@@ -95,7 +95,20 @@ impl Cx<'_> {
         let msp = *msp;
         // (`x.m()` with x of a type parameter `T: Tr` in a generic fn, instantiated as a primitive: Tr's `m`, which a
         // builtin method of the same name (`to_string` ..) would otherwise answer: `<T as Tr>::m(&x, ..)`)
-        if let Some(ne) = self.bound_method_call(recv, method, margs) {
+        // (`impl Deref<Target = [T; N]>` (or a slice, str) with no method m of its own: `t.m()` is `t.deref().m()`,
+        // decided before anything is evaluated, so the user's deref runs once)
+        if let Some(Ty::Struct(sid)) = self.peek(recv).map(|t| self.strip_refs(t)) {
+            if self.prog.method(sid, method).is_none() && self.prog.default_method(sid, method).is_none() {
+                if let Some(did) = self.prog.method(sid, "deref") {
+                    if matches!(self.prog.sigs[did as usize].ret, Ty::Ref(_, Ty::Array(..) | Ty::Slice(_) | Ty::Str)) {
+                        let d = Expr::MethodCall(Box::new(Expr::Paren(recv.clone())), "deref".to_string(), vec![], vec![], msp);
+                        let ne: &Expr = self.keep_expr(Expr::MethodCall(Box::new(d), method.to_string(), gargs.clone(), margs.clone(), msp));
+                        return self.expr(ne, expected);
+                    }
+                }
+            }
+        }
+        if let Some(ne) = self.bound_method_call(recv, method, gargs, margs) {
             let ne: &Expr = self.keep_expr(ne);
             return self.expr(ne, expected);
         }
@@ -693,14 +706,6 @@ impl Cx<'_> {
                         Place::Mem(ptr, 0, *i)
                     }
                     p => {
-                        // (`impl Deref<Target = [T; N]>`: `t.len()` is `t.deref().len()`, the method of what it derefs to;
-                        // for a receiver that is a place, which evaluating again does not change)
-                        if via_deref && is_place_expr(recv) && matches!(p.ty(), Ty::Array(..) | Ty::Slice(_) | Ty::Str) {
-                            let d = Expr::MethodCall(Box::new(Expr::Paren(Box::new(recv.clone()))), "deref".to_string(), vec![], vec![], msp);
-                            let ne = Expr::MethodCall(Box::new(d), method.to_string(), gargs.clone(), margs.clone(), msp);
-                            let ne: &Expr = self.keep_expr(ne);
-                            return self.expr(ne, expected);
-                        }
                         let t = self.prog.tn(p.ty());
                         return err(SP, format!("no method `{}` on type `{t}`", method));
                     }
@@ -2106,10 +2111,15 @@ impl Cx<'_> {
     /// メソッド呼び出しなどに書き換えたもの (front.rs の Program::prim_method_call。e は `Expr::Call` 全体)
     /// The rewrite of `x.m(..)` when x's type is a primitive that a type parameter of this fn stands for, and a trait
     /// of that parameter's bounds has an impl of m for it: `<T as Tr>::m(&x, ..)` (or `x` for a `self` method)
-    pub(crate) fn bound_method_call(&self, recv: &Expr, method: &str, margs: &[Expr]) -> Option<Expr> {
-        if self.env.params.is_empty() {
+    pub(crate) fn bound_method_call(&self, recv: &Expr, method: &str, gargs: &[GArg], margs: &[Expr]) -> Option<Expr> {
+        if self.env.params.is_empty() || self.generic_args.is_empty() {
             return None;
         }
+        // (only a value of the type parameter: a parameter declared `x: T` / `x: &T`, not another value that happens to
+        // be of the type T stands for (`let n: i32` beside `T = i32`))
+        let Expr::Path(None, rp) = strip_paren(recv) else { return None };
+        let rn = ident_of(rp)?;
+        let declared = self.generic_args.iter().find(|a| a.0 == rn).map(|a| a.1.clone())?;
         let t = self.peek(recv)?;
         let (t, by_ref) = match t {
             Ty::Ref(_, i) => (*i, true),
@@ -2120,16 +2130,27 @@ impl Cx<'_> {
         }
         let gens = &self.prog.sigs.get(self.root as usize)?.generics;
         for (g, bounds) in gens {
-            if self.env.params.iter().find(|p| &p.0 == g).map(|p| p.1) != Some(t) {
+            if *g != declared || self.env.params.iter().find(|p| &p.0 == g).map(|p| p.1) != Some(t) {
                 continue;
             }
             for b in bounds {
                 let tr = b.split('<').next().unwrap_or(b).trim();
                 let Some(id) = self.trait_candidate(&format!("{}::{method}", self.ty_key(t)), tr) else { continue };
-                let takes_ref = matches!(self.prog.sigs[id as usize].params.first(), Some(Ty::Ref(..)));
-                let Ok(Expr::Path(q, p)) = crate::parse::parse_expr(&format!("<{} as {tr}>::{method}", self.prog.tn(t))) else { continue };
+                let first = self.prog.sigs[id as usize].params.first().copied();
+                let takes_ref = matches!(first, Some(Ty::Ref(..)));
+                let takes_mut = matches!(first, Some(Ty::Ref(true, _)));
+                let Ok(Expr::Path(q, mut p)) = crate::parse::parse_expr(&format!("<{} as {tr}>::{method}", self.prog.tn(t))) else { continue };
+                // (the call's own type arguments: `x.m::<u8>()`)
+                if let Some(last) = p.segs.last_mut() {
+                    last.args = gargs.to_vec();
+                }
                 let r = paren(recv.clone());
-                let a0 = if takes_ref && !by_ref { Expr::Ref(false, Box::new(r)) } else { r };
+                // (`&self` / `&mut self` of a value: borrowed as the method takes it; `self` of a `&T`: the value)
+                let a0 = match (takes_ref, by_ref) {
+                    (true, false) => Expr::Ref(takes_mut, Box::new(r)),
+                    (false, true) => Expr::Unary("*".to_string(), Box::new(r), Default::default()),
+                    _ => r,
+                };
                 let mut args = vec![a0];
                 args.extend(margs.iter().cloned());
                 return Some(Expr::Call(Box::new(Expr::Path(q, p)), args));

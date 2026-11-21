@@ -294,6 +294,20 @@ pub fn compile(prog: &Program, insts: &Mutex<Insts>, id: u32, f: &ItemFn, line_b
         addr_taken: taken,
         caps,
         root,
+        generic_args: f
+            .sig
+            .params
+            .iter()
+            .filter_map(|(p, t)| {
+                let crate::parse::Pat::Ident(_, _, n, None) = p else { return None };
+                let t = match t {
+                    crate::parse::Ty::Ref(_, _, i) => &**i,
+                    t => t,
+                };
+                let crate::parse::Ty::Path(None, tp) = t else { return None };
+                (tp.segs.len() == 1 && tp.segs[0].args.is_empty() && prog.sigs.get(root as usize).is_some_and(|rs| rs.generics.iter().any(|g| g.0 == tp.segs[0].name))).then(|| (n.clone(), tp.segs[0].name.clone()))
+            })
+            .collect(),
         closure_ix,
         explicit_traits: HashMap::default(),
         explicit_trait: None,
@@ -664,6 +678,8 @@ pub struct Cx<'p> {
     pub cmp_depth: u32,
     pub caps: Vec<(String, Ty, bool, u32)>,
     pub root: u32,
+    /// The fn's parameters declared as one of its type parameters (`x: T` / `x: &T`): (name, type parameter)
+    pub generic_args: Vec<(String, String)>,
     /// クロージャ式 (Debug の文字列) → 番号
     pub closure_ix: HashMap<String, u32>,
     /// `a::M::m(&x)` rewritten as `x.m()`: the kept method call (by address) -> the trait it named, so the call takes

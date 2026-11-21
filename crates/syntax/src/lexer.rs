@@ -435,12 +435,32 @@ fn unclosed_delims(b: &[u8]) -> bool {
                     i += 1;
                 }
             }
+            // (block comments nest: `/* a /* b */ } */`)
             b'/' if b.get(i + 1) == Some(&b'*') => {
                 i += 2;
-                while i + 1 < b.len() && !(b[i] == b'*' && b[i + 1] == b'/') {
-                    i += 1;
+                let mut depth = 1;
+                while i + 1 < b.len() && depth > 0 {
+                    if b[i] == b'/' && b[i + 1] == b'*' {
+                        depth += 1;
+                        i += 2;
+                    } else if b[i] == b'*' && b[i + 1] == b'/' {
+                        depth -= 1;
+                        i += 2;
+                    } else {
+                        i += 1;
+                    }
                 }
-                i += 1;
+                continue;
+            }
+            // (a raw string `r#".."#` (or `br"..")`: its end as the lexer reads it, quotes inside and all)
+            b'r' | b'b' if (i == 0 || !(b[i - 1].is_ascii_alphanumeric() || b[i - 1] == b'_')) && matches!(b.get(i + 1), Some(b'"' | b'#' | b'r')) => {
+                match string_lit(b, i) {
+                    Some(e) if e > i => {
+                        i = e;
+                        continue;
+                    }
+                    _ => {}
+                }
             }
             b'"' => {
                 i += 1;
