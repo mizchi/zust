@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795305503258,
+  "lastUpdate": 1795305505514,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -58528,6 +58528,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "lsp peak RSS",
             "value": 87.734,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "miz404@gmail.com",
+            "name": "Kotaro Chikuba",
+            "username": "mizchi"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "5248923ad4b786394fb913449d9e0039b0845510",
+          "message": "SIMD: vectors in the IR, wasm (v128) and Cranelift (128 / 256-bit), core::arch::wasm32 / x86_64 (#33)\n\nImplements #30's V0 (IR + wasm), V1 (Cranelift + core::arch::x86_64, extended to 256-bit AVX/AVX2/FMA) and the relaxed-SIMD part of V2. AVX-512 is skipped for now.\n\n- IR: Type::Vec(VBits) by width; Op::Simd(Shape, VOp, args) by lane shape; room for flexible vectors.\n- wasm: 128-bit vectors only (v128 locals, loads/stores, every simd128 / relaxed-simd opcode).\n- Cranelift: 128- and 256-bit vectors (a 256-bit one is two 128-bit parts); AVX-512 left out of the ISA.\n- Intrinsics lowered in place (core::arch::wasm32 all of simd128 + relaxed-simd; a core::arch::x86_64 SSE..AVX2/FMA subset), checked like rustc's (immediates, pointer types, unsafe, names the program owns).\n- Tests against rustc (wasm32-wasip1 under Node, native x86) and error cases; TODO.md lists what is left.\n\nCo-Authored-By: Claude Opus 5.5 &lt;noreply@anthropic.com&gt;\nClaude-Session: https://claude.ai/code/session_01JroQ9fRgwYNcgjEK4xh99N",
+          "timestamp": "2026-11-22T08:55:07+09:00",
+          "tree_id": "359830a2e814d560d27e8f2270d72ac9676055f2",
+          "url": "https://github.com/mizchi/zust/commit/5248923ad4b786394fb913449d9e0039b0845510"
+        },
+        "date": 1795305505071,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "lsp definition p50",
+            "value": 0.683,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp hover p50",
+            "value": 0.475,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp completion p50",
+            "value": 0.87,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp references p50",
+            "value": 5.591,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp rename p50",
+            "value": 0.441,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp signatureHelp p50",
+            "value": 0.522,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp documentHighlight p50",
+            "value": 1.17,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp ready (startup to indexed)",
+            "value": 131.299,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp peak RSS",
+            "value": 89.242,
             "unit": "MiB"
           }
         ]
