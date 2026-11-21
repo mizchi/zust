@@ -649,6 +649,7 @@ impl Session2 {
         let mut deny_unused_imports = false;
         let mut deny_unreachable_code = false;
         let mut deny_must_use = false;
+        let mut deny_unused_alloc = false;
         let mut deny_trivial_casts = (false, false);
         // (non_snake_case, non_camel_case_types, non_upper_case_globals)
         let mut deny_style = [false; 3];
@@ -681,6 +682,8 @@ impl Session2 {
             // (an `#![allow(..)]` of the lint undoes a deny, as the levels apply in order; forbid cannot be undone)
             let lint = |n: &str| levels.contains(&n) && (c.contains(&format!("#![forbid({n}")) || !c.contains(&format!("#![allow({n}")));
             deny_trivial_casts = (lint("trivial_casts"), lint("trivial_numeric_casts"));
+            deny_unused_alloc = lint("unused_allocation")
+                || (levels.iter().any(|l| matches!(*l, "unused" | "warnings")) && !c.contains("#![allow(unused") && !c.contains("#![allow(unused_allocation"));
             for (k, n) in ["non_snake_case", "non_camel_case_types", "non_upper_case_globals"].iter().enumerate() {
                 deny_style[k] = levels.iter().any(|l| l == n || *l == "nonstandard_style" || *l == "warnings") && !c.contains(&format!("#![allow({n}"));
             }
@@ -757,6 +760,7 @@ impl Session2 {
         prog.overflow_checks = !self.opts.opt;
         prog.deny_unreachable = deny_unreachable;
         prog.deny_must_use = deny_must_use;
+        prog.deny_unused_alloc = deny_unused_alloc;
         prog.deny_trivial_casts = deny_trivial_casts;
         if deny_must_use {
             for it in &items[..user] {
@@ -2279,5 +2283,5 @@ impl Session2 {
 /// The lint levels codegen checks (`#![deny(unused_must_use)]`, `trivial_casts` ..) as one byte for the cache keys: a
 /// function compiled before such a `#![deny]` was added is not reused without its check
 fn lint_bits(p: &Program) -> u8 {
-    p.deny_must_use as u8 | (p.deny_trivial_casts.0 as u8) << 1 | (p.deny_trivial_casts.1 as u8) << 2 | (p.deny_unreachable as u8) << 3
+    p.deny_must_use as u8 | (p.deny_trivial_casts.0 as u8) << 1 | (p.deny_trivial_casts.1 as u8) << 2 | (p.deny_unreachable as u8) << 3 | (p.deny_unused_alloc as u8) << 4
 }

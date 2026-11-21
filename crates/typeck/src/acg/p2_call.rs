@@ -93,6 +93,14 @@ impl Cx<'_> {
     fn method_call_inner(&mut self, e: &Expr, expected: Option<Ty>) -> R<V> {
         let Expr::MethodCall(recv, method, gargs, margs, msp) = e else { unreachable!() };
         let msp = *msp;
+        // (unused_allocation: `Box::new([1]).len()`, a `&self` method of the array / slice the box holds)
+        if self.prog.deny_unused_alloc && self.user_code && is_box_new(recv) {
+            if let Some(Ty::Box(Ty::Array(..) | Ty::Slice(_) | Ty::Str)) = self.peek(recv) {
+                if matches!(method.as_str(), "len" | "is_empty" | "iter" | "first" | "last" | "get" | "contains" | "to_vec" | "starts_with" | "ends_with") {
+                    return err(expr_start(recv), "unnecessary allocation, use `&` instead");
+                }
+            }
+        }
         // (`b.m()` with b: Box<[T]>: the slice's method, through `&*b` / `&mut *b`)
         let local_ty = match &**recv {
             Expr::Path(None, p) => ident_of(p).and_then(|n| self.lookup(n)).map(|x| x.1),
@@ -738,6 +746,14 @@ impl Cx<'_> {
         // struct のアドレスを渡す: `&self` ならそのまま、`self` なら call_fn がコピーする
         let mut recv_v = self.addr_plus(a, o);
         let st = Ty::Struct(sid);
+        // (unused_allocation: `Box::new(s).m()` with `fn m(&self)` of S itself (not `self: &Box<Self>`))
+        if self.prog.deny_unused_alloc && self.user_code && recv_box.is_some() && derefs == 0 && is_box_new(recv) {
+            if let Some(Ty::Ref(_, Ty::Struct(ps))) = self.prog.sigs[id as usize].params.first() {
+                if self.prog.base_of(*ps) == self.prog.base_of(sid) {
+                    return err(expr_start(recv), "unnecessary allocation, use `&` instead");
+                }
+            }
+        }
         // (`r.take()` with `fn take(self)` and r: &S, S not Copy: moving out of what r points to (E0507))
         if through_ref && !via_deref && self.user_code {
             let p0 = self.prog.sigs[id as usize].params.first().copied();
@@ -2152,6 +2168,15 @@ fn is_int_lit(e: &Expr) -> bool {
     match strip_paren(e) {
         Expr::Lit(t, _) => t.starts_with(|c: char| c.is_ascii_digit()) && !t.contains('.') && !t.contains(['i', 'u']) && !t.contains('e'),
         Expr::Unary(op, x, _) => op == "-" && is_int_lit(x),
+        _ => false,
+    }
+}
+
+/// `Box::new(..)` (also `std::boxed::Box::new(..)`), in parentheses or not
+fn is_box_new(e: &Expr) -> bool {
+    match e {
+        Expr::Paren(x) => is_box_new(x),
+        Expr::Call(f, _) => matches!(&**f, Expr::Path(None, p) if p.segs.len() >= 2 && p.segs[p.segs.len() - 2].name == "Box" && p.segs[p.segs.len() - 1].name == "new"),
         _ => false,
     }
 }
