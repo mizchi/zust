@@ -680,3 +680,11 @@ fn elision_with_hidden_lifetimes() {
     let d = check("fn f() -> Vec<\n    &str\n> {\n    vec![]\n}\nfn main() {}\n");
     assert!(d.len() == 1 && d[0].0 == 2 && d[0].1.contains("E0106"), "{d:?}");
 }
+
+/// A struct holding a trait object is invariant in the lifetimes the object's trait arguments name
+#[test]
+fn invariant_through_trait_object_arguments() {
+    let d = check("struct Inv<'a> {\n    f: Box<dyn FnOnce(&mut &'a isize) + 'static>,\n}\nfn longer<'r>(b: Inv<'r>) -> Inv<'static> {\n    b\n}\nfn main() {}\n");
+    assert!(d.len() == 1 && d[0].0 == 5, "{d:?}");
+    assert_eq!(check("struct Inv<'a> {\n    f: Box<dyn FnOnce(&mut &'a isize) + 'static>,\n}\nfn same<'r>(b: Inv<'r>) -> Inv<'r> {\n    b\n}\nfn main() {}\n"), vec![]);
+}

@@ -304,6 +304,9 @@ pub const R_BOUND: u8 = 0xF5;
 /// The codes of a fn pointer's type written as one follow (its parameters', then its result's); without it (a type
 /// alias naming one) a fn pointer's regions are its own
 pub const R_FN: u8 = 0xF6;
+/// After a trait object's lifetime: the lifetimes in scope its trait's arguments name follow (their number, then
+/// their codes). The object has no slots for them; they make a definition holding it invariant in them
+pub const R_DYN_ARGS: u8 = 0xF7;
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Default)]
 pub struct RSigSyn {

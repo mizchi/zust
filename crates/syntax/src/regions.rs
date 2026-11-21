@@ -2,7 +2,7 @@
 //! summaries (`TySyn`) and of the program (`Ty`) carry no regions: the region checker reads these beside them.
 
 use crate::parse::{Bound, FnSig as PSig, GArg, GParam, Generics, Ty as PTy};
-use crate::types::{RAdtSyn, RImplSyn, RSigSyn, R_BOUND, R_DYN_DEFAULT, R_ELIDED, R_ELIDED_ADT, R_FN, R_STATIC, R_UNKNOWN};
+use crate::types::{RAdtSyn, RImplSyn, RSigSyn, R_BOUND, R_DYN_ARGS, R_DYN_DEFAULT, R_ELIDED, R_ELIDED_ADT, R_FN, R_STATIC, R_UNKNOWN};
 
 const PRIMS: &[&str] = &[
     "i8", "i16", "i32", "i64", "i128", "isize", "u8", "u16", "u32", "u64", "u128", "usize", "f32", "f64", "bool", "char", "str",
@@ -164,6 +164,54 @@ fn lifetimes_in(t: &PTy, out: &mut Vec<String>) {
     }
 }
 
+/// The lifetimes named anywhere in a path's arguments (with those of `Fn(..)` sugar)
+fn path_lts(p: &crate::parse::Path, out: &mut Vec<String>) {
+    fn ty(t: &PTy, out: &mut Vec<String>) {
+        match t {
+            PTy::Ref(l, _, i) => {
+                out.extend(l.clone());
+                ty(i, out)
+            }
+            PTy::Ptr(_, i) | PTy::Slice(i) | PTy::Array(i, _) => ty(i, out),
+            PTy::Tuple(ts) => ts.iter().for_each(|t| ty(t, out)),
+            PTy::Fn(ps, r) => {
+                ps.iter().for_each(|t| ty(t, out));
+                ty(r, out)
+            }
+            PTy::Path(q, p) => {
+                if let Some(q) = q {
+                    ty(q, out);
+                }
+                path_lts(p, out)
+            }
+            PTy::Dyn(bs) | PTy::Impl(bs) => {
+                for b in bs {
+                    match b {
+                        Bound::Trait(_, p) => path_lts(p, out),
+                        Bound::Lifetime(l) => out.push(l.clone()),
+                    }
+                }
+            }
+            PTy::Never | PTy::Infer | PTy::Macro(_) => {}
+        }
+    }
+    for s in &p.segs {
+        for a in &s.args {
+            match a {
+                GArg::Lifetime(l) => out.push(l.clone()),
+                GArg::Ty(t) | GArg::Bind(_, t) => ty(t, out),
+                GArg::Const(_) => {}
+            }
+        }
+        if let Some((ps, r)) = &s.fn_args {
+            ps.iter().for_each(|t| ty(t, out));
+            if let Some(r) = r {
+                ty(r, out);
+            }
+        }
+    }
+}
+
 pub struct Slots<'a> {
     pub lts: Vec<String>,
     /// Type parameters in scope (they have no slots of their own: an instance substitutes them)
@@ -286,6 +334,27 @@ impl<'a> Slots<'a> {
                     None => R_DYN_DEFAULT,
                 };
                 out.push(code);
+                // (the lifetimes in scope its trait's arguments name)
+                let mut named = vec![];
+                for b in bs {
+                    if let Bound::Trait(_, p) = b {
+                        path_lts(p, &mut named);
+                    }
+                }
+                let mut codes: Vec<u8> = vec![];
+                for l in &named {
+                    if let Some(i) = self.lts.iter().position(|x| x == l).filter(|&i| i < R_STATIC as usize) {
+                        if !codes.contains(&(i as u8)) {
+                            codes.push(i as u8);
+                        }
+                    }
+                }
+                if !codes.is_empty() && codes.len() < 16 {
+                    self.any = true;
+                    out.push(R_DYN_ARGS);
+                    out.push(codes.len() as u8);
+                    out.extend(codes);
+                }
             }
             // (a fn pointer: its parameters' regions, then its result's; those it binds are its own)
             PTy::Fn(ps, r) => {

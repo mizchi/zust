@@ -20,7 +20,7 @@ use super::{Cx, Loc, Sp};
 use crate::fxhash::FxMap as HashMap;
 use crate::parse::{Expr, GArg, Stmt, Ty as PTy};
 use crate::program::Program;
-use crate::types::{RSigSyn, Ty, R_BOUND, R_DYN_DEFAULT, R_ELIDED, R_ELIDED_ADT, R_FN, R_STATIC, R_UNKNOWN};
+use crate::types::{RSigSyn, Ty, R_BOUND, R_DYN_ARGS, R_DYN_DEFAULT, R_ELIDED, R_ELIDED_ADT, R_FN, R_STATIC, R_UNKNOWN};
 
 /// Region variables of a value, aligned with the region slots of its type
 pub type RT = Vec<u32>;
@@ -460,6 +460,18 @@ impl Codes<'_> {
             },
         }
     }
+    /// After a trait object's lifetime: the lifetimes its trait's arguments name
+    fn dyn_args(&mut self) -> &[u8] {
+        let Some(c) = self.codes else { return &[] };
+        if c.get(self.pos) != Some(&R_DYN_ARGS) {
+            return &[];
+        }
+        let n = c.get(self.pos + 1).copied().unwrap_or(0) as usize;
+        let from = (self.pos + 2).min(c.len());
+        let to = (from + n).min(c.len());
+        self.pos = to;
+        &c[from..to]
+    }
     /// A path type's marker for lifetimes not written (`Vec<T>`)
     fn elided_adt(&mut self) -> bool {
         match self.codes {
@@ -655,9 +667,13 @@ impl Rg {
                     self.var_walk(prog, ft.ret, &mut none, v, 0, acc, depth + 1);
                 }
             }
+            // (invariant in the lifetimes its trait's arguments name)
             Ty::Dyn(_) => {
                 let code = c.next();
                 lt(acc, code, v);
+                for &code in c.dyn_args() {
+                    lt(acc, code, Var::Inv);
+                }
             }
             _ => {}
         }
@@ -759,6 +775,8 @@ impl Rg {
                         0
                     }
                 };
+                // (the lifetimes its trait's arguments name: the object has no slots for them)
+                c.dyn_args();
                 out.push(v);
             }
             // (a fn pointer: the regions it binds are its own, as are those elided in it)
