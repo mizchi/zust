@@ -154,7 +154,7 @@ pub struct RgSt {
     pub lts: Vec<u32>,
     pub lt_names: Vec<String>,
     /// Variance of a struct / enum definition: its lifetime parameters, then its type parameters
-    pub variance: HashMap<u32, Vec<Var>>,
+    pub variance: HashMap<u32, std::sync::Arc<[Var]>>,
     /// The definitions whose variance is being computed; whether a provisional one was read; the ones computed, in
     /// order (see variance)
     pub var_open: Vec<u32>,
@@ -399,6 +399,15 @@ fn is_closure(prog: &Program, sid: u32) -> bool {
     prog.closure_of_struct.contains_key(&prog.base_of(sid))
 }
 
+/// A struct's definition, its base (an instance's generic one) and whether it is a tuple, with one lock of the
+/// table (an instance of a tuple is named `(A, B)`, the generic one `#tupleN`)
+#[inline]
+fn adt(prog: &Program, sid: u32) -> (&crate::program::StructDef, u32, bool) {
+    let sd = &prog.structs[sid as usize];
+    let tuple = sd.name.starts_with('(') || sd.name.starts_with("#tuple");
+    (sd, sd.base.unwrap_or(sid), tuple)
+}
+
 /// A closure's captures: their types (among its type arguments: a capture by reference is a pointer to it) and
 /// whether each is held by value
 fn captures(prog: &Program, sid: u32) -> Option<(&[Ty], &[bool])> {
@@ -416,8 +425,9 @@ pub fn count(prog: &Program, t: Ty, depth: u32) -> Option<usize> {
         Ty::Ref(_, i) => 1 + count(prog, *i, depth + 1)?,
         Ty::Ptr(_, i) | Ty::Box(i) | Ty::Array(i, _) | Ty::Slice(i) => count(prog, *i, depth + 1)?,
         Ty::Struct(sid) => {
+            let (sd, base, _) = adt(prog, sid);
             // (a closure: the regions of what it captures, a capture by reference the borrow's region first)
-            if is_closure(prog, sid) {
+            if prog.closure_of_struct.contains_key(&base) {
                 let (ts, moved) = captures(prog, sid)?;
                 let mut n = 0;
                 for (j, &a) in ts.iter().enumerate() {
@@ -428,8 +438,8 @@ pub fn count(prog: &Program, t: Ty, depth: u32) -> Option<usize> {
                 }
                 return Some(n);
             }
-            let mut n = lts_of(prog, prog.base_of(sid));
-            for &a in &prog.structs[sid as usize].args {
+            let mut n = lts_of(prog, base);
+            for &a in &sd.args {
                 n += count(prog, a, depth + 1)?;
             }
             n
@@ -674,7 +684,7 @@ impl RgSt {
     }
 
     /// The variance of the lifetime and type parameters of a definition (computed once)
-    pub fn variance(&mut self, prog: &Program, base: u32) -> Vec<Var> {
+    pub fn variance(&mut self, prog: &Program, base: u32) -> std::sync::Arc<[Var]> {
         if let Some(v) = self.variance.get(&base) {
             // (a type whose variance is being computed: what is known of it so far)
             if self.var_open.contains(&base) {
@@ -690,7 +700,7 @@ impl RgSt {
         // invariant)
         if prelude {
             let inv = matches!(sd.name.as_str(), "Cell" | "RefCell" | "UnsafeCell" | "Mutex" | "RwLock" | "OnceCell" | "OnceLock" | "AtomicPtr" | "MutexGuard");
-            let v = vec![if inv { Var::Inv } else { Var::Co }; nl + ng];
+            let v: std::sync::Arc<[Var]> = vec![if inv { Var::Inv } else { Var::Co }; nl + ng].into();
             self.variance.insert(base, v.clone());
             return v;
         }
@@ -703,7 +713,7 @@ impl RgSt {
         self.var_open.push(base);
         let outer_cycle = std::mem::take(&mut self.var_cycle);
         for _ in 0..16 {
-            self.variance.insert(base, cur.clone());
+            self.variance.insert(base, cur.clone().into());
             let log0 = self.var_log.len();
             self.var_cycle = false;
             let mut acc = vec![Var::Bi; nl + ng];
@@ -725,6 +735,7 @@ impl RgSt {
         // (a cycle through a type still open further out: that one is computed again, and this one with it)
         self.var_cycle |= outer_cycle;
         // (a parameter not used is an error of its own (E0392); as rustc, bivariant)
+        let cur: std::sync::Arc<[Var]> = cur.into();
         self.variance.insert(base, cur.clone());
         self.var_log.push(base);
         cur
@@ -753,14 +764,14 @@ impl RgSt {
             }
             Ty::Array(i, _) | Ty::Slice(i) => self.var_walk(prog, *i, c, v, nl, acc, depth + 1),
             Ty::Struct(sid) => {
-                if is_closure(prog, sid) {
+                let (sd, base, tuple) = adt(prog, sid);
+                if prog.closure_of_struct.contains_key(&base) {
                     c.ok = false;
                     return;
                 }
-                let base = prog.base_of(sid);
                 let n2 = lts_of(prog, base);
                 let nv = self.variance(prog, base);
-                if !prog.is_tuple(sid) {
+                if !tuple {
                     // (the marker of lifetimes not written is read whether or not the type has any)
                     let elided = c.elided_adt();
                     if n2 == 0 || elided {
@@ -771,9 +782,8 @@ impl RgSt {
                         }
                     }
                 }
-                let args = prog.structs[sid as usize].args.clone();
-                for (j, a) in args.into_iter().enumerate() {
-                    let w = if prog.is_tuple(sid) { Var::Co } else { nv.get(n2 + j).copied().unwrap_or(Var::Inv) };
+                for (j, &a) in sd.args.iter().enumerate() {
+                    let w = if tuple { Var::Co } else { nv.get(n2 + j).copied().unwrap_or(Var::Inv) };
                     self.var_walk(prog, a, c, v.then(w), nl, acc, depth + 1);
                 }
             }
@@ -846,14 +856,14 @@ impl RgSt {
                 self.inst(prog, *i, c, lts, targs, elided, out, depth + 1)
             }
             Ty::Struct(sid) => {
-                if is_closure(prog, sid) {
+                let (sd, base, tuple) = adt(prog, sid);
+                if prog.closure_of_struct.contains_key(&base) {
                     c.ok = false;
                     return;
                 }
-                let base = prog.base_of(sid);
                 let n = lts_of(prog, base);
                 let own0 = out.len();
-                if !prog.is_tuple(sid) {
+                if !tuple {
                     if n == 0 {
                         c.elided_adt();
                     } else if c.elided_adt() {
@@ -868,12 +878,12 @@ impl RgSt {
                         }
                     }
                 }
-                let ar = prog.adt_regions.get(&base).cloned();
-                for (j, &a) in prog.structs[sid as usize].args.clone().iter().enumerate() {
+                let ar = prog.adt_regions.get(&base);
+                for (j, &a) in sd.args.iter().enumerate() {
                     // (a trait object as a type argument: its default lifetime is the parameter's one lifetime bound
                     // (`struct Ref<'a, T: 'a>` makes `Ref<'a, dyn Tr>` `dyn Tr + 'a`); with two, a variable of its own)
                     if matches!(a, Ty::Dyn(_)) {
-                        if let (Some(ar), Some(gn)) = (&ar, prog.structs[base as usize].generics.get(j)) {
+                        if let (Some(ar), Some(gn)) = (ar, prog.structs[base as usize].generics.get(j)) {
                             let bs: Vec<u8> = ar.ty_outlives.iter().filter(|x| x.0 == *gn).map(|x| x.1).collect();
                             match bs.as_slice() {
                                 [] => {}
@@ -1039,15 +1049,14 @@ impl RgSt {
                 }
             }
             Ty::Struct(sid) => {
-                let base = prog.base_of(sid);
+                let (sd, base, tuple) = adt(prog, sid);
                 let n = lts_of(prog, base);
                 let nv = self.variance(prog, base);
                 for j in 0..n {
                     self.constrain(sub[*k], sup[*k], v.then(nv[j]), sp);
                     *k += 1;
                 }
-                let tuple = prog.is_tuple(sid);
-                for (j, &a) in prog.structs[sid as usize].args.clone().iter().enumerate() {
+                for (j, &a) in sd.args.iter().enumerate() {
                     let w = if tuple { Var::Co } else { nv.get(n + j).copied().unwrap_or(Var::Inv) };
                     self.rel(prog, a, sub, sup, k, v.then(w), sp, depth + 1);
                 }
@@ -1278,7 +1287,7 @@ impl RgSt {
                 // (its type arguments are well formed: `Option<&'s &'l ()>` implies 'l: 's)
                 if depth < 4 && !is_closure(prog, sid) {
                     if let Some((_, args)) = self.split_adt(prog, sid, &me) {
-                        for (&a, at) in prog.structs[sid as usize].args.clone().iter().zip(args) {
+                        for (&a, at) in prog.structs[sid as usize].args.iter().zip(args) {
                             if let Some(at) = at {
                                 self.implied(prog, a, &at, depth + 1);
                             }
