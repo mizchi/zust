@@ -1417,6 +1417,7 @@ impl Program {
             // (a trait with parameters, `impl Tr<u8> for S` and `impl Tr<u16> for S`, or self types that differ in their
             // arguments, `impl Tr for Vec<i32>` and `impl Tr for Vec<Box<i32>>`)
             let dup = !p.impls.insert((sid, tr.clone()));
+
             if impl_overlaps(&mut self_tys, sums, ii, sn, tr, dup)
                 && !matches!(
                     tr.as_str(),
@@ -1509,6 +1510,24 @@ impl Program {
                 }
             }
         }
+        // (a free constant of an uninhabited type (`!`, an enum with no variants) has no value to evaluate to; an
+        // associated one is evaluated only where it is used)
+        for c in p.consts.iter().filter(|c| c.stat.is_none() && (c.item as usize) < user && !c.name.contains("::")) {
+            let empty = match c.ty {
+                Ty::Never => true,
+                Ty::Struct(sid) => p.structs[sid as usize].is_enum && p.structs[sid as usize].variants.is_empty(),
+                _ => false,
+            };
+            if empty {
+                // (`const C: ! = panic!();`: the panic is what its evaluation reaches)
+                let why = if c.expr.trim_start().starts_with("panic") {
+                    "evaluation panicked: explicit panic".to_string()
+                } else {
+                    format!("evaluation of constant value failed: attempted to instantiate uninhabited type `{}`", p.tn(c.ty))
+                };
+                return Err(format!("{}:1: {why} (E0080)", items[c.item as usize].line));
+            }
+        }
         // (a static's type is well-formed: the bounds of its struct's parameters hold, `static S: W<u8>` with
         // `struct W<T: Tr>` and no `impl Tr for u8` (E0277))
         for c in p.consts.iter().filter(|c| c.stat.is_some()) {
@@ -1521,14 +1540,13 @@ impl Program {
             };
             for (pn, trs) in &sm.adt_bounds {
                 let Some(&a) = sm.adt_generics.iter().position(|g| g == pn).and_then(|i| sd.args.get(i)) else { continue };
-                // (only arguments whose impls `implements` knows exactly: scalars and non-generic structs. An array's
-                // impl or one of a generic struct's instances (`impl Tr for G<u8>`) is not told apart here)
-                let judged = a.is_int() || a.is_float() || matches!(a, Ty::Bool | Ty::Char | Ty::Unit) || matches!(a, Ty::Struct(x) if p.structs[x as usize].base.is_none() && p.structs[x as usize].generics.is_empty());
-                if !judged {
-                    continue;
-                }
                 for tr in trs {
-                    if sums.iter().any(|s| s.trait_decl.as_deref() == Some(tr.as_str())) && !p.implements(a, tr) {
+                    // (the program's own traits, for any argument; the prelude's (Eq ..), for the arguments `implements`
+                    // judges exactly: scalars and non-generic structs)
+                    let own = sums[..user.min(sums.len())].iter().any(|s| s.trait_decl.as_deref() == Some(tr.as_str()));
+                    let judged = a.is_int() || a.is_float() || matches!(a, Ty::Bool | Ty::Char | Ty::Unit) || matches!(a, Ty::Struct(x) if p.structs[x as usize].base.is_none() && p.structs[x as usize].generics.is_empty());
+                    let prelude = !own && judged && sums.iter().any(|s| s.trait_decl.as_deref() == Some(tr.as_str()));
+                    if (own || prelude) && !p.bound_holds(sums, user, a, tr, 0) {
                         // (an extern static: at its own line in the block)
                         let line = items[c.item as usize].line + crate::parse::extern_static(&c.expr).map_or(0, |x| x.0.saturating_sub(1));
                         return Err(format!("{line}:1: the trait bound `{}: {tr}` is not satisfied (E0277)", p.tn(a)));
@@ -1658,6 +1676,82 @@ impl Program {
             }
             _ => None,
         }
+    }
+
+    /// Whether t: tr holds, for a static's bound. For a trait the program declares, one of its impls in the program must
+    /// apply: its self type matches t exactly (`impl Tr for G<u8>` is not one for G<u16>, nor `&mut u8`'s for `&u8`;
+    /// a blanket `impl<P: B> Tr for P` matches any t) and the impl's bounds on its parameters hold for what they matched
+    /// (checked the same way). An impl this cannot read (a where clause, a self type that does not resolve) counts as
+    /// applying. Other traits (std's) are asked of `implements`
+    pub fn bound_holds(&self, sums: &[Summary], user: usize, t: Ty, tr: &str, depth: u32) -> bool {
+        self.bound_holds_in(sums, user, t, tr, depth, &mut vec![])
+    }
+
+    /// bound_holds, with the obligations being proved (active): one that comes back around (`impl<T: B> A for T` with
+    /// `impl<T: A> B for T`) is no proof, and that candidate fails
+    fn bound_holds_in(&self, sums: &[Summary], user: usize, t: Ty, tr: &str, depth: u32, active: &mut Vec<(Ty, String)>) -> bool {
+        // (the program's own traits: the first `user` summaries are its items, the rest the prelude's, whose traits
+        // (Default ..) builtin types implement without an impl to find)
+        if matches!(t, Ty::Param(_)) || self.has_param(t) || !sums[..user.min(sums.len())].iter().any(|s| s.trait_decl.as_deref() == Some(tr)) {
+            return self.implements(t, tr);
+        }
+        // (a trait object is its own trait's: `dyn Tr: Tr`, and the other traits written in it (`dyn Tr + Other`);
+        // not any blanket trait `implements` would also answer for it)
+        if let Ty::Dyn(d) = t {
+            if d.split('+').any(|p| {
+                let p = p.trim();
+                let name = p.split('<').next().unwrap_or(p).trim();
+                name.rsplit("::").next().unwrap_or(name) == tr
+            }) {
+                return true;
+            }
+        }
+        if active.iter().any(|(at, atr)| *at == t && atr == tr) {
+            return false;
+        }
+        // (a proof deeper than this (types that grow at each step) is not followed: it counts as holding)
+        if depth > 16 {
+            return true;
+        }
+        active.push((t, tr.to_string()));
+        let r = self.bound_impls(sums, user, t, tr, depth, active);
+        active.pop();
+        r
+    }
+
+    fn bound_impls(&self, sums: &[Summary], user: usize, t: Ty, tr: &str, depth: u32, active: &mut Vec<(Ty, String)>) -> bool {
+        let readable = |b: &str| b.chars().all(|c| c.is_alphanumeric() || c == '_');
+        for s in sums.iter().filter(|s| s.impl_trait.as_deref() == Some(tr)) {
+            let gn: Vec<&str> = s.impl_generics.iter().map(|g| g.0.as_str()).collect();
+            let Some(pt) = s.impl_self_ty.as_ref().and_then(|st| self.resolve_g(st, &gn).ok()) else {
+                return true;
+            };
+            let mut sol = vec![None; gn.len()];
+            if !self.match_ty(pt, t, &mut sol) {
+                continue;
+            }
+            // (match_ty also lets `&mut` stand for `&` and the like: the impl applies only to its self type itself)
+            if let Some(args) = sol.iter().copied().collect::<Option<Vec<Ty>>>() {
+                if self.subst(pt, &args) != t {
+                    continue;
+                }
+            }
+            // (a where clause this does not read: the impl applies, once its self type matches)
+            if !s.where_types.is_empty() {
+                return true;
+            }
+            let bounds_hold = s.impl_generics.iter().zip(&sol).all(|((_, bs), a)| match a {
+                Some(a) => bs.iter().all(|b| {
+                    let b = b.trim();
+                    !readable(b) || self.bound_holds_in(sums, user, *a, b, depth + 1, active)
+                }),
+                None => true,
+            });
+            if bounds_hold {
+                return true;
+            }
+        }
+        false
     }
 
     pub fn implements(&self, t: Ty, tr: &str) -> bool {

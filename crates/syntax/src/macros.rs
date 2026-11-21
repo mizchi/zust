@@ -472,10 +472,26 @@ fn body_lets(body: &[Pt], out: &mut Vec<String>) {
 fn transcribe_h(body: &[Pt], binds: &HashMap<String, Bind>, out: &mut String) -> Result<(), String> {
     let mut lets = vec![];
     body_lets(body, &mut lets);
-    transcribe(body, binds, out, &lets)
+    transcribe(body, &Binds::Root(binds), out, &lets)
 }
 
-fn transcribe(body: &[Pt], binds: &HashMap<String, Bind>, out: &mut String, lets: &[String]) -> Result<(), String> {
+/// The bindings a transcription reads: the match's, and over them, for each repetition being transcribed, its
+/// variables' bindings at that step (a layer of references: copying the whole map at each step was quadratic)
+enum Binds<'a> {
+    Root(&'a HashMap<String, Bind>),
+    Layer(HashMap<&'a str, &'a Bind>, &'a Binds<'a>),
+}
+
+impl<'a> Binds<'a> {
+    fn get(&self, name: &str) -> Option<&'a Bind> {
+        match self {
+            Binds::Root(m) => m.get(name),
+            Binds::Layer(m, up) => m.get(name).copied().or_else(|| up.get(name)),
+        }
+    }
+}
+
+fn transcribe(body: &[Pt], binds: &Binds, out: &mut String, lets: &[String]) -> Result<(), String> {
     for (k, p) in body.iter().enumerate() {
         match p {
             // (a label of the body's own: `'x` -> `'x__mh`)
@@ -556,15 +572,15 @@ fn transcribe(body: &[Pt], binds: &HashMap<String, Bind>, out: &mut String, lets
                             tt_text(s, out);
                         }
                     }
-                    let mut b = binds.clone();
+                    let mut layer: HashMap<&str, &Bind> = HashMap::default();
                     for v in &names {
                         if let Some(Bind::Many(xs)) = binds.get(v) {
                             if let Some(x) = xs.get(k) {
-                                b.insert(v.clone(), x.clone());
+                                layer.insert(v.as_str(), x);
                             }
                         }
                     }
-                    transcribe(inner, &b, out, lets)?;
+                    transcribe(inner, &Binds::Layer(layer, binds), out, lets)?;
                 }
             }
         }
