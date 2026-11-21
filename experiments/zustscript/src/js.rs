@@ -58,6 +58,7 @@ fn ts_mangle(t: &Ty) -> String {
         Ty::I32 => "i32".into(),
         Ty::U32 => "u32".into(),
         Ty::I64 => "i64".into(),
+        Ty::F32 => "f32".into(),
         Ty::F64 => "f64".into(),
         Ty::Param(p) => p.clone(),
         o => ts(o).replace(|c: char| !c.is_alphanumeric(), "_"),
@@ -131,6 +132,7 @@ const HELPERS: &[(&str, &str)] = &[
     ("$fold", "function $fold(xs, acc, f) {\n  for (let i = 0; i < xs.length; i++) acc = f(acc, xs[i]);\n  return acc;\n}"),
     ("$rangeFold", "function $rangeFold(a, b, acc, f) {\n  for (let i = a; i < b; i++) acc = f(acc, i);\n  return acc;\n}"),
     ("$rangeMap", "function $rangeMap(a, b, f) {\n  const r = new Array(Math.max(b - a, 0));\n  for (let i = a; i < b; i++) r[i - a] = f(i);\n  return r;\n}"),
+    ("$rangeMapTo", "function $rangeMapTo(T, a, b, f) {\n  const r = new T(Math.max(b - a, 0));\n  for (let i = a; i < b; i++) r[i - a] = f(i);\n  return r;\n}"),
     ("$round", "function $round(x) {\n  return x < 0 ? -Math.round(-x) : Math.round(x);\n}"),
     (
         "$handle",
@@ -648,6 +650,7 @@ impl<'a> Js<'a> {
             return self.iife(e);
         }
         match &e.kind {
+            EK::Lit(Lit::Float(f)) if self.num(e.id) == Ty::F32 => f32_lit(f),
             EK::Lit(l) => lit(l, self.num(e.id) == Ty::I64),
             EK::Var(n) | EK::Path(_, n) => match self.info.callee.get(&e.id).cloned() {
                 Some(Callee::Variant(en)) => {
@@ -683,6 +686,10 @@ impl<'a> Js<'a> {
                     };
                 }
                 let a: Vec<String> = args.iter().map(|x| self.expr(x)).collect();
+                if let Some(Callee::TypedCtor(el, c)) = self.info.callee.get(&f.id).cloned() {
+                    let ctor = typed_js(&el);
+                    return if c == "zeros" { format!("new {ctor}({})", a[0]) } else { format!("{ctor}.from({})", a[0]) };
+                }
                 if let EK::Var(n) | EK::Path(_, n) = &f.kind {
                     match self.info.callee.get(&f.id).cloned() {
                         Some(Callee::Variant(en)) => return self.variant_value(&en, n, a),
@@ -717,6 +724,11 @@ impl<'a> Js<'a> {
                         let f = self.callback(&args[1], 2);
                         let init = self.expr(&args[0]);
                         format!("$rangeFold({lo}, {hi}, {init}, {f})")
+                    } else if let Some(el) = self.info.typed_lit.get(&e.id).cloned() {
+                        // (into a typed array, as the type says)
+                        self.helpers.insert("$rangeMapTo");
+                        let f = self.callback(&args[0], 1);
+                        format!("$rangeMapTo({}, {lo}, {hi}, {f})", typed_js(&el))
                     } else {
                         self.helpers.insert("$rangeMap");
                         let f = self.callback(&args[0], 1);
@@ -747,7 +759,11 @@ impl<'a> Js<'a> {
                     Some(B::Split) => format!("{recv}.split({})", arg(self, 0)),
                     Some(B::ToString) => format!("String({})", self.expr(r)),
                     Some(B::Floor) => format!("Math.floor({})", self.expr(r)),
+                    Some(B::Sqrt) if self.num(e.id) == Ty::F32 => format!("Math.fround(Math.sqrt({}))", self.expr(r)),
                     Some(B::Sqrt) => format!("Math.sqrt({})", self.expr(r)),
+                    Some(B::Max) => format!("Math.max({}, {})", self.expr(r), arg(self, 0)),
+                    Some(B::Min) => format!("Math.min({}, {})", self.expr(r), arg(self, 0)),
+                    Some(B::ToArray) => format!("Array.from({recv})"),
                     Some(B::Abs) => format!("Math.abs({})", self.expr(r)),
                     Some(B::Round) => {
                         self.helpers.insert("$round");
@@ -774,7 +790,7 @@ impl<'a> Js<'a> {
                     return lit(&Lit::Int(-n), self.num(x.id) == Ty::I64);
                 }
                 if let EK::Lit(Lit::Float(f)) = &x.kind {
-                    return format!("-{f}");
+                    return if self.num(x.id) == Ty::F32 { format!("-{}", f32_lit(f)) } else { format!("-{f}") };
                 }
                 let v = self.operand(x);
                 match self.num(e.id) {
@@ -822,6 +838,10 @@ impl<'a> Js<'a> {
                 }
                 format!("{{ {} }}", parts.join(", "))
             }
+            EK::Array(xs) if self.info.typed_lit.contains_key(&e.id) => {
+                let ctor = typed_js(&self.info.typed_lit[&e.id].clone());
+                format!("new {ctor}([{}])", xs.iter().map(|x| self.expr(x)).collect::<Vec<_>>().join(", "))
+            }
             EK::Array(xs) | EK::Tuple(xs) => format!("[{}]", xs.iter().map(|x| self.expr(x)).collect::<Vec<_>>().join(", ")),
             EK::Jsx(j) => self.jsx_expr(j),
             EK::Cast(x, _) => {
@@ -831,7 +851,12 @@ impl<'a> Js<'a> {
                 let o = || if v.chars().all(|c| c.is_alphanumeric() || c == '_' || c == '.') { v.clone() } else { format!("({v})") };
                 match (&from, &to) {
                     (a, b) if a == b => v,
-                    (Ty::I32 | Ty::U32, Ty::F64) => v,
+                    (Ty::I32 | Ty::U32 | Ty::F32, Ty::F64) => v,
+                    (Ty::I32 | Ty::U32 | Ty::F64, Ty::F32) => format!("Math.fround({v})"),
+                    (Ty::I64, Ty::F32) => format!("Math.fround(Number({v}))"),
+                    (Ty::F32, Ty::I32) => self.help("$f64_to_i32", &v),
+                    (Ty::F32, Ty::U32) => self.help("$f64_to_u32", &v),
+                    (Ty::F32, Ty::I64) => self.help("$f64_to_i64", &v),
                     (Ty::I32, Ty::U32) => format!("{} >>> 0", o()),
                     (Ty::U32, Ty::I32) => format!("{} | 0", o()),
                     (Ty::I32 | Ty::U32, Ty::I64) => format!("BigInt({v})"),
@@ -903,6 +928,7 @@ impl<'a> Js<'a> {
         // (operands of the wrapping forms are inside `(..)` or a call: any precedence above `|` and `,` will do)
         let p = match (&t, op) {
             (Ty::I32 | Ty::U32 | Ty::I64, "+" | "-" | "*" | "/" | "%") => if op == "+" || op == "-" { bin_prec(op) } else { 3 },
+            (Ty::F32, "+" | "-" | "*" | "/" | "%") => bin_prec(op),
             _ => bin_prec(op),
         };
         let (a, b) = (self.bin_operand(l, p, false), self.bin_operand(r, p, true));
@@ -922,6 +948,8 @@ impl<'a> Js<'a> {
             (Ty::U32, "/") => self.help("$div_u32", &format!("{a}, {b}")),
             (Ty::U32, "%") => self.help("$rem_u32", &format!("{a}, {b}")),
             (Ty::I64, _) => format!("BigInt.asIntN(64, {a} {op} {b})"),
+            // (f32: the f64 result rounded to f32 is exactly the f32 operation, for + - * / and %)
+            (Ty::F32, _) => format!("Math.fround({a} {op} {b})"),
             _ => format!("{a} {op} {b}"),
         }
     }
@@ -966,6 +994,22 @@ impl<'a> Js<'a> {
             None => format!("{f}({tag}, {p})"),
         }
     }
+}
+
+/// The JS typed array of an element type
+pub fn typed_js(el: &Ty) -> &'static str {
+    match el {
+        Ty::F32 => "Float32Array",
+        Ty::I32 => "Int32Array",
+        _ => "Float64Array",
+    }
+}
+
+/// An f32 literal: the f32 nearest to it, written as its shortest f64 text (exact in JS)
+fn f32_lit(f: &str) -> String {
+    let v = f.parse::<f64>().unwrap_or(0.0) as f32 as f64;
+    let s = format!("{v}");
+    if s.contains('.') || s.contains('e') || s.contains("inf") || s.contains("NaN") { s } else { format!("{s}.0") }
 }
 
 fn bin_prec(op: &str) -> u8 {
@@ -1015,7 +1059,9 @@ pub fn ts(t: &Ty) -> String {
         // (branded: `i32` is `number & { __zsc_num: "i32" }`, so TS keeps integers and floats apart too)
         Ty::I32 => "i32".into(),
         Ty::U32 => "u32".into(),
+        Ty::F32 => "f32".into(),
         Ty::F64 => "f64".into(),
+        Ty::Typed(e) => typed_js(e).into(),
         Ty::I64 => "bigint".into(),
         Ty::Str => "string".into(),
         Ty::Bool => "boolean".into(),
@@ -1040,6 +1086,7 @@ fn ts_inner(t: &Ty) -> String {
 pub const BRANDS: &[(&str, &str, &str)] = &[
     ("i32", "a 32-bit signed integer", "Number.isInteger(x) && x >= -2147483648 && x <= 2147483647"),
     ("u32", "a 32-bit unsigned integer", "Number.isInteger(x) && x >= 0 && x <= 4294967295"),
+    ("f32", "a 32-bit float", "Object.is(Math.fround(x), x)"),
     ("f64", "a 64-bit float", "typeof x === \"number\""),
 ];
 

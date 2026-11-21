@@ -131,6 +131,7 @@ pub enum WTy {
     I32,
     U32,
     I64,
+    F32,
     F64,
     Bool,
     Unit,
@@ -141,6 +142,8 @@ pub enum WTy {
     /// `String` / `Vec<f64>` / ... (result: copied out, then freed by the glue)
     String,
     Vec(Elem),
+    /// a result for a typed-array type (`F64Array` ..): copied out with `.slice()`
+    TVec(Elem),
     /// A record or an enum of a `@wasm fn`'s signature: crosses as its scalar slots (no linear memory for an
     /// argument; a result is written to the glue's out area, 8 bytes a slot)
     Value(Box<VTy>),
@@ -178,6 +181,7 @@ pub enum Elem {
     I32,
     U32,
     I64,
+    F32,
     F64,
 }
 
@@ -187,6 +191,7 @@ impl Elem {
             "i32" => Elem::I32,
             "u32" => Elem::U32,
             "i64" => Elem::I64,
+            "f32" => Elem::F32,
             "f64" => Elem::F64,
             _ => return None,
         })
@@ -197,6 +202,7 @@ impl Elem {
             Elem::I32 => ("i32", "Int32Array", 4),
             Elem::U32 => ("u32", "Uint32Array", 4),
             Elem::I64 => ("i64", "BigInt64Array", 8),
+            Elem::F32 => ("f32", "Float32Array", 4),
             Elem::F64 => ("f64", "Float64Array", 8),
         }
     }
@@ -210,7 +216,8 @@ pub enum Item {
     /// (bounds: `T: Num` / `T: Integer` / `T: Float`; a function with one is monomorphized per numeric type)
     /// (`wasm`: written `@wasm fn`: lowered to Rust and compiled to wasm, see lower.rs)
     /// (`simd`: written `@simd fn`: an array kernel vectorized with v128, see simd.rs)
-    Fn { name: String, public: bool, wasm: bool, simd: bool, generics: Vec<String>, bounds: Vec<(String, String)>, args: Vec<(String, TyS)>, ret: Option<TyS>, body: Expr, pos: Pos },
+    /// (`relaxed`: `@simd(relaxed)`: relaxed SIMD allowed: fused multiply-add, relaxed min / max)
+    Fn { name: String, public: bool, wasm: bool, simd: bool, relaxed: bool, generics: Vec<String>, bounds: Vec<(String, String)>, args: Vec<(String, TyS)>, ret: Option<TyS>, body: Expr, pos: Pos },
     /// `extern "react" fn useState<T>(init: T) -> (T, fn(T) -> ()) = "useState";`
     Extern { name: String, module: Option<String>, generics: Vec<String>, args: Vec<TyS>, ret: TyS, js: String, pos: Pos },
     /// `wasm fn` (the text is the whole Rust function, handed to zustc)

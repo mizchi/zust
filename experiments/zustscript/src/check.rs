@@ -19,7 +19,11 @@ pub enum Ty {
     I32,
     U32,
     I64,
+    /// (JS: a number rounded with Math.fround after every operation, which is exactly f32 arithmetic)
+    F32,
     F64,
+    /// `F64Array` / `F32Array` / `I32Array`: a numeric array backed by a JS typed array (the element type inside)
+    Typed(Box<Ty>),
     Str,
     Bool,
     Unit,
@@ -45,6 +49,8 @@ pub enum Callee {
     Variant(String),
     /// the built-in `range(start, end)`: the i32s from start to end (exclusive)
     Range,
+    /// `F64Array::zeros(n)` / `F64Array::from(xs)` (the element type, the constructor)
+    TypedCtor(Ty, String),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -67,6 +73,9 @@ pub enum Builtin {
     Round,
     Sqrt,
     Abs,
+    Max,
+    Min,
+    ToArray,
 }
 
 pub struct RecordDef {
@@ -111,6 +120,8 @@ pub struct Info {
     pub effects: HashMap<String, BTreeSet<String>>,
     /// the type arguments at each use of a monomorphized (numeric-bound) function, in its generics' order
     pub inst: HashMap<Id, Vec<Ty>>,
+    /// array literals that build a typed array (the element type): `let w: F32Array = [..]`
+    pub typed_lit: HashMap<Id, Ty>,
     pub records: HashMap<String, RecordDef>,
     pub enums: HashMap<String, EnumDef>,
     /// variant name → enum name (variant names are unique in a file)
@@ -140,6 +151,9 @@ pub struct Checker {
     /// the numeric bounds of the function being checked
     bounds: HashMap<String, String>,
     insts: Vec<(Id, Vec<Ty>)>,
+    /// type variables that only float types may fill (from float literals)
+    floatv: HashSet<u32>,
+    typed_lits: Vec<(Id, Ty)>,
     bound_checks: Vec<(Pos, Ty, String)>,
     /// mutable locals: (scope index, name)
     muts: HashSet<(usize, String)>,
@@ -155,8 +169,8 @@ pub const BOUNDS: &[&str] = &["Num", "Integer", "Float"];
 pub fn bound_types(b: &str) -> Vec<Ty> {
     match b {
         "Integer" => vec![Ty::I32, Ty::U32, Ty::I64],
-        "Float" => vec![Ty::F64],
-        _ => vec![Ty::I32, Ty::U32, Ty::I64, Ty::F64],
+        "Float" => vec![Ty::F32, Ty::F64],
+        _ => vec![Ty::I32, Ty::U32, Ty::I64, Ty::F32, Ty::F64],
     }
 }
 
@@ -165,15 +179,12 @@ pub fn wty_to_ty(w: &WTy) -> Ty {
         WTy::I32 => Ty::I32,
         WTy::U32 => Ty::U32,
         WTy::I64 => Ty::I64,
+        WTy::F32 => Ty::F32,
         WTy::F64 => Ty::F64,
         WTy::Bool => Ty::Bool,
         WTy::Unit => Ty::Unit,
-        WTy::Slice(e) | WTy::Vec(e) => Ty::Array(Box::new(match e {
-            Elem::I32 => Ty::I32,
-            Elem::U32 => Ty::U32,
-            Elem::I64 => Ty::I64,
-            Elem::F64 => Ty::F64,
-        })),
+        WTy::Slice(e) | WTy::Vec(e) => Ty::Array(Box::new(elem_ty(*e))),
+        WTy::TVec(e) => Ty::Typed(Box::new(elem_ty(*e))),
         WTy::Str | WTy::String => Ty::Str,
         WTy::Callback(a, r, _) => Ty::Fn(a.iter().map(wty_to_ty).collect(), Box::new(wty_to_ty(r))),
         // (only lowered `@wasm fn`s have these, and their types come from their zustscript signature)
@@ -186,7 +197,24 @@ pub fn is_int(t: &Ty) -> bool {
 }
 
 pub fn is_num(t: &Ty) -> bool {
-    matches!(t, Ty::I32 | Ty::U32 | Ty::I64 | Ty::F64)
+    matches!(t, Ty::I32 | Ty::U32 | Ty::I64 | Ty::F32 | Ty::F64)
+}
+
+pub fn elem_ty(e: Elem) -> Ty {
+    match e {
+        Elem::I32 => Ty::I32,
+        Elem::U32 => Ty::U32,
+        Elem::I64 => Ty::I64,
+        Elem::F32 => Ty::F32,
+        Elem::F64 => Ty::F64,
+    }
+}
+
+/// The typed-array types: (name, element type)
+pub const TYPED: &[(&str, Ty)] = &[("F64Array", Ty::F64), ("F32Array", Ty::F32), ("I32Array", Ty::I32)];
+
+pub fn typed_name(el: &Ty) -> &'static str {
+    TYPED.iter().find(|t| t.1 == *el).map_or("F64Array", |t| t.0)
 }
 
 impl Checker {
@@ -205,6 +233,8 @@ impl Checker {
             casts: vec![],
             bounds: HashMap::new(),
             insts: vec![],
+            floatv: HashSet::new(),
+            typed_lits: vec![],
             bound_checks: vec![],
             muts: HashSet::new(),
             closure_bases: vec![],
@@ -219,6 +249,15 @@ impl Checker {
     fn fresh(&mut self) -> Ty {
         self.subst.push(None);
         Ty::Var(self.subst.len() as u32 - 1)
+    }
+
+    /// The type of a float literal: a variable that only f32 / f64 may fill (f64 when nothing decides)
+    fn fresh_float(&mut self) -> Ty {
+        let t = self.fresh();
+        if let Ty::Var(v) = t {
+            self.floatv.insert(v);
+        }
+        t
     }
 
     /// The type of an integer literal: a variable that only i32 / u32 / i64 may fill
@@ -237,6 +276,7 @@ impl Checker {
                 None => t.clone(),
             },
             Ty::Array(a) => Ty::Array(Box::new(self.resolve(a))),
+            Ty::Typed(a) => Ty::Typed(Box::new(self.resolve(a))),
             Ty::Tuple(ts) => Ty::Tuple(ts.iter().map(|t| self.resolve(t)).collect()),
             Ty::Fn(a, r) => Ty::Fn(a.iter().map(|t| self.resolve(t)).collect(), Box::new(self.resolve(r))),
             Ty::Named(n, a) => Ty::Named(n.clone(), a.iter().map(|t| self.resolve(t)).collect()),
@@ -262,8 +302,20 @@ impl Checker {
                 if self.occurs(*x, t) {
                     return false;
                 }
+                if self.floatv.contains(x) {
+                    match t {
+                        Ty::Var(y) if self.intv.contains(y) => return false,
+                        Ty::Var(y) => {
+                            self.floatv.insert(*y);
+                        }
+                        Ty::F32 | Ty::F64 => {}
+                        Ty::Param(p) if matches!(self.bounds.get(p).map(|s| s.as_str()), Some("Num" | "Float")) => {}
+                        _ => return false,
+                    }
+                }
                 if self.intv.contains(x) {
                     match t {
+                        Ty::Var(y) if self.floatv.contains(y) => return false,
                         Ty::Var(y) => {
                             self.intv.insert(*y);
                         }
@@ -275,7 +327,7 @@ impl Checker {
                 self.subst[*x as usize] = Some(t.clone());
                 true
             }
-            (Ty::Array(x), Ty::Array(y)) => self.unify_inner(x, y),
+            (Ty::Array(x), Ty::Array(y)) | (Ty::Typed(x), Ty::Typed(y)) => self.unify_inner(x, y),
             (Ty::Tuple(xs), Ty::Tuple(ys)) => xs.len() == ys.len() && xs.iter().zip(ys).all(|(x, y)| self.unify_inner(x, y)),
             (Ty::Named(n, xs), Ty::Named(m, ys)) => n == m && xs.len() == ys.len() && xs.iter().zip(ys).all(|(x, y)| self.unify_inner(x, y)),
             (Ty::Fn(xa, xr), Ty::Fn(ya, yr)) => {
@@ -308,7 +360,9 @@ impl Checker {
             Ty::I32 => "i32".into(),
             Ty::U32 => "u32".into(),
             Ty::I64 => "i64".into(),
+            Ty::F32 => "f32".into(),
             Ty::F64 => "f64".into(),
+            Ty::Typed(e) => typed_name(&e).into(),
             Ty::Str => "String".into(),
             Ty::Bool => "bool".into(),
             Ty::Unit => "()".into(),
@@ -320,6 +374,7 @@ impl Checker {
             Ty::Named(n, a) => format!("{n}<{}>", a.iter().map(|t| self.show(t)).collect::<Vec<_>>().join(", ")),
             Ty::Param(p) => p,
             Ty::Var(v) if self.intv.contains(&v) => "{integer}".into(),
+            Ty::Var(v) if self.floatv.contains(&v) => "{float}".into(),
             Ty::Var(v) => format!("?{v}"),
         }
     }
@@ -341,7 +396,11 @@ impl Checker {
                     "i32" => Ty::I32,
                     "u32" => Ty::U32,
                     "i64" => Ty::I64,
+                    "f32" => Ty::F32,
                     "f64" => Ty::F64,
+                    "F64Array" => Ty::Typed(Box::new(Ty::F64)),
+                    "F32Array" => Ty::Typed(Box::new(Ty::F32)),
+                    "I32Array" => Ty::Typed(Box::new(Ty::I32)),
                     "String" => Ty::Str,
                     "bool" => Ty::Bool,
                     "Jsx" => Ty::Jsx,
@@ -489,6 +548,18 @@ impl Checker {
             if let Ty::Var(w) = self.shallow(&Ty::Var(v)) {
                 self.subst[w as usize] = Some(Ty::I32);
             }
+        }
+        // float literals: f64
+        let mut floatv: Vec<u32> = self.floatv.iter().copied().collect();
+        floatv.sort();
+        for v in floatv {
+            if let Ty::Var(w) = self.shallow(&Ty::Var(v)) {
+                self.subst[w as usize] = Some(Ty::F64);
+            }
+        }
+        for (id, t) in std::mem::take(&mut self.typed_lits) {
+            let r = self.resolve(&t);
+            self.info.typed_lit.insert(id, r);
         }
         for (id, t) in std::mem::take(&mut self.nums) {
             let r = self.resolve(&t);
@@ -662,7 +733,7 @@ impl Checker {
         match &e.kind {
             EK::Lit(l) => {
                 let t = self.lit_ty(l);
-                if matches!(l, Lit::Int(_)) {
+                if matches!(l, Lit::Int(_) | Lit::Float(_)) {
                     self.nums.push((e.id, t.clone()));
                 }
                 t
@@ -722,6 +793,7 @@ impl Checker {
                     "i32" => Ty::I32,
                     "u32" => Ty::U32,
                     "i64" => Ty::I64,
+                    "f32" => Ty::F32,
                     "f64" => Ty::F64,
                     p if self.bounds.contains_key(p) => Ty::Param(p.to_string()),
                     _ => {
@@ -731,6 +803,19 @@ impl Checker {
                 };
                 self.nums.push((e.id, t.clone()));
                 Ty::Fn(vec![], Box::new(t))
+            }
+            EK::Path(tn, c) if TYPED.iter().any(|t| t.0 == tn) => {
+                let el = TYPED.iter().find(|t| t.0 == tn).unwrap().1.clone();
+                let typed = Ty::Typed(Box::new(el.clone()));
+                self.info.callee.insert(e.id, Callee::TypedCtor(el.clone(), c.clone()));
+                match c.as_str() {
+                    "zeros" => Ty::Fn(vec![Ty::I32], Box::new(typed)),
+                    "from" => Ty::Fn(vec![Ty::Array(Box::new(el))], Box::new(typed)),
+                    _ => {
+                        self.err(pos, format!("`{tn}` has `{tn}::zeros(n)` and `{tn}::from(xs)` (or write a literal where the type says {tn})"));
+                        self.fresh()
+                    }
+                }
             }
             EK::Path(en, v) => self.variant(e.id, pos, Some(en), v),
             EK::Call(f, args) => {
@@ -757,7 +842,15 @@ impl Checker {
             }
             EK::Method(recv, name, args) => {
                 let rt = self.infer(recv, None);
-                let rt = self.resolve(&rt);
+                let mut rt = self.resolve(&rt);
+                // (a float literal's other methods: f64, the default, unless something decided)
+                if let Ty::Var(v) = rt
+                    && self.floatv.contains(&v)
+                    && name != "to_string"
+                {
+                    self.unify(pos, &rt, &Ty::F64);
+                    rt = Ty::F64;
+                }
                 // `props.onPick(x)`: a call of a record's function-typed field
                 if let Ty::Named(n, targs) = &rt
                     && let Some(r) = self.info.records.get(n)
@@ -788,8 +881,24 @@ impl Checker {
                     return self.fresh();
                 };
                 self.info.builtin.insert(e.id, b);
+                // (the float methods' JS depends on f32 / f64: Math.fround)
+                if matches!(b, Builtin::Sqrt | Builtin::Max | Builtin::Min | Builtin::Abs | Builtin::Floor | Builtin::Round) {
+                    self.nums.push((e.id, rt.clone()));
+                }
                 if params.len() != args.len() {
                     self.err(pos, format!("`.{name}()` takes {} argument(s), found {}", params.len(), args.len()));
+                }
+                // `range(0, n).map(..)` where the type says F32Array / ..: it builds that typed array
+                let mut ret = ret;
+                if b == Builtin::Map
+                    && matches!(&recv.kind, EK::Call(f, _) if matches!(self.info.callee.get(&f.id), Some(Callee::Range)))
+                    && let Some(Ty::Typed(el)) = expect.map(|t| self.resolve(t))
+                {
+                    if let Ty::Array(u) = &ret {
+                        self.unify(pos, u, &el);
+                    }
+                    self.typed_lits.push((e.id, (*el).clone()));
+                    ret = Ty::Typed(el);
                 }
                 for (a, p) in args.iter().zip(&params) {
                     let t = self.infer(a, Some(p));
@@ -883,7 +992,12 @@ impl Checker {
             EK::For(x, it, body) => {
                 let itt = self.infer(it, None);
                 let el = self.fresh();
-                self.unify(it.pos, &itt, &Ty::Array(Box::new(el.clone())));
+                let itt = self.resolve(&itt);
+                if let Ty::Typed(e) = &itt {
+                    self.unify(it.pos, e, &el);
+                } else {
+                    self.unify(it.pos, &itt, &Ty::Array(Box::new(el.clone())));
+                }
                 self.scopes.push([(x.clone(), el)].into_iter().collect());
                 self.loops += 1;
                 let bt = self.infer(body, Some(&Ty::Unit));
@@ -904,8 +1018,13 @@ impl Checker {
                 let it = self.infer(i, Some(&Ty::I32));
                 self.unify(i.pos, &it, &Ty::I32);
                 let el = self.fresh();
-                self.unify(x.pos, &xt, &Ty::Array(Box::new(el.clone())));
-                el
+                match self.resolve(&xt) {
+                    Ty::Typed(e) => *e,
+                    _ => {
+                        self.unify(x.pos, &xt, &Ty::Array(Box::new(el.clone())));
+                        el
+                    }
+                }
             }
             EK::Cast(x, ty) => {
                 let g = self.generics.clone();
@@ -1130,6 +1249,15 @@ impl Checker {
                 rt
             }
             EK::Array(xs) => {
+                // a literal where the type says F64Array / F32Array / I32Array builds that typed array
+                if let Some(Ty::Typed(el)) = expect.map(|t| self.resolve(t)) {
+                    for x in xs {
+                        let t = self.infer(x, Some(&el));
+                        self.unify(x.pos, &t, &el);
+                    }
+                    self.typed_lits.push((e.id, (*el).clone()));
+                    return Ty::Typed(el);
+                }
                 let et = match expect.map(|t| self.resolve(t)) {
                     Some(Ty::Array(t)) => *t,
                     _ => self.fresh(),
@@ -1151,7 +1279,7 @@ impl Checker {
     fn lit_ty(&mut self, l: &Lit) -> Ty {
         match l {
             Lit::Int(_) => self.fresh_int(),
-            Lit::Float(_) => Ty::F64,
+            Lit::Float(_) => self.fresh_float(),
             Lit::Str(_) => Ty::Str,
             Lit::Bool(_) => Ty::Bool,
             Lit::Unit => Ty::Unit,
@@ -1238,7 +1366,17 @@ impl Checker {
         use Builtin as B;
         let f = |a: Vec<Ty>, r: Ty| Ty::Fn(a, Box::new(r));
         Some(match (recv, name) {
-            (Ty::Array(_), "len") | (Ty::Str, "len") => (vec![], Ty::I32, B::Len),
+            (Ty::Array(_), "len") | (Ty::Str, "len") | (Ty::Typed(_), "len") => (vec![], Ty::I32, B::Len),
+            // a typed array's map keeps its type (the element type: Float64Array.map stores into a Float64Array)
+            (Ty::Typed(t), "map") => (vec![f(vec![(**t).clone()], (**t).clone())], recv.clone(), B::Map),
+            (Ty::Typed(t), "filter") => (vec![f(vec![(**t).clone()], Ty::Bool)], recv.clone(), B::Filter),
+            (Ty::Typed(t), "any") => (vec![f(vec![(**t).clone()], Ty::Bool)], Ty::Bool, B::Any),
+            (Ty::Typed(t), "all") => (vec![f(vec![(**t).clone()], Ty::Bool)], Ty::Bool, B::All),
+            (Ty::Typed(t), "fold") => {
+                let u = self.fresh();
+                (vec![u.clone(), f(vec![u.clone(), (**t).clone()], u.clone())], u, B::Fold)
+            }
+            (Ty::Typed(t), "to_array") => (vec![], Ty::Array(t.clone()), B::ToArray),
             (Ty::Array(t), "map") => {
                 let u = self.fresh();
                 (vec![f(vec![(**t).clone()], u.clone())], Ty::Array(Box::new(u)), B::Map)
@@ -1257,14 +1395,18 @@ impl Checker {
             (Ty::Str, "trim") => (vec![], Ty::Str, B::Trim),
             (Ty::Str, "contains") => (vec![Ty::Str], Ty::Bool, B::Contains),
             (Ty::Str, "split") => (vec![Ty::Str], Ty::Array(Box::new(Ty::Str)), B::Split),
-            (Ty::I32 | Ty::U32 | Ty::I64 | Ty::F64 | Ty::Bool, "to_string") => (vec![], Ty::Str, B::ToString),
+            (Ty::I32 | Ty::U32 | Ty::I64 | Ty::F32 | Ty::F64 | Ty::Bool, "to_string") => (vec![], Ty::Str, B::ToString),
             (Ty::Param(p), "to_string") if self.bounds.contains_key(p) => (vec![], Ty::Str, B::ToString),
             // (an integer literal whose type is not decided yet: every integer type has it)
             (Ty::Var(v), "to_string") if self.intv.contains(v) => (vec![], Ty::Str, B::ToString),
-            (Ty::F64, "floor") => (vec![], Ty::F64, B::Floor),
-            (Ty::F64, "round") => (vec![], Ty::F64, B::Round),
-            (Ty::F64, "sqrt") => (vec![], Ty::F64, B::Sqrt),
-            (Ty::F64, "abs") => (vec![], Ty::F64, B::Abs),
+            (Ty::Var(v), "to_string") if self.floatv.contains(v) => (vec![], Ty::Str, B::ToString),
+            (Ty::F32 | Ty::F64, "floor") => (vec![], recv.clone(), B::Floor),
+            (Ty::F32 | Ty::F64, "round") => (vec![], recv.clone(), B::Round),
+            (Ty::F32 | Ty::F64, "sqrt") => (vec![], recv.clone(), B::Sqrt),
+            (Ty::F32 | Ty::F64, "abs") => (vec![], recv.clone(), B::Abs),
+            // (JS's Math.max / Math.min: NaN if either is NaN, and +0 above -0)
+            (Ty::F32 | Ty::F64, "max") => (vec![recv.clone()], recv.clone(), B::Max),
+            (Ty::F32 | Ty::F64, "min") => (vec![recv.clone()], recv.clone(), B::Min),
             _ => return None,
         })
     }

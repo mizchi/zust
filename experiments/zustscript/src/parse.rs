@@ -274,6 +274,17 @@ impl Parser {
         } else {
             (false, false)
         };
+        // `@simd(relaxed)`
+        let relaxed = if simd && self.eat("(")? {
+            let (a, apos) = self.ident()?;
+            if a != "relaxed" {
+                return Err((apos, format!("unknown option `{a}` of @simd (there is `relaxed`)")));
+            }
+            self.expect(")")?;
+            true
+        } else {
+            false
+        };
         let wasm_attr = wasm || simd;
         let public = if self.is_kw("pub")? {
             self.next()?;
@@ -331,7 +342,7 @@ impl Parser {
                 }
                 let ret = if self.eat("->")? { Some(self.ty()?) } else { None };
                 let body = self.block()?;
-                Ok(Item::Fn { name, public, wasm, simd, generics, bounds, args, ret, body, pos })
+                Ok(Item::Fn { name, public, wasm, simd, relaxed, generics, bounds, args, ret, body, pos })
             }
             "extern" => {
                 let module = match &self.peek()?.t {
@@ -431,6 +442,7 @@ impl Parser {
             "i32" => WTy::I32,
             "i64" => WTy::I64,
             "u32" => WTy::U32,
+            "f32" => WTy::F32,
             "f64" => WTy::F64,
             "bool" => WTy::Bool,
             "()" => WTy::Unit,
@@ -1072,6 +1084,7 @@ fn scalar_wty(s: &str) -> Option<WTy> {
     Some(match s {
         "i32" => WTy::I32,
         "u32" => WTy::U32,
+        "f32" => WTy::F32,
         "f64" => WTy::F64,
         "bool" => WTy::Bool,
         "()" => WTy::Unit,

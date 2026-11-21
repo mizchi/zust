@@ -136,7 +136,7 @@ fn dts_typechecks() {
         return;
     }
     let d = out_dir("ts");
-    for name in ["basics", "app"] {
+    for name in ["basics", "app", "ml"] {
         let o = zsc(&root().join(format!("examples/{name}.zsc")), &d, &[]);
         assert!(o.status.success(), "zsc failed:\n{}", String::from_utf8_lossy(&o.stderr));
     }
@@ -233,4 +233,25 @@ fn i64_in_js_warns() {
     assert!(String::from_utf8_lossy(&o.stderr).contains("warning: i64 arithmetic in the JS layer runs on BigInt"));
     let o = zsc(&root().join("examples/numeric.zsc"), &out_dir("warn-numeric"), &[]);
     assert!(!String::from_utf8_lossy(&o.stderr).contains("warning"), "{}", String::from_utf8_lossy(&o.stderr));
+}
+
+/// examples/ml.zsc: f32 kernels on F32Array (f32x4), @simd(relaxed) (fused multiply-add, relaxed max) and a
+/// matrix-vector product with row offsets agree across @simd, --no-simd and --all-js (sums to 5 digits)
+#[test]
+fn ml_kernels_agree() {
+    let src = root().join("examples/ml.zsc");
+    let mut outs = vec![];
+    for (name, flags) in [("ml-simd", &[][..]), ("ml-nosimd", &["--no-simd"][..]), ("ml-js", &["--all-js"][..])] {
+        let d = out_dir(name);
+        let o = zsc(&src, &d, flags);
+        assert!(o.status.success(), "zsc failed:\n{}", String::from_utf8_lossy(&o.stderr));
+        let r = Command::new("node").arg(root().join("tests/ml_driver.mjs")).arg(d.join("ml.js")).output().unwrap();
+        assert!(r.status.success(), "{}", String::from_utf8_lossy(&r.stderr));
+        outs.push(String::from_utf8(r.stdout).unwrap());
+    }
+    assert_eq!(outs[0], outs[2], "@simd and JS differ");
+    assert_eq!(outs[1], outs[2], "--no-simd and JS differ");
+    assert!(outs[0].contains("dense_is_f32array true"));
+    assert!(outs[0].contains("relu [0,0.5,0,2,0,7,0.125]"));
+    assert!(outs[0].contains("bounds_error true"));
 }

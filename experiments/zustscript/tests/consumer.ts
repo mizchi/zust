@@ -3,6 +3,7 @@
 import { sum$i32, sum$f64, i32, f64, mean, area, visible, type Todo, type Shape } from "./basics.js";
 import { App, Row, stats, map_sum, histogram, type Sample } from "./app.js";
 import type { ReactElement } from "react";
+import { dense, relu, sumsq } from "./ml.js";
 
 const a: i32 = sum$i32([i32(1), i32(2)]);
 const asNumber: number = a; // a brand is still a number
@@ -20,6 +21,14 @@ const h: readonly i32[] = histogram(sample.values, i32(4));
 const el: ReactElement = App({ samples: [sample] });
 const row: ReactElement = Row({ sample, onPick: (l: string) => console.log(l) });
 
+// numeric arrays are typed arrays: Float32Array in, Float32Array out; counts are branded i32 (from any module)
+const y: Float32Array = relu(dense(new Float32Array(6), new Float32Array(3), new Float32Array(2), i32(2), i32(3)));
+const ss: number = sumsq(y);
+// @ts-expect-error: a plain array is not a Float32Array
+relu([1, 2, 3]);
+// @ts-expect-error: a plain number is not an i32 count
+dense(new Float32Array(6), new Float32Array(3), new Float32Array(2), 2, 3);
+
 // @ts-expect-error: an f64 is not an i32
 sum$i32([f64(1.5)]);
 // @ts-expect-error: a plain number is not an i32 (make one with i32(..))
@@ -33,4 +42,4 @@ t.done = true;
 // @ts-expect-error: the array is readonly
 active.push(t);
 
-export { asNumber, total, st, sq, h, el, row, bad };
+export { asNumber, total, st, sq, h, el, row, bad, ss };

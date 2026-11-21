@@ -11,7 +11,7 @@ zust を土台にした、フロントエンド向け言語の試作。目標は
   - zustc は外部コマンドとして呼ぶだけ
   - 本体側の変更は `.gitignore` の 2 行のみ
 - テスト: `cargo test --release`
-  - node が必要
+  - **Node 26** を使う(PATH 上の `node`。計測も Node 26.13.1。relaxed SIMD はフラグなしで動く)
   - app の例は zust 側の `target/release/zustc` を使う
   - `.d.ts` の検査は tsc を使う(環境変数 `TSC` か PATH 上の `tsc`。なければ飛ばす)
 
@@ -59,7 +59,29 @@ extern "react" fn useState<T>(init: T) -> (T, fn(T) -> ()) = "useState";
 | `i32` | number | `(a + b) \| 0`、`Math.imul`、`/` と `%` は 0 除算で例外を投げ、結果を切り捨てる |
 | `u32` | number | `>>> 0` で wrap する |
 | `i64` | BigInt | `BigInt.asIntN(64, ..)`。2^53 を超えても正確 |
+| `f32` | number | 演算のたびに `Math.fround`。+ - * / と sqrt は、f64 で計算して f32 に丸めると f32 の演算と完全に一致する。リテラルは、コンパイル時に f32 に丸めた値を書く |
 | `f64` | number | そのまま |
+
+- 小数リテラルは文脈の型になる(f32 か f64。決まらなければ f64)
+- f32 と f64 も暗黙には変換しない(`x as f32`)
+
+### 数値専用の配列: `F64Array` / `F32Array` / `I32Array`
+
+```zsc
+let w: F32Array = [0.5, -1.0, 2.0];          // 型の注釈があるリテラルは new Float32Array([..]) になる
+let z = F64Array::zeros(n);                  // new Float64Array(n)
+let p = F64Array::from(xs);                  // Array<f64> から明示的に変換する(暗黙の変換はない)
+pub fn dense(..) -> F32Array { range(0, m).map((r) => ..) }   // 期待する型が F32Array なら、range の map もそれを作る
+```
+
+- JS では typed array そのもの(`Float64Array` / `Float32Array` / `Int32Array`)。`.d.ts` でもその型になる
+- 型で明示的に作る
+  - 期待する型(`let` の注釈、引数、戻り値、レコードのフィールド)が typed array のところでは、配列リテラルと `range(..).map` がその typed array を作る
+  - `Array<f64>` の変数は暗黙には変換されない。`F64Array::from(xs)` か `xs` を作り直す。変換すれば型エラーにならない(tests/errors/typed_from_array.zsc)
+- メソッド
+  - `len`、添字、`map`(同じ型の typed array を返す)、`filter`、`fold`、`any` / `all`、`for x in xs`、`to_array()` が使える
+  - 不変として扱うので、`push` / `concat` はない
+- 境界(`@wasm` / `@simd`)では、`.set()` でまとめてコピーし、結果は `.slice()` で取り出す。普通の配列のように、要素ごとの変換をしなくて済む
 
 - `.d.ts` では branded type になる。TS 側でも整数と小数が混ざらない
   - 例: `export type i32 = number & { readonly __zsc_num: "i32" }`
@@ -104,6 +126,7 @@ pub fn primes_below(n: i32) -> i32 {
 |---|---|---|
 | `i32` | **整数の既定**(添字、個数、ID、整数の計算全般)。整数リテラルは、文脈がなければ i32 になる | number のまま(`\| 0` と `Math.imul`)。JIT が整数として扱えるので速い |
 | `f64` | 実数 | number のまま |
+| `f32` | ML の重みや画像など、精度より量と SIMD の幅(4 レーン)が効くもの。`F32Array` と組み合わせる | `Math.fround` が付く |
 | `u32` | ハッシュ、ビット列、色など、符号なしの wrap が要るもの | number のまま(`>>> 0`) |
 | `i64` | **JS 層では避ける**。2^31 を超える整数が本当に要る計算は `@wasm` に置く | BigInt になる(遅く、割り当てが起きる)。JS 層で i64 の演算を書くと、コンパイラが警告を出す |
 
@@ -285,16 +308,50 @@ wasm { fn sq(x: f64) -> f64 { x * x } }                              // wasm 側
   - 配列が短いときは、ループの前に glue が RangeError を投げる(JS の `$at` と同じ扱い)
 - 差分テスト `kernels_simd_nosimd_js_agree`: `@simd`、`--no-simd`(zustc を通したスカラーの wasm)、`--all-js` の 3 つの出力が一致する。f64 の和だけは 12 桁で比べる。1e6 要素の内積で、JS との差は 1.5e-15 だった
 
-速さ(1e6 要素、node 22。JS 側も `for` ループで出すようにした後の値)
+速さ(1e6 要素、Node 26.13。JS 側も `for` ループで出すようにした後の値。入力は普通の配列)
 
 | カーネル | `@simd` | `--no-simd`(zustc) | JS |
 |---|---|---|---|
-| `dot` | 2.3 ms | 21.7 ms | 7.1 ms |
-| `sum` | 1.0 ms | 18.1 ms | 0.7 ms |
-| `axpy`(配列を返す) | 14.0 ms | 44.2 ms | 12.2 ms |
-| `norms`(sqrt) | 13.5 ms | 43.7 ms | 20.6 ms |
-| `isum`(i32) | 0.7 ms | 17.5 ms | 6.7 ms |
-| `dot`、入力が `Float64Array` | 1.8 ms | 19.6 ms | 9.9 ms |
+| `dot` | 4.3 ms | 25.9 ms | 7.0 ms |
+| `sum` | 1.2 ms | 17.4 ms | 0.9 ms |
+| `axpy`(配列を返す) | 7.4 ms | 41.6 ms | 7.2 ms |
+| `norms`(sqrt) | 12.1 ms | 47.5 ms | 16.0 ms |
+| `isum`(i32) | 0.9 ms | 18.7 ms | 7.7 ms |
+| `dot`、入力が `Float64Array` | 2.3 ms | 20.1 ms | 12.9 ms |
+
+#### f32x4、relaxed SIMD、行列(ML 向け。examples/ml.zsc)
+
+```zsc
+// 全結合層: y = W x + b(W は m×n を行ごとに並べたもの)
+@simd pub fn dense(w: F32Array, x: F32Array, b: F32Array, m: i32, n: i32) -> F32Array {
+  range(0, m).map((r) => b[r] + range(0, n).fold(0.0, (s, i) => s + w[r * n + i] * x[i]))
+}
+@simd(relaxed) pub fn dense_fma(..) -> F32Array { /* 同じ本体 */ }   // 積和を relaxed_madd(FMA)に
+@simd pub fn relu(xs: F32Array) -> F32Array { xs.map((x) => x.max(0.0)) }
+```
+
+- **f32x4**: `F32Array` のカーネルは 4 レーンで処理する。f64x2 / i32x4 と同じ形で書ける
+- **2 重のループ**: `range(0, m).map((r) => ..)` の本体の中に、内側の和を 1 つ置ける。内側では `w[r * n + i]` のように、行のオフセットを付けて読める
+  - オフセットは、外側の `r` について 1 次式(`r * n + k`、i32 の引数とリテラル)に限る
+  - 1 次式なので、glue は `r = 0` と `r = m - 1` の 2 点だけで、全部の読み出しが範囲内かを確かめられる。範囲外なら、ループの前に RangeError にする
+  - i32 の引数は、f32 / f64 のカーネルの中でも、個数とオフセットとして使える
+- **relaxed SIMD**(`@simd(relaxed)`): 結果がエンジンや CPU で変わりうる命令を、明示したときだけ使う
+  - `a * b + c` と、内側の和の `s + a * b` は `f32x4.relaxed_madd` / `f64x2.relaxed_madd` になる(1 回丸めか 2 回丸めかはエンジンが選ぶ)
+  - `max` / `min` は `relaxed_max` / `relaxed_min` になる(NaN と ±0 の扱いはエンジンが選ぶ)
+  - relaxed でない `max` / `min` は、JS の `Math.max` と同じく、NaN を伝え、+0 を -0 より大きいとする。Rust に落とすときも、この意味の helper(`zs_max_f32` など)になる
+- 差分テスト `ml_kernels_agree`: `@simd`、`--no-simd`、`--all-js` が一致する(和と relaxed の結果は 5 桁で比べる)。`max(-0, 0)` が `+0` になることや、範囲外の行数で RangeError になることも確かめている
+- tsc の検査: `dense` などの `.d.ts` は `Float32Array` と branded な `i32` を取る。素の配列や素の number は型エラーになる
+
+| カーネル(Node 26.13、入力は `Float32Array`) | `@simd` | `@simd(relaxed)` | `--no-simd`(zustc) | JS |
+|---|---|---|---|---|
+| `dense` 512×512(呼び出しごとに W をコピー) | 0.14 ms | 0.17 ms | 4.83 ms | 3.51 ms |
+| `relu` 1e6 | 3.14 ms | 2.27 ms | 57.7 ms | 22.2 ms |
+| `saxpy` 1e6(relaxed: FMA) | - | 2.30 ms | 39.7 ms | 15.7 ms |
+| `sumsq` 1e6 | 0.67 ms | - | 22.4 ms | 6.23 ms |
+
+- typed array を入力にすると、境界は `.set()` / `.slice()` の一括コピーだけになり、SIMD の差がそのまま出る: 全結合層は JS の 25 倍、ReLU は 7〜10 倍、saxpy は 7 倍
+- relaxed は ReLU で効く(NaN と ±0 の処理を省ける)。FMA はこの CPU と V8 の組み合わせでは差が出なかった(全結合層は W のコピーが支配的)
+- zustc を通したスカラーの wasm は、どれも JS より遅い。zust の IR にベクタ型を入れる件は [mizchi/zust#30](https://github.com/mizchi/zust/issues/30) にした
 
 - 内積は 3 倍、i32 の和は 9.5 倍、sqrt を含む要素ごとの計算は 1.5 倍、それぞれ JS より速い
 - 単純な和や `axpy` は、コピーの分で JS と同じくらいになる
@@ -375,8 +432,12 @@ zust は到達しない関数をそもそも出さないので、`wasm-gc` に�
 
 ## 未決事項
 
-- 数値の配列を typed array(`Float64Array` / `Int32Array`)として JS 層に持つか。境界のコピーが要らなくなり(`@simd` の map は約 3 倍速くなる)、TS の `readonly number[]` とは型が合わなくなる。`.d.ts` を `ArrayLike<f64>` などにするか、配列の型を 2 つにするか
-- `@simd` で書けるカーネルの拡張: min / max、比較とマスク、f32x4、複数の出力、2 次元(行列)
+- `@simd` で書けるカーネルの拡張
+  - 比較とマスク(`if` を `bitselect` に)、複数の出力
+  - 行列と行列の積(3 重のループ、タイル分割)
+  - int8 の量子化(`i32x4.relaxed_dot_i8x16_i7x16_add_s`)。そのためには `I8Array` / `i8` が要る
+- 呼び出しごとのコピーをなくす: 重みのように何度も使う配列を、wasm 側のメモリに置いたままにするハンドル(`WasmF32Array` など)
+- typed array を不変として扱うことの徹底: JS の `Float32Array` は書き換えられるので、TS 側から渡された配列が後で変わりうる。今は zustscript 側からは変更できない、というだけ
 - 配列の更新が多い箇所の計算量: `readonly T[]` に決めたので、`push` は O(n) のコピーになる。ループのように積み上げる用途には、`fold` で一度に作る、あるいは wasm 層に寄せる方針で足りるかを確かめる
 - 文字列の長さ(`len` は今 UTF-16 単位。Rust の byte 単位とずれる)
 - brand のコンストラクタ名(`i32` など)が、利用者の関数名と衝突しうる。今は検査していない

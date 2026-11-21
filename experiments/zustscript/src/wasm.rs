@@ -25,6 +25,7 @@ fn rs_scalar(w: &WTy) -> &'static str {
         WTy::I32 => "i32",
         WTy::U32 => "u32",
         WTy::I64 => "i64",
+        WTy::F32 => "f32",
         WTy::F64 => "f64",
         WTy::Bool => "bool",
         WTy::Unit => "()",
@@ -141,7 +142,7 @@ pub fn generate(items: &[Item], lowered: Vec<WFn>, raw: &str, wasm_file: &str) -
         let mut jpre = vec![]; // JS before the call
         let mut jargs = vec![]; // the wrapper's arguments in JS
         let mut jpost = vec![]; // JS after the call (frees, releases)
-        let out = matches!(ret, WTy::String | WTy::Vec(_));
+        let out = matches!(ret, WTy::String | WTy::Vec(_) | WTy::TVec(_));
         let ret: &WTy = ret;
         if out {
             ps.push("__out: *mut usize".to_string());
@@ -164,7 +165,7 @@ pub fn generate(items: &[Item], lowered: Vec<WFn>, raw: &str, wasm_file: &str) -
                     }
                     call.push(build(v, a));
                 }
-                WTy::I32 | WTy::U32 | WTy::F64 | WTy::I64 => {
+                WTy::I32 | WTy::U32 | WTy::F32 | WTy::F64 | WTy::I64 => {
                     ps.push(format!("{a}: {}", rs_scalar(w)));
                     call.push(a.clone());
                     jargs.push(a.clone());
@@ -223,7 +224,7 @@ pub fn generate(items: &[Item], lowered: Vec<WFn>, raw: &str, wasm_file: &str) -
             }
         }
         let wret = match ret {
-            WTy::I32 | WTy::U32 | WTy::F64 | WTy::I64 | WTy::Bool => format!(" -> {}", rs_scalar(ret)),
+            WTy::I32 | WTy::U32 | WTy::F32 | WTy::F64 | WTy::I64 | WTy::Bool => format!(" -> {}", rs_scalar(ret)),
             _ => String::new(),
         };
         let _ = writeln!(rs, "#[no_mangle]\npub extern \"C\" fn __zsc_w_{wname}({}){wret} {{", ps.join(", "));
@@ -272,8 +273,9 @@ pub fn generate(items: &[Item], lowered: Vec<WFn>, raw: &str, wasm_file: &str) -
             WTy::Bool => {
                 let _ = writeln!(glue, "{pad}return {callw} !== 0;");
             }
-            WTy::String | WTy::Vec(_) => {
+            WTy::String | WTy::Vec(_) | WTy::TVec(_) => {
                 let read = match ret {
+                    WTy::TVec(el) => format!("new {}($w.memory.buffer, Number(p), Number(l)).slice()", el.info().1),
                     WTy::Vec(el) => format!("$wToArray(new {}($w.memory.buffer, Number(p), Number(l)))", el.info().1),
                     _ => "$dec.decode(new Uint8Array($w.memory.buffer, Number(p), Number(l)))".to_string(),
                 };
@@ -404,7 +406,7 @@ fn build(v: &VTy, rn: &str) -> String {
 fn store(v: &VTy, e: &str, off: &mut usize, depth: usize, out: &mut String) {
     match v {
         VTy::Scalar(w) => {
-            let t = if *w == WTy::F64 { "f64" } else { "i64" };
+            let t = if matches!(w, WTy::F64 | WTy::F32) { "f64" } else { "i64" };
             let _ = writeln!(out, "    unsafe {{ *(__vout as *mut {t}).add({off}) = ({e}) as {t}; }}");
             *off += 1;
         }
@@ -442,7 +444,7 @@ fn decode(v: &VTy, off: &mut usize) -> String {
             let at = 8 * *off;
             *off += 1;
             match w {
-                WTy::F64 => format!("$o.getFloat64({at}, true)"),
+                WTy::F64 | WTy::F32 => format!("$o.getFloat64({at}, true)"),
                 WTy::I64 => format!("$o.getBigInt64({at}, true)"),
                 WTy::Bool => format!("$o.getBigInt64({at}, true) !== 0n"),
                 _ => format!("Number($o.getBigInt64({at}, true))"),

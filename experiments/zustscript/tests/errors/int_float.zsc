@@ -1,2 +1,2 @@
-// expect: type mismatch: expected i32, found f64
+// expect: type mismatch: expected i32, found {float}
 fn f(n: i32) -> i32 { n * 2.5 }

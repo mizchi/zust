@@ -52,6 +52,7 @@ fn scalar(t: &Ty) -> Option<&'static str> {
         Ty::I32 => "i32",
         Ty::U32 => "u32",
         Ty::I64 => "i64",
+        Ty::F32 => "f32",
         Ty::F64 => "f64",
         Ty::Bool => "bool",
         Ty::Unit => "()",
@@ -92,6 +93,8 @@ pub struct Lower<'a> {
     used: std::collections::BTreeSet<String>,
     /// where each record and enum is declared (for errors in their definitions)
     type_pos: HashMap<String, Pos>,
+    /// the helper functions used (`zs_max_f32` ..)
+    helpers: std::collections::BTreeSet<String>,
 }
 
 /// The Rust name of a record or enum: `ZsPoint`
@@ -110,7 +113,7 @@ pub fn lower(items: &[Item], info: &Info, wanted: &[(String, Vec<Ty>)], simd_as_
             _ => None,
         })
         .collect();
-    let mut l = Lower { info, fns, subst: HashMap::new(), slices: HashSet::new(), queue: vec![], done: HashSet::new(), used: Default::default(), type_pos: HashMap::new() };
+    let mut l = Lower { info, fns, subst: HashMap::new(), slices: HashSet::new(), queue: vec![], done: HashSet::new(), used: Default::default(), type_pos: HashMap::new(), helpers: Default::default() };
     for it in items {
         if let Item::Record { name, pos, .. } | Item::Enum { name, pos, .. } = it {
             l.type_pos.insert(name.clone(), *pos);
@@ -156,6 +159,15 @@ pub fn lower(items: &[Item], info: &Info, wanted: &[(String, Vec<Ty>)], simd_as_
                 Err(e) => errors.push(e),
             }
         }
+    }
+    for h in &l.helpers {
+        // zs_max_f32 / zs_min_f64 ..
+        let (op, t) = h.trim_start_matches("zs_").split_once('_').unwrap();
+        let (pick, zero) = if op == "max" { ("a > b", "a.is_sign_positive()") } else { ("a < b", "a.is_sign_negative()") };
+        let _ = write!(
+            defs,
+            "fn {h}(a: {t}, b: {t}) -> {t} {{\n    if a.is_nan() || b.is_nan() {{ {t}::NAN }} else if a == b {{ if {zero} {{ a }} else {{ b }} }} else if {pick} {{ a }} else {{ b }}\n}}\n\n"
+        );
     }
     if errors.is_empty() { Ok((out, defs + &internal)) } else { Err(errors) }
 }
@@ -205,6 +217,7 @@ impl Lower<'_> {
             Ty::I32 => sc(WTy::I32),
             Ty::U32 => sc(WTy::U32),
             Ty::I64 => sc(WTy::I64),
+            Ty::F32 => sc(WTy::F32),
             Ty::F64 => sc(WTy::F64),
             Ty::Bool => sc(WTy::Bool),
             Ty::Named(n, targs) => {
@@ -247,7 +260,12 @@ impl Lower<'_> {
             Ty::I32 => WTy::I32,
             Ty::U32 => WTy::U32,
             Ty::I64 => WTy::I64,
+            Ty::F32 => WTy::F32,
             Ty::F64 => WTy::F64,
+            Ty::Typed(e) if scalar(e).and_then(Elem::parse).is_some() => {
+                let el = scalar(e).and_then(Elem::parse).unwrap();
+                if arg { WTy::Slice(el) } else { WTy::TVec(el) }
+            }
             Ty::Bool => WTy::Bool,
             Ty::Unit => WTy::Unit,
             Ty::Array(e) if scalar(e).and_then(Elem::parse).is_some() => {
@@ -284,7 +302,7 @@ impl<'a> Lower<'a> {
                     Ok(format!("{}<{}>", rs_type(n), a.join(", ")))
                 }
             }
-            Ty::Array(e) => match scalar(e) {
+            Ty::Array(e) | Ty::Typed(e) => match scalar(e) {
                 Some(s) if s != "()" => Ok(if param { format!("&[{s}]") } else { format!("Vec<{s}>") }),
                 _ => not_in_subset(pos, &format!("an array of {}", show(e))),
             },
@@ -311,12 +329,12 @@ impl<'a> Lower<'a> {
         let mut ps = vec![];
         for ((a, _), t) in args.iter().zip(&ats) {
             ps.push(format!("{}: {}", local(a), self.rty(t, *pos, true)?));
-            if matches!(t, Ty::Array(_)) {
+            if matches!(t, Ty::Array(_) | Ty::Typed(_)) {
                 self.slices.insert(a.clone());
             }
         }
         let rt = self.rty(&ret, *pos, false)?;
-        let b = self.ret_expr(body, matches!(ret, Ty::Array(_)))?;
+        let b = self.ret_expr(body, matches!(ret, Ty::Array(_) | Ty::Typed(_)))?;
         let text = format!("fn {}({}) -> {rt} {b}", rs_name(name, targs), ps.join(", "));
         let named = args.iter().map(|a| a.0.clone()).zip(ats).collect();
         Ok((text, named, ret))
@@ -378,7 +396,7 @@ impl<'a> Lower<'a> {
                 Some(s) => format!("{n}{s}"),
                 None => format!("{n}"),
             },
-            Lit::Float(f) => format!("{f}f64"),
+            Lit::Float(f) => format!("{f}{}", if self.num(id) == Ty::F32 { "f32" } else { "f64" }),
             Lit::Bool(b) => b.to_string(),
             Lit::Unit => "()".into(),
             Lit::Str(_) => return not_in_subset(pos, "a string"),
@@ -465,6 +483,7 @@ impl<'a> Lower<'a> {
                     let t = self.num(f.id);
                     return Ok(match t {
                         Ty::F64 => (if c == "one" { "1.0f64" } else { "0.0f64" }).into(),
+                        Ty::F32 => (if c == "one" { "1.0f32" } else { "0.0f32" }).into(),
                         t => format!("{}{}", if c == "one" { 1 } else { 0 }, scalar(&t).unwrap_or("")),
                     });
                 }
@@ -474,6 +493,15 @@ impl<'a> Lower<'a> {
                     let a = args.iter().map(|x| self.expr(x)).collect::<LResult<Vec<_>>>()?;
                     return self.variant(&en, n, a, pos);
                 }
+                if let Some(Callee::TypedCtor(el, c)) = self.info.callee.get(&f.id).cloned() {
+                    let a = self.expr(&args[0])?;
+                    let zero = match el {
+                        Ty::F32 => "0.0f32",
+                        Ty::F64 => "0.0f64",
+                        _ => "0i32",
+                    };
+                    return Ok(if c == "zeros" { format!("vec![{zero}; ({a}) as usize]") } else { format!("({a}).to_vec()") });
+                }
                 let EK::Var(n) = &f.kind else { return not_in_subset(pos, "calling this") };
                 if let Some((a, b)) = self.range_args(e)? {
                     return Ok(format!("({a}..{b}).collect::<Vec<i32>>()"));
@@ -481,7 +509,7 @@ impl<'a> Lower<'a> {
                 match self.info.callee.get(&f.id) {
                     Some(Callee::Fn) if self.fns.contains_key(n.as_str()) => {
                         let targs: Vec<Ty> = self.info.inst.get(&f.id).map(|t| t.iter().map(|t| subst_ty(t, &self.subst)).collect()).unwrap_or_default();
-                        let ptys: Vec<bool> = self.info.fns[n].args.iter().map(|t| matches!(t, Ty::Array(_))).collect();
+                        let ptys: Vec<bool> = self.info.fns[n].args.iter().map(|t| matches!(t, Ty::Array(_) | Ty::Typed(_))).collect();
                         let rs = self.want(n, targs);
                         let a = args.iter().zip(ptys).map(|(x, arr)| self.arg(x, arr)).collect::<LResult<Vec<_>>>()?;
                         format!("{rs}({})", a.join(", "))
@@ -533,6 +561,14 @@ impl<'a> Lower<'a> {
                     B::Concat => format!("{{ let mut v = {recv}.to_vec(); v.extend_from_slice({}); v }}", self.arg(&args[0], true)?),
                     B::Sqrt => format!("{recv}.sqrt()"),
                     B::Abs => format!("{recv}.abs()"),
+                    B::Max | B::Min => {
+                        // (JS's Math.max / Math.min: NaN wins, +0 is above -0)
+                        let t = scalar(&self.num(e.id)).unwrap_or("f64");
+                        let h = format!("zs_{}_{t}", if b == B::Max { "max" } else { "min" });
+                        self.helpers.insert(h.clone());
+                        format!("{h}({recv}, {})", self.expr(&args[0])?)
+                    }
+                    B::ToArray => format!("{recv}.to_vec()"),
                     B::Floor => format!("{recv}.floor()"),
                     B::Round => format!("{recv}.round()"),
                     _ => return not_in_subset(pos, "this method (strings are not in it)"),
@@ -553,14 +589,14 @@ impl<'a> Lower<'a> {
                             };
                             format!("({a}).{m}({b})")
                         }
-                        Ty::F64 => format!("({a} {op} {b})"),
+                        Ty::F64 | Ty::F32 => format!("({a} {op} {b})"),
                         _ => return not_in_subset(pos, "string concatenation"),
                     },
                 }
             }
             EK::Un("!", x) => format!("!({})", self.expr(x)?),
             EK::Un(_, x) => match self.num(e.id) {
-                Ty::F64 => format!("-({})", self.expr(x)?),
+                Ty::F64 | Ty::F32 => format!("-({})", self.expr(x)?),
                 _ => format!("({}).wrapping_neg()", self.expr(x)?),
             },
             EK::Cast(x, _) => {
