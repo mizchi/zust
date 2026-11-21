@@ -2197,6 +2197,7 @@ compile-fail	error-codes/E0615.rs
 compile-fail	error-codes/E0617.rs
 compile-fail	error-codes/E0618.rs
 compile-fail	error-codes/E0620.rs
+compile-fail	error-codes/E0621-does-not-trigger-for-closures.rs
 compile-fail	error-codes/E0637.rs
 compile-fail	error-codes/E0659.rs
 compile-fail	error-codes/E0746.rs
@@ -3193,6 +3194,7 @@ compile-fail	lexer/unterminated-comment.rs
 compile-fail	lexer/unterminated-nested-comment.rs
 check-pass	lifetimes/array-pattern-matching-10396.rs
 compile-fail	lifetimes/borrowck-let-suggestion.rs
+compile-fail	lifetimes/closure-must-return-bound-lifetime.rs
 compile-fail	lifetimes/constructor-lifetime-early-binding-error.rs
 compile-fail	lifetimes/container-lifetime-error-11374.rs
 compile-fail	lifetimes/copy_modulo_regions.rs
@@ -4146,8 +4148,10 @@ check-pass	nll/issue-51351.rs
 check-pass	nll/issue-51770.rs
 run-pass	nll/issue-52057.rs
 check-pass	nll/issue-52078.rs
+compile-fail	nll/issue-52533-1.rs
 compile-fail	nll/issue-52534-1.rs
 compile-fail	nll/issue-52534-2.rs
+compile-fail	nll/issue-52534.rs
 compile-fail	nll/issue-52663-span-decl-captured-variable.rs
 compile-fail	nll/issue-52669.rs
 compile-fail	nll/issue-52742.rs
@@ -4166,6 +4170,7 @@ compile-fail	nll/issue-57642-higher-ranked-subtype.rs
 compile-fail	nll/issue-57843.rs
 run-pass	nll/issue-57960.rs
 compile-fail	nll/issue-57989.rs
+compile-fail	nll/issue-58053.rs
 check-pass	nll/issue-61311-normalize.rs
 check-pass	nll/issue-61320-normalize.rs
 compile-fail	nll/issue-67007-escaping-data.rs
@@ -4209,6 +4214,7 @@ compile-fail	nll/user-annotations/adt-brace-structs.rs
 compile-fail	nll/user-annotations/adt-tuple-struct.rs
 compile-fail	nll/user-annotations/cast_static_lifetime.rs
 check-pass	nll/user-annotations/closure-sig.rs
+compile-fail	nll/user-annotations/closure-substs.rs
 compile-fail	nll/user-annotations/constant-in-expr-normalize.rs
 compile-fail	nll/user-annotations/constant-in-expr-trait-item-1.rs
 check-pass	nll/user-annotations/downcast-infer.rs
@@ -5262,6 +5268,7 @@ run-pass	recursion/recursive-enum-box.rs
 compile-fail	recursion/recursive-enum.rs
 run-pass	recursion/recursive-struct-with-raw-pointer-field.rs
 compile-fail	reflection/feature_gate.rs
+compile-fail	regions/account-for-lifetimes-in-closure-suggestion.rs
 check-pass	regions/closure-prop-issue-104477-case1.rs
 check-pass	regions/closure-prop-issue-104477-case2.rs
 check-pass	regions/forall-wf-reflexive.rs
@@ -5279,6 +5286,7 @@ check-pass	regions/issue-72051-member-region-hang.rs
 compile-fail	regions/multiple-sources-for-outlives-requirement.rs
 compile-fail	regions/outlives-with-missing.rs
 run-pass	regions/owned-implies-static.rs
+compile-fail	regions/region-borrow-params-issue-29793-big.rs
 check-pass	regions/region-bound-extra-bound-in-inherent-impl.rs
 check-pass	regions/region-bound-same-bounds-in-trait-and-impl.rs
 compile-fail	regions/region-lifetime-bounds-on-fns-where-clause.rs
@@ -5317,6 +5325,8 @@ run-pass	regions/regions-dependent-let-ref.rs
 run-pass	regions/regions-early-bound-lifetime-in-assoc-fn.rs
 run-pass	regions/regions-early-bound-used-in-bound-method.rs
 run-pass	regions/regions-escape-into-other-fn.rs
+compile-fail	regions/regions-escape-method.rs
+compile-fail	regions/regions-escape-via-trait-or-not.rs
 run-pass	regions/regions-expl-self.rs
 run-pass	regions/regions-fn-subtyping-2.rs
 check-pass	regions/regions-fn-subtyping-return-static.rs
@@ -5339,6 +5349,7 @@ run-pass	regions/regions-infer-borrow-scope-view.rs
 run-pass	regions/regions-infer-borrow-scope-within-loop-ok.rs
 run-pass	regions/regions-infer-borrow-scope.rs
 run-pass	regions/regions-infer-call-2.rs
+compile-fail	regions/regions-infer-call-3.rs
 run-pass	regions/regions-infer-call.rs
 run-pass	regions/regions-infer-contravariance-due-to-ret.rs
 compile-fail	regions/regions-infer-invariance-due-to-decl.rs
@@ -5355,6 +5366,7 @@ run-pass	regions/regions-lub-ref-ref-rc.rs
 compile-fail	regions/regions-name-duplicated.rs
 compile-fail	regions/regions-name-static.rs
 compile-fail	regions/regions-name-undeclared.rs
+compile-fail	regions/regions-nested-fns-2.rs
 run-pass	regions/regions-no-bound-in-argument-cleanup.rs
 check-pass	regions/regions-no-variance-from-fn-generics.rs
 run-pass	regions/regions-nullary-variant.rs
@@ -5371,6 +5383,8 @@ compile-fail	regions/regions-reborrow-from-shorter-mut-ref-mut-ref.rs
 compile-fail	regions/regions-reborrow-from-shorter-mut-ref.rs
 run-pass	regions/regions-refcell.rs
 run-pass	regions/regions-relate-bound-regions-on-closures-to-inference-variables.rs
+compile-fail	regions/regions-ret-borrowed-1.rs
+compile-fail	regions/regions-ret-borrowed.rs
 run-pass	regions/regions-return-interior-of-option.rs
 run-pass	regions/regions-scope-chain-example.rs
 run-pass	regions/regions-self-impls.rs

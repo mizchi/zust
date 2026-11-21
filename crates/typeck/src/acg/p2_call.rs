@@ -1625,7 +1625,8 @@ impl Cx<'_> {
                 }
             }
             // `F: Fn(A) -> B` の引数にクロージャを渡すなら、A / B をクロージャの型の手がかりにする
-            let fb = self.fn_bound_of(&sig0, pt);
+            let fbt = self.fn_bound_with_text(&sig0, pt);
+            let fb = fbt.as_ref().map(|x| (x.0.clone(), x.1));
             // 関数アイテム (`or_insert_with(Vec::new)`) なら、境界を関数ポインタの期待型にして型引数を決める
             if let (Some((bps, bret)), None, Expr::Path(..)) = (&fb, exp, strip_paren(a)) {
                 let ft = crate::types::FnTy {
@@ -1641,6 +1642,17 @@ impl Cx<'_> {
                 let ps = bps.iter().map(|&t| self.prog.partial_subst(t, &sol)).collect();
                 let r = Some(self.prog.partial_subst(*bret, &sol));
                 self.closure_hint = Some((ps, r));
+                // (the bound for the closure's region check: not one of the prelude's, which writes no lifetimes
+                // (`is_sorted_by_key`'s is `FnMut(&'a T)` in std, not higher-ranked))
+                let prelude = self.prog.item_of.get(id as usize).copied().flatten().is_none_or(|i| i >= self.prog.prelude_from);
+                self.closure_bound = None;
+                self.closure_prelude = prelude;
+                if !prelude && self.user_code && self.bk.level >= 2 && regionck::enabled() {
+                    if let Some(x) = &fbt {
+                        let lts = sig0.regions.as_deref().map(|r| r.lts.clone()).unwrap_or_default();
+                        self.closure_bound = Some(Box::new((x.2.to_string(), lts, sig0.generics.iter().map(|g| g.0.clone()).collect())));
+                    }
+                }
             }
             let top_ref = self.bk_on() && matches!(strip_paren(a), Expr::Ref(..));
             // (an argument `&x` the result does not borrow from: its loan ends with the call)
@@ -1662,6 +1674,8 @@ impl Cx<'_> {
             }
             let (v, mut t) = r?;
             self.closure_hint = None;
+            self.closure_bound = None;
+            self.closure_prelude = false;
             // クロージャの実際の引数・戻り値の型から境界の型パラメータを解く (`map<U, F: FnOnce(T) -> U>`)
             if let Some((bps, bret)) = &fb {
                 let mut ct = t;

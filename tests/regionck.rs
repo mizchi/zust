@@ -448,3 +448,31 @@ fn main() {}
 "#;
     assert_eq!(check(ok), vec![]);
 }
+
+/// A closure's body is checked against the signature the bound it is passed to gives it (the regions of its
+/// parameters are the bound's, higher-ranked; its result's, the bound's), or against its annotations
+#[test]
+fn closure_bodies() {
+    one_error("fn foo(_: impl FnOnce(&u32) -> &u32) {}\nfn bar() {\n    let x = 22;\n    foo(|a| &x);\n}\nfn main() {}\n", 4);
+    one_error("fn with<R, F>(f: F) -> R where F: FnOnce(&isize) -> R { f(&3) }\nfn return_it<'a>() -> &'a isize {\n    with(|o| o)\n}\nfn main() {}\n", 3);
+    one_error("fn foo(_: impl for<'a> FnOnce(&'a u32, &u32) -> &'a u32) {}\nfn main() {\n    foo(|a, b| b);\n}\n", 3);
+    one_error("fn main() {\n    let i = &3;\n    let f = |x: &i32| -> &i32 { x };\n    let _ = f(i);\n}\n", 3);
+    let ok = r#"
+struct A { name: String }
+fn foo(_: impl FnOnce(&u32) -> &u32) {}
+fn pick(_: impl for<'a> FnOnce(&'a u32, &u32) -> &'a u32) {}
+fn with<R, F>(f: F) -> R where F: FnOnce(&isize) -> R { f(&3) }
+fn main() {
+    foo(|a| a);
+    pick(|a, _b| a);
+    let n = with(|o| *o + 1);
+    let v = vec![1];
+    let g = || &v;
+    let h = |x| x;
+    let a = [A { name: "1".to_string() }, A { name: "2".to_string() }];
+    let s = a.is_sorted_by_key(|a| a.name.as_str());
+    println!("{} {:?} {} {}", n, g(), h(1), s);
+}
+"#;
+    assert_eq!(check(ok), vec![]);
+}

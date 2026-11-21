@@ -206,9 +206,10 @@ pub const TRAP_SITE_MAX: usize = 245;
 
 /// 1 関数をコンパイルする。返り値は (Blob, 要求したインスタンス)
 pub fn compile(prog: &Program, insts: &Mutex<Insts>, id: u32, f: &ItemFn, line_base: u32, inl: &Inline) -> R<(Compiled, Vec<u32>)> {
-    let (sig, env, body_id, fnptr, inst_args) = {
+    let (sig, env, body_id, fnptr, inst_args, clo_rg) = {
         let g = insts.lock().unwrap();
-        (g.sig(prog, id).clone(), g.env(prog, id), g.body_of(id), g.get(id).is_some_and(|i| i.fnptr), g.get(id).map(|i| i.args.clone()))
+        let b = g.body_of(id);
+        (g.sig(prog, id).clone(), g.env(prog, id), b, g.get(id).is_some_and(|i| i.fnptr), g.get(id).map(|i| i.args.clone()), g.closure_rg.get(&b).cloned())
     };
     // (a closure's fn-pointer instance: the body without the `__env` parameter (it has no captures))
     let f_np;
@@ -266,7 +267,14 @@ pub fn compile(prog: &Program, insts: &Mutex<Insts>, id: u32, f: &ItemFn, line_b
         bk: borrowck::Bk { on: bk_level > 0, level: bk_level, line_base, ..Default::default() },
         // (a function's own body, not a generic one's instance nor a closure's: see regionck)
         // (a generic function's instance: the generic signature, its type parameters' regions not followed)
-        rg: regionck::Rg { on: bk_level >= 2 && !fnptr && caps.is_empty() && prog.closures.get(&body_id).is_none() && regionck::enabled(), base: body_id, inst_args: inst_args.unwrap_or_default(), ..Default::default() },
+        // (a closure's: with the region signature the bound it is passed to (or its annotations) gives it)
+        rg: regionck::Rg {
+            on: bk_level >= 2 && !fnptr && ((caps.is_empty() && prog.closures.get(&body_id).is_none()) || clo_rg.is_some()) && regionck::enabled(),
+            base: body_id,
+            inst_args: if clo_rg.is_some() { vec![] } else { inst_args.unwrap_or_default() },
+            closure: clo_rg,
+            ..Default::default()
+        },
         prog,
         scopes: vec![vec![]],
         loops: vec![],
@@ -303,6 +311,8 @@ pub fn compile(prog: &Program, insts: &Mutex<Insts>, id: u32, f: &ItemFn, line_b
         explicit_traits: HashMap::default(),
         explicit_trait: None,
         closure_hint: None,
+        closure_bound: None,
+        closure_prelude: false,
         seg_self: None,
         loop_bounds: vec![],
         pending_bound: None,
@@ -682,6 +692,11 @@ pub struct Cx<'p> {
     /// while a method call that named its trait is being resolved: (the method, the trait)
     pub explicit_trait: Option<(String, String)>,
     pub closure_hint: Option<(Vec<Ty>, Option<Ty>)>,
+    /// The bound the closure being passed is checked against (`FnOnce(&u32) -> &u32`), with the callee's lifetimes and
+    /// type parameters (regionck)
+    pub closure_bound: Option<Box<(String, Vec<String>, Vec<String>)>>,
+    /// The closure being passed goes to a function of the prelude (whose bounds write no lifetimes)
+    pub closure_prelude: bool,
     pub seg_self: Option<Ty>,
     pub loop_bounds: Vec<(Loc, u64)>,
     pub pending_bound: Option<u64>,
@@ -1142,8 +1157,8 @@ impl Cx<'_> {
         // (the gate, before any work: a signature with fewer than two regions and no lifetime named has no two
         // universal regions to relate)
         // (or one region and a trait object in the result, 'static by default: `fn f(x: &u8) -> Box<dyn Tr>`)
-        self.rg.eligible = self.rg.on;
-        if self.rg.on && sig.regions.is_none() {
+        self.rg.eligible = self.rg.on && self.rg.closure.is_none();
+        if self.rg.on && sig.regions.is_none() && self.rg.closure.is_none() {
             let n: usize = sig.params.iter().map(|&t| regionck::count(self.prog, t, 0).unwrap_or(0)).sum();
             if n < 2 && !(n == 1 && regionck::has_dyn(self.prog, sig.ret, 0)) {
                 self.rg.on = false;
@@ -1151,7 +1166,18 @@ impl Cx<'_> {
                 self.rg.late = Some((se, f.sig.recv.is_some() && !se));
             }
         }
-        if self.rg.on {
+        // (a closure's body: its parameters but the environment)
+        if self.rg.on && self.rg.closure.is_some() {
+            let mut ps = vec![];
+            for (p, _) in &f.sig.params {
+                let n = pat_name(p)?;
+                if n != "__env" {
+                    ps.push(n);
+                }
+            }
+            let ps: Vec<(Loc, Ty)> = ps.iter().filter_map(|n| self.lookup(n)).collect();
+            self.rg_begin_closure(&ps);
+        } else if self.rg.on {
             let mut ps = vec![];
             if f.sig.recv.is_some() {
                 ps.push("self".to_string());
@@ -1192,6 +1218,7 @@ impl Cx<'_> {
                 if !by_ref {
                     self.bk_local(loc, &n, t);
                 }
+                self.rg_capture(loc, t);
                 self.scopes.last_mut().unwrap().push((n, loc, t));
             }
         }

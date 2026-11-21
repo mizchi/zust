@@ -117,6 +117,134 @@ pub struct Rg {
     /// A function the gate left out: how its receiver elides (`&self`), and whether another receiver leaves the
     /// result's regions unknown, for a check begun later (rg_late_on)
     pub late: Option<(bool, bool)>,
+    /// A closure's body: its region signature (codes CLO_P + i: a region the bound binds, a placeholder; CLO_E + i:
+    /// one from outside the closure), the locals that are its captures, and the region its environment is borrowed for
+    pub closure: Option<Vec<Vec<u8>>>,
+    pub cap_locs: Vec<Loc>,
+    pub env_r: u32,
+    pub externals: Vec<u32>,
+}
+
+/// Closure region codes (Rg::closure): a placeholder (a region the expected signature binds), one from outside
+pub const CLO_P: u8 = 0;
+pub const CLO_E: u8 = 0x40;
+
+/// How a closure's signature names its regions, while its codes are made
+struct CloCodes<'a> {
+    /// The lifetimes and type parameters of the callee (from outside the closure)
+    outer_lts: &'a [String],
+    tparams: &'a [String],
+    named: Vec<(String, u8)>,
+    np: u8,
+    ne: u8,
+    /// The code an elided region of the result takes (the one region of the inputs), else fresh
+    elided: Option<u8>,
+}
+
+impl CloCodes<'_> {
+    fn p(&mut self) -> u8 {
+        self.np = (self.np + 1).min(0x3F);
+        CLO_P + self.np - 1
+    }
+    fn e(&mut self) -> u8 {
+        self.ne = (self.ne + 1).min(0x3F);
+        CLO_E + self.ne - 1
+    }
+    fn named(&mut self, l: &str) -> u8 {
+        match l {
+            "'static" => R_STATIC,
+            "'_" => self.p(),
+            l => {
+                if let Some(&(_, c)) = self.named.iter().find(|x| x.0 == l) {
+                    return c;
+                }
+                let c = if self.outer_lts.iter().any(|x| x == l) { self.e() } else { self.p() };
+                self.named.push((l.to_string(), c));
+                c
+            }
+        }
+    }
+    fn elided(&mut self) -> u8 {
+        match self.elided {
+            Some(c) => c,
+            None => self.p(),
+        }
+    }
+
+    /// The codes of a value of type t written pt; false: not followed
+    fn of(&mut self, prog: &Program, pt: &PTy, t: Ty, out: &mut Vec<u8>, depth: u32) -> bool {
+        if depth > 12 {
+            return false;
+        }
+        let fresh = |out: &mut Vec<u8>| match count(prog, t, 0) {
+            Some(n) => {
+                out.extend(std::iter::repeat_n(R_ELIDED, n));
+                true
+            }
+            None => false,
+        };
+        match (pt, t) {
+            (PTy::Ref(l, _, pi), Ty::Ref(_, ti)) => {
+                let c = match l {
+                    None => self.elided(),
+                    Some(l) => self.named(l),
+                };
+                out.push(c);
+                self.of(prog, pi, *ti, out, depth + 1)
+            }
+            (PTy::Ptr(_, pi), Ty::Ptr(_, ti)) | (PTy::Slice(pi), Ty::Slice(ti)) | (PTy::Array(pi, _), Ty::Array(ti, _)) => self.of(prog, pi, *ti, out, depth + 1),
+            (PTy::Path(None, p), Ty::Box(ti)) if p.segs.last().is_some_and(|s| s.name == "Box") => match p.segs.last().and_then(|s| s.args.iter().find_map(|a| if let GArg::Ty(t) = a { Some(t) } else { None })) {
+                Some(pi) => self.of(prog, pi, *ti, out, depth + 1),
+                None => fresh(out),
+            },
+            // (the callee's type parameter: what it is instantiated with comes from outside)
+            (PTy::Path(None, p), _) if p.segs.len() == 1 && p.segs[0].args.is_empty() && self.tparams.iter().any(|x| *x == p.segs[0].name) => match count(prog, t, 0) {
+                Some(n) => {
+                    for _ in 0..n {
+                        let c = self.e();
+                        out.push(c);
+                    }
+                    true
+                }
+                None => false,
+            },
+            (PTy::Tuple(ps), Ty::Struct(sid)) if prog.is_tuple(sid) && prog.structs[sid as usize].args.len() == ps.len() => {
+                let args = prog.structs[sid as usize].args.clone();
+                ps.iter().zip(args).all(|(p, a)| self.of(prog, p, a, out, depth + 1))
+            }
+            (PTy::Path(None, p), Ty::Struct(sid)) if !is_closure(prog, sid) && p.segs.last().is_some_and(|s| s.name == prog.structs[prog.base_of(sid) as usize].name) => {
+                let Some(last) = p.segs.last() else { return false };
+                let n = lts_of(prog, prog.base_of(sid));
+                let written: Vec<&String> = last.args.iter().filter_map(|a| if let GArg::Lifetime(l) = a { Some(l) } else { None }).collect();
+                if written.len() == n {
+                    for l in written {
+                        let c = self.named(l);
+                        out.push(c);
+                    }
+                } else if written.is_empty() {
+                    for _ in 0..n {
+                        let c = self.elided();
+                        out.push(c);
+                    }
+                } else {
+                    return false;
+                }
+                let tys: Vec<&PTy> = last.args.iter().filter_map(|a| if let GArg::Ty(t) = a { Some(t) } else { None }).collect();
+                let args = prog.structs[sid as usize].args.clone();
+                if tys.len() != args.len() {
+                    return args.into_iter().all(|a| match count(prog, a, 0) {
+                        Some(k) => {
+                            out.extend(std::iter::repeat_n(R_ELIDED, k));
+                            true
+                        }
+                        None => false,
+                    });
+                }
+                tys.into_iter().zip(args).all(|(p, a)| self.of(prog, p, a, out, depth + 1))
+            }
+            _ => fresh(out),
+        }
+    }
 }
 
 /// t holds a trait object (whose lifetime a signature may leave to the default)
@@ -823,7 +951,8 @@ impl Rg {
                     }
                     seen[y as usize] = true;
                     if let Some(j) = ix(y) {
-                        if !k[i][j] {
+                        // (a closure's region from outside required to be 'static: the caller's to know)
+                        if !k[i][j] && !(j == 0 && self.externals.contains(&u)) {
                             let other = if j == 0 { "'static".to_string() } else { self.univ[j - 1].1.clone() };
                             errs.push((sp, format!("lifetime may not live long enough (`{uname}` must outlive `{other}`)")));
                         }
@@ -1160,6 +1289,10 @@ impl Cx<'_> {
             Expr::Paren(x) => self.rt_place(x),
             Expr::Path(None, p) if p.segs.len() == 1 && p.segs[0].args.is_empty() => {
                 let (loc, t) = self.lookup(&p.segs[0].name)?;
+                // (a closure's capture: reached through its environment, not owned)
+                if self.rg.cap_locs.contains(&loc) {
+                    return Some((t, self.rg.locals.get(&loc)?.clone(), vec![self.rg.env_r]));
+                }
                 let tr = match self.rg.locals.get(&loc) {
                     Some(tr) => tr.clone(),
                     // (a local whose type has no region (bound before the check began): its tree is empty)
@@ -1576,6 +1709,155 @@ impl Cx<'_> {
             k += c;
         }
         self.rg.calls.insert(e as *const Expr as usize, (t, tree));
+    }
+
+    /// A closure's region signature (Rg::closure) for its body's check, from the bound it is passed to (its text,
+    /// the callee's lifetimes and type parameters) or else its annotations: kept with the instances (Insts::closure_rg)
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn rg_closure_sig(&mut self, c: &Expr, cid: u32, params: &[Ty], ret: Ty, bound: Option<(String, Vec<String>, Vec<String>)>) {
+        let Expr::Closure(_, inputs, ret_ann, _, _) = c else { return };
+        let prog = self.prog;
+        // (nothing to check when no region is in its signature)
+        if params.iter().chain([&ret]).all(|&t| count(prog, t, 0) == Some(0)) {
+            return;
+        }
+        let mut codes: Vec<Vec<u8>> = vec![];
+        match bound {
+            Some((b, lts, tps)) => {
+                let Some(f) = crate::parse::parse_file(&format!("type __B = dyn {b};")).ok() else { return };
+                let Some(crate::parse::ItemKind::Type(_, _, _, Some(PTy::Dyn(bs)))) = f.items.first().map(|i| &i.kind) else { return };
+                let Some(crate::parse::Bound::Trait(_, p)) = bs.first() else { return };
+                let Some((bps, br)) = p.segs.last().and_then(|s| s.fn_args.clone()) else { return };
+                if bps.len() != params.len() {
+                    return;
+                }
+                let mut cc = CloCodes { outer_lts: &lts, tparams: &tps, named: vec![], np: 0, ne: 0, elided: None };
+                for (pt, &t) in bps.iter().zip(params) {
+                    let mut v = vec![];
+                    if !cc.of(prog, pt, t, &mut v, 0) {
+                        return;
+                    }
+                    codes.push(v);
+                }
+                // (the result's elided regions: the one region of the inputs, as fn elision)
+                let mut ins: Vec<u8> = codes.iter().flatten().copied().filter(|&c| c != R_ELIDED && c != R_STATIC).collect();
+                ins.sort();
+                ins.dedup();
+                cc.elided = if ins.len() == 1 { Some(ins[0]) } else { None };
+                let mut v = vec![];
+                match &br {
+                    Some(rt) => {
+                        if !cc.of(prog, rt, ret, &mut v, 0) {
+                            return;
+                        }
+                    }
+                    None if count(prog, ret, 0) == Some(0) => {}
+                    None => return,
+                }
+                // (an elided region of the result with no one input region: not followed)
+                if cc.elided.is_none() && v.iter().any(|&c| c < CLO_E && cc.np as usize > ins.len()) {
+                    return;
+                }
+                codes.push(v);
+            }
+            // (no bound: the annotated parameters' elided regions are bound by the closure; the result's regions
+            // are from outside it)
+            None => {
+                let outer = self.rg.lt_names.clone();
+                let mut cc = CloCodes { outer_lts: &outer, tparams: &[], named: vec![], np: 0, ne: 0, elided: None };
+                for (i, &t) in params.iter().enumerate() {
+                    let mut v = vec![];
+                    let ok = match inputs.get(i).and_then(|x| x.1.as_ref()) {
+                        Some(pt) => cc.of(prog, pt, t, &mut v, 0),
+                        None => count(prog, t, 0).map(|n| v.extend(std::iter::repeat_n(R_ELIDED, n))).is_some(),
+                    };
+                    if !ok {
+                        return;
+                    }
+                    codes.push(v);
+                }
+                let _ = ret_ann;
+                let Some(n) = count(prog, ret, 0) else { return };
+                let v: Vec<u8> = (0..n).map(|_| cc.e()).collect();
+                codes.push(v);
+            }
+        }
+        self.insts.lock().unwrap().closure_rg.insert(cid, codes);
+    }
+
+    /// A closure's body begins: its parameters' trees and its result's from its region signature; what it
+    /// captures is from outside it (rg_capture)
+    pub(crate) fn rg_begin_closure(&mut self, params: &[(Loc, Ty)]) {
+        let prog = self.prog;
+        let Some(codes) = self.rg.closure.clone() else { return };
+        if codes.len() != params.len() + 1 {
+            self.rg.on = false;
+            return;
+        }
+        let mut rg = std::mem::take(&mut self.rg);
+        let mut regs: Vec<(u8, u32)> = vec![];
+        let mut reg = |rg: &mut Rg, c: u8| -> u32 {
+            if c == R_STATIC {
+                return STATIC;
+            }
+            if c == R_ELIDED {
+                return rg.var();
+            }
+            if let Some(&(_, v)) = regs.iter().find(|x| x.0 == c) {
+                return v;
+            }
+            let v = rg.var();
+            rg.univ.push((v, "'_".to_string()));
+            if c >= CLO_E {
+                rg.externals.push(v);
+            }
+            regs.push((c, v));
+            v
+        };
+        let mut trees = vec![];
+        for (i, &(loc, t)) in params.iter().enumerate() {
+            let tr: RT = codes[i].iter().map(|&c| reg(&mut rg, c)).collect();
+            if count(prog, t, 0) != Some(tr.len()) {
+                self.rg = rg;
+                self.rg.on = false;
+                return;
+            }
+            trees.push((loc, t, tr));
+        }
+        let rtr: RT = codes[params.len()].iter().map(|&c| reg(&mut rg, c)).collect();
+        // (the environment is borrowed from outside)
+        let env = rg.var();
+        rg.univ.push((env, "'_".to_string()));
+        rg.externals.push(env);
+        rg.env_r = env;
+        for (loc, t, tr) in trees {
+            rg.implied(prog, t, &tr, 0);
+            rg.locals.insert(loc, tr);
+        }
+        if count(prog, self.ret, 0) == Some(rtr.len()) {
+            rg.ret = Some(rtr);
+        }
+        // (regions from outside the closure: what the caller knows of them is not known here, nor needed)
+        let ex = rg.externals.clone();
+        for &a in &ex {
+            for &b in &ex {
+                rg.known.push((a, b));
+            }
+        }
+        self.rg = rg;
+    }
+
+    /// A capture of the closure being checked, bound at loc: its regions are from outside, and it is reached through
+    /// the environment
+    pub(crate) fn rg_capture(&mut self, loc: Loc, t: Ty) {
+        if !self.rg_on() || self.rg.closure.is_none() {
+            return;
+        }
+        let prog = self.prog;
+        if let Some(tr) = self.rg.fresh(prog, t) {
+            self.rg.locals.insert(loc, tr);
+            self.rg.cap_locs.push(loc);
+        }
     }
 
     /// A closure's value of type t: what it captures by value, and borrows of what it captures by reference

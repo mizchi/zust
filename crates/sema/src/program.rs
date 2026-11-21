@@ -387,6 +387,9 @@ pub struct Insts {
     pub list: Vec<Inst>,
     map: HashMap<(u32, Vec<Ty>), u32>,
     pub pending: Vec<u32>,
+    /// A closure's region signature, by its fn id (its parameters' codes, then its result's), from the bound it is
+    /// passed to or its annotations (typeck's regionck)
+    pub closure_rg: HashMap<u32, Vec<Vec<u8>>>,
 }
 
 impl Insts {
@@ -396,6 +399,7 @@ impl Insts {
             list: vec![],
             map: HashMap::default(),
             pending: vec![],
+            closure_rg: HashMap::default(),
         }
     }
 

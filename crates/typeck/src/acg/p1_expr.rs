@@ -1530,6 +1530,8 @@ impl Cx<'_> {
         let Expr::Closure(_, inputs, _, _, _) = c else { return err(SP, "internal: expected a closure") };
         let prog = self.prog;
         let hint = self.closure_hint.take();
+        let bound = self.closure_bound.take();
+        let to_prelude = std::mem::take(&mut self.closure_prelude);
         let Some(&k) = self.closure_ix.get(&format!("@{}", c as *const Expr as usize)).or_else(|| self.closure_ix.get(&crate::ast_closure::closure_key(c))) else {
             return err(SP, "internal: unknown closure");
         };
@@ -1662,6 +1664,13 @@ impl Cx<'_> {
             return Ok((Some(v), t));
         }
         let sid = prog.instantiate(cd.sid, args.clone()).or_else(|e| err(SP, e))?;
+        // (the region signature its body is checked with: from a bound not the prelude's, else from annotated
+        // parameters)
+        if self.user_code && self.bk.level >= 2 && !to_prelude && (bound.is_some() || inputs.iter().any(|x| x.1.is_some())) && regionck::enabled() {
+            if let Some((ps, r)) = self.closure_sig(Ty::Struct(sid)) {
+                self.rg_closure_sig(c, cid, &ps, r, bound.map(|b| *b));
+            }
+        }
         // 呼ばれなくても本体を検査・コンパイルする (未使用なら --gc-sections で消える)
         {
             let mut g = self.insts.lock().unwrap();
@@ -2073,16 +2082,21 @@ impl Cx<'_> {
     /// 呼び先の引数の型 pt が `F` / `&F` / `&mut F` で、F に `Fn(A) -> B` の境界があれば (A, B)
     /// (呼び先のシグネチャの型パラメータを Param で含む)
     pub(crate) fn fn_bound_of(&self, sig: &FnSig, pt: Ty) -> Option<(Vec<Ty>, Ty)> {
+        self.fn_bound_with_text(sig, pt).map(|x| (x.0, x.1))
+    }
+
+    /// fn_bound_of, and the text of the bound
+    pub(crate) fn fn_bound_with_text<'s>(&self, sig: &'s FnSig, pt: Ty) -> Option<(Vec<Ty>, Ty, &'s str)> {
         let pt = match pt {
             Ty::Ref(_, i) => *i,
             t => t,
         };
         let Ty::Param(g) = pt else { return None };
         let (_, bounds) = sig.generics.get(g as usize)?;
-        let (_, ps, r) = bounds.iter().find_map(|b| crate::ast_summary::parse_fn_bound(b))?;
+        let (text, (_, ps, r)) = bounds.iter().find_map(|b| crate::ast_summary::parse_fn_bound(b).map(|x| (b.as_str(), x)))?;
         let names: Vec<&str> = sig.generics.iter().map(|g| g.0.as_str()).collect();
         let ps = ps.iter().map(|t| self.prog.resolve_g(t, &names).ok()).collect::<Option<Vec<Ty>>>()?;
-        Some((ps, self.prog.resolve_g(&r, &names).ok()?))
+        Some((ps, self.prog.resolve_g(&r, &names).ok()?, text))
     }
 
     /// クロージャの型 (struct のインスタンス) なら、その引数と戻り値の型
