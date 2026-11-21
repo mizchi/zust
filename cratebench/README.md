@@ -24,8 +24,8 @@ crates.io の小さなクレートを zustc でビルドできるか・どのく
 
 - `ui/apps/<名前>/`: そのフレームワークのカウンタのアプリ (Cargo.toml と Cargo.lock で版を固定。zust の Cargo の
   ワークスペースには入らない)
-- `ui/run.py`: `python3 cratebench/ui/run.py [名前..] [--rustc]` (リポジトリの根で、`cargo build --release` の後。
-  クレートを crates.io から取るのでネットワークが要る)。`cargo metadata` の wasm32 向けのグラフを、葉から順に
+- `ui/run.py`: `python3 cratebench/ui/run.py [名前..] [--rustc]` (リポジトリの根で、`cargo build --release --workspace` の後。
+  クレートを crates.io から取るのでネットワークが要る)。`zurgo metadata` の wasm32 向けのグラフを、葉から順に
   zustc でビルドし、失敗するクレートとその最初のエラーを、その上にあるクレートの数の順に出す。`--rustc` は先に
   `cargo build --target wasm32-unknown-unknown` で、rustc ならビルドできることを確かめる
 

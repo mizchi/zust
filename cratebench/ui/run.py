@@ -4,7 +4,8 @@ usage: python3 cratebench/ui/run.py [APP ...] [--rustc]   (リポジトリの根
   APP: apps/ の名前 (dioxus / leptos)。省くとすべて
   --rustc: 先に cargo build --target wasm32-unknown-unknown で、rustc ならビルドできることを確かめる
 
-クレートの一覧は `cargo metadata --filter-platform wasm32-unknown-unknown` (Cargo.lock の版、解決された feature)。
+クレートの一覧は `zurgo metadata --filter-platform wasm32-unknown-unknown` (Cargo.lock の版、解決された feature。
+`cargo metadata` と同じもの)。cargo はソースを取ってくる (`cargo fetch`) のにだけ使う。
 wasm に入るクレート (proc-macro を通らずに app から届くもの) だけをビルドする。proc-macro とそれが使うクレートは
 ホストで動くもので、zustc には proc-macro を動かす仕組みがないので数えるだけ。
 各クレートは、推移的な依存 (lib) と自分のワークスペース (ws.txt) にして `zustc build` する。依存のどれかが
@@ -21,13 +22,17 @@ import time
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(os.path.dirname(HERE))
 ZUSTC = os.path.join(ROOT, "target/release/zustc")
+ZURGO = os.path.join(ROOT, "target/release/zurgo")
 OUT = os.path.join(ROOT, "out/cratebench-ui")
 TARGET = "wasm32-unknown-unknown"
 
 
 def metadata(app):
-    r = subprocess.run(["cargo", "metadata", "--format-version", "1", "--locked", "--filter-platform", TARGET],
-                       cwd=os.path.join(HERE, "apps", app), capture_output=True, text=True, check=True)
+    d = os.path.join(HERE, "apps", app)
+    # (cargo only downloads the sources; zurgo reads the graph, as cargo metadata would give it)
+    subprocess.run(["cargo", "fetch", "--locked", "--target", TARGET], cwd=d, capture_output=True, text=True, check=True)
+    r = subprocess.run([ZURGO, "metadata", "--format-version", "1", "--filter-platform", TARGET], cwd=d, capture_output=True, text=True,
+                       check=True)
     return json.loads(r.stdout)
 
 

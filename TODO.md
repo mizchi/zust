@@ -80,10 +80,12 @@ behavior: `cve_2020_36323_join_borrow` (join over a `Borrow<str>` of the program
 Neither builds yet. `python3 cratebench/ui/run.py` builds their wasm32 crate graphs leaves first and lists the first
 error of each failing crate. Details and the order of the work: [docs/reports/2026-11-21-03-ui-frameworks-wasm.md](docs/reports/2026-11-21-03-ui-frameworks-wasm.md).
 
-- Cargo graphs: Cargo.toml / Cargo.lock, two versions of one crate, an edition per crate, build scripts (cfgs,
-  `rustc-env`, `OUT_DIR`), `env!` / `option_env!`, and workspace builds for wasm32. Planned as `crates/zargo`, a
-  Cargo-compatible driver: [#28](https://github.com/mizchi/zust/issues/28).
-- Proc macros: none can run. Unknown attributes are dropped silently (`#[wasm_bindgen]`, `#[component]`).
+- Cargo graphs: `crates/zurgo` ([#28](https://github.com/mizchi/zust/issues/28), [docs/zurgo.md](docs/zurgo.md))
+  reads Cargo.toml / Cargo.lock, turns on features as cargo does and builds path and crates.io packages (M0). Left:
+  build scripts (cfgs, `rustc-env`, `OUT_DIR`), two versions of one crate and renamed dependencies (zustc's workspace
+  has one name per crate), an edition per crate, `env!` / `option_env!`, workspace builds for wasm32.
+- Proc macros ([#29](https://github.com/mizchi/zust/issues/29)): none can run. Unknown attributes are dropped silently
+  (`#[wasm_bindgen]`, `#[component]`).
 - async is erased: an `async fn` runs when called and returns its value. Needs a state-machine lowering, `Pin`,
   `Waker` / `Context`.
 - wasm-bindgen's ABI: 32-bit pointers and `usize` on wasm32, imports from JS, exports called after `main`, its custom

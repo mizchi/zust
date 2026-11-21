@@ -702,6 +702,9 @@ pub struct CrateSpec {
     pub deps: Vec<String>,
     /// 有効な feature (`features=a,b`)
     pub features: Vec<String>,
+    /// (a bin: the name of the executable, when it is not `name`. A Cargo package's lib and bin share the package's
+    /// name, so zurgo gives the bin another crate name and keeps the executable's here)
+    pub exe: Option<String>,
 }
 
 /// ワークスペースの説明ファイルを読む。1 行に 1 クレート: `lib <名前> <根のファイル> [依存...]` / `bin <名前> <根のファイル> [依存...]`
@@ -736,6 +739,7 @@ pub fn read_workspace(path: &std::path::Path) -> R<Vec<CrateSpec>> {
                 .filter(|s| !s.is_empty())
                 .map(|s| s.to_string())
                 .collect(),
+            exe: None,
         });
     }
     Ok(out)
@@ -1391,7 +1395,7 @@ impl Session2 {
                 continue;
             }
             let deps = all_deps(i);
-            let exe = out_dir.join(c.name.as_str());
+            let exe = out_dir.join(c.exe.as_deref().unwrap_or(c.name.as_str()));
             if !changed[i] && !deps.iter().any(|&j| changed[j]) && exe.exists() {
                 continue;
             }

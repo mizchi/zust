@@ -74,3 +74,4 @@ zustc / zust-analyzer の作業の記録 (日付順)。数値はそれぞれの�
 | 2026-11-21 | [Rust の CVE から作るセキュリティの回帰テスト、同じパターンの点検、wasm のサンドボックス](2026-11-21-01-security-cves.md) |
 | 2026-11-21 | [RefCell の借用フラグとガード、一時値を drop する時](2026-11-21-02-refcell-guards.md) |
 | 2026-11-21 | [zustc で dioxus と leptos を wasm32 向けにビルドできるか](2026-11-21-03-ui-frameworks-wasm.md) |
+| 2026-11-21 | [zurgo M0: Cargo のパッケージを zustc でビルドする](2026-11-21-04-zurgo-m0.md) |

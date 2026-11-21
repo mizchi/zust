@@ -1,6 +1,6 @@
 {
   "schema": "jev-lint-documents-1",
-  "snapshotDigest": "cf7c8f9ccd7667af8dcdcbb64f905442eca3546df49cefebf5a57bd5352fee65",
+  "snapshotDigest": "44ae57ed5f8db53e302a19316cdb9f2247c858d519518317bc28f8c73b4bdcf0",
   "questionDigest": "209d6df378ccb747fcb0e821998fcd6105bc76638a88d22488d3b398d6a21595",
   "model": "jev-1.14.0",
   "snapshotChanged": false,
@@ -32,10 +32,10 @@
       "contextHash": "ec20e2ebdd2ae375a6636074c628c438138c77646a5be532bd01237081e3f660",
       "judgment": {
         "choice": "supports",
-        "confidence": 1,
+        "confidence": 0.99,
         "probabilities": {
-          "supports": 1,
-          "contradicts": 0,
+          "supports": 0.99,
+          "contradicts": 0.01,
           "unrelated": 0,
           "insufficient_context": 0
         }
@@ -66,10 +66,10 @@
       "contextHash": "7c7b286af72e5d19978bdcefe4ac1812afb0557f682df47ae767fa9324a36f5c",
       "judgment": {
         "choice": "supports",
-        "confidence": 0.99,
+        "confidence": 1,
         "probabilities": {
-          "supports": 0.99,
-          "contradicts": 0.01,
+          "supports": 1,
+          "contradicts": 0,
           "unrelated": 0,
           "insufficient_context": 0
         }
@@ -100,12 +100,12 @@
       "contextHash": "a068452334ef52150a1932e9d45207a4c156e3a5c60d69e061e986b1aa86d889",
       "judgment": {
         "choice": "supports",
-        "confidence": 0.97,
+        "confidence": 0.96,
         "probabilities": {
-          "supports": 0.98,
+          "supports": 0.97,
           "contradicts": 0.02,
           "unrelated": 0,
-          "insufficient_context": 0
+          "insufficient_context": 0.01
         }
       }
     },
@@ -168,12 +168,12 @@
       "contextHash": "ecee8f597e8c6093bcea35ffd84dafe505685fb3c77901bd2a2a9e033883360c",
       "judgment": {
         "choice": "supports",
-        "confidence": 0.97,
+        "confidence": 0.99,
         "probabilities": {
-          "supports": 0.98,
+          "supports": 0.99,
           "contradicts": 0.01,
           "unrelated": 0,
-          "insufficient_context": 0.01
+          "insufficient_context": 0
         }
       }
     },
@@ -202,12 +202,12 @@
       "contextHash": "5b6ede2d00ec82893b1c63b36b593d1e9e7999236c2422416b8324666f265c93",
       "judgment": {
         "choice": "supports",
-        "confidence": 0.97,
+        "confidence": 0.93,
         "probabilities": {
-          "supports": 0.98,
-          "contradicts": 0.02,
+          "supports": 0.95,
+          "contradicts": 0.04,
           "unrelated": 0,
-          "insufficient_context": 0
+          "insufficient_context": 0.01
         }
       }
     },
@@ -236,10 +236,10 @@
       "contextHash": "68facf70966b576a1dde106a31fd37de8e21bda46e6439878b91e7bce57154b6",
       "judgment": {
         "choice": "supports",
-        "confidence": 0.99,
+        "confidence": 0.97,
         "probabilities": {
-          "supports": 0.99,
-          "contradicts": 0.01,
+          "supports": 0.98,
+          "contradicts": 0.02,
           "unrelated": 0,
           "insufficient_context": 0
         }
@@ -338,10 +338,10 @@
       "contextHash": "b91a1cf01d33b66ef15111899d22ac963d6abc38c4242e6d72ebc80aefe2aecd",
       "judgment": {
         "choice": "supports",
-        "confidence": 1,
+        "confidence": 0.99,
         "probabilities": {
-          "supports": 1,
-          "contradicts": 0,
+          "supports": 0.99,
+          "contradicts": 0.01,
           "unrelated": 0,
           "insufficient_context": 0
         }
@@ -375,9 +375,9 @@
         "confidence": 0.97,
         "probabilities": {
           "supports": 0.98,
-          "contradicts": 0.01,
+          "contradicts": 0.02,
           "unrelated": 0,
-          "insufficient_context": 0.01
+          "insufficient_context": 0
         }
       }
     },
@@ -474,10 +474,10 @@
       "contextHash": "995fd3a707f5776e51b94a751074fafac1a87ee298cdbfcbf1ad24758b45d1e1",
       "judgment": {
         "choice": "supports",
-        "confidence": 0.99,
+        "confidence": 1,
         "probabilities": {
-          "supports": 0.99,
-          "contradicts": 0.01,
+          "supports": 1,
+          "contradicts": 0,
           "unrelated": 0,
           "insufficient_context": 0
         }
@@ -712,10 +712,10 @@
       "contextHash": "fee3dc6136c2d74a8f2b22992deee33ae5ead6cdbc19c240e51b7dcbe27e38cc",
       "judgment": {
         "choice": "supports",
-        "confidence": 0.97,
+        "confidence": 0.96,
         "probabilities": {
-          "supports": 0.98,
-          "contradicts": 0.01,
+          "supports": 0.97,
+          "contradicts": 0.02,
           "unrelated": 0,
           "insufficient_context": 0.01
         }
@@ -749,9 +749,9 @@
         "confidence": 0.96,
         "probabilities": {
           "supports": 0.97,
-          "contradicts": 0.01,
+          "contradicts": 0.02,
           "unrelated": 0,
-          "insufficient_context": 0.02
+          "insufficient_context": 0.01
         }
       }
     },
@@ -783,9 +783,9 @@
         "confidence": 0.92,
         "probabilities": {
           "supports": 0.94,
-          "contradicts": 0.05,
+          "contradicts": 0.04,
           "unrelated": 0,
-          "insufficient_context": 0.01
+          "insufficient_context": 0.02
         }
       }
     },
@@ -814,10 +814,10 @@
       "contextHash": "7438e0bb6ac3c01bf6beaa56051a35abf5a2f30ee56334c8cd754b996d6bd4e6",
       "judgment": {
         "choice": "supports",
-        "confidence": 0.87,
+        "confidence": 0.85,
         "probabilities": {
-          "supports": 0.9,
-          "contradicts": 0.09,
+          "supports": 0.89,
+          "contradicts": 0.1,
           "unrelated": 0,
           "insufficient_context": 0.01
         }
@@ -848,10 +848,10 @@
       "contextHash": "7982c179582830150e0121639bf13f758b8cd2967a8c41c2205db632219eb8e5",
       "judgment": {
         "choice": "supports",
-        "confidence": 0.93,
+        "confidence": 0.97,
         "probabilities": {
-          "supports": 0.95,
-          "contradicts": 0.05,
+          "supports": 0.98,
+          "contradicts": 0.02,
           "unrelated": 0,
           "insufficient_context": 0
         }
@@ -882,12 +882,12 @@
       "contextHash": "536786479dc0803408f0444fb2041d9e5a569289c775017759c4867ead02b09b",
       "judgment": {
         "choice": "supports",
-        "confidence": 0.99,
+        "confidence": 0.97,
         "probabilities": {
-          "supports": 0.99,
+          "supports": 0.98,
           "contradicts": 0.01,
           "unrelated": 0,
-          "insufficient_context": 0
+          "insufficient_context": 0.01
         }
       }
     },
@@ -916,12 +916,12 @@
       "contextHash": "6ef3c783f7f2ee4aa85d450d7fc65f20f61a1aa01a222d8aeb9ddeda31a027f9",
       "judgment": {
         "choice": "supports",
-        "confidence": 0.71,
+        "confidence": 0.87,
         "probabilities": {
-          "supports": 0.78,
-          "contradicts": 0.07,
+          "supports": 0.9,
+          "contradicts": 0.04,
           "unrelated": 0,
-          "insufficient_context": 0.15
+          "insufficient_context": 0.06
         }
       }
     },
@@ -950,10 +950,10 @@
       "contextHash": "4df342055803f33b6195c27c167f6f86d7071a5337af51009058f12b67f5035e",
       "judgment": {
         "choice": "supports",
-        "confidence": 0.97,
+        "confidence": 0.96,
         "probabilities": {
-          "supports": 0.98,
-          "contradicts": 0.02,
+          "supports": 0.97,
+          "contradicts": 0.03,
           "unrelated": 0,
           "insufficient_context": 0
         }
@@ -984,10 +984,10 @@
       "contextHash": "262bb5dcd097b8cb7be1fb2545acff1e36bb67eb6c6b7603871f70e0250fd627",
       "judgment": {
         "choice": "supports",
-        "confidence": 0.61,
+        "confidence": 0.51,
         "probabilities": {
-          "supports": 0.71,
-          "contradicts": 0.27,
+          "supports": 0.63,
+          "contradicts": 0.35,
           "unrelated": 0,
           "insufficient_context": 0.02
         }
@@ -1018,10 +1018,10 @@
       "contextHash": "0b80accfa94c5b38ba9a5a907f337dfaa274c72bc632be2ff55655cef05112aa",
       "judgment": {
         "choice": "supports",
-        "confidence": 0.59,
+        "confidence": 0.57,
         "probabilities": {
-          "supports": 0.69,
-          "contradicts": 0.3,
+          "supports": 0.68,
+          "contradicts": 0.31,
           "unrelated": 0,
           "insufficient_context": 0.01
         }
@@ -1052,20 +1052,54 @@
       "contextHash": "a6096ad392205a3aab3622788c6910d2f275768686eec35b9ca80d37dc6793fe",
       "judgment": {
         "choice": "supports",
-        "confidence": 0.99,
+        "confidence": 0.97,
         "probabilities": {
-          "supports": 0.99,
-          "contradicts": 0.01,
+          "supports": 0.98,
+          "contradicts": 0.02,
           "unrelated": 0,
           "insufficient_context": 0
+        }
+      }
+    },
+    {
+      "id": "docs_reports_2026-11-21-04-zurgo-m0",
+      "topic": "The Japanese file docs/ja/reports/2026-11-21-04-zurgo-m0.md is a faithful translation of docs/reports/2026-11-21-04-zurgo-m0.md",
+      "mode": "translation",
+      "reference": {
+        "source": "docs_reports_2026-11-21-04-zurgo-m0.en",
+        "path": "docs/reports/2026-11-21-04-zurgo-m0.md",
+        "startLine": 1,
+        "endLine": 110,
+        "quote": "# zurgo M0: Cargo packages built with zustc\n\nDate: 2026-11-21\n\nzustc had no way to build a Cargo package: its workspace build takes a hand-written list of crates. This is the first\nmilestone of mizchi/zust#28. It adds `crates/zurgo`, a Cargo-compatible driver (named zargo at first, but that crate\nname is taken on crates.io). zurgo reads Cargo.toml and Cargo.lock, finds the sources, turns on features as cargo does,\nand builds the graph with zustc's workspace build in the same process. `zurgo metadata` writes the JSON of\n`cargo metadata`. The issue for proc macros, mizchi/zust#29, was written at the same time. Usage: [zurgo.md](../zurgo.md).\n\n## 1. What it is made of\n\n3,100 lines, with no crates.io dependency (serde_json only in the tests):\n\n| module | lines | contents |\n|---|---:|---|\n| `toml.rs` | 529 | TOML: tables, arrays of tables, dotted and quoted keys, inline tables, the four kinds of strings, numbers, dates |\n| `resolve.rs` | 592 | the package graph from Cargo.lock and the manifests, and feature activation |\n| `manifest.rs` | 381 | Cargo.toml: targets with Cargo's auto-discovery, dependencies of the three kinds and under `[target]`, features, workspace inheritance |\n| `metadata.rs` | 258 | the JSON of `cargo metadata` |\n| `semver.rs` | 244 | versions and requirements, with Cargo's rules for `^`, `~`, wildcards and pre-releases |\n| `platform.rs` | 223 | `cfg(..)` platform keys, with the values `rustc --print cfg` gives for x86-64 Linux and wasm32 |\n| `compile.rs` | 217 | the zustc workspace (`CrateSpec`) and the build |\n| `lock.rs`, `json.rs` | 354 | Cargo.lock, and cargo's registry index cache |\n\nzust-core changes by one field: `CrateSpec::exe`, the name of a binary's executable. A package's library and binary\nshare the package's name, and zustc names a crate's files by its name, so zurgo gives the binary another crate name and\nkeeps the executable's name here.\n\n## 2. Matching cargo metadata\n\nThe test compares `zurgo metadata` with `cargo metadata` on the test packages and on cratebench/ui's dioxus (344\npackages) and leptos (180) apps, without a platform filter and with `--filter-platform` for wasm32 and for x86-64 Linux.\nIt compares packages, ids, targets, enabled features, edges and their `dep_kinds`. They are the same everywhere.\n\nThe first version followed the documented rules of cargo's feature resolver, and it differed in four ways. Each one\nshowed something about what `cargo metadata` reports:\n\n- **`cargo metadata` gives the dependency resolver's graph, not the feature resolver's.** Features in it are unified\n  over every kind and every platform. A weak `dep?/feat` pulls `dep` into the graph: toml's\n  `std = [\"serde_core?/std\", ..]` gives toml an edge to serde_core, though toml's `serde` feature is off. `zurgo build`\n  keeps the feature resolver's rules, which cargo builds with: a side for the host, no dev-dependencies, platforms\n  checked, weak features that wait.\n- **`--filter-platform` only filters edges.** An edge is shown if one of its declarations applies, and its `dep_kinds`\n  then list every declaration, also those for other platforms. dioxus-logger's tracing-subscriber has\n  `cfg(not(target_arch = \"wasm32\"))` in its kinds under the wasm32 filter, and tracing-subscriber's features include\n  `fmt`, which only that declaration asks for.\n- **`x/f` also turns on the feature named `x`** when `x` is an optional dependency and there is a feature of that name,\n  explicit or implicit. yoke has `zerofrom = [\"dep:zerofrom\"]` and `derive = [.., \"zerofrom/derive\"]`, so `derive` turns\n  the `zerofrom` feature on.\n- **Packages that are not downloaded still count.** `cargo metadata --filter-platform` and\n  `cargo fetch --target` leave out packages for other platforms: here 49 of the dioxus graph's 344 were not downloaded\n  (windows-sys, rustix, ndk ...). Their dependencies can still turn features on in a shared package: bitflags's `std`\n  comes only through them. cargo has their dependencies and features\n  in its registry index cache (`registry/index/*/.cache`, a version and a JSON line per entry), and zurgo reads them\n  from there. Cargo also prints a platform key from its parse (`cfg(target_os=\"hermit\")` becomes\n  `cfg(target_os = \"hermit\")`), and zurgo does the same.\n\nOn dioxus, `zurgo metadata` takes 39 ms and `cargo metadata --offline` 320 ms. `cratebench/ui/run.py` now reads its\ngraph from zurgo and uses cargo only to download (`cargo fetch`). Its output is the same as before.\n\n## 3. Builds\n\n- A path workspace builds and runs as its cargo build does:\n  - a library and a binary of one name;\n  - features through `default`, a dependency's `features = [..]` and `dep:`;\n  - a dev-dependency that would not compile, which must not be built.\n\n  The same build again does no work: every crate is fresh, and nothing is linked.\n- The six cratebench crates from crates.io (fnv, adler2, hex, itoa, rustc-hash, cfg-if), each with its cratebench app,\n  print what their cargo builds print.\n- For the dioxus and leptos apps, `zurgo build` stops at the first proc-macro dependency it reaches, and names it\n  (`const_format_proc_macros`, `futures-macro`) with mizchi/zust#29.\n\nhex did not print what its cargo build printed: `<[u8; 4]>::from_hex(..)` returned an error. This was not zurgo: plain\n`zustc build` of cratebench's hex printed the same. Bisecting found 61ae81a (\"pick_overload finds the group of a\nsuffixed candidate\"):\n\n- Impls of one trait for `[u8; 4]` and `[u8; 2]` give functions of one name, `n` and `n#1`, in one overload group.\n- The caller chooses one by the self type. Before 61ae81a, pick_overload did not find the group of the suffixed `n#1`,\n  so that choice stood.\n- Since then, it re-picked by the first argument. For `fn from_hex<T: AsRef<[u8]>>(hex: T)`, every candidate fits, so\n  the first impl was called.\n- Now a function without `self` is not re-picked among impls for other self types: its first argument says nothing of\n  the self type. Overloads of one self type (`From<&str>` and `From<String>` for one type) are still picked by the\n  argument.\n- `tests/probe/assoc_fn_by_self_type.rs` covers both.\n\nNo CI job compares cratebench's outputs (the KPI job measures its times), so this went unnoticed for a day. zurgo's\ntest now compares them.\n\n## 4. Not changed\n\n`cratebench/run.py` still builds with `zustc build` and hand-written workspaces. The KPI job (`bench/kpi_track.py`)\nmeasures cratebench's builds with it, and building through zurgo would change what that KPI measures. The same crates\nare built through zurgo in zurgo's tests.\n\n## 5. Left for M1 (mizchi/zust#28)\n\n- **Build scripts.** They are not run yet; a warning names each one.\n- **zustc's workspace:**\n  - crate names apart from extern names, so that two versions of one crate and renamed dependencies work;\n  - an edition per crate;\n  - `env!` / `option_env!`;\n  - wasm32.\n- **zurgo itself:**\n  - its own resolver;\n  - downloads;\n  - git dependencies;\n  - `[patch]`.",
+        "contentHash": "313f5692d5a1c0cc88e37c4aead90349c24f18786a28f51b09b2f557d3dee7d1"
+      },
+      "target": {
+        "source": "docs_reports_2026-11-21-04-zurgo-m0.ja",
+        "path": "docs/ja/reports/2026-11-21-04-zurgo-m0.md",
+        "startLine": 1,
+        "endLine": 112,
+        "quote": "# zurgo M0: Cargo のパッケージを zustc でビルドする\n\n日付: 2026-11-21\n\nzustc には Cargo のパッケージをビルドする手段がなかった: そのワークスペースのビルドは、手で書いたクレートの一覧を\n受け取る。これは mizchi/zust#28 の最初のマイルストーンである。Cargo と互換のドライバ `crates/zurgo` を足す (最初は\nzargo という名前だったが、そのクレート名は crates.io で使われている)。zurgo は Cargo.toml と Cargo.lock を読み、\nソースを見つけ、cargo と同じように feature を有効にし、そのグラフを同じプロセスの中で zustc のワークスペースの\nビルドでビルドする。`zurgo metadata` は `cargo metadata` の JSON を書く。proc macro の issue、mizchi/zust#29 も同時に\n書いた。使い方: [zurgo.md](../zurgo.md)。\n\n## 1. 何でできているか\n\n3,100 行で、crates.io への依存はない (serde_json はテストだけ):\n\n| モジュール | 行 | 中身 |\n|---|---:|---|\n| `toml.rs` | 529 | TOML: テーブル、テーブルの配列、ドットと引用符のキー、インラインのテーブル、4 種類の文字列、数、日付 |\n| `resolve.rs` | 592 | Cargo.lock とマニフェストからのパッケージのグラフと、feature の有効化 |\n| `manifest.rs` | 381 | Cargo.toml: Cargo の自動の発見を含むターゲット、3 種類の依存と `[target]` の下のもの、feature、ワークスペースからの継承 |\n| `metadata.rs` | 258 | `cargo metadata` の JSON |\n| `semver.rs` | 244 | 版と要求。`^`、`~`、ワイルドカード、プレリリースは Cargo の規則で |\n| `platform.rs` | 223 | `cfg(..)` のプラットフォームのキー。値は x86-64 Linux と wasm32 で `rustc --print cfg` が出すもの |\n| `compile.rs` | 217 | zustc のワークスペース (`CrateSpec`) とビルド |\n| `lock.rs`、`json.rs` | 354 | Cargo.lock と、cargo のレジストリの index のキャッシュ |\n\nzust-core はフィールド 1 つだけ変わる: `CrateSpec::exe`、バイナリの実行ファイルの名前である。パッケージの\nライブラリとバイナリはパッケージの名前を共有し、zustc はクレートのファイルをその名前で名付けるので、zurgo は\nバイナリに別のクレート名を付け、実行ファイルの名前をここに持たせる。\n\n## 2. cargo metadata に合わせる\n\nテストは、テストのパッケージと、cratebench/ui の dioxus (344 パッケージ) と leptos (180) のアプリについて、\n`zurgo metadata` と `cargo metadata` を比べる。プラットフォームの絞り込みなしと、wasm32 と x86-64 Linux の\n`--filter-platform` とで比べる。比べるのは、パッケージ、id、ターゲット、有効な feature、辺とその `dep_kinds` である。\nどこでも同じになる。\n\n最初の版は cargo の feature のリゾルバの、文書にある規則に従っていて、4 つの点で違った。どれも `cargo metadata` が\n何を出すかについて、何かを示した:\n\n- **`cargo metadata` が出すのは依存のリゾルバのグラフで、feature のリゾルバのものではない。** その feature は、\n  すべての種類、すべてのプラットフォームにわたってまとめられる。弱い `dep?/feat` も `dep` をグラフに入れる: toml の\n  `std = [\"serde_core?/std\", ..]` は、toml の `serde` feature が無効でも、toml から serde_core への辺を作る。\n  `zurgo build` は、cargo がビルドに使う feature のリゾルバの規則のままにする: ホストの側、dev-dependencies なし、\n  プラットフォームの確認、待つ弱い feature。\n- **`--filter-platform` は辺を絞るだけである。** 辺は、その宣言のどれかが当てはまれば出され、その `dep_kinds` には\n  すべての宣言が並ぶ。ほかのプラットフォームのものも並ぶ。wasm32 の絞り込みでも、dioxus-logger の\n  tracing-subscriber の種類には `cfg(not(target_arch = \"wasm32\"))` があり、tracing-subscriber の feature には、\n  その宣言だけが求める `fmt` がある。\n- **`x/f` は、`x` という名前の feature も有効にする。** `x` が optional の依存で、その名前の feature (明示のものか\n  暗黙のもの) があるときである。yoke には `zerofrom = [\"dep:zerofrom\"]` と `derive = [.., \"zerofrom/derive\"]` が\n  あるので、`derive` は `zerofrom` feature を有効にする。\n- **ダウンロードされていないパッケージも数に入る。** `cargo metadata --filter-platform` と `cargo fetch --target` は、\n  ほかのプラットフォームのパッケージを取ってこない: ここでは dioxus のグラフの 344 のうち 49 がダウンロードされて\n  いなかった (windows-sys、rustix、ndk など)。それでもその依存は、共有のパッケージの feature を有効にしうる:\n  bitflags の `std` はそれらからだけ来る。cargo はその依存と feature をレジストリの index のキャッシュ\n  (`registry/index/*/.cache`。項目ごとに版と JSON の 1 行) に持っていて、zurgo はそこから読む。また cargo は\n  プラットフォームのキーを、その構文解析から出し直す (`cfg(target_os=\"hermit\")` は `cfg(target_os = \"hermit\")` に\n  なる)。zurgo も同じようにする。\n\ndioxus では、`zurgo metadata` は 39 ms、`cargo metadata --offline` は 320 ms かかる。`cratebench/ui/run.py` は今は\nグラフを zurgo から読み、cargo はダウンロード (`cargo fetch`) にだけ使う。その出力は前と同じである。\n\n## 3. ビルド\n\n- path のワークスペースは、その cargo のビルドと同じようにビルドされ、動く:\n  - 1 つの名前のライブラリとバイナリ;\n  - `default`、依存の `features = [..]`、`dep:` を通した feature;\n  - コンパイルできない dev-dependency。これはビルドしてはいけない。\n\n  同じビルドをもう一度すると何もしない: どのクレートも新しいままで、何もリンクしない。\n- crates.io の cratebench の 6 つのクレート (fnv、adler2、hex、itoa、rustc-hash、cfg-if) は、それぞれ cratebench の\n  アプリと一緒に、その cargo のビルドと同じものを出す。\n- dioxus と leptos のアプリでは、`zurgo build` は最初に届いた proc-macro の依存で止まり、それを\n  (`const_format_proc_macros`、`futures-macro`) mizchi/zust#29 と一緒に示す。\n\nhex は、その cargo のビルドと同じものを出さなかった: `<[u8; 4]>::from_hex(..)` がエラーを返した。これは zurgo の\nせいではなかった: cratebench の hex をそのまま `zustc build` しても同じものを出した。二分探索で 61ae81a\n(\"pick_overload finds the group of a suffixed candidate\") が見つかった:\n\n- `[u8; 4]` と `[u8; 2]` への 1 つの trait の impl は、同じ名前の関数 `n` と `n#1` を作り、それらは 1 つの\n  オーバーロードの組に入る。\n- 呼ぶ側は self の型でその 1 つを選ぶ。61ae81a の前は、pick_overload は接尾辞の付いた `n#1` の組を見つけなかった\n  ので、その選択がそのまま残った。\n- それ以後は、最初の引数で選び直していた。`fn from_hex<T: AsRef<[u8]>>(hex: T)` ではどの候補も合うので、最初の\n  impl が呼ばれていた。\n- 今は、`self` のない関数を、ほかの self の型の impl の中から選び直さない: その最初の引数は self の型について何も\n  言わない。1 つの self の型のオーバーロード (1 つの型への `From<&str>` と `From<String>`) は、今も引数で選ぶ。\n- `tests/probe/assoc_fn_by_self_type.rs` がその両方を確かめる。\n\ncratebench の出力を比べる CI のジョブはない (KPI のジョブはその時間を測る) ので、これは 1 日気づかれなかった。今は\nzurgo のテストがそれを比べる。\n\n## 4. 変えなかったもの\n\n`cratebench/run.py` は今も `zustc build` と手で書いたワークスペースでビルドする。KPI のジョブ\n(`bench/kpi_track.py`) は cratebench のビルドをそれで測っていて、zurgo を通すとその KPI が測るものが変わる。同じ\nクレートは、zurgo のテストで zurgo を通してビルドする。\n\n## 5. M1 に残すもの (mizchi/zust#28)\n\n- **ビルドスクリプト。** まだ実行しない。それぞれを警告で示す。\n- **zustc のワークスペース:**\n  - extern の名前と分けたクレートの名前。1 つのクレートの 2 つの版と、名前を変えた依存のため;\n  - クレートごとの edition;\n  - `env!` / `option_env!`;\n  - wasm32。\n- **zurgo 自身:**\n  - 自前のリゾルバ;\n  - ダウンロード;\n  - git の依存;\n  - `[patch]`。",
+        "contentHash": "b9c379e70c13604710f5c52e8b3267304fb55a61fb4ff6859d57960fd1d82030"
+      },
+      "context": [],
+      "candidateId": "c32e995e2eb5f34cb6ec6f48c0d4a175d0552ba816791cab320dbdf7a0b72812",
+      "contextHash": "3680d7821ceccb84e40c111efdbf9782ab670b502e1b1838ae62cb03ee844288",
+      "judgment": {
+        "choice": "supports",
+        "confidence": 0.96,
+        "probabilities": {
+          "supports": 0.97,
+          "contradicts": 0.02,
+          "unrelated": 0,
+          "insufficient_context": 0.01
         }
       }
     }
   ],
   "coverage": {
-    "expected": 31,
-    "selected": 31,
-    "answered": 31,
+    "expected": 32,
+    "selected": 32,
+    "answered": 32,
     "missing": 0,
     "contradictions": 0,
     "unassessed": 0,
@@ -1074,9 +1108,9 @@
     "unboundDocuments": 0
   },
   "usage": {
-    "requests": 31,
-    "inputTokens": 163393,
-    "usd": 0.006862506000000001
+    "requests": 32,
+    "inputTokens": 169731,
+    "usd": 0.007128702
   },
   "errors": []
 }
