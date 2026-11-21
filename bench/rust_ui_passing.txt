@@ -1535,6 +1535,7 @@ compile-fail	const-generics/min_const_generics/const-expression-suggest-missing-
 check-pass	const-generics/min_const_generics/default_trait_param.rs
 compile-fail	const-generics/min_const_generics/forbid-non-static-lifetimes.rs
 run-pass	const-generics/min_const_generics/inferred_const.rs
+compile-fail	const-generics/min_const_generics/invalid-patterns.rs
 compile-fail	const-generics/min_const_generics/macro-fail.rs
 compile-fail	const-generics/min_const_generics/self-ty-in-const-1.rs
 compile-fail	const-generics/not_wf_param_in_rpitit.rs
@@ -3709,6 +3710,7 @@ check-pass	lint/unused/unused_assignments_across_match_guards.rs
 run-pass	lint/unused/unused_parens/unused-parens-in-macro-issue-120642.rs
 check-pass	lint/unused_braces.rs
 check-pass	lint/unused_braces_borrow.rs
+build-pass	lint/unused_braces_macro.rs
 check-pass	lint/unused_labels.rs
 compile-fail	lint/unused_parens_multibyte_recovery.rs
 compile-fail	lint/unused_variables-issue-82488.rs

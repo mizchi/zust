@@ -238,7 +238,11 @@ fn collect_generics(g: &Generics, out: &mut Vec<(String, Vec<String>)>) -> R<()>
         match p {
             GParam::Lifetime(_) => {}
             GParam::Ty(n, bs, _) => out.push((n.clone(), bound_names(bs)?)),
-            GParam::Const(n, _) => out.push((n.clone(), vec![CONST_GENERIC.to_string()])),
+            // (`const B: bool`: the parameter's type when it is not usize, as `__const:bool` after the mark)
+            GParam::Const(n, t) => out.push((n.clone(), match t {
+                PTy::Path(None, q) if q.segs.len() == 1 && q.segs[0].name != "usize" => vec![CONST_GENERIC.to_string(), format!("{CONST_GENERIC}:{}", q.segs[0].name)],
+                _ => vec![CONST_GENERIC.to_string()],
+            })),
         }
     }
     for (t, bs) in &g.preds {

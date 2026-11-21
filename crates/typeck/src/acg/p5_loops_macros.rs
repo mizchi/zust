@@ -2237,6 +2237,16 @@ impl Cx<'_> {
         crate::program::const_generic_value(&self.env, id)
     }
 
+    /// the declared type of the const generic parameter `e` names, when it is not usize (`const B: bool`)
+    pub(crate) fn const_generic_ty(&self, e: &Expr) -> Option<Ty> {
+        let Expr::Path(_, p) = e else { return None };
+        let id = ident_of(p)?;
+        let sig = self.prog.sigs.get(self.root as usize)?;
+        let (_, bs) = sig.generics.iter().find(|(n, _)| n == id)?;
+        let t = bs.iter().find_map(|b| b.strip_prefix(crate::types::CONST_GENERIC)?.strip_prefix(':'))?;
+        Ty::prim(t)
+    }
+
     pub(crate) fn const_of(&self, e: &Expr) -> Option<u32> {
         let Expr::Path(qself, p) = e else { return None };
         // (速い判定: 複数セグメントのパスで、最後の名前の const がなければ const ではない)

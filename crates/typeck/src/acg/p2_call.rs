@@ -1386,7 +1386,27 @@ impl Cx<'_> {
         let first = sig.trait_of.is_some() as usize;
         if let Some(tf) = turbofish {
             for (i, a) in tf.iter().enumerate() {
+                // (`get_flag::<false, 0xFF>()` with `const C: char`: a const argument of another kind than its parameter's
+                // type)
+                if let Some((_, bs)) = sig.generics.get(first + i).filter(|(_, bs)| bs.iter().any(|b| b == crate::types::CONST_GENERIC)) {
+                    let decl = bs.iter().find_map(|b| b.strip_prefix(crate::types::CONST_GENERIC)?.strip_prefix(':')).unwrap_or("usize");
+                    let found = match a {
+                        GArg::Ty(t) if crate::ast_types::bool_arg(t).is_some() => Some(("bool", "bool")),
+                        GArg::Const(Expr::Lit(s, _)) if s.starts_with('\'') => Some(("char", "char")),
+                        GArg::Const(Expr::Lit(s, _)) if s.starts_with(|c: char| c.is_ascii_digit()) => Some(("int", "integer")),
+                        _ => None,
+                    };
+                    let kind = match decl {
+                        "bool" | "char" => decl,
+                        _ => "int",
+                    };
+                    if let Some((_, shown)) = found.filter(|(k, _)| *k != kind) {
+                        return err(SP, format!("mismatched types: expected `{decl}`, found {shown} (const argument)"));
+                    }
+                }
                 let ty = match a {
+                    // (`f::<true>()`: a bool const argument, which the parser reads as a type path)
+                    GArg::Ty(t) if crate::ast_types::bool_arg(t).is_some() => self.prog.resolve_env(&crate::ast_types::bool_arg(t).unwrap(), &self.env).or_else(|er| err(SP, er))?,
                     GArg::Ty(t) => self.parse_ty(t)?,
                     // `f::<3>()`: const ジェネリクスの引数
                     GArg::Const(e) => {

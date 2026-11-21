@@ -2025,7 +2025,7 @@ impl Cx<'_> {
                 if p.segs[1].name == "BITS" { Some(Ty::U32) } else { Ty::from_suffix(&p.segs[0].name) }
             }
             Expr::Path(None, p) if p.segs.len() == 2 && self.const_of(e).is_some() => Some(self.prog.consts[self.const_of(e)? as usize].ty),
-            Expr::Path(None, _) if self.const_generic(e).is_some() => Some(Ty::Usize),
+            Expr::Path(None, _) if self.const_generic(e).is_some() => Some(self.const_generic_ty(e).unwrap_or(Ty::Usize)),
             Expr::Try(x) => {
                 let Ty::Struct(sid) = self.peek(x)? else { return None };
                 let sd = &self.prog.structs[sid as usize];

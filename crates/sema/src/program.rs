@@ -1951,7 +1951,7 @@ impl Program {
             }
         }
         // (const ジェネリクスの引数は長さを持つ配列型)
-        if tr == CONST_GENERIC {
+        if tr == CONST_GENERIC || tr.strip_prefix(CONST_GENERIC).is_some_and(|r| r.starts_with(':')) {
             return matches!(t, Ty::Array(Ty::Unit, _));
         }
         // 組み込みの AsRef<str> / AsRef<[T]> (文字列・Vec・配列・スライスとその参照)

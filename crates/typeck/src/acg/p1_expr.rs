@@ -65,10 +65,11 @@ impl Cx<'_> {
             Expr::Paren(p) => self.place(p),
             Expr::Path(..) if self.const_generic(e).is_some() => {
                 let n = self.const_generic(e).unwrap();
-                let v = self.b.ins().iconst(types::I64, n as i64);
-                let var = self.b.declare_var(types::I64);
+                let t = self.const_generic_ty(e).unwrap_or(Ty::Usize);
+                let v = self.int_const(t, n as i128);
+                let var = self.b.declare_var(clif_ty(t).unwrap_or(types::I64));
                 self.b.def_var(var, v);
-                Ok(Place::Var(var, Ty::Usize))
+                Ok(Place::Var(var, t))
             }
             // const (`LIMIT` / `S::N`) を場所として使う (`println!("{}", LIMIT)` / `&LIMIT`): 一時領域に置く
             Expr::Path(_, p) if self.const_of(e).is_some() && ident_of(p).is_none_or(|id| self.lookup(id).is_none()) => {
@@ -537,9 +538,11 @@ impl Cx<'_> {
             // const ジェネリクスの N: インスタンスの型引数の長さ
             Expr::Path(..) if self.const_generic(e).is_some() => {
                 let n = self.const_generic(e).unwrap();
-                // (`const N: u8`: the parameter's type is not kept; an expected integer type is taken as it)
-                let t = match expected {
-                    Some(t) if t.is_int() => t,
+                // (`const B: bool` / `const N: u8`: the parameter's declared type; a usize one takes an expected integer
+                // type)
+                let t = match (self.const_generic_ty(e), expected) {
+                    (Some(t), _) => t,
+                    (None, Some(t)) if t.is_int() => t,
                     _ => Ty::Usize,
                 };
                 Ok((Some(self.int_const(t, n as i128)), t))
