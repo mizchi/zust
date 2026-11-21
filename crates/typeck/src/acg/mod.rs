@@ -799,6 +799,15 @@ impl Cx<'_> {
                 return err(SP, format!("mismatched types: expected `{}`, found `{}`", self.prog.tn(vt), self.prog.tn(pt)));
             }
         }
+        // (`let (false,) = (22u8,);`: a tuple's elements against its fields)
+        if let (Pat::Tuple(ps), Ty::Struct(sid)) = (pat, vt) {
+            if self.prog.is_tuple(self.prog.base_of(sid)) && !ps.iter().any(|p| matches!(p, Pat::Rest)) {
+                let fts: Vec<Ty> = self.prog.structs[sid as usize].fields.iter().map(|f| f.1).collect();
+                for (p, ft) in ps.iter().zip(fts) {
+                    self.lit_pat_type_check(p, ft)?;
+                }
+            }
+        }
         Ok(())
     }
 
@@ -1414,8 +1423,21 @@ impl Cx<'_> {
                     if els.is_none() && self.user_code && !plainly_irrefutable(pat) {
                         // (`let false = 22;`: the literal's type first)
                         self.lit_pat_type_check(pat, place.ty())?;
-                        if let Some(w) = self.non_exhaustive_pats(&[pat], place.ty()) {
-                            return err(SP, format!("refutable pattern in local binding: `{w}` not covered (E0005)"));
+                        match self.coverage(&[pat], place.ty()) {
+                            Some(Some(w)) => return err(SP, format!("refutable pattern in local binding: `{w}` not covered (E0005)")),
+                            Some(None) => {}
+                            // (a pattern coverage does not model (`let [Some(x)] = xs;`): tested at run time, a trap where it
+                            // does not match, so nothing binds from a payload that is not there)
+                            None if els.is_none() => {
+                                let trap = self.b.create_block();
+                                self.pat_test(pat, place, trap)?;
+                                let cur = self.b.create_block();
+                                self.b.ins().jump(cur, &[]);
+                                self.b.switch_to_block(trap);
+                                self.b.ins().trap(TrapCode::unwrap_user(2));
+                                self.b.switch_to_block(cur);
+                            }
+                            None => {}
                         }
                     }
                     // `let PAT = e else { .. };`: 合わなければ else の (発散する) ブロックへ
