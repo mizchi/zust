@@ -10,6 +10,9 @@ fn get(x: __m128) -> i32 {
     x.n
 }
 
+#[allow(non_camel_case_types)]
+struct f32x4(u64, u64, u64, u64);
+
 struct Ops;
 
 impl Ops {
@@ -39,4 +42,6 @@ fn main() {
     println!("assoc {} {}", Ops::_mm_add_ps(3, 4), Ops::i32x4_add(9, 2));
     println!("fn pointer {}", apply(|a, b| a * 10 + b));
     println!("own fn {}", f32x4_mine(1.25));
+    let q = f32x4(1, 2, 3, 4);
+    println!("tuple struct {}", q.0 + q.3);
 }

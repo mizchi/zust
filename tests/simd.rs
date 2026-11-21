@@ -104,6 +104,11 @@ fn simd_errors() {
         ("let a = _mm_set1_epi32(1); let _ = _mm_extract_epi32::<4294967297>(a);", "too large"),
         ("let a = _mm_set1_epi32(1); let _ = _mm_extract_epi32::<4>(a);", "out of range"),
         ("let a = _mm_set1_ps(1.0); let _ = _mm_extractf128_ps::<0>(a);", "_mm_extractf128_ps"),
+        ("let a = _mm_set1_epi32(1); let _ = _mm_extract_epi32::<BIG>(a); } const BIG: usize = 4294967297; fn f() {", "too large"),
+        ("let a = _mm_set1_ps(1.0); let _ = _mm_dp_ps::<256>(a, a);", "out of range"),
+        ("let a = _mm_set1_ps(1.0); let _ = _mm_cmp_ps::<32>(a, a);", "out of range"),
+        ("let t = [0i32; 8]; let i = _mm_set1_epi32(0); let _ = unsafe { _mm_i32gather_epi32::<3>(t.as_ptr(), i) };", "scale"),
+        ("let _ = core::arch::wasm32::_mm_set1_ps(1.0);", "_mm_set1_ps"),
     ];
     let mut bad = vec![];
     for (k, (body, want)) in cases.iter().enumerate() {

@@ -65,18 +65,26 @@ enum Plan {
 impl Cx<'_> {
     /// The lane index or shuffle index k of a call's const generic arguments (`::<3>`)
     fn simd_const(&mut self, seg: &crate::parse::Seg, k: usize, name: &str) -> R<u32> {
-        // (x86's comparison predicates by name: `_mm256_cmp_ps::<_CMP_LT_OQ>`)
-        // (a constant of the program's own of that name is the program's)
-        let named = match seg.args.get(k) {
-            Some(GArg::Const(Expr::Path(None, p))) | Some(GArg::Ty(crate::parse::Ty::Path(None, p)))
-                if p.segs.len() == 1 && !self.prog.const_index.contains_key(&p.segs[0].name) =>
-            {
-                cmp_predicate(&p.segs[0].name)
-            }
+        // (a single name, written bare, as a type, or in braces: `::<_CMP_LT_OQ>`, `::<{ _CMP_LT_OQ }>`, `::<LANE>`)
+        let single = |p: &Path| (p.segs.len() == 1 && p.segs[0].args.is_empty()).then(|| p.segs[0].name.clone());
+        let one: Option<String> = match seg.args.get(k) {
+            Some(GArg::Const(Expr::Path(None, p))) | Some(GArg::Ty(crate::parse::Ty::Path(None, p))) => single(p),
+            Some(GArg::Const(Expr::Block(None, false, b))) if b.stmts.len() == 1 => match &b.stmts[0] {
+                crate::parse::Stmt::Expr(Expr::Path(None, p), false) => single(p),
+                _ => None,
+            },
             _ => None,
         };
-        if let Some(n) = named {
-            return Ok(n);
+        if let Some(n) = &one {
+            if self.prog.const_index.contains_key(n) {
+                // (a constant of the program's: its value, which must fit (not truncated to another lane))
+                let v = self.prog.const_usize(n).or_else(|e| err(SP, e))?;
+                return u32::try_from(v).or_else(|_| err(SP, format!("`{name}`: const argument {} is too large", k + 1)));
+            }
+            // (x86's comparison predicates by name: `_mm256_cmp_ps::<_CMP_LT_OQ>`)
+            if let Some(v) = cmp_predicate(n) {
+                return Ok(v);
+            }
         }
         let ts = match seg.args.get(k) {
             Some(GArg::Const(e)) => crate::ast_types::const_arg_syn(e).or_else(|er| err(SP, er))?,
@@ -120,7 +128,7 @@ impl Cx<'_> {
         if p.segs.len() == 1 && self.lookup(name).is_some() {
             return Ok(None);
         }
-        if !crate::simd_sig::arch_path(p.segs[..p.segs.len() - 1].iter().map(|s| s.name.as_str())) {
+        if !crate::simd_sig::arch_path(p.segs[..p.segs.len() - 1].iter().map(|s| s.name.as_str()), name) {
             return Ok(None);
         }
         if self.prog.fn_by_p(&PPath::of(p), self.self_sid).is_some() || self.prog.index.contains_key(name) {
@@ -147,6 +155,21 @@ impl Cx<'_> {
             } else {
                 0
             };
+            // (the immediates' ranges, as rustc's static asserts: a gather's scale 1, 2, 4 or 8; a comparison
+            // predicate 5 bits; a 128-bit half 1 bit; the other immediates 8 bits)
+            let max = match x.op {
+                "cmp" => 31,
+                "extractf128" | "extracti128" | "insertf128" | "inserti128" => 1,
+                "extract" => u32::MAX,
+                _ => 255,
+            };
+            if crate::simd_sig::x86_gather(x).is_some() {
+                if !matches!(imm, 1 | 2 | 4 | 8) {
+                    return err(SP, format!("`{name}`: the scale must be 1, 2, 4 or 8, not {imm}"));
+                }
+            } else if imm > max {
+                return err(SP, format!("`{name}`: the immediate {imm} is out of range (0..={max})"));
+            }
             Plan::X86(imm)
         } else if pre == "v128" {
             match rest {
@@ -1175,7 +1198,8 @@ fn gather(m: &mut crate::ir::Recorder, g: crate::simd_sig::Gather, scale: u32, v
             a = m.select(c, a, d);
             on = Some(c);
         }
-        let e = m.load(el.ty(), a, 0);
+        // (a scale below the element's size makes an address that need not be aligned to it: read it byte by byte)
+        let e = if scale < el.bits() / 8 { load_bytes(m, el.ty(), a) } else { m.load(el.ty(), a, 0) };
         let e = match on {
             Some(c) => {
                 let old = m.simd(rs, VOp::Extract(i as u8), &[r]);
@@ -1189,6 +1213,20 @@ fn gather(m: &mut crate::ir::Recorder, g: crate::simd_sig::Gather, scale: u32, v
     for i in g.n..rs.count() {
         let z = m.iconst(el.ty(), 0);
         r = m.simd(rs, VOp::Replace(i as u8), &[r, z]);
+    }
+    r
+}
+
+/// An integer of type t read a byte at a time (an address that need not be aligned to t: the IR's loads are)
+fn load_bytes(m: &mut crate::ir::Recorder, t: Type, a: Value) -> Value {
+    let n = t.bytes();
+    let mut r = m.iconst(t, 0);
+    for j in 0..n {
+        let b = m.load(Type::I8, a, j as i32);
+        let b = m.uextend(t, b);
+        let s = m.iconst(Type::I32, (8 * j) as i64);
+        let b = m.ishl(b, s);
+        r = m.bor(r, b);
     }
     r
 }

@@ -48,6 +48,7 @@ fn run() {
     h("cmpge_ss", _mm_castps_si128(_mm_cmpge_ss(a, b)));
     h("cmpneq_ss", _mm_castps_si128(_mm_cmpneq_ss(n, n)));
     h("cmp_ss", _mm_castps_si128(_mm_cmp_ss::<_CMP_GT_OQ>(b, a)));
+    h("cmp braced", _mm_castps_si128(_mm_cmp_ps::<{ _CMP_GE_OQ }>(a, _mm_setr_ps(1.0, 9.0, 3.0, 0.0))));
     h("cmp own const", _mm_castps_si128(_mm_cmp_ps::<_CMP_LT_OQ>(a, _mm_setr_ps(1.0, 0.0, 3.0, 9.0))));
     h("fmadd_ss", _mm_castps_si128(_mm_fmadd_ss(a, b, n)));
     h("fnmsub_ss", _mm_castps_si128(_mm_fnmsub_ss(b, a, b)));

@@ -31,10 +31,17 @@ pub fn vector_name(s: &str) -> Option<Ty> {
     })
 }
 
-/// Whether a call's path may name an intrinsic: a bare name, or one qualified by core::arch's modules only
-/// (`core::arch::x86_64::_mm_add_ps`). `Ops::_mm_add_ps` is the program's function
-pub fn arch_path<'a>(qualifier: impl IntoIterator<Item = &'a str>) -> bool {
-    qualifier.into_iter().all(|s| matches!(s, "core" | "std" | "arch" | "x86_64" | "x86" | "wasm32" | "wasm64"))
+/// Whether a call's path may name the intrinsic `name`: a bare name, or one qualified by core::arch's modules only,
+/// and by the module of its family (`core::arch::x86_64::_mm_add_ps`, `std::arch::wasm32::f32x4_add`).
+/// `Ops::_mm_add_ps` is the program's function; `core::arch::wasm32::_mm_set1_ps` names nothing
+pub fn arch_path<'a>(qualifier: impl IntoIterator<Item = &'a str>, name: &str) -> bool {
+    let x86 = name.starts_with("_mm");
+    qualifier.into_iter().all(|s| match s {
+        "core" | "std" | "arch" => true,
+        "x86_64" | "x86" => x86,
+        "wasm32" | "wasm64" => !x86,
+        _ => false,
+    })
 }
 
 /// A pointer argument of a load (`*const T`) or a store (`*mut T`)
