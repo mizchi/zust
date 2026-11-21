@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795261451673,
+  "lastUpdate": 1795261454008,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -76005,6 +76005,85 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/mizchi/zust/commit/bbe372d466a494c40c547d266340bb7347b28bd7"
         },
         "date": 1795250343334,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "parity documentSymbol (名前の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity workspace/symbol (上位 20 の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity definition (行き先の一致)",
+            "value": 96.667,
+            "unit": "%"
+          },
+          {
+            "name": "parity hover (名前を含む)",
+            "value": 90,
+            "unit": "%"
+          },
+          {
+            "name": "parity references (数の一致)",
+            "value": 84.615,
+            "unit": "%"
+          },
+          {
+            "name": "parity documentHighlight (数の一致)",
+            "value": 93.939,
+            "unit": "%"
+          },
+          {
+            "name": "parity rename (書き換えの一致)",
+            "value": 89.474,
+            "unit": "%"
+          },
+          {
+            "name": "parity signatureHelp (名前・引数の数・今の引数の一致)",
+            "value": 94.737,
+            "unit": "%"
+          },
+          {
+            "name": "parity completion `x.\\|` (書いてある名前を含む)",
+            "value": 95,
+            "unit": "%"
+          },
+          {
+            "name": "parity completion `na\\|me` (同)",
+            "value": 84.211,
+            "unit": "%"
+          },
+          {
+            "name": "parity 一致の平均",
+            "value": 92.864,
+            "unit": "%"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "miz404@gmail.com",
+            "name": "Kotaro Chikuba",
+            "username": "mizchi"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "6f8e6a91bd2d6f9d38019a4c357f4b80e68c8923",
+          "message": "Merge pull request #24 from mizchi/claude/compat-next20\n\nE0005 refutable let/for, E0415/E0416 names bound twice, E0124, E0407",
+          "timestamp": "2026-11-21T20:40:06+09:00",
+          "tree_id": "d6959e02238a331e54bf9e4c39de488893959d09",
+          "url": "https://github.com/mizchi/zust/commit/6f8e6a91bd2d6f9d38019a4c357f4b80e68c8923"
+        },
+        "date": 1795261453520,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
