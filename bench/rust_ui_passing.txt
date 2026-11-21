@@ -4386,6 +4386,7 @@ check-pass	nll/ty-outlives/projection-body.rs
 check-pass	nll/ty-outlives/projection-where-clause-env.rs
 check-pass	nll/ty-outlives/projection-where-clause-trait.rs
 compile-fail	nll/ty-outlives/ty-param-fn-body.rs
+compile-fail	nll/ty-outlives/ty-param-fn.rs
 compile-fail	nll/ty-outlives/wf-unreachable.rs
 compile-fail	nll/type-check-pointer-coercions.rs
 compile-fail	nll/type-check-pointer-comparisons.rs
@@ -5538,6 +5539,9 @@ run-pass	regions/regions-bound-lists-feature-gate.rs
 compile-fail	regions/regions-bounded-by-trait-requiring-static.rs
 compile-fail	regions/regions-bounded-method-type-parameters.rs
 compile-fail	regions/regions-bounds.rs
+compile-fail	regions/regions-close-over-type-parameter-1.rs
+compile-fail	regions/regions-close-over-type-parameter-multiple.rs
+compile-fail	regions/regions-close-param-into-object.rs
 run-pass	regions/regions-copy-closure.rs
 run-pass	regions/regions-creating-enums2.rs
 compile-fail	regions/regions-creating-enums3.rs

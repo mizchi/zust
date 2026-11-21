@@ -378,6 +378,11 @@ impl<'a> Slots<'a> {
             // own arguments are not followed)
             PTy::Dyn(bs) => {
                 let code = match bs.iter().find_map(|b| if let Bound::Lifetime(l) = b { Some(l.clone()) } else { None }) {
+                    // (`dyn Tr + '_` is not the default (`Box<dyn Tr>` is 'static): the signature says something)
+                    Some(l) if l == "'_" && self.in_fn == 0 => {
+                        self.any = true;
+                        R_ELIDED
+                    }
                     Some(l) => self.code(Some(&l)),
                     None => R_DYN_DEFAULT,
                 };

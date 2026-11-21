@@ -916,7 +916,15 @@ impl RgSt {
                 // (its lifetime: written, or the default: the reference's around it, else 'static in a signature and
                 // inferred in a body)
                 let v = match c.next() {
-                    R_DYN_DEFAULT | R_ELIDED => match parent {
+                    R_DYN_DEFAULT => match parent {
+                        Some(r) => r,
+                        None if self.dyn_infer => self.var(),
+                        None => STATIC,
+                    },
+                    // (`dyn Tr + '_`: an elided lifetime, as any other `'_` (a fresh one of a call's parameter); not the
+                    // default, which in `Box<dyn Tr>` is 'static)
+                    R_ELIDED if c.codes.is_some() => elided(self),
+                    R_ELIDED => match parent {
                         Some(r) => r,
                         None if self.dyn_infer => self.var(),
                         None => STATIC,
@@ -1685,7 +1693,10 @@ impl Cx<'_> {
                 // its lifetime inferred)
                 let infer = matches!(to, Ty::Param(h) if h == crate::program::HOLE) && matches!(it, Ty::Ptr(_, i) if dyn_tail(prog, *i, 0));
                 let to = if infer { it } else { to };
-                if to != it {
+                // (an unsizing cast (`Box::new(v) as Box<dyn Tr + 'static>`): a coercion, the value flows into the
+                // type written)
+                let unsize = to != it && has_dyn(prog, to, 0) && !matches!(to, Ty::Ptr(..));
+                if to != it && !unsize {
                     return None;
                 }
                 if infer {
@@ -1705,6 +1716,10 @@ impl Cx<'_> {
                 let tree = self.rg.instantiate(prog, to, Some(&codes), &lts, &[], &mut |me| me.var());
                 self.rg.dyn_infer = false;
                 let tree = tree?;
+                if unsize {
+                    self.rg.flow(prog, it, to, &itr, &tree, super::borrowck::pos(x));
+                    return Some((to, tree));
+                }
                 // (a cast of a raw pointer may change the regions of what it points to; not a trait object's
                 // lifetime: `*mut (dyn Tr + 'a) as *mut (dyn Tr + 'static)` is an error)
                 // (`*mut S<dyn Tr + 'a>` too: the object at the end of what it points to)

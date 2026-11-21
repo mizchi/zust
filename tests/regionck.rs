@@ -1107,3 +1107,17 @@ fn type_parameter_regions() {
     assert!(d.len() == 1 && d[0].0 == 8 && d[0].1.contains("the parameter type `T` may not live long enough") && d[0].1.contains("E0309"), "{d:?}");
     assert_eq!(check("use std::cell::Cell;\nfn outlives<'a, T>(_x: Cell<&'a usize>, _y: T)\nwhere\n    T: 'a,\n{\n}\nfn bounded<'a, T: 'a>(cell: Cell<&'a usize>, t: T) {\n    outlives(cell, t)\n}\nfn main() {}\n"), vec![]);
 }
+
+/// A placeholder bounded by a trait: coerced to `dyn Tr + 'static` (E0310), cast to it; a fn whose body calls the
+/// bound's methods is not checked (`dyn Tr + '_` in a parameter is an elided lifetime, not the default)
+#[test]
+fn placeholder_bounds() {
+    let d = check("trait X {\n    fn foo(&self) {}\n}\nfn p1<T>(v: T) -> Box<dyn X + 'static>\nwhere\n    T: X,\n{\n    Box::new(v)\n}\nfn main() {}\n");
+    assert!(d.len() == 1 && d[0].0 == 8 && d[0].1.contains("E0310"), "{d:?}");
+    let d = check("trait S {\n    fn get(&self) -> isize;\n}\nfn m<A: S>(v: A) -> Box<dyn S + 'static> {\n    Box::new(v) as Box<dyn S + 'static>\n}\nfn main() {}\n");
+    assert!(d.len() == 1 && d[0].0 == 5 && d[0].1.contains("E0310"), "{d:?}");
+    assert_eq!(
+        check("trait X {\n    fn foo(&self) {}\n}\nfn p1<'a, T: X + 'a>(v: T) -> Box<dyn X + 'a> {\n    Box::new(v)\n}\ntrait G {\n    fn get(&self) -> usize;\n}\nstruct H<'a> {\n    c: &'a usize,\n}\nimpl<'a> G for H<'a> {\n    fn get(&self) -> usize {\n        *self.c\n    }\n}\nfn get_v(gc: Box<dyn G + '_>) -> usize {\n    gc.get()\n}\nfn main() {\n    let c = 22;\n    let h = H { c: &c };\n    println!(\"{}\", get_v(Box::new(h) as Box<dyn G>));\n}\n"),
+        vec![]
+    );
+}
