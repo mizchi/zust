@@ -26,6 +26,7 @@ fn main() {
     let v = vec![Q { a: 1 }];
     println!("{}", v[0] == Q { a: 1 });
     println!("{:?}", by_ref());
+    println!("{:?}", other_eq());
 }
 // (`impl PartialEq for &X` only: `&X(1) == &X(2)` compares through it, not by the fields)
 struct RX(i32);
@@ -37,4 +38,19 @@ impl PartialEq for &RX {
 #[allow(dead_code)]
 fn by_ref() -> (bool, bool, bool) {
     (&RX(1) == &RX(3), &RX(1) == &RX(2), &RX(2) != &RX(4))
+}
+// (another trait's `eq` for `&X` is no PartialEq: `==` still uses X's derived one)
+trait Other {
+    fn eq(&self, o: &Self) -> bool;
+}
+#[derive(PartialEq)]
+struct OX(i32);
+impl Other for &OX {
+    fn eq(&self, _o: &Self) -> bool {
+        true
+    }
+}
+#[allow(dead_code)]
+fn other_eq() -> (bool, bool) {
+    (&OX(1) == &OX(2), &OX(1) == &OX(1))
 }
