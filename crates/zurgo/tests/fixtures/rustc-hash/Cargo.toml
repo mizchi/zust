@@ -1,0 +1,11 @@
+[package]
+name = "app-rustc-hash"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+# (a test package of zurgo, not a member of zust's workspace)
+[workspace]
+
+[dependencies]
+rustc-hash = "=2.1.3"

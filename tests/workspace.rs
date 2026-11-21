@@ -103,3 +103,31 @@ fn workspace_matches_rustc_and_rebuilds_incrementally() {
     assert_eq!(a, b);
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// An executable whose name moves between bin crates (`exe=`, as zurgo writes it) is linked again when the crate it
+/// comes from changes, though that crate's object is fresh and the file exists
+#[test]
+fn exe_moved_between_crates_relinks() {
+    let dir = std::env::temp_dir().join(format!("zustc_ws_exe_{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join("a.rs"), "fn main() {\n    println!(\"a\");\n}\n").unwrap();
+    std::fs::write(dir.join("b.rs"), "fn main() {\n    println!(\"b\");\n}\n").unwrap();
+    let out = dir.join("t");
+    let spec = |name: &str| zustc::driver2::CrateSpec {
+        name: name.to_string(),
+        root: dir.join(format!("{name}.rs")),
+        display: format!("{name}.rs"),
+        lib: false,
+        deps: vec![],
+        features: vec![],
+        exe: Some("one".to_string()),
+    };
+    let mut s = zustc::driver2::Session2::new(zustc::driver2::Options2::default());
+    for (name, want) in [("a", "a\n"), ("b", "b\n"), ("a", "a\n")] {
+        s.build_workspace(&[spec(name)], &out).unwrap();
+        let (got, _, code) = run(&out.join("one"), &dir, 0);
+        assert_eq!((got.as_str(), code), (want, Some(0)), "after building `{name}` as `one`");
+    }
+    let _ = std::fs::remove_dir_all(&dir);
+}

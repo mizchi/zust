@@ -211,7 +211,11 @@ cargo install --path .
 cargo install --path crates/analyzer
 ```
 
-This puts `zustc` and `zust-analyzer` in `~/.cargo/bin`. You can also run `cargo build --release --workspace` and use
+```bash
+cargo install --path crates/zurgo
+```
+
+This puts `zustc`, `zust-analyzer` and `zurgo` in `~/.cargo/bin`. You can also run `cargo build --release --workspace` and use
 the binaries in `target/release/` without installing.
 
 ## Using zustc
@@ -263,7 +267,22 @@ zustc build workspace.txt -o target
 - Changing the body of a function in a crate that others depend on does not recompile the dependents; zustc only
   relinks.
 - See `tests/workspace/` for an example.
-- Cargo.toml is not read.
+- zustc does not read Cargo.toml: zurgo (next section) does.
+
+### Cargo packages (zurgo)
+
+`zurgo` builds a Cargo package with zustc: it reads Cargo.toml and Cargo.lock, takes crates.io sources from
+`$CARGO_HOME/registry/src` (where `cargo fetch` puts them), turns on features as cargo does, and builds the graph as a
+zustc workspace ([docs/zurgo.md](docs/zurgo.md)).
+
+```bash
+zurgo run
+```
+
+- Commands: `build`, `run`, `metadata` (the JSON of `cargo metadata`), `clean`, with cargo's flags for them.
+- Output goes to `target/zust/<profile>/`.
+- Not yet: build scripts, proc macros, two versions of one crate, renamed dependencies, git dependencies, its own
+  resolver (mizchi/zust#28, mizchi/zust#29).
 
 ### Options
 

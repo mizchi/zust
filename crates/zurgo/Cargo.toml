@@ -1,0 +1,17 @@
+[package]
+name = "zurgo"
+version = "0.1.0"
+edition = "2024"
+license = "MIT OR Apache-2.0"
+description = "A Cargo-compatible build driver for zustc"
+
+[[bin]]
+name = "zurgo"
+path = "src/main.rs"
+
+[dependencies]
+# (the compiler, in process: the same crates and backends as the zustc binary)
+zustc = { path = "../.." }
+
+[dev-dependencies]
+serde_json = "1"

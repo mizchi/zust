@@ -1,6 +1,6 @@
 {
   "schema": "jev-lint-documents-1",
-  "snapshotDigest": "d31275aa319bab8b07c1e65f13ec41d26c779569c6c40cf269017c5cbb94168f",
+  "snapshotDigest": "fb6d70917e0da9accfe574e34d5511f8d33c98f60ca2ffca039db88c2fcc168c",
   "questionDigest": "209d6df378ccb747fcb0e821998fcd6105bc76638a88d22488d3b398d6a21595",
   "model": "jev-1.14.0",
   "snapshotChanged": false,
@@ -100,10 +100,10 @@
       "contextHash": "a068452334ef52150a1932e9d45207a4c156e3a5c60d69e061e986b1aa86d889",
       "judgment": {
         "choice": "supports",
-        "confidence": 0.99,
+        "confidence": 0.97,
         "probabilities": {
-          "supports": 0.99,
-          "contradicts": 0.01,
+          "supports": 0.98,
+          "contradicts": 0.02,
           "unrelated": 0,
           "insufficient_context": 0
         }
@@ -304,10 +304,10 @@
       "contextHash": "41c0a2541784f0e073e300bd96b1ad35979d31a7048a9c86dc0c9821eba76c55",
       "judgment": {
         "choice": "supports",
-        "confidence": 1,
+        "confidence": 0.99,
         "probabilities": {
-          "supports": 1,
-          "contradicts": 0,
+          "supports": 0.99,
+          "contradicts": 0.01,
           "unrelated": 0,
           "insufficient_context": 0
         }
@@ -372,12 +372,12 @@
       "contextHash": "65d03eec8a642fb4c59c7bacc74397f936864091105bba631e8977b9ca9c1612",
       "judgment": {
         "choice": "supports",
-        "confidence": 0.96,
+        "confidence": 0.99,
         "probabilities": {
-          "supports": 0.97,
-          "contradicts": 0.02,
+          "supports": 0.99,
+          "contradicts": 0.01,
           "unrelated": 0,
-          "insufficient_context": 0.01
+          "insufficient_context": 0
         }
       }
     },
@@ -644,10 +644,10 @@
       "contextHash": "1275e8de4d291bc21dd7f5b87a5196cba9cca33005a1ac6eca77fa3d0892971e",
       "judgment": {
         "choice": "supports",
-        "confidence": 0.96,
+        "confidence": 0.97,
         "probabilities": {
-          "supports": 0.97,
-          "contradicts": 0.03,
+          "supports": 0.98,
+          "contradicts": 0.02,
           "unrelated": 0,
           "insufficient_context": 0
         }
@@ -746,12 +746,12 @@
       "contextHash": "74cd923d61e00b7739f80b534b652a909070bb949bfb007a464579050da1d263",
       "judgment": {
         "choice": "supports",
-        "confidence": 0.99,
+        "confidence": 0.97,
         "probabilities": {
-          "supports": 0.99,
+          "supports": 0.98,
           "contradicts": 0.01,
           "unrelated": 0,
-          "insufficient_context": 0
+          "insufficient_context": 0.01
         }
       }
     },
@@ -780,10 +780,10 @@
       "contextHash": "54b56e94027819b91287b9766c4872faa76c4344146540b341b4389c6b8dd7ce",
       "judgment": {
         "choice": "supports",
-        "confidence": 0.96,
+        "confidence": 0.93,
         "probabilities": {
-          "supports": 0.97,
-          "contradicts": 0.02,
+          "supports": 0.95,
+          "contradicts": 0.04,
           "unrelated": 0,
           "insufficient_context": 0.01
         }
@@ -814,10 +814,10 @@
       "contextHash": "7438e0bb6ac3c01bf6beaa56051a35abf5a2f30ee56334c8cd754b996d6bd4e6",
       "judgment": {
         "choice": "supports",
-        "confidence": 0.87,
+        "confidence": 0.81,
         "probabilities": {
-          "supports": 0.9,
-          "contradicts": 0.09,
+          "supports": 0.86,
+          "contradicts": 0.13,
           "unrelated": 0,
           "insufficient_context": 0.01
         }
@@ -848,10 +848,10 @@
       "contextHash": "7982c179582830150e0121639bf13f758b8cd2967a8c41c2205db632219eb8e5",
       "judgment": {
         "choice": "supports",
-        "confidence": 0.96,
+        "confidence": 0.95,
         "probabilities": {
-          "supports": 0.97,
-          "contradicts": 0.03,
+          "supports": 0.96,
+          "contradicts": 0.04,
           "unrelated": 0,
           "insufficient_context": 0
         }
@@ -916,12 +916,12 @@
       "contextHash": "6ef3c783f7f2ee4aa85d450d7fc65f20f61a1aa01a222d8aeb9ddeda31a027f9",
       "judgment": {
         "choice": "supports",
-        "confidence": 0.8,
+        "confidence": 0.84,
         "probabilities": {
-          "supports": 0.85,
-          "contradicts": 0.06,
+          "supports": 0.88,
+          "contradicts": 0.04,
           "unrelated": 0,
-          "insufficient_context": 0.09
+          "insufficient_context": 0.08
         }
       }
     },
@@ -950,10 +950,10 @@
       "contextHash": "4df342055803f33b6195c27c167f6f86d7071a5337af51009058f12b67f5035e",
       "judgment": {
         "choice": "supports",
-        "confidence": 0.96,
+        "confidence": 0.99,
         "probabilities": {
-          "supports": 0.97,
-          "contradicts": 0.03,
+          "supports": 0.99,
+          "contradicts": 0.01,
           "unrelated": 0,
           "insufficient_context": 0
         }
@@ -984,10 +984,10 @@
       "contextHash": "262bb5dcd097b8cb7be1fb2545acff1e36bb67eb6c6b7603871f70e0250fd627",
       "judgment": {
         "choice": "supports",
-        "confidence": 0.63,
+        "confidence": 0.69,
         "probabilities": {
-          "supports": 0.72,
-          "contradicts": 0.26,
+          "supports": 0.77,
+          "contradicts": 0.21,
           "unrelated": 0,
           "insufficient_context": 0.02
         }
@@ -1018,10 +1018,78 @@
       "contextHash": "0b80accfa94c5b38ba9a5a907f337dfaa274c72bc632be2ff55655cef05112aa",
       "judgment": {
         "choice": "supports",
-        "confidence": 0.72,
+        "confidence": 0.71,
         "probabilities": {
-          "supports": 0.79,
-          "contradicts": 0.2,
+          "supports": 0.78,
+          "contradicts": 0.21,
+          "unrelated": 0,
+          "insufficient_context": 0.01
+        }
+      }
+    },
+    {
+      "id": "docs_reports_2026-11-21-03-ui-frameworks-wasm",
+      "topic": "The Japanese file docs/ja/reports/2026-11-21-03-ui-frameworks-wasm.md is a faithful translation of docs/reports/2026-11-21-03-ui-frameworks-wasm.md",
+      "mode": "translation",
+      "reference": {
+        "source": "docs_reports_2026-11-21-03-ui-frameworks-wasm.en",
+        "path": "docs/reports/2026-11-21-03-ui-frameworks-wasm.md",
+        "startLine": 1,
+        "endLine": 291,
+        "quote": "# Can zustc build dioxus and leptos for wasm32?\n\nDate: 2026-11-21\n\nThe goal is to build Rust UI libraries for the browser with zustc. This report checks the two most used ones,\ndioxus and leptos, against the current zustc: whether each builds, and, since neither does, what is missing. The\ncheck is repeatable: `python3 cratebench/ui/run.py` (new) builds the crates of each framework's wasm32 graph with\nzustc, leaves first, and prints the result.\n\n## 1. The answer\n\nrustc builds both counter apps of `cratebench/ui/apps/` (a signal, a heading and a button) for\n`wasm32-unknown-unknown`: dioxus 0.7.10 (`web`) in 38 s, leptos 0.8.23 (`csr`) in about 50 s (cold, debug).\nzustc builds neither:\n\n| | dioxus 0.7.10 | leptos 0.8.23 |\n|---|---:|---:|\n| crates built for wasm32 | 168 | 123 |\n| lines of `.rs` in their directories | 1.36 M | 1.01 M |\n| of which web-sys (enabled features only) | 28 k (106 features) | 36 k (162 features) |\n| with a build script | 23 | 22 |\n| host crates (proc macros and what they use) | 66 | 76 |\n| of which proc-macro crates | 28 | 22 |\n| zustc: pass | 15 | 14 |\n| zustc: fail on their own code | 47 | 39 |\n| zustc: blocked by a dependency that fails | 106 | 70 |\n\n- The crates that pass are small leaves (cfg-if, itoa, fnv, byteorder, scopeguard, pin-project-lite, rustc-hash 2,\n  xxhash-rust and so on) or crates that only re-export a proc macro (pin-project, derive_more, zerofrom).\n- A library that passes has its non-generic code compiled. zustc checks a generic function's body only where it is\n  instantiated.\n- Every path to the browser is blocked:\n  - wasm-bindgen, by unicode-ident;\n  - js-sys and web-sys, also by the futures crates;\n  - dioxus-core, dioxus-web, reactive_graph, tachys and leptos.\n- `cargo metadata --filter-platform wasm32-unknown-unknown` gives the crate graph, with the versions of the\n  committed Cargo.lock and the resolved features. A crate is \"built for wasm32\" if the app reaches it without going\n  through a proc macro.\n- Each crate is built as a zustc workspace of itself and its dependencies. A crate whose dependency fails is not\n  built.\n- `zustc build` does not take wasm32 yet, so the script builds with the x86-64 cfg. A local zustc with the wasm32 cfg\n  for workspaces gave the same set of passing and failing crates, with one first error different (same-file).\n\n## 2. What is missing, from the bottom up\n\nThe first four parts are not about single crates. Each of them alone stops both frameworks.\n\n### 2.1 Building a Cargo graph\n\nzustc builds a workspace from a hand-written list (`lib <name> <root> [deps] features=..`). A graph from crates.io\nalso needs:\n\n- what Cargo.toml and Cargo.lock decide: versions, features, renamed dependencies, target-specific dependencies\n  (`run.py` takes them from `cargo metadata`);\n- two versions of one crate in one graph. A workspace has one name per crate, so thiserror 1 and 2 (in both trees),\n  rustc-hash 1 and 2 and const-serialize 0.7 and 0.8 cannot both be there;\n- the edition of each crate: both trees mix 2015, 2018, 2021 and 2024;\n- build scripts. Their outputs are:\n  - cfgs, such as wasm-bindgen's `wbg_reference_types` and those of serde, anyhow and num-traits;\n  - environment variables (`cargo:rustc-env`), such as wasm-bindgen-shared's `SCHEMA_FILE_HASH`;\n  - generated code (`include!(concat!(env!(\"OUT_DIR\"), ..))`), in serde, serde_core and thiserror 2;\n- `env!` / `option_env!` (\"macro `env!` is not supported\"), and the variables Cargo sets, such as\n  `CARGO_PKG_VERSION`;\n- workspace builds for wasm32: `zustc build` refuses `--target wasm32-unknown-unknown`.\n\nCargo can give most of this:\n\n- `cargo metadata` gives the graph;\n- `cargo check --message-format=json` runs the build scripts and reports their cfgs, variables and `OUT_DIR`\n  (`build-script-executed`);\n- the same command builds the proc-macro crates for the host (`compiler-artifact`).\n\n### 2.2 Proc macros\n\nBoth frameworks are used through proc macros, and so are many crates under them:\n\n- the 14 lines of each app need `#[component]` and `rsx!` / `view!`;\n- js-sys and web-sys declare every binding with `#[wasm_bindgen]` (18 crates of the trees use it);\n- the derives of serde, thiserror's `#[derive(Error)]`, pin-project, async-trait, tracing's `#[instrument]`, and\n  typed-builder, which makes leptos's props.\n\nAbout 83 of the 222 crates of the two trees use a derive or an attribute from a proc macro.\n\nzustc cannot run a proc macro, and it does not treat them all alike:\n\n- an unknown derive is an error (\"cannot find derive macro\");\n- an unknown function-like macro is an error (\"macro `rsx!` is not supported\");\n- an unknown attribute is dropped, so `#[wasm_bindgen] extern \"C\" { .. }` compiles as a plain C import and\n  `#[component] fn` as a plain function.\n\nThere are three ways to run them:\n\n1. Compile the proc-macro crates with zustc for the host, run them, and give them a `proc_macro` crate of zustc's\n   own. They need syn, quote, proc-macro2 and the rest: 66 and 76 host crates (394 k and 411 k lines), which have the\n   same gaps as the wasm side.\n2. Let rustc build them (cargo does already) and load them through rust-analyzer's proc-macro server. The toolchain\n   ships it (`libexec/rust-analyzer-proc-macro-srv` is installed here). Its interface is internal and may change\n   (\"an IDE implementation detail\"), and it ties zustc to the installed rustc.\n3. Expand with rustc before zustc (`-Zunpretty=expanded`, which needs `RUSTC_BOOTSTRAP=1`). The output names\n   unstable internals (`::alloc::boxed::box_assume_init_into_vec_unsafe`, `#[prelude_import]`), and the expansion\n   would need rustc in each incremental build.\n\nThe expansion of the two apps (rustc's) shows what the generated code needs, apart from the libraries:\n\n- `rsx!`:\n  - statics with `OnceLock`, and `GlobalSignal` statics built from a closure;\n  - const evaluation through const_format: an array whose length is a `const fn` call, and\n    `*const [u8] as *const str`;\n  - `Box<[T]>` from `Box::new([..])`, and `format_args!`;\n  - closures such as `move |_| count += 1` on a `Signal<i32>` (`AddAssign`);\n- `view!`:\n  - a builder with a default type parameter (`struct AppPropsBuilder<TypedBuilderFields = ()>`);\n  - `-> impl IntoView` whose type is nested tuples of `HtmlElement<..>`, built by chained `.child(..)` / `.on(..)`.\n    This needs traits with type parameters and associated output types, and impls for tuples.\n\n### 2.3 async is erased\n\nzustc accepts `async fn`, `async {}` and `.await`, but compiles them as plain code:\n\n- an `async fn` runs its body when called and returns its value;\n- `let x: i32 = f();` type-checks for `async fn f() -> i32`;\n- a future that is never polled still runs;\n- `pin!` is not supported;\n- a `Pin<Box<dyn Future>>` made by `Box::pin(async { .. })` holds the value (\"no method `as_mut` on type `i32`\").\n\nBoth frameworks run on futures:\n\n- dioxus's `spawn` and `use_resource`;\n- leptos's `spawn_local`, `Resource` and `Suspense`;\n- wasm-bindgen-futures, between JS promises and futures.\n\n53 crates of the trees use async, and 48 use `Waker` / `Context` / `Poll`. They need a lowering of async bodies to\nstate machines, `Pin`, and the task types (`Waker`, `RawWaker`, `Context`).\n\nThis also changes what programs zustc accepts today do: an `async fn` with side effects runs them at the wrong time.\ndocs/language.md did not say so, and now it does.\n\n### 2.4 The wasm module and the JavaScript side\n\nA zustc wasm module is made for the sandbox of tests/wasm:\n\n- it imports only functions of `env` that the host gives;\n- it exports only `memory` and `main`, and runs `main` to completion;\n- it keeps 64-bit pointers and `usize` (`target_pointer_width = \"64\"`).\n\nwasm-bindgen, which every web API of both trees goes through, needs:\n\n- 32-bit `usize` and pointers: its ABI passes pointers and lengths as u32 (`WasmSlice { ptr: u32, len: u32 }`), and\n  the JS glue reads memory that way;\n- imports from JS, and exported functions that JS calls after `main` has returned: event handlers, closures, the\n  allocator, and a table for closures;\n- the custom section `__wasm_bindgen_unstable` that `#[wasm_bindgen]` writes;\n- the `__wbindgen_describe_*` functions, which the `wasm-bindgen` CLI runs in its interpreter to generate the JS glue.\n  The format is pinned to the version of wasm-bindgen-shared (`SCHEMA_VERSION`);\n- externref (reference types), which wasm-bindgen's build script turns on.\n\nA JS bridge of zust's own would not need wasm-bindgen's format, but dioxus and leptos use the types of web-sys and\njs-sys directly.\n\n### 2.5 Language\n\nThese are first errors of crates in the two trees. A ✓ means that a small program with the same construct fails\nin zustc too.\n\n| missing | crates where it stops | ✓ |\n|---|---|:-:|\n| an impl for a reference to a reference (`impl .. for &'a &'b str`, \"unsupported impl self type\"; wasm-bindgen's `ref_by_copy!` writes `&$t` with `$t = &str`) | wasm-bindgen (its conversions) | ✓ |\n| `impl Tr for &T` next to `impl Tr for &mut T` or `Box<S>` (E0119, conflicting implementations) | stable_deref_trait, tower-service | ✓ |\n| one inherent method in impls for different self types (`Either<&L, &R>::cloned`, `Either<&mut L, &mut R>::cloned`) | either | ✓ |\n| `dyn` with traits other than Send / Sync (`dyn Error + Send + Sync + UnwindSafe + 'a`) | thiserror 1 and 2 | ✓ |\n| an associated type of a trait with a type parameter (`impl<S> Layer<S> for Identity { type Service = S; }`) | tower-layer | ✓ |\n| a GAT with a type parameter (`type Output<Next> = (Next,);`) | next_tuple | ✓ |\n| elision through a path's hidden lifetime (`fn f(e: Ref<ErrorImpl>) -> Option<&Backtrace>`, E0106) | anyhow | ✓ |\n| `Rc<dyn Tr>` from `Rc::new(S)` | (dioxus-core keeps `Rc<dyn Any>`) | ✓ |\n| `*mut T` where `*const T` is expected, and the raw pointer `as_ref` | ryu, inventory | ✓ |\n| default type parameters (`struct B<F = ()>`) | (the output of typed-builder in `view!`) | ✓ |\n| `impl Trait` inside an argument type (`Option<&[impl AsRef<str>]>`) | wasm-bindgen-shared (section 3) | ✓ |\n| an enum variant through a crate path (`alloc::borrow::Cow::Borrowed(..)`), and `Cow<'_, str>` | wasm-bindgen-shared (section 3) | ✓ |\n| const evaluation: a `const fn` with a loop as an array length, a static array built by a `const fn` | percent-encoding, httparse | ✓ |\n| `.bitxor(i)` in a chain of integer methods (expected `bool`) | rustc-hash 1 | ✓ |\n| an integer method on `unsafe { a.get_unchecked(i) }` | unicode-ident | ✓ |\n| a parameter used only through a projection is reported unused | zmij | |\n\nThe counts of crates (of 222) that use the constructs give an idea of their weight. These are regex counts:\n\n- an impl for `&T`, `Box`, `Option` or a slice: 112;\n- `-> impl Trait`: 59;\n- `dyn A + B`: 51;\n- GATs: 8.\n\n### 2.6 macro_rules, modules and attributes\n\n- The fragments `ty` and `expr` are matched as the tokens up to the next delimiter. So in a repetition without\n  separator, `$($t:ty)*` takes the whole list as one type: num-traits (`int_trait_impl!(Num for usize u8 u16 ..)`),\n  wasm-bindgen (`vectors! { u8 i8 u16 .. }`). ✓\n- Larger tt-munchers do not match:\n  - `pin_project!` of pin-project-lite ✓, which tokio, futures-util, event-listener, throw_error, http-body-util and\n    tower use;\n  - `bitflags!` ✓: its definition does not even load (\"unterminated item\");\n  - wasm-bindgen's `closures!` ✓;\n  - konst's `__choose!`, bytes's `buf_try_get_impl!`, html-escape's `encode_impl!`, either_of's `tuples!`.\n- The recursion limit is 64 (rustc: 128), and `#![recursion_limit]` is not read: typenum, writeable. ✓\n- Macro scope:\n  - `#[macro_use] extern crate x;` does not bring x's macros, though `x::m!` and `use x::m;` do: encoding_rs\n    (`cfg_if!`), lock_api (`defer!`). ✓\n  - `#[macro_use] mod macros;` in its own file does not either, though an inline `mod` does: httparse, zerocopy. ✓\n- `pub extern crate alloc;` is not removed; only `extern crate x;` is: smallvec. ✓\n- A doc comment before an item that `#[cfg]` removes is left behind, and is then an error (E0585): enumset, matchit,\n  litemap, wasm-bindgen. ✓\n- Modules:\n  - a `mod de;` that a macro expands to is looked for next to the file that defines the macro, not where it is\n    called: serde_core's `crate_root!()`;\n  - `#[cfg_attr(.., path = \"..\")] mod` is not followed: mio.\n\n### 2.7 std in the prelude\n\nEach of these is missing, and each is the first error of some crate:\n\n- `any::Any` (with `downcast_ref`), `rc::Weak` and `sync::Weak`;\n- `RwLock`, `LockResult` / `PoisonError`, `LazyLock`, `Once`, `thread::Thread`;\n- `panic::AssertUnwindSafe` / `UnwindSafe`, `task::RawWaker`, `io::IoSlice` / `IoSliceMut`, `vec::Drain`;\n- `str::FromStr`, `time::SystemTime`, `num::NonZero*`, `marker::PhantomPinned`, `path::Ancestors`;\n- `CStr::from_bytes_until_nul`, `spin_loop_hint`, and the default `ExactSizeIterator::len`.\n\nAlso, the prelude's `iter::Map` has 3 type parameters where std's has 2, so unicode-segmentation's `Map<I, F>` is\nan error. How many of the 222 crates use them:\n\n- `dyn Any`, `downcast` or `TypeId`: 28;\n- `Weak`: 12;\n- `RwLock`, `Mutex` or atomics: 69;\n- `thread_local!`: 33;\n- `OnceLock`, `LazyLock` or `OnceCell`: 23.\n\n## 3. How deep it goes: the path through wasm-bindgen\n\nA crate's first error is only the first. Every web API goes through unicode-ident → wasm-bindgen-shared →\nwasm-bindgen. To see past the first errors on that path, scratch copies of these crates were changed one error at a\ntime:\n\n| crate | error | change |\n|---|---|---|\n| unicode-ident | `wrapping_shr` on `unsafe { .. get_unchecked(..) }` | `>>` |\n| wasm-bindgen-shared | `Option<&[impl AsRef<str>]>` (\"unsupported type\") | a type parameter |\n| | `alloc::borrow::Cow::Borrowed(..)` (\"unsupported path\") | `use` and `Cow::Borrowed` |\n| | `Cow<'_, str>` (\"no method `bytes` on type `str`\") | return a `String` |\n| | `env!(\"CARGO_PKG_VERSION\")`, `option_env!` | constants |\n| wasm-bindgen | `closures!` matches none of its calls | the module removed |\n| | a doc comment before a cfg'd-out item (E0585) | doc comments removed |\n| | `$($t:ty)*` | `$($t:ident)*` |\n| | `ref_by_copy!` makes `impl IntoWasmAbi for &&str` (\"unsupported impl self type\") | (stopped here) |\n\nwasm-bindgen-shared (670 lines) needed five changes. wasm-bindgen (9.7 k lines) has at least four more, before its\nproc macro and its ABI come into play. After it come js-sys (23 k lines) and web-sys, whose bindings are all\n`#[wasm_bindgen]`.\n\n## 4. What it would take\n\nAn order that removes one layer at a time. `cratebench/ui/run.py` measures steps 1 to 4 and 6: whether the crates\nbuild. Step 5 needs a build for wasm32 and a check of the ABI (the `wasm-bindgen` CLI on the module), which it does\nnot do.\n\n1. The leaves. `run.py` ranks the failing crates by how many crates are above them:\n   - dioxus: serde_core 43, memchr 42, futures-core 38, unicode-ident 37, futures-sink 33, and futures-io,\n     futures-task and slab 32 each;\n   - leptos: memchr 29, unicode-ident 24, serde_core 23, futures-core 21.\n\n   Most first errors are one of the std types of 2.7, the macro gaps of 2.6, or the impl rules of 2.5. A first\n   goal: the futures crates, slab, memchr, unicode-ident and serde_core, none of which needs a proc macro or async.\n2. Cargo as the driver (2.1): `cargo metadata`, and `cargo check --message-format=json` for the build scripts and\n   the proc-macro artifacts; an edition per crate; two versions of one crate; `env!`.\n3. Lowering async to state machines (2.3).\n4. Proc macros (2.2, the first or the second way).\n5. wasm-bindgen's ABI (2.4): 32-bit pointers on wasm32, imports and exports, the custom section and reference\n   types. Then the `wasm-bindgen` CLI can make the JS glue.\n6. The frameworks:\n   - dioxus-core: `Rc<dyn Any>`, generational-box;\n   - reactive_graph: `Arc<RwLock<..>>`, `Weak`;\n   - tachys: views as types (tuples, associated types).\n\nSteps 2 to 5 are each a large piece of work, and these two frameworks need all of them. A smaller target would reach\nthe browser sooner: a UI library made for zustc, with macro_rules instead of proc macros, a JS bridge of its own, and\ncallbacks instead of async.\n\n## 5. Files\n\n- `cratebench/ui/apps/dioxus`, `cratebench/ui/apps/leptos`: the counter apps, with versions pinned by Cargo.lock.\n- `cratebench/ui/run.py`: the check (`--rustc` also builds the apps with cargo for wasm32 first).\n- docs/language.md: async is listed as erased. The line on temporaries is updated: since the\n  [RefCell report](2026-11-21-02-refcell-guards.md), temporaries of a `let` are no longer all kept to the end of the\n  block.\n- TODO.md: a section on UI frameworks, which points here.",
+        "contentHash": "bb47e1ba40a43270dbac8f6140d8779d60d797b9d5fad9d97f88e73a01b5248d"
+      },
+      "target": {
+        "source": "docs_reports_2026-11-21-03-ui-frameworks-wasm.ja",
+        "path": "docs/ja/reports/2026-11-21-03-ui-frameworks-wasm.md",
+        "startLine": 1,
+        "endLine": 286,
+        "quote": "# zustc で dioxus と leptos を wasm32 向けにビルドできるか\n\n日付: 2026-11-21\n\n目標は、Rust の UI ライブラリを zustc でブラウザ向けにビルドすることである。このレポートは、よく使われる 2 つ、\ndioxus と leptos を今の zustc で確かめる: それぞれがビルドできるか、そしてどちらもできないので、何が足りないか。\n確かめ方は繰り返せる: `python3 cratebench/ui/run.py` (新しく足した) は、それぞれのフレームワークの wasm32 向けの\nクレートを、葉から順に zustc でビルドし、結果を出す。\n\n## 1. 答え\n\nrustc は `cratebench/ui/apps/` の 2 つのカウンタのアプリ (シグナル 1 つ、見出しとボタン) を\n`wasm32-unknown-unknown` 向けにビルドする: dioxus 0.7.10 (`web`) は 38 秒、leptos 0.8.23 (`csr`) は約 50 秒\n(キャッシュなし、debug)。zustc はどちらもビルドできない:\n\n| | dioxus 0.7.10 | leptos 0.8.23 |\n|---|---:|---:|\n| wasm32 向けにビルドするクレート | 168 | 123 |\n| そのディレクトリの `.rs` の行数 | 1.36 M | 1.01 M |\n| そのうち web-sys (有効な feature の分だけ) | 28 k (106 feature) | 36 k (162 feature) |\n| ビルドスクリプトのあるもの | 23 | 22 |\n| ホストのクレート (proc macro と、それが使うもの) | 66 | 76 |\n| そのうち proc-macro のクレート | 28 | 22 |\n| zustc: 通る | 15 | 14 |\n| zustc: 自分のコードで失敗する | 47 | 39 |\n| zustc: 失敗する依存に止められる | 106 | 70 |\n\n- 通るのは小さな葉 (cfg-if、itoa、fnv、byteorder、scopeguard、pin-project-lite、rustc-hash 2、xxhash-rust など)\n  か、proc macro を再公開するだけのクレート (pin-project、derive_more、zerofrom) である。\n- ライブラリが通るとは、総称でないコードがコンパイルできたということである。zustc は総称関数の本体を、実体化する\n  所でだけ検査する。\n- ブラウザへの道はすべて止まっている:\n  - wasm-bindgen は unicode-ident に;\n  - js-sys と web-sys は、futures のクレートにも;\n  - dioxus-core、dioxus-web、reactive_graph、tachys と leptos。\n- クレートのグラフは `cargo metadata --filter-platform wasm32-unknown-unknown` から取る。版はコミットした\n  Cargo.lock のもので、feature は解決されたもの。アプリから proc macro を通らずに届くクレートを「wasm32 向けに\n  ビルドする」ものとする。\n- 各クレートは、自分と依存からなる zustc のワークスペースとしてビルドする。依存が失敗するクレートはビルドしない。\n- `zustc build` はまだ wasm32 を受け付けないので、スクリプトは x86-64 の cfg でビルドする。ワークスペースで wasm32\n  の cfg を使う手元の zustc でも、通るクレートと失敗するクレートの組は同じで、最初のエラーが 1 つ違うだけだった\n  (same-file)。\n\n## 2. 足りないもの、下から順に\n\nはじめの 4 つは、個々のクレートの話ではない。どれも、1 つだけで両方のフレームワークを止める。\n\n### 2.1 Cargo のグラフをビルドする\n\nzustc は、手で書いた一覧 (`lib <名前> <根> [依存] features=..`) からワークスペースをビルドする。crates.io からの\nグラフには、さらに次のものが要る:\n\n- Cargo.toml と Cargo.lock が決めること: 版、feature、名前を変えた依存、ターゲットごとの依存 (`run.py` は\n  `cargo metadata` から取る);\n- 1 つのグラフの中の、1 つのクレートの 2 つの版。ワークスペースではクレートごとに名前が 1 つなので、thiserror の\n  1 と 2 (両方のツリーにある)、rustc-hash の 1 と 2、const-serialize の 0.7 と 0.8 は両方は置けない;\n- クレートごとの edition: どちらのツリーにも 2015、2018、2021、2024 が混じる;\n- ビルドスクリプト。その出力は:\n  - cfg。wasm-bindgen の `wbg_reference_types` や、serde、anyhow、num-traits のもの;\n  - 環境変数 (`cargo:rustc-env`)。wasm-bindgen-shared の `SCHEMA_FILE_HASH` など;\n  - 生成するコード (`include!(concat!(env!(\"OUT_DIR\"), ..))`)。serde、serde_core、thiserror 2 にある;\n- `env!` / `option_env!` (\"macro `env!` is not supported\") と、Cargo が設定する変数 (`CARGO_PKG_VERSION` など);\n- wasm32 向けのワークスペースのビルド: `zustc build` は `--target wasm32-unknown-unknown` を断る。\n\nこのほとんどは Cargo から得られる:\n\n- `cargo metadata` がグラフを出す;\n- `cargo check --message-format=json` がビルドスクリプトを動かし、その cfg、変数、`OUT_DIR` を知らせる\n  (`build-script-executed`);\n- 同じコマンドが、proc-macro のクレートをホスト向けにビルドする (`compiler-artifact`)。\n\n### 2.2 proc macro\n\nどちらのフレームワークも proc macro を通して使うもので、その下の多くのクレートも同じである:\n\n- それぞれのアプリの 14 行に、`#[component]` と `rsx!` / `view!` が要る;\n- js-sys と web-sys は、すべての束縛を `#[wasm_bindgen]` で宣言する (ツリーの 18 個のクレートが使う);\n- serde の derive、thiserror の `#[derive(Error)]`、pin-project、async-trait、tracing の `#[instrument]`、leptos の\n  props を作る typed-builder。\n\n2 つのツリーの 222 個のクレートのうち、約 83 個が proc macro の derive か属性を使う。\n\nzustc は proc macro を動かせず、その扱いもそろっていない:\n\n- 知らない derive はエラーになる (\"cannot find derive macro\");\n- 知らない関数形式のマクロはエラーになる (\"macro `rsx!` is not supported\");\n- 知らない属性は捨てられる。そのため `#[wasm_bindgen] extern \"C\" { .. }` はただの C の import に、\n  `#[component] fn` はただの関数になってコンパイルされる。\n\n動かす方法は 3 つある:\n\n1. proc-macro のクレートを zustc でホスト向けにコンパイルして動かし、zustc 自身の `proc_macro` クレートを渡す。\n   それには syn、quote、proc-macro2 などが要る: ホストのクレートは 66 個と 76 個 (394 k 行と 411 k 行) あり、\n   wasm の側と同じ穴にかかる。\n2. rustc にビルドさせ (cargo がすでにしている)、rust-analyzer の proc macro サーバを通して読み込む。ツールチェーンに\n   入っている (ここでは `libexec/rust-analyzer-proc-macro-srv` がある)。そのインターフェースは内部のもので、変わり\n   うる (\"an IDE implementation detail\")。また zustc を、入っている rustc に結び付ける。\n3. zustc の前に rustc で展開する (`-Zunpretty=expanded`。`RUSTC_BOOTSTRAP=1` が要る)。出力は安定でない内部の名前\n   (`::alloc::boxed::box_assume_init_into_vec_unsafe`、`#[prelude_import]`) を使い、展開のために、差分ビルドの\n   たびに rustc が要ることになる。\n\n2 つのアプリの (rustc による) 展開を見ると、ライブラリとは別に、生成されるコードが何を要るかが分かる:\n\n- `rsx!`:\n  - `OnceLock` を持つ static と、クロージャから作る `GlobalSignal` の static;\n  - const_format を通した定数の評価: 長さが `const fn` の呼び出しである配列と、`*const [u8] as *const str`;\n  - `Box::new([..])` からの `Box<[T]>` と、`format_args!`;\n  - `Signal<i32>` に対する `move |_| count += 1` のようなクロージャ (`AddAssign`);\n- `view!`:\n  - 型引数に既定値のあるビルダー (`struct AppPropsBuilder<TypedBuilderFields = ()>`);\n  - `.child(..)` / `.on(..)` をつなげて作る、`HtmlElement<..>` の入れ子のタプルが型である `-> impl IntoView`。\n    これには、型引数を持つ trait と出力の関連型、タプルへの impl が要る。\n\n### 2.3 async は消される\n\nzustc は `async fn`、`async {}`、`.await` を受け付けるが、ただのコードとしてコンパイルする:\n\n- `async fn` は呼ばれた時に本体を実行し、その値を返す;\n- `async fn f() -> i32` に対して `let x: i32 = f();` が型検査を通る;\n- 一度も poll されない future も実行される;\n- `pin!` には対応していない;\n- `Box::pin(async { .. })` で作った `Pin<Box<dyn Future>>` は値を持つ (\"no method `as_mut` on type `i32`\")。\n\nどちらのフレームワークも future の上で動く:\n\n- dioxus の `spawn` と `use_resource`;\n- leptos の `spawn_local`、`Resource`、`Suspense`;\n- JS の promise と future をつなぐ wasm-bindgen-futures。\n\nツリーの 53 個のクレートが async を、48 個が `Waker` / `Context` / `Poll` を使う。async の本体を状態機械に変える\n処理、`Pin`、タスクの型 (`Waker`、`RawWaker`、`Context`) が要る。\n\nこれは、zustc が今受け付けるプログラムの動きも変える: 副作用のある `async fn` は、それを違う時に起こす。\ndocs/language.md はそれを書いていなかったので、書いた。\n\n### 2.4 wasm のモジュールと JavaScript の側\n\nzustc の wasm のモジュールは、tests/wasm のサンドボックスのために作られている:\n\n- ホストが与える `env` の関数だけを import する;\n- `memory` と `main` だけを export し、`main` を最後まで実行する;\n- ポインタと `usize` を 64 ビットのままにする (`target_pointer_width = \"64\"`)。\n\n両方のツリーのすべての web の API が通る wasm-bindgen には、次のものが要る:\n\n- 32 ビットの `usize` とポインタ: その ABI はポインタと長さを u32 で渡し (`WasmSlice { ptr: u32, len: u32 }`)、\n  JS の glue もメモリをそのように読む;\n- JS からの import と、`main` が返った後に JS が呼ぶ export の関数: イベントハンドラ、クロージャ、アロケータ、\n  クロージャのためのテーブル;\n- `#[wasm_bindgen]` が書くカスタムセクション `__wasm_bindgen_unstable`;\n- `wasm-bindgen` CLI が JS の glue を作るためにインタプリタで動かす、`__wbindgen_describe_*` の関数。その形式は\n  wasm-bindgen-shared の版に固定されている (`SCHEMA_VERSION`);\n- wasm-bindgen のビルドスクリプトが有効にする externref (reference types)。\n\nzust 自身の JS とのつなぎなら wasm-bindgen の形式は要らないが、dioxus と leptos は web-sys と js-sys の型を直接\n使う。\n\n### 2.5 言語\n\n2 つのツリーのクレートの最初のエラーである。✓ は、同じ構文の小さなプログラムも zustc で失敗することを表す。\n\n| 足りないもの | そこで止まるクレート | ✓ |\n|---|---|:-:|\n| 参照への参照への impl (`impl .. for &'a &'b str`、\"unsupported impl self type\"。wasm-bindgen の `ref_by_copy!` が `$t = &str` で `&$t` と書く) | wasm-bindgen (その変換) | ✓ |\n| `impl Tr for &mut T` や `Box<S>` と並ぶ `impl Tr for &T` (E0119、conflicting implementations) | stable_deref_trait、tower-service | ✓ |\n| self の型の違う impl にある同じ名前の固有メソッド (`Either<&L, &R>::cloned`、`Either<&mut L, &mut R>::cloned`) | either | ✓ |\n| Send / Sync 以外の trait を含む `dyn` (`dyn Error + Send + Sync + UnwindSafe + 'a`) | thiserror 1 と 2 | ✓ |\n| 型引数を持つ trait の関連型 (`impl<S> Layer<S> for Identity { type Service = S; }`) | tower-layer | ✓ |\n| 型引数を持つ GAT (`type Output<Next> = (Next,);`) | next_tuple | ✓ |\n| パスの隠れたライフタイムを通した省略 (`fn f(e: Ref<ErrorImpl>) -> Option<&Backtrace>`、E0106) | anyhow | ✓ |\n| `Rc::new(S)` からの `Rc<dyn Tr>` | (dioxus-core は `Rc<dyn Any>` を持つ) | ✓ |\n| `*const T` が要る所での `*mut T` と、生ポインタの `as_ref` | ryu、inventory | ✓ |\n| 型引数の既定値 (`struct B<F = ()>`) | (`view!` の中の typed-builder の出力) | ✓ |\n| 引数の型の中の `impl Trait` (`Option<&[impl AsRef<str>]>`) | wasm-bindgen-shared (3 節) | ✓ |\n| クレートのパスを通した enum のヴァリアント (`alloc::borrow::Cow::Borrowed(..)`) と `Cow<'_, str>` | wasm-bindgen-shared (3 節) | ✓ |\n| 定数の評価: 配列の長さとしてのループのある `const fn`、`const fn` で作る static の配列 | percent-encoding、httparse | ✓ |\n| 整数のメソッドの連なりの中の `.bitxor(i)` (`bool` を期待する) | rustc-hash 1 | ✓ |\n| `unsafe { a.get_unchecked(i) }` に対する整数のメソッド | unicode-ident | ✓ |\n| 射影を通してだけ使う型引数が、使われていないと報告される | zmij | |\n\nその構文を使うクレート (222 個のうち) の数が、重みの目安になる。正規表現で数えたものである:\n\n- `&T`、`Box`、`Option`、スライスへの impl: 112;\n- `-> impl Trait`: 59;\n- `dyn A + B`: 51;\n- GAT: 8。\n\n### 2.6 macro_rules、モジュール、属性\n\n- 断片 `ty` と `expr` は、次の区切りまでのトークンとして照合される。そのため区切りのない繰り返し `$($t:ty)*` は、\n  一覧全体を 1 つの型として取る: num-traits (`int_trait_impl!(Num for usize u8 u16 ..)`)、wasm-bindgen\n  (`vectors! { u8 i8 u16 .. }`)。✓\n- もっと大きな tt-muncher は合わない:\n  - pin-project-lite の `pin_project!` ✓。tokio、futures-util、event-listener、throw_error、http-body-util、tower が\n    使う;\n  - `bitflags!` ✓: その定義が読み込めさえしない (\"unterminated item\");\n  - wasm-bindgen の `closures!` ✓;\n  - konst の `__choose!`、bytes の `buf_try_get_impl!`、html-escape の `encode_impl!`、either_of の `tuples!`。\n- 再帰の上限は 64 (rustc は 128) で、`#![recursion_limit]` を読まない: typenum、writeable。✓\n- マクロの届く範囲:\n  - `#[macro_use] extern crate x;` は x のマクロを持ち込まない (`x::m!` と `use x::m;` は持ち込む): encoding_rs\n    (`cfg_if!`)、lock_api (`defer!`)。✓\n  - 別のファイルの `#[macro_use] mod macros;` も持ち込まない (インラインの `mod` は持ち込む): httparse、zerocopy。✓\n- `pub extern crate alloc;` は取り除かれない。取り除くのは `extern crate x;` だけ: smallvec。✓\n- `#[cfg]` が取り除くアイテムの前の doc コメントが残り、エラーになる (E0585): enumset、matchit、litemap、\n  wasm-bindgen。✓\n- モジュール:\n  - マクロが展開して作る `mod de;` を、マクロを呼んだ所ではなく、マクロを定義したファイルの隣で探す: serde_core の\n    `crate_root!()`;\n  - `#[cfg_attr(.., path = \"..\")] mod` をたどらない: mio。\n\n### 2.7 prelude の std\n\n次のものがなく、どれもどこかのクレートの最初のエラーである:\n\n- `any::Any` (`downcast_ref` も)、`rc::Weak` と `sync::Weak`;\n- `RwLock`、`LockResult` / `PoisonError`、`LazyLock`、`Once`、`thread::Thread`;\n- `panic::AssertUnwindSafe` / `UnwindSafe`、`task::RawWaker`、`io::IoSlice` / `IoSliceMut`、`vec::Drain`;\n- `str::FromStr`、`time::SystemTime`、`num::NonZero*`、`marker::PhantomPinned`、`path::Ancestors`;\n- `CStr::from_bytes_until_nul`、`spin_loop_hint`、`ExactSizeIterator::len` の既定の実装。\n\nまた、prelude の `iter::Map` は型引数が 3 つで、std のものは 2 つなので、unicode-segmentation の `Map<I, F>` は\nエラーになる。222 個のクレートのうち、それを使うものの数:\n\n- `dyn Any`、`downcast`、`TypeId`: 28;\n- `Weak`: 12;\n- `RwLock`、`Mutex`、アトミック: 69;\n- `thread_local!`: 33;\n- `OnceLock`、`LazyLock`、`OnceCell`: 23。\n\n## 3. どこまで深いか: wasm-bindgen を通る道\n\nクレートの最初のエラーは、最初のものにすぎない。すべての web の API は unicode-ident → wasm-bindgen-shared →\nwasm-bindgen を通る。この道で最初のエラーの先を見るため、これらのクレートの作業用のコピーを、エラー 1 つずつ\n書き換えた:\n\n| クレート | エラー | 書き換え |\n|---|---|---|\n| unicode-ident | `unsafe { .. get_unchecked(..) }` に対する `wrapping_shr` | `>>` |\n| wasm-bindgen-shared | `Option<&[impl AsRef<str>]>` (\"unsupported type\") | 型引数 |\n| | `alloc::borrow::Cow::Borrowed(..)` (\"unsupported path\") | `use` と `Cow::Borrowed` |\n| | `Cow<'_, str>` (\"no method `bytes` on type `str`\") | `String` を返す |\n| | `env!(\"CARGO_PKG_VERSION\")`、`option_env!` | 定数 |\n| wasm-bindgen | `closures!` がどの呼び出しにも合わない | そのモジュールを外す |\n| | cfg で消えるアイテムの前の doc コメント (E0585) | doc コメントを消す |\n| | `$($t:ty)*` | `$($t:ident)*` |\n| | `ref_by_copy!` が `impl IntoWasmAbi for &&str` を作る (\"unsupported impl self type\") | (ここで止めた) |\n\nwasm-bindgen-shared (670 行) には 5 つの書き換えが要った。wasm-bindgen (9.7 k 行) には、その proc macro と ABI が\n関わる前に、少なくともあと 4 つある。その後に js-sys (23 k 行) と web-sys が来て、その束縛はすべて `#[wasm_bindgen]`\nである。\n\n## 4. 何が要るか\n\n層を 1 つずつ取り除く順序。`cratebench/ui/run.py` で測れるのは 1 から 4 と 6、つまりクレートがビルドできるか\nである。5 には wasm32 向けのビルドと ABI の確認 (モジュールに `wasm-bindgen` CLI をかける) が要り、それはしない。\n\n1. 葉。`run.py` は失敗するクレートを、その上にあるクレートの数で並べる:\n   - dioxus: serde_core 43、memchr 42、futures-core 38、unicode-ident 37、futures-sink 33、futures-io、\n     futures-task、slab がそれぞれ 32;\n   - leptos: memchr 29、unicode-ident 24、serde_core 23、futures-core 21。\n\n   最初のエラーのほとんどは、2.7 の std の型、2.6 のマクロの穴、2.5 の impl の規則のどれかである。最初の目標:\n   futures のクレート、slab、memchr、unicode-ident、serde_core。どれも proc macro も async も要らない。\n2. Cargo を元にしたビルド (2.1): `cargo metadata` と、ビルドスクリプトと proc-macro の成果物のための\n   `cargo check --message-format=json`; クレートごとの edition; 1 つのクレートの 2 つの版; `env!`。\n3. async を状態機械に変える (2.3)。\n4. proc macro (2.2 の 1 つ目か 2 つ目の方法)。\n5. wasm-bindgen の ABI (2.4): wasm32 での 32 ビットのポインタ、import と export、カスタムセクション、reference\n   types。そうすれば `wasm-bindgen` CLI が JS の glue を作れる。\n6. フレームワーク:\n   - dioxus-core: `Rc<dyn Any>`、generational-box;\n   - reactive_graph: `Arc<RwLock<..>>`、`Weak`;\n   - tachys: 型としてのビュー (タプル、関連型)。\n\n2 から 5 はどれも大きな作業で、この 2 つのフレームワークにはそのすべてが要る。もっと小さな目標なら、早くブラウザに\n届く: zustc のために作る UI ライブラリで、proc macro の代わりに macro_rules、自前の JS とのつなぎ、async の代わりに\nコールバックを使うもの。\n\n## 5. ファイル\n\n- `cratebench/ui/apps/dioxus`、`cratebench/ui/apps/leptos`: カウンタのアプリ。版は Cargo.lock で固定してある。\n- `cratebench/ui/run.py`: この確かめ (`--rustc` は先にアプリを cargo で wasm32 向けにもビルドする)。\n- docs/language.md: async は消されると書いた。一時値の行を直した: [RefCell のレポート](2026-11-21-02-refcell-guards.md)\n  から、`let` の一時値をすべてブロックの終わりまで残すことはしなくなった。\n- TODO.md: UI フレームワークの節。ここを指す。",
+        "contentHash": "339a316fb28fcdb2fe56187c7722f87e15ba878badb086e91adb70db7c811d6a"
+      },
+      "context": [],
+      "candidateId": "e9387f60ba1b19eb3708a5a90f36747056bdcc1793092e3be325ed2e838fe8d6",
+      "contextHash": "bfaf4d56cd89f0d502d67729104d49b1f7a5d01e4a0434db45cecfa6c5d2c14a",
+      "judgment": {
+        "choice": "supports",
+        "confidence": 0.95,
+        "probabilities": {
+          "supports": 0.96,
+          "contradicts": 0.04,
+          "unrelated": 0,
+          "insufficient_context": 0
+        }
+      }
+    },
+    {
+      "id": "docs_reports_2026-11-21-04-zurgo-m0",
+      "topic": "The Japanese file docs/ja/reports/2026-11-21-04-zurgo-m0.md is a faithful translation of docs/reports/2026-11-21-04-zurgo-m0.md",
+      "mode": "translation",
+      "reference": {
+        "source": "docs_reports_2026-11-21-04-zurgo-m0.en",
+        "path": "docs/reports/2026-11-21-04-zurgo-m0.md",
+        "startLine": 1,
+        "endLine": 110,
+        "quote": "# zurgo M0: Cargo packages built with zustc\n\nDate: 2026-11-21\n\nzustc had no way to build a Cargo package: its workspace build takes a hand-written list of crates. This is the first\nmilestone of mizchi/zust#28. It adds `crates/zurgo`, a Cargo-compatible driver (named zargo at first, but that crate\nname is taken on crates.io). zurgo reads Cargo.toml and Cargo.lock, finds the sources, turns on features as cargo does,\nand builds the graph with zustc's workspace build in the same process. `zurgo metadata` writes the JSON of\n`cargo metadata`. The issue for proc macros, mizchi/zust#29, was written at the same time. Usage: [zurgo.md](../zurgo.md).\n\n## 1. What it is made of\n\n3,100 lines, with no crates.io dependency (serde_json only in the tests):\n\n| module | lines | contents |\n|---|---:|---|\n| `toml.rs` | 529 | TOML: tables, arrays of tables, dotted and quoted keys, inline tables, the four kinds of strings, numbers, dates |\n| `resolve.rs` | 592 | the package graph from Cargo.lock and the manifests, and feature activation |\n| `manifest.rs` | 381 | Cargo.toml: targets with Cargo's auto-discovery, dependencies of the three kinds and under `[target]`, features, workspace inheritance |\n| `metadata.rs` | 258 | the JSON of `cargo metadata` |\n| `semver.rs` | 244 | versions and requirements, with Cargo's rules for `^`, `~`, wildcards and pre-releases |\n| `platform.rs` | 223 | `cfg(..)` platform keys, with the values `rustc --print cfg` gives for x86-64 Linux and wasm32 |\n| `compile.rs` | 217 | the zustc workspace (`CrateSpec`) and the build |\n| `lock.rs`, `json.rs` | 354 | Cargo.lock, and cargo's registry index cache |\n\nzust-core changes by one field: `CrateSpec::exe`, the name of a binary's executable. A package's library and binary\nshare the package's name, and zustc names a crate's files by its name, so zurgo gives the binary another crate name and\nkeeps the executable's name here.\n\n## 2. Matching cargo metadata\n\nThe test compares `zurgo metadata` with `cargo metadata` on the test packages and on cratebench/ui's dioxus (344\npackages) and leptos (180) apps, without a platform filter and with `--filter-platform` for wasm32 and for x86-64 Linux.\nIt compares packages, ids, targets, enabled features, edges and their `dep_kinds`. They are the same everywhere.\n\nThe first version followed the documented rules of cargo's feature resolver, and it differed in four ways. Each one\nshowed something about what `cargo metadata` reports:\n\n- **`cargo metadata` gives the dependency resolver's graph, not the feature resolver's.** Features in it are unified\n  over every kind and every platform. A weak `dep?/feat` pulls `dep` into the graph: toml's\n  `std = [\"serde_core?/std\", ..]` gives toml an edge to serde_core, though toml's `serde` feature is off. `zurgo build`\n  keeps the feature resolver's rules, which cargo builds with: a side for the host, no dev-dependencies, platforms\n  checked, weak features that wait.\n- **`--filter-platform` only filters edges.** An edge is shown if one of its declarations applies, and its `dep_kinds`\n  then list every declaration, also those for other platforms. dioxus-logger's tracing-subscriber has\n  `cfg(not(target_arch = \"wasm32\"))` in its kinds under the wasm32 filter, and tracing-subscriber's features include\n  `fmt`, which only that declaration asks for.\n- **`x/f` also turns on the feature named `x`** when `x` is an optional dependency and there is a feature of that name,\n  explicit or implicit. yoke has `zerofrom = [\"dep:zerofrom\"]` and `derive = [.., \"zerofrom/derive\"]`, so `derive` turns\n  the `zerofrom` feature on.\n- **Packages that are not downloaded still count.** `cargo metadata --filter-platform` and\n  `cargo fetch --target` leave out packages for other platforms: here 49 of the dioxus graph's 344 were not downloaded\n  (windows-sys, rustix, ndk ...). Their dependencies can still turn features on in a shared package: bitflags's `std`\n  comes only through them. cargo has their dependencies and features\n  in its registry index cache (`registry/index/*/.cache`, a version and a JSON line per entry), and zurgo reads them\n  from there. Cargo also prints a platform key from its parse (`cfg(target_os=\"hermit\")` becomes\n  `cfg(target_os = \"hermit\")`), and zurgo does the same.\n\nOn dioxus, `zurgo metadata` takes 39 ms and `cargo metadata --offline` 320 ms. `cratebench/ui/run.py` now reads its\ngraph from zurgo and uses cargo only to download (`cargo fetch`). Its output is the same as before.\n\n## 3. Builds\n\n- A path workspace builds and runs as its cargo build does:\n  - a library and a binary of one name;\n  - features through `default`, a dependency's `features = [..]` and `dep:`;\n  - a dev-dependency that would not compile, which must not be built.\n\n  The same build again does no work: every crate is fresh, and nothing is linked.\n- The six cratebench crates from crates.io (fnv, adler2, hex, itoa, rustc-hash, cfg-if), each with its cratebench app,\n  print what their cargo builds print.\n- For the dioxus and leptos apps, `zurgo build` stops at the first proc-macro dependency it reaches, and names it\n  (`const_format_proc_macros`, `futures-macro`) with mizchi/zust#29.\n\nhex did not print what its cargo build printed: `<[u8; 4]>::from_hex(..)` returned an error. This was not zurgo: plain\n`zustc build` of cratebench's hex printed the same. Bisecting found 61ae81a (\"pick_overload finds the group of a\nsuffixed candidate\"):\n\n- Impls of one trait for `[u8; 4]` and `[u8; 2]` give functions of one name, `n` and `n#1`, in one overload group.\n- The caller chooses one by the self type. Before 61ae81a, pick_overload did not find the group of the suffixed `n#1`,\n  so that choice stood.\n- Since then, it re-picked by the first argument. For `fn from_hex<T: AsRef<[u8]>>(hex: T)`, every candidate fits, so\n  the first impl was called.\n- Now a function without `self` is not re-picked among impls for other self types: its first argument says nothing of\n  the self type. Overloads of one self type (`From<&str>` and `From<String>` for one type) are still picked by the\n  argument.\n- `tests/probe/assoc_fn_by_self_type.rs` covers both.\n\nNo CI job compares cratebench's outputs (the KPI job measures its times), so this went unnoticed for a day. zurgo's\ntest now compares them.\n\n## 4. Not changed\n\n`cratebench/run.py` still builds with `zustc build` and hand-written workspaces. The KPI job (`bench/kpi_track.py`)\nmeasures cratebench's builds with it, and building through zurgo would change what that KPI measures. The same crates\nare built through zurgo in zurgo's tests.\n\n## 5. Left for M1 (mizchi/zust#28)\n\n- **Build scripts.** They are not run yet; a warning names each one.\n- **zustc's workspace:**\n  - crate names apart from extern names, so that two versions of one crate and renamed dependencies work;\n  - an edition per crate;\n  - `env!` / `option_env!`;\n  - wasm32.\n- **zurgo itself:**\n  - its own resolver;\n  - downloads;\n  - git dependencies;\n  - `[patch]`.",
+        "contentHash": "313f5692d5a1c0cc88e37c4aead90349c24f18786a28f51b09b2f557d3dee7d1"
+      },
+      "target": {
+        "source": "docs_reports_2026-11-21-04-zurgo-m0.ja",
+        "path": "docs/ja/reports/2026-11-21-04-zurgo-m0.md",
+        "startLine": 1,
+        "endLine": 112,
+        "quote": "# zurgo M0: Cargo のパッケージを zustc でビルドする\n\n日付: 2026-11-21\n\nzustc には Cargo のパッケージをビルドする手段がなかった: そのワークスペースのビルドは、手で書いたクレートの一覧を\n受け取る。これは mizchi/zust#28 の最初のマイルストーンである。Cargo と互換のドライバ `crates/zurgo` を足す (最初は\nzargo という名前だったが、そのクレート名は crates.io で使われている)。zurgo は Cargo.toml と Cargo.lock を読み、\nソースを見つけ、cargo と同じように feature を有効にし、そのグラフを同じプロセスの中で zustc のワークスペースの\nビルドでビルドする。`zurgo metadata` は `cargo metadata` の JSON を書く。proc macro の issue、mizchi/zust#29 も同時に\n書いた。使い方: [zurgo.md](../zurgo.md)。\n\n## 1. 何でできているか\n\n3,100 行で、crates.io への依存はない (serde_json はテストだけ):\n\n| モジュール | 行 | 中身 |\n|---|---:|---|\n| `toml.rs` | 529 | TOML: テーブル、テーブルの配列、ドットと引用符のキー、インラインのテーブル、4 種類の文字列、数、日付 |\n| `resolve.rs` | 592 | Cargo.lock とマニフェストからのパッケージのグラフと、feature の有効化 |\n| `manifest.rs` | 381 | Cargo.toml: Cargo の自動の発見を含むターゲット、3 種類の依存と `[target]` の下のもの、feature、ワークスペースからの継承 |\n| `metadata.rs` | 258 | `cargo metadata` の JSON |\n| `semver.rs` | 244 | 版と要求。`^`、`~`、ワイルドカード、プレリリースは Cargo の規則で |\n| `platform.rs` | 223 | `cfg(..)` のプラットフォームのキー。値は x86-64 Linux と wasm32 で `rustc --print cfg` が出すもの |\n| `compile.rs` | 217 | zustc のワークスペース (`CrateSpec`) とビルド |\n| `lock.rs`、`json.rs` | 354 | Cargo.lock と、cargo のレジストリの index のキャッシュ |\n\nzust-core はフィールド 1 つだけ変わる: `CrateSpec::exe`、バイナリの実行ファイルの名前である。パッケージの\nライブラリとバイナリはパッケージの名前を共有し、zustc はクレートのファイルをその名前で名付けるので、zurgo は\nバイナリに別のクレート名を付け、実行ファイルの名前をここに持たせる。\n\n## 2. cargo metadata に合わせる\n\nテストは、テストのパッケージと、cratebench/ui の dioxus (344 パッケージ) と leptos (180) のアプリについて、\n`zurgo metadata` と `cargo metadata` を比べる。プラットフォームの絞り込みなしと、wasm32 と x86-64 Linux の\n`--filter-platform` とで比べる。比べるのは、パッケージ、id、ターゲット、有効な feature、辺とその `dep_kinds` である。\nどこでも同じになる。\n\n最初の版は cargo の feature のリゾルバの、文書にある規則に従っていて、4 つの点で違った。どれも `cargo metadata` が\n何を出すかについて、何かを示した:\n\n- **`cargo metadata` が出すのは依存のリゾルバのグラフで、feature のリゾルバのものではない。** その feature は、\n  すべての種類、すべてのプラットフォームにわたってまとめられる。弱い `dep?/feat` も `dep` をグラフに入れる: toml の\n  `std = [\"serde_core?/std\", ..]` は、toml の `serde` feature が無効でも、toml から serde_core への辺を作る。\n  `zurgo build` は、cargo がビルドに使う feature のリゾルバの規則のままにする: ホストの側、dev-dependencies なし、\n  プラットフォームの確認、待つ弱い feature。\n- **`--filter-platform` は辺を絞るだけである。** 辺は、その宣言のどれかが当てはまれば出され、その `dep_kinds` には\n  すべての宣言が並ぶ。ほかのプラットフォームのものも並ぶ。wasm32 の絞り込みでも、dioxus-logger の\n  tracing-subscriber の種類には `cfg(not(target_arch = \"wasm32\"))` があり、tracing-subscriber の feature には、\n  その宣言だけが求める `fmt` がある。\n- **`x/f` は、`x` という名前の feature も有効にする。** `x` が optional の依存で、その名前の feature (明示のものか\n  暗黙のもの) があるときである。yoke には `zerofrom = [\"dep:zerofrom\"]` と `derive = [.., \"zerofrom/derive\"]` が\n  あるので、`derive` は `zerofrom` feature を有効にする。\n- **ダウンロードされていないパッケージも数に入る。** `cargo metadata --filter-platform` と `cargo fetch --target` は、\n  ほかのプラットフォームのパッケージを取ってこない: ここでは dioxus のグラフの 344 のうち 49 がダウンロードされて\n  いなかった (windows-sys、rustix、ndk など)。それでもその依存は、共有のパッケージの feature を有効にしうる:\n  bitflags の `std` はそれらからだけ来る。cargo はその依存と feature をレジストリの index のキャッシュ\n  (`registry/index/*/.cache`。項目ごとに版と JSON の 1 行) に持っていて、zurgo はそこから読む。また cargo は\n  プラットフォームのキーを、その構文解析から出し直す (`cfg(target_os=\"hermit\")` は `cfg(target_os = \"hermit\")` に\n  なる)。zurgo も同じようにする。\n\ndioxus では、`zurgo metadata` は 39 ms、`cargo metadata --offline` は 320 ms かかる。`cratebench/ui/run.py` は今は\nグラフを zurgo から読み、cargo はダウンロード (`cargo fetch`) にだけ使う。その出力は前と同じである。\n\n## 3. ビルド\n\n- path のワークスペースは、その cargo のビルドと同じようにビルドされ、動く:\n  - 1 つの名前のライブラリとバイナリ;\n  - `default`、依存の `features = [..]`、`dep:` を通した feature;\n  - コンパイルできない dev-dependency。これはビルドしてはいけない。\n\n  同じビルドをもう一度すると何もしない: どのクレートも新しいままで、何もリンクしない。\n- crates.io の cratebench の 6 つのクレート (fnv、adler2、hex、itoa、rustc-hash、cfg-if) は、それぞれ cratebench の\n  アプリと一緒に、その cargo のビルドと同じものを出す。\n- dioxus と leptos のアプリでは、`zurgo build` は最初に届いた proc-macro の依存で止まり、それを\n  (`const_format_proc_macros`、`futures-macro`) mizchi/zust#29 と一緒に示す。\n\nhex は、その cargo のビルドと同じものを出さなかった: `<[u8; 4]>::from_hex(..)` がエラーを返した。これは zurgo の\nせいではなかった: cratebench の hex をそのまま `zustc build` しても同じものを出した。二分探索で 61ae81a\n(\"pick_overload finds the group of a suffixed candidate\") が見つかった:\n\n- `[u8; 4]` と `[u8; 2]` への 1 つの trait の impl は、同じ名前の関数 `n` と `n#1` を作り、それらは 1 つの\n  オーバーロードの組に入る。\n- 呼ぶ側は self の型でその 1 つを選ぶ。61ae81a の前は、pick_overload は接尾辞の付いた `n#1` の組を見つけなかった\n  ので、その選択がそのまま残った。\n- それ以後は、最初の引数で選び直していた。`fn from_hex<T: AsRef<[u8]>>(hex: T)` ではどの候補も合うので、最初の\n  impl が呼ばれていた。\n- 今は、`self` のない関数を、ほかの self の型の impl の中から選び直さない: その最初の引数は self の型について何も\n  言わない。1 つの self の型のオーバーロード (1 つの型への `From<&str>` と `From<String>`) は、今も引数で選ぶ。\n- `tests/probe/assoc_fn_by_self_type.rs` がその両方を確かめる。\n\ncratebench の出力を比べる CI のジョブはない (KPI のジョブはその時間を測る) ので、これは 1 日気づかれなかった。今は\nzurgo のテストがそれを比べる。\n\n## 4. 変えなかったもの\n\n`cratebench/run.py` は今も `zustc build` と手で書いたワークスペースでビルドする。KPI のジョブ\n(`bench/kpi_track.py`) は cratebench のビルドをそれで測っていて、zurgo を通すとその KPI が測るものが変わる。同じ\nクレートは、zurgo のテストで zurgo を通してビルドする。\n\n## 5. M1 に残すもの (mizchi/zust#28)\n\n- **ビルドスクリプト。** まだ実行しない。それぞれを警告で示す。\n- **zustc のワークスペース:**\n  - extern の名前と分けたクレートの名前。1 つのクレートの 2 つの版と、名前を変えた依存のため;\n  - クレートごとの edition;\n  - `env!` / `option_env!`;\n  - wasm32。\n- **zurgo 自身:**\n  - 自前のリゾルバ;\n  - ダウンロード;\n  - git の依存;\n  - `[patch]`。",
+        "contentHash": "b9c379e70c13604710f5c52e8b3267304fb55a61fb4ff6859d57960fd1d82030"
+      },
+      "context": [],
+      "candidateId": "c32e995e2eb5f34cb6ec6f48c0d4a175d0552ba816791cab320dbdf7a0b72812",
+      "contextHash": "3680d7821ceccb84e40c111efdbf9782ab670b502e1b1838ae62cb03ee844288",
+      "judgment": {
+        "choice": "supports",
+        "confidence": 0.96,
+        "probabilities": {
+          "supports": 0.97,
+          "contradicts": 0.02,
           "unrelated": 0,
           "insufficient_context": 0.01
         }
@@ -1029,9 +1097,9 @@
     }
   ],
   "coverage": {
-    "expected": 30,
-    "selected": 30,
-    "answered": 30,
+    "expected": 32,
+    "selected": 32,
+    "answered": 32,
     "missing": 0,
     "contradictions": 0,
     "unassessed": 0,
@@ -1040,9 +1108,9 @@
     "unboundDocuments": 0
   },
   "usage": {
-    "requests": 30,
-    "inputTokens": 149777,
-    "usd": 0.006290634
+    "requests": 32,
+    "inputTokens": 169858,
+    "usd": 0.007134036000000001
   },
   "errors": []
 }
