@@ -88,37 +88,13 @@ pub fn cargo_home() -> PathBuf {
     }
 }
 
-/// cargo's own names for crates.io's directories under `registry/index` and `registry/src` (the sparse index with
-/// the hash cargo uses since 1.85 and before; the git index)
-const CRATES_IO_BUCKETS: [&str; 3] = ["index.crates.io-1949cf8c6b5b557f", "index.crates.io-6f17d22bba15001f", "github.com-1ecc6299db9ec823"];
-
-/// The names of crates.io's directories under `registry/index` (and so under `registry/src`): one of cargo's names for
-/// crates.io, or an index whose `config.json` is crates.io's (`"api": "https://crates.io"`). Another registry's
-/// directory never counts, though it be on the same host (`github.com-<hash>` of another GitHub-hosted index), so a
-/// package of the same name and version from it is never taken for the crates.io one
-fn crates_io_buckets(home: &Path) -> Vec<String> {
-    let idx = home.join("registry/index");
-    let mut out: Vec<String> = std::fs::read_dir(&idx)
-        .into_iter()
-        .flatten()
-        .filter_map(|e| e.ok().and_then(|e| e.file_name().into_string().ok()))
-        .filter(|n| {
-            CRATES_IO_BUCKETS.contains(&n.as_str())
-                || std::fs::read_to_string(idx.join(n).join("config.json"))
-                    .ok()
-                    .and_then(|c| crate::json::parse(&c).ok())
-                    .is_some_and(|v| v.as_table().and_then(|t| toml::get_str(t, &["api"])).is_some_and(|a| a.trim_end_matches('/') == "https://crates.io"))
-        })
-        .collect();
-    // (cargo's own names also when there is no index directory: sources unpacked without it)
-    for b in CRATES_IO_BUCKETS {
-        if !out.iter().any(|n| n == b) {
-            out.push(b.to_string());
-        }
-    }
-    out.sort();
-    out
-}
+/// crates.io's directories under `registry/index` and `registry/src`: cargo's own names for them (the sparse index
+/// with the hash cargo uses since 1.85 and before; the git index). The name is the hash of the index's URL, so it is
+/// the index's identity. Nothing inside a directory is trusted for this: another registry's `config.json` may name
+/// crates.io as its `api` (a mirror does), and a directory of another name (`github.com-<hash>` of another
+/// GitHub-hosted index) never counts, so a package of the same name and version from it is never taken for the
+/// crates.io one. A cargo that hashes the URL another way gives a "not downloaded" error until its name is added here
+const CRATES_IO_BUCKETS: [&str; 3] = ["github.com-1ecc6299db9ec823", "index.crates.io-1949cf8c6b5b557f", "index.crates.io-6f17d22bba15001f"];
 
 /// The unpacked sources of a crates.io package (`$CARGO_HOME/registry/src/<index>/<name>-<version>`, where `cargo
 /// fetch` and `cargo build` put them)
@@ -127,7 +103,7 @@ pub fn registry_dir(name: &str, version: &str) -> Option<PathBuf> {
 }
 
 pub fn registry_dir_in(home: &Path, name: &str, version: &str) -> Option<PathBuf> {
-    crates_io_buckets(home)
+    CRATES_IO_BUCKETS
         .iter()
         .map(|b| home.join("registry/src").join(b).join(format!("{name}-{version}")))
         .find(|d| d.join("Cargo.toml").is_file())
@@ -148,8 +124,8 @@ pub fn index_entry_in(home: &Path, name: &str, version: &str) -> Option<crate::t
         3 => format!("3/{}", &lower[..1]),
         _ => format!("{}/{}", &lower[..2], &lower[2..4]),
     };
-    for b in crates_io_buckets(home) {
-        let Ok(bytes) = std::fs::read(home.join("registry/index").join(&b).join(".cache").join(&prefix).join(&lower)) else { continue };
+    for b in CRATES_IO_BUCKETS {
+        let Ok(bytes) = std::fs::read(home.join("registry/index").join(b).join(".cache").join(&prefix).join(&lower)) else { continue };
         let parts: Vec<&[u8]> = bytes.split(|&b| b == 0).collect();
         // (the header and the etag line come first; then the pairs)
         let mut i = 2;
@@ -216,8 +192,8 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
         assert_eq!(l.find(&LockDep { name: "rustc-hash".into(), version: None, source: None }), None);
     }
 
-    /// Another GitHub-hosted registry's directories (`github.com-<other hash>`) are never taken for crates.io's, also
-    /// when crates.io's copy is missing; crates.io's are found by cargo's name or by their `config.json`
+    /// Another registry's directories are never taken for crates.io's, also when crates.io's copy is missing: one on
+    /// the same host (`github.com-<other hash>`), and one whose `config.json` names crates.io as its `api`
     #[test]
     fn only_crates_io_directories() {
         let home = std::env::temp_dir().join(format!("zurgo-home-{}-{}", std::process::id(), line!()));
@@ -234,11 +210,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
         put("registry/src/github.com-0123456789abcdef/fnv-1.0.7/Cargo.toml", "[package]\nname = \"fnv\"\nversion = \"1.0.7\"\n");
         assert_eq!(registry_dir_in(&home, "fnv", "1.0.7"), None);
         assert!(index_entry_in(&home, "fnv", "1.0.7").is_none());
-        // (crates.io, as an index of another name whose config.json is crates.io's)
-        put("registry/index/index.crates.io-aaaaaaaaaaaaaaaa/config.json", "{\"dl\":\"https://static.crates.io/crates\",\"api\":\"https://crates.io\"}");
+        // (a registry whose config.json names crates.io's api, as a mirror's does)
+        put("registry/index/index.crates.io-aaaaaaaaaaaaaaaa/config.json", "{\"dl\":\"https://example.com/crates\",\"api\":\"https://crates.io\"}");
         put("registry/index/index.crates.io-aaaaaaaaaaaaaaaa/.cache/3/f/fnv", &entry("fnv"));
         put("registry/src/index.crates.io-aaaaaaaaaaaaaaaa/fnv-1.0.7/Cargo.toml", "[package]\nname = \"fnv\"\nversion = \"1.0.7\"\n");
-        assert_eq!(registry_dir_in(&home, "fnv", "1.0.7"), Some(home.join("registry/src/index.crates.io-aaaaaaaaaaaaaaaa/fnv-1.0.7")));
+        assert_eq!(registry_dir_in(&home, "fnv", "1.0.7"), None);
+        assert!(index_entry_in(&home, "fnv", "1.0.7").is_none());
+        // (crates.io's sparse index under cargo's name)
+        put("registry/index/index.crates.io-1949cf8c6b5b557f/.cache/3/f/fnv", &entry("fnv"));
+        put("registry/src/index.crates.io-1949cf8c6b5b557f/fnv-1.0.7/Cargo.toml", "[package]\nname = \"fnv\"\nversion = \"1.0.7\"\n");
+        assert_eq!(registry_dir_in(&home, "fnv", "1.0.7"), Some(home.join("registry/src/index.crates.io-1949cf8c6b5b557f/fnv-1.0.7")));
         assert!(index_entry_in(&home, "fnv", "1.0.7").is_some());
         // (and cargo's own name for crates.io's git index)
         put("registry/src/github.com-1ecc6299db9ec823/itoa-1.0.0/Cargo.toml", "[package]\nname = \"itoa\"\nversion = \"1.0.0\"\n");
