@@ -1,0 +1,110 @@
+[
+ {
+  "proposal": "002-anonymous-records",
+  "persona": "ts-dev",
+  "note": "condensed from the evaluator's report (scores verbatim, findings summarized)",
+  "scores": {
+   "R1": {
+    "score": 3,
+    "why": "props の型は TS とほぼ同じ。二重の波括弧と、JS の spread と逆に読める `{ done: x, ..t }` で読み違える"
+   },
+   "R2": {
+    "score": 3,
+    "why": "期待する型で作る規則は typed array と揃う。関数型が 2 通り、名前付きと無名の 2 つの世界"
+   },
+   "R3": {
+    "score": 3,
+    "why": "「最初のフィールドが `name:`」の非対称(`{ total, done: x }` はエラーで `{ done: x, total }` は通る)。型依存の構文解析案は採るべきでない"
+   },
+   "R4": {
+    "score": 4,
+    "why": "4 つの型宣言が消える。全部省略形、props の分割代入、`?:` がない"
+   },
+   "R5": {
+    "score": 3,
+    "why": "更新の順序の読み違え、`{ x }` がブロックとして通る、無名の値が名前付きの型に渡せない"
+   },
+   "R6": {
+    "score": 4,
+    "why": ".d.ts はほぼ TS そのもの、引数名も出る。戻り値の型に名前がなく `ReturnType<..>` が要る。`@wasm` で書けない"
+   },
+   "R7": {
+    "score": 3,
+    "why": "似ているのに違う点が多い(部分型なし、省略形の制限、末尾の `..t`、`{ x }`、`()`、`?:` なし)"
+   },
+   "R8": {
+    "score": 3,
+    "why": "構造的同一性は単一化に載せやすい。型の `(` は `=>` まで決まらず入れ子で先読みが長い。長い無名型の表示"
+   }
+  },
+  "blocker": [],
+  "issues": [
+   {
+    "severity": "high",
+    "where": "B の更新 `{ done: !t.done, ..t }`",
+    "problem": "JS の `{ done: x, ...t }` は後に書いた t が勝つので逆の意味に読む。型名という目印がなくなるので読み違えやすい",
+    "suggestion": "JS と同じ `{ ...t, done: x }`(後に書いたものが勝つ)を受け付ける"
+   },
+   {
+    "severity": "high",
+    "where": "B「`{ todo, onToggle }` は書けない」",
+    "problem": "React で一番よく書く形。`ident ,` は式にならないので 2 トークンの先読みで決まり、本当に曖昧なのは `{ x }` だけ(evaluator は parse.rs で未確認)",
+    "suggestion": "`{` の後が `ident :` / `ident ,` / `...` ならレコード。`{ x }` だけブロック。期待する型がレコードの所では did you mean を出す"
+   },
+   {
+    "severity": "high",
+    "where": "A「名前付きと無名は別の型」と B「期待する型で名前付きになる」",
+    "problem": "`let r = { .. }; f(r)`(f は Todo を受ける)がエラーになる。書き方次第で同じ値が別の型になる",
+    "suggestion": "使われた先で同じフィールドなら名前付きに一致とみなす。または直し方つきのエラー"
+   },
+   {
+    "severity": "medium",
+    "where": "`if c { { .. } }`",
+    "problem": "二重の波括弧は読みにくい。`#{ }` は TS から離れるので採りたくない",
+    "suggestion": "formatter で 1 行にまとめる程度で足りる"
+   },
+   {
+    "severity": "medium",
+    "where": "D のコンポーネント",
+    "problem": "React は引数の位置で props を分割代入するのが標準。`props.` を毎回書くのは冗長",
+    "suggestion": "引数の位置の分割代入 `fn TodoItem({ todo, onToggle }: { .. })` を許す"
+   },
+   {
+    "severity": "medium",
+    "where": "未決事項 `title?:`",
+    "problem": "JSX の任意の prop がないと、既定値のある prop を足すたびに全部の呼び出しを直す",
+    "suggestion": "`title?: String` を `Option<String>` として入れ、省略は None。.d.ts は `title?: string`"
+   },
+   {
+    "severity": "medium",
+    "where": "C の関数型",
+    "problem": "型の `(` は `=>` まで決まらず入れ子で読みにくい。`()` は TS の void と違う",
+    "suggestion": "関数型を返す関数型の括弧の規則を明記。`void` を `()` の別名として受け付ける"
+   },
+   {
+    "severity": "low",
+    "where": "`pub` 関数の無名の戻り値",
+    "problem": "TS 側で名前を付けるには `ReturnType<typeof stats>` が要る",
+    "suggestion": ".d.ts で自動で名前を付けるか、`pub` では警告"
+   },
+   {
+    "severity": "low",
+    "where": "`@wasm` で無名レコードが使えない",
+    "problem": "「同じソースのまま切り替えられる」に反する",
+    "suggestion": "フィールドの集合から決まる名前の struct を最初から作る"
+   }
+  ],
+  "questions": [
+   "空の `{}` は空のレコードかブロックか",
+   "JSX の `todo={{ id: 1, .. }}` は期待する型 `Todo` から名前付きになるか",
+   "無名レコードの更新で元にないフィールドを足したら新しい型かエラーか",
+   "hover やエラーで長い無名型をどう表示するか",
+   "`key` のような特別な属性は無名の props でも同じか",
+   "総称的な無名レコード `{ value: T }` を書けるか"
+  ],
+  "alternative": {
+   "summary": "記号は足さず、`{` の後の 2 トークンで決める(`ident :` / `ident ,` / `...` ならレコード、`{ x }` だけブロック)。更新は JS と同じ `{ ...t, done: x }`。引数の位置の分割代入と `?:`",
+   "example": "pub fn TodoItem({ todo, onToggle }: { todo: Todo, onToggle: (id: i32) => void }) -> Jsx { .. }\nif t.id == id { { ...t, done: !t.done } } else { t }\n{ total, done }\npub fn Header(props: { title: String, subtitle?: String }) -> Jsx { .. }"
+  }
+ }
+]
