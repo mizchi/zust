@@ -293,7 +293,18 @@ impl Options2 {
 
     /// cfg の述語の設定 (features は与えたもの)
     pub fn cfg_with(&self, features: &[String]) -> crate::cfg::CfgSet {
-        crate::cfg::CfgSet { features: features.to_vec(), debug_assertions: !self.opt, wasm: self.module_writer.is_some() }
+        self.cfg_of(features, &[], &[])
+    }
+
+    /// cfg の述語の設定 (ワークスペースのクレート: feature、ビルドスクリプトの cfg、`env!` の環境)
+    pub fn cfg_of(&self, features: &[String], cfgs: &[(String, Option<String>)], env: &[(String, String)]) -> crate::cfg::CfgSet {
+        crate::cfg::CfgSet {
+            features: features.to_vec(),
+            debug_assertions: !self.opt,
+            wasm: self.module_writer.is_some(),
+            cfgs: cfgs.to_vec(),
+            env: env.to_vec(),
+        }
     }
 }
 
@@ -312,6 +323,9 @@ pub struct CrateCtx {
     pub deps: Vec<String>,
     /// このクレートの feature (ワークスペース。None なら Options2 の features)
     pub features: Option<Vec<String>>,
+    /// このクレートの cfg と `env!` の環境 (ワークスペース: CrateSpec の cfgs / env)
+    pub cfgs: Vec<(String, Option<String>)>,
+    pub env: Vec<(String, String)>,
     /// 依存するクレートのテキストの範囲 (結合したソースの行 [開始, 終わり)) と、そこから見えるクレート (この表の番号。自分も)
     pub dep_ranges: Vec<(u32, u32, Vec<usize>, u32)>,
 }
@@ -490,7 +504,7 @@ impl Session2 {
         let mut crates = self.ctx.deps.clone();
         crates.extend(self.ctx.lib.iter().cloned());
         let mut fix = vec![];
-        let cfg = self.opts.cfg_with(self.ctx.features.as_ref().unwrap_or(&self.opts.features));
+        let cfg = self.opts.cfg_of(self.ctx.features.as_ref().unwrap_or(&self.opts.features), &self.ctx.cfgs, &self.ctx.env);
         let (src, items, user, prelude_line0) = with_prelude_in(src0, &crates, &mut fix, Some(&cfg), &mut self.sel)?;
         self.ctx.map.colfix = fix;
         // (E0432: a top-level `use` of a path whose first segment names nothing; the `use` items come from the item

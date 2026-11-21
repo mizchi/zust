@@ -705,10 +705,51 @@ pub struct CrateSpec {
     /// (a bin: the name of the executable, when it is not `name`. A Cargo package's lib and bin share the package's
     /// name, so zurgo gives the bin another crate name and keeps the executable's here)
     pub exe: Option<String>,
+    /// more cfgs (a build script's `rustc-cfg`): `name`, or `name = "value"` (`cfg=name`, `cfg=name=value`)
+    pub cfgs: Vec<(String, Option<String>)>,
+    /// the compile-time environment for `env!` / `option_env!` (`env=KEY=VALUE`): cargo's `CARGO_PKG_*`, `OUT_DIR`,
+    /// a build script's `rustc-env`
+    pub env: Vec<(String, String)>,
+}
+
+/// A value for the workspace file: `%`, `#`, whitespace and other control characters as `%XX`
+pub fn ws_escape(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    for c in s.chars() {
+        if c == '%' || c == '#' || c.is_whitespace() || c.is_control() {
+            let mut buf = [0u8; 4];
+            for b in c.encode_utf8(&mut buf).bytes() {
+                out.push_str(&format!("%{b:02X}"));
+            }
+        } else {
+            out.push(c);
+        }
+    }
+    out
+}
+
+fn ws_unescape(s: &str) -> String {
+    let b = s.as_bytes();
+    let mut out: Vec<u8> = Vec::with_capacity(b.len());
+    let mut i = 0;
+    while i < b.len() {
+        let hex = |c: &u8| (*c as char).to_digit(16);
+        if b[i] == b'%' {
+            if let (Some(h), Some(l)) = (b.get(i + 1).and_then(hex), b.get(i + 2).and_then(hex)) {
+                out.push((h * 16 + l) as u8);
+                i += 3;
+                continue;
+            }
+        }
+        out.push(b[i]);
+        i += 1;
+    }
+    String::from_utf8_lossy(&out).into_owned()
 }
 
 /// ワークスペースの説明ファイルを読む。1 行に 1 クレート: `lib <名前> <根のファイル> [依存...]` / `bin <名前> <根のファイル> [依存...]`
-/// (依存の代わりに `features=a,b` で feature を有効にする。bin の `exe=NAME` は実行ファイルの名前)
+/// (依存の代わりに `features=a,b` で feature を有効にする。bin の `exe=NAME` は実行ファイルの名前。`cfg=name` / `cfg=name=value`
+/// は cfg、`env=KEY=VALUE` は `env!` の値: 値の `%` `#` 空白は `%XX` (ws_escape))
 /// (`#` から後ろはコメント。パスは説明ファイルのディレクトリから)
 pub fn read_workspace(path: &std::path::Path) -> R<Vec<CrateSpec>> {
     let text = std::fs::read_to_string(path).map_err(|e| format!("{}: {e}", path.display()))?;
@@ -731,7 +772,7 @@ pub fn read_workspace(path: &std::path::Path) -> R<Vec<CrateSpec>> {
             root: dir.join(w[2]),
             display: w[2].to_string(),
             lib: w[0] == "lib",
-            deps: w[3..].iter().filter(|s| !s.starts_with("features=") && !s.starts_with("exe=")).map(|s| s.to_string()).collect(),
+            deps: w[3..].iter().filter(|s| !s.contains('=')).map(|s| s.to_string()).collect(),
             features: w[3..]
                 .iter()
                 .filter_map(|s| s.strip_prefix("features="))
@@ -740,6 +781,15 @@ pub fn read_workspace(path: &std::path::Path) -> R<Vec<CrateSpec>> {
                 .map(|s| s.to_string())
                 .collect(),
             exe: w[3..].iter().find_map(|s| s.strip_prefix("exe=")).map(str::to_string),
+            cfgs: w[3..]
+                .iter()
+                .filter_map(|s| s.strip_prefix("cfg="))
+                .map(|s| match s.split_once('=') {
+                    Some((k, v)) => (ws_unescape(k), Some(ws_unescape(v))),
+                    None => (ws_unescape(s), None),
+                })
+                .collect(),
+            env: w[3..].iter().filter_map(|s| s.strip_prefix("env=")).filter_map(|s| s.split_once('=')).map(|(k, v)| (ws_unescape(k), ws_unescape(v))).collect(),
         });
     }
     Ok(out)
@@ -963,6 +1013,8 @@ impl Session2 {
             map: map.clone(),
             deps: deps.iter().map(|&j| crates[j].name.clone()).collect(),
             features: Some(c.features.clone()),
+            cfgs: c.cfgs.clone(),
+            env: c.env.clone(),
             dep_ranges: ranges,
         };
         let mut r = Report2::default();
@@ -1077,7 +1129,7 @@ impl Session2 {
         let mut loaded: Vec<Option<(String, crate::srcmap::SrcMap)>> = vec![None; crates.len()];
         for &i in &order {
             let c = &crates[i];
-            let (text, map) = crate::srcmap::load_crate(c.root.as_path(), &c.display, &self.opts.cfg_with(&c.features))?;
+            let (text, map) = crate::srcmap::load_crate(c.root.as_path(), &c.display, &self.opts.cfg_of(&c.features, &c.cfgs, &c.env))?;
             let text = if c.lib { format!("pub mod {} {{ {text}\n}}\n", c.name) } else { text };
             loaded[i] = Some((text, map));
         }
@@ -1200,6 +1252,9 @@ impl Session2 {
                 for f in &crates[i].features {
                     kh.add(f);
                 }
+                for (k, v) in &crates[i].cfgs {
+                    kh.add(&format!("cfg {k}={v:?}"));
+                }
                 let pkey = key_hex(kh.finish());
                 let pp = out_dir.join(format!("{}.prep", crates[i].name).as_str());
                 if let Ok(old) = std::fs::read_to_string(pp.as_path()) {
@@ -1224,7 +1279,7 @@ impl Session2 {
                     let mut full = text.clone();
                     full.push_str(marker);
                     full.push_str(&dd);
-                    let cfg = self.opts.cfg_with(&crates[i].features);
+                    let cfg = self.opts.cfg_of(&crates[i].features, &crates[i].cfgs, &crates[i].env);
                     match crate::macros::expand_cfg(&full, Some(&cfg)).map_err(|e| format!("crate `{}`: {}", crates[i].name, map.relocate_err(&e)))? {
                         Some(t) => match t.find(marker) {
                             Some(k) => t[..k].to_string(),

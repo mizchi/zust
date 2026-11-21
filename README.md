@@ -263,6 +263,14 @@ bin app app/src/main.rs geom util
 zustc build workspace.txt -o target
 ```
 
+- Words after the dependencies set more of the crate:
+  - `features=a,b`: its features;
+  - `cfg=name` / `cfg=name=value`: other cfgs (what a build script's `rustc-cfg` gives);
+  - `env=KEY=VALUE`: the values `env!` / `option_env!` see (`CARGO_PKG_*`, `OUT_DIR`);
+  - `exe=NAME`: a bin's executable name.
+
+  In a value, `%`, `#` and white space are written `%XX`. A name `env!` does not find there is looked up in zustc's
+  own environment, as rustc does.
 - Each crate gets its own object file and cache, and they are linked at the end.
 - Changing the body of a function in a crate that others depend on does not recompile the dependents; zustc only
   relinks.
@@ -451,7 +459,7 @@ the measured numbers. The [reports](docs/reports/) explain each step.
 - [ ] items inside blocks: `mod`, `trait`, `impl`, `type`, `union` and `pub` items in a fn body now move out; items a
   macro expands to in statement position move out too; from a macro in expression position not yet (~12 tests)
 - [ ] builtin macros: `offset_of!`, `addr_of!` / `addr_of_mut!`, `try!`, `stringify!`, `concat!`, `line!`, `column!`,
-  `option_env!`, `assert_matches!`, `format_args!` now work; `module_path!`, `file!`, `include!`, `asm!` do not (~8 tests)
+  `env!`, `option_env!`, `assert_matches!`, `format_args!` now work; `module_path!`, `file!`, `include!`, `asm!` do not (~8 tests)
 - [ ] `repr(packed)` / `repr(align)`: ~16 tests
 - [ ] `Pin`: `Pin<&T>` / `Pin<&mut T>` work as the pointer; `Box::pin(fut)` and `Pin<Box<dyn Future<Output = T>>>` work (the future's value, as async runs at once); `self: Pin<&mut Self>` and
   `self: Box<Self>` receivers work; `pin!` does not

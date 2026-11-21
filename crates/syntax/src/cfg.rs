@@ -14,10 +14,26 @@ pub struct CfgSet {
     /// the target is wasm32-unknown-unknown (`target_arch = "wasm32"`, `target_family = "wasm"`, no `unix`).
     /// `target_pointer_width` stays "64": zustc's wasm32 output keeps 64-bit pointers and usize
     pub wasm: bool,
+    /// more cfgs of this crate, as a build script's `rustc-cfg` gives them: `name`, or `name = "value"`
+    pub cfgs: Vec<(String, Option<String>)>,
+    /// the crate's compile-time environment for `env!` / `option_env!` (cargo's `CARGO_PKG_*`, `OUT_DIR`, a build
+    /// script's `rustc-env`). A name that is not here is looked up in zustc's own environment, as rustc does
+    pub env: Vec<(String, String)>,
 }
 
 impl CfgSet {
+    /// the value `env!(name)` / `option_env!(name)` gives in this crate
+    pub fn env_var(&self, name: &str) -> Option<String> {
+        match self.env.iter().rev().find(|(k, _)| k == name) {
+            Some((_, v)) => Some(v.clone()),
+            None => std::env::var(name).ok(),
+        }
+    }
+
     fn flag(&self, name: &str) -> bool {
+        if self.cfgs.iter().any(|(k, v)| k == name && v.is_none()) {
+            return true;
+        }
         match name {
             "unix" => !self.wasm,
             "debug_assertions" => self.debug_assertions,
@@ -27,6 +43,9 @@ impl CfgSet {
     }
 
     fn kv(&self, key: &str, val: &str) -> bool {
+        if self.cfgs.iter().any(|(k, v)| k == key && v.as_deref() == Some(val)) {
+            return true;
+        }
         match key {
             "feature" => self.features.iter().any(|f| f == val),
             "target_os" if self.wasm => val == "unknown",
@@ -304,7 +323,7 @@ mod tests {
     use super::*;
 
     fn run(src: &str, feats: &[&str]) -> String {
-        let c = CfgSet { features: feats.iter().map(|s| s.to_string()).collect(), debug_assertions: true, wasm: false };
+        let c = CfgSet { features: feats.iter().map(|s| s.to_string()).collect(), debug_assertions: true, ..Default::default() };
         let o = strip(src, &c).unwrap_or_else(|| src.to_string());
         assert_eq!(o.len(), src.len());
         o.split_whitespace().collect::<Vec<_>>().join(" ")

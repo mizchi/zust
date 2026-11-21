@@ -194,6 +194,14 @@ fn load_file_in(path: &Path, display: &str, mod_dir: &Path, disp_dir: &str, star
         None => src,
     };
     map.inputs.push(path.to_path_buf());
+    // (`env!` / `option_env!` read the environment, which file stamps do not cover)
+    if src.contains("env!") {
+        map.volatile = true;
+    }
+    let src = match crate::macros::expand_env(&src, cfg) {
+        Some(t) => t,
+        None => src,
+    };
     let src = match crate::macros::expand_includes(&src, path.parent().unwrap_or(Path::new("."))) {
         Ok(Some(s)) => {
             map.volatile = true;

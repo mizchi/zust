@@ -1208,6 +1208,105 @@ fn find_calls(
     Ok(())
 }
 
+/// `env!("NAME")` / `env!("NAME", "message")` and `option_env!("NAME")` with the crate's compile-time environment
+/// (`CfgSet::env`, then zustc's own): `env!` becomes the value as a string literal, `option_env!` `Some("value")`.
+/// A name that is not set is left as written: `option_env!` is then `None` (acg), and `env!` the error that names it.
+/// The value goes on one line (newlines escaped), so the lines after it keep their numbers. None: nothing to expand
+pub fn expand_env(src: &str, cfg: &crate::cfg::CfgSet) -> Option<String> {
+    if !src.contains("env!") {
+        return None;
+    }
+    let b = src.as_bytes();
+    let mut out = String::with_capacity(src.len());
+    let mut at = 0;
+    let mut changed = false;
+    let mut from = 0;
+    while let Some(k) = src[from..].find("env!") {
+        let i = from + k;
+        from = i + 4;
+        // (`option_env!` or `env!`, not part of another name, not in a line comment or right after a quote)
+        let (mut start, opt) = if src[..i].ends_with("option_") { (i - 7, true) } else { (i, false) };
+        // (`std::env!`, `::core::option_env!`: the path goes too)
+        for p in ["::core::", "::std::", "core::", "std::"] {
+            if src[..start].ends_with(p) {
+                start -= p.len();
+                break;
+            }
+        }
+        let line_start = src[..start].rfind('\n').map(|k| k + 1).unwrap_or(0);
+        if src[line_start..start].contains("//") || start > 0 && (b[start - 1] == b'"' || b[start - 1] == b'_' || b[start - 1].is_ascii_alphanumeric()) {
+            continue;
+        }
+        let Some((name, end)) = env_args(&src[i + 4..], opt) else { continue };
+        let Some(v) = cfg.env_var(&name) else { continue };
+        out.push_str(&src[at..start]);
+        let lit = str_literal(&v);
+        if opt {
+            out.push_str("Some(");
+            out.push_str(&lit);
+            out.push(')');
+        } else {
+            out.push_str(&lit);
+        }
+        at = i + 4 + end;
+        from = at;
+        changed = true;
+    }
+    if !changed {
+        return None;
+    }
+    out.push_str(&src[at..]);
+    Some(out)
+}
+
+/// The arguments of `env!` / `option_env!` after the `!`: `("NAME")`, or for `env!` `("NAME", "message")`; (the name,
+/// the length up to and with the closing parenthesis). None: not that form (a macro's `$x`, an escape in the name)
+fn env_args(after: &str, opt: bool) -> Option<(String, usize)> {
+    let t = after.trim_start().strip_prefix('(')?.trim_start();
+    let r = t.strip_prefix('"')?;
+    let e = r.find('"')?;
+    let name = &r[..e];
+    if name.contains('\\') || name.is_empty() {
+        return None;
+    }
+    let mut rest = r[e + 1..].trim_start();
+    if let Some(x) = rest.strip_prefix(',') {
+        rest = x.trim_start();
+        if !opt {
+            // (the message: a plain string literal)
+            if let Some(m) = rest.strip_prefix('"') {
+                let mut j = 0;
+                let mb = m.as_bytes();
+                while j < mb.len() && mb[j] != b'"' {
+                    j += if mb[j] == b'\\' { 2 } else { 1 };
+                }
+                rest = m.get(j + 1..)?.trim_start().strip_prefix(',').unwrap_or(m.get(j + 1..)?).trim_start();
+            }
+        }
+    }
+    let close = rest.strip_prefix(')')?;
+    Some((name.to_string(), after.len() - close.len()))
+}
+
+/// A string literal (on one line) whose value is s
+fn str_literal(s: &str) -> String {
+    let mut out = String::with_capacity(s.len() + 2);
+    out.push('"');
+    for ch in s.chars() {
+        match ch {
+            '\n' => out.push_str("\\n"),
+            '\r' => out.push_str("\\r"),
+            '\t' => out.push_str("\\t"),
+            '"' => out.push_str("\\\""),
+            '\\' => out.push_str("\\\\"),
+            c if (c as u32) < 0x20 || c as u32 == 0x7f => out.push_str(&format!("\\u{{{:x}}}", c as u32)),
+            c => out.push(c),
+        }
+    }
+    out.push('"');
+    out
+}
+
 /// `include_str!("path")` / `include_bytes!("path")` (path は文字列リテラル、`dir` からの相対) を、ファイルの中身の
 /// リテラル (改行などはエスケープして 1 行に収める: 後ろの行番号を変えない) に置き換える。無ければ None
 pub fn expand_includes(src: &str, dir: &std::path::Path) -> Result<Option<String>, String> {

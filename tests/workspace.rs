@@ -122,12 +122,49 @@ fn exe_moved_between_crates_relinks() {
         deps: vec![],
         features: vec![],
         exe: Some("one".to_string()),
+        cfgs: vec![],
+        env: vec![],
     };
     let mut s = zustc::driver2::Session2::new(zustc::driver2::Options2::default());
     for (name, want) in [("a", "a\n"), ("b", "b\n"), ("a", "a\n")] {
         s.build_workspace(&[spec(name)], &out).unwrap();
         let (got, _, code) = run(&out.join("one"), &dir, 0);
         assert_eq!((got.as_str(), code), (want, Some(0)), "after building `{name}` as `one`");
+    }
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// A crate's own cfgs and compile-time environment (`cfg=` / `env=`, what a build script and cargo give): `cfg!`,
+/// `#[cfg]`, `env!`, `option_env!` and `include!(concat!(env!(..), ..))` see them, and a change rebuilds the crate
+#[test]
+fn crate_cfgs_and_env() {
+    let dir = std::env::temp_dir().join(format!("zustc_ws_env_{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    let put = |p: &str, t: &str| {
+        let f = dir.join(p);
+        std::fs::create_dir_all(f.parent().unwrap()).unwrap();
+        std::fs::write(f, t).unwrap();
+    };
+    put("out/gen.rs", "pub fn gen() -> &'static str { \"generated\" }\n");
+    put(
+        "lib/lib.rs",
+        "include!(concat!(env!(\"OUT_DIR\"), \"/gen.rs\"));\n#[cfg(big)]\npub const SIZE: &str = \"big\";\n#[cfg(not(big))]\npub const SIZE: &str = \"small\";\npub fn hi() -> String {\n    let mut s = String::from(env!(\"CARGO_PKG_NAME\"));\n    if cfg!(kind = \"x y\") {\n        s.push_str(\" kind\");\n    }\n    s\n}\n",
+    );
+    put("app/main.rs", "fn main() {\n    println!(\"{} {} {} {:?} {:?}\", lib::hi(), lib::SIZE, lib::gen(), option_env!(\"APP_NOTE\"), option_env!(\"ZUST_SURELY_UNSET\"));\n}\n");
+    let ws = |big: bool| {
+        let out = zustc::driver2::ws_escape(dir.join("out").to_str().unwrap());
+        let cfg = if big { " cfg=big" } else { "" };
+        format!("lib lib lib/lib.rs cfg=kind={}{cfg} env=OUT_DIR={out} env=CARGO_PKG_NAME=my%20lib\nbin app app/main.rs lib env=APP_NOTE=a%23b\n", zustc::driver2::ws_escape("x y"))
+    };
+    let target = dir.join("target");
+    for (big, want) in [(true, "my lib kind big generated Some(\"a#b\") None\n"), (false, "my lib kind small generated Some(\"a#b\") None\n")] {
+        put("ws.txt", &ws(big));
+        let crates = zustc::driver2::read_workspace(&dir.join("ws.txt")).unwrap();
+        // (no forked workers: the other tests of this file run in threads beside this one)
+        let mut s = zustc::driver2::Session2::new(zustc::driver2::Options2 { jobs: 1, ..Default::default() });
+        s.build_workspace(&crates, &target).unwrap();
+        let (out, err, code) = run(&target.join("app"), &dir, 0);
+        assert_eq!((out.as_str(), code), (want, Some(0)), "{err}");
     }
     let _ = std::fs::remove_dir_all(&dir);
 }

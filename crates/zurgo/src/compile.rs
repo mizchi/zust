@@ -137,6 +137,8 @@ pub fn plan(g: &Graph, o: &BuildOpts) -> R<Vec<CrateSpec>> {
             deps: deps_of(g, &r, n)?,
             features: r.nodes[&n].features.iter().cloned().collect(),
             exe: None,
+            cfgs: vec![],
+            env: vec![],
         });
     }
     // (the requested binaries, over all the selected packages)
@@ -191,6 +193,8 @@ pub fn plan(g: &Graph, o: &BuildOpts) -> R<Vec<CrateSpec>> {
                 deps,
                 features: r.nodes[&n].features.iter().cloned().collect(),
                 exe: Some(b.name.clone()),
+                cfgs: vec![],
+                env: vec![],
             });
         }
     }
