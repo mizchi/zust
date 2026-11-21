@@ -379,6 +379,11 @@ fn written_types_well_formed() {
     assert!(d.0 == 5 && d.1.contains("E0309"), "{d:?}");
     let d = first("fn ordering4<'a, 'b, F>(a: &'a usize, b: &'b usize, x: F) where F: FnOnce(&'a &'b usize) {}\nfn main() {}\n");
     assert!(d.0 == 1 && d.1.contains("E0491"), "{d:?}");
+    // (in a fn pointer's or a trait object's type)
+    let d = first("struct Foo<T> {\n    x: fn() -> &'static T,\n}\nfn main() {}\n");
+    assert!(d.0 == 2 && d.1.contains("E0310"), "{d:?}");
+    let d = first("trait Object<T> {}\nstruct Foo<T> {\n    x: Box<dyn Object<&'static T>>,\n}\nfn main() {}\n");
+    assert!(d.0 == 3 && d.1.contains("E0310"), "{d:?}");
     let ok = r#"
 pub trait Foo<'a> { type Bar; }
 impl<'a, T: 'a> Foo<'a> for T { type Bar = &'a T; }

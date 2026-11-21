@@ -303,6 +303,10 @@ impl Known {
                 None
             }
             PTy::Fn(ps, r) => ps.iter().chain(std::iter::once(&**r)).find_map(|t| self.check(t, statics, depth + 1)),
+            PTy::Dyn(bs) | PTy::Impl(bs) => bs.iter().find_map(|b| match b {
+                Bound::Trait(_, p) => self.check(&PTy::Path(None, p.clone()), statics, depth + 1),
+                Bound::Lifetime(_) => None,
+            }),
             _ => None,
         }
     }

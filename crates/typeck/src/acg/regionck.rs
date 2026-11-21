@@ -1461,7 +1461,13 @@ impl Cx<'_> {
             if !cd.moved.get(i).copied().unwrap_or(false) {
                 let r = self.rg.var();
                 if derefs.is_empty() {
-                    self.rg.loans.push((r, n.clone(), sp));
+                    // (the borrow is the closure's; it is reported where the body uses it first, as rustc does)
+                    let mut uses = vec![];
+                    if let Expr::Closure(_, _, _, body, _) = c {
+                        self.bk_cap_paths(body, n, &mut uses);
+                    }
+                    let at = uses.iter().map(|u| u.3).filter(|s| s.line != 0).min_by_key(|s| (s.line, s.col)).unwrap_or(sp);
+                    self.rg.loans.push((r, n.clone(), at));
                 }
                 for d in derefs {
                     self.rg.edge(d, r, sp);

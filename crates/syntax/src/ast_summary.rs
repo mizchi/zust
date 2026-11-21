@@ -794,8 +794,12 @@ fn static_fields(g: &Generics, tys: &[&PTy]) -> Option<String> {
             k.add_generics(g);
             k
         });
+        // (a field's type has no position: the line of the first `'static`, which the driver finds)
         if let Some((p, m)) = k.check(t, true, 0) {
-            return Some(format!("\u{3}{}\u{3}{m}", p.map_or(1, |p| p.line)));
+            return Some(match p {
+                Some(p) => format!("\u{3}{}\u{3}{m}", p.line),
+                None => format!("\u{1}'static\u{1}{m}"),
+            });
         }
     }
     None

@@ -1687,7 +1687,7 @@ impl Cx<'_> {
     }
 
     /// The places rooted at the variable n that the closure body uses
-    fn bk_cap_paths(&self, e: &Expr, n: &str, out: &mut Vec<(BPlace, Option<Ty>, CapMode, Sp)>) {
+    pub(crate) fn bk_cap_paths(&self, e: &Expr, n: &str, out: &mut Vec<(BPlace, Option<Ty>, CapMode, Sp)>) {
         // (destructuring a captured place captures the parts the patterns use: `let (ref mut x, _) = a;`)
         // (a use that captures nothing (`match a { [_, ..] => .. }`) is marked by a place of no local)
         let seen = BPlace { local: u32::MAX, proj: vec![] };

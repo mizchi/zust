@@ -45,15 +45,24 @@ pub fn mentions_static(t: &PTy) -> bool {
         PTy::Ref(l, _, i) => l.as_deref() == Some("'static") || mentions_static(i),
         PTy::Ptr(_, i) | PTy::Slice(i) | PTy::Array(i, _) => mentions_static(i),
         PTy::Tuple(ts) => ts.iter().any(mentions_static),
-        PTy::Path(None, p) => p.segs.iter().any(|s| {
-            s.args.iter().any(|a| match a {
-                GArg::Lifetime(l) => l == "'static",
-                GArg::Ty(t) => mentions_static(t),
-                _ => false,
-            })
+        PTy::Path(None, p) => path_mentions_static(p),
+        PTy::Fn(ps, r) => ps.iter().any(mentions_static) || mentions_static(r),
+        PTy::Dyn(bs) | PTy::Impl(bs) => bs.iter().any(|b| match b {
+            Bound::Lifetime(l) => l == "'static",
+            Bound::Trait(_, p) => path_mentions_static(p),
         }),
         _ => false,
     }
+}
+
+fn path_mentions_static(p: &crate::parse::Path) -> bool {
+    p.segs.iter().any(|s| {
+        s.args.iter().any(|a| match a {
+            GArg::Lifetime(l) => l == "'static",
+            GArg::Ty(t) | GArg::Bind(_, t) => mentions_static(t),
+            _ => false,
+        }) || s.fn_args.as_ref().is_some_and(|(ps, r)| ps.iter().any(mentions_static) || r.as_deref().is_some_and(mentions_static))
+    })
 }
 
 /// Generics declare or bound with a lifetime

@@ -6883,6 +6883,7 @@ run-pass	unboxed-closures/unboxed-closures-counter-not-moved.rs
 run-pass	unboxed-closures/unboxed-closures-direct-sugary-call.rs
 run-pass	unboxed-closures/unboxed-closures-extern-fn-hr.rs
 run-pass	unboxed-closures/unboxed-closures-extern-fn.rs
+compile-fail	unboxed-closures/unboxed-closures-failed-recursive-fn-1.rs
 compile-fail	unboxed-closures/unboxed-closures-failed-recursive-fn-2.rs
 run-pass	unboxed-closures/unboxed-closures-generic.rs
 run-pass	unboxed-closures/unboxed-closures-infer-arg-types-from-expected-bound.rs
@@ -7043,6 +7044,8 @@ compile-fail	wf/wf-associated-const.rs
 check-pass	wf/wf-dyn-in-hrtb-bound-issue-157122.rs
 compile-fail	wf/wf-fn-def-check-sig-2.rs
 compile-fail	wf/wf-impl-associated-type-region.rs
+compile-fail	wf/wf-in-fn-type-static.rs
+compile-fail	wf/wf-in-obj-type-static.rs
 compile-fail	wf/wf-where-clauses-pre-normalization.rs
 compile-fail	where-clauses/ignore-err-clauses.rs
 check-pass	where-clauses/impl-method-where-clause-resolution.rs
