@@ -202,3 +202,35 @@ collatz_max [{"TAG":"Some","_0":"6171n"},{"TAG":"None"}]
 "#
     );
 }
+
+/// examples/kernels.zsc: the `@simd` kernels (v128, a module zsc writes), the same functions through zustc
+/// (`--no-simd`) and as JS (`--all-js`) agree: exactly for `map` and i32 sums, to 12 digits for f64 sums (the lanes
+/// regroup them)
+#[test]
+fn kernels_simd_nosimd_js_agree() {
+    let src = root().join("examples/kernels.zsc");
+    let mut outs = vec![];
+    for (name, flags) in [("kernels-simd", &[][..]), ("kernels-nosimd", &["--no-simd"][..]), ("kernels-js", &["--all-js"][..])] {
+        let d = out_dir(name);
+        let o = zsc(&src, &d, flags);
+        assert!(o.status.success(), "zsc failed:\n{}", String::from_utf8_lossy(&o.stderr));
+        assert_eq!(d.join("kernels.simd.wasm").exists(), flags.is_empty());
+        let r = Command::new("node").arg(root().join("tests/kernels_driver.mjs")).arg(d.join("kernels.js")).output().unwrap();
+        assert!(r.status.success(), "{}", String::from_utf8_lossy(&r.stderr));
+        outs.push(String::from_utf8(r.stdout).unwrap());
+    }
+    assert_eq!(outs[0], outs[2], "@simd and JS differ");
+    assert_eq!(outs[1], outs[2], "--no-simd and JS differ");
+    assert!(outs[0].contains("axpy_exact true"));
+    assert!(outs[0].contains("isum [-290105161,-2147483639]"));
+}
+
+/// The guideline: i64 arithmetic in the JS layer is a warning (BigInt); in a @wasm fn it is not
+#[test]
+fn i64_in_js_warns() {
+    let o = zsc(&root().join("examples/basics.zsc"), &out_dir("warn-basics"), &[]);
+    assert!(o.status.success());
+    assert!(String::from_utf8_lossy(&o.stderr).contains("warning: i64 arithmetic in the JS layer runs on BigInt"));
+    let o = zsc(&root().join("examples/numeric.zsc"), &out_dir("warn-numeric"), &[]);
+    assert!(!String::from_utf8_lossy(&o.stderr).contains("warning"), "{}", String::from_utf8_lossy(&o.stderr));
+}

@@ -274,7 +274,7 @@ pub fn generate(items: &[Item], lowered: Vec<WFn>, raw: &str, wasm_file: &str) -
             }
             WTy::String | WTy::Vec(_) => {
                 let read = match ret {
-                    WTy::Vec(el) => format!("Array.from(new {}($w.memory.buffer, Number(p), Number(l)))", el.info().1),
+                    WTy::Vec(el) => format!("$wToArray(new {}($w.memory.buffer, Number(p), Number(l)))", el.info().1),
                     _ => "$dec.decode(new Uint8Array($w.memory.buffer, Number(p), Number(l)))".to_string(),
                 };
                 let _ = writeln!(glue, "{pad}{callw};");
@@ -309,6 +309,7 @@ pub fn generate(items: &[Item], lowered: Vec<WFn>, raw: &str, wasm_file: &str) -
     head.push_str("const $enc = new TextEncoder();\nconst $dec = new TextDecoder();\n");
     head.push_str("// JS functions handed to wasm, by id (borrowed ones leave when the call returns, owned ones when Rust drops them)\nexport const $cbs = new Map();\nlet $cbNext = 1;\nconst $cbAdd = (f) => {\n  const id = $cbNext++;\n  $cbs.set(id, f);\n  return id;\n};\n");
     head.push_str("const $lines = {};\n");
+    head.push_str("function $wToArray(v) {\n  const r = new Array(v.length);\n  for (let i = 0; i < v.length; i++) r[i] = v[i];\n  return r;\n}\n");
     head.push_str("const $env = {\n  __zsc_cb_drop: (id) => void $cbs.delete(id),\n");
     for (k, a, r, _) in &cb_decls {
         let ps: Vec<String> = (0..a.len()).map(|i| format!("a{i}")).collect();

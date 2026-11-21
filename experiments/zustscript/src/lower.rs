@@ -101,11 +101,12 @@ fn rs_type(n: &str) -> String {
 
 /// Lowers the wanted `@wasm` instances (those the JS layer calls, and the public ones) and every instance they
 /// call. Returns the ones that need glue, and the Rust of the others.
-pub fn lower(items: &[Item], info: &Info, wanted: &[(String, Vec<Ty>)]) -> Result<(Vec<WFn>, String), Vec<(Pos, String)>> {
+/// (`simd_as_wasm`: `@simd fn`s are lowered too: `zsc --no-simd`)
+pub fn lower(items: &[Item], info: &Info, wanted: &[(String, Vec<Ty>)], simd_as_wasm: bool) -> Result<(Vec<WFn>, String), Vec<(Pos, String)>> {
     let fns = items
         .iter()
         .filter_map(|it| match it {
-            Item::Fn { name, wasm: true, .. } => Some((name.as_str(), it)),
+            Item::Fn { name, wasm, simd, .. } if *wasm || (*simd && simd_as_wasm) => Some((name.as_str(), it)),
             _ => None,
         })
         .collect();

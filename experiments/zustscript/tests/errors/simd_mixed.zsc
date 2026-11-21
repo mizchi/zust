@@ -1,0 +1,2 @@
+// expect: @simd: the parameter `k` is
+@simd pub fn scale(xs: Array<f64>, k: i32) -> Array<f64> { xs.map((x) => x * 2.0) }

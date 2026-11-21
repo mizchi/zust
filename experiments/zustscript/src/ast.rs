@@ -209,7 +209,8 @@ pub enum Item {
     Enum { name: String, params: Vec<String>, variants: Vec<(String, Vec<TyS>, Option<TyS>)>, pos: Pos },
     /// (bounds: `T: Num` / `T: Integer` / `T: Float`; a function with one is monomorphized per numeric type)
     /// (`wasm`: written `@wasm fn`: lowered to Rust and compiled to wasm, see lower.rs)
-    Fn { name: String, public: bool, wasm: bool, generics: Vec<String>, bounds: Vec<(String, String)>, args: Vec<(String, TyS)>, ret: Option<TyS>, body: Expr, pos: Pos },
+    /// (`simd`: written `@simd fn`: an array kernel vectorized with v128, see simd.rs)
+    Fn { name: String, public: bool, wasm: bool, simd: bool, generics: Vec<String>, bounds: Vec<(String, String)>, args: Vec<(String, TyS)>, ret: Option<TyS>, body: Expr, pos: Pos },
     /// `extern "react" fn useState<T>(init: T) -> (T, fn(T) -> ()) = "useState";`
     Extern { name: String, module: Option<String>, generics: Vec<String>, args: Vec<TyS>, ret: TyS, js: String, pos: Pos },
     /// `wasm fn` (the text is the whole Rust function, handed to zustc)

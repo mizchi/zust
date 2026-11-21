@@ -128,6 +128,9 @@ const HELPERS: &[(&str, &str)] = &[
     ("$f64_to_i64", "function $f64_to_i64(x) {\n  if (x !== x) return 0n;\n  if (x >= 9223372036854775807) return 9223372036854775807n;\n  if (x <= -9223372036854775808) return -9223372036854775808n;\n  return BigInt(Math.trunc(x));\n}"),
     ("$at", "function $at(a, i) {\n  if (i >= 0 && i < a.length) return a[i];\n  throw new RangeError(\"index out of bounds: the len is \" + a.length + \" but the index is \" + i);\n}"),
     ("$range", "function $range(a, b) {\n  const r = [];\n  for (let i = a; i < b; i++) r.push(i);\n  return r;\n}"),
+    ("$fold", "function $fold(xs, acc, f) {\n  for (let i = 0; i < xs.length; i++) acc = f(acc, xs[i]);\n  return acc;\n}"),
+    ("$rangeFold", "function $rangeFold(a, b, acc, f) {\n  for (let i = a; i < b; i++) acc = f(acc, i);\n  return acc;\n}"),
+    ("$rangeMap", "function $rangeMap(a, b, f) {\n  const r = new Array(Math.max(b - a, 0));\n  for (let i = a; i < b; i++) r[i - a] = f(i);\n  return r;\n}"),
     ("$round", "function $round(x) {\n  return x < 0 ? -Math.round(-x) : Math.round(x);\n}"),
     (
         "$handle",
@@ -702,8 +705,25 @@ impl<'a> Js<'a> {
                 format!("{}({})", self.wrap_callee(&f), a.join(", "))
             }
             EK::Method(r, m, args) => {
-                let recv = self.operand(r);
                 let b = self.info.builtin.get(&e.id).copied();
+                // `range(a, b).fold(..)` / `.map(..)`: a counting loop, no array of indices
+                if let EK::Call(f, ra) = &r.kind
+                    && matches!(self.info.callee.get(&f.id), Some(Callee::Range))
+                    && matches!(b, Some(Builtin::Fold | Builtin::Map))
+                {
+                    let (lo, hi) = (self.expr(&ra[0]), self.expr(&ra[1]));
+                    return if b == Some(Builtin::Fold) {
+                        self.helpers.insert("$rangeFold");
+                        let f = self.callback(&args[1], 2);
+                        let init = self.expr(&args[0]);
+                        format!("$rangeFold({lo}, {hi}, {init}, {f})")
+                    } else {
+                        self.helpers.insert("$rangeMap");
+                        let f = self.callback(&args[0], 1);
+                        format!("$rangeMap({lo}, {hi}, {f})")
+                    };
+                }
+                let recv = self.operand(r);
                 let arg = |js: &mut Js, k: usize| js.expr(&args[k]);
                 use Builtin as B;
                 match b {
@@ -713,8 +733,10 @@ impl<'a> Js<'a> {
                     Some(B::Any) => format!("{recv}.some({})", self.callback(&args[0], 1)),
                     Some(B::All) => format!("{recv}.every({})", self.callback(&args[0], 1)),
                     Some(B::Fold) => {
+                        // (a counting loop: Array.prototype.reduce is several times slower in V8)
+                        self.helpers.insert("$fold");
                         let f = self.callback(&args[1], 2);
-                        format!("{recv}.reduce({f}, {})", arg(self, 0))
+                        format!("$fold({recv}, {}, {f})", arg(self, 0))
                     }
                     Some(B::Push) => format!("[...{recv}, {}]", arg(self, 0)),
                     Some(B::Concat) => format!("[...{recv}, ...{}]", self.operand(&args[0])),

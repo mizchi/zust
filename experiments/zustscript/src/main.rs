@@ -1,8 +1,9 @@
 //! zsc: the zustscript prototype's compiler.
 //!
-//!   zsc <input.zsc> [-o out-dir] [--zustc PATH] [--jsx-runtime MODULE] [--wasm-O] [--all-js]
+//!   zsc <input.zsc> [-o out-dir] [--zustc PATH] [--jsx-runtime MODULE] [--wasm-O] [--all-js] [--no-simd]
 //!
-//! (`--all-js` keeps `@wasm fn`s in the JS output: the same source, run as JS.
+//! (`--no-simd` compiles `@simd fn`s through zustc like `@wasm` ones (no vectors).
+//! `--all-js` keeps `@wasm fn`s in the JS output: the same source, run as JS.
 //! `--wasm-O` passes -O to zustc: faster code, but zustc's inlining makes the module larger, so the default is
 //! without it)
 //!
@@ -15,6 +16,7 @@ mod ast;
 mod check;
 mod js;
 mod lower;
+mod simd;
 mod parse;
 mod wasm;
 
@@ -29,6 +31,7 @@ fn main() {
     let mut jsx_runtime = "react/jsx-runtime".to_string();
     let mut wasm_opt = false;
     let mut all_js = false;
+    let mut no_simd = false;
     let mut it = args.iter();
     while let Some(a) = it.next() {
         match a.as_str() {
@@ -37,6 +40,7 @@ fn main() {
             "--jsx-runtime" => jsx_runtime = it.next().expect("--jsx-runtime needs a module").clone(),
             "--wasm-O" => wasm_opt = true,
             "--all-js" => all_js = true,
+            "--no-simd" => no_simd = true,
             _ if input.is_none() => input = Some(PathBuf::from(a)),
             _ => usage(),
         }
@@ -63,11 +67,14 @@ fn main() {
         report(&file, &src, &errs);
         std::process::exit(1);
     }
+    let mut warns = ck.warnings.clone();
+    warns.sort_by_key(|e| (e.0.line, e.0.col));
+    report_warnings(&file, &src, &warns);
     let info = ck.info;
     let mut j = js::Js::new(&info, &jsx_runtime);
     if !all_js {
         j.wasm_fns = items.iter().filter_map(|it| match it {
-            ast::Item::Fn { name, wasm: true, .. } => Some(name.clone()),
+            ast::Item::Fn { name, wasm, simd, .. } if *wasm || *simd => Some(name.clone()),
             _ => None,
         }).collect();
     }
@@ -76,7 +83,19 @@ fn main() {
     let (dts, brands) = js::dts(&items, &info);
     let wasm_name = format!("{stem}.wasm");
     // `@wasm fn`s: lowered to Rust (with --all-js they stay in the JS output)
-    let (lowered, raw) = match lower::lower(&items, &info, &j.wasm_wanted) {
+    // `@simd fn`s: vectorized kernels (with --no-simd they go through zustc as @wasm ones)
+    let is_simd = |n: &str| items.iter().any(|it| matches!(it, ast::Item::Fn { name, simd: true, .. } if name == n));
+    let (simd_wanted, wasm_wanted): (Vec<_>, Vec<_>) = j.wasm_wanted.iter().cloned().partition(|(n, _)| is_simd(n) && !no_simd);
+    let simd_names: Vec<String> = simd_wanted.iter().map(|(n, _)| n.clone()).collect();
+    let simd = match simd::generate(&items, &info, &simd_names) {
+        Ok(s) => s,
+        Err(mut errs) => {
+            errs.sort_by_key(|e| (e.0.line, e.0.col));
+            report(&file, &src, &errs);
+            std::process::exit(1);
+        }
+    };
+    let (lowered, raw) = match lower::lower(&items, &info, &wasm_wanted, no_simd) {
         Ok(x) => x,
         Err(mut errs) => {
             errs.sort_by_key(|e| (e.0.line, e.0.col));
@@ -116,6 +135,10 @@ fn main() {
         t_wasm = Some(t1.elapsed());
         let _ = &w.names;
     }
+    if let Some(s) = &simd {
+        out.push_str(&s.glue);
+        std::fs::write(out_dir.join(format!("{stem}.simd.wasm")), &s.wasm).unwrap();
+    }
     out.push_str(&js::brand_runtime(&brands));
     std::fs::write(out_dir.join(format!("{stem}.js")), out).unwrap();
     std::fs::write(out_dir.join(format!("{stem}.d.ts")), dts).unwrap();
@@ -151,8 +174,18 @@ fn report(file: &str, src: &str, errs: &[(ast::Pos, String)]) {
     eprintln!("{} error(s)", errs.len());
 }
 
+fn report_warnings(file: &str, src: &str, ws: &[(ast::Pos, String)]) {
+    let lines: Vec<&str> = src.lines().collect();
+    for (pos, m) in ws {
+        eprintln!("warning: {m}\n  --> {file}:{}:{}", pos.line, pos.col + 1);
+        if let Some(l) = lines.get(pos.line.saturating_sub(1) as usize) {
+            eprintln!("   | {l}\n   | {}^", " ".repeat(pos.col as usize));
+        }
+    }
+}
+
 fn usage() -> ! {
-    die("usage: zsc <input.zsc> [-o out-dir] [--zustc PATH] [--jsx-runtime MODULE] [--wasm-O] [--all-js]")
+    die("usage: zsc <input.zsc> [-o out-dir] [--zustc PATH] [--jsx-runtime MODULE] [--wasm-O] [--all-js] [--no-simd]")
 }
 
 fn die(m: &str) -> ! {

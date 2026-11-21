@@ -125,6 +125,10 @@ pub struct Checker {
     subst: Vec<Option<Ty>>,
     scopes: Vec<HashMap<String, Ty>>,
     pub errors: Vec<(Pos, String)>,
+    /// (not errors: the guidelines, e.g. i64 in the JS layer)
+    pub warnings: Vec<(Pos, String)>,
+    /// the function being checked runs as wasm (`@wasm` / `@simd`)
+    in_wasm: bool,
     /// (checked when the function is done, once inference has decided the types)
     deferred: Vec<(Pos, Id, &'static str, Ty)>,
     generics: Vec<String>,
@@ -192,6 +196,8 @@ impl Checker {
             subst: vec![],
             scopes: vec![],
             errors: vec![],
+            warnings: vec![],
+            in_wasm: false,
             deferred: vec![],
             generics: vec![],
             intv: HashSet::new(),
@@ -457,7 +463,8 @@ impl Checker {
         infer_effects(items, &mut self.info, &mut errs);
         self.errors.extend(errs);
         for it in items {
-            if let Item::Fn { generics, args, body, pos, name, .. } = it {
+            if let Item::Fn { generics, args, body, pos, name, wasm, simd, .. } = it {
+                self.in_wasm = *wasm || *simd;
                 self.generics = generics.clone();
                 self.scopes = vec![HashMap::new()];
                 self.muts.clear();
@@ -516,8 +523,14 @@ impl Checker {
             }
             self.info.cast.insert(id, (f, t));
         }
+        let mut warned_i64 = false;
         for (pos, _id, what, t) in std::mem::take(&mut self.deferred) {
             let r = self.resolve(&t);
+            // the guideline: in the JS layer an i64 is a BigInt (slow, allocating); i32 is the integer to use there
+            if r == Ty::I64 && matches!(what, "num" | "add" | "div") && !self.in_wasm && !warned_i64 {
+                warned_i64 = true;
+                self.warnings.push((pos, "i64 arithmetic in the JS layer runs on BigInt (slow, allocates): use i32, or move this to a @wasm fn".into()));
+            }
             let ok = match what {
                 "num" | "div" => self.numeric(&r),
                 "add" | "ord" => self.numeric(&r) || r == Ty::Str,

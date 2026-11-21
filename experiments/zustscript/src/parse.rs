@@ -263,15 +263,18 @@ impl Parser {
 
     fn item(&mut self) -> PResult<Item> {
         // `@wasm fn ..`: a zustscript function that runs as wasm
-        let wasm = if self.eat("@")? {
+        // `@simd fn ..`: an array kernel vectorized with v128
+        let (wasm, simd) = if self.eat("@")? {
             let (a, apos) = self.ident()?;
-            if a != "wasm" {
-                return Err((apos, format!("unknown attribute `@{a}` (there is `@wasm`)")));
+            match a.as_str() {
+                "wasm" => (true, false),
+                "simd" => (false, true),
+                _ => return Err((apos, format!("unknown attribute `@{a}` (there are `@wasm` and `@simd`)"))),
             }
-            true
         } else {
-            false
+            (false, false)
         };
+        let wasm_attr = wasm || simd;
         let public = if self.is_kw("pub")? {
             self.next()?;
             true
@@ -280,7 +283,7 @@ impl Parser {
         };
         let (kw, pos) = self.ident()?;
         match kw.as_str() {
-            _ if wasm && kw != "fn" => Err((pos, "`@wasm` goes on a `fn`".into())),
+            _ if wasm_attr && kw != "fn" => Err((pos, "`@wasm` / `@simd` go on a `fn`".into())),
             "type" => {
                 let (name, _) = self.ident()?;
                 let params = self.generics()?;
@@ -328,7 +331,7 @@ impl Parser {
                 }
                 let ret = if self.eat("->")? { Some(self.ty()?) } else { None };
                 let body = self.block()?;
-                Ok(Item::Fn { name, public, wasm, generics, bounds, args, ret, body, pos })
+                Ok(Item::Fn { name, public, wasm, simd, generics, bounds, args, ret, body, pos })
             }
             "extern" => {
                 let module = match &self.peek()?.t {
