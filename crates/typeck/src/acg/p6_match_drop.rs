@@ -935,7 +935,7 @@ impl Cx<'_> {
             // (an aggregate constant, tested by pat_test: not a new name, so a nested match still compares with it)
             Pat::Ident(_, _, n, None)
                 if self.user_code
-                    && (self.prog.lower_consts || n.starts_with(|c: char| c.is_uppercase()))
+                    && (self.prog.lower_consts || n.trim_start_matches('_').starts_with(|c: char| c.is_uppercase()))
                     && self.prog.const_index.get(n.as_str()).is_some_and(|&ci| self.prog.consts[ci as usize].stat.is_none())
                     && self.lookup(n).is_none() =>
             {

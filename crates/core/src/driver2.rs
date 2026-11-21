@@ -667,7 +667,7 @@ impl Session2 {
             if ext || head.starts_with('#') {
                 // (an item's outer attributes, not its body; an extern block's items are read whole)
                 let end = if ext { Some(it.end) } else { gated_attrs_len(head.as_bytes()).map(|n| it.start + n) };
-                if let Some(e) = end.and_then(|end| gated_attr(&src[..end], it.start, &mut feats)) {
+                if let Some(e) = end.and_then(|end| gated_attr(&src, it.start, end, &mut feats)) {
                     return Err(e);
                 }
             }
@@ -804,7 +804,13 @@ impl Session2 {
         // crate's source (its files joined, as the items' lines count); a build with dependency crates keeps the earlier
         // choice, the first impl)
         // (whether the source has modules: one search, for trait scopes and for has_mods below)
-        let has_mod_word = src0.contains("mod");
+        // (the keyword, not `mode`: a `mod` not after an identifier's letter and followed by a space)
+        let has_mod_word = src0.contains("mod") && {
+            let b = src0.as_bytes();
+            src0.match_indices("mod").any(|(i, _)| {
+                (i == 0 || !(b[i - 1].is_ascii_alphanumeric() || b[i - 1] == b'_')) && b.get(i + 3).is_some_and(|c| c.is_ascii_whitespace())
+            })
+        };
         if self.ctx.deps.is_empty() && self.ctx.lib.is_none() {
             prog.trait_scopes = lexer::trait_scopes_with(src0, has_mod_word);
             if !prog.trait_scopes.is_empty() {
@@ -815,7 +821,7 @@ impl Session2 {
         prog.deny_unreachable = deny_unreachable;
         // (the program has modules: read from its source as written, before flattening blanks their headers)
         prog.has_mods = has_mod_word;
-        prog.lower_consts = prog.consts.iter().any(|c| !c.name.contains("::") && c.name.starts_with(|ch: char| ch.is_lowercase()));
+        prog.lower_consts = prog.consts.iter().any(|c| !c.name.contains("::") && c.name.trim_start_matches('_').starts_with(|ch: char| ch.is_lowercase()));
         prog.deny_must_use = deny_must_use;
         prog.deny_unused_alloc = deny_unused_alloc;
         prog.deny_trivial_casts = deny_trivial_casts;
@@ -2524,10 +2530,11 @@ const GATED: &[(&str, &str)] = &[
 ];
 
 /// An attribute that needs a `#![feature(..)]` the source does not have: `line:col: the `x` attribute is an
-/// experimental feature (E0658)`. Read from the tokens of src[from..] (literals and comments are not attributes)
-fn gated_attr(src: &str, from: usize, feats: &mut Option<Vec<String>>) -> Option<String> {
+/// experimental feature (E0658)`. Read from the tokens of src[from..to] (literals and comments are not attributes);
+/// the features from the whole source's (a `#![feature]` may follow the attribute it enables)
+fn gated_attr(src: &str, from: usize, to: usize, feats: &mut Option<Vec<String>>) -> Option<String> {
     let b = src.as_bytes();
-    let toks = lexer::tokenize(&b[from..]);
+    let toks = lexer::tokenize(&b[from..to]);
     let tx = |k: usize| &src[from + toks[k].1..from + toks[k].2];
     let sym = |k: usize, c: &str| k < toks.len() && toks[k].0 == 1 && tx(k) == c;
     for k in 0..toks.len() {
