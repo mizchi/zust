@@ -7,10 +7,19 @@
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+/// A new directory of this test's own (created, not found: mode 0700, a fresh name if one exists)
 fn dir(name: &str) -> PathBuf {
-    let d = std::env::temp_dir().join(format!("zust_simd_{name}_{}", std::process::id()));
-    std::fs::create_dir_all(&d).unwrap();
-    d
+    use std::os::unix::fs::DirBuilderExt;
+    for k in 0..100u32 {
+        let t = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.subsec_nanos()).unwrap_or(0);
+        let d = std::env::temp_dir().join(format!("zust_simd_{name}_{}_{t}_{k}", std::process::id()));
+        match std::fs::DirBuilder::new().mode(0o700).create(&d) {
+            Ok(()) => return d,
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => continue,
+            Err(e) => panic!("{}: {e}", d.display()),
+        }
+    }
+    panic!("no new directory under {}", std::env::temp_dir().display());
 }
 
 fn programs() -> Vec<PathBuf> {
@@ -54,7 +63,15 @@ fn x86_simd_like_rustc() {
                 continue;
             }
             let got = Command::new(&exe).output().unwrap();
-            if got.status.code() != want.status.code() || got.stdout != want.stdout {
+            if !want.status.success() || !got.status.success() {
+                bad.push(format!(
+                    "{n} {flags:?}: exit {:?} / {:?}\n  rustc's stderr: {}\n  zustc's stderr: {}",
+                    want.status.code(),
+                    got.status.code(),
+                    String::from_utf8_lossy(&want.stderr).trim(),
+                    String::from_utf8_lossy(&got.stderr).trim()
+                ));
+            } else if got.stdout != want.stdout {
                 let (w, g) = (String::from_utf8_lossy(&want.stdout).into_owned(), String::from_utf8_lossy(&got.stdout).into_owned());
                 let first = w.lines().zip(g.lines()).find(|(a, b)| a != b).map(|(a, b)| format!("rustc: {a}\n  zustc: {b}")).unwrap_or_default();
                 bad.push(format!("{n} {flags:?}: exit {:?} / {:?}, first difference:\n  {first}", want.status.code(), got.status.code()));
@@ -74,4 +91,30 @@ fn minclif_rejects_simd() {
         assert!(e.contains("minclif has no SIMD yet"), "{p}: {e}");
     }
     let _ = std::fs::remove_dir_all(&d);
+}
+
+/// Calls rustc rejects are rejected: a store through a `*const` pointer, a lane index past u32 (not truncated to
+/// another lane), a half of a 128-bit vector, a lane out of range
+#[test]
+fn simd_errors() {
+    let d = dir("errors");
+    let cases: &[(&str, &str)] = &[
+        ("let v = _mm_set1_ps(1.0); let x = [0f32; 4]; unsafe { _mm_storeu_ps(x.as_ptr(), v) };", "takes `*mut f32`"),
+        ("let v = _mm_set1_ps(1.0); let x = [0i32; 4]; unsafe { _mm_storeu_ps(x.as_mut_ptr(), v) };", "takes `*mut f32`"),
+        ("let a = _mm_set1_epi32(1); let _ = _mm_extract_epi32::<4294967297>(a);", "too large"),
+        ("let a = _mm_set1_epi32(1); let _ = _mm_extract_epi32::<4>(a);", "out of range"),
+        ("let a = _mm_set1_ps(1.0); let _ = _mm_extractf128_ps::<0>(a);", "_mm_extractf128_ps"),
+    ];
+    let mut bad = vec![];
+    for (k, (body, want)) in cases.iter().enumerate() {
+        let src = d.join(format!("e{k}.rs"));
+        std::fs::write(&src, format!("use std::arch::x86_64::*;\nfn main() {{ {body} }}\n")).unwrap();
+        match zustc(&src, &d.join(format!("e{k}")), &[]) {
+            Ok(()) => bad.push(format!("{body}: built")),
+            Err(e) if !e.contains(want) => bad.push(format!("{body}: {e}")),
+            Err(_) => {}
+        }
+    }
+    let _ = std::fs::remove_dir_all(&d);
+    assert!(bad.is_empty(), "\n{}", bad.join("\n"));
 }

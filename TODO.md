@@ -84,7 +84,7 @@ rustc's wasm32-wasip1 builds (tests/wasm/README.md). Left:
 - Cranelift: 128- and 256-bit vectors are done (tests/simd/README.md); a 256-bit one is two 128-bit halves (Cranelift
   has no ymm registers yet): real AVX2 code when Cranelift has it. 512-bit vectors (four halves) are not tested, and
   nothing produces them while AVX-512 is skipped.
-- `core::arch::x86_64`: rounding-mode forms (`round_ps`, `floor_ps`), scalar `_ss` / `_sd` arithmetic, `rcp_ps` /
+- `core::arch::x86_64`: rounding-mode forms (`round_ps`, `floor_ps`), `rcp_ps` /
   `rsqrt_ps`, `sign_epi*`, string / CRC / AES / F16C (tests/simd/README.md has the subset done). Integer `hadd` is
   two `pshufb`s and an add, not `phaddw`; gathers and `sllv` are lane by lane, not `vpgatherdd` / `vpsllvd`.
 - AVX-512 (intrinsics, 512-bit registers): skipped for now. Few machines have it and implementations of it differ in

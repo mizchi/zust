@@ -3566,7 +3566,10 @@ impl FunctionBuilder {
     /// whether it has a SIMD op or a vector value (minclif cannot emit them natively)
     pub fn has_simd(&self) -> bool {
         let vec = |t: Type| matches!(t, Type::Vec(_));
-        self.ops.iter().any(|o| o.is_simd()) || self.dry.values.iter().any(|v| vec(v.1)) || self.dry.vars.iter().any(|v| vec(v.1))
+        self.ops.iter().any(|o| o.is_simd())
+            || self.params.iter().chain(&self.rets).any(|&t| vec(t))
+            || self.dry.values.iter().any(|v| vec(v.1))
+            || self.dry.vars.iter().any(|v| vec(v.1))
     }
 }
 

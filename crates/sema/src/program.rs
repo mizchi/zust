@@ -2257,7 +2257,9 @@ impl Program {
                         _ => self.const_usize(c)?,
                     },
                 };
-                Ty::Array(intern(r(inner)?), n as u32)
+                // (a length past u32 is an error, not truncated: `extract_lane::<4294967297>` is not lane 1)
+                let n = u32::try_from(n).map_err(|_| format!("the constant {n} is too large"))?;
+                Ty::Array(intern(r(inner)?), n)
             }
             TySyn::Named(n) => {
                 if let Some(t) = names(n) {
@@ -2273,7 +2275,11 @@ impl Program {
                     Some(_) => return Err(format!("missing generics for `{n}`")),
                     // (`zeros::<K>()` / `Buf<K>`: const の名前は const ジェネリクスの引数)
                     None if self.const_index.contains_key(n) => Ty::Array(intern(Ty::Unit), self.const_usize(n)? as u32),
-                    None => return Err(format!("cannot find type `{n}`")),
+                    // (core::arch's vector types, when the program has no type of the name: `v128`, `__m256`)
+                    None => match crate::simd_sig::vector_name(n) {
+                        Some(t) => t,
+                        None => return Err(format!("cannot find type `{n}`")),
+                    },
                 }
             }
             // `Box<dyn Error>`: prelude の __DynError (表示と Debug の文字列を持つ)

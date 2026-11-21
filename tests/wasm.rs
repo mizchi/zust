@@ -411,7 +411,16 @@ fn wasm_simd_like_rustc() {
         c.arg(WASI_RUNNER).arg(&rmod).current_dir(&dir.0);
         let want = run_limited(c, Duration::from_secs(60)).expect("rustc's module timed out");
         let got = run_wasm(&zmod, &[], &dir.0).expect("the module timed out");
-        if want.status.code() != got.status.code() || want.stdout != got.stdout {
+        // (both must run to the end: two runs that fail alike would compare nothing)
+        if !want.status.success() || !got.status.success() {
+            bad.push(format!(
+                "{n}: rustc exit {:?}, zustc exit {:?}\n  rustc's stderr: {}\n  zustc's stderr: {}",
+                want.status.code(),
+                got.status.code(),
+                String::from_utf8_lossy(&want.stderr).trim(),
+                String::from_utf8_lossy(&got.stderr).trim()
+            ));
+        } else if want.stdout != got.stdout {
             let (w, g) = (String::from_utf8_lossy(&want.stdout).into_owned(), String::from_utf8_lossy(&got.stdout).into_owned());
             let first = w.lines().zip(g.lines()).find(|(a, b)| a != b).map(|(a, b)| format!("rustc: {a}\n  zustc: {b}")).unwrap_or_default();
             bad.push(format!(
@@ -462,7 +471,15 @@ fn simd_natively_like_rustc_wasm() {
                 continue;
             }
             let got = run_limited(Command::new(&exe), Duration::from_secs(60)).expect("timed out");
-            if got.status.code() != want.status.code() || got.stdout != want.stdout {
+            if !want.status.success() || !got.status.success() {
+                bad.push(format!(
+                    "{n} (-O {opt}): exit {:?} / {:?}\n  rustc's stderr: {}\n  zustc's stderr: {}",
+                    want.status.code(),
+                    got.status.code(),
+                    String::from_utf8_lossy(&want.stderr).trim(),
+                    String::from_utf8_lossy(&got.stderr).trim()
+                ));
+            } else if got.stdout != want.stdout {
                 let (w, g) = (String::from_utf8_lossy(&want.stdout).into_owned(), String::from_utf8_lossy(&got.stdout).into_owned());
                 let first = w.lines().zip(g.lines()).find(|(a, b)| a != b).map(|(a, b)| format!("rustc: {a}\n  zustc: {b}")).unwrap_or_default();
                 bad.push(format!("{n} (-O {opt}): exit {:?} / {:?}, first difference:\n  {first}", want.status.code(), got.status.code()));
@@ -487,6 +504,31 @@ fn wasm_simd_module_shape() {
     let mut ex: Vec<&str> = exports.iter().map(|e| e.0.as_str()).collect();
     ex.sort();
     assert_eq!(ex, ["main", "memory"]);
-    // (a function type with a v128 parameter: 0x60, n params, .. 0x7B ..)
-    assert!(m.windows(3).any(|w| w[0] == 0x60 && w[1] >= 1 && w[2] == 0x7B), "no v128 parameter in the type section");
+    assert!(type_params(&m).iter().any(|ps| ps.contains(&0x7B)), "no function type with a v128 parameter");
+}
+
+/// The parameter types of each function type in a module's type section (section 1)
+fn type_params(m: &[u8]) -> Vec<Vec<u8>> {
+    let mut out = vec![];
+    let mut i = 8;
+    while i < m.len() {
+        let id = m[i];
+        i += 1;
+        let len = uleb(m, &mut i) as usize;
+        let end = i + len;
+        if id == 1 {
+            let mut j = i;
+            for _ in 0..uleb(m, &mut j) {
+                assert_eq!(m[j], 0x60, "a type that is not a function type");
+                j += 1;
+                let np = uleb(m, &mut j) as usize;
+                out.push(m[j..j + np].to_vec());
+                j += np;
+                let nr = uleb(m, &mut j) as usize;
+                j += nr;
+            }
+        }
+        i = end;
+    }
+    out
 }

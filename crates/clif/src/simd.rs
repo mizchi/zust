@@ -389,6 +389,8 @@ pub fn lower(b: &mut CBuilder, sh: Shape, op: VOp, args: &[Vec<ir::Value>], fma:
     let a = &args[0];
     let mut out: Vec<ir::Value> = vec![];
     match op {
+        // (a half of a 256- or 512-bit vector; the halves of a 128-bit one are not vectors)
+        VOp::Half(_) | VOp::Concat if n < 2 => return Err(format!("cranelift: {op:?} of a {}-bit vector", sh.bits.bits())),
         VOp::Half(h) => out.extend_from_slice(if h { &a[n / 2..] } else { &a[..n / 2] }),
         VOp::Concat => {
             out.extend_from_slice(&args[0]);

@@ -56,7 +56,8 @@ fn run() {
     // (one rounding: 1 + eps squared minus one is not 2 eps)
     let e = _mm256_set1_ps(1.0 + f32::EPSILON);
     hf("fmadd rounding", _mm256_fmadd_ps(e, e, _mm256_set1_ps(-1.0)));
-    hf("fmadd 128", _mm256_castps128_ps256(_mm_fmadd_ps(_mm256_castps256_ps128(a), _mm256_castps256_ps128(b), _mm256_castps256_ps128(n))));
+    // (128-bit results printed as 128 bits: a cast to 256 leaves the high half undefined)
+    h128("fmadd 128", _mm_castps_si128(_mm_fmadd_ps(_mm256_castps256_ps128(a), _mm256_castps256_ps128(b), _mm256_castps256_ps128(n))));
     hf("cmp 0", _mm256_cmp_ps::<_CMP_EQ_OQ>(a, b));
     hf("cmp 1", _mm256_cmp_ps::<_CMP_LT_OS>(a, b));
     hf("cmp 2", _mm256_cmp_ps::<_CMP_LE_OS>(a, b));
@@ -180,8 +181,8 @@ fn run() {
     h("setr_m128i", _mm256_setr_m128i(lo, hi));
     hf("set_m128", _mm256_set_m128(_mm_set1_ps(1.0), _mm_set1_ps(2.0)));
     hf("insertf128", _mm256_insertf128_ps::<1>(a, _mm_set1_ps(4.0)));
-    hf("extractf128", _mm256_castps128_ps256(_mm256_extractf128_ps::<1>(a)));
-    hd("extractf128_pd", _mm256_castpd128_pd256(_mm256_extractf128_pd::<1>(d)));
+    h128("extractf128", _mm_castps_si128(_mm256_extractf128_ps::<1>(a)));
+    h128("extractf128_pd", _mm_castpd_si128(_mm256_extractf128_pd::<1>(d)));
     hf("zextps128", _mm256_zextps128_ps256(_mm_set1_ps(3.0)));
     h("cvtepi8_epi16", _mm256_cvtepi8_epi16(_mm256_castsi256_si128(x8)));
     h("cvtepu8_epi16", _mm256_cvtepu8_epi16(_mm256_castsi256_si128(x8)));

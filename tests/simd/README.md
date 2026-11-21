@@ -40,6 +40,7 @@ work within each 128-bit half (`_mm256_packs_epi32`). The subset, for `_mm_` (12
 | shifts by a count | `sll` / `srl` / `sra` (`epi16`, `epi32`, `epi64`): by the low 64 bits of a 128-bit count, the width or more giving 0 (or the sign); `sllv` / `srlv` / `srav` (`epi32`, `epi64`): each lane by its own count, lane by lane |
 | gathers | `i32gather` / `i64gather` (`epi32`, `epi64`, `ps`, `pd`) and their `mask_` forms, `::<SCALE>`: lane by lane; a lane the mask leaves out keeps `src` and reads a scratch slot, not its address |
 | masked memory | `maskload` / `maskstore` (`ps`, `pd`, `epi32`, `epi64`): lane by lane, without a branch; a lane the mask leaves out reads or writes a scratch slot, never memory |
+| scalar | the `_ss` / `_sd` forms of `add`, `sub`, `mul`, `div`, `min`, `max`, `sqrt`, the compares, `cmp`, the FMAs: lane 0 of the packed result into a's lanes; `load_ss` / `_sd` and `store_ss` / `_sd` read and write one element; `set_ss` / `_sd`, `move_ss` / `_sd` |
 | other | `mulhi_epi16` / `epu16`, `mulhrs_epi16` (`-32768 * -32768` wraps, as pmulhrsw), `sad_epu8`, `maddubs_epi16` (saturating), `dp_ps` / `dp_pd::<IMM>` (summed in Intel's order: `(t3 + t2) + (t1 + t0)`) |
 
 A shuffle by an immediate is a table of the elements it picks (Intel's definitions; the 256-bit forms of most work
@@ -48,21 +49,26 @@ reads (two at a time). Cranelift lowers those masks to the instruction that does
 `palignr`, `pblendw`, `pshuflw` / `pshufhw`; `pshufb` otherwise). A shuffle by a vector is a `Swizzle` with byte
 indices computed from the lane indices (`permutevar8x32` swizzles each half and joins them).
 
-Not in the subset: the rounding-mode forms (`round_ps::<_MM_FROUND_*>`, `floor` / `ceil_ps`), the scalar `_ss` /
-`_sd` arithmetic, the approximations (`rcp_ps`, `rsqrt_ps`), `sign_epi*`, `minpos_epu16`, `mpsadbw`, SSE4.2's string
+Not in the subset: the rounding-mode forms (`round_ps::<_MM_FROUND_*>`, `floor` / `ceil_ps`), the approximations (`rcp_ps`, `rsqrt_ps`), `sign_epi*`, `minpos_epu16`, `mpsadbw`, SSE4.2's string
 and CRC instructions, AES / SHA / CLMUL, F16C, streaming stores and prefetches. AVX-512 is left out for now: few
 machines have it, and implementations of it differ in problems (the ISA leaves it out too, above). The gathers and
 `sllv` / `srav` are lane by lane, a few instructions per lane rather than one `vpgatherdd` / `vpsllvd`. `#[target_feature]` is accepted and changes
 nothing (the intrinsics are always available), and an intrinsic needs `unsafe` only when it reads or writes through a
-pointer.
+raw pointer. A pointer argument has its type (`*const f32`, `*mut __m128i`), with rustc's coercions (`&mut T`,
+`*mut T` for `*const T`); `broadcast_ss` takes `&f32`. A call is an intrinsic only when nothing of the program has the
+name: a local (a closure, a fn pointer), the program's function, a qualified path of its own (`Ops::_mm_add_ps`); and
+`__m128` / `v128` are vector types only when the program has no type of the name. Another `_mm` name is an error that
+says it is not in the subset.
 
 ## Tests
 
 `tests/simd.rs` (needs a CPU with AVX2 and FMA): `x86_simd_like_rustc` checks that `sse.rs`, `avx.rs`,
-`avx_usage.rs`, `shuffle.rs`, `hadd_mul.rs` and `misc.rs` (every intrinsic above on edge cases: NaN, ±0, saturation, shifts past the width,
+`avx_usage.rs`, `shuffle.rs`, `hadd_mul.rs`, `misc.rs`, `scalar.rs` and `shadow.rs` (the names used for the
+program's own items, without SIMD) (every intrinsic above on edge cases: NaN, ±0, saturation, shifts past the width,
 every comparison predicate, all 256 immediates of the 4-lane shuffles, out-of-range shuffle indices; 256-bit values
 through parameters, results, branches, loops, structs, `Vec`, closures; the zustscript kernels at 8 lanes with FMA; a
-4x4 transpose) print what rustc's builds print, with and without -O. `minclif_rejects_simd`. The
+4x4 transpose) print what rustc's builds print, with and without -O. `simd_errors`: what rustc rejects is rejected (a store
+through `*const`, a lane index past u32, a lane out of range, a name outside the subset). `minclif_rejects_simd`. The
 binaries also run clean under valgrind.
 
 The 256-bit kernels (`avx_usage.rs`'s, 1e6 f32, -O): sum of squares 0.31 ms against rustc's 0.23 ms (AVX2) and

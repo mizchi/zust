@@ -66,8 +66,13 @@ impl Cx<'_> {
     /// The lane index or shuffle index k of a call's const generic arguments (`::<3>`)
     fn simd_const(&mut self, seg: &crate::parse::Seg, k: usize, name: &str) -> R<u32> {
         // (x86's comparison predicates by name: `_mm256_cmp_ps::<_CMP_LT_OQ>`)
+        // (a constant of the program's own of that name is the program's)
         let named = match seg.args.get(k) {
-            Some(GArg::Const(Expr::Path(None, p))) | Some(GArg::Ty(crate::parse::Ty::Path(None, p))) if p.segs.len() == 1 => cmp_predicate(&p.segs[0].name),
+            Some(GArg::Const(Expr::Path(None, p))) | Some(GArg::Ty(crate::parse::Ty::Path(None, p)))
+                if p.segs.len() == 1 && !self.prog.const_index.contains_key(&p.segs[0].name) =>
+            {
+                cmp_predicate(&p.segs[0].name)
+            }
             _ => None,
         };
         if let Some(n) = named {
@@ -100,10 +105,24 @@ impl Cx<'_> {
     pub(crate) fn simd_call(&mut self, p: &Path, cargs: &[Expr]) -> R<Option<V>> {
         let last = p.segs.last().unwrap();
         let name = last.name.as_str();
-        if self.prog.index.contains_key(name) {
+        // (a local of that name (a closure, a fn pointer), a path the program's own function has (`Ops::_mm_add_ps`),
+        // or a program's function of that name is called instead)
+        if p.segs.len() == 1 && self.lookup(name).is_some() {
             return Ok(None);
         }
-        let Some((args, ret)) = simd_sig(name) else { return Ok(None) };
+        if !crate::simd_sig::arch_path(p.segs[..p.segs.len() - 1].iter().map(|s| s.name.as_str())) {
+            return Ok(None);
+        }
+        if self.prog.fn_by_p(&PPath::of(p), self.self_sid).is_some() || self.prog.index.contains_key(name) {
+            return Ok(None);
+        }
+        let Some((args, ret)) = simd_sig(name) else {
+            // (an x86 intrinsic's name that zustc does not have, rather than "cannot find")
+            if x86_split(name).is_some() {
+                return err(SP, format!("`{name}` is not one of the core::arch::x86_64 intrinsics zustc supports (tests/simd/README.md)"));
+            }
+            return Ok(None);
+        };
         let (pre, rest) = split(name);
         let plan = if let Some(x) = x86_split(name) {
             // (the const argument: a predicate, a lane, a shift, a half)
@@ -247,8 +266,8 @@ impl Cx<'_> {
         if cargs.len() != args.len() {
             return err(SP, format!("`{name}` takes {} argument(s), found {}", args.len(), cargs.len()));
         }
-        // (what reads or writes memory through a pointer is unsafe)
-        if args.contains(&SArg::P) {
+        // (what reads or writes memory through a raw pointer is unsafe)
+        if args.iter().any(|a| matches!(a, SArg::P(..))) {
             self.check_unsafe_op(name, p.pos)?;
         }
         let mut vals: Vec<Value> = vec![];
@@ -265,10 +284,25 @@ impl Cx<'_> {
                     self.same(SP, t, want)?;
                     (x, t)
                 }
-                SArg::P => {
-                    let (x, t) = self.expr(e, None)?;
-                    if !matches!(t, Ty::Ptr(..) | Ty::Ref(..) | Ty::Never) || t.is_fat() {
-                        return err(SP, format!("`{name}` takes a raw pointer, found `{}`", self.prog.tn(t)));
+                SArg::P(want, mutable) => {
+                    // (`*const T`: a `*mut T`, `&T` or `&mut T` coerces; `*mut T`: a `*mut T` or `&mut T`)
+                    let (x, t) = self.expr(e, Some(Ty::Ptr(mutable, intern(want))))?;
+                    let ok = match t {
+                        Ty::Never => true,
+                        Ty::Ptr(m, i) | Ty::Ref(m, i) => *i == want && (m || !mutable),
+                        _ => false,
+                    };
+                    if !ok {
+                        let w = self.prog.tn(Ty::Ptr(mutable, intern(want)));
+                        return err(SP, format!("mismatched types: `{name}` takes `{w}`, found `{}`", self.prog.tn(t)));
+                    }
+                    (x, t)
+                }
+                SArg::R(want) => {
+                    let r = Ty::Ref(false, intern(want));
+                    let (x, t) = self.expr(e, Some(r))?;
+                    if !matches!(t, Ty::Never) && !matches!(t, Ty::Ref(_, i) if *i == want) {
+                        return err(SP, format!("mismatched types: expected `{}`, found `{}`", self.prog.tn(r), self.prog.tn(t)));
                     }
                     (x, t)
                 }
@@ -382,6 +416,42 @@ fn x86_emit(m: &mut crate::ir::Recorder, x: X86, imm: u32, v: &[Value]) -> R<Opt
     let w = VBits::from_bits(x.bits as u32).unwrap();
     if let Some(g) = crate::simd_sig::x86_gather(x) {
         return Ok(Some(gather(m, g, imm, v)));
+    }
+    // (the scalar forms, `_ss` / `_sd`: lane 0 only. A load reads one element into a vector of zeros, a store writes
+    // one; arithmetic and compares put lane 0 of the packed result into a's lanes)
+    if matches!(x.suffix, "ss" | "sd") && x.op != "broadcast" {
+        let sh = Shape::new(if x.suffix == "ss" { Lane::F32 } else { Lane::F64 }, w);
+        let l = sh.lane;
+        return Ok(match x.op {
+            "load" | "loadu" => {
+                let e = m.load(l.ty(), v[0], 0);
+                let z = zero(m, w);
+                Some(m.simd(sh, VOp::Replace(0), &[z, e]))
+            }
+            "store" | "storeu" => {
+                let e = m.simd(sh, VOp::Extract(0), &[v[1]]);
+                m.store(e, v[0], 0);
+                None
+            }
+            "set" => {
+                let z = zero(m, w);
+                Some(m.simd(sh, VOp::Replace(0), &[z, v[0]]))
+            }
+            "move" => {
+                let e = m.simd(sh, VOp::Extract(0), &[v[1]]);
+                Some(m.simd(sh, VOp::Replace(0), &[v[0], e]))
+            }
+            "add" | "sub" | "mul" | "div" | "min" | "max" | "sqrt" | "cmpeq" | "cmpneq" | "cmplt" | "cmple" | "cmpgt" | "cmpge" | "cmp" | "fmadd"
+            | "fmsub" | "fnmadd" | "fnmsub" => {
+                let packed = X86 { suffix: if x.suffix == "ss" { "ps" } else { "pd" }, ..x };
+                // (`_mm_sqrt_sd(a, b)`: the root of b's lane 0)
+                let args = if x.op == "sqrt" && v.len() == 2 { &v[1..] } else { v };
+                let Some(p) = x86_emit(m, packed, imm, args)? else { return Ok(None) };
+                let e = m.simd(sh, VOp::Extract(0), &[p]);
+                Some(m.simd(sh, VOp::Replace(0), &[v[0], e]))
+            }
+            _ => None,
+        });
     }
     let Some((sh, u)) = x86_shape(x.suffix, x.bits).or(match x.suffix {
         // (suffixes of results that are not vectors: cvtss_f32, cvtsi128_si32, set_m128)
@@ -540,6 +610,13 @@ fn x86_emit(m: &mut crate::ir::Recorder, x: X86, imm: u32, v: &[Value]) -> R<Opt
             }
         }
         "movemask" => m.simd(int, VOp::Bitmask, v),
+        "testz" if f => {
+            // (vtestps / vtestpd: the sign bits of a & b only)
+            let a = m.simd(sh, VOp::And, v);
+            let b = m.simd(int, VOp::Bitmask, &[a]);
+            let z = m.icmp_imm(IntCC::Equal, b, 0);
+            m.uextend(Type::I32, z)
+        }
         "testz" => {
             let a = m.simd(sh, VOp::And, v);
             let t = m.simd(sh, VOp::AnyTrue, &[a]);
