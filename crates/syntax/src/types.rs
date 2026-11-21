@@ -298,6 +298,17 @@ pub const R_ELIDED_ADT: u8 = 0xF2;
 /// A type the checker does not follow (a projection, `dyn`, `impl`, a fn pointer, a macro): the whole parameter is
 /// not checked
 pub const R_UNKNOWN: u8 = 0xF3;
+/// A trait object's lifetime not written (`&'a dyn Tr`, `Box<dyn Tr>`): the default (the reference's region directly
+/// around it, else 'static in a signature; inferred in a body)
+pub const R_DYN_DEFAULT: u8 = 0xF4;
+/// A region a fn pointer's type binds (written `for<'r>`, or elided in it): a variable of its own
+pub const R_BOUND: u8 = 0xF5;
+/// The codes of a fn pointer's type written as one follow (its parameters', then its result's); without it (a type
+/// alias naming one) a fn pointer's regions are its own
+pub const R_FN: u8 = 0xF6;
+/// After a trait object's lifetime: the lifetimes in scope its trait's arguments name follow (their number, then
+/// their codes). The object has no slots for them; they make a definition holding it invariant in them
+pub const R_DYN_ARGS: u8 = 0xF7;
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Default)]
 pub struct RSigSyn {
@@ -309,6 +320,11 @@ pub struct RSigSyn {
     pub outlives: Vec<(u8, u8)>,
     /// Declared `T: 'a` (type parameter, code)
     pub ty_outlives: Vec<(String, u8)>,
+    /// How many of lts are the impl's or trait's (the rest are the fn's own)
+    pub outer: u8,
+    /// An impl's method: the region slots of the impl's self type (it is well formed: implied in the body, required
+    /// of a call)
+    pub self_slots: Vec<u8>,
 }
 
 /// The regions of a struct / enum definition
@@ -333,6 +349,10 @@ pub struct RImplSyn {
     /// An impl's lifetime parameters neither its self type nor its trait names (an associated type must not name
     /// them, E0207)
     pub free: Vec<String>,
+    /// What the header knows of outlives by name (declared, or implied by its types: crate::wf::Known), and the
+    /// names another item may relate
+    pub wf_pairs: Vec<(String, String)>,
+    pub wf_vague: Vec<String>,
 }
 
 /// enum のバリアント (要約に保存する形)
@@ -415,6 +435,26 @@ pub struct Summary {
     /// The concrete (non-parameter, non-primitive) types bounded in the item's where clauses (`where Local: Any`):
     /// Program checks that they exist
     pub where_types: Vec<String>,
+}
+
+/// A trait's declaration: the lifetimes Self must outlive (`trait Wedding<'t>: 't`) are the item `#outlives` of
+/// Summary::trait_generics, as the indices of its lifetime parameters (`static`: 'static)
+pub const SELF_OUTLIVES: &str = "#outlives";
+
+/// A type that must outlive what a trait's declaration requires of Self: the self type of `impl Tr<'x> for S<'a, T>`,
+/// or a trait object `dyn Tr<'x> + 'r`
+#[derive(Clone, Debug, Default, PartialEq, Eq, Hash)]
+pub struct WfObl {
+    pub tr: String,
+    /// The trait's lifetime arguments as written
+    pub args: Vec<String>,
+    /// The lifetimes and type parameters that must outlive them
+    pub sub: Vec<String>,
+    /// What the item knows (crate::wf::Known): (longer, shorter), and the names it may not
+    pub known: Vec<(String, String)>,
+    pub vague: Vec<String>,
+    /// The line in the item (from 1)
+    pub line: u64,
 }
 
 #[derive(Clone, Debug, Default)]

@@ -206,9 +206,26 @@ pub const TRAP_SITE_MAX: usize = 245;
 
 /// 1 関数をコンパイルする。返り値は (Blob, 要求したインスタンス)
 pub fn compile(prog: &Program, insts: &Mutex<Insts>, id: u32, f: &ItemFn, line_base: u32, inl: &Inline) -> R<(Compiled, Vec<u32>)> {
-    let (sig, env, body_id, fnptr, inst_args) = {
+    // (a region check begun late (`'static` required where the gate left the function out) that met a local bound
+    // before it began, with no tree: the function again, checked from its start)
+    // (rerun out of band: the result is compile's own, returned as it is, not copied into another)
+    let mut rerun = false;
+    let r = compile_once(prog, insts, id, f, line_base, inl, false, &mut rerun);
+    if rerun && r.is_ok() {
+        if regionck::debug() {
+            eprintln!("regionck: {} again, checked from its start", f.sig.name);
+        }
+        return compile_once(prog, insts, id, f, line_base, inl, true, &mut rerun);
+    }
+    r
+}
+
+#[allow(clippy::too_many_arguments)]
+fn compile_once(prog: &Program, insts: &Mutex<Insts>, id: u32, f: &ItemFn, line_base: u32, inl: &Inline, force_rg: bool, rerun_out: &mut bool) -> R<(Compiled, Vec<u32>)> {
+    let (sig, env, body_id, fnptr, inst_args, clo_rg) = {
         let g = insts.lock().unwrap();
-        (g.sig(prog, id).clone(), g.env(prog, id), g.body_of(id), g.get(id).is_some_and(|i| i.fnptr), g.get(id).map(|i| i.args.clone()))
+        let b = g.body_of(id);
+        (g.sig(prog, id).clone(), g.env(prog, id), b, g.get(id).is_some_and(|i| i.fnptr), g.get(id).map(|i| i.args.clone()), g.closure_rg.get(&b).cloned())
     };
     // (a closure's fn-pointer instance: the body without the `__env` parameter (it has no captures))
     let f_np;
@@ -266,7 +283,15 @@ pub fn compile(prog: &Program, insts: &Mutex<Insts>, id: u32, f: &ItemFn, line_b
         bk: borrowck::Bk { on: bk_level > 0, level: bk_level, line_base, ..Default::default() },
         // (a function's own body, not a generic one's instance nor a closure's: see regionck)
         // (a generic function's instance: the generic signature, its type parameters' regions not followed)
-        rg: regionck::Rg { on: bk_level >= 2 && !fnptr && caps.is_empty() && prog.closures.get(&body_id).is_none() && regionck::enabled(), base: body_id, inst_args: inst_args.unwrap_or_default(), ..Default::default() },
+        // (a closure's: with the region signature the bound it is passed to (or its annotations) gives it)
+        rg: regionck::Rg {
+            on: bk_level >= 2 && !fnptr && ((caps.is_empty() && prog.closures.get(&body_id).is_none()) || clo_rg.is_some()) && regionck::enabled(),
+            base: body_id,
+            inst_args: if clo_rg.is_some() { vec![] } else { inst_args.unwrap_or_default() },
+            closure: clo_rg,
+            force: force_rg,
+            ..Default::default()
+        },
         prog,
         scopes: vec![vec![]],
         loops: vec![],
@@ -308,6 +333,10 @@ pub fn compile(prog: &Program, insts: &Mutex<Insts>, id: u32, f: &ItemFn, line_b
         explicit_traits: HashMap::default(),
         explicit_trait: None,
         closure_hint: None,
+        closure_bound: None,
+        closure_prelude: false,
+        hr_lost: vec![],
+        clo_ret_param: vec![],
         seg_self: None,
         loop_bounds: vec![],
         pending_bound: None,
@@ -357,9 +386,21 @@ pub fn compile(prog: &Program, insts: &Mutex<Insts>, id: u32, f: &ItemFn, line_b
     } else {
         cx.body(f, &sig)
     };
+    // (the struct types' implied relations, for the next functions: taken when the check began)
+    if cx.rg.imp_taken {
+        let ic = std::mem::take(&mut cx.rg.imp_cache);
+        let mut g = insts.lock().unwrap();
+        if g.imp_cache.len() < ic.len() {
+            g.imp_cache = ic;
+        }
+    }
     r?;
     cx.bk_check()?;
-    cx.rg_check()?;
+    let rerun = cx.rg.rerun && !force_rg;
+    *rerun_out = rerun;
+    if !rerun {
+        cx.rg_check()?;
+    }
     // (入口以外で作った drop フラグは入口で 0 にする: minclif はフラグのスロットを関数の最初に 0 にする)
     let late = std::mem::take(&mut cx.late_flags);
     let requested = std::mem::take(&mut cx.requested);
@@ -427,9 +468,38 @@ pub(crate) fn addr_taken(b: &crate::parse::Block, mut_methods: &crate::fxhash::F
             _ => None,
         }
     }
+    // (`let ref mut y = x;`: y points at x itself. A shared `ref` binds a copy in memory (pat_bind): x does not
+    // change while y is in use)
+    fn ref_lets(b: &crate::parse::Block, out: &mut HashSet<String>) {
+        for st in &b.stmts {
+            if let Stmt::Let(pat, _, Some(init), ..) = st {
+                // (most bind a name by value: no walk of the pattern)
+                if matches!(pat, Pat::Ident(false, _, _, None) | Pat::Wild) {
+                    continue;
+                }
+                if borrowck::pat_binds_ref_mut(pat) {
+                    if let Some(n) = root(init) {
+                        out.insert(n);
+                    }
+                }
+            }
+        }
+    }
     fn visit(e: &Expr, out: &mut HashSet<String>, mm: &crate::fxhash::FxSet<String>) {
         match e {
             Expr::Ref(_, x) | Expr::RawRef(_, x) => {
+                if let Some(n) = root(x) {
+                    out.insert(n);
+                }
+            }
+            Expr::Block(_, _, b) | Expr::Const(b) | Expr::Loop(_, b) | Expr::While(_, _, b) | Expr::For(_, _, _, b) | Expr::If(_, b, _) => ref_lets(b, out),
+            // (`match x { ref mut y => .. }`, `if let Some(ref mut y) = x`: the same)
+            Expr::Match(x, arms) if arms.iter().any(|a| borrowck::pat_binds_ref_mut(&a.pat)) => {
+                if let Some(n) = root(x) {
+                    out.insert(n);
+                }
+            }
+            Expr::Let(pat, x) if borrowck::pat_binds_ref_mut(pat) => {
                 if let Some(n) = root(x) {
                     out.insert(n);
                 }
@@ -690,6 +760,16 @@ pub struct Cx<'p> {
     /// while a method call that named its trait is being resolved: (the method, the trait)
     pub explicit_trait: Option<(String, String)>,
     pub closure_hint: Option<(Vec<Ty>, Option<Ty>)>,
+    /// The bound the closure being passed is checked against (`FnOnce(&u32) -> &u32`), with the callee's lifetimes and
+    /// type parameters (regionck)
+    pub closure_bound: Option<Box<(String, Vec<String>, Vec<String>)>>,
+    /// The closure being passed goes to a function of the prelude (whose bounds write no lifetimes)
+    pub closure_prelude: bool,
+    /// Closures made where nothing was expected (their kind, signature: from the body), by their definition: the
+    /// parameters with no type written that are references (one region each, not higher-ranked)
+    pub hr_lost: Vec<(u32, Vec<usize>)>,
+    /// Of those, the ones whose body is one of their parameters (`|y| y`): that parameter's type argument
+    pub clo_ret_param: Vec<(u32, usize)>,
     pub seg_self: Option<Ty>,
     pub loop_bounds: Vec<(Loc, u64)>,
     pub pending_bound: Option<u64>,
@@ -1214,10 +1294,31 @@ impl Cx<'_> {
         self.bk.params = (0..self.bk.locals.len() as u32).collect();
         // (the gate, before any work: a signature with fewer than two regions and no lifetime named has no two
         // universal regions to relate)
-        if self.rg.on && sig.regions.is_none() && sig.params.iter().map(|&t| regionck::count(self.prog, t, 0).unwrap_or(0)).sum::<usize>() < 2 {
-            self.rg.on = false;
+        // (or one region and a trait object in the result, 'static by default: `fn f(x: &u8) -> Box<dyn Tr>`)
+        self.rg.eligible = self.rg.on && self.rg.closure.is_none();
+        if self.rg.on && sig.regions.is_none() && self.rg.closure.is_none() && !self.rg.force {
+            let n: usize = sig.params.iter().map(|&t| regionck::count(self.prog, t, 0).unwrap_or(0)).sum();
+            // (an `impl Trait` result of a fn with no region in its signature: its hidden type captures none, its
+            // regions are 'static)
+            let opaque = n == 0 && !sig.is_generic() && self.prog.opaque.contains(&self.rg.base) && regionck::count(self.prog, sig.ret, 0).is_some_and(|c| c > 0);
+            if n < 2 && !(n == 1 && regionck::has_dyn(self.prog, sig.ret, 0)) && !opaque {
+                self.rg.on = false;
+                let se = f.sig.recv.as_ref().is_some_and(|r| r.starts_with('&'));
+                self.rg.late = Some((se, f.sig.recv.is_some() && !se));
+            }
         }
-        if self.rg.on {
+        // (a closure's body: its parameters but the environment)
+        if self.rg.on && self.rg.closure.is_some() {
+            let mut ps = vec![];
+            for (p, _) in &f.sig.params {
+                let n = pat_name(p)?;
+                if n != "__env" {
+                    ps.push(n);
+                }
+            }
+            let ps: Vec<(Loc, Ty)> = ps.iter().filter_map(|n| self.lookup(n)).collect();
+            self.rg_begin_closure(&ps);
+        } else if self.rg.on {
             let mut ps = vec![];
             if f.sig.recv.is_some() {
                 ps.push("self".to_string());
@@ -1230,12 +1331,20 @@ impl Cx<'_> {
                 // (elision from the receiver: `&self` / `&mut self`, or a receiver type that names `Self`)
                 let self_elides = match (&f.sig.recv, &f.sig.recv_ty) {
                     (Some(r), _) if r.starts_with('&') => true,
-                    (Some(_), Some(t)) => format!("{t:?}").contains("\"Self\"") && format!("{t:?}").contains("Ref("),
+                    // (`self: &Struct` names the self type as Self does)
+                    (Some(_), Some(t)) => {
+                        let d = format!("{t:?}");
+                        let own = self.self_sid.map(|s| self.prog.structs[self.prog.base_of(s) as usize].name.rsplit("::").next().unwrap_or("").to_string());
+                        d.contains("Ref(") && (d.contains("\"Self\"") || own.is_some_and(|n| !n.is_empty() && d.contains(&format!("\"{n}\""))))
+                    }
                     _ => false,
                 };
                 // (any other receiver with elided regions in the result: not followed)
-                let other_self = f.sig.recv.is_some() && !self_elides;
-                self.rg_begin(sig.regions.as_deref(), &ps, self_elides);
+                // (when the result has elided regions: `fn set(self, s: &str) -> Flag<'a>` names its own)
+                let ret_elides = sig.regions.as_deref().and_then(|r| r.slots.last()).is_none_or(|s| s.iter().any(|&c| c == crate::types::R_ELIDED || c == crate::types::R_ELIDED_ADT));
+                let other_self = f.sig.recv.is_some() && !self_elides && ret_elides;
+                let force = self.rg.force;
+                self.rg_begin(sig.regions.as_deref(), &ps, self_elides, force);
                 if other_self {
                     self.rg.ret = None;
                 }
@@ -1250,7 +1359,7 @@ impl Cx<'_> {
                 None => None,
             };
             let env = env.ok_or("closure without environment")?;
-            for (n, t, by_ref, off) in self.caps.clone() {
+            for (ci, (n, t, by_ref, off)) in self.caps.clone().into_iter().enumerate() {
                 let a = if by_ref { self.b.ins().load(PTR, mf(), env, off as i32) } else { self.addr_plus(env, off as i32) };
                 let loc = if clif_ty(t).is_none() && !t.is_agg() { Loc::Zst(self.bk.fresh_zst()) } else { Loc::Ptr(a) };
                 // (a capture held by value is a local of the body for the borrow checker: moving it twice, or in a
@@ -1258,6 +1367,7 @@ impl Cx<'_> {
                 if !by_ref {
                     self.bk_local(loc, &n, t);
                 }
+                self.rg_capture(ci, loc, t);
                 self.scopes.last_mut().unwrap().push((n, loc, t));
             }
         }
@@ -1444,7 +1554,17 @@ impl Cx<'_> {
                     };
                     let ann = ann_ty.as_ref().and_then(|t| self.parse_ty(t).ok());
                     // (destructuring reads the parts the pattern binds, not the whole value)
-                    let Some(place) = self.bk_scrutinee(init, ann, &[pat])? else {
+                    // (a `let`'s temporary bound by `ref` lives as long as the block: not one of the statement)
+                    self.bk.let_scrut = true;
+                    // (`let &Foo(ref x) = &f();`: the temporary lives as long as the block)
+                    let ext1 = self.bk.extended.len();
+                    if self.bk_on() {
+                        borrowck::direct_ref(init, &mut self.bk.extended);
+                    }
+                    let sc = self.bk_scrutinee(init, ann, &[pat]);
+                    self.bk.extended.truncate(ext1);
+                    self.bk.let_scrut = false;
+                    let Some(place) = sc? else {
                         diverged = true;
                         continue;
                     };
@@ -1515,15 +1635,20 @@ impl Cx<'_> {
                         self.drop_temps(t0);
                     }
                 }
-                Stmt::Let(Pat::Wild, ann_ty, init, None, ..) => {
+                Stmt::Let(Pat::Wild, ann_ty, init, None, let_at) => {
                     // `let _ = e;`: 場所ならムーブしない。値ならすぐ drop する
                     let Some(init) = init else {
-                        // (`let _: T;`: T must name a type; nothing else happens)
+                        // (`let _: T;`: T must name a type (a well-formed one); nothing else happens)
                         if let Some(t) = ann_ty {
                             self.parse_ty(t)?;
+                            self.rg_let_uninit(None, t, *let_at);
                         }
                         continue;
                     };
+                    let let_sp0 = std::mem::replace(&mut self.rg.let_sp, *let_at);
+                    if !self.rg.on && self.rg.eligible && ann_ty.as_ref().is_some_and(crate::regions::mentions_static) {
+                        self.rg_late_on();
+                    }
                     // (`let _ = Foo;` with Foo a unit struct (or a const) is a value: dropped at once)
                     let local = !matches!(init, Expr::Path(None, p) if ident_of(p).is_some_and(|n| self.lookup(n).is_none()
                         && !self.prog.const_index.get(n).is_some_and(|&ci| self.prog.consts[ci as usize].stat.is_some())));
@@ -1550,10 +1675,18 @@ impl Cx<'_> {
                             self.own_temp(v, t);
                         }
                     }
+                    // (`let _: Covariant<'short> = c;`: the value flows into the annotation's type)
+                    if let Some(a) = ann_ty {
+                        self.rg_let_wild(a, init);
+                    }
+                    self.rg.let_sp = let_sp0;
                     self.drop_temps(t0);
                 }
-                Stmt::Let(pat, ann_ty, init, _, ..) => {
+                Stmt::Let(pat, ann_ty, init, _, let_at) => {
                     let name = pat_name(pat)?;
+                    if let Some(t) = ann_ty {
+                        self.body_lifetimes(t, *let_at)?;
+                    }
                     let ann = match ann_ty {
                         // (`let v: Vec<Box<_>> = Vec::new();`: the holes are what inference found, when it did)
                         Some(t) => {
@@ -1600,7 +1733,10 @@ impl Cx<'_> {
                         let Some(ty) = ann.filter(|&t| !self.prog.has_param(t)) else {
                             return err(SP, "cannot infer the type of this `let`; annotate it");
                         };
-                        if self.needs_drop(ty) && !self.zeroable(ty) {
+                        // (the zeroed value stands for "not initialized yet", which a value that is dropped must be
+                        // able to: a build cannot make it of such a type. A check runs nothing: the zeroed value is
+                        // only a placeholder)
+                        if self.needs_drop(ty) && !self.zeroable(ty) && !self.inl.check_only {
                             return err(SP, "`let` without initializer is not supported for this type");
                         }
                         let v = if ty.is_agg() {
@@ -1618,13 +1754,20 @@ impl Cx<'_> {
                         };
                         self.bk.uninit_next = true;
                         self.bk.mut_next = pat_mut(pat);
-                        self.bind(name, ty, v);
+                        self.bind(name.clone(), ty, v);
+                        // (the annotation's type is well formed; the value assigned later flows into it)
+                        if let Some(t) = ann_ty {
+                            self.rg_let_uninit(Some(&name), t, *let_at);
+                        }
                         continue;
                     };
-                    // (`let f1 = f;` with f a generic fn and no annotation: f1 is f, instantiated at each call)
+                    // (`let f1 = f;` with f a generic fn and no annotation: f1 is f, instantiated at each call; so is a fn
+                    // with lifetime parameters, whose calls the region check sees then)
                     if let (None, Some(id)) = (ann_ty, self.fn_item(init)) {
                         let tf = matches!(init, Expr::Path(_, ip) if ip.segs.last().is_some_and(|s| !s.args.is_empty()));
-                        if self.prog.sigs[id as usize].is_generic() && !tf && !matches!(pat, Pat::Ident(_, true, ..)) {
+                        let s = &self.prog.sigs[id as usize];
+                        let lts = self.rg.on && s.regions.as_deref().is_some_and(|r| !r.lts.is_empty());
+                        if (s.is_generic() || lts) && !tf && !matches!(pat, Pat::Ident(_, true, ..)) {
                             let a: &Expr = self.keep_expr(init.clone());
                             self.fn_aliases.retain(|x| x.0 != name);
                             self.fn_aliases.push((name.clone(), a));
@@ -1657,11 +1800,24 @@ impl Cx<'_> {
                     self.bk_frame();
                     self.bk.move_mut_next = ann_ty.is_none();
                     let ext0 = self.bk.direct.len();
+                    let ext1 = self.bk.extended.len();
                     if self.bk_on() {
                         borrowck::direct_temps(init, &mut self.bk.direct);
+                        // (`let x = &f();`: the temporary lives as long as x's block)
+                        borrowck::direct_ref(init, &mut self.bk.extended);
                     }
+                    // (a function the gate left out, with `let x: &'static T = ..`: from here on, a borrow of what it
+                    // owns must not have to be 'static. What came before has no trees and adds no constraint)
+                    let static_cast = || matches!(strip_paren(init), Expr::Cast(_, t) if crate::regions::mentions_static(t));
+                    if !self.rg.on && self.rg.eligible && (static_cast() || ann_ty.as_ref().is_some_and(crate::regions::mentions_static)) {
+                        self.rg_late_on();
+                    }
+                    let let_sp0 = std::mem::replace(&mut self.rg.let_sp, *let_at);
+                    let ml0 = std::mem::replace(&mut self.bk.macro_let, name.starts_with("__exr_"));
                     let r = self.expr(init, ann.or(hint));
+                    self.bk.macro_let = ml0;
                     self.bk.direct.truncate(ext0);
+                    self.bk.extended.truncate(ext1);
                     let srcs = self.bk_frame_end();
                     let (mut v, mut t) = r?;
                     if t == Ty::Never {
@@ -1707,6 +1863,7 @@ impl Cx<'_> {
                     self.bind(name.clone(), ty, v);
                     self.bk_def_named(&name, &srcs, init);
                     self.rg_let(&name, ann_ty.as_ref(), init, rg_init);
+                    self.rg.let_sp = let_sp0;
                     // (rustc drops a let initializer's temporaries at the end of the statement, unless the initializer
                     // extends them (`let r = &f();`, `let p: *const S = &S::new();`). zustc also keeps them when the
                     // bound value may hold a reference, which rustc rejects when it borrows a temporary (E0716) and
@@ -1743,7 +1900,25 @@ impl Cx<'_> {
                         self.bk_frame();
                     }
                     self.bk.move_mut_next = last && !*semi;
+                    // (a statement's temporaries borrowed by its outermost call, or by an assignment (`x = &f();`: no
+                    // `let` extends them): they go away at its end)
+                    let ext0 = self.bk.direct.len();
+                    if *semi && self.bk_on() {
+                        match strip_paren(e) {
+                            Expr::Assign(_, v) => borrowck::direct_ref(v, &mut self.bk.direct),
+                            // (a method of a local that may hold references: `v.push(&f());`)
+                            e @ Expr::MethodCall(r, ..) => {
+                                borrowck::direct_temps(e, &mut self.bk.direct);
+                                let holds = || matches!(strip_paren(r), Expr::Path(None, p) if p.segs.len() == 1 && self.lookup(&p.segs[0].name).is_some_and(|(_, t)| borrowck::has_refs(self.prog, t, 0)));
+                                if self.bk.direct.len() > ext0 && !holds() {
+                                    self.bk.direct.truncate(ext0);
+                                }
+                            }
+                            _ => {}
+                        }
+                    }
                     let r = self.expr(e, exp);
+                    self.bk.direct.truncate(ext0);
                     if last && !*semi && self.bk.tail == e as *const Expr as usize && r.is_ok() {
                         self.rg_ret(e);
                     }

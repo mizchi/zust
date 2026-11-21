@@ -546,16 +546,73 @@ fn parse_sig(sig: &PSig, is_extern: bool, is_main: bool, owner: Option<&Owner>) 
         if let Some(l) = undeclared_lifetime(&used, &declared) {
             return Err(format!("use of undeclared lifetime name `{l}` (E0261)"));
         }
+        // (E0308: a receiver of the self type names its lifetimes as the impl's self type does: `self: Foo<'b, 'a>`
+        // in `impl<'a, 'b> Foo<'a, 'b>` is not Self)
+        if let (Some(o), Some(rt)) = (owner.filter(|o| !o.is_trait), &sig.recv_ty) {
+            if let Some(r) = o.regions.as_deref() {
+                let mut t = rt;
+                loop {
+                    match t {
+                        PTy::Ref(_, _, i) => t = i,
+                        PTy::Path(None, p) if p.segs.len() == 1 && p.segs[0].name == "Box" => match p.segs[0].args.first() {
+                            Some(crate::parse::GArg::Ty(i)) => t = i,
+                            _ => break,
+                        },
+                        _ => break,
+                    }
+                }
+                if let PTy::Path(None, p) = t {
+                    let last = p.segs.last();
+                    let base = o.base.rsplit("::").next().unwrap_or("");
+                    if last.is_some_and(|s| s.name == base) {
+                        let written: Vec<u8> = last
+                            .unwrap()
+                            .args
+                            .iter()
+                            .filter_map(|a| match a {
+                                crate::parse::GArg::Lifetime(l) if l == "'static" => Some(crate::types::R_STATIC),
+                                crate::parse::GArg::Lifetime(l) => r.lts.iter().position(|x| x == l).map(|i| i as u8),
+                                _ => None,
+                            })
+                            .collect();
+                        let own: Vec<u8> = r.self_slots.iter().copied().take(written.len()).collect();
+                        if !written.is_empty() && own.len() == written.len() && own.iter().all(|&c| (c as usize) < r.lts.len() || c == crate::types::R_STATIC) && own != written {
+                            let m = "mismatched `self` parameter type: its lifetimes are not the impl's (E0308)";
+                            return Err(if p.pos.line != 0 { format!("{}:{}: {m}", p.pos.line, p.pos.col + 1) } else { m.to_string() });
+                        }
+                    }
+                }
+            }
+        }
+        // (the types the bounds and where clauses write are well formed, as the signature's types imply)
+        if crate::wf::bounds_have_refs(&sig.generics) {
+            let mut k = owner.map(crate::wf::Known::of_owner).unwrap_or_default();
+            k.add_generics(&sig.generics);
+            for t in sig.recv_ty.iter().chain(sig.params.iter().map(|p| &p.1)).chain(sig.ret.iter()) {
+                k.implied(t, 0);
+            }
+            if let Some(e) = k.check_bounds(&sig.generics) {
+                return Err(crate::wf::at(e));
+            }
+        }
     }
     if owner.is_none() {
         // (E0106: an elided lifetime in the return type needs exactly one lifetime among the parameters)
         // (not the prelude's own `__exr_` helpers, written against this compiler rather than rustc)
-        if sig.recv_ty.is_none() && !is_extern && !sig.name.starts_with("__") {
+        if sig.recv_ty.is_none() && !sig.name.starts_with("__") {
             if let Some(r) = &sig.ret {
                 if lifetime_positions(r).0 > 0 {
                     let inputs: usize = sig.params.iter().map(|(_, t)| lifetime_positions(t).1).sum();
-                    if inputs != 1 {
-                        return err("missing lifetime specifier (E0106)");
+                    // (none written, but a parameter's type may be a struct (or an alias) with lifetimes it leaves out:
+                    // `fn f(s: S) -> &T` with `struct S<'a>`; the summary does not see it)
+                    let hidden = inputs == 0 && sig.params.iter().any(|(_, t)| may_hide_lifetimes(t));
+                    if inputs != 1 && !hidden {
+                        // (at the elided reference of the result)
+                        let m = "missing lifetime specifier (E0106)";
+                        return Err(match elided_pos(r).or_else(|| crate::wf::pos_of(r)) {
+                            Some(p) => format!("{}:{}: {m}", p.line, p.col + 1),
+                            None => m.to_string(),
+                        });
                     }
                 }
             }
@@ -644,7 +701,7 @@ fn parse_sig(sig: &PSig, is_extern: bool, is_main: bool, owner: Option<&Owner>) 
 /// Checks on a struct / enum / union definition: unused parameters (E0392), `Self` in defaults (E0735), union fields
 /// a slice or array whose element is unsized (`[[T]]`, `[str; 2]`, `[dyn Tr]`), anywhere in t: its text
 /// The lifetimes a type names, outside fn pointer, `impl` and `dyn` types (which may bind their own with `for<'a>`)
-fn named_lifetimes(t: &PTy, out: &mut Vec<String>) {
+pub fn named_lifetimes(t: &PTy, out: &mut Vec<String>) {
     match t {
         PTy::Ref(l, _, i) => {
             if let Some(l) = l {
@@ -698,6 +755,46 @@ fn bound_lifetimes(g: &Generics, out: &mut Vec<String>) {
         if matches!(t, PTy::Path(None, p) if p.segs.len() == 1 && p.segs[0].args.is_empty()) {
             bs_of(bs, out);
         }
+    }
+}
+
+/// t names a type with no lifetime arguments that may have lifetimes (a struct or an alias of the program's)
+fn may_hide_lifetimes(t: &PTy) -> bool {
+    match t {
+        PTy::Ref(_, _, i) | PTy::Ptr(_, i) | PTy::Slice(i) | PTy::Array(i, _) => may_hide_lifetimes(i),
+        PTy::Tuple(ts) => ts.iter().any(may_hide_lifetimes),
+        PTy::Path(None, p) => p.segs.last().is_some_and(|s| {
+            let std = matches!(s.name.as_str(), "String" | "Vec" | "Box" | "Option" | "Result" | "Rc" | "Arc" | "HashMap" | "HashSet" | "BTreeMap" | "BTreeSet" | "VecDeque" | "str" | "Self")
+                || s.name.chars().next().is_some_and(|c| c.is_ascii_lowercase());
+            let lts = s.args.iter().any(|a| matches!(a, crate::parse::GArg::Lifetime(_)));
+            (!std && !lts) || s.args.iter().any(|a| matches!(a, crate::parse::GArg::Ty(t) if may_hide_lifetimes(t)))
+        }),
+        _ => false,
+    }
+}
+
+/// Where t's first elided reference is (the type it refers to)
+fn elided_pos(t: &PTy) -> Option<crate::parse::Pos> {
+    match t {
+        PTy::Ref(l, _, i) if l.as_deref().is_none_or(|l| l == "'_") => crate::wf::pos_of(i),
+        PTy::Ref(_, _, i) | PTy::Ptr(_, i) | PTy::Slice(i) | PTy::Array(i, _) => elided_pos(i),
+        PTy::Tuple(ts) => ts.iter().find_map(elided_pos),
+        PTy::Path(None, p) => p.segs.iter().flat_map(|s| s.args.iter()).find_map(|a| match a {
+            crate::parse::GArg::Ty(t) => elided_pos(t),
+            _ => None,
+        }),
+        _ => None,
+    }
+}
+
+/// A trait object in t is bounded by `'_`
+fn anon_dyn(t: &PTy) -> bool {
+    match t {
+        PTy::Dyn(bs) => bs.iter().any(|b| matches!(b, Bound::Lifetime(l) if l == "'_")),
+        PTy::Ref(_, _, i) | PTy::Ptr(_, i) | PTy::Slice(i) | PTy::Array(i, _) => anon_dyn(i),
+        PTy::Tuple(ts) => ts.iter().any(anon_dyn),
+        PTy::Path(None, p) => p.segs.iter().flat_map(|s| s.args.iter()).any(|a| matches!(a, crate::parse::GArg::Ty(t) if anon_dyn(t))),
+        _ => false,
     }
 }
 
@@ -771,6 +868,154 @@ fn unsized_elem(t: &PTy) -> Option<String> {
     }
 }
 
+/// What an item's types require of traits' `Self: 'x` bounds (the driver checks them against the traits, which
+/// only it sees, and only when a trait has such a bound): an impl's self type outlives what its trait requires; a
+/// field's trait object's lifetime (`Box<dyn Wedding<'k> + 'r>`), what its trait requires
+/// A path in a field's, a type alias's, an associated type's or a const's type that names a struct or enum with
+/// lifetimes (adts: their numbers) and writes none (E0106: nothing to elide them to there), or writes another number
+/// of them (E0107): `line:col: msg`. Not in fn pointer, `dyn` and `impl` types, which elide
+pub fn hidden_lifetimes(src: &str, it: &SrcItem, adts: &crate::fxhash::FxMap<&str, usize>) -> Option<String> {
+    let text = src.get(it.start..it.end)?;
+    let f = parse_file(text).ok()?;
+    let item = f.items.first()?;
+    let (g, tys): (Option<&Generics>, Vec<&PTy>) = match &item.kind {
+        ItemKind::Struct(_, g, fields) | ItemKind::Union(_, g, fields) => (Some(g), match fields {
+            Fields::Named(v) => v.iter().map(|x| &x.1).collect(),
+            Fields::Tuple(v) => v.iter().collect(),
+            Fields::Unit => vec![],
+        }),
+        ItemKind::Enum(_, g, vs) => (Some(g), vs.iter().flat_map(|v| match &v.1 {
+            Fields::Named(f) => f.iter().map(|x| &x.1).collect::<Vec<_>>(),
+            Fields::Tuple(f) => f.iter().collect(),
+            Fields::Unit => vec![],
+        }).collect()),
+        ItemKind::Type(_, g, _, Some(t)) => (Some(g), vec![t]),
+        ItemKind::Const(_, Some(t), _) | ItemKind::Static(_, _, t, _) => (None, vec![t]),
+        _ => return None,
+    };
+    // (a const's or a static's elided lifetimes are 'static (RFC 1623): only a wrong number is an error)
+    let statics = matches!(item.kind, ItemKind::Const(..) | ItemKind::Static(..));
+    let tparams: Vec<&str> = g.map(|g| g.params.iter().filter_map(|p| if let GParam::Ty(n, ..) = p { Some(n.as_str()) } else { None }).collect()).unwrap_or_default();
+    fn walk(t: &PTy, adts: &crate::fxhash::FxMap<&str, usize>, tparams: &[&str], statics: bool, depth: u32) -> Option<(crate::parse::Pos, String)> {
+        if depth > 16 {
+            return None;
+        }
+        match t {
+            PTy::Ref(_, _, i) | PTy::Ptr(_, i) | PTy::Slice(i) | PTy::Array(i, _) => walk(i, adts, tparams, statics, depth + 1),
+            PTy::Tuple(ts) => ts.iter().find_map(|t| walk(t, adts, tparams, statics, depth + 1)),
+            PTy::Path(None, p) => {
+                let s = p.segs.last()?;
+                if p.segs.len() == 1 && !tparams.contains(&s.name.as_str()) && s.fn_args.is_none() {
+                    if let Some(&n) = adts.get(s.name.as_str()) {
+                        let m = s.args.iter().filter(|a| matches!(a, crate::parse::GArg::Lifetime(_))).count();
+                        if m == 0 && n > 0 && !statics {
+                            return Some((p.pos, "missing lifetime specifier (E0106)".to_string()));
+                        }
+                        if m > 0 && m != n {
+                            let w = |k: usize| if k == 1 { "argument" } else { "arguments" };
+                            return Some((p.pos, format!("struct takes {n} lifetime {} but {m} lifetime {} supplied (E0107)", w(n), if m == 1 { "argument was" } else { "arguments were" })));
+                        }
+                    }
+                }
+                s.args.iter().find_map(|a| match a {
+                    crate::parse::GArg::Ty(t) => walk(t, adts, tparams, statics, depth + 1),
+                    _ => None,
+                })
+            }
+            _ => None,
+        }
+    }
+    let (p, m) = tys.iter().find_map(|t| walk(t, adts, &tparams, statics, 0))?;
+    Some(format!("{}:{}: {m}", it.line + p.line.max(1) as usize - 1, p.col + 1))
+}
+
+pub fn trait_obls(src: &str, it: &SrcItem) -> Vec<crate::types::WfObl> {
+    let text = &src[it.start..it.end];
+    let text = match it.kind {
+        LexKind::ImplHeader => format!("{text}}}"),
+        _ => text.to_string(),
+    };
+    let mut out = vec![];
+    let Ok(f) = parse_file(&text) else { return out };
+    let Some(item) = f.items.first() else { return out };
+    match &item.kind {
+        ItemKind::Impl(g, Some((false, tp)), self_ty, _) => {
+            let mut k = crate::wf::Known::default();
+            k.add_generics(g);
+            k.implied(self_ty, 0);
+            if let Some(sub) = k.sub_of(self_ty).filter(|s| !s.is_empty()) {
+                out.extend(k.obl(tp, sub, 1));
+            }
+        }
+        ItemKind::Struct(_, g, fields) | ItemKind::Union(_, g, fields) => {
+            let tys: Vec<&PTy> = match fields {
+                Fields::Named(v) => v.iter().map(|x| &x.1).collect(),
+                Fields::Tuple(v) => v.iter().collect(),
+                Fields::Unit => vec![],
+            };
+            dyn_obls(g, &tys, &mut out);
+        }
+        ItemKind::Enum(_, g, vars) => {
+            let mut tys: Vec<&PTy> = vec![];
+            for (_, f, _) in vars {
+                match f {
+                    Fields::Named(v) => tys.extend(v.iter().map(|x| &x.1)),
+                    Fields::Tuple(v) => tys.extend(v.iter()),
+                    Fields::Unit => {}
+                }
+            }
+            dyn_obls(g, &tys, &mut out);
+        }
+        _ => {}
+    }
+    out
+}
+
+fn dyn_obls(g: &Generics, tys: &[&PTy], out: &mut Vec<crate::types::WfObl>) {
+    let mut k = None;
+    for t in tys.iter().filter(|t| has_dyn_syn(t)) {
+        let k = k.get_or_insert_with(|| {
+            let mut k = crate::wf::Known::default();
+            k.add_generics(g);
+            k
+        });
+        k.dyn_obls(t, None, out, 0);
+    }
+}
+
+fn has_dyn_syn(t: &PTy) -> bool {
+    match t {
+        PTy::Dyn(_) => true,
+        PTy::Ref(_, _, i) | PTy::Ptr(_, i) | PTy::Slice(i) | PTy::Array(i, _) => has_dyn_syn(i),
+        PTy::Tuple(ts) => ts.iter().any(has_dyn_syn),
+        PTy::Path(_, p) => p.segs.iter().any(|s| s.args.iter().any(|a| matches!(a, crate::parse::GArg::Ty(t) if has_dyn_syn(t)))),
+        _ => false,
+    }
+}
+
+/// A field `&'static T` needs `T: 'static` declared (it is not inferred, E0310): `\u{3}line\u{3}msg`
+fn static_fields(g: &Generics, tys: &[&PTy]) -> Option<String> {
+    if g.params.is_empty() {
+        return None;
+    }
+    let mut k = None;
+    for t in tys.iter().filter(|t| crate::regions::mentions_static(t)) {
+        let k = k.get_or_insert_with(|| {
+            let mut k = crate::wf::Known::default();
+            k.add_generics(g);
+            k
+        });
+        // (a field's type has no position: the line of the first `'static`, which the driver finds)
+        if let Some((p, m)) = k.check(t, true, 0) {
+            return Some(match p {
+                Some(p) => format!("\u{3}{}\u{3}{m}", p.line),
+                None => format!("\u{1}'static\u{1}{m}"),
+            });
+        }
+    }
+    None
+}
+
 fn adt_checks(attrs: &[String], g: &Generics, tys: &[&PTy], union: bool, nfields: usize) -> R<()> {
     // (E0261: the fields name only the lifetimes the type declares)
     {
@@ -782,11 +1027,13 @@ fn adt_checks(attrs: &[String], g: &Generics, tys: &[&PTy], union: bool, nfields
         for t in tys {
             named_lifetimes(t, &mut used);
         }
+        // (and the parameters' own bounds: `struct S<'a: 'missing>`, `T: 'x`)
+        bound_lifetimes(g, &mut used);
         if let Some(l) = undeclared_lifetime(&used, &declared) {
             return Err(format!("use of undeclared lifetime name `{l}` (E0261)"));
         }
-        // (E0106: a field's reference names its lifetime)
-        if tys.iter().any(|t| lifetime_positions(t).0 > 0) {
+        // (E0106: a field's reference names its lifetime, and so does its trait object: `Box<dyn Debug + '_>`)
+        if tys.iter().any(|t| lifetime_positions(t).0 > 0 || anon_dyn(t)) {
             return Err("missing lifetime specifier (E0106)".to_string());
         }
     }
@@ -901,6 +1148,13 @@ fn lifetimes(t: &PTy, out: &mut Vec<String>, elided: &mut bool, opaque: &mut boo
                         _ => {}
                     }
                 }
+                // (`Fn(&'a u8) -> &'a u8`: as a fn pointer type, its own elided ones aside)
+                if let Some((ps, r)) = &s.fn_args {
+                    let (mut e, mut o) = (false, false);
+                    for t in ps.iter().chain(r.as_deref()) {
+                        lifetimes(t, out, &mut e, &mut o);
+                    }
+                }
             }
         }
         PTy::Ptr(_, i) | PTy::Slice(i) | PTy::Array(i, _) => lifetimes(i, out, elided, opaque),
@@ -931,6 +1185,31 @@ fn lifetimes(t: &PTy, out: &mut Vec<String>, elided: &mut bool, opaque: &mut boo
     }
 }
 
+/// Add to ls the lifetimes the signature declares (or a parameter's projection implies) to outlive one of them
+#[cold]
+fn outlived_by(sig: &PSig, ls: &mut Vec<String>) {
+    let mut longer: Vec<(String, String)> = vec![];
+    for (t, bs) in &sig.generics.preds {
+        if let PTy::Path(None, p) = t {
+            if let [s] = p.segs.as_slice() {
+                if s.name.starts_with('\'') {
+                    for b in bs {
+                        if let Bound::Lifetime(l) = b {
+                            longer.push((s.name.clone(), l.clone()));
+                        }
+                    }
+                }
+            }
+        }
+    }
+    for (_, t) in &sig.params {
+        crate::regions::qself_outlives(t, &mut longer, 0);
+    }
+    while let Some((a, _)) = longer.iter().find(|(a, b)| ls.contains(b) && !ls.contains(a)) {
+        ls.push(a.clone());
+    }
+}
+
 /// SigSyn::ret_from: the elision rules (`&self` methods return borrows of self, else the only argument with
 /// lifetimes) and named lifetimes (`fn f<'a>(x: &'a T, y: &U) -> &'a T` borrows from x only)
 fn ret_from(sig: &PSig) -> u64 {
@@ -940,6 +1219,11 @@ fn ret_from(sig: &PSig) -> u64 {
     lifetimes(ret, &mut rl, &mut relided, &mut opaque);
     if opaque {
         return 0;
+    }
+    // (a lifetime declared to outlive one of the result's may be the result's too: `fn f<'a, 'b: 'a>(x: &'b T) -> &'a T`)
+    // (and so may one a parameter's projection implies to: `<&'a &'b () as Tr>::Type`)
+    if !rl.is_empty() {
+        outlived_by(sig, &mut rl);
     }
     let mut inputs: Vec<&PTy> = vec![];
     if let Some(r) = &sig.recv_ty {
@@ -1490,12 +1774,57 @@ fn item_elision_err(item: &Item) -> bool {
     }
 }
 
+/// E0637: `'_` as a bound (`T: '_`, `'b: '_`), or a reference with no lifetime in a bound's arguments
+/// (`where T: WithType<&u32>`; `Fn(&u32)` elides): a message (`\u{3}line\u{3}msg` at the reference's line)
+fn anon_bound_err(item: &Item) -> Option<String> {
+    let g = match &item.kind {
+        ItemKind::Fn(fs, _) => &fs.generics,
+        ItemKind::Struct(_, g, _) | ItemKind::Enum(_, g, _) | ItemKind::Union(_, g, _) | ItemKind::Impl(g, ..) | ItemKind::Trait(_, g, ..) | ItemKind::Type(_, g, _, _) => g,
+        _ => return None,
+    };
+    if g.params.is_empty() && g.preds.is_empty() {
+        return None;
+    }
+    let bs_err = |bs: &[Bound]| -> Option<String> {
+        for b in bs {
+            match b {
+                Bound::Lifetime(l) if l == "'_" => return Some("`'_` cannot be used here (E0637)".to_string()),
+                Bound::Trait(_, p) => {
+                    for a in p.segs.iter().flat_map(|s| s.args.iter()) {
+                        let (crate::parse::GArg::Ty(t) | crate::parse::GArg::Bind(_, t)) = a else { continue };
+                        if let PTy::Ref(None, _, i) = t {
+                            let m = "`&` without an explicit lifetime name cannot be used here (E0637)";
+                            return Some(match crate::wf::pos_of(i) {
+                                Some(p) => format!("\u{3}{}\u{3}{m}", p.line),
+                                None => m.to_string(),
+                            });
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+        None
+    };
+    for p in &g.params {
+        if let GParam::Ty(_, bs, _) = p {
+            if let Some(e) = bs_err(bs) {
+                return Some(e);
+            }
+        }
+    }
+    g.preds.iter().find_map(|(_, bs)| bs_err(bs))
+}
+
 /// 1 つのアイテムの要約 (front.rs の summarize)
 pub fn summarize(item: &Item, owner: Option<&Owner>) -> R<Summary> {
     if item_elision_err(item) {
         return err("missing lifetime specifier (E0106)");
     }
     let mut sm = Summary::default();
+    // (the program's items: the prelude writes no lifetimes in its bounds, `Iterator<Item = &T>`; the driver
+    // reports it)
+    sm.adt_err = anon_bound_err(item);
     match &item.kind {
         ItemKind::Type(n, _, _, Some(t)) if owner.is_some() => {
             let ow = owner.unwrap();
@@ -1505,6 +1834,17 @@ pub fn summarize(item: &Item, owner: Option<&Owner>) -> R<Summary> {
                 if let Some(l) = used.iter().find(|l| r.free.contains(l)) {
                     return Err(format!("\u{2}the lifetime parameter `{l}` is not constrained by the impl trait, self type, or predicates (E0207)"));
                 }
+                // (the value is well formed, as the header implies: `type Out = &'a T;` needs `T: 'a`)
+                if !ow.is_trait {
+                    if let Some(e) = crate::wf::Known::of_owner(ow).check(t, false, 0) {
+                        return Err(crate::wf::at(e));
+                    }
+                }
+            }
+            // (an associated type's value elides no lifetime: `type Output = &i32;` (E0106), `&'_ i32` (E0637); the
+            // program's, not the prelude's, which writes no lifetimes: the driver reports it of the program's items)
+            if !ow.is_trait && lifetime_positions(t).0 > 0 {
+                sm.adt_err = Some(if format!("{t:?}").contains("\"'_\"") { "`'_` cannot be used here (E0637)" } else { "missing lifetime in associated type (E0106)" }.to_string());
             }
             sm.assocs.push(AssocSyn {
                 name: n.clone(),
@@ -1516,6 +1856,18 @@ pub fn summarize(item: &Item, owner: Option<&Owner>) -> R<Summary> {
         ItemKind::Fn(fs, Some(body)) if owner.is_some() => {
             let ow = owner.unwrap();
             let mut sig = parse_sig(fs, false, false, Some(ow))?;
+            // (E0106: a method with no receiver elides as a free fn; the program's, not the prelude's, which writes no
+            // lifetimes: the driver reports it of the program's items)
+            if fs.recv_ty.is_none() && !fs.name.starts_with("__") {
+                if let Some(r) = fs.ret.as_ref().filter(|r| lifetime_positions(r).0 > 0) {
+                    if fs.params.iter().map(|(_, t)| lifetime_positions(t).1).sum::<usize>() != 1 {
+                        sm.adt_err = Some(match crate::wf::pos_of(r) {
+                            Some(p) => format!("\u{3}{}\u{3}missing lifetime specifier (E0106)", p.line),
+                            None => "missing lifetime specifier (E0106)".to_string(),
+                        });
+                    }
+                }
+            }
             let name = match ow.impl_trait.as_deref() {
                 Some(t) if t == "Display" || t == "Debug" => format!("{}::<{t}>::{}", ow.base, fs.name),
                 Some(t) if t.starts_with("PartialEq<") || t.starts_with("PartialOrd<") => format!("{}::<{t}>::{}", ow.base, fs.name),
@@ -1539,7 +1891,39 @@ pub fn summarize(item: &Item, owner: Option<&Owner>) -> R<Summary> {
             sm.aliases.push((n.clone(), gs.into_iter().map(|x| x.0).collect(), tysyn(t, None)?));
         }
         ItemKind::Trait(n, g, supers, _) => {
+            // (E0261: the lifetimes its bounds and where clause name are its own; `'_`, `'static` and a binder's
+            // (`for<'a> T: 'a`, parsed as 'static) excepted)
+            if !g.preds.is_empty() || g.params.iter().any(|p| matches!(p, GParam::Ty(_, bs, _) if !bs.is_empty())) {
+                let declared: Vec<&str> = g.params.iter().filter_map(|p| if let GParam::Lifetime(l) = p { Some(l.as_str()) } else { None }).collect();
+                let mut used = vec![];
+                bound_lifetimes(g, &mut used);
+                for b in supers {
+                    if let Bound::Lifetime(l) = b {
+                        used.push(l.clone());
+                    }
+                }
+                if let Some(l) = undeclared_lifetime(&used, &declared) {
+                    let m = format!("use of undeclared lifetime name `{l}` (E0261)");
+                    // (at the where clause's predicate that names it)
+                    let at = g.preds.iter().find(|(_, bs)| bs.iter().any(|b| matches!(b, Bound::Lifetime(x) if *x == l))).and_then(|(t, _)| crate::wf::pos_of(t));
+                    return Err(match at {
+                        Some(p) => format!("{}:{}: {m}", p.line, p.col + 1),
+                        None => m,
+                    });
+                }
+            }
             sm.hdr_regions = crate::regions::hdr_regions(g, None);
+            // (`trait Wedding<'t>: 't`: what Self must outlive)
+            let mut self_outlives = vec![];
+            for b in supers {
+                if let Bound::Lifetime(l) = b {
+                    if l == "'static" {
+                        self_outlives.push("static".to_string());
+                    } else if let Some(i) = g.params.iter().filter_map(|p| if let GParam::Lifetime(l) = p { Some(l) } else { None }).position(|x| x == l) {
+                        self_outlives.push(i.to_string());
+                    }
+                }
+            }
             let mut sup = vec![];
             for b in supers {
                 if let Bound::Trait(false, p) = b {
@@ -1569,6 +1953,9 @@ pub fn summarize(item: &Item, owner: Option<&Owner>) -> R<Summary> {
             if !sup.is_empty() {
                 sm.trait_generics.push(("#supers".to_string(), sup));
             }
+            if !self_outlives.is_empty() {
+                sm.trait_generics.push((crate::types::SELF_OUTLIVES.to_string(), self_outlives));
+            }
             sm.trait_decl = Some(n.clone());
         }
         ItemKind::Impl(g, tr, self_ty, _) => {
@@ -1582,10 +1969,33 @@ pub fn summarize(item: &Item, owner: Option<&Owner>) -> R<Summary> {
                 if let Some((_, tp)) = tr {
                     named_lifetimes(&PTy::Path(None, tp.clone()), &mut used);
                 }
-                // (constrained: written anywhere in the self type or the trait (`dyn Tr + 'a` too), or in a where
-                // clause (`T: Tr<Ty = &'x ()>`))
+                // (constrained: written anywhere in the self type or the trait (`dyn Tr + 'a` too), or in the value an
+                // associated type is bound to in a bound (`T: Tr<Ty = &'x ()>`, inline or in a where clause). Only
+                // restricting it (`S: 'a`) does not constrain it)
                 let constrained: Vec<String> = {
-                    let text = format!("{self_ty:?} {tr:?} {:?} {:?}", g.preds, g.params.iter().filter(|p| matches!(p, GParam::Ty(..))).collect::<Vec<_>>());
+                    let mut binds = vec![];
+                    let mut of_bounds = |bs: &[Bound]| {
+                        for b in bs {
+                            if let Bound::Trait(_, p) = b {
+                                for sg in &p.segs {
+                                    for a in &sg.args {
+                                        if let crate::parse::GArg::Bind(_, t) = a {
+                                            binds.push(t.clone());
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    };
+                    for p in &g.params {
+                        if let GParam::Ty(_, bs, _) = p {
+                            of_bounds(bs);
+                        }
+                    }
+                    for (_, bs) in &g.preds {
+                        of_bounds(bs);
+                    }
+                    let text = format!("{self_ty:?} {tr:?} {binds:?}");
                     declared.iter().filter(|l| text.contains(&format!("\"{l}\""))).map(|l| l.to_string()).collect()
                 };
                 bound_lifetimes(g, &mut used);
@@ -1594,6 +2004,22 @@ pub fn summarize(item: &Item, owner: Option<&Owner>) -> R<Summary> {
                 }
                 if let Some(r) = &mut sm.hdr_regions {
                     r.free = declared.iter().filter(|l| !constrained.iter().any(|x| x == *l)).map(|l| l.to_string()).collect();
+                    // (what the header's types imply, for its members' well-formedness; its declared bounds are
+                    // the owner's own)
+                    let mut k = crate::wf::Known::default();
+                    k.tparams = g.params.iter().filter_map(|p| if let GParam::Ty(n, _, _) = p { Some(n.clone()) } else { None }).collect();
+                    k.implied(self_ty, 0);
+                    if let Some((_, tp)) = tr {
+                        for s in &tp.segs {
+                            for a in &s.args {
+                                if let crate::parse::GArg::Ty(t) = a {
+                                    k.implied(t, 0);
+                                }
+                            }
+                        }
+                    }
+                    r.wf_pairs = k.pairs;
+                    r.wf_vague = k.vague;
                 }
             }
             if let Some((neg, tp)) = tr {
@@ -1813,7 +2239,8 @@ pub fn summarize(item: &Item, owner: Option<&Owner>) -> R<Summary> {
                 if fi.attrs.iter().any(|a| compact(a).starts_with("#[linkage")) {
                     return Err(format!("{}:1: the `linkage` attribute is experimental and not portable", fi.line));
                 }
-                let mut sig = parse_sig(fs, true, false, None)?;
+                // (an error at the fn's line in the block)
+                let mut sig = parse_sig(fs, true, false, None).map_err(|e| if e.starts_with(|c: char| c.is_ascii_digit()) { e } else { format!("{}:1: {e}", fi.line) })?;
                 if let Some(l) = link_name(&fi.attrs) {
                     sig.symbol = l;
                 }
@@ -1830,7 +2257,7 @@ pub fn summarize(item: &Item, owner: Option<&Owner>) -> R<Summary> {
                         Fields::Unit => {}
                     }
                 }
-                sm.adt_err = adt_checks(&item.attrs, g, &tys, false, vars.len()).err();
+                sm.adt_err = adt_checks(&item.attrs, g, &tys, false, vars.len()).err().or_else(|| static_fields(g, &tys));
                 if let Some(e) = sm.adt_err.clone().filter(|e| e.ends_with("(E0106)")) {
                     sm.adt_err = Some(format!("\u{1}&\u{1}{e}"));
                 }
@@ -1909,7 +2336,7 @@ pub fn summarize(item: &Item, owner: Option<&Owner>) -> R<Summary> {
                     return err("tuple unions are not allowed");
                 }
                 // (PhantomData itself is the one type whose parameter needs no use)
-                sm.adt_err = adt_checks(&item.attrs, g, &tys, union, tys.len()).err();
+                sm.adt_err = adt_checks(&item.attrs, g, &tys, union, tys.len()).err().or_else(|| static_fields(g, &tys));
                 // (an unsized element: at its field's line, which the driver finds by the field's name)
                 // (an undeclared lifetime: at the line it is first written on)
                 if let Some(e) = sm.adt_err.as_ref().filter(|e| e.ends_with("(E0261)")) {
@@ -1920,7 +2347,7 @@ pub fn summarize(item: &Item, owner: Option<&Owner>) -> R<Summary> {
                 // (a missing lifetime: at the field it is missing in (named), or at the first `&`)
                 if let Some(e) = sm.adt_err.clone().filter(|e| e.ends_with("(E0106)")) {
                     let at = match fields {
-                        Fields::Named(v) => v.iter().find(|x| lifetime_positions(&x.1).0 > 0).map(|x| x.0.clone()),
+                        Fields::Named(v) => v.iter().find(|x| lifetime_positions(&x.1).0 > 0 || anon_dyn(&x.1)).map(|x| x.0.clone()),
                         _ => None,
                     };
                     sm.adt_err = Some(format!("\u{1}{}\u{1}{e}", at.unwrap_or_else(|| "&".to_string())));
@@ -2049,7 +2476,7 @@ pub fn owner_of(it: &SrcItem, sums: &[Summary]) -> Option<Owner> {
         }
         LexKind::TraitMember(h) => sums[h as usize].trait_decl.clone().map(|n| Owner {
             self_ty: TySyn::Named("Self".into()),
-            generics: std::iter::once(("Self".to_string(), vec![n.clone()])).chain(sums[h as usize].trait_generics.iter().filter(|g| g.0 != "#supers").cloned()).collect(),
+            generics: std::iter::once(("Self".to_string(), vec![n.clone()])).chain(sums[h as usize].trait_generics.iter().filter(|g| !g.0.starts_with('#')).cloned()).collect(),
             base: n,
             impl_trait: None,
             is_trait: true,
