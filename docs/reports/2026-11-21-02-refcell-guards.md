@@ -39,7 +39,8 @@ one each needed the deref through the guard in another place:
 - `*c.borrow()`, the deref of a guard that is a temporary;
 - `for x in c.borrow().iter()` and `for x in g.iter_mut()`, a loop over what the guard holds.
 
-A method through a `RefMut` takes `&mut *g` only when it takes `&mut self`, and indexing reads through a shared
+A method through a `RefMut` takes `&mut *g` only when it takes `&mut self` (a trait's method on a primitive type
+too, or it would change a copy), and indexing reads through a shared
 borrow of the guard, as autoderef does. So `let g = c.borrow_mut(); g[0]` is accepted, and only changing the value
 needs `let mut g`.
 
@@ -47,7 +48,8 @@ What rustc rejects here is rejected:
 
 - `iter_mut` or a `&mut self` method through a `Ref` (E0596);
 - a by-value `self` method through a guard (E0507);
-- a guard that outlives its cell (E0597, E0515), and moving the cell while a guard of it is alive (E0505).
+- a guard that outlives its cell (E0597, E0515), and moving the cell while a guard of it is alive (E0505);
+- a guard sent to another thread (E0277): its drop changes the cell's flag, which is not atomic.
 
   A guard holds raw pointers, so the borrow checker counts it among the prelude's views, which hold the loan of what
   they were made from, as `Iter` does. The same check found that a `MutexGuard` lost the Mutex's loan inside the

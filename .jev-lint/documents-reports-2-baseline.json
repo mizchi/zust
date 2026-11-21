@@ -1,6 +1,6 @@
 {
   "schema": "jev-lint-documents-1",
-  "snapshotDigest": "5f15a3f987a9a97a925bcd2fe0549262109014a90db90d3d4292d4ab826315c8",
+  "snapshotDigest": "d31275aa319bab8b07c1e65f13ec41d26c779569c6c40cf269017c5cbb94168f",
   "questionDigest": "209d6df378ccb747fcb0e821998fcd6105bc76638a88d22488d3b398d6a21595",
   "model": "jev-1.14.0",
   "snapshotChanged": false,
@@ -100,10 +100,10 @@
       "contextHash": "a068452334ef52150a1932e9d45207a4c156e3a5c60d69e061e986b1aa86d889",
       "judgment": {
         "choice": "supports",
-        "confidence": 0.97,
+        "confidence": 0.99,
         "probabilities": {
-          "supports": 0.98,
-          "contradicts": 0.02,
+          "supports": 0.99,
+          "contradicts": 0.01,
           "unrelated": 0,
           "insufficient_context": 0
         }
@@ -168,12 +168,12 @@
       "contextHash": "ecee8f597e8c6093bcea35ffd84dafe505685fb3c77901bd2a2a9e033883360c",
       "judgment": {
         "choice": "supports",
-        "confidence": 0.97,
+        "confidence": 0.99,
         "probabilities": {
-          "supports": 0.98,
+          "supports": 0.99,
           "contradicts": 0.01,
           "unrelated": 0,
-          "insufficient_context": 0.01
+          "insufficient_context": 0
         }
       }
     },
@@ -202,10 +202,10 @@
       "contextHash": "5b6ede2d00ec82893b1c63b36b593d1e9e7999236c2422416b8324666f265c93",
       "judgment": {
         "choice": "supports",
-        "confidence": 0.99,
+        "confidence": 0.96,
         "probabilities": {
-          "supports": 0.99,
-          "contradicts": 0.01,
+          "supports": 0.97,
+          "contradicts": 0.03,
           "unrelated": 0,
           "insufficient_context": 0
         }
@@ -236,12 +236,12 @@
       "contextHash": "68facf70966b576a1dde106a31fd37de8e21bda46e6439878b91e7bce57154b6",
       "judgment": {
         "choice": "supports",
-        "confidence": 0.96,
+        "confidence": 0.97,
         "probabilities": {
-          "supports": 0.97,
+          "supports": 0.98,
           "contradicts": 0.02,
           "unrelated": 0,
-          "insufficient_context": 0.01
+          "insufficient_context": 0
         }
       }
     },
@@ -304,10 +304,10 @@
       "contextHash": "41c0a2541784f0e073e300bd96b1ad35979d31a7048a9c86dc0c9821eba76c55",
       "judgment": {
         "choice": "supports",
-        "confidence": 0.99,
+        "confidence": 1,
         "probabilities": {
-          "supports": 0.99,
-          "contradicts": 0.01,
+          "supports": 1,
+          "contradicts": 0,
           "unrelated": 0,
           "insufficient_context": 0
         }
@@ -372,10 +372,10 @@
       "contextHash": "65d03eec8a642fb4c59c7bacc74397f936864091105bba631e8977b9ca9c1612",
       "judgment": {
         "choice": "supports",
-        "confidence": 0.95,
+        "confidence": 0.96,
         "probabilities": {
-          "supports": 0.96,
-          "contradicts": 0.03,
+          "supports": 0.97,
+          "contradicts": 0.02,
           "unrelated": 0,
           "insufficient_context": 0.01
         }
@@ -440,10 +440,10 @@
       "contextHash": "d77f2024ffc7a01c94e005a23cd8538534ebb4abb40df15020d2f6eb96f550b6",
       "judgment": {
         "choice": "supports",
-        "confidence": 0.99,
+        "confidence": 1,
         "probabilities": {
-          "supports": 0.99,
-          "contradicts": 0.01,
+          "supports": 1,
+          "contradicts": 0,
           "unrelated": 0,
           "insufficient_context": 0
         }
@@ -610,10 +610,10 @@
       "contextHash": "60cba8f9920a12369db8088d9da4aba7831509e04aeed3ec12052847209a00f4",
       "judgment": {
         "choice": "supports",
-        "confidence": 1,
+        "confidence": 0.99,
         "probabilities": {
-          "supports": 1,
-          "contradicts": 0,
+          "supports": 0.99,
+          "contradicts": 0.01,
           "unrelated": 0,
           "insufficient_context": 0
         }
@@ -712,10 +712,10 @@
       "contextHash": "fee3dc6136c2d74a8f2b22992deee33ae5ead6cdbc19c240e51b7dcbe27e38cc",
       "judgment": {
         "choice": "supports",
-        "confidence": 0.96,
+        "confidence": 0.97,
         "probabilities": {
-          "supports": 0.97,
-          "contradicts": 0.02,
+          "supports": 0.98,
+          "contradicts": 0.01,
           "unrelated": 0,
           "insufficient_context": 0.01
         }
@@ -746,12 +746,12 @@
       "contextHash": "74cd923d61e00b7739f80b534b652a909070bb949bfb007a464579050da1d263",
       "judgment": {
         "choice": "supports",
-        "confidence": 0.97,
+        "confidence": 0.99,
         "probabilities": {
-          "supports": 0.98,
+          "supports": 0.99,
           "contradicts": 0.01,
           "unrelated": 0,
-          "insufficient_context": 0.01
+          "insufficient_context": 0
         }
       }
     },
@@ -780,10 +780,10 @@
       "contextHash": "54b56e94027819b91287b9766c4872faa76c4344146540b341b4389c6b8dd7ce",
       "judgment": {
         "choice": "supports",
-        "confidence": 0.95,
+        "confidence": 0.96,
         "probabilities": {
-          "supports": 0.96,
-          "contradicts": 0.03,
+          "supports": 0.97,
+          "contradicts": 0.02,
           "unrelated": 0,
           "insufficient_context": 0.01
         }
@@ -814,10 +814,10 @@
       "contextHash": "7438e0bb6ac3c01bf6beaa56051a35abf5a2f30ee56334c8cd754b996d6bd4e6",
       "judgment": {
         "choice": "supports",
-        "confidence": 0.83,
+        "confidence": 0.87,
         "probabilities": {
-          "supports": 0.87,
-          "contradicts": 0.12,
+          "supports": 0.9,
+          "contradicts": 0.09,
           "unrelated": 0,
           "insufficient_context": 0.01
         }
@@ -882,10 +882,10 @@
       "contextHash": "536786479dc0803408f0444fb2041d9e5a569289c775017759c4867ead02b09b",
       "judgment": {
         "choice": "supports",
-        "confidence": 0.97,
+        "confidence": 0.99,
         "probabilities": {
-          "supports": 0.98,
-          "contradicts": 0.02,
+          "supports": 0.99,
+          "contradicts": 0.01,
           "unrelated": 0,
           "insufficient_context": 0
         }
@@ -950,10 +950,10 @@
       "contextHash": "4df342055803f33b6195c27c167f6f86d7071a5337af51009058f12b67f5035e",
       "judgment": {
         "choice": "supports",
-        "confidence": 0.99,
+        "confidence": 0.96,
         "probabilities": {
-          "supports": 0.99,
-          "contradicts": 0.01,
+          "supports": 0.97,
+          "contradicts": 0.03,
           "unrelated": 0,
           "insufficient_context": 0
         }
@@ -984,10 +984,10 @@
       "contextHash": "262bb5dcd097b8cb7be1fb2545acff1e36bb67eb6c6b7603871f70e0250fd627",
       "judgment": {
         "choice": "supports",
-        "confidence": 0.59,
+        "confidence": 0.63,
         "probabilities": {
-          "supports": 0.69,
-          "contradicts": 0.29,
+          "supports": 0.72,
+          "contradicts": 0.26,
           "unrelated": 0,
           "insufficient_context": 0.02
         }
@@ -1001,27 +1001,27 @@
         "source": "docs_reports_2026-11-21-02-refcell-guards.en",
         "path": "docs/reports/2026-11-21-02-refcell-guards.md",
         "startLine": 1,
-        "endLine": 106,
-        "quote": "# RefCell's borrow flag and guards, and when temporaries are dropped\n\nDate: 2026-11-21\n\nzustc's `RefCell` had no borrow flag: `borrow` and `borrow_mut` handed out plain references, so two `borrow_mut`\nof one cell gave safe code two `&mut` to the same value, and a `borrow_mut` inside a loop over a `borrow` could free\nthe buffer the loop was reading. This change gives `RefCell` the flag std has and makes `borrow` / `borrow_mut`\nreturn the `Ref` / `RefMut` guards. It was the first item of [TODO.md](../../TODO.md) left by the\n[security report](2026-11-21-01-security-cves.md).\n\n## 1. The flag and the guards\n\nThe prelude's `RefCell<T>` now holds an `isize`, as std's does. 0 means free, a positive count means that many\nshared borrows, and -1 means one mutable borrow.\n\n- `borrow` panics if the cell is borrowed mutably, and `borrow_mut` panics if it is borrowed at all. Otherwise each\n  returns a guard, and the guard's `Drop` gives the borrow back.\n- The panics print what std prints (`RefCell already borrowed`, `RefCell already mutably borrowed`), at the line\n  and column of the call, as `#[track_caller]` does in std. This uses the mechanism `unwrap` already has, a location\n  stored before the call.\n- `try_borrow` and `try_borrow_mut` return `BorrowError` / `BorrowMutError`, with std's `Debug` and `Display`.\n- `replace`, `replace_with`, `take` and `swap` go through a `borrow_mut`, so they panic under a live borrow, as in\n  std.\n- `{:?}` of a cell that is borrowed mutably prints `RefCell { value: <borrowed> }`.\n- `Ref::map`, `RefMut::map` and `Ref::clone` are there.\n  - They are associated functions, not methods, as in std, so `g.map(..)` and `g.clone()` still reach the value\n    through the guard.\n  - The paths are mapped to prelude functions, as `Path::new` is.\n\n## 2. Using a value through its guard\n\nA guard is useful only if the value behind it can be used as if it were borrowed directly. The ways std code uses\none each needed the deref through the guard in another place:\n\n- `c.borrow().len`, a field of the value (type inference looks through the guard);\n- `c.borrow().to_uppercase()` and `c.borrow_mut().push(1)`, methods of the value, the builtin ones of `String` and\n  `Vec` among them;\n- `total(&c.borrow())` where `total` takes `&[i32]`, a coercion from `&Ref<Vec<T>>` to `&T`, `&[T]` or `&str`;\n- `*c.borrow()`, the deref of a guard that is a temporary;\n- `for x in c.borrow().iter()` and `for x in g.iter_mut()`, a loop over what the guard holds.\n\nA method through a `RefMut` takes `&mut *g` only when it takes `&mut self`, and indexing reads through a shared\nborrow of the guard, as autoderef does. So `let g = c.borrow_mut(); g[0]` is accepted, and only changing the value\nneeds `let mut g`.\n\nWhat rustc rejects here is rejected:\n\n- `iter_mut` or a `&mut self` method through a `Ref` (E0596);\n- a by-value `self` method through a guard (E0507);\n- a guard that outlives its cell (E0597, E0515), and moving the cell while a guard of it is alive (E0505).\n\n  A guard holds raw pointers, so the borrow checker counts it among the prelude's views, which hold the loan of what\n  they were made from, as `Iter` does. The same check found that a `MutexGuard` lost the Mutex's loan inside the\n  `Result` that `lock()` returns; it now keeps it.\n\n## 3. When temporaries are dropped\n\nWith guards, a temporary dropped too late is a panic in a correct program, so the times zustc drops temporaries had\nto match rustc's. Three did not:\n\n- A `let` initializer's temporaries were all kept to the end of the block. rustc drops them at the end of the\n  `let` unless the initializer extends them by its syntax: `&temp()`, also inside a tuple, an array, a cast, a struct\n  literal or a block's tail. zustc does the same now, and also keeps them when the bound value's type holds a\n  reference or the pattern has a `ref` binding. rustc rejects a value that borrows a dropped temporary (E0716), and\n  zustc does not see that yet. Before, `let n = c.borrow().len();` kept the guard alive, and the next\n  `c.borrow_mut()` panicked.\n- The same holds for a destructuring `let`: `let (n, _) = (c.borrow().len(), 0);`.\n- The temporaries of an `if let` scrutinee are dropped at the end of the `if let`, as in Rust 2024: before the else\n  block, and after the then block unless its value may hold a reference. Those of a `let ... else` are dropped\n  before the else block. Before, a `borrow_mut` in the else block, or later in the same statement, panicked.\n\nTwo tests/ui tests pass because of the first fix: `nll/issue-53570.rs` and `mir/mir_early_return_scope.rs`.\n`coercion/unsize-lifetime-shrinking.rs` is now rejected at its line, but for another reason than the one it tests,\nso it is listed in `bench/rust_ui_accidental.txt`.\n\n## 4. Tests\n\nIn `tests/security/`:\n\n- `rt_refcell` overlaps two borrows of one cell in three ways, and each must panic. Its `todo` mark is removed.\n- `rt_refcell_iter_invalidation` pushes to a Vec with `borrow_mut` while a loop over `c.borrow().iter()` reads it.\n  The borrow checker cannot see this: both borrows are of a shared `&RefCell`. The flag must catch it.\n- `rt_refcell_ok` uses a cell in the ways of section 2, and must run as rustc's build does.\n- `rt_let_temporaries_drop` and `rt_scrutinee_temporaries_drop` check the drop times of section 3 with values that\n  print when dropped.\n- `borrow_refcell_guard_outlives`, `borrow_refcell_guard_move_cell`, `borrow_mutex_guard_move_mutex`,\n  `borrow_refcell_guard_deref_outlives` and `borrow_mutex_guard_deref_outlives` are the rejections of section 2. A\n  reference through a guard (`&g[0]`, `&mut *g`) borrows the guard, so dropping the guard under it is rejected too.\n\nWhile checking the drop times, an older leak turned up. A pattern that moves some parts of a value out and leaves\nthe rest to `_` or `..` never drops the rest: `let (a, _) = pair();`, `let W { a, .. } = w;`, `match pair() { (a, _)\n=> .. }`. Nothing is dropped twice. Fixing it means dropping, for each pattern, the parts it does not move, in the\ncode that tracks moves, so it was left as `rt_pattern_partial_move`, marked `todo` and listed in TODO.md.\n\nAnother older gap is in the region check. A block whose value borrows one of its own locals through another local\n(`{ let v = ..; let r = &v; r }`), or through what a by-value method returns (`{ Some(&v).unwrap() }`), is accepted.\n`{ let v = ..; &v }` is rejected. It holds for references as much as for guards, so it is left to the region-check\nwork as `region_block_tail_escapes`.\n\n## 5. Checks\n\n- The security tests pass, including `cves.txt`, the table of unsafe APIs and TODO.md.\n- The wasm tests pass, and the RefCell cases print under wasm what rustc's builds print.\n- tests/ui: no regressions.\n- Native builds of examples, `tests/probe` and `bench/rt` print what rustc's builds print: 140 programs.\n- The new cases and the test programs written for this change run clean under valgrind.",
-        "contentHash": "077789355858fc231742ed29a281a69ea7663706d2e4707e839cdcea112ffeb5"
+        "endLine": 108,
+        "quote": "# RefCell's borrow flag and guards, and when temporaries are dropped\n\nDate: 2026-11-21\n\nzustc's `RefCell` had no borrow flag: `borrow` and `borrow_mut` handed out plain references, so two `borrow_mut`\nof one cell gave safe code two `&mut` to the same value, and a `borrow_mut` inside a loop over a `borrow` could free\nthe buffer the loop was reading. This change gives `RefCell` the flag std has and makes `borrow` / `borrow_mut`\nreturn the `Ref` / `RefMut` guards. It was the first item of [TODO.md](../../TODO.md) left by the\n[security report](2026-11-21-01-security-cves.md).\n\n## 1. The flag and the guards\n\nThe prelude's `RefCell<T>` now holds an `isize`, as std's does. 0 means free, a positive count means that many\nshared borrows, and -1 means one mutable borrow.\n\n- `borrow` panics if the cell is borrowed mutably, and `borrow_mut` panics if it is borrowed at all. Otherwise each\n  returns a guard, and the guard's `Drop` gives the borrow back.\n- The panics print what std prints (`RefCell already borrowed`, `RefCell already mutably borrowed`), at the line\n  and column of the call, as `#[track_caller]` does in std. This uses the mechanism `unwrap` already has, a location\n  stored before the call.\n- `try_borrow` and `try_borrow_mut` return `BorrowError` / `BorrowMutError`, with std's `Debug` and `Display`.\n- `replace`, `replace_with`, `take` and `swap` go through a `borrow_mut`, so they panic under a live borrow, as in\n  std.\n- `{:?}` of a cell that is borrowed mutably prints `RefCell { value: <borrowed> }`.\n- `Ref::map`, `RefMut::map` and `Ref::clone` are there.\n  - They are associated functions, not methods, as in std, so `g.map(..)` and `g.clone()` still reach the value\n    through the guard.\n  - The paths are mapped to prelude functions, as `Path::new` is.\n\n## 2. Using a value through its guard\n\nA guard is useful only if the value behind it can be used as if it were borrowed directly. The ways std code uses\none each needed the deref through the guard in another place:\n\n- `c.borrow().len`, a field of the value (type inference looks through the guard);\n- `c.borrow().to_uppercase()` and `c.borrow_mut().push(1)`, methods of the value, the builtin ones of `String` and\n  `Vec` among them;\n- `total(&c.borrow())` where `total` takes `&[i32]`, a coercion from `&Ref<Vec<T>>` to `&T`, `&[T]` or `&str`;\n- `*c.borrow()`, the deref of a guard that is a temporary;\n- `for x in c.borrow().iter()` and `for x in g.iter_mut()`, a loop over what the guard holds.\n\nA method through a `RefMut` takes `&mut *g` only when it takes `&mut self` (a trait's method on a primitive type\ntoo, or it would change a copy), and indexing reads through a shared\nborrow of the guard, as autoderef does. So `let g = c.borrow_mut(); g[0]` is accepted, and only changing the value\nneeds `let mut g`.\n\nWhat rustc rejects here is rejected:\n\n- `iter_mut` or a `&mut self` method through a `Ref` (E0596);\n- a by-value `self` method through a guard (E0507);\n- a guard that outlives its cell (E0597, E0515), and moving the cell while a guard of it is alive (E0505);\n- a guard sent to another thread (E0277): its drop changes the cell's flag, which is not atomic.\n\n  A guard holds raw pointers, so the borrow checker counts it among the prelude's views, which hold the loan of what\n  they were made from, as `Iter` does. The same check found that a `MutexGuard` lost the Mutex's loan inside the\n  `Result` that `lock()` returns; it now keeps it.\n\n## 3. When temporaries are dropped\n\nWith guards, a temporary dropped too late is a panic in a correct program, so the times zustc drops temporaries had\nto match rustc's. Three did not:\n\n- A `let` initializer's temporaries were all kept to the end of the block. rustc drops them at the end of the\n  `let` unless the initializer extends them by its syntax: `&temp()`, also inside a tuple, an array, a cast, a struct\n  literal or a block's tail. zustc does the same now, and also keeps them when the bound value's type holds a\n  reference or the pattern has a `ref` binding. rustc rejects a value that borrows a dropped temporary (E0716), and\n  zustc does not see that yet. Before, `let n = c.borrow().len();` kept the guard alive, and the next\n  `c.borrow_mut()` panicked.\n- The same holds for a destructuring `let`: `let (n, _) = (c.borrow().len(), 0);`.\n- The temporaries of an `if let` scrutinee are dropped at the end of the `if let`, as in Rust 2024: before the else\n  block, and after the then block unless its value may hold a reference. Those of a `let ... else` are dropped\n  before the else block. Before, a `borrow_mut` in the else block, or later in the same statement, panicked.\n\nTwo tests/ui tests pass because of the first fix: `nll/issue-53570.rs` and `mir/mir_early_return_scope.rs`.\n`coercion/unsize-lifetime-shrinking.rs` is now rejected at its line, but for another reason than the one it tests,\nso it is listed in `bench/rust_ui_accidental.txt`.\n\n## 4. Tests\n\nIn `tests/security/`:\n\n- `rt_refcell` overlaps two borrows of one cell in three ways, and each must panic. Its `todo` mark is removed.\n- `rt_refcell_iter_invalidation` pushes to a Vec with `borrow_mut` while a loop over `c.borrow().iter()` reads it.\n  The borrow checker cannot see this: both borrows are of a shared `&RefCell`. The flag must catch it.\n- `rt_refcell_ok` uses a cell in the ways of section 2, and must run as rustc's build does.\n- `rt_let_temporaries_drop` and `rt_scrutinee_temporaries_drop` check the drop times of section 3 with values that\n  print when dropped.\n- `borrow_refcell_guard_outlives`, `borrow_refcell_guard_move_cell`, `borrow_mutex_guard_move_mutex`,\n  `borrow_refcell_guard_deref_outlives` and `borrow_mutex_guard_deref_outlives` are the rejections of section 2. A\n  reference through a guard (`&g[0]`, `&mut *g`) borrows the guard, so dropping the guard under it is rejected too.\n\nWhile checking the drop times, an older leak turned up. A pattern that moves some parts of a value out and leaves\nthe rest to `_` or `..` never drops the rest: `let (a, _) = pair();`, `let W { a, .. } = w;`, `match pair() { (a, _)\n=> .. }`. Nothing is dropped twice. Fixing it means dropping, for each pattern, the parts it does not move, in the\ncode that tracks moves, so it was left as `rt_pattern_partial_move`, marked `todo` and listed in TODO.md.\n\nAnother older gap is in the region check. A block whose value borrows one of its own locals through another local\n(`{ let v = ..; let r = &v; r }`), or through what a by-value method returns (`{ Some(&v).unwrap() }`), is accepted.\n`{ let v = ..; &v }` is rejected. It holds for references as much as for guards, so it is left to the region-check\nwork as `region_block_tail_escapes`.\n\n## 5. Checks\n\n- The security tests pass, including `cves.txt`, the table of unsafe APIs and TODO.md.\n- The wasm tests pass, and the RefCell cases print under wasm what rustc's builds print.\n- tests/ui: no regressions.\n- Native builds of examples, `tests/probe` and `bench/rt` print what rustc's builds print: 140 programs.\n- The new cases and the test programs written for this change run clean under valgrind.",
+        "contentHash": "d750bd92c025d1e0a6d38b038df496a89ffa3f10566a0b9943e58fbf894f7d11"
       },
       "target": {
         "source": "docs_reports_2026-11-21-02-refcell-guards.ja",
         "path": "docs/ja/reports/2026-11-21-02-refcell-guards.md",
         "startLine": 1,
-        "endLine": 100,
-        "quote": "# RefCell の借用フラグとガード、一時値を drop する時\n\n日付: 2026-11-21\n\nzustc の `RefCell` には借用フラグがなかった。`borrow` と `borrow_mut` はただの参照を返していた。そのため、1 つの\nセルへの 2 つの `borrow_mut` が safe なコードに同じ値への `&mut` を 2 つ渡した。また、`borrow` を回すループの中の\n`borrow_mut` が、ループの読んでいるバッファを解放しえた。この変更では `RefCell` に std と同じフラグを持たせ、`borrow` /\n`borrow_mut` がガード `Ref` / `RefMut` を返すようにした。[セキュリティのレポート](2026-11-21-01-security-cves.md)が\n残した [TODO.md](../../../TODO.md) の最初の項目である。\n\n## 1. フラグとガード\n\nprelude の `RefCell<T>` は、std のものと同じく `isize` を持つようになった。0 は空き、正の数はその数の共有の借用、-1 は\n1 つの可変の借用を表す。\n\n- `borrow` はセルが可変に借用されていれば panic し、`borrow_mut` は少しでも借用されていれば panic する。そうでなければ\n  どちらもガードを返し、ガードの `Drop` が借用を返す。\n- panic は std と同じもの (`RefCell already borrowed`、`RefCell already mutably borrowed`) を、std の\n  `#[track_caller]` と同じく呼んだ所の行と列で出す。`unwrap` がすでに持つ仕組み (呼ぶ前に場所を書いておく) を使う。\n- `try_borrow` と `try_borrow_mut` は `BorrowError` / `BorrowMutError` を返す。`Debug` と `Display` は std と同じ。\n- `replace`・`replace_with`・`take`・`swap` は `borrow_mut` を通すので、std と同じく、生きている借用があれば panic する。\n- 可変に借用されているセルの `{:?}` は `RefCell { value: <borrowed> }` を出す。\n- `Ref::map`・`RefMut::map`・`Ref::clone` がある。\n  - std と同じくメソッドではなく関連関数なので、`g.map(..)` と `g.clone()` は今までどおりガードを通して値のものになる。\n  - パスは `Path::new` と同じく prelude の関数に対応させる。\n\n## 2. ガードを通して値を使う\n\nガードが役に立つのは、その後ろの値を、直接借用したときのように使えるときだけである。std のコードがガードを使う形の\nそれぞれで、ガードを通す deref が別の場所に必要だった。\n\n- `c.borrow().len`: 値のフィールド (型推論がガードの先を見る)\n- `c.borrow().to_uppercase()`・`c.borrow_mut().push(1)`: 値のメソッド (`String` と `Vec` の組み込みのものを含む)\n- `total` が `&[i32]` を受け取るときの `total(&c.borrow())`: `&Ref<Vec<T>>` から `&T`・`&[T]`・`&str` への型強制\n- `*c.borrow()`: 一時値のガードの deref\n- `for x in c.borrow().iter()`・`for x in g.iter_mut()`: ガードが持つものを回すループ\n\n`RefMut` を通したメソッドが `&mut *g` を取るのは、そのメソッドが `&mut self` を受け取るときだけである。添字は、autoderef と\n同じくガードの共有の借用を通して読む。そのため `let g = c.borrow_mut(); g[0]` は受け付け、値を変えるときだけ `let mut g` が\n要る。\n\nここで rustc が拒否するものは拒否する。\n\n- `Ref` を通した `iter_mut` や `&mut self` のメソッド (E0596)\n- ガードを通した、`self` を値で受け取るメソッド (E0507)\n- セルより長く生きるガード (E0597、E0515) と、ガードが生きている間のセルのムーブ (E0505)\n\n  ガードは生ポインタを持つので、借用検査はこれを prelude のビューの 1 つとして数える。ビューは `Iter` と同じく、作った元の\n  貸し出しを持つ。同じ確認で、`MutexGuard` が `lock()` の返す `Result` の中で Mutex の貸し出しを失っていたことが分かった。\n  今は持ち続ける。\n\n## 3. 一時値を drop する時\n\nガードがあると、遅すぎる一時値の drop は正しいプログラムの panic になる。そのため、zustc が一時値を drop する時を\nrustc に合わせる必要があった。合っていなかったのは 3 つである。\n\n- `let` の初期化式の一時値は、すべてブロックの終わりまで残していた。rustc は、初期化式がその構文で延ばすのでなければ、\n  `let` の終わりで drop する。延ばす構文は `&temp()` と、タプル・配列・キャスト・struct リテラル・ブロックの末尾の中の\n  それである。zustc も今はそうする。束縛した値の型が参照を含むときと、パターンに `ref` の束縛があるときも残す。drop\n  された一時値を借用する値は rustc が拒否する (E0716) が、zustc にはまだそれが見えない。以前は\n  `let n = c.borrow().len();` がガードを生かしたままにし、次の `c.borrow_mut()` が panic した。\n- 分解する `let` でも同じ: `let (n, _) = (c.borrow().len(), 0);`\n- `if let` の match 対象の一時値は、Rust 2024 と同じく `if let` の終わりで drop する。else のブロックの前と、then の\n  ブロックの後 (その値が参照を含みうるときを除く) である。`let ... else` のものは else のブロックの前で drop する。以前は\n  else のブロックの中や、同じ文のその後での `borrow_mut` が panic した。\n\n1 つ目の修正で tests/ui の 2 つのテストが通るようになった: `nll/issue-53570.rs` と `mir/mir_early_return_scope.rs`。\n`coercion/unsize-lifetime-shrinking.rs` は印の行で拒否されるようになったが、そのテストが確かめる理由とは別の理由なので、\n`bench/rust_ui_accidental.txt` に載せた。\n\n## 4. テスト\n\n`tests/security/` に:\n\n- `rt_refcell`: 1 つのセルの 2 つの借用を 3 通りに重ね、どれも panic しなければならない。`todo` の印を外した。\n- `rt_refcell_iter_invalidation`: `c.borrow().iter()` を回すループが読んでいる間に、`borrow_mut` で Vec に push する。\n  借用検査からは見えない (どちらの借用も共有の `&RefCell` のもの)。フラグが捕まえなければならない。\n- `rt_refcell_ok`: 2 節の形でセルを使い、rustc のビルドと同じに動かなければならない。\n- `rt_let_temporaries_drop`・`rt_scrutinee_temporaries_drop`: drop されると出力する値で、3 節の drop の時を確かめる。\n- `borrow_refcell_guard_outlives`・`borrow_refcell_guard_move_cell`・`borrow_mutex_guard_move_mutex`・\n  `borrow_refcell_guard_deref_outlives`・`borrow_mutex_guard_deref_outlives`: 2 節の拒否。ガードを通した参照 (`&g[0]`、\n  `&mut *g`) はガードを借用するので、その下でのガードの drop も拒否する。\n\ndrop の時を確かめている間に、以前からのリークが見つかった。値の一部をムーブし、残りを `_` か `..` に任せるパターンは、\nその残りを drop しない: `let (a, _) = pair();`、`let W { a, .. } = w;`、`match pair() { (a, _) => .. }`。二重に drop\nされるものはない。直すには、ムーブを追う処理の中で、パターンごとにムーブしない部分を drop することになる。そのため\n`rt_pattern_partial_move` として残し、`todo` の印を付けて TODO.md に載せた。\n\nもう 1 つ、region check に以前からの穴がある。ブロックの値が、別のローカル変数を通して (`{ let v = ..; let r = &v; r }`)、\nまたは値で受け取るメソッドの戻り値を通して (`{ Some(&v).unwrap() }`)、そのブロック自身のローカル変数を借用していても\n受け付ける。`{ let v = ..; &v }` は拒否する。ガードだけでなく参照でも同じなので、`region_block_tail_escapes` として\nregion check の作業に残した。\n\n## 5. 確認\n\n- セキュリティのテストが通る (`cves.txt`、unsafe な API の表、TODO.md を含む)。\n- wasm のテストが通る。RefCell のケースは wasm の下でも rustc のビルドと同じものを出す。\n- tests/ui: 後退なし。\n- examples・`tests/probe`・`bench/rt` の native のビルドが rustc のビルドと同じものを出す: 140 個のプログラム。\n- 新しいケースと、この変更のために書いたテストのプログラムは、valgrind の下で問題なく動く。",
-        "contentHash": "34d943768de519d81cac6dece47e5e049a0f4cd5de07f93813bb23d3eb54872d"
+        "endLine": 102,
+        "quote": "# RefCell の借用フラグとガード、一時値を drop する時\n\n日付: 2026-11-21\n\nzustc の `RefCell` には借用フラグがなかった。`borrow` と `borrow_mut` はただの参照を返していた。そのため、1 つの\nセルへの 2 つの `borrow_mut` が safe なコードに同じ値への `&mut` を 2 つ渡した。また、`borrow` を回すループの中の\n`borrow_mut` が、ループの読んでいるバッファを解放しえた。この変更では `RefCell` に std と同じフラグを持たせ、`borrow` /\n`borrow_mut` がガード `Ref` / `RefMut` を返すようにした。[セキュリティのレポート](2026-11-21-01-security-cves.md)が\n残した [TODO.md](../../../TODO.md) の最初の項目である。\n\n## 1. フラグとガード\n\nprelude の `RefCell<T>` は、std のものと同じく `isize` を持つようになった。0 は空き、正の数はその数の共有の借用、-1 は\n1 つの可変の借用を表す。\n\n- `borrow` はセルが可変に借用されていれば panic し、`borrow_mut` は少しでも借用されていれば panic する。そうでなければ\n  どちらもガードを返し、ガードの `Drop` が借用を返す。\n- panic は std と同じもの (`RefCell already borrowed`、`RefCell already mutably borrowed`) を、std の\n  `#[track_caller]` と同じく呼んだ所の行と列で出す。`unwrap` がすでに持つ仕組み (呼ぶ前に場所を書いておく) を使う。\n- `try_borrow` と `try_borrow_mut` は `BorrowError` / `BorrowMutError` を返す。`Debug` と `Display` は std と同じ。\n- `replace`・`replace_with`・`take`・`swap` は `borrow_mut` を通すので、std と同じく、生きている借用があれば panic する。\n- 可変に借用されているセルの `{:?}` は `RefCell { value: <borrowed> }` を出す。\n- `Ref::map`・`RefMut::map`・`Ref::clone` がある。\n  - std と同じくメソッドではなく関連関数なので、`g.map(..)` と `g.clone()` は今までどおりガードを通して値のものになる。\n  - パスは `Path::new` と同じく prelude の関数に対応させる。\n\n## 2. ガードを通して値を使う\n\nガードが役に立つのは、その後ろの値を、直接借用したときのように使えるときだけである。std のコードがガードを使う形の\nそれぞれで、ガードを通す deref が別の場所に必要だった。\n\n- `c.borrow().len`: 値のフィールド (型推論がガードの先を見る)\n- `c.borrow().to_uppercase()`・`c.borrow_mut().push(1)`: 値のメソッド (`String` と `Vec` の組み込みのものを含む)\n- `total` が `&[i32]` を受け取るときの `total(&c.borrow())`: `&Ref<Vec<T>>` から `&T`・`&[T]`・`&str` への型強制\n- `*c.borrow()`: 一時値のガードの deref\n- `for x in c.borrow().iter()`・`for x in g.iter_mut()`: ガードが持つものを回すループ\n\n`RefMut` を通したメソッドが `&mut *g` を取るのは、そのメソッドが `&mut self` を受け取るときだけである (プリミティブ型\nへの trait のメソッドも含む。そうでなければコピーを変えてしまう)。添字は、autoderef と\n同じくガードの共有の借用を通して読む。そのため `let g = c.borrow_mut(); g[0]` は受け付け、値を変えるときだけ `let mut g` が\n要る。\n\nここで rustc が拒否するものは拒否する。\n\n- `Ref` を通した `iter_mut` や `&mut self` のメソッド (E0596)\n- ガードを通した、`self` を値で受け取るメソッド (E0507)\n- セルより長く生きるガード (E0597、E0515) と、ガードが生きている間のセルのムーブ (E0505)\n- 別のスレッドに送るガード (E0277): その drop はセルのフラグを変えるが、フラグはアトミックではない\n\n  ガードは生ポインタを持つので、借用検査はこれを prelude のビューの 1 つとして数える。ビューは `Iter` と同じく、作った元の\n  貸し出しを持つ。同じ確認で、`MutexGuard` が `lock()` の返す `Result` の中で Mutex の貸し出しを失っていたことが分かった。\n  今は持ち続ける。\n\n## 3. 一時値を drop する時\n\nガードがあると、遅すぎる一時値の drop は正しいプログラムの panic になる。そのため、zustc が一時値を drop する時を\nrustc に合わせる必要があった。合っていなかったのは 3 つである。\n\n- `let` の初期化式の一時値は、すべてブロックの終わりまで残していた。rustc は、初期化式がその構文で延ばすのでなければ、\n  `let` の終わりで drop する。延ばす構文は `&temp()` と、タプル・配列・キャスト・struct リテラル・ブロックの末尾の中の\n  それである。zustc も今はそうする。束縛した値の型が参照を含むときと、パターンに `ref` の束縛があるときも残す。drop\n  された一時値を借用する値は rustc が拒否する (E0716) が、zustc にはまだそれが見えない。以前は\n  `let n = c.borrow().len();` がガードを生かしたままにし、次の `c.borrow_mut()` が panic した。\n- 分解する `let` でも同じ: `let (n, _) = (c.borrow().len(), 0);`\n- `if let` の match 対象の一時値は、Rust 2024 と同じく `if let` の終わりで drop する。else のブロックの前と、then の\n  ブロックの後 (その値が参照を含みうるときを除く) である。`let ... else` のものは else のブロックの前で drop する。以前は\n  else のブロックの中や、同じ文のその後での `borrow_mut` が panic した。\n\n1 つ目の修正で tests/ui の 2 つのテストが通るようになった: `nll/issue-53570.rs` と `mir/mir_early_return_scope.rs`。\n`coercion/unsize-lifetime-shrinking.rs` は印の行で拒否されるようになったが、そのテストが確かめる理由とは別の理由なので、\n`bench/rust_ui_accidental.txt` に載せた。\n\n## 4. テスト\n\n`tests/security/` に:\n\n- `rt_refcell`: 1 つのセルの 2 つの借用を 3 通りに重ね、どれも panic しなければならない。`todo` の印を外した。\n- `rt_refcell_iter_invalidation`: `c.borrow().iter()` を回すループが読んでいる間に、`borrow_mut` で Vec に push する。\n  借用検査からは見えない (どちらの借用も共有の `&RefCell` のもの)。フラグが捕まえなければならない。\n- `rt_refcell_ok`: 2 節の形でセルを使い、rustc のビルドと同じに動かなければならない。\n- `rt_let_temporaries_drop`・`rt_scrutinee_temporaries_drop`: drop されると出力する値で、3 節の drop の時を確かめる。\n- `borrow_refcell_guard_outlives`・`borrow_refcell_guard_move_cell`・`borrow_mutex_guard_move_mutex`・\n  `borrow_refcell_guard_deref_outlives`・`borrow_mutex_guard_deref_outlives`: 2 節の拒否。ガードを通した参照 (`&g[0]`、\n  `&mut *g`) はガードを借用するので、その下でのガードの drop も拒否する。\n\ndrop の時を確かめている間に、以前からのリークが見つかった。値の一部をムーブし、残りを `_` か `..` に任せるパターンは、\nその残りを drop しない: `let (a, _) = pair();`、`let W { a, .. } = w;`、`match pair() { (a, _) => .. }`。二重に drop\nされるものはない。直すには、ムーブを追う処理の中で、パターンごとにムーブしない部分を drop することになる。そのため\n`rt_pattern_partial_move` として残し、`todo` の印を付けて TODO.md に載せた。\n\nもう 1 つ、region check に以前からの穴がある。ブロックの値が、別のローカル変数を通して (`{ let v = ..; let r = &v; r }`)、\nまたは値で受け取るメソッドの戻り値を通して (`{ Some(&v).unwrap() }`)、そのブロック自身のローカル変数を借用していても\n受け付ける。`{ let v = ..; &v }` は拒否する。ガードだけでなく参照でも同じなので、`region_block_tail_escapes` として\nregion check の作業に残した。\n\n## 5. 確認\n\n- セキュリティのテストが通る (`cves.txt`、unsafe な API の表、TODO.md を含む)。\n- wasm のテストが通る。RefCell のケースは wasm の下でも rustc のビルドと同じものを出す。\n- tests/ui: 後退なし。\n- examples・`tests/probe`・`bench/rt` の native のビルドが rustc のビルドと同じものを出す: 140 個のプログラム。\n- 新しいケースと、この変更のために書いたテストのプログラムは、valgrind の下で問題なく動く。",
+        "contentHash": "eff871ee1beb4512056ba09482f303c1937d13aeeb250df5f550c5470f07fe89"
       },
       "context": [],
-      "candidateId": "57ae9f00396628d284af4e169f144a3f72fd1b22a2d2021a5e7d72aaec182bae",
-      "contextHash": "82b060a7658ad5e46fe8e9f4e534053a46dff58c74525ea33e7c43c17e29ed02",
+      "candidateId": "26cac7392a8dc4cab575b916e35e8e5216eed41277f5b54acbf6f04857f415f2",
+      "contextHash": "0b80accfa94c5b38ba9a5a907f337dfaa274c72bc632be2ff55655cef05112aa",
       "judgment": {
         "choice": "supports",
-        "confidence": 0.61,
+        "confidence": 0.72,
         "probabilities": {
-          "supports": 0.71,
-          "contradicts": 0.28,
+          "supports": 0.79,
+          "contradicts": 0.2,
           "unrelated": 0,
           "insufficient_context": 0.01
         }
@@ -1041,8 +1041,8 @@
   },
   "usage": {
     "requests": 30,
-    "inputTokens": 149638,
-    "usd": 0.0062847960000000005
+    "inputTokens": 149777,
+    "usd": 0.006290634
   },
   "errors": []
 }

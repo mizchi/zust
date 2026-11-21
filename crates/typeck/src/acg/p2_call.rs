@@ -974,9 +974,17 @@ impl Cx<'_> {
     /// `thread::spawn(|| ..)`: the closure must own what it uses (E0373) and be Send (see not_send)
     /// Whether `x.m()` with x: t takes `&mut self` (a method of t's, or a builtin one of a slice / str that changes it)
     pub(crate) fn takes_mut_self(&self, t: Ty, m: &str) -> bool {
-        if let Ty::Struct(ts) = self.strip_refs(t) {
+        let t = self.strip_refs(t);
+        if let Ty::Struct(ts) = t {
             if let Some(id) = self.prog.method(ts, m).or_else(|| self.prog.default_method(ts, m)) {
                 return matches!(self.prog.sigs[id as usize].params.first(), Some(Ty::Ref(true, _)));
+            }
+        }
+        // (a trait's method of a primitive type's (`impl Inc for i32 { fn inc(&mut self) }`): through `&mut *g`,
+        // or it changes a copy)
+        if let Some(id) = self.prog.prim_self_method(t, m) {
+            if matches!(self.prog.sigs[id as usize].params.first(), Some(Ty::Ref(true, _))) {
+                return true;
             }
         }
         matches!(
@@ -2450,6 +2458,8 @@ fn auto_trait_fails(prog: &Program, t: Ty, sync: bool, seen: &mut Vec<(u32, bool
                 let args = &sd.args;
                 return match (name, sync) {
                     ("Rc", _) | ("MutexGuard" | "RwLockReadGuard" | "RwLockWriteGuard", false) => true,
+                    // (a RefCell's guards share the cell's non-atomic borrow flag: neither Send nor Sync, as in std)
+                    ("Ref" | "RefMut", _) => true,
                     ("Cell" | "RefCell" | "UnsafeCell" | "__Rcvr__", true) => true,
                     ("Mutex", true) => args.iter().any(|&a| send(a, seen)),
                     ("Arc" | "RwLock" | "OnceLock", true) | ("Arc", false) => args.iter().any(|&a| send(a, seen) || sync_(a, seen)),

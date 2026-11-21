@@ -106,4 +106,17 @@ fn main() {
     drop(g);
     cells.borrow_mut().sort();
     println!("{:?}", cells.borrow());
+    // (a `&mut self` method of a trait's on a primitive type, through the guard: it changes the cell, not a copy)
+    let n = RefCell::new(5i32);
+    n.borrow_mut().bump();
+    println!("{}", n.borrow());
+}
+
+trait Bump {
+    fn bump(&mut self);
+}
+impl Bump for i32 {
+    fn bump(&mut self) {
+        *self += 1;
+    }
 }

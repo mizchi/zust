@@ -332,6 +332,8 @@ impl Cx<'_> {
             self.release_outer(lexpr, sflag)?;
         }
         let (tv, tt) = self.block(then_branch, expected)?;
+        // (the pattern's bindings first: one may borrow from a temporary, a guard of a cell the temporary owns)
+        self.pop_scope();
         // (Rust 2024: the scrutinee's temporaries are dropped at the end of the `if let`, on this path after the then
         // block: `(if let Some(_) = c.borrow().first() { 1 } else { 0 }, c.borrow_mut().len())` does not panic. Not
         // when the result may borrow from them, which rustc rejects (E0716) and zustc does not see yet; never the
@@ -343,7 +345,6 @@ impl Cx<'_> {
                 self.emit_owned_drop(o);
             }
         }
-        self.pop_scope();
         self.finish_arm(tv, tt, merge, &mut result_ty, &mut param, SP)?;
         self.b.switch_to_block(else_blk);
         // (the scrutinee's temporaries are dropped before the else block (Rust 2024): `if let Some(x) =

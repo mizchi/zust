@@ -5,6 +5,7 @@
 //@ pattern: drops (each value dropped once, and at the time rustc drops it)
 //@ expect: run
 use std::cell::RefCell;
+use std::rc::Rc;
 struct D(u32);
 impl Drop for D {
     fn drop(&mut self) {
@@ -51,4 +52,9 @@ fn main() {
     // (dropped at the end of the `if let` on the then path too: the later element of the tuple borrows mutably)
     let t = (if let Some(x) = c.borrow().first() { *x } else { 0 }, c.borrow_mut().len());
     println!("{t:?}");
+    // (a binding that borrows from a temporary of the scrutinee (a guard of the cell an Rc temporary owns) is
+    // dropped before it: valgrind sees the other order)
+    if let Some(g) = Some(Rc::new(RefCell::new(7))).as_ref().map(|x| x.borrow()) {
+        println!("guard {}", *g);
+    }
 }
