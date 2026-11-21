@@ -4223,6 +4223,8 @@ compile-fail	nll/issue-58053.rs
 check-pass	nll/issue-61311-normalize.rs
 check-pass	nll/issue-61320-normalize.rs
 compile-fail	nll/issue-67007-escaping-data.rs
+compile-fail	nll/issue-69114-static-mut-ty.rs
+compile-fail	nll/issue-69114-static-ty.rs
 compile-fail	nll/issue-95272.rs
 compile-fail	nll/issue-98170.rs
 check-pass	nll/lint-no-err.rs

@@ -1885,6 +1885,38 @@ impl Cx<'_> {
         }
     }
 
+    /// A call through `dyn Fn(..)` whose bound writes lifetimes (s: the bound's text): the arguments flow into its
+    /// parameters' types, with the regions written there (those it elides are its own)
+    pub(crate) fn rg_dyn_fn_args(&mut self, s: &str, args: &[&Expr]) {
+        if !self.rg_on() || !s.contains('\'') {
+            return;
+        }
+        let Ok(Expr::Cast(_, pt)) = crate::parse::parse_expr(&format!("0 as &dyn {s}")) else { return };
+        let PTy::Ref(_, _, inner) = &*pt else { return };
+        let PTy::Dyn(bs) = &**inner else { return };
+        let Some(ps) = bs.iter().find_map(|b| match b {
+            crate::parse::Bound::Trait(_, p) => p.segs.last().and_then(|sg| sg.fn_args.as_ref()).map(|f| f.0.clone()),
+            _ => None,
+        }) else {
+            return;
+        };
+        let prog = self.prog;
+        for (a, p) in args.iter().zip(&ps) {
+            if !crate::regions::names_lt(p) {
+                continue;
+            }
+            let Ok(t) = self.parse_ty(p) else { continue };
+            let mut sl = crate::regions::Slots { lts: self.rg.lt_names.clone(), tparams: vec![], self_slots: &[], any: false, in_fn: 1 };
+            let mut codes = vec![];
+            sl.slots(p, false, &mut codes);
+            let lts = self.rg.lts.clone();
+            let Some(tree) = self.rg.instantiate(prog, t, Some(&codes), &lts, &[], &mut |me| me.var()) else { continue };
+            let Some((at, atr)) = self.rt_expr(a) else { continue };
+            let sp = super::borrowck::pos(a);
+            self.rg.flow(prog, at, t, &atr, &tree, sp);
+        }
+    }
+
     /// `let _: ann = init;`: init flows into a value of the annotation's type
     pub(crate) fn rg_let_wild(&mut self, ann: &PTy, init: &Expr) {
         if !self.rg_on() {
@@ -1955,7 +1987,24 @@ impl Cx<'_> {
 
     /// `place = value;`
     pub(crate) fn rg_assign(&mut self, place: &Expr, value: &Expr) {
+        // (a static assigned (`BAR = &n;`): every region of its type is 'static)
+        let stat = match strip(place) {
+            Expr::Path(None, p) if p.segs.len() == 1 && self.lookup(&p.segs[0].name).is_none() => {
+                self.prog.const_index.get(&p.segs[0].name).map(|&ci| &self.prog.consts[ci as usize]).filter(|c| c.stat.is_some()).map(|c| c.ty)
+            }
+            _ => None,
+        };
+        let stat = stat.and_then(|t| Some((t, count(self.prog, t, 0)?))).filter(|&(_, n)| n > 0);
+        if stat.is_some() && !self.rg.on && self.rg.eligible && self.inline_depth == 0 {
+            self.rg_late_on();
+        }
         if !self.rg_on() {
+            return;
+        }
+        if let Some((t, n)) = stat {
+            let Some((vt, vtr)) = self.rt_expr(value) else { return };
+            let prog = self.prog;
+            self.rg.flow(prog, vt, t, &vtr, &vec![STATIC; n], super::borrowck::pos(value));
             return;
         }
         let (Some((t, ptr, _)), Some((vt, vtr))) = (self.rt_place(place), self.rt_expr(value)) else { return };

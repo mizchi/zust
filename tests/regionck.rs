@@ -909,3 +909,14 @@ fn early_bound_through_type_parameter_bounds() {
     assert!(d.len() == 1 && d[0].0 == 7 && d[0].1.contains("E0195"), "{d:?}");
     assert_eq!(check("trait Test<'p> {}\ntrait NoLifetime {\n    fn get<'p, T: Test<'p>>(&self) -> u8;\n}\nstruct Foo;\nimpl NoLifetime for Foo {\n    fn get<'p, T: Test<'p>>(&self) -> u8 {\n        0\n    }\n}\nfn main() {}\n"), vec![]);
 }
+
+/// A call through `dyn Fn(&'static u8)` passes arguments of the regions its bound writes; a static's regions are
+/// 'static when it is assigned
+#[test]
+fn dyn_fn_calls_and_static_assignments() {
+    let d = check("static FOO: &'static (dyn Fn(&'static u8) + Send + Sync) = &drop;\nfn main() {\n    let n = 42;\n    FOO(&n);\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 4, "{d:?}");
+    let d = check("static FOO: u8 = 42;\nstatic mut BAR: &'static u8 = &FOO;\nfn set() {\n    let n = 42;\n    unsafe {\n        BAR = &n;\n    }\n}\nfn main() {\n    set();\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 6, "{d:?}");
+    assert_eq!(check("static FOO: u8 = 42;\nstatic mut BAR: &'static u8 = &FOO;\nfn take(f: &dyn Fn(&u8), n: &u8) {\n    f(n);\n}\nfn main() {\n    unsafe {\n        BAR = &FOO;\n    }\n    take(&|_| {}, &1);\n}\n"), vec![]);
+}

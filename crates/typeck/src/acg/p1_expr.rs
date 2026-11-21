@@ -2334,7 +2334,15 @@ impl Cx<'_> {
                 self.rg_took_call(c);
                 r
             }
-            Ty::Ref(_, Ty::Dyn(s)) | Ty::Box(Ty::Dyn(s)) => self.dyn_fn_call(v, s, &args, SP),
+            Ty::Ref(_, Ty::Dyn(s)) | Ty::Box(Ty::Dyn(s)) => {
+                // (a bound that writes `'static` (`dyn Fn(&'static u8)`): checked from here on)
+                if !self.rg.on && self.rg.eligible && self.inline_depth == 0 && s.contains("'static") {
+                    self.rg_late_on();
+                }
+                let r = self.dyn_fn_call(v, s, &args, SP);
+                self.rg_dyn_fn_args(s, &args);
+                r
+            }
             Ty::Fn(f) => self.indirect_call(Indirect::Ptr(v), &f.params, f.ret, &args, SP),
             t => err(SP, format!("expected a function, found `{}`", self.prog.tn(t))),
         };
