@@ -2443,6 +2443,7 @@ compile-fail	fn/fn-compare-mismatch.rs
 compile-fail	fn/fn-item-type.rs
 compile-fail	fn/fn-pointer-mismatch.rs
 compile-fail	fn/fn-ptr-pattern.rs
+check-pass	fn/fn-ptr-trait-int-float-infer-var.rs
 compile-fail	fn/fn-recover-return-sign.rs
 compile-fail	fn/fn-recover-return-sign2.rs
 compile-fail	fn/fn-trait-formatting.rs

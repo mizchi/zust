@@ -95,6 +95,25 @@ impl Cx<'_> {
     fn method_call_inner(&mut self, e: &Expr, expected: Option<Ty>) -> R<V> {
         let Expr::MethodCall(recv, method, gargs, margs, msp) = e else { unreachable!() };
         let msp = *msp;
+        // (`0.0.cmp()` with `impl MyCmp for f32` only: an unsuffixed literal takes the one numeric type whose impl has
+        // the method, when its default type (f64 / i32) has none)
+        if let Expr::Lit(t, sp) = strip_paren(recv) {
+            let (default, cands): (Ty, &[Ty]) = if is_float_lit(recv) {
+                (Ty::F64, &[Ty::F32])
+            } else if is_int_lit(recv) {
+                (Ty::I32, &[Ty::I8, Ty::I16, Ty::I64, Ty::I128, Ty::Isize, Ty::U8, Ty::U16, Ty::U32, Ty::U64, Ty::U128, Ty::Usize])
+            } else {
+                (Ty::Unit, &[])
+            };
+            if !cands.is_empty() && self.prog.prim_method(default, method).is_none() {
+                let mut found = cands.iter().filter(|&&c| self.prog.prim_method(c, method).is_some());
+                if let (Some(&c), None) = (found.next(), found.next()) {
+                    let lit = Expr::Lit(format!("{t}{}", self.prog.tn(c)), *sp);
+                    let ne: &Expr = self.keep_expr(Expr::MethodCall(Box::new(lit), method.clone(), gargs.clone(), margs.clone(), msp));
+                    return self.expr(ne, expected);
+                }
+            }
+        }
         // (`x.m()` with x of a type parameter `T: Tr` in a generic fn, instantiated as a primitive: Tr's `m`, which a
         // builtin method of the same name (`to_string` ..) would otherwise answer: `<T as Tr>::m(&x, ..)`)
         // (`impl Deref<Target = [T; N]>` (or a slice, str) with no method m of its own: `t.m()` is `t.deref().m()`,
