@@ -314,6 +314,16 @@ pub fn enabled() -> bool {
     *ON.get_or_init(|| std::env::var_os("ZUSTC_NO_REGIONCK").is_none())
 }
 
+/// t ends in a trait object (`dyn Tr`, `S<dyn Tr>` with the object its last type argument): the last region of its
+/// tree is the object's
+fn dyn_tail(prog: &Program, t: Ty, depth: u32) -> bool {
+    match t {
+        Ty::Dyn(_) => true,
+        Ty::Struct(sid) if depth < 8 && !is_closure(prog, sid) => prog.structs[sid as usize].args.last().is_some_and(|&a| dyn_tail(prog, a, depth + 1)),
+        _ => false,
+    }
+}
+
 fn lts_of(prog: &Program, base: u32) -> usize {
     prog.adt_regions.get(&base).map_or(0, |r| r.lts.len())
 }
@@ -1333,10 +1343,22 @@ impl Cx<'_> {
             Expr::Cast(x, ty) => {
                 let (it, itr) = self.rt_expr(x)?;
                 let to = self.parse_ty(ty).ok()?;
+                let prog = self.prog;
+                // (`p as _` with p a pointer to a trait object: as typeck, the same type when nothing else is expected;
+                // its lifetime inferred)
+                let infer = matches!(to, Ty::Param(h) if h == crate::program::HOLE) && matches!(it, Ty::Ptr(_, i) if dyn_tail(prog, *i, 0));
+                let to = if infer { it } else { to };
                 if to != it {
                     return None;
                 }
-                let prog = self.prog;
+                if infer {
+                    // (fresh regions; the object's outlived by the source's)
+                    let tree = self.rg.fresh(prog, to)?;
+                    if let (Some(&a), Some(&b)) = (itr.last(), tree.last()) {
+                        self.rg.edge(a, b, super::borrowck::pos(x));
+                    }
+                    return Some((to, tree));
+                }
                 let names = self.rg.lt_names.clone();
                 let mut s = crate::regions::Slots { lts: names, tparams: vec![], self_slots: &[], any: false, in_fn: 0 };
                 let mut codes = vec![];
@@ -1348,9 +1370,10 @@ impl Cx<'_> {
                 let tree = tree?;
                 // (a cast of a raw pointer may change the regions of what it points to; not a trait object's
                 // lifetime: `*mut (dyn Tr + 'a) as *mut (dyn Tr + 'static)` is an error)
+                // (`*mut S<dyn Tr + 'a>` too: the object at the end of what it points to)
                 match to {
-                    Ty::Ptr(_, Ty::Dyn(_)) => {
-                        if let (Some(&a), Some(&b)) = (itr.first(), tree.first()) {
+                    Ty::Ptr(_, i) if dyn_tail(prog, *i, 0) => {
+                        if let (Some(&a), Some(&b)) = (itr.last(), tree.last()) {
                             self.rg.edge(a, b, super::borrowck::pos(x));
                         }
                     }

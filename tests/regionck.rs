@@ -688,3 +688,14 @@ fn invariant_through_trait_object_arguments() {
     assert!(d.len() == 1 && d[0].0 == 5, "{d:?}");
     assert_eq!(check("struct Inv<'a> {\n    f: Box<dyn FnOnce(&mut &'a isize) + 'static>,\n}\nfn same<'r>(b: Inv<'r>) -> Inv<'r> {\n    b\n}\nfn main() {}\n"), vec![]);
 }
+
+/// A cast of a pointer to a trait object (or to a struct ending in one) may not lengthen the object's lifetime, also
+/// when the target is inferred (`as _`)
+#[test]
+fn pointer_casts_keep_the_object_lifetime() {
+    let d = check("trait Trait {}\nfn f<'a>(p: *mut (dyn Trait + 'a)) -> *mut (dyn Trait + 'static) {\n    p as _\n}\nfn main() {}\n");
+    assert!(d.len() == 1 && d[0].0 == 3, "{d:?}");
+    let d = check("trait Trait {}\nstruct W<T: ?Sized>(T);\nfn f<'a>(p: *mut W<dyn Trait + 'a>) -> *mut W<dyn Trait + 'static> {\n    p as _\n}\nfn main() {}\n");
+    assert!(d.len() == 1 && d[0].0 == 4, "{d:?}");
+    assert_eq!(check("trait Trait {}\nfn f<'a>(p: *mut (dyn Trait + 'static)) -> *mut (dyn Trait + 'a) {\n    p as _\n}\nfn main() {}\n"), vec![]);
+}
