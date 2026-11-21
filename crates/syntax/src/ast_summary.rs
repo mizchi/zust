@@ -603,10 +603,13 @@ fn parse_sig(sig: &PSig, is_extern: bool, is_main: bool, owner: Option<&Owner>) 
             if let Some(r) = &sig.ret {
                 if lifetime_positions(r).0 > 0 {
                     let inputs: usize = sig.params.iter().map(|(_, t)| lifetime_positions(t).1).sum();
-                    if inputs != 1 {
-                        // (at the result's type)
+                    // (none written, but a parameter's type may be a struct (or an alias) with lifetimes it leaves out:
+                    // `fn f(s: S) -> &T` with `struct S<'a>`; the summary does not see it)
+                    let hidden = inputs == 0 && sig.params.iter().any(|(_, t)| may_hide_lifetimes(t));
+                    if inputs != 1 && !hidden {
+                        // (at the elided reference of the result)
                         let m = "missing lifetime specifier (E0106)";
-                        return Err(match crate::wf::pos_of(r) {
+                        return Err(match elided_pos(r).or_else(|| crate::wf::pos_of(r)) {
                             Some(p) => format!("{}:{}: {m}", p.line, p.col + 1),
                             None => m.to_string(),
                         });
@@ -752,6 +755,35 @@ fn bound_lifetimes(g: &Generics, out: &mut Vec<String>) {
         if matches!(t, PTy::Path(None, p) if p.segs.len() == 1 && p.segs[0].args.is_empty()) {
             bs_of(bs, out);
         }
+    }
+}
+
+/// t names a type with no lifetime arguments that may have lifetimes (a struct or an alias of the program's)
+fn may_hide_lifetimes(t: &PTy) -> bool {
+    match t {
+        PTy::Ref(_, _, i) | PTy::Ptr(_, i) | PTy::Slice(i) | PTy::Array(i, _) => may_hide_lifetimes(i),
+        PTy::Tuple(ts) => ts.iter().any(may_hide_lifetimes),
+        PTy::Path(None, p) => p.segs.last().is_some_and(|s| {
+            let std = matches!(s.name.as_str(), "String" | "Vec" | "Box" | "Option" | "Result" | "Rc" | "Arc" | "HashMap" | "HashSet" | "BTreeMap" | "BTreeSet" | "VecDeque" | "str" | "Self")
+                || s.name.chars().next().is_some_and(|c| c.is_ascii_lowercase());
+            let lts = s.args.iter().any(|a| matches!(a, crate::parse::GArg::Lifetime(_)));
+            (!std && !lts) || s.args.iter().any(|a| matches!(a, crate::parse::GArg::Ty(t) if may_hide_lifetimes(t)))
+        }),
+        _ => false,
+    }
+}
+
+/// Where t's first elided reference is (the type it refers to)
+fn elided_pos(t: &PTy) -> Option<crate::parse::Pos> {
+    match t {
+        PTy::Ref(l, _, i) if l.as_deref().is_none_or(|l| l == "'_") => crate::wf::pos_of(i),
+        PTy::Ref(_, _, i) | PTy::Ptr(_, i) | PTy::Slice(i) | PTy::Array(i, _) => elided_pos(i),
+        PTy::Tuple(ts) => ts.iter().find_map(elided_pos),
+        PTy::Path(None, p) => p.segs.iter().flat_map(|s| s.args.iter()).find_map(|a| match a {
+            crate::parse::GArg::Ty(t) => elided_pos(t),
+            _ => None,
+        }),
+        _ => None,
     }
 }
 
