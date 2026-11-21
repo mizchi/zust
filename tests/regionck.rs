@@ -312,3 +312,27 @@ fn main() {
 "#;
     assert_eq!(check(ok), vec![]);
 }
+
+/// A closure holds what it captures: by value, the value's regions; by reference, a borrow of the local
+#[test]
+fn closure_captures() {
+    one_error("fn f(x: &isize) -> Box<dyn FnMut() -> isize + 'static> {\n    Box::new(move || *x)\n}\nfn main() {}\n", 2);
+    one_error("fn consume<T: 'static>(_: T) {}\nfn foo<'a>(u: &'a u8) {\n    let c = move || u;\n    consume(c);\n}\nfn main() {}\n", 4);
+    let d = check("fn f(x: &i32) -> Box<dyn Fn() -> i32> {\n    Box::new(|| *x)\n}\nfn main() {}\n");
+    assert!(d.len() == 1 && d[0].0 == 2, "{d:?}");
+    let ok = r#"
+fn g<'a>(x: &'a isize) -> Box<dyn FnMut() -> isize + 'a> { Box::new(move || *x) }
+fn consume<T: 'static>(_: T) {}
+fn h<F: Fn() -> usize>(f: F) -> usize { f() }
+fn main() {
+    let v = vec![1, 2];
+    let n = h(|| v.len());
+    let s = String::from("a");
+    consume(move || s.len());
+    let w = 3;
+    let c = || w + 1;
+    println!("{} {}", n, c());
+}
+"#;
+    assert_eq!(check(ok), vec![]);
+}

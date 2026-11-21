@@ -1664,6 +1664,7 @@ impl Cx<'_> {
             self.requested.push(iid);
         }
         let st = Ty::Struct(sid);
+        self.rg_closure(c, st);
         let a = self.temp(st);
         let fields = prog.structs[sid as usize].fields.clone();
         for (i, ((loc, t), (_, ft, off))) in caps.into_iter().zip(fields).enumerate() {

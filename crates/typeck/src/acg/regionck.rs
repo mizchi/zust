@@ -167,6 +167,14 @@ fn is_closure(prog: &Program, sid: u32) -> bool {
     prog.closure_of_struct.contains_key(&prog.base_of(sid))
 }
 
+/// A closure's captures: their types (among its type arguments: a capture by reference is a pointer to it) and
+/// whether each is held by value
+fn captures(prog: &Program, sid: u32) -> Option<(&[Ty], &[bool])> {
+    let cd = prog.closures.get(prog.closure_of_struct.get(&prog.base_of(sid))?)?;
+    let args = prog.structs[sid as usize].args.get(cd.n_parent..cd.n_parent + cd.captures.len())?;
+    Some((args, &cd.moved))
+}
+
 /// The number of region slots of t (None: not followed)
 pub fn count(prog: &Program, t: Ty, depth: u32) -> Option<usize> {
     if depth > 24 {
@@ -176,8 +184,17 @@ pub fn count(prog: &Program, t: Ty, depth: u32) -> Option<usize> {
         Ty::Ref(_, i) => 1 + count(prog, *i, depth + 1)?,
         Ty::Ptr(_, i) | Ty::Box(i) | Ty::Array(i, _) | Ty::Slice(i) => count(prog, *i, depth + 1)?,
         Ty::Struct(sid) => {
+            // (a closure: the regions of what it captures, a capture by reference the borrow's region first)
             if is_closure(prog, sid) {
-                return None;
+                let (ts, moved) = captures(prog, sid)?;
+                let mut n = 0;
+                for (j, &a) in ts.iter().enumerate() {
+                    n += match (moved.get(j).copied().unwrap_or(false), a) {
+                        (false, Ty::Ptr(_, i)) => 1 + count(prog, *i, depth + 1)?,
+                        _ => count(prog, a, depth + 1)?,
+                    };
+                }
+                return Some(n);
             }
             let mut n = lts_of(prog, prog.base_of(sid));
             for &a in &prog.structs[sid as usize].args {
@@ -601,6 +618,20 @@ impl Rg {
             }
             Ty::Ptr(m, i) => self.rel(prog, *i, sub, sup, k, if m { v.then(Var::Inv) } else { v }, sp, depth + 1),
             Ty::Box(i) | Ty::Array(i, _) | Ty::Slice(i) => self.rel(prog, *i, sub, sup, k, v, sp, depth + 1),
+            // (a closure: covariant in what it captures)
+            Ty::Struct(sid) if is_closure(prog, sid) => {
+                let Some((ts, moved)) = captures(prog, sid) else { return };
+                for (j, &a) in ts.iter().enumerate() {
+                    match (moved.get(j).copied().unwrap_or(false), a) {
+                        (false, Ty::Ptr(_, i)) => {
+                            self.constrain(sub[*k], sup[*k], v, sp);
+                            *k += 1;
+                            self.rel(prog, *i, sub, sup, k, v, sp, depth + 1);
+                        }
+                        _ => self.rel(prog, a, sub, sup, k, v, sp, depth + 1),
+                    }
+                }
+            }
             Ty::Struct(sid) => {
                 let base = prog.base_of(sid);
                 let n = lts_of(prog, base);
@@ -956,7 +987,7 @@ impl Cx<'_> {
                 out.extend(tr);
                 Some((Ty::Ref(*m, crate::types::intern(t)), out))
             }
-            Expr::Call(..) | Expr::MethodCall(..) | Expr::Struct(..) | Expr::Tuple(..) => self.rg.calls.get(&(e as *const Expr as usize)).cloned(),
+            Expr::Call(..) | Expr::MethodCall(..) | Expr::Struct(..) | Expr::Tuple(..) | Expr::Closure(..) => self.rg.calls.get(&(e as *const Expr as usize)).cloned(),
             // (`e as &'static T`: the cast's type, with the regions written in it; e flows into it)
             Expr::Cast(x, ty) => {
                 let (it, itr) = self.rt_expr(x)?;
@@ -1197,6 +1228,8 @@ impl Cx<'_> {
             return;
         }
         let recv_info = recv.as_ref().map(|r| r.1);
+        // (a call whose span is not known: at its first argument)
+        let sp = if sp.line == 0 { args.first().map(|a| super::borrowck::pos(a)).filter(|s| s.line != 0).unwrap_or(sp) } else { sp };
         self.rg.last_call = None;
         let prog = self.prog;
         let sig0 = &prog.sigs[id as usize];
@@ -1363,6 +1396,37 @@ impl Cx<'_> {
             k += c;
         }
         self.rg.calls.insert(e as *const Expr as usize, (t, tree));
+    }
+
+    /// A closure's value of type t: what it captures by value, and borrows of what it captures by reference
+    pub(crate) fn rg_closure(&mut self, c: &Expr, t: Ty) {
+        if !self.rg_on() {
+            return;
+        }
+        let prog = self.prog;
+        let Ty::Struct(sid) = t else { return };
+        let Some(cd) = prog.closure_of_struct.get(&prog.base_of(sid)).and_then(|cid| prog.closures.get(cid)) else { return };
+        let sp = super::borrowck::pos(c);
+        let mut tree = vec![];
+        for (i, n) in cd.captures.iter().enumerate() {
+            let seg = crate::parse::Seg { name: n.clone(), args: vec![], fn_args: None, text: n.clone() };
+            let p = Expr::Path(None, crate::parse::Path { global: false, segs: vec![seg], pos: Default::default() });
+            let Some((_, tr, derefs)) = self.rt_place(&p) else { return };
+            if !cd.moved.get(i).copied().unwrap_or(false) {
+                let r = self.rg.var();
+                if derefs.is_empty() {
+                    self.rg.loans.push((r, n.clone(), sp));
+                }
+                for d in derefs {
+                    self.rg.edge(d, r, sp);
+                }
+                tree.push(r);
+            }
+            tree.extend(tr);
+        }
+        if count(prog, t, 0) == Some(tree.len()) {
+            self.rg.calls.insert(c as *const Expr as usize, (t, tree));
+        }
     }
 
     /// `Box::new(x)` (x of type t): the box's tree is x's
