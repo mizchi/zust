@@ -4236,6 +4236,7 @@ compile-fail	nll/user-annotations/patterns.rs
 compile-fail	nll/user-annotations/region-error-ice-109072.rs
 check-pass	nll/user-annotations/type-annotation-with-hrtb.rs
 compile-fail	nll/where_clauses_in_functions.rs
+compile-fail	nll/where_clauses_in_structs.rs
 run-pass	non_modrs_mods/non_modrs_mods.rs
 compile-fail	not-panic/not-panic-safe-2.rs
 compile-fail	not-panic/not-panic-safe-3.rs
@@ -5292,12 +5293,14 @@ run-pass	regions/owned-implies-static.rs
 compile-fail	regions/region-borrow-params-issue-29793-big.rs
 check-pass	regions/region-bound-extra-bound-in-inherent-impl.rs
 check-pass	regions/region-bound-same-bounds-in-trait-and-impl.rs
+compile-fail	regions/region-invariant-static-error-reporting.rs
 compile-fail	regions/region-lifetime-bounds-on-fns-where-clause.rs
 compile-fail	regions/region-multiple-lifetime-bounds-on-fns-where-clause.rs
 check-pass	regions/region-object-lifetime-1.rs
 compile-fail	regions/region-object-lifetime-2.rs
 check-pass	regions/region-object-lifetime-3.rs
 compile-fail	regions/region-object-lifetime-4.rs
+compile-fail	regions/region-object-lifetime-5.rs
 compile-fail	regions/region-object-lifetime-in-coercion.rs
 compile-fail	regions/regions-addr-of-arg.rs
 run-pass	regions/regions-addr-of-interior-of-unique-box.rs
@@ -5336,6 +5339,7 @@ check-pass	regions/regions-fn-subtyping-return-static.rs
 run-pass	regions/regions-fn-subtyping.rs
 compile-fail	regions/regions-free-region-ordering-callee-4.rs
 compile-fail	regions/regions-free-region-ordering-callee.rs
+compile-fail	regions/regions-free-region-ordering-caller.rs
 compile-fail	regions/regions-free-region-ordering-caller1.rs
 run-pass	regions/regions-free-region-outlives-static-outlives-free-region.rs
 compile-fail	regions/regions-glb-free-free.rs

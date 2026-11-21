@@ -125,6 +125,8 @@ pub struct Rg {
     pub externals: Vec<u32>,
     /// The elements' tree of the array or slice a slice pattern matches
     pub pat_elem: Option<(Ty, RT)>,
+    /// Rg::wf: imp's relations are required, at this span
+    pub wf_sp: Option<Sp>,
 }
 
 /// Closure region codes (Rg::closure): a placeholder (a region the expected signature binds), one from outside
@@ -361,6 +363,37 @@ fn deref(ds: &mut Vec<u32>, r: u32, mutable: bool) {
         ds.clear();
     }
     ds.push(r);
+}
+
+/// Where e is written: borrowck's position, else that of the path it calls or of its receiver
+fn epos(e: &Expr) -> Sp {
+    let p = super::borrowck::pos(e);
+    if p.line != 0 {
+        return p;
+    }
+    match strip(e) {
+        Expr::Call(f, _) => epos(f),
+        Expr::MethodCall(r, ..) => epos(r),
+        Expr::Path(_, p) | Expr::Struct(p, ..) => p.pos,
+        Expr::Block(_, _, b) => match b.stmts.last() {
+            Some(Stmt::Expr(t, _)) => epos(t),
+            _ => p,
+        },
+        _ => p,
+    }
+}
+
+/// e has no value: it panics, returns, breaks or continues (as written)
+fn diverges(e: &Expr) -> bool {
+    match strip(e) {
+        Expr::Return(_) | Expr::Break(..) | Expr::Continue(_) => true,
+        Expr::Macro(p, _, _) => p.segs.last().is_some_and(|s| matches!(s.name.as_str(), "panic" | "unreachable" | "todo" | "unimplemented")),
+        Expr::Block(_, _, b) => match b.stmts.last() {
+            Some(Stmt::Expr(t, _)) => diverges(t),
+            _ => false,
+        },
+        _ => false,
+    }
 }
 
 fn recv_sp(r: &Option<Sp>, or: Sp) -> Sp {
@@ -874,6 +907,23 @@ impl Rg {
         self.imp(prog, t, tree, &mut k, &mut vec![], depth);
     }
 
+    /// What the types of a value written in the body require among its regions (its well-formedness): as imp's
+    /// implied bounds, but as constraints (`let z: Option<&'b &'a u8>` needs 'a: 'b)
+    pub fn wf(&mut self, prog: &Program, t: Ty, tree: &[u32], sp: Sp) {
+        self.wf_sp = Some(sp);
+        let mut k = 0;
+        self.imp(prog, t, tree, &mut k, &mut vec![], 0);
+        self.wf_sp = None;
+    }
+
+    /// x outlives y: known (implied bounds), or required (wf)
+    fn imp_rel(&mut self, x: u32, y: u32) {
+        match self.wf_sp {
+            Some(sp) => self.edge(x, y, sp),
+            None => self.known.push((x, y)),
+        }
+    }
+
     fn imp(&mut self, prog: &Program, t: Ty, tree: &[u32], k: &mut usize, outer: &mut Vec<u32>, depth: u32) {
         if *k > tree.len() || depth > 24 {
             return;
@@ -882,7 +932,7 @@ impl Rg {
             Ty::Ref(_, i) => {
                 let Some(&r) = tree.get(*k) else { return };
                 for &o in outer.iter() {
-                    self.known.push((r, o));
+                    self.imp_rel(r, o);
                 }
                 *k += 1;
                 outer.push(r);
@@ -896,7 +946,7 @@ impl Rg {
                 let me = me.to_vec();
                 for &r in &me {
                     for &o in outer.iter() {
-                        self.known.push((r, o));
+                        self.imp_rel(r, o);
                     }
                 }
                 *k += c;
@@ -929,14 +979,14 @@ impl Rg {
                         let (own, args) = self.split_adt(prog, sid, &me).unwrap_or_default();
                         for &(a, b) in &ar.outlives {
                             if let (Some(&x), Some(&y)) = (own.get(a as usize), own.get(b as usize)) {
-                                self.known.push((x, y));
+                                self.imp_rel(x, y);
                             }
                         }
                         for (tp, b) in &ar.ty_outlives {
                             let (Some(g), Some(&y)) = (bd.generics.iter().position(|x| x == tp), own.get(*b as usize)) else { continue };
                             if let Some(Some(at)) = args.get(g) {
                                 for &x in at {
-                                    self.known.push((x, y));
+                                    self.imp_rel(x, y);
                                 }
                             }
                         }
@@ -1042,6 +1092,11 @@ impl Rg {
             }
         }
         errs.sort_by_key(|e| (e.0.line, e.0.col));
+        if debug() {
+            for e in &errs {
+                eprintln!("regionck: error candidate at {}:{}: {}", e.0.line, e.0.col, e.1);
+            }
+        }
         errs.into_iter().next()
     }
 }
@@ -1224,6 +1279,23 @@ impl Cx<'_> {
                 }
                 Some((to, tree))
             }
+            // (an `if` / `match`'s value: each branch's that does not diverge flows into it)
+            Expr::If(_, b, els) => {
+                let mut vs: Vec<&Expr> = vec![];
+                match b.stmts.last() {
+                    Some(Stmt::Expr(t, false)) => vs.push(t),
+                    _ => return None,
+                }
+                vs.push(els.as_deref()?);
+                self.rt_branches(&vs)
+            }
+            Expr::Match(_, arms) => {
+                if let Some(&m2) = self.rg.alias.get(&(e as *const Expr as usize)) {
+                    return self.rt_expr(m2);
+                }
+                let vs: Vec<&Expr> = arms.iter().map(|a| &a.body).collect();
+                self.rt_branches(&vs)
+            }
             // (a block's value (an `unsafe` one's too): its tail's, kept while the block's locals were in scope)
             Expr::Block(None, _, b) => match b.stmts.last() {
                 Some(Stmt::Expr(t, false)) => self.rt_expr(t),
@@ -1280,6 +1352,26 @@ impl Cx<'_> {
             Expr::Struct(_, fs, _) => fs.iter().any(|f| self.not_const(&f.1)),
             _ => false,
         }
+    }
+
+    /// The value of branches (an `if`'s, a `match`'s arms): a fresh tree of the first one's type each flows into;
+    /// a branch that diverges (`panic!()`, `return`) has none
+    fn rt_branches(&mut self, vs: &[&Expr]) -> Option<(Ty, RT)> {
+        let mut got: Vec<(Ty, RT, Sp)> = vec![];
+        for v in vs {
+            if diverges(v) {
+                continue;
+            }
+            let (t, tr) = self.rt_expr(v)?;
+            got.push((t, tr, epos(v)));
+        }
+        let t = got.first()?.0;
+        let prog = self.prog;
+        let tree = self.rg.fresh(prog, t)?;
+        for (vt, vtr, sp) in got {
+            self.rg.flow(prog, vt, t, &vtr, &tree, sp);
+        }
+        Some((t, tree))
     }
 
     /// e reads a local (so it is not a constant a `&` would promote to a static)
@@ -1452,6 +1544,10 @@ impl Cx<'_> {
             None => self.rg.fresh(prog, t),
         };
         let Some(tree) = tree else { return };
+        // (the annotation's type is well formed)
+        if ann.is_some() {
+            self.rg.wf(prog, t, &tree, super::borrowck::pos(init));
+        }
         // (the initializer's tree was taken before the binding: `let y = y;` reads the y it shadows)
         if let Some((it, itr)) = init_tree {
             self.rg.flow(prog, it, t, &itr, &tree, super::borrowck::pos(init));
@@ -1476,6 +1572,7 @@ impl Cx<'_> {
         let tree = self.rg.instantiate(prog, t, Some(&codes), &lts, &[], &mut |me| me.var());
         self.rg.dyn_infer = false;
         if let Some(tree) = tree {
+            self.rg.wf(prog, t, &tree, super::borrowck::pos(init));
             self.rg.flow(prog, it, t, &itr, &tree, super::borrowck::pos(init));
         }
     }
@@ -1699,14 +1796,22 @@ impl Cx<'_> {
             return;
         }
         let Some(tree) = self.rg.fresh(prog, t) else { return };
+        // (at a field's value, else at the literal: `Foo { x, y }` writes no value)
+        let lit_sp = match e {
+            Expr::Struct(p, ..) if p.pos.line != 0 => p.pos,
+            _ => super::borrowck::pos(e),
+        };
         for (n, v) in fs {
             let Some(i) = prog.structs[sid as usize].fields.iter().position(|f| f.0 == *n) else { continue };
             let ft = prog.structs[sid as usize].fields[i].1;
             let Some(ftr) = self.rg.field(prog, sid, i, &tree) else { continue };
             if let Some((vt, vtr)) = self.rt_expr(v) {
-                self.rg.flow(prog, vt, ft, &vtr, &ftr, super::borrowck::pos(v));
+                let sp = Some(super::borrowck::pos(v)).filter(|s| s.line != 0).unwrap_or(lit_sp);
+                self.rg.flow(prog, vt, ft, &vtr, &ftr, sp);
             }
         }
+        // (the definition's bounds hold of the value built: `struct Foo<'a: 'b, 'b>`)
+        self.rg.wf(prog, t, &tree, lit_sp);
         self.rg.calls.insert(e as *const Expr as usize, (t, tree));
     }
 
@@ -1739,11 +1844,19 @@ impl Cx<'_> {
             return;
         }
         let Expr::MethodCall(recv, _, _, margs, _) = mc else { return };
-        let Some((rty, rtr)) = self.rt_expr(recv) else { return };
+        let Some((rty, mut rtr)) = self.rt_expr(recv) else { return };
         let selft = match rty {
             Ty::Ref(_, i) | Ty::Box(i) => *i,
             t => t,
         };
+        // (a Box's content is borrowed for a `&self` method: of what the function owns, a loan)
+        if let (Ty::Box(_), Some(Ty::Ref(..))) = (rty, self.prog.sigs[decl as usize].params.first()) {
+            let r = self.rg.var();
+            if let Some(n) = place_text(recv) {
+                self.rg.loans.push((r, format!("*{n}"), super::borrowck::pos(recv)));
+            }
+            rtr.insert(0, r);
+        }
         let mut sol = sol.to_vec();
         if let Some(s) = sol.first_mut() {
             *s = Some(selft);
