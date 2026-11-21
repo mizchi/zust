@@ -113,6 +113,7 @@ fn simd_errors() {
         ("let a = _mm_set1_pd(1.0); let _ = _mm_blend_pd::<4>(a, a);", "out of range"),
         ("let a = _mm_set1_ps(1.0); let _ = _mm_blend_ps::<16>(a, a);", "out of range"),
         ("let a = _mm_set1_epi32(1); let _ = _mm_extract_epi32::<[u8; 1]>(a);", "not a constant"),
+        ("let a = _mm_set1_epi32(1); let _ = _mm_extract_epi32::<A>(a); } type A = [u8; 1]; fn f() {", "not a constant"),
         ("let mut x = [0f32; 4]; let v = _mm_set1_ps(1.0); unsafe { _mm_maskstore_ss(x.as_mut_ptr(), v) };", "_mm_maskstore_ss"),
     ];
     let mut bad = vec![];

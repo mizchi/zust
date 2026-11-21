@@ -91,10 +91,15 @@ impl Cx<'_> {
         let ts = match seg.args.get(k) {
             Some(GArg::Const(e)) => crate::ast_types::const_arg_syn(e).or_else(|er| err(SP, er))?,
             // (a name written as a type: a const parameter. An array type is not an immediate: `::<[u8; 1]>`)
-            Some(GArg::Ty(t @ crate::parse::Ty::Path(..))) => match self.parse_ty(t)? {
-                Ty::Array(_, n) => return Ok(n),
-                _ => return err(SP, format!("`{name}`: const argument {} is not a constant", k + 1)),
-            },
+            // (only a const parameter's name: an alias of an array type is a type, `type A = [u8; 1]; ::<A>`)
+            Some(GArg::Ty(t @ crate::parse::Ty::Path(None, p)))
+                if p.segs.len() == 1 && p.segs[0].args.is_empty() && self.env.params.iter().any(|q| q.0 == p.segs[0].name) =>
+            {
+                match self.parse_ty(t)? {
+                    Ty::Array(_, n) => return Ok(n),
+                    _ => return err(SP, format!("`{name}`: const argument {} is not a constant", k + 1)),
+                }
+            }
             Some(GArg::Ty(_)) => return err(SP, format!("`{name}`: const argument {} is not a constant", k + 1)),
             _ => return err(SP, format!("`{name}` needs {} const argument(s): `{name}::<..>(..)`", k + 1)),
         };
