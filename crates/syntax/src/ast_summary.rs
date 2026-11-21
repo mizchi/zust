@@ -933,6 +933,31 @@ fn lifetimes(t: &PTy, out: &mut Vec<String>, elided: &mut bool, opaque: &mut boo
     }
 }
 
+/// Add to ls the lifetimes the signature declares (or a parameter's projection implies) to outlive one of them
+#[cold]
+fn outlived_by(sig: &PSig, ls: &mut Vec<String>) {
+    let mut longer: Vec<(String, String)> = vec![];
+    for (t, bs) in &sig.generics.preds {
+        if let PTy::Path(None, p) = t {
+            if let [s] = p.segs.as_slice() {
+                if s.name.starts_with('\'') {
+                    for b in bs {
+                        if let Bound::Lifetime(l) = b {
+                            longer.push((s.name.clone(), l.clone()));
+                        }
+                    }
+                }
+            }
+        }
+    }
+    for (_, t) in &sig.params {
+        crate::regions::qself_outlives(t, &mut longer, 0);
+    }
+    while let Some((a, _)) = longer.iter().find(|(a, b)| ls.contains(b) && !ls.contains(a)) {
+        ls.push(a.clone());
+    }
+}
+
 /// SigSyn::ret_from: the elision rules (`&self` methods return borrows of self, else the only argument with
 /// lifetimes) and named lifetimes (`fn f<'a>(x: &'a T, y: &U) -> &'a T` borrows from x only)
 fn ret_from(sig: &PSig) -> u64 {
@@ -942,6 +967,11 @@ fn ret_from(sig: &PSig) -> u64 {
     lifetimes(ret, &mut rl, &mut relided, &mut opaque);
     if opaque {
         return 0;
+    }
+    // (a lifetime declared to outlive one of the result's may be the result's too: `fn f<'a, 'b: 'a>(x: &'b T) -> &'a T`)
+    // (and so may one a parameter's projection implies to: `<&'a &'b () as Tr>::Type`)
+    if !rl.is_empty() {
+        outlived_by(sig, &mut rl);
     }
     let mut inputs: Vec<&PTy> = vec![];
     if let Some(r) = &sig.recv_ty {

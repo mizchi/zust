@@ -112,6 +112,8 @@ pub struct Rg {
     pub temps: HashMap<usize, Ty>,
     /// The method call being made (call_fn is given no span for it)
     pub call_sp: Sp,
+    /// Where values are returned (a borrow that escapes there is reported there: E0515)
+    pub ret_sps: Vec<Sp>,
 }
 
 /// t holds a trait object (whose lifetime a signature may leave to the default)
@@ -823,20 +825,27 @@ impl Rg {
             seen[*r as usize] = true;
             let mut st = vec![*r];
             let mut bad = false;
+            // (the borrow escapes as the value returned: reported where it is returned)
+            let mut ret_at = None;
             while let Some(x) = st.pop() {
-                for &(y, _) in &adj[x as usize] {
+                for &(y, esp) in &adj[x as usize] {
                     if seen[y as usize] {
                         continue;
                     }
                     seen[y as usize] = true;
                     if ix(y).is_some() {
                         bad = true;
+                        if ret_at.is_none() && self.ret_sps.contains(&esp) {
+                            ret_at = Some(esp);
+                        }
                     }
                     st.push(y);
                 }
             }
-            if bad {
-                errs.push((*lsp, if name.is_empty() { "temporary value dropped while borrowed (it must outlive the function)".to_string() } else { format!("`{name}` does not live long enough (borrowed value must outlive the function)") }));
+            match ret_at {
+                Some(sp) if bad => errs.push((sp, if name.is_empty() { "cannot return value referencing temporary value (E0515)".to_string() } else { format!("cannot return value referencing local variable `{name}` (E0515)") })),
+                _ if bad => errs.push((*lsp, if name.is_empty() { "temporary value dropped while borrowed (it must outlive the function)".to_string() } else { format!("`{name}` does not live long enough (borrowed value must outlive the function)") })),
+                _ => {}
             }
         }
         errs.sort_by_key(|e| (e.0.line, e.0.col));
@@ -1007,7 +1016,17 @@ impl Cx<'_> {
                 let tree = self.rg.instantiate(prog, to, Some(&codes), &lts, &[], &mut |me| me.var());
                 self.rg.dyn_infer = false;
                 let tree = tree?;
-                self.rg.relate(prog, to, &itr, &tree, super::borrowck::pos(x));
+                // (a cast of a raw pointer may change the regions of what it points to; not a trait object's
+                // lifetime: `*mut (dyn Tr + 'a) as *mut (dyn Tr + 'static)` is an error)
+                match to {
+                    Ty::Ptr(_, Ty::Dyn(_)) => {
+                        if let (Some(&a), Some(&b)) = (itr.first(), tree.first()) {
+                            self.rg.edge(a, b, super::borrowck::pos(x));
+                        }
+                    }
+                    Ty::Ptr(..) => {}
+                    _ => self.rg.relate(prog, to, &itr, &tree, super::borrowck::pos(x)),
+                }
                 Some((to, tree))
             }
             // (a block's value (an `unsafe` one's too): its tail's, kept while the block's locals were in scope)
@@ -1220,7 +1239,11 @@ impl Cx<'_> {
         let Some(rt) = self.rg.ret.clone() else { return };
         let Some((et, tr)) = self.rt_expr(e) else { return };
         let (prog, t) = (self.prog, self.ret);
-        self.rg.flow(prog, et, t, &tr, &rt, super::borrowck::pos(e));
+        let sp = super::borrowck::pos(e);
+        if sp.line != 0 {
+            self.rg.ret_sps.push(sp);
+        }
+        self.rg.flow(prog, et, t, &tr, &rt, sp);
     }
 
     /// A call of id (generic signature sig0, type arguments sol, instance's parameter types params) with these

@@ -2411,6 +2411,7 @@ compile-fail	fn/fn-trait-formatting.rs
 compile-fail	fn/fn-trait-use-named-params-issue-140169.rs
 run-pass	fn/fun-call-variants.rs
 check-pass	fn/implied-bounds-unnorm-associated-type-3.rs
+compile-fail	fn/implied-bounds-unnorm-associated-type-4.rs
 compile-fail	fn/invalid-sugg-for-unused-fn-arg-147303.rs
 run-pass	fn/issue-1451.rs
 compile-fail	fn/issue-3044.rs
@@ -5334,6 +5335,7 @@ run-pass	regions/regions-infer-static-from-proc.rs
 run-pass	regions/regions-issue-21422.rs
 run-pass	regions/regions-issue-22246.rs
 compile-fail	regions/regions-lifetime-bounds-on-fns.rs
+compile-fail	regions/regions-lifetime-of-struct-or-enum-variant.rs
 run-pass	regions/regions-lifetime-static-items-enclosing-scopes.rs
 run-pass	regions/regions-link-fn-args.rs
 run-pass	regions/regions-lub-ref-ref-rc.rs
@@ -5531,6 +5533,7 @@ compile-fail	return/dont-suggest-through-inner-const.rs
 run-pass	return/early-return-with-unreachable-code-24353.rs
 run-pass	return/ret-bang.rs
 compile-fail	return/ret-non-nil.rs
+compile-fail	return/return-disjoint-regions.rs
 compile-fail	return/return-from-diverging.rs
 compile-fail	return/return-from-residual-sugg-issue-125997.rs
 run-pass	return/return-nil.rs

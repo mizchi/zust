@@ -345,3 +345,25 @@ fn turbofish_regions() {
     let ok = "fn foo<T: 'static>() {}\nfn id<T>(t: T) -> T { t }\nfn boo<'a>(x: &'a u32) -> &'a u32 {\n    foo::<&'static u32>();\n    id::<&'a u32>(x)\n}\nfn main() {}\n";
     assert_eq!(check(ok), vec![]);
 }
+
+/// A borrow of a local that escapes as the returned value is reported where it is returned (E0515); a raw pointer
+/// cast may change the regions of what it points to; a projection's self type implies its bounds
+#[test]
+fn returns_casts_projections() {
+    let d = check("fn f<'a, 'b>(x: i32) -> (&'a i32, &'b i32) {\n    let y = &x;\n    (y, y)\n}\nfn main() {}\n");
+    assert!(d.len() == 1 && d[0].0 == 3 && d[0].1.contains("E0515"), "{d:?}");
+    let d = check("fn id<T>(x: T) -> T { x }\nstruct Test;\nfn s<'a>() -> &'a Test {\n    let t = &id(Test);\n    t\n}\nfn main() {}\n");
+    assert!(d.len() == 1 && d[0].0 == 5 && d[0].1.contains("temporary"), "{d:?}");
+    let ok = r#"
+struct Foo<'a> { a: &'a () }
+fn extend<'a>(v: *const Foo<'a>) -> *const Foo<'static> { v as *const Foo<'static> }
+trait Trait { type Type; }
+impl<T> Trait for T { type Type = (); }
+fn f<'a, 'b>(s: &'b str, _: <&'a &'b () as Trait>::Type) -> &'a str where &'a &'b (): Trait { s }
+fn main() {}
+"#;
+    assert_eq!(check(ok), vec![]);
+    // (the result of `f<'a, 'b: 'a>(x: &'b T) -> &'a T` may borrow x)
+    let d = check("fn f<'a, 'b: 'a>(x: &'b String, _y: &'a u8) -> &'a str { x.as_str() }\nfn main() {\n    let s = String::from(\"a\");\n    let n = 1u8;\n    let r = f(&s, &n);\n    drop(s);\n    println!(\"{}\", r);\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 6 && d[0].1.contains("because it is borrowed"), "{d:?}");
+}

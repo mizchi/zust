@@ -71,6 +71,90 @@ pub fn sig_names_lt(sig: &PSig) -> bool {
 }
 
 /// Collects the region slots of types against the lifetimes in scope
+/// What the well-formedness of the self types of the projections in t implies (`<&'a &'b () as Tr>::Type`:
+/// 'b: 'a), as (longer, shorter): a projection is normalized away, and with it its implied bounds
+pub fn qself_outlives(t: &PTy, out: &mut Vec<(String, String)>, depth: u32) {
+    if depth > 8 {
+        return;
+    }
+    match t {
+        PTy::Path(q, p) => {
+            if let Some(q) = q {
+                wf_outlives(q, out, depth + 1);
+                qself_outlives(q, out, depth + 1);
+            }
+            for s in &p.segs {
+                for a in &s.args {
+                    if let crate::parse::GArg::Ty(a) = a {
+                        qself_outlives(a, out, depth + 1);
+                    }
+                }
+            }
+        }
+        PTy::Ref(_, _, i) | PTy::Ptr(_, i) | PTy::Slice(i) | PTy::Array(i, _) => qself_outlives(i, out, depth + 1),
+        PTy::Tuple(ts) => ts.iter().for_each(|t| qself_outlives(t, out, depth + 1)),
+        _ => {}
+    }
+}
+
+/// `&'x T` is well formed when every lifetime named in T outlives 'x
+fn wf_outlives(t: &PTy, out: &mut Vec<(String, String)>, depth: u32) {
+    if depth > 8 {
+        return;
+    }
+    match t {
+        PTy::Ref(Some(x), _, i) => {
+            let mut inner = vec![];
+            lifetimes_in(i, &mut inner);
+            for y in inner {
+                if y != *x && y != "'_" && x != "'_" && !out.contains(&(y.clone(), x.clone())) {
+                    out.push((y, x.clone()));
+                }
+            }
+            wf_outlives(i, out, depth + 1);
+        }
+        PTy::Ref(None, _, i) | PTy::Ptr(_, i) | PTy::Slice(i) | PTy::Array(i, _) => wf_outlives(i, out, depth + 1),
+        PTy::Tuple(ts) => ts.iter().for_each(|t| wf_outlives(t, out, depth + 1)),
+        _ => {}
+    }
+}
+
+/// The lifetimes named in t
+fn lifetimes_in(t: &PTy, out: &mut Vec<String>) {
+    match t {
+        PTy::Ref(l, _, i) => {
+            if let Some(l) = l {
+                out.push(l.clone());
+            }
+            lifetimes_in(i, out);
+        }
+        PTy::Ptr(_, i) | PTy::Slice(i) | PTy::Array(i, _) => lifetimes_in(i, out),
+        PTy::Tuple(ts) => ts.iter().for_each(|t| lifetimes_in(t, out)),
+        PTy::Path(q, p) => {
+            if let Some(q) = q {
+                lifetimes_in(q, out);
+            }
+            for s in &p.segs {
+                for a in &s.args {
+                    match a {
+                        crate::parse::GArg::Ty(a) => lifetimes_in(a, out),
+                        crate::parse::GArg::Lifetime(l) => out.push(l.clone()),
+                        _ => {}
+                    }
+                }
+            }
+        }
+        PTy::Dyn(bs) | PTy::Impl(bs) => {
+            for b in bs {
+                if let crate::parse::Bound::Lifetime(l) = b {
+                    out.push(l.clone());
+                }
+            }
+        }
+        _ => {}
+    }
+}
+
 pub struct Slots<'a> {
     pub lts: Vec<String>,
     /// Type parameters in scope (they have no slots of their own: an instance substitutes them)
@@ -94,6 +178,18 @@ impl<'a> Slots<'a> {
             }
         }
         Slots { any: !lts.is_empty(), lts, tparams, self_slots: outer.map(|o| o.self_slots.as_slice()).unwrap_or(&[]) }
+    }
+
+    /// The outlives relations the well-formedness of the self types of projections in t implies
+    pub fn qself_implied(&mut self, t: &PTy, out: &mut Vec<(u8, u8)>) {
+        let mut pairs = vec![];
+        qself_outlives(t, &mut pairs, 0);
+        for (a, b) in pairs {
+            let (a, b) = (self.code(Some(&a)), self.code(Some(&b)));
+            if a < R_STATIC && b < R_STATIC && a != b && !out.contains(&(a, b)) {
+                out.push((a, b));
+            }
+        }
     }
 
     pub fn code(&mut self, l: Option<&str>) -> u8 {
@@ -235,6 +331,11 @@ pub fn sig_regions(sig: &PSig, outer: Option<&RImplSyn>, outer_tparams: &[&str])
     slots.push(v);
     let (mut outlives, mut ty_outlives) = (outer.map(|o| o.outlives.clone()).unwrap_or_default(), outer.map(|o| o.ty_outlives.clone()).unwrap_or_default());
     s.bounds(&sig.generics, &mut outlives, &mut ty_outlives);
+    // (a parameter's type that is a projection (`<&'a &'b () as Tr>::Type`) is normalized away, and with it what its
+    // well-formedness implies ('b: 'a): kept as declared bounds)
+    for (_, t) in &sig.params {
+        s.qself_implied(t, &mut outlives);
+    }
     if !s.any && outlives.is_empty() && ty_outlives.is_empty() {
         return None;
     }
