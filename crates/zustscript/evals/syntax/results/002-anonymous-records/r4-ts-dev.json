@@ -1,0 +1,92 @@
+[
+  {
+    "proposal": "002-anonymous-records",
+    "persona": "ts-dev",
+    "scores": {
+      "R1": {
+        "score": 4,
+        "why": "`pub fn TodoItem({ todo, onToggle }: { todo: Todo, onToggle: OnToggle })`、`fn title_of({ title }: Todo)`、`{ ...t, done: !t.done }`、`type OnToggle = (id: i32) => ()` は、React / TS とほぼ同じ字面。減点は 3 つ。`if t.id == id { { ...t, done: !t.done } } else { t }` の二重の波括弧。`()` が void に読めない。`fn adder(n: i32) -> (x: i32) => i32 { … }` は、`=> i32 {` がクロージャの本体に見える"
+      },
+      "R2": {
+        "score": 4,
+        "why": "`.d.ts` が `export type` になり、構造的な別名という本文の意味と出力がそろった。一部だけの分割代入は TS と同じで、書き漏らしのエラーが match だけなのは 001 と同じ規則。例外は 2 つ。`@nominal` と再帰する型は名前で区別される。`{ x }` の警告は、式の位置のブロックには出て、block() の本体には出ない(どちらも理由は書いてある)"
+      },
+      "R3": {
+        "score": 4,
+        "why": "ブロックかレコードかは、`{` の次の 2 トークン(`ident :` / `ident ,` / `...`)で決まる。関数型の `(T)` は `=>` の有無で決まる。名前の有無の混在はエラー。人にとって紛らわしいのは `{ x }` だけで、式の位置では警告が出る。ただし JSX の `style={{ color }}` は、React の人には確実にオブジェクトに見える字面が、ブロックとして読まれる"
+      },
+      "R4": {
+        "score": 4,
+        "why": "props の型の名前 3 つと `Stats` が消え、`props.` もなくなった。`fn title_of({ title }: Todo)` のように、一部だけの分割代入が書ける。TS より書けないものは 4 つ。spread は 1 つだけで、`{ ...defaults, ...props }` が書けない。spread でフィールドを足せない。幅の部分型がないので、`{ title: String }` を受ける関数に `Todo` を渡せない。props の型とパターンでフィールド名を 2 回書く"
+      },
+      "R5": {
+        "score": 4,
+        "why": "r3 の 3 から上げた。警告が primary の `{` に限られ、`else { t }`、`{ None }`、`fn id(x) { x }` の誤検出が消えた。`let r = { x };` と `(t) => { t }`(TS では undefined を返す字面)は警告で捕まる。後ろに置いた `...t`、`..t`、`fn(…) -> ()`、名前の有無の混在、block() の先頭のレコードの形は、直し方つきのエラー。残る弱点は 2 つ。小文字の JSX 要素の属性は、今の check.rs の jsx() で期待する型なしに推論される。そのため `<div style={{ color }}>` は、文字列 `color` として警告だけで通る。TS から来た余分なプロパティは、JS と `@wasm` で結果が変わりうる(未決)"
+      },
+      "R6": {
+        "score": 4,
+        "why": "`export type Todo = { readonly … }`、`export declare function TodoItem(props: { readonly todo: Todo; readonly onToggle: OnToggle }): $ReactElement`、`(x: i32) => i32` は、TS からそのまま使える。`@nominal` の brand とコンストラクタ `Meters({ v })` も、数値の brand と同じ形なので予想できる。8816491 の struct 名の規則は、`@wasm` の Rust の側だけで、`.d.ts` にも JS にも出ないので、この点には影響しない。一手間残る点は 3 つ。無名の戻り値の型に名前がない(`ReturnType<typeof stats>` が要る)。関数型の `void`。`@nominal` の TS 向けのコンストラクタ `export function Meters` が、同名の `pub fn` と JS の値の名前空間で衝突しうる"
+      },
+      "R7": {
+        "score": 4,
+        "why": "props の分割代入(一部だけでよい)、省略形、spread、`=>` の関数型、`export type` で、React の書き方がそのまま通じる。r3 で一番引っかかった『一部だけの分割代入がエラー』は消えた。新しく覚えることは少し残る。幅の部分型がない。spread は 1 つだけ。二重の波括弧。宣言だけ `-> R`。`{ x }` は `{ x, }` と書く"
+      },
+      "R8": {
+        "score": 3,
+        "why": "構文の判定は 1 つの関数で、`try_arrow_params` と同じ保存と巻き戻しで足りる。今の parse.rs では、primary の `T::P(\"{\")`(820 行目)が block() を呼ぶので、警告はそこで出せる。JSX の属性の `{`(998 行目)と match の腕は `expr(false)` を通るので、列挙された位置と実装が一致する。8816491 で、struct 名を決める範囲がモジュールとその import 先に閉じ、プログラム全体の形を集める必要はなくなった。それでも 4 から下げる理由が 2 つある。(1) 互いを import しない a と b が同じ形を持つと、`a::ZsRec_done_total` と `b::ZsRec_done_total` が Rust では別の型になる。両方を import する c で値を受け渡すと、zsc の型検査は通るのに、Rust の出力が型エラーになる。(2) 『import 先に同じ形があれば、import 先の struct を使う』ので、import 先に同じ形の別名を足すと、このモジュールの struct 名が変わる。E 節の『他のファイルの変更では変わらない』と食い違う。形ごとに 1 つの struct を共通の場所に置けば、4 に戻る"
+      }
+    },
+    "blocker": [],
+    "issues": [
+      {
+        "severity": "medium",
+        "where": "B. `{ x }` の警告(JSX の `{…}` の中に書いたブロック: `style={{ color }}`)/ check.rs の jsx() の小文字の要素",
+        "problem": "React では `style={{ color }}` はオブジェクト。この提案ではブロックとして読み、値は `color` になる。小文字の要素の属性は `self.infer(x, None)` で、期待する型がない。そのため型エラーにならず、警告だけで、文字列が style に渡る。JSX は ts-dev が最もよく書く場所で、警告を見落とすと実行時に初めて分かる",
+        "suggestion": "JSX の属性の式コンテナ `={` の直後の `{` は、常にレコードとして読む(属性の位置にブロックを書く理由はない)。`{ x }` の 1 つだけの省略形も、そこではレコードにする。採らないなら、この位置の `{ x }` は警告でなくエラーにする"
+      },
+      {
+        "severity": "medium",
+        "where": "E. `@wasm` での struct の名前(8816491)/ 『名前はモジュールの名前空間に置く』『import 先の struct を使う』",
+        "problem": "互いを import しない a と b が同じ形 `{ total: i32, done: i32 }` を持つと、それぞれが自分の `ZsRec_done_total` を作る。両方を import する c で、a の関数の結果を b の関数に渡すと、zsc では同じ構造的な型なので通るが、Rust では別の struct なので型エラーになる。また、import 先に同じ形の別名を足すと、このモジュールの struct が import 先のものに変わり、名前も変わる。『他のファイルの変更では変わらない』と食い違う",
+        "suggestion": "形ごとの struct は 1 つだけにし、crate の共通のモジュール(`zs_shapes`)に、形から決まる名前で置く。各モジュールの別名と宣言順で決まる名前は、Rust の `type` 別名にする(`type ZsTodo = zs_shapes::ZsRec_done_id_title;`)。そうすれば、ひし形の import でも同じ型になり、他のファイルの変更でも、このモジュールの名前は変わらない。採らないなら、ひし形の import で別の struct になる場合の変換を、どこで入れるかを書く"
+      },
+      {
+        "severity": "medium",
+        "where": "出力 / `@nominal` の TS 向けのコンストラクタ `export function Meters(v)`",
+        "problem": "`@nominal type Point = {…}` と `pub fn Point(…) -> Jsx` が同じファイルにあると、JS の値の名前空間で `export function Point` が 2 つになる。001 の決定 6 で、同名のコンポーネントとデータは UI でよくあるとされている。宣言の時点での検査が書かれていない",
+        "suggestion": "`@nominal` の名前と、同じファイルの `pub fn` の名前の衝突を、宣言の時点でエラーにする。あるいは、TS 向けのコンストラクタを `Point.make({ … })` のように、型と同名の namespace の中に出す(001 の `Shape.Circle` の namespace と形がそろう)"
+      },
+      {
+        "severity": "low",
+        "where": "未決事項 `void`",
+        "problem": "3 回続けて未決。関数型は TS にそろったのに、`(next: T) => ()` だけが TS から読めない",
+        "suggestion": "型の位置でだけ `void` を `()` の別名として受け付ける。`.d.ts` は今までどおり `void` を出す。rust-dev が不要と言うなら、formatter が `()` に直すだけでもよい"
+      },
+      {
+        "severity": "low",
+        "where": "B. 更新(spread は先頭に 1 つだけ)/ 未決事項",
+        "problem": "未決事項には入ったが、`{ ...defaults, ...props }` が書けない間に、どう書けばよいかの例がない",
+        "suggestion": "書けない間の書き方を例で示す(`{ ...defaults, color: props.color, size: props.size }`)。同じ型同士なら 2 つ以上の spread を許す案を、r5 で決める"
+      },
+      {
+        "severity": "low",
+        "where": "C. `fn adder(n: i32) -> (x: i32) => i32 { (x) => x + n }`",
+        "problem": "`-> (x: i32) => i32 {` は、TS の人には『`(x: i32) => i32` の後に本体』とも『クロージャ `(x: i32) => …`』とも読める。戻り値の型がレコードなら `-> (x: i32) => { a: i32 } {` になり、さらに読みにくい",
+        "suggestion": "formatter は、戻り値が関数型のときに括弧を付ける(`-> ((x: i32) => i32) {`)。未決事項から決定に移す"
+      }
+    ],
+    "questions": [
+      "JSX の属性の `{{ … }}` は、中身によらずレコードとして読むか",
+      "互いを import しない 2 つのモジュールが同じ形を持ち、両方を import するモジュールで値を受け渡すとき、`@wasm` の Rust の struct は同じ型になるか",
+      "import 先に同じ形の別名を足したとき、このモジュールの struct 名が変わることは許容するか(E 節の『他のファイルの変更では変わらない』との関係)",
+      "`@nominal` の値(`Meters`)を、同じ形の無名の型 `{ v: f64 }` を受ける関数に渡せるか(逆は書いてあるが、この向きが書いていない。TS の brand なら渡せる)",
+      "`@nominal` の TS 向けのコンストラクタは、余分なプロパティや型の違うフィールドを検査するか(『確かめるだけ』の範囲)",
+      "`@nominal` の名前と、同名の `pub fn` の衝突をどう扱うか",
+      "分割代入した引数の hover は `arg0` と出すか、パターン `{ title }: Todo` と出すか"
+    ],
+    "alternative": {
+      "summary": "JSX の属性の式コンテナの直後の `{` は、常にレコードとして読む。`@nominal` の TS 向けのコンストラクタは、型と同名の namespace に出す。`@wasm` の struct は形ごとに crate で 1 つにし、モジュールの宣言順で決まる名前は Rust の `type` 別名にする",
+      "example": "<div style={{ color }} />                    // 属性の `={` の直後なので、{ color: color } のレコード\n<div style={{ color, fontSize: size }} />    // 今までどおり\n\n// @nominal type Point = { x: f64, y: f64 } と pub fn Point(props: …) -> Jsx が同じファイルにあっても衝突しない\nexport type Point = { readonly x: f64; readonly y: f64 } & { readonly __zsc_nominal: \"Point\" };\nexport declare namespace Point { function make(v: { readonly x: f64; readonly y: f64 }): Point; }\nexport declare function Point(props: { … }): $ReactElement;   // TS では値の Point と namespace の Point がマージされる\n\n// @wasm: 形ごとの struct は crate で 1 つ。モジュールの名前は別名\nmod zs_shapes { pub struct ZsRec_done_total { pub done: i32, pub total: i32 } }\nmod a { pub type ZsStats = crate::zs_shapes::ZsRec_done_total; }\nmod b { pub type ZsRec_done_total = crate::zs_shapes::ZsRec_done_total; }   // a と b の値を c で受け渡せる"
+    }
+  }
+]

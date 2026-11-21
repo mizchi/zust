@@ -1,0 +1,90 @@
+[
+  {
+    "proposal": "002-anonymous-records",
+    "persona": "implementer",
+    "scores": {
+      "R1": {
+        "score": 4,
+        "why": "`{ todo, onToggle }: { todo: Todo, onToggle: OnToggle }`、`{ ...t, done: !t.done }`、`(id: i32) => ()` は TS の読み方で通じる。if の中の `{ { ...t, done: x } }` だけは、一度説明が要る"
+      },
+      "R2": {
+        "score": 4,
+        "why": "書き漏らしのエラーを match だけにして 001 と揃え、部分型の書き方も 001 と同じにした。`@wasm` を Copy の形だけにしたことも、lower.rs の type_def(`derive(Clone, Copy)`)と field_ty の今の subset に揃っている。例外は二重の波括弧の 1 つ"
+      },
+      "R3": {
+        "score": 4,
+        "why": "ブロックかレコードかは、`{` の後の 2 トークン(`ident :`、`ident ,`、`...`)で決まり、型に依存しない。`{ x }` の警告は primary の `{`(parse.rs 820 行目)だけで出す。fn / if / else / while / for の本体は block() を直接呼ぶので、2 つの経路は重ならない。型の `(T)` は、後に `=>` があるかどうかで決まる。try_arrow_params と同じ保存と巻き戻しで足りる"
+      },
+      "R4": {
+        "score": 4,
+        "why": "props の型と小さな戻り値の型に名前が要らなくなった。一部だけの分割代入もできる。複数の spread と、`{ todo }: { todo: Todo }` の 2 重の記述は未決"
+      },
+      "R5": {
+        "score": 4,
+        "why": "r3 の high(本体での誤検知)が解消し、警告は `let r = { x };` や `{ total }` のような、本当に紛らわしい所だけに出る。旧式の `fn(..) -> ..` と `..t` は、直し方つきのエラー。String を含む形を `@wasm` に渡すと、zsc のエラーになる。ただし struct 名が単射でないため、違う形が同じ名前になったときの誤りは、rustc のエラーとして離れた所に出る(issues)"
+      },
+      "R6": {
+        "score": 4,
+        "why": "`.d.ts` は `export type` と、brand つきの `@nominal` で、TS からそのまま使える(js.rs 1305 行目の interface を type にするだけ)。最終版の E では、Rust の struct 名がフィールドの名前と型だけで決まり、見なくても予想できる。読める名前は、別名ごとの `pub type ZsPt = …` で出る。5 にしないのは、名前の作り方が単射でない(`_` の区切り)ことと、総称的な別名の名前が決まっていないため"
+      },
+      "R7": {
+        "score": 4,
+        "why": "TS の構造的な型、spread、分割代入がそのまま使える。違うのは、幅の部分型がないことと、`{ x, }` の 2 つ"
+      },
+      "R8": {
+        "score": 4,
+        "why": "構文解析は局所的。struct 名は形だけから作る純粋な関数なので、アイテム単位の増分のコード生成と合う。形を足しても、既存の名前は変わらない。lower.rs の変更は、rs_type(`Zs{n}`)を、形からの名前と別名の type に替える所で済む。残る作業は、Ty::Rec、等価性で無視する引数名と表示名、再帰の強連結成分。struct 名を単射にする修正は小さい"
+      }
+    },
+    "blocker": [],
+    "issues": [
+      {
+        "severity": "high",
+        "where": "E『struct 名は、形だけから作る: フィールドの名前と型を、名前の順に並べる』『フィールドの型がレコードなら、その形の名前を入れる』",
+        "problem": "区切りが `_` だけで、フィールド名にも、入れ子の形の名前にも `_` が入るため、名前の作り方が単射でない。`{ a: i32, b: i32 }` と `{ a_i32_b: i32 }` は、どちらも `ZsRec_a_i32_b_i32` になる。入れ子でも、`{ p: { x: f64 }, y: f64 }` と `{ p: { x: f64, y: f64 } }` は区切りが同じ字面になる。lower.rs は、出力済みの Rust の名前を `done` で一度だけ出すので、2 つ目の形は 1 つ目の struct を使ってしまう。誤りは zsc ではなく、rustc のフィールドのエラーとして離れた所に出る",
+        "suggestion": "区切りを曖昧にしない書き方にする。たとえば、フィールド名に長さを前に付ける(`ZsRec_1a_i32_1b_i32` と `ZsRec_7a_i32_b_i32`)。または、名前の中の `_` を `__` にエスケープし、入れ子の形は開きと閉じの印で囲む(`ZsRec_p_R_x_f64_E_y_f64`)。形の正規化した文字列から名前への写像が単射であることを、lower のテストで確かめる"
+      },
+      {
+        "severity": "low",
+        "where": "E『ZsRec_…』と、別名の `pub type Zs{名前}`",
+        "problem": "利用者の型名 `Rec_x_f64`(別名、enum、`@nominal`)から作る `ZsRec_x_f64` が、生成する struct の名前と衝突する。別名なら `pub type ZsRec_x_f64 = ZsRec_x_f64;` という自己参照になる",
+        "suggestion": "生成する struct には、ソースの名前から作れない接頭辞を使う(lower.rs の local() が予約している `__zs` の名前空間など)。または、`Rec_` で始まる型名を宣言の時点でエラーにする"
+      },
+      {
+        "severity": "low",
+        "where": "E と、未決事項『総称的な無名のレコード { value: T }』",
+        "problem": "lower.rs は総称的な関数を型引数ごとに単相化する。そのため `type Box<T> = { value: T }` の struct は、型引数ごとに `ZsRec_value_f64` などに分かれる。総称の Rust の別名 `type ZsBox<T>` 1 つでは表せない。別名の出し方が決まっていない",
+        "suggestion": "r4 では、総称的な別名は Rust の別名を出さない(単相化した形の名前だけ)、と書く。または、`ZsBox__f64` のように、型引数ごとに別名を出す"
+      },
+      {
+        "severity": "low",
+        "where": "実装の注意『分割代入した引数は、内部では `$p0` という名前の引数にして』",
+        "problem": "`$p0` は JS では使えるが、Rust の識別子にならない。lower.rs の local() も `$` を扱わない",
+        "suggestion": "lower.rs がすでに予約している名前空間の `__zs_p0` を使う"
+      },
+      {
+        "severity": "low",
+        "where": "実装の注意『type の名前は別名の表に置き、表示用に型に添える』",
+        "problem": "Ty は derive(PartialEq) で、unify_inner の最後の `_ => a == b` もそれを使う。表示名をそのまま Ty に入れると、等価性に混ざる。また、型変数は先に単一化した側の Ty に置き換わるので、残る表示名が単一化の順で変わる",
+        "suggestion": "Fn の引数名と同じく、等価性で無視するフィールドにする。表示名は、注釈から来た束縛と式の Id の side table に置き、Ty の中には持たない"
+      },
+      {
+        "severity": "low",
+        "where": "出力『export function Meters(v)』(@nominal の TS 用コンストラクタ)",
+        "problem": "利用者の `fn Meters` や extern の `Meters` と、JS の export が衝突する。check.rs の `names` が見るのは fn / extern / wasm fn だけ",
+        "suggestion": "@nominal の型名を、関数の名前空間にも登録して、二重の定義をエラーにする"
+      }
+    ],
+    "questions": [
+      "match の腕で、名前なしのレコードのパターン `{ x, y } => …` は書けるか(r3 から未回答)",
+      "再帰する型の『1 段だけ展開』は出会うたびに 1 段か。入れ子のリテラル `{ children: [{ children: [] }] }` も Node に渡せるか(r3 から未回答)",
+      "総称的な別名(`type Box<T> = { value: T }`)を、`@wasm` の Rust でどう出すか",
+      "spread の元 `...t` の型が、その時点でまだ型変数のときは、EK::Field と同じく注釈を求めるのか",
+      "struct 名の中のフィールド名は、ソースの名前か、local() で変えた後の名前(`type` → `type_`)か"
+    ],
+    "alternative": {
+      "summary": "E の方針(形だけから作る、プログラム全体で 1 つ、別名は type)はそのままにして、名前の作り方だけを単射にする",
+      "example": "// フィールド名に長さを付け、入れ子の形は R … E で囲む\n// { a: i32, b: i32 }           → ZsRec_1a_i32_1b_i32\n// { a_i32_b: i32 }              → ZsRec_7a_i32_b_i32\n// { p: { x: f64 }, y: f64 }     → ZsRec_1p_R_1x_f64_E_1y_f64\n// { p: { x: f64, y: f64 } }     → ZsRec_1p_R_1x_f64_1y_f64_E\n#[allow(non_camel_case_types)]\n#[derive(Clone, Copy, PartialEq)]\nstruct ZsRec_4done_i32_5total_i32 { done: i32, total: i32 }\npub type ZsStats = ZsRec_4done_i32_5total_i32;"
+    }
+  }
+]

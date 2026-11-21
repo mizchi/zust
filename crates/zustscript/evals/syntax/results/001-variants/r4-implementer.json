@@ -1,0 +1,90 @@
+[
+  {
+    "proposal": "001-variants",
+    "persona": "implementer",
+    "scores": {
+      "R1": {
+        "score": 4,
+        "why": "`Shape::Circle { r, ... }` も、修飾しない `Circle { … }` も、Rust と TS の経験で読める。同名の関数があるファイルで修飾が要る規則(view の例)は、一度説明を読めば分かる"
+      },
+      "R2": {
+        "score": 4,
+        "why": "絞り込みを束縛のメタデータにして部分型をやめたので、単一化は check.rs の等式のまま。同名の関数を優先する規則は、EK::Var の今の引き順(local → fns → externs → wasm → variant)と一致する。ただし『整数リテラルと同じ既定値』と言いながら、使う前に決める地点(match、メソッド)で既定値を使わない。check.rs が EK::Method で小数のリテラルを f64 に決めているのと揃っていない"
+      },
+      "R3": {
+        "score": 4,
+        "why": "決まる方法が、単一化と prelude の既定値の 2 つに限られた。遅らせるのは引数のないバリアントだけで、規則が明快。残る曖昧さは 2 つ。(1)どの式が絞り込みを運ぶか(ブロックの末尾、if / match の分岐、呼び出し)が定義されていない。(2)期待する型が `Parsed` を含む候補つきの型変数のとき、`p = Ok(s)` は Result に決まる、と読むしかない"
+      },
+      "R4": {
+        "score": 4,
+        "why": "`Circle { ...s, center: add(center) }` と、prelude の既定値による `last_positive` は短い。関数とバリアントが同名のファイルでは、パターンにも修飾が要り、長くなる(パターンを緩める件は未決事項)"
+      },
+      "R5": {
+        "score": 3,
+        "why": "注(『ここで `Result::Ok` に決まった』)とクイックフィックスは良い。ただし `Shape::Circle` を引数に取る関数を値として渡すと(`.map(grow)`、`let f = grow`)、検査が消える。JS では NaN が静かに返り、wasm では trap する。コンパイル時に分からない誤りが残る"
+      },
+      "R6": {
+        "score": 4,
+        "why": "`Shape.Circle` の namespace と、spread の後の TAG は予想どおり。境界の型は `ZsShape` のままで、VTy::Enum にフィールド名を足すだけ。TAG の衝突は @tag の決定に移してある"
+      },
+      "R7": {
+        "score": 4,
+        "why": "Rust の enum と match、TS の判別共用体の絞り込みに近い。新しく覚えるのは、`...` の残りのパターンと、同名の関数がある時の修飾だけ"
+      },
+      "R8": {
+        "score": 3,
+        "why": "遅延も既定値も関数の中で閉じ(finish_fn)、アイテム単位の増分は保たれる。ただし、修飾しないバリアントの補完と hover は期待する型に依存し、候補つきの型変数を unify_inner に足す必要がある(候補の集合の共通部分)。parse.rs にも変更が多い: primary は `::` の直後に EK::Path を返すので `Shape::Circle { … }` が読めない。pat() に `{` の形がない。ty() に `::` がない。EK::Record に enum の修飾がない。Info.variant_of が 1 対 1 で、js.rs の pat_cond と handle、lower.rs の pat、EffWalk がこれに頼っている。どれも無理はないが、型情報が要る"
+      }
+    },
+    "blocker": [],
+    "issues": [
+      {
+        "severity": "high",
+        "where": "B『型 Shape::Circle … 型検査の中の型(Ty)にはならない』と、`fn grow(c: Shape::Circle)`",
+        "problem": "Ty にないので、`grow` を値として使うと `Ty::Fn([Shape], Shape)` になり、絞り込みの検査が消える。`shapes |> .map(grow)` は型検査を通り、Rect が渡ると、JS では `{ ...c, TAG: \"Circle\", r: c.r * 2.0 }` が NaN を作り、wasm では `unreachable!()` で trap する。クロージャの引数 `(c: Shape::Circle) => c.r` と、関数型の中の `Shape::Circle` も同じ",
+        "suggestion": "引数の型に `Shape::Circle` を持つ関数は、直接呼ぶ(`|>` を含む)ときだけ使える、とする。値として使ったら `` `grow` takes a narrowed `Shape::Circle`: call it inside a `match`, or wrap it `(s) => match s { … }` `` のエラーにする。EffWalk の EK::Var が、effect を持つ関数を値として使うのを拒んでいるのと同じ仕組みで書ける。クロージャの引数と、関数型の中の `Shape::Circle` は、r4 では書けないとする"
+      },
+      {
+        "severity": "medium",
+        "where": "B『生成した式の型は Shape。Circle という絞り込みの情報が付く』『通るもの: 絞り込まれた変数、生成、戻り値が Shape::Circle の関数の呼び出し』",
+        "problem": "infer は Ty しか返さず、scopes は `HashMap<String, Ty>`。どの式が絞り込みを運ぶか(ブロックの末尾、if / match の全分岐、`let c = Circle { … }` の c)が定義されていない。`fn grow2(c: Shape::Circle) -> Shape::Circle { let r = c.r * 2.0; Circle { ...c, r } }` の末尾がブロックの中にあるときや、`if big { c } else { Circle { ...c, r: 1.0 } }` が通るかが、規則から読めない",
+        "suggestion": "構文で決める関数 `narrow_of(expr)` を定義する。Var とフィールドのパスはメタデータを引く。バリアントの生成は、そのバリアント。戻り値が `Shape::Circle` の呼び出しは、それ。ブロックは末尾の式。if と match は、全分岐が同じバリアントのときだけそれ。ほかはなし。scopes の値を (Ty, Option<Narrow>) にし、`let` は narrow_of を写す、と書く"
+      },
+      {
+        "severity": "medium",
+        "where": "A『決まっていない値は、使う前に決める … その場で修飾を求めるエラー』と『prelude の既定値 … 整数リテラルと同じ』",
+        "problem": "候補つきの型変数の候補には、`None` から作ったものなら必ず prelude の Option が入る。それなのに `let x = None; match x { Some(v) => v, None => 0 }` はエラーになる。check.rs は、小数リテラルにメソッドを呼んだ時点(EK::Method)で f64 に決めている。類推を掲げるなら、これと揃っていない",
+        "suggestion": "match、フィールドの読み出し、メソッドの呼び出しの地点で、候補に prelude の enum があれば、その場で既定値に決める。ないとき(`Empty` など)だけ修飾を求める。そう決めた所には注を付ける"
+      },
+      {
+        "severity": "low",
+        "where": "A『期待する型が、まだ決まっていない候補つきの型変数のときも、期待する型がないものとして扱う』",
+        "problem": "`let mut p = None; p = Ok(s); report(p)`(report は Parsed を受ける)では、`Ok(s)` が Result に決まる。候補 {Option, Hit, Parsed} との単一化に失敗するので、エラーの位置は `p = Ok(s)` になる。規則どおりだが、利用者は Parsed を意図している",
+        "suggestion": "このエラーのクイックフィックスに、候補の中で同名のバリアントを持つ enum の修飾(`Parsed::Ok(s)`)を出す、と書く。候補の数で決めることはしない"
+      },
+      {
+        "severity": "low",
+        "where": "実装の注意(parse.rs の変更が、PUNCTS と HArm しか書かれていない)",
+        "problem": "primary は `Ident ::` の直後に EK::Path を返すので、`Shape::Circle { … }` は読めない。pat() に `{ … }`、`Name { … }`、`...` の形がない。ty() は `Shape::Circle` を読めない。EK::Record には enum の修飾がなく、`..` の base を末尾で読んでいる",
+        "suggestion": "実装の注意に足す。(1)primary の `Path` の後に `{` が来て no_rec でなければ、レコードの形として読む。(2)EK::Record に `Option<String>` の enum を持たせ、`...` は先頭だけにする。(3)Pat に Record(Option<path>, fields, rest, Id) を足す。(4)ty() で `::` を読む"
+      },
+      {
+        "severity": "low",
+        "where": "A『同じ名前の関数とバリアント』",
+        "problem": "ここでの『関数』に extern、wasm fn、ローカルの変数(大文字で始まる名前)が入るのかが書かれていない。check.rs の EK::Var は、どれもバリアントより先に引く",
+        "suggestion": "『名前が同じものがあれば、バリアントは修飾が要る。関数、extern、wasm fn、ローカルのすべて』と書く。または、ローカルの変数を大文字で始められないようにする"
+      }
+    ],
+    "questions": [
+      "位置引数のバリアントの残りのパターン `Pair(...)` はあるか(r2 から未回答)",
+      "enum の名前とバリアントの名前が同じとき(`enum Hit { Hit(i32) }`)は、宣言の時点でのエラーに含まれるか",
+      "フィールドのパス `st.shape` の絞り込みは、腕の中で `st` を `let` で影にしたら外れるか",
+      "関数の終わりに prelude の Option に決まった `None` の型引数が、何にも決まらないとき(`let x = None;` を使わないとき)は、エラーか、それとも JS 層だけは許すのか",
+      "`Shape::Circle` を返す関数を、値として使うことはできるか(引数ではなく戻り値に `Shape::Circle` があるとき)"
+    ],
+    "alternative": {
+      "summary": "絞り込みを運ぶ式を構文で定義し、絞り込みが要る関数を値として使うことを禁じる。どちらも局所的に検査でき、Ty は増やさない",
+      "example": "// narrow_of(e): Var / パス → メタデータ、Circle { … } → Circle、grow(…) → Circle(戻り値の注釈から)、\n//               { …; e } → narrow_of(e)、if / match → 全分岐が同じときだけ\nfn grow2(c: Shape::Circle) -> Shape::Circle { let r = c.r * 2.0; Circle { ...c, r } }   // 通る(ブロックの末尾)\n\nshapes |> .map(grow)\n//             ^^^^ error: `grow` takes a narrowed `Shape::Circle`; call it directly:\n//                  .map((s) => match s { Circle { ... } => grow(s), _ => s })"
+    }
+  }
+]

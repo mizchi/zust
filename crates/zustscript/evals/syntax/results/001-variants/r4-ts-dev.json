@@ -1,0 +1,77 @@
+[
+  {
+    "proposal": "001-variants",
+    "persona": "ts-dev",
+    "scores": {
+      "R1": {
+        "score": 4,
+        "why": "`Circle { r, ... } => …`、`Label { ... } => 0.0`、`Circle { ...s, center: add(center) }` は、TS の判別共用体と JS の rest / spread を知っていれば読める。`grow_all` の `Circle { ... } => grow(s)` は、TS の switch の絞り込みと同じ感覚で読める。減点は 2 つ。`::` は書き慣れない。同名のコンポーネントがあるファイルでは `Shape::Circle { r, ... }` と修飾が増え(`view` の例)、同じファイルの中で修飾の有無が混ざる"
+      },
+      "R2": {
+        "score": 4,
+        "why": "更新は 002 の spread の規則に、パターンの書き漏らしは決定 7 にそろった。prelude の既定値は、整数リテラルの既定値 i32 と同じ考え方なので、自然な延長と言える。例外は 3 つ残る。effect の操作名は一意。型の別名とバリアントの同名は宣言の時点でエラーなのに、関数とバリアントの同名は修飾でなら許す(86〜91 行目と 80〜85 行目で規則が違う)。名前なしの `{ ...c, x }` は、バリアントのときだけエラー"
+      },
+      "R3": {
+        "score": 3,
+        "why": "構文は `::`、`{`、`...` で決まる。部分型を単一化から外したので、`if b { s } else { t }` や `[c, shape]` が書いた順によらなくなった。人にとっても予測しやすい。それでも、修飾しないバリアントがどの enum かは期待する型で決まる(ルーブリックの 3)。さらに、修飾しない `Circle` の意味が、同じファイルに `fn Circle` があるかどうかで変わる。遠くの宣言に依存する"
+      },
+      "R4": {
+        "score": 4,
+        "why": "`last_positive` が `Some(i)` の修飾なしで通るようになった。`moved` の更新は 1 行で書ける。TS より長い所は 3 つ。更新のたびにバリアント名を書く(`{ ...s, center }` はエラー)。注釈のない `let h = if c { None } else { At{…} }` には修飾か注釈が要る。全バリアントに共通する `s.at` は未決のまま"
+      },
+      "R5": {
+        "score": 4,
+        "why": "`grow(shapes[0])` の ``expected `Shape::Circle`, found `Shape` (narrow it with `match`)``、prelude に決まった場所の注、`..` / 書き漏らし / 浮動小数点のパターン / レコードからの spread は、どれも直し方つきのエラー。`{ None }` の誤検出も消えた。5 にしない理由は 2 つ。TS から `Shape.Circle` として受けた値を入口で検査しない(`as` で Rect を渡すと、`@wasm` では `unreachable!()`、JS では誤ったフィールドを読む)。`fn Circle` を足すと、離れたパターンが一斉にエラーになる"
+      },
+      "R6": {
+        "score": 4,
+        "why": "名前付きフィールドが名前のままプロパティになる。`export declare namespace Shape { type Circle = … }` で、zsc の `Shape::Circle` が `.d.ts` の `Shape.Circle` に対応する。同名の関数 `Circle` は値の名前空間なので、TS の型とは衝突しない(343 行目)。一手間残る点は 3 つ。TS 側でバリアントの値を作るコンストラクタがない。`Hit.None` と `Parsed.None` の TAG が同じになる。データのないバリアントの形(文字列かオブジェクトか)は、`@tag` の決定待ち"
+      },
+      "R7": {
+        "score": 4,
+        "why": "scrutinee の絞り込み、パターンの `...`、`let { x } = p` の一部だけの分割代入、prelude の Option の推論で、TS の経験がほぼそのまま通じる。新しく覚えることは 4 つ。`::` での修飾。更新でバリアント名を書くこと。同名のコンポーネントがあると修飾が必須になること。TS の定番の `type Circle = {…}` とバリアントを同じ名前にできないこと"
+      },
+      "R8": {
+        "score": 3,
+        "why": "部分型をやめたので、合流の規則の問題は消えた。遅延は finish_fn の中で閉じ、網羅性はパターン行列で `EK::Match` に残す。どちらも具体的に書かれている。ただし、バリアント名の解決には型情報が要る(ルーブリックの 3)。今の parse.rs は `Ident` の直後の `::` で `EK::Path` を返して終わる(908〜910 行目)ので、`Shape::Circle { … }` の生成とパターンには parse の変更が要る。LSP の補完も、`Circle {` の後のフィールドの候補を出すのに、どの enum かの解決が先に要る。hover で絞り込みをどう見せるかは書かれていない"
+      }
+    },
+    "blocker": [],
+    "issues": [
+      {
+        "severity": "medium",
+        "where": "A. 同じ名前の関数とバリアント(決定 6)/ 311 行目「このファイルでは、上の area / moved の `Circle` も `Shape::Circle` と書く」",
+        "problem": "`fn Circle` というコンポーネントを 1 つ足すと、同じファイルの離れた match のパターン `Circle { r, ... }` と生成 `Circle { … }` が一斉にエラーになる。r1 で A.1 を廃止した理由(宣言を足すと離れた所が壊れる)に近い。名前付きフィールドの `Circle { … }` とパターンの位置には、もともと関数が来ないので、区別のために修飾を求める必要がない",
+        "suggestion": "修飾を求めるのは、関数と字面が重なる形だけにする。重なるのは呼び出し `Circle(…)` と、裸の `Circle`。`Circle { … }` の生成とパターンは、今までどおり期待する型で解決する。effect の推論には、parser が `Name {` をバリアントの生成として印を付けて渡せば、関数の表を引かずに済む"
+      },
+      {
+        "severity": "medium",
+        "where": "出力 / `.d.ts` の `Shape.Circle`、`fn grow(c: Shape::Circle)` の lower(`let … else { unreachable!() }`)",
+        "problem": "`pub` な関数の引数が `Shape::Circle` のとき、TS からは型の上では Circle しか渡せない。それでも `as` や any を経由すれば Rect が届く。`@wasm` では panic になり、JS ではそのまま `c.r` が undefined になる。数値の brand は、コンストラクタで検査すると決めている",
+        "suggestion": "`pub` な関数の入口で TAG を検査し、違えば TypeError にする(数値の brand のコンストラクタと同じ方針)。JS 層の内部の呼び出しでは検査しない"
+      },
+      {
+        "severity": "low",
+        "where": "B. 更新(名前なしの `{ ...c, center: x }` はエラー)",
+        "problem": "r3 から変わっていない。TS の人は、絞り込んだ `s` に `{ ...s, center }` と書く。毎回バリアント名を書かされる理由(出力に判別キーを書くため)は、書く側には見えない。代替案にも理由が残っていない",
+        "suggestion": "spread の元が絞り込み済みの束縛なら、名前なしでも、そのバリアントの更新として扱う(判別キーは絞り込みから分かる)。採らないなら、代替案に理由を書く。エラーには LSP のクイックフィックスを付ける"
+      },
+      {
+        "severity": "low",
+        "where": "A. 型の別名とバリアントの同名は宣言でエラー(86〜91 行目)",
+        "problem": "関数とは修飾で共存できるのに、別名とは共存できない。TS からの移行で `type Circle = {…}` を先に書いていると、名前を変えるまで通らない",
+        "suggestion": "未決事項(425 行目)のとおり、関数と同じく修飾でなら許す方向で決める。決めるまでは、エラーで `Shape::Circle` を別名の代わりに示す今の直し方で足りる"
+      }
+    ],
+    "questions": [
+      "絞り込まれた `s` の hover は `Shape` と出すか、`Shape::Circle` と出すか(TS は絞り込んだ型を出す)",
+      "TS から受けた `Shape.Circle` の引数を、`pub` な関数の入口で検査するか",
+      "同名の関数があるとき、名前付きフィールドの生成 `Circle { … }` まで修飾を求める必要はあるか(関数とは字面が重ならない)",
+      "`let d = if b { s } else { s2 }`(どちらも Circle に絞り込まれている)の `d` は絞り込まれるか"
+    ],
+    "alternative": {
+      "summary": "同名の関数があるときに修飾を求めるのは、関数と字面が重なる `Circle(…)` と裸の `Circle` だけにする。`Name {` の生成とパターンは、期待する型でバリアントに解決する",
+      "example": "fn Circle({ r }: { r: f64 }) -> Jsx { <circle r={r} /> }\n\nfn view(s: Shape) -> Jsx {\n  match s {\n    Circle { r, ... } => <Circle r={r} />,   // パターンに関数は来ないのでバリアント。<Circle /> は関数\n    Rect { ... } => <rect />,\n    Label { text, ... } => <text>{text}</text>,\n  }\n}\nfn moved(s: Shape, d: Vec2) -> Shape {\n  match s { Circle { center, ... } => Circle { ...s, center: add(center) }, … }   // 修飾は要らない\n}\n// 位置引数のバリアント `Pair(a, b)` と同名の関数 `Pair` があるときだけ、`Shape::Pair(a, b)` と書く"
+    }
+  }
+]
