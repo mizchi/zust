@@ -1553,7 +1553,7 @@ impl Program {
                 let bare = m.strip_prefix("__ref_").unwrap_or(m);
                 let decls = p.traits.get(tr).map(|v| v.as_slice()).unwrap_or(&[]);
                 let declared = |n: &str| decls.iter().any(|&d| p.names[d as usize].rsplit("::").next() == Some(n));
-                if declared(m) || declared(bare) || bare.starts_with("__") {
+                if declared(m) || declared(bare) {
                     continue;
                 }
                 let m = bare;

@@ -580,6 +580,7 @@ impl Cx<'_> {
     /// E0005: the pattern of a `for` must cover the element type (`for Some(x) in xs` does not)
     pub(crate) fn for_pat_check(&self, p: &Pat, t: Ty) -> R<()> {
         if self.user_code && !super::plainly_irrefutable(p) {
+            self.lit_pat_type_check(p, t)?;
             if let Some(w) = self.non_exhaustive_pats(&[p], t) {
                 return err(SP, format!("refutable pattern in `for` loop binding: `{w}` not covered (E0005)"));
             }

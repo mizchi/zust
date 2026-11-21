@@ -783,6 +783,25 @@ pub fn is_place_expr(e: &Expr) -> bool {
 
 /// `let x` / `let mut x` / `let _` のような単純な let か
 impl Cx<'_> {
+    /// (`let false = 22;` / `for 'a' in 0..3`: a bool / char literal pattern of another type is a mismatch, before any
+    /// E0005)
+    pub(crate) fn lit_pat_type_check(&self, pat: &Pat, vt: Ty) -> R<()> {
+        let lit_ty = match pat {
+            Pat::Lit(e) => match &**e {
+                Expr::Lit(t, _) if t == "true" || t == "false" => Some(Ty::Bool),
+                Expr::Lit(t, _) if t.starts_with('\'') => Some(Ty::Char),
+                _ => None,
+            },
+            _ => None,
+        };
+        if let Some(pt) = lit_ty {
+            if vt != pt && (vt.is_int() || vt.is_float() || matches!(vt, Ty::Bool | Ty::Char)) {
+                return err(SP, format!("mismatched types: expected `{}`, found `{}`", self.prog.tn(vt), self.prog.tn(pt)));
+            }
+        }
+        Ok(())
+    }
+
     /// `let None = ..` / `let MAX = ..`: an identifier pattern naming a unit variant or a constant
     pub(crate) fn names_variant_or_const(&self, p: &Pat) -> bool {
         let Pat::Ident(false, false, n, None) = p else { return false };
@@ -1394,20 +1413,7 @@ impl Cx<'_> {
                     // (E0005: without `else`, the pattern must cover the value's type)
                     if els.is_none() && self.user_code && !plainly_irrefutable(pat) {
                         // (`let false = 22;`: the literal's type first)
-                        let lit_ty = match pat {
-                            Pat::Lit(e) => match &**e {
-                                Expr::Lit(t, _) if t == "true" || t == "false" => Some(Ty::Bool),
-                                Expr::Lit(t, _) if t.starts_with('\'') => Some(Ty::Char),
-                                _ => None,
-                            },
-                            _ => None,
-                        };
-                        if let Some(pt) = lit_ty {
-                            let vt = place.ty();
-                            if vt != pt && (vt.is_int() || vt.is_float() || matches!(vt, Ty::Bool | Ty::Char)) {
-                                return err(SP, format!("mismatched types: expected `{}`, found `{}`", self.prog.tn(vt), self.prog.tn(pt)));
-                            }
-                        }
+                        self.lit_pat_type_check(pat, place.ty())?;
                         if let Some(w) = self.non_exhaustive_pats(&[pat], place.ty()) {
                             return err(SP, format!("refutable pattern in local binding: `{w}` not covered (E0005)"));
                         }
