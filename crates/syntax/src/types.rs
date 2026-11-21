@@ -84,7 +84,9 @@ impl Ty {
     pub fn is_fat(self) -> bool {
         matches!(
             self,
-            Ty::Ref(_, Ty::Slice(_) | Ty::Str | Ty::Dyn(_)) | Ty::Box(Ty::Slice(_) | Ty::Str | Ty::Dyn(_))
+            Ty::Ref(_, Ty::Slice(_) | Ty::Str | Ty::Dyn(_))
+                | Ty::Box(Ty::Slice(_) | Ty::Str | Ty::Dyn(_))
+                | Ty::Ptr(_, Ty::Slice(_) | Ty::Str | Ty::Dyn(_))
         )
     }
 }

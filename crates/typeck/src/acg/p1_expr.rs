@@ -204,6 +204,12 @@ impl Cx<'_> {
                     // patterns on it bind by value)
                     // (a fat pointer's value is the address of its two words, which is what a slice place holds)
                     (Some(fat), Ty::Ref(_, Ty::Slice(e)) | Ty::Box(Ty::Slice(e))) => Ok(Place::Mem(fat, 0, Ty::Slice(e))),
+                    (Some(_), Ty::Ptr(..)) if self.unsafe_ok == 0 && sp.start.line != 0 => {
+                        err(sp.start, "dereference of raw pointer is unsafe and requires unsafe block (E0133)")
+                    }
+                    // (a fat raw pointer is the address of its two words, as a fat reference is)
+                    (Some(fat), Ty::Ptr(_, Ty::Slice(e))) => Ok(Place::Mem(fat, 0, Ty::Slice(e))),
+                    (Some(fat), Ty::Ptr(_, i @ (Ty::Str | Ty::Dyn(_)))) => Ok(Place::Mem(fat, 0, *i)),
                     (Some(_), t) if t.is_fat() => err(SP, "dereferencing a slice is not supported (index it instead)"),
                     (Some(_), Ty::Ptr(..)) if self.unsafe_ok == 0 && sp.start.line != 0 => {
                         err(sp.start, "dereference of raw pointer is unsafe and requires unsafe block (E0133)")
@@ -1113,7 +1119,12 @@ impl Cx<'_> {
                     }
                     // (a raw slice pointer is the address of its (data, length) pair here: as a thin pointer, the data
                     // word)
-                    (Ty::Ptr(_, Ty::Slice(_) | Ty::Str), Ty::Ptr(_, b)) if !matches!(b, Ty::Slice(_) | Ty::Str | Ty::Dyn(_)) => {
+                    // (a raw dyn pointer, the address of its (data, vtable) pair: likewise the data word)
+                    (Ty::Ptr(_, Ty::Slice(_) | Ty::Str | Ty::Dyn(_)), Ty::Ptr(_, b)) if !matches!(b, Ty::Slice(_) | Ty::Str | Ty::Dyn(_)) => {
+                        return Ok((v.map(|a| self.b.ins().load(PTR, mf(), a, 0)), to));
+                    }
+                    // (`p as usize` of a fat raw pointer: its address, the data word)
+                    (Ty::Ptr(_, Ty::Slice(_) | Ty::Str | Ty::Dyn(_)), t) if matches!(t, Ty::Usize | Ty::U64 | Ty::Isize | Ty::I64) => {
                         return Ok((v.map(|a| self.b.ins().load(PTR, mf(), a, 0)), to));
                     }
                     (Ty::Ptr(..), Ty::Ptr(..)) => return Ok((v, to)),
@@ -2075,6 +2086,29 @@ impl Cx<'_> {
     }
 
     /// `x.m(..)` (x: `&dyn Trait`)
+    /// E0596: a `&mut self` method of `dyn tr` called through a shared `&dyn` / `*const dyn` (the receiver's type as
+    /// evaluated)
+    pub(crate) fn dyn_mut_check(&mut self, recv_ty: Ty, tr: &str, name: &str) -> R<()> {
+        if !self.user_code {
+            return Ok(());
+        }
+        let (trn, _) = self.dyn_trait_args(tr);
+        let decls = self.prog.dyn_methods(&trn);
+        let Some(&d) = decls.iter().find(|&&d| self.prog.names[d as usize].rsplit("::").next() == Some(name)) else {
+            return Ok(());
+        };
+        let ds = &self.prog.sigs[d as usize];
+        // (a method `where Self: Sized` is not in the vtable)
+        if ds.generics.first().is_some_and(|g| g.1.iter().any(|b| b == "Sized")) {
+            return err(SP, format!("the `{name}` method cannot be invoked on `{}`", self.prog.tn(recv_ty)));
+        }
+        let shared = matches!(recv_ty, Ty::Ref(false, Ty::Dyn(_)) | Ty::Ptr(false, Ty::Dyn(_)));
+        if shared && matches!(ds.params.first(), Some(Ty::Ref(true, _))) {
+            return err(SP, "cannot borrow data in a `&` reference as mutable (E0596)".to_string());
+        }
+        Ok(())
+    }
+
     pub(crate) fn dyn_method_call(&mut self, fat: Value, tr: &str, mc: &Expr) -> R<V> {
         let Expr::MethodCall(_, name, _, margs, _) = mc else { return err(SP, "internal: expected a method call") };
         let (trn, targs) = self.dyn_trait_args(tr);

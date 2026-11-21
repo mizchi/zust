@@ -1390,9 +1390,19 @@ pub fn select_with(user_src: &str, user_items: &[SrcItem], cache: &mut SelectCac
             user_src.match_indices(w).any(|(i, _)| {
                 let after = b.get(i + 3).copied().unwrap_or(b' ');
                 // (`3f32`: the suffix of a number literal counts; `x1f32` / `0x1f32` do not)
+                // (`1e3f32` / `1e-3f32`: the exponent is part of the number)
                 let mut k = i;
-                while k > 0 && (b[k - 1].is_ascii_digit() || b[k - 1] == b'_') {
-                    k -= 1;
+                loop {
+                    while k > 0 && (b[k - 1].is_ascii_digit() || b[k - 1] == b'_') {
+                        k -= 1;
+                    }
+                    if k >= 2 && matches!(b[k - 1], b'e' | b'E') && b[k - 2].is_ascii_digit() {
+                        k -= 1;
+                    } else if k >= 3 && matches!(b[k - 1], b'+' | b'-') && matches!(b[k - 2], b'e' | b'E') && b[k - 3].is_ascii_digit() {
+                        k -= 2;
+                    } else {
+                        break;
+                    }
                 }
                 let lit_suffix = k < i && b[k].is_ascii_digit() && !(k > 0 && (b[k - 1].is_ascii_alphanumeric() || b[k - 1] == b'_'));
                 let before_ident = !lit_suffix && i > 0 && (b[i - 1].is_ascii_alphanumeric() || b[i - 1] == b'_');

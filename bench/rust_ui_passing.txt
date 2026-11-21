@@ -2700,6 +2700,8 @@ compile-fail	hygiene/no_implicit_prelude-2018.rs
 check-pass	hygiene/no_implicit_prelude-2021.rs
 run-pass	hygiene/thread-local-not-in-prelude.rs
 compile-fail	illegal-sized-bound/mutability-mismatch-arg.rs
+compile-fail	illegal-sized-bound/mutability-mismatch.rs
+compile-fail	illegal-sized-bound/regular.rs
 run-pass	impl-header-lifetime-elision/bare_type.rs
 check-pass	impl-header-lifetime-elision/constant-used-as-arraylen.rs
 compile-fail	impl-header-lifetime-elision/dyn-trait.rs
@@ -3371,6 +3373,7 @@ check-pass	lint/improper-ctypes/mustpass-73747.rs
 compile-fail	lint/improper-ctypes/nonzero-char.rs
 check-pass	lint/inert-attr-macro.rs
 check-pass	lint/int_to_ptr-no_std.rs
+check-pass	lint/int_to_ptr-unsized.rs
 check-pass	lint/int_to_ptr.rs
 compile-fail	lint/invalid_null_args.rs
 check-pass	lint/issue-103317.rs
@@ -5735,6 +5738,7 @@ compile-fail	span/borrowck-borrow-overloaded-auto-deref-mut.rs
 compile-fail	span/borrowck-borrow-overloaded-deref-mut.rs
 compile-fail	span/borrowck-call-method-from-mut-aliasable.rs
 compile-fail	span/borrowck-let-suggestion-suffixes.rs
+compile-fail	span/borrowck-object-mutability.rs
 compile-fail	span/coerce-suggestions.rs
 compile-fail	span/drop-location-span-error-rust-2021-incompatible-closure-captures-96258.rs
 compile-fail	span/impl-wrong-item-for-trait.rs
