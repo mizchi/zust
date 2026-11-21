@@ -532,6 +532,55 @@ impl Cx<'_> {
 
     /// An identifier pattern that names a const of the scrutinee's type (a simple type: integer, bool, char, `&str`,
     /// a reference to an integer or integer slice)
+    /// The part of t that is not structural (no derived PartialEq), if any: numbers, bool, char, str, references,
+    /// arrays, tuples are; a struct / enum is when it derives PartialEq and its fields are (Option / Result derive it);
+    /// Vec / String / Box (manual impls) are not
+    pub(crate) fn non_structural(&self, t: Ty, depth: u32) -> Option<Ty> {
+        if depth > 8 {
+            return None;
+        }
+        match t {
+            t if t.is_int() || t.is_float() || matches!(t, Ty::Bool | Ty::Char | Ty::Unit | Ty::Never | Ty::Str) => None,
+            Ty::Ref(_, i) | Ty::Array(i, _) | Ty::Slice(i) => self.non_structural(*i, depth + 1),
+            Ty::Struct(sid) => {
+                let base = self.prog.base_of(sid);
+                let sd = &self.prog.structs[sid as usize];
+                // (std's types that derive PartialEq there, whatever the prelude's version does)
+                let std_structural = matches!(
+                    self.prog.structs[base as usize].name.as_str(),
+                    "Option" | "Result" | "ManuallyDrop" | "Wrapping" | "Saturating" | "PhantomData" | "Reverse" | "Ordering" | "Bound" | "Range" | "RangeInclusive"
+                );
+                if !self.prog.is_tuple(base) && !std_structural && !self.prog.derived_peq.contains(&base) {
+                    return Some(t);
+                }
+                // (an enum's variants are not looked into: only the variant the constant holds counts, which is not
+                // evaluated here; a struct's fields all are)
+                let fields: Vec<Ty> = if sd.is_enum { vec![] } else { sd.fields.iter().map(|f| f.1).collect() };
+                fields.into_iter().find_map(|f| self.non_structural(f, depth + 1))
+            }
+            _ => None,
+        }
+    }
+
+    /// Whether t holds a fn pointer or a raw pointer (in a field, an element): such a constant does not match reliably
+    fn has_fn_or_raw_ptr(&self, t: Ty, depth: u32) -> bool {
+        if depth > 8 {
+            return false;
+        }
+        match t {
+            // (a raw pointer may come from an integer (`ptr::null()`), which matches reliably: only fn pointers)
+            Ty::Fn(_) => true,
+            Ty::Ref(_, i) | Ty::Array(i, _) | Ty::Slice(i) => self.has_fn_or_raw_ptr(*i, depth + 1),
+            Ty::Struct(sid) => {
+                let sd = &self.prog.structs[sid as usize];
+                // (as for non_structural: not an enum's variants, only the one the constant holds would count)
+                let fs: Vec<Ty> = if sd.is_enum { vec![] } else { sd.fields.iter().map(|f| f.1).collect() };
+                fs.into_iter().any(|f| self.has_fn_or_raw_ptr(f, depth + 1))
+            }
+            _ => false,
+        }
+    }
+
     pub(crate) fn const_pat_ok(&self, pat: &Pat, t: Ty) -> bool {
         let Some(n) = const_ident_pat(self.prog, pat) else { return false };
         if self.lookup(n).is_some() {
@@ -586,6 +635,60 @@ impl Cx<'_> {
                 self.same(SP, ct, t)?;
                 let cond = self.eq_at(v.unwrap(), c.unwrap(), t, SP)?;
                 self.require(cond, fail);
+                Ok(())
+            }
+            // (a constant of a type without a derived PartialEq (or holding one) cannot be a pattern)
+            Pat::Ident(_, _, n, None) if self.user_code && self.lookup(n).is_none() && self.prog.const_index.contains_key(n.as_str()) => {
+                let c = &self.prog.consts[self.prog.const_index[n.as_str()] as usize];
+                // (a static's name is not a pattern (E0530))
+                // (with modules, whose scopes are flattened away, the static may be another module's: a binding then)
+                if c.stat.is_some() {
+                    if self.prog.has_mods {
+                        return Ok(());
+                    }
+                    return err(SP, format!("match bindings cannot shadow statics (E0530): `{n}`"));
+                }
+                let ct = c.ty;
+                if let Ty::Struct(sid) = self.strip_refs(ct) {
+                    if self.prog.unions.contains(&self.prog.structs[self.prog.base_of(sid) as usize].name) {
+                        return err(SP, "cannot use unions in constant patterns".to_string());
+                    }
+                }
+                if let Some(bad) = self.non_structural(ct, 0) {
+                    return err(SP, format!("constant of non-structural type `{}` in a pattern", self.prog.tn(bad)));
+                }
+                if let Ty::Dyn(_) = self.strip_refs(ct) {
+                    return err(SP, format!("`{}` cannot be used in patterns", self.prog.tn(self.strip_refs(ct))));
+                }
+                if self.has_fn_or_raw_ptr(ct, 0) {
+                    return err(SP, "function pointers and raw pointers not derived from integers in patterns behave unpredictably".to_string());
+                }
+                // (a structural constant of the scrutinee's type (`const C: [u8; 2]`, a struct deriving PartialEq):
+                // equal to its value, as `==` compares)
+                // (`match &[2u8] { C => .. }` with `const C: [u8; 1]`: the scrutinee through its references)
+                let mut p = p;
+                while p.ty() != ct && matches!(p.ty(), Ty::Ref(..)) {
+                    p = self.pat_deref_once(p).0;
+                }
+                let t = p.ty();
+                // (`match 0 { OR => .. }` with `const OR: usize`: rustc types the literal from the constant; here the
+                // scrutinee kept its own integer type, and the constant's value is compared in it)
+                let int_pair = ct.is_int() && t.is_int();
+                if ct != t && !int_pair {
+                    return err(SP, format!("mismatched types: expected `{}`, found `{}`", self.prog.tn(t), self.prog.tn(ct)));
+                }
+                let (v, _) = self.read(p);
+                let ce = self.keep_expr(path_expr(n));
+                let (c, cty) = self.expr(ce, Some(ct))?;
+                self.same(SP, cty, ct)?;
+                let c = match (c, int_pair && ct != t) {
+                    (Some(c), true) => Some(self.convert(c, ct, t)),
+                    (c, _) => c,
+                };
+                if let (Some(v), Some(c)) = (v, c) {
+                    let cond = self.eq_at(v, c, t, SP)?;
+                    self.require(cond, fail);
+                }
                 Ok(())
             }
             Pat::Ident(_, _, _, sub) => match sub {
@@ -849,6 +952,15 @@ impl Cx<'_> {
             Pat::Ident(..) if unit_variant_ident(self.prog, pat).is_some() => Ok(()),
             Pat::Ident(..) if const_lit_pat(self.prog, pat).is_some() => Ok(()),
             Pat::Ident(..) if self.const_pat_ok(pat, p.ty()) => Ok(()),
+            // (an aggregate constant, tested by pat_test: not a new name, so a nested match still compares with it)
+            Pat::Ident(_, _, n, None)
+                if self.user_code
+                    && (self.prog.lower_consts || n.trim_start_matches('_').starts_with(|c: char| c.is_uppercase()))
+                    && self.prog.const_index.get(n.as_str()).is_some_and(|&ci| self.prog.consts[ci as usize].stat.is_none())
+                    && self.lookup(n).is_none() =>
+            {
+                Ok(())
+            }
             Pat::Ident(by_ref, mutable, name, subpat) => {
                 if let Some(sub) = subpat {
                     self.pat_bind(sub, p, mode)?;

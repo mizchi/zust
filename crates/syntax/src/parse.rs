@@ -734,6 +734,13 @@ impl Parser {
             None => format!("end of input: {msg}"),
         }
     }
+    /// an error at the current token, without the token's text
+    fn err_plain(&self, msg: &str) -> String {
+        match self.toks.get(self.i) {
+            Some(t) => format!("{}:{}: {msg}", t.line, t.col + 1),
+            None => format!("end of input: {msg}"),
+        }
+    }
     fn at_end(&self) -> bool {
         self.i >= self.toks.len()
     }
@@ -2519,7 +2526,11 @@ impl Parser {
             while !self.is_close() {
                 self.attrs()?;
                 self.vis()?;
-                v.push(self.ty()?);
+                let ft = self.ty()?;
+                if ty_has_infer(&ft) {
+                    return Err(self.err_plain("the placeholder `_` is not allowed within types on item signatures for structs (E0121)"));
+                }
+                v.push(ft);
                 if !self.eat_punct(",") {
                     break;
                 }
@@ -2538,7 +2549,11 @@ impl Parser {
                     return Err(self.err(&format!("field `{n}` is already declared (E0124)")));
                 }
                 self.expect_punct(":")?;
-                v.push((n, self.ty()?));
+                let ft = self.ty()?;
+                if ty_has_infer(&ft) {
+                    return Err(self.err_plain("the placeholder `_` is not allowed within types on item signatures for structs (E0121)"));
+                }
+                v.push((n, ft));
                 if !self.eat_punct(",") {
                     break;
                 }
@@ -2653,7 +2668,11 @@ impl Parser {
                 self.i += 3;
                 Ty::Infer
             } else {
-                self.ty()?
+                let t = self.ty()?;
+                if ty_has_infer(&t) {
+                    return Err(self.err_plain(PLACEHOLDER_FN));
+                }
+                t
             };
             params.push((p, t));
             if !self.eat_punct(",") {
@@ -2662,6 +2681,9 @@ impl Parser {
         }
         self.expect_close(")")?;
         let ret = if self.eat_punct("->") { Some(self.ty()?) } else { None };
+        if ret.as_ref().is_some_and(ty_has_infer) || recv_ty.as_ref().is_some_and(ty_has_infer) {
+            return Err(self.err_plain(PLACEHOLDER_FN));
+        }
         self.where_clause(&mut g)?;
         Ok(FnSig { name: name, generics: g, recv: recv, recv_ty: recv_ty, params: params, ret: ret, quals: quals })
     }
@@ -2840,6 +2862,9 @@ impl Parser {
                 self.i += 1;
                 let n = if self.eat_ident("_") { "_".to_string() } else { self.ident()? };
                 let t = if self.eat_punct(":") { Some(self.ty()?) } else { None };
+                if t.as_ref().is_some_and(ty_has_infer) {
+                    return Err(self.err_plain("the placeholder `_` is not allowed within types on item signatures for constants (E0121)"));
+                }
                 let e = if self.eat_punct("=") {
                     let st = self.i;
                     let e = self.expr(true)?;
@@ -2857,6 +2882,9 @@ impl Parser {
                 let n = self.decl_ident()?;
                 self.expect_punct(":")?;
                 let t = self.ty()?;
+                if ty_has_infer(&t) {
+                    return Err(self.err_plain("the placeholder `_` is not allowed within types on item signatures for statics (E0121)"));
+                }
                 // (`static X: T;` in an extern block: a symbol of the program it links with, no initializer)
                 if self.is_punct(";") && !self.in_extern {
                     return Err(self.err("free static item without body"));
@@ -2880,6 +2908,10 @@ impl Parser {
                 let bs = if self.eat_punct(":") { self.bounds()? } else { Vec::new() };
                 self.where_clause(&mut g)?;
                 let t = if self.eat_punct("=") { Some(self.ty()?) } else { None };
+                // (not the parser's own `type __B = dyn ..;`, which reads a bound's text)
+                if n != "__B" && t.as_ref().is_some_and(ty_has_infer) {
+                    return Err(self.err_plain("the placeholder `_` is not allowed within types on item signatures for type aliases (E0121)"));
+                }
                 // (a generic associated type's where clause after the value: `type Item<'a> = &'a T where T: 'a;`)
                 self.where_clause(&mut g)?;
                 self.expect_punct(";")?;
@@ -3272,3 +3304,32 @@ pub(crate) fn double_binding<'a>(p: &'a Pat, seen: &mut crate::fxhash::FxSet<&'a
         _ => None,
     }
 }
+
+/// Whether a type written in an item's signature has a `_` placeholder (E0121)
+fn ty_has_infer(t: &Ty) -> bool {
+    let arg = |a: &GArg| match a {
+        GArg::Ty(t) | GArg::Bind(_, t) => ty_has_infer(t),
+        _ => false,
+    };
+    match t {
+        Ty::Infer => true,
+        // (`Fn(_)` as a path in 2015: its parenthesized arguments too)
+        Ty::Path(q, p) => {
+            q.as_deref().is_some_and(ty_has_infer)
+                || p.segs.iter().any(|s| s.args.iter().any(arg) || s.fn_args.as_ref().is_some_and(|(ps, r)| ps.iter().any(ty_has_infer) || r.as_deref().is_some_and(ty_has_infer)))
+        }
+        Ty::Ref(_, _, i) | Ty::Ptr(_, i) | Ty::Slice(i) | Ty::Array(i, _) => ty_has_infer(i),
+        Ty::Tuple(ts) => ts.iter().any(ty_has_infer),
+        Ty::Fn(ps, r) => ps.iter().any(ty_has_infer) || ty_has_infer(r),
+        // (`&dyn Fn(_)`: the arguments of a bound's trait)
+        Ty::Dyn(bs) | Ty::Impl(bs) => bs.iter().any(|b| match b {
+            Bound::Trait(_, p) => p.segs.iter().any(|s| {
+                s.args.iter().any(arg) || s.fn_args.as_ref().is_some_and(|(ps, r)| ps.iter().any(ty_has_infer) || r.as_deref().is_some_and(ty_has_infer))
+            }),
+            _ => false,
+        }),
+        _ => false,
+    }
+}
+
+const PLACEHOLDER_FN: &str = "the placeholder `_` is not allowed within types on item signatures for functions (E0121)";

@@ -657,6 +657,21 @@ impl Session2 {
                 return Err(format!("{}:1: {e}", it.line));
             }
         }
+        // (E0658: an attribute behind a feature gate the file does not enable)
+        // (attributes start items: only the text at the start of the program's items, not the whole source)
+        let mut feats: Option<Vec<String>> = None;
+        for it in &items[..user] {
+            let head = src.get(it.start..it.end).unwrap_or("");
+            // (and an extern block's items: `extern "C" { #[unsafe(ffi_const)] fn f(); }`)
+            let ext = head.starts_with("extern") || head.starts_with("unsafe extern");
+            if ext || head.starts_with('#') {
+                // (an item's outer attributes, not its body; an extern block's items are read whole)
+                let end = if ext { Some(it.end) } else { gated_attrs_len(head.as_bytes()).map(|n| it.start + n) };
+                if let Some(e) = end.and_then(|end| gated_attr(&src, it.start, end, &mut feats)) {
+                    return Err(e);
+                }
+            }
+        }
         // (`#![crate_type = "lib"]`: a library, no `main` needed)
         let mut deny_unreachable = false;
         let mut deny_unused_vars = false;
@@ -788,14 +803,25 @@ impl Session2 {
         // (traits of one name in two modules: which one a method call means depends on where it is. Read from the
         // crate's source (its files joined, as the items' lines count); a build with dependency crates keeps the earlier
         // choice, the first impl)
+        // (whether the source has modules: one search, for trait scopes and for has_mods below)
+        // (the keyword, not `mode`: a `mod` not after an identifier's letter and followed by a space)
+        let has_mod_word = src0.contains("mod") && {
+            let b = src0.as_bytes();
+            src0.match_indices("mod").any(|(i, _)| {
+                (i == 0 || !(b[i - 1].is_ascii_alphanumeric() || b[i - 1] == b'_')) && b.get(i + 3).is_some_and(|c| c.is_ascii_whitespace())
+            })
+        };
         if self.ctx.deps.is_empty() && self.ctx.lib.is_none() {
-            prog.trait_scopes = lexer::trait_scopes(src0);
+            prog.trait_scopes = lexer::trait_scopes_with(src0, has_mod_word);
             if !prog.trait_scopes.is_empty() {
                 prog.item_lines = items.iter().map(|it| it.line as u32).collect();
             }
         }
         prog.overflow_checks = !self.opts.opt;
         prog.deny_unreachable = deny_unreachable;
+        // (the program has modules: read from its source as written, before flattening blanks their headers)
+        prog.has_mods = has_mod_word;
+        prog.lower_consts = prog.consts.iter().any(|c| !c.name.contains("::") && c.name.trim_start_matches('_').starts_with(|ch: char| ch.is_lowercase()));
         prog.deny_must_use = deny_must_use;
         prog.deny_unused_alloc = deny_unused_alloc;
         prog.deny_trivial_casts = deny_trivial_casts;
@@ -2483,4 +2509,183 @@ impl Session2 {
 /// function compiled before such a `#![deny]` was added is not reused without its check
 fn lint_bits(p: &Program) -> u8 {
     p.deny_must_use as u8 | (p.deny_trivial_casts.0 as u8) << 1 | (p.deny_trivial_casts.1 as u8) << 2 | (p.deny_unreachable as u8) << 3 | (p.deny_unused_alloc as u8) << 4
+}
+
+/// The attributes behind a feature gate, and the feature
+const GATED: &[(&str, &str)] = &[
+    ("default_lib_allocator", "allocator_internals"),
+    ("export_stable", "export_stable"),
+    ("ffi_const", "ffi_const"),
+    ("ffi_pure", "ffi_pure"),
+    ("rustc_align", "fn_align"),
+    ("rustc_align_static", "static_align"),
+    ("fundamental", "fundamental"),
+    ("move_size_limit", "large_assignments"),
+    ("marker", "marker_trait_attr"),
+    ("no_core", "no_core"),
+    ("optimize", "optimize_attribute"),
+    ("patchable_function_entry", "patchable_function_entry"),
+    ("register_tool", "register_tool"),
+    ("thread_local", "thread_local"),
+];
+
+/// An attribute that needs a `#![feature(..)]` the source does not have: `line:col: the `x` attribute is an
+/// experimental feature (E0658)`. Read from the tokens of src[from..to] (literals and comments are not attributes);
+/// the features from the whole source's (a `#![feature]` may follow the attribute it enables)
+fn gated_attr(src: &str, from: usize, to: usize, feats: &mut Option<Vec<String>>) -> Option<String> {
+    let b = src.as_bytes();
+    let toks = lexer::tokenize(&b[from..to]);
+    let tx = |k: usize| &src[from + toks[k].1..from + toks[k].2];
+    let sym = |k: usize, c: &str| k < toks.len() && toks[k].0 == 1 && tx(k) == c;
+    for k in 0..toks.len() {
+        if !sym(k, "#") {
+            continue;
+        }
+        let mut j = k + 1;
+        if sym(j, "!") {
+            j += 1;
+        }
+        if !sym(j, "[") {
+            continue;
+        }
+        j += 1;
+        // (`#[unsafe(ffi_const)]`)
+        if j + 1 < toks.len() && toks[j].0 == 0 && tx(j) == "unsafe" && sym(j + 1, "(") {
+            j += 2;
+        }
+        if j >= toks.len() || toks[j].0 != 0 || sym(j + 1, ":") {
+            continue;
+        }
+        let name = tx(j);
+        let Some(&(_, feat)) = GATED.iter().find(|g| g.0 == name) else { continue };
+        // (the source's enabled features: read once, at the first gated attribute)
+        let enabled = feats.get_or_insert_with(|| enabled_features(src));
+        if !enabled.iter().any(|f| f == feat) {
+            let i = from + toks[k].1;
+            let line = src[..i].matches('\n').count() + 1;
+            let col = i - src[..i].rfind('\n').map_or(0, |n| n + 1) + 1;
+            return Some(format!("{line}:{col}: the `{name}` attribute is an experimental feature (E0658)"));
+        }
+    }
+    None
+}
+
+/// The attributes `#[..]` / `#![..]` at the start of b, with the space and comments between them: Some(their length)
+/// when one is behind a feature gate, None when none is. A raw string or a character literal inside one gives up and
+/// reads all of b (the tokens then tell what they are)
+fn gated_attrs_len(b: &[u8]) -> Option<usize> {
+    let ident = |c: u8| c.is_ascii_alphanumeric() || c == b'_';
+    let mut i = 0;
+    let mut gated = false;
+    loop {
+        loop {
+            while i < b.len() && b[i].is_ascii_whitespace() {
+                i += 1;
+            }
+            if b[i..].starts_with(b"//") {
+                while i < b.len() && b[i] != b'\n' {
+                    i += 1;
+                }
+            } else if b[i..].starts_with(b"/*") {
+                let mut depth = 0;
+                while i < b.len() {
+                    if b[i..].starts_with(b"/*") {
+                        depth += 1;
+                        i += 2;
+                    } else if b[i..].starts_with(b"*/") {
+                        depth -= 1;
+                        i += 2;
+                        if depth == 0 {
+                            break;
+                        }
+                    } else {
+                        i += 1;
+                    }
+                }
+            } else {
+                break;
+            }
+        }
+        if i >= b.len() || b[i] != b'#' {
+            return gated.then_some(i);
+        }
+        i += 1;
+        let mut depth = 0;
+        while i < b.len() {
+            match b[i] {
+                b'[' if depth == 0 => {
+                    depth = 1;
+                    // (the attribute's name: `#[name`, `#[unsafe(name`; not a path `#[tool::name`)
+                    let mut j = i + 1;
+                    let skip = |j: &mut usize| {
+                        while *j < b.len() && b[*j].is_ascii_whitespace() {
+                            *j += 1;
+                        }
+                    };
+                    skip(&mut j);
+                    if b[j..].starts_with(b"unsafe") && !b.get(j + 6).is_some_and(|&c| ident(c)) {
+                        let mut k = j + 6;
+                        skip(&mut k);
+                        if b.get(k) == Some(&b'(') {
+                            depth = 2;
+                            j = k + 1;
+                            skip(&mut j);
+                        }
+                    }
+                    let n0 = j;
+                    while j < b.len() && ident(b[j]) {
+                        j += 1;
+                    }
+                    let name = &b[n0..j];
+                    skip(&mut j);
+                    if !name.is_empty() && b.get(j) != Some(&b':') && GATED.iter().any(|g| g.0.as_bytes() == name) {
+                        gated = true;
+                    }
+                    i = j;
+                    continue;
+                }
+                b'[' | b'(' | b'{' => depth += 1,
+                b']' | b')' | b'}' => {
+                    depth -= 1;
+                    if depth <= 0 {
+                        i += 1;
+                        break;
+                    }
+                }
+                b'"' => {
+                    i += 1;
+                    while i < b.len() && b[i] != b'"' {
+                        i += if b[i] == b'\\' { 2 } else { 1 };
+                    }
+                }
+                b'\'' => return Some(b.len()),
+                b'r' if matches!(b.get(i + 1), Some(b'#' | b'"')) => return Some(b.len()),
+                _ => {}
+            }
+            i += 1;
+        }
+        i = i.min(b.len());
+    }
+}
+
+/// The features `#![feature(..)]` enables, read from the source's tokens (not a comment's or a string's text)
+fn enabled_features(src: &str) -> Vec<String> {
+    let b = src.as_bytes();
+    let toks = lexer::tokenize(b);
+    let tx = |k: usize| &src[toks[k].1..toks[k].2];
+    let sym = |k: usize, c: &str| k < toks.len() && toks[k].0 == 1 && tx(k) == c;
+    let mut out = vec![];
+    for k in 0..toks.len() {
+        if !(sym(k, "#") && sym(k + 1, "!") && sym(k + 2, "[") && k + 3 < toks.len() && tx(k + 3) == "feature" && sym(k + 4, "(")) {
+            continue;
+        }
+        let mut j = k + 5;
+        while j < toks.len() && !sym(j, ")") {
+            if toks[j].0 == 0 {
+                out.push(tx(j).to_string());
+            }
+            j += 1;
+        }
+    }
+    out
 }
