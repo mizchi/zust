@@ -332,8 +332,9 @@ too. [jev-lint](https://github.com/mizchi/jev-lint) `docs` asks a model whether 
 - `scripts/docs_manifest.py` writes the jev-lint manifests (`.jev-lint/documents*.json`) from the pairs;
   `--check` fails if a file has no counterpart or a manifest is out of date.
 - `scripts/docs_check.sh` replays the recorded verdicts (`.jev-lint/*-baseline.json`) against the current documents.
-  It is offline and needs no API key; CI runs it. It fails if a pair contradicts, or if a document changed after its
-  verdict was recorded.
+  It is offline and needs no API key; CI runs it. It fails if a pair contradicts. A manifest whose documents changed
+  after its verdict was recorded cannot be judged without an API key: with no `TYPESAFE_API_KEY` it is skipped with a
+  warning (`DOCS_CHECK_STRICT=1` makes it fail instead, exit 3). The pairs and the manifests are checked either way.
 - `scripts/docs_check.sh --update` asks the model again for the manifests whose documents changed and rewrites the
   records. It needs `TYPESAFE_API_KEY` (or `TYPESAFEAI_API_KEY`) from https://typesafe.ai; the document text is
   sent to that API. A full run of all 64 pairs costs about $0.03.

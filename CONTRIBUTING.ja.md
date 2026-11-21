@@ -322,7 +322,9 @@ python3 bench/ci_bench.py --out-dir out/ci
 - `scripts/docs_manifest.py` は、組から jev-lint のマニフェスト (`.jev-lint/documents*.json`) を書く。`--check` は、
   相手のないファイルがあるか、マニフェストが古ければ失敗する。
 - `scripts/docs_check.sh` は、記録した判定 (`.jev-lint/*-baseline.json`) を今の文書で読み直す。オフラインで、API キーは
-  要らない (CI が走らせる)。組が食い違っているか、判定を記録した後に文書が変わっていれば失敗する。
+  要らない (CI が走らせる)。組が食い違っていれば失敗する。判定を記録した後に文書が変わったマニフェストは API キーが
+  なければ判定し直せないので、`TYPESAFE_API_KEY` がないときは警告を出して飛ばす (`DOCS_CHECK_STRICT=1` なら飛ばさず
+  失敗にする。終了コード 3)。組がそろっているかとマニフェストが最新かは、どちらでも確かめる。
 - `scripts/docs_check.sh --update` は、文書が変わったマニフェストだけをモデルに判定させ直し、記録を書き直す。
   https://typesafe.ai の `TYPESAFE_API_KEY` (か `TYPESAFEAI_API_KEY`) が要る。文書の本文はその API に送られる。64 組を
   全部判定して約 $0.03。
