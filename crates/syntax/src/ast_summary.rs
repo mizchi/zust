@@ -496,6 +496,11 @@ fn check_impl_ret(sig: &PSig, owner: Option<&Owner>) -> R<()> {
 
 fn parse_sig(sig: &PSig, is_extern: bool, is_main: bool, owner: Option<&Owner>) -> R<SigSyn> {
     check_impl_ret(sig, owner)?;
+    // (E0106 in fn pointer types and `Fn() -> &T` bounds of the signature: also of trait and extern declarations,
+    // which are not summarized as items)
+    if generics_elision_err(&sig.generics) || sig.params.iter().any(|p| fn_elision_err(&p.1)) || sig.ret.as_ref().is_some_and(fn_elision_err) {
+        return err("missing lifetime specifier (E0106)");
+    }
     let mut generics = owner.map(|o| o.generics.clone()).unwrap_or_default();
     collect_generics(&sig.generics, &mut generics)?;
     if is_extern && !generics.is_empty() {
@@ -1365,10 +1370,73 @@ fn lift_closures(sig_ast: &PSig, body: &Block, fname: &str, sig: &mut SigSyn, se
 
 /// E0106 in a fn pointer type or an `Fn(..) -> R` bound: its return type elides a lifetime, and its parameters do not
 /// have exactly one lifetime to take it from
+/// The input lifetimes of a fn pointer type / `Fn(..)` bound for elision: each elided one counts by itself, a named
+/// one once however often it is written. None when not known: a path type written without lifetime arguments may
+/// have lifetime parameters of its own (`fn(View) -> &u8` with `struct View<'a>`)
+fn input_lifetimes(ps: &[PTy]) -> Option<usize> {
+    const NO_LTS: &[&str] = &[
+        "i8", "i16", "i32", "i64", "i128", "isize", "u8", "u16", "u32", "u64", "u128", "usize", "f32", "f64", "bool", "char", "str",
+        "String", "Vec", "Option", "Result", "Box", "Rc", "Arc", "HashMap", "HashSet", "BTreeMap", "BTreeSet", "VecDeque", "Self",
+    ];
+    fn go(t: &PTy, named: &mut Vec<String>, elided: &mut usize) -> bool {
+        match t {
+            PTy::Ref(l, _, i) => {
+                match l.as_deref() {
+                    None | Some("'_") => *elided += 1,
+                    Some(l) => {
+                        if !named.iter().any(|x| x == l) {
+                            named.push(l.to_string());
+                        }
+                    }
+                }
+                go(i, named, elided)
+            }
+            PTy::Path(None, p) => {
+                let mut lts = 0;
+                for sg in &p.segs {
+                    for a in &sg.args {
+                        match a {
+                            crate::parse::GArg::Lifetime(l) if l == "'_" => {
+                                *elided += 1;
+                                lts += 1;
+                            }
+                            crate::parse::GArg::Lifetime(l) => {
+                                lts += 1;
+                                if !named.iter().any(|x| x == l) {
+                                    named.push(l.clone());
+                                }
+                            }
+                            crate::parse::GArg::Ty(t) => {
+                                if !go(t, named, elided) {
+                                    return false;
+                                }
+                            }
+                            _ => {}
+                        }
+                    }
+                }
+                // (a type parameter (one letter) or a type known to have no lifetime parameter)
+                let last = p.segs.last().map(|s| s.name.as_str()).unwrap_or("");
+                lts > 0 || last.len() == 1 || NO_LTS.contains(&last)
+            }
+            PTy::Ptr(_, i) | PTy::Slice(i) | PTy::Array(i, _) => go(i, named, elided),
+            PTy::Tuple(ts) => ts.iter().all(|t| go(t, named, elided)),
+            PTy::Never => true,
+            // (a nested fn pointer or a trait object binds or hides its own)
+            _ => false,
+        }
+    }
+    let (mut named, mut elided) = (vec![], 0);
+    for p in ps {
+        if !go(p, &mut named, &mut elided) {
+            return None;
+        }
+    }
+    Some(named.len() + elided)
+}
+
 fn fn_elision_err(t: &PTy) -> bool {
-    let sig = |ps: &[PTy], r: Option<&PTy>| {
-        r.is_some_and(|r| lifetime_positions(r).0 > 0) && ps.iter().map(|p| lifetime_positions(p).1).sum::<usize>() != 1
-    };
+    let sig = |ps: &[PTy], r: Option<&PTy>| r.is_some_and(|r| lifetime_positions(r).0 > 0) && input_lifetimes(ps).is_some_and(|n| n != 1);
     match t {
         PTy::Fn(ps, r) => sig(ps, Some(r)) || ps.iter().any(fn_elision_err) || fn_elision_err(r),
         PTy::Ref(_, _, i) | PTy::Ptr(_, i) | PTy::Slice(i) | PTy::Array(i, _) => fn_elision_err(i),
@@ -1383,7 +1451,7 @@ fn path_elision_err(p: &Path) -> bool {
     p.segs.iter().any(|sg| {
         sg.args.iter().any(|a| matches!(a, crate::parse::GArg::Ty(t) | crate::parse::GArg::Bind(_, t) if fn_elision_err(t)))
             || sg.fn_args.as_ref().is_some_and(|(ps, r)| {
-                (r.as_deref().is_some_and(|r| lifetime_positions(r).0 > 0) && ps.iter().map(|p| lifetime_positions(p).1).sum::<usize>() != 1)
+                (r.as_deref().is_some_and(|r| lifetime_positions(r).0 > 0) && input_lifetimes(ps).is_some_and(|n| n != 1))
                     || ps.iter().any(fn_elision_err)
                     || r.as_deref().is_some_and(fn_elision_err)
             })
@@ -1512,7 +1580,7 @@ pub fn summarize(item: &Item, owner: Option<&Owner>) -> R<Summary> {
                 // (constrained: written anywhere in the self type or the trait (`dyn Tr + 'a` too), or in a where
                 // clause (`T: Tr<Ty = &'x ()>`))
                 let constrained: Vec<String> = {
-                    let text = format!("{self_ty:?} {tr:?} {:?}", g.preds);
+                    let text = format!("{self_ty:?} {tr:?} {:?} {:?}", g.preds, g.params.iter().filter(|p| matches!(p, GParam::Ty(..))).collect::<Vec<_>>());
                     declared.iter().filter(|l| text.contains(&format!("\"{l}\""))).map(|l| l.to_string()).collect()
                 };
                 bound_lifetimes(g, &mut used);

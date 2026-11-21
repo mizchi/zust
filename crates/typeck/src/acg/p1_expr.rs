@@ -1339,7 +1339,10 @@ impl Cx<'_> {
         };
         // `&一時値`: 一時値は文 (let ならブロック) の終わりまで所有する
         self.own_temp_at(a, t);
-        self.bk_temp_borrow(rexpr, m, t);
+        // (coerced to a raw pointer: not a loan, as for a place)
+        if !matches!(expected, Some(Ty::Ptr(..))) {
+            self.bk_temp_borrow(rexpr, m, t);
+        }
         Ok((Some(a), Ty::Ref(m, intern(t))))
     }
 
@@ -1347,6 +1350,10 @@ impl Cx<'_> {
         let r = self.struct_lit_inner(e, expected);
         if let Ok((_, t)) = &r {
             self.rg_struct_lit(e, *t);
+            // (a struct-like variant (`E::V { r: x }`): its value's tree, which variant_value made last)
+            if matches!(t, Ty::Struct(s) if self.prog.structs[*s as usize].is_enum) {
+                self.rg_took_call(e);
+            }
         }
         r
     }

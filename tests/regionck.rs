@@ -53,7 +53,8 @@ fn f14<'a, 'b>(x: &'a mut &'b str, y: &'b str) { *x = y; }
 fn main() {
     let s = String::from("abc");
     let mut p = P::new(&s);
-    println!("{} {} {}", p.rest(), p.peek(), p.take());
+    println!("{} {}", p.rest(), p.peek());
+    println!("{}", p.take());
     let (a, b) = (1u32, 2u32);
     println!("{} {}", f1(&a, &b), f2(&&a));
     let v = vec!["x"];
@@ -113,4 +114,35 @@ fn main() {
     // (a borrow of a temporary that must be 'static)
     let d = check("fn bar<'a>() -> &'a mut u32 {\n    &mut 4\n}\nfn main() {}\n");
     assert!(d.len() == 1 && d[0].0 == 2, "{d:?}");
+}
+
+/// What the review of the first version found (#19): code rustc accepts that must stay accepted, and errors that must
+/// be found
+#[test]
+fn review_cases() {
+    let ok = r#"
+fn take_g(_g: fn(&'static u8, &'static u8) -> &u8) {}
+fn take_h<F: Fn(&'static u8, &'static u8) -> &u8>(_f: F) {}
+trait Source { type Item; }
+trait Target { type Out; }
+struct Wrap<T>(T);
+impl<'a, T: Source<Item = &'a u8>> Target for Wrap<T> { type Out = &'a u8; }
+trait Get { fn get(&self) -> &'static str; }
+impl Get for &'static str { fn get(&self) -> &'static str { *self } }
+fn make() -> u32 { 1 }
+fn label(_: *const u32) -> &'static str { "ok" }
+fn main() {
+    let r = label(&make());
+    println!("{}", r);
+    let s: &'static str = "x";
+    println!("{}", s.get());
+}
+"#;
+    assert_eq!(check(ok), vec![]);
+    // (a shadowing `let` reads the value it shadows)
+    one_error("fn f<'a, 'b>(_x: &'a u32, y: &'b u32) -> &'a u32 {\n    let y = y;\n    y\n}\nfn main() {}\n", 3);
+    // (a struct-like variant)
+    one_error("enum E<'a> { V { r: &'a u32 } }\nfn f<'a, 'b>(_x: &'a u32, y: &'b u32) -> E<'a> {\n    E::V { r: y }\n}\nfn main() {}\n", 3);
+    // (the receiver's tree is the outer call's, though an argument calls a method too)
+    one_error("struct S<'a> { r: &'a u32 }\nimpl<'a> S<'a> {\n    fn set(&mut self, v: &'a u32) { self.r = v; }\n    fn get(&self) -> &'a u32 { self.r }\n}\nfn f<'a, 'b>(s: &mut S<'a>, y: &S<'b>) {\n    s.set(y.get());\n}\nfn main() {}\n", 7);
 }

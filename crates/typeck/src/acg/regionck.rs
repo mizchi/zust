@@ -316,7 +316,9 @@ impl Rg {
                 let n2 = lts_of(prog, base);
                 let nv = self.variance(prog, base);
                 if !prog.is_tuple(sid) {
-                    if n2 == 0 || c.elided_adt() {
+                    // (the marker of lifetimes not written is read whether or not the type has any)
+                    let elided = c.elided_adt();
+                    if n2 == 0 || elided {
                     } else {
                         for k in 0..n2 {
                             let code = c.next();
@@ -862,7 +864,7 @@ impl Cx<'_> {
     }
 
     /// `let name[: ann] = init;` (after name is bound)
-    pub(crate) fn rg_let(&mut self, name: &str, ann: Option<&PTy>, init: &Expr) {
+    pub(crate) fn rg_let(&mut self, name: &str, ann: Option<&PTy>, init: &Expr, init_tree: Option<(Ty, RT)>) {
         if !self.rg_on() {
             return;
         }
@@ -881,7 +883,8 @@ impl Cx<'_> {
             None => self.rg.fresh(prog, t),
         };
         let Some(tree) = tree else { return };
-        if let Some((it, itr)) = self.rt_expr(init) {
+        // (the initializer's tree was taken before the binding: `let y = y;` reads the y it shadows)
+        if let Some((it, itr)) = init_tree {
             if count(prog, it, 0) == Some(tree.len()) {
                 self.rg.relate(prog, t, &itr, &tree, super::borrowck::pos(init));
             }
@@ -937,11 +940,10 @@ impl Cx<'_> {
 
     /// A call of id (generic signature sig0, type arguments sol, instance's parameter types params) with these
     /// arguments (the receiver's tree is rg.recv): relate the arguments to the parameters, and keep the result's tree
-    pub(crate) fn rg_call(&mut self, id: u32, sol: &[Option<Ty>], args: &[&Expr], params: &[Ty], ret: Ty, has_recv: bool, sp: Sp) {
+    pub(crate) fn rg_call(&mut self, id: u32, sol: &[Option<Ty>], args: &[&Expr], params: &[Ty], ret: Ty, recv: Option<(RT, Sp)>, has_recv: bool, sp: Sp) {
         if !self.rg_on() {
             return;
         }
-        let recv = self.rg.recv.take();
         let recv_info = recv.as_ref().map(|r| r.1);
         self.rg.last_call = None;
         let prog = self.prog;
@@ -953,12 +955,14 @@ impl Cx<'_> {
         let mut rg = std::mem::take(&mut self.rg);
         let lts: Vec<u32> = rs.as_deref().map(|r| r.lts.iter().map(|_| rg.var()).collect()).unwrap_or_default();
         let targs: Vec<Option<RT>> = sol.iter().map(|t| t.and_then(|t| rg.fresh(prog, t))).collect();
+        // (the regions a type argument brings are not the signature's own: elision does not see them)
+        let substituted: Vec<u32> = targs.iter().flatten().flatten().copied().collect();
         let mut ptrees: Vec<Option<RT>> = vec![];
         let mut inputs = vec![];
         for (i, &pt) in sig0.params.iter().enumerate() {
             let tr = rg.instantiate(prog, pt, codes(i), &lts, &targs, &mut |me| me.var());
             if let Some(t) = &tr {
-                inputs.extend(t.iter().copied().filter(|&v| v != STATIC));
+                inputs.extend(t.iter().copied().filter(|&v| v != STATIC && !substituted.contains(&v)));
             }
             ptrees.push(tr);
         }
@@ -1001,7 +1005,7 @@ impl Cx<'_> {
         // (a receiver `&self` / `&mut self`: of the impl's own type; another receiver type leaves the result's
         // elided regions unknown)
         let self_ref = sig0.has_self && matches!((sig0.params.first(), sig0.impl_of), (Some(Ty::Ref(_, Ty::Struct(s))), Some(i)) if prog.base_of(*s) == prog.base_of(i));
-        let self_r = if self_ref { ptrees.first().and_then(|t| t.as_ref()).and_then(|t| t.first().copied()) } else { None };
+        let self_r = if self_ref { ptrees.first().and_then(|t| t.as_ref()).and_then(|t| t.first().copied()).filter(|v| !substituted.contains(v)) } else { None };
         let other_self = sig0.has_self && !self_ref;
         inputs.dedup();
         let one = if inputs.len() == 1 { Some(inputs[0]) } else { None };
@@ -1083,6 +1087,8 @@ impl Cx<'_> {
         if !self.rg_on() {
             return;
         }
+        // (nothing a field's call left is this value's)
+        self.rg.last_call = None;
         let Ty::Struct(sid) = t else { return };
         let prog = self.prog;
         let Some(tree) = self.rg.fresh(prog, t) else { return };

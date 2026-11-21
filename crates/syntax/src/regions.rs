@@ -114,6 +114,10 @@ impl<'a> Slots<'a> {
                     if s.args.is_empty() && s.fn_args.is_none() {
                         let n = s.name.as_str();
                         if n == "Self" {
+                            // (an explicit region of the impl's self type (`impl Tr for &'static S`) is kept)
+                            if self.self_slots.iter().any(|&c| c != R_ELIDED && c != R_ELIDED_ADT) {
+                                self.any = true;
+                            }
                             out.extend_from_slice(self.self_slots);
                             return;
                         }

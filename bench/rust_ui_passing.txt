@@ -5253,6 +5253,7 @@ run-pass	regions/regions-infer-borrow-scope.rs
 run-pass	regions/regions-infer-call-2.rs
 run-pass	regions/regions-infer-call.rs
 run-pass	regions/regions-infer-contravariance-due-to-ret.rs
+compile-fail	regions/regions-infer-invariance-due-to-decl.rs
 run-pass	regions/regions-infer-reborrow-ref-mut-recurse.rs
 run-pass	regions/regions-infer-region-in-fn-but-not-type.rs
 run-pass	regions/regions-infer-static-from-proc.rs

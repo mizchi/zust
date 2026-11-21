@@ -1591,9 +1591,10 @@ impl Cx<'_> {
                     }
                     self.same(SP, t, ty).map_err(|m| self.at(expr_start(init), m))?;
                     self.bk.mut_next = pat_mut(pat);
+                    let rg_init = if self.rg_on() { self.rt_expr(init) } else { None };
                     self.bind(name.clone(), ty, v);
                     self.bk_def_named(&name, &srcs, init);
-                    self.rg_let(&name, ann_ty.as_ref(), init);
+                    self.rg_let(&name, ann_ty.as_ref(), init, rg_init);
                     self.extend_temps(t0);
                 }
                 // (`;` の付いたマクロの文。末尾の `vec![]` などは式として期待型を渡す)
