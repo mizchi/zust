@@ -185,7 +185,7 @@ impl Cx<'_> {
         }
         // `2.eq(&3)` / `x.lt(&y)` on a number, bool or char: the operator (`2 == *&3`)
         if margs.len() == 1 {
-            let op = match method.as_str() {
+            let op = match &method[..] {
                 "eq" => "==",
                 "ne" => "!=",
                 "lt" => "<",
@@ -602,6 +602,32 @@ impl Cx<'_> {
                 }
             }
         }
+        // (`15_isize.add(6)` with `use std::ops::Add`: the operator trait's method on a number is the operator, when no
+        // trait of the program gives the number that method)
+        if margs.len() == 1 && gargs.is_empty() {
+            let op = match &method[..] {
+                "add" => "+",
+                "sub" => "-",
+                "mul" => "*",
+                "div" => "/",
+                "rem" => "%",
+                "bitand" => "&",
+                "bitor" => "|",
+                "bitxor" => "^",
+                "shl" => "<<",
+                "shr" => ">>",
+                _ => "",
+            };
+            if !op.is_empty() {
+                if let Some(t) = self.peek(recv) {
+                    if (t.is_int() || t.is_float()) && self.prog.prim_self_method(t, method).is_none() {
+                        let b = Expr::Binary(op.to_string(), Box::new(paren((*recv).clone())), Box::new(paren(margs[0].clone())), msp);
+                        let b: &Expr = self.keep_expr(b);
+                        return self.expr(b, expected);
+                    }
+                }
+            }
+        }
         // (`r.into_iter()` with r: `&Vec<T>` / `&HashMap<..>` (a generic fn's `I: IntoIterator`): what `for x in r`
         // does, `r.iter()` (or the collection's `__ref_into_iter`); `Vec::into_iter` takes the collection by value)
         if method == "into_iter" && margs.is_empty() {
@@ -653,6 +679,22 @@ impl Cx<'_> {
                 return self.call_fn(id, Some((rv, rt)), &args, None, expected, SP);
             }
         }
+        // (`(*p).m()` with p: `&dyn Tr` / `*const dyn Tr`: the vtable call on the fat pointer itself)
+        if let Expr::Unary(op, inner, sp) = strip_paren(recv) {
+            if op == "*" {
+                if let Some(t @ (Ty::Ref(_, Ty::Dyn(tr)) | Ty::Ptr(_, Ty::Dyn(tr)))) = self.peek(inner) {
+                    if matches!(t, Ty::Ptr(..)) && self.unsafe_ok == 0 && sp.start.line != 0 {
+                        return err(sp.start, "dereference of raw pointer is unsafe and requires unsafe block (E0133)");
+                    }
+                    if let (Some(v), vt) = self.expr(inner, None)? {
+                        // (a copy of the pair: an argument that reassigns the pointer must not change the receiver)
+                        let tmp = self.temp(vt);
+                        self.copy(tmp, v, vt);
+                        return self.dyn_method_call_on(tmp, tr, e, Some(vt));
+                    }
+                }
+            }
+        }
         let mut recv_temp = None;
         // (whether the receiver was reached through a reference: a `self` by value there moves out of it)
         let mut through_ref = false;
@@ -693,9 +735,9 @@ impl Cx<'_> {
             let (a, o, sid) = loop {
                 p = match p {
                     Place::Mem(a, o, Ty::Struct(sid)) => break (a, o, sid),
-                    Place::Mem(a, o, Ty::Ref(_, Ty::Dyn(tr)) | Ty::Box(Ty::Dyn(tr))) => {
+                    Place::Mem(a, o, rt @ (Ty::Ref(_, Ty::Dyn(tr)) | Ty::Box(Ty::Dyn(tr)))) => {
                         let fat = self.addr_plus(a, o);
-                        return self.dyn_method_call(fat, tr, e);
+                        return self.dyn_method_call_on(fat, tr, e, Some(rt));
                     }
                     Place::Mem(a, o, Ty::Ref(_, i) | Ty::Box(i)) => {
                         through_ref |= matches!(p.ty(), Ty::Ref(..));
@@ -1097,11 +1139,22 @@ impl Cx<'_> {
                 // (the Box's value is the address of the number: it is the `&self` / `&mut self` receiver itself)
                 if let Ty::Box(mut inner) = t {
                     let nested = matches!(inner, Ty::Box(_));
-                    if nested {
-                        // (a `self: Box<Self>` method would move the inner Box out of the outer one)
-                        if matches!(self.prog.sigs[id as usize].params.first(), Some(Ty::Box(_))) {
+                    // (`x.m()` with x: `Box<Box<i32>>` and `self: Box<Self>`: the inner Box moves out of the outer ones, whose
+                    // memory is freed)
+                    if nested && matches!(self.prog.sigs[id as usize].params.first(), Some(Ty::Box(_))) {
+                        if !boxed_num(t) {
                             return Ok(None);
                         }
+                        let (v, mut vt) = self.expr(recv, Some(t))?;
+                        let Some(mut v) = v else { return Ok(Some((None, Ty::Never))) };
+                        while let Ty::Box(Ty::Box(i)) = vt {
+                            let next = self.b.ins().load(PTR, mf(), v, 0);
+                            self.free(v);
+                            v = next;
+                            vt = Ty::Box(i);
+                        }
+                        let args: Vec<&Expr> = margs.iter().collect();
+                        return self.call_fn(id, Some((v, vt)), &args, tf, expected, SP).map(Some);
                     }
                     while let Ty::Box(i) = inner {
                         inner = i;

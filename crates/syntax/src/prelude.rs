@@ -1389,7 +1389,29 @@ pub fn select_with(user_src: &str, user_items: &[SrcItem], cache: &mut SelectCac
         ["f64", "f32"].iter().any(|w| {
             user_src.match_indices(w).any(|(i, _)| {
                 let after = b.get(i + 3).copied().unwrap_or(b' ');
-                let before_ident = i > 0 && (b[i - 1].is_ascii_alphanumeric() || b[i - 1] == b'_');
+                // (`3f32`: the suffix of a number literal counts; `x1f32` / `0x1f32` do not)
+                // (`1e3f32` / `1e-3f32`: the exponent is part of the number; `x1e-3f32` is `x1e - 3f32`, where the
+                // digits alone are the literal)
+                let starts_lit = |k: usize| k < i && b[k].is_ascii_digit() && !(k > 0 && (b[k - 1].is_ascii_alphanumeric() || b[k - 1] == b'_'));
+                let mut k0 = i;
+                while k0 > 0 && (b[k0 - 1].is_ascii_digit() || b[k0 - 1] == b'_') {
+                    k0 -= 1;
+                }
+                let mut k = i;
+                loop {
+                    while k > 0 && (b[k - 1].is_ascii_digit() || b[k - 1] == b'_') {
+                        k -= 1;
+                    }
+                    if k >= 2 && matches!(b[k - 1], b'e' | b'E') && b[k - 2].is_ascii_digit() {
+                        k -= 1;
+                    } else if k >= 3 && matches!(b[k - 1], b'+' | b'-') && matches!(b[k - 2], b'e' | b'E') && b[k - 3].is_ascii_digit() {
+                        k -= 2;
+                    } else {
+                        break;
+                    }
+                }
+                let lit_suffix = starts_lit(k) || starts_lit(k0);
+                let before_ident = !lit_suffix && i > 0 && (b[i - 1].is_ascii_alphanumeric() || b[i - 1] == b'_');
                 let after_ident = after.is_ascii_alphanumeric() || after == b'_';
                 let mut j = i;
                 while j > 0 && b[j - 1] == b' ' {

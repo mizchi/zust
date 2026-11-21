@@ -81,11 +81,13 @@ impl Ty {
         matches!(self, Ty::Struct(_) | Ty::Array(..)) || self.is_fat()
     }
     /// (ポインタ, 長さ) の 2 語で表す参照
+    /// (raw pointers to them too: `*const [T]` / `*const dyn Tr` are the same two words)
+    #[inline]
     pub fn is_fat(self) -> bool {
-        matches!(
-            self,
-            Ty::Ref(_, Ty::Slice(_) | Ty::Str | Ty::Dyn(_)) | Ty::Box(Ty::Slice(_) | Ty::Str | Ty::Dyn(_))
-        )
+        match self {
+            Ty::Ref(_, i) | Ty::Ptr(_, i) | Ty::Box(i) => matches!(i, Ty::Slice(_) | Ty::Str | Ty::Dyn(_)),
+            _ => false,
+        }
     }
 }
 

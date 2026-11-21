@@ -362,6 +362,7 @@ check-pass	async-await/async-trait-fn.rs
 compile-fail	async-await/async-unsafe-fn-call-in-safe.rs
 compile-fail	async-await/await-keyword/await-macro-rustfix.rs
 compile-fail	async-await/await-keyword/incorrect-syntax-suggestions.rs
+check-pass	async-await/await-unsize.rs
 check-pass	async-await/bound-normalization.rs
 compile-fail	async-await/clone-suggestion.rs
 compile-fail	async-await/coroutine-desc.rs
@@ -543,6 +544,7 @@ run-pass	autoref-autoderef/autoderef-and-borrow-method-receiver.rs
 compile-fail	autoref-autoderef/autoderef-box-no-add.rs
 run-pass	autoref-autoderef/autoderef-method-on-trait.rs
 run-pass	autoref-autoderef/autoderef-method-priority.rs
+run-pass	autoref-autoderef/autoderef-method-twice.rs
 run-pass	autoref-autoderef/autoderef-method.rs
 run-pass	autoref-autoderef/autoderef-vec-box-fn-36786.rs
 run-pass	autoref-autoderef/autoref-intermediate-types-issue-3585.rs
@@ -666,6 +668,7 @@ run-pass	binop/binops.rs
 compile-fail	binop/borrow-suggestion-109352-2.rs
 compile-fail	binop/box-arithmetic-14915.rs
 check-pass	binop/can-have-side-effects-consider-operands.rs
+run-pass	binop/compound-assign-by-ref.rs
 compile-fail	binop/eq-vec.rs
 compile-fail	binop/function-comparison-errors-59488.rs
 run-pass	binop/infer-rhs-type.rs
@@ -1037,9 +1040,11 @@ compile-fail	cast/cast-to-nil.rs
 compile-fail	cast/cast-to-slice.rs
 compile-fail	cast/cast-to-unsized-trait-object-suggestion.rs
 compile-fail	cast/cast-to-unsized-type.rs
+run-pass	cast/cast.rs
 compile-fail	cast/cast_lit_suffix-issue-138392.rs
 compile-fail	cast/casts-differing-anon.rs
 compile-fail	cast/casts-issue-46365.rs
+run-pass	cast/coercion-as-explicit-cast.rs
 run-pass	cast/constant-expression-cast-9942.rs
 check-pass	cast/dyn-tails-need-normalization.rs
 compile-fail	cast/enum-to-numeric-cast.rs
@@ -1055,7 +1060,9 @@ compile-fail	cast/non-primitive-cast-suggestion.rs
 compile-fail	cast/non-primitive-isize-ref-cast.rs
 run-pass	cast/owned-struct-to-trait-cast-6318.rs
 check-pass	cast/ptr-ptr-to-ptr-ptr-different-regions.rs
+check-pass	cast/ptr-to-trait-obj-add-super-auto.rs
 build-pass	cast/raw-pointer-from-str-comparison.rs
+compile-fail	cast/raw-ptr-to-dyn-fn-raw-ptr.rs
 run-pass	cast/supported-cast.rs
 compile-fail	cast/trait-object-size-error-14366.rs
 run-pass	cast/u8-to-char-cast-9918.rs
@@ -1975,6 +1982,7 @@ compile-fail	dropck/unconstrained_const_param_on_drop.rs
 compile-fail	dst/dst-bad-coerce1.rs
 compile-fail	dst/dst-bad-coerce2.rs
 compile-fail	dst/dst-bad-coercions.rs
+run-pass	dst/dst-coercions.rs
 compile-fail	dst/dst-rvalue.rs
 compile-fail	dst/issue-90528-unsizing-not-suggestion-110063.rs
 compile-fail	dst/issue-90528-unsizing-suggestion-1.rs
@@ -2641,6 +2649,7 @@ check-pass	higher-ranked/leak-check/leak-check-in-selection-7-coherence.rs
 check-pass	higher-ranked/region-leak-rc-and-mut-ptr.rs
 compile-fail	higher-ranked/subtype/placeholder-pattern-fail.rs
 check-pass	higher-ranked/subtype/placeholder-pattern.rs
+check-pass	higher-ranked/subtyping-fn-ptr-coercion.rs
 check-pass	higher-ranked/trait-bounds/complex.rs
 compile-fail	higher-ranked/trait-bounds/hang-on-deeply-nested-dyn.rs
 compile-fail	higher-ranked/trait-bounds/higher-trait-bounds-ice-60218.rs
@@ -2694,6 +2703,8 @@ compile-fail	hygiene/no_implicit_prelude-2018.rs
 check-pass	hygiene/no_implicit_prelude-2021.rs
 run-pass	hygiene/thread-local-not-in-prelude.rs
 compile-fail	illegal-sized-bound/mutability-mismatch-arg.rs
+compile-fail	illegal-sized-bound/mutability-mismatch.rs
+compile-fail	illegal-sized-bound/regular.rs
 run-pass	impl-header-lifetime-elision/bare_type.rs
 check-pass	impl-header-lifetime-elision/constant-used-as-arraylen.rs
 compile-fail	impl-header-lifetime-elision/dyn-trait.rs
@@ -3365,6 +3376,7 @@ check-pass	lint/improper-ctypes/mustpass-73747.rs
 compile-fail	lint/improper-ctypes/nonzero-char.rs
 check-pass	lint/inert-attr-macro.rs
 check-pass	lint/int_to_ptr-no_std.rs
+check-pass	lint/int_to_ptr-unsized.rs
 check-pass	lint/int_to_ptr.rs
 compile-fail	lint/invalid_null_args.rs
 check-pass	lint/issue-103317.rs
@@ -3490,6 +3502,7 @@ check-pass	lint/unused/concat-in-crate-deprecated-issue-137687.rs
 check-pass	lint/unused/const-local-var.rs
 run-pass	lint/unused/ignored-allow-unused_variables.rs
 check-pass	lint/unused/import_remove_line.rs
+check-pass	lint/unused/issue-103320-must-use-ops.rs
 check-pass	lint/unused/issue-104397.rs
 check-pass	lint/unused/issue-117142-invalid-remove-parens.rs
 compile-fail	lint/unused/issue-30730.rs
@@ -4213,6 +4226,7 @@ run-pass	numbers-arithmetic/integer-literal-suffix-inference-3.rs
 run-pass	numbers-arithmetic/integer-literal-suffix-inference.rs
 run-pass	numbers-arithmetic/isize-base.rs
 compile-fail	numbers-arithmetic/not-suggest-float-literal.rs
+run-pass	numbers-arithmetic/numeric-method-autoexport.rs
 run-pass	numbers-arithmetic/shift-various-types.rs
 run-pass	numbers-arithmetic/shift.rs
 run-pass	numbers-arithmetic/signed-shift-const-eval.rs
@@ -5727,6 +5741,7 @@ compile-fail	span/borrowck-borrow-overloaded-auto-deref-mut.rs
 compile-fail	span/borrowck-borrow-overloaded-deref-mut.rs
 compile-fail	span/borrowck-call-method-from-mut-aliasable.rs
 compile-fail	span/borrowck-let-suggestion-suffixes.rs
+compile-fail	span/borrowck-object-mutability.rs
 compile-fail	span/coerce-suggestions.rs
 compile-fail	span/drop-location-span-error-rust-2021-incompatible-closure-captures-96258.rs
 compile-fail	span/impl-wrong-item-for-trait.rs

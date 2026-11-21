@@ -204,6 +204,12 @@ impl Cx<'_> {
                     // patterns on it bind by value)
                     // (a fat pointer's value is the address of its two words, which is what a slice place holds)
                     (Some(fat), Ty::Ref(_, Ty::Slice(e)) | Ty::Box(Ty::Slice(e))) => Ok(Place::Mem(fat, 0, Ty::Slice(e))),
+                    (Some(_), Ty::Ptr(..)) if self.unsafe_ok == 0 && sp.start.line != 0 => {
+                        err(sp.start, "dereference of raw pointer is unsafe and requires unsafe block (E0133)")
+                    }
+                    // (a fat raw pointer is the address of its two words, as a fat reference is)
+                    (Some(fat), Ty::Ptr(_, Ty::Slice(e))) => Ok(Place::Mem(fat, 0, Ty::Slice(e))),
+                    (Some(fat), Ty::Ptr(_, i @ (Ty::Str | Ty::Dyn(_)))) => Ok(Place::Mem(fat, 0, *i)),
                     (Some(_), t) if t.is_fat() => err(SP, "dereferencing a slice is not supported (index it instead)"),
                     (Some(_), Ty::Ptr(..)) if self.unsafe_ok == 0 && sp.start.line != 0 => {
                         err(sp.start, "dereference of raw pointer is unsafe and requires unsafe block (E0133)")
@@ -427,6 +433,18 @@ impl Cx<'_> {
             if !matches!(inner, Ty::Dyn(_)) && (m1 || !m2) {
                 let fat = self.to_dyn(v, *inner, tr.as_str(), SP)?;
                 return Ok((Some(fat), want));
+            }
+        }
+        // `&T` → `*const dyn Trait` (the same fat value as `&dyn Trait`)
+        if let (Some(want @ Ty::Ptr(m2, Ty::Dyn(tr))), Some(v), Ty::Ref(m1, inner)) = (expected, v, t) {
+            if m1 || !m2 {
+                if matches!(inner, Ty::Dyn(t2) if t2 == tr) {
+                    return Ok((Some(v), want));
+                }
+                if !matches!(inner, Ty::Dyn(_) | Ty::Slice(_) | Ty::Str) {
+                    let fat = self.to_dyn(v, *inner, tr.as_str(), SP)?;
+                    return Ok((Some(fat), want));
+                }
             }
         }
         Ok((v, t))
@@ -734,6 +752,11 @@ impl Cx<'_> {
                 let srcs = if self.bk_on() && !self.bk_ty(t).1 { vec![] } else { srcs };
                 self.bk_assign(left, &srcs);
                 self.rg_assign(left, right);
+                // (`p = ptr::null_mut()` into a `*const T`: `*mut T` coerces to `*const T`)
+                let rt = match (rt, t) {
+                    (Ty::Ptr(true, a), Ty::Ptr(false, b)) if a == b => t,
+                    _ => rt,
+                };
                 self.same(SP, rt, t)?;
                 let refill = if self.needs_drop(t) { self.drop_before_assign(left, p) } else { None };
                 self.write(p, v);
@@ -948,7 +971,23 @@ impl Cx<'_> {
                     self.same(SP, t, to)?;
                     return Ok((v, t));
                 }
-                // (`Box::new(s) as Box<dyn Tr>` / `as Rc<dyn Tr>`: the unsizing coercion too)
+                // (`&s as *const dyn Tr`: the unsizing coercion to `&dyn Tr`, whose fat value the raw pointer shares)
+                if let Ty::Ptr(pm, d @ Ty::Dyn(_)) = to {
+                    if let Some(Ty::Ref(m, inner)) = self.peek(x) {
+                        if !matches!(inner, Ty::Dyn(_) | Ty::Slice(_) | Ty::Str) && (m || !pm) {
+                            let want = Ty::Ref(m, d);
+                            let (v, t) = self.expr(x, Some(want))?;
+                            self.same(SP, t, want)?;
+                            return Ok((v, to));
+                        }
+                    }
+                }
+                // (`Box::new(s) as Box<dyn Tr>` / `as Rc<dyn Tr>`: the unsizing coercion too; `Box::new(()) as _` where a
+                // `Box<dyn Send>` is expected)
+                let to = match (to, expected) {
+                    (Ty::Param(h), Some(e @ Ty::Box(Ty::Dyn(_)))) if h == crate::program::HOLE => e,
+                    _ => to,
+                };
                 let unsizing = match to {
                     Ty::Box(Ty::Dyn(_) | Ty::Slice(_)) => true,
                     Ty::Struct(sid) => self.prog.structs[sid as usize].args.iter().any(|a| matches!(a, Ty::Dyn(_))),
@@ -965,10 +1004,51 @@ impl Cx<'_> {
                     self.same(SP, t, to)?;
                     return Ok((v, t));
                 }
+                // (`c as fn(&str)` with c a closure value that captures nothing: its fn-pointer instance)
+                if let (Ty::Fn(_), Some(Ty::Struct(sid))) = (to, self.peek(x)) {
+                    let base = self.prog.base_of(sid);
+                    if let Some(&cid) = self.prog.closure_of_struct.get(&base) {
+                        if self.prog.structs[sid as usize].fields.is_empty() {
+                            // (the value carries nothing; evaluated for its effects)
+                            self.expr(x, None)?;
+                            let args = self.prog.structs[sid as usize].args.clone();
+                            let prog = self.prog;
+                            let (iid, sig) = {
+                                let mut g = self.insts.lock().unwrap();
+                                let iid = g.request_fnptr(prog, cid, args).or_else(|e| err(SP, e))?;
+                                (iid, g.sig(prog, iid).clone())
+                            };
+                            self.requested.push(iid);
+                            let fr = self.fref(iid, &sig);
+                            let v = self.b.ins().func_addr(PTR, fr);
+                            let t = Ty::Fn(crate::types::intern_fn(crate::types::FnTy { params: sig.params.clone(), ret: sig.ret }));
+                            self.same(SP, t, to)?;
+                            return Ok((Some(v), t));
+                        }
+                    }
+                }
                 let int_lit = matches!(strip_paren(x), Expr::Lit(l, _) if matches!(lit::lit(l), Some(Lit::Int(i)) if i.suffix().is_empty()));
                 let hint = if int_lit && matches!(to, Ty::Ptr(..)) {
                     // (`0 as *mut u8`: an address)
                     Some(Ty::Usize)
+                } else if int_lit && to == Ty::Char {
+                    // (`0x51 as char`: the literal is a `u8`; a larger one is the deny-by-default `overflowing_literals`)
+                    if let Expr::Lit(l, _) = strip_paren(x) {
+                        if let Some(Lit::Int(i)) = lit::lit(l) {
+                            let n: u64 = i.base10_digits().parse().unwrap_or(u64::MAX);
+                            if n > 0xFF {
+                                let m = if (0xD800..=0xDFFF).contains(&n) {
+                                    "surrogate values are not valid for `char`"
+                                } else if n > 0x10FFFF {
+                                    "value exceeds maximum `char` value"
+                                } else {
+                                    "only `u8` can be cast into `char`"
+                                };
+                                return err(SP, m.to_string());
+                            }
+                        }
+                    }
+                    Some(Ty::U8)
                 } else {
                     self.peek(x).or(match &**x {
                         Expr::Lit(l, _) if matches!(lit::lit(l), Some(Lit::Float(_))) => Some(Ty::F64),
@@ -1031,15 +1111,36 @@ impl Cx<'_> {
                         let len = self.b.ins().iconst(types::I64, *n as i64);
                         return Ok((Some(self.make_fat_v(a, len)), to));
                     }
-                    // (`&[T]` as `*const [T]`: the same fat pointer)
+                    // (`&[T]` as `*const [T]` / `&dyn Tr` as `*const dyn Tr`: the same fat pointer)
                     (Ty::Ref(_, Ty::Slice(e)), Ty::Ptr(_, Ty::Slice(e2))) if e == e2 => return Ok((v, to)),
+                    (Ty::Ref(m, Ty::Dyn(a)), Ty::Ptr(pm, Ty::Dyn(b))) if a == b && (m || !pm) => return Ok((v, to)),
                     (Ty::Ref(_, a), Ty::Ptr(_, b)) if a == b || matches!(*a, Ty::Array(e, _) if e == b) => {
                         return Ok((v, to));
                     }
                     // (a raw slice pointer is the address of its (data, length) pair here: as a thin pointer, the data
                     // word)
-                    (Ty::Ptr(_, Ty::Slice(_) | Ty::Str), Ty::Ptr(_, b)) if !matches!(b, Ty::Slice(_) | Ty::Str | Ty::Dyn(_)) => {
+                    // (a raw dyn pointer, the address of its (data, vtable) pair: likewise the data word)
+                    (Ty::Ptr(_, Ty::Slice(_) | Ty::Str | Ty::Dyn(_)), Ty::Ptr(_, b)) if !matches!(b, Ty::Slice(_) | Ty::Str | Ty::Dyn(_)) => {
                         return Ok((v.map(|a| self.b.ins().load(PTR, mf(), a, 0)), to));
+                    }
+                    // (`p as usize` of a fat raw pointer: its address, the data word)
+                    (Ty::Ptr(_, Ty::Slice(_) | Ty::Str | Ty::Dyn(_)), t) if matches!(t, Ty::Usize | Ty::U64 | Ty::Isize | Ty::I64) => {
+                        return Ok((v.map(|a| self.b.ins().load(PTR, mf(), a, 0)), to));
+                    }
+                    // (`p as *const dyn Tr` with p: `*const S`: the unsizing to a (data, vtable) pair)
+                    (Ty::Ptr(m, inner), Ty::Ptr(pm, Ty::Dyn(tr))) if !matches!(inner, Ty::Dyn(_) | Ty::Slice(_) | Ty::Str) && (m || !pm) => {
+                        let Some(a) = v else { return Ok((None, to)) };
+                        // (a trait the program does not define (`dyn PartialEq<u8>`): no vtable to call through, a null
+                        // one; the data word still casts back)
+                        let fat = match self.to_dyn(a, *inner, tr.as_str(), SP) {
+                            Ok(f) => f,
+                            Err(e) if e.to_string().contains("cannot find trait") => {
+                                let z = self.b.ins().iconst(PTR, 0);
+                                self.make_fat_v(a, z)
+                            }
+                            Err(e) => return Err(e),
+                        };
+                        return Ok((Some(fat), to));
                     }
                     (Ty::Ptr(..), Ty::Ptr(..)) => return Ok((v, to)),
                     // (a fn pointer as a raw pointer: the same address)
@@ -1141,6 +1242,9 @@ impl Cx<'_> {
                 }
                 // 整数 ⇔ char / bool → 整数 (char には u8 からだけ)
                 let ok = (to.is_int() && (from.is_int() || matches!(from, Ty::Bool | Ty::Char))) || (to == Ty::Char && matches!(from, Ty::U8 | Ty::Char));
+                if !ok && to == Ty::Char && from.is_int() {
+                    return err(SP, format!("only `u8` can be cast as `char`, not `{}` (E0604)", self.prog.tn(from)));
+                }
                 if !ok {
                     return err(SP, format!("unsupported cast `{}` as `{}`", self.prog.tn(from), self.prog.tn(to)));
                 }
@@ -1997,7 +2101,13 @@ impl Cx<'_> {
     }
 
     /// `x.m(..)` (x: `&dyn Trait`)
+    /// `recv.m(..)` through the vtable of `dyn tr`. `recv_ty` is the receiver's type as evaluated, when the caller has
+    /// it: a `&mut self` method through a shared `&dyn` / `*const dyn` is E0596
     pub(crate) fn dyn_method_call(&mut self, fat: Value, tr: &str, mc: &Expr) -> R<V> {
+        self.dyn_method_call_on(fat, tr, mc, None)
+    }
+
+    pub(crate) fn dyn_method_call_on(&mut self, fat: Value, tr: &str, mc: &Expr, recv_ty: Option<Ty>) -> R<V> {
         let Expr::MethodCall(_, name, _, margs, _) = mc else { return err(SP, "internal: expected a method call") };
         let (trn, targs) = self.dyn_trait_args(tr);
         let binds = if tr.contains('=') { self.dyn_bindings(tr) } else { vec![] };
@@ -2007,6 +2117,15 @@ impl Cx<'_> {
             return err(SP, format!("no method named `{name}` found for `dyn {tr}`"));
         };
         let ds = &self.prog.sigs[decls[idx] as usize];
+        if let (Some(rt), true) = (recv_ty, self.user_code) {
+            // (a method `where Self: Sized` is not in the vtable)
+            if ds.generics.first().is_some_and(|g| g.1.iter().any(|b| b == "Sized")) {
+                return err(SP, format!("the `{name}` method cannot be invoked on `{}`", self.prog.tn(rt)));
+            }
+            if matches!(rt, Ty::Ref(false, _) | Ty::Ptr(false, _)) && matches!(ds.params.first(), Some(Ty::Ref(true, _))) {
+                return err(SP, "cannot borrow data in a `&` reference as mutable (E0596)".to_string());
+            }
+        }
         // (a method the vtable has no entry for: `self` by value / no `self` / generics of its own)
         let by_box = matches!(ds.params.first(), Some(Ty::Box(_)));
         if !ds.has_self || !matches!(ds.params.first(), Some(Ty::Ref(..) | Ty::Box(_))) || ds.generics.len() > 1 + targs.len() {
