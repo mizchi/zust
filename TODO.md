@@ -98,6 +98,9 @@ rustc's wasm32-wasip1 builds (tests/wasm/README.md). Left:
   claims the address is aligned) although `ptr::read_unaligned` and a gather off an unaligned base (scale >= the
   element size) use them too. x86 scalar moves do not need alignment, so the code is right today; an alignment
   operand (or an unaligned load op) on `Op::Load` / `Op::Store` would make the flag true.
+- Nested generic aliases (`type T1 = D<T0, T0>; type T2 = D<T1, T1>; ..`) take time exponential in the depth to
+  compile (about 3x per two levels; 0.7 s at depth 20), with or without `TypeId` (whose key is the fixed-size
+  `hash_ty`). Pre-existing (not SIMD): probably the aliases' expansion.
 - Wider byte shuffles and constants: `Shuffle` / `Swizzle` / `Vconst` are 128-bit only.
 - Wasm flexible vectors (proposal, phase 3), when engines have them: a width the engine sets at run time, an
   instruction for the lane count, lane shifts and half concatenations (the IR's SIMD section has the plan). Until

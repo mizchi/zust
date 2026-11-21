@@ -3460,51 +3460,41 @@ impl Program {
 
     /// エラーメッセージ用の型名
     pub fn tn(&self, t: Ty) -> String {
-        self.tn_k(t, false)
-    }
-
-    /// A type's name as a key (`TypeId::of`): a vector's is not a display name, at any depth (`&v128` of a
-    /// program's `struct v128` is not `&__m128i`)
-    pub fn type_key(&self, t: Ty) -> String {
-        self.tn_k(t, true)
-    }
-
-    fn tn_k(&self, t: Ty, key: bool) -> String {
         match t {
-            Ty::Vec(b) if key => format!("core::arch::<vector of {b} bits>"),
-            // (an instance (a tuple, `Foo<T>`): its base and its arguments' keys, not its stored name, which is
-            // made of the arguments' display names: `(v128,)` of a program's `struct v128` is not `(__m128i,)`)
-            Ty::Struct(id) if key && self.structs[id as usize].base.is_some() => {
-                let sd = &self.structs[id as usize];
-                let base = &self.structs[sd.base.unwrap() as usize].name;
-                let ks: Vec<String> = sd.args.iter().map(|&a| self.tn_k(a, true)).collect();
-                if base.starts_with("#tuple") { format!("({},)", ks.join(", ")) } else { format!("{base}<{}>", ks.join(", ")) }
-            }
-            Ty::Ref(false, i) => format!("&{}", self.tn_k(*i, key)),
-            Ty::Ref(true, i) => format!("&mut {}", self.tn_k(*i, key)),
+            Ty::Ref(false, i) => format!("&{}", self.tn(*i)),
+            Ty::Ref(true, i) => format!("&mut {}", self.tn(*i)),
             Ty::Struct(id) => self.structs[id as usize].name.clone(),
             Ty::Unit => "()".into(),
             Ty::Never => "!".into(),
             Ty::Vec(128) => "v128".into(),
             Ty::Vec(b) => format!("__m{b}"),
             Ty::Param(i) => format!("T{i}"),
-            Ty::Ptr(false, i) => format!("*const {}", self.tn_k(*i, key)),
-            Ty::Ptr(true, i) => format!("*mut {}", self.tn_k(*i, key)),
-            Ty::Array(i, n) => format!("[{}; {n}]", self.tn_k(*i, key)),
-            Ty::Slice(i) => format!("[{}]", self.tn_k(*i, key)),
+            Ty::Ptr(false, i) => format!("*const {}", self.tn(*i)),
+            Ty::Ptr(true, i) => format!("*mut {}", self.tn(*i)),
+            Ty::Array(i, n) => format!("[{}; {n}]", self.tn(*i)),
+            Ty::Slice(i) => format!("[{}]", self.tn(*i)),
             Ty::Str => "str".into(),
             Ty::Dyn(s) => format!("dyn {}", s.replace(" (", "(").replace("( ", "(").replace(" )", ")")),
-            Ty::Box(i) => format!("Box<{}>", self.tn_k(*i, key)),
-            Ty::Assoc(a) => format!("<{}>::{}", self.tn_k(a.base, key), a.name),
+            Ty::Box(i) => format!("Box<{}>", self.tn(*i)),
+            Ty::Assoc(a) => format!("<{}>::{}", self.tn(a.base), a.name),
             Ty::Fn(f) => {
-                let ps: Vec<String> = f.params.iter().map(|&p| self.tn_k(p, key)).collect();
+                let ps: Vec<String> = f.params.iter().map(|&p| self.tn(p)).collect();
                 match f.ret {
                     Ty::Unit => format!("fn({})", ps.join(", ")),
-                    r => format!("fn({}) -> {}", ps.join(", "), self.tn_k(r, key)),
+                    r => format!("fn({}) -> {}", ps.join(", "), self.tn(r)),
                 }
             }
             t => format!("{t:?}").to_lowercase(),
         }
+    }
+
+    /// A type's identity as a key (`TypeId::of`): its structural hash (`hash_ty`, which memoizes instances), not
+    /// its display name: a program's `struct v128` is not `__m128i`, at any depth (`&v128`, `(v128,)`,
+    /// `Option<v128>`), and a deeply nested instance's key stays fixed-size
+    pub fn type_key(&self, t: Ty) -> String {
+        let mut h = KeyHasher::new();
+        self.hash_ty(t, &mut h);
+        format!("{:032x}", h.finish())
     }
 
     /// キャッシュキー用: 型を (struct は deep hash で) ハッシュする
