@@ -489,6 +489,7 @@ compile-fail	async-await/unreachable-lint-1.rs
 check-pass	async-await/unreachable-lint.rs
 compile-fail	async-await/unresolved_type_param.rs
 compile-fail	async-await/unsized-across-await.rs
+compile-fail	async-await/unused-lifetime.rs
 compile-fail	attributes/attr-bad-crate-attr.rs
 compile-fail	attributes/attr-order-must-use.rs
 compile-fail	attributes/attrs-with-no-formal-in-generics-3.rs
@@ -5860,11 +5861,18 @@ compile-fail	single-use-lifetime/issue-107998.rs
 compile-fail	single-use-lifetime/lifetime-bounds.rs
 compile-fail	single-use-lifetime/one-use-in-fn-argument.rs
 check-pass	single-use-lifetime/one-use-in-fn-return.rs
+compile-fail	single-use-lifetime/one-use-in-inherent-impl-header.rs
+compile-fail	single-use-lifetime/one-use-in-inherent-method-argument.rs
+compile-fail	single-use-lifetime/one-use-in-inherent-method-return.rs
 check-pass	single-use-lifetime/one-use-in-struct.rs
+compile-fail	single-use-lifetime/one-use-in-trait-method-argument.rs
 check-pass	single-use-lifetime/two-uses-in-fn-argument-and-return.rs
 check-pass	single-use-lifetime/two-uses-in-fn-arguments.rs
 check-pass	single-use-lifetime/two-uses-in-inherent-impl-header.rs
+compile-fail	single-use-lifetime/two-uses-in-inherent-method-argument-and-return.rs
 check-pass	single-use-lifetime/two-uses-in-trait-impl.rs
+compile-fail	single-use-lifetime/zero-uses-in-fn.rs
+compile-fail	single-use-lifetime/zero-uses-in-impl.rs
 compile-fail	sized/ensure-overriding-bindings-in-pattern-with-ty-err-doesnt-ice.rs
 check-pass	sized/recursive-type-pass.rs
 compile-fail	sized/reject-unsized-fn-params.rs

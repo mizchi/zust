@@ -795,3 +795,14 @@ fn fn_item_not_general_enough() {
     assert!(d.len() == 1 && d[0].0 == 6 && d[0].1.contains("not general enough"), "{d:?}");
     assert_eq!(check("fn all<F, T>(_f: F) where F: FnMut(&String) -> T {}\nfn len(x: &String) -> usize {\n    x.len()\n}\nfn all2<F>(_f: F) where F: FnMut(&String) -> &String {}\nfn id(x: &String) -> &String {\n    x\n}\nfn main() {\n    all(len);\n    all2(id);\n}\n"), vec![]);
 }
+
+/// `#![deny(unused_lifetimes)]`, `#![deny(single_use_lifetimes)]`
+#[test]
+fn unused_and_single_use_lifetime_lints() {
+    let d = check("#![deny(unused_lifetimes)]\nstruct Foo {}\nimpl<'a> Foo {}\nfn f<'b>(x: &'b u8) -> &'b u8 {\n    x\n}\nfn main() {}\n");
+    assert!(d.len() == 1 && d[0].0 == 3 && d[0].1.contains("never used"), "{d:?}");
+    let d = check("#![deny(single_use_lifetimes)]\nstruct Foo<'f> {\n    data: &'f u32,\n}\nimpl<'f> Foo<'f> {\n    fn get(&self) -> u32 {\n        *self.data\n    }\n}\nfn main() {}\n");
+    assert!(d.len() == 1 && d[0].0 == 5 && d[0].1.contains("only used once"), "{d:?}");
+    // (used twice; once in the result; once in an `impl` type; bounded)
+    assert_eq!(check("#![deny(single_use_lifetimes)]\nfn a<'a>(x: &'a u32) -> &'a u32 {\n    x\n}\nfn b<'a>() -> &'a u32 {\n    &1\n}\nfn c<'a>(x: impl IntoIterator<Item = &'a i32>) {\n    for _ in x {}\n}\nfn d<'a, 'b: 'a>(_: &'a u8, _: &'b u8) {}\nfn main() {}\n"), vec![]);
+}

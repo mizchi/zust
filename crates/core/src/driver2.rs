@@ -701,6 +701,7 @@ impl Session2 {
         let mut deny_must_use = false;
         let mut deny_unused_alloc = false;
         let mut deny_trivial_casts = (false, false);
+        let mut deny_unused_lifetimes = (false, false);
         // (non_snake_case, non_camel_case_types, non_upper_case_globals)
         let mut deny_style = [false; 3];
         let lib_attr = {
@@ -747,6 +748,7 @@ impl Session2 {
                 levels.contains(&n) && (last("forbid").is_some() || last("allow") < last("deny"))
             };
             deny_trivial_casts = (lint("trivial_casts"), lint("trivial_numeric_casts"));
+            deny_unused_lifetimes = (lint("unused_lifetimes"), lint("single_use_lifetimes"));
             deny_unused_alloc = lint("unused_allocation")
                 || (!levels.contains(&"unused_allocation") && levels.iter().any(|l| matches!(*l, "unused" | "warnings")) && !c.contains("#![allow(unused"));
             for (k, n) in ["non_snake_case", "non_camel_case_types", "non_upper_case_globals"].iter().enumerate() {
@@ -787,6 +789,14 @@ impl Session2 {
                         return Err(format!("{}:{}: unreachable {what}", it.line + p.line as usize - 1, p.col + 1));
                     }
                 }
+            }
+        }
+        // (unused_lifetimes: a lifetime parameter of a fn or an impl of the program's that nothing in it names;
+        // single_use_lifetimes: one named once, in a parameter's type (or the impl's header), which eliding it would
+        // say)
+        if deny_unused_lifetimes.0 || deny_unused_lifetimes.1 {
+            if let Some(e) = first_unused_lifetime(&src, &items[..user], deny_unused_lifetimes) {
+                return Err(e);
             }
         }
         // (unused_variables: the first binding nothing reads, in the program's own fns)
@@ -1786,6 +1796,80 @@ fn first_dead_item(src: &str, items: &[SrcItem], check_pub: bool) -> Option<(usi
         }
     }
     None
+}
+
+/// `#![deny(unused_lifetimes)]` / `#![deny(single_use_lifetimes)]`: the first lifetime parameter of a fn or an impl
+/// named nowhere else in it / named once, as `line:col: message`
+fn first_unused_lifetime(src: &str, items: &[SrcItem], (unused, single): (bool, bool)) -> Option<String> {
+    use crate::parse::{GParam, ItemKind};
+    // (the uses of l in t, as tokens: not `'a'` (a char) nor `'ab`)
+    let count = |t: &str, l: &str| {
+        t.match_indices(l)
+            .filter(|(i, _)| {
+                let next = t[i + l.len()..].chars().next();
+                !next.is_some_and(|c| c == '\'' || c.is_alphanumeric() || c == '_')
+            })
+            .count()
+    };
+    // (the text without its line comments, where a lifetime's name is no use of it)
+    let code = |t: &str| t.lines().map(|l| l.find("//").map_or(l, |i| &l[..i])).collect::<Vec<_>>().join("\n");
+    for (k, it) in items.iter().enumerate() {
+        let text = src.get(it.start..it.end).unwrap_or("");
+        if !text.contains('\'') || text.contains("allow(unused_lifetimes") || text.contains("allow(single_use_lifetimes") || text.contains("#[cfg") || text.contains("macro_rules") {
+            continue;
+        }
+        // (an impl's header, `impl<'a> S<'a> {`: its members name its lifetimes too)
+        let header = matches!(it.kind, crate::lexer::ItemKind::ImplHeader);
+        let Ok(f) = (if header { crate::parse::parse_file(&format!("{text}}}")) } else { crate::parse::parse_file(text) }) else { continue };
+        let Some(item) = f.items.into_iter().next() else { continue };
+        let (g, ret, params): (_, _, Vec<&crate::parse::Ty>) = match &item.kind {
+            ItemKind::Fn(sig, Some(_)) => (&sig.generics, sig.ret.as_ref().map(|r| format!("{r:?}")).unwrap_or_default(), sig.recv_ty.iter().chain(sig.params.iter().map(|p| &p.1)).collect()),
+            ItemKind::Impl(g, _, _, _) => (g, String::new(), vec![]),
+            _ => continue,
+        };
+        let is_fn = matches!(item.kind, ItemKind::Fn(..));
+        let members: String = if header {
+            items.iter().filter(|m| matches!(m.kind, crate::lexer::ItemKind::ImplMember(h) if h as usize == k)).map(|m| code(src.get(m.start..m.end).unwrap_or(""))).collect::<Vec<_>>().join("\n")
+        } else {
+            String::new()
+        };
+        let own = code(text);
+        for p in &g.params {
+            let GParam::Lifetime(l) = p else { continue };
+            let n = count(&own, l) + count(&members, l);
+            let off = text.find(l.as_str()).unwrap_or(0);
+            let line = it.line + text[..off].matches('\n').count();
+            if unused && n <= 1 {
+                return Some(format!("{line}:1: lifetime parameter `{l}` never used (#![deny(unused_lifetimes)])"));
+            }
+            // (declared with bounds, or bounding another: a use of its own)
+            let bounded = g.preds.iter().any(|(t, bs)| format!("{t:?}").contains(&format!("\"{l}\"")) || bs.iter().any(|b| matches!(b, crate::parse::Bound::Lifetime(x) if x == l)));
+            // (a fn's: not in its result's type, which has nothing to elide it to, nor in an `impl` / `dyn` / fn
+            // pointer type, where it cannot be elided)
+            let elidable = || params.iter().any(|t| elidable_use(t, l)) || !params.iter().any(|t| format!("{t:?}").contains(&format!("\"{l}\"")));
+            if single && n == 2 && !bounded && (!is_fn || (count(&ret, l) == 0 && elidable())) {
+                return Some(format!("{line}:1: lifetime parameter `{l}` only used once (#![deny(single_use_lifetimes)])"));
+            }
+        }
+    }
+    None
+}
+
+/// t names l where eliding it is allowed: a reference's lifetime or a path's lifetime argument, not in an `impl` /
+/// `dyn` / fn pointer type or an associated type's binding
+fn elidable_use(t: &crate::parse::Ty, l: &str) -> bool {
+    use crate::parse::{GArg, Ty as PTy};
+    match t {
+        PTy::Ref(x, _, i) => x.as_deref() == Some(l) || elidable_use(i, l),
+        PTy::Ptr(_, i) | PTy::Slice(i) | PTy::Array(i, _) => elidable_use(i, l),
+        PTy::Tuple(ts) => ts.iter().any(|t| elidable_use(t, l)),
+        PTy::Path(None, p) => p.segs.iter().flat_map(|s| s.args.iter()).any(|a| match a {
+            GArg::Lifetime(x) => x == l,
+            GArg::Ty(t) => elidable_use(t, l),
+            _ => false,
+        }),
+        _ => false,
+    }
 }
 
 pub fn parse_fn(src: &str, it: &SrcItem) -> R<Option<ItemFn>> {
