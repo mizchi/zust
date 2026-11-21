@@ -24,7 +24,7 @@
 | `e?.f` を Rust の意味で入れるか、予約のままか | rust-dev / ts-dev(反対の意見) | **要確認** | 下の決定 3 |
 | `??` | ts-dev | **要確認** | 下の決定 4 |
 | `Option<Jsx>` を JSX の子に置けない(「あれば描く」) | ts-dev | **採用** | 子に置ける。None は `undefined`(何も描かない) |
-| 省略したフィールドにも `note: undefined` を書く(TS 側の spread で既定値が消える) | ts-dev | **採用** | 省略したらキーを書かない(JSX の props と同じ)。明示の `None` と spread の上書きのときだけ `undefined` |
+| 省略したフィールドにも `note: undefined` を書く(TS 側の spread で既定値が消える) | ts-dev | **採用** | 省略したらキーを書かない(JSX の props と同じ)。**r2 で決定 1 に合わせて読み替えた**: zsc の中では省略も明示の `None` も同じ `None` なので、境界ではどちらもキーを書かない(spread の上書きで `None` にしたときも同じ)。TS 側で「キーはあるが `undefined`」を作る書き方はない(003 の未決事項) |
 | `pipe()` の `.m(a)` の枝が postfix を通らない、`x \|> f(a)?[0]` | implementer, ts-dev, rust-dev | **採用** | pipe の右辺は `?` を読まない postfix で読み、脱糖した後に postfix のループを続ける(`.m` の枝も合流) |
 | `perform Ask(q)?` だけ括弧を求めるのは不整合 | implementer | **採用** | 括弧なしで `(perform Ask(q))?` と読む |
 | `?.` の予約が字句だけで、`e? .f` が通る | implementer | **採用** | 構文解析器の側で、`?` の直後の `.` を空白によらず同じに扱う |

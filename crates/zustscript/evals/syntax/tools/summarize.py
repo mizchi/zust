@@ -14,6 +14,15 @@ WEIGHTS = {
 }
 
 
+def pick(data, proposal, path):
+    """the entry for `proposal` (the results directory's name): an array may hold entries for several proposals"""
+    entries = data if isinstance(data, list) else [data]
+    hits = [e for e in entries if e.get("proposal") == proposal]
+    if len(hits) != 1:
+        sys.exit(f"{path}: expected exactly one entry for {proposal}, found {len(hits)}")
+    return hits[0]
+
+
 def load(d):
     """{round: {persona: entry}}"""
     out = {}
@@ -22,7 +31,7 @@ def load(d):
         if not m:
             continue
         data = json.load(open(p))
-        entry = data[0] if isinstance(data, list) else data
+        entry = pick(data, os.path.basename(os.path.normpath(d)), p)
         out.setdefault(int(m.group(1)), {})[m.group(2)] = entry
     return out
 
