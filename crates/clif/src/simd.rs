@@ -261,6 +261,14 @@ fn op128(b: &mut CBuilder, l: Lane, op: VOp, a: &[ir::Value], fma: bool) -> Resu
             let (p, q) = (widen(b, p, h, u), widen(b, q, h, u));
             b.ins().imul(p, q)
         }
+        // (to i64 lanes: x64 has no iadd_pairwise.i64x2; the even and the odd 32-bit lanes widened and added)
+        VOp::ExtAddPairwise(u) if l == Lane::I64 => {
+            let ev = shuffle(b, a[0], a[0], [0, 1, 2, 3, 8, 9, 10, 11, 0, 1, 2, 3, 8, 9, 10, 11]);
+            let od = shuffle(b, a[0], a[0], [4, 5, 6, 7, 12, 13, 14, 15, 4, 5, 6, 7, 12, 13, 14, 15]);
+            let (ev, od) = (cast(b, types::I32X4, ev), cast(b, types::I32X4, od));
+            let (ev, od) = (widen(b, ev, false, u), widen(b, od, false, u));
+            b.ins().iadd(ev, od)
+        }
         VOp::ExtAddPairwise(u) => {
             let p = cast(b, vt(narrower(l)?), a[0]);
             let (lo, hi) = (widen(b, p, false, u), widen(b, p, true, u));

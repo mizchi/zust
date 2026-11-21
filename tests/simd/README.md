@@ -37,6 +37,10 @@ work within each 128-bit half (`_mm256_packs_epi32`). The subset, for `_mm_` (12
 | shuffles by a vector | `shuffle_epi8` (pshufb), `permutevar_ps` / `_pd`, `permutevar8x32_epi32` / `_ps` |
 | horizontal | `hadd` / `hsub` (`ps`, `pd`, `epi16`, `epi32`), `hadds` / `hsubs_epi16`: the even elements op the odd ones, both picked by shuffles |
 | 32 x 32 -> 64 | `mul_epu32` / `mul_epi32`: the even 32-bit lanes moved to the low half, then the IR's widening multiply (Cranelift: `pshufd` + `pmuludq` / `pmuldq`) |
+| shifts by a count | `sll` / `srl` / `sra` (`epi16`, `epi32`, `epi64`): by the low 64 bits of a 128-bit count, the width or more giving 0 (or the sign); `sllv` / `srlv` / `srav` (`epi32`, `epi64`): each lane by its own count, lane by lane |
+| gathers | `i32gather` / `i64gather` (`epi32`, `epi64`, `ps`, `pd`) and their `mask_` forms, `::<SCALE>`: lane by lane; a lane the mask leaves out keeps `src` and reads a scratch slot, not its address |
+| masked memory | `maskload` / `maskstore` (`ps`, `pd`, `epi32`, `epi64`): lane by lane, without a branch; a lane the mask leaves out reads or writes a scratch slot, never memory |
+| other | `mulhi_epi16` / `epu16`, `mulhrs_epi16` (`-32768 * -32768` wraps, as pmulhrsw), `sad_epu8`, `maddubs_epi16` (saturating), `dp_ps` / `dp_pd::<IMM>` (summed in Intel's order: `(t3 + t2) + (t1 + t0)`) |
 
 A shuffle by an immediate is a table of the elements it picks (Intel's definitions; the 256-bit forms of most work
 within each 128-bit half), lowered to one 128-bit byte `Shuffle` per 128-bit half of the result, from the halves it
@@ -44,16 +48,18 @@ reads (two at a time). Cranelift lowers those masks to the instruction that does
 `palignr`, `pblendw`, `pshuflw` / `pshufhw`; `pshufb` otherwise). A shuffle by a vector is a `Swizzle` with byte
 indices computed from the lane indices (`permutevar8x32` swizzles each half and joins them).
 
-Not yet: shifts by a vector count (`sll_epi32`, `sllv_epi32`), gathers, masked loads, `mulhi`, `sad_epu8`,
-`maddubs_epi16`, `dp_ps`. AVX-512 is left out for now: few machines have it, and implementations of it differ in
-problems (the ISA leaves it out too, above). `#[target_feature]` is accepted and changes
+Not in the subset: the rounding-mode forms (`round_ps::<_MM_FROUND_*>`, `floor` / `ceil_ps`), the scalar `_ss` /
+`_sd` arithmetic, the approximations (`rcp_ps`, `rsqrt_ps`), `sign_epi*`, `minpos_epu16`, `mpsadbw`, SSE4.2's string
+and CRC instructions, AES / SHA / CLMUL, F16C, streaming stores and prefetches. AVX-512 is left out for now: few
+machines have it, and implementations of it differ in problems (the ISA leaves it out too, above). The gathers and
+`sllv` / `srav` are lane by lane, a few instructions per lane rather than one `vpgatherdd` / `vpsllvd`. `#[target_feature]` is accepted and changes
 nothing (the intrinsics are always available), and an intrinsic needs `unsafe` only when it reads or writes through a
 pointer.
 
 ## Tests
 
 `tests/simd.rs` (needs a CPU with AVX2 and FMA): `x86_simd_like_rustc` checks that `sse.rs`, `avx.rs`,
-`avx_usage.rs`, `shuffle.rs` and `hadd_mul.rs` (every intrinsic above on edge cases: NaN, ±0, saturation, shifts past the width,
+`avx_usage.rs`, `shuffle.rs`, `hadd_mul.rs` and `misc.rs` (every intrinsic above on edge cases: NaN, ±0, saturation, shifts past the width,
 every comparison predicate, all 256 immediates of the 4-lane shuffles, out-of-range shuffle indices; 256-bit values
 through parameters, results, branches, loops, structs, `Vec`, closures; the zustscript kernels at 8 lanes with FMA; a
 4x4 transpose) print what rustc's builds print, with and without -O. `minclif_rejects_simd`. The

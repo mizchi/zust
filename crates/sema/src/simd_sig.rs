@@ -156,8 +156,19 @@ fn x86_sig(x: X86) -> Option<(Vec<SArg>, Ty)> {
     // (n vector operands, then the result vector)
     let vs = |n: usize| -> Option<(Vec<SArg>, Ty)> { Some(((0..n).map(|k| V(x86_arg_width(x, k))).collect(), Ty::Vec(x86_ret_width(x)))) };
     let to = |n: usize, r: Ty| -> Option<(Vec<SArg>, Ty)> { Some(((0..n).map(|k| V(x86_arg_width(x, k))).collect(), r)) };
+    if let Some(g) = x86_gather(x) {
+        // (src, pointer, indices, mask / pointer, indices)
+        let r = V(g.res_bits);
+        let i = V(g.idx_bits);
+        return Some((if g.mask { vec![r, P, i, r] } else { vec![P, i] }, Ty::Vec(g.res_bits)));
+    }
     match x.op {
         "loadu" | "load" if lane_suffix => Some((vec![P], Ty::Vec(x.bits))),
+        "maskload" if lane_suffix => Some((vec![P, V(x.bits)], Ty::Vec(x.bits))),
+        "maskstore" if lane_suffix => Some((vec![P, V(x.bits), V(x.bits)], Ty::Unit)),
+        // (shifts by the low 64 bits of a 128-bit count; by each lane's own count)
+        "sll" | "srl" | "sra" if lane_suffix => Some((vec![V(x.bits), V(128)], Ty::Vec(x.bits))),
+        "sllv" | "srlv" | "srav" | "mulhi" | "mulhrs" | "sad" | "maddubs" | "dp" => vs(2),
         "storeu" | "store" if lane_suffix => Some((vec![P, V(x.bits)], Ty::Unit)),
         "setzero" if lane_suffix => Some((vec![], Ty::Vec(x.bits))),
         "set1" if lane_suffix => Some((vec![S(lt)], Ty::Vec(x.bits))),
@@ -214,4 +225,38 @@ pub fn x86_ret_width(x: X86) -> u16 {
         "cvtpd" if x.suffix == "ps" && x.bits == 256 => 128,
         _ => x.bits,
     }
+}
+
+/// A gather (`_mm256_i32gather_ps::<SCALE>(p, idx)`, `_mm_mask_i64gather_epi32`): its element and index widths, how
+/// many elements it loads, the widths of its result and index vectors
+#[derive(Clone, Copy, Debug)]
+pub struct Gather {
+    pub mask: bool,
+    pub idx64: bool,
+    pub elem64: bool,
+    pub n: u32,
+    pub res_bits: u16,
+    pub idx_bits: u16,
+}
+
+pub fn x86_gather(x: X86) -> Option<Gather> {
+    let (mask, op) = match x.op.strip_prefix("mask_") {
+        Some(o) => (true, o),
+        None => (false, x.op),
+    };
+    let idx64 = match op {
+        "i32gather" => false,
+        "i64gather" => true,
+        _ => return None,
+    };
+    let elem64 = match x.suffix {
+        "epi32" | "ps" => false,
+        "epi64" | "pd" => true,
+        _ => return None,
+    };
+    // (as many elements as the wider of the two lane types fits in the vector)
+    let n = x.bits as u32 / if idx64 || elem64 { 64 } else { 32 };
+    let res_bits = if elem64 || !idx64 { x.bits } else { 128 };
+    let idx_bits = if idx64 || !elem64 { x.bits } else { 128 };
+    Some(Gather { mask, idx64, elem64, n, res_bits, idx_bits })
 }

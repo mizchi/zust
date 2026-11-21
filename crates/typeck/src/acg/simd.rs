@@ -110,8 +110,9 @@ impl Cx<'_> {
             let imm = if matches!(
                 x.op,
                 "cmp" | "extract" | "slli" | "srli" | "srai" | "extractf128" | "extracti128" | "insertf128" | "inserti128" | "shufflelo" | "shufflehi"
-                    | "alignr" | "blend" | "bslli" | "bsrli" | "permute" | "permute2f128" | "permute2x128" | "permute4x64"
+                    | "alignr" | "blend" | "bslli" | "bsrli" | "permute" | "permute2f128" | "permute2x128" | "permute4x64" | "dp"
             ) || (x.op == "shuffle" && x.suffix != "epi8")
+                || crate::simd_sig::x86_gather(x).is_some()
             {
                 self.simd_const(last, 0, name)?
             } else {
@@ -379,6 +380,9 @@ fn zero(m: &mut crate::ir::Recorder, w: VBits) -> Value {
 /// (0x80000000), and the instructions that work within each 128-bit half of a 256-bit vector (`packs`)
 fn x86_emit(m: &mut crate::ir::Recorder, x: X86, imm: u32, v: &[Value]) -> R<Option<Value>> {
     let w = VBits::from_bits(x.bits as u32).unwrap();
+    if let Some(g) = crate::simd_sig::x86_gather(x) {
+        return Ok(Some(gather(m, g, imm, v)));
+    }
     let Some((sh, u)) = x86_shape(x.suffix, x.bits).or(match x.suffix {
         // (suffixes of results that are not vectors: cvtss_f32, cvtsi128_si32, set_m128)
         "f32" => Some((Shape::new(Lane::F32, w), false)),
@@ -663,6 +667,149 @@ fn x86_emit(m: &mut crate::ir::Recorder, x: X86, imm: u32, v: &[Value]) -> R<Opt
             }
         }
         "madd" if l == Lane::I16 => m.simd(Shape::new(Lane::I32, w), VOp::Dot, v),
+        "maskload" | "maskstore" => {
+            // (lane by lane, without a branch: a lane the mask leaves out reads and writes a scratch slot instead of
+            // memory, so an address past the end of an array is never touched)
+            let li = int_lane(l);
+            let n = sh.count();
+            let es = li.bits() / 8;
+            let scratch = m.create_stack_slot(8, 8);
+            let dummy = m.stack_addr(scratch, 0);
+            let mut r = zero(m, w);
+            for i in 0..n {
+                let mk = m.simd(Shape::new(li, w), VOp::Extract(i as u8), &[v[1]]);
+                let on = m.icmp_imm(IntCC::SignedLessThan, mk, 0);
+                let a = m.iadd_imm(v[0], (i * es) as i64);
+                let a = m.select(on, a, dummy);
+                if x.op == "maskload" {
+                    let e = m.load(l.ty(), a, 0);
+                    let z = zero_scalar(m, l);
+                    let e = m.select(on, e, z);
+                    r = m.simd(sh, VOp::Replace(i as u8), &[r, e]);
+                } else {
+                    let e = m.simd(sh, VOp::Extract(i as u8), &[v[2]]);
+                    m.store(e, a, 0);
+                }
+            }
+            if x.op == "maskstore" {
+                return Ok(None);
+            }
+            r
+        }
+        "sll" | "srl" | "sra" if !f => {
+            // (by the low 64 bits of the count: the lane width or more gives 0, or every bit the sign)
+            let c = m.simd(Shape::I64X2, VOp::Extract(0), &[v[1]]);
+            let over = m.icmp_imm(IntCC::UnsignedGreaterThanOrEqual, c, lb as i64);
+            let k = m.ireduce(Type::I32, c);
+            if x.op == "sra" {
+                let top = m.iconst(Type::I32, (lb - 1) as i64);
+                let k = m.select(over, top, k);
+                m.simd(sh, VOp::Shr(false), &[v[0], k])
+            } else {
+                let o = if x.op == "sll" { VOp::Shl } else { VOp::Shr(true) };
+                let r = m.simd(sh, o, &[v[0], k]);
+                let z = zero(m, w);
+                m.select(over, z, r)
+            }
+        }
+        "sllv" | "srlv" | "srav" if matches!(l, Lane::I32 | Lane::I64) => {
+            // (each lane by its own count, lane by lane: no vector instruction for it in the IR)
+            let mut r = v[0];
+            for i in 0..sh.count() {
+                let a = m.simd(sh, VOp::Extract(i as u8), &[v[0]]);
+                let c = m.simd(sh, VOp::Extract(i as u8), &[v[1]]);
+                let over = m.icmp_imm(IntCC::UnsignedGreaterThanOrEqual, c, lb as i64);
+                let e = match x.op {
+                    "srav" => {
+                        let top = m.iconst(l.ty(), (lb - 1) as i64);
+                        let c = m.select(over, top, c);
+                        m.sshr(a, c)
+                    }
+                    op => {
+                        let s = if op == "sllv" { m.ishl(a, c) } else { m.ushr(a, c) };
+                        let z = m.iconst(l.ty(), 0);
+                        m.select(over, z, s)
+                    }
+                };
+                r = m.simd(sh, VOp::Replace(i as u8), &[r, e]);
+            }
+            r
+        }
+        "mulhi" if l == Lane::I16 => {
+            // (the high 16 bits of each 32-bit product: products of the low and high halves, their odd 16-bit parts)
+            let s32 = Shape::new(Lane::I32, w);
+            let lo = m.simd(s32, VOp::ExtMul(false, u), v);
+            let hi = m.simd(s32, VOp::ExtMul(true, u), v);
+            let n = sh.count();
+            let sel: Vec<Option<(usize, u32)>> = (0..n).map(|i| if i < n / 2 { Some((0, 2 * i + 1)) } else { Some((1, 2 * (i - n / 2) + 1)) }).collect();
+            pick(m, w, &[lo, hi], &[w, w], 2, &sel)
+        }
+        "mulhrs" if l == Lane::I16 => {
+            // (pmulhrsw: q15mulr, but -32768 * -32768 wraps to -32768 where q15mulr_sat saturates)
+            let r = m.simd(sh, VOp::Q15MulrSat, v);
+            let k = m.iconst(Type::I16, 0x8000);
+            let k = m.simd(sh, VOp::Splat, &[k]);
+            let ea = m.simd(sh, VOp::Icmp(IntCC::Equal), &[v[0], k]);
+            let eb = m.simd(sh, VOp::Icmp(IntCC::Equal), &[v[1], k]);
+            let both = m.simd(sh, VOp::And, &[ea, eb]);
+            m.simd(sh, VOp::Bitselect, &[k, r, both])
+        }
+        "sad" if x.suffix == "epu8" => {
+            // (psadbw: |a - b| of each byte, summed over each 64-bit lane)
+            let mx = m.simd(sh, VOp::Max(true), v);
+            let mn = m.simd(sh, VOp::Min(true), v);
+            let d = m.simd(sh, VOp::Sub, &[mx, mn]);
+            let d = m.simd(Shape::new(Lane::I16, w), VOp::ExtAddPairwise(true), &[d]);
+            let d = m.simd(Shape::new(Lane::I32, w), VOp::ExtAddPairwise(true), &[d]);
+            m.simd(Shape::new(Lane::I64, w), VOp::ExtAddPairwise(true), &[d])
+        }
+        "maddubs" if x.suffix == "epi16" => {
+            // (pmaddubsw: a's bytes unsigned times b's signed, adjacent pairs summed with signed saturation)
+            let s8 = Shape::new(Lane::I16, w);
+            let mut prods = vec![];
+            for h in [false, true] {
+                let a = m.simd(s8, VOp::Extend(h, true), &[v[0]]);
+                let b = m.simd(s8, VOp::Extend(h, false), &[v[1]]);
+                let p = m.simd(s8, VOp::Mul, &[a, b]);
+                prods.push(m.simd(Shape::new(Lane::I32, w), VOp::ExtAddPairwise(false), &[p]));
+            }
+            m.simd(s8, VOp::Narrow(false), &prods)
+        }
+        "dp" if f => {
+            // (dpps / dppd within each 128-bit half: the products imm's high bits select, summed in Intel's order
+            // ((t3 + t2) + (t1 + t0); t1 + t0), into the lanes imm's low bits select, 0 elsewhere)
+            let es = l.bits() / 8;
+            let per = 16 / es;
+            let n = sh.count();
+            let mask = |m: &mut crate::ir::Recorder, f: &dyn Fn(u32) -> bool| -> Value {
+                let li = int_lane(l);
+                let one = m.iconst(li.ty(), -1);
+                let mut r = zero(m, w);
+                for i in 0..n {
+                    if f(i % per) {
+                        r = m.simd(Shape::new(li, w), VOp::Replace(i as u8), &[r, one]);
+                    }
+                }
+                r
+            };
+            let lanes = |f: &dyn Fn(u32) -> u32| -> Vec<Option<(usize, u32)>> { (0..n).map(|i| Some((0, i / per * per + f(i % per)))).collect() };
+            let t = m.simd(sh, VOp::Mul, v);
+            let pm = mask(m, &|j| (imm >> (4 + j)) & 1 == 1);
+            let t = m.simd(sh, VOp::And, &[t, pm]);
+            let sum = if per == 4 {
+                let x1 = pick(m, w, &[t], &[w], es, &lanes(&|k| [3, 1, 3, 1][k as usize]));
+                let y1 = pick(m, w, &[t], &[w], es, &lanes(&|k| [2, 0, 2, 0][k as usize]));
+                let s1 = m.simd(sh, VOp::Add, &[x1, y1]);
+                let s2 = pick(m, w, &[s1], &[w], es, &lanes(&|_| 1));
+                m.simd(sh, VOp::Add, &[s1, s2])
+            } else {
+                let x1 = pick(m, w, &[t], &[w], es, &lanes(&|_| 1));
+                m.simd(sh, VOp::Add, &[x1, t])
+            };
+            let b = pick(m, w, &[sum], &[w], es, &lanes(&|_| 0));
+            let dm = mask(m, &|j| (imm >> j) & 1 == 1);
+            m.simd(sh, VOp::And, &[b, dm])
+        }
         // (pshufb: a byte's index is its low 4 bits, or 0 when its top bit is set; within each 128-bit half)
         "shuffle" if x.suffix == "epi8" => {
             let k = m.iconst(Type::I8, 0x8F);
@@ -892,4 +1039,69 @@ fn pick128(m: &mut crate::ir::Recorder, halves: &[Value], c: &[Option<(usize, u3
         acc = m.simd(Shape::I8X16, VOp::Shuffle(mk), &[acc, x]);
     }
     acc
+}
+
+fn int_lane(l: Lane) -> Lane {
+    match l {
+        Lane::F32 => Lane::I32,
+        Lane::F64 => Lane::I64,
+        l => l,
+    }
+}
+
+/// a scalar 0 of a lane type
+fn zero_scalar(m: &mut crate::ir::Recorder, l: Lane) -> Value {
+    match l {
+        Lane::F32 => m.f32const(0.0),
+        Lane::F64 => m.f64const(0.0),
+        l => m.iconst(l.ty(), 0),
+    }
+}
+
+/// A gather, lane by lane: element i from p + index_i * scale (the index sign-extended). With a mask: only the
+/// lanes whose mask's top bit is set, the others src's; a lane left out reads a scratch slot, not memory
+fn gather(m: &mut crate::ir::Recorder, g: crate::simd_sig::Gather, scale: u32, v: &[Value]) -> Value {
+    let el = if g.elem64 { Lane::I64 } else { Lane::I32 };
+    let il = if g.idx64 { Lane::I64 } else { Lane::I32 };
+    let rw = VBits::from_bits(g.res_bits as u32).unwrap();
+    let iw = VBits::from_bits(g.idx_bits as u32).unwrap();
+    let (src, p, idx, mask) = if g.mask { (Some(v[0]), v[1], v[2], Some(v[3])) } else { (None, v[0], v[1], None) };
+    let rs = Shape::new(el, rw);
+    let mut r = match src {
+        Some(s) => s,
+        None => zero(m, rw),
+    };
+    let dummy = mask.map(|_| {
+        let s = m.create_stack_slot(8, 8);
+        m.stack_addr(s, 0)
+    });
+    for i in 0..g.n {
+        let k = m.simd(Shape::new(il, iw), VOp::Extract(i as u8), &[idx]);
+        let k = if g.idx64 { k } else { m.sextend(Type::I64, k) };
+        let s = m.iconst(Type::I64, scale as i64);
+        let off = m.imul(k, s);
+        let mut a = m.iadd(p, off);
+        let mut on = None;
+        if let (Some(mk), Some(d)) = (mask, dummy) {
+            let e = m.simd(rs, VOp::Extract(i as u8), &[mk]);
+            let c = m.icmp_imm(IntCC::SignedLessThan, e, 0);
+            a = m.select(c, a, d);
+            on = Some(c);
+        }
+        let e = m.load(el.ty(), a, 0);
+        let e = match on {
+            Some(c) => {
+                let old = m.simd(rs, VOp::Extract(i as u8), &[r]);
+                m.select(c, e, old)
+            }
+            None => e,
+        };
+        r = m.simd(rs, VOp::Replace(i as u8), &[r, e]);
+    }
+    // (an i64 gather of 32-bit elements: the lanes past the n it loads are 0, also with a mask (Intel: dst[MAX:..] := 0))
+    for i in g.n..rs.count() {
+        let z = m.iconst(el.ty(), 0);
+        r = m.simd(rs, VOp::Replace(i as u8), &[r, z]);
+    }
+    r
 }
