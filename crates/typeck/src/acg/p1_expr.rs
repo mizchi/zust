@@ -2611,6 +2611,10 @@ impl Cx<'_> {
                 };
                 let m = Expr::MethodCall(Box::new(Expr::Paren(Box::new(recv))), p.segs[1].name.clone(), p.segs[1].args.clone(), cargs[1..].to_vec(), span);
                 let m = self.keep_expr(m);
+                // (`Foo::tag(&s)`: the trait's method, not an inherent `tag` of the receiver's type)
+                if user {
+                    self.explicit_traits.insert(m as *const Expr as usize, p.segs[0].name.clone());
+                }
                 return self.expr(m, expected);
             }
         }
