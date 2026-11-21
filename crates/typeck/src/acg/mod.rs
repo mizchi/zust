@@ -208,19 +208,20 @@ pub const TRAP_SITE_MAX: usize = 245;
 pub fn compile(prog: &Program, insts: &Mutex<Insts>, id: u32, f: &ItemFn, line_base: u32, inl: &Inline) -> R<(Compiled, Vec<u32>)> {
     // (a region check begun late (`'static` required where the gate left the function out) that met a local bound
     // before it began, with no tree: the function again, checked from its start)
-    let (c, req, rerun) = compile_once(prog, insts, id, f, line_base, inl, false)?;
-    if rerun {
+    // (rerun out of band: the result is compile's own, returned as it is, not copied into another)
+    let mut rerun = false;
+    let r = compile_once(prog, insts, id, f, line_base, inl, false, &mut rerun);
+    if rerun && r.is_ok() {
         if regionck::debug() {
             eprintln!("regionck: {} again, checked from its start", f.sig.name);
         }
-        let (c, req, _) = compile_once(prog, insts, id, f, line_base, inl, true)?;
-        return Ok((c, req));
+        return compile_once(prog, insts, id, f, line_base, inl, true, &mut rerun);
     }
-    Ok((c, req))
+    r
 }
 
 #[allow(clippy::too_many_arguments)]
-fn compile_once(prog: &Program, insts: &Mutex<Insts>, id: u32, f: &ItemFn, line_base: u32, inl: &Inline, force_rg: bool) -> R<(Compiled, Vec<u32>, bool)> {
+fn compile_once(prog: &Program, insts: &Mutex<Insts>, id: u32, f: &ItemFn, line_base: u32, inl: &Inline, force_rg: bool, rerun_out: &mut bool) -> R<(Compiled, Vec<u32>)> {
     let (sig, env, body_id, fnptr, inst_args, clo_rg) = {
         let g = insts.lock().unwrap();
         let b = g.body_of(id);
@@ -391,6 +392,7 @@ fn compile_once(prog: &Program, insts: &Mutex<Insts>, id: u32, f: &ItemFn, line_
     r?;
     cx.bk_check()?;
     let rerun = cx.rg.rerun && !force_rg;
+    *rerun_out = rerun;
     if !rerun {
         cx.rg_check()?;
     }
@@ -402,7 +404,7 @@ fn compile_once(prog: &Program, insts: &Mutex<Insts>, id: u32, f: &ItemFn, line_
     let infos = std::mem::take(&mut cx.traps);
     let loc_used = cx.loc_used;
     let b = cx.b;
-    Ok((Compiled { rec: b.m, late, datas, vtables, infos, loc_used, line_base }, requested, rerun))
+    Ok((Compiled { rec: b.m, late, datas, vtables, infos, loc_used, line_base }, requested))
 }
 
 /// コード生成の結果: 記録した命令の列と、Blob を作るのに要るもの。機械語にするのはバックエンド
@@ -1673,8 +1675,8 @@ impl Cx<'_> {
                     }
                     // (a function the gate left out, with `let x: &'static T = ..`: from here on, a borrow of what it
                     // owns must not have to be 'static. What came before has no trees and adds no constraint)
-                    let static_cast = matches!(strip_paren(init), Expr::Cast(_, t) if crate::regions::mentions_static(t));
-                    if !self.rg.on && self.rg.eligible && (static_cast || ann_ty.as_ref().is_some_and(crate::regions::mentions_static)) {
+                    let static_cast = || matches!(strip_paren(init), Expr::Cast(_, t) if crate::regions::mentions_static(t));
+                    if !self.rg.on && self.rg.eligible && (static_cast() || ann_ty.as_ref().is_some_and(crate::regions::mentions_static)) {
                         self.rg_late_on();
                     }
                     let let_sp0 = std::mem::replace(&mut self.rg.let_sp, *let_at);

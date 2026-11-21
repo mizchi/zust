@@ -183,7 +183,7 @@ fn has_anon(t: &PTy) -> bool {
 
 /// Names each `'_` written in an impl's self type (outside fn pointer, `dyn` and `impl` types): `'_0`, `'_1`, ..
 fn name_anon(t: &mut PTy, out: &mut Vec<String>) {
-    let mut fresh = |out: &mut Vec<String>| {
+    let fresh = |out: &mut Vec<String>| {
         let n = format!("'_{}", out.len());
         out.push(n.clone());
         n

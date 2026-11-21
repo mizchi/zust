@@ -2122,13 +2122,8 @@ impl Cx<'_> {
         r
     }
 
-    /// 呼び先の引数の型 pt が `F` / `&F` / `&mut F` で、F に `Fn(A) -> B` の境界があれば (A, B)
+    /// 呼び先の引数の型 pt が `F` / `&F` / `&mut F` で、F に `Fn(A) -> B` の境界があれば (A, B) と境界の文字列
     /// (呼び先のシグネチャの型パラメータを Param で含む)
-    pub(crate) fn fn_bound_of(&self, sig: &FnSig, pt: Ty) -> Option<(Vec<Ty>, Ty)> {
-        self.fn_bound_with_text(sig, pt).map(|x| (x.0, x.1))
-    }
-
-    /// fn_bound_of, and the text of the bound
     pub(crate) fn fn_bound_with_text<'s>(&self, sig: &'s FnSig, pt: Ty) -> Option<(Vec<Ty>, Ty, &'s str)> {
         let pt = match pt {
             Ty::Ref(_, i) => *i,

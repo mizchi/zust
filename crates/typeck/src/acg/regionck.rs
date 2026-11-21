@@ -56,6 +56,8 @@ impl Var {
     }
 }
 
+/// The region check of one function. What it tracks is in `st`, made when the check first writes it: a function the
+/// check leaves out (most of them: the gate, generic instances, the prelude) makes and drops none of it
 #[derive(Default)]
 pub struct Rg {
     pub on: bool,
@@ -63,6 +65,76 @@ pub struct Rg {
     pub eligible: bool,
     /// The `let` being lowered: where an error is reported for what has no position of its own (a block)
     pub let_sp: Sp,
+    /// The function's own definition (of an instance: the generic one) and an instance's type arguments
+    pub base: u32,
+    pub inst_args: Vec<Ty>,
+    /// A function the gate left out: how its receiver elides (`&self`), and whether another receiver leaves the
+    /// result's regions unknown, for a check begun later (rg_late_on)
+    pub late: Option<(bool, bool)>,
+    /// A closure's body: its region signature (codes CLO_P + i: a region the bound binds, a placeholder; CLO_E + i:
+    /// one from outside the closure)
+    pub closure: Option<Box<crate::program::CloRg>>,
+    /// The check is on from the function's start whatever the gate says (compile's second run); the check began late
+    /// (rg_late_on); a local bound before it with no tree was met (the function is compiled again)
+    pub force: bool,
+    pub began_late: bool,
+    pub rerun: bool,
+    /// Nesting of call_fn (this and what follows: where lowering is, written whether the check is on or not)
+    pub depth: u32,
+    /// The receiver of the method call being lowered, as passed, and its position
+    pub recv: Option<(RT, Sp)>,
+    /// The last scrutinee's tree; the part of it the pattern being bound matches, and the region of the reference
+    /// matched through last (bindings in it are by reference)
+    pub scrut: Option<(Ty, RT)>,
+    pub pat: Option<(Ty, RT)>,
+    pub pat_ref: Option<u32>,
+    /// The method call being made (call_fn is given no span for it)
+    pub call_sp: Sp,
+    /// The elements' tree of the array or slice a slice pattern matches
+    pub pat_elem: Option<(Ty, RT)>,
+    /// The call being made is of a closure made where nothing was expected (by its definition): the regions of its
+    /// signature are one for all its calls (clo_shared)
+    pub shared_clo: Option<(u32, Option<usize>)>,
+    /// The state of the check (RgSt), read through Deref: a function that never writes it reads an empty one
+    pub st: Option<Box<RgSt>>,
+}
+
+impl std::ops::Deref for Rg {
+    type Target = RgSt;
+    #[inline]
+    fn deref(&self) -> &RgSt {
+        match &self.st {
+            Some(b) => b,
+            None => empty_st(),
+        }
+    }
+}
+
+impl std::ops::DerefMut for Rg {
+    #[inline]
+    fn deref_mut(&mut self) -> &mut RgSt {
+        self.st.get_or_insert_with(Default::default)
+    }
+}
+
+impl Rg {
+    /// Whether the state was made (written)
+    pub fn has_st(&self) -> bool {
+        self.st.is_some()
+    }
+}
+
+/// The state of a function whose check wrote nothing (never written)
+fn empty_st() -> &'static RgSt {
+    static E: std::sync::LazyLock<RgSt> = std::sync::LazyLock::new(RgSt::default);
+    &E
+}
+
+/// What the region check of a function tracks (Rg::st)
+#[derive(Default)]
+pub struct RgSt {
+    /// A closure's body (Rg::closure is set)
+    pub in_closure: bool,
     /// Region variables made (0 is `'static`)
     pub n: u32,
     /// The universal regions (not `'static`), with their names
@@ -76,10 +148,6 @@ pub struct Rg {
     pub calls: HashMap<usize, (Ty, RT)>,
     /// The result of the last call lowered (at the depth of call_fn it was made at)
     pub last_call: Option<(u32, Ty, RT)>,
-    /// Nesting of call_fn
-    pub depth: u32,
-    /// The receiver of the method call being lowered, as passed, and its position
-    pub recv: Option<(RT, Sp)>,
     /// The tree of the return type
     pub ret: Option<RT>,
     /// The function's own lifetime parameters (in `RSigSyn::lts` order)
@@ -92,34 +160,20 @@ pub struct Rg {
     pub var_open: Vec<u32>,
     pub var_cycle: bool,
     pub var_log: Vec<u32>,
-    /// The function's own definition (of an instance: the generic one) and an instance's type arguments
-    pub base: u32,
-    pub inst_args: Vec<Ty>,
     /// Borrows of what the function owns (a local, not through a reference): (region, the place's text, where)
     pub loans: Vec<(u32, String, Sp)>,
     /// Instantiating a type written in a body (`let` annotation, cast): a trait object's default lifetime is inferred
     pub dyn_infer: bool,
     /// ZUSTC_RG_DEBUG: the kinds of values not followed
     pub missed: Vec<&'static str>,
-    /// The last scrutinee's tree; the part of it the pattern being bound matches, and the region of the reference
-    /// matched through last (bindings in it are by reference)
-    pub scrut: Option<(Ty, RT)>,
-    pub pat: Option<(Ty, RT)>,
-    pub pat_ref: Option<u32>,
     /// A match lowered as another (its or-pattern arms with guards split): the one lowered
     pub alias: HashMap<usize, &'static Expr>,
     /// Values of no region borrowed as temporaries no constant promotion makes static (`&(x + 1)`, `&(5.f())`)
     pub temps: HashMap<usize, Ty>,
-    /// The method call being made (call_fn is given no span for it)
-    pub call_sp: Sp,
     /// Where values are returned (a borrow that escapes there is reported there: E0515)
     pub ret_sps: Vec<Sp>,
-    /// A function the gate left out: how its receiver elides (`&self`), and whether another receiver leaves the
-    /// result's regions unknown, for a check begun later (rg_late_on)
-    pub late: Option<(bool, bool)>,
-    /// A closure's body: its region signature (codes CLO_P + i: a region the bound binds, a placeholder; CLO_E + i:
-    /// one from outside the closure), the locals that are its captures, and the region its environment is borrowed for
-    pub closure: Option<Box<crate::program::CloRg>>,
+    /// A closure's body: the locals that are its captures, the region its environment is borrowed for, the regions
+    /// from outside
     pub cap_locs: Vec<Loc>,
     pub env_r: u32,
     pub externals: Vec<u32>,
@@ -128,16 +182,9 @@ pub struct Rg {
     pub outer_univ: Vec<u32>,
     /// CLO_S regions: only borrows of what the closure owns must not reach them
     pub soft: Vec<u32>,
-    /// The elements' tree of the array or slice a slice pattern matches
-    pub pat_elem: Option<(Ty, RT)>,
     /// Rg::wf: imp's relations are required, at this span (not those of the fields: wf_declared)
     pub wf_sp: Option<Sp>,
     pub wf_no_fields: bool,
-    /// The check is on from the function's start whatever the gate says (compile's second run); the check began late
-    /// (rg_late_on); a local bound before it with no tree was met (the function is compiled again)
-    pub force: bool,
-    pub began_late: bool,
-    pub rerun: bool,
     /// An impl's method: the tree of its self type (what `Self { .. }` builds)
     pub self_tree: Option<(Ty, RT)>,
     /// The region of each reborrow through a reference (`&mut *x`, `&v[0]` with v a reference), by the address of
@@ -155,9 +202,6 @@ pub struct Rg {
     pub imp_rec: Vec<Vec<(u32, u32)>>,
     /// imp_cache was taken from Insts (rg_begin), to be put back
     pub imp_taken: bool,
-    /// The call being made is of a closure made where nothing was expected (by its definition): the regions of its
-    /// signature are one for all its calls (clo_shared)
-    pub shared_clo: Option<(u32, Option<usize>)>,
     pub clo_shared: Vec<(u32, Vec<u32>)>,
     /// The trees of the type arguments of such a closure's calls (its parameters' and result's types)
     pub clo_targs: Vec<(u32, Vec<Option<RT>>)>,
@@ -573,7 +617,7 @@ impl Codes<'_> {
     }
 }
 
-impl Rg {
+impl RgSt {
     pub fn var(&mut self) -> u32 {
         self.n += 1;
         self.n
@@ -771,13 +815,13 @@ impl Rg {
     /// targs) or a field. `lts`: the variables of the lifetimes the codes name; `elided`: makes the variable of an
     /// elided region
     #[allow(clippy::too_many_arguments)]
-    fn inst(&mut self, prog: &Program, t: Ty, c: &mut Codes, lts: &[u32], targs: &[Option<RT>], elided: &mut dyn FnMut(&mut Rg) -> u32, out: &mut RT, depth: u32) {
+    fn inst(&mut self, prog: &Program, t: Ty, c: &mut Codes, lts: &[u32], targs: &[Option<RT>], elided: &mut dyn FnMut(&mut RgSt) -> u32, out: &mut RT, depth: u32) {
         if depth > 24 || !c.ok {
             c.ok = false;
             return;
         }
         let parent = c.parent.take();
-        let region = |me: &mut Rg, c: &mut Codes, elided: &mut dyn FnMut(&mut Rg) -> u32| -> u32 {
+        let region = |me: &mut RgSt, c: &mut Codes, elided: &mut dyn FnMut(&mut RgSt) -> u32| -> u32 {
             match c.next() {
                 R_STATIC => STATIC,
                 R_ELIDED => elided(me),
@@ -870,7 +914,7 @@ impl Rg {
             // (a fn pointer: the regions it binds are its own, as are those elided in it)
             // (written as a type alias (no R_FN): its regions are its own; the alias's one code is read)
             Ty::Fn(ft) => {
-                let mut own = |me: &mut Rg| me.var();
+                let mut own = |me: &mut RgSt| me.var();
                 if c.next() == R_FN {
                     for &p in &ft.params {
                         self.inst(prog, p, c, lts, targs, &mut own, out, depth + 1);
@@ -893,7 +937,7 @@ impl Rg {
 
     /// Instantiate t with codes (all of them must be read)
     #[allow(clippy::too_many_arguments)]
-    pub fn instantiate(&mut self, prog: &Program, t: Ty, codes: Option<&[u8]>, lts: &[u32], targs: &[Option<RT>], elided: &mut dyn FnMut(&mut Rg) -> u32) -> Option<RT> {
+    pub fn instantiate(&mut self, prog: &Program, t: Ty, codes: Option<&[u8]>, lts: &[u32], targs: &[Option<RT>], elided: &mut dyn FnMut(&mut RgSt) -> u32) -> Option<RT> {
         // (a parameter whose type is not followed)
         if codes.is_some_and(|c| c.contains(&R_UNKNOWN)) {
             return None;
@@ -1343,11 +1387,11 @@ impl Rg {
                         let outside = |a: u32, b: u32| self.externals.contains(&a) && (b == STATIC || self.outer_univ.contains(&b));
                         // (nor one of the function's that must outlive a placeholder: the callee's lifetimes in the
                         // bound may be it, and what they imply is of them)
-                        let placeholder = |b: u32| self.closure.is_some() && !self.externals.contains(&b) && !self.outer_univ.contains(&b) && b != STATIC;
+                        let placeholder = |b: u32| self.in_closure && !self.externals.contains(&b) && !self.outer_univ.contains(&b) && b != STATIC;
                         if !k[i][j] && !outside(u, y) && !outside(y, u) && !(self.outer_univ.contains(&u) && placeholder(y)) && !self.soft.contains(&u) && !self.soft.contains(&y) {
                             let other = if j == 0 { "'static".to_string() } else { self.univ[j - 1].1.clone() };
                             // (a region the closure's signature binds flowing into one from outside)
-                            let escapes = self.closure.is_some() && !self.externals.contains(&u) && !self.outer_univ.contains(&u) && self.cap_regions.contains(&y);
+                            let escapes = self.in_closure && !self.externals.contains(&u) && !self.outer_univ.contains(&u) && self.cap_regions.contains(&y);
                             errs.push((sp, if escapes { "borrowed data escapes outside of closure (a region of its signature flows into one from outside)".to_string() } else { format!("lifetime may not live long enough (`{uname}` must outlive `{other}`)") }));
                         }
                     }
@@ -1427,7 +1471,7 @@ impl Cx<'_> {
         let mut inputs: Vec<u32> = vec![];
         for (i, &(_, t)) in params.iter().enumerate() {
             let t = if generic { gsig.params[i] } else { t };
-            let mut el = |me: &mut Rg| {
+            let mut el = |me: &mut RgSt| {
                 let v = me.var();
                 me.univ.push((v, "'_".to_string()));
                 v
@@ -1445,7 +1489,7 @@ impl Cx<'_> {
         let one = if inputs.len() == 1 { Some(inputs[0]) } else { None };
         let mut bad = false;
         let ret_t = self.ret;
-        let mut el = |_: &mut Rg| match self_r.or(one) {
+        let mut el = |_: &mut RgSt| match self_r.or(one) {
             Some(v) => v,
             None => {
                 bad = true;
@@ -2779,7 +2823,8 @@ impl Cx<'_> {
             return;
         }
         let mut rg = std::mem::take(&mut self.rg);
-        let reg = |rg: &mut Rg, c: u8| -> u32 { rg.clo_reg(c) };
+        rg.in_closure = true;
+        let reg = |rg: &mut RgSt, c: u8| -> u32 { rg.clo_reg(c) };
         // (the function's named lifetimes, as a `let` annotation in the closure names them)
         for (n, c) in &clo.lts {
             let v = reg(&mut rg, *c);
@@ -3106,6 +3151,10 @@ impl Cx<'_> {
     /// Keep the tree of the call just lowered, as the value of e
     pub(crate) fn rg_took_call(&mut self, e: &Expr) {
         // (only the call made by this expression's own call_fn: one level below)
+        // (read first: taking it would make the state of a check that wrote none)
+        if self.rg.last_call.is_none() {
+            return;
+        }
         if let Some((d, t, tr)) = self.rg.last_call.take() {
             if d == self.rg.depth + 1 {
                 self.rg.calls.insert(e as *const Expr as usize, (t, tr));
@@ -3116,7 +3165,7 @@ impl Cx<'_> {
     /// Report what the constraints require
     pub(crate) fn rg_check(&mut self) -> super::R<()> {
         if debug() {
-            eprintln!("regionck {}: on={} univ={} edges={} loans={} missed={:?}", self.prog.names.get(self.rg.base as usize).map(|s| s.as_str()).unwrap_or("?"), self.rg.on, self.rg.univ.len(), self.rg.edges.len(), self.rg.loans.len(), self.rg.missed);
+            eprintln!("regionck {}: on={} st={} univ={} edges={} loans={} missed={:?}", self.prog.names.get(self.rg.base as usize).map(|s| s.as_str()).unwrap_or("?"), self.rg.on, self.rg.has_st(), self.rg.univ.len(), self.rg.edges.len(), self.rg.loans.len(), self.rg.missed);
             if std::env::var_os("ZUSTC_RG_EDGES").is_some() {
                 eprintln!("  univ {:?} loans {:?} edges {:?} ret {:?}", self.rg.univ, self.rg.loans.iter().map(|l| (l.0, &l.1)).collect::<Vec<_>>(), self.rg.edges.iter().map(|e| (e.0, e.1, e.2.line)).collect::<Vec<_>>(), self.rg.ret);
             }
