@@ -1098,3 +1098,12 @@ fn uncalled_generic_fns() {
         vec![]
     );
 }
+
+/// A placeholder's region is a type parameter's: universal, outliving what its `T: 'a` bounds name. One that must
+/// outlive another region is "the parameter type `T` may not live long enough" (E0309; E0310 for 'static)
+#[test]
+fn type_parameter_regions() {
+    let d = check("use std::cell::Cell;\nfn outlives<'a, T>(_x: Cell<&'a usize>, _y: T)\nwhere\n    T: 'a,\n{\n}\nfn region_static<'a, T>(cell: Cell<&'a usize>, t: T) {\n    outlives(cell, t)\n}\nfn main() {}\n");
+    assert!(d.len() == 1 && d[0].0 == 8 && d[0].1.contains("the parameter type `T` may not live long enough") && d[0].1.contains("E0309"), "{d:?}");
+    assert_eq!(check("use std::cell::Cell;\nfn outlives<'a, T>(_x: Cell<&'a usize>, _y: T)\nwhere\n    T: 'a,\n{\n}\nfn bounded<'a, T: 'a>(cell: Cell<&'a usize>, t: T) {\n    outlives(cell, t)\n}\nfn main() {}\n"), vec![]);
+}

@@ -392,7 +392,11 @@ fn dyn_tail(prog: &Program, t: Ty, depth: u32) -> bool {
 }
 
 fn lts_of(prog: &Program, base: u32) -> usize {
-    prog.adt_regions.get(&base).map_or(0, |r| r.lts.len())
+    match prog.adt_regions.get(&base) {
+        Some(r) => r.lts.len(),
+        // (a type parameter's placeholder: one region, the parameter's (what its values may borrow))
+        None => prog.is_placeholder(base) as usize,
+    }
 }
 
 fn is_closure(prog: &Program, sid: u32) -> bool {
@@ -695,6 +699,12 @@ impl RgSt {
         let sd = &prog.structs[base as usize];
         let nl = lts_of(prog, base);
         let ng = sd.generics.len();
+        // (a placeholder: covariant in its one region)
+        if sd.placeholder.is_some() {
+            let v: std::sync::Arc<[Var]> = vec![Var::Co; nl + ng].into();
+            self.variance.insert(base, v.clone());
+            return v;
+        }
         let prelude = prog.struct_item.get(base as usize).is_some_and(|&i| i >= prog.prelude_from);
         // (the prelude's types stand for std's: raw pointers in them are as `NonNull` (covariant); its cells are
         // invariant)
@@ -1412,7 +1422,15 @@ impl RgSt {
                             let other = if j == 0 { "'static".to_string() } else { self.univ[j - 1].1.clone() };
                             // (a region the closure's signature binds flowing into one from outside)
                             let escapes = self.in_closure && !self.externals.contains(&u) && !self.outer_univ.contains(&u) && self.cap_regions.contains(&y);
-                            errs.push((sp, if escapes { "borrowed data escapes outside of closure (a region of its signature flows into one from outside)".to_string() } else { format!("lifetime may not live long enough (`{uname}` must outlive `{other}`)") }));
+                            let msg = if escapes {
+                                "borrowed data escapes outside of closure (a region of its signature flows into one from outside)".to_string()
+                            } else if let Some(tp) = uname.strip_suffix('#') {
+                                // (a type parameter's placeholder: what its values may borrow must outlive `other`)
+                                format!("the parameter type `{tp}` may not live long enough (it must outlive `{other}`) (E0{})", if j == 0 { 310 } else { 309 })
+                            } else {
+                                format!("lifetime may not live long enough (`{uname}` must outlive `{other}`)")
+                            };
+                            errs.push((sp, msg));
                         }
                     }
                     st.push(y);
@@ -1523,6 +1541,24 @@ impl Cx<'_> {
         let opaque = inputs.is_empty() && !generic && rs.is_none() && prog.opaque.contains(&rg.base);
         if opaque {
             rg.ret = count(prog, ret_t, 0).filter(|&c| c > 0).map(|c| vec![STATIC; c]);
+        }
+        // (a placeholder for a type parameter (zustc check of a generic fn nothing calls): its region is a universal
+        // one, named as the placeholder (`T#`), that outlives what the parameter's `T: 'a` bounds name)
+        if generic {
+            for (k, &t) in rg.inst_args.clone().iter().enumerate() {
+                let (Ty::Struct(sid), Some(Some(tr))) = (t, targs.get(k)) else { continue };
+                let (Some(&v), true) = (tr.first(), prog.is_placeholder(sid)) else { continue };
+                rg.univ.push((v, prog.structs[sid as usize].name.clone()));
+                let pname = gsig.generics.get(k).map(|g| g.0.as_str()).unwrap_or("");
+                for (tp, c) in rs.map(|r| r.ty_outlives.as_slice()).unwrap_or(&[]) {
+                    if tp == pname {
+                        let b = if *c == R_STATIC { Some(STATIC) } else { lts.get(*c as usize).copied() };
+                        if let Some(b) = b {
+                            rg.known.push((v, b));
+                        }
+                    }
+                }
+            }
         }
         let nuniv = rg.univ.len();
         // (or a signature that writes 'static: `fn f(x: isize) -> &'static [isize]`)

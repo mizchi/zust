@@ -128,6 +128,8 @@ pub struct AdtTable {
     tuples: Mutex<HashMap<usize, u32>>,
     /// The placeholders made, by (fn, type parameter)
     placeholders: Mutex<HashMap<(u32, u32), u32>>,
+    /// Whether any was made (read without the lock, on hot paths)
+    any_placeholder: std::sync::atomic::AtomicBool,
 }
 
 impl AdtTable {
@@ -137,6 +139,7 @@ impl AdtTable {
             inst: Mutex::new(HashMap::default()),
             tuples: Mutex::new(HashMap::default()),
             placeholders: Mutex::new(HashMap::default()),
+            any_placeholder: std::sync::atomic::AtomicBool::new(false),
         }
     }
     pub fn len(&self) -> usize {
@@ -2803,7 +2806,13 @@ impl Program {
         }
         let s = self.structs.push(d);
         g.insert((id, k), s);
+        self.structs.any_placeholder.store(true, std::sync::atomic::Ordering::Relaxed);
         s
+    }
+
+    /// sid is a placeholder (Program::placeholder); cheap when none was made
+    pub fn is_placeholder(&self, sid: u32) -> bool {
+        self.structs.any_placeholder.load(std::sync::atomic::Ordering::Relaxed) && self.structs[sid as usize].placeholder.is_some()
     }
 
     pub fn tuple_base(&self, n: usize) -> u32 {
