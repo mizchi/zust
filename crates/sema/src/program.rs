@@ -387,9 +387,22 @@ pub struct Insts {
     pub list: Vec<Inst>,
     map: HashMap<(u32, Vec<Ty>), u32>,
     pub pending: Vec<u32>,
-    /// A closure's region signature, by its fn id (its parameters' codes, then its result's), from the bound it is
-    /// passed to or its annotations (typeck's regionck)
-    pub closure_rg: HashMap<u32, Vec<Vec<u8>>>,
+    /// A closure's region signature, by its fn id, from the bound it is passed to or its annotations, and the regions
+    /// of the function it is in that its captures hold (typeck's regionck)
+    pub closure_rg: HashMap<u32, Box<CloRg>>,
+}
+
+/// Insts::closure_rg (codes: see typeck's regionck)
+#[derive(Clone, Debug, Default)]
+pub struct CloRg {
+    /// The parameters' codes, then the result's
+    pub codes: Vec<Vec<u8>>,
+    /// Each capture's codes (None: not followed)
+    pub caps: Vec<Option<Vec<u8>>>,
+    /// What the function it is in knows of those of its regions: (longer, shorter)
+    pub known: Vec<(u8, u8)>,
+    /// The function's named lifetimes (a `let` annotation in the closure names them)
+    pub lts: Vec<(String, u8)>,
 }
 
 impl Insts {

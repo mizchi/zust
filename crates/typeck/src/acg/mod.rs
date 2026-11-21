@@ -1237,7 +1237,7 @@ impl Cx<'_> {
                 None => None,
             };
             let env = env.ok_or("closure without environment")?;
-            for (n, t, by_ref, off) in self.caps.clone() {
+            for (ci, (n, t, by_ref, off)) in self.caps.clone().into_iter().enumerate() {
                 let a = if by_ref { self.b.ins().load(PTR, mf(), env, off as i32) } else { self.addr_plus(env, off as i32) };
                 let loc = if clif_ty(t).is_none() && !t.is_agg() { Loc::Zst(self.bk.fresh_zst()) } else { Loc::Ptr(a) };
                 // (a capture held by value is a local of the body for the borrow checker: moving it twice, or in a
@@ -1245,7 +1245,7 @@ impl Cx<'_> {
                 if !by_ref {
                     self.bk_local(loc, &n, t);
                 }
-                self.rg_capture(loc, t);
+                self.rg_capture(ci, loc, t);
                 self.scopes.last_mut().unwrap().push((n, loc, t));
             }
         }

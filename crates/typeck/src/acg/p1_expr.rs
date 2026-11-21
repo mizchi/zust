@@ -1673,7 +1673,7 @@ impl Cx<'_> {
         let sid = prog.instantiate(cd.sid, args.clone()).or_else(|e| err(SP, e))?;
         // (the region signature its body is checked with: from a bound not the prelude's, else from annotated
         // parameters)
-        if self.user_code && self.bk.level >= 2 && !to_prelude && (bound.is_some() || inputs.iter().any(|x| x.1.is_some())) && regionck::enabled() {
+        if self.user_code && self.bk.level >= 2 && !to_prelude && (bound.is_some() || inputs.iter().any(|x| x.1.is_some()) || (self.rg_on() && !cd.captures.is_empty())) && regionck::enabled() {
             if let Some((ps, r)) = self.closure_sig(Ty::Struct(sid)) {
                 self.rg_closure_sig(c, cid, &ps, r, bound.map(|b| *b));
             }

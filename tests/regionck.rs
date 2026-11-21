@@ -598,3 +598,25 @@ fn self_parameter_lifetimes() {
     assert!(d.len() == 1 && d[0].0 == 4 && d[0].1.contains("E0308"), "{d:?}");
     assert_eq!(check("struct Foo<'a, 'b> { x: &'a isize, y: &'b isize }\nimpl<'a, 'b> Foo<'a, 'b> {\n    fn bar(self: Foo<'a, 'b>) {}\n    fn baz(self: &Foo<'a, 'b>) {}\n    fn qux(self: Box<Self>) {}\n}\nfn main() {}\n"), vec![]);
 }
+
+/// A closure's captures hold regions of the function it is in, related in its body as that function knows them
+#[test]
+fn closure_captures_regions() {
+    one_error("trait B {}\nimpl<F> B for F {}\nfn produce<'a, 'b: 'a>(data: &'b mut Vec<&'b u32>, value: &'a u32) -> impl B + 'b {\n    let x = move || {\n        let value: &'a u32 = value;\n        data.push(value);\n    };\n    x\n}\nfn main() {}\n", 6);
+    let ok = r#"
+trait B {}
+impl<F> B for F {}
+fn produce<'a, 'b: 'a>(data: &'a mut Vec<&'a u32>, value: &'b u32) -> impl B + 'a {
+    move || { let value: &'a u32 = value; data.push(value); }
+}
+pub fn f<'a>(_: &'a i32, _: impl FnOnce(&mut &mut &'a i32)) {}
+pub fn h<'a>(p: &'a i32) { f(p, |x: &mut &mut &'a i32| { let _: &mut &mut &'a i32 = x; }) }
+fn main() {
+    let v = vec![1u8];
+    let r = &v;
+    let c = || r.len();
+    println!("{}", c());
+}
+"#;
+    assert_eq!(check(ok), vec![]);
+}
