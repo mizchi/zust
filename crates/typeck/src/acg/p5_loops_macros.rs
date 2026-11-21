@@ -588,6 +588,21 @@ impl Cx<'_> {
         Ok(())
     }
 
+    /// A pattern coverage does not model (`[Some(x)]`): tested at run time, a trap where it does not match, so nothing
+    /// binds from a payload that is not there
+    pub(crate) fn runtime_pat_guard(&mut self, p: &Pat, place: Place) -> R<()> {
+        if self.user_code && !super::plainly_irrefutable(p) && self.coverage(&[p], place.ty()).is_none() {
+            let trap = self.b.create_block();
+            self.pat_test(p, place, trap)?;
+            let cur = self.b.create_block();
+            self.b.ins().jump(cur, &[]);
+            self.b.switch_to_block(trap);
+            self.b.ins().trap(TrapCode::unwrap_user(2));
+            self.b.switch_to_block(cur);
+        }
+        Ok(())
+    }
+
     pub(crate) fn for_body(&mut self, f: &Expr, val: Option<Value>, vt: Ty, step: Block, exit: Block) -> R<()> {
         let Expr::For(_, fpat, _, fbody) = f else { unreachable!() };
         self.scopes.push(vec![]);
@@ -603,9 +618,11 @@ impl Cx<'_> {
         if let (Some((idx, v, t)), Pat::Tuple(tp)) = (self.pending_pair.take(), &**fpat) {
             let pi = to_place(self, Some(idx), Ty::Usize);
             self.for_pat_check(&tp[0], Ty::Usize)?;
+            self.runtime_pat_guard(&tp[0], pi)?;
             self.pat_bind(&tp[0], pi, BindMode::Move)?;
             let pv = to_place(self, v, t);
             self.for_pat_check(&tp[1], t)?;
+            self.runtime_pat_guard(&tp[1], pv)?;
             self.pat_bind(&tp[1], pv, BindMode::Move)?;
         } else {
             let place = to_place(self, val, vt);
@@ -616,16 +633,7 @@ impl Cx<'_> {
                 }
             }
             self.for_pat_check(fpat, place.ty())?;
-            // (a pattern coverage does not model: tested at run time, a trap where it does not match)
-            if self.user_code && !super::plainly_irrefutable(fpat) && self.coverage(&[&**fpat], place.ty()).is_none() {
-                let trap = self.b.create_block();
-                self.pat_test(fpat, place, trap)?;
-                let cur = self.b.create_block();
-                self.b.ins().jump(cur, &[]);
-                self.b.switch_to_block(trap);
-                self.b.ins().trap(TrapCode::unwrap_user(2));
-                self.b.switch_to_block(cur);
-            }
+            self.runtime_pat_guard(fpat, place)?;
             self.pat_bind(fpat, place, BindMode::Move)?;
         }
         let bound = self.pending_bound.take();
