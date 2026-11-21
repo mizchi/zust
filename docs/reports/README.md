@@ -72,3 +72,5 @@ Japanese versions are in [../ja/reports/](../ja/reports/README.md).
 | 2026-11-20 | [Fixing what the formal models found: the borrow checker giving up, Vec overflow and allocation failure, the cache's tmp file](2026-11-20-01-formal-fixes.md) |
 | 2026-11-20 | [`std::thread` as green threads](2026-11-20-02-green-threads.md) |
 | 2026-11-20 | [Benchmarks in the shapes of application code](2026-11-20-03-bench-patterns.md) |
+| 2026-11-20 | [Region (lifetime) checking: approach and steps (issue #1)](2026-11-20-01-region-check.md) |
+| 2026-11-21 | [Region (lifetime) checking, part 2: what the first version left out](2026-11-21-01-region-check-2.md) |
