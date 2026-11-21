@@ -11,12 +11,15 @@
 pub struct CfgSet {
     pub features: Vec<String>,
     pub debug_assertions: bool,
+    /// the target is wasm32-unknown-unknown (`target_arch = "wasm32"`, `target_family = "wasm"`, no `unix`).
+    /// `target_pointer_width` stays "64": zustc's wasm32 output keeps 64-bit pointers and usize
+    pub wasm: bool,
 }
 
 impl CfgSet {
     fn flag(&self, name: &str) -> bool {
         match name {
-            "unix" => true,
+            "unix" => !self.wasm,
             "debug_assertions" => self.debug_assertions,
             "overflow_checks" => self.debug_assertions,
             _ => false,
@@ -26,6 +29,12 @@ impl CfgSet {
     fn kv(&self, key: &str, val: &str) -> bool {
         match key {
             "feature" => self.features.iter().any(|f| f == val),
+            "target_os" if self.wasm => val == "unknown",
+            "target_family" if self.wasm => val == "wasm",
+            "target_arch" if self.wasm => val == "wasm32",
+            "target_env" if self.wasm => val.is_empty(),
+            "panic" if self.wasm => val == "abort",
+            "target_feature" if self.wasm => val == "bulk-memory" || val == "sign-ext" || val == "nontrapping-fptoint" || val == "multivalue",
             "target_os" => val == "linux",
             "target_family" => val == "unix",
             "target_arch" => val == "x86_64",
@@ -295,7 +304,7 @@ mod tests {
     use super::*;
 
     fn run(src: &str, feats: &[&str]) -> String {
-        let c = CfgSet { features: feats.iter().map(|s| s.to_string()).collect(), debug_assertions: true };
+        let c = CfgSet { features: feats.iter().map(|s| s.to_string()).collect(), debug_assertions: true, wasm: false };
         let o = strip(src, &c).unwrap_or_else(|| src.to_string());
         assert_eq!(o.len(), src.len());
         o.split_whitespace().collect::<Vec<_>>().join(" ")

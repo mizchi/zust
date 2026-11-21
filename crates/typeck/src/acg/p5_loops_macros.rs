@@ -408,9 +408,25 @@ impl Cx<'_> {
             }
             bt = Some(*i);
         }
+        // (`for x in c.borrow().iter()` / `for x in g.iter_mut()` with g a guard (`Ref<Vec<T>>`) of a Vec or an array:
+        // the elements of what it guards, indexed through its deref; a guard that is a temporary lives to the end
+        // of the statement, after the loop)
+        let guard_seq = match (bt, adapters.first().map(|a| a.as_str())) {
+            (Some(t), Some(a @ ("iter" | "iter_mut"))) => match self.guard_of(t) {
+                Some((sid, target, gm)) if matches!(target, Ty::Array(..)) || matches!(target, Ty::Struct(v) if self.vec_fields(v).is_some()) => {
+                    if a == "iter_mut" && !gm {
+                        let g = self.prog.tn(Ty::Struct(sid));
+                        return err(expr_start(e), format!("cannot borrow data in dereference of `{g}` as mutable (E0596)"));
+                    }
+                    true
+                }
+                _ => false,
+            },
+            _ => false,
+        };
         // (型が分からないメソッド・関数呼び出し (`s.split(' ')` など) もイテレータとみなす)
         let iterator = match bt {
-            Some(Ty::Struct(sid)) => self.vec_fields(sid).is_none(),
+            Some(Ty::Struct(sid)) => self.vec_fields(sid).is_none() && !guard_seq,
             None => matches!(e, Expr::MethodCall(..) | Expr::Call(..)),
             _ => false,
         };
@@ -577,6 +593,32 @@ impl Cx<'_> {
     }
 
     /// ループ本体: パターンに値を束縛して本体を実行し、step (continue 先) へ
+    /// E0005: the pattern of a `for` must cover the element type (`for Some(x) in xs` does not)
+    pub(crate) fn for_pat_check(&self, p: &Pat, t: Ty) -> R<()> {
+        if self.user_code && !super::plainly_irrefutable(p) {
+            self.lit_pat_type_check(p, t)?;
+            if let Some(w) = self.non_exhaustive_pats(&[p], t) {
+                return err(SP, format!("refutable pattern in `for` loop binding: `{w}` not covered (E0005)"));
+            }
+        }
+        Ok(())
+    }
+
+    /// A pattern coverage does not model (`[Some(x)]`): tested at run time, a trap where it does not match, so nothing
+    /// binds from a payload that is not there
+    pub(crate) fn runtime_pat_guard(&mut self, p: &Pat, place: Place) -> R<()> {
+        if self.user_code && !super::plainly_irrefutable(p) && self.coverage(&[p], place.ty()).is_none() {
+            let trap = self.b.create_block();
+            self.pat_test(p, place, trap)?;
+            let cur = self.b.create_block();
+            self.b.ins().jump(cur, &[]);
+            self.b.switch_to_block(trap);
+            self.b.ins().trap(TrapCode::unwrap_user(2));
+            self.b.switch_to_block(cur);
+        }
+        Ok(())
+    }
+
     pub(crate) fn for_body(&mut self, f: &Expr, val: Option<Value>, vt: Ty, step: Block, exit: Block) -> R<()> {
         let Expr::For(_, fpat, _, fbody) = f else { unreachable!() };
         self.scopes.push(vec![]);
@@ -591,8 +633,12 @@ impl Cx<'_> {
         };
         if let (Some((idx, v, t)), Pat::Tuple(tp)) = (self.pending_pair.take(), &**fpat) {
             let pi = to_place(self, Some(idx), Ty::Usize);
+            self.for_pat_check(&tp[0], Ty::Usize)?;
+            self.runtime_pat_guard(&tp[0], pi)?;
             self.pat_bind(&tp[0], pi, BindMode::Move)?;
             let pv = to_place(self, v, t);
+            self.for_pat_check(&tp[1], t)?;
+            self.runtime_pat_guard(&tp[1], pv)?;
             self.pat_bind(&tp[1], pv, BindMode::Move)?;
         } else {
             let place = to_place(self, val, vt);
@@ -603,6 +649,8 @@ impl Cx<'_> {
                 }
             }
             self.rg_for_item(f, vt);
+            self.for_pat_check(fpat, place.ty())?;
+            self.runtime_pat_guard(fpat, place)?;
             self.pat_bind(fpat, place, BindMode::Move)?;
             self.rg.pat = None;
         }
@@ -678,6 +726,10 @@ impl Cx<'_> {
             if let (Some(l), Some(h)) = (self.iconst_of(lo), self.iconst_of(hi)) {
                 let h = h + inclusive as i64;
                 if l <= h && h - l <= 4 {
+                    // (E0005 also for a loop that runs no time: `for 0 in 0..0 {}`)
+                    if let Expr::For(_, fp, _, _) = f {
+                        self.for_pat_check(fp, lt)?;
+                    }
                     let bound = self.pending_bound;
                     let exit = self.b.create_block();
                     let vals: Vec<i64> = if rev { (l..h).rev().collect() } else { (l..h).collect() };
@@ -1061,6 +1113,16 @@ impl Cx<'_> {
         match crate::ast_closure::macro_args_at(g, self.mbase) {
             Some(v) => Ok(v),
             None => {
+                // (the parser's own error for an argument that is no expression: `assert!({one! two})`)
+                let inner = g.get(1..g.len().saturating_sub(1)).unwrap_or("");
+                for part in split_top(inner, ",").unwrap_or_default() {
+                    // (`L:C: expected one of ..` with a token there, `end of input: expected one of ..` at the end)
+                    if let Err(e) = crate::parse::parse_expr(&part) {
+                        if let Some(i) = e.find("expected one of") {
+                            return err(SP, e[i..].trim().to_string());
+                        }
+                    }
+                }
                 let name = p.segs.last().map(|s| s.name.as_str()).unwrap_or("");
                 err(SP, format!("cannot parse the arguments of `{name}!`"))
             }
@@ -1652,6 +1714,10 @@ impl Cx<'_> {
         }
         // `Box::into_raw(b)` / `Box::from_raw(p)`: the same pointer as a raw pointer / as the Box (the Box is not dropped)
         if matches!(name.as_str(), "into_raw" | "from_raw") && n >= 2 && p.segs[n - 2].name == "Box" && cargs.len() == 1 && !self.prog.struct_index.contains_key("Box") {
+            // (`Box::from_raw` is unsafe: it takes ownership of any pointer; into_raw is safe)
+            if name == "from_raw" {
+                self.check_unsafe_op("Box::from_raw", p.pos)?;
+            }
             let want = match (name.as_str(), expected) {
                 ("from_raw", Some(Ty::Box(i))) => Some(Ty::Ptr(true, i)),
                 _ => None,
@@ -1731,6 +1797,7 @@ impl Cx<'_> {
         }
         // `core::slice::from_raw_parts(p, n)` / `_mut` と `core::str::from_utf8_unchecked(b)`
         if matches!(name.as_str(), "from_raw_parts" | "from_raw_parts_mut" | "from_utf8_unchecked") && !(p.segs.len() == 1 && self.prog.index.contains_key(&name)) {
+            self.check_unsafe_op(&name, p.pos)?;
             if name == "from_utf8_unchecked" {
                 let u8s = Ty::Ref(false, intern(Ty::Slice(intern(Ty::U8))));
                 let (v, t) = self.expr(&cargs[0], Some(u8s))?;
@@ -1780,6 +1847,12 @@ impl Cx<'_> {
             }
             // `core::mem::zeroed::<T>()` (型は turbofish か期待型): 0 で埋めた値
             "zeroed" => {
+                // (`mem::zeroed` is unsafe: a zeroed `&T` or `Box<T>` is a null one, whatever the module is called
+                // (`use std::mem as m; m::zeroed()`). Only `MaybeUninit::zeroed` is safe)
+                let qual = (p.segs.len() >= 2).then(|| p.segs[p.segs.len() - 2].name.as_str());
+                if !matches!(qual, Some("MaybeUninit")) {
+                    self.check_unsafe_op("zeroed", p.pos)?;
+                }
                 let Some(t) = targ.or(expected) else {
                     return err(SP, "cannot infer the type of `zeroed()`; annotate it");
                 };

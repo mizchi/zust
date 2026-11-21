@@ -237,6 +237,15 @@ pub struct Program {
     pub overflow_checks: bool,
     /// `#![deny(unreachable_patterns)]` (or forbid) in the source: an arm no value can reach is an error
     pub deny_unreachable: bool,
+    /// structs / enums with `#[derive(PartialEq)]` (base ids): a constant of such a type (with fields of such types) is
+    /// structural, usable as a pattern
+    pub derived_peq: FxSet<u32>,
+    /// the program's source declares modules (`mod m { .. }`), whose scopes are flattened away: a name's item may then
+    /// be out of scope where the name is written
+    pub has_mods: bool,
+    /// a constant with a lowercase name exists (`const or: usize`): an identifier pattern of any case may name one;
+    /// without, only an uppercase one is looked up
+    pub lower_consts: bool,
     /// `#![deny(unused_must_use)]`: a statement whose value is a `Result` is an error
     pub deny_must_use: bool,
     /// `#![deny(unused_allocation)]`: `Box::new(x).m()` with m of `&self` on what the box holds is an error
@@ -735,6 +744,9 @@ impl Program {
             panic_handler: None,
             consts: vec![],
             const_index: FxMap::default(),
+            derived_peq: FxSet::default(),
+            has_mods: false,
+            lower_consts: false,
             const_by_last: FxMap::default(),
             prim_impls: HashSet::default(),
             ref_slice_traits: HashSet::default(),
@@ -907,6 +919,12 @@ impl Program {
                     p.const_by_last.entry(last.to_string()).or_default().push(p.consts.len() as u32);
                 }
                 p.const_index.insert(n.clone(), p.consts.len() as u32);
+                // (a trait impl's goes by `Foo as Tr::C` too: a qualified path that misses it reads the trait's default)
+                if let (Some(tr), false) = (trait_of(ii), n.contains(" as ")) {
+                    if let Some((base, last)) = n.rsplit_once("::") {
+                        p.const_index.insert(format!("{base} as {tr}::{last}"), p.consts.len() as u32);
+                    }
+                }
                 p.consts.push(ConstDef {
                     name: n.clone(),
                     ty: Ty::Unit,
@@ -1487,6 +1505,9 @@ impl Program {
                 if let Some(&sid) = p.struct_index.get(tn) {
                     for d in ds {
                         p.impls.insert((sid, d.clone()));
+                        if d == "PartialEq" {
+                            p.derived_peq.insert(sid);
+                        }
                     }
                 }
             }
@@ -1580,6 +1601,59 @@ impl Program {
                         .position(|sm| sm.impl_trait.as_deref() == Some(tr.as_str()) && sm.impl_self.as_deref() == Some(sn.as_str()))
                         .map_or(String::new(), |ii| format!("{}:1: ", items[ii].line));
                     return Err(format!("{line}not all trait items implemented, missing: `{m}` in `impl {tr} for {sn}`"));
+                }
+            }
+        }
+        // (E0407: a method of a trait impl that the trait does not declare; for the program's own traits)
+        let user_traits: FxSet<&str> = sums[..user].iter().filter_map(|sm| sm.trait_decl.as_deref()).collect();
+        if !user_traits.is_empty() {
+            for (fi, s) in p.sigs.iter().enumerate() {
+                let Some(tr) = s.impl_trait.as_deref() else { continue };
+                // (`impl Tr<u8> for S`: the trait's own name)
+                let tr = tr.split('<').next().unwrap_or(tr).trim();
+                let Some(ii) = p.item_of[fi] else { continue };
+                if ii as usize >= user || !user_traits.contains(tr) {
+                    continue;
+                }
+                // (the internal names of overloads `get#1` and of impls for references `__ref_foo`: the method's own)
+                let m = p.names[fi].rsplit("::").next().unwrap_or("");
+                let m = m.split('#').next().unwrap_or(m);
+                // (`__ref_foo` is the generated name of an impl for a reference; a method the trait declares with that
+                // name matches as written)
+                let bare = m.strip_prefix("__ref_").unwrap_or(m);
+                let decls = p.traits.get(tr).map(|v| v.as_slice()).unwrap_or(&[]);
+                let declared = |n: &str| decls.iter().any(|&d| p.names[d as usize].rsplit("::").next() == Some(n));
+                if declared(m) || declared(bare) {
+                    continue;
+                }
+                let m = bare;
+                {
+                    return Err(format!("{}:1: method `{m}` is not a member of trait `{tr}` (E0407)", items[ii as usize].line));
+                }
+            }
+        }
+        // (E0391: a trait that is its own supertrait, through any number of them; reported at the first trait of the
+        // cycle in the source. A cycle through a name declared twice (in two modules, flattened to one name) is left
+        // out: counted only when a cycle is found)
+        if !user_traits.is_empty() && !p.trait_supers.is_empty() {
+            for (ii, sm) in sums[..user].iter().enumerate() {
+                let Some(tr) = sm.trait_decl.as_deref() else { continue };
+                let Some(sup) = p.trait_supers.get(tr) else { continue };
+                let mut seen: FxSet<&str> = FxSet::default();
+                let mut todo: Vec<&str> = sup.iter().map(|s| s.as_str()).collect();
+                let mut cycle = false;
+                while let Some(t) = todo.pop() {
+                    if t == tr {
+                        cycle = true;
+                        break;
+                    }
+                    if user_traits.contains(t) && seen.insert(t) {
+                        todo.extend(p.trait_supers.get(t).into_iter().flatten().map(|s| s.as_str()));
+                    }
+                }
+                let once = |t: &str| sums[..user].iter().filter(|s| s.trait_decl.as_deref() == Some(t)).count() == 1;
+                if cycle && once(tr) && seen.iter().all(|t| once(t)) {
+                    return Err(format!("{}:1: cycle detected when computing the super predicates of `{tr}` (E0391)", items[ii].line));
                 }
             }
         }
@@ -2339,7 +2413,46 @@ impl Program {
     }
 
     /// 配列の長さに使う const (要約の const 表から整数の定数式として評価する)
+    /// Whether an impl of trait tr for a type parameter (`impl<T> Tr for T { const N = .. }`) defines its const n: a
+    /// type it covers takes that, not the trait's default (which the qualified-path fallback then must not read)
+    fn blanket_defines(&self, tr: &str, n: &str) -> Option<String> {
+        let suffix = format!(" as {tr}::{n}");
+        self.const_index
+            .keys()
+            .find(|k| {
+                k.strip_suffix(suffix.as_str()).is_some_and(|base| !self.struct_index.contains_key(base) && Ty::prim(base).is_none() && !self.aliases.contains_key(base))
+            })
+            .cloned()
+    }
+
     fn const_usize(&self, name: &str) -> R<u64> {
+        // (`<Foo as Bar>::SIZE`: the trait's under its qualified name, else the only `Foo::SIZE`; an expression with a
+        // cast in it, `(1 as usize) + Foo::SIZE`, is not one)
+        let word = |s: &str| !s.is_empty() && s.chars().all(|c| c.is_alphanumeric() || c == '_');
+        if let Some((base, rest)) = name.split_once(" as ").filter(|(b, r)| word(b) && r.split("::").all(word) && r.contains("::")) {
+            if !self.const_index.contains_key(name) {
+                // (`type Alias = Foo;`: the impl's under `Foo`)
+                let base = match self.aliases.get(base) {
+                    Some((g, TySyn::Named(n))) if g.is_empty() => n.as_str(),
+                    _ => base,
+                };
+                let (tr, last) = rest.rsplit_once("::").unwrap_or_default();
+                let q = format!("{base} as {tr}::{last}");
+                if self.const_index.contains_key(&q) {
+                    return self.const_usize(&q);
+                }
+                // (the impl leaves it out: the trait's default, not an inherent `Foo::SIZE`)
+                // (`impl<T> Tr for T { const N }`: the blanket impl's, which covers Foo)
+                if let Some(k) = self.blanket_defines(tr, last) {
+                    return self.const_usize(&k);
+                }
+                let d = format!("{tr}::{last}");
+                if self.const_index.contains_key(&d) {
+                    return self.const_usize(&d);
+                }
+                return self.const_usize(&format!("{base}::{last}"));
+            }
+        }
         // (const ジェネリクスの引数の式 `{ A - 16 }` は式のテキストで来る)
         let v = if !self.const_index.contains_key(name) && (name.starts_with(|c: char| c.is_ascii_digit()) || name.bytes().any(|c| !(c.is_ascii_alphanumeric() || c == b'_' || c == b':'))) {
             let e = crate::parse::parse_expr(name)?;
@@ -2523,6 +2636,20 @@ impl Program {
             // `<u64 as Integer>::MAX_STR_LEN`
             Expr::Path(Some(q), p) if matches!(&**q, crate::parse::Ty::Path(None, tp) if tp.segs.len() == 1) && !p.segs.is_empty() => {
                 let crate::parse::Ty::Path(None, tp) = &**q else { unreachable!() };
+                // (the trait impl's under its qualified name first, where an inherent const took the plain one)
+                if p.segs.len() == 2 {
+                    let q = format!("{} as {}::{}", tp.segs[0].name, p.segs[0].name, p.segs[1].name);
+                    if self.const_index.contains_key(&q) {
+                        return self.const_int(&q, depth);
+                    }
+                    if let Some(k) = self.blanket_defines(&p.segs[0].name, &p.segs[1].name) {
+                        return self.const_int(&k, depth);
+                    }
+                    let d = format!("{}::{}", p.segs[0].name, p.segs[1].name);
+                    if self.const_index.contains_key(&d) {
+                        return self.const_int(&d, depth);
+                    }
+                }
                 let full = format!("{}::{}", tp.segs[0].name, p.segs.last().unwrap().name);
                 if self.const_index.contains_key(&full) {
                     return self.const_int(&full, depth);
@@ -3927,7 +4054,8 @@ impl Program {
         // `std::collections::HashMap::new` などは `HashMap::new`
         if n >= 3 && matches!(name(0), "core" | "std" | "alloc") {
             let ty = name(n - 2);
-            if self.struct_index.contains_key(ty) {
+            // (`std::cell::Ref::map`: below, as `Ref::map`)
+            if self.struct_index.contains_key(ty) && !matches!(ty, "Ref" | "RefMut") {
                 return self.index.get(&format!("{ty}::{}", name(n - 1))).copied();
             }
         }
@@ -3946,6 +4074,10 @@ impl Program {
                 ("Path", "new") => Some("__exr_path_new"),
                 ("ptr", "eq") => Some("__exr_ptr_eq"),
                 ("array", "from_fn") => Some("__exr_array_from_fn"),
+                // (RefCell's guards: associated functions of the prelude's Ref / RefMut, unless the program has its own)
+                ("Ref", "map") if !self.index.contains_key("Ref::map") => Some("__exr_ref_map"),
+                ("RefMut", "map") if !self.index.contains_key("RefMut::map") => Some("__exr_refmut_map"),
+                ("Ref", "clone") if !self.index.contains_key("Ref::clone") => Some("__exr_ref_clone"),
                 _ => None,
             };
             if let Some(c) = core {

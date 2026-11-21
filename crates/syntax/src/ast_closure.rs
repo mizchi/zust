@@ -268,6 +268,28 @@ fn collect_closures(e: &Expr, out: &mut Vec<Expr>) {
     each_child(e, &mut |c| collect_closures(c, out));
 }
 
+/// closures_of と同じ順の、クロージャが `unsafe { }` の中に書かれているか (その本体は unsafe の文脈:
+/// 外のものは E0133 を検査する)
+pub fn closures_in_unsafe(b: &Block) -> Vec<bool> {
+    let mut out = Vec::new();
+    block_exprs(b, &mut |e| collect_in_unsafe(e, false, &mut out));
+    out
+}
+
+fn collect_in_unsafe(e: &Expr, u: bool, out: &mut Vec<bool>) {
+    if let Expr::Closure(..) = e {
+        out.push(u);
+    }
+    if let Expr::Macro(_, g, sp) = e {
+        for x in macro_exprs_at(g, sp.at) {
+            collect_in_unsafe(&x, u, out);
+        }
+        return;
+    }
+    let u = u || matches!(e, Expr::Block(_, true, _));
+    each_child(e, &mut |c| collect_in_unsafe(c, u, out));
+}
+
 /// クロージャを式の形で引くときのキー (式の形のハッシュ)
 pub fn closure_key(e: &Expr) -> String {
     format!("#{:x}", expr_hash(e))

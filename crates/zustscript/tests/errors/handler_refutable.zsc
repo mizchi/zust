@@ -1,0 +1,4 @@
+// expect: a handler's arm binds the operation's arguments
+enum Op { Get(i32) -> i32 }
+fn f() -> i32 { perform Get(2) }
+fn g() -> i32 { handle f() { Get(1), k => 10 } }

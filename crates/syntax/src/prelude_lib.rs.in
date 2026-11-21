@@ -760,6 +760,10 @@ impl<T> Vec<T> {
     // 3 回の反転で回す
     pub fn rotate_left(&mut self, k: usize) {
         let n = self.len;
+        // (as std: a count past the length is a caller's error, not taken modulo the length)
+        if k > n {
+            panic!("assertion failed: mid <= self.len()");
+        }
         if n == 0 {
             return;
         }
@@ -770,6 +774,9 @@ impl<T> Vec<T> {
     }
     pub fn rotate_right(&mut self, k: usize) {
         let n = self.len;
+        if k > n {
+            panic!("assertion failed: k <= self.len()");
+        }
         if n == 0 {
             return;
         }
@@ -2270,6 +2277,10 @@ impl String {
         self.vec.clear();
     }
     pub fn truncate(&mut self, n: usize) {
+        // (a byte inside a char: the String would no longer be UTF-8)
+        if n < self.vec.len && (unsafe { *self.vec.ptr.add(n) } & 0xC0) == 0x80 {
+            panic!("assertion failed: self.is_char_boundary(n)");
+        }
         self.vec.truncate(n);
     }
     pub fn as_bytes(&self) -> &[u8] {
@@ -2285,6 +2296,10 @@ impl String {
         let old = self.vec.len;
         if idx > old {
             panic!("insertion index is out of bounds");
+        }
+        // (a byte inside a char: the String would no longer be UTF-8)
+        if idx < self.vec.len && (unsafe { *self.vec.ptr.add(idx) } & 0xC0) == 0x80 {
+            panic!("assertion failed: self.is_char_boundary(idx)");
         }
         self.vec.reserve(n);
         unsafe {
@@ -2306,6 +2321,10 @@ impl String {
     pub fn remove<G>(&mut self, idx: usize) -> char {
         if idx >= self.vec.len {
             panic!("cannot remove a char from the end of a string");
+        }
+        // (a byte inside a char: the String would no longer be UTF-8)
+        if idx < self.vec.len && (unsafe { *self.vec.ptr.add(idx) } & 0xC0) == 0x80 {
+            panic!("assertion failed: self.is_char_boundary(idx)");
         }
         let (c, n) = __exr_decode_at::<()>(self.vec.ptr as *const u8, idx);
         unsafe {
@@ -2369,6 +2388,9 @@ impl String {
         let b = self.as_bytes();
         if r.start > r.end || r.end > b.len() {
             panic!("range end index {} out of range for slice of length {}", r.end, b.len());
+        }
+        if (r.start < b.len() && (b[r.start] & 0xC0) == 0x80) || (r.end < b.len() && (b[r.end] & 0xC0) == 0x80) {
+            panic!("assertion failed: self.is_char_boundary(n)");
         }
         let mut v: Vec<u8> = Vec::with_capacity(b.len() - (r.end - r.start) + with.len());
         v.extend_from_slice(&b[..r.start]);
@@ -5422,15 +5444,16 @@ impl<T> MaybeUninit<T> {
     pub fn as_mut_ptr(&mut self) -> *mut T {
         &mut self.value as *mut T
     }
-    pub fn assume_init(self) -> T {
+    // (unsafe as in std: the value may be zeroed or uninitialized. A zeroed `&T` is null)
+    pub unsafe fn assume_init(self) -> T {
         self.value
     }
-    pub fn assume_init_ref(&self) -> &T {
+    pub unsafe fn assume_init_ref(&self) -> &T {
         &self.value
     }
 }
 
-pub fn __core_unreachable_unchecked() -> ! {
+pub unsafe fn __core_unreachable_unchecked() -> ! {
     panic!("internal error: entered unreachable code")
 }
 
@@ -7043,6 +7066,11 @@ impl<T> Arc<T> {
     }
     pub fn ptr_eq(a: &Arc<T>, b: &Arc<T>) -> bool {
         a.p == b.p
+    }
+    // `&mut T` only while this is the one Arc (CVE-2018-25008 was this check, too weakly synchronized: zustc's
+    // threads are green threads on one OS thread, so the count cannot change under it)
+    pub fn get_mut(this: &mut Arc<T>) -> Option<&mut T> {
+        if unsafe { (*this.__bx()).strong } == 1 { Some(unsafe { &mut (*this.__bx()).val }) } else { None }
     }
     pub fn as_ref(&self) -> &T {
         unsafe { &(*self.__bx()).val }
@@ -9214,32 +9242,204 @@ impl<T> UnsafeCell<T> {
     }
 }
 
-// 内部可変性。借用の検査はしない (borrow / borrow_mut は参照をそのまま返す)
+// 内部可変性。借用は実行時に数える (std と同じ): flag は 0 で空き、正なら共有の借用の数、-1 なら可変の借用。
+// borrow / borrow_mut は Ref / RefMut (ガード) を返し、ガードが drop されると借用を返す。重なる借用は panic
+// (tests/security/rt_refcell.rs: 二つの borrow_mut が同じ値を指せば safe なコードで &mut が二つになる)
 pub struct RefCell<T> {
+    flag: isize,
     val: T,
 }
 
+pub struct BorrowError {
+    _p: (),
+}
+
+pub struct BorrowMutError {
+    _p: (),
+}
+
+impl Debug for BorrowError {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError> {
+        f.buf.push_str("BorrowError");
+        Ok(())
+    }
+}
+
+impl Debug for BorrowMutError {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError> {
+        f.buf.push_str("BorrowMutError");
+        Ok(())
+    }
+}
+
+impl Display for BorrowError {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError> {
+        f.buf.push_str("RefCell already mutably borrowed");
+        Ok(())
+    }
+}
+
+impl Display for BorrowMutError {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError> {
+        f.buf.push_str("RefCell already borrowed");
+        Ok(())
+    }
+}
+
 impl<T> RefCell<T> {
-    pub fn new(v: T) -> RefCell<T> {
-        RefCell { val: v }
+    pub const fn new(v: T) -> RefCell<T> {
+        RefCell { flag: 0, val: v }
     }
-    pub fn borrow(&self) -> &T {
-        &self.val
+    fn __flag(&self) -> *mut isize {
+        &self.flag as *const isize as *mut isize
     }
-    pub fn borrow_mut(&self) -> &mut T {
-        unsafe { &mut *(&self.val as *const T as *mut T) }
+    pub fn borrow(&self) -> Ref<T> {
+        let f = self.__flag();
+        if unsafe { *f } < 0 {
+            panic!("RefCell already mutably borrowed");
+        }
+        unsafe {
+            *f += 1;
+        }
+        Ref { __v: &self.val as *const T, __b: f }
+    }
+    pub fn borrow_mut(&self) -> RefMut<T> {
+        let f = self.__flag();
+        if unsafe { *f } != 0 {
+            panic!("RefCell already borrowed");
+        }
+        unsafe {
+            *f = -1;
+        }
+        RefMut { __v: &self.val as *const T as *mut T, __b: f }
+    }
+    pub fn try_borrow(&self) -> Result<Ref<T>, BorrowError> {
+        if unsafe { *self.__flag() } < 0 { Err(BorrowError { _p: () }) } else { Ok(self.borrow()) }
+    }
+    pub fn try_borrow_mut(&self) -> Result<RefMut<T>, BorrowMutError> {
+        if unsafe { *self.__flag() } != 0 { Err(BorrowMutError { _p: () }) } else { Ok(self.borrow_mut()) }
     }
     pub fn into_inner(self) -> T {
         self.val
     }
     pub fn replace(&self, v: T) -> T {
-        __core_replace(self.borrow_mut(), v)
+        let mut g = self.borrow_mut();
+        __core_replace(g.deref_mut(), v)
+    }
+    pub fn replace_with<F: FnOnce(&mut T) -> T>(&self, f: F) -> T {
+        let mut g = self.borrow_mut();
+        let v = f(g.deref_mut());
+        __core_replace(g.deref_mut(), v)
     }
     pub fn take(&self) -> T {
-        __core_replace(self.borrow_mut(), __exr_default::<T>())
+        let mut g = self.borrow_mut();
+        __core_replace(g.deref_mut(), __exr_default::<T>())
+    }
+    pub fn swap(&self, other: &RefCell<T>) {
+        let mut a = self.borrow_mut();
+        let mut b = other.borrow_mut();
+        __core_swap(a.deref_mut(), b.deref_mut());
     }
     pub fn get_mut(&mut self) -> &mut T {
         &mut self.val
+    }
+    pub fn as_ptr(&self) -> *mut T {
+        &self.val as *const T as *mut T
+    }
+}
+
+// `RefCell::borrow` のガード: 生きている間は共有の借用を一つ数える
+// (フィールドの名前は値のフィールドと重ならないもの: `guard.f` は値の f)
+pub struct Ref<T> {
+    __v: *const T,
+    __b: *mut isize,
+}
+
+impl<T> Ref<T> {
+    pub fn deref(&self) -> &T {
+        unsafe { &*self.__v }
+    }
+}
+
+impl<T> Drop for Ref<T> {
+    fn drop(&mut self) {
+        unsafe {
+            *self.__b -= 1;
+        }
+    }
+}
+
+// `RefCell::borrow_mut` のガード: 生きている間は可変の借用 (ほかの借用はすべて panic)
+pub struct RefMut<T> {
+    __v: *mut T,
+    __b: *mut isize,
+}
+
+impl<T> RefMut<T> {
+    pub fn deref(&self) -> &T {
+        unsafe { &*self.__v }
+    }
+    pub fn deref_mut(&mut self) -> &mut T {
+        unsafe { &mut *self.__v }
+    }
+}
+
+impl<T> Drop for RefMut<T> {
+    fn drop(&mut self) {
+        unsafe {
+            *self.__b = 0;
+        }
+    }
+}
+
+// `Ref::map(r, |v| &v.f)` / `RefMut::map(m, ..)` / `Ref::clone(&r)` (associated functions, not methods: `g.map(..)` is
+// the value's). The new guard holds the borrow of the old one, which is forgotten instead of dropped
+pub fn __exr_ref_map<T, U, F: FnOnce(&T) -> &U>(orig: Ref<T>, f: F) -> Ref<U> {
+    let v = f(unsafe { &*orig.__v }) as *const U;
+    let b = orig.__b;
+    __core_forget(orig);
+    Ref { __v: v, __b: b }
+}
+
+pub fn __exr_refmut_map<T, U, F: FnOnce(&mut T) -> &mut U>(orig: RefMut<T>, f: F) -> RefMut<U> {
+    let v = f(unsafe { &mut *orig.__v }) as *mut U;
+    let b = orig.__b;
+    __core_forget(orig);
+    RefMut { __v: v, __b: b }
+}
+
+pub fn __exr_ref_clone<T>(orig: &Ref<T>) -> Ref<T> {
+    unsafe {
+        *orig.__b += 1;
+    }
+    Ref { __v: orig.__v, __b: orig.__b }
+}
+
+impl<T> Debug for Ref<T> {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError> {
+        __exr_debug(self.deref(), f);
+        Ok(())
+    }
+}
+
+impl<T> Display for Ref<T> {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError> {
+        __exr_display(self.deref(), f);
+        Ok(())
+    }
+}
+
+impl<T> Debug for RefMut<T> {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError> {
+        __exr_debug(self.deref(), f);
+        Ok(())
+    }
+}
+
+impl<T> Display for RefMut<T> {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError> {
+        __exr_display(self.deref(), f);
+        Ok(())
     }
 }
 
@@ -9247,7 +9447,12 @@ impl<T> Debug for RefCell<T> {
     fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError> {
         __exr_dbg_begin::<()>(f, "RefCell", 0);
         __exr_dbg_item::<()>(f, 0, "value");
-        __exr_debug(&self.val, f);
+        // (borrowed mutably: what std prints instead of the value, which the RefMut may be changing)
+        if self.flag < 0 {
+            f.buf.push_str("<borrowed>");
+        } else {
+            __exr_debug(&self.val, f);
+        }
         __exr_dbg_item_end::<()>(f);
         __exr_dbg_end::<()>(f, 1, 0, false);
         Ok(())
@@ -9847,6 +10052,11 @@ impl<K, V> HashMap<K, V> {
     }
     pub fn with_capacity(n: usize) -> HashMap<K, V> {
         let mut m = HashMap::new();
+        // (the same pattern as CVE-2018-1000810: `n * 4` wrapped to a small table, and `c * 3` wrapping made `c`
+        // reach 0 and the loop never end. A count whose table does not fit is a panic, as in std)
+        if n > usize::MAX / 8 {
+            panic!("capacity overflow");
+        }
         let mut c = 8;
         while c * 3 < n * 4 {
             c *= 2;
@@ -9863,6 +10073,10 @@ impl<K, V> HashMap<K, V> {
     fn alloc(&mut self, c: usize) {
         let ks = core::mem::size_of::<K>();
         let vs = core::mem::size_of::<V>();
+        // (`c * ks` / `c * vs` past isize::MAX: a panic, not a wrapped small block)
+        if (ks != 0 && c > isize::MAX as usize / ks) || (vs != 0 && c > isize::MAX as usize / vs) {
+            panic!("capacity overflow");
+        }
         self.st = unsafe { __exr_realloc_ok(core::ptr::null_mut(), c) };
         self.ks = unsafe { __exr_realloc_ok(core::ptr::null_mut(), if ks == 0 { 1 } else { c * ks }) } as *mut K;
         self.vs = unsafe { __exr_realloc_ok(core::ptr::null_mut(), if vs == 0 { 1 } else { c * vs }) } as *mut V;
@@ -10939,6 +11153,11 @@ impl<T> VecDeque<T> {
         }
         let c = if n < 4 { 4 } else { n };
         let sz = core::mem::size_of::<T>();
+        // (a block past isize::MAX bytes, or `c * sz` past usize, is a panic as in std: wrapped, it would be a
+        // small block the pushes then overrun)
+        if sz != 0 && c > isize::MAX as usize / sz {
+            panic!("capacity overflow");
+        }
         let np = unsafe { __exr_realloc_ok(0usize as *mut u8, if sz == 0 { 1 } else { c * sz }) } as *mut T;
         let mut i = 0;
         while i < self.len {
@@ -10955,6 +11174,42 @@ impl<T> VecDeque<T> {
         self.ptr = np;
         self.cap = c;
         self.head = 0;
+    }
+    pub fn capacity(&self) -> usize {
+        self.cap
+    }
+    // (CVE-2018-1000657 was std's reserve mis-copying a wrapped buffer: dq_grow copies the elements in order into a
+    // new block, whatever the head)
+    pub fn reserve(&mut self, extra: usize) {
+        if extra > usize::MAX - self.len {
+            panic!("capacity overflow");
+        }
+        self.dq_grow(self.len + extra);
+    }
+    // The elements in order in one slice. (CVE-2020-36318 was std's make_contiguous popping an element twice for some
+    // layouts: here a wrapped buffer is copied in order into a new block of the same size, each element read once)
+    pub fn make_contiguous(&mut self) -> &mut [T] {
+        if self.head + self.len > self.cap {
+            let c = self.cap;
+            let sz = core::mem::size_of::<T>();
+            let np = unsafe { __exr_realloc_ok(0usize as *mut u8, if sz == 0 { 1 } else { c * sz }) } as *mut T;
+            let mut i = 0;
+            while i < self.len {
+                unsafe {
+                    np.add(i).write(self.dq_at(i).read());
+                }
+                i += 1;
+            }
+            unsafe {
+                __exr_free(self.ptr as *mut u8);
+            }
+            self.ptr = np;
+            self.head = 0;
+        }
+        if self.len == 0 {
+            return unsafe { core::slice::from_raw_parts_mut(self.ptr, 0) };
+        }
+        unsafe { core::slice::from_raw_parts_mut(self.ptr.add(self.head), self.len) }
     }
     pub fn push_back(&mut self, x: T) {
         if self.len == self.cap {
@@ -11155,6 +11410,26 @@ impl<T> Iterator for DqIter<T> {
         } else {
             None
         }
+    }
+}
+
+// (CVE-2019-1010299: std's Debug of vec_deque::Iter printed the whole buffer, uninitialized slots included. Only the
+// elements still to come)
+impl<T> Debug for DqIter<T> {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError> {
+        f.buf.push_str("Iter([");
+        let mut i = self.i;
+        while i < self.n {
+            if i > self.i {
+                f.buf.push_str(", ");
+            }
+            unsafe {
+                __exr_debug(&*(*self.d).dq_at(i), f);
+            }
+            i += 1;
+        }
+        f.buf.push_str("])");
+        Ok(())
     }
 }
 
@@ -11708,6 +11983,10 @@ fn __exr_str_replacen<G>(s: &str, from: &str, to: &str, n: usize) -> String {
 }
 
 fn __exr_str_repeat<G>(s: &str, n: usize) -> String {
+    // (CVE-2018-1000810: a product past usize would wrap to a small buffer that the loop then overruns)
+    if s.len() != 0 && n > usize::MAX / s.len() {
+        panic!("capacity overflow");
+    }
     let mut r = String::with_capacity(s.len() * n);
     let mut i = 0;
     while i < n {

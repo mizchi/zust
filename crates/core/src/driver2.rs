@@ -68,7 +68,8 @@ pub struct Analysis {
     /// 読んだ関数の本体 (関数 id → 構文木)
     pub asts: Mutex<FxMap<u32, ItemFn>>,
     /// 囲む関数 (アイテム番号) ごとのクロージャの式 (クロージャの本体を引くたびに囲む関数を読み直さない)
-    pub encl: Mutex<FxMap<u32, Vec<Expr>>>,
+    /// item → its closures, and whether each is written inside `unsafe { }`
+    pub encl: Mutex<FxMap<u32, Vec<(Expr, bool)>>>,
     /// 関数ごとのシグネチャのハッシュ (0 はまだ: キーを作るたびに参照先のシグネチャをたどり直さない)
     pub sig_keys: Mutex<Vec<Key>>,
     /// 依存するクレートのテキストの範囲と、そこから見えるクレート (CrateCtx::dep_ranges)
@@ -265,23 +266,34 @@ pub struct Options2 {
     pub backend: Option<Backend>,
     /// `#[cfg(feature = "..")]` で真になる feature (1 つのクレートのビルド。ワークスペースはクレートごとに CrateSpec が持つ)
     pub features: Vec<String>,
+    /// wasm32-unknown-unknown: writes the module instead of an ELF object, and does not link (zust_wasm::write_module;
+    /// `backend` is then zust_wasm::compile)
+    pub module_writer: Option<ModuleWriter>,
 }
+
+/// Writes the output from the functions and data build.rs lays out (in place of the ELF object)
+pub type ModuleWriter = fn(&[(String, Vec<u8>, Vec<crate::ir::Reloc>, bool)], &[(String, Vec<u8>, Vec<(u32, String, i64)>, bool)]) -> Result<Vec<u8>, String>;
 
 impl Default for Options2 {
     fn default() -> Self {
-        Options2 { opt: false, jobs: cpu_count(), linker: None, lib_dirs: vec![], no_cache: false, time: false, backend: None, features: vec![] }
+        Options2 { opt: false, jobs: cpu_count(), linker: None, lib_dirs: vec![], no_cache: false, time: false, backend: None, features: vec![], module_writer: None }
     }
 }
 
 impl Options2 {
     /// キャッシュのキーに入れるバックエンドの印 (Cranelift なら 1)
     pub fn backend_id(&self) -> u8 {
+        // (wasm: the address checks are part of the code, so a build without them (ZUSTC_WASM_NO_ADDR_CHECK, for
+        // measuring) has its own cache entries)
+        if self.module_writer.is_some() {
+            return if std::env::var_os("ZUSTC_WASM_NO_ADDR_CHECK").is_some() { 3 } else { 2 };
+        }
         self.backend.is_some() as u8
     }
 
     /// cfg の述語の設定 (features は与えたもの)
     pub fn cfg_with(&self, features: &[String]) -> crate::cfg::CfgSet {
-        crate::cfg::CfgSet { features: features.to_vec(), debug_assertions: !self.opt }
+        crate::cfg::CfgSet { features: features.to_vec(), debug_assertions: !self.opt, wasm: self.module_writer.is_some() }
     }
 }
 
@@ -735,6 +747,56 @@ impl Session2 {
                 return Err(format!("{}:1: {e}", it.line));
             }
         }
+        // (E0658: an attribute behind a feature gate the file does not enable)
+        // (attributes start items: only the text at the start of the program's items, not the whole source)
+        let mut feats: Option<Vec<String>> = None;
+        for it in &items[..user] {
+            let head = src.get(it.start..it.end).unwrap_or("");
+            // (and an extern block's items: `extern "C" { #[unsafe(ffi_const)] fn f(); }`)
+            let ext = extern_block(head.as_bytes(), 0);
+            if ext || head.starts_with('#') {
+                // (an item's outer attributes, not its body; an extern block's items are read whole)
+                let end = if ext { Some(it.end) } else { gated_attrs_len(head.as_bytes()).map(|n| it.start + n) };
+                if let Some(e) = end.and_then(|end| gated_attr(&src, it.start, end, &mut feats)) {
+                    return Err(e);
+                }
+            }
+        }
+        // (E0119: two blanket impls of one trait for a bare parameter, `impl<T: A> Tr for T` and `impl<T: B> Tr for T`,
+        // overlap whatever their bounds say. Only the program's own traits declared once (modules flatten names),
+        // without trait arguments, and not under the features that allow overlapping impls)
+        {
+            // (a `where` clause only on the parameter itself: `where (): Mirror<Assoc = T>` can make the impls disjoint)
+            let plain_where = |ii: usize, st: &str| {
+                let it = &items[ii];
+                let head = src.get(it.start..it.end).unwrap_or("");
+                let head = &head[..head.find('{').unwrap_or(head.len())];
+                let w = head.match_indices("where").find(|&(i, _)| {
+                    let b = head.as_bytes();
+                    (i == 0 || !(b[i - 1].is_ascii_alphanumeric() || b[i - 1] == b'_')) && b.get(i + 5).is_none_or(|c| !(c.is_ascii_alphanumeric() || *c == b'_'))
+                });
+                w.is_none_or(|(i, _)| top_level_split(&head[i + 5..]).iter().all(|p| p.trim().is_empty() || p.split(':').next().map(str::trim) == Some(st)))
+            };
+            let mut first: FxMap<&str, (usize, &str)> = FxMap::default();
+            for (ii, sm) in sums[..user].iter().enumerate() {
+                let (Some(tr), Some(st)) = (sm.impl_trait.as_deref(), sm.impl_self.as_deref()) else { continue };
+                if !sm.impl_trait_args.is_empty() || tr.contains(['<', ':']) || !sm.impl_generics.iter().any(|g| g.0 == st) {
+                    continue;
+                }
+                // (an impl whose `where` clause may make it disjoint is no candidate either way)
+                if !plain_where(ii, st) {
+                    continue;
+                }
+                let Some((_, _)) = first.insert(tr, (ii, st)) else { continue };
+                let once = sums[..user].iter().filter(|s| s.trait_decl.as_deref() == Some(tr)).count() == 1;
+                const OVERLAP: [&str; 6] =
+                    ["specialization", "min_specialization", "marker_trait_attr", "negative_impls", "with_negative_coherence", "rustc_attrs"];
+                let enabled = feats.get_or_insert_with(|| enabled_features(&src));
+                if once && !enabled.iter().any(|f| OVERLAP.contains(&f.as_str())) {
+                    return Err(format!("{}:1: conflicting implementations of trait `{tr}` (E0119)", items[ii].line));
+                }
+            }
+        }
         // (`#![crate_type = "lib"]`: a library, no `main` needed)
         let mut deny_unreachable = false;
         let mut deny_unused_vars = false;
@@ -864,20 +926,37 @@ impl Session2 {
                 }
             }
         }
+        unsafe_impls(&src, &items[..user])?;
         let mut prog = Program::build_with(&items, &sums, self.ctx.lib.is_none() && !lib_attr, user).map_err(|e| name_line(&e, &src, &items))?;
         tm.lap("program", String::new());
         prog.prelude_from = user as u32;
+        // (E0277: a static is reachable from every thread, so its type must be Sync)
+        if let Some((ci, tn)) = crate::acg::static_not_sync(&prog) {
+            let line = items.get(prog.consts[ci].item as usize).map_or(0, |it| it.line);
+            return Err(format!("{line}:1: `{tn}` cannot be shared between threads safely: the type of a `static` must be Sync (E0277)"));
+        }
         // (traits of one name in two modules: which one a method call means depends on where it is. Read from the
         // crate's source (its files joined, as the items' lines count); a build with dependency crates keeps the earlier
         // choice, the first impl)
+        // (whether the source has modules: one search, for trait scopes and for has_mods below)
+        // (the keyword, not `mode`: a `mod` not after an identifier's letter and followed by a space)
+        let has_mod_word = src0.contains("mod") && {
+            let b = src0.as_bytes();
+            src0.match_indices("mod").any(|(i, _)| {
+                (i == 0 || !(b[i - 1].is_ascii_alphanumeric() || b[i - 1] == b'_')) && b.get(i + 3).is_some_and(|c| c.is_ascii_whitespace())
+            })
+        };
         if self.ctx.deps.is_empty() && self.ctx.lib.is_none() {
-            prog.trait_scopes = lexer::trait_scopes(src0);
+            prog.trait_scopes = lexer::trait_scopes_with(src0, has_mod_word);
             if !prog.trait_scopes.is_empty() {
                 prog.item_lines = items.iter().map(|it| it.line as u32).collect();
             }
         }
         prog.overflow_checks = !self.opts.opt;
         prog.deny_unreachable = deny_unreachable;
+        // (the program has modules: read from its source as written, before flattening blanks their headers)
+        prog.has_mods = has_mod_word;
+        prog.lower_consts = prog.consts.iter().any(|c| !c.name.contains("::") && c.name.trim_start_matches('_').starts_with(|ch: char| ch.is_lowercase()));
         prog.deny_must_use = deny_must_use;
         prog.deny_unused_alloc = deny_unused_alloc;
         prog.deny_trivial_casts = deny_trivial_casts;
@@ -1937,8 +2016,9 @@ pub fn parse_fn(src: &str, it: &SrcItem) -> R<Option<ItemFn>> {
     Ok(Some(ItemFn { attrs: item.attrs, sig, block }))
 }
 
-/// クロージャ式を関数にする (`fn call(__env: (), p0: (), ..) { 本体 }`: 型はシグネチャから決まる)
-pub fn synth_closure(c: &Expr) -> ItemFn {
+/// クロージャ式を関数にする (`fn call(__env: (), p0: (), ..) { 本体 }`: 型はシグネチャから決まる)。
+/// in_unsafe: the closure is written where `unsafe` operations are allowed, so its body is put in `unsafe { }`
+pub fn synth_closure(c: &Expr, in_unsafe: bool) -> ItemFn {
     let Expr::Closure(_, ps, _, body, _) = c else { unreachable!() };
     let unit = crate::parse::Ty::Tuple(vec![]);
     let mut params = vec![(Pat::Ident(false, false, "__env".into(), None), unit.clone())];
@@ -1958,6 +2038,9 @@ pub fn synth_closure(c: &Expr) -> ItemFn {
         Expr::Block(None, false, b) => stmts.extend(b.stmts.iter().cloned()),
         e => stmts.push(Stmt::Expr(e.clone(), false)),
     }
+    if in_unsafe {
+        stmts = vec![Stmt::Expr(Expr::Block(None, true, Block { stmts }), false)];
+    }
     let sig = crate::parse::FnSig {
         name: "call".into(),
         generics: crate::parse::Generics { params: vec![], preds: vec![] },
@@ -1970,6 +2053,161 @@ pub fn synth_closure(c: &Expr) -> ItemFn {
     ItemFn { attrs: vec![], sig, block: Block { stmts } }
 }
 
+/// The text of an item after its attributes and comments, and the number of lines skipped to get there
+fn after_attrs(text: &str) -> (&str, usize) {
+    let mut t = text;
+    loop {
+        let u = t.trim_start();
+        if let Some(r) = u.strip_prefix("//") {
+            t = r.find('\n').map(|k| &r[k..]).unwrap_or("");
+        } else if let Some(r) = u.strip_prefix("/*") {
+            t = r.find("*/").map(|k| &r[k + 2..]).unwrap_or("");
+        } else if let Some(r) = u.strip_prefix("#[").or_else(|| u.strip_prefix("#![")) {
+            t = &r[attr_end(r)..];
+        } else {
+            t = u;
+            break;
+        }
+    }
+    let skipped = &text[..text.len() - t.len()];
+    (t, skipped.matches('\n').count())
+}
+
+/// The length of an attribute's body up to and with its closing `]` (r is after `#[`). Brackets inside string, raw
+/// string and char literals do not count: `#[doc = "]"]` ends at the last `]`
+fn attr_end(r: &str) -> usize {
+    let b = r.as_bytes();
+    let mut depth = 1;
+    let mut i = 0;
+    while i < b.len() {
+        match b[i] {
+            b'[' => depth += 1,
+            b']' => {
+                depth -= 1;
+                if depth == 0 {
+                    return i + 1;
+                }
+            }
+            // a raw string `r"..."` / `r#"..."#`: to the quote followed by as many `#`
+            b'r' if i + 1 < b.len() && (b[i + 1] == b'"' || b[i + 1] == b'#') && (i == 0 || !(b[i - 1].is_ascii_alphanumeric() || b[i - 1] == b'_')) => {
+                let mut j = i + 1;
+                let mut hashes = 0;
+                while j < b.len() && b[j] == b'#' {
+                    hashes += 1;
+                    j += 1;
+                }
+                if j < b.len() && b[j] == b'"' {
+                    j += 1;
+                    while j < b.len() && !(b[j] == b'"' && b[j + 1..].iter().take(hashes).filter(|&&c| c == b'#').count() == hashes) {
+                        j += 1;
+                    }
+                    i = j + hashes;
+                }
+            }
+            b'"' => {
+                i += 1;
+                while i < b.len() && b[i] != b'"' {
+                    if b[i] == b'\\' {
+                        i += 1;
+                    }
+                    i += 1;
+                }
+            }
+            // a char literal ('x', '\'', '\\'): not a lifetime, which has no closing quote two or three bytes on
+            b'\'' if b.get(i + 2) == Some(&b'\'') || (b.get(i + 1) == Some(&b'\\') && b.get(i + 3) == Some(&b'\'')) => {
+                i += if b[i + 1] == b'\\' { 3 } else { 2 };
+            }
+            _ => {}
+        }
+        i += 1;
+    }
+    b.len()
+}
+
+/// t without its `// ..` and `/* .. */` comments (each one a space)
+fn strip_comments(t: &str) -> String {
+    let mut out = String::with_capacity(t.len());
+    let mut rest = t;
+    loop {
+        let (a, b) = (rest.find("//"), rest.find("/*"));
+        let k = match (a, b) {
+            (Some(x), Some(y)) => x.min(y),
+            (Some(x), None) | (None, Some(x)) => x,
+            (None, None) => break,
+        };
+        out.push_str(&rest[..k]);
+        out.push(' ');
+        rest = if rest[k..].starts_with("//") {
+            rest[k..].find('\n').map(|e| &rest[k + e..]).unwrap_or("")
+        } else {
+            rest[k + 2..].find("*/").map(|e| &rest[k + 2 + e + 2..]).unwrap_or("")
+        };
+    }
+    out.push_str(rest);
+    out
+}
+
+/// `t` without the keyword `w` at its start (and the spaces after it)
+fn after_word<'a>(t: &'a str, w: &str) -> Option<&'a str> {
+    let r = t.strip_prefix(w)?;
+    if r.starts_with(|c: char| c.is_alphanumeric() || c == '_') {
+        return None;
+    }
+    Some(r.trim_start())
+}
+
+/// E0200: an impl of an unsafe trait (`Send`, `Sync`, or an `unsafe trait` of the program) must be an `unsafe impl`.
+/// Implementing `Send` for a type holding an `Rc` is how safe code would otherwise share it between threads
+fn unsafe_impls(src: &str, items: &[SrcItem]) -> R<()> {
+    let mut unsafe_traits: Vec<&str> = vec!["Send", "Sync"];
+    for it in items {
+        let (t, _) = after_attrs(src.get(it.start..it.end).unwrap_or(""));
+        let t = after_word(t, "pub").map(|r| if r.starts_with('(') { r.find(')').map(|k| r[k + 1..].trim_start()).unwrap_or(r) } else { r }).unwrap_or(t);
+        if let Some(r) = after_word(t, "unsafe").and_then(|r| after_word(r, "trait")) {
+            let n = r.split(|c: char| !(c.is_alphanumeric() || c == '_')).next().unwrap_or("");
+            if !n.is_empty() {
+                unsafe_traits.push(n);
+            }
+        }
+    }
+    for it in items {
+        if !matches!(it.kind, ItemKind::Normal | ItemKind::ImplHeader) {
+            continue;
+        }
+        let (t, skipped) = after_attrs(src.get(it.start..it.end).unwrap_or(""));
+        let Some(mut r) = after_word(t, "impl") else { continue };
+        // (the impl's own generics: `impl<T: Send> Send for W<T>`)
+        if r.starts_with('<') {
+            let mut depth = 0;
+            let mut end = r.len();
+            for (k, c) in r.char_indices() {
+                match c {
+                    '<' => depth += 1,
+                    '>' if k > 0 && r.as_bytes()[k - 1] == b'-' => {}
+                    '>' => {
+                        depth -= 1;
+                        if depth == 0 {
+                            end = k + 1;
+                            break;
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            r = r[end..].trim_start();
+        }
+        // (the header without comments, in single spaces: `impl Send // ..\nfor S` is the same header)
+        let head = strip_comments(r.split('{').next().unwrap_or("")).split_whitespace().collect::<Vec<_>>().join(" ");
+        let Some(k) = head.find(" for ") else { continue };
+        let path = head[..k].trim();
+        let last = path.split('<').next().unwrap_or("").rsplit("::").next().unwrap_or("").trim();
+        if unsafe_traits.contains(&last) {
+            return Err(format!("{}:1: the trait `{last}` requires an `unsafe impl` declaration (E0200)", it.line + skipped));
+        }
+    }
+    Ok(())
+}
+
 /// 関数 (インスタンスも) id の本体
 fn fn_ast(a: &Analysis, body: u32) -> R<ItemFn> {
     let ii = a.prog.item_of[body as usize].ok_or("internal: no item")?;
@@ -1978,11 +2216,14 @@ fn fn_ast(a: &Analysis, body: u32) -> R<ItemFn> {
         let mut encl = a.encl.lock().unwrap();
         if !encl.contains_key(&ii) {
             let f = parse_fn(&a.src, it)?.ok_or_else(|| format!("`{}` has no body", a.prog.names[body as usize]))?;
-            encl.insert(ii, crate::ast_closure::closures_of(&f.block));
+            let u = crate::ast_closure::closures_in_unsafe(&f.block);
+            encl.insert(ii, crate::ast_closure::closures_of(&f.block).into_iter().zip(u).collect());
         }
         let cs = encl.get(&ii).unwrap();
-        let c = cs.get(cd.k as usize).ok_or("internal: closure not found")?;
-        return Ok(synth_closure(c));
+        let (c, in_unsafe) = cs.get(cd.k as usize).ok_or("internal: closure not found")?;
+        // (a closure written in `unsafe { }` or in an `unsafe fn` may do what its surroundings may)
+        let in_unsafe = *in_unsafe || a.prog.sigs.get(cd.parent as usize).is_some_and(|s| s.is_unsafe);
+        return Ok(synth_closure(c, in_unsafe));
     }
     let f = parse_fn(&a.src, it)?.ok_or_else(|| format!("`{}` has no body", a.prog.names[body as usize]))?;
     Ok(f)
@@ -2477,4 +2718,322 @@ impl Session2 {
 /// function compiled before such a `#![deny]` was added is not reused without its check
 fn lint_bits(p: &Program) -> u8 {
     p.deny_must_use as u8 | (p.deny_trivial_casts.0 as u8) << 1 | (p.deny_trivial_casts.1 as u8) << 2 | (p.deny_unreachable as u8) << 3 | (p.deny_unused_alloc as u8) << 4
+}
+
+/// The attributes behind a feature gate, and the feature
+const GATED: &[(&str, &str)] = &[
+    ("default_lib_allocator", "allocator_internals"),
+    ("export_stable", "export_stable"),
+    ("ffi_const", "ffi_const"),
+    ("ffi_pure", "ffi_pure"),
+    ("rustc_align", "fn_align"),
+    ("rustc_align_static", "static_align"),
+    ("fundamental", "fundamental"),
+    ("move_size_limit", "large_assignments"),
+    ("marker", "marker_trait_attr"),
+    ("no_core", "no_core"),
+    ("optimize", "optimize_attribute"),
+    ("patchable_function_entry", "patchable_function_entry"),
+    ("register_tool", "register_tool"),
+    ("thread_local", "thread_local"),
+];
+
+/// An attribute that needs a `#![feature(..)]` the source does not have: `line:col: the `x` attribute is an
+/// experimental feature (E0658)`. Read from the tokens of src[from..to] (literals and comments are not attributes);
+/// the features from the whole source's (a `#![feature]` may follow the attribute it enables)
+fn gated_attr(src: &str, from: usize, to: usize, feats: &mut Option<Vec<String>>) -> Option<String> {
+    let b = src.as_bytes();
+    let toks = lexer::tokenize(&b[from..to]);
+    let tx = |k: usize| &src[from + toks[k].1..from + toks[k].2];
+    let sym = |k: usize, c: &str| k < toks.len() && toks[k].0 == 1 && tx(k) == c;
+    for k in 0..toks.len() {
+        if !sym(k, "#") {
+            continue;
+        }
+        let mut j = k + 1;
+        if sym(j, "!") {
+            j += 1;
+        }
+        if !sym(j, "[") {
+            continue;
+        }
+        j += 1;
+        // (`#[unsafe(ffi_const)]`)
+        if j + 1 < toks.len() && toks[j].0 == 0 && tx(j) == "unsafe" && sym(j + 1, "(") {
+            j += 2;
+        }
+        if j >= toks.len() || toks[j].0 != 0 || sym(j + 1, ":") {
+            continue;
+        }
+        let name = tx(j);
+        let at = |k: usize| {
+            let i = from + toks[k].1;
+            let line = src[..i].matches('\n').count() + 1;
+            (line, i - src[..i].rfind('\n').map_or(0, |n| n + 1) + 1)
+        };
+        // (`#[target_feature(enable = "apxf,avx2")]`: a feature of the target that is unstable)
+        if name == "target_feature" {
+            let mut q = j + 1;
+            while q < toks.len() && !sym(q, "]") {
+                if let Some(text) = (toks[q].0 == 2).then(|| str_lit_value(tx(q))).flatten() {
+                    for tf in text.split(',').map(str::trim) {
+                        let Some(gate) = unstable_target_feature(tf) else { continue };
+                        let enabled = feats.get_or_insert_with(|| enabled_features(src));
+                        if !enabled.iter().any(|f| f == gate) {
+                            let (line, col) = at(k);
+                            return Some(format!("{line}:{col}: the target feature `{tf}` is currently unstable (E0658)"));
+                        }
+                    }
+                }
+                q += 1;
+            }
+            continue;
+        }
+        let Some(&(_, feat)) = GATED.iter().find(|g| g.0 == name) else { continue };
+        // (the source's enabled features: read once, at the first gated attribute)
+        let enabled = feats.get_or_insert_with(|| enabled_features(src));
+        if !enabled.iter().any(|f| f == feat) {
+            let (line, col) = at(k);
+            return Some(format!("{line}:{col}: the `{name}` attribute is an experimental feature (E0658)"));
+        }
+    }
+    None
+}
+
+/// The parts of s between its top-level commas (not those inside `<..>` / `(..)` / `[..]`): a `where` clause's
+/// predicates
+fn top_level_split(s: &str) -> Vec<&str> {
+    let (mut out, mut depth, mut from) = (vec![], 0i32, 0);
+    let mut prev = '\0';
+    for (i, c) in s.char_indices() {
+        let arrow = c == '>' && prev == '-';
+        prev = c;
+        match c {
+            // (the `>` of `-> R` closes nothing)
+            '>' if arrow => {}
+            '<' | '(' | '[' => depth += 1,
+            '>' | ')' | ']' => depth -= 1,
+            ',' if depth == 0 => {
+                out.push(&s[from..i]);
+                from = i + 1;
+            }
+            _ => {}
+        }
+    }
+    out.push(&s[from..]);
+    out
+}
+
+/// The value of a string literal token: `"x87"`, `r"x87"` / `r#"x87"#`, with the escapes of an ordinary one decoded
+/// (`"x\x38\x37"`). None for another literal
+fn str_lit_value(t: &str) -> Option<String> {
+    if let Some(r) = t.strip_prefix('r') {
+        let h = r.len() - r.trim_start_matches('#').len();
+        return Some(r.get(h + 1..r.len().checked_sub(h + 1)?)?.to_string());
+    }
+    let inner = t.strip_prefix('"')?.strip_suffix('"')?;
+    let mut out = String::new();
+    let mut cs = inner.chars();
+    while let Some(c) = cs.next() {
+        if c != '\\' {
+            out.push(c);
+            continue;
+        }
+        match cs.next()? {
+            'n' => out.push('\n'),
+            't' => out.push('\t'),
+            'r' => out.push('\r'),
+            '0' => out.push('\0'),
+            'x' => out.push(u8::from_str_radix(&cs.by_ref().take(2).collect::<String>(), 16).ok()? as char),
+            'u' => {
+                // (`\u{3_8}`: underscores may separate the digits)
+                let hex: String = cs.by_ref().skip(1).take_while(|&c| c != '}').filter(|&c| c != '_').collect();
+                out.push(char::from_u32(u32::from_str_radix(&hex, 16).ok()?)?);
+            }
+            '\n' => {
+                while cs.clone().next().is_some_and(char::is_whitespace) {
+                    cs.next();
+                }
+            }
+            c => out.push(c),
+        }
+    }
+    Some(out)
+}
+
+/// The feature gate of an x86 target feature that is unstable (rustc 1.100): `#[target_feature(enable = "x87")]`
+/// needs `#![feature(x87_target_feature)]`. Only those whose gate tests/ui checks; the others count as stable
+fn unstable_target_feature(tf: &str) -> Option<&'static str> {
+    if tf.starts_with("amx-") {
+        return Some("x86_amx_intrinsics");
+    }
+    Some(match tf {
+        "apxf" => "apx_target_feature",
+        "avx10.1" | "avx10.2" => "avx10_target_feature",
+        "clflushopt" => "clflushopt_target_feature",
+        "fma4" => "fma4_target_feature",
+        "movrs" => "movrs_target_feature",
+        "x87" => "x87_target_feature",
+        "xop" => "xop_target_feature",
+        _ => return None,
+    })
+}
+
+/// The attributes `#[..]` / `#![..]` at the start of b, with the space and comments between them: Some(their length)
+/// when one is behind a feature gate, None when none is. A raw string or a character literal inside one gives up and
+/// reads all of b (the tokens then tell what they are)
+fn gated_attrs_len(b: &[u8]) -> Option<usize> {
+    let ident = |c: u8| c.is_ascii_alphanumeric() || c == b'_';
+    let mut i = 0;
+    let mut gated = false;
+    loop {
+        i = skip_space(b, i);
+        if i >= b.len() || b[i] != b'#' {
+            // (an extern block after its outer attributes: its items' attributes are read too, the whole item)
+            if extern_block(b, i) {
+                return Some(b.len());
+            }
+            return gated.then_some(i);
+        }
+        i += 1;
+        let mut depth = 0;
+        while i < b.len() {
+            match b[i] {
+                b'[' if depth == 0 => {
+                    depth = 1;
+                    // (the attribute's name: `#[name`, `#[unsafe(name`; not a path `#[tool::name`)
+                    let mut j = i + 1;
+                    let skip = |j: &mut usize| *j = skip_space(b, *j);
+                    skip(&mut j);
+                    if b[j..].starts_with(b"unsafe") && !b.get(j + 6).is_some_and(|&c| ident(c)) {
+                        let mut k = j + 6;
+                        skip(&mut k);
+                        if b.get(k) == Some(&b'(') {
+                            depth = 2;
+                            j = k + 1;
+                            skip(&mut j);
+                        }
+                    }
+                    let n0 = j;
+                    while j < b.len() && ident(b[j]) {
+                        j += 1;
+                    }
+                    let name = &b[n0..j];
+                    skip(&mut j);
+                    if !name.is_empty() && b.get(j) != Some(&b':') && (GATED.iter().any(|g| g.0.as_bytes() == name) || name == b"target_feature") {
+                        gated = true;
+                    }
+                    i = j;
+                    continue;
+                }
+                b'[' | b'(' | b'{' => depth += 1,
+                b']' | b')' | b'}' => {
+                    depth -= 1;
+                    if depth <= 0 {
+                        i += 1;
+                        break;
+                    }
+                }
+                b'"' => {
+                    i += 1;
+                    while i < b.len() && b[i] != b'"' {
+                        i += if b[i] == b'\\' { 2 } else { 1 };
+                    }
+                }
+                b'\'' => return Some(b.len()),
+                b'r' if matches!(b.get(i + 1), Some(b'#' | b'"')) => return Some(b.len()),
+                _ => {}
+            }
+            i += 1;
+        }
+        i = i.min(b.len());
+    }
+}
+
+/// An extern block starts at b[i..]: `extern "C" {` / `unsafe extern {`, not an `extern "C" fn` (whose body's macro
+/// arguments are no attributes)
+fn extern_block(b: &[u8], i: usize) -> bool {
+    // (most items start with neither `extern` nor `unsafe`)
+    if !matches!(b.get(i), Some(b'e' | b'u')) {
+        return false;
+    }
+    let mut j = i;
+    if b[j..].starts_with(b"unsafe") {
+        j = skip_space(b, j + 6);
+    }
+    if !b[j..].starts_with(b"extern") {
+        return false;
+    }
+    j = skip_space(b, j + 6);
+    // (the ABI: `"C"`, or a raw string `r"C"` / `r#"C"#`)
+    let mut hashes = 0;
+    if b.get(j) == Some(&b'r') {
+        j += 1;
+        while b.get(j) == Some(&b'#') {
+            hashes += 1;
+            j += 1;
+        }
+    }
+    if b.get(j) == Some(&b'"') {
+        j += 1;
+        while j < b.len() && !(b[j] == b'"' && b[j + 1..].iter().take(hashes).filter(|&&c| c == b'#').count() == hashes) {
+            j += 1;
+        }
+        j = skip_space(b, j + 1 + hashes);
+    }
+    b.get(j) == Some(&b'{')
+}
+
+/// The index of the first byte at or after i that is not whitespace or a comment (`//..`, nested `/* .. */`)
+fn skip_space(b: &[u8], mut i: usize) -> usize {
+    loop {
+        while i < b.len() && b[i].is_ascii_whitespace() {
+            i += 1;
+        }
+        if b.get(i..).is_some_and(|r| r.starts_with(b"//")) {
+            while i < b.len() && b[i] != b'\n' {
+                i += 1;
+            }
+        } else if b.get(i..).is_some_and(|r| r.starts_with(b"/*")) {
+            let mut depth = 0;
+            while i < b.len() {
+                if b[i..].starts_with(b"/*") {
+                    depth += 1;
+                    i += 2;
+                } else if b[i..].starts_with(b"*/") {
+                    depth -= 1;
+                    i += 2;
+                    if depth == 0 {
+                        break;
+                    }
+                } else {
+                    i += 1;
+                }
+            }
+        } else {
+            return i.min(b.len());
+        }
+    }
+}
+
+/// The features `#![feature(..)]` enables, read from the source's tokens (not a comment's or a string's text)
+fn enabled_features(src: &str) -> Vec<String> {
+    let b = src.as_bytes();
+    let toks = lexer::tokenize(b);
+    let tx = |k: usize| &src[toks[k].1..toks[k].2];
+    let sym = |k: usize, c: &str| k < toks.len() && toks[k].0 == 1 && tx(k) == c;
+    let mut out = vec![];
+    for k in 0..toks.len() {
+        if !(sym(k, "#") && sym(k + 1, "!") && sym(k + 2, "[") && k + 3 < toks.len() && tx(k + 3) == "feature" && sym(k + 4, "(")) {
+            continue;
+        }
+        let mut j = k + 5;
+        while j < toks.len() && !sym(j, ")") {
+            if toks[j].0 == 0 {
+                out.push(tx(j).to_string());
+            }
+            j += 1;
+        }
+    }
+    out
 }

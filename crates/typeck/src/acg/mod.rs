@@ -300,7 +300,8 @@ fn compile_once(prog: &Program, insts: &Mutex<Insts>, id: u32, f: &ItemFn, line_
         user_code,
         raw_ref: 0,
         const_hint: None,
-        unsafe_ok: (!user_code || sig.is_unsafe || prog.closures.get(&body_id).is_some()) as u32,
+        // (a closure's body is checked too: one written inside `unsafe { }` comes wrapped in one, see synth_closure)
+        unsafe_ok: (!user_code || sig.is_unsafe) as u32,
         overflow_checks: prog.overflow_checks && (user_code || f.attrs.iter().any(|a| a.contains("rustc_inherit_overflow_checks"))),
         traps: vec![],
         line_base,
@@ -310,8 +311,12 @@ fn compile_once(prog: &Program, insts: &Mutex<Insts>, id: u32, f: &ItemFn, line_
         index_panic_block: None,
         caller_loc: matches!(
             prog.names.get(body_id as usize).map(|n| n.as_str()),
-            Some("Option::unwrap" | "Option::expect" | "Result::unwrap" | "Result::expect" | "Result::unwrap_err" | "Result::expect_err")
+            Some(
+                "Option::unwrap" | "Option::expect" | "Result::unwrap" | "Result::expect" | "Result::unwrap_err" | "Result::expect_err"
+                    | "RefCell::borrow" | "RefCell::borrow_mut"
+            )
         ) && prog.item_of.get(body_id as usize).copied().flatten().is_some_and(|i| i >= prog.prelude_from),
+        caller_locs: vec![],
         self_sid: env.self_sid,
         sret: None,
         fresh: Default::default(),
@@ -705,7 +710,7 @@ pub struct Cx<'p> {
     pub ret: Ty,
     pub is_main: bool,
     pub user_code: bool,
-    /// > 0 inside `unsafe { }`, an `unsafe fn`, or code not checked for E0133 (the prelude, closure bodies)
+    /// > 0 inside `unsafe { }`, an `unsafe fn`, or code not checked for E0133 (the prelude)
     pub unsafe_ok: u32,
     /// > 0 under `&raw const` / `&raw mut` / `addr_of!` (a raw reference to a `static mut` is safe)
     pub raw_ref: u32,
@@ -721,6 +726,9 @@ pub struct Cx<'p> {
     pub loc_used: bool,
     pub index_panic_block: Option<Block>,
     pub caller_loc: bool,
+    /// The method calls being lowered that store their location for a panic in the callee (`unwrap`, a RefCell's
+    /// `borrow`): (the method's name, line << 16 | column)
+    pub caller_locs: Vec<(String, i64)>,
     pub self_sid: Option<u32>,
     pub sret: Option<Value>,
     /// 呼び出しの戻り値を書かせた一時領域 (まだ誰も使っていない): 値渡し・let ではコピーせずにそのまま使う
@@ -861,10 +869,75 @@ pub fn is_place_expr(e: &Expr) -> bool {
 }
 
 /// `let x` / `let mut x` / `let _` のような単純な let か
+impl Cx<'_> {
+    /// (`let false = 22;` / `for 'a' in 0..3`: a bool / char literal pattern of another type is a mismatch, before any
+    /// E0005)
+    pub(crate) fn lit_pat_type_check(&self, pat: &Pat, vt: Ty) -> R<()> {
+        let lit_ty = match pat {
+            Pat::Lit(e) => match &**e {
+                Expr::Lit(t, _) if t == "true" || t == "false" => Some(Ty::Bool),
+                Expr::Lit(t, _) if t.starts_with('\'') => Some(Ty::Char),
+                _ => None,
+            },
+            _ => None,
+        };
+        if let Some(pt) = lit_ty {
+            if vt != pt && (vt.is_int() || vt.is_float() || matches!(vt, Ty::Bool | Ty::Char)) {
+                return err(SP, format!("mismatched types: expected `{}`, found `{}`", self.prog.tn(vt), self.prog.tn(pt)));
+            }
+        }
+        // (`let (false,) = (22u8,);`: a tuple's elements against its fields)
+        if let (Pat::Tuple(ps), Ty::Struct(sid)) = (pat, vt) {
+            if self.prog.is_tuple(self.prog.base_of(sid)) && !ps.iter().any(|p| matches!(p, Pat::Rest)) {
+                let fts: Vec<Ty> = self.prog.structs[sid as usize].fields.iter().map(|f| f.1).collect();
+                for (p, ft) in ps.iter().zip(fts) {
+                    self.lit_pat_type_check(p, ft)?;
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// `let None = ..` / `let MAX = ..`: an identifier pattern naming a unit variant or a constant
+    pub(crate) fn names_variant_or_const(&self, p: &Pat) -> bool {
+        let Pat::Ident(false, false, n, None) = p else { return false };
+        if !n.starts_with(|c: char| c.is_uppercase()) || self.lookup(n).is_some() {
+            return false;
+        }
+        // (a constant, not a static: module scopes are flattened away, so a static of another module (`mod config {
+        // static SIZES }`) must not turn `let SIZES = ..` in main into a pattern)
+        if let Some(&ci) = self.prog.const_index.get(n.as_str()) {
+            return self.prog.consts[ci as usize].stat.is_none();
+        }
+        let Expr::Path(None, path) = path_expr(n) else { return false };
+        self.prog.variant_by_p(&PPath::of(&path), self.self_sid).is_some()
+    }
+}
+
 pub fn is_simple_let(p: &Pat) -> bool {
     match p {
         Pat::Ident(by_ref, _, _, sub) => sub.is_none() && !*by_ref,
         Pat::Wild => true,
+        _ => false,
+    }
+}
+
+/// rustc's temporary lifetime extension by the initializer's syntax (the Reference, "Extending based on
+/// expressions"): e borrows a temporary that then lives to the end of the block, `&temp()`, also inside a tuple, an
+/// array, a cast, a braced struct, a block's tail, an if / else or a match arm (`let p: *const S = &S::new();`)
+pub fn extends_temps(e: &Expr) -> bool {
+    let tail = |b: &crate::parse::Block| match b.stmts.last() {
+        Some(Stmt::Expr(t, false)) => extends_temps(t),
+        _ => false,
+    };
+    match e {
+        Expr::Ref(..) => true,
+        Expr::Paren(x) | Expr::Cast(x, _) => extends_temps(x),
+        Expr::Tuple(xs) | Expr::Array(xs) => xs.iter().any(extends_temps),
+        Expr::Struct(_, fs, _) => fs.iter().any(|f| extends_temps(&f.1)),
+        Expr::Block(_, _, b) => tail(b),
+        Expr::If(_, t, els) => tail(t) || els.as_deref().is_some_and(extends_temps),
+        Expr::Match(_, arms) => arms.iter().any(|a| extends_temps(&a.body)),
         _ => false,
     }
 }
@@ -1473,7 +1546,8 @@ impl Cx<'_> {
             let t0 = self.temps.len();
             self.stmt_i = i;
             match st {
-                Stmt::Let(pat, ann_ty, init, els, ..) if !is_simple_let(pat) || els.is_some() => {
+                // (`let None = x;`: a unit variant or a constant, a pattern to test (E0005), not a new name)
+                Stmt::Let(pat, ann_ty, init, els, ..) if !is_simple_let(pat) || els.is_some() || self.names_variant_or_const(pat) => {
                     // 分解する let (`let S { x, y } = s;`): 反駁不能パターンとして束縛だけ行う
                     let Some(init) = init else {
                         return err(SP, "`let` without initializer is not supported");
@@ -1494,6 +1568,27 @@ impl Cx<'_> {
                         diverged = true;
                         continue;
                     };
+                    // (E0005: without `else`, the pattern must cover the value's type)
+                    if els.is_none() && self.user_code && !plainly_irrefutable(pat) {
+                        // (`let false = 22;`: the literal's type first)
+                        self.lit_pat_type_check(pat, place.ty())?;
+                        match self.coverage(&[pat], place.ty()) {
+                            Some(Some(w)) => return err(SP, format!("refutable pattern in local binding: `{w}` not covered (E0005)")),
+                            Some(None) => {}
+                            // (a pattern coverage does not model (`let [Some(x)] = xs;`): tested at run time, a trap where it
+                            // does not match, so nothing binds from a payload that is not there)
+                            None if els.is_none() => {
+                                let trap = self.b.create_block();
+                                self.pat_test(pat, place, trap)?;
+                                let cur = self.b.create_block();
+                                self.b.ins().jump(cur, &[]);
+                                self.b.switch_to_block(trap);
+                                self.b.ins().trap(TrapCode::unwrap_user(2));
+                                self.b.switch_to_block(cur);
+                            }
+                            None => {}
+                        }
+                    }
                     // `let PAT = e else { .. };`: 合わなければ else の (発散する) ブロックへ
                     // (the else block may match other scrutinees: the pattern binds from this one)
                     let scrut_saved = (self.bk.scrut.clone(), self.bk.scrut_place.clone(), self.rg.scrut.clone());
@@ -1503,6 +1598,9 @@ impl Cx<'_> {
                         let cur = self.b.create_block();
                         self.b.ins().jump(cur, &[]);
                         self.b.switch_to_block(else_blk);
+                        // (the scrutinee's temporaries are dropped before the else block, as in rustc: `let Some(x) =
+                        // c.borrow().first().copied() else { c.borrow_mut().push(1); return }` does not panic)
+                        self.drop_for_exit(usize::MAX, t0);
                         let (_, et) = self.block(else_b, Some(Ty::Never))?;
                         if et != Ty::Never {
                             return err(SP, "the `else` block of `let ... else` must diverge (return / break / panic)");
@@ -1529,7 +1627,13 @@ impl Cx<'_> {
                             }
                         }
                     }
-                    self.extend_temps(t0);
+                    // (as for a plain let: what the bindings may borrow (a `ref` binding, a reference in the value)
+                    // lives to the end of the block, the rest is dropped here: `let (n, _) = (c.borrow().len(), 0);`)
+                    if extends_temps(init) || borrowck::has_refs(self.prog, place.ty(), 0) || format!("{pat:?}").contains("Ident(true") {
+                        self.extend_temps(t0);
+                    } else {
+                        self.drop_temps(t0);
+                    }
                 }
                 Stmt::Let(Pat::Wild, ann_ty, init, None, let_at) => {
                     // `let _ = e;`: 場所ならムーブしない。値ならすぐ drop する
@@ -1760,7 +1864,15 @@ impl Cx<'_> {
                     self.bk_def_named(&name, &srcs, init);
                     self.rg_let(&name, ann_ty.as_ref(), init, rg_init);
                     self.rg.let_sp = let_sp0;
-                    self.extend_temps(t0);
+                    // (rustc drops a let initializer's temporaries at the end of the statement, unless the initializer
+                    // extends them (`let r = &f();`, `let p: *const S = &S::new();`). zustc also keeps them when the
+                    // bound value may hold a reference, which rustc rejects when it borrows a temporary (E0716) and
+                    // zustc does not see yet. A RefCell guard in `let n = *c.borrow();` must not outlive the let)
+                    if extends_temps(init) || borrowck::has_refs(self.prog, ty, 0) {
+                        self.extend_temps(t0);
+                    } else {
+                        self.drop_temps(t0);
+                    }
                 }
                 // (`;` の付いたマクロの文。末尾の `vec![]` などは式として期待型を渡す)
                 Stmt::Expr(Expr::Macro(p, g, sp), semi) if *semi => {
@@ -2232,4 +2344,16 @@ pub(crate) fn generic_args_of(prog: &Program, params: &[(crate::parse::Pat, crat
             (tp.segs.len() == 1 && tp.segs[0].args.is_empty() && rs.generics.iter().any(|g| g.0 == tp.segs[0].name)).then(|| (n.clone(), tp.segs[0].name.clone()))
         })
         .collect()
+}
+
+/// A pattern of bindings, `_` and tuples of them, which matches any value (no exhaustiveness check needed: a parameter
+/// `(_, _, ..)` of thousands of elements). A lowercase name binds; an uppercase one may be a constant or a unit variant
+pub(crate) fn plainly_irrefutable(p: &Pat) -> bool {
+    match p {
+        Pat::Wild | Pat::Rest => true,
+        Pat::Ident(_, _, n, sub) => n.starts_with(|c: char| c.is_lowercase() || c == '_') && sub.as_deref().is_none_or(plainly_irrefutable),
+        Pat::Tuple(ps) => ps.iter().all(plainly_irrefutable),
+        Pat::Ref(_, i) => plainly_irrefutable(i),
+        _ => false,
+    }
 }

@@ -65,6 +65,43 @@ impl Cx<'_> {
         }
     }
 
+    /// A struct of the program in t that does not implement tr (PartialEq / PartialOrd), the type of a comparison's
+    /// operands: itself, the elements of an array / slice / tuple, behind references. A prelude type or a generic
+    /// struct's instance is left to the impls it has
+    fn lacks_cmp(&self, t: Ty, tr: &str, depth: u32) -> bool {
+        if depth > 8 {
+            return false;
+        }
+        match t {
+            // (`impl PartialEq for &X`: the reference's own impl, before its target's)
+            Ty::Ref(_, i) => {
+                let own = self.prog.ref_impls.contains(&(t, tr.to_string()))
+                    || self.prog.ref_impl_pats.iter().any(|(pt, ptr, n)| ptr == tr && self.prog.match_ty(*pt, t, &mut vec![None; *n]));
+                !own && self.lacks_cmp(*i, tr, depth + 1)
+            }
+            Ty::Array(i, _) | Ty::Slice(i) => self.lacks_cmp(*i, tr, depth + 1),
+            Ty::Struct(sid) => {
+                let b = self.prog.base_of(sid);
+                if self.prog.is_tuple(b) {
+                    return self.prog.structs[sid as usize].fields.iter().any(|f| self.lacks_cmp(f.1, tr, depth + 1));
+                }
+                let user = self.prog.struct_item.get(b as usize).is_some_and(|&i| i < self.prog.prelude_from);
+                // (`impl PartialEq<i32> for S`: an impl for another right-hand side counts, looked for only when the
+                // plain one is missing)
+                // (an impl of the trait (derived or written), not an inherent `eq` / `partial_cmp`, which
+                // Program::implements also counts)
+                user && b == sid && !self.prog.impls.contains(&(b, tr.to_string())) && !self.prog.blanket_traits.contains(tr)
+                    && !{
+                        // (`impl PartialEq<i32> for S`: the functions `S::<PartialEq<i32>>::eq`, which `==` picks directly)
+                        let fs = if tr == "PartialEq" { &self.prog.peq } else { &self.prog.pord };
+                        let n = &self.prog.structs[b as usize].name;
+                        fs.iter().any(|&f| self.prog.names[f as usize].strip_prefix(n.as_str()).is_some_and(|r| r.starts_with("::<")))
+                    }
+            }
+            _ => false,
+        }
+    }
+
     /// `a op b` (Expr::Binary) と複合代入 `a op= b` (Expr::AssignOp)
     pub(crate) fn binary(&mut self, e: &Expr, expected: Option<Ty>) -> R<V> {
         let (op, left, right, assign) = match e {
@@ -160,6 +197,17 @@ impl Cx<'_> {
                 let ne = self.keep_expr(ne);
                 return self.expr(ne, expected);
             }
+            // (`&a == &b` with `impl PartialEq for &X`: that impl's eq, `(&a).eq(&&b)`, not X's fields)
+            // (only PartialEq's `eq` for `&X` (another trait's `eq` gets the same name), and both sides `&X`)
+            let peq_ref = self.prog.method(*sid, "__ref_eq").is_some_and(|id| {
+                self.prog.sigs[id as usize].impl_trait.as_deref().is_some_and(|t| t == "PartialEq" || t.starts_with("PartialEq<"))
+            });
+            if matches!(op, "==" | "!=") && !assign && peq_ref && self.peek(right) == self.peek(left) {
+                let call = mcall(paren(left), "eq", vec![Expr::Ref(false, Box::new(paren(right)))]);
+                let ne = if op == "!=" { Expr::Unary("!".into(), Box::new(Expr::Paren(Box::new(call))), Default::default()) } else { call };
+                let ne = self.keep_expr(ne);
+                return self.expr(ne, expected);
+            }
         }
         // 複合代入 a op= b
         let compound = match op {
@@ -209,10 +257,10 @@ impl Cx<'_> {
                 return Ok((None, Ty::Never));
             };
             let (l, _) = self.read(p);
-            // `acc += x` (x: &i32): 整数への参照は値にする (core の `AddAssign<&i32>` 相当)
+            // `acc += x` (x: &i32 / &f32): 数への参照は値にする (core の `AddAssign<&i32>` 相当)
             let mut rt = rt;
             while let Ty::Ref(_, i) = rt {
-                if !(i.is_int() || matches!(i, Ty::Ref(..))) || rt.is_fat() {
+                if !(i.is_int() || i.is_float() || matches!(i, Ty::Ref(..))) || rt.is_fat() {
                     break;
                 }
                 r = self.b.ins().load(clif_ty(*i).unwrap_or(PTR), mf(), r, 0);
@@ -243,9 +291,21 @@ impl Cx<'_> {
         };
         let hint = deref_num(hint);
         let (l, lt) = self.operand(left, hint, cmp)?;
-        let Some(l) = l else {
+        let Some(mut l) = l else {
             return Ok((None, Ty::Never));
         };
+        // (E0369: `X == X` for a struct of the program that is not PartialEq (`<` and the others: PartialOrd), also as an
+        // element of an array, a slice, a tuple or behind a reference)
+        if cmp && !assign && self.user_code && !lt.is_int() && self.lacks_cmp(lt, if op == "==" || op == "!=" { "PartialEq" } else { "PartialOrd" }, 0) {
+            let pos = if let Expr::Binary(_, _, _, sp) = e { sp.start } else { SP };
+            return err(pos, format!("binary operation `{op}` cannot be applied to type `{}` (E0369)", self.prog.tn(lt)));
+        }
+        // (a fat raw pointer's pair, copied before the right side runs: `p == { p = q; p }` compares the old p)
+        if lt.is_fat() && matches!(lt, Ty::Ptr(..)) {
+            let tmp = self.temp(lt);
+            self.copy(tmp, l, lt);
+            l = tmp;
+        }
         let rhint = if is_shift { self.peek(right) } else { deref_num(Some(lt)) };
         // (`v < (1, 5)` / `v == 2`: 右辺がリテラルなら、左の型の `PartialOrd<R>` / `PartialEq<R>` の R を期待型にする)
         let rhint = match op {
@@ -332,6 +392,40 @@ impl Cx<'_> {
                     rt = ft;
                 }
             }
+        }
+        // (fat raw pointers `*const [T]` / `*const dyn Tr`: their values, the data word then the metadata word, not the
+        // addresses of the pairs that hold them)
+        if lt.is_fat() && matches!(lt, Ty::Ptr(..)) && lt == rt && is_cmp(op) {
+            // (pointers cannot be compared in a `const fn`, as below for thin ones)
+            if self.user_code && self.prog.names.get(self.root as usize).is_some_and(|n| self.prog.const_fns.contains_key(n)) {
+                let pos = if let Expr::Binary(_, _, _, sp) = e { sp.start } else { SP };
+                return err(pos, "pointers cannot be reliably compared during const eval");
+            }
+            let (pa, pb) = (self.b.ins().load(PTR, mf(), l, 0), self.b.ins().load(PTR, mf(), r, 0));
+            let (ma, mb) = (self.b.ins().load(PTR, mf(), l, 8), self.b.ins().load(PTR, mf(), r, 8));
+            let v = match op {
+                "==" | "!=" => {
+                    let cc = if op == "==" { IntCC::Equal } else { IntCC::NotEqual };
+                    let d = self.b.ins().icmp(cc, pa, pb);
+                    let m = self.b.ins().icmp(cc, ma, mb);
+                    if op == "==" { self.b.ins().band(d, m) } else { self.b.ins().bor(d, m) }
+                }
+                _ => {
+                    let (strict, eq_ok) = match op {
+                        "<" => (IntCC::UnsignedLessThan, IntCC::UnsignedLessThan),
+                        "<=" => (IntCC::UnsignedLessThan, IntCC::UnsignedLessThanOrEqual),
+                        ">" => (IntCC::UnsignedGreaterThan, IntCC::UnsignedGreaterThan),
+                        _ => (IntCC::UnsignedGreaterThan, IntCC::UnsignedGreaterThanOrEqual),
+                    };
+                    // (data words differ: their order; equal: the metadata's)
+                    let d_ord = self.b.ins().icmp(strict, pa, pb);
+                    let d_eq = self.b.ins().icmp(IntCC::Equal, pa, pb);
+                    let m_ord = self.b.ins().icmp(eq_ok, ma, mb);
+                    let tie = self.b.ins().band(d_eq, m_ord);
+                    self.b.ins().bor(d_ord, tie)
+                }
+            };
+            return Ok((Some(v), Ty::Bool));
         }
         // 型の違う `<` / `<=` / `>` / `>=`: `impl PartialOrd<R> for S` の partial_cmp (None ならどれも false)
         if matches!(op, "<" | "<=" | ">" | ">=") && lt != rt {
@@ -652,6 +746,14 @@ impl Cx<'_> {
         let one = |this: &mut Self| this.b.ins().iconst(types::I8, 1);
         match t {
             Ty::Unit => Ok(one(self)),
+            // (a fat raw pointer: its data word and its metadata word)
+            t if t.is_fat() && matches!(t, Ty::Ptr(..)) => {
+                let (pa, pb) = (self.b.ins().load(PTR, mf(), a, 0), self.b.ins().load(PTR, mf(), b, 0));
+                let (ma, mb) = (self.b.ins().load(PTR, mf(), a, 8), self.b.ins().load(PTR, mf(), b, 8));
+                let d = self.b.ins().icmp(IntCC::Equal, pa, pb);
+                let m = self.b.ins().icmp(IntCC::Equal, ma, mb);
+                Ok(self.b.ins().band(d, m))
+            }
             t if t.is_int() || matches!(t, Ty::Bool | Ty::Char | Ty::Ptr(..)) => Ok(self.b.ins().icmp(IntCC::Equal, a, b)),
             t if t.is_float() => Ok(self.b.ins().fcmp(FloatCC::Equal, a, b)),
             // `&str` / `&[T]`: 長さと中身で比べる
@@ -1344,6 +1446,8 @@ impl Cx<'_> {
         // (`g[i]` (g: MutexGuard<Vec<T>> など): `(*g)[i]`)
         if let Some(d) = self.user_deref(e) {
             let d = self.keep_expr(d);
+            // (a read through `deref_mut` (a RefMut's) borrows the guard shared, as `*g` does: `let g = ..; g[0]`)
+            self.deref_shared(d);
             return self.indexable(d);
         }
         // (-O: ループの前で読んでおいたもの)
@@ -1572,7 +1676,12 @@ impl Cx<'_> {
 
     pub(crate) fn repeat_lit(&mut self, e: &Expr, expected: Option<Ty>) -> R<V> {
         let Expr::Repeat(x, len) = e else { unreachable!() };
-        let n = self.array_len(len)?;
+        // (`[0; _]`: the length the expected array type has)
+        let infer = matches!(strip_paren(len), Expr::Path(None, p) if p.segs.len() == 1 && p.segs[0].name == "_");
+        let n = match (infer, expected) {
+            (true, Some(Ty::Array(_, n))) if n < crate::types::CONST_LEN_BASE => n,
+            _ => self.array_len(len)?,
+        };
         let exp = match expected {
             Some(Ty::Array(t, _)) => Some(*t),
             _ => None,

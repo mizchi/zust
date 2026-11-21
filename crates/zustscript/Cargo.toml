@@ -1,0 +1,13 @@
+[package]
+name = "zustscript"
+version = "0.0.1"
+edition = "2024"
+license = "MIT OR Apache-2.0"
+description = "Prototype: a frontend language whose JS layer compiles to readable JS + .d.ts + JSX, and whose `wasm fn`s are compiled by zustc with generated JS glue"
+
+# (a standalone crate: not a member of zust's workspace, so it does not affect zust's builds or KPIs)
+[workspace]
+
+[[bin]]
+name = "zsc"
+path = "src/main.rs"

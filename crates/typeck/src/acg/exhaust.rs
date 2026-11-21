@@ -120,17 +120,27 @@ impl Cx<'_> {
 
     /// Some(witness) when the arms (those without a guard) do not cover `ty`
     pub(crate) fn non_exhaustive(&self, arms: &[crate::parse::Arm], ty: Ty) -> Option<String> {
+        let pats: Vec<&crate::parse::Pat> = arms.iter().filter(|a| a.guard.is_none()).map(|a| &a.pat).collect();
+        self.non_exhaustive_pats(&pats, ty)
+    }
+
+    /// Some(witness) when the patterns do not cover `ty` (a `let` pattern that is refutable, E0005)
+    pub(crate) fn non_exhaustive_pats(&self, pats: &[&crate::parse::Pat], ty: Ty) -> Option<String> {
+        self.coverage(pats, ty).flatten()
+    }
+
+    /// Some(Some(witness)): not covered; Some(None): covered; None: a pattern the algorithm does not model (a slice
+    /// pattern, ..), where the caller must test at run time instead
+    pub(crate) fn coverage(&self, pats: &[&crate::parse::Pat], ty: Ty) -> Option<Option<String>> {
         let mut rows = vec![];
-        for a in arms {
-            if a.guard.is_some() {
-                continue;
-            }
-            rows.push(vec![self.norm(&a.pat, ty, 0).ok()?]);
+        for p in pats {
+            rows.push(vec![self.norm(p, ty, 0).ok()?]);
         }
         let mut work = 0;
         match self.useful(&rows, &[ty], &mut work) {
-            Ok(Some(w)) => Some(w.into_iter().next().unwrap_or_else(|| "_".into())),
-            _ => None,
+            Ok(Some(w)) => Some(Some(w.into_iter().next().unwrap_or_else(|| "_".into()))),
+            Ok(None) => Some(None),
+            Err(_) => None,
         }
     }
 
@@ -147,6 +157,9 @@ impl Cx<'_> {
         match Self::strip_ref(t) {
             Ty::Bool => Some(vec![("false".into(), vec![]), ("true".into(), vec![])]),
             Ty::Unit => Some(vec![("()".into(), vec![])]),
+            // (an array of a known, small length: one constructor with an element per field, as a tuple; a slice's
+            // length varies and is not modelled)
+            Ty::Array(e, n) if n <= 64 => Some(vec![("[]".into(), vec![*e; n as usize])]),
             Ty::Struct(sid) => {
                 let sd = &self.prog.structs[sid as usize];
                 if sd.symbolic {
@@ -276,6 +289,12 @@ impl Cx<'_> {
                     _ => return Err(Unknown),
                 }
             }
+            // (`[a, b]` / `[first, .., last]` / `[x, rest @ ..]` against an array: its elements, positionally)
+            Pat::Slice(v) if matches!(t0, Ty::Array(_, n) if n <= 64) => {
+                let Some(cs) = self.ctors(t0) else { return Err(Unknown) };
+                let v: Vec<Pat> = v.iter().map(|q| if matches!(q, Pat::Ident(_, _, _, Some(sub)) if matches!(**sub, Pat::Rest)) { Pat::Rest } else { q.clone() }).collect();
+                self.fields_positional(&v, &cs[0].1, 0, depth)?
+            }
             // (ranges, slices, macros: not modelled)
             _ => return Err(Unknown),
         })
@@ -399,6 +418,9 @@ fn specialize(r: &[N], c: usize, n: usize) -> Option<Vec<N>> {
 }
 
 fn show(name: &str, args: &[String], tuple: bool) -> String {
+    if name == "[]" {
+        return format!("[{}]", args.join(", "));
+    }
     if args.is_empty() {
         return if tuple { "()".into() } else { name.to_string() };
     }

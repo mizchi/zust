@@ -327,7 +327,7 @@ pub fn is_copy(prog: &Program, t: Ty, depth: u32) -> bool {
 
 /// The prelude's iterator and view types: raw pointers into what they were made from, so they hold the loan of it
 const VIEWS: &[&str] = &[
-    "Windows", "Chunks", "ChunksExact", "Iter", "IterMut", "Chars", "DebugStruct", "DebugTuple", "DebugMap", "MutexGuard", "HmIter",
+    "Windows", "Chunks", "ChunksExact", "Iter", "IterMut", "Chars", "DebugStruct", "DebugTuple", "DebugMap", "MutexGuard", "Ref", "RefMut", "HmIter",
     "HmIterMut", "BtIter", "BtIterMut", "DqIter", "Split", "SplitStr", "MatchIndices", "RSplitStr", "CharIndices", "Bytes", "SplitFn",
 ];
 
@@ -1640,10 +1640,15 @@ impl Cx<'_> {
     pub(crate) fn bk_ret_from(&self, id: u32, i: usize) -> bool {
         let sig = &self.prog.sigs[id as usize];
         // (a method of a prelude view (`chunks.remainder()`): the result borrows what the view borrows, which the view's
-        // local passes on, not the view)
+        // local passes on, not the view. Not a RefCell guard's `deref` / `deref_mut`: `&mut *g` and `&g[0]` borrow the
+        // guard g, which must outlive them. A MutexGuard is left out: here `if let Some(&r) = guard.get(&k) { return r }`
+        // (tests/probe/modules_intern.rs) would count r, a `&'static` copied out, as a borrow of the guard, as the
+        // prelude has no lifetimes to tell; and `&g[0]` through it borrows the guard already
+        // (tests/security/borrow_mutex_guard_deref_outlives.rs))
         if i == 0 && sig.has_self {
             if let Some(Ty::Ref(_, Ty::Struct(v))) = sig.params.first() {
-                if is_view(self.prog, *v) {
+                let guard = matches!(self.prog.structs[self.prog.base_of(*v) as usize].name.as_str(), "Ref" | "RefMut");
+                if is_view(self.prog, *v) && !guard {
                     return false;
                 }
             }
@@ -1656,8 +1661,8 @@ impl Cx<'_> {
         if i == 0 && sig.has_self && matches!(sig.params.first(), Some(Ty::Ref(..))) {
             let mut r = sig.ret;
             if let Ty::Struct(o) = r {
-                // (`Option<Iter<T>>` ..)
-                if self.prog.structs[o as usize].args.len() == 1 && !is_view(self.prog, o) {
+                // (`Option<Iter<T>>`, `Result<MutexGuard<T>, E>` (`m.lock()`) ..)
+                if !self.prog.structs[o as usize].args.is_empty() && !is_view(self.prog, o) {
                     r = self.prog.structs[o as usize].args[0];
                 }
             }

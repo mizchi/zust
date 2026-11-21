@@ -20,13 +20,16 @@
 
 > **Status**: experimental.
 >
-> - zustc only targets Linux x86-64 and does not support all of Rust ([supported language](docs/language.md)).
+> - zustc targets Linux x86-64 and does not support all of Rust ([supported language](docs/language.md)).
+>   `--target wasm32-unknown-unknown` writes a wasm module (experimental: [tests/wasm/README.md](tests/wasm/README.md)).
+> - Security regression tests from past Rust CVEs and soundness bugs: [tests/security/README.md](tests/security/README.md).
+>   What zustc does not catch yet, and what else is left: [TODO.md](TODO.md).
 > - zustc's checks (types, borrow checking, region errors against signatures) are partial, so it is not a replacement for rustc for checking correctness.
 > - zust-analyzer implements only part of what rust-analyzer does.
 
 ## Status
 
-Numbers measured <!-- measured -->2026-11-21, d5eaaae<!-- /measured --> by CI on each push to main (bench.yml runs
+Numbers measured <!-- measured -->2026-11-21, 68b7497<!-- /measured --> by CI on each push to main (bench.yml runs
 `bench/ci_bench.py` and `bench/rust_ui.py`, then `scripts/update_readme.py` writes them here). Times come from shared
 GitHub Actions runners and vary by about ±20%; the instruction counts (valgrind) do not.
 
@@ -38,10 +41,10 @@ only the tests it can be asked to handle (no nightly features, auxiliary crates 
 <!-- auto:ui -->
 | kind | applicable | pass |
 |---|---:|---:|
-| run-pass (builds, runs, same output) | 2385 | 1784 (74.8%) |
-| check-pass (accepted by `zustc check`) | 1807 | 1461 (80.9%) |
+| run-pass (builds, runs, same output) | 2385 | 1800 (75.5%) |
+| check-pass (accepted by `zustc check`) | 1807 | 1475 (81.6%) |
 | build-pass | 135 | 98 (72.6%) |
-| compile-fail (rejected at an annotated line) | 7358 | 3694 (50.2%) |
+| compile-fail (rejected at an annotated line) | 7358 | 3818 (51.9%) |
 <!-- /auto:ui -->
 
 [What is supported](#what-is-supported) breaks this down by area.
@@ -53,22 +56,22 @@ Build speed, build cache size and LSP latency on generated programs of 1000 / 50
 <!-- auto:kpi -->
 | KPI | gen1000 | gen5000 |
 |---|---:|---:|
-| cold build | 122 ms | 547 ms |
-| no-op build | 0.9 ms | 0.8 ms |
-| build after editing one function | 20.5 ms | 67.8 ms |
-| `check` | 93 ms | 459 ms |
-| no-op build (instructions) | 0.5 M | 0.6 M |
-| edit one function (instructions) | 124.5 M | 589.8 M |
-| `check` (instructions) | 778.7 M | 3843.5 M |
+| cold build | 122 ms | 544 ms |
+| no-op build | 0.6 ms | 0.7 ms |
+| build after editing one function | 16.4 ms | 63.6 ms |
+| `check` | 75 ms | 379 ms |
+| no-op build (instructions) | 0.6 M | 0.6 M |
+| edit one function (instructions) | 124.4 M | 589.7 M |
+| `check` (instructions) | 780.7 M | 3853.3 M |
 | build cache on disk | 387.2 KiB | 1902.8 KiB |
 | binary | 324.0 KiB | 1558.3 KiB |
-| cold build peak RSS | 18.1 MiB | 51.9 MiB |
+| cold build peak RSS | 18.6 MiB | 52.5 MiB |
 
 | zust-analyzer (zustc's own sources) | |
 |---|---:|
-| p50: definition, hover, completion, references, rename | 0.64 ms / 0.45 ms / 0.94 ms / 2.45 ms / 0.49 ms |
-| startup until indexed | 126 ms |
-| peak RSS | 78.3 MiB |
+| p50: definition, hover, completion, references, rename | 0.45 ms / 0.37 ms / 0.99 ms / 2.44 ms / 0.50 ms |
+| startup until indexed | 142 ms |
+| peak RSS | 81.0 MiB |
 <!-- /auto:kpi -->
 
 Every change is also measured on its own with `python3 bench/kpi_track.py`, so that small increases that add up stay
@@ -347,16 +350,16 @@ the measured numbers. The [reports](docs/reports/) explain each step.
 
 ### Overall
 
-- [x] tests/ui run-pass: <!-- total:run-pass -->74.8% (1784 / 2385)
-- [x] tests/ui check-pass: <!-- total:check-pass -->80.9% (1461 / 1807)
+- [x] tests/ui run-pass: <!-- total:run-pass -->75.5% (1800 / 2385)
+- [x] tests/ui check-pass: <!-- total:check-pass -->81.6% (1475 / 1807)
 - [x] tests/ui build-pass: <!-- total:build-pass -->72.6% (98 / 135)
-- [ ] tests/ui compile-fail (an error on an annotated line): <!-- total:compile-fail -->50.2% (3694 / 7358)
+- [ ] tests/ui compile-fail (an error on an annotated line): <!-- total:compile-fail -->51.9% (3818 / 7358)
 - [x] real crates: fnv, adler2, hex, itoa, rustc-hash and cfg-if build and give the same output (6 / 6)
 - [x] zust-analyzer answers like rust-analyzer: 95.4% (rust-analyzer: 96.2%)
 
 ### Language
 
-- [x] numbers, arithmetic, overflow checks: <!-- ui:numbers-arithmetic -->96.6%
+- [x] numbers, arithmetic, overflow checks: <!-- ui:numbers-arithmetic -->100.0%
 - [x] `for` / `while` / `loop`, labels: <!-- ui:for-loop-while,loops,label -->96.7%
 - [x] enums, `#[repr(u8)]`, auto-sized tags: <!-- ui:enum,enum-discriminant -->85.7%
 - [x] `cfg`: <!-- ui:cfg -->93.8%
@@ -373,18 +376,18 @@ the measured numbers. The [reports](docs/reports/) explain each step.
 - [x] parser: <!-- ui:parser -->89.9%
 - [x] closures (capture, `Fn` traits, `move`; with no captures also as fn pointers): <!-- ui:closures,unboxed-closures,functions-closures -->78.6%
 - [x] derives: `Debug`, `Clone`, `Copy`, `PartialEq`/`Eq`, `PartialOrd`/`Ord`, `Hash`, `Default`: <!-- ui:derives,deriving -->86.4%
-- [x] imports, `use`: <!-- ui:imports -->84.1%
-- [x] associated types: <!-- ui:associated-types -->77.6%
+- [x] imports, `use`: <!-- ui:imports -->86.4%
+- [x] associated types: <!-- ui:associated-types -->78.3%
 - [x] generics: <!-- ui:generics -->78.6% (an integer literal for `T: Foo` takes the one integer type that implements Foo; a type
   parameter known only from the expected type is not inferred)
 - [ ] consts: <!-- ui:consts -->76.6% (no heap values, no generic `const fn`; a const of a generic impl (`const C: Option<T> = None`) takes its type at each use)
 - [ ] drop: <!-- ui:drop -->65.2% (the drop order of some temporaries differs)
-- [ ] traits: <!-- ui:traits -->70.1% (generic traits, blanket impls, `dyn` (also `dyn Tr<A>`), `impl .. for dyn Tr` work; `impl<T> Tr for &T` only without functions; no coherence)
-- [ ] `macro_rules!`: <!-- ui:macros -->74.3% (hygiene for `let`, labels, arm bindings; not every fragment kind)
+- [ ] traits: <!-- ui:traits -->70.5% (generic traits, blanket impls, `dyn` (also `dyn Tr<A>`), `impl .. for dyn Tr` work; `impl<T> Tr for &T` only without functions; no coherence)
+- [ ] `macro_rules!`: <!-- ui:macros -->76.4% (hygiene for `let`, labels, arm bindings; not every fragment kind)
 - [ ] unions: <!-- ui:union -->69.2% (no `repr(packed)`)
-- [ ] const generics: <!-- ui:const-generics -->56.4% (no `generic_const_exprs`)
+- [ ] const generics: <!-- ui:const-generics -->58.4% (no `generic_const_exprs`)
 - [ ] generic associated types: <!-- ui:generic-associated-types -->71.1%
-- [ ] casts (`as _` / `as *const _` take the source or expected type; a pointer of unknown kind is E0641): <!-- ui:cast -->62.1%
+- [ ] casts (`as _` / `as *const _` take the source or expected type; a pointer of unknown kind is E0641): <!-- ui:cast -->72.4%
 - [ ] `impl Trait`: <!-- ui:impl-trait -->70.3% (return position, also nested (`-> Option<impl Debug>`), in trait methods and generic fns (typed per instance); no TAIT)
 - [ ] layout: `repr(packed)` / `repr(align)` are ignored: <!-- ui:packed,layout -->58.1%
 
@@ -392,7 +395,7 @@ the measured numbers. The [reports](docs/reports/) explain each step.
 
 - [x] borrow checking: moves, conflicting loans, escapes, mutability: borrowck <!-- cf:borrowck -->59.3%
   ([report 08](docs/reports/2026-11-18-08-borrow-checking.md))
-- [x] type errors, missing items, generics declarations (E0403, E0207, E0392, E0072 ..): typeck <!-- cf:typeck -->67.7%, structs <!-- cf:structs -->75.0%
+- [x] type errors, missing items, generics declarations (E0403, E0207, E0392, E0072 ..): typeck <!-- cf:typeck -->69.3%, structs <!-- cf:structs -->77.1%
 - [x] unsafe operations outside `unsafe` (E0133): calls to `unsafe fn` and extern fns, raw pointer derefs, `static mut`,
   union field reads (not yet inside closures or consts, and not the `unsafe_op_in_unsafe_fn` lint)
 - [x] non-exhaustive `match` (E0004): bool, unit, enums (variants that cannot have a value need no arm), structs and
@@ -419,7 +422,7 @@ the measured numbers. The [reports](docs/reports/) explain each step.
   `BTreeMap`/`BTreeSet`, `VecDeque`, `BinaryHeap`, `Rc`/`Arc`, `Cell`/`RefCell`, `Mutex`, `OnceLock`, `ManuallyDrop`,
   `Duration`, `AtomicPtr`, `RangeTo` / `RangeFull` as types, `Fuse`, `iter::Empty`, `NonNull`, `Pin` (a plain pointer: `Pin::new`, `get_mut`, `into_inner`, deref), `std::task` (`Poll`, `Context`, `Waker::noop`) and the `Future` trait for futures implemented and polled by hand, `UnsafeCell`, `PhantomData`, atomics, `mpsc`, `mem::*`, `ptr::{read, write, drop_in_place, null}`,
   `iter::{repeat, once, empty, repeat_with, successors}`, `reverse` / `fill` / `rotate_left` / `rotate_right` on arrays and slices, formatting, stdin/stdout/fs/env/process basics
-- [ ] async / await: <!-- ui:async-await -->76.7%. It runs at once, with no executor (no `poll`, `Waker`, `Pin<Box<dyn Future>>`)
+- [ ] async / await: <!-- ui:async-await -->77.7%. It runs at once, with no executor (no `poll`, `Waker`, `Pin<Box<dyn Future>>`)
 - [ ] threads: <!-- ui:threads-sendsync -->70.2%. Green threads on one OS thread: each spawned thread has its own stack and runs until it waits (`join`, `recv`, a held `Mutex`, `sleep`, `yield_now`, an atomic `load`); no parallelism
 - [ ] iterators: <!-- ui:iterators -->47.1% (`iter::empty()` cannot infer its item from the target)
 - [ ] FFI: <!-- ui:abi -->78.6%. Scalars only, no structs by value
@@ -445,9 +448,9 @@ the measured numbers. The [reports](docs/reports/) explain each step.
 - [x] region checking against signatures: measured against cd5dccd (instructions): check +0.14%, edit one fn +0.28%,
   traits check +0.36%, patterns check +0.91% (the region check itself ~0.5%), LSP session +0.06%, no-op and cache unchanged.
   Part 2 (closures, trait objects, well-formedness) against 18e598d: patterns check +0.5%, traits check +0.2%,
-  check +0.08%, LSP ±0 ([report](docs/reports/2026-11-21-01-region-check-2.md)). Part 3 (closures, loans that outlive
+  check +0.08%, LSP ±0 ([report](docs/reports/2026-11-21-03-region-check-2.md)). Part 3 (closures, loans that outlive
   the fn, lints): patterns check +0.65%, traits check +0.23%, check +0.13% in all
-  ([report](docs/reports/2026-11-21-02-region-check-3.md))
+  ([report](docs/reports/2026-11-21-04-region-check-3.md))
 - [ ] coherence and bounds of blanket impls: `check` time, LSP
 - [ ] real async (state machines, `poll`, an executor): build time, binary size
 - [ ] unwinding (landing pads): build time, binary size

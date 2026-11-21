@@ -1,0 +1,33 @@
+// @simd: array kernels vectorized with wasm's v128 (f64x2: two lanes, i32x4: four). The same source runs as JS
+// (zsc --all-js) or through zustc without vectors (zsc --no-simd).
+
+@simd pub fn dot(a: Array<f64>, b: Array<f64>) -> f64 {
+  range(0, a.len()).fold(0.0, (s, i) => s + a[i] * b[i])
+}
+
+@simd pub fn sum(xs: Array<f64>) -> f64 {
+  xs.fold(0.0, (acc, x) => acc + x)
+}
+
+// elementwise (the same results as JS, bit for bit)
+@simd pub fn axpy(k: f64, xs: Array<f64>, ys: Array<f64>) -> Array<f64> {
+  range(0, xs.len()).map((i) => k * xs[i] + ys[i])
+}
+
+@simd pub fn norms(xs: Array<f64>, ys: Array<f64>) -> Array<f64> {
+  range(0, xs.len()).map((i) => (xs[i] * xs[i] + ys[i] * ys[i]).sqrt())
+}
+
+@simd pub fn affine(xs: Array<f64>, scale: f64, shift: f64) -> Array<f64> {
+  let s2 = scale * 2.0;
+  xs.map((x) => (x - shift).abs() * s2)
+}
+
+// i32: four lanes; wrapping adds and multiplies, so a sum is exact in any order
+@simd pub fn isum(xs: Array<i32>) -> i32 {
+  xs.fold(0, (acc, x) => acc + x)
+}
+
+@simd pub fn imix(xs: Array<i32>, ys: Array<i32>, k: i32) -> Array<i32> {
+  range(0, xs.len()).map((i) => xs[i] * k - ys[i] + 7)
+}

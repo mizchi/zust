@@ -1,0 +1,1 @@
+4:13: binary operation `==` cannot be applied to type `[X; 2]` (E0369)

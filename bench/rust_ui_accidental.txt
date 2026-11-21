@@ -59,4 +59,9 @@ compile-fail	borrowck/moved-value-in-thread-loop-12041.rs
 compile-fail	suggestions/dont-suggest-ref/move-into-closure.rs
 compile-fail	consts/issue-16538.rs
 compile-fail	parser/issues/issue-87217-keyword-order/wrong-pub-const-unsafe-abi.rs
+compile-fail	match/expr_before_ident_pat.rs
+compile-fail	typeck/issue-88643.rs
+compile-fail	nll/issue-54302-cases.rs
+compile-fail	nll/user-annotations/method-ufcs-2.rs
+compile-fail	coercion/unsize-lifetime-shrinking.rs
 compile-fail	generics/issue-65285-incorrect-explicit-lifetime-name-needed.rs
