@@ -75,7 +75,13 @@ impl Cx<'_> {
             },
             _ => None,
         };
-        // (a const parameter of the function shadows the program's constants and the predicates: resolved below)
+        // (a const parameter of the function shadows the program's constants and the predicates: resolved below. A type
+        // parameter is not a constant, also in braces: `::<{ T }>` with `T = [(); 1]`)
+        if let Some(n) = &one {
+            if self.env.params.iter().any(|p| &p.0 == n) && !self.const_param(n) {
+                return err(SP, format!("`{name}`: const argument {} is not a constant", k + 1));
+            }
+        }
         let one = one.filter(|n| !self.env.params.iter().any(|p| &p.0 == n));
         if let Some(n) = &one {
             if self.prog.const_index.contains_key(n) {
