@@ -26,7 +26,7 @@
 
 ## Status
 
-Numbers measured <!-- measured -->2026-11-21, d5eaaae<!-- /measured --> by CI on each push to main (bench.yml runs
+Numbers measured <!-- measured -->2026-11-21, c14c905<!-- /measured --> by CI on each push to main (bench.yml runs
 `bench/ci_bench.py` and `bench/rust_ui.py`, then `scripts/update_readme.py` writes them here). Times come from shared
 GitHub Actions runners and vary by about ±20%; the instruction counts (valgrind) do not.
 
@@ -38,10 +38,10 @@ only the tests it can be asked to handle (no nightly features, auxiliary crates 
 <!-- auto:ui -->
 | kind | applicable | pass |
 |---|---:|---:|
-| run-pass (builds, runs, same output) | 2385 | 1784 (74.8%) |
-| check-pass (accepted by `zustc check`) | 1807 | 1461 (80.9%) |
+| run-pass (builds, runs, same output) | 2385 | 1789 (75.0%) |
+| check-pass (accepted by `zustc check`) | 1807 | 1466 (81.1%) |
 | build-pass | 135 | 98 (72.6%) |
-| compile-fail (rejected at an annotated line) | 7358 | 3694 (50.2%) |
+| compile-fail (rejected at an annotated line) | 7358 | 3696 (50.2%) |
 <!-- /auto:ui -->
 
 [What is supported](#what-is-supported) breaks this down by area.
@@ -53,22 +53,22 @@ Build speed, build cache size and LSP latency on generated programs of 1000 / 50
 <!-- auto:kpi -->
 | KPI | gen1000 | gen5000 |
 |---|---:|---:|
-| cold build | 122 ms | 547 ms |
-| no-op build | 0.9 ms | 0.8 ms |
-| build after editing one function | 20.5 ms | 67.8 ms |
-| `check` | 93 ms | 459 ms |
-| no-op build (instructions) | 0.5 M | 0.6 M |
-| edit one function (instructions) | 124.5 M | 589.8 M |
-| `check` (instructions) | 778.7 M | 3843.5 M |
+| cold build | 116 ms | 535 ms |
+| no-op build | 0.6 ms | 0.7 ms |
+| build after editing one function | 16.2 ms | 61.7 ms |
+| `check` | 74 ms | 371 ms |
+| no-op build (instructions) | 0.5 M | 0.5 M |
+| edit one function (instructions) | 124.8 M | 590.0 M |
+| `check` (instructions) | 778.7 M | 3843.4 M |
 | build cache on disk | 387.2 KiB | 1902.8 KiB |
 | binary | 324.0 KiB | 1558.3 KiB |
-| cold build peak RSS | 18.1 MiB | 51.9 MiB |
+| cold build peak RSS | 18.2 MiB | 52.0 MiB |
 
 | zust-analyzer (zustc's own sources) | |
 |---|---:|
-| p50: definition, hover, completion, references, rename | 0.64 ms / 0.45 ms / 0.94 ms / 2.45 ms / 0.49 ms |
-| startup until indexed | 126 ms |
-| peak RSS | 78.3 MiB |
+| p50: definition, hover, completion, references, rename | 0.48 ms / 0.40 ms / 1.09 ms / 2.90 ms / 0.40 ms |
+| startup until indexed | 127 ms |
+| peak RSS | 78.4 MiB |
 <!-- /auto:kpi -->
 
 Every change is also measured on its own with `python3 bench/kpi_track.py`, so that small increases that add up stay
@@ -347,10 +347,10 @@ the measured numbers. The [reports](docs/reports/) explain each step.
 
 ### Overall
 
-- [x] tests/ui run-pass: <!-- total:run-pass -->74.8% (1784 / 2385)
-- [x] tests/ui check-pass: <!-- total:check-pass -->80.9% (1461 / 1807)
+- [x] tests/ui run-pass: <!-- total:run-pass -->75.0% (1789 / 2385)
+- [x] tests/ui check-pass: <!-- total:check-pass -->81.1% (1466 / 1807)
 - [x] tests/ui build-pass: <!-- total:build-pass -->72.6% (98 / 135)
-- [ ] tests/ui compile-fail (an error on an annotated line): <!-- total:compile-fail -->50.2% (3694 / 7358)
+- [ ] tests/ui compile-fail (an error on an annotated line): <!-- total:compile-fail -->50.2% (3696 / 7358)
 - [x] real crates: fnv, adler2, hex, itoa, rustc-hash and cfg-if build and give the same output (6 / 6)
 - [x] zust-analyzer answers like rust-analyzer: 95.4% (rust-analyzer: 96.2%)
 
@@ -373,16 +373,16 @@ the measured numbers. The [reports](docs/reports/) explain each step.
 - [x] parser: <!-- ui:parser -->89.9%
 - [x] closures (capture, `Fn` traits, `move`; with no captures also as fn pointers): <!-- ui:closures,unboxed-closures,functions-closures -->78.6%
 - [x] derives: `Debug`, `Clone`, `Copy`, `PartialEq`/`Eq`, `PartialOrd`/`Ord`, `Hash`, `Default`: <!-- ui:derives,deriving -->86.4%
-- [x] imports, `use`: <!-- ui:imports -->84.1%
+- [x] imports, `use`: <!-- ui:imports -->86.4%
 - [x] associated types: <!-- ui:associated-types -->77.6%
 - [x] generics: <!-- ui:generics -->78.6% (an integer literal for `T: Foo` takes the one integer type that implements Foo; a type
   parameter known only from the expected type is not inferred)
 - [ ] consts: <!-- ui:consts -->76.6% (no heap values, no generic `const fn`; a const of a generic impl (`const C: Option<T> = None`) takes its type at each use)
 - [ ] drop: <!-- ui:drop -->65.2% (the drop order of some temporaries differs)
 - [ ] traits: <!-- ui:traits -->70.1% (generic traits, blanket impls, `dyn` (also `dyn Tr<A>`), `impl .. for dyn Tr` work; `impl<T> Tr for &T` only without functions; no coherence)
-- [ ] `macro_rules!`: <!-- ui:macros -->74.3% (hygiene for `let`, labels, arm bindings; not every fragment kind)
+- [ ] `macro_rules!`: <!-- ui:macros -->76.4% (hygiene for `let`, labels, arm bindings; not every fragment kind)
 - [ ] unions: <!-- ui:union -->69.2% (no `repr(packed)`)
-- [ ] const generics: <!-- ui:const-generics -->56.4% (no `generic_const_exprs`)
+- [ ] const generics: <!-- ui:const-generics -->57.4% (no `generic_const_exprs`)
 - [ ] generic associated types: <!-- ui:generic-associated-types -->71.1%
 - [ ] casts (`as _` / `as *const _` take the source or expected type; a pointer of unknown kind is E0641): <!-- ui:cast -->62.1%
 - [ ] `impl Trait`: <!-- ui:impl-trait -->70.3% (return position, also nested (`-> Option<impl Debug>`), in trait methods and generic fns (typed per instance); no TAIT)
