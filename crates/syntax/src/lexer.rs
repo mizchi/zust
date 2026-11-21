@@ -178,6 +178,8 @@ pub fn split(src: &str) -> Result<Vec<SrcItem>, String> {
         };
     }
 
+    // (outer doc comments `///` / `/** */`: (start, end), looked at after the loop (E0585); only comments add to it)
+    let mut docs: Vec<(usize, usize)> = Vec::new();
     while i < n {
         let c = s[i];
         // 空白
@@ -188,13 +190,18 @@ pub fn split(src: &str) -> Result<Vec<SrcItem>, String> {
         }
         // コメント
         if c == b'/' && i + 1 < n && s[i + 1] == b'/' {
+            let st0 = i;
             while i < n && s[i] != b'\n' {
                 i += 1;
+            }
+            if s[st0..].starts_with(b"///") && !s[st0..].starts_with(b"////") {
+                docs.push((st0, i));
             }
             st.prev_ws = true;
             continue;
         }
         if c == b'/' && i + 1 < n && s[i + 1] == b'*' {
+            let st0 = i;
             let mut d = 0;
             while i < n {
                 if s[i] == b'/' && i + 1 < n && s[i + 1] == b'*' {
@@ -209,6 +216,9 @@ pub fn split(src: &str) -> Result<Vec<SrcItem>, String> {
                 } else {
                     i += 1;
                 }
+            }
+            if s[st0..].starts_with(b"/**") && !s[st0..].starts_with(b"/***") && !s[st0..].starts_with(b"/**/") {
+                docs.push((st0, i));
             }
             st.prev_ws = true;
             continue;
@@ -385,6 +395,10 @@ pub fn split(src: &str) -> Result<Vec<SrcItem>, String> {
                 kind,
             });
         }
+    }
+    // (E0585: out of line, so the loop above compiles as it did)
+    if !docs.is_empty() {
+        dangling_docs(s, docs)?;
     }
     if impl_header.is_some() {
         return Err("unterminated impl block".into());
@@ -1158,7 +1172,12 @@ pub fn expand_thread_local(src: &str) -> Option<String> {
 /// colliding name that are in scope there: defined in it, or brought in by `use` (also `as`, and globs). Empty when no
 /// trait name collides (then nothing needs it).
 pub fn trait_scopes(src: &str) -> Vec<(u32, u32, Vec<String>)> {
-    if !src.contains("mod") || !src.contains("trait") {
+    trait_scopes_with(src, src.contains("mod"))
+}
+
+/// trait_scopes, with whether src contains `mod` already known (one search of the text for both uses)
+pub fn trait_scopes_with(src: &str, has_mod: bool) -> Vec<(u32, u32, Vec<String>)> {
+    if !has_mod || !src.contains("trait") {
         return vec![];
     }
     // (a quick look first: the names after the word `trait` and any whitespace, newlines too, by text; no name twice,
@@ -2190,4 +2209,93 @@ pub fn is_std_macro(n: &str) -> bool {
             | "pin" | "addr_of" | "addr_of_mut" | "offset_of" | "cfg_select" | "cfg_match" | "global_asm" | "asm" | "naked_asm"
             | "is_x86_feature_detected" | "select_unpredictable" | "join"
     )
+}
+
+/// Whether position p is inside the arguments of a macro invocation (`m! { .. }`, `macro_rules! m { .. }`): the group
+/// that holds p opens right after a `!`, or after `! name`. Doc comments there are tokens the macro reads (roughly:
+/// brackets in strings and comments before p are counted too)
+fn in_macro_args(s: &[u8], p: usize) -> bool {
+    let mut depth = 0i32;
+    let mut k = p;
+    while k > 0 {
+        k -= 1;
+        match s[k] {
+            b')' | b']' | b'}' => depth += 1,
+            b'(' | b'[' | b'{' => {
+                if depth == 0 {
+                    // (the token before the opener)
+                    let mut j = k;
+                    while j > 0 && s[j - 1].is_ascii_whitespace() {
+                        j -= 1;
+                    }
+                    if j > 0 && s[j - 1] == b'!' {
+                        return true;
+                    }
+                    // (`macro_rules! name {`)
+                    let mut i = j;
+                    while i > 0 && (s[i - 1].is_ascii_alphanumeric() || s[i - 1] == b'_') {
+                        i -= 1;
+                    }
+                    let mut h = i;
+                    while h > 0 && s[h - 1].is_ascii_whitespace() {
+                        h -= 1;
+                    }
+                    return i < j && h > 0 && s[h - 1] == b'!';
+                }
+                depth -= 1;
+            }
+            _ => {}
+        }
+    }
+    false
+}
+
+/// E0585: an outer doc comment right before `}` / `;` / `,` (outside a macro's arguments) documents nothing
+#[inline(never)]
+fn dangling_docs(s: &[u8], docs: Vec<(usize, usize)>) -> Result<(), String> {
+    let n = s.len();
+    // (E0585: an outer doc comment right before `}` / `;` / `,` documents nothing. One forward pass: a doc that starts
+    // before the previous lookahead's stop ends at the same token)
+    let mut stop = 0usize;
+    for (d0, d1) in docs {
+        if d0 < stop {
+            continue;
+        }
+        let mut j = d1;
+        loop {
+            if j < n && s[j].is_ascii_whitespace() {
+                j += 1;
+            } else if j + 1 < n && s[j] == b'/' && s[j + 1] == b'/' {
+                while j < n && s[j] != b'\n' {
+                    j += 1;
+                }
+            } else if j + 1 < n && s[j] == b'/' && s[j + 1] == b'*' {
+                // (a block comment, nested ones in it)
+                let mut d = 0;
+                while j < n {
+                    if j + 1 < n && s[j] == b'/' && s[j + 1] == b'*' {
+                        d += 1;
+                        j += 2;
+                    } else if j + 1 < n && s[j] == b'*' && s[j + 1] == b'/' {
+                        d -= 1;
+                        j += 2;
+                        if d == 0 {
+                            break;
+                        }
+                    } else {
+                        j += 1;
+                    }
+                }
+            } else {
+                break;
+            }
+        }
+        stop = j;
+        if j < n && matches!(s[j], b'}' | b';' | b',') && !in_macro_args(s, d0) {
+            let line = s[..d0].iter().filter(|&&c| c == b'\n').count() + 1;
+            let col = d0 - s[..d0].iter().rposition(|&c| c == b'\n').map_or(0, |k| k + 1) + 1;
+            return Err(format!("{line}:{col}: found a documentation comment that doesn't document anything (E0585)"));
+        }
+    }
+    Ok(())
 }

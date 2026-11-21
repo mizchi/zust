@@ -29,7 +29,7 @@
 
 ## Status
 
-Numbers measured <!-- measured -->2026-11-21, f6fcd46<!-- /measured --> by CI on each push to main (bench.yml runs
+Numbers measured <!-- measured -->2026-11-21, f106913<!-- /measured --> by CI on each push to main (bench.yml runs
 `bench/ci_bench.py` and `bench/rust_ui.py`, then `scripts/update_readme.py` writes them here). Times come from shared
 GitHub Actions runners and vary by about ±20%; the instruction counts (valgrind) do not.
 
@@ -41,10 +41,10 @@ only the tests it can be asked to handle (no nightly features, auxiliary crates 
 <!-- auto:ui -->
 | kind | applicable | pass |
 |---|---:|---:|
-| run-pass (builds, runs, same output) | 2385 | 1796 (75.3%) |
+| run-pass (builds, runs, same output) | 2385 | 1797 (75.3%) |
 | check-pass (accepted by `zustc check`) | 1807 | 1472 (81.5%) |
 | build-pass | 135 | 98 (72.6%) |
-| compile-fail (rejected at an annotated line) | 7358 | 3738 (50.8%) |
+| compile-fail (rejected at an annotated line) | 7358 | 3793 (51.5%) |
 <!-- /auto:ui -->
 
 [What is supported](#what-is-supported) breaks this down by area.
@@ -56,22 +56,22 @@ Build speed, build cache size and LSP latency on generated programs of 1000 / 50
 <!-- auto:kpi -->
 | KPI | gen1000 | gen5000 |
 |---|---:|---:|
-| cold build | 123 ms | 549 ms |
-| no-op build | 0.8 ms | 0.7 ms |
-| build after editing one function | 18.0 ms | 64.3 ms |
-| `check` | 80 ms | 379 ms |
+| cold build | 120 ms | 545 ms |
+| no-op build | 0.7 ms | 0.7 ms |
+| build after editing one function | 17.5 ms | 63.4 ms |
+| `check` | 75 ms | 380 ms |
 | no-op build (instructions) | 0.6 M | 0.6 M |
-| edit one function (instructions) | 124.5 M | 590.5 M |
-| `check` (instructions) | 780.6 M | 3852.7 M |
+| edit one function (instructions) | 124.4 M | 589.5 M |
+| `check` (instructions) | 780.7 M | 3853.1 M |
 | build cache on disk | 387.2 KiB | 1902.8 KiB |
 | binary | 324.0 KiB | 1558.3 KiB |
-| cold build peak RSS | 18.6 MiB | 52.5 MiB |
+| cold build peak RSS | 18.7 MiB | 52.6 MiB |
 
 | zust-analyzer (zustc's own sources) | |
 |---|---:|
-| p50: definition, hover, completion, references, rename | 0.47 ms / 0.37 ms / 1.10 ms / 2.20 ms / 0.47 ms |
-| startup until indexed | 139 ms |
-| peak RSS | 80.4 MiB |
+| p50: definition, hover, completion, references, rename | 0.55 ms / 0.43 ms / 1.05 ms / 4.88 ms / 0.56 ms |
+| startup until indexed | 144 ms |
+| peak RSS | 81.3 MiB |
 <!-- /auto:kpi -->
 
 Every change is also measured on its own with `python3 bench/kpi_track.py`, so that small increases that add up stay
@@ -350,10 +350,10 @@ the measured numbers. The [reports](docs/reports/) explain each step.
 
 ### Overall
 
-- [x] tests/ui run-pass: <!-- total:run-pass -->75.3% (1796 / 2385)
+- [x] tests/ui run-pass: <!-- total:run-pass -->75.3% (1797 / 2385)
 - [x] tests/ui check-pass: <!-- total:check-pass -->81.5% (1472 / 1807)
 - [x] tests/ui build-pass: <!-- total:build-pass -->72.6% (98 / 135)
-- [ ] tests/ui compile-fail (an error on an annotated line): <!-- total:compile-fail -->50.8% (3738 / 7358)
+- [ ] tests/ui compile-fail (an error on an annotated line): <!-- total:compile-fail -->51.5% (3793 / 7358)
 - [x] real crates: fnv, adler2, hex, itoa, rustc-hash and cfg-if build and give the same output (6 / 6)
 - [x] zust-analyzer answers like rust-analyzer: 95.4% (rust-analyzer: 96.2%)
 
@@ -395,7 +395,7 @@ the measured numbers. The [reports](docs/reports/) explain each step.
 
 - [x] borrow checking: moves, conflicting loans, escapes, mutability: borrowck <!-- cf:borrowck -->59.3%
   ([report 08](docs/reports/2026-11-18-08-borrow-checking.md))
-- [x] type errors, missing items, generics declarations (E0403, E0207, E0392, E0072 ..): typeck <!-- cf:typeck -->68.3%, structs <!-- cf:structs -->77.1%
+- [x] type errors, missing items, generics declarations (E0403, E0207, E0392, E0072 ..): typeck <!-- cf:typeck -->69.3%, structs <!-- cf:structs -->77.1%
 - [x] unsafe operations outside `unsafe` (E0133): calls to `unsafe fn` and extern fns, raw pointer derefs, `static mut`,
   union field reads (not yet inside closures or consts, and not the `unsafe_op_in_unsafe_fn` lint)
 - [x] non-exhaustive `match` (E0004): bool, unit, enums (variants that cannot have a value need no arm), structs and
