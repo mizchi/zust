@@ -696,6 +696,7 @@ check-pass	borrowck/alias-liveness/higher-ranked.rs
 check-pass	borrowck/alias-liveness/opaque-capture.rs
 check-pass	borrowck/alias-liveness/rpit-static.rs
 check-pass	borrowck/alias-liveness/rpitit-static.rs
+compile-fail	borrowck/already-borrowed-as-mutable-if-let-133941.rs
 compile-fail	borrowck/argument_number_mismatch_ice.rs
 check-pass	borrowck/array-disjoint-borrows-issue-135671.rs
 compile-fail	borrowck/assign-imm-local-twice.rs
@@ -1964,10 +1965,12 @@ compile-fail	dropck/dropck-union.rs
 run-pass	dropck/dropck_fn_type.rs
 compile-fail	dropck/dropck_trait_cycle_checked.rs
 run-pass	dropck/dropck_traits.rs
+compile-fail	dropck/eager-by-ref-binding-for-guards.rs
 run-pass	dropck/issue-29844.rs
 run-pass	dropck/issue-34053.rs
 check-pass	dropck/issue-54943-1.rs
 check-pass	dropck/issue-54943-2.rs
+compile-fail	dropck/let-else-more-permissive.rs
 check-pass	dropck/no-dropck-overflow-on-deep-nesting.rs
 run-pass	dropck/self-referential-struct-with-boxed-closure.rs
 check-pass	dropck/transitive-outlives-2.rs
@@ -2159,6 +2162,7 @@ compile-fail	error-codes/E0540.rs
 compile-fail	error-codes/E0559.rs
 compile-fail	error-codes/E0560.rs
 compile-fail	error-codes/E0596.rs
+compile-fail	error-codes/E0597.rs
 compile-fail	error-codes/E0599.rs
 compile-fail	error-codes/E0600.rs
 compile-fail	error-codes/E0601.rs
@@ -4116,6 +4120,7 @@ check-pass	nll/issue-52992.rs
 run-pass	nll/issue-53123-raw-pointer-cast.rs
 compile-fail	nll/issue-53807.rs
 compile-fail	nll/issue-54302-cases.rs
+compile-fail	nll/issue-54556-wrap-it-up.rs
 check-pass	nll/issue-55288.rs
 check-pass	nll/issue-55344.rs
 check-pass	nll/issue-55651.rs
@@ -4134,7 +4139,11 @@ compile-fail	nll/lub-match.rs
 compile-fail	nll/match-cfg-fake-edges.rs
 compile-fail	nll/match-cfg-fake-edges2.rs
 compile-fail	nll/match-on-borrowed.rs
+compile-fail	nll/maybe-initialized-drop-implicit-fragment-drop.rs
 check-pass	nll/maybe-initialized-drop-uninitialized.rs
+compile-fail	nll/maybe-initialized-drop-with-fragment.rs
+compile-fail	nll/maybe-initialized-drop-with-uninitialized-fragments.rs
+compile-fail	nll/maybe-initialized-drop.rs
 compile-fail	nll/move-errors.rs
 compile-fail	nll/move-subpaths-moves-root.rs
 run-pass	nll/mutating_references.rs
@@ -5721,6 +5730,7 @@ compile-fail	span/coerce-suggestions.rs
 compile-fail	span/drop-location-span-error-rust-2021-incompatible-closure-captures-96258.rs
 compile-fail	span/impl-wrong-item-for-trait.rs
 check-pass	span/issue-24690.rs
+compile-fail	span/issue-29106.rs
 compile-fail	span/issue-29595.rs
 compile-fail	span/issue-34264.rs
 compile-fail	span/issue-36537.rs
@@ -5745,6 +5755,7 @@ compile-fail	span/suggestion-non-ascii.rs
 compile-fail	span/suggestion-raw-68962.rs
 compile-fail	span/typo-suggestion.rs
 run-pass	span/unused-warning-point-at-identifier.rs
+compile-fail	span/vec_refs_data_with_early_death.rs
 compile-fail	specialization/feature-gate-specialization.rs
 run-pass	specialization/soundness/partial_ord_slice.rs
 compile-fail	specialization/specialization-feature-gate-overlap.rs

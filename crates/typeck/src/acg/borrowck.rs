@@ -65,6 +65,9 @@ pub enum Acc {
     Borrow(u32),
     /// `x += 1` (reads and writes; the value must be initialized)
     Modify,
+    /// The local is dropped at the end of its scope and its type's `Drop` may use what it borrows (drop check): it
+    /// is live until then. Not a use of a moved value (a moved one is not dropped), nor a conflict with its loans
+    Drop,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -548,6 +551,65 @@ impl Bk {
         }
         let nl = self.locals.len();
         let loans_on = need_loans;
+        // ---- drop check: a drop of a local that is certainly moved out runs nothing (NLL's drop-liveness counts only
+        // the maybe-initialized). Forward: the locals moved out on every path, joined by intersection
+        if evs.iter().flatten().any(|e| matches!(e, Ev::Acc(_, Acc::Drop, _))) {
+            let words = nl.div_ceil(64).max(1);
+            let step = |m: &mut Vec<u64>, e: &Ev| match e {
+                Ev::Acc(p, Acc::Move, _) if p.proj.is_empty() => m[p.local as usize / 64] |= 1 << (p.local % 64),
+                Ev::Acc(p, Acc::Write, _) if p.proj.is_empty() => m[p.local as usize / 64] &= !(1 << (p.local % 64)),
+                Ev::Bind(l, _) | Ev::Def(l, _) => m[*l as usize / 64] &= !(1 << (l % 64)),
+                _ => {}
+            };
+            let mut min: Vec<Option<Vec<u64>>> = vec![None; n];
+            min[0] = Some(vec![0u64; words]);
+            let mut work = vec![0usize];
+            let mut rounds = 0usize;
+            while let Some(b) = work.pop() {
+                rounds += 1;
+                if rounds > n.saturating_mul(nl + 2).saturating_add(16) {
+                    break;
+                }
+                let mut m = min[b].clone().unwrap();
+                for e in &evs[b] {
+                    step(&mut m, e);
+                }
+                for &s2 in &succ[b] {
+                    let changed = match &mut min[s2] {
+                        Some(x) => {
+                            let mut ch = false;
+                            for (a, y) in x.iter_mut().zip(&m) {
+                                let v = *a & y;
+                                ch |= v != *a;
+                                *a = v;
+                            }
+                            ch
+                        }
+                        slot @ None => {
+                            *slot = Some(m.clone());
+                            true
+                        }
+                    };
+                    if changed && !work.contains(&s2) {
+                        work.push(s2);
+                    }
+                }
+            }
+            for b in 0..n {
+                let Some(mut m) = min[b].clone() else { continue };
+                let mut keep: Vec<&Ev> = Vec::with_capacity(evs[b].len());
+                for &e in &evs[b] {
+                    if let Ev::Acc(p, Acc::Drop, _) = e {
+                        if m[p.local as usize / 64] >> (p.local % 64) & 1 == 1 {
+                            continue;
+                        }
+                    }
+                    step(&mut m, e);
+                    keep.push(e);
+                }
+                evs[b] = keep;
+            }
+        }
         // ---- liveness of locals (backward): live_in[b] as a bit set
         let words = nl.div_ceil(64).max(1);
         let mut live_in = vec![vec![0u64; words]; n];
@@ -736,6 +798,7 @@ impl Bk {
                     st.moved.retain(|m| m.place.local != *l);
                     st.holds.retain(|h| h.0 != *l);
                 }
+                Ev::Acc(_, Acc::Drop, _) => {}
                 Ev::Acc(p, a, sp) => {
                     if let Some(errs) = errs.as_deref_mut() {
                         if *a == Acc::Write && p.proj.is_empty() {
@@ -886,7 +949,7 @@ impl Bk {
                 format!("used binding `{name}` isn't initialized")
             } else {
                 let verb = match a {
-                    Acc::Read => "use",
+                    Acc::Read | Acc::Drop => "use",
                     Acc::Move => "use",
                     Acc::Write | Acc::Modify => "assign to part",
                     Acc::Borrow(_) => "borrow",
@@ -902,7 +965,7 @@ impl Bk {
     fn check_loans(&self, live: &[u32], p: &BPlace, a: Acc, sp: Sp, errs: &mut Vec<BkError>) {
         let mine = if let Acc::Borrow(l) = a { Some(l) } else { None };
         let wants_mut = match a {
-            Acc::Read => false,
+            Acc::Read | Acc::Drop => false,
             Acc::Borrow(l) => self.loans[l as usize].mutable,
             Acc::Move | Acc::Write | Acc::Modify => true,
         };
@@ -932,7 +995,7 @@ impl Bk {
             let at = at(self.line_base, lo.sp);
             let lk = if lo.mutable { "mutable" } else { "immutable" };
             let msg = match a {
-                Acc::Read => format!("cannot use `{name}` because it was mutably borrowed (at {at})"),
+                Acc::Read | Acc::Drop => format!("cannot use `{name}` because it was mutably borrowed (at {at})"),
                 Acc::Move => format!("cannot move out of `{name}` because it is borrowed (at {at})"),
                 Acc::Write | Acc::Modify => format!("cannot assign to `{name}` because it is borrowed (at {at})"),
                 Acc::Borrow(l) if self.loans[l as usize].mutable && lo.mutable => {
@@ -1164,9 +1227,37 @@ impl Cx<'_> {
             return;
         }
         let Some(s) = self.scopes.last() else { return };
-        let ids: Vec<u32> = s.iter().rev().filter_map(|(_, l, _)| self.bk.by_loc.get(l).copied()).collect();
-        for id in ids {
+        let ids: Vec<(u32, Ty)> = s.iter().rev().filter_map(|(_, l, t)| self.bk.by_loc.get(l).map(|&id| (id, *t))).collect();
+        for (id, t) in ids {
+            // (drop check: a value whose `Drop` may see what it borrows is used when it is dropped)
+            if self.bk.locals[id as usize].refs && self.bk.level >= 2 && self.dropck(t, 0) {
+                self.bk_ev(Ev::Acc(BPlace { local: id, proj: vec![] }, Acc::Drop, sp));
+            }
             self.bk_ev(Ev::Dead(id, sp));
+        }
+    }
+
+    /// The drop of a value of type t runs a `Drop` the program implements, which may use the references the value
+    /// holds. The prelude's containers drop their elements only (as std's `#[may_dangle]`)
+    pub(crate) fn dropck(&self, t: Ty, depth: u32) -> bool {
+        if depth > 8 {
+            return false;
+        }
+        match t {
+            Ty::Struct(sid) => {
+                let prog = self.prog;
+                let base = prog.base_of(sid);
+                let sd = &prog.structs[sid as usize];
+                let prelude = prog.struct_item.get(base as usize).is_some_and(|&i| i >= prog.prelude_from);
+                if prelude || prog.closure_of_struct.contains_key(&base) {
+                    return sd.args.iter().any(|&a| self.dropck(a, depth + 1));
+                }
+                prog.impls.contains(&(base, "Drop".to_string()))
+                    || sd.fields.iter().any(|f| self.dropck(f.1, depth + 1))
+                    || sd.variants.iter().any(|v| v.fields.iter().any(|f| self.dropck(f.1, depth + 1)))
+            }
+            Ty::Box(i) | Ty::Array(i, _) => self.dropck(*i, depth + 1),
+            _ => false,
         }
     }
 

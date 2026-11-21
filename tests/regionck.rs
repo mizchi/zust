@@ -180,3 +180,29 @@ fn static_annotations() {
     assert!(d.len() == 1 && d[0].0 == 2 && d[0].1.contains("temporary"), "{d:?}");
     assert_eq!(check("fn main() {\n    let x: &'static u32 = &42;\n    let s: &'static str = \"a\";\n    println!(\"{} {}\", x, s);\n}\n"), vec![]);
 }
+
+/// Drop check: a value whose type implements `Drop` uses what it borrows when it is dropped, unless it was moved
+#[test]
+fn drop_check() {
+    let bad = "struct Foo<'a> { x: Option<&'a u32> }\nimpl<'a> Drop for Foo<'a> { fn drop(&mut self) {} }\nfn main() {\n    let mut x = Foo { x: None };\n    let y = 0;\n    x.x = Some(&y);\n}\n";
+    let d = check(bad);
+    assert!(d.len() == 1 && d[0].0 == 6 && d[0].1.contains("does not live long enough"), "{d:?}");
+    let ok = r#"
+struct D<'a>(&'a u32);
+impl<'a> Drop for D<'a> { fn drop(&mut self) {} }
+struct W<'p> { p: &'p mut i32 }
+impl<'p> Drop for W<'p> { fn drop(&mut self) { *self.p += 1; } }
+fn main() {
+    let y = 1;
+    let d = D(&y);
+    let v = vec![&y];
+    println!("{} {:?}", d.0, v);
+    let mut x = 0;
+    let w = W { p: &mut x };
+    std::mem::drop(w);
+    x = 1;
+    println!("{}", x);
+}
+"#;
+    assert_eq!(check(ok), vec![]);
+}
