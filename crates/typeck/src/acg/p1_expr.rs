@@ -913,7 +913,13 @@ impl Cx<'_> {
             Expr::Closure(..) => self.closure_value(e, expected),
             Expr::Range(..) => self.range_value(e, expected),
             Expr::Tuple(t) if t.is_empty() => Ok((None, Ty::Unit)),
-            Expr::Tuple(_) => self.tuple_lit(e, expected),
+            Expr::Tuple(_) => {
+                let r = self.tuple_lit(e, expected);
+                if let Ok((_, t)) = &r {
+                    self.rg_tuple(e, *t);
+                }
+                r
+            }
             Expr::Array(_) => self.array_lit(e, expected),
             Expr::Repeat(..) => self.repeat_lit(e, expected),
             Expr::Index(_, ix, _) if matches!(&**ix, Expr::Range(..)) => err(SP, "range indexing needs a reference: `&a[lo..hi]`"),

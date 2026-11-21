@@ -847,7 +847,7 @@ impl Cx<'_> {
                 out.extend(tr);
                 Some((Ty::Ref(*m, crate::types::intern(t)), out))
             }
-            Expr::Call(..) | Expr::MethodCall(..) | Expr::Struct(..) => self.rg.calls.get(&(e as *const Expr as usize)).cloned(),
+            Expr::Call(..) | Expr::MethodCall(..) | Expr::Struct(..) | Expr::Tuple(..) => self.rg.calls.get(&(e as *const Expr as usize)).cloned(),
             // (`e as &'static T`: the cast's type, with the regions written in it; e flows into it)
             Expr::Cast(x, ty) => {
                 let (it, itr) = self.rt_expr(x)?;
@@ -1190,6 +1190,30 @@ impl Cx<'_> {
         self.rg.calls.insert(e as *const Expr as usize, (t, tree));
     }
 
+    /// A tuple literal of type t: its elements' trees, side by side (the tuple is covariant in them)
+    pub(crate) fn rg_tuple(&mut self, e: &Expr, t: Ty) {
+        if !self.rg_on() {
+            return;
+        }
+        let (Expr::Tuple(xs), Ty::Struct(sid)) = (e, t) else { return };
+        let prog = self.prog;
+        let args = prog.structs[sid as usize].args.clone();
+        if !prog.is_tuple(sid) || args.len() != xs.len() {
+            return;
+        }
+        let Some(tree) = self.rg.fresh(prog, t) else { return };
+        let mut k = 0;
+        for (x, &at) in xs.iter().zip(&args) {
+            let Some(c) = count(prog, at, 0) else { return };
+            if let Some((_, xt)) = self.rt_expr(x) {
+                let part = tree[k..k + c].to_vec();
+                self.rg.relate(prog, at, &xt, &part, super::borrowck::pos(x));
+            }
+            k += c;
+        }
+        self.rg.calls.insert(e as *const Expr as usize, (t, tree));
+    }
+
     /// A variant's value of type t (`Some(x)`, `None`): a fresh tree, the fields' values flow into its fields; kept as
     /// a call's result (see rg_took_call)
     pub(crate) fn rg_variant(&mut self, t: Ty, vi: usize, args: &[(usize, &Expr)]) {
@@ -1262,7 +1286,11 @@ impl Cx<'_> {
         let Some((_, tr)) = self.rg.pat.clone() else { return };
         let Some((loc, t)) = self.lookup(name) else { return };
         let tree = if by_ref {
-            let Some(r) = self.rg.pat_ref else { return };
+            // (by the reference matched through, or a `ref` binding's own borrow: a region of its own)
+            let r = match self.rg.pat_ref {
+                Some(r) => r,
+                None => self.rg.var(),
+            };
             let mut v = vec![r];
             v.extend(tr);
             v

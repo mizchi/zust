@@ -853,6 +853,11 @@ impl Cx<'_> {
                         self.bk.bind_srcs = saved;
                         if !*by_ref {
                             self.rg_pat_bind(&name, true);
+                        } else {
+                            // (`ref` / `ref mut`: a borrow of the part matched)
+                            let pr = self.rg.pat_ref.take();
+                            self.rg_pat_bind(&name, true);
+                            self.rg.pat_ref = pr;
                         }
                     }
                 }

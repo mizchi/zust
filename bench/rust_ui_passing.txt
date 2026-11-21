@@ -3223,6 +3223,7 @@ compile-fail	lifetimes/lifetime-errors/ex2b-push-no-existing-names.rs
 compile-fail	lifetimes/lifetime-errors/ex2c-push-inference-variable.rs
 compile-fail	lifetimes/lifetime-errors/ex2d-push-inference-variable-2.rs
 compile-fail	lifetimes/lifetime-errors/ex2e-push-inference-variable-3.rs
+compile-fail	lifetimes/lifetime-errors/ex3-both-anon-regions-3.rs
 compile-fail	lifetimes/lifetime-errors/ex3-both-anon-regions-both-are-structs-2.rs
 compile-fail	lifetimes/lifetime-errors/ex3-both-anon-regions-both-are-structs-3.rs
 compile-fail	lifetimes/lifetime-errors/ex3-both-anon-regions-both-are-structs-earlybound-regions.rs
@@ -3780,6 +3781,8 @@ run-pass	match/match-on-negative-integer-ranges.rs
 compile-fail	match/match-option-result-mismatch.rs
 run-pass	match/match-range-char-const.rs
 compile-fail	match/match-range-fail.rs
+compile-fail	match/match-ref-mut-invariance.rs
+compile-fail	match/match-ref-mut-let-invariance.rs
 run-pass	match/match-ref-option-pattern.rs
 compile-fail	match/match-static-pattern.rs
 run-pass	match/match-string-slice.rs
@@ -4070,6 +4073,7 @@ compile-fail	nll/borrowed-local-error.rs
 compile-fail	nll/borrowed-match-issue-45045.rs
 compile-fail	nll/borrowed-referent-issue-38899.rs
 compile-fail	nll/borrowed-universal-error-2.rs
+compile-fail	nll/borrowed-universal-error.rs
 compile-fail	nll/cannot-move-block-spans.rs
 compile-fail	nll/closure-access-spans.rs
 compile-fail	nll/closure-borrow-spans.rs
@@ -4156,6 +4160,7 @@ run-pass	nll/mutating_references.rs
 compile-fail	nll/nested-bodies-in-dead-code.rs
 compile-fail	nll/nll-anon-to-static.rs
 check-pass	nll/normalization-bounds.rs
+compile-fail	nll/outlives-suggestion-more.rs
 compile-fail	nll/outlives-suggestion-simple.rs
 run-pass	nll/process_or_insert_default.rs
 check-pass	nll/promotable-mutable-zst-doesnt-conflict.rs
