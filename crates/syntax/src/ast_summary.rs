@@ -546,6 +546,44 @@ fn parse_sig(sig: &PSig, is_extern: bool, is_main: bool, owner: Option<&Owner>) 
         if let Some(l) = undeclared_lifetime(&used, &declared) {
             return Err(format!("use of undeclared lifetime name `{l}` (E0261)"));
         }
+        // (E0308: a receiver of the self type names its lifetimes as the impl's self type does: `self: Foo<'b, 'a>`
+        // in `impl<'a, 'b> Foo<'a, 'b>` is not Self)
+        if let (Some(o), Some(rt)) = (owner.filter(|o| !o.is_trait), &sig.recv_ty) {
+            if let Some(r) = o.regions.as_deref() {
+                let mut t = rt;
+                loop {
+                    match t {
+                        PTy::Ref(_, _, i) => t = i,
+                        PTy::Path(None, p) if p.segs.len() == 1 && p.segs[0].name == "Box" => match p.segs[0].args.first() {
+                            Some(crate::parse::GArg::Ty(i)) => t = i,
+                            _ => break,
+                        },
+                        _ => break,
+                    }
+                }
+                if let PTy::Path(None, p) = t {
+                    let last = p.segs.last();
+                    let base = o.base.rsplit("::").next().unwrap_or("");
+                    if last.is_some_and(|s| s.name == base) {
+                        let written: Vec<u8> = last
+                            .unwrap()
+                            .args
+                            .iter()
+                            .filter_map(|a| match a {
+                                crate::parse::GArg::Lifetime(l) if l == "'static" => Some(crate::types::R_STATIC),
+                                crate::parse::GArg::Lifetime(l) => r.lts.iter().position(|x| x == l).map(|i| i as u8),
+                                _ => None,
+                            })
+                            .collect();
+                        let own: Vec<u8> = r.self_slots.iter().copied().take(written.len()).collect();
+                        if !written.is_empty() && own.len() == written.len() && own.iter().all(|&c| (c as usize) < r.lts.len() || c == crate::types::R_STATIC) && own != written {
+                            let m = "mismatched `self` parameter type: its lifetimes are not the impl's (E0308)";
+                            return Err(if p.pos.line != 0 { format!("{}:{}: {m}", p.pos.line, p.pos.col + 1) } else { m.to_string() });
+                        }
+                    }
+                }
+            }
+        }
         // (the types the bounds and where clauses write are well formed, as the signature's types imply)
         if crate::wf::bounds_have_refs(&sig.generics) {
             let mut k = owner.map(crate::wf::Known::of_owner).unwrap_or_default();

@@ -3209,6 +3209,7 @@ check-pass	lifetimes/elided-lifetime-in-path-in-pat.rs
 check-pass	lifetimes/elided-lifetime-in-path-in-type-relative-expression.rs
 run-pass	lifetimes/enum-lifetime-container-10228.rs
 compile-fail	lifetimes/explicit-lifetime-required-14285.rs
+compile-fail	lifetimes/explicit-self-lifetime-mismatch.rs
 check-pass	lifetimes/field-borrow-lifetime-inference.rs
 run-pass	lifetimes/for-loop-region-links.rs
 compile-fail	lifetimes/fullwidth-ampersand.rs
