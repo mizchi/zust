@@ -317,6 +317,9 @@ pub struct RSigSyn {
     pub ty_outlives: Vec<(String, u8)>,
     /// How many of lts are the impl's or trait's (the rest are the fn's own)
     pub outer: u8,
+    /// An impl's method: the region slots of the impl's self type (it is well formed: implied in the body, required
+    /// of a call)
+    pub self_slots: Vec<u8>,
 }
 
 /// The regions of a struct / enum definition

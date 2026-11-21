@@ -602,7 +602,9 @@ impl Cx<'_> {
                     self.drop_in_place(a, t);
                 }
             }
+            self.rg_for_item(f, vt);
             self.pat_bind(fpat, place, BindMode::Move)?;
+            self.rg.pat = None;
         }
         let bound = self.pending_bound.take();
         let nb = self.loop_bounds.len();

@@ -3215,6 +3215,7 @@ check-pass	lifetimes/field-borrow-lifetime-inference.rs
 run-pass	lifetimes/for-loop-region-links.rs
 compile-fail	lifetimes/fullwidth-ampersand.rs
 check-pass	lifetimes/if-else-branches-lifetime-coercion.rs
+compile-fail	lifetimes/issue-103582-hint-for-missing-lifetime-bound-on-trait-object-using-type-alias.rs
 check-pass	lifetimes/issue-104432-unused-lifetimes-in-expansion.rs
 compile-fail	lifetimes/issue-107492-default-value-for-lifetime.rs
 compile-fail	lifetimes/issue-107988.rs
@@ -4121,6 +4122,7 @@ check-pass	nll/closure-requirements/type-test-subject-unnamed-region.rs
 compile-fail	nll/closure-use-spans.rs
 compile-fail	nll/closures-in-loops.rs
 check-pass	nll/constant.rs
+compile-fail	nll/dont-print-desugared.rs
 check-pass	nll/empty-type-predicate-2.rs
 check-pass	nll/empty-type-predicate.rs
 compile-fail	nll/guarantor-issue-46974.rs
@@ -4242,6 +4244,7 @@ check-pass	nll/user-annotations/normalize-self-ty.rs
 compile-fail	nll/user-annotations/patterns.rs
 compile-fail	nll/user-annotations/region-error-ice-109072.rs
 check-pass	nll/user-annotations/type-annotation-with-hrtb.rs
+compile-fail	nll/user-annotations/wf-self-type.rs
 compile-fail	nll/where_clauses_in_functions.rs
 compile-fail	nll/where_clauses_in_structs.rs
 run-pass	non_modrs_mods/non_modrs_mods.rs
@@ -5291,6 +5294,7 @@ compile-fail	regions/issue-12470.rs
 check-pass	regions/issue-21520.rs
 check-pass	regions/issue-24085.rs
 check-pass	regions/issue-26448-3.rs
+compile-fail	regions/issue-28848.rs
 run-pass	regions/issue-5243.rs
 check-pass	regions/issue-56537-closure-uses-region-from-container.rs
 check-pass	regions/issue-72051-member-region-hang.rs
@@ -7106,6 +7110,7 @@ compile-fail	wf/wf-fn-def-check-sig-2.rs
 compile-fail	wf/wf-impl-associated-type-region.rs
 compile-fail	wf/wf-in-fn-type-static.rs
 compile-fail	wf/wf-in-obj-type-static.rs
+compile-fail	wf/wf-static-method.rs
 compile-fail	wf/wf-where-clauses-pre-normalization.rs
 compile-fail	where-clauses/ignore-err-clauses.rs
 check-pass	where-clauses/impl-method-where-clause-resolution.rs

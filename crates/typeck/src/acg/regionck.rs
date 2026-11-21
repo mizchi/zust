@@ -126,6 +126,8 @@ pub struct Rg {
     /// A closure's body: the regions its codes name (CLO_U: of the function it is in, related as there)
     pub clo_regs: Vec<(u8, u32)>,
     pub outer_univ: Vec<u32>,
+    /// CLO_S regions: only borrows of what the closure owns must not reach them
+    pub soft: Vec<u32>,
     /// The elements' tree of the array or slice a slice pattern matches
     pub pat_elem: Option<(Ty, RT)>,
     /// Rg::wf: imp's relations are required, at this span
@@ -142,6 +144,9 @@ pub const CLO_P: u8 = 0;
 pub const CLO_E: u8 = 0x40;
 /// A region of the function the closure is in (a universal one there): related as that function knows
 pub const CLO_U: u8 = 0x80;
+/// A region of the result of a closure whose signature may come from an expected type it is coerced to: nothing the
+/// closure owns may be borrowed for it, what else it is related to is not known
+pub const CLO_S: u8 = 0xC0;
 
 /// How a closure's signature names its regions, while its codes are made
 struct CloCodes<'a> {
@@ -488,7 +493,9 @@ impl Rg {
         }
         let v = self.var();
         self.univ.push((v, "'_".to_string()));
-        if c >= CLO_U {
+        if (CLO_S..R_STATIC).contains(&c) {
+            self.soft.push(v);
+        } else if c >= CLO_U {
             self.outer_univ.push(v);
         } else if c >= CLO_E {
             self.externals.push(v);
@@ -1090,7 +1097,7 @@ impl Rg {
                         // (nor one of the function's that must outlive a placeholder: the callee's lifetimes in the
                         // bound may be it, and what they imply is of them)
                         let placeholder = |b: u32| self.closure.is_some() && !self.externals.contains(&b) && !self.outer_univ.contains(&b) && b != STATIC;
-                        if !k[i][j] && !outside(u, y) && !outside(y, u) && !(self.outer_univ.contains(&u) && placeholder(y)) {
+                        if !k[i][j] && !outside(u, y) && !outside(y, u) && !(self.outer_univ.contains(&u) && placeholder(y)) && !self.soft.contains(&u) && !self.soft.contains(&y) {
                             let other = if j == 0 { "'static".to_string() } else { self.univ[j - 1].1.clone() };
                             errs.push((sp, format!("lifetime may not live long enough (`{uname}` must outlive `{other}`)")));
                         }
@@ -1202,6 +1209,14 @@ impl Cx<'_> {
                 if let Some(tr) = trees[i].clone() {
                     rg.implied(prog, t, &tr, 0);
                     rg.locals.insert(loc, tr);
+                }
+            }
+            // (an impl's method: its self type is well formed, as its callers make sure)
+            if let (Some(r), Some(isid)) = (rs, gsig.impl_of) {
+                if !r.self_slots.is_empty() {
+                    if let Some(st) = rg.instantiate(prog, Ty::Struct(isid), Some(&r.self_slots), &lts, &targs, &mut |me| me.var()) {
+                        rg.implied(prog, Ty::Struct(isid), &st, 0);
+                    }
                 }
             }
             if let Some(tr) = rg.ret.clone() {
@@ -1545,7 +1560,7 @@ impl Cx<'_> {
                     Ty::Array(e, _) | Ty::Slice(e) => *e,
                     Ty::Struct(sid) => {
                         let sd = &self.prog.structs[sid as usize];
-                        if sd.name != "Vec" || sd.args.len() != 1 || lts_of(self.prog, self.prog.base_of(sid)) != 0 {
+                        if self.prog.structs[self.prog.base_of(sid) as usize].name != "Vec" || sd.args.len() != 1 || lts_of(self.prog, self.prog.base_of(sid)) != 0 {
                             return None;
                         }
                         sd.args[0]
@@ -1755,6 +1770,14 @@ impl Cx<'_> {
         for (i, ((at, asp), pt)) in atrees.iter().zip(&ptrees).enumerate() {
             if let (Some((aty, at)), Some(pt), Some(&ty)) = (at, pt, params.get(i)) {
                 rg.flow(prog, aty.unwrap_or(ty), ty, at, pt, *asp);
+            }
+        }
+        // (an impl's method: its self type is well formed (`struct Foo<'a, 'b: 'a>`): the call makes sure)
+        if let (Some(r), Some(isid)) = (rs.as_deref(), sig0.impl_of) {
+            if !r.self_slots.is_empty() {
+                if let Some(st) = rg.instantiate(prog, Ty::Struct(isid), Some(&r.self_slots), &lts, &targs, &mut |me| me.var()) {
+                    rg.wf(prog, Ty::Struct(isid), &st, sp);
+                }
             }
         }
         // (the callee's declared bounds hold of its arguments; not those of a trait's impl called from a generic
@@ -2027,9 +2050,13 @@ impl Cx<'_> {
                     }
                     codes.push(v);
                 }
-                let _ = ret_ann;
+                // (the result's: from outside when the closure writes its type; else an expected type it is
+                // coerced to may give its signature (`Box<dyn for<'r> Fn(&'r T) -> &'r U>`): not known)
                 let Some(n) = count(prog, ret, 0) else { return };
-                let v: Vec<u8> = (0..n).map(|_| cc.e()).collect();
+                let v: Vec<u8> = (0..n.min(0x30)).map(|i| if ret_ann.is_some() { cc.e() } else { CLO_S + i as u8 }).collect();
+                if v.len() != n {
+                    return;
+                }
                 codes.push(v);
             }
         }
@@ -2250,6 +2277,29 @@ impl Cx<'_> {
             }
         }
         self.rg.last_call = Some((self.rg.depth + 1, t, tree));
+    }
+
+    /// `for pat in e` binds items of type vt: of a Vec, an array or a slice (or a reference to one), its elements' tree
+    /// (and the reference's region): the pattern's
+    pub(crate) fn rg_for_item(&mut self, f: &Expr, vt: Ty) {
+        if !self.rg_on() {
+            return;
+        }
+        let Expr::For(_, _, x, _) = f else { return };
+        let Some((it, itr)) = self.rt_expr(x) else { return };
+        let prog = self.prog;
+        let elem = |t: Ty| match t {
+            Ty::Array(e, _) | Ty::Slice(e) => Some(*e),
+            Ty::Struct(sid) if prog.structs[prog.base_of(sid) as usize].name == "Vec" && prog.structs[sid as usize].args.len() == 1 && lts_of(prog, prog.base_of(sid)) == 0 => Some(prog.structs[sid as usize].args[0]),
+            _ => None,
+        };
+        let ok = match (it, vt) {
+            (Ty::Ref(_, i), Ty::Ref(_, e)) => elem(*i) == Some(*e),
+            (t, e) => elem(t) == Some(e),
+        };
+        if ok && count(prog, vt, 0) == Some(itr.len()) {
+            self.rg.pat = Some((vt, itr));
+        }
     }
 
     /// The element type and tree of an array or a slice matched (through references, as default binding modes)

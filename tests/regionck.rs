@@ -621,3 +621,23 @@ fn main() {
 "#;
     assert_eq!(check(ok), vec![]);
 }
+
+/// An impl's self type is well formed (required of a call of its methods); a for loop's items of a Vec, an array or
+/// a slice have their elements' trees; a closure with no bound whose result is not written borrows nothing it owns
+/// for its result, and is otherwise free
+#[test]
+fn self_wf_for_items_soft_results() {
+    one_error("struct Foo<'a, 'b: 'a>(&'a &'b ());\nimpl<'a, 'b> Foo<'a, 'b> {\n    fn xmute(_a: &'b ()) -> &'a () { unreachable!() }\n}\npub fn foo<'a, 'b>(u: &'b ()) -> &'a () {\n    Foo::xmute(u)\n}\nfn main() {}\n", 6);
+    let d = check("struct D<'a>(&'a ());\nfn f(v: Vec<D<'static>>) {\n    for ref mut d in v {\n        let y = ();\n        *d = D(&y);\n    }\n}\nfn main() {}\n");
+    assert!(d.len() == 1 && d[0].0 == 5 && d[0].1.contains("`y` does not live long enough"), "{d:?}");
+    let ok = r#"
+struct UsizeRef<'a> { a: &'a usize }
+type RefTo = Box<dyn for<'r> Fn(&'r Vec<usize>) -> UsizeRef<'r>>;
+fn first<'a>(v: &'a [&'a u8]) -> &'a u8 { for x in v { return *x; } &0 }
+fn main() {
+    let a: RefTo = Box::new(|vec: &Vec<usize>| UsizeRef { a: &vec[0] });
+    let _ = a;
+}
+"#;
+    assert_eq!(check(ok), vec![]);
+}
