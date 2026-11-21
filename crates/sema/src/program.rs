@@ -1578,29 +1578,27 @@ impl Program {
             }
         }
         // (E0391: a trait that is its own supertrait, through any number of them; reported at the first trait of the
-        // cycle in the source. A name declared twice (in two modules, flattened to one name) is left out)
+        // cycle in the source. A cycle through a name declared twice (in two modules, flattened to one name) is left
+        // out: counted only when a cycle is found)
         if !user_traits.is_empty() && !p.trait_supers.is_empty() {
-            let mut decls: FxMap<&str, u32> = FxMap::default();
-            for sm in &sums[..user] {
-                if let Some(t) = sm.trait_decl.as_deref() {
-                    *decls.entry(t).or_default() += 1;
-                }
-            }
-            let once = |t: &str| decls.get(t) == Some(&1);
             for (ii, sm) in sums[..user].iter().enumerate() {
                 let Some(tr) = sm.trait_decl.as_deref() else { continue };
-                if !p.trait_supers.contains_key(tr) || !once(tr) {
-                    continue;
-                }
+                let Some(sup) = p.trait_supers.get(tr) else { continue };
                 let mut seen: FxSet<&str> = FxSet::default();
-                let mut todo: Vec<&str> = p.trait_supers[tr].iter().map(|s| s.as_str()).collect();
+                let mut todo: Vec<&str> = sup.iter().map(|s| s.as_str()).collect();
+                let mut cycle = false;
                 while let Some(t) = todo.pop() {
                     if t == tr {
-                        return Err(format!("{}:1: cycle detected when computing the super predicates of `{tr}` (E0391)", items[ii].line));
+                        cycle = true;
+                        break;
                     }
-                    if user_traits.contains(t) && once(t) && seen.insert(t) {
+                    if user_traits.contains(t) && seen.insert(t) {
                         todo.extend(p.trait_supers.get(t).into_iter().flatten().map(|s| s.as_str()));
                     }
+                }
+                let once = |t: &str| sums[..user].iter().filter(|s| s.trait_decl.as_deref() == Some(t)).count() == 1;
+                if cycle && once(tr) && seen.iter().all(|t| once(t)) {
+                    return Err(format!("{}:1: cycle detected when computing the super predicates of `{tr}` (E0391)", items[ii].line));
                 }
             }
         }
