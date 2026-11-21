@@ -2682,6 +2682,7 @@ compile-fail	half-open-range-patterns/slice_pattern_syntax_problem1.rs
 run-pass	half-open-range-patterns/slice_pattern_syntax_problem2.rs
 check-pass	higher-ranked/binop-lhs-hrtb-subtyping.rs
 compile-fail	higher-ranked/erroneous-lifetime-bound.rs
+compile-fail	higher-ranked/forall-implies-static.rs
 compile-fail	higher-ranked/higher-lifetime-bounds.rs
 run-pass	higher-ranked/higher-ranked-encoding.rs
 compile-fail	higher-ranked/higher-ranked-invalid-bounds.rs
@@ -4253,6 +4254,7 @@ check-pass	nll/ty-outlives/projection-where-clause-trait.rs
 compile-fail	nll/ty-outlives/wf-unreachable.rs
 compile-fail	nll/type-check-pointer-coercions.rs
 compile-fail	nll/type-check-pointer-comparisons.rs
+compile-fail	nll/type-test-universe.rs
 check-pass	nll/unexpected-inference-var-ice-116599.rs
 compile-fail	nll/user-annotations/adt-brace-structs.rs
 compile-fail	nll/user-annotations/adt-tuple-struct.rs

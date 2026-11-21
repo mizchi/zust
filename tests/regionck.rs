@@ -816,3 +816,11 @@ fn anonymous_lifetimes_in_bounds() {
     assert!(d.len() == 1 && d[0].0 == 5 && d[0].1.contains("E0637"), "{d:?}");
     assert_eq!(check("fn f<F: Fn(&u32) -> u32>(f: F) -> u32 {\n    f(&1)\n}\nfn g<'a, I: Iterator<Item = &'a u32>>(_i: I) {}\nfn main() {\n    let _ = f(|x| *x);\n}\n"), vec![]);
 }
+
+/// `for<'a> T: 'a` is `T: 'static`
+#[test]
+fn higher_ranked_outlives_is_static() {
+    let d = check("fn foo<T>() where for<'a> T: 'a {}\nfn bar<'a>() {\n    foo::<&'a i32>();\n}\nfn main() {\n    bar();\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 3, "{d:?}");
+    assert_eq!(check("fn foo<T>() where for<'a> T: 'a {}\nfn main() {\n    foo::<&'static i32>();\n    foo::<u8>();\n}\n"), vec![]);
+}
