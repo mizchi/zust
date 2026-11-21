@@ -307,6 +307,7 @@ pub fn compile(prog: &Program, insts: &Mutex<Insts>, id: u32, f: &ItemFn, line_b
         closure_ix,
         explicit_traits: HashMap::default(),
         explicit_trait: None,
+        keep_overload: std::cell::Cell::new(None),
         closure_hint: None,
         seg_self: None,
         loop_bounds: vec![],
@@ -689,6 +690,8 @@ pub struct Cx<'p> {
     pub explicit_traits: HashMap<usize, String>,
     /// while a method call that named its trait is being resolved: (the method, the trait)
     pub explicit_trait: Option<(String, String)>,
+    /// an overload already chosen (`X::__ref_eq#1`, PartialEq's among a reference's `eq`s): pick_overload keeps it once
+    pub keep_overload: std::cell::Cell<Option<u32>>,
     pub closure_hint: Option<(Vec<Ty>, Option<Ty>)>,
     pub seg_self: Option<Ty>,
     pub loop_bounds: Vec<(Loc, u64)>,

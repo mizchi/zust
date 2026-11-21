@@ -1141,7 +1141,13 @@ impl Cx<'_> {
                 _ => None,
             };
             if let Some(f) = f {
-                if let Some(&id) = self.prog.index.get(&f) {
+                if let Some(&id0) = self.prog.index.get(&f) {
+                    // (a named trait's impl among the overloads: `impl Other for &X` and `impl PartialEq for &X`)
+                    let id = match &self.explicit_trait {
+                        Some((m, tr)) if m == method => self.trait_candidate(&f, tr).unwrap_or(id0),
+                        _ => id0,
+                    };
+                    let f = self.prog.names[id as usize].clone();
                     let a0 = match self.prog.sigs[id as usize].params.first() {
                         Some(Ty::Ref(m, Ty::Ref(..))) => Expr::Ref(*m, Box::new(recv.clone())),
                         _ => recv.clone(),
@@ -1149,7 +1155,12 @@ impl Cx<'_> {
                     let mut args = vec![a0];
                     args.extend(margs.iter().cloned());
                     let c = Expr::Call(Box::new(path_expr(&f)), args);
-                    return self.expr(&c, expected).map(Some);
+                    if id != id0 {
+                        self.keep_overload.set(Some(id));
+                    }
+                    let r = self.expr(&c, expected).map(Some);
+                    self.keep_overload.set(None);
+                    return r;
                 }
             }
         }
@@ -1470,6 +1481,10 @@ impl Cx<'_> {
 
     /// 同じ名前の trait impl の関数 (`P::from` が `From<&str>` と `From<String>`) から、最初の引数の型で選ぶ
     pub(crate) fn pick_overload(&self, id: u32, recv: Option<Ty>, args: &[&Expr]) -> u32 {
+        if self.keep_overload.get() == Some(id) {
+            self.keep_overload.set(None);
+            return id;
+        }
         // (by the group's name: a candidate's own may carry an overload suffix, `S::from#1`)
         let gname = &self.prog.names[id as usize];
         let Some(cands) = self.prog.overloads.get(gname).or_else(|| self.prog.overloads.get(gname.split('#').next().unwrap_or(gname))) else {
@@ -1495,7 +1510,9 @@ impl Cx<'_> {
         // method of the same name)
         if let Some((m, tr)) = &self.explicit_trait {
             let name = &self.prog.names[id as usize];
-            if name.rsplit("::").next().map(|l| l.split('#').next().unwrap_or(l)) == Some(m.as_str()) {
+            // (an impl for a reference, `impl PartialEq for &X`: its methods are `X::__ref_eq`)
+            let last = name.rsplit("::").next().map(|l| l.split('#').next().unwrap_or(l));
+            if last == Some(m.as_str()) || last.and_then(|l| l.strip_prefix("__ref_")) == Some(m.as_str()) {
                 let of_tr = |c: u32| base(c) == Some(tr.as_str());
                 if let Some(&c) = cands.iter().find(|&&c| of_tr(c) && fits(c, at)) {
                     return c;
