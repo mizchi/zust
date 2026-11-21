@@ -1,0 +1,7 @@
+// expect: `break` / `continue` here would have to leave a function in the JS output
+fn id(x: i32) -> i32 { x }
+fn f(stop: bool) -> i32 {
+  let mut n = 0;
+  while true { n = id(match stop { true => { break }, false => 1 }); }
+  n
+}

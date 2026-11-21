@@ -1,0 +1,11 @@
+[package]
+name = "app-hex"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+# (a test package of zurgo, not a member of zust's workspace)
+[workspace]
+
+[dependencies]
+hex = "=0.4.3"

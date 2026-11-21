@@ -1456,6 +1456,20 @@ impl Cx<'_> {
         let Some(cands) = self.prog.overloads.get(gname).or_else(|| self.prog.overloads.get(gname.split('#').next().unwrap_or(gname))) else {
             return id;
         };
+        // (a function without `self` in impls for other self types (`impl L for [u8; 4]` / `[u8; 2]`, `fn n<T>(x: T)`):
+        // not an overload of this one. The caller chose it by the self type, and its first argument says nothing of
+        // that. Methods with `self` are told apart by the receiver below)
+        let own = &self.prog.sigs[id as usize];
+        let same_self: Vec<u32>;
+        let cands: &Vec<u32> = if own.has_self || cands.iter().all(|&c| self.prog.sigs[c as usize].self_ty == own.self_ty) {
+            cands
+        } else {
+            same_self = cands.iter().copied().filter(|&c| self.prog.sigs[c as usize].self_ty == own.self_ty).collect();
+            if same_self.len() <= 1 {
+                return id;
+            }
+            &same_self
+        };
         let Some(at) = recv.or_else(|| args.first().and_then(|a| self.peek(a))) else {
             return id;
         };

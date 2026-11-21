@@ -65,6 +65,43 @@ impl Cx<'_> {
         }
     }
 
+    /// A struct of the program in t that does not implement tr (PartialEq / PartialOrd), the type of a comparison's
+    /// operands: itself, the elements of an array / slice / tuple, behind references. A prelude type or a generic
+    /// struct's instance is left to the impls it has
+    fn lacks_cmp(&self, t: Ty, tr: &str, depth: u32) -> bool {
+        if depth > 8 {
+            return false;
+        }
+        match t {
+            // (`impl PartialEq for &X`: the reference's own impl, before its target's)
+            Ty::Ref(_, i) => {
+                let own = self.prog.ref_impls.contains(&(t, tr.to_string()))
+                    || self.prog.ref_impl_pats.iter().any(|(pt, ptr, n)| ptr == tr && self.prog.match_ty(*pt, t, &mut vec![None; *n]));
+                !own && self.lacks_cmp(*i, tr, depth + 1)
+            }
+            Ty::Array(i, _) | Ty::Slice(i) => self.lacks_cmp(*i, tr, depth + 1),
+            Ty::Struct(sid) => {
+                let b = self.prog.base_of(sid);
+                if self.prog.is_tuple(b) {
+                    return self.prog.structs[sid as usize].fields.iter().any(|f| self.lacks_cmp(f.1, tr, depth + 1));
+                }
+                let user = self.prog.struct_item.get(b as usize).is_some_and(|&i| i < self.prog.prelude_from);
+                // (`impl PartialEq<i32> for S`: an impl for another right-hand side counts, looked for only when the
+                // plain one is missing)
+                // (an impl of the trait (derived or written), not an inherent `eq` / `partial_cmp`, which
+                // Program::implements also counts)
+                user && b == sid && !self.prog.impls.contains(&(b, tr.to_string())) && !self.prog.blanket_traits.contains(tr)
+                    && !{
+                        // (`impl PartialEq<i32> for S`: the functions `S::<PartialEq<i32>>::eq`, which `==` picks directly)
+                        let fs = if tr == "PartialEq" { &self.prog.peq } else { &self.prog.pord };
+                        let n = &self.prog.structs[b as usize].name;
+                        fs.iter().any(|&f| self.prog.names[f as usize].strip_prefix(n.as_str()).is_some_and(|r| r.starts_with("::<")))
+                    }
+            }
+            _ => false,
+        }
+    }
+
     /// `a op b` (Expr::Binary) と複合代入 `a op= b` (Expr::AssignOp)
     pub(crate) fn binary(&mut self, e: &Expr, expected: Option<Ty>) -> R<V> {
         let (op, left, right, assign) = match e {
@@ -160,6 +197,17 @@ impl Cx<'_> {
                 let ne = self.keep_expr(ne);
                 return self.expr(ne, expected);
             }
+            // (`&a == &b` with `impl PartialEq for &X`: that impl's eq, `(&a).eq(&&b)`, not X's fields)
+            // (only PartialEq's `eq` for `&X` (another trait's `eq` gets the same name), and both sides `&X`)
+            let peq_ref = self.prog.method(*sid, "__ref_eq").is_some_and(|id| {
+                self.prog.sigs[id as usize].impl_trait.as_deref().is_some_and(|t| t == "PartialEq" || t.starts_with("PartialEq<"))
+            });
+            if matches!(op, "==" | "!=") && !assign && peq_ref && self.peek(right) == self.peek(left) {
+                let call = mcall(paren(left), "eq", vec![Expr::Ref(false, Box::new(paren(right)))]);
+                let ne = if op == "!=" { Expr::Unary("!".into(), Box::new(Expr::Paren(Box::new(call))), Default::default()) } else { call };
+                let ne = self.keep_expr(ne);
+                return self.expr(ne, expected);
+            }
         }
         // 複合代入 a op= b
         let compound = match op {
@@ -246,6 +294,12 @@ impl Cx<'_> {
         let Some(mut l) = l else {
             return Ok((None, Ty::Never));
         };
+        // (E0369: `X == X` for a struct of the program that is not PartialEq (`<` and the others: PartialOrd), also as an
+        // element of an array, a slice, a tuple or behind a reference)
+        if cmp && !assign && self.user_code && !lt.is_int() && self.lacks_cmp(lt, if op == "==" || op == "!=" { "PartialEq" } else { "PartialOrd" }, 0) {
+            let pos = if let Expr::Binary(_, _, _, sp) = e { sp.start } else { SP };
+            return err(pos, format!("binary operation `{op}` cannot be applied to type `{}` (E0369)", self.prog.tn(lt)));
+        }
         // (a fat raw pointer's pair, copied before the right side runs: `p == { p = q; p }` compares the old p)
         if lt.is_fat() && matches!(lt, Ty::Ptr(..)) {
             let tmp = self.temp(lt);

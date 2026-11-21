@@ -110,6 +110,25 @@ rustc's wasm32-wasip1 builds (tests/wasm/README.md). Left:
   the address checks (the relooper / stackifier above).
 - Auto-vectorization of simple slice loops (map / sum).
 
+## UI frameworks for wasm32 (dioxus, leptos)
+
+Neither builds yet. `python3 cratebench/ui/run.py` builds their wasm32 crate graphs leaves first and lists the first
+error of each failing crate. Details and the order of the work: [docs/reports/2026-11-21-03-ui-frameworks-wasm.md](docs/reports/2026-11-21-03-ui-frameworks-wasm.md).
+
+- Cargo graphs: `crates/zurgo` ([#28](https://github.com/mizchi/zust/issues/28), [docs/zurgo.md](docs/zurgo.md))
+  reads Cargo.toml / Cargo.lock, turns on features as cargo does and builds path and crates.io packages (M0). Left:
+  build scripts (cfgs, `rustc-env`, `OUT_DIR`), two versions of one crate and renamed dependencies (zustc's workspace
+  has one name per crate), an edition per crate, `env!` / `option_env!`, workspace builds for wasm32.
+- Proc macros ([#29](https://github.com/mizchi/zust/issues/29)): none can run. Unknown attributes are dropped silently
+  (`#[wasm_bindgen]`, `#[component]`).
+- async is erased: an `async fn` runs when called and returns its value. Needs a state-machine lowering, `Pin`,
+  `Waker` / `Context`.
+- wasm-bindgen's ABI: 32-bit pointers and `usize` on wasm32, imports from JS, exports called after `main`, its custom
+  section and describe functions, reference types.
+- Macros: `$($t:ty)*`, larger tt-munchers (`pin_project!`, `bitflags!`), `#[macro_use] extern crate`, `#[macro_use]
+  mod` in a file, `#![recursion_limit]`, doc comments before items removed by `#[cfg]` (E0585).
+- Language and std: the tables of sections 2.5 and 2.7 of the report.
+
 ## Tooling
 
 - `scripts/docs_check.sh` without an API key skips a manifest whose record is out of date. jev-lint rejects the whole

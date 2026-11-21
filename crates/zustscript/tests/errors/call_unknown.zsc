@@ -1,0 +1,2 @@
+// expect: type mismatch
+fn f() -> i32 { let apply = (x) => x(1); apply(0) }
