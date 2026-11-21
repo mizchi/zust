@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795305505514,
+  "lastUpdate": 1795305507516,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -78823,6 +78823,85 @@ window.BENCHMARK_DATA = {
           {
             "name": "parity 一致の平均",
             "value": 92.046,
+            "unit": "%"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "miz404@gmail.com",
+            "name": "Kotaro Chikuba",
+            "username": "mizchi"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "5248923ad4b786394fb913449d9e0039b0845510",
+          "message": "SIMD: vectors in the IR, wasm (v128) and Cranelift (128 / 256-bit), core::arch::wasm32 / x86_64 (#33)\n\nImplements #30's V0 (IR + wasm), V1 (Cranelift + core::arch::x86_64, extended to 256-bit AVX/AVX2/FMA) and the relaxed-SIMD part of V2. AVX-512 is skipped for now.\n\n- IR: Type::Vec(VBits) by width; Op::Simd(Shape, VOp, args) by lane shape; room for flexible vectors.\n- wasm: 128-bit vectors only (v128 locals, loads/stores, every simd128 / relaxed-simd opcode).\n- Cranelift: 128- and 256-bit vectors (a 256-bit one is two 128-bit parts); AVX-512 left out of the ISA.\n- Intrinsics lowered in place (core::arch::wasm32 all of simd128 + relaxed-simd; a core::arch::x86_64 SSE..AVX2/FMA subset), checked like rustc's (immediates, pointer types, unsafe, names the program owns).\n- Tests against rustc (wasm32-wasip1 under Node, native x86) and error cases; TODO.md lists what is left.\n\nCo-Authored-By: Claude Opus 5.5 &lt;noreply@anthropic.com&gt;\nClaude-Session: https://claude.ai/code/session_01JroQ9fRgwYNcgjEK4xh99N",
+          "timestamp": "2026-11-22T08:55:07+09:00",
+          "tree_id": "359830a2e814d560d27e8f2270d72ac9676055f2",
+          "url": "https://github.com/mizchi/zust/commit/5248923ad4b786394fb913449d9e0039b0845510"
+        },
+        "date": 1795305507115,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "parity documentSymbol (名前の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity workspace/symbol (上位 20 の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity definition (行き先の一致)",
+            "value": 94.286,
+            "unit": "%"
+          },
+          {
+            "name": "parity hover (名前を含む)",
+            "value": 90,
+            "unit": "%"
+          },
+          {
+            "name": "parity references (数の一致)",
+            "value": 89.744,
+            "unit": "%"
+          },
+          {
+            "name": "parity documentHighlight (数の一致)",
+            "value": 94.595,
+            "unit": "%"
+          },
+          {
+            "name": "parity rename (書き換えの一致)",
+            "value": 93.333,
+            "unit": "%"
+          },
+          {
+            "name": "parity signatureHelp (名前・引数の数・今の引数の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity completion `x.\\|` (書いてある名前を含む)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity completion `na\\|me` (同)",
+            "value": 92.308,
+            "unit": "%"
+          },
+          {
+            "name": "parity 一致の平均",
+            "value": 95.426,
             "unit": "%"
           }
         ]
