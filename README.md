@@ -29,7 +29,7 @@
 
 ## Status
 
-Numbers measured <!-- measured -->2026-11-21, bbe372d<!-- /measured --> by CI on each push to main (bench.yml runs
+Numbers measured <!-- measured -->2026-11-21, 6f8e6a9<!-- /measured --> by CI on each push to main (bench.yml runs
 `bench/ci_bench.py` and `bench/rust_ui.py`, then `scripts/update_readme.py` writes them here). Times come from shared
 GitHub Actions runners and vary by about ±20%; the instruction counts (valgrind) do not.
 
@@ -44,7 +44,7 @@ only the tests it can be asked to handle (no nightly features, auxiliary crates 
 | run-pass (builds, runs, same output) | 2385 | 1795 (75.3%) |
 | check-pass (accepted by `zustc check`) | 1807 | 1471 (81.4%) |
 | build-pass | 135 | 98 (72.6%) |
-| compile-fail (rejected at an annotated line) | 7358 | 3705 (50.4%) |
+| compile-fail (rejected at an annotated line) | 7358 | 3737 (50.8%) |
 <!-- /auto:ui -->
 
 [What is supported](#what-is-supported) breaks this down by area.
@@ -56,22 +56,22 @@ Build speed, build cache size and LSP latency on generated programs of 1000 / 50
 <!-- auto:kpi -->
 | KPI | gen1000 | gen5000 |
 |---|---:|---:|
-| cold build | 119 ms | 540 ms |
-| no-op build | 0.7 ms | 0.7 ms |
-| build after editing one function | 17.6 ms | 62.2 ms |
-| `check` | 77 ms | 380 ms |
+| cold build | 115 ms | 529 ms |
+| no-op build | 0.6 ms | 0.7 ms |
+| build after editing one function | 15.1 ms | 57.7 ms |
+| `check` | 74 ms | 345 ms |
 | no-op build (instructions) | 0.6 M | 0.6 M |
-| edit one function (instructions) | 124.9 M | 591.4 M |
-| `check` (instructions) | 780.0 M | 3850.0 M |
+| edit one function (instructions) | 124.9 M | 591.5 M |
+| `check` (instructions) | 780.3 M | 3851.3 M |
 | build cache on disk | 387.2 KiB | 1902.8 KiB |
 | binary | 324.0 KiB | 1558.3 KiB |
-| cold build peak RSS | 18.6 MiB | 52.4 MiB |
+| cold build peak RSS | 18.6 MiB | 52.5 MiB |
 
 | zust-analyzer (zustc's own sources) | |
 |---|---:|
-| p50: definition, hover, completion, references, rename | 0.48 ms / 0.38 ms / 1.11 ms / 2.05 ms / 0.48 ms |
+| p50: definition, hover, completion, references, rename | 0.47 ms / 0.40 ms / 1.12 ms / 1.99 ms / 0.45 ms |
 | startup until indexed | 138 ms |
-| peak RSS | 80.0 MiB |
+| peak RSS | 80.1 MiB |
 <!-- /auto:kpi -->
 
 Every change is also measured on its own with `python3 bench/kpi_track.py`, so that small increases that add up stay
@@ -353,7 +353,7 @@ the measured numbers. The [reports](docs/reports/) explain each step.
 - [x] tests/ui run-pass: <!-- total:run-pass -->75.3% (1795 / 2385)
 - [x] tests/ui check-pass: <!-- total:check-pass -->81.4% (1471 / 1807)
 - [x] tests/ui build-pass: <!-- total:build-pass -->72.6% (98 / 135)
-- [ ] tests/ui compile-fail (an error on an annotated line): <!-- total:compile-fail -->50.4% (3705 / 7358)
+- [ ] tests/ui compile-fail (an error on an annotated line): <!-- total:compile-fail -->50.8% (3737 / 7358)
 - [x] real crates: fnv, adler2, hex, itoa, rustc-hash and cfg-if build and give the same output (6 / 6)
 - [x] zust-analyzer answers like rust-analyzer: 95.4% (rust-analyzer: 96.2%)
 
@@ -395,7 +395,7 @@ the measured numbers. The [reports](docs/reports/) explain each step.
 
 - [x] borrow checking: moves, conflicting loans, escapes, mutability: borrowck <!-- cf:borrowck -->59.3%
   ([report 08](docs/reports/2026-11-18-08-borrow-checking.md))
-- [x] type errors, missing items, generics declarations (E0403, E0207, E0392, E0072 ..): typeck <!-- cf:typeck -->68.3%, structs <!-- cf:structs -->75.0%
+- [x] type errors, missing items, generics declarations (E0403, E0207, E0392, E0072 ..): typeck <!-- cf:typeck -->68.3%, structs <!-- cf:structs -->77.1%
 - [x] unsafe operations outside `unsafe` (E0133): calls to `unsafe fn` and extern fns, raw pointer derefs, `static mut`,
   union field reads (not yet inside closures or consts, and not the `unsafe_op_in_unsafe_fn` lint)
 - [x] non-exhaustive `match` (E0004): bool, unit, enums (variants that cannot have a value need no arm), structs and
