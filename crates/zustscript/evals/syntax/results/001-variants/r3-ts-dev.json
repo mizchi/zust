@@ -1,0 +1,90 @@
+[
+  {
+    "proposal": "001-variants",
+    "persona": "ts-dev",
+    "scores": {
+      "R1": {
+        "score": 4,
+        "why": "`Circle { center: Vec2, r: f64 }`、`Circle { r, ... } => 3.14… * r * r`、`Label { ... } => 0.0` は、TS の判別共用体と JS の rest を知っていれば説明なしで読める。r2 で引っかかった『同じ腕に `..` と `...` が並ぶ』は、`...` への統一で消えた。scrutinee の絞り込みで `c @` もほぼ要らなくなった。減点は 2 つ。`Shape::Circle` の `::` は、TS では読めても書き慣れない。`@` は入れ子でだけ使うが、`@wasm` / `@nominal` と同じ記号のまま残る"
+      },
+      "R2": {
+        "score": 4,
+        "why": "パターンの残りと更新の spread が `...` にそろい、更新は 002 の spread の規則(先頭に 1 つ、結果は `...c` の型)にそのまま従う。例外は 2 つになった。(1) effect の操作名は一意のまま。(2) 同じファイルで、関数とバリアント、型の別名とバリアントの同名は宣言の時点でエラー。どちらにも理由が書いてある。名前なしの `{ ...c, x }` だけがバリアントのときにエラーで、`@nominal` のときは通る、という小さな非対称もある"
+      },
+      "R3": {
+        "score": 3,
+        "why": "構文は `::`、`{`、`...` の先読みで決まる。修飾しない名前は『具体的な型との単一化だけで決まる。遅らせるのは引数のないバリアントだけ。未決の値の match、フィールド読み出し、メソッド呼び出しは修飾を求める』となり、r2 よりはるかに明快。それでも、どの enum かは期待する型に依存するので、ルーブリックでは 3。`let h = if c { None } else { At { index: 1 } }` がエラーで、`Hit::At` にすれば通るという差は、人が字面から予測できる。もう 1 つ、生成した式 `Circle { … }` が `Shape::Circle` 型か `Shape` 型かが書かれていない。そのため、注釈のない if の分岐、配列の要素、`let mut` への再代入の型が決まらない"
+      },
+      "R4": {
+        "score": 4,
+        "why": "`Label(_, _, _)` が `Label { ... }` になる。`moved` は `Circle { ...s, center: add(center) }` で、全フィールドの書き直しも別名も要らない。`None` を enum ごとに使える。TS より長い所は 2 つ。更新でバリアント名を毎回書く(`{ ...s, center }` はエラー)。注釈のない `let h = if c { None } else { At{…} }` に修飾か注釈が要る。全バリアントに共通する `s.at` は、まだ書けない"
+      },
+      "R5": {
+        "score": 4,
+        "why": "引数を持つバリアントは、その場で修飾を求める(クイックフィックスつき)。遅らせた `None` には、決まった場所の注が付く(`report(x)` の例)。名前なしの spread、`..`、書き漏らした `...`、浮動小数点のリテラルパターンは、どれも直し方つきのエラー。残る弱点は 2 つ。002 の『`{ x }` は常に警告』と組み合わさって、`if found < 0 { None } else { … }` の `{ None }` が警告になる(誤検出の多い警告は無視されるようになる)。`Circle { r: 0, ... }` の例は、f64 のフィールドに整数のリテラルを書いていて、規則(数値の暗黙の変換なし、浮動小数点のパターンは書けない)と食い違う"
+      },
+      "R6": {
+        "score": 4,
+        "why": "名前付きのフィールドが名前のままプロパティになり、`export declare namespace Shape { type Circle = … }` で、TS からも `Shape.Circle` を受けられる。zustscript の `Shape::Circle` と `.d.ts` の `Shape.Circle` が対応するのも分かりやすい。更新の出力 `{ ...s, TAG: \"Circle\", center }` も予想どおり。一手間残る点: TS 側でバリアントの値を作るコンストラクタがない。`Parsed.None` と `Hit.None` が同じ TAG になること、データのないバリアントの出力の形は、`@tag` の決定待ち"
+      },
+      "R7": {
+        "score": 4,
+        "why": "scrutinee の絞り込み(TS の switch の絞り込みと同じ感覚)、パターンの `...`、`let { x, y } = p` で、TS の経験がほぼ通じるようになった(r2 の 3 から上げた)。新しく覚えることは 4 つ。`::` での修飾。更新ではバリアント名を書くこと。部分型が `Shape::Circle` → `Shape` の 1 つだけであること。TS の定番の `type Circle = {…}; type Shape = Circle | Rect` の名前の付け方が、宣言の時点でエラーになること(`Shape::Circle` を使えという誘導が要る)"
+      },
+      "R8": {
+        "score": 3,
+        "why": "遅延は関数の中で閉じ、finish_fn の順序も明記されている。パターンの Id と side table、`PUNCTS` の `...` の位置も具体的。今の parse.rs は、大文字の名前の後の `{` を、`no_rec` でなければレコードとして読む。`match s {` の判定とは衝突しない。一方で、`Shape::Circle` を部分型として単一化に入れる(『`Shape` に広げてから単一化』)。そうすると、if の分岐の合流、配列の要素、`let mut` で、どちらの型にするかの規則が要る。それがまだない。hover は、絞り込みと未決の候補(`Hit | Parsed`)の両方を表示する必要がある"
+      }
+    },
+    "blocker": [],
+    "issues": [
+      {
+        "severity": "high",
+        "where": "変更後 `first_hit` / `describe_later_a`: `if found < 0 { None } else { … }`(002 の B の『`{ x }` は常に警告』との組み合わせ)",
+        "problem": "002 の規則は block() の先頭でも判定するので、if の本体 `{ None }` が『識別子 1 つだけのブロック』として警告になる。この提案の corpus そのものが警告を出す",
+        "suggestion": "002 の側で、警告を『式の位置に置いた `{`』に絞る(if / else / fn / while の本体は対象外)。001 の例が警告なしで通ることを、両方の提案の変更後で確かめる"
+      },
+      {
+        "severity": "medium",
+        "where": "B. バリアントの型 `Shape::Circle`",
+        "problem": "生成した式 `Circle { center, r }` の型が `Shape::Circle` か `Shape` かが書かれていない。前者なら、注釈のない `let mut x = Circle{…}; x = Rect{…}` や `let xs = [Circle{…}, Rect{…}]` がエラーになりうる。TS では、リテラルは合流で共用体に広がる",
+        "suggestion": "生成した式の型は `Shape` にする。`Shape::Circle` になるのは、注釈と絞り込みのときだけにする。あるいは、if / match の分岐と配列の要素は enum に広げて合流する、と明記する"
+      },
+      {
+        "severity": "medium",
+        "where": "A. 同名の型の別名とバリアントは宣言の時点でエラー",
+        "problem": "TS からの移行で一番自然な書き方 `type Circle = { … }` と `enum Shape { Circle { … } }` の併存、あるいは `fn Label(…) -> Jsx` というコンポーネントと `Shape::Label` の併存が、名前を変えるまで通らない。React では UI 部品と同じ名前のデータの種類はよくある",
+        "suggestion": "エラーメッセージで『バリアントの型は `Shape::Circle` と書ける』と別名の代わりを示す。コンポーネントとの衝突は、JSX の `<Label />` の字面とバリアントの生成 `Label { … }` / `Label(…)` が構文上区別できるかを検討し、できるなら許す"
+      },
+      {
+        "severity": "low",
+        "where": "B. パターン `Circle { r: 0, ... }`",
+        "problem": "`r` は f64 なのに、整数のリテラルで照合する例になっている。規則(浮動小数点のリテラルパターンは書けない、暗黙の変換なし)と食い違う",
+        "suggestion": "例を `Label { text: \"\", ... }` のような、文字列か整数のフィールドに直す"
+      },
+      {
+        "severity": "low",
+        "where": "B. 更新(名前なしの `{ ...c, x }` はエラー)",
+        "problem": "TS の人は、絞り込んだ `s` に `{ ...s, center }` と書く。直し方は出るが、毎回バリアント名を書かされる理由(出力に判別キーを書くため)は、書く側には見えない",
+        "suggestion": "絞り込み済みの変数の名前なしの spread は、絞り込んだバリアントとして扱う案を、代替案に理由つきで残す。エラーのままにするなら、クイックフィックスで名前を足す"
+      },
+      {
+        "severity": "low",
+        "where": "B. 更新 / C. レコードとの関係",
+        "problem": "`Circle { ...rec, r: 1.0 }`(`rec` は 002 の構造的なレコード)が書けるかが明記されていない。規則『結果は `...c` の型』からはエラーと読めるが、書かれていない",
+        "suggestion": "レコードからバリアントへの spread はエラーと明記し、直し方(`Circle { center: rec.center, r: 1.0 }`)を示す"
+      }
+    ],
+    "questions": [
+      "生成した式 `Circle { … }` の型は `Shape::Circle` か `Shape` か。if の分岐、配列の要素、`let mut` への再代入で、どう合流するか",
+      "002 の『`{ x }` は常に警告』は、if の本体 `{ None }` にも出るか",
+      "構造的なレコードを、バリアントの更新の spread の元にできるか",
+      "JSX の `<Label />` と、バリアントの `Label { … }` の同名を、構文で区別して許す余地はあるか",
+      "TS 側で値を作るコンストラクタ(`Shape.Circle({ … })`)は、`@tag` の決定と一緒に出すのか"
+    ],
+    "alternative": {
+      "summary": "生成した式の型は enum(`Shape`)にし、`Shape::Circle` は注釈と絞り込みでだけ現れるようにする。if の本体は `{ x }` の警告の対象外にする",
+      "example": "let shapes = [Circle { center: c, r: 1.0 }, Rect { min: a, max: b }];   // Array<Shape>(合流で広げる必要がない)\nfn grow(c: Shape::Circle) -> Shape::Circle { Circle { ...c, r: c.r * 2.0 } } // 注釈すれば Shape::Circle\npub fn first_hit(…) -> Hit {\n  if found < 0 { None } else { At { index: found } }   // if の本体なので警告なし\n}"
+    }
+  }
+]

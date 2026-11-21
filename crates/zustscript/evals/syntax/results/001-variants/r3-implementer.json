@@ -1,0 +1,92 @@
+[
+  {
+    "proposal": "001-variants",
+    "persona": "implementer",
+    "scores": {
+      "R1": {
+        "score": 4,
+        "why": "`Circle { r, ... }`、`Shape::Circle`、`Circle { ...s, center: add(center) }` は、Rust と TS の知識で読める。腕の中で `s` が絞り込まれるのも、TS の人の期待どおり。ただし `describe_later` が修飾を求め、`describe_later_b` は通る。この違いは、引数のあるなしで遅らせるかが変わる、という規則を読まないと分からない"
+      },
+      "R2": {
+        "score": 4,
+        "why": "パターンの残りと spread が `...` にそろい、更新は 002 の spread の規則に従う。fn とバリアント、別名とバリアントの同名は宣言の時点でエラーになった。r2 の不揃いは解消した。例外として残るのは 2 つで、どちらも範囲がはっきり書かれている。effect の操作名は一意のまま(もとからある規則)。部分型は `Shape::Circle <: Shape` だけ"
+      },
+      "R3": {
+        "score": 3,
+        "why": "バリアントの解決は、具体的な Named 型との単一化だけで決まるようになり、候補の数は使わなくなった(r2 の high は解消)。しかし、部分型 `Shape::Circle <: Shape` は等式の単一化の上では順序に依存する。`if b { s } else { t }`(s は絞り込み済み、t: Shape)と、その逆の順で、通るかどうかが変わる。`[c, shape]` と `[shape, c]`、期待する型のない match の腕同士も同じ。フィールドのパス `st.shape` の絞り込みも、束縛し直しや影になったときの規則がない"
+      },
+      "R4": {
+        "score": 4,
+        "why": "名前付きフィールド、`...`、scrutinee の絞り込みからの更新 `Label { ...s, at: add(at) }` で、corpus の `moved` は短くなった。引数を持つバリアントを注釈のない `let` で作るときは修飾が要る(`let h = Hit::At { index: 1 }`)。ここは r2 より少し長くなる"
+      },
+      "R5": {
+        "score": 4,
+        "why": "決まらないものは、その場か関数の終わりでエラーになり、修飾とクイックフィックスが示される。遅らせた `None` には、決まった場所の注が付く。黙って別の enum に決まる経路はなくなった。ただし部分型の順序依存では、『expected Shape::Circle, found Shape』という、原因(先の腕で狭い型に決まったこと)を示さない誤りが出る"
+      },
+      "R6": {
+        "score": 4,
+        "why": "名前付きフィールドが名前のままプロパティになり、`Shape.Circle` の namespace が出て、spread の後に TAG を書く。どれも出力が予想できる。総称的な enum の namespace(`Option.Some<T>`)は、まだ決まっていない"
+      },
+      "R7": {
+        "score": 4,
+        "why": "Rust の struct バリアントと TS の判別共用体の、どちらの経験も通じる。新しく覚えるのは、引数のないバリアントだけを遅らせる規則と、`..` ではなく `...` を使うことくらい"
+      },
+      "R8": {
+        "score": 3,
+        "why": "解決は関数の中で閉じ、候補つきの型変数は intv / floatv と同じ形で `unify_inner` に入る。パターンの Id と `pat_enum` の side table、`EK::Call` に期待する型を渡すことも具体的に書かれている。ただし Ty に部分型を入れると、unify / resolve / occurs / show / subst_ty のすべてに広げる規則が要り、join がないので順序に依存する。lower.rs では Rust の enum にフィールドの読み出しがないので、絞り込んだ `s.r` と、型が `Shape::Circle` の引数の下ろし方が決まっていない"
+      }
+    },
+    "blocker": [],
+    "issues": [
+      {
+        "severity": "high",
+        "where": "B『バリアントの型 Shape::Circle … Shape の部分型 … どこにでも渡せる(引数、戻り値、配列の要素など)』と、実装の注意『Shape を期待する所では Shape に広げてから単一化する』",
+        "problem": "check.rs の単一化は等式だけで、join を持たない。広げられるのは、期待する型が先に決まっているときだけになる。`let t = match s { Circle {..} => s, Rect {..} => s }` では、out が fresh で、最初の腕で out := Shape::Circle に決まり、2 つ目の腕で Shape::Rect と不一致になる。`if b { s } else { t }` は通らず、`if b { t } else { s }` は通る。`[c, shape]` も通らない。どれも書いた順で結果が変わり、エラーの位置も原因から離れる",
+        "suggestion": "バリアントの型を、単一化の中に入れない。(1) 絞り込んだ変数や、型が `Shape::Circle` の値を読んだときの型は、常に `Shape` にする。(2) 絞り込みの情報は束縛のメタデータとして持ち、見るのは EK::Field、spread の元、期待する型がすでに具体的な `Shape::Circle` であるとき(引数、注釈、戻り値)の検査だけにする。(3) `let d = c` の d に絞り込みを引き継ぐかを決める。引き継ぐなら、束縛のメタデータを写す、と明記する"
+      },
+      {
+        "severity": "medium",
+        "where": "出力『@wasm では Rust の struct バリアント』と、B『フィールドの読み出し c.r』",
+        "problem": "Rust の enum にはフィールドの読み出しがない。lower.rs の EK::Field は `{s}.{f}` を出すだけなので、絞り込んだ `s.r` と、`fn grow(c: Shape::Circle)` の `c.r` は Rust のコンパイルエラーになる。型が `Shape::Circle` の引数と戻り値の Rust での型、境界の VTy(全バリアントのスロットを持つのか)も決まっていない",
+        "suggestion": "腕の中で絞り込んだ変数は、腕のパターンで全フィールドを新しい名前に束縛する(`ZsShape::Circle { center: s_center, r: s_r }`)。`s.r` はその名前に下ろす。型が `Shape::Circle` の引数は、本体の先頭で `let ZsShape::Circle { center: c_center, r: c_r } = c else { unreachable!() };` にする。境界は ZsShape のまま渡す、と書く"
+      },
+      {
+        "severity": "low",
+        "where": "実装の注意『finish_fn の順序 1. 候補つきの型変数の固定点』",
+        "problem": "r3 で遅らせるのは引数のないバリアントだけなので、決まってもフィールドとの単一化は起きない。候補が決まるのは推論中の単一化だけで、finish_fn で新しく決まる経路はない。この段は r2 の名残で、規則 A の『関数の終わりまで決まらなければエラー』と役割が重なる。網羅性の検査を finish_fn に移す必要もない。照合する値の型が決まっていなければ、その場でエラーになるため",
+        "suggestion": "第 1 段を『残った候補つきの型変数をエラーにする(決まった場所の注は単一化のときに記録しておく)』に直す。網羅性の検査は EK::Match に残してよい、と書く"
+      },
+      {
+        "severity": "low",
+        "where": "A『期待する型が伝わる場所(列挙する。これ以外では伝わらない)』",
+        "problem": "今の check.rs は、EK::Assign(`infer(x, Some(&t))`)、Stmt::LetMut、EK::Perform の引数、EK::Method の引数、handle の arm の本体、`k(x)` でも期待する型を渡している。列挙にはこれらがないので、『これ以外では伝わらない』と矛盾する。`let mut h: Hit = None; h = None;` の 2 つ目の None が決まるかどうかが、規則からは読めない",
+        "suggestion": "代入と複合代入、`let mut x: T = e`、メソッドと `perform` の引数、handle の arm の本体(と `k` の引数)を列挙に足す"
+      },
+      {
+        "severity": "low",
+        "where": "A『effect の操作名は effect の enum の間で一意のまま … 衝突したときは perform Console::Print(…) と修飾できる』",
+        "problem": "effect の間で一意なら、perform と handle の arm で衝突は起きない(データの enum のバリアントは候補にならないため)。何との衝突を修飾で避けるのかが書かれていない。また、parse.rs の handle の arm は `ident()` しか読まず、HArm に修飾を持つ場所がない。EffWalk は `variant_of.get(v)` を名前だけで引いている",
+        "suggestion": "『effect の操作名は、effect の enum の間で一意。データの enum のバリアントとは同じ名前でよい。修飾は書けるが必須ではない』と書く。effect の操作の表(`op_of`)を `variant_of` から分け、EffWalk と EK::Perform / EK::Handle はそれを引く、と実装の注意に足す"
+      },
+      {
+        "severity": "low",
+        "where": "A『match のパターンでは、照合する値の型で決まる』と、check.rs の check_pat(Pat::Variant で照合する値の型を Named(e) と単一化している)",
+        "problem": "照合する値の型が、候補つきではない、ふつうの型変数のときの扱いが書かれていない。今の check_pat は、パターンのバリアント名から照合する値の型を決めている。r3 の規則では、名前が一意なバリアント(`Circle`)でも決めてはいけない(候補の数で決めないため)。総称的な関数の中や、`|>` で型が後から決まる場合に、今まで通っていたコードがエラーになる",
+        "suggestion": "『照合する値の型が決まっていなければ、修飾されたパターン(`Shape::Circle {..}`)があるときだけ、それで決める。なければ注釈を求める』と明記する"
+      }
+    ],
+    "questions": [
+      "型が `Shape::Circle` の値を match にかけたときの網羅性(`Circle` の腕 1 つで網羅か、他の腕はエラーか)",
+      "`let d = s`(s は絞り込み済み)の d は絞り込まれるか",
+      "位置引数のバリアントの残りのパターン `Pair(...)` はあるか(r2 から未回答)",
+      "総称的な enum のバリアントの型は `Option::Some` と `Option<i32>::Some` のどちらで書くか。`.d.ts` の `Option.Some<T>` はどうなるか",
+      "enum の名前とバリアントの名前が同じとき(旧 corpus の `enum Hit { Hit(i32) }`)は、宣言の時点でのエラーに含まれるか",
+      "名前付きの更新 `Circle { ...r, center }` で、r がバリアントではなくレコード(Ty::Rec)のときは、エラーか",
+      "フィールドのパス `st.shape` の絞り込みは、腕の中で `st` を `let` で影にしたら外れるか"
+    ],
+    "alternative": {
+      "summary": "部分型を Ty に入れない。絞り込みは束縛のメタデータだけで持ち、`Shape::Circle` は期待する型として検査するときだけ使う。単一化はすべて `Shape` で行うので、順序に依存しない",
+      "example": "fn grow(c: Shape::Circle) -> Shape::Circle { Circle { ...c, r: c.r * 2.0 } }\n// checker: 引数 c の束縛は (型 Shape, 絞り込み Circle)。c.r と ...c はメタデータを見る\n// 戻り値の検査: 期待する型が Shape::Circle なので、末尾の式が Circle であることを構文と絞り込みで確かめる\n\nlet t = match s { Circle {..} => s, Rect {..} => s };   // どの腕も型は Shape。順序に依存しない\nlet xs = [c, shape];                                  // Array<Shape>\ngrow(c)            // 通る: c の束縛は Circle に絞り込まれている\ngrow(shape)        // error: expected `Shape::Circle`, found `Shape` (match で絞り込む)\n\n// lower.rs\n// fn grow(c: ZsShape) -> ZsShape {\n//   let ZsShape::Circle { center: c_center, r: c_r } = c else { unreachable!() };\n//   ZsShape::Circle { center: c_center, r: c_r * 2.0 }\n// }"
+    }
+  }
+]

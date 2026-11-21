@@ -1,0 +1,90 @@
+[
+  {
+    "proposal": "001-variants",
+    "persona": "rust-dev",
+    "scores": {
+      "R1": {
+        "score": 4,
+        "why": "`Circle { center: Vec2, r: f64 }`、`Circle { r, ... } =>`、`fn grow(c: Shape::Circle) -> Shape::Circle` は Rust の struct variant とほぼ同じで、説明なしに読める。scrutinee の絞り込み(`Circle { center, ... } => Circle { ...s, center: add(center) }` の腕の中で `s` が Circle になる)は Rust にない読み方なので、一度は説明が要る。パターンの残りが `..` でなく `...` なのも、Rust の目には一瞬引っかかる。"
+      },
+      "R2": {
+        "score": 4,
+        "why": "パターンの残り `...` と更新 `Circle { ...c, … }` が 002 の spread と揃い、`Shape::Circle` は値、パターン、型のどこでも同じパスで書ける。例外は 2 つ。effect の操作名だけは一意のまま残る。言語にある部分型が `Shape::Circle <: Shape` の 1 つだけになり、他の型(レコード、型引数)には部分型がない。"
+      },
+      "R3": {
+        "score": 3,
+        "why": "決まる方法を『具体的な型との単一化』1 つに絞り、候補の数では決めないと明記した。遅らせるのは `None` のような引数なしのバリアントだけで、決まっていない値の match はその場でエラー。r2 の循環は消え、規則は明快になった。ただし解決は依然として期待する型に依存する(rubric の 3 に当たる)。新しく入った部分型について、分岐の合流(`match s { Circle { .. } => s, _ => s }` で、期待する型がないときの結果の型)の規則が書かれていない。"
+      },
+      "R4": {
+        "score": 3,
+        "why": "名前付きフィールド、`...` での部分的な取り出し、`Label { ...s, at: add(at) }` での更新で、`moved` は r1 の全フィールドの書き直しから大きく短くなった。`Pair(Vec2, Vec2)` も同じ enum に置ける。一方で、引数を持つバリアントを遅らせない規則のため、期待する型がない所では `let x = Some(1);`、`xs.map((x) => Some(x))`、`let mut best = None; … best = Some(i);` がすべて `Option::Some` の修飾を求められる。Rust で最も頻繁に書く形が長くなる。or パターンとガードは 004 に移ったので、この提案の範囲ではまだ書けない。"
+      },
+      "R5": {
+        "score": 4,
+        "why": "enum を足しても離れた場所が壊れない。決まらないときは `cannot tell which enum At is: write Hit::At` と、クイックフィックス(修飾か `let h: Hit` の注釈)が出る。遅らせて決まった `None` が原因の型エラーには『ここで `Parsed::None` に決まった』という注が付き、r2 の『誤りの位置が原因から離れる』が解消した。`...` の書き漏らし、`..` を書いたとき、浮動小数点のリテラルパターン、TAG との衝突はどれもエラーになる。減点は 2 つ。入れ子のパターンやリテラルを含むパターン(`Ok(Circle { .. })`、`Circle { r: 0, ... }`)の網羅性の検査の方式が書かれていない(今の `exhaustive()` は最上位しか見ない)。部分型の合流の失敗が、分かりにくいエラーになりうる。"
+      },
+      "R6": {
+        "score": 4,
+        "why": "名前付きフィールドが名前のままプロパティになる。`.d.ts` は `Shape.Circle` の namespace で、zustscript の `Shape::Circle` 型とそのまま対応する。更新で TAG を spread の後に明示するので、実行時のバリアントが字面どおりになる。`@wasm` は `ZsShape::Circle { center, r }` で、全フィールドを束縛し直して組み立てる、と書かれており予想しやすい。位置引数のバリアントは `_0` のまま。同名のバリアントが同じ TAG になる件は `@tag` の決定に移った。"
+      },
+      "R7": {
+        "score": 4,
+        "why": "Rust の enum、struct variant、`@` 束縛、パスでの修飾の知識がそのまま使える。新しく覚えるのは 4 つ。`...`(Rust の `..` ではない)、scrutinee の絞り込み、`Shape::Circle` の部分型、そして prelude の `Some` / `Ok` でも期待する型がないと修飾が要ること。最後のものは Rust の経験と逆なので、最初は何度も引っかかる。"
+      },
+      "R8": {
+        "score": 3,
+        "why": "遅延を引数なしのバリアントに限ったので、候補つきの型変数は引数の型を持たず、r2 で心配したオーバーロード解決のような仕組みは要らなくなった。finish_fn の順序(候補の固定点 → 数値の既定値 → deferred → casts → 網羅性 → side table)も明記された。check.rs の `EK::If` は then 側の型を else 側の expect に渡すので、`describe_later_b` の形はそのまま入る。ただし部分型は、今の unify_inner(`Ty::Named` の名前の一致だけを見る)に、広げる場所(coercion)と合流の規則を足す必要がある。網羅性の検査を finish_fn に移すことと、入れ子のパターンを扱うことも、実装量として小さくない。"
+      }
+    },
+    "blocker": [],
+    "issues": [
+      {
+        "severity": "high",
+        "where": "A『引数を持つバリアントは遅らせない。その場の期待する型で決まらなければ、修飾を求める』",
+        "problem": "prelude の `Option` / `Result` にもこの規則が掛かるので、`let x = Some(1);`、`xs.map((x) => Some(x))`、`let mut best = None; … best = Some(i);`(右辺の期待する型は、まだ決まっていない `best` の型)が、すべて `Option::Some` の修飾を求めるエラーになる。Rust では最も頻繁に書く形で、R4 と R7 を大きく下げる。",
+        "suggestion": "整数リテラルの既定値(i32)と同じ扱いを、prelude の enum に限って入れる。finish_fn の固定点の後でも決まらない `None` / `Some(…)` / `Ok(…)` / `Err(…)` は prelude の型に決める。引数を持つものも、期待する型がなければ、その場で prelude の enum として推論する(総称なので、引数の型が誤った位置でエラーになる心配はない)。prelude は固定なので、A.1 のような非局所性は戻らない。ユーザーの enum が同名のバリアントを持つ場合は、期待する型があればそちらが優先される。"
+      },
+      {
+        "severity": "medium",
+        "where": "B『バリアントの型 `Shape::Circle`』(`Shape` の部分型)",
+        "problem": "部分型がどこで広がり、どこで合流するかが書かれていない。例: 期待する型のない `let t = match s { Circle { .. } => s, _ => s };`(最初の腕で結果が `Shape::Circle` に固定されると、2 つ目の腕で失敗する)、`let xs = [c, d];`(c と d が絞り込まれていると `Array<Shape::Circle>` になり、`Array<Shape>` には渡せない。これは未決事項)、`let o = Some(c);` を `Option<Shape>` を受ける関数に渡す場合。HM 風の単一化に部分型を入れると、ここで驚くエラーが出やすい。",
+        "suggestion": "『`Shape::Circle` は、注釈で書いたとき、またはフィールドの読み出しと spread のときだけ保つ。注釈のない let、分岐の合流、配列の要素、型引数の中では `Shape` に広げる』という広げ方の規則を足す(TS のリテラル型の widening と同じ考え方)。"
+      },
+      {
+        "severity": "medium",
+        "where": "B『パターン』と、実装の注意『網羅性の検査を finish_fn に移す』",
+        "problem": "名前付きフィールドの中に、入れ子のバリアントのパターンやリテラルのパターンが入る。網羅性の検査の方式は書かれておらず、今の check.rs の `exhaustive()` は、引数がすべて `_` か束縛のバリアントしか『覆った』と数えない。そのため `Ok(Circle { .. })`、`Ok(Rect { .. })`、`Ok(Label { .. })`、`None`、`Bad(_)` を全部書いても、`Ok` が覆われていないと誤検出される。到達しない腕の警告もない。",
+        "suggestion": "Rust と同じく、パターン行列による網羅性と到達可能性の検査(Maranget の方式)を、この提案の実装の範囲に入れると明記する。足りないものは `Ok(Circle { .. })` の形で示す。"
+      },
+      {
+        "severity": "medium",
+        "where": "A『同じファイルで、関数とバリアントの同名は宣言の時点でエラー』",
+        "problem": "UI のコードでは、`Shape::Circle` を描くコンポーネントを `fn Circle(props: …) -> Jsx` と名付けるのが自然で、よく衝突する。Rust では値の名前空間が分かれているので、`fn Circle` と `Shape::Circle` は共存できる。名前を変えさせると R4 と R7 が下がる。",
+        "suggestion": "衝突する側のバリアントは修飾(`Shape::Circle`)でしか書けない、という制限にとどめる。effect の推論が名前だけで関数とバリアントを区別している点は、修飾されたパスを推論に渡すことで避けられないか検討する。少なくとも、エラーにする理由を『effect の推論の制約』と書き、将来は緩める余地があることを未決事項に残す。"
+      },
+      {
+        "severity": "low",
+        "where": "A『effect の操作は例外』",
+        "problem": "『操作名は effect の enum の間で一意のまま』と『衝突したときは `perform Console::Print(…)` と修飾できる』が同時に書かれていて、衝突が許されるのかどうかが読み取れない。",
+        "suggestion": "『修飾しない操作名は、すべての effect の enum の間で一意でなければならない。衝突した名前は修飾すれば使える。衝突したときのエラーは、両方の宣言の位置と修飾の直し方を出す』のように、1 つの規則として書き直す。"
+      },
+      {
+        "severity": "low",
+        "where": "未決事項『腕の中で `let mut` の変数に代入したとき』",
+        "problem": "Rust には、束縛した値の型が代入で変わる、という概念がない。ここを決めないと、絞り込みが静かに間違うおそれがある。",
+        "suggestion": "まずは、絞り込まれている `let mut` の変数への腕の中での代入をエラーにする(直し方: 別の変数に束縛する、または `@` で名前を付ける)。後から緩めるのは互換を壊さない。"
+      }
+    ],
+    "questions": [
+      "prelude の `Option` / `Result` の `Some(x)` / `Ok(x)` も、期待する型がなければ修飾が要るのか。要るなら `let x = Some(1);` はエラーか",
+      "期待する型がないときの、`Shape::Circle` と `Shape` の合流(if / match の分岐、配列の要素、注釈なしの let)の規則は何か",
+      "網羅性の検査は入れ子のパターンとリテラルのパターンを扱うか。到達しない腕は警告になるか",
+      "位置引数のバリアントを関数値として渡す使い方(`xs.map(At)`)はできるか(r2 からの持ち越し)",
+      "絞り込まれた変数をクロージャが捕捉したとき、クロージャの中でも絞り込まれたままか"
+    ],
+    "alternative": {
+      "summary": "prelude の enum に限り、整数リテラルと同じ『既定値』を入れる。合わせて、絞り込んだ型の広げ方の規則を明記する。",
+      "example": "let x = Some(1);                       // OK: 期待する型がない -> prelude の Option<i32>\nlet mut best = None;                   // finish_fn まで決まらなければ Option\nfor i in range(0, n) { if ok(i) { best = Some(i); } }   // OK\nlet h = None; count(h);                // count(h: Hit) で Hit に決まる(既定値より先に単一化)\n\nfn pick(s: Shape) -> Shape {\n  let t = match s { Circle { .. } => s, _ => s };   // 注釈のない let の合流では Shape に広げる\n  t\n}\nfn grow(c: Shape::Circle) -> Shape::Circle { Circle { ...c, r: c.r * 2.0 } }   // 注釈では保つ"
+    }
+  }
+]

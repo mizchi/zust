@@ -1,0 +1,89 @@
+[
+  {
+    "proposal": "002-anonymous-records",
+    "persona": "rust-dev",
+    "scores": {
+      "R1": {
+        "score": 3,
+        "why": "`{ total, done }`、`{ ...t, done: !t.done }`、`(id: i32) => ()`、`@nominal type Meters = { v: f64 }` はどれも読みやすい。ただし `toggle` の `if t.id == id { { ...t, done: !t.done } } else { t }` の二重の波括弧は残り、Rust の目にはブロックの中のブロックに見える。`TodoList({ todos, onToggle, title }: { todos: Array<Todo>, onToggle: OnToggle, title: String })` は、フィールド名を 2 回読むことになる。"
+      },
+      "R2": {
+        "score": 4,
+        "why": "名前で区別したい型は `@nominal` で選び、これは `@wasm fn` と同じ『宣言の前の印』の形。`type` が関数型とタプルにも使える。spread の規則は 001 の `Circle { ...c, … }` と共通。パターンの残りの `...` も揃った。残る例外は 2 つ。宣言は `->`、型とクロージャは `=>`。再帰する型だけは名前で区別される(定義は明確になった)。"
+      },
+      "R3": {
+        "score": 4,
+        "why": "ブロックかレコードかは、型に依存せず 2 トークンの先読み(`ident :` / `ident ,` / `...`)で決まる。判定を 1 つの関数にまとめると明記された。型の `=>` は右結合、1 要素のタプルの型は `(T,)` で、型の括弧の読み方も決まった。減点は 2 つ。`{ x }` と `{ x, }` はカンマ 1 つで分かれる(警告は出る)。関数型は `)` の後の `=>` を見るまで決まらない(巻き戻しで足りる)。"
+      },
+      "R4": {
+        "score": 4,
+        "why": "props と小さな戻り値の型の名前が要らなくなり、`stats` は `{ total, done }` で終わる。r2 で失った newtype は `@nominal type` で取り戻した。`type OnToggle = (id: i32) => ()` で、関数型にも名前を付けられる。失ったもの、まだ長いものは 2 つ。spread は 1 つだけで、`{ ...a, ...b }` は書けない。props のフィールド名をパターンと型で 2 回書く(未決のまま)。"
+      },
+      "R5": {
+        "score": 4,
+        "why": "r2 で R5 を下げた 3 点が解消した。`@nominal` で `Meters` と `Celsius` が取り違えられない。`let r = { x };` には構文だけで警告が出る。spread でフィールドを足す、型を変える、はエラーになる。`..t`、後ろに書いた `...t`、旧式の `fn(..) -> ..` は直し方つきのエラーで、レコードの差分も表示する。減点は 2 つ。`{ x }` の警告がどこまで効くのかが書かれていない(if や fn の本体なら誤検出が大量に出る。issues の 1 つ目)。`@nominal` の型の区別は、`.d.ts` で brand を付けない限り TS 側では効かない。"
+      },
+      "R6": {
+        "score": 4,
+        "why": "JS はプレーンなオブジェクトと分割代入、`.d.ts` は `interface Todo` と、引数名つきの `(id: i32) => void`。分割代入した引数の名前(`props` / `arg0`)と、`@wasm` の struct 名(最初の別名、他は `type ZsTask = ZsTodo;`)が決まった。減点は 2 つ。TS から余分なプロパティが来たとき、JS 層では残り、`@wasm` では落ちる(未決のまま)。`@nominal` の `.d.ts` の形も未決。"
+      },
+      "R7": {
+        "score": 3,
+        "why": "構造的なレコード型は、Rust にない概念。`@nominal` で Rust の struct に近い型も作れるようになったが、既定が構造的なので、Rust の感覚(名前が違えば別の型)とは逆になる。Rust の `Todo { done: x, ..t }` の癖は、直し方つきのエラーで直せる。`=> ()` はそのままでよく、`void` は要らない。"
+      },
+      "R8": {
+        "score": 4,
+        "why": "再帰は『enum を通らない、別名と型引数の強連結成分』と定義され、単一化では 1 段だけ展開する。`Ty::Fn` の引数名は等価性で無視する別のフィールドに持つ。構文の判定は、parse.rs の `try_arrow_params` と同じ保存と巻き戻しで足りる。レコードの式の型を side table に記録して lower が struct 名を引く、という道筋も具体的。残る難しさは 2 つ。表示名を形から逆に引くには、形を鍵にした表が要る。struct 名が宣言の順序に依存するので、別名を前に足すと生成される Rust が変わる。"
+      }
+    },
+    "blocker": [],
+    "issues": [
+      {
+        "severity": "high",
+        "where": "B『`{ x }`(中身が識別子 1 つだけのブロック)は、常に警告』と『判定は 1 つの関数にまとめ、式の `{` と block() の先頭の両方がそれを呼ぶ』",
+        "problem": "警告がどこまで効くのかが書かれていない。parse.rs では、if / else / fn / loop の本体がすべて `block()` を通る。文字どおりに読むと、corpus の `else { t }`、001 の `if found < 0 { None }`、`fn id(x: T) -> T { x }`、`if c { a } else { b }` のすべてに警告が出る。Rust では最も普通の書き方。",
+        "suggestion": "`{ x }` の警告は、式の位置で `{` が始まる場合(`let r = { x };`、引数、フィールドの値、`=>` の右)に限ると明記する。if / fn / loop / match の腕の本体の `{ x }` には出さない。block() の先頭で判定するのは、`ident :` / `ident ,` / `...` の 3 つの形の専用エラーだけにする。"
+      },
+      {
+        "severity": "medium",
+        "where": "A『`@nominal type`』と、未決事項『`@nominal` の型の `.d.ts` での形』",
+        "problem": "`.d.ts` が `interface Meters { readonly v: f64 }` のままだと、TS 側では `Celsius` の値や素の `{ v }` を `Meters` の引数にそのまま渡せる。数値の型は brand で守っているので、レコードの newtype だけが境界で穴になる。",
+        "suggestion": "数値と同じく、文字列リテラルのプロパティで brand を付ける(`{ readonly v: f64 } & { readonly __zsc_nominal: \"Meters\" }`)。値を作るためのコンストラクタ `Meters({ v })` を export する。"
+      },
+      {
+        "severity": "medium",
+        "where": "未決事項『TS から余分なプロパティを持つオブジェクトが渡されたとき』",
+        "problem": "r2 からの持ち越し。JS 層の `{ ...t, done: x }` は余分なプロパティをコピーし、`@wasm` ではスロットに分解されて落ちる。同じソースの `--all-js` と wasm で、戻り値のプロパティの集合が変わる。差分テストの前提(同じ結果)と合わない。",
+        "suggestion": "既定は JS の挙動のままでよいが、差分テストが比べるのは『型にあるフィールドだけ』と明記する。または、`pub` な関数の境界(TS から呼ばれる入口)でだけフィールドを列挙して作り直すオプションを、未決事項の案として載せる。"
+      },
+      {
+        "severity": "low",
+        "where": "E『名前は、その形を持つ別名のうち、最初に宣言したもの』",
+        "problem": "同じ形の別名を前に足すと、生成される Rust の struct 名が変わる(非局所的)。複数のモジュールにまたがるとき、何を『最初』とするかが書かれていない。",
+        "suggestion": "モジュールごとに、宣言の順序で決めると明記する。別名を足して名前が変わったら、コンパイラが情報(note)で知らせる。"
+      },
+      {
+        "severity": "low",
+        "where": "D と未決事項『props の型とパターンで、フィールド名を 2 回書く』",
+        "problem": "r2 からの持ち越し。props が 5〜6 個あると、シグネチャが 1 行に収まらない。",
+        "suggestion": "当面の推奨の形として `fn TodoList(props: { … }) -> Jsx { let { todos, onToggle, title } = props; … }` を書いておく。略記は 003 の任意のフィールドと一緒に検討する。"
+      },
+      {
+        "severity": "low",
+        "where": "C『型の `=>` は右結合』と『関数の宣言は `fn f(…) -> R`』",
+        "problem": "r2 からの持ち越し。`fn adder(n: i32) -> (x: i32) => i32 { (x) => x + n }` のように、`->`、`=>`、本体の `{` が 1 行に並ぶ例がない。formatter の方針もない。",
+        "suggestion": "変更後の例にこの形を 1 つ載せる。formatter は、戻り値が関数型なら括弧を付ける(`-> ((x: i32) => i32)`)と決める。"
+      }
+    ],
+    "questions": [
+      "`{ x }` の警告は、if / else / fn / match の腕の本体のブロックにも出るか",
+      "構造的なレコード同士の `==` は使えるか(フィールドの順序が違っても等しいか)。`@wasm` の `derive(PartialEq)` と結果が一致するか(r2 からの持ち越し)",
+      "`@nominal` の型の値を `{ ...m, v: 2.0 }` と名前なしで更新したとき、結果は `Meters` か(001 には書いてあるが、002 の B には書かれていない)",
+      "`Array<{ id: i32 }>` のような、型引数の中の無名のレコードは、`@wasm` で同じ struct に単相化されるか"
+    ],
+    "alternative": {
+      "summary": "`{ x }` の警告を式の位置の `{` だけに限り、`@nominal` には `.d.ts` で brand を付ける。",
+      "example": "fn pick(c: bool, a: Todo, b: Todo) -> Todo { if c { a } else { b } }   // 警告なし: if の本体\nfn id(x: i32) -> i32 { x }                                             // 警告なし: fn の本体\nlet r = { x };          // warning: 式の位置の `{ x }`。レコードなら `{ x, }`、値なら `x`\n\n@nominal type Meters = { v: f64 }\n// .d.ts:\n// export type Meters = { readonly v: f64 } & { readonly __zsc_nominal: \"Meters\" };\n// export declare function Meters(v: { readonly v: f64 }): Meters;"
+    }
+  }
+]
