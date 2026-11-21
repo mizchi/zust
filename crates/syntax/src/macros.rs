@@ -1212,10 +1212,8 @@ fn find_calls(
 /// (`CfgSet::env`, then zustc's own): `env!` becomes the value as a string literal, `option_env!` `Some("value")`.
 /// A name that is not set is left as written: `option_env!` is then `None` (acg), and `env!` the error that names it.
 /// The value goes on one line (newlines escaped), so the lines after it keep their numbers. None: nothing to expand
+/// (the caller looks for `env!` first)
 pub fn expand_env(src: &str, cfg: &crate::cfg::CfgSet) -> Option<String> {
-    if !src.contains("env!") {
-        return None;
-    }
     let b = src.as_bytes();
     let mut out = String::with_capacity(src.len());
     let mut at = 0;
