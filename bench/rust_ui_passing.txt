@@ -1789,6 +1789,9 @@ check-pass	coroutine/witness-ignore-fake-reads.rs
 build-pass	coroutine/yielding-in-match-guards.rs
 compile-fail	cycle-trait/cycle-error-comparing-function-inside-itself-66667.rs
 compile-fail	cycle-trait/cycle-trait-default-type-trait.rs
+compile-fail	cycle-trait/cycle-trait-supertrait-direct.rs
+compile-fail	cycle-trait/cycle-trait-supertrait-indirect.rs
+compile-fail	cycle-trait/issue-12511.rs
 compile-fail	delegation/ice-line-bounds-issue-148732.rs
 check-pass	deprecation/atomic_initializers.rs
 run-pass	deprecation/deprecated-macro_escape-inner.rs
@@ -2284,6 +2287,7 @@ compile-fail	extern/not-in-block.rs
 run-pass	extern/windows-tcb-trash-13259.rs
 compile-fail	feature-gates/feature-gate-adt_const_params.rs
 compile-fail	feature-gates/feature-gate-allocator_internals.rs
+compile-fail	feature-gates/feature-gate-apx-target-feature.rs
 compile-fail	feature-gates/feature-gate-asm_const_ptr.rs
 compile-fail	feature-gates/feature-gate-asm_goto_with_outputs.rs
 compile-fail	feature-gates/feature-gate-asm_unwind.rs
@@ -2291,8 +2295,10 @@ compile-fail	feature-gates/feature-gate-associated_const_equality.rs
 compile-fail	feature-gates/feature-gate-async-drop.rs
 compile-fail	feature-gates/feature-gate-async-trait-bounds.rs
 compile-fail	feature-gates/feature-gate-auto-traits.rs
+compile-fail	feature-gates/feature-gate-avx10_target_feature.rs
 compile-fail	feature-gates/feature-gate-builtin_syntax.rs
 compile-fail	feature-gates/feature-gate-cfg-version.rs
+compile-fail	feature-gates/feature-gate-clflushopt_target_feature.rs
 compile-fail	feature-gates/feature-gate-closure_lifetime_binder.rs
 compile-fail	feature-gates/feature-gate-concat_bytes.rs
 compile-fail	feature-gates/feature-gate-const-c-variadic.rs
@@ -2313,6 +2319,7 @@ compile-fail	feature-gates/feature-gate-ffi_const.rs
 compile-fail	feature-gates/feature-gate-ffi_pure.rs
 compile-fail	feature-gates/feature-gate-field-projections.rs
 compile-fail	feature-gates/feature-gate-final-associated-functions.rs
+compile-fail	feature-gates/feature-gate-fma4_target_feature.rs
 compile-fail	feature-gates/feature-gate-fmt-debug.rs
 compile-fail	feature-gates/feature-gate-fn_align.rs
 compile-fail	feature-gates/feature-gate-fn_delegation.rs
@@ -2337,6 +2344,7 @@ compile-fail	feature-gates/feature-gate-marker_trait_attr.rs
 compile-fail	feature-gates/feature-gate-may-dangle.rs
 compile-fail	feature-gates/feature-gate-more-qualified-paths.rs
 compile-fail	feature-gates/feature-gate-move_expr.rs
+compile-fail	feature-gates/feature-gate-movrs_target_feature.rs
 check-pass	feature-gates/feature-gate-multiple_supertrait_upcastable.rs
 compile-fail	feature-gates/feature-gate-mut-ref.rs
 compile-fail	feature-gates/feature-gate-named-fn-trait-parameters.rs
@@ -2367,6 +2375,8 @@ compile-fail	feature-gates/feature-gate-type_ascription.rs
 check-pass	feature-gates/feature-gate-unqualified-local-imports.rs
 compile-fail	feature-gates/feature-gate-unsized_locals.rs
 compile-fail	feature-gates/feature-gate-with_negative_coherence.rs
+compile-fail	feature-gates/feature-gate-x86_amx_intrinsics.rs
+compile-fail	feature-gates/feature-gate-xop_target_feature.rs
 compile-fail	feature-gates/feature-gate-yeet_expr.rs
 check-pass	feature-gates/issue-43106-gating-of-deprecated.rs
 compile-fail	feature-gates/issue-43106-gating-of-derive-2.rs
@@ -6314,6 +6324,7 @@ compile-fail	sync/suggest-cell.rs
 compile-fail	sync/suggest-once-cell.rs
 compile-fail	sync/suggest-ref-cell.rs
 check-pass	target-feature/const-target-feature-fn-ptr-coercion.rs
+compile-fail	target-feature/gate.rs
 build-pass	target-feature/implied-features.rs
 check-pass	thread-local/long-docs.rs
 check-pass	thread-local/name-collision.rs
@@ -6628,6 +6639,7 @@ compile-fail	traits/trait-object-method-receiver-rules.rs
 run-pass	traits/trait-object-mut-to-shared-coercion.rs
 run-pass	traits/trait-object-type-alias-3052.rs
 compile-fail	traits/trait-selection-ice-84727.rs
+compile-fail	traits/trait-upcasting/cyclic-trait-resolution.rs
 check-pass	traits/trait-upcasting/deref-upcast-shadowing-lint.rs
 compile-fail	traits/trait-upcasting/invalid-upcast.rs
 check-pass	traits/trait-upcasting/migrate-lint-deny-regions.rs

@@ -2557,17 +2557,56 @@ fn gated_attr(src: &str, from: usize, to: usize, feats: &mut Option<Vec<String>>
             continue;
         }
         let name = tx(j);
+        let at = |k: usize| {
+            let i = from + toks[k].1;
+            let line = src[..i].matches('\n').count() + 1;
+            (line, i - src[..i].rfind('\n').map_or(0, |n| n + 1) + 1)
+        };
+        // (`#[target_feature(enable = "apxf,avx2")]`: a feature of the target that is unstable)
+        if name == "target_feature" {
+            let mut q = j + 1;
+            while q < toks.len() && !sym(q, "]") {
+                if toks[q].0 == 2 && tx(q).starts_with('"') {
+                    for tf in tx(q).trim_matches('"').split(',').map(str::trim) {
+                        let Some(gate) = unstable_target_feature(tf) else { continue };
+                        let enabled = feats.get_or_insert_with(|| enabled_features(src));
+                        if !enabled.iter().any(|f| f == gate) {
+                            let (line, col) = at(k);
+                            return Some(format!("{line}:{col}: the target feature `{tf}` is currently unstable (E0658)"));
+                        }
+                    }
+                }
+                q += 1;
+            }
+            continue;
+        }
         let Some(&(_, feat)) = GATED.iter().find(|g| g.0 == name) else { continue };
         // (the source's enabled features: read once, at the first gated attribute)
         let enabled = feats.get_or_insert_with(|| enabled_features(src));
         if !enabled.iter().any(|f| f == feat) {
-            let i = from + toks[k].1;
-            let line = src[..i].matches('\n').count() + 1;
-            let col = i - src[..i].rfind('\n').map_or(0, |n| n + 1) + 1;
+            let (line, col) = at(k);
             return Some(format!("{line}:{col}: the `{name}` attribute is an experimental feature (E0658)"));
         }
     }
     None
+}
+
+/// The feature gate of an x86 target feature that is unstable (rustc 1.100): `#[target_feature(enable = "x87")]`
+/// needs `#![feature(x87_target_feature)]`. Only those whose gate tests/ui checks; the others count as stable
+fn unstable_target_feature(tf: &str) -> Option<&'static str> {
+    if tf.starts_with("amx-") {
+        return Some("x86_amx_intrinsics");
+    }
+    Some(match tf {
+        "apxf" => "apx_target_feature",
+        "avx10.1" | "avx10.2" => "avx10_target_feature",
+        "clflushopt" => "clflushopt_target_feature",
+        "fma4" => "fma4_target_feature",
+        "movrs" => "movrs_target_feature",
+        "x87" => "x87_target_feature",
+        "xop" => "xop_target_feature",
+        _ => return None,
+    })
 }
 
 /// The attributes `#[..]` / `#![..]` at the start of b, with the space and comments between them: Some(their length)
@@ -2612,7 +2651,7 @@ fn gated_attrs_len(b: &[u8]) -> Option<usize> {
                     }
                     let name = &b[n0..j];
                     skip(&mut j);
-                    if !name.is_empty() && b.get(j) != Some(&b':') && GATED.iter().any(|g| g.0.as_bytes() == name) {
+                    if !name.is_empty() && b.get(j) != Some(&b':') && (GATED.iter().any(|g| g.0.as_bytes() == name) || name == b"target_feature") {
                         gated = true;
                     }
                     i = j;
