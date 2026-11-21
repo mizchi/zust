@@ -428,7 +428,43 @@ fn x86_emit(m: &mut crate::ir::Recorder, x: X86, imm: u32, v: &[Value]) -> R<Opt
         }
         "add" => m.simd(sh, VOp::Add, v),
         "sub" => m.simd(sh, VOp::Sub, v),
+        // (pmuludq / pmuldq: the even 32-bit lanes (the low half of each 64-bit lane) widened and multiplied: they are
+        // moved to the low half, and multiplied as the IR's ExtMul does)
+        "mul" if l == Lane::I32 => {
+            let n = sh.count();
+            let sel: Vec<Option<(usize, u32)>> = (0..n).map(|i| if i < n / 2 { Some((0, 2 * i)) } else { None }).collect();
+            let sel_b: Vec<Option<(usize, u32)>> = sel.iter().map(|e| e.map(|(_, x)| (1, x))).collect();
+            let ws = [w, w];
+            let ea = pick(m, w, v, &ws, 4, &sel);
+            let eb = pick(m, w, v, &ws, 4, &sel_b);
+            m.simd(Shape::new(Lane::I64, w), VOp::ExtMul(false, u), &[ea, eb])
+        }
         "mul" | "mullo" if l != Lane::I8 => m.simd(sh, VOp::Mul, v),
+        // (hadd: a0 + a1, a2 + a3, .., then b's pairs, within each 128-bit half; hadds / hsubs saturate)
+        "hadd" | "hsub" | "hadds" | "hsubs" if matches!(l, Lane::I16 | Lane::I32 | Lane::F32 | Lane::F64) => {
+            let es = l.bits() / 8;
+            let half_n = 16 / es;
+            let n = sh.count();
+            let pair = |p: u32| -> Vec<Option<(usize, u32)>> {
+                (0..n)
+                    .map(|i| {
+                        let (base, k) = (i / half_n * half_n, i % half_n);
+                        if k < half_n / 2 { Some((0, base + 2 * k + p)) } else { Some((1, base + 2 * (k - half_n / 2) + p)) }
+                    })
+                    .collect()
+            };
+            let ws = [w, w];
+            let ev = pick(m, w, v, &ws, es, &pair(0));
+            let od = pick(m, w, v, &ws, es, &pair(1));
+            let o = match x.op {
+                "hadd" => VOp::Add,
+                "hsub" => VOp::Sub,
+                "hadds" if l == Lane::I16 => VOp::AddSat(false),
+                "hsubs" if l == Lane::I16 => VOp::SubSat(false),
+                _ => return Ok(None),
+            };
+            m.simd(sh, o, &[ev, od])
+        }
         "div" if f => m.simd(sh, VOp::Div, v),
         "adds" => m.simd(sh, VOp::AddSat(u), v),
         "subs" => m.simd(sh, VOp::SubSat(u), v),

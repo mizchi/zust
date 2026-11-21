@@ -82,9 +82,12 @@ Done: vector types of 128 / 256 / 512 bits and the SIMD instructions in the IR (
 rustc's wasm32-wasip1 builds (tests/wasm/README.md). Left:
 
 - Cranelift: 128- and 256-bit vectors are done (tests/simd/README.md); a 256-bit one is two 128-bit halves (Cranelift
-  has no ymm registers yet): real AVX2 code when Cranelift has it. 512-bit vectors (four halves) are not tested.
-- `core::arch::x86_64`: horizontal adds, `mul_epu32`, shifts by a vector count, gathers, masked loads, AVX-512
-  (tests/simd/README.md has the subset done).
+  has no ymm registers yet): real AVX2 code when Cranelift has it. 512-bit vectors (four halves) are not tested, and
+  nothing produces them while AVX-512 is skipped.
+- `core::arch::x86_64`: shifts by a vector count, gathers, masked loads, `mulhi`, `sad_epu8`, `maddubs_epi16`,
+  `dp_ps` (tests/simd/README.md has the subset done). Integer `hadd` is two `pshufb`s and an add, not `phaddw`.
+- AVX-512 (intrinsics, 512-bit registers): skipped for now. Few machines have it and implementations of it differ in
+  problems; the Cranelift ISA leaves it out.
 - `macro_rules!`: a local that one macro's body declares (`let mut s = 0;`) and passes to another macro as
   `$s:ident` is not found there ("cannot find value `s`"); rustc accepts it. Found by tests/simd/shuffle.rs, which
   avoids it.

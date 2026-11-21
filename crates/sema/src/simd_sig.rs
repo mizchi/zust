@@ -171,6 +171,8 @@ fn x86_sig(x: X86) -> Option<(Vec<SArg>, Ty)> {
         "shuffle" if matches!(x.suffix, "ps" | "pd") => vs(2),
         "shuffle" | "shufflelo" | "shufflehi" | "permute" | "permute4x64" | "moveldup" | "movehdup" | "movedup" | "bslli" | "bsrli" => vs(1),
         "unpacklo" | "unpackhi" | "movehl" | "movelh" | "alignr" | "blend" | "permute2f128" | "permute2x128" | "permutevar" | "permutevar8x32" => vs(2),
+        // (horizontal: adjacent pairs of a, then of b, per 128-bit half)
+        "hadd" | "hsub" | "hadds" | "hsubs" => vs(2),
         op if op.starts_with("broadcast") && op != "broadcast" => vs(1),
         "blendv" | "fmadd" | "fmsub" | "fnmadd" | "fnmsub" => vs(3),
         "movemask" | "testz" => to(if x.op == "testz" { 2 } else { 1 }, Ty::I32),
