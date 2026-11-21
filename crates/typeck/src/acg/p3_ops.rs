@@ -243,9 +243,15 @@ impl Cx<'_> {
         };
         let hint = deref_num(hint);
         let (l, lt) = self.operand(left, hint, cmp)?;
-        let Some(l) = l else {
+        let Some(mut l) = l else {
             return Ok((None, Ty::Never));
         };
+        // (a fat raw pointer's pair, copied before the right side runs: `p == { p = q; p }` compares the old p)
+        if lt.is_fat() && matches!(lt, Ty::Ptr(..)) {
+            let tmp = self.temp(lt);
+            self.copy(tmp, l, lt);
+            l = tmp;
+        }
         let rhint = if is_shift { self.peek(right) } else { deref_num(Some(lt)) };
         // (`v < (1, 5)` / `v == 2`: 右辺がリテラルなら、左の型の `PartialOrd<R>` / `PartialEq<R>` の R を期待型にする)
         let rhint = match op {
@@ -336,6 +342,11 @@ impl Cx<'_> {
         // (fat raw pointers `*const [T]` / `*const dyn Tr`: their values, the data word then the metadata word, not the
         // addresses of the pairs that hold them)
         if lt.is_fat() && matches!(lt, Ty::Ptr(..)) && lt == rt && is_cmp(op) {
+            // (pointers cannot be compared in a `const fn`, as below for thin ones)
+            if self.user_code && self.prog.names.get(self.root as usize).is_some_and(|n| self.prog.const_fns.contains_key(n)) {
+                let pos = if let Expr::Binary(_, _, _, sp) = e { sp.start } else { SP };
+                return err(pos, "pointers cannot be reliably compared during const eval");
+            }
             let (pa, pb) = (self.b.ins().load(PTR, mf(), l, 0), self.b.ins().load(PTR, mf(), r, 0));
             let (ma, mb) = (self.b.ins().load(PTR, mf(), l, 8), self.b.ins().load(PTR, mf(), r, 8));
             let v = match op {
