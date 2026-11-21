@@ -2684,6 +2684,7 @@ run-pass	hygiene/hygienic-labels-in-let.rs
 run-pass	hygiene/hygienic-labels.rs
 run-pass	hygiene/issue-15221.rs
 check-pass	hygiene/issue-32922.rs
+run-pass	hygiene/issue-40847.rs
 check-pass	hygiene/issue-61574-const-parameters.rs
 compile-fail	hygiene/no_implicit_prelude-2018.rs
 check-pass	hygiene/no_implicit_prelude-2021.rs
@@ -2947,6 +2948,7 @@ check-pass	imports/issue-56263.rs
 compile-fail	imports/issue-57015.rs
 check-pass	imports/issue-62767.rs
 compile-fail	imports/issue-81413.rs
+check-pass	imports/local-modularized-tricky-pass-1.rs
 check-pass	imports/local-modularized.rs
 compile-fail	imports/nested-import-root-symbol-150103.rs
 check-pass	imports/no-ambiguous-trait-lint-on-redundant-import.rs
@@ -2965,6 +2967,7 @@ compile-fail	imports/resolve_self_super_hint.rs
 compile-fail	imports/tool-mod-child.rs
 compile-fail	imports/underscore-imports/shadow.rs
 compile-fail	imports/underscore-imports/unused-2018.rs
+check-pass	imports/unused-import-in-macro-expansion-rustfix.rs
 check-pass	imports/unused-import-issue-157420.rs
 run-pass	imports/use-declaration-no-path-segment-prefix.rs
 run-pass	imports/use-mod.rs
@@ -3618,6 +3621,7 @@ check-pass	macros/issue-39467.rs
 check-pass	macros/issue-40469.rs
 check-pass	macros/issue-40770.rs
 compile-fail	macros/issue-41776.rs
+run-pass	macros/issue-41803.rs
 compile-fail	macros/issue-46438.rs
 run-pass	macros/issue-5060.rs
 run-pass	macros/issue-52169.rs
@@ -3682,6 +3686,7 @@ run-pass	macros/macro-nested_definition_issue-31946.rs
 run-pass	macros/macro-nested_stmt_macros.rs
 compile-fail	macros/macro-non-lifetime.rs
 check-pass	macros/macro-nt-list.rs
+run-pass	macros/macro-of-higher-order.rs
 check-pass	macros/macro-pat-follow-2018.rs
 run-pass	macros/macro-pat-follow.rs
 run-pass	macros/macro-pat-neg-lit.rs
@@ -3710,6 +3715,7 @@ run-pass	macros/macro-with-attrs2.rs
 run-pass	macros/macro-with-braces-in-expr-position.rs
 compile-fail	macros/macro_undefined.rs
 compile-fail	macros/macros-in-trait-positions-issue-40845.rs
+run-pass	macros/meta-variable-misuse.rs
 compile-fail	macros/missing-bang-in-decl.rs
 compile-fail	macros/missing-comma.rs
 compile-fail	macros/missing-writer.rs
