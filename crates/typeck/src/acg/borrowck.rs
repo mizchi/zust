@@ -313,6 +313,10 @@ pub fn is_copy(prog: &Program, t: Ty, depth: u32) -> bool {
             if sd.symbolic {
                 return true;
             }
+            // (a type parameter's placeholder: Copy when its bounds say so)
+            if let Some(bs) = &sd.placeholder {
+                return bs.iter().any(|b| b == "Copy");
+            }
             if prog.closure_of_struct.contains_key(&prog.base_of(sid)) || prog.is_tuple(sid) {
                 return sd.fields.iter().all(|f| is_copy(prog, f.1, depth + 1));
             }

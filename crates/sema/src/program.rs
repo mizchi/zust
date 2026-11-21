@@ -90,6 +90,9 @@ pub struct StructDef {
     /// 型引数に型パラメータが残っているインスタンスか (has_param が引数を辿り直さないように: 入れ子のクロージャの
     /// 型は共有された部分を持つので、辿り直すと段の数の指数になる)
     pub symbolic: bool,
+    /// A placeholder for a type parameter of a generic fn `zustc check` instantiates though nothing calls it: the
+    /// traits the parameter's bounds name (Program::placeholder)
+    pub placeholder: Option<Vec<String>>,
 }
 
 impl StructDef {
@@ -107,6 +110,7 @@ impl StructDef {
             base: None,
             args: vec![],
             symbolic: false,
+            placeholder: None,
         }
     }
 }
@@ -122,6 +126,8 @@ pub struct AdtTable {
     v: Mutex<Vec<Box<StructDef>>>,
     inst: Mutex<HashMap<(u32, Vec<Ty>), u32>>,
     tuples: Mutex<HashMap<usize, u32>>,
+    /// The placeholders made, by (fn, type parameter)
+    placeholders: Mutex<HashMap<(u32, u32), u32>>,
 }
 
 impl AdtTable {
@@ -130,6 +136,7 @@ impl AdtTable {
             v: Mutex::new(vec![]),
             inst: Mutex::new(HashMap::default()),
             tuples: Mutex::new(HashMap::default()),
+            placeholders: Mutex::new(HashMap::default()),
         }
     }
     pub fn len(&self) -> usize {
@@ -402,6 +409,9 @@ pub struct Insts {
     /// The region check's implied relations of struct types, by position (typeck's Rg::imp_cache): kept between
     /// the functions of a build
     pub imp_cache: HashMap<(u32, u32, bool), Option<Vec<(u32, u32)>>>,
+    /// zustc check's last round: the instances with placeholders for type parameters (Program::placeholder), and
+    /// what they request. A typeck error of one is not reported (acg::compile)
+    pub lenient: bool,
 }
 
 /// Insts::closure_rg (codes: see typeck's regionck)
@@ -426,6 +436,7 @@ impl Insts {
             pending: vec![],
             closure_rg: HashMap::default(),
             imp_cache: HashMap::default(),
+            lenient: false,
         }
     }
 
@@ -1912,6 +1923,13 @@ impl Program {
         if self.blanket_traits.contains(tr) {
             return true;
         }
+        // (a placeholder implements the traits its parameter's bounds name, and the auto traits)
+        if let Ty::Struct(sid) = t {
+            if let Some(bs) = &self.structs[sid as usize].placeholder {
+                let name = |b: &str| b.split('<').next().unwrap_or(b).trim().to_string();
+                return matches!(tr, "Sized" | "Send" | "Sync" | "Unpin") || bs.iter().any(|b| b == tr || name(b) == name(tr));
+            }
+        }
         if matches!(t, Ty::Ref(..)) && !self.ref_impls.is_empty() && self.ref_impls.contains(&(t, tr.to_string())) {
             return true;
         }
@@ -2702,6 +2720,26 @@ impl Program {
     }
 
     /// n 要素のタプルの (組み込みの) ジェネリック定義
+    /// The placeholder type for type parameter k (named `name`, bounded by the traits `bounds`) of fn id: a struct
+    /// with no fields, named `name#` (no program's type has that name), that implements just those traits
+    pub fn placeholder(&self, id: u32, k: u32, name: &str, bounds: &[String]) -> u32 {
+        if let Some(&s) = self.structs.placeholders.lock().unwrap().get(&(id, k)) {
+            return s;
+        }
+        let mut d = StructDef::blank(format!("{name}#"), false);
+        d.placeholder = Some(bounds.to_vec());
+        let mut h = KeyHasher::new();
+        h.add(&("placeholder", id, k));
+        d.deep = h.finish();
+        let mut g = self.structs.placeholders.lock().unwrap();
+        if let Some(&s) = g.get(&(id, k)) {
+            return s;
+        }
+        let s = self.structs.push(d);
+        g.insert((id, k), s);
+        s
+    }
+
     pub fn tuple_base(&self, n: usize) -> u32 {
         if let Some(&id) = self.structs.tuples.lock().unwrap().get(&n) {
             return id;

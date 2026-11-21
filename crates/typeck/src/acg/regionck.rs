@@ -2369,6 +2369,14 @@ impl Cx<'_> {
         self.rg.last_call = None;
         let prog = self.prog;
         let sig0 = &prog.sigs[id as usize];
+        // (a generic function's instance calling the method of an impl that writes lifetimes in its trait
+        // (`impl Trait<'static> for ()`): the generic body called the trait's method under its own bounds
+        // (`(): Trait<'a>`), with the trait's signature, not the impl's. Not followed)
+        let writes_lts = |r: &RSigSyn| r.slots.iter().flatten().any(|&c| c == R_STATIC || c < r.outer);
+        if !self.rg.inst_args.is_empty() && sig0.impl_trait.is_some() && sig0.regions.as_deref().is_some_and(writes_lts) {
+            self.rg.missed.push("trait impl");
+            return;
+        }
         let rs = sig0.regions.clone();
         let codes = |i: usize| rs.as_deref().map(|r| r.slots.get(i).map(|c| c.as_slice()).unwrap_or(&[]));
         // (the prelude writes no lifetimes: what its results borrow is not known from elision. A closure's call
