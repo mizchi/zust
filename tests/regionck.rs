@@ -928,3 +928,14 @@ fn pattern_paths_with_lifetimes() {
     assert!(d.len() == 1 && d[0].0 == 6 && d[0].1.contains("does not live long enough"), "{d:?}");
     assert_eq!(check("enum Foo<'a> {\n    Bar(&'a u32),\n}\nfn main() {\n    let y = 22;\n    let foo = Foo::Bar(&y);\n    match foo {\n        Foo::Bar(_z) => {}\n    }\n    static Z: u32 = 1;\n    let Foo::Bar::<'static>(_w) = Foo::Bar(&Z);\n}\n"), vec![]);
 }
+
+/// A call through a fn pointer passes its arguments into the pointer's parameters' regions; a fn item with the
+/// type arguments written is a value of those regions
+#[test]
+fn fn_pointer_calls_and_fn_item_values() {
+    let d = check("fn take<'a>(f: fn(&'a i32), x: &i32) {\n    f(x);\n}\nfn main() {}\n");
+    assert!(d.len() == 1 && d[0].0 == 2, "{d:?}");
+    let d = check("fn foo<'a>() {\n    let x = 0;\n    let f = &drop::<&'a i32>;\n    f(&x);\n}\nfn main() {}\n");
+    assert!(d.len() == 1 && d[0].0 == 4 && d[0].1.contains("does not live long enough"), "{d:?}");
+    assert_eq!(check("fn take<'a>(f: fn(&'a i32), x: &'a i32) {\n    f(x);\n}\nfn id<T>(t: T) -> T {\n    t\n}\nfn g<'a>(a: &'a ()) {\n    let x = id::<&'a ()>;\n    let _: &'a () = x(a);\n}\nfn main() {}\n"), vec![]);
+}

@@ -2343,7 +2343,12 @@ impl Cx<'_> {
                 self.rg_dyn_fn_args(s, &args);
                 r
             }
-            Ty::Fn(f) => self.indirect_call(Indirect::Ptr(v), &f.params, f.ret, &args, SP),
+            Ty::Fn(f) => {
+                let r = self.indirect_call(Indirect::Ptr(v), &f.params, f.ret, &args, SP);
+                self.rg_fnptr_call(func, t, &args);
+                self.rg_took_call(c);
+                r
+            }
             t => err(SP, format!("expected a function, found `{}`", self.prog.tn(t))),
         };
         self.bk_frame_end_call();

@@ -2436,6 +2436,7 @@ compile-fail	fn/fn-recover-return-sign.rs
 compile-fail	fn/fn-recover-return-sign2.rs
 compile-fail	fn/fn-trait-formatting.rs
 compile-fail	fn/fn-trait-use-named-params-issue-140169.rs
+compile-fail	fn/fn_def_coercion.rs
 run-pass	fn/fun-call-variants.rs
 check-pass	fn/implied-bounds-unnorm-associated-type-3.rs
 compile-fail	fn/implied-bounds-unnorm-associated-type-4.rs
@@ -4289,6 +4290,7 @@ check-pass	nll/user-annotations/normalize-self-ty.rs
 compile-fail	nll/user-annotations/pattern_substs_on_brace_enum_variant.rs
 compile-fail	nll/user-annotations/pattern_substs_on_tuple_enum_variant.rs
 compile-fail	nll/user-annotations/patterns.rs
+compile-fail	nll/user-annotations/promoted-annotation.rs
 compile-fail	nll/user-annotations/region-error-ice-109072.rs
 check-pass	nll/user-annotations/type-annotation-with-hrtb.rs
 compile-fail	nll/user-annotations/wf-self-type.rs

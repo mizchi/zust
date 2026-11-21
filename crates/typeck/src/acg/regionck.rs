@@ -1500,6 +1500,13 @@ impl Cx<'_> {
                 out.extend(tr);
                 Some((Ty::Ref(*m, crate::types::intern(t)), out))
             }
+            // (`&f::<&'a i32>`: a fn item is a constant, its borrow promoted)
+            Expr::Ref(false, x) if matches!(strip(x), Expr::Path(..)) && self.fn_item(x).is_some() => {
+                let (t, tr) = self.rt_fn_item(x)?;
+                let mut out = vec![STATIC];
+                out.extend(tr);
+                Some((Ty::Ref(false, crate::types::intern(t)), out))
+            }
             Expr::Ref(m, x) => {
                 let (t, tr, derefs) = self.rt_place(x)?;
                 let r = self.rg.var();
@@ -1593,7 +1600,8 @@ impl Cx<'_> {
             },
             Expr::Path(..) | Expr::Field(..) | Expr::Unary(..) => match self.rt_place(e) {
                 Some((t, tr, _)) => Some((t, tr)),
-                // (a unit variant: `None`)
+                // (a fn item as a value (`foo::<&'a ()>`); a unit variant: `None`)
+                None if matches!(e, Expr::Path(..)) && self.fn_item(e).is_some() => self.rt_fn_item(e),
                 None => self.rg.calls.get(&(e as *const Expr as usize)).cloned(),
             },
             _ => None,
@@ -1914,6 +1922,89 @@ impl Cx<'_> {
             let Some((at, atr)) = self.rt_expr(a) else { continue };
             let sp = super::borrowck::pos(a);
             self.rg.flow(prog, at, t, &atr, &tree, sp);
+        }
+    }
+
+    /// A fn item as a value (`f::<&'a i32>`): a fn pointer whose regions are its signature's, with the lifetimes
+    /// the type arguments written name; its own lifetimes fresh
+    pub(crate) fn rt_fn_item(&mut self, e: &Expr) -> Option<(Ty, RT)> {
+        let Expr::Path(None, p) = strip(e) else { return None };
+        let id = self.fn_item(e)?;
+        let prog = self.prog;
+        let sig = &prog.sigs[id as usize];
+        let tf: Vec<&PTy> = p.segs.last()?.args.iter().filter_map(|a| if let GArg::Ty(t) = a { Some(t) } else { None }).collect();
+        // (the instance: its type arguments as written, all of them)
+        if tf.len() != sig.generics.len() || sig.trait_of.is_some() {
+            return if sig.generics.is_empty() { self.rt_fn_sig(id, &[], &[]) } else { None };
+        }
+        let mut sol = vec![];
+        let mut targs = vec![];
+        for pt in &tf {
+            let t = self.parse_ty(pt).ok()?;
+            let mut sl = crate::regions::Slots { lts: self.rg.lt_names.clone(), tparams: vec![], self_slots: &[], any: false, in_fn: 0 };
+            let mut codes = vec![];
+            sl.slots(pt, false, &mut codes);
+            let lts = self.rg.lts.clone();
+            targs.push(self.rg.instantiate(prog, t, Some(&codes), &lts, &[], &mut |me| me.var()));
+            sol.push(t);
+        }
+        self.rt_fn_sig(id, &sol, &targs)
+    }
+
+    fn rt_fn_sig(&mut self, id: u32, sol: &[Ty], targs: &[Option<RT>]) -> Option<(Ty, RT)> {
+        let prog = self.prog;
+        let sig = &prog.sigs[id as usize];
+        let rs = sig.regions.clone();
+        let codes = |i: usize| rs.as_deref().map(|r| r.slots.get(i).map(|c| c.as_slice()).unwrap_or(&[]));
+        let lts: Vec<u32> = rs.as_deref().map(|r| r.lts.iter().map(|_| self.rg.var()).collect()).unwrap_or_default();
+        let opt: Vec<Option<Ty>> = sol.iter().map(|&t| Some(t)).collect();
+        let mut tree = vec![];
+        let mut params = vec![];
+        for (i, &pt) in sig.params.iter().enumerate() {
+            tree.extend(self.rg.instantiate(prog, pt, codes(i), &lts, targs, &mut |me| me.var())?);
+            params.push(prog.partial_subst(pt, &opt));
+        }
+        tree.extend(self.rg.instantiate(prog, sig.ret, codes(sig.params.len()), &lts, targs, &mut |me| me.var())?);
+        let ret = prog.partial_subst(sig.ret, &opt);
+        if params.iter().any(|&t| prog.has_param(t)) || prog.has_param(ret) {
+            return None;
+        }
+        let t = Ty::Fn(crate::types::intern_fn(crate::types::FnTy { params, ret }));
+        (count(prog, t, 0) == Some(tree.len())).then_some((t, tree))
+    }
+
+    /// A call through a fn pointer (f: the callee's value, of type t once dereferenced): the arguments flow into its
+    /// parameters' regions, the result is of its result's
+    pub(crate) fn rg_fnptr_call(&mut self, f: &Expr, t: Ty, args: &[&Expr]) {
+        if !self.rg_on() {
+            return;
+        }
+        let Ty::Fn(ft) = t else { return };
+        let Some((mut ft0, mut tr)) = self.rt_expr(f) else { return };
+        while let Ty::Ref(_, i) = ft0 {
+            if tr.is_empty() {
+                return;
+            }
+            tr.remove(0);
+            ft0 = *i;
+        }
+        if ft0 != t {
+            return;
+        }
+        let prog = self.prog;
+        let mut k = 0;
+        for (a, &pt) in args.iter().zip(&ft.params) {
+            let Some(n) = count(prog, pt, 0) else { return };
+            let Some(ptr) = tr.get(k..k + n).map(|x| x.to_vec()) else { return };
+            k += n;
+            if let Some((at, atr)) = self.rt_expr(a) {
+                self.rg.flow(prog, at, pt, &atr, &ptr, super::borrowck::pos(a));
+            }
+        }
+        if let Some(r) = tr.get(k..) {
+            if count(prog, ft.ret, 0) == Some(r.len()) {
+                self.rg.last_call = Some((self.rg.depth + 1, ft.ret, r.to_vec()));
+            }
         }
     }
 
