@@ -77,8 +77,13 @@ pub fn find_manifest(given: Option<&Path>) -> R<PathBuf> {
 
 /// Expand the members of a workspace (`crates/*` globs in the last component)
 fn members_of(ws: &Workspace) -> Vec<PathBuf> {
+    expand(ws, &ws.members)
+}
+
+/// Directories of workspace patterns (`crates/*`: a glob in the last component), minus `exclude`
+fn expand(ws: &Workspace, patterns: &[String]) -> Vec<PathBuf> {
     let mut out = vec![];
-    for m in &ws.members {
+    for m in patterns {
         let (dir, last) = match m.rsplit_once('/') {
             Some((d, l)) => (ws.dir.join(d), l.to_string()),
             None => (ws.dir.clone(), m.clone()),
@@ -182,7 +187,7 @@ pub fn load(manifest_path: &Path) -> R<Graph> {
         None => vec![start_dir.clone()],
     };
     let default_dirs: Vec<PathBuf> = match &ws {
-        Some(w) if !w.default_members.is_empty() => w.default_members.iter().map(|m| manifest::normalize(&w.dir.join(m))).collect(),
+        Some(w) if !w.default_members.is_empty() => expand(w, &w.default_members).iter().map(|d| manifest::normalize(d)).collect(),
         Some(w) if member_dirs.contains(&w.dir) => vec![w.dir.clone()],
         _ => member_dirs.clone(),
     };
@@ -405,12 +410,16 @@ pub fn features(g: &Graph, o: &Opts) -> Resolved {
                 st.entry(n, &format!("dep:{}", d.name));
             }
         }
+        // (`--features`: `member/feat` names a member's feature; anything else, `feat` or a dependency's `dep/feat`,
+        //  is for the selected packages (a build's selection; for metadata, the root package or the only member))
+        let selected = match &o.only {
+            Some(only) => only.contains(&m),
+            None => Some(m) == g.root || g.members.len() == 1,
+        };
         for f in &o.features {
-            // (`member/feat` names a member's feature; anything else is for the root package: `feat`, or a
-            //  dependency's `dep/feat`)
             match f.split_once('/') {
                 Some((pk, ff)) if g.pkgs[m].m.name == pk => st.entry(n, ff),
-                _ if Some(m) == g.root || g.members.len() == 1 => st.entry(n, f),
+                _ if selected => st.entry(n, f),
                 _ => {}
             }
         }

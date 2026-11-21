@@ -209,11 +209,12 @@ fn workspace_rules_match_cargo() {
         ),
         (
             "crates/app/Cargo.toml",
-            "[package]\nname = \"app\"\nversion.workspace = true\nedition.workspace = true\ndefault-run = \"app\"\n[dependencies]\nutil = { path = \"../util\" }\nhelper = { path = \"../../helper\" }\n[features]\nextra = []\n[[bin]]\nname = \"app\"\npath = \"src/main.rs\"\n[[bin]]\nname = \"extra\"\npath = \"src/extra.rs\"\nrequired-features = [\"extra\"]\n",
+            "[package]\nname = \"app\"\nversion.workspace = true\nedition.workspace = true\ndefault-run = \"app\"\n[dependencies]\nutil = { path = \"../util\" }\nhelper = { path = \"../../helper\" }\n[features]\nextra = []\n[[bin]]\nname = \"app\"\npath = \"src/main.rs\"\n[[bin]]\nname = \"extra\"\npath = \"src/extra.rs\"\nrequired-features = [\"extra\"]\n[[bin]]\nname = \"loudbin\"\npath = \"src/loud.rs\"\nrequired-features = [\"util/loud\"]\n",
         ),
         ("crates/app/src/lib.rs", "pub fn hi() -> String {\n    format!(\"{} {}\", util::word(), helper::n())\n}\n"),
         ("crates/app/src/main.rs", "fn main() {\n    println!(\"app: {}\", app::hi());\n}\n"),
         ("crates/app/src/extra.rs", "fn main() {\n    println!(\"extra: {}\", app::hi());\n}\n"),
+        ("crates/app/src/loud.rs", "fn main() {\n    println!(\"loud: {}\", app::hi());\n}\n"),
         ("crates/util/Cargo.toml", "[package]\nname = \"util\"\nversion = \"0.1.0\"\nedition = \"2021\"\n[features]\nloud = []\n"),
         ("crates/util/src/lib.rs", "pub fn word() -> &'static str {\n    if cfg!(feature = \"loud\") { \"LOUD\" } else { \"quiet\" }\n}\n"),
         ("crates/tools/Cargo.toml", "[package]\nname = \"tools\"\nversion = \"0.1.0\"\nedition = \"2021\"\nautolib = false\n[dependencies]\nutil = { path = \"../util\", features = [\"loud\"] }\n"),
@@ -255,8 +256,53 @@ fn workspace_rules_match_cargo() {
     let (ok, out, err) = zurgo(&["run", "--bin", "extra", "--features", "extra"], &app, &t);
     assert!(ok, "{err}");
     assert_eq!(out, "extra: quiet 7\n");
+    // (from the virtual root: the default member is selected, and a bare `--features` is its feature)
+    let (ok, out, err) = zurgo(&["run", "--bin", "extra", "--features", "extra"], &root, &t);
+    assert!(ok, "{err}");
+    assert_eq!(out, "extra: quiet 7\n");
+    // (`required-features` of a dependency's feature: `util/loud` is checked on util)
+    let (ok, _, err) = zurgo(&["build", "--bin", "loudbin"], &app, &t);
+    assert!(!ok && err.contains("util/loud"), "{err}");
+    let (ok, out, err) = zurgo(&["run", "--bin", "loudbin", "--features", "util/loud"], &app, &t);
+    assert!(ok, "{err}");
+    assert_eq!(out, "loud: LOUD 7\n");
     // (tools: `autolib = false` builds no library from its src/lib.rs, and its util is loud)
     let (ok, out, err) = zurgo(&["run"], &sc.0.join("crates/tools/Cargo.toml"), &t);
     assert!(ok, "{err}");
     assert_eq!(out, "tools: LOUD\n");
+}
+
+/// The root manifest of a workspace with a package of its own and `default-members` as a glob: commands at the root
+/// select the default members (not the root package), as cargo does
+#[test]
+fn root_package_and_default_members_glob() {
+    let sc = Scratch::new("ws-root");
+    sc.write(&[
+        ("Cargo.toml", "[package]\nname = \"rootpkg\"\nversion = \"0.1.0\"\nedition = \"2021\"\n[workspace]\nmembers = [\"crates/*\"]\ndefault-members = [\"crates/*\"]\n"),
+        ("src/main.rs", "fn main() {\n    println!(\"root\");\n}\n"),
+        ("crates/a/Cargo.toml", "[package]\nname = \"a\"\nversion = \"0.1.0\"\nedition = \"2021\"\n[dependencies]\nb = { path = \"../b\" }\n"),
+        ("crates/a/src/main.rs", "fn main() {\n    println!(\"a {}\", b::n());\n}\n"),
+        ("crates/b/Cargo.toml", "[package]\nname = \"b\"\nversion = \"0.1.0\"\nedition = \"2021\"\n"),
+        ("crates/b/src/lib.rs", "pub fn n() -> i32 {\n    2\n}\n"),
+    ]);
+    let root = sc.0.join("Cargo.toml");
+    let t = sc.0.join("target");
+    let (ok, _, err) = cargo(&["generate-lockfile", "--offline"], &root, &t);
+    assert!(ok, "{err}");
+    let a = ["metadata", "--format-version", "1", "--offline"];
+    let (ok, want, err) = cargo(&a, &root, &t);
+    assert!(ok, "{err}");
+    let (ok, got, err) = zurgo(&a, &root, &t);
+    assert!(ok, "{err}");
+    let dm = |j: &str| -> Vec<String> {
+        let v: serde_json::Value = serde_json::from_str(j).unwrap();
+        let mut x: Vec<String> = v["workspace_default_members"].as_array().unwrap().iter().map(|i| i.as_str().unwrap().to_string()).collect();
+        x.sort();
+        x
+    };
+    assert_eq!(dm(&got), dm(&want));
+    let (ok, out, err) = zurgo(&["run"], &root, &t);
+    assert!(ok, "{err}");
+    assert_eq!(out, "a 2\n");
+    assert!(!t.join("zust/debug/rootpkg").exists(), "the root package was built");
 }

@@ -36,6 +36,15 @@ pub struct Built {
     pub crates: Vec<CrateSpec>,
 }
 
+/// The packages a command works on, as cargo chooses them: a member's own manifest selects that member; the root
+/// manifest of a workspace selects its default members (`default-members`, else the root package, else every member)
+pub fn selection(g: &Graph) -> Vec<usize> {
+    match g.root {
+        Some(r) if crate::manifest::normalize(&g.pkgs[r].m.dir) != g.ws_dir => vec![r],
+        _ => g.default_members.clone(),
+    }
+}
+
 pub fn target_dir(g: &Graph) -> PathBuf {
     std::env::var_os("CARGO_TARGET_DIR").map(PathBuf::from).unwrap_or_else(|| g.ws_dir.join("target"))
 }
@@ -55,12 +64,8 @@ pub fn plan(g: &Graph, o: &BuildOpts) -> R<Vec<CrateSpec>> {
         Some(t) => Target::by_triple(t).ok_or_else(|| format!("unknown target `{t}` (x86_64-unknown-linux-gnu, wasm32-unknown-unknown)"))?,
         None => host.clone(),
     };
-    // (the members to build: the package of the manifest, or the default members of a virtual workspace. Their
-    //  features alone are activated: another member's do not leak into this build)
-    let selected: Vec<usize> = match g.root {
-        Some(r) => vec![r],
-        None => g.default_members.clone(),
-    };
+    // (the members to build. Their features alone are activated: another member's do not leak into this build)
+    let selected = selection(g);
     let r = resolve::features(
         g,
         &Opts {
@@ -145,9 +150,17 @@ pub fn plan(g: &Graph, o: &BuildOpts) -> R<Vec<CrateSpec>> {
                 continue;
             }
             found.extend(o.bins.iter().filter(|x| **x == b.name));
-            // (`required-features`: a bin is built only when they are all on; asking for it by name says which miss)
-            let on = &r.nodes[&n].features;
-            let missing: Vec<&String> = b.required_features.iter().filter(|f| !on.contains(*f)).collect();
+            // (`required-features`: a bin is built only when they are all on; asking for it by name says which miss.
+            //  `dep/feat` is a feature of the dependency `dep`, on the node this package's edge reaches)
+            let on = |f: &String| -> bool {
+                match f.split_once('/') {
+                    Some((dep, feat)) => r.nodes[&n].edges.iter().any(|&(ei, t)| {
+                        g.decl(n.0, &g.edges[n.0][ei]).name == dep.trim_end_matches('?') && r.nodes.get(&t).is_some_and(|s| s.features.contains(feat))
+                    }),
+                    None => r.nodes[&n].features.contains(f),
+                }
+            };
+            let missing: Vec<&String> = b.required_features.iter().filter(|f| !on(f)).collect();
             if !missing.is_empty() {
                 if asked {
                     return Err(format!(

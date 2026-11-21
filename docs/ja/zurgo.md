@@ -50,7 +50,10 @@ zurgo run
     - `*` のグロブを使えるメンバー。ディレクトリごとに 1 つ;
     - ワークスペースのディレクトリの中の path の依存。cargo と同じく、並べなくてもメンバーになる;
     - `exclude`、`default-members`、`[workspace.dependencies]`;
-    - メンバー自身の Cargo.toml を渡したとき (`--manifest-path`) も、メンバーが受け継ぐフィールド。
+    - メンバー自身の Cargo.toml を渡したとき (`--manifest-path`) も、メンバーが受け継ぐフィールド;
+    - コマンドが扱うパッケージ: メンバー自身のマニフェストはそのメンバーを選び、ワークスペースの根のマニフェストは
+      `default-members` (グロブも)、なければ根のパッケージ、それもなければすべてのメンバーを選ぶ。`--features` と
+      `default-run` はその選んだものに効く。
   - TOML のパーサは zurgo 自身のもの (`crates/zurgo/src/toml.rs`)。
 - **Cargo.lock** (バージョン 1 から 4)。zurgo にはまだリゾルバがないので、版は lock のもの。lock がなければ、
   `cargo generate-lockfile` を実行するよう言う。

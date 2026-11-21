@@ -133,16 +133,18 @@ fn package(g: &Graph, p: usize) -> J {
         .collect();
     let mut targets = vec![];
     for t in m.targets() {
-        targets.push(J::Obj(vec![
+        let mut fields = vec![
             ("kind", J::Arr(t.kind.iter().map(|k| s(k)).collect())),
             ("crate_types", J::Arr(t.crate_types.iter().map(|k| s(k)).collect())),
             ("name", s(&t.name)),
             ("src_path", s(&t.path.display().to_string())),
             ("edition", s(&t.edition)),
-            ("doc", J::Bool(true)),
-            ("doctest", J::Bool(t.kind.iter().any(|k| k == "lib" || k == "rlib"))),
-            ("test", J::Bool(true)),
-        ]));
+        ];
+        if !t.required_features.is_empty() {
+            fields.push(("required-features", J::Arr(t.required_features.iter().map(|f| s(f)).collect())));
+        }
+        fields.extend([("doc", J::Bool(true)), ("doctest", J::Bool(t.kind.iter().any(|k| k == "lib" || k == "rlib"))), ("test", J::Bool(true))]);
+        targets.push(J::Obj(fields));
     }
     if let Some(b) = &m.build {
         targets.push(J::Obj(vec![

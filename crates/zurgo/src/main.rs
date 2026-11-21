@@ -90,10 +90,12 @@ fn main() {
             eprintln!("    Finished `{}` profile in {:.2}s (zustc)", if o.release { "release" } else { "dev" }, t0.elapsed().as_secs_f64());
         }
         "run" | "r" => {
-            // (without `--bin`: the package's `default-run`, as cargo chooses)
+            // (without `--bin`: the `default-run` of the selected package, as cargo chooses)
             if o.bins.is_empty() {
-                if let Some(d) = g.root.and_then(|r| g.pkgs[r].m.default_run.clone()) {
-                    o.bins.push(d);
+                if let [p] = compile::selection(&g).as_slice() {
+                    if let Some(d) = g.pkgs[*p].m.default_run.clone() {
+                        o.bins.push(d);
+                    }
                 }
             }
             let built = compile::build(&g, &o).unwrap_or_else(|e| die(&e));

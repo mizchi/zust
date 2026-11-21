@@ -53,7 +53,10 @@ output. A binary is `target/zust/debug/<name>`.
     - members with `*` globs, each directory once;
     - path dependencies inside the workspace's directory, which are members without being listed, as in cargo;
     - `exclude`, `default-members`, `[workspace.dependencies]`;
-    - a member's inherited fields also when its own Cargo.toml is given (`--manifest-path`).
+    - a member's inherited fields also when its own Cargo.toml is given (`--manifest-path`);
+    - which packages a command works on: a member's own manifest selects that member; the workspace's root
+      manifest selects `default-members` (globs too), else the root package, else every member. `--features` and
+      `default-run` apply to that selection.
   - The TOML parser is zurgo's own (`crates/zurgo/src/toml.rs`).
 - **Cargo.lock** (versions 1 to 4). zurgo has no resolver yet, so the versions are the lock's. Without a lock, zurgo
   says to run `cargo generate-lockfile`.

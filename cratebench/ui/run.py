@@ -60,6 +60,8 @@ def on_target(platform):
             val = toks[pos[0] + 1][1:-1]
             pos[0] += 2
             return (name, val) in WASM_CFG
+        if name in ("true", "false"):
+            return name == "true"
         return (name, None) in WASM_CFG
 
     return ev()

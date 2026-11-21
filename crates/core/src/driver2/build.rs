@@ -1395,8 +1395,19 @@ impl Session2 {
                 continue;
             }
             let deps = all_deps(i);
-            let exe = out_dir.join(c.exe.as_deref().unwrap_or(c.name.as_str()));
-            if !changed[i] && !deps.iter().any(|&j| changed[j]) && exe.exists() {
+            let exe_name = c.exe.as_deref().unwrap_or(c.name.as_str());
+            let exe = out_dir.join(exe_name);
+            // (what this executable is linked from: the crates' names and fingerprints, kept next to it. An unchanged
+            //  object is not enough when another bin crate wrote this executable last (`exe=` moved between crates))
+            let mut stamp = String::new();
+            for j in std::iter::once(i).chain(deps.iter().copied()) {
+                stamp.push_str(&crates[j].name);
+                stamp.push(' ');
+                stamp.push_str(&std::fs::read_to_string(out_dir.join(format!("{}.fp", crates[j].name).as_str())).unwrap_or_default());
+                stamp.push('\n');
+            }
+            let stamp_path = out_dir.join(format!("{exe_name}.linked").as_str());
+            if !changed[i] && !deps.iter().any(|&j| changed[j]) && exe.exists() && std::fs::read_to_string(stamp_path.as_path()).is_ok_and(|s| s == stamp) {
                 continue;
             }
             let t1 = now_ns();
@@ -1404,6 +1415,7 @@ impl Session2 {
             objs.extend(deps.iter().map(|&j| out_dir.join(format!("{}.o", crates[j].name).as_str())));
             let refs: Vec<&std::path::Path> = objs.iter().map(|p| p.as_path()).collect();
             crate::link::link_many(self.opts.linker.as_deref(), &refs, exe.as_path())?;
+            let _ = std::fs::write(stamp_path.as_path(), &stamp);
             rep.linked += 1;
             if self.opts.time {
                 eprintln!("  {:<12} {:>8.2} ms  link {} objects", format!("link {}", c.name), (now_ns() - t1) as f64 / 1e6, objs.len());
