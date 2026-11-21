@@ -75,8 +75,15 @@ pub(crate) fn const_expr_text(e: &Expr) -> Option<String> {
         Expr::Paren(x) => const_expr_text(x)?,
         Expr::MethodCall(r, m, g, a, _) if g.is_empty() && a.is_empty() => format!("{}.{m}()", const_expr_text(r)?),
         Expr::Unary(op, x, _) if op == "!" => format!("(!{})", const_expr_text(x)?),
-        // (the type of a cast does not change an integer constant's value here)
-        Expr::Cast(x, _) => format!("({} as usize)", const_expr_text(x)?),
+        // (a cast keeps its type's name, which Program::eval_const wraps to when it is an integer type or an alias
+        // of one: `-1i8 as i32` is -1, `4294967298u64 as i32` is 2; another type does not change the value)
+        Expr::Cast(x, t) => {
+            let inner = const_expr_text(x)?;
+            match &**t {
+                crate::parse::Ty::Path(None, p) if p.segs.len() == 1 && p.segs[0].args.is_empty() => format!("({inner} as {})", p.segs[0].name),
+                _ => inner,
+            }
+        }
         Expr::Block(None, false, b) | Expr::Const(b) if b.stmts.len() == 1 => match &b.stmts[0] {
             Stmt::Expr(x, false) => const_expr_text(x)?,
             _ => return None,

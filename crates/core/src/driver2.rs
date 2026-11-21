@@ -2400,6 +2400,20 @@ impl Session2 {
     /// シグネチャは prelude のものだけを入れる (名前の最後で多めに取ると、ユーザの `Acc::push` などが入って、同じ prelude の
     /// 関数がクレートごとに違うキーになり、どのクレートでもコンパイルし直していた)
     fn fn_key_r(&self, a: &Analysis, id: usize, closed: Option<&[bool]>) -> Key {
+        // (the program's non-generic type aliases: a constant's cast through one (`257u32 as Lane`) changes its
+        // value, and a function that uses the constant, when the alias does. Order-independent)
+        let aliases = || {
+            let mut k: Key = 0;
+            for (n, (g, t)) in &a.prog.aliases {
+                if g.is_empty() {
+                    let mut h = KeyHasher::new();
+                    h.add(n);
+                    h.add(t);
+                    k ^= h.finish();
+                }
+            }
+            k
+        };
         let ii = a.prog.item_of[id].unwrap() as usize;
         let pf = a.prog.prelude_from as usize;
         // 閉じた依存するクレートの関数 (と、型引数に依存するクレートの型を持つ prelude の関数): 本体・自分のシグネチャと、
@@ -2432,6 +2446,9 @@ impl Session2 {
                     h.add(&a.items[cd.item as usize].hash);
                     a.prog.hash_ty(cd.ty, &mut h);
                 }
+            }
+            if !a.crefs[id].is_empty() {
+                h.add(&aliases());
             }
             match a.prog.panic_handler {
                 Some(p) => h.add(&a.prog.names[p as usize]),
@@ -2513,6 +2530,8 @@ impl Session2 {
             h.add(&a.items[cd.item as usize].hash);
             a.prog.hash_ty(cd.ty, &mut h);
         }
+        // (and a cast in the body's own constants: `::<{ 257u32 as Lane }>`)
+        h.add(&aliases());
         h.finish()
     }
 

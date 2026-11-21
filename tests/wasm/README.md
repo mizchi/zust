@@ -15,6 +15,59 @@ stays in it:
 | `wasm_host_denies` | `deny/*.rs`: spawning a process (the module imports `fork` / `execvp` and is not run at all), reading and writing host files (they fail; no file appears), the host's environment (empty) |
 | `wasm_contains_faults` | `contain/*.rs`: unsafe code that writes past 4 GiB (would wrap onto the stack), reads the null page, writes past the end of memory, copies or fills such addresses in bulk, calls an integer as a function, calls a function pointer with bits past 32 set, calls through a pointer of another signature, overflows the stack, or allocates more than memory: each run ends in a trap or an abort, before its next line |
 
+## SIMD (`core::arch::wasm32`, issue #30)
+
+zustc's IR has vector types of a fixed width, `Type::Vec(VBits)` (128, 256 or 512 bits), and SIMD instructions
+written per lane, not per width: `Op::Simd(Shape, VOp, ..)`, where the `Shape` is the lane type and the width
+(`f32x4.add` is `Add` on f32 lanes of 128 bits; AVX2's `vaddps ymm` would be the same `Add` at 256). The set is what
+wasm SIMD and SSE4.1 / AVX2 / NEON have in common, with the relaxed instructions apart. Only the byte shuffles
+(`Shuffle`, `Swizzle`) and `Vconst` are 128-bit only. The wasm backend emits 128-bit vectors only: each instruction as
+its `0xFD` opcode (the relaxed ones from `0xFD 0x100`), and a wider vector is an error, not split into several.
+Node 22 and 26 run both sets without flags.
+
+The design leaves room for wasm's flexible-vectors proposal (phase 3): its types (`vec.i32` ..) have a length the
+engine chooses, a runtime constant read by `vec.i32.length`, and its operations are lane-wise ones of the same kinds
+(arithmetic, compares to masks, `narrow`, `widen_low` / `widen_high`, splat, lane access by immediate within the
+low 128 bits), without a byte shuffle. That would be one more width whose size is the target's at run time, like
+Cranelift's dynamic vector types: vectors that can be locals and parameters but not fields of a laid-out struct, plus
+an instruction for the lane count and the lane shifts and half concatenations (`crates/ir`, the SIMD section).
+
+- `v128` is a primitive type (`Ty::Vec(128)`: 16 bytes, aligned to 16), held in one wasm local, passed and returned as a `v128`
+  parameter or result. It can be a struct field, an array or `Vec` element, an `Option` payload, a closure capture or a
+  generic argument.
+- The intrinsics of `core::arch::wasm32` (rustc's names and types: `f32x4_add`, `u8x16_shr`, `i32x4_extract_lane::<N>`,
+  `i8x16_shuffle::<..>`, `v128_load`, `f32x4_relaxed_madd`, ..: the whole `simd128` and `relaxed-simd` sets) are
+  lowered in place to one instruction each, or a few (a constructor is a splat and lane replacements). They are not
+  prelude functions: a program that names none of them compiles as before. One that defines a function of the same
+  name calls its own. An intrinsic cannot be used as a function value (`apply(f32x4_add, ..)`: write a closure).
+- `cfg(target_feature = "simd128")` and `"relaxed-simd"` are true for wasm32.
+- Loads and stores of `v128` check their address as scalar ones do (`contain/simd_*.rs`).
+- Native builds: the Cranelift backend emits the same instructions (128- and 256-bit vectors, `core::arch::x86_64`
+  too: tests/simd/README.md), and `core::arch::wasm32`'s intrinsics give the wasm results natively. minclif rejects a
+  function with a vector.
+
+`tests/wasm.rs`'s `wasm_simd_like_rustc` checks that `simd/*.rs` (every intrinsic, on edge cases: NaN, ±0, saturation,
+out-of-range shifts and swizzle indices, and `v128` as a value) print what rustc's wasm32-wasip1 builds print under
+Node's WASI (`wasi.mjs`; needs `rustup target add wasm32-wasip1`). rustc's build is unoptimized there: with -O, LLVM
+folds `f32x4_pmin` / `f32x4_pmax` of constants with the operands swapped, which differs from its definition and
+from the wasm spec on NaN and ±0 lanes. Relaxed results are compared on inputs where every allowed result agrees, and
+by whether a result is one of the allowed ones.
+
+The kernels of experiments/zustscript written against `core::arch::wasm32` (`simd/kernels.rs` has them), timed
+in place of zsc's hand-written v128 module with the same JS glue (`tests/ml_bench.mjs`, Node 22.23, 1e6 elements;
+zustc without -O):
+
+| kernel | hand-written v128 | zustc, `core::arch::wasm32` | zustc, scalar (before) |
+|---|---|---|---|
+| dense 512×512 | 0.11 ms | 0.20 ms | 3.69 ms |
+| relu | 2.7 ms | 4.0 ms | 42.0 ms |
+| saxpy (relaxed madd) | 2.1 ms | 3.7–4.1 ms | 29.0 ms |
+| sum of squares | 0.55 ms | 0.91 ms | 14.6 ms |
+
+The instructions are the same as the hand-written module's; the 1.5–1.8x left is the backend's: the `loop` +
+`br_table` dispatcher between blocks and the address checks (with `ZUSTC_WASM_NO_ADDR_CHECK=1` and -O, the sum of
+squares takes 0.70 ms), and zustc's `vec![0.0; n]` for the outputs.
+
 ## The sandbox
 
 `run.mjs` is the host. The module can do only what the host's imports let it:

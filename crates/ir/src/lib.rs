@@ -11,6 +11,9 @@ pub enum Type {
     I128,
     F32,
     F64,
+    /// A SIMD vector of a fixed width. Its lanes are not part of the type: each SIMD instruction says which
+    /// [`Shape`] it reads it as (see [`VBits`] for the widths and why)
+    Vec(VBits),
 }
 
 impl Type {
@@ -21,6 +24,7 @@ impl Type {
             Type::I32 => 4,
             Type::I64 | Type::F64 => 8,
             Type::I128 => 16,
+            Type::Vec(w) => w.bytes(),
             Type::F32 => 4,
         }
     }
@@ -29,6 +33,298 @@ impl Type {
     }
     pub fn bits(self) -> u32 {
         self.bytes() * 8
+    }
+}
+
+// --- SIMD (issue #30) ---------------------------------------------------------------------------------------
+//
+// A vector type is only its width ([`VBits`]); an instruction reads it through a [`Shape`] (lane type x width), as
+// wasm's `i32x4.add` reads a `v128`. The instructions are written per lane, not per width, so one [`VOp`] covers
+// 128-bit SIMD (wasm simd128, SSE, NEON), 256-bit (AVX2) and 512-bit (AVX-512) vectors: a backend says which widths it
+// emits (wasm: 128 only; the others reject a wider vector, they do not split it silently).
+//
+// Two kinds of instruction do not scale with the width and are 128-bit only: `Shuffle` / `Swizzle` (a byte index
+// table; AVX's shuffles work within 128-bit halves) and `Vconst` of more than 16 bytes (a wider constant is a splat).
+// `Half` / `Concat` change the width (a 256-bit vector's 128-bit halves); with them an instruction that works per
+// 128-bit lane on x86 (`_mm256_packs_epi32`) is written from 128-bit ones. A backend with narrower registers than a
+// vector holds it in parts: Cranelift (no 256-bit registers on x86-64 yet) as 128-bit values, wasm not at all.
+//
+// Wasm's flexible-vectors proposal (phase 3: `vec.i32` and the like, whose length the engine sets: a runtime
+// constant, read by `vec.i32.length`) fits the same instructions with a width that is not known until the program
+// runs. Its lane-wise operations are these ones (add .. max, compares to masks, `narrow`, `widen_low/high` as
+// `Extend`, splat, lane access by immediate index within the low 128 bits), and it has no byte shuffle. It would be
+// a width `VBits::Flex` whose size is the target's: such vectors could be locals and parameters but not fields of a
+// laid-out struct, as Cranelift's dynamic vector types (`i32x4*gv`) and Rust's scalable vectors are; plus an
+// instruction for its lane count and the lane shifts / half concatenations. Not added until a backend has it.
+
+/// The width of a vector
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Hash)]
+pub enum VBits {
+    B128,
+    B256,
+    B512,
+}
+
+impl VBits {
+    pub fn bits(self) -> u32 {
+        match self {
+            VBits::B128 => 128,
+            VBits::B256 => 256,
+            VBits::B512 => 512,
+        }
+    }
+    pub fn bytes(self) -> u32 {
+        self.bits() / 8
+    }
+    /// the width of a half (none below 128 bits)
+    pub fn half(self) -> Option<VBits> {
+        match self {
+            VBits::B128 => None,
+            VBits::B256 => Some(VBits::B128),
+            VBits::B512 => Some(VBits::B256),
+        }
+    }
+    pub fn from_bits(b: u32) -> Option<VBits> {
+        Some(match b {
+            128 => VBits::B128,
+            256 => VBits::B256,
+            512 => VBits::B512,
+            _ => return None,
+        })
+    }
+}
+
+/// The type of one lane
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Hash)]
+pub enum Lane {
+    I8,
+    I16,
+    I32,
+    I64,
+    F32,
+    F64,
+}
+
+impl Lane {
+    /// the scalar type of one lane (what splat takes and extract_lane gives)
+    pub fn ty(self) -> Type {
+        match self {
+            Lane::I8 => Type::I8,
+            Lane::I16 => Type::I16,
+            Lane::I32 => Type::I32,
+            Lane::I64 => Type::I64,
+            Lane::F32 => Type::F32,
+            Lane::F64 => Type::F64,
+        }
+    }
+    pub fn bits(self) -> u32 {
+        self.ty().bits()
+    }
+    pub fn is_float(self) -> bool {
+        matches!(self, Lane::F32 | Lane::F64)
+    }
+}
+
+/// How an instruction reads a vector: its lane type and width (the lane count follows)
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Hash)]
+pub struct Shape {
+    pub lane: Lane,
+    pub bits: VBits,
+}
+
+impl Shape {
+    pub const I8X16: Shape = Shape { lane: Lane::I8, bits: VBits::B128 };
+    pub const I16X8: Shape = Shape { lane: Lane::I16, bits: VBits::B128 };
+    pub const I32X4: Shape = Shape { lane: Lane::I32, bits: VBits::B128 };
+    pub const I64X2: Shape = Shape { lane: Lane::I64, bits: VBits::B128 };
+    pub const F32X4: Shape = Shape { lane: Lane::F32, bits: VBits::B128 };
+    pub const F64X2: Shape = Shape { lane: Lane::F64, bits: VBits::B128 };
+    pub fn new(lane: Lane, bits: VBits) -> Shape {
+        Shape { lane, bits }
+    }
+    pub fn count(self) -> u32 {
+        self.bits.bits() / self.lane.bits()
+    }
+    /// the vector type
+    pub fn ty(self) -> Type {
+        Type::Vec(self.bits)
+    }
+    pub fn is_float(self) -> bool {
+        self.lane.is_float()
+    }
+}
+
+/// A SIMD instruction (issue #30), in [`Op::Simd`] with the [`Shape`] it reads its vector operands as. The operands
+/// are vectors of that width unless noted; the result is one unless [`VOp::result`] says otherwise. For a
+/// conversion the shape is the result's (`Narrow`: i8 lanes from two vectors of i16 lanes). "Half" is half the lanes
+/// of the width. The set is what wasm SIMD and SSE4.1 / AVX2 / NEON have in common, and the relaxed instructions
+/// separately (their results may differ between engines and CPUs: a program opts into them by name)
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum VOp {
+    // bitwise, whatever the lanes
+    Not,
+    And,
+    /// a & !b
+    AndNot,
+    Or,
+    Xor,
+    /// (a & c) | (b & !c)
+    Bitselect,
+    /// any bit set (result I8: 0 / 1)
+    AnyTrue,
+    /// (scalar of the lane type) to every lane
+    Splat,
+    /// one lane (result: the lane type; i8 / i16 lanes as their bits)
+    Extract(u8),
+    /// (vector, scalar of the lane type)
+    Replace(u8),
+    /// (128-bit only) bytes of (a, b) picked by 16 indices < 32 (byte i of the u128 is the index of result byte i)
+    Shuffle(u128),
+    /// (128-bit only) bytes of a picked by the bytes of b (an index >= 16 gives 0)
+    Swizzle,
+    Add,
+    Sub,
+    /// (not for i8 lanes)
+    Mul,
+    /// (floats)
+    Div,
+    Neg,
+    Abs,
+    /// (floats)
+    Sqrt,
+    Ceil,
+    Floor,
+    Trunc,
+    Nearest,
+    /// (unsigned): integers; floats propagate NaN, -0 < +0
+    Min(bool),
+    Max(bool),
+    /// pseudo-min / max of floats: b < a ? b : a / a < b ? b : a
+    Pmin,
+    Pmax,
+    /// saturating, i8 / i16 lanes (unsigned)
+    AddSat(bool),
+    SubSat(bool),
+    /// unsigned rounding average, i8 / i16 lanes
+    Avgr,
+    /// lanewise compare to a mask of all ones / zeros
+    Icmp(IntCC),
+    Fcmp(FloatCC),
+    /// (vector, I32 amount mod the lane width)
+    Shl,
+    /// (unsigned)
+    Shr(bool),
+    /// every lane non-zero (result I8: 0 / 1)
+    AllTrue,
+    /// the top bit of each lane (result I32: up to 32 lanes; a wider count needs I64, not used yet)
+    Bitmask,
+    /// i8 lanes
+    Popcnt,
+    /// (unsigned): two vectors of twice as wide lanes narrowed with saturation (to i8 / i16 lanes)
+    Narrow(bool),
+    /// (high half, unsigned): half the lanes widened (to i16 / i32 / i64 lanes)
+    Extend(bool, bool),
+    /// (high half, unsigned): the widened product of half the lanes
+    ExtMul(bool, bool),
+    /// (unsigned): sums of adjacent pairs, widened (to i16 / i32 lanes)
+    ExtAddPairwise(bool),
+    /// i32 lanes from the products of adjacent i16 pairs, summed
+    Dot,
+    /// i16 lanes, q15 rounding saturating multiply
+    Q15MulrSat,
+    /// (unsigned): to f32 lanes from as many i32 lanes / to f64 lanes from the low half of i32 lanes
+    FcvtFromInt(bool),
+    /// (from f64, unsigned): to i32 lanes, saturating, from f32 lanes / from f64 lanes into the low half (the rest 0)
+    FcvtToIntSat(bool, bool),
+    /// f64 lanes to the low half of f32 lanes (the rest 0)
+    Demote,
+    /// the low half of f32 lanes to f64 lanes
+    Promote,
+    /// a * b + c rounded once (floats; x86's FMA). Not in wasm (only the relaxed form)
+    Fma,
+    /// the low / high half of a vector of shape s: a vector of half the width (x86's `_mm256_extractf128_ps`)
+    Half(bool),
+    /// (low, high): two vectors of half the width of shape s, as one
+    Concat,
+    // relaxed SIMD (results may differ between engines): wasm's relaxed-simd proposal
+    /// a * b + c, fused or not (floats)
+    RelaxedMadd,
+    /// -(a * b) + c, fused or not
+    RelaxedNmadd,
+    RelaxedMin,
+    RelaxedMax,
+    /// (a, b, mask): bitselect, or by the top bit of each lane
+    RelaxedLaneselect,
+    /// (128-bit only)
+    RelaxedSwizzle,
+    /// (from f64, unsigned): as FcvtToIntSat, out-of-range lanes as the engine likes
+    RelaxedTrunc(bool, bool),
+    RelaxedQ15Mulr,
+    /// i16 lanes from i8 x i7 lanes
+    RelaxedDot,
+    /// i32 lanes from i8 x i7 lanes, plus i32 lanes
+    RelaxedDotAdd,
+}
+
+impl VOp {
+    /// the type of the result, read as `s`
+    pub fn result(self, s: Shape) -> Type {
+        match self {
+            VOp::AnyTrue | VOp::AllTrue => Type::I8,
+            VOp::Bitmask => Type::I32,
+            VOp::Extract(_) => s.lane.ty(),
+            VOp::Half(_) => Type::Vec(s.bits.half().unwrap_or(s.bits)),
+            _ => s.ty(),
+        }
+    }
+    /// how many operands it takes
+    pub fn arity(self) -> usize {
+        match self {
+            VOp::Not
+            | VOp::AnyTrue
+            | VOp::Splat
+            | VOp::Extract(_)
+            | VOp::Neg
+            | VOp::Abs
+            | VOp::Sqrt
+            | VOp::Ceil
+            | VOp::Floor
+            | VOp::Trunc
+            | VOp::Nearest
+            | VOp::AllTrue
+            | VOp::Bitmask
+            | VOp::Popcnt
+            | VOp::Extend(..)
+            | VOp::ExtAddPairwise(_)
+            | VOp::FcvtFromInt(_)
+            | VOp::FcvtToIntSat(..)
+            | VOp::Demote
+            | VOp::Promote
+            | VOp::Half(_)
+            | VOp::RelaxedTrunc(..) => 1,
+            VOp::Bitselect | VOp::Fma | VOp::RelaxedMadd | VOp::RelaxedNmadd | VOp::RelaxedLaneselect | VOp::RelaxedDotAdd => 3,
+            _ => 2,
+        }
+    }
+    /// whether it is defined only on 128-bit vectors (a byte index table)
+    pub fn only_128(self) -> bool {
+        matches!(self, VOp::Shuffle(_) | VOp::Swizzle | VOp::RelaxedSwizzle)
+    }
+    /// whether it is a relaxed instruction
+    pub fn relaxed(self) -> bool {
+        matches!(
+            self,
+            VOp::RelaxedMadd
+                | VOp::RelaxedNmadd
+                | VOp::RelaxedMin
+                | VOp::RelaxedMax
+                | VOp::RelaxedLaneselect
+                | VOp::RelaxedSwizzle
+                | VOp::RelaxedTrunc(..)
+                | VOp::RelaxedQ15Mulr
+                | VOp::RelaxedDot
+                | VOp::RelaxedDotAdd
+        )
     }
 }
 
@@ -214,6 +510,17 @@ pub enum Op {
     Trapnz(Value),
     CallIndirect(Value, Vec<Value>, Vec<Type>),
     SymbolAddr(String),
+    /// a 128-bit vector constant (byte i is bits 8i..8i+8; a wider constant is a splat)
+    Vconst(u128),
+    /// a SIMD instruction, reading its vectors as the shape
+    Simd(Shape, VOp, Vec<Value>),
+}
+
+impl Op {
+    /// whether it is a SIMD instruction (the native backends reject a function that has one, or a vector value)
+    pub fn is_simd(&self) -> bool {
+        matches!(self, Op::Vconst(_) | Op::Simd(..))
+    }
 }
 
 // --- Recorder: 命令を記録するだけの組み立て (acg が使う) -----------------------------------------------
@@ -888,5 +1195,35 @@ impl Recorder {
         let r = self.val(Type::I64);
         self.res.push(vec![r.0]);
         r
+    }
+    pub fn vconst(&mut self, x: u128) -> Value {
+        self.ops.push(Op::Vconst(x));
+        let r = self.val(Type::Vec(VBits::B128));
+        self.res.push(vec![r.0]);
+        r
+    }
+    pub fn simd(&mut self, s: Shape, op: VOp, args: &[Value]) -> Value {
+        self.ops.push(Op::Simd(s, op, args.to_vec()));
+        let r = self.val(op.result(s));
+        self.res.push(vec![r.0]);
+        r
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn shapes() {
+        assert_eq!(Shape::F32X4.count(), 4);
+        assert_eq!(Shape::I8X16.count(), 16);
+        assert_eq!(Shape::new(Lane::F32, VBits::B256).count(), 8);
+        assert_eq!(Shape::new(Lane::I16, VBits::B512).count(), 32);
+        assert_eq!(Type::Vec(VBits::B256).bytes(), 32);
+        assert_eq!(VOp::Add.result(Shape::new(Lane::I32, VBits::B512)), Type::Vec(VBits::B512));
+        assert_eq!(VOp::Extract(3).result(Shape::F64X2), Type::F64);
+        assert_eq!(VBits::from_bits(256), Some(VBits::B256));
+        assert_eq!(VBits::from_bits(192), None);
     }
 }
