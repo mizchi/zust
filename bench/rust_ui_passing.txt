@@ -4066,6 +4066,7 @@ compile-fail	never_type/regress/never-in-range-pat.rs
 compile-fail	never_type/regress/never-type-method-call-15207.rs
 compile-fail	never_type/regress/suggestion-ice-132517.rs
 run-pass	nll/borrow-use-issue-46875.rs
+compile-fail	nll/borrowed-local-error.rs
 compile-fail	nll/borrowed-match-issue-45045.rs
 compile-fail	nll/borrowed-referent-issue-38899.rs
 compile-fail	nll/borrowed-universal-error-2.rs
@@ -4106,6 +4107,7 @@ compile-fail	nll/issue-47388.rs
 compile-fail	nll/issue-47470.rs
 run-pass	nll/issue-47589.rs
 run-pass	nll/issue-48070.rs
+compile-fail	nll/issue-48238.rs
 run-pass	nll/issue-48623-closure.rs
 compile-fail	nll/issue-48803.rs
 run-pass	nll/issue-50343.rs
@@ -5228,6 +5230,7 @@ run-pass	regions/init-res-into-things.rs
 compile-fail	regions/issue-102374.rs
 compile-fail	regions/issue-102392.rs
 check-pass	regions/issue-11612.rs
+compile-fail	regions/issue-12470.rs
 check-pass	regions/issue-21520.rs
 check-pass	regions/issue-24085.rs
 check-pass	regions/issue-26448-3.rs

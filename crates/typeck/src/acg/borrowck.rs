@@ -1945,6 +1945,19 @@ impl Cx<'_> {
     fn bk_direct(&self, e: &Expr, out: &mut Vec<Src>) {
         match e {
             Expr::Paren(x) => self.bk_direct(x, out),
+            // (a call of the program's fn: what its result borrows from, by its signature (`fn gimme(x: &T) -> &U`);
+            // the prelude writes no lifetimes, so its fns are not followed)
+            Expr::Call(f, args) => {
+                if let Some(id) = self.fn_item(f) {
+                    if self.prog.item_of.get(id as usize).copied().flatten().is_some_and(|i| i < self.prog.prelude_from) {
+                        for (i, a) in args.iter().enumerate() {
+                            if self.bk_ret_from(id, i) {
+                                self.bk_direct(a, out);
+                            }
+                        }
+                    }
+                }
+            }
             Expr::Ref(_, x) => {
                 if let Some(&ln) = self.bk.loan_of.get(&(&**x as *const Expr as usize)) {
                     out.push(Src::Loan(ln));
