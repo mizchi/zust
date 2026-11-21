@@ -2086,30 +2086,13 @@ impl Cx<'_> {
     }
 
     /// `x.m(..)` (x: `&dyn Trait`)
-    /// E0596: a `&mut self` method of `dyn tr` called through a shared `&dyn` / `*const dyn` (the receiver's type as
-    /// evaluated)
-    pub(crate) fn dyn_mut_check(&mut self, recv_ty: Ty, tr: &str, name: &str) -> R<()> {
-        if !self.user_code {
-            return Ok(());
-        }
-        let (trn, _) = self.dyn_trait_args(tr);
-        let decls = self.prog.dyn_methods(&trn);
-        let Some(&d) = decls.iter().find(|&&d| self.prog.names[d as usize].rsplit("::").next() == Some(name)) else {
-            return Ok(());
-        };
-        let ds = &self.prog.sigs[d as usize];
-        // (a method `where Self: Sized` is not in the vtable)
-        if ds.generics.first().is_some_and(|g| g.1.iter().any(|b| b == "Sized")) {
-            return err(SP, format!("the `{name}` method cannot be invoked on `{}`", self.prog.tn(recv_ty)));
-        }
-        let shared = matches!(recv_ty, Ty::Ref(false, Ty::Dyn(_)) | Ty::Ptr(false, Ty::Dyn(_)));
-        if shared && matches!(ds.params.first(), Some(Ty::Ref(true, _))) {
-            return err(SP, "cannot borrow data in a `&` reference as mutable (E0596)".to_string());
-        }
-        Ok(())
+    /// `recv.m(..)` through the vtable of `dyn tr`. `recv_ty` is the receiver's type as evaluated, when the caller has
+    /// it: a `&mut self` method through a shared `&dyn` / `*const dyn` is E0596
+    pub(crate) fn dyn_method_call(&mut self, fat: Value, tr: &str, mc: &Expr) -> R<V> {
+        self.dyn_method_call_on(fat, tr, mc, None)
     }
 
-    pub(crate) fn dyn_method_call(&mut self, fat: Value, tr: &str, mc: &Expr) -> R<V> {
+    pub(crate) fn dyn_method_call_on(&mut self, fat: Value, tr: &str, mc: &Expr, recv_ty: Option<Ty>) -> R<V> {
         let Expr::MethodCall(_, name, _, margs, _) = mc else { return err(SP, "internal: expected a method call") };
         let (trn, targs) = self.dyn_trait_args(tr);
         let binds = if tr.contains('=') { self.dyn_bindings(tr) } else { vec![] };
@@ -2119,6 +2102,15 @@ impl Cx<'_> {
             return err(SP, format!("no method named `{name}` found for `dyn {tr}`"));
         };
         let ds = &self.prog.sigs[decls[idx] as usize];
+        if let (Some(rt), true) = (recv_ty, self.user_code) {
+            // (a method `where Self: Sized` is not in the vtable)
+            if ds.generics.first().is_some_and(|g| g.1.iter().any(|b| b == "Sized")) {
+                return err(SP, format!("the `{name}` method cannot be invoked on `{}`", self.prog.tn(rt)));
+            }
+            if matches!(rt, Ty::Ref(false, _) | Ty::Ptr(false, _)) && matches!(ds.params.first(), Some(Ty::Ref(true, _))) {
+                return err(SP, "cannot borrow data in a `&` reference as mutable (E0596)".to_string());
+            }
+        }
         // (a method the vtable has no entry for: `self` by value / no `self` / generics of its own)
         let by_box = matches!(ds.params.first(), Some(Ty::Box(_)));
         if !ds.has_self || !matches!(ds.params.first(), Some(Ty::Ref(..) | Ty::Box(_))) || ds.generics.len() > 1 + targs.len() {

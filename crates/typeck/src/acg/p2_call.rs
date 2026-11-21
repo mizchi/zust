@@ -686,8 +686,7 @@ impl Cx<'_> {
                         return err(sp.start, "dereference of raw pointer is unsafe and requires unsafe block (E0133)");
                     }
                     if let (Some(v), vt) = self.expr(inner, None)? {
-                        self.dyn_mut_check(vt, tr, method)?;
-                        return self.dyn_method_call(v, tr, e);
+                        return self.dyn_method_call_on(v, tr, e, Some(vt));
                     }
                 }
             }
@@ -733,9 +732,8 @@ impl Cx<'_> {
                 p = match p {
                     Place::Mem(a, o, Ty::Struct(sid)) => break (a, o, sid),
                     Place::Mem(a, o, rt @ (Ty::Ref(_, Ty::Dyn(tr)) | Ty::Box(Ty::Dyn(tr)))) => {
-                        self.dyn_mut_check(rt, tr, &name)?;
                         let fat = self.addr_plus(a, o);
-                        return self.dyn_method_call(fat, tr, e);
+                        return self.dyn_method_call_on(fat, tr, e, Some(rt));
                     }
                     Place::Mem(a, o, Ty::Ref(_, i) | Ty::Box(i)) => {
                         through_ref |= matches!(p.ty(), Ty::Ref(..));
