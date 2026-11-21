@@ -871,6 +871,64 @@ fn unsized_elem(t: &PTy) -> Option<String> {
 /// What an item's types require of traits' `Self: 'x` bounds (the driver checks them against the traits, which
 /// only it sees, and only when a trait has such a bound): an impl's self type outlives what its trait requires; a
 /// field's trait object's lifetime (`Box<dyn Wedding<'k> + 'r>`), what its trait requires
+/// A path in a field's, a type alias's, an associated type's or a const's type that names a struct or enum with
+/// lifetimes (adts: their numbers) and writes none (E0106: nothing to elide them to there), or writes another number
+/// of them (E0107): `line:col: msg`. Not in fn pointer, `dyn` and `impl` types, which elide
+pub fn hidden_lifetimes(src: &str, it: &SrcItem, adts: &crate::fxhash::FxMap<&str, usize>) -> Option<String> {
+    let text = src.get(it.start..it.end)?;
+    let f = parse_file(text).ok()?;
+    let item = f.items.first()?;
+    let (g, tys): (Option<&Generics>, Vec<&PTy>) = match &item.kind {
+        ItemKind::Struct(_, g, fields) | ItemKind::Union(_, g, fields) => (Some(g), match fields {
+            Fields::Named(v) => v.iter().map(|x| &x.1).collect(),
+            Fields::Tuple(v) => v.iter().collect(),
+            Fields::Unit => vec![],
+        }),
+        ItemKind::Enum(_, g, vs) => (Some(g), vs.iter().flat_map(|v| match &v.1 {
+            Fields::Named(f) => f.iter().map(|x| &x.1).collect::<Vec<_>>(),
+            Fields::Tuple(f) => f.iter().collect(),
+            Fields::Unit => vec![],
+        }).collect()),
+        ItemKind::Type(_, g, _, Some(t)) => (Some(g), vec![t]),
+        ItemKind::Const(_, Some(t), _) | ItemKind::Static(_, _, t, _) => (None, vec![t]),
+        _ => return None,
+    };
+    // (a const's or a static's elided lifetimes are 'static (RFC 1623): only a wrong number is an error)
+    let statics = matches!(item.kind, ItemKind::Const(..) | ItemKind::Static(..));
+    let tparams: Vec<&str> = g.map(|g| g.params.iter().filter_map(|p| if let GParam::Ty(n, ..) = p { Some(n.as_str()) } else { None }).collect()).unwrap_or_default();
+    fn walk(t: &PTy, adts: &crate::fxhash::FxMap<&str, usize>, tparams: &[&str], statics: bool, depth: u32) -> Option<(crate::parse::Pos, String)> {
+        if depth > 16 {
+            return None;
+        }
+        match t {
+            PTy::Ref(_, _, i) | PTy::Ptr(_, i) | PTy::Slice(i) | PTy::Array(i, _) => walk(i, adts, tparams, statics, depth + 1),
+            PTy::Tuple(ts) => ts.iter().find_map(|t| walk(t, adts, tparams, statics, depth + 1)),
+            PTy::Path(None, p) => {
+                let s = p.segs.last()?;
+                if p.segs.len() == 1 && !tparams.contains(&s.name.as_str()) && s.fn_args.is_none() {
+                    if let Some(&n) = adts.get(s.name.as_str()) {
+                        let m = s.args.iter().filter(|a| matches!(a, crate::parse::GArg::Lifetime(_))).count();
+                        if m == 0 && n > 0 && !statics {
+                            return Some((p.pos, "missing lifetime specifier (E0106)".to_string()));
+                        }
+                        if m > 0 && m != n {
+                            let w = |k: usize| if k == 1 { "argument" } else { "arguments" };
+                            return Some((p.pos, format!("struct takes {n} lifetime {} but {m} lifetime {} supplied (E0107)", w(n), if m == 1 { "argument was" } else { "arguments were" })));
+                        }
+                    }
+                }
+                s.args.iter().find_map(|a| match a {
+                    crate::parse::GArg::Ty(t) => walk(t, adts, tparams, statics, depth + 1),
+                    _ => None,
+                })
+            }
+            _ => None,
+        }
+    }
+    let (p, m) = tys.iter().find_map(|t| walk(t, adts, &tparams, statics, 0))?;
+    Some(format!("{}:{}: {m}", it.line + p.line.max(1) as usize - 1, p.col + 1))
+}
+
 pub fn trait_obls(src: &str, it: &SrcItem) -> Vec<crate::types::WfObl> {
     let text = &src[it.start..it.end];
     let text = match it.kind {

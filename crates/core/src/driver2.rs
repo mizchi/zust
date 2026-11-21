@@ -631,6 +631,31 @@ impl Session2 {
                 String::new()
             }
         });
+        // (E0106 / E0107: the program's fields, type aliases and associated types that name a struct or enum with
+        // lifetimes and write none of them, or another number: the definitions are known now. Only the items that
+        // mention one by name are read again)
+        {
+            let mut adts: crate::fxhash::FxMap<&str, usize> = Default::default();
+            for sm in &sums[..user] {
+                if let Some(r) = sm.adt_regions.as_deref().filter(|r| !r.lts.is_empty()) {
+                    for n in sm.structs.iter().map(|s| s.0.as_str()).chain(sm.enums.iter().map(|e| e.0.as_str())) {
+                        adts.insert(n, r.lts.len());
+                    }
+                }
+            }
+            if !adts.is_empty() {
+                for (it, sm) in items[..user].iter().zip(&sums[..user]) {
+                    let kind = !sm.structs.is_empty() || !sm.enums.is_empty() || !sm.aliases.is_empty() || !sm.consts.is_empty() || !sm.statics.is_empty() || !sm.assocs.is_empty();
+                    let Some(text) = src.get(it.start..it.end).filter(|_| kind) else { continue };
+                    if !adts.keys().any(|n| text.contains(n)) {
+                        continue;
+                    }
+                    if let Some(e) = crate::ast_summary::hidden_lifetimes(&src, it, &adts) {
+                        return Err(e);
+                    }
+                }
+            }
+        }
         // (what the program's types require of traits' `Self: 'x` bounds (E0478, E0310): the traits are known now)
         {
             let so: crate::fxhash::FxMap<&str, &[String]> = sums

@@ -890,3 +890,14 @@ fn extended_temporaries_end_with_their_block() {
     assert!(d.len() == 1 && d[0].0 == 7 && d[0].1.contains("E0716"), "{d:?}");
     assert_eq!(check("fn id<T>(x: T) -> T {\n    x\n}\nfn main() {\n    let r;\n    let x = &id(3);\n    {\n        r = x;\n    }\n    println!(\"{} {}\", r, x);\n}\n"), vec![]);
 }
+
+/// A field, a type alias or an associated type naming a struct with lifetimes writes them (E0106), as many as it
+/// has (E0107); a const's or a static's are 'static
+#[test]
+fn hidden_lifetimes_in_items() {
+    let d = check("struct Bar<'a, T>(&'a T);\ntype B = Bar<u8>;\nfn main() {}\n");
+    assert!(d.len() == 1 && d[0].0 == 2 && d[0].1.contains("E0106"), "{d:?}");
+    let d = check("struct Buzz<'a, 'b>(&'a str, &'b str);\nstruct Baz<'a> {\n    buzz: Buzz<'a>,\n}\nfn main() {}\n");
+    assert!(d.len() == 1 && d[0].0 == 3 && d[0].1.contains("E0107"), "{d:?}");
+    assert_eq!(check("struct Foo<'a> {\n    b: &'a [bool],\n}\nstatic F: Foo = Foo { b: &[true] };\nstruct W<'a> {\n    f: Foo<'a>,\n    g: fn(Foo) -> u8,\n}\nfn h(_f: Foo) {}\nfn main() {\n    let _ = &F;\n}\n"), vec![]);
+}

@@ -2141,6 +2141,7 @@ compile-fail	error-codes/E0070.rs
 compile-fail	error-codes/E0071.rs
 compile-fail	error-codes/E0081.rs
 compile-fail	error-codes/E0106.rs
+compile-fail	error-codes/E0107.rs
 compile-fail	error-codes/E0117.rs
 compile-fail	error-codes/E0119.rs
 compile-fail	error-codes/E0120.rs
@@ -3223,6 +3224,7 @@ run-pass	lexer/underscores-in-unicode-escapes.rs
 run-pass	lexer/unicode-pattern-white-space.rs
 compile-fail	lexer/unterminated-comment.rs
 compile-fail	lexer/unterminated-nested-comment.rs
+compile-fail	lifetimes/E0106-trailing-comma-in-lifetime-suggestion.rs
 check-pass	lifetimes/array-pattern-matching-10396.rs
 compile-fail	lifetimes/borrowck-let-suggestion.rs
 compile-fail	lifetimes/closure-must-return-bound-lifetime.rs
@@ -4000,6 +4002,7 @@ compile-fail	mismatched_types/issue-1448-2.rs
 compile-fail	mismatched_types/issue-19109.rs
 compile-fail	mismatched_types/issue-38371-unfixable.rs
 compile-fail	mismatched_types/issue-47706.rs
+compile-fail	mismatched_types/issue-74918-missing-lifetime.rs
 compile-fail	mismatched_types/issue-84976.rs
 compile-fail	mismatched_types/mismatch-args-crash-issue-130400.rs
 compile-fail	mismatched_types/mismatch-args-vargs-issue-130372.rs
