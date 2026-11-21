@@ -643,9 +643,100 @@ impl Session2 {
                 String::new()
             }
         });
+        // (E0106 / E0107: the program's fields, type aliases and associated types that name a struct or enum with
+        // lifetimes and write none of them, or another number: the definitions are known now. Only the items that
+        // mention one by name are read again)
+        {
+            let mut adts: crate::fxhash::FxMap<&str, usize> = Default::default();
+            for sm in &sums[..user] {
+                if let Some(r) = sm.adt_regions.as_deref().filter(|r| !r.lts.is_empty()) {
+                    for n in sm.structs.iter().map(|s| s.0.as_str()).chain(sm.enums.iter().map(|e| e.0.as_str())) {
+                        adts.insert(n, r.lts.len());
+                    }
+                }
+            }
+            if !adts.is_empty() {
+                for (it, sm) in items[..user].iter().zip(&sums[..user]) {
+                    let kind = !sm.structs.is_empty() || !sm.enums.is_empty() || !sm.aliases.is_empty() || !sm.consts.is_empty() || !sm.statics.is_empty() || !sm.assocs.is_empty();
+                    if !kind {
+                        continue;
+                    }
+                    // (from the summary's types: only an item whose types name such a struct or enum is read again)
+                    fn names(t: &crate::types::TySyn, adts: &crate::fxhash::FxMap<&str, usize>) -> bool {
+                        use crate::types::TySyn as T;
+                        match t {
+                            T::Named(n) => adts.contains_key(n.as_str()),
+                            T::App(n, a) => adts.contains_key(n.as_str()) || a.iter().any(|t| names(t, adts)),
+                            T::Ref(_, i) | T::Ptr(_, i) | T::Slice(i) | T::Array(i, _) => names(i, adts),
+                            T::Tuple(a) => a.iter().any(|t| names(t, adts)),
+                            _ => false,
+                        }
+                    }
+                    let named = sm.structs.iter().any(|s| s.1.iter().any(|f| names(&f.1, &adts)))
+                        || sm.enums.iter().any(|e| e.1.iter().any(|v| v.fields.iter().any(|f| names(&f.1, &adts))))
+                        || sm.aliases.iter().any(|a| names(&a.2, &adts))
+                        || sm.assocs.iter().any(|a| names(&a.value, &adts))
+                        || sm.consts.iter().any(|c| names(&c.1, &adts))
+                        || sm.statics.iter().any(|c| names(&c.1, &adts));
+                    if !named {
+                        continue;
+                    }
+                    let outer: Vec<String> = sm.assocs.iter().flat_map(|a| a.generics.iter().cloned()).collect();
+                    if let Some(e) = crate::ast_summary::hidden_lifetimes(&src, it, &adts, &outer) {
+                        return Err(e);
+                    }
+                }
+            }
+        }
+        // (what the program's types require of traits' `Self: 'x` bounds (E0478, E0310): the traits are known now)
+        {
+            let so: crate::fxhash::FxMap<&str, &[String]> = sums
+                .iter()
+                .filter_map(|sm| Some((sm.trait_decl.as_deref()?, sm.trait_generics.iter().find(|g| g.0 == crate::types::SELF_OUTLIVES)?.1.as_slice())))
+                .collect();
+            if !so.is_empty() {
+                for (it, sm) in items[..user].iter().zip(&sums[..user]) {
+                    // (an impl of such a trait, or a type whose fields write `dyn`: read again)
+                    let of_trait = sm.impl_trait.as_deref().is_some_and(|t| so.contains_key(t));
+                    let dyns = (!sm.structs.is_empty() || !sm.enums.is_empty() || !sm.unions.is_empty()) && src.get(it.start..it.end).is_some_and(|t| t.contains("dyn"));
+                    if !of_trait && !dyns {
+                        continue;
+                    }
+                    for o in &crate::ast_summary::trait_obls(&src, it) {
+                        let Some(req) = so.get(o.tr.as_str()) else { continue };
+                        let k = crate::wf::Known { pairs: o.known.clone(), vague: o.vague.clone(), ..Default::default() };
+                        for c in req.iter() {
+                            let x = if c == "static" {
+                                "'static".to_string()
+                            } else {
+                                match c.parse::<usize>().ok().and_then(|i| o.args.get(i)) {
+                                    Some(a) => a.clone(),
+                                    None => continue,
+                                }
+                            };
+                            for s in &o.sub {
+                                if o.vague.contains(s) || k.outlives(s, &x) {
+                                    continue;
+                                }
+                                let line = it.line + o.line.max(1) as usize - 1;
+                                return Err(if s.starts_with('\'') {
+                                    format!("{line}:1: lifetime bound not satisfied (`{s}` must outlive `{x}`, which trait `{}` requires) (E0478)", o.tr)
+                                } else {
+                                    format!("{line}:1: the parameter type `{s}` may not live long enough (E0{})", if x == "'static" { 310 } else { 309 })
+                                });
+                            }
+                        }
+                    }
+                }
+            }
+        }
         // (struct / enum / union definitions of the program: unused parameters, union fields ..)
         for (it, sm) in items[..user].iter().zip(&sums[..user]) {
             if let Some(e) = &sm.adt_err {
+                // (`\u{3}line\u{3}msg`: at that line of the item)
+                if let Some((l, m)) = e.strip_prefix('\u{3}').and_then(|r| r.split_once('\u{3}')) {
+                    return Err(format!("{}:1: {m}", it.line + l.parse::<usize>().unwrap_or(1) - 1));
+                }
                 // (`\u{1}field\u{1}msg`: at the line of the field `field:`)
                 if let Some((f, m)) = e.strip_prefix('\u{1}').and_then(|r| r.split_once('\u{1}')) {
                     let text = src.get(it.start..it.end).unwrap_or("");
@@ -717,6 +808,7 @@ impl Session2 {
         let mut deny_must_use = false;
         let mut deny_unused_alloc = false;
         let mut deny_trivial_casts = (false, false);
+        let mut deny_unused_lifetimes = (false, false);
         // (non_snake_case, non_camel_case_types, non_upper_case_globals)
         let mut deny_style = [false; 3];
         let lib_attr = {
@@ -763,6 +855,7 @@ impl Session2 {
                 levels.contains(&n) && (last("forbid").is_some() || last("allow") < last("deny"))
             };
             deny_trivial_casts = (lint("trivial_casts"), lint("trivial_numeric_casts"));
+            deny_unused_lifetimes = (lint("unused_lifetimes"), lint("single_use_lifetimes"));
             deny_unused_alloc = lint("unused_allocation")
                 || (!levels.contains(&"unused_allocation") && levels.iter().any(|l| matches!(*l, "unused" | "warnings")) && !c.contains("#![allow(unused"));
             for (k, n) in ["non_snake_case", "non_camel_case_types", "non_upper_case_globals"].iter().enumerate() {
@@ -803,6 +896,14 @@ impl Session2 {
                         return Err(format!("{}:{}: unreachable {what}", it.line + p.line as usize - 1, p.col + 1));
                     }
                 }
+            }
+        }
+        // (unused_lifetimes: a lifetime parameter of a fn or an impl of the program's that nothing in it names;
+        // single_use_lifetimes: one named once, in a parameter's type (or the impl's header), which eliding it would
+        // say)
+        if deny_unused_lifetimes.0 || deny_unused_lifetimes.1 {
+            if let Some(e) = first_unused_lifetime(&src, &items[..user], deny_unused_lifetimes) {
+                return Err(e);
             }
         }
         // (unused_variables: the first binding nothing reads, in the program's own fns)
@@ -1819,6 +1920,151 @@ fn first_dead_item(src: &str, items: &[SrcItem], check_pub: bool) -> Option<(usi
         }
     }
     None
+}
+
+/// `#![deny(unused_lifetimes)]` / `#![deny(single_use_lifetimes)]`: the first lifetime parameter of a fn or an impl
+/// named nowhere else in it / named once, as `line:col: message`
+fn first_unused_lifetime(src: &str, items: &[SrcItem], (unused, single): (bool, bool)) -> Option<String> {
+    use crate::parse::{GParam, ItemKind};
+    // (the uses of l in t, as tokens: not `'a'` (a char) nor `'ab`)
+    let count = |t: &str, l: &str| {
+        t.match_indices(l)
+            .filter(|(i, _)| {
+                let next = t[i + l.len()..].chars().next();
+                !next.is_some_and(|c| c == '\'' || c.is_alphanumeric() || c == '_')
+            })
+            .count()
+    };
+    // (the text without its comments and string literals, where a lifetime's name is no use of it)
+    let code = |t: &str| strip_strings(t);
+    // (`#[allow(dead_code, unused_lifetimes)]`: the lint anywhere in an allow list)
+    let allows = |t: &str, lint: &str| {
+        t.match_indices("allow(").any(|(i, _)| {
+            let rest = &t[i + 6..];
+            let list = &rest[..rest.find(')').unwrap_or(rest.len())];
+            list.split(',').any(|x| x.trim() == lint)
+        })
+    };
+    for (k, it) in items.iter().enumerate() {
+        let text = src.get(it.start..it.end).unwrap_or("");
+        if !text.contains('\'') || allows(text, "unused_lifetimes") || allows(text, "single_use_lifetimes") || text.contains("#[cfg") || text.contains("macro_rules") {
+            continue;
+        }
+        // (an impl's header, `impl<'a> S<'a> {`: its members name its lifetimes too)
+        let header = matches!(it.kind, crate::lexer::ItemKind::ImplHeader);
+        let Ok(f) = (if header { crate::parse::parse_file(&format!("{text}}}")) } else { crate::parse::parse_file(text) }) else { continue };
+        let Some(item) = f.items.into_iter().next() else { continue };
+        let (g, ret, params): (_, _, Vec<&crate::parse::Ty>) = match &item.kind {
+            ItemKind::Fn(sig, Some(_)) => (&sig.generics, sig.ret.as_ref().map(|r| format!("{r:?}")).unwrap_or_default(), sig.recv_ty.iter().chain(sig.params.iter().map(|p| &p.1)).collect()),
+            ItemKind::Impl(g, _, _, _) => (g, String::new(), vec![]),
+            _ => continue,
+        };
+        let is_fn = matches!(item.kind, ItemKind::Fn(..));
+        let members: String = if header {
+            items.iter().filter(|m| matches!(m.kind, crate::lexer::ItemKind::ImplMember(h) if h as usize == k)).map(|m| code(src.get(m.start..m.end).unwrap_or(""))).collect::<Vec<_>>().join("\n")
+        } else {
+            String::new()
+        };
+        let own = code(text);
+        for p in &g.params {
+            let GParam::Lifetime(l) = p else { continue };
+            let n = count(&own, l) + count(&members, l);
+            let off = text.find(l.as_str()).unwrap_or(0);
+            let line = it.line + text[..off].matches('\n').count();
+            if unused && n <= 1 {
+                return Some(format!("{line}:1: lifetime parameter `{l}` never used (#![deny(unused_lifetimes)])"));
+            }
+            // (declared with bounds, or bounding another: a use of its own)
+            let bounded = g.preds.iter().any(|(t, bs)| format!("{t:?}").contains(&format!("\"{l}\"")) || bs.iter().any(|b| matches!(b, crate::parse::Bound::Lifetime(x) if x == l)));
+            // (a fn's: not in its result's type, which has nothing to elide it to, nor in an `impl` / `dyn` / fn
+            // pointer type, where it cannot be elided)
+            let elidable = || params.iter().any(|t| elidable_use(t, l)) || !params.iter().any(|t| format!("{t:?}").contains(&format!("\"{l}\"")));
+            if single && n == 2 && !bounded && (!is_fn || (count(&ret, l) == 0 && elidable())) {
+                return Some(format!("{line}:1: lifetime parameter `{l}` only used once (#![deny(single_use_lifetimes)])"));
+            }
+        }
+    }
+    None
+}
+
+/// t with its string literals (`"'a"`, raw ones too) and comments blanked out, in one pass: a `//` in a string is
+/// no comment, a `"` in a comment no string. Lines are kept
+fn strip_strings(t: &str) -> String {
+    let b = t.as_bytes();
+    let mut out = String::with_capacity(t.len());
+    let mut i = 0;
+    // (blanks b[i..end], keeping its newlines)
+    let blank = |out: &mut String, from: usize, end: usize| {
+        for &c in &b[from..end] {
+            out.push(if c == b'\n' { '\n' } else { ' ' });
+        }
+    };
+    while i < b.len() {
+        // (a `"` or `/` char literal is none of these)
+        if b[i] == b'\'' && i + 2 < b.len() && b[i + 2] == b'\'' && (b[i + 1] == b'"' || b[i + 1] == b'/') {
+            out.push_str(&t[i..i + 3]);
+            i += 3;
+            continue;
+        }
+        if b[i] == b'/' && b.get(i + 1) == Some(&b'/') {
+            let end = t[i..].find('\n').map_or(b.len(), |k| i + k);
+            blank(&mut out, i, end);
+            i = end;
+            continue;
+        }
+        if b[i] == b'/' && b.get(i + 1) == Some(&b'*') {
+            let end = t[i + 2..].find("*/").map_or(b.len(), |k| i + 2 + k + 2);
+            blank(&mut out, i, end);
+            i = end;
+            continue;
+        }
+        // (`r"..."` / `r#"..."#`: to the quote and as many `#`)
+        if b[i] == b'r' && (i == 0 || !(b[i - 1].is_ascii_alphanumeric() || b[i - 1] == b'_')) {
+            let mut j = i + 1;
+            while j < b.len() && b[j] == b'#' {
+                j += 1;
+            }
+            if j < b.len() && b[j] == b'"' {
+                let hashes = j - i - 1;
+                let close: String = std::iter::once('"').chain(std::iter::repeat_n('#', hashes)).collect();
+                let end = t[j + 1..].find(close.as_str()).map_or(b.len(), |k| j + 1 + k + close.len());
+                blank(&mut out, i, end);
+                i = end;
+                continue;
+            }
+        }
+        if b[i] == b'"' {
+            let mut j = i + 1;
+            while j < b.len() && b[j] != b'"' {
+                j += if b[j] == b'\\' { 2 } else { 1 };
+            }
+            let end = (j + 1).min(b.len());
+            blank(&mut out, i, end);
+            i = end;
+            continue;
+        }
+        let c = t[i..].chars().next().unwrap();
+        out.push(c);
+        i += c.len_utf8();
+    }
+    out
+}
+
+/// t names l where eliding it is allowed: a reference's lifetime or a path's lifetime argument, not in an `impl` /
+/// `dyn` / fn pointer type or an associated type's binding
+fn elidable_use(t: &crate::parse::Ty, l: &str) -> bool {
+    use crate::parse::{GArg, Ty as PTy};
+    match t {
+        PTy::Ref(x, _, i) => x.as_deref() == Some(l) || elidable_use(i, l),
+        PTy::Ptr(_, i) | PTy::Slice(i) | PTy::Array(i, _) => elidable_use(i, l),
+        PTy::Tuple(ts) => ts.iter().any(|t| elidable_use(t, l)),
+        PTy::Path(None, p) => p.segs.iter().flat_map(|s| s.args.iter()).any(|a| match a {
+            GArg::Lifetime(x) => x == l,
+            GArg::Ty(t) => elidable_use(t, l),
+            _ => false,
+        }),
+        _ => false,
+    }
 }
 
 pub fn parse_fn(src: &str, it: &SrcItem) -> R<Option<ItemFn>> {
