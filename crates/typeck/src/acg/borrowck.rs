@@ -206,6 +206,11 @@ pub struct Bk {
     pub recv_loans: HashMap<usize, u32>,
     /// The scrutinee being lowered is a `let`'s initializer (its temporary is extended)
     pub let_scrut: bool,
+    /// The temporaries of the `let` initializers being lowered that the `let` extends (`let x = &f();`): their
+    /// addresses (see direct)
+    pub extended: Vec<usize>,
+    /// Hidden locals of extended temporaries, with the depth of the scope they go out of scope with
+    pub scope_temps: Vec<(usize, u32)>,
 }
 
 /// The temporaries of a `let` initializer that are followed: the operands of `&` passed directly to its outermost call
@@ -814,7 +819,7 @@ impl Bk {
                                 if lo.place.local == *l && lo.place.owned_len() == lo.place.proj.len() {
                                     let name = path_str(&self.locals, &BPlace { local: *l, proj: vec![] });
                                     if name == TEMP {
-                                        errs.push(BkError { sp: lo.sp, msg: "temporary value dropped while borrowed: it is freed at the end of the statement (E0716)".to_string() });
+                                        errs.push(BkError { sp: lo.sp, msg: "temporary value dropped while borrowed: it is freed while still in use (E0716)".to_string() });
                                         continue;
                                     }
                                     errs.push(BkError { sp: lo.sp, msg: if sp.line == 0 { format!("`{name}` does not live long enough (dropped while still borrowed)") } else { format!("`{name}` does not live long enough (borrowed value dropped at {} while still borrowed)", at(self.line_base, *sp)) } });
@@ -1317,6 +1322,12 @@ impl Cx<'_> {
             }
             self.bk_ev(Ev::Dead(id, sp));
         }
+        // (the temporaries its `let`s extended)
+        let depth = self.scopes.len().saturating_sub(1);
+        while self.bk.scope_temps.last().is_some_and(|x| x.0 >= depth) {
+            let (_, id) = self.bk.scope_temps.pop().unwrap();
+            self.bk_ev(Ev::Dead(id, sp));
+        }
     }
 
     /// The drop of a value of type t runs a `Drop` the program implements, which may use the references the value
@@ -1461,7 +1472,9 @@ impl Cx<'_> {
     /// `&e` of a temporary (not promoted to a static): a hidden local that goes out of scope at the end of the
     /// statement (unless the `let` extends it), so a loan of it still live then is an error (E0716)
     pub(crate) fn bk_temp_borrow(&mut self, e: &Expr, m: bool, t: Ty) {
-        if !self.bk_on() || self.bk.level < 2 || !self.bk.direct.contains(&(e as *const Expr as usize)) {
+        let key = e as *const Expr as usize;
+        let ext = self.bk.extended.contains(&key);
+        if !self.bk_on() || self.bk.level < 2 || !(ext || self.bk.direct.contains(&key)) {
             return;
         }
         let quiet = std::mem::take(&mut self.bk.no_loan_src);
@@ -1478,7 +1491,12 @@ impl Cx<'_> {
         if !quiet {
             self.bk.src(Src::Loan(ln));
         }
-        self.bk.stmt_temps.push(id);
+        // (extended by the `let`: it goes away with the block's locals)
+        if ext {
+            self.bk.scope_temps.push((self.scopes.len().saturating_sub(1), id));
+        } else {
+            self.bk.stmt_temps.push(id);
+        }
     }
 
     /// The statements from `mark` on are over: their temporaries go out of scope

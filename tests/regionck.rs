@@ -882,3 +882,11 @@ fn scrutinee_temporaries_bound_by_ref() {
     assert!(d.len() == 1 && d[0].0 == 3 && d[0].1.contains("E0716"), "{d:?}");
     assert_eq!(check("fn main() {\n    let ref x = String::new();\n    match Some(String::new()) {\n        Some(ref m) => println!(\"{} {}\", m, x),\n        None => {}\n    }\n}\n"), vec![]);
 }
+
+/// A temporary a `let` extends (`let x = &f();`) goes away with the block's locals
+#[test]
+fn extended_temporaries_end_with_their_block() {
+    let d = check("fn id<T>(x: T) -> T {\n    x\n}\nfn main() {\n    let r;\n    {\n        let x = &id(3);\n        r = x;\n    }\n    println!(\"{}\", r);\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 7 && d[0].1.contains("E0716"), "{d:?}");
+    assert_eq!(check("fn id<T>(x: T) -> T {\n    x\n}\nfn main() {\n    let r;\n    let x = &id(3);\n    {\n        r = x;\n    }\n    println!(\"{} {}\", r, x);\n}\n"), vec![]);
+}

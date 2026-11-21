@@ -1648,8 +1648,11 @@ impl Cx<'_> {
                     self.bk_frame();
                     self.bk.move_mut_next = ann_ty.is_none();
                     let ext0 = self.bk.direct.len();
+                    let ext1 = self.bk.extended.len();
                     if self.bk_on() {
                         borrowck::direct_temps(init, &mut self.bk.direct);
+                        // (`let x = &f();`: the temporary lives as long as x's block)
+                        borrowck::direct_ref(init, &mut self.bk.extended);
                     }
                     // (a function the gate left out, with `let x: &'static T = ..`: from here on, a borrow of what it
                     // owns must not have to be 'static. What came before has no trees and adds no constraint)
@@ -1660,6 +1663,7 @@ impl Cx<'_> {
                     let let_sp0 = std::mem::replace(&mut self.rg.let_sp, *let_at);
                     let r = self.expr(init, ann.or(hint));
                     self.bk.direct.truncate(ext0);
+                    self.bk.extended.truncate(ext1);
                     let srcs = self.bk_frame_end();
                     let (mut v, mut t) = r?;
                     if t == Ty::Never {
