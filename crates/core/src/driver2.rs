@@ -658,8 +658,15 @@ impl Session2 {
             }
         }
         // (E0658: an attribute behind a feature gate the file does not enable)
-        if let Some(e) = gated_attr(&src) {
-            return Err(e);
+        // (attributes start items: only the text at the start of the program's items, not the whole source)
+        for it in &items[..user] {
+            let head = src.get(it.start..it.end).unwrap_or("");
+            // (and an extern block's items: `extern "C" { #[unsafe(ffi_const)] fn f(); }`)
+            if head.starts_with('#') || head.starts_with("extern") || head.starts_with("unsafe extern") {
+                if let Some(e) = gated_attr(&src[..it.end], it.start) {
+                    return Err(e);
+                }
+            }
         }
         // (`#![crate_type = "lib"]`: a library, no `main` needed)
         let mut deny_unreachable = false;
@@ -2491,7 +2498,7 @@ fn lint_bits(p: &Program) -> u8 {
 
 /// An attribute that needs a `#![feature(..)]` the source does not have: `line:col: the `x` attribute is an
 /// experimental feature (E0658)`. Only the places of `#` are looked at
-fn gated_attr(src: &str) -> Option<String> {
+fn gated_attr(src: &str, from: usize) -> Option<String> {
     const GATED: &[(&str, &str)] = &[
         ("default_lib_allocator", "allocator_internals"),
         ("export_stable", "export_stable"),
@@ -2509,7 +2516,7 @@ fn gated_attr(src: &str) -> Option<String> {
         ("thread_local", "thread_local"),
     ];
     let b = src.as_bytes();
-    for (i, _) in src.match_indices('#') {
+    for (i, _) in src[from..].match_indices('#').map(|(k, m)| (from + k, m)) {
         // (not in a line comment or after a quote on its line: `// see #[thread_local]`, `"#[x]"`)
         let ls = src[..i].rfind('\n').map_or(0, |n| n + 1);
         if src[ls..i].contains("//") || src[ls..i].contains('"') {
