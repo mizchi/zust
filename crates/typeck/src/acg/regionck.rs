@@ -143,6 +143,8 @@ pub struct Rg {
     /// The region of each reborrow through a reference (`&mut *x`, `&v[0]` with v a reference), by the address of
     /// its place: one that must outlive a universal region lives to the function's end (Rg::forever)
     pub reborrows: Vec<(usize, u32)>,
+    /// A closure's body: the regions of its captures of the function's locals (from outside)
+    pub cap_regions: Vec<u32>,
 }
 
 /// Closure region codes (Rg::closure): a placeholder (a region the expected signature binds), one from outside
@@ -1225,7 +1227,9 @@ impl Rg {
                         let placeholder = |b: u32| self.closure.is_some() && !self.externals.contains(&b) && !self.outer_univ.contains(&b) && b != STATIC;
                         if !k[i][j] && !outside(u, y) && !outside(y, u) && !(self.outer_univ.contains(&u) && placeholder(y)) && !self.soft.contains(&u) && !self.soft.contains(&y) {
                             let other = if j == 0 { "'static".to_string() } else { self.univ[j - 1].1.clone() };
-                            errs.push((sp, format!("lifetime may not live long enough (`{uname}` must outlive `{other}`)")));
+                            // (a region the closure's signature binds flowing into one from outside)
+                            let escapes = self.closure.is_some() && !self.externals.contains(&u) && !self.outer_univ.contains(&u) && self.cap_regions.contains(&y);
+                            errs.push((sp, if escapes { "borrowed data escapes outside of closure (a region of its signature flows into one from outside)".to_string() } else { format!("lifetime may not live long enough (`{uname}` must outlive `{other}`)") }));
                         }
                     }
                     st.push(y);
@@ -2398,7 +2402,21 @@ impl Cx<'_> {
         let codes = self.rg.closure.as_ref().and_then(|c| c.caps.get(i).cloned().flatten());
         let tr = match codes {
             Some(cs) if count(prog, t, 0) == Some(cs.len()) => Some(cs.iter().map(|&c| self.rg.clo_reg(c)).collect()),
-            _ => self.rg.fresh(prog, t),
+            // (the regions of a local of the function the closure is in: from outside, related to the others from
+            // outside as the function relates them, not known here; a placeholder of the closure's signature must not
+            // flow into them ("borrowed data escapes outside of closure"))
+            _ => self.rg.fresh(prog, t).inspect(|tr| {
+                for &v in tr {
+                    let ex = self.rg.externals.clone();
+                    for a in ex {
+                        self.rg.known.push((a, v));
+                        self.rg.known.push((v, a));
+                    }
+                    self.rg.univ.push((v, "'_".to_string()));
+                    self.rg.externals.push(v);
+                    self.rg.cap_regions.push(v);
+                }
+            }),
         };
         if let Some(tr) = tr {
             self.rg.locals.insert(loc, tr);
