@@ -657,6 +657,10 @@ impl Session2 {
                 return Err(format!("{}:1: {e}", it.line));
             }
         }
+        // (E0658: an attribute behind a feature gate the file does not enable)
+        if let Some(e) = gated_attr(&src) {
+            return Err(e);
+        }
         // (`#![crate_type = "lib"]`: a library, no `main` needed)
         let mut deny_unreachable = false;
         let mut deny_unused_vars = false;
@@ -2483,4 +2487,61 @@ impl Session2 {
 /// function compiled before such a `#![deny]` was added is not reused without its check
 fn lint_bits(p: &Program) -> u8 {
     p.deny_must_use as u8 | (p.deny_trivial_casts.0 as u8) << 1 | (p.deny_trivial_casts.1 as u8) << 2 | (p.deny_unreachable as u8) << 3 | (p.deny_unused_alloc as u8) << 4
+}
+
+/// An attribute that needs a `#![feature(..)]` the source does not have: `line:col: the `x` attribute is an
+/// experimental feature (E0658)`. Only the places of `#` are looked at
+fn gated_attr(src: &str) -> Option<String> {
+    const GATED: &[(&str, &str)] = &[
+        ("default_lib_allocator", "allocator_internals"),
+        ("export_stable", "export_stable"),
+        ("ffi_const", "ffi_const"),
+        ("ffi_pure", "ffi_pure"),
+        ("rustc_align", "fn_align"),
+        ("rustc_align_static", "static_align"),
+        ("fundamental", "fundamental"),
+        ("move_size_limit", "large_assignments"),
+        ("marker", "marker_trait_attr"),
+        ("no_core", "no_core"),
+        ("optimize", "optimize_attribute"),
+        ("patchable_function_entry", "patchable_function_entry"),
+        ("register_tool", "register_tool"),
+        ("thread_local", "thread_local"),
+    ];
+    let b = src.as_bytes();
+    for (i, _) in src.match_indices('#') {
+        // (not in a line comment or after a quote on its line: `// see #[thread_local]`, `"#[x]"`)
+        let ls = src[..i].rfind('\n').map_or(0, |n| n + 1);
+        if src[ls..i].contains("//") || src[ls..i].contains('"') {
+            continue;
+        }
+        let mut j = i + 1;
+        if b.get(j) == Some(&b'!') {
+            j += 1;
+        }
+        if b.get(j) != Some(&b'[') {
+            continue;
+        }
+        j += 1;
+        let rest = &src[j..];
+        let rest = rest.strip_prefix("unsafe(").unwrap_or(rest);
+        let name_len = rest.bytes().take_while(|c| c.is_ascii_alphanumeric() || *c == b'_').count();
+        let name = &rest[..name_len];
+        // (not a path: `#[thread_local]`, not `#[foo::thread_local]`)
+        if rest[name_len..].starts_with("::") {
+            continue;
+        }
+        let Some(&(_, feat)) = GATED.iter().find(|g| g.0 == name) else { continue };
+        let enabled = src.match_indices("feature(").any(|(k, _)| {
+            let list = &src[k + 8..];
+            let end = list.find(')').unwrap_or(list.len());
+            list[..end].split(',').any(|f| f.trim() == feat)
+        });
+        if !enabled {
+            let line = src[..i].matches('\n').count() + 1;
+            let col = i - src[..i].rfind('\n').map_or(0, |n| n + 1) + 1;
+            return Some(format!("{line}:{col}: the `{name}` attribute is an experimental feature (E0658)"));
+        }
+    }
+    None
 }

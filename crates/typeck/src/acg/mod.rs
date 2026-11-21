@@ -817,8 +817,10 @@ impl Cx<'_> {
         if !n.starts_with(|c: char| c.is_uppercase()) || self.lookup(n).is_some() {
             return false;
         }
-        if self.prog.const_index.contains_key(n.as_str()) {
-            return true;
+        // (a constant, not a static: module scopes are flattened away, so a static of another module (`mod config {
+        // static SIZES }`) must not turn `let SIZES = ..` in main into a pattern)
+        if let Some(&ci) = self.prog.const_index.get(n.as_str()) {
+            return self.prog.consts[ci as usize].stat.is_none();
         }
         let Expr::Path(None, path) = path_expr(n) else { return false };
         self.prog.variant_by_p(&PPath::of(&path), self.self_sid).is_some()
