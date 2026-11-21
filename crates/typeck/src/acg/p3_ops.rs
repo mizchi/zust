@@ -82,12 +82,16 @@ impl Cx<'_> {
             // (`impl PartialEq<R> for [N; 1]`: an impl for arrays / slices of the program's answers the comparison as a
             // whole, before its elements)
             Ty::Array(i, _) | Ty::Slice(i) => {
+                // (elements first: only when they lack the trait is an impl for the whole looked for)
+                if !self.lacks_cmp(*i, tr, depth + 1) {
+                    return false;
+                }
                 // (the program's own impls: the prelude's are for elements that are PartialEq themselves)
                 let own = |f: u32| self.prog.item_of.get(f as usize).copied().flatten().is_some_and(|ii| ii < self.prog.prelude_from);
                 let fs = if tr == "PartialEq" { &self.prog.peq } else { &self.prog.pord };
                 let whole = fs.iter().any(|&f| own(f) && (self.prog.names[f as usize].starts_with("__array::") || self.prog.names[f as usize].starts_with("__slice::")))
                     || self.prog.prim_method(t, if tr == "PartialEq" { "eq" } else { "partial_cmp" }).is_some_and(own);
-                !whole && self.lacks_cmp(*i, tr, depth + 1)
+                !whole
             }
             Ty::Struct(sid) => {
                 let b = self.prog.base_of(sid);
