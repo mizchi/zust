@@ -956,3 +956,12 @@ fn vec_macro_temporaries() {
     assert!(d.len() == 1 && d[0].0 == 5 && d[0].1.contains("E0716"), "{d:?}");
     assert_eq!(check("fn one() -> i32 {\n    1\n}\nfn main() {\n    assert_eq!(vec![&one(), &2], vec![&1, &(one() + one())]);\n    let v = vec![&3];\n    let _ = v.len();\n}\n"), vec![]);
 }
+
+/// The hidden type of an `impl Trait` result of a fn with no region in its signature captures none: its regions
+/// are 'static
+#[test]
+fn opaque_result_without_lifetimes_is_static() {
+    let d = check("pub trait T {}\nstruct S<'a>(&'a ());\nimpl<'a> T for S<'a> {}\nfn foo() -> impl T {\n    let x = ();\n    S(&x)\n}\nfn main() {\n    let _ = foo();\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 6, "{d:?}");
+    assert_eq!(check("use std::fmt::Display;\npub trait T {}\nstruct S<'a>(&'a ());\nimpl<'a> T for S<'a> {}\nfn foo() -> impl T {\n    S(&())\n}\nfn bar() -> impl Display {\n    \"x\"\n}\nfn main() {\n    let _ = (foo(), bar());\n}\n"), vec![]);
+}

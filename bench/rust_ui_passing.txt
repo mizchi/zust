@@ -5338,6 +5338,7 @@ compile-fail	regions/account-for-lifetimes-in-closure-suggestion.rs
 compile-fail	regions/better-blame-constraint-for-outlives-static.rs
 check-pass	regions/closure-prop-issue-104477-case1.rs
 check-pass	regions/closure-prop-issue-104477-case2.rs
+compile-fail	regions/do-not-suggest-adding-bound-to-opaque-type.rs
 check-pass	regions/forall-wf-reflexive.rs
 run-pass	regions/init-res-into-things.rs
 compile-fail	regions/issue-102374.rs

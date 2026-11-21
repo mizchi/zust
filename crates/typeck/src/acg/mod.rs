@@ -1186,7 +1186,10 @@ impl Cx<'_> {
         self.rg.eligible = self.rg.on && self.rg.closure.is_none();
         if self.rg.on && sig.regions.is_none() && self.rg.closure.is_none() && !self.rg.force {
             let n: usize = sig.params.iter().map(|&t| regionck::count(self.prog, t, 0).unwrap_or(0)).sum();
-            if n < 2 && !(n == 1 && regionck::has_dyn(self.prog, sig.ret, 0)) {
+            // (an `impl Trait` result of a fn with no region in its signature: its hidden type captures none, its
+            // regions are 'static)
+            let opaque = n == 0 && !sig.is_generic() && self.prog.opaque.contains(&self.rg.base) && regionck::count(self.prog, sig.ret, 0).is_some_and(|c| c > 0);
+            if n < 2 && !(n == 1 && regionck::has_dyn(self.prog, sig.ret, 0)) && !opaque {
                 self.rg.on = false;
                 let se = f.sig.recv.as_ref().is_some_and(|r| r.starts_with('&'));
                 self.rg.late = Some((se, f.sig.recv.is_some() && !se));

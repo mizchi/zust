@@ -1417,9 +1417,14 @@ impl Cx<'_> {
         let gret = if generic { gsig.ret } else { ret_t };
         let ret = rg.instantiate(prog, gret, codes(params.len()), &lts, &targs, &mut el);
         rg.ret = ret.filter(|_| !bad);
+        // (an `impl Trait` result with no region among the parameters: its hidden type's regions are 'static)
+        let opaque = inputs.is_empty() && !generic && rs.is_none() && prog.opaque.contains(&rg.base);
+        if opaque {
+            rg.ret = count(prog, ret_t, 0).filter(|&c| c > 0).map(|c| vec![STATIC; c]);
+        }
         let nuniv = rg.univ.len();
         // (or a signature that writes 'static: `fn f(x: isize) -> &'static [isize]`)
-        rg.on = force || nuniv >= 2 || (nuniv >= 1 && (rs.is_some() || has_dyn(prog, ret_t, 0))) || rs.is_some_and(Self::needs_static);
+        rg.on = force || nuniv >= 2 || (nuniv >= 1 && (rs.is_some() || has_dyn(prog, ret_t, 0))) || rs.is_some_and(Self::needs_static) || (opaque && rg.ret.is_some());
         if rg.on {
             for (i, &(loc, t)) in params.iter().enumerate() {
                 if let Some(tr) = trees[i].clone() {
