@@ -717,3 +717,13 @@ fn deref_of_owned_string_and_vec() {
     assert!(d.len() == 1 && d[0].0 == 4, "{d:?}");
     assert_eq!(check("fn keep(_: &[u8]) {}\nfn main() {\n    let v: Vec<u8> = Vec::new();\n    keep(&*v);\n    let s = String::new();\n    let t: &str = &*s;\n    let _ = t;\n}\n"), vec![]);
 }
+
+/// The annotation of a `let` with no initializer is well formed, as is one in code after a `return`
+#[test]
+fn wf_of_uninitialized_lets() {
+    let d = check("fn f<'a>() {\n    let x: &'static &'a ();\n}\nfn main() {}\n");
+    assert!(d.len() == 1 && d[0].0 == 2, "{d:?}");
+    let d = check("fn f<'a>() {\n    return;\n    let _: &'static &'a () = &&();\n}\nfn main() {}\n");
+    assert!(d.len() == 1 && d[0].0 == 3, "{d:?}");
+    assert_eq!(check("fn f<'a>() {\n    let x: &'a &'static ();\n    x = &&();\n    let _ = x;\n}\nfn main() {}\n"), vec![]);
+}

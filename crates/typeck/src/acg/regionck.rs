@@ -1676,7 +1676,8 @@ impl Cx<'_> {
         let Some(tree) = tree else { return };
         // (the annotation's type is well formed)
         if ann.is_some() {
-            self.rg.wf(prog, t, &tree, super::borrowck::pos(init));
+            let sp = Some(super::borrowck::pos(init)).filter(|s| s.line != 0).unwrap_or(self.rg.let_sp);
+            self.rg.wf(prog, t, &tree, sp);
         }
         // (the initializer's tree was taken before the binding: `let y = y;` reads the y it shadows)
         if let Some((it, itr)) = init_tree {
@@ -1702,8 +1703,34 @@ impl Cx<'_> {
         let tree = self.rg.instantiate(prog, t, Some(&codes), &lts, &[], &mut |me| me.var());
         self.rg.dyn_infer = false;
         if let Some(tree) = tree {
-            self.rg.wf(prog, t, &tree, super::borrowck::pos(init));
-            self.rg.flow(prog, it, t, &itr, &tree, super::borrowck::pos(init));
+            let sp = Some(super::borrowck::pos(init)).filter(|s| s.line != 0).unwrap_or(self.rg.let_sp);
+            self.rg.wf(prog, t, &tree, sp);
+            self.rg.flow(prog, it, t, &itr, &tree, sp);
+        }
+    }
+
+    /// `let x: ann;` (`let _: ann;`): the annotation's type is well formed; x's tree is of it
+    pub(crate) fn rg_let_uninit(&mut self, name: Option<&str>, ann: &PTy, sp: Sp) {
+        if !self.rg.on && self.rg.eligible && self.inline_depth == 0 && crate::regions::mentions_static(ann) {
+            self.rg_late_on();
+        }
+        if !self.rg_on() {
+            return;
+        }
+        let Ok(t) = self.parse_ty(ann) else { return };
+        let prog = self.prog;
+        let names = self.rg.lt_names.clone();
+        let mut s = crate::regions::Slots { lts: names, tparams: vec![], self_slots: &[], any: false, in_fn: 0 };
+        let mut codes = vec![];
+        s.slots(ann, false, &mut codes);
+        let lts = self.rg.lts.clone();
+        self.rg.dyn_infer = true;
+        let tree = self.rg.instantiate(prog, t, Some(&codes), &lts, &[], &mut |me| me.var());
+        self.rg.dyn_infer = false;
+        let Some(tree) = tree else { return };
+        self.rg.wf(prog, t, &tree, sp);
+        if let Some((loc, _)) = name.and_then(|n| self.lookup(n)) {
+            self.rg.locals.insert(loc, tree);
         }
     }
 

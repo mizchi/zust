@@ -1472,15 +1472,17 @@ impl Cx<'_> {
                     }
                     self.extend_temps(t0);
                 }
-                Stmt::Let(Pat::Wild, ann_ty, init, None, ..) => {
+                Stmt::Let(Pat::Wild, ann_ty, init, None, let_at) => {
                     // `let _ = e;`: 場所ならムーブしない。値ならすぐ drop する
                     let Some(init) = init else {
-                        // (`let _: T;`: T must name a type; nothing else happens)
+                        // (`let _: T;`: T must name a type (a well-formed one); nothing else happens)
                         if let Some(t) = ann_ty {
                             self.parse_ty(t)?;
+                            self.rg_let_uninit(None, t, *let_at);
                         }
                         continue;
                     };
+                    let let_sp0 = std::mem::replace(&mut self.rg.let_sp, *let_at);
                     if !self.rg.on && self.rg.eligible && ann_ty.as_ref().is_some_and(crate::regions::mentions_static) {
                         self.rg_late_on();
                     }
@@ -1514,6 +1516,7 @@ impl Cx<'_> {
                     if let Some(a) = ann_ty {
                         self.rg_let_wild(a, init);
                     }
+                    self.rg.let_sp = let_sp0;
                     self.drop_temps(t0);
                 }
                 Stmt::Let(pat, ann_ty, init, _, let_at) => {
@@ -1585,7 +1588,11 @@ impl Cx<'_> {
                         };
                         self.bk.uninit_next = true;
                         self.bk.mut_next = pat_mut(pat);
-                        self.bind(name, ty, v);
+                        self.bind(name.clone(), ty, v);
+                        // (the annotation's type is well formed; the value assigned later flows into it)
+                        if let Some(t) = ann_ty {
+                            self.rg_let_uninit(Some(&name), t, *let_at);
+                        }
                         continue;
                     };
                     // (`let f1 = f;` with f a generic fn and no annotation: f1 is f, instantiated at each call; so is a fn
