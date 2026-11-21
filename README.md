@@ -442,8 +442,8 @@ the measured numbers. The [reports](docs/reports/) explain each step.
 
 - [x] region checking against signatures: measured against cd5dccd (instructions): check +0.14%, edit one fn +0.28%,
   traits check +0.36%, patterns check +0.91% (the region check itself ~0.5%), LSP session +0.06%, no-op and cache unchanged.
-  Part 2 (closures, trait objects, well-formedness) against 18e598d: patterns check +0.28%, traits check +0.15%,
-  check +0.04%, LSP +0.02% ([report](docs/reports/2026-11-21-01-region-check-2.md))
+  Part 2 (closures, trait objects, well-formedness) against 18e598d: patterns check +0.5%, traits check +0.2%,
+  check +0.08%, LSP ±0 ([report](docs/reports/2026-11-21-01-region-check-2.md))
 - [ ] coherence and bounds of blanket impls: `check` time, LSP
 - [ ] real async (state machines, `poll`, an executor): build time, binary size
 - [ ] unwinding (landing pads): build time, binary size
