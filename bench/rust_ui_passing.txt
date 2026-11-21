@@ -313,6 +313,7 @@ check-pass	associated-types/normalize-cycle-in-eval.rs
 run-pass	associated-types/object-method-numbering.rs
 check-pass	associated-types/object-normalization.rs
 check-pass	associated-types/param-env-normalize-cycle.rs
+compile-fail	associated-types/param-env-shadowing-suggestion-no-ice-on-missing-assoc-value.rs
 run-pass	associated-types/project-defer-unification.rs
 run-pass	associated-types/projection-as-type-alias.rs
 compile-fail	associated-types/recursive-associated-type-overflow-21946.rs
@@ -2144,6 +2145,7 @@ compile-fail	error-codes/E0392.rs
 compile-fail	error-codes/E0403.rs
 compile-fail	error-codes/E0404.rs
 compile-fail	error-codes/E0405.rs
+compile-fail	error-codes/E0407.rs
 compile-fail	error-codes/E0411.rs
 compile-fail	error-codes/E0412.rs
 compile-fail	error-codes/E0415.rs
@@ -5170,6 +5172,7 @@ compile-fail	privacy/suggest-new-projection-ice.rs
 compile-fail	privacy/trait-object-method-error.rs
 check-pass	privacy/trait_more_private_than_item.rs
 compile-fail	privacy/unreachable-issue-121455.rs
+compile-fail	privacy/unresolved-trait-impl-item.rs
 check-pass	privacy/use-in-impl-scope-12729.rs
 check-pass	privacy/where-pub-type-impls-priv-trait.rs
 check-pass	proc-macro/derive-multiple-with-packed.rs
@@ -6389,6 +6392,7 @@ check-pass	traits/hrtb-related-type-params-30867.rs
 compile-fail	traits/ignore-err-impls.rs
 compile-fail	traits/impl-1.rs
 run-pass	traits/impl-2.rs
+compile-fail	traits/impl-can-not-have-untraitful-items.rs
 compile-fail	traits/impl-for-module.rs
 run-pass	traits/impl-implicit-trait.rs
 run-pass	traits/impl-inherent-prefer-over-trait.rs
@@ -6439,6 +6443,7 @@ compile-fail	traits/issue-32963.rs
 check-pass	traits/issue-33187.rs
 run-pass	traits/issue-3683.rs
 compile-fail	traits/issue-38604.rs
+compile-fail	traits/issue-3973.rs
 run-pass	traits/issue-40085.rs
 run-pass	traits/issue-4107.rs
 run-pass	traits/issue-43132.rs
