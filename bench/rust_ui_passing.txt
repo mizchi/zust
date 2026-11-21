@@ -1426,6 +1426,7 @@ compile-fail	const-generics/early/trivial-const-arg-macro-res-error.rs
 check-pass	const-generics/early/trivial-const-arg-macro.rs
 compile-fail	const-generics/exhaustive-value.rs
 compile-fail	const-generics/gca/suggest-const-item-for-generic-expr.rs
+check-pass	const-generics/generic_arg_infer/array-repeat-expr-lib.rs
 compile-fail	const-generics/generic_arg_infer/in-signature.rs
 compile-fail	const-generics/generic_arg_infer/infer-arg-test.rs
 check-pass	const-generics/generic_const_exprs/associated-const.rs
@@ -5330,8 +5331,10 @@ run-pass	regions/wf-bound-region-in-object-type.rs
 check-pass	repeat-expr/can-have-side-effects-consider-element.rs
 compile-fail	repeat-expr/copy-check-const-element-uninferred-count.rs
 compile-fail	repeat-expr/copy-check-deferred-after-fallback.rs
+check-pass	repeat-expr/copy-check-deferred-before-fallback.rs
 compile-fail	repeat-expr/copy-check-inference-side-effects.rs
 compile-fail	repeat-expr/copy-check-when-count-inferred-later.rs
+check-pass	repeat-expr/dont-require-copy-on-infer.rs
 compile-fail	repeat-expr/no-conservative-copy-impl-requirement.rs
 run-pass	repeat-expr/repeat-expr-in-static.rs
 compile-fail	repeat-expr/repeat_count.rs

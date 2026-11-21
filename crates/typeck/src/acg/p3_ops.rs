@@ -1572,7 +1572,12 @@ impl Cx<'_> {
 
     pub(crate) fn repeat_lit(&mut self, e: &Expr, expected: Option<Ty>) -> R<V> {
         let Expr::Repeat(x, len) = e else { unreachable!() };
-        let n = self.array_len(len)?;
+        // (`[0; _]`: the length the expected array type has)
+        let infer = matches!(strip_paren(len), Expr::Path(None, p) if p.segs.len() == 1 && p.segs[0].name == "_");
+        let n = match (infer, expected) {
+            (true, Some(Ty::Array(_, n))) if n < crate::types::CONST_LEN_BASE => n,
+            _ => self.array_len(len)?,
+        };
         let exp = match expected {
             Some(Ty::Array(t, _)) => Some(*t),
             _ => None,
