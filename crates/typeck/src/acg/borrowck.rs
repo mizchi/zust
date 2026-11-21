@@ -198,6 +198,8 @@ pub struct Bk {
     /// Loans the region check found must outlive the function (a reborrow through a parameter flowing into a
     /// universal region): live from where each is made to the end (sorted)
     pub forever: Vec<u32>,
+    /// The loans of each closure's captures by reference, by the closure's address
+    pub cap_loans: HashMap<usize, Vec<u32>>,
 }
 
 /// The temporaries of a `let` initializer that are followed: the operands of `&` passed directly to its outermost call
@@ -300,8 +302,11 @@ pub fn has_refs(prog: &Program, t: Ty, _depth: u32) -> bool {
                 }
                 seen.push(sid);
                 let sd = &prog.structs[sid as usize];
-                // (a closure holds what it captures by reference as raw pointers)
-                let clo = (prog.closure_of_struct.contains_key(&prog.base_of(sid)) && sd.fields.iter().any(|f| matches!(f.1, Ty::Ptr(..))))
+                // (a closure holds what it captures by reference as raw pointers; one with no `move` that holds a copy
+                // of a value it uses borrows it, as rustc's closures capture what they only read by reference)
+                let cd = prog.closure_of_struct.get(&prog.base_of(sid)).and_then(|c| prog.closures.get(c));
+                // (`by_move` is also set when every capture is by value: the `move` keyword is not known here)
+                let clo = cd.is_some_and(|cd| sd.fields.iter().any(|f| matches!(f.1, Ty::Ptr(..))) || cd.moved.iter().any(|&m| m))
                     || is_view(prog, sid);
                 let r = clo
                     || sd.symbolic
@@ -1563,10 +1568,14 @@ impl Cx<'_> {
             let pt = if p.proj.is_empty() { Some(t) } else { pt };
             if mode == CapMode::Val {
                 let copy = pt.is_none_or(|t| self.bk_ty(t).0);
-                self.bk_acc_place(p, if copy { Acc::Read } else { Acc::Move }, sp);
-                continue;
+                // (a copy a closure with no `move` holds of what it only reads: rustc's closure borrows it)
+                if !(copy && !move_kw && pt.is_some()) {
+                    self.bk_acc_place(p, if copy { Acc::Read } else { Acc::Move }, sp);
+                    continue;
+                }
             }
             let ln = self.bk.loans.len() as u32;
+            self.bk.cap_loans.entry(c as *const Expr as usize).or_default().push(ln);
             self.bk.loans.push(Loan { place: p.clone(), mutable: mode == CapMode::RefMut, sp, at, quiet: false, capture: true });
             self.bk_ev(Ev::Acc(p, Acc::Borrow(ln), sp));
             self.bk.src(Src::Loan(ln));
@@ -1992,6 +2001,12 @@ impl Cx<'_> {
             Expr::Block(_, _, b) => {
                 if let Some(crate::parse::Stmt::Expr(t, false)) = b.stmts.last() {
                     self.bk_direct(t, out);
+                }
+            }
+            // (a closure: the loans of what it captures by reference)
+            Expr::Closure(..) => {
+                if let Some(ls) = self.bk.cap_loans.get(&(e as *const Expr as usize)) {
+                    out.extend(ls.iter().map(|&l| Src::Loan(l)));
                 }
             }
             Expr::If(_, b, els) => {
