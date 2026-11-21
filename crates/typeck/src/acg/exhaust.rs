@@ -126,14 +126,21 @@ impl Cx<'_> {
 
     /// Some(witness) when the patterns do not cover `ty` (a `let` pattern that is refutable, E0005)
     pub(crate) fn non_exhaustive_pats(&self, pats: &[&crate::parse::Pat], ty: Ty) -> Option<String> {
+        self.coverage(pats, ty).flatten()
+    }
+
+    /// Some(Some(witness)): not covered; Some(None): covered; None: a pattern the algorithm does not model (a slice
+    /// pattern, ..), where the caller must test at run time instead
+    pub(crate) fn coverage(&self, pats: &[&crate::parse::Pat], ty: Ty) -> Option<Option<String>> {
         let mut rows = vec![];
         for p in pats {
             rows.push(vec![self.norm(p, ty, 0).ok()?]);
         }
         let mut work = 0;
         match self.useful(&rows, &[ty], &mut work) {
-            Ok(Some(w)) => Some(w.into_iter().next().unwrap_or_else(|| "_".into())),
-            _ => None,
+            Ok(Some(w)) => Some(Some(w.into_iter().next().unwrap_or_else(|| "_".into()))),
+            Ok(None) => Some(None),
+            Err(_) => None,
         }
     }
 

@@ -616,6 +616,16 @@ impl Cx<'_> {
                 }
             }
             self.for_pat_check(fpat, place.ty())?;
+            // (a pattern coverage does not model: tested at run time, a trap where it does not match)
+            if self.user_code && !super::plainly_irrefutable(fpat) && self.coverage(&[&**fpat], place.ty()).is_none() {
+                let trap = self.b.create_block();
+                self.pat_test(fpat, place, trap)?;
+                let cur = self.b.create_block();
+                self.b.ins().jump(cur, &[]);
+                self.b.switch_to_block(trap);
+                self.b.ins().trap(TrapCode::unwrap_user(2));
+                self.b.switch_to_block(cur);
+            }
             self.pat_bind(fpat, place, BindMode::Move)?;
         }
         let bound = self.pending_bound.take();

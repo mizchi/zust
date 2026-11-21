@@ -5486,6 +5486,7 @@ compile-fail	resolve/missing-associated-items.rs
 compile-fail	resolve/missing-in-namespace.rs
 compile-fail	resolve/missing-type-in-scope-58712.rs
 compile-fail	resolve/module-used-as-struct-constructor.rs
+compile-fail	resolve/name-clash-nullary.rs
 check-pass	resolve/name-collision-in-trait-fn-sig.rs
 compile-fail	resolve/no-implicit-prelude-nested.rs
 compile-fail	resolve/no-implicit-prelude.rs
