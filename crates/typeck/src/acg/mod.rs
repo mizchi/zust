@@ -782,6 +782,21 @@ pub fn is_place_expr(e: &Expr) -> bool {
 }
 
 /// `let x` / `let mut x` / `let _` のような単純な let か
+impl Cx<'_> {
+    /// `let None = ..` / `let MAX = ..`: an identifier pattern naming a unit variant or a constant
+    pub(crate) fn names_variant_or_const(&self, p: &Pat) -> bool {
+        let Pat::Ident(false, false, n, None) = p else { return false };
+        if !n.starts_with(|c: char| c.is_uppercase()) || self.lookup(n).is_some() {
+            return false;
+        }
+        if self.prog.const_index.contains_key(n.as_str()) {
+            return true;
+        }
+        let Expr::Path(None, path) = path_expr(n) else { return false };
+        self.prog.variant_by_p(&PPath::of(&path), self.self_sid).is_some()
+    }
+}
+
 pub fn is_simple_let(p: &Pat) -> bool {
     match p {
         Pat::Ident(by_ref, _, _, sub) => sub.is_none() && !*by_ref,
@@ -1364,7 +1379,8 @@ impl Cx<'_> {
             let t0 = self.temps.len();
             self.stmt_i = i;
             match st {
-                Stmt::Let(pat, ann_ty, init, els, ..) if !is_simple_let(pat) || els.is_some() => {
+                // (`let None = x;`: a unit variant or a constant, a pattern to test (E0005), not a new name)
+                Stmt::Let(pat, ann_ty, init, els, ..) if !is_simple_let(pat) || els.is_some() || self.names_variant_or_const(pat) => {
                     // 分解する let (`let S { x, y } = s;`): 反駁不能パターンとして束縛だけ行う
                     let Some(init) = init else {
                         return err(SP, "`let` without initializer is not supported");

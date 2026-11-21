@@ -1539,6 +1539,8 @@ impl Program {
         if !user_traits.is_empty() {
             for (fi, s) in p.sigs.iter().enumerate() {
                 let Some(tr) = s.impl_trait.as_deref() else { continue };
+                // (`impl Tr<u8> for S`: the trait's own name)
+                let tr = tr.split('<').next().unwrap_or(tr).trim();
                 let Some(ii) = p.item_of[fi] else { continue };
                 if ii as usize >= user || !user_traits.contains(tr) {
                     continue;
@@ -1546,12 +1548,16 @@ impl Program {
                 // (the internal names of overloads `get#1` and of impls for references `__ref_foo`: the method's own)
                 let m = p.names[fi].rsplit("::").next().unwrap_or("");
                 let m = m.split('#').next().unwrap_or(m);
-                let m = m.strip_prefix("__ref_").unwrap_or(m);
-                if m.starts_with("__") {
+                // (`__ref_foo` is the generated name of an impl for a reference; a method the trait declares with that
+                // name matches as written)
+                let bare = m.strip_prefix("__ref_").unwrap_or(m);
+                let decls = p.traits.get(tr).map(|v| v.as_slice()).unwrap_or(&[]);
+                let declared = |n: &str| decls.iter().any(|&d| p.names[d as usize].rsplit("::").next() == Some(n));
+                if declared(m) || declared(bare) || bare.starts_with("__") {
                     continue;
                 }
-                let decls = p.traits.get(tr).map(|v| v.as_slice()).unwrap_or(&[]);
-                if !decls.iter().any(|&d| p.names[d as usize].rsplit("::").next() == Some(m)) {
+                let m = bare;
+                {
                     return Err(format!("{}:1: method `{m}` is not a member of trait `{tr}` (E0407)", items[ii as usize].line));
                 }
             }
