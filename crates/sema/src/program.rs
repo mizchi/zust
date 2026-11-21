@@ -1580,7 +1580,13 @@ impl Program {
         // (E0391: a trait that is its own supertrait, through any number of them; reported at the first trait of the
         // cycle in the source. A name declared twice (in two modules, flattened to one name) is left out)
         if !user_traits.is_empty() && !p.trait_supers.is_empty() {
-            let once = |t: &str| sums[..user].iter().filter(|sm| sm.trait_decl.as_deref() == Some(t)).count() == 1;
+            let mut decls: FxMap<&str, u32> = FxMap::default();
+            for sm in &sums[..user] {
+                if let Some(t) = sm.trait_decl.as_deref() {
+                    *decls.entry(t).or_default() += 1;
+                }
+            }
+            let once = |t: &str| decls.get(t) == Some(&1);
             for (ii, sm) in sums[..user].iter().enumerate() {
                 let Some(tr) = sm.trait_decl.as_deref() else { continue };
                 if !p.trait_supers.contains_key(tr) || !once(tr) {
