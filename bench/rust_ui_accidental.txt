@@ -60,3 +60,5 @@ compile-fail	borrowck/moved-value-in-thread-loop-12041.rs
 compile-fail	suggestions/dont-suggest-ref/move-into-closure.rs
 compile-fail	consts/issue-16538.rs
 compile-fail	parser/issues/issue-87217-keyword-order/wrong-pub-const-unsafe-abi.rs
+compile-fail	macros/expand-full-no-resolution.rs
+compile-fail	macros/issue-10536.rs
