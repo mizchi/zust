@@ -782,6 +782,8 @@ fn adt_checks(attrs: &[String], g: &Generics, tys: &[&PTy], union: bool, nfields
         for t in tys {
             named_lifetimes(t, &mut used);
         }
+        // (and the parameters' own bounds: `struct S<'a: 'missing>`, `T: 'x`)
+        bound_lifetimes(g, &mut used);
         if let Some(l) = undeclared_lifetime(&used, &declared) {
             return Err(format!("use of undeclared lifetime name `{l}` (E0261)"));
         }
@@ -1582,10 +1584,33 @@ pub fn summarize(item: &Item, owner: Option<&Owner>) -> R<Summary> {
                 if let Some((_, tp)) = tr {
                     named_lifetimes(&PTy::Path(None, tp.clone()), &mut used);
                 }
-                // (constrained: written anywhere in the self type or the trait (`dyn Tr + 'a` too), or in a where
-                // clause (`T: Tr<Ty = &'x ()>`))
+                // (constrained: written anywhere in the self type or the trait (`dyn Tr + 'a` too), or in the value an
+                // associated type is bound to in a bound (`T: Tr<Ty = &'x ()>`, inline or in a where clause). Only
+                // restricting it (`S: 'a`) does not constrain it)
                 let constrained: Vec<String> = {
-                    let text = format!("{self_ty:?} {tr:?} {:?} {:?}", g.preds, g.params.iter().filter(|p| matches!(p, GParam::Ty(..))).collect::<Vec<_>>());
+                    let mut binds = vec![];
+                    let mut of_bounds = |bs: &[Bound]| {
+                        for b in bs {
+                            if let Bound::Trait(_, p) = b {
+                                for sg in &p.segs {
+                                    for a in &sg.args {
+                                        if let crate::parse::GArg::Bind(_, t) = a {
+                                            binds.push(t.clone());
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    };
+                    for p in &g.params {
+                        if let GParam::Ty(_, bs, _) = p {
+                            of_bounds(bs);
+                        }
+                    }
+                    for (_, bs) in &g.preds {
+                        of_bounds(bs);
+                    }
+                    let text = format!("{self_ty:?} {tr:?} {binds:?}");
                     declared.iter().filter(|l| text.contains(&format!("\"{l}\""))).map(|l| l.to_string()).collect()
                 };
                 bound_lifetimes(g, &mut used);

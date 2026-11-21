@@ -83,6 +83,11 @@ pub struct Rg {
     pub lt_names: Vec<String>,
     /// Variance of a struct / enum definition: its lifetime parameters, then its type parameters
     pub variance: HashMap<u32, Vec<Var>>,
+    /// The definitions whose variance is being computed; whether a provisional one was read; the ones computed, in
+    /// order (see variance)
+    pub var_open: Vec<u32>,
+    pub var_cycle: bool,
+    pub var_log: Vec<u32>,
     /// The function's own definition (of an instance: the generic one) and an instance's type arguments
     pub base: u32,
     pub inst_args: Vec<Ty>,
@@ -258,6 +263,10 @@ impl Rg {
     /// The variance of the lifetime and type parameters of a definition (computed once)
     pub fn variance(&mut self, prog: &Program, base: u32) -> Vec<Var> {
         if let Some(v) = self.variance.get(&base) {
+            // (a type whose variance is being computed: what is known of it so far)
+            if self.var_open.contains(&base) {
+                self.var_cycle = true;
+            }
             return v.clone();
         }
         let sd = &prog.structs[base as usize];
@@ -272,19 +281,40 @@ impl Rg {
             self.variance.insert(base, v.clone());
             return v;
         }
-        // (while computing it: a recursive type's own uses add nothing)
-        self.variance.insert(base, vec![Var::Bi; nl + ng]);
-        let mut acc = vec![Var::Bi; nl + ng];
+        // (a recursive type: computed again from what the last round found, until it no longer changes. The
+        // variances of the types computed meanwhile from a provisional one are computed again too. Each round can
+        // only move a variance up (bivariant, co/contra, invariant), so this ends)
         let ar = prog.adt_regions.get(&base).cloned();
         let fields: Vec<Ty> = sd.fields.iter().map(|f| f.1).chain(sd.variants.iter().flat_map(|v| v.fields.iter().map(|f| f.1))).collect();
-        for (i, &ft) in fields.iter().enumerate() {
-            let codes = ar.as_ref().map(|r| r.fields.get(i).map(|c| c.as_slice()).unwrap_or(&[]));
-            let mut c = Codes { codes, pos: 0, ok: true };
-            self.var_walk(prog, ft, &mut c, Var::Co, nl, &mut acc, 0);
+        let mut cur = vec![Var::Bi; nl + ng];
+        self.var_open.push(base);
+        let outer_cycle = std::mem::take(&mut self.var_cycle);
+        for _ in 0..16 {
+            self.variance.insert(base, cur.clone());
+            let log0 = self.var_log.len();
+            self.var_cycle = false;
+            let mut acc = vec![Var::Bi; nl + ng];
+            for (i, &ft) in fields.iter().enumerate() {
+                let codes = ar.as_ref().map(|r| r.fields.get(i).map(|c| c.as_slice()).unwrap_or(&[]));
+                let mut c = Codes { codes, pos: 0, ok: true };
+                self.var_walk(prog, ft, &mut c, Var::Co, nl, &mut acc, 0);
+            }
+            let again = self.var_cycle && acc != cur;
+            cur = acc;
+            if !again {
+                break;
+            }
+            for b in self.var_log.drain(log0..) {
+                self.variance.remove(&b);
+            }
         }
+        self.var_open.pop();
+        // (a cycle through a type still open further out: that one is computed again, and this one with it)
+        self.var_cycle |= outer_cycle;
         // (a parameter not used is an error of its own (E0392); as rustc, bivariant)
-        self.variance.insert(base, acc.clone());
-        acc
+        self.variance.insert(base, cur.clone());
+        self.var_log.push(base);
+        cur
     }
 
     #[allow(clippy::too_many_arguments)]

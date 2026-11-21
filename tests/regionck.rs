@@ -153,3 +153,19 @@ fn main() {
     // (the receiver's tree is the outer call's, though an argument calls a method too)
     one_error("struct S<'a> { r: &'a u32 }\nimpl<'a> S<'a> {\n    fn set(&mut self, v: &'a u32) { self.r = v; }\n    fn get(&self) -> &'a u32 { self.r }\n}\nfn f<'a, 'b>(s: &mut S<'a>, y: &S<'b>) {\n    s.set(y.get());\n}\nfn main() {}\n", 7);
 }
+
+/// Variance of recursive types: a cycle is computed to a fixed point (an invariant use anywhere in it makes the whole
+/// cycle invariant; a cycle of covariant uses stays covariant)
+#[test]
+fn recursive_variance() {
+    let inv = "struct A<'a> { b: Option<Box<B<'a>>>, p: *mut &'a u32 }\nstruct B<'a> { a: *const A<'a> }\nfn f<'a, 'b: 'a>(x: B<'b>) -> B<'a> {\n    x\n}\nfn main() {}\n";
+    one_error(inv, 4);
+    let co = "struct List<'a> { next: Option<Box<List<'a>>>, v: &'a u32 }\nfn g<'a, 'b: 'a>(x: List<'b>) -> List<'a> {\n    x\n}\nfn main() {}\n";
+    assert_eq!(check(co), vec![]);
+    // (E0207: a lifetime only an outlives predicate names is not constrained)
+    let d = check("trait Tr { type Out; }\nstruct S;\nimpl<'a> Tr for S where S: 'a { type Out = &'a u8; }\nfn main() {}\n");
+    assert!(d.len() == 1 && d[0].1.contains("E0207"), "{d:?}");
+    // (E0261 on the bounds of the type's own parameters)
+    let d = check("struct S<'a: 'missing>(&'a u8);\nfn main() {}\n");
+    assert!(d.len() == 1 && d[0].1.contains("E0261"), "{d:?}");
+}
