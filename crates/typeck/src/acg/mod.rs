@@ -206,6 +206,21 @@ pub const TRAP_SITE_MAX: usize = 245;
 
 /// 1 関数をコンパイルする。返り値は (Blob, 要求したインスタンス)
 pub fn compile(prog: &Program, insts: &Mutex<Insts>, id: u32, f: &ItemFn, line_base: u32, inl: &Inline) -> R<(Compiled, Vec<u32>)> {
+    // (a region check begun late (`'static` required where the gate left the function out) that met a local bound
+    // before it began, with no tree: the function again, checked from its start)
+    let (c, req, rerun) = compile_once(prog, insts, id, f, line_base, inl, false)?;
+    if rerun {
+        if regionck::debug() {
+            eprintln!("regionck: {} again, checked from its start", f.sig.name);
+        }
+        let (c, req, _) = compile_once(prog, insts, id, f, line_base, inl, true)?;
+        return Ok((c, req));
+    }
+    Ok((c, req))
+}
+
+#[allow(clippy::too_many_arguments)]
+fn compile_once(prog: &Program, insts: &Mutex<Insts>, id: u32, f: &ItemFn, line_base: u32, inl: &Inline, force_rg: bool) -> R<(Compiled, Vec<u32>, bool)> {
     let (sig, env, body_id, fnptr, inst_args, clo_rg) = {
         let g = insts.lock().unwrap();
         let b = g.body_of(id);
@@ -273,6 +288,7 @@ pub fn compile(prog: &Program, insts: &Mutex<Insts>, id: u32, f: &ItemFn, line_b
             base: body_id,
             inst_args: if clo_rg.is_some() { vec![] } else { inst_args.unwrap_or_default() },
             closure: clo_rg,
+            force: force_rg,
             ..Default::default()
         },
         prog,
@@ -364,7 +380,10 @@ pub fn compile(prog: &Program, insts: &Mutex<Insts>, id: u32, f: &ItemFn, line_b
     };
     r?;
     cx.bk_check()?;
-    cx.rg_check()?;
+    let rerun = cx.rg.rerun && !force_rg;
+    if !rerun {
+        cx.rg_check()?;
+    }
     // (入口以外で作った drop フラグは入口で 0 にする: minclif はフラグのスロットを関数の最初に 0 にする)
     let late = std::mem::take(&mut cx.late_flags);
     let requested = std::mem::take(&mut cx.requested);
@@ -373,7 +392,7 @@ pub fn compile(prog: &Program, insts: &Mutex<Insts>, id: u32, f: &ItemFn, line_b
     let infos = std::mem::take(&mut cx.traps);
     let loc_used = cx.loc_used;
     let b = cx.b;
-    Ok((Compiled { rec: b.m, late, datas, vtables, infos, loc_used, line_base }, requested))
+    Ok((Compiled { rec: b.m, late, datas, vtables, infos, loc_used, line_base }, requested, rerun))
 }
 
 /// コード生成の結果: 記録した命令の列と、Blob を作るのに要るもの。機械語にするのはバックエンド
@@ -1158,7 +1177,7 @@ impl Cx<'_> {
         // universal regions to relate)
         // (or one region and a trait object in the result, 'static by default: `fn f(x: &u8) -> Box<dyn Tr>`)
         self.rg.eligible = self.rg.on && self.rg.closure.is_none();
-        if self.rg.on && sig.regions.is_none() && self.rg.closure.is_none() {
+        if self.rg.on && sig.regions.is_none() && self.rg.closure.is_none() && !self.rg.force {
             let n: usize = sig.params.iter().map(|&t| regionck::count(self.prog, t, 0).unwrap_or(0)).sum();
             if n < 2 && !(n == 1 && regionck::has_dyn(self.prog, sig.ret, 0)) {
                 self.rg.on = false;
@@ -1202,7 +1221,8 @@ impl Cx<'_> {
                 // (when the result has elided regions: `fn set(self, s: &str) -> Flag<'a>` names its own)
                 let ret_elides = sig.regions.as_deref().and_then(|r| r.slots.last()).is_none_or(|s| s.iter().any(|&c| c == crate::types::R_ELIDED || c == crate::types::R_ELIDED_ADT));
                 let other_self = f.sig.recv.is_some() && !self_elides && ret_elides;
-                self.rg_begin(sig.regions.as_deref(), &ps, self_elides, false);
+                let force = self.rg.force;
+                self.rg_begin(sig.regions.as_deref(), &ps, self_elides, force);
                 if other_self {
                     self.rg.ret = None;
                 }

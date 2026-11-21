@@ -127,6 +127,11 @@ pub struct Rg {
     pub pat_elem: Option<(Ty, RT)>,
     /// Rg::wf: imp's relations are required, at this span
     pub wf_sp: Option<Sp>,
+    /// The check is on from the function's start whatever the gate says (compile's second run); the check began late
+    /// (rg_late_on); a local bound before it with no tree was met (the function is compiled again)
+    pub force: bool,
+    pub began_late: bool,
+    pub rerun: bool,
 }
 
 /// Closure region codes (Rg::closure): a placeholder (a region the expected signature binds), one from outside
@@ -1391,6 +1396,7 @@ impl Cx<'_> {
     pub(crate) fn rg_late_on(&mut self) {
         if !self.rg.on && self.rg.eligible {
             self.rg.on = true;
+            self.rg.began_late = true;
             // (the parameters' trees: those the signature gives them)
             if let Some((self_elides, other_self)) = self.rg.late.take() {
                 // (a parameter's binding is the outermost of its name: a later `let` may shadow it)
@@ -1443,6 +1449,9 @@ impl Cx<'_> {
                     None => {
                         if debug() {
                             eprintln!("regionck: local {} ({:?}) has no tree", p.segs[0].name, loc);
+                        }
+                        if self.rg.began_late {
+                            self.rg.rerun = true;
                         }
                         return None;
                     }

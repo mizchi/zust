@@ -5363,6 +5363,7 @@ compile-fail	regions/regions-infer-contravariance-due-to-decl.rs
 run-pass	regions/regions-infer-contravariance-due-to-ret.rs
 compile-fail	regions/regions-infer-covariance-due-to-decl.rs
 compile-fail	regions/regions-infer-invariance-due-to-decl.rs
+compile-fail	regions/regions-infer-proc-static-upvar.rs
 run-pass	regions/regions-infer-reborrow-ref-mut-recurse.rs
 run-pass	regions/regions-infer-region-in-fn-but-not-type.rs
 run-pass	regions/regions-infer-static-from-proc.rs
@@ -6414,6 +6415,7 @@ run-pass	traits/cache-issue-18209.rs
 compile-fail	traits/cast-as-dyn-trait-wo-assoc-type-issue-21950.rs
 compile-fail	traits/closure-capture-not-send.rs
 compile-fail	traits/closure-rc-not-send.rs
+compile-fail	traits/coercion-generic-regions.rs
 run-pass	traits/coercion-generic.rs
 check-pass	traits/composition-trivial.rs
 check-pass	traits/const-traits/call-generic-method-nonconst-bound.rs
