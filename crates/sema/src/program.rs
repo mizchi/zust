@@ -2481,7 +2481,12 @@ impl Program {
             crate::parse::Ty::Path(None, p) if p.segs.len() == 1 && p.segs[0].args.is_empty() => p.segs[0].name.clone(),
             _ => String::new(),
         };
+        // (a primitive integer's name is that type, not an alias of it: the aliases are the whole program's, and a
+        // program's `type u32 = u8;` must not change the prelude's `as u32`, whose cached code does not hash aliases)
         for _ in 0..16 {
+            if matches!(prim.as_str(), "u8" | "u16" | "u32" | "u64" | "u128" | "usize" | "i8" | "i16" | "i32" | "i64" | "i128" | "isize") {
+                break;
+            }
             match self.aliases.get(&prim) {
                 Some((g, crate::types::TySyn::Named(n))) if g.is_empty() => prim = n.clone(),
                 Some((g, crate::types::TySyn::Prim(p))) if g.is_empty() => prim = format!("{p:?}").to_lowercase(),
