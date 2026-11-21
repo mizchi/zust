@@ -1695,6 +1695,10 @@ impl Program {
         if matches!(t, Ty::Param(_)) || self.has_param(t) || !sums[..user.min(sums.len())].iter().any(|s| s.trait_decl.as_deref() == Some(tr)) {
             return self.implements(t, tr);
         }
+        // (a trait object is its own trait's: `dyn Tr: Tr`, as `implements` reads its components)
+        if matches!(t, Ty::Dyn(_)) && self.implements(t, tr) {
+            return true;
+        }
         if active.iter().any(|(at, atr)| *at == t && atr == tr) {
             return false;
         }
