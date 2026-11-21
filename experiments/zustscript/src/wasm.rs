@@ -50,14 +50,35 @@ pub struct Wasm {
     pub names: Vec<String>,
 }
 
-pub fn generate(items: &[Item], wasm_file: &str) -> Option<Wasm> {
-    let fns: Vec<(&String, &Vec<(String, WTy)>, &WTy, &String)> = items
+/// A function of the wasm layer: written in Rust (`wasm fn`), or lowered from zustscript (`@wasm fn`, see
+/// lower.rs)
+pub struct WFn {
+    /// the JS name of its glue (an instance's for a numeric-bound function: `sum$f64`)
+    pub js: String,
+    /// the Rust function the wrapper calls
+    pub rs: String,
+    pub args: Vec<(String, WTy)>,
+    pub ret: WTy,
+    /// the Rust items (the function, and for `@wasm` what it was lowered to)
+    pub text: String,
+    /// exported from the JS module
+    pub public: bool,
+}
+
+/// `raw`: Rust that needs no glue (lowered functions only other lowered functions call)
+pub fn generate(items: &[Item], lowered: Vec<WFn>, raw: &str, wasm_file: &str) -> Option<Wasm> {
+    let mut wfns: Vec<WFn> = items
         .iter()
         .filter_map(|it| match it {
-            Item::WasmFn { name, args, ret, text, .. } => Some((name, args, ret, text)),
+            Item::WasmFn { name, args, ret, text, public, .. } => {
+                Some(WFn { js: name.clone(), rs: name.clone(), args: args.clone(), ret: ret.clone(), text: text.clone(), public: *public })
+            }
             _ => None,
         })
         .collect();
+    wfns.extend(lowered);
+    let fns: Vec<(&String, &Vec<(String, WTy)>, &WTy, &String, &String)> = wfns.iter().map(|f| (&f.js, &f.args, &f.ret, &f.text, &f.rs)).collect();
+    let public: std::collections::HashSet<&String> = wfns.iter().filter(|f| f.public).map(|f| &f.js).collect();
     if fns.is_empty() {
         return None;
     }
@@ -68,15 +89,16 @@ pub fn generate(items: &[Item], wasm_file: &str) -> Option<Wasm> {
             rs.push_str("\n\n");
         }
     }
-    for (_, _, _, text) in &fns {
+    for (_, _, _, text, _) in &fns {
         rs.push_str(text);
         rs.push_str("\n\n");
     }
+    rs.push_str(raw);
     // callbacks: one import per signature, plus the release of an owned one
     let mut cb_sigs: BTreeSet<String> = BTreeSet::new();
     let mut cb_decls = vec![];
     let mut owned = false;
-    for (_, args, _, _) in &fns {
+    for (_, args, _, _, _) in &fns {
         for (_, w) in args.iter() {
             if let WTy::Callback(a, r, o) = w {
                 owned |= *o;
@@ -108,14 +130,16 @@ pub fn generate(items: &[Item], wasm_file: &str) -> Option<Wasm> {
     rs.push_str("#[no_mangle]\npub extern \"C\" fn __zsc_alloc(n: usize) -> *mut u8 {\n    unsafe { malloc(if n == 0 { 1 } else { n }) }\n}\n#[no_mangle]\npub extern \"C\" fn __zsc_free(p: *mut u8) {\n    unsafe { free(p) }\n}\n\n");
     let mut glue = String::new();
     let mut names = vec![];
-    for (name, args, ret, _) in &fns {
+    for (name, args, ret, _, rs_name) in &fns {
+        // (`$` is not in Rust names: the wrapper of `sum$f64` is `__zsc_w_sum__f64`)
+        let wname = name.replace('$', "__");
         let mut ps = vec![]; // the wrapper's parameters
         let mut pre = vec![]; // Rust statements before the call
         let mut call = vec![]; // the call's arguments
         let mut jpre = vec![]; // JS before the call
         let mut jargs = vec![]; // the wrapper's arguments in JS
         let mut jpost = vec![]; // JS after the call (frees, releases)
-        let out = matches!(ret, WTy::String | WTy::VecF64 | WTy::VecI32);
+        let out = matches!(ret, WTy::String | WTy::Vec(_));
         let ret: &WTy = ret;
         if out {
             ps.push("__out: *mut usize".to_string());
@@ -133,8 +157,8 @@ pub fn generate(items: &[Item], wasm_file: &str) -> Option<Wasm> {
                     call.push(a.clone());
                     jargs.push(format!("{a} ? 1 : 0"));
                 }
-                WTy::SliceF64 | WTy::SliceI32 => {
-                    let (t, arr, sz) = if *w == WTy::SliceF64 { ("f64", "Float64Array", 8) } else { ("i32", "Int32Array", 4) };
+                WTy::Slice(el) => {
+                    let (t, arr, sz) = el.info();
                     ps.push(format!("{a}_p: *const {t}, {a}_n: usize"));
                     call.push(format!("unsafe {{ std::slice::from_raw_parts({a}_p, {a}_n) }}"));
                     jpre.push(format!("const {a}$p = $w.__zsc_alloc(BigInt({a}.length * {sz}));"));
@@ -185,27 +209,27 @@ pub fn generate(items: &[Item], wasm_file: &str) -> Option<Wasm> {
             WTy::I32 | WTy::U32 | WTy::F64 | WTy::I64 | WTy::Bool => format!(" -> {}", rs_scalar(ret)),
             _ => String::new(),
         };
-        let _ = writeln!(rs, "#[no_mangle]\npub extern \"C\" fn __zsc_w_{name}({}){wret} {{", ps.join(", "));
+        let _ = writeln!(rs, "#[no_mangle]\npub extern \"C\" fn __zsc_w_{wname}({}){wret} {{", ps.join(", "));
         for p in &pre {
             let _ = writeln!(rs, "    {p}");
         }
         if out {
-            let _ = writeln!(rs, "    let r = {name}({});", call.join(", "));
+            let _ = writeln!(rs, "    let r = {rs_name}({});", call.join(", "));
             let ptr = if *ret == WTy::String { "r.as_bytes().as_ptr()" } else { "r.as_ptr()" };
             let _ = write!(rs, "    let (p, l, c) = ({ptr} as usize, r.len(), r.capacity());");
             rs.push_str("\n    std::mem::forget(r);\n    unsafe {\n        *__out = p;\n        *__out.add(1) = l;\n        *__out.add(2) = c;\n    }\n");
         } else {
-            let _ = writeln!(rs, "    {name}({})", call.join(", "));
+            let _ = writeln!(rs, "    {rs_name}({})", call.join(", "));
         }
         rs.push_str("}\n\n");
 
         // the glue
         let jps: Vec<String> = args.iter().map(|(a, _)| a.clone()).collect();
-        let _ = writeln!(glue, "function {name}({}) {{", jps.join(", "));
+        let _ = writeln!(glue, "{}function {name}({}) {{", if public.contains(name) { "export " } else { "" }, jps.join(", "));
         for l in &jpre {
             let _ = writeln!(glue, "  {l}");
         }
-        let callw = format!("$w.__zsc_w_{name}({})", jargs.join(", "));
+        let callw = format!("$w.__zsc_w_{wname}({})", jargs.join(", "));
         let has_post = !jpost.is_empty();
         if has_post {
             glue.push_str("  try {\n");
@@ -221,11 +245,10 @@ pub fn generate(items: &[Item], wasm_file: &str) -> Option<Wasm> {
             WTy::Bool => {
                 let _ = writeln!(glue, "{pad}return {callw} !== 0;");
             }
-            WTy::String | WTy::VecF64 | WTy::VecI32 => {
+            WTy::String | WTy::Vec(_) => {
                 let read = match ret {
-                    WTy::String => "$dec.decode(new Uint8Array($w.memory.buffer, Number(p), Number(l)))",
-                    WTy::VecF64 => "Array.from(new Float64Array($w.memory.buffer, Number(p), Number(l)))",
-                    _ => "Array.from(new Int32Array($w.memory.buffer, Number(p), Number(l)))",
+                    WTy::Vec(el) => format!("Array.from(new {}($w.memory.buffer, Number(p), Number(l)))", el.info().1),
+                    _ => "$dec.decode(new Uint8Array($w.memory.buffer, Number(p), Number(l)))".to_string(),
                 };
                 let _ = writeln!(glue, "{pad}{callw};");
                 let _ = writeln!(glue, "{pad}const [p, l, c] = new BigUint64Array($w.memory.buffer, Number($out), 3);");
@@ -258,6 +281,7 @@ pub fn generate(items: &[Item], wasm_file: &str) -> Option<Wasm> {
     head.push_str("const $mod = await WebAssembly.compile($wasmBytes);\n");
     head.push_str("const $enc = new TextEncoder();\nconst $dec = new TextDecoder();\n");
     head.push_str("// JS functions handed to wasm, by id (borrowed ones leave when the call returns, owned ones when Rust drops them)\nexport const $cbs = new Map();\nlet $cbNext = 1;\nconst $cbAdd = (f) => {\n  const id = $cbNext++;\n  $cbs.set(id, f);\n  return id;\n};\n");
+    head.push_str("const $lines = {};\n");
     head.push_str("const $env = {\n  __zsc_cb_drop: (id) => void $cbs.delete(id),\n");
     for (k, a, r, _) in &cb_decls {
         let ps: Vec<String> = (0..a.len()).map(|i| format!("a{i}")).collect();
@@ -275,7 +299,7 @@ pub fn generate(items: &[Item], wasm_file: &str) -> Option<Wasm> {
         let _ = writeln!(head, "  __zsc_cb_{k}: (id{}) => {body},", ps.iter().map(|p| format!(", {p}")).collect::<String>());
     }
     head.push_str(
-        "  // (what zustc's runtime imports: a panic prints to stderr and aborts)\n  write: (fd, p, n) => {\n    const s = $dec.decode(new Uint8Array($w.memory.buffer, Number(p), Number(n)));\n    (fd === 2 ? console.error : console.log)(s.replace(/\\n$/, \"\"));\n    return n;\n  },\n  abort: () => {\n    throw new Error(\"zustscript: the wasm layer panicked\");\n  },\n  exit: (c) => {\n    throw new Error(\"zustscript: the wasm layer exited with \" + c);\n  },\n  fflush: () => 0,\n  sigaction: () => 0,\n};\n",
+        "  // (what zustc's runtime imports: a panic prints to stderr and aborts)\n  write: (fd, p, n) => {\n    // (line-buffered: a panic message comes in pieces)\n    $lines[fd] = ($lines[fd] || \"\") + $dec.decode(new Uint8Array($w.memory.buffer, Number(p), Number(n)));\n    const k = $lines[fd].lastIndexOf(\"\\n\");\n    if (k >= 0) {\n      (fd === 2 ? console.error : console.log)($lines[fd].slice(0, k));\n      $lines[fd] = $lines[fd].slice(k + 1);\n    }\n    return n;\n  },\n  abort: () => {\n    throw new Error(\"zustscript: the wasm layer panicked\");\n  },\n  exit: (c) => {\n    throw new Error(\"zustscript: the wasm layer exited with \" + c);\n  },\n  fflush: () => 0,\n  sigaction: () => 0,\n};\n",
     );
     head.push_str("for (const i of WebAssembly.Module.imports($mod)) {\n  if (!(i.name in $env)) $env[i.name] = () => {\n    throw new Error(\"zustscript: the wasm layer called \" + i.name + \", which this host does not provide\");\n  };\n}\n");
     head.push_str("const $w = (await WebAssembly.instantiate($mod, { env: $env })).exports;\n");

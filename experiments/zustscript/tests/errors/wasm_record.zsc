@@ -1,0 +1,3 @@
+// expect: the type P is not in the @wasm subset
+type P = { x: f64 }
+@wasm pub fn f(p: P) -> f64 { 1.0 }

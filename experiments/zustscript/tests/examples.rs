@@ -9,8 +9,8 @@ fn root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
 }
 
-fn zsc(input: &Path, out: &Path) -> std::process::Output {
-    Command::new(env!("CARGO_BIN_EXE_zsc")).arg(input).arg("-o").arg(out).output().unwrap()
+fn zsc(input: &Path, out: &Path, flags: &[&str]) -> std::process::Output {
+    Command::new(env!("CARGO_BIN_EXE_zsc")).arg(input).arg("-o").arg(out).args(flags).output().unwrap()
 }
 
 fn out_dir(name: &str) -> PathBuf {
@@ -36,7 +36,7 @@ fn node(dir: &Path, script: &str) -> String {
 
 fn build(name: &str) -> PathBuf {
     let d = out_dir(name);
-    let o = zsc(&root().join(format!("examples/{name}.zsc")), &d);
+    let o = zsc(&root().join(format!("examples/{name}.zsc")), &d, &[]);
     assert!(o.status.success(), "zsc failed:\n{}", String::from_utf8_lossy(&o.stderr));
     let c = Command::new("node").arg("--check").arg(d.join(format!("{name}.js"))).output().unwrap();
     assert!(c.status.success(), "the output is not valid JS:\n{}", String::from_utf8_lossy(&c.stderr));
@@ -117,7 +117,7 @@ fn errors() {
         let f = f.unwrap().path();
         let src = std::fs::read_to_string(&f).unwrap();
         let want = src.lines().next().unwrap().strip_prefix("// expect: ").expect("first line: // expect: <message>");
-        let o = zsc(&f, &root().join("target/test-out/errors"));
+        let o = zsc(&f, &root().join("target/test-out/errors"), &[]);
         let err = String::from_utf8_lossy(&o.stderr);
         assert!(!o.status.success(), "{} compiled", f.display());
         assert!(err.contains(want), "{}: expected `{want}` in:\n{err}", f.display());
@@ -137,7 +137,7 @@ fn dts_typechecks() {
     }
     let d = out_dir("ts");
     for name in ["basics", "app"] {
-        let o = zsc(&root().join(format!("examples/{name}.zsc")), &d);
+        let o = zsc(&root().join(format!("examples/{name}.zsc")), &d, &[]);
         assert!(o.status.success(), "zsc failed:\n{}", String::from_utf8_lossy(&o.stderr));
     }
     std::fs::copy(root().join("tests/consumer.ts"), d.join("consumer.ts")).unwrap();
@@ -149,4 +149,28 @@ fn dts_typechecks() {
         .output()
         .unwrap();
     assert!(o.status.success(), "tsc:\n{}{}", String::from_utf8_lossy(&o.stdout), String::from_utf8_lossy(&o.stderr));
+}
+
+/// examples/numeric.zsc's `@wasm fn`s give the same results lowered to Rust and run as wasm, and run as JS
+/// (`--all-js`): numbers keep their meaning in both (i32 / u32 wrapping, i64 past 2^53, saturating `as`, errors)
+#[test]
+fn numeric_same_in_js_and_wasm() {
+    let src = root().join("examples/numeric.zsc");
+    let mut outs = vec![];
+    for (name, flags) in [("numeric-wasm", &[][..]), ("numeric-js", &["--all-js"][..])] {
+        let d = out_dir(name);
+        let o = zsc(&src, &d, flags);
+        assert!(o.status.success(), "zsc failed:\n{}", String::from_utf8_lossy(&o.stderr));
+        assert_eq!(d.join("numeric.wasm").exists(), flags.is_empty());
+        let r = Command::new("node").arg(root().join("tests/numeric_driver.mjs")).arg(d.join("numeric.js")).output().unwrap();
+        assert!(r.status.success(), "{}", String::from_utf8_lossy(&r.stderr));
+        outs.push(String::from_utf8(r.stdout).unwrap());
+    }
+    assert_eq!(outs[0], outs[1], "wasm and JS differ");
+    assert_eq!(
+        outs[0],
+        "dot 33.5\ntotal$i32 -2147483643\ntotal$u32 1\ntotal$i64 18014398509481986n\ntotal$f64 0.30000000000000004\n\
+         mean 2.3333333333333335\nmean0 0\nnormalize [0.25,-1,0.5]\nnormalize0 [0,0]\nevens_squared [4,16,-2147386332,36]\n\
+         escape [50,2,33]\ncollatz [111,410]\nlcg 350778849\nedge_cases [473956351,2147418112,0]\nout_of_bounds error\n"
+    );
 }

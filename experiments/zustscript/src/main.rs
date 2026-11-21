@@ -1,8 +1,9 @@
 //! zsc: the zustscript prototype's compiler.
 //!
-//!   zsc <input.zsc> [-o out-dir] [--zustc PATH] [--jsx-runtime MODULE] [--wasm-O]
+//!   zsc <input.zsc> [-o out-dir] [--zustc PATH] [--jsx-runtime MODULE] [--wasm-O] [--all-js]
 //!
-//! (`--wasm-O` passes -O to zustc: faster code, but zustc's inlining makes the module larger, so the default is
+//! (`--all-js` keeps `@wasm fn`s in the JS output: the same source, run as JS.
+//! `--wasm-O` passes -O to zustc: faster code, but zustc's inlining makes the module larger, so the default is
 //! without it)
 //!
 //! Writes `<name>.js` (ES module: the JS layer, then the glue of the wasm layer), `<name>.d.ts`, and, when the file
@@ -13,6 +14,7 @@
 mod ast;
 mod check;
 mod js;
+mod lower;
 mod parse;
 mod wasm;
 
@@ -26,6 +28,7 @@ fn main() {
     let mut zustc = std::env::var("ZUSTC").ok().map(PathBuf::from);
     let mut jsx_runtime = "react/jsx-runtime".to_string();
     let mut wasm_opt = false;
+    let mut all_js = false;
     let mut it = args.iter();
     while let Some(a) = it.next() {
         match a.as_str() {
@@ -33,6 +36,7 @@ fn main() {
             "--zustc" => zustc = Some(PathBuf::from(it.next().expect("--zustc needs a path"))),
             "--jsx-runtime" => jsx_runtime = it.next().expect("--jsx-runtime needs a module").clone(),
             "--wasm-O" => wasm_opt = true,
+            "--all-js" => all_js = true,
             _ if input.is_none() => input = Some(PathBuf::from(a)),
             _ => usage(),
         }
@@ -61,11 +65,27 @@ fn main() {
     }
     let info = ck.info;
     let mut j = js::Js::new(&info, &jsx_runtime);
+    if !all_js {
+        j.wasm_fns = items.iter().filter_map(|it| match it {
+            ast::Item::Fn { name, wasm: true, .. } => Some(name.clone()),
+            _ => None,
+        }).collect();
+    }
     let body = j.items(&items);
     let header = j.header();
     let (dts, brands) = js::dts(&items, &info);
     let wasm_name = format!("{stem}.wasm");
-    let w = wasm::generate(&items, &wasm_name);
+    // `@wasm fn`s: lowered to Rust (with --all-js they stay in the JS output)
+    let (lowered, raw) = match lower::lower(&items, &info, &j.wasm_wanted) {
+        Ok(x) => x,
+        Err(mut errs) => {
+            errs.sort_by_key(|e| (e.0.line, e.0.col));
+            errs.dedup();
+            report(&file, &src, &errs);
+            std::process::exit(1);
+        }
+    };
+    let w = wasm::generate(&items, lowered, &raw, &wasm_name);
     let t_front = t0.elapsed();
 
     std::fs::create_dir_all(&out_dir).unwrap_or_else(|e| die(&format!("{}: {e}", out_dir.display())));
@@ -74,13 +94,7 @@ fn main() {
     out.push_str(&body);
     let mut t_wasm = None;
     if let Some(w) = &w {
-        let mut glue = w.glue.clone();
-        for it in &items {
-            if let ast::Item::WasmFn { name, public: true, .. } = it {
-                glue = glue.replacen(&format!("\nfunction {name}("), &format!("\nexport function {name}("), 1);
-            }
-        }
-        out.push_str(&glue);
+        out.push_str(&w.glue);
         let rs_path = out_dir.join(format!("{stem}.wasm.rs"));
         std::fs::write(&rs_path, &w.rust).unwrap();
         let zustc = zustc.unwrap_or_else(default_zustc);
@@ -138,7 +152,7 @@ fn report(file: &str, src: &str, errs: &[(ast::Pos, String)]) {
 }
 
 fn usage() -> ! {
-    die("usage: zsc <input.zsc> [-o out-dir] [--zustc PATH] [--jsx-runtime MODULE] [--wasm-O]")
+    die("usage: zsc <input.zsc> [-o out-dir] [--zustc PATH] [--jsx-runtime MODULE] [--wasm-O] [--all-js]")
 }
 
 fn die(m: &str) -> ! {

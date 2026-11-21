@@ -38,6 +38,9 @@ pub struct Js<'a> {
     /// instances of numeric-bound functions still to write, and the ones written or queued
     queue: Vec<(String, Vec<Ty>)>,
     queued: HashSet<String>,
+    /// `@wasm fn`s that go to wasm (empty with --all-js): not written here, their uses are collected
+    pub wasm_fns: HashSet<String>,
+    pub wasm_wanted: Vec<(String, Vec<Ty>)>,
 }
 
 /// The JS name of an instance of a numeric-bound function: `sum$f64`
@@ -123,6 +126,8 @@ const HELPERS: &[(&str, &str)] = &[
     ("$f64_to_i32", "function $f64_to_i32(x) {\n  return x !== x ? 0 : x >= 2147483647 ? 2147483647 : x <= -2147483648 ? -2147483648 : x | 0;\n}"),
     ("$f64_to_u32", "function $f64_to_u32(x) {\n  return x !== x || x <= 0 ? 0 : x >= 4294967295 ? 4294967295 : x >>> 0;\n}"),
     ("$f64_to_i64", "function $f64_to_i64(x) {\n  if (x !== x) return 0n;\n  if (x >= 9223372036854775807) return 9223372036854775807n;\n  if (x <= -9223372036854775808) return -9223372036854775808n;\n  return BigInt(Math.trunc(x));\n}"),
+    ("$at", "function $at(a, i) {\n  if (i >= 0 && i < a.length) return a[i];\n  throw new RangeError(\"index out of bounds: the len is \" + a.length + \" but the index is \" + i);\n}"),
+    ("$range", "function $range(a, b) {\n  const r = [];\n  for (let i = a; i < b; i++) r.push(i);\n  return r;\n}"),
     ("$round", "function $round(x) {\n  return x < 0 ? -Math.round(-x) : Math.round(x);\n}"),
     (
         "$handle",
@@ -147,6 +152,8 @@ impl<'a> Js<'a> {
             subst: HashMap::new(),
             queue: vec![],
             queued: HashSet::new(),
+            wasm_fns: HashSet::new(),
+            wasm_wanted: vec![],
         }
     }
 
@@ -173,6 +180,14 @@ impl<'a> Js<'a> {
         let mut bodies: HashMap<&String, &Item> = HashMap::new();
         for it in items {
             if let Item::Fn { name, public, generics, bounds, .. } = it {
+                if self.wasm_fns.contains(name) {
+                    if *public {
+                        for targs in all_instances(generics, bounds) {
+                            self.want(name, targs);
+                        }
+                    }
+                    continue;
+                }
                 if bounds.is_empty() {
                     self.function(it, &ident(name), *public);
                 } else {
@@ -199,7 +214,12 @@ impl<'a> Js<'a> {
     fn want(&mut self, name: &str, targs: Vec<Ty>) -> String {
         let n = inst_name(name, &targs);
         if self.queued.insert(n.clone()) {
-            self.queue.push((name.to_string(), targs));
+            if self.wasm_fns.contains(name) {
+                // (its glue, named the same, is written with the wasm layer)
+                self.wasm_wanted.push((name.to_string(), targs));
+            } else {
+                self.queue.push((name.to_string(), targs));
+            }
         }
         n
     }
@@ -223,6 +243,9 @@ impl<'a> Js<'a> {
 
     /// The name of a use of function `n` (an instance's, for a numeric-bound one)
     fn fn_name(&mut self, id: Id, n: &str) -> String {
+        if self.wasm_fns.contains(n) && !self.info.inst.contains_key(&id) {
+            return self.want(n, vec![]);
+        }
         match self.info.inst.get(&id).cloned() {
             Some(targs) => {
                 let targs: Vec<Ty> = targs.iter().map(|t| subst_ty(t, &self.subst)).collect();
@@ -567,6 +590,10 @@ impl<'a> Js<'a> {
                     js
                 }
                 Some(Callee::Fn) => self.fn_name(e.id, n),
+                Some(Callee::Range) => {
+                    self.helpers.insert("$range");
+                    "$range".into()
+                }
                 _ => ident(n),
             },
             EK::Call(f, args) => {
@@ -637,6 +664,10 @@ impl<'a> Js<'a> {
                         format!("{recv}.{m}({})", a.join(", "))
                     }
                 }
+            }
+            EK::Index(x, i) => {
+                self.helpers.insert("$at");
+                format!("$at({}, {})", self.expr(x), self.expr(i))
             }
             EK::Field(x, f) => {
                 let s = self.operand(x);

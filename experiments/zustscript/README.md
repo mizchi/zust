@@ -131,6 +131,54 @@ wasm { fn sq(x: f64) -> f64 { x * x } }                              // wasm 側
   - 制約: 引数と戻り値はスカラーだけ
 - テストで確かめていること: 借用・所有の両方とも、呼び出しの後で JS 側の表は空になる
 
+### `@wasm fn`: 同じ zustscript を JS でも wasm でも実行する(方向 A の合流)
+
+```zsc
+@wasm pub fn dot(a: Array<f64>, b: Array<f64>) -> f64 {
+  range(0, a.len()).fold(0.0, (s, i) => s + a[i] * b[i])
+}
+@wasm pub fn total<T: Num>(xs: Array<T>) -> T { xs.fold(T::zero(), (acc, x) => acc + x) }
+```
+
+- 本体は普通の zustscript で、JS 層と同じ検査器で型を検査する。そのうえで `lower.rs` が、型の付いた構文木から Rust のソースへ落とし、zustc が wasm にする。境界のグルーは `wasm fn` と同じ仕組みで生成する
+  - 例: `dot` は `(0i32..(a.len() as i32)).fold(0.0f64, |s, i| s + a[i as usize] * b[i as usize])` になる
+- `zsc --all-js` を付けると、同じ関数を JS として出す。テスト `numeric_same_in_js_and_wasm` で、両方の出力が一致することを確かめている(差分テスト)。比べている結果は次のとおり
+  - i32 / u32 の wrap
+  - 2^53 を超える i64
+  - f64 から整数への `as` の飽和
+  - 再帰
+  - 配列の範囲外アクセスがエラーになること
+- 意味をそろえる方法
+  - JS 層の i32 / u32 / i64 の演算は、Rust では `wrapping_add` / `wrapping_div` などにする(0 除算は JS でも Rust でもエラー)
+  - `as` は Rust 自身が飽和するので、そのまま使える
+  - 添字 `xs[i]` は、JS では範囲を検査する `$at`、Rust では `xs[i as usize]`(負の添字は巨大な usize になり、範囲外として止まる)
+- 部分集合(外れると、その構文の名前を出してエラーにする)
+  - 型: 数値、bool、それらの配列(引数は `&[T]`、戻り値は `Vec<T>`)
+  - 構文: `let` / `if` / 数値と bool の `match`、`as`、`T::zero()` / `T::one()`
+  - 配列の操作: `len` `map` `filter` `fold` `any` `all` `push` `concat`、添字、`range(a, b)`(Rust では配列を作らずイテレータ `a..b` になる)
+  - 呼び出し: 他の `@wasm` 関数、`wasm fn`、再帰
+  - 使えないもの: 文字列、レコード、enum、effect、値としての関数
+- `T: Num` の関数は、wasm でもインスタンスごとに単相化する(`zs_total__f64`、`zs_total__i64` など)
+  - JS から呼ばれるインスタンスだけに wrapper とグルーを付ける
+  - 他の `@wasm` 関数からだけ呼ばれるもの(例の `step`)は、ただの Rust 関数になる
+- 境界を越えられる配列は、i32 / u32 / i64 / f64 のもの(`Int32Array` / `Uint32Array` / `BigInt64Array` / `Float64Array` でコピーする)
+
+同じソースを JS と wasm で走らせた速さ(node 22、examples/numeric.zsc、`tests/numeric_bench.mjs`)。両方の結果は一致している。
+
+| 処理 | wasm | JS (`--all-js`) |
+|---|---|---|
+| `dot`、要素数 1e6 の f64(呼び出しごとに 2 本の配列を線形メモリへコピー) | 27 ms | 44 ms |
+| `total$f64`、1e6(足すだけ。コピーが支配的) | 20 ms | 14 ms |
+| mandelbrot 160×120、反復の上限 200(点ごとに境界を 1 回越える) | 8.1 ms | 11.0 ms |
+| `lcg`、u32 で 1e6 ステップ | 11.5 ms | 44.6 ms |
+| `collatz_steps`、1..20000(i64。JS では BigInt) | 20.7 ms | 45.1 ms |
+
+- 判断の目安: 配列を渡して軽い処理を 1 回するだけならコピーで負ける。計算が重い処理、整数の wrap、i64(BigInt は遅い)は wasm が 1.4〜3.9 倍速い
+- これは zustc の今の wasm 出力(振り分け、アドレス検査あり)での数字
+  - `--wasm-O` を付けてもほぼ同じで、サイズは 46 KB → 69 KB に増える
+  - 後述のメモリモデルの改善が入れば、差はさらに開く見込み
+- JS 側にも改善の余地がある。`range(..).fold` は今、配列を作ってから畳み込んでいるので、`for` ループにすれば JS も速くなる
+
 ## 測ったこと
 
 試作のコンパイラの規模は約 3,900 行(parser 1,000、検査 1,350、JS 生成 1,000、wasm/グルー 280)。
@@ -178,7 +226,7 @@ zust は到達しない関数をそもそも出さないので、`wasm-gc` に�
 | 方向 | 中身 | 試作で分かったこと | 判断 |
 |---|---|---|---|
 | **C. Rust 風の文法から JS を吐き、必要な所だけ wasm(今回の試作)** | JS 層は GC 前提で読める JS。wasm 層は Rust のまま | 1 回の作業で、型推論、JSX、effect、単相化、境界の自動生成まで動いた。**zust の型付き IR は不要だった**(JS 層は独自の検査器で、zust には wasm 層を Rust のテキストとして渡すだけ) | **本線にする** |
-| A. Rust に変換できる高水準言語 | JS 層のコードを Rust ソースに落とし、zustc で wasm/native にする | 不変のレコードや enum は Rust に落とせる。ただしクロージャ、GC 前提の共有(`Rc` だらけになる)、effect(Rust にはジェネレータがない)を落とすのが難しい | **部分的に採る**: effect を持たず、数値と配列を中心にした一階の部分集合(まず `T: Num` の関数)だけを Rust に落とせば、同じソースを JS でも wasm でも実行できる。zust の型付き IR が効いてくるのはここ |
+| A. Rust に変換できる高水準言語 | JS 層のコードを Rust ソースに落とし、zustc で wasm/native にする | 不変のレコードや enum は Rust に落とせる。ただしクロージャ、GC 前提の共有(`Rc` だらけになる)、effect(Rust にはジェネレータがない)を落とすのが難しい | **部分的に採り、`@wasm fn` として試作済み**: 数値と配列の部分集合を Rust に落とし、JS と wasm で同じ結果になることを差分テストで確かめた。ここでも zust の型付き IR は不要だった(zustscript の型付き構文木と、検査器の表で足りた) |
 | B. 全部 wasm に変換する前提で効率化 | UI まで wasm に置き、メモリモデルを wasm 向けにする | DOM には JS 経由でしか触れないので、境界の量は C より増える。サイズは 1〜4 の改善をしても JS 1.8 KB(gzip)に対して桁が違う | **単独の方向にはしない**。1〜4 の改善は C の wasm の島にそのまま効くので、別の作業として進める価値はある |
 
 結論:
@@ -191,11 +239,11 @@ zust は到達しない関数をそもそも出さないので、`wasm-gc` に�
 
 | 段階 | 内容 | 目安 | 備考 |
 |---|---|---|---|
-| 済 | 試作(この crate) | - | 型付き IR なしで成立 |
+| 済 | 試作(この crate): JS 層、effect、JSX、境界、branded な `.d.ts`、`@wasm fn` | - | 型付き IR なしで成立 |
 | 1 | 言語として固める: モジュールと import、無名のレコード型、`Option`/`Result` の標準化、文字列の補間、エラーの改善、TS からの型名の衝突回避 | 2〜3 週 | |
 | 2 | 道具: 増分ビルド(アイテム単位のハッシュは zust の lexer の考え方を流用)、LSP(診断、hover、定義へ移動)、source map | 3〜5 週 | zust の `ide` / `analyzer` の作りを参考に別 crate で |
 | 3 | effect 多相(関数型の effect 行)、async の effect(Promise で継続を再開) | 2〜4 週 | 生成はジェネレータのまま |
-| 4 | 方向 A の合流: JS 層の数値部分集合を Rust に落とす(`T: Num` の関数から) | 3〜6 週 | ここで zust に型付き IR があると楽になる |
+| 4 | 方向 A の合流: `@wasm fn` の部分集合を広げる(レコードを値で渡す、enum、可変のローカル変数とループ)、JS 側の `for` への最適化、どの関数を wasm に置くかの判断材料(コピーの量の見積もり) | 2〜4 週 | 最小の形は試作済み |
 | 5 | wasm バックエンドの改善(reactor、stackifier、wasm32 レイアウト) | 1〜2 か月 | zust 本体の作業 |
 | 6 | TS の型の取り込み(限定した部分集合、tsc API による抽出) | 範囲次第 | 今は手書きの extern |
 

@@ -43,6 +43,8 @@ pub enum Callee {
     Wasm,
     /// a variant constructor (enum name)
     Variant(String),
+    /// the built-in `range(start, end)`: the i32s from start to end (exclusive)
+    Range,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -156,8 +158,12 @@ pub fn wty_to_ty(w: &WTy) -> Ty {
         WTy::F64 => Ty::F64,
         WTy::Bool => Ty::Bool,
         WTy::Unit => Ty::Unit,
-        WTy::SliceF64 | WTy::VecF64 => Ty::Array(Box::new(Ty::F64)),
-        WTy::SliceI32 | WTy::VecI32 => Ty::Array(Box::new(Ty::I32)),
+        WTy::Slice(e) | WTy::Vec(e) => Ty::Array(Box::new(match e {
+            Elem::I32 => Ty::I32,
+            Elem::U32 => Ty::U32,
+            Elem::I64 => Ty::I64,
+            Elem::F64 => Ty::F64,
+        })),
         WTy::Str | WTy::String => Ty::Str,
         WTy::Callback(a, r, _) => Ty::Fn(a.iter().map(wty_to_ty).collect(), Box::new(wty_to_ty(r))),
     }
@@ -670,6 +676,10 @@ impl Checker {
                 if self.info.variant_of.contains_key(n) {
                     return self.variant(e.id, pos, None, n);
                 }
+                if n == "range" {
+                    self.info.callee.insert(e.id, Callee::Range);
+                    return Ty::Fn(vec![Ty::I32, Ty::I32], Box::new(Ty::Array(Box::new(Ty::I32))));
+                }
                 self.err(pos, format!("unknown name `{n}`"));
                 self.fresh()
             }
@@ -814,6 +824,14 @@ impl Checker {
                     self.nums.push((e.id, t.clone()));
                 }
                 t
+            }
+            EK::Index(x, i) => {
+                let xt = self.infer(x, None);
+                let it = self.infer(i, Some(&Ty::I32));
+                self.unify(i.pos, &it, &Ty::I32);
+                let el = self.fresh();
+                self.unify(x.pos, &xt, &Ty::Array(Box::new(el.clone())));
+                el
             }
             EK::Cast(x, ty) => {
                 let g = self.generics.clone();
@@ -1293,6 +1311,10 @@ impl EffWalk<'_> {
                 }
             }
             EK::Field(x, _) | EK::Un(_, x) | EK::Cast(x, _) => out.extend(self.expr(x)),
+            EK::Index(x, i) => {
+                out.extend(self.expr(x));
+                out.extend(self.expr(i));
+            }
             EK::Bin(_, l, r) => {
                 out.extend(self.expr(l));
                 out.extend(self.expr(r));

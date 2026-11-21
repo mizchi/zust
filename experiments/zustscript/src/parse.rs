@@ -34,7 +34,7 @@ pub type PResult<X> = Result<X, (Pos, String)>;
 
 const PUNCTS: &[&str] = &[
     "|>", "..", "::", "->", "=>", "==", "!=", "<=", ">=", "&&", "||", "+", "-", "*", "/", "%", "=", "<", ">", "!", "(", ")",
-    "{", "}", "[", "]", ",", ";", ":", ".", "|", "&", "#",
+    "{", "}", "[", "]", ",", ";", ":", ".", "|", "&", "#", "@",
 ];
 
 impl Parser {
@@ -112,6 +112,19 @@ impl Parser {
                 let ch = self.bump();
                 if ch != '_' {
                     s.push(ch);
+                }
+            }
+            // (an exponent: `1.0e10`, `2e-3`)
+            if (self.at(0) == 'e' || self.at(0) == 'E')
+                && (self.at(1).is_ascii_digit() || ((self.at(1) == '-' || self.at(1) == '+') && self.at(2).is_ascii_digit()))
+            {
+                float = true;
+                s.push(self.bump());
+                if !self.at(0).is_ascii_digit() {
+                    s.push(self.bump());
+                }
+                while self.at(0).is_ascii_digit() {
+                    s.push(self.bump());
                 }
             }
             if float {
@@ -249,6 +262,16 @@ impl Parser {
     }
 
     fn item(&mut self) -> PResult<Item> {
+        // `@wasm fn ..`: a zustscript function that runs as wasm
+        let wasm = if self.eat("@")? {
+            let (a, apos) = self.ident()?;
+            if a != "wasm" {
+                return Err((apos, format!("unknown attribute `@{a}` (there is `@wasm`)")));
+            }
+            true
+        } else {
+            false
+        };
         let public = if self.is_kw("pub")? {
             self.next()?;
             true
@@ -257,6 +280,7 @@ impl Parser {
         };
         let (kw, pos) = self.ident()?;
         match kw.as_str() {
+            _ if wasm && kw != "fn" => Err((pos, "`@wasm` goes on a `fn`".into())),
             "type" => {
                 let (name, _) = self.ident()?;
                 let params = self.generics()?;
@@ -304,7 +328,7 @@ impl Parser {
                 }
                 let ret = if self.eat("->")? { Some(self.ty()?) } else { None };
                 let body = self.block()?;
-                Ok(Item::Fn { name, public, generics, bounds, args, ret, body, pos })
+                Ok(Item::Fn { name, public, wasm, generics, bounds, args, ret, body, pos })
             }
             "extern" => {
                 let module = match &self.peek()?.t {
@@ -407,17 +431,15 @@ impl Parser {
             "f64" => WTy::F64,
             "bool" => WTy::Bool,
             "()" => WTy::Unit,
-            "&[f64]" => WTy::SliceF64,
-            "&[i32]" => WTy::SliceI32,
+            _ if s.starts_with("&[") && s.ends_with(']') && Elem::parse(&s[2..s.len() - 1]).is_some() => WTy::Slice(Elem::parse(&s[2..s.len() - 1]).unwrap()),
+            _ if s.starts_with("Vec<") && s.ends_with('>') && Elem::parse(&s[4..s.len() - 1]).is_some() => WTy::Vec(Elem::parse(&s[4..s.len() - 1]).unwrap()),
             "&str" => WTy::Str,
             "String" => WTy::String,
-            "Vec<f64>" => WTy::VecF64,
-            "Vec<i32>" => WTy::VecI32,
             _ => {
                 return Err((
                     pos,
                     format!(
-                        "`{s}` cannot cross the JS / wasm boundary (allowed: i32 u32 i64 f64 bool (); &[f64] &[i32] &str and &dyn Fn(..) / Box<dyn Fn(..)> of scalars as arguments; String Vec<f64> Vec<i32> as results)"
+                        "`{s}` cannot cross the JS / wasm boundary (allowed: i32 u32 i64 f64 bool (); &[T] (T: i32 u32 i64 f64), &str and &dyn Fn(..) / Box<dyn Fn(..)> of scalars as arguments; String, Vec<T> as results)"
                     ),
                 ));
             }
@@ -678,6 +700,11 @@ impl Parser {
                 let pos = self.next()?.pos;
                 let args = self.args(")")?;
                 e = self.mk(pos, EK::Call(Box::new(e), args));
+            } else if self.is("[")? {
+                let pos = self.next()?.pos;
+                let i = self.expr(false)?;
+                self.expect("]")?;
+                e = self.mk(pos, EK::Index(Box::new(e), Box::new(i)));
             } else if self.is(".")? {
                 self.next()?;
                 let t = self.next()?;
