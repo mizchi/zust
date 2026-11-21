@@ -94,6 +94,10 @@ rustc's wasm32-wasip1 builds (tests/wasm/README.md). Left:
   avoids it.
 - `{:x}` of a negative signed integer prints `-1` where rustc prints `ffffffff` (the prelude's formatting; found by
   the SIMD tests, which print `as u32`).
+- The IR's scalar `Load` / `Store` carry no alignment: Cranelift lowers them with `MemFlagsData::trusted()` (which
+  claims the address is aligned) although `ptr::read_unaligned` and a gather off an unaligned base (scale >= the
+  element size) use them too. x86 scalar moves do not need alignment, so the code is right today; an alignment
+  operand (or an unaligned load op) on `Op::Load` / `Op::Store` would make the flag true.
 - Wider byte shuffles and constants: `Shuffle` / `Swizzle` / `Vconst` are 128-bit only.
 - Wasm flexible vectors (proposal, phase 3), when engines have them: a width the engine sets at run time, an
   instruction for the lane count, lane shifts and half concatenations (the IR's SIMD section has the plan). Until

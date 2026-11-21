@@ -31,17 +31,20 @@ pub fn vector_name(s: &str) -> Option<Ty> {
     })
 }
 
-/// Whether a call's path may name the intrinsic `name`: a bare name, or one qualified by core::arch's modules only,
-/// and by the module of its family (`core::arch::x86_64::_mm_add_ps`, `std::arch::wasm32::f32x4_add`).
-/// `Ops::_mm_add_ps` is the program's function; `core::arch::wasm32::_mm_set1_ps` names nothing
+/// Whether a call's path may name the intrinsic `name`: a bare name, or one qualified by a suffix of core::arch's
+/// path to the module of its family, in order (`x86_64::_mm_add_ps`, `arch::x86_64::_mm_add_ps`,
+/// `core::arch::x86_64::_mm_add_ps`, `std::arch::wasm32::f32x4_add`). `Ops::_mm_add_ps` is the program's function;
+/// `core::arch::wasm32::_mm_set1_ps` and `core::x86_64::arch::_mm_set1_ps` name nothing
 pub fn arch_path<'a>(qualifier: impl IntoIterator<Item = &'a str>, name: &str) -> bool {
     let x86 = name.starts_with("_mm");
-    qualifier.into_iter().all(|s| match s {
-        "core" | "std" | "arch" => true,
-        "x86_64" | "x86" => x86,
-        "wasm32" | "wasm64" => !x86,
-        _ => false,
-    })
+    let q: Vec<&str> = qualifier.into_iter().collect();
+    let fam = |s: &str| if x86 { matches!(s, "x86_64" | "x86") } else { matches!(s, "wasm32" | "wasm64") };
+    let n = q.len();
+    n == 0
+        || (n <= 3
+            && fam(q[n - 1])
+            && (n < 2 || q[n - 2] == "arch")
+            && (n < 3 || q[0] == "core" || q[0] == "std"))
 }
 
 /// A pointer argument of a load (`*const T`) or a store (`*mut T`)
