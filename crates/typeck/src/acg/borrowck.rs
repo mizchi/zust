@@ -797,7 +797,12 @@ impl Bk {
                         st.inited.push(*l);
                         st.inited.sort_unstable();
                     }
+                    // (what it holds through the regions of its type stays: NLL's liveness is of the variable)
+                    let kept = self.region_held(st, *l);
                     st.holds.retain(|h| h.0 != *l);
+                    if !kept.is_empty() {
+                        st.set_holds(*l, kept);
+                    }
                     st.kill_loans_of(*l, &self.loans);
                 }
                 Ev::Dead(l, sp) => {
@@ -909,6 +914,18 @@ impl Bk {
                     let mut ls = self.resolve(srcs, st);
                     if let Ev::Flow(..) = e {
                         ls.extend_from_slice(st.held(*l));
+                    } else {
+                        let kept = self.region_held(st, *l);
+                        // (a loan of a local already gone that it holds through the regions of its type, and it is
+                        // used: `let d = { let p = ..; f.m(&p) };`)
+                        if let (Some(errs), true) = (errs.as_deref_mut(), loans_on && is_live(&live_at[i], *l)) {
+                            if let Some(&ln) = kept.iter().find(|ln| st.dead.binary_search(ln).is_ok()) {
+                                let lo = &self.loans[ln as usize];
+                                let name = path_str(&self.locals, &BPlace { local: lo.place.local, proj: vec![] });
+                                errs.push(BkError { sp: lo.sp, msg: format!("`{name}` does not live long enough (dropped while still borrowed)") });
+                            }
+                        }
+                        ls.extend(kept);
                     }
                     st.set_holds(*l, ls);
                 }
@@ -941,6 +958,14 @@ impl Bk {
                 }
             }
         }
+    }
+
+    /// The loans local l holds through the regions of its type (held_by): kept when it is bound or assigned again
+    fn region_held(&self, st: &State, l: u32) -> Vec<u32> {
+        if self.held_by.is_empty() {
+            return vec![];
+        }
+        st.held(l).iter().copied().filter(|ln| self.held_by.binary_search_by_key(ln, |x| x.0).is_ok_and(|k| self.held_by[k].1.contains(&l))).collect()
     }
 
     /// Mutation of a local not declared `mut`

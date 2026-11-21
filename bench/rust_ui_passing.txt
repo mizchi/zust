@@ -5949,6 +5949,7 @@ compile-fail	span/typo-suggestion.rs
 run-pass	span/unused-warning-point-at-identifier.rs
 compile-fail	span/vec-macro-outlives-issue-15480.rs
 compile-fail	span/vec_refs_data_with_early_death.rs
+compile-fail	span/wf-method-late-bound-regions.rs
 compile-fail	specialization/feature-gate-specialization.rs
 run-pass	specialization/soundness/partial_ord_slice.rs
 compile-fail	specialization/specialization-feature-gate-overlap.rs

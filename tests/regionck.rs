@@ -973,3 +973,12 @@ fn self_constructor_of_a_static_instance() {
     assert!(d.len() == 1 && d[0].0 == 5, "{d:?}");
     assert_eq!(check("struct A<T>(T);\nimpl A<&'static u8> {\n    fn f() {\n        static X: u8 = 0;\n        Self(&X);\n        let y = 0;\n        let _ = A(&y);\n    }\n}\nfn main() {\n    A::f();\n}\n"), vec![]);
 }
+
+/// A call requires its parameters' types well formed (`&'a Foo<'b>`: 'b: 'a), and a local holds through the regions
+/// of its type a borrow made before it is bound
+#[test]
+fn parameter_well_formedness_at_calls() {
+    let d = check("struct Foo<'b>(Option<&'b ()>);\nimpl<'b> Foo<'b> {\n    fn xmute<'a>(&'a self, u: &'b u32) -> &'a u32 {\n        u\n    }\n}\nfn main() {\n    let f2 = Foo(None);\n    let dangling = {\n        let pointer = Box::new(42);\n        f2.xmute(&pointer)\n    };\n    println!(\"{}\", dangling);\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 11 && d[0].1.contains("does not live long enough"), "{d:?}");
+    assert_eq!(check("struct Foo<'b>(Option<&'b ()>);\nimpl<'b> Foo<'b> {\n    fn xmute<'a>(&'a self, u: &'b u32) -> &'a u32 {\n        u\n    }\n}\nfn main() {\n    let f2 = Foo(None);\n    let pointer = Box::new(42);\n    let ok = f2.xmute(&pointer);\n    println!(\"{}\", ok);\n}\n"), vec![]);
+}

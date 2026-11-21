@@ -2265,6 +2265,14 @@ impl Cx<'_> {
                 rg.flow(prog, aty.unwrap_or(ty), ty, at, pt, *asp);
             }
         }
+        // (the parameters' types are well formed, as the callee assumes: `&'a Foo<'b>` needs 'b: 'a of the call)
+        if !prelude && rs.is_some() {
+            for (pt, &ty) in ptrees.iter().zip(params) {
+                if let Some(pt) = pt.as_ref().filter(|t| t.len() > 1) {
+                    rg.wf(prog, ty, pt, sp);
+                }
+            }
+        }
         // (an impl's method: its self type is well formed (`struct Foo<'a, 'b: 'a>`): the call makes sure)
         if let (Some(r), Some(isid)) = (rs.as_deref(), sig0.impl_of) {
             if !r.self_slots.is_empty() {
