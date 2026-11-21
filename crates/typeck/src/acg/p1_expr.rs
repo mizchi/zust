@@ -981,6 +981,29 @@ impl Cx<'_> {
                     self.same(SP, t, to)?;
                     return Ok((v, t));
                 }
+                // (`c as fn(&str)` with c a closure value that captures nothing: its fn-pointer instance)
+                if let (Ty::Fn(_), Some(Ty::Struct(sid))) = (to, self.peek(x)) {
+                    let base = self.prog.base_of(sid);
+                    if let Some(&cid) = self.prog.closure_of_struct.get(&base) {
+                        if self.prog.structs[sid as usize].fields.is_empty() {
+                            // (the value carries nothing; evaluated for its effects)
+                            self.expr(x, None)?;
+                            let args = self.prog.structs[sid as usize].args.clone();
+                            let prog = self.prog;
+                            let (iid, sig) = {
+                                let mut g = self.insts.lock().unwrap();
+                                let iid = g.request_fnptr(prog, cid, args).or_else(|e| err(SP, e))?;
+                                (iid, g.sig(prog, iid).clone())
+                            };
+                            self.requested.push(iid);
+                            let fr = self.fref(iid, &sig);
+                            let v = self.b.ins().func_addr(PTR, fr);
+                            let t = Ty::Fn(crate::types::intern_fn(crate::types::FnTy { params: sig.params.clone(), ret: sig.ret }));
+                            self.same(SP, t, to)?;
+                            return Ok((Some(v), t));
+                        }
+                    }
+                }
                 let int_lit = matches!(strip_paren(x), Expr::Lit(l, _) if matches!(lit::lit(l), Some(Lit::Int(i)) if i.suffix().is_empty()));
                 let hint = if int_lit && matches!(to, Ty::Ptr(..)) {
                     // (`0 as *mut u8`: an address)

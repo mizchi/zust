@@ -2642,6 +2642,7 @@ check-pass	higher-ranked/leak-check/leak-check-in-selection-7-coherence.rs
 check-pass	higher-ranked/region-leak-rc-and-mut-ptr.rs
 compile-fail	higher-ranked/subtype/placeholder-pattern-fail.rs
 check-pass	higher-ranked/subtype/placeholder-pattern.rs
+check-pass	higher-ranked/subtyping-fn-ptr-coercion.rs
 check-pass	higher-ranked/trait-bounds/complex.rs
 compile-fail	higher-ranked/trait-bounds/hang-on-deeply-nested-dyn.rs
 compile-fail	higher-ranked/trait-bounds/higher-trait-bounds-ice-60218.rs
