@@ -1015,6 +1015,7 @@ check-pass	builtin-superkinds/builtin-superkinds-typaram.rs
 compile-fail	c-variadic/fn-item-diagnostic-issue-69232.rs
 compile-fail	c-variadic/issue-32201.rs
 compile-fail	c-variadic/issue-86053-1.rs
+compile-fail	c-variadic/issue-86053-2.rs
 compile-fail	c-variadic/no-closure.rs
 compile-fail	c-variadic/variadic-ffi-6.rs
 build-pass	c-variadic/variadic-ffi-no-fixed-args.rs
@@ -2572,6 +2573,7 @@ compile-fail	generic-associated-types/parse/trait-path-expressions.rs
 compile-fail	generic-associated-types/parse/trait-path-missing-gen_arg.rs
 compile-fail	generic-associated-types/parse/trait-path-segments.rs
 compile-fail	generic-associated-types/parse/trait-path-types.rs
+compile-fail	generic-associated-types/static-lifetime-tip-with-default-type.rs
 compile-fail	generic-associated-types/type-param-defaults.rs
 check-pass	generic-associated-types/variance_constraints.rs
 compile-fail	generic-const-items/feature-gate-generic_const_items.rs
@@ -2624,6 +2626,7 @@ compile-fail	generics/issue-83556.rs
 compile-fail	generics/issue-95208-ignore-qself.rs
 compile-fail	generics/issue-95208.rs
 compile-fail	generics/lifetime-before-type-params.rs
+compile-fail	generics/missing-param-but-has-colon-144215.rs
 run-pass	generics/newtype-with-generics.rs
 compile-fail	generics/overlapping-errors-span-issue-123861.rs
 check-pass	generics/resolve-generic-method-param-2312.rs
@@ -3220,6 +3223,7 @@ compile-fail	lifetimes/issue-95023.rs
 compile-fail	lifetimes/keyword-self-lifetime-error-10412.rs
 run-pass	lifetimes/late-bound-lifetime-arguments-warning-72278.rs
 check-pass	lifetimes/lifetime-bound-whitespace-13703.rs
+compile-fail	lifetimes/lifetime-doesnt-live-long-enough.rs
 compile-fail	lifetimes/lifetime-elision-return-type-requires-explicit-lifetime.rs
 compile-fail	lifetimes/lifetime-errors/42701_one_named_and_one_anonymous.rs
 compile-fail	lifetimes/lifetime-errors/e0621-mut-ref-aliases-pointee-lifetime-distinct.rs
@@ -5309,6 +5313,7 @@ run-pass	regions/regions-expl-self.rs
 run-pass	regions/regions-fn-subtyping-2.rs
 check-pass	regions/regions-fn-subtyping-return-static.rs
 run-pass	regions/regions-fn-subtyping.rs
+compile-fail	regions/regions-free-region-ordering-callee-4.rs
 compile-fail	regions/regions-free-region-ordering-callee.rs
 compile-fail	regions/regions-free-region-ordering-caller1.rs
 run-pass	regions/regions-free-region-outlives-static-outlives-free-region.rs
@@ -5594,6 +5599,11 @@ check-pass	rfcs/rfc-2091-track-caller/macro-declaration.rs
 compile-fail	rfcs/rfc-2091-track-caller/only-for-fns.rs
 check-pass	rfcs/rfc-2093-infer-outlives/issue-54467.rs
 run-pass	rfcs/rfc-2093-infer-outlives/privacy.rs
+compile-fail	rfcs/rfc-2093-infer-outlives/regions-outlives-nominal-type-region-rev.rs
+compile-fail	rfcs/rfc-2093-infer-outlives/regions-outlives-nominal-type-region.rs
+compile-fail	rfcs/rfc-2093-infer-outlives/regions-outlives-nominal-type-type-rev.rs
+compile-fail	rfcs/rfc-2093-infer-outlives/regions-outlives-nominal-type-type.rs
+compile-fail	rfcs/rfc-2093-infer-outlives/regions-struct-not-wf.rs
 compile-fail	rfcs/rfc-2126-crate-paths/crate-path-non-absolute.rs
 compile-fail	rfcs/rfc-2126-extern-absolute-paths/non-existent-1.rs
 compile-fail	rfcs/rfc-2126-extern-absolute-paths/non-existent-2.rs
@@ -7032,6 +7042,8 @@ compile-fail	wf/wf-array-elem-sized.rs
 compile-fail	wf/wf-associated-const.rs
 check-pass	wf/wf-dyn-in-hrtb-bound-issue-157122.rs
 compile-fail	wf/wf-fn-def-check-sig-2.rs
+compile-fail	wf/wf-impl-associated-type-region.rs
+compile-fail	wf/wf-where-clauses-pre-normalization.rs
 compile-fail	where-clauses/ignore-err-clauses.rs
 check-pass	where-clauses/impl-method-where-clause-resolution.rs
 check-pass	where-clauses/issue-50825-1.rs

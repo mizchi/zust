@@ -546,6 +546,17 @@ fn parse_sig(sig: &PSig, is_extern: bool, is_main: bool, owner: Option<&Owner>) 
         if let Some(l) = undeclared_lifetime(&used, &declared) {
             return Err(format!("use of undeclared lifetime name `{l}` (E0261)"));
         }
+        // (the types the bounds and where clauses write are well formed, as the signature's types imply)
+        if crate::wf::bounds_have_refs(&sig.generics) {
+            let mut k = owner.map(crate::wf::Known::of_owner).unwrap_or_default();
+            k.add_generics(&sig.generics);
+            for t in sig.recv_ty.iter().chain(sig.params.iter().map(|p| &p.1)).chain(sig.ret.iter()) {
+                k.implied(t, 0);
+            }
+            if let Some(e) = k.check_bounds(&sig.generics) {
+                return Err(crate::wf::at(e));
+            }
+        }
     }
     if owner.is_none() {
         // (E0106: an elided lifetime in the return type needs exactly one lifetime among the parameters)
@@ -769,6 +780,25 @@ fn unsized_elem(t: &PTy) -> Option<String> {
         }),
         _ => None,
     }
+}
+
+/// A field `&'static T` needs `T: 'static` declared (it is not inferred, E0310): `\u{3}line\u{3}msg`
+fn static_fields(g: &Generics, tys: &[&PTy]) -> Option<String> {
+    if g.params.is_empty() {
+        return None;
+    }
+    let mut k = None;
+    for t in tys.iter().filter(|t| crate::regions::mentions_static(t)) {
+        let k = k.get_or_insert_with(|| {
+            let mut k = crate::wf::Known::default();
+            k.add_generics(g);
+            k
+        });
+        if let Some((p, m)) = k.check(t, true, 0) {
+            return Some(format!("\u{3}{}\u{3}{m}", p.map_or(1, |p| p.line)));
+        }
+    }
+    None
 }
 
 fn adt_checks(attrs: &[String], g: &Generics, tys: &[&PTy], union: bool, nfields: usize) -> R<()> {
@@ -1537,6 +1567,12 @@ pub fn summarize(item: &Item, owner: Option<&Owner>) -> R<Summary> {
                 if let Some(l) = used.iter().find(|l| r.free.contains(l)) {
                     return Err(format!("\u{2}the lifetime parameter `{l}` is not constrained by the impl trait, self type, or predicates (E0207)"));
                 }
+                // (the value is well formed, as the header implies: `type Out = &'a T;` needs `T: 'a`)
+                if !ow.is_trait {
+                    if let Some(e) = crate::wf::Known::of_owner(ow).check(t, false, 0) {
+                        return Err(crate::wf::at(e));
+                    }
+                }
             }
             sm.assocs.push(AssocSyn {
                 name: n.clone(),
@@ -1649,6 +1685,22 @@ pub fn summarize(item: &Item, owner: Option<&Owner>) -> R<Summary> {
                 }
                 if let Some(r) = &mut sm.hdr_regions {
                     r.free = declared.iter().filter(|l| !constrained.iter().any(|x| x == *l)).map(|l| l.to_string()).collect();
+                    // (what the header's types imply, for its members' well-formedness; its declared bounds are
+                    // the owner's own)
+                    let mut k = crate::wf::Known::default();
+                    k.tparams = g.params.iter().filter_map(|p| if let GParam::Ty(n, _, _) = p { Some(n.clone()) } else { None }).collect();
+                    k.implied(self_ty, 0);
+                    if let Some((_, tp)) = tr {
+                        for s in &tp.segs {
+                            for a in &s.args {
+                                if let crate::parse::GArg::Ty(t) = a {
+                                    k.implied(t, 0);
+                                }
+                            }
+                        }
+                    }
+                    r.wf_pairs = k.pairs;
+                    r.wf_vague = k.vague;
                 }
             }
             if let Some((neg, tp)) = tr {
@@ -1885,7 +1937,7 @@ pub fn summarize(item: &Item, owner: Option<&Owner>) -> R<Summary> {
                         Fields::Unit => {}
                     }
                 }
-                sm.adt_err = adt_checks(&item.attrs, g, &tys, false, vars.len()).err();
+                sm.adt_err = adt_checks(&item.attrs, g, &tys, false, vars.len()).err().or_else(|| static_fields(g, &tys));
                 if let Some(e) = sm.adt_err.clone().filter(|e| e.ends_with("(E0106)")) {
                     sm.adt_err = Some(format!("\u{1}&\u{1}{e}"));
                 }
@@ -1964,7 +2016,7 @@ pub fn summarize(item: &Item, owner: Option<&Owner>) -> R<Summary> {
                     return err("tuple unions are not allowed");
                 }
                 // (PhantomData itself is the one type whose parameter needs no use)
-                sm.adt_err = adt_checks(&item.attrs, g, &tys, union, tys.len()).err();
+                sm.adt_err = adt_checks(&item.attrs, g, &tys, union, tys.len()).err().or_else(|| static_fields(g, &tys));
                 // (an unsized element: at its field's line, which the driver finds by the field's name)
                 // (an undeclared lifetime: at the line it is first written on)
                 if let Some(e) = sm.adt_err.as_ref().filter(|e| e.ends_with("(E0261)")) {

@@ -334,6 +334,10 @@ pub struct RImplSyn {
     /// An impl's lifetime parameters neither its self type nor its trait names (an associated type must not name
     /// them, E0207)
     pub free: Vec<String>,
+    /// What the header knows of outlives by name (declared, or implied by its types: crate::wf::Known), and the
+    /// names another item may relate
+    pub wf_pairs: Vec<(String, String)>,
+    pub wf_vague: Vec<String>,
 }
 
 /// enum のバリアント (要約に保存する形)

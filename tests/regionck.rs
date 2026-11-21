@@ -367,3 +367,31 @@ fn main() {}
     let d = check("fn f<'a, 'b: 'a>(x: &'b String, _y: &'a u8) -> &'a str { x.as_str() }\nfn main() {\n    let s = String::from(\"a\");\n    let n = 1u8;\n    let r = f(&s, &n);\n    drop(s);\n    println!(\"{}\", r);\n}\n");
     assert!(d.len() == 1 && d[0].0 == 6 && d[0].1.contains("because it is borrowed"), "{d:?}");
 }
+
+/// The types an item writes are well formed: `&'a T` needs T: 'a (E0309), `&'static T` T: 'static (E0310),
+/// `&'a &'b U` 'b: 'a (E0491), as declared or implied by the signature's or the impl header's types
+#[test]
+fn written_types_well_formed() {
+    let first = |src: &str| check(src).into_iter().next().map(|d| (d.0, d.1)).unwrap_or_default();
+    let d = first("struct Foo<T> {\n    foo: &'static T,\n}\nfn main() {}\n");
+    assert!(d.0 == 2 && d.1.contains("E0310"), "{d:?}");
+    let d = first("pub trait Foo<'a> {\n    type Bar;\n}\nimpl<'a, T> Foo<'a> for T {\n    type Bar = &'a T;\n}\nfn main() {}\n");
+    assert!(d.0 == 5 && d.1.contains("E0309"), "{d:?}");
+    let d = first("fn ordering4<'a, 'b, F>(a: &'a usize, b: &'b usize, x: F) where F: FnOnce(&'a &'b usize) {}\nfn main() {}\n");
+    assert!(d.0 == 1 && d.1.contains("E0491"), "{d:?}");
+    let ok = r#"
+pub trait Foo<'a> { type Bar; }
+impl<'a, T: 'a> Foo<'a> for T { type Bar = &'a T; }
+pub trait Baz<'a> { type Q; }
+impl<'a, T> Baz<'a> for &'a T { type Q = &'a T; }
+struct Ok<T: 'static> { x: &'static T }
+struct Inferred<'a, T> { x: &'a T }
+trait Mine {}
+fn f1<'a, 'b, F>(a: &'a &'b usize, x: F) where F: FnOnce(&'a &'b usize) {}
+fn f2<'a, 'b: 'a, F: FnOnce(&'a &'b usize)>(x: F) {}
+fn f3<'a, K: Mine, L: Into<&'a K>>() {}
+fn f4<K, F: Fn(&K)>(x: F) {}
+fn main() {}
+"#;
+    assert_eq!(check(ok), vec![]);
+}
