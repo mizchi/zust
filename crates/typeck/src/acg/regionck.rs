@@ -95,6 +95,8 @@ pub struct Rg {
     pub scrut: Option<(Ty, RT)>,
     pub pat: Option<(Ty, RT)>,
     pub pat_ref: Option<u32>,
+    /// A match lowered as another (its or-pattern arms with guards split): the one lowered
+    pub alias: HashMap<usize, &'static Expr>,
 }
 
 fn kind(e: &Expr) -> &'static str {
@@ -925,6 +927,9 @@ impl Cx<'_> {
                 return;
             }
             Expr::Match(_, arms) => {
+                if let Some(&m2) = self.rg.alias.get(&(e as *const Expr as usize)) {
+                    return self.rg_ret(m2);
+                }
                 for a in arms {
                     self.rg_ret(&a.body);
                 }

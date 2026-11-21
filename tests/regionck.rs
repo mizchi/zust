@@ -139,6 +139,10 @@ fn main() {
 }
 "#;
     assert_eq!(check(ok), vec![]);
+    // (`let .. else` whose else block matches another value binds from its own scrutinee)
+    assert_eq!(check("fn f<'a, 'b>(x: Option<&'a u32>, y: Option<&'b u32>, d: &'a u32) -> &'a u32 {\n    let Some(r) = x else { match y { Some(_) => return d, None => return d } };\n    r\n}\nfn main() {}\n"), vec![]);
+    // (an or-pattern arm with a guard is lowered as one arm per alternative)
+    one_error("enum E<'a> { L(&'a u32), R(&'a u32), N }\nfn f<'a, 'b>(x: &'a u32, y: E<'b>, flag: bool) -> &'a u32 {\n    match y { E::L(r) | E::R(r) if flag => r, _ => x }\n}\nfn main() {}\n", 3);
     // (a shadowing `let` reads the value it shadows)
     one_error("fn f<'a, 'b>(_x: &'a u32, y: &'b u32) -> &'a u32 {\n    let y = y;\n    y\n}\nfn main() {}\n", 3);
     // (a struct-like variant)

@@ -169,6 +169,10 @@ impl Cx<'_> {
             }
             if changed {
                 let m2 = self.keep_expr(Expr::Match(scrut.clone(), out));
+                // (the region check follows the arms that were lowered)
+                if self.rg_on() {
+                    self.rg.alias.insert(m as *const Expr as usize, m2);
+                }
                 return self.match_(m2, expected);
             }
         }

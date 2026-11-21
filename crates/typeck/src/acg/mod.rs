@@ -1372,6 +1372,8 @@ impl Cx<'_> {
                         continue;
                     };
                     // `let PAT = e else { .. };`: 合わなければ else の (発散する) ブロックへ
+                    // (the else block may match other scrutinees: the pattern binds from this one)
+                    let scrut_saved = (self.bk.scrut.clone(), self.bk.scrut_place.clone(), self.rg.scrut.clone());
                     if let Some(else_b) = els {
                         let else_blk = self.b.create_block();
                         self.pat_test(pat, place, else_blk)?;
@@ -1385,6 +1387,9 @@ impl Cx<'_> {
                         self.b.ins().trap(TrapCode::unwrap_user(2));
                         self.b.switch_to_block(cur);
                     }
+                    self.bk.scrut = scrut_saved.0;
+                    self.bk.scrut_place = scrut_saved.1;
+                    self.rg.scrut = scrut_saved.2;
                     let ob = self.owned_binds;
                     let pre = if is_place_expr(init) { self.moved_flag(init) } else { None };
                     self.bk_bind_begin();
