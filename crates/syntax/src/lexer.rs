@@ -178,6 +178,8 @@ pub fn split(src: &str) -> Result<Vec<SrcItem>, String> {
         };
     }
 
+    // (outer doc comments `///` / `/** */`: (start, end), looked at after the loop (E0585); only comments add to it)
+    let mut docs: Vec<(usize, usize)> = Vec::new();
     while i < n {
         let c = s[i];
         // 空白
@@ -188,13 +190,18 @@ pub fn split(src: &str) -> Result<Vec<SrcItem>, String> {
         }
         // コメント
         if c == b'/' && i + 1 < n && s[i + 1] == b'/' {
+            let st0 = i;
             while i < n && s[i] != b'\n' {
                 i += 1;
+            }
+            if s[st0..].starts_with(b"///") && !s[st0..].starts_with(b"////") {
+                docs.push((st0, i));
             }
             st.prev_ws = true;
             continue;
         }
         if c == b'/' && i + 1 < n && s[i + 1] == b'*' {
+            let st0 = i;
             let mut d = 0;
             while i < n {
                 if s[i] == b'/' && i + 1 < n && s[i + 1] == b'*' {
@@ -209,6 +216,9 @@ pub fn split(src: &str) -> Result<Vec<SrcItem>, String> {
                 } else {
                     i += 1;
                 }
+            }
+            if s[st0..].starts_with(b"/**") && !s[st0..].starts_with(b"/***") && !s[st0..].starts_with(b"/**/") {
+                docs.push((st0, i));
             }
             st.prev_ws = true;
             continue;
@@ -384,6 +394,24 @@ pub fn split(src: &str) -> Result<Vec<SrcItem>, String> {
                 idents,
                 kind,
             });
+        }
+    }
+    // (E0585: an outer doc comment right before `}` / `;` / `,` documents nothing)
+    for (d0, d1) in docs {
+        let mut j = d1;
+        while j < n && (s[j].is_ascii_whitespace() || (s[j] == b'/' && j + 1 < n && s[j + 1] == b'/')) {
+            if s[j] == b'/' {
+                while j < n && s[j] != b'\n' {
+                    j += 1;
+                }
+            } else {
+                j += 1;
+            }
+        }
+        if j < n && matches!(s[j], b'}' | b';' | b',') {
+            let line = s[..d0].iter().filter(|&&c| c == b'\n').count() + 1;
+            let col = d0 - s[..d0].iter().rposition(|&c| c == b'\n').map_or(0, |k| k + 1) + 1;
+            return Err(format!("{line}:{col}: found a documentation comment that doesn't document anything (E0585)"));
         }
     }
     if impl_header.is_some() {

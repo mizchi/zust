@@ -2179,6 +2179,7 @@ compile-fail	error-codes/E0532.rs
 compile-fail	error-codes/E0540.rs
 compile-fail	error-codes/E0559.rs
 compile-fail	error-codes/E0560.rs
+compile-fail	error-codes/E0585.rs
 compile-fail	error-codes/E0596.rs
 compile-fail	error-codes/E0599.rs
 compile-fail	error-codes/E0600.rs
@@ -4421,12 +4422,21 @@ compile-fail	parser/diff-markers/struct.rs
 compile-fail	parser/diff-markers/unclosed-delims-in-macro.rs
 compile-fail	parser/diff-markers/unclosed-delims.rs
 compile-fail	parser/do-not-suggest-semicolon-before-array.rs
+compile-fail	parser/doc-after-struct-field.rs
 compile-fail	parser/doc-before-attr.rs
 compile-fail	parser/doc-before-bad-variant.rs
+compile-fail	parser/doc-before-extern-rbrace.rs
+compile-fail	parser/doc-before-fn-rbrace.rs
+compile-fail	parser/doc-before-rbrace.rs
+compile-fail	parser/doc-before-semi.rs
+compile-fail	parser/doc-before-struct-rbrace-1.rs
+compile-fail	parser/doc-before-struct-rbrace-2.rs
 compile-fail	parser/doc-before-syntax-error.rs
 compile-fail	parser/doc-comment-after-missing-comma-issue-142311.rs
 check-pass	parser/doc-comment-in-generic.rs
+compile-fail	parser/doc-comment-in-stmt.rs
 run-pass	parser/doc-comment-parsing.rs
+compile-fail	parser/doc-inside-trait-item.rs
 compile-fail	parser/dotdotdot-expr.rs
 compile-fail	parser/dotdotdot-rest-pattern-suggestion-span.rs
 compile-fail	parser/duplicate-visibility.rs
@@ -4566,6 +4576,7 @@ compile-fail	parser/issues/issue-33262.rs
 compile-fail	parser/issues/issue-33413.rs
 compile-fail	parser/issues/issue-33418.rs
 compile-fail	parser/issues/issue-33455.rs
+compile-fail	parser/issues/issue-34222-1.rs
 compile-fail	parser/issues/issue-34255-1.rs
 compile-fail	parser/issues/issue-39616.rs
 compile-fail	parser/issues/issue-41155.rs
