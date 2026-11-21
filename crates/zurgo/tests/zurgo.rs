@@ -193,6 +193,27 @@ fn errors() {
     // (but metadata works)
     let (ok, out, err) = zurgo(&["metadata"], &m, &d.join("t"));
     assert!(ok && out.contains("\"proc-macro\""), "{err}");
+    // (a target name that is a path: it would put the executable outside the target directory)
+    sc.write(&[
+        ("q/Cargo.toml", "[package]\nname = \"q\"\nversion = \"0.1.0\"\nedition = \"2021\"\n[workspace]\n[[bin]]\nname = \"../escape\"\npath = \"src/main.rs\"\n"),
+        ("q/Cargo.lock", "version = 3\n\n[[package]]\nname = \"q\"\nversion = \"0.1.0\"\n"),
+        ("q/src/main.rs", "fn main() {}\n"),
+    ]);
+    let (ok, _, err) = zurgo(&["build"], &d.join("q/Cargo.toml"), &d.join("t"));
+    assert!(!ok && err.contains("binary name `../escape` is not allowed"), "{err}");
+    assert!(!d.join("t/zust/escape").exists() && !d.join("t/escape").exists());
+    // (a git dependency is not matched by crates.io's package of the same name and version)
+    let crates_io = "registry+https://github.com/rust-lang/crates.io-index";
+    sc.write(&[
+        ("g/Cargo.toml", "[package]\nname = \"g\"\nversion = \"0.1.0\"\nedition = \"2021\"\n[workspace]\n[dependencies]\nfnv = { git = \"https://example.com/fnv\" }\n"),
+        (
+            "g/Cargo.lock",
+            format!("version = 3\n\n[[package]]\nname = \"fnv\"\nversion = \"1.0.7\"\nsource = \"{crates_io}\"\n\n[[package]]\nname = \"g\"\nversion = \"0.1.0\"\ndependencies = [\"fnv\"]\n").as_str(),
+        ),
+        ("g/src/main.rs", "fn main() {}\n"),
+    ]);
+    let (ok, _, err) = zurgo(&["metadata"], &d.join("g/Cargo.toml"), &d.join("t"));
+    assert!(!ok && err.contains("Cargo.lock does not resolve `fnv`"), "{err}");
 }
 
 /// Workspace rules, against cargo: members from a glob and an explicit entry (one each), a path dependency inside the

@@ -327,7 +327,21 @@ fn pick(lock: &Lock, ldeps: &[LockDep], d: &Dep) -> Option<usize> {
             (Some(r), Some(v)) => r.matches(&v) || (d.path.is_some() && d.req == "*"),
             _ => true,
         };
-        v_ok && (d.path.is_some() == p.source.is_none() || d.path.is_none() && d.git.is_none() && p.source.is_none())
+        // (the entry comes from the source the dependency names: a path entry for a path; a git entry of that
+        //  repository for a git dependency; another registry's entry for `registry = ..`; crates.io's for the rest,
+        //  or a path entry that `[patch]` put there. A mismatch is no candidate, so the caller asks for a new lock)
+        let src_ok = match (&d.path, &d.git, &d.registry, p.source.as_deref()) {
+            (Some(_), _, _, s) => s.is_none(),
+            (None, Some(url), _, Some(s)) => {
+                let norm = |u: &str| u.trim_end_matches('/').trim_end_matches(".git").to_string();
+                s.strip_prefix("git+").and_then(|r| r.split(['?', '#']).next()).is_some_and(|r| norm(r) == norm(url))
+            }
+            (None, None, Some(_), Some(s)) => !lock::is_registry(s) && (s.starts_with("registry+") || s.starts_with("sparse+")),
+            (None, None, None, Some(s)) => lock::is_registry(s),
+            (None, None, None, None) => true,
+            (None, _, _, None) => false,
+        };
+        v_ok && src_ok
     };
     let fit: Vec<&usize> = cands.iter().filter(ok).collect();
     // (none fits: the lock is older than the manifest, and the caller says so)

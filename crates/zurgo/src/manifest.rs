@@ -178,6 +178,15 @@ pub struct Manifest {
 
 type R<T> = Result<T, String>;
 
+/// A package or target name, which zurgo uses as a file name: letters, digits, `-` and `_` only (cargo's rule for
+/// package names; it keeps a binary's executable and objects inside the target directory)
+fn safe_name(what: &str, n: &str) -> R<()> {
+    if n.is_empty() || !n.chars().all(|c| c.is_alphanumeric() || c == '-' || c == '_') {
+        return Err(format!("the {what} name `{n}` is not allowed: use letters, digits, `-` and `_`"));
+    }
+    Ok(())
+}
+
 pub fn read(path: &Path) -> R<Table> {
     let text = std::fs::read_to_string(path).map_err(|e| format!("{}: {e}", path.display()))?;
     toml::parse(&text).map_err(|e| format!("{}: {e}", path.display()))
@@ -307,6 +316,11 @@ fn package(t: &Table, p: &Table, dir: &Path, path: &Path, ws: Option<&Workspace>
                 bins.push(Target { name: n, kind: vec!["bin".into()], crate_types: vec!["bin".into()], path: x, edition: edition.clone(), required_features: vec![] });
             }
         }
+    }
+    // (the names become file names under the target directory: no path separators, `.` or `..`)
+    safe_name("package", &name)?;
+    for x in lib.iter().chain(&bins) {
+        safe_name(if x.kind.iter().any(|k| k == "bin") { "binary" } else { "library" }, &x.name)?;
     }
     let mut deps = vec![];
     let tables: [(DepKind, &[&str]); 3] =
