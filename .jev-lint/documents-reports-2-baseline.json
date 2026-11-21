@@ -1,6 +1,6 @@
 {
   "schema": "jev-lint-documents-1",
-  "snapshotDigest": "e8b0bafc1341c42f5aef58c1ca139b71618bc2f911f59d982406cb5c8ce5ffa7",
+  "snapshotDigest": "68f4e509fecadddcccf94324139e596a6bbe8cf6de95e90047bb9b3acc2f538f",
   "questionDigest": "209d6df378ccb747fcb0e821998fcd6105bc76638a88d22488d3b398d6a21595",
   "model": "jev-1.14.0",
   "snapshotChanged": false,
@@ -100,12 +100,12 @@
       "contextHash": "a068452334ef52150a1932e9d45207a4c156e3a5c60d69e061e986b1aa86d889",
       "judgment": {
         "choice": "supports",
-        "confidence": 0.99,
+        "confidence": 0.96,
         "probabilities": {
-          "supports": 0.99,
-          "contradicts": 0.01,
+          "supports": 0.97,
+          "contradicts": 0.02,
           "unrelated": 0,
-          "insufficient_context": 0
+          "insufficient_context": 0.01
         }
       }
     },
@@ -168,12 +168,12 @@
       "contextHash": "ecee8f597e8c6093bcea35ffd84dafe505685fb3c77901bd2a2a9e033883360c",
       "judgment": {
         "choice": "supports",
-        "confidence": 0.99,
+        "confidence": 0.97,
         "probabilities": {
-          "supports": 0.99,
+          "supports": 0.98,
           "contradicts": 0.01,
           "unrelated": 0,
-          "insufficient_context": 0
+          "insufficient_context": 0.01
         }
       }
     },
@@ -202,10 +202,10 @@
       "contextHash": "5b6ede2d00ec82893b1c63b36b593d1e9e7999236c2422416b8324666f265c93",
       "judgment": {
         "choice": "supports",
-        "confidence": 0.96,
+        "confidence": 0.99,
         "probabilities": {
-          "supports": 0.97,
-          "contradicts": 0.03,
+          "supports": 0.99,
+          "contradicts": 0.01,
           "unrelated": 0,
           "insufficient_context": 0
         }
@@ -236,10 +236,10 @@
       "contextHash": "68facf70966b576a1dde106a31fd37de8e21bda46e6439878b91e7bce57154b6",
       "judgment": {
         "choice": "supports",
-        "confidence": 0.99,
+        "confidence": 0.97,
         "probabilities": {
-          "supports": 0.99,
-          "contradicts": 0.01,
+          "supports": 0.98,
+          "contradicts": 0.02,
           "unrelated": 0,
           "insufficient_context": 0
         }
@@ -304,10 +304,10 @@
       "contextHash": "41c0a2541784f0e073e300bd96b1ad35979d31a7048a9c86dc0c9821eba76c55",
       "judgment": {
         "choice": "supports",
-        "confidence": 0.99,
+        "confidence": 1,
         "probabilities": {
-          "supports": 0.99,
-          "contradicts": 0.01,
+          "supports": 1,
+          "contradicts": 0,
           "unrelated": 0,
           "insufficient_context": 0
         }
@@ -644,10 +644,10 @@
       "contextHash": "1275e8de4d291bc21dd7f5b87a5196cba9cca33005a1ac6eca77fa3d0892971e",
       "judgment": {
         "choice": "supports",
-        "confidence": 0.96,
+        "confidence": 0.97,
         "probabilities": {
-          "supports": 0.97,
-          "contradicts": 0.03,
+          "supports": 0.98,
+          "contradicts": 0.02,
           "unrelated": 0,
           "insufficient_context": 0
         }
@@ -712,10 +712,10 @@
       "contextHash": "fee3dc6136c2d74a8f2b22992deee33ae5ead6cdbc19c240e51b7dcbe27e38cc",
       "judgment": {
         "choice": "supports",
-        "confidence": 0.96,
+        "confidence": 0.97,
         "probabilities": {
-          "supports": 0.97,
-          "contradicts": 0.02,
+          "supports": 0.98,
+          "contradicts": 0.01,
           "unrelated": 0,
           "insufficient_context": 0.01
         }
@@ -746,12 +746,12 @@
       "contextHash": "74cd923d61e00b7739f80b534b652a909070bb949bfb007a464579050da1d263",
       "judgment": {
         "choice": "supports",
-        "confidence": 0.97,
+        "confidence": 0.99,
         "probabilities": {
-          "supports": 0.98,
+          "supports": 0.99,
           "contradicts": 0.01,
           "unrelated": 0,
-          "insufficient_context": 0.01
+          "insufficient_context": 0
         }
       }
     },
@@ -780,12 +780,12 @@
       "contextHash": "54b56e94027819b91287b9766c4872faa76c4344146540b341b4389c6b8dd7ce",
       "judgment": {
         "choice": "supports",
-        "confidence": 0.91,
+        "confidence": 0.92,
         "probabilities": {
-          "supports": 0.93,
-          "contradicts": 0.06,
+          "supports": 0.94,
+          "contradicts": 0.04,
           "unrelated": 0,
-          "insufficient_context": 0.01
+          "insufficient_context": 0.02
         }
       }
     },
@@ -814,10 +814,10 @@
       "contextHash": "7438e0bb6ac3c01bf6beaa56051a35abf5a2f30ee56334c8cd754b996d6bd4e6",
       "judgment": {
         "choice": "supports",
-        "confidence": 0.85,
+        "confidence": 0.84,
         "probabilities": {
-          "supports": 0.89,
-          "contradicts": 0.1,
+          "supports": 0.88,
+          "contradicts": 0.11,
           "unrelated": 0,
           "insufficient_context": 0.01
         }
@@ -916,12 +916,12 @@
       "contextHash": "6ef3c783f7f2ee4aa85d450d7fc65f20f61a1aa01a222d8aeb9ddeda31a027f9",
       "judgment": {
         "choice": "supports",
-        "confidence": 0.79,
+        "confidence": 0.87,
         "probabilities": {
-          "supports": 0.84,
-          "contradicts": 0.05,
+          "supports": 0.9,
+          "contradicts": 0.06,
           "unrelated": 0,
-          "insufficient_context": 0.11
+          "insufficient_context": 0.04
         }
       }
     },
@@ -950,10 +950,10 @@
       "contextHash": "4df342055803f33b6195c27c167f6f86d7071a5337af51009058f12b67f5035e",
       "judgment": {
         "choice": "supports",
-        "confidence": 0.96,
+        "confidence": 0.99,
         "probabilities": {
-          "supports": 0.97,
-          "contradicts": 0.03,
+          "supports": 0.99,
+          "contradicts": 0.01,
           "unrelated": 0,
           "insufficient_context": 0
         }
@@ -984,12 +984,12 @@
       "contextHash": "262bb5dcd097b8cb7be1fb2545acff1e36bb67eb6c6b7603871f70e0250fd627",
       "judgment": {
         "choice": "supports",
-        "confidence": 0.63,
+        "confidence": 0.65,
         "probabilities": {
-          "supports": 0.72,
-          "contradicts": 0.26,
+          "supports": 0.74,
+          "contradicts": 0.25,
           "unrelated": 0,
-          "insufficient_context": 0.02
+          "insufficient_context": 0.01
         }
       }
     },
@@ -1018,12 +1018,12 @@
       "contextHash": "0b80accfa94c5b38ba9a5a907f337dfaa274c72bc632be2ff55655cef05112aa",
       "judgment": {
         "choice": "supports",
-        "confidence": 0.59,
+        "confidence": 0.63,
         "probabilities": {
-          "supports": 0.69,
-          "contradicts": 0.29,
+          "supports": 0.72,
+          "contradicts": 0.27,
           "unrelated": 0,
-          "insufficient_context": 0.02
+          "insufficient_context": 0.01
         }
       }
     },
@@ -1052,10 +1052,10 @@
       "contextHash": "bfaf4d56cd89f0d502d67729104d49b1f7a5d01e4a0434db45cecfa6c5d2c14a",
       "judgment": {
         "choice": "supports",
-        "confidence": 0.89,
+        "confidence": 0.91,
         "probabilities": {
-          "supports": 0.92,
-          "contradicts": 0.07,
+          "supports": 0.93,
+          "contradicts": 0.06,
           "unrelated": 0,
           "insufficient_context": 0.01
         }
@@ -1120,10 +1120,10 @@
       "contextHash": "bdae948e735bbc239b594e195dd432f3efabbcd09895e48688e599b130a79530",
       "judgment": {
         "choice": "supports",
-        "confidence": 0.81,
+        "confidence": 0.88,
         "probabilities": {
-          "supports": 0.86,
-          "contradicts": 0.13,
+          "supports": 0.91,
+          "contradicts": 0.08,
           "unrelated": 0,
           "insufficient_context": 0.01
         }
@@ -1154,10 +1154,10 @@
       "contextHash": "56aef8202ec18e7d916f99df3c3f62b2bb9580fd1fbf151d494787ff37e24afd",
       "judgment": {
         "choice": "supports",
-        "confidence": 0.84,
+        "confidence": 0.83,
         "probabilities": {
-          "supports": 0.88,
-          "contradicts": 0.11,
+          "supports": 0.87,
+          "contradicts": 0.12,
           "unrelated": 0,
           "insufficient_context": 0.01
         }
@@ -1171,29 +1171,29 @@
         "source": "docs_reports_2026-11-21-07-region-check-4.en",
         "path": "docs/reports/2026-11-21-07-region-check-4.md",
         "startLine": 1,
-        "endLine": 59,
-        "quote": "# Region (lifetime) checking, part 4: generic functions nothing calls (issue #1)\n\nDate: 2026-11-21\n\nPart 3 ([2026-11-21-06](2026-11-21-06-region-check-3.md)) was merged with #39. Its last section noted that `zustc\ncheck` checks a generic fn only for the instances requested of it, and that a generic fn nothing calls held the first\nerror of 120 of the 451 failing tests about lifetimes and borrows. This step checks those functions.\n\n## 1. What was added\n\n- **Placeholder instances:** at the end of the check, each generic fn of the program that no instance was requested\n  of is instantiated once more, with a placeholder for each type parameter (`Program::placeholder`).\n  - A placeholder is a struct with no fields named `T#`, a name no program's type has.\n  - It implements the traits its parameter's bounds name and the auto traits, and is `Copy` when the bounds say so.\n  - Left out: a trait's default methods, a closure's body, a dependency's fns.\n- **Only marker bounds:** only fns whose type parameters have marker bounds (`Copy`, `Sized`, `Send`, `Sync`,\n  `Unpin`) get a placeholder instance. A placeholder has no trait's methods. A fn bounded by more would most likely fail\n  its typeck, after the work of it.\n- **What is reported:** in this round a typeck error is not reported, as a placeholder cannot do all that its bounds\n  allow. The borrow and region checks' errors are reported.\n- **What the round follows:** the closures the bodies make, a few levels deep, but not other generic fns' instances.\n  `foo(p, |x| f(x))` in foo would never end, and those fns get placeholder instances of their own.\n- **Switching it off:** `ZUSTC_NO_PLACEHOLDERS=1` leaves the round out.\n\nFound on the way:\n\n- **`_` parameters:** two `_` parameters are now two locals for the region check (`_#k`). Before, the second hid the\n  first's implied bounds, so `fn foo<'a, 'b>(_: &'a &'b (), v: &'b u8, _: &()) -> &'a u8` was rejected.\n- **Fields not known:** a struct literal of a type whose fields are not known (of a placeholder's associated type) is\n  an error, not a panic.\n- **Calls into impls that write lifetimes:** a generic fn's instance calling the method of such an impl\n  (`impl Trait<'static> for ()`) is not followed. The generic body called the trait's method under its own bounds\n  (`(): Trait<'a>`), with the trait's signature, not the impl's.\n- **Review of #39 (minor):** block comments nest in the lifetime lints' scan. The count of a signature's input\n  lifetimes goes on past a type it does not know.\n\n## 2. Coverage\n\n(tests/ui compile-fail, rust-lang/rust 1.100.0)\n\n| | main (4735d9f) | this work |\n|---|---:|---:|\n| compile-fail passing (accidental ones not counted) | 4013 | 4029 (+16) |\n\n- **Lost:** no test that passed before fails now; run-pass and check-pass do not change.\n- **Now passing:** 16 tests, among them `borrowck/mut-borrow-in-loop.rs` (the implicit reborrow of part 3, in a method\n  of `impl<'a, T> FuncWrapper<'a, T>`) and `nll/issue-62007-assign-const-index.rs`.\n- **Wider:** with bounds of any trait, 17 pass. The marker-bound filter gives up one of them for the cost.\n\n## 3. KPIs\n\n(measured with `bench/kpi_track.py --dry-run --lsp` against main 4735d9f: in progress)\n\n## 4. Not covered yet\n\n- **Placeholder regions:** a placeholder has no region. `T: 'a` and the E0310 / E0309 tests need a type parameter's\n  region as a universal region, bounded by its `T: 'a` bounds.\n- **Bounds with methods:** a bound's methods and coercions of a placeholder to `dyn` are missing. They need the trait's\n  signatures, not an impl's.",
-        "contentHash": "e49f1df231c055eed33ef18c98f885d9ee606e510baa98059ace70e1e71a7cea"
+        "endLine": 75,
+        "quote": "# Region (lifetime) checking, part 4: generic functions nothing calls (issue #1)\n\nDate: 2026-11-21\n\nPart 3 ([2026-11-21-06](2026-11-21-06-region-check-3.md)) was merged with #39. Its last section noted that `zustc\ncheck` checks a generic fn only for the instances requested of it, and that a generic fn nothing calls held the first\nerror of 120 of the 451 failing tests about lifetimes and borrows. This step checks those functions.\n\n## 1. What was added\n\n- **Placeholder instances:** at the end of the check, each generic fn of the program that no instance was requested\n  of is instantiated once more, with a placeholder for each type parameter (`Program::placeholder`).\n  - A placeholder is a struct with no fields named `T#`, a name no program's type has.\n  - It implements the traits its parameter's bounds name and the auto traits, and is `Copy` when the bounds say so.\n  - Left out: a trait's default methods, a closure's body, a dependency's fns.\n- **Only marker bounds:** only fns whose type parameters have marker bounds (`Copy`, `Sized`, `Send`, `Sync`,\n  `Unpin`) get a placeholder instance. A placeholder has no trait's methods. A fn bounded by more would most likely fail\n  its typeck, after the work of it.\n- **What is reported:** in this round a typeck error is not reported, as a placeholder cannot do all that its bounds\n  allow. The borrow and region checks' errors are reported.\n- **What the round follows:** the closures the bodies make, a few levels deep, but not other generic fns' instances.\n  `foo(p, |x| f(x))` in foo would never end, and those fns get placeholder instances of their own.\n- **Switching it off:** `ZUSTC_NO_PLACEHOLDERS=1` leaves the round out.\n\nFound on the way:\n\n- **`_` parameters:** two `_` parameters are now two locals for the region check (`_#k`). Before, the second hid the\n  first's implied bounds, so `fn foo<'a, 'b>(_: &'a &'b (), v: &'b u8, _: &()) -> &'a u8` was rejected.\n- **Fields not known:** a struct literal of a type whose fields are not known (of a placeholder's associated type) is\n  an error, not a panic.\n- **Calls into impls that write lifetimes:** a generic fn's instance calling the method of such an impl\n  (`impl Trait<'static> for ()`) is not followed. The generic body called the trait's method under its own bounds\n  (`(): Trait<'a>`), with the trait's signature, not the impl's.\n- **Review of #39 (minor):** block comments nest in the lifetime lints' scan. The count of a signature's input\n  lifetimes goes on past a type it does not know.\n\n## 2. Coverage\n\n(tests/ui compile-fail, rust-lang/rust 1.100.0)\n\n| | main (4735d9f) | this work |\n|---|---:|---:|\n| compile-fail passing (accidental ones not counted) | 4013 | 4029 (+16) |\n\n- **Lost:** no test that passed before fails now; run-pass and check-pass do not change.\n- **Now passing:** 16 tests, among them `borrowck/mut-borrow-in-loop.rs` (the implicit reborrow of part 3, in a method\n  of `impl<'a, T> FuncWrapper<'a, T>`) and `nll/issue-62007-assign-const-index.rs`.\n- **Wider:** with bounds of any trait, 17 pass. The marker-bound filter gives up one of them for the cost.\n\n## 3. KPIs\n\n`bench/kpi_track.py --dry-run --lsp`, main (4735d9f) and this work, both measured here:\n\n| KPI | main (4735d9f) | this work (0d6779b) | change |\n|---|---:|---:|---:|\n| no-op build (M) | 0.707 | 0.705 | -0.28% |\n| edit one fn (M) | 544.801 | 544.981 | +0.03% |\n| check (M) | 3839.18 | 3839.71 | +0.01% |\n| cache (KiB) | 1902.8 | 1902.8 | ±0 |\n| LSP session (G) | 10.9211 | 10.9012 | -0.18% |\n| traits check (M) | 1184.16 | 1184.7 | +0.05% |\n| traits edit (M) | 61.643 | 61.636 | -0.01% |\n| crates no-op (M) | 9.943 | 9.939 | -0.04% |\n| crates edit (M) | 315.125 | 315.211 | +0.03% |\n| patterns check (M) | 712.262 | 711.917 | -0.05% |\n| patterns edit (M) | 260.513 | 260.82 | +0.12% |\n\nNo KPI moves past run-to-run noise. None of the KPI inputs has a generic fn nothing calls whose bounds are markers only. Of the patterns input's, the four that have one are bounded by a trait with methods, and no placeholder is made for them. Made, those four cost patterns check +0.45%, and that cost is why the filter is there.\n\n## 4. Not covered yet\n\n- **Placeholder regions:** a placeholder has no region. `T: 'a` and the E0310 / E0309 tests need a type parameter's\n  region as a universal region, bounded by its `T: 'a` bounds.\n- **Bounds with methods:** a bound's methods and coercions of a placeholder to `dyn` are missing. They need the trait's\n  signatures, not an impl's.",
+        "contentHash": "7f6150b504c51f3b05b011c5e25acf2c2486ea59bcb50bbfbffb4aaa6e07f3ce"
       },
       "target": {
         "source": "docs_reports_2026-11-21-07-region-check-4.ja",
         "path": "docs/ja/reports/2026-11-21-07-region-check-4.md",
         "startLine": 1,
-        "endLine": 59,
-        "quote": "# リージョン (ライフタイム) 検査、その 4: 何も呼ばないジェネリック関数 (issue #1)\n\n日付: 2026-11-21\n\nその 3 ([2026-11-21-06](2026-11-21-06-region-check-3.md)) は #39 でマージした。その最後の章に書いたとおり、`zustc check`\nはジェネリック関数を、要求されたインスタンスについてだけ検査する。ライフタイムと借用の、落ちている 451 のテストの\nうち 120 は、最初のエラーが何も呼ばないジェネリック関数の中にあった。この段は、それらの関数を検査する。\n\n## 1. 加えたもの\n\n- **代わりの型のインスタンス:** 検査の最後に、どのインスタンスも要求されなかったプログラムのジェネリック関数を、もう 1\n  回インスタンスにする。型パラメータごとに代わりの型を入れる (`Program::placeholder`)。\n  - 代わりの型は、フィールドのない struct で、名前は `T#` (プログラムの型が持たない名前)。\n  - パラメータの境界が名指すトレイトと auto トレイトを実装し、境界がそう言えば `Copy`。\n  - 除くもの: トレイトのデフォルトメソッド、クロージャの本体、依存するクレートの関数。\n- **マーカーの境界だけ:** 型パラメータの境界がマーカーのトレイト (`Copy`、`Sized`、`Send`、`Sync`、`Unpin`) だけの関数\n  に限る。代わりの型はトレイトのメソッドを持たない。それ以上の境界を持つ関数は、型検査の作業をしたあげくに、ほぼ\n  失敗するから。\n- **報告するもの:** この巡では、型検査のエラーは報告しない (代わりの型は、境界が許すことのすべてはできない)。借用検査と\n  リージョン検査のエラーは報告する。\n- **この巡が辿るもの:** 本体が作るクロージャを数段まで辿る。ほかのジェネリック関数のインスタンスは辿らない。foo の中の\n  `foo(p, |x| f(x))` は終わらないし、そうした関数は、自分の代わりの型のインスタンスを持つ。\n- **切り方:** `ZUSTC_NO_PLACEHOLDERS=1` で、この巡を除く。\n\n途中で見つけたもの:\n\n- **`_` の引数:** `_` の引数が 2 つあれば、リージョン検査にとって 2 つのローカル (`_#k`) になった。以前は 2 つ目が 1 つ\n  目の導く境界を隠し、`fn foo<'a, 'b>(_: &'a &'b (), v: &'b u8, _: &()) -> &'a u8` を拒否していた。\n- **フィールドが分からない型:** フィールドが分からない型 (代わりの型の関連型) の struct リテラルは、パニックでなく\n  エラーにした。\n- **ライフタイムを書く impl のメソッド:** ジェネリック関数のインスタンスが、トレイトにライフタイムを書く impl\n  (`impl Trait<'static> for ()`) のメソッドを呼ぶとき、その呼び出しは辿らない。ジェネリックな本体は、自分の境界\n  (`(): Trait<'a>`) のもとで、impl ではなくトレイトのシグネチャでそのメソッドを呼んだから。\n- **#39 のレビュー (minor):** ライフタイムの lint の走査で、ブロックコメントを入れ子にした。シグネチャの入力の\n  ライフタイムは、分からない型の後も数える。\n\n## 2. カバー率\n\n(tests/ui の compile-fail、rust-lang/rust 1.100.0)\n\n| | main (4735d9f) | この作業 |\n|---|---:|---:|\n| 通る compile-fail (偶然の通過は数えない) | 4013 | 4029 (+16) |\n\n- **失ったもの:** 前に通っていたテストで、いま通らないものはない。run-pass と check-pass は変わらない。\n- **通るようになったもの:** 16 件。その中には `borrowck/mut-borrow-in-loop.rs` (その 3 の暗黙の再借用。\n  `impl<'a, T> FuncWrapper<'a, T>` のメソッドの中) と `nll/issue-62007-assign-const-index.rs` がある。\n- **境界を広げた場合:** どんなトレイトの境界も通すと 17 件通る。マーカーの境界に絞ったので、コストのために 1 件を\n  あきらめた。\n\n## 3. KPI\n\n(`bench/kpi_track.py --dry-run --lsp` で main 4735d9f と比べる: 計測中)\n\n## 4. まだ扱わないもの\n\n- **代わりの型のリージョン:** 代わりの型はリージョンを持たない。`T: 'a` と E0310 / E0309 のテストには、型パラメータの\n  リージョンを universal なリージョンとして扱い、`T: 'a` の境界で縛ることが要る。\n- **メソッドを持つ境界:** 境界のメソッドと、代わりの型の `dyn` への変換がない。impl ではなくトレイトのシグネチャが要る。",
-        "contentHash": "6c51ea7db322afb907f8dd06e3aa7567fb2625a3df8ed09762f6d72186b60975"
+        "endLine": 75,
+        "quote": "# リージョン (ライフタイム) 検査、その 4: 何も呼ばないジェネリック関数 (issue #1)\n\n日付: 2026-11-21\n\nその 3 ([2026-11-21-06](2026-11-21-06-region-check-3.md)) は #39 でマージした。その最後の章に書いたとおり、`zustc check`\nはジェネリック関数を、要求されたインスタンスについてだけ検査する。ライフタイムと借用の、落ちている 451 のテストの\nうち 120 は、最初のエラーが何も呼ばないジェネリック関数の中にあった。この段は、それらの関数を検査する。\n\n## 1. 加えたもの\n\n- **代わりの型のインスタンス:** 検査の最後に、どのインスタンスも要求されなかったプログラムのジェネリック関数を、もう 1\n  回インスタンスにする。型パラメータごとに代わりの型を入れる (`Program::placeholder`)。\n  - 代わりの型は、フィールドのない struct で、名前は `T#` (プログラムの型が持たない名前)。\n  - パラメータの境界が名指すトレイトと auto トレイトを実装し、境界がそう言えば `Copy`。\n  - 除くもの: トレイトのデフォルトメソッド、クロージャの本体、依存するクレートの関数。\n- **マーカーの境界だけ:** 型パラメータの境界がマーカーのトレイト (`Copy`、`Sized`、`Send`、`Sync`、`Unpin`) だけの関数\n  に限る。代わりの型はトレイトのメソッドを持たない。それ以上の境界を持つ関数は、型検査の作業をしたあげくに、ほぼ\n  失敗するから。\n- **報告するもの:** この巡では、型検査のエラーは報告しない (代わりの型は、境界が許すことのすべてはできない)。借用検査と\n  リージョン検査のエラーは報告する。\n- **この巡が辿るもの:** 本体が作るクロージャを数段まで辿る。ほかのジェネリック関数のインスタンスは辿らない。foo の中の\n  `foo(p, |x| f(x))` は終わらないし、そうした関数は、自分の代わりの型のインスタンスを持つ。\n- **切り方:** `ZUSTC_NO_PLACEHOLDERS=1` で、この巡を除く。\n\n途中で見つけたもの:\n\n- **`_` の引数:** `_` の引数が 2 つあれば、リージョン検査にとって 2 つのローカル (`_#k`) になった。以前は 2 つ目が 1 つ\n  目の導く境界を隠し、`fn foo<'a, 'b>(_: &'a &'b (), v: &'b u8, _: &()) -> &'a u8` を拒否していた。\n- **フィールドが分からない型:** フィールドが分からない型 (代わりの型の関連型) の struct リテラルは、パニックでなく\n  エラーにした。\n- **ライフタイムを書く impl のメソッド:** ジェネリック関数のインスタンスが、トレイトにライフタイムを書く impl\n  (`impl Trait<'static> for ()`) のメソッドを呼ぶとき、その呼び出しは辿らない。ジェネリックな本体は、自分の境界\n  (`(): Trait<'a>`) のもとで、impl ではなくトレイトのシグネチャでそのメソッドを呼んだから。\n- **#39 のレビュー (minor):** ライフタイムの lint の走査で、ブロックコメントを入れ子にした。シグネチャの入力の\n  ライフタイムは、分からない型の後も数える。\n\n## 2. カバー率\n\n(tests/ui の compile-fail、rust-lang/rust 1.100.0)\n\n| | main (4735d9f) | この作業 |\n|---|---:|---:|\n| 通る compile-fail (偶然の通過は数えない) | 4013 | 4029 (+16) |\n\n- **失ったもの:** 前に通っていたテストで、いま通らないものはない。run-pass と check-pass は変わらない。\n- **通るようになったもの:** 16 件。その中には `borrowck/mut-borrow-in-loop.rs` (その 3 の暗黙の再借用。\n  `impl<'a, T> FuncWrapper<'a, T>` のメソッドの中) と `nll/issue-62007-assign-const-index.rs` がある。\n- **境界を広げた場合:** どんなトレイトの境界も通すと 17 件通る。マーカーの境界に絞ったので、コストのために 1 件を\n  あきらめた。\n\n## 3. KPI\n\n`bench/kpi_track.py --dry-run --lsp` で、main (4735d9f) とこの作業を、どちらもここで測った:\n\n| KPI | main (4735d9f) | この作業 (0d6779b) | 変化 |\n|---|---:|---:|---:|\n| no-op build (M) | 0.707 | 0.705 | -0.28% |\n| edit one fn (M) | 544.801 | 544.981 | +0.03% |\n| check (M) | 3839.18 | 3839.71 | +0.01% |\n| cache (KiB) | 1902.8 | 1902.8 | ±0 |\n| LSP session (G) | 10.9211 | 10.9012 | -0.18% |\n| traits check (M) | 1184.16 | 1184.7 | +0.05% |\n| traits edit (M) | 61.643 | 61.636 | -0.01% |\n| crates no-op (M) | 9.943 | 9.939 | -0.04% |\n| crates edit (M) | 315.125 | 315.211 | +0.03% |\n| patterns check (M) | 712.262 | 711.917 | -0.05% |\n| patterns edit (M) | 260.513 | 260.82 | +0.12% |\n\nどの KPI も、実行ごとの揺れを超えて動かない。KPI の入力には、境界がマーカーだけの、何も呼ばないジェネリック関数がない。patterns の入力にはそうした関数が 4 つあるが、どれもメソッドを持つトレイトで縛られているので、代わりの型を作らない。作れば patterns check は +0.45% になる。絞り込みはそのためにある。\n\n## 4. まだ扱わないもの\n\n- **代わりの型のリージョン:** 代わりの型はリージョンを持たない。`T: 'a` と E0310 / E0309 のテストには、型パラメータの\n  リージョンを universal なリージョンとして扱い、`T: 'a` の境界で縛ることが要る。\n- **メソッドを持つ境界:** 境界のメソッドと、代わりの型の `dyn` への変換がない。impl ではなくトレイトのシグネチャが要る。",
+        "contentHash": "7e4015db91ce56b3b8e629519180e446aadd58ea73864309e19ed9d0a95cd3b8"
       },
       "context": [],
-      "candidateId": "51fb7fffa3982fa642eef8c61210b183b1709d7d5a839db7cadb7330153619a2",
-      "contextHash": "51dd14690fb2e592d8d5733a541482998feb0298511ad48e8167c5a359ea87a1",
+      "candidateId": "a795ba3e5187d5f38c33750566d3e99ef489bc4f5d266beeca97a400f776c343",
+      "contextHash": "74e65e68c1b778bfced01be26cec0dab66d60dd32d09c465681c7178583e7e1b",
       "judgment": {
         "choice": "supports",
-        "confidence": 0.96,
+        "confidence": 0.99,
         "probabilities": {
-          "supports": 0.97,
-          "contradicts": 0.02,
+          "supports": 0.99,
+          "contradicts": 0.01,
           "unrelated": 0,
-          "insufficient_context": 0.01
+          "insufficient_context": 0
         }
       }
     }
@@ -1211,8 +1211,8 @@
   },
   "usage": {
     "requests": 35,
-    "inputTokens": 191494,
-    "usd": 0.008042748
+    "inputTokens": 192499,
+    "usd": 0.008084958000000001
   },
   "errors": []
 }
