@@ -3215,6 +3215,14 @@ impl Program {
                 }
                 // `Box<T>` はポインタなので T のレイアウトは要らない
                 TySyn::App(n, _) if n == "Box" && !self.struct_index.contains_key(&n) => {}
+                // (`C::Assoc<Self>` / `type MaybeBox<T> = <T as A<T, Box<T>>>::B;`: a projection, whose type is the
+                // impl's: whether it holds its arguments by value is not known here)
+                // (`A::Allocated<Self>` arrives as `Allocated<..>`: a name that is no struct and no alias is such an
+                // associated type)
+                TySyn::App(n, _)
+                    if n.contains("::")
+                        || (!self.struct_index.contains_key(&n) && !self.aliases.contains_key(&n))
+                        || self.aliases.get(&n).is_some_and(|a| syn_has_assoc(&a.1)) => {}
                 TySyn::App(n, args) => {
                     // 型引数のうち、その型が値として持つもの (`Vec<T>` の T はポインタの先なので要らない)
                     let mut by_value = vec![true; args.len()];
@@ -3789,6 +3797,17 @@ fn syn_unify(a: &TySyn, ga: &[String], b: &TySyn, gb: &[String], sub: &mut Vec<(
 }
 
 /// t names a generic type (`Vec<u8>`) or an alias (one may stand for one)
+/// t names an associated type (`T::Item`, `<T as A>::B`) somewhere
+fn syn_has_assoc(t: &TySyn) -> bool {
+    match t {
+        TySyn::Assoc(..) => true,
+        TySyn::App(n, a) => n.contains("::") || a.iter().any(syn_has_assoc),
+        TySyn::Ref(_, i) | TySyn::Ptr(_, i) | TySyn::Slice(i) | TySyn::Array(i, _) => syn_has_assoc(i),
+        TySyn::Tuple(a) | TySyn::FnPtr(a) => a.iter().any(syn_has_assoc),
+        _ => false,
+    }
+}
+
 fn syn_has_app(t: &TySyn, aliases: &FxMap<String, (Vec<String>, TySyn)>) -> bool {
     match t {
         TySyn::App(..) | TySyn::Dyn(_) => true,
