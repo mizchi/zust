@@ -2285,12 +2285,22 @@ impl Program {
 
     /// 配列の長さに使う const (要約の const 表から整数の定数式として評価する)
     fn const_usize(&self, name: &str) -> R<u64> {
-        // (`<Foo as Bar>::SIZE`: the trait's under its qualified name, else the only `Foo::SIZE`)
-        if let Some((base, rest)) = name.split_once(" as ") {
+        // (`<Foo as Bar>::SIZE`: the trait's under its qualified name, else the only `Foo::SIZE`; an expression with a
+        // cast in it, `(1 as usize) + Foo::SIZE`, is not one)
+        let word = |s: &str| !s.is_empty() && s.bytes().all(|c| c.is_ascii_alphanumeric() || c == b'_');
+        if let Some((base, rest)) = name.split_once(" as ").filter(|(b, r)| word(b) && r.split("::").all(word) && r.contains("::")) {
             if !self.const_index.contains_key(name) {
-                if let Some((_, last)) = rest.rsplit_once("::") {
-                    return self.const_usize(&format!("{base}::{last}"));
+                // (`type Alias = Foo;`: the impl's under `Foo`)
+                let base = match self.aliases.get(base) {
+                    Some((g, TySyn::Named(n))) if g.is_empty() => n.as_str(),
+                    _ => base,
+                };
+                let (tr, last) = rest.rsplit_once("::").unwrap_or_default();
+                let q = format!("{base} as {tr}::{last}");
+                if self.const_index.contains_key(&q) {
+                    return self.const_usize(&q);
                 }
+                return self.const_usize(&format!("{base}::{last}"));
             }
         }
         // (const ジェネリクスの引数の式 `{ A - 16 }` は式のテキストで来る)
