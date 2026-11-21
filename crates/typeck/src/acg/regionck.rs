@@ -1423,8 +1423,11 @@ impl Cx<'_> {
         inputs.dedup();
         let one = if inputs.len() == 1 { Some(inputs[0]) } else { None };
         let n = sig0.params.len();
-        let rtr = rg.instantiate(prog, sig0.ret, codes(n), &lts, &targs, &mut |me| match (prelude || (other_self && self_r.is_none()), self_r.or(one)) {
-            (false, Some(v)) => v,
+        // (the prelude writes no lifetimes: a method of it taking `&self` returns a borrow of self, as std's do;
+        // what else its results borrow is not known)
+        let rtr = rg.instantiate(prog, sig0.ret, codes(n), &lts, &targs, &mut |me| match (prelude, other_self && self_r.is_none(), self_r, one) {
+            (true, _, Some(v), _) => v,
+            (false, false, Some(v), _) | (false, false, None, Some(v)) => v,
             _ => me.var(),
         });
         if let Some(rtr) = rtr {
