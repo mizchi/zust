@@ -470,7 +470,7 @@ the measured numbers. The [reports](docs/reports/) explain each step.
   check +0.08%, LSP ±0 ([report](docs/reports/2026-11-21-05-region-check-2.md)). Part 3 (closures, loans that outlive
   the fn, lints), merged against main 68b7497: patterns check +0.60%, traits check +0.30%, check +0.33%
   ([report](docs/reports/2026-11-21-06-region-check-3.md)). Part 4 (generic fns nothing calls, with placeholder
-  types): every KPI within ±0.12% ([report](docs/reports/2026-11-21-07-region-check-4.md))
+  types): every KPI within run-to-run noise ([report](docs/reports/2026-11-21-07-region-check-4.md))
 - [ ] coherence and bounds of blanket impls: `check` time, LSP
 - [ ] real async (state machines, `poll`, an executor): build time, binary size
 - [ ] unwinding (landing pads): build time, binary size

@@ -1089,6 +1089,9 @@ fn uncalled_generic_fns() {
     assert!(d.len() == 1 && d[0].0 == 7 && d[0].1.contains("more than once"), "{d:?}");
     let d = check("fn baz<'a, 'b, T>(x: &mut Vec<&'a T>, y: &T) {\n    x.push(y);\n}\nfn main() {}\n");
     assert!(d.len() == 1 && d[0].0 == 2 && d[0].1.contains("lifetime may not live long enough"), "{d:?}");
+    // (a generic fn's call of a concrete impl's method whose trait declares 'static too is followed)
+    let d = check("struct S;\ntrait Tr {\n    fn take(x: &'static u8);\n}\nimpl Tr for S {\n    fn take(_: &'static u8) {}\n}\nfn f<T>(x: &u8) {\n    S::take(x);\n}\nfn main() {\n    let n = 0u8;\n    f::<u8>(&n);\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 9, "{d:?}");
     // (accepted: a bound's method, a Copy bound, a recursive call through a closure, a trait's impl with 'static)
     assert_eq!(
         check("trait Tr {\n    fn get(&self) -> u8;\n}\nfn a<T: Tr>(x: &T) -> u8 {\n    x.get()\n}\nfn b<T: Copy>(x: T) -> (T, T) {\n    (x, x)\n}\nfn c<F: FnMut(u8)>(n: u8, mut f: F) {\n    if n > 0 {\n        c(n - 1, |x| f(x))\n    }\n}\nfn d<'a, 'b, T>(_: &'a &'b (), v: &'b T, _: &()) -> &'a T {\n    v\n}\nfn main() {}\n"),

@@ -2841,7 +2841,8 @@ fn placeholder_wave(a: &Analysis, insts: &Mutex<Insts>) -> Vec<u32> {
         if !sig.is_generic() || !sig.has_body || sig.trait_of.is_some() || made.contains(&(id as u32)) || p.closures.contains_key(&(id as u32)) {
             continue;
         }
-        if !p.item_of[id].is_some_and(|ii| ii < p.prelude_from) || a.is_ext(id as u32) {
+        // (not a dependency's: `is_ext` knows only concrete fns, the item's flag tells)
+        if !p.item_of[id].is_some_and(|ii| ii < p.prelude_from && !a.ext_items.get(ii as usize).copied().unwrap_or(false)) {
             continue;
         }
         // (a placeholder has no trait's methods: a fn whose type parameters are bounded by more than marker traits
