@@ -270,10 +270,24 @@ console.log(m.unwrap_or({ TAG: "Some", _0: 4 }, 0), m.unwrap_or({ TAG: "None" },
 console.log(m.shadow(), m.only("One"), m.range_end_once(), m.prec(-1, 2, 3));
 console.log(m.add_all([1, 2]).join(","), m.push_v([1, 2], 3).join(","));
 console.log(m.shadow_fn(), m.prec_str(3), m.push_zs([1], 2).join(","), m.re({ value: 5 }));
+console.log(m.zs_inj(5, 2));
 "#,
     );
-    assert_eq!(out, "4 9\n12 1 3 9\n2,3 1,2,3\n7 6 1,2 5\n");
+    assert_eq!(out, "4 9\n12 1 3 9\n2,3 1,2,3\n7 6 1,2 5\n3\n");
     let dts = std::fs::read_to_string(d.join("regress.d.ts")).unwrap();
     assert!(dts.contains("import type { ReactElement as $ReactElement } from \"react\";"), "{dts}");
     assert!(dts.contains("export interface ReactElement {"), "{dts}");
+}
+
+/// A `.d.ts` without a Jsx type imports no ReactElement, even when a name in it contains `$ReactElement`
+/// (a type parameter named ReactElement makes the specialization `f$i32$ReactElement`)
+#[test]
+fn no_jsx_no_react_import() {
+    let d = out_dir("no_jsx");
+    let src = d.join("nojsx.zsc");
+    std::fs::write(&src, "pub fn f<T: Num, ReactElement>(x: T) -> T { x }\npub fn g(x: i32) -> i32 { f(x) }\n").unwrap();
+    let o = zsc(&src, &d, &[]);
+    assert!(o.status.success(), "zsc failed:\n{}", String::from_utf8_lossy(&o.stderr));
+    let dts = std::fs::read_to_string(d.join("nojsx.d.ts")).unwrap();
+    assert!(!dts.contains("import type"), "{dts}");
 }

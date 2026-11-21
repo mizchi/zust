@@ -74,3 +74,9 @@ pub fn prec_str(z: f64) -> f64 {
 // a user type named like React's
 type ReactElement = { value: i32 }
 pub fn re(r: ReactElement) -> i32 { r.value }
+
+// source names that differ only by the escape the lowering adds (the mapping stays injective)
+@wasm pub fn zs_inj(__zs_x: i32, u__zs_x: i32) -> i32 {
+  let uu__zs_y = __zs_x - u__zs_x;
+  uu__zs_y
+}
