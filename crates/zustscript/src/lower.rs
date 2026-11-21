@@ -29,8 +29,16 @@ const RUST_KW: &[&str] = &[
     "where", "while", "yield",
 ];
 
+/// A source name in Rust: keywords get a `_`, and names in the generated `__zs` namespace are moved out of it, so
+/// no source name can meet a temporary the lowering makes
 fn local(n: &str) -> String {
-    if RUST_KW.contains(&n) { format!("{n}_") } else { n.to_string() }
+    if RUST_KW.contains(&n) {
+        format!("{n}_")
+    } else if n.starts_with("__zs") {
+        format!("u{n}")
+    } else {
+        n.to_string()
+    }
 }
 
 /// The Rust name of an instance: `zs_sum__f64`

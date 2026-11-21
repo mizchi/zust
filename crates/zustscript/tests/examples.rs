@@ -269,9 +269,11 @@ const m = await import('./regress.js');
 console.log(m.unwrap_or({ TAG: "Some", _0: 4 }, 0), m.unwrap_or({ TAG: "None" }, 9));
 console.log(m.shadow(), m.only("One"), m.range_end_once(), m.prec(-1, 2, 3));
 console.log(m.add_all([1, 2]).join(","), m.push_v([1, 2], 3).join(","));
+console.log(m.shadow_fn(), m.prec_str(3), m.push_zs([1], 2).join(","), m.re({ value: 5 }));
 "#,
     );
-    assert_eq!(out, "4 9\n12 1 3 9\n2,3 1,2,3\n");
+    assert_eq!(out, "4 9\n12 1 3 9\n2,3 1,2,3\n7 6 1,2 5\n");
     let dts = std::fs::read_to_string(d.join("regress.d.ts")).unwrap();
-    assert!(dts.contains("import type { ReactElement } from \"react\";"), "{dts}");
+    assert!(dts.contains("import type { ReactElement as $ReactElement } from \"react\";"), "{dts}");
+    assert!(dts.contains("export interface ReactElement {"), "{dts}");
 }

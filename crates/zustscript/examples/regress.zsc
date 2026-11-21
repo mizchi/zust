@@ -52,3 +52,25 @@ pub fn add_all(xs: Array<i32>) -> Array<i32> {
 
 // a record with a Jsx field: the .d.ts imports ReactElement
 pub fn view_of(v: View) -> i32 { 1 }
+
+// a local named like a top-level function, in a flattened block (review of 248aa0d)
+fn value() -> i32 { 7 }
+pub fn shadow_fn() -> i32 {
+  { let value = 1; };
+  value()
+}
+
+// parentheses inside strings do not make a sum look like one call
+fn n(s: String) -> f64 { 1.0 }
+pub fn prec_str(z: f64) -> f64 {
+  (n("(") + n(")")) * z
+}
+
+// a source name in the lowering's temporary namespace
+@wasm pub fn push_zs(xs: Array<i32>, __zs_v: i32) -> Array<i32> {
+  xs.push(__zs_v)
+}
+
+// a user type named like React's
+type ReactElement = { value: i32 }
+pub fn re(r: ReactElement) -> i32 { r.value }
