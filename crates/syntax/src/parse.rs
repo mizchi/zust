@@ -1778,6 +1778,29 @@ impl Parser {
         Ok(l)
     }
 
+    /// The rest of a binary expression whose first operand is l (casts of l first)
+    #[cold]
+    #[inline(never)]
+    fn bin_continue(&mut self, mut l: Expr, start: Pos) -> R<Expr> {
+        while self.is_ident("as") {
+            self.i += 1;
+            let t = self.ty_no_bounds()?;
+            l = Expr::Cast(Box::new(l), Box::new(t));
+        }
+        loop {
+            let Some(op) = self.bin_op() else { break };
+            let p = bin_prec(&op);
+            if p == 0 {
+                break;
+            }
+            let at = self.pos();
+            self.i += op.len();
+            let r = self.bin_expr(p, true)?;
+            l = Expr::Binary(op, Box::new(l), Box::new(r), Span { start, at });
+        }
+        Ok(l)
+    }
+
     fn cast_expr(&mut self, ss: bool) -> R<Expr> {
         let mut e = self.unary_expr(ss)?;
         while self.is_ident("as") {
@@ -2423,6 +2446,9 @@ impl Parser {
                 return Ok(Stmt::Expr(e, semi));
             }
             let e = self.postfix_rest(e, start)?;
+            // (after the postfix part it is no longer block-like: `unsafe { a.get_unchecked(i) }.shr(n) & 1 != 0`
+            //  goes on through casts and binary operators, as in rustc)
+            let e = self.bin_continue(e, start)?;
             // (`{ x }.a = 1;` / `{ t }.0 += 1;`: an assignment to the place)
             let e = if self.tok(0).is_some_and(|t| t.kind == TokKind::Punct && t.text != ";") { self.place_assign(e, start)? } else { e };
             let semi = self.eat_punct(";");

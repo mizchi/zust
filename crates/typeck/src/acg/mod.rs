@@ -1945,6 +1945,12 @@ impl Cx<'_> {
                         _ => None,
                     };
                 }
+                // (`unsafe { a.get_unchecked(i) }.wrapping_shr(..)`: the element's reference)
+                if let Ty::Array(el, _) | Ty::Slice(el) = t {
+                    if name == "get_unchecked" || name == "get_unchecked_mut" {
+                        return Some(Ty::Ref(name.ends_with("_mut"), el));
+                    }
+                }
                 let Ty::Struct(sid) = t else { return None };
                 let id = self.prog.method(sid, name).or_else(|| self.prog.default_method(sid, name))?;
                 let sig = &self.prog.sigs[id as usize];

@@ -92,6 +92,12 @@ error of each failing crate. Details and the order of the work: [docs/reports/20
   serde_core 1.0.229 (`mod x;` inside a `macro_rules!` body: rustc finds the file where the macro is expanded, zustc
   beside the macro's own file). Their build scripts compile with rustc only (`env::vars()`, `Command` with an
   `OsString`, `Output` and other std gaps).
+- wasm-bindgen-shared 0.2.130 (W0 of [#38](https://github.com/mizchi/zust/issues/38)), built for x86-64 for now: its
+  build script compiles with zustc and runs, and unicode-ident builds. The crate stops on:
+  - `alloc::borrow::Cow::Borrowed(..)`: a value through an `alloc::` path is not found (`std::` works);
+  - `Cow::Borrowed(s)` as a `Cow<'_, str>`: "type annotations needed", also with the type written out.
+- `s.as_ref()` with `s: &T`, `T: AsRef<str>` and `T = &str` is "cannot index into a value of type `str`"; inside a
+  closure (`.map(|x| x.as_ref())`) its return type is not inferred.
 - async is erased: an `async fn` runs when called and returns its value. Needs a state-machine lowering, `Pin`,
   `Waker` / `Context`.
 - wasm-bindgen's ABI: 32-bit pointers and `usize` on wasm32, imports from JS, exports called after `main`, its custom

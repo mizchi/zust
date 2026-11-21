@@ -1748,7 +1748,6 @@ check-pass	consts/min_const_fn/address_of_const.rs
 check-pass	consts/min_const_fn/allow_raw_ptr_dereference_const_fn.rs
 check-pass	consts/min_const_fn/cast_fn.rs
 compile-fail	consts/min_const_fn/cmp_fn_pointers.rs
-compile-fail	consts/min_const_fn/min_const_fn.rs
 check-pass	consts/min_const_fn/min_const_fn_dyn.rs
 compile-fail	consts/missing_assoc_const_type.rs
 compile-fail	consts/missing_assoc_const_type2.rs
@@ -2895,6 +2894,7 @@ check-pass	impl-trait/transmute/in-defining-scope.rs
 check-pass	impl-trait/transmute/outside-of-defining-scope.rs
 run-pass	impl-trait/universal_hrtb_anon.rs
 run-pass	impl-trait/universal_hrtb_named.rs
+run-pass	impl-trait/universal_in_adt_in_parameters.rs
 run-pass	impl-trait/universal_in_trait_defn_parameters.rs
 run-pass	impl-trait/universal_multiple_bounds.rs
 check-pass	impl-trait/wf-eval-order.rs
@@ -3090,6 +3090,7 @@ compile-fail	inference/need_type_info/expr-struct-type-relative.rs
 compile-fail	inference/need_type_info/infer-var-for-self-param.rs
 compile-fail	inference/need_type_info/issue-107745-avoid-expr-from-macro-expansion.rs
 compile-fail	inference/need_type_info/issue-109905.rs
+compile-fail	inference/need_type_info/issue-113264-incorrect-impl-trait-in-path-suggestion.rs
 compile-fail	inference/need_type_info/single-const-generic-suggestion.rs
 compile-fail	inference/need_type_info/single-type-generic-suggestion.rs
 compile-fail	inference/need_type_info/type-alias-indirect.rs
