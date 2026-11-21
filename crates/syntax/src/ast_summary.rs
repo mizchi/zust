@@ -604,7 +604,12 @@ fn parse_sig(sig: &PSig, is_extern: bool, is_main: bool, owner: Option<&Owner>) 
                 if lifetime_positions(r).0 > 0 {
                     let inputs: usize = sig.params.iter().map(|(_, t)| lifetime_positions(t).1).sum();
                     if inputs != 1 {
-                        return err("missing lifetime specifier (E0106)");
+                        // (at the result's type)
+                        let m = "missing lifetime specifier (E0106)";
+                        return Err(match crate::wf::pos_of(r) {
+                            Some(p) => format!("{}:{}: {m}", p.line, p.col + 1),
+                            None => m.to_string(),
+                        });
                     }
                 }
             }
@@ -1701,6 +1706,11 @@ pub fn summarize(item: &Item, owner: Option<&Owner>) -> R<Summary> {
                     }
                 }
             }
+            // (an associated type's value elides no lifetime: `type Output = &i32;` (E0106), `&'_ i32` (E0637); the
+            // program's, not the prelude's, which writes no lifetimes: the driver reports it of the program's items)
+            if !ow.is_trait && lifetime_positions(t).0 > 0 {
+                sm.adt_err = Some(if format!("{t:?}").contains("\"'_\"") { "`'_` cannot be used here (E0637)" } else { "missing lifetime in associated type (E0106)" }.to_string());
+            }
             sm.assocs.push(AssocSyn {
                 name: n.clone(),
                 self_ty: ow.self_ty.clone(),
@@ -1711,6 +1721,18 @@ pub fn summarize(item: &Item, owner: Option<&Owner>) -> R<Summary> {
         ItemKind::Fn(fs, Some(body)) if owner.is_some() => {
             let ow = owner.unwrap();
             let mut sig = parse_sig(fs, false, false, Some(ow))?;
+            // (E0106: a method with no receiver elides as a free fn; the program's, not the prelude's, which writes no
+            // lifetimes: the driver reports it of the program's items)
+            if fs.recv_ty.is_none() && !fs.name.starts_with("__") {
+                if let Some(r) = fs.ret.as_ref().filter(|r| lifetime_positions(r).0 > 0) {
+                    if fs.params.iter().map(|(_, t)| lifetime_positions(t).1).sum::<usize>() != 1 {
+                        sm.adt_err = Some(match crate::wf::pos_of(r) {
+                            Some(p) => format!("\u{3}{}\u{3}missing lifetime specifier (E0106)", p.line),
+                            None => "missing lifetime specifier (E0106)".to_string(),
+                        });
+                    }
+                }
+            }
             let name = match ow.impl_trait.as_deref() {
                 Some(t) if t == "Display" || t == "Debug" => format!("{}::<{t}>::{}", ow.base, fs.name),
                 Some(t) if t.starts_with("PartialEq<") || t.starts_with("PartialOrd<") => format!("{}::<{t}>::{}", ow.base, fs.name),

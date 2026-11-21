@@ -446,6 +446,7 @@ compile-fail	async-await/issues/issue-62097.rs
 check-pass	async-await/issues/issue-62517-1.rs
 check-pass	async-await/issues/issue-62517-2.rs
 compile-fail	async-await/issues/issue-63388-1.rs
+compile-fail	async-await/issues/issue-63388-2.rs
 check-pass	async-await/issues/issue-63388-3.rs
 check-pass	async-await/issues/issue-63388-4.rs
 check-pass	async-await/issues/issue-64391-2.rs
@@ -2730,6 +2731,7 @@ compile-fail	hygiene/no_implicit_prelude-2018.rs
 check-pass	hygiene/no_implicit_prelude-2021.rs
 run-pass	hygiene/thread-local-not-in-prelude.rs
 compile-fail	illegal-sized-bound/mutability-mismatch-arg.rs
+compile-fail	impl-header-lifetime-elision/assoc-type.rs
 run-pass	impl-header-lifetime-elision/bare_type.rs
 check-pass	impl-header-lifetime-elision/constant-used-as-arraylen.rs
 compile-fail	impl-header-lifetime-elision/dyn-trait.rs
@@ -3298,6 +3300,7 @@ compile-fail	lifetimes/mut-ref-owned-suggestion.rs
 compile-fail	lifetimes/nested-binder-print.rs
 check-pass	lifetimes/nested.rs
 check-pass	lifetimes/no-spurious-ref-outlives-data.rs
+compile-fail	lifetimes/no_lending_iterators.rs
 compile-fail	lifetimes/nondeterministic-lifetime-errors-15034.rs
 check-pass	lifetimes/raw/lifetimes-eq.rs
 check-pass	lifetimes/raw/macro-lt.rs

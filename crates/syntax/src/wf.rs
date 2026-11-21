@@ -471,12 +471,16 @@ fn names(t: &PTy, out: &mut Vec<String>) {
 }
 
 /// Where t is written (its first path)
-fn pos_of(t: &PTy) -> Option<Pos> {
+pub fn pos_of(t: &PTy) -> Option<Pos> {
     match t {
         PTy::Path(_, p) if p.pos.line != 0 => Some(p.pos),
         PTy::Path(Some(q), _) => pos_of(q),
         PTy::Ref(_, _, i) | PTy::Ptr(_, i) | PTy::Slice(i) | PTy::Array(i, _) => pos_of(i),
         PTy::Tuple(ts) => ts.iter().find_map(pos_of),
+        PTy::Dyn(bs) | PTy::Impl(bs) => bs.iter().find_map(|b| match b {
+            Bound::Trait(_, p) if p.pos.line != 0 => Some(p.pos),
+            _ => None,
+        }),
         _ => None,
     }
 }
