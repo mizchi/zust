@@ -1371,9 +1371,9 @@ fn lift_closures(sig_ast: &PSig, body: &Block, fname: &str, sig: &mut SigSyn, se
 /// E0106 in a fn pointer type or an `Fn(..) -> R` bound: its return type elides a lifetime, and its parameters do not
 /// have exactly one lifetime to take it from
 /// The input lifetimes of a fn pointer type / `Fn(..)` bound for elision: each elided one counts by itself, a named
-/// one once however often it is written. None when not known: a path type written without lifetime arguments may
-/// have lifetime parameters of its own (`fn(View) -> &u8` with `struct View<'a>`)
-fn input_lifetimes(ps: &[PTy]) -> Option<usize> {
+/// one once however often it is written. With the count, whether every input was understood: a path type written
+/// without lifetime arguments may have lifetime parameters of its own (`fn(View) -> &u8` with `struct View<'a>`)
+fn input_lifetimes(ps: &[PTy]) -> (usize, bool) {
     const NO_LTS: &[&str] = &[
         "i8", "i16", "i32", "i64", "i128", "isize", "u8", "u16", "u32", "u64", "u128", "usize", "f32", "f64", "bool", "char", "str",
         "String", "Vec", "Option", "Result", "Box", "Rc", "Arc", "HashMap", "HashSet", "BTreeMap", "BTreeSet", "VecDeque", "Self",
@@ -1426,17 +1426,22 @@ fn input_lifetimes(ps: &[PTy]) -> Option<usize> {
             _ => false,
         }
     }
-    let (mut named, mut elided) = (vec![], 0);
+    let (mut named, mut elided, mut complete) = (vec![], 0, true);
     for p in ps {
-        if !go(p, &mut named, &mut elided) {
-            return None;
-        }
+        complete &= go(p, &mut named, &mut elided);
     }
-    Some(named.len() + elided)
+    (named.len() + elided, complete)
+}
+
+/// The elided output of a fn type with these inputs has no lifetime to take: more than one is known (an input not
+/// understood can only add more), or all are understood and there is not exactly one
+fn elision_fails(ps: &[PTy]) -> bool {
+    let (n, complete) = input_lifetimes(ps);
+    n > 1 || (complete && n != 1)
 }
 
 fn fn_elision_err(t: &PTy) -> bool {
-    let sig = |ps: &[PTy], r: Option<&PTy>| r.is_some_and(|r| lifetime_positions(r).0 > 0) && input_lifetimes(ps).is_some_and(|n| n != 1);
+    let sig = |ps: &[PTy], r: Option<&PTy>| r.is_some_and(|r| lifetime_positions(r).0 > 0) && elision_fails(ps);
     match t {
         PTy::Fn(ps, r) => sig(ps, Some(r)) || ps.iter().any(fn_elision_err) || fn_elision_err(r),
         PTy::Ref(_, _, i) | PTy::Ptr(_, i) | PTy::Slice(i) | PTy::Array(i, _) => fn_elision_err(i),
@@ -1451,7 +1456,7 @@ fn path_elision_err(p: &Path) -> bool {
     p.segs.iter().any(|sg| {
         sg.args.iter().any(|a| matches!(a, crate::parse::GArg::Ty(t) | crate::parse::GArg::Bind(_, t) if fn_elision_err(t)))
             || sg.fn_args.as_ref().is_some_and(|(ps, r)| {
-                (r.as_deref().is_some_and(|r| lifetime_positions(r).0 > 0) && input_lifetimes(ps).is_some_and(|n| n != 1))
+                (r.as_deref().is_some_and(|r| lifetime_positions(r).0 > 0) && elision_fails(ps))
                     || ps.iter().any(fn_elision_err)
                     || r.as_deref().is_some_and(fn_elision_err)
             })

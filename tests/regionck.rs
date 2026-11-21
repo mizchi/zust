@@ -139,6 +139,9 @@ fn main() {
 }
 "#;
     assert_eq!(check(ok), vec![]);
+    // (two elided inputs are ambiguous whatever an input not understood holds: E0106)
+    let d = check("struct Data;\nfn take(_f: fn(&u8, &Data) -> &u8) {}\nfn main() {}\n");
+    assert!(d.len() == 1 && d[0].1.contains("E0106"), "{d:?}");
     // (`let .. else` whose else block matches another value binds from its own scrutinee)
     assert_eq!(check("fn f<'a, 'b>(x: Option<&'a u32>, y: Option<&'b u32>, d: &'a u32) -> &'a u32 {\n    let Some(r) = x else { match y { Some(_) => return d, None => return d } };\n    r\n}\nfn main() {}\n"), vec![]);
     // (an or-pattern arm with a guard is lowered as one arm per alternative)
