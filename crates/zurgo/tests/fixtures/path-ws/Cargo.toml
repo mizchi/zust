@@ -1,0 +1,19 @@
+[package]
+name = "app"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+# (a test package of zurgo, not a member of zust's workspace)
+[workspace]
+members = ["crates/*"]
+
+[dependencies]
+greet = { path = "crates/greet", features = ["loud"] }
+extra = { path = "crates/extra", optional = true }
+
+[dev-dependencies]
+devonly = { path = "crates/devonly" }
+
+[features]
+with-extra = ["dep:extra"]

@@ -74,6 +74,8 @@ Japanese versions are in [../ja/reports/](../ja/reports/README.md).
 | 2026-11-20 | [Benchmarks in the shapes of application code](2026-11-20-03-bench-patterns.md) |
 | 2026-11-21 | [Security regression tests from Rust's CVEs, the same patterns elsewhere, and a wasm sandbox](2026-11-21-01-security-cves.md) |
 | 2026-11-21 | [RefCell's borrow flag and guards, and when temporaries are dropped](2026-11-21-02-refcell-guards.md) |
+| 2026-11-21 | [Can zustc build dioxus and leptos for wasm32?](2026-11-21-03-ui-frameworks-wasm.md) |
+| 2026-11-21 | [zurgo M0: Cargo packages built with zustc](2026-11-21-04-zurgo-m0.md) |
 | 2026-11-20 | [Region (lifetime) checking: approach and steps (issue #1)](2026-11-20-01-region-check.md) |
-| 2026-11-21 | [Region (lifetime) checking, part 2: what the first version left out](2026-11-21-03-region-check-2.md) |
-| 2026-11-21 | [Region (lifetime) checking, part 3: closures, loans that outlive the function, lints](2026-11-21-04-region-check-3.md) |
+| 2026-11-21 | [Region (lifetime) checking, part 2: what the first version left out](2026-11-21-05-region-check-2.md) |
+| 2026-11-21 | [Region (lifetime) checking, part 3: closures, loans that outlive the function, lints](2026-11-21-06-region-check-3.md) |

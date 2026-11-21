@@ -29,7 +29,7 @@
 
 ## Status
 
-Numbers measured <!-- measured -->2026-11-21, 68b7497<!-- /measured --> by CI on each push to main (bench.yml runs
+Numbers measured <!-- measured -->2026-11-21, a599696<!-- /measured --> by CI on each push to main (bench.yml runs
 `bench/ci_bench.py` and `bench/rust_ui.py`, then `scripts/update_readme.py` writes them here). Times come from shared
 GitHub Actions runners and vary by about ±20%; the instruction counts (valgrind) do not.
 
@@ -56,22 +56,22 @@ Build speed, build cache size and LSP latency on generated programs of 1000 / 50
 <!-- auto:kpi -->
 | KPI | gen1000 | gen5000 |
 |---|---:|---:|
-| cold build | 122 ms | 544 ms |
-| no-op build | 0.6 ms | 0.7 ms |
-| build after editing one function | 16.4 ms | 63.6 ms |
-| `check` | 75 ms | 379 ms |
+| cold build | 121 ms | 551 ms |
+| no-op build | 0.7 ms | 0.8 ms |
+| build after editing one function | 18.0 ms | 66.4 ms |
+| `check` | 80 ms | 386 ms |
 | no-op build (instructions) | 0.6 M | 0.6 M |
 | edit one function (instructions) | 124.4 M | 589.7 M |
-| `check` (instructions) | 780.7 M | 3853.3 M |
+| `check` (instructions) | 780.7 M | 3853.4 M |
 | build cache on disk | 387.2 KiB | 1902.8 KiB |
 | binary | 324.0 KiB | 1558.3 KiB |
-| cold build peak RSS | 18.6 MiB | 52.5 MiB |
+| cold build peak RSS | 18.4 MiB | 52.3 MiB |
 
 | zust-analyzer (zustc's own sources) | |
 |---|---:|
-| p50: definition, hover, completion, references, rename | 0.45 ms / 0.37 ms / 0.99 ms / 2.44 ms / 0.50 ms |
-| startup until indexed | 142 ms |
-| peak RSS | 81.0 MiB |
+| p50: definition, hover, completion, references, rename | 0.55 ms / 0.44 ms / 1.08 ms / 2.73 ms / 0.63 ms |
+| startup until indexed | 157 ms |
+| peak RSS | 83.4 MiB |
 <!-- /auto:kpi -->
 
 Every change is also measured on its own with `python3 bench/kpi_track.py`, so that small increases that add up stay
@@ -211,7 +211,11 @@ cargo install --path .
 cargo install --path crates/analyzer
 ```
 
-This puts `zustc` and `zust-analyzer` in `~/.cargo/bin`. You can also run `cargo build --release --workspace` and use
+```bash
+cargo install --path crates/zurgo
+```
+
+This puts `zustc`, `zust-analyzer` and `zurgo` in `~/.cargo/bin`. You can also run `cargo build --release --workspace` and use
 the binaries in `target/release/` without installing.
 
 ## Using zustc
@@ -263,7 +267,22 @@ zustc build workspace.txt -o target
 - Changing the body of a function in a crate that others depend on does not recompile the dependents; zustc only
   relinks.
 - See `tests/workspace/` for an example.
-- Cargo.toml is not read.
+- zustc does not read Cargo.toml: zurgo (next section) does.
+
+### Cargo packages (zurgo)
+
+`zurgo` builds a Cargo package with zustc: it reads Cargo.toml and Cargo.lock, takes crates.io sources from
+`$CARGO_HOME/registry/src` (where `cargo fetch` puts them), turns on features as cargo does, and builds the graph as a
+zustc workspace ([docs/zurgo.md](docs/zurgo.md)).
+
+```bash
+zurgo run
+```
+
+- Commands: `build`, `run`, `metadata` (the JSON of `cargo metadata`), `clean`, with cargo's flags for them.
+- Output goes to `target/zust/<profile>/`.
+- Not yet: build scripts, proc macros, two versions of one crate, renamed dependencies, git dependencies, its own
+  resolver (mizchi/zust#28, mizchi/zust#29).
 
 ### Options
 
@@ -448,9 +467,9 @@ the measured numbers. The [reports](docs/reports/) explain each step.
 - [x] region checking against signatures: measured against cd5dccd (instructions): check +0.14%, edit one fn +0.28%,
   traits check +0.36%, patterns check +0.91% (the region check itself ~0.5%), LSP session +0.06%, no-op and cache unchanged.
   Part 2 (closures, trait objects, well-formedness) against 18e598d: patterns check +0.5%, traits check +0.2%,
-  check +0.08%, LSP ±0 ([report](docs/reports/2026-11-21-03-region-check-2.md)). Part 3 (closures, loans that outlive
+  check +0.08%, LSP ±0 ([report](docs/reports/2026-11-21-05-region-check-2.md)). Part 3 (closures, loans that outlive
   the fn, lints): patterns check +0.65%, traits check +0.23%, check +0.13% in all
-  ([report](docs/reports/2026-11-21-04-region-check-3.md))
+  ([report](docs/reports/2026-11-21-06-region-check-3.md))
 - [ ] coherence and bounds of blanket impls: `check` time, LSP
 - [ ] real async (state machines, `poll`, an executor): build time, binary size
 - [ ] unwinding (landing pads): build time, binary size

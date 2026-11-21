@@ -32,6 +32,14 @@
     "docs_reports_README.ja": {
       "path": "docs/ja/reports/README.md",
       "role": "document"
+    },
+    "docs_zurgo.en": {
+      "path": "docs/zurgo.md",
+      "role": "document"
+    },
+    "docs_zurgo.ja": {
+      "path": "docs/ja/zurgo.md",
+      "role": "document"
     }
   },
   "comparisons": [
@@ -77,6 +85,17 @@
       },
       "target": {
         "source": "docs_reports_README.ja"
+      }
+    },
+    {
+      "id": "docs_zurgo",
+      "topic": "The Japanese file docs/ja/zurgo.md is a faithful translation of docs/zurgo.md",
+      "mode": "translation",
+      "reference": {
+        "source": "docs_zurgo.en"
+      },
+      "target": {
+        "source": "docs_zurgo.ja"
       }
     }
   ]
