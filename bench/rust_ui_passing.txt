@@ -2091,6 +2091,7 @@ check-pass	enum/namespaced-enum-emulate-flat.rs
 check-pass	enum/namespaced-enum-glob-import.rs
 check-pass	enum/namespaced-enums.rs
 compile-fail	enum/nested-enum.rs
+compile-fail	enum/recursive-enum-memory-32326.rs
 run-pass	enum/simple-enum-usage-8506.rs
 compile-fail	enum/single-variant-enum-deref-error-9814.rs
 run-pass	enum/struct-like-variant-construct.rs
@@ -5833,6 +5834,7 @@ check-pass	single-use-lifetime/two-uses-in-fn-arguments.rs
 check-pass	single-use-lifetime/two-uses-in-inherent-impl-header.rs
 check-pass	single-use-lifetime/two-uses-in-trait-impl.rs
 compile-fail	sized/ensure-overriding-bindings-in-pattern-with-ty-err-doesnt-ice.rs
+compile-fail	sized/recursive-type-infinite-size.rs
 check-pass	sized/recursive-type-pass.rs
 compile-fail	sized/reject-unsized-fn-params.rs
 compile-fail	sized/relaxing-default-bound-error-37534.rs
@@ -5864,6 +5866,7 @@ check-pass	span/macro-span-replacement.rs
 compile-fail	span/macro-ty-params.rs
 compile-fail	span/missing-unit-argument.rs
 compile-fail	span/move-closure.rs
+compile-fail	span/multiline-span-E0072.rs
 check-pass	span/multispan-import-lint.rs
 compile-fail	span/mut-arg-hint.rs
 compile-fail	span/mutability-suggestion-fullwidth-ampersand.rs
@@ -5962,6 +5965,7 @@ run-pass	structs-enums/enum-non-c-like-repr-c-and-int.rs
 run-pass	structs-enums/enum-non-c-like-repr-c.rs
 run-pass	structs-enums/enum-non-c-like-repr-int.rs
 run-pass	structs-enums/enum-nullable-const-null-with-fields.rs
+compile-fail	structs-enums/enum-rec/issue-17431-6.rs
 compile-fail	structs-enums/enum-rec/issue-17431-7.rs
 run-pass	structs-enums/enum-vec-initializer.rs
 run-pass	structs-enums/expr-if-struct.rs
@@ -5971,6 +5975,8 @@ run-pass	structs-enums/functional-struct-upd.rs
 run-pass	structs-enums/generic-recursive-list-struct.rs
 compile-fail	structs-enums/issue-103869.rs
 run-pass	structs-enums/issue-1701.rs
+compile-fail	structs-enums/issue-3008-1.rs
+compile-fail	structs-enums/issue-3008-2.rs
 compile-fail	structs-enums/issue-3008-3.rs
 run-pass	structs-enums/issue-38002.rs
 run-pass	structs-enums/issue-50731.rs
@@ -5990,6 +5996,7 @@ compile-fail	structs-enums/struct-enum-ignoring-field-with-underscore.rs
 run-pass	structs-enums/struct-field-shorthand.rs
 compile-fail	structs-enums/struct-rec/issue-17431-1.rs
 compile-fail	structs-enums/struct-rec/issue-17431-2.rs
+compile-fail	structs-enums/struct-rec/issue-17431-3.rs
 compile-fail	structs-enums/struct-rec/issue-17431-4.rs
 compile-fail	structs-enums/struct-rec/issue-17431-5.rs
 compile-fail	structs-enums/struct-rec/issue-74224.rs
@@ -6783,6 +6790,7 @@ compile-fail	type/type-mismatch-multiple.rs
 compile-fail	type/type-parameter-defaults-referencing-Self-ppaux.rs
 compile-fail	type/type-params-in-different-spaces-1.rs
 compile-fail	type/type-path-err-node-types.rs
+compile-fail	type/type-recursive-box-shadowed.rs
 compile-fail	type/type-recursive.rs
 run-pass	type/unit-type-basic-usages.rs
 compile-fail	type/usize-no-generic-arguments.rs
@@ -7100,6 +7108,7 @@ compile-fail	variance/variance-invariant-arg-object.rs
 compile-fail	variance/variance-issue-20533.rs
 run-pass	variance/variance-iterators-in-libcore.rs
 compile-fail	variance/variance-regions-unused-direct.rs
+compile-fail	variance/variance-regions-unused-indirect.rs
 compile-fail	variance/variance-unused-region-param.rs
 compile-fail	variance/variance-unused-type-param.rs
 compile-fail	variance/variance-use-contravariant-struct-1.rs

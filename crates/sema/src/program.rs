@@ -2262,6 +2262,13 @@ impl Program {
             TySyn::Str => Ty::Str,
             TySyn::Dyn(s) => Ty::Dyn(intern_str(s)),
             TySyn::Infer => Ty::Param(HOLE),
+            // (`M::S<u8>` of a module M reads as a generic associated type `#gat:S` of `(M, u8)`: when M is no type,
+            // it is the type S<u8> as before)
+            TySyn::Assoc(b, n) if n.starts_with(crate::ast_types::GAT_PREFIX) && matches!(&**b, TySyn::Tuple(p) if !p.is_empty() && r(&p[0]).is_err()) => {
+                let TySyn::Tuple(parts) = &**b else { unreachable!() };
+                let name = n[crate::ast_types::GAT_PREFIX.len()..].to_string();
+                return r(&TySyn::App(name, parts[1..].to_vec()));
+            }
             TySyn::Assoc(b, n) => {
                 let bt = r(b)?;
                 if self.has_param(bt) {
@@ -3232,10 +3239,7 @@ impl Program {
         match state[id] {
             2 => return Ok(()),
             1 => {
-                return Err(format!(
-                    "recursive type `{}` has infinite size",
-                    sdefs[id].1
-                ));
+                return Err(format!("{}:1: recursive type `{}` has infinite size", items[sdefs[id].0].line, sdefs[id].1));
             }
             _ => {}
         }
@@ -3273,10 +3277,15 @@ impl Program {
                 // impl's: whether it holds its arguments by value is not known here)
                 // (`A::Allocated<Self>` arrives as `Allocated<..>`: a name that is no struct and no alias is such an
                 // associated type)
-                TySyn::App(n, _)
-                    if n.contains("::")
-                        || (!self.struct_index.contains_key(&n) && !self.aliases.contains_key(&n))
-                        || self.aliases.get(&n).is_some_and(|a| syn_has_assoc(&a.1)) => {}
+                TySyn::App(n, _) if n.contains("::") || (!self.struct_index.contains_key(&n) && !self.aliases.contains_key(&n)) => {}
+                // (`type Alias<T> = (T, <() as Tr>::A);`: its value with the arguments, whose projections are skipped
+                // and whose other parts are held as written)
+                TySyn::App(n, args) if self.aliases.get(&n).is_some_and(|a| syn_has_assoc(&a.1)) => {
+                    let (ps, body) = self.aliases[&n].clone();
+                    if ps.len() == args.len() {
+                        todo.push((subst_tysyn(&body, &ps, &args), gs.clone()));
+                    }
+                }
                 TySyn::App(n, args) => {
                     // 型引数のうち、その型が値として持つもの (`Vec<T>` の T はポインタの先なので要らない)
                     let mut by_value = vec![true; args.len()];
@@ -3851,6 +3860,23 @@ fn syn_unify(a: &TySyn, ga: &[String], b: &TySyn, gb: &[String], sub: &mut Vec<(
 }
 
 /// t names a generic type (`Vec<u8>`) or an alias (one may stand for one)
+/// t with each parameter of ps replaced by its argument (a type alias's value with the arguments it is given)
+fn subst_tysyn(t: &TySyn, ps: &[String], args: &[TySyn]) -> TySyn {
+    let r = |t: &TySyn| subst_tysyn(t, ps, args);
+    match t {
+        TySyn::Named(n) => ps.iter().position(|p| p == n).map_or_else(|| t.clone(), |k| args[k].clone()),
+        TySyn::App(n, a) => TySyn::App(n.clone(), a.iter().map(r).collect()),
+        TySyn::Ref(m, i) => TySyn::Ref(*m, Box::new(r(i))),
+        TySyn::Ptr(m, i) => TySyn::Ptr(*m, Box::new(r(i))),
+        TySyn::Slice(i) => TySyn::Slice(Box::new(r(i))),
+        TySyn::Array(i, n) => TySyn::Array(Box::new(r(i)), n.clone()),
+        TySyn::Tuple(v) => TySyn::Tuple(v.iter().map(r).collect()),
+        TySyn::FnPtr(v) => TySyn::FnPtr(v.iter().map(r).collect()),
+        TySyn::Assoc(b, n) => TySyn::Assoc(Box::new(r(b)), n.clone()),
+        t => t.clone(),
+    }
+}
+
 /// t names an associated type (`T::Item`, `<T as A>::B`) somewhere
 fn syn_has_assoc(t: &TySyn) -> bool {
     match t {

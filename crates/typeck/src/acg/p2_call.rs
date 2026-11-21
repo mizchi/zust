@@ -100,7 +100,7 @@ impl Cx<'_> {
         if let Expr::Lit(t, sp) = strip_paren(recv) {
             let (default, cands): (Ty, &[Ty]) = if is_float_lit(recv) {
                 (Ty::F64, &[Ty::F32])
-            } else if is_int_lit(recv) {
+            } else if is_int_lit(recv) && matches!(lit::lit(t), Some(Lit::Int(i)) if i.suffix().is_empty()) {
                 (Ty::I32, &[Ty::I8, Ty::I16, Ty::I64, Ty::I128, Ty::Isize, Ty::U8, Ty::U16, Ty::U32, Ty::U64, Ty::U128, Ty::Usize])
             } else {
                 (Ty::Unit, &[])
