@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795263005328,
+  "lastUpdate": 1795263006997,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -91808,6 +91808,70 @@ window.BENCHMARK_DATA = {
           {
             "name": "tests/ui compile-fail passing",
             "value": 3737,
+            "unit": "tests"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "miz404@gmail.com",
+            "name": "Kotaro Chikuba",
+            "username": "mizchi"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "f6fcd46125b4e904c25a8872e05a0560143e8f33",
+          "message": "Merge pull request #25 from mizchi/claude/clever-pasteur-11fjnw\n\nRefCell: a borrow flag and Ref / RefMut guards; drop temporaries when rustc does",
+          "timestamp": "2026-11-21T21:06:00+09:00",
+          "tree_id": "c5620d55bdc6bb1fb9c7c789fb2348f39cd25e2e",
+          "url": "https://github.com/mizchi/zust/commit/f6fcd46125b4e904c25a8872e05a0560143e8f33"
+        },
+        "date": 1795263006782,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tests/ui run-pass pass rate",
+            "value": 75.3,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui run-pass passing",
+            "value": 1796,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui check-pass pass rate",
+            "value": 81.46,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui check-pass passing",
+            "value": 1472,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui build-pass pass rate",
+            "value": 72.59,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui build-pass passing",
+            "value": 98,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui compile-fail pass rate",
+            "value": 50.8,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui compile-fail passing",
+            "value": 3738,
             "unit": "tests"
           }
         ]
