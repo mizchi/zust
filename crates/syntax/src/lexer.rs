@@ -263,6 +263,13 @@ pub fn split(src: &str) -> Result<Vec<SrcItem>, String> {
                 i += 1;
             }
             tok!(start, i, 3u8);
+            // (`3f32`: the suffix is a name the prelude selection looks for, as `f32` written as a type is)
+            let hex = s[start] == b'0' && start + 1 < i && matches!(s[start + 1], b'x' | b'X' | b'b' | b'o');
+            if i - start > 3 && !hex && matches!(&s[i - 3..i], b"f32" | b"f64") {
+                if let Some(cur) = st.cur.as_mut() {
+                    cur.2.push(((i - 3) as u32, i as u32));
+                }
+            }
             continue;
         }
         if c == b'\'' {

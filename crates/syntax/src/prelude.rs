@@ -1389,7 +1389,13 @@ pub fn select_with(user_src: &str, user_items: &[SrcItem], cache: &mut SelectCac
         ["f64", "f32"].iter().any(|w| {
             user_src.match_indices(w).any(|(i, _)| {
                 let after = b.get(i + 3).copied().unwrap_or(b' ');
-                let before_ident = i > 0 && (b[i - 1].is_ascii_alphanumeric() || b[i - 1] == b'_');
+                // (`3f32`: the suffix of a number literal counts; `x1f32` / `0x1f32` do not)
+                let mut k = i;
+                while k > 0 && (b[k - 1].is_ascii_digit() || b[k - 1] == b'_') {
+                    k -= 1;
+                }
+                let lit_suffix = k < i && b[k].is_ascii_digit() && !(k > 0 && (b[k - 1].is_ascii_alphanumeric() || b[k - 1] == b'_'));
+                let before_ident = !lit_suffix && i > 0 && (b[i - 1].is_ascii_alphanumeric() || b[i - 1] == b'_');
                 let after_ident = after.is_ascii_alphanumeric() || after == b'_';
                 let mut j = i;
                 while j > 0 && b[j - 1] == b' ' {
@@ -1411,17 +1417,6 @@ pub fn select_with(user_src: &str, user_items: &[SrcItem], cache: &mut SelectCac
                 b'.' if !in_str && b[i - 1].is_ascii_digit() && b[i + 1].is_ascii_digit() => {
                     found = true;
                     break;
-                }
-                // (`3f32` / `1_000f64`: a suffixed literal; not `x1f32` or the hex `0x1f32`)
-                b'f' if !in_str && b[i - 1].is_ascii_digit() && (b[i + 1..].starts_with(b"32") || b[i + 1..].starts_with(b"64")) => {
-                    let mut k = i;
-                    while k > 0 && (b[k - 1].is_ascii_digit() || b[k - 1] == b'_') {
-                        k -= 1;
-                    }
-                    if b[k].is_ascii_digit() && !(k > 0 && (b[k - 1].is_ascii_alphanumeric() || b[k - 1] == b'_')) {
-                        found = true;
-                        break;
-                    }
                 }
                 _ => {}
             }
