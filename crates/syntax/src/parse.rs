@@ -1399,6 +1399,10 @@ impl Parser {
 
     /// E0416: a name bound twice in one pattern (`(x, x)`); the alternatives of `|` bind the same names
     fn no_double_binding(&self, p: &Pat) -> R<()> {
+        // (most patterns bind one name or none: no set for them)
+        if matches!(p, Pat::Ident(_, _, _, None) | Pat::Wild | Pat::Rest | Pat::Lit(_) | Pat::Path(_) | Pat::Range(..) | Pat::Macro(_)) {
+            return Ok(());
+        }
         let mut seen = crate::fxhash::FxSet::default();
         if let Some(n) = double_binding(p, &mut seen) {
             return Err(self.err(&format!("identifier `{n}` is bound more than once in the same pattern (E0416)")));
@@ -2720,10 +2724,9 @@ impl Parser {
                 }
                 // (E0415: a name bound by two parameters of a fn with a body; a declaration (a trait's, an extern
                 // one) may repeat one)
-                if sig.params.len() > 1 {
+                if sig.params.len() > 1 && !sig.params.iter().all(|(p, _)| matches!(p, Pat::Wild)) {
                     let mut seen = crate::fxhash::FxSet::default();
-                    let all = Pat::Tuple(sig.params.iter().map(|(p, _)| p.clone()).collect());
-                    if let Some(n) = double_binding(&all, &mut seen) {
+                    if let Some(n) = sig.params.iter().find_map(|(p, _)| double_binding(p, &mut seen)) {
                         return Err(self.err(&format!("identifier `{n}` is bound more than once in this parameter list (E0415)")));
                     }
                 }
