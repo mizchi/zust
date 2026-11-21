@@ -105,7 +105,9 @@ impl Cx<'_> {
             Ty::Struct(sid) => {
                 let b = self.prog.base_of(sid);
                 if self.prog.is_tuple(b) {
-                    return self.prog.structs[sid as usize].fields.iter().any(|f| self.lacks_cmp(f.1, &|| None, tr, depth + 1));
+                    // (a tuple compares with its own type only, `impl<A: PartialEq, ..> PartialEq for (A, ..)`: each field
+                    // against its own type)
+                    return self.prog.structs[sid as usize].fields.iter().any(|f| self.lacks_cmp(f.1, &|| Some(f.1), tr, depth + 1));
                 }
                 let user = self.prog.struct_item.get(b as usize).is_some_and(|&i| i < self.prog.prelude_from);
                 // (`impl PartialEq<i32> for S`: an impl for another right-hand side counts, looked for only when the

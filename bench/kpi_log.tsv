@@ -247,3 +247,4 @@ date	commit	change	noop_M	edit_M	check_M	cache_KiB	lsp_G	run	check	build	cfail	t
 2026-11-21	ef664e2+	break / continue at their own position; a labeled while's label in its condition	0.697	553.933	3859.300	1902.8	-	1800	1481	98	3842	1184.873	63.975	10.298	319.509	717.396	267.286
 2026-11-21	38f699a+	Review of #36: an auto trait alone in a module-qualified Box	0.695	553.782	3859.114	1902.8	-	1800	1480	98	3827	1184.776	63.953	10.284	319.400	717.352	267.235
 2026-11-21	b6c0bae+	bool / char / integer const parameters: their declared type, and arguments of another kind	0.697	554.200	3867.405	1902.8	-	1802	1483	99	4093	1187.597	64.104	10.359	319.610	720.962	267.232
+2026-11-21	f95d62b+	Review of #36: a tuple's fields against their own types	0.697	553.930	3866.869	1902.8	-	1802	1482	98	4077	1187.308	64.102	10.358	319.608	720.841	267.226
