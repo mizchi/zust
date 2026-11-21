@@ -322,7 +322,9 @@ python3 bench/ci_bench.py --out-dir out/ci
 - `scripts/docs_manifest.py` は、組から jev-lint のマニフェスト (`.jev-lint/documents*.json`) を書く。`--check` は、
   相手のないファイルがあるか、マニフェストが古ければ失敗する。
 - `scripts/docs_check.sh` は、記録した判定 (`.jev-lint/*-baseline.json`) を今の文書で読み直す。オフラインで、API キーは
-  要らない (CI が走らせる)。組が食い違っているか、判定を記録した後に文書が変わっていれば失敗する。
+  要らない (CI が走らせる)。組が食い違っていれば失敗する。判定を記録した後に文書が変わったマニフェストは API キーが
+  なければ判定し直せないので、`TYPESAFE_API_KEY` がないときは警告を出して飛ばす (`DOCS_CHECK_STRICT=1` なら飛ばさず
+  失敗にする。終了コード 3)。組がそろっているかとマニフェストが最新かは、どちらでも確かめる。
 - `scripts/docs_check.sh --update` は、文書が変わったマニフェストだけをモデルに判定させ直し、記録を書き直す。
   https://typesafe.ai の `TYPESAFE_API_KEY` (か `TYPESAFEAI_API_KEY`) が要る。文書の本文はその API に送られる。64 組を
   全部判定して約 $0.03。
@@ -395,6 +397,8 @@ What was done, why, how it was measured, the results (numbers), what was learned
 
 ### コンパイラ (zustc)
 
+- **セキュリティ** ([TODO.md](TODO.md)。[レポート](docs/reports/2026-11-21-01-security-cves.md)): セキュリティのテストが
+  見つけて残した穴 (`tests/security/` の `//@ todo` のケース) と、wasm32 のターゲットの残り
 - **rustc の tests/ui** (`python3 bench/rust_ui.py`。[レポート](docs/reports/2026-11-18-07-rustc-ui-tests.md))
   - 通る割合を上げる ([Status](README.md#status))
   - 大きな穴: unwinding (`catch_unwind`、`panic::set_hook`)、FFI の構造体の値渡し、型推論 (期待型からしか分からない

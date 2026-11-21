@@ -224,6 +224,14 @@
     "docs_reports_2026-11-20-03-bench-patterns.ja": {
       "path": "docs/ja/reports/2026-11-20-03-bench-patterns.md",
       "role": "historical"
+    },
+    "docs_reports_2026-11-21-01-security-cves.en": {
+      "path": "docs/reports/2026-11-21-01-security-cves.md",
+      "role": "historical"
+    },
+    "docs_reports_2026-11-21-01-security-cves.ja": {
+      "path": "docs/ja/reports/2026-11-21-01-security-cves.md",
+      "role": "historical"
     }
   },
   "comparisons": [
@@ -533,6 +541,17 @@
       },
       "target": {
         "source": "docs_reports_2026-11-20-03-bench-patterns.ja"
+      }
+    },
+    {
+      "id": "docs_reports_2026-11-21-01-security-cves",
+      "topic": "The Japanese file docs/ja/reports/2026-11-21-01-security-cves.md is a faithful translation of docs/reports/2026-11-21-01-security-cves.md",
+      "mode": "translation",
+      "reference": {
+        "source": "docs_reports_2026-11-21-01-security-cves.en"
+      },
+      "target": {
+        "source": "docs_reports_2026-11-21-01-security-cves.ja"
       }
     }
   ]

@@ -1,0 +1,9 @@
+[package]
+name = "zust-wasm"
+version = "0.1.0"
+edition = "2024"
+license = "MIT OR Apache-2.0"
+description = "zustc's wasm32-unknown-unknown backend: the recorded instructions as wasm function bodies, and the module writer"
+
+[dependencies]
+minclif = { path = "../minclif" }

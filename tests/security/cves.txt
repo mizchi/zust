@@ -1,0 +1,27 @@
+# Every advisory for Rust's standard library, and the case that covers it in zustc. Sources: RustSec's advisories for
+# the `std` package (https://rustsec.org/packages/std.html, 18), the Rust blog's security advisories, and
+# rust-lang/rust's GitHub security advisories. Each case says
+# `//@ cve: <id>`; `tests/security.rs` (every_std_cve_has_a_case) keeps this table and the cases in step.
+#
+# cve	std API	what was wrong	case (or n/a: why)
+CVE-2015-20001	BinaryHeap	not panic safe: a panicking comparison left a zeroed element to be dropped	cve_2015_20001_binary_heap
+CVE-2017-20004	MutexGuard	Sync for any T (MutexGuard<Cell<i32>> could be shared)	cve_2017_20004_mutexguard_sync
+CVE-2018-1000657	VecDeque::reserve	buffer overflow growing a wrapped ring buffer	cve_2018_1000657_vecdeque_reserve
+CVE-2018-1000810	str::repeat	len * n overflowed: a too small buffer written past its end	cve_2018_1000810_str_repeat
+CVE-2018-25008	Arc::get_mut	too weak synchronization of the unique-owner check	cve_2018_25008_arc_get_mut
+CVE-2019-12083	Error::type_id	overridable: downcast to the wrong type	cve_2019_12083_error_type_id
+CVE-2019-1010299	vec_deque::Iter Debug	printed uninitialized slots of the buffer	cve_2019_1010299_vecdeque_iter_debug
+CVE-2020-36317	String::retain	a panic in the predicate left invalid UTF-8	cve_2020_36317_string_retain, cve_2020_36317_string_retain_panic
+CVE-2020-36318	VecDeque::make_contiguous	popped an element twice (use after free / double free)	cve_2020_36318_vecdeque_make_contiguous
+CVE-2020-36323	[S]::join for S: Borrow<str>	measured, then borrowed again: uninitialized bytes exposed	cve_2020_36323_join, cve_2020_36323_join_borrow
+CVE-2021-28875	Read::read_to_end	trusted the count a Read impl returned (buffer overflow)	cve_2021_28875_read_to_end
+CVE-2021-28876	Zip (TrustedRandomAccess)	same index fetched twice after a panic in the inner iterator	cve_2021_28876_28878_zip_both_ends
+CVE-2021-28877	nested Zip	TrustedRandomAccess composed wrongly: an index fetched twice	cve_2021_28877_nested_zip
+CVE-2021-28878	Zip	same index fetched twice mixing next and next_back	cve_2021_28876_28878_zip_both_ends
+CVE-2021-28879	Zip	size overflow: a consumed Zip used again overflowed a buffer	cve_2021_28879_zip_consumed
+CVE-2021-29922	Ipv4Addr::from_str	leading zeros stripped ("010.8.8.8" read as 10.8.8.8)	cve_2021_29922_ip_octal
+CVE-2021-31162	Vec::from_iter	double free when dropping an element panicked	cve_2021_31162_from_iter_drop_panic
+CVE-2022-21658	fs::remove_dir_all	TOCTOU: a symlink swapped in during the walk was followed	cve_2022_21658_remove_dir_all
+CVE-2024-24576	process::Command (Windows)	batch file arguments not escaped	n/a: Windows only; zustc targets Linux and wasm32 (no processes)
+CVE-2024-43402	process::Command (Windows)	the CVE-2024-24576 fix missed batch file names with trailing spaces or periods	n/a: Windows only (fixed in 1.81.0)
+CVE-2025-11233	Path (Cygwin)	backslash separators not detected on x86_64-pc-cygwin	n/a: Cygwin only (fixed in 1.89.0)

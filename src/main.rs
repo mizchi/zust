@@ -11,7 +11,7 @@ mod stamp;
 
 fn usage() -> ! {
     eprintln!(
-        "usage: zustc <input.rs> [-o out] [-O] [--backend=cranelift|minclif] [--linker=NAME] [--features=a,b] [-L dir] [--time] [-j N] [--no-cache]\n       zustc build <workspace-file> [-o out-dir] [-O] [--backend=..] [-j N] [--time] [--no-cache]\n       zustc check <input.rs>"
+        "usage: zustc <input.rs> [-o out] [-O] [--backend=cranelift|minclif] [--target=wasm32-unknown-unknown] [--linker=NAME] [--features=a,b] [-L dir] [--time] [-j N] [--no-cache]\n       zustc build <workspace-file> [-o out-dir] [-O] [--backend=..] [-j N] [--time] [--no-cache]\n       zustc check <input.rs>"
     );
     std::process::exit(2)
 }
@@ -31,6 +31,7 @@ fn main() {
     let mut mode = "build";
     // (バックエンド: 既定は Cranelift。ZUSTC_BACKEND=minclif / --backend=minclif で minclif)
     let mut backend = std::env::var("ZUSTC_BACKEND").unwrap_or_else(|_| "cranelift".to_string());
+    let mut target = String::from("x86_64-unknown-linux-gnu");
     match args.peek().map(String::as_str) {
         Some("check") => {
             mode = "check";
@@ -59,6 +60,8 @@ fn main() {
             }
             "-j" => o.jobs = args.next().and_then(|s| s.parse().ok()).unwrap_or_else(|| usage()),
             s if s.starts_with("--backend=") => backend = s["--backend=".len()..].to_string(),
+            "--target" => target = args.next().unwrap_or_else(|| usage()),
+            s if s.starts_with("--target=") => target = s["--target=".len()..].to_string(),
             s if s.starts_with("--linker=") => o.linker = Some(s["--linker=".len()..].into()),
             s if s.starts_with("--features=") => o.features.extend(s["--features=".len()..].split(',').filter(|f| !f.is_empty()).map(|f| f.to_string())),
             s if s.starts_with('-') => usage(),
@@ -68,11 +71,25 @@ fn main() {
     if input.as_os_str().is_empty() {
         usage();
     }
+    match target.as_str() {
+        "x86_64-unknown-linux-gnu" => {}
+        // (a wasm module: its own backend and writer, no linker)
+        "wasm32-unknown-unknown" => {
+            backend = "wasm".to_string();
+            o.module_writer = Some(zustc::wasm_backend::write_module);
+        }
+        t => {
+            eprintln!("error: unknown target `{t}` (x86_64-unknown-linux-gnu / wasm32-unknown-unknown)");
+            std::process::exit(2);
+        }
+    }
     match backend.as_str() {
+        // (the wasm lowerer only with the wasm writer: `--target wasm32-unknown-unknown`, never alone)
+        "wasm" if o.module_writer.is_some() => o.backend = Some(zustc::wasm_backend::compile),
         "cranelift" => o.backend = Some(zustc::clif_backend::compile),
         "minclif" => o.backend = None,
         b => {
-            eprintln!("error: unknown backend `{b}` (cranelift / minclif)");
+            eprintln!("error: unknown backend `{b}` (cranelift / minclif; wasm is chosen by --target wasm32-unknown-unknown)");
             std::process::exit(2);
         }
     }

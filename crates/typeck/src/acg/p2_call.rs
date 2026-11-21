@@ -240,6 +240,7 @@ impl Cx<'_> {
                 _ => false,
             };
             if seq {
+                self.check_unsafe_op(method, msp.at)?;
                 let ix = Expr::Index(Box::new(paren(recv.clone())), Box::new(margs[0].clone()), Default::default());
                 let ne = Expr::Ref(method == "get_unchecked_mut", Box::new(ix));
                 let ne = self.keep_expr(ne);
@@ -896,12 +897,12 @@ impl Cx<'_> {
         r
     }
 
-    /// `thread::spawn(|| ..)`: the closure must own what it uses (E0373) and be Send (no `Rc`)
+    /// `thread::spawn(|| ..)`: the closure must own what it uses (E0373) and be Send (see not_send)
     fn check_spawn_closure(&self, c: &Expr) -> R<()> {
         let Expr::Closure(mv, _, _, _, cpos) = strip_paren(c) else { return Ok(()) };
         for n in crate::ast_closure::free_vars(strip_paren(c)) {
             let Some((_, t)) = self.lookup(&n) else { continue };
-            if self.holds_rc(t, 0) {
+            if not_send(self.prog, t) {
                 return Err(self.at(*cpos, format!("`{}` cannot be sent between threads safely", self.prog.tn(t))));
             }
             if !*mv && !crate::ast_closure::moves_capture(strip_paren(c), &[n.clone()]) {
@@ -909,25 +910,6 @@ impl Cx<'_> {
             }
         }
         Ok(())
-    }
-
-    fn holds_rc(&self, t: Ty, d: u32) -> bool {
-        if d > 6 {
-            return false;
-        }
-        match t {
-            Ty::Struct(sid) => {
-                let sd = &self.prog.structs[sid as usize];
-                let b = self.prog.base_of(sid);
-                // (the prelude's own types (a channel's queue is an Rc) are not looked into: only their arguments)
-                let prelude = self.prog.struct_item.get(b as usize).is_some_and(|&i| i >= self.prog.prelude_from);
-                self.prog.structs[b as usize].name == "Rc"
-                    || sd.args.iter().any(|&a| self.holds_rc(a, d + 1))
-                    || !prelude && sd.fields.iter().any(|f| self.holds_rc(f.1, d + 1))
-            }
-            Ty::Ref(_, i) | Ty::Box(i) | Ty::Array(i, _) => self.holds_rc(*i, d + 1),
-            _ => false,
-        }
     }
 
     /// 組み込みの AsRef (`s.as_ref()` → `s.as_bytes()` / `&s[..]`)。受け手が as_ref を持つ構造体 (Option など) なら None
@@ -1427,6 +1409,16 @@ impl Cx<'_> {
         if self.unsafe_ok == 0 && pos.line != 0 && self.prog.sigs[id as usize].is_unsafe {
             let n = self.prog.names[id as usize].rsplit("::").next().unwrap_or("").split('#').next().unwrap_or("");
             return err(pos, format!("call to unsafe function `{}` is unsafe and requires unsafe block (E0133)", n.strip_prefix("__core_").unwrap_or(n)));
+        }
+        Ok(())
+    }
+
+    /// E0133 for an unsafe std function codegen lowers itself instead of calling the prelude's `unsafe fn`
+    /// (`p.add(n)` / `p.read()` on raw pointers, `slice::from_raw_parts`, `str::from_utf8_unchecked`,
+    /// `get_unchecked`, `mem::zeroed`): such a path never reaches check_unsafe_call, so it checks here
+    pub(crate) fn check_unsafe_op(&self, name: &str, pos: Sp) -> R<()> {
+        if self.unsafe_ok == 0 && pos.line != 0 && self.user_code {
+            return err(pos, format!("call to unsafe function `{name}` is unsafe and requires unsafe block (E0133)"));
         }
         Ok(())
     }
@@ -2299,4 +2291,81 @@ fn is_box_new(e: &Expr) -> bool {
         Expr::Call(f, _) => matches!(&**f, Expr::Path(None, p) if p.segs.len() >= 2 && p.segs[p.segs.len() - 2].name == "Box" && p.segs[p.segs.len() - 1].name == "new"),
         _ => false,
     }
+}
+
+/// The name of the generic struct sid was made from, and whether the prelude declares it
+fn base_name(prog: &Program, sid: u32) -> (&str, bool) {
+    let b = prog.base_of(sid);
+    let prelude = prog.struct_item.get(b as usize).is_some_and(|&i| i >= prog.prelude_from);
+    (prog.structs[b as usize].name.as_str(), prelude)
+}
+
+/// A type whose values may not move to another thread (not Send): an `Rc`, a raw pointer, a `MutexGuard` or an
+/// RwLock guard, a `&T` of a T that is not Sync, an `Arc<T>` of a T that is not Send and Sync, or a type holding one.
+/// A type of the program's with `unsafe impl Send` is Send. The prelude's own types are judged by their arguments (a
+/// Vec holds a raw pointer, and is Send when its elements are). A type parameter is taken as Send. (A `dyn Trait` is
+/// taken as Send: zustc's types do not keep `+ Send`, tests/security/send_dyn_thread.rs.)
+pub fn not_send(prog: &Program, t: Ty) -> bool {
+    auto_trait_fails(prog, t, false, &mut vec![], 0)
+}
+
+/// A type whose values may not be shared between threads (not Sync): `Cell`, `RefCell`, `UnsafeCell`, `Rc`, a
+/// channel's receiver, a raw pointer, `Mutex<T>` of a T that is not Send, `RwLock<T>` / `Arc<T>` / `OnceLock<T>` of a
+/// T that is not Send and Sync, or a type holding one. A type of the program's with `unsafe impl Sync` is Sync
+pub fn not_sync(prog: &Program, t: Ty) -> bool {
+    auto_trait_fails(prog, t, true, &mut vec![], 0)
+}
+
+/// not_send (sync = false) / not_sync (sync = true). `seen` holds the types of the program's being looked into: one
+/// met again is taken to hold (as rustc's auto traits do for recursive types), so a recursive type is looked into
+/// once. A nesting past the limit counts as failing, never as Send / Sync
+fn auto_trait_fails(prog: &Program, t: Ty, sync: bool, seen: &mut Vec<(u32, bool)>, d: u32) -> bool {
+    if d > 64 {
+        return true;
+    }
+    let send = |t: Ty, seen: &mut Vec<(u32, bool)>| auto_trait_fails(prog, t, false, seen, d + 1);
+    let sync_ = |t: Ty, seen: &mut Vec<(u32, bool)>| auto_trait_fails(prog, t, true, seen, d + 1);
+    match t {
+        Ty::Ptr(..) => true,
+        // (&T is Send if T is Sync; &mut T if T is Send; both are Sync if T is Sync)
+        Ty::Ref(false, i) => sync_(*i, seen),
+        Ty::Ref(true, i) if !sync => send(*i, seen),
+        Ty::Ref(_, i) | Ty::Box(i) | Ty::Array(i, _) | Ty::Slice(i) => auto_trait_fails(prog, *i, sync, seen, d + 1),
+        Ty::Struct(sid) => {
+            let (name, prelude) = base_name(prog, sid);
+            let sd = &prog.structs[sid as usize];
+            if prelude {
+                let args = &sd.args;
+                return match (name, sync) {
+                    ("Rc", _) | ("MutexGuard" | "RwLockReadGuard" | "RwLockWriteGuard", false) => true,
+                    ("Cell" | "RefCell" | "UnsafeCell" | "__Rcvr__", true) => true,
+                    ("Mutex", true) => args.iter().any(|&a| send(a, seen)),
+                    ("Arc" | "RwLock" | "OnceLock", true) | ("Arc", false) => args.iter().any(|&a| send(a, seen) || sync_(a, seen)),
+                    _ => args.iter().any(|&a| auto_trait_fails(prog, a, sync, seen, d + 1)),
+                };
+            }
+            let base = prog.base_of(sid);
+            if prog.impls.contains(&(base, if sync { "Sync" } else { "Send" }.to_string())) {
+                return false;
+            }
+            if seen.contains(&(sid, sync)) {
+                return false;
+            }
+            seen.push((sid, sync));
+            sd.args.iter().any(|&a| auto_trait_fails(prog, a, sync, seen, d + 1))
+                || sd.fields.iter().any(|f| auto_trait_fails(prog, f.1, sync, seen, d + 1))
+                || sd.variants.iter().any(|v| v.fields.iter().any(|f| auto_trait_fails(prog, f.1, sync, seen, d + 1)))
+        }
+        _ => false,
+    }
+}
+
+/// E0277: a `static` (not `static mut`, not an extern block's) of the program's whose type is not Sync: every thread
+/// can reach it at once (`static C: Cell<u32>`). Returns (the static's index, its type's name)
+pub fn static_not_sync(prog: &Program) -> Option<(usize, String)> {
+    prog.consts.iter().enumerate().find_map(|(ci, c)| {
+        let user = c.item < prog.prelude_from;
+        let ext = c.expr.starts_with(crate::parse::EXTERN_STATIC_SYM);
+        (c.stat == Some(false) && user && !ext && not_sync(prog, c.ty)).then(|| (ci, prog.tn(c.ty)))
+    })
 }
