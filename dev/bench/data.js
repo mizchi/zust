@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795284171080,
+  "lastUpdate": 1795284173807,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -92881,6 +92881,70 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/mizchi/zust/commit/a4db1fd2abc8eb782eec469d681eb8dee1f89c36"
         },
         "date": 1795277864226,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tests/ui run-pass pass rate",
+            "value": 75.47,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui run-pass passing",
+            "value": 1800,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui check-pass pass rate",
+            "value": 81.63,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui check-pass passing",
+            "value": 1475,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui build-pass pass rate",
+            "value": 72.59,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui build-pass passing",
+            "value": 98,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui compile-fail pass rate",
+            "value": 51.64,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui compile-fail passing",
+            "value": 3800,
+            "unit": "tests"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "miz404@gmail.com",
+            "name": "Kotaro Chikuba",
+            "username": "mizchi"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "d4304189893eb18e090f7134252fd12ab26f36db",
+          "message": "Merge pull request #31 from mizchi/claude/gracious-brahmagupta-16jxdl\n\nzustscript: a frontend language prototype on top of zustc (crates/zustscript, own CI)",
+          "timestamp": "2026-11-22T02:58:26+09:00",
+          "tree_id": "8dc1222db2d824299d87128e6e2d5213e3767112",
+          "url": "https://github.com/mizchi/zust/commit/d4304189893eb18e090f7134252fd12ab26f36db"
+        },
+        "date": 1795284173309,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
