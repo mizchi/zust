@@ -810,7 +810,8 @@ impl Cx<'_> {
             Expr::Ref(m, x)
                 if matches!(strip(x), Expr::Call(..) | Expr::MethodCall(..))
                     || (*m && matches!(strip(x), Expr::Lit(..)))
-                    || matches!(strip(x), Expr::Block(None, false, b) if b.stmts.len() > 1) =>
+                    || matches!(strip(x), Expr::Block(None, false, b) if b.stmts.len() > 1)
+                    || (matches!(strip(x), Expr::Ref(..) | Expr::Struct(..) | Expr::Tuple(..)) && self.mentions_local(x)) =>
             {
                 let (t, tr) = match strip(x) {
                     Expr::Lit(..) => (Ty::U8, vec![]),
@@ -818,6 +819,7 @@ impl Cx<'_> {
                         Some(Stmt::Expr(tail, false)) => self.rt_expr(tail)?,
                         _ => return None,
                     },
+                    x @ (Expr::Ref(..) | Expr::Struct(..) | Expr::Tuple(..)) => self.rt_expr(x)?,
                     x => self.rg.calls.get(&(x as *const Expr as usize)).cloned()?,
                 };
                 let r = self.rg.var();
@@ -860,13 +862,42 @@ impl Cx<'_> {
         }
     }
 
+    /// e reads a local (so it is not a constant a `&` would promote to a static)
+    fn mentions_local(&self, e: &Expr) -> bool {
+        match strip(e) {
+            Expr::Path(None, p) => p.segs.len() == 1 && self.lookup(&p.segs[0].name).is_some(),
+            Expr::Ref(_, x) | Expr::Unary(_, x, _) | Expr::Field(x, _, _) | Expr::Cast(x, _) => self.mentions_local(x),
+            Expr::Tuple(xs) | Expr::Array(xs) => xs.iter().any(|x| self.mentions_local(x)),
+            Expr::Struct(_, fs, _) => fs.iter().any(|f| self.mentions_local(&f.1)),
+            _ => false,
+        }
+    }
+
+    /// A function the gate left out begins its check here, where something must be 'static: what it owns must not
+    /// be borrowed for that (what came before has no trees and adds no constraint)
+    pub(crate) fn rg_late_on(&mut self) {
+        if !self.rg.on && self.rg.eligible {
+            self.rg.on = true;
+        }
+    }
+
+    /// The signature requires a region of it to be 'static
+    pub(crate) fn needs_static(r: &RSigSyn) -> bool {
+        r.slots.iter().flatten().any(|&c| c == R_STATIC) || r.ty_outlives.iter().any(|x| x.1 == R_STATIC) || r.outlives.iter().any(|x| x.1 == R_STATIC)
+    }
+
     /// The tree of a place, and the regions of the references it goes through
     pub(crate) fn rt_place(&mut self, e: &Expr) -> Option<(Ty, RT, Vec<u32>)> {
         match e {
             Expr::Paren(x) => self.rt_place(x),
             Expr::Path(None, p) if p.segs.len() == 1 && p.segs[0].args.is_empty() => {
                 let (loc, t) = self.lookup(&p.segs[0].name)?;
-                let tr = self.rg.locals.get(&loc)?.clone();
+                let tr = match self.rg.locals.get(&loc) {
+                    Some(tr) => tr.clone(),
+                    // (a local whose type has no region (bound before the check began): its tree is empty)
+                    None if count(self.prog, t, 0) == Some(0) => vec![],
+                    None => return None,
+                };
                 Some((t, tr, vec![]))
             }
             Expr::Unary(op, x, _) if op == "*" => {
@@ -1114,6 +1145,14 @@ impl Cx<'_> {
 
     /// A struct literal of type t: a fresh tree, the fields' values flow into its fields
     pub(crate) fn rg_struct_lit(&mut self, e: &Expr, t: Ty) {
+        // (a field of a type written `'static`: from here on, checked)
+        if !self.rg.on && self.rg.eligible && self.inline_depth == 0 {
+            if let Ty::Struct(sid) = t {
+                if self.prog.adt_regions.get(&self.prog.base_of(sid)).is_some_and(|r| r.fields.iter().flatten().any(|&c| c == R_STATIC)) {
+                    self.rg_late_on();
+                }
+            }
+        }
         if !self.rg_on() {
             return;
         }

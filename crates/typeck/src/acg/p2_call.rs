@@ -1764,6 +1764,10 @@ impl Cx<'_> {
                 return Ok((None, Ty::Unit));
             }
         }
+        // (a callee that requires 'static (`fn f<T: 'static>`, `&'static T`): from here on, checked)
+        if !self.rg.on && self.rg.eligible && self.inline_depth == 0 && self.prog.sigs[id as usize].regions.as_deref().is_some_and(Self::needs_static) {
+            self.rg_late_on();
+        }
         let sol_rg = if self.rg_on() { Some(sol0.clone()) } else { None };
         let (target, sig) = self.resolve_call(id, &arg_tys, sol0, expected, span)?;
         if let Some(sol) = sol_rg {

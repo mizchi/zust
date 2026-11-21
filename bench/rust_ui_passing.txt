@@ -4092,11 +4092,14 @@ check-pass	nll/issue-22323-temp-destruction.rs
 run-pass	nll/issue-24535-allow-mutable-borrow-in-match-guard.rs
 compile-fail	nll/issue-27868.rs
 check-pass	nll/issue-30104.rs
+compile-fail	nll/issue-30438-a.rs
+compile-fail	nll/issue-30438-b.rs
 compile-fail	nll/issue-30438-c.rs
 check-pass	nll/issue-40510-2.rs
 check-pass	nll/issue-40510-4.rs
 run-pass	nll/issue-45696-long-live-borrows-in-boxes.rs
 run-pass	nll/issue-45696-no-variant-box-recur.rs
+compile-fail	nll/issue-46036.rs
 check-pass	nll/issue-47022.rs
 run-pass	nll/issue-47153-generic-const.rs
 compile-fail	nll/issue-47388.rs
@@ -5271,6 +5274,7 @@ run-pass	regions/regions-fn-subtyping-2.rs
 check-pass	regions/regions-fn-subtyping-return-static.rs
 run-pass	regions/regions-fn-subtyping.rs
 compile-fail	regions/regions-free-region-ordering-callee.rs
+compile-fail	regions/regions-free-region-ordering-caller1.rs
 run-pass	regions/regions-free-region-outlives-static-outlives-free-region.rs
 check-pass	regions/regions-implied-bounds-projection-gap-2.rs
 check-pass	regions/regions-implied-bounds-projection-gap-3.rs
@@ -5780,11 +5784,13 @@ check-pass	static/raw-ref-static-mut.rs
 run-pass	static/refer-to-other-statics-by-value.rs
 build-pass	static/static-array-shared-slice-references.rs
 compile-fail	static/static-closures.rs
+compile-fail	static/static-lifetime-bound.rs
 run-pass	static/static-list-initialization-5917.rs
 compile-fail	static/static-mut-bad-types.rs
 compile-fail	static/static-mut-foreign-requires-unsafe.rs
 compile-fail	static/static-mut-requires-unsafe.rs
 compile-fail	static/static-reference-to-fn-2.rs
+compile-fail	static/static-region-bound.rs
 build-pass	static/static-str-deref-ref.rs
 check-pass	static/static-string-slice-9249.rs
 run-pass	static/static-struct-initialization-5688.rs
