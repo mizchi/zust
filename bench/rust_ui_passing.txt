@@ -5466,6 +5466,7 @@ run-pass	regions/regions-trait-object-1.rs
 compile-fail	regions/regions-trait-object-subtyping.rs
 compile-fail	regions/regions-trait-variance.rs
 compile-fail	regions/regions-undeclared.rs
+compile-fail	regions/regions-var-type-out-of-scope.rs
 run-pass	regions/regions-variance-contravariant-use-contravariant.rs
 compile-fail	regions/regions-variance-contravariant-use-covariant-in-second-position.rs
 compile-fail	regions/regions-variance-contravariant-use-covariant.rs

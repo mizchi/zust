@@ -833,3 +833,14 @@ fn by_key_closures_cannot_return_borrows() {
     assert!(d.len() == 1 && d[0].0 == 6, "{d:?}");
     assert_eq!(check("struct P {\n    name: String,\n    age: u32,\n}\nfn main() {\n    let mut v: Vec<P> = Vec::new();\n    v.sort_by_key(|p| p.age);\n    v.sort_by_key(|p| p.name.clone());\n    let a = v.iter().max_by_key(|&p| &p.name);\n    let mut w: Vec<&str> = vec![\"a\"];\n    w.sort_by_key(|s| *s);\n    let _ = a;\n}\n"), vec![]);
 }
+
+/// A statement's temporary borrowed by an assignment, or by a method of a local holding references, goes away at
+/// the statement's end: E0716 when the borrow is used later
+#[test]
+fn statement_temporaries() {
+    let d = check("fn id<T>(x: T) -> T {\n    x\n}\nfn main() {\n    let mut x;\n    x = &id(3);\n    let y = *x;\n    let _ = y;\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 6 && d[0].1.contains("E0716"), "{d:?}");
+    let d = check("fn id<T>(x: T) -> T {\n    x\n}\nfn main() {\n    let mut v: Vec<&i32> = Vec::new();\n    v.push(&id(3));\n    let _ = v.len();\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 6 && d[0].1.contains("E0716"), "{d:?}");
+    assert_eq!(check("fn id<T>(x: T) -> T {\n    x\n}\nfn main() {\n    let mut v: Vec<i32> = Vec::new();\n    v.push(*&id(3));\n    let x = &id(3);\n    let _ = (*x, v.len());\n}\n"), vec![]);
+}

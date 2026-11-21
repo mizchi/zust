@@ -219,19 +219,29 @@ pub fn direct_temps(e: &Expr, out: &mut Vec<usize>) {
         _ => return,
     };
     for a in args {
-        if let Expr::Ref(_, x) = strip(a) {
-            // (only what is never promoted to a static: the result of a call of a fn (not a struct's or variant's
-            // constructor), of a method, of `vec!` / `format!`)
-            let made = match strip(x) {
-                Expr::MethodCall(..) => true,
-                Expr::Call(f, _) => matches!(strip(f), Expr::Path(_, p) if p.segs.last().is_some_and(|s| s.name.starts_with(|c: char| c.is_ascii_lowercase() || c == '_'))),
-                Expr::Macro(p, ..) => p.segs.last().is_some_and(|s| s.name == "vec" || s.name == "format"),
-                _ => false,
-            };
-            if made {
-                out.push(&**x as *const Expr as usize);
-                out.push(strip(x) as *const Expr as usize);
-            }
+        direct_ref(a, out);
+    }
+}
+
+/// `&e` with e a temporary that is never promoted to a static: the result of a call of a fn (not a struct's or
+/// variant's constructor), of a method, of `vec!` / `format!` (its addresses, for direct_temps)
+pub fn direct_ref(a: &Expr, out: &mut Vec<usize>) {
+    fn strip(mut e: &Expr) -> &Expr {
+        while let Expr::Paren(p) = e {
+            e = p;
+        }
+        e
+    }
+    if let Expr::Ref(_, x) = strip(a) {
+        let made = match strip(x) {
+            Expr::MethodCall(..) => true,
+            Expr::Call(f, _) => matches!(strip(f), Expr::Path(_, p) if p.segs.last().is_some_and(|s| s.name.starts_with(|c: char| c.is_ascii_lowercase() || c == '_'))),
+            Expr::Macro(p, ..) => p.segs.last().is_some_and(|s| s.name == "vec" || s.name == "format"),
+            _ => false,
+        };
+        if made {
+            out.push(&**x as *const Expr as usize);
+            out.push(strip(x) as *const Expr as usize);
         }
     }
 }

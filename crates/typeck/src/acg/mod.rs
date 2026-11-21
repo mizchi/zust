@@ -1724,7 +1724,25 @@ impl Cx<'_> {
                         self.bk_frame();
                     }
                     self.bk.move_mut_next = last && !*semi;
+                    // (a statement's temporaries borrowed by its outermost call, or by an assignment (`x = &f();`: no
+                    // `let` extends them): they go away at its end)
+                    let ext0 = self.bk.direct.len();
+                    if *semi && self.bk_on() {
+                        match strip_paren(e) {
+                            Expr::Assign(_, v) => borrowck::direct_ref(v, &mut self.bk.direct),
+                            // (a method of a local that may hold references: `v.push(&f());`)
+                            e @ Expr::MethodCall(r, ..) => {
+                                borrowck::direct_temps(e, &mut self.bk.direct);
+                                let holds = || matches!(strip_paren(r), Expr::Path(None, p) if p.segs.len() == 1 && self.lookup(&p.segs[0].name).is_some_and(|(_, t)| borrowck::has_refs(self.prog, t, 0)));
+                                if self.bk.direct.len() > ext0 && !holds() {
+                                    self.bk.direct.truncate(ext0);
+                                }
+                            }
+                            _ => {}
+                        }
+                    }
                     let r = self.expr(e, exp);
+                    self.bk.direct.truncate(ext0);
                     if last && !*semi && self.bk.tail == e as *const Expr as usize && r.is_ok() {
                         self.rg_ret(e);
                     }
