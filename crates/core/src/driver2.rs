@@ -1936,7 +1936,7 @@ fn first_unused_lifetime(src: &str, items: &[SrcItem], (unused, single): (bool, 
             .count()
     };
     // (the text without its comments and string literals, where a lifetime's name is no use of it)
-    let code = |t: &str| strip_strings(&t.lines().map(|l| l.find("//").map_or(l, |i| &l[..i])).collect::<Vec<_>>().join("\n"));
+    let code = |t: &str| strip_strings(t);
     // (`#[allow(dead_code, unused_lifetimes)]`: the lint anywhere in an allow list)
     let allows = |t: &str, lint: &str| {
         t.match_indices("allow(").any(|(i, _)| {
@@ -1987,12 +1987,37 @@ fn first_unused_lifetime(src: &str, items: &[SrcItem], (unused, single): (bool, 
     None
 }
 
-/// t with the contents of its string literals (`"'a"`, raw ones too) blanked out
+/// t with its string literals (`"'a"`, raw ones too) and comments blanked out, in one pass: a `//` in a string is
+/// no comment, a `"` in a comment no string. Lines are kept
 fn strip_strings(t: &str) -> String {
     let b = t.as_bytes();
     let mut out = String::with_capacity(t.len());
     let mut i = 0;
+    // (blanks b[i..end], keeping its newlines)
+    let blank = |out: &mut String, from: usize, end: usize| {
+        for &c in &b[from..end] {
+            out.push(if c == b'\n' { '\n' } else { ' ' });
+        }
+    };
     while i < b.len() {
+        // (a `"` or `/` char literal is none of these)
+        if b[i] == b'\'' && i + 2 < b.len() && b[i + 2] == b'\'' && (b[i + 1] == b'"' || b[i + 1] == b'/') {
+            out.push_str(&t[i..i + 3]);
+            i += 3;
+            continue;
+        }
+        if b[i] == b'/' && b.get(i + 1) == Some(&b'/') {
+            let end = t[i..].find('\n').map_or(b.len(), |k| i + k);
+            blank(&mut out, i, end);
+            i = end;
+            continue;
+        }
+        if b[i] == b'/' && b.get(i + 1) == Some(&b'*') {
+            let end = t[i + 2..].find("*/").map_or(b.len(), |k| i + 2 + k + 2);
+            blank(&mut out, i, end);
+            i = end;
+            continue;
+        }
         // (`r"..."` / `r#"..."#`: to the quote and as many `#`)
         if b[i] == b'r' && (i == 0 || !(b[i - 1].is_ascii_alphanumeric() || b[i - 1] == b'_')) {
             let mut j = i + 1;
@@ -2003,7 +2028,7 @@ fn strip_strings(t: &str) -> String {
                 let hashes = j - i - 1;
                 let close: String = std::iter::once('"').chain(std::iter::repeat_n('#', hashes)).collect();
                 let end = t[j + 1..].find(close.as_str()).map_or(b.len(), |k| j + 1 + k + close.len());
-                out.push_str(&" ".repeat(end - i));
+                blank(&mut out, i, end);
                 i = end;
                 continue;
             }
@@ -2014,7 +2039,7 @@ fn strip_strings(t: &str) -> String {
                 j += if b[j] == b'\\' { 2 } else { 1 };
             }
             let end = (j + 1).min(b.len());
-            out.push_str(&" ".repeat(end - i));
+            blank(&mut out, i, end);
             i = end;
             continue;
         }

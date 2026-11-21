@@ -1072,6 +1072,9 @@ fn accepted_review_39() {
     assert_eq!(check("#![deny(single_use_lifetimes)]\nfn f<'a>() {\n    let _ = \"'a\";\n}\nfn main() {\n    f();\n}\n"), vec![]);
     assert_eq!(check("struct View<'a>(&'a u8);\ntrait Read {\n    fn rd(self) -> u8;\n}\nimpl<'a> Read for &'a View<'static> {\n    fn rd(self: &'a View<'static>) -> u8 {\n        *self.0\n    }\n}\nstatic X: u8 = 1;\nfn main() {\n    let v = View(&X);\n    println!(\"{}\", (&v).rd());\n}\n"), vec![]);
     assert_eq!(check("struct View<'a>(&'a u8);\nstruct Holder<T>(T);\ntrait Tr {\n    type Out;\n}\nimpl<View> Tr for Holder<View> {\n    type Out = View;\n}\nfn main() {\n    let _h: Holder<u8> = Holder(1);\n}\n"), vec![]);
+    assert_eq!(check("fn pick<'a>(x: &'a u8, _y: &'a u8) -> &u8 {\n    x\n}\nfn main() {\n    let a = 1;\n    println!(\"{}\", pick(&a, &a));\n}\n"), vec![]);
+    // (a `//` in a string is no comment: the lifetime's use after it is seen)
+    assert_eq!(check("#![deny(unused_lifetimes)]\nfn f<'a>() {\n    let _ = \"https://example\";\n    let _: Option<&'a u8> = None;\n}\nfn main() {\n    f();\n}\n"), vec![]);
     // (still E0106: two lifetimes, and none)
     let d = check("struct S;\nimpl S {\n    fn pick<'a, 'b>(x: &'a u8, _y: &'b u8) -> &u8 {\n        x\n    }\n}\nfn main() {}\n");
     assert!(d.len() == 1 && d[0].1.contains("E0106"), "{d:?}");

@@ -801,12 +801,13 @@ impl RgSt {
                     }
                     self.var_walk(prog, ft.ret, c, v, nl, acc, depth + 1);
                 } else {
-                    // (a type alias: the regions in it are not followed, its type parameters are)
+                    // (a type alias: the regions in it are not followed (no codes: each reads as elided), its type
+                    // parameters are, after the definition's lifetimes)
                     let mut none = Codes { codes: None, pos: 0, ok: true, parent: None };
                     for &p in &ft.params {
-                        self.var_walk(prog, p, &mut none, v.then(Var::Contra), 0, acc, depth + 1);
+                        self.var_walk(prog, p, &mut none, v.then(Var::Contra), nl, acc, depth + 1);
                     }
-                    self.var_walk(prog, ft.ret, &mut none, v, 0, acc, depth + 1);
+                    self.var_walk(prog, ft.ret, &mut none, v, nl, acc, depth + 1);
                 }
             }
             // (invariant in the lifetimes its trait's arguments name)

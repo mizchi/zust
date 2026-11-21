@@ -603,7 +603,9 @@ fn parse_sig(sig: &PSig, is_extern: bool, is_main: bool, owner: Option<&Owner>) 
         if sig.recv_ty.is_none() && !sig.name.starts_with("__") {
             if let Some(r) = &sig.ret {
                 if lifetime_positions(r).0 > 0 {
-                    let inputs: usize = sig.params.iter().map(|(_, t)| lifetime_positions(t).1).sum();
+                    // (the distinct input lifetimes: `x: &'a u8, y: &'a u8` has one)
+                    let ps: Vec<PTy> = sig.params.iter().map(|(_, t)| t.clone()).collect();
+                    let inputs = input_lifetimes(&ps).0;
                     // (none written, but a parameter's type may be a struct (or an alias) with lifetimes it leaves out:
                     // `fn f(s: S) -> &T` with `struct S<'a>`; the summary does not see it)
                     let hidden = inputs == 0 && sig.params.iter().any(|(_, t)| may_hide_lifetimes(t));
