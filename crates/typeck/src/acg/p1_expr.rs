@@ -2062,7 +2062,12 @@ impl Cx<'_> {
             return err(SP, format!("`{name}` cannot be called through `dyn {tr}` (it uses `Self` or generics)"));
         }
         let args: Vec<&Expr> = margs.iter().collect();
-        self.dyn_call(fat, idx, &ps, ret, &args, SP)
+        let decl = decls[idx];
+        let r = self.dyn_call(fat, idx, &ps, ret, &args, SP);
+        if r.is_ok() {
+            self.rg_dyn_call(mc, decl, &sol, &ps, ret);
+        }
+        r
     }
 
     /// 呼び先の引数の型 pt が `F` / `&F` / `&mut F` で、F に `Fn(A) -> B` の境界があれば (A, B)
@@ -2470,7 +2475,11 @@ impl Cx<'_> {
                         return err(SP, format!("this struct takes {n} fields"));
                     }
                     let args: Vec<(usize, &Expr)> = cargs.iter().enumerate().collect();
-                    return self.adt_value(sid, None, &args, expected, SP);
+                    let r = self.adt_value(sid, None, &args, expected, SP);
+                    if let Ok((_, t)) = &r {
+                        self.rg_ctor(c, *t, &args);
+                    }
+                    return r;
                 }
             }
         }

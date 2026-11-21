@@ -971,7 +971,8 @@ impl Cx<'_> {
             // (`&f(..)` / `&mut 4` / `&{ let y = ..; y }`: a temporary the function owns (a `&` of a literal is
             // promoted to a static, and so may be a block of a constant alone))
             Expr::Ref(m, x)
-                if matches!(strip(x), Expr::Call(..) | Expr::MethodCall(..))
+                if matches!(strip(x), Expr::MethodCall(..))
+                    || (matches!(strip(x), Expr::Call(..)) && self.not_const(x))
                     || self.rg.temps.contains_key(&(strip(x) as *const Expr as usize))
                     || (*m && matches!(strip(x), Expr::Lit(..)))
                     || matches!(strip(x), Expr::Block(None, false, b) if b.stmts.len() > 1)
@@ -1065,7 +1066,9 @@ impl Cx<'_> {
         }
         let x = strip(e);
         let k = x as *const Expr as usize;
-        if self.rg.calls.contains_key(&k) || !self.not_const(x) || super::borrowck::has_refs(self.prog, t, 0) {
+        // (a constant whose type needs dropping (`&Test` with `impl Drop for Test`) is not promoted either)
+        let dropped = || matches!(x, Expr::Path(None, p) if p.segs.len() != 1 || self.lookup(&p.segs[0].name).is_none()) && self.needs_drop(t);
+        if self.rg.calls.contains_key(&k) || !(self.not_const(x) || dropped()) || super::borrowck::has_refs(self.prog, t, 0) {
             return;
         }
         self.rg.temps.insert(k, t);
@@ -1497,6 +1500,55 @@ impl Cx<'_> {
             }
         }
         self.rg.calls.insert(e as *const Expr as usize, (t, tree));
+    }
+
+    /// A tuple struct's value of type t built by its constructor (`B(a)`): the arguments flow into its fields
+    pub(crate) fn rg_ctor(&mut self, c: &Expr, t: Ty, args: &[(usize, &Expr)]) {
+        if !self.rg_on() {
+            return;
+        }
+        let Ty::Struct(sid) = t else { return };
+        let prog = self.prog;
+        if prog.structs[sid as usize].is_enum {
+            return;
+        }
+        let Some(tree) = self.rg.fresh(prog, t) else { return };
+        for &(i, v) in args {
+            let Some(&(_, ft, _)) = prog.structs[sid as usize].fields.get(i) else { continue };
+            let Some(ftr) = self.rg.field(prog, sid, i, &tree) else { continue };
+            if let Some((vt, vtr)) = self.rt_expr(v) {
+                self.rg.flow(prog, vt, ft, &vtr, &ftr, super::borrowck::pos(v));
+            }
+        }
+        self.rg.calls.insert(c as *const Expr as usize, (t, tree));
+    }
+
+    /// A call of a trait's method through a trait object (decl: the trait's declaration; sol: its type arguments,
+    /// params: the instance's parameters but the receiver): as a call of the declaration with Self the object
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn rg_dyn_call(&mut self, mc: &Expr, decl: u32, sol: &[Option<Ty>], params: &[Ty], ret: Ty) {
+        if !self.rg_on() {
+            return;
+        }
+        let Expr::MethodCall(recv, _, _, margs, _) = mc else { return };
+        let Some((rty, rtr)) = self.rt_expr(recv) else { return };
+        let selft = match rty {
+            Ty::Ref(_, i) | Ty::Box(i) => *i,
+            t => t,
+        };
+        let mut sol = sol.to_vec();
+        if let Some(s) = sol.first_mut() {
+            *s = Some(selft);
+        }
+        let Some(&p0) = self.prog.sigs[decl as usize].params.first() else { return };
+        let p0 = self.prog.partial_subst(p0, &sol);
+        let ps: Vec<Ty> = std::iter::once(p0).chain(params.iter().copied()).collect();
+        let args: Vec<&Expr> = margs.iter().collect();
+        let sp = super::borrowck::pos(recv);
+        self.rg.depth += 1;
+        self.rg_call(decl, &sol, None, &args, &ps, ret, Some((rtr, sp)), true, super::borrowck::pos(mc));
+        self.rg.depth -= 1;
+        self.rg_took_call(mc);
     }
 
     /// A tuple literal of type t: its elements' trees, side by side (the tuple is covariant in them)

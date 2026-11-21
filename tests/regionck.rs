@@ -424,3 +424,24 @@ fn main() {
 "#;
     assert_eq!(check(ok), vec![]);
 }
+
+/// Tuple struct constructors (`B(a)`), calls through trait objects, and unit structs that need dropping (not
+/// promoted); a constructor of constants is promoted
+#[test]
+fn ctors_dyn_calls_drop_units() {
+    one_error("trait Foo { fn dummy(&self) {} }\nstruct B<'a>(&'a (dyn Foo + 'a));\nfn foo<'a>(a: &dyn Foo) -> B<'a> {\n    B(a)\n}\nfn main() {}\n", 4);
+    one_error("trait Foo { fn borrowed<'a>(&'a self) -> &'a (); }\nfn f<'a, 'b>(x: &'a dyn Foo) -> &'b () {\n    x.borrowed()\n}\nfn main() {}\n", 3);
+    let d = check("struct Test;\nimpl Drop for Test { fn drop(&mut self) {} }\nfn create<'a>() -> &'a Test {\n    let t = &Test;\n    return t;\n}\nfn main() {}\n");
+    assert!(d.len() == 1 && d[0].0 == 5 && d[0].1.contains("E0515"), "{d:?}");
+    let ok = r#"
+struct Generic<T>(T);
+struct Struct<'a, T>(&'a T);
+struct Unit;
+trait Foo { fn borrowed<'a>(&'a self) -> &'a (); }
+fn fine<'a>() -> Struct<'a, Generic<()>> { Struct(&Generic(())) }
+fn unit<'a>() -> &'a Unit { &Unit }
+fn same<'a>(x: &'a dyn Foo) -> &'a () { x.borrowed() }
+fn main() {}
+"#;
+    assert_eq!(check(ok), vec![]);
+}
