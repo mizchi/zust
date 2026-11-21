@@ -4286,6 +4286,8 @@ compile-fail	nll/user-annotations/method-ufcs-3.rs
 compile-fail	nll/user-annotations/method-ufcs-inherent-2.rs
 compile-fail	nll/user-annotations/method-ufcs-inherent-4.rs
 check-pass	nll/user-annotations/normalize-self-ty.rs
+compile-fail	nll/user-annotations/pattern_substs_on_brace_enum_variant.rs
+compile-fail	nll/user-annotations/pattern_substs_on_tuple_enum_variant.rs
 compile-fail	nll/user-annotations/patterns.rs
 compile-fail	nll/user-annotations/region-error-ice-109072.rs
 check-pass	nll/user-annotations/type-annotation-with-hrtb.rs

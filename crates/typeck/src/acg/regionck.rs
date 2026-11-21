@@ -2773,6 +2773,35 @@ impl Cx<'_> {
         self.rg.pat = Some((pt, tr));
     }
 
+    /// A pattern's path writes lifetimes (`Foo::Bar::<'static> { .. }`, a type annotation): the value it matches is
+    /// of that type, its regions outlive them
+    pub(crate) fn rg_pat_lifetimes(&mut self, path: &crate::parse::Path) {
+        if !self.rg_on() {
+            return;
+        }
+        let ls: Vec<&String> = path.segs.iter().flat_map(|s| s.args.iter()).filter_map(|a| if let GArg::Lifetime(l) = a { Some(l) } else { None }).collect();
+        if ls.is_empty() {
+            return;
+        }
+        let Some((Ty::Struct(sid), tr)) = self.rg.pat.clone() else { return };
+        let prog = self.prog;
+        let Some((own, _)) = self.rg.split_adt(prog, sid, &tr) else { return };
+        if own.len() != ls.len() {
+            return;
+        }
+        let sp = path.pos;
+        for (&r, l) in own.iter().zip(ls) {
+            let to = match l.as_str() {
+                "'static" => STATIC,
+                l => match self.rg.lt_names.iter().position(|x| x == l) {
+                    Some(i) => self.rg.lts[i],
+                    None => continue,
+                },
+            };
+            self.rg.edge(r, to, sp);
+        }
+    }
+
     /// Descend into field fi of the value the pattern matches (of type parent; vi: the variant); returns what to
     /// restore
     pub(crate) fn rg_pat_field(&mut self, parent: Ty, vi: Option<usize>, fi: usize) -> (Option<(Ty, RT)>, Option<u32>) {

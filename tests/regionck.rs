@@ -920,3 +920,11 @@ fn dyn_fn_calls_and_static_assignments() {
     assert!(d.len() == 1 && d[0].0 == 6, "{d:?}");
     assert_eq!(check("static FOO: u8 = 42;\nstatic mut BAR: &'static u8 = &FOO;\nfn take(f: &dyn Fn(&u8), n: &u8) {\n    f(n);\n}\nfn main() {\n    unsafe {\n        BAR = &FOO;\n    }\n    take(&|_| {}, &1);\n}\n"), vec![]);
 }
+
+/// A pattern's path that writes lifetimes is a type annotation: the value matched outlives them
+#[test]
+fn pattern_paths_with_lifetimes() {
+    let d = check("enum Foo<'a> {\n    Bar { field: &'a u32 },\n}\nfn main() {\n    let y = 22;\n    let foo = Foo::Bar { field: &y };\n    match foo {\n        Foo::Bar::<'static> { field: _z } => {}\n    }\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 6 && d[0].1.contains("does not live long enough"), "{d:?}");
+    assert_eq!(check("enum Foo<'a> {\n    Bar(&'a u32),\n}\nfn main() {\n    let y = 22;\n    let foo = Foo::Bar(&y);\n    match foo {\n        Foo::Bar(_z) => {}\n    }\n    static Z: u32 = 1;\n    let Foo::Bar::<'static>(_w) = Foo::Bar(&Z);\n}\n"), vec![]);
+}

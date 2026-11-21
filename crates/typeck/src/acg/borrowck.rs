@@ -1211,6 +1211,10 @@ impl Cx<'_> {
         }
         let srcs = self.bk_frame_end();
         self.bk.scrut = srcs;
+        // (a pattern that writes `'static` (`Foo::Bar::<'static> { .. }`): checked from here on)
+        if !self.rg.on && self.rg.eligible && self.inline_depth == 0 && pats.iter().any(|p| pat_any(p, &|q| matches!(q, Pat::TupleStruct(pp, _) | Pat::Struct(pp, _, _) if crate::regions::path_names_lt(pp)))) {
+            self.rg_late_on();
+        }
         self.rg.scrut = if self.rg_on() { self.rt_expr(e) } else { None };
         self.bk.scrut_place = self.bk_place(e).map(|p| (p.0, err_pos(e)));
         r

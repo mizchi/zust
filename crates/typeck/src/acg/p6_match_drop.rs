@@ -983,6 +983,7 @@ impl Cx<'_> {
             Pat::TupleStruct(path, elems) => {
                 let (p, mode) = self.pat_deref(p, mode);
                 self.rg_pat_align(p.ty());
+                self.rg_pat_lifetimes(path);
                 let (fields, vname, rvi) = match self.variant_on(path, p.ty()) {
                     Some((sid, vi)) => {
                         let v = &self.prog.structs[sid as usize].variants[vi];
@@ -1020,8 +1021,10 @@ impl Cx<'_> {
                 }
                 Ok(())
             }
-            Pat::Struct(..) => {
+            Pat::Struct(spath, ..) => {
                 let (p, mode) = self.pat_deref(p, mode);
+                self.rg_pat_align(p.ty());
+                self.rg_pat_lifetimes(spath);
                 // (the parts are not tracked: the field names are not at hand here)
                 let saved = self.bk.pat_path.take();
                 let rs = self.rg.pat.take();
