@@ -299,6 +299,11 @@ pub const R_UNKNOWN: u8 = 0xF3;
 /// A trait object's lifetime not written (`&'a dyn Tr`, `Box<dyn Tr>`): the default (the reference's region directly
 /// around it, else 'static in a signature; inferred in a body)
 pub const R_DYN_DEFAULT: u8 = 0xF4;
+/// A region a fn pointer's type binds (written `for<'r>`, or elided in it): a variable of its own
+pub const R_BOUND: u8 = 0xF5;
+/// The codes of a fn pointer's type written as one follow (its parameters', then its result's); without it (a type
+/// alias naming one) a fn pointer's regions are its own
+pub const R_FN: u8 = 0xF6;
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Default)]
 pub struct RSigSyn {

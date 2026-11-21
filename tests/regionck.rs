@@ -503,3 +503,27 @@ fn main() {}
 "#;
     assert_eq!(check(ok), vec![]);
 }
+
+/// `let _: T = e;` relates e to T; fn pointer types carry their regions (contravariant in the parameters), and so
+/// make structs that hold them contravariant; a type argument's well-formedness is implied (`Option<&'s &'l ()>`);
+/// `self: &Struct` elides as `&self` does
+#[test]
+fn wildcards_fn_pointers_typed_self() {
+    one_error("struct Co<'a> { f: fn(&'a isize) }\nfn use_<'short, 'long>(c: Co<'long>, _w: Option<&'short &'long ()>) {\n    let _: Co<'short> = c;\n}\nfn main() {}\n", 3);
+    one_error("use std::cell::Cell;\nstruct Foo<'a> { x: Cell<Option<&'a isize>> }\nfn use_<'short, 'long>(c: Foo<'short>, _w: Option<&'short &'long ()>) {\n    let _: Foo<'long> = c;\n}\nfn main() {}\n", 4);
+    one_error("struct S {}\nimpl S {\n    fn r(self: &S, f: &u32) -> &u32 {\n        f\n    }\n}\nfn main() {}\n", 4);
+    let ok = r#"
+struct Contra<'a> { f: fn(&'a isize) }
+struct S<'a, 'b> { f: &'a isize, g: &'b isize }
+type F<'a> = fn(&mut Vec<&'a u8>) -> Option<&'static str>;
+fn a<'short, 'long>(c: Contra<'short>, _w: Option<&'short &'long ()>) { let _: Contra<'long> = c; }
+fn b<'short, 'long>(c: S<'long, 'short>, _w: Option<&'short &'long ()>) { let _: S<'long, 'short> = c; let _: S<'short, 'short> = c; }
+fn apply<'a>(f: fn(&'a u8) -> &'a u8, x: &'a u8) -> &'a u8 { f(x) }
+fn g(_: &mut Vec<&u8>) -> Option<&'static str> { None }
+fn alias<'a>(v: &'a F<'a>) -> &'a F<'a> { v }
+struct T {}
+impl T { fn r(self: &T, _f: &u32) -> &T { self } }
+fn main() { let f: F = g; let _ = alias(&f); }
+"#;
+    assert_eq!(check(ok), vec![]);
+}

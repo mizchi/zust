@@ -5355,7 +5355,9 @@ run-pass	regions/regions-infer-borrow-scope.rs
 run-pass	regions/regions-infer-call-2.rs
 compile-fail	regions/regions-infer-call-3.rs
 run-pass	regions/regions-infer-call.rs
+compile-fail	regions/regions-infer-contravariance-due-to-decl.rs
 run-pass	regions/regions-infer-contravariance-due-to-ret.rs
+compile-fail	regions/regions-infer-covariance-due-to-decl.rs
 compile-fail	regions/regions-infer-invariance-due-to-decl.rs
 run-pass	regions/regions-infer-reborrow-ref-mut-recurse.rs
 run-pass	regions/regions-infer-region-in-fn-but-not-type.rs
@@ -5404,7 +5406,12 @@ compile-fail	regions/regions-trait-object-subtyping.rs
 compile-fail	regions/regions-trait-variance.rs
 compile-fail	regions/regions-undeclared.rs
 run-pass	regions/regions-variance-contravariant-use-contravariant.rs
+compile-fail	regions/regions-variance-contravariant-use-covariant-in-second-position.rs
+compile-fail	regions/regions-variance-contravariant-use-covariant.rs
+compile-fail	regions/regions-variance-covariant-use-contravariant.rs
 run-pass	regions/regions-variance-covariant-use-covariant.rs
+compile-fail	regions/regions-variance-invariant-use-contravariant.rs
+compile-fail	regions/regions-variance-invariant-use-covariant.rs
 check-pass	regions/relate-bound-region-ref-type-param.rs
 check-pass	regions/type-param-outlives-reempty-issue-74429-2.rs
 check-pass	regions/type-param-outlives-reempty-issue-74429.rs
@@ -5745,10 +5752,16 @@ check-pass	self/elision/lt-struct.rs
 compile-fail	self/elision/nested-item.rs
 check-pass	self/elision/ref-alias-async.rs
 check-pass	self/elision/ref-alias.rs
+compile-fail	self/elision/ref-assoc-async.rs
+compile-fail	self/elision/ref-assoc.rs
 check-pass	self/elision/ref-mut-alias-async.rs
 check-pass	self/elision/ref-mut-alias.rs
 compile-fail	self/elision/ref-mut-self-async.rs
 compile-fail	self/elision/ref-mut-self.rs
+compile-fail	self/elision/ref-mut-struct-async.rs
+compile-fail	self/elision/ref-mut-struct.rs
+compile-fail	self/elision/ref-struct-async.rs
+compile-fail	self/elision/ref-struct.rs
 check-pass	self/elision/self-async.rs
 check-pass	self/elision/self.rs
 check-pass	self/elision/struct-async.rs
@@ -7046,6 +7059,7 @@ compile-fail	use/use-paths-as-items.rs
 compile-fail	variance/leaking-unnameables.rs
 check-pass	variance/smart-pointers-covariant.rs
 compile-fail	variance/type-resolve-error-two-structs-deep.rs
+compile-fail	variance/variance-cell-is-invariant.rs
 compile-fail	variance/variance-contravariant-arg-object.rs
 compile-fail	variance/variance-covariant-arg-object.rs
 run-pass	variance/variance-intersection-of-ref-and-opt-ref.rs

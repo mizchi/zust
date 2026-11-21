@@ -1190,7 +1190,12 @@ impl Cx<'_> {
                 // (elision from the receiver: `&self` / `&mut self`, or a receiver type that names `Self`)
                 let self_elides = match (&f.sig.recv, &f.sig.recv_ty) {
                     (Some(r), _) if r.starts_with('&') => true,
-                    (Some(_), Some(t)) => format!("{t:?}").contains("\"Self\"") && format!("{t:?}").contains("Ref("),
+                    // (`self: &Struct` names the self type as Self does)
+                    (Some(_), Some(t)) => {
+                        let d = format!("{t:?}");
+                        let own = self.self_sid.map(|s| self.prog.structs[self.prog.base_of(s) as usize].name.rsplit("::").next().unwrap_or("").to_string());
+                        d.contains("Ref(") && (d.contains("\"Self\"") || own.is_some_and(|n| !n.is_empty() && d.contains(&format!("\"{n}\""))))
+                    }
                     _ => false,
                 };
                 // (any other receiver with elided regions in the result: not followed)
@@ -1456,6 +1461,9 @@ impl Cx<'_> {
                         }
                         continue;
                     };
+                    if !self.rg.on && self.rg.eligible && ann_ty.as_ref().is_some_and(crate::regions::mentions_static) {
+                        self.rg_late_on();
+                    }
                     // (`let _ = Foo;` with Foo a unit struct (or a const) is a value: dropped at once)
                     let local = !matches!(init, Expr::Path(None, p) if ident_of(p).is_some_and(|n| self.lookup(n).is_none()
                         && !self.prog.const_index.get(n).is_some_and(|&ci| self.prog.consts[ci as usize].stat.is_some())));
@@ -1481,6 +1489,10 @@ impl Cx<'_> {
                         if let Some(v) = v {
                             self.own_temp(v, t);
                         }
+                    }
+                    // (`let _: Covariant<'short> = c;`: the value flows into the annotation's type)
+                    if let Some(a) = ann_ty {
+                        self.rg_let_wild(a, init);
                     }
                     self.drop_temps(t0);
                 }

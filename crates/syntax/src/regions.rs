@@ -2,7 +2,7 @@
 //! summaries (`TySyn`) and of the program (`Ty`) carry no regions: the region checker reads these beside them.
 
 use crate::parse::{Bound, FnSig as PSig, GArg, GParam, Generics, Ty as PTy};
-use crate::types::{RAdtSyn, RImplSyn, RSigSyn, R_DYN_DEFAULT, R_ELIDED, R_ELIDED_ADT, R_STATIC, R_UNKNOWN};
+use crate::types::{RAdtSyn, RImplSyn, RSigSyn, R_BOUND, R_DYN_DEFAULT, R_ELIDED, R_ELIDED_ADT, R_FN, R_STATIC, R_UNKNOWN};
 
 const PRIMS: &[&str] = &[
     "i8", "i16", "i32", "i64", "i128", "isize", "u8", "u16", "u32", "u64", "u128", "usize", "f32", "f64", "bool", "char", "str",
@@ -173,6 +173,8 @@ pub struct Slots<'a> {
     /// A named lifetime (or `'static`) was seen: without one every region is elided, and the slots follow from the
     /// type alone, so the summary leaves them out
     pub any: bool,
+    /// Inside a fn pointer's type: its elided regions and the lifetimes it binds are its own (R_BOUND)
+    pub in_fn: u32,
 }
 
 impl<'a> Slots<'a> {
@@ -186,7 +188,7 @@ impl<'a> Slots<'a> {
                 GParam::Const(..) => {}
             }
         }
-        Slots { any: !lts.is_empty(), lts, tparams, self_slots: outer.map(|o| o.self_slots.as_slice()).unwrap_or(&[]) }
+        Slots { any: !lts.is_empty(), lts, tparams, self_slots: outer.map(|o| o.self_slots.as_slice()).unwrap_or(&[]), in_fn: 0 }
     }
 
     /// The outlives relations the well-formedness of the self types of projections in t implies
@@ -203,6 +205,8 @@ impl<'a> Slots<'a> {
 
     pub fn code(&mut self, l: Option<&str>) -> u8 {
         match l {
+            None | Some("'_") if self.in_fn > 0 => R_BOUND,
+            Some(l) if self.in_fn > 0 && l != "'static" && !self.lts.iter().any(|x| x == l) => R_BOUND,
             None | Some("'_") => R_ELIDED,
             Some("'static") => {
                 self.any = true;
@@ -283,7 +287,17 @@ impl<'a> Slots<'a> {
                 };
                 out.push(code);
             }
-            PTy::Path(Some(_), _) | PTy::Fn(..) | PTy::Impl(_) | PTy::Infer | PTy::Macro(_) => out.push(R_UNKNOWN),
+            // (a fn pointer: its parameters' regions, then its result's; those it binds are its own)
+            PTy::Fn(ps, r) => {
+                out.push(R_FN);
+                self.in_fn += 1;
+                for p in ps {
+                    self.slots(p, false, out);
+                }
+                self.slots(r, false, out);
+                self.in_fn -= 1;
+            }
+            PTy::Path(Some(_), _) | PTy::Impl(_) | PTy::Infer | PTy::Macro(_) => out.push(R_UNKNOWN),
             PTy::Never => {}
         }
     }

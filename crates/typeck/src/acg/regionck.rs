@@ -20,7 +20,7 @@ use super::{Cx, Loc, Sp};
 use crate::fxhash::FxMap as HashMap;
 use crate::parse::{Expr, GArg, Stmt, Ty as PTy};
 use crate::program::Program;
-use crate::types::{RSigSyn, Ty, R_DYN_DEFAULT, R_ELIDED, R_ELIDED_ADT, R_STATIC, R_UNKNOWN};
+use crate::types::{RSigSyn, Ty, R_BOUND, R_DYN_DEFAULT, R_ELIDED, R_ELIDED_ADT, R_FN, R_STATIC, R_UNKNOWN};
 
 /// Region variables of a value, aligned with the region slots of its type
 pub type RT = Vec<u32>;
@@ -339,7 +339,15 @@ pub fn count(prog: &Program, t: Ty, depth: u32) -> Option<usize> {
             }
             n
         }
-        Ty::Dyn(_) | Ty::Fn(_) => 1,
+        Ty::Dyn(_) => 1,
+        // (a fn pointer: its parameters' regions, then its result's)
+        Ty::Fn(ft) => {
+            let mut n = count(prog, ft.ret, depth + 1)?;
+            for &p in &ft.params {
+                n += count(prog, p, depth + 1)?;
+            }
+            n
+        }
         Ty::Assoc(_) => return None,
         _ => 0,
     })
@@ -557,15 +565,21 @@ impl Rg {
                     acc[k] = acc[k].join(v);
                 }
             }
+            // (contravariant in its parameters' regions and types, covariant in its result's)
             Ty::Fn(ft) => {
-                c.next();
-                let mut none = Codes { codes: Some(&[]), pos: 0, ok: true, parent: None };
-                for &p in &ft.params {
-                    // (the regions in a fn pointer's types are not followed, its type parameters are)
-                    none.codes = None;
-                    self.var_walk(prog, p, &mut none, v.then(Var::Contra), 0, acc, depth + 1);
+                if c.next() == R_FN {
+                    for &p in &ft.params {
+                        self.var_walk(prog, p, c, v.then(Var::Contra), nl, acc, depth + 1);
+                    }
+                    self.var_walk(prog, ft.ret, c, v, nl, acc, depth + 1);
+                } else {
+                    // (a type alias: the regions in it are not followed, its type parameters are)
+                    let mut none = Codes { codes: None, pos: 0, ok: true, parent: None };
+                    for &p in &ft.params {
+                        self.var_walk(prog, p, &mut none, v.then(Var::Contra), 0, acc, depth + 1);
+                    }
+                    self.var_walk(prog, ft.ret, &mut none, v, 0, acc, depth + 1);
                 }
-                self.var_walk(prog, ft.ret, &mut none, v, 0, acc, depth + 1);
             }
             Ty::Dyn(_) => {
                 let code = c.next();
@@ -589,6 +603,7 @@ impl Rg {
             match c.next() {
                 R_STATIC => STATIC,
                 R_ELIDED => elided(me),
+                R_BOUND => me.var(),
                 x if (x as usize) < lts.len() => lts[x as usize],
                 _ => {
                     c.ok = false;
@@ -672,11 +687,24 @@ impl Rg {
                 };
                 out.push(v);
             }
-            Ty::Fn(_) => {
-                // (a fn pointer's regions are not followed: a variable of its own)
-                let _ = c.next();
-                let v = self.var();
-                out.push(v);
+            // (a fn pointer: the regions it binds are its own, as are those elided in it)
+            // (written as a type alias (no R_FN): its regions are its own; the alias's one code is read)
+            Ty::Fn(ft) => {
+                let mut own = |me: &mut Rg| me.var();
+                if c.next() == R_FN {
+                    for &p in &ft.params {
+                        self.inst(prog, p, c, lts, targs, &mut own, out, depth + 1);
+                    }
+                    self.inst(prog, ft.ret, c, lts, targs, &mut own, out, depth + 1);
+                } else {
+                    let ok = c.ok;
+                    let mut none = Codes { codes: None, pos: 0, ok: true, parent: None };
+                    for &p in &ft.params {
+                        self.inst(prog, p, &mut none, lts, targs, &mut own, out, depth + 1);
+                    }
+                    self.inst(prog, ft.ret, &mut none, lts, targs, &mut own, out, depth + 1);
+                    c.ok = ok && none.ok;
+                }
             }
             Ty::Assoc(_) => c.ok = false,
             _ => {}
@@ -800,7 +828,13 @@ impl Rg {
                 self.constrain(sub[*k], sup[*k], v, sp);
                 *k += 1;
             }
-            Ty::Fn(_) => *k += 1,
+            // (contravariant in its parameters, covariant in its result)
+            Ty::Fn(ft) => {
+                for &p in &ft.params {
+                    self.rel(prog, p, sub, sup, k, v.then(Var::Contra), sp, depth + 1);
+                }
+                self.rel(prog, ft.ret, sub, sup, k, v, sp, depth + 1);
+            }
             _ => {}
         }
     }
@@ -866,6 +900,16 @@ impl Rg {
                     }
                 }
                 *k += c;
+                // (its type arguments are well formed: `Option<&'s &'l ()>` implies 'l: 's)
+                if depth < 4 && !is_closure(prog, sid) {
+                    if let Some((_, args)) = self.split_adt(prog, sid, &me) {
+                        for (&a, at) in prog.structs[sid as usize].args.clone().iter().zip(args) {
+                            if let Some(at) = at {
+                                self.implied(prog, a, &at, depth + 1);
+                            }
+                        }
+                    }
+                }
                 // (the fields: what the definition's types require of its parameters)
                 let base = prog.base_of(sid);
                 if prog.adt_regions.contains_key(&base) && depth < 3 {
@@ -899,7 +943,9 @@ impl Rg {
                     }
                 }
             }
-            Ty::Dyn(_) | Ty::Fn(_) => *k += 1,
+            Ty::Dyn(_) => *k += 1,
+            // (a fn pointer's types imply nothing)
+            Ty::Fn(_) => *k += count(prog, t, 0).unwrap_or(0),
             _ => {}
         }
     }
@@ -1157,7 +1203,7 @@ impl Cx<'_> {
                 }
                 let prog = self.prog;
                 let names = self.rg.lt_names.clone();
-                let mut s = crate::regions::Slots { lts: names, tparams: vec![], self_slots: &[], any: false };
+                let mut s = crate::regions::Slots { lts: names, tparams: vec![], self_slots: &[], any: false, in_fn: 0 };
                 let mut codes = vec![];
                 s.slots(ty, false, &mut codes);
                 let lts = self.rg.lts.clone();
@@ -1394,7 +1440,7 @@ impl Cx<'_> {
         let tree = match ann {
             Some(a) => {
                 let names = self.rg.lt_names.clone();
-                let mut s = crate::regions::Slots { lts: names, tparams: vec![], self_slots: &[], any: false };
+                let mut s = crate::regions::Slots { lts: names, tparams: vec![], self_slots: &[], any: false, in_fn: 0 };
                 let mut codes = vec![];
                 s.slots(a, false, &mut codes);
                 let lts = self.rg.lts.clone();
@@ -1411,6 +1457,27 @@ impl Cx<'_> {
             self.rg.flow(prog, it, t, &itr, &tree, super::borrowck::pos(init));
         }
         self.rg.locals.insert(loc, tree);
+    }
+
+    /// `let _: ann = init;`: init flows into a value of the annotation's type
+    pub(crate) fn rg_let_wild(&mut self, ann: &PTy, init: &Expr) {
+        if !self.rg_on() {
+            return;
+        }
+        let Some((it, itr)) = self.rt_expr(init) else { return };
+        let Ok(t) = self.parse_ty(ann) else { return };
+        let prog = self.prog;
+        let names = self.rg.lt_names.clone();
+        let mut s = crate::regions::Slots { lts: names, tparams: vec![], self_slots: &[], any: false, in_fn: 0 };
+        let mut codes = vec![];
+        s.slots(ann, false, &mut codes);
+        let lts = self.rg.lts.clone();
+        self.rg.dyn_infer = true;
+        let tree = self.rg.instantiate(prog, t, Some(&codes), &lts, &[], &mut |me| me.var());
+        self.rg.dyn_infer = false;
+        if let Some(tree) = tree {
+            self.rg.flow(prog, it, t, &itr, &tree, super::borrowck::pos(init));
+        }
     }
 
     /// `place = value;`
@@ -1494,7 +1561,7 @@ impl Cx<'_> {
                 if !crate::regions::names_lt(pt) {
                     continue;
                 }
-                let mut s = crate::regions::Slots { lts: rg.lt_names.clone(), tparams: vec![], self_slots: &[], any: false };
+                let mut s = crate::regions::Slots { lts: rg.lt_names.clone(), tparams: vec![], self_slots: &[], any: false, in_fn: 0 };
                 let mut codes = vec![];
                 s.slots(pt, false, &mut codes);
                 let flts = rg.lts.clone();
