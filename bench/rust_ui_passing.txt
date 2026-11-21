@@ -6016,6 +6016,7 @@ compile-fail	suggestions/case-difference-suggestions.rs
 compile-fail	suggestions/chain-method-call-mutation-in-place.rs
 compile-fail	suggestions/closure-arg-trailing-semicolon.rs
 compile-fail	suggestions/const-no-type.rs
+compile-fail	suggestions/const-pat-non-exaustive-let-new-var.rs
 compile-fail	suggestions/copied-and-cloned.rs
 compile-fail	suggestions/count2len.rs
 compile-fail	suggestions/crate-or-module-typo.rs
@@ -6102,6 +6103,7 @@ compile-fail	suggestions/issue-85945-check-where-clause-before-suggesting-unsize
 compile-fail	suggestions/issue-86100-tuple-paren-comma.rs
 compile-fail	suggestions/issue-86667.rs
 compile-fail	suggestions/issue-88696.rs
+compile-fail	suggestions/issue-88730.rs
 compile-fail	suggestions/issue-89064.rs
 compile-fail	suggestions/issue-89640.rs
 compile-fail	suggestions/issue-90213-expected-boxfuture-self-ice.rs
