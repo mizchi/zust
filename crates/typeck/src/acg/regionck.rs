@@ -1071,19 +1071,31 @@ impl Rg {
             return vec![];
         }
         let n = self.n as usize + 1;
-        let mut rev: Vec<Vec<u32>> = vec![vec![]; n];
+        // (what outlives each variable, as one array (CSR): no allocation per variable)
+        let mut start = vec![0u32; n + 1];
         for &(a, b, _) in &self.edges {
             if (a as usize) < n && (b as usize) < n {
-                rev[b as usize].push(a);
+                start[b as usize + 1] += 1;
+            }
+        }
+        for k in 0..n {
+            start[k + 1] += start[k];
+        }
+        let mut fill = start.clone();
+        let mut rev = vec![0u32; start[n] as usize];
+        for &(a, b, _) in &self.edges {
+            if (a as usize) < n && (b as usize) < n {
+                rev[fill[b as usize] as usize] = a;
+                fill[b as usize] += 1;
             }
         }
         let mut seen = vec![false; n];
-        let mut st: Vec<u32> = std::iter::once(STATIC).chain(self.univ.iter().map(|u| u.0)).collect();
+        let mut st: Vec<u32> = std::iter::once(STATIC).chain(self.univ.iter().map(|u| u.0)).filter(|&v| (v as usize) < n).collect();
         for &v in &st {
             seen[v as usize] = true;
         }
         while let Some(x) = st.pop() {
-            for &y in &rev[x as usize] {
+            for &y in &rev[start[x as usize] as usize..start[x as usize + 1] as usize] {
                 if !seen[y as usize] {
                     seen[y as usize] = true;
                     st.push(y);
@@ -1101,33 +1113,55 @@ impl Rg {
             return vec![];
         }
         let n = self.n as usize + 1;
-        // (the locals (the first 64) whose types' regions each variable must outlive: those of its own, and those of
-        // what it outlives, to a fixpoint)
+        // (the locals (the first 64) each variable is a region of the type of)
         let locs: Vec<(Loc, &RT)> = self.locals.iter().map(|(&l, t)| (l, t)).take(64).collect();
-        let mut reach = vec![0u64; n];
+        let mut own = vec![0u64; n];
         for (i, (_, tr)) in locs.iter().enumerate() {
             for &v in tr.iter() {
                 if v != STATIC && (v as usize) < n {
-                    reach[v as usize] |= 1 << i;
+                    own[v as usize] |= 1 << i;
                 }
             }
         }
-        for _ in 0..n.min(64) {
-            let mut changed = false;
-            for &(a, b, _) in &self.edges {
-                let (a, b) = (a as usize, b as usize);
-                if a < n && b < n && reach[b] & !reach[a] != 0 {
-                    reach[a] |= reach[b];
-                    changed = true;
-                }
+        // (what each variable outlives, as one array (CSR))
+        let mut start = vec![0u32; n + 1];
+        for &(a, b, _) in &self.edges {
+            if (a as usize) < n && (b as usize) < n {
+                start[a as usize + 1] += 1;
             }
-            if !changed {
-                break;
+        }
+        for k in 0..n {
+            start[k + 1] += start[k];
+        }
+        let mut fill = start.clone();
+        let mut adj = vec![0u32; start[n] as usize];
+        for &(a, b, _) in &self.edges {
+            if (a as usize) < n && (b as usize) < n {
+                adj[fill[a as usize] as usize] = b;
+                fill[a as usize] += 1;
             }
         }
         let mut out = vec![];
-        for &(p, r) in self.reborrows.iter().chain(&self.owned_borrows) {
-            let m = reach.get(r as usize).copied().unwrap_or(0);
+        let mut seen = vec![0u32; n];
+        let mut st = vec![];
+        for (k, &(p, r)) in self.reborrows.iter().chain(&self.owned_borrows).enumerate() {
+            if r as usize >= n {
+                continue;
+            }
+            let stamp = k as u32 + 1;
+            let mut m = 0u64;
+            st.clear();
+            st.push(r);
+            seen[r as usize] = stamp;
+            while let Some(x) = st.pop() {
+                for &y in &adj[start[x as usize] as usize..start[x as usize + 1] as usize] {
+                    if seen[y as usize] != stamp {
+                        seen[y as usize] = stamp;
+                        m |= own[y as usize];
+                        st.push(y);
+                    }
+                }
+            }
             if m != 0 {
                 out.push((p, (0..locs.len()).filter(|&i| m >> i & 1 == 1).map(|i| locs[i].0).collect()));
             }
@@ -1991,7 +2025,7 @@ impl Cx<'_> {
         // (the prelude writes no lifetimes: what its results borrow is not known from elision. A closure's call
         // elides as a fn)
         let prelude = prog.item_of.get(id as usize).copied().flatten().is_none_or(|i| i >= prog.prelude_from) && !prog.closures.contains_key(&id);
-        let mut rg = std::mem::take(&mut self.rg);
+        let rg = &mut self.rg;
         let lts: Vec<u32> = rs.as_deref().map(|r| r.lts.iter().map(|_| rg.var()).collect()).unwrap_or_default();
         let mut targs: Vec<Option<RT>> = sol.iter().map(|t| t.and_then(|t| rg.fresh(prog, t))).collect();
         // (type arguments written (`f::<&'a u8>()`): with the regions they name)
@@ -2070,12 +2104,11 @@ impl Cx<'_> {
         if has_recv {
             atrees.push((recv.map(|r| (None, r.0)), recv_sp(&recv_info, sp)));
         }
-        self.rg = rg;
         for a in args {
             let t = self.rt_expr(a).map(|x| (Some(x.0), x.1));
             atrees.push((t, super::borrowck::pos(a)));
         }
-        let mut rg = std::mem::take(&mut self.rg);
+        let rg = &mut self.rg;
         for (i, ((at, asp), pt)) in atrees.iter().zip(&ptrees).enumerate() {
             if let (Some((aty, at)), Some(pt), Some(&ty)) = (at, pt, params.get(i)) {
                 rg.flow(prog, aty.unwrap_or(ty), ty, at, pt, *asp);
@@ -2129,7 +2162,6 @@ impl Cx<'_> {
                 rg.last_call = Some((rg.depth, ret, rtr));
             }
         }
-        self.rg = rg;
     }
 
     /// The tree of a method call's receiver as passed: recv's place, through `derefs` references, then borrowed again
