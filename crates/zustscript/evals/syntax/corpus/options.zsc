@@ -46,6 +46,19 @@ fn validate(d: Draft, id: i32) -> Result<Todo, FormError> {
   }
 }
 
+// checking every element: the first error is carried out of the loop by hand, and push builds a new array each time (O(n²))
+fn titles(ds: Array<Draft>) -> Result<Array<String>, FormError> {
+  let mut out = [];
+  let mut err = None;
+  for d in ds {
+    match non_empty("title", d.title) {
+      Err(e) => { err = Some(e); break; },
+      Ok(t) => { out = out.push(t); },
+    }
+  }
+  match err { Some(e) => Err(e), None => Ok(out) }
+}
+
 fn rename(todos: Array<Todo>, id: i32, d: Draft) -> Result<Array<Todo>, FormError> {
   match find(todos, id) {
     None => Err(NotFound(id)),

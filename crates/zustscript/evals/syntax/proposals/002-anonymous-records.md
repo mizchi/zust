@@ -21,7 +21,7 @@
   - 例: `props: { todo: Todo, onToggle: (id: i32) => () }`
 - **`type Todo = { … }` は、TS と同じく構造的な型の別名**
   - フィールドの名前の集合とそれぞれの型が同じなら、同じ型(順序は問わない)
-    - 任意のフィールド(`note?: T`、003)は、任意かどうかも比べる
+    - 任意のフィールド(`note?: T`、003)の印は比べない。`{ note?: T }` と `{ note: Option<T> }` は同じ型(003 の C)
   - `Todo` の値を、同じ形の無名の型を受ける関数に渡せる。逆も同じ
   - 名前は、エラーメッセージや hover での表示と、`@wasm` の Rust の `type` 別名に使う(E)
 - **`type` はレコード以外にも書ける**
@@ -153,10 +153,14 @@
   - 小さな props は、今までどおり無名の型をその場に書いてよい(`TodoItem`)
 - JSX の props の検査は今までどおり(足りない prop、余分な prop、型の違いはエラー)
 - **任意のフィールド** `title?: String` は、003 で決める(003 の C を参照)
-  - 読むときの型は `Option<String>`。期待する型が分かっている所では、リテラルと JSX で省略できる
-  - ただし `{ title?: String }` と `{ title: Option<String> }` は**別の型**
-    - JS での持ち方が違うため(任意のフィールドは `undefined`、`Option` は `Option` の表現)
-  - A の構造的な等しさでも、任意かどうかを比べる
+  - `title?: String` は `title: Option<String>` と**同じ型**。違いは、省略できるという印だけ
+    - 印は型の一部ではない。A の構造的な等しさでも比べない
+    - zsc の中では、どちらも Option の表現で持つ
+  - 読むときの型は `Option<String>`
+  - 印のあるフィールドは、リテラルと JSX の属性で省略できる。省略したら `None`
+    - 注釈のないリテラルの省略は、003 の候補つきの型変数で決める
+  - 印のあるフィールドのリテラルの値と JSX の属性の値には、`String` の値をそのまま書ける(Some として受ける。003)
+  - TS との境界(`pub` の入口と出口、コンポーネントの props)では、`None` はキーなし、`Some(v)` は `v`(下の「出力」)
 
 ### E. `@wasm` での struct の名前
 
@@ -178,6 +182,9 @@
     - `{ total: f64, done: f64 }` は `__zs_Rec_4done_f64_5total_f64`
     - `{ a: i32, b: i32 }` は `__zs_Rec_1a_i32_1b_i32`、`{ a_i32_b: i32 }` は `__zs_Rec_7a_i32_b_i32`
     - `{ p: { x: f64 }, y: f64 }` は `__zs_Rec_1p_R_1x_f64_E_1y_f64`、`{ p: { x: f64, y: f64 } }` は `__zs_Rec_1p_R_1x_f64_1y_f64_E`
+  - 型引数のある enum(`Option<f64>`)は、名前の後に型引数を印 `A` と `E` で囲む: `6Option_A_f64_E`
+  - **任意のフィールドの印は、名前に入れない**(003。印は型の一部ではないため)
+    - `{ x?: f64 }` と `{ x: Option<f64> }` は、同じ struct `__zs_Rec_1x_6Option_A_f64_E`
   - 長くなるのは受け入れる(読むときは別名の `type` を見る)
   - 形から名前への写像が単射であることは、lower のテストで確かめる
   - `#[allow(non_camel_case_types)]` と `#[derive(Clone, Copy, PartialEq)]` を付ける
@@ -289,6 +296,11 @@ export type Meters = { readonly v: f64 } & { readonly __zsc_nominal: "Meters" };
 export declare namespace Meters { function make(v: { readonly v: f64 }): Meters; }
 ```
 
+- 任意のフィールドを持つ型(003)
+  - zsc の中のオブジェクトは、省略したフィールドにも `None` を持つ
+  - TS へ渡すとき(`pub` の戻り値、JSX の props)は、`None` のキーを書かない。`Some(v)` は `v` を書く
+  - TS から受けるとき(`pub` の引数、コンポーネントの props)は、キーが無い、`undefined`、`null` を `None` にする
+  - そのため、この型の値は境界で作り直す。`.d.ts` は `readonly note?: string | undefined`
 - `interface` ではなく `type` を出す(`type` は構造的な別名なので、TS でも同じ意味の書き方にする)
 - `@nominal` の型は、数値と同じく brand を付ける。TS から `Celsius` や素の `{ v }` を渡すと、TS の型エラーになる
   - 値は `Meters.make({ v: 1.0 })` で作る
@@ -317,6 +329,7 @@ struct ZsMeters { v: f64 }   // @nominal は自分の struct
   - `type M2 = Meters` は別名の表に入り、`Meters` に展開される
   - TS 向けのコンストラクタは namespace の `make` に出す。そのため、同じ名前の `pub fn` と JS の export が衝突しない
 - `Ty::Fn` の引数名は、等価性で無視する別のフィールドに持つ(`derive(PartialEq)` に混ざらないように)
+- `Ty::Rec` のフィールドの任意の印(003)も同じく、等価性で無視する別のフィールドに持つ。struct 名にも入れない
   - ty() の `(` の中で、名前のある要素とない要素が混ざったらエラー
 - 分割代入した引数は、内部では `__zs_p0` という名前の引数にして、本体の先頭で展開する
   - r4 の `$p0` は Rust の識別子にならないので、lower.rs が予約している `__zs` の名前空間にした
@@ -371,6 +384,7 @@ struct ZsMeters { v: f64 }   // @nominal は自分の struct
   - `@wasm` ではスロットに分解されて落ちる。同じソースで、JS と wasm の結果が変わりうる
   - 差分テストは型にあるフィールドだけを比べる(A)。今は JS の挙動のまま
   - 案: `pub` な関数の入口(TS から呼ばれる所)でだけ、型にあるフィールドを並べて作り直す
+  - 任意のフィールドを持つ型は、003 で境界で作り直すことになった。その型では余分なプロパティが落ちる
 
 ## 改訂履歴
 
@@ -385,7 +399,8 @@ struct ZsMeters { v: f64 }   // @nominal は自分の struct
   - props の推奨の形(`type TodoListProps = { … }` と `fn TodoList({ … }: TodoListProps)`)を載せ、`TodoList` の例を直した
   - formatter は戻り値の関数型に括弧を付けることにした(`-> ((x: i32) => i32) {`)。`adder` の例を直した
   - spread が 1 つの間の書き方(`{ ...defaults, color: props.color }`)を書き、`themed` の例を足した
-  - 任意のフィールドは 003 に従うと書き直した。`title?: T` は `title: Option<T>` とは別の型(JS での持ち方が違う)。構造的な等しさでも任意かどうかを比べる
+  - 任意のフィールドは 003 に従うと書き直した。`title?: T` は `title: Option<T>` と同じ型で、違いは省略できる印だけ。構造的な等しさと struct 名に印は入らない。TS との境界では、`None` のキーを書かない(003 r1 の決定 1 に合わせた)
+  - struct 名に、型引数のある enum の書き方(`6Option_A_f64_E`)を足した(003 r1 の決定 1 に合わせた)
   - 代替案に、`_` だけの struct 名と、JSX の属性の `{{ x }}` をブロックとして読む案を足した
   - 未決事項: props の 2 回書きと formatter の括弧を外した。レコードの `==` を足した(001 の enum の `==` と一緒に)
 
