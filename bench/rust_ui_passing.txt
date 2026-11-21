@@ -1159,6 +1159,7 @@ run-pass	closures/2229_closure_analysis/run_pass/mut_ref_struct_mem.rs
 run-pass	closures/2229_closure_analysis/run_pass/nested-closure.rs
 check-pass	closures/2229_closure_analysis/run_pass/tuple-struct-pattern-matching-with-methods.rs
 run-pass	closures/2229_closure_analysis/run_pass/unsafe_ptr.rs
+compile-fail	closures/2229_closure_analysis/unique-borrows-are-invariant-1.rs
 compile-fail	closures/2229_closure_analysis/unique-borrows-are-invariant-2.rs
 run-pass	closures/2229_closure_analysis/unresolvable-upvar-issue-87987.rs
 compile-fail	closures/add_semicolon_non_block_closure.rs

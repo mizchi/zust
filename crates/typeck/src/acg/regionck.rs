@@ -1978,6 +1978,77 @@ impl Cx<'_> {
         (count(prog, t, 0) == Some(tree.len())).then_some((t, tree))
     }
 
+    /// A closure made where nothing was expected (by its definition base, of type arguments args): its calls share
+    /// one signature (clo_targs, made here), and what its body stores of its parameters in places it captures
+    /// (`x.0 = input`, `v.push(input)`) flows there in the function it is in: the function knows those places
+    pub(crate) fn rg_closure_stores(&mut self, base: u32, args: &[Ty], link: Option<usize>, body: &Expr, params: &[(String, usize)], caps: &[String]) {
+        if !self.rg_on() || params.is_empty() {
+            return;
+        }
+        let prog = self.prog;
+        let mut targs: Vec<Option<RT>> = args.iter().map(|&t| self.rg.fresh(prog, t)).collect();
+        if let (Some(g), Some(last)) = (link, targs.len().checked_sub(1)) {
+            if let Some(t) = targs.get(g).cloned() {
+                targs[last] = t;
+            }
+        }
+        self.rg.clo_targs.retain(|x| x.0 != base);
+        self.rg.clo_targs.push((base, targs.clone()));
+        let stmts: Vec<&Expr> = match strip(body) {
+            Expr::Block(_, _, b) => b.stmts.iter().filter_map(|s| if let Stmt::Expr(e, _) = s { Some(e) } else { None }).collect(),
+            e => vec![e],
+        };
+        fn root(e: &Expr) -> Option<&str> {
+            match strip(e) {
+                Expr::Path(None, p) if p.segs.len() == 1 => Some(p.segs[0].name.as_str()),
+                Expr::Field(x, _, _) | Expr::Index(x, _, _) => root(x),
+                Expr::Unary(op, x, _) if op == "*" => root(x),
+                _ => None,
+            }
+        }
+        let param = |e: &Expr| match strip(e) {
+            Expr::Path(None, p) if p.segs.len() == 1 => params.iter().find(|x| x.0 == p.segs[0].name).map(|x| x.1),
+            _ => None,
+        };
+        for e in stmts {
+            let (place, g, push) = match strip(e) {
+                Expr::Assign(l, r) => match param(r) {
+                    Some(g) => (&**l, g, false),
+                    None => continue,
+                },
+                Expr::MethodCall(recv, m, _, a, _) if m == "push" && a.len() == 1 => match param(&a[0]) {
+                    Some(g) => (&**recv, g, true),
+                    None => continue,
+                },
+                _ => continue,
+            };
+            if !root(place).is_some_and(|r| caps.iter().any(|c| c == r)) {
+                continue;
+            }
+            let (Some(Some(ptr)), Some(&pty)) = (targs.get(g), args.get(g)) else { continue };
+            let Some((mut t, mut tr, _)) = self.rt_place(place) else { continue };
+            // (`v.push(input)` of a Vec: its elements')
+            if push {
+                while let Ty::Ref(_, i) = t {
+                    if tr.is_empty() {
+                        break;
+                    }
+                    tr.remove(0);
+                    t = *i;
+                }
+                let Ty::Struct(sid) = t else { continue };
+                let sd = &prog.structs[sid as usize];
+                if prog.structs[prog.base_of(sid) as usize].name != "Vec" || sd.args.len() != 1 {
+                    continue;
+                }
+                t = sd.args[0];
+            }
+            let sp = super::borrowck::pos(e);
+            let ptr = ptr.clone();
+            self.rg.flow(prog, pty, t, &ptr, &tr, sp);
+        }
+    }
+
     /// A call through a fn pointer (f: the callee's value, of type t once dereferenced): the arguments flow into its
     /// parameters' regions, the result is of its result's
     pub(crate) fn rg_fnptr_call(&mut self, f: &Expr, t: Ty, args: &[&Expr]) {

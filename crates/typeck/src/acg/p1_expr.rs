@@ -1698,6 +1698,13 @@ impl Cx<'_> {
                 if let Some(&(_, g)) = ret_param.and_then(|i| pslots.iter().find(|x| x.0 == i)) {
                     self.clo_ret_param.push((cd.sid, g));
                 }
+                // (what its body stores of its parameters in what it captures: `|input| x.0 = input`)
+                let names: Vec<(String, usize)> = pslots.iter().filter_map(|&(i, g)| match &ins.get(i)?.0 {
+                    Pat::Ident(_, _, n, None) => Some((n.clone(), g)),
+                    _ => None,
+                }).collect();
+                let link = self.clo_ret_param.iter().find(|x| x.0 == cd.sid).map(|x| x.1);
+                self.rg_closure_stores(cd.sid, &args, link, body, &names, &cd.captures);
             }
         }
         // (the region signature its body is checked with: from a bound not the prelude's, else from annotated

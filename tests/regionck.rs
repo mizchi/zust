@@ -982,3 +982,14 @@ fn parameter_well_formedness_at_calls() {
     assert!(d.len() == 1 && d[0].0 == 11 && d[0].1.contains("does not live long enough"), "{d:?}");
     assert_eq!(check("struct Foo<'b>(Option<&'b ()>);\nimpl<'b> Foo<'b> {\n    fn xmute<'a>(&'a self, u: &'b u32) -> &'a u32 {\n        u\n    }\n}\nfn main() {\n    let f2 = Foo(None);\n    let pointer = Box::new(42);\n    let ok = f2.xmute(&pointer);\n    println!(\"{}\", ok);\n}\n"), vec![]);
 }
+
+/// A closure made where nothing was expected that stores its parameter in what it captures: the function it is in
+/// sees the store, and its calls' arguments flow there
+#[test]
+fn closure_stores_its_parameter_in_a_capture() {
+    let d = check("fn extend<'a, 'b>(x: &mut (&'a str,), y: &'b str) {\n    let mut closure = |input| x.0 = input;\n    closure(y);\n}\nfn main() {}\n");
+    assert!(d.len() == 1 && d[0].0 == 2, "{d:?}");
+    let d = check("fn main() {\n    let mut v: Vec<&u8> = Vec::new();\n    {\n        let mut add = |s| v.push(s);\n        let x = 1;\n        add(&x);\n    }\n    let _ = v.len();\n}\n");
+    assert!(d.len() == 1 && d[0].1.contains("does not live long enough"), "{d:?}");
+    assert_eq!(check("fn extend<'a>(x: &mut (&'a str,), y: &'a str) {\n    let mut closure = |input| x.0 = input;\n    closure(y);\n}\nfn main() {}\n"), vec![]);
+}
