@@ -26,7 +26,7 @@
 
 ## Status
 
-Numbers measured <!-- measured -->2026-11-20, 1433239<!-- /measured --> by CI on each push to main (bench.yml runs
+Numbers measured <!-- measured -->2026-11-21, e3aedce<!-- /measured --> by CI on each push to main (bench.yml runs
 `bench/ci_bench.py` and `bench/rust_ui.py`, then `scripts/update_readme.py` writes them here). Times come from shared
 GitHub Actions runners and vary by about ±20%; the instruction counts (valgrind) do not.
 
@@ -38,10 +38,10 @@ only the tests it can be asked to handle (no nightly features, auxiliary crates 
 <!-- auto:ui -->
 | kind | applicable | pass |
 |---|---:|---:|
-| run-pass (builds, runs, same output) | 2385 | 1776 (74.5%) |
+| run-pass (builds, runs, same output) | 2385 | 1778 (74.5%) |
 | check-pass (accepted by `zustc check`) | 1807 | 1459 (80.7%) |
 | build-pass | 135 | 98 (72.6%) |
-| compile-fail (rejected at an annotated line) | 7358 | 3587 (48.7%) |
+| compile-fail (rejected at an annotated line) | 7358 | 3589 (48.8%) |
 <!-- /auto:ui -->
 
 [What is supported](#what-is-supported) breaks this down by area.
@@ -53,21 +53,21 @@ Build speed, build cache size and LSP latency on generated programs of 1000 / 50
 <!-- auto:kpi -->
 | KPI | gen1000 | gen5000 |
 |---|---:|---:|
-| cold build | 124 ms | 546 ms |
-| no-op build | 0.9 ms | 0.9 ms |
-| build after editing one function | 20.1 ms | 70.3 ms |
-| `check` | 93 ms | 458 ms |
+| cold build | 165 ms | 698 ms |
+| no-op build | 1.3 ms | 1.3 ms |
+| build after editing one function | 25.7 ms | 86.2 ms |
+| `check` | 129 ms | 618 ms |
 | no-op build (instructions) | 0.6 M | 0.6 M |
-| edit one function (instructions) | 123.8 M | 589.2 M |
-| `check` (instructions) | 776.8 M | 3835.7 M |
+| edit one function (instructions) | 123.8 M | 589.0 M |
+| `check` (instructions) | 776.3 M | 3833.5 M |
 | build cache on disk | 387.2 KiB | 1902.8 KiB |
 | binary | 324.0 KiB | 1558.3 KiB |
-| cold build peak RSS | 17.9 MiB | 51.9 MiB |
+| cold build peak RSS | 18.0 MiB | 51.9 MiB |
 
 | zust-analyzer (zustc's own sources) | |
 |---|---:|
-| p50: definition, hover, completion, references, rename | 0.59 ms / 0.45 ms / 0.96 ms / 3.76 ms / 0.47 ms |
-| startup until indexed | 124 ms |
+| p50: definition, hover, completion, references, rename | 1.02 ms / 0.75 ms / 1.71 ms / 4.99 ms / 0.67 ms |
+| startup until indexed | 165 ms |
 | peak RSS | 76.4 MiB |
 <!-- /auto:kpi -->
 
@@ -347,10 +347,10 @@ the measured numbers. The [reports](docs/reports/) explain each step.
 
 ### Overall
 
-- [x] tests/ui run-pass: <!-- total:run-pass -->74.5% (1776 / 2385)
+- [x] tests/ui run-pass: <!-- total:run-pass -->74.5% (1778 / 2385)
 - [x] tests/ui check-pass: <!-- total:check-pass -->80.7% (1459 / 1807)
 - [x] tests/ui build-pass: <!-- total:build-pass -->72.6% (98 / 135)
-- [ ] tests/ui compile-fail (an error on an annotated line): <!-- total:compile-fail -->48.7% (3587 / 7358)
+- [ ] tests/ui compile-fail (an error on an annotated line): <!-- total:compile-fail -->48.8% (3589 / 7358)
 - [x] real crates: fnv, adler2, hex, itoa, rustc-hash and cfg-if build and give the same output (6 / 6)
 - [x] zust-analyzer answers like rust-analyzer: 95.4% (rust-analyzer: 96.2%)
 
