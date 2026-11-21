@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795223555368,
+  "lastUpdate": 1795223557970,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -74163,6 +74163,85 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/mizchi/zust/commit/143323981aa57c9742aca98db9253b3e39270e74"
         },
         "date": 1795212865366,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "parity documentSymbol (名前の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity workspace/symbol (上位 20 の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity definition (行き先の一致)",
+            "value": 96.774,
+            "unit": "%"
+          },
+          {
+            "name": "parity hover (名前を含む)",
+            "value": 92.5,
+            "unit": "%"
+          },
+          {
+            "name": "parity references (数の一致)",
+            "value": 92.105,
+            "unit": "%"
+          },
+          {
+            "name": "parity documentHighlight (数の一致)",
+            "value": 93.939,
+            "unit": "%"
+          },
+          {
+            "name": "parity rename (書き換えの一致)",
+            "value": 88.235,
+            "unit": "%"
+          },
+          {
+            "name": "parity signatureHelp (名前・引数の数・今の引数の一致)",
+            "value": 94.737,
+            "unit": "%"
+          },
+          {
+            "name": "parity completion `x.\\|` (書いてある名前を含む)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity completion `na\\|me` (同)",
+            "value": 80.769,
+            "unit": "%"
+          },
+          {
+            "name": "parity 一致の平均",
+            "value": 93.906,
+            "unit": "%"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "miz404@gmail.com",
+            "name": "Kotaro Chikuba",
+            "username": "mizchi"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "e3aedce67dd6162f43983638362fef0ed85cf6da",
+          "message": "Merge pull request #18 from mizchi/claude/compat-next10\n\nStatic bound checks via impl self types and blanket bounds, two-phase compound assignment, Infallible",
+          "timestamp": "2026-11-21T10:08:03+09:00",
+          "tree_id": "d1d2e013aea62c0e06bbdf075b21f5c713de2e42",
+          "url": "https://github.com/mizchi/zust/commit/e3aedce67dd6162f43983638362fef0ed85cf6da"
+        },
+        "date": 1795223557379,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
