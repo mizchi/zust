@@ -195,6 +195,9 @@ pub struct Bk {
     pub stmt_temps: Vec<u32>,
     /// The temporaries of the `let` initializers being lowered that are followed (see direct_temps): their addresses
     pub direct: Vec<usize>,
+    /// Loans the region check found must outlive the function (a reborrow through a parameter flowing into a
+    /// universal region): live from where each is made to the end (sorted)
+    pub forever: Vec<u32>,
 }
 
 /// The temporaries of a `let` initializer that are followed: the operands of `&` passed directly to its outermost call
@@ -739,9 +742,10 @@ impl Bk {
             }
         }
         let is_live = |live: &[u64], l: u32| live.get(l as usize / 64).is_some_and(|w| w >> (l % 64) & 1 == 1);
-        // (the loans live at a point: held by a local that is live after the point)
+        // (the loans live at a point: held by a local that is live after the point, or stored where they outlive
+        // the function)
         let live_loans = |st: &State, live: &[u64]| -> Vec<u32> {
-            let mut out = vec![];
+            let mut out = st.escaped.clone();
             for (l, ls) in &st.holds {
                 if is_live(live, *l) {
                     out.extend_from_slice(ls);
@@ -823,6 +827,9 @@ impl Bk {
                         Acc::Borrow(ln) => {
                             if let Ok(i) = st.dead.binary_search(ln) {
                                 st.dead.remove(i);
+                            }
+                            if self.forever.binary_search(ln).is_ok() {
+                                add_sorted(&mut st.escaped, *ln);
                             }
                         }
                         Acc::Move => {
@@ -2011,6 +2018,13 @@ impl Cx<'_> {
         }
         let mut bk = std::mem::take(&mut self.bk);
         bk.edges = self.b.cfg_edges();
+        // (the reborrows the region check found must outlive the function)
+        if self.rg.on && !self.rg.rerun && self.rg.closure.is_none() {
+            let mut f: Vec<u32> = self.rg.forever().into_iter().filter_map(|p| bk.loan_of.get(&p).copied()).collect();
+            f.sort_unstable();
+            f.dedup();
+            bk.forever = f;
+        }
         let r = bk.check(self.b.n_blocks());
         self.bk = bk;
         match r {

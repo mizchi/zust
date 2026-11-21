@@ -140,6 +140,9 @@ pub struct Rg {
     pub rerun: bool,
     /// An impl's method: the tree of its self type (what `Self { .. }` builds)
     pub self_tree: Option<(Ty, RT)>,
+    /// The region of each reborrow through a reference (`&mut *x`, `&v[0]` with v a reference), by the address of
+    /// its place: one that must outlive a universal region lives to the function's end (Rg::forever)
+    pub reborrows: Vec<(usize, u32)>,
 }
 
 /// Closure region codes (Rg::closure): a placeholder (a region the expected signature binds), one from outside
@@ -995,6 +998,35 @@ impl Rg {
         self.wf_no_fields = false;
     }
 
+    /// The places (addresses) of the reborrows whose region must outlive a universal region ('static too): the loan
+    /// is live from where it is made to the end of the function
+    pub fn forever(&self) -> Vec<usize> {
+        if self.reborrows.is_empty() {
+            return vec![];
+        }
+        let n = self.n as usize + 1;
+        let mut rev: Vec<Vec<u32>> = vec![vec![]; n];
+        for &(a, b, _) in &self.edges {
+            if (a as usize) < n && (b as usize) < n {
+                rev[b as usize].push(a);
+            }
+        }
+        let mut seen = vec![false; n];
+        let mut st: Vec<u32> = std::iter::once(STATIC).chain(self.univ.iter().map(|u| u.0)).collect();
+        for &v in &st {
+            seen[v as usize] = true;
+        }
+        while let Some(x) = st.pop() {
+            for &y in &rev[x as usize] {
+                if !seen[y as usize] {
+                    seen[y as usize] = true;
+                    st.push(y);
+                }
+            }
+        }
+        self.reborrows.iter().filter(|&&(_, r)| seen.get(r as usize).copied().unwrap_or(false)).map(|&(p, _)| p).collect()
+    }
+
     /// x outlives y: known (implied bounds), or required (wf)
     fn imp_rel(&mut self, x: u32, y: u32) {
         match self.wf_sp {
@@ -1335,6 +1367,9 @@ impl Cx<'_> {
                     }
                 }
                 // (a reborrow through references: it lives no longer than they do)
+                if !derefs.is_empty() && self.rg.closure.is_none() {
+                    self.rg.reborrows.push((&**x as *const Expr as usize, r));
+                }
                 for d in derefs {
                     self.rg.edge(d, r, sp);
                 }
