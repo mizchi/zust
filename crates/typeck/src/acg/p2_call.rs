@@ -857,6 +857,20 @@ impl Cx<'_> {
                     self.bk.activate = Some((act, tid));
                 }
             } else if matches!(bk_recv_ty, Ty::Ref(true, _)) && self.bk.op_call != e as *const Expr as usize {
+                // (an argument that names the receiver (`v.push(v.pop().unwrap())`): the two-phase borrow's
+                // reservation, a shared loan of the place, lasts while the arguments are evaluated)
+                if let (Some(borrowck::Ev::Acc(place, borrowck::Acc::Borrow(ln), sp)), Some(n)) = (&ev, borrowck::root_local(recv)) {
+                    if margs.iter().any(|a| borrowck::mentions(a, n)) {
+                        let l = &self.bk.loans[*ln as usize];
+                        let res = borrowck::Loan { place: l.place.clone(), mutable: false, sp: l.sp, at: l.at, quiet: l.quiet, capture: l.capture };
+                        let rs = self.bk.loans.len() as u32;
+                        self.bk.loans.push(res);
+                        self.bk.reserved.push(rs);
+                        self.bk_push(Some(borrowck::Ev::Acc(place.clone(), borrowck::Acc::Borrow(rs), *sp)));
+                        self.bk_call_temp(&[borrowck::Src::Loan(rs)], true);
+                        bk_op_temp = true;
+                    }
+                }
                 bk_late = ev;
             } else {
                 // (an operator's `&mut self` lasts until the call: `x += x` moves x while it is borrowed)
@@ -866,7 +880,17 @@ impl Cx<'_> {
                     self.bk_call_temp(&[borrowck::Src::Loan(ln)], true);
                     bk_op_temp = true;
                 } else {
+                    // (a shared receiver an argument names (`v.get({ v.push(2); 0 })`): its loan lasts while the
+                    // arguments are evaluated)
+                    let hold = match (&ev, borrowck::root_local(recv)) {
+                        (Some(borrowck::Ev::Acc(_, borrowck::Acc::Borrow(ln), _)), Some(n)) if margs.iter().any(|a| borrowck::mentions(a, n)) => Some(*ln),
+                        _ => None,
+                    };
                     self.bk_push(ev);
+                    if let Some(ln) = hold {
+                        self.bk_call_temp(&[borrowck::Src::Loan(ln)], true);
+                        bk_op_temp = true;
+                    }
                 }
             }
         }
@@ -913,10 +937,11 @@ impl Cx<'_> {
             let srcs = self.bk_frame_end();
             self.bk_flow_into(recv, &srcs);
         }
-        self.bk_push(bk_late);
+        // (the arguments' and the reservation's loans end at the call, before a `&mut self` borrow is taken)
         if bk_op_temp {
             self.bk_call_temps_end(t0);
         }
+        self.bk_push(bk_late);
         r
     }
 

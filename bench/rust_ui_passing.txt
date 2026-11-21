@@ -977,9 +977,12 @@ check-pass	borrowck/struct-field-move-with-drop-borrow.rs
 run-pass	borrowck/struct-with-reference-to-trait-5708.rs
 compile-fail	borrowck/suggest-as-ref-on-mut-closure.rs
 compile-fail	borrowck/suggest-assign-rvalue.rs
+compile-fail	borrowck/suggest-local-var-double-mut.rs
+compile-fail	borrowck/suggest-local-var-imm-and-mut.rs
 compile-fail	borrowck/suggest-lt-on-ty-alias-w-generics.rs
 compile-fail	borrowck/suggest-mut-iterator.rs
 compile-fail	borrowck/suggest-ref-mut-issue-118596.rs
+compile-fail	borrowck/suggest-storing-local-var-for-vector.rs
 compile-fail	borrowck/suggestions/overloaded-index-not-mut-but-should-be-mut.rs
 compile-fail	borrowck/suggestions/overloaded-index-without-indexmut.rs
 compile-fail	borrowck/tainted-promoteds.rs
@@ -988,9 +991,12 @@ check-pass	borrowck/tuple-field-move-with-drop-borrow.rs
 compile-fail	borrowck/two-phase-across-loop.rs
 run-pass	borrowck/two-phase-baseline.rs
 run-pass	borrowck/two-phase-bin-ops.rs
+compile-fail	borrowck/two-phase-cannot-nest-mut-self-calls.rs
 run-pass	borrowck/two-phase-control-flow-split-before-activation.rs
 run-pass	borrowck/two-phase-method-receivers.rs
+compile-fail	borrowck/two-phase-multi-mut.rs
 run-pass	borrowck/two-phase-multiple-activations.rs
+compile-fail	borrowck/two-phase-sneaky.rs
 compile-fail	borrowck/two-phase-surprise-no-conflict.rs
 compile-fail	borrowck/unboxed-closures-move-upvar-from-non-once-ref-closure.rs
 compile-fail	borrowck/uninitalized-in-match-arm-issue-126133.rs
@@ -1289,6 +1295,7 @@ run-pass	codegen/trait-objects-slice-coercion.rs
 compile-fail	codemap_tests/bad-format-args.rs
 compile-fail	codemap_tests/coherence-overlapping-inherent-impl-trait.rs
 compile-fail	codemap_tests/issue-28308.rs
+compile-fail	codemap_tests/one_line.rs
 compile-fail	codemap_tests/overlapping_inherent_impls.rs
 compile-fail	codemap_tests/tab.rs
 compile-fail	codemap_tests/unicode_2.rs
@@ -1908,6 +1915,7 @@ compile-fail	did_you_mean/compatible-variants.rs
 compile-fail	did_you_mean/expect-instead-of-unwrap.rs
 compile-fail	did_you_mean/issue-103909.rs
 compile-fail	did_you_mean/issue-114112.rs
+compile-fail	did_you_mean/issue-34126.rs
 compile-fail	did_you_mean/issue-35937.rs
 compile-fail	did_you_mean/issue-36798.rs
 compile-fail	did_you_mean/issue-36798_unknown_field.rs

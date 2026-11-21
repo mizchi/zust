@@ -262,10 +262,21 @@ impl Cx<'_> {
             Expr::Index(b, index, isp) if !matches!(&**index, Expr::Range(..)) => {
                 let isp = *isp;
                 let (base, len, elem) = self.indexable(b)?;
+                // (a place written through `IndexMut` (`v[v.len() - 1] = 1` of a Vec): the `&mut v` is taken before
+                // the index is evaluated, with no two-phase borrow)
+                let t0 = self.bk.call_temps.len();
+                let held = self.bk_on()
+                    && self.bk.place_mut
+                    && borrowck::root_local(b).is_some_and(|n| borrowck::mentions(index, n))
+                    && matches!(self.peek(b).map(|t| self.strip_refs(t)), Some(Ty::Struct(_)))
+                    && self.bk_index_mut(b);
                 // (the index is a value, not the place `&raw` takes: reading a static in it still needs unsafe)
                 let raw = std::mem::take(&mut self.raw_ref);
                 let r = self.expr(index, Some(Ty::Usize));
                 self.raw_ref = raw;
+                if held {
+                    self.bk_call_temps_end(t0);
+                }
                 let (i, it) = r?;
                 let Some(i) = i else {
                     return err(SP, "index diverges");

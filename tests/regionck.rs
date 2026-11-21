@@ -1001,3 +1001,20 @@ fn destructuring_let_of_a_temporary() {
     assert!(d.len() == 1 && d[0].0 == 7 && d[0].1.contains("E0515"), "{d:?}");
     assert_eq!(check("fn id<T>(x: T) -> T {\n    x\n}\nstruct Foo(isize);\nfn main() {\n    let &Foo(ref x) = &id(Foo(3));\n    let _ = *x;\n}\n"), vec![]);
 }
+
+/// The receiver's borrow comes before the arguments: a shared one (`v.get({ v.push(2); 0 })`) and a two-phase
+/// borrow's reservation (`v.push(v.pop().unwrap())`) last while an argument that names the receiver is evaluated, and
+/// a place written through `IndexMut` (`v[v.len() - 1] = 1` of a Vec) is borrowed before its index
+#[test]
+fn receiver_borrowed_before_the_arguments() {
+    let d = check("fn main() {\n    let mut v = vec![0, 1];\n    v.get({\n        v.push(2);\n        0\n    });\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 4 && d[0].1.contains("cannot borrow `v` as mutable because it is also borrowed as immutable"), "{d:?}");
+    let d = check("fn main() {\n    let mut v = vec![1, 2];\n    v.push(v.pop().unwrap());\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 3 && d[0].1.contains("more than once at a time"), "{d:?}");
+    let d = check("fn main() {\n    let mut v = vec![0u32; 4];\n    v[v.len() - 1] = 123;\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 3, "{d:?}");
+    assert_eq!(
+        check("fn main() {\n    let mut v = vec![1usize, 2];\n    v.push(v.len());\n    let x = v.get(v.len() - 1).copied();\n    let n = v.len();\n    v[n - 1] = 3;\n    v[0] = v.len();\n    let mut a = [1, 2, 3];\n    a[a.len() - 1] = 4;\n    let mut vv = vec![vec![1]];\n    vv[0][0] = vv.len() as i32;\n    println!(\"{:?} {:?} {:?}\", x, a, vv);\n}\n"),
+        vec![]
+    );
+}

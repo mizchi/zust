@@ -128,6 +128,9 @@ pub struct BkError {
 
 #[derive(Default)]
 pub struct Bk {
+    /// The loans that are two-phase borrows' reservations (shared loans of a `&mut self` receiver while the arguments
+    /// are evaluated)
+    pub reserved: Vec<u32>,
     /// Record events (user code only, not while inlining)
     pub on: bool,
     /// What to check (ZUSTC_BORROWCK: 0 = nothing, 1 = moves only, 2 (default) = moves and loans)
@@ -235,6 +238,31 @@ pub fn direct_temps(e: &Expr, out: &mut Vec<usize>) {
     for a in args {
         direct_ref(a, out);
     }
+}
+
+/// The local a place expression is rooted at (`v` of `v.f[i]`)
+pub(crate) fn root_local(e: &Expr) -> Option<&str> {
+    match e {
+        Expr::Path(None, p) => super::ident_of(p),
+        Expr::Field(x, ..) | Expr::Index(x, ..) | Expr::Paren(x) => root_local(x),
+        _ => None,
+    }
+}
+
+/// Whether e names the local n (in a closure's body too; not in a macro's arguments)
+pub(crate) fn mentions(e: &Expr, n: &str) -> bool {
+    if let Expr::Path(None, p) = e {
+        if super::ident_of(p) == Some(n) {
+            return true;
+        }
+    }
+    let mut found = false;
+    crate::ast_closure::each_child_pub(e, &mut |c| {
+        if !found && mentions(c, n) {
+            found = true;
+        }
+    });
+    found
 }
 
 /// `&e` with e a temporary that is never promoted to a static: the result of a call of a fn (not a struct's or
@@ -1071,12 +1099,14 @@ impl Bk {
             }
             let name = path_str(&self.locals, p);
             let at = at(self.line_base, lo.sp);
-            let lk = if lo.mutable { "mutable" } else { "immutable" };
+            // (a two-phase borrow's reservation conflicts as a shared loan, and is reported as the `&mut` it is)
+            let lo_mut = lo.mutable || self.reserved.contains(&ln);
+            let lk = if lo_mut { "mutable" } else { "immutable" };
             let msg = match a {
                 Acc::Read | Acc::Drop => format!("cannot use `{name}` because it was mutably borrowed (at {at})"),
                 Acc::Move => format!("cannot move out of `{name}` because it is borrowed (at {at})"),
                 Acc::Write | Acc::Modify => format!("cannot assign to `{name}` because it is borrowed (at {at})"),
-                Acc::Borrow(l) if self.loans[l as usize].mutable && lo.mutable => {
+                Acc::Borrow(l) if self.loans[l as usize].mutable && lo_mut => {
                     format!("cannot borrow `{name}` as mutable more than once at a time (first borrow at {at})")
                 }
                 Acc::Borrow(l) => {
@@ -1949,6 +1979,18 @@ impl Cx<'_> {
         self.bk_ev(Ev::Bind(id, true));
         self.bk_ev(Ev::Def(id, loans));
         self.bk.call_temps.push(id);
+    }
+
+    /// `IndexMut::index_mut(&mut b, ..)` of a place written: the `&mut b` loan, held until the index is evaluated
+    /// (bk_call_temps_end)
+    pub(crate) fn bk_index_mut(&mut self, b: &Expr) -> bool {
+        let Some((p, _)) = self.bk_place(b) else { return false };
+        let sp = err_pos(b);
+        let ln = self.bk.loans.len() as u32;
+        self.bk.loans.push(Loan { place: p.clone(), mutable: true, sp, at: sp, quiet: false, capture: false });
+        self.bk_ev(Ev::Acc(p, Acc::Borrow(ln), sp));
+        self.bk_call_temp(&[Src::Loan(ln)], true);
+        true
     }
 
     /// The call is made: the argument loans end
