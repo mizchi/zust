@@ -131,13 +131,15 @@
 ### E. `@wasm` での struct の名前
 
 - struct は形(フィールドの名前と型の集合)ごとに 1 つ
-- **struct 名は、いつも形から作る**
-  - フィールド名を並べる: `{ total: i32, done: i32 }` は `ZsRec_done_total`
-  - 型の違う同じフィールド名の形と衝突したときだけ、形を正規化した文字列の短いハッシュを付ける
-    - `{ total: f64, done: f64 }` は `ZsRec_done_total_9c2e` のようになる
-  - 同じ形からは、いつも同じ名前になる
-- **別名は、すべて Rust の `type` 別名にする**: `type ZsTodo = ZsRec_done_id_title;`
-  - 別名を足したり並べ替えたりしても、struct 名は変わらない
+- **struct 名は、モジュールの中の宣言順で決める**(ハッシュは使わない)
+  - その形の別名がモジュールにあれば、最初に宣言した別名の名前(`type Todo` → `ZsTodo`)
+  - なければフィールド名を並べた名前: `{ total: i32, done: i32 }` は `ZsRec_done_total`
+  - 型の違う同じフィールド名の形が同じモジュールに複数あれば、モジュールの中で最初に現れた順に `_2`、`_3` を付ける
+    - `{ total: f64, done: f64 }` が後に現れたら `ZsRec_done_total_2`
+  - 名前はモジュールの名前空間に置く(`mod_a::ZsRec_done_total`)。決めるのに見るのは、そのモジュールの宣言と、それが import するモジュールだけ
+    - 同じ形が import 先にもあれば、import 先の struct を使う(依存の順で先に決まる)
+  - そのため、名前が変わるのは、同じファイルで別名を前に足したり、並べ替えたりしたときだけ。他のファイルの変更では変わらない
+- **他の別名は、Rust の `type` 別名にする**: `type ZsTask = ZsTodo;`
 - `@nominal` の型は、同じ形の別の型があっても、自分の struct(`ZsMeters`)を持つ
 
 ## 変更前 / 変更後(corpus/components.zsc)
@@ -225,8 +227,7 @@ export declare function Meters(v: { readonly v: f64 }): Meters;
 
 ```rust
 // @wasm(lower.rs)
-struct ZsRec_done_id_title { done: bool, id: i32, title: String }
-type ZsTodo = ZsRec_done_id_title;
+struct ZsTodo { done: bool, id: i32, title: String }   // 別名 Todo がこのモジュールにあるので、その名前
 struct ZsRec_done_total { done: i32, total: i32 }
 struct ZsMeters { v: f64 }   // @nominal は自分の struct
 ```
@@ -243,7 +244,7 @@ struct ZsMeters { v: f64 }   // @nominal は自分の struct
 - レコード同士の単一化に失敗したら、差分(足りない / 余分 / 型が違うフィールド)を返して表示する
 - 再帰する型は、別名と型引数の依存の強連結成分で見つける(enum の定義は辺にしない)
 - checker はレコードの式の型を Id ごとに side table に記録し、lower はそれを引いて struct 名を決める
-  - struct 名は形を正規化した文字列から作る。衝突はプログラム全体の形を集めてから調べ、そのときだけハッシュを付ける
+  - struct 名はモジュールごとに、宣言と最初に現れた順で決める(上の E)。プログラム全体は見ない
 - 構文の判定のための先読みは、`try_arrow_params` と同じ保存と巻き戻しで足りる
 - `{ x }` の警告は primary の `{` の側だけで出す。block() は 3 つの形の専用エラーだけを出す
 
@@ -255,9 +256,9 @@ struct ZsMeters { v: f64 }   // @nominal は自分の struct
 2. **無名のレコードの値に印を付ける**(`#{ … }`): 二重の波括弧はなくなるが、TS から離れる。選ばない
 3. **Rust 式の更新 `{ done: x, ..t }`**: JS の spread と逆の意味に読めるので、選ばない
 4. **Rust 風の関数型 `fn(id: i32) -> ()`**: 宣言と矢印は揃うが、クロージャ `(x) => e` と揃わない。選ばない
-5. **struct 名を、その形の最初に宣言した別名から取る**(r3)
-   - 別名を前に足すと、関係のない `@wasm` の項目の Rust の出力が変わる(非局所的)
-   - 廃止し、struct 名は形から作り、別名は Rust の `type` 別名にした
+5. **struct 名をプログラム全体の最初に宣言した別名から取る**(r3)、**衝突したときだけ形のハッシュを付ける**(r4 の最初の案)
+   - どちらも、どこか別のファイルに別名や同じフィールド名の形を足すと、既存の struct 名が変わる(非局所的)
+   - 決める範囲をモジュールとその import 先に閉じ、宣言順で決めることにした
 6. **`{ x }` の警告を、block() の本体にも出す**(r3)
    - `if x > a { x } else { a }` や `fn id(x) { x }` のような普通のコードに警告が出て、本当の誤りを見落とす
    - 廃止し、式の位置のブロックだけにした
@@ -282,7 +283,7 @@ struct ZsMeters { v: f64 }   // @nominal は自分の struct
   - `{ x }` の警告を、primary の `{` から読む式の位置のブロックだけにした。block() が直接読む fn / if / else / while / for の本体には出さない
   - block() の先頭で見るのは、3 つの形の専用エラーだけにした
   - `let` と引数のレコードのパターンは一部だけでよいことにした。書き漏らしのエラーは match だけ(決定 7)
-  - struct 名を常に形から作り、衝突したときだけハッシュを付けるようにした。別名はすべて Rust の `type` 別名にした
+  - struct 名を、モジュールの中の宣言順で決めるようにした(別名があればその名前、なければフィールド名、型の違う同名の形には `_2`)。決める範囲はモジュールとその import 先だけ。ハッシュは使わない
   - 表示名は注釈から来た名前だけにした。形からの逆引きは hover の補足
   - `.d.ts` を `interface` から `export type` にした
   - `@nominal` に `.d.ts` の brand とコンストラクタ `Meters({ v })` を足した。r4 ではレコードだけとした
