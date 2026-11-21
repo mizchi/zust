@@ -2484,11 +2484,19 @@ impl Program {
             // (an integer `as` wraps to its type, as rustc's: `4294967297u64 as i32` is 1)
             Expr::Cast(x, t) => {
                 let v = self.eval_const(x, depth)?;
-                let prim = match &**t {
-                    crate::parse::Ty::Path(None, p) if p.segs.len() == 1 && p.segs[0].args.is_empty() => p.segs[0].name.as_str(),
-                    _ => "",
+                let mut prim = match &**t {
+                    crate::parse::Ty::Path(None, p) if p.segs.len() == 1 && p.segs[0].args.is_empty() => p.segs[0].name.clone(),
+                    _ => String::new(),
                 };
-                match prim {
+                // (an alias of an integer type: `type Lane = i32`)
+                for _ in 0..16 {
+                    match self.aliases.get(&prim) {
+                        Some((g, crate::types::TySyn::Named(n))) if g.is_empty() => prim = n.clone(),
+                        Some((g, crate::types::TySyn::Prim(p))) if g.is_empty() => prim = format!("{p:?}").to_lowercase(),
+                        _ => break,
+                    }
+                }
+                match prim.as_str() {
                     "u8" => v as u8 as i128,
                     "u16" => v as u16 as i128,
                     "u32" => v as u32 as i128,

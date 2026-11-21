@@ -90,10 +90,12 @@ impl Cx<'_> {
         }
         let ts = match seg.args.get(k) {
             Some(GArg::Const(e)) => crate::ast_types::const_arg_syn(e).or_else(|er| err(SP, er))?,
-            Some(GArg::Ty(t)) => match self.parse_ty(t)? {
+            // (a name written as a type: a const parameter. An array type is not an immediate: `::<[u8; 1]>`)
+            Some(GArg::Ty(t @ crate::parse::Ty::Path(..))) => match self.parse_ty(t)? {
                 Ty::Array(_, n) => return Ok(n),
                 _ => return err(SP, format!("`{name}`: const argument {} is not a constant", k + 1)),
             },
+            Some(GArg::Ty(_)) => return err(SP, format!("`{name}`: const argument {} is not a constant", k + 1)),
             _ => return err(SP, format!("`{name}` needs {} const argument(s): `{name}::<..>(..)`", k + 1)),
         };
         // (a constant past u32 is an error here, not truncated: `extract_lane::<4294967297>` is not lane 1. Array
@@ -129,7 +131,7 @@ impl Cx<'_> {
         let name = last.name.as_str();
         // (a local of that name (a closure, a fn pointer), a path the program's own function has (`Ops::_mm_add_ps`),
         // or a program's function of that name is called instead)
-        if p.segs.len() == 1 && self.lookup(name).is_some() {
+        if p.segs.len() == 1 && (self.lookup(name).is_some() || self.prog.const_index.contains_key(name)) {
             return Ok(None);
         }
         if !crate::simd_sig::arch_path(p.segs[..p.segs.len() - 1].iter().map(|s| s.name.as_str()), name) {
@@ -165,6 +167,12 @@ impl Cx<'_> {
                 "cmp" => 31,
                 "extractf128" | "extracti128" | "insertf128" | "inserti128" => 1,
                 "extract" => u32::MAX,
+                // (a blend's bits are its lanes': blend_pd 2, blend_ps / blend_epi32 / _mm256_blend_pd 4;
+                // blend_epi16's 8 bits are each 128-bit half's)
+                "blend" if x.suffix != "epi16" => {
+                    let lanes = x.bits as u32 / if x.suffix == "pd" { 64 } else { 32 };
+                    (1u32 << lanes.min(8)) - 1
+                }
                 _ => 255,
             };
             if crate::simd_sig::x86_gather(x).is_some() {
@@ -357,9 +365,12 @@ impl Cx<'_> {
         let r = match plan {
             Plan::X86(imm) => {
                 let x = x86_split(name).unwrap();
+                let before = m.ops.len();
                 return match x86_emit(m, x, imm, &vals)? {
                     Some(r) => Ok(Some((Some(r), ret))),
-                    None if ret == Ty::Unit => Ok(Some((None, Ty::Unit))),
+                    // (a store: it recorded its instructions. One that recorded none is not supported:
+                    // `_mm_maskstore_ss` is not `_mm_store_ss`)
+                    None if ret == Ty::Unit && m.ops.len() > before => Ok(Some((None, Ty::Unit))),
                     None => err(SP, format!("`{name}` is not supported yet")),
                 };
             }

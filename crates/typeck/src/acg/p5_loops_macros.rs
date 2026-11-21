@@ -1694,7 +1694,12 @@ impl Cx<'_> {
                     Expr::Lit(format!("{:?}", tn.replace("__u_", "")), Default::default())
                 } else {
                     let mut h: u64 = 0xcbf2_9ce4_8422_2325;
-                    for b in tn.bytes() {
+                    // (a vector's key is not its display name, which a program's `struct v128` may also have)
+                    let key = match t {
+                        Ty::Vec(b) => format!("core::arch::<vector of {b} bits>"),
+                        _ => tn.clone(),
+                    };
+                    for b in key.bytes() {
                         h = (h ^ b as u64).wrapping_mul(0x0100_0000_01b3);
                     }
                     let seg = |n: &str| crate::parse::Seg { name: n.to_string(), args: vec![], fn_args: None, text: n.to_string() };

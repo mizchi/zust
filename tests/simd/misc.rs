@@ -29,6 +29,20 @@ fn lane<const LANE: i32>(a: __m128i) -> i32 {
 // (a const parameter shadows a program constant too large for a lane, in braces)
 const BIG: i64 = 1 << 40;
 
+// (a cast to an alias of an integer type wraps as to the type)
+type Lane = i32;
+
+// (a constant of an intrinsic's name is the program's: called, not lowered)
+fn add(a: i32, b: i32) -> i32 {
+    a * 10 + b
+}
+#[allow(non_upper_case_globals)]
+const _mm_add_ps: fn(i32, i32) -> i32 = add;
+
+// (a program's type named like a vector type is another type than the vector)
+#[allow(non_camel_case_types)]
+struct v128;
+
 #[target_feature(enable = "avx2,fma")]
 fn blane<const BIG: i32>(a: __m128i) -> i32 {
     _mm_extract_epi32::<{ BIG }>(a)
@@ -44,6 +58,15 @@ fn run() {
         _mm_extract_epi32::<{ 4294967298u64 as i32 }>(l),
         blane::<3>(l)
     );
+    println!("alias cast {}", _mm_extract_epi32::<{ 4294967298u64 as Lane }>(l));
+    let fa = _mm_setr_pd(1.0, 2.0);
+    let fb = _mm_setr_pd(3.0, 4.0);
+    h("blend_pd 3", _mm_castpd_si128(_mm_blend_pd::<3>(fa, fb)));
+    let pa = _mm256_set1_ps(1.0);
+    let pb = _mm256_set1_ps(2.0);
+    h2("256 blend_ps 255", _mm256_castps_si256(_mm256_blend_ps::<255>(pa, pb)));
+    println!("callable const {}", _mm_add_ps(3, 4));
+    println!("type ids {}", std::any::TypeId::of::<v128>() == std::any::TypeId::of::<__m128i>());
     let a16 = _mm_setr_epi16(1, -2, 32767, -32768, 1000, -1000, 255, -256);
     let a32 = _mm_setr_epi32(1, -2, i32::MAX, i32::MIN);
     let a64 = _mm_set_epi64x(-5, 0x1234_5678_9abc_def0);

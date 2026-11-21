@@ -75,18 +75,12 @@ pub(crate) fn const_expr_text(e: &Expr) -> Option<String> {
         Expr::Paren(x) => const_expr_text(x)?,
         Expr::MethodCall(r, m, g, a, _) if g.is_empty() && a.is_empty() => format!("{}.{m}()", const_expr_text(r)?),
         Expr::Unary(op, x, _) if op == "!" => format!("(!{})", const_expr_text(x)?),
-        // (a cast to an integer type keeps its type, which Program::eval_const wraps to: `-1i8 as i32` is -1,
-        // `4294967298u64 as i32` is 2; another type does not change the value)
+        // (a cast keeps its type's name, which Program::eval_const wraps to when it is an integer type or an alias
+        // of one: `-1i8 as i32` is -1, `4294967298u64 as i32` is 2; another type does not change the value)
         Expr::Cast(x, t) => {
             let inner = const_expr_text(x)?;
             match &**t {
-                crate::parse::Ty::Path(None, p)
-                    if p.segs.len() == 1
-                        && p.segs[0].args.is_empty()
-                        && matches!(p.segs[0].name.as_str(), "u8" | "u16" | "u32" | "u64" | "usize" | "i8" | "i16" | "i32" | "i64" | "isize") =>
-                {
-                    format!("({inner} as {})", p.segs[0].name)
-                }
+                crate::parse::Ty::Path(None, p) if p.segs.len() == 1 && p.segs[0].args.is_empty() => format!("({inner} as {})", p.segs[0].name),
                 _ => inner,
             }
         }

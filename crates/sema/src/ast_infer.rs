@@ -1710,7 +1710,9 @@ impl Inf<'_> {
                 let arch = crate::simd_sig::arch_path(segs[..segs.len() - 1].iter().map(|s| s.name.as_str()), last);
                 // (nor a tuple struct or variant of the program's: `struct f32x4(u64, u64, u64, u64)`)
                 let ctor = self.variant_by(p).is_some() || self.struct_by(p).is_some();
-                if crate::simd_sig::maybe_simd(last) && arch && !local && !ctor && self.fn_by(p).is_none() {
+                // (nor a constant or static of the program's: `const _mm_add_ps: fn(i32, i32) -> i32 = add;`)
+                let konst = segs.len() == 1 && self.prog.const_index.contains_key(last.as_str());
+                if crate::simd_sig::maybe_simd(last) && arch && !local && !ctor && !konst && self.fn_by(p).is_none() {
                     if let Some((ps, r)) = crate::simd_sig::simd_sig(last).filter(|(ps, _)| ps.len() == args.len()) {
                         for (a, k) in args.iter().zip(ps) {
                             let av = self.expr(a);
