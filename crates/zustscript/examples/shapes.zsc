@@ -1,0 +1,67 @@
+// @wasm with records, enums and local mutation: the same source as JS (zsc --all-js) and as wasm.
+// Records and enums are Copy structs / enums in Rust and cross the boundary as their scalar fields (no copy
+// into linear memory).
+
+type Vec2 = { x: f64, y: f64 }
+enum Shape { Circle(Vec2, f64), Rect(Vec2, Vec2), Dot(Vec2) }
+enum Mode { Fast, Exact }
+enum Option<T> { None, Some(T) }
+type Hit = { index: i32, dist: f64, inside: bool }
+
+@wasm fn sub(a: Vec2, b: Vec2) -> Vec2 { Vec2 { x: a.x - b.x, y: a.y - b.y } }
+@wasm fn len(v: Vec2) -> f64 { (v.x * v.x + v.y * v.y).sqrt() }
+
+@wasm pub fn area(s: Shape) -> f64 {
+  match s {
+    Circle(_, r) => 3.141592653589793 * r * r,
+    Rect(a, b) => ((b.x - a.x) * (b.y - a.y)).abs(),
+    Dot(_) => 0.0,
+  }
+}
+
+@wasm pub fn center(s: Shape) -> Vec2 {
+  match s {
+    Circle(c, _) => c,
+    Rect(a, b) => Vec2 { x: (a.x + b.x) / 2.0, y: (a.y + b.y) / 2.0 },
+    Dot(p) => p,
+  }
+}
+
+@wasm pub fn grow(s: Shape, k: f64) -> Shape {
+  match s {
+    Circle(c, r) => Circle(c, r * k),
+    Rect(a, b) => Rect(a, Vec2 { x: a.x + (b.x - a.x) * k, y: a.y + (b.y - a.y) * k }),
+    Dot(p) => Circle(p, k),
+  }
+}
+
+// the nearest of points (as two arrays) to p, with a loop and mutable locals
+@wasm pub fn nearest(xs: Array<f64>, ys: Array<f64>, p: Vec2, mode: Mode) -> Option<Hit> {
+  let mut best = -1;
+  let mut bd = 0.0;
+  for i in range(0, xs.len()) {
+    let d = match mode {
+      Fast => (xs[i] - p.x).abs() + (ys[i] - p.y).abs(),
+      Exact => len(sub(Vec2 { x: xs[i], y: ys[i] }, p)),
+    };
+    if best < 0 || d < bd { best = i; bd = d; }
+  }
+  if best < 0 { None } else { Some(Hit { index: best, dist: bd, inside: bd < 1.0 }) }
+}
+
+@wasm pub fn collatz_max(limit: i64) -> Option<i64> {
+  let mut best = 0;
+  let mut arg = 0;
+  let mut n = 1;
+  while n < limit {
+    let mut k = n;
+    let mut steps = 0;
+    while k != 1 {
+      k = if k % 2 == 0 { k / 2 } else { 3 * k + 1 };
+      steps += 1;
+    }
+    if steps > best { best = steps; arg = n; }
+    n += 1;
+  }
+  if arg == 0 { None } else { Some(arg) }
+}

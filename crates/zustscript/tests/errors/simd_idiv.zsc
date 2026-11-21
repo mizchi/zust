@@ -1,0 +1,2 @@
+// expect: @simd: i32 division (wasm has no vector integer division)
+@simd pub fn halves(xs: Array<i32>) -> Array<i32> { xs.map((x) => x / 2) }

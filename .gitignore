@@ -5,3 +5,5 @@
 __pycache__/
 /cratebench/out
 /crates/zurgo/tests/fixtures/*/target
+/crates/zustscript/target
+/crates/zustscript/out

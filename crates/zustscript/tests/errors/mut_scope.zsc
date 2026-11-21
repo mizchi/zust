@@ -1,0 +1,5 @@
+// expect: `x` is not mutable
+fn f() -> () {
+  { let mut x = 0; };
+  for x in [1] { x = 2; }
+}
