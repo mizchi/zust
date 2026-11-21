@@ -886,6 +886,12 @@ impl Program {
                     p.const_by_last.entry(last.to_string()).or_default().push(p.consts.len() as u32);
                 }
                 p.const_index.insert(n.clone(), p.consts.len() as u32);
+                // (a trait impl's goes by `Foo as Tr::C` too: a qualified path that misses it reads the trait's default)
+                if let (Some(tr), false) = (trait_of(ii), n.contains(" as ")) {
+                    if let Some((base, last)) = n.rsplit_once("::") {
+                        p.const_index.insert(format!("{base} as {tr}::{last}"), p.consts.len() as u32);
+                    }
+                }
                 p.consts.push(ConstDef {
                     name: n.clone(),
                     ty: Ty::Unit,
@@ -2300,6 +2306,11 @@ impl Program {
                 if self.const_index.contains_key(&q) {
                     return self.const_usize(&q);
                 }
+                // (the impl leaves it out: the trait's default, not an inherent `Foo::SIZE`)
+                let d = format!("{tr}::{last}");
+                if self.const_index.contains_key(&d) {
+                    return self.const_usize(&d);
+                }
                 return self.const_usize(&format!("{base}::{last}"));
             }
         }
@@ -2491,6 +2502,10 @@ impl Program {
                     let q = format!("{} as {}::{}", tp.segs[0].name, p.segs[0].name, p.segs[1].name);
                     if self.const_index.contains_key(&q) {
                         return self.const_int(&q, depth);
+                    }
+                    let d = format!("{}::{}", p.segs[0].name, p.segs[1].name);
+                    if self.const_index.contains_key(&d) {
+                        return self.const_int(&d, depth);
                     }
                 }
                 let full = format!("{}::{}", tp.segs[0].name, p.segs.last().unwrap().name);
