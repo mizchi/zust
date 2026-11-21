@@ -917,6 +917,10 @@ impl Rg {
     /// its type: to a trait object (every region of the value outlives the object's), an array to a slice, a
     /// reference to one of what it derefs to (only the outer regions are related there)
     pub fn flow(&mut self, prog: &Program, from: Ty, to: Ty, sub: &[u32], sup: &[u32], sp: Sp) {
+        // (no regions on either side: nothing to relate)
+        if sub.is_empty() || sup.is_empty() {
+            return;
+        }
         if from == to {
             return self.relate(prog, to, sub, sup, sp);
         }
