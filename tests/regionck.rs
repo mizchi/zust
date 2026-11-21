@@ -947,3 +947,12 @@ fn returned_adapter_holds_its_closure() {
     assert!(d.len() == 1 && d[0].0 == 9 && d[0].1.contains("E0373"), "{d:?}");
     assert_eq!(check("struct B {\n    v: Vec<u32>,\n}\nimpl B {\n    fn find(&mut self, id: u32) -> Option<&mut u32> {\n        self.v.iter_mut().find(|a| **a == id)\n    }\n}\nfn main() {}\n"), vec![]);
 }
+
+/// `vec![&f()]`: a macro's arguments are not extended, the temporary goes away with the statement (not inside
+/// `assert_eq!`, whose temporaries live as long as its statement)
+#[test]
+fn vec_macro_temporaries() {
+    let d = check("fn id<T>(x: T) -> T {\n    x\n}\nfn main() {\n    let v = vec![&id(3)];\n    for &&x in &v {\n        let _ = x;\n    }\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 5 && d[0].1.contains("E0716"), "{d:?}");
+    assert_eq!(check("fn one() -> i32 {\n    1\n}\nfn main() {\n    assert_eq!(vec![&one(), &2], vec![&1, &(one() + one())]);\n    let v = vec![&3];\n    let _ = v.len();\n}\n"), vec![]);
+}

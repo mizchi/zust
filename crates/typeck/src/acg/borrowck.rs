@@ -206,6 +206,9 @@ pub struct Bk {
     pub recv_loans: HashMap<usize, u32>,
     /// The scrutinee being lowered is a `let`'s initializer (its temporary is extended)
     pub let_scrut: bool,
+    /// The `let` being lowered binds a macro's hidden local (`assert_eq!`'s `__exr_l`): its temporaries live as long as
+    /// the macro's statement in rustc (a `match`), not the `let`'s
+    pub macro_let: bool,
     /// The temporaries of the `let` initializers being lowered that the `let` extends (`let x = &f();`): their
     /// addresses (see direct)
     pub extended: Vec<usize>,

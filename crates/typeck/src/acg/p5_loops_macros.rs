@@ -1028,7 +1028,14 @@ impl Cx<'_> {
         let mut vals = vec![];
         for a in args {
             let a: &Expr = self.keep_expr(a);
-            let (v, t) = self.expr(a, elem)?;
+            // (`vec![&f()]`: a macro's arguments are not extended, the temporary goes away with the statement)
+            let d0 = self.bk.direct.len();
+            if self.bk_on() && !self.bk.macro_let {
+                borrowck::direct_ref(a, &mut self.bk.direct);
+            }
+            let r = self.expr(a, elem);
+            self.bk.direct.truncate(d0);
+            let (v, t) = r?;
             if t == Ty::Never {
                 return Ok((None, Ty::Never));
             }

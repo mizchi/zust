@@ -1661,7 +1661,9 @@ impl Cx<'_> {
                         self.rg_late_on();
                     }
                     let let_sp0 = std::mem::replace(&mut self.rg.let_sp, *let_at);
+                    let ml0 = std::mem::replace(&mut self.bk.macro_let, name.starts_with("__exr_"));
                     let r = self.expr(init, ann.or(hint));
+                    self.bk.macro_let = ml0;
                     self.bk.direct.truncate(ext0);
                     self.bk.extended.truncate(ext1);
                     let srcs = self.bk_frame_end();
