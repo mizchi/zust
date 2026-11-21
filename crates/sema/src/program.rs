@@ -2257,9 +2257,7 @@ impl Program {
                         _ => self.const_usize(c)?,
                     },
                 };
-                // (a length past u32 is an error, not truncated: `extract_lane::<4294967297>` is not lane 1)
-                let n = u32::try_from(n).map_err(|_| format!("the constant {n} is too large"))?;
-                Ty::Array(intern(r(inner)?), n)
+                Ty::Array(intern(r(inner)?), n as u32)
             }
             TySyn::Named(n) => {
                 if let Some(t) = names(n) {
@@ -2351,7 +2349,7 @@ impl Program {
             .cloned()
     }
 
-    fn const_usize(&self, name: &str) -> R<u64> {
+    pub fn const_usize(&self, name: &str) -> R<u64> {
         // (`<Foo as Bar>::SIZE`: the trait's under its qualified name, else the only `Foo::SIZE`; an expression with a
         // cast in it, `(1 as usize) + Foo::SIZE`, is not one)
         let word = |s: &str| !s.is_empty() && s.chars().all(|c| c.is_alphanumeric() || c == '_');

@@ -86,6 +86,16 @@ impl Cx<'_> {
             },
             _ => return err(SP, format!("`{name}` needs {} const argument(s): `{name}::<..>(..)`", k + 1)),
         };
+        // (a constant past u32 is an error here, not truncated: `extract_lane::<4294967297>` is not lane 1. Array
+        // lengths elsewhere keep their wrapping: `[u8; 4294967296]` may be declared and never used)
+        let big = match &ts {
+            crate::types::TySyn::Array(_, crate::types::ArrLen::Lit(n)) => *n > u32::MAX as u64,
+            crate::types::TySyn::Array(_, crate::types::ArrLen::Const(c)) => self.prog.const_usize(c).is_ok_and(|n| n > u32::MAX as u64),
+            _ => false,
+        };
+        if big {
+            return err(SP, format!("`{name}`: const argument {} is too large", k + 1));
+        }
         match self.prog.resolve_env(&ts, &self.env).or_else(|er| err(SP, er))? {
             Ty::Array(_, n) => Ok(n),
             _ => err(SP, format!("`{name}`: const argument {} is not a constant", k + 1)),
