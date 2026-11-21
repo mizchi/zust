@@ -289,8 +289,10 @@ zurgo run
 
 - Commands: `build`, `run`, `metadata` (the JSON of `cargo metadata`), `clean`, with cargo's flags for them.
 - Output goes to `target/zust/<profile>/`.
-- Not yet: build scripts, proc macros, two versions of one crate, renamed dependencies, git dependencies, its own
-  resolver (mizchi/zust#28, mizchi/zust#29).
+- Build scripts run as under cargo (compiled by zustc, or by rustc when zustc cannot), and their cfgs, `rustc-env` and
+  `OUT_DIR` reach the crates. A proc-macro dependency is a stub: using its macros is an error.
+- Not yet: running proc macros, two versions of one crate, renamed dependencies, git dependencies, its own resolver
+  (mizchi/zust#28, mizchi/zust#29).
 
 ### Options
 

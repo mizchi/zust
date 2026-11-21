@@ -76,3 +76,4 @@ Japanese versions are in [../ja/reports/](../ja/reports/README.md).
 | 2026-11-21 | [RefCell's borrow flag and guards, and when temporaries are dropped](2026-11-21-02-refcell-guards.md) |
 | 2026-11-21 | [Can zustc build dioxus and leptos for wasm32?](2026-11-21-03-ui-frameworks-wasm.md) |
 | 2026-11-21 | [zurgo M0: Cargo packages built with zustc](2026-11-21-04-zurgo-m0.md) |
+| 2026-11-21 | [zurgo M1: build scripts, `env!`, and proc-macro stubs](2026-11-21-05-zurgo-build-scripts.md) |

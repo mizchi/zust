@@ -81,11 +81,17 @@ Neither builds yet. `python3 cratebench/ui/run.py` builds their wasm32 crate gra
 error of each failing crate. Details and the order of the work: [docs/reports/2026-11-21-03-ui-frameworks-wasm.md](docs/reports/2026-11-21-03-ui-frameworks-wasm.md).
 
 - Cargo graphs: `crates/zurgo` ([#28](https://github.com/mizchi/zust/issues/28), [docs/zurgo.md](docs/zurgo.md))
-  reads Cargo.toml / Cargo.lock, turns on features as cargo does and builds path and crates.io packages (M0). Left:
-  build scripts (cfgs, `rustc-env`, `OUT_DIR`), two versions of one crate and renamed dependencies (zustc's workspace
-  has one name per crate), an edition per crate, `env!` / `option_env!`, workspace builds for wasm32.
-- Proc macros ([#29](https://github.com/mizchi/zust/issues/29)): none can run. Unknown attributes are dropped silently
+  reads Cargo.toml / Cargo.lock, turns on features as cargo does and builds path and crates.io packages (M0); runs
+  build scripts and gives their cfgs, `rustc-env` and `OUT_DIR` to the crates (M1). thiserror 2's library builds.
+  Left: two versions of one crate and renamed dependencies (zustc's workspace has one name per crate), workspace
+  builds for wasm32, link instructions of build scripts, `zurgo test`.
+- Proc macros ([#29](https://github.com/mizchi/zust/issues/29)): none can run. zurgo builds a proc-macro dependency as a
+  stub and stops on a use of its derives or attributes; zustc alone still drops an unknown attribute silently
   (`#[wasm_bindgen]`, `#[component]`).
+- Crates that zurgo now reaches and that stop on zustc: anyhow 1.0.104 (`error.rs:808`, E0106), libc 0.2.191 and
+  serde_core 1.0.229 (`mod x;` inside a `macro_rules!` body: rustc finds the file where the macro is expanded, zustc
+  beside the macro's own file). Their build scripts compile with rustc only (`env::vars()`, `Command` with an
+  `OsString`, `Output` and other std gaps).
 - async is erased: an `async fn` runs when called and returns its value. Needs a state-machine lowering, `Pin`,
   `Waker` / `Context`.
 - wasm-bindgen's ABI: 32-bit pointers and `usize` on wasm32, imports from JS, exports called after `main`, its custom

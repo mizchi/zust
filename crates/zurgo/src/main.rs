@@ -22,6 +22,7 @@ options:
   --bin <name>                   only this binary (build) / the binary to run (run)
   -j <n>                         parallel jobs
   -v                             print the zustc workspace (also written to target/zust/<profile>/zurgo-ws.txt)
+  --build-script-compiler <c>    auto (zustc, else rustc; default), zustc or rustc
   --time                         zustc's timings
   --filter-platform <triple>     (metadata) only the dependencies of that platform
   --locked / --offline / --frozen are accepted: zurgo always uses Cargo.lock as it is and never downloads";
@@ -65,6 +66,9 @@ fn main() {
             "-j" | "--jobs" => o.jobs = Some(val(&a).parse().unwrap_or_else(|_| die("`-j` needs a number"))),
             "-v" | "--verbose" => o.verbose = true,
             "--time" => o.time = true,
+            "--build-script-compiler" => {
+                o.bs_compiler = zurgo::build_script::Compiler::parse(&val(&a)).unwrap_or_else(|| die("`--build-script-compiler` is auto, zustc or rustc"))
+            }
             "--no-cache" => o.no_cache = true,
             "--filter-platform" => filter = Some(val(&a)),
             "--format-version" => {

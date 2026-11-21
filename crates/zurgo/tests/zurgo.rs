@@ -2,9 +2,13 @@
 //! - `path_workspace`: a workspace of path packages (a lib and a bin of one name, features through `default`,
 //!   `features = [..]` and `dep:`, a dev-dependency that must not be built) runs as its cargo build does;
 //! - `registry_crates_run_like_cargo`: the cratebench crates from crates.io (fnv, adler2, hex, itoa, rustc-hash,
-//!   cfg-if), built by zurgo, print what their cargo builds print;
+//!   cfg-if; thiserror, with its build script and a stub for its proc-macro crate), built by zurgo, print what their
+//!   cargo builds print;
 //! - `metadata_matches_cargo`: `zurgo metadata` and `cargo metadata` give the same graph (packages, targets, ids,
 //!   enabled features, edges and their kinds) for those packages and for cratebench/ui's dioxus and leptos apps;
+//! - `build_scripts_match_cargo`: build scripts (a build-dependency, `links` metadata as `DEP_*`, code written to
+//!   `OUT_DIR`, `rustc-cfg`, `rustc-env`, cargo's variables) give what they give under cargo, whichever compiler builds
+//!   them, and run again only when what they depend on changes;
 //! - `errors`: what M0 does not do yet is an error that says so.
 //!
 //! The registry tests need cargo and the network (`cargo fetch`), as the rest of zust's tests do.
@@ -84,10 +88,60 @@ fn path_workspace() {
     assert!(err.contains("fresh") && !err.contains("fns compiled") && !err.contains("link "), "a no-op build did work:\n{err}");
 }
 
+fn copy_dir(from: &Path, to: &Path) {
+    std::fs::create_dir_all(to).unwrap();
+    for e in std::fs::read_dir(from).unwrap() {
+        let p = e.unwrap().path();
+        let q = to.join(p.file_name().unwrap());
+        if p.is_dir() {
+            if p.file_name().unwrap() != "target" {
+                copy_dir(&p, &q);
+            }
+        } else {
+            std::fs::copy(&p, &q).unwrap();
+        }
+    }
+}
+
+#[test]
+fn build_scripts_match_cargo() {
+    let sc = Scratch::new("build-script");
+    copy_dir(&fixture("build-script"), &sc.0);
+    let m = sc.0.join("Cargo.toml");
+    let (ok, want, err) = cargo(&["run", "-q", "--offline"], &m, &sc.0.join("cargo-target"));
+    assert!(ok, "cargo run: {err}");
+    // (rustc for every script; auto: zustc for gen's (it can), rustc for the app's (`env::vars()`))
+    for c in ["rustc", "auto"] {
+        let t = sc.0.join(format!("t-{c}"));
+        let (ok, got, err) = zurgo(&["run", "--build-script-compiler", c], &m, &t);
+        assert!(ok, "zurgo run ({c}): {err}");
+        assert_eq!(got, want, "{c}");
+        let compilers: Vec<String> = std::fs::read_dir(t.join("zust/debug/build"))
+            .unwrap()
+            .filter_map(|e| std::fs::read_to_string(e.unwrap().path().join("compiler")).ok())
+            .map(|s| s.split(' ').next().unwrap().to_string())
+            .collect();
+        let mut compilers = compilers;
+        compilers.sort();
+        assert_eq!(compilers, if c == "rustc" { ["rustc", "rustc"] } else { ["rustc", "zustc"] }, "{c}");
+    }
+    // (again: no script runs; after an edit of build.rs (its rerun-if-changed) only the app's runs)
+    let t = sc.0.join("t-auto");
+    let (ok, _, err) = zurgo(&["build", "-v"], &m, &t);
+    assert!(ok && !err.contains("Running build script"), "{err}");
+    std::fs::write(sc.0.join("build.rs"), std::fs::read_to_string(sc.0.join("build.rs")).unwrap() + "\n// edited\n").unwrap();
+    let (ok, _, err) = zurgo(&["build", "-v"], &m, &t);
+    assert!(ok && err.contains("Running build script of `bsapp") && !err.contains("Running build script of `gen"), "{err}");
+    // (a script that fails stops the build with its output)
+    std::fs::write(sc.0.join("gen/build.rs"), "fn main() {\n    eprintln!(\"gen says no\");\n    std::process::exit(3);\n}\n").unwrap();
+    let (ok, _, err) = zurgo(&["build"], &m, &t);
+    assert!(!ok && err.contains("failed to run the build script of `gen v1.0.0`") && err.contains("gen says no"), "{err}");
+}
+
 #[test]
 fn registry_crates_run_like_cargo() {
     let mut bad = vec![];
-    for n in ["fnv", "adler2", "hex", "itoa", "rustc-hash", "cfg-if"] {
+    for n in ["fnv", "adler2", "hex", "itoa", "rustc-hash", "cfg-if", "thiserror"] {
         let m = fixture(&format!("{n}/Cargo.toml"));
         let (ok, _, err) = cargo(&["fetch", "--locked"], &m, &tdir(n));
         assert!(ok, "cargo fetch {n}: {err}");
@@ -179,7 +233,10 @@ fn errors() {
         ("p/Cargo.toml", "[package]\nname = \"p\"\nversion = \"0.1.0\"\nedition = \"2021\"\n[workspace]\n[dependencies]\npm = { path = \"../pm\" }\n"),
         ("p/src/main.rs", "fn main() {}\n"),
         ("pm/Cargo.toml", "[package]\nname = \"pm\"\nversion = \"0.1.0\"\nedition = \"2021\"\n[lib]\nproc-macro = true\n"),
-        ("pm/src/lib.rs", ""),
+        (
+            "pm/src/lib.rs",
+            "extern crate proc_macro;\nuse proc_macro::TokenStream;\n#[proc_macro_attribute]\npub fn traced(_a: TokenStream, i: TokenStream) -> TokenStream {\n    i\n}\n#[proc_macro]\npub fn html(i: TokenStream) -> TokenStream {\n    i\n}\n",
+        ),
     ]);
     let m = d.join("p/Cargo.toml");
     // (no Cargo.lock: zurgo has no resolver yet)
@@ -187,9 +244,17 @@ fn errors() {
     assert!(!ok && err.contains("cargo generate-lockfile"), "{err}");
     let (ok, _, err) = cargo(&["generate-lockfile", "--offline"], &m, &d.join("t"));
     assert!(ok, "{err}");
-    // (a proc-macro dependency names mizchi/zust#29)
+    // (a proc-macro dependency is a stub: unused, the build goes on)
     let (ok, _, err) = zurgo(&["build"], &m, &d.join("t"));
-    assert!(!ok && err.contains("proc-macro crate `pm`") && err.contains("#29"), "{err}");
+    assert!(ok, "{err}");
+    // (its attribute used: an error that names mizchi/zust#29, not an attribute dropped)
+    sc.write(&[("p/src/main.rs", "#[pm::traced]\nfn main() {}\n")]);
+    let (ok, _, err) = zurgo(&["build"], &m, &d.join("t"));
+    assert!(!ok && err.contains("the attribute `#[traced]` of the proc-macro crate `pm v0.1.0`") && err.contains("#29"), "{err}");
+    // (a function-like macro: the stub's compile_error!)
+    sc.write(&[("p/src/main.rs", "fn main() {\n    pm::html!(<p>);\n}\n")]);
+    let (ok, _, err) = zurgo(&["build"], &m, &d.join("t"));
+    assert!(!ok && err.contains("`html!` is a proc macro of `pm`, which cannot run yet (mizchi/zust#29)"), "{err}");
     // (but metadata works)
     let (ok, out, err) = zurgo(&["metadata"], &m, &d.join("t"));
     assert!(ok && out.contains("\"proc-macro\""), "{err}");

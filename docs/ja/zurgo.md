@@ -28,9 +28,12 @@ zurgo run
 - `--target <triple>`: `x86_64-unknown-linux-gnu` (既定)。`wasm32-unknown-unknown` も受け付けるが、zustc の
   ワークスペースのビルドはまだそれを受け付けない。
 - `--bin <名前>`、`-j <n>`、`--time` (zustc の時間)、`--no-cache`。
+- `--build-script-compiler auto|zustc|rustc`: ビルドスクリプトを何でコンパイルするか (下に)。既定の `auto` は
+  zustc を試し、だめなら rustc を使う。
 - `-v`: zurgo が zustc に渡すワークスペースを、`zustc build` の形で出す。`target/zust/<profile>/zurgo-ws.txt` にも
   書くので、`zustc build` で同じビルドを繰り返せる。クレート名と実行ファイルの名前が違う bin (パッケージの lib と
-  bin はパッケージの名前を共有するので、bin のクレートは `<名前>-bin` になる) には `exe=<名前>` が付く。
+  bin はパッケージの名前を共有するので、bin のクレートは `<名前>-bin` になる) には `exe=<名前>` が付く。クレートごとの、
+  ビルドスクリプトが与える cfg と、`env!` の環境 (`CARGO_PKG_*`、`OUT_DIR`) もそこに付く (`cfg=`、`env=`)。
 - `--filter-platform <triple>` (metadata)。
 - `--locked`、`--offline`、`--frozen` は受け付ける。zurgo はいつも Cargo.lock をそのまま使い、何もダウンロードしない。
 
@@ -84,12 +87,54 @@ zurgo run
 パッケージ。wasm32 と x86-64 Linux の `--filter-platform` でも) について、`zurgo metadata` と `cargo metadata` が同じ
 グラフを出すことを確かめる。dioxus では、zurgo は 39 ms、cargo は 320 ms かかる。
 
+## ビルドスクリプト
+
+パッケージの `build.rs` は、cargo と同じく、そのクレートをビルドする前に実行する:
+
+- **コンパイル。** ホスト向けのバイナリで、パッケージのビルド用の依存を使う。
+  - `auto` (既定): zustc が、ビルド用の依存とスクリプトを 1 つの zustc のワークスペースとしてビルドする。zustc が
+    できないとき (zustc にない std の関数、proc-macro のビルド用の依存) は、代わりに rustc がビルドする: ビルド用の
+    依存を rlib に (proc macro は dylib に) してから、スクリプトを。
+  - `-v` は、どちらがスクリプトをビルドしたか、zustc がなぜできなかったかを出す。zurgo はソースが変わるまでその
+    選択を覚えておく。
+- **実行。** パッケージのディレクトリで、cargo が設定する変数を付けて実行する:
+  - `OUT_DIR`、`TARGET`、`HOST`、`NUM_JOBS`、`OPT_LEVEL`、`DEBUG`、`PROFILE`;
+  - `CARGO_MANIFEST_DIR`、`CARGO_MANIFEST_PATH`、`CARGO_MANIFEST_LINKS`、`CARGO_PKG_*`;
+  - `CARGO_FEATURE_<名前>` と `CARGO_CFG_<キー>` (ターゲットの rustc の値);
+  - `RUSTC`、`RUSTDOC`、`CARGO`、`CARGO_ENCODED_RUSTFLAGS`;
+  - 依存する `links` のパッケージからの `DEP_<LINKS>_<キー>`。
+
+  `RUSTC` は本物の rustc なので、スクリプトの試しのコンパイルと版の確認は、cargo のときと同じものを見る。
+- **出力** (`cargo:` と `cargo::` の形):
+  - `rustc-cfg` と `rustc-env` は、パッケージのクレートに渡す;
+  - `warning` は出し、`error` はビルドを止める;
+  - `metadata` (古い形では、ほかのキーすべて) は、依存する側のスクリプトに `DEP_<LINKS>_<キー>` として渡す;
+  - リンクの指示 (`rustc-link-lib`、`rustc-link-search`、`rustc-link-arg`、`rustc-flags`) は取っておくが、zustc は
+    まだ使わない: 警告でそう言う。
+- **もう一度実行するとき。** 出力は `target/zust/<profile>/build/<パッケージ>-<ハッシュ>/` に取っておく。スクリプトが
+  変わったとき、cargo の変数が変わったとき、`rerun-if-changed` / `rerun-if-env-changed` が名指しするファイルか変数が
+  変わったときに、もう一度実行する。どちらも出さないスクリプトは、cargo と同じく、パッケージのどれかのファイルが
+  変わったときに実行する。
+
+どのクレートも、`env!` / `option_env!` のために cargo の変数を受け取る: `CARGO_PKG_*`、`CARGO_MANIFEST_DIR`、
+`CARGO_CRATE_NAME`、bin なら `CARGO_BIN_NAME`。`OUT_DIR` とスクリプトの `rustc-env` はその上に加わる。
+
+## proc-macro の依存
+
+proc macro はまだ動かせない (mizchi/zust#29)。proc-macro の依存は、その名前の空のライブラリ (スタブ) としてビルド
+するので、それを再エクスポートするだけのクレートはビルドできる: `pub use thiserror_impl::*;` や、serde の `derive`
+feature。
+
+zustc は知らない属性を黙って捨てるので、proc macro を使うと、何もビルドする前にエラーになる:
+- ビルドのどれかのクレートが、スタブの derive (`#[derive(thiserror::Error)]`) か属性マクロ (`#[wasm_bindgen]`) を
+  使っていれば、#29 を示すエラーになる;
+- 関数のようなマクロ (`html!(..)`) は、#29 を示す `compile_error!` に展開する。
+
 ## まだのもの (mizchi/zust#28)
 
-- **ビルドスクリプトは実行しない。** それぞれを警告で示す。それが設定する cfg と書くファイルはない。
-- **proc-macro の依存はエラーになる** (mizchi/zust#29)。
 - **1 つのライブラリの 2 つの版**と、**名前を変えた依存**はエラーになる: zustc のワークスペースでは、クレートごとに
   名前が 1 つである。
 - **ほかのソース:** git の依存、ほかのレジストリ、ソースの置き換え。
 - **`[patch]`、自前のリゾルバ、ダウンロード、`test` / `doc` はない。**
-- **edition:** zustc はまだクレートごとの edition を受け付けない。
+- **edition:** zustc には edition の設定がない: どの edition が受け付けるものも受け付ける。なので、クレートの
+  edition は渡さない (ビルドスクリプトをビルドする rustc には、それぞれのクレートの edition を渡す)。

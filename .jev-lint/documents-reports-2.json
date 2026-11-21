@@ -256,6 +256,14 @@
     "docs_reports_2026-11-21-04-zurgo-m0.ja": {
       "path": "docs/ja/reports/2026-11-21-04-zurgo-m0.md",
       "role": "historical"
+    },
+    "docs_reports_2026-11-21-05-zurgo-build-scripts.en": {
+      "path": "docs/reports/2026-11-21-05-zurgo-build-scripts.md",
+      "role": "historical"
+    },
+    "docs_reports_2026-11-21-05-zurgo-build-scripts.ja": {
+      "path": "docs/ja/reports/2026-11-21-05-zurgo-build-scripts.md",
+      "role": "historical"
     }
   },
   "comparisons": [
@@ -609,6 +617,17 @@
       },
       "target": {
         "source": "docs_reports_2026-11-21-04-zurgo-m0.ja"
+      }
+    },
+    {
+      "id": "docs_reports_2026-11-21-05-zurgo-build-scripts",
+      "topic": "The Japanese file docs/ja/reports/2026-11-21-05-zurgo-build-scripts.md is a faithful translation of docs/reports/2026-11-21-05-zurgo-build-scripts.md",
+      "mode": "translation",
+      "reference": {
+        "source": "docs_reports_2026-11-21-05-zurgo-build-scripts.en"
+      },
+      "target": {
+        "source": "docs_reports_2026-11-21-05-zurgo-build-scripts.ja"
       }
     }
   ]
