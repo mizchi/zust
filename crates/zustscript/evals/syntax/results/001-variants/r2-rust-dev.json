@@ -1,0 +1,85 @@
+[
+  {
+    "proposal": "001-variants",
+    "persona": "rust-dev",
+    "scores": {
+      "R1": {
+        "score": 4,
+        "why": "`enum Shape { Circle { center: Vec2, r: f64 }, .. }`、`Circle { r, .. } =>`、`c @ Circle { center, .. }`、`Shape::Circle` はどれも Rust の struct variant と `@` 束縛そのもので、説明なしに読める。減点は 2 つ。修飾しない `None` の意味を取るには、期待する型を目で追う必要がある。r2 の遅延で、`describe_later` の `let h = if c { None } else { At { index: 1 } }` のように後ろ(else 側)まで読まないと決まらない場合が増えた。更新が Rust の `..c` でなく `{ ...c, center }` なのも、Rust の目には一瞬引っかかる。"
+      },
+      "R2": {
+        "score": 4,
+        "why": "生成、パターン、更新が 002 のレコードの書き方(`{ ...t, x }`、省略形、`..`)と揃い、`Enum::Variant` は既存の `T::zero()` / `F64Array::zeros` のパス記法と揃う。期待する型で決める方針も typed array と同系統。例外は 2 つ。effect の操作名だけ一意のまま残る。腕の中だけで成り立つ『絞り込まれた型』という、言語の他の場所にない種類の型が増えた。"
+      },
+      "R3": {
+        "score": 3,
+        "why": "パターンは照合する値の型で決まり、式は期待する型が伝わる場所が列挙されたので、規則は明快になった(A.1 の非局所性もなくなった)。ただし解決は依然として型の文脈に依存し、関数の終わりまでの遅延で、どこで決まるかが前後に広がる。未解決の値を match するとき、パターン `At { index }` がどの enum を指すかも書かれていない(パターンは照合する値の型で決まるという規則と循環する)。"
+      },
+      "R4": {
+        "score": 4,
+        "why": "r1 の不満は解消した。`moved` の `l @ Label { at, .. } => Label { ...l, at: add(at) }` で全フィールドの書き直しが不要になり、`Pair(Vec2, Vec2)` の位置引数のバリアントも同じ enum に置ける。`let mut best = None; .. best = Some(i)` のような Rust の定番も、遅延のおかげで注釈なしに書けるはず。まだ書けないのは or パターン(`Rect { .. } | Label { .. } => 0.0`)とガード(`Circle { r, .. } if r == 0.0`)。f64 のリテラルパターンを禁止したので、ガードがないと `if` に逃がすしかない。"
+      },
+      "R5": {
+        "score": 4,
+        "why": "良い点は 4 つ。enum を足しても離れた場所が壊れなくなった。決まらないときは `cannot tell which enum None is: write Hit::None or Parsed::None` と直し方が出る。`..` の書き漏らしは Rust の E0027 と同じくエラーで、LSP のクイックフィックスもある。浮動小数点のリテラルパターンと `TAG` との衝突もエラーにした。減点は 2 つ。遅延した解決の失敗が関数の終わりに出るので、位置が使った所から離れる。`c` の絞り込まれた型が腕の外へ出たときの扱いが書かれていない。"
+      },
+      "R6": {
+        "score": 4,
+        "why": "名前付きフィールドが名前のままプロパティになり、`Shape.Circle` の namespace で TS 側も 1 つのバリアントを受けられる。`@wasm` では `ZsShape::Circle { center, r }` の struct variant で、Rust 側の見通しもよい。ただし位置引数のバリアントは `_0` のまま。`Parsed.None` と `Hit.None` が同じ `TAG: \"None\"` になり、TS 側で 2 つを混ぜた union は区別できない(r1 の問いへの回答がない)。"
+      },
+      "R7": {
+        "score": 4,
+        "why": "Rust の enum とパターンの知識がほぼそのまま使える。修飾しないバリアントが期待する型で通るのは、Rust の `use Shape::*` より便利。新しく覚えるのは 2 つ。更新が `..c`(末尾)でなく `...c`(先頭)であること(Rust の癖で書くとエラーになる。直し方つきなので軽い)と、effect の操作名だけは一意であること。"
+      },
+      "R8": {
+        "score": 3,
+        "why": "パターンの Id、side table の `pat_enum`、`EK::Call` への期待する型の受け渡し、`finish_fn` の中で閉じる遅延と、増分検査を壊さない設計になった。ただし check.rs の `finish_fn` が今扱う整数の型変数 `intv` は、どの候補でも演算が同じなので既定値(i32)で閉じられる。enum の候補は引数の型や match の束縛の型が候補ごとに違い、既定値もないので、オーバーロード解決に近い仕組みが要る。補完と hover も、関数の終わりまで型が `?` のまま見える場面が出る。"
+      }
+    },
+    "blocker": [],
+    "issues": [
+      {
+        "severity": "high",
+        "where": "A の 2(関数の終わりまで決定を遅らせる)と『実装の注意』の『整数リテラルの型と同じ仕組み』",
+        "problem": "整数リテラルの型変数はどの候補でも演算が同じだが、enum の候補はそうではない。`let x = Some(1)` や `let h = At(found)` で候補が複数あると、引数の期待する型が候補ごとに違う。未解決の `h` に `match h { None => 0, At { index } => index + 1 }` と書くと、パターンの解決、`index` の型、網羅性の検査がすべて決められない。r1 の『期待する型の伝わり方が書かれていない』は、規則としては解消したが、遅延が新しい未定義の領域を作った。",
+        "suggestion": "遅延できる場面を絞る。(1) 未解決の値を match する、フィールドを読む、引数を持つバリアントの引数を検査する、のどれかに来たら、その場で『注釈か修飾を書く』エラーにする。(2) 遅延できるのは、関数の終わりまでに値として流れる先(代入、if の分岐、戻り値、引数)で決まる場合だけ、と明記する。未解決の値の match でパターンが候補を絞るかどうかも書く。"
+      },
+      {
+        "severity": "medium",
+        "where": "B の『`@` 束縛と絞り込み』と、002 B の `{ ...t, x }`",
+        "problem": "`c @ Circle { .. }` の `c` の型が言語の型として定義されていない。`c` を腕から返す、`let s2: Shape = c`、`Shape` を受ける関数に渡す、の可否が書かれていない。名前を書かない `{ ...c, center: x }` は、002 の規則ではレコードの値になるが、JS の出力は `TAG` をそのまま写すので、型(レコード)と実行時の値(バリアント)がずれる。",
+        "suggestion": "絞り込まれた型は `Shape` の部分型で、`Shape` の期待する所ではそのまま `Shape` として使える、と明記する。zustscript でも `.d.ts` と同じく型として `Shape::Circle` と書けるようにする。名前のない `{ ...c, .. }` の c がバリアントならエラーにして、`Circle { ...c, .. }` と書く直し方を出す。"
+      },
+      {
+        "severity": "medium",
+        "where": "変更後の `area`、`contains`(r1 からの持ち越し)",
+        "problem": "or パターンとガードがないので、`Rect { .. } => 0.0, Label { .. } => 0.0` のような重複や、浮動小数点のリテラルパターンを禁止した後の `Circle { r, .. } if r == 0.0` が書けない。名前付きのバリアントを入れると、Rust ではこの 2 つを一緒に使うのが普通。",
+        "suggestion": "`Rect { .. } | Label { .. } => 0.0` と `Circle { r, .. } if r == 0.0 => ..` を、この提案か次の提案に入れる。少なくとも未決事項に載せる。"
+      },
+      {
+        "severity": "low",
+        "where": "B『更新の書き方は 002 と同じ。`...` が先頭』",
+        "problem": "Rust 開発者は `Circle { center: x, ..c }` と書く癖がある。エラーになるのは正しいが、毎回引っかかる。",
+        "suggestion": "エラーに `Circle { ...c, center: x }` への書き換えを出し、LSP のクイックフィックスにする(提案の 002 側の記述を 001 でも明記する)。"
+      },
+      {
+        "severity": "low",
+        "where": "A『effect の操作は例外』",
+        "problem": "通常のバリアントは一意でなくてよいのに、effect の操作名だけは一意を求める。effect の enum を 1 つ足すと、既存の `perform Print(..)` が修飾を求められる。r1 の A.1 と同じ種類の非局所性が、effect の中だけに残る。",
+        "suggestion": "衝突したときのエラーが、衝突した両方の宣言の位置と修飾の直し方を出すことを明記する。effect の推論を型検査の後に移す余地を未決事項に残す。"
+      }
+    ],
+    "questions": [
+      "未解決のバリアントの値(候補が複数)を match するとき、パターン(`At { .. }`)は候補を絞るか。網羅性の検査はいつ行うか",
+      "`c @ Circle { .. }` の `c` の型は zustscript で `Shape::Circle` と書けるか。腕の外へ返せるか",
+      "名前を書かない `{ ...c, center: x }` の c がバリアントのとき、結果はレコードか、バリアントか、エラーか",
+      "位置引数のバリアントを関数値として渡す使い方(`xs.map(At)`)はできるか。できるなら、期待する型で解決するか",
+      "別々の enum の同名のバリアントが `.d.ts` で同じ `TAG` 文字列になる件を、表現の決定(`@tag`)の側で扱うか",
+      "or パターンとガードを入れる予定はあるか"
+    ],
+    "alternative": {
+      "summary": "遅延は値が流れる先で決まる場合だけに絞り、未解決のまま match、フィールド読み出し、引数の検査に来たら、その場で修飾を求める。合わせて、絞り込まれた型を `Shape::Circle` として書けるようにし、or パターンも入れる。",
+      "example": "fn describe_later(c: bool) -> i32 {\n  let h = if c { None } else { At { index: 1 } };   // OK: else 側で Hit に決まる\n  match h { None => 0, At { index } => index }\n}\n\nfn bad() -> i32 {\n  let h = None;\n  match h { None => 0, _ => 1 }\n  // error: cannot tell which enum `None` is before matching on it: write `Hit::None`\n}\n\nfn grow(c: Shape::Circle) -> Shape::Circle { Circle { ...c, r: c.r * 2.0 } }\n\npub fn area(s: Shape) -> f64 {\n  match s {\n    c @ Circle { .. } => 3.141592653589793 * grow(c).r,\n    Rect { .. } | Label { .. } => 0.0,\n  }\n}"
+    }
+  }
+]
