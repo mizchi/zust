@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795223552715,
+  "lastUpdate": 1795223555368,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -55108,6 +55108,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "lsp peak RSS",
             "value": 76.395,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "miz404@gmail.com",
+            "name": "Kotaro Chikuba",
+            "username": "mizchi"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "e3aedce67dd6162f43983638362fef0ed85cf6da",
+          "message": "Merge pull request #18 from mizchi/claude/compat-next10\n\nStatic bound checks via impl self types and blanket bounds, two-phase compound assignment, Infallible",
+          "timestamp": "2026-11-21T10:08:03+09:00",
+          "tree_id": "d1d2e013aea62c0e06bbdf075b21f5c713de2e42",
+          "url": "https://github.com/mizchi/zust/commit/e3aedce67dd6162f43983638362fef0ed85cf6da"
+        },
+        "date": 1795223554730,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "lsp definition p50",
+            "value": 1.021,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp hover p50",
+            "value": 0.753,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp completion p50",
+            "value": 1.712,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp references p50",
+            "value": 4.994,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp rename p50",
+            "value": 0.668,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp signatureHelp p50",
+            "value": 0.891,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp documentHighlight p50",
+            "value": 1.461,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp ready (startup to indexed)",
+            "value": 164.752,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp peak RSS",
+            "value": 76.367,
             "unit": "MiB"
           }
         ]
