@@ -1159,13 +1159,12 @@ pub enum CapMode {
     Val,
 }
 
-/// The pattern looks at the value (a discriminant, a literal, a length), so matching reads the scrutinee
 /// p binds by reference somewhere (`ref x`, `ref mut x`)
-fn pat_binds_ref(p: &Pat) -> bool {
+pub(crate) fn pat_binds_ref(p: &Pat) -> bool {
     pat_any(p, &|q| matches!(q, Pat::Ident(true, ..)))
 }
 
-fn pat_binds_ref_mut(p: &Pat) -> bool {
+pub(crate) fn pat_binds_ref_mut(p: &Pat) -> bool {
     pat_any(p, &|q| matches!(q, Pat::Ident(true, true, ..)))
 }
 
@@ -1182,6 +1181,7 @@ fn pat_any(p: &Pat, f: &dyn Fn(&Pat) -> bool) -> bool {
     }
 }
 
+/// The pattern looks at the value (a discriminant, a literal, a length), so matching reads the scrutinee
 fn pat_reads(p: &Pat) -> bool {
     match p {
         Pat::Wild | Pat::Rest => false,

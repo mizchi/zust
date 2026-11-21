@@ -1224,6 +1224,8 @@ run-pass	closures/issue-22864-2.rs
 compile-fail	closures/issue-25439.rs
 check-pass	closures/issue-41366.rs
 check-pass	closures/issue-48109.rs
+compile-fail	closures/issue-5239-1.rs
+run-pass	closures/issue-5239-2.rs
 compile-fail	closures/issue-6801.rs
 check-pass	closures/issue-68025.rs
 check-pass	closures/issue-72408-nested-closures-exponential.rs
@@ -2199,6 +2201,7 @@ compile-fail	error-codes/E0435.rs
 compile-fail	error-codes/E0478.rs
 compile-fail	error-codes/E0496.rs
 compile-fail	error-codes/E0499.rs
+compile-fail	error-codes/E0502.rs
 compile-fail	error-codes/E0503.rs
 compile-fail	error-codes/E0505.rs
 compile-fail	error-codes/E0506.rs
@@ -3883,6 +3886,7 @@ compile-fail	match/option-result-mismatch-11844.rs
 compile-fail	match/option-result-type-param-mismatch-13466.rs
 run-pass	match/overeager-sub-match-pruning-13027.rs
 run-pass	match/pattern-deref-miscompile.rs
+run-pass	match/range-arm-and-ref-arm.rs
 compile-fail	match/single-line.rs
 run-pass	match/struct-reference-patterns-12285.rs
 run-pass	match/tuple-usize-pattern-14393.rs
@@ -4198,6 +4202,7 @@ compile-fail	nll/issue-47388.rs
 compile-fail	nll/issue-47470.rs
 run-pass	nll/issue-47589.rs
 run-pass	nll/issue-48070.rs
+check-pass	nll/issue-48179.rs
 compile-fail	nll/issue-48238.rs
 run-pass	nll/issue-48623-closure.rs
 compile-fail	nll/issue-48697.rs
@@ -4205,6 +4210,7 @@ compile-fail	nll/issue-48803.rs
 run-pass	nll/issue-50343.rs
 run-pass	nll/issue-50461-used-mut-from-moves.rs
 check-pass	nll/issue-50716-1.rs
+compile-fail	nll/issue-51244.rs
 check-pass	nll/issue-51351.rs
 check-pass	nll/issue-51770.rs
 run-pass	nll/issue-52057.rs
@@ -4270,6 +4276,7 @@ run-pass	nll/rc-loop.rs
 compile-fail	nll/ref-suggestion.rs
 compile-fail	nll/reference-carried-through-struct-field.rs
 check-pass	nll/relate_tys/issue-48071.rs
+compile-fail	nll/return-ref-mut-issue-46557.rs
 check-pass	nll/self-assign-ref-mut.rs
 check-pass	nll/ty-outlives/issue-53789-1.rs
 check-pass	nll/ty-outlives/issue-53789-2.rs
@@ -5100,8 +5107,10 @@ compile-fail	pattern/at-in-struct-patterns.rs
 run-pass	pattern/bindings-after-at/bind-by-copy-or-pat.rs
 run-pass	pattern/bindings-after-at/bind-by-copy.rs
 compile-fail	pattern/bindings-after-at/bind-by-move-no-subbindings-fun-param.rs
+check-pass	pattern/bindings-after-at/borrowck-pat-ref-both-sides.rs
 check-pass	pattern/bindings-after-at/nested-binding-mode-lint.rs
 compile-fail	pattern/bindings-after-at/nested-binding-modes-mut.rs
+compile-fail	pattern/bindings-after-at/nested-binding-modes-ref.rs
 run-pass	pattern/bindings-after-at/nested-patterns.rs
 run-pass	pattern/bindings-after-at/or-patterns-slice-patterns.rs
 run-pass	pattern/bindings-after-at/or-patterns.rs
@@ -5475,6 +5484,7 @@ run-pass	regions/regions-reassign-let-bound-pointer.rs
 run-pass	regions/regions-reassign-match-bound-pointer.rs
 compile-fail	regions/regions-reborrow-from-shorter-mut-ref-mut-ref.rs
 compile-fail	regions/regions-reborrow-from-shorter-mut-ref.rs
+compile-fail	regions/regions-ref-in-fn-arg.rs
 run-pass	regions/regions-refcell.rs
 run-pass	regions/regions-relate-bound-regions-on-closures-to-inference-variables.rs
 compile-fail	regions/regions-ret-borrowed-1.rs

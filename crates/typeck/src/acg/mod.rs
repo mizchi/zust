@@ -463,9 +463,38 @@ pub(crate) fn addr_taken(b: &crate::parse::Block, mut_methods: &crate::fxhash::F
             _ => None,
         }
     }
+    // (`let ref mut y = x;`: y points at x itself. A shared `ref` binds a copy in memory (pat_bind): x does not
+    // change while y is in use)
+    fn ref_lets(b: &crate::parse::Block, out: &mut HashSet<String>) {
+        for st in &b.stmts {
+            if let Stmt::Let(pat, _, Some(init), ..) = st {
+                // (most bind a name by value: no walk of the pattern)
+                if matches!(pat, Pat::Ident(false, _, _, None) | Pat::Wild) {
+                    continue;
+                }
+                if borrowck::pat_binds_ref_mut(pat) {
+                    if let Some(n) = root(init) {
+                        out.insert(n);
+                    }
+                }
+            }
+        }
+    }
     fn visit(e: &Expr, out: &mut HashSet<String>, mm: &crate::fxhash::FxSet<String>) {
         match e {
             Expr::Ref(_, x) | Expr::RawRef(_, x) => {
+                if let Some(n) = root(x) {
+                    out.insert(n);
+                }
+            }
+            Expr::Block(_, _, b) | Expr::Const(b) | Expr::Loop(_, b) | Expr::While(_, _, b) | Expr::For(_, _, _, b) | Expr::If(_, b, _) => ref_lets(b, out),
+            // (`match x { ref mut y => .. }`, `if let Some(ref mut y) = x`: the same)
+            Expr::Match(x, arms) if arms.iter().any(|a| borrowck::pat_binds_ref_mut(&a.pat)) => {
+                if let Some(n) = root(x) {
+                    out.insert(n);
+                }
+            }
+            Expr::Let(pat, x) if borrowck::pat_binds_ref_mut(pat) => {
                 if let Some(n) = root(x) {
                     out.insert(n);
                 }

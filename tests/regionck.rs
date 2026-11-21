@@ -1047,3 +1047,16 @@ fn implicit_reborrow_of_a_mut_argument() {
         vec![]
     );
 }
+
+/// `ref` bindings of a value not in memory: `let ref y = a;` borrows a (E0502 below), `let ref x = 0;` binds a
+/// temporary, and `let ref mut y = x;` writes x itself
+#[test]
+fn ref_bindings_of_values() {
+    let d = check("fn bar(_x: &mut i32) {}\nfn foo(a: &mut i32) {\n    let ref y = a;\n    bar(a);\n    let v = **y;\n    let _ = v;\n}\nfn main() {\n    let mut n = 1;\n    foo(&mut n);\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 4, "{d:?}");
+    let d = check("fn main() {\n    let ref my_ref @ _ = 0;\n    *my_ref = 0;\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 3 && d[0].1.contains("behind a `&` reference"), "{d:?}");
+    let d = check("fn main() {\n    let var = 10i32;\n    let ref string: String = var;\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 3 && d[0].1.contains("mismatched types"), "{d:?}");
+    assert_eq!(check("fn main() {\n    let mut x = 5;\n    let ref mut y = x;\n    *y += 1;\n    let ref z = 7;\n    match x {\n        ref mut w => *w += 1,\n    }\n    assert_eq!(x + *z, 14);\n}\n"), vec![]);
+}
