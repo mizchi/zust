@@ -2290,6 +2290,18 @@ impl Program {
     }
 
     /// 配列の長さに使う const (要約の const 表から整数の定数式として評価する)
+    /// Whether an impl of trait tr for a type parameter (`impl<T> Tr for T { const N = .. }`) defines its const n: a
+    /// type it covers takes that, not the trait's default (which the qualified-path fallback then must not read)
+    fn blanket_defines(&self, tr: &str, n: &str) -> Option<String> {
+        let suffix = format!(" as {tr}::{n}");
+        self.const_index
+            .keys()
+            .find(|k| {
+                k.strip_suffix(suffix.as_str()).is_some_and(|base| !self.struct_index.contains_key(base) && Ty::prim(base).is_none() && !self.aliases.contains_key(base))
+            })
+            .cloned()
+    }
+
     fn const_usize(&self, name: &str) -> R<u64> {
         // (`<Foo as Bar>::SIZE`: the trait's under its qualified name, else the only `Foo::SIZE`; an expression with a
         // cast in it, `(1 as usize) + Foo::SIZE`, is not one)
@@ -2307,6 +2319,10 @@ impl Program {
                     return self.const_usize(&q);
                 }
                 // (the impl leaves it out: the trait's default, not an inherent `Foo::SIZE`)
+                // (`impl<T> Tr for T { const N }`: the blanket impl's, which covers Foo)
+                if let Some(k) = self.blanket_defines(tr, last) {
+                    return self.const_usize(&k);
+                }
                 let d = format!("{tr}::{last}");
                 if self.const_index.contains_key(&d) {
                     return self.const_usize(&d);
@@ -2502,6 +2518,9 @@ impl Program {
                     let q = format!("{} as {}::{}", tp.segs[0].name, p.segs[0].name, p.segs[1].name);
                     if self.const_index.contains_key(&q) {
                         return self.const_int(&q, depth);
+                    }
+                    if let Some(k) = self.blanket_defines(&p.segs[0].name, &p.segs[1].name) {
+                        return self.const_int(&k, depth);
                     }
                     let d = format!("{}::{}", p.segs[0].name, p.segs[1].name);
                     if self.const_index.contains_key(&d) {
