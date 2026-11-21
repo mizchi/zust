@@ -800,7 +800,16 @@ impl Cx<'_> {
                 self.b.ins().jump(header, &[]);
                 self.b.switch_to_block(header);
                 let t0 = self.temps.len();
+                // (`'a: while break 'a {}`: the label is a target of `break` already in the condition (an unlabeled
+                // `break` or a `continue` there is not))
+                let label = self.pending_label.take();
+                if label.is_some() {
+                    self.loops.push(Loop { cont: header, brk: exit, breaks: 0, label: label.clone(), val: None, is_block: true, depth: self.scopes.len(), temps: t0 });
+                }
                 let (c, ct) = self.expr(cond, Some(Ty::Bool))?;
+                if label.is_some() {
+                    self.loops.pop();
+                }
                 self.same(SP, ct, Ty::Bool)?;
                 // (the condition's temporaries are dropped before the body: `while borrow().ok() { .. }`)
                 if c.is_some() {
@@ -819,7 +828,7 @@ impl Cx<'_> {
                     cont: header,
                     brk: exit,
                     breaks: 0,
-                    label: self.pending_label.take(),
+                    label,
                     val: None,
                     is_block: false,
                     depth: self.scopes.len(),
@@ -876,10 +885,10 @@ impl Cx<'_> {
                 }
                 Ok((None, Ty::Unit))
             }
-            Expr::Break(label, value) => {
+            Expr::Break(label, value, pos) => {
                 let label = label.as_deref().map(label_name);
                 let Some(li) = self.loop_index(label.as_deref(), true) else {
-                    return err(SP, "`break` outside of a loop (or unknown label)");
+                    return err(*pos, "`break` outside of a loop (or unknown label)");
                 };
                 // `break v`: 値を評価してから抜ける (型は最初の break で決まる)
                 let mut args = vec![];
@@ -912,10 +921,10 @@ impl Cx<'_> {
                 self.b.ins().jump(t, &args);
                 Ok(self.dead())
             }
-            Expr::Continue(label) => {
+            Expr::Continue(label, pos) => {
                 let label = label.as_deref().map(label_name);
                 let Some(li) = self.loop_index(label.as_deref(), false) else {
-                    return err(SP, "`continue` outside of a loop (or unknown label)");
+                    return err(*pos, "`continue` outside of a loop (or unknown label)");
                 };
                 let lp = &self.loops[li];
                 let (t, d, tt) = (lp.cont, lp.depth, lp.temps);

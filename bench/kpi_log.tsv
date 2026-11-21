@@ -244,3 +244,4 @@ date	commit	change	noop_M	edit_M	check_M	cache_KiB	lsp_G	run	check	build	cfail	t
 2026-11-21	3b9c000	lacks_cmp: elements first	0.700	553.923	3858.998	1902.8	-	1800	1480	98	3827	1184.773	63.965	10.312	319.399	717.328	267.146
 2026-11-21	b3475f1	PartialEq's eq among reference overloads; merge #36 work	0.702	553.798	3859.543	1902.8	-	1800	1480	98	3828	1184.934	64.076	10.326	319.426	717.405	267.224
 2026-11-21	699644c+	Review of #36: module types with const args, array impls matched to operands	0.699	553.786	3859.117	1902.8	-	1800	1480	98	3827	1184.794	63.966	10.311	319.407	717.333	267.216
+2026-11-21	ef664e2+	break / continue at their own position; a labeled while's label in its condition	0.697	553.933	3859.300	1902.8	-	1800	1481	98	3842	1184.873	63.975	10.298	319.509	717.396	267.286

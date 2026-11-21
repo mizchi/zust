@@ -425,8 +425,9 @@ pub enum Expr {
     While(Option<String>, Box<Expr>, Block),
     Loop(Option<String>, Block),
     For(Option<String>, Box<Pat>, Box<Expr>, Block),
-    Break(Option<String>, Option<Box<Expr>>),
-    Continue(Option<String>),
+    /// (the last field: where its label is, else where the keyword is)
+    Break(Option<String>, Option<Box<Expr>>, Pos),
+    Continue(Option<String>, Pos),
     Return(Option<Box<Expr>>),
     /// (the last field: where the closure starts)
     Closure(bool, Vec<(Pat, Option<Ty>)>, Option<Box<Ty>>, Box<Expr>, Pos),
@@ -2202,14 +2203,20 @@ impl Parser {
                 return Ok(Expr::Return(v));
             }
             "break" => {
+                let kw = self.pos();
                 self.i += 1;
+                let lp = self.pos();
                 let l = self.lifetime();
+                let pos = if l.is_some() { lp } else { kw };
                 let v = if self.expr_follows() && !(self.is_open("{") && !ss) { Some(Box::new(self.expr(ss)?)) } else { None };
-                return Ok(Expr::Break(l, v));
+                return Ok(Expr::Break(l, v, pos));
             }
             "continue" => {
+                let kw = self.pos();
                 self.i += 1;
-                return Ok(Expr::Continue(self.lifetime()));
+                let lp = self.pos();
+                let l = self.lifetime();
+                return Ok(Expr::Continue(l.clone(), if l.is_some() { lp } else { kw }));
             }
             "let" => {
                 self.i += 1;
@@ -3237,7 +3244,7 @@ impl Counts {
                 self.expr(x);
                 self.block(b);
             }
-            Expr::Break(_, v) | Expr::Return(v) => {
+            Expr::Break(_, v, _) | Expr::Return(v) => {
                 if matches!(e, Expr::Return(_)) {
                     self.returns += 1;
                 }
@@ -3245,7 +3252,7 @@ impl Counts {
                     self.expr(v);
                 }
             }
-            Expr::Continue(_) => {}
+            Expr::Continue(..) => {}
             Expr::Closure(_, _, _, b, _) => {
                 self.closures += 1;
                 self.expr(b);

@@ -117,7 +117,7 @@ fn diverging_macro(p: &Path) -> bool {
 /// 必ず発散する式 (`return` / `break` / `continue` / `panic!(..)`)
 fn diverges(e: &Expr) -> bool {
     match e {
-        Expr::Return(_) | Expr::Break(..) | Expr::Continue(_) => true,
+        Expr::Return(_) | Expr::Break(..) | Expr::Continue(..) => true,
         Expr::Macro(p, _, _) => diverging_macro(p),
         _ => false,
     }
@@ -1368,7 +1368,7 @@ impl Inf<'_> {
                 }
                 self.known(Ty::Never)
             }
-            Expr::Break(label, x) => {
+            Expr::Break(label, x, _) => {
                 let fi = self.brk.iter().rposition(|f| match label {
                     Some(n) => f.0.as_deref() == Some(n.as_str()),
                     None => !f.2,
@@ -1385,7 +1385,7 @@ impl Inf<'_> {
                 }
                 self.known(Ty::Never)
             }
-            Expr::Continue(_) => self.known(Ty::Never),
+            Expr::Continue(..) => self.known(Ty::Never),
             Expr::Call(f, args) => self.call(f, args),
             Expr::Closure(..) => self.closure(e),
             Expr::MethodCall(recv, name, tf, args, _) => self.method_call(recv, name, tf, args),

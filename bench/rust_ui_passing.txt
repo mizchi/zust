@@ -424,6 +424,9 @@ compile-fail	async-await/issue-69446-fnmut-capture.rs
 compile-fail	async-await/issue-70594.rs
 compile-fail	async-await/issue-72590-type-error-sized.rs
 check-pass	async-await/issue-73050.rs
+compile-fail	async-await/issue-73541-1.rs
+compile-fail	async-await/issue-73541-3.rs
+compile-fail	async-await/issue-73541.rs
 compile-fail	async-await/issue-73741-type-err.rs
 compile-fail	async-await/issue-74047.rs
 compile-fail	async-await/issue-74072-lifetime-name-annotations.rs
@@ -2150,6 +2153,7 @@ compile-fail	error-codes/E0261.rs
 compile-fail	error-codes/E0262.rs
 compile-fail	error-codes/E0263.rs
 compile-fail	error-codes/E0267.rs
+compile-fail	error-codes/E0268.rs
 compile-fail	error-codes/E0277-2.rs
 compile-fail	error-codes/E0277-3.rs
 compile-fail	error-codes/E0277-4.rs
@@ -2172,6 +2176,7 @@ compile-fail	error-codes/E0416.rs
 compile-fail	error-codes/E0423-struct-literal-comment.rs
 compile-fail	error-codes/E0423.rs
 compile-fail	error-codes/E0424.rs
+compile-fail	error-codes/E0426.rs
 compile-fail	error-codes/E0428.rs
 check-pass	error-codes/E0429.rs
 compile-fail	error-codes/E0430.rs
@@ -2465,6 +2470,7 @@ compile-fail	fn/param-mismatch-foreign.rs
 compile-fail	fn/suggest-return-closure.rs
 compile-fail	fn/suggest-return-future.rs
 run-pass	for-loop-while/auto-loop.rs
+compile-fail	for-loop-while/break-continue-in-loop-while-condition.rs
 compile-fail	for-loop-while/break-outside-loop.rs
 run-pass	for-loop-while/break-value.rs
 run-pass	for-loop-while/break.rs
@@ -2747,6 +2753,7 @@ compile-fail	hygiene/expansion-info-reset.rs
 compile-fail	hygiene/fields-numeric-borrowck.rs
 compile-fail	hygiene/for-loop.rs
 run-pass	hygiene/hygiene-dodging-1.rs
+compile-fail	hygiene/hygienic-label-2.rs
 compile-fail	hygiene/hygienic-label-4.rs
 run-pass	hygiene/hygienic-labels-in-let.rs
 run-pass	hygiene/hygienic-labels.rs
@@ -3126,6 +3133,7 @@ check-pass	inline-const/const-expr-inference.rs
 run-pass	inline-const/const-expr-lifetime.rs
 run-pass	inline-const/const-expr-macro.rs
 run-pass	inline-const/const-expr-reference.rs
+compile-fail	inline-const/cross-const-control-flow-125846.rs
 check-pass	inline-const/elided-lifetime-being-infer-vars.rs
 compile-fail	inline-const/expr-unsafe-err.rs
 check-pass	inline-const/expr-unsafe.rs
@@ -3165,11 +3173,15 @@ compile-fail	keyword/keyword-true-as-identifier.rs
 compile-fail	keyword/meta-is-not-reserved.rs
 run-pass	keyword/raw-identifier-for-function-57198.rs
 compile-fail	keyword/reserved-become.rs
+compile-fail	label/continue-pointing-to-block-ice-121623.rs
 check-pass	label/label-beginning-with-underscore.rs
 run-pass	label/label-in-closure-no-self-shadow.rs
+compile-fail	label/label_break_value_continue.rs
 compile-fail	label/label_break_value_illegal_uses.rs
+compile-fail	label/label_break_value_unlabeled_break.rs
 compile-fail	label/label_misspelled.rs
 compile-fail	label/label_misspelled_2.rs
+compile-fail	label/undeclared-label-span.rs
 check-pass	late-bound-lifetimes/downgraded_to_early_through_alias.rs
 run-pass	late-bound-lifetimes/issue-36381.rs
 check-pass	late-bound-lifetimes/issue-47511.rs
@@ -4147,6 +4159,7 @@ compile-fail	never_type/regress/never-deref.rs
 compile-fail	never_type/regress/never-in-range-pat.rs
 compile-fail	never_type/regress/never-type-method-call-15207.rs
 compile-fail	never_type/regress/suggestion-ice-132517.rs
+check-pass	nll/assign-while-to-immutable.rs
 run-pass	nll/borrow-use-issue-46875.rs
 compile-fail	nll/borrowed-match-issue-45045.rs
 compile-fail	nll/borrowed-referent-issue-38899.rs
@@ -4444,6 +4457,7 @@ compile-fail	parser/bounds-lifetime-where-1.rs
 compile-fail	parser/bounds-lifetime-where.rs
 check-pass	parser/bounds-obj-parens.rs
 compile-fail	parser/brace-in-let-chain.rs
+compile-fail	parser/break-in-unlabeled-block-parenthesized.rs
 compile-fail	parser/cast-angle-bracket-precedence.rs
 compile-fail	parser/chained-comparison-suggestion.rs
 compile-fail	parser/char/whitespace-character-literal.rs
@@ -6284,6 +6298,7 @@ compile-fail	suggestions/suggest-exact-alias-before-similar-name.rs
 compile-fail	suggestions/suggest-field-through-deref.rs
 compile-fail	suggestions/suggest-fn-ptr-for-fn-item-in-fn-ret.rs
 compile-fail	suggestions/suggest-imm-mut-trait-implementations.rs
+compile-fail	suggestions/suggest-labels.rs
 compile-fail	suggestions/suggest-let-and-typo-issue-132483.rs
 compile-fail	suggestions/suggest-let-for-assignment.rs
 compile-fail	suggestions/suggest-methods.rs
