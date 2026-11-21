@@ -1577,6 +1577,16 @@ impl Cx<'_> {
                         Some((*i, tr[1..].to_vec(), ds))
                     }
                     Ty::Box(i) => Some((*i, tr, ds)),
+                    // (`*s` of a String or a Vec: what it owns, as a Box's)
+                    Ty::Struct(sid) => {
+                        let prog = self.prog;
+                        let sd = &prog.structs[sid as usize];
+                        match prog.structs[prog.base_of(sid) as usize].name.as_str() {
+                            "String" if sd.args.is_empty() => Some((Ty::Str, tr, ds)),
+                            "Vec" if sd.args.len() == 1 && lts_of(prog, prog.base_of(sid)) == 0 => Some((Ty::Slice(crate::types::intern(sd.args[0])), tr, ds)),
+                            _ => None,
+                        }
+                    }
                     _ => None,
                 }
             }
@@ -1762,7 +1772,8 @@ impl Cx<'_> {
         let Some((et, tr)) = self.rt_expr(e) else { return };
         let (prog, t) = (self.prog, self.ret);
         let sp = super::borrowck::pos(e);
-        if sp.line != 0 {
+        // (a result with no regions: nothing escapes through it; the span may be a call's in it)
+        if sp.line != 0 && !rt.is_empty() {
             self.rg.ret_sps.push(sp);
         }
         self.rg.flow(prog, et, t, &tr, &rt, sp);
