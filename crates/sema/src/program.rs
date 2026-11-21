@@ -237,6 +237,9 @@ pub struct Program {
     pub overflow_checks: bool,
     /// `#![deny(unreachable_patterns)]` (or forbid) in the source: an arm no value can reach is an error
     pub deny_unreachable: bool,
+    /// structs / enums with `#[derive(PartialEq)]` (base ids): a constant of such a type (with fields of such types) is
+    /// structural, usable as a pattern
+    pub derived_peq: FxSet<u32>,
     /// `#![deny(unused_must_use)]`: a statement whose value is a `Result` is an error
     pub deny_must_use: bool,
     /// `#![deny(unused_allocation)]`: `Box::new(x).m()` with m of `&self` on what the box holds is an error
@@ -714,6 +717,7 @@ impl Program {
             panic_handler: None,
             consts: vec![],
             const_index: FxMap::default(),
+            derived_peq: FxSet::default(),
             const_by_last: FxMap::default(),
             prim_impls: HashSet::default(),
             ref_slice_traits: HashSet::default(),
@@ -1472,6 +1476,9 @@ impl Program {
                 if let Some(&sid) = p.struct_index.get(tn) {
                     for d in ds {
                         p.impls.insert((sid, d.clone()));
+                        if d == "PartialEq" {
+                            p.derived_peq.insert(sid);
+                        }
                     }
                 }
             }

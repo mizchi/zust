@@ -1651,7 +1651,9 @@ compile-fail	consts/const_in_pattern/incomplete-slice.rs
 compile-fail	consts/const_in_pattern/issue-34784-match-on-non-int-raw-ptr.rs
 check-pass	consts/const_in_pattern/issue-53708.rs
 run-pass	consts/const_in_pattern/issue-62614.rs
+compile-fail	consts/const_in_pattern/no-eq-branch-fail.rs
 run-pass	consts/const_in_pattern/null-raw-ptr-issue-119270.rs
+compile-fail	consts/const_in_pattern/suggest_equality_comparison_instead_of_pattern_matching.rs
 check-pass	consts/const_let_assign.rs
 check-pass	consts/const_let_assign2.rs
 run-pass	consts/const_let_eq.rs
@@ -1732,6 +1734,7 @@ run-pass	consts/load-preserves-partial-init.rs
 compile-fail	consts/long-constant-evaluation-cause-ice-in-sty.rs
 check-pass	consts/manually_drop_structural_eq.rs
 run-pass	consts/match-const-fn-structs.rs
+compile-fail	consts/match_ice.rs
 run-pass	consts/method-reference-in-const-dyn-fn.rs
 check-pass	consts/min_const_fn/address_of_const.rs
 check-pass	consts/min_const_fn/allow_raw_ptr_dereference_const_fn.rs
@@ -2175,6 +2178,7 @@ compile-fail	error-codes/E0516.rs
 compile-fail	error-codes/E0527.rs
 compile-fail	error-codes/E0528.rs
 compile-fail	error-codes/E0529.rs
+compile-fail	error-codes/E0530.rs
 compile-fail	error-codes/E0532.rs
 compile-fail	error-codes/E0540.rs
 compile-fail	error-codes/E0559.rs
@@ -5036,10 +5040,12 @@ run-pass	pattern/integer-range-binding.rs
 run-pass	pattern/issue-10392.rs
 compile-fail	pattern/issue-106552.rs
 compile-fail	pattern/issue-106862.rs
+compile-fail	pattern/issue-115599.rs
 run-pass	pattern/issue-11577.rs
 check-pass	pattern/issue-117626.rs
 run-pass	pattern/issue-12582.rs
 run-pass	pattern/issue-15080.rs
+compile-fail	pattern/issue-17718-patterns.rs
 run-pass	pattern/issue-27320.rs
 compile-fail	pattern/issue-28992-empty.rs
 run-pass	pattern/issue-6449.rs
@@ -5091,6 +5097,7 @@ compile-fail	pattern/self-ctor-133272.rs
 run-pass	pattern/size-and-align.rs
 run-pass	pattern/slice-pattern-recursion-15104.rs
 check-pass	pattern/slice-patterns-nested.rs
+compile-fail	pattern/static-binding-shadow-16149.rs
 compile-fail	pattern/string-match-as-str-suggestion.rs
 compile-fail	pattern/struct-mismatch-destructure-14541.rs
 compile-fail	pattern/struct-parser-recovery-issue-126344.rs
@@ -5107,6 +5114,7 @@ run-pass	pattern/unit-pattern-matching-in-function-argument-7519.rs
 compile-fail	pattern/unit-type-struct-pattern-mismatch-16401.rs
 check-pass	pattern/unused-parameters-const-pattern.rs
 compile-fail	pattern/usefulness/conflicting_bindings.rs
+compile-fail	pattern/usefulness/const-partial_eq-fallback-ice.rs
 check-pass	pattern/usefulness/const-pat-ice.rs
 check-pass	pattern/usefulness/const-private-fields.rs
 compile-fail	pattern/usefulness/consts-opaque.rs
@@ -5552,8 +5560,16 @@ run-pass	rfcs/rfc-0107-bind-by-move-pattern-guards/rfc-basic-examples.rs
 compile-fail	rfcs/rfc-0107-bind-by-move-pattern-guards/rfc-reject-double-move-in-first-arm.rs
 run-pass	rfcs/rfc-1238-nonparametric-dropck/must-work-ex1.rs
 run-pass	rfcs/rfc-1238-nonparametric-dropck/must-work-ex2.rs
+compile-fail	rfcs/rfc-1445-restrict-constants-in-patterns/cant-hide-behind-direct-struct-embedded.rs
+compile-fail	rfcs/rfc-1445-restrict-constants-in-patterns/cant-hide-behind-direct-struct-param.rs
+compile-fail	rfcs/rfc-1445-restrict-constants-in-patterns/cant-hide-behind-doubly-indirect-embedded.rs
+compile-fail	rfcs/rfc-1445-restrict-constants-in-patterns/cant-hide-behind-doubly-indirect-param.rs
+compile-fail	rfcs/rfc-1445-restrict-constants-in-patterns/cant-hide-behind-indirect-struct-embedded.rs
+compile-fail	rfcs/rfc-1445-restrict-constants-in-patterns/cant-hide-behind-indirect-struct-param.rs
+compile-fail	rfcs/rfc-1445-restrict-constants-in-patterns/issue-62307-match-ref-ref-forbidden-without-eq.rs
 compile-fail	rfcs/rfc-1445-restrict-constants-in-patterns/issue-6804-nan-match.rs
 run-pass	rfcs/rfc-1445-restrict-constants-in-patterns/match-empty-array-allowed-without-eq-issue-62336.rs
+compile-fail	rfcs/rfc-1445-restrict-constants-in-patterns/match-requires-both-partialeq-and-eq.rs
 run-pass	rfcs/rfc-1445-restrict-constants-in-patterns/phantom-data-is-structurally-matchable.rs
 run-pass	rfcs/rfc-1445-restrict-constants-in-patterns/rfc1445/eq-allows-match-on-ty-in-macro.rs
 run-pass	rfcs/rfc-1445-restrict-constants-in-patterns/rfc1445/eq-allows-match.rs
@@ -5831,6 +5847,7 @@ compile-fail	static/static-closures.rs
 run-pass	static/static-list-initialization-5917.rs
 compile-fail	static/static-mut-bad-types.rs
 compile-fail	static/static-mut-foreign-requires-unsafe.rs
+compile-fail	static/static-mut-not-pat.rs
 compile-fail	static/static-mut-requires-unsafe.rs
 compile-fail	static/static-reference-to-fn-2.rs
 build-pass	static/static-str-deref-ref.rs
@@ -6927,6 +6944,7 @@ compile-fail	union/union-assignop.rs
 compile-fail	union/union-borrow-move-parent-sibling.rs
 run-pass	union/union-const-codegen.rs
 run-pass	union/union-const-eval-field.rs
+compile-fail	union/union-const-pat.rs
 compile-fail	union/union-derive-clone.rs
 run-pass	union/union-drop-assign.rs
 run-pass	union/union-drop.rs

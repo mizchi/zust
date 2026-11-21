@@ -512,6 +512,34 @@ impl Cx<'_> {
 
     /// An identifier pattern that names a const of the scrutinee's type (a simple type: integer, bool, char, `&str`,
     /// a reference to an integer or integer slice)
+    /// The part of t that is not structural (no derived PartialEq), if any: numbers, bool, char, str, references,
+    /// arrays, tuples are; a struct / enum is when it derives PartialEq and its fields are (Option / Result derive it);
+    /// Vec / String / Box (manual impls) are not
+    pub(crate) fn non_structural(&self, t: Ty, depth: u32) -> Option<Ty> {
+        if depth > 8 {
+            return None;
+        }
+        match t {
+            t if t.is_int() || t.is_float() || matches!(t, Ty::Bool | Ty::Char | Ty::Unit | Ty::Never | Ty::Str) => None,
+            Ty::Ref(_, i) | Ty::Array(i, _) | Ty::Slice(i) => self.non_structural(*i, depth + 1),
+            Ty::Struct(sid) => {
+                let base = self.prog.base_of(sid);
+                let sd = &self.prog.structs[sid as usize];
+                // (std's types that derive PartialEq there, whatever the prelude's version does)
+                let std_structural = matches!(
+                    self.prog.structs[base as usize].name.as_str(),
+                    "Option" | "Result" | "ManuallyDrop" | "Wrapping" | "Saturating" | "PhantomData" | "Reverse" | "Ordering" | "Bound" | "Range" | "RangeInclusive"
+                );
+                if !self.prog.is_tuple(base) && !std_structural && !self.prog.derived_peq.contains(&base) {
+                    return Some(t);
+                }
+                let fields = sd.fields.iter().map(|f| f.1).chain(sd.variants.iter().flat_map(|v| v.fields.iter().map(|f| f.1)));
+                fields.collect::<Vec<Ty>>().into_iter().find_map(|f| self.non_structural(f, depth + 1))
+            }
+            _ => None,
+        }
+    }
+
     pub(crate) fn const_pat_ok(&self, pat: &Pat, t: Ty) -> bool {
         let Some(n) = const_ident_pat(self.prog, pat) else { return false };
         if self.lookup(n).is_some() {
@@ -566,6 +594,24 @@ impl Cx<'_> {
                 self.same(SP, ct, t)?;
                 let cond = self.eq_at(v.unwrap(), c.unwrap(), t, SP)?;
                 self.require(cond, fail);
+                Ok(())
+            }
+            // (a constant of a type without a derived PartialEq (or holding one) cannot be a pattern)
+            Pat::Ident(_, _, n, None) if self.user_code && self.lookup(n).is_none() && self.prog.const_index.contains_key(n.as_str()) => {
+                let c = &self.prog.consts[self.prog.const_index[n.as_str()] as usize];
+                // (a static's name is not a pattern (E0530))
+                if c.stat.is_some() {
+                    return err(SP, format!("match bindings cannot shadow statics (E0530): `{n}`"));
+                }
+                let ct = c.ty;
+                if let Ty::Struct(sid) = self.strip_refs(ct) {
+                    if self.prog.unions.contains(&self.prog.structs[self.prog.base_of(sid) as usize].name) {
+                        return err(SP, "cannot use unions in constant patterns".to_string());
+                    }
+                }
+                if let Some(bad) = self.non_structural(ct, 0) {
+                    return err(SP, format!("constant of non-structural type `{}` in a pattern", self.prog.tn(bad)));
+                }
                 Ok(())
             }
             Pat::Ident(_, _, _, sub) => match sub {
