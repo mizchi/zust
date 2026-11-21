@@ -1,0 +1,26 @@
+# Cases zustc does not pass yet: `name  # reason`. A listed case that fails is reported but does not fail
+# tests/security.rs; a listed case that passes fails it, so this list only shrinks.
+
+# Borrow and region checking (closures, temporaries, drop check)
+borrow_closure_escapes          # E0373 is only checked for thread::spawn: a boxed closure borrowing a local is returned
+borrow_closure_mut_and_shared   # a closure's captures are not loans: `v` is read while a closure holds `&mut v`
+borrow_uninit_read              # rejected, but reported at the function's first line instead of the read
+region_temporary_dropped        # E0716 not found when the reference is assigned after its `let`
+region_dropck                   # no drop check: a value with Drop may outlive what it borrows
+
+# Privacy (E0603 / E0616 / E0451): visibility is not checked at all
+privacy_field
+privacy_field_write
+privacy_ctor
+privacy_fn
+
+# Traits and types
+sync_cell_static                # a static's type is not required to be Sync
+sync_refcell_static             # (same)
+unsafe_fn_pointer               # fn pointer types do not record `unsafe`, so calling one needs no unsafe block
+lit_overflow                    # overflowing_literals: `256` as u8 is accepted (and wraps to 0)
+const_overflow                  # E0080: overflow in a const is found only when it is evaluated at run time (a panic)
+
+# Runtime
+rt_refcell                      # RefCell hands out plain references with no borrow flag: two `borrow_mut` alias
+rt_box_move_out                 # `let x = *b;` moves the value but never frees the Box's block (a leak)

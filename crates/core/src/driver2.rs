@@ -68,7 +68,8 @@ pub struct Analysis {
     /// 読んだ関数の本体 (関数 id → 構文木)
     pub asts: Mutex<FxMap<u32, ItemFn>>,
     /// 囲む関数 (アイテム番号) ごとのクロージャの式 (クロージャの本体を引くたびに囲む関数を読み直さない)
-    pub encl: Mutex<FxMap<u32, Vec<Expr>>>,
+    /// item → its closures, and whether each is written inside `unsafe { }`
+    pub encl: Mutex<FxMap<u32, Vec<(Expr, bool)>>>,
     /// 関数ごとのシグネチャのハッシュ (0 はまだ: キーを作るたびに参照先のシグネチャをたどり直さない)
     pub sig_keys: Mutex<Vec<Key>>,
     /// 依存するクレートのテキストの範囲と、そこから見えるクレート (CrateCtx::dep_ranges)
@@ -764,6 +765,7 @@ impl Session2 {
                 }
             }
         }
+        unsafe_impls(&src, &items[..user])?;
         let mut prog = Program::build_with(&items, &sums, self.ctx.lib.is_none() && !lib_attr, user).map_err(|e| name_line(&e, &src, &items))?;
         tm.lap("program", String::new());
         prog.prelude_from = user as u32;
@@ -1763,8 +1765,9 @@ pub fn parse_fn(src: &str, it: &SrcItem) -> R<Option<ItemFn>> {
     Ok(Some(ItemFn { attrs: item.attrs, sig, block }))
 }
 
-/// クロージャ式を関数にする (`fn call(__env: (), p0: (), ..) { 本体 }`: 型はシグネチャから決まる)
-pub fn synth_closure(c: &Expr) -> ItemFn {
+/// クロージャ式を関数にする (`fn call(__env: (), p0: (), ..) { 本体 }`: 型はシグネチャから決まる)。
+/// in_unsafe: the closure is written where `unsafe` operations are allowed, so its body is put in `unsafe { }`
+pub fn synth_closure(c: &Expr, in_unsafe: bool) -> ItemFn {
     let Expr::Closure(_, ps, _, body, _) = c else { unreachable!() };
     let unit = crate::parse::Ty::Tuple(vec![]);
     let mut params = vec![(Pat::Ident(false, false, "__env".into(), None), unit.clone())];
@@ -1784,6 +1787,9 @@ pub fn synth_closure(c: &Expr) -> ItemFn {
         Expr::Block(None, false, b) => stmts.extend(b.stmts.iter().cloned()),
         e => stmts.push(Stmt::Expr(e.clone(), false)),
     }
+    if in_unsafe {
+        stmts = vec![Stmt::Expr(Expr::Block(None, true, Block { stmts }), false)];
+    }
     let sig = crate::parse::FnSig {
         name: "call".into(),
         generics: crate::parse::Generics { params: vec![], preds: vec![] },
@@ -1796,6 +1802,101 @@ pub fn synth_closure(c: &Expr) -> ItemFn {
     ItemFn { attrs: vec![], sig, block: Block { stmts } }
 }
 
+/// The text of an item after its attributes and comments, and the number of lines skipped to get there
+fn after_attrs(text: &str) -> (&str, usize) {
+    let mut t = text;
+    loop {
+        let u = t.trim_start();
+        if let Some(r) = u.strip_prefix("//") {
+            t = r.find('\n').map(|k| &r[k..]).unwrap_or("");
+        } else if let Some(r) = u.strip_prefix("/*") {
+            t = r.find("*/").map(|k| &r[k + 2..]).unwrap_or("");
+        } else if let Some(r) = u.strip_prefix("#[").or_else(|| u.strip_prefix("#![")) {
+            let mut depth = 1;
+            let mut end = r.len();
+            for (k, c) in r.char_indices() {
+                match c {
+                    '[' => depth += 1,
+                    ']' => {
+                        depth -= 1;
+                        if depth == 0 {
+                            end = k + 1;
+                            break;
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            t = &r[end..];
+        } else {
+            t = u;
+            break;
+        }
+    }
+    let skipped = &text[..text.len() - t.len()];
+    (t, skipped.matches('\n').count())
+}
+
+/// `t` without the keyword `w` at its start (and the spaces after it)
+fn after_word<'a>(t: &'a str, w: &str) -> Option<&'a str> {
+    let r = t.strip_prefix(w)?;
+    if r.starts_with(|c: char| c.is_alphanumeric() || c == '_') {
+        return None;
+    }
+    Some(r.trim_start())
+}
+
+/// E0200: an impl of an unsafe trait (`Send`, `Sync`, or an `unsafe trait` of the program) must be an `unsafe impl`.
+/// Implementing `Send` for a type holding an `Rc` is how safe code would otherwise share it between threads
+fn unsafe_impls(src: &str, items: &[SrcItem]) -> R<()> {
+    let mut unsafe_traits: Vec<&str> = vec!["Send", "Sync"];
+    for it in items {
+        let (t, _) = after_attrs(src.get(it.start..it.end).unwrap_or(""));
+        let t = after_word(t, "pub").map(|r| if r.starts_with('(') { r.find(')').map(|k| r[k + 1..].trim_start()).unwrap_or(r) } else { r }).unwrap_or(t);
+        if let Some(r) = after_word(t, "unsafe").and_then(|r| after_word(r, "trait")) {
+            let n = r.split(|c: char| !(c.is_alphanumeric() || c == '_')).next().unwrap_or("");
+            if !n.is_empty() {
+                unsafe_traits.push(n);
+            }
+        }
+    }
+    for it in items {
+        if !matches!(it.kind, ItemKind::Normal | ItemKind::ImplHeader) {
+            continue;
+        }
+        let (t, skipped) = after_attrs(src.get(it.start..it.end).unwrap_or(""));
+        let Some(mut r) = after_word(t, "impl") else { continue };
+        // (the impl's own generics: `impl<T: Send> Send for W<T>`)
+        if r.starts_with('<') {
+            let mut depth = 0;
+            let mut end = r.len();
+            for (k, c) in r.char_indices() {
+                match c {
+                    '<' => depth += 1,
+                    '>' if k > 0 && r.as_bytes()[k - 1] == b'-' => {}
+                    '>' => {
+                        depth -= 1;
+                        if depth == 0 {
+                            end = k + 1;
+                            break;
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            r = r[end..].trim_start();
+        }
+        let head = r.split('{').next().unwrap_or("");
+        let Some(k) = head.find(" for ") else { continue };
+        let path = head[..k].trim();
+        let last = path.split('<').next().unwrap_or("").rsplit("::").next().unwrap_or("").trim();
+        if unsafe_traits.contains(&last) {
+            return Err(format!("{}:1: the trait `{last}` requires an `unsafe impl` declaration (E0200)", it.line + skipped));
+        }
+    }
+    Ok(())
+}
+
 /// 関数 (インスタンスも) id の本体
 fn fn_ast(a: &Analysis, body: u32) -> R<ItemFn> {
     let ii = a.prog.item_of[body as usize].ok_or("internal: no item")?;
@@ -1804,11 +1905,14 @@ fn fn_ast(a: &Analysis, body: u32) -> R<ItemFn> {
         let mut encl = a.encl.lock().unwrap();
         if !encl.contains_key(&ii) {
             let f = parse_fn(&a.src, it)?.ok_or_else(|| format!("`{}` has no body", a.prog.names[body as usize]))?;
-            encl.insert(ii, crate::ast_closure::closures_of(&f.block));
+            let u = crate::ast_closure::closures_in_unsafe(&f.block);
+            encl.insert(ii, crate::ast_closure::closures_of(&f.block).into_iter().zip(u).collect());
         }
         let cs = encl.get(&ii).unwrap();
-        let c = cs.get(cd.k as usize).ok_or("internal: closure not found")?;
-        return Ok(synth_closure(c));
+        let (c, in_unsafe) = cs.get(cd.k as usize).ok_or("internal: closure not found")?;
+        // (a closure written in `unsafe { }` or in an `unsafe fn` may do what its surroundings may)
+        let in_unsafe = *in_unsafe || a.prog.sigs.get(cd.parent as usize).is_some_and(|s| s.is_unsafe);
+        return Ok(synth_closure(c, in_unsafe));
     }
     let f = parse_fn(&a.src, it)?.ok_or_else(|| format!("`{}` has no body", a.prog.names[body as usize]))?;
     Ok(f)

@@ -2270,6 +2270,10 @@ impl String {
         self.vec.clear();
     }
     pub fn truncate(&mut self, n: usize) {
+        // (a byte inside a char: the String would no longer be UTF-8)
+        if n < self.vec.len && (unsafe { *self.vec.ptr.add(n) } & 0xC0) == 0x80 {
+            panic!("assertion failed: self.is_char_boundary(n)");
+        }
         self.vec.truncate(n);
     }
     pub fn as_bytes(&self) -> &[u8] {
@@ -2285,6 +2289,10 @@ impl String {
         let old = self.vec.len;
         if idx > old {
             panic!("insertion index is out of bounds");
+        }
+        // (a byte inside a char: the String would no longer be UTF-8)
+        if idx < self.vec.len && (unsafe { *self.vec.ptr.add(idx) } & 0xC0) == 0x80 {
+            panic!("assertion failed: self.is_char_boundary(idx)");
         }
         self.vec.reserve(n);
         unsafe {
@@ -2306,6 +2314,10 @@ impl String {
     pub fn remove<G>(&mut self, idx: usize) -> char {
         if idx >= self.vec.len {
             panic!("cannot remove a char from the end of a string");
+        }
+        // (a byte inside a char: the String would no longer be UTF-8)
+        if idx < self.vec.len && (unsafe { *self.vec.ptr.add(idx) } & 0xC0) == 0x80 {
+            panic!("assertion failed: self.is_char_boundary(idx)");
         }
         let (c, n) = __exr_decode_at::<()>(self.vec.ptr as *const u8, idx);
         unsafe {
@@ -2369,6 +2381,9 @@ impl String {
         let b = self.as_bytes();
         if r.start > r.end || r.end > b.len() {
             panic!("range end index {} out of range for slice of length {}", r.end, b.len());
+        }
+        if (r.start < b.len() && (b[r.start] & 0xC0) == 0x80) || (r.end < b.len() && (b[r.end] & 0xC0) == 0x80) {
+            panic!("assertion failed: self.is_char_boundary(n)");
         }
         let mut v: Vec<u8> = Vec::with_capacity(b.len() - (r.end - r.start) + with.len());
         v.extend_from_slice(&b[..r.start]);
@@ -10939,6 +10954,11 @@ impl<T> VecDeque<T> {
         }
         let c = if n < 4 { 4 } else { n };
         let sz = core::mem::size_of::<T>();
+        // (a block past isize::MAX bytes, or `c * sz` past usize, is a panic as in std: wrapped, it would be a
+        // small block the pushes then overrun)
+        if sz != 0 && c > isize::MAX as usize / sz {
+            panic!("capacity overflow");
+        }
         let np = unsafe { __exr_realloc_ok(0usize as *mut u8, if sz == 0 { 1 } else { c * sz }) } as *mut T;
         let mut i = 0;
         while i < self.len {
@@ -11708,6 +11728,10 @@ fn __exr_str_replacen<G>(s: &str, from: &str, to: &str, n: usize) -> String {
 }
 
 fn __exr_str_repeat<G>(s: &str, n: usize) -> String {
+    // (CVE-2018-1000810: a product past usize would wrap to a small buffer that the loop then overruns)
+    if s.len() != 0 && n > usize::MAX / s.len() {
+        panic!("capacity overflow");
+    }
     let mut r = String::with_capacity(s.len() * n);
     let mut i = 0;
     while i < n {

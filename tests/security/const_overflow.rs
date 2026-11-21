@@ -1,0 +1,6 @@
+//! Overflow in a constant (E0080) is a compile error, not a wrapped value.
+//@ expect: reject
+const N: u8 = 255 + 1; //~ ERROR E0080
+fn main() {
+    println!("{N}");
+}
