@@ -266,23 +266,32 @@ pub struct Options2 {
     pub backend: Option<Backend>,
     /// `#[cfg(feature = "..")]` で真になる feature (1 つのクレートのビルド。ワークスペースはクレートごとに CrateSpec が持つ)
     pub features: Vec<String>,
+    /// wasm32-unknown-unknown: writes the module instead of an ELF object, and does not link (zust_wasm::write_module;
+    /// `backend` is then zust_wasm::compile)
+    pub module_writer: Option<ModuleWriter>,
 }
+
+/// Writes the output from the functions and data build.rs lays out (in place of the ELF object)
+pub type ModuleWriter = fn(&[(String, Vec<u8>, Vec<crate::ir::Reloc>, bool)], &[(String, Vec<u8>, Vec<(u32, String, i64)>, bool)]) -> Result<Vec<u8>, String>;
 
 impl Default for Options2 {
     fn default() -> Self {
-        Options2 { opt: false, jobs: cpu_count(), linker: None, lib_dirs: vec![], no_cache: false, time: false, backend: None, features: vec![] }
+        Options2 { opt: false, jobs: cpu_count(), linker: None, lib_dirs: vec![], no_cache: false, time: false, backend: None, features: vec![], module_writer: None }
     }
 }
 
 impl Options2 {
     /// キャッシュのキーに入れるバックエンドの印 (Cranelift なら 1)
     pub fn backend_id(&self) -> u8 {
+        if self.module_writer.is_some() {
+            return 2;
+        }
         self.backend.is_some() as u8
     }
 
     /// cfg の述語の設定 (features は与えたもの)
     pub fn cfg_with(&self, features: &[String]) -> crate::cfg::CfgSet {
-        crate::cfg::CfgSet { features: features.to_vec(), debug_assertions: !self.opt }
+        crate::cfg::CfgSet { features: features.to_vec(), debug_assertions: !self.opt, wasm: self.module_writer.is_some() }
     }
 }
 

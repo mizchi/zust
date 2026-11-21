@@ -20,7 +20,10 @@
 
 > **Status**: experimental.
 >
-> - zustc only targets Linux x86-64 and does not support all of Rust ([supported language](docs/language.md)).
+> - zustc targets Linux x86-64 and does not support all of Rust ([supported language](docs/language.md)).
+>   `--target wasm32-unknown-unknown` writes a wasm module (experimental: [tests/wasm/README.md](tests/wasm/README.md)).
+> - Security regression tests from past Rust CVEs and soundness bugs, and what zustc does not catch yet:
+>   [tests/security/README.md](tests/security/README.md).
 > - zustc's checks (types, borrow checking, region errors against signatures) are partial, so it is not a replacement for rustc for checking correctness.
 > - zust-analyzer implements only part of what rust-analyzer does.
 

@@ -819,6 +819,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "zust-wasm"
+version = "0.1.0"
+dependencies = [
+ "minclif",
+]
+
+[[package]]
 name = "zustc"
 version = "0.1.0"
 dependencies = [
@@ -830,4 +837,5 @@ dependencies = [
  "zust-analyzer",
  "zust-clif",
  "zust-core",
+ "zust-wasm",
 ]
