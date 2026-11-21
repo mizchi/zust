@@ -26,9 +26,10 @@
 //! (Cranelift and minclif), and run under valgrind when it is installed (memory errors and
 //! definite leaks fail; `ZUST_SECURITY_NO_VALGRIND=1` skips it).
 //!
-//! `tests/security/known_gaps.txt` lists the cases zustc does not pass yet, with the reason. A
-//! listed case that fails is reported but does not fail the test; a listed case that passes fails
-//! it, so the list only ever shrinks. `ZUST_SECURITY_FILTER=substr` runs only matching cases.
+//! A case zustc does not pass yet says so with `//@ todo: <why>` (or `//@ todo(valgrind): <why>` when only valgrind
+//! sees the failure, a leak). It is run and reported as TODO, and does not fail the test; once it passes, it fails the
+//! test until its `todo` line is removed, so the TODOs only go away. TODO.md (at the top of the repository) lists
+//! every one with what is left elsewhere. `ZUST_SECURITY_FILTER=substr` runs only matching cases.
 #![cfg(feature = "acg")]
 
 use std::path::{Path, PathBuf};
@@ -57,6 +58,8 @@ struct Case {
     error_texts: Vec<(usize, String)>,
     /// `//@ cve:` ids
     cves: Vec<String>,
+    /// `//@ todo: why`: not passed yet (and whether only valgrind sees the failure)
+    todo: Option<(String, bool)>,
 }
 
 fn parse_case(path: &Path) -> Case {
@@ -69,6 +72,7 @@ fn parse_case(path: &Path) -> Case {
     let mut error_texts = vec![];
     let mut cves = vec![];
     let mut source = false;
+    let mut todo = None;
     for (i, line) in src.lines().enumerate() {
         if let Some(c) = line.strip_prefix("//@ cve:") {
             cves.extend(c.split(',').map(|x| x.trim().to_string()).filter(|x| !x.is_empty()));
@@ -76,6 +80,11 @@ fn parse_case(path: &Path) -> Case {
         }
         if ["//@ issue:", "//@ pattern:", "//@ rule:"].iter().any(|p| line.starts_with(p)) {
             source = true;
+        }
+        if let Some(t) = line.strip_prefix("//@ todo:") {
+            todo = Some((t.trim().to_string(), false));
+        } else if let Some(t) = line.strip_prefix("//@ todo(valgrind):") {
+            todo = Some((t.trim().to_string(), true));
         }
         if let Some(e) = line.strip_prefix("//@ expect:") {
             expect = Some(match e.trim() {
@@ -108,7 +117,7 @@ fn parse_case(path: &Path) -> Case {
     if matches!(expect, Expect::Reject | Expect::RejectOrPanic) {
         assert!(!error_lines.is_empty(), "{name}: a rejected case needs a `//~ ERROR` line");
     }
-    Case { name, path: path.to_path_buf(), expect, args, error_lines, error_codes, error_texts, cves }
+    Case { name, path: path.to_path_buf(), expect, args, error_lines, error_codes, error_texts, cves, todo }
 }
 
 /// A new directory only this user can enter (as tests/panic_loc.rs), removed when dropped
@@ -137,6 +146,9 @@ fn private_dir(prefix: &str) -> PrivateDir {
 
 /// Runs `cmd` with a time limit; None when it had to be killed
 fn run_limited(mut cmd: Command, limit: Duration) -> Option<Output> {
+    use std::os::unix::process::CommandExt;
+    // (its own process group: zustc forks workers that keep the pipes open, so a timeout kills the whole group)
+    cmd.process_group(0);
     let mut child = cmd.stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped()).spawn().unwrap();
     // (read the pipes on threads, so a chatty child does not block on a full pipe)
     let mut so = child.stdout.take().unwrap();
@@ -157,6 +169,7 @@ fn run_limited(mut cmd: Command, limit: Duration) -> Option<Output> {
             break Some(s);
         }
         if start.elapsed() > limit {
+            let _ = Command::new("kill").args(["-KILL", "--", &format!("-{}", child.id())]).status();
             let _ = child.kill();
             let _ = child.wait();
             break None;
@@ -336,11 +349,6 @@ fn security_regressions() {
     let mut files: Vec<PathBuf> = std::fs::read_dir("tests/security").unwrap().map(|e| e.unwrap().path()).filter(|p| p.extension().is_some_and(|x| x == "rs")).collect();
     files.sort();
     let cases: Vec<Case> = files.iter().map(|p| parse_case(p)).filter(|c| c.name.contains(&filter)).collect();
-    let gaps_src = std::fs::read_to_string("tests/security/known_gaps.txt").unwrap();
-    let gaps: Vec<&str> = gaps_src.lines().map(|l| l.split('#').next().unwrap().trim()).filter(|l| !l.is_empty()).collect();
-    for g in &gaps {
-        assert!(files.iter().any(|p| p.file_stem().unwrap() == *g), "known_gaps.txt names `{g}`, which is not a case");
-    }
     let dir = private_dir("security");
     // (cases in parallel: each one runs rustc, zustc and the programs)
     let n = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(2).min(8);
@@ -364,18 +372,22 @@ fn security_regressions() {
     let (mut pass, mut gap) = (0, 0);
     for (i, r) in &results {
         let c = &cases[*i];
-        let known = gaps.contains(&c.name.as_str());
-        match (r, known) {
-            (Ok(()), false) => pass += 1,
-            (Ok(()), true) => bad.push(format!("{}: passes now; remove it from tests/security/known_gaps.txt", c.name)),
-            (Err(e), true) => {
+        match (r, &c.todo) {
+            (Ok(()), None) => pass += 1,
+            // (a failure only valgrind sees, and valgrind did not run: not known to pass)
+            (Ok(()), Some((_, true))) if !valgrind => {
                 gap += 1;
-                eprintln!("known gap {}: {}", c.name, e.lines().next().unwrap_or(""));
+                eprintln!("TODO {}: not checked (valgrind did not run)", c.name);
             }
-            (Err(e), false) => bad.push(format!("{}: {e}", c.name)),
+            (Ok(()), Some(_)) => bad.push(format!("{}: passes now; remove its `//@ todo` line (and its entry in TODO.md)", c.name)),
+            (Err(e), Some((why, _))) => {
+                gap += 1;
+                eprintln!("TODO {}: {why}\n    {}", c.name, e.lines().next().unwrap_or(""));
+            }
+            (Err(e), None) => bad.push(format!("{}: {e}", c.name)),
         }
     }
-    eprintln!("security: {pass} pass, {gap} known gaps, {} failing (valgrind: {valgrind})", bad.len());
+    eprintln!("security: {pass} pass, {gap} TODO, {} failing (valgrind: {valgrind})", bad.len());
     assert!(bad.is_empty(), "\n{}", bad.join("\n"));
 }
 
@@ -418,8 +430,8 @@ fn every_std_cve_has_a_case() {
 }
 
 /// tests/security/unsafe_std_apis.txt: every unsafe std API needs `unsafe` in safe code. rustc must reject each with
-/// E0133; zustc must reject it too (with E0133, or as an API it does not have). Gaps are `unsafe_api:<name>` lines
-/// of known_gaps.txt
+/// E0133; zustc must reject it too (with E0133, or as an API it does not have). A row zustc does not pass yet has a
+/// fourth column, `todo: why`
 #[test]
 fn unsafe_std_apis() {
     if !have("rustc") {
@@ -427,17 +439,19 @@ fn unsafe_std_apis() {
         return;
     }
     let text = std::fs::read_to_string("tests/security/unsafe_std_apis.txt").unwrap();
+    let mut gaps: Vec<String> = vec![];
     let rows: Vec<(String, String, String)> = text
         .lines()
         .filter(|l| !l.starts_with('#') && !l.trim().is_empty())
         .map(|l| {
             let c: Vec<&str> = l.split('\t').collect();
-            assert_eq!(c.len(), 3, "unsafe_std_apis.txt: `{l}` is not name<TAB>setup<TAB>expression");
+            assert!(c.len() == 3 || (c.len() == 4 && c[3].starts_with("todo:")), "unsafe_std_apis.txt: `{l}` is not name<TAB>setup<TAB>expression[<TAB>todo: why]");
+            if c.len() == 4 {
+                gaps.push(c[0].to_string());
+            }
             (c[0].to_string(), c[1].to_string(), c[2].to_string())
         })
         .collect();
-    let gaps_src = std::fs::read_to_string("tests/security/known_gaps.txt").unwrap();
-    let gaps: Vec<String> = gaps_src.lines().filter_map(|l| l.split('#').next().unwrap().trim().strip_prefix("unsafe_api:").map(str::to_string)).collect();
     let dir = private_dir("security_unsafe_api");
     let zustc = env!("CARGO_BIN_EXE_zustc");
     let next = std::sync::atomic::AtomicUsize::new(0);
@@ -480,11 +494,40 @@ fn unsafe_std_apis() {
         match (r, gap) {
             (Ok("E0133"), false) => e0133.push(name.clone()),
             (Ok(_), false) => unsupported.push(name.clone()),
-            (Ok(_), true) => bad.push(format!("{name}: rejected now; remove `unsafe_api:{name}` from known_gaps.txt")),
-            (Err(e), true) => eprintln!("known gap unsafe_api:{name}: {e}"),
+            (Ok(_), true) => bad.push(format!("{name}: rejected now; remove its `todo:` column (and its entry in TODO.md)")),
+            (Err(e), true) => eprintln!("TODO unsafe API {name}: {e}"),
             (Err(e), false) => bad.push(format!("{name}: {e}")),
         }
     }
     eprintln!("unsafe std APIs: {} need unsafe (E0133), {} not supported by zustc: {}", e0133.len(), unsupported.len(), unsupported.join(" "));
+    assert!(bad.is_empty(), "\n{}", bad.join("\n"));
+}
+
+/// TODO.md names every case that has a `//@ todo` line (in a table row, `| \`name\` | why |`), and every case its
+/// table rows name still has one, so the list of what is left is in one place
+#[test]
+fn todo_md_lists_every_todo() {
+    let md = std::fs::read_to_string("TODO.md").unwrap();
+    let rows: Vec<&str> = md.lines().filter_map(|l| l.strip_prefix("| `")?.split('`').next()).collect();
+    let mut bad = vec![];
+    let mut cases = vec![];
+    for e in std::fs::read_dir("tests/security").unwrap() {
+        let p = e.unwrap().path();
+        if p.extension().is_some_and(|x| x == "rs") {
+            let c = parse_case(&p);
+            let named = rows.contains(&c.name.as_str());
+            match (&c.todo, named) {
+                (Some(_), false) => bad.push(format!("{}: has a `//@ todo` line but no row of TODO.md names it", c.name)),
+                (None, true) => bad.push(format!("{}: a row of TODO.md names it, but it has no `//@ todo` line (done? remove the row)", c.name)),
+                _ => {}
+            }
+            cases.push(c.name);
+        }
+    }
+    for r in &rows {
+        if !cases.iter().any(|c| c == r) {
+            bad.push(format!("TODO.md names `{r}`, which is not a case of tests/security"));
+        }
+    }
     assert!(bad.is_empty(), "\n{}", bad.join("\n"));
 }

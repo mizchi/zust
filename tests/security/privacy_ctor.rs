@@ -1,5 +1,6 @@
 //! Building a struct with private fields from outside its module (E0451).
 //@ rule: privacy (a module's invariants are its own to keep)
+//@ todo: privacy (E0603 / E0616 / E0451) is not checked at all
 //@ expect: reject
 mod m {
     pub struct NonZero {

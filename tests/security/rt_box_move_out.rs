@@ -2,6 +2,7 @@
 //! frees the Box's block once. (A leak is not unsafe, but valgrind counts it: the same paths that
 //! leak here would double free if they got the count wrong the other way.)
 //@ pattern: drops (each value dropped and each block freed once: the class of CVE-2021-31162)
+//@ todo(valgrind): `let x = *b;` moves the value but never frees the Box's block (a leak)
 //@ expect: run
 use std::cell::Cell;
 struct D<'a>(u32, &'a Cell<u32>);

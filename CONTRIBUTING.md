@@ -409,6 +409,8 @@ list in [docs/reports/README.md](docs/reports/README.md) (and to
 
 ### Compiler (zustc)
 
+- **Security** ([TODO.md](TODO.md); [report](docs/reports/2026-11-21-01-security-cves.md)): the holes the security tests
+  found and left (the `//@ todo` cases of `tests/security/`), and what is left of the wasm32 target
 - **rustc's tests/ui** (`python3 bench/rust_ui.py`; [report](docs/reports/2026-11-18-07-rustc-ui-tests.md))
   - Raise the pass rates ([Status](README.md#status))
   - Largest gaps: unwinding (`catch_unwind`, `panic::set_hook`), structs by value through FFI, type inference (type

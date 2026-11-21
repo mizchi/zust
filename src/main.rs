@@ -84,11 +84,12 @@ fn main() {
         }
     }
     match backend.as_str() {
-        "wasm" => o.backend = Some(zustc::wasm_backend::compile),
+        // (the wasm lowerer only with the wasm writer: `--target wasm32-unknown-unknown`, never alone)
+        "wasm" if o.module_writer.is_some() => o.backend = Some(zustc::wasm_backend::compile),
         "cranelift" => o.backend = Some(zustc::clif_backend::compile),
         "minclif" => o.backend = None,
         b => {
-            eprintln!("error: unknown backend `{b}` (cranelift / minclif)");
+            eprintln!("error: unknown backend `{b}` (cranelift / minclif; wasm is chosen by --target wasm32-unknown-unknown)");
             std::process::exit(2);
         }
     }

@@ -397,6 +397,8 @@ What was done, why, how it was measured, the results (numbers), what was learned
 
 ### コンパイラ (zustc)
 
+- **セキュリティ** ([TODO.md](TODO.md)。[レポート](docs/reports/2026-11-21-01-security-cves.md)): セキュリティのテストが
+  見つけて残した穴 (`tests/security/` の `//@ todo` のケース) と、wasm32 のターゲットの残り
 - **rustc の tests/ui** (`python3 bench/rust_ui.py`。[レポート](docs/reports/2026-11-18-07-rustc-ui-tests.md))
   - 通る割合を上げる ([Status](README.md#status))
   - 大きな穴: unwinding (`catch_unwind`、`panic::set_hook`)、FFI の構造体の値渡し、型推論 (期待型からしか分からない

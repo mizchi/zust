@@ -1775,8 +1775,10 @@ impl Cx<'_> {
             }
             // `core::mem::zeroed::<T>()` (型は turbofish か期待型): 0 で埋めた値
             "zeroed" => {
-                // (`mem::zeroed` is unsafe: a zeroed `&T` or `Box<T>` is a null one. `MaybeUninit::zeroed` is not)
-                if p.segs.len() < 2 || p.segs[p.segs.len() - 2].name == "mem" {
+                // (`mem::zeroed` is unsafe: a zeroed `&T` or `Box<T>` is a null one, whatever the module is called
+                // (`use std::mem as m; m::zeroed()`). Only `MaybeUninit::zeroed` is safe)
+                let qual = (p.segs.len() >= 2).then(|| p.segs[p.segs.len() - 2].name.as_str());
+                if !matches!(qual, Some("MaybeUninit")) {
                     self.check_unsafe_op("zeroed", p.pos)?;
                 }
                 let Some(t) = targ.or(expected) else {

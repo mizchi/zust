@@ -1,5 +1,6 @@
 # Every advisory for Rust's standard library, and the case that covers it in zustc. Sources: RustSec's advisories for
-# the `std` package (https://rustsec.org/packages/std.html) and the Rust blog's security advisories. Each case says
+# the `std` package (https://rustsec.org/packages/std.html, 18), the Rust blog's security advisories, and
+# rust-lang/rust's GitHub security advisories. Each case says
 # `//@ cve: <id>`; `tests/security.rs` (every_std_cve_has_a_case) keeps this table and the cases in step.
 #
 # cve	std API	what was wrong	case (or n/a: why)
@@ -22,3 +23,5 @@ CVE-2021-29922	Ipv4Addr::from_str	leading zeros stripped ("010.8.8.8" read as 10
 CVE-2021-31162	Vec::from_iter	double free when dropping an element panicked	cve_2021_31162_from_iter_drop_panic
 CVE-2022-21658	fs::remove_dir_all	TOCTOU: a symlink swapped in during the walk was followed	cve_2022_21658_remove_dir_all
 CVE-2024-24576	process::Command (Windows)	batch file arguments not escaped	n/a: Windows only; zustc targets Linux and wasm32 (no processes)
+CVE-2024-43402	process::Command (Windows)	the CVE-2024-24576 fix missed batch file names with trailing spaces or periods	n/a: Windows only (fixed in 1.81.0)
+CVE-2025-11233	Path (Cygwin)	backslash separators not detected on x86_64-pc-cygwin	n/a: Cygwin only (fixed in 1.89.0)

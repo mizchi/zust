@@ -1,6 +1,7 @@
 //! Neighbors of rt_box_move_out: values moved out of a Box by patterns. Each value must be dropped once and each
 //! Box freed once (valgrind sees double frees and leaks).
 //@ pattern: drops
+//@ todo(valgrind): the same leak through patterns (`let Pair { a, b } = *b`, `match *b`); no double free
 //@ expect: run
 use std::cell::Cell;
 struct D<'a>(u32, &'a Cell<u32>);

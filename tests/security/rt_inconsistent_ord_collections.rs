@@ -31,12 +31,20 @@ fn main() {
     while let Some(w) = h.pop() {
         seen[w.1 as usize] = true;
     }
-    println!("ok heap {}", seen.iter().all(|&s| s));
+    if !seen.iter().all(|&s| s) {
+        println!("heap lost an element");
+        std::process::exit(1);
+    }
+    println!("ok heap");
     let mut v: Vec<W> = (0..100).map(|i| W(format!("w{i}"), i)).collect();
     v.sort();
     let mut seen = vec![false; 100];
     for w in &v {
         seen[w.1 as usize] = true;
     }
-    println!("ok sort {}", seen.iter().all(|&s| s));
+    if !seen.iter().all(|&s| s) {
+        println!("sort lost an element");
+        std::process::exit(1);
+    }
+    println!("ok sort");
 }

@@ -17,7 +17,8 @@ rustc の健全性の不具合) をテストのプログラムにし、zustc が
   その CVE は起こりえない)
 
 正解は rustc 1.97 で、そのビルドがヘッダと合っていることを確かめ、出力を比べる。実行するケースは 2 つのバックエンドで
-ビルドし、valgrind の下で動かす。`known_gaps.txt` は zustc がまだ通らないものを理由付きで並べ、減ることしかできない。
+ビルドし、valgrind の下で動かす。zustc がまだ通らないケースには `//@ todo: <理由>` の印を付ける。実行して報告するが
+テストは失敗させず、通るようになったら印を外さなければならない。[TODO.md](../../../TODO.md) がそれをすべて並べる。
 
 ケースは 100 個あり、それに加えて、どれも `unsafe` が要るはずの std の unsafe API 51 個の表がある。
 
@@ -65,7 +66,7 @@ std の unsafe API の表は、E0133 で拒否が 30、zustc にない (未知�
   (collect・extend・HashMap・BinaryHeap・sort はメモリ安全なまま)
 - VecDeque の添字と remove の経路 (境界を検査している)
 
-まだ開いているもの (`known_gaps.txt`):
+まだ開いているもの (`//@ todo` の印付き、[TODO.md](../../../TODO.md) に一覧):
 
 - privacy を検査しない
 - RefCell に借用のフラグがない

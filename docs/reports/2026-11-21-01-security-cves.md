@@ -18,8 +18,9 @@ Each case says where it comes from and what safe behavior is:
   (zustc does not have the API, so the CVE cannot happen).
 
 rustc 1.97 is the oracle: its build must agree with the header, and the output is compared with it. Runtime cases
-are built with both backends and run under valgrind. `known_gaps.txt` lists, with reasons, what zustc does not pass
-yet; it can only shrink.
+are built with both backends and run under valgrind. A case zustc does not pass yet is marked `//@ todo: <why>`: it
+is run and reported, does not fail the test, and must lose its mark once it passes. [TODO.md](../../TODO.md) lists
+them all.
 
 There are 100 cases, plus a table of 51 unsafe std APIs that each must need `unsafe`.
 
@@ -67,7 +68,7 @@ E0502); user iterators whose `size_hint` or `ExactSizeIterator::len` lie, and `H
 consistent (collect, extend, HashMap, BinaryHeap and sort stay memory safe); VecDeque's index and remove paths
 (bounds checked).
 
-Still open (in `known_gaps.txt`):
+Still open (marked `//@ todo`, listed in [TODO.md](../../TODO.md)):
 
 - privacy is not checked;
 - RefCell has no borrow flag;

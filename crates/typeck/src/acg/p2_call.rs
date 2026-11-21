@@ -902,7 +902,7 @@ impl Cx<'_> {
         let Expr::Closure(mv, _, _, _, cpos) = strip_paren(c) else { return Ok(()) };
         for n in crate::ast_closure::free_vars(strip_paren(c)) {
             let Some((_, t)) = self.lookup(&n) else { continue };
-            if not_send(self.prog, t, 0) {
+            if not_send(self.prog, t) {
                 return Err(self.at(*cpos, format!("`{}` cannot be sent between threads safely", self.prog.tn(t))));
             }
             if !*mv && !crate::ast_closure::moves_capture(strip_paren(c), &[n.clone()]) {
@@ -2300,63 +2300,61 @@ fn base_name(prog: &Program, sid: u32) -> (&str, bool) {
     (prog.structs[b as usize].name.as_str(), prelude)
 }
 
-/// A type whose values may not move to another thread (not Send): an `Rc`, a raw pointer, a `MutexGuard`, a `&T`
-/// of a T that is not Sync, an `Arc<T>` of a T that is not Send and Sync, or a type holding one. (A `dyn Trait` is
-/// taken as Send: zustc's types do not keep `+ Send`, tests/security/send_dyn_thread.rs.) A type of the program's with `unsafe impl Send` is Send. The prelude's own types are judged by their
-/// arguments (a Vec holds a raw pointer, and is Send when its elements are). A type parameter is taken as Send
-pub fn not_send(prog: &Program, t: Ty, d: u32) -> bool {
-    if d > 8 {
-        return false;
-    }
-    match t {
-        Ty::Ptr(..) => true,
-        Ty::Ref(false, i) => not_sync(prog, *i, d + 1),
-        Ty::Ref(true, i) | Ty::Box(i) | Ty::Array(i, _) | Ty::Slice(i) => not_send(prog, *i, d + 1),
-        Ty::Struct(sid) => {
-            let (name, prelude) = base_name(prog, sid);
-            let sd = &prog.structs[sid as usize];
-            if prelude {
-                return match name {
-                    "Rc" | "MutexGuard" => true,
-                    "Arc" => sd.args.iter().any(|&a| not_send(prog, a, d + 1) || not_sync(prog, a, d + 1)),
-                    _ => sd.args.iter().any(|&a| not_send(prog, a, d + 1)),
-                };
-            }
-            if prog.impls.contains(&(prog.base_of(sid), "Send".to_string())) {
-                return false;
-            }
-            sd.args.iter().any(|&a| not_send(prog, a, d + 1)) || sd.fields.iter().any(|f| not_send(prog, f.1, d + 1)) || sd.variants.iter().any(|v| v.fields.iter().any(|f| not_send(prog, f.1, d + 1)))
-        }
-        _ => false,
-    }
+/// A type whose values may not move to another thread (not Send): an `Rc`, a raw pointer, a `MutexGuard` or an
+/// RwLock guard, a `&T` of a T that is not Sync, an `Arc<T>` of a T that is not Send and Sync, or a type holding one.
+/// A type of the program's with `unsafe impl Send` is Send. The prelude's own types are judged by their arguments (a
+/// Vec holds a raw pointer, and is Send when its elements are). A type parameter is taken as Send. (A `dyn Trait` is
+/// taken as Send: zustc's types do not keep `+ Send`, tests/security/send_dyn_thread.rs.)
+pub fn not_send(prog: &Program, t: Ty) -> bool {
+    auto_trait_fails(prog, t, false, &mut vec![], 0)
 }
 
 /// A type whose values may not be shared between threads (not Sync): `Cell`, `RefCell`, `UnsafeCell`, `Rc`, a
-/// channel's receiver, a raw pointer, `Mutex<T>` / `RwLock<T>` of a T that is not
-/// Send, an `Arc<T>` / `OnceLock<T>` of a T that is not Send and Sync, or a type holding one. A type of the
-/// program's with `unsafe impl Sync` is Sync
-pub fn not_sync(prog: &Program, t: Ty, d: u32) -> bool {
-    if d > 8 {
-        return false;
+/// channel's receiver, a raw pointer, `Mutex<T>` of a T that is not Send, `RwLock<T>` / `Arc<T>` / `OnceLock<T>` of a
+/// T that is not Send and Sync, or a type holding one. A type of the program's with `unsafe impl Sync` is Sync
+pub fn not_sync(prog: &Program, t: Ty) -> bool {
+    auto_trait_fails(prog, t, true, &mut vec![], 0)
+}
+
+/// not_send (sync = false) / not_sync (sync = true). `seen` holds the types of the program's being looked into: one
+/// met again is taken to hold (as rustc's auto traits do for recursive types), so a recursive type is looked into
+/// once. A nesting past the limit counts as failing, never as Send / Sync
+fn auto_trait_fails(prog: &Program, t: Ty, sync: bool, seen: &mut Vec<(u32, bool)>, d: u32) -> bool {
+    if d > 64 {
+        return true;
     }
+    let send = |t: Ty, seen: &mut Vec<(u32, bool)>| auto_trait_fails(prog, t, false, seen, d + 1);
+    let sync_ = |t: Ty, seen: &mut Vec<(u32, bool)>| auto_trait_fails(prog, t, true, seen, d + 1);
     match t {
         Ty::Ptr(..) => true,
-        Ty::Ref(_, i) | Ty::Box(i) | Ty::Array(i, _) | Ty::Slice(i) => not_sync(prog, *i, d + 1),
+        // (&T is Send if T is Sync; &mut T if T is Send; both are Sync if T is Sync)
+        Ty::Ref(false, i) => sync_(*i, seen),
+        Ty::Ref(true, i) if !sync => send(*i, seen),
+        Ty::Ref(_, i) | Ty::Box(i) | Ty::Array(i, _) | Ty::Slice(i) => auto_trait_fails(prog, *i, sync, seen, d + 1),
         Ty::Struct(sid) => {
             let (name, prelude) = base_name(prog, sid);
             let sd = &prog.structs[sid as usize];
             if prelude {
-                return match name {
-                    "Cell" | "RefCell" | "UnsafeCell" | "Rc" | "__Rcvr__" => true,
-                    "Mutex" | "RwLock" => sd.args.iter().any(|&a| not_send(prog, a, d + 1)),
-                    "Arc" | "OnceLock" => sd.args.iter().any(|&a| not_send(prog, a, d + 1) || not_sync(prog, a, d + 1)),
-                    _ => sd.args.iter().any(|&a| not_sync(prog, a, d + 1)),
+                let args = &sd.args;
+                return match (name, sync) {
+                    ("Rc", _) | ("MutexGuard" | "RwLockReadGuard" | "RwLockWriteGuard", false) => true,
+                    ("Cell" | "RefCell" | "UnsafeCell" | "__Rcvr__", true) => true,
+                    ("Mutex", true) => args.iter().any(|&a| send(a, seen)),
+                    ("Arc" | "RwLock" | "OnceLock", true) | ("Arc", false) => args.iter().any(|&a| send(a, seen) || sync_(a, seen)),
+                    _ => args.iter().any(|&a| auto_trait_fails(prog, a, sync, seen, d + 1)),
                 };
             }
-            if prog.impls.contains(&(prog.base_of(sid), "Sync".to_string())) {
+            let base = prog.base_of(sid);
+            if prog.impls.contains(&(base, if sync { "Sync" } else { "Send" }.to_string())) {
                 return false;
             }
-            sd.args.iter().any(|&a| not_sync(prog, a, d + 1)) || sd.fields.iter().any(|f| not_sync(prog, f.1, d + 1)) || sd.variants.iter().any(|v| v.fields.iter().any(|f| not_sync(prog, f.1, d + 1)))
+            if seen.contains(&(sid, sync)) {
+                return false;
+            }
+            seen.push((sid, sync));
+            sd.args.iter().any(|&a| auto_trait_fails(prog, a, sync, seen, d + 1))
+                || sd.fields.iter().any(|f| auto_trait_fails(prog, f.1, sync, seen, d + 1))
+                || sd.variants.iter().any(|v| v.fields.iter().any(|f| auto_trait_fails(prog, f.1, sync, seen, d + 1)))
         }
         _ => false,
     }
@@ -2368,6 +2366,6 @@ pub fn static_not_sync(prog: &Program) -> Option<(usize, String)> {
     prog.consts.iter().enumerate().find_map(|(ci, c)| {
         let user = c.item < prog.prelude_from;
         let ext = c.expr.starts_with(crate::parse::EXTERN_STATIC_SYM);
-        (c.stat == Some(false) && user && !ext && not_sync(prog, c.ty, 0)).then(|| (ci, prog.tn(c.ty)))
+        (c.stat == Some(false) && user && !ext && not_sync(prog, c.ty)).then(|| (ci, prog.tn(c.ty)))
     })
 }

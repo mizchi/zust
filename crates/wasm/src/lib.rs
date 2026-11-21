@@ -336,6 +336,30 @@ impl<'a> Body<'a> {
         self.op(0xA7);
         Ok(())
     }
+    /// Traps unless each pointer is a valid address (as addr checks one) or the count n is 0, and n fits in 32 bits
+    fn check_range(&mut self, ptrs: &[Value], n: Value) -> Result<(), String> {
+        let (t, c) = (self.tmp64(8), self.tmp64(10));
+        self.get_as(n, Type::I64)?;
+        self.ltee(c);
+        self.i64c(0xFFFF_FFFF);
+        self.op(0x56);
+        self.ops(&[0x04, 0x40, 0x00, 0x0B]);
+        self.lget(c);
+        self.op(0x50);
+        self.op(0x45);
+        self.ops(&[0x04, 0x40]);
+        for &p in ptrs {
+            self.get(p)?;
+            self.ltee(t);
+            self.i64c(NULL_PAGE as i64);
+            self.op(0x7D);
+            self.i64c(0xFFFF_FFFF - NULL_PAGE as i64);
+            self.op(0x56);
+            self.ops(&[0x04, 0x40, 0x00, 0x0B]);
+        }
+        self.op(0x0B);
+        Ok(())
+    }
     /// memarg (alignment 1: always valid; offset 0)
     fn memarg(&mut self, off: u32) {
         self.op(0);
@@ -1239,7 +1263,9 @@ pub fn compile(fb: &FunctionBuilder, zero: &[StackSlot], _opt: bool) -> Result<(
         l += wtys(p).len() as u32;
     }
     // first pass: locals for values and variables, the frame's slots, function names, the order of the blocks
-    let mut frame = 0u32;
+    // (u64: two slots of 2 GiB must not wrap the frame to a small one; a frame past the stack is rejected below)
+    let mut frame = 0u64;
+    let mut max_align = 16u64;
     let mut first_case: Option<u32> = None;
     let put = |v: &mut Vec<u32>, i: u32, x: u32| {
         let i = i as usize;
@@ -1262,16 +1288,17 @@ pub fn compile(fb: &FunctionBuilder, zero: &[StackSlot], _opt: bool) -> Result<(
                 b.var[id] = (first, *t);
             }
             Op::CreateStackSlot(size, align) => {
-                let al = (*align).max(1);
+                let al = (*align).max(1) as u64;
+                max_align = max_align.max(al.next_power_of_two());
                 frame = frame.div_ceil(al) * al;
                 let id = res[0] as usize;
                 if b.slot.len() <= id {
                     b.slot.resize(id + 1, 0);
                     b.slot_size.resize(id + 1, 0);
                 }
-                b.slot[id] = frame;
+                b.slot[id] = frame.min(u32::MAX as u64) as u32;
                 b.slot_size[id] = *size;
-                frame += (*size).max(1);
+                frame += (*size).max(1) as u64;
             }
             Op::ImportFunction(n) => {
                 let id = res[0] as usize;
@@ -1300,7 +1327,11 @@ pub fn compile(fb: &FunctionBuilder, zero: &[StackSlot], _opt: bool) -> Result<(
             }
         }
     }
-    b.frame = frame.div_ceil(16) * 16;
+    let frame = frame.div_ceil(16) * 16;
+    if frame > STACK_SIZE {
+        return Err(format!("wasm32: a stack frame of {frame} bytes is larger than the shadow stack ({STACK_SIZE} bytes)"));
+    }
+    b.frame = frame as u32;
     b.l_label = b.new_local(T_I32);
     b.l_fp = b.new_local(T_I64);
     b.l_saved_sp = b.new_local(T_I64);
@@ -1311,6 +1342,9 @@ pub fn compile(fb: &FunctionBuilder, zero: &[StackSlot], _opt: bool) -> Result<(
         b.gget(G_SP);
         b.i64c(b.frame as i64);
         b.op(0x7D);
+        // (the base aligned down to the strictest slot's alignment: offsets are aligned from it)
+        b.i64c(-(max_align as i64));
+        b.op(0x83);
         b.ltee(b.l_fp);
         b.gset(G_SP);
         b.lget(b.l_fp);
@@ -1670,6 +1704,11 @@ fn lower_op(b: &mut Body, op: &Op, res: &[u32]) -> Result<(), String> {
                 // (bulk memory, for acg's own calls by name (struct copies): in place. Calls through the prelude's
                 // extern declarations are named only when the module is written, and go to the built-in functions)
                 "memcpy" | "memmove" | "memset" if args.len() == 3 => {
+                    // (the operands checked as a load's address is: a bulk operation must not bypass the checks)
+                    if b.check_addr {
+                        let ptrs: &[Value] = if name == "memset" { &args[..1] } else { &args[..2] };
+                        b.check_range(ptrs, args[2])?;
+                    }
                     let d = b.tmp32(2);
                     b.get(args[0])?;
                     b.op(0xA7);
@@ -1718,7 +1757,14 @@ fn lower_op(b: &mut Body, op: &Op, res: &[u32]) -> Result<(), String> {
                 rw.extend_from_slice(wtys(t));
             }
             let sig = sig_enc(&pw, &rw)?;
+            // (a function pointer is a table index: one past 32 bits would wrap onto another entry. A trap)
+            let t = b.tmp64(9);
             b.get(*p)?;
+            b.ltee(t);
+            b.i64c(0xFFFF_FFFF);
+            b.op(0x56);
+            b.ops(&[0x04, 0x40, 0x00, 0x0B]);
+            b.lget(t);
             b.op(0xA7);
             b.op(0x11);
             let at = b.code.len();
@@ -2086,6 +2132,21 @@ impl Asm {
     }
 }
 
+/// The address checks of Body::addr for a built-in's pointer parameters: each must be past the null page and fit in
+/// 32 bits, unless the count parameter is 0; the count must fit in 32 bits
+fn check_bulk(a: &mut Asm, ptrs: &[u32], count: Option<u32>) {
+    if let Some(n) = count {
+        a.get(n).k(0xFFFF_FFFF).o(&[0x56, 0x04, 0x40, 0x00, 0x0B]);
+        a.get(n).o(&[0x50, 0x45, 0x04, 0x40]);
+    }
+    for &p in ptrs {
+        a.get(p).k(NULL_PAGE as i64).o(&[0x7D]).k(0xFFFF_FFFF - NULL_PAGE as i64).o(&[0x56, 0x04, 0x40, 0x00, 0x0B]);
+    }
+    if count.is_some() {
+        a.o(&[0x0B]);
+    }
+}
+
 /// The bodies of the built-in allocator (a power-of-two size-class free list over a bump heap).
 /// Blocks: 16 bytes of header ([0] the next free block while free, [8] the class), then the user's bytes.
 /// `free_base` is the address of the free-list heads (64 classes of 8 bytes). idx: the functions' indices
@@ -2149,10 +2210,12 @@ fn builtin_body(name: &str, lay: &Layout, idx: &dyn Fn(&str) -> u32) -> (Vec<u8>
         }
         // memcpy / memmove (d, s, n) -> d: memory.copy handles overlap
         "memcpy" | "memmove" => {
+            check_bulk(&mut a, &[0, 1], Some(2));
             a.get(0).wrap().get(1).wrap().get(2).wrap().o(&[0xFC, 10, 0, 0]).get(0);
             (vec![T_I64, T_I64, T_I64], vec![T_I64], vec![])
         }
         "memset" => {
+            check_bulk(&mut a, &[0], Some(2));
             a.get(0).wrap().get(1).get(2).wrap().o(&[0xFC, 11, 0]).get(0);
             (vec![T_I64, T_I32, T_I64], vec![T_I64], vec![])
         }
@@ -2166,6 +2229,7 @@ fn builtin_body(name: &str, lay: &Layout, idx: &dyn Fn(&str) -> u32) -> (Vec<u8>
         }
         // strlen(p) -> n. locals: 0 p, 1 n
         "strlen" => {
+            check_bulk(&mut a, &[0], None);
             a.o(&[0x02, 0x40, 0x03, 0x40]).get(0).get(1).o(&[0x7C]).wrap().o(&[0x2D, 0, 0, 0x45, 0x0D, 1]);
             a.get(1).k(1).o(&[0x7C]).set(1).o(&[0x0C, 0, 0x0B, 0x0B]).get(1);
             (vec![T_I64], vec![T_I64], vec![T_I64])

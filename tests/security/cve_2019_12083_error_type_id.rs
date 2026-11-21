@@ -1,6 +1,7 @@
 //! CVE-2019-12083 (std, fixed in 1.34.2): `Error::type_id` could be overridden; returning another type's TypeId made
 //! `downcast` cast the error to the wrong type. The method is no longer one an impl can define.
 //@ cve: CVE-2019-12083
+//@ todo: an impl may define a method its trait does not declare (E0407); zustc has no downcast, so no type confusion follows
 //@ expect: reject
 use std::any::TypeId;
 use std::fmt;

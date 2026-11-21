@@ -33,8 +33,9 @@ report is [docs/reports/2026-11-21-01-security-cves.md](../../docs/reports/2026-
 - rustc's build must agree with the header. Runtime cases are built with both backends and run under valgrind
   (memory errors and definite leaks fail).
 
-`known_gaps.txt` lists what zustc does not pass yet, with the reason. A listed case that fails is reported but does
-not fail the test; one that passes fails it, so the list only shrinks.
+A case zustc does not pass yet is marked `//@ todo: <why>` (`//@ todo(valgrind):` when only valgrind sees the
+failure): it is run and reported as TODO, and does not fail the test. Once it passes, the test fails until the line is
+removed, so the TODOs only go away. [TODO.md](../../TODO.md) lists every one, with what else is left.
 
 ## The std CVEs
 

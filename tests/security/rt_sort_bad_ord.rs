@@ -14,5 +14,9 @@ fn main() {
     });
     let mut got = v.clone();
     got.sort();
-    println!("ok permutation {}", got == want);
+    if got != want {
+        println!("not a permutation");
+        std::process::exit(1);
+    }
+    println!("ok permutation");
 }

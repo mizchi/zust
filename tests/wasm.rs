@@ -45,6 +45,9 @@ fn have(tool: &str) -> bool {
 }
 
 fn run_limited(mut cmd: Command, limit: Duration) -> Option<Output> {
+    use std::os::unix::process::CommandExt;
+    // (its own process group, killed as a whole on a timeout: zustc's forked workers hold the pipes too)
+    cmd.process_group(0);
     let mut child = cmd.stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped()).spawn().unwrap();
     let mut so = child.stdout.take().unwrap();
     let mut se = child.stderr.take().unwrap();
@@ -64,6 +67,7 @@ fn run_limited(mut cmd: Command, limit: Duration) -> Option<Output> {
             break Some(s);
         }
         if start.elapsed() > limit {
+            let _ = Command::new("kill").args(["-KILL", "--", &format!("-{}", child.id())]).status();
             let _ = child.kill();
             let _ = child.wait();
             break None;
@@ -129,18 +133,16 @@ fn wasm_runs_like_rustc() {
         }
         progs.push(Prog { path: p, edition: None, args: vec![], safe: false });
     }
-    // the runtime cases of the security tests (the CVE cases among them), except the ones zustc does not pass natively
-    // either (a leak is not seen here: there is no valgrind)
-    let gaps = std::fs::read_to_string("tests/security/known_gaps.txt").unwrap();
+    // the runtime cases of the security tests (the CVE cases among them), except the TODOs (a `todo(valgrind)` one is
+    // run: its failure is a leak, which nothing here sees)
     for p in files("tests/security", "") {
-        let name = p.file_stem().unwrap().to_string_lossy().into_owned();
         let src = std::fs::read_to_string(&p).unwrap();
         let expect = src.lines().find_map(|l| l.strip_prefix("//@ expect:")).unwrap_or("").trim().to_string();
         // (threads need swapcontext, which the sandbox does not give: such a module is not run)
         if !matches!(expect.as_str(), "run" | "panic" | "safe") || src.contains("thread::spawn") {
             continue;
         }
-        if gaps.lines().any(|l| l.split('#').next().unwrap().trim() == name) && !name.starts_with("rt_box_move") {
+        if src.lines().any(|l| l.starts_with("//@ todo:")) {
             continue;
         }
         let args = src.lines().find_map(|l| l.strip_prefix("//@ args:")).map(|a| a.split_whitespace().map(str::to_string).collect()).unwrap_or_default();

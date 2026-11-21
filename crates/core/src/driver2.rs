@@ -283,8 +283,10 @@ impl Default for Options2 {
 impl Options2 {
     /// キャッシュのキーに入れるバックエンドの印 (Cranelift なら 1)
     pub fn backend_id(&self) -> u8 {
+        // (wasm: the address checks are part of the code, so a build without them (ZUSTC_WASM_NO_ADDR_CHECK, for
+        // measuring) has its own cache entries)
         if self.module_writer.is_some() {
-            return 2;
+            return if std::env::var_os("ZUSTC_WASM_NO_ADDR_CHECK").is_some() { 3 } else { 2 };
         }
         self.backend.is_some() as u8
     }
@@ -1826,22 +1828,7 @@ fn after_attrs(text: &str) -> (&str, usize) {
         } else if let Some(r) = u.strip_prefix("/*") {
             t = r.find("*/").map(|k| &r[k + 2..]).unwrap_or("");
         } else if let Some(r) = u.strip_prefix("#[").or_else(|| u.strip_prefix("#![")) {
-            let mut depth = 1;
-            let mut end = r.len();
-            for (k, c) in r.char_indices() {
-                match c {
-                    '[' => depth += 1,
-                    ']' => {
-                        depth -= 1;
-                        if depth == 0 {
-                            end = k + 1;
-                            break;
-                        }
-                    }
-                    _ => {}
-                }
-            }
-            t = &r[end..];
+            t = &r[attr_end(r)..];
         } else {
             t = u;
             break;
@@ -1849,6 +1836,80 @@ fn after_attrs(text: &str) -> (&str, usize) {
     }
     let skipped = &text[..text.len() - t.len()];
     (t, skipped.matches('\n').count())
+}
+
+/// The length of an attribute's body up to and with its closing `]` (r is after `#[`). Brackets inside string, raw
+/// string and char literals do not count: `#[doc = "]"]` ends at the last `]`
+fn attr_end(r: &str) -> usize {
+    let b = r.as_bytes();
+    let mut depth = 1;
+    let mut i = 0;
+    while i < b.len() {
+        match b[i] {
+            b'[' => depth += 1,
+            b']' => {
+                depth -= 1;
+                if depth == 0 {
+                    return i + 1;
+                }
+            }
+            // a raw string `r"..."` / `r#"..."#`: to the quote followed by as many `#`
+            b'r' if i + 1 < b.len() && (b[i + 1] == b'"' || b[i + 1] == b'#') && (i == 0 || !(b[i - 1].is_ascii_alphanumeric() || b[i - 1] == b'_')) => {
+                let mut j = i + 1;
+                let mut hashes = 0;
+                while j < b.len() && b[j] == b'#' {
+                    hashes += 1;
+                    j += 1;
+                }
+                if j < b.len() && b[j] == b'"' {
+                    j += 1;
+                    while j < b.len() && !(b[j] == b'"' && b[j + 1..].iter().take(hashes).filter(|&&c| c == b'#').count() == hashes) {
+                        j += 1;
+                    }
+                    i = j + hashes;
+                }
+            }
+            b'"' => {
+                i += 1;
+                while i < b.len() && b[i] != b'"' {
+                    if b[i] == b'\\' {
+                        i += 1;
+                    }
+                    i += 1;
+                }
+            }
+            // a char literal ('x', '\'', '\\'): not a lifetime, which has no closing quote two or three bytes on
+            b'\'' if b.get(i + 2) == Some(&b'\'') || (b.get(i + 1) == Some(&b'\\') && b.get(i + 3) == Some(&b'\'')) => {
+                i += if b[i + 1] == b'\\' { 3 } else { 2 };
+            }
+            _ => {}
+        }
+        i += 1;
+    }
+    b.len()
+}
+
+/// t without its `// ..` and `/* .. */` comments (each one a space)
+fn strip_comments(t: &str) -> String {
+    let mut out = String::with_capacity(t.len());
+    let mut rest = t;
+    loop {
+        let (a, b) = (rest.find("//"), rest.find("/*"));
+        let k = match (a, b) {
+            (Some(x), Some(y)) => x.min(y),
+            (Some(x), None) | (None, Some(x)) => x,
+            (None, None) => break,
+        };
+        out.push_str(&rest[..k]);
+        out.push(' ');
+        rest = if rest[k..].starts_with("//") {
+            rest[k..].find('\n').map(|e| &rest[k + e..]).unwrap_or("")
+        } else {
+            rest[k + 2..].find("*/").map(|e| &rest[k + 2 + e + 2..]).unwrap_or("")
+        };
+    }
+    out.push_str(rest);
+    out
 }
 
 /// `t` without the keyword `w` at its start (and the spaces after it)
@@ -1900,7 +1961,8 @@ fn unsafe_impls(src: &str, items: &[SrcItem]) -> R<()> {
             }
             r = r[end..].trim_start();
         }
-        let head = r.split('{').next().unwrap_or("");
+        // (the header without comments, in single spaces: `impl Send // ..\nfor S` is the same header)
+        let head = strip_comments(r.split('{').next().unwrap_or("")).split_whitespace().collect::<Vec<_>>().join(" ");
         let Some(k) = head.find(" for ") else { continue };
         let path = head[..k].trim();
         let last = path.split('<').next().unwrap_or("").rsplit("::").next().unwrap_or("").trim();

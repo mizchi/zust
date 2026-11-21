@@ -28,14 +28,18 @@ status=0
 for m in .jev-lint/documents*.json; do
   case "$m" in *-baseline.json) continue ;; esac
   b="${m%.json}-baseline.json"
+  stale=0
   if [ -f "$b" ]; then
     $JEV docs --document-manifest "$m" --replay "$b" >/tmp/jev-docs.$$ 2>&1
     rc=$?
+    # (3 は記録が古いときと、記録が今の文書のもので判定が insufficient_context のとき。飛ばすのは前者だけ)
+    [ $rc -eq 3 ] && grep -q "record is invalid or stale" /tmp/jev-docs.$$ && stale=1
   else
     rc=3
+    stale=1
   fi
   # (記録が古く、判定し直すキーもない: 飛ばす)
-  if [ $rc -eq 3 ] && [ $have_key -eq 0 ] && [ $strict -eq 0 ]; then
+  if [ $rc -eq 3 ] && [ $stale -eq 1 ] && [ $have_key -eq 0 ] && [ $strict -eq 0 ]; then
     msg="docs: $m の記録が古いが、TYPESAFE_API_KEY がないので判定を飛ばした (キーを設定して scripts/docs_check.sh --update で記録する)"
     echo "$msg" >&2
     [ -n "${GITHUB_ACTIONS:-}" ] && echo "::warning::$msg"
@@ -56,7 +60,12 @@ for m in .jev-lint/documents*.json; do
   case $rc in
     0) ;;
     1) echo "docs: 英語と日本語が食い違っている ($m):" >&2; grep -v '^{' /tmp/jev-docs.$$ | head -40 >&2; status=1 ;;
-    3) echo "docs: $m の記録が古い (scripts/docs_check.sh --update で書き直す)" >&2; [ $status -eq 0 ] && status=3 ;;
+    3) if [ $stale -eq 1 ]; then
+         echo "docs: $m の記録が古い (scripts/docs_check.sh --update で書き直す)" >&2
+       else
+         echo "docs: $m の判定が決まっていない (insufficient_context など):" >&2; grep -v '^{' /tmp/jev-docs.$$ | head -20 >&2
+       fi
+       [ $status -eq 0 ] && status=3 ;;
     *) echo "docs: jev-lint が失敗した ($m, 終了コード $rc):" >&2; tail -20 /tmp/jev-docs.$$ >&2; [ $status -eq 0 ] && status=2 ;;
   esac
 done
