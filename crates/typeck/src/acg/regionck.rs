@@ -1586,6 +1586,24 @@ impl Cx<'_> {
         }
     }
 
+    /// `a == b` (and the other comparisons): both are of one type (`PartialEq<Self>`), each flows into it (so its
+    /// invariant parts are the same: `*mut &'a i32 == *mut &'b i32` needs 'a == 'b)
+    pub(crate) fn rg_cmp(&mut self, a: &Expr, b: &Expr, e: &Expr) {
+        // (a literal on either side: a number, a string, of no region to relate)
+        if !self.rg_on() || matches!(strip(a), Expr::Lit(..)) || matches!(strip(b), Expr::Lit(..)) {
+            return;
+        }
+        let (Some((at, atr)), Some((bt, btr))) = (self.rt_expr(a), self.rt_expr(b)) else { return };
+        let prog = self.prog;
+        if at != bt || atr.is_empty() {
+            return;
+        }
+        let Some(tree) = self.rg.fresh(prog, at) else { return };
+        let sp = Some(epos(e)).filter(|s| s.line != 0).unwrap_or_else(|| epos(a));
+        self.rg.relate(prog, at, &atr, &tree, sp);
+        self.rg.relate(prog, bt, &btr, &tree, sp);
+    }
+
     /// `place = value;`
     pub(crate) fn rg_assign(&mut self, place: &Expr, value: &Expr) {
         if !self.rg_on() {

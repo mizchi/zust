@@ -4215,6 +4215,7 @@ check-pass	nll/ty-outlives/projection-body.rs
 check-pass	nll/ty-outlives/projection-where-clause-env.rs
 check-pass	nll/ty-outlives/projection-where-clause-trait.rs
 compile-fail	nll/type-check-pointer-coercions.rs
+compile-fail	nll/type-check-pointer-comparisons.rs
 check-pass	nll/unexpected-inference-var-ice-116599.rs
 compile-fail	nll/user-annotations/adt-brace-structs.rs
 compile-fail	nll/user-annotations/adt-tuple-struct.rs

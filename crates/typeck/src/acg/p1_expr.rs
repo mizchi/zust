@@ -662,6 +662,13 @@ impl Cx<'_> {
                 }
             }
             Expr::Struct(..) => self.struct_lit(e, expected),
+            Expr::Binary(op, l, r, _) if self.rg.on => {
+                let v = self.binary(e, expected);
+                if v.is_ok() && matches!(op.as_str(), "==" | "!=" | "<" | "<=" | ">" | ">=") {
+                    self.rg_cmp(l, r, e);
+                }
+                v
+            }
             Expr::Binary(..) => self.binary(e, expected),
             Expr::AssignOp(_, left, _, _) => {
                 // (an overloaded `+=` is a call of `add_assign(&mut self, ..)`: no access of its own)

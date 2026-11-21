@@ -583,3 +583,10 @@ fn main() {}
 "#;
     assert_eq!(check(ok), vec![]);
 }
+
+/// The two sides of a comparison are of one type: their invariant parts are the same
+#[test]
+fn comparisons() {
+    one_error("fn cmp<'a, 'b>(x: *mut &'a i32, y: *mut &'b i32) -> bool {\n    x == y\n}\nfn main() {}\n", 2);
+    assert_eq!(check("fn hr<'a>(f: fn(&'a i32), g: fn(&i32)) -> bool { f == g }\nfn co<'a, 'b>(x: &'a i32, y: &'b i32) -> bool { x == y }\nfn main() {}\n"), vec![]);
+}
