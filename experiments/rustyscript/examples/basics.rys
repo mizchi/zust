@@ -1,0 +1,72 @@
+// rustyscript: the JS layer (records, enums, match, |>, numbers that keep their types)
+
+extern fn log(s: String) = "console.log";
+
+type Point = { x: f64, y: f64 }
+enum Shape { Circle(Point, f64), Rect(Point, Point) }
+enum Filter { All, Active, Done }
+enum Option<T> { None, Some(T) }
+type Todo = { id: i32, title: String, done: bool }
+
+pub fn area(s: Shape) -> f64 {
+  match s {
+    Circle(_, r) => 3.141592653589793 * r * r,
+    Rect(a, b) => ((b.x - a.x) * (b.y - a.y)).abs(),
+  }
+}
+
+pub fn visible(todos: Array<Todo>, f: Filter) -> Array<Todo> {
+  todos |> .filter((t) => match f {
+    All => true,
+    Active => !t.done,
+    Done => t.done,
+  })
+}
+
+fn toggle(t: Todo) -> Todo {
+  Todo { done: !t.done, ..t }
+}
+
+fn find_title(todos: Array<Todo>, id: i32) -> Option<String> {
+  let hits = todos |> .filter((t) => t.id == id);
+  if hits.len() == 0 { None } else { Some(hits.map((t) => t.title).join(",")) }
+}
+
+// num-traits style: one source, one JS function per numeric type (the arithmetic differs)
+pub fn sum<T: Num>(xs: Array<T>) -> T {
+  xs.fold(T::zero(), (acc, x) => acc + x)
+}
+
+pub fn mean(xs: Array<f64>) -> f64 {
+  sum(xs) / (xs.len() as f64)
+}
+
+fn describe(o: Option<String>) -> String {
+  match o {
+    Some(s) => "found " + s,
+    None => "none",
+  }
+}
+
+pub fn main() -> () {
+  let todos = [
+    Todo { id: 1, title: "write the parser", done: true },
+    Todo { id: 2, title: "type check", done: false },
+    Todo { id: 3, title: "emit JS", done: false },
+  ];
+  let shapes = [Circle(Point { x: 0.0, y: 0.0 }, 2.0), Rect(Point { x: 0.0, y: 0.0 }, Point { x: 3.0, y: 4.0 })];
+  log("areas: " + (shapes |> .map(area) |> .map((a) => a.to_string()) |> .join(", ")));
+  log("active: " + (visible(todos, Active) |> .map((t) => t.title) |> .join(", ")));
+  log("toggled: " + (todos |> .map(toggle) |> .map((t) => t.done.to_string()) |> .join(",")));
+  log(describe(find_title(todos, 2)) + " / " + describe(find_title(todos, 9)));
+
+  // i32 wraps like Rust's wrapping ops, i64 is a BigInt, `/` on integers truncates
+  let big: i32 = 2147483647;
+  log("i32: " + (big + 1).to_string() + " " + (7 / 2).to_string() + " " + (-7 % 3).to_string());
+  let n: i64 = 9007199254740993;
+  log("i64: " + (n * 3).to_string());
+  let u: u32 = 0;
+  log("u32: " + (u - 1).to_string());
+  log("sums: " + sum([1, 2, 3]).to_string() + " " + sum([1.5, 2.25]).to_string() + " " + mean([1.0, 2.0, 4.0]).to_string());
+  log("casts: " + (3.99 as i32).to_string() + " " + (10000000000.0 as i32).to_string() + " " + ((10 as f64) / 4.0).to_string());
+}

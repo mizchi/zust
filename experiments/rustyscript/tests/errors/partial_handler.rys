@@ -1,0 +1,4 @@
+// expect: this handler handles `State` but not `Put`
+enum State { Get -> i32, Put(i32) -> () }
+fn f() -> i32 { perform Get }
+fn g() -> i32 { handle f() { Get, k => k(1) } }
