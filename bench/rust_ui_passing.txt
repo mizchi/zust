@@ -3127,6 +3127,7 @@ run-pass	let-else/let-else-temp-borrowck.rs
 compile-fail	let-else/let-else-then-diverge.rs
 run-pass	let-else/let-else.rs
 compile-fail	let-else/uninitialized-refutable-let-issue-123844.rs
+compile-fail	lexer/lex-bad-binary-literal.rs
 compile-fail	lexer/lex-bad-char-literals-2.rs
 compile-fail	lexer/lex-bad-char-literals-3.rs
 compile-fail	lexer/lex-bad-char-literals-4.rs
@@ -3134,6 +3135,7 @@ compile-fail	lexer/lex-bad-char-literals-5.rs
 compile-fail	lexer/lex-bad-char-literals-6.rs
 compile-fail	lexer/lex-bad-char-literals-7.rs
 compile-fail	lexer/lex-bad-numeric-literals.rs
+compile-fail	lexer/lex-bad-octal-literal.rs
 compile-fail	lexer/lex-bad-str-literal-as-char-1.rs
 compile-fail	lexer/lex-bad-str-literal-as-char-2.rs
 compile-fail	lexer/lex-bad-token.rs
@@ -4164,6 +4166,7 @@ compile-fail	numeric/numeric-suffix/numeric-suffix.rs
 run-pass	numeric/ref-int.rs
 run-pass	numeric/type-limit-comparisons-6130.rs
 compile-fail	numeric/uppercase-base-prefix-invalid-no-fix.rs
+compile-fail	numeric/uppercase-base-prefix.rs
 check-pass	object-lifetime/object-lifetime-default-assoc-ty-self-ty-static.rs
 run-pass	object-lifetime/object-lifetime-default-default-to-static.rs
 compile-fail	object-lifetime/object-lifetime-default-from-box-error.rs
@@ -4693,6 +4696,7 @@ compile-fail	parser/not-a-pred.rs
 compile-fail	parser/nt-parsing-has-recovery.rs
 compile-fail	parser/numeric-lifetime.rs
 compile-fail	parser/obsolete-syntax-impl-for-dotdot.rs
+compile-fail	parser/old-suffixes-are-really-forbidden.rs
 compile-fail	parser/omitted-arg-in-item-fn.rs
 run-pass	parser/operator-associativity.rs
 run-pass	parser/operator-precedence-braces-exprs.rs
