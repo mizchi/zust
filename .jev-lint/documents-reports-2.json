@@ -232,6 +232,14 @@
     "docs_reports_2026-11-21-01-security-cves.ja": {
       "path": "docs/ja/reports/2026-11-21-01-security-cves.md",
       "role": "historical"
+    },
+    "docs_reports_2026-11-21-02-refcell-guards.en": {
+      "path": "docs/reports/2026-11-21-02-refcell-guards.md",
+      "role": "historical"
+    },
+    "docs_reports_2026-11-21-02-refcell-guards.ja": {
+      "path": "docs/ja/reports/2026-11-21-02-refcell-guards.md",
+      "role": "historical"
     }
   },
   "comparisons": [
@@ -552,6 +560,17 @@
       },
       "target": {
         "source": "docs_reports_2026-11-21-01-security-cves.ja"
+      }
+    },
+    {
+      "id": "docs_reports_2026-11-21-02-refcell-guards",
+      "topic": "The Japanese file docs/ja/reports/2026-11-21-02-refcell-guards.md is a faithful translation of docs/reports/2026-11-21-02-refcell-guards.md",
+      "mode": "translation",
+      "reference": {
+        "source": "docs_reports_2026-11-21-02-refcell-guards.en"
+      },
+      "target": {
+        "source": "docs_reports_2026-11-21-02-refcell-guards.ja"
       }
     }
   ]

@@ -3974,7 +3974,8 @@ impl Program {
         // `std::collections::HashMap::new` などは `HashMap::new`
         if n >= 3 && matches!(name(0), "core" | "std" | "alloc") {
             let ty = name(n - 2);
-            if self.struct_index.contains_key(ty) {
+            // (`std::cell::Ref::map`: below, as `Ref::map`)
+            if self.struct_index.contains_key(ty) && !matches!(ty, "Ref" | "RefMut") {
                 return self.index.get(&format!("{ty}::{}", name(n - 1))).copied();
             }
         }
@@ -3993,6 +3994,10 @@ impl Program {
                 ("Path", "new") => Some("__exr_path_new"),
                 ("ptr", "eq") => Some("__exr_ptr_eq"),
                 ("array", "from_fn") => Some("__exr_array_from_fn"),
+                // (RefCell's guards: associated functions of the prelude's Ref / RefMut, unless the program has its own)
+                ("Ref", "map") if !self.index.contains_key("Ref::map") => Some("__exr_ref_map"),
+                ("RefMut", "map") if !self.index.contains_key("RefMut::map") => Some("__exr_refmut_map"),
+                ("Ref", "clone") if !self.index.contains_key("Ref::clone") => Some("__exr_ref_clone"),
                 _ => None,
             };
             if let Some(c) = core {

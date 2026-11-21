@@ -223,6 +223,18 @@ impl Cx<'_> {
                         self.deref_shared(d);
                         self.place(d)
                     }
+                    // (a Deref value that is not a place (`*(*rc).borrow()`, a guard returned by a call the type records
+                    // did not name): its deref on the value already computed, which lives to the end of the statement)
+                    (Some(a), Ty::Struct(sid)) if self.user_deref_sid(x, sid).is_some() => {
+                        let m = if self.prog.method(sid, "deref_mut").is_some() { "deref_mut" } else { "deref" };
+                        let did = self.prog.method(sid, m).unwrap();
+                        self.own_temp(a, t);
+                        let (pv, pt) = self.call_fn_vals(did, &[(a, Ty::Ref(m == "deref_mut", intern(t)))], SP)?;
+                        match (pv, pt) {
+                            (Some(p), Ty::Ref(_, inner)) => Ok(Place::Mem(p, 0, *inner)),
+                            _ => err(SP, format!("type `{}` cannot be dereferenced", self.prog.tn(t))),
+                        }
+                    }
                     _ => err(SP, format!("type `{}` cannot be dereferenced", self.prog.tn(t))),
                 }
             }
@@ -664,6 +676,13 @@ impl Cx<'_> {
                 } else {
                     Expr::Ref(*m, Box::new(Expr::Index(Box::new(yb), Box::new(Expr::Range(None, None, false)), crate::parse::Span::default())))
                 };
+                let ne: &Expr = self.keep_expr(ne);
+                self.expr(ne, expected)
+            }
+            // (deref coercion of a guard: `&g` where a `&T` (or `&[U]` / `&str` of a Vec / String T) is expected, with
+            // g a RefCell's Ref / RefMut or a MutexGuard: `&*g`)
+            Expr::Ref(_, x) if self.guard_coercion(x, expected).is_some() => {
+                let ne = self.guard_coercion(x, expected).unwrap();
                 let ne: &Expr = self.keep_expr(ne);
                 self.expr(ne, expected)
             }
@@ -1320,6 +1339,58 @@ impl Cx<'_> {
         }
         let a = self.data_addr(dv.bytes);
         Some((Some(a), Ty::Ref(false, intern(t))))
+    }
+
+    /// A borrow guard (`Ref<T>` / `RefMut<T>` / `MutexGuard<T>`): (its struct, T, whether it derefs mutably)
+    pub(crate) fn guard_of(&self, t: Ty) -> Option<(u32, Ty, bool)> {
+        let Ty::Struct(sid) = t else { return None };
+        if !matches!(self.prog.structs[self.prog.base_of(sid) as usize].name.as_str(), "Ref" | "RefMut" | "MutexGuard") {
+            return None;
+        }
+        let target = *self.prog.structs[sid as usize].args.first()?;
+        Some((sid, target, self.prog.method(sid, "deref_mut").is_some()))
+    }
+
+    /// A RefCell, or a reference / Box / Rc / Arc to one (what `c.borrow()` reaches by auto-deref)
+    pub(crate) fn is_refcell(&self, t: Ty) -> bool {
+        let mut t = t;
+        for _ in 0..8 {
+            t = match t {
+                Ty::Ref(_, i) | Ty::Box(i) => *i,
+                Ty::Struct(sid) => match self.prog.structs[self.prog.base_of(sid) as usize].name.as_str() {
+                    "RefCell" => return true,
+                    "Rc" | "Arc" => match self.prog.structs[sid as usize].args.first() {
+                        Some(&a) => a,
+                        None => return false,
+                    },
+                    _ => return false,
+                },
+                _ => return false,
+            };
+        }
+        false
+    }
+
+    /// `&g` (g: Ref<T> / RefMut<T> / MutexGuard<T>) where a reference to T, or the slice / str of a Vec / String T, is
+    /// expected: the expression to use instead (`&*g`, `&(*g)[..]`, `(*g).as_str()`). None when no coercion applies
+    /// (a `&dyn Trait` is expected, or a reference to the guard itself)
+    pub(crate) fn guard_coercion(&self, x: &Expr, expected: Option<Ty>) -> Option<Expr> {
+        let Some(Ty::Ref(wm, want)) = expected else { return None };
+        let (sid, target, _) = self.guard_of(self.peek(x)?)?;
+        if *want == Ty::Struct(sid) || matches!(want, Ty::Dyn(_)) || self.prog.has_param(*want) {
+            return None;
+        }
+        let inner = Expr::Paren(Box::new(Expr::Unary("*".into(), Box::new(x.clone()), Default::default())));
+        let tname = match target {
+            Ty::Struct(t) => self.prog.structs[self.prog.base_of(t) as usize].name.clone(),
+            _ => String::new(),
+        };
+        Some(match want {
+            w if *w == target => Expr::Ref(wm, Box::new(inner)),
+            Ty::Slice(_) if tname == "Vec" => Expr::Ref(wm, Box::new(Expr::Index(Box::new(inner), Box::new(Expr::Range(None, None, false)), Default::default()))),
+            Ty::Str if tname == "String" => mcall(inner, if wm { "as_mut_str" } else { "as_str" }, vec![]),
+            _ => return None,
+        })
     }
 
     pub(crate) fn reference(&mut self, e: &Expr, expected: Option<Ty>) -> R<V> {

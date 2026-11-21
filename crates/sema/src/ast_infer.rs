@@ -1896,7 +1896,9 @@ impl Inf<'_> {
         while callee.is_none() && hops < 4 {
             let Some(s0) = sid else { break };
             let Some(did) = self.prog.method(s0, "deref") else { break };
-            if !matches!(n, "clone" | "to_string" | "cmp" | "partial_cmp" | "eq") {
+            // (a guard (RefCell's Ref / RefMut, MutexGuard) has none of these itself: `g.clone()` is the value's)
+            let guard = matches!(self.prog.structs[self.prog.base_of(s0) as usize].name.as_str(), "Ref" | "RefMut" | "MutexGuard");
+            if guard || !matches!(n, "clone" | "to_string" | "cmp" | "partial_cmp" | "eq") {
                 let r = self.apply_recv(Some(did), vec![], rv);
                 rv = self.deref_expr(r);
                 let root = self.find(rv);
