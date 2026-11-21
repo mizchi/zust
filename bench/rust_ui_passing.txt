@@ -6300,6 +6300,7 @@ compile-fail	traits/issue-22384.rs
 run-pass	traits/issue-22655.rs
 check-pass	traits/issue-23003-overflow.rs
 run-pass	traits/issue-23003.rs
+run-pass	traits/issue-23825.rs
 check-pass	traits/issue-2611-3.rs
 compile-fail	traits/issue-32963.rs
 check-pass	traits/issue-33187.rs

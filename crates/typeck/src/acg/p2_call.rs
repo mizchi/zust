@@ -93,6 +93,12 @@ impl Cx<'_> {
     fn method_call_inner(&mut self, e: &Expr, expected: Option<Ty>) -> R<V> {
         let Expr::MethodCall(recv, method, gargs, margs, msp) = e else { unreachable!() };
         let msp = *msp;
+        // (`x.m()` with x of a type parameter `T: Tr` in a generic fn, instantiated as a primitive: Tr's `m`, which a
+        // builtin method of the same name (`to_string` ..) would otherwise answer: `<T as Tr>::m(&x, ..)`)
+        if let Some(ne) = self.bound_method_call(recv, method, margs) {
+            let ne: &Expr = self.keep_expr(ne);
+            return self.expr(ne, expected);
+        }
         // (unused_allocation: `Box::new([1]).len()`, a `&self` method of the array / slice the box holds)
         if self.prog.deny_unused_alloc && self.user_code && is_box_new(recv) {
             if let Some(Ty::Box(Ty::Array(..) | Ty::Slice(_) | Ty::Str)) = self.peek(recv) {
@@ -2088,6 +2094,40 @@ impl Cx<'_> {
 
     /// `i32::pow(2, 10)` / `Trait::m(&x, a)` / `Ord::cmp(&a, &b)` / `HashMap::from([..])` などを
     /// メソッド呼び出しなどに書き換えたもの (front.rs の Program::prim_method_call。e は `Expr::Call` 全体)
+    /// The rewrite of `x.m(..)` when x's type is a primitive that a type parameter of this fn stands for, and a trait
+    /// of that parameter's bounds has an impl of m for it: `<T as Tr>::m(&x, ..)` (or `x` for a `self` method)
+    pub(crate) fn bound_method_call(&self, recv: &Expr, method: &str, margs: &[Expr]) -> Option<Expr> {
+        if self.env.params.is_empty() {
+            return None;
+        }
+        let t = self.peek(recv)?;
+        let (t, by_ref) = match t {
+            Ty::Ref(_, i) => (*i, true),
+            t => (t, false),
+        };
+        if !(t.is_int() || t.is_float() || matches!(t, Ty::Bool | Ty::Char)) {
+            return None;
+        }
+        let gens = &self.prog.sigs.get(self.root as usize)?.generics;
+        for (g, bounds) in gens {
+            if self.env.params.iter().find(|p| &p.0 == g).map(|p| p.1) != Some(t) {
+                continue;
+            }
+            for b in bounds {
+                let tr = b.split('<').next().unwrap_or(b).trim();
+                let Some(id) = self.trait_candidate(&format!("{}::{method}", self.ty_key(t)), tr) else { continue };
+                let takes_ref = matches!(self.prog.sigs[id as usize].params.first(), Some(Ty::Ref(..)));
+                let Ok(Expr::Path(q, p)) = crate::parse::parse_expr(&format!("<{} as {tr}>::{method}", self.prog.tn(t))) else { continue };
+                let r = paren(recv.clone());
+                let a0 = if takes_ref && !by_ref { Expr::Ref(false, Box::new(r)) } else { r };
+                let mut args = vec![a0];
+                args.extend(margs.iter().cloned());
+                return Some(Expr::Call(Box::new(Expr::Path(q, p)), args));
+            }
+        }
+        None
+    }
+
     pub(crate) fn prim_method_call(&self, e: &Expr) -> Option<Expr> {
         let Expr::Call(func, cargs) = e else { return None };
         let Expr::Path(qself, p) = &**func else { return None };
@@ -2114,6 +2154,15 @@ impl Cx<'_> {
                             Expr::Ref(_, e) => paren((**e).clone()),
                             _ => paren(a0.clone()),
                         };
+                        // (a primitive receiver with an impl of this trait: `<u32 as Tr>::m(&x)`, which a builtin
+                        // method of the same name (`to_string`) cannot take over as `x.m()` would let it)
+                        if let Some(t) = self.peek(&recv).map(|t| self.strip_refs(t)) {
+                            if (t.is_int() || t.is_float() || matches!(t, Ty::Bool | Ty::Char)) && self.trait_candidate(&format!("{}::{ms}", self.ty_key(t)), &tr).is_some() {
+                                if let Ok(Expr::Path(q, qp)) = crate::parse::parse_expr(&format!("<{} as {tr}>::{ms}", self.prog.tn(t))) {
+                                    return Some(Expr::Call(Box::new(Expr::Path(q, qp)), cargs.clone()));
+                                }
+                            }
+                        }
                         return Some(Expr::MethodCall(Box::new(recv), ms, vec![], rest, crate::parse::Span::default()));
                     }
                 }
