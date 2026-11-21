@@ -2571,8 +2571,11 @@ impl Cx<'_> {
             );
             // (a user trait only when the path names no function itself: itoa's `Unsigned::fmt(x, buf)` does)
             let direct = self.prog.fn_by_p(&PPath::of(p), self.self_sid);
-            let user = self.prog.traits.contains_key(&p.segs[0].name) && direct.is_none();
-            if !p.global && p.segs.len() == 2 && p.segs[0].args.is_empty() && (known || user)
+            // (`Foo::<i32>::get`: with arguments, the first segment is the trait, not a module)
+            let user = self.prog.traits.contains_key(&p.segs[0].name) && (direct.is_none() || !p.segs[0].args.is_empty());
+            // (`Foo::<i32>::get(&x)`: the trait's arguments pick its impl; with one impl of the trait, it is that one)
+            let targs_ok = p.segs[0].args.is_empty() || (user && self.prog.impl_targs.get(&p.segs[0].name).map_or(0, |v| v.len()) <= 1);
+            if !p.global && p.segs.len() == 2 && targs_ok && (known || user)
                 && !self.prog.struct_index.contains_key(&p.segs[0].name)
                 && direct.is_none_or(|id| self.prog.sigs[id as usize].has_self)
             {
@@ -2608,6 +2611,10 @@ impl Cx<'_> {
                 };
                 let m = Expr::MethodCall(Box::new(Expr::Paren(Box::new(recv))), p.segs[1].name.clone(), p.segs[1].args.clone(), cargs[1..].to_vec(), span);
                 let m = self.keep_expr(m);
+                // (`Foo::tag(&s)`: the trait's method, not an inherent `tag` of the receiver's type)
+                if user {
+                    self.explicit_traits.insert(m as *const Expr as usize, p.segs[0].name.clone());
+                }
                 return self.expr(m, expected);
             }
         }
@@ -2664,9 +2671,14 @@ impl Cx<'_> {
             _ => None,
         };
         // `Buf::<8>::new()` / `Vec::<i32>::new()`: 型のセグメントの型引数
-        if let Expr::Path(_, p) = &**func {
+        if let Expr::Path(qs, p) = &**func {
             let n = p.segs.len();
-            if n >= 2 && !p.segs[n - 2].args.is_empty() {
+            // (`<i32 as Foo<i32>>::get`: the segment before the fn is the trait, not the self type)
+            let trait_seg = qs.is_some() && n == 2;
+            if let (true, Some(q)) = (trait_seg, qs) {
+                // (Self is the qualified type, when it is known: `<&'static u32 as Bazoom<_>>::method`)
+                self.seg_self = self.parse_ty(q).ok().filter(|&t| !self.prog.has_param(t) && !has_hole(self.prog, t));
+            } else if n >= 2 && !p.segs[n - 2].args.is_empty() {
                 let seg = p.segs[n - 2].clone();
                 let ty = crate::parse::Ty::Path(None, Path { global: false, segs: vec![seg], pos: Default::default() });
                 self.seg_self = Some(self.parse_ty(&ty)?);

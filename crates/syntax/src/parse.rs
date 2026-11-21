@@ -825,9 +825,15 @@ impl Parser {
     /// A declared name (an item's, a field's, a variant's, a binding's): not a reserved keyword (the 2018 ones
     /// `async` / `await` / `dyn` / `try` stay names, as an edition 2015 file may use them)
     fn decl_ident(&mut self) -> R<String> {
-        if let Some(t) = self.tok(0).filter(|t| t.kind == TokKind::Ident && reserved_kw(&t.text, true)) {
-            let k = t.text.clone();
-            return Err(self.err(&format!("expected identifier, found keyword `{k}`")));
+        if let Some(t) = self.tok(0).filter(|t| t.kind == TokKind::Ident) {
+            if reserved_kw(&t.text, true) {
+                let k = t.text.clone();
+                return Err(self.err(&format!("expected identifier, found keyword `{k}`")));
+            }
+            if unused_kw(&t.text) {
+                let k = t.text.clone();
+                return Err(self.err(&format!("expected identifier, found reserved keyword `{k}`")));
+            }
         }
         self.ident()
     }
@@ -1632,6 +1638,13 @@ impl Parser {
             // (a keyword is no binding: `let extern = 0;`; `Self` / `self` are a unit struct and a receiver here)
             if reserved_kw(&n, false) {
                 return Err(self.err(&format!("expected identifier, found keyword `{n}`")));
+            }
+            // (`let box = 0;`: `box` starts a box pattern, whose pattern is missing)
+            if n == "box" {
+                return Err(self.err("expected pattern"));
+            }
+            if unused_kw(&n) {
+                return Err(self.err(&format!("expected identifier, found reserved keyword `{n}`")));
             }
             if self.eat_punct("@") {
                 return Ok(Pat::Ident(false, false, n, Some(Box::new(self.pat_one()?))));
@@ -3274,6 +3287,20 @@ pub fn reserved_kw(s: &str, with_paths: bool) -> bool {
         _ => false,
     };
     core || (with_paths && matches!(s, "self" | "Self" | "crate" | "super" | "true" | "false" | "mut" | "ref"))
+}
+
+/// A keyword reserved for the future in every edition (`let final = ();` is an error; `r#final` is a name)
+pub fn unused_kw(s: &str) -> bool {
+    match s.len() {
+        2 => s == "do",
+        3 => s == "box",
+        4 => s == "priv",
+        5 => matches!(s, "final" | "macro" | "yield"),
+        6 => matches!(s, "become" | "typeof"),
+        7 => matches!(s, "unsized" | "virtual"),
+        8 => matches!(s, "abstract" | "override"),
+        _ => false,
+    }
 }
 
 /// The first name a pattern binds twice. A name binds when it starts in lowercase (an uppercase one may be a unit

@@ -300,6 +300,7 @@ run-pass	associated-types/issue-47139-2.rs
 check-pass	associated-types/issue-48010.rs
 check-pass	associated-types/issue-48551.rs
 run-pass	associated-types/issue-54467.rs
+run-pass	associated-types/issue-55846.rs
 compile-fail	associated-types/issue-64855.rs
 check-pass	associated-types/issue-91069.rs
 run-pass	associated-types/method-on-impl-with-assoc-type-projection.rs
@@ -1470,6 +1471,7 @@ run-pass	const-generics/issues/issue-70125-1.rs
 run-pass	const-generics/issues/issue-70125-2.rs
 check-pass	const-generics/issues/issue-70167.rs
 check-pass	const-generics/issues/issue-70225.rs
+check-pass	const-generics/issues/issue-70273-assoc-fn.rs
 check-pass	const-generics/issues/issue-71986.rs
 check-pass	const-generics/issues/issue-74906.rs
 compile-fail	const-generics/issues/issue-76701-ty-param-in-const.rs
@@ -3139,6 +3141,7 @@ compile-fail	keyword/keyword-self-as-type-param.rs
 compile-fail	keyword/keyword-true-as-identifier.rs
 compile-fail	keyword/meta-is-not-reserved.rs
 run-pass	keyword/raw-identifier-for-function-57198.rs
+compile-fail	keyword/reserved-become.rs
 check-pass	label/label-beginning-with-underscore.rs
 run-pass	label/label-in-closure-no-self-shadow.rs
 compile-fail	label/label_break_value_illegal_uses.rs
@@ -4106,6 +4109,7 @@ compile-fail	never_type/empty-never-array.rs
 compile-fail	never_type/fallback_change/dependency-on-fallback-to-unit.rs
 compile-fail	never_type/fallback_change/diverging-fallback-unconstrained-return.rs
 compile-fail	never_type/fallback_change/fallback-closure-ret.rs
+check-pass	never_type/fallback_change/from_infer_breaking_with_unit_fallback.rs
 compile-fail	never_type/fallback_change/lint-breaking-2024-assign-underscore.rs
 compile-fail	never_type/fallback_change/lint-never-type-fallback-flowing-into-unsafe.rs
 check-pass	never_type/fallback_change/question_mark_from_never.rs
@@ -4176,7 +4180,6 @@ check-pass	nll/issue-52992.rs
 run-pass	nll/issue-53123-raw-pointer-cast.rs
 check-pass	nll/issue-53570.rs
 compile-fail	nll/issue-53807.rs
-compile-fail	nll/issue-54302-cases.rs
 check-pass	nll/issue-55288.rs
 check-pass	nll/issue-55344.rs
 check-pass	nll/issue-55651.rs
@@ -4231,7 +4234,6 @@ run-pass	nll/user-annotations/issue-55241.rs
 compile-fail	nll/user-annotations/issue-55748-pat-types-constrain-bindings.rs
 compile-fail	nll/user-annotations/method-call.rs
 compile-fail	nll/user-annotations/method-ufcs-1.rs
-compile-fail	nll/user-annotations/method-ufcs-2.rs
 compile-fail	nll/user-annotations/method-ufcs-3.rs
 check-pass	nll/user-annotations/normalize-self-ty.rs
 compile-fail	nll/user-annotations/patterns.rs
@@ -4719,12 +4721,15 @@ check-pass	parser/item-free-static-no-body-syntactic-pass.rs
 check-pass	parser/item-free-type-bounds-syntactic-pass.rs
 compile-fail	parser/item-kw-case-mismatch.rs
 compile-fail	parser/item-needs-block.rs
+compile-fail	parser/keyword-abstract.rs
 compile-fail	parser/keyword-as-as-identifier.rs
+compile-fail	parser/keyword-box-as-identifier.rs
 compile-fail	parser/keyword-break-as-identifier.rs
 compile-fail	parser/keyword-const-as-identifier.rs
 compile-fail	parser/keyword-continue-as-identifier.rs
 compile-fail	parser/keyword-else-as-identifier.rs
 compile-fail	parser/keyword-enum-as-identifier.rs
+compile-fail	parser/keyword-final.rs
 compile-fail	parser/keyword-fn-as-identifier.rs
 compile-fail	parser/keyword-for-as-identifier.rs
 compile-fail	parser/keyword-if-as-identifier.rs
@@ -4736,6 +4741,7 @@ compile-fail	parser/keyword-match-as-identifier.rs
 compile-fail	parser/keyword-mod-as-identifier.rs
 compile-fail	parser/keyword-move-as-identifier.rs
 compile-fail	parser/keyword-mut-as-identifier.rs
+compile-fail	parser/keyword-override.rs
 compile-fail	parser/keyword-pub-as-identifier.rs
 compile-fail	parser/keyword-ref-as-identifier.rs
 compile-fail	parser/keyword-return-as-identifier.rs
@@ -4743,6 +4749,7 @@ compile-fail	parser/keyword-static-as-identifier.rs
 compile-fail	parser/keyword-struct-as-identifier.rs
 compile-fail	parser/keyword-trait-as-identifier.rs
 compile-fail	parser/keyword-type-as-identifier.rs
+compile-fail	parser/keyword-typeof.rs
 compile-fail	parser/keyword-unsafe-as-identifier.rs
 compile-fail	parser/keyword-use-as-identifier.rs
 compile-fail	parser/keyword-where-as-identifier.rs
@@ -4767,6 +4774,7 @@ compile-fail	parser/macro/issue-33569.rs
 compile-fail	parser/macro/kw-in-item-pos-recovery-149692.rs
 compile-fail	parser/macro/macro-bad-delimiter-ident.rs
 check-pass	parser/macro/macro-bare-trait-object-maybe-trait-bound.rs
+compile-fail	parser/macro/macro-keyword.rs
 compile-fail	parser/macro/macro-missing-right-paren.rs
 compile-fail	parser/macro/macros-no-semicolon.rs
 compile-fail	parser/macro/misspelled-macro-rules.rs
@@ -5153,6 +5161,7 @@ compile-fail	pattern/usefulness/issue-40221.rs
 compile-fail	pattern/usefulness/issue-4321.rs
 check-pass	pattern/usefulness/issue-53820-slice-pattern-large-array.rs
 compile-fail	pattern/usefulness/issue-56379.rs
+compile-fail	pattern/usefulness/issue-57472.rs
 check-pass	pattern/usefulness/issue-65413-constants-and-slices-exhaustiveness.rs
 check-pass	pattern/usefulness/issue-66501.rs
 check-pass	pattern/usefulness/issue-71930-type-of-match-scrutinee.rs
@@ -5167,6 +5176,7 @@ compile-fail	pattern/usefulness/match-arm-statics-2.rs
 compile-fail	pattern/usefulness/match-arm-statics.rs
 compile-fail	pattern/usefulness/match-byte-array-patterns-2.rs
 compile-fail	pattern/usefulness/match-non-exhaustive.rs
+compile-fail	pattern/usefulness/match-vec-fixed.rs
 run-pass	pattern/usefulness/nested-exhaustive-match.rs
 compile-fail	pattern/usefulness/non-exhaustive-match-nested.rs
 compile-fail	pattern/usefulness/non-exhaustive-match.rs
@@ -5764,6 +5774,7 @@ run-pass	self/move-self.rs
 run-pass	self/objects-owned-object-owned-method.rs
 compile-fail	self/point-at-arbitrary-self-type-method.rs
 compile-fail	self/point-at-arbitrary-self-type-trait-method.rs
+run-pass	self/self-as-trait-call-in-method-body.rs
 check-pass	self/self-ctor-nongeneric.rs
 check-pass	self/self-in-method-body-resolves.rs
 run-pass	self/self-in-mut-slot-immediate-value.rs
@@ -6516,6 +6527,7 @@ check-pass	traits/issue-72455.rs
 compile-fail	traits/issue-75627.rs
 compile-fail	traits/issue-77982.rs
 compile-fail	traits/issue-78372.rs
+check-pass	traits/issue-78632.rs
 compile-fail	traits/issue-87558.rs
 check-pass	traits/issue-90195-2.rs
 check-pass	traits/issue-90195.rs
@@ -6895,6 +6907,7 @@ compile-fail	typeck/typeck_type_placeholder_item_help.rs
 compile-fail	typeck/typeck_type_placeholder_lifetime_1.rs
 compile-fail	typeck/typeck_type_placeholder_lifetime_2.rs
 compile-fail	typeck/typeck_type_placeholder_mismatch.rs
+run-pass	typeck/ufcs-type-params.rs
 compile-fail	typeck/unconstrained-impl-extra-parameter.rs
 run-pass	typeck/unify-return-ty.rs
 compile-fail	typeck/while-type-error.rs
