@@ -2725,12 +2725,21 @@ fn extern_block(b: &[u8], i: usize) -> bool {
         return false;
     }
     j = skip_space(b, j + 6);
-    if b.get(j) == Some(&b'"') {
+    // (the ABI: `"C"`, or a raw string `r"C"` / `r#"C"#`)
+    let mut hashes = 0;
+    if b.get(j) == Some(&b'r') {
         j += 1;
-        while j < b.len() && b[j] != b'"' {
+        while b.get(j) == Some(&b'#') {
+            hashes += 1;
             j += 1;
         }
-        j = skip_space(b, j + 1);
+    }
+    if b.get(j) == Some(&b'"') {
+        j += 1;
+        while j < b.len() && !(b[j] == b'"' && b[j + 1..].iter().take(hashes).filter(|&&c| c == b'#').count() == hashes) {
+            j += 1;
+        }
+        j = skip_space(b, j + 1 + hashes);
     }
     b.get(j) == Some(&b'{')
 }
