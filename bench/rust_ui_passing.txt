@@ -2684,6 +2684,7 @@ compile-fail	higher-ranked/erroneous-lifetime-bound.rs
 compile-fail	higher-ranked/higher-lifetime-bounds.rs
 run-pass	higher-ranked/higher-ranked-encoding.rs
 compile-fail	higher-ranked/higher-ranked-invalid-bounds.rs
+compile-fail	higher-ranked/higher-ranked-lifetime-error.rs
 check-pass	higher-ranked/hrtb-projection-closure-62201.rs
 compile-fail	higher-ranked/hrtb-with-assoc-type-projection.rs
 check-pass	higher-ranked/leak-check/leak-check-in-selection-7-coherence.rs

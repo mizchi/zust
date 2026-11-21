@@ -1645,6 +1645,20 @@ impl Cx<'_> {
                     }
                 }
             }
+            // (a fn item whose result borrows from a parameter the bound gives for any region (`FnMut(&String) -> T`),
+            // where the bound's result is a type parameter: one type for every region, which the fn's is not)
+            if let (Some(x), Expr::Path(..)) = (&fbt, strip_paren(a)) {
+                if let (Ty::Param(_), Some(fid), false) = (x.1, self.fn_item(a), x.2.contains('\'')) {
+                    let user = |i: u32| self.prog.item_of.get(i as usize).copied().flatten().is_some_and(|i| i < self.prog.prelude_from);
+                    let fs = &self.prog.sigs[fid as usize];
+                    let rf = fs.ret_from;
+                    let borrows = |i: usize| rf >> 63 & 1 == 1 && rf >> i & 1 == 1;
+                    if user(id) && user(fid) && matches!(fs.ret, Ty::Ref(..)) && (0..x.0.len().min(62)).any(|i| matches!(x.0[i], Ty::Ref(..)) && borrows(i)) {
+                        let k = x.2.split('(').next().unwrap_or("FnOnce").trim().to_string();
+                        return Err(self.at(super::borrowck::pos(a), format!("implementation of `{k}` is not general enough (the fn's result borrows from its parameter, the bound's result is one type for every lifetime)")));
+                    }
+                }
+            }
             // 関数アイテム (`or_insert_with(Vec::new)`) なら、境界を関数ポインタの期待型にして型引数を決める
             if let (Some((bps, bret)), None, Expr::Path(..)) = (&fb, exp, strip_paren(a)) {
                 let ft = crate::types::FnTy {
