@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795289076920,
+  "lastUpdate": 1795289078800,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -93994,6 +93994,70 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/mizchi/zust/commit/a5996966ddff7363cc2af8785021d22103dbe264"
         },
         "date": 1795287745998,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tests/ui run-pass pass rate",
+            "value": 75.47,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui run-pass passing",
+            "value": 1800,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui check-pass pass rate",
+            "value": 81.63,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui check-pass passing",
+            "value": 1475,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui build-pass pass rate",
+            "value": 72.59,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui build-pass passing",
+            "value": 98,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui compile-fail pass rate",
+            "value": 51.89,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui compile-fail passing",
+            "value": 3818,
+            "unit": "tests"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "miz404@gmail.com",
+            "name": "Kotaro Chikuba",
+            "username": "mizchi"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "9b3f116f7d3e1e41dbb46dc4708e2b2c7b5eb76c",
+          "message": "Merge pull request #37 from mizchi/claude/gracious-brahmagupta-16jxdl\n\nzustscript: grammar improvement loop (evals/syntax), proposals 001–003, TODO.md",
+          "timestamp": "2026-11-22T04:19:56+09:00",
+          "tree_id": "110ef70dc85a68cce6a3f8a8c8104717621d637a",
+          "url": "https://github.com/mizchi/zust/commit/9b3f116f7d3e1e41dbb46dc4708e2b2c7b5eb76c"
+        },
+        "date": 1795289078502,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
