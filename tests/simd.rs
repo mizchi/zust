@@ -117,7 +117,7 @@ fn simd_errors() {
         ("let a = _mm_set1_epi32(1); let _ = g::<[u8; 1]>(a); } fn g<T>(a: __m128i) -> i32 { _mm_extract_epi32::<T>(a) } fn f() {", "not a constant"),
         ("let a = _mm_set1_epi32(1); let _ = g::<[(); 1]>(a); } fn g<T>(a: __m128i) -> i32 { _mm_extract_epi32::<T>(a) } fn f() {", "not a constant"),
         ("let a = _mm_set1_epi32(1); let _ = g::<[(); 1]>(a); } fn g<T>(a: __m128i) -> i32 { _mm_extract_epi32::<{ T }>(a) } fn f() {", "not a constant"),
-        ("let mut x = [0f32; 4]; let v = _mm_set1_ps(1.0); unsafe { _mm_maskstore_ss(x.as_mut_ptr(), v) };", "_mm_maskstore_ss"),
+        ("let mut x = [0f32; 4]; let v = _mm_set1_ps(1.0); unsafe { _mm_maskstore_ss(x.as_mut_ptr(), v, v) };", "`_mm_maskstore_ss` is not supported yet"),
     ];
     let mut bad = vec![];
     for (k, (body, want)) in cases.iter().enumerate() {
