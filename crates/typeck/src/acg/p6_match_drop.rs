@@ -540,6 +540,24 @@ impl Cx<'_> {
         }
     }
 
+    /// Whether t holds a fn pointer or a raw pointer (in a field, an element): such a constant does not match reliably
+    fn has_fn_or_raw_ptr(&self, t: Ty, depth: u32) -> bool {
+        if depth > 8 {
+            return false;
+        }
+        match t {
+            // (a raw pointer may come from an integer (`ptr::null()`), which matches reliably: only fn pointers)
+            Ty::Fn(_) => true,
+            Ty::Ref(_, i) | Ty::Array(i, _) | Ty::Slice(i) => self.has_fn_or_raw_ptr(*i, depth + 1),
+            Ty::Struct(sid) => {
+                let sd = &self.prog.structs[sid as usize];
+                let fs: Vec<Ty> = sd.fields.iter().map(|f| f.1).chain(sd.variants.iter().flat_map(|v| v.fields.iter().map(|f| f.1))).collect();
+                fs.into_iter().any(|f| self.has_fn_or_raw_ptr(f, depth + 1))
+            }
+            _ => false,
+        }
+    }
+
     pub(crate) fn const_pat_ok(&self, pat: &Pat, t: Ty) -> bool {
         let Some(n) = const_ident_pat(self.prog, pat) else { return false };
         if self.lookup(n).is_some() {
@@ -611,6 +629,25 @@ impl Cx<'_> {
                 }
                 if let Some(bad) = self.non_structural(ct, 0) {
                     return err(SP, format!("constant of non-structural type `{}` in a pattern", self.prog.tn(bad)));
+                }
+                if let Ty::Dyn(_) = self.strip_refs(ct) {
+                    return err(SP, format!("`{}` cannot be used in patterns", self.prog.tn(self.strip_refs(ct))));
+                }
+                if self.has_fn_or_raw_ptr(ct, 0) {
+                    return err(SP, "function pointers and raw pointers not derived from integers in patterns behave unpredictably".to_string());
+                }
+                // (a structural constant of the scrutinee's type (`const C: [u8; 2]`, a struct deriving PartialEq):
+                // equal to its value, as `==` compares)
+                let t = p.ty();
+                if ct == t {
+                    let (v, _) = self.read(p);
+                    let ce = self.keep_expr(path_expr(n));
+                    let (c, cty) = self.expr(ce, Some(t))?;
+                    self.same(SP, cty, t)?;
+                    if let (Some(v), Some(c)) = (v, c) {
+                        let cond = self.eq_at(v, c, t, SP)?;
+                        self.require(cond, fail);
+                    }
                 }
                 Ok(())
             }

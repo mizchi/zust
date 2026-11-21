@@ -3813,6 +3813,7 @@ run-pass	match/issue-36401.rs
 check-pass	match/issue-37598.rs
 run-pass	match/issue-46920-byte-array-patterns.rs
 run-pass	match/issue-5530.rs
+compile-fail	match/issue-70972-dyn-trait.rs
 run-pass	match/issue-72680.rs
 compile-fail	match/issue-82866.rs
 check-pass	match/issue-84434.rs
@@ -3929,6 +3930,7 @@ check-pass	mir/issue-99866.rs
 compile-fail	mir/mir-build-2021-closure-capture-ice-110453-2.rs
 run-pass	mir/mir-typeck-normalize-fn-sig.rs
 run-pass	mir/mir_assign_eval_order.rs
+run-pass	mir/mir_build_match_comparisons.rs
 run-pass	mir/mir_call_with_associated_type.rs
 run-pass	mir/mir_cast_fn_ret.rs
 run-pass	mir/mir_codegen_array.rs
@@ -5579,7 +5581,9 @@ compile-fail	rfcs/rfc-1445-restrict-constants-in-patterns/cant-hide-behind-doubl
 compile-fail	rfcs/rfc-1445-restrict-constants-in-patterns/cant-hide-behind-doubly-indirect-param.rs
 compile-fail	rfcs/rfc-1445-restrict-constants-in-patterns/cant-hide-behind-indirect-struct-embedded.rs
 compile-fail	rfcs/rfc-1445-restrict-constants-in-patterns/cant-hide-behind-indirect-struct-param.rs
+compile-fail	rfcs/rfc-1445-restrict-constants-in-patterns/fn-ptr-is-not-structurally-matchable.rs
 compile-fail	rfcs/rfc-1445-restrict-constants-in-patterns/issue-62307-match-ref-ref-forbidden-without-eq.rs
+compile-fail	rfcs/rfc-1445-restrict-constants-in-patterns/issue-63479-match-fnptr.rs
 compile-fail	rfcs/rfc-1445-restrict-constants-in-patterns/issue-6804-nan-match.rs
 run-pass	rfcs/rfc-1445-restrict-constants-in-patterns/match-empty-array-allowed-without-eq-issue-62336.rs
 compile-fail	rfcs/rfc-1445-restrict-constants-in-patterns/match-requires-both-partialeq-and-eq.rs
