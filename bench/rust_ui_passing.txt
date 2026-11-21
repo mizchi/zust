@@ -772,6 +772,7 @@ compile-fail	borrowck/borrowck-init-in-fn-expr.rs
 compile-fail	borrowck/borrowck-init-in-fru.rs
 compile-fail	borrowck/borrowck-init-op-equal.rs
 compile-fail	borrowck/borrowck-init-plus-equal.rs
+compile-fail	borrowck/borrowck-insert-during-each.rs
 compile-fail	borrowck/borrowck-issue-14498.rs
 compile-fail	borrowck/borrowck-issue-2657-1.rs
 compile-fail	borrowck/borrowck-issue-2657-2.rs
@@ -787,6 +788,7 @@ compile-fail	borrowck/borrowck-loan-blocks-mut-uniq.rs
 compile-fail	borrowck/borrowck-loan-in-overloaded-op.rs
 compile-fail	borrowck/borrowck-loan-rcvr-overloaded-op.rs
 compile-fail	borrowck/borrowck-loan-rcvr.rs
+compile-fail	borrowck/borrowck-loan-vec-content.rs
 compile-fail	borrowck/borrowck-local-borrow-outlives-fn.rs
 compile-fail	borrowck/borrowck-local-borrow-with-panic-outlives-fn.rs
 compile-fail	borrowck/borrowck-match-already-borrowed.rs

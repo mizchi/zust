@@ -1018,3 +1018,17 @@ fn receiver_borrowed_before_the_arguments() {
         vec![]
     );
 }
+
+/// A closure that calls a `&mut self` method of what it captures (`|| v.push(4)`), or writes it through an index
+/// (`|| v[1] = 4`), captures it by `&mut`
+#[test]
+fn closure_capture_by_mut_method() {
+    let d = check("fn main() {\n    let mut v: Vec<isize> = vec![1, 2, 3];\n    let r = &v[0];\n    let mut c = || {\n        v.push(4);\n    };\n    c();\n    println!(\"{}\", r);\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 4 && d[0].1.contains("cannot borrow `v` as mutable"), "{d:?}");
+    let d = check("fn g<F: FnOnce()>(_a: &isize, f: F) {\n    f();\n}\nfn main() {\n    let mut v: Vec<isize> = vec![1, 2, 3];\n    g(&v[0], || {\n        v[1] = 4;\n    });\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 6, "{d:?}");
+    assert_eq!(
+        check("fn main() {\n    let mut v: Vec<isize> = vec![1, 2, 3];\n    let mut c = || {\n        v.push(4);\n        v[0] = 2;\n    };\n    c();\n    let r = &v;\n    let n = || r.len();\n    println!(\"{:?} {}\", r, n());\n}\n"),
+        vec![]
+    );
+}

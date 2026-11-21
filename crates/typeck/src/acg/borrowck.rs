@@ -1673,7 +1673,8 @@ impl Cx<'_> {
         let move_kw = matches!(c, Expr::Closure(true, ..));
         // (the places of n the body assigns or borrows mutably: those are captured by `&mut`)
         let mut muts: Vec<BPlace> = vec![];
-        self.bk_cap_muts(body, n, &mut muts);
+        let mut calls: Vec<BPlace> = vec![];
+        self.bk_cap_muts(body, n, &mut muts, &mut calls);
         let assigns = crate::ast_closure::assigns_capture(c, &[n.to_string()]);
         for (p, pt, mode, _) in &mut paths {
             // (stop at an index, and a move closure at a deref: it captures the reference)
@@ -1686,7 +1687,7 @@ impl Cx<'_> {
                 *mode = CapMode::Val;
             } else if *mode == CapMode::Use {
                 // (a use that is not a pattern: acg's analysis says whether the closure takes the value)
-                let m = assigns && muts.iter().any(|q| overlap(q, p));
+                let m = assigns && muts.iter().any(|q| overlap(q, p)) || calls.iter().any(|q| overlap(q, p));
                 *mode = if by_move { CapMode::Val } else if m { CapMode::RefMut } else { CapMode::Ref };
             }
         }
@@ -1837,22 +1838,39 @@ impl Cx<'_> {
     }
 
     /// The places rooted at n that the closure body assigns (`n.a = ..`, `n += 1`) or borrows mutably (`&mut n.b`)
-    fn bk_cap_muts(&self, e: &Expr, n: &str, out: &mut Vec<BPlace>) {
+    fn bk_cap_muts(&self, e: &Expr, n: &str, out: &mut Vec<BPlace>, calls: &mut Vec<BPlace>) {
         match e {
             Expr::Assign(l, _) | Expr::AssignOp(_, l, _, _) | Expr::Ref(true, l) => {
+                // (`v[1] = 4`: v itself, as the capture stops at an index)
+                let mut l = &**l;
+                while let Expr::Index(b, _, _) = strip_paren(l) {
+                    l = b;
+                }
                 if let Some((p, _)) = self.bk_rooted_at(l, n) {
                     out.push(p);
                 }
             }
+            // (a `&mut self` method of the place (`v.push(4)`): captured by `&mut`)
+            Expr::MethodCall(r, m, ..) => {
+                if let Some((p, Some(Ty::Struct(sid)))) = self.bk_rooted_at(r, n) {
+                    let mut_self = self.prog.method(sid, m).is_some_and(|id| {
+                        let sg = &self.prog.sigs[id as usize];
+                        sg.has_self && matches!(sg.params.first(), Some(Ty::Ref(true, _)))
+                    });
+                    if mut_self {
+                        calls.push(p);
+                    }
+                }
+            }
             Expr::Macro(_, g, _) => {
                 for a in crate::ast_closure::macro_args(g).unwrap_or_default() {
-                    self.bk_cap_muts(&a, n, out);
+                    self.bk_cap_muts(&a, n, out, calls);
                 }
                 return;
             }
             _ => {}
         }
-        crate::ast_closure::each_child_pub(e, &mut |c| self.bk_cap_muts(c, n, out));
+        crate::ast_closure::each_child_pub(e, &mut |c| self.bk_cap_muts(c, n, out, calls));
     }
 
     /// The places rooted at the variable n that the closure body uses
