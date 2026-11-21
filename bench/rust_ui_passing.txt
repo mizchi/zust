@@ -3330,6 +3330,7 @@ run-pass	lifetimes/ref-pattern-lifetime-annotation-13665.rs
 run-pass	lifetimes/rvalue-cleanup-shortcircuit.rs
 compile-fail	lifetimes/shadow.rs
 check-pass	lifetimes/static-bound-fulfillment-with-pointer-7268.rs
+compile-fail	lifetimes/static-impl-obligation.rs
 compile-fail	lifetimes/static-typos.rs
 check-pass	lifetimes/struct-lifetime-field-assignment-13405.rs
 check-pass	lifetimes/struct-lifetime-inference-15735.rs
@@ -7023,6 +7024,12 @@ compile-fail	underscore-lifetime/in-struct.rs
 compile-fail	underscore-lifetime/raw-underscore-lifetime.rs
 compile-fail	underscore-lifetime/underscore-lifetime-binders.rs
 compile-fail	underscore-lifetime/underscore-lifetime-elison-mismatch.rs
+compile-fail	underscore-lifetime/underscore-outlives-bounds.rs
+compile-fail	underscore-lifetime/where-clause-inherent-impl-ampersand-rust2015.rs
+compile-fail	underscore-lifetime/where-clause-inherent-impl-ampersand-rust2018.rs
+compile-fail	underscore-lifetime/where-clause-trait-impl-region-2015.rs
+compile-fail	underscore-lifetime/where-clause-trait-impl-region-2018.rs
+compile-fail	underscore-lifetime/where-clauses.rs
 run-pass	uniform-paths/same-crate.rs
 check-pass	uninhabited/diverging-guard.rs
 check-pass	uninhabited/exhaustive-wo-nevertype-issue-51221.rs

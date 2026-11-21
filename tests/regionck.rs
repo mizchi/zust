@@ -806,3 +806,13 @@ fn unused_and_single_use_lifetime_lints() {
     // (used twice; once in the result; once in an `impl` type; bounded)
     assert_eq!(check("#![deny(single_use_lifetimes)]\nfn a<'a>(x: &'a u32) -> &'a u32 {\n    x\n}\nfn b<'a>() -> &'a u32 {\n    &1\n}\nfn c<'a>(x: impl IntoIterator<Item = &'a i32>) {\n    for _ in x {}\n}\nfn d<'a, 'b: 'a>(_: &'a u8, _: &'b u8) {}\nfn main() {}\n"), vec![]);
 }
+
+/// E0637: `'_` as a bound, a reference with no lifetime in a where clause's bound
+#[test]
+fn anonymous_lifetimes_in_bounds() {
+    let d = check("trait Foo<'a> {}\nimpl<'b: '_> Foo<'b> for i32 {}\nfn main() {}\n");
+    assert!(d.len() == 1 && d[0].0 == 2 && d[0].1.contains("E0637"), "{d:?}");
+    let d = check("trait WithType<T> {}\nstruct Foo<T>(T);\nimpl<T> Foo<T>\nwhere\n    T: WithType<&u32>,\n{\n}\nfn main() {}\n");
+    assert!(d.len() == 1 && d[0].0 == 5 && d[0].1.contains("E0637"), "{d:?}");
+    assert_eq!(check("fn f<F: Fn(&u32) -> u32>(f: F) -> u32 {\n    f(&1)\n}\nfn g<'a, I: Iterator<Item = &'a u32>>(_i: I) {}\nfn main() {\n    let _ = f(|x| *x);\n}\n"), vec![]);
+}

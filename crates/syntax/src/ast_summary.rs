@@ -1716,12 +1716,57 @@ fn item_elision_err(item: &Item) -> bool {
     }
 }
 
+/// E0637: `'_` as a bound (`T: '_`, `'b: '_`), or a reference with no lifetime in a bound's arguments
+/// (`where T: WithType<&u32>`; `Fn(&u32)` elides): a message (`\u{3}line\u{3}msg` at the reference's line)
+fn anon_bound_err(item: &Item) -> Option<String> {
+    let g = match &item.kind {
+        ItemKind::Fn(fs, _) => &fs.generics,
+        ItemKind::Struct(_, g, _) | ItemKind::Enum(_, g, _) | ItemKind::Union(_, g, _) | ItemKind::Impl(g, ..) | ItemKind::Trait(_, g, ..) | ItemKind::Type(_, g, _, _) => g,
+        _ => return None,
+    };
+    if g.params.is_empty() && g.preds.is_empty() {
+        return None;
+    }
+    let bs_err = |bs: &[Bound]| -> Option<String> {
+        for b in bs {
+            match b {
+                Bound::Lifetime(l) if l == "'_" => return Some("`'_` cannot be used here (E0637)".to_string()),
+                Bound::Trait(_, p) => {
+                    for a in p.segs.iter().flat_map(|s| s.args.iter()) {
+                        let (crate::parse::GArg::Ty(t) | crate::parse::GArg::Bind(_, t)) = a else { continue };
+                        if let PTy::Ref(None, _, i) = t {
+                            let m = "`&` without an explicit lifetime name cannot be used here (E0637)";
+                            return Some(match crate::wf::pos_of(i) {
+                                Some(p) => format!("\u{3}{}\u{3}{m}", p.line),
+                                None => m.to_string(),
+                            });
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+        None
+    };
+    for p in &g.params {
+        if let GParam::Ty(_, bs, _) = p {
+            if let Some(e) = bs_err(bs) {
+                return Some(e);
+            }
+        }
+    }
+    g.preds.iter().find_map(|(_, bs)| bs_err(bs))
+}
+
 /// 1 つのアイテムの要約 (front.rs の summarize)
 pub fn summarize(item: &Item, owner: Option<&Owner>) -> R<Summary> {
     if item_elision_err(item) {
         return err("missing lifetime specifier (E0106)");
     }
     let mut sm = Summary::default();
+    // (the program's items: the prelude writes no lifetimes in its bounds, `Iterator<Item = &T>`; the driver
+    // reports it)
+    sm.adt_err = anon_bound_err(item);
     match &item.kind {
         ItemKind::Type(n, _, _, Some(t)) if owner.is_some() => {
             let ow = owner.unwrap();
