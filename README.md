@@ -29,7 +29,7 @@
 
 ## Status
 
-Numbers measured <!-- measured -->2026-11-21, b183247<!-- /measured --> by CI on each push to main (bench.yml runs
+Numbers measured <!-- measured -->2026-11-21, bbe372d<!-- /measured --> by CI on each push to main (bench.yml runs
 `bench/ci_bench.py` and `bench/rust_ui.py`, then `scripts/update_readme.py` writes them here). Times come from shared
 GitHub Actions runners and vary by about ±20%; the instruction counts (valgrind) do not.
 
@@ -41,10 +41,10 @@ only the tests it can be asked to handle (no nightly features, auxiliary crates 
 <!-- auto:ui -->
 | kind | applicable | pass |
 |---|---:|---:|
-| run-pass (builds, runs, same output) | 2385 | 1789 (75.0%) |
-| check-pass (accepted by `zustc check`) | 1807 | 1466 (81.1%) |
+| run-pass (builds, runs, same output) | 2385 | 1795 (75.3%) |
+| check-pass (accepted by `zustc check`) | 1807 | 1471 (81.4%) |
 | build-pass | 135 | 98 (72.6%) |
-| compile-fail (rejected at an annotated line) | 7358 | 3701 (50.3%) |
+| compile-fail (rejected at an annotated line) | 7358 | 3705 (50.4%) |
 <!-- /auto:ui -->
 
 [What is supported](#what-is-supported) breaks this down by area.
@@ -56,22 +56,22 @@ Build speed, build cache size and LSP latency on generated programs of 1000 / 50
 <!-- auto:kpi -->
 | KPI | gen1000 | gen5000 |
 |---|---:|---:|
-| cold build | 119 ms | 537 ms |
+| cold build | 119 ms | 540 ms |
 | no-op build | 0.7 ms | 0.7 ms |
-| build after editing one function | 15.9 ms | 63.1 ms |
-| `check` | 76 ms | 377 ms |
+| build after editing one function | 17.6 ms | 62.2 ms |
+| `check` | 77 ms | 380 ms |
 | no-op build (instructions) | 0.6 M | 0.6 M |
-| edit one function (instructions) | 124.8 M | 590.8 M |
-| `check` (instructions) | 778.9 M | 3844.0 M |
+| edit one function (instructions) | 124.9 M | 591.4 M |
+| `check` (instructions) | 780.0 M | 3850.0 M |
 | build cache on disk | 387.2 KiB | 1902.8 KiB |
 | binary | 324.0 KiB | 1558.3 KiB |
-| cold build peak RSS | 18.6 MiB | 52.5 MiB |
+| cold build peak RSS | 18.6 MiB | 52.4 MiB |
 
 | zust-analyzer (zustc's own sources) | |
 |---|---:|
-| p50: definition, hover, completion, references, rename | 0.47 ms / 0.39 ms / 1.17 ms / 1.96 ms / 0.45 ms |
-| startup until indexed | 133 ms |
-| peak RSS | 79.6 MiB |
+| p50: definition, hover, completion, references, rename | 0.48 ms / 0.38 ms / 1.11 ms / 2.05 ms / 0.48 ms |
+| startup until indexed | 138 ms |
+| peak RSS | 80.0 MiB |
 <!-- /auto:kpi -->
 
 Every change is also measured on its own with `python3 bench/kpi_track.py`, so that small increases that add up stay
@@ -350,16 +350,16 @@ the measured numbers. The [reports](docs/reports/) explain each step.
 
 ### Overall
 
-- [x] tests/ui run-pass: <!-- total:run-pass -->75.0% (1789 / 2385)
-- [x] tests/ui check-pass: <!-- total:check-pass -->81.1% (1466 / 1807)
+- [x] tests/ui run-pass: <!-- total:run-pass -->75.3% (1795 / 2385)
+- [x] tests/ui check-pass: <!-- total:check-pass -->81.4% (1471 / 1807)
 - [x] tests/ui build-pass: <!-- total:build-pass -->72.6% (98 / 135)
-- [ ] tests/ui compile-fail (an error on an annotated line): <!-- total:compile-fail -->50.3% (3701 / 7358)
+- [ ] tests/ui compile-fail (an error on an annotated line): <!-- total:compile-fail -->50.4% (3705 / 7358)
 - [x] real crates: fnv, adler2, hex, itoa, rustc-hash and cfg-if build and give the same output (6 / 6)
 - [x] zust-analyzer answers like rust-analyzer: 95.4% (rust-analyzer: 96.2%)
 
 ### Language
 
-- [x] numbers, arithmetic, overflow checks: <!-- ui:numbers-arithmetic -->96.6%
+- [x] numbers, arithmetic, overflow checks: <!-- ui:numbers-arithmetic -->100.0%
 - [x] `for` / `while` / `loop`, labels: <!-- ui:for-loop-while,loops,label -->96.7%
 - [x] enums, `#[repr(u8)]`, auto-sized tags: <!-- ui:enum,enum-discriminant -->85.7%
 - [x] `cfg`: <!-- ui:cfg -->93.8%
@@ -387,7 +387,7 @@ the measured numbers. The [reports](docs/reports/) explain each step.
 - [ ] unions: <!-- ui:union -->69.2% (no `repr(packed)`)
 - [ ] const generics: <!-- ui:const-generics -->57.4% (no `generic_const_exprs`)
 - [ ] generic associated types: <!-- ui:generic-associated-types -->71.1%
-- [ ] casts (`as _` / `as *const _` take the source or expected type; a pointer of unknown kind is E0641): <!-- ui:cast -->62.1%
+- [ ] casts (`as _` / `as *const _` take the source or expected type; a pointer of unknown kind is E0641): <!-- ui:cast -->72.4%
 - [ ] `impl Trait`: <!-- ui:impl-trait -->70.3% (return position, also nested (`-> Option<impl Debug>`), in trait methods and generic fns (typed per instance); no TAIT)
 - [ ] layout: `repr(packed)` / `repr(align)` are ignored: <!-- ui:packed,layout -->58.1%
 
@@ -418,7 +418,7 @@ the measured numbers. The [reports](docs/reports/) explain each step.
   `BTreeMap`/`BTreeSet`, `VecDeque`, `BinaryHeap`, `Rc`/`Arc`, `Cell`/`RefCell`, `Mutex`, `OnceLock`, `ManuallyDrop`,
   `Duration`, `AtomicPtr`, `RangeTo` / `RangeFull` as types, `Fuse`, `iter::Empty`, `NonNull`, `Pin` (a plain pointer: `Pin::new`, `get_mut`, `into_inner`, deref), `std::task` (`Poll`, `Context`, `Waker::noop`) and the `Future` trait for futures implemented and polled by hand, `UnsafeCell`, `PhantomData`, atomics, `mpsc`, `mem::*`, `ptr::{read, write, drop_in_place, null}`,
   `iter::{repeat, once, empty, repeat_with, successors}`, `reverse` / `fill` / `rotate_left` / `rotate_right` on arrays and slices, formatting, stdin/stdout/fs/env/process basics
-- [ ] async / await: <!-- ui:async-await -->76.7%. It runs at once, with no executor (no `poll`, `Waker`, `Pin<Box<dyn Future>>`)
+- [ ] async / await: <!-- ui:async-await -->77.7%. It runs at once, with no executor (no `poll`, `Waker`, `Pin<Box<dyn Future>>`)
 - [ ] threads: <!-- ui:threads-sendsync -->70.2%. Green threads on one OS thread: each spawned thread has its own stack and runs until it waits (`join`, `recv`, a held `Mutex`, `sleep`, `yield_now`, an atomic `load`); no parallelism
 - [ ] iterators: <!-- ui:iterators -->47.1% (`iter::empty()` cannot infer its item from the target)
 - [ ] FFI: <!-- ui:abi -->78.6%. Scalars only, no structs by value
