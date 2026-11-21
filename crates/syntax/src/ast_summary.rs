@@ -701,7 +701,7 @@ fn parse_sig(sig: &PSig, is_extern: bool, is_main: bool, owner: Option<&Owner>) 
 /// Checks on a struct / enum / union definition: unused parameters (E0392), `Self` in defaults (E0735), union fields
 /// a slice or array whose element is unsized (`[[T]]`, `[str; 2]`, `[dyn Tr]`), anywhere in t: its text
 /// The lifetimes a type names, outside fn pointer, `impl` and `dyn` types (which may bind their own with `for<'a>`)
-fn named_lifetimes(t: &PTy, out: &mut Vec<String>) {
+pub fn named_lifetimes(t: &PTy, out: &mut Vec<String>) {
     match t {
         PTy::Ref(l, _, i) => {
             if let Some(l) = l {
@@ -1833,6 +1833,27 @@ pub fn summarize(item: &Item, owner: Option<&Owner>) -> R<Summary> {
             sm.aliases.push((n.clone(), gs.into_iter().map(|x| x.0).collect(), tysyn(t, None)?));
         }
         ItemKind::Trait(n, g, supers, _) => {
+            // (E0261: the lifetimes its bounds and where clause name are its own; `'_`, `'static` and a binder's
+            // (`for<'a> T: 'a`, parsed as 'static) excepted)
+            if !g.preds.is_empty() || g.params.iter().any(|p| matches!(p, GParam::Ty(_, bs, _) if !bs.is_empty())) {
+                let declared: Vec<&str> = g.params.iter().filter_map(|p| if let GParam::Lifetime(l) = p { Some(l.as_str()) } else { None }).collect();
+                let mut used = vec![];
+                bound_lifetimes(g, &mut used);
+                for b in supers {
+                    if let Bound::Lifetime(l) = b {
+                        used.push(l.clone());
+                    }
+                }
+                if let Some(l) = undeclared_lifetime(&used, &declared) {
+                    let m = format!("use of undeclared lifetime name `{l}` (E0261)");
+                    // (at the where clause's predicate that names it)
+                    let at = g.preds.iter().find(|(_, bs)| bs.iter().any(|b| matches!(b, Bound::Lifetime(x) if *x == l))).and_then(|(t, _)| crate::wf::pos_of(t));
+                    return Err(match at {
+                        Some(p) => format!("{}:{}: {m}", p.line, p.col + 1),
+                        None => m,
+                    });
+                }
+            }
             sm.hdr_regions = crate::regions::hdr_regions(g, None);
             // (`trait Wedding<'t>: 't`: what Self must outlive)
             let mut self_outlives = vec![];

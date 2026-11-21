@@ -1525,6 +1525,9 @@ impl Cx<'_> {
                 }
                 Stmt::Let(pat, ann_ty, init, _, let_at) => {
                     let name = pat_name(pat)?;
+                    if let Some(t) = ann_ty {
+                        self.body_lifetimes(t, *let_at)?;
+                    }
                     let ann = match ann_ty {
                         // (`let v: Vec<Box<_>> = Vec::new();`: the holes are what inference found, when it did)
                         Some(t) => {

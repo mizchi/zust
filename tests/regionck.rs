@@ -855,3 +855,13 @@ fn borrows_held_through_the_regions_of_a_type() {
     assert!(d.len() == 1 && d[0].0 == 16, "{d:?}");
     assert_eq!(check("struct S<'a> {\n    r: Option<&'a mut u8>,\n}\nimpl<'a> S<'a> {\n    fn set(&mut self, x: &'a mut u8) {\n        self.r = Some(x);\n    }\n    fn get(&self) -> u8 {\n        0\n    }\n}\nfn main() {\n    let mut y = 1;\n    let mut s = S { r: None };\n    s.set(&mut y);\n    let _ = s.get();\n    let _ = s.get();\n    y += 1;\n}\n"), vec![]);
 }
+
+/// E0261 in a body's `let` annotation, and in a trait's where clause
+#[test]
+fn undeclared_lifetimes_in_bodies_and_traits() {
+    let d = check("fn main() {\n    let x: &'a u8 = &1;\n    let _ = x;\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 2 && d[0].1.contains("E0261"), "{d:?}");
+    let d = check("trait Tr<T>\nwhere\n    T: 'b,\n{\n}\nfn main() {}\n");
+    assert!(d.len() == 1 && d[0].0 == 3 && d[0].1.contains("E0261"), "{d:?}");
+    assert_eq!(check("struct S<'a>(&'a u8);\nimpl<'a> S<'a> {\n    fn f<'b>(&self, x: &'b u8) {\n        let _y: &'a u8 = self.0;\n        let _z: &'b u8 = x;\n        let _w: &'static str = \"\";\n    }\n}\ntrait Tr<'a, T: 'a> where T: 'static {}\nfn main() {}\n"), vec![]);
+}

@@ -2622,6 +2622,7 @@ run-pass	generics/generic-fn-twice.rs
 run-pass	generics/generic-fn-unique.rs
 run-pass	generics/generic-fn.rs
 compile-fail	generics/generic-function-item-where-type.rs
+compile-fail	generics/generic-higher-ranked-lifetime-issue-122714.rs
 compile-fail	generics/generic-impl-less-params-with-defaults.rs
 check-pass	generics/generic-impl-method-params-2311.rs
 compile-fail	generics/generic-impl-more-params-with-defaults.rs
@@ -3327,6 +3328,7 @@ compile-fail	lifetimes/raw/multiple-prefixes.rs
 check-pass	lifetimes/raw/prim-lt.rs
 check-pass	lifetimes/raw/simple.rs
 check-pass	lifetimes/raw/static-lt.rs
+compile-fail	lifetimes/raw/use-of-undeclared-raw-lifetimes.rs
 check-pass	lifetimes/reader-wrapper-trait-14901.rs
 compile-fail	lifetimes/recover-infer-ret-ty-issue-135845.rs
 run-pass	lifetimes/ref-pattern-lifetime-annotation-13665.rs

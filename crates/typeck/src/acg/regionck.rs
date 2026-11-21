@@ -1829,6 +1829,22 @@ impl Cx<'_> {
         self.rg.locals.insert(loc, tree);
     }
 
+    /// E0261 in a body: the lifetimes a `let` annotation names (outside fn pointer, `impl` and `dyn` types, which may
+    /// bind their own) are the function's (its impl's included). Not in a closure's body, whose function's are in
+    /// scope too
+    pub(crate) fn body_lifetimes(&self, t: &PTy, sp: Sp) -> super::R<()> {
+        if !self.user_code || self.inline_depth > 0 || !crate::regions::names_lt(t) || self.prog.closures.contains_key(&self.rg.base) {
+            return Ok(());
+        }
+        let mut used = vec![];
+        crate::ast_summary::named_lifetimes(t, &mut used);
+        let declared = self.prog.sigs.get(self.rg.base as usize).and_then(|s| s.regions.as_deref()).map(|r| r.lts.as_slice()).unwrap_or(&[]);
+        match used.iter().find(|l| !matches!(l.as_str(), "'static" | "'_") && !l.starts_with("'r#") && !declared.iter().any(|d| d == *l)) {
+            Some(l) => Err(self.at(sp, format!("use of undeclared lifetime name `{l}` (E0261)"))),
+            None => Ok(()),
+        }
+    }
+
     /// `let _: ann = init;`: init flows into a value of the annotation's type
     pub(crate) fn rg_let_wild(&mut self, ann: &PTy, init: &Expr) {
         if !self.rg_on() {
