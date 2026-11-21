@@ -188,9 +188,13 @@
     - `{ total: f64, done: f64 }` は `__zs_Rec_4done_f64_5total_f64`
     - `{ a: i32, b: i32 }` は `__zs_Rec_1a_i32_1b_i32`、`{ a_i32_b: i32 }` は `__zs_Rec_7a_i32_b_i32`
     - `{ p: { x: f64 }, y: f64 }` は `__zs_Rec_1p_R_1x_f64_E_1y_f64`、`{ p: { x: f64, y: f64 } }` は `__zs_Rec_1p_R_1x_f64_1y_f64_E`
-  - 型引数のある enum(`Option<f64>`)は、名前の後に型引数を印 `A` と `E` で囲む: `6Option_A_f64_E`
+  - prelude の型(003 の `Option` / `Result`)は、モジュールの代わりに印 `P` を付ける: `P_6Option`
+    - ユーザーのモジュールは `M` で始まるので、`P` と重ならない。prelude の名前は予約されている(003)ので、同じ名前のユーザーの型とも重ならない
+  - 型引数のある enum は、その名前(`M_…_E` か `P_…`)の後に、型引数を印 `A` と `E` で囲む
+    - `Option<f64>` は `P_6Option_A_f64_E`
+    - `a/state.zsc` の `enum Box<T>` の `Box<i32>` は `M_1a_5state_3Box_E_A_i32_E`
   - **任意のフィールドの印は、名前に入れない**(003。印は型の一部ではないため)
-    - `{ x?: f64 }` と `{ x: Option<f64> }` は、同じ struct `__zs_Rec_1x_6Option_A_f64_E`
+    - `{ x?: f64 }` と `{ x: Option<f64> }` は、同じ struct `__zs_Rec_1x_P_6Option_A_f64_E`
   - 長くなるのは受け入れる(読むときは別名の `type` を見る)
   - 形から名前への写像が単射であることは、lower のテストで確かめる
   - `#[allow(non_camel_case_types)]` と `#[derive(Clone, Copy, PartialEq)]` を付ける
@@ -406,7 +410,7 @@ struct ZsMeters { v: f64 }   // @nominal は自分の struct
   - formatter は戻り値の関数型に括弧を付けることにした(`-> ((x: i32) => i32) {`)。`adder` の例を直した
   - spread が 1 つの間の書き方(`{ ...defaults, color: props.color }`)を書き、`themed` の例を足した
   - 任意のフィールドは 003 に従うと書き直した。`title?: T` は `title: Option<T>` と同じ型で、違いは省略できる印だけ。構造的な等しさと struct 名に印は入らない。TS との境界では、`None` のキーを書かない(003 r1 の決定 1 に合わせた)
-  - struct 名に、型引数のある enum の書き方(`6Option_A_f64_E`)を足した(003 r1 の決定 1 に合わせた)
+  - struct 名に、型引数のある enum の書き方(`P_6Option_A_f64_E`)を足した(003 r1 の決定 1 に合わせた)
   - 代替案に、`_` だけの struct 名と、JSX の属性の `{{ x }}` をブロックとして読む案を足した
   - 未決事項: props の 2 回書きと formatter の括弧を外した。レコードの `==` を足した(001 の enum の `==` と一緒に)
 
