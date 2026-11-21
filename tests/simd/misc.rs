@@ -67,6 +67,11 @@ fn run() {
     h2("256 blend_ps 255", _mm256_castps_si256(_mm256_blend_ps::<255>(pa, pb)));
     println!("callable const {}", _mm_add_ps(3, 4));
     println!("type ids {}", std::any::TypeId::of::<v128>() == std::any::TypeId::of::<__m128i>());
+    println!(
+        "type ids of compounds {} {}",
+        std::any::TypeId::of::<&'static v128>() == std::any::TypeId::of::<&'static __m128i>(),
+        std::any::TypeId::of::<[v128; 2]>() == std::any::TypeId::of::<[__m128i; 2]>()
+    );
     let a16 = _mm_setr_epi16(1, -2, 32767, -32768, 1000, -1000, 255, -256);
     let a32 = _mm_setr_epi32(1, -2, i32::MAX, i32::MIN);
     let a64 = _mm_set_epi64x(-5, 0x1234_5678_9abc_def0);
