@@ -6108,6 +6108,7 @@ compile-fail	suggestions/dont-suggest-boxing-async-closure-body.rs
 compile-fail	suggestions/dont-suggest-pin-array-dot-set.rs
 compile-fail	suggestions/dont-suggest-private-trait-method.rs
 compile-fail	suggestions/dont-suggest-ref/simple.rs
+compile-fail	suggestions/dont-suggest-try_into-in-macros.rs
 compile-fail	suggestions/dont-suggest-ufcs-for-const.rs
 run-pass	suggestions/dont-try-removing-the-field.rs
 compile-fail	suggestions/double-reference-ty-in-self-ty.rs

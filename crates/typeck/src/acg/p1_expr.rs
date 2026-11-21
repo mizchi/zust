@@ -1331,7 +1331,16 @@ impl Cx<'_> {
 
     /// a constant expression's value as static data: a reference to it
     fn promote(&mut self, rexpr: &Expr, inner_exp: Option<Ty>) -> Option<V> {
-        let t = inner_exp.filter(|t| !matches!(t, Ty::Dyn(_) | Ty::Slice(_) | Ty::Str)).or_else(|| self.peek(rexpr));
+        // (`&1u16`: a suffixed literal is of its suffix's type, whatever is expected or inferred around it)
+        let own = match strip_paren(rexpr) {
+            Expr::Lit(l, _) => match lit::lit(l) {
+                Some(Lit::Int(i)) => Ty::from_suffix(i.suffix()).or(match i.suffix() { "f32" => Some(Ty::F32), "f64" => Some(Ty::F64), _ => None }),
+                Some(Lit::Float(f)) => match f.suffix() { "f32" => Some(Ty::F32), "f64" => Some(Ty::F64), _ => None },
+                _ => None,
+            },
+            _ => None,
+        };
+        let t = own.or_else(|| inner_exp.filter(|t| !matches!(t, Ty::Dyn(_) | Ty::Slice(_) | Ty::Str))).or_else(|| self.peek(rexpr));
         let t = t.filter(|&t| !self.needs_drop(t) && !self.prog.has_param(t) && !self.interior_mut(t, 0))?;
         let dv = crate::ast_consteval::eval(self.prog, rexpr, t).ok()?;
         if !dv.relocs.is_empty() || dv.bytes.is_empty() {
