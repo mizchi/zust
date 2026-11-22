@@ -118,6 +118,95 @@ pub fn crate_tag(name: &str) -> u32 {
 /// 場所の表では、この行から後ろは prelude のファイル
 pub const PRELUDE_LINE: u32 = 49152;
 
+/// The first line of the fns that `zustc check` adds to read the program's constants (const_check_item): past every
+/// line of a program and its prelude, and under 2^20 (an error's line is kept in 20 bits)
+pub const CONST_CHECK_LINE: usize = 1_000_000;
+
+/// The names of those fns, with the constant's place in their order after it
+pub const CONST_CHECK_FN: &str = "__zust_const_";
+
+/// `zustc check`: a fn for each constant and static of the program that binds its initializer to its type
+/// (`fn __zust_const_0() { let _zc: &'static str = ("x"); }`), so that the initializer is checked against the type where
+/// it is defined, used or not, as rustc checks every constant, with the inference of a fn's body: (the fns'
+/// text, the line of each initializer). None without one. Not one whose initializer defines items (a fn body would
+/// hoist them again)
+fn const_check_item(src: &str, items: &[SrcItem]) -> Option<(String, Vec<usize>)> {
+    let mut body = String::new();
+    let mut lines = vec![];
+    for it in items {
+        if !matches!(it.kind, ItemKind::Normal) {
+            continue;
+        }
+        let text = &src[it.start..it.end];
+        // (past the item's attributes and its visibility)
+        let mut t = text.trim_start();
+        while t.starts_with("#[") {
+            let o = 2;
+            t = t[(o + attr_end(&t[o..])).min(t.len())..].trim_start();
+        }
+        if let Some(r) = t.strip_prefix("pub") {
+            t = r.trim_start();
+            if t.starts_with('(') {
+                t = t.find(')').map_or("", |e| t[e + 1..].trim_start());
+            }
+        }
+        let Some(r) = t.strip_prefix("const ").or_else(|| t.strip_prefix("static ")) else { continue };
+        let r = r.trim_start();
+        let r = r.strip_prefix("mut ").map_or(r, str::trim_start);
+        let name: &str = &r[..r.find(|c: char| !(c.is_alphanumeric() || c == '_')).unwrap_or(r.len())];
+        let Some(ty_from) = r[name.len()..].trim_start().strip_prefix(':') else { continue };
+        if name.is_empty() || name == "_" || name == "fn" {
+            continue;
+        }
+        // (the type, to the `=` outside its brackets (`&dyn Iterator<Item = u8>`); then the initializer to the `;`)
+        let b = ty_from.as_bytes();
+        let mut depth = 0i32;
+        let mut eq = None;
+        for (i, &c) in b.iter().enumerate() {
+            match c {
+                b'<' | b'(' | b'[' => depth += 1,
+                b'>' if i > 0 && b[i - 1] == b'-' => {}
+                b'>' | b')' | b']' => depth -= 1,
+                b'=' if depth == 0 => {
+                    eq = Some(i);
+                    break;
+                }
+                _ => {}
+            }
+        }
+        let Some(eq) = eq else { continue };
+        let ty = ty_from[..eq].trim();
+        let init = ty_from[eq + 1..].trim_end().trim_end_matches(';');
+        // (nor one with a `return`, which would return from the fn: E0572 in a constant)
+        let items_inside = ["fn ", "struct ", "enum ", "union ", "impl ", "trait ", "mod ", "use ", "static ", "const ", "macro_rules", "type ", "return"];
+        if ty.is_empty() || init.trim().is_empty() || items_inside.iter().any(|k| init.contains(k)) {
+            continue;
+        }
+        // (a constant's references are 'static: `&str` is `&'static str`)
+        let mut ty_s = String::new();
+        let tb = ty.as_bytes();
+        for (i, &c) in tb.iter().enumerate() {
+            ty_s.push(c as char);
+            if c == b'&' && !tb[i + 1..].iter().find(|c| !c.is_ascii_whitespace()).is_some_and(|&n| n == b'\'' || n == b'&') {
+                ty_s.push_str("'static ");
+            }
+            if c == b'&' && tb.get(i + 1) == Some(&b'&') {
+                ty_s.push_str("'static ");
+            }
+        }
+        // (the line of its initializer)
+        let at = text.len() - ty_from.len() + eq + 1;
+        let skip = text[at..].len() - text[at..].trim_start().len();
+        // (a `let` of the type: the coercions of a `let`, as a constant's initializer has)
+        body.push_str(&format!("#[allow(dead_code, unused)] fn {CONST_CHECK_FN}{}() {{\n    let _zc: {ty_s} = (\n{init}\n    );\n}}\n", lines.len()));
+        lines.push(it.line + text[..at + skip].matches('\n').count());
+    }
+    if lines.is_empty() {
+        return None;
+    }
+    Some((body, lines))
+}
+
 /// 検査だけの印のキャッシュのキー (ビルドの Blob のキーと混ざらないように)
 const CHECK_SALT: Key = 0x5eed_c4ec_0000_0000_0000_0000_0000_0001;
 
@@ -417,11 +506,15 @@ pub struct Session2 {
     /// A crate of one file that the caller configured before it checks it: the `extern crate x;` items the configuring
     /// blanked (SrcMap::externs), whose names may be defined twice. Read by the next analyze
     pub externs: Vec<(usize, String)>,
+    /// In a `check`: its analysis adds const_check_item
+    checking: bool,
+    /// The lines of the constants that the check's const_check_item reads, in its order
+    const_lines: Vec<usize>,
 }
 
 impl Session2 {
     pub fn new(opts: Options2) -> Session2 {
-        Session2 { opts, cid: compiler_id(), disk: crate::cache2::Cache2::empty(), mem: FxMap::default(), used: FxSet::default(), fresh: vec![], ctx: CrateCtx::default(), last_map: None, sel: Default::default(), sum_fp: FxMap::default(), chk: None, externs: vec![] }
+        Session2 { opts, cid: compiler_id(), disk: crate::cache2::Cache2::empty(), mem: FxMap::default(), used: FxSet::default(), fresh: vec![], ctx: CrateCtx::default(), last_map: None, sel: Default::default(), sum_fp: FxMap::default(), chk: None, externs: vec![], checking: false, const_lines: vec![] }
     }
 
     pub fn load_cache(&mut self, path: &std::path::Path) {
@@ -517,8 +610,43 @@ impl Session2 {
         crates.extend(self.ctx.lib.iter().cloned());
         let mut fix = vec![];
         let cfg = self.opts.cfg_of(self.ctx.features.as_ref().unwrap_or(&self.opts.features), &self.ctx.cfgs, &self.ctx.env);
-        let (src, items, user, prelude_line0) = with_prelude_in(src0, &crates, &mut fix, Some(&cfg), &mut self.sel)?;
+        let (mut src, mut items, mut user, prelude_line0) = with_prelude_in(src0, &crates, &mut fix, Some(&cfg), &mut self.sel)?;
         self.ctx.map.colfix = fix;
+        // (`zustc check`: each constant of the program is checked where it is defined, used or not, as rustc does: a
+        // fn of the program that reads them, on lines past every other (check maps its errors back to them))
+        self.const_lines.clear();
+        if self.checking {
+            if let Some((text, lines)) = const_check_item(&src, &items[..user]) {
+                if !src.ends_with('\n') {
+                    src.push('\n');
+                }
+                let off = src.len();
+                src.push_str(&text);
+                if let Ok(mut its) = lexer::split(&text) {
+                    for it in &mut its {
+                        it.start += off;
+                        it.end += off;
+                        it.line += CONST_CHECK_LINE - 1;
+                        for id in &mut it.idents {
+                            id.0 += off as u32;
+                            id.1 += off as u32;
+                        }
+                    }
+                    let n = its.len();
+                    // (the prelude's items move by n: its members' headers too)
+                    for it in &mut items[user..] {
+                        if let ItemKind::ImplMember(h) | ItemKind::TraitMember(h) = &mut it.kind {
+                            if *h as usize >= user {
+                                *h += n as u32;
+                            }
+                        }
+                    }
+                    items.splice(user..user, its);
+                    user += n;
+                    self.const_lines = lines;
+                }
+            }
+        }
         // (E0432: a top-level `use` of a path whose first segment names nothing; the `use` items come from the item
         // split, the names they could mean from the original text)
         if self.ctx.map.inputs.is_empty() {
@@ -3227,7 +3355,10 @@ impl Session2 {
     /// 検査する (コード生成までしてエラーを集め、結果はキャッシュに入れる: 次の検査・ビルドはそれを使う)。prelude の中の診断は出さない
     pub fn check(&mut self, src: &str) -> Vec<Diagnostic> {
         let user_lines = src.bytes().filter(|&c| c == b'\n').count() + 1;
-        let mut a = match self.analyze(src) {
+        self.checking = true;
+        let r = self.analyze(src);
+        self.checking = false;
+        let mut a = match r {
             Ok(a) => a,
             Err(e) => return vec![Diagnostic::parse(&e)],
         };
@@ -3348,7 +3479,28 @@ impl Session2 {
                                     Some(req)
                                 }
                                 Err(e) => {
-                                    errs.push(e);
+                                    // (a fn that reads a constant: its type errors are the constant's, at its line; what
+                                    // zustc cannot evaluate in a constant is not an error of the program)
+                                    match body.strip_prefix(CONST_CHECK_FN).and_then(|k| k.parse::<usize>().ok()) {
+                                        Some(k) => {
+                                            // (nor a mismatch zustc's coercions may make: of a raw pointer, or of a type
+                                            // that has no size, which rustc rejects another way)
+                                            // (nor a reference to a type with a Deref, whose coercion zustc does not make)
+                                            let m = e.find("mismatched types").filter(|&m| {
+                                                let tys = &e[m..];
+                                                let unsized_ty = |t: &str| t == "str" || t.starts_with('[') && !t.contains(';') || t.starts_with("dyn ");
+                                                let derefs = |t: &str| {
+                                                    let n = t.strip_prefix('&').map(|x| x.strip_prefix("mut ").unwrap_or(x)).unwrap_or("");
+                                                    a.prog.struct_index.get(n).is_some_and(|&sid| a.prog.method(sid, "deref").is_some())
+                                                };
+                                                !tys.contains("*const") && !tys.contains("*mut") && !tys.split('`').skip(1).step_by(2).any(|t| unsized_ty(t) || derefs(t))
+                                            });
+                                            if let (Some(&l), Some(m)) = (self.const_lines.get(k), m) {
+                                                errs.push(format!("{l}:1: {}", &e[m..]));
+                                            }
+                                        }
+                                        None => errs.push(e),
+                                    }
                                     ok = false;
                                     Some(vec![])
                                 }
@@ -3396,6 +3548,7 @@ impl Session2 {
             self.chk = Some(memo);
         }
         tm.lap("check", format!("{n_memo} from the last check, {n_keys} keys, {n_hit} cached, {n_checked} checked"));
+        self.const_lines.clear();
         let mut d: Vec<Diagnostic> = errs.iter().map(|e| Diagnostic::parse(e)).filter(|d| d.line <= user_lines).collect();
         d.sort_by(|x, y| (x.line, x.col).cmp(&(y.line, y.col)));
         d.dedup();

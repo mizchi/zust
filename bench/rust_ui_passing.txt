@@ -1632,6 +1632,7 @@ build-pass	const_prop/unreachable-bounds.rs
 build-pass	const_prop/unreachable-overflow.rs
 run-pass	consts/arithmetic-expr-in-array-len.rs
 build-pass	consts/array-literal-index-oob.rs
+compile-fail	consts/array-literal-len-mismatch.rs
 check-pass	consts/assoc-const-elided-lifetime.rs
 compile-fail	consts/bad-array-size-in-type-err.rs
 run-pass	consts/bool-comparison-in-const-array-len.rs
@@ -1645,6 +1646,7 @@ check-pass	consts/const-address-of-interior-mut.rs
 check-pass	consts/const-address-of-mut.rs
 check-pass	consts/const-address-of.rs
 run-pass	consts/const-adt-align-mismatch.rs
+compile-fail	consts/const-array-oob-arith.rs
 build-pass	consts/const-array-oob-in-range-expr.rs
 compile-fail	consts/const-array-oob.rs
 compile-fail	consts/const-as-fn.rs
@@ -1753,12 +1755,14 @@ run-pass	consts/const-rec-and-tup.rs
 check-pass	consts/const-ref-to-static-linux-vtable.rs
 run-pass	consts/const-region-ptrs-noncopy.rs
 run-pass	consts/const-region-ptrs.rs
+compile-fail	consts/const-result-no-expect-suggestion.rs
 compile-fail	consts/const-slice-array-deref.rs
 check-pass	consts/const-static-ref-to-closure.rs
 run-pass	consts/const-struct-offsets.rs
 run-pass	consts/const-struct.rs
 run-pass	consts/const-trait-to-trait.rs
 run-pass	consts/const-tuple-struct.rs
+compile-fail	consts/const-type-mismatch.rs
 run-pass	consts/const-unit-struct.rs
 run-pass	consts/const-unsafe-fn.rs
 compile-fail	consts/const-unsized.rs
@@ -1876,6 +1880,7 @@ run-pass	consts/packed_pattern.rs
 run-pass	consts/packed_pattern2.rs
 run-pass	consts/promote_borrowed_field.rs
 compile-fail	consts/promote_const_let.rs
+compile-fail	consts/promoted-type-error-issue-133968.rs
 run-pass	consts/promoted_const_call4.rs
 check-pass	consts/promotion-drop-type-static-lifetime-86672.rs
 check-pass	consts/raw-ptr-const.rs
@@ -2006,6 +2011,7 @@ compile-fail	diagnostic_namespace/on_unimplemented/report_warning_on_duplicated_
 compile-fail	did_you_mean/E0178.rs
 compile-fail	did_you_mean/bad-assoc-expr.rs
 compile-fail	did_you_mean/bad-assoc-pat.rs
+compile-fail	did_you_mean/brackets-to-braces-single-element.rs
 compile-fail	did_you_mean/c-style-pointer-types.rs
 compile-fail	did_you_mean/casting-fn-item-to-fn-pointer.rs
 compile-fail	did_you_mean/collect-without-into-iter-call.rs
@@ -6280,12 +6286,14 @@ compile-fail	stability-attribute/accidentally-stable-intrinsics.rs
 check-pass	stability-attribute/check-stability-issue-138319.rs
 check-pass	stability-attribute/issue-99286-stable-intrinsics.rs
 compile-fail	stability-attribute/stability-in-private-module.rs
+compile-fail	static/bad-const-type.rs
 compile-fail	static/duplicated-fields-issue-124464.rs
 compile-fail	static/duplicated-fields-issue-125842.rs
 compile-fail	static/extern-static-normalization-failure-issue-148161.rs
 compile-fail	static/global-variable-promotion-error-7364.rs
 run-pass	static/issue-1660.rs
 build-pass	static/issue-34194.rs
+compile-fail	static/issue-5216.rs
 compile-fail	static/missing-type.rs
 check-pass	static/raw-ref-deref-with-unsafe.rs
 check-pass	static/raw-ref-extern-static.rs

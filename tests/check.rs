@@ -102,3 +102,16 @@ fn check_memo_matches_fresh_check() {
     }
     assert!(compared > 50, "{compared}");
 }
+
+/// Each constant and static is checked against its type where it is defined, used or not (as rustc does), with the
+/// inference of a fn body (`{ let mut b = 1; b }` is a u32). Fixing one clears its diagnostic
+#[test]
+fn constants_checked_where_defined() {
+    let src = "const LIMIT: u8 = 300u16;\nconst SIZES: [u8; 3] = [1, 2];\nstatic NAME: &[u8] = \"abc\";\nconst FINE: u32 = { let mut b = 1; b += 1; b };\nconst LABEL: &str = \"ok\";\nfn main() {}\n";
+    let mut s = Session2::new(Options2 { jobs: 1, ..Options2::default() });
+    let d = s.check(src);
+    assert_eq!(d.iter().map(|d| d.line).collect::<Vec<_>>(), vec![1, 2, 3], "{d:?}");
+    assert!(d.iter().all(|d| d.msg.starts_with("mismatched types")), "{d:?}");
+    let fixed = src.replace("300u16", "200").replace("[1, 2]", "[1, 2, 3]").replace("\"abc\"", "b\"abc\"");
+    assert!(s.check(&fixed).is_empty(), "{:?}", s.check(&fixed));
+}
