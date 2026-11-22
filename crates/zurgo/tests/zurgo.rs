@@ -138,10 +138,50 @@ fn build_scripts_match_cargo() {
     assert!(!ok && err.contains("failed to run the build script of `gen v1.0.0`") && err.contains("gen says no"), "{err}");
 }
 
+/// The same programs built for wasm32 and run under the repository's sandbox host print what their native builds print:
+/// the build scripts run on the host, the crates are one module
+#[test]
+fn wasm32_runs_like_native() {
+    if !Command::new("node").arg("--version").output().is_ok_and(|o| o.status.success()) {
+        eprintln!("note: no node: wasm32_runs_like_native skipped");
+        return;
+    }
+    let host = format!("node {}", Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/wasm/run.mjs").display());
+    let bs = Scratch::new("build-script-wasm");
+    copy_dir(&fixture("build-script"), &bs.0);
+    let mut cases: Vec<(String, std::path::PathBuf)> = vec![("path-ws".into(), fixture("path-ws/Cargo.toml")), ("build-script".into(), bs.0.join("Cargo.toml"))];
+    for n in ["fnv", "adler2", "hex", "itoa", "rustc-hash", "cfg-if", "thiserror", "wasm-bindgen-shared"] {
+        let m = fixture(&format!("{n}/Cargo.toml"));
+        let (ok, _, err) = cargo(&["fetch", "--locked"], &m, &tdir(n));
+        assert!(ok, "cargo fetch {n}: {err}");
+        cases.push((n.to_string(), m));
+    }
+    let mut bad = vec![];
+    for (n, m) in &cases {
+        let (ok, want, err) = zurgo(&["run"], m, &tdir(&format!("{n}-native")));
+        assert!(ok, "zurgo run {n}: {err}");
+        // (what depends on the target: the build script reads `CARGO_CFG_*` for wasm32; `cfg(unix)` is off there)
+        let want = match n.as_str() {
+            "build-script" => want.replace("cfg x86_64 linux 64", "cfg wasm32 unknown 32"),
+            "cfg-if" => want.replace("unix64", "other"),
+            _ => want,
+        };
+        let r = run(Command::new(ZURGO)
+            .args(["run", "--target", "wasm32-unknown-unknown", "--manifest-path"])
+            .arg(m)
+            .env("CARGO_TARGET_DIR", tdir(&format!("{n}-wasm")))
+            .env("CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_RUNNER", &host));
+        if !r.0 || r.1 != want {
+            bad.push(format!("{n}: {}\n--- want\n{want}--- got\n{}", r.2, r.1));
+        }
+    }
+    assert!(bad.is_empty(), "{}", bad.join("\n"));
+}
+
 #[test]
 fn registry_crates_run_like_cargo() {
     let mut bad = vec![];
-    for n in ["fnv", "adler2", "hex", "itoa", "rustc-hash", "cfg-if", "thiserror"] {
+    for n in ["fnv", "adler2", "hex", "itoa", "rustc-hash", "cfg-if", "thiserror", "wasm-bindgen-shared"] {
         let m = fixture(&format!("{n}/Cargo.toml"));
         let (ok, _, err) = cargo(&["fetch", "--locked"], &m, &tdir(n));
         assert!(ok, "cargo fetch {n}: {err}");
