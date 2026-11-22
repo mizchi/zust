@@ -202,19 +202,57 @@ fn take_frag(toks: &[TokenTree], kind: &str, stop: Option<&TokenTree>) -> Option
             // (a type / path keeps its generic arguments: `HashMap<K, V>` does not end at the `,`)
             let angles = matches!(kind, "ty" | "path");
             let mut angle: u32 = 0;
+            // (a type: after a whole one (a name, a group, closed generic arguments), another name, `&`, `*` or `[..]`
+            // starts the next: `$($t:ty)*` of `u8 u16 String`. A modifier (`dyn`, `mut`, `fn`, ..) and a lifetime's
+            // name go on)
+            let mut ty_end = false;
+            let mut quote = false;
             while n < toks.len() {
                 if angle > 0 {
                     if let TokenTree::Punct(p) = &toks[n] {
                         match p.as_char() {
                             '<' => angle += 1,
                             // (`->` in `Fn() -> T` is not a closing angle)
-                            '>' if !(n > 0 && matches!(&toks[n - 1], TokenTree::Punct(q) if q.as_char() == '-' && q.spacing() == Spacing::Joint)) => angle -= 1,
+                            '>' if !(n > 0 && matches!(&toks[n - 1], TokenTree::Punct(q) if q.as_char() == '-' && q.spacing() == Spacing::Joint)) => {
+                                angle -= 1;
+                                ty_end = angle == 0;
+                            }
                             ';' => break,
                             _ => {}
                         }
                     }
                     n += 1;
                     continue;
+                }
+                if kind == "ty" && stop.is_none() {
+                    match &toks[n] {
+                        TokenTree::Ident(i) => {
+                            let w = i.to_string();
+                            if ty_end && !quote && w != "as" {
+                                break;
+                            }
+                            ty_end = !quote && !matches!(w.as_str(), "dyn" | "impl" | "mut" | "const" | "fn" | "unsafe" | "extern" | "for" | "as");
+                            quote = false;
+                        }
+                        TokenTree::Group(g) => {
+                            if ty_end && g.delimiter() != Delimiter::Parenthesis {
+                                break;
+                            }
+                            ty_end = true;
+                        }
+                        TokenTree::Punct(p) => {
+                            if ty_end && matches!(p.as_char(), '&' | '*') {
+                                break;
+                            }
+                            quote = p.as_char() == '\'';
+                            ty_end = p.as_char() == '!';
+                        }
+                        TokenTree::Literal(_) => {
+                            if ty_end {
+                                break;
+                            }
+                        }
+                    }
                 }
                 if let Some(s) = stop {
                     if same_tok(&toks[n], s) {
