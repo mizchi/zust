@@ -211,6 +211,9 @@ fn take_frag(toks: &[TokenTree], kind: &str, stop: Option<&TokenTree>) -> Option
             let mut named = false;
             // (`m!` before its group: a type macro, `m!(u8)` / `m![u8]`)
             let mut mac = false;
+            // (`for` before `<`, and generic arguments that are its binder: `for<'a> fn(&'a u8)` goes on after the `>`)
+            let mut for_kw = false;
+            let mut binder = false;
             while n < toks.len() {
                 if angle > 0 {
                     if let TokenTree::Punct(p) = &toks[n] {
@@ -219,7 +222,7 @@ fn take_frag(toks: &[TokenTree], kind: &str, stop: Option<&TokenTree>) -> Option
                             // (`->` in `Fn() -> T` is not a closing angle)
                             '>' if !(n > 0 && matches!(&toks[n - 1], TokenTree::Punct(q) if q.as_char() == '-' && q.spacing() == Spacing::Joint)) => {
                                 angle -= 1;
-                                ty_end = angle == 0;
+                                ty_end = angle == 0 && !binder;
                                 named = false;
                             }
                             ';' => break,
@@ -236,9 +239,10 @@ fn take_frag(toks: &[TokenTree], kind: &str, stop: Option<&TokenTree>) -> Option
                             if ty_end && !quote && w != "as" {
                                 break;
                             }
-                            ty_end = !quote && !matches!(w.as_str(), "dyn" | "impl" | "mut" | "const" | "fn" | "unsafe" | "extern" | "for" | "as");
+                            ty_end = !quote && !matches!(w.as_str(), "dyn" | "impl" | "mut" | "const" | "fn" | "unsafe" | "extern" | "for" | "as" | "async");
                             named = ty_end;
                             mac = false;
+                            for_kw = w == "for";
                             quote = false;
                         }
                         TokenTree::Group(g) => {
@@ -248,6 +252,7 @@ fn take_frag(toks: &[TokenTree], kind: &str, stop: Option<&TokenTree>) -> Option
                             ty_end = true;
                             named = false;
                             mac = false;
+                            for_kw = false;
                         }
                         TokenTree::Punct(p) => {
                             if ty_end && matches!(p.as_char(), '&' | '*') {
@@ -257,6 +262,7 @@ fn take_frag(toks: &[TokenTree], kind: &str, stop: Option<&TokenTree>) -> Option
                             mac = p.as_char() == '!' && named;
                             ty_end = p.as_char() == '!';
                             named = false;
+                            for_kw = for_kw && p.as_char() == '<';
                         }
                         TokenTree::Literal(_) => {
                             if ty_end {
@@ -275,6 +281,7 @@ fn take_frag(toks: &[TokenTree], kind: &str, stop: Option<&TokenTree>) -> Option
                     && (angles || (kind == "expr" && (n == 0 || matches!(&toks[n - 1], TokenTree::Punct(q) if q.as_char() == ':'))))
                 {
                     angle = 1;
+                    binder = std::mem::take(&mut for_kw);
                     n += 1;
                     continue;
                 }
