@@ -3769,6 +3769,7 @@ compile-fail	loops/issue-43162.rs
 compile-fail	loops/label-on-block-suggest-move.rs
 compile-fail	loops/loop-break-never-type-mismatch.rs
 check-pass	loops/loop-break-unsize.rs
+compile-fail	loops/loop-break-value-no-repeat.rs
 compile-fail	loops/loop-break-value.rs
 compile-fail	loops/loop-else-err.rs
 compile-fail	loops/loop-if-else-break-issue-123261.rs
@@ -4636,6 +4637,7 @@ compile-fail	parser/bounds-lifetime-where.rs
 check-pass	parser/bounds-obj-parens.rs
 compile-fail	parser/brace-in-let-chain.rs
 compile-fail	parser/break-in-unlabeled-block-parenthesized.rs
+compile-fail	parser/break-in-unlabeled-block.rs
 compile-fail	parser/cast-angle-bracket-precedence.rs
 compile-fail	parser/chained-comparison-suggestion.rs
 compile-fail	parser/char/whitespace-character-literal.rs

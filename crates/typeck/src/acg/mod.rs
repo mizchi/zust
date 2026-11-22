@@ -697,6 +697,9 @@ pub struct Loop {
     pub is_block: bool,
     pub depth: usize,
     pub temps: usize,
+    /// a `while` / `for` loop (and a while's condition): the kind it names in E0571, for a `break` with a value
+    /// (None: a `loop` or a labeled block, which `break v` may leave)
+    pub no_value: Option<&'static str>,
 }
 
 #[derive(Clone, Copy)]
@@ -2302,7 +2305,12 @@ impl Cx<'_> {
 
     /// The method named `name` (`S::m`, among its overloads) that is an impl of trait tr
     pub fn trait_candidate(&self, name: &str, tr: &str) -> Option<u32> {
-        let of_tr = |i: u32| self.prog.sigs[i as usize].impl_trait.as_deref().is_some_and(|t| t.split('<').next().unwrap_or(t).trim() == tr);
+        self.trait_candidate_where(name, tr, |_| true)
+    }
+
+    /// trait_candidate among those `ok` accepts (`impl PartialEq for &TX<u8>` / `.. for &TX<u16>`: the receiver's)
+    pub fn trait_candidate_where(&self, name: &str, tr: &str, ok: impl Fn(u32) -> bool) -> Option<u32> {
+        let of_tr = |i: u32| self.prog.sigs[i as usize].impl_trait.as_deref().is_some_and(|t| t.split('<').next().unwrap_or(t).trim() == tr) && ok(i);
         let first = self.prog.index.get(name).copied();
         first.filter(|&i| of_tr(i)).or_else(|| self.prog.overloads.get(name).and_then(|cs| cs.iter().copied().find(|&c| of_tr(c))))
     }

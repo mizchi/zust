@@ -14,4 +14,7 @@ fn main() {
     let s = S::<()>(None);
     let u = U::<u8>(7);
     println!("{} {} {} {}", a.0.len(), g.n(), s.0.is_none(), u.0);
+    // (a unit struct's pattern with a turbofish, through a reference too)
+    let Generic::<5> = &g;
+    let Generic::<5> = g;
 }

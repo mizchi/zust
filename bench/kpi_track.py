@@ -169,7 +169,20 @@ def ui_counts():
     if not os.path.exists(j) or os.path.getmtime(j) < os.path.getmtime(ZUSTC):
         return [None] * 4
     k = json.load(open(j))["kinds"]
-    return [k[x]["pass"] for x in ("run-pass", "check-pass", "build-pass", "compile-fail")]
+    kinds = ("run-pass", "check-pass", "build-pass", "compile-fail")
+    # (as the ratchet counts them: without the compile-fail tests rejected for another reason than the one they test,
+    #  bench/rust_ui_accidental.txt; from the run's per-test results when they are as new as its counts)
+    res = os.path.join(ROOT, "out/rust_ui_results.txt")
+    acc = os.path.join(ROOT, "bench/rust_ui_accidental.txt")
+    if os.path.exists(res) and os.path.getmtime(res) >= os.path.getmtime(j) - 60 and os.path.exists(acc):
+        skip = {tuple(l.rstrip("\n").split("\t")[:2]) for l in open(acc) if l.strip() and not l.startswith("#")}
+        n = dict.fromkeys(kinds, 0)
+        for line in open(res):
+            f = line.rstrip("\n").split("\t")
+            if len(f) >= 3 and f[0] == "pass" and f[1] in n and (f[1], f[2]) not in skip:
+                n[f[1]] += 1
+        return [n[x] for x in kinds]
+    return [k[x]["pass"] for x in kinds]
 
 
 def read_log():

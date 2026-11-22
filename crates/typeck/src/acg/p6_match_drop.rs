@@ -414,6 +414,7 @@ impl Cx<'_> {
             is_block: false,
             depth: self.scopes.len() - 1,
             temps: t0,
+            no_value: Some("while"),
         });
         let (_, bt) = self.block(body, Some(Ty::Unit))?;
         self.loops.pop();
@@ -958,10 +959,12 @@ impl Cx<'_> {
             // (`let PhantomData::<(A, B)> = x`: a unit struct's turbofish names the type the value has)
             Pat::Path(path) if path.segs.last().is_some_and(|s| !s.args.is_empty()) && self.variant_on(path, p.ty()).is_none() => {
                 let (pp, targs) = self.turbofish_split(path);
-                if let (Some(sid), Some(ts)) = (self.prog.struct_by_p(&pp, self.self_sid), targs) {
-                    if let Some(ts) = ts.into_iter().collect::<Option<Vec<Ty>>>().filter(|ts| ts.len() == self.prog.structs[self.prog.base_of(sid) as usize].generics.len()) {
+                if let (Some(sid), Some(args)) = (self.prog.struct_by_p(&pp, self.self_sid), targs) {
+                    if let Some(ts) = self.turbofish_targs(sid, args)?.into_iter().collect::<Option<Vec<Ty>>>() {
                         let pt = Ty::Struct(self.prog.instantiate(self.prog.base_of(sid), ts)?);
-                        self.same(SP, pt, p.ty())?;
+                        // (`let G::<5> = &x;`: through the reference, as match ergonomics reads it)
+                        let (pd, _) = self.pat_deref(p, mode);
+                        self.same(SP, pt, pd.ty())?;
                     }
                 }
                 Ok(())

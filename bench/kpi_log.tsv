@@ -251,3 +251,4 @@ date	commit	change	noop_M	edit_M	check_M	cache_KiB	lsp_G	run	check	build	cfail	t
 2026-11-22	6fc2fc1+	turbofish on struct constructors and unit structs; derived impls' bounds; E0107 for lifetime arguments	0.697	554.172	3868.162	1902.8	-	-	-	-	-	1188.780	64.026	10.359	319.843	721.403	267.184
 2026-11-22	46a2a8d+	variants and associated consts through a type alias; E0109 for a variant's type arguments	0.700	555.185	3862.894	1902.8	-	1805	1491	101	4112	1193.521	64.024	10.371	320.303	723.109	267.884
 2026-11-22	4d540f1+	cfg_select!: the first arm whose predicate holds	0.697	555.183	3862.892	1902.8	10.8520	1805	1492	101	4113	1193.508	64.008	10.370	320.284	723.286	268.008
+2026-11-22	4d540f1+	Review of #41: E0571, E0747, E0107 for turbofish counts, receiver's ref impl, alias instances	0.697	555.260	3863.881	1902.8	-	1805	1491	101	4059	1192.734	64.113	10.359	320.245	722.962	267.893
