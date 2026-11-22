@@ -257,6 +257,15 @@ impl Cx<'_> {
             if self.owned_binds > ob {
                 self.release_outer(scrut, sflag)?;
             }
+            // (a guard must not change the place the match tests: rustc's fake borrows of it (E0510). Only when a
+            // pattern tests it: `match x { y if .. }` borrows nothing)
+            let guard_place = match (&arm.guard, &bk_sp) {
+                (Some(_), Some((sp, _))) if self.bk_on() && arms.iter().any(|a| !super::plainly_irrefutable(&a.pat)) => Some(sp.clone()),
+                _ => None,
+            };
+            if let Some(gp) = &guard_place {
+                self.bk_ev(borrowck::Ev::Guard(Some(gp.clone())));
+            }
             if let Some(g) = &arm.guard {
                 // (`P if let Q = e && c => ..`: each `let` of the guard tests and binds in the arm's scope, each other
                 // condition must hold; a failure goes to the next arm)
@@ -293,6 +302,9 @@ impl Cx<'_> {
                         self.require(c, next);
                     }
                 }
+            }
+            if guard_place.is_some() {
+                self.bk_ev(borrowck::Ev::Guard(None));
             }
             let t0 = self.temps.len();
             let (v, t) = self.expr(&arm.body, result_ty.or(expected))?;

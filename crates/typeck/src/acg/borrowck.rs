@@ -99,6 +99,9 @@ pub enum Ev {
     /// These loans are stored behind the local's `&mut`s, so many derefs deep (`*q = &y` with q = &mut p): the
     /// locals those point to hold them
     Store(u32, u32, Vec<Src>),
+    /// A match's guard begins (the place the match tests) or ends (None). The events between are the guard's, in the
+    /// order they are made: a guard's evaluation is one piece of the source, nested in the match's
+    Guard(Option<BPlace>),
 }
 
 #[derive(Clone, Debug)]
@@ -688,8 +691,19 @@ impl Bk {
                 by_local.entry(lo.place.local).or_default().push(i as u32);
             }
         }
+        // (the places of the matches whose guards are running: rustc's fake borrows, which a guard must not change)
+        let mut guards: Vec<&BPlace> = vec![];
         for (_, e) in &self.evs {
             match e {
+                Ev::Guard(Some(g)) => guards.push(g),
+                Ev::Guard(None) => {
+                    guards.pop();
+                }
+                Ev::Acc(p, a, sp) if !guards.is_empty() && self.guard_conflict(&guards, p, *a).is_some() => {
+                    let name = path_str(&self.locals, p);
+                    let what = if matches!(a, Acc::Borrow(_)) { "mutably borrow" } else { "assign" };
+                    errs.push(BkError { sp: *sp, msg: format!("cannot {what} `{name}` in match guard (E0510)") });
+                }
                 Ev::Bind(_, false) => need_moves = true,
                 Ev::Acc(p, a, sp) => {
                     if *a == Acc::Move {
@@ -1099,6 +1113,8 @@ impl Bk {
                         add_sorted(&mut st.escaped, ln);
                     }
                 }
+                // (checked in the pre-pass, in the order the events are made)
+                Ev::Guard(_) => {}
                 Ev::Store(l, derefs, srcs) => {
                     let ls = self.resolve(srcs, st);
                     // (the locals the `&mut`s point to, deref by deref; one behind a parameter: it outlives the
@@ -1243,6 +1259,23 @@ impl Bk {
             errs.push(BkError { sp, msg });
             return;
         }
+    }
+
+    /// The place of a running guard's match that a write or a `&mut` of p changes (E0510): p is the place or one it
+    /// is part of, or what it points to (`*x = None` in a guard of `match x { &mut None => .. }`). Not a part of it
+    /// (`s.b = 2` of `match s`): rustc's fake borrows are shallow
+    fn guard_conflict<'g>(&self, guards: &[&'g BPlace], p: &BPlace, a: Acc) -> Option<&'g BPlace> {
+        let changes = match a {
+            Acc::Write | Acc::Modify => true,
+            Acc::Borrow(l) => self.loans[l as usize].mutable,
+            _ => false,
+        };
+        if !changes {
+            return None;
+        }
+        guards.iter().copied().find(|g| {
+            g.local == p.local && (prefix(&p.proj, &g.proj) || prefix(&g.proj, &p.proj) && p.proj[g.proj.len()..].iter().all(|x| matches!(x, Proj::Deref(_))))
+        })
     }
 
     fn check_loans(&self, live: &[u32], p: &BPlace, a: Acc, sp: Sp, errs: &mut Vec<BkError>) {
