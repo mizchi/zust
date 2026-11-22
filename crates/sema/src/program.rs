@@ -3398,7 +3398,15 @@ impl Program {
                 return Some(self.subst(a.value, &args));
             }
         }
-        None
+        // (std's impls the prelude does not write out: `<i32 as Add<T>>::Output` is i32 (the operators of a number or
+        // bool are Self's, through a reference too: `&i32 + i32`), `<&i32 as Deref>::Target` is i32)
+        let prim = |t: Ty| t.is_int() || t.is_float() || t == Ty::Bool;
+        match (name, t) {
+            ("Output", t) if prim(t) => Some(t),
+            ("Output", Ty::Ref(_, i)) if prim(*i) => Some(*i),
+            ("Target", Ty::Ref(_, i) | Ty::Box(i)) => Some(*i),
+            _ => None,
+        }
     }
 
     /// t names a type parameter numbered `from` or above
