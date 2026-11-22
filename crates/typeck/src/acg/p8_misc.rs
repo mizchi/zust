@@ -384,7 +384,8 @@ impl Cx<'_> {
             // for the shared pointers)
             // (neither when a trait of the program gives S a `clone` (a default fn of `impl Duplicate for S {}`): that is
             // the method called)
-            let user_clone = |sid: u32| self.prog.default_method(sid, "clone").is_some();
+            // (a method: an associated `fn clone() -> S` is not called by `r.clone()`)
+            let user_clone = |sid: u32| self.prog.default_method(sid, "clone").is_some_and(|d| self.prog.sigs[d as usize].has_self);
             // (a closure's Clone is the compiler's, and asks it of each capture: E0277 for one that is not, also through
             // a reference, which rustc does not copy then)
             let closure_err = |sid: u32| -> Option<String> {

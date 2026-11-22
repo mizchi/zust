@@ -1829,7 +1829,18 @@ impl Cx<'_> {
                     }
                 }
                 let ne = self.keep_expr(Expr::Struct(bare, sfields.clone(), rest.clone()));
-                return self.struct_lit(ne, typed.or(expected));
+                let r = self.struct_lit(ne, typed.or(expected))?;
+                // (`Pair::<u8, _> { a: 300u16, .. }`: the arguments written beside a `_` hold too)
+                if let (None, Ty::Struct(v)) = (typed, r.1) {
+                    let vargs = &self.prog.structs[v as usize].args;
+                    if targs.iter().enumerate().any(|(k, a)| a.is_some_and(|a| !self.prog.has_param(a) && vargs.get(k).is_some_and(|&va| va != a))) {
+                        let full: Vec<Ty> = targs.iter().enumerate().map(|(k, a)| a.or(vargs.get(k).copied()).unwrap_or(Ty::Unit)).collect();
+                        let base = self.prog.base_of(v);
+                        let want = self.prog.instantiate(base, full).map(|i| self.prog.tn(Ty::Struct(i))).unwrap_or_else(|_| self.prog.structs[base as usize].name.clone());
+                        return err(expr_start(e), format!("mismatched types: expected `{want}`, found `{}`", self.prog.tn(r.1)));
+                    }
+                }
+                return Ok(r);
             }
         }
         let Some(sid) = self.prog.struct_by_p(&PPath::of(path), self.self_sid) else {
