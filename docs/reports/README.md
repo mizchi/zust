@@ -83,3 +83,4 @@ Japanese versions are in [../ja/reports/](../ja/reports/README.md).
 | 2026-11-22 | [Region (lifetime) checking, part 5: a type parameter's region](2026-11-22-01-region-check-5.md) |
 | 2026-11-22 | [Region (lifetime) checking, part 6: placeholders' regions everywhere, and the borrow check's mutability](2026-11-22-02-region-check-6.md) |
 | 2026-11-22 | [Region (lifetime) checking, part 7: control flow, temporaries and what prelude methods return](2026-11-22-03-region-check-7.md) |
+| 2026-11-22 | [Region (lifetime) checking, part 8: stores through `&mut`, moves out of what cannot be moved, and tuning](2026-11-22-04-region-check-8.md) |
