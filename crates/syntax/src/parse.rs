@@ -729,6 +729,38 @@ fn fut_output(p: &Path) -> Option<Ty> {
 }
 
 impl Parser {
+    /// E0582: a lifetime a binder (`for<'a>`) declares that the bound's result (`-> T`) or an associated type's binding
+    /// (`Item = T`) names, but not its inputs (`Fn(..)`'s parameters, the trait's arguments): no type can be it
+    fn hr_output_check(&self, binder: &[GArg], p: &Path, at: usize, self_ty: Option<&Ty>) -> R<()> {
+        if binder.is_empty() {
+            return Ok(());
+        }
+        let Some(last) = p.segs.last() else { return Ok(()) };
+        for b in binder {
+            let GArg::Lifetime(l) = b else { continue };
+            // (the predicate's own type is an input: `for<'a> &'a T: IntoIterator<Item = &'a U>`)
+            let mut ins = self_ty.is_some_and(|t| crate::regions::mentions_lt(t, l)) || last.args.iter().any(|a| match a {
+                GArg::Ty(t) => crate::regions::mentions_lt(t, l),
+                GArg::Lifetime(x) => x == l,
+                _ => false,
+            });
+            // (`Item = T` binds; `Item: 'a` (parsed as `impl` bounds) only bounds it, which a binder's lifetime may)
+            let mut out = last.args.iter().any(|a| matches!(a, GArg::Bind(_, t) if !matches!(t, Ty::Impl(_)) && crate::regions::mentions_lt(t, l)));
+            if let Some((ps, r)) = &last.fn_args {
+                ins |= ps.iter().any(|t| crate::regions::mentions_lt(t, l));
+                out |= r.as_deref().is_some_and(|t| crate::regions::mentions_lt(t, l));
+            }
+            // (an earlier segment's arguments are inputs too: `a::Tr<'a>::..` is rare, taken as one)
+            ins |= p.segs[..p.segs.len() - 1].iter().any(|s| s.args.iter().any(|a| matches!(a, GArg::Lifetime(x) if x == l) || matches!(a, GArg::Ty(t) if crate::regions::mentions_lt(t, l))));
+            if out && !ins {
+                let line = self.toks.get(at).map(|t| (t.line, t.col + 1)).unwrap_or((0, 0));
+                let what = if last.fn_args.is_some() { "`Output`".to_string() } else { "an associated type".to_string() };
+                return Err(format!("{}:{}: binding for associated type {what} references lifetime `{l}`, which does not appear in the trait input types (E0582)", line.0, line.1));
+            }
+        }
+        Ok(())
+    }
+
     fn err(&self, msg: &str) -> String {
         match self.toks.get(self.i) {
             Some(t) => format!("{}:{}: {msg} (found `{}`)", t.line, t.col + 1, t.text),
@@ -1173,20 +1205,28 @@ impl Parser {
         } else if self.is_open("(") {
             self.i += 1;
             let q = self.eat_punct("?");
+            let mut binder = vec![];
             if self.eat_ident("for") {
                 self.expect_punct("<")?;
-                let _ = self.generic_args()?;
+                binder = self.generic_args()?;
             }
-            v.push(Bound::Trait(q, self.path(true)?));
+            let at = self.i;
+            let p = self.path(true)?;
+            self.hr_output_check(&binder, &p, at, None)?;
+            v.push(Bound::Trait(q, p));
             self.expect_close(")")?;
         } else {
             let q = self.eat_punct("?");
+            let mut binder = vec![];
             if self.eat_ident("for") {
                 self.expect_punct("<")?;
-                let _ = self.generic_args()?;
+                binder = self.generic_args()?;
             }
             if self.tok(0).is_some_and(|t| t.kind == TokKind::Ident) || self.is_punct("::") {
-                v.push(Bound::Trait(q, self.path(true)?));
+                let at = self.i;
+                let p = self.path(true)?;
+                self.hr_output_check(&binder, &p, at, None)?;
+                v.push(Bound::Trait(q, p));
             }
         }
         Ok(v)
@@ -2540,7 +2580,13 @@ impl Parser {
                 // (`dyn A + 'static: B`: a trait object type takes its bounds)
                 let t = if self.is_ident("dyn") { self.ty()? } else { self.ty_no_bounds()? };
                 self.expect_punct(":")?;
+                let at = self.i;
                 let mut bs = self.bounds()?;
+                for b in &bs {
+                    if let Bound::Trait(_, p) = b {
+                        self.hr_output_check(&binder, p, at, Some(&t))?;
+                    }
+                }
                 // (`for<'a> T: 'a`: the bound is of a lifetime the predicate binds, not one of the item: T outlives
                 // every region, `T: 'static`)
                 for b in bs.iter_mut() {

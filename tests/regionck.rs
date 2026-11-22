@@ -1381,3 +1381,50 @@ fn part7_review_follow_ups() {
     let d = check("fn bad<F: FnMut()>(f: &F) {\n    f();\n}\nfn main() {}\n");
     assert!(d.len() == 1 && d[0].0 == 2 && d[0].1.contains("behind a `&` reference"), "{d:?}");
 }
+
+/// What is stored through a `&mut` a local holds (`*q = &y` with `q = &mut p`) is held by what it points to: p used
+/// after y is gone is E0597. Not when p is not used after, nor through a `&mut` of a local that outlives y
+#[test]
+fn store_through_mut_ref() {
+    let d = check("fn deref(_: &i32) {}\nfn main() {\n    let x = 44;\n    let mut p = &x;\n    {\n        let y = 22;\n        let q = &mut p;\n        *q = &y;\n    }\n    deref(p);\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 8 && d[0].1.contains("does not live long enough"), "{d:?}");
+    assert_eq!(check("fn deref(_: &i32) {}\nfn main() {\n    let x = 44;\n    let mut p = &x;\n    {\n        let y = 22;\n        let q = &mut p;\n        *q = &y;\n        deref(p);\n    }\n    let z = 1;\n    p = &z;\n    deref(p);\n}\n"), vec![]);
+    assert_eq!(check("fn main() {\n    let y = 22;\n    let x = 44;\n    let mut p = &x;\n    let q = &mut p;\n    *q = &y;\n    println!(\"{}\", p);\n}\n"), vec![]);
+}
+
+/// A `&mut` local passed for a type parameter not known yet (`fn g<T>(x: T)`) is moved, not reborrowed (E0382 when
+/// used after); one passed where the parameter is a `&mut` is reborrowed
+#[test]
+fn mut_ref_moved_into_type_parameter() {
+    let d = check("struct X(u32);\nimpl X {\n    fn f(&mut self) {\n        generic(self);\n        self.0 += 1;\n    }\n}\nfn generic<T>(_x: T) {}\nfn main() {}\n");
+    assert!(d.len() == 1 && d[0].0 == 5 && d[0].1.contains("moved"), "{d:?}");
+    assert_eq!(check("struct X(u32);\nimpl X {\n    fn f(&mut self) {\n        by_ref(self);\n        self.0 += 1;\n    }\n}\nfn by_ref(_x: &mut X) {}\nfn main() {}\n"), vec![]);
+}
+
+/// Two fields of a union are the same memory: `&mut u.s.a` and `&u.z.c` conflict (E0502); fields of the same field
+/// do not
+#[test]
+fn union_fields_overlap() {
+    let src = |second: &str| format!("#[derive(Clone, Copy)]\nstruct S {{\n    a: u8,\n    b: u8,\n}}\n#[derive(Clone, Copy)]\nstruct Z {{\n    c: u8,\n    d: u8,\n}}\nunion U {{\n    s: S,\n    z: Z,\n}}\nfn main() {{\n    unsafe {{\n        let mut u = U {{ s: S {{ a: 1, b: 2 }} }};\n        let m = &mut u.s.a;\n        let n = &{second};\n        println!(\"{{}} {{}}\", m, n);\n    }}\n}}\n");
+    let d = check(&src("u.z.c"));
+    assert!(d.len() == 1 && d[0].0 == 19, "{d:?}");
+    assert_eq!(check(&src("u.s.b")), vec![]);
+}
+
+/// E0582: a lifetime a `for<'a>` binder declares that only the bound's result or an associated type's binding names
+#[test]
+fn e0582_unconstrained_binder() {
+    let d = check("fn bar<F>(_t: F)\nwhere\n    F: for<'a> Fn() -> Option<&'a i32>,\n{\n}\nfn main() {}\n");
+    assert!(d.len() == 1 && d[0].0 == 3 && d[0].1.contains("E0582"), "{d:?}");
+    let d = check("fn baz<F>(_t: F)\nwhere\n    F: for<'a> Iterator<Item = &'a i32>,\n{\n}\nfn main() {}\n");
+    assert!(d.len() == 1 && d[0].0 == 3 && d[0].1.contains("E0582"), "{d:?}");
+    assert_eq!(check("fn ok<F, T, U>(_t: F)\nwhere\n    F: for<'a> Fn(&'a u8) -> &'a u8,\n    for<'a> &'a T: IntoIterator<Item = &'a U>,\n{\n}\nfn main() {}\n"), vec![]);
+}
+
+/// A move out of a static (E0507); a constant is a new value at each use
+#[test]
+fn move_out_of_static() {
+    let d = check("struct Foo {\n    foo: String,\n}\nstatic BAR: Foo = Foo { foo: String::new() };\nfn test(_f: Foo) {}\nfn main() {\n    test(BAR);\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 7 && d[0].1.contains("E0507"), "{d:?}");
+    assert_eq!(check("struct Foo {\n    foo: u8,\n}\nconst BAR: Foo = Foo { foo: 1 };\nfn test(_f: Foo) {}\nfn main() {\n    test(BAR);\n    println!(\"{}\", BAR.foo);\n}\n"), vec![]);
+}

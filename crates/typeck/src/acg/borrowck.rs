@@ -96,6 +96,9 @@ pub enum Ev {
     Escape(Vec<Src>),
     /// The local keeps these loans (what its initializer borrows directly): they must not be of a dead local
     Keep(u32, Vec<Src>),
+    /// These loans are stored behind the local's `&mut`s, so many derefs deep (`*q = &y` with q = &mut p): the
+    /// locals those point to hold them
+    Store(u32, u32, Vec<Src>),
 }
 
 #[derive(Clone, Debug)]
@@ -277,7 +280,22 @@ fn made_temp(x: &Expr) -> bool {
         Expr::MethodCall(..) => true,
         Expr::Call(f, _) => matches!(&**f, Expr::Path(_, p) if p.segs.last().is_some_and(|s| s.name.starts_with(|c: char| c.is_ascii_lowercase() || c == '_'))),
         Expr::Macro(p, ..) => p.segs.last().is_some_and(|s| s.name == "vec" || s.name == "format"),
+        // (a tuple / array / struct literal of a value only known when it runs (`(v,)` of a local v): not promoted to a
+        // static as a constant one is (`&(1, 2)`), so a temporary)
+        Expr::Tuple(xs) | Expr::Array(xs) => !xs.is_empty() && xs.iter().any(runtime_value),
+        Expr::Struct(_, fs, None) => fs.iter().any(|f| runtime_value(&f.1)),
         _ => false,
+    }
+}
+
+/// e's value is only known when it runs: it reads a local (a lowercase name), calls something or makes a temporary
+fn runtime_value(e: &Expr) -> bool {
+    match e {
+        Expr::Paren(x) | Expr::Field(x, _, _) | Expr::Cast(x, _) | Expr::Unary(_, x, _) | Expr::Ref(_, x) => runtime_value(x),
+        Expr::Path(None, p) => p.segs.len() == 1 && p.segs[0].name.starts_with(|c: char| c.is_ascii_lowercase() || c == '_') && !matches!(p.segs[0].name.as_str(), "true" | "false"),
+        Expr::Call(..) | Expr::MethodCall(..) | Expr::Index(..) | Expr::Macro(..) | Expr::Block(..) | Expr::If(..) | Expr::Match(..) => true,
+        Expr::Binary(_, a, b, _) => runtime_value(a) || runtime_value(b),
+        _ => made_temp(e),
     }
 }
 
@@ -329,11 +347,18 @@ pub fn direct_ref(a: &Expr, out: &mut Vec<usize>) {
     }
 }
 
+/// ZUSTC_BORROWCK=n: the level of the check (read once: it is asked for each function)
 pub fn level() -> u8 {
-    match std::env::var("ZUSTC_BORROWCK") {
+    static L: std::sync::OnceLock<u8> = std::sync::OnceLock::new();
+    *L.get_or_init(|| match std::env::var("ZUSTC_BORROWCK") {
         Ok(v) => v.parse().unwrap_or(2),
         Err(_) => 2,
-    }
+    })
+}
+
+fn bk_debug() -> bool {
+    static C: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *C.get_or_init(|| std::env::var_os("ZUSTC_BK_DEBUG").is_some())
 }
 
 /// `Copy` for the borrow checker. Unlike `Program::implements`, a derived `Copy` on a generic type also needs its
@@ -433,7 +458,7 @@ fn path_str(locals: &[Local], p: &BPlace) -> String {
                 if !f.starts_with('[') {
                     s.push('.');
                 }
-                s.push_str(f);
+                s.push_str(f.trim_start_matches(UNION_FIELD));
             }
             Proj::Deref(_) | Proj::Shr => {
                 // (auto-deref before a field is not written)
@@ -466,8 +491,22 @@ fn prefix(a: &[Proj], b: &[Proj]) -> bool {
         (None, Some(_)) => *x == Proj::Index,
         (None, None) => x == y || (*x == Proj::Index && *y == Proj::Index),
     };
-    a.len() <= b.len() && a.iter().zip(b).all(|(x, y)| same(x, y))
+    for (x, y) in a.iter().zip(b) {
+        // (two fields of a union: the same memory, whatever follows)
+        if let (Proj::Field(f), Proj::Field(g)) = (x, y) {
+            if f != g && f.starts_with(UNION_FIELD) && g.starts_with(UNION_FIELD) {
+                return true;
+            }
+        }
+        if !same(x, y) {
+            return false;
+        }
+    }
+    a.len() <= b.len()
 }
+
+/// The mark of a union's field in a place (Proj::Field)
+const UNION_FIELD: char = '\u{1}';
 
 /// The two places overlap (one contains the other)
 fn overlap(a: &BPlace, b: &BPlace) -> bool {
@@ -600,7 +639,7 @@ impl Bk {
         if self.level == 0 || self.evs.is_empty() {
             return None;
         }
-        if std::env::var_os("ZUSTC_BK_DEBUG").is_some() {
+        if bk_debug() {
             for (i, l) in self.locals.iter().enumerate() {
                 eprintln!("local {i}: {} refs={} copy={} mut={:?}", l.name, l.refs, l.copy, l.mutable);
             }
@@ -759,24 +798,25 @@ impl Bk {
         };
         if loans_on {
             let mut changed = true;
+            let (mut out, mut live) = (vec![0u64; words], vec![0u64; words]);
             while changed {
                 changed = false;
                 for b in (0..n).rev() {
-                    let mut out = vec![0u64; words];
+                    out.fill(0);
                     for &s in &succ[b] {
                         for (o, x) in out.iter_mut().zip(&live_in[s]) {
                             *o |= x;
                         }
                     }
-                    let mut live = out.clone();
+                    live.copy_from_slice(&out);
                     for e in evs[b].iter().rev() {
                         transfer_back(&mut live, e);
                     }
                     if live != live_in[b] {
-                        live_in[b] = live;
+                        live_in[b].copy_from_slice(&live);
                         changed = true;
                     }
-                    live_out[b] = out;
+                    live_out[b].copy_from_slice(&out);
                 }
             }
         }
@@ -805,11 +845,13 @@ impl Bk {
             }
             let mut st = st_in[b].clone().unwrap();
             self.run_block(&evs[b], &mut st, None, &live_out[b], loans_on, &mut vec![]);
-            for &s in &succ[b] {
+            let ns = succ[b].len();
+            for (i, &s) in succ[b].iter().enumerate() {
                 let ch = match &mut st_in[s] {
                     Some(x) => x.join(&st),
                     slot @ None => {
-                        *slot = Some(st.clone());
+                        // (the last successor takes the state: it is not used after)
+                        *slot = Some(if i + 1 == ns { std::mem::take(&mut st) } else { st.clone() });
                         true
                     }
                 };
@@ -820,10 +862,10 @@ impl Bk {
             }
         }
         // ---- report (on the fixpoint)
+        let mut live_at = vec![];
         for b in 0..n {
-            let Some(st) = &st_in[b] else { continue };
-            let mut st = st.clone();
-            self.run_block(&evs[b], &mut st, Some(&mut errs), &live_out[b], loans_on, &mut vec![]);
+            let Some(mut st) = st_in[b].take() else { continue };
+            self.run_block(&evs[b], &mut st, Some(&mut errs), &live_out[b], loans_on, &mut live_at);
             // (the function ends here (return / panic): a loan stored behind a parameter must not be of a local)
             if succ[b].is_empty() {
                 for &ln in &st.escaped {
@@ -1029,6 +1071,42 @@ impl Bk {
                 Ev::Escape(srcs) => {
                     for ln in self.resolve(srcs, st) {
                         add_sorted(&mut st.escaped, ln);
+                    }
+                }
+                Ev::Store(l, derefs, srcs) => {
+                    let ls = self.resolve(srcs, st);
+                    // (the locals the `&mut`s point to, deref by deref; one behind a parameter: it outlives the
+                    // function)
+                    let mut at = vec![*l];
+                    let mut escapes = false;
+                    for _ in 0..*derefs {
+                        let mut next = vec![];
+                        for &x in &at {
+                            for &ln in st.held(x) {
+                                let lo = &self.loans[ln as usize];
+                                if !lo.mutable {
+                                    continue;
+                                }
+                                if lo.place.owned_len() < lo.place.proj.len() && self.params.contains(&lo.place.local) {
+                                    escapes = true;
+                                } else if !next.contains(&lo.place.local) {
+                                    next.push(lo.place.local);
+                                }
+                            }
+                        }
+                        at = next;
+                    }
+                    if escapes {
+                        for &ln in &ls {
+                            add_sorted(&mut st.escaped, ln);
+                        }
+                    }
+                    for t in at {
+                        if t != *l && self.locals[t as usize].refs {
+                            let mut h = st.held(t).to_vec();
+                            h.extend_from_slice(&ls);
+                            st.set_holds(t, h);
+                        }
                     }
                 }
                 Ev::Ret(srcs, sp) => {
@@ -1355,6 +1433,12 @@ impl Cx<'_> {
         }
         self.rg.scrut = if self.rg_on() { self.rt_expr(e) } else { None };
         self.bk.scrut_place = self.bk_place(e).map(|p| (p.0, err_pos(e)));
+        if let (Ok(Some(p)), true) = (&r, self.bk.level >= 1) {
+            let t = p.ty();
+            for pat in pats {
+                self.drop_pat_check(pat, t, err_pos(e))?;
+            }
+        }
         r
     }
 
@@ -1528,8 +1612,11 @@ impl Cx<'_> {
                     return None;
                 }
                 let f = sd.fields.iter().find(|f| f.0 == *name)?;
-                // (the fields of a union are the same memory: a union place is the whole union)
-                if !self.prog.unions.contains(&self.prog.structs[self.prog.base_of(sid) as usize].name) {
+                // (the fields of a union are the same memory: one is marked, and two different ones overlap whatever
+                // follows them (`u.s.a` and `u.z.c`, see prefix))
+                if self.prog.unions.contains(&self.prog.structs[self.prog.base_of(sid) as usize].name) {
+                    p.proj.push(Proj::Field(format!("{UNION_FIELD}{name}")));
+                } else {
                     p.proj.push(Proj::Field(name.clone()));
                 }
                 Some((p, Some(f.1)))
@@ -2278,9 +2365,14 @@ impl Cx<'_> {
         let whole = p.proj.is_empty();
         // (`*x = ..` / `x.f = ..` through a reference parameter: what is stored outlives the function)
         let through = p.owned_len() < p.proj.len() && self.bk.params.contains(&l);
+        let derefs = p.proj.iter().filter(|x| matches!(x, Proj::Deref(false))).count() as u32;
         self.bk_ev(Ev::Acc(p, Acc::Write, err_pos(left)));
         if through && !srcs.is_empty() {
             self.bk_ev(Ev::Escape(srcs.to_vec()));
+        }
+        // (through a `&mut` the local holds: what is stored is held by what it points to)
+        if !through && derefs > 0 && !srcs.is_empty() && self.bk.locals[l as usize].refs {
+            self.bk_ev(Ev::Store(l, derefs, srcs.to_vec()));
         }
         if self.bk.locals[l as usize].refs {
             if whole {
