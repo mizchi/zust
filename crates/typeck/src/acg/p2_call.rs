@@ -2749,7 +2749,10 @@ impl Cx<'_> {
             Ty::Ref(_, i) => (*i, true),
             t => (t, false),
         };
-        if !(t.is_int() || t.is_float() || matches!(t, Ty::Bool | Ty::Char)) {
+        // (a primitive; or a struct when two traits of the program's have the method, so that the bound decides which:
+        // `s.scaled()` of `S: S1` with S's instance implementing S0 and S1)
+        let multi = || matches!(t, Ty::Struct(_)) && self.prog.multi_trait_methods.contains(method);
+        if !(t.is_int() || t.is_float() || matches!(t, Ty::Bool | Ty::Char) || multi()) {
             return None;
         }
         let gens = &self.prog.sigs.get(self.root as usize)?.generics;
@@ -2759,7 +2762,8 @@ impl Cx<'_> {
             }
             for b in bounds {
                 let tr = b.split('<').next().unwrap_or(b).trim();
-                let Some(id) = self.trait_candidate(&format!("{}::{method}", self.ty_key(t)), tr) else { continue };
+                // (the impl's method, or the trait's default when the impl leaves it out: `<u16 as S0>::scaled`)
+                let Some(id) = self.trait_candidate(&format!("{}::{method}", self.ty_key(t)), tr).or_else(|| self.trait_default(tr, method, t)) else { continue };
                 let first = self.prog.sigs[id as usize].params.first().copied();
                 let takes_ref = matches!(first, Some(Ty::Ref(..)));
                 let takes_mut = matches!(first, Some(Ty::Ref(true, _)));

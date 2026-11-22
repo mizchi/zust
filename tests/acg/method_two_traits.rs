@@ -40,11 +40,18 @@ trait S1 {
 }
 impl S0 for u16 {}
 impl S1 for u16 {}
+#[derive(Clone, Copy)]
+struct P;
+impl S0 for P {}
+impl S1 for P {}
 fn by0<S: S0>(s: &S) -> u8 {
     s.scaled()
 }
+fn by1<S: S1>(s: S) -> u8 {
+    s.scaled()
+}
 fn main() {
-    println!("{}", by0(&5u16));
+    println!("{} {} {} {} {} {}", by0(&5u16), by1(5u16), <u16 as S1>::scaled(&1), <u16 as S0>::scaled(&1), by0(&P), by1(P));
     let ab = AB;
     println!("{} {} {} {}", ab.foo(), A::foo(&ab), <AB as B>::foo(&ab), OnlyA.foo());
 }
