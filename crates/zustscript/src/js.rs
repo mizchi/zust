@@ -4,8 +4,10 @@
 //!   (the shape TS narrows as a discriminated union);
 //! - numbers keep their Rust meaning: i32 wraps (`| 0`, `Math.imul`), u32 wraps (`>>> 0`), i64 is a BigInt
 //!   (`BigInt.asIntN(64, ..)`), integer division truncates and fails on zero, `as` from f64 saturates;
-//! - a function that performs effects is a generator (`function*`), `perform` is `yield`, a call to it is
-//!   `yield*`, and `handle` runs the body under `$handle` (one-shot deep handlers);
+//! - effects whose handlers all resume in tail position (`Info::direct`) are plain calls: `perform` is
+//!   `$perform("Op", ..)`, which calls the nearest handler's arm, and `handle` is `$handleD`; for the other effects, a
+//!   function that performs one is a generator (`function*`), `perform` is `yield`, a call to it is `yield*`, and
+//!   `handle` runs the body under `$handle` (one-shot deep handlers);
 //! - `match` is an `if` chain; a block, `match` or `if` in a value position becomes statements when it is the
 //!   value of a `let` or of the function, and an immediately called function otherwise.
 
@@ -28,6 +30,8 @@ pub struct Js<'a> {
     /// inside a generator (an effectful function, a handled body, a handler arm)
     gen_: bool,
     conts: Vec<String>,
+    /// the continuations of the direct (tail-resumptive) handler being written: `k(x)` is just `x`
+    dconts: Vec<String>,
     pub helpers: BTreeSet<&'static str>,
     pub jsx: bool,
     /// module → names imported from it (externs)
@@ -40,6 +44,8 @@ pub struct Js<'a> {
     queued: HashSet<String>,
     /// `@wasm fn`s that go to wasm (empty with --all-js): not written here, their uses are collected
     pub wasm_fns: HashSet<String>,
+    /// import the helpers from the shared `zsc-runtime.js` (the default), or write them into the module
+    pub shared_runtime: bool,
     pub wasm_wanted: Vec<(String, Vec<Ty>)>,
     /// locals in scope: (source name, JS name), innermost last. Every JS name a function uses is unique in it
     /// (`x`, then `x$1` for a second `x`), so flattened blocks, shadowing and match arms never collide
@@ -148,6 +154,10 @@ const HELPERS: &[(&str, &str)] = &[
         "$handle",
         "// A deep handler: runs the generator `body`; an operation in `ops` goes to `arm` with a one-shot continuation,\n// any other operation is passed on to the enclosing handler\nfunction* $handle(body, ops, arm) {\n  const g = body();\n  function* resume(v) {\n    for (;;) {\n      const r = g.next(v);\n      if (r.done) return r.value;\n      if (ops.includes(r.value.TAG)) {\n        let used = false;\n        const k = function* (x) {\n          if (used) throw new Error(\"zustscript: a continuation was resumed twice\");\n          used = true;\n          return yield* resume(x);\n        };\n        return yield* arm(r.value, k);\n      }\n      v = yield r.value;\n    }\n  }\n  return yield* resume(undefined);\n}",
     ),
+    (
+        "$perform",
+        "// Direct (tail-resumptive) handlers: a chain of frames; an operation calls the nearest frame's arm, which runs\n// under the handlers outside its own `handle` (deep handler semantics)\nlet $cur = null;\nfunction $perform(op, ...a) {\n  for (let f = $cur; f !== null; f = f.p) {\n    const h = f.h[op];\n    if (h !== undefined) {\n      const s = $cur;\n      $cur = f.p;\n      try {\n        return h(...a);\n      } finally {\n        $cur = s;\n      }\n    }\n  }\n  throw new Error(\"zustscript: unhandled effect \" + op);\n}\n\nfunction $handleD(h, body) {\n  const f = { h, p: $cur };\n  $cur = f;\n  try {\n    return body();\n  } finally {\n    $cur = f.p;\n  }\n}",
+    ),
     ("$run", "function $run(g) {\n  const r = g.next();\n  if (!r.done) throw new Error(\"zustscript: unhandled effect \" + r.value.TAG);\n  return r.value;\n}"),
 ];
 
@@ -160,6 +170,7 @@ impl<'a> Js<'a> {
             tmp: 0,
             gen_: false,
             conts: vec![],
+            dconts: vec![],
             helpers: BTreeSet::new(),
             jsx: false,
             imports: BTreeMap::new(),
@@ -168,6 +179,7 @@ impl<'a> Js<'a> {
             queue: vec![],
             queued: HashSet::new(),
             wasm_fns: HashSet::new(),
+            shared_runtime: true,
             wasm_wanted: vec![],
             locals: vec![],
             declared: HashSet::new(),
@@ -289,7 +301,7 @@ impl<'a> Js<'a> {
 
     fn function(&mut self, it: &Item, js_name: &str, public: bool) {
         let Item::Fn { name, args, body, .. } = it else { return };
-        let gen_ = !self.info.effects[name].is_empty();
+        let gen_ = self.generator(name);
         self.locals.clear();
         // (the module's own names: a local never takes one, so a call of a top-level function still reaches it)
         self.declared.clear();
@@ -336,6 +348,15 @@ impl<'a> Js<'a> {
         let mut need: BTreeSet<&str> = self.helpers.clone();
         if need.contains("$handle") {
             need.insert("$run");
+        }
+        if need.contains("$perform") {
+            need.insert("$handleD");
+        }
+        if self.shared_runtime {
+            if !need.is_empty() {
+                let _ = writeln!(h, "import {{ {} }} from \"./{RUNTIME}.js\";", need.iter().copied().collect::<Vec<_>>().join(", "));
+            }
+            return h;
         }
         for (n, code) in HELPERS {
             if need.contains(n) {
@@ -692,6 +713,48 @@ impl<'a> Js<'a> {
         }
     }
 
+    /// The function is a generator: it performs (and does not handle) an effect that is not direct
+    fn generator(&self, name: &str) -> bool {
+        self.info.effects.get(name).is_some_and(|es| es.iter().any(|e| !self.info.direct.contains(e)))
+    }
+
+    /// A tail-resumptive handler: the arms are plain functions that `$perform` calls, `k(x)` in an arm is `x`, and
+    /// the body runs as a plain function under the handler
+    fn direct_handle(&mut self, body: &Expr, arms: &[HArm]) -> String {
+        self.helpers.insert("$perform");
+        let saved = (std::mem::take(&mut self.out), self.ind, std::mem::take(&mut self.conts), std::mem::take(&mut self.dconts), self.gen_);
+        self.gen_ = false;
+        let pad = "  ".repeat(saved.1);
+        let mut parts = vec![];
+        for a in arms {
+            self.ind = saved.1 + 1;
+            let mark = self.locals.len();
+            let ps: Vec<String> = (0..a.pats.len()).map(|i| format!("$a{i}")).collect();
+            let mut binds = vec![];
+            for (i, p) in a.pats.iter().enumerate() {
+                self.pat_binds(p, &format!("$a{i}"), &mut binds);
+            }
+            for (n, v) in binds {
+                let js = self.bind(&n);
+                self.line(&format!("const {js} = {v};"));
+            }
+            self.dconts.push(a.k.clone());
+            self.stmt_expr(&a.body, &Dest::Return);
+            self.dconts.pop();
+            self.locals.truncate(mark);
+            let b = std::mem::take(&mut self.out);
+            // (a computed key: an operation named `__proto__` is an own property, not the table's prototype)
+            parts.push(format!("[{}]: ({}) => {{\n{b}{pad}}}", js_str(&a.variant), ps.join(", ")));
+        }
+        self.ind = saved.1 + 1;
+        self.dconts.clear();
+        self.stmt_expr(body, &Dest::Return);
+        let b = std::mem::take(&mut self.out);
+        (self.out, self.ind, self.conts, self.dconts, self.gen_) = saved;
+        // (a null prototype: an operation named like an Object method, `toString`, must not find an inherited one)
+        format!("$handleD({{ __proto__: null, {} }}, () => {{\n{b}{pad}}})", parts.join(", "))
+    }
+
     fn iife(&mut self, e: &Expr) -> String {
         if let Some(pos) = loop_exit(e) {
             self.errors.push((pos, "`break` / `continue` here would have to leave a function in the JS output: move this `if` / `match` into a statement of its own (`let v = if ..;`)".into()));
@@ -796,9 +859,13 @@ impl<'a> Js<'a> {
                 if let EK::Var(n) | EK::Path(_, n) = &f.kind {
                     match self.info.callee.get(&f.id).cloned() {
                         Some(Callee::Variant(en)) => return self.variant_value(&en, n, a),
-                        Some(Callee::Fn) if !self.info.effects[n].is_empty() => {
+                        Some(Callee::Fn) if self.generator(n) => {
                             let fname = self.fn_name(f.id, n);
                             return format!("(yield* {fname}({}))", a.join(", "));
+                        }
+                        Some(Callee::Local) if self.dconts.contains(n) => {
+                            // (tail-resumptive: the arm's value is the operation's result)
+                            return if a.is_empty() { "undefined".into() } else { a[0].clone() };
                         }
                         Some(Callee::Local) if self.conts.contains(n) => {
                             let a = if a.len() == 1 && a[0] == "undefined" { vec![] } else { a };
@@ -913,7 +980,7 @@ impl<'a> Js<'a> {
             EK::Block(_, None) => "undefined".into(),
             EK::Match(..) | EK::Assign(..) | EK::While(..) | EK::For(..) | EK::Break | EK::Continue => unreachable!(),
             EK::Closure(ps, body) => {
-                let saved = (self.gen_, std::mem::take(&mut self.conts));
+                let saved = (self.gen_, std::mem::take(&mut self.conts), std::mem::take(&mut self.dconts));
                 self.gen_ = false;
                 let mark = self.locals.len();
                 let ps: Vec<String> = ps.iter().map(|p| self.bind(&p.0)).collect();
@@ -928,7 +995,7 @@ impl<'a> Js<'a> {
                     let b = self.expr(body);
                     if b.starts_with('{') { format!("({b})") } else { b }
                 };
-                (self.gen_, self.conts) = saved;
+                (self.gen_, self.conts, self.dconts) = saved;
                 self.locals.truncate(mark);
                 format!("({}) => {b}", ps.join(", "))
             }
@@ -977,7 +1044,14 @@ impl<'a> Js<'a> {
             EK::Perform(_, v, args) => {
                 let a: Vec<String> = args.iter().map(|x| self.expr(x)).collect();
                 let en = self.info.variant_of[v].clone();
+                if self.info.direct.contains(&en) {
+                    self.helpers.insert("$perform");
+                    return format!("$perform({})", [js_str(v)].into_iter().chain(a).collect::<Vec<_>>().join(", "));
+                }
                 format!("(yield {})", self.variant_value(&en, v, a))
+            }
+            EK::Handle(body, arms) if arms.iter().all(|a| self.info.variant_of.get(&a.variant).is_some_and(|en| self.info.direct.contains(en))) => {
+                self.direct_handle(body, arms)
             }
             EK::Handle(body, arms) => {
                 self.helpers.insert("$handle");
@@ -1277,6 +1351,179 @@ fn uses_word(s: &str, w: &str) -> bool {
     s.match_indices(w).any(|(k, _)| (k == 0 || !word(b[k - 1])) && b.get(k + w.len()).is_none_or(|c| !word(*c)))
 }
 
+// ---------------------------------------------------------------- the extern check (TS declarations vs zustscript)
+
+/// A zustscript type as TS sees the JS value: numbers are `number` (no brands: TS's own declarations use `number`)
+fn ts_plain(t: &Ty, named: &mut BTreeSet<String>) -> String {
+    match t {
+        Ty::I32 | Ty::U32 | Ty::F32 | Ty::F64 => "number".into(),
+        Ty::I64 => "bigint".into(),
+        Ty::Str => "string".into(),
+        Ty::Bool => "boolean".into(),
+        Ty::Unit => "void".into(),
+        Ty::Typed(e) => typed_js(e).into(),
+        Ty::Jsx => {
+            named.insert("$ReactElement".into());
+            "$ReactElement".into()
+        }
+        Ty::Array(a) => {
+            let s = ts_plain(a, named);
+            if matches!(**a, Ty::Fn(..)) { format!("readonly ({s})[]") } else { format!("readonly {s}[]") }
+        }
+        Ty::Tuple(ts_) => format!("readonly [{}]", ts_.iter().map(|t| ts_plain(t, named)).collect::<Vec<_>>().join(", ")),
+        Ty::Fn(a, r) => {
+            let ps: Vec<String> = a.iter().enumerate().map(|(k, t)| format!("a{k}: {}", ts_plain(t, named))).collect();
+            format!("({}) => {}", ps.join(", "), ts_plain(r, named))
+        }
+        // (a local copy of the record or enum with its numbers unbranded: TS's values carry no brands)
+        Ty::Named(n, a) => {
+            named.insert(n.clone());
+            if a.is_empty() { format!("$P_{n}") } else { format!("$P_{n}<{}>", a.iter().map(|t| ts_plain(t, named)).collect::<Vec<_>>().join(", ")) }
+        }
+        Ty::Param(p) => p.clone(),
+        Ty::Var(_) => "unknown".into(),
+    }
+}
+
+/// The unbranded copy of a record or enum, in the `.d.ts`'s shape
+fn ts_plain_def(n: &str, items: &[Item], info: &Info, named: &mut BTreeSet<String>) -> Option<String> {
+    for it in items {
+        match it {
+            Item::Record { name, params, .. } if name == n => {
+                let g = if params.is_empty() { String::new() } else { format!("<{}>", params.join(", ")) };
+                let fs: Vec<String> = info.records[n].fields.iter().map(|(f, t)| format!("readonly {f}: {}", ts_plain(t, named))).collect();
+                return Some(format!("type $P_{n}{g} = {{ {} }};", fs.join("; ")));
+            }
+            Item::Enum { name, params, .. } if name == n => {
+                let e = &info.enums[n];
+                let g = if params.is_empty() { String::new() } else { format!("<{}>", params.join(", ")) };
+                let alts: Vec<String> = e
+                    .variants
+                    .iter()
+                    .map(|(v, fs)| {
+                        if e.unit_only() && !e.is_effect() {
+                            js_str(v)
+                        } else {
+                            let mut s = format!("{{ readonly TAG: {}", js_str(v));
+                            for (k, t) in fs.iter().enumerate() {
+                                let _ = write!(s, "; readonly _{k}: {}", ts_plain(t, named));
+                            }
+                            s + " }"
+                        }
+                    })
+                    .collect();
+                return Some(format!("type $P_{n}{g} = {};", alts.join(" | ")));
+            }
+            _ => {}
+        }
+    }
+    None
+}
+
+/// The TS file that checks every `extern` against the TS declaration it names: the real function must be
+/// assignable to the type zustscript gives it (arguments are checked contravariantly, results covariantly).
+/// Returns the file and, for each extern, (its line in the file, the extern's name, its position in the source).
+pub fn extern_check(items: &[Item], info: &Info) -> Option<(String, Vec<(usize, String, Pos)>)> {
+    let mut named = BTreeSet::new();
+    let mut imports: Vec<String> = vec![];
+    let mut checks: Vec<(String, String, Pos)> = vec![];
+    for it in items {
+        if let Item::Extern { name, module, pos, .. } = it {
+            let (sig, _, js) = &info.externs[name];
+            let g = if sig.generics.is_empty() { String::new() } else { format!("<{}>", sig.generics.join(", ")) };
+            let ps: Vec<String> = sig.args.iter().enumerate().map(|(k, t)| format!("a{k}: {}", ts_plain(t, &mut named))).collect();
+            let want = format!("{g}({}) => {}", ps.join(", "), ts_plain(&sig.ret, &mut named));
+            let k = checks.len();
+            let value = match module {
+                Some(m) => {
+                    // (a dotted name `api.read`: import the root, reach the member through it)
+                    let root = js.split('.').next().unwrap_or(js);
+                    imports.push(format!("import {{ {root} as $e{k} }} from {};", js_str(m)));
+                    format!("$e{k}{}", &js[root.len()..])
+                }
+                None => js.clone(),
+            };
+            checks.push((format!("const $c{k}: {want} = {value};"), name.clone(), *pos));
+        }
+    }
+    if checks.is_empty() {
+        return None;
+    }
+    let mut o = String::from("// generated by zsc --check-externs: each extern's TS declaration must fit its zustscript signature\n");
+    let mut defs = vec![];
+    let mut done = BTreeSet::new();
+    done.insert("$ReactElement".to_string());
+    while let Some(n) = named.iter().find(|n| !done.contains(*n)).cloned() {
+        done.insert(n.clone());
+        if let Some(d) = ts_plain_def(&n, items, info, &mut named) {
+            defs.push(d);
+        }
+    }
+    // (after the expansion: a record's Jsx field needs the import too)
+    if named.contains("$ReactElement") {
+        o.push_str("import type { ReactElement as $ReactElement } from \"react\";\n");
+    }
+    for i in imports {
+        o.push_str(&i);
+        o.push('\n');
+    }
+    o.push_str("export {};\n");
+    for d in defs {
+        o.push_str(&d);
+        o.push('\n');
+    }
+    let mut lines = vec![];
+    for (c, name, pos) in checks {
+        let _ = writeln!(o, "// extern {name}");
+        lines.push((o.lines().count() + 1, name, pos));
+        o.push_str(&c);
+        o.push('\n');
+    }
+    Some((o, lines))
+}
+
+/// The name of the shared runtime module (`zsc-runtime.js` and `.d.ts`, written next to the modules)
+pub const RUNTIME: &str = "zsc-runtime";
+/// The first line of the shared runtime file: how zsc tells it from a module of the same name.
+pub const RUNTIME_HEADER: &str = "// generated by zsc: the runtime the modules share (helpers, and the constructors of the numeric brands)\n";
+
+/// The shared runtime: every helper and every brand constructor, exported (a bundler keeps only what the modules
+/// import). Its content does not depend on the module, so the modules compiled into one directory share one file.
+pub fn runtime_js() -> String {
+    let mut o = String::from(RUNTIME_HEADER);
+    o.push('\n');
+    for (_, code) in HELPERS {
+        for line in code.lines() {
+            if line.starts_with("function") {
+                o.push_str("export ");
+            }
+            o.push_str(line);
+            o.push('\n');
+        }
+        o.push('\n');
+    }
+    let all: Vec<&str> = BRANDS.iter().map(|b| b.0).collect();
+    o + &brand_runtime(&all)
+}
+
+/// The types of the shared runtime: the numeric brands and their constructors
+pub fn runtime_dts() -> String {
+    let mut o = String::from("// generated by zsc: the numeric brands (a brand on top of number; make one with `i32(1)` / `f64(0.5)`)\n\n");
+    for (n, what, _) in BRANDS {
+        let _ = writeln!(o, "/** {what} */\nexport type {n} = number & {{ readonly __zsc_num: \"{n}\" }};\nexport declare function {n}(x: number): {n};");
+    }
+    o
+}
+
+/// With the shared runtime, the module re-exports the brand constructors its `.d.ts` uses (TS code imports them
+/// from the module, as before)
+pub fn brand_reexport(used: &[&str]) -> String {
+    if used.is_empty() {
+        return String::new();
+    }
+    format!("export {{ {} }} from \"./{RUNTIME}.js\";\n", used.join(", "))
+}
+
 /// The constructors of the brands the `.d.ts` uses, for the JS module: TS code makes an `i32` with `i32(x)`,
 /// which checks (it does not convert: a TS number that is not an integer is a mistake at the boundary)
 pub fn brand_runtime(used: &[&str]) -> String {
@@ -1294,7 +1541,7 @@ pub fn brand_runtime(used: &[&str]) -> String {
 }
 
 /// The `.d.ts`, and the numeric brands it uses
-pub fn dts(items: &[Item], info: &Info) -> (String, Vec<&'static str>) {
+pub fn dts(items: &[Item], info: &Info, shared_runtime: bool) -> (String, Vec<&'static str>) {
     let mut o = String::new();
     USES_JSX.with(|u| u.set(false));
     for it in items {
@@ -1364,7 +1611,9 @@ pub fn dts(items: &[Item], info: &Info) -> (String, Vec<&'static str>) {
         h.push_str("import type { ReactElement as $ReactElement } from \"react\";\n");
     }
     h.push('\n');
-    if !used.is_empty() {
+    if !used.is_empty() && shared_runtime {
+        let _ = writeln!(h, "// numbers keep their zustscript type: a brand on top of number (make one with `i32(1)` / `f64(0.5)`)\nimport {{ {0} }} from \"./{RUNTIME}.js\";\nexport {{ {0} }};\n", used.join(", "));
+    } else if !used.is_empty() {
         h.push_str("// numbers keep their zustscript type: a brand on top of number (make one with `i32(1)` / `f64(0.5)`)\n");
         for (n, what, _) in BRANDS {
             if used.contains(n) {

@@ -1,0 +1,4 @@
+// a record with a Jsx field, returned by an extern: the check imports ReactElement for the expanded record
+type View = { title: String, body: Jsx }
+extern "./lib.js" fn view() -> View = "view";
+pub fn f() -> String { view().title }
