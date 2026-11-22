@@ -29,7 +29,7 @@
 
 ## Status
 
-Numbers measured <!-- measured -->2026-11-22, f2f16b8<!-- /measured --> by CI on each push to main (bench.yml runs
+Numbers measured <!-- measured -->2026-11-22, 08899a6<!-- /measured --> by CI on each push to main (bench.yml runs
 `bench/ci_bench.py` and `bench/rust_ui.py`, then `scripts/update_readme.py` writes them here). Times come from shared
 GitHub Actions runners and vary by about ±20%; the instruction counts (valgrind) do not.
 
@@ -44,7 +44,7 @@ only the tests it can be asked to handle (no nightly features, auxiliary crates 
 | run-pass (builds, runs, same output) | 2385 | 1811 (75.9%) |
 | check-pass (accepted by `zustc check`) | 1807 | 1493 (82.6%) |
 | build-pass | 135 | 101 (74.8%) |
-| compile-fail (rejected at an annotated line) | 7358 | 4242 (57.7%) |
+| compile-fail (rejected at an annotated line) | 7358 | 4263 (57.9%) |
 <!-- /auto:ui -->
 
 [What is supported](#what-is-supported) breaks this down by area.
@@ -56,22 +56,22 @@ Build speed, build cache size and LSP latency on generated programs of 1000 / 50
 <!-- auto:kpi -->
 | KPI | gen1000 | gen5000 |
 |---|---:|---:|
-| cold build | 158 ms | 704 ms |
-| no-op build | 0.9 ms | 0.9 ms |
-| build after editing one function | 24.3 ms | 84.4 ms |
-| `check` | 129 ms | 626 ms |
+| cold build | 124 ms | 555 ms |
+| no-op build | 0.8 ms | 0.7 ms |
+| build after editing one function | 18.0 ms | 65.6 ms |
+| `check` | 82 ms | 378 ms |
 | no-op build (instructions) | 0.6 M | 0.6 M |
-| edit one function (instructions) | 124.6 M | 591.3 M |
-| `check` (instructions) | 785.2 M | 3871.3 M |
+| edit one function (instructions) | 124.9 M | 591.9 M |
+| `check` (instructions) | 785.0 M | 3873.1 M |
 | build cache on disk | 387.2 KiB | 1902.8 KiB |
 | binary | 324.0 KiB | 1558.3 KiB |
-| cold build peak RSS | 19.1 MiB | 53.0 MiB |
+| cold build peak RSS | 19.3 MiB | 52.9 MiB |
 
 | zust-analyzer (zustc's own sources) | |
 |---|---:|
-| p50: definition, hover, completion, references, rename | 0.83 ms / 0.69 ms / 1.43 ms / 4.83 ms / 0.76 ms |
-| startup until indexed | 203 ms |
-| peak RSS | 93.7 MiB |
+| p50: definition, hover, completion, references, rename | 0.57 ms / 0.46 ms / 1.20 ms / 4.72 ms / 0.54 ms |
+| startup until indexed | 172 ms |
+| peak RSS | 93.9 MiB |
 <!-- /auto:kpi -->
 
 Every change is also measured on its own with `python3 bench/kpi_track.py`, so that small increases that add up stay
@@ -382,7 +382,7 @@ the measured numbers. The [reports](docs/reports/) explain each step.
 - [x] tests/ui run-pass: <!-- total:run-pass -->75.9% (1811 / 2385)
 - [x] tests/ui check-pass: <!-- total:check-pass -->82.6% (1493 / 1807)
 - [x] tests/ui build-pass: <!-- total:build-pass -->74.8% (101 / 135)
-- [ ] tests/ui compile-fail (an error on an annotated line): <!-- total:compile-fail -->57.7% (4242 / 7358)
+- [ ] tests/ui compile-fail (an error on an annotated line): <!-- total:compile-fail -->57.9% (4263 / 7358)
 - [x] real crates: fnv, adler2, hex, itoa, rustc-hash and cfg-if build and give the same output (6 / 6)
 - [x] zust-analyzer answers like rust-analyzer: 95.4% (rust-analyzer: 96.2%)
 
