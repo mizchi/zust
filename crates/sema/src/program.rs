@@ -3422,6 +3422,41 @@ impl Program {
         s
     }
 
+    /// Whether the program has placeholders for type parameters (zustc check's last round) at all
+    pub fn any_placeholder(&self) -> bool {
+        self.structs.any_placeholder.load(std::sync::atomic::Ordering::Relaxed)
+    }
+
+    /// Whether t is surely not Clone (`r.clone()` of `&t` is then the reference's clone): a type of the program with no
+    /// clone and no derive, or an instance with such an argument (`Option<NoClone>`), but for the shared pointers
+    pub fn surely_not_clone(&self, t: Ty, depth: u32) -> bool {
+        // (`&mut T` is not Clone: `Option<&mut T>` neither)
+        if let Ty::Ref(true, _) = t {
+            return true;
+        }
+        let Ty::Struct(sid) = t else { return false };
+        let b = self.base_of(sid);
+        let own = self.struct_item.get(b as usize).is_some_and(|&ii| ii < self.prelude_from);
+        // (a clone of the program's own; std's (`Vec<T>`) is Clone when its arguments are)
+        if depth > 4 || (own && self.method(sid, "clone").is_some()) {
+            return false;
+        }
+        let derived = self.derived.get(&b).is_some_and(|d| d.iter().any(|x| x == "Clone"));
+        if own && !derived && !self.implements(t, "Clone") {
+            return true;
+        }
+        self.clone_needs_args(b, own) && self.structs[sid as usize].args.iter().any(|&a| self.surely_not_clone(a, depth + 1))
+    }
+
+    /// Whether the base b is Clone only when its arguments are: a derive of the program's own, and std's containers
+    /// (`Option<T>: Clone` needs `T: Clone`). Not the shared pointers, the senders or the iterators (`Iter<'_, T>` is
+    /// Clone for every T)
+    pub fn clone_needs_args(&self, b: u32, own: bool) -> bool {
+        let name = self.structs[b as usize].name.as_str();
+        own || name.starts_with("#tuple")
+            || matches!(name, "Option" | "Result" | "Vec" | "VecDeque" | "BinaryHeap" | "HashMap" | "HashSet" | "BTreeMap" | "BTreeSet" | "RefCell" | "Reverse")
+    }
+
     /// sid is a placeholder (Program::placeholder); cheap when none was made
     pub fn is_placeholder(&self, sid: u32) -> bool {
         self.structs.any_placeholder.load(std::sync::atomic::Ordering::Relaxed) && self.structs[sid as usize].placeholder.is_some()

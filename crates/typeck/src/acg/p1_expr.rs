@@ -2387,40 +2387,8 @@ impl Cx<'_> {
                     return err(span, format!("the value of the associated type `{n}` in `{tr}` must be specified (E0191)"));
                 }
             }
-            // (E0038 too: a supertrait of the program's trait that takes Self by default (`trait Expr: PartialEq`))
-            {
-                let mut st = vec![tr.to_string()];
-                let mut seen: Vec<String> = vec![];
-                while let Some(t) = st.pop() {
-                    if seen.contains(&t) {
-                        continue;
-                    }
-                    for sup in self.prog.trait_supers.get(&t).cloned().unwrap_or_default() {
-                        if sup == "#SelfRhs" {
-                            return err(span, format!("the trait `{tr}` is not dyn compatible: it uses `Self` as a type parameter (E0038)"));
-                        }
-                        st.push(sup.split('<').next().unwrap_or("").trim().to_string());
-                    }
-                    seen.push(t);
-                }
-            }
-            // (E0038: a method without `where Self: Sized` makes the trait not dyn compatible when it has no `self`,
-            // or, for a method the program's own trait declares (not a supertrait's, not the prelude's, which leave
-            // out their `where Self: Sized`), when `Self` is in its parameters or result)
-            for &d in &decls {
-                let ds = &self.prog.sigs[d as usize];
-                let sized = ds.generics.first().is_some_and(|g| g.1.iter().any(|b| b == "Sized"));
-                if sized {
-                    continue;
-                }
-                let own = self.prog.item_of.get(d as usize).copied().flatten().is_some_and(|ii| ii < self.prog.prelude_from);
-                let self_used = own && ds.trait_of.as_deref() == Some(tr) && (ds.params.iter().skip(1).any(|&p| mentions_self(self.prog, p)) || mentions_self(self.prog, ds.ret));
-                // (generics of its own: more than Self and the trait's own parameters)
-                let own_generics = own && ds.trait_of.as_deref().and_then(|t| self.prog.trait_ngen.get(t)).is_some_and(|&n| ds.generics.len() > n);
-                if !ds.has_self || self_used || own_generics {
-                    let m = self.prog.names[d as usize].rsplit("::").next().unwrap_or("").to_string();
-                    return err(span, format!("the trait `{tr}` is not dyn compatible: `{m}` (E0038)"));
-                }
+            if let Some(m) = dyn_incompatible(self.prog, tr, &decls, false) {
+                return err(span, m);
             }
             for &d in &decls {
                 let ds = &self.prog.sigs[d as usize];
@@ -3126,6 +3094,38 @@ impl Cx<'_> {
         if let Some(r) = self.default_call(c, expected)? {
             return Ok(r);
         }
+        // (`<T as Clone>::clone(x)`: `(x).clone()` naming its trait (not an inherent `clone` of T), for x: &T, a derive's
+        // clone too; x of another referent is mismatched types (`<u8 as Clone>::clone(&1u32)`))
+        if let (Expr::Path(Some(qs), p), [x]) = (&**func, cargs.as_slice()) {
+            let n = p.segs.len();
+            if n >= 2 && p.segs[n - 2].name == "Clone" && p.segs[n - 1].name == "clone" && p.segs[n - 2].args.is_empty() && self.lookup("Clone").is_none() {
+                // (x is `&Self` after deref coercions (`&&1u8` for `<u8 as Clone>`); Self a reference: its clone is a copy of
+                // it, not its referent's clone (`<&Q as Clone>::clone(&&q)` is `&Q`))
+                let mut arg = x.clone();
+                if let (Ok(st), Some(xt)) = (self.parse_ty(qs), self.peek(x)) {
+                    if !self.prog.has_param(st) && !self.prog.has_param(xt) && !has_hole(self.prog, st) {
+                        let mut t = xt;
+                        loop {
+                            match t {
+                                Ty::Ref(_, i) if *i == st => break,
+                                Ty::Ref(_, i @ Ty::Ref(..)) => {
+                                    arg = Expr::Unary("*".into(), Box::new(Expr::Paren(Box::new(arg))), Default::default());
+                                    t = *i;
+                                }
+                                _ => return err(expr_start(x), format!("mismatched types: expected `&{}`, found `{}`", self.prog.tn(st), self.prog.tn(xt))),
+                            }
+                        }
+                        if matches!(st, Ty::Ref(false, _)) {
+                            let d = self.keep_expr(Expr::Unary("*".into(), Box::new(Expr::Paren(Box::new(arg))), Default::default()));
+                            return self.expr(d, expected);
+                        }
+                    }
+                }
+                let e = self.keep_expr(mcall(Expr::Paren(Box::new(arg)), "clone", vec![]));
+                self.explicit_traits.insert(e as *const Expr as usize, "Clone".to_string());
+                return self.expr(e, expected);
+            }
+        }
         // `From::from(x)` to an expected type T: `T::from(x)`; `Into::into(x)`: `x.into()`
         if let (Expr::Path(None, p), [x]) = (&**func, cargs.as_slice()) {
             let n = p.segs.len();
@@ -3375,6 +3375,54 @@ impl Cx<'_> {
 }
 
 /// t names `Self` (the parameter 0 of a trait's method) itself, not through an associated type (`Self::Item`)
+/// E0038: why the trait `tr` is not dyn compatible, with its methods dyn calls (Program::dyn_methods), or None. A
+/// supertrait of the program's trait that takes Self by default (`trait Expr: PartialEq`); a method without
+/// `where Self: Sized` that has no `self`, or (the program's own trait's) that names `Self` in its parameters or result
+/// or has generics of its own
+/// `bounded_exempt`: a method with any bound on Self counts as `where Self: Sized` (a bound's trait may be Sized,
+/// `where Self: Tr1` with `trait Tr1: Sized`, which the supertraits recorded leave out)
+pub fn dyn_incompatible(prog: &crate::program::Program, tr: &str, decls: &[u32], bounded_exempt: bool) -> Option<String> {
+    // (E0038 too: a supertrait of the program's trait that takes Self by default (`trait Expr: PartialEq`))
+    {
+        let mut st = vec![tr.to_string()];
+        let mut seen: Vec<String> = vec![];
+        while let Some(t) = st.pop() {
+            if seen.contains(&t) {
+                continue;
+            }
+            for sup in prog.trait_supers.get(&t).cloned().unwrap_or_default() {
+                if sup == "#SelfRhs" {
+                    return Some(format!("the trait `{tr}` is not dyn compatible: it uses `Self` as a type parameter (E0038)"));
+                }
+                st.push(sup.split('<').next().unwrap_or("").trim().to_string());
+            }
+            seen.push(t);
+        }
+    }
+    // (E0038: a method without `where Self: Sized` makes the trait not dyn compatible when it has no `self`,
+    // or, for a method the program's own trait declares (not a supertrait's, not the prelude's, which leave
+    // out their `where Self: Sized`), when `Self` is in its parameters or result)
+    for &d in decls {
+        let ds = &prog.sigs[d as usize];
+        // (a bound of Self's other than its own trait's: `where Self: Tr1<..>`)
+        let named = |b: &str, t: &str| b == t || b.starts_with(&format!("{t}<"));
+        let other_bound = |g: &(String, Vec<String>)| g.1.iter().any(|b| !named(b, tr) && !ds.trait_of.as_deref().is_some_and(|t| named(b, t)));
+        let sized = ds.generics.first().is_some_and(|g| g.1.iter().any(|b| b == "Sized") || (bounded_exempt && other_bound(g)));
+        if sized {
+            continue;
+        }
+        let own = prog.item_of.get(d as usize).copied().flatten().is_some_and(|ii| ii < prog.prelude_from);
+        let self_used = own && ds.trait_of.as_deref() == Some(tr) && (ds.params.iter().skip(1).any(|&p| mentions_self(prog, p)) || mentions_self(prog, ds.ret));
+        // (generics of its own: more than Self and the trait's own parameters)
+        let own_generics = own && ds.trait_of.as_deref().and_then(|t| prog.trait_ngen.get(t)).is_some_and(|&n| ds.generics.len() > n);
+        if !ds.has_self || self_used || own_generics {
+            let m = prog.names[d as usize].rsplit("::").next().unwrap_or("").to_string();
+            return Some(format!("the trait `{tr}` is not dyn compatible: `{m}` (E0038)"));
+        }
+    }
+    None
+}
+
 fn mentions_self(prog: &crate::program::Program, t: Ty) -> bool {
     match t {
         Ty::Param(0) => true,

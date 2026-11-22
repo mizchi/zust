@@ -402,11 +402,28 @@ impl Cx<'_> {
             Expr::MethodCall(recv, m, _, margs, _) if margs.is_empty() && matches!(m.as_str(), "iter" | "iter_mut" | "into_iter") => Some((&**recv, m.as_str())),
             _ => direct,
         };
+        // (`for x in Ok::<_, ()>(1)`: a constructor of the prelude's Option / Result, whose type is not peeked)
+        let ctor_of = |cx: &Self, e: &Expr| -> Option<&'static str> {
+            let Expr::Call(f, a) = strip_paren(e) else { return None };
+            let Expr::Path(None, p) = &**f else { return None };
+            let last = &p.segs.last()?.name;
+            let qualified = p.segs.len() == 1 || (p.segs.len() == 2 && matches!(p.segs[0].name.as_str(), "Option" | "Result"));
+            (a.len() == 1 && qualified && cx.lookup(last).is_none()).then_some(())?;
+            match last.as_str() {
+                "Some" => Some("Option"),
+                "Ok" | "Err" => Some("Result"),
+                _ => None,
+            }
+        };
+        let call = call.or_else(|| ctor_of(self, fexpr).map(|_| (&**fexpr, "into_iter")));
         if let Some((recv, m)) = call {
             {
-                if let Some(Ty::Struct(sid)) = self.peek(recv) {
-                    let tyname = self.prog.structs[self.prog.base_of(sid) as usize].name.as_str();
-                    if matches!(tyname, "Option" | "Result") && self.prog.method(sid, m).is_none() {
+                let peeked = match self.peek(recv) {
+                    Some(Ty::Struct(sid)) => Some((self.prog.structs[self.prog.base_of(sid) as usize].name.as_str(), self.prog.method(sid, m).is_none())),
+                    _ => ctor_of(self, recv).filter(|_| m == "into_iter").map(|n| (n, true)),
+                };
+                if let Some((tyname, true)) = peeked {
+                    if matches!(tyname, "Option" | "Result") {
                         let ctor = if tyname == "Option" { "Some" } else { "Ok" };
                         let scrut = match m {
                             "iter" => Expr::Ref(false, Box::new(Expr::Paren(Box::new(recv.clone())))),
