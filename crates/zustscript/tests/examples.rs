@@ -332,3 +332,26 @@ fn externs_match_ts() {
     let err = String::from_utf8_lossy(&o.stderr);
     assert!(o.status.success() && err.contains("(1 checked with tsrs)"), "{err}");
 }
+
+#[test]
+fn runtime_name_collisions() {
+    // the shared runtime and a module named `zsc-runtime` never overwrite each other in one directory
+    let d = out_dir("runtime_names");
+    let _ = std::fs::remove_dir_all(&d);
+    std::fs::create_dir_all(&d).unwrap();
+    let src = d.join("zsc-runtime.zsc");
+    std::fs::write(&src, "pub fn one() -> i32 { 1 }\n").unwrap();
+    let o = zsc(&src, &d, &[]);
+    assert!(!o.status.success(), "a module named like the runtime is refused in shared mode");
+    assert!(zsc(&root().join("examples/basics.zsc"), &d, &[]).status.success());
+    let rt = std::fs::read_to_string(d.join("zsc-runtime.js")).unwrap();
+    let o = zsc(&src, &d, &["--inline-runtime"]);
+    assert!(!o.status.success(), "an inline `zsc-runtime` must not overwrite the shared runtime");
+    assert_eq!(std::fs::read_to_string(d.join("zsc-runtime.js")).unwrap(), rt);
+    // in its own directory, the inline build works; a shared build into that directory is then refused
+    let e = d.join("inline");
+    assert!(zsc(&src, &e, &["--inline-runtime"]).status.success());
+    let o = zsc(&root().join("examples/basics.zsc"), &e, &[]);
+    assert!(!o.status.success(), "the shared runtime must not overwrite a module named like it");
+    assert!(std::fs::read_to_string(e.join("zsc-runtime.js")).unwrap().contains("function one"));
+}

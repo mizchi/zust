@@ -59,6 +59,18 @@ fn main() {
         die(&format!("{}: `{stem}` is the name of the shared runtime the modules import: rename the file, or use --inline-runtime", input.display()));
     }
 
+    // (the shared runtime and a module named like it must not overwrite each other in one directory)
+    let rt_path = out_dir.join(format!("{}.js", js::RUNTIME));
+    if let Ok(existing) = std::fs::read_to_string(&rt_path) {
+        let is_runtime = existing.starts_with(js::RUNTIME_HEADER);
+        if inline_runtime && stem == js::RUNTIME && is_runtime {
+            die(&format!("{}: holds the shared runtime other modules import: compile `{stem}` with --inline-runtime into another directory", rt_path.display()));
+        }
+        if !inline_runtime && !is_runtime {
+            die(&format!("{}: is a module, not the shared runtime: compile into another directory, or use --inline-runtime", rt_path.display()));
+        }
+    }
+
     let t0 = std::time::Instant::now();
     let items = match parse::Parser::new(&src).file() {
         Ok(i) => i,
