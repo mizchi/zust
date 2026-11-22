@@ -864,6 +864,20 @@ pub fn is_promotable(cx: &Cx, e: &Expr) -> bool {
 }
 
 /// `_` の穴を含む型か
+/// Whether a type as written names a path of std / core / alloc (`std::num::NonZero<u64>`), which zustc may not have
+pub fn names_std_path(t: &crate::parse::Ty) -> bool {
+    use crate::parse::{GArg, Ty as P};
+    match t {
+        P::Path(None, p) => {
+            p.segs.first().is_some_and(|s| matches!(s.name.as_str(), "std" | "core" | "alloc"))
+                || p.segs.iter().any(|s| s.args.iter().any(|a| matches!(a, GArg::Ty(x) if names_std_path(x))))
+        }
+        P::Ref(_, _, x) | P::Ptr(_, x) | P::Slice(x) | P::Array(x, _) => names_std_path(x),
+        P::Tuple(xs) => xs.iter().any(names_std_path),
+        _ => false,
+    }
+}
+
 pub fn has_hole(prog: &Program, t: Ty) -> bool {
     match t {
         Ty::Param(i) => i == crate::program::HOLE,
@@ -1060,6 +1074,30 @@ impl Cx<'_> {
             }
             Err(self.at(span, format!("mismatched types: expected `{}`, found `{}`", self.prog.tn(want), self.prog.tn(got))))
         }
+    }
+
+    /// Whether two types differ only in the lifetimes their names show (`dyn Foo<Bar = &'a u32>` and `.. &'static u32>`)
+    pub fn apart_in_lifetimes(&self, a: Ty, b: Ty) -> bool {
+        let (x, y) = (self.prog.tn(a), self.prog.tn(b));
+        if !x.contains('\'') && !y.contains('\'') {
+            return false;
+        }
+        // (the names without their `'a`, and their spaces)
+        let plain = |s: &str| {
+            let mut out = String::new();
+            let mut it = s.chars().peekable();
+            while let Some(c) = it.next() {
+                if c == '\'' {
+                    while it.peek().is_some_and(|d| d.is_alphanumeric() || *d == '_') {
+                        it.next();
+                    }
+                } else if !c.is_whitespace() {
+                    out.push(c);
+                }
+            }
+            out
+        };
+        plain(&x) == plain(&y)
     }
 
     /// 書かれた型 (`Self` と型パラメータは env から)
@@ -1693,24 +1731,48 @@ impl Cx<'_> {
                     // (`let _ = Foo;` with Foo a unit struct (or a const) is a value: dropped at once)
                     let local = !matches!(init, Expr::Path(None, p) if ident_of(p).is_some_and(|n| self.lookup(n).is_none()
                         && !self.prog.const_index.get(n).is_some_and(|&ci| self.prog.consts[ci as usize].stat.is_some())));
-                    if is_place_expr(init) && local {
+                    // (`let _: u8 = "s";`: the annotation names a type, and the value is checked against it as a named
+                    // binding's is: the expected type, then a deref coercion (`let _: *const u8 = &a;` with `a: Foo`
+                    // stays an error))
+                    // (a type zustc cannot read yet (`[(); foo()]`, `dyn Send`, `std::num::NonZero<u64>`) is not checked;
+                    // a name of none of the program's is an error)
+                    let ann = match ann_ty.as_ref().map(|t| (t, self.parse_ty(t))) {
+                        Some((_, Ok(a))) => Some(a),
+                        Some((t, Err(e))) if e.contains("cannot find type") && !names_std_path(t) => return Err(e),
+                        _ => None,
+                    };
+                    let full = ann.filter(|&a| !has_hole(self.prog, a) && !self.prog.has_param(a));
+                    // (a place of another type than the annotation's is coerced: a value, read)
+                    let coerced = || full.is_some_and(|a| self.peek(init).is_some_and(|pt| pt != a));
+                    if is_place_expr(init) && local && !coerced() {
                         // (`let _ = x;` does not read x)
                         self.bk.place_depth += 1;
                         let r = self.place(init);
                         self.bk.place_depth -= 1;
                         let _ = r?;
                     } else {
-                        // (`let _: [(); 0] = [];`: the annotation is the expected type)
-                        // (only for an array literal, which needs it for its element type: an expected type would
-                        // also coerce, and `let _: *const u8 = &a;` must stay an error)
-                        let exp = match ann_ty {
-                            Some(t) if matches!(strip_paren(init), Expr::Array(_) | Expr::Repeat(..)) => self.parse_ty(t).ok().filter(|&t| !has_hole(self.prog, t)),
-                            _ => None,
+                        // (`let _: [(); 0] = [];`: an array literal takes its element type from it, holes and all)
+                        let exp = match ann {
+                            Some(a) if matches!(strip_paren(init), Expr::Array(_) | Expr::Repeat(..)) => Some(a).filter(|&a| !has_hole(self.prog, a)),
+                            _ => full,
                         };
-                        let (v, t) = self.expr(init, exp)?;
+                        let (mut v, mut t) = self.expr(init, exp)?;
                         if t == Ty::Never {
                             diverged = true;
                             continue;
+                        }
+                        if let Some(a) = full.filter(|&a| a != t) {
+                            let (v2, t2) = self.deref_coerce(v, t, a);
+                            if t2 == a {
+                                v = v2;
+                                t = t2;
+                            }
+                            // (`*mut T` where `*const T` is written: the same pointer. Types apart in their lifetimes only
+                            // (`dyn Foo<Bar = &'a u32>`, which keeps the text of its bounds) are the region check's)
+                            let ptr = matches!((t, a), (Ty::Ptr(true, x), Ty::Ptr(false, y)) if x == y);
+                            if !ptr && !self.apart_in_lifetimes(t, a) {
+                                self.same(SP, t, a).map_err(|m| self.at(expr_start(init), m))?;
+                            }
                         }
                         if let Some(v) = v {
                             self.own_temp(v, t);

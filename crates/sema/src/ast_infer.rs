@@ -1011,6 +1011,8 @@ impl Inf<'_> {
                 self.unify(l, r);
                 self.known(Ty::Bool)
             }
+            // (the left operand's type, a number behind a reference dereferenced: `let _: u8 = &0 << 0;`)
+            "<<" | ">>" if !adt => self.num_operand(l),
             "<<" | ">>" => l,
             "<<=" | ">>=" => self.known(Ty::Unit),
             "+=" | "-=" | "*=" | "/=" | "%=" | "^=" | "&=" | "|=" => {
@@ -1950,6 +1952,16 @@ impl Inf<'_> {
         let rroot = self.find(rv);
         let prim = matches!(self.shape[rroot as usize], Some(Shape::Known(t)) if t.is_int() || t.is_float() || matches!(t, Ty::Bool | Ty::Char | Ty::Ptr(..)));
         if callee.is_none() && n == "clone" && args.is_empty() && (sid.is_some() || prim) {
+            // (`r.clone()` with `r: &S` and S a type of the program that is not Clone: the reference's clone, `&S`)
+            let fr = self.find(r);
+            let refd = matches!(self.shape[fr as usize], Some(Shape::Ref(..)));
+            if let (true, Some(s)) = (refd, sid) {
+                let b = self.prog.base_of(s);
+                let own = self.prog.struct_item.get(b as usize).is_some_and(|&ii| ii < self.prog.prelude_from);
+                if own && !self.prog.derived.get(&b).is_some_and(|d| d.iter().any(|x| x == "Clone")) && !self.prog.implements(Ty::Struct(s), "Clone") {
+                    return r;
+                }
+            }
             return rv;
         }
         let mut avs = vec![];

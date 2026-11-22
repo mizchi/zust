@@ -379,6 +379,14 @@ impl Cx<'_> {
             return Ok(None);
         }
         if let Some(pt) = self.peek(receiver) {
+            // (`r.clone()` with `r: &S` and S not Clone: the reference's own clone, a copy of r (`&S`). Not Clone: a type
+            // of the program with no clone and no derive, or an instance with such an argument (`Option<NoClone>`), but
+            // for the shared pointers)
+            if let Ty::Ref(false, i @ Ty::Struct(_)) = pt {
+                if self.not_clone(*i, 0) {
+                    return self.operand(receiver, None, false).map(Some);
+                }
+            }
             let mut t = pt;
             while let Ty::Ref(_, i) = t {
                 if t.is_fat() {
@@ -411,6 +419,21 @@ impl Cx<'_> {
         }
         let r = Ty::Ref(false, intern(t));
         self.call_named("__exr_clone", vec![t], &[(a, r)], SP).map(Some)
+    }
+
+    /// Whether t is surely not Clone (clone_call): see there
+    fn not_clone(&self, t: Ty, depth: u32) -> bool {
+        let Ty::Struct(sid) = t else { return false };
+        if depth > 4 || self.prog.method(sid, "clone").is_some() {
+            return false;
+        }
+        let b = self.prog.base_of(sid);
+        let derived = self.prog.derived.get(&b).is_some_and(|d| d.iter().any(|x| x == "Clone"));
+        if self.prog.struct_item.get(b as usize).is_some_and(|&ii| ii < self.prog.prelude_from) && !derived && !self.prog.implements(t, "Clone") {
+            return true;
+        }
+        let shared = matches!(self.prog.structs[b as usize].name.as_str(), "Rc" | "Arc" | "Weak" | "PhantomData" | "Sender" | "SyncSender");
+        !shared && self.prog.structs[sid as usize].args.iter().any(|&a| self.not_clone(a, depth + 1))
     }
 
     /// `__exr_clone::<T>(x: &T) -> T` の本体
