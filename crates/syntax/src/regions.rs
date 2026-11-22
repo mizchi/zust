@@ -26,40 +26,37 @@ pub fn names_lt(t: &PTy) -> bool {
 /// `E::V::<Cell<&'static u32>>`) or before a `::` (`<A<'a>>::new`, `<A<'a> as Tr>::IC`). Only then do a body's
 /// statements look for paths that write lifetimes (writes_path_lts): most programs have none
 pub fn src_path_lts(src: &str) -> bool {
+    // (from each `'`, on its line: a `<` around it right after `::` (a turbofish), or a `>` around it right before
+    // `::`. Looking for the `'`s, which are few, costs less than looking for every `::`)
     let b = src.as_bytes();
-    let before = || {
-        src.match_indices(">::").any(|(i, _)| {
-            let mut d = 0i32;
-            for &c in b[..=i].iter().rev() {
-                match c {
-                    b'>' => d += 1,
-                    b'<' => {
-                        d -= 1;
-                        if d == 0 {
-                            return false;
-                        }
-                    }
-                    b'\'' => return true,
-                    b';' | b'{' | b'}' | b'\n' => return false,
-                    _ => {}
-                }
-            }
-            false
-        })
-    };
-    before() || src.match_indices("::<").any(|(i, _)| {
+    let stop = |c: u8| matches!(c, b';' | b'{' | b'}' | b'\n');
+    src.match_indices('\'').any(|(i, _)| {
         let mut d = 0i32;
-        for &c in &b[i + 2..] {
-            match c {
-                b'<' => d += 1,
-                b'>' => {
-                    d -= 1;
-                    if d == 0 {
-                        return false;
+        for j in (0..i).rev() {
+            match b[j] {
+                b'>' if j == 0 || b[j - 1] != b'-' => d += 1,
+                b'<' if d == 0 => {
+                    if j >= 2 && &b[j - 2..j] == b"::" {
+                        return true;
                     }
                 }
-                b'\'' => return true,
-                b';' | b'{' | b'}' | b'\n' => return false,
+                b'<' => d -= 1,
+                c if stop(c) => break,
+                _ => {}
+            }
+        }
+        let mut d = 0i32;
+        for j in i + 1..b.len() {
+            match b[j] {
+                b'<' => d += 1,
+                b'>' if b[j - 1] == b'-' => {}
+                b'>' if d == 0 => {
+                    if b.get(j + 1..j + 3) == Some(b"::") {
+                        return true;
+                    }
+                }
+                b'>' => d -= 1,
+                c if stop(c) => break,
                 _ => {}
             }
         }
