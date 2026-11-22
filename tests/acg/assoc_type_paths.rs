@@ -53,4 +53,6 @@ fn main() {
     let s = <u32 as TryFrom<u64>>::try_from(5u64).unwrap();
     let t = <u32 as TryFrom<u64>>::try_from(1u64 << 40).is_err();
     println!("{r} {s} {t}");
+    let (a, b, c) = (<f64 as From<f32>>::from(1.5), <u32 as TryFrom<i64>>::try_from(-5).is_err(), <i64 as From<i8>>::from(-3));
+    println!("{a} {b} {c}");
 }
