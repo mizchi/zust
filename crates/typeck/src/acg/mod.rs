@@ -2532,7 +2532,7 @@ impl Cx<'_> {
     }
 
     /// The statement `let x = S::<&'a u32> {..};` / `S::<&'a u32> {..};` (type arguments that name lifetimes) as
-    /// `let x: S<&'a u32> = S {..};` / `let _: S<&'a u32> = S {..};`; None for any other
+    /// `let x: S<&'a u32> = S::<&'a u32> {..};` / `let _: S<&'a u32> = S::<&'a u32> {..};`; None for any other
     #[cold]
     #[inline(never)]
     fn lifetime_lit(&self, st: &Stmt) -> Option<&'static Stmt> {
@@ -2541,7 +2541,7 @@ impl Cx<'_> {
             Stmt::Expr(init @ Expr::Struct(..), true) => (Pat::Wild, init, Default::default()),
             _ => return None,
         };
-        let Expr::Struct(path, fields, rest) = init else { return None };
+        let Expr::Struct(path, ..) = init else { return None };
         if !path.segs.iter().any(|s| s.args.iter().any(|a| format!("{a:?}").contains('\''))) {
             return None;
         }
@@ -2550,7 +2550,9 @@ impl Cx<'_> {
             s.args.clear();
         }
         self.prog.struct_by_p(&PPath::of(&bare), self.self_sid)?;
-        Some(Box::leak(Box::new(Stmt::Let(pat, Some(crate::parse::Ty::Path(None, path.clone())), Some(Expr::Struct(bare, fields.clone(), rest.clone())), None, lp))))
+        // (the literal keeps its arguments too: struct_lit_inner checks them against the fields and an update's base,
+        // also when the annotation, with a `_`, gives no type)
+        Some(Box::leak(Box::new(Stmt::Let(pat, Some(crate::parse::Ty::Path(None, path.clone())), Some(init.clone()), None, lp))))
     }
 
     /// The name methods of t are indexed under (`S` for a struct's instances too, `u8`, `#tuple0`)
