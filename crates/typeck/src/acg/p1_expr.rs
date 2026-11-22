@@ -138,14 +138,29 @@ impl Cx<'_> {
     }
 
     /// The arguments of `<T as From<S>>::from(x)` as the call on T gets them: x of the source S written (E0308 for
-    /// another type; an unsuffixed literal is S's, `<u16 as From<u8>>::from(6)`). Other calls' as they are
+    /// another type; an unsuffixed literal of S's kind is S's, `<u16 as From<u8>>::from(6)`). Other calls' as they are
     fn from_source_args(&self, p: &crate::parse::Path, cargs: &[Expr]) -> R<Vec<Expr>> {
         if let ([tr, m], [x]) = (p.segs.as_slice(), cargs) {
             if matches!((tr.name.as_str(), m.name.as_str()), ("From", "from") | ("TryFrom", "try_from")) {
                 if let [GArg::Ty(sty)] = tr.args.as_slice() {
                     if let Some(s) = self.parse_ty(sty).ok().filter(|&s| !self.prog.has_param(s) && !has_hole(self.prog, s)) {
-                        if super::p2_call::is_int_lit(x) || super::p2_call::is_float_lit(x) {
-                            return Ok(vec![Expr::Paren(Box::new(Expr::Cast(Box::new(Expr::Paren(Box::new(x.clone()))), Box::new(sty.clone()))))]);
+                        // (a literal of the source's kind takes it as its suffix (`6` as `6u8`, out of range an error as for
+                        // `300u8`); one of the other kind is a mismatch (`from(3.5)` for a u8), as rustc says)
+                        let (int, float) = (super::p2_call::is_int_lit(x), super::p2_call::is_float_lit(x));
+                        if int || float {
+                            if (int && !s.is_int()) || (float && !s.is_float()) {
+                                let found = if int { "integer" } else { "floating-point number" };
+                                return err(expr_start(x), format!("mismatched types: expected `{}`, found {found}", self.prog.tn(s)));
+                            }
+                            fn suffixed(e: &Expr, sfx: &str) -> Expr {
+                                match e {
+                                    Expr::Paren(i) => suffixed(i, sfx),
+                                    Expr::Lit(t, sp) => Expr::Lit(format!("{t}{sfx}"), *sp),
+                                    Expr::Unary(op, i, sp) => Expr::Unary(op.clone(), Box::new(suffixed(i, sfx)), *sp),
+                                    e => e.clone(),
+                                }
+                            }
+                            return Ok(vec![suffixed(x, &self.prog.tn(s))]);
                         }
                         if let Some(a) = self.peek(x).filter(|&a| a != s && !self.prog.has_param(a)) {
                             return err(expr_start(x), format!("mismatched types: expected `{}`, found `{}`", self.prog.tn(s), self.prog.tn(a)));
