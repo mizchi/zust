@@ -1153,6 +1153,11 @@ fn placeholder_bounds() {
 fn mutability_of_bindings_statics_slices() {
     let d = check("fn main() {\n    let op = Some(2);\n    match op {\n        Some(ref v) => {\n            let _a = &mut v;\n        }\n        None => {}\n    }\n}\n");
     assert!(d.len() == 1 && d[0].0 == 5 && d[0].1.contains("not declared as mutable"), "{d:?}");
+    // (two or more such borrows: one error, at the declaration, as rustc reports them)
+    let d = check("fn main() {\n    let v = Vec::new();\n    v.push(0);\n    v.push(1);\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 2 && d[0].1.contains("not declared as mutable"), "{d:?}");
+    let d = check("fn main() {\n    let v: Vec<u8> = Vec::new();\n    v.push(0);\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 3, "{d:?}");
     let d = check("static FOO: isize = 5;\nfn main() {\n    FOO = 6;\n}\n");
     assert!(d.len() == 1 && d[0].0 == 3 && d[0].1.contains("immutable static item `FOO`"), "{d:?}");
     let d = check("fn main() {\n    let x: &[isize] = &[1, 2, 3];\n    let _ = &mut x[0..2];\n}\n");

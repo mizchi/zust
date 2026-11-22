@@ -104,6 +104,8 @@ pub struct Local {
     pub refs: bool,
     /// `let mut` (None: not known)
     pub mutable: Option<bool>,
+    /// The `let` that declares it (line 0: not known)
+    pub decl: Sp,
 }
 
 #[derive(Clone, Debug)]
@@ -607,7 +609,8 @@ impl Bk {
             }
         }
         if !(need_moves || need_loans || need_inited) {
-            errs.sort_by_key(|e| (e.sp.line, e.sp.col));
+            // (the borrows of a local not `mut` reported as one error at its declaration: rustc reports them after the rest)
+        errs.sort_by_key(|e| (e.msg.contains("is not declared as mutable") && self.locals.iter().any(|l| l.decl.line != 0 && l.decl == e.sp), e.sp.line, e.sp.col));
             return errs.into_iter().next();
         }
         let n = nblocks.max(1 + self.evs.iter().map(|e| e.0 .0 as usize).max().unwrap_or(0)).max(1 + self.edges.iter().map(|e| e.0 .0.max(e.1 .0) as usize).max().unwrap_or(0));
@@ -781,7 +784,8 @@ impl Bk {
                 }
             }
         }
-        errs.sort_by_key(|e| (e.sp.line, e.sp.col));
+        // (the borrows of a local not `mut` reported as one error at its declaration: rustc reports them after the rest)
+        errs.sort_by_key(|e| (e.msg.contains("is not declared as mutable") && self.locals.iter().any(|l| l.decl.line != 0 && l.decl == e.sp), e.sp.line, e.sp.col));
         errs.into_iter().next()
     }
 
@@ -1036,7 +1040,12 @@ impl Bk {
         let msg = match a {
             Acc::Borrow(l) if self.loans[l as usize].mutable => {
                 let msg = format!("cannot borrow `{}` as mutable, as `{name}` is not declared as mutable", path_str(&self.locals, p));
-                errs.push(BkError { sp: self.loans[l as usize].at, msg });
+                // (two or more such borrows of it: rustc reports them as one error, at the declaration)
+                // (not with a closure's capture among them: rustc reports those as the closure's own errors)
+                let of = |x: &&Loan| x.mutable && x.place.local == p.local && x.place.owned_len() == x.place.proj.len();
+                let n = if self.loans.iter().filter(of).any(|x| x.capture) { 0 } else { self.loans.iter().filter(of).count() };
+                let sp = if n >= 2 && lo.decl.line != 0 { lo.decl } else { self.loans[l as usize].at };
+                errs.push(BkError { sp, msg });
                 return;
             }
             Acc::Write | Acc::Modify if !p.proj.is_empty() => {
@@ -1221,7 +1230,7 @@ impl Cx<'_> {
         }
         let id = self.bk.locals.len() as u32;
         let (copy, refs) = self.bk_ty(ty);
-        self.bk.locals.push(Local { name: name.to_string(), ty, copy, refs, mutable });
+        self.bk.locals.push(Local { name: name.to_string(), ty, copy, refs, mutable, decl: self.rg.let_sp });
         self.bk.by_loc.insert(loc, id);
         self.bk_ev(Ev::Bind(id, !uninit));
         if refs {
@@ -1274,7 +1283,7 @@ impl Cx<'_> {
         // statement)
         if self.bk.level >= 2 && !in_let && !super::is_place_expr(e) && pats.iter().any(|p| pat_binds_ref(p)) {
             let id = self.bk.locals.len() as u32;
-            self.bk.locals.push(Local { name: TEMP.to_string(), ty: Ty::Unit, copy: true, refs: false, mutable: Some(true) });
+            self.bk.locals.push(Local { name: TEMP.to_string(), ty: Ty::Unit, copy: true, refs: false, mutable: Some(true), decl: super::SP });
             self.bk_ev(Ev::Bind(id, true));
             let sp = err_pos(e);
             let ln = self.bk.loans.len() as u32;
@@ -1576,7 +1585,7 @@ impl Cx<'_> {
         let quiet = std::mem::take(&mut self.bk.no_loan_src);
         let id = self.bk.locals.len() as u32;
         let (copy, refs) = self.bk_ty(t);
-        self.bk.locals.push(Local { name: TEMP.to_string(), ty: t, copy, refs, mutable: Some(true) });
+        self.bk.locals.push(Local { name: TEMP.to_string(), ty: t, copy, refs, mutable: Some(true), decl: super::SP });
         self.bk_ev(Ev::Bind(id, true));
         let sp = err_pos(e);
         let p = BPlace { local: id, proj: vec![] };
@@ -2042,7 +2051,7 @@ impl Cx<'_> {
             return;
         }
         let id = self.bk.locals.len() as u32;
-        self.bk.locals.push(Local { name: "<argument>".into(), ty: Ty::Unit, copy: true, refs: true, mutable: None });
+        self.bk.locals.push(Local { name: "<argument>".into(), ty: Ty::Unit, copy: true, refs: true, mutable: None, decl: super::SP });
         self.bk_ev(Ev::Bind(id, true));
         self.bk_ev(Ev::Def(id, loans));
         self.bk.call_temps.push(id);
@@ -2200,7 +2209,7 @@ impl Cx<'_> {
             // (not of a reference: `&h()` with h returning `&'static str` is deref-coerced to what h returns)
             if made && self.bk.level >= 2 && self.peek(t).is_some_and(|ty| !matches!(ty, Ty::Ref(..) | Ty::Ptr(..))) {
                 let id = self.bk.locals.len() as u32;
-                self.bk.locals.push(Local { name: TEMP.to_string(), ty: Ty::Unit, copy: true, refs: false, mutable: Some(true) });
+                self.bk.locals.push(Local { name: TEMP.to_string(), ty: Ty::Unit, copy: true, refs: false, mutable: Some(true), decl: super::SP });
                 self.bk_ev(Ev::Bind(id, true));
                 let ln = self.bk.loans.len() as u32;
                 let sp = err_pos(t);
