@@ -498,11 +498,12 @@ impl Session2 {
         // (ファイルから読んだもの (load_crate) は読むときに cfg を評価してある)
         let stripped;
         let src0 = if self.ctx.map.inputs.is_empty() {
-            match crate::cfg::strip(src0, &self.opts.cfg_with(&self.opts.features)) {
+            let cfg = self.opts.cfg_with(&self.opts.features);
+            match crate::cfg::strip(src0, &cfg) {
                 Some(t) => {
                     // (the `extern crate` items it blanked, for the names they define)
                     if externs.is_empty() {
-                        externs = crate::cfg::blanked_externs(src0, &t);
+                        externs = crate::cfg::blanked_externs(src0, &t, &cfg);
                     }
                     stripped = t;
                     stripped.as_str()
@@ -1624,6 +1625,12 @@ fn cross_kind_duplicate<'p>(prog: &'p Program, src: &str, items: &[SrcItem], sum
                 Some((f, _)) => f == "0",
                 None => {
                     let text = src.get(items[ii].start..items[ii].end).unwrap_or("");
+                    // (past the item's attributes, whose text may say `struct X;`)
+                    let mut text = text.trim_start();
+                    while text.starts_with("#[") || text.starts_with("#![") {
+                        let o = text.find('[').map_or(text.len(), |o| o + 1);
+                        text = text[(o + attr_end(&text[o..])).min(text.len())..].trim_start();
+                    }
                     text.find("struct ").is_some_and(|k| {
                         let rest = text[k + 7..].trim_start();
                         let rest = rest.strip_prefix(n.as_str()).unwrap_or(rest).trim_start();
@@ -1663,17 +1670,19 @@ struct DupDef<'a> {
     at: usize,
     /// an import's path (`use a::b as c;`: [a, b])
     path: Vec<&'a [u8]>,
+    /// an import `self` of a list (`use a::b::{self}`): the module, not a value of its name
+    module_only: bool,
 }
 
-/// The names a `use` tree from token k binds: (name, path, the first token of its part of the tree). A glob and
-/// `as _` bind none. Returns the token past the tree
+/// The names a `use` tree from token k binds: (name, path, the first token of its part of the tree, whether it is a
+/// `self` of a list, which names a module only). A glob and `as _` bind none. Returns the token past the tree
 fn use_tree_names<'a>(
     b: &'a [u8],
     toks: &[(u8, usize, usize)],
     close: &[usize],
     k: usize,
     prefix: &mut Vec<&'a [u8]>,
-    out: &mut Vec<(&'a [u8], Vec<&'a [u8]>, usize)>,
+    out: &mut Vec<(&'a [u8], Vec<&'a [u8]>, usize, bool)>,
 ) -> usize {
     let t = |k: usize| -> &'a [u8] { toks.get(k).map_or(&b""[..], |&(_, a, e)| &b[a..e]) };
     let is_id = |k: usize| toks.get(k).is_some_and(|x| x.0 == 0);
@@ -1708,9 +1717,15 @@ fn use_tree_names<'a>(
             k = s + 3;
             continue;
         }
-        let (alias, next) = if t(s + 1) == b"as" { (Some(t(s + 2)), s + 3) } else { (None, s + 1) };
-        // (`use a::{self}` binds `a`)
-        let (name, path) = if t(s) == b"self" {
+        // (`as r#x` binds `x`)
+        let (alias, next) = match t(s + 1) == b"as" {
+            true if t(s + 2) == b"r" && t(s + 3) == b"#" && is_id(s + 4) => (Some(t(s + 4)), s + 5),
+            true => (Some(t(s + 2)), s + 3),
+            false => (None, s + 1),
+        };
+        // (`use a::{self}` binds `a`, the module alone)
+        let own = t(s) == b"self";
+        let (name, path) = if own {
             (alias.or(prefix.last().copied()), prefix.clone())
         } else {
             let mut p = prefix.clone();
@@ -1718,7 +1733,7 @@ fn use_tree_names<'a>(
             (Some(alias.unwrap_or(t(s))), p)
         };
         if let Some(nm) = name.filter(|&nm| nm != b"_" && !path.is_empty()) {
-            out.push((nm, path, at));
+            out.push((nm, path, at, own));
         }
         break next;
     };
@@ -1750,13 +1765,18 @@ fn std_path_ns(path: &[&[u8]]) -> u8 {
 /// at the second (`enum Foo {}` and `mod Foo {}`). The definitions: items (types: `mod` / `struct` / `enum` / `union`
 /// / `trait` / `type` / `extern crate`; values: `fn` / `const` / `static` / a unit or tuple struct), imports of a module
 /// or item of the program or of a module or type of std, and the `extern crate std` the compiler puts in the crate
-/// root in edition 2015 (`injected`; a later edition's is hygienic). Only read when the program has a `mod`, an
-/// `extern crate` or a `use .. as std` / `as core`. `src` is the configured text, `externs` the `extern crate` items
+/// root in edition 2015 (`injected`; a later edition's is hygienic). Only read when the program has a `mod` or an
+/// `extern crate`, or in edition 2015 something that may define `std` / `core`. `src` is the configured text, `externs` the `extern crate` items
 /// the configuring blanked (cfg::blanked_externs)
 fn duplicate_name(src: &str, externs: &[(usize, String)], injected: bool) -> Option<String> {
     // (a few scans: a program without these has its other duplicates found when its items are collected)
-    // (`use x as std;` meets only 2015's injected `std`)
-    if externs.is_empty() && !src.contains("mod ") && !(injected && (src.contains(" as std;") || src.contains(" as core;"))) {
+    // (2015's injected `std` meets an item or import of that name: `struct std;`, `use x as std;`, `enum std {`)
+    let names_std = || {
+        ["std", "core"].iter().any(|w| {
+            src.match_indices(w).any(|(i, _)| src[i + w.len()..].trim_start().starts_with([';', '{', '=', '<', '(']))
+        })
+    };
+    if externs.is_empty() && !src.contains("mod ") && !(injected && names_std()) {
         return None;
     }
     // (the blanked `extern crate x;` items back in their places, where those are still blank)
@@ -1800,15 +1820,17 @@ fn duplicate_name(src: &str, externs: &[(usize, String)], injected: bool) -> Opt
     // (modules: (the tokens of the body, the parent, the name); the crate root first)
     let mut mods: Vec<(usize, usize, usize, &[u8])> = vec![(0, n, usize::MAX, b"")];
     let mut defs: Vec<Vec<DupDef>> = vec![];
-    let mut uses: Vec<(&[u8], Vec<&[u8]>, usize)> = vec![];
+    let mut uses: Vec<(&[u8], Vec<&[u8]>, usize, bool)> = vec![];
     let mut prefix: Vec<&[u8]> = vec![];
     while defs.len() < mods.len() {
         let m = defs.len();
         let (lo, hi, _, _) = mods[m];
         let mut names: Vec<DupDef> = vec![];
-        if m == 0 && injected && !src.contains("#![no_core]") {
-            let name: &[u8] = if src.contains("#![no_std]") { b"core" } else { b"std" };
-            names.push(DupDef { ns: 1, name, def: Def::Injected, at: usize::MAX, path: vec![] });
+        // (the crate's own attributes `#![no_std]` / `#![no_core]`, from the tokens: not in a comment)
+        let inner = |a: &[u8]| (0..n.saturating_sub(4)).any(|k| t(k) == b"#" && t(k + 1) == b"!" && t(k + 2) == b"[" && t(k + 3) == a && t(k + 4) == b"]");
+        if m == 0 && injected && !inner(b"no_core") {
+            let name: &[u8] = if inner(b"no_std") { b"core" } else { b"std" };
+            names.push(DupDef { ns: 1, name, def: Def::Injected, at: usize::MAX, path: vec![], module_only: false });
         }
         let mut k = lo;
         // (the item's first token past its attributes: `pub` included)
@@ -1832,6 +1854,15 @@ fn duplicate_name(src: &str, externs: &[(usize, String)], injected: bool) -> Opt
             }
             if matches!(t(k), b"unsafe" | b"async" | b"default") {
                 k += 1;
+                continue;
+            }
+            // (`const fn` / `const unsafe fn` / `extern "C" fn`: qualifiers of a fn)
+            if t(k) == b"const" && matches!(t(k + 1), b"fn" | b"unsafe" | b"extern" | b"async") {
+                k += 1;
+                continue;
+            }
+            if t(k) == b"extern" && toks.get(k + 1).is_some_and(|x| x.0 == 2) && matches!(t(k + 2), b"fn" | b"unsafe") {
+                k += 2;
                 continue;
             }
             // (the item's namespaces and name: 1 types, 2 values)
@@ -1888,14 +1919,14 @@ fn duplicate_name(src: &str, externs: &[(usize, String)], injected: bool) -> Opt
                 b"use" => {
                     uses.clear();
                     use_tree_names(b, &toks, &close, k + 1, &mut prefix, &mut uses);
-                    for (name, path, at) in uses.drain(..) {
-                        names.push(DupDef { ns: 0, name, def: Def::Use, at, path });
+                    for (name, path, at, own) in uses.drain(..) {
+                        names.push(DupDef { ns: 0, name, def: Def::Use, at, path, module_only: own });
                     }
                 }
                 _ => {}
             }
             if let Some((ns, at, def)) = item {
-                names.push(DupDef { ns, name: t(raw(at)), def, at: start, path: vec![] });
+                names.push(DupDef { ns, name: t(raw(at)), def, at: start, path: vec![], module_only: false });
             }
             start = usize::MAX;
             // to the item's end: a `;` or a body `{ .. }` (a body in brackets is skipped whole)
@@ -1952,7 +1983,7 @@ fn duplicate_name(src: &str, externs: &[(usize, String)], injected: bool) -> Opt
                     }
                 }
                 b"std" | b"core" | b"alloc" if child(m, path[0]).is_none() => {
-                    resolved.push((m, i, std_path_ns(path)));
+                    resolved.push((m, i, std_path_ns(path) & if d.module_only { 1 } else { 3 }));
                     continue;
                 }
                 _ => {}
@@ -1977,7 +2008,7 @@ fn duplicate_name(src: &str, externs: &[(usize, String)], injected: bool) -> Opt
             if child(cur, last).is_some() {
                 ns |= 1;
             }
-            resolved.push((m, i, ns));
+            resolved.push((m, i, if d.module_only { ns & 1 } else { ns }));
         }
     }
     for (m, i, ns) in resolved {

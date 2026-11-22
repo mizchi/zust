@@ -387,9 +387,10 @@ pub fn strip_noting_env(src: &str, c: &CfgSet, env: &mut Option<bool>) -> Option
 }
 
 /// The `extern crate x;` items of `src` that [`strip`] blanked in `stripped` as such (its own pass, not one that went
-/// with a configured-away item or module: the token before it is kept, or is such an item's), and not in a comment:
-/// (byte offset, the item's text). One tokenizing of the text, only when it has an `extern crate`
-pub fn blanked_externs(src: &str, stripped: &str) -> Vec<(usize, String)> {
+/// with a configured-away item or module: the token before it is kept, is such an item's, or ends its own true
+/// `#[cfg(..)]`), and not in a comment: (byte offset, the item's text). One tokenizing of the text, only when it has an
+/// `extern crate`
+pub fn blanked_externs(src: &str, stripped: &str, c: &CfgSet) -> Vec<(usize, String)> {
     let mut out: Vec<(usize, String)> = vec![];
     if src.len() != stripped.len() || !src.contains("extern crate") {
         return out;
@@ -406,10 +407,21 @@ pub fn blanked_externs(src: &str, stripped: &str) -> Vec<(usize, String)> {
         let Some(e) = (i + 3..(i + 6).min(toks.len())).find(|&e| t(e) == b";") else { continue };
         let (a, b) = (toks[i].1, toks[e].2);
         let blank = st[a..b].iter().all(u8::is_ascii_whitespace);
-        let before_kept = i == 0 || {
-            let (_, pa, pb) = toks[i - 1];
+        // (its own attributes `#[cfg(p)]`, which went with the item when p is false: back to where they start)
+        let mut j = i;
+        let mut cfg_true = true;
+        while j >= 3 && t(j - 1) == b"]" {
+            let Some(o) = (0..j - 1).rev().find(|&o| t(o) == b"[" && o >= 1 && t(o - 1) == b"#") else { break };
+            if t(o + 1) == b"cfg" && t(o + 2) == b"(" {
+                cfg_true &= eval(s, &toks, o + 3, c).0;
+            }
+            j = o - 1;
+        }
+        let before_kept = j == 0 || {
+            let (_, pa, pb) = toks[j - 1];
             st[pa..pb] == s[pa..pb] || pb == last_end
         };
+        let before_kept = before_kept && cfg_true;
         if blank && before_kept {
             out.push((a, src[a..b].to_string()));
             last_end = b;
