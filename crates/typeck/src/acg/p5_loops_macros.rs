@@ -2283,7 +2283,8 @@ impl Cx<'_> {
             let (a, n) = (p.segs[0].name.clone(), p.segs[1].name.clone());
             let ty = if a == "Self" {
                 self.env.self_ty.or(self.self_sid.map(Ty::Struct))
-            } else if self.env.params.iter().any(|(g, _)| *g == a) {
+            } else if self.env.params.iter().any(|(g, _)| *g == a) || self.prog.aliases.contains_key(&a) {
+                // (`T::N` of a type parameter, `Alias::N` of a type alias: the type it stands for)
                 let ty = crate::parse::Ty::Path(None, path_of(&a));
                 self.parse_ty(&ty).ok()
             } else {

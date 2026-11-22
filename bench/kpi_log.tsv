@@ -249,3 +249,4 @@ date	commit	change	noop_M	edit_M	check_M	cache_KiB	lsp_G	run	check	build	cfail	t
 2026-11-21	b6c0bae+	bool / char / integer const parameters: their declared type, and arguments of another kind	0.697	554.200	3867.405	1902.8	-	1802	1483	99	4093	1187.597	64.104	10.359	319.610	720.962	267.232
 2026-11-21	f95d62b+	Review of #36: a tuple's fields against their own types	0.697	553.930	3866.869	1902.8	-	1802	1482	98	4077	1187.308	64.102	10.358	319.608	720.841	267.226
 2026-11-22	6fc2fc1+	turbofish on struct constructors and unit structs; derived impls' bounds; E0107 for lifetime arguments	0.697	554.172	3868.162	1902.8	-	-	-	-	-	1188.780	64.026	10.359	319.843	721.403	267.184
+2026-11-22	46a2a8d+	variants and associated consts through a type alias; E0109 for a variant's type arguments	0.700	555.185	3862.894	1902.8	-	1805	1491	101	4112	1193.521	64.024	10.371	320.303	723.109	267.884

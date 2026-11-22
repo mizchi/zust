@@ -4197,13 +4197,24 @@ impl Program {
             return None;
         }
         let tn = segs[0].name.as_str();
-        let sid = if tn == "Self" { self_sid? } else { *self.struct_index.get(tn)? };
+        // (`E2::A` of `type E2 = E;`; an alias with arguments, `Lt::<'static>::None`, is not looked through yet)
+        let sid = if tn == "Self" { self_sid? } else { self.struct_index.get(tn).copied().or_else(|| self.alias_adt(tn).filter(|_| !segs[0].args))? };
         let sd = &self.structs[sid as usize];
         if !sd.is_enum {
             return None;
         }
         let vn = &segs[1].name;
         sd.variants.iter().position(|v| &v.name == vn).map(|vi| (sid, vi))
+    }
+
+    /// `type E2 = E;` / `type Opt<T> = Option<T>;`: the struct / enum (its base) an alias names directly
+    pub fn alias_adt(&self, name: &str) -> Option<u32> {
+        let (_, syn) = self.aliases.get(name)?;
+        let n = match syn {
+            TySyn::Named(n) | TySyn::App(n, _) => n.as_str(),
+            _ => return None,
+        };
+        self.struct_index.get(n).copied()
     }
 
     pub fn struct_by_p(&self, p: &PPath, self_sid: Option<u32>) -> Option<u32> {

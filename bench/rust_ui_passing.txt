@@ -1787,6 +1787,7 @@ run-pass	consts/issue-54582.rs
 check-pass	consts/issue-62045.rs
 check-pass	consts/issue-65348.rs
 compile-fail	consts/issue-66693-panic-in-array-len.rs
+check-pass	consts/issue-68684.rs
 compile-fail	consts/issue-69310-array-size-lit-wrong-ty.rs
 build-pass	consts/issue-69312.rs
 run-pass	consts/issue-69532.rs
@@ -3521,6 +3522,7 @@ check-pass	lint/dead-code/issue-85255.rs
 run-pass	lint/dead-code/leading-underscore.rs
 compile-fail	lint/dead-code/lint-dead-code-6.rs
 compile-fail	lint/dead-code/newline-span.rs
+check-pass	lint/dead-code/no-dead-code-for-static-trait-impl.rs
 check-pass	lint/dead-code/not-lint-adt-appeared-in-pattern-issue-120770.rs
 check-pass	lint/dead-code/offset-of-correct-param-env.rs
 check-pass	lint/dead-code/self-assign.rs
@@ -7008,6 +7010,7 @@ compile-fail	tuple/wrong_argument_ice.rs
 compile-fail	type-alias-enum-variants/enum-variant-generic-args.rs
 compile-fail	type-alias-enum-variants/enum-variant-priority-higher-than-other-inherent.rs
 compile-fail	type-alias-enum-variants/incorrect-variant-form-through-alias-caught.rs
+check-pass	type-alias-enum-variants/issue-57866.rs
 check-pass	type-alias-enum-variants/issue-63151-dead-code-lint-fields-in-patterns.rs
 compile-fail	type-alias-enum-variants/resolve-to-enum-variant-in-type-namespace-and-error.rs
 compile-fail	type-alias-impl-trait/coherence/orphanck-tait-with-projection-arg.rs

@@ -63,6 +63,24 @@ impl Cx<'_> {
         Ok(())
     }
 
+    /// `Enum::<()>::V::<()>(..)` / `Alias::V::<()>(..)` / `Self::V::<()>(..)`: E0109 for type arguments on a variant
+    /// when its type has them already, or is an alias or `Self` (`Enum::V::<()>` alone is fine)
+    pub(crate) fn variant_targs_allowed(&self, p: &crate::parse::Path, kind: &str) -> R<()> {
+        let n = p.segs.len();
+        let has_ty = |s: &crate::parse::Seg| s.args.iter().any(|a| matches!(a, GArg::Ty(_) | GArg::Const(_)));
+        if n < 2 || !has_ty(&p.segs[n - 1]) {
+            return Ok(());
+        }
+        let ty_seg = &p.segs[n - 2];
+        if ty_seg.name == "Self" || self.prog.aliases.contains_key(&ty_seg.name) {
+            return err(SP, "type arguments are not allowed on this type (E0109)");
+        }
+        if has_ty(ty_seg) {
+            return err(SP, format!("type arguments are not allowed on {kind} `{}` (E0109)", p.segs[n - 1].name));
+        }
+        Ok(())
+    }
+
     /// `U::<u8>` / `Foo::<3>` / `Flag::<true>`: the path without the last segment's turbofish, and the type arguments
     /// it gives (None for `_`); the path itself when it has none
     pub(crate) fn turbofish_split(&self, p: &crate::parse::Path) -> (PPath, Option<Vec<Option<Ty>>>) {
@@ -2816,6 +2834,7 @@ impl Cx<'_> {
                     return err(SP, format!("variant `{}` takes {} fields", v.name, v.fields.len()));
                 }
                 self.lifetime_arity(sid, p, "enum")?;
+                self.variant_targs_allowed(p, "tuple variant")?;
                 let args: Vec<(usize, &Expr)> = cargs.iter().enumerate().collect();
                 // (`Ok::<_, ()>(1)` / `Some::<u8>(3)`: the turbofish gives the type arguments it names)
                 if let Some(ta) = p.segs.iter().rev().find_map(|s| if s.args.is_empty() { None } else { Some(&s.args) }) {
