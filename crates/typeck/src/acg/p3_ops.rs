@@ -1796,7 +1796,17 @@ impl Cx<'_> {
             Expr::Const(_) => true,
             _ => false,
         };
-        if n >= 2 && self.user_code && !constant && !super::borrowck::is_copy(self.prog, elem, 0) {
+        // (Copy as a trait: `&mut T` is not, though the borrow check's is_copy counts it, as it is reborrowed)
+        fn mut_ref(p: &Program, t: Ty, depth: u32) -> bool {
+            match t {
+                Ty::Ref(true, _) => true,
+                Ty::Array(e, _) => depth < 16 && mut_ref(p, *e, depth + 1),
+                Ty::Struct(sid) if p.is_tuple(sid) => depth < 16 && p.structs[sid as usize].fields.iter().any(|f| mut_ref(p, f.1, depth + 1)),
+                _ => false,
+            }
+        }
+        let copy = super::borrowck::is_copy(self.prog, elem, 0) && !mut_ref(self.prog, elem, 0);
+        if n >= 2 && self.user_code && !constant && !copy {
             // (the type that is not Copy: an argument of a Copy type, as rustc names it (`Option<Bar>`: `Bar`))
             let mut culprit = elem;
             while let Ty::Struct(sid) = culprit {

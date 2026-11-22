@@ -994,6 +994,7 @@ pub fn names_std_path(t: &crate::parse::Ty) -> bool {
         }
         P::Ref(_, _, x) | P::Ptr(_, x) | P::Slice(x) | P::Array(x, _) => names_std_path(x),
         P::Tuple(xs) => xs.iter().any(names_std_path),
+        P::Fn(ps, r) => ps.iter().any(names_std_path) || names_std_path(r),
         _ => false,
     }
 }
