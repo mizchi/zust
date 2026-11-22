@@ -1000,6 +1000,8 @@ impl Session2 {
         let iface_fp = {
             let mut h = KeyHasher::new();
             h.add(&self.ctx.dep_ranges.len());
+            // (the edition changes what a body's check finds: tail temporaries)
+            h.add(&self.opts.edition);
             let mut new_fp: FxMap<Key, u64> = FxMap::default();
             for (i, it) in items.iter().enumerate() {
                 let is_fn = !sums[i].fns.is_empty() && sums[i].structs.is_empty() && sums[i].enums.is_empty() && matches!(it.kind, ItemKind::Normal | ItemKind::ImplMember(_) | ItemKind::TraitMember(_));

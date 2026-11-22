@@ -2021,3 +2021,34 @@ fn part11_review_2() {
         assert_eq!(check(&src.replace("    *r = 5;\n    *r2 += 1;\n", "    *r2 += 1;\n    *r = 5;\n")), vec![], "{call}");
     }
 }
+
+/// From the third and fourth reviews of #54: a blanket method's by-value `self` gives its loan to a result that is
+/// Self only (`fn pick<U>(self, v: U) -> U` does not hold `*r`); a `&mut` receiver's loan lasts while arguments that
+/// name it are evaluated (`r.touch({ *r = 5; })`, E0506); a trait object's `&mut self` call is two-phase
+/// (`x.set(x.get())` with `get` returning a `&u8` is E0502, with a `u8` it is not); the edition is in the check memo's
+/// fingerprint (a session that changes it checks the bodies again). From the follow-ups of the second review: a chain
+/// of blanket bounds longer than the depth followed holds only by an impl for the type itself (six traits deep from
+/// `Marker`, `().go()` is E0599 without `impl Marker for ()`), and a pattern's turbofish with too many arguments is E0107
+#[test]
+fn part11_review_3() {
+    let deep = "trait Marker {}\ntrait A {}\ntrait B {}\ntrait C {}\ntrait D {}\ntrait E {}\nimpl<T: Marker> A for T {}\nimpl<T: A> B for T {}\nimpl<T: B> C for T {}\nimpl<T: C> D for T {}\nimpl<T: D> E for T {}\ntrait Tr {\n    fn go(&self) {}\n}\nimpl<T: E> Tr for T {}\nfn main() {\n    ().go();\n}\n";
+    let d = check(deep);
+    assert!(d.len() == 1 && d[0].0 == 17 && d[0].1.contains("go"), "{d:?}");
+    assert_eq!(check(&deep.replace("trait Marker {}\n", "trait Marker {}\nimpl Marker for () {}\n")), vec![]);
+    let d = check("struct S<T>(T);\nfn f(s: S<u8>) -> u8 {\n    match s {\n        S::<u8, u16>(x) => x,\n    }\n}\nfn main() {\n    println!(\"{}\", f(S(1)));\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 4 && d[0].1.contains("E0107"), "{d:?}");
+    assert_eq!(check("trait P { fn pick<U>(self, value: U) -> U where Self: Sized { value } }\nimpl<T> P for T {}\nfn main() {\n    let mut n = 3u8;\n    let r = &mut n;\n    let k = 7u8;\n    let v = r.pick(&k);\n    *r = 5;\n    println!(\"{}\", v);\n}\n"), vec![]);
+    let d = check("trait Tc { fn touch(&mut self, _u: ()) {} }\nimpl<T> Tc for T {}\nfn main() {\n    let mut n = 3u8;\n    let r = &mut n;\n    r.touch({ *r = 5; });\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 6 && d[0].1.contains("cannot assign to `*r` because it is borrowed"), "{d:?}");
+    let d = check("trait T {\n    fn get(&self) -> &u8;\n    fn set(&mut self, v: &u8);\n}\nfn f(x: &mut dyn T) {\n    x.set(x.get());\n}\nfn main() {}\n");
+    assert!(d.len() == 1 && d[0].0 == 6 && d[0].1.contains("cannot borrow `*x` as mutable because it is also borrowed as immutable"), "{d:?}");
+    assert_eq!(check("trait T {\n    fn get(&self) -> u8;\n    fn set(&mut self, v: u8);\n}\nfn f(x: &mut dyn T) {\n    x.set(x.get());\n}\nfn main() {}\n"), vec![]);
+    let src = "struct D<T>(T);\nimpl<T> Drop for D<T> {\n    fn drop(&mut self) {}\n}\nimpl<T> D<T> {\n    fn end(&self) {}\n}\nfn f() {\n    let t = D(Box::new(1));\n    D(&t).end()\n}\nfn main() {\n    f();\n}\n";
+    // (a successful check under 2024 is not reused under 2021)
+    let mut s = Session2::new(Options2 { jobs: 1, edition: 2024, ..Options2::default() });
+    assert!(s.check(src).is_empty());
+    s.opts.edition = 2021;
+    assert_eq!(s.check(src).len(), 1);
+    s.opts.edition = 2024;
+    assert!(s.check(src).is_empty());
+}
