@@ -18,6 +18,7 @@ mod ast;
 mod check;
 mod js;
 mod lower;
+mod own;
 mod simd;
 mod parse;
 mod wasm;
