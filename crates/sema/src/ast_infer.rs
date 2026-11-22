@@ -384,6 +384,17 @@ impl Inf<'_> {
         self.prog.struct_by_p(&PPath::of(p), self.self_sid)
     }
 
+    /// A pattern's path that writes type arguments (`P::<u16>(x, _)`): the value it matches is of that instance
+    fn pat_turbofish(&mut self, v: u32, p: &Path, sid: u32) {
+        // (a value of another instance (`S::<u16>(_)` matching `S(1u8)`) is then a mismatch where it is built)
+        if p.segs.iter().any(|s| s.args.iter().any(|a| matches!(a, GArg::Ty(_)))) {
+            if let Some(t) = self.variant_turbofish(p, sid) {
+                let k = self.known(t);
+                self.unify(v, k);
+            }
+        }
+    }
+
     /// The struct a path with a turbofish on its last segment names (`S::<u32>`)
     fn struct_by_turbofish(&self, p: &Path) -> Option<u32> {
         let last = p.segs.last()?;
@@ -780,8 +791,10 @@ impl Inf<'_> {
             Pat::TupleStruct(p, elems) => {
                 let (v, mode) = self.auto_deref(v, mode);
                 let fts: Vec<u32> = if let Some((sid, vi)) = self.variant_by(p) {
+                    self.pat_turbofish(v, p, sid);
                     self.pat_fields(v, sid, Some(vi)).into_iter().map(|f| f.1).collect()
                 } else if let Some(sid) = self.struct_by(p).or_else(|| self.struct_by_turbofish(p)) {
+                    self.pat_turbofish(v, p, sid);
                     self.pat_fields(v, sid, None).into_iter().map(|f| f.1).collect()
                 } else {
                     return;
@@ -797,8 +810,10 @@ impl Inf<'_> {
             Pat::Struct(p, fps, _) => {
                 let (v, mode) = self.auto_deref(v, mode);
                 let fields = if let Some((sid, vi)) = self.variant_by(p) {
+                    self.pat_turbofish(v, p, sid);
                     self.pat_fields(v, sid, Some(vi))
                 } else if let Some(sid) = self.struct_by(p).or_else(|| self.struct_by_turbofish(p)) {
+                    self.pat_turbofish(v, p, sid);
                     self.pat_fields(v, sid, None)
                 } else {
                     return;

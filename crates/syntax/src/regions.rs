@@ -26,17 +26,32 @@ pub fn names_lt(t: &PTy) -> bool {
 /// `E::V::<Cell<&'static u32>>`) or before a `::` (`<A<'a>>::new`, `<A<'a> as Tr>::IC`). Only then do a body's
 /// statements look for paths that write lifetimes (writes_path_lts): most programs have none
 pub fn src_path_lts(src: &str) -> bool {
-    // (from each `'`, on its line: a `<` around it right after `::` (a turbofish), or a `>` around it right before
-    // `::`. Looking for the `'`s, which are few, costs less than looking for every `::`)
+    // (from each `'`, within its statement: a `<` around it right after `::` (a turbofish), or a `>` around it right
+    // before `::`, whitespace between them too (a turbofish formatted on several lines). Looking for the `'`s, which
+    // are few, costs less than looking for every `::`)
     let b = src.as_bytes();
-    let stop = |c: u8| matches!(c, b';' | b'{' | b'}' | b'\n');
+    let stop = |c: u8| matches!(c, b';' | b'{' | b'}');
+    let after = |j: usize| -> bool {
+        let mut k = j;
+        while k < b.len() && b[k].is_ascii_whitespace() {
+            k += 1;
+        }
+        b.get(k..k + 2) == Some(b"::")
+    };
+    let before = |j: usize| -> bool {
+        let mut k = j;
+        while k > 0 && b[k - 1].is_ascii_whitespace() {
+            k -= 1;
+        }
+        k >= 2 && &b[k - 2..k] == b"::"
+    };
     src.match_indices('\'').any(|(i, _)| {
         let mut d = 0i32;
         for j in (0..i).rev() {
             match b[j] {
                 b'>' if j == 0 || b[j - 1] != b'-' => d += 1,
                 b'<' if d == 0 => {
-                    if j >= 2 && &b[j - 2..j] == b"::" {
+                    if before(j) {
                         return true;
                     }
                 }
@@ -51,7 +66,7 @@ pub fn src_path_lts(src: &str) -> bool {
                 b'<' => d += 1,
                 b'>' if b[j - 1] == b'-' => {}
                 b'>' if d == 0 => {
-                    if b.get(j + 1..j + 3) == Some(b"::") {
+                    if after(j + 1) {
                         return true;
                     }
                 }
@@ -74,6 +89,12 @@ pub fn writes_path_lts(e: &crate::parse::Expr) -> bool {
         Expr::Path(q, p) => written(q, p),
         Expr::Struct(p, ..) => p.segs.iter().any(|s| !s.args.is_empty()) && path_names_lt(p),
         Expr::Call(f, _) => matches!(&**f, Expr::Path(q, p) if written(q, p)),
+        // (a method call's turbofish: `q.take::<&'static u32>(&c)`)
+        Expr::MethodCall(_, _, gargs, _, _) => gargs.iter().any(|a| match a {
+            GArg::Lifetime(l) => l != "'_",
+            GArg::Ty(t) | GArg::Bind(_, t) => names_lt(t),
+            GArg::Const(_) => false,
+        }),
         // (a closure's body is checked on its own)
         Expr::Closure(..) => return false,
         _ => false,

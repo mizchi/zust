@@ -1094,6 +1094,17 @@ impl Cx<'_> {
         let Some(sid) = self.pat_struct_by(path) else {
             return err(span, self.no_variant_msg(path));
         };
+        // (`S::<u16>(_)` matching an `S<u8>`: the turbofish's arguments are the value's)
+        if let (Some(args), Ty::Struct(_)) = (self.turbofish_split(path).1, t) {
+            if !args.is_empty() && args.iter().any(|a| matches!(a, crate::parse::GArg::Ty(_))) && self.prog.struct_by_p(&PPath::of(path), self.self_sid).is_none() {
+                let ts = self.turbofish_targs(sid, args)?;
+                let n = self.prog.structs[self.prog.base_of(sid) as usize].generics.len();
+                if ts.len() != n {
+                    return err(span, format!("struct takes {n} generic arguments but {} were supplied (E0107)", ts.len()));
+                }
+                self.turbofish_vs_expected(sid, &ts, Some(t))?;
+            }
+        }
         match t {
             Ty::Struct(x) if self.prog.base_of(x) == self.prog.base_of(sid) => Ok(self.prog.structs[x as usize].fields.clone()),
             _ => err(span, format!("mismatched types: expected `{}`, found `{}`", self.prog.tn(t), self.prog.structs[sid as usize].name)),
@@ -2435,6 +2446,15 @@ fn ref_mut_names(p: &Pat, out: &mut Vec<String>) {
 fn guard_mut_use(e: &Expr, names: &[String]) -> Option<(crate::parse::Pos, String, bool)> {
     if names.is_empty() {
         return None;
+    }
+    // (a closure's parameters are its own: `|r: &mut i32| { *r = 2; true }` writes no arm's `r`)
+    if let Expr::Closure(_, inputs, _, body, _) = e {
+        let mut bound = vec![];
+        for (p, _) in inputs {
+            crate::ast_closure::pat_idents(p, &mut bound);
+        }
+        let cur: Vec<String> = names.iter().filter(|n| !bound.contains(n)).cloned().collect();
+        return guard_mut_use(body, &cur);
     }
     let named = |x: &Expr| -> Option<String> {
         let mut x = strip_paren(x);

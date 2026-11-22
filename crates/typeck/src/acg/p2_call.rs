@@ -489,7 +489,8 @@ impl Cx<'_> {
             // `()`'s)
             let bsig = &self.prog.sigs[bid as usize];
             let bounds = bsig.trait_of.as_deref().or(bsig.impl_trait.as_deref()).and_then(|tr| self.prog.blanket_bounds.get(tr));
-            let holds = |t: Ty| bounds.is_none_or(|bs| bs.iter().all(|b| b.starts_with('?') || b.starts_with('\'') || self.prog.implements(t, b)));
+            let prog = self.prog;
+            let holds = |t: Ty| bounds.is_none_or(|bs| blanket_bounds_hold(prog, t, bs, 0));
             let extra = |t: Ty| (prim(t) || matches!(t, Ty::Unit | Ty::Box(_))) && holds(t);
             let to_prim = matches!(pt, Some(Ty::Ref(_, i)) if extra(*i));
             if !own && pt.is_some_and(|t| prim(t) || matches!(t, Ty::Ref(_, Ty::Str)) || (t == Ty::Unit && holds(t))) || (!own && to_prim) {
@@ -500,9 +501,10 @@ impl Cx<'_> {
                 let args: Vec<&Expr> = margs.iter().collect();
                 if let (Ty::Ref(m, i), Some(v)) = (t, v) {
                     if extra(*i) {
-                        // (a `&self` method through a `&mut`: the reference is shared for it)
-                        let self_mut = matches!(self.prog.sigs[bid as usize].params.first(), Some(Ty::Ref(true, _)));
-                        return self.call_fn(bid, Some((v, Ty::Ref(m && self_mut, i))), &args, tf, expected, SP);
+                        // (a `&self` method through a `&mut`: the reference is shared for it; `self` by value keeps it
+                        // as it is)
+                        let shared_self = matches!(self.prog.sigs[bid as usize].params.first(), Some(Ty::Ref(false, _)));
+                        return self.call_fn(bid, Some((v, Ty::Ref(m && !shared_self, i))), &args, tf, expected, SP);
                     }
                 }
                 // (&self に渡すのは値のアドレス。&str は fat pointer の置き場所のアドレスがそのまま &&str; `()` は
@@ -2907,4 +2909,18 @@ pub fn static_not_sync(prog: &Program) -> Option<(usize, String)> {
 /// `__implT`
 fn hidden_param(n: &str) -> bool {
     n.starts_with("__impl") && n.len() > 6 && n.as_bytes()[6..].iter().all(|c| c.is_ascii_digit())
+}
+
+/// The bounds of a blanket impl's self type hold of t (`?Sized` and lifetimes aside). A bound that is a trait with a
+/// blanket impl of its own holds when that impl's bounds do (`impl<T: Marker> Other for T`)
+fn blanket_bounds_hold(prog: &crate::program::Program, t: Ty, bs: &[String], depth: u32) -> bool {
+    bs.iter().all(|b| {
+        if b.starts_with('?') || b.starts_with('\'') {
+            return true;
+        }
+        match prog.blanket_bounds.get(b.as_str()) {
+            Some(inner) if prog.blanket_traits.contains(b.as_str()) && depth < 4 => blanket_bounds_hold(prog, t, inner, depth + 1),
+            _ => prog.implements(t, b),
+        }
+    })
 }

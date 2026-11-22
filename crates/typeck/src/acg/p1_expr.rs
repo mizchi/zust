@@ -75,8 +75,36 @@ impl Cx<'_> {
         if ty_seg.name == "Self" || self.prog.aliases.contains_key(&ty_seg.name) {
             return err(SP, "type arguments are not allowed on this type (E0109)");
         }
-        if has_ty(ty_seg) {
+        // (`E::<'static>::V::<u8>(..)`: the enum's arguments are written, lifetimes too)
+        if !ty_seg.args.is_empty() {
             return err(SP, format!("type arguments are not allowed on {kind} `{}` (E0109)", p.segs[n - 1].name));
+        }
+        Ok(())
+    }
+
+    /// t implements `Copy` (borrowck's is_copy counts a `&mut` as Copy, for the reborrows of passing it)
+    pub(crate) fn strict_copy(&self, t: Ty) -> bool {
+        match t {
+            Ty::Ref(true, _) => false,
+            Ty::Array(e, _) => self.strict_copy(*e),
+            Ty::Struct(s) if self.prog.is_tuple(s) => self.prog.structs[s as usize].args.iter().all(|&a| self.strict_copy(a)),
+            t => borrowck::is_copy(self.prog, t, 0),
+        }
+    }
+
+    /// A struct's turbofish (ts: its arguments, None for `_`) against the expected instance of it: each argument
+    /// written is the expected one (`let _: S<u8, u8> = S::<u16, _> { .. }` is a mismatch; `S::<u8, _>` is not)
+    pub(crate) fn turbofish_vs_expected(&self, sid: u32, ts: &[Option<Ty>], expected: Option<Ty>) -> R<()> {
+        let Some(Ty::Struct(es)) = expected else { return Ok(()) };
+        let base = self.prog.base_of(sid);
+        if self.prog.base_of(es) != base || self.prog.has_param(Ty::Struct(es)) {
+            return Ok(());
+        }
+        let eargs = &self.prog.structs[es as usize].args;
+        if ts.iter().zip(eargs).any(|(w, e)| w.is_some_and(|w| w != *e)) {
+            let shown: Vec<String> = ts.iter().map(|w| w.map_or("_".to_string(), |w| self.prog.tn(w))).collect();
+            let name = &self.prog.structs[base as usize].name;
+            return err(SP, format!("mismatched types: expected `{}`, found `{name}<{}>`", self.prog.tn(Ty::Struct(es)), shown.join(", ")));
         }
         Ok(())
     }
@@ -1788,13 +1816,7 @@ impl Cx<'_> {
                         self.lifetime_arity(s, path, "struct")?;
                         let ts = self.turbofish_targs(s, ta)?;
                         // (`let x: S<u16> = S::<u8> { t: 1 }`: the turbofish against the expected instance)
-                        if let (Some(Ty::Struct(es)), Some(full)) = (expected, ts.iter().copied().collect::<Option<Vec<Ty>>>()) {
-                            let base = self.prog.base_of(s);
-                            if self.prog.base_of(es) == base && !self.prog.has_param(Ty::Struct(es)) {
-                                let it = Ty::Struct(self.prog.instantiate(base, full)?);
-                                self.same(SP, it, Ty::Struct(es))?;
-                            }
-                        }
+                        self.turbofish_vs_expected(s, &ts, expected)?;
                         written = Some(ts);
                         Some(s)
                     }
@@ -1949,7 +1971,7 @@ impl Cx<'_> {
             if self.prog.structs[inst as usize].base.is_some() {
                 for (_, ft, _) in self.prog.structs[inst as usize].fields.clone() {
                     let md = matches!(ft, Ty::Struct(f) if self.prog.structs[self.prog.base_of(f) as usize].name == "ManuallyDrop");
-                    if !md && !self.prog.has_param(ft) && !borrowck::is_copy(self.prog, ft, 0) {
+                    if !md && !self.prog.has_param(ft) && !self.strict_copy(ft) {
                         return err(SP, format!("the trait bound `{}: Copy` is not satisfied (E0277)", self.prog.tn(ft)));
                     }
                 }
@@ -3350,13 +3372,7 @@ impl Cx<'_> {
                     if let Some(args) = targs {
                         let ts = self.turbofish_targs(sid, args)?;
                         // (`let x: S<u16> = S::<u8>(1u16)`: the turbofish against the expected instance)
-                        if let (Some(Ty::Struct(es)), Some(ts)) = (expected, ts.iter().copied().collect::<Option<Vec<Ty>>>()) {
-                            let base = self.prog.base_of(sid);
-                            if self.prog.base_of(es) == base && !self.prog.has_param(Ty::Struct(es)) {
-                                let it = Ty::Struct(self.prog.instantiate(base, ts)?);
-                                self.same(SP, it, Ty::Struct(es))?;
-                            }
-                        }
+                        self.turbofish_vs_expected(sid, &ts, expected)?;
                         self.adt_targs = Some(ts);
                     }
                     let args: Vec<(usize, &Expr)> = cargs.iter().enumerate().collect();

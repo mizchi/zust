@@ -20,6 +20,8 @@ fn main() {
     let v: Vec<P<i64>> = vec![4i64, 5].into_iter().map(|x| P::<i64>(x, 9)).collect();
     println!("{} {:?} {} {}", f(2, 3).0, g(3), v[1].0, v[1].1);
     let P::<u16>(x, y) = P(300, 1);
+    // (the pattern's turbofish makes x a u16: 7, not an i32's 23)
+    println!("{}", x.leading_zeros());
     let s = S { t: String::from("x"), n: 2 };
     match s {
         S::<String> { t, n: 2 } => println!("{} {} {}", x, y, t),

@@ -1967,7 +1967,7 @@ impl Cx<'_> {
                     // coercion makes one struct another)
                     if let (Some(Ty::Struct(a)), Ty::Struct(b), true) = (ann, t, ann_ty.is_some()) {
                         let p = self.prog;
-                        if has_hole(p, Ty::Struct(a)) && p.base_of(a) != p.base_of(b) && !p.is_tuple(a) && !p.is_tuple(b) && !p.has_param(t) && p.structs[b as usize].placeholder.is_none() && !p.closures.contains_key(&b) {
+                        if has_hole(p, Ty::Struct(a)) && p.base_of(a) != p.base_of(b) && !p.is_tuple(a) && !p.is_tuple(b) && !p.has_param(t) && p.structs[b as usize].placeholder.is_none() && !p.closure_of_struct.contains_key(&p.base_of(b)) {
                             let m = format!("mismatched types: expected `{}`, found `{}`", p.tn(Ty::Struct(a)), p.tn(t));
                             return Err(self.at(expr_start(init), m));
                         }
