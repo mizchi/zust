@@ -214,6 +214,12 @@ pub fn expand_select(src: &str, c: &CfgSet) -> Option<String> {
                 i = matching(&s, &toks, i + 3) + 1;
                 continue;
             }
+            // (another macro's arguments are its own: `stringify!(cfg_select! { .. })` keeps them; a macro_rules! call's
+            // are expanded with it. The std macros that take expressions, `println!(cfg_select! { .. })`, are looked in)
+            if toks[i].0 == 0 && t(i) != b"cfg_select" && t(i + 1) == b"!" && is_open(t(i + 2)) && !expr_macro(t(i)) {
+                i = matching(&s, &toks, i + 2) + 1;
+                continue;
+            }
             if !(toks[i].0 == 0 && t(i) == b"cfg_select" && t(i + 1) == b"!" && is_open(t(i + 2))) {
                 i += 1;
                 continue;
@@ -243,11 +249,28 @@ pub fn expand_select(src: &str, c: &CfgSet) -> Option<String> {
                 continue;
             }
             match chosen {
-                Some((bo, bc)) => {
+                // (a `{ .. }` arm gives its contents; a `( .. )` / `[ .. ]` one is an expression with its delimiters:
+                // `2 * cfg_select! { _ => (1 + 2) }` is 6)
+                Some((bo, bc)) if t(bo) == b"{" => {
                     blank(&mut out, toks[i].1, toks[bo].2);
                     blank(&mut out, toks[bc].1, toks[close].2);
                 }
-                None => blank(&mut out, toks[i].1, toks[close].2),
+                Some((bo, bc)) => {
+                    blank(&mut out, toks[i].1, toks[bo].1);
+                    blank(&mut out, toks[bc].2, toks[close].2);
+                }
+                // (no arm holds: an error at the call, as rustc's "none of the predicates in this `cfg_select`
+                // evaluated to true")
+                None => {
+                    let (a, b) = (toks[i].1, toks[close].2);
+                    blank(&mut out, a, b);
+                    let w: &[u8] = b"compile_error!(\"none of the predicates in this `cfg_select` evaluated to true\")";
+                    if b - a >= w.len() {
+                        out[a..a + w.len()].copy_from_slice(w);
+                    } else {
+                        out.splice(a..a, w.iter().copied());
+                    }
+                }
             }
             found = true;
             changed = true;
@@ -312,8 +335,11 @@ fn strip_toks(src: &str, c: &CfgSet, select: &mut bool) -> Option<String> {
                 None
             };
             if let Some(g) = g {
-                *select |= t(i) == b"cfg_select";
-                i = matching(s, &toks, g) + 1;
+                let end = matching(s, &toks, g);
+                // (also in the arguments of a std macro that takes expressions: `println!(cfg_select! { .. })`)
+                *select |= t(i) == b"cfg_select"
+                    || (expr_macro(t(i)) && end < toks.len() && src[toks[g].1..toks[end].2].contains("cfg_select"));
+                i = end + 1;
                 continue;
             }
         }
@@ -417,4 +443,14 @@ mod tests {
         assert_eq!(run("m! { if #[cfg(test)] { a } } macro_rules! n { () => { #[cfg(test)] fn f() {} } }", &[]), "m! { if #[cfg(test)] { a } } macro_rules! n { () => { #[cfg(test)] fn f() {} } }");
         assert_eq!(run("#[cfg(feature = \"alloc\")] extern crate alloc; extern crate std as s; fn f() {}", &["alloc"]), "fn f() {}");
     }
+}
+
+/// std macros whose arguments are expressions (a `cfg_select!` in them is expanded in place)
+fn expr_macro(n: &[u8]) -> bool {
+    matches!(
+        n,
+        b"println" | b"print" | b"eprintln" | b"eprint" | b"format" | b"write" | b"writeln" | b"panic" | b"assert" | b"assert_eq"
+            | b"assert_ne" | b"debug_assert" | b"debug_assert_eq" | b"debug_assert_ne" | b"vec" | b"dbg" | b"todo" | b"unreachable"
+            | b"unimplemented" | b"format_args"
+    )
 }

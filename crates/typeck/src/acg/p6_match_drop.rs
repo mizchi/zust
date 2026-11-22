@@ -626,18 +626,15 @@ impl Cx<'_> {
             // (`G::<5> => ..` with `struct G<const N: usize>;`: a unit struct's pattern, checked against the value's
             // type (through references) and always matching)
             Pat::Path(path) if path.segs.last().is_some_and(|s| !s.args.is_empty()) && self.variant_on(path, p.ty()).is_none() => {
-                let (pp, targs) = self.turbofish_split(path);
                 let (pd, _) = self.pat_deref(p, BindMode::Move);
-                match (self.prog.struct_by_p(&pp, self.self_sid), targs) {
-                    (Some(sid), Some(args)) if self.prog.structs[sid as usize].fields.is_empty() && !self.prog.structs[sid as usize].is_enum => {
-                        if let Some(ts) = self.turbofish_targs(sid, args)?.into_iter().collect::<Option<Vec<Ty>>>() {
-                            let pt = Ty::Struct(self.prog.instantiate(self.prog.base_of(sid), ts)?);
-                            self.same(SP, pt, pd.ty())?;
-                        }
-                        Ok(())
-                    }
-                    _ => err(SP, self.no_variant_msg(path)),
+                let (pp, _) = self.turbofish_split(path);
+                if self.prog.struct_by_p(&pp, self.self_sid).is_none_or(|sid| !self.prog.structs[sid as usize].fields.is_empty() || self.prog.structs[sid as usize].is_enum) {
+                    return err(SP, self.no_variant_msg(path));
                 }
+                if let Some(pt) = self.pat_turbofish_ty(path, pd.ty())? {
+                    self.same(SP, pt, pd.ty())?;
+                }
+                Ok(())
             }
             // (`Num::ZERO => ..` / `u8::MAX`: a path to a constant, not a variant, is equal to its value)
             Pat::Path(path) if self.variant_on(path, p.ty()).is_none() && self.path_const_pat(path) => {
@@ -975,14 +972,10 @@ impl Cx<'_> {
         match pat {
             // (`let PhantomData::<(A, B)> = x`: a unit struct's turbofish names the type the value has)
             Pat::Path(path) if path.segs.last().is_some_and(|s| !s.args.is_empty()) && self.variant_on(path, p.ty()).is_none() => {
-                let (pp, targs) = self.turbofish_split(path);
-                if let (Some(sid), Some(args)) = (self.prog.struct_by_p(&pp, self.self_sid), targs) {
-                    if let Some(ts) = self.turbofish_targs(sid, args)?.into_iter().collect::<Option<Vec<Ty>>>() {
-                        let pt = Ty::Struct(self.prog.instantiate(self.prog.base_of(sid), ts)?);
-                        // (`let G::<5> = &x;`: through the reference, as match ergonomics reads it)
-                        let (pd, _) = self.pat_deref(p, mode);
-                        self.same(SP, pt, pd.ty())?;
-                    }
+                // (`let G::<5> = &x;`: through the reference, as match ergonomics reads it)
+                let (pd, _) = self.pat_deref(p, mode);
+                if let Some(pt) = self.pat_turbofish_ty(path, pd.ty())? {
+                    self.same(SP, pt, pd.ty())?;
                 }
                 Ok(())
             }

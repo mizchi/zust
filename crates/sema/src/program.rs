@@ -1822,11 +1822,9 @@ impl Program {
         if (tr.starts_with("From") || tr.starts_with("Into")) && (t.is_int() || t.is_float() || matches!(t, Ty::Bool | Ty::Char)) {
             let tr2: String = tr.chars().filter(|c| !c.is_whitespace()).collect();
             let arg = |p: &str| tr2.strip_prefix(p).and_then(|r| r.strip_prefix('<')).and_then(|r| r.strip_suffix('>')).and_then(Ty::prim);
-            if let Some(a) = arg("From") {
-                return Some(prim_from(a, t));
-            }
-            if let Some(a) = arg("Into") {
-                return Some(prim_from(t, a));
+            // (only a conversion std has answers here; the rest goes to the impls, a program's own `From` among them)
+            if arg("From").is_some_and(|a| prim_from(a, t)) || arg("Into").is_some_and(|a| prim_from(t, a)) {
+                return Some(true);
             }
         }
         match (t, tr) {
@@ -1996,7 +1994,8 @@ impl Program {
         // type argument, `S<X>: Clone` needs `X: Clone`)
         if let Ty::Struct(sid) = t {
             let b = self.base_of(sid);
-            if b != sid && self.derived.get(&b).is_some_and(|ds| ds.iter().any(|d| d == tr)) && self.struct_item.get(b as usize).is_some_and(|&i| i < self.prelude_from) {
+            // (`#[derive(Default)]` on an enum takes its `#[default]` unit variant: no bound on the arguments)
+            if b != sid && !(tr == "Default" && self.structs[b as usize].is_enum) && self.derived.get(&b).is_some_and(|ds| ds.iter().any(|d| d == tr)) && self.struct_item.get(b as usize).is_some_and(|&i| i < self.prelude_from) {
                 return self.structs[sid as usize].args.iter().all(|&a| matches!(a, Ty::Array(Ty::Unit, _)) || self.has_param(a) || self.implements(a, tr));
             }
         }
@@ -3825,6 +3824,8 @@ impl Program {
         s.extend(self.struct_index.keys().map(|k| k.as_str()));
         s.extend(self.const_index.keys().map(|k| k.as_str()));
         s.extend(self.const_by_last.keys().map(|k| k.as_str()));
+        // (`A::V` through `type A = E;`: the alias leads to E)
+        s.extend(self.aliases.keys().map(|k| k.as_str()));
         s.insert("for");
         s
     }
@@ -3843,20 +3844,32 @@ impl Program {
             }
             // `for` はイテレータなら名前を書かずに next を呼ぶ
             let s = if s == "for" { "next" } else { s };
+            let mut hit = false;
             if let Some(ids) = self.by_last.get(s) {
                 fns.extend_from_slice(ids);
+                hit = true;
             }
             if let Some(&i) = self.struct_index.get(s) {
                 sts.push(i);
+                hit = true;
             }
             if has_consts {
                 if let Some(&i) = self.const_index.get(s) {
                     cs.push(i);
+                    hit = true;
                 }
                 if has_assoc {
                     if let Some(ids) = self.const_by_last.get(s) {
                         cs.extend_from_slice(ids);
+                        hit = true;
                     }
+                }
+            }
+            // (a name no table has: an alias, whose structs / enums a fn using `A::V` depends on, so a change to `E`
+            // reaches it)
+            if !hit {
+                if let Some((_, syn)) = self.aliases.get(s) {
+                    alias_structs(syn, &self.struct_index, &mut sts);
                 }
             }
         }
@@ -4476,5 +4489,19 @@ fn prim_from(a: Ty, b: Ty) -> bool {
         I64 => matches!(b, I128),
         F32 => matches!(b, F64),
         _ => false,
+    }
+}
+
+/// the structs / enums a type alias's value names (by the program's index)
+fn alias_structs(t: &TySyn, index: &FxMap<String, u32>, out: &mut Vec<u32>) {
+    match t {
+        TySyn::Named(n) => out.extend(index.get(n).copied()),
+        TySyn::App(n, args) => {
+            out.extend(index.get(n).copied());
+            args.iter().for_each(|a| alias_structs(a, index, out));
+        }
+        TySyn::Ref(_, i) | TySyn::Ptr(_, i) | TySyn::Slice(i) | TySyn::Array(i, _) | TySyn::Assoc(i, _) => alias_structs(i, index, out),
+        TySyn::Tuple(ts) | TySyn::FnPtr(ts) => ts.iter().for_each(|a| alias_structs(a, index, out)),
+        _ => {}
     }
 }

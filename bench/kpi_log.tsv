@@ -256,3 +256,4 @@ date	commit	change	noop_M	edit_M	check_M	cache_KiB	lsp_G	run	check	build	cfail	t
 2026-11-22	135b732+	merge main (#42) into compat-next26	0.697	555.067	3863.382	1902.8	10.8534	1809	1493	101	4072	1192.759	64.098	10.370	320.238	723.142	268.037
 2026-11-22	527eacb+	U::from(x) of a number parameter; From::from to an expected number type	0.697	555.067	3863.361	1902.8	-	1809	1493	101	4072	1192.763	64.099	10.370	320.238	723.149	268.037
 2026-11-22	e5f8fdb+	A missing ; before a statement on the next line: at the end of the previous token	0.697	555.075	3863.375	1902.8	-	1809	1493	101	4078	1192.762	64.008	10.370	320.250	723.151	268.041
+2026-11-22	5911b30+	Review of #41 (3): alias deps in cache keys, cfg_select delimiters / opaque macros / no arm, compile_error!	0.699	555.600	3863.878	1902.8	10.8520	1809	1493	101	4078	1192.696	64.130	10.400	320.396	723.768	268.207

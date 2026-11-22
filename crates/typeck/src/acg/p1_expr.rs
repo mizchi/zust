@@ -92,6 +92,33 @@ impl Cx<'_> {
         (pp, Some(&last.args))
     }
 
+    /// a unit struct pattern's instance (`G::<5, _>` against a `G<5, 7>`: its `_` from the value's type), after its
+    /// lifetime and argument counts are checked; None when it is not one
+    pub(crate) fn pat_turbofish_ty(&self, path: &crate::parse::Path, value: Ty) -> R<Option<Ty>> {
+        let (pp, targs) = self.turbofish_split(path);
+        let (Some(sid), Some(args)) = (self.prog.struct_by_p(&pp, self.self_sid), targs) else { return Ok(None) };
+        let sd = &self.prog.structs[sid as usize];
+        if !sd.fields.is_empty() || sd.is_enum {
+            return Ok(None);
+        }
+        self.lifetime_arity(sid, path, "struct")?;
+        let base = self.prog.base_of(sid);
+        let mut ts = self.turbofish_targs(sid, args)?;
+        if let Ty::Struct(v) = value {
+            if self.prog.base_of(v) == base {
+                for (k, t) in ts.iter_mut().enumerate() {
+                    if t.is_none() {
+                        *t = self.prog.structs[v as usize].args.get(k).copied();
+                    }
+                }
+            }
+        }
+        match ts.into_iter().collect::<Option<Vec<Ty>>>() {
+            Some(ts) => Ok(Some(Ty::Struct(self.prog.instantiate(base, ts)?))),
+            None => Ok(None),
+        }
+    }
+
     /// the type arguments a struct's turbofish gives (None for `_`; lifetimes left out), checked against the struct's
     /// number of generic parameters (E0107); a type that does not resolve is that error
     pub(crate) fn turbofish_targs(&self, sid: u32, args: &[GArg]) -> R<Vec<Option<Ty>>> {

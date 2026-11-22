@@ -1443,6 +1443,14 @@ impl Cx<'_> {
                 let e: &Expr = self.keep_expr(Expr::Macro(path_of("format"), g.to_string(), crate::parse::Span::default()));
                 self.expr(e, None)
             }
+            // `compile_error!("msg")`: the error it names, here
+            "compile_error" => {
+                let args = self.macro_args(p, g)?;
+                match args.first().and_then(str_lit) {
+                    Some(m) => err(SP, m),
+                    None => err(SP, "compile_error! takes a string literal"),
+                }
+            }
             // `option_env!("X")`: no build-time environment here
             "option_env" => {
                 let args = self.macro_args(p, g)?;
