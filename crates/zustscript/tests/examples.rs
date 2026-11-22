@@ -278,6 +278,22 @@ fn owned_same_in_js_and_wasm() {
     assert!(rs.contains("for x in xs.to_vec().into_iter() {\nxs = { let mut __zs_v = xs;"), "{rs}");
 }
 
+/// tests/js_inplace.zsc: the JS layer appends in place only onto a local array no one else can see, so every
+/// result is what the copying push gives
+#[test]
+fn js_push_in_place() {
+    let d = out_dir("js_inplace");
+    let o = zsc(&root().join("tests/js_inplace.zsc"), &d, &[]);
+    assert!(o.status.success(), "{}", String::from_utf8_lossy(&o.stderr));
+    let out = node(&d, "const m = await import('./js_inplace.js'); const xs = [1]; const r = m.from_param(xs); console.log(JSON.stringify([m.ramp(5), m.aliased(), [r, xs.length], m.iterate_and_grow(), m.stored(), m.other_local(), m.concat_and_short()]))");
+    assert_eq!(out, "[5,12,[2,1],4,114,13,31]\n");
+    let js = std::fs::read_to_string(d.join("js_inplace.js")).unwrap();
+    // in place exactly where no one else can see the array: the loop's accumulator, a local made by a copying
+    // push, and a concat onto a fresh literal
+    assert_eq!(js.matches(".push(").count(), 2, "{js}");
+    assert!(js.contains("acc = (acc.push(i), acc);") && js.contains("b = (b.push(3), b);") && js.contains("a = $append(a, [2, 3]);"), "{js}");
+}
+
 /// examples/kernels.zsc: the `@simd` kernels (v128, a module zsc writes), the same functions through zustc
 /// (`--no-simd`) and as JS (`--all-js`) agree: exactly for `map` and i32 sums, to 12 digits for f64 sums (the lanes
 /// regroup them)

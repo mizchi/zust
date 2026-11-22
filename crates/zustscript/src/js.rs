@@ -47,6 +47,8 @@ pub struct Js<'a> {
     /// import the helpers from the shared `zsc-runtime.js` (the default), or write them into the module
     pub shared_runtime: bool,
     pub wasm_wanted: Vec<(String, Vec<Ty>)>,
+    /// the `push` / `concat` calls of the function being written that append in place ([`crate::own::inplace_pushes`])
+    inplace: HashSet<Id>,
     /// locals in scope: (source name, JS name), innermost last. Every JS name a function uses is unique in it
     /// (`x`, then `x$1` for a second `x`), so flattened blocks, shadowing and match arms never collide
     locals: Vec<(String, String)>,
@@ -143,6 +145,8 @@ const HELPERS: &[(&str, &str)] = &[
     ("$f64_to_i64", "function $f64_to_i64(x) {\n  if (x !== x) return 0n;\n  if (x >= 9223372036854775807) return 9223372036854775807n;\n  if (x <= -9223372036854775808) return -9223372036854775808n;\n  return BigInt(Math.trunc(x));\n}"),
     ("$at", "function $at(a, i) {\n  if (i >= 0 && i < a.length) return a[i];\n  throw new RangeError(\"index out of bounds: the len is \" + a.length + \" but the index is \" + i);\n}"),
     ("$range", "function $range(a, b) {\n  const r = [];\n  for (let i = a; i < b; i++) r.push(i);\n  return r;\n}"),
+    // (appends `ys` onto `xs` in place: only onto an array no one else can see, see own::inplace_pushes)
+    ("$append", "function $append(xs, ys) {\n  for (let i = 0; i < ys.length; i++) xs.push(ys[i]);\n  return xs;\n}"),
     ("$fold", "function $fold(xs, acc, f) {\n  for (let i = 0; i < xs.length; i++) acc = f(acc, xs[i]);\n  return acc;\n}"),
     ("$rangeFold", "function $rangeFold(a, b, acc, f) {\n  for (let i = a; i < b; i++) acc = f(acc, i);\n  return acc;\n}"),
     ("$rangeMap", "function $rangeMap(a, b, f) {\n  const r = new Array(Math.max(b - a, 0));\n  for (let i = a; i < b; i++) r[i - a] = f(i);\n  return r;\n}"),
@@ -181,6 +185,7 @@ impl<'a> Js<'a> {
             wasm_fns: HashSet::new(),
             shared_runtime: true,
             wasm_wanted: vec![],
+            inplace: HashSet::new(),
             locals: vec![],
             declared: HashSet::new(),
             module_names: HashSet::new(),
@@ -306,6 +311,8 @@ impl<'a> Js<'a> {
         // (the module's own names: a local never takes one, so a call of a top-level function still reaches it)
         self.declared.clear();
         let ps: Vec<String> = args.iter().map(|a| self.bind(&a.0)).collect();
+        let params: Vec<String> = args.iter().map(|a| a.0.clone()).collect();
+        self.inplace = crate::own::inplace_pushes(&params, body, self.info);
         let saved = std::mem::take(&mut self.out);
         self.line(&format!("{}function{} {js_name}({}) {{", if public { "export " } else { "" }, if gen_ { "*" } else { "" }, ps.join(", ")));
         self.ind += 1;
@@ -919,6 +926,12 @@ impl<'a> Js<'a> {
                         self.helpers.insert("$fold");
                         let f = self.callback(&args[1], 2);
                         format!("$fold({recv}, {}, {f})", arg(self, 0))
+                    }
+                    // (in place onto a local array no one else sees, at its last use: amortized O(1), not a copy)
+                    Some(B::Push) if self.inplace.contains(&e.id) => format!("({recv}.push({}), {recv})", arg(self, 0)),
+                    Some(B::Concat) if self.inplace.contains(&e.id) => {
+                        self.helpers.insert("$append");
+                        format!("$append({recv}, {})", arg(self, 0))
                     }
                     Some(B::Push) => format!("[...{recv}, {}]", arg(self, 0)),
                     Some(B::Concat) => format!("[...{recv}, ...{}]", self.operand(&args[0])),
