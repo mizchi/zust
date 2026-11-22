@@ -975,7 +975,8 @@ impl Inf<'_> {
         let f = self.find(v);
         let (b, args) = match self.shape[f as usize] {
             // (a known instance: its arguments are known too)
-            Some(Shape::Known(t @ Ty::Struct(_))) => return self.prog.surely_not_clone(t, depth),
+            Some(Shape::Known(t @ (Ty::Struct(_) | Ty::Ref(true, _)))) => return self.prog.surely_not_clone(t, depth),
+            Some(Shape::Ref(true, _)) => return true,
             Some(Shape::Adt(b, st, n)) => (b, Some((st, n))),
             _ => return false,
         };

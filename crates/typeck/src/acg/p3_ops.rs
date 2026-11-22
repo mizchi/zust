@@ -1753,7 +1753,8 @@ impl Cx<'_> {
         // (E0277: two or more copies of a value need it to be Copy; a constant (`[C; 4]`, `[const { .. }; 4]`) is
         // evaluated for each)
         let constant = match strip_paren(x) {
-            Expr::Path(None, p) => p.segs.len() >= 1 && self.lookup(&p.segs[p.segs.len() - 1].name).is_none() && self.prog.const_index.contains_key(&p.segs.iter().map(|s| s.name.as_str()).collect::<Vec<_>>().join("::")),
+            // (the resolver's: `Self::C`, `m::C`, a local of the name shadows it)
+            e @ Expr::Path(None, p) => p.segs.len() >= 1 && (p.segs.len() >= 2 || self.lookup(&p.segs[0].name).is_none()) && self.const_of(e).is_some(),
             Expr::Const(_) => true,
             _ => false,
         };
