@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795379018749,
+  "lastUpdate": 1795379020917,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -85829,6 +85829,85 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/mizchi/zust/commit/867f67263ab48ed41036263d5cf712f12eea356a"
         },
         "date": 1795377399748,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "parity documentSymbol (名前の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity workspace/symbol (上位 20 の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity definition (行き先の一致)",
+            "value": 89.655,
+            "unit": "%"
+          },
+          {
+            "name": "parity hover (名前を含む)",
+            "value": 87.5,
+            "unit": "%"
+          },
+          {
+            "name": "parity references (数の一致)",
+            "value": 84.615,
+            "unit": "%"
+          },
+          {
+            "name": "parity documentHighlight (数の一致)",
+            "value": 88.235,
+            "unit": "%"
+          },
+          {
+            "name": "parity rename (書き換えの一致)",
+            "value": 80,
+            "unit": "%"
+          },
+          {
+            "name": "parity signatureHelp (名前・引数の数・今の引数の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity completion `x.\\|` (書いてある名前を含む)",
+            "value": 95,
+            "unit": "%"
+          },
+          {
+            "name": "parity completion `na\\|me` (同)",
+            "value": 95.455,
+            "unit": "%"
+          },
+          {
+            "name": "parity 一致の平均",
+            "value": 92.046,
+            "unit": "%"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "miz404@gmail.com",
+            "name": "Kotaro Chikuba",
+            "username": "mizchi"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "0501acf4d97d64847cbc103180dc68d10c4c0c07",
+          "message": "Merge pull request #60 from mizchi/claude/compat-next34\n\nCompat: struct literals and patterns with type arguments; E0109, E0277 Copy bound, E0599 clone; closure Clone from captures; review fixes",
+          "timestamp": "2026-11-23T05:19:50+09:00",
+          "tree_id": "a7ac21b699e00371da9e40e6b5df853543138a55",
+          "url": "https://github.com/mizchi/zust/commit/0501acf4d97d64847cbc103180dc68d10c4c0c07"
+        },
+        "date": 1795379020492,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
