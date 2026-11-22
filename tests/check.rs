@@ -235,7 +235,7 @@ fn uncalled_generic_fns_with_supertraits_and_equations() {
     let in_str = "#![deny(deprecated)]\nfn main() {\n    let _ = \"allow(deprecated\";\n    let _: u32 = unsafe { std::intrinsics::transmute(0u32) };\n}\n";
     assert_eq!(s.check(in_str).iter().map(|d| d.line).collect::<Vec<_>>(), vec![4]);
     // (an equation fixes `T::Target`, not T: a T returned as i32 is mismatched types, inline or in a where clause)
-    let by_value = "fn bad<T: std::ops::Deref<Target = i32>>(x: T) -> i32 {\n    x\n}\nfn bad2<T>(x: T) -> i32\nwhere\n    T: std::ops::Deref<Target = i32>,\n{\n    x\n}\nfn main() {}\n";
+    let by_value = "trait Tr {\n    type Out;\n}\nfn bad<T: Tr<Out = i32>>(x: T) -> i32 {\n    x\n}\nfn bad2<T>(x: T) -> i32\nwhere\n    T: Tr<Out = i32>,\n{\n    x\n}\nfn main() {}\n";
     let d = s.check(by_value);
-    assert_eq!(d.iter().map(|d| d.line).collect::<Vec<_>>(), vec![2, 8], "{d:?}");
+    assert_eq!(d.iter().map(|d| d.line).collect::<Vec<_>>(), vec![5, 11], "{d:?}");
 }
