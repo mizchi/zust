@@ -507,15 +507,28 @@ impl Cx<'_> {
                         let rt = Ty::Ref(m && !shared_self, i);
                         // (the receiver is reborrowed: `*r`, which a result that borrows from self holds
                         // (`let r2 = r.get(); *r = 5;` while r2 is used is E0506))
+                        let t0 = self.bk.call_temps.len();
                         if self.bk_on() {
-                            // (`self` by value of a reference (`fn id(self) -> Self`): the result may be the reborrow)
+                            // (`self` by value of a reference whose result is Self (`fn id(self) -> Self`): the result
+                            // may be the reborrow. Not another parameter (`fn pick<U>(self, v: U) -> U`))
                             let bs = &self.prog.sigs[bid as usize];
-                            let by_value = !matches!(bs.params.first(), Some(Ty::Ref(..))) && self.prog.has_param(bs.ret);
+                            let by_value = !matches!(bs.params.first(), Some(Ty::Ref(..))) && mentions_param0(self.prog, bs.ret, 0);
                             let flows = by_value || self.bk_ret_from(bid, 0);
                             let ev = self.bk_recv_ev(recv, rt, flows);
+                            // (a `&mut` receiver whose arguments name it (`r.touch({ *r = 5; })`): its loan lasts while
+                            // they are evaluated)
+                            let hold = match (&ev, borrowck::root_local(recv)) {
+                                (Some(borrowck::Ev::Acc(_, borrowck::Acc::Borrow(ln), _)), Some(n)) if matches!(rt, Ty::Ref(true, _)) && margs.iter().any(|a| borrowck::mentions(a, n)) => Some(*ln),
+                                _ => None,
+                            };
                             self.bk_push(ev);
+                            if let Some(ln) = hold {
+                                self.bk_call_temp(&[borrowck::Src::Loan(ln)], true);
+                            }
                         }
-                        return self.call_fn(bid, Some((v, rt)), &args, tf, expected, SP);
+                        let r = self.call_fn(bid, Some((v, rt)), &args, tf, expected, SP);
+                        self.bk_call_temps_end(t0);
+                        return r;
                     }
                 }
                 // (&self に渡すのは値のアドレス。&str は fat pointer の置き場所のアドレスがそのまま &&str; `()` は
@@ -2929,10 +2942,21 @@ fn blanket_bounds_hold(prog: &crate::program::Program, t: Ty, bs: &[String], dep
         if b.starts_with('?') || b.starts_with('\'') {
             return true;
         }
-        // (an impl for t itself (`impl Other for ()`), or the blanket impl's bounds)
+        // (an impl for t itself (`impl Other for ()`), or the blanket impl's bounds; past the depth limit, only an
+        // impl for t itself: a chain that long, or a cycle, is not taken to hold)
         match prog.blanket_bounds.get(b.as_str()) {
-            Some(inner) if prog.blanket_traits.contains(b.as_str()) && depth < 4 => prog.implements_concrete(t, b) || blanket_bounds_hold(prog, t, inner, depth + 1),
+            Some(inner) if prog.blanket_traits.contains(b.as_str()) => prog.implements_concrete(t, b) || (depth < 8 && blanket_bounds_hold(prog, t, inner, depth + 1)),
             _ => prog.implements(t, b),
         }
     })
+}
+
+/// t names the type parameter 0 (a trait's `Self`, or a blanket impl's `T`)
+fn mentions_param0(prog: &crate::program::Program, t: Ty, depth: u32) -> bool {
+    match t {
+        Ty::Param(0) => true,
+        Ty::Ref(_, i) | Ty::Ptr(_, i) | Ty::Box(i) | Ty::Array(i, _) | Ty::Slice(i) if depth < 8 => mentions_param0(prog, *i, depth + 1),
+        Ty::Struct(s) if depth < 8 => prog.structs[s as usize].args.iter().any(|&a| mentions_param0(prog, a, depth + 1)),
+        _ => false,
+    }
 }

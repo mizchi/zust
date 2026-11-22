@@ -2742,14 +2742,49 @@ impl Cx<'_> {
         let decl = decls[idx];
         // (the receiver is borrowed by `&self` / `&mut self`, and a result that borrows from self holds the loan:
         // `let y = x.f1(); x.f2(); y.use_ref();` with x a `&mut dyn Foo` is E0499)
+        // (a `&mut self` receiver whose arguments name it (`x.set(x.get())`): two-phase, as a method of a struct's. A
+        // shared reservation while the arguments are evaluated, whose loans are held to the call; the `&mut` loan then)
+        let mut two_phase = None;
         if self.bk_on() && !by_box {
             if let (Expr::MethodCall(recv, ..), Some(&Ty::Ref(m, _))) = (mc, self.prog.sigs[decl as usize].params.first()) {
                 let flows = self.bk_ret_from(decl, 0);
-                let ev = self.bk_recv_ev(recv, Ty::Ref(m, intern(Ty::Unit)), flows);
-                self.bk_push(ev);
+                if m && borrowck::root_local(recv).is_some_and(|n| margs.iter().any(|a| borrowck::mentions(a, n))) {
+                    let t0 = self.bk.call_temps.len();
+                    let rs = self.bk_recv_ev(recv, Ty::Ref(false, intern(Ty::Unit)), false);
+                    let tid = match &rs {
+                        Some(borrowck::Ev::Acc(_, borrowck::Acc::Borrow(l), _)) => Some(*l),
+                        _ => None,
+                    };
+                    self.bk_push(rs);
+                    if let Some(l) = tid {
+                        self.bk_call_temp(&[borrowck::Src::Loan(l)], true);
+                    }
+                    self.bk_frame();
+                    two_phase = Some((recv, flows, t0));
+                } else {
+                    let ev = self.bk_recv_ev(recv, Ty::Ref(m, intern(Ty::Unit)), flows);
+                    self.bk_push(ev);
+                }
             }
         }
         let r = self.dyn_call(fat, idx, &ps, ret, &args, SP);
+        if let Some((recv, flows, t0)) = two_phase {
+            // (the arguments' loans live to the call, where the `&mut` loan is taken; what they borrow may flow on)
+            let srcs = self.bk_frame_end();
+            self.bk_call_temp(&srcs, true);
+            // (the reservation ends before the `&mut` loan is taken)
+            if let Some(tid) = self.bk.call_temps.get(t0).copied().filter(|&t| t != u32::MAX) {
+                self.bk_ev(borrowck::Ev::Acc(borrowck::BPlace { local: tid, proj: vec![] }, borrowck::Acc::Read, SP));
+                self.bk_ev(borrowck::Ev::Dead(tid, SP));
+                self.bk.call_temps[t0] = u32::MAX;
+            }
+            let ev = self.bk_recv_ev(recv, Ty::Ref(true, intern(Ty::Unit)), flows);
+            self.bk_push(ev);
+            self.bk_call_temps_end(t0);
+            for s in srcs {
+                self.bk.src(s);
+            }
+        }
         if r.is_ok() {
             self.rg_dyn_call(mc, decl, &sol, &ps, ret);
         }
