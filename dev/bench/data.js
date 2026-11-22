@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795371419198,
+  "lastUpdate": 1795371421393,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -101414,6 +101414,70 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/mizchi/zust/commit/4a5b4249eef4d71e19089a1780653a6afb85d86c"
         },
         "date": 1795371197763,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tests/ui run-pass pass rate",
+            "value": 76.14,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui run-pass passing",
+            "value": 1816,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui check-pass pass rate",
+            "value": 83.12,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui check-pass passing",
+            "value": 1502,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui build-pass pass rate",
+            "value": 75.56,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui build-pass passing",
+            "value": 102,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui compile-fail pass rate",
+            "value": 59.31,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui compile-fail passing",
+            "value": 4364,
+            "unit": "tests"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "miz404@gmail.com",
+            "name": "Kotaro Chikuba",
+            "username": "mizchi"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "9edb11926201917ebdff36ffaba2081d65ff405d",
+          "message": "Merge pull request #58 from mizchi/claude/tender-sagan-iatvun\n\nREADME: remove duplicated content; docs check on jev-lint 0.10.0",
+          "timestamp": "2026-11-23T03:07:18+09:00",
+          "tree_id": "cb2ca7affe6da3121d0ada254b1946accd5a69c0",
+          "url": "https://github.com/mizchi/zust/commit/9edb11926201917ebdff36ffaba2081d65ff405d"
+        },
+        "date": 1795371420885,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
