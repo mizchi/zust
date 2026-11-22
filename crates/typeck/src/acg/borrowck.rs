@@ -2106,8 +2106,7 @@ impl Cx<'_> {
         if (by_move || move_kw) && !self.bk_ty(t).0 && !self.bk.fnonce_exprs.contains(&ca) && (crate::ast_closure::moves_capture(c, &[n.to_string()]) || self.bk_may_consume(body, n)) {
             self.bk.fnonce_exprs.push(ca);
         }
-        // (surely: not a name the body binds again (`let val = ..; drop(val)`), which moves_capture takes for the capture)
-        if (by_move || move_kw) && !self.bk_ty(t).0 && crate::ast_closure::moves_capture(c, &[n.to_string()]) && !self.bk.fnonce_sure.contains(&ca) && !crate::ast_closure::rebinds(c, &[n.to_string()]) {
+        if (by_move || move_kw) && !self.bk_ty(t).0 && crate::ast_closure::moves_capture(c, &[n.to_string()]) && !self.bk.fnonce_sure.contains(&ca) {
             self.bk.fnonce_sure.push(ca);
         }
         for (p, pt, mode, _) in &mut paths {
