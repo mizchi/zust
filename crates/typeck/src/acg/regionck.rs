@@ -2606,7 +2606,7 @@ impl Cx<'_> {
                             }
                         }
                     }
-                } else if let Some(b) = bs.iter().filter(|_| outer > 0).find(|b| b.split('<').next().unwrap_or(b).trim().rsplit("::").next() == Some(short)) {
+                } else if let Some(b) = bs.iter().filter(|_| outer > 0).find(|b| b.split('<').next().unwrap_or(b).trim() == tr).or_else(|| bs.iter().filter(|_| outer > 0).find(|b| b.split('<').next().unwrap_or(b).trim().rsplit("::").next() == Some(short))) {
                     for (i, l) in bound_lts(b).iter().enumerate().take(outer) {
                         let v = if l == "'static" { Some(STATIC) } else { rg.lt_names.iter().position(|x| x == l).and_then(|p| rg.lts.get(p).copied()) };
                         if let (Some(v), Some(slot)) = (v, lts.get_mut(i)) {

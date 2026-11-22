@@ -304,6 +304,32 @@ impl Cx<'_> {
     pub(crate) fn for_(&mut self, f: &Expr) -> R<V> {
         let mut temp = None;
         if let Expr::For(_, _, fexpr, _) = f {
+            // (`for x in v.iter()` / `v.iter_mut()`, through `copied` / `cloned` / `enumerate` / `rev`: a loan of v for
+            // the loop, as `&v` / `&mut v`)
+            let mut base = strip_paren(fexpr);
+            let mut by_iter = None;
+            while let Expr::MethodCall(r, name, _, args, _) = base {
+                if !args.is_empty() {
+                    break;
+                }
+                match name.as_str() {
+                    "copied" | "cloned" | "enumerate" | "rev" => base = strip_paren(r),
+                    "iter" | "iter_mut" => {
+                        by_iter = Some((strip_paren(r), name == "iter_mut"));
+                        break;
+                    }
+                    _ => break,
+                }
+            }
+            if let (true, Some((inner, m))) = (self.bk_on(), by_iter.filter(|x| is_place_expr(x.0))) {
+                let t0 = self.bk.call_temps.len();
+                if let Some(ln) = self.bk_loan_only(inner, m) {
+                    self.bk_call_temp(&[borrowck::Src::Loan(ln)], true);
+                }
+                if self.bk.call_temps.len() > t0 {
+                    temp = Some(t0);
+                }
+            }
             if let (true, Expr::Ref(m, inner)) = (self.bk_on(), strip_paren(fexpr)) {
                 // (the loan only: the lowering reads x itself)
                 let t0 = self.bk.call_temps.len();
@@ -561,9 +587,10 @@ impl Cx<'_> {
             iv
         };
         let addr = self.elem_addr(ptr, idx, elem);
-        // (`v.iter().cloned()` of elements that need a drop: each is cloned (`Clone::clone` of a reference to it), not
-        // copied bit for bit)
-        let clone_elems = mode.is_none() && borrowed && adapters.iter().any(|a| a == "cloned") && self.needs_drop(elem);
+        // (`v.iter().cloned()`: each element is cloned (`Clone::clone` of a reference to it, a user's `Clone` too), not
+        // copied bit for bit; a primitive's clone is its copy)
+        let prim = matches!(elem, Ty::I8 | Ty::I16 | Ty::I32 | Ty::I64 | Ty::I128 | Ty::Isize | Ty::U8 | Ty::U16 | Ty::U32 | Ty::U64 | Ty::U128 | Ty::Usize | Ty::F32 | Ty::F64 | Ty::Bool | Ty::Char | Ty::Unit | Ty::Ref(false, _));
+        let clone_elems = mode.is_none() && borrowed && adapters.iter().any(|a| a == "cloned") && !prim;
         let (val, vt) = match mode {
             Some(m) => (Some(addr), Ty::Ref(m, intern(elem))),
             None if clone_elems => {

@@ -1,6 +1,21 @@
 //! `for x in v.iter().copied()` / `.cloned()`: the elements are copied (cloned) out of a borrow, v stays as it is; `for x
 //! in v` takes v
+struct C(i32);
+impl Clone for C {
+    fn clone(&self) -> C {
+        println!("clone {}", self.0);
+        C(self.0 + 10)
+    }
+}
+
 fn main() {
+    // (a user's `Clone` is called for each element)
+    let cs = vec![C(1), C(2)];
+    let mut k = 0;
+    for x in cs.iter().cloned() {
+        k += x.0;
+    }
+    println!("{} {}", k, cs.len());
     let v = vec![1, 2, 3];
     let mut s = 0;
     for x in v.iter().copied() {

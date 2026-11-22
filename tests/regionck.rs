@@ -1243,3 +1243,16 @@ fn review_of_43() {
         vec![]
     );
 }
+
+/// Review of #43 (2): an `FnMut` closure called through a `&` (E0596) or a `&mut` (accepted); `a[1] = x` does not
+/// reinitialize a[0] moved by a pattern; `for x in v.iter()` borrows v for the loop
+#[test]
+fn review_of_43_2() {
+    let d = check("fn main() {\n    let mut x = 0;\n    let c = || x += 1;\n    let r = &c;\n    r();\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 5 && d[0].1.contains("behind a `&` reference"), "{d:?}");
+    let d = check("fn main() {\n    let mut a = [String::new(), String::new()];\n    let [_x, _y] = a;\n    a[1] = String::new();\n    let _z = &a[0];\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 5 && d[0].1.contains("moved"), "{d:?}");
+    let d = check("fn main() {\n    let mut v = vec![1];\n    for x in v.iter() {\n        v.push(*x);\n    }\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 4 && d[0].1.contains("also borrowed as immutable"), "{d:?}");
+    assert_eq!(check("fn main() {\n    let mut x = 0;\n    let mut c = || x += 1;\n    let r = &mut c;\n    r();\n    r();\n    let mut v = vec![1];\n    for x in v.iter_mut() {\n        *x += 1;\n    }\n    v.push(2);\n}\n"), vec![]);
+}

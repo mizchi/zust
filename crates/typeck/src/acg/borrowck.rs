@@ -936,8 +936,9 @@ impl Bk {
                             }
                         }
                         Acc::Write => {
-                            // (reinitializes the path and everything under it)
-                            if p.owned_len() == p.proj.len() {
+                            // (reinitializes the path and everything under it; not through an index, which is some element,
+                            // not a known one: `a[1] = x` after `let [_, _] = a;` leaves a[0] moved)
+                            if p.owned_len() == p.proj.len() && !p.proj.contains(&Proj::Index) {
                                 st.moved.retain(|m| !(m.place.local == p.local && prefix(&p.proj, &m.place.proj)));
                             }
                             if p.proj.is_empty() {

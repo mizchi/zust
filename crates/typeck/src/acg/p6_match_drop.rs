@@ -1125,12 +1125,19 @@ impl Cx<'_> {
                 }
                 self.rg.pat = None;
                 // (`rest @ ..` by value of an array: it takes the elements between)
+                // (more than a few elements between: the move of the whole array, so the work does not grow with its
+                // length)
                 if let (Some(n), Some(Pat::Ident(false, _, _, _)), BindMode::Move) = (n, rest, mode) {
                     if !self.bk_ty(elem).0 {
-                        for idx in pre.len()..n.saturating_sub(post.len()) {
-                            let saved = self.bk_pat_proj(borrowck::Proj::Field(format!("[{idx}]")));
-                            self.bk_pat_move(elem, "");
-                            self.bk.pat_path = saved;
+                        let between = pre.len()..n.saturating_sub(post.len());
+                        if between.len() > 16 {
+                            self.bk_pat_move(p.ty(), "");
+                        } else {
+                            for idx in between {
+                                let saved = self.bk_pat_proj(borrowck::Proj::Field(format!("[{idx}]")));
+                                self.bk_pat_move(elem, "");
+                                self.bk.pat_path = saved;
+                            }
                         }
                     }
                 }
