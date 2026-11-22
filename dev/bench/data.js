@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795321622915,
+  "lastUpdate": 1795321624856,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -79996,6 +79996,85 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/mizchi/zust/commit/2c8411a9ea94793b035670b2bdd4638030405c97"
         },
         "date": 1795313936671,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "parity documentSymbol (名前の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity workspace/symbol (上位 20 の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity definition (行き先の一致)",
+            "value": 89.655,
+            "unit": "%"
+          },
+          {
+            "name": "parity hover (名前を含む)",
+            "value": 87.5,
+            "unit": "%"
+          },
+          {
+            "name": "parity references (数の一致)",
+            "value": 82.051,
+            "unit": "%"
+          },
+          {
+            "name": "parity documentHighlight (数の一致)",
+            "value": 83.871,
+            "unit": "%"
+          },
+          {
+            "name": "parity rename (書き換えの一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity signatureHelp (名前・引数の数・今の引数の一致)",
+            "value": 89.474,
+            "unit": "%"
+          },
+          {
+            "name": "parity completion `x.\\|` (書いてある名前を含む)",
+            "value": 95,
+            "unit": "%"
+          },
+          {
+            "name": "parity completion `na\\|me` (同)",
+            "value": 87.5,
+            "unit": "%"
+          },
+          {
+            "name": "parity 一致の平均",
+            "value": 91.505,
+            "unit": "%"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "miz404@gmail.com",
+            "name": "Kotaro Chikuba",
+            "username": "mizchi"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "b86a3926105e05b11bf5d5af6a7e157e9ff47d4e",
+          "message": "Merge pull request #44 from mizchi/claude/gracious-brahmagupta-16jxdl\n\nzustscript: JS-target KPIs, direct effect handlers, a shared runtime, and --check-externs with tsrs",
+          "timestamp": "2026-11-22T13:22:16+09:00",
+          "tree_id": "7eb699095e3b24a9319b00db8be1410563d9023a",
+          "url": "https://github.com/mizchi/zust/commit/b86a3926105e05b11bf5d5af6a7e157e9ff47d4e"
+        },
+        "date": 1795321624541,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
