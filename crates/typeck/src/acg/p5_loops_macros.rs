@@ -317,7 +317,7 @@ impl Cx<'_> {
                     Ty::Struct(sid) => self.vec_fields(sid).is_some(),
                     _ => false,
                 };
-                seq.then(|| (x.clone(), path_expr("__exr_for_tmp")))
+                seq.then(|| (x.clone(), path_expr("for#tmp")))
             }
             _ => None,
         }
@@ -332,7 +332,7 @@ impl Cx<'_> {
                     false,
                     crate::parse::Block {
                         stmts: vec![
-                            Stmt::Let(Pat::Ident(false, false, "__exr_for_tmp".into(), None), None, Some(base), None, at),
+                            Stmt::Let(Pat::Ident(false, false, "for#tmp".into(), None), None, Some(base), None, at),
                             Stmt::Expr(Expr::For(label.clone(), fpat.clone(), Box::new(rebuilt), fbody.clone()), false),
                         ],
                     },

@@ -58,4 +58,9 @@ fn main() {
         u += x.len();
     }
     println!("{}", u);
+    // (the loop's own local does not hide one of the program's)
+    let __exr_for_tmp = [9];
+    for _ in [1] {
+        println!("{}", __exr_for_tmp[0]);
+    }
 }

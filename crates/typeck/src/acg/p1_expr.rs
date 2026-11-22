@@ -719,7 +719,7 @@ impl Cx<'_> {
             }
             Expr::Binary(..) => self.binary(e, expected),
             Expr::AssignOp(_, left, _, _) => {
-                if let Some(m) = self.immutable_static(left) {
+                if let Some(m) = self.prog.any_immutable_static.then(|| self.immutable_static(left)).flatten() {
                     return err(expr_start(left), m);
                 }
                 // (an overloaded `+=` is a call of `add_assign(&mut self, ..)`: no access of its own)
@@ -731,7 +731,7 @@ impl Cx<'_> {
                 Ok(r)
             }
             Expr::Assign(left, right) => {
-                if let Some(m) = self.immutable_static(left) {
+                if let Some(m) = self.prog.any_immutable_static.then(|| self.immutable_static(left)).flatten() {
                     return err(expr_start(left), m);
                 }
                 // (`map[&k] = v`: a map's index is not a place to assign to (E0594); `insert` or `get_mut`)
@@ -2684,6 +2684,9 @@ impl Cx<'_> {
 
     /// An assignment to (a field or element of) a static not declared `mut` (E0594)
     pub(crate) fn immutable_static(&self, left: &Expr) -> Option<String> {
+        if !self.prog.any_immutable_static {
+            return None;
+        }
         let mut e = strip_paren(left);
         let mut whole = true;
         while let Expr::Field(b, ..) | Expr::Index(b, ..) = e {
@@ -2691,6 +2694,10 @@ impl Cx<'_> {
             whole = false;
         }
         let Expr::Path(None, p) = e else { return None };
+        // (the hot path: a name that is no static's of the program, as almost every assignment's)
+        if !p.segs.last().is_some_and(|s| self.prog.const_index.contains_key(&s.name)) {
+            return None;
+        }
         // (`N` not shadowed by a local, or `m::N`: by the path's static)
         if ident_of(p).is_some_and(|id| self.lookup(id).is_some()) {
             return None;
