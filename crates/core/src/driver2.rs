@@ -2234,10 +2234,12 @@ fn duplicate_name(src: &str, externs: &[(usize, String)], injected: bool) -> Opt
                         s += 1;
                     }
                 }
-                b"std" | b"core" | b"alloc" if child(m, path[0]).is_none() => {
+                // (a path of neither: from the crate root in 2015, from this module later)
+                b"std" | b"core" | b"alloc" if child(if injected { 0 } else { m }, path[0]).is_none() => {
                     resolved.push((m, i, std_path_ns(path) & if d.module_only { 1 } else { 3 }));
                     continue;
                 }
+                _ if injected => cur = 0,
                 _ => {}
             }
             if cur == usize::MAX || s >= path.len() {
