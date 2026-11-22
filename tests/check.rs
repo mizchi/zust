@@ -206,3 +206,19 @@ fn discriminants_and_constants_past_literals() {
     let repeat = "struct S;\nimpl S {\n    const C: S = S;\n    fn make() {\n        let _ = [Self::C; 2];\n    }\n}\nfn main() {\n    S::make();\n}\n";
     assert_eq!(lines(&mut s, repeat), Vec::<usize>::new());
 }
+
+/// Review of #55: an operator a bound's supertrait gives, a mismatch a bound's equation may make (`Deref<Target = i32>`,
+/// in a where clause too) are no errors of an uncalled generic fn; `dyn` in a fn pointer of a signature is read; an
+/// item's `#[allow(deprecated)]` allows its intrinsics paths
+#[test]
+fn uncalled_generic_fns_with_supertraits_and_equations() {
+    let ok = "trait Sum: std::ops::Add<Output = Self> + Sized {}\nfn f<T: Sum>(a: T, b: T) -> T {\n    a + b\n}\nfn g<T: std::ops::Deref<Target = i32>>(x: &T) -> &i32 {\n    x\n}\nfn h<T>(x: &T) -> &i32\nwhere\n    T: std::ops::Deref<Target = i32>,\n{\n    x\n}\nfn main() {}\n";
+    let mut s = Session2::new(Options2 { jobs: 1, ..Options2::default() });
+    assert!(s.check(ok).is_empty(), "{:?}", s.check(ok));
+    let fnptr = "trait Bad {\n    fn make() -> Self;\n}\nfn unused<T>(_: fn(&dyn Bad)) {}\nfn main() {}\n";
+    let d = s.check(fnptr);
+    assert_eq!(d.iter().map(|d| d.line).collect::<Vec<_>>(), vec![4], "{d:?}");
+    assert!(d[0].msg.contains("(E0038)"), "{d:?}");
+    let allowed = "#![deny(deprecated)]\n#[allow(deprecated)]\nfn conv(x: f32) -> u32 {\n    unsafe { std::intrinsics::transmute(x) }\n}\nfn main() {\n    let _ = conv(1.0);\n}\n";
+    assert!(s.check(allowed).is_empty(), "{:?}", s.check(allowed));
+}

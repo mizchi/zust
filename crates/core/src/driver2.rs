@@ -1965,6 +1965,12 @@ fn dyn_in_signature(prog: &Program, src: &str, items: &[SrcItem]) -> Option<Stri
                     dyns(prog, a, depth + 1, out);
                 }
             }
+            // (a fn pointer's parameters and result: `fn(&dyn Bad)`)
+            Ty::Fn(f) => {
+                for &a in f.params.iter().chain([&f.ret]) {
+                    dyns(prog, a, depth + 1, out);
+                }
+            }
             _ => {}
         }
     }
@@ -3644,7 +3650,8 @@ impl Session2 {
         if d.line <= user_lines || !e.trim_start().starts_with(|c: char| c.is_ascii_digit()) || !hoisted_err_holds(&d.msg) {
             return e;
         }
-        let cfg = self.opts.cfg_with(&self.opts.features);
+        // (the analysis's configuration: the crate's features, cfgs and env when it has them)
+        let cfg = self.opts.cfg_of(self.ctx.features.as_ref().unwrap_or(&self.opts.features), &self.ctx.cfgs, &self.ctx.env);
         let stripped = crate::cfg::strip(src0, &cfg);
         let s = stripped.as_deref().unwrap_or(src0);
         let renamed = crate::prep::std_renames(s);
@@ -4040,7 +4047,8 @@ fn first_accidentally_stable(src: &str, items: &[SrcItem]) -> Option<String> {
     const STABLE: [&str; 4] = ["transmute", "copy_nonoverlapping", "copy", "write_bytes"];
     for it in items {
         let raw = src.get(it.start..it.end)?;
-        if !raw.contains("intrinsics") {
+        // (an item's `#[allow(deprecated)]` allows its uses, under the crate's deny)
+        if !raw.contains("intrinsics") || raw.contains("allow(deprecated") || raw.contains("expect(deprecated") {
             continue;
         }
         // (comments and string literals are no paths)

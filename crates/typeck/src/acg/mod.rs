@@ -510,16 +510,26 @@ fn compile_once(prog: &Program, insts: &Mutex<Insts>, id: u32, f: &ItemFn, line_
     let mut bound_params: Vec<String> = vec![];
     if placeholder && r.is_err() {
         bound_eqs.extend(sig.generics.iter().flat_map(|(_, bs)| bs.iter().map(|b| b.as_str())).filter(|b| b.contains('=')));
+        // (a parameter with an equation in its bounds (`T: Deref<Target = i32>`): its mismatches may be the projection's)
+        bound_params.extend(sig.generics.iter().filter(|(_, bs)| bs.iter().any(|b| b.contains('='))).map(|(n, _)| format!("= {n}")));
     }
     // (and the fn's own where clauses, on any type: `where Back: Backend<Layout = DSL>`)
-    for (_, bs) in f.sig.generics.preds.iter().filter(|_| placeholder && r.is_err()) {
+    for (subj, bs) in f.sig.generics.preds.iter().filter(|_| placeholder && r.is_err()) {
         for b in bs {
             if let crate::parse::Bound::Trait(_, p) = b {
                 for seg in &p.segs {
                     for a in &seg.args {
-                        if let crate::parse::GArg::Bind(_, crate::parse::Ty::Path(None, tp)) = a {
-                            if let Some(s) = tp.segs.last() {
-                                bound_params.push(format!("= {}", s.name));
+                        if let crate::parse::GArg::Bind(_, bt) = a {
+                            if let crate::parse::Ty::Path(None, tp) = bt {
+                                if let Some(s) = tp.segs.last() {
+                                    bound_params.push(format!("= {}", s.name));
+                                }
+                            }
+                            // (`where T: Deref<Target = i32>`: T's mismatches may be the projection's)
+                            if let crate::parse::Ty::Path(None, sp) = subj {
+                                if let [s] = sp.segs.as_slice() {
+                                    bound_params.push(format!("= {}", s.name));
+                                }
                             }
                         }
                     }
