@@ -80,6 +80,10 @@ fn effects() {
         "[ask] name?\n[out] hello, taro\ngreeted taro\n[state] put 11\n[state] put 11\n[state] put 11\ncounter: 10\n\
          raised: divide by zero\nresults: -1 3\n"
     );
+    // State and Console have only tail-resumptive handlers: plain calls. Fail's handler does not resume: a generator
+    let js = std::fs::read_to_string(d.join("effects.js")).unwrap();
+    assert!(js.contains("$perform(\"Get\")") && js.contains("$handleD("), "{js}");
+    assert!(js.contains("function* safe_div") && !js.contains("function* counter"), "{js}");
 }
 
 #[test]
@@ -271,9 +275,10 @@ console.log(m.shadow(), m.only("One"), m.range_end_once(), m.prec(-1, 2, 3));
 console.log(m.add_all([1, 2]).join(","), m.push_v([1, 2], 3).join(","));
 console.log(m.shadow_fn(), m.prec_str(3), m.push_zs([1], 2).join(","), m.re({ value: 5 }));
 console.log(m.zs_inj(5, 2), m.kw_inj(7, 3), JSON.stringify(m.kw_rec({ async_: 1, move: 2 })));
+console.log(m.many_ops(100000));
 "#,
     );
-    assert_eq!(out, "4 9\n12 1 3 9\n2,3 1,2,3\n7 6 1,2 5\n3 4 {\"async_\":2,\"move\":1}\n");
+    assert_eq!(out, "4 9\n12 1 3 9\n2,3 1,2,3\n7 6 1,2 5\n3 4 {\"async_\":2,\"move\":1}\n99999\n");
     let dts = std::fs::read_to_string(d.join("regress.d.ts")).unwrap();
     assert!(dts.contains("import type { ReactElement as $ReactElement } from \"react\";"), "{dts}");
     assert!(dts.contains("export interface ReactElement {"), "{dts}");

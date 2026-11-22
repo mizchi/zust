@@ -92,3 +92,17 @@ type Kw = { async_: i32, move: i32 }
 @wasm pub fn kw_rec(r: Kw) -> Kw {
   Kw { async_: r.move, move: r.async_ }
 }
+
+// a tail-resumptive handler runs as plain calls: many operations in one handle do not grow the stack
+enum Tally { Count -> i32, Bump(i32) -> () }
+fn bump_all(n: i32) -> i32 {
+  for i in range(0, n) { perform Bump(i % 3); }
+  perform Count
+}
+pub fn many_ops(n: i32) -> i32 {
+  let mut c = 0;
+  handle bump_all(n) {
+    Count, k => k(c),
+    Bump(v), k => { c = c + v; k(()) },
+  }
+}

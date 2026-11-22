@@ -4,8 +4,10 @@
 //!   (the shape TS narrows as a discriminated union);
 //! - numbers keep their Rust meaning: i32 wraps (`| 0`, `Math.imul`), u32 wraps (`>>> 0`), i64 is a BigInt
 //!   (`BigInt.asIntN(64, ..)`), integer division truncates and fails on zero, `as` from f64 saturates;
-//! - a function that performs effects is a generator (`function*`), `perform` is `yield`, a call to it is
-//!   `yield*`, and `handle` runs the body under `$handle` (one-shot deep handlers);
+//! - effects whose handlers all resume in tail position (`Info::direct`) are plain calls: `perform` is
+//!   `$perform("Op", ..)`, which calls the nearest handler's arm, and `handle` is `$handleD`; for the other effects, a
+//!   function that performs one is a generator (`function*`), `perform` is `yield`, a call to it is `yield*`, and
+//!   `handle` runs the body under `$handle` (one-shot deep handlers);
 //! - `match` is an `if` chain; a block, `match` or `if` in a value position becomes statements when it is the
 //!   value of a `let` or of the function, and an immediately called function otherwise.
 
@@ -28,6 +30,8 @@ pub struct Js<'a> {
     /// inside a generator (an effectful function, a handled body, a handler arm)
     gen_: bool,
     conts: Vec<String>,
+    /// the continuations of the direct (tail-resumptive) handler being written: `k(x)` is just `x`
+    dconts: Vec<String>,
     pub helpers: BTreeSet<&'static str>,
     pub jsx: bool,
     /// module → names imported from it (externs)
@@ -148,6 +152,10 @@ const HELPERS: &[(&str, &str)] = &[
         "$handle",
         "// A deep handler: runs the generator `body`; an operation in `ops` goes to `arm` with a one-shot continuation,\n// any other operation is passed on to the enclosing handler\nfunction* $handle(body, ops, arm) {\n  const g = body();\n  function* resume(v) {\n    for (;;) {\n      const r = g.next(v);\n      if (r.done) return r.value;\n      if (ops.includes(r.value.TAG)) {\n        let used = false;\n        const k = function* (x) {\n          if (used) throw new Error(\"zustscript: a continuation was resumed twice\");\n          used = true;\n          return yield* resume(x);\n        };\n        return yield* arm(r.value, k);\n      }\n      v = yield r.value;\n    }\n  }\n  return yield* resume(undefined);\n}",
     ),
+    (
+        "$perform",
+        "// Direct (tail-resumptive) handlers: a chain of frames; an operation calls the nearest frame's arm, which runs\n// under the handlers outside its own `handle` (deep handler semantics)\nlet $cur = null;\nfunction $perform(op, ...a) {\n  for (let f = $cur; f !== null; f = f.p) {\n    const h = f.h[op];\n    if (h !== undefined) {\n      const s = $cur;\n      $cur = f.p;\n      try {\n        return h(...a);\n      } finally {\n        $cur = s;\n      }\n    }\n  }\n  throw new Error(\"zustscript: unhandled effect \" + op);\n}\n\nfunction $handleD(h, body) {\n  const f = { h, p: $cur };\n  $cur = f;\n  try {\n    return body();\n  } finally {\n    $cur = f.p;\n  }\n}",
+    ),
     ("$run", "function $run(g) {\n  const r = g.next();\n  if (!r.done) throw new Error(\"zustscript: unhandled effect \" + r.value.TAG);\n  return r.value;\n}"),
 ];
 
@@ -160,6 +168,7 @@ impl<'a> Js<'a> {
             tmp: 0,
             gen_: false,
             conts: vec![],
+            dconts: vec![],
             helpers: BTreeSet::new(),
             jsx: false,
             imports: BTreeMap::new(),
@@ -289,7 +298,7 @@ impl<'a> Js<'a> {
 
     fn function(&mut self, it: &Item, js_name: &str, public: bool) {
         let Item::Fn { name, args, body, .. } = it else { return };
-        let gen_ = !self.info.effects[name].is_empty();
+        let gen_ = self.generator(name);
         self.locals.clear();
         // (the module's own names: a local never takes one, so a call of a top-level function still reaches it)
         self.declared.clear();
@@ -692,6 +701,47 @@ impl<'a> Js<'a> {
         }
     }
 
+    /// The function is a generator: it performs (and does not handle) an effect that is not direct
+    fn generator(&self, name: &str) -> bool {
+        self.info.effects.get(name).is_some_and(|es| es.iter().any(|e| !self.info.direct.contains(e)))
+    }
+
+    /// A tail-resumptive handler: the arms are plain functions that `$perform` calls, `k(x)` in an arm is `x`, and
+    /// the body runs as a plain function under the handler
+    fn direct_handle(&mut self, body: &Expr, arms: &[HArm]) -> String {
+        self.helpers.insert("$perform");
+        let saved = (std::mem::take(&mut self.out), self.ind, std::mem::take(&mut self.conts), std::mem::take(&mut self.dconts), self.gen_);
+        self.gen_ = false;
+        let pad = "  ".repeat(saved.1);
+        let mut parts = vec![];
+        for a in arms {
+            self.ind = saved.1 + 1;
+            let mark = self.locals.len();
+            let ps: Vec<String> = (0..a.pats.len()).map(|i| format!("$a{i}")).collect();
+            let mut binds = vec![];
+            for (i, p) in a.pats.iter().enumerate() {
+                self.pat_binds(p, &format!("$a{i}"), &mut binds);
+            }
+            for (n, v) in binds {
+                let js = self.bind(&n);
+                self.line(&format!("const {js} = {v};"));
+            }
+            self.dconts.push(a.k.clone());
+            self.stmt_expr(&a.body, &Dest::Return);
+            self.dconts.pop();
+            self.locals.truncate(mark);
+            let b = std::mem::take(&mut self.out);
+            parts.push(format!("{}: ({}) => {{
+{b}{pad}}}", a.variant, ps.join(", ")));
+        }
+        self.ind = saved.1 + 1;
+        self.dconts.clear();
+        self.stmt_expr(body, &Dest::Return);
+        let b = std::mem::take(&mut self.out);
+        (self.out, self.ind, self.conts, self.dconts, self.gen_) = saved;
+        format!("$handleD({{ {} }}, () => {{\n{b}{pad}}})", parts.join(", "))
+    }
+
     fn iife(&mut self, e: &Expr) -> String {
         if let Some(pos) = loop_exit(e) {
             self.errors.push((pos, "`break` / `continue` here would have to leave a function in the JS output: move this `if` / `match` into a statement of its own (`let v = if ..;`)".into()));
@@ -796,9 +846,13 @@ impl<'a> Js<'a> {
                 if let EK::Var(n) | EK::Path(_, n) = &f.kind {
                     match self.info.callee.get(&f.id).cloned() {
                         Some(Callee::Variant(en)) => return self.variant_value(&en, n, a),
-                        Some(Callee::Fn) if !self.info.effects[n].is_empty() => {
+                        Some(Callee::Fn) if self.generator(n) => {
                             let fname = self.fn_name(f.id, n);
                             return format!("(yield* {fname}({}))", a.join(", "));
+                        }
+                        Some(Callee::Local) if self.dconts.contains(n) => {
+                            // (tail-resumptive: the arm's value is the operation's result)
+                            return if a.is_empty() { "undefined".into() } else { a[0].clone() };
                         }
                         Some(Callee::Local) if self.conts.contains(n) => {
                             let a = if a.len() == 1 && a[0] == "undefined" { vec![] } else { a };
@@ -913,7 +967,7 @@ impl<'a> Js<'a> {
             EK::Block(_, None) => "undefined".into(),
             EK::Match(..) | EK::Assign(..) | EK::While(..) | EK::For(..) | EK::Break | EK::Continue => unreachable!(),
             EK::Closure(ps, body) => {
-                let saved = (self.gen_, std::mem::take(&mut self.conts));
+                let saved = (self.gen_, std::mem::take(&mut self.conts), std::mem::take(&mut self.dconts));
                 self.gen_ = false;
                 let mark = self.locals.len();
                 let ps: Vec<String> = ps.iter().map(|p| self.bind(&p.0)).collect();
@@ -928,7 +982,7 @@ impl<'a> Js<'a> {
                     let b = self.expr(body);
                     if b.starts_with('{') { format!("({b})") } else { b }
                 };
-                (self.gen_, self.conts) = saved;
+                (self.gen_, self.conts, self.dconts) = saved;
                 self.locals.truncate(mark);
                 format!("({}) => {b}", ps.join(", "))
             }
@@ -977,7 +1031,14 @@ impl<'a> Js<'a> {
             EK::Perform(_, v, args) => {
                 let a: Vec<String> = args.iter().map(|x| self.expr(x)).collect();
                 let en = self.info.variant_of[v].clone();
+                if self.info.direct.contains(&en) {
+                    self.helpers.insert("$perform");
+                    return format!("$perform({})", [js_str(v)].into_iter().chain(a).collect::<Vec<_>>().join(", "));
+                }
                 format!("(yield {})", self.variant_value(&en, v, a))
+            }
+            EK::Handle(body, arms) if arms.iter().all(|a| self.info.variant_of.get(&a.variant).is_some_and(|en| self.info.direct.contains(en))) => {
+                self.direct_handle(body, arms)
             }
             EK::Handle(body, arms) => {
                 self.helpers.insert("$handle");

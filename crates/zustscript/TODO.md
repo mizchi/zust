@@ -85,9 +85,10 @@ r5 / r2 を書いた agent が報告したもの。次の改訂で直す。
 
 決めたこと(順に入れて、1 つずつ効果を測る):
 
-1. **effect の tail-resumptive な handler を、直接の関数呼び出しにする**
-   - handler のすべての arm が末尾で `k(x)` を呼ぶだけなら、generator を使わず、handler を引数で渡す普通の呼び出しにする。それ以外の handler だけ generator を残す
-   - **不具合**: 今の generator の deep handler は、operation のたびに JS のスタックが深くなり、1 つの `handle` の中で operation が 1000 回前後になるとスタックがあふれる(`w_effects` は n=500 で RangeError)。直接の呼び出しにすると、この不具合も消える。残る generator の handler にもループの形の再開が要る
+1. **済: effect の tail-resumptive な handler を、直接の関数呼び出しにした**(`check::direct_effects`、`$perform` / `$handleD`)
+   - handler のすべての arm が末尾で `k(x)` を呼ぶだけで、`pub` な関数から外へ出ず、generator の effect と混ざらない effect は、普通の呼び出しになる。それ以外は generator のまま
+   - `w_effects` は 676 ms → 6.5 ms(約 100 倍)。結果は同じ。operation を 100 万回しても、スタックはあふれない(回帰テスト `many_ops`)
+   - **残る不具合**: generator の deep handler は、operation のたびに JS のスタックが深くなり、1 つの `handle` の中で operation が 1000 回前後になるとあふれる。ループの形の再開(trampoline)が要る
 2. **実行時の補助関数を共通の runtime モジュールにする**: `zsc-runtime.js`(`$div_i32`、`$fold`、`$handle`、数値の brand のコンストラクタなど)と `zsc-prelude.d.ts` を 1 つ出し、各モジュールは使うものだけ import する(bundler の tree-shaking が効き、モジュールの間で重複しない。003 の prelude の計画と同じ)
 3. **TS との境界の検査に tsrs を使う**(`npm i tsrs`。tsc と同じ診断で、今の .d.ts の検査は 0.89 秒 → 0.06 秒)
    - `extern` で宣言した TS の関数の型と、実際の .d.ts の型が合うかを、検査用の .ts を生成して tsrs で確かめる。TS の型検査を自前で実装しない

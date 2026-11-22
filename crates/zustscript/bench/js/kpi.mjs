@@ -59,8 +59,8 @@ size.TOTAL = { raw: total("raw"), raw_gz: total("raw_gz"), ...(hasEsbuild ? { mi
 
 // ---- speed
 const m = await import(pathToFileURL(join(out, "workloads/workloads.js")).href);
-// [argument, calls per run]. w_effects stays small: with the generator-based handlers each operation deepens the JS
-// stack, and around 1000 operations in one `handle` overflow it (a known bug; see TODO.md)
+// [argument, calls per run]. w_effects keeps the small argument of the first baseline (then, generator-based handlers
+// overflowed the stack around 1000 operations in one `handle`), so the numbers stay comparable
 const loads = { w_effects: [400, 500], w_records: [200, 1], w_enums: [500, 1], w_numeric: [2_000_000, 1], w_strings: [2_000, 1] };
 const runs = quick ? 3 : 7;
 const speed = {};

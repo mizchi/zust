@@ -166,7 +166,10 @@ let who = handle greet() {
 };
 ```
 
-- JS では、effect を持つ関数は `function*`、`perform` は `yield`、その呼び出しは `yield*` になる。`handle` は深いハンドラ `$handle`(30 行の実行時ヘルパ)で処理する
+- JS では、effect の handler がすべて tail-resumptive(arm が末尾で `k(x)` を呼ぶだけ)なら、普通の関数呼び出しになる
+  - `perform` は `$perform("Op", ..)` で、最も内側の handler の arm を直接呼ぶ。`k(x)` は `x` を返すことになる。arm は、その `handle` の外側の handler の下で動く(深いハンドラの意味のまま)
+  - それ以外の effect(arm が `k` を呼ばずに抜けるもの、`pub` な関数から外へ出るもの、それらと混ざるもの)では、関数は `function*`、`perform` は `yield`、その呼び出しは `yield*` になる。`handle` は深いハンドラ `$handle`(一度だけ再開できる継続)で、外側では `$run` が結果を取り出す
+  - 直接の呼び出しは generator の約 100 倍速い(`bench/js` の `w_effects`)。generator の handler は operation のたびにスタックが深くなるので、1 つの `handle` の中で operation が 1000 回前後になるとあふれる(未修正)
   - 扱わない effect は外側のハンドラへ転送される
   - handler の arm の中で別の effect を `perform` することもできる
 - 制約(effect 多相の代わりに置いた簡単な規則)
