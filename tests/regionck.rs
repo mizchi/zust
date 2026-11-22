@@ -2056,3 +2056,17 @@ fn generic_moves_behind_copy_instances() {
     assert!(d.len() == 1 && d[0].0 == 2 && d[0].1.contains("use of moved value: `x`"), "{d:?}");
     assert_eq!(check("fn dup<T: Copy>(x: T) -> (T, T) {\n    (x, x)\n}\nfn main() {\n    let _ = dup(1u32);\n}\n"), vec![]);
 }
+
+/// From the second review of #54: a blanket impl's bound holds by an impl for the type itself (`impl Other for ()`
+/// beside `impl<T: Marker> Other for T`); a reference receiver of a blanket method is reborrowed, and a result that
+/// borrows from self (`fn get(&mut self) -> &mut Self`, `fn id(self) -> Self`) holds the loan (E0506)
+#[test]
+fn part11_review_2() {
+    assert_eq!(check("trait Marker {}\ntrait Other {}\nimpl<T: Marker> Other for T {}\nimpl Other for () {}\ntrait Tr { fn go(&self) {} }\nimpl<T: Other> Tr for T {}\nfn main() {\n    ().go();\n}\n"), vec![]);
+    for (tr, call) in [("trait Fake { fn get(&mut self) -> &mut Self { self } }", "r.get()"), ("trait Fake { fn id(self) -> Self where Self: Sized { self } }", "r.id()")] {
+        let src = format!("{tr}\nimpl<T> Fake for T {{}}\nfn main() {{\n    let mut n = 3u8;\n    let r = &mut n;\n    let r2: &mut u8 = {call};\n    *r = 5;\n    *r2 += 1;\n}}\n");
+        let d = check(&src);
+        assert!(d.len() == 1 && d[0].0 == 7 && d[0].1.contains("cannot assign to `*r` because it is borrowed"), "{call}: {d:?}");
+        assert_eq!(check(&src.replace("    *r = 5;\n    *r2 += 1;\n", "    *r2 += 1;\n    *r = 5;\n")), vec![], "{call}");
+    }
+}

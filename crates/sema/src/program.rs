@@ -2023,9 +2023,11 @@ impl Program {
     }
 
     pub fn implements(&self, t: Ty, tr: &str) -> bool {
-        if self.blanket_traits.contains(tr) {
-            return true;
-        }
+        self.blanket_traits.contains(tr) || self.implements_concrete(t, tr)
+    }
+
+    /// implements, not counting a blanket impl of tr (`impl<T: Marker> Other for T`): an impl for t's type itself
+    pub fn implements_concrete(&self, t: Ty, tr: &str) -> bool {
         // (a placeholder implements the traits its parameter's bounds name, and the auto traits)
         if let Ty::Struct(sid) = t {
             if let Some(bs) = &self.structs[sid as usize].placeholder {
