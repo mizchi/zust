@@ -11,6 +11,10 @@ fn make(p: P) -> impl Fn() -> u32 {
     move || p.n + 1
 }
 
+enum E {
+    V(u32, Rc<i32>),
+}
+
 fn main() {
     let shared = Rc::new(5);
     let p = P { n: 7, r: shared.clone() };
@@ -32,4 +36,11 @@ fn main() {
     println!("{}", Rc::strong_count(&shared));
     let f = make(P { n: 41, r: shared.clone() });
     println!("{} {}", f(), Rc::strong_count(&shared));
+    // (an enum of one variant: the copy keeps its `Copy` field)
+    let e = E::V(7, shared.clone());
+    let g = move || {
+        let E::V(n, _) = e;
+        n
+    };
+    println!("{} {}", g(), Rc::strong_count(&shared));
 }
