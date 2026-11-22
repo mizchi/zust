@@ -1622,13 +1622,19 @@ impl Session2 {
                 Some(_) => out_dir.join(format!("{exe_name}.wasm").as_str()),
                 None => out_dir.join(exe_name),
             };
-            // (what this executable is linked from: the crates' names and fingerprints, kept next to it. An unchanged
-            //  object is not enough when another bin crate wrote this executable last (`exe=` moved between crates))
+            // (what this executable is linked from: the crates' names, fingerprints and objects' sizes and times, kept
+            //  next to it. An unchanged object is not enough when another bin crate wrote this executable last (`exe=`
+            //  moved between crates), and an object written again is linked again (a `--no-cache` build has no
+            //  fingerprints, also one that stopped before its links))
             let mut stamp = String::new();
             for j in std::iter::once(i).chain(deps.iter().copied()) {
                 stamp.push_str(&crates[j].name);
                 stamp.push(' ');
                 stamp.push_str(&std::fs::read_to_string(out_dir.join(format!("{}.fp", crates[j].name).as_str())).unwrap_or_default());
+                if let Ok(m) = std::fs::metadata(out_dir.join(format!("{}.o", crates[j].name).as_str())) {
+                    let t = m.modified().ok().and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok()).map_or(0, |d| d.as_nanos());
+                    stamp.push_str(&format!(" {} {t}", m.len()));
+                }
                 stamp.push('\n');
             }
             let stamp_path = out_dir.join(format!("{exe_name}.linked").as_str());
