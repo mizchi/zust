@@ -1653,6 +1653,13 @@ fn part9_review_follow_ups() {
     let d = check("fn take_mut(_: impl FnMut()) {}\nfn main() {\n    let v = String::new();\n    take_mut(|| {\n        let _inner = move || drop(v);\n    });\n}\n");
     assert!(d.len() == 1 && d[0].0 == 5 && d[0].1.contains("E0507"), "{d:?}");
     assert_eq!(check("fn take_fn(_: impl Fn()) {}\nfn main() {\n    let val = String::new();\n    take_fn(move || {\n        let _len = val.len();\n        let val = String::new();\n        drop(val);\n    });\n}\n"), vec![]);
+    // (a move of the capture before a `let` binds its name again is still one; the names an arm, a loop, an `if let`,
+    // a nested closure's parameter or a block's `let` bind are not the capture there)
+    let d = check("fn take_fn(_: impl Fn()) {}\nfn main() {\n    let val = String::new();\n    take_fn(move || {\n        drop(val);\n        let val = String::new();\n        drop(val);\n    });\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 5 && d[0].1.contains("E0507"), "{d:?}");
+    let d = check("fn take_fn(_: impl Fn()) {}\nfn main() {\n    let val = String::new();\n    take_fn(move || {\n        if true {\n            let val = String::new();\n            drop(val);\n        }\n        drop(val);\n    });\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 9 && d[0].1.contains("E0507"), "{d:?}");
+    assert_eq!(check("fn take_fn(_: impl Fn()) {}\nfn main() {\n    let val = String::new();\n    take_fn(move || match Some(String::new()) {\n        Some(val) => drop(val),\n        None => (),\n    });\n    let val = String::new();\n    take_fn(move || {\n        let f = |val: String| drop(val);\n        f(String::new());\n        let _ = val.len();\n    });\n    let val = String::new();\n    take_fn(move || {\n        if let Some(val) = Some(String::new()) {\n            drop(val)\n        }\n        let _ = val.len();\n    });\n    let val = String::new();\n    take_fn(move || {\n        for val in vec![String::new()] {\n            drop(val);\n        }\n        let _ = val.len();\n    });\n}\n"), vec![]);
     // (a nested closure without `move` whose body moves the capture out takes it by value too; one that borrows it
     // does not)
     let d = check("fn take_mut(_: impl FnMut()) {}\nfn main() {\n    let v = String::new();\n    take_mut(|| {\n        let _inner = || drop(v);\n    });\n}\n");

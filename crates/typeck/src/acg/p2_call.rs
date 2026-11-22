@@ -2059,7 +2059,7 @@ impl Cx<'_> {
                 let kind = |k: &str| want.strip_prefix(k).is_some_and(|r| r.trim_start().starts_with('('));
                 let c = strip_paren(a);
                 if (kind("Fn") || kind("FnMut")) && self.bk.fnonce_sure.contains(&(c as *const Expr as usize)) {
-                    let caps: Vec<String> = crate::ast_closure::free_vars(c).into_iter().filter(|n| self.lookup(n).is_some_and(|(_, t)| !self.bk_ty(t).0) && !crate::ast_closure::rebinds(c, std::slice::from_ref(n))).collect();
+                    let caps: Vec<String> = crate::ast_closure::free_vars(c).into_iter().filter(|n| self.lookup(n).is_some_and(|(_, t)| !self.bk_ty(t).0)).collect();
                     if let Some((n, at)) = crate::ast_closure::move_site(c, &caps) {
                         let w = if kind("Fn") { "Fn" } else { "FnMut" };
                         return Err(self.at(at, format!("cannot move out of `{n}`, a captured variable in an `{w}` closure (E0507)")));

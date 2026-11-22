@@ -384,9 +384,6 @@ fn str_lit_body(t: &str) -> Option<&str> {
 struct Free {
     scopes: Vec<Vec<String>>,
     out: Vec<String>,
-    /// (rebinds) names to watch, and whether one was bound
-    watch: Vec<String>,
-    rebound: bool,
 }
 
 impl Free {
@@ -396,7 +393,6 @@ impl Free {
     fn bind(&mut self, p: &Pat) {
         let mut v = vec![];
         pat_idents(p, &mut v);
-        self.rebound |= !self.watch.is_empty() && v.iter().any(|n| self.watch.contains(n));
         self.scopes.last_mut().unwrap().extend(v);
     }
     fn name(&mut self, n: &str) {
@@ -526,18 +522,9 @@ impl Free {
 
 /// クロージャの自由変数 (使われた順)
 pub fn free_vars(c: &Expr) -> Vec<String> {
-    let mut v = Free { scopes: vec![vec![]], out: Vec::new(), watch: vec![], rebound: false };
+    let mut v = Free { scopes: vec![vec![]], out: Vec::new() };
     v.expr(c);
     v.out
-}
-
-/// Whether the body of closure c binds one of names again (a `let`, a pattern, a nested closure's parameter). A use of
-/// the name may then be of that binding, which moves_capture and move_site, going by names, take for the capture
-pub fn rebinds(c: &Expr, names: &[String]) -> bool {
-    let Expr::Closure(_, _, _, body, _) = c else { return false };
-    let mut v = Free { scopes: vec![vec![]], out: Vec::new(), watch: names.to_vec(), rebound: false };
-    v.expr(body);
-    v.rebound
 }
 
 fn is_cap(e: &Expr, caps: &[String]) -> bool {
@@ -548,6 +535,9 @@ fn is_cap(e: &Expr, caps: &[String]) -> bool {
 }
 
 fn moves_in(e: &Expr, caps: &[String]) -> bool {
+    if caps.is_empty() {
+        return false;
+    }
     match e {
         // (a nested closure that owns the capture: `|| { let c = move || t.0 = ..; }` moves `t` into the outer
         // closure too)
@@ -556,21 +546,93 @@ fn moves_in(e: &Expr, caps: &[String]) -> bool {
         }
         Expr::Call(_, a) if a.iter().any(|x| is_cap(x, caps)) => return true,
         Expr::Return(Some(v)) if is_cap(v, caps) => return true,
-        Expr::Block(_, _, b) | Expr::Const(b) | Expr::Loop(_, b) => {
-            // (`let C(ref mut r, _) = c;` binds by reference: not a move)
-            if b.stmts.iter().any(|s| matches!(s, Stmt::Let(p, _, Some(x), _, ..) if is_cap(x, caps) && binds_by_value(p))) {
-                return true;
-            }
-        }
         _ => {}
     }
-    let mut found = false;
-    each_child_stmts(e, &mut |c| {
-        if !found && moves_in(c, caps) {
-            found = true;
+    // (`let C(ref mut r, _) = c;` binds by reference: not a move)
+    scoped_children(e, caps, &mut |c, cs, let_pat| let_pat.is_some_and(|p| is_cap(c, cs) && binds_by_value(p)) || moves_in(c, cs))
+}
+
+/// The names of caps that p does not bind
+fn unbound(caps: &[String], p: &Pat) -> Vec<String> {
+    let mut v = vec![];
+    pat_idents(p, &mut v);
+    caps.iter().filter(|c| !v.contains(c)).cloned().collect()
+}
+
+/// f on each child of e (until it returns true), with the captures a name in scope there still means: not one a
+/// `let` before it in a block, or a pattern of the arm, loop, `if let` or closure it is in, binds again
+/// (`let val = String::new(); drop(val);` moves the new val). A `let`'s initializer comes with its pattern
+fn scoped_children(e: &Expr, caps: &[String], f: &mut dyn FnMut(&Expr, &[String], Option<&Pat>) -> bool) -> bool {
+    match e {
+        Expr::Block(_, _, b) | Expr::Const(b) | Expr::Loop(_, b) => {
+            let mut cur = caps.to_vec();
+            for st in &b.stmts {
+                match st {
+                    Stmt::Let(p, _, init, els, ..) => {
+                        if init.as_ref().is_some_and(|x| f(x, &cur, Some(p))) {
+                            return true;
+                        }
+                        if els.as_ref().is_some_and(|eb| f(&Expr::Block(None, false, eb.clone()), &cur, None)) {
+                            return true;
+                        }
+                        cur = unbound(&cur, p);
+                    }
+                    Stmt::Expr(x, _) => {
+                        if f(x, &cur, None) {
+                            return true;
+                        }
+                    }
+                    Stmt::Item(_) => {}
+                }
+            }
+            false
         }
-    });
-    found
+        Expr::Match(x, arms) => {
+            if f(x, caps, None) {
+                return true;
+            }
+            arms.iter().any(|a| {
+                let cs = unbound(caps, &a.pat);
+                a.guard.as_ref().is_some_and(|g| f(g, &cs, None)) || f(&a.body, &cs, None)
+            })
+        }
+        Expr::For(_, p, x, b) => f(x, caps, None) || f(&Expr::Block(None, false, b.clone()), &unbound(caps, p), None),
+        // (`if let P = x { .. }` / `while let`: P's names are bound in the block)
+        Expr::If(c, t, _) | Expr::While(_, c, t) if matches!(&**c, Expr::Let(..)) => {
+            let Expr::Let(p, x) = &**c else { return false };
+            let els = if let Expr::If(_, _, els) = e { els.as_deref() } else { None };
+            f(x, caps, None) || f(&Expr::Block(None, false, t.clone()), &unbound(caps, p), None) || els.is_some_and(|x| f(x, caps, None))
+        }
+        Expr::Closure(_, ps, _, body, _) => {
+            let mut cs = caps.to_vec();
+            for (p, _) in ps {
+                cs = unbound(&cs, p);
+            }
+            f(body, &cs, None)
+        }
+        _ => {
+            let mut found = false;
+            each_child_stmts(e, &mut |c| {
+                if !found && f(c, caps, None) {
+                    found = true;
+                }
+            });
+            found
+        }
+    }
+}
+
+/// The captures the tail of a closure's body still means: not one a `let` of the body binds again
+fn tail_caps(body: &Expr, caps: &[String]) -> Vec<String> {
+    let mut cur = caps.to_vec();
+    if let Expr::Block(_, _, b) = body {
+        for st in &b.stmts {
+            if let Stmt::Let(p, ..) = st {
+                cur = unbound(&cur, p);
+            }
+        }
+    }
+    cur
 }
 
 /// each_child と同じだが、ブロックの let の右辺の判定 (moves_in の中) のために子のブロックも辿る
@@ -597,7 +659,12 @@ fn each_child_stmts(e: &Expr, f: &mut dyn FnMut(&Expr)) {
 
 /// クロージャの本体がキャプチャした変数を値として使うか (関数の引数・本体の値・`let y = x;` の右辺・`return x`)
 pub fn moves_capture(c: &Expr, caps: &[String]) -> bool {
-    let Expr::Closure(_, _, _, body, _) = c else { return false };
+    let Expr::Closure(_, ps, _, body, _) = c else { return false };
+    // (not what the closure's parameters name)
+    let mut caps = caps.to_vec();
+    for (p, _) in ps {
+        caps = unbound(&caps, p);
+    }
     let tail = match &**body {
         Expr::Block(_, _, b) => b.stmts.last().and_then(|s| match s {
             Stmt::Expr(e, false) => Some(e),
@@ -605,16 +672,20 @@ pub fn moves_capture(c: &Expr, caps: &[String]) -> bool {
         }),
         e => Some(e),
     };
-    if tail.is_some_and(|e| is_cap(e, caps)) {
+    if tail.is_some_and(|e| is_cap(e, &tail_caps(body, &caps))) {
         return true;
     }
-    moves_in(body, caps)
+    moves_in(body, &caps)
 }
 
 /// Where the body of closure c first moves one of caps out (what moves_capture finds), with that capture's name. Not
 /// in a nested closure (its move is the nested closure's capture)
 pub fn move_site(c: &Expr, caps: &[String]) -> Option<(String, Pos)> {
-    let Expr::Closure(_, _, _, body, _) = c else { return None };
+    let Expr::Closure(_, ps, _, body, _) = c else { return None };
+    let mut caps = caps.to_vec();
+    for (p, _) in ps {
+        caps = unbound(&caps, p);
+    }
     let tail = match &**body {
         Expr::Block(_, _, b) => b.stmts.last().and_then(|s| match s {
             Stmt::Expr(e, false) => Some(e),
@@ -622,7 +693,7 @@ pub fn move_site(c: &Expr, caps: &[String]) -> Option<(String, Pos)> {
         }),
         e => Some(e),
     };
-    tail.and_then(|e| cap_at(e, caps)).or_else(|| move_site_in(body, caps))
+    tail.and_then(|e| cap_at(e, &tail_caps(body, &caps))).or_else(|| move_site_in(body, &caps))
 }
 
 fn cap_at(e: &Expr, caps: &[String]) -> Option<(String, Pos)> {
@@ -633,13 +704,16 @@ fn cap_at(e: &Expr, caps: &[String]) -> Option<(String, Pos)> {
 }
 
 fn move_site_in(e: &Expr, caps: &[String]) -> Option<(String, Pos)> {
+    if caps.is_empty() {
+        return None;
+    }
     match e {
         // (a nested closure that takes one by value, a `move` one that captures it or one whose body moves it out
         // (`|| drop(v)`): it is moved into that closure where the closure is made. One that only borrows it does
         // not move it)
         Expr::Closure(true, _, _, _, at) => return free_vars(e).into_iter().find(|n| caps.contains(n)).map(|n| (n, *at)),
         Expr::Closure(false, _, _, _, at) => {
-            return caps.iter().find(|n| moves_capture(e, std::slice::from_ref(*n)) && !rebinds(e, std::slice::from_ref(*n))).map(|n| (n.clone(), *at));
+            return caps.iter().find(|n| moves_capture(e, std::slice::from_ref(*n))).map(|n| (n.clone(), *at));
         }
         Expr::Call(_, a) => {
             if let Some(x) = a.iter().find_map(|x| cap_at(x, caps)) {
@@ -651,24 +725,12 @@ fn move_site_in(e: &Expr, caps: &[String]) -> Option<(String, Pos)> {
                 return Some(x);
             }
         }
-        Expr::Block(_, _, b) | Expr::Const(b) | Expr::Loop(_, b) => {
-            for s in &b.stmts {
-                if let Stmt::Let(p, _, Some(x), _, ..) = s {
-                    if binds_by_value(p) {
-                        if let Some(r) = cap_at(x, caps) {
-                            return Some(r);
-                        }
-                    }
-                }
-            }
-        }
         _ => {}
     }
     let mut found = None;
-    each_child_stmts(e, &mut |c| {
-        if found.is_none() {
-            found = move_site_in(c, caps);
-        }
+    scoped_children(e, caps, &mut |c, cs, let_pat| {
+        found = let_pat.filter(|p| binds_by_value(p)).and_then(|_| cap_at(c, cs)).or_else(|| move_site_in(c, cs));
+        found.is_some()
     });
     found
 }
