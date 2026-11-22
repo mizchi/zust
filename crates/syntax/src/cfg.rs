@@ -386,7 +386,15 @@ pub fn strip_noting(src: &str, c: &CfgSet, env: &mut Option<bool>, externs: &mut
     *env = Some(seen);
     if select {
         if let Some(e) = expand_select(r.as_deref().unwrap_or(src), c) {
-            return Some(strip_toks(&e, c, &mut false, &mut false, &mut vec![]).unwrap_or(e));
+            // (the chosen arm's `extern crate` items too: in place, while the expansion keeps the length)
+            let mut more = vec![];
+            let same = e.len() == src.len();
+            let r2 = strip_toks(&e, c, &mut false, &mut false, &mut more).unwrap_or(e);
+            if same {
+                externs.extend(more);
+                externs.sort_unstable();
+            }
+            return Some(r2);
         }
     }
     r
