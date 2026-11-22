@@ -25,8 +25,11 @@ zurgo run
 - `--manifest-path <Cargo.toml>`: パッケージ。なければ、今のディレクトリから上へ、いちばん近い Cargo.toml を使う。
 - `-r` / `--release`: zustc の `-O`。
 - `-F` / `--features a,b`、`--all-features`、`--no-default-features`。`dep/feat` は依存の feature を指す。
-- `--target <triple>`: `x86_64-unknown-linux-gnu` (既定)。`wasm32-unknown-unknown` も受け付けるが、zustc の
-  ワークスペースのビルドはまだそれを受け付けない。
+- `--target <triple>`: `x86_64-unknown-linux-gnu` (既定) か `wasm32-unknown-unknown`。
+  - wasm32 では、bin ごとに 1 つの wasm モジュール `target/zust/wasm32-unknown-unknown/<profile>/<bin>.wasm` になる。
+  - `zurgo run` は cargo と同じようにそれを動かす: `CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_RUNNER` のプログラム
+    (空白で分ける) に、モジュールと引数を渡す。このリポジトリでは、ランナーは `node tests/wasm/run.mjs`。
+  - ビルドスクリプトは、今までどおりホスト向けにビルドし、ホストで動かす。
 - `--bin <名前>`、`-j <n>`、`--time` (zustc の時間)、`--no-cache`。
 - `--build-script-compiler auto|zustc|rustc`: ビルドスクリプトを何でコンパイルするか (下に)。既定の `auto` は
   zustc を試し、だめなら rustc を使う。

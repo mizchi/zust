@@ -1198,6 +1198,20 @@ impl Cx<'_> {
     pub(crate) fn as_ref_rewrite(&self, recv: &Expr, expected: Option<Ty>) -> Option<Expr> {
         let (target, is_string, seq) = self.as_ref_target(recv, expected)?;
         let r = paren(recv.clone());
+        // (a `&&str` (an `AsRef<str>` instance at `&str`, through `iter()`): the `&str` it points to, `*x`)
+        let mut refs = 0;
+        let mut t = self.peek(recv)?;
+        while let Ty::Ref(_, i) = t {
+            refs += 1;
+            t = *i;
+        }
+        if target == "str" && t == Ty::Str && refs >= 2 {
+            let mut x = r;
+            for _ in 1..refs {
+                x = paren(Expr::Unary("*".into(), Box::new(x), Default::default()));
+            }
+            return Some(x);
+        }
         Some(if target == "str" {
             if is_string { mcall(r, "as_str", vec![]) } else { Expr::Ref(false, Box::new(Expr::Index(Box::new(r), Box::new(Expr::Range(None, None, false)), Default::default()))) }
         } else if !seq {
