@@ -1306,3 +1306,14 @@ fn alias_with_elided_lifetimes() {
     assert!(d.len() == 1 && d[0].0 == 7 && d[0].1.contains("lifetime may not live long enough"), "{d:?}");
     assert_eq!(check("type A<'a> = &'a isize;\nstruct C<'a> {\n    f: A<'a>,\n}\nimpl<'a> C<'a> {\n    fn set_ok(&mut self, b: A<'a>) {\n        self.f = b;\n    }\n    fn get(&self) -> A {\n        self.f\n    }\n}\nfn main() {}\n"), vec![]);
 }
+
+/// A method of the prelude's types whose result holds references holds what its receiver holds: returning
+/// `it.next()` or `raw.iter().map(..).collect()` of a local's iterator is E0515, where the chain starts
+#[test]
+fn prelude_results_hold_receivers() {
+    let d = check("fn d<'a>() -> Option<&'a String> {\n    let raw: Vec<String> = Vec::new();\n    let mut it = raw.iter();\n    it.next()\n}\nfn main() {}\n");
+    assert!(d.len() == 1 && d[0].0 == 4 && d[0].1.contains("cannot return a reference to a local variable"), "{d:?}");
+    let d = check("fn r<'a>() -> Vec<&'a str> {\n    let raw: Vec<String> = vec![String::new()];\n    raw\n        .iter()\n        .map(|l| l.trim())\n        .collect()\n}\nfn main() {}\n");
+    assert!(d.len() == 1 && d[0].0 == 3, "{d:?}");
+    assert_eq!(check("fn ok(s: &str) -> Option<&str> {\n    let parts: Vec<&str> = s.split(',').collect();\n    parts.first().copied()\n}\nfn n() -> usize {\n    let raw: Vec<String> = Vec::new();\n    raw.iter().count()\n}\nfn main() {}\n"), vec![]);
+}

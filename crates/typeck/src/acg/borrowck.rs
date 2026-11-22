@@ -2311,7 +2311,30 @@ impl Cx<'_> {
             }
         }
         if !srcs.is_empty() {
-            self.bk_ev(Ev::Ret(srcs, pos(e)));
+            // (a chain of method calls is reported where it starts (rustc's span of the returned value), not at its
+            // last method's name: `raw\n.iter()\n.collect()`)
+            let mut x = e;
+            while let Expr::Paren(i) | Expr::Ref(_, i) = x {
+                x = i;
+            }
+            let sp = if matches!(x, Expr::MethodCall(..)) { super::expr_start(x) } else { pos(e) };
+            self.bk_ev(Ev::Ret(srcs, if sp.line == 0 { pos(e) } else { sp }));
+        }
+    }
+
+    /// What the value of e holds under the borrows it is (a chain's root local's loans: `parts.first()` holds what parts
+    /// holds)
+    fn bk_held(&self, e: &Expr, out: &mut Vec<Src>) {
+        match e {
+            Expr::Paren(x) | Expr::MethodCall(x, ..) => self.bk_held(x, out),
+            Expr::Path(..) => {
+                if let Some((p, _)) = self.bk_place(e) {
+                    if p.proj.is_empty() && self.bk.locals[p.local as usize].refs {
+                        out.push(Src::Local(p.local));
+                    }
+                }
+            }
+            _ => {}
         }
     }
 
@@ -2336,9 +2359,31 @@ impl Cx<'_> {
                     out.push(Src::Loan(ln));
                 }
             }
-            Expr::MethodCall(_, name, _, args, _) => {
+            Expr::MethodCall(recv, name, _, args, _) => {
+                let n0 = out.len();
                 if let Some(&ln) = self.bk.loan_of.get(&(e as *const Expr as usize)) {
                     out.push(Src::Loan(ln));
+                }
+                // (a method of the prelude's types whose result holds references: what its receiver holds (`it.next()`,
+                // `raw.iter().map(..).collect()`). The prelude writes no lifetimes)
+                if out.len() == n0 && self.peek(e).is_some_and(|t| has_refs(self.prog, t, 0)) {
+                    let prelude = |t: Ty| match t {
+                        Ty::Struct(sid) => self.prog.struct_item.get(self.prog.base_of(sid) as usize).is_some_and(|&i| i >= self.prog.prelude_from),
+                        _ => false,
+                    };
+                    let mut rt = self.peek(recv);
+                    while let Some(Ty::Ref(_, i)) = rt {
+                        rt = Some(*i);
+                    }
+                    if rt.is_some_and(prelude) {
+                        // (`copied` / `cloned` take a reference off: what is under it, not the borrow itself
+                        // (`parts.first().copied()` holds what parts holds, not a loan of parts))
+                        if matches!(name.as_str(), "copied" | "cloned") {
+                            self.bk_held(recv, out);
+                        } else {
+                            self.bk_direct(recv, out);
+                        }
+                    }
                 }
                 // (a closure passed to an iterator adapter, which its result holds: `lines.filter_map(|l| .. self.x ..)`
                 // returned. Not `find(|a| ..)`, whose result does not)
