@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795377397521,
+  "lastUpdate": 1795377400246,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -85522,6 +85522,85 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/mizchi/zust/commit/17c92ec6cd2d67bafddb5074b3d94d27c683c91d"
         },
         "date": 1795376706356,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "parity documentSymbol (名前の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity workspace/symbol (上位 20 の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity definition (行き先の一致)",
+            "value": 89.655,
+            "unit": "%"
+          },
+          {
+            "name": "parity hover (名前を含む)",
+            "value": 87.5,
+            "unit": "%"
+          },
+          {
+            "name": "parity references (数の一致)",
+            "value": 84.615,
+            "unit": "%"
+          },
+          {
+            "name": "parity documentHighlight (数の一致)",
+            "value": 88.235,
+            "unit": "%"
+          },
+          {
+            "name": "parity rename (書き換えの一致)",
+            "value": 80,
+            "unit": "%"
+          },
+          {
+            "name": "parity signatureHelp (名前・引数の数・今の引数の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity completion `x.\\|` (書いてある名前を含む)",
+            "value": 95,
+            "unit": "%"
+          },
+          {
+            "name": "parity completion `na\\|me` (同)",
+            "value": 95.455,
+            "unit": "%"
+          },
+          {
+            "name": "parity 一致の平均",
+            "value": 92.046,
+            "unit": "%"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "miz404@gmail.com",
+            "name": "Kotaro Chikuba",
+            "username": "mizchi"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "867f67263ab48ed41036263d5cf712f12eea356a",
+          "message": "Merge pull request #62 from mizchi/claude/gracious-brahmagupta-16jxdl\n\nzustscript: in-place push in JS, kept borrows of owned locals, strings and == by content in @wasm",
+          "timestamp": "2026-11-23T04:51:50+09:00",
+          "tree_id": "e4a70aae9c99e715a739729b1ac154605d996ab7",
+          "url": "https://github.com/mizchi/zust/commit/867f67263ab48ed41036263d5cf712f12eea356a"
+        },
+        "date": 1795377399748,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
