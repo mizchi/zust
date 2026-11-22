@@ -2729,7 +2729,9 @@ impl Program {
                     let (v, t) = self.eval_t(&x, depth, lt)?;
                     let t = lt.or(t);
                     // (untyped (`let x = !0 >> 4;`): kept as its expression too, which takes the type of its use)
-                    let lazy = t.is_none().then_some(x);
+                    // (but not a large one: `let x1 = x0 + x0; let x2 = x1 + x1; ..` would double at each use; past
+                    // the cap it stays its untyped value)
+                    let lazy = t.is_none().then_some(x).filter(|x| format!("{x:?}").len() <= 4096);
                     env.push((name.clone(), t.map_or(v, |it| it.wrap(v)), t, lazy));
                 }
                 Stmt::Expr(x, false) if k + 1 == n => return self.eval_t(&subst_consts(x, env), depth, want),
@@ -2747,7 +2749,7 @@ impl Program {
                     let (v, t) = self.eval_t(&x, depth, st)?;
                     env[slot].1 = v;
                     env[slot].2 = st.or(t);
-                    env[slot].3 = env[slot].2.is_none().then_some(x);
+                    env[slot].3 = env[slot].2.is_none().then_some(x).filter(|x| format!("{x:?}").len() <= 4096);
                 }
                 _ => return Err("unsupported statement in a const fn".into()),
             }
@@ -2876,7 +2878,13 @@ impl Program {
                 }
                 let b = crate::parse::parse_expr(&body)?;
                 let Expr::Block(_, _, b) = b else { return Err("unsupported const fn".into()) };
-                un(self.eval_block_env(&b, &mut env, depth + 1, None)?.0)
+                let v = self.eval_block_env(&b, &mut env, depth + 1, None)?.0;
+                // (its result is the type its use wants, as rustc unifies them: `flip(255) + 1` as a u8 wraps the
+                // untyped `!255` to 0, not an overflow of -256)
+                match want {
+                    Some(it) => Ok((it.wrap(v), Some(it))),
+                    None => un(v),
+                }
             }
             // (`X[0]` / `T.1` of a const array, byte string, tuple or struct)
             Expr::Index(b, i, _) => {
@@ -3125,6 +3133,9 @@ impl Program {
                             _ => (p, t),
                         }
                     }
+                    // (a u128 compares as unsigned: its bit pattern past i128::MAX is negative)
+                    ("min", [b]) if bits == 128 && unsigned => ((v as u128).min(*b as u128) as i128, t),
+                    ("max", [b]) if bits == 128 && unsigned => ((v as u128).max(*b as u128) as i128, t),
                     ("min", [b]) => (v.min(*b), t),
                     ("max", [b]) => (v.max(*b), t),
                     // (checked at the receiver's width: `i8::MIN.abs()` overflows)
@@ -3144,8 +3155,13 @@ impl Program {
         use crate::parse::Expr;
         match e {
             Expr::Paren(x) | Expr::Ref(_, x) => self.const_ty_of(x),
+            // (through references: `const R: &[u8; 1]` indexes as a `[u8; 1]`)
             Expr::Path(None, p) if !p.global && p.segs.len() == 1 && p.segs[0].args.is_empty() => {
-                self.const_index.get(p.segs[0].name.as_str()).map(|&ci| self.consts[ci as usize].ty)
+                let mut t = self.const_index.get(p.segs[0].name.as_str()).map(|&ci| self.consts[ci as usize].ty)?;
+                while let Ty::Ref(_, x) = t {
+                    t = *x;
+                }
+                Some(t)
             }
             _ => None,
         }
@@ -3183,8 +3199,13 @@ impl Program {
             }
             .or_else(|| self.static_ty(els)),
             Expr::Path(None, p) if !p.global && p.segs.len() == 1 && p.segs[0].args.is_empty() => self.const_index.get(p.segs[0].name.as_str()).and_then(|&ci| It::of_ty(self.consts[ci as usize].ty)),
+            // (a declared associated constant first, as eval_t: `impl S { const BITS: u8 = 7; }`)
+            Expr::Path(None, p) if p.segs.len() == 2 && self.const_index.contains_key(&format!("{}::{}", p.segs[0].name, p.segs[1].name)) => {
+                let ci = self.const_index[&format!("{}::{}", p.segs[0].name, p.segs[1].name)];
+                It::of_ty(self.consts[ci as usize].ty)
+            }
             Expr::Path(None, p) if p.segs.len() == 2 => match (Ty::prim(&p.segs[0].name), p.segs[1].name.as_str()) {
-                (_, "BITS") => Some(It { bits: 32, signed: false }),
+                (Some(_), "BITS") => Some(It { bits: 32, signed: false }),
                 (Some(t), _) => It::of_ty(t),
                 _ => None,
             },

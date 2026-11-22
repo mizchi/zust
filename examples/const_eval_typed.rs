@@ -108,6 +108,8 @@ fn main() {
     println!("{} {}", REM, ARR[0]);
     println!("{} {}", std::mem::size_of::<G>(), US);
     println!("{}", std::mem::size_of::<[u8; I128_LIT_MIN]>());
+    println!("{} {} {}", std::mem::size_of::<[u8; REF_IDX]>(), std::mem::size_of::<[u8; USER_BITS]>(), EXP);
+    println!("{}", FLIP);
 }
 
 // (a generic alias resolves before layout; an unsafe block evaluates; the i128::MIN literal negates)
@@ -120,3 +122,16 @@ struct G {
 const UNSAFE_C: u8 = unsafe { 7 };
 static US: u8 = UNSAFE_C;
 const I128_LIT_MIN: usize = (-170141183460469231731687303715884105728i128).count_ones() as usize;
+// (through a reference; a user's `BITS`; untyped lets that double; a const fn's result as its use's type)
+const R: &[u8; 1] = &[!0];
+const REF_IDX: usize = R[0].count_ones() as usize;
+struct SB2;
+impl SB2 {
+    const BITS: u8 = 7;
+}
+const USER_BITS: usize = ((4 / ((!0 >> 7) + 1)) & SB2::BITS) as usize;
+const EXP: usize = { let x0 = 0; let x1 = x0 + x0; let x2 = x1 + x1; let x3 = x2 + x2; let x4 = x3 + x3; let x5 = x4 + x4; let x6 = x5 + x5; let x7 = x6 + x6; let x8 = x7 + x7; let x9 = x8 + x8; let x10 = x9 + x9; let x11 = x10 + x10; let x12 = x11 + x11; let x13 = x12 + x12; let x14 = x13 + x13; let x15 = x14 + x14; let x16 = x15 + x15; let x17 = x16 + x16; let x18 = x17 + x17; let x19 = x18 + x18; let x20 = x19 + x19; let x21 = x20 + x20; let x22 = x21 + x21; let x23 = x22 + x22; let x24 = x23 + x23; let x25 = x24 + x24; x25 };
+const fn flip(x: u8) -> u8 {
+    !x
+}
+const FLIP: u8 = flip(255) + 1;
