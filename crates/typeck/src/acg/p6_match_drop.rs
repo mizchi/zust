@@ -241,8 +241,26 @@ impl Cx<'_> {
         // (the places a guard must not change, made at the first guard: see below)
         let mut guard_places: Option<Vec<(borrowck::BPlace, bool)>> = None;
         // 各 arm を上から順に試す (判定 → 束縛 → ガード → 本体)
+        let mut after_guard = false;
         for arm in arms {
             let next = self.b.create_block();
+            // (after a guard that failed, the next arm tests the scrutinee again: what the guard moved out of it is
+            // used (E0382, at the match, as rustc reports it))
+            if after_guard && self.bk_on() {
+                if let Some((sp, at)) = &bk_sp {
+                    let mut tested = vec![];
+                    self.tested_places(&arm.pat, sp, place.ty(), &mut tested, 0);
+                    for p in tested {
+                        self.bk_acc_place(p, borrowck::Acc::Read, *at);
+                    }
+                    // (a binding of all of it by value (`x => x`) reads all of it, at the arm (a pattern has no
+                    // position of its own))
+                    if matches!(arm.pat, Pat::Ident(false, _, _, None)) {
+                        self.bk_acc_place(sp.clone(), borrowck::Acc::Read, arm.pos);
+                    }
+                }
+            }
+            after_guard = arm.guard.is_some();
             // (a pattern has no position of its own: an error in it is reported at the arm's body)
             self.pat_test(&arm.pat, place, next).map_err(|m| self.at(arm.pos, m))?;
             self.scopes.push(vec![]);
@@ -252,7 +270,9 @@ impl Cx<'_> {
             self.rg.scrut = rg_ss.clone();
             self.bk_bind_begin();
             self.bk.guard_arm = arm.guard.is_some();
+            self.bk.arm_at = Some(arm.pos).filter(|p| p.line != 0);
             let r = self.pat_bind(&arm.pat, place, BindMode::Move);
+            self.bk.arm_at = None;
             self.bk.guard_arm = false;
             self.bk_bind_end();
             r?;
@@ -1356,20 +1376,25 @@ impl Cx<'_> {
                 }
                 Ok(())
             }
-            Pat::Struct(spath, ..) => {
+            Pat::Struct(spath, fps, _) => {
                 let (p, mode) = self.pat_deref(p, mode);
                 self.rg_pat_align(p.ty());
                 self.rg_pat_lifetimes(spath);
-                // (the parts are not tracked: the field names are not at hand here)
-                let saved = self.bk.pat_path.take();
+                // (the borrow check follows the parts by their names, as for a tuple struct's (`S { x: ax, .. } = a`
+                // moves a.x); the region check does not)
+                let vname = self.variant_on(spath, p.ty()).map(|(sid, vi)| self.prog.structs[sid as usize].variants[vi].name.clone());
+                let deref = matches!(mode, BindMode::Ref(_));
                 let rs = self.rg.pat.take();
                 let r = (|| {
-                    for (sub, fp) in self.struct_pat_fields(pat, p, None)? {
-                        self.pat_bind(sub, fp, mode)?;
+                    let parts = self.struct_pat_fields(pat, p, None)?;
+                    for ((fname, _), (sub, fp)) in fps.iter().zip(parts) {
+                        let saved = self.bk_pat_field(deref, vname.as_deref(), fname);
+                        let r = self.pat_bind(sub, fp, mode);
+                        self.bk.pat_path = saved;
+                        r?;
                     }
                     Ok(())
                 })();
-                self.bk.pat_path = saved;
                 self.rg.pat = rs;
                 r
             }
@@ -1707,6 +1732,28 @@ impl Cx<'_> {
         }
         if let Some(n) = self.drop_owner(e) {
             return err(expr_start(e), format!("cannot move out of type `{n}`, which implements the `Drop` trait (E0509)"));
+        }
+        // (out of what an overloaded `Deref` gives (`x.field` with x: `Rc<Bar>`, `*w` with w: W: Deref): its
+        // `deref` returns a reference, E0507. Not out of a `Box`, which the program owns)
+        let mut cur = strip_paren(e);
+        loop {
+            let (b, fname) = match cur {
+                Expr::Field(b, f, _) => (strip_paren(b), Some(f)),
+                Expr::Unary(op, b, _) if op == "*" => (strip_paren(b), None),
+                _ => break,
+            };
+            if let Some(Ty::Struct(sid)) = self.peek(b) {
+                let through = fname.is_none_or(|f| self.prog.field(sid, f).is_none());
+                if through && self.user_deref_sid(b, sid).is_some() {
+                    let n = self.prog.structs[self.prog.base_of(sid) as usize].name.clone();
+                    let msg = if matches!(n.as_str(), "Rc" | "Arc") { format!("cannot move out of an `{n}` (E0507)") } else { format!("cannot move out of dereference of `{n}` (E0507)") };
+                    return err(expr_start(e), msg);
+                }
+            }
+            if fname.is_none() {
+                break;
+            }
+            cur = b;
         }
         let mut cur = strip_paren(e);
         while let Expr::Field(b, _, _) = cur {

@@ -1728,3 +1728,36 @@ fn drop_field_implicit_reborrow() {
     assert!(d.len() == 1 && d[0].0 == 11 && d[0].1.contains("E0713"), "{d:?}");
     assert_eq!(check("struct C<'a> {\n    raw: &'a mut i32,\n}\nimpl<'a> Drop for C<'a> {\n    fn drop(&mut self) {}\n}\nfn put<'a>(v: &mut Vec<&'a mut i32>, x: &'a mut i32) {\n    v.push(x)\n}\nfn bump(x: &mut i32) {\n    *x += 1;\n}\nfn f(c: C) {\n    bump(c.raw);\n    bump(c.raw);\n}\nfn g<'a>(v: &mut Vec<C<'a>>, c: C<'a>) {\n    v.push(c)\n}\nfn main() {}\n"), vec![]);
 }
+
+/// After a guard that failed, the next arm tests the scrutinee again: what the guard moved out of it is used (E0382,
+/// at the match; a binding of all of it, at the arm). A `&mut` captured by value by a `let` in the closure is moved;
+/// passed as an argument it may be reborrowed (`drop::<&mut U>(x)` twice is fine)
+#[test]
+fn guard_moves_and_captured_mut_refs() {
+    let d = check("fn main() {\n    let a = Some(String::new());\n    let b = match a {\n        Some(_) if {\n            drop(a);\n            false\n        } => None,\n        x => x,\n    };\n    drop(b);\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 8 && d[0].1.contains("use of moved value: `a`"), "{d:?}");
+    let d = check("fn main() {\n    let b = &mut true;\n    match b {\n        &mut false => {}\n        _ if {\n            (|| {\n                let bar = b;\n                *bar = false;\n            })();\n            false\n        } => {}\n        &mut true => {}\n        _ => {}\n    }\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 3 && d[0].1.contains("use of moved value"), "{d:?}");
+    assert_eq!(check("struct U;\nfn main() {\n    let mut u = U;\n    let x = &mut u;\n    let c1 = || drop::<&mut U>(x);\n    c1();\n    let c2 = || drop::<&mut U>(x);\n    c2();\n}\n"), vec![]);
+}
+
+/// A struct pattern follows its parts by name (`let S { x: ax, .. } = a;` moves a.x, E0505 while a is borrowed); a
+/// pattern of a struct that is no enum does not read the struct itself, and a reference bound in an arm flows out of
+/// the match (E0499 for the second `ref mut` of y.0, not for y.1)
+#[test]
+fn struct_pattern_parts() {
+    let d = check("struct S {\n    x: Box<i32>,\n    y: Box<i32>,\n}\nfn g(_: &S) {}\nfn main() {\n    let a = S { x: Box::new(1), y: Box::new(2) };\n    let pb = &a;\n    let S { x: ax, .. } = a;\n    g(pb);\n    drop(ax);\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 9 && d[0].1.contains("cannot move out of `a.x` because it is borrowed"), "{d:?}");
+    let d = check("struct Y(usize, usize);\nfn main() {\n    let mut y = Y(1, 2);\n    let a = match y {\n        Y(ref mut a, _) => a,\n    };\n    let b = match y {\n        Y(_, ref mut b) => b,\n    };\n    let c = match y {\n        Y(ref mut c, _) => c,\n    };\n    *a += 1;\n    *b += 1;\n    *c += 1;\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 11 && d[0].1.contains("more than once"), "{d:?}");
+}
+
+/// An assignment drops the old value: a `Drop` that may see what it borrows uses its loans there (E0506). A move out
+/// of what an overloaded `Deref` gives (an `Rc`'s field) is E0507; a copy or a borrow of it is fine
+#[test]
+fn assignment_drop_and_deref_moves() {
+    let d = check("struct W<'a>(&'a mut bool);\nimpl<'a> Drop for W<'a> {\n    fn drop(&mut self) {}\n}\nfn main() {\n    let mut base = true;\n    let mut w = W(&mut base);\n    for _ in 0..2 {\n        base = false;\n        w = W(&mut base);\n    }\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 9 && d[0].1.contains("cannot assign to `base` because it is borrowed"), "{d:?}");
+    let d = check("use std::rc::Rc;\nstruct Bar {\n    field: Vec<i32>,\n    n: u32,\n}\nfn main() {\n    let x = Rc::new(Bar { field: vec![], n: 1 });\n    let n = x.n;\n    let l = x.field.len();\n    let f = x.field;\n    drop((n, l, f));\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 10 && d[0].1.contains("cannot move out of an `Rc`"), "{d:?}");
+}

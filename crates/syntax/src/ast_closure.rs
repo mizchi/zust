@@ -568,6 +568,23 @@ fn moves_in(e: &Expr, caps: &[String], by: MovesBy) -> bool {
     scoped_children(e, caps, &mut |c, cs, let_pat| let_pat.is_some_and(|p| cap_name(c, cs).is_some_and(|n| by(p, n))) || moves_in(c, cs, by))
 }
 
+/// Whether the body of closure c moves one of caps by a `let` that binds it by value (`let bar = b;`). Not by passing
+/// it: an argument of type `&mut T` is reborrowed, which the syntax does not tell. Not in a nested closure
+pub fn let_moves_capture(c: &Expr, caps: &[String]) -> bool {
+    let Expr::Closure(_, ps, _, body, _) = c else { return false };
+    let mut caps = caps.to_vec();
+    for (p, _) in ps {
+        caps = unbound(&caps, p);
+    }
+    fn walk(e: &Expr, caps: &[String]) -> bool {
+        if caps.is_empty() || matches!(e, Expr::Closure(..)) {
+            return false;
+        }
+        scoped_children(e, caps, &mut |c, cs, let_pat| let_pat.is_some_and(|p| cap_name(c, cs).is_some() && binds_by_value(p)) || walk(c, cs))
+    }
+    walk(body, &caps)
+}
+
 /// The names of caps that p does not bind
 fn unbound(caps: &[String], p: &Pat) -> Vec<String> {
     let mut v = vec![];
