@@ -965,6 +965,34 @@ impl Inf<'_> {
         v
     }
 
+    /// Whether the type of v is surely not Clone (acg's clone_call): a type of the program with no clone and no
+    /// derive, or an instance with such an argument, but for the shared pointers
+    fn not_clone(&mut self, v: u32, depth: u32) -> bool {
+        if depth > 4 {
+            return false;
+        }
+        let f = self.find(v);
+        let (b, args) = match self.shape[f as usize] {
+            Some(Shape::Known(Ty::Struct(s))) => (self.prog.base_of(s), None),
+            Some(Shape::Adt(b, st, n)) => (b, Some((st, n))),
+            _ => return false,
+        };
+        if self.prog.method(b, "clone").is_some() {
+            return false;
+        }
+        let own = self.prog.struct_item.get(b as usize).is_some_and(|&ii| ii < self.prog.prelude_from);
+        let derived = self.prog.derived.get(&b).is_some_and(|d| d.iter().any(|x| x == "Clone"));
+        if own && !derived && !self.prog.implements(Ty::Struct(b), "Clone") {
+            return true;
+        }
+        let shared = matches!(self.prog.structs[b as usize].name.as_str(), "Rc" | "Arc" | "Weak" | "PhantomData" | "Sender" | "SyncSender");
+        let Some((st, n)) = args.filter(|_| !shared) else { return false };
+        (st..st + n).any(|k| {
+            let a = self.adt_args[k as usize];
+            self.not_clone(a, depth + 1)
+        })
+    }
+
     fn binary(&mut self, op: &str, le: &Expr, re: &Expr) -> u32 {
         let l = self.expr(le);
         let r = self.expr(re);
@@ -1955,12 +1983,9 @@ impl Inf<'_> {
             // (`r.clone()` with `r: &S` and S a type of the program that is not Clone: the reference's clone, `&S`)
             let fr = self.find(r);
             let refd = matches!(self.shape[fr as usize], Some(Shape::Ref(..)));
-            if let (true, Some(s)) = (refd, sid) {
-                let b = self.prog.base_of(s);
-                let own = self.prog.struct_item.get(b as usize).is_some_and(|&ii| ii < self.prog.prelude_from);
-                if own && !self.prog.derived.get(&b).is_some_and(|d| d.iter().any(|x| x == "Clone")) && !self.prog.implements(Ty::Struct(s), "Clone") {
-                    return r;
-                }
+            // (and an instance with such an argument, `Option<NoClone>`, but for the shared pointers: as the code does)
+            if refd && self.not_clone(rv, 0) {
+                return r;
             }
             return rv;
         }

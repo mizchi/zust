@@ -143,17 +143,30 @@ fn blank_comments(s: &str) -> String {
                 }
                 continue;
             }
+            // (`/* .. /* .. */ .. */` nests)
             b'/' if b.get(i + 1) == Some(&b'*') => {
-                while i < b.len() && !(b[i] == b'*' && b.get(i + 1) == Some(&b'/')) {
-                    if b[i] != b'\n' {
+                let mut depth = 0usize;
+                while i < b.len() {
+                    if b[i] == b'/' && b.get(i + 1) == Some(&b'*') {
+                        depth += 1;
                         out[i] = b' ';
+                        out[i + 1] = b' ';
+                        i += 2;
+                    } else if b[i] == b'*' && b.get(i + 1) == Some(&b'/') {
+                        depth -= 1;
+                        out[i] = b' ';
+                        out[i + 1] = b' ';
+                        i += 2;
+                        if depth == 0 {
+                            break;
+                        }
+                    } else {
+                        if b[i] != b'\n' {
+                            out[i] = b' ';
+                        }
+                        i += 1;
                     }
-                    i += 1;
                 }
-                for k in i..(i + 2).min(b.len()) {
-                    out[k] = b' ';
-                }
-                i += 2;
                 continue;
             }
             _ => {}
@@ -161,6 +174,29 @@ fn blank_comments(s: &str) -> String {
         i += 1;
     }
     String::from_utf8(out).unwrap_or_else(|_| s.to_string())
+}
+
+/// Where the string or char literal at b[i] ends (past it): `"..."`, `b'{'`, `'\n'`; None for anything else (a
+/// lifetime `'a`)
+fn literal_end(b: &[u8], i: usize) -> Option<usize> {
+    match b[i] {
+        b'"' => {
+            let mut j = i + 1;
+            while j < b.len() && b[j] != b'"' {
+                j += if b[j] == b'\\' { 2 } else { 1 };
+            }
+            Some((j + 1).min(b.len()))
+        }
+        b'\'' => {
+            // (a char: one char or an escape, then `'`)
+            let j = if b.get(i + 1) == Some(&b'\\') { b[i + 2..].iter().position(|&c| c == b'\'').map(|p| i + 2 + p)? } else {
+                let w = std::str::from_utf8(&b[i + 1..(i + 5).min(b.len())]).ok().or_else(|| std::str::from_utf8(&b[i + 1..(i + 2).min(b.len())]).ok())?.chars().next()?.len_utf8();
+                (b.get(i + 1 + w) == Some(&b'\'')).then_some(i + 1 + w)?
+            };
+            Some(j + 1)
+        }
+        _ => None,
+    }
 }
 
 /// The names of those fns, with the constant's place in their order after it
@@ -198,7 +234,7 @@ fn const_check_item(src: &str, items: &[SrcItem]) -> Option<(String, Vec<usize>)
         }
         // (an enum's discriminants: each of its integer type, `#[repr(u8)]` or isize)
         if let Some(r) = t.strip_prefix("enum ") {
-            let head = &text[..text.len() - t.len()];
+            let head: String = text[..text.len() - t.len()].chars().filter(|c| !c.is_whitespace()).collect();
             let ints = ["i8", "i16", "i32", "i64", "i128", "isize", "u8", "u16", "u32", "u64", "u128", "usize"];
             let repr = head.find("repr(").and_then(|k| {
                 let args = &head[k + 5..];
@@ -212,7 +248,16 @@ fn const_check_item(src: &str, items: &[SrcItem]) -> Option<(String, Vec<usize>)
             let (mut depth, mut start) = (0i32, 0usize);
             let bb = body.as_bytes();
             let mut parts = vec![];
+            let mut skip_to = 0;
             for (i, &c) in bb.iter().enumerate() {
+                if i < skip_to {
+                    continue;
+                }
+                // (a string or char literal's brackets are none: `b'{'`)
+                if let Some(e) = literal_end(bb, i) {
+                    skip_to = e;
+                    continue;
+                }
                 match c {
                     b'(' | b'[' | b'{' => depth += 1,
                     b')' | b']' | b'}' if depth == 0 => {
@@ -242,11 +287,11 @@ fn const_check_item(src: &str, items: &[SrcItem]) -> Option<(String, Vec<usize>)
                 });
                 let Some(eq) = eq else { continue };
                 let e = v[eq + 1..].trim();
-                if e.is_empty() || items_inside.iter().any(|k| e.contains(k)) {
+                if e.is_empty() || items_inside.iter().any(|k| blank_comments(e).contains(k)) {
                     continue;
                 }
                 let at = body_at + a + eq + 1;
-                let skip = text[at..].len() - text[at..].trim_start().len();
+                let skip = { let b = blank_comments(&text[at..]); b.len() - b.trim_start().len() };
                 body_out.push_str(&format!("#[allow(dead_code, unused)] fn {CONST_CHECK_FN}{}() {{\n    let _zc: {} = (\n{e}\n    );\n}}\n", lines.len(), repr.unwrap_or("isize")));
                 lines.push(written(it.line + text[..at + skip].matches('\n').count()));
             }
@@ -279,29 +324,44 @@ fn const_check_item(src: &str, items: &[SrcItem]) -> Option<(String, Vec<usize>)
         let Some(eq) = eq else { continue };
         let ty = ty_from[..eq].trim();
         let init = ty_from[eq + 1..].trim_end().trim_end_matches(';');
-        if ty.is_empty() || init.trim().is_empty() || items_inside.iter().any(|k| init.contains(k)) {
+        if ty.is_empty() || init.trim().is_empty() || items_inside.iter().any(|k| blank_comments(init).contains(k)) {
             continue;
         }
         // (a constant's references are 'static: `&str` is `&'static str`)
         let mut ty_s = String::new();
         let tb = ty.as_bytes();
+        // (not a `&` of an array's length, `[u8; 3 & 1]`: after a `;` in brackets)
+        let mut lens: Vec<bool> = vec![];
         for (i, &c) in tb.iter().enumerate() {
-            ty_s.push(c as char);
-            if c == b'&' && !tb[i + 1..].iter().find(|c| !c.is_ascii_whitespace()).is_some_and(|&n| n == b'\'' || n == b'&') {
-                ty_s.push_str("'static ");
+            match c {
+                b'[' => lens.push(false),
+                b']' => {
+                    lens.pop();
+                }
+                b';' => {
+                    if let Some(l) = lens.last_mut() {
+                        *l = true;
+                    }
+                }
+                _ => {}
             }
-            if c == b'&' && tb.get(i + 1) == Some(&b'&') {
-                ty_s.push_str("'static ");
+            ty_s.push(c as char);
+            if c == b'&' && !lens.last().copied().unwrap_or(false) {
+                let next = tb[i + 1..].iter().find(|c| !c.is_ascii_whitespace());
+                if !next.is_some_and(|&n| n == b'\'') {
+                    ty_s.push_str("'static ");
+                }
             }
         }
         // (the line of its initializer)
         let at = text.len() - ty_from.len() + eq + 1;
-        let skip = text[at..].len() - text[at..].trim_start().len();
+        let skip = { let b = blank_comments(&text[at..]); b.len() - b.trim_start().len() };
         // (a `let` of the type: the coercions of a `let`, as a constant's initializer has)
         body_out.push_str(&format!("#[allow(dead_code, unused)] fn {CONST_CHECK_FN}{}() {{\n    let _zc: {ty_s} = (\n{init}\n    );\n}}\n", lines.len()));
         lines.push(written(it.line + text[..at + skip].matches('\n').count()));
     }
-    if lines.is_empty() {
+    // (none when the program names its own fns so: the probes' names are theirs alone)
+    if lines.is_empty() || items.iter().any(|it| src[it.start..it.end].contains(CONST_CHECK_FN)) {
         return None;
     }
     Some((body_out, lines))
@@ -726,6 +786,8 @@ impl Session2 {
         self.ctx.map.colfix = fix;
         // (`zustc check`: each constant of the program is checked where it is defined, used or not, as rustc does: a
         // fn of the program that reads them, on lines past every other (check maps its errors back to them))
+        // (the program's own items, before the constants' fns: what the source's own scans read)
+        let user_src = user;
         self.const_lines.clear();
         if self.checking {
             if let Some((text, lines)) = const_check_item(&src, &items[..user]) {
@@ -762,10 +824,10 @@ impl Session2 {
         // (E0432: a top-level `use` of a path whose first segment names nothing; the `use` items come from the item
         // split, the names they could mean from the original text)
         if self.ctx.map.inputs.is_empty() {
-            if let Some(e) = unresolved_import(src0, &src, &items[..user], &self.ctx.deps) {
+            if let Some(e) = unresolved_import(src0, &src, &items[..user_src], &self.ctx.deps) {
                 return Err(e);
             }
-            if let Some(e) = duplicate_import(src0, &src, &items[..user]) {
+            if let Some(e) = duplicate_import(src0, &src, &items[..user_src]) {
                 return Err(e);
             }
             // (E0428 of an inline module and an item: a whole-text pass, so not on each build of a crate loaded from
@@ -773,7 +835,7 @@ impl Session2 {
             if let Some(e) = duplicate_name(src0, &externs, self.opts.edition < 2018) {
                 return Err(e);
             }
-            if let Some(e) = malformed_attr(src0, &src, &items[..user], self.ctx.deps.is_empty() && self.ctx.lib.is_none()) {
+            if let Some(e) = malformed_attr(src0, &src, &items[..user_src], self.ctx.deps.is_empty() && self.ctx.lib.is_none()) {
                 return Err(e);
             }
         }
@@ -908,7 +970,7 @@ impl Session2 {
         tm.lap("summaries", {
             if tm.on {
                 let ol = self.ctx.own_lines as usize;
-                let own = items[..user].iter().filter(|it| ol == 0 || it.line <= ol).count();
+                let own = items[..user_src].iter().filter(|it| ol == 0 || it.line <= ol).count();
                 format!("{} items: own {own}, deps {}, prelude {}", items.len(), user - own, items.len() - user)
             } else {
                 String::new()
@@ -919,7 +981,7 @@ impl Session2 {
         // mention one by name are read again)
         {
             let mut adts: crate::fxhash::FxMap<&str, usize> = Default::default();
-            for sm in &sums[..user] {
+            for sm in &sums[..user_src] {
                 if let Some(r) = sm.adt_regions.as_deref().filter(|r| !r.lts.is_empty()) {
                     for n in sm.structs.iter().map(|s| s.0.as_str()).chain(sm.enums.iter().map(|e| e.0.as_str())) {
                         adts.insert(n, r.lts.len());
@@ -927,7 +989,7 @@ impl Session2 {
                 }
             }
             if !adts.is_empty() {
-                for (it, sm) in items[..user].iter().zip(&sums[..user]) {
+                for (it, sm) in items[..user_src].iter().zip(&sums[..user_src]) {
                     let kind = !sm.structs.is_empty() || !sm.enums.is_empty() || !sm.aliases.is_empty() || !sm.consts.is_empty() || !sm.statics.is_empty() || !sm.assocs.is_empty();
                     if !kind {
                         continue;
@@ -966,7 +1028,7 @@ impl Session2 {
                 .filter_map(|sm| Some((sm.trait_decl.as_deref()?, sm.trait_generics.iter().find(|g| g.0 == crate::types::SELF_OUTLIVES)?.1.as_slice())))
                 .collect();
             if !so.is_empty() {
-                for (it, sm) in items[..user].iter().zip(&sums[..user]) {
+                for (it, sm) in items[..user_src].iter().zip(&sums[..user_src]) {
                     // (an impl of such a trait, or a type whose fields write `dyn`: read again)
                     let of_trait = sm.impl_trait.as_deref().is_some_and(|t| so.contains_key(t));
                     let dyns = (!sm.structs.is_empty() || !sm.enums.is_empty() || !sm.unions.is_empty()) && src.get(it.start..it.end).is_some_and(|t| t.contains("dyn"));
@@ -1002,7 +1064,7 @@ impl Session2 {
             }
         }
         // (struct / enum / union definitions of the program: unused parameters, union fields ..)
-        for (it, sm) in items[..user].iter().zip(&sums[..user]) {
+        for (it, sm) in items[..user_src].iter().zip(&sums[..user_src]) {
             if let Some(e) = &sm.adt_err {
                 // (`\u{3}line\u{3}msg`: at that line of the item)
                 if let Some((l, m)) = e.strip_prefix('\u{3}').and_then(|r| r.split_once('\u{3}')) {
@@ -1022,7 +1084,7 @@ impl Session2 {
         // (E0658: an attribute behind a feature gate the file does not enable)
         // (attributes start items: only the text at the start of the program's items, not the whole source)
         let mut feats: Option<Vec<String>> = None;
-        for it in &items[..user] {
+        for it in &items[..user_src] {
             let head = src.get(it.start..it.end).unwrap_or("");
             // (and an extern block's items: `extern "C" { #[unsafe(ffi_const)] fn f(); }`)
             let ext = extern_block(head.as_bytes(), 0);
@@ -1050,7 +1112,7 @@ impl Session2 {
                 w.is_none_or(|(i, _)| top_level_split(&head[i + 5..]).iter().all(|p| p.trim().is_empty() || p.split(':').next().map(str::trim) == Some(st)))
             };
             let mut first: FxMap<&str, (usize, &str)> = FxMap::default();
-            for (ii, sm) in sums[..user].iter().enumerate() {
+            for (ii, sm) in sums[..user_src].iter().enumerate() {
                 let (Some(tr), Some(st)) = (sm.impl_trait.as_deref(), sm.impl_self.as_deref()) else { continue };
                 if !sm.impl_trait_args.is_empty() || tr.contains(['<', ':']) || !sm.impl_generics.iter().any(|g| g.0 == st) {
                     continue;
@@ -1060,7 +1122,7 @@ impl Session2 {
                     continue;
                 }
                 let Some((_, _)) = first.insert(tr, (ii, st)) else { continue };
-                let once = sums[..user].iter().filter(|s| s.trait_decl.as_deref() == Some(tr)).count() == 1;
+                let once = sums[..user_src].iter().filter(|s| s.trait_decl.as_deref() == Some(tr)).count() == 1;
                 const OVERLAP: [&str; 6] =
                     ["specialization", "min_specialization", "marker_trait_attr", "negative_impls", "with_negative_coherence", "rustc_attrs"];
                 let enabled = feats.get_or_insert_with(|| enabled_features(&src));
@@ -1079,7 +1141,7 @@ impl Session2 {
                     (i == 0 || !id(b[i - 1])) && b.get(i + w.len()).is_none_or(|&c| !id(c))
                 })
             };
-            for it in &items[..user] {
+            for it in &items[..user_src] {
                 let crate::lexer::ItemKind::ImplMember(h) = it.kind else { continue };
                 let t = src.get(it.start..it.end).unwrap_or("").trim_start();
                 let Some(rest) = t.strip_prefix("type ") else { continue };
@@ -1090,10 +1152,10 @@ impl Session2 {
                     continue;
                 }
                 let Some(tr) = sums.get(h as usize).and_then(|s| s.impl_trait.as_deref()) else { continue };
-                if sums[..user].iter().filter(|s| s.trait_decl.as_deref() == Some(tr)).count() != 1 {
+                if sums[..user_src].iter().filter(|s| s.trait_decl.as_deref() == Some(tr)).count() != 1 {
                     continue;
                 }
-                let decl = items[..user].iter().find(|d| {
+                let decl = items[..user_src].iter().find(|d| {
                     matches!(d.kind, crate::lexer::ItemKind::TraitMember(th) if sums.get(th as usize).and_then(|s| s.trait_decl.as_deref()) == Some(tr))
                         && src.get(d.start..d.end).unwrap_or("").trim_start().strip_prefix("type ").is_some_and(|r| {
                             let r = r.trim_start();
@@ -1176,25 +1238,25 @@ impl Session2 {
         // appears nowhere but in its own definition and in `impl` headers)
         if deny_dead_code && self.ctx.lib.is_none() {
             // (a `pub` item counts as used, except in a binary under `deny(dead_code_pub_in_binary)`)
-            if let Some((line, msg)) = first_dead_item(&src, &items[..user], deny_dead_pub && !lib_attr) {
+            if let Some((line, msg)) = first_dead_item(&src, &items[..user_src], deny_dead_pub && !lib_attr) {
                 return Err(format!("{line}:1: {msg}"));
             }
         }
         // (unused_imports: a top-level `use` whose name nothing else mentions)
         if deny_unused_imports && self.ctx.lib.is_none() {
-            if let Some((line, col, msg)) = first_unused_import(&src, &items[..user]) {
+            if let Some((line, col, msg)) = first_unused_import(&src, &items[..user_src]) {
                 return Err(format!("{line}:{col}: {msg}"));
             }
         }
         // (naming lints: the first item whose name breaks its case convention)
         if deny_style.iter().any(|&d| d) && self.ctx.lib.is_none() {
-            if let Some((line, msg)) = first_bad_name(&src, &items[..user], deny_style) {
+            if let Some((line, msg)) = first_bad_name(&src, &items[..user_src], deny_style) {
                 return Err(format!("{line}:1: {msg}"));
             }
         }
         // (unreachable_code: a statement after one that diverges)
         if deny_unreachable_code && self.ctx.lib.is_none() {
-            for it in &items[..user] {
+            for it in &items[..user_src] {
                 let text = src.get(it.start..it.end).unwrap_or("");
                 if !text.contains("fn ") || text.contains("allow(unreachable") || text.contains("#[cfg") {
                     continue;
@@ -1211,13 +1273,13 @@ impl Session2 {
         // single_use_lifetimes: one named once, in a parameter's type (or the impl's header), which eliding it would
         // say)
         if deny_unused_lifetimes.0 || deny_unused_lifetimes.1 {
-            if let Some(e) = first_unused_lifetime(&src, &items[..user], deny_unused_lifetimes) {
+            if let Some(e) = first_unused_lifetime(&src, &items[..user_src], deny_unused_lifetimes) {
                 return Err(e);
             }
         }
         // (unused_variables: the first binding nothing reads, in the program's own fns)
         if deny_unused_vars {
-            for it in &items[..user] {
+            for it in &items[..user_src] {
                 let text = src.get(it.start..it.end).unwrap_or("");
                 if !text.contains("fn ") || text.contains("allow(unused") || text.contains("#[cfg") {
                     continue;
@@ -1236,7 +1298,7 @@ impl Session2 {
                 }
             }
         }
-        unsafe_impls(&src, &items[..user])?;
+        unsafe_impls(&src, &items[..user_src])?;
         let mut prog = Program::build_with(&items, &sums, self.ctx.lib.is_none() && !lib_attr, user).map_err(|e| name_line(&e, &src, &items))?;
         tm.lap("program", String::new());
         prog.prelude_from = user as u32;
@@ -3636,7 +3698,7 @@ impl Session2 {
                                 Err(e) => {
                                     // (a fn that reads a constant: its type errors are the constant's, at its line; what
                                     // zustc cannot evaluate in a constant is not an error of the program)
-                                    match body.strip_prefix(CONST_CHECK_FN).and_then(|k| k.parse::<usize>().ok()) {
+                                    match body.strip_prefix(CONST_CHECK_FN).and_then(|k| k.parse::<usize>().ok()).filter(|_| !self.const_lines.is_empty()) {
                                         Some(k) => {
                                             // (nor a mismatch zustc's coercions may make: of a raw pointer, or of a type
                                             // that has no size, which rustc rejects another way)
