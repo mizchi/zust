@@ -2305,9 +2305,7 @@ fn lit_suffix(e: &Expr) -> Option<bool> {
 /// A closure in e (a match guard) whose body moves one of names out: that capture, and where it moves
 fn guard_closure_move(e: &Expr, names: &[String]) -> Option<(String, crate::parse::Pos)> {
     if let Expr::Closure(..) = e {
-        // (not a name the closure binds again: see ast_closure::rebinds)
-        let names: Vec<String> = names.iter().filter(|n| !crate::ast_closure::rebinds(e, std::slice::from_ref(*n))).cloned().collect();
-        return crate::ast_closure::move_site(e, &names);
+        return crate::ast_closure::move_site(e, names);
     }
     let mut found = None;
     crate::ast_closure::each_child_pub(e, &mut |c| {
