@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795374134112,
+  "lastUpdate": 1795374136003,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -101785,6 +101785,70 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/mizchi/zust/commit/9edb11926201917ebdff36ffaba2081d65ff405d"
         },
         "date": 1795371420885,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tests/ui run-pass pass rate",
+            "value": 76.14,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui run-pass passing",
+            "value": 1816,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui check-pass pass rate",
+            "value": 83.12,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui check-pass passing",
+            "value": 1502,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui build-pass pass rate",
+            "value": 75.56,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui build-pass passing",
+            "value": 102,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui compile-fail pass rate",
+            "value": 59.31,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui compile-fail passing",
+            "value": 4364,
+            "unit": "tests"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "miz404@gmail.com",
+            "name": "Kotaro Chikuba",
+            "username": "mizchi"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "659257cb22dfa6d913da4c97e6122cdb4a4c96be",
+          "message": "Merge pull request #61 from mizchi/claude/tender-sagan-iatvun\n\nTODO.md: remove what is fixed, point to the issues for what they track",
+          "timestamp": "2026-11-23T03:57:33+09:00",
+          "tree_id": "ca25681e6704d5a47234e2f6a60856ae81b428ce",
+          "url": "https://github.com/mizchi/zust/commit/659257cb22dfa6d913da4c97e6122cdb4a4c96be"
+        },
+        "date": 1795374135763,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
