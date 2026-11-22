@@ -94,6 +94,12 @@ pub(crate) fn const_expr_text(e: &Expr) -> Option<String> {
             let inner = const_expr_text(x)?;
             match &**t {
                 crate::parse::Ty::Path(None, p) if p.segs.len() == 1 && p.segs[0].args.is_empty() => format!("({inner} as {})", p.segs[0].name),
+                // (a primitive by its path: `as core::primitive::u16`)
+                crate::parse::Ty::Path(None, p)
+                    if p.segs.len() == 3 && matches!(p.segs[0].name.as_str(), "core" | "std") && p.segs[1].name == "primitive" && p.segs.iter().all(|s| s.args.is_empty()) =>
+                {
+                    format!("({inner} as {})", p.segs[2].name)
+                }
                 _ => inner,
             }
         }

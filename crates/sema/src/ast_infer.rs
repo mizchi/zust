@@ -834,7 +834,9 @@ impl Inf<'_> {
             }
             Pat::Struct(p, fps, _) => {
                 let (v, mode) = self.auto_deref(v, mode);
-                let fields = if let Some((sid, vi)) = self.variant_by(p) {
+                // (a unit variant has no fields: `Skip { iter, .. }` is the struct, even with `use E::*`'s variant `Skip`)
+                let variant = self.variant_by(p).filter(|&(sid, vi)| fps.is_empty() || !self.prog.structs[sid as usize].variants[vi].fields.is_empty() || self.struct_by(p).is_none());
+                let fields = if let Some((sid, vi)) = variant {
                     self.pat_fields(v, sid, Some(vi))
                 } else if let Some(sid) = self.struct_by(p) {
                     self.pat_fields(v, sid, None)
@@ -2491,7 +2493,13 @@ impl Inf<'_> {
                 }
                 self.option_of(rv)
             }
-            "overflowing_shl" | "overflowing_shr" => self.var(),
+            "overflowing_shl" | "overflowing_shr" => {
+                for a in avs {
+                    let k = self.known(Ty::U32);
+                    self.unify(a, k);
+                }
+                self.var()
+            }
             "pow" | "rotate_left" | "rotate_right" | "wrapping_pow" | "saturating_pow" => {
                 for a in avs {
                     let k = self.known(Ty::U32);

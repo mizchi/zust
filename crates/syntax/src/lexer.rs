@@ -2238,7 +2238,7 @@ pub fn expand_module_aliases(src: &str) -> Option<String> {
     }
     // (the innermost block around token k: a module's body, or a function's for a `use` in it)
     let scope = |k: usize| blocks.iter().filter(|&&(o, c)| o < k && k < c).min_by_key(|&&(o, c)| c - o).copied();
-    let mut reps: Vec<(usize, Vec<u8>)> = vec![]; // (token, its new text)
+    let mut reps: Vec<(usize, Vec<u8>, usize)> = vec![]; // (token, its new text, the size of the use's scope)
     let mut k = 0;
     while k < toks.len() {
         // (`use a::b::m as x;`, in a tree too: `use crate::{arch::m as x, y};`)
@@ -2264,7 +2264,7 @@ pub fn expand_module_aliases(src: &str) -> Option<String> {
                     continue;
                 }
                 if is_id(t) && tk(t) == alias.as_slice() && is_sym(t + 1, b':') && is_sym(t + 2, b':') && !(t >= 2 && is_sym(t - 1, b':') && is_sym(t - 2, b':')) && !(t >= 1 && is_sym(t - 1, b'.')) {
-                    reps.push((t, text.clone()));
+                    reps.push((t, text.clone(), hi - lo));
                 }
             }
         }
@@ -2273,11 +2273,12 @@ pub fn expand_module_aliases(src: &str) -> Option<String> {
     if reps.is_empty() {
         return None;
     }
-    reps.sort_by_key(|r| r.0);
+    // (the innermost `use` of a name wins: `use crate::b::m;` in a function over the module's `use crate::a::m;`)
+    reps.sort_by_key(|r| (r.0, r.2));
     reps.dedup_by_key(|r| r.0);
     let mut out = Vec::with_capacity(s.len() + reps.len() * 16);
     let mut at = 0;
-    for (t, p) in reps {
+    for (t, p, _) in reps {
         out.extend_from_slice(&s[at..toks[t].1]);
         out.extend_from_slice(&p);
         at = toks[t].2;

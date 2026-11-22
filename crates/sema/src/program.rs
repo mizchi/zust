@@ -1608,7 +1608,8 @@ impl Program {
             }
             // (and a vector type of core::arch, when the program has no type of the name: `impl Vector for __m128i`.
             // `__m128`, `__m128i`, `__m128d` and `v128` are one type here, so impls of a trait for two of them conflict)
-            let vec_ty = crate::simd_sig::vector_name(sn).filter(|_| !p.struct_index.contains_key(sn.as_str()));
+            // (not `impl Tr for &__m128i`, which the reference implements: registered above)
+            let vec_ty = crate::simd_sig::vector_name(sn).filter(|_| !p.struct_index.contains_key(sn.as_str()) && !matches!(sm.impl_self_ty, Some(TySyn::Ref(..))));
             if let Some(pt) = Ty::prim(sn).or((sn == "str").then_some(Ty::Str)).or((sn == "#tuple0").then_some(Ty::Unit)).or(vec_ty) {
                 let dup = !p.prim_impls.insert((pt, tr.clone()));
                 if impl_overlaps(&mut self_tys, sums, ii, sn, tr, dup) {
@@ -2772,7 +2773,11 @@ impl Program {
         });
         let mut unused = None;
         for (x, er, referenced) in pending {
-            let fails = !referenced || want.is_none() || self.eval_t(&x, depth, want).is_err();
+            // (a skipped use's type is not known here: the block's, or any integer type it succeeds at
+            // (`let _y: u8 = if false { x } else { 0u8 };` in an i64 block))
+            let at = |w: Option<It>| self.eval_t(&x, depth, w).is_ok();
+            let ints = ["u8", "u16", "u32", "u64", "u128", "usize", "i8", "i16", "i32", "i64", "i128", "isize"];
+            let fails = !referenced || !(want.is_some_and(|w| at(Some(w))) || ints.iter().any(|n| at(It::of_name(n))));
             if fails && unused.is_none() {
                 unused = Some(er);
             }
@@ -2896,6 +2901,12 @@ impl Program {
     fn cast_prim(&self, t: &crate::parse::Ty) -> String {
         match t {
             crate::parse::Ty::Path(None, p) if p.segs.len() == 1 && p.segs[0].args.is_empty() => self.prim_of_name(&p.segs[0].name),
+            // (`as core::primitive::u16`)
+            crate::parse::Ty::Path(None, p)
+                if p.segs.len() == 3 && matches!(p.segs[0].name.as_str(), "core" | "std") && p.segs[1].name == "primitive" && p.segs.iter().all(|s| s.args.is_empty()) =>
+            {
+                p.segs[2].name.clone()
+            }
             _ => String::new(),
         }
     }
@@ -3081,6 +3092,11 @@ impl Program {
                     Some(it) => Ok((it.check(raw.checked_neg().filter(|_| (it.signed || raw == 0) && raw >= 0))?, Some(it))),
                     None => un(raw.wrapping_neg()),
                 }
+            }
+            // (`!` of a bool is the logical not: `(!true) as u8` is 0, not the complement of 1)
+            Expr::Unary(op, x, _) if op == "!" && is_bool_expr(x) => {
+                let (v, _) = self.eval_t(x, depth, None)?;
+                un((v == 0) as i128)
             }
             Expr::Unary(op, x, _) => {
                 let (v, t) = self.eval_t(x, depth, want)?;
@@ -4134,13 +4150,22 @@ impl Program {
             }
             AdtShape::Enum(vs) => {
                 let mut discrs = vec![];
-                let mut next = 0i64;
+                // (the implicit successor, as a value of the repr type: None past its range)
+                let mut next: Option<i128> = Some(0);
                 // (a discriminant is a value of the repr type, isize without one: `(1 << 63) >> 63` is -1)
                 let dt = self.reprs.get(&self.structs[id as u32 as usize].name).copied().unwrap_or(Ty::Isize);
+                let dit = It::of_ty(dt);
                 let mut env: Vec<(String, i128, Option<It>, Option<crate::parse::Expr>)> = vec![];
                 for v in vs {
                     let d = if v.discr_src.is_empty() {
-                        v.discr.unwrap_or(next)
+                        match v.discr {
+                            Some(x) => x,
+                            // (an implicit one past the repr type's range is E0370: `#[repr(u8)]`'s `A = 255, B`)
+                            None => match next.filter(|&n| dit.is_none_or(|it| it.fits(n))) {
+                                Some(n) => n as i64,
+                                None => return Err(format!("{line}:1: enum discriminant overflowed (E0370): `{}`", v.name)),
+                            },
+                        }
                     } else {
                         // (other constants, and the variants before it: `Y = Foo::X as isize - 3`)
                         let e = crate::parse::parse_expr(&v.discr_src).map_err(|e| format!("{line}:1: {e}"))?;
@@ -4160,7 +4185,7 @@ impl Program {
                         ));
                     }
                     discrs.push(d);
-                    next = d + 1;
+                    next = dit.map_or(d as i128, |it| it.wrap(d as i128)).checked_add(1);
                 }
                 let repr = self.reprs.get(&self.structs[id as u32 as usize].name).copied();
                 let tag = if let Some(t) = repr {
@@ -5107,6 +5132,18 @@ pub fn const_generic_value(env: &TyEnv, name: &str) -> Option<u32> {
 }
 
 /// e without the parentheses around it
+/// e is a bool by its form: `true` / `false`, a comparison, `&&` / `||`, or `!` of one
+fn is_bool_expr(e: &crate::parse::Expr) -> bool {
+    use crate::parse::Expr;
+    match strip_parens(e) {
+        Expr::Path(None, p) => p.segs.len() == 1 && matches!(p.segs[0].name.as_str(), "true" | "false"),
+        Expr::Lit(t, _) => t == "true" || t == "false",
+        Expr::Binary(op, ..) => matches!(op.as_str(), "==" | "!=" | "<" | "<=" | ">" | ">=" | "&&" | "||"),
+        Expr::Unary(op, x, _) => op == "!" && is_bool_expr(x),
+        _ => false,
+    }
+}
+
 fn strip_parens(e: &crate::parse::Expr) -> &crate::parse::Expr {
     match e {
         crate::parse::Expr::Paren(x) => strip_parens(x),

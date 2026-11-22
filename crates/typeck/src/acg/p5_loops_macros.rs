@@ -1885,6 +1885,12 @@ impl Cx<'_> {
         if name == "from" && n >= 2 && p.segs[n - 2].name == "Box" && cargs.len() == 1 && !self.prog.struct_index.contains_key("Box") {
             let owned = |t: Ty| !matches!(t, Ty::Ref(..) | Ty::Str | Ty::Slice(_) | Ty::Dyn(_)) && !matches!(t, Ty::Struct(sid) if matches!(self.prog.structs[self.prog.base_of(sid) as usize].name.as_str(), "String" | "Vec"));
             let arg = self.peek(&cargs[0]).or(match expected { Some(Ty::Box(i)) => Some(*i), _ => None });
+            // (`Box::from(b)` of a Box of that type: `From<T> for T`, the Box itself)
+            if let (Some(a @ Ty::Box(_)), Some(e)) = (arg, expected) {
+                if a == e {
+                    return self.expr(&cargs[0], expected).map(Some);
+                }
+            }
             if arg.is_some_and(owned) {
                 // (the `Box` segment as written, with its arguments: `Box::<u64>::from(1)`)
                 let seg = |n: &str| crate::parse::Seg { name: n.to_string(), args: vec![], fn_args: None, text: n.to_string() };
@@ -2225,7 +2231,10 @@ impl Cx<'_> {
                 let names = crate::program::vector_names(t).iter().filter(|n| !self.prog.struct_index.contains_key(**n));
                 let qualified = (p.segs.len() >= 2).then(|| p.segs[p.segs.len() - 2].name.clone());
                 let by_trait = qualified.as_ref().and_then(|tr| names.clone().find(|n| self.prog.const_index.contains_key(&format!("{n} as {tr}::{}", last.name))));
-                if let Some(n) = by_trait.or_else(|| names.clone().find(|n| self.prog.const_index.contains_key(&format!("{n}::{}", last.name)))) {
+                // (a qualified path whose impl has no `C` takes the trait's default: not another trait's bare `C`)
+                let trait_default = qualified.as_ref().is_some_and(|tr| self.prog.const_index.contains_key(&format!("{tr}::{}", last.name)));
+                let bare = || if qualified.is_some() && trait_default { None } else { names.clone().find(|n| self.prog.const_index.contains_key(&format!("{n}::{}", last.name))) };
+                if let Some(n) = by_trait.or_else(bare) {
                     tn = n.to_string();
                 }
                 // (`<Foo as Tr>::C` where Foo has an inherent `C` too: the trait impl's, by its qualified name)
