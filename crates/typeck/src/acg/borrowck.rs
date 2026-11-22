@@ -250,11 +250,31 @@ pub fn direct_temps(e: &Expr, out: &mut Vec<usize>) {
     }
     let args = match strip(e) {
         Expr::Call(_, a) => a,
-        Expr::MethodCall(_, _, _, a, _) => a,
+        Expr::MethodCall(r, _, _, a, _) => {
+            // (the receiver made by a call (`mk(1).get()`): borrowed by a `&self` method, it is a temporary too)
+            if made_temp(r) {
+                out.push(&**r as *const Expr as usize);
+            }
+            a
+        }
         _ => return,
     };
     for a in args {
         direct_ref(a, out);
+    }
+}
+
+/// A value a call makes (not a place, not a constant rustc would promote): `f()`, `x.m()`, `vec![..]`
+fn made_temp(x: &Expr) -> bool {
+    let mut x = x;
+    while let Expr::Paren(p) = x {
+        x = p;
+    }
+    match x {
+        Expr::MethodCall(..) => true,
+        Expr::Call(f, _) => matches!(&**f, Expr::Path(_, p) if p.segs.last().is_some_and(|s| s.name.starts_with(|c: char| c.is_ascii_lowercase() || c == '_'))),
+        Expr::Macro(p, ..) => p.segs.last().is_some_and(|s| s.name == "vec" || s.name == "format"),
+        _ => false,
     }
 }
 
@@ -293,13 +313,7 @@ pub fn direct_ref(a: &Expr, out: &mut Vec<usize>) {
         e
     }
     if let Expr::Ref(_, x) = strip(a) {
-        let made = match strip(x) {
-            Expr::MethodCall(..) => true,
-            Expr::Call(f, _) => matches!(strip(f), Expr::Path(_, p) if p.segs.last().is_some_and(|s| s.name.starts_with(|c: char| c.is_ascii_lowercase() || c == '_'))),
-            Expr::Macro(p, ..) => p.segs.last().is_some_and(|s| s.name == "vec" || s.name == "format"),
-            _ => false,
-        };
-        if made {
+        if made_temp(x) {
             out.push(&**x as *const Expr as usize);
             out.push(strip(x) as *const Expr as usize);
         }

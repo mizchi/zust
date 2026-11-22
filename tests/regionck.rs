@@ -1287,3 +1287,13 @@ fn constant_conditions_and_chains() {
     assert!(d.len() == 1 && d[0].0 == 4 && d[0].1.contains("isn't initialized"), "{d:?}");
     assert_eq!(check("fn main() {\n    let z;\n    if true && { z = 3; true } && z == 3 {}\n    let y;\n    if false || { y = 3; false } || y == 3 {}\n}\n"), vec![]);
 }
+
+/// A receiver a call made, borrowed by a `&self` method whose result borrows it, in a `let`'s initializer: a temporary
+/// freed at the end of the statement (E0716 when the result is used after). Not when the result does not borrow it
+#[test]
+fn receiver_temporaries() {
+    let a = "struct A {\n    v: Vec<u8>,\n}\nimpl A {\n    fn get(&self) -> &A {\n        self\n    }\n    fn len(&self) -> usize {\n        self.v.len()\n    }\n    fn name(&self) -> &'static str {\n        \"a\"\n    }\n}\nfn mk() -> A {\n    A { v: vec![1] }\n}\n";
+    let d = check(&format!("{a}fn main() {{\n    let x = mk().get();\n    println!(\"{{}}\", x.len());\n}}\n"));
+    assert!(d.len() == 1 && d[0].0 == 19 && d[0].1.contains("E0716"), "{d:?}");
+    assert_eq!(check(&format!("{a}fn main() {{\n    let n = mk().len();\n    let s = mk().name();\n    let k = mk().get().len();\n    println!(\"{{}} {{}} {{}}\", n, s, k);\n}}\n")), vec![]);
+}

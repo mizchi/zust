@@ -924,6 +924,13 @@ impl Cx<'_> {
         let t0 = self.bk.call_temps.len();
         if self.bk_on() && !via_deref {
             let flows = self.bk_ret_from(id, 0);
+            // (a receiver a call made, borrowed by `&self` / `&mut self` for a result that borrows it, in a `let`'s
+            // initializer: a temporary freed at the end of the statement (E0716 when the result is used after))
+            if let (Ty::Ref(m, _), false, true) = (recv_ty, is_place_expr(recv), flows) {
+                if !matches!(p0.ty(), Ty::Ref(..)) {
+                    self.bk_temp_borrow(recv, m, st);
+                }
+            }
             let bk_recv_ty = if self.bk.shared_recv == e as *const Expr as usize { Ty::Ref(false, intern(st)) } else { recv_ty };
             let ev = self.bk_recv_ev(recv, bk_recv_ty, flows);
             if let (true, Some(borrowck::Ev::Acc(_, borrowck::Acc::Borrow(ln), _))) = (flows, &ev) {
