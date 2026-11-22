@@ -1326,6 +1326,8 @@ impl Cx<'_> {
         self.rg.eligible = self.rg.on && self.rg.closure.is_none();
         if self.rg.on && sig.regions.is_none() && self.rg.closure.is_none() && !self.rg.force {
             let n: usize = sig.params.iter().map(|&t| regionck::count(self.prog, t, 0).unwrap_or(0)).sum();
+            // (a placeholder's region is universal, whether a parameter's type has it or not (`f::<T>(x)`))
+            let n = n + self.rg.inst_args.iter().filter(|&&t| matches!(t, Ty::Struct(s) if self.prog.is_placeholder(s))).count();
             // (an `impl Trait` result of a fn with no region in its signature: its hidden type captures none, its
             // regions are 'static)
             let opaque = n == 0 && !sig.is_generic() && self.prog.opaque.contains(&self.rg.base) && regionck::count(self.prog, sig.ret, 0).is_some_and(|c| c > 0);

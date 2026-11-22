@@ -139,6 +139,9 @@ pub struct RgSt {
     pub n: u32,
     /// The universal regions (not `'static`), with their names
     pub univ: Vec<(u32, String)>,
+    /// The placeholders of the instance's type parameters (zustc check of a generic fn nothing calls), with their
+    /// universal regions: a placeholder's region is the same wherever its type is
+    pub ph: Vec<(u32, u32)>,
     /// Outlives relations among universal regions the function may assume (a: b)
     pub known: Vec<(u32, u32)>,
     /// Constraints a: b, with where they come from
@@ -420,7 +423,28 @@ fn captures(prog: &Program, sid: u32) -> Option<(&[Ty], &[bool])> {
     Some((args, &cd.moved))
 }
 
-/// The number of region slots of t (None: not followed)
+/// The type parameters of a generic type g that a type c of the same shape instantiates
+fn bind_params(prog: &Program, g: Ty, c: Ty, sol: &mut [Option<Ty>], depth: u32) {
+    if depth > 12 {
+        return;
+    }
+    match (g, c) {
+        (Ty::Param(k), c) => {
+            if let Some(s @ None) = sol.get_mut(k as usize) {
+                *s = Some(c);
+            }
+        }
+        (Ty::Ref(_, a), Ty::Ref(_, b)) | (Ty::Ptr(_, a), Ty::Ptr(_, b)) | (Ty::Box(a), Ty::Box(b)) | (Ty::Slice(a), Ty::Slice(b)) | (Ty::Array(a, _), Ty::Array(b, _)) => bind_params(prog, *a, *b, sol, depth + 1),
+        (Ty::Struct(x), Ty::Struct(y)) if x != y && prog.base_of(x) == prog.base_of(y) => {
+            let (xa, ya) = (prog.structs[x as usize].args.clone(), prog.structs[y as usize].args.clone());
+            for (a, b) in xa.into_iter().zip(ya) {
+                bind_params(prog, a, b, sol, depth + 1);
+            }
+        }
+        _ => {}
+    }
+}
+
 /// The lifetimes a bound written as a string passes its trait (`GetRef<'a, isize>`: `'a`), in order
 fn bound_lts(b: &str) -> Vec<String> {
     let (Some(i), Some(j)) = (b.find('<'), b.rfind('>')) else { return vec![] };
@@ -443,6 +467,7 @@ fn bound_lts(b: &str) -> Vec<String> {
     out
 }
 
+/// The number of region slots of t (None: not followed)
 pub fn count(prog: &Program, t: Ty, depth: u32) -> Option<usize> {
     if depth > 24 {
         return None;
@@ -705,8 +730,61 @@ impl RgSt {
 
     /// A tree of fresh variables for t
     pub fn fresh(&mut self, prog: &Program, t: Ty) -> Option<RT> {
+        if !self.ph.is_empty() {
+            let mut out = vec![];
+            return self.fresh_ph(prog, t, &mut out, 0).map(|_| out);
+        }
         let n = count(prog, t, 0)?;
         Some((0..n).map(|_| self.var()).collect())
+    }
+
+    /// fresh, with the placeholders' regions where their types are (in count's order)
+    fn fresh_ph(&mut self, prog: &Program, t: Ty, out: &mut RT, depth: u32) -> Option<()> {
+        if depth > 24 {
+            return None;
+        }
+        match t {
+            Ty::Ref(_, i) => {
+                let v = self.var();
+                out.push(v);
+                self.fresh_ph(prog, *i, out, depth + 1)?;
+            }
+            Ty::Ptr(_, i) | Ty::Box(i) | Ty::Array(i, _) | Ty::Slice(i) => self.fresh_ph(prog, *i, out, depth + 1)?,
+            Ty::Struct(sid) => {
+                if let Some(&(_, v)) = self.ph.iter().find(|x| x.0 == sid) {
+                    out.push(v);
+                    return Some(());
+                }
+                let (sd, base, _) = adt(prog, sid);
+                if prog.closure_of_struct.contains_key(&base) {
+                    for _ in 0..count(prog, t, depth)? {
+                        let v = self.var();
+                        out.push(v);
+                    }
+                    return Some(());
+                }
+                for _ in 0..lts_of(prog, base) {
+                    let v = self.var();
+                    out.push(v);
+                }
+                for &a in &sd.args {
+                    self.fresh_ph(prog, a, out, depth + 1)?;
+                }
+            }
+            Ty::Dyn(_) => {
+                let v = self.var();
+                out.push(v);
+            }
+            Ty::Fn(ft) => {
+                for &p in &ft.params {
+                    self.fresh_ph(prog, p, out, depth + 1)?;
+                }
+                self.fresh_ph(prog, ft.ret, out, depth + 1)?;
+            }
+            Ty::Assoc(_) => return None,
+            _ => {}
+        }
+        Some(())
     }
 
     /// The variance of the lifetime and type parameters of a definition (computed once)
@@ -909,6 +987,13 @@ impl RgSt {
                             let r = region(self, c, elided);
                             out.push(r);
                         }
+                    }
+                }
+                // (a placeholder: its region is the same wherever its type is)
+                if n > 0 && !self.ph.is_empty() {
+                    if let Some(&(_, v)) = self.ph.iter().find(|x| x.0 == sid) {
+                        out.truncate(own0);
+                        out.push(v);
                     }
                 }
                 let ar = prog.adt_regions.get(&base);
@@ -1455,8 +1540,14 @@ impl RgSt {
                             let msg = if escapes {
                                 "borrowed data escapes outside of closure (a region of its signature flows into one from outside)".to_string()
                             } else if let Some(tp) = uname.strip_suffix('#') {
-                                // (a type parameter's placeholder: what its values may borrow must outlive `other`)
-                                format!("the parameter type `{tp}` may not live long enough (it must outlive `{other}`) (E0{})", if j == 0 { 310 } else { 309 })
+                                // (a type parameter's placeholder: what its values may borrow must outlive `other`;
+                                // E0311 when `other` has no name)
+                                let code = match (j, other.as_str()) {
+                                    (0, _) => 310,
+                                    (_, "'_") => 311,
+                                    _ => 309,
+                                };
+                                format!("the parameter type `{tp}` may not live long enough (it must outlive `{other}`) (E0{code})")
                             } else {
                                 format!("lifetime may not live long enough (`{uname}` must outlive `{other}`)")
                             };
@@ -1579,6 +1670,7 @@ impl Cx<'_> {
                 let (Ty::Struct(sid), Some(Some(tr))) = (t, targs.get(k)) else { continue };
                 let (Some(&v), true) = (tr.first(), prog.is_placeholder(sid)) else { continue };
                 rg.univ.push((v, prog.structs[sid as usize].name.clone()));
+                rg.ph.push((sid, v));
                 let pname = gsig.generics.get(k).map(|g| g.0.as_str()).unwrap_or("");
                 // (and what its bounds' traits require of their `Self` (`trait Tr<'a>: 'a`, `T: Tr<'x>`: T: 'x),
                 // through supertraits)
@@ -2493,7 +2585,49 @@ impl Cx<'_> {
         // elides as a fn)
         let prelude = prog.item_of.get(id as usize).copied().flatten().is_none_or(|i| i >= prog.prelude_from) && !prog.closures.contains_key(&id);
         let rg = &mut self.rg;
-        let lts: Vec<u32> = rs.as_deref().map(|r| r.lts.iter().map(|_| rg.var()).collect()).unwrap_or_default();
+        let mut lts: Vec<u32> = rs.as_deref().map(|r| r.lts.iter().map(|_| rg.var()).collect()).unwrap_or_default();
+        // (a method of a placeholder's bound (`G: GetRef<'a>` calling `g.get()`): the trait's lifetimes are those the
+        // bound writes, the caller's; what the declaration requires is the caller's to prove)
+        let mut ph_self = false;
+        if let (Some(tr), Some(&Some(Ty::Struct(s)))) = (sig0.trait_of.as_deref(), sol.first()) {
+            if prog.is_placeholder(s) {
+                ph_self = true;
+                let outer = rs.as_deref().map_or(0, |r| r.outer as usize);
+                let short = tr.rsplit("::").next().unwrap_or(tr);
+                let bs = prog.structs[s as usize].placeholder.as_deref().unwrap_or(&[]);
+                // (`Self` of the trait's own default method: bounded by the trait, whose lifetimes are the method's, by name)
+                let own = prog.sigs.get(rg.base as usize).and_then(|c| c.trait_of.as_deref()) == Some(tr);
+                if let (true, Some(r)) = (own, rs.as_deref()) {
+                    for (i, l) in r.lts.iter().enumerate().take(outer) {
+                        if let (Some(p), Some(slot)) = (rg.lt_names.iter().position(|x| x == l), lts.get_mut(i)) {
+                            if let Some(&v) = rg.lts.get(p) {
+                                *slot = v;
+                            }
+                        }
+                    }
+                } else if let Some(b) = bs.iter().filter(|_| outer > 0).find(|b| b.split('<').next().unwrap_or(b).trim().rsplit("::").next() == Some(short)) {
+                    for (i, l) in bound_lts(b).iter().enumerate().take(outer) {
+                        let v = if l == "'static" { Some(STATIC) } else { rg.lt_names.iter().position(|x| x == l).and_then(|p| rg.lts.get(p).copied()) };
+                        if let (Some(v), Some(slot)) = (v, lts.get_mut(i)) {
+                            *slot = v;
+                        }
+                    }
+                }
+            }
+        }
+        // (type parameters the arguments did not solve (a bound's `G: GetRef<'a, isize>` gives the trait's `T`): from
+        // the instantiated signature)
+        let filled;
+        let sol = if ph_self && sol.iter().any(|t| t.is_none()) {
+            let mut s2 = sol.to_vec();
+            for (&g, &c) in sig0.params.iter().zip(params).chain(std::iter::once((&sig0.ret, &ret))) {
+                bind_params(prog, g, c, &mut s2, 0);
+            }
+            filled = s2;
+            &filled[..]
+        } else {
+            sol
+        };
         let mut targs: Vec<Option<RT>> = sol.iter().map(|t| t.and_then(|t| rg.fresh(prog, t))).collect();
         // (type arguments written (`f::<&'a u8>()`): with the regions they name)
         if let Some(tf) = turbofish {
@@ -2602,7 +2736,7 @@ impl Cx<'_> {
         }
         // (the callee's declared bounds hold of its arguments; not those of a trait's impl called from a generic
         // function's instance: the generic body called the trait's method, under its own bounds)
-        let through_trait = !rg.inst_args.is_empty() && (sig0.impl_trait.is_some() || sig0.trait_of.is_some());
+        let through_trait = !rg.inst_args.is_empty() && (sig0.impl_trait.is_some() || sig0.trait_of.is_some()) && !ph_self;
         if let Some(r) = rs.as_deref().filter(|_| !through_trait) {
             let m = |c: u8| if c == R_STATIC { Some(STATIC) } else { lts.get(c as usize).copied() };
             for &(a, b) in &r.outlives {

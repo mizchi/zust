@@ -1121,6 +1121,18 @@ fn placeholder_trait_outlives() {
     assert_eq!(check("trait Tr {}\nfn p<T: Tr + 'static>(v: *const T) -> *const (dyn Tr + 'static) {\n    v as *const (dyn Tr + 'static)\n}\nfn main() {}\n"), vec![]);
 }
 
+/// A placeholder's region is the same wherever its type is: a type argument written (`f::<T>(x)`), an annotation
+/// (`let _: &'static T`), not only a value's type. E0311 when the region it must outlive has no name
+#[test]
+fn placeholder_type_arguments() {
+    let w = "fn with_restriction<'b, T: 'b>(x: &'b ()) -> &'b () {\n    x\n}\n";
+    let d = check(&format!("fn no_restriction<T>(x: &()) -> &() {{\n    with_restriction::<T>(x)\n}}\n{w}fn main() {{}}\n"));
+    assert!(d.len() == 1 && d[0].0 == 2 && d[0].1.contains("E0311"), "{d:?}");
+    let d = check("fn test<T>(_: &u8) {\n    let _: &'static T;\n}\nfn main() {}\n");
+    assert!(d.len() == 1 && d[0].0 == 2 && d[0].1.contains("E0310"), "{d:?}");
+    assert_eq!(check(&format!("fn bounded<'b, T: 'b>(x: &'b ()) -> &'b () {{\n    with_restriction::<T>(x)\n}}\nfn local<T>(x: &()) {{\n    with_restriction::<T>(x);\n}}\n{w}fn main() {{}}\n")), vec![]);
+}
+
 /// A placeholder bounded by a trait: coerced to `dyn Tr + 'static` (E0310), cast to it; a fn whose body calls the
 /// bound's methods is not checked (`dyn Tr + '_` in a parameter is an elided lifetime, not the default)
 #[test]
