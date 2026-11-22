@@ -259,6 +259,9 @@ pub struct Program {
     /// the program's source declares modules (`mod m { .. }`), whose scopes are flattened away: a name's item may then
     /// be out of scope where the name is written
     pub has_mods: bool,
+    /// some trait other than Clone has a fn `clone` (`trait Duplicate { fn clone(&self) -> S { .. } }`), or a blanket
+    /// impl one: only then can default_method find a `clone` for a type
+    pub trait_clone_fns: bool,
     /// a constant with a lowercase name exists (`const or: usize`): an identifier pattern of any case may name one;
     /// without, only an uppercase one is looked up
     pub lower_consts: bool,
@@ -799,6 +802,7 @@ impl Program {
             const_param_tys: FxMap::default(),
             copy_params: FxMap::default(),
             has_mods: false,
+            trait_clone_fns: false,
             lower_consts: false,
             const_by_last: FxMap::default(),
             prim_impls: HashSet::default(),
@@ -1821,6 +1825,8 @@ impl Program {
             }
         }
         p.any_immutable_static = p.consts.iter().any(|c| c.stat == Some(false) && (c.item as usize) < user);
+        // (a trait other than Clone with a fn `clone`, or a blanket `clone`: what default_method may find for a `.clone()`)
+        p.trait_clone_fns = p.blanket.contains_key("clone") || p.traits.iter().any(|(t, ds)| t != "Clone" && ds.iter().any(|&d| p.names.get(d as usize).is_some_and(|n| n.rsplit("::").next() == Some("clone"))));
         Ok(p)
     }
 
