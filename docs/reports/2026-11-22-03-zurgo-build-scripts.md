@@ -1,6 +1,6 @@
 # zurgo M1: build scripts, `env!`, and proc-macro stubs
 
-Date: 2026-11-21
+Date: 2026-11-22
 
 M0 built Cargo packages without running their build scripts, and stopped on any proc-macro dependency. This is the
 second milestone of mizchi/zust#28 and the start of step W0 of the wasm-bindgen roadmap (mizchi/zust#38). Usage:

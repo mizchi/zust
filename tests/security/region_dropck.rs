@@ -1,7 +1,6 @@
 //! Drop check (E0597): a value whose `Drop` reads a reference must not outlive what it borrows.
 //! `p` is declared first, so it is dropped after `s`, and its `drop` would read a freed String.
 //@ rule: region checking (a reference never outlives what it borrows)
-//@ todo: no drop check: a value with Drop may outlive what it borrows
 //@ expect: reject
 struct Printer<'a>(&'a String);
 impl Drop for Printer<'_> {

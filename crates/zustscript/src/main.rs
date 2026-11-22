@@ -1,6 +1,6 @@
 //! zsc: the zustscript prototype's compiler.
 //!
-//!   zsc <input.zsc> [-o out-dir] [--zustc PATH] [--jsx-runtime MODULE] [--wasm-O] [--all-js] [--no-simd]
+//!   zsc <input.zsc> [-o out-dir] [--zustc PATH] [--jsx-runtime MODULE] [--wasm-O] [--all-js] [--no-simd] [--inline-runtime] [--check-externs]
 //!
 //! (`--no-simd` compiles `@simd fn`s through zustc like `@wasm` ones (no vectors).
 //! `--all-js` keeps `@wasm fn`s in the JS output: the same source, run as JS.
@@ -9,6 +9,8 @@
 //!
 //! Writes `<name>.js` (ES module: the JS layer, then the glue of the wasm layer), `<name>.d.ts`, and, when the file
 //! has `wasm fn`s, `<name>.wasm.rs` (the Rust handed to zustc) and `<name>.wasm`.
+//! The helpers and the brand constructors go to `zsc-runtime.js` / `.d.ts` in the same directory, which the modules
+//! import (`--inline-runtime` writes them into the module instead).
 //!
 //! zustc is used only as an external command: this prototype adds nothing to zust's crates.
 
@@ -32,6 +34,8 @@ fn main() {
     let mut wasm_opt = false;
     let mut all_js = false;
     let mut no_simd = false;
+    let mut inline_runtime = false;
+    let mut check_externs = false;
     let mut it = args.iter();
     while let Some(a) = it.next() {
         match a.as_str() {
@@ -41,6 +45,8 @@ fn main() {
             "--wasm-O" => wasm_opt = true,
             "--all-js" => all_js = true,
             "--no-simd" => no_simd = true,
+            "--inline-runtime" => inline_runtime = true,
+            "--check-externs" => check_externs = true,
             _ if input.is_none() => input = Some(PathBuf::from(a)),
             _ => usage(),
         }
@@ -49,6 +55,21 @@ fn main() {
     let src = std::fs::read_to_string(&input).unwrap_or_else(|e| die(&format!("{}: {e}", input.display())));
     let file = input.display().to_string();
     let stem = input.file_stem().unwrap().to_string_lossy().to_string();
+    if stem == js::RUNTIME && !inline_runtime {
+        die(&format!("{}: `{stem}` is the name of the shared runtime the modules import: rename the file, or use --inline-runtime", input.display()));
+    }
+
+    // (the shared runtime and a module named like it must not overwrite each other in one directory)
+    let rt_path = out_dir.join(format!("{}.js", js::RUNTIME));
+    if let Ok(existing) = std::fs::read_to_string(&rt_path) {
+        let is_runtime = existing.starts_with(js::RUNTIME_HEADER);
+        if inline_runtime && stem == js::RUNTIME && is_runtime {
+            die(&format!("{}: holds the shared runtime other modules import: compile `{stem}` with --inline-runtime into another directory", rt_path.display()));
+        }
+        if !inline_runtime && !is_runtime {
+            die(&format!("{}: is a module, not the shared runtime: compile into another directory, or use --inline-runtime", rt_path.display()));
+        }
+    }
 
     let t0 = std::time::Instant::now();
     let items = match parse::Parser::new(&src).file() {
@@ -72,6 +93,7 @@ fn main() {
     report_warnings(&file, &src, &warns);
     let info = ck.info;
     let mut j = js::Js::new(&info, &jsx_runtime);
+    j.shared_runtime = !inline_runtime;
     if !all_js {
         j.wasm_fns = items.iter().filter_map(|it| match it {
             ast::Item::Fn { name, wasm, simd, .. } if *wasm || *simd => Some(name.clone()),
@@ -87,7 +109,7 @@ fn main() {
         std::process::exit(1);
     }
     let header = j.header();
-    let (dts, brands) = js::dts(&items, &info);
+    let (dts, brands) = js::dts(&items, &info, !inline_runtime);
     let wasm_name = format!("{stem}.wasm");
     // `@wasm fn`s: lowered to Rust (with --all-js they stay in the JS output)
     // `@simd fn`s: vectorized kernels (with --no-simd they go through zustc as @wasm ones)
@@ -146,7 +168,13 @@ fn main() {
         out.push_str(&s.glue);
         std::fs::write(out_dir.join(format!("{stem}.simd.wasm")), &s.wasm).unwrap();
     }
-    out.push_str(&js::brand_runtime(&brands));
+    if inline_runtime {
+        out.push_str(&js::brand_runtime(&brands));
+    } else {
+        out.push_str(&js::brand_reexport(&brands));
+        publish_atomic(&out_dir.join(format!("{}.js", js::RUNTIME)), js::runtime_js());
+        publish_atomic(&out_dir.join(format!("{}.d.ts", js::RUNTIME)), js::runtime_dts());
+    }
     std::fs::write(out_dir.join(format!("{stem}.js")), out).unwrap();
     std::fs::write(out_dir.join(format!("{stem}.d.ts")), dts).unwrap();
     eprint!("zsc: {} → {}/{stem}.js, .d.ts (front {:.1} ms", file, out_dir.display(), t_front.as_secs_f64() * 1e3);
@@ -155,6 +183,53 @@ fn main() {
         eprint!("; wasm layer via zustc {:.1} ms, {size} bytes", t.as_secs_f64() * 1e3);
     }
     eprintln!(")");
+    if check_externs {
+        check_externs_with_tsrs(&items, &info, &stem, &out_dir, &file, &src);
+    }
+}
+
+/// `--check-externs`: writes `<stem>.externs.ts` (each extern's TS declaration assigned to its zustscript type) and
+/// type-checks it with tsrs (the `TSRS` variable, or `tsrs` on PATH; TypeScript's checker, in Rust). An error is
+/// reported at the extern it belongs to.
+fn check_externs_with_tsrs(items: &[ast::Item], info: &check::Info, stem: &str, out_dir: &std::path::Path, file: &str, src: &str) {
+    let Some((ts, lines)) = js::extern_check(items, info) else { return };
+    let name = format!("{stem}.externs.ts");
+    std::fs::write(out_dir.join(&name), ts).unwrap();
+    let tsrs = std::env::var("TSRS").unwrap_or_else(|_| "tsrs".into());
+    let o = Command::new(&tsrs)
+        .current_dir(out_dir)
+        .args(["--noEmit", "--strict", "--skipLibCheck", "--target", "es2022", "--module", "esnext", "--moduleResolution", "bundler", &name])
+        .output()
+        .unwrap_or_else(|e| die(&format!("--check-externs needs tsrs (`npm i tsrs`, or set TSRS): {tsrs}: {e}")));
+    if o.status.success() {
+        eprintln!("zsc: externs match their TS declarations ({} checked with tsrs)", lines.len());
+        return;
+    }
+    // `<file>(line,col): error TSxxxx: message` (continuation lines are indented)
+    let text = String::from_utf8_lossy(&o.stdout).to_string() + &String::from_utf8_lossy(&o.stderr);
+    let mut errs: Vec<(ast::Pos, String)> = vec![];
+    let mut other = vec![];
+    for l in text.lines() {
+        let line = l.strip_prefix(&name).and_then(|r| r.strip_prefix('(')).and_then(|r| r.split(',').next()).and_then(|n| n.parse::<usize>().ok());
+        match line.and_then(|n| lines.iter().find(|x| x.0 == n)) {
+            Some((_, ext, pos)) => {
+                let msg = l.split_once("): ").map(|x| x.1).unwrap_or(l);
+                errs.push((*pos, format!("the TS declaration of `{ext}` does not fit this signature: {msg}")));
+            }
+            None if l.starts_with(' ') && !errs.is_empty() => {
+                let e = errs.last_mut().unwrap();
+                e.1.push('\n');
+                e.1.push_str(l.trim_end());
+            }
+            None if !l.trim().is_empty() => other.push(l.to_string()),
+            None => {}
+        }
+    }
+    if errs.is_empty() {
+        die(&format!("tsrs failed on {}:\n{}", out_dir.join(&name).display(), other.join("\n")));
+    }
+    report(file, src, &errs);
+    std::process::exit(1);
 }
 
 /// zustc next to this binary's checkout: crates/zustscript/target/<profile>/zsc → <zust>/target/release/zustc
@@ -192,10 +267,18 @@ fn report_warnings(file: &str, src: &str, ws: &[(ast::Pos, String)]) {
 }
 
 fn usage() -> ! {
-    die("usage: zsc <input.zsc> [-o out-dir] [--zustc PATH] [--jsx-runtime MODULE] [--wasm-O] [--all-js] [--no-simd]")
+    die("usage: zsc <input.zsc> [-o out-dir] [--zustc PATH] [--jsx-runtime MODULE] [--wasm-O] [--all-js] [--no-simd] [--inline-runtime] [--check-externs]")
 }
 
 fn die(m: &str) -> ! {
     eprintln!("zsc: {m}");
     std::process::exit(2)
+}
+
+/// Writes a file shared by the builds of one directory: a temporary file renamed over the target, so a concurrent or
+/// interrupted build never sees it empty.
+fn publish_atomic(path: &std::path::Path, contents: impl AsRef<[u8]>) {
+    let tmp = path.with_extension(format!("{}.tmp", std::process::id()));
+    std::fs::write(&tmp, contents).unwrap_or_else(|e| die(&format!("{}: {e}", tmp.display())));
+    std::fs::rename(&tmp, path).unwrap_or_else(|e| die(&format!("{}: {e}", path.display())));
 }

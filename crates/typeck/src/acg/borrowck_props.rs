@@ -199,7 +199,7 @@ fn fixpoint_does_not_give_up() {
     use crate::types::Ty;
     const K: u32 = 700;
     let sp = |line: u32| Sp { line, col: 0 };
-    let local = |name: String, refs: bool| Local { name, ty: Ty::Unit, copy: false, refs, mutable: Some(true) };
+    let local = |name: String, refs: bool| Local { name, ty: Ty::Unit, copy: false, refs, mutable: Some(true), decl: crate::acg::SP };
     let place = |l: u32| BPlace { local: l, proj: vec![] };
     // (locals: 0 = x, 1 = z, 2 + i = r{i})
     let mut bk = Bk { on: true, level: 2, ..Bk::default() };
@@ -209,8 +209,8 @@ fn fixpoint_does_not_give_up() {
         bk.locals.push(local(format!("r{i}"), true));
     }
     let r = |i: u32| 2 + i;
-    bk.loans.push(Loan { place: place(0), mutable: false, sp: sp(1), at: sp(1), quiet: false });
-    bk.loans.push(Loan { place: place(1), mutable: false, sp: sp(2), at: sp(2), quiet: false });
+    bk.loans.push(Loan { place: place(0), mutable: false, sp: sp(1), at: sp(1), quiet: false, capture: false });
+    bk.loans.push(Loan { place: place(1), mutable: false, sp: sp(2), at: sp(2), quiet: false, capture: false });
     let (b0, b1, b2, b3) = (Block(0), Block(1), Block(2), Block(3));
     bk.evs.push((b0, Ev::Bind(0, true)));
     bk.evs.push((b0, Ev::Bind(1, true)));

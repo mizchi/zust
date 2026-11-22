@@ -1,0 +1,80 @@
+// JS-target workloads: bench/js/kpi.mjs compiles this with `zsc --all-js` and times each `pub fn w_*`.
+// Each workload returns a number so runs can be compared across compiler changes.
+
+enum State { Get -> i32, Put(i32) -> () }
+
+// effects: a loop that performs State on every step, handled by a tail-resumptive handler
+fn step(i: i32) -> () {
+  let v = perform Get;
+  perform Put(v + i % 7);
+}
+
+fn steps(n: i32) -> i32 {
+  for i in range(0, n) { step(i); }
+  perform Get
+}
+
+pub fn w_effects(n: i32) -> i32 {
+  let mut s = 0;
+  handle steps(n) {
+    Get, k => k(s),
+    Put(v), k => { s = v; k(()) },
+  }
+}
+
+// records: update with spread, filter and map pipelines
+type Todo = { id: i32, done: bool, weight: i32 }
+
+fn toggle(t: Todo) -> Todo { Todo { done: !t.done, ..t } }
+
+pub fn w_records(n: i32) -> i32 {
+  let mut todos = [];
+  for i in range(0, 1000) { todos = todos.push(Todo { id: i, done: i % 3 == 0, weight: i % 11 }); }
+  let mut total = 0;
+  for r in range(0, n) {
+    let next = todos |> .map((t) => if t.id % 5 == r % 5 { toggle(t) } else { t });
+    total = total + next.filter((t) => t.done).map((t) => t.weight).fold(0, (a, b) => a + b);
+  }
+  total
+}
+
+// enums: match over a mixed array
+type Vec2 = { x: f64, y: f64 }
+enum Shape { Circle(Vec2, f64), Rect(Vec2, Vec2), Dot(Vec2) }
+
+fn area(s: Shape) -> f64 {
+  match s {
+    Circle(c, r) => 3.141592653589793 * r * r,
+    Rect(a, b) => ((b.x - a.x) * (b.y - a.y)).abs(),
+    Dot(p) => 0.0,
+  }
+}
+
+pub fn w_enums(n: i32) -> f64 {
+  let mut shapes = [];
+  for i in range(0, 1000) {
+    let p = Vec2 { x: i as f64, y: (i % 17) as f64 };
+    let s = if i % 3 == 0 { Circle(p, (i % 9) as f64) } else if i % 3 == 1 { Rect(p, Vec2 { x: p.x + 2.0, y: p.y + 3.0 }) } else { Dot(p) };
+    shapes = shapes.push(s);
+  }
+  let mut total = 0.0;
+  for r in range(0, n) { total = total + shapes.map(area).fold(0.0, (a, b) => a + b); }
+  total
+}
+
+// numbers: wrapping i32 arithmetic and division
+pub fn w_numeric(n: i32) -> i32 {
+  let mut h = 17;
+  for i in range(0, n) { h = h * 31 + i / 3 - i % 5; }
+  h
+}
+
+// strings: building and joining
+pub fn w_strings(n: i32) -> i32 {
+  let mut total = 0;
+  for r in range(0, n) {
+    let parts = range(0, 200).map((i) => "k" + i.to_string());
+    total = total + parts.join(",").len();
+  }
+  total
+}

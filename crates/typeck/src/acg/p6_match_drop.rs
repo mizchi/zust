@@ -46,7 +46,14 @@ impl Cx<'_> {
         }
         let bare_none = expected.is_some() && matches!(strip_paren(e), Expr::Path(None, pa) if pa.segs.len() == 1 && pa.segs[0].name == "None");
         if is_place_expr(e) && !bare_none {
-            return Ok(Some(self.place(e)?));
+            let p = self.place(e)?;
+            // (the annotation is the place's type (`let ref s: String = n;` with n an i32 is E0308); not a pointer's,
+            // to which a coercion may apply)
+            let coercible = |t: Ty| matches!(t, Ty::Ref(..) | Ty::Ptr(..) | Ty::Box(_) | Ty::Fn(_) | Ty::Dyn(_) | Ty::Never);
+            if let Some(t) = expected.filter(|&t| t != p.ty() && !coercible(t) && !coercible(p.ty()) && !super::has_hole(self.prog, t)) {
+                self.same(err_pos(e), p.ty(), t)?;
+            }
+            return Ok(Some(p));
         }
         let (v, t) = self.expr(e, expected)?;
         // 一時値の match 対象は文の終わりまで所有する (パターンがムーブしたらフラグを下ろす)
@@ -976,15 +983,31 @@ impl Cx<'_> {
                         self.rg_pat_bind(&name, false);
                     }
                     BindMode::Ref(m) => {
-                        let Place::Mem(a, o, t) = p else {
-                            return err(SP, "cannot bind by reference here");
+                        // (a value not in memory (`let ref x = 0;`, a zero-sized one): a temporary holds it, as `&`
+                        // of a value does)
+                        let (addr, t) = match p {
+                            Place::Mem(a, o, t) => (self.addr_plus(a, o), t),
+                            Place::Zst(t) => (self.temp(t), t),
+                            Place::Var(..) => {
+                                let (v, t) = self.read(p);
+                                let tmp = self.temp(t);
+                                self.write(Place::Mem(tmp, 0, t), v);
+                                (tmp, t)
+                            }
                         };
-                        let addr = self.addr_plus(a, o);
                         let saved = self.bk_pat_ref(m, *by_ref);
+                        // (the binding of `ref x` / `ref mut x`, or one by reference of the default binding mode, is not
+                        // `mut` itself: `&mut x` of it is E0596)
+                        self.bk.mut_next = Some(false);
                         self.bind(name.clone(), Ty::Ref(m, intern(t)), Some(addr));
                         self.bk.bind_srcs = saved;
                         if !*by_ref {
                             self.rg_pat_bind(&name, true);
+                        } else {
+                            // (`ref` / `ref mut`: a borrow of the part matched)
+                            let pr = self.rg.pat_ref.take();
+                            self.rg_pat_bind(&name, true);
+                            self.rg.pat_ref = pr;
                         }
                     }
                 }
@@ -1064,10 +1087,15 @@ impl Cx<'_> {
                 Ok(())
             }
             Pat::Slice(_) => {
-                // (moving out of an array by a pattern is allowed: not tracked)
-                let saved = self.bk.pat_path.take();
+                // (an array matched by value: each element is a place of its own (`[_, _, x] = a` moves a[2]); a slice's
+                // or one through a reference is not tracked)
+                let arr = matches!(p.ty(), Ty::Array(..));
+                let saved = if arr { self.bk.pat_path.clone() } else { self.bk.pat_path.take() };
                 let rs = self.rg.pat.take();
+                // (the elements' tree: the array's or the slice's, through the references matched)
+                self.rg.pat_elem = rs.clone().and_then(|p| self.rg_slice_elem(p));
                 let r = self.pat_bind_slice(pat, p, mode);
+                self.rg.pat_elem = None;
                 self.bk.pat_path = saved;
                 self.rg.pat = rs;
                 r
@@ -1082,8 +1110,28 @@ impl Cx<'_> {
                 let (base, len, elem, rmode) = self.slice_scrutinee(p, SP)?;
                 let mode = rmode.map(BindMode::Ref).unwrap_or(mode);
                 let (pre, rest, post) = slice_parts(pat);
-                for (q, sub) in self.slice_elems(base, len, elem, &pre, &post) {
+                let n = match p.ty() {
+                    Ty::Array(_, n) if self.bk.pat_path.is_some() => Some(n as usize),
+                    _ => None,
+                };
+                for (k, (q, sub)) in self.slice_elems(base, len, elem, &pre, &post).into_iter().enumerate() {
+                    self.rg.pat = self.rg.pat_elem.clone();
+                    let idx = if k < pre.len() { k } else { n.unwrap_or(0).wrapping_sub(pre.len() + post.len()).wrapping_add(k) };
+                    let saved = n.map(|_| self.bk_pat_proj(borrowck::Proj::Field(format!("[{idx}]"))));
                     self.pat_bind(sub, q, mode)?;
+                    if let Some(s) = saved {
+                        self.bk.pat_path = s;
+                    }
+                }
+                self.rg.pat = None;
+                // (`rest @ ..` by value of an array: it takes the elements between, one place for them all (`a[1..19]`), so
+                // the work does not grow with the array's length)
+                if let (Some(n), Some(Pat::Ident(false, _, _, _)), BindMode::Move) = (n, rest, mode) {
+                    if !self.bk_ty(elem).0 && pre.len() < n.saturating_sub(post.len()) {
+                        let saved = self.bk_pat_proj(borrowck::Proj::Field(format!("[{}..{}]", pre.len(), n - post.len())));
+                        self.bk_pat_move(elem, "");
+                        self.bk.pat_path = saved;
+                    }
                 }
                 // `rest @ ..`: 残りの部分スライス (`&[T]`)
                 if let Some(Pat::Ident(_, _, rname, _)) = rest {
@@ -1105,6 +1153,7 @@ impl Cx<'_> {
             Pat::TupleStruct(path, elems) => {
                 let (p, mode) = self.pat_deref(p, mode);
                 self.rg_pat_align(p.ty());
+                self.rg_pat_lifetimes(path);
                 let (fields, vname, rvi) = match self.variant_on(path, p.ty()) {
                     Some((sid, vi)) => {
                         let v = &self.prog.structs[sid as usize].variants[vi];
@@ -1142,8 +1191,10 @@ impl Cx<'_> {
                 }
                 Ok(())
             }
-            Pat::Struct(..) => {
+            Pat::Struct(spath, ..) => {
                 let (p, mode) = self.pat_deref(p, mode);
+                self.rg_pat_align(p.ty());
+                self.rg_pat_lifetimes(spath);
                 // (the parts are not tracked: the field names are not at hand here)
                 let saved = self.bk.pat_path.take();
                 let rs = self.rg.pat.take();

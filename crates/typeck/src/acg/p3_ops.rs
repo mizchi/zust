@@ -68,7 +68,7 @@ impl Cx<'_> {
     /// A struct of the program in t that does not implement tr (PartialEq / PartialOrd), the type of a comparison's
     /// operands: itself, the elements of an array / slice / tuple, behind references. A prelude type or a generic
     /// struct's instance is left to the impls it has
-    fn lacks_cmp(&self, t: Ty, tr: &str, depth: u32) -> bool {
+    fn lacks_cmp(&self, t: Ty, rt: &dyn Fn() -> Option<Ty>, tr: &str, depth: u32) -> bool {
         if depth > 8 {
             return false;
         }
@@ -77,13 +77,37 @@ impl Cx<'_> {
             Ty::Ref(_, i) => {
                 let own = self.prog.ref_impls.contains(&(t, tr.to_string()))
                     || self.prog.ref_impl_pats.iter().any(|(pt, ptr, n)| ptr == tr && self.prog.match_ty(*pt, t, &mut vec![None; *n]));
-                !own && self.lacks_cmp(*i, tr, depth + 1)
+                !own && self.lacks_cmp(*i, &|| match rt() { Some(Ty::Ref(_, r)) => Some(*r), _ => None }, tr, depth + 1)
             }
-            Ty::Array(i, _) | Ty::Slice(i) => self.lacks_cmp(*i, tr, depth + 1),
+            // (`impl PartialEq<R> for [N; 1]`: an impl for arrays / slices of the program's answers the comparison as a
+            // whole, before its elements)
+            Ty::Array(i, _) | Ty::Slice(i) => {
+                // (elements first: only when they lack the trait is an impl for the whole looked for)
+                if !self.lacks_cmp(*i, &|| match rt() { Some(Ty::Array(r, _) | Ty::Slice(r)) => Some(*r), _ => None }, tr, depth + 1) {
+                    return false;
+                }
+                // (the program's own impls: the prelude's are for elements that are PartialEq themselves)
+                let own = |f: u32| self.prog.item_of.get(f as usize).copied().flatten().is_some_and(|ii| ii < self.prog.prelude_from);
+                // (an impl whose Self is this operand and whose right-hand side is the other operand (when known):
+                // `impl PartialEq<RR> for [NN; 1]` answers `[NN] == RR`, not `[NN] == [NN]`)
+                let r = rt();
+                let fits = |f: u32| {
+                    let sig = &self.prog.sigs[f as usize];
+                    let (Some(&Ty::Ref(_, ps)), Some(&Ty::Ref(_, pr))) = (sig.params.first(), sig.params.get(1)) else { return false };
+                    let mut sol = vec![None; sig.generics.len()];
+                    self.prog.match_ty(*ps, t, &mut sol) && r.is_none_or(|r| self.prog.match_ty(*pr, r, &mut sol))
+                };
+                let fs = if tr == "PartialEq" { &self.prog.peq } else { &self.prog.pord };
+                let whole = fs.iter().any(|&f| own(f) && (self.prog.names[f as usize].starts_with("__array::") || self.prog.names[f as usize].starts_with("__slice::")) && fits(f))
+                    || self.prog.prim_method(t, if tr == "PartialEq" { "eq" } else { "partial_cmp" }).is_some_and(|f| own(f) && fits(f));
+                !whole
+            }
             Ty::Struct(sid) => {
                 let b = self.prog.base_of(sid);
                 if self.prog.is_tuple(b) {
-                    return self.prog.structs[sid as usize].fields.iter().any(|f| self.lacks_cmp(f.1, tr, depth + 1));
+                    // (a tuple compares with its own type only, `impl<A: PartialEq, ..> PartialEq for (A, ..)`: each field
+                    // against its own type)
+                    return self.prog.structs[sid as usize].fields.iter().any(|f| self.lacks_cmp(f.1, &|| Some(f.1), tr, depth + 1));
                 }
                 let user = self.prog.struct_item.get(b as usize).is_some_and(|&i| i < self.prog.prelude_from);
                 // (`impl PartialEq<i32> for S`: an impl for another right-hand side counts, looked for only when the
@@ -296,7 +320,7 @@ impl Cx<'_> {
         };
         // (E0369: `X == X` for a struct of the program that is not PartialEq (`<` and the others: PartialOrd), also as an
         // element of an array, a slice, a tuple or behind a reference)
-        if cmp && !assign && self.user_code && !lt.is_int() && self.lacks_cmp(lt, if op == "==" || op == "!=" { "PartialEq" } else { "PartialOrd" }, 0) {
+        if cmp && !assign && self.user_code && !lt.is_int() && self.lacks_cmp(lt, &|| self.peek(right), if op == "==" || op == "!=" { "PartialEq" } else { "PartialOrd" }, 0) {
             let pos = if let Expr::Binary(_, _, _, sp) = e { sp.start } else { SP };
             return err(pos, format!("binary operation `{op}` cannot be applied to type `{}` (E0369)", self.prog.tn(lt)));
         }
@@ -1296,7 +1320,10 @@ impl Cx<'_> {
             self.b.ins().store(mf(), tv, a, 0);
         }
         for (fi, v, vt, sp) in vals {
-            let (_, fty, off) = fields[fi];
+            // (a type whose fields are not known (of a placeholder's associated type): an error, not a panic)
+            let Some(&(_, fty, off)) = fields.get(fi) else {
+                return err(sp, format!("internal: `{}` has no field {fi}", self.prog.tn(t)));
+            };
             // (`V(x)` で x: &&T を &T のフィールドに: deref の強制変換)
             let (v, vt) = self.deref_coerce(v, vt, fty);
             self.same(sp, vt, fty)?;

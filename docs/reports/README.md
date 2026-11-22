@@ -76,4 +76,10 @@ Japanese versions are in [../ja/reports/](../ja/reports/README.md).
 | 2026-11-21 | [RefCell's borrow flag and guards, and when temporaries are dropped](2026-11-21-02-refcell-guards.md) |
 | 2026-11-21 | [Can zustc build dioxus and leptos for wasm32?](2026-11-21-03-ui-frameworks-wasm.md) |
 | 2026-11-21 | [zurgo M0: Cargo packages built with zustc](2026-11-21-04-zurgo-m0.md) |
-| 2026-11-21 | [zurgo M1: build scripts, `env!`, and proc-macro stubs](2026-11-21-05-zurgo-build-scripts.md) |
+| 2026-11-20 | [Region (lifetime) checking: approach and steps (issue #1)](2026-11-20-01-region-check.md) |
+| 2026-11-21 | [Region (lifetime) checking, part 2: what the first version left out](2026-11-21-05-region-check-2.md) |
+| 2026-11-21 | [Region (lifetime) checking, part 3: closures, loans that outlive the function, lints](2026-11-21-06-region-check-3.md) |
+| 2026-11-21 | [Region (lifetime) checking, part 4: generic functions nothing calls](2026-11-21-07-region-check-4.md) |
+| 2026-11-22 | [Region (lifetime) checking, part 5: a type parameter's region](2026-11-22-01-region-check-5.md) |
+| 2026-11-22 | [Region (lifetime) checking, part 6: placeholders' regions everywhere, and the borrow check's mutability](2026-11-22-02-region-check-6.md) |
+| 2026-11-22 | [zurgo M1: build scripts, `env!`, and proc-macro stubs](2026-11-22-03-zurgo-build-scripts.md) |

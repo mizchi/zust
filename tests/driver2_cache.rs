@@ -53,3 +53,28 @@ fn cache_and_parallel() {
     assert!(o3 == o4 && o4 == o5, "objects differ");
     assert!(s3 == s4 && s4 == s5);
 }
+
+/// A constant's cast through a type alias: changing the alias changes the constant, and the function that uses
+/// it is compiled again (its body and the constant's text are the same)
+#[test]
+fn alias_in_a_constant_invalidates() {
+    let dir = std::env::temp_dir().join(format!("d2cache_alias_{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let out = dir.join("p");
+    let cp = dir.join("p.crcache2");
+    let run = |src: &str| {
+        let mut s = Session2::new(Options2 { jobs: 1, ..Default::default() });
+        s.load_cache(&cp);
+        s.build(src, &out).unwrap();
+        s.save_cache(&cp).unwrap();
+        String::from_utf8(std::process::Command::new(&out).output().unwrap().stdout).unwrap()
+    };
+    let src = |lane: &str| {
+        format!(
+            "type Lane = {lane};\nconst INDEX: usize = (((257u32 as Lane) as u32) / 256) as usize;\nfn pick() -> u32 {{ let t = [10u32, 11, 12]; t[INDEX] }}\nfn main() {{ println!(\"{{}}\", pick()); }}\n"
+        )
+    };
+    assert_eq!(run(&src("u8")), "10\n");
+    assert_eq!(run(&src("u16")), "11\n");
+    let _ = std::fs::remove_dir_all(&dir);
+}

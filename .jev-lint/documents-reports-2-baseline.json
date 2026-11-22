@@ -1,6 +1,6 @@
 {
   "schema": "jev-lint-documents-1",
-  "snapshotDigest": "47ae1ecec7f8670b5dc23af9b8ed7db7009e584f817c3895ebe3d2bf639a59dc",
+  "snapshotDigest": "a2e6d1ac954052832728da5efa34274c661c7fba8bcbb1ce9dbc3cdea760fdf1",
   "questionDigest": "209d6df378ccb747fcb0e821998fcd6105bc76638a88d22488d3b398d6a21595",
   "model": "jev-1.14.0",
   "snapshotChanged": false,
@@ -32,10 +32,10 @@
       "contextHash": "ec20e2ebdd2ae375a6636074c628c438138c77646a5be532bd01237081e3f660",
       "judgment": {
         "choice": "supports",
-        "confidence": 1,
+        "confidence": 0.99,
         "probabilities": {
-          "supports": 1,
-          "contradicts": 0,
+          "supports": 0.99,
+          "contradicts": 0.01,
           "unrelated": 0,
           "insufficient_context": 0
         }
@@ -168,10 +168,10 @@
       "contextHash": "ecee8f597e8c6093bcea35ffd84dafe505685fb3c77901bd2a2a9e033883360c",
       "judgment": {
         "choice": "supports",
-        "confidence": 0.96,
+        "confidence": 0.97,
         "probabilities": {
-          "supports": 0.97,
-          "contradicts": 0.02,
+          "supports": 0.98,
+          "contradicts": 0.01,
           "unrelated": 0,
           "insufficient_context": 0.01
         }
@@ -304,10 +304,10 @@
       "contextHash": "41c0a2541784f0e073e300bd96b1ad35979d31a7048a9c86dc0c9821eba76c55",
       "judgment": {
         "choice": "supports",
-        "confidence": 1,
+        "confidence": 0.99,
         "probabilities": {
-          "supports": 1,
-          "contradicts": 0,
+          "supports": 0.99,
+          "contradicts": 0.01,
           "unrelated": 0,
           "insufficient_context": 0
         }
@@ -338,10 +338,10 @@
       "contextHash": "b91a1cf01d33b66ef15111899d22ac963d6abc38c4242e6d72ebc80aefe2aecd",
       "judgment": {
         "choice": "supports",
-        "confidence": 1,
+        "confidence": 0.99,
         "probabilities": {
-          "supports": 1,
-          "contradicts": 0,
+          "supports": 0.99,
+          "contradicts": 0.01,
           "unrelated": 0,
           "insufficient_context": 0
         }
@@ -372,12 +372,12 @@
       "contextHash": "65d03eec8a642fb4c59c7bacc74397f936864091105bba631e8977b9ca9c1612",
       "judgment": {
         "choice": "supports",
-        "confidence": 0.97,
+        "confidence": 0.96,
         "probabilities": {
-          "supports": 0.98,
+          "supports": 0.97,
           "contradicts": 0.02,
           "unrelated": 0,
-          "insufficient_context": 0
+          "insufficient_context": 0.01
         }
       }
     },
@@ -542,10 +542,10 @@
       "contextHash": "00e42fd2cdae3ea7c73dba0447b72b25a656b131f159ac3ebcbdd07de3f969a5",
       "judgment": {
         "choice": "supports",
-        "confidence": 1,
+        "confidence": 0.99,
         "probabilities": {
-          "supports": 1,
-          "contradicts": 0,
+          "supports": 0.99,
+          "contradicts": 0.01,
           "unrelated": 0,
           "insufficient_context": 0
         }
@@ -610,10 +610,10 @@
       "contextHash": "60cba8f9920a12369db8088d9da4aba7831509e04aeed3ec12052847209a00f4",
       "judgment": {
         "choice": "supports",
-        "confidence": 0.99,
+        "confidence": 1,
         "probabilities": {
-          "supports": 0.99,
-          "contradicts": 0.01,
+          "supports": 1,
+          "contradicts": 0,
           "unrelated": 0,
           "insufficient_context": 0
         }
@@ -644,10 +644,10 @@
       "contextHash": "1275e8de4d291bc21dd7f5b87a5196cba9cca33005a1ac6eca77fa3d0892971e",
       "judgment": {
         "choice": "supports",
-        "confidence": 0.97,
+        "confidence": 0.96,
         "probabilities": {
-          "supports": 0.98,
-          "contradicts": 0.02,
+          "supports": 0.97,
+          "contradicts": 0.03,
           "unrelated": 0,
           "insufficient_context": 0
         }
@@ -678,10 +678,10 @@
       "contextHash": "f1894d506a5e66f92906b403c8a6a69c60e6e1bad8273b43b0489836c39d482f",
       "judgment": {
         "choice": "supports",
-        "confidence": 0.99,
+        "confidence": 0.97,
         "probabilities": {
-          "supports": 0.99,
-          "contradicts": 0.01,
+          "supports": 0.98,
+          "contradicts": 0.02,
           "unrelated": 0,
           "insufficient_context": 0
         }
@@ -746,12 +746,12 @@
       "contextHash": "74cd923d61e00b7739f80b534b652a909070bb949bfb007a464579050da1d263",
       "judgment": {
         "choice": "supports",
-        "confidence": 0.99,
+        "confidence": 0.97,
         "probabilities": {
-          "supports": 0.99,
+          "supports": 0.98,
           "contradicts": 0.01,
           "unrelated": 0,
-          "insufficient_context": 0
+          "insufficient_context": 0.01
         }
       }
     },
@@ -780,12 +780,12 @@
       "contextHash": "54b56e94027819b91287b9766c4872faa76c4344146540b341b4389c6b8dd7ce",
       "judgment": {
         "choice": "supports",
-        "confidence": 0.91,
+        "confidence": 0.92,
         "probabilities": {
-          "supports": 0.93,
+          "supports": 0.94,
           "contradicts": 0.05,
           "unrelated": 0,
-          "insufficient_context": 0.02
+          "insufficient_context": 0.01
         }
       }
     },
@@ -848,10 +848,10 @@
       "contextHash": "7982c179582830150e0121639bf13f758b8cd2967a8c41c2205db632219eb8e5",
       "judgment": {
         "choice": "supports",
-        "confidence": 0.96,
+        "confidence": 0.95,
         "probabilities": {
-          "supports": 0.97,
-          "contradicts": 0.03,
+          "supports": 0.96,
+          "contradicts": 0.04,
           "unrelated": 0,
           "insufficient_context": 0
         }
@@ -882,12 +882,12 @@
       "contextHash": "536786479dc0803408f0444fb2041d9e5a569289c775017759c4867ead02b09b",
       "judgment": {
         "choice": "supports",
-        "confidence": 0.99,
+        "confidence": 0.96,
         "probabilities": {
-          "supports": 0.99,
-          "contradicts": 0.01,
+          "supports": 0.97,
+          "contradicts": 0.02,
           "unrelated": 0,
-          "insufficient_context": 0
+          "insufficient_context": 0.01
         }
       }
     },
@@ -916,12 +916,12 @@
       "contextHash": "6ef3c783f7f2ee4aa85d450d7fc65f20f61a1aa01a222d8aeb9ddeda31a027f9",
       "judgment": {
         "choice": "supports",
-        "confidence": 0.79,
+        "confidence": 0.84,
         "probabilities": {
-          "supports": 0.84,
-          "contradicts": 0.07,
+          "supports": 0.88,
+          "contradicts": 0.06,
           "unrelated": 0,
-          "insufficient_context": 0.09
+          "insufficient_context": 0.06
         }
       }
     },
@@ -984,10 +984,10 @@
       "contextHash": "262bb5dcd097b8cb7be1fb2545acff1e36bb67eb6c6b7603871f70e0250fd627",
       "judgment": {
         "choice": "supports",
-        "confidence": 0.68,
+        "confidence": 0.59,
         "probabilities": {
-          "supports": 0.76,
-          "contradicts": 0.23,
+          "supports": 0.69,
+          "contradicts": 0.3,
           "unrelated": 0,
           "insufficient_context": 0.01
         }
@@ -1018,10 +1018,10 @@
       "contextHash": "0b80accfa94c5b38ba9a5a907f337dfaa274c72bc632be2ff55655cef05112aa",
       "judgment": {
         "choice": "supports",
-        "confidence": 0.67,
+        "confidence": 0.57,
         "probabilities": {
-          "supports": 0.75,
-          "contradicts": 0.24,
+          "supports": 0.68,
+          "contradicts": 0.31,
           "unrelated": 0,
           "insufficient_context": 0.01
         }
@@ -1052,10 +1052,10 @@
       "contextHash": "bfaf4d56cd89f0d502d67729104d49b1f7a5d01e4a0434db45cecfa6c5d2c14a",
       "judgment": {
         "choice": "supports",
-        "confidence": 0.93,
+        "confidence": 0.91,
         "probabilities": {
-          "supports": 0.95,
-          "contradicts": 0.04,
+          "supports": 0.93,
+          "contradicts": 0.06,
           "unrelated": 0,
           "insufficient_context": 0.01
         }
@@ -1086,38 +1086,208 @@
       "contextHash": "3680d7821ceccb84e40c111efdbf9782ab670b502e1b1838ae62cb03ee844288",
       "judgment": {
         "choice": "supports",
-        "confidence": 0.96,
+        "confidence": 0.97,
         "probabilities": {
-          "supports": 0.97,
+          "supports": 0.98,
           "contradicts": 0.02,
+          "unrelated": 0,
+          "insufficient_context": 0
+        }
+      }
+    },
+    {
+      "id": "docs_reports_2026-11-21-05-region-check-2",
+      "topic": "The Japanese file docs/ja/reports/2026-11-21-05-region-check-2.md is a faithful translation of docs/reports/2026-11-21-05-region-check-2.md",
+      "mode": "translation",
+      "reference": {
+        "source": "docs_reports_2026-11-21-05-region-check-2.en",
+        "path": "docs/reports/2026-11-21-05-region-check-2.md",
+        "startLine": 1,
+        "endLine": 111,
+        "quote": "# Region (lifetime) checking, part 2: what the first version left out (issue #1)\n\nDate: 2026-11-21\n\nThe first version ([2026-11-20-01](2026-11-20-01-region-check.md)) checked a function's body against the universal\nregions of its signature. This report covers the work after it was merged: the gaps that report listed, and the ones\nthe failing tests showed.\n\n## 1. What was added\n\n- **Values the check now follows:**\n  - temporaries that constant promotion does not make static (`&(5_i32.reverse_bits())`, `&(n + 1)`, `&[&FOO]`,\n    `&Test` with `impl Drop for Test`), and temporaries of a call in a statement\n  - `Box::new(x)`, array literals, tuple and tuple struct constructors (`B(a)`), casts\n  - closures: what they capture (by value: its regions; by reference: a borrow of the local)\n  - calls through trait objects, with `Self` the object; methods of the prelude taking `&self` return a borrow of self\n  - type arguments written at a call (`f::<&'a u32>()`)\n  - indexed places (`&mut v[..]`); a reborrow through a shared reference lives as long as that reference alone\n    (NLL's supporting prefixes)\n- **Coercions where values flow:** to a trait object every region of the value outlives the object's; an array to a\n  slice; a reference to what it derefs to.\n- **Trait object lifetimes:** the bound as written, else the default (the reference around it, the type parameter's one\n  bound, else `'static` in signatures; inferred in bodies).\n- **Closure bodies:** checked against the signature the bound they are passed to gives them. The regions the bound binds\n  are placeholders; the callee's lifetimes, a type parameter's instance (`-> R`) and the closure's environment come from\n  outside. An annotated closure with no bound binds its parameters' elided regions, and its result's come from outside.\n  Bounds of the prelude are skipped: it writes no lifetimes, and some of std's are not higher-ranked\n  (`is_sorted_by_key`).\n- **Well-formedness of written types (`crates/syntax/src/wf.rs`):** `&'a T` needs every lifetime in T to outlive `'a`\n  (E0491) and every type parameter in it to be declared to (E0309, E0310). It is checked in a fn's bounds and where\n  clauses, an impl's associated type values and a struct's `&'static` fields. What another item decides (a trait's\n  `: 'a` supertraits, a struct's requirements) is left unchecked.\n- **Functions the gate leaves out:** the check begins where `'static` is required (a `let` annotation, a cast, a callee),\n  and then instantiates the parameters' trees.\n- **Where errors are reported:**\n  - a borrow that escapes as the returned value: at the return (E0515)\n  - a closure's capture: where the body first uses it\n  - an error of a call: at the call (`call_fn` is given no span)\n- **fn pointer types** carry their regions (contravariant in the parameters); those they bind are their own. Structs\n  holding them get their variance from them. A type alias naming one stays opaque.\n- **More values and places:** `let _: T = e;`, `if` / `match` values, `self: &Struct` receivers, a Box's content\n  borrowed for a `&self` method through a trait object, items of `for` loops over a Vec, an array or a slice.\n- **Well-formedness in bodies:** a `let` annotation's type and a struct literal's (the definition's bounds); an impl's\n  self type is well formed (implied in its methods, required of their calls); a type argument's well-formedness is\n  implied (`Option<&'s &'l ()>` gives 'l: 's).\n- **Traits' `Self: 'x` bounds:** `trait Wedding<'t>: 't` makes `dyn Wedding<'k> + 'r` need 'r: 'k (E0478), and an impl's\n  self type outlive what the trait requires. The driver checks them: only it sees every trait.\n- **Comparisons:** both sides are of one type, so their invariant parts are the same.\n- **Closures' captures** keep the regions of the function they are in, related as that function knows them.\n- **Late checks:** when a check begun late meets a local bound before it began, the function is checked again from its\n  start (none of the benchmarks' functions is).\n- **Borrow check side:**\n  - drop check for values whose `Drop` may use what they borrow\n  - `ret_from` takes lifetimes declared to outlive the result's (`fn f<'a, 'b: 'a>(x: &'b T) -> &'a T` borrows x)\n  - an impl method that ties a parameter the trait leaves free to a lifetime of its header (`fn next(&'a mut self)`):\n    E0308; a receiver of the self type that names other lifetimes (`self: Foo<'b, 'a>`): E0308\n  - E0392: a lifetime used only in a bound's `Fn(..)` arguments is used\n\n## 2. Coverage\n\n(tests/ui compile-fail, rust-lang/rust 1.100.0; run-pass, check-pass and build-pass did not change)\n\n| | main (18e598d) | this work (14faccc) |\n|---|---:|---:|\n| compile-fail passing | 3694 | 3844 (+150) |\n\n- No test that passed before fails now. One test rejected at the annotated line for another reason was added to\n  `bench/rust_ui_accidental.txt` and is not counted.\n- Each step was checked against false positives the same way: run-pass and check-pass must not lose a test, and\n  `tests/regionck.rs` keeps the code rustc accepts next to the errors.\n\n## 3. KPIs\n\nMeasured with `bench/kpi_track.py --dry-run --lsp`, main (18e598d) against d4ed42d. The last steps after it (up to\n14faccc) add patterns check +0.12% (the items of for loops in functions the check is on for) and change gen5000 and\ntraits by under 0.01%.\n\n| KPI | main | this work (d4ed42d) | change |\n|---|---:|---:|---:|\n| no-op build (M) | 0.704 | 0.705 | +0.14% (run-to-run noise) |\n| edit one fn (M) | 541.9 | 542.2 | +0.05% |\n| check (M) | 3820.1 | 3823.0 | +0.08% |\n| cache (KiB) | 1902.8 | 1902.8 | ±0 |\n| LSP session (G) | 10.915 | 10.913 | -0.02% |\n| traits check (M) | 1171.2 | 1173.5 | +0.20% |\n| traits edit (M) | 61.12 | 61.13 | +0.01% |\n| crates no-op (M) | 9.868 | 9.879 | +0.11% |\n| crates edit (M) | 311.6 | 311.5 | -0.04% |\n| patterns check (M) | 695.9 | 698.6 | +0.39% |\n| patterns edit (M) | 257.1 | 257.3 | +0.05% |\n\n- **The costliest step was closure bodies.** Its first version cost traits +1.68% and patterns +0.80%:\n  - Every closure argument parsed its bound's text again. `fn_bound_of` now returns the text it parsed.\n  - Closures passed to the prelude's functions were checked too; they are skipped now.\n  - What is left is the check of closures passed to the program's own bounds.\n- **The other steps cost under 0.05% each.**\n  - The well-formedness check runs only when a bound or a where clause writes a reference.\n  - The new hooks do their work only in functions the check is on for.\n  - What summaries keep of traits' `Self: 'x` bounds is an item of an existing list, not a field: a larger `Summary`\n    alone cost gen5000 +0.06% (allocation and copies).\n  - The comparisons' hook first looks whether the check is on: matching the operator of every binary expression cost\n    gen5000 +0.04%.\n\n## 4. Not covered yet\n\n- generic functions that are never called: `zustc check` does not check them at all (most of the E0310 tests)\n- higher-ranked trait selection (\"implementation of `Trait` is not general enough\")\n- requirements of the impl a coercion or a call selects (`impl Tr for S<T> where T: 'static`)\n- a struct's own requirements on its arguments, and those of traits, in the summary-time well-formedness check\n- the iterators of the prelude: their types hold no lifetimes, so what `.iter().map(..).collect()` borrows is lost\n- closures passed to the prelude's functions",
+        "contentHash": "7a154d8a7bea8cfabee348b34b9ad35decb67048cc6e43b80f63fad0ae8eba22"
+      },
+      "target": {
+        "source": "docs_reports_2026-11-21-05-region-check-2.ja",
+        "path": "docs/ja/reports/2026-11-21-05-region-check-2.md",
+        "startLine": 1,
+        "endLine": 105,
+        "quote": "# リージョン (ライフタイム) 検査、その 2: 最初の版が残したもの (issue #1)\n\n日付: 2026-11-21\n\n最初の版 ([2026-11-20-01](2026-11-20-01-region-check.md)) は、関数の本体をシグネチャの全称リージョンに照らして検査した。この\nレポートは、それがマージされた後の作業を扱う。あのレポートが挙げた欠け、および通らないテストが示した欠けである。\n\n## 1. 加えたもの\n\n- **検査が追うようになった値:**\n  - 定数の昇格 (promotion) で static にならない一時値 (`&(5_i32.reverse_bits())`、`&(n + 1)`、`&[&FOO]`、\n    `impl Drop for Test` のある `&Test`)、および文の中の呼び出しの一時値\n  - `Box::new(x)`、配列のリテラル、タプルとタプル構造体のコンストラクタ (`B(a)`)、キャスト\n  - クロージャ: キャプチャするもの (値で: そのリージョン。参照で: ローカルの借用)\n  - トレイトオブジェクトを通した呼び出し (`Self` をそのオブジェクトとする)。`&self` を取る prelude のメソッドは self の借用を返す\n  - 呼び出しに書いた型引数 (`f::<&'a u32>()`)\n  - 添字の場所 (`&mut v[..]`)。共有参照を通した再借用は、その参照のぶんだけ生きる (NLL の supporting prefixes)\n- **値が流れるところの型強制:** トレイトオブジェクトへは、値のすべてのリージョンがオブジェクトのリージョンより長生きする。配列から\n  スライスへ。参照から、それが deref する先へ。\n- **トレイトオブジェクトのライフタイム:** 書いた境界、なければ既定 (それを包む参照、型パラメータのただ 1 つの境界、どちらもなければ\n  シグネチャでは `'static`。本体では推論する)。\n- **クロージャの本体:** 渡される先の境界が与えるシグネチャに照らして検査する。境界が束縛するリージョンはプレースホルダ。呼び出し先の\n  ライフタイム、型パラメータのインスタンス (`-> R`)、クロージャの環境は外から来る。境界がなく注釈のあるクロージャは、引数の省略した\n  リージョンを自分で束縛し、結果のリージョンは外から来る。prelude の境界は飛ばす: prelude はライフタイムを書かず、std の境界には\n  高階でないものもある (`is_sorted_by_key`)。\n- **書いた型の well-formedness (`crates/syntax/src/wf.rs`):** `&'a T` は、T の中のすべてのライフタイムが `'a` より長生きすること\n  (E0491) と、T の中のすべての型パラメータがそう宣言されていること (E0309、E0310) を要る。fn の境界と where 句、impl の関連型の値、\n  struct の `&'static` のフィールドで検査する。ほかのアイテムが決めること (トレイトの `: 'a` のスーパートレイト、struct の要求) は\n  検査しない。\n- **ゲートが外す関数:** `'static` が要るところ (`let` の注釈、キャスト、呼び出し先) から検査を始め、そのとき引数の木を作る。\n- **エラーを報告する場所:**\n  - 戻り値として逃げる借用: 戻すところで (E0515)\n  - クロージャのキャプチャ: 本体が最初に使うところで\n  - 呼び出しのエラー: 呼び出しで (`call_fn` には位置が渡らない)\n- **fn ポインタの型** は自分のリージョンを持つ (引数について反変)。それが束縛するリージョンはそれ自身のもの。それを持つ struct は、\n  そこから変性を得る。それを名指す型の別名は不透明なまま。\n- **さらに追う値と場所:** `let _: T = e;`、`if` / `match` の値、`self: &Struct` のレシーバ、トレイトオブジェクトを通して\n  `&self` のメソッドのために借りる Box の中身、Vec・配列・スライスを回る `for` ループの要素。\n- **本体の中の well-formedness:** `let` の注釈の型と struct リテラルの型 (定義の境界)。impl の self 型は well-formed\n  (そのメソッドでは暗黙の境界、呼び出しでは要求)。型引数の well-formedness は暗黙の境界になる (`Option<&'s &'l ()>` は\n  'l: 's を与える)。\n- **トレイトの `Self: 'x` 境界:** `trait Wedding<'t>: 't` は、`dyn Wedding<'k> + 'r` に 'r: 'k を要る (E0478)。impl の self 型は、\n  トレイトが要るものより長生きする。これはドライバが検査する: すべてのトレイトが見えるのはドライバだけだから。\n- **比較:** 両辺は 1 つの型なので、その不変な部分は同じになる。\n- **クロージャのキャプチャ** は、外の関数のリージョンを保ち、その関数が知るとおりに関係づける。\n- **遅い検査:** 遅れて始めた検査が、それより前に束縛されたローカルに出会ったら、関数を先頭から検査し直す (ベンチマークの関数で\n  そうなるものはない)。\n- **借用検査の側:**\n  - `Drop` が借りているものを使いうる値の drop 検査\n  - `ret_from` は、結果のライフタイムより長生きすると宣言したライフタイムも取る (`fn f<'a, 'b: 'a>(x: &'b T) -> &'a T` は x を借りる)\n  - トレイトが自由にしておく引数を、ヘッダのライフタイムに結びつける impl のメソッド (`fn next(&'a mut self)`): E0308。\n    ほかのライフタイムを名指す self 型のレシーバ (`self: Foo<'b, 'a>`): E0308\n  - E0392: 境界の `Fn(..)` の引数でだけ使うライフタイムも、使っている\n\n## 2. カバー率\n\n(tests/ui の compile-fail、rust-lang/rust 1.100.0。run-pass、check-pass、build-pass は変わらない)\n\n| | main (18e598d) | この作業 (14faccc) |\n|---|---:|---:|\n| 通る compile-fail | 3694 | 3844 (+150) |\n\n- 前に通っていたテストで、いま通らないものはない。注釈の行で、ただし別の理由で拒否するテストを 1 つ\n  `bench/rust_ui_accidental.txt` に加え、数えていない。\n- どの段も、誤検出を同じやり方で確かめた: run-pass と check-pass が 1 つも減らないこと。`tests/regionck.rs` は、エラーの隣に\n  rustc が受け入れるコードを持つ。\n\n## 3. KPI\n\n`bench/kpi_track.py --dry-run --lsp` で、main (18e598d) と d4ed42d を比べた。その後の段 (14faccc まで) は、patterns check を\n+0.12% 足し (検査が有効な関数の for ループの要素)、gen5000 と traits を変えるのは 0.01% 未満。\n\n| KPI | main | この作業 (d4ed42d) | 変化 |\n|---|---:|---:|---:|\n| no-op build (M) | 0.704 | 0.705 | +0.14% (実行ごとの揺れ) |\n| edit one fn (M) | 541.9 | 542.2 | +0.05% |\n| check (M) | 3820.1 | 3823.0 | +0.08% |\n| cache (KiB) | 1902.8 | 1902.8 | ±0 |\n| LSP session (G) | 10.915 | 10.913 | -0.02% |\n| traits check (M) | 1171.2 | 1173.5 | +0.20% |\n| traits edit (M) | 61.12 | 61.13 | +0.01% |\n| crates no-op (M) | 9.868 | 9.879 | +0.11% |\n| crates edit (M) | 311.6 | 311.5 | -0.04% |\n| patterns check (M) | 695.9 | 698.6 | +0.39% |\n| patterns edit (M) | 257.1 | 257.3 | +0.05% |\n\n- **いちばん費用がかかった段はクロージャの本体。** 最初の版は traits を +1.68%、patterns を +0.80% にした:\n  - クロージャの引数ごとに、境界のテキストを解析し直していた。`fn_bound_of` は、解析したテキストを返すようにした。\n  - prelude の関数に渡すクロージャも検査していた。今は飛ばす。\n  - 残るのは、プログラム自身の境界に渡すクロージャの検査。\n- **ほかの段は、それぞれ 0.05% 未満。**\n  - well-formedness の検査は、境界か where 句が参照を書くときだけ走る。\n  - 新しいフックは、検査が有効な関数でだけ仕事をする。\n  - 要約がトレイトの `Self: 'x` 境界について持つものは、フィールドではなく、既存のリストの項目にした: `Summary` を大きくする\n    だけで gen5000 が +0.06% になった (割り当てとコピー)。\n  - 比較のフックは、まず検査が有効かを見る: 二項式ごとに演算子を照合すると gen5000 が +0.04% になった。\n\n## 4. まだ扱わないもの\n\n- 呼ばれないジェネリック関数: `zustc check` はそもそも検査しない (E0310 のテストの多く)\n- 高階のトレイト選択 (\"implementation of `Trait` is not general enough\")\n- 型強制や呼び出しが選ぶ impl の要求 (`impl Tr for S<T> where T: 'static`)\n- 要約の時点の well-formedness 検査での、struct 自身が引数に要るものと、トレイトが要るもの\n- prelude のイテレータ: その型はライフタイムを持たないので、`.iter().map(..).collect()` が借りるものを見失う\n- prelude の関数に渡すクロージャ",
+        "contentHash": "948eb2b4ed97ae04f24b44519f8a6e58b3d8a468a9387d82327836fff7d6ddad"
+      },
+      "context": [],
+      "candidateId": "c925c688340084371a06d4fe6f836bb5c2db892499a5e964aeca3a660e7f5f63",
+      "contextHash": "bdae948e735bbc239b594e195dd432f3efabbcd09895e48688e599b130a79530",
+      "judgment": {
+        "choice": "supports",
+        "confidence": 0.81,
+        "probabilities": {
+          "supports": 0.86,
+          "contradicts": 0.13,
           "unrelated": 0,
           "insufficient_context": 0.01
         }
       }
     },
     {
-      "id": "docs_reports_2026-11-21-05-zurgo-build-scripts",
-      "topic": "The Japanese file docs/ja/reports/2026-11-21-05-zurgo-build-scripts.md is a faithful translation of docs/reports/2026-11-21-05-zurgo-build-scripts.md",
+      "id": "docs_reports_2026-11-21-06-region-check-3",
+      "topic": "The Japanese file docs/ja/reports/2026-11-21-06-region-check-3.md is a faithful translation of docs/reports/2026-11-21-06-region-check-3.md",
       "mode": "translation",
       "reference": {
-        "source": "docs_reports_2026-11-21-05-zurgo-build-scripts.en",
-        "path": "docs/reports/2026-11-21-05-zurgo-build-scripts.md",
+        "source": "docs_reports_2026-11-21-06-region-check-3.en",
+        "path": "docs/reports/2026-11-21-06-region-check-3.md",
         "startLine": 1,
-        "endLine": 99,
-        "quote": "# zurgo M1: build scripts, `env!`, and proc-macro stubs\n\nDate: 2026-11-21\n\nM0 built Cargo packages without running their build scripts, and stopped on any proc-macro dependency. This is the\nsecond milestone of mizchi/zust#28 and the start of step W0 of the wasm-bindgen roadmap (mizchi/zust#38). Usage:\n[zurgo.md](../zurgo.md).\n\n## 1. What changed\n\n- **zustc: a crate's own cfgs and compile-time environment.**\n  - `env!` / `option_env!` are expanded when a file is read. They read the crate's environment first, then zustc's\n    own, as rustc reads its own.\n  - `include!(concat!(env!(\"OUT_DIR\"), \"/x.rs\"))` therefore works.\n  - Each crate of a workspace can carry cfgs (`cfg=name`, `cfg=name=value`) and environment variables\n    (`env=KEY=VALUE`).\n- **zurgo: build scripts.**\n  - A build script is compiled with its build-dependencies, by zustc when it can and by rustc otherwise.\n  - It runs with cargo's variables, and its `cargo:` / `cargo::` output is read.\n  - It runs again only when something it depends on changes.\n- **zurgo: cargo's variables for every crate.** `CARGO_PKG_*`, `CARGO_MANIFEST_DIR`, `CARGO_CRATE_NAME`, and\n  `CARGO_BIN_NAME` for a bin.\n- **zurgo: proc-macro dependencies are stubs.** A proc-macro crate is built as an empty library of its name, so a\n  crate that only re-exports it builds. Using one of its macros is an error naming mizchi/zust#29, not an attribute\n  dropped silently.\n- **zustc fixes found on the way:**\n  - `cfg!` inside the arguments of std's format macros (`println!(\"{}\", cfg!(unix))`) was never evaluated;\n  - `compile_error!`;\n  - `dyn Error + Send + Sync + UnwindSafe` (only `Send` and `Sync` counted as auto traits);\n  - `std::path::Display`;\n  - `fmt::Pointer`.\n\n## 2. Decisions\n\nThese were open questions in mizchi/zust#28:\n\n- **`RUSTC` for build scripts is the real rustc** (question 1). A script's probes (thiserror's and anyhow's nightly\n  probes, autocfg) and its version checks (rustversion, version_check) then see what they see under cargo. A crate\n  takes the same paths as in its cargo build. zustc follows a recent stable rustc, so those are the paths it must\n  support.\n- **The build-script compiler is zustc, with rustc as the fallback** (question 3, `--build-script-compiler auto`).\n  - Of the scripts tried, zustc compiles the fixture's `gen` script only. thiserror's, anyhow's, libc's, serde_core's\n    and the fixture's app script stop on std functions zustc lacks: `env::vars()`, `Command` with an `OsString`,\n    `process::Output`, `fs::create_dir`.\n  - rustc builds those, so every script runs.\n  - zurgo remembers which compiler built a script until its sources change, so a script zustc cannot build is not\n    tried again on every build.\n- **Proc-macro dependencies are stubs, with a check.**\n  - zustc drops an unknown attribute silently, so the stub alone could miscompile code that uses an attribute macro.\n  - zurgo therefore reads the macros a proc-macro crate defines (`#[proc_macro_derive(..)]`,\n    `#[proc_macro_attribute]`, `#[proc_macro]`). A crate of the build whose source uses one of its derives or\n    attributes stops the build before anything is compiled.\n  - Function-like macros expand to a `compile_error!`.\n\n## 3. Results\n\n`crates/zurgo/tests/zurgo.rs`:\n\n- **`build_scripts_match_cargo`.** A fixture package compared with `cargo run` under both `rustc` and `auto`. The\n  output is the same. The package has:\n  - a build script with a build-dependency, that reads `DEP_GEN_*` and writes code into `OUT_DIR`;\n  - `rustc-cfg` (also `name=\"value\"`) and `rustc-env`;\n  - `CARGO_PKG_*` with a pre-release version, `CARGO_CFG_*` and `PROFILE`;\n  - a dependency with `links` whose script emits metadata in both forms and a cfg that depends on a feature.\n\n  The test also checks that a second build runs no script, and that an edit of the file the app's script names in\n  `rerun-if-changed` runs only that script. A failing script stops the build with its output.\n- **thiserror 2.0.21's library builds.** An app that depends on it prints what its cargo build prints, and so it joins\n  `registry_crates_run_like_cargo`. The library needs:\n  - its build script, which writes `OUT_DIR/private.rs` from `CARGO_PKG_VERSION_PATCH` and probes `$RUSTC`;\n  - `include!(concat!(env!(\"OUT_DIR\"), \"/private.rs\"))`;\n  - the stub for thiserror-impl;\n  - the four zustc fixes above.\n\n  `#[derive(thiserror::Error)]` is the #29 error.\n- **`errors`.** A proc-macro dependency that is not used builds. Its attribute used is the #29 error, and so is its\n  function-like macro.\n\nCrates whose build scripts now run, and where they stop next. All of these are zustc's own gaps:\n\n| crate | build script | the crate itself |\n|---|---|---|\n| thiserror 2.0.21 | runs (rustc) | builds |\n| anyhow 1.0.104 | runs (rustc) | `error.rs:808`: a missing lifetime specifier (E0106) |\n| libc 0.2.191 | runs (rustc) | `mod types;` inside the `prelude!` macro |\n| serde_core 1.0.229 | runs (rustc) | `mod de;` inside the `crate_root!` macro |\n\nFor the last two, rustc looks for the module's file where the macro is expanded (the crate root). zustc looks\nbeside the file that defines the macro.\n\n## 4. Next\n\nFor W0 of mizchi/zust#38:\n- workspace builds for wasm32 (zustc's workspace build is x86-64 only);\n- crate identity apart from the extern name (two versions of one crate, renamed dependencies);\n- the compiler gaps on the way to wasm-bindgen-shared (the UI report, sections 3, 2.5 and 2.6).\n\nThen W1: proc macros themselves (mizchi/zust#29). The rustc path for build scripts already builds proc-macro crates\nas dylibs, which is backend A of #29.",
-        "contentHash": "1c93f7ca918d04cab244d58e76b2c4ba048cec124d82e9f6291effa8c6fe0dcb"
+        "endLine": 186,
+        "quote": "# Region (lifetime) checking, part 3: closures, loans that outlive the function, lints (issue #1)\n\nDate: 2026-11-21\n\nPart 2 ([2026-11-21-05](2026-11-21-05-region-check-2.md)) left the check at 3844 passing compile-fail tests. This\nreport covers the steps since: the failing tests whose first error is about lifetimes, taken one kind at a time.\n\n## 1. What was added\n\n- **Signatures:**\n  - A parameter whose type is a struct with no lifetimes written (`fn f(s: S) -> &T` with `struct S<'a>`) may hold\n    lifetimes, so the result's elided lifetime is no E0106. E0106 is reported at the elided reference of a result\n    written over several lines.\n  - Each `'_` of an impl's self type (`impl S<'_>`) is a lifetime of the impl, and `Self { .. }` in a method builds\n    that self type, not one with fresh regions.\n  - `for<'a> T: 'a` is `T: 'static`.\n  - E0195 for early-bound lifetimes, E0106 in extern blocks, for `'_` in a field's trait object, for associated type\n    values and for methods with no receiver.\n- **Variance:** a struct holding a trait object is invariant in the lifetimes the object's trait arguments name\n  (`Box<dyn FnOnce(&mut &'a isize)>`).\n- **Bodies:**\n  - casts of pointers to a trait object, also with an inferred target (`p as _`), and to a struct ending in one\n  - `*s` of a String or a Vec is a place the local owns (`&*line` borrows line)\n  - the annotation of a `let` with no initializer is well formed, as is `let _: T = e;` when e is not followed\n  - the results of builtin methods borrow their receiver\n- **Closures:**\n  - one that returns a mutable borrow of what it captures by reference is `FnMut`: \"captured variable cannot escape\n    `FnMut` closure body\"\n  - checked against a bound, it reaches the function's locals it captures with regions from outside: a region its\n    signature binds flowing into one of them is \"borrowed data escapes outside of closure\"\n  - one made where nothing was expected (`let f = |_| ();`) has one region for a parameter with no type written;\n    passed where a bound takes a reference for any region it is \"not general enough\", as is a fn whose result\n    borrows its parameter passed where the bound's result is a type parameter\n  - closures passed to `sort_by_key`, `max_by_key` and the like are checked (`v.sort_by_key(|p| &p.name)`): those\n    bounds are higher-ranked in std as the prelude writes them. The prelude's other bounds stay unchecked.\n- **Borrow check:**\n  - a reborrow through a reference that must outlive a lifetime of the signature lives to the end of the function,\n    as NLL's universal regions hold every point (`keep.push(&v[0]); v.push(1);` with `keep: &mut Vec<&'a u8>` is\n    E0502). The region check records each reborrow's region; the borrow check makes the loan live from where it is\n    made.\n  - a closure with no `move` borrows the copies it reads, as rustc's closures capture what they only read by\n    reference (not a reference it reads: one passed where a reference is expected is reborrowed, and the closure\n    holds a copy)\n  - a returned closure that borrows a local is E0373 at the closure\n  - returning `&f()` is E0515\n  - the temporaries an assignment (`x = &f();`) or a method of a local holding references (`v.push(&f());`) borrows\n    go away at the end of the statement (E0716)\n- **Syntax and lints:**\n  - E0637: `'_` as a bound (`impl<'b: '_>`), `&` with no lifetime in a bound's arguments (`where T: Tr<&u32>`)\n  - `#![deny(unused_lifetimes)]` and `#![deny(single_use_lifetimes)]` for fns and impls\n\n## 2. Coverage\n\n(tests/ui compile-fail, rust-lang/rust 1.100.0; run-pass, check-pass and build-pass did not change)\n\n| | main (18e598d) | part 2 (14faccc) | this work (f91a81d) |\n|---|---:|---:|---:|\n| compile-fail passing | 3694 | 3844 | 3905 (+61) |\n\n- No test that passed before fails now (`bench/rust_ui.py --baseline bench/rust_ui_passing.txt --check`).\n- `tests/regionck.rs` has 52 tests, each with the code rustc accepts next to the error.\n\n## 3. KPIs\n\nMeasured with `bench/kpi_track.py --dry-run --lsp`, main (18e598d) against this work (f91a81d). Part 2 was at\npatterns check +0.51%, traits check +0.20%, check +0.08%.\n\n| KPI | main | this work (f91a81d) | change |\n|---|---:|---:|---:|\n| no-op build (M) | 0.704 | 0.703 | -0.14% (run-to-run noise) |\n| edit one fn (M) | 541.9 | 542.4 | +0.08% |\n| check (M) | 3820.1 | 3825.2 | +0.13% |\n| cache (KiB) | 1902.8 | 1902.8 | ±0 |\n| LSP session (G) | 10.915 | 10.901 | -0.13% |\n| traits check (M) | 1171.2 | 1173.9 | +0.23% |\n| traits edit (M) | 61.12 | 61.15 | +0.04% |\n| crates no-op (M) | 9.868 | 9.865 | -0.03% |\n| crates edit (M) | 311.6 | 311.5 | -0.03% |\n| patterns check (M) | 695.9 | 700.4 | +0.65% |\n| patterns edit (M) | 257.1 | 257.5 | +0.12% |\n\n- **Patterns check +0.14% since part 2,** spread over the steps: none of them cost more than +0.07% (the closures'\n  steps together), the statement temporaries +0.01% (gen5000 +0.03%).\n- **What was kept cheap:**\n  - The statement temporaries are followed only for an assignment and for a method of a local holding references:\n    following every call's `&f()` arguments cost patterns +0.08%, as the borrow check then runs its dataflow in more\n    functions.\n  - The lints and E0637 are checks of the syntax, run only when the crate denies the lint or a bound writes `'_` or\n    `&`.\n\n## 4. After the measurements\n\nThe steps after f91a81d, at 3910 passing compile-fail tests (5db66d5), no test lost:\n\n- a borrow that must outlive a region of a local's type is held by that local, live while it is (as NLL):\n  `foo.insert(); foo.insert();` with `fn insert(&'a mut self)` in `impl<'a> Foo<'a>`, and an argument a `&mut self`\n  method stores (`s.set(&mut y); y += 1; s.get();`)\n- a closure made where nothing was expected has one signature for all its calls: `let f = |y| y; f(&z); f(x)`\n  returns what z's borrow flows into\n- E0261 in a body's `let` annotation, and in a trait's bounds and where clause\n- a temporary a `match` binds by `ref` goes away at the end of the statement; one a `let` extends\n  (`let x = &f();`) with its block's locals\n- tuning: `rg_call` no longer moves the whole `Rg` (some 1.4 KiB) out and back twice per call, and the\n  reachability of reborrows walks one array of edges: patterns check 700.8M to 700.2M. Against main (18e598d), by\n  instructions on the KPI inputs: gen5000 check +0.19%, traits check +0.29%, patterns check +0.66%.\n\nThen, to 3927 (a4ae97e):\n\n- E0106 / E0107 for the program's structs and enums with lifetimes named in fields, type aliases and associated\n  types without them (`type B = Bar<u8>;`) or with another number (`Buzz<'a>` of `Buzz<'a, 'b>`); a const's or a\n  static's are 'static. The driver reads again only the items whose summarized types name such a struct.\n- E0195: a lifetime a type parameter's bound names (`T: Test<'p>`) is early-bound\n- calls through `dyn Fn(&'static u8)` and through fn pointers pass their arguments into the regions of the\n  parameters; a fn item used as a value (`&drop::<&'a i32>`) has the regions of its type arguments; assigning a\n  static makes the value's regions 'static\n- a pattern's path that writes lifetimes (`Foo::Bar::<'static> { .. }`) annotates the type of the value matched\n- the temporaries of `vec![&f()]` go away with the statement; a returned iterator adapter (`filter_map(|..| ..)`)\n  holds the closure passed to it, and what the closure borrows (E0373)\n- an `impl Trait` result of a fn with no region in its signature is 'static (its hidden type captures none);\n  `Self(..)` in `impl A<&'static u8>` builds that type\n- a call requires its parameters' types well formed (`&'a Foo<'b>`: 'b: 'a)\n- a closure made where nothing was expected that stores its parameter in what it captures (`|input| x.0 = input`,\n  `v.push(s)`): the function it is in sees the store, and the calls' arguments flow there\n\nThen, to 3944 (84cd2b7):\n\n- the receiver's borrow comes before the arguments: a shared receiver an argument names keeps its loan while the\n  arguments are evaluated (`v.get({ v.push(2); 0 })` is E0502), as does a two-phase borrow's reservation\n  (`v.push(v.pop().unwrap())` is E0499); a place written through `IndexMut` (`v[v.len() - 1] = 1` of a Vec) is\n  borrowed before its index\n- a closure that calls a `&mut self` method of what it captures (`|| v.push(4)`), or writes it through an index,\n  captures it by `&mut`\n- a `&mut` local passed where a `&mut` is expected is reborrowed (`f(x)` is `f(&mut *x)`): one that must outlive a\n  lifetime of the signature lives to the function's end, so the same call again in a loop is E0499.\n  `&mut (dyn Tr + 'a)` passed on as `&mut (dyn Tr + 'b)` shortens the object's lifetime (an unsizing coercion)\n- `ref` bindings of a value not in memory (`let ref y = a;`, `let ref x = 0;`) bind a copy in memory; a local a\n  `ref mut` borrows stays in memory; a place bound under an annotation has the annotation's type\n- tuning, by instructions on the KPI inputs of this branch: the check's state (some 1 KiB) is made only when the\n  check first writes it, so a function it leaves out (all of the traits input) no longer makes, copies and drops\n  it; compile_once returns compile's own result type (one copy less per function); one lock of the struct table per\n  struct type walked, with no copies of its type arguments; a flow with no regions on a side relates nothing. traits\n  check 1,175.3M to 1,174.5M, patterns check 701.0M to 699.6M.\n\nMerged with main (68b7497): 4068 compile-fail tests pass, no test main's baseline passes is lost, and three\nsecurity cases marked todo pass now (`borrow_closure_mut_and_shared`, `region_temporary_dropped`, `region_dropck`).\n\nKPIs of the merge against main, both measured here with `bench/kpi_track.py --dry-run --lsp`:\n\n| KPI | main (68b7497) | this branch (1fc05df) | change |\n|---|---:|---:|---:|\n| no-op build (M) | 0.709 | 0.705 | -0.56% |\n| edit one fn (M) | 544.482 | 544.972 | +0.09% |\n| check (M) | 3832.25 | 3845 | +0.33% |\n| cache (KiB) | 1902.8 | 1902.8 | ±0 |\n| LSP session (G) | 10.9194 | 10.9182 | -0.01% |\n| traits check (M) | 1181.27 | 1184.78 | +0.30% |\n| traits edit (M) | 61.553 | 61.538 | -0.02% |\n| crates no-op (M) | 9.897 | 9.88 | -0.17% |\n| crates edit (M) | 314.998 | 315.074 | +0.02% |\n| patterns check (M) | 708.487 | 712.719 | +0.60% |\n| patterns edit (M) | 260.258 | 260.576 | +0.12% |\n\nThe check's cost is where the check is on (patterns check: 80 of its 1263 functions) and in the borrow check's\nnew loans (receivers, implicit reborrows); a function the gate leaves out costs almost nothing more than on main.\n\n## 5. Tried and left out\n\n- **Temporaries of a block's tail expression** live to the end of the enclosing statement up to edition 2021\n  (`y.borrow().clone()` at the end of a block that owns y). Edition 2024 ends them with the block, and zust's own\n  code is edition 2024: following 2021 would reject it.\n- **E0713** (a borrow through a `&mut` a value with `Drop` holds, still in use when the value is dropped): the\n  parameters' drops at the end of the function are not events of the borrow check yet.\n- **Two cost tunings of the implied bounds of a struct's fields** (skip structs with no regions; skip definitions\n  whose fields imply nothing) changed nothing measurable, or cost more than they saved; they were dropped.\n\n## 6. Not covered yet\n\n- generic functions that are never called: `zustc check` does not check them at all. They hold the first error of\n  120 of the 451 failing tests about lifetimes and borrows (`(self.func)(arg)` in a loop of\n  `impl<'a, T> FuncWrapper<'a, T>` among them): checking them needs placeholder types for their type parameters,\n  with the regions of a type parameter as universal regions\n- what a closure's body requires of the function it is in (rustc's closure requirements): a closure with no bound\n  is checked alone\n- the iterators of the prelude: their types hold no lifetimes, so what `.iter().map(..).collect()` borrows is lost\n- higher-ranked trait selection (`impl<A> Foo for fn(A)` against `fn(&i32)`)\n- the number of lifetime arguments a path writes (E0107), type aliases with lifetimes in signatures",
+        "contentHash": "da7b36d3911bf129b0e64c3e21b97a85113fbb79121e9b76caecaddd0e07245b"
       },
       "target": {
-        "source": "docs_reports_2026-11-21-05-zurgo-build-scripts.ja",
-        "path": "docs/ja/reports/2026-11-21-05-zurgo-build-scripts.md",
+        "source": "docs_reports_2026-11-21-06-region-check-3.ja",
+        "path": "docs/ja/reports/2026-11-21-06-region-check-3.md",
         "startLine": 1,
-        "endLine": 99,
-        "quote": "# zurgo M1: ビルドスクリプト、`env!`、proc-macro のスタブ\n\n日付: 2026-11-21\n\nM0 は Cargo のパッケージを、ビルドスクリプトを実行せずにビルドし、proc-macro の依存があれば止まった。これは\nmizchi/zust#28 の 2 つめのマイルストーンで、wasm-bindgen のロードマップ (mizchi/zust#38) の W0 の始まりである。\n使い方: [zurgo.md](../zurgo.md)。\n\n## 1. 変えたもの\n\n- **zustc: クレートごとの cfg とコンパイル時の環境。**\n  - `env!` / `option_env!` は、ファイルを読むときに展開する。まずクレートの環境を、次に zustc 自身の環境を読む\n    (rustc が自分の環境を読むのと同じ)。\n  - なので `include!(concat!(env!(\"OUT_DIR\"), \"/x.rs\"))` が動く。\n  - ワークスペースのクレートはそれぞれ、cfg (`cfg=name`、`cfg=name=value`) と環境変数 (`env=KEY=VALUE`) を持てる。\n- **zurgo: ビルドスクリプト。**\n  - ビルドスクリプトを、そのビルド用の依存と一緒に、zustc でできれば zustc で、できなければ rustc でコンパイルする。\n  - cargo の変数を付けて実行し、`cargo:` / `cargo::` の出力を読む。\n  - 依存するものが変わったときだけ、もう一度実行する。\n- **zurgo: どのクレートにも cargo の変数。** `CARGO_PKG_*`、`CARGO_MANIFEST_DIR`、`CARGO_CRATE_NAME`、bin なら\n  `CARGO_BIN_NAME`。\n- **zurgo: proc-macro の依存はスタブ。** proc-macro のクレートは、その名前の空のライブラリとしてビルドするので、それを\n  再エクスポートするだけのクレートはビルドできる。そのマクロのどれかを使うのは、mizchi/zust#29 を示すエラーになり、\n  属性を黙って捨てることはない。\n- **途中で見つけた zustc の直し:**\n  - std の書式のマクロの引数の中の `cfg!` (`println!(\"{}\", cfg!(unix))`) を、評価していなかった;\n  - `compile_error!`;\n  - `dyn Error + Send + Sync + UnwindSafe` (自動 trait として数えていたのは `Send` と `Sync` だけだった);\n  - `std::path::Display`;\n  - `fmt::Pointer`。\n\n## 2. 決めたこと\n\nmizchi/zust#28 で未決だった問い:\n\n- **ビルドスクリプトの `RUSTC` は本物の rustc にした** (問い 1)。スクリプトの試しのコンパイル (thiserror と anyhow\n  の nightly の試し、autocfg) と版の確認 (rustversion、version_check) は、cargo のときと同じものを見る。クレートは\n  cargo でビルドしたときと同じ道を通る。zustc は新しい安定版の rustc に従うので、その道こそ zustc が受け付けるべき\n  ものである。\n- **ビルドスクリプトのコンパイラは zustc で、だめなら rustc にした** (問い 3、`--build-script-compiler auto`)。\n  - 試したスクリプトのうち、zustc がコンパイルできるのはテストのパッケージの `gen` のものだけである。thiserror、\n    anyhow、libc、serde_core と、テストのパッケージのアプリのスクリプトは、zustc にない std の関数で止まる:\n    `env::vars()`、`OsString` を取る `Command`、`process::Output`、`fs::create_dir`。\n  - それらは rustc がビルドするので、どのスクリプトも実行できる。\n  - zurgo は、どちらがスクリプトをビルドしたかを、そのソースが変わるまで覚えておく。なので、zustc がビルドできない\n    スクリプトを、ビルドのたびに試し直すことはない。\n- **proc-macro の依存は、確かめた上でスタブにした。**\n  - zustc は知らない属性を黙って捨てるので、スタブだけでは、属性マクロを使うコードを間違ってコンパイルしうる。\n  - そこで zurgo は、proc-macro のクレートが定義するマクロ (`#[proc_macro_derive(..)]`、`#[proc_macro_attribute]`、\n    `#[proc_macro]`) を読む。ビルドのどれかのクレートのソースがその derive か属性を使っていれば、何もコンパイル\n    する前にビルドを止める。\n  - 関数のようなマクロは `compile_error!` に展開する。\n\n## 3. 結果\n\n`crates/zurgo/tests/zurgo.rs`:\n\n- **`build_scripts_match_cargo`。** テストのパッケージを、`rustc` と `auto` の両方で `cargo run` と比べる。出力は\n  同じである。そのパッケージには、次のものがある:\n  - ビルド用の依存を使い、`DEP_GEN_*` を読み、`OUT_DIR` にコードを書くビルドスクリプト;\n  - `rustc-cfg` (`name=\"value\"` も) と `rustc-env`;\n  - pre-release の版の `CARGO_PKG_*`、`CARGO_CFG_*`、`PROFILE`;\n  - `links` を持つ依存。そのスクリプトは、2 つの形で metadata を出し、feature によって決まる cfg を出す。\n\n  テストは、2 回めのビルドがどのスクリプトも実行しないこと、アプリのスクリプトが `rerun-if-changed` で名指しする\n  ファイルを変えると、そのスクリプトだけを実行することも確かめる。失敗するスクリプトは、その出力を付けてビルドを\n  止める。\n- **thiserror 2.0.21 のライブラリはビルドできる。** それに依存するアプリは、cargo でビルドしたものと同じものを出す\n  ので、`registry_crates_run_like_cargo` に加えた。ライブラリに要るもの:\n  - `CARGO_PKG_VERSION_PATCH` から `OUT_DIR/private.rs` を書き、`$RUSTC` を試すビルドスクリプト;\n  - `include!(concat!(env!(\"OUT_DIR\"), \"/private.rs\"))`;\n  - thiserror-impl のスタブ;\n  - 上の zustc の 4 つの直し。\n\n  `#[derive(thiserror::Error)]` は #29 のエラーになる。\n- **`errors`。** 使われない proc-macro の依存はビルドできる。その属性を使えば #29 のエラーで、関数のようなマクロも\n  同じである。\n\nいまビルドスクリプトを実行できるクレートと、次に止まる所。どれも zustc 自身の足りない所である:\n\n| クレート | ビルドスクリプト | クレートそのもの |\n|---|---|---|\n| thiserror 2.0.21 | 実行できる (rustc) | ビルドできる |\n| anyhow 1.0.104 | 実行できる (rustc) | `error.rs:808`: ライフタイムの指定がない (E0106) |\n| libc 0.2.191 | 実行できる (rustc) | `prelude!` マクロの中の `mod types;` |\n| serde_core 1.0.229 | 実行できる (rustc) | `crate_root!` マクロの中の `mod de;` |\n\nあとの 2 つでは、rustc はモジュールのファイルを、マクロを展開した場所 (クレートの根) から探す。zustc はマクロを\n定義したファイルのそばを探す。\n\n## 4. 次\n\nmizchi/zust#38 の W0 のために:\n- wasm32 向けのワークスペースのビルド (zustc のワークスペースのビルドは x86-64 だけ);\n- extern の名前とは別のクレートの同一性 (1 つのクレートの 2 つの版、名前を変えた依存);\n- wasm-bindgen-shared までの途中にあるコンパイラの足りない所 (UI のレポートの 3、2.5、2.6 節)。\n\n次に W1: proc macro そのもの (mizchi/zust#29)。ビルドスクリプトのための rustc の道は、すでに proc-macro のクレートを\ndylib としてビルドする。それが #29 のバックエンド A である。",
-        "contentHash": "25f1474022d232c83a58a9984ba82a6852f72a16e801129335aaab1bde651aa2"
+        "endLine": 183,
+        "quote": "# リージョン (ライフタイム) 検査、その 3: クロージャ、関数より長く生きる借用、lint (issue #1)\n\n日付: 2026-11-21\n\nその 2 ([2026-11-21-05](2026-11-21-05-region-check-2.md)) の時点で、通る compile-fail は 3844 だった。このレポートは\nその後の段を扱う。最初のエラーがライフタイムに関するもので、まだ通らないテストを、種類ごとに 1 つずつ見ていった。\n\n## 1. 加えたもの\n\n- **シグネチャ:**\n  - 型がライフタイムを書かない struct である引数 (`struct S<'a>` のときの `fn f(s: S) -> &T`) はライフタイムを\n    持ちうるので、結果の省略したライフタイムは E0106 ではない。何行かにわたって書いた結果の E0106 は、その省略した\n    参照で報告する。\n  - impl の self 型の `'_` (`impl S<'_>`) は、それぞれ impl のライフタイムになる。メソッドの中の `Self { .. }` は、\n    新しいリージョンの値ではなく、その self 型の値を作る。\n  - `for<'a> T: 'a` は `T: 'static`。\n  - early-bound のライフタイムの E0195。extern ブロック、フィールドのトレイトオブジェクトの `'_`、関連型の値、\n    レシーバのないメソッドでの E0106。\n- **変性:** トレイトオブジェクトを持つ struct は、そのトレイトの引数が名指すライフタイムについて不変\n  (`Box<dyn FnOnce(&mut &'a isize)>`)。\n- **本体:**\n  - トレイトオブジェクトへのポインタのキャスト。行き先を推論させるもの (`p as _`) と、末尾がトレイトオブジェクトの\n    struct へのポインタも。\n  - String と Vec の `*s` は、ローカルが所有する場所 (`&*line` は line を借りる)\n  - 初期化のない `let` の注釈の型は well-formed。e を追えないときの `let _: T = e;` も。\n  - 組み込みのメソッドの結果はレシーバを借りる\n- **クロージャ:**\n  - 参照でキャプチャしたものの可変借用を返すクロージャは `FnMut`: \"captured variable cannot escape `FnMut` closure\n    body\"\n  - 境界に照らして検査するクロージャは、キャプチャした関数のローカルに、外から来るリージョンで届く。シグネチャが\n    束縛するリージョンがそこへ流れると \"borrowed data escapes outside of closure\"\n  - 何も期待されないところで作ったクロージャ (`let f = |_| ();`) の、型を書かない引数のリージョンは 1 つ。どんな\n    リージョンの参照でも取る境界に渡すと \"not general enough\"。結果が引数を借りる fn を、結果が型パラメータである\n    境界に渡すのも同じ。\n  - `sort_by_key` や `max_by_key` などに渡すクロージャを検査する (`v.sort_by_key(|p| &p.name)`)。prelude が書く\n    とおり std でも高階の境界だから。prelude のほかの境界は飛ばしたまま。\n- **借用検査:**\n  - 参照を通した再借用で、シグネチャのライフタイムより長生きする必要があるものは、関数の終わりまで生きる。NLL の\n    universal なリージョンがすべての点を含むのと同じ (`keep: &mut Vec<&'a u8>` のとき\n    `keep.push(&v[0]); v.push(1);` は E0502)。リージョン検査が再借用ごとにそのリージョンを記録し、借用検査は、\n    その借用を作ったところから生かす。\n  - `move` のないクロージャは、読むだけの値のコピーを借りる。rustc のクロージャは、読むだけのものを参照で\n    キャプチャするから。読む参照は別: 参照を期待するところに渡す参照は再借用され、クロージャはそのコピーを持つ。\n  - ローカルを借りるクロージャを返すと、そのクロージャで E0373\n  - `&f()` を返すと E0515\n  - 代入 (`x = &f();`) や、参照を持つローカルのメソッド (`v.push(&f());`) が借りる一時値は、文の終わりで\n    なくなる (E0716)\n- **構文と lint:**\n  - E0637: 境界としての `'_` (`impl<'b: '_>`)、境界の引数のライフタイムのない `&` (`where T: Tr<&u32>`)\n  - fn と impl の `#![deny(unused_lifetimes)]`、`#![deny(single_use_lifetimes)]`\n\n## 2. カバー率\n\n(tests/ui の compile-fail、rust-lang/rust 1.100.0。run-pass、check-pass、build-pass は変わらない)\n\n| | main (18e598d) | その 2 (14faccc) | この作業 (f91a81d) |\n|---|---:|---:|---:|\n| 通る compile-fail | 3694 | 3844 | 3905 (+61) |\n\n- 前に通っていたテストで、いま通らないものはない (`bench/rust_ui.py --baseline bench/rust_ui_passing.txt --check`)。\n- `tests/regionck.rs` のテストは 52 になった。どれも、エラーの隣に rustc が受け入れるコードを持つ。\n\n## 3. KPI\n\n`bench/kpi_track.py --dry-run --lsp` で、main (18e598d) とこの作業 (f91a81d) を比べた。その 2 の時点は\npatterns check +0.51%、traits check +0.20%、check +0.08% だった。\n\n| KPI | main | この作業 (f91a81d) | 変化 |\n|---|---:|---:|---:|\n| no-op build (M) | 0.704 | 0.703 | -0.14% (実行ごとの揺れ) |\n| edit one fn (M) | 541.9 | 542.4 | +0.08% |\n| check (M) | 3820.1 | 3825.2 | +0.13% |\n| cache (KiB) | 1902.8 | 1902.8 | ±0 |\n| LSP session (G) | 10.915 | 10.901 | -0.13% |\n| traits check (M) | 1171.2 | 1173.9 | +0.23% |\n| traits edit (M) | 61.12 | 61.15 | +0.04% |\n| crates no-op (M) | 9.868 | 9.865 | -0.03% |\n| crates edit (M) | 311.6 | 311.5 | -0.03% |\n| patterns check (M) | 695.9 | 700.4 | +0.65% |\n| patterns edit (M) | 257.1 | 257.5 | +0.12% |\n\n- **その 2 からの patterns check の +0.14%** は、段に散らばる。+0.07% を超える段はない (クロージャの段を合わせて\n  +0.07%)。文の一時値は +0.01% (gen5000 は +0.03%)。\n- **安く抑えたもの:**\n  - 文の一時値を追うのは、代入と、参照を持つローカルのメソッドだけ。すべての呼び出しの `&f()` 引数を追うと\n    patterns が +0.08% になった。借用検査がデータフローを走らせる関数が増えるから。\n  - lint と E0637 は構文の検査で、クレートが lint を deny したとき、境界が `'_` か `&` を書くときだけ走る。\n\n## 4. 計測の後\n\nf91a81d の後の段。通る compile-fail は 3910 (5db66d5) で、失ったテストはない。\n\n- ローカルの型のリージョンより長生きする必要がある借用は、そのローカルが持つ。そのローカルが生きているあいだ\n  生きる (NLL と同じ)。`impl<'a> Foo<'a>` の `fn insert(&'a mut self)` での `foo.insert(); foo.insert();`、\n  `&mut self` のメソッドがしまう引数 (`s.set(&mut y); y += 1; s.get();`)\n- 何も期待されないところで作ったクロージャのシグネチャは、すべての呼び出しで 1 つ: `let f = |y| y; f(&z); f(x)`\n  は、z の借用が流れ込むものを返す\n- 本体の `let` の注釈と、トレイトの境界と where 句での E0261\n- `match` が `ref` で束縛する一時値は、文の終わりでなくなる。`let` が延ばす一時値 (`let x = &f();`) は、その\n  ブロックのローカルと一緒になくなる\n- 調整: `rg_call` は、呼び出しごとに `Rg` 全体 (約 1.4 KiB) を 2 回出し入れしなくなった。再借用の到達の計算は、\n  辺を 1 本の配列で辿る。patterns check は 700.8M から 700.2M。main (18e598d) に対して、KPI の入力の命令数で\n  gen5000 check +0.19%、traits check +0.29%、patterns check +0.66%。\n\nその後、3927 (a4ae97e) まで:\n\n- ライフタイムを持つプログラムの struct と enum を、フィールド、型の別名、関連型でライフタイムを書かずに名指す\n  (`type B = Bar<u8>;`)、あるいは違う数を書く (`Buzz<'a, 'b>` に `Buzz<'a>`) と E0106 / E0107。const と static の\n  ものは 'static。ドライバは、要約の型がそのような struct を名指す項目だけを読み直す。\n- E0195: 型パラメータの境界が名指すライフタイム (`T: Test<'p>`) は early-bound\n- `dyn Fn(&'static u8)` と fn ポインタを通した呼び出しは、実引数を引数のリージョンへ流す。値として使う fn アイテム\n  (`&drop::<&'a i32>`) は、型引数のリージョンを持つ。static への代入は、値のリージョンを 'static にする\n- ライフタイムを書くパターンのパス (`Foo::Bar::<'static> { .. }`) は、照合する値の型の注釈\n- `vec![&f()]` の一時値は文と一緒になくなる。返す反復子のアダプタ (`filter_map(|..| ..)`) は、渡したクロージャと、\n  それが借りるものを持つ (E0373)\n- シグネチャにリージョンのない fn の `impl Trait` の結果は 'static (隠れた型は何も捕捉しない)。\n  `impl A<&'static u8>` の中の `Self(..)` は、その型を作る\n- 呼び出しは、引数の型が well-formed であることを要る (`&'a Foo<'b>` なら 'b: 'a)\n- 何も期待されないところで作ったクロージャが、引数をキャプチャしたものへしまう (`|input| x.0 = input`、\n  `v.push(s)`) と、それを含む関数はそれを見て、呼び出しの実引数はそこへ流れる\n\nその後、3944 (84cd2b7) まで:\n\n- レシーバの借用は実引数より先: 実引数が名指す共有のレシーバは、実引数を評価するあいだ借用を保つ\n  (`v.get({ v.push(2); 0 })` は E0502)。二相借用の予約も同じ (`v.push(v.pop().unwrap())` は E0499)。`IndexMut` を\n  通して書く場所 (Vec の `v[v.len() - 1] = 1`) は、添字より先に借りる\n- キャプチャしたものの `&mut self` のメソッドを呼ぶクロージャ (`|| v.push(4)`)、添字を通して書くクロージャは、それを\n  `&mut` でキャプチャする\n- `&mut` を期待するところに渡す `&mut` のローカルは再借用される (`f(x)` は `f(&mut *x)`)。シグネチャのライフタイムより\n  長生きする必要があるものは関数の終わりまで生きるので、ループの中の同じ呼び出しは E0499。`&mut (dyn Tr + 'a)` を\n  `&mut (dyn Tr + 'b)` として渡すと、オブジェクトのライフタイムは縮む (unsize の変換)\n- メモリにない値の `ref` の束縛 (`let ref y = a;`、`let ref x = 0;`) は、メモリに置いたコピーを束縛する。`ref mut` が\n  借りるローカルはメモリに置く。注釈の付いた束縛の場所は、注釈の型を持つ\n- 調整 (このブランチの KPI の入力の命令数): 検査の状態 (約 1 KiB) は、検査が最初に書くときに作る。検査が除く関数\n  (traits の入力のすべて) は、それを作らず、コピーせず、drop しない。compile_once は compile と同じ結果の型を返す\n  (関数ごとにコピーが 1 回減る)。辿る struct の型ごとに、struct の表のロックは 1 回で、型引数をコピーしない。片側に\n  リージョンのない flow は何も関係づけない。traits check は 1,175.3M から 1,174.5M、patterns check は 701.0M から\n  699.6M。\n\nmain (68b7497) とマージして: 通る compile-fail は 4068。main の基準で通るテストで失ったものはない。todo の印の付いた\nセキュリティのケースが 3 つ通るようになった (`borrow_closure_mut_and_shared`、`region_temporary_dropped`、\n`region_dropck`)。\n\nマージの KPI を main と比べた (どちらもここで `bench/kpi_track.py --dry-run --lsp` で測った):\n\n| KPI | main (68b7497) | このブランチ (1fc05df) | 変化 |\n|---|---:|---:|---:|\n| no-op build (M) | 0.709 | 0.705 | -0.56% |\n| edit one fn (M) | 544.482 | 544.972 | +0.09% |\n| check (M) | 3832.25 | 3845 | +0.33% |\n| cache (KiB) | 1902.8 | 1902.8 | ±0 |\n| LSP session (G) | 10.9194 | 10.9182 | -0.01% |\n| traits check (M) | 1181.27 | 1184.78 | +0.30% |\n| traits edit (M) | 61.553 | 61.538 | -0.02% |\n| crates no-op (M) | 9.897 | 9.88 | -0.17% |\n| crates edit (M) | 314.998 | 315.074 | +0.02% |\n| patterns check (M) | 708.487 | 712.719 | +0.60% |\n| patterns edit (M) | 260.258 | 260.576 | +0.12% |\n\n検査のコストは、検査が on になる関数 (patterns check では 1263 のうち 80) と、借用検査の新しい借用 (レシーバ、暗黙の\n再借用) にある。ゲートが除く関数のコストは main とほとんど変わらない。\n\n## 5. 試して、入れなかったもの\n\n- **ブロックの末尾の式の一時値:** edition 2021 までは、それを囲む文の終わりまで生きる (y を所有するブロックの\n  末尾の `y.borrow().clone()`)。edition 2024 はブロックで終わらせる。zust 自身のコードは edition 2024 なので、\n  2021 に従うとそれを拒否してしまう。\n- **E0713:** `Drop` を持つ値が持つ `&mut` を通した借用が、その値の drop のときにまだ使われているもの。関数の終わりの\n  引数の drop は、まだ借用検査のイベントになっていない。\n- **struct のフィールドの暗黙の境界のコストの調整を 2 つ:** リージョンのない struct を飛ばすもの、フィールドが何も\n  導かない定義を飛ばすもの。測れる差がないか、削るより足すほうが多かったので、入れなかった。\n\n## 6. まだ扱わないもの\n\n- 呼ばれないジェネリック関数: `zustc check` はそもそも検査しない。ライフタイムと借用の、落ちている 451 のテストの\n  うち 120 は、最初のエラーがその中にある (`impl<'a, T> FuncWrapper<'a, T>` のループの中の `(self.func)(arg)` も\n  そう)。検査するには、型パラメータの代わりの型と、型パラメータのリージョンを universal なリージョンとして扱う\n  ことが要る\n- クロージャの本体が、それを含む関数に要るもの (rustc の closure requirements): 境界のないクロージャは単独で\n  検査する\n- prelude のイテレータ: その型はライフタイムを持たないので、`.iter().map(..).collect()` が借りるものを見失う\n- 高階のトレイト選択 (`fn(&i32)` に対する `impl<A> Foo for fn(A)`)\n- パスが書くライフタイム引数の数 (E0107)、シグネチャの中のライフタイムを持つ型の別名",
+        "contentHash": "e6ff6a07fb9d3b80117815b7a2361a7ab6b786bc51d79a5b89bd155e66748350"
       },
       "context": [],
-      "candidateId": "4387402aeae80230767aff6ccaff56433e9f58343a3d175055c0d8fcf5113f18",
-      "contextHash": "a5ce3fd98cf851849501937d43036a94c14c8793fbce5b86394b9ad15c01c552",
+      "candidateId": "d95a2b368ba148e2aff7f34f681b3c8ed5dd2f3718a2d98f80cb3febb8cfb1a6",
+      "contextHash": "56aef8202ec18e7d916f99df3c3f62b2bb9580fd1fbf151d494787ff37e24afd",
+      "judgment": {
+        "choice": "supports",
+        "confidence": 0.89,
+        "probabilities": {
+          "supports": 0.92,
+          "contradicts": 0.07,
+          "unrelated": 0,
+          "insufficient_context": 0.01
+        }
+      }
+    },
+    {
+      "id": "docs_reports_2026-11-21-07-region-check-4",
+      "topic": "The Japanese file docs/ja/reports/2026-11-21-07-region-check-4.md is a faithful translation of docs/reports/2026-11-21-07-region-check-4.md",
+      "mode": "translation",
+      "reference": {
+        "source": "docs_reports_2026-11-21-07-region-check-4.en",
+        "path": "docs/reports/2026-11-21-07-region-check-4.md",
+        "startLine": 1,
+        "endLine": 75,
+        "quote": "# Region (lifetime) checking, part 4: generic functions nothing calls (issue #1)\n\nDate: 2026-11-21\n\nPart 3 ([2026-11-21-06](2026-11-21-06-region-check-3.md)) was merged with #39. Its last section noted that `zustc\ncheck` checks a generic fn only for the instances requested of it, and that a generic fn nothing calls held the first\nerror of 120 of the 451 failing tests about lifetimes and borrows. This step checks those functions.\n\n## 1. What was added\n\n- **Placeholder instances:** at the end of the check, each generic fn of the program that no instance was requested\n  of is instantiated once more, with a placeholder for each type parameter (`Program::placeholder`).\n  - A placeholder is a struct with no fields named `T#`, a name no program's type has.\n  - It implements the traits its parameter's bounds name and the auto traits, and is `Copy` when the bounds say so.\n  - Left out: a trait's default methods, a closure's body, a dependency's fns.\n- **Only marker bounds:** only fns whose type parameters have marker bounds (`Copy`, `Sized`, `Send`, `Sync`,\n  `Unpin`) get a placeholder instance. A placeholder has no trait's methods. A fn bounded by more would most likely fail\n  its typeck, after the work of it.\n- **What is reported:** in this round a typeck error is not reported, as a placeholder cannot do all that its bounds\n  allow. The borrow and region checks' errors are reported.\n- **What the round follows:** the closures the bodies make, a few levels deep, but not other generic fns' instances.\n  `foo(p, |x| f(x))` in foo would never end, and those fns get placeholder instances of their own.\n- **Switching it off:** `ZUSTC_NO_PLACEHOLDERS=1` leaves the round out.\n\nFound on the way:\n\n- **`_` parameters:** two `_` parameters are now two locals for the region check (`_#k`). Before, the second hid the\n  first's implied bounds, so `fn foo<'a, 'b>(_: &'a &'b (), v: &'b u8, _: &()) -> &'a u8` was rejected.\n- **Fields not known:** a struct literal of a type whose fields are not known (of a placeholder's associated type) is\n  an error, not a panic.\n- **Calls into impls that write lifetimes:** a generic fn's instance calling the method of such an impl\n  (`impl Trait<'static> for ()`) is not followed. The generic body called the trait's method under its own bounds\n  (`(): Trait<'a>`), with the trait's signature, not the impl's.\n- **Review of #39 (minor):** block comments nest in the lifetime lints' scan. The count of a signature's input\n  lifetimes goes on past a type it does not know.\n\n## 2. Coverage\n\n(tests/ui compile-fail, rust-lang/rust 1.100.0)\n\n| | main (4735d9f) | this work |\n|---|---:|---:|\n| compile-fail passing (accidental ones not counted) | 4013 | 4029 (+16) |\n\n- **Lost:** no test that passed before fails now; run-pass and check-pass do not change.\n- **Now passing:** 16 tests, among them `borrowck/mut-borrow-in-loop.rs` (the implicit reborrow of part 3, in a method\n  of `impl<'a, T> FuncWrapper<'a, T>`) and `nll/issue-62007-assign-const-index.rs`.\n- **Wider:** with bounds of any trait, 17 pass. The marker-bound filter gives up one of them for the cost.\n\n## 3. KPIs\n\n`bench/kpi_track.py --dry-run --lsp`, main (4735d9f) and this work, both measured here:\n\n| KPI | main (4735d9f) | this work (0d6779b) | change |\n|---|---:|---:|---:|\n| no-op build (M) | 0.707 | 0.705 | -0.28% |\n| edit one fn (M) | 544.801 | 544.981 | +0.03% |\n| check (M) | 3839.18 | 3839.71 | +0.01% |\n| cache (KiB) | 1902.8 | 1902.8 | ±0 |\n| LSP session (G) | 10.9211 | 10.9012 | -0.18% |\n| traits check (M) | 1184.16 | 1184.7 | +0.05% |\n| traits edit (M) | 61.643 | 61.636 | -0.01% |\n| crates no-op (M) | 9.943 | 9.939 | -0.04% |\n| crates edit (M) | 315.125 | 315.211 | +0.03% |\n| patterns check (M) | 712.262 | 711.917 | -0.05% |\n| patterns edit (M) | 260.513 | 260.82 | +0.12% |\n\nNo KPI moves past run-to-run noise. None of the KPI inputs has a generic fn nothing calls whose bounds are markers only. Of the patterns input's, the four that have one are bounded by a trait with methods, and no placeholder is made for them. Made, those four cost patterns check +0.45%, and that cost is why the filter is there.\n\n## 4. Not covered yet\n\n- **Placeholder regions:** a placeholder has no region. `T: 'a` and the E0310 / E0309 tests need a type parameter's\n  region as a universal region, bounded by its `T: 'a` bounds.\n- **Bounds with methods:** a bound's methods and coercions of a placeholder to `dyn` are missing. They need the trait's\n  signatures, not an impl's.",
+        "contentHash": "7f6150b504c51f3b05b011c5e25acf2c2486ea59bcb50bbfbffb4aaa6e07f3ce"
+      },
+      "target": {
+        "source": "docs_reports_2026-11-21-07-region-check-4.ja",
+        "path": "docs/ja/reports/2026-11-21-07-region-check-4.md",
+        "startLine": 1,
+        "endLine": 75,
+        "quote": "# リージョン (ライフタイム) 検査、その 4: 何も呼ばないジェネリック関数 (issue #1)\n\n日付: 2026-11-21\n\nその 3 ([2026-11-21-06](2026-11-21-06-region-check-3.md)) は #39 でマージした。その最後の章に書いたとおり、`zustc check`\nはジェネリック関数を、要求されたインスタンスについてだけ検査する。ライフタイムと借用の、落ちている 451 のテストの\nうち 120 は、最初のエラーが何も呼ばないジェネリック関数の中にあった。この段は、それらの関数を検査する。\n\n## 1. 加えたもの\n\n- **代わりの型のインスタンス:** 検査の最後に、どのインスタンスも要求されなかったプログラムのジェネリック関数を、もう 1\n  回インスタンスにする。型パラメータごとに代わりの型を入れる (`Program::placeholder`)。\n  - 代わりの型は、フィールドのない struct で、名前は `T#` (プログラムの型が持たない名前)。\n  - パラメータの境界が名指すトレイトと auto トレイトを実装し、境界がそう言えば `Copy`。\n  - 除くもの: トレイトのデフォルトメソッド、クロージャの本体、依存するクレートの関数。\n- **マーカーの境界だけ:** 型パラメータの境界がマーカーのトレイト (`Copy`、`Sized`、`Send`、`Sync`、`Unpin`) だけの関数\n  に限る。代わりの型はトレイトのメソッドを持たない。それ以上の境界を持つ関数は、型検査の作業をしたあげくに、ほぼ\n  失敗するから。\n- **報告するもの:** この巡では、型検査のエラーは報告しない (代わりの型は、境界が許すことのすべてはできない)。借用検査と\n  リージョン検査のエラーは報告する。\n- **この巡が辿るもの:** 本体が作るクロージャを数段まで辿る。ほかのジェネリック関数のインスタンスは辿らない。foo の中の\n  `foo(p, |x| f(x))` は終わらないし、そうした関数は、自分の代わりの型のインスタンスを持つ。\n- **切り方:** `ZUSTC_NO_PLACEHOLDERS=1` で、この巡を除く。\n\n途中で見つけたもの:\n\n- **`_` の引数:** `_` の引数が 2 つあれば、リージョン検査にとって 2 つのローカル (`_#k`) になった。以前は 2 つ目が 1 つ\n  目の導く境界を隠し、`fn foo<'a, 'b>(_: &'a &'b (), v: &'b u8, _: &()) -> &'a u8` を拒否していた。\n- **フィールドが分からない型:** フィールドが分からない型 (代わりの型の関連型) の struct リテラルは、パニックでなく\n  エラーにした。\n- **ライフタイムを書く impl のメソッド:** ジェネリック関数のインスタンスが、トレイトにライフタイムを書く impl\n  (`impl Trait<'static> for ()`) のメソッドを呼ぶとき、その呼び出しは辿らない。ジェネリックな本体は、自分の境界\n  (`(): Trait<'a>`) のもとで、impl ではなくトレイトのシグネチャでそのメソッドを呼んだから。\n- **#39 のレビュー (minor):** ライフタイムの lint の走査で、ブロックコメントを入れ子にした。シグネチャの入力の\n  ライフタイムは、分からない型の後も数える。\n\n## 2. カバー率\n\n(tests/ui の compile-fail、rust-lang/rust 1.100.0)\n\n| | main (4735d9f) | この作業 |\n|---|---:|---:|\n| 通る compile-fail (偶然の通過は数えない) | 4013 | 4029 (+16) |\n\n- **失ったもの:** 前に通っていたテストで、いま通らないものはない。run-pass と check-pass は変わらない。\n- **通るようになったもの:** 16 件。その中には `borrowck/mut-borrow-in-loop.rs` (その 3 の暗黙の再借用。\n  `impl<'a, T> FuncWrapper<'a, T>` のメソッドの中) と `nll/issue-62007-assign-const-index.rs` がある。\n- **境界を広げた場合:** どんなトレイトの境界も通すと 17 件通る。マーカーの境界に絞ったので、コストのために 1 件を\n  あきらめた。\n\n## 3. KPI\n\n`bench/kpi_track.py --dry-run --lsp` で、main (4735d9f) とこの作業を、どちらもここで測った:\n\n| KPI | main (4735d9f) | この作業 (0d6779b) | 変化 |\n|---|---:|---:|---:|\n| no-op build (M) | 0.707 | 0.705 | -0.28% |\n| edit one fn (M) | 544.801 | 544.981 | +0.03% |\n| check (M) | 3839.18 | 3839.71 | +0.01% |\n| cache (KiB) | 1902.8 | 1902.8 | ±0 |\n| LSP session (G) | 10.9211 | 10.9012 | -0.18% |\n| traits check (M) | 1184.16 | 1184.7 | +0.05% |\n| traits edit (M) | 61.643 | 61.636 | -0.01% |\n| crates no-op (M) | 9.943 | 9.939 | -0.04% |\n| crates edit (M) | 315.125 | 315.211 | +0.03% |\n| patterns check (M) | 712.262 | 711.917 | -0.05% |\n| patterns edit (M) | 260.513 | 260.82 | +0.12% |\n\nどの KPI も、実行ごとの揺れを超えて動かない。KPI の入力には、境界がマーカーだけの、何も呼ばないジェネリック関数がない。patterns の入力にはそうした関数が 4 つあるが、どれもメソッドを持つトレイトで縛られているので、代わりの型を作らない。作れば patterns check は +0.45% になる。絞り込みはそのためにある。\n\n## 4. まだ扱わないもの\n\n- **代わりの型のリージョン:** 代わりの型はリージョンを持たない。`T: 'a` と E0310 / E0309 のテストには、型パラメータの\n  リージョンを universal なリージョンとして扱い、`T: 'a` の境界で縛ることが要る。\n- **メソッドを持つ境界:** 境界のメソッドと、代わりの型の `dyn` への変換がない。impl ではなくトレイトのシグネチャが要る。",
+        "contentHash": "7e4015db91ce56b3b8e629519180e446aadd58ea73864309e19ed9d0a95cd3b8"
+      },
+      "context": [],
+      "candidateId": "a795ba3e5187d5f38c33750566d3e99ef489bc4f5d266beeca97a400f776c343",
+      "contextHash": "74e65e68c1b778bfced01be26cec0dab66d60dd32d09c465681c7178583e7e1b",
+      "judgment": {
+        "choice": "supports",
+        "confidence": 0.97,
+        "probabilities": {
+          "supports": 0.98,
+          "contradicts": 0.02,
+          "unrelated": 0,
+          "insufficient_context": 0
+        }
+      }
+    },
+    {
+      "id": "docs_reports_2026-11-22-01-region-check-5",
+      "topic": "The Japanese file docs/ja/reports/2026-11-22-01-region-check-5.md is a faithful translation of docs/reports/2026-11-22-01-region-check-5.md",
+      "mode": "translation",
+      "reference": {
+        "source": "docs_reports_2026-11-22-01-region-check-5.en",
+        "path": "docs/reports/2026-11-22-01-region-check-5.md",
+        "startLine": 1,
+        "endLine": 80,
+        "quote": "# Region (lifetime) checking, part 5: a type parameter's region (issue #1)\n\nDate: 2026-11-22\n\nPart 4 ([2026-11-21-07](2026-11-21-07-region-check-4.md)) checks a generic fn nothing calls with a placeholder type\nfor each type parameter. That placeholder had no region, so `T: 'a` meant nothing, and the E0310 / E0309 tests (\"the\nparameter type `T` may not live long enough\") could not fail. This step gives it one.\n\n## 1. What was added\n\n- **A placeholder's region:** a placeholder has one region, covariant. It stands for what the parameter's values may\n  borrow. In its instance the region is universal, named as the placeholder (`T#`). It outlives what the parameter's\n  `T: 'a` / `T: 'static` bounds name, and what the parameters' types imply (`&'a T` implies `T: 'a`).\n- **The error:** a placeholder's region that must outlive another is \"the parameter type `T` may not live long\n  enough\": E0310 for 'static, E0309 otherwise.\n  - Example: `outlives(cell, t)` with `fn outlives<'a, T: 'a>(..)` in a fn whose `T` has no `T: 'a`.\n  - Example: `Box::new(v)` returned as `Box<dyn X + 'static>`.\n- **Cost on the hot path:** `lts_of` reads a placeholder only once one was made (an atomic flag), so the hot path does\n  not lock the struct table otherwise.\n- **Bounds that are traits:** a fn whose type parameters are bounded by traits gets a placeholder instance when its body\n  calls none of the methods those traits declare (`Box::new(v)` into `Box<dyn X>`).\n  - A call of them would check only the trait's declaration, and its typeck is the cost. On the patterns input, four\n    such fns cost +0.5%.\n  - A placeholder's method resolves to its bounds' trait's declaration; a trait of a module is found by the last name\n    of its path.\n  - A trait method with no body is called for a placeholder `Self`. Its instance is not compiled.\n- **Unsizing casts:** `Box::new(v) as Box<dyn Tr + 'static>` is a coercion. The value flows into the type written.\n- **`dyn Tr + '_`:** in a signature it is an elided lifetime, a fresh one at each call. It is not the default, which in\n  `Box<dyn Tr>` is 'static. A signature that writes only that `'_` used to read as having no regions, so\n  `get_v(Box::new(h) as Box<dyn G>)` with `fn get_v(gc: Box<dyn G + '_>)` was rejected.\n- **E0594 and its kind (review of #40):** the borrow check's kind of errors that lowering itself returns (E0594 for\n  `m[&k] = v` of a HashMap, `cannot borrow`, E0596, E0384) are reported in placeholder instances too, not left out\n  with the typeck errors.\n\n- **Review of #42:** what a bound's trait requires of its `Self` (`trait Tr: 'static`, `trait Q<'a>: 'a`, through\n  supertraits for 'static) holds of the placeholder: `fn boxed<T: Tr>(v: T) -> Box<dyn Tr + 'static>` was rejected\n  (E0310). A raw pointer to a value with no trait object in it, cast to a pointer to a trait object\n  (`p as *const (dyn Tr + 'static)`), is an unsizing coercion: the value's regions outlive the object's lifetime.\n\n## 2. Coverage\n\n(tests/ui compile-fail, rust-lang/rust 1.100.0)\n\n| | main (548feb9) | this work |\n|---|---:|---:|\n| compile-fail passing (accidental ones not counted) | 4038 | 4050 (+12) |\n\n- No test that passed before fails now; run-pass and check-pass do not change.\n- Among the new ones: `nll/ty-outlives/ty-param-fn.rs`, `nll/ty-outlives/ty-param-fn-body.rs`,\n  `regions/regions-close-param-into-object.rs`, `regions/regions-close-over-type-parameter-1.rs`,\n  `regions/regions-infer-bound-from-trait.rs`, `underscore-lifetime/dyn-trait-underscore.rs`.\n\n## 3. KPIs\n\n`bench/kpi_track.py --dry-run --lsp`, main (38e288b) and this work on it, both measured here, one after the other (main\nhas moved on since to 548feb9, merged here; this work changes no code of #36):\n\n| KPI | main (38e288b) | this work (3bceef2) | change |\n|---|---:|---:|---:|\n| no-op build (M) | 0.706 | 0.706 | ±0 |\n| edit one fn (M) | 545.737 | 546.168 | +0.08% |\n| check (M) | 3834.36 | 3834.41 | ±0 |\n| cache (KiB) | 1902.8 | 1902.8 | ±0 |\n| LSP session (G) | 10.9195 | 10.9092 | -0.09% |\n| traits check (M) | 1188.4 | 1188.53 | +0.01% |\n| traits edit (M) | 61.609 | 61.606 | ±0 |\n| crates no-op (M) | 9.942 | 9.94 | -0.02% |\n| crates edit (M) | 315.721 | 315.694 | -0.01% |\n| patterns check (M) | 713.791 | 713.875 | +0.01% |\n| patterns edit (M) | 260.857 | 260.602 | -0.10% |\n\nNo KPI moves past run-to-run noise: `lts_of`'s atomic flag keeps the struct table's lock off the hot path, and on the\nKPI inputs no placeholder's region is checked (no instance has a `T#` universal region).\n\n## 4. Not covered yet\n\n- **Projections:** the region of a projection of a type parameter (`<T as Tr>::Output: 'a`). A placeholder has no\n  associated types, so those fns are not checked (`nll/ty-outlives/projection-*`).\n- **`impl Trait` results:** the regions an `impl Trait` result captures (`type_parameters_captured`).\n- **Async fns:** their placeholder instances.",
+        "contentHash": "19263579319d9f7671ca8bc70a42c817438bf867bb36f8749b4092861ce7bf2d"
+      },
+      "target": {
+        "source": "docs_reports_2026-11-22-01-region-check-5.ja",
+        "path": "docs/ja/reports/2026-11-22-01-region-check-5.md",
+        "startLine": 1,
+        "endLine": 79,
+        "quote": "# リージョン (ライフタイム) 検査、その 5: 型パラメータのリージョン (issue #1)\n\n日付: 2026-11-22\n\nその 4 ([2026-11-21-07](2026-11-21-07-region-check-4.md)) は、何も呼ばないジェネリック関数を、型パラメータごとの代わりの\n型で検査する。その代わりの型はリージョンを持たなかった。そのため `T: 'a` は何の意味も持たず、E0310 / E0309 のテスト\n(「the parameter type `T` may not live long enough」) は落ちようがなかった。この段は、代わりの型にリージョンを持たせる。\n\n## 1. 加えたもの\n\n- **代わりの型のリージョン:** 代わりの型はリージョンを 1 つ持ち、共変。パラメータの値が借りうるものを表す。\n  インスタンスの中では universal なリージョンで、名前は代わりの型と同じ (`T#`)。パラメータの `T: 'a` / `T: 'static`\n  の境界が名指すものと、引数の型が導くもの (`&'a T` は `T: 'a` を導く) より長生きする。\n- **エラー:** 代わりの型のリージョンが、ほかのリージョンより長生きする必要があれば「the parameter type `T` may not\n  live long enough」。'static に対してなら E0310、それ以外なら E0309。\n  - 例: `T` が `T: 'a` を持たない関数の中の、`fn outlives<'a, T: 'a>(..)` への呼び出し `outlives(cell, t)`。\n  - 例: `Box<dyn X + 'static>` として返す `Box::new(v)`。\n- **よく通る経路のコスト:** `lts_of` は、代わりの型を作ったあとでだけ代わりの型を見る (atomic のフラグ)。それまでは\n  struct の表のロックを取らない。\n- **トレイトの境界:** 型パラメータがトレイトで縛られた関数も、本体がそのトレイトの宣言するメソッドを 1 つも呼ばなければ、\n  代わりの型のインスタンスを作る (`Box::new(v)` を `Box<dyn X>` へ)。\n  - それらのメソッドの呼び出しで検査できるのはトレイトの宣言だけで、コストはその型検査にかかる。patterns の入力では、\n    そうした関数 4 つで +0.5% だった。\n  - 代わりの型のメソッドは、境界のトレイトの宣言に解決する。モジュールの中のトレイトは、パスの最後の名前で引く。\n  - 本体のないトレイトのメソッドも、代わりの型の `Self` については呼べる (そのインスタンスはコンパイルしない)。\n- **unsize のキャスト:** `Box::new(v) as Box<dyn Tr + 'static>` は型の変換で、値は書いた型へ流れる。\n- **`dyn Tr + '_`:** シグネチャの中では省略したライフタイムで、呼び出しごとに新しいものになる。既定のライフタイム\n  (`Box<dyn Tr>` なら 'static) ではない。その `'_` だけを書くシグネチャは、リージョンを持たないものとして読まれて\n  いた。そのため `fn get_v(gc: Box<dyn G + '_>)` に対する `get_v(Box::new(h) as Box<dyn G>)` を拒否していた。\n- **E0594 などの借用のエラー (#40 のレビュー):** lowering が自分で返す借用の種類のエラーは、代わりの型のインスタンスでも\n  報告する。HashMap の `m[&k] = v` の E0594、`cannot borrow`、E0596、E0384 がそれにあたる。型検査のエラーと一緒に\n  捨てない。\n\n- **#42 のレビュー:** 境界のトレイトが自分の `Self` に求めること (`trait Tr: 'static`、`trait Q<'a>: 'a`。'static なら親\n  トレイトを通しても) は、代わりの型についても成り立つ。`fn boxed<T: Tr>(v: T) -> Box<dyn Tr + 'static>` を拒否\n  (E0310) していた。トレイトオブジェクトを含まない値への生ポインタを、トレイトオブジェクトへのポインタへキャストする\n  こと (`p as *const (dyn Tr + 'static)`) は unsize の変換で、値のリージョンはオブジェクトのライフタイムより長生きする。\n\n## 2. カバー率\n\n(tests/ui の compile-fail、rust-lang/rust 1.100.0)\n\n| | main (548feb9) | この作業 |\n|---|---:|---:|\n| 通る compile-fail (偶然の通過は数えない) | 4038 | 4050 (+12) |\n\n- 前に通っていたテストで、いま通らないものはない。run-pass と check-pass は変わらない。\n- 通るようになったものの例: `nll/ty-outlives/ty-param-fn.rs`、`nll/ty-outlives/ty-param-fn-body.rs`、\n  `regions/regions-close-param-into-object.rs`、`regions/regions-close-over-type-parameter-1.rs`、\n  `regions/regions-infer-bound-from-trait.rs`、`underscore-lifetime/dyn-trait-underscore.rs`。\n\n## 3. KPI\n\n`bench/kpi_track.py --dry-run --lsp` で、main (38e288b) とその上のこの作業を、どちらもここで、順に測った (main はその後\n548feb9 へ進み、ここに取り込んだ。この作業は #36 のコードを変えない):\n\n| KPI | main (38e288b) | この作業 (3bceef2) | 変化 |\n|---|---:|---:|---:|\n| no-op build (M) | 0.706 | 0.706 | ±0 |\n| edit one fn (M) | 545.737 | 546.168 | +0.08% |\n| check (M) | 3834.36 | 3834.41 | ±0 |\n| cache (KiB) | 1902.8 | 1902.8 | ±0 |\n| LSP session (G) | 10.9195 | 10.9092 | -0.09% |\n| traits check (M) | 1188.4 | 1188.53 | +0.01% |\n| traits edit (M) | 61.609 | 61.606 | ±0 |\n| crates no-op (M) | 9.942 | 9.94 | -0.02% |\n| crates edit (M) | 315.721 | 315.694 | -0.01% |\n| patterns check (M) | 713.791 | 713.875 | +0.01% |\n| patterns edit (M) | 260.857 | 260.602 | -0.10% |\n\nどの KPI も、実行ごとの揺れを超えて動かない。`lts_of` の atomic のフラグで、よく通る経路は struct の表のロックを取らない。\nKPI の入力では、代わりの型のリージョンを検査するインスタンスはない (`T#` の universal なリージョンを持つものがない)。\n\n## 4. まだ扱わないもの\n\n- **射影型:** 型パラメータの射影型のリージョン (`<T as Tr>::Output: 'a`)。代わりの型は関連型を持たないので、そうした\n  関数は検査しない (`nll/ty-outlives/projection-*`)。\n- **`impl Trait` の結果:** `impl Trait` の結果が捕捉するリージョン (`type_parameters_captured`)。\n- **async fn:** async fn の代わりの型のインスタンス。",
+        "contentHash": "0b7d66a5b218e94994e47bbfcf5c76516a327e44e8847deb86438b9389f229ab"
+      },
+      "context": [],
+      "candidateId": "34f3a5f5e4ec13256105c07bdfe3d4d24f142a84bd807085f71bd09340737d6c",
+      "contextHash": "f0d2be59aa7f66b5393e14f52bebb261bbc73ff0e17d8864466d2fbbacc92e53",
+      "judgment": {
+        "choice": "supports",
+        "confidence": 0.93,
+        "probabilities": {
+          "supports": 0.95,
+          "contradicts": 0.04,
+          "unrelated": 0,
+          "insufficient_context": 0.01
+        }
+      }
+    },
+    {
+      "id": "docs_reports_2026-11-22-02-region-check-6",
+      "topic": "The Japanese file docs/ja/reports/2026-11-22-02-region-check-6.md is a faithful translation of docs/reports/2026-11-22-02-region-check-6.md",
+      "mode": "translation",
+      "reference": {
+        "source": "docs_reports_2026-11-22-02-region-check-6.en",
+        "path": "docs/reports/2026-11-22-02-region-check-6.md",
+        "startLine": 1,
+        "endLine": 122,
+        "quote": "# Region (lifetime) checking, part 6: placeholders' regions everywhere, and the borrow check's mutability (issue #1)\n\nDate: 2026-11-22\n\nPart 5 ([2026-11-22-01](2026-11-22-01-region-check-5.md)) was merged with #42. Its placeholder's region was a fresh\nvariable wherever no value of the parameter's type carried it. This step makes it the same region wherever its type\nis, checks more of what nothing calls, and adds the borrow check's mutability rules that the failing tests about\nborrows needed most.\n\n## 1. What was added\n\n### Region check\n\n- **A placeholder's region, wherever its type is:** a type written as an argument (`with_restriction::<T>(x)`) or in an\n  annotation (`let _: &'static T;`) has the placeholder's universal region, not a fresh one.\n  - The gate counts a placeholder's region, so a fn whose parameters have no region but its `T` is checked.\n  - E0311 when the region the placeholder must outlive has no name (`'_`).\n- **Bounds that write lifetimes:** a placeholder's method of a bound `G: GetRef<'a, isize>` is called with the trait's\n  lifetimes set to those the bound writes.\n  - What the trait's declaration requires (`fn method<'y: 'x>`) is the caller's to prove.\n  - A type parameter of the trait that the arguments do not solve (the `T` of `GetRef<'a, T>`) comes from the\n    instantiated signature.\n  - A fn that calls such a method gets a placeholder instance: its call says something of the regions.\n- **Trait default methods:** a trait's default method that no impl uses is checked with a placeholder `Self` bounded by\n  the trait. Its calls of the trait's methods take the trait's lifetimes by name (`self.a()` with\n  `fn a(&'a self)` in `fn b(&self)` is \"lifetime may not live long enough\").\n\n### Borrow check\n\n- **`ref` bindings:** the binding of `ref x` / `ref mut x`, or one by reference of the default binding mode, is not\n  `mut` itself: `&mut x` of it is E0596.\n- **Immutable statics:** an assignment to a static not declared `mut`, or to a part of one, is E0594.\n- **Slices by range:** `&x[a..b]` / `&mut x[a..b]` is a loan of x's elements. It is E0596 behind a `&`, and it conflicts\n  as `&x[i]` does.\n- **Many borrows of a local not `mut`:** two or more are one error at its declaration, after the function's other\n  errors, as rustc reports them.\n- **Closures:**\n  - one that mutates what it captures is `FnMut`: a call of it by name borrows it mutably (E0596 when its binding is not\n    `mut`). `&mut x;` in its body is such a mutation.\n  - one that holds a `&mut` of a capture is not `Copy` (E0382 when it is moved twice).\n  - one whose body moves a capture that is not `Copy` out of itself (`|| drop(v)`) is `FnOnce`: a call of it by name\n    takes it (E0382 when it is called again).\n- **Arrays matched by value:** `let [_, _, x] = a;` moves `a[2]`, a place of its own, and `rest @ ..` the elements\n  between. An array pattern tests nothing of the array itself.\n- **`for x in v`:** a Vec or an array by value (not `Copy`) is taken by the loop. A use after it is E0382.\n- **Closures where `Fn` is wanted:** a closure passed where a bound wants `Fn` may not mutate what it captures: E0594\n  for an assignment, E0596 for a `&mut` or a `&mut self` method (in a closure inside it too), at the mutation.\n\n### Review of #43\n\n- An index (`&a[2]`) reads an array pattern's moved element (`let [_, _, s] = a;`).\n- A move closure that only mutates a capture that is not `Copy` (`move || s.push_str(\"x\")`) is `FnMut`. The test for\n  `FnOnce` looks for a method that takes `self`, or a pattern that binds a part by value, in the macros' arguments too.\n- `m::N = 1` of an immutable static in a module is E0594, as `N = 1` is.\n- Another type parameter of a trait's default method (`G: Get<'b>`) keeps its bound's lifetimes; only `Self` takes\n  the trait's.\n- A closure passed by name where a bound wants `Fn` / `FnMut` (`wants_fn(c)`) is E0525 at the closure, when it is only\n  `FnMut` / `FnOnce`.\n- `for x in v.iter().copied()` / `.cloned()` does not take v. It also emptied v at run time (v.len() was 0 after the\n  loop), and `.cloned()` now clones each element (a `Clone::clone` of a reference to it, a user's `Clone` too), not a\n  copy of its bits.\n- `for x in v.iter()` / `v.iter_mut()` (through `copied`, `cloned`, `enumerate`, `rev`) borrows v for the loop, as `&v`\n  does: `v.push(..)` in its body is E0502.\n- An `FnMut` closure called through references is a `&mut` of what they point to: E0596 when one of them is a `&`\n  (`&&mut c`), accepted through `&mut` ones.\n- `a[1] = x` does not reinitialize the elements an array pattern moved (an index is some element, not a known one).\n- A `rest @ ..` moves its elements as one place (`a[1..19]`), so the work does not grow with the array's length.\n- `for x in mk().iter().cloned()` (a Vec or an array a call, a macro or a literal makes, under adapters) puts the value in\n  a local of the loop's own block first, which drops it when the loop is done. Before, such a temporary leaked (its\n  buffer, on main too; its elements, with `.cloned()` cloning them).\n- A placeholder's bound is found by the trait's whole path before its last name.\n- A builtin method's result (`v.iter()` of `&[T]`) keeps a placeholder's region its own, not the receiver's:\n  `v.iter().count()` in a generic fn nothing calls was \"`'_` must outlive `T#`\".\n\n## 2. Coverage\n\n(tests/ui compile-fail, rust-lang/rust 1.100.0)\n\n| | main (2c8411a) | this work |\n|---|---:|---:|\n| compile-fail passing (accidental ones not counted) | 4050 | 4097 (+47) |\n\n- No test that passed before fails now; run-pass and check-pass do not change.\n- Among the new ones: `regions/regions-early-bound-error.rs`, `lifetimes/elided-self-lifetime-in-trait-fn.rs`,\n  `error-codes/E0311.rs`, `borrowck/borrowck-move-out-from-array.rs`, `loops/issue-82916.rs`,\n  `unboxed-closures/unboxed-closures-infer-fnonce-call-twice.rs`, `closures/issue-80313-mutation-in-move-closure.rs`.\n- tests/security: `borrow_slice_into_vec_then_clear` passes; its todo line and its TODO.md entry are removed.\n\n## 3. KPIs\n\n`bench/kpi_track.py --dry-run --lsp`, main (2c8411a) and this work, both measured here, one after the other (the last\ncommit, closures where `Fn` is wanted, came after; it adds a test only where a closure is passed to a `Fn` bound):\n\n| KPI | main (2c8411a) | this work (158a07b) | change |\n|---|---:|---:|---:|\n| no-op build (M) | 0.706 | 0.706 | ±0 |\n| edit one fn (M) | 545.857 | 546.171 | +0.06% |\n| check (M) | 3847.26 | 3849.34 | +0.05% |\n| cache (KiB) | 1902.8 | 1902.8 | ±0 |\n| LSP session (G) | 10.9081 | 10.9068 | -0.01% |\n| traits check (M) | 1189.96 | 1189.53 | -0.04% |\n| traits edit (M) | 61.563 | 61.643 | +0.13% |\n| crates no-op (M) | 9.944 | 9.94 | -0.04% |\n| crates edit (M) | 315.907 | 315.795 | -0.04% |\n| patterns check (M) | 714.134 | 714.691 | +0.08% |\n| patterns edit (M) | 260.856 | 260.726 | -0.05% |\n\nNo KPI moves past run-to-run noise there. The review's fixes came after, and the PR's KPI workflow measured them (base\n2c8411a, head 26835d6): check +0.40%, patterns check +0.35%, traits check +0.11%, the others within ±0.15%. Most of the\ncheck's was the immutable-static test on every assignment; it now runs only for a program that has such a static.\nMeasured here with cachegrind after that (`zustc check`, instructions): the check input +0.04%, the patterns input\n+0.28%. The rest is the borrow check's new work: the loans of `for x in v.iter()` and of slices by range, the moves of\n`for x in v`, which make more functions need the loans' analysis.\n\n## 4. Not covered yet\n\n- **Tail expressions' temporaries:** a temporary of a block's tail expression lives to the end of the enclosing\n  statement, after the block's locals (before edition 2024). One that borrows a local of the block is E0597\n  (`nll/issue-54556-*`). zustc has no notion of the edition yet.\n- **Projections and `impl Trait`:** as in part 5.\n- **Constant conditions:** the borrow check's graph takes one edge of a constant condition, so `false || { i = 5; true }`\n  initializes i for it (rustc: E0381).",
+        "contentHash": "b09eecae54e38817770d12d8e002edf421f31d370cb864e31ad2b483dbb0ec65"
+      },
+      "target": {
+        "source": "docs_reports_2026-11-22-02-region-check-6.ja",
+        "path": "docs/ja/reports/2026-11-22-02-region-check-6.md",
+        "startLine": 1,
+        "endLine": 116,
+        "quote": "# リージョン (ライフタイム) 検査、その 6: どこでも同じ代わりの型のリージョンと、借用検査の可変性 (issue #1)\n\n日付: 2026-11-22\n\nその 5 ([2026-11-22-01](2026-11-22-01-region-check-5.md)) は #42 でマージした。その代わりの型のリージョンは、パラメータの型の\n値が運ばないところでは新しい変数だった。この段は、そのリージョンを型があるところならどこでも同じものにし、何も呼ばない\nものをもっと検査する。そして、借用についての落ちているテストがいちばん必要としていた、借用検査の可変性の規則を加える。\n\n## 1. 加えたもの\n\n### リージョン検査\n\n- **どこでも同じ代わりの型のリージョン:** 型引数として書いた型 (`with_restriction::<T>(x)`) や、注釈に書いた型\n  (`let _: &'static T;`) も、代わりの型の universal なリージョンを持つ。新しいリージョンにはならない。\n  - 関門は代わりの型のリージョンを数える。引数がリージョンを持たなくても、`T` を持つ関数は検査する。\n  - 代わりの型が長生きすべきリージョンが名前を持たない (`'_`) なら E0311。\n- **ライフタイムを書く境界:** 境界 `G: GetRef<'a, isize>` の代わりの型のメソッドは、トレイトのライフタイムを境界が書く\n  ものにして呼ぶ。\n  - トレイトの宣言が求めること (`fn method<'y: 'x>`) は、呼び出し側が示す。\n  - 引数から決まらないトレイトの型パラメータ (`GetRef<'a, T>` の `T`) は、インスタンスにしたシグネチャから取る。\n  - そうしたメソッドを呼ぶ関数も、代わりの型のインスタンスを作る。その呼び出しはリージョンについて何かを言うから。\n- **トレイトのデフォルトメソッド:** どの impl も使わないトレイトのデフォルトメソッドを、トレイトで縛った代わりの型の\n  `Self` で検査する。トレイトのメソッドの呼び出しは、トレイトのライフタイムを名前で取る (`fn b(&self)` の中の、\n  `fn a(&'a self)` に対する `self.a()` は「lifetime may not live long enough」)。\n\n### 借用検査\n\n- **`ref` の束縛:** `ref x` / `ref mut x` の束縛と、既定の束縛モードで参照になる束縛は、それ自体は `mut` でない。その\n  `&mut x` は E0596。\n- **不変の static:** `mut` と宣言していない static、またはその一部への代入は E0594。\n- **範囲のスライス:** `&x[a..b]` / `&mut x[a..b]` は x の要素の貸し出し。`&` の向こうなら E0596 で、`&x[i]` と同じように\n  衝突する。\n- **`mut` でないローカルへのたくさんの借用:** 2 つ以上なら、rustc と同じく、宣言の位置の 1 つのエラーにして、関数の\n  ほかのエラーの後に報告する。\n- **クロージャ:**\n  - 捕捉したものを変更するクロージャは `FnMut`。名前で呼ぶと可変で借りる (束縛が `mut` でなければ E0596)。本体の\n    `&mut x;` もそうした変更。\n  - 捕捉の `&mut` を持つクロージャは `Copy` でない (2 回ムーブすれば E0382)。\n  - `Copy` でない捕捉を本体が外へムーブするクロージャ (`|| drop(v)`) は `FnOnce`。名前で呼ぶとそれを取る (もう 1 回\n    呼べば E0382)。\n- **値でマッチする配列:** `let [_, _, x] = a;` は `a[2]` をムーブする。それはそれだけの場所。`rest @ ..` は間の要素を\n  ムーブする。配列のパターンは、配列そのものを何も調べない。\n- **`for x in v`:** 値で回す Vec や配列 (`Copy` でないもの) は、ループが取る。その後で使えば E0382。\n- **`Fn` が期待されるところのクロージャ:** 境界が `Fn` を求めるところに渡すクロージャは、捕捉したものを変更できない。\n  代入なら E0594、`&mut` や `&mut self` のメソッドなら E0596 で (中のクロージャでも)、変更の位置に報告する。\n\n### #43 のレビュー\n\n- 添字 (`&a[2]`) は、配列のパターンがムーブした要素 (`let [_, _, s] = a;`) を読む。\n- `Copy` でない捕捉を変更するだけの move クロージャ (`move || s.push_str(\"x\")`) は `FnMut`。`FnOnce` の判定は、`self` を\n  取るメソッドや、一部を値で束縛するパターンを探す (マクロの引数の中も)。\n- モジュールの中の不変の static への `m::N = 1` も、`N = 1` と同じく E0594。\n- トレイトのデフォルトメソッドのほかの型パラメータ (`G: Get<'b>`) は、自分の境界のライフタイムを持つ。トレイトの\n  ライフタイムを取るのは `Self` だけ。\n- 境界が `Fn` / `FnMut` を求めるところに名前で渡すクロージャ (`wants_fn(c)`) は、`FnMut` / `FnOnce` でしかなければ、\n  クロージャの位置で E0525。\n- `for x in v.iter().copied()` / `.cloned()` は v を取らない。実行時にも v を空にしていた (ループの後の v.len() が 0)。\n  `.cloned()` は、要素のビットを写さずに、要素ごとに複製する (要素への参照の `Clone::clone`。ユーザの `Clone` も)。\n- `for x in v.iter()` / `v.iter_mut()` (`copied`、`cloned`、`enumerate`、`rev` を通しても) は、`&v` と同じく、ループの間\n  v を借りる。本体の `v.push(..)` は E0502。\n- 参照を通して呼ぶ `FnMut` のクロージャは、指す先の `&mut`。そのどれかが `&` なら (`&&mut c`) E0596、`&mut` だけなら通す。\n- `a[1] = x` は、配列のパターンがムーブした要素を初期化し直さない (添字はどれかの要素で、決まった要素ではない)。\n- `rest @ ..` は間の要素を 1 つの場所 (`a[1..19]`) としてムーブする。作業が配列の長さで増えないように。\n- `for x in mk().iter().cloned()` (呼び出し、マクロ、リテラルが作る Vec や配列に、アダプタをつけたもの) は、値をまずループ\n  自身のブロックのローカルに置く。ループが終われば、それを drop する。以前は、そうした一時値が漏れていた (バッファは\n  main でも。要素は、`.cloned()` が複製するようになってから)。\n- 代わりの型の境界は、最後の名前より先に、トレイトのパス全体で探す。\n- 組み込みのメソッドの結果 (`&[T]` の `v.iter()`) の中の代わりの型のリージョンは、受け手のものでなく、代わりの型自身のもの。\n  何も呼ばないジェネリック関数の中の `v.iter().count()` は「`'_` must outlive `T#`」になっていた。\n\n## 2. カバー率\n\n(tests/ui の compile-fail、rust-lang/rust 1.100.0)\n\n| | main (2c8411a) | この作業 |\n|---|---:|---:|\n| 通る compile-fail (偶然の通過は数えない) | 4050 | 4097 (+47) |\n\n- 前に通っていたテストで、いま通らないものはない。run-pass と check-pass は変わらない。\n- 通るようになったものの例: `regions/regions-early-bound-error.rs`、`lifetimes/elided-self-lifetime-in-trait-fn.rs`、\n  `error-codes/E0311.rs`、`borrowck/borrowck-move-out-from-array.rs`、`loops/issue-82916.rs`、\n  `unboxed-closures/unboxed-closures-infer-fnonce-call-twice.rs`、`closures/issue-80313-mutation-in-move-closure.rs`。\n- tests/security: `borrow_slice_into_vec_then_clear` が通るようになった。todo の行と TODO.md の項目は外した。\n\n## 3. KPI\n\n`bench/kpi_track.py --dry-run --lsp` で、main (2c8411a) とこの作業を、どちらもここで、順に測った (最後のコミット、`Fn` が\n期待されるところのクロージャは、その後。クロージャを `Fn` の境界に渡すところでだけ検査を足す):\n\n| KPI | main (2c8411a) | この作業 (158a07b) | 変化 |\n|---|---:|---:|---:|\n| no-op build (M) | 0.706 | 0.706 | ±0 |\n| edit one fn (M) | 545.857 | 546.171 | +0.06% |\n| check (M) | 3847.26 | 3849.34 | +0.05% |\n| cache (KiB) | 1902.8 | 1902.8 | ±0 |\n| LSP session (G) | 10.9081 | 10.9068 | -0.01% |\n| traits check (M) | 1189.96 | 1189.53 | -0.04% |\n| traits edit (M) | 61.563 | 61.643 | +0.13% |\n| crates no-op (M) | 9.944 | 9.94 | -0.04% |\n| crates edit (M) | 315.907 | 315.795 | -0.04% |\n| patterns check (M) | 714.134 | 714.691 | +0.08% |\n| patterns edit (M) | 260.856 | 260.726 | -0.05% |\n\nそこでは、どの KPI も実行ごとの揺れを超えて動かない。レビューの修正はその後で、PR の KPI のワークフローが測った (base\n2c8411a、head 26835d6): check +0.40%、patterns check +0.35%、traits check +0.11%、ほかは ±0.15% 以内。check の分の多くは、\n代入のたびの不変の static の検査だった。いまは、そうした static を持つプログラムでだけ検査する。その後にここで\ncachegrind で測ると (`zustc check` の命令数): check の入力で +0.04%、patterns の入力で +0.28%。残りは借用検査の新しい作業で、\n`for x in v.iter()` と範囲のスライスの貸し出し、`for x in v` のムーブが、貸し出しの解析の要る関数を増やす。\n\n## 4. まだ扱わないもの\n\n- **末尾の式の一時値:** ブロックの末尾の式の一時値は、ブロックのローカルより後、囲む文の終わりまで生きる (edition 2024\n  より前)。ブロックのローカルを借りる一時値は E0597 (`nll/issue-54556-*`)。zustc はまだ edition を持たない。\n- **射影型と `impl Trait`:** その 5 と同じ。\n- **定数の条件:** 借用検査のグラフは、定数の条件では片方の辺だけを取る。そのため `false || { i = 5; true }` は i を\n  初期化したことになる (rustc: E0381)。",
+        "contentHash": "9d3e9c86df26ffe5cd590234027cb161546287b32a8223f6766e0cc603fd927f"
+      },
+      "context": [],
+      "candidateId": "c0e8ef0925e5fb493f9e8f27ef82b709e40a72871fc98e275406c960686c2ff2",
+      "contextHash": "e6ee8a7c0ecfcc1d24cf3e3a49387253a59f79cbb14f5dfe17684e41f47ac559",
+      "judgment": {
+        "choice": "supports",
+        "confidence": 0.92,
+        "probabilities": {
+          "supports": 0.94,
+          "contradicts": 0.05,
+          "unrelated": 0,
+          "insufficient_context": 0.01
+        }
+      }
+    },
+    {
+      "id": "docs_reports_2026-11-22-03-zurgo-build-scripts",
+      "topic": "The Japanese file docs/ja/reports/2026-11-22-03-zurgo-build-scripts.md is a faithful translation of docs/reports/2026-11-22-03-zurgo-build-scripts.md",
+      "mode": "translation",
+      "reference": {
+        "source": "docs_reports_2026-11-22-03-zurgo-build-scripts.en",
+        "path": "docs/reports/2026-11-22-03-zurgo-build-scripts.md",
+        "startLine": 1,
+        "endLine": 99,
+        "quote": "# zurgo M1: build scripts, `env!`, and proc-macro stubs\n\nDate: 2026-11-22\n\nM0 built Cargo packages without running their build scripts, and stopped on any proc-macro dependency. This is the\nsecond milestone of mizchi/zust#28 and the start of step W0 of the wasm-bindgen roadmap (mizchi/zust#38). Usage:\n[zurgo.md](../zurgo.md).\n\n## 1. What changed\n\n- **zustc: a crate's own cfgs and compile-time environment.**\n  - `env!` / `option_env!` are expanded when a file is read. They read the crate's environment first, then zustc's\n    own, as rustc reads its own.\n  - `include!(concat!(env!(\"OUT_DIR\"), \"/x.rs\"))` therefore works.\n  - Each crate of a workspace can carry cfgs (`cfg=name`, `cfg=name=value`) and environment variables\n    (`env=KEY=VALUE`).\n- **zurgo: build scripts.**\n  - A build script is compiled with its build-dependencies, by zustc when it can and by rustc otherwise.\n  - It runs with cargo's variables, and its `cargo:` / `cargo::` output is read.\n  - It runs again only when something it depends on changes.\n- **zurgo: cargo's variables for every crate.** `CARGO_PKG_*`, `CARGO_MANIFEST_DIR`, `CARGO_CRATE_NAME`, and\n  `CARGO_BIN_NAME` for a bin.\n- **zurgo: proc-macro dependencies are stubs.** A proc-macro crate is built as an empty library of its name, so a\n  crate that only re-exports it builds. Using one of its macros is an error naming mizchi/zust#29, not an attribute\n  dropped silently.\n- **zustc fixes found on the way:**\n  - `cfg!` inside the arguments of std's format macros (`println!(\"{}\", cfg!(unix))`) was never evaluated;\n  - `compile_error!`;\n  - `dyn Error + Send + Sync + UnwindSafe` (only `Send` and `Sync` counted as auto traits);\n  - `std::path::Display`;\n  - `fmt::Pointer`.\n\n## 2. Decisions\n\nThese were open questions in mizchi/zust#28:\n\n- **`RUSTC` for build scripts is the real rustc** (question 1). A script's probes (thiserror's and anyhow's nightly\n  probes, autocfg) and its version checks (rustversion, version_check) then see what they see under cargo. A crate\n  takes the same paths as in its cargo build. zustc follows a recent stable rustc, so those are the paths it must\n  support.\n- **The build-script compiler is zustc, with rustc as the fallback** (question 3, `--build-script-compiler auto`).\n  - Of the scripts tried, zustc compiles the fixture's `gen` script only. thiserror's, anyhow's, libc's, serde_core's\n    and the fixture's app script stop on std functions zustc lacks: `env::vars()`, `Command` with an `OsString`,\n    `process::Output`, `fs::create_dir`.\n  - rustc builds those, so every script runs.\n  - zurgo remembers which compiler built a script until its sources change, so a script zustc cannot build is not\n    tried again on every build.\n- **Proc-macro dependencies are stubs, with a check.**\n  - zustc drops an unknown attribute silently, so the stub alone could miscompile code that uses an attribute macro.\n  - zurgo therefore reads the macros a proc-macro crate defines (`#[proc_macro_derive(..)]`,\n    `#[proc_macro_attribute]`, `#[proc_macro]`). A crate of the build whose source uses one of its derives or\n    attributes stops the build before anything is compiled.\n  - Function-like macros expand to a `compile_error!`.\n\n## 3. Results\n\n`crates/zurgo/tests/zurgo.rs`:\n\n- **`build_scripts_match_cargo`.** A fixture package compared with `cargo run` under both `rustc` and `auto`. The\n  output is the same. The package has:\n  - a build script with a build-dependency, that reads `DEP_GEN_*` and writes code into `OUT_DIR`;\n  - `rustc-cfg` (also `name=\"value\"`) and `rustc-env`;\n  - `CARGO_PKG_*` with a pre-release version, `CARGO_CFG_*` and `PROFILE`;\n  - a dependency with `links` whose script emits metadata in both forms and a cfg that depends on a feature.\n\n  The test also checks that a second build runs no script, and that an edit of the file the app's script names in\n  `rerun-if-changed` runs only that script. A failing script stops the build with its output.\n- **thiserror 2.0.21's library builds.** An app that depends on it prints what its cargo build prints, and so it joins\n  `registry_crates_run_like_cargo`. The library needs:\n  - its build script, which writes `OUT_DIR/private.rs` from `CARGO_PKG_VERSION_PATCH` and probes `$RUSTC`;\n  - `include!(concat!(env!(\"OUT_DIR\"), \"/private.rs\"))`;\n  - the stub for thiserror-impl;\n  - the four zustc fixes above.\n\n  `#[derive(thiserror::Error)]` is the #29 error.\n- **`errors`.** A proc-macro dependency that is not used builds. Its attribute used is the #29 error, and so is its\n  function-like macro.\n\nCrates whose build scripts now run, and where they stop next. All of these are zustc's own gaps:\n\n| crate | build script | the crate itself |\n|---|---|---|\n| thiserror 2.0.21 | runs (rustc) | builds |\n| anyhow 1.0.104 | runs (rustc) | `error.rs:808`: a missing lifetime specifier (E0106) |\n| libc 0.2.191 | runs (rustc) | `mod types;` inside the `prelude!` macro |\n| serde_core 1.0.229 | runs (rustc) | `mod de;` inside the `crate_root!` macro |\n\nFor the last two, rustc looks for the module's file where the macro is expanded (the crate root). zustc looks\nbeside the file that defines the macro.\n\n## 4. Next\n\nFor W0 of mizchi/zust#38:\n- workspace builds for wasm32 (zustc's workspace build is x86-64 only);\n- crate identity apart from the extern name (two versions of one crate, renamed dependencies);\n- the compiler gaps on the way to wasm-bindgen-shared (the UI report, sections 3, 2.5 and 2.6).\n\nThen W1: proc macros themselves (mizchi/zust#29). The rustc path for build scripts already builds proc-macro crates\nas dylibs, which is backend A of #29.",
+        "contentHash": "3f20fe2b6114a55a9e0338c6890d2562ef2dc5e214a71408cb40de95692a02d6"
+      },
+      "target": {
+        "source": "docs_reports_2026-11-22-03-zurgo-build-scripts.ja",
+        "path": "docs/ja/reports/2026-11-22-03-zurgo-build-scripts.md",
+        "startLine": 1,
+        "endLine": 99,
+        "quote": "# zurgo M1: ビルドスクリプト、`env!`、proc-macro のスタブ\n\n日付: 2026-11-22\n\nM0 は Cargo のパッケージを、ビルドスクリプトを実行せずにビルドし、proc-macro の依存があれば止まった。これは\nmizchi/zust#28 の 2 つめのマイルストーンで、wasm-bindgen のロードマップ (mizchi/zust#38) の W0 の始まりである。\n使い方: [zurgo.md](../zurgo.md)。\n\n## 1. 変えたもの\n\n- **zustc: クレートごとの cfg とコンパイル時の環境。**\n  - `env!` / `option_env!` は、ファイルを読むときに展開する。まずクレートの環境を、次に zustc 自身の環境を読む\n    (rustc が自分の環境を読むのと同じ)。\n  - なので `include!(concat!(env!(\"OUT_DIR\"), \"/x.rs\"))` が動く。\n  - ワークスペースのクレートはそれぞれ、cfg (`cfg=name`、`cfg=name=value`) と環境変数 (`env=KEY=VALUE`) を持てる。\n- **zurgo: ビルドスクリプト。**\n  - ビルドスクリプトを、そのビルド用の依存と一緒に、zustc でできれば zustc で、できなければ rustc でコンパイルする。\n  - cargo の変数を付けて実行し、`cargo:` / `cargo::` の出力を読む。\n  - 依存するものが変わったときだけ、もう一度実行する。\n- **zurgo: どのクレートにも cargo の変数。** `CARGO_PKG_*`、`CARGO_MANIFEST_DIR`、`CARGO_CRATE_NAME`、bin なら\n  `CARGO_BIN_NAME`。\n- **zurgo: proc-macro の依存はスタブ。** proc-macro のクレートは、その名前の空のライブラリとしてビルドするので、それを\n  再エクスポートするだけのクレートはビルドできる。そのマクロのどれかを使うのは、mizchi/zust#29 を示すエラーになり、\n  属性を黙って捨てることはない。\n- **途中で見つけた zustc の直し:**\n  - std の書式のマクロの引数の中の `cfg!` (`println!(\"{}\", cfg!(unix))`) を、評価していなかった;\n  - `compile_error!`;\n  - `dyn Error + Send + Sync + UnwindSafe` (自動 trait として数えていたのは `Send` と `Sync` だけだった);\n  - `std::path::Display`;\n  - `fmt::Pointer`。\n\n## 2. 決めたこと\n\nmizchi/zust#28 で未決だった問い:\n\n- **ビルドスクリプトの `RUSTC` は本物の rustc にした** (問い 1)。スクリプトの試しのコンパイル (thiserror と anyhow\n  の nightly の試し、autocfg) と版の確認 (rustversion、version_check) は、cargo のときと同じものを見る。クレートは\n  cargo でビルドしたときと同じ道を通る。zustc は新しい安定版の rustc に従うので、その道こそ zustc が受け付けるべき\n  ものである。\n- **ビルドスクリプトのコンパイラは zustc で、だめなら rustc にした** (問い 3、`--build-script-compiler auto`)。\n  - 試したスクリプトのうち、zustc がコンパイルできるのはテストのパッケージの `gen` のものだけである。thiserror、\n    anyhow、libc、serde_core と、テストのパッケージのアプリのスクリプトは、zustc にない std の関数で止まる:\n    `env::vars()`、`OsString` を取る `Command`、`process::Output`、`fs::create_dir`。\n  - それらは rustc がビルドするので、どのスクリプトも実行できる。\n  - zurgo は、どちらがスクリプトをビルドしたかを、そのソースが変わるまで覚えておく。なので、zustc がビルドできない\n    スクリプトを、ビルドのたびに試し直すことはない。\n- **proc-macro の依存は、確かめた上でスタブにした。**\n  - zustc は知らない属性を黙って捨てるので、スタブだけでは、属性マクロを使うコードを間違ってコンパイルしうる。\n  - そこで zurgo は、proc-macro のクレートが定義するマクロ (`#[proc_macro_derive(..)]`、`#[proc_macro_attribute]`、\n    `#[proc_macro]`) を読む。ビルドのどれかのクレートのソースがその derive か属性を使っていれば、何もコンパイル\n    する前にビルドを止める。\n  - 関数のようなマクロは `compile_error!` に展開する。\n\n## 3. 結果\n\n`crates/zurgo/tests/zurgo.rs`:\n\n- **`build_scripts_match_cargo`。** テストのパッケージを、`rustc` と `auto` の両方で `cargo run` と比べる。出力は\n  同じである。そのパッケージには、次のものがある:\n  - ビルド用の依存を使い、`DEP_GEN_*` を読み、`OUT_DIR` にコードを書くビルドスクリプト;\n  - `rustc-cfg` (`name=\"value\"` も) と `rustc-env`;\n  - pre-release の版の `CARGO_PKG_*`、`CARGO_CFG_*`、`PROFILE`;\n  - `links` を持つ依存。そのスクリプトは、2 つの形で metadata を出し、feature によって決まる cfg を出す。\n\n  テストは、2 回めのビルドがどのスクリプトも実行しないこと、アプリのスクリプトが `rerun-if-changed` で名指しする\n  ファイルを変えると、そのスクリプトだけを実行することも確かめる。失敗するスクリプトは、その出力を付けてビルドを\n  止める。\n- **thiserror 2.0.21 のライブラリはビルドできる。** それに依存するアプリは、cargo でビルドしたものと同じものを出す\n  ので、`registry_crates_run_like_cargo` に加えた。ライブラリに要るもの:\n  - `CARGO_PKG_VERSION_PATCH` から `OUT_DIR/private.rs` を書き、`$RUSTC` を試すビルドスクリプト;\n  - `include!(concat!(env!(\"OUT_DIR\"), \"/private.rs\"))`;\n  - thiserror-impl のスタブ;\n  - 上の zustc の 4 つの直し。\n\n  `#[derive(thiserror::Error)]` は #29 のエラーになる。\n- **`errors`。** 使われない proc-macro の依存はビルドできる。その属性を使えば #29 のエラーで、関数のようなマクロも\n  同じである。\n\nいまビルドスクリプトを実行できるクレートと、次に止まる所。どれも zustc 自身の足りない所である:\n\n| クレート | ビルドスクリプト | クレートそのもの |\n|---|---|---|\n| thiserror 2.0.21 | 実行できる (rustc) | ビルドできる |\n| anyhow 1.0.104 | 実行できる (rustc) | `error.rs:808`: ライフタイムの指定がない (E0106) |\n| libc 0.2.191 | 実行できる (rustc) | `prelude!` マクロの中の `mod types;` |\n| serde_core 1.0.229 | 実行できる (rustc) | `crate_root!` マクロの中の `mod de;` |\n\nあとの 2 つでは、rustc はモジュールのファイルを、マクロを展開した場所 (クレートの根) から探す。zustc はマクロを\n定義したファイルのそばを探す。\n\n## 4. 次\n\nmizchi/zust#38 の W0 のために:\n- wasm32 向けのワークスペースのビルド (zustc のワークスペースのビルドは x86-64 だけ);\n- extern の名前とは別のクレートの同一性 (1 つのクレートの 2 つの版、名前を変えた依存);\n- wasm-bindgen-shared までの途中にあるコンパイラの足りない所 (UI のレポートの 3、2.5、2.6 節)。\n\n次に W1: proc macro そのもの (mizchi/zust#29)。ビルドスクリプトのための rustc の道は、すでに proc-macro のクレートを\ndylib としてビルドする。それが #29 のバックエンド A である。",
+        "contentHash": "95892fdc54470b0995a0d01730ca8baa3bbc3ea296233da09a8e0ad6b67940ca"
+      },
+      "context": [],
+      "candidateId": "58e45ff6cec39bbc8ee590dac4281cabdca32f25e49cdcf54b13117f584200fb",
+      "contextHash": "261872c1c7579d57f048dde9afcaf530fd5f9a715f3f99765b7d239dfb0ee652",
       "judgment": {
         "choice": "supports",
         "confidence": 1,
@@ -1131,9 +1301,9 @@
     }
   ],
   "coverage": {
-    "expected": 33,
-    "selected": 33,
-    "answered": 33,
+    "expected": 38,
+    "selected": 38,
+    "answered": 38,
     "missing": 0,
     "contradictions": 0,
     "unassessed": 0,
@@ -1142,9 +1312,9 @@
     "unboundDocuments": 0
   },
   "usage": {
-    "requests": 33,
-    "inputTokens": 175299,
-    "usd": 0.007362558000000001
+    "requests": 38,
+    "inputTokens": 210883,
+    "usd": 0.008857086
   },
   "errors": []
 }

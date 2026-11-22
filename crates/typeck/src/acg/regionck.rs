@@ -18,9 +18,9 @@
 
 use super::{Cx, Loc, Sp};
 use crate::fxhash::FxMap as HashMap;
-use crate::parse::{Expr, Stmt, Ty as PTy};
+use crate::parse::{Expr, GArg, Stmt, Ty as PTy};
 use crate::program::Program;
-use crate::types::{RSigSyn, Ty, R_ELIDED, R_ELIDED_ADT, R_STATIC, R_UNKNOWN};
+use crate::types::{RSigSyn, Ty, R_BOUND, R_DYN_ARGS, R_DYN_DEFAULT, R_ELIDED, R_ELIDED_ADT, R_FN, R_STATIC, R_UNKNOWN};
 
 /// Region variables of a value, aligned with the region slots of its type
 pub type RT = Vec<u32>;
@@ -56,13 +56,92 @@ impl Var {
     }
 }
 
+/// The region check of one function. What it tracks is in `st`, made when the check first writes it: a function the
+/// check leaves out (most of them: the gate, generic instances, the prelude) makes and drops none of it
 #[derive(Default)]
 pub struct Rg {
     pub on: bool,
+    /// The function may be checked (its own body, not a closure's), though the gate may have left it out
+    pub eligible: bool,
+    /// The `let` being lowered: where an error is reported for what has no position of its own (a block)
+    pub let_sp: Sp,
+    /// The function's own definition (of an instance: the generic one) and an instance's type arguments
+    pub base: u32,
+    pub inst_args: Vec<Ty>,
+    /// A function the gate left out: how its receiver elides (`&self`), and whether another receiver leaves the
+    /// result's regions unknown, for a check begun later (rg_late_on)
+    pub late: Option<(bool, bool)>,
+    /// A closure's body: its region signature (codes CLO_P + i: a region the bound binds, a placeholder; CLO_E + i:
+    /// one from outside the closure)
+    pub closure: Option<Box<crate::program::CloRg>>,
+    /// The check is on from the function's start whatever the gate says (compile's second run); the check began late
+    /// (rg_late_on); a local bound before it with no tree was met (the function is compiled again)
+    pub force: bool,
+    pub began_late: bool,
+    pub rerun: bool,
+    /// Nesting of call_fn (this and what follows: where lowering is, written whether the check is on or not)
+    pub depth: u32,
+    /// The receiver of the method call being lowered, as passed, and its position
+    pub recv: Option<(RT, Sp)>,
+    /// The last scrutinee's tree; the part of it the pattern being bound matches, and the region of the reference
+    /// matched through last (bindings in it are by reference)
+    pub scrut: Option<(Ty, RT)>,
+    pub pat: Option<(Ty, RT)>,
+    pub pat_ref: Option<u32>,
+    /// The method call being made (call_fn is given no span for it)
+    pub call_sp: Sp,
+    /// The elements' tree of the array or slice a slice pattern matches
+    pub pat_elem: Option<(Ty, RT)>,
+    /// The call being made is of a closure made where nothing was expected (by its definition): the regions of its
+    /// signature are one for all its calls (clo_shared)
+    pub shared_clo: Option<(u32, Option<usize>)>,
+    /// The state of the check (RgSt), read through Deref: a function that never writes it reads an empty one
+    pub st: Option<Box<RgSt>>,
+}
+
+impl std::ops::Deref for Rg {
+    type Target = RgSt;
+    #[inline]
+    fn deref(&self) -> &RgSt {
+        match &self.st {
+            Some(b) => b,
+            None => empty_st(),
+        }
+    }
+}
+
+impl std::ops::DerefMut for Rg {
+    #[inline]
+    fn deref_mut(&mut self) -> &mut RgSt {
+        self.st.get_or_insert_with(Default::default)
+    }
+}
+
+impl Rg {
+    /// Whether the state was made (written)
+    pub fn has_st(&self) -> bool {
+        self.st.is_some()
+    }
+}
+
+/// The state of a function whose check wrote nothing (never written)
+fn empty_st() -> &'static RgSt {
+    static E: std::sync::LazyLock<RgSt> = std::sync::LazyLock::new(RgSt::default);
+    &E
+}
+
+/// What the region check of a function tracks (Rg::st)
+#[derive(Default)]
+pub struct RgSt {
+    /// A closure's body (Rg::closure is set)
+    pub in_closure: bool,
     /// Region variables made (0 is `'static`)
     pub n: u32,
     /// The universal regions (not `'static`), with their names
     pub univ: Vec<(u32, String)>,
+    /// The placeholders of the instance's type parameters (zustc check of a generic fn nothing calls), with their
+    /// universal regions: a placeholder's region is the same wherever its type is
+    pub ph: Vec<(u32, u32)>,
     /// Outlives relations among universal regions the function may assume (a: b)
     pub known: Vec<(u32, u32)>,
     /// Constraints a: b, with where they come from
@@ -72,31 +151,200 @@ pub struct Rg {
     pub calls: HashMap<usize, (Ty, RT)>,
     /// The result of the last call lowered (at the depth of call_fn it was made at)
     pub last_call: Option<(u32, Ty, RT)>,
-    /// Nesting of call_fn
-    pub depth: u32,
-    /// The receiver of the method call being lowered, as passed, and its position
-    pub recv: Option<(RT, Sp)>,
     /// The tree of the return type
     pub ret: Option<RT>,
     /// The function's own lifetime parameters (in `RSigSyn::lts` order)
     pub lts: Vec<u32>,
     pub lt_names: Vec<String>,
     /// Variance of a struct / enum definition: its lifetime parameters, then its type parameters
-    pub variance: HashMap<u32, Vec<Var>>,
-    /// The function's own definition (of an instance: the generic one) and an instance's type arguments
-    pub base: u32,
-    pub inst_args: Vec<Ty>,
+    pub variance: HashMap<u32, std::sync::Arc<[Var]>>,
+    /// The definitions whose variance is being computed; whether a provisional one was read; the ones computed, in
+    /// order (see variance)
+    pub var_open: Vec<u32>,
+    pub var_cycle: bool,
+    pub var_log: Vec<u32>,
     /// Borrows of what the function owns (a local, not through a reference): (region, the place's text, where)
     pub loans: Vec<(u32, String, Sp)>,
+    /// Instantiating a type written in a body (`let` annotation, cast): a trait object's default lifetime is inferred
+    pub dyn_infer: bool,
     /// ZUSTC_RG_DEBUG: the kinds of values not followed
     pub missed: Vec<&'static str>,
-    /// The last scrutinee's tree; the part of it the pattern being bound matches, and the region of the reference
-    /// matched through last (bindings in it are by reference)
-    pub scrut: Option<(Ty, RT)>,
-    pub pat: Option<(Ty, RT)>,
-    pub pat_ref: Option<u32>,
     /// A match lowered as another (its or-pattern arms with guards split): the one lowered
     pub alias: HashMap<usize, &'static Expr>,
+    /// Values of no region borrowed as temporaries no constant promotion makes static (`&(x + 1)`, `&(5.f())`)
+    pub temps: HashMap<usize, Ty>,
+    /// Where values are returned (a borrow that escapes there is reported there: E0515)
+    pub ret_sps: Vec<Sp>,
+    /// A closure's body: the locals that are its captures, the region its environment is borrowed for, the regions
+    /// from outside
+    pub cap_locs: Vec<Loc>,
+    pub env_r: u32,
+    pub externals: Vec<u32>,
+    /// A closure's body: the regions its codes name (CLO_U: of the function it is in, related as there)
+    pub clo_regs: Vec<(u8, u32)>,
+    pub outer_univ: Vec<u32>,
+    /// CLO_S regions: only borrows of what the closure owns must not reach them
+    pub soft: Vec<u32>,
+    /// Rg::wf: imp's relations are required, at this span (not those of the fields: wf_declared)
+    pub wf_sp: Option<Sp>,
+    pub wf_no_fields: bool,
+    /// An impl's method: the tree of its self type (what `Self { .. }` builds)
+    pub self_tree: Option<(Ty, RT)>,
+    /// The region of each reborrow through a reference (`&mut *x`, `&v[0]` with v a reference), by the address of
+    /// its place: one that must outlive a universal region lives to the function's end (Rg::forever)
+    pub reborrows: Vec<(usize, u32)>,
+    /// Borrows of places the function owns, as reborrows (Rg::holders only: the region check reports those that
+    /// outlive the function)
+    pub owned_borrows: Vec<(usize, u32)>,
+    /// A closure's body: the regions of its captures of the function's locals (from outside)
+    pub cap_regions: Vec<u32>,
+    /// What imp finds of a struct's type below its own regions (its type arguments' and fields' relations), as
+    /// positions in its tree (u32::MAX: 'static), by (struct, depth, wf_no_fields); None: not by positions alone
+    pub imp_cache: HashMap<(u32, u32, bool), Option<Vec<(u32, u32)>>>,
+    /// The relations imp_rel makes, while imp computes entries of imp_cache
+    pub imp_rec: Vec<Vec<(u32, u32)>>,
+    /// imp_cache was taken from Insts (rg_begin), to be put back
+    pub imp_taken: bool,
+    pub clo_shared: Vec<(u32, Vec<u32>)>,
+    /// The trees of the type arguments of such a closure's calls (its parameters' and result's types)
+    pub clo_targs: Vec<(u32, Vec<Option<RT>>)>,
+}
+
+/// Closure region codes (Rg::closure): a placeholder (a region the expected signature binds), one from outside
+pub const CLO_P: u8 = 0;
+pub const CLO_E: u8 = 0x40;
+/// A region of the function the closure is in (a universal one there): related as that function knows
+pub const CLO_U: u8 = 0x80;
+/// A region of the result of a closure whose signature may come from an expected type it is coerced to: nothing the
+/// closure owns may be borrowed for it, what else it is related to is not known
+pub const CLO_S: u8 = 0xC0;
+
+/// How a closure's signature names its regions, while its codes are made
+struct CloCodes<'a> {
+    /// The lifetimes and type parameters of the callee (from outside the closure)
+    outer_lts: &'a [String],
+    tparams: &'a [String],
+    named: Vec<(String, u8)>,
+    np: u8,
+    ne: u8,
+    /// The code an elided region of the result takes (the one region of the inputs), else fresh
+    elided: Option<u8>,
+}
+
+impl CloCodes<'_> {
+    fn p(&mut self) -> u8 {
+        self.np = (self.np + 1).min(0x3F);
+        CLO_P + self.np - 1
+    }
+    fn e(&mut self) -> u8 {
+        self.ne = (self.ne + 1).min(0x3F);
+        CLO_E + self.ne - 1
+    }
+    fn named(&mut self, l: &str) -> u8 {
+        match l {
+            "'static" => R_STATIC,
+            "'_" => self.p(),
+            l => {
+                if let Some(&(_, c)) = self.named.iter().find(|x| x.0 == l) {
+                    return c;
+                }
+                let c = if self.outer_lts.iter().any(|x| x == l) { self.e() } else { self.p() };
+                self.named.push((l.to_string(), c));
+                c
+            }
+        }
+    }
+    fn elided(&mut self) -> u8 {
+        match self.elided {
+            Some(c) => c,
+            None => self.p(),
+        }
+    }
+
+    /// The codes of a value of type t written pt; false: not followed
+    fn of(&mut self, prog: &Program, pt: &PTy, t: Ty, out: &mut Vec<u8>, depth: u32) -> bool {
+        if depth > 12 {
+            return false;
+        }
+        let fresh = |out: &mut Vec<u8>| match count(prog, t, 0) {
+            Some(n) => {
+                out.extend(std::iter::repeat_n(R_ELIDED, n));
+                true
+            }
+            None => false,
+        };
+        match (pt, t) {
+            (PTy::Ref(l, _, pi), Ty::Ref(_, ti)) => {
+                let c = match l {
+                    None => self.elided(),
+                    Some(l) => self.named(l),
+                };
+                out.push(c);
+                self.of(prog, pi, *ti, out, depth + 1)
+            }
+            (PTy::Ptr(_, pi), Ty::Ptr(_, ti)) | (PTy::Slice(pi), Ty::Slice(ti)) | (PTy::Array(pi, _), Ty::Array(ti, _)) => self.of(prog, pi, *ti, out, depth + 1),
+            (PTy::Path(None, p), Ty::Box(ti)) if p.segs.last().is_some_and(|s| s.name == "Box") => match p.segs.last().and_then(|s| s.args.iter().find_map(|a| if let GArg::Ty(t) = a { Some(t) } else { None })) {
+                Some(pi) => self.of(prog, pi, *ti, out, depth + 1),
+                None => fresh(out),
+            },
+            // (the callee's type parameter: what it is instantiated with comes from outside)
+            (PTy::Path(None, p), _) if p.segs.len() == 1 && p.segs[0].args.is_empty() && self.tparams.iter().any(|x| *x == p.segs[0].name) => match count(prog, t, 0) {
+                Some(n) => {
+                    for _ in 0..n {
+                        let c = self.e();
+                        out.push(c);
+                    }
+                    true
+                }
+                None => false,
+            },
+            (PTy::Tuple(ps), Ty::Struct(sid)) if prog.is_tuple(sid) && prog.structs[sid as usize].args.len() == ps.len() => {
+                let args = prog.structs[sid as usize].args.clone();
+                ps.iter().zip(args).all(|(p, a)| self.of(prog, p, a, out, depth + 1))
+            }
+            (PTy::Path(None, p), Ty::Struct(sid)) if !is_closure(prog, sid) && p.segs.last().is_some_and(|s| s.name == prog.structs[prog.base_of(sid) as usize].name) => {
+                let Some(last) = p.segs.last() else { return false };
+                let n = lts_of(prog, prog.base_of(sid));
+                let written: Vec<&String> = last.args.iter().filter_map(|a| if let GArg::Lifetime(l) = a { Some(l) } else { None }).collect();
+                if written.len() == n {
+                    for l in written {
+                        let c = self.named(l);
+                        out.push(c);
+                    }
+                } else if written.is_empty() {
+                    for _ in 0..n {
+                        let c = self.elided();
+                        out.push(c);
+                    }
+                } else {
+                    return false;
+                }
+                let tys: Vec<&PTy> = last.args.iter().filter_map(|a| if let GArg::Ty(t) = a { Some(t) } else { None }).collect();
+                let args = prog.structs[sid as usize].args.clone();
+                if tys.len() != args.len() {
+                    return args.into_iter().all(|a| match count(prog, a, 0) {
+                        Some(k) => {
+                            out.extend(std::iter::repeat_n(R_ELIDED, k));
+                            true
+                        }
+                        None => false,
+                    });
+                }
+                tys.into_iter().zip(args).all(|(p, a)| self.of(prog, p, a, out, depth + 1))
+            }
+            _ => fresh(out),
+        }
+    }
+}
+
+/// t holds a trait object (whose lifetime a signature may leave to the default)
+pub fn has_dyn(prog: &Program, t: Ty, depth: u32) -> bool {
+    match t {
+        Ty::Dyn(_) => true,
+        Ty::Ref(_, i) | Ty::Ptr(_, i) | Ty::Box(i) | Ty::Array(i, _) | Ty::Slice(i) => has_dyn(prog, *i, depth + 1),
+        Ty::Struct(sid) if depth < 4 => prog.structs[sid as usize].args.iter().any(|&a| has_dyn(prog, a, depth + 1)),
+        _ => false,
+    }
 }
 
 fn kind(e: &Expr) -> &'static str {
@@ -136,12 +384,87 @@ pub fn enabled() -> bool {
     *ON.get_or_init(|| std::env::var_os("ZUSTC_NO_REGIONCK").is_none())
 }
 
+/// t ends in a trait object (`dyn Tr`, `S<dyn Tr>` with the object its last type argument): the last region of its
+/// tree is the object's
+fn dyn_tail(prog: &Program, t: Ty, depth: u32) -> bool {
+    match t {
+        Ty::Dyn(_) => true,
+        Ty::Struct(sid) if depth < 8 && !is_closure(prog, sid) => prog.structs[sid as usize].args.last().is_some_and(|&a| dyn_tail(prog, a, depth + 1)),
+        _ => false,
+    }
+}
+
 fn lts_of(prog: &Program, base: u32) -> usize {
-    prog.adt_regions.get(&base).map_or(0, |r| r.lts.len())
+    match prog.adt_regions.get(&base) {
+        Some(r) => r.lts.len(),
+        // (a type parameter's placeholder: one region, the parameter's (what its values may borrow))
+        None => prog.is_placeholder(base) as usize,
+    }
 }
 
 fn is_closure(prog: &Program, sid: u32) -> bool {
     prog.closure_of_struct.contains_key(&prog.base_of(sid))
+}
+
+/// A struct's definition, its base (an instance's generic one) and whether it is a tuple, with one lock of the
+/// table (an instance of a tuple is named `(A, B)`, the generic one `#tupleN`)
+#[inline]
+fn adt(prog: &Program, sid: u32) -> (&crate::program::StructDef, u32, bool) {
+    let sd = &prog.structs[sid as usize];
+    let tuple = sd.name.starts_with('(') || sd.name.starts_with("#tuple");
+    (sd, sd.base.unwrap_or(sid), tuple)
+}
+
+/// A closure's captures: their types (among its type arguments: a capture by reference is a pointer to it) and
+/// whether each is held by value
+fn captures(prog: &Program, sid: u32) -> Option<(&[Ty], &[bool])> {
+    let cd = prog.closures.get(prog.closure_of_struct.get(&prog.base_of(sid))?)?;
+    let args = prog.structs[sid as usize].args.get(cd.n_parent..cd.n_parent + cd.captures.len())?;
+    Some((args, &cd.moved))
+}
+
+/// The type parameters of a generic type g that a type c of the same shape instantiates
+fn bind_params(prog: &Program, g: Ty, c: Ty, sol: &mut [Option<Ty>], depth: u32) {
+    if depth > 12 {
+        return;
+    }
+    match (g, c) {
+        (Ty::Param(k), c) => {
+            if let Some(s @ None) = sol.get_mut(k as usize) {
+                *s = Some(c);
+            }
+        }
+        (Ty::Ref(_, a), Ty::Ref(_, b)) | (Ty::Ptr(_, a), Ty::Ptr(_, b)) | (Ty::Box(a), Ty::Box(b)) | (Ty::Slice(a), Ty::Slice(b)) | (Ty::Array(a, _), Ty::Array(b, _)) => bind_params(prog, *a, *b, sol, depth + 1),
+        (Ty::Struct(x), Ty::Struct(y)) if x != y && prog.base_of(x) == prog.base_of(y) => {
+            let (xa, ya) = (prog.structs[x as usize].args.clone(), prog.structs[y as usize].args.clone());
+            for (a, b) in xa.into_iter().zip(ya) {
+                bind_params(prog, a, b, sol, depth + 1);
+            }
+        }
+        _ => {}
+    }
+}
+
+/// The lifetimes a bound written as a string passes its trait (`GetRef<'a, isize>`: `'a`), in order
+fn bound_lts(b: &str) -> Vec<String> {
+    let (Some(i), Some(j)) = (b.find('<'), b.rfind('>')) else { return vec![] };
+    let Some(inner) = b.get(i + 1..j) else { return vec![] };
+    let (mut out, mut depth, mut from) = (vec![], 0i32, 0);
+    for (k, ch) in inner.char_indices().chain(std::iter::once((inner.len(), ','))) {
+        match ch {
+            '<' | '(' | '[' => depth += 1,
+            '>' | ')' | ']' => depth -= 1,
+            ',' if depth == 0 => {
+                let a = inner[from..k].trim();
+                if a.starts_with('\'') {
+                    out.push(a.to_string());
+                }
+                from = k + 1;
+            }
+            _ => {}
+        }
+    }
+    out
 }
 
 /// The number of region slots of t (None: not followed)
@@ -153,19 +476,133 @@ pub fn count(prog: &Program, t: Ty, depth: u32) -> Option<usize> {
         Ty::Ref(_, i) => 1 + count(prog, *i, depth + 1)?,
         Ty::Ptr(_, i) | Ty::Box(i) | Ty::Array(i, _) | Ty::Slice(i) => count(prog, *i, depth + 1)?,
         Ty::Struct(sid) => {
-            if is_closure(prog, sid) {
-                return None;
+            let (sd, base, _) = adt(prog, sid);
+            // (a closure: the regions of what it captures, a capture by reference the borrow's region first)
+            if prog.closure_of_struct.contains_key(&base) {
+                let (ts, moved) = captures(prog, sid)?;
+                let mut n = 0;
+                for (j, &a) in ts.iter().enumerate() {
+                    n += match (moved.get(j).copied().unwrap_or(false), a) {
+                        (false, Ty::Ptr(_, i)) => 1 + count(prog, *i, depth + 1)?,
+                        _ => count(prog, a, depth + 1)?,
+                    };
+                }
+                return Some(n);
             }
-            let mut n = lts_of(prog, prog.base_of(sid));
-            for &a in &prog.structs[sid as usize].args {
+            let mut n = lts_of(prog, base);
+            for &a in &sd.args {
                 n += count(prog, a, depth + 1)?;
             }
             n
         }
-        Ty::Dyn(_) | Ty::Fn(_) => 1,
+        Ty::Dyn(_) => 1,
+        // (a fn pointer: its parameters' regions, then its result's)
+        Ty::Fn(ft) => {
+            let mut n = count(prog, ft.ret, depth + 1)?;
+            for &p in &ft.params {
+                n += count(prog, p, depth + 1)?;
+            }
+            n
+        }
         Ty::Assoc(_) => return None,
         _ => 0,
     })
+}
+
+/// A deref of a reference of region r on the way to a place: a reborrow of the place lives no longer than r. Through
+/// a shared reference, no longer than it alone (NLL's supporting prefixes stop there: `&**p` with p: &mut &'y T lives
+/// as long as 'y)
+fn deref(ds: &mut Vec<u32>, r: u32, mutable: bool) {
+    if !mutable {
+        ds.clear();
+    }
+    ds.push(r);
+}
+
+/// Where e is written: borrowck's position, else that of the path it calls or of its receiver
+fn epos(e: &Expr) -> Sp {
+    let p = super::borrowck::pos(e);
+    if p.line != 0 {
+        return p;
+    }
+    match strip(e) {
+        Expr::Call(f, _) => epos(f),
+        Expr::MethodCall(r, ..) => epos(r),
+        Expr::Path(_, p) | Expr::Struct(p, ..) => p.pos,
+        Expr::Block(_, _, b) => match b.stmts.last() {
+            Some(Stmt::Expr(t, _)) => epos(t),
+            _ => p,
+        },
+        _ => p,
+    }
+}
+
+/// A closure body's value (its tail, the branches of an `if` / `match` there, what a `return` returns) that is a
+/// mutable borrow of a place rooted at one of caps: its position
+pub fn fnmut_escape(body: &Expr, caps: &[&str]) -> Option<Sp> {
+    if caps.is_empty() {
+        return None;
+    }
+    fn root(e: &Expr) -> Option<&str> {
+        match strip(e) {
+            Expr::Path(None, p) if p.segs.len() == 1 && p.segs[0].args.is_empty() => Some(p.segs[0].name.as_str()),
+            Expr::Field(x, _, _) | Expr::Index(x, _, _) => root(x),
+            Expr::Unary(op, x, _) if op == "*" => root(x),
+            _ => None,
+        }
+    }
+    fn value(e: &Expr, caps: &[&str], depth: u32) -> Option<Sp> {
+        if depth > 16 {
+            return None;
+        }
+        match strip(e) {
+            Expr::Ref(true, x) if root(x).is_some_and(|r| caps.contains(&r)) => Some(super::borrowck::pos(e)).filter(|s| s.line != 0).or_else(|| Some(epos(x))),
+            Expr::Block(_, _, b) => {
+                for st in &b.stmts {
+                    if let Some(sp) = returns(st, caps, depth + 1) {
+                        return Some(sp);
+                    }
+                }
+                match b.stmts.last() {
+                    Some(Stmt::Expr(t, false)) => value(t, caps, depth + 1),
+                    _ => None,
+                }
+            }
+            Expr::If(_, b, els) => {
+                let t = match b.stmts.last() {
+                    Some(Stmt::Expr(t, false)) => value(t, caps, depth + 1),
+                    _ => None,
+                };
+                t.or_else(|| els.as_deref().and_then(|e| value(e, caps, depth + 1)))
+            }
+            Expr::Match(_, arms) => arms.iter().find_map(|a| value(&a.body, caps, depth + 1)),
+            _ => None,
+        }
+    }
+    // (a `return` among a block's statements: only as a statement of its own, not inside nested closures)
+    fn returns(st: &Stmt, caps: &[&str], depth: u32) -> Option<Sp> {
+        match st {
+            Stmt::Expr(e, _) => match strip(e) {
+                Expr::Return(Some(v)) => value(v, caps, depth + 1),
+                _ => None,
+            },
+            _ => None,
+        }
+    }
+    value(body, caps, 0)
+}
+
+/// e has no value: it panics, returns, breaks or continues (as written)
+fn diverges(e: &Expr) -> bool {
+    match strip(e) {
+        Expr::Return(_) | Expr::Break(..) | Expr::Continue(_) => true,
+        Expr::Macro(p, _, _) => p.segs.last().is_some_and(|s| matches!(s.name.as_str(), "panic" | "unreachable" | "todo" | "unimplemented")),
+        Expr::Block(_, _, b) => match b.stmts.last() {
+            Some(Stmt::Expr(t, _)) => diverges(t),
+            _ => false,
+        },
+        _ => false,
+    }
 }
 
 fn recv_sp(r: &Option<Sp>, or: Sp) -> Sp {
@@ -184,6 +621,9 @@ fn place_text(e: &Expr) -> Option<String> {
     match strip(e) {
         Expr::Path(None, p) if p.segs.len() == 1 => Some(p.segs[0].name.clone()),
         Expr::Field(x, f, _) => Some(format!("{}.{f}", place_text(x)?)),
+        Expr::Index(x, _, _) => place_text(x),
+        // (`*b` of a Box the function owns)
+        Expr::Unary(op, x, _) if op == "*" => Some(format!("*{}", place_text(x)?)),
         _ => None,
     }
 }
@@ -193,6 +633,8 @@ struct Codes<'a> {
     codes: Option<&'a [u8]>,
     pos: usize,
     ok: bool,
+    /// The region of the reference directly around the type being read (a trait object's default lifetime)
+    parent: Option<u32>,
 }
 
 impl Codes<'_> {
@@ -211,6 +653,18 @@ impl Codes<'_> {
             },
         }
     }
+    /// After a trait object's lifetime: the lifetimes its trait's arguments name
+    fn dyn_args(&mut self) -> &[u8] {
+        let Some(c) = self.codes else { return &[] };
+        if c.get(self.pos) != Some(&R_DYN_ARGS) {
+            return &[];
+        }
+        let n = c.get(self.pos + 1).copied().unwrap_or(0) as usize;
+        let from = (self.pos + 2).min(c.len());
+        let to = (from + n).min(c.len());
+        self.pos = to;
+        &c[from..to]
+    }
     /// A path type's marker for lifetimes not written (`Vec<T>`)
     fn elided_adt(&mut self) -> bool {
         match self.codes {
@@ -224,13 +678,38 @@ impl Codes<'_> {
     }
 }
 
-impl Rg {
+impl RgSt {
     pub fn var(&mut self) -> u32 {
         self.n += 1;
         self.n
     }
 
     /// a: b
+    /// The region a closure's code names (Rg::closure): a placeholder, one from outside, or one of the function it is
+    /// in (all universal, made once each)
+    pub fn clo_reg(&mut self, c: u8) -> u32 {
+        if c == R_STATIC {
+            return STATIC;
+        }
+        if c == R_ELIDED {
+            return self.var();
+        }
+        if let Some(&(_, v)) = self.clo_regs.iter().find(|x| x.0 == c) {
+            return v;
+        }
+        let v = self.var();
+        self.univ.push((v, "'_".to_string()));
+        if (CLO_S..R_STATIC).contains(&c) {
+            self.soft.push(v);
+        } else if c >= CLO_U {
+            self.outer_univ.push(v);
+        } else if c >= CLO_E {
+            self.externals.push(v);
+        }
+        self.clo_regs.push((c, v));
+        v
+    }
+
     pub fn edge(&mut self, a: u32, b: u32, sp: Sp) {
         if a != b && a != STATIC {
             self.edges.push((a, b, sp));
@@ -251,40 +730,125 @@ impl Rg {
 
     /// A tree of fresh variables for t
     pub fn fresh(&mut self, prog: &Program, t: Ty) -> Option<RT> {
+        if !self.ph.is_empty() {
+            let mut out = vec![];
+            return self.fresh_ph(prog, t, &mut out, 0).map(|_| out);
+        }
         let n = count(prog, t, 0)?;
         Some((0..n).map(|_| self.var()).collect())
     }
 
+    /// fresh, with the placeholders' regions where their types are (in count's order)
+    fn fresh_ph(&mut self, prog: &Program, t: Ty, out: &mut RT, depth: u32) -> Option<()> {
+        if depth > 24 {
+            return None;
+        }
+        match t {
+            Ty::Ref(_, i) => {
+                let v = self.var();
+                out.push(v);
+                self.fresh_ph(prog, *i, out, depth + 1)?;
+            }
+            Ty::Ptr(_, i) | Ty::Box(i) | Ty::Array(i, _) | Ty::Slice(i) => self.fresh_ph(prog, *i, out, depth + 1)?,
+            Ty::Struct(sid) => {
+                if let Some(&(_, v)) = self.ph.iter().find(|x| x.0 == sid) {
+                    out.push(v);
+                    return Some(());
+                }
+                let (sd, base, _) = adt(prog, sid);
+                if prog.closure_of_struct.contains_key(&base) {
+                    for _ in 0..count(prog, t, depth)? {
+                        let v = self.var();
+                        out.push(v);
+                    }
+                    return Some(());
+                }
+                for _ in 0..lts_of(prog, base) {
+                    let v = self.var();
+                    out.push(v);
+                }
+                for &a in &sd.args {
+                    self.fresh_ph(prog, a, out, depth + 1)?;
+                }
+            }
+            Ty::Dyn(_) => {
+                let v = self.var();
+                out.push(v);
+            }
+            Ty::Fn(ft) => {
+                for &p in &ft.params {
+                    self.fresh_ph(prog, p, out, depth + 1)?;
+                }
+                self.fresh_ph(prog, ft.ret, out, depth + 1)?;
+            }
+            Ty::Assoc(_) => return None,
+            _ => {}
+        }
+        Some(())
+    }
+
     /// The variance of the lifetime and type parameters of a definition (computed once)
-    pub fn variance(&mut self, prog: &Program, base: u32) -> Vec<Var> {
+    pub fn variance(&mut self, prog: &Program, base: u32) -> std::sync::Arc<[Var]> {
         if let Some(v) = self.variance.get(&base) {
+            // (a type whose variance is being computed: what is known of it so far)
+            if self.var_open.contains(&base) {
+                self.var_cycle = true;
+            }
             return v.clone();
         }
         let sd = &prog.structs[base as usize];
         let nl = lts_of(prog, base);
         let ng = sd.generics.len();
+        // (a placeholder: covariant in its one region)
+        if sd.placeholder.is_some() {
+            let v: std::sync::Arc<[Var]> = vec![Var::Co; nl + ng].into();
+            self.variance.insert(base, v.clone());
+            return v;
+        }
         let prelude = prog.struct_item.get(base as usize).is_some_and(|&i| i >= prog.prelude_from);
         // (the prelude's types stand for std's: raw pointers in them are as `NonNull` (covariant); its cells are
         // invariant)
         if prelude {
             let inv = matches!(sd.name.as_str(), "Cell" | "RefCell" | "UnsafeCell" | "Mutex" | "RwLock" | "OnceCell" | "OnceLock" | "AtomicPtr" | "MutexGuard");
-            let v = vec![if inv { Var::Inv } else { Var::Co }; nl + ng];
+            let v: std::sync::Arc<[Var]> = vec![if inv { Var::Inv } else { Var::Co }; nl + ng].into();
             self.variance.insert(base, v.clone());
             return v;
         }
-        // (while computing it: a recursive type's own uses add nothing)
-        self.variance.insert(base, vec![Var::Bi; nl + ng]);
-        let mut acc = vec![Var::Bi; nl + ng];
+        // (a recursive type: computed again from what the last round found, until it no longer changes. The
+        // variances of the types computed meanwhile from a provisional one are computed again too. Each round can
+        // only move a variance up (bivariant, co/contra, invariant), so this ends)
         let ar = prog.adt_regions.get(&base).cloned();
         let fields: Vec<Ty> = sd.fields.iter().map(|f| f.1).chain(sd.variants.iter().flat_map(|v| v.fields.iter().map(|f| f.1))).collect();
-        for (i, &ft) in fields.iter().enumerate() {
-            let codes = ar.as_ref().map(|r| r.fields.get(i).map(|c| c.as_slice()).unwrap_or(&[]));
-            let mut c = Codes { codes, pos: 0, ok: true };
-            self.var_walk(prog, ft, &mut c, Var::Co, nl, &mut acc, 0);
+        let mut cur = vec![Var::Bi; nl + ng];
+        self.var_open.push(base);
+        let outer_cycle = std::mem::take(&mut self.var_cycle);
+        for _ in 0..16 {
+            self.variance.insert(base, cur.clone().into());
+            let log0 = self.var_log.len();
+            self.var_cycle = false;
+            let mut acc = vec![Var::Bi; nl + ng];
+            for (i, &ft) in fields.iter().enumerate() {
+                let codes = ar.as_ref().map(|r| r.fields.get(i).map(|c| c.as_slice()).unwrap_or(&[]));
+                let mut c = Codes { codes, pos: 0, ok: true, parent: None };
+                self.var_walk(prog, ft, &mut c, Var::Co, nl, &mut acc, 0);
+            }
+            let again = self.var_cycle && acc != cur;
+            cur = acc;
+            if !again {
+                break;
+            }
+            for b in self.var_log.drain(log0..) {
+                self.variance.remove(&b);
+            }
         }
+        self.var_open.pop();
+        // (a cycle through a type still open further out: that one is computed again, and this one with it)
+        self.var_cycle |= outer_cycle;
         // (a parameter not used is an error of its own (E0392); as rustc, bivariant)
-        self.variance.insert(base, acc.clone());
-        acc
+        let cur: std::sync::Arc<[Var]> = cur.into();
+        self.variance.insert(base, cur.clone());
+        self.var_log.push(base);
+        cur
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -310,14 +874,14 @@ impl Rg {
             }
             Ty::Array(i, _) | Ty::Slice(i) => self.var_walk(prog, *i, c, v, nl, acc, depth + 1),
             Ty::Struct(sid) => {
-                if is_closure(prog, sid) {
+                let (sd, base, tuple) = adt(prog, sid);
+                if prog.closure_of_struct.contains_key(&base) {
                     c.ok = false;
                     return;
                 }
-                let base = prog.base_of(sid);
                 let n2 = lts_of(prog, base);
                 let nv = self.variance(prog, base);
-                if !prog.is_tuple(sid) {
+                if !tuple {
                     // (the marker of lifetimes not written is read whether or not the type has any)
                     let elided = c.elided_adt();
                     if n2 == 0 || elided {
@@ -328,9 +892,8 @@ impl Rg {
                         }
                     }
                 }
-                let args = prog.structs[sid as usize].args.clone();
-                for (j, a) in args.into_iter().enumerate() {
-                    let w = if prog.is_tuple(sid) { Var::Co } else { nv.get(n2 + j).copied().unwrap_or(Var::Inv) };
+                for (j, &a) in sd.args.iter().enumerate() {
+                    let w = if tuple { Var::Co } else { nv.get(n2 + j).copied().unwrap_or(Var::Inv) };
                     self.var_walk(prog, a, c, v.then(w), nl, acc, depth + 1);
                 }
             }
@@ -340,19 +903,30 @@ impl Rg {
                     acc[k] = acc[k].join(v);
                 }
             }
+            // (contravariant in its parameters' regions and types, covariant in its result's)
             Ty::Fn(ft) => {
-                c.next();
-                let mut none = Codes { codes: Some(&[]), pos: 0, ok: true };
-                for &p in &ft.params {
-                    // (the regions in a fn pointer's types are not followed, its type parameters are)
-                    none.codes = None;
-                    self.var_walk(prog, p, &mut none, v.then(Var::Contra), 0, acc, depth + 1);
+                if c.next() == R_FN {
+                    for &p in &ft.params {
+                        self.var_walk(prog, p, c, v.then(Var::Contra), nl, acc, depth + 1);
+                    }
+                    self.var_walk(prog, ft.ret, c, v, nl, acc, depth + 1);
+                } else {
+                    // (a type alias: the regions in it are not followed (no codes: each reads as elided), its type
+                    // parameters are, after the definition's lifetimes)
+                    let mut none = Codes { codes: None, pos: 0, ok: true, parent: None };
+                    for &p in &ft.params {
+                        self.var_walk(prog, p, &mut none, v.then(Var::Contra), nl, acc, depth + 1);
+                    }
+                    self.var_walk(prog, ft.ret, &mut none, v, nl, acc, depth + 1);
                 }
-                self.var_walk(prog, ft.ret, &mut none, v, 0, acc, depth + 1);
             }
+            // (invariant in the lifetimes its trait's arguments name)
             Ty::Dyn(_) => {
                 let code = c.next();
                 lt(acc, code, v);
+                for &code in c.dyn_args() {
+                    lt(acc, code, Var::Inv);
+                }
             }
             _ => {}
         }
@@ -362,15 +936,17 @@ impl Rg {
     /// targs) or a field. `lts`: the variables of the lifetimes the codes name; `elided`: makes the variable of an
     /// elided region
     #[allow(clippy::too_many_arguments)]
-    fn inst(&mut self, prog: &Program, t: Ty, c: &mut Codes, lts: &[u32], targs: &[Option<RT>], elided: &mut dyn FnMut(&mut Rg) -> u32, out: &mut RT, depth: u32) {
+    fn inst(&mut self, prog: &Program, t: Ty, c: &mut Codes, lts: &[u32], targs: &[Option<RT>], elided: &mut dyn FnMut(&mut RgSt) -> u32, out: &mut RT, depth: u32) {
         if depth > 24 || !c.ok {
             c.ok = false;
             return;
         }
-        let region = |me: &mut Rg, c: &mut Codes, elided: &mut dyn FnMut(&mut Rg) -> u32| -> u32 {
+        let parent = c.parent.take();
+        let region = |me: &mut RgSt, c: &mut Codes, elided: &mut dyn FnMut(&mut RgSt) -> u32| -> u32 {
             match c.next() {
                 R_STATIC => STATIC,
                 R_ELIDED => elided(me),
+                R_BOUND => me.var(),
                 x if (x as usize) < lts.len() => lts[x as usize],
                 _ => {
                     c.ok = false;
@@ -382,6 +958,7 @@ impl Rg {
             Ty::Ref(_, i) => {
                 let r = region(self, c, elided);
                 out.push(r);
+                c.parent = Some(r);
                 self.inst(prog, *i, c, lts, targs, elided, out, depth + 1);
             }
             Ty::Ptr(_, i) | Ty::Array(i, _) | Ty::Slice(i) => self.inst(prog, *i, c, lts, targs, elided, out, depth + 1),
@@ -390,13 +967,14 @@ impl Rg {
                 self.inst(prog, *i, c, lts, targs, elided, out, depth + 1)
             }
             Ty::Struct(sid) => {
-                if is_closure(prog, sid) {
+                let (sd, base, tuple) = adt(prog, sid);
+                if prog.closure_of_struct.contains_key(&base) {
                     c.ok = false;
                     return;
                 }
-                let base = prog.base_of(sid);
                 let n = lts_of(prog, base);
-                if !prog.is_tuple(sid) {
+                let own0 = out.len();
+                if !tuple {
                     if n == 0 {
                         c.elided_adt();
                     } else if c.elided_adt() {
@@ -411,7 +989,28 @@ impl Rg {
                         }
                     }
                 }
-                for &a in &prog.structs[sid as usize].args {
+                // (a placeholder: its region is the same wherever its type is)
+                if n > 0 && !self.ph.is_empty() {
+                    if let Some(&(_, v)) = self.ph.iter().find(|x| x.0 == sid) {
+                        out.truncate(own0);
+                        out.push(v);
+                    }
+                }
+                let ar = prog.adt_regions.get(&base);
+                for (j, &a) in sd.args.iter().enumerate() {
+                    // (a trait object as a type argument: its default lifetime is the parameter's one lifetime bound
+                    // (`struct Ref<'a, T: 'a>` makes `Ref<'a, dyn Tr>` `dyn Tr + 'a`); with two, a variable of its own)
+                    if matches!(a, Ty::Dyn(_)) {
+                        if let (Some(ar), Some(gn)) = (ar, prog.structs[base as usize].generics.get(j)) {
+                            let bs: Vec<u8> = ar.ty_outlives.iter().filter(|x| x.0 == *gn).map(|x| x.1).collect();
+                            match bs.as_slice() {
+                                [] => {}
+                                [R_STATIC] => c.parent = Some(STATIC),
+                                [k] if (*k as usize) < n => c.parent = out.get(own0 + *k as usize).copied(),
+                                _ => c.parent = Some(self.var()),
+                            }
+                        }
+                    }
                     self.inst(prog, a, c, lts, targs, elided, out, depth + 1);
                 }
             }
@@ -420,11 +1019,52 @@ impl Rg {
                 Some(None) => c.ok = false,
                 None => {}
             },
-            Ty::Dyn(_) | Ty::Fn(_) => {
-                // (a trait object's or fn pointer's regions are not followed: a variable of its own)
-                let _ = c.next();
-                let v = self.var();
+            Ty::Dyn(_) => {
+                // (its lifetime: written, or the default: the reference's around it, else 'static in a signature and
+                // inferred in a body)
+                let v = match c.next() {
+                    R_DYN_DEFAULT => match parent {
+                        Some(r) => r,
+                        None if self.dyn_infer => self.var(),
+                        None => STATIC,
+                    },
+                    // (`dyn Tr + '_`: an elided lifetime, as any other `'_` (a fresh one of a call's parameter); not the
+                    // default, which in `Box<dyn Tr>` is 'static)
+                    R_ELIDED if c.codes.is_some() => elided(self),
+                    R_ELIDED => match parent {
+                        Some(r) => r,
+                        None if self.dyn_infer => self.var(),
+                        None => STATIC,
+                    },
+                    R_STATIC => STATIC,
+                    x if (x as usize) < lts.len() => lts[x as usize],
+                    _ => {
+                        c.ok = false;
+                        0
+                    }
+                };
+                // (the lifetimes its trait's arguments name: the object has no slots for them)
+                c.dyn_args();
                 out.push(v);
+            }
+            // (a fn pointer: the regions it binds are its own, as are those elided in it)
+            // (written as a type alias (no R_FN): its regions are its own; the alias's one code is read)
+            Ty::Fn(ft) => {
+                let mut own = |me: &mut RgSt| me.var();
+                if c.next() == R_FN {
+                    for &p in &ft.params {
+                        self.inst(prog, p, c, lts, targs, &mut own, out, depth + 1);
+                    }
+                    self.inst(prog, ft.ret, c, lts, targs, &mut own, out, depth + 1);
+                } else {
+                    let ok = c.ok;
+                    let mut none = Codes { codes: None, pos: 0, ok: true, parent: None };
+                    for &p in &ft.params {
+                        self.inst(prog, p, &mut none, lts, targs, &mut own, out, depth + 1);
+                    }
+                    self.inst(prog, ft.ret, &mut none, lts, targs, &mut own, out, depth + 1);
+                    c.ok = ok && none.ok;
+                }
             }
             Ty::Assoc(_) => c.ok = false,
             _ => {}
@@ -433,12 +1073,12 @@ impl Rg {
 
     /// Instantiate t with codes (all of them must be read)
     #[allow(clippy::too_many_arguments)]
-    pub fn instantiate(&mut self, prog: &Program, t: Ty, codes: Option<&[u8]>, lts: &[u32], targs: &[Option<RT>], elided: &mut dyn FnMut(&mut Rg) -> u32) -> Option<RT> {
+    pub fn instantiate(&mut self, prog: &Program, t: Ty, codes: Option<&[u8]>, lts: &[u32], targs: &[Option<RT>], elided: &mut dyn FnMut(&mut RgSt) -> u32) -> Option<RT> {
         // (a parameter whose type is not followed)
         if codes.is_some_and(|c| c.contains(&R_UNKNOWN)) {
             return None;
         }
-        let mut c = Codes { codes, pos: 0, ok: true };
+        let mut c = Codes { codes, pos: 0, ok: true, parent: None };
         let mut out = vec![];
         self.inst(prog, t, &mut c, lts, targs, elided, &mut out, 0);
         (c.ok && codes.is_none_or(|x| c.pos == x.len())).then_some(out)
@@ -451,6 +1091,70 @@ impl Rg {
         }
         let mut k = 0;
         self.rel(prog, t, sub, sup, &mut k, Var::Co, sp, 0);
+    }
+
+    /// A value of type from (tree sub) flows into a place of type to (tree sup), through the coercions that change
+    /// its type: to a trait object (every region of the value outlives the object's), an array to a slice, a
+    /// reference to one of what it derefs to (only the outer regions are related there)
+    pub fn flow(&mut self, prog: &Program, from: Ty, to: Ty, sub: &[u32], sup: &[u32], sp: Sp) {
+        // (no regions on either side: nothing to relate)
+        if sub.is_empty() || sup.is_empty() {
+            return;
+        }
+        // (`&mut (dyn Tr + 'a)` to `&mut (dyn Tr + 'b)` with 'a: 'b, `Box` too: an unsizing coercion. The object's
+        // lifetime right under the pointer shortens, though `&mut` is invariant)
+        if let (Ty::Ref(_, Ty::Dyn(_)), Ty::Ref(_, Ty::Dyn(_))) | (Ty::Box(Ty::Dyn(_)), Ty::Box(Ty::Dyn(_))) = (from, to) {
+            if from == to && sub.len() == sup.len() {
+                for (&x, &y) in sub.iter().zip(sup) {
+                    self.constrain(x, y, Var::Co, sp);
+                }
+                return;
+            }
+        }
+        if from == to {
+            return self.relate(prog, to, sub, sup, sp);
+        }
+        let (mut i, mut j) = (0, 0);
+        self.co(prog, from, to, sub, sup, (&mut i, &mut j), Var::Co, sp, 0);
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn co(&mut self, prog: &Program, from: Ty, to: Ty, sub: &[u32], sup: &[u32], ij: (&mut usize, &mut usize), v: Var, sp: Sp, depth: u32) -> bool {
+        let (i, j) = ij;
+        if depth > 24 {
+            return false;
+        }
+        if from == to {
+            let Some(c) = count(prog, to, 0) else { return false };
+            let (Some(a), Some(b)) = (sub.get(*i..*i + c), sup.get(*j..*j + c)) else { return false };
+            let mut k = 0;
+            self.rel(prog, to, a, b, &mut k, v, sp, depth);
+            *i += c;
+            *j += c;
+            return true;
+        }
+        match (from, to) {
+            (Ty::Ref(_, a), Ty::Ref(m, b)) => {
+                let (Some(&x), Some(&y)) = (sub.get(*i), sup.get(*j)) else { return false };
+                self.constrain(x, y, v, sp);
+                *i += 1;
+                *j += 1;
+                self.co(prog, *a, *b, sub, sup, (i, j), if m { v.then(Var::Inv) } else { v }, sp, depth + 1)
+            }
+            (Ty::Ptr(_, a), Ty::Ptr(m, b)) => self.co(prog, *a, *b, sub, sup, (i, j), if m { v.then(Var::Inv) } else { v }, sp, depth + 1),
+            (Ty::Box(a), Ty::Box(b)) | (Ty::Array(a, _), Ty::Slice(b)) => self.co(prog, *a, *b, sub, sup, (i, j), v, sp, depth + 1),
+            (_, Ty::Dyn(_)) => {
+                let Some(c) = count(prog, from, 0) else { return false };
+                let (Some(xs), Some(&y)) = (sub.get(*i..*i + c), sup.get(*j)) else { return false };
+                for &x in xs {
+                    self.constrain(x, y, Var::Co, sp);
+                }
+                *i += c;
+                *j += 1;
+                true
+            }
+            _ => false,
+        }
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -466,16 +1170,29 @@ impl Rg {
             }
             Ty::Ptr(m, i) => self.rel(prog, *i, sub, sup, k, if m { v.then(Var::Inv) } else { v }, sp, depth + 1),
             Ty::Box(i) | Ty::Array(i, _) | Ty::Slice(i) => self.rel(prog, *i, sub, sup, k, v, sp, depth + 1),
+            // (a closure: covariant in what it captures)
+            Ty::Struct(sid) if is_closure(prog, sid) => {
+                let Some((ts, moved)) = captures(prog, sid) else { return };
+                for (j, &a) in ts.iter().enumerate() {
+                    match (moved.get(j).copied().unwrap_or(false), a) {
+                        (false, Ty::Ptr(_, i)) => {
+                            self.constrain(sub[*k], sup[*k], v, sp);
+                            *k += 1;
+                            self.rel(prog, *i, sub, sup, k, v, sp, depth + 1);
+                        }
+                        _ => self.rel(prog, a, sub, sup, k, v, sp, depth + 1),
+                    }
+                }
+            }
             Ty::Struct(sid) => {
-                let base = prog.base_of(sid);
+                let (sd, base, tuple) = adt(prog, sid);
                 let n = lts_of(prog, base);
                 let nv = self.variance(prog, base);
                 for j in 0..n {
                     self.constrain(sub[*k], sup[*k], v.then(nv[j]), sp);
                     *k += 1;
                 }
-                let tuple = prog.is_tuple(sid);
-                for (j, &a) in prog.structs[sid as usize].args.clone().iter().enumerate() {
+                for (j, &a) in sd.args.iter().enumerate() {
                     let w = if tuple { Var::Co } else { nv.get(n + j).copied().unwrap_or(Var::Inv) };
                     self.rel(prog, a, sub, sup, k, v.then(w), sp, depth + 1);
                 }
@@ -484,7 +1201,13 @@ impl Rg {
                 self.constrain(sub[*k], sup[*k], v, sp);
                 *k += 1;
             }
-            Ty::Fn(_) => *k += 1,
+            // (contravariant in its parameters, covariant in its result)
+            Ty::Fn(ft) => {
+                for &p in &ft.params {
+                    self.rel(prog, p, sub, sup, k, v.then(Var::Contra), sp, depth + 1);
+                }
+                self.rel(prog, ft.ret, sub, sup, k, v, sp, depth + 1);
+            }
             _ => {}
         }
     }
@@ -524,6 +1247,139 @@ impl Rg {
         self.imp(prog, t, tree, &mut k, &mut vec![], depth);
     }
 
+    /// What the types of a value written in the body require among its regions (its well-formedness): as imp's
+    /// implied bounds, but as constraints (`let z: Option<&'b &'a u8>` needs 'a: 'b)
+    pub fn wf(&mut self, prog: &Program, t: Ty, tree: &[u32], sp: Sp) {
+        self.wf_sp = Some(sp);
+        let mut k = 0;
+        self.imp(prog, t, tree, &mut k, &mut vec![], 0);
+        self.wf_sp = None;
+    }
+
+    /// wf of a struct's value its fields' values flowed into: only what the definition declares (what its fields
+    /// imply already holds of them)
+    pub fn wf_declared(&mut self, prog: &Program, t: Ty, tree: &[u32], sp: Sp) {
+        self.wf_no_fields = true;
+        self.wf(prog, t, tree, sp);
+        self.wf_no_fields = false;
+    }
+
+    /// The places (addresses) of the reborrows whose region must outlive a universal region ('static too): the loan
+    /// is live from where it is made to the end of the function
+    pub fn forever(&self) -> Vec<usize> {
+        if self.reborrows.is_empty() {
+            return vec![];
+        }
+        let n = self.n as usize + 1;
+        // (what outlives each variable, as one array (CSR): no allocation per variable)
+        let mut start = vec![0u32; n + 1];
+        for &(a, b, _) in &self.edges {
+            if (a as usize) < n && (b as usize) < n {
+                start[b as usize + 1] += 1;
+            }
+        }
+        for k in 0..n {
+            start[k + 1] += start[k];
+        }
+        let mut fill = start.clone();
+        let mut rev = vec![0u32; start[n] as usize];
+        for &(a, b, _) in &self.edges {
+            if (a as usize) < n && (b as usize) < n {
+                rev[fill[b as usize] as usize] = a;
+                fill[b as usize] += 1;
+            }
+        }
+        let mut seen = vec![false; n];
+        let mut st: Vec<u32> = std::iter::once(STATIC).chain(self.univ.iter().map(|u| u.0)).filter(|&v| (v as usize) < n).collect();
+        for &v in &st {
+            seen[v as usize] = true;
+        }
+        while let Some(x) = st.pop() {
+            for &y in &rev[start[x as usize] as usize..start[x as usize + 1] as usize] {
+                if !seen[y as usize] {
+                    seen[y as usize] = true;
+                    st.push(y);
+                }
+            }
+        }
+        self.reborrows.iter().filter(|&&(_, r)| seen.get(r as usize).copied().unwrap_or(false)).map(|&(p, _)| p).collect()
+    }
+
+    /// The locals whose types' regions the reborrows (and borrows of receivers) must outlive, by the reborrow's
+    /// address: as NLL, such a borrow is live while the local is (`foo.insert()` with `fn insert(&'a mut self)` in
+    /// `impl<'a> Foo<'a>` borrows foo for as long as foo is used)
+    pub fn holders(&self) -> Vec<(usize, Vec<Loc>)> {
+        if (self.reborrows.is_empty() && self.owned_borrows.is_empty()) || self.locals.is_empty() {
+            return vec![];
+        }
+        let n = self.n as usize + 1;
+        // (the locals (the first 64) each variable is a region of the type of)
+        let locs: Vec<(Loc, &RT)> = self.locals.iter().map(|(&l, t)| (l, t)).take(64).collect();
+        let mut own = vec![0u64; n];
+        for (i, (_, tr)) in locs.iter().enumerate() {
+            for &v in tr.iter() {
+                if v != STATIC && (v as usize) < n {
+                    own[v as usize] |= 1 << i;
+                }
+            }
+        }
+        // (what each variable outlives, as one array (CSR))
+        let mut start = vec![0u32; n + 1];
+        for &(a, b, _) in &self.edges {
+            if (a as usize) < n && (b as usize) < n {
+                start[a as usize + 1] += 1;
+            }
+        }
+        for k in 0..n {
+            start[k + 1] += start[k];
+        }
+        let mut fill = start.clone();
+        let mut adj = vec![0u32; start[n] as usize];
+        for &(a, b, _) in &self.edges {
+            if (a as usize) < n && (b as usize) < n {
+                adj[fill[a as usize] as usize] = b;
+                fill[a as usize] += 1;
+            }
+        }
+        let mut out = vec![];
+        let mut seen = vec![0u32; n];
+        let mut st = vec![];
+        for (k, &(p, r)) in self.reborrows.iter().chain(&self.owned_borrows).enumerate() {
+            if r as usize >= n {
+                continue;
+            }
+            let stamp = k as u32 + 1;
+            let mut m = 0u64;
+            st.clear();
+            st.push(r);
+            seen[r as usize] = stamp;
+            while let Some(x) = st.pop() {
+                for &y in &adj[start[x as usize] as usize..start[x as usize + 1] as usize] {
+                    if seen[y as usize] != stamp {
+                        seen[y as usize] = stamp;
+                        m |= own[y as usize];
+                        st.push(y);
+                    }
+                }
+            }
+            if m != 0 {
+                out.push((p, (0..locs.len()).filter(|&i| m >> i & 1 == 1).map(|i| locs[i].0).collect()));
+            }
+        }
+        out
+    }
+
+    /// x outlives y: known (implied bounds), or required (wf)
+    fn imp_rel(&mut self, x: u32, y: u32) {
+        for r in self.imp_rec.iter_mut() {
+            r.push((x, y));
+        }
+        match self.wf_sp {
+            Some(sp) => self.edge(x, y, sp),
+            None => self.known.push((x, y)),
+        }
+    }
+
     fn imp(&mut self, prog: &Program, t: Ty, tree: &[u32], k: &mut usize, outer: &mut Vec<u32>, depth: u32) {
         if *k > tree.len() || depth > 24 {
             return;
@@ -532,7 +1388,7 @@ impl Rg {
             Ty::Ref(_, i) => {
                 let Some(&r) = tree.get(*k) else { return };
                 for &o in outer.iter() {
-                    self.known.push((r, o));
+                    self.imp_rel(r, o);
                 }
                 *k += 1;
                 outer.push(r);
@@ -546,15 +1402,39 @@ impl Rg {
                 let me = me.to_vec();
                 for &r in &me {
                     for &o in outer.iter() {
-                        self.known.push((r, o));
+                        self.imp_rel(r, o);
                     }
                 }
                 *k += c;
+                // (what follows depends on the struct's type and the depth alone: computed once, by positions)
+                let key = (sid, depth, self.wf_no_fields);
+                if let Some(Some(pairs)) = self.imp_cache.get(&key) {
+                    let pairs = pairs.clone();
+                    for (a, b) in pairs {
+                        let m = |i: u32| if i == u32::MAX { STATIC } else { me[i as usize] };
+                        self.imp_rel(m(a), m(b));
+                    }
+                    return;
+                }
+                let record = !self.imp_cache.contains_key(&key);
+                if record {
+                    self.imp_rec.push(vec![]);
+                }
+                // (its type arguments are well formed: `Option<&'s &'l ()>` implies 'l: 's)
+                if depth < 4 && !is_closure(prog, sid) {
+                    if let Some((_, args)) = self.split_adt(prog, sid, &me) {
+                        for (&a, at) in prog.structs[sid as usize].args.iter().zip(args) {
+                            if let Some(at) = at {
+                                self.implied(prog, a, &at, depth + 1);
+                            }
+                        }
+                    }
+                }
                 // (the fields: what the definition's types require of its parameters)
                 let base = prog.base_of(sid);
                 if prog.adt_regions.contains_key(&base) && depth < 3 {
                     let bd = &prog.structs[base as usize];
-                    let nf = bd.fields.len() + bd.variants.iter().map(|v| v.fields.len()).sum::<usize>();
+                    let nf = if self.wf_no_fields { 0 } else { bd.fields.len() + bd.variants.iter().map(|v| v.fields.len()).sum::<usize>() };
                     let fts: Vec<Ty> = prog.structs[sid as usize].fields.iter().map(|f| f.1).chain(prog.structs[sid as usize].variants.iter().flat_map(|v| v.fields.iter().map(|f| f.1))).collect();
                     for i in 0..nf {
                         let n0 = self.n;
@@ -569,21 +1449,29 @@ impl Rg {
                         let (own, args) = self.split_adt(prog, sid, &me).unwrap_or_default();
                         for &(a, b) in &ar.outlives {
                             if let (Some(&x), Some(&y)) = (own.get(a as usize), own.get(b as usize)) {
-                                self.known.push((x, y));
+                                self.imp_rel(x, y);
                             }
                         }
                         for (tp, b) in &ar.ty_outlives {
                             let (Some(g), Some(&y)) = (bd.generics.iter().position(|x| x == tp), own.get(*b as usize)) else { continue };
                             if let Some(Some(at)) = args.get(g) {
                                 for &x in at {
-                                    self.known.push((x, y));
+                                    self.imp_rel(x, y);
                                 }
                             }
                         }
                     }
                 }
+                if record {
+                    let rec = self.imp_rec.pop().unwrap_or_default();
+                    let pos = |v: u32| if v == STATIC { Some(u32::MAX) } else { me.iter().position(|&x| x == v).map(|p| p as u32) };
+                    let pairs: Option<Vec<(u32, u32)>> = rec.iter().map(|&(x, y)| Some((pos(x)?, pos(y)?))).collect();
+                    self.imp_cache.insert(key, pairs);
+                }
             }
-            Ty::Dyn(_) | Ty::Fn(_) => *k += 1,
+            Ty::Dyn(_) => *k += 1,
+            // (a fn pointer's types imply nothing)
+            Ty::Fn(_) => *k += count(prog, t, 0).unwrap_or(0),
             _ => {}
         }
     }
@@ -639,9 +1527,31 @@ impl Rg {
                     }
                     seen[y as usize] = true;
                     if let Some(j) = ix(y) {
-                        if !k[i][j] {
+                        // (a closure's region from outside required to be 'static, or related to one of the function
+                        // it is in: the caller's to know)
+                        let outside = |a: u32, b: u32| self.externals.contains(&a) && (b == STATIC || self.outer_univ.contains(&b));
+                        // (nor one of the function's that must outlive a placeholder: the callee's lifetimes in the
+                        // bound may be it, and what they imply is of them)
+                        let placeholder = |b: u32| self.in_closure && !self.externals.contains(&b) && !self.outer_univ.contains(&b) && b != STATIC;
+                        if !k[i][j] && !outside(u, y) && !outside(y, u) && !(self.outer_univ.contains(&u) && placeholder(y)) && !self.soft.contains(&u) && !self.soft.contains(&y) {
                             let other = if j == 0 { "'static".to_string() } else { self.univ[j - 1].1.clone() };
-                            errs.push((sp, format!("lifetime may not live long enough (`{uname}` must outlive `{other}`)")));
+                            // (a region the closure's signature binds flowing into one from outside)
+                            let escapes = self.in_closure && !self.externals.contains(&u) && !self.outer_univ.contains(&u) && self.cap_regions.contains(&y);
+                            let msg = if escapes {
+                                "borrowed data escapes outside of closure (a region of its signature flows into one from outside)".to_string()
+                            } else if let Some(tp) = uname.strip_suffix('#') {
+                                // (a type parameter's placeholder: what its values may borrow must outlive `other`;
+                                // E0311 when `other` has no name)
+                                let code = match (j, other.as_str()) {
+                                    (0, _) => 310,
+                                    (_, "'_") => 311,
+                                    _ => 309,
+                                };
+                                format!("the parameter type `{tp}` may not live long enough (it must outlive `{other}`) (E0{code})")
+                            } else {
+                                format!("lifetime may not live long enough (`{uname}` must outlive `{other}`)")
+                            };
+                            errs.push((sp, msg));
                         }
                     }
                     st.push(y);
@@ -655,23 +1565,35 @@ impl Rg {
             seen[*r as usize] = true;
             let mut st = vec![*r];
             let mut bad = false;
+            // (the borrow escapes as the value returned: reported where it is returned)
+            let mut ret_at = None;
             while let Some(x) = st.pop() {
-                for &(y, _) in &adj[x as usize] {
+                for &(y, esp) in &adj[x as usize] {
                     if seen[y as usize] {
                         continue;
                     }
                     seen[y as usize] = true;
                     if ix(y).is_some() {
                         bad = true;
+                        if ret_at.is_none() && self.ret_sps.contains(&esp) {
+                            ret_at = Some(esp);
+                        }
                     }
                     st.push(y);
                 }
             }
-            if bad {
-                errs.push((*lsp, if name.is_empty() { "temporary value dropped while borrowed (it must outlive the function)".to_string() } else { format!("`{name}` does not live long enough (borrowed value must outlive the function)") }));
+            match ret_at {
+                Some(sp) if bad => errs.push((sp, if name.is_empty() { "cannot return value referencing temporary value (E0515)".to_string() } else { format!("cannot return value referencing local variable `{name}` (E0515)") })),
+                _ if bad => errs.push((*lsp, if name.is_empty() { "temporary value dropped while borrowed (it must outlive the function)".to_string() } else { format!("`{name}` does not live long enough (borrowed value must outlive the function)") })),
+                _ => {}
             }
         }
         errs.sort_by_key(|e| (e.0.line, e.0.col));
+        if debug() {
+            for e in &errs {
+                eprintln!("regionck: error candidate at {}:{}: {}", e.0.line, e.0.col, e.1);
+            }
+        }
         errs.into_iter().next()
     }
 }
@@ -683,14 +1605,19 @@ impl Cx<'_> {
 
     /// At the start of the body: the universal regions of the signature, the trees of the parameters and of the
     /// return type. Only a function with at least two regions in its signature (or a named one) is checked
-    pub(crate) fn rg_begin(&mut self, regions: Option<&RSigSyn>, params: &[(Loc, Ty)], self_elides: bool) {
+    pub(crate) fn rg_begin(&mut self, regions: Option<&RSigSyn>, params: &[(Loc, Ty)], self_elides: bool, force: bool) {
         let prog = self.prog;
+        if !self.rg.imp_taken {
+            self.rg.imp_cache = std::mem::take(&mut self.insts.lock().unwrap().imp_cache);
+            self.rg.imp_taken = true;
+        }
         let rs = regions;
         let codes = |i: usize| rs.map(|r| r.slots.get(i).map(|c| c.as_slice()).unwrap_or(&[]));
         let mut rg = std::mem::take(&mut self.rg);
         for l in rs.map(|r| r.lts.as_slice()).unwrap_or(&[]) {
             let v = rg.var();
-            rg.univ.push((v, l.clone()));
+            // (`'_0`: a `'_` of the impl's header)
+            rg.univ.push((v, if l.starts_with("'_") { "'_".to_string() } else { l.clone() }));
             rg.lts.push(v);
             rg.lt_names.push(l.clone());
         }
@@ -703,7 +1630,7 @@ impl Cx<'_> {
         let mut inputs: Vec<u32> = vec![];
         for (i, &(_, t)) in params.iter().enumerate() {
             let t = if generic { gsig.params[i] } else { t };
-            let mut el = |me: &mut Rg| {
+            let mut el = |me: &mut RgSt| {
                 let v = me.var();
                 me.univ.push((v, "'_".to_string()));
                 v
@@ -721,7 +1648,7 @@ impl Cx<'_> {
         let one = if inputs.len() == 1 { Some(inputs[0]) } else { None };
         let mut bad = false;
         let ret_t = self.ret;
-        let mut el = |_: &mut Rg| match self_r.or(one) {
+        let mut el = |_: &mut RgSt| match self_r.or(one) {
             Some(v) => v,
             None => {
                 bad = true;
@@ -731,13 +1658,72 @@ impl Cx<'_> {
         let gret = if generic { gsig.ret } else { ret_t };
         let ret = rg.instantiate(prog, gret, codes(params.len()), &lts, &targs, &mut el);
         rg.ret = ret.filter(|_| !bad);
+        // (an `impl Trait` result with no region among the parameters: its hidden type's regions are 'static)
+        let opaque = inputs.is_empty() && !generic && rs.is_none() && prog.opaque.contains(&rg.base);
+        if opaque {
+            rg.ret = count(prog, ret_t, 0).filter(|&c| c > 0).map(|c| vec![STATIC; c]);
+        }
+        // (a placeholder for a type parameter (zustc check of a generic fn nothing calls): its region is a universal
+        // one, named as the placeholder (`T#`), that outlives what the parameter's `T: 'a` bounds name)
+        if generic {
+            for (k, &t) in rg.inst_args.clone().iter().enumerate() {
+                let (Ty::Struct(sid), Some(Some(tr))) = (t, targs.get(k)) else { continue };
+                let (Some(&v), true) = (tr.first(), prog.is_placeholder(sid)) else { continue };
+                rg.univ.push((v, prog.structs[sid as usize].name.clone()));
+                rg.ph.push((sid, v));
+                let pname = gsig.generics.get(k).map(|g| g.0.as_str()).unwrap_or("");
+                // (and what its bounds' traits require of their `Self` (`trait Tr<'a>: 'a`, `T: Tr<'x>`: T: 'x),
+                // through supertraits)
+                if !prog.trait_self_outlives.is_empty() {
+                    let mut todo: Vec<(String, Vec<String>)> = gsig.generics.get(k).map(|g| g.1.iter().map(|b| (b.split('<').next().unwrap_or(b).trim().to_string(), bound_lts(b))).collect()).unwrap_or_default();
+                    let mut seen = 0;
+                    while let Some((tr, args)) = todo.pop() {
+                        seen += 1;
+                        if seen > 16 {
+                            break;
+                        }
+                        let short = tr.rsplit("::").next().unwrap_or(&tr).to_string();
+                        let find = |m: &HashMap<String, Vec<String>>| m.get(&tr).or_else(|| m.iter().find(|(n, _)| n.rsplit("::").next() == Some(&short)).map(|(_, x)| x)).cloned();
+                        for c in find(&prog.trait_self_outlives).unwrap_or_default() {
+                            let b = if c == "static" { Some(STATIC) } else { c.parse::<usize>().ok().and_then(|i| args.get(i)).and_then(|l| if l == "'static" { Some(STATIC) } else { rg.lt_names.iter().position(|x| x == l).and_then(|p| lts.get(p).copied()) }) };
+                            if let Some(b) = b {
+                                rg.known.push((v, b));
+                            }
+                        }
+                        // (a supertrait's lifetimes: as written in the trait's header, not the bound's; only 'static
+                        // and its unnamed ones are followed)
+                        for sup in find(&prog.trait_supers).unwrap_or_default() {
+                            todo.push((sup.split('<').next().unwrap_or(&sup).trim().to_string(), vec![]));
+                        }
+                    }
+                }
+                for (tp, c) in rs.map(|r| r.ty_outlives.as_slice()).unwrap_or(&[]) {
+                    if tp == pname {
+                        let b = if *c == R_STATIC { Some(STATIC) } else { lts.get(*c as usize).copied() };
+                        if let Some(b) = b {
+                            rg.known.push((v, b));
+                        }
+                    }
+                }
+            }
+        }
         let nuniv = rg.univ.len();
-        rg.on = nuniv >= 2 || (nuniv >= 1 && rs.is_some());
+        // (or a signature that writes 'static: `fn f(x: isize) -> &'static [isize]`)
+        rg.on = force || nuniv >= 2 || (nuniv >= 1 && (rs.is_some() || has_dyn(prog, ret_t, 0))) || rs.is_some_and(Self::needs_static) || (opaque && rg.ret.is_some());
         if rg.on {
             for (i, &(loc, t)) in params.iter().enumerate() {
                 if let Some(tr) = trees[i].clone() {
                     rg.implied(prog, t, &tr, 0);
                     rg.locals.insert(loc, tr);
+                }
+            }
+            // (an impl's method: its self type is well formed, as its callers make sure)
+            if let (Some(r), Some(isid)) = (rs, gsig.impl_of) {
+                if !r.self_slots.is_empty() {
+                    if let Some(st) = rg.instantiate(prog, Ty::Struct(isid), Some(&r.self_slots), &lts, &targs, &mut |me| me.var()) {
+                        rg.implied(prog, Ty::Struct(isid), &st, 0);
+                        rg.self_tree = Some((Ty::Struct(isid), st));
+                    }
                 }
             }
             if let Some(tr) = rg.ret.clone() {
@@ -760,6 +1746,12 @@ impl Cx<'_> {
         let r = self.rt_expr_inner(e);
         if r.is_none() && debug() {
             self.rg.missed.push(kind(e));
+            eprintln!("regionck: {} not followed at line {}", kind(e), self.line_base + super::borrowck::pos(e).line);
+            if let Expr::Path(_, p) = strip(e) {
+                let n = p.segs.iter().map(|s| s.name.as_str()).collect::<Vec<_>>().join("::");
+                let lt = p.segs.last().and_then(|s| self.lookup(&s.name)).map(|(_, t)| self.prog.tn(t));
+                eprintln!("regionck: path {n} not followed (local: {lt:?})");
+            }
         }
         r
     }
@@ -771,18 +1763,39 @@ impl Cx<'_> {
         match e {
             Expr::Paren(x) => self.rt_expr(x),
             Expr::Lit(s, _) if s.starts_with('"') || s.starts_with("r\"") || s.starts_with("r#") => Some((Ty::Ref(false, crate::types::intern(Ty::Str)), vec![STATIC])),
-            // (`&f(..)` / `&mut 4`: a temporary the function owns (a `&` of a literal is promoted to a static))
-            Expr::Ref(m, x) if matches!(strip(x), Expr::Call(..) | Expr::MethodCall(..)) || (*m && matches!(strip(x), Expr::Lit(..))) => {
+            // (`&f(..)` / `&mut 4` / `&{ let y = ..; y }`: a temporary the function owns (a `&` of a literal is
+            // promoted to a static, and so may be a block of a constant alone))
+            Expr::Ref(m, x)
+                if matches!(strip(x), Expr::MethodCall(..))
+                    || (matches!(strip(x), Expr::Call(..)) && self.not_const(x))
+                    || self.rg.temps.contains_key(&(strip(x) as *const Expr as usize))
+                    || (*m && matches!(strip(x), Expr::Lit(..)))
+                    || matches!(strip(x), Expr::Block(None, false, b) if b.stmts.len() > 1)
+                    || (matches!(strip(x), Expr::Ref(..) | Expr::Struct(..) | Expr::Tuple(..) | Expr::Array(..)) && (self.mentions_local(x) || self.not_const(x))) =>
+            {
                 let (t, tr) = match strip(x) {
+                    x if self.rg.temps.contains_key(&(x as *const Expr as usize)) => (self.rg.temps[&(x as *const Expr as usize)], vec![]),
                     Expr::Lit(..) => (Ty::U8, vec![]),
+                    Expr::Block(_, _, b) => match b.stmts.last() {
+                        Some(Stmt::Expr(tail, false)) => self.rt_expr(tail)?,
+                        _ => return None,
+                    },
+                    x @ (Expr::Ref(..) | Expr::Struct(..) | Expr::Tuple(..) | Expr::Array(..)) => self.rt_expr(x)?,
                     x => self.rg.calls.get(&(x as *const Expr as usize)).cloned()?,
                 };
                 let r = self.rg.var();
-                let sp = super::borrowck::pos(e);
+                let sp = Some(super::borrowck::pos(e)).filter(|s| s.line != 0).unwrap_or(self.rg.let_sp);
                 self.rg.loans.push((r, String::new(), sp));
                 let mut out = vec![r];
                 out.extend(tr);
                 Some((Ty::Ref(*m, crate::types::intern(t)), out))
+            }
+            // (`&f::<&'a i32>`: a fn item is a constant, its borrow promoted)
+            Expr::Ref(false, x) if matches!(strip(x), Expr::Path(..)) && self.fn_item(x).is_some() => {
+                let (t, tr) = self.rt_fn_item(x)?;
+                let mut out = vec![STATIC];
+                out.extend(tr);
+                Some((Ty::Ref(false, crate::types::intern(t)), out))
             }
             Expr::Ref(m, x) => {
                 let (t, tr, derefs) = self.rt_place(x)?;
@@ -795,6 +1808,13 @@ impl Cx<'_> {
                     }
                 }
                 // (a reborrow through references: it lives no longer than they do)
+                if self.rg.closure.is_none() {
+                    if derefs.is_empty() {
+                        self.rg.owned_borrows.push((&**x as *const Expr as usize, r));
+                    } else {
+                        self.rg.reborrows.push((&**x as *const Expr as usize, r));
+                    }
+                }
                 for d in derefs {
                     self.rg.edge(d, r, sp);
                 }
@@ -802,14 +1822,222 @@ impl Cx<'_> {
                 out.extend(tr);
                 Some((Ty::Ref(*m, crate::types::intern(t)), out))
             }
-            Expr::Call(..) | Expr::MethodCall(..) | Expr::Struct(..) => self.rg.calls.get(&(e as *const Expr as usize)).cloned(),
+            Expr::Call(..) | Expr::MethodCall(..) | Expr::Struct(..) | Expr::Tuple(..) | Expr::Array(..) | Expr::Closure(..) => self.rg.calls.get(&(e as *const Expr as usize)).cloned(),
+            // (`e as &'static T`: the cast's type, with the regions written in it; e flows into it)
+            Expr::Cast(x, ty) => {
+                let (it, itr) = self.rt_expr(x)?;
+                let to = self.parse_ty(ty).ok()?;
+                let prog = self.prog;
+                // (`p as _` with p a pointer to a trait object: as typeck, the same type when nothing else is expected;
+                // its lifetime inferred)
+                let infer = matches!(to, Ty::Param(h) if h == crate::program::HOLE) && matches!(it, Ty::Ptr(_, i) if dyn_tail(prog, *i, 0));
+                let to = if infer { it } else { to };
+                // (an unsizing cast (`Box::new(v) as Box<dyn Tr + 'static>`): a coercion, the value flows into the
+                // type written)
+                // (a raw pointer to a value with no trait object in it, cast to one to a trait object (`p as *const (dyn
+                // Tr + 'static)`), unsizes too; one between pointers to trait objects is not a coercion)
+                let unsize = to != it && has_dyn(prog, to, 0) && (!matches!(to, Ty::Ptr(..)) || !has_dyn(prog, it, 0));
+                if to != it && !unsize {
+                    return None;
+                }
+                if infer {
+                    // (fresh regions; the object's outlived by the source's)
+                    let tree = self.rg.fresh(prog, to)?;
+                    if let (Some(&a), Some(&b)) = (itr.last(), tree.last()) {
+                        self.rg.edge(a, b, super::borrowck::pos(x));
+                    }
+                    return Some((to, tree));
+                }
+                let names = self.rg.lt_names.clone();
+                let mut s = crate::regions::Slots { lts: names, tparams: vec![], self_slots: &[], any: false, in_fn: 0 };
+                let mut codes = vec![];
+                s.slots(ty, false, &mut codes);
+                let lts = self.rg.lts.clone();
+                self.rg.dyn_infer = true;
+                let tree = self.rg.instantiate(prog, to, Some(&codes), &lts, &[], &mut |me| me.var());
+                self.rg.dyn_infer = false;
+                let tree = tree?;
+                if unsize {
+                    self.rg.flow(prog, it, to, &itr, &tree, super::borrowck::pos(x));
+                    return Some((to, tree));
+                }
+                // (a cast of a raw pointer may change the regions of what it points to; not a trait object's
+                // lifetime: `*mut (dyn Tr + 'a) as *mut (dyn Tr + 'static)` is an error)
+                // (`*mut S<dyn Tr + 'a>` too: the object at the end of what it points to)
+                match to {
+                    Ty::Ptr(_, i) if dyn_tail(prog, *i, 0) => {
+                        if let (Some(&a), Some(&b)) = (itr.last(), tree.last()) {
+                            self.rg.edge(a, b, super::borrowck::pos(x));
+                        }
+                    }
+                    Ty::Ptr(..) => {}
+                    _ => self.rg.relate(prog, to, &itr, &tree, super::borrowck::pos(x)),
+                }
+                Some((to, tree))
+            }
+            // (an `if` / `match`'s value: each branch's that does not diverge flows into it)
+            Expr::If(_, b, els) => {
+                let mut vs: Vec<&Expr> = vec![];
+                match b.stmts.last() {
+                    Some(Stmt::Expr(t, false)) => vs.push(t),
+                    _ => return None,
+                }
+                vs.push(els.as_deref()?);
+                self.rt_branches(&vs)
+            }
+            Expr::Match(_, arms) => {
+                if let Some(&m2) = self.rg.alias.get(&(e as *const Expr as usize)) {
+                    return self.rt_expr(m2);
+                }
+                let vs: Vec<&Expr> = arms.iter().map(|a| &a.body).collect();
+                self.rt_branches(&vs)
+            }
+            // (a block's value (an `unsafe` one's too): its tail's, kept while the block's locals were in scope)
+            Expr::Block(None, _, b) => match b.stmts.last() {
+                Some(Stmt::Expr(t, false)) => self.rt_expr(t),
+                _ => None,
+            },
             Expr::Path(..) | Expr::Field(..) | Expr::Unary(..) => match self.rt_place(e) {
                 Some((t, tr, _)) => Some((t, tr)),
-                // (a unit variant: `None`)
+                // (a fn item as a value (`foo::<&'a ()>`); a unit variant: `None`)
+                None if matches!(e, Expr::Path(..)) && self.fn_item(e).is_some() => self.rt_fn_item(e),
                 None => self.rg.calls.get(&(e as *const Expr as usize)).cloned(),
             },
             _ => None,
         }
+    }
+
+    /// `&e` borrows a temporary of e's value of type t (not a place, not promoted): one the region check follows when
+    /// e is no constant (a call of a function, an operation on a local) and t holds no region
+    pub(crate) fn rg_temp(&mut self, e: &Expr, t: Ty) {
+        if !self.rg_on() {
+            return;
+        }
+        let x = strip(e);
+        let k = x as *const Expr as usize;
+        // (a constant whose type needs dropping (`&Test` with `impl Drop for Test`) is not promoted either)
+        let dropped = || matches!(x, Expr::Path(None, p) if p.segs.len() != 1 || self.lookup(&p.segs[0].name).is_none()) && self.needs_drop(t);
+        if self.rg.calls.contains_key(&k) || !(self.not_const(x) || dropped()) || super::borrowck::has_refs(self.prog, t, 0) {
+            return;
+        }
+        self.rg.temps.insert(k, t);
+    }
+
+    /// e is not a constant expression a `&` would promote to a static: it reads a local, calls a function (not the
+    /// few promoted ones: `ptr::null()`, `mem::size_of()`), or compares, reads or casts to integers raw pointers
+    fn not_const(&self, e: &Expr) -> bool {
+        let ptr_cast = |x: &Expr| matches!(strip(x), Expr::Cast(_, t) if matches!(**t, crate::parse::Ty::Ptr(..) | crate::parse::Ty::Fn(..)));
+        match strip(e) {
+            // (a static: a constant expression does not borrow one)
+            Expr::Path(None, p) if p.segs.len() == 1 => {
+                self.lookup(&p.segs[0].name).is_some() || self.prog.const_index.get(&p.segs[0].name).is_some_and(|&ci| self.prog.consts[ci as usize].stat.is_some())
+            }
+            Expr::Path(None, _) => self.static_of(e).is_some(),
+            Expr::Ref(_, x) => self.not_const(x),
+            Expr::MethodCall(..) => true,
+            Expr::Call(f, args) => match strip(f) {
+                Expr::Path(_, p) if self.prog.variant_by_p(&crate::program::PPath::of(p), self.self_sid).is_some() || self.prog.struct_by_p(&crate::program::PPath::of(p), self.self_sid).is_some() => args.iter().any(|a| self.not_const(a)),
+                Expr::Path(_, p) => p.segs.last().is_none_or(|s| !matches!(s.name.as_str(), "null" | "null_mut" | "size_of" | "align_of" | "max_value" | "min_value" | "new" | "from_secs" | "from_millis" | "from_micros" | "from_nanos")),
+                _ => true,
+            },
+            Expr::Binary(op, a, b, _) => self.not_const(a) || self.not_const(b) || (matches!(op.as_str(), "==" | "!=" | "<" | "<=" | ">" | ">=") && (ptr_cast(a) || ptr_cast(b))),
+            Expr::Unary(op, x, _) => op == "*" || self.not_const(x),
+            Expr::Cast(x, to) => self.not_const(x) || (matches!(**to, crate::parse::Ty::Path(..)) && ptr_cast(x)),
+            Expr::Field(x, _, _) => self.not_const(x),
+            Expr::Block(None, _, b) if b.stmts.len() == 1 => matches!(&b.stmts[0], Stmt::Expr(t, false) if self.not_const(t)),
+            Expr::Tuple(xs) | Expr::Array(xs) => xs.iter().any(|x| self.not_const(x)),
+            Expr::Struct(_, fs, _) => fs.iter().any(|f| self.not_const(&f.1)),
+            _ => false,
+        }
+    }
+
+    /// The value of branches (an `if`'s, a `match`'s arms): a fresh tree of the first one's type each flows into;
+    /// a branch that diverges (`panic!()`, `return`) has none
+    fn rt_branches(&mut self, vs: &[&Expr]) -> Option<(Ty, RT)> {
+        let mut got: Vec<(Ty, RT, Sp)> = vec![];
+        for v in vs {
+            if diverges(v) {
+                continue;
+            }
+            let (t, tr) = self.rt_expr(v)?;
+            got.push((t, tr, epos(v)));
+        }
+        let t = got.first()?.0;
+        let prog = self.prog;
+        let tree = self.rg.fresh(prog, t)?;
+        for (vt, vtr, sp) in got {
+            self.rg.flow(prog, vt, t, &vtr, &tree, sp);
+        }
+        Some((t, tree))
+    }
+
+    /// e reads a local (so it is not a constant a `&` would promote to a static)
+    fn mentions_local(&self, e: &Expr) -> bool {
+        match strip(e) {
+            Expr::Path(None, p) => p.segs.len() == 1 && self.lookup(&p.segs[0].name).is_some(),
+            Expr::Ref(_, x) | Expr::Unary(_, x, _) | Expr::Field(x, _, _) | Expr::Cast(x, _) => self.mentions_local(x),
+            Expr::Binary(_, a, b, _) => self.mentions_local(a) || self.mentions_local(b),
+            Expr::Tuple(xs) | Expr::Array(xs) => xs.iter().any(|x| self.mentions_local(x)),
+            Expr::Struct(_, fs, _) => fs.iter().any(|f| self.mentions_local(&f.1)),
+            _ => false,
+        }
+    }
+
+    /// A function the gate left out begins its check here, where something must be 'static: what it owns must not
+    /// be borrowed for that (what came before has no trees and adds no constraint)
+    pub(crate) fn rg_late_on(&mut self) {
+        if !self.rg.on && self.rg.eligible {
+            self.rg.on = true;
+            self.rg.began_late = true;
+            // (the parameters' trees: those the signature gives them)
+            if let Some((self_elides, other_self)) = self.rg.late.take() {
+                // (a parameter's binding is the outermost of its name: a later `let` may shadow it)
+                let ps: Vec<(Loc, Ty)> = self
+                    .bk
+                    .params
+                    .iter()
+                    .filter_map(|&l| {
+                        let n = &self.bk.locals[l as usize].name;
+                        self.scopes.iter().find_map(|s| s.iter().find(|b| b.0 == *n)).map(|b| (b.1, b.2))
+                    })
+                    .collect();
+                if debug() {
+                    eprintln!("regionck: late begin with {} of {} parameters ({:?})", ps.len(), self.bk.params.len(), self.inst_params_len());
+                }
+                if ps.len() == self.bk.params.len() && self.inst_params_len() == Some(ps.len()) {
+                    self.rg_begin(None, &ps, self_elides, true);
+                    if other_self {
+                        self.rg.ret = None;
+                    }
+                }
+            }
+        }
+    }
+
+    /// The number of parameters of the function being checked
+    fn inst_params_len(&self) -> Option<usize> {
+        self.prog.sigs.get(self.rg.base as usize).map(|s| s.params.len())
+    }
+
+    /// A parameter's trait object not behind a reference (`Box<dyn Tr>`): 'static by default, written or not
+    pub(crate) fn static_object(t: Ty) -> bool {
+        match t {
+            Ty::Dyn(_) => true,
+            Ty::Box(i) => Self::static_object(*i),
+            _ => false,
+        }
+    }
+
+    /// The signature requires a region of it to be 'static
+    /// Of a callee: what it requires of its arguments writes 'static (not its result's 'static, which requires
+    /// nothing of the caller)
+    pub(crate) fn callee_needs_static(r: &RSigSyn) -> bool {
+        let n = r.slots.len().saturating_sub(1);
+        r.slots[..n].iter().flatten().any(|&c| c == R_STATIC) || r.ty_outlives.iter().any(|x| x.1 == R_STATIC) || r.outlives.iter().any(|x| x.1 == R_STATIC) || r.self_slots.contains(&R_STATIC)
+    }
+
+    pub(crate) fn needs_static(r: &RSigSyn) -> bool {
+        r.slots.iter().flatten().any(|&c| c == R_STATIC) || r.ty_outlives.iter().any(|x| x.1 == R_STATIC) || r.outlives.iter().any(|x| x.1 == R_STATIC) || r.self_slots.contains(&R_STATIC)
     }
 
     /// The tree of a place, and the regions of the references it goes through
@@ -818,17 +2046,44 @@ impl Cx<'_> {
             Expr::Paren(x) => self.rt_place(x),
             Expr::Path(None, p) if p.segs.len() == 1 && p.segs[0].args.is_empty() => {
                 let (loc, t) = self.lookup(&p.segs[0].name)?;
-                let tr = self.rg.locals.get(&loc)?.clone();
+                // (a closure's capture: reached through its environment, not owned)
+                if self.rg.cap_locs.contains(&loc) {
+                    return Some((t, self.rg.locals.get(&loc)?.clone(), vec![self.rg.env_r]));
+                }
+                let tr = match self.rg.locals.get(&loc) {
+                    Some(tr) => tr.clone(),
+                    // (a local whose type has no region (bound before the check began): its tree is empty)
+                    None if count(self.prog, t, 0) == Some(0) => vec![],
+                    None => {
+                        if debug() {
+                            eprintln!("regionck: local {} ({:?}) has no tree", p.segs[0].name, loc);
+                        }
+                        if self.rg.began_late {
+                            self.rg.rerun = true;
+                        }
+                        return None;
+                    }
+                };
                 Some((t, tr, vec![]))
             }
             Expr::Unary(op, x, _) if op == "*" => {
                 let (t, tr, mut ds) = self.rt_place(x)?;
                 match t {
-                    Ty::Ref(_, i) => {
-                        ds.push(*tr.first()?);
+                    Ty::Ref(m, i) => {
+                        deref(&mut ds, *tr.first()?, m);
                         Some((*i, tr[1..].to_vec(), ds))
                     }
                     Ty::Box(i) => Some((*i, tr, ds)),
+                    // (`*s` of a String or a Vec: what it owns, as a Box's)
+                    Ty::Struct(sid) => {
+                        let prog = self.prog;
+                        let sd = &prog.structs[sid as usize];
+                        match prog.structs[prog.base_of(sid) as usize].name.as_str() {
+                            "String" if sd.args.is_empty() => Some((Ty::Str, tr, ds)),
+                            "Vec" if sd.args.len() == 1 && lts_of(prog, prog.base_of(sid)) == 0 => Some((Ty::Slice(crate::types::intern(sd.args[0])), tr, ds)),
+                            _ => None,
+                        }
+                    }
                     _ => None,
                 }
             }
@@ -837,8 +2092,8 @@ impl Cx<'_> {
                 // (auto-deref)
                 loop {
                     match t {
-                        Ty::Ref(_, i) => {
-                            ds.push(*tr.first()?);
+                        Ty::Ref(m, i) => {
+                            deref(&mut ds, *tr.first()?, m);
                             tr = tr[1..].to_vec();
                             t = *i;
                         }
@@ -856,6 +2111,34 @@ impl Cx<'_> {
                 let prog = self.prog;
                 let fr = self.rg.field(prog, sid, i, &tr)?;
                 Some((ft, fr, ds))
+            }
+            // (an element of an array, a slice or a Vec (`&mut v[..]`): its tree is the element type's)
+            Expr::Index(x, ix, _) => {
+                let (mut t, mut tr, mut ds) = self.rt_place(x)?;
+                loop {
+                    match t {
+                        Ty::Ref(m, i) => {
+                            deref(&mut ds, *tr.first()?, m);
+                            tr = tr[1..].to_vec();
+                            t = *i;
+                        }
+                        Ty::Box(i) => t = *i,
+                        _ => break,
+                    }
+                }
+                let et = match t {
+                    Ty::Array(e, _) | Ty::Slice(e) => *e,
+                    Ty::Struct(sid) => {
+                        let sd = &self.prog.structs[sid as usize];
+                        if self.prog.structs[self.prog.base_of(sid) as usize].name != "Vec" || sd.args.len() != 1 || lts_of(self.prog, self.prog.base_of(sid)) != 0 {
+                            return None;
+                        }
+                        sd.args[0]
+                    }
+                    _ => return None,
+                };
+                let t = if matches!(strip(ix), Expr::Range(..)) { Ty::Slice(crate::types::intern(et)) } else { et };
+                Some((t, tr, ds))
             }
             Expr::Call(..) | Expr::MethodCall(..) => {
                 let (t, tr) = self.rg.calls.get(&(e as *const Expr as usize)).cloned()?;
@@ -876,32 +2159,349 @@ impl Cx<'_> {
         let tree = match ann {
             Some(a) => {
                 let names = self.rg.lt_names.clone();
-                let mut s = crate::regions::Slots { lts: names, tparams: vec![], self_slots: &[], any: false };
+                let mut s = crate::regions::Slots { lts: names, tparams: vec![], self_slots: &[], any: false, in_fn: 0 };
                 let mut codes = vec![];
                 s.slots(a, false, &mut codes);
                 let lts = self.rg.lts.clone();
-                self.rg.instantiate(prog, t, Some(&codes), &lts, &[], &mut |me| me.var())
+                self.rg.dyn_infer = true;
+                let tr = self.rg.instantiate(prog, t, Some(&codes), &lts, &[], &mut |me| me.var());
+                self.rg.dyn_infer = false;
+                tr
             }
             None => self.rg.fresh(prog, t),
         };
         let Some(tree) = tree else { return };
+        // (the annotation's type is well formed)
+        if ann.is_some() {
+            let sp = Some(super::borrowck::pos(init)).filter(|s| s.line != 0).unwrap_or(self.rg.let_sp);
+            self.rg.wf(prog, t, &tree, sp);
+        }
         // (the initializer's tree was taken before the binding: `let y = y;` reads the y it shadows)
         if let Some((it, itr)) = init_tree {
-            if count(prog, it, 0) == Some(tree.len()) {
-                self.rg.relate(prog, t, &itr, &tree, super::borrowck::pos(init));
-            }
+            self.rg.flow(prog, it, t, &itr, &tree, super::borrowck::pos(init));
         }
         self.rg.locals.insert(loc, tree);
     }
 
-    /// `place = value;`
-    pub(crate) fn rg_assign(&mut self, place: &Expr, value: &Expr) {
+    /// E0261 in a body: the lifetimes a `let` annotation names (outside fn pointer, `impl` and `dyn` types, which may
+    /// bind their own) are the function's (its impl's included). Not in a closure's body, whose function's are in
+    /// scope too
+    pub(crate) fn body_lifetimes(&self, t: &PTy, sp: Sp) -> super::R<()> {
+        if !self.user_code || self.inline_depth > 0 || !crate::regions::names_lt(t) || self.prog.closures.contains_key(&self.rg.base) {
+            return Ok(());
+        }
+        let mut used = vec![];
+        crate::ast_summary::named_lifetimes(t, &mut used);
+        let declared = self.prog.sigs.get(self.rg.base as usize).and_then(|s| s.regions.as_deref()).map(|r| r.lts.as_slice()).unwrap_or(&[]);
+        match used.iter().find(|l| !matches!(l.as_str(), "'static" | "'_") && !l.starts_with("'r#") && !declared.iter().any(|d| d == *l)) {
+            Some(l) => Err(self.at(sp, format!("use of undeclared lifetime name `{l}` (E0261)"))),
+            None => Ok(()),
+        }
+    }
+
+    /// A call through `dyn Fn(..)` whose bound writes lifetimes (s: the bound's text): the arguments flow into its
+    /// parameters' types, with the regions written there (those it elides are its own)
+    pub(crate) fn rg_dyn_fn_args(&mut self, s: &str, args: &[&Expr]) {
+        if !self.rg_on() || !s.contains('\'') {
+            return;
+        }
+        let Ok(Expr::Cast(_, pt)) = crate::parse::parse_expr(&format!("0 as &dyn {s}")) else { return };
+        let PTy::Ref(_, _, inner) = &*pt else { return };
+        let PTy::Dyn(bs) = &**inner else { return };
+        let Some(ps) = bs.iter().find_map(|b| match b {
+            crate::parse::Bound::Trait(_, p) => p.segs.last().and_then(|sg| sg.fn_args.as_ref()).map(|f| f.0.clone()),
+            _ => None,
+        }) else {
+            return;
+        };
+        let prog = self.prog;
+        for (a, p) in args.iter().zip(&ps) {
+            if !crate::regions::names_lt(p) {
+                continue;
+            }
+            let Ok(t) = self.parse_ty(p) else { continue };
+            let mut sl = crate::regions::Slots { lts: self.rg.lt_names.clone(), tparams: vec![], self_slots: &[], any: false, in_fn: 1 };
+            let mut codes = vec![];
+            sl.slots(p, false, &mut codes);
+            let lts = self.rg.lts.clone();
+            let Some(tree) = self.rg.instantiate(prog, t, Some(&codes), &lts, &[], &mut |me| me.var()) else { continue };
+            let Some((at, atr)) = self.rt_expr(a) else { continue };
+            let sp = super::borrowck::pos(a);
+            self.rg.flow(prog, at, t, &atr, &tree, sp);
+        }
+    }
+
+    /// A fn item as a value (`f::<&'a i32>`): a fn pointer whose regions are its signature's, with the lifetimes
+    /// the type arguments written name; its own lifetimes fresh
+    pub(crate) fn rt_fn_item(&mut self, e: &Expr) -> Option<(Ty, RT)> {
+        let Expr::Path(None, p) = strip(e) else { return None };
+        let id = self.fn_item(e)?;
+        let prog = self.prog;
+        let sig = &prog.sigs[id as usize];
+        let tf: Vec<&PTy> = p.segs.last()?.args.iter().filter_map(|a| if let GArg::Ty(t) = a { Some(t) } else { None }).collect();
+        // (the instance: its type arguments as written, all of them)
+        if tf.len() != sig.generics.len() || sig.trait_of.is_some() {
+            return if sig.generics.is_empty() { self.rt_fn_sig(id, &[], &[]) } else { None };
+        }
+        let mut sol = vec![];
+        let mut targs = vec![];
+        for pt in &tf {
+            let t = self.parse_ty(pt).ok()?;
+            let mut sl = crate::regions::Slots { lts: self.rg.lt_names.clone(), tparams: vec![], self_slots: &[], any: false, in_fn: 0 };
+            let mut codes = vec![];
+            sl.slots(pt, false, &mut codes);
+            let lts = self.rg.lts.clone();
+            targs.push(self.rg.instantiate(prog, t, Some(&codes), &lts, &[], &mut |me| me.var()));
+            sol.push(t);
+        }
+        self.rt_fn_sig(id, &sol, &targs)
+    }
+
+    fn rt_fn_sig(&mut self, id: u32, sol: &[Ty], targs: &[Option<RT>]) -> Option<(Ty, RT)> {
+        let prog = self.prog;
+        let sig = &prog.sigs[id as usize];
+        let rs = sig.regions.clone();
+        let codes = |i: usize| rs.as_deref().map(|r| r.slots.get(i).map(|c| c.as_slice()).unwrap_or(&[]));
+        let lts: Vec<u32> = rs.as_deref().map(|r| r.lts.iter().map(|_| self.rg.var()).collect()).unwrap_or_default();
+        let opt: Vec<Option<Ty>> = sol.iter().map(|&t| Some(t)).collect();
+        let mut tree = vec![];
+        let mut params = vec![];
+        for (i, &pt) in sig.params.iter().enumerate() {
+            tree.extend(self.rg.instantiate(prog, pt, codes(i), &lts, targs, &mut |me| me.var())?);
+            params.push(prog.partial_subst(pt, &opt));
+        }
+        tree.extend(self.rg.instantiate(prog, sig.ret, codes(sig.params.len()), &lts, targs, &mut |me| me.var())?);
+        let ret = prog.partial_subst(sig.ret, &opt);
+        if params.iter().any(|&t| prog.has_param(t)) || prog.has_param(ret) {
+            return None;
+        }
+        let t = Ty::Fn(crate::types::intern_fn(crate::types::FnTy { params, ret }));
+        (count(prog, t, 0) == Some(tree.len())).then_some((t, tree))
+    }
+
+    /// A closure made where nothing was expected (by its definition base, of type arguments args): its calls share
+    /// one signature (clo_targs, made here), and what its body stores of its parameters in places it captures
+    /// (`x.0 = input`, `v.push(input)`) flows there in the function it is in: the function knows those places
+    pub(crate) fn rg_closure_stores(&mut self, base: u32, args: &[Ty], link: Option<usize>, body: &Expr, params: &[(String, usize)], caps: &[String]) {
+        if !self.rg_on() || params.is_empty() {
+            return;
+        }
+        let prog = self.prog;
+        let mut targs: Vec<Option<RT>> = args.iter().map(|&t| self.rg.fresh(prog, t)).collect();
+        if let (Some(g), Some(last)) = (link, targs.len().checked_sub(1)) {
+            if let Some(t) = targs.get(g).cloned() {
+                targs[last] = t;
+            }
+        }
+        self.rg.clo_targs.retain(|x| x.0 != base);
+        self.rg.clo_targs.push((base, targs.clone()));
+        let stmts: Vec<&Expr> = match strip(body) {
+            Expr::Block(_, _, b) => b.stmts.iter().filter_map(|s| if let Stmt::Expr(e, _) = s { Some(e) } else { None }).collect(),
+            e => vec![e],
+        };
+        fn root(e: &Expr) -> Option<&str> {
+            match strip(e) {
+                Expr::Path(None, p) if p.segs.len() == 1 => Some(p.segs[0].name.as_str()),
+                Expr::Field(x, _, _) | Expr::Index(x, _, _) => root(x),
+                Expr::Unary(op, x, _) if op == "*" => root(x),
+                _ => None,
+            }
+        }
+        let param = |e: &Expr| match strip(e) {
+            Expr::Path(None, p) if p.segs.len() == 1 => params.iter().find(|x| x.0 == p.segs[0].name).map(|x| x.1),
+            _ => None,
+        };
+        for e in stmts {
+            let (place, g, push) = match strip(e) {
+                Expr::Assign(l, r) => match param(r) {
+                    Some(g) => (&**l, g, false),
+                    None => continue,
+                },
+                Expr::MethodCall(recv, m, _, a, _) if m == "push" && a.len() == 1 => match param(&a[0]) {
+                    Some(g) => (&**recv, g, true),
+                    None => continue,
+                },
+                _ => continue,
+            };
+            if !root(place).is_some_and(|r| caps.iter().any(|c| c == r)) {
+                continue;
+            }
+            let (Some(Some(ptr)), Some(&pty)) = (targs.get(g), args.get(g)) else { continue };
+            let Some((mut t, mut tr, _)) = self.rt_place(place) else { continue };
+            // (`v.push(input)` of a Vec: its elements')
+            if push {
+                while let Ty::Ref(_, i) = t {
+                    if tr.is_empty() {
+                        break;
+                    }
+                    tr.remove(0);
+                    t = *i;
+                }
+                let Ty::Struct(sid) = t else { continue };
+                let sd = &prog.structs[sid as usize];
+                if prog.structs[prog.base_of(sid) as usize].name != "Vec" || sd.args.len() != 1 {
+                    continue;
+                }
+                t = sd.args[0];
+            }
+            let sp = super::borrowck::pos(e);
+            let ptr = ptr.clone();
+            self.rg.flow(prog, pty, t, &ptr, &tr, sp);
+        }
+    }
+
+    /// A call through a fn pointer (f: the callee's value, of type t once dereferenced): the arguments flow into its
+    /// parameters' regions, the result is of its result's
+    /// A `&mut` local passed where a `&mut` is expected is reborrowed (`f(x)` is `f(&mut *x)`): a region of its own,
+    /// that the reference's outlives, recorded as a reborrow (the borrow check's loan of the argument: see
+    /// Rg::forever)
+    fn rg_reborrow_arg(&mut self, a: &Expr, t: &mut Option<(Ty, RT)>) {
+        let Some((Ty::Ref(true, _), tr)) = t else { return };
+        if tr.is_empty() || self.rg.closure.is_some() || !matches!(strip(a), Expr::Path(..)) {
+            return;
+        }
+        let r = self.rg.var();
+        self.rg.edge(tr[0], r, super::borrowck::pos(a));
+        tr[0] = r;
+        self.rg.reborrows.push((a as *const Expr as usize, r));
+    }
+
+    pub(crate) fn rg_fnptr_call(&mut self, f: &Expr, t: Ty, args: &[&Expr]) {
         if !self.rg_on() {
             return;
         }
-        let (Some((t, ptr, _)), Some((_, vtr))) = (self.rt_place(place), self.rt_expr(value)) else { return };
+        let Ty::Fn(ft) = t else { return };
+        let Some((mut ft0, mut tr)) = self.rt_expr(f) else { return };
+        while let Ty::Ref(_, i) = ft0 {
+            if tr.is_empty() {
+                return;
+            }
+            tr.remove(0);
+            ft0 = *i;
+        }
+        if ft0 != t {
+            return;
+        }
         let prog = self.prog;
-        self.rg.relate(prog, t, &vtr, &ptr, super::borrowck::pos(value));
+        let mut k = 0;
+        for (a, &pt) in args.iter().zip(&ft.params) {
+            let Some(n) = count(prog, pt, 0) else { return };
+            let Some(ptr) = tr.get(k..k + n).map(|x| x.to_vec()) else { return };
+            k += n;
+            let mut t = self.rt_expr(a);
+            if matches!(pt, Ty::Ref(true, _)) {
+                self.rg_reborrow_arg(a, &mut t);
+            }
+            if let Some((at, atr)) = t {
+                self.rg.flow(prog, at, pt, &atr, &ptr, super::borrowck::pos(a));
+            }
+        }
+        if let Some(r) = tr.get(k..) {
+            if count(prog, ft.ret, 0) == Some(r.len()) {
+                self.rg.last_call = Some((self.rg.depth + 1, ft.ret, r.to_vec()));
+            }
+        }
+    }
+
+    /// `let _: ann = init;`: init flows into a value of the annotation's type
+    pub(crate) fn rg_let_wild(&mut self, ann: &PTy, init: &Expr) {
+        if !self.rg_on() {
+            return;
+        }
+        let init_tree = self.rt_expr(init);
+        let Ok(t) = self.parse_ty(ann) else { return };
+        let prog = self.prog;
+        let names = self.rg.lt_names.clone();
+        let mut s = crate::regions::Slots { lts: names, tparams: vec![], self_slots: &[], any: false, in_fn: 0 };
+        let mut codes = vec![];
+        s.slots(ann, false, &mut codes);
+        let lts = self.rg.lts.clone();
+        self.rg.dyn_infer = true;
+        let tree = self.rg.instantiate(prog, t, Some(&codes), &lts, &[], &mut |me| me.var());
+        self.rg.dyn_infer = false;
+        if let Some(tree) = tree {
+            let sp = Some(super::borrowck::pos(init)).filter(|s| s.line != 0).unwrap_or(self.rg.let_sp);
+            self.rg.wf(prog, t, &tree, sp);
+            if let Some((it, itr)) = init_tree {
+                self.rg.flow(prog, it, t, &itr, &tree, sp);
+            }
+        }
+    }
+
+    /// `let x: ann;` (`let _: ann;`): the annotation's type is well formed; x's tree is of it
+    pub(crate) fn rg_let_uninit(&mut self, name: Option<&str>, ann: &PTy, sp: Sp) {
+        if !self.rg.on && self.rg.eligible && self.inline_depth == 0 && crate::regions::mentions_static(ann) {
+            self.rg_late_on();
+        }
+        if !self.rg_on() {
+            return;
+        }
+        let Ok(t) = self.parse_ty(ann) else { return };
+        let prog = self.prog;
+        let names = self.rg.lt_names.clone();
+        let mut s = crate::regions::Slots { lts: names, tparams: vec![], self_slots: &[], any: false, in_fn: 0 };
+        let mut codes = vec![];
+        s.slots(ann, false, &mut codes);
+        let lts = self.rg.lts.clone();
+        self.rg.dyn_infer = true;
+        let tree = self.rg.instantiate(prog, t, Some(&codes), &lts, &[], &mut |me| me.var());
+        self.rg.dyn_infer = false;
+        let Some(tree) = tree else { return };
+        self.rg.wf(prog, t, &tree, sp);
+        if let Some((loc, _)) = name.and_then(|n| self.lookup(n)) {
+            self.rg.locals.insert(loc, tree);
+        }
+    }
+
+    /// `a == b` (and the other comparisons): both are of one type (`PartialEq<Self>`), each flows into it (so its
+    /// invariant parts are the same: `*mut &'a i32 == *mut &'b i32` needs 'a == 'b)
+    pub(crate) fn rg_cmp(&mut self, a: &Expr, b: &Expr, e: &Expr) {
+        // (a literal on either side: a number, a string, of no region to relate)
+        if !self.rg_on() || matches!(strip(a), Expr::Lit(..)) || matches!(strip(b), Expr::Lit(..)) {
+            return;
+        }
+        let (Some((at, atr)), Some((bt, btr))) = (self.rt_expr(a), self.rt_expr(b)) else { return };
+        let prog = self.prog;
+        if at != bt || atr.is_empty() {
+            return;
+        }
+        let Some(tree) = self.rg.fresh(prog, at) else { return };
+        let sp = Some(epos(e)).filter(|s| s.line != 0).unwrap_or_else(|| epos(a));
+        self.rg.relate(prog, at, &atr, &tree, sp);
+        self.rg.relate(prog, bt, &btr, &tree, sp);
+    }
+
+    /// `place = value;`
+    pub(crate) fn rg_assign(&mut self, place: &Expr, value: &Expr) {
+        // (a static assigned (`BAR = &n;`): every region of its type is 'static)
+        // (a static first, then not a local of its name: the scopes are looked up for the rare static only)
+        let stat = match strip(place) {
+            Expr::Path(None, p) if p.segs.len() == 1 && (self.rg.on || self.rg.eligible) => self
+                .prog
+                .const_index
+                .get(&p.segs[0].name)
+                .map(|&ci| &self.prog.consts[ci as usize])
+                .filter(|c| c.stat.is_some())
+                .map(|c| c.ty)
+                .filter(|_| self.lookup(&p.segs[0].name).is_none()),
+            _ => None,
+        };
+        let stat = stat.and_then(|t| Some((t, count(self.prog, t, 0)?))).filter(|&(_, n)| n > 0);
+        if stat.is_some() && !self.rg.on && self.rg.eligible && self.inline_depth == 0 {
+            self.rg_late_on();
+        }
+        if !self.rg_on() {
+            return;
+        }
+        if let Some((t, n)) = stat {
+            let Some((vt, vtr)) = self.rt_expr(value) else { return };
+            let prog = self.prog;
+            self.rg.flow(prog, vt, t, &vtr, &vec![STATIC; n], super::borrowck::pos(value));
+            return;
+        }
+        let (Some((t, ptr, _)), Some((vt, vtr))) = (self.rt_place(place), self.rt_expr(value)) else { return };
+        let prog = self.prog;
+        self.rg.flow(prog, vt, t, &vtr, &ptr, super::borrowck::pos(value));
     }
 
     /// The value e is returned
@@ -938,58 +2538,206 @@ impl Cx<'_> {
             _ => {}
         }
         let Some(rt) = self.rg.ret.clone() else { return };
-        let Some((_, tr)) = self.rt_expr(e) else { return };
+        let Some((et, tr)) = self.rt_expr(e) else { return };
         let (prog, t) = (self.prog, self.ret);
-        self.rg.relate(prog, t, &tr, &rt, super::borrowck::pos(e));
+        let sp = super::borrowck::pos(e);
+        // (a result with no regions: nothing escapes through it; the span may be a call's in it)
+        if sp.line != 0 && !rt.is_empty() {
+            self.rg.ret_sps.push(sp);
+        }
+        self.rg.flow(prog, et, t, &tr, &rt, sp);
     }
 
     /// A call of id (generic signature sig0, type arguments sol, instance's parameter types params) with these
     /// arguments (the receiver's tree is rg.recv): relate the arguments to the parameters, and keep the result's tree
-    pub(crate) fn rg_call(&mut self, id: u32, sol: &[Option<Ty>], args: &[&Expr], params: &[Ty], ret: Ty, recv: Option<(RT, Sp)>, has_recv: bool, sp: Sp) {
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn rg_call(&mut self, id: u32, sol: &[Option<Ty>], turbofish: Option<&[GArg]>, args: &[&Expr], params: &[Ty], ret: Ty, recv: Option<(RT, Sp)>, has_recv: bool, sp: Sp) {
         if !self.rg_on() {
             return;
         }
         let recv_info = recv.as_ref().map(|r| r.1);
+        // (a call whose span is not known: at its first argument)
+        let sp = if sp.line == 0 { recv_info.into_iter().chain(args.first().map(|a| super::borrowck::pos(a))).find(|s| s.line != 0).unwrap_or(sp) } else { sp };
         self.rg.last_call = None;
         let prog = self.prog;
         let sig0 = &prog.sigs[id as usize];
+        // (a generic function's instance calling the method of an impl that writes lifetimes in its trait
+        // (`impl Trait<'static> for ()`): the generic body called the trait's method under its own bounds
+        // (`(): Trait<'a>`), with the trait's signature, not the impl's. Not followed)
+        // (only where the trait's declaration of the method names the trait's own lifetimes, which the impl sets and a
+        // bound may set otherwise; a trait's `fn take(x: &'static u8)` is the impl's too: `S::take(x)` is followed)
+        let decl_names_trait_lts = || {
+            let tr = sig0.impl_trait.as_deref()?;
+            let name = prog.names[id as usize].rsplit("::").next()?;
+            let tail = format!("::{tr}");
+            let decls = prog.traits.get(tr).or_else(|| prog.traits.iter().find(|(k, _)| k.ends_with(&tail)).map(|(_, v)| v))?;
+            let d = decls.iter().copied().find(|&d| prog.names[d as usize].rsplit("::").next() == Some(name))?;
+            let r = prog.sigs[d as usize].regions.as_deref()?;
+            Some(r.slots.iter().flatten().any(|&c| c < r.outer))
+        };
+        if !self.rg.inst_args.is_empty() && sig0.impl_trait.is_some() && decl_names_trait_lts().unwrap_or(false) {
+            self.rg.missed.push("trait impl");
+            return;
+        }
         let rs = sig0.regions.clone();
         let codes = |i: usize| rs.as_deref().map(|r| r.slots.get(i).map(|c| c.as_slice()).unwrap_or(&[]));
-        // (the prelude writes no lifetimes: what its results borrow is not known from elision)
-        let prelude = prog.item_of.get(id as usize).copied().flatten().is_none_or(|i| i >= prog.prelude_from);
-        let mut rg = std::mem::take(&mut self.rg);
-        let lts: Vec<u32> = rs.as_deref().map(|r| r.lts.iter().map(|_| rg.var()).collect()).unwrap_or_default();
-        let targs: Vec<Option<RT>> = sol.iter().map(|t| t.and_then(|t| rg.fresh(prog, t))).collect();
+        // (the prelude writes no lifetimes: what its results borrow is not known from elision. A closure's call
+        // elides as a fn)
+        let prelude = prog.item_of.get(id as usize).copied().flatten().is_none_or(|i| i >= prog.prelude_from) && !prog.closures.contains_key(&id);
+        let rg = &mut self.rg;
+        let mut lts: Vec<u32> = rs.as_deref().map(|r| r.lts.iter().map(|_| rg.var()).collect()).unwrap_or_default();
+        // (a method of a placeholder's bound (`G: GetRef<'a>` calling `g.get()`): the trait's lifetimes are those the
+        // bound writes, the caller's; what the declaration requires is the caller's to prove)
+        let mut ph_self = false;
+        if let (Some(tr), Some(&Some(Ty::Struct(s)))) = (sig0.trait_of.as_deref(), sol.first()) {
+            if prog.is_placeholder(s) {
+                ph_self = true;
+                let outer = rs.as_deref().map_or(0, |r| r.outer as usize);
+                let short = tr.rsplit("::").next().unwrap_or(tr);
+                let bs = prog.structs[s as usize].placeholder.as_deref().unwrap_or(&[]);
+                // (`Self` of the trait's own default method: bounded by the trait, whose lifetimes are the method's, by name)
+                // (only for the `Self` placeholder: another type parameter of the method (`G: Get<'b>`) has its own bound)
+                let own = prog.sigs.get(rg.base as usize).and_then(|c| c.trait_of.as_deref()) == Some(tr) && prog.structs[s as usize].name == "Self#";
+                if let (true, Some(r)) = (own, rs.as_deref()) {
+                    for (i, l) in r.lts.iter().enumerate().take(outer) {
+                        if let (Some(p), Some(slot)) = (rg.lt_names.iter().position(|x| x == l), lts.get_mut(i)) {
+                            if let Some(&v) = rg.lts.get(p) {
+                                *slot = v;
+                            }
+                        }
+                    }
+                } else if let Some(b) = bs.iter().filter(|_| outer > 0).find(|b| b.split('<').next().unwrap_or(b).trim() == tr).or_else(|| bs.iter().filter(|_| outer > 0).find(|b| b.split('<').next().unwrap_or(b).trim().rsplit("::").next() == Some(short))) {
+                    for (i, l) in bound_lts(b).iter().enumerate().take(outer) {
+                        let v = if l == "'static" { Some(STATIC) } else { rg.lt_names.iter().position(|x| x == l).and_then(|p| rg.lts.get(p).copied()) };
+                        if let (Some(v), Some(slot)) = (v, lts.get_mut(i)) {
+                            *slot = v;
+                        }
+                    }
+                }
+            }
+        }
+        // (type parameters the arguments did not solve (a bound's `G: GetRef<'a, isize>` gives the trait's `T`): from
+        // the instantiated signature)
+        let filled;
+        let sol = if ph_self && sol.iter().any(|t| t.is_none()) {
+            let mut s2 = sol.to_vec();
+            for (&g, &c) in sig0.params.iter().zip(params).chain(std::iter::once((&sig0.ret, &ret))) {
+                bind_params(prog, g, c, &mut s2, 0);
+            }
+            filled = s2;
+            &filled[..]
+        } else {
+            sol
+        };
+        let mut targs: Vec<Option<RT>> = sol.iter().map(|t| t.and_then(|t| rg.fresh(prog, t))).collect();
+        // (type arguments written (`f::<&'a u8>()`): with the regions they name)
+        if let Some(tf) = turbofish {
+            let first = sig0.trait_of.is_some() as usize;
+            for (i, a) in tf.iter().enumerate() {
+                let (GArg::Ty(pt), Some(Some(t))) = (a, sol.get(first + i)) else { continue };
+                if !crate::regions::names_lt(pt) {
+                    continue;
+                }
+                let mut s = crate::regions::Slots { lts: rg.lt_names.clone(), tparams: vec![], self_slots: &[], any: false, in_fn: 0 };
+                let mut codes = vec![];
+                s.slots(pt, false, &mut codes);
+                let flts = rg.lts.clone();
+                rg.dyn_infer = true;
+                let tr = rg.instantiate(prog, *t, Some(&codes), &flts, &[], &mut |me| me.var());
+                rg.dyn_infer = false;
+                if let Some(tr) = tr {
+                    targs[first + i] = Some(tr);
+                }
+            }
+        }
         // (the regions a type argument brings are not the signature's own: elision does not see them)
         let substituted: Vec<u32> = targs.iter().flatten().flatten().copied().collect();
         let mut ptrees: Vec<Option<RT>> = vec![];
         let mut inputs = vec![];
+        // (a closure's of one region for all its calls: the same variables, in order)
+        let shared = rg.shared_clo.take();
+        // (its parameters' and result's types: the same trees at each call; the result's its parameter's for `|y| y`)
+        if let Some((b, link)) = shared {
+            match rg.clo_targs.iter().find(|x| x.0 == b) {
+                Some((_, t)) if t.len() == targs.len() => targs = t.clone(),
+                _ => {
+                    if let (Some(g), Some(last)) = (link, targs.len().checked_sub(1)) {
+                        if let Some(t) = targs.get(g).cloned() {
+                            targs[last] = t;
+                        }
+                    }
+                    rg.clo_targs.retain(|x| x.0 != b);
+                    rg.clo_targs.push((b, targs.clone()));
+                }
+            }
+        }
+        let shared = shared.map(|s| s.0);
+        let mut k = 0usize;
         for (i, &pt) in sig0.params.iter().enumerate() {
-            let tr = rg.instantiate(prog, pt, codes(i), &lts, &targs, &mut |me| me.var());
+            let tr = rg.instantiate(prog, pt, codes(i), &lts, &targs, &mut |me| match shared {
+                Some(b) => {
+                    let pos = match me.clo_shared.iter().position(|x| x.0 == b) {
+                        Some(p) => p,
+                        None => {
+                            me.clo_shared.push((b, vec![]));
+                            me.clo_shared.len() - 1
+                        }
+                    };
+                    let v = match me.clo_shared[pos].1.get(k) {
+                        Some(&v) => v,
+                        None => {
+                            let v = me.var();
+                            me.clo_shared[pos].1.push(v);
+                            v
+                        }
+                    };
+                    k += 1;
+                    v
+                }
+                None => me.var(),
+            });
             if let Some(t) = &tr {
                 inputs.extend(t.iter().copied().filter(|&v| v != STATIC && !substituted.contains(&v)));
             }
             ptrees.push(tr);
         }
         // (the arguments flow into the parameters)
-        let mut atrees: Vec<(Option<RT>, Sp)> = vec![];
+        let mut atrees: Vec<(Option<(Option<Ty>, RT)>, Sp)> = vec![];
         if has_recv {
-            atrees.push((recv.map(|r| r.0), recv_sp(&recv_info, sp)));
+            atrees.push((recv.map(|r| (None, r.0)), recv_sp(&recv_info, sp)));
         }
-        self.rg = rg;
-        for a in args {
-            let t = self.rt_expr(a).map(|x| x.1);
-            atrees.push((t, super::borrowck::pos(a)));
+        for (i, a) in args.iter().enumerate() {
+            let mut t = self.rt_expr(a);
+            if params.get(i + has_recv as usize).is_some_and(|p| matches!(p, Ty::Ref(true, _))) {
+                self.rg_reborrow_arg(a, &mut t);
+            }
+            atrees.push((t.map(|x| (Some(x.0), x.1)), super::borrowck::pos(a)));
         }
-        let mut rg = std::mem::take(&mut self.rg);
+        let rg = &mut self.rg;
         for (i, ((at, asp), pt)) in atrees.iter().zip(&ptrees).enumerate() {
-            if let (Some(at), Some(pt), Some(&ty)) = (at, pt, params.get(i)) {
-                rg.relate(prog, ty, at, pt, *asp);
+            if let (Some((aty, at)), Some(pt), Some(&ty)) = (at, pt, params.get(i)) {
+                rg.flow(prog, aty.unwrap_or(ty), ty, at, pt, *asp);
+            }
+        }
+        // (the parameters' types are well formed, as the callee assumes: `&'a Foo<'b>` needs 'b: 'a of the call)
+        if !prelude && rs.is_some() {
+            for (pt, &ty) in ptrees.iter().zip(params) {
+                if let Some(pt) = pt.as_ref().filter(|t| t.len() > 1) {
+                    rg.wf(prog, ty, pt, sp);
+                }
+            }
+        }
+        // (an impl's method: its self type is well formed (`struct Foo<'a, 'b: 'a>`): the call makes sure)
+        if let (Some(r), Some(isid)) = (rs.as_deref(), sig0.impl_of) {
+            if !r.self_slots.is_empty() {
+                if let Some(st) = rg.instantiate(prog, Ty::Struct(isid), Some(&r.self_slots), &lts, &targs, &mut |me| me.var()) {
+                    rg.wf(prog, Ty::Struct(isid), &st, sp);
+                }
             }
         }
         // (the callee's declared bounds hold of its arguments; not those of a trait's impl called from a generic
         // function's instance: the generic body called the trait's method, under its own bounds)
-        let through_trait = !rg.inst_args.is_empty() && (sig0.impl_trait.is_some() || sig0.trait_of.is_some());
+        let through_trait = !rg.inst_args.is_empty() && (sig0.impl_trait.is_some() || sig0.trait_of.is_some()) && !ph_self;
         if let Some(r) = rs.as_deref().filter(|_| !through_trait) {
             let m = |c: u8| if c == R_STATIC { Some(STATIC) } else { lts.get(c as usize).copied() };
             for &(a, b) in &r.outlives {
@@ -1015,8 +2763,11 @@ impl Cx<'_> {
         inputs.dedup();
         let one = if inputs.len() == 1 { Some(inputs[0]) } else { None };
         let n = sig0.params.len();
-        let rtr = rg.instantiate(prog, sig0.ret, codes(n), &lts, &targs, &mut |me| match (prelude || (other_self && self_r.is_none()), self_r.or(one)) {
-            (false, Some(v)) => v,
+        // (the prelude writes no lifetimes: a method of it taking `&self` returns a borrow of self, as std's do;
+        // what else its results borrow is not known)
+        let rtr = rg.instantiate(prog, sig0.ret, codes(n), &lts, &targs, &mut |me| match (prelude, other_self && self_r.is_none(), self_r, one) {
+            (true, _, Some(v), _) => v,
+            (false, false, Some(v), _) | (false, false, None, Some(v)) => v,
             _ => me.var(),
         });
         if let Some(rtr) = rtr {
@@ -1024,12 +2775,11 @@ impl Cx<'_> {
                 rg.last_call = Some((rg.depth, ret, rtr));
             }
         }
-        self.rg = rg;
     }
 
     /// The tree of a method call's receiver as passed: recv's place, through `derefs` references, then borrowed again
     /// when the method takes `&self` / `&mut self` (passed as recv_ty)
-    pub(crate) fn rg_recv(&mut self, recv: &Expr, recv_ty: Ty, sid: u32) {
+    pub(crate) fn rg_recv(&mut self, recv: &Expr, recv_ty: Ty, sid: u32, call: Option<&Expr>) {
         self.rg.recv = None;
         if !self.rg_on() {
             return;
@@ -1038,9 +2788,11 @@ impl Cx<'_> {
         loop {
             match t {
                 Ty::Struct(s) if s == sid => break,
-                Ty::Ref(_, i) => {
+                // (through a shared reference the borrow lives no longer than it alone: `x.get()` with
+                // x: &'short mut &'long S borrows for 'long, as fields and indexes do)
+                Ty::Ref(m, i) => {
                     let Some(&r) = tr.first() else { return };
-                    ds.push(r);
+                    deref(&mut ds, r, m);
                     tr = tr[1..].to_vec();
                     t = *i;
                 }
@@ -1055,6 +2807,10 @@ impl Cx<'_> {
                 for d in ds {
                     self.rg.edge(d, r, sp);
                 }
+                // (the borrow of the receiver, by the call (the borrow check's loan of it): see Rg::holders)
+                if let (None, Some(c)) = (&self.rg.closure, call) {
+                    self.rg.reborrows.push((c as *const Expr as usize, r));
+                }
                 let mut v = vec![r];
                 v.extend(tr);
                 v
@@ -1066,6 +2822,14 @@ impl Cx<'_> {
 
     /// A struct literal of type t: a fresh tree, the fields' values flow into its fields
     pub(crate) fn rg_struct_lit(&mut self, e: &Expr, t: Ty) {
+        // (a field of a type written `'static`: from here on, checked)
+        if !self.rg.on && self.rg.eligible && self.inline_depth == 0 {
+            if let Ty::Struct(sid) = t {
+                if self.prog.adt_regions.get(&self.prog.base_of(sid)).is_some_and(|r| r.fields.iter().flatten().any(|&c| c == R_STATIC)) {
+                    self.rg_late_on();
+                }
+            }
+        }
         if !self.rg_on() {
             return;
         }
@@ -1074,16 +2838,448 @@ impl Cx<'_> {
         if prog.structs[sid as usize].is_enum {
             return;
         }
-        let Some(tree) = self.rg.fresh(prog, t) else { return };
+        // (`Self { .. }` in an impl's method: of the impl's self type)
+        let of_self = matches!(e, Expr::Struct(p, ..) if p.segs.len() == 1 && p.segs[0].name == "Self");
+        let Some(tree) = self.self_tree(t, of_self) else { return };
+        // (at a field's value, else at the literal: `Foo { x, y }` writes no value)
+        let lit_sp = match e {
+            Expr::Struct(p, ..) if p.pos.line != 0 => p.pos,
+            _ => super::borrowck::pos(e),
+        };
         for (n, v) in fs {
             let Some(i) = prog.structs[sid as usize].fields.iter().position(|f| f.0 == *n) else { continue };
             let ft = prog.structs[sid as usize].fields[i].1;
             let Some(ftr) = self.rg.field(prog, sid, i, &tree) else { continue };
-            if let Some((_, vtr)) = self.rt_expr(v) {
-                self.rg.relate(prog, ft, &vtr, &ftr, super::borrowck::pos(v));
+            if let Some((vt, vtr)) = self.rt_expr(v) {
+                let sp = Some(super::borrowck::pos(v)).filter(|s| s.line != 0).unwrap_or(lit_sp);
+                self.rg.flow(prog, vt, ft, &vtr, &ftr, sp);
+            }
+        }
+        // (the definition's bounds hold of the value built: `struct Foo<'a: 'b, 'b>`)
+        self.rg.wf_declared(prog, t, &tree, lit_sp);
+        self.rg.calls.insert(e as *const Expr as usize, (t, tree));
+    }
+
+    /// The tree of a value of type t built by a struct literal or a constructor: the impl's self type's for `Self`,
+    /// else fresh
+    fn self_tree(&mut self, t: Ty, of_self: bool) -> Option<RT> {
+        let prog = self.prog;
+        // (an impl of an instance (`impl A<&'static u8>`): its self type's codes, on the type built)
+        if of_self && self.rg.self_tree.as_ref().is_none_or(|x| x.0 != t) {
+            let rs = prog.sigs.get(self.rg.base as usize).and_then(|s| s.regions.clone());
+            if let Some(r) = rs.filter(|r| !r.self_slots.is_empty()) {
+                let lts = self.rg.lts.clone();
+                if let Some(tr) = self.rg.instantiate(prog, t, Some(&r.self_slots), &lts, &[], &mut |me| me.var()) {
+                    return Some(tr);
+                }
+            }
+        }
+        match &self.rg.self_tree {
+            Some((st, tr)) if of_self && *st == t => Some(tr.clone()),
+            _ => self.rg.fresh(prog, t),
+        }
+    }
+
+    /// A tuple struct's value of type t built by its constructor (`B(a)`): the arguments flow into its fields
+    pub(crate) fn rg_ctor(&mut self, c: &Expr, t: Ty, args: &[(usize, &Expr)]) {
+        // (c: the call `Self(..)`)
+        let of_self = matches!(strip(c), Expr::Call(f, _) if matches!(strip(f), Expr::Path(None, p) if p.segs.len() == 1 && p.segs[0].name == "Self"));
+        // (a field of a type written `'static`, or `Self` of an impl's self type that writes it: from here on,
+        // checked)
+        if !self.rg.on && self.rg.eligible && self.inline_depth == 0 {
+            if let Ty::Struct(sid) = t {
+                let self_static = of_self && self.prog.sigs.get(self.rg.base as usize).and_then(|s| s.regions.as_deref()).is_some_and(|r| r.self_slots.contains(&R_STATIC));
+                if self_static || self.prog.adt_regions.get(&self.prog.base_of(sid)).is_some_and(|r| r.fields.iter().flatten().any(|&c| c == R_STATIC)) {
+                    self.rg_late_on();
+                }
+            }
+        }
+        if !self.rg_on() {
+            return;
+        }
+        let Ty::Struct(sid) = t else { return };
+        let prog = self.prog;
+        if prog.structs[sid as usize].is_enum {
+            return;
+        }
+        let Some(tree) = self.self_tree(t, of_self) else { return };
+        for &(i, v) in args {
+            let Some(&(_, ft, _)) = prog.structs[sid as usize].fields.get(i) else { continue };
+            let Some(ftr) = self.rg.field(prog, sid, i, &tree) else { continue };
+            if let Some((vt, vtr)) = self.rt_expr(v) {
+                self.rg.flow(prog, vt, ft, &vtr, &ftr, super::borrowck::pos(v));
+            }
+        }
+        self.rg.calls.insert(c as *const Expr as usize, (t, tree));
+    }
+
+    /// A call of a trait's method through a trait object (decl: the trait's declaration; sol: its type arguments,
+    /// params: the instance's parameters but the receiver): as a call of the declaration with Self the object
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn rg_dyn_call(&mut self, mc: &Expr, decl: u32, sol: &[Option<Ty>], params: &[Ty], ret: Ty) {
+        if !self.rg_on() {
+            return;
+        }
+        let Expr::MethodCall(recv, _, _, margs, _) = mc else { return };
+        let Some((rty, mut rtr)) = self.rt_expr(recv) else { return };
+        let selft = match rty {
+            Ty::Ref(_, i) | Ty::Box(i) => *i,
+            t => t,
+        };
+        // (a Box's content is borrowed for a `&self` method: of what the function owns, a loan)
+        if let (Ty::Box(_), Some(Ty::Ref(..))) = (rty, self.prog.sigs[decl as usize].params.first()) {
+            let r = self.rg.var();
+            if let Some(n) = place_text(recv) {
+                self.rg.loans.push((r, format!("*{n}"), super::borrowck::pos(recv)));
+            }
+            rtr.insert(0, r);
+        }
+        let mut sol = sol.to_vec();
+        if let Some(s) = sol.first_mut() {
+            *s = Some(selft);
+        }
+        let Some(&p0) = self.prog.sigs[decl as usize].params.first() else { return };
+        let p0 = self.prog.partial_subst(p0, &sol);
+        let ps: Vec<Ty> = std::iter::once(p0).chain(params.iter().copied()).collect();
+        let args: Vec<&Expr> = margs.iter().collect();
+        let sp = super::borrowck::pos(recv);
+        self.rg.depth += 1;
+        self.rg_call(decl, &sol, None, &args, &ps, ret, Some((rtr, sp)), true, super::borrowck::pos(mc));
+        self.rg.depth -= 1;
+        self.rg_took_call(mc);
+    }
+
+    /// A tuple literal of type t: its elements' trees, side by side (the tuple is covariant in them)
+    pub(crate) fn rg_tuple(&mut self, e: &Expr, t: Ty) {
+        if !self.rg_on() {
+            return;
+        }
+        let (Expr::Tuple(xs), Ty::Struct(sid)) = (e, t) else { return };
+        let prog = self.prog;
+        let args = prog.structs[sid as usize].args.clone();
+        if !prog.is_tuple(sid) || args.len() != xs.len() {
+            return;
+        }
+        let Some(tree) = self.rg.fresh(prog, t) else { return };
+        let mut k = 0;
+        for (x, &at) in xs.iter().zip(&args) {
+            let Some(c) = count(prog, at, 0) else { return };
+            if let Some((xty, xt)) = self.rt_expr(x) {
+                let part = tree[k..k + c].to_vec();
+                self.rg.flow(prog, xty, at, &xt, &part, super::borrowck::pos(x));
+            }
+            k += c;
+        }
+        self.rg.calls.insert(e as *const Expr as usize, (t, tree));
+    }
+
+    /// A closure's region signature (Rg::closure) for its body's check, from the bound it is passed to (its text,
+    /// the callee's lifetimes and type parameters) or else its annotations: kept with the instances (Insts::closure_rg)
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn rg_closure_sig(&mut self, c: &Expr, cid: u32, params: &[Ty], ret: Ty, bound: Option<(String, Vec<String>, Vec<String>)>) {
+        let Expr::Closure(_, inputs, ret_ann, _, _) = c else { return };
+        let prog = self.prog;
+        // (its captures' regions that are universal here: the function's own, related as it knows)
+        let (caps, known, lts) = self.rg_capture_codes(cid);
+        let any_cap = caps.iter().flatten().flatten().any(|&c| c >= CLO_U);
+        // (nothing to check when no region is in its signature nor its captures are this function's)
+        if !any_cap && params.iter().chain([&ret]).all(|&t| count(prog, t, 0) == Some(0)) {
+            return;
+        }
+        if bound.is_none() && !any_cap && !inputs.iter().any(|x| x.1.is_some()) {
+            return;
+        }
+        let mut codes: Vec<Vec<u8>> = vec![];
+        match bound {
+            Some((b, lts, tps)) => {
+                let Some(f) = crate::parse::parse_file(&format!("type __B = dyn {b};")).ok() else { return };
+                let Some(crate::parse::ItemKind::Type(_, _, _, Some(PTy::Dyn(bs)))) = f.items.first().map(|i| &i.kind) else { return };
+                let Some(crate::parse::Bound::Trait(_, p)) = bs.first() else { return };
+                let Some((bps, br)) = p.segs.last().and_then(|s| s.fn_args.clone()) else { return };
+                if bps.len() != params.len() {
+                    return;
+                }
+                let mut cc = CloCodes { outer_lts: &lts, tparams: &tps, named: vec![], np: 0, ne: 0, elided: None };
+                for (pt, &t) in bps.iter().zip(params) {
+                    let mut v = vec![];
+                    if !cc.of(prog, pt, t, &mut v, 0) {
+                        return;
+                    }
+                    codes.push(v);
+                }
+                // (the result's elided regions: the one region of the inputs, as fn elision)
+                let mut ins: Vec<u8> = codes.iter().flatten().copied().filter(|&c| c != R_ELIDED && c != R_STATIC).collect();
+                ins.sort();
+                ins.dedup();
+                cc.elided = if ins.len() == 1 { Some(ins[0]) } else { None };
+                let mut v = vec![];
+                match &br {
+                    Some(rt) => {
+                        if !cc.of(prog, rt, ret, &mut v, 0) {
+                            return;
+                        }
+                    }
+                    None if count(prog, ret, 0) == Some(0) => {}
+                    None => return,
+                }
+                // (an elided region of the result with no one input region: not followed)
+                if cc.elided.is_none() && v.iter().any(|&c| c < CLO_E && cc.np as usize > ins.len()) {
+                    return;
+                }
+                codes.push(v);
+            }
+            // (no bound: the annotated parameters' elided regions are bound by the closure; the result's regions
+            // are from outside it)
+            None => {
+                let outer = self.rg.lt_names.clone();
+                let mut cc = CloCodes { outer_lts: &outer, tparams: &[], named: vec![], np: 0, ne: 0, elided: None };
+                for (i, &t) in params.iter().enumerate() {
+                    let mut v = vec![];
+                    let ok = match inputs.get(i).and_then(|x| x.1.as_ref()) {
+                        Some(pt) => cc.of(prog, pt, t, &mut v, 0),
+                        None => count(prog, t, 0).map(|n| v.extend(std::iter::repeat_n(R_ELIDED, n))).is_some(),
+                    };
+                    if !ok {
+                        return;
+                    }
+                    codes.push(v);
+                }
+                // (the result's: from outside when the closure writes its type; else an expected type it is
+                // coerced to may give its signature (`Box<dyn for<'r> Fn(&'r T) -> &'r U>`): not known)
+                let Some(n) = count(prog, ret, 0) else { return };
+                let v: Vec<u8> = (0..n.min(0x30)).map(|i| if ret_ann.is_some() { cc.e() } else { CLO_S + i as u8 }).collect();
+                if v.len() != n {
+                    return;
+                }
+                codes.push(v);
+            }
+        }
+        self.insts.lock().unwrap().closure_rg.insert(cid, Box::new(crate::program::CloRg { codes, caps, known, lts }));
+    }
+
+    /// The codes of a closure's captures (cid) as trees of this function: its universal regions are CLO_U + i; what
+    /// it knows of them; its named lifetimes
+    #[allow(clippy::type_complexity)]
+    fn rg_capture_codes(&mut self, cid: u32) -> (Vec<Option<Vec<u8>>>, Vec<(u8, u8)>, Vec<(String, u8)>) {
+        let prog = self.prog;
+        let Some(cd) = prog.closures.get(&cid) else { return (vec![], vec![], vec![]) };
+        if !self.rg_on() {
+            return (vec![None; cd.captures.len()], vec![], vec![]);
+        }
+        let mut us: Vec<u32> = vec![];
+        let code = |us: &mut Vec<u32>, v: u32| -> u8 {
+            match us.iter().position(|&x| x == v) {
+                Some(i) => CLO_U + i as u8,
+                None if us.len() < 0x3F => {
+                    us.push(v);
+                    CLO_U + us.len() as u8 - 1
+                }
+                None => R_ELIDED,
+            }
+        };
+        let univ: Vec<u32> = self.rg.univ.iter().map(|u| u.0).collect();
+        let mut caps = vec![];
+        for n in &cd.captures {
+            let seg = crate::parse::Seg { name: n.clone(), args: vec![], fn_args: None, text: n.clone() };
+            let p = Expr::Path(None, crate::parse::Path { global: false, segs: vec![seg], pos: Default::default() });
+            caps.push(self.rt_place(&p).map(|(_, tr, _)| {
+                tr.iter()
+                    .map(|&v| match v {
+                        STATIC => R_STATIC,
+                        v if univ.contains(&v) => code(&mut us, v),
+                        _ => R_ELIDED,
+                    })
+                    .collect()
+            }));
+        }
+        let mut lts = vec![];
+        for (name, &v) in self.rg.lt_names.clone().iter().zip(self.rg.lts.clone().iter()) {
+            lts.push((name.clone(), code(&mut us, v)));
+        }
+        let known = self
+            .rg
+            .known
+            .iter()
+            .filter_map(|&(a, b)| {
+                let (i, j) = (us.iter().position(|&x| x == a)?, us.iter().position(|&x| x == b)?);
+                Some((CLO_U + i as u8, CLO_U + j as u8))
+            })
+            .collect();
+        (caps, known, lts)
+    }
+
+    /// A closure's body begins: its parameters' trees and its result's from its region signature; what it
+    /// captures is from outside it (rg_capture)
+    pub(crate) fn rg_begin_closure(&mut self, params: &[(Loc, Ty)]) {
+        let prog = self.prog;
+        let Some(clo) = self.rg.closure.clone() else { return };
+        let codes = &clo.codes;
+        if codes.len() != params.len() + 1 {
+            self.rg.on = false;
+            return;
+        }
+        let mut rg = std::mem::take(&mut self.rg);
+        rg.in_closure = true;
+        let reg = |rg: &mut RgSt, c: u8| -> u32 { rg.clo_reg(c) };
+        // (the function's named lifetimes, as a `let` annotation in the closure names them)
+        for (n, c) in &clo.lts {
+            let v = reg(&mut rg, *c);
+            rg.lt_names.push(n.clone());
+            rg.lts.push(v);
+            if let Some(u) = rg.univ.iter_mut().find(|u| u.0 == v) {
+                u.1 = n.clone();
+            }
+        }
+        let mut trees = vec![];
+        for (i, &(loc, t)) in params.iter().enumerate() {
+            let tr: RT = codes[i].iter().map(|&c| reg(&mut rg, c)).collect();
+            if count(prog, t, 0) != Some(tr.len()) {
+                self.rg = rg;
+                self.rg.on = false;
+                return;
+            }
+            trees.push((loc, t, tr));
+        }
+        let rtr: RT = codes[params.len()].iter().map(|&c| reg(&mut rg, c)).collect();
+        // (the environment is borrowed from outside)
+        let env = rg.var();
+        rg.univ.push((env, "'_".to_string()));
+        rg.externals.push(env);
+        rg.env_r = env;
+        for (loc, t, tr) in trees {
+            rg.implied(prog, t, &tr, 0);
+            rg.locals.insert(loc, tr);
+        }
+        if count(prog, self.ret, 0) == Some(rtr.len()) {
+            rg.ret = Some(rtr);
+        }
+        // (regions from outside the closure: what the caller knows of them is not known here, nor needed; but the
+        // function's own regions are related as it knows)
+        let ex = rg.externals.clone();
+        for &a in &ex {
+            for &b in &ex {
+                rg.known.push((a, b));
+            }
+        }
+        for &(a, b) in &clo.known {
+            let (x, y) = (reg(&mut rg, a), reg(&mut rg, b));
+            rg.known.push((x, y));
+        }
+        self.rg = rg;
+    }
+
+    /// A capture of the closure being checked, bound at loc: its regions are from outside, and it is reached through
+    /// the environment
+    pub(crate) fn rg_capture(&mut self, i: usize, loc: Loc, t: Ty) {
+        if !self.rg_on() || self.rg.closure.is_none() {
+            return;
+        }
+        let prog = self.prog;
+        // (its regions that are of the function the closure is in: those)
+        let codes = self.rg.closure.as_ref().and_then(|c| c.caps.get(i).cloned().flatten());
+        let tr = match codes {
+            Some(cs) if count(prog, t, 0) == Some(cs.len()) => Some(cs.iter().map(|&c| self.rg.clo_reg(c)).collect()),
+            // (the regions of a local of the function the closure is in: from outside, related to the others from
+            // outside as the function relates them, not known here; a placeholder of the closure's signature must not
+            // flow into them ("borrowed data escapes outside of closure"))
+            _ => self.rg.fresh(prog, t).inspect(|tr| {
+                for &v in tr {
+                    let ex = self.rg.externals.clone();
+                    for a in ex {
+                        self.rg.known.push((a, v));
+                        self.rg.known.push((v, a));
+                    }
+                    self.rg.univ.push((v, "'_".to_string()));
+                    self.rg.externals.push(v);
+                    self.rg.cap_regions.push(v);
+                }
+            }),
+        };
+        if let Some(tr) = tr {
+            self.rg.locals.insert(loc, tr);
+            self.rg.cap_locs.push(loc);
+        }
+    }
+
+    /// A closure's value of type t: what it captures by value, and borrows of what it captures by reference
+    pub(crate) fn rg_closure(&mut self, c: &Expr, t: Ty) {
+        if !self.rg_on() {
+            return;
+        }
+        let prog = self.prog;
+        let Ty::Struct(sid) = t else { return };
+        let Some(cd) = prog.closure_of_struct.get(&prog.base_of(sid)).and_then(|cid| prog.closures.get(cid)) else { return };
+        let sp = super::borrowck::pos(c);
+        let mut tree = vec![];
+        for (i, n) in cd.captures.iter().enumerate() {
+            let seg = crate::parse::Seg { name: n.clone(), args: vec![], fn_args: None, text: n.clone() };
+            let p = Expr::Path(None, crate::parse::Path { global: false, segs: vec![seg], pos: Default::default() });
+            let Some((_, tr, derefs)) = self.rt_place(&p) else { return };
+            if !cd.moved.get(i).copied().unwrap_or(false) {
+                let r = self.rg.var();
+                if derefs.is_empty() {
+                    // (the borrow is the closure's; it is reported where the body uses it first, as rustc does)
+                    let mut uses = vec![];
+                    if let Expr::Closure(_, _, _, body, _) = c {
+                        self.bk_cap_paths(body, n, &mut uses);
+                    }
+                    let at = uses.iter().map(|u| u.3).filter(|s| s.line != 0).min_by_key(|s| (s.line, s.col)).unwrap_or(sp);
+                    self.rg.loans.push((r, n.clone(), at));
+                }
+                for d in derefs {
+                    self.rg.edge(d, r, sp);
+                }
+                tree.push(r);
+            }
+            tree.extend(tr);
+        }
+        if count(prog, t, 0) == Some(tree.len()) {
+            self.rg.calls.insert(c as *const Expr as usize, (t, tree));
+        }
+    }
+
+    /// An array literal of type t: every element flows into the element's tree
+    pub(crate) fn rg_array(&mut self, e: &Expr, t: Ty) {
+        if !self.rg_on() {
+            return;
+        }
+        let (Expr::Array(xs), Ty::Array(et, _)) = (e, t) else { return };
+        let prog = self.prog;
+        let Some(tree) = self.rg.fresh(prog, t) else { return };
+        for x in xs {
+            if let Some((xty, xt)) = self.rt_expr(x) {
+                self.rg.flow(prog, xty, *et, &xt, &tree, super::borrowck::pos(x));
             }
         }
         self.rg.calls.insert(e as *const Expr as usize, (t, tree));
+    }
+
+    /// A builtin method of a reference (`buf.split_at(2)` of a slice, `s.trim()`): the references in its result (of
+    /// type t) borrow what the receiver does
+    pub(crate) fn rg_builtin(&mut self, e: &Expr, recv: &Expr, t: Ty) {
+        if !self.rg_on() {
+            return;
+        }
+        let prog = self.prog;
+        let Some(n) = count(prog, t, 0).filter(|&n| n > 0) else { return };
+        let Some((Ty::Ref(..), rtr)) = self.rt_expr(recv) else { return };
+        let Some(&r) = rtr.first() else { return };
+        // (a placeholder's region in the result is its own, not the receiver's: `v.iter()` of `&[T]` is `Iter<T>`)
+        let tree = match self.rg.fresh(prog, t).filter(|_| !self.rg.ph.is_empty()) {
+            Some(tr) => tr.into_iter().map(|v| if self.rg.ph.iter().any(|x| x.1 == v) { v } else { r }).collect(),
+            None => vec![r; n],
+        };
+        self.rg.calls.insert(e as *const Expr as usize, (t, tree));
+    }
+
+    /// `Box::new(x)` (x of type t): the box's tree is x's
+    pub(crate) fn rg_box(&mut self, c: &Expr, x: &Expr, t: Ty) {
+        if !self.rg_on() {
+            return;
+        }
+        if let Some((_, tr)) = self.rt_expr(x) {
+            self.rg.calls.insert(c as *const Expr as usize, (Ty::Box(crate::types::intern(t)), tr));
+        }
     }
 
     /// A variant's value of type t (`Some(x)`, `None`): a fresh tree, the fields' values flow into its fields; kept as
@@ -1103,11 +3299,50 @@ impl Cx<'_> {
         let fts: Vec<Ty> = v.fields.iter().map(|f| f.1).collect();
         for &(fi, ex) in args {
             let (Some(&ft), Some(ftr)) = (fts.get(fi), self.rg.field(prog, sid, off + fi, &tree)) else { continue };
-            if let Some((_, vtr)) = self.rt_expr(ex) {
-                self.rg.relate(prog, ft, &vtr, &ftr, super::borrowck::pos(ex));
+            if let Some((vt, vtr)) = self.rt_expr(ex) {
+                self.rg.flow(prog, vt, ft, &vtr, &ftr, super::borrowck::pos(ex));
             }
         }
         self.rg.last_call = Some((self.rg.depth + 1, t, tree));
+    }
+
+    /// `for pat in e` binds items of type vt: of a Vec, an array or a slice (or a reference to one), its elements' tree
+    /// (and the reference's region): the pattern's
+    pub(crate) fn rg_for_item(&mut self, f: &Expr, vt: Ty) {
+        if !self.rg_on() {
+            return;
+        }
+        let Expr::For(_, _, x, _) = f else { return };
+        let Some((it, itr)) = self.rt_expr(x) else { return };
+        let prog = self.prog;
+        let elem = |t: Ty| match t {
+            Ty::Array(e, _) | Ty::Slice(e) => Some(*e),
+            Ty::Struct(sid) if prog.structs[prog.base_of(sid) as usize].name == "Vec" && prog.structs[sid as usize].args.len() == 1 && lts_of(prog, prog.base_of(sid)) == 0 => Some(prog.structs[sid as usize].args[0]),
+            _ => None,
+        };
+        let ok = match (it, vt) {
+            (Ty::Ref(_, i), Ty::Ref(_, e)) => elem(*i) == Some(*e),
+            (t, e) => elem(t) == Some(e),
+        };
+        if ok && count(prog, vt, 0) == Some(itr.len()) {
+            self.rg.pat = Some((vt, itr));
+        }
+    }
+
+    /// The element type and tree of an array or a slice matched (through references, as default binding modes)
+    pub(crate) fn rg_slice_elem(&mut self, p: (Ty, RT)) -> Option<(Ty, RT)> {
+        let (mut t, mut tr) = p;
+        loop {
+            match t {
+                Ty::Ref(_, i) => {
+                    self.rg.pat_ref = Some(*tr.first()?);
+                    tr.remove(0);
+                    t = *i;
+                }
+                Ty::Array(e, _) | Ty::Slice(e) => return Some((*e, tr)),
+                _ => return None,
+            }
+        }
     }
 
     /// The pattern matches through references (default binding modes) down to a value of type t
@@ -1121,6 +3356,35 @@ impl Cx<'_> {
             pt = *i;
         }
         self.rg.pat = Some((pt, tr));
+    }
+
+    /// A pattern's path writes lifetimes (`Foo::Bar::<'static> { .. }`, a type annotation): the value it matches is
+    /// of that type, its regions outlive them
+    pub(crate) fn rg_pat_lifetimes(&mut self, path: &crate::parse::Path) {
+        if !self.rg_on() {
+            return;
+        }
+        let ls: Vec<&String> = path.segs.iter().flat_map(|s| s.args.iter()).filter_map(|a| if let GArg::Lifetime(l) = a { Some(l) } else { None }).collect();
+        if ls.is_empty() {
+            return;
+        }
+        let Some((Ty::Struct(sid), tr)) = self.rg.pat.clone() else { return };
+        let prog = self.prog;
+        let Some((own, _)) = self.rg.split_adt(prog, sid, &tr) else { return };
+        if own.len() != ls.len() {
+            return;
+        }
+        let sp = path.pos;
+        for (&r, l) in own.iter().zip(ls) {
+            let to = match l.as_str() {
+                "'static" => STATIC,
+                l => match self.rg.lt_names.iter().position(|x| x == l) {
+                    Some(i) => self.rg.lts[i],
+                    None => continue,
+                },
+            };
+            self.rg.edge(r, to, sp);
+        }
     }
 
     /// Descend into field fi of the value the pattern matches (of type parent; vi: the variant); returns what to
@@ -1158,7 +3422,11 @@ impl Cx<'_> {
         let Some((_, tr)) = self.rg.pat.clone() else { return };
         let Some((loc, t)) = self.lookup(name) else { return };
         let tree = if by_ref {
-            let Some(r) = self.rg.pat_ref else { return };
+            // (by the reference matched through, or a `ref` binding's own borrow: a region of its own)
+            let r = match self.rg.pat_ref {
+                Some(r) => r,
+                None => self.rg.var(),
+            };
             let mut v = vec![r];
             v.extend(tr);
             v
@@ -1184,6 +3452,10 @@ impl Cx<'_> {
     /// Keep the tree of the call just lowered, as the value of e
     pub(crate) fn rg_took_call(&mut self, e: &Expr) {
         // (only the call made by this expression's own call_fn: one level below)
+        // (read first: taking it would make the state of a check that wrote none)
+        if self.rg.last_call.is_none() {
+            return;
+        }
         if let Some((d, t, tr)) = self.rg.last_call.take() {
             if d == self.rg.depth + 1 {
                 self.rg.calls.insert(e as *const Expr as usize, (t, tr));
@@ -1194,7 +3466,10 @@ impl Cx<'_> {
     /// Report what the constraints require
     pub(crate) fn rg_check(&mut self) -> super::R<()> {
         if debug() {
-            eprintln!("regionck {}: on={} univ={} edges={} loans={} missed={:?}", self.prog.names.get(self.rg.base as usize).map(|s| s.as_str()).unwrap_or("?"), self.rg.on, self.rg.univ.len(), self.rg.edges.len(), self.rg.loans.len(), self.rg.missed);
+            eprintln!("regionck {}: on={} st={} univ={} edges={} loans={} missed={:?}", self.prog.names.get(self.rg.base as usize).map(|s| s.as_str()).unwrap_or("?"), self.rg.on, self.rg.has_st(), self.rg.univ.len(), self.rg.edges.len(), self.rg.loans.len(), self.rg.missed);
+            if std::env::var_os("ZUSTC_RG_EDGES").is_some() {
+                eprintln!("  univ {:?} loans {:?} edges {:?} ret {:?}", self.rg.univ, self.rg.loans.iter().map(|l| (l.0, &l.1)).collect::<Vec<_>>(), self.rg.edges.iter().map(|e| (e.0, e.1, e.2.line)).collect::<Vec<_>>(), self.rg.ret);
+            }
         }
         if !self.rg.on {
             return Ok(());

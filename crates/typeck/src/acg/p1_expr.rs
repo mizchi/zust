@@ -280,10 +280,21 @@ impl Cx<'_> {
             Expr::Index(b, index, isp) if !matches!(&**index, Expr::Range(..)) => {
                 let isp = *isp;
                 let (base, len, elem) = self.indexable(b)?;
+                // (a place written through `IndexMut` (`v[v.len() - 1] = 1` of a Vec): the `&mut v` is taken before
+                // the index is evaluated, with no two-phase borrow)
+                let t0 = self.bk.call_temps.len();
+                let held = self.bk_on()
+                    && self.bk.place_mut
+                    && borrowck::root_local(b).is_some_and(|n| borrowck::mentions(index, n))
+                    && matches!(self.peek(b).map(|t| self.strip_refs(t)), Some(Ty::Struct(_)))
+                    && self.bk_index_mut(b);
                 // (the index is a value, not the place `&raw` takes: reading a static in it still needs unsafe)
                 let raw = std::mem::take(&mut self.raw_ref);
                 let r = self.expr(index, Some(Ty::Usize));
                 self.raw_ref = raw;
+                if held {
+                    self.bk_call_temps_end(t0);
+                }
                 let (i, it) = r?;
                 let Some(i) = i else {
                     return err(SP, "index diverges");
@@ -699,8 +710,18 @@ impl Cx<'_> {
                 }
             }
             Expr::Struct(..) => self.struct_lit(e, expected),
+            Expr::Binary(op, l, r, _) if self.rg.on => {
+                let v = self.binary(e, expected);
+                if v.is_ok() && matches!(op.as_str(), "==" | "!=" | "<" | "<=" | ">" | ">=") {
+                    self.rg_cmp(l, r, e);
+                }
+                v
+            }
             Expr::Binary(..) => self.binary(e, expected),
             Expr::AssignOp(_, left, _, _) => {
+                if let Some(m) = self.prog.any_immutable_static.then(|| self.immutable_static(left)).flatten() {
+                    return err(expr_start(left), m);
+                }
                 // (an overloaded `+=` is a call of `add_assign(&mut self, ..)`: no access of its own)
                 let builtin = !matches!(self.peek(left), Some(Ty::Struct(_) | Ty::Ref(_, Ty::Struct(_))));
                 let r = self.binary(e, expected)?;
@@ -710,6 +731,9 @@ impl Cx<'_> {
                 Ok(r)
             }
             Expr::Assign(left, right) => {
+                if let Some(m) = self.prog.any_immutable_static.then(|| self.immutable_static(left)).flatten() {
+                    return err(expr_start(left), m);
+                }
                 // (`map[&k] = v`: a map's index is not a place to assign to (E0594); `insert` or `get_mut`)
                 if let Expr::Index(b, _, _) = strip_paren(left) {
                     if let Some(Ty::Struct(sid)) = self.peek(b).map(|t| self.strip_refs(t)) {
@@ -955,8 +979,20 @@ impl Cx<'_> {
             Expr::Closure(..) => self.closure_value(e, expected),
             Expr::Range(..) => self.range_value(e, expected),
             Expr::Tuple(t) if t.is_empty() => Ok((None, Ty::Unit)),
-            Expr::Tuple(_) => self.tuple_lit(e, expected),
-            Expr::Array(_) => self.array_lit(e, expected),
+            Expr::Tuple(_) => {
+                let r = self.tuple_lit(e, expected);
+                if let Ok((_, t)) = &r {
+                    self.rg_tuple(e, *t);
+                }
+                r
+            }
+            Expr::Array(_) => {
+                let r = self.array_lit(e, expected);
+                if let Ok((_, t)) = &r {
+                    self.rg_array(e, *t);
+                }
+                r
+            }
             Expr::Repeat(..) => self.repeat_lit(e, expected),
             Expr::Index(_, ix, _) if matches!(&**ix, Expr::Range(..)) => err(SP, "range indexing needs a reference: `&a[lo..hi]`"),
             Expr::Index(..) => {
@@ -1439,7 +1475,10 @@ impl Cx<'_> {
         // `&a[lo..hi]` → スライス (fat pointer)
         if let Expr::Index(b, ix, _) = &**rexpr {
             if let Expr::Range(..) = &**ix {
-                return self.slice_range(b, ix, m);
+                let r = self.slice_range(b, ix, m)?;
+                // (a borrow of the elements: `&mut x[1..3]` with x: &[T] is E0596, and it conflicts as `&mut x[1]`)
+                self.bk_borrow(rexpr, m, err_pos(rexpr));
+                return Ok(r);
             }
         }
         let fn_item = matches!(&**rexpr, Expr::Path(..) if self.fn_item(rexpr).is_some());
@@ -1502,6 +1541,9 @@ impl Cx<'_> {
         if t == Ty::Never {
             return Ok((None, Ty::Never));
         }
+        if !matches!(expected, Some(Ty::Ptr(..))) {
+            self.rg_temp(rexpr, t);
+        }
         let a = match (v, t) {
             (Some(a), t) if t.is_agg() => a,
             (v, t) => {
@@ -1560,6 +1602,13 @@ impl Cx<'_> {
             return self.variant_value(sid, vi, &args, expected);
         }
         let Some(sid) = self.prog.struct_by_p(&PPath::of(path), self.self_sid) else {
+            // (`Self::Output::Simple {}` with `type Output<T> = Bar<T>;`: the generic associated type's arguments are
+            // not given, nothing else says them)
+            if path.segs.len() >= 3 && path.segs[0].name == "Self" && path.segs[1].args.is_empty()
+                && self.prog.assocs.iter().any(|a| a.name == path.segs[1].name && a.ngat > 0)
+            {
+                return err(SP, format!("type annotations needed (the arguments of the generic associated type `{}`)", path.segs[1].name));
+            }
             return err(SP, "cannot find struct");
         };
         // `S { a: 1, ..base }`: base を一時変数に置き、書かれていないフィールドをそこからムーブする
@@ -1690,6 +1739,10 @@ impl Cx<'_> {
         let Expr::Closure(_, inputs, _, _, _) = c else { return err(SP, "internal: expected a closure") };
         let prog = self.prog;
         let hint = self.closure_hint.take();
+        let bound = self.closure_bound.take();
+        let to_prelude = std::mem::take(&mut self.closure_prelude);
+        let fn_only = self.closure_fn_only;
+        self.closure_fn_only = false;
         let Some(&k) = self.closure_ix.get(&format!("@{}", c as *const Expr as usize)).or_else(|| self.closure_ix.get(&crate::ast_closure::closure_key(c))) else {
             return err(SP, "internal: unknown closure");
         };
@@ -1720,6 +1773,16 @@ impl Cx<'_> {
             };
             self.dyn_fn_sig(s).ok().map(|(ps, r)| (ps, Some(r)))
         });
+        // (a closure whose kind nothing expected decides, returning a mutable borrow of what it captures by
+        // reference: it is `FnMut`, and the borrow is through the `&mut self` of a call)
+        let own_type = matches!(expected, Some(Ty::Struct(sid)) if prog.base_of(sid) == cd.sid);
+        if hint.is_none() && (expected.is_none() || own_type) && bound.is_none() && !to_prelude && self.user_code && self.bk.level >= 2 && regionck::enabled() {
+            let Expr::Closure(mv, _, _, body, _) = c else { unreachable!() };
+            let by_ref: Vec<&str> = cd.captures.iter().enumerate().filter(|(i, _)| !*mv && !cd.moved.get(*i).copied().unwrap_or(false)).map(|(_, n)| n.as_str()).collect();
+            if let Some(sp) = regionck::fnmut_escape(body, &by_ref) {
+                return Err(self.at(sp, "captured variable cannot escape `FnMut` closure body (a mutable borrow of what the closure captures is returned)".to_string()));
+            }
+        }
         let mut caps = vec![];
         for (i, n) in cd.captures.iter().enumerate() {
             let Some((loc, t)) = self.lookup(n) else {
@@ -1730,6 +1793,16 @@ impl Cx<'_> {
             sol[cd.n_parent + i] = Some(ct);
             caps.push((loc, t));
             self.bk_capture(c, n, loc, t, by_move);
+        }
+        // (passed where a bound wants `Fn`: a closure that mutates what it captures is not one (E0594 / E0596))
+        if fn_only && self.bk.fnmut_exprs.contains(&(c as *const Expr as usize)) {
+            let Expr::Closure(_, _, _, body, csp) = c else { unreachable!() };
+            let (sp, msg) = match self.fn_mutation(body, &cd.captures) {
+                Some((sp, n, true)) => (sp, format!("cannot assign to `{n}`, as it is a captured variable in a `Fn` closure (E0594)")),
+                Some((sp, n, false)) => (sp, format!("cannot borrow `{n}` as mutable, as it is a captured variable in a `Fn` closure (E0596)")),
+                None => (*csp, "a closure that mutates what it captures is passed where `Fn` is expected (E0596)".to_string()),
+            };
+            return Err(self.at(sp, msg));
         }
         let mut g = cd.n_parent + cd.captures.len();
         let mut pslots = vec![];
@@ -1822,6 +1895,39 @@ impl Cx<'_> {
             return Ok((Some(v), t));
         }
         let sid = prog.instantiate(cd.sid, args.clone()).or_else(|e| err(SP, e))?;
+        // (made where nothing was expected: a parameter with no type written that is a reference has one region,
+        // not one for each call (see call_fn_inner))
+        if hint.is_none() && (expected.is_none() || own_type) && self.user_code && self.bk.level >= 2 && regionck::enabled() {
+            let refs: Vec<usize> = pslots.iter().filter(|&&(_, g)| matches!(args.get(g), Some(Ty::Ref(..)))).map(|&(i, _)| i).collect();
+            if !refs.is_empty() {
+                self.hr_lost.retain(|x| x.0 != cd.sid);
+                self.hr_lost.push((cd.sid, refs));
+                // (`|y| y`: its result's type is its parameter's, regions and all)
+                let Expr::Closure(_, ins, _, body, _) = c else { unreachable!() };
+                let ret_param = match strip_paren(body) {
+                    Expr::Path(None, bp) if bp.segs.len() == 1 => ins.iter().position(|(p, _)| matches!(p, Pat::Ident(_, _, n, None) if *n == bp.segs[0].name)),
+                    _ => None,
+                };
+                self.clo_ret_param.retain(|x| x.0 != cd.sid);
+                if let Some(&(_, g)) = ret_param.and_then(|i| pslots.iter().find(|x| x.0 == i)) {
+                    self.clo_ret_param.push((cd.sid, g));
+                }
+                // (what its body stores of its parameters in what it captures: `|input| x.0 = input`)
+                let names: Vec<(String, usize)> = pslots.iter().filter_map(|&(i, g)| match &ins.get(i)?.0 {
+                    Pat::Ident(_, _, n, None) => Some((n.clone(), g)),
+                    _ => None,
+                }).collect();
+                let link = self.clo_ret_param.iter().find(|x| x.0 == cd.sid).map(|x| x.1);
+                self.rg_closure_stores(cd.sid, &args, link, body, &names, &cd.captures);
+            }
+        }
+        // (the region signature its body is checked with: from a bound not the prelude's, else from annotated
+        // parameters)
+        if self.user_code && self.bk.level >= 2 && !to_prelude && (bound.is_some() || inputs.iter().any(|x| x.1.is_some()) || (self.rg_on() && !cd.captures.is_empty())) && regionck::enabled() {
+            if let Some((ps, r)) = self.closure_sig(Ty::Struct(sid)) {
+                self.rg_closure_sig(c, cid, &ps, r, bound.map(|b| *b));
+            }
+        }
         // 呼ばれなくても本体を検査・コンパイルする (未使用なら --gc-sections で消える)
         {
             let mut g = self.insts.lock().unwrap();
@@ -1830,6 +1936,26 @@ impl Cx<'_> {
             self.requested.push(iid);
         }
         let st = Ty::Struct(sid);
+        if let Expr::Closure(.., csp) = c {
+            if !self.bk.clo_at.iter().any(|x| x.0 == st) {
+                self.bk.clo_at.push((st, *csp));
+            }
+        }
+        // (a closure that moves what it captures out of itself is `FnOnce`)
+        if self.bk.fnonce_sure.contains(&(c as *const Expr as usize)) && !self.bk.fnonce.contains(&st) {
+            self.bk.fnonce.push(st);
+        }
+        // (a closure that mutates its captures is `FnMut`; one that holds a `&mut` of them is not `Copy`)
+        if self.bk.fnmut_exprs.contains(&(c as *const Expr as usize)) && !self.bk.fnonce_exprs.contains(&(c as *const Expr as usize)) {
+            if !self.bk.fnmut.contains(&st) {
+                self.bk.fnmut.push(st);
+            }
+            let unique = self.bk.cap_loans.get(&(c as *const Expr as usize)).is_some_and(|ls| ls.iter().any(|&l| self.bk.loans[l as usize].mutable));
+            if unique {
+                self.bk.ty_info.insert(st, (false, true));
+            }
+        }
+        self.rg_closure(c, st);
         let a = self.temp(st);
         let fields = prog.structs[sid as usize].fields.clone();
         for (i, ((loc, t), (_, ft, off))) in caps.into_iter().zip(fields).enumerate() {
@@ -1868,6 +1994,46 @@ impl Cx<'_> {
             }
         }
         Ok((Some(a), st))
+    }
+
+    /// The first assignment to, `&mut` of, or `&mut self` method call of a captured variable in a closure's body (a
+    /// closure in it too): where, which, whether an assignment
+    fn fn_mutation(&self, e: &Expr, caps: &[String]) -> Option<(Sp, String, bool)> {
+        let hit = |l: &Expr| borrowck::root_local(strip_paren(l)).filter(|n| caps.iter().any(|c| c == n)).map(|n| n.to_string());
+        match e {
+            Expr::Assign(l, _) | Expr::AssignOp(_, l, _, _) => {
+                if let Some(n) = hit(l) {
+                    return Some((borrowck::pos(e), n, true));
+                }
+            }
+            Expr::Ref(true, l) => {
+                if let Some(n) = hit(l) {
+                    return Some((borrowck::pos(e), n, false));
+                }
+            }
+            Expr::MethodCall(r, m, ..) => {
+                if let Some(n) = hit(r) {
+                    let mut_self = match self.lookup(&n) {
+                        Some((_, Ty::Struct(sid))) => self.prog.method(sid, m).is_some_and(|id| {
+                            let sg = &self.prog.sigs[id as usize];
+                            sg.has_self && matches!(sg.params.first(), Some(Ty::Ref(true, _)))
+                        }),
+                        _ => false,
+                    };
+                    if mut_self {
+                        return Some((borrowck::pos(e), n, false));
+                    }
+                }
+            }
+            _ => {}
+        }
+        let mut found = None;
+        crate::ast_closure::each_child_pub(e, &mut |c| {
+            if found.is_none() {
+                found = self.fn_mutation(c, caps);
+            }
+        });
+        found
     }
 
     /// `&T` (アドレス v) を `&dyn tr` の fat pointer にする
@@ -2050,6 +2216,9 @@ impl Cx<'_> {
             let (mut v, mut t) = self.expr(a, Some(pt))?;
             if t == Ty::Never {
                 return Ok((None, Ty::Never));
+            }
+            if matches!(pt, Ty::Ref(true, _)) {
+                self.bk_reborrow_arg(a);
             }
             // (`&Box<T>` / `&&T` を `&T` の引数に: deref の強制変換)
             while let (Ty::Ref(_, _), Ty::Ref(m, inner @ (Ty::Ref(..) | Ty::Box(_))), Some(val)) = (pt, t, v) {
@@ -2236,22 +2405,27 @@ impl Cx<'_> {
             return err(SP, format!("`{name}` cannot be called through `dyn {tr}` (it uses `Self` or generics)"));
         }
         let args: Vec<&Expr> = margs.iter().collect();
-        self.dyn_call(fat, idx, &ps, ret, &args, SP)
+        let decl = decls[idx];
+        let r = self.dyn_call(fat, idx, &ps, ret, &args, SP);
+        if r.is_ok() {
+            self.rg_dyn_call(mc, decl, &sol, &ps, ret);
+        }
+        r
     }
 
-    /// 呼び先の引数の型 pt が `F` / `&F` / `&mut F` で、F に `Fn(A) -> B` の境界があれば (A, B)
+    /// 呼び先の引数の型 pt が `F` / `&F` / `&mut F` で、F に `Fn(A) -> B` の境界があれば (A, B) と境界の文字列
     /// (呼び先のシグネチャの型パラメータを Param で含む)
-    pub(crate) fn fn_bound_of(&self, sig: &FnSig, pt: Ty) -> Option<(Vec<Ty>, Ty)> {
+    pub(crate) fn fn_bound_with_text<'s>(&self, sig: &'s FnSig, pt: Ty) -> Option<(Vec<Ty>, Ty, &'s str)> {
         let pt = match pt {
             Ty::Ref(_, i) => *i,
             t => t,
         };
         let Ty::Param(g) = pt else { return None };
         let (_, bounds) = sig.generics.get(g as usize)?;
-        let (_, ps, r) = bounds.iter().find_map(|b| crate::ast_summary::parse_fn_bound(b))?;
+        let (text, (_, ps, r)) = bounds.iter().find_map(|b| crate::ast_summary::parse_fn_bound(b).map(|x| (b.as_str(), x)))?;
         let names: Vec<&str> = sig.generics.iter().map(|g| g.0.as_str()).collect();
         let ps = ps.iter().map(|t| self.prog.resolve_g(t, &names).ok()).collect::<Option<Vec<Ty>>>()?;
-        Some((ps, self.prog.resolve_g(&r, &names).ok()?))
+        Some((ps, self.prog.resolve_g(&r, &names).ok()?, text))
     }
 
     /// クロージャの型 (struct のインスタンス) なら、その引数と戻り値の型
@@ -2432,6 +2606,33 @@ impl Cx<'_> {
             }
         }
         let args: Vec<&Expr> = cargs.iter().collect();
+        // (an `FnOnce` closure called by name: the call takes it (E0382 when it is called again))
+        if matches!(t, Ty::Struct(_)) && self.bk.fnonce.contains(&t) && is_place_expr(func) && self.peek(func) == Some(t) {
+            self.bk_acc(func, borrowck::Acc::Move);
+        }
+        // (an `FnMut` closure called by name: a `&mut` of it (E0596 when it is not `mut`); through a reference, a `&mut`
+        // of what it points to (E0596 behind a `&`))
+        if matches!(t, Ty::Struct(_)) && self.bk.fnmut.contains(&t) && !self.bk.fnonce.contains(&t) && is_place_expr(func) {
+            // (through every reference to it: `&&mut c` is behind a `&`, `&mut &mut c` is not)
+            let mut ft = self.peek(func);
+            let mut x: &Expr = func;
+            let mut n = 0;
+            while let Some(Ty::Ref(_, i)) = ft {
+                if n > 8 {
+                    break;
+                }
+                let sp = crate::parse::Span { start: expr_start(func), at: expr_start(func) };
+                x = self.keep_expr(Expr::Unary("*".into(), Box::new(x.clone()), sp));
+                ft = Some(*i);
+                n += 1;
+            }
+            let target: Option<&Expr> = (ft == Some(t)).then_some(x);
+            if let Some(x) = target {
+                self.bk.no_loan_src = true;
+                self.bk_borrow(x, true, err_pos(func));
+                self.bk.no_loan_src = false;
+            }
+        }
         self.bk_frame();
         let r = match t {
             Ty::Struct(sid) => {
@@ -2439,10 +2640,35 @@ impl Cx<'_> {
                     return err(SP, format!("expected a function, found `{}`", self.prog.tn(t)));
                 };
                 let recv = (v, Ty::Ptr(true, intern(t)));
-                self.call_fn(cid, Some(recv), &args, None, expected, SP)
+                // (a closure made where nothing was expected, a parameter of it a reference: its signature's regions
+                // are one for all its calls (rustc's inference variables), not each call's own)
+                let base = self.prog.base_of(sid);
+                if self.hr_lost.iter().any(|h| h.0 == base) {
+                    if !self.rg.on && self.rg.eligible && self.inline_depth == 0 {
+                        self.rg_late_on();
+                    }
+                    self.rg.shared_clo = Some((base, self.clo_ret_param.iter().find(|x| x.0 == base).map(|x| x.1)));
+                }
+                let r = self.call_fn(cid, Some(recv), &args, None, expected, SP);
+                self.rg.shared_clo = None;
+                self.rg_took_call(c);
+                r
             }
-            Ty::Ref(_, Ty::Dyn(s)) | Ty::Box(Ty::Dyn(s)) => self.dyn_fn_call(v, s, &args, SP),
-            Ty::Fn(f) => self.indirect_call(Indirect::Ptr(v), &f.params, f.ret, &args, SP),
+            Ty::Ref(_, Ty::Dyn(s)) | Ty::Box(Ty::Dyn(s)) => {
+                // (a bound that writes `'static` (`dyn Fn(&'static u8)`): checked from here on)
+                if !self.rg.on && self.rg.eligible && self.inline_depth == 0 && s.contains("'static") {
+                    self.rg_late_on();
+                }
+                let r = self.dyn_fn_call(v, s, &args, SP);
+                self.rg_dyn_fn_args(s, &args);
+                r
+            }
+            Ty::Fn(f) => {
+                let r = self.indirect_call(Indirect::Ptr(v), &f.params, f.ret, &args, SP);
+                self.rg_fnptr_call(func, t, &args);
+                self.rg_took_call(c);
+                r
+            }
             t => err(SP, format!("expected a function, found `{}`", self.prog.tn(t))),
         };
         self.bk_frame_end_call();
@@ -2454,6 +2680,41 @@ impl Cx<'_> {
         let inh = |i: u32| self.prog.sigs[i as usize].impl_trait.is_none();
         let Some(&i) = self.prog.index.get(name) else { return false };
         inh(i) && self.prog.overloads.get(name).is_none_or(|cs| cs.iter().all(|&c| inh(c)))
+    }
+
+    /// An assignment to (a field or element of) a static not declared `mut` (E0594)
+    pub(crate) fn immutable_static(&self, left: &Expr) -> Option<String> {
+        if !self.prog.any_immutable_static {
+            return None;
+        }
+        let mut e = strip_paren(left);
+        let mut whole = true;
+        while let Expr::Field(b, ..) | Expr::Index(b, ..) = e {
+            e = strip_paren(b);
+            whole = false;
+        }
+        let Expr::Path(None, p) = e else { return None };
+        // (the hot path: a name that is no static's of the program, as almost every assignment's)
+        if !p.segs.last().is_some_and(|s| self.prog.const_index.contains_key(&s.name)) {
+            return None;
+        }
+        // (`N` not shadowed by a local, or `m::N`: by the path's static)
+        if ident_of(p).is_some_and(|id| self.lookup(id).is_some()) {
+            return None;
+        }
+        let ci = match self.static_of(e) {
+            Some(ci) => ci,
+            None => match p.segs.as_slice() {
+                [seg] if seg.args.is_empty() => *self.prog.const_index.get(&seg.name)?,
+                _ => return None,
+            },
+        };
+        let c = &self.prog.consts[ci as usize];
+        if c.stat != Some(false) || crate::parse::extern_static(&c.expr).is_some() {
+            return None;
+        }
+        let n = &p.segs.iter().map(|s| s.name.as_str()).collect::<Vec<_>>().join("::");
+        Some(if whole { format!("cannot assign to immutable static item `{n}` (E0594)") } else { format!("cannot assign to a part of `{n}`, as `{n}` is an immutable static item (E0594)") })
     }
 
     /// Why reading static ci needs `unsafe` (E0133): a `static mut`, or an extern block's static (foreign memory)
@@ -2651,7 +2912,11 @@ impl Cx<'_> {
                         return err(SP, format!("this struct takes {n} fields"));
                     }
                     let args: Vec<(usize, &Expr)> = cargs.iter().enumerate().collect();
-                    return self.adt_value(sid, None, &args, expected, SP);
+                    let r = self.adt_value(sid, None, &args, expected, SP);
+                    if let Ok((_, t)) = &r {
+                        self.rg_ctor(c, *t, &args);
+                    }
+                    return r;
                 }
             }
         }
@@ -2710,6 +2975,10 @@ impl Cx<'_> {
         });
         if let Expr::Path(_, p) = &**func {
             self.check_unsafe_call(id, p.pos)?;
+        }
+        // (the region check reports at the call: call_fn is given no span for it)
+        if self.rg_on() {
+            self.rg.call_sp = borrowck::pos(c);
         }
         let r = self.call_fn(id, None, &args, tf, expected, SP);
         self.rg_took_call(c);

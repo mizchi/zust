@@ -657,9 +657,100 @@ impl Session2 {
                 String::new()
             }
         });
+        // (E0106 / E0107: the program's fields, type aliases and associated types that name a struct or enum with
+        // lifetimes and write none of them, or another number: the definitions are known now. Only the items that
+        // mention one by name are read again)
+        {
+            let mut adts: crate::fxhash::FxMap<&str, usize> = Default::default();
+            for sm in &sums[..user] {
+                if let Some(r) = sm.adt_regions.as_deref().filter(|r| !r.lts.is_empty()) {
+                    for n in sm.structs.iter().map(|s| s.0.as_str()).chain(sm.enums.iter().map(|e| e.0.as_str())) {
+                        adts.insert(n, r.lts.len());
+                    }
+                }
+            }
+            if !adts.is_empty() {
+                for (it, sm) in items[..user].iter().zip(&sums[..user]) {
+                    let kind = !sm.structs.is_empty() || !sm.enums.is_empty() || !sm.aliases.is_empty() || !sm.consts.is_empty() || !sm.statics.is_empty() || !sm.assocs.is_empty();
+                    if !kind {
+                        continue;
+                    }
+                    // (from the summary's types: only an item whose types name such a struct or enum is read again)
+                    fn names(t: &crate::types::TySyn, adts: &crate::fxhash::FxMap<&str, usize>) -> bool {
+                        use crate::types::TySyn as T;
+                        match t {
+                            T::Named(n) => adts.contains_key(n.as_str()),
+                            T::App(n, a) => adts.contains_key(n.as_str()) || a.iter().any(|t| names(t, adts)),
+                            T::Ref(_, i) | T::Ptr(_, i) | T::Slice(i) | T::Array(i, _) => names(i, adts),
+                            T::Tuple(a) => a.iter().any(|t| names(t, adts)),
+                            _ => false,
+                        }
+                    }
+                    let named = sm.structs.iter().any(|s| s.1.iter().any(|f| names(&f.1, &adts)))
+                        || sm.enums.iter().any(|e| e.1.iter().any(|v| v.fields.iter().any(|f| names(&f.1, &adts))))
+                        || sm.aliases.iter().any(|a| names(&a.2, &adts))
+                        || sm.assocs.iter().any(|a| names(&a.value, &adts))
+                        || sm.consts.iter().any(|c| names(&c.1, &adts))
+                        || sm.statics.iter().any(|c| names(&c.1, &adts));
+                    if !named {
+                        continue;
+                    }
+                    let outer: Vec<String> = sm.assocs.iter().flat_map(|a| a.generics.iter().cloned()).collect();
+                    if let Some(e) = crate::ast_summary::hidden_lifetimes(&src, it, &adts, &outer) {
+                        return Err(e);
+                    }
+                }
+            }
+        }
+        // (what the program's types require of traits' `Self: 'x` bounds (E0478, E0310): the traits are known now)
+        {
+            let so: crate::fxhash::FxMap<&str, &[String]> = sums
+                .iter()
+                .filter_map(|sm| Some((sm.trait_decl.as_deref()?, sm.trait_generics.iter().find(|g| g.0 == crate::types::SELF_OUTLIVES)?.1.as_slice())))
+                .collect();
+            if !so.is_empty() {
+                for (it, sm) in items[..user].iter().zip(&sums[..user]) {
+                    // (an impl of such a trait, or a type whose fields write `dyn`: read again)
+                    let of_trait = sm.impl_trait.as_deref().is_some_and(|t| so.contains_key(t));
+                    let dyns = (!sm.structs.is_empty() || !sm.enums.is_empty() || !sm.unions.is_empty()) && src.get(it.start..it.end).is_some_and(|t| t.contains("dyn"));
+                    if !of_trait && !dyns {
+                        continue;
+                    }
+                    for o in &crate::ast_summary::trait_obls(&src, it) {
+                        let Some(req) = so.get(o.tr.as_str()) else { continue };
+                        let k = crate::wf::Known { pairs: o.known.clone(), vague: o.vague.clone(), ..Default::default() };
+                        for c in req.iter() {
+                            let x = if c == "static" {
+                                "'static".to_string()
+                            } else {
+                                match c.parse::<usize>().ok().and_then(|i| o.args.get(i)) {
+                                    Some(a) => a.clone(),
+                                    None => continue,
+                                }
+                            };
+                            for s in &o.sub {
+                                if o.vague.contains(s) || k.outlives(s, &x) {
+                                    continue;
+                                }
+                                let line = it.line + o.line.max(1) as usize - 1;
+                                return Err(if s.starts_with('\'') {
+                                    format!("{line}:1: lifetime bound not satisfied (`{s}` must outlive `{x}`, which trait `{}` requires) (E0478)", o.tr)
+                                } else {
+                                    format!("{line}:1: the parameter type `{s}` may not live long enough (E0{})", if x == "'static" { 310 } else { 309 })
+                                });
+                            }
+                        }
+                    }
+                }
+            }
+        }
         // (struct / enum / union definitions of the program: unused parameters, union fields ..)
         for (it, sm) in items[..user].iter().zip(&sums[..user]) {
             if let Some(e) = &sm.adt_err {
+                // (`\u{3}line\u{3}msg`: at that line of the item)
+                if let Some((l, m)) = e.strip_prefix('\u{3}').and_then(|r| r.split_once('\u{3}')) {
+                    return Err(format!("{}:1: {m}", it.line + l.parse::<usize>().unwrap_or(1) - 1));
+                }
                 // (`\u{1}field\u{1}msg`: at the line of the field `field:`)
                 if let Some((f, m)) = e.strip_prefix('\u{1}').and_then(|r| r.split_once('\u{1}')) {
                     let text = src.get(it.start..it.end).unwrap_or("");
@@ -721,6 +812,44 @@ impl Session2 {
                 }
             }
         }
+        // (E0276: an impl's generic associated type with a `where` clause that its trait's declaration does not have:
+        // `type Assoc<T> = Vec<T> where T: Iterator;` for `type Assoc<T>;`. Only a trait declared once)
+        {
+            let word = |t: &str, w: &str| {
+                t.match_indices(w).any(|(i, _)| {
+                    let b = t.as_bytes();
+                    let id = |c: u8| c.is_ascii_alphanumeric() || c == b'_';
+                    (i == 0 || !id(b[i - 1])) && b.get(i + w.len()).is_none_or(|&c| !id(c))
+                })
+            };
+            for it in &items[..user] {
+                let crate::lexer::ItemKind::ImplMember(h) = it.kind else { continue };
+                let t = src.get(it.start..it.end).unwrap_or("").trim_start();
+                let Some(rest) = t.strip_prefix("type ") else { continue };
+                let name: String = rest.trim_start().chars().take_while(|c| c.is_alphanumeric() || *c == '_').collect();
+                // (a generic one, with a `where` after its value)
+                let gat = rest.trim_start()[name.len()..].trim_start().starts_with('<');
+                if !gat || !t.split_once('=').is_some_and(|(_, v)| word(v, "where")) {
+                    continue;
+                }
+                let Some(tr) = sums.get(h as usize).and_then(|s| s.impl_trait.as_deref()) else { continue };
+                if sums[..user].iter().filter(|s| s.trait_decl.as_deref() == Some(tr)).count() != 1 {
+                    continue;
+                }
+                let decl = items[..user].iter().find(|d| {
+                    matches!(d.kind, crate::lexer::ItemKind::TraitMember(th) if sums.get(th as usize).and_then(|s| s.trait_decl.as_deref()) == Some(tr))
+                        && src.get(d.start..d.end).unwrap_or("").trim_start().strip_prefix("type ").is_some_and(|r| {
+                            let r = r.trim_start();
+                            r.starts_with(name.as_str()) && !r[name.len()..].starts_with(|c: char| c.is_alphanumeric() || c == '_')
+                        })
+                });
+                if let Some(d) = decl {
+                    if !word(src.get(d.start..d.end).unwrap_or(""), "where") {
+                        return Err(format!("{}:1: impl has stricter requirements than trait (E0276)", it.line));
+                    }
+                }
+            }
+        }
         // (`#![crate_type = "lib"]`: a library, no `main` needed)
         let mut deny_unreachable = false;
         let mut deny_unused_vars = false;
@@ -731,6 +860,7 @@ impl Session2 {
         let mut deny_must_use = false;
         let mut deny_unused_alloc = false;
         let mut deny_trivial_casts = (false, false);
+        let mut deny_unused_lifetimes = (false, false);
         // (non_snake_case, non_camel_case_types, non_upper_case_globals)
         let mut deny_style = [false; 3];
         let lib_attr = {
@@ -777,6 +907,7 @@ impl Session2 {
                 levels.contains(&n) && (last("forbid").is_some() || last("allow") < last("deny"))
             };
             deny_trivial_casts = (lint("trivial_casts"), lint("trivial_numeric_casts"));
+            deny_unused_lifetimes = (lint("unused_lifetimes"), lint("single_use_lifetimes"));
             deny_unused_alloc = lint("unused_allocation")
                 || (!levels.contains(&"unused_allocation") && levels.iter().any(|l| matches!(*l, "unused" | "warnings")) && !c.contains("#![allow(unused"));
             for (k, n) in ["non_snake_case", "non_camel_case_types", "non_upper_case_globals"].iter().enumerate() {
@@ -817,6 +948,14 @@ impl Session2 {
                         return Err(format!("{}:{}: unreachable {what}", it.line + p.line as usize - 1, p.col + 1));
                     }
                 }
+            }
+        }
+        // (unused_lifetimes: a lifetime parameter of a fn or an impl of the program's that nothing in it names;
+        // single_use_lifetimes: one named once, in a parameter's type (or the impl's header), which eliding it would
+        // say)
+        if deny_unused_lifetimes.0 || deny_unused_lifetimes.1 {
+            if let Some(e) = first_unused_lifetime(&src, &items[..user], deny_unused_lifetimes) {
+                return Err(e);
             }
         }
         // (unused_variables: the first binding nothing reads, in the program's own fns)
@@ -1835,6 +1974,167 @@ fn first_dead_item(src: &str, items: &[SrcItem], check_pub: bool) -> Option<(usi
     None
 }
 
+/// `#![deny(unused_lifetimes)]` / `#![deny(single_use_lifetimes)]`: the first lifetime parameter of a fn or an impl
+/// named nowhere else in it / named once, as `line:col: message`
+fn first_unused_lifetime(src: &str, items: &[SrcItem], (unused, single): (bool, bool)) -> Option<String> {
+    use crate::parse::{GParam, ItemKind};
+    // (the uses of l in t, as tokens: not `'a'` (a char) nor `'ab`)
+    let count = |t: &str, l: &str| {
+        t.match_indices(l)
+            .filter(|(i, _)| {
+                let next = t[i + l.len()..].chars().next();
+                !next.is_some_and(|c| c == '\'' || c.is_alphanumeric() || c == '_')
+            })
+            .count()
+    };
+    // (the text without its comments and string literals, where a lifetime's name is no use of it)
+    let code = |t: &str| strip_strings(t);
+    // (`#[allow(dead_code, unused_lifetimes)]`: the lint anywhere in an allow list)
+    let allows = |t: &str, lint: &str| {
+        t.match_indices("allow(").any(|(i, _)| {
+            let rest = &t[i + 6..];
+            let list = &rest[..rest.find(')').unwrap_or(rest.len())];
+            list.split(',').any(|x| x.trim() == lint)
+        })
+    };
+    for (k, it) in items.iter().enumerate() {
+        let text = src.get(it.start..it.end).unwrap_or("");
+        if !text.contains('\'') || allows(text, "unused_lifetimes") || allows(text, "single_use_lifetimes") || text.contains("#[cfg") || text.contains("macro_rules") {
+            continue;
+        }
+        // (an impl's header, `impl<'a> S<'a> {`: its members name its lifetimes too)
+        let header = matches!(it.kind, crate::lexer::ItemKind::ImplHeader);
+        let Ok(f) = (if header { crate::parse::parse_file(&format!("{text}}}")) } else { crate::parse::parse_file(text) }) else { continue };
+        let Some(item) = f.items.into_iter().next() else { continue };
+        let (g, ret, params): (_, _, Vec<&crate::parse::Ty>) = match &item.kind {
+            ItemKind::Fn(sig, Some(_)) => (&sig.generics, sig.ret.as_ref().map(|r| format!("{r:?}")).unwrap_or_default(), sig.recv_ty.iter().chain(sig.params.iter().map(|p| &p.1)).collect()),
+            ItemKind::Impl(g, _, _, _) => (g, String::new(), vec![]),
+            _ => continue,
+        };
+        let is_fn = matches!(item.kind, ItemKind::Fn(..));
+        let members: String = if header {
+            items.iter().filter(|m| matches!(m.kind, crate::lexer::ItemKind::ImplMember(h) if h as usize == k)).map(|m| code(src.get(m.start..m.end).unwrap_or(""))).collect::<Vec<_>>().join("\n")
+        } else {
+            String::new()
+        };
+        let own = code(text);
+        for p in &g.params {
+            let GParam::Lifetime(l) = p else { continue };
+            let n = count(&own, l) + count(&members, l);
+            let off = text.find(l.as_str()).unwrap_or(0);
+            let line = it.line + text[..off].matches('\n').count();
+            if unused && n <= 1 {
+                return Some(format!("{line}:1: lifetime parameter `{l}` never used (#![deny(unused_lifetimes)])"));
+            }
+            // (declared with bounds, or bounding another: a use of its own)
+            let bounded = g.preds.iter().any(|(t, bs)| format!("{t:?}").contains(&format!("\"{l}\"")) || bs.iter().any(|b| matches!(b, crate::parse::Bound::Lifetime(x) if x == l)));
+            // (a fn's: not in its result's type, which has nothing to elide it to, nor in an `impl` / `dyn` / fn
+            // pointer type, where it cannot be elided)
+            let elidable = || params.iter().any(|t| elidable_use(t, l)) || !params.iter().any(|t| format!("{t:?}").contains(&format!("\"{l}\"")));
+            if single && n == 2 && !bounded && (!is_fn || (count(&ret, l) == 0 && elidable())) {
+                return Some(format!("{line}:1: lifetime parameter `{l}` only used once (#![deny(single_use_lifetimes)])"));
+            }
+        }
+    }
+    None
+}
+
+/// t with its string literals (`"'a"`, raw ones too) and comments blanked out, in one pass: a `//` in a string is
+/// no comment, a `"` in a comment no string. Lines are kept
+fn strip_strings(t: &str) -> String {
+    let b = t.as_bytes();
+    let mut out = String::with_capacity(t.len());
+    let mut i = 0;
+    // (blanks b[i..end], keeping its newlines)
+    let blank = |out: &mut String, from: usize, end: usize| {
+        for &c in &b[from..end] {
+            out.push(if c == b'\n' { '\n' } else { ' ' });
+        }
+    };
+    while i < b.len() {
+        // (a `"` or `/` char literal is none of these)
+        if b[i] == b'\'' && i + 2 < b.len() && b[i + 2] == b'\'' && (b[i + 1] == b'"' || b[i + 1] == b'/') {
+            out.push_str(&t[i..i + 3]);
+            i += 3;
+            continue;
+        }
+        if b[i] == b'/' && b.get(i + 1) == Some(&b'/') {
+            let end = t[i..].find('\n').map_or(b.len(), |k| i + k);
+            blank(&mut out, i, end);
+            i = end;
+            continue;
+        }
+        if b[i] == b'/' && b.get(i + 1) == Some(&b'*') {
+            // (block comments nest, as in Rust and in `tokenize`)
+            let (mut depth, mut j) = (0usize, i);
+            while j < b.len() {
+                if b[j..].starts_with(b"/*") {
+                    depth += 1;
+                    j += 2;
+                } else if b[j..].starts_with(b"*/") {
+                    depth -= 1;
+                    j += 2;
+                    if depth == 0 {
+                        break;
+                    }
+                } else {
+                    j += 1;
+                }
+            }
+            let end = j.min(b.len());
+            blank(&mut out, i, end);
+            i = end;
+            continue;
+        }
+        // (`r"..."` / `r#"..."#`: to the quote and as many `#`)
+        if b[i] == b'r' && (i == 0 || !(b[i - 1].is_ascii_alphanumeric() || b[i - 1] == b'_')) {
+            let mut j = i + 1;
+            while j < b.len() && b[j] == b'#' {
+                j += 1;
+            }
+            if j < b.len() && b[j] == b'"' {
+                let hashes = j - i - 1;
+                let close: String = std::iter::once('"').chain(std::iter::repeat_n('#', hashes)).collect();
+                let end = t[j + 1..].find(close.as_str()).map_or(b.len(), |k| j + 1 + k + close.len());
+                blank(&mut out, i, end);
+                i = end;
+                continue;
+            }
+        }
+        if b[i] == b'"' {
+            let mut j = i + 1;
+            while j < b.len() && b[j] != b'"' {
+                j += if b[j] == b'\\' { 2 } else { 1 };
+            }
+            let end = (j + 1).min(b.len());
+            blank(&mut out, i, end);
+            i = end;
+            continue;
+        }
+        let c = t[i..].chars().next().unwrap();
+        out.push(c);
+        i += c.len_utf8();
+    }
+    out
+}
+
+/// t names l where eliding it is allowed: a reference's lifetime or a path's lifetime argument, not in an `impl` /
+/// `dyn` / fn pointer type or an associated type's binding
+fn elidable_use(t: &crate::parse::Ty, l: &str) -> bool {
+    use crate::parse::{GArg, Ty as PTy};
+    match t {
+        PTy::Ref(x, _, i) => x.as_deref() == Some(l) || elidable_use(i, l),
+        PTy::Ptr(_, i) | PTy::Slice(i) | PTy::Array(i, _) => elidable_use(i, l),
+        PTy::Tuple(ts) => ts.iter().any(|t| elidable_use(t, l)),
+        PTy::Path(None, p) => p.segs.iter().flat_map(|s| s.args.iter()).any(|a| match a {
+            GArg::Lifetime(x) => x == l,
+            GArg::Ty(t) => elidable_use(t, l),
+            _ => false,
+        }),
+        _ => false,
+    }
+}
+
 pub fn parse_fn(src: &str, it: &SrcItem) -> R<Option<ItemFn>> {
     let text = &src[it.start..it.end];
     let f = crate::parse::parse_file(text).map_err(|e| relocate(e, it))?;
@@ -2168,6 +2468,20 @@ impl Session2 {
     /// シグネチャは prelude のものだけを入れる (名前の最後で多めに取ると、ユーザの `Acc::push` などが入って、同じ prelude の
     /// 関数がクレートごとに違うキーになり、どのクレートでもコンパイルし直していた)
     fn fn_key_r(&self, a: &Analysis, id: usize, closed: Option<&[bool]>) -> Key {
+        // (the program's non-generic type aliases: a constant's cast through one (`257u32 as Lane`) changes its
+        // value, and a function that uses the constant, when the alias does. Order-independent)
+        let aliases = || {
+            let mut k: Key = 0;
+            for (n, (g, t)) in &a.prog.aliases {
+                if g.is_empty() {
+                    let mut h = KeyHasher::new();
+                    h.add(n);
+                    h.add(t);
+                    k ^= h.finish();
+                }
+            }
+            k
+        };
         let ii = a.prog.item_of[id].unwrap() as usize;
         let pf = a.prog.prelude_from as usize;
         // 閉じた依存するクレートの関数 (と、型引数に依存するクレートの型を持つ prelude の関数): 本体・自分のシグネチャと、
@@ -2200,6 +2514,9 @@ impl Session2 {
                     h.add(&a.items[cd.item as usize].hash);
                     a.prog.hash_ty(cd.ty, &mut h);
                 }
+            }
+            if !a.crefs[id].is_empty() {
+                h.add(&aliases());
             }
             match a.prog.panic_handler {
                 Some(p) => h.add(&a.prog.names[p as usize]),
@@ -2281,6 +2598,8 @@ impl Session2 {
             h.add(&a.items[cd.item as usize].hash);
             a.prog.hash_ty(cd.ty, &mut h);
         }
+        // (and a cast in the body's own constants: `::<{ 257u32 as Lane }>`)
+        h.add(&aliases());
         h.finish()
     }
 
@@ -2444,104 +2763,130 @@ impl Session2 {
             .filter(|&i| concrete(&a.prog, i) && a.prog.item_of[i].is_some_and(|ii| ii < a.prog.prelude_from) && !a.is_ext(i as u32))
             .map(|i| i as u32)
             .collect();
-        while !wave.is_empty() {
-            for &id in &wave {
-                if !done.insert(id) {
-                    continue;
-                }
-                let (name, body) = {
-                    let g = insts.lock().unwrap();
-                    (name_of(&*g, id), a.prog.names[g.body_of(id) as usize].clone())
-                };
-                if !seen.insert(name.clone()) {
-                    continue;
-                }
-                // (記録から: 本体が同じなら、要求していたインスタンスを名前で辿る)
-                if let Some(o) = &old {
-                    if let Some(e) = o.ents.get(&name) {
-                        if e.ok && Some(e.body_hash) == body_hash(&e.body) {
-                            n_memo += 1;
-                            let mut st: Vec<String> = e.children.clone();
-                            memo.ents.insert(name.clone(), e.clone());
-                            while let Some(c) = st.pop() {
-                                if seen.contains(&c) {
-                                    continue;
-                                }
-                                let Some(ce) = o.ents.get(&c) else { continue };
-                                if ce.ok && Some(ce.body_hash) == body_hash(&ce.body) {
-                                    seen.insert(c.clone());
-                                    n_memo += 1;
-                                    st.extend(ce.children.iter().cloned());
-                                    memo.ents.insert(c, ce.clone());
-                                } else {
-                                    // (本体が変わったインスタンス: 要求し直して検査する)
-                                    let _ = crate::cache2::decode_blob(&ce.me, &a.prog, &insts);
-                                }
-                            }
-                            continue;
-                        }
+        // (then, once: the program's generic fns nothing instantiated, with a placeholder type for each type
+        // parameter: acg keeps only the borrow and region checks' errors of such an instance)
+        let mut placeholders = !check_only || std::env::var_os("ZUSTC_NO_PLACEHOLDERS").is_some();
+        // (in the placeholders' round)
+        let mut ph_round = false;
+        let mut ph_depth = 0;
+        loop {
+            while !wave.is_empty() {
+                for &id in &wave {
+                    if !done.insert(id) {
+                        continue;
                     }
-                }
-                let k = self.key_of(&a, &insts, id);
-                let kc = k ^ CHECK_SALT;
-                n_keys += 1;
-                // (キャッシュにあれば検査済み: 読み戻すと要求していたインスタンスも要求し直す)
-                let hit = match self.get(k).and_then(|d| crate::cache2::decode_blob(&d, &a.prog, &insts)) {
-                    Some(b) => Some(b),
-                    None if check_only => self.get(kc).and_then(|d| crate::cache2::decode_blob(&d, &a.prog, &insts)),
-                    None => None,
-                };
-                let mut ok = true;
-                let req: Option<Vec<u32>> = match hit {
-                    Some(b) => {
-                        n_hit += 1;
-                        Some(b.relocs.iter().filter_map(|r| match r.target { acg::Target::Func(i) => Some(i), _ => None }).collect())
+                    let (name, body) = {
+                        let g = insts.lock().unwrap();
+                        (name_of(&*g, id), a.prog.names[g.body_of(id) as usize].clone())
+                    };
+                    if !seen.insert(name.clone()) {
+                        continue;
                     }
-                    None => {
-                        n_checked += 1;
-                        match compile_id_req(&a, &insts, id) {
-                            Ok((b, req)) => {
-                                if !self.opts.no_cache {
-                                    let b = if check_only {
-                                        let relocs = req.iter().map(|&i| acg::BlobReloc { offset: 0, kind: 4, addend: 0, target: acg::Target::Func(i) }).collect();
-                                        Blob { relocs, ..b }
-                                    } else {
-                                        b
-                                    };
-                                    let mut e = vec![];
-                                    {
-                                        let g = insts.lock().unwrap();
-                                        crate::cache2::encode_blob(&b, &a.prog, &*g, &mut e);
+                    // (記録から: 本体が同じなら、要求していたインスタンスを名前で辿る)
+                    if let Some(o) = &old {
+                        if let Some(e) = o.ents.get(&name) {
+                            if e.ok && Some(e.body_hash) == body_hash(&e.body) {
+                                n_memo += 1;
+                                let mut st: Vec<String> = e.children.clone();
+                                memo.ents.insert(name.clone(), e.clone());
+                                while let Some(c) = st.pop() {
+                                    if seen.contains(&c) {
+                                        continue;
                                     }
-                                    self.put(if check_only { kc } else { k }, e);
+                                    let Some(ce) = o.ents.get(&c) else { continue };
+                                    if ce.ok && Some(ce.body_hash) == body_hash(&ce.body) {
+                                        seen.insert(c.clone());
+                                        n_memo += 1;
+                                        st.extend(ce.children.iter().cloned());
+                                        memo.ents.insert(c, ce.clone());
+                                    } else {
+                                        // (本体が変わったインスタンス: 要求し直して検査する)
+                                        let _ = crate::cache2::decode_blob(&ce.me, &a.prog, &insts);
+                                    }
                                 }
-                                Some(req)
-                            }
-                            Err(e) => {
-                                errs.push(e);
-                                ok = false;
-                                Some(vec![])
+                                continue;
                             }
                         }
                     }
-                };
-                // (記録)
-                if !keep {
-                    continue;
-                }
-                if let (Some(req), Some(bh)) = (req, body_hash(&body)) {
-                    let g = insts.lock().unwrap();
-                    let children: Vec<String> = req.iter().filter(|&&i| g.get(i).is_some()).map(|&i| name_of(&*g, i)).collect();
-                    let mut me = vec![];
-                    if g.get(id).is_some() {
-                        let b = Blob { align: 1, code: vec![], relocs: vec![acg::BlobReloc { offset: 0, kind: 4, addend: 0, target: acg::Target::Func(id) }], datas: vec![], vtables: vec![], traps: vec![], line_base: None, code_ref: None };
-                        crate::cache2::encode_blob(&b, &a.prog, &*g, &mut me);
+                    let k = self.key_of(&a, &insts, id);
+                    let kc = k ^ CHECK_SALT;
+                    n_keys += 1;
+                    // (キャッシュにあれば検査済み: 読み戻すと要求していたインスタンスも要求し直す)
+                    let hit = match self.get(k).and_then(|d| crate::cache2::decode_blob(&d, &a.prog, &insts)) {
+                        Some(b) => Some(b),
+                        None if check_only => self.get(kc).and_then(|d| crate::cache2::decode_blob(&d, &a.prog, &insts)),
+                        None => None,
+                    };
+                    let mut ok = true;
+                    let req: Option<Vec<u32>> = match hit {
+                        Some(b) => {
+                            n_hit += 1;
+                            Some(b.relocs.iter().filter_map(|r| match r.target { acg::Target::Func(i) => Some(i), _ => None }).collect())
+                        }
+                        None => {
+                            n_checked += 1;
+                            match compile_id_req(&a, &insts, id) {
+                                Ok((b, req)) => {
+                                    if !self.opts.no_cache {
+                                        let b = if check_only {
+                                            let relocs = req.iter().map(|&i| acg::BlobReloc { offset: 0, kind: 4, addend: 0, target: acg::Target::Func(i) }).collect();
+                                            Blob { relocs, ..b }
+                                        } else {
+                                            b
+                                        };
+                                        let mut e = vec![];
+                                        {
+                                            let g = insts.lock().unwrap();
+                                            crate::cache2::encode_blob(&b, &a.prog, &*g, &mut e);
+                                        }
+                                        self.put(if check_only { kc } else { k }, e);
+                                    }
+                                    Some(req)
+                                }
+                                Err(e) => {
+                                    errs.push(e);
+                                    ok = false;
+                                    Some(vec![])
+                                }
+                            }
+                        }
+                    };
+                    // (記録)
+                    if !keep {
+                        continue;
                     }
-                    memo.ents.insert(name, ChkEnt { body, body_hash: bh, children, me, ok });
+                    if let (Some(req), Some(bh)) = (req, body_hash(&body)) {
+                        let g = insts.lock().unwrap();
+                        let children: Vec<String> = req.iter().filter(|&&i| g.get(i).is_some()).map(|&i| name_of(&*g, i)).collect();
+                        let mut me = vec![];
+                        if g.get(id).is_some() {
+                            let b = Blob { align: 1, code: vec![], relocs: vec![acg::BlobReloc { offset: 0, kind: 4, addend: 0, target: acg::Target::Func(id) }], datas: vec![], vtables: vec![], traps: vec![], line_base: None, code_ref: None };
+                            crate::cache2::encode_blob(&b, &a.prog, &*g, &mut me);
+                        }
+                        memo.ents.insert(name, ChkEnt { body, body_hash: bh, children, me, ok });
+                    }
+                }
+                wave = std::mem::take(&mut insts.lock().unwrap().pending);
+                wave.retain(|id| !done.contains(id));
+                // (the placeholders' round follows the closures their bodies make, a few levels: an instance of
+                // another generic fn they request may make another (`foo(p, |x| f(x))` in foo), and the generic fn
+                // has a placeholder instance of its own)
+                if ph_round {
+                    ph_depth += 1;
+                    let g = insts.lock().unwrap();
+                    wave.retain(|&id| ph_depth < 4 && a.prog.closures.contains_key(&g.body_of(id)));
                 }
             }
-            wave = std::mem::take(&mut insts.lock().unwrap().pending);
+            if placeholders {
+                break;
+            }
+            placeholders = true;
+            ph_round = true;
+            wave = placeholder_wave(&a, &insts);
             wave.retain(|id| !done.contains(id));
+            if wave.is_empty() {
+                break;
+            }
         }
         if keep {
             self.chk = Some(memo);
@@ -2552,6 +2897,56 @@ impl Session2 {
         d.dedup();
         d
     }
+}
+
+/// The program's generic fns (not a trait's default methods, not a closure's body, not a dependency's) that no
+/// instance was requested of: one instance of each with a placeholder for each type parameter (Program::placeholder),
+/// as `zustc check` checks every fn. The ids requested
+fn placeholder_wave(a: &Analysis, insts: &Mutex<Insts>) -> Vec<u32> {
+    let p = &a.prog;
+    let mut g = insts.lock().unwrap();
+    g.lenient = true;
+    let made: FxSet<u32> = g.list.iter().map(|i| i.base).collect();
+    for id in 0..p.names.len() {
+        let sig = &p.sigs[id];
+        // (a trait's default method no impl uses: its `Self` is a placeholder too, bounded by the trait)
+        if !sig.is_generic() || !sig.has_body || made.contains(&(id as u32)) || p.closures.contains_key(&(id as u32)) {
+            continue;
+        }
+        // (not a dependency's: `is_ext` knows only concrete fns, the item's flag tells)
+        if !p.item_of[id].is_some_and(|ii| ii < p.prelude_from && !a.ext_items.get(ii as usize).copied().unwrap_or(false)) {
+            continue;
+        }
+        // (a placeholder has no trait's methods: a fn whose type parameters are bounded by more than marker traits
+        // would most likely fail its typeck after the work of it. Not made)
+        // (a placeholder calls its bounds' methods as the trait declares them, which says little of the regions; a fn
+        // whose body calls a method a bound's trait declares is not made: its typeck is the cost, its check little)
+        let ii = p.item_of[id].unwrap_or(0) as usize;
+        let body = a.items.get(ii).and_then(|it| a.src.get(it.start..it.end)).unwrap_or("");
+        let calls_bound = sig.generics.iter().flat_map(|(_, bs)| bs.iter()).any(|b| {
+            if matches!(b.as_str(), "Copy" | "Sized" | "?Sized" | "Send" | "Sync" | "Unpin") {
+                return false;
+            }
+            let tr = b.split('<').next().unwrap_or(b).trim();
+            let tail = format!("::{tr}");
+            let decls = p.traits.get(tr).or_else(|| p.traits.iter().find(|(k, _)| k.ends_with(&tail)).map(|(_, v)| v));
+            // (a trait not known: as calling)
+            // (but a method whose declaration names lifetimes (the trait's `'a`, its own): its call says something of
+            // the regions)
+            decls.is_none_or(|ds| {
+                ds.iter().any(|&d| {
+                    let called = p.names[d as usize].rsplit("::").next().is_some_and(|m| body.contains(&format!(".{m}(")) || body.contains(&format!("::{m}(")));
+                    called && !p.sigs[d as usize].regions.as_deref().is_some_and(|r| !r.lts.is_empty())
+                })
+            })
+        });
+        if calls_bound {
+            continue;
+        }
+        let args: Vec<Ty> = sig.generics.iter().enumerate().map(|(k, (n, bs))| Ty::Struct(p.placeholder(id as u32, k as u32, n, bs))).collect();
+        let _ = g.request(p, id as u32, args);
+    }
+    std::mem::take(&mut g.pending)
 }
 
 /// The lint levels codegen checks (`#![deny(unused_must_use)]`, `trivial_casts` ..) as one byte for the cache keys: a

@@ -1,6 +1,6 @@
 # zurgo M1: ビルドスクリプト、`env!`、proc-macro のスタブ
 
-日付: 2026-11-21
+日付: 2026-11-22
 
 M0 は Cargo のパッケージを、ビルドスクリプトを実行せずにビルドし、proc-macro の依存があれば止まった。これは
 mizchi/zust#28 の 2 つめのマイルストーンで、wasm-bindgen のロードマップ (mizchi/zust#38) の W0 の始まりである。

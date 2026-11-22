@@ -90,6 +90,9 @@ pub struct StructDef {
     /// 型引数に型パラメータが残っているインスタンスか (has_param が引数を辿り直さないように: 入れ子のクロージャの
     /// 型は共有された部分を持つので、辿り直すと段の数の指数になる)
     pub symbolic: bool,
+    /// A placeholder for a type parameter of a generic fn `zustc check` instantiates though nothing calls it: the
+    /// traits the parameter's bounds name (Program::placeholder)
+    pub placeholder: Option<Vec<String>>,
 }
 
 impl StructDef {
@@ -107,6 +110,7 @@ impl StructDef {
             base: None,
             args: vec![],
             symbolic: false,
+            placeholder: None,
         }
     }
 }
@@ -122,6 +126,10 @@ pub struct AdtTable {
     v: Mutex<Vec<Box<StructDef>>>,
     inst: Mutex<HashMap<(u32, Vec<Ty>), u32>>,
     tuples: Mutex<HashMap<usize, u32>>,
+    /// The placeholders made, by (fn, type parameter)
+    placeholders: Mutex<HashMap<(u32, u32), u32>>,
+    /// Whether any was made (read without the lock, on hot paths)
+    any_placeholder: std::sync::atomic::AtomicBool,
 }
 
 impl AdtTable {
@@ -130,6 +138,8 @@ impl AdtTable {
             v: Mutex::new(vec![]),
             inst: Mutex::new(HashMap::default()),
             tuples: Mutex::new(HashMap::default()),
+            placeholders: Mutex::new(HashMap::default()),
+            any_placeholder: std::sync::atomic::AtomicBool::new(false),
         }
     }
     pub fn len(&self) -> usize {
@@ -297,6 +307,10 @@ pub struct Program {
     pub fnptr_impls: HashSet<(Option<Ty>, String)>,
     /// 親トレイト (`trait Bar: Foo`)
     pub trait_supers: FxMap<String, Vec<String>>,
+    /// What a trait's `Self` must outlive (`trait Tr<'a>: 'a`): "static", or the index of the trait's lifetime parameter
+    pub trait_self_outlives: FxMap<String, Vec<String>>,
+    /// The program (not the prelude) has a static not declared `mut`: an assignment is checked against it
+    pub any_immutable_static: bool,
     /// the generics a method of the trait starts with: Self and the trait's own parameters
     pub trait_ngen: FxMap<String, usize>,
     /// a generic trait's impls: trait → (self type, the trait's arguments, both with the impl's parameters as
@@ -354,7 +368,19 @@ pub struct AssocDef {
     /// impl の self 型と値 (impl の型パラメータを Param で含む)
     pub self_ty: Ty,
     pub value: Ty,
+    /// the impl's parameters
     pub ngen: usize,
+    /// a generic associated type's own parameters (`type Pointer<T>`: 1), Params after the impl's and a mark
+    pub ngat: usize,
+}
+
+/// (the impl's parameter count, the generic associated type's) of an associated type's parameter names: those after
+/// the mark `#gat` are its own
+fn gat_split(gn: &[&str]) -> (usize, usize) {
+    match gn.iter().position(|g| *g == "#gat") {
+        Some(k) => (k, gn.len() - k - 1),
+        None => (gn.len(), 0),
+    }
 }
 
 /// 型推論に任せる `_` の印 (型パラメータの番号としては使わない値)
@@ -396,6 +422,28 @@ pub struct Insts {
     pub list: Vec<Inst>,
     map: HashMap<(u32, Vec<Ty>), u32>,
     pub pending: Vec<u32>,
+    /// A closure's region signature, by its fn id, from the bound it is passed to or its annotations, and the regions
+    /// of the function it is in that its captures hold (typeck's regionck)
+    pub closure_rg: HashMap<u32, Box<CloRg>>,
+    /// The region check's implied relations of struct types, by position (typeck's Rg::imp_cache): kept between
+    /// the functions of a build
+    pub imp_cache: HashMap<(u32, u32, bool), Option<Vec<(u32, u32)>>>,
+    /// zustc check's last round: the instances with placeholders for type parameters (Program::placeholder), and
+    /// what they request. A typeck error of one is not reported (acg::compile)
+    pub lenient: bool,
+}
+
+/// Insts::closure_rg (codes: see typeck's regionck)
+#[derive(Clone, Debug, Default)]
+pub struct CloRg {
+    /// The parameters' codes, then the result's
+    pub codes: Vec<Vec<u8>>,
+    /// Each capture's codes (None: not followed)
+    pub caps: Vec<Option<Vec<u8>>>,
+    /// What the function it is in knows of those of its regions: (longer, shorter)
+    pub known: Vec<(u8, u8)>,
+    /// The function's named lifetimes (a `let` annotation in the closure names them)
+    pub lts: Vec<(String, u8)>,
 }
 
 impl Insts {
@@ -405,6 +453,9 @@ impl Insts {
             list: vec![],
             map: HashMap::default(),
             pending: vec![],
+            closure_rg: HashMap::default(),
+            imp_cache: HashMap::default(),
+            lenient: false,
         }
     }
 
@@ -693,6 +744,8 @@ impl Program {
             prelude_from: u32::MAX,
             overflow_checks: false,
             trait_supers: FxMap::default(),
+            trait_self_outlives: FxMap::default(),
+            any_immutable_static: false,
             trait_ngen: FxMap::default(),
             impl_targs: FxMap::default(),
             ref_impls: Default::default(),
@@ -978,7 +1031,8 @@ impl Program {
                 }
                 let gn: Vec<&str> = a.generics.iter().map(|g| g.as_str()).collect();
                 if let (Ok(self_ty), Ok(value)) = (p.resolve_g(&a.self_ty, &gn), p.resolve_g(&a.value, &gn)) {
-                    p.assocs.push(AssocDef { name: a.name.clone(), self_ty, value, ngen: gn.len() });
+                    let (ngen, ngat) = gat_split(&gn);
+                    p.assocs.push(AssocDef { name: a.name.clone(), self_ty, value, ngen, ngat });
                     early.push((ii, k));
                 }
             }
@@ -1108,11 +1162,13 @@ impl Program {
                 let value = p
                     .resolve_g(&a.value, &gn)
                     .map_err(|e| format!("{}:1: {e}", it.line))?;
+                let (ngen, ngat) = gat_split(&gn);
                 p.assocs.push(AssocDef {
                     name: a.name.clone(),
                     self_ty,
                     value,
-                    ngen: gn.len(),
+                    ngen,
+                    ngat,
                 });
             }
         }
@@ -1281,6 +1337,9 @@ impl Program {
                 p.traits.entry(tr.clone()).or_default();
                 if let Some((_, sup)) = sm.trait_generics.iter().find(|g| g.0 == "#supers") {
                     p.trait_supers.insert(tr.clone(), sup.clone());
+                }
+                if let Some((_, so)) = sm.trait_generics.iter().find(|g| g.0 == crate::types::SELF_OUTLIVES) {
+                    p.trait_self_outlives.insert(tr.clone(), so.clone());
                 }
                 p.trait_ngen.insert(tr.clone(), 1 + sm.trait_generics.iter().filter(|g| !g.0.starts_with('#')).count());
             }
@@ -1536,6 +1595,40 @@ impl Program {
                         if ds.has_self && ms.has_self && kind(&p, ds.params[0]) != kind(&p, ms.params[0]) {
                             return Err(format!("{line}method `{m}` has an incompatible type for trait `{tr}` (E0053)"));
                         }
+                        // (E0195: the method's own lifetimes that bounds make early-bound, and how many bounds each has,
+                        // are the trait's: `fn bar<'a, 'b: 'a>` in the trait, `fn bar<'a, 'b>` in the impl)
+                        {
+                            // (a lifetime a type parameter's bound names (`T: Test<'p>`) is early-bound too)
+                            let early = |r: Option<&crate::types::RSigSyn>, g: &[(String, Vec<String>)]| -> Vec<usize> {
+                                let Some(r) = r else { return vec![] };
+                                let in_bounds = |l: &str| {
+                                    g.iter().flat_map(|x| x.1.iter()).any(|b| b.match_indices(l).any(|(k, _)| !b[k + l.len()..].starts_with(|c: char| c.is_alphanumeric() || c == '_')))
+                                };
+                                (r.outer as usize..r.lts.len())
+                                    .map(|i| r.outlives.iter().filter(|&&(a, b)| a as usize == i || b as usize == i).count() + in_bounds(&r.lts[i]) as usize)
+                                    .filter(|&n| n > 0)
+                                    .collect()
+                            };
+                            let (de, me) = (early(ds.regions.as_deref(), &ds.generics), early(ms.regions.as_deref(), &ms.generics));
+                            if de != me {
+                                return Err(format!("{line}lifetime parameters or bounds on method `{m}` do not match the trait declaration (E0195)"));
+                            }
+                        }
+                        // (a parameter's reference the trait leaves to the caller (elided, or the method's own lifetime)
+                        // that the impl ties to one of its header's (`fn next(&'a mut self)`): less general, E0308)
+                        if let Some(mr) = ms.regions.as_deref().filter(|r| r.outer > 0) {
+                            let dr = ds.regions.as_deref();
+                            for (i, (&dt, &mt)) in ds.params.iter().zip(&ms.params).enumerate() {
+                                if !(matches!(dt, Ty::Ref(..)) && matches!(mt, Ty::Ref(..))) {
+                                    continue;
+                                }
+                                let dc = dr.and_then(|r| r.slots.get(i)).and_then(|s| s.first().copied()).unwrap_or(crate::types::R_ELIDED);
+                                let free = dc == crate::types::R_ELIDED || dr.is_some_and(|r| dc >= r.outer && (dc as usize) < r.lts.len());
+                                if free && mr.slots.get(i).and_then(|s| s.first()).is_some_and(|&c| c < mr.outer) {
+                                    return Err(format!("{line}method not compatible with trait: lifetime mismatch in `{m}` of `{tr}` (E0308)"));
+                                }
+                            }
+                        }
                     }
                 }
                 if !p.sigs[d as usize].has_body && !found {
@@ -1672,6 +1765,7 @@ impl Program {
                 }
             }
         }
+        p.any_immutable_static = p.consts.iter().any(|c| c.stat == Some(false) && (c.item as usize) < user);
         Ok(p)
     }
 
@@ -1856,6 +1950,13 @@ impl Program {
     pub fn implements(&self, t: Ty, tr: &str) -> bool {
         if self.blanket_traits.contains(tr) {
             return true;
+        }
+        // (a placeholder implements the traits its parameter's bounds name, and the auto traits)
+        if let Ty::Struct(sid) = t {
+            if let Some(bs) = &self.structs[sid as usize].placeholder {
+                let name = |b: &str| b.split('<').next().unwrap_or(b).trim().to_string();
+                return matches!(tr, "Sized" | "Send" | "Sync" | "Unpin") || bs.iter().any(|b| b == tr || name(b) == name(tr));
+            }
         }
         if matches!(t, Ty::Ref(..)) && !self.ref_impls.is_empty() && self.ref_impls.contains(&(t, tr.to_string())) {
             return true;
@@ -2247,6 +2348,13 @@ impl Program {
             TySyn::Str => Ty::Str,
             TySyn::Dyn(s) => Ty::Dyn(intern_str(s)),
             TySyn::Infer => Ty::Param(HOLE),
+            // (`M::S<u8>` of a module M reads as a generic associated type `#gat:S` of `(M, u8)`: when M is no type,
+            // it is the type S<u8> as before)
+            TySyn::Assoc(b, n) if n.starts_with(crate::ast_types::GAT_PREFIX) && matches!(&**b, TySyn::Tuple(p) if !p.is_empty() && r(&p[0]).is_err()) => {
+                let TySyn::Tuple(parts) = &**b else { unreachable!() };
+                let name = n[crate::ast_types::GAT_PREFIX.len()..].to_string();
+                return r(&TySyn::App(name, parts[1..].to_vec()));
+            }
             TySyn::Assoc(b, n) => {
                 let bt = r(b)?;
                 if self.has_param(bt) {
@@ -2298,7 +2406,11 @@ impl Program {
                     Some(_) => return Err(format!("missing generics for `{n}`")),
                     // (`zeros::<K>()` / `Buf<K>`: const の名前は const ジェネリクスの引数)
                     None if self.const_index.contains_key(n) => Ty::Array(intern(Ty::Unit), self.const_usize(n)? as u32),
-                    None => return Err(format!("cannot find type `{n}`")),
+                    // (core::arch's vector types, when the program has no type of the name: `v128`, `__m256`)
+                    None => match crate::simd_sig::vector_name(n) {
+                        Some(t) => t,
+                        None => return Err(format!("cannot find type `{n}`")),
+                    },
                 }
             }
             // `Box<dyn Error>`: prelude の __DynError (表示と Debug の文字列を持つ)
@@ -2370,7 +2482,7 @@ impl Program {
             .cloned()
     }
 
-    fn const_usize(&self, name: &str) -> R<u64> {
+    pub fn const_usize(&self, name: &str) -> R<u64> {
         // (`<Foo as Bar>::SIZE`: the trait's under its qualified name, else the only `Foo::SIZE`; an expression with a
         // cast in it, `(1 as usize) + Foo::SIZE`, is not one)
         let word = |s: &str| !s.is_empty() && s.chars().all(|c| c.is_alphanumeric() || c == '_');
@@ -2471,13 +2583,73 @@ impl Program {
         Err("a const fn without a value".into())
     }
 
+    /// The name of a cast's target type, through aliases of it (`type Lane = i32` -> "i32"); "" for another type
+    fn cast_prim(&self, t: &crate::parse::Ty) -> String {
+        let mut prim = match t {
+            crate::parse::Ty::Path(None, p) if p.segs.len() == 1 && p.segs[0].args.is_empty() => p.segs[0].name.clone(),
+            _ => String::new(),
+        };
+        // (a primitive integer's name is that type, not an alias of it: the aliases are the whole program's, and a
+        // program's `type u32 = u8;` must not change the prelude's `as u32`, whose cached code does not hash aliases)
+        for _ in 0..16 {
+            if matches!(prim.as_str(), "u8" | "u16" | "u32" | "u64" | "u128" | "usize" | "i8" | "i16" | "i32" | "i64" | "i128" | "isize") {
+                break;
+            }
+            match self.aliases.get(&prim) {
+                Some((g, crate::types::TySyn::Named(n))) if g.is_empty() => prim = n.clone(),
+                Some((g, crate::types::TySyn::Prim(p))) if g.is_empty() => prim = format!("{p:?}").to_lowercase(),
+                _ => break,
+            }
+        }
+        prim
+    }
+
+    /// The width in bits of a constant expression's integer type when it is written (a cast, a suffixed literal,
+    /// `-` of one): `count_ones` of `-1i8` counts 8 bits, not the 128 of the evaluator's i128
+    fn const_width(&self, e: &crate::parse::Expr) -> Option<u32> {
+        use crate::parse::Expr;
+        let of = |n: &str| match n {
+            "u8" | "i8" => Some(8),
+            "u16" | "i16" => Some(16),
+            "u32" | "i32" => Some(32),
+            "u64" | "i64" | "usize" | "isize" => Some(64),
+            "u128" | "i128" => Some(128),
+            _ => None,
+        };
+        match e {
+            Expr::Cast(_, t) => of(&self.cast_prim(t)),
+            Expr::Paren(x) => self.const_width(x),
+            Expr::Unary(op, x, _) if op == "-" || op == "!" => self.const_width(x),
+            Expr::Lit(t, _) => ["u128", "i128", "usize", "isize", "u64", "i64", "u32", "i32", "u16", "i16", "u8", "i8"]
+                .iter()
+                .find(|s| t.ends_with(*s))
+                .and_then(|s| of(s)),
+            _ => None,
+        }
+    }
+
     /// 自前の構文木の整数の定数式を評価する
     pub fn eval_const(&self, e: &crate::parse::Expr, depth: u32) -> R<i128> {
         use crate::parse::Expr;
         Ok(match e {
             Expr::Lit(t, _) => lit_int(t).ok_or("not an integer constant")?,
             Expr::Paren(x) => self.eval_const(x, depth)?,
-            Expr::Cast(x, _) => self.eval_const(x, depth)?,
+            // (an integer `as` wraps to its type, as rustc's: `4294967297u64 as i32` is 1)
+            Expr::Cast(x, t) => {
+                let v = self.eval_const(x, depth)?;
+                let prim = self.cast_prim(t);
+                match prim.as_str() {
+                    "u8" => v as u8 as i128,
+                    "u16" => v as u16 as i128,
+                    "u32" => v as u32 as i128,
+                    "u64" | "usize" => v as u64 as i128,
+                    "i8" => v as i8 as i128,
+                    "i16" => v as i16 as i128,
+                    "i32" => v as i32 as i128,
+                    "i64" | "isize" => v as i64 as i128,
+                    _ => v,
+                }
+            }
             // (`{ 3 }` / `{ let x = ..; }` is not: a block of one expression; `if c { a } else { b }`)
             Expr::Block(None, false, b) if b.stmts.len() == 1 => match &b.stmts[0] {
                 crate::parse::Stmt::Expr(x, false) => self.eval_const(x, depth)?,
@@ -2620,7 +2792,9 @@ impl Program {
             Expr::MethodCall(recv, m, _, args, _) => {
                 let v = self.eval_const(recv, depth)?;
                 let unsigned = matches!(&**recv, Expr::Path(None, p) if p.segs.len() == 2 && Ty::prim(&p.segs[0].name).is_some_and(|t| !t.signed()));
-                let u = v as u128;
+                // (the bits of the receiver's type only: a negative i8 is 8 bits, not 128)
+                let bits = self.const_width(recv).unwrap_or(128);
+                let u = if bits < 128 { (v as u128) & ((1u128 << bits) - 1) } else { v as u128 };
                 let a: Vec<i128> = args.iter().map(|x| self.eval_const(x, depth)).collect::<R<Vec<i128>>>()?;
                 match (m.as_str(), a.as_slice()) {
                     ("ilog10", []) if unsigned || v > 0 => {
@@ -2634,7 +2808,7 @@ impl Program {
                     }
                     ("ilog2", []) if unsigned || v > 0 => (127 - (if unsigned { u } else { v as u128 }).leading_zeros()) as i128,
                     ("count_ones", []) => u.count_ones() as i128,
-                    ("trailing_zeros", []) => u.trailing_zeros() as i128,
+                    ("trailing_zeros", []) => u.trailing_zeros().min(bits) as i128,
                     ("pow", [e]) => v.checked_pow(*e as u32).ok_or("overflow in constant")?,
                     ("min", [b]) => v.min(*b),
                     ("max", [b]) => v.max(*b),
@@ -2647,6 +2821,32 @@ impl Program {
     }
 
     /// n 要素のタプルの (組み込みの) ジェネリック定義
+    /// The placeholder type for type parameter k (named `name`, bounded by the traits `bounds`) of fn id: a struct
+    /// with no fields, named `name#` (no program's type has that name), that implements just those traits
+    pub fn placeholder(&self, id: u32, k: u32, name: &str, bounds: &[String]) -> u32 {
+        if let Some(&s) = self.structs.placeholders.lock().unwrap().get(&(id, k)) {
+            return s;
+        }
+        let mut d = StructDef::blank(format!("{name}#"), false);
+        d.placeholder = Some(bounds.to_vec());
+        let mut h = KeyHasher::new();
+        h.add(&("placeholder", id, k));
+        d.deep = h.finish();
+        let mut g = self.structs.placeholders.lock().unwrap();
+        if let Some(&s) = g.get(&(id, k)) {
+            return s;
+        }
+        let s = self.structs.push(d);
+        g.insert((id, k), s);
+        self.structs.any_placeholder.store(true, std::sync::atomic::Ordering::Relaxed);
+        s
+    }
+
+    /// sid is a placeholder (Program::placeholder); cheap when none was made
+    pub fn is_placeholder(&self, sid: u32) -> bool {
+        self.structs.any_placeholder.load(std::sync::atomic::Ordering::Relaxed) && self.structs[sid as usize].placeholder.is_some()
+    }
+
     pub fn tuple_base(&self, n: usize) -> u32 {
         if let Some(&id) = self.structs.tuples.lock().unwrap().get(&n) {
             return id;
@@ -3014,8 +3214,34 @@ impl Program {
     }
 
     fn assoc_of0(&self, t: Ty, name: &str) -> Option<Ty> {
+        // (`P::Pointer<String>`: the associated type `#gat:Pointer` of `(P, String)`, the impl's for P with its own
+        // parameters String)
+        if let Some(gname) = name.strip_prefix(crate::ast_types::GAT_PREFIX) {
+            let Ty::Struct(sid) = t else { return None };
+            if !self.is_tuple(sid) {
+                return None;
+            }
+            let parts = self.structs[sid as usize].args.clone();
+            let (&base, gargs) = parts.split_first()?;
+            for a in &self.assocs {
+                if a.name != gname || a.ngat != gargs.len() {
+                    continue;
+                }
+                let mut sol = vec![None; a.ngen];
+                if self.match_ty(a.self_ty, base, &mut sol) {
+                    let Some(mut args) = sol.iter().copied().collect::<Option<Vec<Ty>>>() else { continue };
+                    // (the mark's place, then the associated type's own arguments)
+                    args.push(Ty::Unit);
+                    args.extend_from_slice(gargs);
+                    return Some(self.subst(a.value, &args));
+                }
+            }
+            return None;
+        }
         for a in &self.assocs {
-            if a.name != name {
+            // (a generic associated type without its arguments (`<() as Outer>::Ty` of a qualified path): its value
+            // when that does not use its own parameters)
+            if a.name != name || (a.ngat != 0 && self.uses_params_from(a.value, a.ngen as u8)) {
                 continue;
             }
             if let Ty::Assoc(v) = a.value {
@@ -3025,13 +3251,26 @@ impl Program {
             }
             let mut sol = vec![None; a.ngen];
             if self.match_ty(a.self_ty, t, &mut sol) {
-                let Some(args) = sol.iter().copied().collect::<Option<Vec<Ty>>>() else {
+                let Some(mut args) = sol.iter().copied().collect::<Option<Vec<Ty>>>() else {
                     continue;
                 };
+                args.extend(std::iter::repeat_n(Ty::Unit, if a.ngat > 0 { a.ngat + 1 } else { 0 }));
                 return Some(self.subst(a.value, &args));
             }
         }
         None
+    }
+
+    /// t names a type parameter numbered `from` or above
+    fn uses_params_from(&self, t: Ty, from: u8) -> bool {
+        match t {
+            Ty::Param(i) => i >= from && i != HOLE,
+            Ty::Ref(_, i) | Ty::Ptr(_, i) | Ty::Array(i, _) | Ty::Slice(i) | Ty::Box(i) => self.uses_params_from(*i, from),
+            Ty::Struct(sid) => self.structs[sid as usize].args.iter().any(|&a| self.uses_params_from(a, from)),
+            Ty::Assoc(a) => self.uses_params_from(a.base, from),
+            Ty::Fn(f) => f.params.iter().chain([&f.ret]).any(|&p| self.uses_params_from(p, from)),
+            _ => false,
+        }
     }
 
     /// 型パラメータに型引数を入れる
@@ -3178,10 +3417,7 @@ impl Program {
         match state[id] {
             2 => return Ok(()),
             1 => {
-                return Err(format!(
-                    "recursive type `{}` has infinite size",
-                    sdefs[id].1
-                ));
+                return Err(format!("{}:1: recursive type `{}` has infinite size", items[sdefs[id].0].line, sdefs[id].1));
             }
             _ => {}
         }
@@ -3215,6 +3451,19 @@ impl Program {
                 }
                 // `Box<T>` はポインタなので T のレイアウトは要らない
                 TySyn::App(n, _) if n == "Box" && !self.struct_index.contains_key(&n) => {}
+                // (`C::Assoc<Self>` / `type MaybeBox<T> = <T as A<T, Box<T>>>::B;`: a projection, whose type is the
+                // impl's: whether it holds its arguments by value is not known here)
+                // (`A::Allocated<Self>` arrives as `Allocated<..>`: a name that is no struct and no alias is such an
+                // associated type)
+                TySyn::App(n, _) if n.contains("::") || (!self.struct_index.contains_key(&n) && !self.aliases.contains_key(&n)) => {}
+                // (`type Alias<T> = (T, <() as Tr>::A);`: its value with the arguments, whose projections are skipped
+                // and whose other parts are held as written)
+                TySyn::App(n, args) if self.aliases.get(&n).is_some_and(|a| syn_has_assoc(&a.1)) => {
+                    let (ps, body) = self.aliases[&n].clone();
+                    if ps.len() == args.len() {
+                        todo.push((subst_tysyn(&body, &ps, &args), gs.clone()));
+                    }
+                }
                 TySyn::App(n, args) => {
                     // 型引数のうち、その型が値として持つもの (`Vec<T>` の T はポインタの先なので要らない)
                     let mut by_value = vec![true; args.len()];
@@ -3405,6 +3654,8 @@ impl Program {
             Ty::Struct(id) => self.structs[id as usize].name.clone(),
             Ty::Unit => "()".into(),
             Ty::Never => "!".into(),
+            Ty::Vec(128) => "v128".into(),
+            Ty::Vec(b) => format!("__m{b}"),
             Ty::Param(i) => format!("T{i}"),
             Ty::Ptr(false, i) => format!("*const {}", self.tn(*i)),
             Ty::Ptr(true, i) => format!("*mut {}", self.tn(*i)),
@@ -3423,6 +3674,15 @@ impl Program {
             }
             t => format!("{t:?}").to_lowercase(),
         }
+    }
+
+    /// A type's identity as a key (`TypeId::of`): its structural hash (`hash_ty`, which memoizes instances), not
+    /// its display name: a program's `struct v128` is not `__m128i`, at any depth (`&v128`, `(v128,)`,
+    /// `Option<v128>`), and a deeply nested instance's key stays fixed-size
+    pub fn type_key(&self, t: Ty) -> String {
+        let mut h = KeyHasher::new();
+        self.hash_ty(t, &mut h);
+        format!("{:032x}", h.finish())
     }
 
     /// キャッシュキー用: 型を (struct は deep hash で) ハッシュする
@@ -3495,6 +3755,7 @@ impl Program {
                     self.hash_ty(p, h);
                 }
             }
+            Ty::Vec(b) => h.add(&(112u8, b)),
             t => h.add(&ty_code(t)),
         }
     }
@@ -3789,6 +4050,34 @@ fn syn_unify(a: &TySyn, ga: &[String], b: &TySyn, gb: &[String], sub: &mut Vec<(
 }
 
 /// t names a generic type (`Vec<u8>`) or an alias (one may stand for one)
+/// t with each parameter of ps replaced by its argument (a type alias's value with the arguments it is given)
+fn subst_tysyn(t: &TySyn, ps: &[String], args: &[TySyn]) -> TySyn {
+    let r = |t: &TySyn| subst_tysyn(t, ps, args);
+    match t {
+        TySyn::Named(n) => ps.iter().position(|p| p == n).map_or_else(|| t.clone(), |k| args[k].clone()),
+        TySyn::App(n, a) => TySyn::App(n.clone(), a.iter().map(r).collect()),
+        TySyn::Ref(m, i) => TySyn::Ref(*m, Box::new(r(i))),
+        TySyn::Ptr(m, i) => TySyn::Ptr(*m, Box::new(r(i))),
+        TySyn::Slice(i) => TySyn::Slice(Box::new(r(i))),
+        TySyn::Array(i, n) => TySyn::Array(Box::new(r(i)), n.clone()),
+        TySyn::Tuple(v) => TySyn::Tuple(v.iter().map(r).collect()),
+        TySyn::FnPtr(v) => TySyn::FnPtr(v.iter().map(r).collect()),
+        TySyn::Assoc(b, n) => TySyn::Assoc(Box::new(r(b)), n.clone()),
+        t => t.clone(),
+    }
+}
+
+/// t names an associated type (`T::Item`, `<T as A>::B`) somewhere
+fn syn_has_assoc(t: &TySyn) -> bool {
+    match t {
+        TySyn::Assoc(..) => true,
+        TySyn::App(n, a) => n.contains("::") || a.iter().any(syn_has_assoc),
+        TySyn::Ref(_, i) | TySyn::Ptr(_, i) | TySyn::Slice(i) | TySyn::Array(i, _) => syn_has_assoc(i),
+        TySyn::Tuple(a) | TySyn::FnPtr(a) => a.iter().any(syn_has_assoc),
+        _ => false,
+    }
+}
+
 fn syn_has_app(t: &TySyn, aliases: &FxMap<String, (Vec<String>, TySyn)>) -> bool {
     match t {
         TySyn::App(..) | TySyn::Dyn(_) => true,

@@ -2547,8 +2547,13 @@ impl Parser {
                 let t = if self.is_ident("dyn") { self.ty()? } else { self.ty_no_bounds()? };
                 self.expect_punct(":")?;
                 let mut bs = self.bounds()?;
-                // (`for<'a> T: 'a`: the bound is of a lifetime the predicate binds, not one of the item)
-                bs.retain(|b| !matches!(b, Bound::Lifetime(l) if binder.iter().any(|a| matches!(a, GArg::Lifetime(x) if x == l))));
+                // (`for<'a> T: 'a`: the bound is of a lifetime the predicate binds, not one of the item: T outlives
+                // every region, `T: 'static`)
+                for b in bs.iter_mut() {
+                    if matches!(b, Bound::Lifetime(l) if binder.iter().any(|a| matches!(a, GArg::Lifetime(x) if x == l))) {
+                        *b = Bound::Lifetime("'static".to_string());
+                    }
+                }
                 g.preds.push((t, bs));
             }
             if !self.eat_punct(",") {
