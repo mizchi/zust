@@ -1015,6 +1015,10 @@ pub fn expand_cfg(src: &str, cfg: Option<&crate::cfg::CfgSet>) -> Result<Option<
             if let Some(t) = expand_env(&text, cfg.unwrap_or(&none)) {
                 text = t;
             }
+            // (`env!` values can grow it too)
+            if text.len() > limit {
+                return Err("1:1: macro expansion is too large (a recursive macro that grows)".into());
+            }
         }
         if !again {
             return Ok(Some(text));

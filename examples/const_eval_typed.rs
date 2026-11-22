@@ -41,6 +41,28 @@ const U128_SHR: usize = {
     let x: u128 = u128::MAX;
     (x >> 127) as usize
 };
+// (third review of #49)
+const SHADOW: usize = {
+    let x = 1u8;
+    {
+        let x = 255u8;
+        x.count_ones() as usize
+    }
+};
+const LET_INFER: u8 = {
+    let x = !0 >> 4;
+    x
+};
+const BYTE_LZ: usize = b'\x01'.leading_zeros() as usize;
+const IF_COMMON: usize = (((if true { !0 } else { 1u8 }) >> 4) as u8) as usize;
+const ARR: [u8; 1] = [!0];
+const TUP: (u8,) = (!0,);
+const PROJ: usize = ARR[0].count_ones() as usize + TUP.0.count_ones() as usize;
+const PEER: usize = ((4 / ((!0 >> 7) + 1)) & 7u8) as usize;
+const SHORT: usize = if true || (u8::MAX + 1 == 0) { 1 } else { 2 };
+const POW_U32: usize = 2u8.pow(!0 >> 31) as usize;
+const ABS: usize = (-127i8).abs() as usize;
+const REM: usize = (i8::MIN % -2i8) as usize;
 const I128_MIN_OK: usize = {
     let m = i128::MIN;
     (m == i128::MIN) as usize + 1
@@ -73,4 +95,15 @@ fn main() {
     println!("{} {}", SB, SC);
     println!("{}", std::mem::size_of::<[u8; U128_SHR]>());
     println!("{}", std::mem::size_of::<[u8; I128_MIN_OK]>());
+    println!("{}", std::mem::size_of::<[u8; SHADOW]>());
+    println!("{}", LET_INFER);
+    println!("{}", std::mem::size_of::<[u8; LET_INFER as usize]>());
+    println!("{}", std::mem::size_of::<[u8; BYTE_LZ]>());
+    println!("{}", std::mem::size_of::<[u8; IF_COMMON]>());
+    println!("{}", std::mem::size_of::<[u8; PROJ]>());
+    println!("{}", std::mem::size_of::<[u8; PEER]>());
+    println!("{}", std::mem::size_of::<[u8; SHORT]>());
+    println!("{}", std::mem::size_of::<[u8; POW_U32]>());
+    println!("{}", std::mem::size_of::<[u8; ABS]>());
+    println!("{} {}", REM, ARR[0]);
 }
