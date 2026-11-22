@@ -102,3 +102,68 @@ fn check_memo_matches_fresh_check() {
     }
     assert!(compared > 50, "{compared}");
 }
+
+/// Each constant and static is checked against its type where it is defined, used or not (as rustc does), with the
+/// inference of a fn body (`{ let mut b = 1; b }` is a u32). Fixing one clears its diagnostic
+#[test]
+fn constants_checked_where_defined() {
+    let src = "const LIMIT: u8 = 300u16;\nconst SIZES: [u8; 3] = [1, 2];\nstatic NAME: &[u8] = \"abc\";\nconst FINE: u32 = { let mut b = 1; b += 1; b };\nconst LABEL: &str = \"ok\";\nfn main() {}\n";
+    let mut s = Session2::new(Options2 { jobs: 1, ..Options2::default() });
+    let d = s.check(src);
+    assert_eq!(d.iter().map(|d| d.line).collect::<Vec<_>>(), vec![1, 2, 3], "{d:?}");
+    assert!(d.iter().all(|d| d.msg.starts_with("mismatched types")), "{d:?}");
+    let fixed = src.replace("300u16", "200").replace("[1, 2]", "[1, 2, 3]").replace("\"abc\"", "b\"abc\"");
+    assert!(s.check(&fixed).is_empty(), "{:?}", s.check(&fixed));
+}
+
+/// An enum's discriminants are of its `#[repr(..)]` integer type (isize without one), and a constant or an enum
+/// written in a fn body is reported at the line it was written on (not where it was hoisted to)
+#[test]
+fn discriminants_and_nested_constants() {
+    let src = "enum Level {\n    Low = 1i64,\n    High = 2,\n}\nfn f() {\n    #[repr(u8)]\n    enum Small {\n        A = 1,\n        B = 2i8,\n    }\n    const LIMIT: u8 = 300u16;\n    let _ = Small::A;\n}\nfn main() {\n    let _ = Level::Low;\n    f();\n}\n";
+    let mut s = Session2::new(Options2 { jobs: 1, ..Options2::default() });
+    let d = s.check(src);
+    assert_eq!(d.iter().map(|d| d.line).collect::<Vec<_>>(), vec![2, 9, 11], "{d:?}");
+}
+
+/// A constant whose value needs its own is E0391 at the constant, not an endless evaluation
+#[test]
+fn constant_cycles() {
+    let src = "const A: i32 = B;\nconst B: i32 = A;\nconst SELF_SIZE: usize = SELF_SIZE;\nfn main() {}\n";
+    let mut s = Session2::new(Options2 { jobs: 1, ..Options2::default() });
+    let d = s.check(src);
+    assert!(d.iter().all(|d| d.msg.contains("(E0391)")), "{d:?}");
+    assert_eq!(d.iter().map(|d| d.line).collect::<Vec<_>>(), vec![1, 2, 3], "{d:?}");
+}
+
+/// A raw string with quotes and brackets in an enum's body is no part of its discriminants; a program that writes
+/// the probes' names gets probes of other names
+#[test]
+fn discriminants_past_raw_strings_and_probe_names_of_the_program() {
+    let src = "#[repr(u8)]\nenum E {\n    #[doc = r#\"\"{\"#]\n    A = 1,\n    B = 2i8,\n}\nfn main() {\n    let _ = E::A;\n}\n";
+    let mut s = Session2::new(Options2 { jobs: 1, ..Options2::default() });
+    let d = s.check(src);
+    assert_eq!(d.iter().map(|d| d.line).collect::<Vec<_>>(), vec![5], "{d:?}");
+    let named = "fn __zust_const_0() {}\nconst BAD: u8 = 300u16;\nfn main() {\n    __zust_const_0();\n}\n";
+    let d = s.check(named);
+    assert_eq!(d.iter().map(|d| d.line).collect::<Vec<_>>(), vec![2], "{d:?}");
+    assert!(d[0].msg.contains("mismatched types"), "{d:?}");
+}
+
+/// What the scans for discriminants and constants read past (review of #52): a char literal's quote, a doc's
+/// `repr(`, a doc's bracket; a mismatch with a raw pointer to an expected type that is none; a repeat of `Self::C`
+#[test]
+fn discriminants_and_constants_past_literals() {
+    let mut s = Session2::new(Options2 { jobs: 1, ..Options2::default() });
+    let lines = |s: &mut Session2, src: &str| s.check(src).iter().map(|d| d.line).collect::<Vec<_>>();
+    let quote = "#[repr(u8)]\nenum E {\n    A = b'\"',\n    /* } */\n    B = 2i8,\n}\nfn main() {\n    let _ = E::A;\n}\n";
+    assert_eq!(lines(&mut s, quote), vec![5]);
+    let doc = "#[doc = \"repr(u8)\"]\nenum E {\n    A = 1isize,\n}\nfn main() {\n    let _ = E::A;\n}\n";
+    assert_eq!(lines(&mut s, doc), Vec::<usize>::new());
+    let bracket = "#[repr(u8)]\nenum E {\n    #[doc = \"(\"]\n    A = 1i8,\n}\nfn main() {\n    let _ = E::A;\n}\n";
+    assert_eq!(lines(&mut s, bracket), vec![4]);
+    let ptr = "const BAD: bool = 0 as *const u8;\nfn main() {}\n";
+    assert_eq!(lines(&mut s, ptr), vec![1]);
+    let repeat = "struct S;\nimpl S {\n    const C: S = S;\n    fn make() {\n        let _ = [Self::C; 2];\n    }\n}\nfn main() {\n    S::make();\n}\n";
+    assert_eq!(lines(&mut s, repeat), Vec::<usize>::new());
+}

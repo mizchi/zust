@@ -118,6 +118,308 @@ pub fn crate_tag(name: &str) -> u32 {
 /// 場所の表では、この行から後ろは prelude のファイル
 pub const PRELUDE_LINE: u32 = 49152;
 
+/// The first line of the fns that `zustc check` adds to read the program's constants (const_check_item): past every
+/// line of a program and its prelude, and under 2^20 (an error's line is kept in 20 bits)
+pub const CONST_CHECK_LINE: usize = 1_000_000;
+
+/// `s` with its comments (`//..` to the line's end, `/* .. */`) as spaces, its newlines and length kept; strings and chars
+/// skipped
+/// Where the raw string at b[i] ends (past it), b[i] its `r` (`r#"a "{" b"#`, `br"\"`); None for anything else
+fn raw_str_end(b: &[u8], i: usize) -> Option<usize> {
+    let ident = |k: usize| b[k].is_ascii_alphanumeric() || b[k] == b'_';
+    let alone = |k: usize| k == 0 || !ident(k - 1);
+    if b[i] != b'r' || !(alone(i) || (b[i - 1] == b'b' && alone(i - 1))) {
+        return None;
+    }
+    let hashes = b[i + 1..].iter().take_while(|&&c| c == b'#').count();
+    if b.get(i + 1 + hashes) != Some(&b'"') {
+        return None;
+    }
+    let close = [&b"\""[..], &vec![b'#'; hashes]].concat();
+    let from = i + 2 + hashes;
+    Some(b[from..].windows(close.len()).position(|w| w == close).map_or(b.len(), |p| from + p + close.len()))
+}
+
+fn blank_comments(s: &str) -> String {
+    let b = s.as_bytes();
+    let mut out = b.to_vec();
+    let mut i = 0;
+    while i < b.len() {
+        if let Some(e) = raw_str_end(b, i) {
+            i = e;
+            continue;
+        }
+        // (a char literal (`b'"'`), not a lifetime (`'a`): its quote starts no string)
+        if b[i] == b'\'' {
+            if let Some(e) = literal_end(b, i) {
+                i = e;
+                continue;
+            }
+        }
+        match b[i] {
+            b'"' => {
+                i += 1;
+                while i < b.len() && b[i] != b'"' {
+                    i += if b[i] == b'\\' { 2 } else { 1 };
+                }
+            }
+            b'/' if b.get(i + 1) == Some(&b'/') => {
+                while i < b.len() && b[i] != b'\n' {
+                    out[i] = b' ';
+                    i += 1;
+                }
+                continue;
+            }
+            // (`/* .. /* .. */ .. */` nests)
+            b'/' if b.get(i + 1) == Some(&b'*') => {
+                let mut depth = 0usize;
+                while i < b.len() {
+                    if b[i] == b'/' && b.get(i + 1) == Some(&b'*') {
+                        depth += 1;
+                        out[i] = b' ';
+                        out[i + 1] = b' ';
+                        i += 2;
+                    } else if b[i] == b'*' && b.get(i + 1) == Some(&b'/') {
+                        depth -= 1;
+                        out[i] = b' ';
+                        out[i + 1] = b' ';
+                        i += 2;
+                        if depth == 0 {
+                            break;
+                        }
+                    } else {
+                        if b[i] != b'\n' {
+                            out[i] = b' ';
+                        }
+                        i += 1;
+                    }
+                }
+                continue;
+            }
+            _ => {}
+        }
+        i += 1;
+    }
+    String::from_utf8(out).unwrap_or_else(|_| s.to_string())
+}
+
+/// Where the string or char literal at b[i] ends (past it): `"..."`, `b'{'`, `'\n'`; None for anything else (a
+/// lifetime `'a`)
+fn literal_end(b: &[u8], i: usize) -> Option<usize> {
+    if let Some(e) = raw_str_end(b, i) {
+        return Some(e);
+    }
+    match b[i] {
+        b'"' => {
+            let mut j = i + 1;
+            while j < b.len() && b[j] != b'"' {
+                j += if b[j] == b'\\' { 2 } else { 1 };
+            }
+            Some((j + 1).min(b.len()))
+        }
+        b'\'' => {
+            // (a char: one char or an escape, then `'`)
+            let j = if b.get(i + 1) == Some(&b'\\') { b[i + 2..].iter().position(|&c| c == b'\'').map(|p| i + 2 + p)? } else {
+                let w = std::str::from_utf8(&b[i + 1..(i + 5).min(b.len())]).ok().or_else(|| std::str::from_utf8(&b[i + 1..(i + 2).min(b.len())]).ok())?.chars().next()?.len_utf8();
+                (b.get(i + 1 + w) == Some(&b'\'')).then_some(i + 1 + w)?
+            };
+            Some(j + 1)
+        }
+        _ => None,
+    }
+}
+
+/// The names of those fns, with the constant's place in their order after it
+pub const CONST_CHECK_FN: &str = "__zust_const_";
+
+/// `zustc check`: a fn for each constant and static of the program that binds its initializer to its type
+/// (`fn __zust_const_0() { let _zc: &'static str = ("x"); }`), so that the initializer is checked against the type where
+/// it is defined, used or not, as rustc checks every constant, with the inference of a fn's body: (the fns'
+/// text, the line of each initializer). None without one. Not one whose initializer defines items (a fn body would
+/// hoist them again). An enum's discriminants likewise, of its `#[repr(..)]` integer type or isize
+fn const_check_item(src: &str, items: &[SrcItem]) -> Option<(String, Vec<usize>, String)> {
+    // (each probe's type and initializer, named at the end)
+    let mut probes: Vec<(String, String)> = vec![];
+    let mut lines = vec![];
+    // (an item hoisted out of a fn body: the line it was written on, prep::HOIST_MARK; looked for at the first)
+    let marks: std::cell::OnceCell<Vec<(usize, usize)>> = std::cell::OnceCell::new();
+    let written = |l: usize| crate::prep::hoisted_at(marks.get_or_init(|| crate::prep::hoist_marks(src)), l).unwrap_or(l);
+    // (nor one with a `return`, which would return from the fn: E0572 in a constant)
+    let items_inside = ["fn ", "struct ", "enum ", "union ", "impl ", "trait ", "mod ", "use ", "static ", "const ", "macro_rules", "type ", "return"];
+    // (its comments blanked; `*const T` is a type, no item)
+    // (nor one that casts to a raw pointer of an inferred type, `as *mut _`, whose inference zustc's casts may get wrong)
+    let defines_items = |e: &str| {
+        let b = blank_comments(e).replace("*const ", "*");
+        let tight: String = b.chars().filter(|c| !c.is_whitespace()).collect();
+        let infer_cast = ["as*_", "as*mut_"].iter().any(|k| tight.match_indices(k).any(|(i, _)| !tight[i + k.len()..].starts_with(|c: char| c.is_alphanumeric() || c == '_')));
+        infer_cast || items_inside.iter().any(|k| b.contains(k))
+    };
+    for it in items {
+        if !matches!(it.kind, ItemKind::Normal) {
+            continue;
+        }
+        let text = &src[it.start..it.end];
+        // (past the item's attributes and its visibility)
+        let mut t = text.trim_start();
+        while t.starts_with("#[") {
+            let o = 2;
+            t = t[(o + attr_end(&t[o..])).min(t.len())..].trim_start();
+        }
+        if let Some(r) = t.strip_prefix("pub") {
+            t = r.trim_start();
+            if t.starts_with('(') {
+                t = t.find(')').map_or("", |e| t[e + 1..].trim_start());
+            }
+        }
+        // (an enum's discriminants: each of its integer type, `#[repr(u8)]` or isize)
+        if let Some(r) = t.strip_prefix("enum ") {
+            let head: String = text[..text.len() - t.len()].chars().filter(|c| !c.is_whitespace()).collect();
+            let ints = ["i8", "i16", "i32", "i64", "i128", "isize", "u8", "u16", "u32", "u64", "u128", "usize"];
+            // (the attribute's: not `repr(` in a doc's text)
+            let repr = head.find("#[repr(").and_then(|k| {
+                let args = &head[k + 7..];
+                let args = &args[..args.find(')').unwrap_or(args.len())];
+                args.split(',').map(str::trim).find(|a| ints.contains(a))
+            });
+            let Some(open) = r.find('{') else { continue };
+            let body_at = text.len() - r.len() + open + 1;
+            // (its comments blanked, lengths kept: `//~ NOTE \`3\` (overflowed)` is no part of a discriminant)
+            let body = &blank_comments(&text[body_at..]);
+            let (mut depth, mut start) = (0i32, 0usize);
+            let bb = body.as_bytes();
+            let mut parts = vec![];
+            let mut skip_to = 0;
+            for (i, &c) in bb.iter().enumerate() {
+                if i < skip_to {
+                    continue;
+                }
+                // (a string or char literal's brackets are none: `b'{'`)
+                if let Some(e) = literal_end(bb, i) {
+                    skip_to = e;
+                    continue;
+                }
+                match c {
+                    b'(' | b'[' | b'{' => depth += 1,
+                    b')' | b']' | b'}' if depth == 0 => {
+                        parts.push((start, i));
+                        break;
+                    }
+                    b')' | b']' | b'}' => depth -= 1,
+                    b',' if depth == 0 => {
+                        parts.push((start, i));
+                        start = i + 1;
+                    }
+                    _ => {}
+                }
+            }
+            for (a, z) in parts {
+                let v = &body[a..z];
+                // (`V = e`: a `=` outside brackets, not `==` / `=>` / `<=` ..)
+                let vb = v.as_bytes();
+                let mut d = 0i32;
+                let mut lit_to = 0;
+                let eq = (0..vb.len()).find(|&i| {
+                    if i < lit_to {
+                        return false;
+                    }
+                    if let Some(e) = literal_end(vb, i) {
+                        lit_to = e;
+                        return false;
+                    }
+                    match vb[i] {
+                        b'(' | b'[' | b'{' => d += 1,
+                        b')' | b']' | b'}' => d -= 1,
+                        _ => {}
+                    }
+                    d == 0 && vb[i] == b'=' && vb.get(i + 1).is_none_or(|&n| n != b'=' && n != b'>') && (i == 0 || !b"=!<>".contains(&vb[i - 1]))
+                });
+                let Some(eq) = eq else { continue };
+                let e = v[eq + 1..].trim();
+                if e.is_empty() || defines_items(e) {
+                    continue;
+                }
+                let at = body_at + a + eq + 1;
+                let skip = { let b = blank_comments(&text[at..]); b.len() - b.trim_start().len() };
+                probes.push((repr.unwrap_or("isize").to_string(), e.to_string()));
+                lines.push(written(it.line + text[..at + skip].matches('\n').count()));
+            }
+            continue;
+        }
+        let Some(r) = t.strip_prefix("const ").or_else(|| t.strip_prefix("static ")) else { continue };
+        let r = r.trim_start();
+        let r = r.strip_prefix("mut ").map_or(r, str::trim_start);
+        let name: &str = &r[..r.find(|c: char| !(c.is_alphanumeric() || c == '_')).unwrap_or(r.len())];
+        let Some(ty_from) = r[name.len()..].trim_start().strip_prefix(':') else { continue };
+        if name.is_empty() || name == "_" || name == "fn" {
+            continue;
+        }
+        // (the type, to the `=` outside its brackets (`&dyn Iterator<Item = u8>`); then the initializer to the `;`)
+        let b = ty_from.as_bytes();
+        let mut depth = 0i32;
+        let mut eq = None;
+        for (i, &c) in b.iter().enumerate() {
+            match c {
+                b'<' | b'(' | b'[' => depth += 1,
+                b'>' if i > 0 && b[i - 1] == b'-' => {}
+                b'>' | b')' | b']' => depth -= 1,
+                b'=' if depth == 0 => {
+                    eq = Some(i);
+                    break;
+                }
+                _ => {}
+            }
+        }
+        let Some(eq) = eq else { continue };
+        let ty = ty_from[..eq].trim();
+        let init = ty_from[eq + 1..].trim_end().trim_end_matches(';');
+        if ty.is_empty() || init.trim().is_empty() || defines_items(init) {
+            continue;
+        }
+        // (a constant's references are 'static: `&str` is `&'static str`)
+        let mut ty_s = String::new();
+        let tb: Vec<char> = ty.chars().collect();
+        // (not a `&` of an array's length, `[u8; 3 & 1]`: after a `;` in brackets)
+        let mut lens: Vec<bool> = vec![];
+        for (i, &c) in tb.iter().enumerate() {
+            match c {
+                '[' => lens.push(false),
+                ']' => {
+                    lens.pop();
+                }
+                ';' => {
+                    if let Some(l) = lens.last_mut() {
+                        *l = true;
+                    }
+                }
+                _ => {}
+            }
+            ty_s.push(c);
+            if c == '&' && !lens.last().copied().unwrap_or(false) {
+                let next = tb[i + 1..].iter().find(|c| !c.is_whitespace());
+                if !next.is_some_and(|&n| n == '\'') {
+                    ty_s.push_str("'static ");
+                }
+            }
+        }
+        // (the line of its initializer)
+        let at = text.len() - ty_from.len() + eq + 1;
+        let skip = { let b = blank_comments(&text[at..]); b.len() - b.trim_start().len() };
+        // (a `let` of the type: the coercions of a `let`, as a constant's initializer has)
+        probes.push((ty_s, init.to_string()));
+        lines.push(written(it.line + text[..at + skip].matches('\n').count()));
+    }
+    if lines.is_empty() {
+        return None;
+    }
+    // (the probes' names are theirs alone: `__zust_const_`, or `__zust_const1_` .. when the program writes that)
+    let name = (0..).map(|n| if n == 0 { CONST_CHECK_FN.to_string() } else { format!("__zust_const{n}_") }).find(|p| !items.iter().any(|it| src[it.start..it.end].contains(p.as_str())))?;
+    let mut body_out = String::new();
+    for (k, (ty, init)) in probes.iter().enumerate() {
+        body_out.push_str(&format!("#[allow(dead_code, unused)] fn {name}{k}() {{\n    let _zc: {ty} = (\n{init}\n    );\n}}\n"));
+    }
+    Some((body_out, lines, name))
+}
+
 /// 検査だけの印のキャッシュのキー (ビルドの Blob のキーと混ざらないように)
 const CHECK_SALT: Key = 0x5eed_c4ec_0000_0000_0000_0000_0000_0001;
 
@@ -417,11 +719,17 @@ pub struct Session2 {
     /// A crate of one file that the caller configured before it checks it: the `extern crate x;` items the configuring
     /// blanked (SrcMap::externs), whose names may be defined twice. Read by the next analyze
     pub externs: Vec<(usize, String)>,
+    /// In a `check`: its analysis adds const_check_item
+    checking: bool,
+    /// The lines of the constants that the check's const_check_item reads, in its order
+    const_lines: Vec<usize>,
+    /// their fns' names' prefix (CONST_CHECK_FN, or another when the program writes that)
+    const_fn: String,
 }
 
 impl Session2 {
     pub fn new(opts: Options2) -> Session2 {
-        Session2 { opts, cid: compiler_id(), disk: crate::cache2::Cache2::empty(), mem: FxMap::default(), used: FxSet::default(), fresh: vec![], ctx: CrateCtx::default(), last_map: None, sel: Default::default(), sum_fp: FxMap::default(), chk: None, externs: vec![] }
+        Session2 { opts, cid: compiler_id(), disk: crate::cache2::Cache2::empty(), mem: FxMap::default(), used: FxSet::default(), fresh: vec![], ctx: CrateCtx::default(), last_map: None, sel: Default::default(), sum_fp: FxMap::default(), chk: None, externs: vec![], checking: false, const_lines: vec![], const_fn: String::new() }
     }
 
     pub fn load_cache(&mut self, path: &std::path::Path) {
@@ -529,15 +837,53 @@ impl Session2 {
         crates.extend(self.ctx.lib.iter().cloned());
         let mut fix = vec![];
         let cfg = self.opts.cfg_of(self.ctx.features.as_ref().unwrap_or(&self.opts.features), &self.ctx.cfgs, &self.ctx.env);
-        let (src, items, user, prelude_line0) = with_prelude_in(src0, &crates, &mut fix, Some(&cfg), &mut self.sel)?;
+        let (mut src, mut items, mut user, prelude_line0) = with_prelude_in(src0, &crates, &mut fix, Some(&cfg), &mut self.sel)?;
         self.ctx.map.colfix = fix;
+        // (`zustc check`: each constant of the program is checked where it is defined, used or not, as rustc does: a
+        // fn of the program that reads them, on lines past every other (check maps its errors back to them))
+        // (the program's own items, before the constants' fns: what the source's own scans read)
+        let user_src = user;
+        self.const_lines.clear();
+        if self.checking {
+            if let Some((text, lines, name)) = const_check_item(&src, &items[..user]) {
+                if !src.ends_with('\n') {
+                    src.push('\n');
+                }
+                let off = src.len();
+                src.push_str(&text);
+                if let Ok(mut its) = lexer::split(&text) {
+                    for it in &mut its {
+                        it.start += off;
+                        it.end += off;
+                        it.line += CONST_CHECK_LINE - 1;
+                        for id in &mut it.idents {
+                            id.0 += off as u32;
+                            id.1 += off as u32;
+                        }
+                    }
+                    let n = its.len();
+                    // (the prelude's items move by n: its members' headers too)
+                    for it in &mut items[user..] {
+                        if let ItemKind::ImplMember(h) | ItemKind::TraitMember(h) = &mut it.kind {
+                            if *h as usize >= user {
+                                *h += n as u32;
+                            }
+                        }
+                    }
+                    items.splice(user..user, its);
+                    user += n;
+                    self.const_lines = lines;
+                    self.const_fn = name;
+                }
+            }
+        }
         // (E0432: a top-level `use` of a path whose first segment names nothing; the `use` items come from the item
         // split, the names they could mean from the original text)
         if self.ctx.map.inputs.is_empty() {
-            if let Some(e) = unresolved_import(src0, &src, &items[..user], &self.ctx.deps) {
+            if let Some(e) = unresolved_import(src0, &src, &items[..user_src], &self.ctx.deps) {
                 return Err(e);
             }
-            if let Some(e) = duplicate_import(src0, &src, &items[..user]) {
+            if let Some(e) = duplicate_import(src0, &src, &items[..user_src]) {
                 return Err(e);
             }
             // (E0428 of an inline module and an item: a whole-text pass, so not on each build of a crate loaded from
@@ -545,7 +891,7 @@ impl Session2 {
             if let Some(e) = duplicate_name(src0, &externs, self.opts.edition < 2018) {
                 return Err(e);
             }
-            if let Some(e) = malformed_attr(src0, &src, &items[..user], self.ctx.deps.is_empty() && self.ctx.lib.is_none()) {
+            if let Some(e) = malformed_attr(src0, &src, &items[..user_src], self.ctx.deps.is_empty() && self.ctx.lib.is_none()) {
                 return Err(e);
             }
         }
@@ -680,7 +1026,7 @@ impl Session2 {
         tm.lap("summaries", {
             if tm.on {
                 let ol = self.ctx.own_lines as usize;
-                let own = items[..user].iter().filter(|it| ol == 0 || it.line <= ol).count();
+                let own = items[..user_src].iter().filter(|it| ol == 0 || it.line <= ol).count();
                 format!("{} items: own {own}, deps {}, prelude {}", items.len(), user - own, items.len() - user)
             } else {
                 String::new()
@@ -691,7 +1037,7 @@ impl Session2 {
         // mention one by name are read again)
         {
             let mut adts: crate::fxhash::FxMap<&str, usize> = Default::default();
-            for sm in &sums[..user] {
+            for sm in &sums[..user_src] {
                 if let Some(r) = sm.adt_regions.as_deref().filter(|r| !r.lts.is_empty()) {
                     for n in sm.structs.iter().map(|s| s.0.as_str()).chain(sm.enums.iter().map(|e| e.0.as_str())) {
                         adts.insert(n, r.lts.len());
@@ -699,7 +1045,7 @@ impl Session2 {
                 }
             }
             if !adts.is_empty() {
-                for (it, sm) in items[..user].iter().zip(&sums[..user]) {
+                for (it, sm) in items[..user_src].iter().zip(&sums[..user_src]) {
                     let kind = !sm.structs.is_empty() || !sm.enums.is_empty() || !sm.aliases.is_empty() || !sm.consts.is_empty() || !sm.statics.is_empty() || !sm.assocs.is_empty();
                     if !kind {
                         continue;
@@ -738,7 +1084,7 @@ impl Session2 {
                 .filter_map(|sm| Some((sm.trait_decl.as_deref()?, sm.trait_generics.iter().find(|g| g.0 == crate::types::SELF_OUTLIVES)?.1.as_slice())))
                 .collect();
             if !so.is_empty() {
-                for (it, sm) in items[..user].iter().zip(&sums[..user]) {
+                for (it, sm) in items[..user_src].iter().zip(&sums[..user_src]) {
                     // (an impl of such a trait, or a type whose fields write `dyn`: read again)
                     let of_trait = sm.impl_trait.as_deref().is_some_and(|t| so.contains_key(t));
                     let dyns = (!sm.structs.is_empty() || !sm.enums.is_empty() || !sm.unions.is_empty()) && src.get(it.start..it.end).is_some_and(|t| t.contains("dyn"));
@@ -774,7 +1120,7 @@ impl Session2 {
             }
         }
         // (struct / enum / union definitions of the program: unused parameters, union fields ..)
-        for (it, sm) in items[..user].iter().zip(&sums[..user]) {
+        for (it, sm) in items[..user_src].iter().zip(&sums[..user_src]) {
             if let Some(e) = &sm.adt_err {
                 // (`\u{3}line\u{3}msg`: at that line of the item)
                 if let Some((l, m)) = e.strip_prefix('\u{3}').and_then(|r| r.split_once('\u{3}')) {
@@ -794,7 +1140,7 @@ impl Session2 {
         // (E0658: an attribute behind a feature gate the file does not enable)
         // (attributes start items: only the text at the start of the program's items, not the whole source)
         let mut feats: Option<Vec<String>> = None;
-        for it in &items[..user] {
+        for it in &items[..user_src] {
             let head = src.get(it.start..it.end).unwrap_or("");
             // (and an extern block's items: `extern "C" { #[unsafe(ffi_const)] fn f(); }`)
             let ext = extern_block(head.as_bytes(), 0);
@@ -822,7 +1168,7 @@ impl Session2 {
                 w.is_none_or(|(i, _)| top_level_split(&head[i + 5..]).iter().all(|p| p.trim().is_empty() || p.split(':').next().map(str::trim) == Some(st)))
             };
             let mut first: FxMap<&str, (usize, &str)> = FxMap::default();
-            for (ii, sm) in sums[..user].iter().enumerate() {
+            for (ii, sm) in sums[..user_src].iter().enumerate() {
                 let (Some(tr), Some(st)) = (sm.impl_trait.as_deref(), sm.impl_self.as_deref()) else { continue };
                 if !sm.impl_trait_args.is_empty() || tr.contains(['<', ':']) || !sm.impl_generics.iter().any(|g| g.0 == st) {
                     continue;
@@ -832,7 +1178,7 @@ impl Session2 {
                     continue;
                 }
                 let Some((_, _)) = first.insert(tr, (ii, st)) else { continue };
-                let once = sums[..user].iter().filter(|s| s.trait_decl.as_deref() == Some(tr)).count() == 1;
+                let once = sums[..user_src].iter().filter(|s| s.trait_decl.as_deref() == Some(tr)).count() == 1;
                 const OVERLAP: [&str; 6] =
                     ["specialization", "min_specialization", "marker_trait_attr", "negative_impls", "with_negative_coherence", "rustc_attrs"];
                 let enabled = feats.get_or_insert_with(|| enabled_features(&src));
@@ -851,7 +1197,7 @@ impl Session2 {
                     (i == 0 || !id(b[i - 1])) && b.get(i + w.len()).is_none_or(|&c| !id(c))
                 })
             };
-            for it in &items[..user] {
+            for it in &items[..user_src] {
                 let crate::lexer::ItemKind::ImplMember(h) = it.kind else { continue };
                 let t = src.get(it.start..it.end).unwrap_or("").trim_start();
                 let Some(rest) = t.strip_prefix("type ") else { continue };
@@ -862,10 +1208,10 @@ impl Session2 {
                     continue;
                 }
                 let Some(tr) = sums.get(h as usize).and_then(|s| s.impl_trait.as_deref()) else { continue };
-                if sums[..user].iter().filter(|s| s.trait_decl.as_deref() == Some(tr)).count() != 1 {
+                if sums[..user_src].iter().filter(|s| s.trait_decl.as_deref() == Some(tr)).count() != 1 {
                     continue;
                 }
-                let decl = items[..user].iter().find(|d| {
+                let decl = items[..user_src].iter().find(|d| {
                     matches!(d.kind, crate::lexer::ItemKind::TraitMember(th) if sums.get(th as usize).and_then(|s| s.trait_decl.as_deref()) == Some(tr))
                         && src.get(d.start..d.end).unwrap_or("").trim_start().strip_prefix("type ").is_some_and(|r| {
                             let r = r.trim_start();
@@ -948,25 +1294,25 @@ impl Session2 {
         // appears nowhere but in its own definition and in `impl` headers)
         if deny_dead_code && self.ctx.lib.is_none() {
             // (a `pub` item counts as used, except in a binary under `deny(dead_code_pub_in_binary)`)
-            if let Some((line, msg)) = first_dead_item(&src, &items[..user], deny_dead_pub && !lib_attr) {
+            if let Some((line, msg)) = first_dead_item(&src, &items[..user_src], deny_dead_pub && !lib_attr) {
                 return Err(format!("{line}:1: {msg}"));
             }
         }
         // (unused_imports: a top-level `use` whose name nothing else mentions)
         if deny_unused_imports && self.ctx.lib.is_none() {
-            if let Some((line, col, msg)) = first_unused_import(&src, &items[..user]) {
+            if let Some((line, col, msg)) = first_unused_import(&src, &items[..user_src]) {
                 return Err(format!("{line}:{col}: {msg}"));
             }
         }
         // (naming lints: the first item whose name breaks its case convention)
         if deny_style.iter().any(|&d| d) && self.ctx.lib.is_none() {
-            if let Some((line, msg)) = first_bad_name(&src, &items[..user], deny_style) {
+            if let Some((line, msg)) = first_bad_name(&src, &items[..user_src], deny_style) {
                 return Err(format!("{line}:1: {msg}"));
             }
         }
         // (unreachable_code: a statement after one that diverges)
         if deny_unreachable_code && self.ctx.lib.is_none() {
-            for it in &items[..user] {
+            for it in &items[..user_src] {
                 let text = src.get(it.start..it.end).unwrap_or("");
                 if !text.contains("fn ") || text.contains("allow(unreachable") || text.contains("#[cfg") {
                     continue;
@@ -983,13 +1329,13 @@ impl Session2 {
         // single_use_lifetimes: one named once, in a parameter's type (or the impl's header), which eliding it would
         // say)
         if deny_unused_lifetimes.0 || deny_unused_lifetimes.1 {
-            if let Some(e) = first_unused_lifetime(&src, &items[..user], deny_unused_lifetimes) {
+            if let Some(e) = first_unused_lifetime(&src, &items[..user_src], deny_unused_lifetimes) {
                 return Err(e);
             }
         }
         // (unused_variables: the first binding nothing reads, in the program's own fns)
         if deny_unused_vars {
-            for it in &items[..user] {
+            for it in &items[..user_src] {
                 let text = src.get(it.start..it.end).unwrap_or("");
                 if !text.contains("fn ") || text.contains("allow(unused") || text.contains("#[cfg") {
                     continue;
@@ -1008,7 +1354,7 @@ impl Session2 {
                 }
             }
         }
-        unsafe_impls(&src, &items[..user])?;
+        unsafe_impls(&src, &items[..user_src])?;
         let mut prog = Program::build_with(&items, &sums, self.ctx.lib.is_none() && !lib_attr, user).map_err(|e| name_line(&e, &src, &items))?;
         tm.lap("program", String::new());
         prog.prelude_from = user as u32;
@@ -3226,6 +3572,22 @@ fn compile_id_req(a: &Analysis, insts: &Mutex<Insts>, id: u32) -> R<(Blob, Vec<u
 #[cfg(not(feature = "build"))]
 fn lower_blob(_: &Analysis, _: acg::Compiled, _: Vec<u32>) -> R<(Blob, Vec<u32>)> { Err("internal: zust-core was built without the backend (feature `build`)".into()) }
 
+/// An error at a line of an item hoisted out of a fn body (prep::HOIST_MARK): at the line it was written on
+pub(crate) fn unhoist_err(a: &Analysis, e: String) -> String {
+    let d = Diagnostic::parse(&e);
+    let lead = e.trim_start();
+    if d.line == 0 || !lead.starts_with(|c: char| c.is_ascii_digit()) || (a.prelude_line0 > 0 && d.line >= a.prelude_line0) {
+        return e;
+    }
+    match crate::prep::hoisted_line(&a.src, d.line) {
+        Some(l) => {
+            let n = lead.find(':').unwrap_or(0);
+            format!("{l}{}", &lead[n..])
+        }
+        None => e,
+    }
+}
+
 /// 位置付きのエラー (行・桁は 1 始まり)。check / LSP が返す
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Diagnostic {
@@ -3266,7 +3628,10 @@ impl Session2 {
     /// 検査する (コード生成までしてエラーを集め、結果はキャッシュに入れる: 次の検査・ビルドはそれを使う)。prelude の中の診断は出さない
     pub fn check(&mut self, src: &str) -> Vec<Diagnostic> {
         let user_lines = src.bytes().filter(|&c| c == b'\n').count() + 1;
-        let mut a = match self.analyze(src) {
+        self.checking = true;
+        let r = self.analyze(src);
+        self.checking = false;
+        let mut a = match r {
             Ok(a) => a,
             Err(e) => return vec![Diagnostic::parse(&e)],
         };
@@ -3387,7 +3752,31 @@ impl Session2 {
                                     Some(req)
                                 }
                                 Err(e) => {
-                                    errs.push(e);
+                                    // (a fn that reads a constant: its type errors are the constant's, at its line; what
+                                    // zustc cannot evaluate in a constant is not an error of the program)
+                                    match body.strip_prefix(self.const_fn.as_str()).and_then(|k| k.parse::<usize>().ok()).filter(|_| !self.const_lines.is_empty()) {
+                                        Some(k) => {
+                                            // (nor a mismatch zustc's coercions may make: of a raw pointer, or of a type
+                                            // that has no size, which rustc rejects another way)
+                                            // (nor a reference to a type with a Deref, whose coercion zustc does not make)
+                                            // (a cycle of constants, E0391, is the constant's too)
+                                            let m = e.find("cycle detected when const-evaluating").or_else(|| e.find("mismatched types").filter(|&m| {
+                                                let tys = &e[m..];
+                                                let unsized_ty = |t: &str| t == "str" || t.starts_with('[') && !t.contains(';') || t.starts_with("dyn ");
+                                                let derefs = |t: &str| {
+                                                    let n = t.strip_prefix('&').map(|x| x.strip_prefix("mut ").unwrap_or(x)).unwrap_or("");
+                                                    a.prog.struct_index.get(n).is_some_and(|&sid| a.prog.method(sid, "deref").is_some())
+                                                };
+                                                // (a coercion to a raw pointer zustc may not make: the expected type's)
+                                                let expected = tys.split('`').nth(1).unwrap_or("");
+                                                !expected.contains("*const") && !expected.contains("*mut") && !tys.split('`').skip(1).step_by(2).any(|t| unsized_ty(t) || derefs(t))
+                                            }));
+                                            if let (Some(&l), Some(m)) = (self.const_lines.get(k), m) {
+                                                errs.push(format!("{l}:1: {}", &e[m..]));
+                                            }
+                                        }
+                                        None => errs.push(e),
+                                    }
                                     ok = false;
                                     Some(vec![])
                                 }
@@ -3435,6 +3824,7 @@ impl Session2 {
             self.chk = Some(memo);
         }
         tm.lap("check", format!("{n_memo} from the last check, {n_keys} keys, {n_hit} cached, {n_checked} checked"));
+        self.const_lines.clear();
         let mut d: Vec<Diagnostic> = errs.iter().map(|e| Diagnostic::parse(e)).collect();
         // (an item moved out of a fn body (`fn main() { fn helper() { .. } }`) is past the source's last line: its borrow
         // and region checks' errors are at the lines it was moved from. Not its other errors: typeck does not know all

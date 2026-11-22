@@ -966,6 +966,35 @@ impl Inf<'_> {
         v
     }
 
+    /// Whether the type of v is surely not Clone (acg's clone_call): a type of the program with no clone and no
+    /// derive, or an instance with such an argument, but for the shared pointers
+    fn not_clone(&mut self, v: u32, depth: u32) -> bool {
+        if depth > 4 {
+            return false;
+        }
+        let f = self.find(v);
+        let (b, args) = match self.shape[f as usize] {
+            // (a known instance: its arguments are known too)
+            Some(Shape::Known(t @ (Ty::Struct(_) | Ty::Ref(true, _)))) => return self.prog.surely_not_clone(t, depth),
+            Some(Shape::Ref(true, _)) => return true,
+            Some(Shape::Adt(b, st, n)) => (b, Some((st, n))),
+            _ => return false,
+        };
+        let own = self.prog.struct_item.get(b as usize).is_some_and(|&ii| ii < self.prog.prelude_from);
+        if own && self.prog.method(b, "clone").is_some() {
+            return false;
+        }
+        let derived = self.prog.derived.get(&b).is_some_and(|d| d.iter().any(|x| x == "Clone"));
+        if own && !derived && !self.prog.implements(Ty::Struct(b), "Clone") {
+            return true;
+        }
+        let Some((st, n)) = args.filter(|_| self.prog.clone_needs_args(b, own)) else { return false };
+        (st..st + n).any(|k| {
+            let a = self.adt_args[k as usize];
+            self.not_clone(a, depth + 1)
+        })
+    }
+
     fn binary(&mut self, op: &str, le: &Expr, re: &Expr) -> u32 {
         let l = self.expr(le);
         let r = self.expr(re);
@@ -1012,6 +1041,8 @@ impl Inf<'_> {
                 self.unify(l, r);
                 self.known(Ty::Bool)
             }
+            // (the left operand's type, a number behind a reference dereferenced: `let _: u8 = &0 << 0;`)
+            "<<" | ">>" if !adt => self.num_operand(l),
             "<<" | ">>" => l,
             "<<=" | ">>=" => self.known(Ty::Unit),
             "+=" | "-=" | "*=" | "/=" | "%=" | "^=" | "&=" | "|=" => {
@@ -1951,6 +1982,13 @@ impl Inf<'_> {
         let rroot = self.find(rv);
         let prim = matches!(self.shape[rroot as usize], Some(Shape::Known(t)) if t.is_int() || t.is_float() || matches!(t, Ty::Bool | Ty::Char | Ty::Ptr(..)));
         if callee.is_none() && n == "clone" && args.is_empty() && (sid.is_some() || prim) {
+            // (`r.clone()` with `r: &S` and S a type of the program that is not Clone: the reference's clone, `&S`)
+            let fr = self.find(r);
+            let refd = matches!(self.shape[fr as usize], Some(Shape::Ref(..)));
+            // (and an instance with such an argument, `Option<NoClone>`, but for the shared pointers: as the code does)
+            if refd && self.not_clone(rv, 0) {
+                return r;
+            }
             return rv;
         }
         let mut avs = vec![];
