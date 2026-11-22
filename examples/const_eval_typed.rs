@@ -29,6 +29,13 @@ const NOT_AND: usize = (!0 & 7u8) as usize;
 const POW128: usize = (2u128.pow(127) >> 127) as usize;
 const LET_TYPED: usize = { let x: u8 = !0; x as usize };
 const LAYOUT_N: usize = X.count_ones() as usize;
+// (a u64 discriminant past i64::MAX, used by the next one)
+#[repr(u64)]
+#[derive(Clone, Copy)]
+enum E4 {
+    A = 1u64 << 63,
+    B = (Self::A as u64) + 1,
+}
 struct S {
     a: [u8; LAYOUT_N],
 }
@@ -116,6 +123,7 @@ fn main() {
     println!("{} {}", E2::A as u16, E2::B as u16);
     println!("{}", std::mem::size_of::<[u8; QFLIP]>());
     println!("{} {} {} {}", SKIPPED, E3::A as isize, E3::B as isize, E3::C as isize);
+    println!("{} {}", E4::A as u64, E4::B as u64);
 }
 
 // (a generic alias resolves before layout; an unsafe block evaluates; the i128::MIN literal negates)

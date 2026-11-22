@@ -97,6 +97,8 @@ rustc's wasm32-wasip1 builds (tests/wasm/README.md). Left:
   brace that an edit leaves open (`println!("{}", std::mem::size_o{ fn inner() {} }` inside `fn main`) is hoisted to
   the top level by the full pass but left in place by the chunked one. Found by `tests/prep_inc.rs` when
   `examples/const_eval_typed.rs` grew; the example's new items were moved to its end, which changes the random edits.
+  A second case found the same way: a `m!()` call that the full pass expands and the chunked one leaves (an edit
+  near `let y17 = y16 & y16;` in that example).
 - Nested generic aliases (`type T1 = D<T0, T0>; type T2 = D<T1, T1>; ..`) take time exponential in the depth to
   compile (about 2x per level: 2.2 s at depth 24, 33 s at depth 28), with or without `TypeId` (whose key is the
   fixed-size `hash_ty`). Pre-existing (not SIMD): probably the aliases' expansion.

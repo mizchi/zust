@@ -4148,8 +4148,11 @@ impl Program {
                         i64::try_from(x).or_else(|_| u64::try_from(x).map(|u| u as i64)).map_err(|_| format!("{line}:1: discriminant out of range"))?
                     };
                     if !v.discr_src.is_empty() || vs.iter().any(|w| !w.discr_src.is_empty()) {
-                        env.push((format!("{}::{}", sdefs[id].1, v.name), d as i128, It::of_ty(dt), None));
-                        env.push((format!("Self::{}", v.name), d as i128, It::of_ty(dt), None));
+                        // (as a value of the repr type: `#[repr(u64)]`'s `1 << 63` is 2^63, not i64::MIN)
+                        let it = It::of_ty(dt);
+                        let val = it.map_or(d as i128, |it| it.wrap(d as i128));
+                        env.push((format!("{}::{}", sdefs[id].1, v.name), val, it, None));
+                        env.push((format!("Self::{}", v.name), val, it, None));
                     }
                     if discrs.contains(&d) {
                         return Err(format!(

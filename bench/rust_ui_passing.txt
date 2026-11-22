@@ -318,6 +318,7 @@ compile-fail	associated-types/nested-assoc-type-projection-ice-109864.rs
 build-pass	associated-types/normalization-debruijn-1.rs
 build-pass	associated-types/normalization-debruijn-2.rs
 check-pass	associated-types/normalization-probe-cycle.rs
+run-pass	associated-types/normalize-assoc-types.rs
 check-pass	associated-types/normalize-cycle-in-eval-no-region.rs
 check-pass	associated-types/normalize-cycle-in-eval.rs
 run-pass	associated-types/object-method-numbering.rs
@@ -3010,6 +3011,7 @@ build-pass	impl-trait/defined-by-trait-resolution.rs
 compile-fail	impl-trait/diagnostics/fully-qualified-path-impl-trait.rs
 check-pass	impl-trait/different_where_bounds.rs
 check-pass	impl-trait/divergence.rs
+compile-fail	impl-trait/does-not-live-long-enough.rs
 compile-fail	impl-trait/dyn-incompatible-trait-in-return-position-dyn-trait.rs
 compile-fail	impl-trait/dyn-incompatible-trait-in-return-position-impl-trait.rs
 check-pass	impl-trait/dyn-trait-elided-two-inputs-assoc.rs
@@ -3262,6 +3264,7 @@ compile-fail	imports/issue-55884-1.rs
 check-pass	imports/issue-56263.rs
 compile-fail	imports/issue-57015.rs
 check-pass	imports/issue-62767.rs
+check-pass	imports/issue-68103.rs
 compile-fail	imports/issue-81413.rs
 compile-fail	imports/issue-8640.rs
 check-pass	imports/local-modularized-tricky-pass-1.rs
@@ -4497,6 +4500,7 @@ compile-fail	nll/issue-31567.rs
 compile-fail	nll/issue-40510-1.rs
 check-pass	nll/issue-40510-2.rs
 check-pass	nll/issue-40510-4.rs
+check-pass	nll/issue-43058.rs
 compile-fail	nll/issue-45157.rs
 run-pass	nll/issue-45696-long-live-borrows-in-boxes.rs
 run-pass	nll/issue-45696-no-variant-box-recur.rs
@@ -7285,6 +7289,7 @@ run-pass	type-alias/static-method-type-alias-11047.rs
 run-pass	type-alias/type-param.rs
 check-pass	type-alias/where-clause-on-generic-type-alias.rs
 compile-fail	type-inference/ambiguous-num-type-method-call.rs
+run-pass	type-inference/diverging-expr-unconstrained-type-param.rs
 run-pass	type-inference/dropper_has_sigdrop.rs
 run-pass	type-inference/float-type-inference-unification-14382.rs
 check-pass	type-inference/generalize-subtyped-variables.rs
@@ -7663,6 +7668,7 @@ compile-fail	use/use-after-move-based-on-type.rs
 compile-fail	use/use-after-move-self-based-on-type.rs
 compile-fail	use/use-after-move-self.rs
 check-pass	use/use-keyword.rs
+compile-fail	use/use-meta-mismatch.rs
 check-pass	use/use-mod/use-mod-5.rs
 check-pass	use/use-mod/use-mod-6.rs
 compile-fail	use/use-mod/use-mod.rs
