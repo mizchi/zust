@@ -2232,3 +2232,19 @@ fn blanket_chain_past_eight() {
     let d = check("trait A {}\ntrait B {}\nimpl<T: B> A for T {}\nimpl<T: A> B for T {}\ntrait Tr {\n    fn go(&self) -> u32 {\n        7\n    }\n}\nimpl<T: A> Tr for T {}\nfn main() {\n    println!(\"{}\", ().go());\n}\n");
     assert!(d.len() == 1 && d[0].0 == 12 && d[0].1.contains("no method `go`"), "{d:?}");
 }
+
+/// From the second review of #64: a write through a chain of 17 `Deref`s with no `DerefMut` is E0594 (the borrow
+/// check follows such a chain as far as rustc's recursion limit, not 16 steps), and a read through it is accepted; a
+/// destructuring `let` whose annotation writes `'static` turns the check on before its initializer is lowered, so a
+/// call in it (`(id(r), 0)`) is related to the annotation
+#[test]
+fn part12_review_2() {
+    let chain = "use std::ops::Deref;\nstruct S0 {\n    field: u32,\n}\nstruct S1(S0);\nimpl Deref for S1 {\n    type Target = S0;\n    fn deref(&self) -> &S0 {\n        &self.0\n    }\n}\nstruct S2(S1);\nimpl Deref for S2 {\n    type Target = S1;\n    fn deref(&self) -> &S1 {\n        &self.0\n    }\n}\nstruct S3(S2);\nimpl Deref for S3 {\n    type Target = S2;\n    fn deref(&self) -> &S2 {\n        &self.0\n    }\n}\nstruct S4(S3);\nimpl Deref for S4 {\n    type Target = S3;\n    fn deref(&self) -> &S3 {\n        &self.0\n    }\n}\nstruct S5(S4);\nimpl Deref for S5 {\n    type Target = S4;\n    fn deref(&self) -> &S4 {\n        &self.0\n    }\n}\nstruct S6(S5);\nimpl Deref for S6 {\n    type Target = S5;\n    fn deref(&self) -> &S5 {\n        &self.0\n    }\n}\nstruct S7(S6);\nimpl Deref for S7 {\n    type Target = S6;\n    fn deref(&self) -> &S6 {\n        &self.0\n    }\n}\nstruct S8(S7);\nimpl Deref for S8 {\n    type Target = S7;\n    fn deref(&self) -> &S7 {\n        &self.0\n    }\n}\nstruct S9(S8);\nimpl Deref for S9 {\n    type Target = S8;\n    fn deref(&self) -> &S8 {\n        &self.0\n    }\n}\nstruct S10(S9);\nimpl Deref for S10 {\n    type Target = S9;\n    fn deref(&self) -> &S9 {\n        &self.0\n    }\n}\nstruct S11(S10);\nimpl Deref for S11 {\n    type Target = S10;\n    fn deref(&self) -> &S10 {\n        &self.0\n    }\n}\nstruct S12(S11);\nimpl Deref for S12 {\n    type Target = S11;\n    fn deref(&self) -> &S11 {\n        &self.0\n    }\n}\nstruct S13(S12);\nimpl Deref for S13 {\n    type Target = S12;\n    fn deref(&self) -> &S12 {\n        &self.0\n    }\n}\nstruct S14(S13);\nimpl Deref for S14 {\n    type Target = S13;\n    fn deref(&self) -> &S13 {\n        &self.0\n    }\n}\nstruct S15(S14);\nimpl Deref for S15 {\n    type Target = S14;\n    fn deref(&self) -> &S14 {\n        &self.0\n    }\n}\nstruct S16(S15);\nimpl Deref for S16 {\n    type Target = S15;\n    fn deref(&self) -> &S15 {\n        &self.0\n    }\n}\nstruct S17(S16);\nimpl Deref for S17 {\n    type Target = S16;\n    fn deref(&self) -> &S16 {\n        &self.0\n    }\n}\n";
+    let d = check(&(chain.to_string() + "fn main() {\n    let mut x = S17(S16(S15(S14(S13(S12(S11(S10(S9(S8(S7(S6(S5(S4(S3(S2(S1(S0 { field: 0 })))))))))))))))));\n    x.field = 1;\n}\n"));
+    assert!(d.len() == 1 && d[0].1.contains("cannot assign to data in dereference of `S1` (E0594)"), "{d:?}");
+    assert_eq!(check(&(chain.to_string() + "fn main() {\n    let x = S17(S16(S15(S14(S13(S12(S11(S10(S9(S8(S7(S6(S5(S4(S3(S2(S1(S0 { field: 0 })))))))))))))))));\n    println!(\"{}\", x.field);\n}\n")), vec![]);
+    let id = "fn id(x: &u8) -> &u8 {\n    x\n}\n";
+    let d = check(&(id.to_string() + "fn f(r: &u8) {\n    let (_x, _): (&'static u8, u8) = (id(r), 0);\n}\nfn main() {\n    let v = 1;\n    f(&v);\n}\n"));
+    assert!(d.len() == 1 && d[0].0 == 5 && d[0].1.contains("lifetime may not live long enough"), "{d:?}");
+    assert_eq!(check(&(id.to_string() + "static X: u8 = 1;\nfn main() {\n    let (p, _): (&'static u8, u8) = (id(&X), 0);\n    println!(\"{}\", p);\n}\n")), vec![]);
+}

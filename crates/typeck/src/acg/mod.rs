@@ -1830,6 +1830,13 @@ impl Cx<'_> {
                         return err(SP, "`let` without initializer is not supported");
                     };
                     let ann = ann_ty.as_ref().and_then(|t| self.parse_ty(t).ok());
+                    // (an annotation that writes `'static`: checked from here on, as a `let x: &'static T`, from
+                    // its initializer, whose calls are lowered with the check on)
+                    if let Some(a) = ann_ty {
+                        if !self.rg.on && self.rg.eligible && self.inline_depth == 0 && crate::regions::mentions_static(a) {
+                            self.rg_late_on();
+                        }
+                    }
                     // (destructuring reads the parts the pattern binds, not the whole value)
                     // (a `let`'s temporary bound by `ref` lives as long as the block: not one of the statement)
                     self.bk.let_scrut = true;
@@ -1847,10 +1854,6 @@ impl Cx<'_> {
                     };
                     // (`let (y, _): (&'a u32, u32) = ..;`: the pattern binds from a value of the annotation's type)
                     if let Some(a) = ann_ty {
-                        // (one that writes `'static`: checked from here on, as a `let x: &'static T`)
-                        if !self.rg.on && self.rg.eligible && self.inline_depth == 0 && crate::regions::mentions_static(a) {
-                            self.rg_late_on();
-                        }
                         if let Some((t, tr)) = self.rg_let_ann(a, init, Some(place.ty())) {
                             if t == place.ty() {
                                 self.rg.scrut = Some((t, tr));

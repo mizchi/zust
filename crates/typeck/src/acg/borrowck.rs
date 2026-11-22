@@ -1994,8 +1994,10 @@ impl Cx<'_> {
                         }
                         // (a field of what an overloaded `Deref` reaches: `rc.y` with `rc: Rc<Point>`)
                         Ty::Struct(sid) if !self.prog.structs[sid as usize].is_enum && self.prog.field(sid, name).is_none() => {
+                            // (as far as rustc's recursion limit, past which it rejects the program (E0055): a chain
+                            // that long is followed, and a cycle (`type Target = Self`) ends)
                             n += 1;
-                            if n > 16 {
+                            if n > 128 {
                                 return None;
                             }
                             t = self.bk_overloaded_shr(&mut p, sid)?;
