@@ -122,6 +122,47 @@ pub const PRELUDE_LINE: u32 = 49152;
 /// line of a program and its prelude, and under 2^20 (an error's line is kept in 20 bits)
 pub const CONST_CHECK_LINE: usize = 1_000_000;
 
+/// `s` with its comments (`//..` to the line's end, `/* .. */`) as spaces, its newlines and length kept; strings and chars
+/// skipped
+fn blank_comments(s: &str) -> String {
+    let b = s.as_bytes();
+    let mut out = b.to_vec();
+    let mut i = 0;
+    while i < b.len() {
+        match b[i] {
+            b'"' => {
+                i += 1;
+                while i < b.len() && b[i] != b'"' {
+                    i += if b[i] == b'\\' { 2 } else { 1 };
+                }
+            }
+            b'/' if b.get(i + 1) == Some(&b'/') => {
+                while i < b.len() && b[i] != b'\n' {
+                    out[i] = b' ';
+                    i += 1;
+                }
+                continue;
+            }
+            b'/' if b.get(i + 1) == Some(&b'*') => {
+                while i < b.len() && !(b[i] == b'*' && b.get(i + 1) == Some(&b'/')) {
+                    if b[i] != b'\n' {
+                        out[i] = b' ';
+                    }
+                    i += 1;
+                }
+                for k in i..(i + 2).min(b.len()) {
+                    out[k] = b' ';
+                }
+                i += 2;
+                continue;
+            }
+            _ => {}
+        }
+        i += 1;
+    }
+    String::from_utf8(out).unwrap_or_else(|_| s.to_string())
+}
+
 /// The names of those fns, with the constant's place in their order after it
 pub const CONST_CHECK_FN: &str = "__zust_const_";
 
@@ -129,10 +170,15 @@ pub const CONST_CHECK_FN: &str = "__zust_const_";
 /// (`fn __zust_const_0() { let _zc: &'static str = ("x"); }`), so that the initializer is checked against the type where
 /// it is defined, used or not, as rustc checks every constant, with the inference of a fn's body: (the fns'
 /// text, the line of each initializer). None without one. Not one whose initializer defines items (a fn body would
-/// hoist them again)
+/// hoist them again). An enum's discriminants likewise, of its `#[repr(..)]` integer type or isize
 fn const_check_item(src: &str, items: &[SrcItem]) -> Option<(String, Vec<usize>)> {
-    let mut body = String::new();
+    let mut body_out = String::new();
     let mut lines = vec![];
+    // (an item hoisted out of a fn body: the line it was written on, prep::HOIST_MARK; looked for at the first)
+    let marks: std::cell::OnceCell<Vec<(usize, usize)>> = std::cell::OnceCell::new();
+    let written = |l: usize| crate::prep::hoisted_at(marks.get_or_init(|| crate::prep::hoist_marks(src)), l).unwrap_or(l);
+    // (nor one with a `return`, which would return from the fn: E0572 in a constant)
+    let items_inside = ["fn ", "struct ", "enum ", "union ", "impl ", "trait ", "mod ", "use ", "static ", "const ", "macro_rules", "type ", "return"];
     for it in items {
         if !matches!(it.kind, ItemKind::Normal) {
             continue;
@@ -149,6 +195,62 @@ fn const_check_item(src: &str, items: &[SrcItem]) -> Option<(String, Vec<usize>)
             if t.starts_with('(') {
                 t = t.find(')').map_or("", |e| t[e + 1..].trim_start());
             }
+        }
+        // (an enum's discriminants: each of its integer type, `#[repr(u8)]` or isize)
+        if let Some(r) = t.strip_prefix("enum ") {
+            let head = &text[..text.len() - t.len()];
+            let ints = ["i8", "i16", "i32", "i64", "i128", "isize", "u8", "u16", "u32", "u64", "u128", "usize"];
+            let repr = head.find("repr(").and_then(|k| {
+                let args = &head[k + 5..];
+                let args = &args[..args.find(')').unwrap_or(args.len())];
+                args.split(',').map(str::trim).find(|a| ints.contains(a))
+            });
+            let Some(open) = r.find('{') else { continue };
+            let body_at = text.len() - r.len() + open + 1;
+            // (its comments blanked, lengths kept: `//~ NOTE \`3\` (overflowed)` is no part of a discriminant)
+            let body = &blank_comments(&text[body_at..]);
+            let (mut depth, mut start) = (0i32, 0usize);
+            let bb = body.as_bytes();
+            let mut parts = vec![];
+            for (i, &c) in bb.iter().enumerate() {
+                match c {
+                    b'(' | b'[' | b'{' => depth += 1,
+                    b')' | b']' | b'}' if depth == 0 => {
+                        parts.push((start, i));
+                        break;
+                    }
+                    b')' | b']' | b'}' => depth -= 1,
+                    b',' if depth == 0 => {
+                        parts.push((start, i));
+                        start = i + 1;
+                    }
+                    _ => {}
+                }
+            }
+            for (a, z) in parts {
+                let v = &body[a..z];
+                // (`V = e`: a `=` outside brackets, not `==` / `=>` / `<=` ..)
+                let vb = v.as_bytes();
+                let mut d = 0i32;
+                let eq = (0..vb.len()).find(|&i| {
+                    match vb[i] {
+                        b'(' | b'[' | b'{' => d += 1,
+                        b')' | b']' | b'}' => d -= 1,
+                        _ => {}
+                    }
+                    d == 0 && vb[i] == b'=' && vb.get(i + 1).is_none_or(|&n| n != b'=' && n != b'>') && (i == 0 || !b"=!<>".contains(&vb[i - 1]))
+                });
+                let Some(eq) = eq else { continue };
+                let e = v[eq + 1..].trim();
+                if e.is_empty() || items_inside.iter().any(|k| e.contains(k)) {
+                    continue;
+                }
+                let at = body_at + a + eq + 1;
+                let skip = text[at..].len() - text[at..].trim_start().len();
+                body_out.push_str(&format!("#[allow(dead_code, unused)] fn {CONST_CHECK_FN}{}() {{\n    let _zc: {} = (\n{e}\n    );\n}}\n", lines.len(), repr.unwrap_or("isize")));
+                lines.push(written(it.line + text[..at + skip].matches('\n').count()));
+            }
+            continue;
         }
         let Some(r) = t.strip_prefix("const ").or_else(|| t.strip_prefix("static ")) else { continue };
         let r = r.trim_start();
@@ -177,8 +279,6 @@ fn const_check_item(src: &str, items: &[SrcItem]) -> Option<(String, Vec<usize>)
         let Some(eq) = eq else { continue };
         let ty = ty_from[..eq].trim();
         let init = ty_from[eq + 1..].trim_end().trim_end_matches(';');
-        // (nor one with a `return`, which would return from the fn: E0572 in a constant)
-        let items_inside = ["fn ", "struct ", "enum ", "union ", "impl ", "trait ", "mod ", "use ", "static ", "const ", "macro_rules", "type ", "return"];
         if ty.is_empty() || init.trim().is_empty() || items_inside.iter().any(|k| init.contains(k)) {
             continue;
         }
@@ -198,13 +298,13 @@ fn const_check_item(src: &str, items: &[SrcItem]) -> Option<(String, Vec<usize>)
         let at = text.len() - ty_from.len() + eq + 1;
         let skip = text[at..].len() - text[at..].trim_start().len();
         // (a `let` of the type: the coercions of a `let`, as a constant's initializer has)
-        body.push_str(&format!("#[allow(dead_code, unused)] fn {CONST_CHECK_FN}{}() {{\n    let _zc: {ty_s} = (\n{init}\n    );\n}}\n", lines.len()));
-        lines.push(it.line + text[..at + skip].matches('\n').count());
+        body_out.push_str(&format!("#[allow(dead_code, unused)] fn {CONST_CHECK_FN}{}() {{\n    let _zc: {ty_s} = (\n{init}\n    );\n}}\n", lines.len()));
+        lines.push(written(it.line + text[..at + skip].matches('\n').count()));
     }
     if lines.is_empty() {
         return None;
     }
-    Some((body, lines))
+    Some((body_out, lines))
 }
 
 /// 検査だけの印のキャッシュのキー (ビルドの Blob のキーと混ざらないように)
@@ -3338,6 +3438,22 @@ fn compile_id_req(a: &Analysis, insts: &Mutex<Insts>, id: u32) -> R<(Blob, Vec<u
 /// 記録を機械語にして Blob を作る (バックエンドなしでは作れない)
 #[cfg(not(feature = "build"))]
 fn lower_blob(_: &Analysis, _: acg::Compiled, _: Vec<u32>) -> R<(Blob, Vec<u32>)> { Err("internal: zust-core was built without the backend (feature `build`)".into()) }
+
+/// An error at a line of an item hoisted out of a fn body (prep::HOIST_MARK): at the line it was written on
+pub(crate) fn unhoist_err(a: &Analysis, e: String) -> String {
+    let d = Diagnostic::parse(&e);
+    let lead = e.trim_start();
+    if d.line == 0 || !lead.starts_with(|c: char| c.is_ascii_digit()) || (a.prelude_line0 > 0 && d.line >= a.prelude_line0) {
+        return e;
+    }
+    match crate::prep::hoisted_line(&a.src, d.line) {
+        Some(l) => {
+            let n = lead.find(':').unwrap_or(0);
+            format!("{l}{}", &lead[n..])
+        }
+        None => e,
+    }
+}
 
 /// 位置付きのエラー (行・桁は 1 始まり)。check / LSP が返す
 #[derive(Clone, Debug, PartialEq, Eq)]

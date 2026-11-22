@@ -115,3 +115,13 @@ fn constants_checked_where_defined() {
     let fixed = src.replace("300u16", "200").replace("[1, 2]", "[1, 2, 3]").replace("\"abc\"", "b\"abc\"");
     assert!(s.check(&fixed).is_empty(), "{:?}", s.check(&fixed));
 }
+
+/// An enum's discriminants are of its `#[repr(..)]` integer type (isize without one), and a constant or an enum
+/// written in a fn body is reported at the line it was written on (not where it was hoisted to)
+#[test]
+fn discriminants_and_nested_constants() {
+    let src = "enum Level {\n    Low = 1i64,\n    High = 2,\n}\nfn f() {\n    #[repr(u8)]\n    enum Small {\n        A = 1,\n        B = 2i8,\n    }\n    const LIMIT: u8 = 300u16;\n    let _ = Small::A;\n}\nfn main() {\n    let _ = Level::Low;\n    f();\n}\n";
+    let mut s = Session2::new(Options2 { jobs: 1, ..Options2::default() });
+    let d = s.check(src);
+    assert_eq!(d.iter().map(|d| d.line).collect::<Vec<_>>(), vec![2, 9, 11], "{d:?}");
+}

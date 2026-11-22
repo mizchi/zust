@@ -2181,6 +2181,7 @@ check-pass	entry-point/imported_main_conflict_lib.rs
 compile-fail	entry-point/main-with-invalid-signature.rs
 compile-fail	entry-point/return-ty-has-bound-vars.rs
 run-pass	enum-discriminant/const-implicit-enum-discriminant.rs
+compile-fail	enum-discriminant/discriminant-ill-typed.rs
 run-pass	enum-discriminant/discriminant_value-wrapper.rs
 run-pass	enum-discriminant/enum-discriminant-const-eval-truncation-9837.rs
 run-pass	enum-discriminant/get_discr.rs
@@ -2195,6 +2196,7 @@ compile-fail	enum/enum-and-module-in-same-scope.rs
 run-pass	enum/enum-discrim-manual-sizing.rs
 check-pass	enum/enum-discrim-range-overflow.rs
 run-pass	enum/enum-discrim-width-stuff.rs
+compile-fail	enum/enum-discriminant-type-mismatch-8761.rs
 run-pass	enum/enum-disr-val-pretty.rs
 check-pass	enum/enum-inside-enum-issue-40350.rs
 compile-fail	enum/enum-nonexisting-field.rs

@@ -3,7 +3,7 @@
 //! 各段で本文・桁のずれ・成否を比べる。編集は関数の本体の中 (骨組みが変わらない: 差分の経路) と、どこでも (骨組みが
 //! 変わる: 全体の経路) の両方
 
-use zustc::prep::{PrepMemo, prep, prep_full};
+use zustc::prep::{PrepMemo, marked, prep, prep_full};
 
 struct Rng(u64);
 
@@ -81,7 +81,7 @@ fn prep_inc_matches_full() {
         for step in 0..40 {
             let mut f1 = vec![];
             let mut f2 = vec![];
-            let full = prep_full(&cur, &[], &mut f1, None).map(|p| p.text);
+            let full = prep_full(&cur, &[], &mut f1, None).map(marked);
             let inc = prep(&cur, &[], &mut f2, None, &mut memo);
             match (full, inc) {
                 (Ok(a), Ok(b)) => {
