@@ -238,6 +238,9 @@ pub struct Bk {
     pub forever: Vec<u32>,
     /// The loans of each closure's captures by reference, by the closure's address
     pub cap_loans: HashMap<usize, Vec<u32>>,
+    /// The locals a closure holds by value that hold loans, by the closure's address: the closure holds what they do
+    /// (`move || iter.next()` with `iter = vec.iter()`)
+    pub cap_held: HashMap<usize, Vec<u32>>,
     /// The closures (by address) whose bodies mutate what they capture: `FnMut`, called through a `&mut` of them
     pub fnmut_exprs: Vec<usize>,
     /// The types of such closures
@@ -2369,6 +2372,9 @@ impl Cx<'_> {
             paths.push((BPlace { local: l, proj: vec![] }, Some(t), CapMode::Use, super::SP));
         }
         let move_kw = matches!(c, Expr::Closure(true, ..));
+        if (by_move || move_kw) && self.bk.locals[l as usize].refs {
+            self.bk.cap_held.entry(c as *const Expr as usize).or_default().push(l);
+        }
         let let_moved = matches!(t, Ty::Ref(true, _)) && crate::ast_closure::let_moves_capture(c, &[n.to_string()]);
         // (the places of n the body assigns or borrows mutably: those are captured by `&mut`)
         let mut muts: Vec<BPlace> = vec![];
@@ -3191,10 +3197,13 @@ impl Cx<'_> {
                     self.bk_direct(t, out);
                 }
             }
-            // (a closure: the loans of what it captures by reference)
+            // (a closure: the loans of what it captures by reference, and what it holds by value holds)
             Expr::Closure(..) => {
                 if let Some(ls) = self.bk.cap_loans.get(&(e as *const Expr as usize)) {
                     out.extend(ls.iter().map(|&l| Src::Loan(l)));
+                }
+                if let Some(ls) = self.bk.cap_held.get(&(e as *const Expr as usize)) {
+                    out.extend(ls.iter().map(|&l| Src::Local(l)));
                 }
             }
             Expr::If(_, b, els) => {

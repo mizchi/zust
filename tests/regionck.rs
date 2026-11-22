@@ -2185,3 +2185,12 @@ fn closure_returning_a_closure_that_mutates_its_capture() {
     assert!(d.len() == 1 && d[0].0 == 4, "{d:?}");
     assert_eq!(check("fn once<F: FnOnce() -> G, G: FnMut()>(f: F) -> G {\n    f()\n}\nfn main() {\n    let v = vec![1u32];\n    let f = || {\n        || v.len()\n    };\n    let n = f()();\n    let mut c = 0;\n    let mut g = || {\n        c += 1;\n        c\n    };\n    let k = g();\n    let mut w = vec![1u32];\n    let mut h = once(|| || w.push(2));\n    h();\n    println!(\"{} {} {:?}\", n, k, w);\n}\n"), vec![]);
 }
+
+/// A `move` closure holds what its captures held by value hold: returned from a closure that borrows its own capture
+/// for it, the borrow escapes (borrowck/do-not-suggest-adding-move-when-closure-is-already-marked-as-move.rs)
+#[test]
+fn move_closure_holds_what_its_value_captures_hold() {
+    let d = check("fn main() {\n    let mut vec: Vec<i32> = Vec::new();\n    let _closure = move || {\n        vec.clear();\n        let mut iter = vec.iter();\n        move || iter.next()\n    };\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 6, "{d:?}");
+    assert_eq!(check("fn f<'a>(s: &'a str) -> impl Fn() -> usize + 'a {\n    move || s.len()\n}\nfn main() {\n    let v = vec![1u32, 2];\n    let r = &v;\n    let g = move || r.len();\n    println!(\"{} {}\", f(\"ab\")(), g());\n}\n"), vec![]);
+}
