@@ -327,7 +327,12 @@ impl Cx<'_> {
                                 break;
                             };
                             let args: Vec<Option<Ty>> = self.prog.structs[t as usize].args.iter().map(|&a| Some(a)).collect();
-                            let Ty::Struct(n) = self.prog.partial_subst(*i, &args) else {
+                            // (a target that is a reference (`Target = &'static S`) is followed through it)
+                            let mut target = self.prog.partial_subst(*i, &args);
+                            while let Ty::Ref(_, x) = target {
+                                target = *x;
+                            }
+                            let Ty::Struct(n) = target else {
                                 over = false;
                                 break;
                             };
@@ -337,7 +342,8 @@ impl Cx<'_> {
                                 break;
                             }
                         }
-                        if over {
+                        // (the rewrites below lower the access again from the target: counted across them)
+                        if over || self.deref_depth >= 128 {
                             let sname = self.prog.structs[sid as usize].name.clone();
                             return err(SP, format!("reached the recursion limit while auto-dereferencing `{sname}` (E0055)"));
                         }
@@ -348,7 +354,10 @@ impl Cx<'_> {
                                     self.deref_shared(u);
                                 }
                             }
-                            return self.place(f2);
+                            self.deref_depth += 1;
+                            let r = self.place(f2);
+                            self.deref_depth -= 1;
+                            return r;
                         }
                     }
                 }

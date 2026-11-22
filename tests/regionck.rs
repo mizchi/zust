@@ -2288,6 +2288,12 @@ fn part12_review_3() {
     let d = check(&generic(20, "fn main() {\n    let mut x = VALUE;\n    x.field = 1;\n}\n"));
     assert!(d.len() == 1 && d[0].1.contains("cannot assign to data in dereference of `W` (E0594)"), "{d:?}");
     assert_eq!(check(&generic(20, "fn main() {\n    let x = VALUE;\n    println!(\"{}\", x.field);\n}\n")), vec![]);
+    // (a target that is a reference, `Target = &'static S`: followed through it, as part of the chain; a cycle so is
+    // E0055, not lowered again and again until the stack overflows)
+    let rr = "use std::ops::Deref;\nstruct S0 {\n    field: u32,\n}\nstatic Z: S0 = S0 { field: 3 };\nstatic RZ: &S0 = &Z;\nstruct W;\nimpl Deref for W {\n    type Target = &'static S0;\n    fn deref(&self) -> &&'static S0 {\n        &RZ\n    }\n}\n";
+    assert_eq!(check(&format!("{rr}fn main() {{\n    let w = W;\n    println!(\"{{}}\", w.field);\n}}\n")), vec![]);
+    let d = check("use std::ops::Deref;\nstruct S;\nstatic SS: S = S;\nstatic RS: &S = &SS;\nimpl Deref for S {\n    type Target = &'static S;\n    fn deref(&self) -> &&'static S {\n        &RS\n    }\n}\nfn main() {\n    let s = S;\n    println!(\"{}\", s.missing);\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 13 && d[0].1.contains("reached the recursion limit while auto-dereferencing `S` (E0055)"), "{d:?}");
     // (a cycle through two types: type inference followed it until the stack overflowed)
     let d = check("use std::ops::Deref;\nstruct A {\n    x: u32,\n}\nstruct B {\n    y: u32,\n}\nstatic BB: B = B { y: 2 };\nstatic AA: A = A { x: 2 };\nimpl Deref for A {\n    type Target = B;\n    fn deref(&self) -> &B {\n        &BB\n    }\n}\nimpl Deref for B {\n    type Target = A;\n    fn deref(&self) -> &A {\n        &AA\n    }\n}\nfn main() {\n    let a = A { x: 1 };\n    println!(\"{}\", a.missing);\n}\n");
     assert!(d.len() == 1 && d[0].0 == 24 && d[0].1.contains("reached the recursion limit while auto-dereferencing `A` (E0055)"), "{d:?}");

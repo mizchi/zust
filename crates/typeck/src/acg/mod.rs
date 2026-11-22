@@ -489,6 +489,7 @@ fn compile_once(prog: &Program, insts: &Mutex<Insts>, id: u32, f: &ItemFn, line_
         inl,
         inline_ret: None,
         inline_depth: 0,
+        deref_depth: 0,
         inlined: 0,
         try_into_hint: None,
     };
@@ -991,6 +992,9 @@ pub struct Cx<'p> {
     /// 展開している本体の続きのブロック (return / 末尾の値はここへ飛ぶ)
     pub inline_ret: Option<Block>,
     pub inline_depth: u32,
+    /// The overloaded derefs a field access is lowered through so far (`(*s.deref()).f`, then again): at most rustc's
+    /// default recursion limit (128), then E0055
+    pub deref_depth: u32,
     pub inlined: u32,
     /// `x.try_into().unwrap()` の unwrap の期待型 (型推論が try_into の行き先を記録していないとき)
     pub try_into_hint: Option<Ty>,
