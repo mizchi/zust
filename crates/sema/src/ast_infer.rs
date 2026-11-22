@@ -322,7 +322,6 @@ pub fn infer_ctx_margs(
             out.insert(k, t);
         }
     }
-    let mut texts = TextTypes::default();
     // (同じ式を何度か推論し直すことがある: lets と同じく後の記録を使う)
     let mut recs: Vec<(*const Expr, u32)> = std::mem::take(&mut s.exprs);
     // (アドレスで並べ、同じアドレスは最後の記録だけ残す: 安定ソートなので記録順は保たれる)
@@ -335,6 +334,7 @@ pub fn infer_ctx_margs(
         }
     }
     let recs = dedup;
+    let mut texts = TextTypes::with_capacity_and_hasher(recs.len(), Default::default());
     let mut memo = crate::fxhash::FxMap::default();
     for (e, v) in recs {
         let Some(t) = s.resolve(v) else { continue };

@@ -300,7 +300,11 @@ impl Cx<'_> {
                 if !names.is_empty() {
                     let prog = self.prog;
                     let types: Vec<(String, Ty)> = names.iter().filter_map(|n| self.lookup(n).map(|(_, t)| (n.clone(), t))).collect();
-                    let by = |p: &Pat, n: &str| types.iter().find(|x| x.0 == n).is_none_or(|x| borrowck::pat_moves(prog, p, x.1, 0));
+                    // (a `ref mut` binding's `&mut` is moved by a `let` that binds it by value: not Copy here)
+                    let by = |p: &Pat, n: &str| match types.iter().find(|x| x.0 == n) {
+                        Some((_, Ty::Ref(true, _))) | None => crate::ast_closure::binds_by_value(p),
+                        Some(x) => borrowck::pat_moves(prog, p, x.1, 0),
+                    };
                     if let Some((n, at)) = guard_closure_move(g, &names, &by) {
                         return Err(self.at(at, format!("cannot move out of `{n}` in pattern guard (E0507)")));
                     }
