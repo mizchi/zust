@@ -135,3 +135,17 @@ fn constant_cycles() {
     assert!(!d.is_empty() && d.iter().all(|d| d.msg.contains("(E0391)")), "{d:?}");
     assert!(d.iter().any(|d| d.line == 3), "{d:?}");
 }
+
+/// A raw string with quotes and brackets in an enum's body is no part of its discriminants; a program that writes
+/// the probes' names gets probes of other names
+#[test]
+fn discriminants_past_raw_strings_and_probe_names_of_the_program() {
+    let src = "#[repr(u8)]\nenum E {\n    #[doc = r#\"\"{\"#]\n    A = 1,\n    B = 2i8,\n}\nfn main() {\n    let _ = E::A;\n}\n";
+    let mut s = Session2::new(Options2 { jobs: 1, ..Options2::default() });
+    let d = s.check(src);
+    assert_eq!(d.iter().map(|d| d.line).collect::<Vec<_>>(), vec![5], "{d:?}");
+    let named = "fn __zust_const_0() {}\nconst BAD: u8 = 300u16;\nfn main() {\n    __zust_const_0();\n}\n";
+    let d = s.check(named);
+    assert_eq!(d.iter().map(|d| d.line).collect::<Vec<_>>(), vec![2], "{d:?}");
+    assert!(d[0].msg.contains("mismatched types"), "{d:?}");
+}

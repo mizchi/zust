@@ -158,7 +158,8 @@ struct ChunkOut {
 }
 
 /// What a hoisted item starts with, on its first line: the line it was written on (from 1), `/*zust:line=12*/`, which
-/// an error in it is reported at (a comment: no token, the item's hash stays)
+/// an error in it is reported at (a comment: no token, the item's hash stays). A line the program starts with such a
+/// comment of its own is read as a mark too (the lines after it, to the next mark, as written at its line)
 pub const HOIST_MARK: &str = "/*zust:line=";
 
 fn hoist_mark(line0: usize) -> String {

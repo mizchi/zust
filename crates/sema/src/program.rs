@@ -2924,8 +2924,16 @@ impl Program {
         if own && !derived && !self.implements(t, "Clone") {
             return true;
         }
-        let shared = matches!(self.structs[b as usize].name.as_str(), "Rc" | "Arc" | "Weak" | "PhantomData" | "Sender" | "SyncSender");
-        !shared && self.structs[sid as usize].args.iter().any(|&a| self.surely_not_clone(a, depth + 1))
+        self.clone_needs_args(b, own) && self.structs[sid as usize].args.iter().any(|&a| self.surely_not_clone(a, depth + 1))
+    }
+
+    /// Whether the base b is Clone only when its arguments are: a derive of the program's own, and std's containers
+    /// (`Option<T>: Clone` needs `T: Clone`). Not the shared pointers, the senders or the iterators (`Iter<'_, T>` is
+    /// Clone for every T)
+    pub fn clone_needs_args(&self, b: u32, own: bool) -> bool {
+        let name = self.structs[b as usize].name.as_str();
+        own || name.starts_with("#tuple")
+            || matches!(name, "Option" | "Result" | "Vec" | "VecDeque" | "BinaryHeap" | "HashMap" | "HashSet" | "BTreeMap" | "BTreeSet" | "RefCell" | "Reverse")
     }
 
     pub fn is_placeholder(&self, sid: u32) -> bool {

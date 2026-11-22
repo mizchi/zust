@@ -987,8 +987,7 @@ impl Inf<'_> {
         if own && !derived && !self.prog.implements(Ty::Struct(b), "Clone") {
             return true;
         }
-        let shared = matches!(self.prog.structs[b as usize].name.as_str(), "Rc" | "Arc" | "Weak" | "PhantomData" | "Sender" | "SyncSender");
-        let Some((st, n)) = args.filter(|_| !shared) else { return false };
+        let Some((st, n)) = args.filter(|_| self.prog.clone_needs_args(b, own)) else { return false };
         (st..st + n).any(|k| {
             let a = self.adt_args[k as usize];
             self.not_clone(a, depth + 1)
