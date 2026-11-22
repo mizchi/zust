@@ -1795,6 +1795,20 @@ impl Cx<'_> {
                 s.args.clear();
             }
             if self.prog.struct_by_p(&PPath::of(&bare), self.self_sid).is_some() {
+                // (arguments that name lifetimes (`SomeStruct::<&'static u32> { t: &c }`): a `let` of the type the path
+                // writes, whose annotation the region check reads)
+                let lts = path.segs.iter().any(|s| s.args.iter().any(|a| format!("{a:?}").contains('\'')));
+                if lts {
+                    let tmp = format!("__exr_sl{}", self.temps.len());
+                    let blk = crate::parse::Block {
+                        stmts: vec![
+                            crate::parse::Stmt::Let(Pat::Ident(false, false, tmp.clone(), None), Some(crate::parse::Ty::Path(None, path.clone())), Some(Expr::Struct(bare, sfields.clone(), rest.clone())), None, Default::default()),
+                            crate::parse::Stmt::Expr(path_expr(&tmp), false),
+                        ],
+                    };
+                    let ne: &Expr = self.keep_expr(Expr::Block(None, false, blk));
+                    return self.expr(ne, expected);
+                }
                 let typed = self.parse_ty(&crate::parse::Ty::Path(None, path.clone())).ok().filter(|t| matches!(t, Ty::Struct(_)));
                 let ne = self.keep_expr(Expr::Struct(bare, sfields.clone(), rest.clone()));
                 return self.struct_lit(ne, typed.or(expected));

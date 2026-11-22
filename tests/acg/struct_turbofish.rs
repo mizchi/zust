@@ -7,7 +7,12 @@ struct S<T>(T);
 fn take(S::<u8>(x): S<u8>) -> u8 {
     x
 }
+fn keep<'a>(c: &'a u32) -> Foo<&'a u32> {
+    Foo::<&'a u32> { value: c }
+}
 fn main() {
+    let n = 7u32;
+    println!("{}", keep(&n).value);
     let foo = Foo::<i32> { value: 10 };
     let Foo::<i32> { value } = foo;
     println!("{value}");
