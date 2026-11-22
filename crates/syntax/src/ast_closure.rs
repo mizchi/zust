@@ -528,6 +528,14 @@ pub fn free_vars(c: &Expr) -> Vec<String> {
 }
 
 /// The capture e names (a path that is one of caps)
+/// e without the parentheses around it (`(b)`)
+fn unparen(e: &Expr) -> &Expr {
+    match e {
+        Expr::Paren(x) => unparen(x),
+        _ => e,
+    }
+}
+
 fn cap_name<'c>(e: &Expr, caps: &'c [String]) -> Option<&'c str> {
     match e {
         Expr::Path(None, p) if !p.global && p.segs.len() == 1 && p.segs[0].args.is_empty() => caps.iter().find(|c| **c == p.segs[0].name).map(|c| c.as_str()),
@@ -565,7 +573,7 @@ fn moves_in(e: &Expr, caps: &[String], by: MovesBy) -> bool {
         _ => {}
     }
     // (`let C(ref mut r, _) = c;` binds by reference: not a move)
-    scoped_children(e, caps, &mut |c, cs, let_pat| let_pat.is_some_and(|p| cap_name(c, cs).is_some_and(|n| by(p, n))) || moves_in(c, cs, by))
+    scoped_children(e, caps, &mut |c, cs, let_pat| let_pat.is_some_and(|p| cap_name(unparen(c), cs).is_some_and(|n| by(p, n))) || moves_in(c, cs, by))
 }
 
 /// Whether the body of closure c moves one of caps by a `let` that binds it by value (`let bar = b;`). Not by passing
@@ -580,7 +588,7 @@ pub fn let_moves_capture(c: &Expr, caps: &[String]) -> bool {
         if caps.is_empty() || matches!(e, Expr::Closure(..)) {
             return false;
         }
-        scoped_children(e, caps, &mut |c, cs, let_pat| let_pat.is_some_and(|p| cap_name(c, cs).is_some() && binds_by_value(p)) || walk(c, cs))
+        scoped_children(e, caps, &mut |c, cs, let_pat| let_pat.is_some_and(|p| cap_name(unparen(c), cs).is_some() && binds_by_value(p)) || walk(c, cs))
     }
     walk(body, &caps)
 }
@@ -774,7 +782,7 @@ fn move_site_in(e: &Expr, caps: &[String], by: MovesBy) -> Option<(String, Pos)>
     }
     let mut found = None;
     scoped_children(e, caps, &mut |c, cs, let_pat| {
-        found = let_pat.and_then(|p| cap_at(c, cs).filter(|(n, _)| by(p, n))).or_else(|| move_site_in(c, cs, by));
+        found = let_pat.and_then(|p| cap_at(unparen(c), cs).filter(|(n, _)| by(p, n))).or_else(|| move_site_in(c, cs, by));
         found.is_some()
     });
     found

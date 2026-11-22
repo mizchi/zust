@@ -1113,6 +1113,12 @@ impl Bk {
                 }
                 Ev::Dead(l, sp) => {
                     for (ln, lo) in self.loans.iter().enumerate() {
+                        // (a borrow through a `&mut` field of the `Drop` value going away: gone with it, for a local
+                        // that takes it after (`let r = { let s = S(&mut x); &mut *s.0 };`, E0713 at the Keep))
+                        if lo.place.local == *l && lo.place.owned_len() < lo.place.proj.len() && self.drop_field_borrow(lo, st) {
+                            add_sorted(&mut st.dead, ln as u32);
+                            continue;
+                        }
                         if lo.place.local == *l && lo.place.owned_len() == lo.place.proj.len() {
                             add_sorted(&mut st.dead, ln as u32);
                             if let (true, Some(errs)) = (st.escaped.binary_search(&(ln as u32)).is_ok(), errs.as_deref_mut()) {
@@ -1223,7 +1229,11 @@ impl Bk {
                             if let Some(&ln) = ls.iter().find(|ln| st.dead.binary_search(ln).is_ok()) {
                                 let lo = &self.loans[ln as usize];
                                 let name = path_str(&self.locals, &BPlace { local: lo.place.local, proj: vec![] });
-                                errs.push(BkError { sp: lo.sp, msg: format!("`{name}` does not live long enough (dropped while still borrowed)") });
+                                if lo.place.owned_len() < lo.place.proj.len() {
+                                    errs.push(BkError { sp: lo.sp, msg: "borrow may still be in use when destructor runs (E0713)".to_string() });
+                                } else {
+                                    errs.push(BkError { sp: lo.sp, msg: format!("`{name}` does not live long enough (dropped while still borrowed)") });
+                                }
                             }
                         }
                     }
@@ -2486,21 +2496,23 @@ impl Cx<'_> {
             // (a pattern that binds a part of the place by `ref mut` (`let (ref mut x, _) = p;`): a mutable borrow
             // of it)
             Expr::Match(x, arms) if arms.iter().any(|a| crate::ast_closure::binds_ref_mut(&a.pat)) => {
-                if let Some((p, _)) = self.bk_rooted_at(x, n) {
-                    out.push(p);
+                if let Some((p, t)) = self.bk_rooted_at(x, n) {
+                    for a in arms.iter().filter(|a| crate::ast_closure::binds_ref_mut(&a.pat)) {
+                        self.bk_ref_mut_parts(&a.pat, &p, t, out);
+                    }
                 }
             }
             Expr::Let(pat, x) if crate::ast_closure::binds_ref_mut(pat) => {
-                if let Some((p, _)) = self.bk_rooted_at(x, n) {
-                    out.push(p);
+                if let Some((p, t)) = self.bk_rooted_at(x, n) {
+                    self.bk_ref_mut_parts(pat, &p, t, out);
                 }
             }
             Expr::Block(_, _, b) => {
                 for st in &b.stmts {
                     if let crate::parse::Stmt::Let(pat, _, Some(x), ..) = st {
                         if crate::ast_closure::binds_ref_mut(pat) {
-                            if let Some((p, _)) = self.bk_rooted_at(x, n) {
-                                out.push(p);
+                            if let Some((p, t)) = self.bk_rooted_at(x, n) {
+                                self.bk_ref_mut_parts(pat, &p, t, out);
                             }
                         }
                     }
@@ -2509,6 +2521,18 @@ impl Cx<'_> {
             _ => {}
         }
         crate::ast_closure::each_child_pub(e, &mut |c| self.bk_cap_muts(c, n, out, calls));
+    }
+
+    /// The parts of the place p (of type t) that the pattern binds by `ref mut` (`p.0` of `let (ref mut x, _) = p;`):
+    /// what the closure borrows mutably. All of p when the pattern's parts are not followed
+    fn bk_ref_mut_parts(&self, pat: &Pat, p: &BPlace, t: Option<Ty>, out: &mut Vec<BPlace>) {
+        let mut v = vec![];
+        self.bk_pat_cap(pat, p, t, super::SP, &mut v);
+        let n0 = out.len();
+        out.extend(v.into_iter().filter(|x| x.2 == CapMode::RefMut && x.0.local == p.local).map(|x| x.0));
+        if out.len() == n0 {
+            out.push(p.clone());
+        }
     }
 
     /// Whether a closure's body may take its capture n by value, beyond what moves_capture sees: a method of it that

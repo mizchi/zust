@@ -1790,3 +1790,20 @@ fn closure_match_scrutinee_moves() {
     assert!(d.len() == 1 && d[0].0 == 4 && d[0].1.contains("E0507"), "{d:?}");
     assert_eq!(check("fn take_fn(_: impl Fn()) {}\nfn main() {\n    let o = Some(String::new());\n    take_fn(move || match o {\n        Some(ref s) => println!(\"{}\", s),\n        None => {}\n    });\n    let p = Some((1, String::new()));\n    take_fn(move || {\n        if let Some((n, _)) = p {\n            let _ = n;\n        }\n    });\n}\n"), vec![]);
 }
+
+/// From the review of #53: a `Copy` impl with a `'static` slot and others does not make every copy `'static`; a
+/// parenthesized capture moved by a `let` is moved; a block's result that keeps a borrow through a dropped `Drop`
+/// value's `&mut` field is E0713; a `ref mut` pattern in a closure borrows only the part it binds; a move through a
+/// `&Rc` is E0507; a guard's `let` that binds an arm's name again is not the binding
+#[test]
+fn part10_review() {
+    assert_eq!(check("#[derive(Clone)]\nstruct Foo<'a, 'b>(&'a u32, &'b u32);\nimpl<'b> Copy for Foo<'static, 'b> {}\nstatic S: u32 = 1;\nfn main() {\n    let local = 2;\n    let f = Foo(&S, &local);\n    let g = f;\n    let h = f;\n    println!(\"{} {}\", g.1, h.1);\n}\n"), vec![]);
+    let d = check("fn main() {\n    let mut x = 1;\n    let b = &mut x;\n    let c = || { let bar = (b); *bar = 2; };\n    c();\n    *b = 3;\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 6 && d[0].1.contains("moved"), "{d:?}");
+    let d = check("struct Scribble<'a>(&'a mut u32);\nimpl<'a> Drop for Scribble<'a> { fn drop(&mut self) { *self.0 = 42; } }\nfn main() {\n    let mut x = 1;\n    let r = {\n        let s = Scribble(&mut x);\n        &mut *s.0\n    };\n    *r = 2;\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 7 && d[0].1.contains("E0713"), "{d:?}");
+    assert_eq!(check("fn main() {\n    let mut p = (1u32, 2u32);\n    let r = &p.1;\n    let mut c = || {\n        let (ref mut x, _) = p;\n        *x += p.1;\n    };\n    c();\n    println!(\"{}\", r);\n}\n"), vec![]);
+    let d = check("use std::rc::Rc;\nstruct S { value: String, n: u32 }\nfn main() {\n    let rc = Rc::new(S { value: String::new(), n: 1 });\n    let r = &rc;\n    let n = r.n;\n    let v = r.value;\n    drop((n, v));\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 7 && d[0].1.contains("cannot move out of an `Rc`"), "{d:?}");
+    assert_eq!(check("fn main() {\n    match Some(String::from(\"arm\")) {\n        Some(foo) if {\n            let foo = String::from(\"local\");\n            (|| { let _owned = foo; true })()\n        } => (),\n        _ => (),\n    }\n}\n"), vec![]);
+}

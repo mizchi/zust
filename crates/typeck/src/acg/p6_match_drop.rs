@@ -1502,8 +1502,17 @@ impl Cx<'_> {
         if let Ty::Struct(sid) = t {
             let sd = &self.prog.structs[sid as usize];
             let bname = &self.prog.structs[self.prog.base_of(sid) as usize].name;
-            if !sd.is_enum && !matches!(bname.as_str(), "Vec" | "String" | "Rc" | "Arc") {
-                for (_, ft, off) in sd.fields.clone() {
+            // (an enum of one variant: its fields, so that a `Copy` one the closure uses keeps its value
+            // (`let E::V(n, _) = e;`); the tag stays)
+            let fields = if !sd.is_enum {
+                Some(sd.fields.clone())
+            } else if sd.variants.len() == 1 {
+                Some(sd.variants[0].fields.clone())
+            } else {
+                None
+            };
+            if let (Some(fs), false) = (fields, matches!(bname.as_str(), "Vec" | "String" | "Rc" | "Arc")) {
+                for (_, ft, off) in fs {
                     let d = self.addr_plus(dst, off as i32);
                     self.zero_drop_parts(d, ft);
                 }
@@ -1748,7 +1757,8 @@ impl Cx<'_> {
                 Expr::Unary(op, b, _) if op == "*" => (strip_paren(b), None),
                 _ => break,
             };
-            if let Some(Ty::Struct(sid)) = self.peek(b) {
+            // (through references too: `r.value` with r: `&Rc<S>`)
+            if let Some(Ty::Struct(sid)) = self.peek(b).map(|t| self.strip_refs(t)) {
                 let through = fname.is_none_or(|f| self.prog.field(sid, f).is_none());
                 if through && self.user_deref_sid(b, sid).is_some() {
                     let n = self.prog.structs[self.prog.base_of(sid) as usize].name.clone();
@@ -2384,8 +2394,37 @@ fn lit_suffix(e: &Expr) -> Option<bool> {
 
 /// A closure in e (a match guard) whose body moves one of names out: that capture, and where it moves
 fn guard_closure_move(e: &Expr, names: &[String], by: crate::ast_closure::MovesBy) -> Option<(String, crate::parse::Pos)> {
+    if names.is_empty() {
+        return None;
+    }
     if let Expr::Closure(..) = e {
         return crate::ast_closure::move_site_by(e, names, by);
+    }
+    // (a `let` in a block of the guard binds a name again: past it, the name is not the arm's binding)
+    if let Expr::Block(_, _, b) = e {
+        let mut cur = names.to_vec();
+        for st in &b.stmts {
+            match st {
+                crate::parse::Stmt::Let(p, _, init, els, ..) => {
+                    if let Some(f) = init.as_ref().and_then(|x| guard_closure_move(x, &cur, by)) {
+                        return Some(f);
+                    }
+                    if let Some(f) = els.as_ref().and_then(|eb| guard_closure_move(&Expr::Block(None, false, eb.clone()), &cur, by)) {
+                        return Some(f);
+                    }
+                    let mut bound = vec![];
+                    crate::ast_closure::pat_idents(p, &mut bound);
+                    cur.retain(|n| !bound.contains(n));
+                }
+                crate::parse::Stmt::Expr(x, _) => {
+                    if let Some(f) = guard_closure_move(x, &cur, by) {
+                        return Some(f);
+                    }
+                }
+                _ => {}
+            }
+        }
+        return None;
     }
     let mut found = None;
     crate::ast_closure::each_child_pub(e, &mut |c| {
