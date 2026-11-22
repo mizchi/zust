@@ -1653,6 +1653,11 @@ fn part9_review_follow_ups() {
     let d = check("fn take_mut(_: impl FnMut()) {}\nfn main() {\n    let v = String::new();\n    take_mut(|| {\n        let _inner = move || drop(v);\n    });\n}\n");
     assert!(d.len() == 1 && d[0].0 == 5 && d[0].1.contains("E0507"), "{d:?}");
     assert_eq!(check("fn take_fn(_: impl Fn()) {}\nfn main() {\n    let val = String::new();\n    take_fn(move || {\n        let _len = val.len();\n        let val = String::new();\n        drop(val);\n    });\n}\n"), vec![]);
+    // (a nested closure without `move` whose body moves the capture out takes it by value too; one that borrows it
+    // does not)
+    let d = check("fn take_mut(_: impl FnMut()) {}\nfn main() {\n    let v = String::new();\n    take_mut(|| {\n        let _inner = || drop(v);\n    });\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 5 && d[0].1.contains("E0507"), "{d:?}");
+    assert_eq!(check("fn take_mut(_: impl FnMut()) {}\nfn main() {\n    let v = String::new();\n    take_mut(|| {\n        let inner = || v.len();\n        let _ = inner();\n    });\n}\n"), vec![]);
     let d = check("use std::ops::Deref;\nstruct T;\nimpl T {\n    fn read(&self, _: ()) {}\n}\nstruct W(T);\nimpl Deref for W {\n    type Target = T;\n    fn deref(&self) -> &T {\n        &self.0\n    }\n}\nfn main() {\n    let w = W(T);\n    w.read(drop(w));\n}\n");
     assert!(d.len() == 1 && d[0].0 == 15 && d[0].1.contains("because it is borrowed"), "{d:?}");
     let tr = "trait Get<'a> {\n    fn get(&self) -> &'a i32;\n}\nfn need_static<G: Get<'static>>(_: &G) {}\n";
@@ -1662,6 +1667,8 @@ fn part9_review_follow_ups() {
     // (an fn in a fn body: E0503 at its own lines, the position the message names too)
     let d = check("fn main() {\n    fn helper() {\n        let mut x = 1;\n        let r = &mut x;\n        let y = x;\n        *r = 2;\n        let _ = y;\n    }\n    helper();\n}\n");
     assert!(d.len() == 1 && d[0].0 == 5 && d[0].1.contains("because it was mutably borrowed (at 4:"), "{d:?}");
+    let d = check("struct S {\n    f: u8,\n}\nfn main() {\n    fn helper() {\n        let mut s = S { f: 1 };\n        drop(s);\n        s.f = 2;\n    }\n    helper();\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 8 && d[0].1.contains("assign to part of moved value") && d[0].1.contains("(moved at 7:"), "{d:?}");
 }
 
 /// `break` / `continue` take the locals of the scopes they leave out of scope (E0597), a `Drop` value's too (E0713,

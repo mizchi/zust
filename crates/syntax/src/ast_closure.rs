@@ -634,10 +634,13 @@ fn cap_at(e: &Expr, caps: &[String]) -> Option<(String, Pos)> {
 
 fn move_site_in(e: &Expr, caps: &[String]) -> Option<(String, Pos)> {
     match e {
-        // (a nested `move` closure that captures one: it is moved into that closure where the closure is made. A
-        // nested closure's own moves are its own)
+        // (a nested closure that takes one by value, a `move` one that captures it or one whose body moves it out
+        // (`|| drop(v)`): it is moved into that closure where the closure is made. One that only borrows it does
+        // not move it)
         Expr::Closure(true, _, _, _, at) => return free_vars(e).into_iter().find(|n| caps.contains(n)).map(|n| (n, *at)),
-        Expr::Closure(..) => return None,
+        Expr::Closure(false, _, _, _, at) => {
+            return caps.iter().find(|n| moves_capture(e, std::slice::from_ref(*n)) && !rebinds(e, std::slice::from_ref(*n))).map(|n| (n.clone(), *at));
+        }
         Expr::Call(_, a) => {
             if let Some(x) = a.iter().find_map(|x| cap_at(x, caps)) {
                 return Some(x);
