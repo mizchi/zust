@@ -2106,7 +2106,10 @@ pub fn expand_module_aliases(src: &str) -> Option<String> {
     // (modules: the names, and the token ranges of their bodies)
     let mut names: Vec<&[u8]> = vec![];
     let mut ranges: Vec<(usize, usize)> = vec![];
+    // (every `{ .. }`: a `use` in a function body is that block's)
+    let mut blocks: Vec<(usize, usize)> = vec![];
     let mut stack: Vec<(usize, i32)> = vec![];
+    let mut open: Vec<usize> = vec![];
     let mut depth = 0i32;
     for k in 0..toks.len() {
         if is_id(k) && tk(k) == b"mod" && is_id(k + 1) && is_sym(k + 2, b'{') {
@@ -2114,7 +2117,11 @@ pub fn expand_module_aliases(src: &str) -> Option<String> {
             stack.push((k + 2, depth + 1));
         } else if is_sym(k, b'{') {
             depth += 1;
+            open.push(k);
         } else if is_sym(k, b'}') {
+            if let Some(o) = open.pop() {
+                blocks.push((o, k));
+            }
             if stack.last().is_some_and(|&(_, d)| d == depth) {
                 let (o, _) = stack.pop().unwrap();
                 ranges.push((o, k));
@@ -2125,8 +2132,8 @@ pub fn expand_module_aliases(src: &str) -> Option<String> {
     if names.is_empty() {
         return None;
     }
-    // (the innermost module body around token k)
-    let scope = |k: usize| ranges.iter().filter(|&&(o, c)| o < k && k < c).min_by_key(|&&(o, c)| c - o).copied();
+    // (the innermost block around token k: a module's body, or a function's for a `use` in it)
+    let scope = |k: usize| blocks.iter().filter(|&&(o, c)| o < k && k < c).min_by_key(|&&(o, c)| c - o).copied();
     let mut reps: Vec<(usize, Vec<u8>)> = vec![]; // (token, its new text)
     let mut k = 0;
     while k < toks.len() {

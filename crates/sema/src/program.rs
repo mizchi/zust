@@ -2438,7 +2438,8 @@ impl Program {
         }
         // (a vector type's methods are under the name its impl wrote: `impl Vector for __m128i` has `__m128i::splat`)
         if let Ty::Vec(_) = t {
-            if let Some(&id) = vector_names(t).iter().find_map(|n| self.index.get(&format!("{n}::{name}"))) {
+            // (not a name the program gives a struct of its own: `struct __m128i` is not the vector)
+            if let Some(&id) = vector_names(t).iter().filter(|n| !self.struct_index.contains_key(**n)).find_map(|n| self.index.get(&format!("{n}::{name}"))) {
                 return Some(id);
             }
         }

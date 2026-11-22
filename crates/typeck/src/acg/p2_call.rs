@@ -1323,6 +1323,10 @@ impl Cx<'_> {
         }) else {
             return Ok(None);
         };
+        // (a vector's method may be an `unsafe fn` (`impl Vector for __m128i`): E0133 outside an unsafe block)
+        if let (Ty::Vec(_), Expr::MethodCall(.., msp)) = (t, e) {
+            self.check_unsafe_call(id, msp.start)?;
+        }
         // (`impl Tr for Box<S>`: only when the impl's self type is this Box; else the method is S's, through deref)
         if let Ty::Box(_) = t {
             let st = self.prog.sigs[id as usize].self_ty;

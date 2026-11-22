@@ -1886,8 +1886,9 @@ impl Cx<'_> {
             let owned = |t: Ty| !matches!(t, Ty::Ref(..) | Ty::Str | Ty::Slice(_) | Ty::Dyn(_)) && !matches!(t, Ty::Struct(sid) if matches!(self.prog.structs[self.prog.base_of(sid) as usize].name.as_str(), "String" | "Vec"));
             let arg = self.peek(&cargs[0]).or(match expected { Some(Ty::Box(i)) => Some(*i), _ => None });
             if arg.is_some_and(owned) {
+                // (the `Box` segment as written, with its arguments: `Box::<u64>::from(1)`)
                 let seg = |n: &str| crate::parse::Seg { name: n.to_string(), args: vec![], fn_args: None, text: n.to_string() };
-                let bn = crate::parse::Path { global: false, segs: vec![seg("Box"), seg("new")], pos: p.pos };
+                let bn = crate::parse::Path { global: false, segs: vec![p.segs[n - 2].clone(), seg("new")], pos: p.pos };
                 let ne: &Expr = self.keep_expr(Expr::Call(Box::new(Expr::Path(None, bn)), cargs.to_vec()));
                 return self.expr(ne, expected).map(Some);
             }
@@ -2210,10 +2211,11 @@ impl Cx<'_> {
             if let Ok(t) = self.parse_ty(q) {
                 let mut tn = if t == Ty::Unit { "#tuple0".to_string() } else { self.prog.tn(t) };
                 // (a vector type's consts are under the name its impl wrote: `impl Vector for __m128i` has `__m128i::BYTES`)
-                if let Some(n) = crate::program::vector_names(t).iter().find(|n| {
-                    self.prog.const_index.contains_key(&format!("{n}::{}", last.name))
-                        || p.segs.len() >= 2 && self.prog.const_index.contains_key(&format!("{n} as {}::{}", p.segs[p.segs.len() - 2].name, last.name))
-                }) {
+                // (the trait's own first, among all the names: `<__m128 as B>::C` is B's even if `__m128i` has an A::C)
+                let names = crate::program::vector_names(t).iter().filter(|n| !self.prog.struct_index.contains_key(**n));
+                let qualified = (p.segs.len() >= 2).then(|| p.segs[p.segs.len() - 2].name.clone());
+                let by_trait = qualified.as_ref().and_then(|tr| names.clone().find(|n| self.prog.const_index.contains_key(&format!("{n} as {tr}::{}", last.name))));
+                if let Some(n) = by_trait.or_else(|| names.clone().find(|n| self.prog.const_index.contains_key(&format!("{n}::{}", last.name)))) {
                     tn = n.to_string();
                 }
                 // (`<Foo as Tr>::C` where Foo has an inherent `C` too: the trait impl's, by its qualified name)
@@ -2473,7 +2475,7 @@ impl Cx<'_> {
                 return Some(ci);
             }
             // (`V::BYTES` with V a vector type: its impl's const, under the name the impl wrote (`__m128i::BYTES`))
-            if let Some(&ci) = ty.and_then(|t| crate::program::vector_names(t).iter().find_map(|v| self.prog.const_index.get(&format!("{v}::{n}")))) {
+            if let Some(&ci) = ty.and_then(|t| crate::program::vector_names(t).iter().filter(|v| !self.prog.struct_index.contains_key(**v)).find_map(|v| self.prog.const_index.get(&format!("{v}::{n}")))) {
                 return Some(ci);
             }
             // trait の既定値: 型が実装している trait の `Tr::N`
