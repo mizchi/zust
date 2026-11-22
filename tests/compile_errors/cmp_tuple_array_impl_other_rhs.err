@@ -1,0 +1,1 @@
+10:13: binary operation `==` cannot be applied to type `([NN; 1], i32)` (E0369)

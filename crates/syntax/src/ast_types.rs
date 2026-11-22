@@ -249,11 +249,33 @@ pub fn tysyn(t: &PTy, self_ty: Option<&TySyn>) -> R<TySyn> {
         PTy::Infer => TySyn::Infer,
         // `<T as Iterator>::Item`
         PTy::Path(Some(q), p) if !p.segs.is_empty() => {
+            // (`<T as Tr>::Out<u8>`, a generic associated type in a qualified path, is not taken apart yet: only
+            // `T::Out<u8>` is)
             TySyn::Assoc(Box::new(tysyn(q, self_ty)?), p.segs.last().unwrap().name.clone())
         }
         PTy::Path(None, p) => path_ty(p, self_ty)?,
         _ => return Err("unsupported type".to_string()),
     })
+}
+
+/// The name a generic associated type's application has: `P::Pointer<String>` is the associated type
+/// `#gat:Pointer` of the tuple `(P, String)` (Program::assoc_of takes it apart)
+pub const GAT_PREFIX: &str = "#gat:";
+
+fn gat_app(base: TySyn, seg: &crate::parse::Seg, self_ty: Option<&TySyn>) -> R<TySyn> {
+    let mut parts = vec![base];
+    for a in &seg.args {
+        match a {
+            // (`M::Box<dyn Send>`: an auto trait alone, right in a Box, as for the last segment of a path)
+            GArg::Ty(t) if seg.name == "Box" && auto_dyn(t).is_some() => parts.push(TySyn::Dyn(auto_dyn(t).unwrap())),
+            GArg::Ty(t) => parts.push(tysyn(t, self_ty)?),
+            GArg::Lifetime(_) => {}
+            // (`M::S<3>`: a module-qualified type with a const argument also comes here; `Program` resolves it as `S<3>`)
+            GArg::Const(e) => parts.push(const_arg_syn(e)?),
+            GArg::Bind(..) => return Err("unsupported argument of a generic associated type".to_string()),
+        }
+    }
+    Ok(TySyn::Assoc(Box::new(TySyn::Tuple(parts)), format!("{GAT_PREFIX}{}", seg.name)))
 }
 
 fn no_args(s: &crate::parse::Seg) -> bool {
@@ -269,6 +291,12 @@ fn path_ty(p: &Path, self_ty: Option<&TySyn>) -> R<TySyn> {
         let b = p.segs[0].name.clone();
         let base = if b == "Self" { self_ty.cloned().unwrap_or(TySyn::Named("Self".into())) } else { TySyn::Named(b) };
         return Ok(TySyn::Assoc(Box::new(base), p.segs[1].name.clone()));
+    }
+    // (`P::Pointer<String>` / `Self::Output<O>`: a generic associated type applied to type arguments)
+    if !p.global && n == 2 && no_args(&p.segs[0]) && p.segs[1].fn_args.is_none() && p.segs[0].name.starts_with(|c: char| c.is_ascii_uppercase()) {
+        let b = p.segs[0].name.clone();
+        let base = if b == "Self" { self_ty.cloned().unwrap_or(TySyn::Named("Self".into())) } else { TySyn::Named(b) };
+        return gat_app(base, &p.segs[1], self_ty);
     }
     let last = p.segs.last().ok_or("empty path")?;
     // `io::Error` / `io::Result<T>` (prelude の IoError)

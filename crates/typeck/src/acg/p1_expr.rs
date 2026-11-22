@@ -1593,6 +1593,13 @@ impl Cx<'_> {
             return self.variant_value(sid, vi, &args, expected);
         }
         let Some(sid) = self.prog.struct_by_p(&PPath::of(path), self.self_sid) else {
+            // (`Self::Output::Simple {}` with `type Output<T> = Bar<T>;`: the generic associated type's arguments are
+            // not given, nothing else says them)
+            if path.segs.len() >= 3 && path.segs[0].name == "Self" && path.segs[1].args.is_empty()
+                && self.prog.assocs.iter().any(|a| a.name == path.segs[1].name && a.ngat > 0)
+            {
+                return err(SP, format!("type annotations needed (the arguments of the generic associated type `{}`)", path.segs[1].name));
+            }
             return err(SP, "cannot find struct");
         };
         // `S { a: 1, ..base }`: base を一時変数に置き、書かれていないフィールドをそこからムーブする

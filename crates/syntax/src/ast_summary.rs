@@ -1827,12 +1827,24 @@ pub fn summarize(item: &Item, owner: Option<&Owner>) -> R<Summary> {
         return err("missing lifetime specifier (E0106)");
     }
     let mut sm = Summary::default();
+    // (`type Assoc<T = u32>;` in a trait or an impl: an associated type's parameters take no defaults)
+    if let ItemKind::Type(_, g, ..) = &item.kind {
+        if owner.is_some() && g.params.iter().any(|p| matches!(p, GParam::Ty(_, _, Some(_)))) {
+            return err("defaults for generic parameters are not allowed here");
+        }
+    }
     // (the program's items: the prelude writes no lifetimes in its bounds, `Iterator<Item = &T>`; the driver
     // reports it)
     sm.adt_err = anon_bound_err(item);
     match &item.kind {
-        ItemKind::Type(n, _, _, Some(t)) if owner.is_some() => {
+        ItemKind::Type(n, g, _, Some(t)) if owner.is_some() => {
             let ow = owner.unwrap();
+            // (`type Pointer<T> = Rc<T>;`: a generic associated type's own parameters follow the impl's, after the
+            // mark `#gat`)
+            let gat: Vec<String> = g.params.iter().filter_map(|p| match p {
+                GParam::Ty(n, ..) => Some(n.clone()),
+                _ => None,
+            }).collect();
             if let Some(r) = &ow.regions {
                 let mut used = vec![];
                 named_lifetimes(t, &mut used);
@@ -1851,10 +1863,15 @@ pub fn summarize(item: &Item, owner: Option<&Owner>) -> R<Summary> {
             if !ow.is_trait && lifetime_positions(t).0 > 0 {
                 sm.adt_err = Some(if format!("{t:?}").contains("\"'_\"") { "`'_` cannot be used here (E0637)" } else { "missing lifetime in associated type (E0106)" }.to_string());
             }
+            let mut generics: Vec<String> = ow.generics.iter().map(|g| g.0.clone()).collect();
+            if !gat.is_empty() {
+                generics.push("#gat".to_string());
+                generics.extend(gat);
+            }
             sm.assocs.push(AssocSyn {
                 name: n.clone(),
                 self_ty: ow.self_ty.clone(),
-                generics: ow.generics.iter().map(|g| g.0.clone()).collect(),
+                generics,
                 value: tysyn(t, Some(&ow.self_ty))?,
             });
         }

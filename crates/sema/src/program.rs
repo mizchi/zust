@@ -361,7 +361,19 @@ pub struct AssocDef {
     /// impl の self 型と値 (impl の型パラメータを Param で含む)
     pub self_ty: Ty,
     pub value: Ty,
+    /// the impl's parameters
     pub ngen: usize,
+    /// a generic associated type's own parameters (`type Pointer<T>`: 1), Params after the impl's and a mark
+    pub ngat: usize,
+}
+
+/// (the impl's parameter count, the generic associated type's) of an associated type's parameter names: those after
+/// the mark `#gat` are its own
+fn gat_split(gn: &[&str]) -> (usize, usize) {
+    match gn.iter().position(|g| *g == "#gat") {
+        Some(k) => (k, gn.len() - k - 1),
+        None => (gn.len(), 0),
+    }
 }
 
 /// 型推論に任せる `_` の印 (型パラメータの番号としては使わない値)
@@ -1010,7 +1022,8 @@ impl Program {
                 }
                 let gn: Vec<&str> = a.generics.iter().map(|g| g.as_str()).collect();
                 if let (Ok(self_ty), Ok(value)) = (p.resolve_g(&a.self_ty, &gn), p.resolve_g(&a.value, &gn)) {
-                    p.assocs.push(AssocDef { name: a.name.clone(), self_ty, value, ngen: gn.len() });
+                    let (ngen, ngat) = gat_split(&gn);
+                    p.assocs.push(AssocDef { name: a.name.clone(), self_ty, value, ngen, ngat });
                     early.push((ii, k));
                 }
             }
@@ -1140,11 +1153,13 @@ impl Program {
                 let value = p
                     .resolve_g(&a.value, &gn)
                     .map_err(|e| format!("{}:1: {e}", it.line))?;
+                let (ngen, ngat) = gat_split(&gn);
                 p.assocs.push(AssocDef {
                     name: a.name.clone(),
                     self_ty,
                     value,
-                    ngen: gn.len(),
+                    ngen,
+                    ngat,
                 });
             }
         }
@@ -2320,6 +2335,13 @@ impl Program {
             TySyn::Str => Ty::Str,
             TySyn::Dyn(s) => Ty::Dyn(intern_str(s)),
             TySyn::Infer => Ty::Param(HOLE),
+            // (`M::S<u8>` of a module M reads as a generic associated type `#gat:S` of `(M, u8)`: when M is no type,
+            // it is the type S<u8> as before)
+            TySyn::Assoc(b, n) if n.starts_with(crate::ast_types::GAT_PREFIX) && matches!(&**b, TySyn::Tuple(p) if !p.is_empty() && r(&p[0]).is_err()) => {
+                let TySyn::Tuple(parts) = &**b else { unreachable!() };
+                let name = n[crate::ast_types::GAT_PREFIX.len()..].to_string();
+                return r(&TySyn::App(name, parts[1..].to_vec()));
+            }
             TySyn::Assoc(b, n) => {
                 let bt = r(b)?;
                 if self.has_param(bt) {
@@ -3173,8 +3195,34 @@ impl Program {
     }
 
     fn assoc_of0(&self, t: Ty, name: &str) -> Option<Ty> {
+        // (`P::Pointer<String>`: the associated type `#gat:Pointer` of `(P, String)`, the impl's for P with its own
+        // parameters String)
+        if let Some(gname) = name.strip_prefix(crate::ast_types::GAT_PREFIX) {
+            let Ty::Struct(sid) = t else { return None };
+            if !self.is_tuple(sid) {
+                return None;
+            }
+            let parts = self.structs[sid as usize].args.clone();
+            let (&base, gargs) = parts.split_first()?;
+            for a in &self.assocs {
+                if a.name != gname || a.ngat != gargs.len() {
+                    continue;
+                }
+                let mut sol = vec![None; a.ngen];
+                if self.match_ty(a.self_ty, base, &mut sol) {
+                    let Some(mut args) = sol.iter().copied().collect::<Option<Vec<Ty>>>() else { continue };
+                    // (the mark's place, then the associated type's own arguments)
+                    args.push(Ty::Unit);
+                    args.extend_from_slice(gargs);
+                    return Some(self.subst(a.value, &args));
+                }
+            }
+            return None;
+        }
         for a in &self.assocs {
-            if a.name != name {
+            // (a generic associated type without its arguments (`<() as Outer>::Ty` of a qualified path): its value
+            // when that does not use its own parameters)
+            if a.name != name || (a.ngat != 0 && self.uses_params_from(a.value, a.ngen as u8)) {
                 continue;
             }
             if let Ty::Assoc(v) = a.value {
@@ -3184,13 +3232,26 @@ impl Program {
             }
             let mut sol = vec![None; a.ngen];
             if self.match_ty(a.self_ty, t, &mut sol) {
-                let Some(args) = sol.iter().copied().collect::<Option<Vec<Ty>>>() else {
+                let Some(mut args) = sol.iter().copied().collect::<Option<Vec<Ty>>>() else {
                     continue;
                 };
+                args.extend(std::iter::repeat_n(Ty::Unit, if a.ngat > 0 { a.ngat + 1 } else { 0 }));
                 return Some(self.subst(a.value, &args));
             }
         }
         None
+    }
+
+    /// t names a type parameter numbered `from` or above
+    fn uses_params_from(&self, t: Ty, from: u8) -> bool {
+        match t {
+            Ty::Param(i) => i >= from && i != HOLE,
+            Ty::Ref(_, i) | Ty::Ptr(_, i) | Ty::Array(i, _) | Ty::Slice(i) | Ty::Box(i) => self.uses_params_from(*i, from),
+            Ty::Struct(sid) => self.structs[sid as usize].args.iter().any(|&a| self.uses_params_from(a, from)),
+            Ty::Assoc(a) => self.uses_params_from(a.base, from),
+            Ty::Fn(f) => f.params.iter().chain([&f.ret]).any(|&p| self.uses_params_from(p, from)),
+            _ => false,
+        }
     }
 
     /// 型パラメータに型引数を入れる
@@ -3337,10 +3398,7 @@ impl Program {
         match state[id] {
             2 => return Ok(()),
             1 => {
-                return Err(format!(
-                    "recursive type `{}` has infinite size",
-                    sdefs[id].1
-                ));
+                return Err(format!("{}:1: recursive type `{}` has infinite size", items[sdefs[id].0].line, sdefs[id].1));
             }
             _ => {}
         }
@@ -3374,6 +3432,19 @@ impl Program {
                 }
                 // `Box<T>` はポインタなので T のレイアウトは要らない
                 TySyn::App(n, _) if n == "Box" && !self.struct_index.contains_key(&n) => {}
+                // (`C::Assoc<Self>` / `type MaybeBox<T> = <T as A<T, Box<T>>>::B;`: a projection, whose type is the
+                // impl's: whether it holds its arguments by value is not known here)
+                // (`A::Allocated<Self>` arrives as `Allocated<..>`: a name that is no struct and no alias is such an
+                // associated type)
+                TySyn::App(n, _) if n.contains("::") || (!self.struct_index.contains_key(&n) && !self.aliases.contains_key(&n)) => {}
+                // (`type Alias<T> = (T, <() as Tr>::A);`: its value with the arguments, whose projections are skipped
+                // and whose other parts are held as written)
+                TySyn::App(n, args) if self.aliases.get(&n).is_some_and(|a| syn_has_assoc(&a.1)) => {
+                    let (ps, body) = self.aliases[&n].clone();
+                    if ps.len() == args.len() {
+                        todo.push((subst_tysyn(&body, &ps, &args), gs.clone()));
+                    }
+                }
                 TySyn::App(n, args) => {
                     // 型引数のうち、その型が値として持つもの (`Vec<T>` の T はポインタの先なので要らない)
                     let mut by_value = vec![true; args.len()];
@@ -3960,6 +4031,34 @@ fn syn_unify(a: &TySyn, ga: &[String], b: &TySyn, gb: &[String], sub: &mut Vec<(
 }
 
 /// t names a generic type (`Vec<u8>`) or an alias (one may stand for one)
+/// t with each parameter of ps replaced by its argument (a type alias's value with the arguments it is given)
+fn subst_tysyn(t: &TySyn, ps: &[String], args: &[TySyn]) -> TySyn {
+    let r = |t: &TySyn| subst_tysyn(t, ps, args);
+    match t {
+        TySyn::Named(n) => ps.iter().position(|p| p == n).map_or_else(|| t.clone(), |k| args[k].clone()),
+        TySyn::App(n, a) => TySyn::App(n.clone(), a.iter().map(r).collect()),
+        TySyn::Ref(m, i) => TySyn::Ref(*m, Box::new(r(i))),
+        TySyn::Ptr(m, i) => TySyn::Ptr(*m, Box::new(r(i))),
+        TySyn::Slice(i) => TySyn::Slice(Box::new(r(i))),
+        TySyn::Array(i, n) => TySyn::Array(Box::new(r(i)), n.clone()),
+        TySyn::Tuple(v) => TySyn::Tuple(v.iter().map(r).collect()),
+        TySyn::FnPtr(v) => TySyn::FnPtr(v.iter().map(r).collect()),
+        TySyn::Assoc(b, n) => TySyn::Assoc(Box::new(r(b)), n.clone()),
+        t => t.clone(),
+    }
+}
+
+/// t names an associated type (`T::Item`, `<T as A>::B`) somewhere
+fn syn_has_assoc(t: &TySyn) -> bool {
+    match t {
+        TySyn::Assoc(..) => true,
+        TySyn::App(n, a) => n.contains("::") || a.iter().any(syn_has_assoc),
+        TySyn::Ref(_, i) | TySyn::Ptr(_, i) | TySyn::Slice(i) | TySyn::Array(i, _) => syn_has_assoc(i),
+        TySyn::Tuple(a) | TySyn::FnPtr(a) => a.iter().any(syn_has_assoc),
+        _ => false,
+    }
+}
+
 fn syn_has_app(t: &TySyn, aliases: &FxMap<String, (Vec<String>, TySyn)>) -> bool {
     match t {
         TySyn::App(..) | TySyn::Dyn(_) => true,
