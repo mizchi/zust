@@ -29,7 +29,7 @@
 
 ## Status
 
-Numbers measured <!-- measured -->2026-11-22, 867f672<!-- /measured --> by CI on each push to main (bench.yml runs
+Numbers measured <!-- measured -->2026-11-22, 0501acf<!-- /measured --> by CI on each push to main (bench.yml runs
 `bench/ci_bench.py` and `bench/rust_ui.py`, then `scripts/update_readme.py` writes them here). Times come from shared
 GitHub Actions runners and vary by about ±20%; the instruction counts (valgrind) do not.
 
@@ -44,7 +44,7 @@ only the tests it can be asked to handle (no nightly features, auxiliary crates 
 | run-pass (builds, runs, same output) | 2385 | 1822 (76.4%) |
 | check-pass (accepted by `zustc check`) | 1807 | 1509 (83.5%) |
 | build-pass | 135 | 102 (75.6%) |
-| compile-fail (rejected at an annotated line) | 7358 | 4393 (59.7%) |
+| compile-fail (rejected at an annotated line) | 7358 | 4397 (59.8%) |
 <!-- /auto:ui -->
 
 [What is supported](#what-is-supported) breaks this down by area.
@@ -57,18 +57,18 @@ In parentheses: the instruction count (valgrind), which does not vary with the r
 <!-- auto:kpi -->
 | KPI | gen1000 | gen5000 |
 |---|---:|---:|
-| cold build | 119 ms | 555 ms |
-| no-op build | 0.6 ms (0.6 M) | 0.6 ms (0.6 M) |
-| build after editing one function | 15.3 ms (124.9 M) | 58.5 ms (591.8 M) |
-| `check` | 70 ms (762.8 M) | 352 ms (3761.5 M) |
+| cold build | 91 ms | 393 ms |
+| no-op build | 1.1 ms (0.6 M) | 1.1 ms (0.6 M) |
+| build after editing one function | 18.3 ms (124.6 M) | 62.2 ms (590.8 M) |
+| `check` | 75 ms (763.3 M) | 363 ms (3763.6 M) |
 | build cache on disk | 387.2 KiB | 1902.8 KiB |
 | binary | 324.0 KiB | 1558.3 KiB |
-| cold build peak RSS | 19.3 MiB | 52.9 MiB |
+| cold build peak RSS | 19.3 MiB | 53.3 MiB |
 
 | zust-analyzer (zustc's own sources) | |
 |---|---:|
-| p50: definition, hover, completion, references, rename | 0.57 ms / 0.45 ms / 1.32 ms / 5.45 ms / 0.55 ms |
-| startup until indexed | 184 ms |
+| p50: definition, hover, completion, references, rename | 0.78 ms / 0.56 ms / 1.00 ms / 4.69 ms / 0.57 ms |
+| startup until indexed | 155 ms |
 | peak RSS | 97.0 MiB |
 <!-- /auto:kpi -->
 
