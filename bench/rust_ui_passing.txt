@@ -1486,6 +1486,7 @@ compile-fail	const-generics/defaults/wfness.rs
 check-pass	const-generics/deref-into-array-generic.rs
 compile-fail	const-generics/early/closing-args-token.rs
 compile-fail	const-generics/early/const-expression-parameter.rs
+run-pass	const-generics/early/const-param-hygiene.rs
 compile-fail	const-generics/early/const_arg_trivial_macro_expansion-2.rs
 compile-fail	const-generics/early/invalid-const-arguments.rs
 compile-fail	const-generics/early/macro_rules-braces.rs
@@ -1560,6 +1561,7 @@ run-pass	const-generics/promotion.rs
 compile-fail	const-generics/sneaky-array-repeat-expr.rs
 check-pass	const-generics/trait-const-args.rs
 run-pass	const-generics/type-after-const-ok.rs
+run-pass	const-generics/type-dependent/issue-61936.rs
 run-pass	const-generics/type-dependent/issue-63695.rs
 check-pass	const-generics/type-dependent/issue-67144-1.rs
 check-pass	const-generics/type-dependent/issue-67144-2.rs
@@ -1567,6 +1569,7 @@ run-pass	const-generics/type-dependent/issue-69816.rs
 check-pass	const-generics/type-dependent/issue-70217.rs
 check-pass	const-generics/type-dependent/issue-70586.rs
 compile-fail	const-generics/type-dependent/issue-71382.rs
+check-pass	const-generics/type-dependent/issue-73730.rs
 run-pass	const-generics/type-dependent/qpath.rs
 run-pass	const-generics/type-dependent/simple.rs
 compile-fail	const-generics/type_not_in_scope.rs
@@ -6206,6 +6209,7 @@ check-pass	statics/nested_struct.rs
 check-pass	statics/recursive_interior_mut.rs
 run-pass	statics/static-function-pointer.rs
 compile-fail	statics/static-generic-param-soundness.rs
+run-pass	statics/static-impl.rs
 run-pass	statics/static-method-in-trait-with-tps-intracrate.rs
 run-pass	statics/static-methods-in-traits.rs
 run-pass	statics/static-methods-in-traits2.rs
@@ -7451,6 +7455,7 @@ run-pass	where-clauses/where-clause-region-outlives.rs
 run-pass	where-clauses/where-clauses-lifetimes.rs
 run-pass	where-clauses/where-clauses-method.rs
 run-pass	where-clauses/where-clauses-unboxed-closures.rs
+run-pass	where-clauses/where-clauses.rs
 run-pass	whitespace/vertical_tab_lexer.rs
 run-pass	windows-subsystem/console.rs
 run-pass	windows-subsystem/windows.rs

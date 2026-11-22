@@ -1809,6 +1809,17 @@ impl Program {
             Ty::Struct(sid) => Some(self.structs[self.base_of(sid) as usize].name.as_str()),
             _ => None,
         };
+        // (`u16: From<u8>` / `u8: Into<u32>`: std's lossless conversions between primitives, and `T: From<T>`)
+        if (tr.starts_with("From") || tr.starts_with("Into")) && (t.is_int() || t.is_float() || matches!(t, Ty::Bool | Ty::Char)) {
+            let tr2: String = tr.chars().filter(|c| !c.is_whitespace()).collect();
+            let arg = |p: &str| tr2.strip_prefix(p).and_then(|r| r.strip_prefix('<')).and_then(|r| r.strip_suffix('>')).and_then(Ty::prim);
+            if let Some(a) = arg("From") {
+                return Some(prim_from(a, t));
+            }
+            if let Some(a) = arg("Into") {
+                return Some(prim_from(t, a));
+            }
+        }
         match (t, tr) {
             // (`&str: ToString`, `&T: ToString` for T: Display)
             (Ty::Ref(_, i), "ToString") => Some(*i == Ty::Str || self.implements(*i, "Display") || self.implements(*i, "ToString")),
@@ -4428,5 +4439,27 @@ fn subst_consts(e: &crate::parse::Expr, env: &[(String, i128)]) -> crate::parse:
             Expr::Block(l.clone(), *u, b)
         }
         e => e.clone(),
+    }
+}
+
+/// std has `impl From<a> for b` (b losslessly holds every a; `T: From<T>`)
+fn prim_from(a: Ty, b: Ty) -> bool {
+    use Ty::*;
+    if a == b {
+        return true;
+    }
+    match a {
+        Bool => b.is_int(),
+        Char => matches!(b, U32 | U64 | U128),
+        U8 => matches!(b, U16 | U32 | U64 | U128 | Usize | I16 | I32 | I64 | I128 | Isize | F32 | F64 | Char),
+        U16 => matches!(b, U32 | U64 | U128 | Usize | I32 | I64 | I128 | F32 | F64),
+        U32 => matches!(b, U64 | U128 | I64 | I128 | F64),
+        U64 => matches!(b, U128 | I128),
+        I8 => matches!(b, I16 | I32 | I64 | I128 | Isize | F32 | F64),
+        I16 => matches!(b, I32 | I64 | I128 | Isize | F32 | F64),
+        I32 => matches!(b, I64 | I128 | F64),
+        I64 => matches!(b, I128),
+        F32 => matches!(b, F64),
+        _ => false,
     }
 }

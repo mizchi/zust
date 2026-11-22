@@ -1390,9 +1390,20 @@ impl Cx<'_> {
             }
         }
         // trait メソッドは先頭が Self なので、turbofish はその後ろの型パラメータに当たる
+        // (the turbofish names the fn's own parameters, the last ones: an impl's come first, `impl<const N: usize>
+        // T<N> for S { fn l<const M: bool>() }` with `<S as T<123>>::l::<true>()`; a hidden `__impl0` of an
+        // `impl Trait` argument is not named)
         let first = sig.trait_of.is_some() as usize;
         if let Some(tf) = turbofish {
+            let named: Vec<usize> = (0..sig.generics.len()).filter(|&k| !sig.generics[k].0.starts_with("__impl")).collect();
+            let ntf = tf.iter().filter(|a| !matches!(a, GArg::Lifetime(_))).count();
+            // (an impl's member only: a free fn's parameters are all its own, the prelude's `__exr_*` put the named
+            // ones first)
+            let member = sig.self_ty.is_some() || sig.impl_of.is_some();
+            let own0 = if member { named.len().saturating_sub(ntf).max(first.min(named.len())) } else { first };
+            let slot_of = |i: usize| if member { named.get(own0 + i).copied().unwrap_or(usize::MAX) } else { first + i };
             for (i, a) in tf.iter().enumerate() {
+                let first = slot_of(i).wrapping_sub(i);
                 // (`get_flag::<false, 0xFF>()` with `const C: char`: a const argument of another kind than its parameter's
                 // type)
                 let const_slot = sig.generics.get(first + i).filter(|(_, bs)| bs.iter().any(|b| b == crate::types::CONST_GENERIC));
