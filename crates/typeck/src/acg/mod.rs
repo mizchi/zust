@@ -2091,6 +2091,10 @@ impl Cx<'_> {
                 }
             }
         }
+        // (edition 2024: the tail expression's temporaries go away at the end of the block, before its locals)
+        if self.prog.edition >= 2024 {
+            self.bk_temps_end(bk_mark);
+        }
         self.pop_scope();
         if diverged && result.1 == Ty::Unit {
             result = (None, Ty::Never);

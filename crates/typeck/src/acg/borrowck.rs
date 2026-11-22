@@ -2951,7 +2951,13 @@ impl Cx<'_> {
 
     fn bk_direct(&self, e: &Expr, out: &mut Vec<Src>) {
         match e {
-            Expr::Paren(x) => self.bk_direct(x, out),
+            // (a cast keeps what the value borrows: `Box::new(B(&*v)) as Box<dyn X>`)
+            Expr::Paren(x) | Expr::Cast(x, _) => self.bk_direct(x, out),
+            // (`Box::new(x)`: the box holds what x does (the prelude writes no lifetimes, so its fns are not
+            // followed otherwise))
+            Expr::Call(f, args) if args.len() == 1 && matches!(&**f, Expr::Path(None, p) if p.segs.len() == 2 && p.segs[0].name == "Box" && p.segs[1].name == "new") => {
+                self.bk_direct(&args[0], out)
+            }
             // (a call of the program's fn: what its result borrows from, by its signature (`fn gimme(x: &T) -> &U`);
             // the prelude writes no lifetimes, so its fns are not followed)
             Expr::Call(f, args) => {

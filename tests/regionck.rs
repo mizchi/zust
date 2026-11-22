@@ -1846,3 +1846,10 @@ fn pattern_mut_ref_moves_and_written_receivers() {
     assert!(d.len() == 1 && d[0].0 == 8 && d[0].1.contains("more than once"), "{d:?}");
     assert_eq!(check("struct X(u32);\nimpl X { fn get(&self, n: u32) -> u32 { self.0 + n } }\nfn main() {\n    let mut x = X(1);\n    let a = (&x).get(x.0);\n    let b = (&mut x).get(2);\n    let y = &x;\n    let c = (&x).get(y.0);\n    println!(\"{} {} {}\", a, b, c);\n}\n"), vec![]);
 }
+
+/// What a returned value borrows is followed through a cast and `Box::new` (`Box::new(B(&*v)) as Box<dyn X>`: E0515)
+#[test]
+fn returned_borrow_through_cast_and_box() {
+    let d = check("trait X { }\nstruct B<'a>(&'a u32);\nimpl<'a> X for B<'a> {}\nfn f(v: Box<u32>) -> Box<dyn X + 'static> {\n    Box::new(B(&*v)) as Box<dyn X>\n}\nfn h(v: Box<u32>) -> Box<dyn X + 'static> {\n    Box::new(B(&*v))\n}\nfn main() {}\n");
+    assert!(d.len() == 2 && d[0].0 == 5 && d[1].0 == 8 && d[0].1.contains("cannot return a reference"), "{d:?}");
+}

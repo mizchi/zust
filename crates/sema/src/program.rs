@@ -262,6 +262,8 @@ pub struct Program {
     pub lower_consts: bool,
     /// `#![deny(unused_must_use)]`: a statement whose value is a `Result` is an error
     pub deny_must_use: bool,
+    /// The edition (2021 unless given): from 2024, a block's tail's temporaries go away before its locals
+    pub edition: u16,
     /// `#![deny(unused_allocation)]`: `Box::new(x).m()` with m of `&self` on what the box holds is an error
     pub deny_unused_alloc: bool,
     /// `#![deny(trivial_casts)]` / `#![deny(trivial_numeric_casts)]`: a cast a coercion or nothing would do
@@ -769,6 +771,7 @@ impl Program {
             fnptr_impls: Default::default(),
             deny_unreachable: false,
             deny_must_use: false,
+            edition: 2021,
             deny_unused_alloc: false,
             deny_trivial_casts: (false, false),
             must_use_fns: vec![],
