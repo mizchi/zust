@@ -757,18 +757,35 @@ impl Bk {
             return errs.into_iter().next();
         }
         let n = nblocks.max(1 + self.evs.iter().map(|e| e.0 .0 as usize).max().unwrap_or(0)).max(1 + self.edges.iter().map(|e| e.0 .0.max(e.1 .0) as usize).max().unwrap_or(0));
-        let mut evs: Vec<Vec<&Ev>> = vec![vec![]; n];
+        // (each block's events, in order: counted first, so each block's list is allocated once)
+        let mut counts = vec![0u32; n];
+        for (b, _) in &self.evs {
+            counts[b.0 as usize] += 1;
+        }
+        let mut evs: Vec<Vec<&Ev>> = counts.iter().map(|&c| Vec::with_capacity(c as usize)).collect();
         for (b, e) in &self.evs {
             evs[b.0 as usize].push(e);
         }
-        let mut succ: Vec<Vec<usize>> = vec![vec![]; n];
-        let mut pred: Vec<Vec<usize>> = vec![vec![]; n];
-        for &(a, b) in &self.edges {
-            if !succ[a.0 as usize].contains(&(b.0 as usize)) {
-                succ[a.0 as usize].push(b.0 as usize);
-                pred[b.0 as usize].push(a.0 as usize);
+        // (each block's distinct successors, in the order of their edges, in one array: block b's are
+        // flat[so[b]..so[b + 1]])
+        let mut es: Vec<(u32, u32)> = self.edges.iter().map(|e| (e.0 .0, e.1 .0)).collect();
+        es.sort_by_key(|e| e.0);
+        let mut flat: Vec<usize> = Vec::with_capacity(es.len());
+        let mut so: Vec<usize> = vec![0; n + 1];
+        let mut ei = 0;
+        for (b, o) in so.iter_mut().enumerate().take(n) {
+            *o = flat.len();
+            let start = flat.len();
+            while ei < es.len() && es[ei].0 as usize == b {
+                let t = es[ei].1 as usize;
+                if !flat[start..].contains(&t) {
+                    flat.push(t);
+                }
+                ei += 1;
             }
         }
+        so[n] = flat.len();
+        let succ = |b: usize| &flat[so[b]..so[b + 1]];
         let nl = self.locals.len();
         let loans_on = need_loans;
         // ---- drop check: a drop of a local that is certainly moved out runs nothing (NLL's drop-liveness counts only
@@ -794,7 +811,7 @@ impl Bk {
                 for e in &evs[b] {
                     step(&mut m, e);
                 }
-                for &s2 in &succ[b] {
+                for &s2 in succ(b) {
                     let changed = match &mut min[s2] {
                         Some(x) => {
                             let mut ch = false;
@@ -832,8 +849,10 @@ impl Bk {
         }
         // ---- liveness of locals (backward): live_in[b] as a bit set
         let words = nl.div_ceil(64).max(1);
-        let mut live_in = vec![vec![0u64; words]; n];
-        let mut live_out = vec![vec![0u64; words]; n];
+        // (one array each: block b's words are row(b))
+        let mut live_in = vec![0u64; words * n];
+        let mut live_out = vec![0u64; words * n];
+        let row = move |b: usize| b * words..(b + 1) * words;
         let set = |v: &mut [u64], i: u32| v[i as usize / 64] |= 1 << (i % 64);
         let clr = |v: &mut [u64], i: u32| v[i as usize / 64] &= !(1 << (i % 64));
         // (a read of a local that may hold loans keeps it live; only those matter for loans)
@@ -856,8 +875,8 @@ impl Bk {
                 changed = false;
                 for b in (0..n).rev() {
                     out.fill(0);
-                    for &s in &succ[b] {
-                        for (o, x) in out.iter_mut().zip(&live_in[s]) {
+                    for &s in succ(b) {
+                        for (o, x) in out.iter_mut().zip(&live_in[row(s)]) {
                             *o |= x;
                         }
                     }
@@ -865,11 +884,11 @@ impl Bk {
                     for e in evs[b].iter().rev() {
                         transfer_back(&mut live, e);
                     }
-                    if live != live_in[b] {
-                        live_in[b].copy_from_slice(&live);
+                    if live[..] != live_in[row(b)] {
+                        live_in[row(b)].copy_from_slice(&live);
                         changed = true;
                     }
-                    live_out[b].copy_from_slice(&out);
+                    live_out[row(b)].copy_from_slice(&out);
                 }
             }
         }
@@ -897,9 +916,9 @@ impl Bk {
                 return Some(BkError { sp: super::SP, msg: "internal: the borrow check did not reach a fixpoint".to_string() });
             }
             let mut st = st_in[b].clone().unwrap();
-            self.run_block(&evs[b], &mut st, None, &live_out[b], loans_on, &mut vec![]);
-            let ns = succ[b].len();
-            for (i, &s) in succ[b].iter().enumerate() {
+            self.run_block(&evs[b], &mut st, None, &live_out[row(b)], loans_on, &mut vec![]);
+            let ns = succ(b).len();
+            for (i, &s) in succ(b).iter().enumerate() {
                 let ch = match &mut st_in[s] {
                     Some(x) => x.join(&st),
                     slot @ None => {
@@ -918,9 +937,9 @@ impl Bk {
         let mut live_at = vec![];
         for b in 0..n {
             let Some(mut st) = st_in[b].take() else { continue };
-            self.run_block(&evs[b], &mut st, Some(&mut errs), &live_out[b], loans_on, &mut live_at);
+            self.run_block(&evs[b], &mut st, Some(&mut errs), &live_out[row(b)], loans_on, &mut live_at);
             // (the function ends here (return / panic): a loan stored behind a parameter must not be of a local)
-            if succ[b].is_empty() {
+            if succ(b).is_empty() {
                 for &ln in &st.escaped {
                     let lo = &self.loans[ln as usize];
                     if lo.place.owned_len() == lo.place.proj.len() && !self.params.contains(&lo.place.local) {
@@ -937,15 +956,16 @@ impl Bk {
 
     /// Apply the events of one block (and report errors when errs is given). `live_out` is the liveness at the end of
     /// the block; the liveness at each event is recomputed backward from it
-    fn run_block(&self, evs: &[&Ev], st: &mut State, mut errs: Option<&mut Vec<BkError>>, live_out: &[u64], loans_on: bool, live_at: &mut Vec<Vec<u64>>) {
-        // (liveness after each event: only for reporting)
+    fn run_block(&self, evs: &[&Ev], st: &mut State, mut errs: Option<&mut Vec<BkError>>, live_out: &[u64], loans_on: bool, live_at: &mut Vec<u64>) {
+        // (liveness after each event: only for reporting. Event i's words are live_at[i * w..][..w])
         let loans_on = loans_on && errs.is_some();
+        let w = live_out.len();
         if loans_on {
             live_at.clear();
-            live_at.resize(evs.len(), vec![]);
+            live_at.resize(evs.len() * w, 0);
             let mut live = live_out.to_vec();
             for (i, e) in evs.iter().enumerate().rev() {
-                live_at[i] = live.clone();
+                live_at[i * w..(i + 1) * w].copy_from_slice(&live);
                 match e {
                     Ev::Acc(p, a, _) => {
                         let w = &mut live[p.local as usize / 64];
@@ -1012,7 +1032,7 @@ impl Bk {
                     if loans_on {
                         if let Some(errs) = errs.as_deref_mut() {
                             // (a loan of the local, or of what it owns, still live when it goes away)
-                            for ln in live_loans(st, &live_at[i]) {
+                            for ln in live_loans(st, &live_at[i * w..(i + 1) * w]) {
                                 let lo = &self.loans[ln as usize];
                                 if lo.place.local == *l && lo.place.owned_len() == lo.place.proj.len() {
                                     let name = path_str(&self.locals, &BPlace { local: *l, proj: vec![] });
@@ -1036,7 +1056,7 @@ impl Bk {
                         }
                         self.check_moved(st, p, *a, *sp, errs);
                         if loans_on {
-                            let ll = live_loans(st, &live_at[i]);
+                            let ll = live_loans(st, &live_at[i * w..(i + 1) * w]);
                             self.check_loans(&ll, p, *a, *sp, errs);
                         }
                     }
@@ -1092,7 +1112,7 @@ impl Bk {
                 Ev::Keep(l, srcs) => {
                     // (a loan of a local already gone, kept by a local still used: `let y = { let z = 0; &z };`)
                     if let Some(errs) = errs.as_deref_mut() {
-                        if loans_on && is_live(&live_at[i], *l) {
+                        if loans_on && is_live(&live_at[i * w..(i + 1) * w], *l) {
                             let ls = self.resolve(srcs, st);
                             if let Some(&ln) = ls.iter().find(|ln| st.dead.binary_search(ln).is_ok()) {
                                 let lo = &self.loans[ln as usize];
@@ -1111,7 +1131,7 @@ impl Bk {
                         // (a loan of a local already gone that it holds through the regions of its type, and it is
                         // used: `let d = { let p = ..; f.m(&p) };`. Not what the value computed flows from: an
                         // over-approximation)
-                        if let (Some(errs), true) = (errs.as_deref_mut(), loans_on && is_live(&live_at[i], *l)) {
+                        if let (Some(errs), true) = (errs.as_deref_mut(), loans_on && is_live(&live_at[i * w..(i + 1) * w], *l)) {
                             if let Some(&ln) = kept.iter().find(|ln| st.dead.binary_search(ln).is_ok() && self.loans[**ln as usize].place.owned_len() == self.loans[**ln as usize].place.proj.len()) {
                                 let lo = &self.loans[ln as usize];
                                 let name = path_str(&self.locals, &BPlace { local: lo.place.local, proj: vec![] });
