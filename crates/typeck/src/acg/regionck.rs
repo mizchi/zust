@@ -392,7 +392,11 @@ fn dyn_tail(prog: &Program, t: Ty, depth: u32) -> bool {
 }
 
 fn lts_of(prog: &Program, base: u32) -> usize {
-    prog.adt_regions.get(&base).map_or(0, |r| r.lts.len())
+    match prog.adt_regions.get(&base) {
+        Some(r) => r.lts.len(),
+        // (a type parameter's placeholder: one region, the parameter's (what its values may borrow))
+        None => prog.is_placeholder(base) as usize,
+    }
 }
 
 fn is_closure(prog: &Program, sid: u32) -> bool {
@@ -417,6 +421,28 @@ fn captures(prog: &Program, sid: u32) -> Option<(&[Ty], &[bool])> {
 }
 
 /// The number of region slots of t (None: not followed)
+/// The lifetimes a bound written as a string passes its trait (`GetRef<'a, isize>`: `'a`), in order
+fn bound_lts(b: &str) -> Vec<String> {
+    let (Some(i), Some(j)) = (b.find('<'), b.rfind('>')) else { return vec![] };
+    let Some(inner) = b.get(i + 1..j) else { return vec![] };
+    let (mut out, mut depth, mut from) = (vec![], 0i32, 0);
+    for (k, ch) in inner.char_indices().chain(std::iter::once((inner.len(), ','))) {
+        match ch {
+            '<' | '(' | '[' => depth += 1,
+            '>' | ')' | ']' => depth -= 1,
+            ',' if depth == 0 => {
+                let a = inner[from..k].trim();
+                if a.starts_with('\'') {
+                    out.push(a.to_string());
+                }
+                from = k + 1;
+            }
+            _ => {}
+        }
+    }
+    out
+}
+
 pub fn count(prog: &Program, t: Ty, depth: u32) -> Option<usize> {
     if depth > 24 {
         return None;
@@ -695,6 +721,12 @@ impl RgSt {
         let sd = &prog.structs[base as usize];
         let nl = lts_of(prog, base);
         let ng = sd.generics.len();
+        // (a placeholder: covariant in its one region)
+        if sd.placeholder.is_some() {
+            let v: std::sync::Arc<[Var]> = vec![Var::Co; nl + ng].into();
+            self.variance.insert(base, v.clone());
+            return v;
+        }
         let prelude = prog.struct_item.get(base as usize).is_some_and(|&i| i >= prog.prelude_from);
         // (the prelude's types stand for std's: raw pointers in them are as `NonNull` (covariant); its cells are
         // invariant)
@@ -906,7 +938,15 @@ impl RgSt {
                 // (its lifetime: written, or the default: the reference's around it, else 'static in a signature and
                 // inferred in a body)
                 let v = match c.next() {
-                    R_DYN_DEFAULT | R_ELIDED => match parent {
+                    R_DYN_DEFAULT => match parent {
+                        Some(r) => r,
+                        None if self.dyn_infer => self.var(),
+                        None => STATIC,
+                    },
+                    // (`dyn Tr + '_`: an elided lifetime, as any other `'_` (a fresh one of a call's parameter); not the
+                    // default, which in `Box<dyn Tr>` is 'static)
+                    R_ELIDED if c.codes.is_some() => elided(self),
+                    R_ELIDED => match parent {
                         Some(r) => r,
                         None if self.dyn_infer => self.var(),
                         None => STATIC,
@@ -1412,7 +1452,15 @@ impl RgSt {
                             let other = if j == 0 { "'static".to_string() } else { self.univ[j - 1].1.clone() };
                             // (a region the closure's signature binds flowing into one from outside)
                             let escapes = self.in_closure && !self.externals.contains(&u) && !self.outer_univ.contains(&u) && self.cap_regions.contains(&y);
-                            errs.push((sp, if escapes { "borrowed data escapes outside of closure (a region of its signature flows into one from outside)".to_string() } else { format!("lifetime may not live long enough (`{uname}` must outlive `{other}`)") }));
+                            let msg = if escapes {
+                                "borrowed data escapes outside of closure (a region of its signature flows into one from outside)".to_string()
+                            } else if let Some(tp) = uname.strip_suffix('#') {
+                                // (a type parameter's placeholder: what its values may borrow must outlive `other`)
+                                format!("the parameter type `{tp}` may not live long enough (it must outlive `{other}`) (E0{})", if j == 0 { 310 } else { 309 })
+                            } else {
+                                format!("lifetime may not live long enough (`{uname}` must outlive `{other}`)")
+                            };
+                            errs.push((sp, msg));
                         }
                     }
                     st.push(y);
@@ -1523,6 +1571,49 @@ impl Cx<'_> {
         let opaque = inputs.is_empty() && !generic && rs.is_none() && prog.opaque.contains(&rg.base);
         if opaque {
             rg.ret = count(prog, ret_t, 0).filter(|&c| c > 0).map(|c| vec![STATIC; c]);
+        }
+        // (a placeholder for a type parameter (zustc check of a generic fn nothing calls): its region is a universal
+        // one, named as the placeholder (`T#`), that outlives what the parameter's `T: 'a` bounds name)
+        if generic {
+            for (k, &t) in rg.inst_args.clone().iter().enumerate() {
+                let (Ty::Struct(sid), Some(Some(tr))) = (t, targs.get(k)) else { continue };
+                let (Some(&v), true) = (tr.first(), prog.is_placeholder(sid)) else { continue };
+                rg.univ.push((v, prog.structs[sid as usize].name.clone()));
+                let pname = gsig.generics.get(k).map(|g| g.0.as_str()).unwrap_or("");
+                // (and what its bounds' traits require of their `Self` (`trait Tr<'a>: 'a`, `T: Tr<'x>`: T: 'x),
+                // through supertraits)
+                if !prog.trait_self_outlives.is_empty() {
+                    let mut todo: Vec<(String, Vec<String>)> = gsig.generics.get(k).map(|g| g.1.iter().map(|b| (b.split('<').next().unwrap_or(b).trim().to_string(), bound_lts(b))).collect()).unwrap_or_default();
+                    let mut seen = 0;
+                    while let Some((tr, args)) = todo.pop() {
+                        seen += 1;
+                        if seen > 16 {
+                            break;
+                        }
+                        let short = tr.rsplit("::").next().unwrap_or(&tr).to_string();
+                        let find = |m: &HashMap<String, Vec<String>>| m.get(&tr).or_else(|| m.iter().find(|(n, _)| n.rsplit("::").next() == Some(&short)).map(|(_, x)| x)).cloned();
+                        for c in find(&prog.trait_self_outlives).unwrap_or_default() {
+                            let b = if c == "static" { Some(STATIC) } else { c.parse::<usize>().ok().and_then(|i| args.get(i)).and_then(|l| if l == "'static" { Some(STATIC) } else { rg.lt_names.iter().position(|x| x == l).and_then(|p| lts.get(p).copied()) }) };
+                            if let Some(b) = b {
+                                rg.known.push((v, b));
+                            }
+                        }
+                        // (a supertrait's lifetimes: as written in the trait's header, not the bound's; only 'static
+                        // and its unnamed ones are followed)
+                        for sup in find(&prog.trait_supers).unwrap_or_default() {
+                            todo.push((sup.split('<').next().unwrap_or(&sup).trim().to_string(), vec![]));
+                        }
+                    }
+                }
+                for (tp, c) in rs.map(|r| r.ty_outlives.as_slice()).unwrap_or(&[]) {
+                    if tp == pname {
+                        let b = if *c == R_STATIC { Some(STATIC) } else { lts.get(*c as usize).copied() };
+                        if let Some(b) = b {
+                            rg.known.push((v, b));
+                        }
+                    }
+                }
+            }
         }
         let nuniv = rg.univ.len();
         // (or a signature that writes 'static: `fn f(x: isize) -> &'static [isize]`)
@@ -1649,7 +1740,12 @@ impl Cx<'_> {
                 // its lifetime inferred)
                 let infer = matches!(to, Ty::Param(h) if h == crate::program::HOLE) && matches!(it, Ty::Ptr(_, i) if dyn_tail(prog, *i, 0));
                 let to = if infer { it } else { to };
-                if to != it {
+                // (an unsizing cast (`Box::new(v) as Box<dyn Tr + 'static>`): a coercion, the value flows into the
+                // type written)
+                // (a raw pointer to a value with no trait object in it, cast to one to a trait object (`p as *const (dyn
+                // Tr + 'static)`), unsizes too; one between pointers to trait objects is not a coercion)
+                let unsize = to != it && has_dyn(prog, to, 0) && (!matches!(to, Ty::Ptr(..)) || !has_dyn(prog, it, 0));
+                if to != it && !unsize {
                     return None;
                 }
                 if infer {
@@ -1669,6 +1765,10 @@ impl Cx<'_> {
                 let tree = self.rg.instantiate(prog, to, Some(&codes), &lts, &[], &mut |me| me.var());
                 self.rg.dyn_infer = false;
                 let tree = tree?;
+                if unsize {
+                    self.rg.flow(prog, it, to, &itr, &tree, super::borrowck::pos(x));
+                    return Some((to, tree));
+                }
                 // (a cast of a raw pointer may change the regions of what it points to; not a trait object's
                 // lifetime: `*mut (dyn Tr + 'a) as *mut (dyn Tr + 'static)` is an error)
                 // (`*mut S<dyn Tr + 'a>` too: the object at the end of what it points to)

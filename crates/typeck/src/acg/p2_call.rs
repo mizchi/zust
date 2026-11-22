@@ -807,6 +807,11 @@ impl Cx<'_> {
                     }
                 }
             };
+            // (a type parameter's placeholder: the method its bounds' traits declare, called with the trait's signature
+            // (its instance is not compiled: zustc check's last round follows closures only))
+            if let Some(id) = self.placeholder_method(sid, &name) {
+                break (a, o, sid, id);
+            }
             if let Some(id) = self.prog.method(sid, &name).or_else(|| self.prog.default_method(sid, &name)) {
                 break (a, o, sid, id);
             }
@@ -1062,6 +1067,25 @@ impl Cx<'_> {
                 | "as_mut_ptr" | "as_mut_slice" | "as_mut_str" | "first_mut" | "last_mut" | "get_mut" | "split_at_mut" | "chunks_mut"
                 | "chunks_exact_mut" | "make_ascii_uppercase" | "make_ascii_lowercase"
         )
+    }
+
+    /// The method `name` a placeholder's bounds' traits declare (Program::placeholder)
+    pub(crate) fn placeholder_method(&self, sid: u32, name: &str) -> Option<u32> {
+        if !self.prog.is_placeholder(sid) {
+            return None;
+        }
+        let bs = self.prog.structs[sid as usize].placeholder.clone()?;
+        // (a trait of a module is known by its path: `m::Tr` for a bound written `Tr`)
+        let decls = |tr: &str| -> Option<&Vec<u32>> {
+            self.prog.traits.get(tr).or_else(|| {
+                let tail = format!("::{tr}");
+                self.prog.traits.iter().find(|(k, _)| k.ends_with(&tail)).map(|(_, v)| v)
+            })
+        };
+        bs.iter().find_map(|b| {
+            let tr = b.split('<').next().unwrap_or(b).trim();
+            decls(tr)?.iter().copied().find(|&d| self.prog.names[d as usize].rsplit("::").next() == Some(name))
+        })
     }
 
     fn check_spawn_closure(&self, c: &Expr) -> R<()> {
@@ -1507,7 +1531,10 @@ impl Cx<'_> {
                 self.requested.push(iid);
                 return Ok((iid, g.sig(self.prog, iid).clone()));
             }
-            if !sig.has_body {
+            // (Self a type parameter's placeholder: the trait's method itself, with the trait's signature; its
+            // instance is not compiled)
+            let placeholder = matches!(args[0], Ty::Struct(s) if self.prog.is_placeholder(s));
+            if !sig.has_body && !placeholder {
                 return err(span, format!("`{}` has no implementation for `{}`", self.prog.names[id as usize], self.prog.tn(args[0])));
             }
         }

@@ -402,7 +402,13 @@ fn compile_once(prog: &Program, insts: &Mutex<Insts>, id: u32, f: &ItemFn, line_
     // (an instance with placeholders for type parameters (zustc check of a generic fn nothing calls) whose typeck
     // fails, as a placeholder cannot do all its bounds allow (a trait's method, a coercion to `dyn`): not checked
     // further, nothing reported. Its borrow and region checks' errors are)
-    if r.is_err() && placeholder {
+    // (not an error of the borrow check's kind lowering itself returns: `m[k] = v` of a HashMap is E0594 whatever T is)
+    let borrow_kind = |e: &str| {
+        ["cannot assign", "cannot borrow", "cannot move out", "use of moved", "borrow of moved", "does not live long enough", "may not live long enough", "(E0594)", "(E0596)", "(E0384)"]
+            .iter()
+            .any(|k| e.contains(k))
+    };
+    if placeholder && r.as_ref().is_err_and(|e| !borrow_kind(e)) {
         if regionck::debug() {
             eprintln!("regionck: placeholder instance not checked: {}", r.as_ref().err().map(|e| e.as_str()).unwrap_or(""));
         }

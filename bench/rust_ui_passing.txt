@@ -907,6 +907,7 @@ check-pass	borrowck/issue-10876.rs
 compile-fail	borrowck/issue-109271-pass-self-into-closure.rs
 compile-fail	borrowck/issue-111554.rs
 compile-fail	borrowck/issue-11493.rs
+compile-fail	borrowck/issue-119915-bad-clone-suggestion.rs
 check-pass	borrowck/issue-17263.rs
 run-pass	borrowck/issue-23338-params-outlive-temps-of-body.rs
 compile-fail	borrowck/issue-24267-flow-exit.rs
@@ -953,6 +954,7 @@ compile-fail	borrowck/issue-91206.rs
 compile-fail	borrowck/issue-92015.rs
 compile-fail	borrowck/issue-93093.rs
 run-pass	borrowck/lazy-init.rs
+compile-fail	borrowck/liberated-region-from-outer-closure.rs
 compile-fail	borrowck/mismatched-pointer-type-in-self-7061.rs
 compile-fail	borrowck/move-from-union-field-issue-66500.rs
 compile-fail	borrowck/move-in-pattern-mut.rs
@@ -1334,6 +1336,7 @@ run-pass	coercion/coerce-many-with-ty-var.rs
 check-pass	coercion/coerce-mut-ref-to-raw-ptr-borrow-expires.rs
 run-pass	coercion/coerce-mut-trait-object-8248.rs
 compile-fail	coercion/coerce-mut.rs
+compile-fail	coercion/coerce-overloaded-autoderef-fail.rs
 run-pass	coercion/coerce-overloaded-autoderef.rs
 run-pass	coercion/coerce-reborrow-imm-ptr-arg.rs
 run-pass	coercion/coerce-reborrow-imm-ptr-rcvr.rs
@@ -4390,6 +4393,8 @@ check-pass	nll/ty-outlives/issue-55756.rs
 check-pass	nll/ty-outlives/projection-body.rs
 check-pass	nll/ty-outlives/projection-where-clause-env.rs
 check-pass	nll/ty-outlives/projection-where-clause-trait.rs
+compile-fail	nll/ty-outlives/ty-param-fn-body.rs
+compile-fail	nll/ty-outlives/ty-param-fn.rs
 compile-fail	nll/ty-outlives/wf-unreachable.rs
 compile-fail	nll/type-check-pointer-coercions.rs
 compile-fail	nll/type-check-pointer-comparisons.rs
@@ -5541,6 +5546,9 @@ run-pass	regions/regions-bound-lists-feature-gate.rs
 compile-fail	regions/regions-bounded-by-trait-requiring-static.rs
 compile-fail	regions/regions-bounded-method-type-parameters.rs
 compile-fail	regions/regions-bounds.rs
+compile-fail	regions/regions-close-over-type-parameter-1.rs
+compile-fail	regions/regions-close-over-type-parameter-multiple.rs
+compile-fail	regions/regions-close-param-into-object.rs
 run-pass	regions/regions-copy-closure.rs
 run-pass	regions/regions-creating-enums2.rs
 compile-fail	regions/regions-creating-enums3.rs
@@ -5578,6 +5586,7 @@ compile-fail	regions/regions-infer-borrow-scope-too-big.rs
 run-pass	regions/regions-infer-borrow-scope-view.rs
 run-pass	regions/regions-infer-borrow-scope-within-loop-ok.rs
 run-pass	regions/regions-infer-borrow-scope.rs
+compile-fail	regions/regions-infer-bound-from-trait.rs
 run-pass	regions/regions-infer-call-2.rs
 compile-fail	regions/regions-infer-call-3.rs
 run-pass	regions/regions-infer-call.rs
@@ -6455,6 +6464,8 @@ compile-fail	suggestions/let-binding-init-expr-as-ty.rs
 compile-fail	suggestions/let-binding-suggest-issue-133713.rs
 compile-fail	suggestions/lifetimes/missing-lifetimes-in-signature-before-const.rs
 compile-fail	suggestions/lifetimes/missing-lifetimes-in-signature.rs
+compile-fail	suggestions/lifetimes/type-param-bound-scope.rs
+compile-fail	suggestions/lifetimes/type-param-missing-lifetime.rs
 compile-fail	suggestions/many-type-ascription.rs
 compile-fail	suggestions/match-ergonomics.rs
 compile-fail	suggestions/match-with-different-arm-types-as-stmt-instead-of-expr.rs
@@ -7245,6 +7256,7 @@ compile-fail	unboxed-closures/unboxed-closures-type-mismatch.rs
 run-pass	unboxed-closures/unboxed-closures-zero-args.rs
 run-pass	underscore-lifetime/basic-underscore-lifetime-elision.rs
 compile-fail	underscore-lifetime/dyn-trait-underscore-in-struct.rs
+compile-fail	underscore-lifetime/dyn-trait-underscore.rs
 compile-fail	underscore-lifetime/in-binder.rs
 compile-fail	underscore-lifetime/in-fn-return-illegal.rs
 compile-fail	underscore-lifetime/in-struct.rs

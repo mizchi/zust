@@ -128,6 +128,8 @@ pub struct AdtTable {
     tuples: Mutex<HashMap<usize, u32>>,
     /// The placeholders made, by (fn, type parameter)
     placeholders: Mutex<HashMap<(u32, u32), u32>>,
+    /// Whether any was made (read without the lock, on hot paths)
+    any_placeholder: std::sync::atomic::AtomicBool,
 }
 
 impl AdtTable {
@@ -137,6 +139,7 @@ impl AdtTable {
             inst: Mutex::new(HashMap::default()),
             tuples: Mutex::new(HashMap::default()),
             placeholders: Mutex::new(HashMap::default()),
+            any_placeholder: std::sync::atomic::AtomicBool::new(false),
         }
     }
     pub fn len(&self) -> usize {
@@ -304,6 +307,8 @@ pub struct Program {
     pub fnptr_impls: HashSet<(Option<Ty>, String)>,
     /// 親トレイト (`trait Bar: Foo`)
     pub trait_supers: FxMap<String, Vec<String>>,
+    /// What a trait's `Self` must outlive (`trait Tr<'a>: 'a`): "static", or the index of the trait's lifetime parameter
+    pub trait_self_outlives: FxMap<String, Vec<String>>,
     /// the generics a method of the trait starts with: Self and the trait's own parameters
     pub trait_ngen: FxMap<String, usize>,
     /// a generic trait's impls: trait → (self type, the trait's arguments, both with the impl's parameters as
@@ -737,6 +742,7 @@ impl Program {
             prelude_from: u32::MAX,
             overflow_checks: false,
             trait_supers: FxMap::default(),
+            trait_self_outlives: FxMap::default(),
             trait_ngen: FxMap::default(),
             impl_targs: FxMap::default(),
             ref_impls: Default::default(),
@@ -1328,6 +1334,9 @@ impl Program {
                 p.traits.entry(tr.clone()).or_default();
                 if let Some((_, sup)) = sm.trait_generics.iter().find(|g| g.0 == "#supers") {
                     p.trait_supers.insert(tr.clone(), sup.clone());
+                }
+                if let Some((_, so)) = sm.trait_generics.iter().find(|g| g.0 == crate::types::SELF_OUTLIVES) {
+                    p.trait_self_outlives.insert(tr.clone(), so.clone());
                 }
                 p.trait_ngen.insert(tr.clone(), 1 + sm.trait_generics.iter().filter(|g| !g.0.starts_with('#')).count());
             }
@@ -2825,7 +2834,13 @@ impl Program {
         }
         let s = self.structs.push(d);
         g.insert((id, k), s);
+        self.structs.any_placeholder.store(true, std::sync::atomic::Ordering::Relaxed);
         s
+    }
+
+    /// sid is a placeholder (Program::placeholder); cheap when none was made
+    pub fn is_placeholder(&self, sid: u32) -> bool {
+        self.structs.any_placeholder.load(std::sync::atomic::Ordering::Relaxed) && self.structs[sid as usize].placeholder.is_some()
     }
 
     pub fn tuple_base(&self, n: usize) -> u32 {

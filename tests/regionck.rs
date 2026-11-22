@@ -1089,12 +1089,48 @@ fn uncalled_generic_fns() {
     assert!(d.len() == 1 && d[0].0 == 7 && d[0].1.contains("more than once"), "{d:?}");
     let d = check("fn baz<'a, 'b, T>(x: &mut Vec<&'a T>, y: &T) {\n    x.push(y);\n}\nfn main() {}\n");
     assert!(d.len() == 1 && d[0].0 == 2 && d[0].1.contains("lifetime may not live long enough"), "{d:?}");
+    // (an error of the borrow check's kind lowering returns is reported in a placeholder instance too)
+    let d = check("use std::collections::HashMap;\nfn put<T>(m: &HashMap<u8, u8>, _t: T) {\n    m[&1] = 2;\n}\nfn main() {}\n");
+    assert!(d.len() == 1 && d[0].0 == 3 && d[0].1.contains("E0594"), "{d:?}");
     // (a generic fn's call of a concrete impl's method whose trait declares 'static too is followed)
     let d = check("struct S;\ntrait Tr {\n    fn take(x: &'static u8);\n}\nimpl Tr for S {\n    fn take(_: &'static u8) {}\n}\nfn f<T>(x: &u8) {\n    S::take(x);\n}\nfn main() {\n    let n = 0u8;\n    f::<u8>(&n);\n}\n");
     assert!(d.len() == 1 && d[0].0 == 9, "{d:?}");
     // (accepted: a bound's method, a Copy bound, a recursive call through a closure, a trait's impl with 'static)
     assert_eq!(
         check("trait Tr {\n    fn get(&self) -> u8;\n}\nfn a<T: Tr>(x: &T) -> u8 {\n    x.get()\n}\nfn b<T: Copy>(x: T) -> (T, T) {\n    (x, x)\n}\nfn c<F: FnMut(u8)>(n: u8, mut f: F) {\n    if n > 0 {\n        c(n - 1, |x| f(x))\n    }\n}\nfn d<'a, 'b, T>(_: &'a &'b (), v: &'b T, _: &()) -> &'a T {\n    v\n}\nfn main() {}\n"),
+        vec![]
+    );
+}
+
+/// A placeholder's region is a type parameter's: universal, outliving what its `T: 'a` bounds name. One that must
+/// outlive another region is "the parameter type `T` may not live long enough" (E0309; E0310 for 'static)
+#[test]
+fn type_parameter_regions() {
+    let d = check("use std::cell::Cell;\nfn outlives<'a, T>(_x: Cell<&'a usize>, _y: T)\nwhere\n    T: 'a,\n{\n}\nfn region_static<'a, T>(cell: Cell<&'a usize>, t: T) {\n    outlives(cell, t)\n}\nfn main() {}\n");
+    assert!(d.len() == 1 && d[0].0 == 8 && d[0].1.contains("the parameter type `T` may not live long enough") && d[0].1.contains("E0309"), "{d:?}");
+    assert_eq!(check("use std::cell::Cell;\nfn outlives<'a, T>(_x: Cell<&'a usize>, _y: T)\nwhere\n    T: 'a,\n{\n}\nfn bounded<'a, T: 'a>(cell: Cell<&'a usize>, t: T) {\n    outlives(cell, t)\n}\nfn main() {}\n"), vec![]);
+}
+
+/// What a bound's trait requires of its `Self` holds of a placeholder (`trait Tr: 'static`, `trait Q<'a>: 'a`, through
+/// supertraits); a raw pointer to a placeholder cast to one to a trait object is an unsizing coercion (review of #42)
+#[test]
+fn placeholder_trait_outlives() {
+    assert_eq!(check("trait Tr: 'static {}\nfn boxed<T: Tr>(v: T) -> Box<dyn Tr + 'static> {\n    Box::new(v)\n}\ntrait Q<'a>: 'a {}\nfn q<'a, T: Q<'a>>(v: T) -> Box<dyn Q<'a> + 'a> {\n    Box::new(v)\n}\ntrait Base: 'static {}\ntrait Sub: Base {}\nfn s<T: Sub>(v: T) -> Box<dyn Sub + 'static> {\n    Box::new(v)\n}\nfn main() {}\n"), vec![]);
+    let d = check("trait Tr {}\nfn p<T: Tr>(v: *const T) -> *const (dyn Tr + 'static) {\n    v as *const (dyn Tr + 'static)\n}\nfn main() {}\n");
+    assert!(d.len() == 1 && d[0].0 == 3 && d[0].1.contains("E0310"), "{d:?}");
+    assert_eq!(check("trait Tr {}\nfn p<T: Tr + 'static>(v: *const T) -> *const (dyn Tr + 'static) {\n    v as *const (dyn Tr + 'static)\n}\nfn main() {}\n"), vec![]);
+}
+
+/// A placeholder bounded by a trait: coerced to `dyn Tr + 'static` (E0310), cast to it; a fn whose body calls the
+/// bound's methods is not checked (`dyn Tr + '_` in a parameter is an elided lifetime, not the default)
+#[test]
+fn placeholder_bounds() {
+    let d = check("trait X {\n    fn foo(&self) {}\n}\nfn p1<T>(v: T) -> Box<dyn X + 'static>\nwhere\n    T: X,\n{\n    Box::new(v)\n}\nfn main() {}\n");
+    assert!(d.len() == 1 && d[0].0 == 8 && d[0].1.contains("E0310"), "{d:?}");
+    let d = check("trait S {\n    fn get(&self) -> isize;\n}\nfn m<A: S>(v: A) -> Box<dyn S + 'static> {\n    Box::new(v) as Box<dyn S + 'static>\n}\nfn main() {}\n");
+    assert!(d.len() == 1 && d[0].0 == 5 && d[0].1.contains("E0310"), "{d:?}");
+    assert_eq!(
+        check("trait X {\n    fn foo(&self) {}\n}\nfn p1<'a, T: X + 'a>(v: T) -> Box<dyn X + 'a> {\n    Box::new(v)\n}\ntrait G {\n    fn get(&self) -> usize;\n}\nstruct H<'a> {\n    c: &'a usize,\n}\nimpl<'a> G for H<'a> {\n    fn get(&self) -> usize {\n        *self.c\n    }\n}\nfn get_v(gc: Box<dyn G + '_>) -> usize {\n    gc.get()\n}\nfn main() {\n    let c = 22;\n    let h = H { c: &c };\n    println!(\"{}\", get_v(Box::new(h) as Box<dyn G>));\n}\n"),
         vec![]
     );
 }

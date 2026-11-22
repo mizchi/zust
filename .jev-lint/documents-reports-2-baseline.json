@@ -1,6 +1,6 @@
 {
   "schema": "jev-lint-documents-1",
-  "snapshotDigest": "68f4e509fecadddcccf94324139e596a6bbe8cf6de95e90047bb9b3acc2f538f",
+  "snapshotDigest": "fd86bd45edf631cc4533d32c68bf2c5f73c2d0e4bf2b1513bbf5531b6963f257",
   "questionDigest": "209d6df378ccb747fcb0e821998fcd6105bc76638a88d22488d3b398d6a21595",
   "model": "jev-1.14.0",
   "snapshotChanged": false,
@@ -66,10 +66,10 @@
       "contextHash": "7c7b286af72e5d19978bdcefe4ac1812afb0557f682df47ae767fa9324a36f5c",
       "judgment": {
         "choice": "supports",
-        "confidence": 1,
+        "confidence": 0.99,
         "probabilities": {
-          "supports": 1,
-          "contradicts": 0,
+          "supports": 0.99,
+          "contradicts": 0.01,
           "unrelated": 0,
           "insufficient_context": 0
         }
@@ -100,12 +100,12 @@
       "contextHash": "a068452334ef52150a1932e9d45207a4c156e3a5c60d69e061e986b1aa86d889",
       "judgment": {
         "choice": "supports",
-        "confidence": 0.96,
+        "confidence": 0.97,
         "probabilities": {
-          "supports": 0.97,
+          "supports": 0.98,
           "contradicts": 0.02,
           "unrelated": 0,
-          "insufficient_context": 0.01
+          "insufficient_context": 0
         }
       }
     },
@@ -168,12 +168,12 @@
       "contextHash": "ecee8f597e8c6093bcea35ffd84dafe505685fb3c77901bd2a2a9e033883360c",
       "judgment": {
         "choice": "supports",
-        "confidence": 0.97,
+        "confidence": 0.99,
         "probabilities": {
-          "supports": 0.98,
+          "supports": 0.99,
           "contradicts": 0.01,
           "unrelated": 0,
-          "insufficient_context": 0.01
+          "insufficient_context": 0
         }
       }
     },
@@ -304,10 +304,10 @@
       "contextHash": "41c0a2541784f0e073e300bd96b1ad35979d31a7048a9c86dc0c9821eba76c55",
       "judgment": {
         "choice": "supports",
-        "confidence": 1,
+        "confidence": 0.99,
         "probabilities": {
-          "supports": 1,
-          "contradicts": 0,
+          "supports": 0.99,
+          "contradicts": 0.01,
           "unrelated": 0,
           "insufficient_context": 0
         }
@@ -372,10 +372,10 @@
       "contextHash": "65d03eec8a642fb4c59c7bacc74397f936864091105bba631e8977b9ca9c1612",
       "judgment": {
         "choice": "supports",
-        "confidence": 0.99,
+        "confidence": 0.97,
         "probabilities": {
-          "supports": 0.99,
-          "contradicts": 0.01,
+          "supports": 0.98,
+          "contradicts": 0.02,
           "unrelated": 0,
           "insufficient_context": 0
         }
@@ -712,10 +712,10 @@
       "contextHash": "fee3dc6136c2d74a8f2b22992deee33ae5ead6cdbc19c240e51b7dcbe27e38cc",
       "judgment": {
         "choice": "supports",
-        "confidence": 0.97,
+        "confidence": 0.96,
         "probabilities": {
-          "supports": 0.98,
-          "contradicts": 0.01,
+          "supports": 0.97,
+          "contradicts": 0.02,
           "unrelated": 0,
           "insufficient_context": 0.01
         }
@@ -746,12 +746,12 @@
       "contextHash": "74cd923d61e00b7739f80b534b652a909070bb949bfb007a464579050da1d263",
       "judgment": {
         "choice": "supports",
-        "confidence": 0.99,
+        "confidence": 0.97,
         "probabilities": {
-          "supports": 0.99,
+          "supports": 0.98,
           "contradicts": 0.01,
           "unrelated": 0,
-          "insufficient_context": 0
+          "insufficient_context": 0.01
         }
       }
     },
@@ -780,12 +780,12 @@
       "contextHash": "54b56e94027819b91287b9766c4872faa76c4344146540b341b4389c6b8dd7ce",
       "judgment": {
         "choice": "supports",
-        "confidence": 0.92,
+        "confidence": 0.95,
         "probabilities": {
-          "supports": 0.94,
-          "contradicts": 0.04,
+          "supports": 0.96,
+          "contradicts": 0.03,
           "unrelated": 0,
-          "insufficient_context": 0.02
+          "insufficient_context": 0.01
         }
       }
     },
@@ -814,10 +814,10 @@
       "contextHash": "7438e0bb6ac3c01bf6beaa56051a35abf5a2f30ee56334c8cd754b996d6bd4e6",
       "judgment": {
         "choice": "supports",
-        "confidence": 0.84,
+        "confidence": 0.85,
         "probabilities": {
-          "supports": 0.88,
-          "contradicts": 0.11,
+          "supports": 0.89,
+          "contradicts": 0.1,
           "unrelated": 0,
           "insufficient_context": 0.01
         }
@@ -916,12 +916,12 @@
       "contextHash": "6ef3c783f7f2ee4aa85d450d7fc65f20f61a1aa01a222d8aeb9ddeda31a027f9",
       "judgment": {
         "choice": "supports",
-        "confidence": 0.87,
+        "confidence": 0.79,
         "probabilities": {
-          "supports": 0.9,
-          "contradicts": 0.06,
+          "supports": 0.84,
+          "contradicts": 0.05,
           "unrelated": 0,
-          "insufficient_context": 0.04
+          "insufficient_context": 0.11
         }
       }
     },
@@ -984,10 +984,10 @@
       "contextHash": "262bb5dcd097b8cb7be1fb2545acff1e36bb67eb6c6b7603871f70e0250fd627",
       "judgment": {
         "choice": "supports",
-        "confidence": 0.65,
+        "confidence": 0.64,
         "probabilities": {
-          "supports": 0.74,
-          "contradicts": 0.25,
+          "supports": 0.73,
+          "contradicts": 0.26,
           "unrelated": 0,
           "insufficient_context": 0.01
         }
@@ -1018,10 +1018,10 @@
       "contextHash": "0b80accfa94c5b38ba9a5a907f337dfaa274c72bc632be2ff55655cef05112aa",
       "judgment": {
         "choice": "supports",
-        "confidence": 0.63,
+        "confidence": 0.68,
         "probabilities": {
-          "supports": 0.72,
-          "contradicts": 0.27,
+          "supports": 0.76,
+          "contradicts": 0.23,
           "unrelated": 0,
           "insufficient_context": 0.01
         }
@@ -1086,12 +1086,12 @@
       "contextHash": "3680d7821ceccb84e40c111efdbf9782ab670b502e1b1838ae62cb03ee844288",
       "judgment": {
         "choice": "supports",
-        "confidence": 0.96,
+        "confidence": 0.99,
         "probabilities": {
-          "supports": 0.97,
-          "contradicts": 0.02,
+          "supports": 0.99,
+          "contradicts": 0.01,
           "unrelated": 0,
-          "insufficient_context": 0.01
+          "insufficient_context": 0
         }
       }
     },
@@ -1120,12 +1120,12 @@
       "contextHash": "bdae948e735bbc239b594e195dd432f3efabbcd09895e48688e599b130a79530",
       "judgment": {
         "choice": "supports",
-        "confidence": 0.88,
+        "confidence": 0.77,
         "probabilities": {
-          "supports": 0.91,
-          "contradicts": 0.08,
+          "supports": 0.83,
+          "contradicts": 0.15,
           "unrelated": 0,
-          "insufficient_context": 0.01
+          "insufficient_context": 0.02
         }
       }
     },
@@ -1154,10 +1154,10 @@
       "contextHash": "56aef8202ec18e7d916f99df3c3f62b2bb9580fd1fbf151d494787ff37e24afd",
       "judgment": {
         "choice": "supports",
-        "confidence": 0.83,
+        "confidence": 0.85,
         "probabilities": {
-          "supports": 0.87,
-          "contradicts": 0.12,
+          "supports": 0.89,
+          "contradicts": 0.1,
           "unrelated": 0,
           "insufficient_context": 0.01
         }
@@ -1188,20 +1188,54 @@
       "contextHash": "74e65e68c1b778bfced01be26cec0dab66d60dd32d09c465681c7178583e7e1b",
       "judgment": {
         "choice": "supports",
-        "confidence": 0.99,
+        "confidence": 0.97,
         "probabilities": {
-          "supports": 0.99,
-          "contradicts": 0.01,
+          "supports": 0.98,
+          "contradicts": 0.02,
           "unrelated": 0,
           "insufficient_context": 0
+        }
+      }
+    },
+    {
+      "id": "docs_reports_2026-11-22-01-region-check-5",
+      "topic": "The Japanese file docs/ja/reports/2026-11-22-01-region-check-5.md is a faithful translation of docs/reports/2026-11-22-01-region-check-5.md",
+      "mode": "translation",
+      "reference": {
+        "source": "docs_reports_2026-11-22-01-region-check-5.en",
+        "path": "docs/reports/2026-11-22-01-region-check-5.md",
+        "startLine": 1,
+        "endLine": 80,
+        "quote": "# Region (lifetime) checking, part 5: a type parameter's region (issue #1)\n\nDate: 2026-11-22\n\nPart 4 ([2026-11-21-07](2026-11-21-07-region-check-4.md)) checks a generic fn nothing calls with a placeholder type\nfor each type parameter. That placeholder had no region, so `T: 'a` meant nothing, and the E0310 / E0309 tests (\"the\nparameter type `T` may not live long enough\") could not fail. This step gives it one.\n\n## 1. What was added\n\n- **A placeholder's region:** a placeholder has one region, covariant. It stands for what the parameter's values may\n  borrow. In its instance the region is universal, named as the placeholder (`T#`). It outlives what the parameter's\n  `T: 'a` / `T: 'static` bounds name, and what the parameters' types imply (`&'a T` implies `T: 'a`).\n- **The error:** a placeholder's region that must outlive another is \"the parameter type `T` may not live long\n  enough\": E0310 for 'static, E0309 otherwise.\n  - Example: `outlives(cell, t)` with `fn outlives<'a, T: 'a>(..)` in a fn whose `T` has no `T: 'a`.\n  - Example: `Box::new(v)` returned as `Box<dyn X + 'static>`.\n- **Cost on the hot path:** `lts_of` reads a placeholder only once one was made (an atomic flag), so the hot path does\n  not lock the struct table otherwise.\n- **Bounds that are traits:** a fn whose type parameters are bounded by traits gets a placeholder instance when its body\n  calls none of the methods those traits declare (`Box::new(v)` into `Box<dyn X>`).\n  - A call of them would check only the trait's declaration, and its typeck is the cost. On the patterns input, four\n    such fns cost +0.5%.\n  - A placeholder's method resolves to its bounds' trait's declaration; a trait of a module is found by the last name\n    of its path.\n  - A trait method with no body is called for a placeholder `Self`. Its instance is not compiled.\n- **Unsizing casts:** `Box::new(v) as Box<dyn Tr + 'static>` is a coercion. The value flows into the type written.\n- **`dyn Tr + '_`:** in a signature it is an elided lifetime, a fresh one at each call. It is not the default, which in\n  `Box<dyn Tr>` is 'static. A signature that writes only that `'_` used to read as having no regions, so\n  `get_v(Box::new(h) as Box<dyn G>)` with `fn get_v(gc: Box<dyn G + '_>)` was rejected.\n- **E0594 and its kind (review of #40):** the borrow check's kind of errors that lowering itself returns (E0594 for\n  `m[&k] = v` of a HashMap, `cannot borrow`, E0596, E0384) are reported in placeholder instances too, not left out\n  with the typeck errors.\n\n- **Review of #42:** what a bound's trait requires of its `Self` (`trait Tr: 'static`, `trait Q<'a>: 'a`, through\n  supertraits for 'static) holds of the placeholder: `fn boxed<T: Tr>(v: T) -> Box<dyn Tr + 'static>` was rejected\n  (E0310). A raw pointer to a value with no trait object in it, cast to a pointer to a trait object\n  (`p as *const (dyn Tr + 'static)`), is an unsizing coercion: the value's regions outlive the object's lifetime.\n\n## 2. Coverage\n\n(tests/ui compile-fail, rust-lang/rust 1.100.0)\n\n| | main (548feb9) | this work |\n|---|---:|---:|\n| compile-fail passing (accidental ones not counted) | 4038 | 4050 (+12) |\n\n- No test that passed before fails now; run-pass and check-pass do not change.\n- Among the new ones: `nll/ty-outlives/ty-param-fn.rs`, `nll/ty-outlives/ty-param-fn-body.rs`,\n  `regions/regions-close-param-into-object.rs`, `regions/regions-close-over-type-parameter-1.rs`,\n  `regions/regions-infer-bound-from-trait.rs`, `underscore-lifetime/dyn-trait-underscore.rs`.\n\n## 3. KPIs\n\n`bench/kpi_track.py --dry-run --lsp`, main (38e288b) and this work on it, both measured here, one after the other (main\nhas moved on since to 548feb9, merged here; this work changes no code of #36):\n\n| KPI | main (38e288b) | this work (3bceef2) | change |\n|---|---:|---:|---:|\n| no-op build (M) | 0.706 | 0.706 | ±0 |\n| edit one fn (M) | 545.737 | 546.168 | +0.08% |\n| check (M) | 3834.36 | 3834.41 | ±0 |\n| cache (KiB) | 1902.8 | 1902.8 | ±0 |\n| LSP session (G) | 10.9195 | 10.9092 | -0.09% |\n| traits check (M) | 1188.4 | 1188.53 | +0.01% |\n| traits edit (M) | 61.609 | 61.606 | ±0 |\n| crates no-op (M) | 9.942 | 9.94 | -0.02% |\n| crates edit (M) | 315.721 | 315.694 | -0.01% |\n| patterns check (M) | 713.791 | 713.875 | +0.01% |\n| patterns edit (M) | 260.857 | 260.602 | -0.10% |\n\nNo KPI moves past run-to-run noise: `lts_of`'s atomic flag keeps the struct table's lock off the hot path, and on the\nKPI inputs no placeholder's region is checked (no instance has a `T#` universal region).\n\n## 4. Not covered yet\n\n- **Projections:** the region of a projection of a type parameter (`<T as Tr>::Output: 'a`). A placeholder has no\n  associated types, so those fns are not checked (`nll/ty-outlives/projection-*`).\n- **`impl Trait` results:** the regions an `impl Trait` result captures (`type_parameters_captured`).\n- **Async fns:** their placeholder instances.",
+        "contentHash": "19263579319d9f7671ca8bc70a42c817438bf867bb36f8749b4092861ce7bf2d"
+      },
+      "target": {
+        "source": "docs_reports_2026-11-22-01-region-check-5.ja",
+        "path": "docs/ja/reports/2026-11-22-01-region-check-5.md",
+        "startLine": 1,
+        "endLine": 79,
+        "quote": "# リージョン (ライフタイム) 検査、その 5: 型パラメータのリージョン (issue #1)\n\n日付: 2026-11-22\n\nその 4 ([2026-11-21-07](2026-11-21-07-region-check-4.md)) は、何も呼ばないジェネリック関数を、型パラメータごとの代わりの\n型で検査する。その代わりの型はリージョンを持たなかった。そのため `T: 'a` は何の意味も持たず、E0310 / E0309 のテスト\n(「the parameter type `T` may not live long enough」) は落ちようがなかった。この段は、代わりの型にリージョンを持たせる。\n\n## 1. 加えたもの\n\n- **代わりの型のリージョン:** 代わりの型はリージョンを 1 つ持ち、共変。パラメータの値が借りうるものを表す。\n  インスタンスの中では universal なリージョンで、名前は代わりの型と同じ (`T#`)。パラメータの `T: 'a` / `T: 'static`\n  の境界が名指すものと、引数の型が導くもの (`&'a T` は `T: 'a` を導く) より長生きする。\n- **エラー:** 代わりの型のリージョンが、ほかのリージョンより長生きする必要があれば「the parameter type `T` may not\n  live long enough」。'static に対してなら E0310、それ以外なら E0309。\n  - 例: `T` が `T: 'a` を持たない関数の中の、`fn outlives<'a, T: 'a>(..)` への呼び出し `outlives(cell, t)`。\n  - 例: `Box<dyn X + 'static>` として返す `Box::new(v)`。\n- **よく通る経路のコスト:** `lts_of` は、代わりの型を作ったあとでだけ代わりの型を見る (atomic のフラグ)。それまでは\n  struct の表のロックを取らない。\n- **トレイトの境界:** 型パラメータがトレイトで縛られた関数も、本体がそのトレイトの宣言するメソッドを 1 つも呼ばなければ、\n  代わりの型のインスタンスを作る (`Box::new(v)` を `Box<dyn X>` へ)。\n  - それらのメソッドの呼び出しで検査できるのはトレイトの宣言だけで、コストはその型検査にかかる。patterns の入力では、\n    そうした関数 4 つで +0.5% だった。\n  - 代わりの型のメソッドは、境界のトレイトの宣言に解決する。モジュールの中のトレイトは、パスの最後の名前で引く。\n  - 本体のないトレイトのメソッドも、代わりの型の `Self` については呼べる (そのインスタンスはコンパイルしない)。\n- **unsize のキャスト:** `Box::new(v) as Box<dyn Tr + 'static>` は型の変換で、値は書いた型へ流れる。\n- **`dyn Tr + '_`:** シグネチャの中では省略したライフタイムで、呼び出しごとに新しいものになる。既定のライフタイム\n  (`Box<dyn Tr>` なら 'static) ではない。その `'_` だけを書くシグネチャは、リージョンを持たないものとして読まれて\n  いた。そのため `fn get_v(gc: Box<dyn G + '_>)` に対する `get_v(Box::new(h) as Box<dyn G>)` を拒否していた。\n- **E0594 などの借用のエラー (#40 のレビュー):** lowering が自分で返す借用の種類のエラーは、代わりの型のインスタンスでも\n  報告する。HashMap の `m[&k] = v` の E0594、`cannot borrow`、E0596、E0384 がそれにあたる。型検査のエラーと一緒に\n  捨てない。\n\n- **#42 のレビュー:** 境界のトレイトが自分の `Self` に求めること (`trait Tr: 'static`、`trait Q<'a>: 'a`。'static なら親\n  トレイトを通しても) は、代わりの型についても成り立つ。`fn boxed<T: Tr>(v: T) -> Box<dyn Tr + 'static>` を拒否\n  (E0310) していた。トレイトオブジェクトを含まない値への生ポインタを、トレイトオブジェクトへのポインタへキャストする\n  こと (`p as *const (dyn Tr + 'static)`) は unsize の変換で、値のリージョンはオブジェクトのライフタイムより長生きする。\n\n## 2. カバー率\n\n(tests/ui の compile-fail、rust-lang/rust 1.100.0)\n\n| | main (548feb9) | この作業 |\n|---|---:|---:|\n| 通る compile-fail (偶然の通過は数えない) | 4038 | 4050 (+12) |\n\n- 前に通っていたテストで、いま通らないものはない。run-pass と check-pass は変わらない。\n- 通るようになったものの例: `nll/ty-outlives/ty-param-fn.rs`、`nll/ty-outlives/ty-param-fn-body.rs`、\n  `regions/regions-close-param-into-object.rs`、`regions/regions-close-over-type-parameter-1.rs`、\n  `regions/regions-infer-bound-from-trait.rs`、`underscore-lifetime/dyn-trait-underscore.rs`。\n\n## 3. KPI\n\n`bench/kpi_track.py --dry-run --lsp` で、main (38e288b) とその上のこの作業を、どちらもここで、順に測った (main はその後\n548feb9 へ進み、ここに取り込んだ。この作業は #36 のコードを変えない):\n\n| KPI | main (38e288b) | この作業 (3bceef2) | 変化 |\n|---|---:|---:|---:|\n| no-op build (M) | 0.706 | 0.706 | ±0 |\n| edit one fn (M) | 545.737 | 546.168 | +0.08% |\n| check (M) | 3834.36 | 3834.41 | ±0 |\n| cache (KiB) | 1902.8 | 1902.8 | ±0 |\n| LSP session (G) | 10.9195 | 10.9092 | -0.09% |\n| traits check (M) | 1188.4 | 1188.53 | +0.01% |\n| traits edit (M) | 61.609 | 61.606 | ±0 |\n| crates no-op (M) | 9.942 | 9.94 | -0.02% |\n| crates edit (M) | 315.721 | 315.694 | -0.01% |\n| patterns check (M) | 713.791 | 713.875 | +0.01% |\n| patterns edit (M) | 260.857 | 260.602 | -0.10% |\n\nどの KPI も、実行ごとの揺れを超えて動かない。`lts_of` の atomic のフラグで、よく通る経路は struct の表のロックを取らない。\nKPI の入力では、代わりの型のリージョンを検査するインスタンスはない (`T#` の universal なリージョンを持つものがない)。\n\n## 4. まだ扱わないもの\n\n- **射影型:** 型パラメータの射影型のリージョン (`<T as Tr>::Output: 'a`)。代わりの型は関連型を持たないので、そうした\n  関数は検査しない (`nll/ty-outlives/projection-*`)。\n- **`impl Trait` の結果:** `impl Trait` の結果が捕捉するリージョン (`type_parameters_captured`)。\n- **async fn:** async fn の代わりの型のインスタンス。",
+        "contentHash": "0b7d66a5b218e94994e47bbfcf5c76516a327e44e8847deb86438b9389f229ab"
+      },
+      "context": [],
+      "candidateId": "34f3a5f5e4ec13256105c07bdfe3d4d24f142a84bd807085f71bd09340737d6c",
+      "contextHash": "f0d2be59aa7f66b5393e14f52bebb261bbc73ff0e17d8864466d2fbbacc92e53",
+      "judgment": {
+        "choice": "supports",
+        "confidence": 0.93,
+        "probabilities": {
+          "supports": 0.95,
+          "contradicts": 0.04,
+          "unrelated": 0,
+          "insufficient_context": 0.01
         }
       }
     }
   ],
   "coverage": {
-    "expected": 35,
-    "selected": 35,
-    "answered": 35,
+    "expected": 36,
+    "selected": 36,
+    "answered": 36,
     "missing": 0,
     "contradictions": 0,
     "unassessed": 0,
@@ -1210,9 +1244,9 @@
     "unboundDocuments": 0
   },
   "usage": {
-    "requests": 35,
-    "inputTokens": 192499,
-    "usd": 0.008084958000000001
+    "requests": 36,
+    "inputTokens": 197756,
+    "usd": 0.008305752
   },
   "errors": []
 }
