@@ -1794,6 +1794,24 @@ impl Cx<'_> {
             caps.push((loc, t));
             self.bk_capture(c, n, loc, t, by_move);
         }
+        // (a capture held by value (a `move` closure's) of a local not declared `mut`, which the body assigns or borrows
+        // mutably: E0594 / E0596 at the mutation; one held by reference is a `&mut` loan the borrow check reports)
+        if self.bk_on() && self.bk.fnmut_exprs.contains(&(c as *const Expr as usize)) {
+            let Expr::Closure(_, _, _, body, _) = c else { unreachable!() };
+            for (i, n) in cd.captures.iter().enumerate() {
+                if !cd.moved.get(i).copied().unwrap_or(false) {
+                    continue;
+                }
+                let immutable = self.lookup(n).and_then(|(loc, _)| self.bk.by_loc.get(&loc).copied()).is_some_and(|l| self.bk.locals[l as usize].mutable == Some(false));
+                if !immutable {
+                    continue;
+                }
+                if let Some((sp, assign)) = self.owned_mutation(body, n) {
+                    let msg = if assign { format!("cannot assign to `{n}`, as it is not declared as mutable (E0594)") } else { format!("cannot borrow `{n}` as mutable, as it is not declared as mutable (E0596)") };
+                    return Err(self.at(sp, msg));
+                }
+            }
+        }
         // (passed where a bound wants `Fn`: a closure that mutates what it captures is not one (E0594 / E0596))
         if fn_only && self.bk.fnmut_exprs.contains(&(c as *const Expr as usize)) {
             let Expr::Closure(_, _, _, body, csp) = c else { unreachable!() };
@@ -1994,6 +2012,50 @@ impl Cx<'_> {
             }
         }
         Ok((Some(a), st))
+    }
+
+    /// The first assignment to, `&mut` of, or `&mut self` method call of what the capture n itself holds (not through a
+    /// reference it holds: `t.0.0 = x` with `t.0: &mut S` mutates no part of t): where, whether an assignment
+    fn owned_mutation(&self, e: &Expr, n: &str) -> Option<(Sp, bool)> {
+        let owned = |l: &Expr| self.bk_rooted_at_pub(strip_paren(l), n).is_some_and(|(p, t)| p.owned_len_pub() == p.proj.len() && !matches!(t, Some(Ty::Ref(..))));
+        match e {
+            Expr::Assign(l, _) | Expr::AssignOp(_, l, _, _) => {
+                let mut b: &Expr = l;
+                while let Expr::Index(x, _, _) = strip_paren(b) {
+                    b = x;
+                }
+                if owned(b) {
+                    return Some((borrowck::pos(e), true));
+                }
+            }
+            Expr::Ref(true, l) => {
+                if owned(l) {
+                    return Some((borrowck::pos(e), false));
+                }
+            }
+            Expr::MethodCall(r, m, ..) => {
+                if owned(r) {
+                    let mut_self = match self.bk_rooted_at_pub(strip_paren(r), n) {
+                        Some((_, Some(Ty::Struct(sid)))) => self.prog.method(sid, m).is_some_and(|id| {
+                            let sg = &self.prog.sigs[id as usize];
+                            sg.has_self && matches!(sg.params.first(), Some(Ty::Ref(true, _)))
+                        }),
+                        _ => false,
+                    };
+                    if mut_self {
+                        return Some((borrowck::pos(e), false));
+                    }
+                }
+            }
+            _ => {}
+        }
+        let mut found = None;
+        crate::ast_closure::each_child_pub(e, &mut |c| {
+            if found.is_none() {
+                found = self.owned_mutation(c, n);
+            }
+        });
+        found
     }
 
     /// The first assignment to, `&mut` of, or `&mut self` method call of a captured variable in a closure's body (a

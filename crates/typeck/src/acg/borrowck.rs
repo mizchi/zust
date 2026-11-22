@@ -50,6 +50,9 @@ pub fn ref_deref(m: bool) -> Proj {
 
 impl BPlace {
     /// The part of the place the local owns (up to the first deref of a reference)
+    pub(crate) fn owned_len_pub(&self) -> usize {
+        self.owned_len()
+    }
     fn owned_len(&self) -> usize {
         self.proj.iter().position(|p| matches!(p, Proj::Deref(false) | Proj::Shr)).unwrap_or(self.proj.len())
     }
@@ -1837,6 +1840,10 @@ impl Cx<'_> {
         if self.bk.locals[l as usize].refs {
             self.bk.src(Src::Local(l));
         }
+    }
+
+    pub(crate) fn bk_rooted_at_pub(&self, e: &Expr, n: &str) -> Option<(BPlace, Option<Ty>)> {
+        self.bk_rooted_at(e, n)
     }
 
     /// A place rooted at the variable n (`n`, `n.a`, `*n.b`)

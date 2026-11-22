@@ -1326,3 +1326,12 @@ fn e0195_for_impls_of_references() {
     assert!(d.len() == 1 && d[0].1.contains("E0195"), "{d:?}");
     assert_eq!(check("pub trait Foo<'a> {\n    fn no_bound<'b>(self, b: &'b u8);\n    fn has_bound<'b: 'a>(self, b: &'b u8);\n}\nimpl<'a> Foo<'a> for &'a isize {\n    fn no_bound<'b>(self, b: &'b u8) {}\n    fn has_bound<'b: 'a>(self, b: &'b u8) {}\n}\nfn main() {}\n"), vec![]);
 }
+
+/// A capture held by value (a `move` closure's) of a local not declared `mut`: assigning it is E0594, at the
+/// assignment; assigning through a `&mut` it holds (`t.0.0 = x`) or reading it is not
+#[test]
+fn move_closure_assigns_immutable_capture() {
+    let d = check("fn main() {\n    let x = 0;\n    (move || {\n        x = 1;\n    })()\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 4 && d[0].1.contains("E0594"), "{d:?}");
+    assert_eq!(check("struct S(String);\nstruct T<'a>(&'a mut S);\nfn main() {\n    let mut s = S(String::new());\n    let t = T(&mut s);\n    let mut c = move || {\n        t.0.0 = String::from(\"new\");\n    };\n    c();\n    let y = 1;\n    let g = move || y + 1;\n    g();\n    let mut z = 0;\n    let mut h = move || z += 1;\n    h();\n}\n"), vec![]);
+}
