@@ -253,3 +253,4 @@ date	commit	change	noop_M	edit_M	check_M	cache_KiB	lsp_G	run	check	build	cfail	t
 2026-11-22	4d540f1+	cfg_select!: the first arm whose predicate holds	0.697	555.183	3862.892	1902.8	10.8520	1805	1492	101	4113	1193.508	64.008	10.370	320.284	723.286	268.008
 2026-11-22	4d540f1+	Review of #41: E0571, E0747, E0107 for turbofish counts, receiver's ref impl, alias instances	0.697	555.260	3863.881	1902.8	-	1805	1491	101	4059	1192.734	64.113	10.359	320.245	722.962	267.893
 2026-11-22	0871995+	A method's turbofish names its own parameters; primitives' From / Into bounds	0.697	555.195	3863.796	1902.8	-	1809	1493	101	4060	1192.734	64.002	10.370	320.231	723.074	268.021
+2026-11-22	135b732+	merge main (#42) into compat-next26	0.697	555.067	3863.382	1902.8	10.8534	1809	1493	101	4072	1192.759	64.098	10.370	320.238	723.142	268.037

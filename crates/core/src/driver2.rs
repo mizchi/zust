@@ -2904,7 +2904,21 @@ fn placeholder_wave(a: &Analysis, insts: &Mutex<Insts>) -> Vec<u32> {
         }
         // (a placeholder has no trait's methods: a fn whose type parameters are bounded by more than marker traits
         // would most likely fail its typeck after the work of it. Not made)
-        if sig.generics.iter().any(|(_, bs)| bs.iter().any(|b| !matches!(b.as_str(), "Copy" | "Sized" | "?Sized" | "Send" | "Sync" | "Unpin"))) {
+        // (a placeholder calls its bounds' methods as the trait declares them, which says little of the regions; a fn
+        // whose body calls a method a bound's trait declares is not made: its typeck is the cost, its check little)
+        let ii = p.item_of[id].unwrap_or(0) as usize;
+        let body = a.items.get(ii).and_then(|it| a.src.get(it.start..it.end)).unwrap_or("");
+        let calls_bound = sig.generics.iter().flat_map(|(_, bs)| bs.iter()).any(|b| {
+            if matches!(b.as_str(), "Copy" | "Sized" | "?Sized" | "Send" | "Sync" | "Unpin") {
+                return false;
+            }
+            let tr = b.split('<').next().unwrap_or(b).trim();
+            let tail = format!("::{tr}");
+            let decls = p.traits.get(tr).or_else(|| p.traits.iter().find(|(k, _)| k.ends_with(&tail)).map(|(_, v)| v));
+            // (a trait not known: as calling)
+            decls.is_none_or(|ds| ds.iter().any(|&d| p.names[d as usize].rsplit("::").next().is_some_and(|m| body.contains(&format!(".{m}(")) || body.contains(&format!("::{m}(")))))
+        });
+        if calls_bound {
             continue;
         }
         let args: Vec<Ty> = sig.generics.iter().enumerate().map(|(k, (n, bs))| Ty::Struct(p.placeholder(id as u32, k as u32, n, bs))).collect();

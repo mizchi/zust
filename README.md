@@ -29,7 +29,7 @@
 
 ## Status
 
-Numbers measured <!-- measured -->2026-11-22, 38e288b<!-- /measured --> by CI on each push to main (bench.yml runs
+Numbers measured <!-- measured -->2026-11-22, 2c8411a<!-- /measured --> by CI on each push to main (bench.yml runs
 `bench/ci_bench.py` and `bench/rust_ui.py`, then `scripts/update_readme.py` writes them here). Times come from shared
 GitHub Actions runners and vary by about ±20%; the instruction counts (valgrind) do not.
 
@@ -42,9 +42,9 @@ only the tests it can be asked to handle (no nightly features, auxiliary crates 
 | kind | applicable | pass |
 |---|---:|---:|
 | run-pass (builds, runs, same output) | 2385 | 1802 (75.6%) |
-| check-pass (accepted by `zustc check`) | 1807 | 1477 (81.7%) |
+| check-pass (accepted by `zustc check`) | 1807 | 1482 (82.0%) |
 | build-pass | 135 | 99 (73.3%) |
-| compile-fail (rejected at an annotated line) | 7358 | 4084 (55.5%) |
+| compile-fail (rejected at an annotated line) | 7358 | 4105 (55.8%) |
 <!-- /auto:ui -->
 
 [What is supported](#what-is-supported) breaks this down by area.
@@ -56,22 +56,22 @@ Build speed, build cache size and LSP latency on generated programs of 1000 / 50
 <!-- auto:kpi -->
 | KPI | gen1000 | gen5000 |
 |---|---:|---:|
-| cold build | 122 ms | 553 ms |
-| no-op build | 0.7 ms | 0.6 ms |
-| build after editing one function | 17.9 ms | 63.6 ms |
-| `check` | 79 ms | 379 ms |
+| cold build | 119 ms | 545 ms |
+| no-op build | 0.6 ms | 0.6 ms |
+| build after editing one function | 16.0 ms | 62.1 ms |
+| `check` | 76 ms | 376 ms |
 | no-op build (instructions) | 0.6 M | 0.6 M |
 | edit one function (instructions) | 124.4 M | 590.0 M |
-| `check` (instructions) | 781.3 M | 3855.4 M |
+| `check` (instructions) | 781.3 M | 3855.5 M |
 | build cache on disk | 387.2 KiB | 1902.8 KiB |
 | binary | 324.0 KiB | 1558.3 KiB |
-| cold build peak RSS | 18.7 MiB | 52.4 MiB |
+| cold build peak RSS | 18.8 MiB | 52.7 MiB |
 
 | zust-analyzer (zustc's own sources) | |
 |---|---:|
-| p50: definition, hover, completion, references, rename | 0.54 ms / 0.46 ms / 1.23 ms / 3.44 ms / 0.47 ms |
-| startup until indexed | 162 ms |
-| peak RSS | 88.8 MiB |
+| p50: definition, hover, completion, references, rename | 0.52 ms / 0.44 ms / 1.19 ms / 4.07 ms / 0.48 ms |
+| startup until indexed | 156 ms |
+| peak RSS | 90.1 MiB |
 <!-- /auto:kpi -->
 
 Every change is also measured on its own with `python3 bench/kpi_track.py`, so that small increases that add up stay
@@ -370,9 +370,9 @@ the measured numbers. The [reports](docs/reports/) explain each step.
 ### Overall
 
 - [x] tests/ui run-pass: <!-- total:run-pass -->75.6% (1802 / 2385)
-- [x] tests/ui check-pass: <!-- total:check-pass -->81.7% (1477 / 1807)
+- [x] tests/ui check-pass: <!-- total:check-pass -->82.0% (1482 / 1807)
 - [x] tests/ui build-pass: <!-- total:build-pass -->73.3% (99 / 135)
-- [ ] tests/ui compile-fail (an error on an annotated line): <!-- total:compile-fail -->55.5% (4084 / 7358)
+- [ ] tests/ui compile-fail (an error on an annotated line): <!-- total:compile-fail -->55.8% (4105 / 7358)
 - [x] real crates: fnv, adler2, hex, itoa, rustc-hash and cfg-if build and give the same output (6 / 6)
 - [x] zust-analyzer answers like rust-analyzer: 95.4% (rust-analyzer: 96.2%)
 
@@ -405,14 +405,14 @@ the measured numbers. The [reports](docs/reports/) explain each step.
 - [ ] `macro_rules!`: <!-- ui:macros -->76.4% (hygiene for `let`, labels, arm bindings; not every fragment kind)
 - [ ] unions: <!-- ui:union -->69.2% (no `repr(packed)`)
 - [ ] const generics: <!-- ui:const-generics -->58.4% (no `generic_const_exprs`)
-- [ ] generic associated types: <!-- ui:generic-associated-types -->71.1%
+- [ ] generic associated types: <!-- ui:generic-associated-types -->80.0%
 - [ ] casts (`as _` / `as *const _` take the source or expected type; a pointer of unknown kind is E0641): <!-- ui:cast -->72.4%
 - [ ] `impl Trait`: <!-- ui:impl-trait -->70.3% (return position, also nested (`-> Option<impl Debug>`), in trait methods and generic fns (typed per instance); no TAIT)
 - [ ] layout: `repr(packed)` / `repr(align)` are ignored: <!-- ui:packed,layout -->58.1%
 
 ### Checks (compile-fail)
 
-- [x] borrow checking: moves, conflicting loans, escapes, mutability: borrowck <!-- cf:borrowck -->65.8%
+- [x] borrow checking: moves, conflicting loans, escapes, mutability: borrowck <!-- cf:borrowck -->66.4%
   ([report 08](docs/reports/2026-11-18-08-borrow-checking.md))
 - [x] type errors, missing items, generics declarations (E0403, E0207, E0392, E0072 ..): typeck <!-- cf:typeck -->69.3%, structs <!-- cf:structs -->77.1%
 - [x] unsafe operations outside `unsafe` (E0133): calls to `unsafe fn` and extern fns, raw pointer derefs, `static mut`,
@@ -430,7 +430,7 @@ the measured numbers. The [reports](docs/reports/) explain each step.
   types (E0106), `'_` where it cannot be used (E0637), `unused_lifetimes` / `single_use_lifetimes`; borrows that
   must outlive the fn live to its end, closures that are not general enough or let borrowed data escape. Not yet:
   generic fns that are never called, what a closure's body requires of its fn, higher-ranked trait selection, the
-  requirements of the impl a coercion selects, the prelude's iterators (their types hold no lifetimes). regions <!-- cf:regions -->65.5%, lifetimes <!-- cf:lifetimes -->68.8%
+  requirements of the impl a coercion selects, the prelude's iterators (their types hold no lifetimes). regions <!-- cf:regions -->69.0%, lifetimes <!-- cf:lifetimes -->68.8%
 - [ ] coherence, bounds of blanket impls, dyn compatibility (E0038), the bindings of `dyn Tr<A = T>` against the associated type's bounds (done when T is a primitive, `str` or a struct name)
 - [ ] lints and warnings: lint <!-- cf:lint -->30.6%
 - [ ] editions (2015-only errors)
@@ -470,7 +470,9 @@ the measured numbers. The [reports](docs/reports/) explain each step.
   check +0.08%, LSP ±0 ([report](docs/reports/2026-11-21-05-region-check-2.md)). Part 3 (closures, loans that outlive
   the fn, lints), merged against main 68b7497: patterns check +0.60%, traits check +0.30%, check +0.33%
   ([report](docs/reports/2026-11-21-06-region-check-3.md)). Part 4 (generic fns nothing calls, with placeholder
-  types): every KPI within run-to-run noise ([report](docs/reports/2026-11-21-07-region-check-4.md))
+  types): every KPI within run-to-run noise ([report](docs/reports/2026-11-21-07-region-check-4.md)). Part 5 (a type
+  parameter's region, E0309 / E0310): every KPI within run-to-run noise
+  ([report](docs/reports/2026-11-22-01-region-check-5.md))
 - [ ] coherence and bounds of blanket impls: `check` time, LSP
 - [ ] real async (state machines, `poll`, an executor): build time, binary size
 - [ ] unwinding (landing pads): build time, binary size
