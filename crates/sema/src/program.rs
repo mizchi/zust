@@ -429,6 +429,9 @@ pub struct Program {
     /// Associated consts of impls whose self type names 'static (`impl A<'static> { const IC: i32 = 10; }`), with
     /// the region slots of that self type: `A::<'a>::IC` requires 'a to be 'static
     pub static_self_consts: FxMap<u32, Vec<u8>>,
+    /// The declared type (as written) of a constant whose type is not known yet during layout (`[u8; 1]`, `(u8,)`):
+    /// what an element or field of it is before its type is resolved
+    pub early_syn: FxMap<u32, crate::types::TySyn>,
     /// `#[panic_handler]` の関数 (no_std)。panic (範囲外アクセス・unwrap など) はここを呼ぶ
     pub panic_handler: Option<u32>,
     /// const と static
@@ -859,6 +862,7 @@ impl Program {
             any_immutable_static: false,
             static_copy: FxSet::default(),
             static_self_consts: FxMap::default(),
+            early_syn: FxMap::default(),
             alias_fixed_lt: false,
             trait_ngen: FxMap::default(),
             impl_targs: FxMap::default(),
@@ -1084,6 +1088,9 @@ impl Program {
                 // (an integer type is known already, before the layouts that evaluate constants (`[u8; N]`); the other
                 // types are resolved below)
                 let early = early_int_ty(t, &p.aliases).unwrap_or(Ty::Unit);
+                if early == Ty::Unit && matches!(t, TySyn::Array(..) | TySyn::Tuple(_) | TySyn::Ref(..)) {
+                    p.early_syn.insert(p.consts.len() as u32, t.clone());
+                }
                 p.consts.push(ConstDef {
                     name: n.clone(),
                     ty: early,
@@ -2902,7 +2909,7 @@ impl Program {
                 // (an element of a typed constant array is its element type: `const A: [u8; 1] = [!0]`)
                 let et = match self.const_ty_of(b) {
                     Some(Ty::Array(e, _)) => It::of_ty(*e),
-                    _ => None,
+                    _ => self.early_part_ty(b, None),
                 };
                 self.eval_t(&part, depth + 1, want.or(et))
             }
@@ -2919,7 +2926,7 @@ impl Program {
                         let sd = &self.structs[id as usize];
                         sd.fields.iter().find(|x| &x.0 == f).map(|x| x.1).and_then(It::of_ty)
                     }
-                    _ => None,
+                    _ => self.early_part_ty(b, f.parse::<usize>().ok()),
                 };
                 self.eval_t(&part, depth + 1, want.or(ft))
             }
@@ -3167,6 +3174,31 @@ impl Program {
         }
     }
 
+    /// Before constant types are resolved (a layout's `[u8; N]`): the integer type of an element (k None) or tuple
+    /// field k of the constant b, from its declared type as written
+    fn early_part_ty(&self, b: &crate::parse::Expr, k: Option<usize>) -> Option<It> {
+        use crate::parse::Expr;
+        let b = strip_parens(b);
+        let Expr::Path(None, p) = b else { return None };
+        if p.global || p.segs.len() != 1 {
+            return None;
+        }
+        let ci = *self.const_index.get(p.segs[0].name.as_str())?;
+        if self.consts[ci as usize].ty != Ty::Unit {
+            return None;
+        }
+        let mut t = self.early_syn.get(&ci)?;
+        while let TySyn::Ref(_, x) = t {
+            t = x;
+        }
+        let e = match (t, k) {
+            (TySyn::Array(e, _), None) => &**e,
+            (TySyn::Tuple(xs), Some(k)) => xs.get(k)?,
+            _ => return None,
+        };
+        early_int_ty(e, &self.aliases).and_then(It::of_ty)
+    }
+
     /// e's integer type as written, without evaluating it (a suffix, a cast, a constant's declared type, `u8::MAX`,
     /// an operator's operands'; None for an unsuffixed literal): what an unsuffixed literal beside it is
     fn static_ty(&self, e: &crate::parse::Expr) -> Option<It> {
@@ -3216,7 +3248,7 @@ impl Program {
             },
             Expr::Index(b, _, _) => match self.const_ty_of(b) {
                 Some(Ty::Array(e, _)) => It::of_ty(*e),
-                _ => None,
+                _ => self.early_part_ty(b, None),
             },
             _ => None,
         }

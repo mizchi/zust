@@ -110,6 +110,7 @@ fn main() {
     println!("{}", std::mem::size_of::<[u8; I128_LIT_MIN]>());
     println!("{} {} {}", std::mem::size_of::<[u8; REF_IDX]>(), std::mem::size_of::<[u8; USER_BITS]>(), EXP);
     println!("{}", FLIP);
+    println!("{}", std::mem::size_of::<PL>());
 }
 
 // (a generic alias resolves before layout; an unsafe block evaluates; the i128::MIN literal negates)
@@ -135,3 +136,10 @@ const fn flip(x: u8) -> u8 {
     !x
 }
 const FLIP: u8 = flip(255) + 1;
+// (an element or field of an aggregate constant in a layout, before the constants' types are resolved)
+const PARR: [u8; 1] = [!0];
+const PTUP: (u8,) = (!0,);
+const PL_N: usize = PARR[0].count_ones() as usize + PTUP.0.count_ones() as usize;
+struct PL {
+    bytes: [u8; PL_N],
+}
