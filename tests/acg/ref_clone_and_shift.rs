@@ -28,7 +28,7 @@ fn main() {
     println!("{}", vr.map_or(0, |v| v.len()));
     let (tx, rx) = std::sync::mpsc::channel::<Token>();
     let rt = &tx;
-    let tx2 = rt.clone();
+    let tx2: std::sync::mpsc::Sender<Token> = rt.clone();
     let _ = tx2.send(Token(11));
     drop(tx2);
     println!("{}", rx.recv().unwrap().0);
@@ -38,6 +38,11 @@ fn main() {
     let mut it2 = ri.clone();
     it2.next();
     println!("{} {}", it2.next().unwrap().0, it.len());
+    let mut n = 14;
+    let om = Some(&mut n);
+    let rm = &om;
+    let cm: &Option<&mut i32> = rm.clone();
+    println!("{}", cm.is_some());
     let a: u8 = &1 << 3;
     let _: u8 = &1 << &2;
     let _: u16 = 300;

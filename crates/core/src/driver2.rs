@@ -149,6 +149,13 @@ fn blank_comments(s: &str) -> String {
             i = e;
             continue;
         }
+        // (a char literal (`b'"'`), not a lifetime (`'a`): its quote starts no string)
+        if b[i] == b'\'' {
+            if let Some(e) = literal_end(b, i) {
+                i = e;
+                continue;
+            }
+        }
         match b[i] {
             b'"' => {
                 i += 1;
@@ -239,6 +246,14 @@ fn const_check_item(src: &str, items: &[SrcItem]) -> Option<(String, Vec<usize>,
     let written = |l: usize| crate::prep::hoisted_at(marks.get_or_init(|| crate::prep::hoist_marks(src)), l).unwrap_or(l);
     // (nor one with a `return`, which would return from the fn: E0572 in a constant)
     let items_inside = ["fn ", "struct ", "enum ", "union ", "impl ", "trait ", "mod ", "use ", "static ", "const ", "macro_rules", "type ", "return"];
+    // (its comments blanked; `*const T` is a type, no item)
+    // (nor one that casts to a raw pointer of an inferred type, `as *mut _`, whose inference zustc's casts may get wrong)
+    let defines_items = |e: &str| {
+        let b = blank_comments(e).replace("*const ", "*");
+        let tight: String = b.chars().filter(|c| !c.is_whitespace()).collect();
+        let infer_cast = ["as*_", "as*mut_"].iter().any(|k| tight.match_indices(k).any(|(i, _)| !tight[i + k.len()..].starts_with(|c: char| c.is_alphanumeric() || c == '_')));
+        infer_cast || items_inside.iter().any(|k| b.contains(k))
+    };
     for it in items {
         if !matches!(it.kind, ItemKind::Normal) {
             continue;
@@ -260,8 +275,9 @@ fn const_check_item(src: &str, items: &[SrcItem]) -> Option<(String, Vec<usize>,
         if let Some(r) = t.strip_prefix("enum ") {
             let head: String = text[..text.len() - t.len()].chars().filter(|c| !c.is_whitespace()).collect();
             let ints = ["i8", "i16", "i32", "i64", "i128", "isize", "u8", "u16", "u32", "u64", "u128", "usize"];
-            let repr = head.find("repr(").and_then(|k| {
-                let args = &head[k + 5..];
+            // (the attribute's: not `repr(` in a doc's text)
+            let repr = head.find("#[repr(").and_then(|k| {
+                let args = &head[k + 7..];
                 let args = &args[..args.find(')').unwrap_or(args.len())];
                 args.split(',').map(str::trim).find(|a| ints.contains(a))
             });
@@ -301,7 +317,15 @@ fn const_check_item(src: &str, items: &[SrcItem]) -> Option<(String, Vec<usize>,
                 // (`V = e`: a `=` outside brackets, not `==` / `=>` / `<=` ..)
                 let vb = v.as_bytes();
                 let mut d = 0i32;
+                let mut lit_to = 0;
                 let eq = (0..vb.len()).find(|&i| {
+                    if i < lit_to {
+                        return false;
+                    }
+                    if let Some(e) = literal_end(vb, i) {
+                        lit_to = e;
+                        return false;
+                    }
                     match vb[i] {
                         b'(' | b'[' | b'{' => d += 1,
                         b')' | b']' | b'}' => d -= 1,
@@ -311,7 +335,7 @@ fn const_check_item(src: &str, items: &[SrcItem]) -> Option<(String, Vec<usize>,
                 });
                 let Some(eq) = eq else { continue };
                 let e = v[eq + 1..].trim();
-                if e.is_empty() || items_inside.iter().any(|k| blank_comments(e).contains(k)) {
+                if e.is_empty() || defines_items(e) {
                     continue;
                 }
                 let at = body_at + a + eq + 1;
@@ -348,7 +372,7 @@ fn const_check_item(src: &str, items: &[SrcItem]) -> Option<(String, Vec<usize>,
         let Some(eq) = eq else { continue };
         let ty = ty_from[..eq].trim();
         let init = ty_from[eq + 1..].trim_end().trim_end_matches(';');
-        if ty.is_empty() || init.trim().is_empty() || items_inside.iter().any(|k| blank_comments(init).contains(k)) {
+        if ty.is_empty() || init.trim().is_empty() || defines_items(init) {
             continue;
         }
         // (a constant's references are 'static: `&str` is `&'static str`)
@@ -3843,7 +3867,9 @@ impl Session2 {
                                                     let n = t.strip_prefix('&').map(|x| x.strip_prefix("mut ").unwrap_or(x)).unwrap_or("");
                                                     a.prog.struct_index.get(n).is_some_and(|&sid| a.prog.method(sid, "deref").is_some())
                                                 };
-                                                !tys.contains("*const") && !tys.contains("*mut") && !tys.split('`').skip(1).step_by(2).any(|t| unsized_ty(t) || derefs(t))
+                                                // (a coercion to a raw pointer zustc may not make: the expected type's)
+                                                let expected = tys.split('`').nth(1).unwrap_or("");
+                                                !expected.contains("*const") && !expected.contains("*mut") && !tys.split('`').skip(1).step_by(2).any(|t| unsized_ty(t) || derefs(t))
                                             }));
                                             if let (Some(&l), Some(m)) = (self.const_lines.get(k), m) {
                                                 errs.push(format!("{l}:1: {}", &e[m..]));
