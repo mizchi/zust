@@ -1,0 +1,54 @@
+// Strings and `==` by content in @wasm: the same source as JS (zsc --all-js) and as wasm, with the same results
+// (tests/examples.rs: text_same_in_js_and_wasm). Lengths and order are JS's (UTF-16 code units), and `==` on
+// arrays, records and enums compares contents in both layers.
+
+type Person = { name: String, age: i32 }
+enum Tag { Named(String), Anon }
+
+// a borrowed record's field, concatenated: the left operand is taken, so the appends are in place
+@wasm fn greet(p: Person) -> String { "Hello, " + p.name + "!" }
+
+// trimmed (a borrow of the name), upper-cased, joined
+@wasm fn initials(ps: Array<Person>) -> String { ps.map((p) => p.name.trim().to_upper()).join(",") }
+
+// the result is one of the parameters: borrowed through (`-> &'a str`)
+@wasm fn longest(a: String, b: String) -> String { if a.len() >= b.len() { a } else { b } }
+
+@wasm fn words(s: String) -> i32 { s.trim().split(" ").filter((w) => w.len() > 0).len() }
+
+// JS's order: by UTF-16 code units
+@wasm fn order(a: String, b: String) -> i32 {
+  if a < b { -1 } else if a == b { 0 } else { 1 }
+}
+
+@wasm fn same(p: Person, q: Person) -> bool { p == q }
+@wasm fn same_tags(a: Array<Tag>, b: Array<Tag>) -> bool { a == b }
+
+// built in a loop: the string is taken at each step, so it grows in place
+@wasm fn build(n: i32) -> String {
+  let mut s = "";
+  for i in range(0, n) {
+    s = s + i.to_string() + ";";
+  }
+  s
+}
+
+@wasm pub fn text(n: i32) -> String {
+  let ana = Person { name: "  ana ", age: 30 };
+  let bo = Person { name: "bo", age: 41 };
+  let people = [ana, bo, Person { name: "😀x", age: 7 }];
+  let flags = [
+    same(ana, Person { name: "  ana ", age: 30 }),
+    same(ana, bo),
+    same_tags([Named("a"), Anon], [Named("a"), Anon]),
+    same_tags([Named("a")], [Named("b")]),
+    [1, 2] == [1, 2],
+    [[1.0], [2.0]] != [[1.0], [2.5]],
+  ];
+  let f = flags.map((b) => if b { "T" } else { "F" }).join("");
+  greet(bo) + " " + initials(people) + " " + longest("abc", "de") + " " + words("  a b  c ").to_string() + " "
+    + order("｡", "😀").to_string() + order("b", "a").to_string() + order("x", "x").to_string() + " "
+    + "😀".len().to_string() + " " + f + " " + build(n)
+}
+
+@wasm pub fn shout(s: String) -> String { s.trim().to_upper() + "!" }

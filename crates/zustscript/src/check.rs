@@ -135,6 +135,9 @@ pub struct Info {
     /// the type of each expression of a `@wasm` / `@simd` function (the lowering to Rust decides by it what is Copy,
     /// what is borrowed and what is moved). Not recorded for the JS layer, which does not need it
     pub ty: HashMap<Id, Ty>,
+    /// `==` / `!=` that compare values with parts (arrays, records, enums with data, tuples): by content, in JS with
+    /// `$eq`, in Rust with `derive(PartialEq)`. Values are immutable, so equal contents are equal values
+    pub deep_eq: HashSet<Id>,
 }
 
 pub struct Checker {
@@ -202,6 +205,19 @@ pub fn wty_to_ty(w: &WTy) -> Ty {
 
 pub fn is_int(t: &Ty) -> bool {
     matches!(t, Ty::I32 | Ty::U32 | Ty::I64)
+}
+
+/// `t` with the generic parameters of a record or enum replaced
+fn subst_named(t: &Ty, m: &HashMap<String, Ty>) -> Ty {
+    match t {
+        Ty::Param(p) => m.get(p).cloned().unwrap_or_else(|| t.clone()),
+        Ty::Array(a) => Ty::Array(Box::new(subst_named(a, m))),
+        Ty::Typed(a) => Ty::Typed(Box::new(subst_named(a, m))),
+        Ty::Tuple(ts) => Ty::Tuple(ts.iter().map(|t| subst_named(t, m)).collect()),
+        Ty::Named(n, a) => Ty::Named(n.clone(), a.iter().map(|t| subst_named(t, m)).collect()),
+        Ty::Fn(a, r) => Ty::Fn(a.iter().map(|t| subst_named(t, m)).collect(), Box::new(subst_named(r, m))),
+        t => t.clone(),
+    }
 }
 
 pub fn is_num(t: &Ty) -> bool {
@@ -549,6 +565,34 @@ impl Checker {
         }
     }
 
+    /// Can values of `t` be compared with `==` (by content): not functions, JSX or effects
+    fn eqable(&self, t: &Ty, seen: &mut Vec<String>) -> bool {
+        match t {
+            Ty::Str | Ty::Bool | Ty::Unit | Ty::Param(_) => true,
+            t if self.numeric(t) => true,
+            Ty::Array(e) | Ty::Typed(e) => self.eqable(e, seen),
+            Ty::Tuple(ts) => ts.iter().all(|t| self.eqable(t, seen)),
+            Ty::Named(n, targs) => {
+                if seen.contains(n) {
+                    return true;
+                }
+                let (params, fields): (Vec<String>, Vec<Ty>) = if let Some(r) = self.info.records.get(n) {
+                    (r.params.clone(), r.fields.iter().map(|f| f.1.clone()).collect())
+                } else if let Some(e) = self.info.enums.get(n).filter(|e| !e.is_effect()) {
+                    (e.params.clone(), e.variants.iter().flat_map(|v| v.1.iter().cloned()).collect())
+                } else {
+                    return false;
+                };
+                let m: HashMap<String, Ty> = params.into_iter().zip(targs.iter().cloned()).collect();
+                seen.push(n.clone());
+                let ok = fields.iter().all(|f| self.eqable(&subst_named(f, &m), seen));
+                seen.pop();
+                ok
+            }
+            _ => false,
+        }
+    }
+
     fn finish_fn(&mut self) {
         // integer literals nothing constrained are i32
         let mut intv: Vec<u32> = self.intv.iter().copied().collect();
@@ -618,12 +662,18 @@ impl Checker {
             let ok = match what {
                 "num" | "div" => self.numeric(&r),
                 "add" | "ord" => self.numeric(&r) || r == Ty::Str,
-                "eq" => match &r {
-                    Ty::Str | Ty::Bool | Ty::Unit => true,
-                    t if self.numeric(t) => true,
-                    Ty::Named(n, _) => self.info.enums.get(n).is_some_and(|e| e.unit_only()),
-                    _ => false,
-                },
+                "eq" => {
+                    let primitive = match &r {
+                        Ty::Str | Ty::Bool | Ty::Unit => true,
+                        t if self.numeric(t) => true,
+                        Ty::Named(n, _) => self.info.enums.get(n).is_some_and(|e| e.unit_only() && !e.is_effect()),
+                        _ => false,
+                    };
+                    if !primitive && self.eqable(&r, &mut vec![]) {
+                        self.info.deep_eq.insert(_id);
+                    }
+                    primitive || self.eqable(&r, &mut vec![])
+                }
                 "child" => match &r {
                     Ty::Jsx | Ty::Str => true,
                     t if self.numeric(t) => true,
@@ -640,7 +690,7 @@ impl Checker {
                     "num" | "div" => format!("expected a number (i32, u32, i64, f64), found {s}"),
                     "add" => format!("`+` takes numbers or String, found {s}"),
                     "ord" => format!("cannot compare {s} with `<`"),
-                    "eq" => format!("`==` compares numbers, String, Bool and enums without data, found {s} (records and arrays would compare references in JS)"),
+                    "eq" => format!("`==` compares values (numbers, strings, bools, and arrays, records, enums and tuples of them, by content), not {s}"),
                     _ => format!("a JSX child is Jsx, String, a number or an Array of Jsx / String, found {s}"),
                 };
                 self.err(pos, m);

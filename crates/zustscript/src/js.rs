@@ -145,6 +145,10 @@ const HELPERS: &[(&str, &str)] = &[
     ("$f64_to_i64", "function $f64_to_i64(x) {\n  if (x !== x) return 0n;\n  if (x >= 9223372036854775807) return 9223372036854775807n;\n  if (x <= -9223372036854775808) return -9223372036854775808n;\n  return BigInt(Math.trunc(x));\n}"),
     ("$at", "function $at(a, i) {\n  if (i >= 0 && i < a.length) return a[i];\n  throw new RangeError(\"index out of bounds: the len is \" + a.length + \" but the index is \" + i);\n}"),
     ("$range", "function $range(a, b) {\n  const r = [];\n  for (let i = a; i < b; i++) r.push(i);\n  return r;\n}"),
+    // (equality by content: arrays and typed arrays element by element, records and enums field by field (two
+    // values of one type have the same keys, and variants differ in TAG), the rest with ===, so NaN is not equal to
+    // itself even inside an array, as in Rust)
+    ("$eq", "function $eq(a, b) {\n  if (typeof a !== \"object\" || a === null) return a === b;\n  if (Array.isArray(a) || ArrayBuffer.isView(a)) {\n    if (a.length !== b.length) return false;\n    for (let i = 0; i < a.length; i++) if (!$eq(a[i], b[i])) return false;\n    return true;\n  }\n  for (const k in a) if (!$eq(a[k], b[k])) return false;\n  return true;\n}"),
     // (appends `ys` onto `xs` in place: only onto an array no one else can see, see own::inplace_pushes)
     ("$append", "function $append(xs, ys) {\n  for (let i = 0; i < ys.length; i++) xs.push(ys[i]);\n  return xs;\n}"),
     ("$fold", "function $fold(xs, acc, f) {\n  for (let i = 0; i < xs.length; i++) acc = f(acc, xs[i]);\n  return acc;\n}"),
@@ -1120,6 +1124,12 @@ impl<'a> Js<'a> {
     }
 
     fn binary(&mut self, id: Id, op: &str, l: &Expr, r: &Expr) -> String {
+        // (values with parts compare by content, as Rust's derive(PartialEq) does in the wasm layer)
+        if self.info.deep_eq.contains(&id) {
+            self.helpers.insert("$eq");
+            let (a, b) = (self.expr(l), self.expr(r));
+            return if op == "==" { format!("$eq({a}, {b})") } else { format!("!$eq({a}, {b})") };
+        }
         let t = self.num(id);
         // (operands of the wrapping forms are inside `(..)` or a call: any precedence above `|` and `,` will do)
         let p = match (&t, op) {

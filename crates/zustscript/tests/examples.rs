@@ -285,6 +285,30 @@ fn owned_same_in_js_and_wasm() {
     assert!(rs.contains("for x in xs.to_vec().into_iter() {\nxs = { let mut __zs_v = xs;"), "{rs}");
 }
 
+/// examples/text.zsc: strings and `==` by content in @wasm. Lengths and order are JS's (UTF-16 code units: `"😀"` is
+/// 2 long, and `"｡" > "😀"` though UTF-8 orders them the other way), and `==` on arrays, records and enums compares
+/// contents in JS (`$eq`) and in Rust (derive(PartialEq))
+#[test]
+fn text_same_in_js_and_wasm() {
+    let mut outs = vec![];
+    let mut rs = String::new();
+    for (name, flags) in [("text-wasm", &[][..]), ("text-js", &["--all-js"][..])] {
+        let d = out_dir(name);
+        let o = zsc(&root().join("examples/text.zsc"), &d, flags);
+        assert!(o.status.success(), "zsc failed:\n{}", String::from_utf8_lossy(&o.stderr));
+        outs.push(node(&d, "const m = await import('./text.js'); console.log(JSON.stringify([m.text(4), m.shout('  hé ')]))"));
+        if flags.is_empty() {
+            rs = std::fs::read_to_string(d.join("text.wasm.rs")).unwrap();
+        }
+    }
+    assert_eq!(outs[0], outs[1], "wasm and JS differ");
+    assert_eq!(outs[0], "[\"Hello, bo! ANA,BO,😀X abc 3 110 2 TFTFTT 0;1;2;3;\",\"HÉ!\"]\n");
+    // borrowed strings, a borrowed result with a lifetime, `==` through borrows, and a string grown in place
+    assert!(rs.contains("fn zs_longest<'a>(a: &'a str, b: &'a str) -> &'a str"), "{rs}");
+    assert!(rs.contains("fn zs_same(p: &ZsPerson, q: &ZsPerson) -> bool {\n{\n(p == q)"), "{rs}");
+    assert!(rs.contains("s = { let mut __zs_s = { let mut __zs_s = s;"), "{rs}");
+}
+
 /// tests/js_inplace.zsc: the JS layer appends in place only onto a local array no one else can see, so every
 /// result is what the copying push gives
 #[test]

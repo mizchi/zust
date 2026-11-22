@@ -1,0 +1,2 @@
+// expect: `to_string` of a float (JS and Rust format floats differently) is not in the @wasm subset
+@wasm pub fn f(x: f64) -> String { x.to_string() }

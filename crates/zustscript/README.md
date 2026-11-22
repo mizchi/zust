@@ -239,7 +239,8 @@ wasm { fn sq(x: f64) -> f64 { x * x } }                              // wasm 側
   - 構文: `let` / `let mut` と代入、`while` / `for` / `break` / `continue`、`if`、`match`(数値、bool、enum のバリアント、入れ子のパターン)、レコードの生成・フィールド・`..base` での更新、`as`、`T::zero()` / `T::one()`
   - 配列の操作: `len` `map` `filter` `fold` `any` `all` `push` `concat`、添字、`range(a, b)`(Rust では配列を作らずイテレータ `a..b` になる)
   - 呼び出し: 他の `@wasm` 関数、`wasm fn`、再帰
-  - 使えないもの: 文字列、タプル、effect、値としての関数、配列(とそれを含む値)の `==`
+  - 文字列: 引数は `&str`、戻り値は `String`。`+`、`==` と大小比較、`len` `to_upper` `trim` `contains` `split`、配列の `join`、整数と bool の `to_string`(次の「文字列と `==`」)
+  - 使えないもの: タプル、effect、値としての関数、文字列のパターン、浮動小数点数の `to_string`(JS と Rust で書式が違う)
 - `T: Num` の関数は、wasm でもインスタンスごとに単相化する(`zs_total__f64`、`zs_total__i64` など)
   - JS から呼ばれるインスタンスだけに wrapper とグルーを付ける
   - 他の `@wasm` 関数からだけ呼ばれるもの(例の `step`)は、ただの Rust 関数になる
@@ -332,6 +333,37 @@ type Poly = { pts: Array<f64>, weight: f64 }
     - 生存解析が、入れ子の演算子のたびに部分木の変数を数え直していて(O(n²))、それも式ごとに 1 回にした
   - 最初の版は全体を何度も lowering し直していて、鎖の例で 1.9 秒かかった(O(n²))
 - 既存の例(numeric、shapes、ml、kernels、app)の wasm は、同じか小さくなった(numeric は 47,606 → 47,383 バイト。返す配列の引数を所有にしたので、関数の中の `.to_vec()` が消えた)
+
+### 文字列と `==`
+
+決めたこと:
+
+- **`==` は中身で比べる**(配列、レコード、enum、タプル)。値は不変なので、中身が同じなら同じ値
+  - JS では `$eq(a, b)`(配列と typed array は要素ごと、レコードと enum はフィールドごと、ほかは `===`)、Rust では `derive(PartialEq)`
+  - 同じオブジェクトでも、近道で true にはしない。`[NaN] == [NaN]` は、Rust と同じく false
+  - 比べられないのは、関数、JSX、effect(型エラー)
+- **文字列の長さと順序は JS に合わせる**: どちらも UTF-16 の単位。`"😀".len()` は 2
+  - `"｡" < "😀"` は false(UTF-16 では U+FF61 が上、UTF-8 では逆)。wasm でも JS の順になる
+
+`@wasm` の文字列(`examples/text.zsc`。JS と wasm の結果が一致する):
+
+```zsc
+type Person = { name: String, age: i32 }
+@wasm fn greet(p: Person) -> String { "Hello, " + p.name + "!" }   // 左辺を取って push_str: 連結はその場で伸びる
+@wasm fn longest(a: String, b: String) -> String { if a.len() >= b.len() { a } else { b } }
+                                                   // fn zs_longest<'a>(a: &'a str, b: &'a str) -> &'a str
+@wasm fn same(p: Person, q: Person) -> bool { p == q }           // (p == q): &ZsPerson どうし
+```
+
+- 文字列は Copy でない値として、配列と同じ所有権の推論に乗る(引数は `&str` で借り、消費するなら `String`、借用の結果は `&'a str`)
+  - リテラルは `&'static str` として扱い、消費される所でだけ `String` にする
+- `+` は左辺を所有して `push_str` する。左辺が最後の使用なら move するので、`s = s + x + ";"` はその場で伸びる
+- JS と同じ意味にするための補助関数(zustc の std には `encode_utf16` と `memmem` がないので、自前で書く)
+  - `zs_len16`(UTF-16 の長さ)、`zs_cmp16`(UTF-16 の順)
+  - `zs_trim`(JS の空白と行終端。Rust の `trim` とは U+0085 と U+FEFF が違う)
+  - `zs_contains`、`zs_split`(空の区切りは文字ごと)
+  - `to_upper` は Rust の `to_uppercase`(どちらも Unicode の既定の大文字化)
+- 分かっている違い: 空の区切りの `split` は、U+FFFF より上の文字を、JS では 2 つの単位に分け、wasm では 1 文字のままにする
 
 **ここから見えた現実的なライン**:
 
@@ -503,7 +535,6 @@ zust は到達しない関数をそもそも出さないので、`wasm-gc` に�
 - 呼び出しごとのコピーをなくす: 重みのように何度も使う配列を、wasm 側のメモリに置いたままにするハンドル(`WasmF32Array` など)
 - typed array を不変として扱うことの徹底: JS の `Float32Array` は書き換えられるので、TS 側から渡された配列が後で変わりうる。今は zustscript 側からは変更できない、というだけ
 - 配列の更新が多い箇所の計算量: `readonly T[]` に決めたので、`push` は O(n) のコピーになる。ループのように積み上げる用途には、`fold` で一度に作る、あるいは wasm 層に寄せる方針で足りるかを確かめる
-- 文字列の長さ(`len` は今 UTF-16 単位。Rust の byte 単位とずれる)
 - brand のコンストラクタ名(`i32` など)が、利用者の関数名と衝突しうる。今は検査していない
 - wasm 層から JS 層の関数(コールバックでない普通の関数)を呼ぶ方向
 - wasm 側で panic したときに所有コールバックが漏れること(今は abort して例外になり、表に残る)
