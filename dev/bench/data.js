@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795383354318,
+  "lastUpdate": 1795383356796,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -103660,6 +103660,70 @@ window.BENCHMARK_DATA = {
           {
             "name": "tests/ui check-pass passing",
             "value": 1509,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui build-pass pass rate",
+            "value": 75.56,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui build-pass passing",
+            "value": 102,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui compile-fail pass rate",
+            "value": 59.76,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui compile-fail passing",
+            "value": 4397,
+            "unit": "tests"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "miz404@gmail.com",
+            "name": "Kotaro Chikuba",
+            "username": "mizchi"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "fa48073a779560774193a457ad2b5fcd1b9244bd",
+          "message": "Merge pull request #65 from mizchi/claude/compat-next35\n\nCompat: calls through associated-type paths; E0277 for a primitive's narrowing from; split_ascii_whitespace, char escapes; review fixes",
+          "timestamp": "2026-11-23T06:30:55+09:00",
+          "tree_id": "6b3a3cc98d60d15211cf05716ce9189e7508b9aa",
+          "url": "https://github.com/mizchi/zust/commit/fa48073a779560774193a457ad2b5fcd1b9244bd"
+        },
+        "date": 1795383356270,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tests/ui run-pass pass rate",
+            "value": 76.52,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui run-pass passing",
+            "value": 1825,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui check-pass pass rate",
+            "value": 83.56,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui check-pass passing",
+            "value": 1510,
             "unit": "tests"
           },
           {
