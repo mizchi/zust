@@ -29,7 +29,7 @@
 
 ## Status
 
-Numbers measured <!-- measured -->2026-11-22, 22807de<!-- /measured --> by CI on each push to main (bench.yml runs
+Numbers measured <!-- measured -->2026-11-22, 9edb119<!-- /measured --> by CI on each push to main (bench.yml runs
 `bench/ci_bench.py` and `bench/rust_ui.py`, then `scripts/update_readme.py` writes them here). Times come from shared
 GitHub Actions runners and vary by about ±20%; the instruction counts (valgrind) do not.
 
@@ -41,8 +41,8 @@ only the tests it can be asked to handle (no nightly features, auxiliary crates 
 <!-- auto:ui -->
 | kind | applicable | pass |
 |---|---:|---:|
-| run-pass (builds, runs, same output) | 2385 | 1814 (76.1%) |
-| check-pass (accepted by `zustc check`) | 1807 | 1498 (82.9%) |
+| run-pass (builds, runs, same output) | 2385 | 1816 (76.1%) |
+| check-pass (accepted by `zustc check`) | 1807 | 1502 (83.1%) |
 | build-pass | 135 | 102 (75.6%) |
 | compile-fail (rejected at an annotated line) | 7358 | 4364 (59.3%) |
 <!-- /auto:ui -->
@@ -57,18 +57,18 @@ In parentheses: the instruction count (valgrind), which does not vary with the r
 <!-- auto:kpi -->
 | KPI | gen1000 | gen5000 |
 |---|---:|---:|
-| cold build | 122 ms | 553 ms |
-| no-op build | 0.8 ms (0.6 M) | 0.7 ms (0.6 M) |
-| build after editing one function | 17.9 ms (124.9 M) | 66.2 ms (591.8 M) |
-| `check` | 78 ms (760.9 M) | 387 ms (3754.3 M) |
+| cold build | 123 ms | 437 ms |
+| no-op build | 1.0 ms (0.6 M) | 1.2 ms (0.6 M) |
+| build after editing one function | 23.9 ms (124.9 M) | 70.7 ms (590.9 M) |
+| `check` | 77 ms (761.2 M) | 345 ms (3755.3 M) |
 | build cache on disk | 387.2 KiB | 1902.8 KiB |
 | binary | 324.0 KiB | 1558.3 KiB |
-| cold build peak RSS | 19.5 MiB | 53.3 MiB |
+| cold build peak RSS | 19.3 MiB | 52.8 MiB |
 
 | zust-analyzer (zustc's own sources) | |
 |---|---:|
-| p50: definition, hover, completion, references, rename | 0.61 ms / 0.49 ms / 1.24 ms / 1.90 ms / 0.57 ms |
-| startup until indexed | 181 ms |
+| p50: definition, hover, completion, references, rename | 1.00 ms / 0.77 ms / 1.54 ms / 2.60 ms / 0.85 ms |
+| startup until indexed | 202 ms |
 | peak RSS | 95.8 MiB |
 <!-- /auto:kpi -->
 
@@ -392,7 +392,7 @@ the measured numbers. The [reports](docs/reports/) explain each step.
 - [x] `cfg`: <!-- ui:cfg -->93.8%
 - [x] bindings, patterns, slice patterns, or-patterns (also with guards): <!-- ui:binding,pattern,or-patterns -->89.2%
 - [x] `match`: <!-- ui:match -->87.8%
-- [x] name resolution: <!-- ui:resolve -->85.7%
+- [x] name resolution: <!-- ui:resolve -->88.6%
 - [x] statics: ints, floats, raw pointers, fn pointers, `const fn` calls: <!-- ui:statics -->95.0%
 - [x] structs, `..base` (field by field): <!-- ui:structs,structs-enums -->87.6%
 - [x] type aliases and paths (`impl foo::Point`) as impl self types, discriminants from constants and earlier variants, where clauses on concrete types
@@ -405,7 +405,7 @@ the measured numbers. The [reports](docs/reports/) explain each step.
 - [x] derives: `Debug`, `Clone`, `Copy`, `PartialEq`/`Eq`, `PartialOrd`/`Ord`, `Hash`, `Default`: <!-- ui:derives,deriving -->88.6%
 - [x] imports, `use`: <!-- ui:imports -->86.4%
 - [x] associated types: <!-- ui:associated-types -->79.7%
-- [x] generics: <!-- ui:generics -->83.3% (an integer literal for `T: Foo` takes the one integer type that implements Foo; a type
+- [x] generics: <!-- ui:generics -->85.7% (an integer literal for `T: Foo` takes the one integer type that implements Foo; a type
   parameter known only from the expected type is not inferred)
 - [ ] consts: <!-- ui:consts -->76.9% (no heap values, no generic `const fn`; a const of a generic impl (`const C: Option<T> = None`) takes its type at each use)
 - [ ] drop: <!-- ui:drop -->65.2% (the drop order of some temporaries differs)
