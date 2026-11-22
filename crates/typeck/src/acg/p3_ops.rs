@@ -210,7 +210,18 @@ impl Cx<'_> {
                 _ => "",
             };
             if let (Some(bs), false) = (&self.prog.structs[sid as usize].placeholder, tr.is_empty()) {
-                let named = |b: &String| b.split('<').next().is_some_and(|n| n.trim() == tr || n.trim() == format!("{tr}Assign"));
+                // (the trait of the operator's form, `AddAssign` for `+=`; a bound's supertraits give it too
+                // (`trait Sum: Add<Output = Self>`); a bound zustc does not know may)
+                let want = if assign { format!("{tr}Assign") } else { tr.to_string() };
+                let prog = self.prog;
+                fn gives(prog: &Program, n: &str, want: &str, depth: u32) -> bool {
+                    let n = n.rsplit("::").next().unwrap_or(n).trim();
+                    n == want
+                        || depth < 8 && prog.trait_supers.get(n).is_some_and(|ss| ss.iter().any(|s| gives(prog, s.split('<').next().unwrap_or(s), want, depth + 1)))
+                        || !prog.traits.contains_key(n) && !matches!(n, "Copy" | "Clone" | "Debug" | "Display" | "PartialEq" | "Eq" | "PartialOrd" | "Ord" | "Hash" | "Default" | "Sized" | "Send" | "Sync")
+                            && !["Add", "Sub", "Mul", "Div", "Rem"].iter().any(|o| n == *o || n == format!("{o}Assign"))
+                }
+                let named = |b: &String| b.split('<').next().is_some_and(|n| gives(prog, n, &want, 0));
                 if !bs.iter().any(named) {
                     let show = |t: Ty| self.prog.tn(t).replace('#', "");
                     let (l, r) = (show(lt), self.peek(right).map_or("_".to_string(), show));
