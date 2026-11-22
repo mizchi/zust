@@ -81,6 +81,7 @@ run-pass	array-slice-vec/mutable-alias-vec.rs
 run-pass	array-slice-vec/nested-vec-1.rs
 run-pass	array-slice-vec/nested-vec-2.rs
 run-pass	array-slice-vec/new-style-fixed-length-vec.rs
+compile-fail	array-slice-vec/repeat_empty_ok.rs
 run-pass	array-slice-vec/repeated-vector-syntax.rs
 run-pass	array-slice-vec/show-boxed-slice.rs
 compile-fail	array-slice-vec/slice-2.rs
@@ -1659,8 +1660,11 @@ check-pass	consts/const-block-non-item-statement.rs
 check-pass	consts/const-blocks/const-block-in-array-size.rs
 run-pass	consts/const-blocks/const-repeat.rs
 run-pass	consts/const-blocks/fn-call-in-const.rs
+compile-fail	consts/const-blocks/fn-call-in-non-const.rs
+compile-fail	consts/const-blocks/nll-fail.rs
 check-pass	consts/const-blocks/nll-pass.rs
 run-pass	consts/const-blocks/run-pass.rs
+compile-fail	consts/const-blocks/trait-error.rs
 run-pass	consts/const-byte-str-cast.rs
 compile-fail	consts/const-call.rs
 run-pass	consts/const-cast-ptr-int.rs
@@ -1720,6 +1724,7 @@ run-pass	consts/const-fields-and-indexing.rs
 run-pass	consts/const-fn-const-eval.rs
 check-pass	consts/const-fn-cycle.rs
 check-pass	consts/const-fn-destructuring-arg.rs
+compile-fail	consts/const-fn-in-vec.rs
 run-pass	consts/const-fn-method.rs
 run-pass	consts/const-fn-nested.rs
 run-pass	consts/const-fn-val.rs
@@ -5807,6 +5812,7 @@ compile-fail	repeat-expr/copy-check-when-count-inferred-later.rs
 check-pass	repeat-expr/dont-require-copy-on-infer.rs
 compile-fail	repeat-expr/no-conservative-copy-impl-requirement.rs
 run-pass	repeat-expr/repeat-expr-in-static.rs
+compile-fail	repeat-expr/repeat-to-run-dtor-twice.rs
 compile-fail	repeat-expr/repeat_count.rs
 compile-fail	repeat-expr/typo-in-repeat-expr-issue-80173.rs
 run-pass	repr/align-with-extern-c-fn.rs
@@ -6818,6 +6824,7 @@ check-pass	trait-bounds/anonymous-parameters-13775.rs
 compile-fail	trait-bounds/argument-with-unnecessary-method-call.rs
 compile-fail	trait-bounds/deep-level-send-bound-check-issue-40827.rs
 compile-fail	trait-bounds/false-span-in-trait-bound-label.rs
+compile-fail	trait-bounds/issue-119530-sugg-from-fn.rs
 compile-fail	trait-bounds/issue-82038.rs
 check-pass	trait-bounds/issue-94680.rs
 check-pass	trait-bounds/issue-94999.rs

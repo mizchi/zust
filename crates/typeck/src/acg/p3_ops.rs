@@ -1750,6 +1750,26 @@ impl Cx<'_> {
         if elem == Ty::Never {
             return Ok((None, Ty::Never));
         }
+        // (E0277: two or more copies of a value need it to be Copy; a constant (`[C; 4]`, `[const { .. }; 4]`) is
+        // evaluated for each)
+        let constant = match strip_paren(x) {
+            Expr::Path(None, p) => p.segs.len() >= 1 && self.lookup(&p.segs[p.segs.len() - 1].name).is_none() && self.prog.const_index.contains_key(&p.segs.iter().map(|s| s.name.as_str()).collect::<Vec<_>>().join("::")),
+            Expr::Const(_) => true,
+            _ => false,
+        };
+        if n >= 2 && self.user_code && !constant && !super::borrowck::is_copy(self.prog, elem, 0) {
+            // (the type that is not Copy: an argument of a Copy type, as rustc names it (`Option<Bar>`: `Bar`))
+            let mut culprit = elem;
+            while let Ty::Struct(sid) = culprit {
+                let p = self.prog;
+                let derived_copy = p.impls.contains(&(p.base_of(sid), "Copy".to_string()));
+                match p.structs[sid as usize].args.iter().find(|&&a| !super::borrowck::is_copy(p, a, 0)) {
+                    Some(&a) if derived_copy => culprit = a,
+                    _ => break,
+                }
+            }
+            return err(expr_start(x), format!("the trait bound `{}: Copy` is not satisfied (E0277)", self.prog.tn(culprit)));
+        }
         let t = Ty::Array(intern(elem), n);
         let base = self.temp(t);
         let (size, _) = self.prog.size_align(elem);
