@@ -566,6 +566,11 @@ impl Cx<'_> {
         let base_is_ref = by_ref.is_none() && matches!(self.peek(base_e), Some(Ty::Ref(..)));
         if base_is_ref {
             mode = Some(matches!(self.peek(base_e), Some(Ty::Ref(true, _))));
+            // (`for n in v` with v: &mut Vec<T>: `IntoIterator::into_iter(v)` takes a type parameter, so v is moved,
+            // not reborrowed: used after, E0382)
+            if adapters.is_empty() && is_place_expr(base_e) && matches!(self.peek(base_e), Some(Ty::Ref(true, _))) {
+                self.bk_acc(base_e, crate::acg::borrowck::Acc::Move);
+            }
         }
         for a in &adapters {
             match a.as_str() {

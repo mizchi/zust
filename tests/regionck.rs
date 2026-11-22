@@ -1553,3 +1553,11 @@ fn closure_moves_capture_out() {
     assert!(d.len() == 1 && d[0].0 == 5 && d[0].1.contains("`Fn` closure"), "{d:?}");
     assert_eq!(check("fn take_once(_f: impl FnOnce()) {}\nfn take_mut(_f: impl FnMut()) {}\nfn main() {\n    let a = String::new();\n    take_once(|| {\n        let _x: String = a;\n    });\n    let c = 5;\n    take_mut(move || {\n        let _z = c;\n    });\n    let e = vec![1];\n    take_mut(move || drop(e.clone()));\n}\n"), vec![]);
 }
+
+/// `for n in v` with v: &mut Vec<T> moves v: `IntoIterator::into_iter` takes a type parameter, so no reborrow
+#[test]
+fn for_loop_moves_mut_ref() {
+    let d = check("fn f(v: &mut Vec<i32>) {\n    for n in v {\n        *n += 1;\n    }\n    for n in v {\n        *n += 1;\n    }\n}\nfn main() {}\n");
+    assert!(d.len() == 1 && d[0].0 == 5 && d[0].1.contains("moved"), "{d:?}");
+    assert_eq!(check("fn f(v: &mut Vec<i32>) -> usize {\n    for n in v.iter_mut() {\n        *n += 1;\n    }\n    for n in &mut *v {\n        *n += 1;\n    }\n    v.len()\n}\nfn g(v: &Vec<i32>) {\n    for _ in v {}\n    for _ in v {}\n}\nfn main() {}\n"), vec![]);
+}
