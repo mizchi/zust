@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795366629153,
+  "lastUpdate": 1795366630963,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -83680,6 +83680,85 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/mizchi/zust/commit/a47a1ddc2e8e7b3201175ffabdba624dcfee23e3"
         },
         "date": 1795364658995,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "parity documentSymbol (名前の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity workspace/symbol (上位 20 の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity definition (行き先の一致)",
+            "value": 84.375,
+            "unit": "%"
+          },
+          {
+            "name": "parity hover (名前を含む)",
+            "value": 80,
+            "unit": "%"
+          },
+          {
+            "name": "parity references (数の一致)",
+            "value": 79.487,
+            "unit": "%"
+          },
+          {
+            "name": "parity documentHighlight (数の一致)",
+            "value": 80,
+            "unit": "%"
+          },
+          {
+            "name": "parity rename (書き換えの一致)",
+            "value": 71.429,
+            "unit": "%"
+          },
+          {
+            "name": "parity signatureHelp (名前・引数の数・今の引数の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity completion `x.\\|` (書いてある名前を含む)",
+            "value": 95,
+            "unit": "%"
+          },
+          {
+            "name": "parity completion `na\\|me` (同)",
+            "value": 92.593,
+            "unit": "%"
+          },
+          {
+            "name": "parity 一致の平均",
+            "value": 88.288,
+            "unit": "%"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "miz404@gmail.com",
+            "name": "Kotaro Chikuba",
+            "username": "mizchi"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "22807deba4644f184c44fd8620a15d5a2c0f7cbe",
+          "message": "Merge pull request #56 from mizchi/claude/gracious-brahmagupta-16jxdl\n\nzustscript: infer ownership for @wasm (borrows, lifetimes, moves)",
+          "timestamp": "2026-11-23T01:52:26+09:00",
+          "tree_id": "1b47fbaff681ee9275e2e1ceec73c89e0a8c15b2",
+          "url": "https://github.com/mizchi/zust/commit/22807deba4644f184c44fd8620a15d5a2c0f7cbe"
+        },
+        "date": 1795366630733,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
