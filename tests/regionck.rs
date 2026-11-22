@@ -1430,3 +1430,12 @@ fn move_out_of_static() {
     assert!(d.len() == 1 && d[0].0 == 7 && d[0].1.contains("E0507"), "{d:?}");
     assert_eq!(check("struct Foo {\n    foo: u8,\n}\nconst BAR: Foo = Foo { foo: 1 };\nfn test(_f: Foo) {}\nfn main() {\n    test(BAR);\n    println!(\"{}\", BAR.foo);\n}\n"), vec![]);
 }
+
+/// A tuple / array / struct literal of a runtime value (`(v,)` of a local) is a temporary, not promoted to a static as
+/// `&(1,)` is: borrowed past the statement it is E0716. A `let` extends it
+#[test]
+fn runtime_literal_temporaries() {
+    let d = check("fn gimme(x: &(u32,)) -> &u32 {\n    &x.0\n}\nfn main() {\n    let v = 22;\n    let x = gimme(&(v,));\n    println!(\"{:?}\", x);\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 6 && d[0].1.contains("E0716"), "{d:?}");
+    assert_eq!(check("fn gimme(x: &(u32,)) -> &u32 {\n    &x.0\n}\nfn main() {\n    let v = 22;\n    let a = gimme(&(1,));\n    let r = &(v,);\n    let b = gimme(r);\n    println!(\"{} {} {}\", a, b, gimme(&(v,)));\n}\n"), vec![]);
+}
