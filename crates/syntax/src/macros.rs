@@ -984,6 +984,8 @@ pub fn expand_cfg(src: &str, cfg: Option<&crate::cfg::CfgSet>) -> Result<Option<
         let again = reps.iter().any(|r| r.2.contains("macro_rules") || macros.keys().any(|m| r.2.contains(m.as_str())));
         let has_cfg = cfg.is_some() && reps.iter().any(|r| r.2.contains("cfg"));
         let has_select = !has_cfg && reps.iter().any(|r| r.2.contains("cfg_select"));
+        // (`env!($k)` in a template: its name is known only now)
+        let has_env = reps.iter().any(|r| r.2.contains("env"));
         for (a, e, rep) in reps {
             let nl = text[a..e].bytes().filter(|&c| c == b'\n').count();
             let mut r = rep;
@@ -999,6 +1001,12 @@ pub fn expand_cfg(src: &str, cfg: Option<&crate::cfg::CfgSet>) -> Result<Option<
         } else if has_select {
             // (`cfg_select!` an expansion produced, without a configuration given: the default one's)
             if let Some(t) = crate::cfg::expand_select(&text, &crate::cfg::CfgSet { debug_assertions: true, ..Default::default() }) {
+                text = t;
+            }
+        }
+        if has_env {
+            let none = crate::cfg::CfgSet::default();
+            if let Some(t) = expand_env(&text, cfg.unwrap_or(&none)) {
                 text = t;
             }
         }
@@ -1214,6 +1222,166 @@ fn find_calls(
     Ok(())
 }
 
+/// Whether src may call `env!` / `option_env!` (also written `env !` or `env /* .. */ !`): the one look a file gets
+/// before expand_env
+pub fn may_use_env(src: &str) -> bool {
+    if !src.contains("env") {
+        return false;
+    }
+    let b = src.as_bytes();
+    src.match_indices("env").any(|(k, _)| {
+        let mut j = k + 3;
+        loop {
+            while j < b.len() && b[j].is_ascii_whitespace() {
+                j += 1;
+            }
+            if b[j..].starts_with(b"/*") {
+                j = src[j + 2..].find("*/").map_or(b.len(), |e| j + 2 + e + 2);
+            } else if b[j..].starts_with(b"//") {
+                j = src[j..].find('\n').map_or(b.len(), |e| j + e);
+            } else {
+                break;
+            }
+        }
+        b.get(j) == Some(&b'!')
+    })
+}
+
+/// `env!("NAME")` / `env!("NAME", "message")` and `option_env!("NAME")` with the crate's compile-time environment
+/// (`CfgSet::env`, then zustc's own): `env!` becomes the value as a string literal, `option_env!` `Some("value")`.
+/// A name that is not set is left as written: `option_env!` is then `None` (acg), and `env!` the error that names it.
+/// Found by tokens, so the text of string literals and comments is not read. The value goes on one line (newlines
+/// escaped), followed by the newlines the invocation spanned, so the lines after it keep their numbers. None: nothing
+/// to expand (the caller looks for `env!` first)
+pub fn expand_env(src: &str, cfg: &crate::cfg::CfgSet) -> Option<String> {
+    let s = src.as_bytes();
+    let toks = crate::lexer::tokenize(s);
+    let t = |k: usize| -> &[u8] {
+        match toks.get(k) {
+            Some(&(_, a, b)) => &s[a..b],
+            None => b"",
+        }
+    };
+    let is_lit = |k: usize| toks.get(k).is_some_and(|x| x.0 == 2);
+    let mut out = String::with_capacity(src.len());
+    let mut at = 0;
+    let mut changed = false;
+    let mut i = 0;
+    while i < toks.len() {
+        // (`stringify!(env!("X"))` is the text of the tokens, not their value)
+        if t(i) == b"stringify" && t(i + 1) == b"!" && matches!(t(i + 2), b"(" | b"[" | b"{") {
+            let mut depth = 0usize;
+            let mut j = i + 2;
+            while j < toks.len() {
+                if toks[j].0 == 1 {
+                    match t(j) {
+                        b"(" | b"[" | b"{" => depth += 1,
+                        b")" | b"]" | b"}" => {
+                            depth -= 1;
+                            if depth == 0 {
+                                break;
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+                j += 1;
+            }
+            i = j + 1;
+            continue;
+        }
+        let opt = t(i) == b"option_env";
+        if !(toks[i].0 == 0 && (opt || t(i) == b"env") && t(i + 1) == b"!" && t(i + 2) == b"(" && is_lit(i + 3)) {
+            i += 1;
+            continue;
+        }
+        // (the arguments: `"NAME"`, `"NAME",`, and for env! `"NAME", "message"`)
+        let close = if t(i + 4) == b")" {
+            i + 4
+        } else if t(i + 4) == b"," && t(i + 5) == b")" {
+            i + 5
+        } else if !opt && t(i + 4) == b"," && is_lit(i + 5) && t(i + 6) == b")" {
+            i + 6
+        } else if !opt && t(i + 4) == b"," && is_lit(i + 5) && t(i + 6) == b"," && t(i + 7) == b")" {
+            i + 7
+        } else {
+            i += 1;
+            continue;
+        };
+        let name = match t(i + 3).strip_prefix(b"\"").and_then(|r| r.strip_suffix(b"\"")) {
+            Some(n) if !n.is_empty() && !n.contains(&b'\\') => String::from_utf8_lossy(n).into_owned(),
+            _ => {
+                i = close + 1;
+                continue;
+            }
+        };
+        // (`std::env!`, `::core::option_env!`: the path goes too. Another path (`custom::env!`, `a::std::env!`) names
+        // a macro of its own: left as it is)
+        let back = |k: usize, d: usize| if k >= d { t(k - d) } else { b"" };
+        let mut st = i;
+        if back(st, 1) == b":" && back(st, 2) == b":" {
+            if !matches!(back(st, 3), b"std" | b"core") {
+                i = close + 1;
+                continue;
+            }
+            st -= 3;
+            if back(st, 1) == b":" && back(st, 2) == b":" {
+                // (`a::std::env!`, `<T>::std::env!`: a path of its own; `return ::std::env!(..)`: std's)
+                let kw = matches!(back(st, 3), b"return" | b"break" | b"in" | b"if" | b"else" | b"match" | b"while" | b"move" | b"mut" | b"let" | b"yield" | b"unsafe" | b"async");
+                if st >= 3 && !kw && (toks[st - 3].0 == 0 || t(st - 3) == b">") {
+                    i = close + 1;
+                    continue;
+                }
+                st -= 2;
+            }
+        }
+        let Some(v) = cfg.env_var(&name) else {
+            i = close + 1;
+            continue;
+        };
+        let (a, b) = (toks[st].1, toks[close].2);
+        out.push_str(&src[at..a]);
+        let lit = str_literal(&v);
+        if opt {
+            out.push_str("Some(");
+            out.push_str(&lit);
+            out.push(')');
+        } else {
+            out.push_str(&lit);
+        }
+        for _ in 0..src[a..b].matches('\n').count() {
+            out.push('\n');
+        }
+        at = b;
+        changed = true;
+        i = close + 1;
+    }
+    if !changed {
+        return None;
+    }
+    out.push_str(&src[at..]);
+    Some(out)
+}
+
+/// A string literal (on one line) whose value is s
+fn str_literal(s: &str) -> String {
+    let mut out = String::with_capacity(s.len() + 2);
+    out.push('"');
+    for ch in s.chars() {
+        match ch {
+            '\n' => out.push_str("\\n"),
+            '\r' => out.push_str("\\r"),
+            '\t' => out.push_str("\\t"),
+            '"' => out.push_str("\\\""),
+            '\\' => out.push_str("\\\\"),
+            c if (c as u32) < 0x20 || c as u32 == 0x7f => out.push_str(&format!("\\u{{{:x}}}", c as u32)),
+            c => out.push(c),
+        }
+    }
+    out.push('"');
+    out
+}
+
 /// `include_str!("path")` / `include_bytes!("path")` (path は文字列リテラル、`dir` からの相対) を、ファイルの中身の
 /// リテラル (改行などはエスケープして 1 行に収める: 後ろの行番号を変えない) に置き換える。無ければ None
 pub fn expand_includes(src: &str, dir: &std::path::Path) -> Result<Option<String>, String> {
@@ -1398,4 +1566,25 @@ fn expand_include_code(src: &str, dir: &std::path::Path, depth: u32) -> Result<O
     }
     out.push_str(&src[at..]);
     Ok(changed.then_some(out))
+}
+
+#[cfg(test)]
+mod env_tests {
+    use super::*;
+
+    #[test]
+    fn env_macros_and_their_paths() {
+        let c = crate::cfg::CfgSet { env: vec![("LABEL".into(), "v".into())], ..Default::default() };
+        let x = |s: &str| expand_env(s, &c).unwrap_or_else(|| s.to_string());
+        assert_eq!(x("f(env!(\"LABEL\"), ::std::env!(\"LABEL\"), core::option_env!(\"LABEL\"));"), "f(\"v\", \"v\", Some(\"v\"));");
+        // (another path names a macro of its own)
+        assert_eq!(x("custom::env!(\"LABEL\"); a::std::env!(\"LABEL\");"), "custom::env!(\"LABEL\"); a::std::env!(\"LABEL\");");
+        assert_eq!(x("env ! (\"LABEL\")"), "\"v\"");
+        assert_eq!(x("return ::std::env!(\"LABEL\");"), "return \"v\";");
+        assert_eq!(x("stringify!(env!(\"LABEL\")); env!(\"LABEL\")"), "stringify!(env!(\"LABEL\")); \"v\"");
+        assert!(may_use_env("let a = env ! (\"X\");") && may_use_env("option_env!(\"X\")"));
+        assert!(!may_use_env("use std::env; fn environment() {}"));
+        assert!(may_use_env("env /* a comment */ !(\"X\")") && may_use_env("env // why\n !(\"X\")"));
+        assert_eq!(x("env /* c */ !(\"LABEL\")"), "\"v\"");
+    }
 }

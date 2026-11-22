@@ -1547,6 +1547,26 @@ impl Cx<'_> {
                 let e: &Expr = self.keep_expr(path_expr("None"));
                 self.expr(e, Some(t))
             }
+            // `cfg!(..)` left by the cfg pass: `version(..)` (unstable), or a cfg! the pass did not reach
+            "cfg" if g.to_string().contains("version") => err(SP, "`cfg(version)` is experimental and subject to change (E0658)"),
+            // `compile_error!("msg")`: the error, as written
+            "compile_error" => {
+                let args = self.macro_args(p, g)?;
+                match args.first().and_then(|a| str_lit(a)) {
+                    Some(m) => err(SP, m),
+                    None => err(SP, "compile_error! takes 1 argument"),
+                }
+            }
+            // `env!("X")` left by the preprocessor (macros::expand_env): X is not set
+            "env" => {
+                let args = self.macro_args(p, g)?;
+                // (`env!("X", "message")`: the message is the error)
+                match (args.first().and_then(|a| str_lit(a)), args.get(1).and_then(|a| str_lit(a))) {
+                    (Some(_), Some(m)) => err(SP, m),
+                    (Some(n), None) => err(SP, format!("environment variable `{n}` not defined at compile time")),
+                    (None, _) => err(SP, "expected string literal"),
+                }
+            }
             _ => err(SP, format!("macro `{name}!` is not supported")),
         }
     }

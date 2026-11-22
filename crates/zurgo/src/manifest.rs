@@ -262,8 +262,13 @@ fn package(t: &Table, p: &Table, dir: &Path, path: &Path, ws: Option<&Workspace>
             let proc_macro = l.get("proc-macro").or_else(|| l.get("proc_macro")).and_then(Value::as_bool) == Some(true);
             let crate_types = l.get("crate-type").or_else(|| l.get("crate_type")).map(Value::str_list).filter(|v| !v.is_empty());
             let crate_types = if proc_macro { vec!["proc-macro".to_string()] } else { crate_types.unwrap_or_else(|| vec!["lib".to_string()]) };
+            let lib_name = toml::get_str(&l, &["name"]).map(str::to_string).unwrap_or_else(|| name.replace('-', "_"));
+            // (a crate name, as rustc takes it: it also names files, so no path in it)
+            if lib_name.is_empty() || lib_name.starts_with(|c: char| c.is_ascii_digit()) || !lib_name.chars().all(|c| c.is_alphanumeric() || c == '_') {
+                return Err(format!("{}: the library name `{lib_name}` is not a crate name (letters, digits and `_`)", path.display()));
+            }
             Some(Target {
-                name: toml::get_str(&l, &["name"]).map(str::to_string).unwrap_or_else(|| name.replace('-', "_")),
+                name: lib_name,
                 kind: crate_types.clone(),
                 crate_types,
                 path: lp,

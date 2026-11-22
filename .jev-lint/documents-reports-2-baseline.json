@@ -1,6 +1,6 @@
 {
   "schema": "jev-lint-documents-1",
-  "snapshotDigest": "85a06bdaa715ad22b375775e7f28280cad55854132c709a241ea8b033171b352",
+  "snapshotDigest": "38737b1ece2dc48dc8255104d4d72f8e1610ad46df15d8b7777529aef80af517",
   "questionDigest": "209d6df378ccb747fcb0e821998fcd6105bc76638a88d22488d3b398d6a21595",
   "model": "jev-1.14.0",
   "snapshotChanged": false,
@@ -32,10 +32,10 @@
       "contextHash": "ec20e2ebdd2ae375a6636074c628c438138c77646a5be532bd01237081e3f660",
       "judgment": {
         "choice": "supports",
-        "confidence": 0.99,
+        "confidence": 1,
         "probabilities": {
-          "supports": 0.99,
-          "contradicts": 0.01,
+          "supports": 1,
+          "contradicts": 0,
           "unrelated": 0,
           "insufficient_context": 0
         }
@@ -100,10 +100,10 @@
       "contextHash": "a068452334ef52150a1932e9d45207a4c156e3a5c60d69e061e986b1aa86d889",
       "judgment": {
         "choice": "supports",
-        "confidence": 0.99,
+        "confidence": 0.97,
         "probabilities": {
-          "supports": 0.99,
-          "contradicts": 0.01,
+          "supports": 0.98,
+          "contradicts": 0.02,
           "unrelated": 0,
           "insufficient_context": 0
         }
@@ -202,10 +202,10 @@
       "contextHash": "5b6ede2d00ec82893b1c63b36b593d1e9e7999236c2422416b8324666f265c93",
       "judgment": {
         "choice": "supports",
-        "confidence": 0.96,
+        "confidence": 0.93,
         "probabilities": {
-          "supports": 0.97,
-          "contradicts": 0.03,
+          "supports": 0.95,
+          "contradicts": 0.05,
           "unrelated": 0,
           "insufficient_context": 0
         }
@@ -372,12 +372,12 @@
       "contextHash": "65d03eec8a642fb4c59c7bacc74397f936864091105bba631e8977b9ca9c1612",
       "judgment": {
         "choice": "supports",
-        "confidence": 0.95,
+        "confidence": 0.97,
         "probabilities": {
-          "supports": 0.96,
-          "contradicts": 0.03,
+          "supports": 0.98,
+          "contradicts": 0.02,
           "unrelated": 0,
-          "insufficient_context": 0.01
+          "insufficient_context": 0
         }
       }
     },
@@ -644,10 +644,10 @@
       "contextHash": "1275e8de4d291bc21dd7f5b87a5196cba9cca33005a1ac6eca77fa3d0892971e",
       "judgment": {
         "choice": "supports",
-        "confidence": 0.95,
+        "confidence": 0.97,
         "probabilities": {
-          "supports": 0.96,
-          "contradicts": 0.04,
+          "supports": 0.98,
+          "contradicts": 0.02,
           "unrelated": 0,
           "insufficient_context": 0
         }
@@ -780,12 +780,12 @@
       "contextHash": "54b56e94027819b91287b9766c4872faa76c4344146540b341b4389c6b8dd7ce",
       "judgment": {
         "choice": "supports",
-        "confidence": 0.93,
+        "confidence": 0.92,
         "probabilities": {
-          "supports": 0.95,
-          "contradicts": 0.03,
+          "supports": 0.94,
+          "contradicts": 0.05,
           "unrelated": 0,
-          "insufficient_context": 0.02
+          "insufficient_context": 0.01
         }
       }
     },
@@ -814,10 +814,10 @@
       "contextHash": "7438e0bb6ac3c01bf6beaa56051a35abf5a2f30ee56334c8cd754b996d6bd4e6",
       "judgment": {
         "choice": "supports",
-        "confidence": 0.89,
+        "confidence": 0.87,
         "probabilities": {
-          "supports": 0.92,
-          "contradicts": 0.07,
+          "supports": 0.9,
+          "contradicts": 0.09,
           "unrelated": 0,
           "insufficient_context": 0.01
         }
@@ -848,10 +848,10 @@
       "contextHash": "7982c179582830150e0121639bf13f758b8cd2967a8c41c2205db632219eb8e5",
       "judgment": {
         "choice": "supports",
-        "confidence": 0.95,
+        "confidence": 0.96,
         "probabilities": {
-          "supports": 0.96,
-          "contradicts": 0.04,
+          "supports": 0.97,
+          "contradicts": 0.03,
           "unrelated": 0,
           "insufficient_context": 0
         }
@@ -919,9 +919,9 @@
         "confidence": 0.83,
         "probabilities": {
           "supports": 0.87,
-          "contradicts": 0.06,
+          "contradicts": 0.05,
           "unrelated": 0,
-          "insufficient_context": 0.07
+          "insufficient_context": 0.08
         }
       }
     },
@@ -950,10 +950,10 @@
       "contextHash": "4df342055803f33b6195c27c167f6f86d7071a5337af51009058f12b67f5035e",
       "judgment": {
         "choice": "supports",
-        "confidence": 0.97,
+        "confidence": 0.99,
         "probabilities": {
-          "supports": 0.98,
-          "contradicts": 0.02,
+          "supports": 0.99,
+          "contradicts": 0.01,
           "unrelated": 0,
           "insufficient_context": 0
         }
@@ -984,10 +984,10 @@
       "contextHash": "262bb5dcd097b8cb7be1fb2545acff1e36bb67eb6c6b7603871f70e0250fd627",
       "judgment": {
         "choice": "supports",
-        "confidence": 0.67,
+        "confidence": 0.69,
         "probabilities": {
-          "supports": 0.75,
-          "contradicts": 0.23,
+          "supports": 0.77,
+          "contradicts": 0.21,
           "unrelated": 0,
           "insufficient_context": 0.02
         }
@@ -1018,10 +1018,10 @@
       "contextHash": "0b80accfa94c5b38ba9a5a907f337dfaa274c72bc632be2ff55655cef05112aa",
       "judgment": {
         "choice": "supports",
-        "confidence": 0.71,
+        "confidence": 0.69,
         "probabilities": {
-          "supports": 0.78,
-          "contradicts": 0.21,
+          "supports": 0.77,
+          "contradicts": 0.22,
           "unrelated": 0,
           "insufficient_context": 0.01
         }
@@ -1086,10 +1086,10 @@
       "contextHash": "3680d7821ceccb84e40c111efdbf9782ab670b502e1b1838ae62cb03ee844288",
       "judgment": {
         "choice": "supports",
-        "confidence": 0.97,
+        "confidence": 0.99,
         "probabilities": {
-          "supports": 0.98,
-          "contradicts": 0.02,
+          "supports": 0.99,
+          "contradicts": 0.01,
           "unrelated": 0,
           "insufficient_context": 0
         }
@@ -1120,12 +1120,12 @@
       "contextHash": "bdae948e735bbc239b594e195dd432f3efabbcd09895e48688e599b130a79530",
       "judgment": {
         "choice": "supports",
-        "confidence": 0.79,
+        "confidence": 0.84,
         "probabilities": {
-          "supports": 0.84,
-          "contradicts": 0.14,
+          "supports": 0.88,
+          "contradicts": 0.11,
           "unrelated": 0,
-          "insufficient_context": 0.02
+          "insufficient_context": 0.01
         }
       }
     },
@@ -1154,10 +1154,10 @@
       "contextHash": "56aef8202ec18e7d916f99df3c3f62b2bb9580fd1fbf151d494787ff37e24afd",
       "judgment": {
         "choice": "supports",
-        "confidence": 0.88,
+        "confidence": 0.83,
         "probabilities": {
-          "supports": 0.91,
-          "contradicts": 0.08,
+          "supports": 0.87,
+          "contradicts": 0.12,
           "unrelated": 0,
           "insufficient_context": 0.01
         }
@@ -1256,10 +1256,10 @@
       "contextHash": "e6ee8a7c0ecfcc1d24cf3e3a49387253a59f79cbb14f5dfe17684e41f47ac559",
       "judgment": {
         "choice": "supports",
-        "confidence": 0.91,
+        "confidence": 0.92,
         "probabilities": {
-          "supports": 0.93,
-          "contradicts": 0.06,
+          "supports": 0.94,
+          "contradicts": 0.05,
           "unrelated": 0,
           "insufficient_context": 0.01
         }
@@ -1298,12 +1298,46 @@
           "insufficient_context": 0.01
         }
       }
+    },
+    {
+      "id": "docs_reports_2026-11-22-04-zurgo-build-scripts",
+      "topic": "The Japanese file docs/ja/reports/2026-11-22-04-zurgo-build-scripts.md is a faithful translation of docs/reports/2026-11-22-04-zurgo-build-scripts.md",
+      "mode": "translation",
+      "reference": {
+        "source": "docs_reports_2026-11-22-04-zurgo-build-scripts.en",
+        "path": "docs/reports/2026-11-22-04-zurgo-build-scripts.md",
+        "startLine": 1,
+        "endLine": 99,
+        "quote": "# zurgo M1: build scripts, `env!`, and proc-macro stubs\n\nDate: 2026-11-22\n\nM0 built Cargo packages without running their build scripts, and stopped on any proc-macro dependency. This is the\nsecond milestone of mizchi/zust#28 and the start of step W0 of the wasm-bindgen roadmap (mizchi/zust#38). Usage:\n[zurgo.md](../zurgo.md).\n\n## 1. What changed\n\n- **zustc: a crate's own cfgs and compile-time environment.**\n  - `env!` / `option_env!` are expanded when a file is read. They read the crate's environment first, then zustc's\n    own, as rustc reads its own.\n  - `include!(concat!(env!(\"OUT_DIR\"), \"/x.rs\"))` therefore works.\n  - Each crate of a workspace can carry cfgs (`cfg=name`, `cfg=name=value`) and environment variables\n    (`env=KEY=VALUE`).\n- **zurgo: build scripts.**\n  - A build script is compiled with its build-dependencies, by zustc when it can and by rustc otherwise.\n  - It runs with cargo's variables, and its `cargo:` / `cargo::` output is read.\n  - It runs again only when something it depends on changes.\n- **zurgo: cargo's variables for every crate.** `CARGO_PKG_*`, `CARGO_MANIFEST_DIR`, `CARGO_CRATE_NAME`, and\n  `CARGO_BIN_NAME` for a bin.\n- **zurgo: proc-macro dependencies are stubs.** A proc-macro crate is built as an empty library of its name, so a\n  crate that only re-exports it builds. Using one of its macros is an error naming mizchi/zust#29, not an attribute\n  dropped silently.\n- **zustc fixes found on the way:**\n  - `cfg!` inside the arguments of std's format macros (`println!(\"{}\", cfg!(unix))`) was never evaluated;\n  - `compile_error!`;\n  - `dyn Error + Send + Sync + UnwindSafe` (only `Send` and `Sync` counted as auto traits);\n  - `std::path::Display`;\n  - `fmt::Pointer`.\n\n## 2. Decisions\n\nThese were open questions in mizchi/zust#28:\n\n- **`RUSTC` for build scripts is the real rustc** (question 1). A script's probes (thiserror's and anyhow's nightly\n  probes, autocfg) and its version checks (rustversion, version_check) then see what they see under cargo. A crate\n  takes the same paths as in its cargo build. zustc follows a recent stable rustc, so those are the paths it must\n  support.\n- **The build-script compiler is zustc, with rustc as the fallback** (question 3, `--build-script-compiler auto`).\n  - Of the scripts tried, zustc compiles the fixture's `gen` script only. thiserror's, anyhow's, libc's, serde_core's\n    and the fixture's app script stop on std functions zustc lacks: `env::vars()`, `Command` with an `OsString`,\n    `process::Output`, `fs::create_dir`.\n  - rustc builds those, so every script runs.\n  - zurgo remembers which compiler built a script until its sources change, so a script zustc cannot build is not\n    tried again on every build.\n- **Proc-macro dependencies are stubs, with a check.**\n  - zustc drops an unknown attribute silently, so the stub alone could miscompile code that uses an attribute macro.\n  - zurgo therefore reads the macros a proc-macro crate defines (`#[proc_macro_derive(..)]`,\n    `#[proc_macro_attribute]`, `#[proc_macro]`). A crate of the build that reaches the proc-macro crate and whose\n    source uses one of its derives or attributes stops the build before anything is compiled.\n  - Function-like macros expand to a `compile_error!`.\n\n## 3. Results\n\n`crates/zurgo/tests/zurgo.rs`:\n\n- **`build_scripts_match_cargo`.** A fixture package compared with `cargo run` under both `rustc` and `auto`. The\n  output is the same. The package has:\n  - a build script with a build-dependency, that reads `DEP_GEN_*` and writes code into `OUT_DIR`;\n  - `rustc-cfg` (also `name=\"value\"`) and `rustc-env`;\n  - `CARGO_PKG_*` with a pre-release version, `CARGO_CFG_*` and `PROFILE`;\n  - a dependency with `links` whose script emits metadata in both forms and a cfg that depends on a feature.\n\n  The test also checks that a second build runs no script, and that an edit of the file the app's script names in\n  `rerun-if-changed` runs only that script. A failing script stops the build with its output.\n- **thiserror 2.0.21's library builds.** An app that depends on it prints what its cargo build prints, and so it joins\n  `registry_crates_run_like_cargo`. The library needs:\n  - its build script, which writes `OUT_DIR/private.rs` from `CARGO_PKG_VERSION_PATCH` and probes `$RUSTC`;\n  - `include!(concat!(env!(\"OUT_DIR\"), \"/private.rs\"))`;\n  - the stub for thiserror-impl;\n  - the four zustc fixes above.\n\n  `#[derive(thiserror::Error)]` is the #29 error.\n- **`errors`.** A proc-macro dependency that is not used builds. Its attribute used is the #29 error, and so is its\n  function-like macro.\n\nCrates whose build scripts now run, and where they stop next. All of these are zustc's own gaps:\n\n| crate | build script | the crate itself |\n|---|---|---|\n| thiserror 2.0.21 | runs (rustc) | builds |\n| anyhow 1.0.104 | runs (rustc) | `error.rs:808`: a missing lifetime specifier (E0106) |\n| libc 0.2.191 | runs (rustc) | `mod types;` inside the `prelude!` macro |\n| serde_core 1.0.229 | runs (rustc) | `mod de;` inside the `crate_root!` macro |\n\nFor the last two, rustc looks for the module's file where the macro is expanded (the crate root). zustc looks\nbeside the file that defines the macro.\n\n## 4. Next\n\nFor W0 of mizchi/zust#38:\n- workspace builds for wasm32 (zustc's workspace build is x86-64 only);\n- crate identity apart from the extern name (two versions of one crate, renamed dependencies);\n- the compiler gaps on the way to wasm-bindgen-shared (the UI report, sections 3, 2.5 and 2.6).\n\nThen W1: proc macros themselves (mizchi/zust#29). The rustc path for build scripts already builds proc-macro crates\nas dylibs, which is backend A of #29.",
+        "contentHash": "4424326e1897d913143bc3ee43b0c654413c1bfb290a07862783562b8017e9ec"
+      },
+      "target": {
+        "source": "docs_reports_2026-11-22-04-zurgo-build-scripts.ja",
+        "path": "docs/ja/reports/2026-11-22-04-zurgo-build-scripts.md",
+        "startLine": 1,
+        "endLine": 99,
+        "quote": "# zurgo M1: ビルドスクリプト、`env!`、proc-macro のスタブ\n\n日付: 2026-11-22\n\nM0 は Cargo のパッケージを、ビルドスクリプトを実行せずにビルドし、proc-macro の依存があれば止まった。これは\nmizchi/zust#28 の 2 つめのマイルストーンで、wasm-bindgen のロードマップ (mizchi/zust#38) の W0 の始まりである。\n使い方: [zurgo.md](../zurgo.md)。\n\n## 1. 変えたもの\n\n- **zustc: クレートごとの cfg とコンパイル時の環境。**\n  - `env!` / `option_env!` は、ファイルを読むときに展開する。まずクレートの環境を、次に zustc 自身の環境を読む\n    (rustc が自分の環境を読むのと同じ)。\n  - なので `include!(concat!(env!(\"OUT_DIR\"), \"/x.rs\"))` が動く。\n  - ワークスペースのクレートはそれぞれ、cfg (`cfg=name`、`cfg=name=value`) と環境変数 (`env=KEY=VALUE`) を持てる。\n- **zurgo: ビルドスクリプト。**\n  - ビルドスクリプトを、そのビルド用の依存と一緒に、zustc でできれば zustc で、できなければ rustc でコンパイルする。\n  - cargo の変数を付けて実行し、`cargo:` / `cargo::` の出力を読む。\n  - 依存するものが変わったときだけ、もう一度実行する。\n- **zurgo: どのクレートにも cargo の変数。** `CARGO_PKG_*`、`CARGO_MANIFEST_DIR`、`CARGO_CRATE_NAME`、bin なら\n  `CARGO_BIN_NAME`。\n- **zurgo: proc-macro の依存はスタブ。** proc-macro のクレートは、その名前の空のライブラリとしてビルドするので、それを\n  再エクスポートするだけのクレートはビルドできる。そのマクロのどれかを使うのは、mizchi/zust#29 を示すエラーになり、\n  属性を黙って捨てることはない。\n- **途中で見つけた zustc の直し:**\n  - std の書式のマクロの引数の中の `cfg!` (`println!(\"{}\", cfg!(unix))`) を、評価していなかった;\n  - `compile_error!`;\n  - `dyn Error + Send + Sync + UnwindSafe` (自動 trait として数えていたのは `Send` と `Sync` だけだった);\n  - `std::path::Display`;\n  - `fmt::Pointer`。\n\n## 2. 決めたこと\n\nmizchi/zust#28 で未決だった問い:\n\n- **ビルドスクリプトの `RUSTC` は本物の rustc にした** (問い 1)。スクリプトの試しのコンパイル (thiserror と anyhow\n  の nightly の試し、autocfg) と版の確認 (rustversion、version_check) は、cargo のときと同じものを見る。クレートは\n  cargo でビルドしたときと同じ道を通る。zustc は新しい安定版の rustc に従うので、その道こそ zustc が受け付けるべき\n  ものである。\n- **ビルドスクリプトのコンパイラは zustc で、だめなら rustc にした** (問い 3、`--build-script-compiler auto`)。\n  - 試したスクリプトのうち、zustc がコンパイルできるのはテストのパッケージの `gen` のものだけである。thiserror、\n    anyhow、libc、serde_core と、テストのパッケージのアプリのスクリプトは、zustc にない std の関数で止まる:\n    `env::vars()`、`OsString` を取る `Command`、`process::Output`、`fs::create_dir`。\n  - それらは rustc がビルドするので、どのスクリプトも実行できる。\n  - zurgo は、どちらがスクリプトをビルドしたかを、そのソースが変わるまで覚えておく。なので、zustc がビルドできない\n    スクリプトを、ビルドのたびに試し直すことはない。\n- **proc-macro の依存は、確かめた上でスタブにした。**\n  - zustc は知らない属性を黙って捨てるので、スタブだけでは、属性マクロを使うコードを間違ってコンパイルしうる。\n  - そこで zurgo は、proc-macro のクレートが定義するマクロ (`#[proc_macro_derive(..)]`、`#[proc_macro_attribute]`、\n    `#[proc_macro]`) を読む。その proc-macro のクレートにたどり着くクレートのソースが、その derive か属性を\n    使っていれば、何もコンパイルする前にビルドを止める。\n  - 関数のようなマクロは `compile_error!` に展開する。\n\n## 3. 結果\n\n`crates/zurgo/tests/zurgo.rs`:\n\n- **`build_scripts_match_cargo`。** テストのパッケージを、`rustc` と `auto` の両方で `cargo run` と比べる。出力は\n  同じである。そのパッケージには、次のものがある:\n  - ビルド用の依存を使い、`DEP_GEN_*` を読み、`OUT_DIR` にコードを書くビルドスクリプト;\n  - `rustc-cfg` (`name=\"value\"` も) と `rustc-env`;\n  - pre-release の版の `CARGO_PKG_*`、`CARGO_CFG_*`、`PROFILE`;\n  - `links` を持つ依存。そのスクリプトは、2 つの形で metadata を出し、feature によって決まる cfg を出す。\n\n  テストは、2 回めのビルドがどのスクリプトも実行しないこと、アプリのスクリプトが `rerun-if-changed` で名指しする\n  ファイルを変えると、そのスクリプトだけを実行することも確かめる。失敗するスクリプトは、その出力を付けてビルドを\n  止める。\n- **thiserror 2.0.21 のライブラリはビルドできる。** それに依存するアプリは、cargo でビルドしたものと同じものを出す\n  ので、`registry_crates_run_like_cargo` に加えた。ライブラリに要るもの:\n  - `CARGO_PKG_VERSION_PATCH` から `OUT_DIR/private.rs` を書き、`$RUSTC` を試すビルドスクリプト;\n  - `include!(concat!(env!(\"OUT_DIR\"), \"/private.rs\"))`;\n  - thiserror-impl のスタブ;\n  - 上の zustc の 4 つの直し。\n\n  `#[derive(thiserror::Error)]` は #29 のエラーになる。\n- **`errors`。** 使われない proc-macro の依存はビルドできる。その属性を使えば #29 のエラーで、関数のようなマクロも\n  同じである。\n\nいまビルドスクリプトを実行できるクレートと、次に止まる所。どれも zustc 自身の足りない所である:\n\n| クレート | ビルドスクリプト | クレートそのもの |\n|---|---|---|\n| thiserror 2.0.21 | 実行できる (rustc) | ビルドできる |\n| anyhow 1.0.104 | 実行できる (rustc) | `error.rs:808`: ライフタイムの指定がない (E0106) |\n| libc 0.2.191 | 実行できる (rustc) | `prelude!` マクロの中の `mod types;` |\n| serde_core 1.0.229 | 実行できる (rustc) | `crate_root!` マクロの中の `mod de;` |\n\nあとの 2 つでは、rustc はモジュールのファイルを、マクロを展開した場所 (クレートの根) から探す。zustc はマクロを\n定義したファイルのそばを探す。\n\n## 4. 次\n\nmizchi/zust#38 の W0 のために:\n- wasm32 向けのワークスペースのビルド (zustc のワークスペースのビルドは x86-64 だけ);\n- extern の名前とは別のクレートの同一性 (1 つのクレートの 2 つの版、名前を変えた依存);\n- wasm-bindgen-shared までの途中にあるコンパイラの足りない所 (UI のレポートの 3、2.5、2.6 節)。\n\n次に W1: proc macro そのもの (mizchi/zust#29)。ビルドスクリプトのための rustc の道は、すでに proc-macro のクレートを\ndylib としてビルドする。それが #29 のバックエンド A である。",
+        "contentHash": "b6021cfd3eecbd2d0e447905ffdab727d9cb66f44d61a43d4099b4e503a52d83"
+      },
+      "context": [],
+      "candidateId": "1f512cebd206a9682106abc2726c4501ae8f93cab5e5a7ec940ad88d326a4154",
+      "contextHash": "1ceaf582419d383a7de9fdd44afaaa6505c5f68372bbcd2a2fbf32ae24a3e846",
+      "judgment": {
+        "choice": "supports",
+        "confidence": 0.99,
+        "probabilities": {
+          "supports": 0.99,
+          "contradicts": 0.01,
+          "unrelated": 0,
+          "insufficient_context": 0
+        }
+      }
     }
   ],
   "coverage": {
-    "expected": 38,
-    "selected": 38,
-    "answered": 38,
+    "expected": 39,
+    "selected": 39,
+    "answered": 39,
     "missing": 0,
     "contradictions": 0,
     "unassessed": 0,
@@ -1312,9 +1346,9 @@
     "unboundDocuments": 0
   },
   "usage": {
-    "requests": 38,
-    "inputTokens": 212311,
-    "usd": 0.008917062
+    "requests": 39,
+    "inputTokens": 217774,
+    "usd": 0.009146508000000001
   },
   "errors": []
 }
