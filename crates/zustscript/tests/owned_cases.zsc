@@ -1,0 +1,87 @@
+// Cases where an inferred move could meet a borrow (tests/examples.rs: owned_cases_same_in_js_and_wasm). Each must
+// pass zustc's borrow checker and give the JS layer's result.
+
+type Poly = { pts: Array<f64>, weight: f64 }
+type Box2<T> = { v: T, n: i32 }
+enum Tree { Leaf(Array<f64>), Node(Poly, Array<f64>), Nil }
+
+@wasm fn total(p: Poly) -> f64 { p.pts.fold(0.0, (s, x) => s + x) * p.weight }
+@wasm fn sum(xs: Array<f64>) -> f64 { xs.fold(0.0, (s, x) => s + x) }
+@wasm fn keep(xs: Array<f64>) -> Array<f64> { xs.push(0.5) }
+@wasm fn pair(a: Array<f64>, b: Array<f64>) -> f64 { sum(a) * 10.0 + sum(b) }
+@wasm fn mk(n: i32) -> Poly { Poly { pts: range(0, n).map((i) => i as f64), weight: 2.0 } }
+
+// the same local, borrowed by one argument and consumed by the other
+@wasm fn both(n: i32) -> f64 {
+  let xs = mk(n).pts;
+  pair(xs, keep(xs))
+}
+
+// a field kept, then the record consumed
+@wasm fn field_then_whole(n: i32) -> f64 {
+  let p = mk(n);
+  let pts = p.pts;
+  let q = Poly { weight: 3.0, ..p };
+  sum(pts) + total(q)
+}
+
+// matched while it stays alive, then used again
+@wasm fn match_then_use(n: i32) -> f64 {
+  let t = Node(mk(n), [1.0, 2.0]);
+  let a = match t {
+    Leaf(xs) => sum(xs),
+    Node(p, xs) => total(p) + sum(xs),
+    Nil => 0.0,
+  };
+  let b = match t {
+    Node(p, _) => sum(keep(p.pts)),
+    _ => 0.0,
+  };
+  a + b
+}
+
+// iterated, then reassigned inside the loop (the loop must not borrow it)
+@wasm fn iterate_and_grow(n: i32) -> f64 {
+  let mut xs = [1.0, 2.0];
+  for x in xs {
+    xs = xs.push(x * 10.0);
+  }
+  let mut i = 0;
+  while i < n {
+    if i == 3 { break; }
+    xs = keep(xs);
+    i += 1;
+  }
+  sum(xs) + (xs.len() as f64)
+}
+
+// captured by a closure while the array is mapped
+@wasm fn captured(n: i32) -> f64 {
+  let ys = mk(n).pts;
+  let zs = ys.map((y) => y + sum(ys));
+  sum(zs) + sum(ys)
+}
+
+// shadowing, and a generic record holding an array
+@wasm fn shadow(n: i32) -> f64 {
+  let v = mk(n).pts;
+  let w = { let v = keep(v); sum(v) };
+  let b = Box2 { v: v, n: 2 };
+  w + sum(b.v) * (b.n as f64)
+}
+
+// a nested enum pattern, matched by reference through a borrowed parameter
+@wasm fn depth(t: Tree) -> f64 {
+  match t {
+    Leaf(xs) => sum(xs),
+    Node(p, xs) => total(p) * sum(xs),
+    Nil => -1.0,
+  }
+}
+
+@wasm fn trees(n: i32) -> Array<Tree> { [Leaf([1.0, 2.0]), Node(mk(n), [3.0]), Nil] }
+
+@wasm pub fn cases(n: i32) -> Array<f64> {
+  let ts = trees(n);
+  [both(n), field_then_whole(n), match_then_use(n), iterate_and_grow(n), captured(n), shadow(n), ts.fold(0.0, (s, t) => s + depth(t)), depth(ts[1])]
+}

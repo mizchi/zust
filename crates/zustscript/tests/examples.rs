@@ -210,6 +210,61 @@ collatz_max [{"TAG":"Some","_0":"6171n"},{"TAG":"None"}]
     );
 }
 
+/// examples/owned.zsc and tests/owned_cases.zsc: values that are not Copy (arrays inside records and enums) in
+/// `@wasm`. The Rust's `&`, `'a`, moves and clones are inferred (src/lower.rs, "Ownership"); zustc's borrow checker
+/// accepts it, and the results are the JS layer's
+#[test]
+fn owned_same_in_js_and_wasm() {
+    let run = |src: &str, stem: &str, call: &str| -> (String, String) {
+        let mut outs = vec![];
+        let mut rust = String::new();
+        for (name, flags) in [(format!("{stem}-wasm"), &[][..]), (format!("{stem}-js"), &["--all-js"][..])] {
+            let d = out_dir(&name);
+            let o = zsc(&root().join(src), &d, flags);
+            assert!(o.status.success(), "zsc failed:\n{}", String::from_utf8_lossy(&o.stderr));
+            outs.push(node(&d, &format!("const m = await import('./{stem}.js'); console.log(JSON.stringify({call}))")));
+            if flags.is_empty() {
+                rust = std::fs::read_to_string(d.join(format!("{stem}.wasm.rs"))).unwrap();
+            }
+        }
+        assert_eq!(outs[0], outs[1], "{src}: wasm and JS differ");
+        (outs.remove(0), rust)
+    };
+    let (out, rs) = run("examples/owned.zsc", "owned", "[m.summary(6), m.ramp_sum(1000), m.appended([1, 2], 3), m.longer([1], [2, 3]), m.longer([4, 5], [6])]");
+    assert_eq!(out, "[[346,90,30,1,20],499500,[1,2,3],[2,3],[4,5]]\n");
+    // the inferred signatures: read only → borrowed; returned → borrowed through, with a lifetime; consumed → owned
+    for sig in [
+        "fn zs_total(p: &ZsPoly) -> f64",
+        "fn zs_heavier<'a>(a: &'a ZsPoly, b: &'a ZsPoly) -> &'a ZsPoly",
+        "fn zs_first_pts<'a>(ps: &'a [ZsPoly]) -> &'a [f64]",
+        "fn zs_reweigh(p: ZsPoly, w: f64) -> ZsPoly",
+        "fn zs_shape_area(s: &ZsShape) -> f64",
+        "fn zs_appended(xs: Vec<f64>, x: f64) -> Vec<f64>",
+        "fn zs_longer<'a>(a: &'a [f64], b: &'a [f64]) -> &'a [f64]",
+    ] {
+        assert!(rs.contains(sig), "missing `{sig}` in:\n{rs}");
+    }
+    // a record that holds an array is not Copy; one of scalars still is
+    assert!(rs.contains("#[derive(Clone, PartialEq)]\nstruct ZsPoly"), "{rs}");
+    // the push in the loop reuses the array (no copy of it), and the elements of a dead array are taken
+    let ramp = &rs[rs.find("fn zs_ramp(").unwrap()..];
+    let ramp = &ramp[..ramp.find("\n}\n").unwrap()];
+    assert!(ramp.contains("let mut __zs_v = acc;") && !ramp.contains("to_vec"), "{ramp}");
+    assert!(rs.contains("(zs_polys(n)).into_iter().map(|p|"), "{rs}");
+    // matched by reference through the borrowed parameter
+    assert!(rs.contains("match *s {\nZsShape::Polygon(ref p, n)"), "{rs}");
+    // the glue still passes slices and takes an owned result: adapters in front of the inferred signatures
+    assert!(rs.contains("fn zs_appended__js(xs: &[f64], x: f64) -> Vec<f64> {\n    zs_appended(xs.to_vec(), x)\n}"), "{rs}");
+    assert!(rs.contains("zs_longer(a, b).to_vec()"), "{rs}");
+
+    let (out, rs) = run("tests/owned_cases.zsc", "owned_cases", "m.cases(4)");
+    assert_eq!(out, "[66.5,24,21.5,41.5,36,18.5,38,36]\n");
+    // a local borrowed by one argument and consumed by the other is copied for the consumer only
+    assert!(rs.contains("zs_pair(&xs[..], &(zs_keep(xs.to_vec()))[..])"), "{rs}");
+    // iterated and reassigned in the loop: the loop iterates a copy, and the push inside still reuses the array
+    assert!(rs.contains("for x in xs.to_vec().into_iter() {\nxs = { let mut __zs_v = xs;"), "{rs}");
+}
+
 /// examples/kernels.zsc: the `@simd` kernels (v128, a module zsc writes), the same functions through zustc
 /// (`--no-simd`) and as JS (`--all-js`) agree: exactly for `map` and i32 sums, to 12 digits for f64 sums (the lanes
 /// regroup them)

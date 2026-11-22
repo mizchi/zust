@@ -232,14 +232,14 @@ wasm { fn sq(x: f64) -> f64 { x * x } }                              // wasm 側
   - `as` は Rust 自身が飽和するので、そのまま使える
   - 添字 `xs[i]` は、JS では範囲を検査する `$at`、Rust では `xs[i as usize]`(負の添字は巨大な usize になり、範囲外として止まる)
 - 部分集合(外れると、その構文の名前を出してエラーにする)
-  - 型: 数値、bool、数値の配列(引数は `&[T]`、戻り値は `Vec<T>`)
-    - それらを組み合わせたレコードと enum も使える(総称の `Option<T>` なども可)
-    - レコードと enum は Rust では `#[derive(Clone, Copy, PartialEq)]` の struct / enum(`ZsVec2`、`ZsShape`)になり、値で渡す
-    - 配列や文字列を含むレコードは、Copy にできないので外す
+  - 型: 数値、bool、配列、それらを組み合わせたレコードと enum(入れ子、総称の `Option<T>` なども可)
+    - スカラーだけのレコードと enum は、Rust では `#[derive(Clone, Copy, PartialEq)]` の struct / enum(`ZsVec2`、`ZsShape`)になり、値で渡す
+    - 配列と、配列を含むレコード / enum は Copy にならない。借用、move、clone は zsc が推論する(次の「所有権の推論」)
+    - JS との境界を越えられるのは、これまでどおり数値の配列と、スカラーだけのレコード / enum。配列を含むレコードは wasm の内側で使う
   - 構文: `let` / `let mut` と代入、`while` / `for` / `break` / `continue`、`if`、`match`(数値、bool、enum のバリアント、入れ子のパターン)、レコードの生成・フィールド・`..base` での更新、`as`、`T::zero()` / `T::one()`
   - 配列の操作: `len` `map` `filter` `fold` `any` `all` `push` `concat`、添字、`range(a, b)`(Rust では配列を作らずイテレータ `a..b` になる)
   - 呼び出し: 他の `@wasm` 関数、`wasm fn`、再帰
-  - 使えないもの: 文字列、タプル、effect、値としての関数
+  - 使えないもの: 文字列、タプル、effect、値としての関数、配列(とそれを含む値)の `==`
 - `T: Num` の関数は、wasm でもインスタンスごとに単相化する(`zs_total__f64`、`zs_total__i64` など)
   - JS から呼ばれるインスタンスだけに wrapper とグルーを付ける
   - 他の `@wasm` 関数からだけ呼ばれるもの(例の `step`)は、ただの Rust 関数になる
@@ -275,6 +275,48 @@ wasm { fn sq(x: f64) -> f64 { x * x } }                              // wasm 側
 | `collatz_max(300000)`(i64 の while ループ。JS では BigInt) | 242 ms | 465 ms |
 | `nearest`、2e5 点、f64 のループ(2 本の配列をコピー) | 5.9 ms | 1.2 ms |
 | `grow` を 1e5 回呼ぶ(呼び出しごとに enum とレコードが境界を往復) | 14.6 ms | 1.2 ms |
+
+### 所有権の推論(Rust のライフタイム推論に当たるもの)
+
+`@wasm` の本体は、`&`、`'a`、`.clone()` を書かずに、Copy でない値(配列、配列を含むレコード / enum)を扱える。zustscript の値は不変なので、共有は言語の上では常に安全で、推論は「それを Rust でどう書けば一番コピーが少ないか」を決める(`src/own.rs`、`src/lower.rs` の "Ownership")。
+
+```zsc
+type Poly = { pts: Array<f64>, weight: f64 }
+@wasm fn total(p: Poly) -> f64 { .. }                                    // fn zs_total(p: &ZsPoly) -> f64
+@wasm fn heavier(a: Poly, b: Poly) -> Poly { if total(a) >= total(b) { a } else { b } }
+                                       // fn zs_heavier<'a>(a: &'a ZsPoly, b: &'a ZsPoly) -> &'a ZsPoly
+@wasm fn first_pts(ps: Array<Poly>) -> Array<f64> { ps[0].pts }         // fn zs_first_pts<'a>(ps: &'a [ZsPoly]) -> &'a [f64]
+@wasm fn reweigh(p: Poly, w: f64) -> Poly { Poly { weight: w, ..p } }   // fn zs_reweigh(p: ZsPoly, w: f64) -> ZsPoly
+```
+
+- **引数のモード**: 読むだけの引数は借用(`&[T]` / `&ZsX`)。丸ごと消費する(返す、フィールドに入れる、所有する引数に渡す、`push` する)引数は所有(`Vec<T>` / `ZsX`)
+- **借用の結果**: 結果がいつも借用した引数(またはその一部)なら、ライフタイムつきの借用で返す。呼び出し側は借用のまま使い、消費するときだけコピーする
+- **関数をまたいだ推論**: 引数のモードと結果の形は、呼び出しグラフ全体の不動点で決める
+  - すべて「借用」から始める。lowering の途中で「コピーが要った」と分かったもの(消費された引数、引数の借用でない結果)を所有にして、その関数と呼び出し元だけを lowering し直す(worklist)
+  - 変化は所有の方向にしか起きないので必ず止まる。各関数を lowering する回数は、(1 + 自分と callee の変化の数)回まで
+- **move**: 関数が所有する値は、最後の使用で move し、それ以外では clone する
+  - 最後の使用は、構造化された本体の上の後ろ向きの生存解析で求める。ループは不動点まで回し、名前ではなく束縛ごとに解く(shadowing でも正確)
+  - これにより、`acc = acc.push(x)` と `xs.fold([], (a, x) => a.push(x))` はその場で push する(配列のコピーではなく、償却 O(1))
+  - 使い終わる配列の `map` / `filter` / `for` は、要素を clone せずに取り出す(`into_iter`)
+- **ローカルな借用**: 借用した引数の一部を `let` すると、借用のままになる(`let pts = &p.pts[..]`)
+  - 生き続ける値の `match` は参照で束縛する(`match *s { ZsS::Poly(ref p, n) => .. }`)。生き続ける配列の `for` は `.iter()` で回す
+- **安全側に倒すところ**: borrow checker と食い違いうる箇所では move しない
+  - クロージャが捕捉した変数
+  - 1 つの呼び出しの 2 つの引数に現れる変数(`f(&xs, g(xs))`)
+  - 参照で回している `match` / `for` の対象。本体がそれを代入するなら、先にコピーしてから回す
+- 生成した Rust は zustc の borrow checker がもう一度検査する。推論の誤りはコンパイルエラーになり、未定義動作にはならない
+- JS との境界の wrapper は、これまでどおりスライスを渡して、所有された結果を受け取る。推論した署名がそれと違う関数(配列の引数を所有する、結果を借用で返す)には、間に小さな adapter を置く
+
+測ったこと(`examples/owned.zsc`、`tests/owned_cases.zsc`。どちらも JS と wasm の結果が一致し、zustc の borrow checker を通る)。
+
+| | 推論あり(その場で push) | 毎回コピー(これまでの出力) | JS(`--all-js`) |
+|---|---:|---:|---:|
+| `ramp_sum(10000)`(1 つずつ push して足す) | 2.4 ms | 633 ms | 76 ms |
+| `ramp_sum(100000)` | **10.4 ms** | 59.8 s | 50.9 s |
+
+- 推論そのものの費用は関数の数に線形で、関数 1 つあたり約 29 万命令(callgrind)。最悪に近い形(400 段の呼び出しの鎖を、所有のモードが 1 段ずつ伝わる)でも、フロントは 9 ms(JS だけ)から 25 ms ほどになるだけ
+  - 最初の版は全体を何度も lowering し直していて、この形で 1.9 秒かかった(O(n²))。worklist にして線形にした
+- 既存の例(numeric、shapes、ml、kernels、app)の wasm は、同じか小さくなった(numeric は 47,606 → 47,383 バイト。返す配列の引数を所有にしたので、関数の中の `.to_vec()` が消えた)
 
 **ここから見えた現実的なライン**:
 
