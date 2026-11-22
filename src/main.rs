@@ -11,7 +11,7 @@ mod stamp;
 
 fn usage() -> ! {
     eprintln!(
-        "usage: zustc <input.rs> [-o out] [-O] [--backend=cranelift|minclif] [--target=wasm32-unknown-unknown] [--linker=NAME] [--features=a,b] [-L dir] [--time] [-j N] [--no-cache]\n       zustc build <workspace-file> [-o out-dir] [-O] [--backend=..] [-j N] [--time] [--no-cache]\n       zustc check <input.rs>"
+        "usage: zustc <input.rs> [-o out] [-O] [--backend=cranelift|minclif] [--target=wasm32-unknown-unknown] [--linker=NAME] [--features=a,b] [-L dir] [--time] [-j N] [--no-cache] [--edition=2015|2018|2021|2024]\n       zustc build <workspace-file> [-o out-dir] [-O] [--backend=..] [-j N] [--time] [--no-cache]\n       zustc check <input.rs> [--edition=..]"
     );
     std::process::exit(2)
 }
@@ -59,6 +59,8 @@ fn main() {
                 o.lib_dirs.push(d.strip_prefix("native=").or_else(|| d.strip_prefix("all=")).unwrap_or(&d).into());
             }
             "-j" => o.jobs = args.next().and_then(|s| s.parse().ok()).unwrap_or_else(|| usage()),
+            s if s.starts_with("--edition=") => o.edition = s["--edition=".len()..].parse().unwrap_or_else(|_| usage()),
+            "--edition" => o.edition = args.next().and_then(|s| s.parse().ok()).unwrap_or_else(|| usage()),
             s if s.starts_with("--backend=") => backend = s["--backend=".len()..].to_string(),
             "--target" => target = args.next().unwrap_or_else(|| usage()),
             s if s.starts_with("--target=") => target = s["--target=".len()..].to_string(),
@@ -104,8 +106,13 @@ fn main() {
     }
     if mode == "check" {
         // (`mod x;` のファイルも読む。診断の行は結合したソースのもの: 1 ファイルならそのまま)
-        let (src, _) = zustc::srcmap::load_crate(&input, "src/main.rs", &o.cfg_with(&o.features)).unwrap_or_else(|e| die(e));
-        let diags = Session2::new(Options2 { no_cache: true, jobs: 1, ..o }).check(&src);
+        let (src, map) = zustc::srcmap::load_crate_keeping_externs(&input, "src/main.rs", &o.cfg_with(&o.features)).unwrap_or_else(|e| die(e));
+        let mut s = Session2::new(Options2 { no_cache: true, jobs: 1, ..o });
+        // (a crate of one file: the `extern crate` items the configuring blanked, in their places in it)
+        if map.inputs.len() == 1 && !map.volatile {
+            s.externs = map.externs;
+        }
+        let diags = s.check(&src);
         for d in &diags {
             eprintln!("error: {}:{}:{}: {}", input.display(), d.line, d.col, d.msg.replace("__u_", ""));
         }

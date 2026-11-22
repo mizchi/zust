@@ -703,6 +703,7 @@ run-pass	binop/operator-overloading.rs
 compile-fail	binop/shift-various-bad-types.rs
 compile-fail	binop/spaceship.rs
 run-pass	binop/structured-compare.rs
+compile-fail	blind/blind-item-item-shadow.rs
 compile-fail	block-result/block-must-not-have-result-res.rs
 run-pass	block-result/blocks-without-results-11709.rs
 compile-fail	block-result/consider-removing-last-semi.rs
@@ -2265,6 +2266,9 @@ compile-fail	error-codes/E0207.rs
 compile-fail	error-codes/E0214.rs
 compile-fail	error-codes/E0223.rs
 compile-fail	error-codes/E0252.rs
+compile-fail	error-codes/E0254.rs
+compile-fail	error-codes/E0255.rs
+compile-fail	error-codes/E0260.rs
 compile-fail	error-codes/E0261.rs
 compile-fail	error-codes/E0262.rs
 compile-fail	error-codes/E0263.rs
@@ -3091,6 +3095,8 @@ check-pass	imports/cycle-import-in-diff-module-0.rs
 check-pass	imports/cycle-import-in-diff-module-1.rs
 compile-fail	imports/double-import.rs
 check-pass	imports/duplicate-empty-imports.rs
+compile-fail	imports/duplicate-use-bindings.rs
+compile-fail	imports/duplicate.rs
 check-pass	imports/empty-import-prefix-pass-2015.rs
 check-pass	imports/empty-import-prefix-pass.rs
 run-pass	imports/enum-variant-import-path-15774.rs
@@ -3140,6 +3146,7 @@ compile-fail	imports/issue-109343.rs
 compile-fail	imports/issue-113953.rs
 compile-fail	imports/issue-1697.rs
 check-pass	imports/issue-18083.rs
+compile-fail	imports/issue-19498.rs
 compile-fail	imports/issue-24081.rs
 check-pass	imports/issue-24883.rs
 compile-fail	imports/issue-25396.rs
@@ -3151,6 +3158,7 @@ check-pass	imports/issue-32119.rs
 check-pass	imports/issue-32222.rs
 compile-fail	imports/issue-32354-suggest-import-rename.rs
 compile-fail	imports/issue-33464.rs
+compile-fail	imports/issue-45799-bad-extern-crate-rename-suggestion-formatting.rs
 compile-fail	imports/issue-45829/import-self.rs
 compile-fail	imports/issue-45829/import-twice.rs
 compile-fail	imports/issue-45829/issue-45829.rs
@@ -3169,11 +3177,13 @@ check-pass	imports/issue-56263.rs
 compile-fail	imports/issue-57015.rs
 check-pass	imports/issue-62767.rs
 compile-fail	imports/issue-81413.rs
+compile-fail	imports/issue-8640.rs
 check-pass	imports/local-modularized-tricky-pass-1.rs
 check-pass	imports/local-modularized.rs
 compile-fail	imports/nested-import-root-symbol-150103.rs
 check-pass	imports/no-ambiguous-trait-lint-on-redundant-import.rs
 check-pass	imports/no-pub-reexports-but-used.rs
+compile-fail	imports/no-std-inject.rs
 check-pass	imports/overwrite-deep-glob.rs
 check-pass	imports/overwrite-different-ambig.rs
 check-pass	imports/overwrite-different-vis-2.rs
@@ -5880,7 +5890,10 @@ run-pass	resolve/reference-clone-nonclone-11820.rs
 compile-fail	resolve/regression-struct-called-as-function-148919.rs
 compile-fail	resolve/resolve-assoc-suggestions.rs
 compile-fail	resolve/resolve-bad-import-prefix.rs
+compile-fail	resolve/resolve-conflict-extern-crate-vs-extern-crate.rs
+compile-fail	resolve/resolve-conflict-import-vs-extern-crate.rs
 compile-fail	resolve/resolve-conflict-import-vs-import.rs
+compile-fail	resolve/resolve-conflict-item-vs-extern-crate.rs
 compile-fail	resolve/resolve-conflict-item-vs-import.rs
 compile-fail	resolve/resolve-conflict-type-vs-import.rs
 compile-fail	resolve/resolve-dont-hint-macro.rs
@@ -5915,6 +5928,7 @@ compile-fail	resolve/typo-suggestion-mistyped-in-path.rs
 compile-fail	resolve/typo-suggestion-named-underscore.rs
 compile-fail	resolve/unboxed-closure-sugar-nonexistent-trait.rs
 compile-fail	resolve/underscore-bindings-disambiguators.rs
+compile-fail	resolve/unit-like-struct-masks-constant-7044.rs
 compile-fail	resolve/unresolved-module-error-33293.rs
 compile-fail	resolve/unresolved-segments-visibility.rs
 compile-fail	resolve/unresolved_static_type_field.rs
@@ -6905,6 +6919,7 @@ run-pass	traits/inheritance/subst2.rs
 check-pass	traits/inheritance/supertrait-operator-issue-18088.rs
 build-pass	traits/issue-104322.rs
 compile-fail	traits/issue-105231.rs
+compile-fail	traits/issue-106072.rs
 run-pass	traits/issue-15155.rs
 run-pass	traits/issue-18412.rs
 run-pass	traits/issue-22019.rs
@@ -7432,6 +7447,7 @@ check-pass	union/union_wild_or_wild.rs
 compile-fail	union/unresolved-field-isnt-copy.rs
 compile-fail	unop/unop-neg-bool.rs
 compile-fail	unresolved/unresolved-asterisk-imports.rs
+compile-fail	unresolved/unresolved-extern-mod-suggestion.rs
 compile-fail	unresolved/unresolved-import.rs
 compile-fail	unsafe/break-inside-unsafe-block-issue-128604.rs
 check-pass	unsafe/edition-2024-unsafe_op_in_unsafe_fn.rs
@@ -7491,6 +7507,7 @@ compile-fail	use/use-after-move-self.rs
 check-pass	use/use-keyword.rs
 check-pass	use/use-mod/use-mod-5.rs
 check-pass	use/use-mod/use-mod-6.rs
+compile-fail	use/use-mod/use-mod.rs
 compile-fail	use/use-paths-as-items.rs
 compile-fail	variance/leaking-unnameables.rs
 check-pass	variance/smart-pointers-covariant.rs

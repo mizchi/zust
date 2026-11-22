@@ -20,12 +20,17 @@ pub struct SrcMap {
     pub volatile: bool,
     /// モジュールの名前を変えて桁がずれた所: (行, 桁, ずれ) (lexer::rename_module_collisions_fix)
     pub colfix: Vec<(u32, u32, i32)>,
+    /// The root file's `extern crate x;` items, which the configuring blanks: (byte offset, text)
+    /// (cfg::blanked_externs). Only read when `keep_externs` is set before loading (load_crate_keeping_externs)
+    pub externs: Vec<(usize, String)>,
+    /// Whether the loading keeps `externs`
+    pub keep_externs: bool,
 }
 
 impl SrcMap {
     /// 1 ファイルだけ (区間 1 つ)
     pub fn single(name: &str) -> SrcMap {
-        SrcMap { segs: vec![(1, 0, 1)], files: vec![name.to_string()], inputs: vec![], probes: vec![], volatile: false, colfix: vec![] }
+        SrcMap { segs: vec![(1, 0, 1)], files: vec![name.to_string()], inputs: vec![], probes: vec![], volatile: false, colfix: vec![], externs: vec![], keep_externs: false }
     }
 
     /// 結合したソースの行 → (ファイルの名前, ファイルの中の行)
@@ -108,7 +113,16 @@ fn line_count(s: &str) -> u32 {
 
 /// クレートの根のファイル (main.rs / lib.rs) を読み、`mod x;` を展開する。display は根の表示名 (`src/main.rs` など)
 pub fn load_crate(root: &Path, display: &str, cfg: &crate::cfg::CfgSet) -> Result<(String, SrcMap), String> {
-    let mut map = SrcMap::default();
+    load_crate_in(root, display, cfg, SrcMap::default())
+}
+
+/// [`load_crate`], keeping the root file's `extern crate` items that the configuring blanks (SrcMap::externs): for
+/// `zustc check`, which reads the names they define
+pub fn load_crate_keeping_externs(root: &Path, display: &str, cfg: &crate::cfg::CfgSet) -> Result<(String, SrcMap), String> {
+    load_crate_in(root, display, cfg, SrcMap { keep_externs: true, ..SrcMap::default() })
+}
+
+fn load_crate_in(root: &Path, display: &str, cfg: &crate::cfg::CfgSet, mut map: SrcMap) -> Result<(String, SrcMap), String> {
     let dir = root.parent().map(|d| d.to_path_buf()).unwrap_or_default();
     let disp_dir = match display.rfind('/') {
         Some(i) => display[..i].to_string(),
@@ -190,7 +204,13 @@ fn load_file_in(path: &Path, display: &str, mod_dir: &Path, disp_dir: &str, star
     let src = std::fs::read_to_string(path).map_err(|e| format!("{}: {e}", path.display()))?;
     // (cfg を先に評価する: 偽の `#[cfg(..)] mod x;` のファイルは読まない)
     let src = match crate::cfg::strip(&src, cfg) {
-        Some(t) => t,
+        Some(t) => {
+            // (the root file's `extern crate` items, for a caller that asked)
+            if map.inputs.is_empty() && map.keep_externs {
+                map.externs = crate::cfg::blanked_externs(&src, &t);
+            }
+            t
+        }
         None => src,
     };
     map.inputs.push(path.to_path_buf());

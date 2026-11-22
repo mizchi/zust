@@ -311,6 +311,38 @@ pub fn strip(src: &str, c: &CfgSet) -> Option<String> {
     r
 }
 
+/// The `extern crate x;` items of `src` that [`strip`] blanked in `stripped` as such (its own pass, not one that went
+/// with a configured-away item or module: the token before it is kept, or is such an item's), and not in a comment:
+/// (byte offset, the item's text). One tokenizing of the text, only when it has an `extern crate`
+pub fn blanked_externs(src: &str, stripped: &str) -> Vec<(usize, String)> {
+    let mut out: Vec<(usize, String)> = vec![];
+    if src.len() != stripped.len() || !src.contains("extern crate") {
+        return out;
+    }
+    let (s, st) = (src.as_bytes(), stripped.as_bytes());
+    let toks = crate::lexer::tokenize(s);
+    let t = |k: usize| -> &[u8] { toks.get(k).map_or(&b""[..], |&(_, a, b)| &s[a..b]) };
+    // (where the last item taken ends)
+    let mut last_end = usize::MAX;
+    for i in 0..toks.len() {
+        if t(i) != b"extern" || t(i + 1) != b"crate" || !toks.get(i + 2).is_some_and(|x| x.0 == 0) {
+            continue;
+        }
+        let Some(e) = (i + 3..(i + 6).min(toks.len())).find(|&e| t(e) == b";") else { continue };
+        let (a, b) = (toks[i].1, toks[e].2);
+        let blank = st[a..b].iter().all(u8::is_ascii_whitespace);
+        let before_kept = i == 0 || {
+            let (_, pa, pb) = toks[i - 1];
+            st[pa..pb] == s[pa..pb] || pb == last_end
+        };
+        if blank && before_kept {
+            out.push((a, src[a..b].to_string()));
+            last_end = b;
+        }
+    }
+    out
+}
+
 fn strip_toks(src: &str, c: &CfgSet, select: &mut bool) -> Option<String> {
     let s = src.as_bytes();
     let toks = crate::lexer::tokenize(s);
