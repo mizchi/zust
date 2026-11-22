@@ -325,6 +325,12 @@ pub struct Program {
     pub impl_targs: FxMap<String, Vec<(Ty, Vec<Ty>, usize)>>,
     /// (型, trait) の実装
     pub impls: HashSet<(u32, String)>,
+    /// Types whose `Copy` impl names 'static in its self type (`impl Copy for Foo<'static>`): a copy of one requires
+    /// what it borrows to be 'static
+    pub static_copy: FxSet<u32>,
+    /// Associated consts of impls whose self type names 'static (`impl A<'static> { const IC: i32 = 10; }`), with
+    /// the region slots of that self type: `A::<'a>::IC` requires 'a to be 'static
+    pub static_self_consts: FxMap<u32, Vec<u8>>,
     /// `#[panic_handler]` の関数 (no_std)。panic (範囲外アクセス・unwrap など) はここを呼ぶ
     pub panic_handler: Option<u32>,
     /// const と static
@@ -753,6 +759,8 @@ impl Program {
             trait_supers: FxMap::default(),
             trait_self_outlives: FxMap::default(),
             any_immutable_static: false,
+            static_copy: FxSet::default(),
+            static_self_consts: FxMap::default(),
             alias_fixed_lt: false,
             trait_ngen: FxMap::default(),
             impl_targs: FxMap::default(),
@@ -966,6 +974,13 @@ impl Program {
                 if let (Some(tr), false) = (trait_of(ii), n.contains(" as ")) {
                     if let Some((base, last)) = n.rsplit_once("::") {
                         p.const_index.insert(format!("{base} as {tr}::{last}"), p.consts.len() as u32);
+                    }
+                }
+                // (an impl's for its type's 'static instance (`impl A<'static> { const IC }`): a use names the
+                // lifetimes it is used at)
+                if let crate::lexer::ItemKind::ImplMember(h) = items[ii].kind {
+                    if let Some(r) = sums[h as usize].hdr_regions.as_ref().filter(|r| r.self_slots.contains(&R_STATIC)) {
+                        p.static_self_consts.insert(p.consts.len() as u32, r.self_slots.clone());
                     }
                 }
                 p.consts.push(ConstDef {
@@ -1530,6 +1545,12 @@ impl Program {
             // (a trait with parameters, `impl Tr<u8> for S` and `impl Tr<u16> for S`, or self types that differ in their
             // arguments, `impl Tr for Vec<i32>` and `impl Tr for Vec<Box<i32>>`)
             let dup = !p.impls.insert((sid, tr.clone()));
+            // (all of its lifetimes 'static: `impl Copy for Foo<'static>`, `impl Copy for Foo<&'static u32>` (a path
+            // written without lifetimes is no lifetime of its own). One with others (`impl<'b> Copy for Foo<'static,
+            // 'b>`) is not followed: the borrow check would ask all of a copy's borrows to be 'static)
+            if tr == "Copy" && sm.hdr_regions.as_ref().is_some_and(|r| r.self_slots.contains(&R_STATIC) && r.self_slots.iter().all(|&c| c == R_STATIC || c == R_ELIDED_ADT)) {
+                p.static_copy.insert(sid);
+            }
 
             if impl_overlaps(&mut self_tys, sums, ii, sn, tr, dup)
                 && !matches!(

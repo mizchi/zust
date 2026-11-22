@@ -705,6 +705,8 @@ impl Cx<'_> {
                         self.drop_move_check(e)?;
                     }
                     self.bk_acc(e, borrowck::Acc::Move);
+                } else if self.bk_on() && !self.prog.static_copy.is_empty() {
+                    self.bk_copy(e, r.1);
                 }
                 // drop が要る値を値として読んだらムーブ
                 if self.needs_drop(r.1) {
@@ -1082,6 +1084,8 @@ impl Cx<'_> {
                 lp.breaks += 1;
                 let (t, d, tt) = (lp.brk, lp.depth, lp.temps);
                 self.drop_for_exit(d, tt);
+                // (the locals of the scopes left go out of scope here: `loop { let x = 1; r = &x; break; }`)
+                self.bk_dead_exit(d, *pos);
                 let args: Vec<Value> = args;
                 self.b.ins().jump(t, &args);
                 Ok(self.dead())
@@ -1094,6 +1098,7 @@ impl Cx<'_> {
                 let lp = &self.loops[li];
                 let (t, d, tt) = (lp.cont, lp.depth, lp.temps);
                 self.drop_for_exit(d, tt);
+                self.bk_dead_exit(d, *pos);
                 self.b.ins().jump(t, &[]);
                 Ok(self.dead())
             }
@@ -1953,6 +1958,7 @@ impl Cx<'_> {
             }
         }
         let mut caps = vec![];
+        let mut copy_caps = vec![];
         for (i, n) in cd.captures.iter().enumerate() {
             let Some((loc, t)) = self.lookup(n) else {
                 return err(SP, format!("cannot capture `{n}` here"));
@@ -1961,7 +1967,7 @@ impl Cx<'_> {
             let ct = if by_move { t } else { Ty::Ptr(true, intern(t)) };
             sol[cd.n_parent + i] = Some(ct);
             caps.push((loc, t));
-            self.bk_capture(c, n, loc, t, by_move);
+            copy_caps.push(self.bk_capture(c, n, loc, t, by_move));
         }
         // (a capture held by value (a `move` closure's) of a local not declared `mut`, which the body assigns or borrows
         // mutably: E0594 / E0596 at the mutation; one held by reference is a `&mut` loan the borrow check reports)
@@ -2154,6 +2160,13 @@ impl Cx<'_> {
                 };
                 let (v, _) = self.read(p);
                 self.write(Place::Mem(a, off as i32, ft), v);
+                // (a copy of which the body uses only `Copy` parts (bk_capture): its other parts are emptied, so that
+                // dropping the closure frees nothing, and the variable is not moved)
+                if copy_caps.get(i).copied().unwrap_or(false) {
+                    let dst = self.addr_plus(a, off as i32);
+                    self.zero_drop_parts(dst, t);
+                    continue;
+                }
                 if self.needs_drop(t) {
                     // (a capture of the enclosing closure moved into this one: as for moving it out, the
                     // enclosing closure's slot becomes empty)
@@ -2967,6 +2980,10 @@ impl Cx<'_> {
                                 self.bk.no_loan_src = false;
                             }
                         }
+                        // (a bound that writes `'static` (`F: Fn(&'static u8)`): checked from here on, as a `dyn Fn`'s)
+                        if !self.rg.on && self.rg.eligible && self.inline_depth == 0 && b.contains("'static") {
+                            self.rg_late_on();
+                        }
                         let mut never = false;
                         let prim = |t: Ty| t.is_int() || t.is_float() || matches!(t, Ty::Bool | Ty::Char);
                         for (a, &pt) in args.iter().zip(&ps) {
@@ -2976,6 +2993,8 @@ impl Cx<'_> {
                                 return err(expr_start(a), format!("mismatched types: expected `{}`, found `{}` (an argument of a call through the bound `{b}`) (E0308)", self.prog.tn(pt), self.prog.tn(at)));
                             }
                         }
+                        // (the arguments flow into the regions the bound's parameters write, as for a `dyn Fn`)
+                        self.rg_dyn_fn_args(&b, &args);
                         let r = if never { (None, Ty::Never) } else { self.zero_of(ret) };
                         self.bk_frame_end_call();
                         return Ok(r);

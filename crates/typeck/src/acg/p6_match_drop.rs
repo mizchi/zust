@@ -241,8 +241,26 @@ impl Cx<'_> {
         // (the places a guard must not change, made at the first guard: see below)
         let mut guard_places: Option<Vec<(borrowck::BPlace, bool)>> = None;
         // 各 arm を上から順に試す (判定 → 束縛 → ガード → 本体)
+        let mut after_guard = false;
         for arm in arms {
             let next = self.b.create_block();
+            // (after a guard that failed, the next arm tests the scrutinee again: what the guard moved out of it is
+            // used (E0382, at the match, as rustc reports it))
+            if after_guard && self.bk_on() {
+                if let Some((sp, at)) = &bk_sp {
+                    let mut tested = vec![];
+                    self.tested_places(&arm.pat, sp, place.ty(), &mut tested, 0);
+                    for p in tested {
+                        self.bk_acc_place(p, borrowck::Acc::Read, *at);
+                    }
+                    // (a binding of all of it by value (`x => x`) reads all of it, at the arm (a pattern has no
+                    // position of its own))
+                    if matches!(arm.pat, Pat::Ident(false, _, _, None)) {
+                        self.bk_acc_place(sp.clone(), borrowck::Acc::Read, arm.pos);
+                    }
+                }
+            }
+            after_guard = arm.guard.is_some();
             // (a pattern has no position of its own: an error in it is reported at the arm's body)
             self.pat_test(&arm.pat, place, next).map_err(|m| self.at(arm.pos, m))?;
             self.scopes.push(vec![]);
@@ -252,7 +270,9 @@ impl Cx<'_> {
             self.rg.scrut = rg_ss.clone();
             self.bk_bind_begin();
             self.bk.guard_arm = arm.guard.is_some();
+            self.bk.arm_at = Some(arm.pos).filter(|p| p.line != 0);
             let r = self.pat_bind(&arm.pat, place, BindMode::Move);
+            self.bk.arm_at = None;
             self.bk.guard_arm = false;
             self.bk_bind_end();
             r?;
@@ -290,6 +310,27 @@ impl Cx<'_> {
             };
             if let Some(gp) = &guard_place {
                 self.bk_ev(borrowck::Ev::Guard(Some(gp.clone())));
+            }
+            // (a guard sees the arm's bindings by shared reference: a closure in it that moves one out
+            // (`|| { let bar = foo; }` with `ref mut foo`) is E0507, at the move)
+            if let (Some(g), true) = (&arm.guard, self.bk_on()) {
+                let mut names = vec![];
+                crate::ast_closure::pat_idents(&arm.pat, &mut names);
+                names.retain(|n| self.lookup(n).is_some_and(|(_, t)| !self.bk_ty(t).0 || matches!(t, Ty::Ref(true, _))));
+                if !names.is_empty() {
+                    let prog = self.prog;
+                    let types: Vec<(String, Ty)> = names.iter().filter_map(|n| self.lookup(n).map(|(_, t)| (n.clone(), t))).collect();
+                    // (a `ref mut` binding's `&mut` is moved by a `let` that binds it by value: not Copy here)
+                    let by = |p: &Pat, n: &str| match types.iter().find(|x| x.0 == n) {
+                        // (`let &mut n = foo;` matches the referent: it does not move the `&mut`)
+                        Some((_, t @ Ty::Ref(true, _))) if matches!(p, Pat::Ref(..)) => borrowck::pat_moves(prog, p, *t, 0),
+                        Some((_, Ty::Ref(true, _))) | None => crate::ast_closure::binds_by_value(p),
+                        Some(x) => borrowck::pat_moves(prog, p, x.1, 0),
+                    };
+                    if let Some((n, at)) = guard_closure_move(g, &names, &by) {
+                        return Err(self.at(at, format!("cannot move out of `{n}` in pattern guard (E0507)")));
+                    }
+                }
             }
             if let Some(g) = &arm.guard {
                 // (`P if let Q = e && c => ..`: each `let` of the guard tests and binds in the arm's scope, each other
@@ -1337,20 +1378,25 @@ impl Cx<'_> {
                 }
                 Ok(())
             }
-            Pat::Struct(spath, ..) => {
+            Pat::Struct(spath, fps, _) => {
                 let (p, mode) = self.pat_deref(p, mode);
                 self.rg_pat_align(p.ty());
                 self.rg_pat_lifetimes(spath);
-                // (the parts are not tracked: the field names are not at hand here)
-                let saved = self.bk.pat_path.take();
+                // (the borrow check follows the parts by their names, as for a tuple struct's (`S { x: ax, .. } = a`
+                // moves a.x); the region check does not)
+                let vname = self.variant_on(spath, p.ty()).map(|(sid, vi)| self.prog.structs[sid as usize].variants[vi].name.clone());
+                let deref = matches!(mode, BindMode::Ref(_));
                 let rs = self.rg.pat.take();
                 let r = (|| {
-                    for (sub, fp) in self.struct_pat_fields(pat, p, None)? {
-                        self.pat_bind(sub, fp, mode)?;
+                    let parts = self.struct_pat_fields(pat, p, None)?;
+                    for ((fname, _), (sub, fp)) in fps.iter().zip(parts) {
+                        let saved = self.bk_pat_field(deref, vname.as_deref(), fname);
+                        let r = self.pat_bind(sub, fp, mode);
+                        self.bk.pat_path = saved;
+                        r?;
                     }
                     Ok(())
                 })();
-                self.bk.pat_path = saved;
                 self.rg.pat = rs;
                 r
             }
@@ -1441,6 +1487,35 @@ impl Cx<'_> {
             }
             _ => !self.needs_drop(t),
         }
+    }
+
+    /// Empties the parts of the value of type t at dst that need dropping (t is zeroable): a struct's fields one by
+    /// one, so that its other fields keep their values
+    pub(crate) fn zero_drop_parts(&mut self, dst: Value, t: Ty) {
+        if !self.needs_drop(t) {
+            return;
+        }
+        if let Ty::Struct(sid) = t {
+            let sd = &self.prog.structs[sid as usize];
+            let bname = &self.prog.structs[self.prog.base_of(sid) as usize].name;
+            // (an enum of one variant: its fields, so that a `Copy` one the closure uses keeps its value
+            // (`let E::V(n, _) = e;`); the tag stays)
+            let fields = if !sd.is_enum {
+                Some(sd.fields.clone())
+            } else if sd.variants.len() == 1 {
+                Some(sd.variants[0].fields.clone())
+            } else {
+                None
+            };
+            if let (Some(fs), false) = (fields, matches!(bname.as_str(), "Vec" | "String" | "Rc" | "Arc")) {
+                for (_, ft, off) in fs {
+                    let d = self.addr_plus(dst, off as i32);
+                    self.zero_drop_parts(d, ft);
+                }
+                return;
+            }
+        }
+        self.zero(dst, t);
     }
 
     pub(crate) fn zero(&mut self, dst: Value, t: Ty) {
@@ -1668,6 +1743,29 @@ impl Cx<'_> {
         }
         if let Some(n) = self.drop_owner(e) {
             return err(expr_start(e), format!("cannot move out of type `{n}`, which implements the `Drop` trait (E0509)"));
+        }
+        // (out of what an overloaded `Deref` gives (`x.field` with x: `Rc<Bar>`, `*w` with w: W: Deref): its
+        // `deref` returns a reference, E0507. Not out of a `Box`, which the program owns)
+        let mut cur = strip_paren(e);
+        loop {
+            let (b, fname) = match cur {
+                Expr::Field(b, f, _) => (strip_paren(b), Some(f)),
+                Expr::Unary(op, b, _) if op == "*" => (strip_paren(b), None),
+                _ => break,
+            };
+            // (through references too: `r.value` with r: `&Rc<S>`)
+            if let Some(Ty::Struct(sid)) = self.peek(b).map(|t| self.strip_refs(t)) {
+                let through = fname.is_none_or(|f| self.prog.field(sid, f).is_none());
+                if through && self.user_deref_sid(b, sid).is_some() {
+                    let n = self.prog.structs[self.prog.base_of(sid) as usize].name.clone();
+                    let msg = if matches!(n.as_str(), "Rc" | "Arc") { format!("cannot move out of an `{n}` (E0507)") } else { format!("cannot move out of dereference of `{n}` (E0507)") };
+                    return err(expr_start(e), msg);
+                }
+            }
+            if fname.is_none() {
+                break;
+            }
+            cur = b;
         }
         let mut cur = strip_paren(e);
         while let Expr::Field(b, _, _) = cur {
@@ -2288,4 +2386,54 @@ fn lit_suffix(e: &Expr) -> Option<bool> {
         Expr::Unary(op, x, _) if op == "-" => lit_suffix(x),
         _ => None,
     }
+}
+
+/// A closure in e (a match guard) whose body moves one of names out: that capture, and where it moves
+fn guard_closure_move(e: &Expr, names: &[String], by: crate::ast_closure::MovesBy) -> Option<(String, crate::parse::Pos)> {
+    if names.is_empty() {
+        return None;
+    }
+    // (a `move` closure takes what it names by value when it is made: one of names it names is moved there, even if
+    // its body only borrows it)
+    if let Expr::Closure(true, _, _, _, at) = e {
+        if let Some(n) = crate::ast_closure::free_vars(e).into_iter().find(|n| names.contains(n)) {
+            return Some((n, *at));
+        }
+    }
+    if let Expr::Closure(..) = e {
+        return crate::ast_closure::move_site_by(e, names, by);
+    }
+    // (a `let` in a block of the guard binds a name again: past it, the name is not the arm's binding)
+    if let Expr::Block(_, _, b) = e {
+        let mut cur = names.to_vec();
+        for st in &b.stmts {
+            match st {
+                crate::parse::Stmt::Let(p, _, init, els, ..) => {
+                    if let Some(f) = init.as_ref().and_then(|x| guard_closure_move(x, &cur, by)) {
+                        return Some(f);
+                    }
+                    if let Some(f) = els.as_ref().and_then(|eb| guard_closure_move(&Expr::Block(None, false, eb.clone()), &cur, by)) {
+                        return Some(f);
+                    }
+                    let mut bound = vec![];
+                    crate::ast_closure::pat_idents(p, &mut bound);
+                    cur.retain(|n| !bound.contains(n));
+                }
+                crate::parse::Stmt::Expr(x, _) => {
+                    if let Some(f) = guard_closure_move(x, &cur, by) {
+                        return Some(f);
+                    }
+                }
+                _ => {}
+            }
+        }
+        return None;
+    }
+    let mut found = None;
+    crate::ast_closure::each_child_pub(e, &mut |c| {
+        if found.is_none() {
+            found = guard_closure_move(c, names, by);
+        }
+    });
+    found
 }

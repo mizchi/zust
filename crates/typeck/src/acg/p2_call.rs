@@ -2049,7 +2049,9 @@ impl Cx<'_> {
                 self.bk_frame();
             }
             let r = self.expr(a, exp);
-            if matches!(pt, Ty::Ref(true, _)) {
+            // (also where a type parameter the call already knows is a `&mut` (`v.push(c.raw)` with v: `Vec<&mut T>`),
+            // as rustc's coercion to the expected type)
+            if matches!(pt, Ty::Ref(true, _)) || matches!(self.prog.partial_subst(pt, &sol), Ty::Ref(true, _)) {
                 self.bk_reborrow_arg(a);
             }
             // (a closure written where a bound wants `Fn` / `FnMut`: it is that, so its body moving out what it captures

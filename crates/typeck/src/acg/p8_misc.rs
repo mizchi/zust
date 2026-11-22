@@ -764,7 +764,9 @@ impl Cx<'_> {
     }
 
     fn const_value_in(&mut self, p: &Expr, ci: u32) -> R<V> {
-        let _ = p;
+        if !self.prog.static_self_consts.is_empty() {
+            self.rg_static_self_const(p, ci);
+        }
         let prog = self.prog;
         let c = &prog.consts[ci as usize];
         let (t, src) = (c.ty, c.expr.clone());
