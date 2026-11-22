@@ -201,6 +201,21 @@ impl Resolve {
                 self.scopes.pop();
                 self.closures -= 1;
             }
+            // (a handler arm is a function the operation calls: its own bindings are one level deeper, as a closure's)
+            EK::Handle(body, arms) => {
+                self.expr(body);
+                for a in arms {
+                    self.closures += 1;
+                    self.scopes.push(HashMap::new());
+                    for p in &a.pats {
+                        self.pat(p, a.body.id);
+                    }
+                    self.bind((a.body.id, a.k.clone()));
+                    self.expr(&a.body);
+                    self.scopes.pop();
+                    self.closures -= 1;
+                }
+            }
             _ => {
                 for c in children(e) {
                     self.expr(c);
@@ -538,7 +553,23 @@ impl Lv<'_> {
                 self.closure -= 1;
                 live.extend(l);
             }
-            EK::Call(_, args) => self.operands(&args.iter().collect::<Vec<_>>(), live),
+            // (the callee too: it may be an expression, `(if c { f } else { g })(x)`)
+            EK::Call(f, args) => self.operands(&std::iter::once(&**f).chain(args).collect::<Vec<_>>(), live),
+            // (the emitted JS evaluates a JSX element's parts in its own order (`key` after the props): as operands, a
+            // local read by two of them is moved by none, whatever the order)
+            EK::Jsx(j) => self.operands(&jsx_children(j), live),
+            // (a handler's arms run once per operation, maybe many times: like a closure, a local from outside is
+            // never moved in them; the body runs while they can)
+            EK::Handle(body, arms) => {
+                self.closure += 1;
+                let mut l = live.clone();
+                for a in arms {
+                    self.expr(&a.body, &mut l);
+                }
+                self.closure -= 1;
+                live.extend(l);
+                self.expr(body, live);
+            }
             EK::Method(r, _, args) => self.operands(&std::iter::once(&**r).chain(args).collect::<Vec<_>>(), live),
             EK::Bin(op, a, b) if *op == "&&" || *op == "||" => {
                 // (the right operand may not run: what is live before it joins what is live after the operator)

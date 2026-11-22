@@ -61,7 +61,9 @@ enum Tag { Named(String), Anon }
   let b = s.contains({ s = "zz"; "a" });
   let mut t = "x";
   let c = t + { t = "y"; t };
-  (if a { "T" } else { "F" }) + (if b { "T" } else { "F" }) + c + (n as i32).to_string()
+  let mut ws = ["a", "b"];
+  let j = ws.join({ ws = ["z"]; "," });
+  (if a { "T" } else { "F" }) + (if b { "T" } else { "F" }) + c + j + (n as i32).to_string()
 }
 
 @wasm pub fn conflict_report(n: i32) -> String { conflicts(n) }

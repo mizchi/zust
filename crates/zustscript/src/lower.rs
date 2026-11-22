@@ -1422,6 +1422,16 @@ impl<'a> Lower<'a> {
         match b {
             B::Len => val(format!("({recv}.len() as i32)")),
             B::Join => {
+                // (a separator that assigns what the receiver reads: the receiver is taken as a value first)
+                let mut recv = recv;
+                if self.live.assigns_in.contains(&args[0].id) {
+                    let (mut reads, mut assigns) = (HashSet::new(), HashSet::new());
+                    own::names(r, &mut reads, &mut HashSet::new());
+                    own::names(&args[0], &mut HashSet::new(), &mut assigns);
+                    if reads.iter().any(|n| assigns.contains(n)) {
+                        recv = format!("({{ {} }})", self.owned(recv, &rf, &rt));
+                    }
+                }
                 let (sep, _) = self.borrowed(&args[0])?;
                 val(format!("{recv}.join({sep})"))
             }

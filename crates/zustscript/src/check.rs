@@ -165,6 +165,9 @@ pub struct Checker {
     typed_lits: Vec<(Id, Ty)>,
     /// (id, type) of the expressions of a `@wasm` function, resolved into `Info::ty` when the function is done
     tys: Vec<(Id, Ty)>,
+    /// [`Checker::eqable`]'s finished answers
+    eq_memo: std::cell::RefCell<HashMap<Ty, bool>>,
+    eq_cycles: std::cell::Cell<usize>,
     bound_checks: Vec<(Pos, Ty, String)>,
     /// mutable locals: (scope index, name)
     muts: HashSet<(usize, String)>,
@@ -205,6 +208,24 @@ pub fn wty_to_ty(w: &WTy) -> Ty {
 
 pub fn is_int(t: &Ty) -> bool {
     matches!(t, Ty::I32 | Ty::U32 | Ty::I64)
+}
+
+/// The number of nodes of `t`, counted up to `cap`
+fn ty_size(t: &Ty, cap: usize) -> usize {
+    let mut n = 1;
+    let kids: Vec<&Ty> = match t {
+        Ty::Array(a) | Ty::Typed(a) => vec![a],
+        Ty::Tuple(ts) | Ty::Named(_, ts) => ts.iter().collect(),
+        Ty::Fn(a, r) => a.iter().chain(std::iter::once(&**r)).collect(),
+        _ => vec![],
+    };
+    for k in kids {
+        if n >= cap {
+            break;
+        }
+        n += ty_size(k, cap - n);
+    }
+    n
 }
 
 /// `t` with the generic parameters of a record or enum replaced
@@ -260,6 +281,8 @@ impl Checker {
             floatv: HashSet::new(),
             typed_lits: vec![],
             tys: vec![],
+            eq_memo: Default::default(),
+            eq_cycles: Default::default(),
             bound_checks: vec![],
             muts: HashSet::new(),
             closure_bases: vec![],
@@ -567,8 +590,22 @@ impl Checker {
 
     /// Can values of `t` be compared with `==` (by content): not functions, JSX or effects
     /// (`seen`: the instantiated types being checked, so a recursive type ends; a type that grows without repeating
-    /// is refused past a depth)
+    /// is refused past a depth, or once it is large, before its fields are substituted. Finished answers are kept in
+    /// `eq_memo`, so a type shared by many fields is checked once)
     fn eqable(&self, t: &Ty, seen: &mut Vec<Ty>) -> bool {
+        if let Some(r) = self.eq_memo.borrow().get(t) {
+            return *r;
+        }
+        let cycles = self.eq_cycles.get();
+        let r = self.eqable_inner(t, seen);
+        // (false is final; true is final unless it leaned on a type still being checked, a cycle)
+        if !r || self.eq_cycles.get() == cycles {
+            self.eq_memo.borrow_mut().insert(t.clone(), r);
+        }
+        r
+    }
+
+    fn eqable_inner(&self, t: &Ty, seen: &mut Vec<Ty>) -> bool {
         match t {
             // (a generic parameter compares only with a numeric bound: unbounded, it could be a function)
             Ty::Str | Ty::Bool | Ty::Unit => true,
@@ -577,9 +614,10 @@ impl Checker {
             Ty::Tuple(ts) => ts.iter().all(|t| self.eqable(t, seen)),
             Ty::Named(n, targs) => {
                 if seen.contains(t) {
+                    self.eq_cycles.set(self.eq_cycles.get() + 1);
                     return true;
                 }
-                if seen.len() > 64 {
+                if seen.len() > 64 || ty_size(t, 4096) >= 4096 {
                     return false;
                 }
                 let (params, fields): (Vec<String>, Vec<Ty>) = if let Some(r) = self.info.records.get(n) {

@@ -91,3 +91,29 @@ pub fn jsx_alias() -> i32 {
 type P = { x: i32, name: String }
 // == by content, on the declared fields only (a value from TS may carry more)
 pub fn same_p(a: P, b: P) -> bool { a == b }
+
+fn one(x: i32) -> i32 { 1 }
+fn two(x: i32) -> i32 { 2 }
+// the callee is an expression that reads the array
+pub fn computed_callee() -> i32 {
+  let mut a = [1];
+  a.push(2);
+  (if a.len() == 1 { one } else { two })(0)
+}
+
+// a JSX element's parts are evaluated in the emitter's order (`key` after the props): no in-place push in them
+pub fn jsx_key() -> i32 {
+  let mut a = [1];
+  let v = <div key={a.len()} id={a.push(2).len()} />;
+  a.len()
+}
+
+// a handler arm runs once per operation: an array from outside is not appended to in place there
+enum Step { Tick -> i32 }
+fn ticks() -> i32 { perform Tick + perform Tick }
+pub fn handler_twice() -> i32 {
+  let mut a = [1];
+  handle ticks() {
+    Tick, k => k(a.push(2).len()),
+  }
+}
