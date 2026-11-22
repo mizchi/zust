@@ -2613,12 +2613,20 @@ impl Cx<'_> {
         // (an `FnMut` closure called by name: a `&mut` of it (E0596 when it is not `mut`); through a reference, a `&mut`
         // of what it points to (E0596 behind a `&`))
         if matches!(t, Ty::Struct(_)) && self.bk.fnmut.contains(&t) && !self.bk.fnonce.contains(&t) && is_place_expr(func) {
-            let ft = self.peek(func);
-            let target: Option<&Expr> = match ft {
-                Some(x) if x == t => Some(&**func),
-                Some(Ty::Ref(_, i)) if *i == t => Some(self.keep_expr(Expr::Unary("*".into(), func.clone(), crate::parse::Span { start: expr_start(func), at: expr_start(func) }))),
-                _ => None,
-            };
+            // (through every reference to it: `&&mut c` is behind a `&`, `&mut &mut c` is not)
+            let mut ft = self.peek(func);
+            let mut x: &Expr = func;
+            let mut n = 0;
+            while let Some(Ty::Ref(_, i)) = ft {
+                if n > 8 {
+                    break;
+                }
+                let sp = crate::parse::Span { start: expr_start(func), at: expr_start(func) };
+                x = self.keep_expr(Expr::Unary("*".into(), Box::new(x.clone()), sp));
+                ft = Some(*i);
+                n += 1;
+            }
+            let target: Option<&Expr> = (ft == Some(t)).then_some(x);
             if let Some(x) = target {
                 self.bk.no_loan_src = true;
                 self.bk_borrow(x, true, err_pos(func));

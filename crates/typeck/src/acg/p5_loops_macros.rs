@@ -301,7 +301,46 @@ impl Cx<'_> {
 
     /// `for pat in &x { .. }` / `for pat in &mut x { .. }`: x is borrowed until the loop ends (a hidden local holds
     /// the loan; it is read when the loop is left)
+    /// `for x in mk().iter().cloned()` (a Vec or an array a call makes, under adapters): the value goes to a local of
+    /// the loop's own block first, `{ let t = mk(); for x in t.iter().cloned() { .. } }`, so it is dropped when the
+    /// loop is done (its elements, which a borrowed loop leaves in it; its buffer, which a loop by value empties)
+    fn for_temp_base(&self, e: &Expr) -> Option<(Expr, Expr)> {
+        match strip_paren(e) {
+            Expr::MethodCall(r, name, tf, args, sp) if args.is_empty() && matches!(name.as_str(), "iter" | "iter_mut" | "into_iter" | "copied" | "cloned" | "enumerate" | "rev") => {
+                let (base, inner) = self.for_temp_base(r)?;
+                Some((base, Expr::MethodCall(Box::new(inner), name.clone(), tf.clone(), vec![], *sp)))
+            }
+            x @ (Expr::Call(..) | Expr::MethodCall(..) | Expr::Macro(..) | Expr::Array(..)) => {
+                let t = self.peek(x)?;
+                let seq = match t {
+                    Ty::Array(..) => true,
+                    Ty::Struct(sid) => self.vec_fields(sid).is_some(),
+                    _ => false,
+                };
+                seq.then(|| (x.clone(), path_expr("__exr_for_tmp")))
+            }
+            _ => None,
+        }
+    }
+
     pub(crate) fn for_(&mut self, f: &Expr) -> R<V> {
+        if let Expr::For(label, fpat, fexpr, fbody) = f {
+            if let Some((base, rebuilt)) = self.for_temp_base(fexpr) {
+                let at = expr_start(fexpr);
+                let blk = Expr::Block(
+                    None,
+                    false,
+                    crate::parse::Block {
+                        stmts: vec![
+                            Stmt::Let(Pat::Ident(false, false, "__exr_for_tmp".into(), None), None, Some(base), None, at),
+                            Stmt::Expr(Expr::For(label.clone(), fpat.clone(), Box::new(rebuilt), fbody.clone()), false),
+                        ],
+                    },
+                );
+                let blk = self.keep_expr(blk);
+                return self.expr(blk, None);
+            }
+        }
         let mut temp = None;
         if let Expr::For(_, _, fexpr, _) = f {
             // (`for x in v.iter()` / `v.iter_mut()`, through `copied` / `cloned` / `enumerate` / `rev`: a loan of v for

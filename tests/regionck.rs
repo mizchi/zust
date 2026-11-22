@@ -1256,3 +1256,14 @@ fn review_of_43_2() {
     assert!(d.len() == 1 && d[0].0 == 4 && d[0].1.contains("also borrowed as immutable"), "{d:?}");
     assert_eq!(check("fn main() {\n    let mut x = 0;\n    let mut c = || x += 1;\n    let r = &mut c;\n    r();\n    r();\n    let mut v = vec![1];\n    for x in v.iter_mut() {\n        *x += 1;\n    }\n    v.push(2);\n}\n"), vec![]);
 }
+
+/// Review of #43 (3): an `FnMut` closure called through `&&mut` is behind a `&` (E0596), through `&mut &mut` it is not;
+/// a long `rest @ ..` moves its elements as one place (a[1..19]), which a[0] is not
+#[test]
+fn review_of_43_3() {
+    let d = check("fn main() {\n    let mut x = 0;\n    let mut c = || x += 1;\n    let m = &mut c;\n    let r = &m;\n    r();\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 6 && d[0].1.contains("behind a `&` reference"), "{d:?}");
+    let d = check("fn main() {\n    let a: [String; 20] = Default::default();\n    let [_f, _rest @ ..] = a;\n    let _g = &a[5];\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 4 && d[0].1.contains("moved"), "{d:?}");
+    assert_eq!(check("fn main() {\n    let mut x = 0;\n    let mut c = || x += 1;\n    let mut m = &mut c;\n    let r = &mut m;\n    r();\n    let a: [String; 20] = Default::default();\n    let [_f, _rest @ .., _l] = a;\n}\n"), vec![]);
+}

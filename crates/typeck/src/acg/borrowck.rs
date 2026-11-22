@@ -424,10 +424,26 @@ fn path_str(locals: &[Local], p: &BPlace) -> String {
     s
 }
 
-/// a is a prefix of b (an index `[..]` is any element, an array pattern's `[2]` too)
+/// The elements an array pattern's place is (`[2]`: 2..3; `[1..19]`: the rest between)
+fn elems(p: &Proj) -> Option<(usize, usize)> {
+    let Proj::Field(f) = p else { return None };
+    let inner = f.strip_prefix('[')?.strip_suffix(']')?;
+    match inner.split_once("..") {
+        Some((a, b)) => Some((a.parse().ok()?, b.parse().ok()?)),
+        None => inner.parse::<usize>().ok().map(|i| (i, i + 1)),
+    }
+}
+
+/// a is a prefix of b (an index `[..]` is any element; an array pattern's elements, `[2]` or `[1..19]`, are where they
+/// overlap)
 fn prefix(a: &[Proj], b: &[Proj]) -> bool {
-    let elem = |p: &Proj| matches!(p, Proj::Field(f) if f.starts_with('['));
-    a.len() <= b.len() && a.iter().zip(b).all(|(x, y)| x == y || (*x == Proj::Index && (*y == Proj::Index || elem(y))) || (elem(x) && *y == Proj::Index))
+    let same = |x: &Proj, y: &Proj| match (elems(x), elems(y)) {
+        (Some((a0, a1)), Some((b0, b1))) => a0 < b1 && b0 < a1,
+        (Some(_), None) => *y == Proj::Index,
+        (None, Some(_)) => *x == Proj::Index,
+        (None, None) => x == y || (*x == Proj::Index && *y == Proj::Index),
+    };
+    a.len() <= b.len() && a.iter().zip(b).all(|(x, y)| same(x, y))
 }
 
 /// The two places overlap (one contains the other)

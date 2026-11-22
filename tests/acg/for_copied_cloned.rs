@@ -42,4 +42,20 @@ fn main() {
         t += x.len();
     }
     println!("{}", t);
+    // (a Vec or an array a call makes: dropped when the loop is done, by value or borrowed)
+    let mk = || vec![String::from("p"), String::from("qq")];
+    let mut u = 0;
+    for x in mk().iter().cloned() {
+        u += x.len();
+    }
+    for x in mk().iter() {
+        u += x.len();
+    }
+    for x in mk() {
+        u += x.len();
+    }
+    for x in [String::from("r")].iter().cloned() {
+        u += x.len();
+    }
+    println!("{}", u);
 }
