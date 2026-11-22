@@ -1985,7 +1985,17 @@ impl Cx<'_> {
         let Expr::Closure(_, inputs, _, _, _) = c else { return err(SP, "internal: expected a closure") };
         let prog = self.prog;
         let hint = self.closure_hint.take();
-        let bound = self.closure_bound.take();
+        let mut bound = self.closure_bound.take();
+        // (made where a trait object of a closure trait is expected (`&mut |y| x = Some(y)` for a
+        // `&mut dyn FnMut(&isize)`): its text is the bound its body is checked with, its lifetimes from outside)
+        if bound.is_none() && self.user_code && self.bk.level >= 2 && regionck::enabled() {
+            if let Some(Ty::Dyn(d)) = expected {
+                let fn_trait = ["FnOnce", "FnMut", "Fn"].iter().find_map(|k| d.trim_start().strip_prefix(k)).is_some_and(|r| r.trim_start().starts_with('('));
+                if fn_trait {
+                    bound = Some(Box::new((d.to_string(), self.rg.lt_names.clone(), vec![])));
+                }
+            }
+        }
         let to_prelude = std::mem::take(&mut self.closure_prelude);
         let fn_only = self.closure_fn_only;
         self.closure_fn_only = false;
@@ -2027,6 +2037,10 @@ impl Cx<'_> {
             let by_ref: Vec<&str> = cd.captures.iter().enumerate().filter(|(i, _)| !*mv && !cd.moved.get(*i).copied().unwrap_or(false)).map(|(_, n)| n.as_str()).collect();
             if let Some(sp) = regionck::fnmut_escape(body, &by_ref) {
                 return Err(self.at(sp, "captured variable cannot escape `FnMut` closure body (a mutable borrow of what the closure captures is returned)".to_string()));
+            }
+            // (its body's borrow check finds the rest: a closure it returns that mutates what it captures)
+            if !by_ref.is_empty() {
+                self.insts.lock().unwrap().kind_free.insert(cid);
             }
         }
         let mut caps = vec![];
@@ -2971,8 +2985,16 @@ impl Cx<'_> {
 
     /// 関数でない値の呼び出し `f(x)`: クロージャ (の参照) か `&dyn Fn`
     pub(crate) fn call_value(&mut self, c: &Expr, expected: Option<Ty>) -> R<V> {
+        let t0 = self.bk.call_temps.len();
+        let r = self.call_value_inner(c, expected);
+        self.bk_call_temps_end(t0);
+        r
+    }
+
+    fn call_value_inner(&mut self, c: &Expr, expected: Option<Ty>) -> R<V> {
         let Expr::Call(func, cargs) = c else { return err(SP, "internal: expected a call") };
         // 呼び出しはムーブしない (Fn / FnMut は参照で呼ぶ)。一時値なら文の終わりまで所有する
+        self.bk_frame();
         let (v, mut t) = if is_place_expr(func) && !matches!(&**func, Expr::Path(..) if self.fn_item(func).is_some()) {
             let p = self.place(func)?;
             self.read(p)
@@ -2983,6 +3005,7 @@ impl Cx<'_> {
             }
             r
         };
+        let callee_srcs = self.bk_frame_end();
         let Some(mut v) = v else {
             return err(SP, "expected a function");
         };
@@ -3023,6 +3046,13 @@ impl Cx<'_> {
                 self.bk.no_loan_src = true;
                 self.bk_borrow(x, true, err_pos(func));
                 self.bk.no_loan_src = false;
+            }
+        }
+        // (a closure called: what it borrows is held until the call, after its arguments, as rustc's `&c` of the
+        // call (`c(take(v))` with c capturing v by reference is E0505))
+        if let Ty::Struct(sid) = t {
+            if self.prog.closure_of_struct.contains_key(&self.prog.base_of(sid)) {
+                self.bk_callee_hold(&callee_srcs);
             }
         }
         self.bk_frame();

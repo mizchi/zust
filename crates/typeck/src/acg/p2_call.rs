@@ -836,6 +836,8 @@ impl Cx<'_> {
         let p0 = p;
         // (メソッドがなく `impl Deref` があれば、deref した先で探す: `rc.borrow_mut()`)
         let mut via_deref = false;
+        // (the first type reached through whose `Deref` has no `DerefMut` (`Rc`): what follows is shared)
+        let mut shared_deref: Option<String> = None;
         let mut derefs = 0;
         let (a, o, sid, id) = loop {
             let (a, o, sid) = loop {
@@ -887,6 +889,9 @@ impl Cx<'_> {
                 };
                 p = Place::Mem(v.unwrap(), 0, inner_t);
                 via_deref = true;
+                if shared_deref.is_none() {
+                    shared_deref = self.shared_deref(sid);
+                }
                 derefs += 1;
                 if derefs > 16 {
                     let sname = self.prog.structs[sid as usize].name.clone();
@@ -908,6 +913,12 @@ impl Cx<'_> {
         let sname = self.prog.structs[sid as usize].name.clone();
         if !self.prog.sigs[id as usize].has_self {
             return err(SP, format!("`{sname}::{name}` is an associated function, not a method"));
+        }
+        // (a `&mut self` method of what a `Deref` with no `DerefMut` reaches (`rc.set(0, 0)` with `rc: Rc<Point>`):
+        // it would write shared data (E0596))
+        if let (Some(n), true, true) = (&shared_deref, self.user_code, matches!(self.prog.sigs[id as usize].params.first(), Some(Ty::Ref(true, _)))) {
+            let what = if matches!(n.as_str(), "Rc" | "Arc") { format!("data in an `{n}`") } else { format!("data in dereference of `{n}`") };
+            return err(SP, format!("cannot borrow {what} as mutable (E0596)"));
         }
         // struct のアドレスを渡す: `&self` ならそのまま、`self` なら call_fn がコピーする
         let mut recv_v = self.addr_plus(a, o);

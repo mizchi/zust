@@ -4000,13 +4000,29 @@ fn placeholder_wave(a: &Analysis, insts: &Mutex<Insts>) -> Vec<u32> {
     let p = &a.prog;
     let mut g = insts.lock().unwrap();
     g.lenient = true;
-    let made: FxSet<u32> = g.list.iter().map(|i| i.base).collect();
+    let mut made: FxMap<u32, Vec<Vec<Ty>>> = FxMap::default();
+    for i in &g.list {
+        made.entry(i.base).or_default().push(i.args.clone());
+    }
     for id in 0..p.names.len() {
         let sig = &p.sigs[id];
         // (a trait's default method no impl uses: its `Self` is a placeholder too, bounded by the trait)
-        if !sig.is_generic() || !sig.has_body || made.contains(&(id as u32)) || p.closures.contains_key(&(id as u32)) {
+        if !sig.is_generic() || !sig.has_body || p.closures.contains_key(&(id as u32)) {
             continue;
         }
+        // (a fn of which instances are made: checked with them. Unless every instance gives a `Copy` type for a
+        // parameter its bounds do not make `Copy` (`dup(1u32)` of `fn dup<T>(x: T) -> (T, T) { (x, x) }`): those hide
+        // what moving a T does, so the body is checked with placeholders too)
+        let recheck = match made.get(&(id as u32)) {
+            Some(insts) => {
+                let hides = |args: &Vec<Ty>| args.iter().zip(&sig.generics).any(|(&a, (_, bs))| !bs.iter().any(|b| b == "Copy") && acg::borrowck::is_copy(p, a, 0));
+                if !insts.iter().all(hides) {
+                    continue;
+                }
+                true
+            }
+            None => false,
+        };
         // (not a dependency's: `is_ext` knows only concrete fns, the item's flag tells)
         if !p.item_of[id].is_some_and(|ii| ii < p.prelude_from && !a.ext_items.get(ii as usize).copied().unwrap_or(false)) {
             continue;
@@ -4039,7 +4055,9 @@ fn placeholder_wave(a: &Analysis, insts: &Mutex<Insts>) -> Vec<u32> {
             continue;
         }
         let args: Vec<Ty> = sig.generics.iter().enumerate().map(|(k, (n, bs))| Ty::Struct(p.placeholder(id as u32, k as u32, n, bs))).collect();
-        let _ = g.request(p, id as u32, args);
+        if let (Ok(iid), true) = (g.request(p, id as u32, args), recheck) {
+            g.recheck.insert(iid);
+        }
     }
     std::mem::take(&mut g.pending)
 }
