@@ -4589,6 +4589,7 @@ run-pass	or-patterns/bindings-runpass-1.rs
 run-pass	or-patterns/bindings-runpass-2.rs
 compile-fail	or-patterns/exhaustiveness-non-exhaustive.rs
 check-pass	or-patterns/exhaustiveness-pass.rs
+compile-fail	or-patterns/exhaustiveness-unreachable-pattern.rs
 run-pass	or-patterns/for-loop.rs
 run-pass	or-patterns/if-let-while-let.rs
 compile-fail	or-patterns/inconsistent-modes.rs
@@ -5417,12 +5418,14 @@ check-pass	pattern/usefulness/const-pat-ice.rs
 check-pass	pattern/usefulness/const-private-fields.rs
 compile-fail	pattern/usefulness/consts-opaque.rs
 check-pass	pattern/usefulness/integer-ranges/issue-117648-overlapping_range_endpoints-false-positive.rs
+compile-fail	pattern/usefulness/integer-ranges/reachability.rs
 run-pass	pattern/usefulness/integer-ranges/regression-switchint-sorting-with-ranges.rs
 run-pass	pattern/usefulness/irrefutable-let-patterns.rs
 run-pass	pattern/usefulness/irrefutable-unit.rs
 compile-fail	pattern/usefulness/issue-105479-str-non-exhaustiveness.rs
 compile-fail	pattern/usefulness/issue-15129.rs
 compile-fail	pattern/usefulness/issue-2111.rs
+compile-fail	pattern/usefulness/issue-30240-b.rs
 compile-fail	pattern/usefulness/issue-30240.rs
 compile-fail	pattern/usefulness/issue-3096-2.rs
 compile-fail	pattern/usefulness/issue-31221.rs
@@ -5448,6 +5451,7 @@ compile-fail	pattern/usefulness/match-arm-statics-2.rs
 compile-fail	pattern/usefulness/match-arm-statics.rs
 compile-fail	pattern/usefulness/match-byte-array-patterns-2.rs
 compile-fail	pattern/usefulness/match-non-exhaustive.rs
+compile-fail	pattern/usefulness/match-ref-ice.rs
 compile-fail	pattern/usefulness/match-vec-fixed.rs
 run-pass	pattern/usefulness/nested-exhaustive-match.rs
 compile-fail	pattern/usefulness/non-exhaustive-match-nested.rs
