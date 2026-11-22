@@ -527,6 +527,11 @@ impl Session2 {
             if let Some(e) = duplicate_import(src0, &src, &items[..user]) {
                 return Err(e);
             }
+            // (E0428 of an inline module and an item: a whole-text pass, so not on each build of a crate loaded from
+            // files, whose incremental builds would pay it every time)
+            if let Some(e) = duplicate_name(src0) {
+                return Err(e);
+            }
             if let Some(e) = malformed_attr(src0, &src, &items[..user], self.ctx.deps.is_empty() && self.ctx.lib.is_none()) {
                 return Err(e);
             }
@@ -1568,6 +1573,155 @@ fn malformed_attr(src0: &str, split: &str, items: &[SrcItem], standalone: bool) 
 
 /// E0252 / E0255: a name a top-level `use` brings in that another top-level `use` or item of the crate root also
 /// defines ("the name `X` is defined multiple times", at the second). Top level = the item starts a line (the
+
+/// E0428: two items of a module (the crate root or a `mod m { .. }`) with the same name in the type namespace (`mod`,
+/// `struct`, `enum`, `union`, `trait`, `type`, `extern crate`) or the value namespace (`fn`, `const`, `static`, a unit
+/// / tuple struct), at the second: `enum Foo {}` and `mod Foo {}`. Only read when the program has a `mod`
+fn duplicate_name(src: &str) -> Option<String> {
+    // (one scan: a program without an inline module has its other duplicates found when its items are collected)
+    if !src.contains("mod ") {
+        return None;
+    }
+    let b = src.as_bytes();
+    let toks = crate::lexer::tokenize(b);
+    let n = toks.len();
+    let t = |k: usize| -> &[u8] { toks.get(k).map_or(&b""[..], |&(_, a, e)| &b[a..e]) };
+    // (each open bracket's match)
+    let mut close = vec![usize::MAX; n];
+    let mut stack: Vec<usize> = vec![];
+    for k in 0..n {
+        if toks[k].0 == 1 {
+            match b[toks[k].1] {
+                b'(' | b'[' | b'{' => stack.push(k),
+                b')' | b']' | b'}' => {
+                    if let Some(o) = stack.pop() {
+                        close[o] = k;
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+    let line_of = |k: usize| b[..toks[k].1].iter().filter(|&&c| c == b'\n').count() + 1;
+    let is_id = |k: usize| toks.get(k).is_some_and(|x| x.0 == 0);
+    // (scopes to scan: token ranges of module bodies)
+    let mut scopes: Vec<(usize, usize)> = vec![(0, n)];
+    while let Some((lo, hi)) = scopes.pop() {
+        let mut names: Vec<(u8, &[u8])> = vec![];
+        let mut k = lo;
+        while k < hi {
+            // attributes
+            if t(k) == b"#" && (t(k + 1) == b"[" || (t(k + 1) == b"!" && t(k + 2) == b"[")) {
+                let o = if t(k + 1) == b"[" { k + 1 } else { k + 2 };
+                k = close[o].saturating_add(1);
+                continue;
+            }
+            if t(k) == b"pub" {
+                k += 1;
+                if t(k) == b"(" {
+                    k = close[k].saturating_add(1);
+                }
+                continue;
+            }
+            if matches!(t(k), b"unsafe" | b"async" | b"default") {
+                k += 1;
+                continue;
+            }
+            // (the item's namespace and name: 0 types, 1 values)
+            let mut item: Option<(u8, usize)> = None;
+            match t(k) {
+                // (an inline module; a `mod m;` file may be configured away by its own `#![cfg(..)]`)
+                // (nor one whose body starts with an inner `#![cfg(..)]`, a file module brought in that way)
+                // (nor one whose body starts with an inner `#![cfg(..)]`, nor an empty one over several lines: a file module
+                // the loader brought in, configured away by its own `#![cfg(..)]`)
+                b"mod" if is_id(k + 1)
+                    && t(k + 2) == b"{"
+                    && !(t(k + 3) == b"#" && t(k + 4) == b"!" && t(k + 5) == b"[" && t(k + 6).starts_with(b"cfg"))
+                    && !(close[k + 2] == k + 3 && b[toks[k + 2].1..toks[k + 3].1].contains(&b'\n')) =>
+                {
+                    item = Some((0, k + 1));
+                    if close[k + 2] < hi {
+                        scopes.push((k + 3, close[k + 2]));
+                    }
+                }
+                b"struct" if is_id(k + 1) => {
+                    item = Some((0, k + 1));
+                    // (a unit / tuple struct is a value too)
+                    let mut j = k + 2;
+                    if t(j) == b"<" {
+                        let mut d = 0i32;
+                        while j < hi {
+                            match t(j) {
+                                b"<" => d += 1,
+                                b">" => {
+                                    d -= 1;
+                                    if d == 0 {
+                                        break;
+                                    }
+                                }
+                                _ => {}
+                            }
+                            j += 1;
+                        }
+                        j += 1;
+                    }
+                    if matches!(t(j), b";" | b"(") {
+                        names.push((1, t(k + 1)));
+                    }
+                }
+                b"enum" | b"trait" | b"type" if is_id(k + 1) => item = Some((0, k + 1)),
+                b"union" if is_id(k + 1) && t(k + 1) != b"union" => item = Some((0, k + 1)),
+                b"fn" | b"const" | b"static" if is_id(k + 1) && t(k + 1) != b"_" && t(k + 1) != b"fn" && t(k + 1) != b"mut" => {
+                    item = Some((1, k + 1))
+                }
+                b"static" if t(k + 1) == b"mut" && is_id(k + 2) => item = Some((1, k + 2)),
+                b"extern" if t(k + 1) == b"crate" && is_id(k + 2) => {
+                    let nm = if t(k + 3) == b"as" && (is_id(k + 4) || t(k + 4) == b"_") { k + 4 } else { k + 2 };
+                    // (`as _` binds no name)
+                    if t(nm) != b"self" && t(nm) != b"_" {
+                        item = Some((0, nm));
+                    }
+                }
+                _ => {}
+            }
+            if let Some((ns, at)) = item {
+                // (`r#foo` is the name `foo`: the tokens split it into `r`, `#`, `foo`)
+                let at = if t(at) == b"r" && t(at + 1) == b"#" && is_id(at + 2) { at + 2 } else { at };
+                let name = t(at);
+                if names.iter().any(|&(m, x)| m == ns && x == name) {
+                    return Some(format!("{}:1: the name `{}` is defined multiple times (E0428)", line_of(at), String::from_utf8_lossy(name)));
+                }
+                names.push((ns, name));
+            }
+            // to the item's end: a `;` or a body `{ .. }` (a body in brackets is skipped whole)
+            let mut j = if item.is_some() { k + 1 } else { k };
+            loop {
+                if j >= hi {
+                    break;
+                }
+                match t(j) {
+                    b";" => break,
+                    b"{" => {
+                        j = close[j];
+                        // (`struct S { .. }` / `fn f() { .. }` end at their body; `const C: T = S { .. };` goes on)
+                        if t(j + 1) != b";" && !matches!(t(j + 1), b"." | b"?" | b"+" | b"-" | b"*" | b"/") {
+                            break;
+                        }
+                    }
+                    b"(" | b"[" => j = close[j],
+                    _ => {}
+                }
+                if j == usize::MAX {
+                    return None;
+                }
+                j += 1;
+            }
+            k = j.saturating_add(1);
+        }
+    }
+    None
+}
+
 /// flattened modules' items keep their indentation)
 fn duplicate_import(src0: &str, split: &str, items: &[SrcItem]) -> Option<String> {
     // (no crate-root `use`, no clash to look for: the common case costs one look at each item's first bytes)
@@ -1699,6 +1853,16 @@ fn unresolved_import(src: &str, split: &str, items: &[SrcItem], deps: &[String])
                 let second: String = r2.chars().take_while(|c| c.is_alphanumeric() || *c == '_').collect();
                 if !second.is_empty() && second != "self" && second != "super" {
                     seconds.push((line, first.clone(), second));
+                } else if let Some(list) = r2.trim_start().strip_prefix('{').and_then(|l| l.split_once('}')).map(|(l, _)| l).filter(|l| !l.contains('{')) {
+                    // (`use m::{f, g as h};`: each name of a flat list)
+                    for part in list.split(',') {
+                        // (`r#foo` names `foo`)
+                        let p = part.trim_start();
+                        let n: String = p.strip_prefix("r#").unwrap_or(p).chars().take_while(|c| c.is_alphanumeric() || *c == '_').collect();
+                        if !n.is_empty() && n != "self" && n != "super" && !part.contains("::") {
+                            seconds.push((line, first.clone(), n));
+                        }
+                    }
                 }
             }
             firsts.push((line, first));

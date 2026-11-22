@@ -1440,6 +1440,10 @@ fn part8_review_follow_ups() {
     assert_eq!(check("mod m {\n    pub static BAR: String = String::new();\n}\nfn main() {\n    println!(\"{}\", m::BAR.len());\n}\n"), vec![]);
     // (`*q = &mut y` with q = &mut p, p = &mut *z: p changes, not z, which q holds a loan of through p)
     assert_eq!(check("fn main() {\n    let mut z0 = 0;\n    let z = &mut z0;\n    let mut w = 5;\n    let mut p = &mut w;\n    p = &mut *z;\n    {\n        let mut y = 1;\n        let q = &mut p;\n        *q = &mut y;\n        **q += 1;\n    }\n    *z += 1;\n}\n"), vec![]);
+    // (nor what z points to when z is a parameter: `*q = &mut y` does not store y behind it)
+    assert_eq!(check("fn f(z: &mut i32) {\n    let mut p = &mut *z;\n    {\n        let mut y = 1;\n        let q = &mut p;\n        *q = &mut y;\n        **q += 1;\n    }\n    *z += 1;\n}\nfn main() {}\n"), vec![]);
+    let d = check("fn g(z: &mut &i32) {\n    let y = 1;\n    let q = &mut *z;\n    *q = &y;\n}\nfn main() {}\n");
+    assert!(d.len() == 1 && d[0].0 == 4, "{d:?}");
     // (but `*q = &mut &y`: the `&mut` is invariant, so z's region is y's)
     let d = check("fn sink(_: &u32) {}\nfn main() {\n    let z0 = 0;\n    let mut z = &z0;\n    let mut p = &mut z;\n    {\n        let y = 1;\n        let q = &mut p;\n        *q = &mut &y;\n    }\n    sink(z);\n}\n");
     assert!(d.len() == 1 && d[0].0 == 9, "{d:?}");
