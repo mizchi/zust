@@ -2761,6 +2761,23 @@ impl Program {
         crate::parse::parse_expr(&format!("__zust_lazy_{id}"))
     }
 
+    /// An untyped local whose untyped value failed and that x refers to is used, even where x is not evaluated (an
+    /// `if` arm not taken still gives it its type): its error is not the block's
+    fn note_refs(&self, x: &crate::parse::Expr) {
+        LAZY.with(|l| {
+            let mut l = l.borrow_mut();
+            if l.1.values().all(|e| e.2.is_none()) {
+                return;
+            }
+            let t = format!("{x:?}");
+            for (id, e) in l.1.iter_mut() {
+                if e.2.is_some() && t.contains(&format!("\"__zust_lazy_{id}\"")) {
+                    e.2 = None;
+                }
+            }
+        });
+    }
+
     fn eval_block_in(&self, b: &crate::parse::Block, env: &mut Vec<(String, i128, Option<It>, Option<crate::parse::Expr>)>, depth: u32, want: Option<It>) -> R<(i128, Option<It>)> {
         use crate::parse::{Pat, Stmt};
         let n = b.stmts.len();
@@ -2769,6 +2786,7 @@ impl Program {
                 Stmt::Let(Pat::Ident(false, _, name, None), ty, Some(init), None, ..) => {
                     // (`let x: u8 = ..`: the annotation is the value's type)
                     let x = subst_consts(init, env);
+                    self.note_refs(&x);
                     let lt = ty.as_ref().and_then(|t| It::of_name(&self.cast_prim(t))).or_else(|| self.static_ty(&x));
                     // (with no type yet, its failing untyped value is not an error: `let x = 1 / ((!0 >> 7) + 1);` is
                     // 0 as a u8, whose use evaluates it again at that type)
@@ -2786,7 +2804,11 @@ impl Program {
                     let lazy = if t.is_none() { Some(self.lazy_marker(x, failed)?) } else { None };
                     env.push((name.clone(), t.map_or(v, |it| it.wrap(v)), t, lazy));
                 }
-                Stmt::Expr(x, false) if k + 1 == n => return self.eval_t(&subst_consts(x, env), depth, want),
+                Stmt::Expr(x, false) if k + 1 == n => {
+                    let x = subst_consts(x, env);
+                    self.note_refs(&x);
+                    return self.eval_t(&x, depth, want);
+                }
                 // (`x = 3;` to a local: its new value)
                 Stmt::Expr(crate::parse::Expr::Assign(l, r), _) => {
                     let crate::parse::Expr::Path(None, p) = &**l else { return Err("unsupported statement in a const fn".into()) };
@@ -2798,6 +2820,7 @@ impl Program {
                     };
                     let st = env[slot].2;
                     let x = subst_consts(r, env);
+                    self.note_refs(&x);
                     let mut failed = None;
                     let (v, t) = match self.eval_t(&x, depth, st) {
                         Err(e) if st.is_none() => {
@@ -4041,6 +4064,8 @@ impl Program {
             AdtShape::Enum(vs) => {
                 let mut discrs = vec![];
                 let mut next = 0i64;
+                // (a discriminant is a value of the repr type, isize without one: `(1 << 63) >> 63` is -1)
+                let dt = self.reprs.get(&self.structs[id as u32 as usize].name).copied().unwrap_or(Ty::Isize);
                 let mut env: Vec<(String, i128, Option<It>, Option<crate::parse::Expr>)> = vec![];
                 for v in vs {
                     let d = if v.discr_src.is_empty() {
@@ -4048,12 +4073,12 @@ impl Program {
                     } else {
                         // (other constants, and the variants before it: `Y = Foo::X as isize - 3`)
                         let e = crate::parse::parse_expr(&v.discr_src).map_err(|e| format!("{line}:1: {e}"))?;
-                        let x = self.eval_const(&subst_consts(&e, &env), 1).map_err(|e| format!("{line}:1: {e}"))?;
+                        let x = self.eval_const_as(&subst_consts(&e, &env), dt).map_err(|e| format!("{line}:1: {e}"))?;
                         i64::try_from(x).or_else(|_| u64::try_from(x).map(|u| u as i64)).map_err(|_| format!("{line}:1: discriminant out of range"))?
                     };
                     if !v.discr_src.is_empty() || vs.iter().any(|w| !w.discr_src.is_empty()) {
-                        env.push((format!("{}::{}", sdefs[id].1, v.name), d as i128, None, None));
-                        env.push((format!("Self::{}", v.name), d as i128, None, None));
+                        env.push((format!("{}::{}", sdefs[id].1, v.name), d as i128, It::of_ty(dt), None));
+                        env.push((format!("Self::{}", v.name), d as i128, It::of_ty(dt), None));
                     }
                     if discrs.contains(&d) {
                         return Err(format!(

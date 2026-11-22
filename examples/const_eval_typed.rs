@@ -115,6 +115,7 @@ fn main() {
     println!("{}", DIV_LATE);
     println!("{} {}", E2::A as u16, E2::B as u16);
     println!("{}", std::mem::size_of::<[u8; QFLIP]>());
+    println!("{} {} {}", SKIPPED, E3::A as isize, E3::B as isize);
 }
 
 // (a generic alias resolves before layout; an unsafe block evaluates; the i128::MIN literal negates)
@@ -174,3 +175,14 @@ const fn qflip(x: core::primitive::u8) -> core::primitive::u8 {
     !x >> 4
 }
 const QFLIP: usize = qflip(0) as usize;
+
+// (a use in an arm not taken gives the local its type; a discriminant is an isize without a repr; an unsafe block)
+const SKIPPED: u8 = {
+    let x = 1 / ((!0 >> 7) + 1);
+    if false { x } else { 0u8 }
+};
+#[derive(Clone, Copy)]
+enum E3 {
+    A = (1 << 63) >> 63,
+    B = unsafe { 1 + 2 },
+}

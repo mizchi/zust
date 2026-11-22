@@ -2423,7 +2423,15 @@ pub fn summarize(item: &Item, owner: Option<&Owner>) -> R<Summary> {
                         Ok(v) => Some(v),
                         // (`Bar = QUUX` / `Y = Foo::X as isize - 3`: Program evaluates it with the constants)
                         Err(er) => {
-                            discr_src = crate::ast_types::const_expr_text(e).ok_or(er)?;
+                            // (a block's tail, `unsafe` or not: `A = unsafe { 1 + 2 }`)
+                            let mut x = e;
+                            while let Expr::Block(None, _, b) = x {
+                                match &b.stmts[..] {
+                                    [crate::parse::Stmt::Expr(t, false)] => x = t,
+                                    _ => break,
+                                }
+                            }
+                            discr_src = crate::ast_types::const_expr_text(x).ok_or(er)?;
                             Some(0)
                         }
                     },
