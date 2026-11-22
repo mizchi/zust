@@ -1,3 +1,0 @@
-// expect: `==` compares numbers, String, Bool and enums without data
-type P = { x: i32 }
-fn f(a: P, b: P) -> bool { a == b }

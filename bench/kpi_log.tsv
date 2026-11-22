@@ -280,3 +280,4 @@ date	commit	change	noop_M	edit_M	check_M	cache_KiB	lsp_G	run	check	build	cfail	t
 2026-11-22	13c69c4+	&T to *const T in inference, for over a Result constructor, deny(deprecated) for std::intrinsics	0.697	549.793	3752.043	1902.8	-	1814	1498	102	4309	1180.997	64.232	10.466	320.562	719.017	266.806
 2026-11-22	b61f543	Review of #55: supertraits and equations of uncalled fns' bounds, fn pointers' dyn, item allow(deprecated)	0.693	549.801	3752.007	1902.8	-	1814	1498	102	4309	1180.975	64.229	10.438	320.449	718.972	266.772
 2026-11-22	6e74aa4	Scrutinee types from unit struct / reference patterns; ptr::from_ref; <T as Clone>::clone	0.693	549.838	3751.948	1902.8	-	1816	1502	102	4309	1181.053	64.179	10.438	320.594	719.379	266.905
+2026-11-22	3b8d09a+	Struct literals and patterns with type arguments; E0109, E0277 Copy bound, E0599 clone; closure Clone from captures	0.693	550.148	3751.997	1902.8	-	1819	1506	102	4315	1181.234	64.139	10.438	320.487	719.341	267.347

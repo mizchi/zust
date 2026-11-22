@@ -1,0 +1,5 @@
+// expect: `==` compares values
+// (B waits on A while A is checked, and A then fails on its function: B must not be kept as comparable)
+type A = { b: B, bad: fn(i32) -> i32 }
+type B = { more: Array<A> }
+fn f(a: A, b: B) -> bool { a == a || b == b }

@@ -1,0 +1,1 @@
+3:59: mismatched types: expected `Foo<u8>`, found `Foo<u16>`

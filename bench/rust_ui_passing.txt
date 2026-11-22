@@ -358,6 +358,7 @@ build-pass	async-await/async-closures/implements-fnmut.rs
 compile-fail	async-await/async-closures/kind-due-to-arg-with-box-wrap.rs
 check-pass	async-await/async-closures/mac-body.rs
 compile-fail	async-await/async-closures/move-from-async-fn-bound.rs
+compile-fail	async-await/async-closures/not-clone-closure.rs
 check-pass	async-await/async-closures/sig-from-bare-fn.rs
 compile-fail	async-await/async-closures/suggest-async-block-issue-140265.rs
 compile-fail	async-await/async-closures/suggest-impl-async-fn-issue-148493.rs
@@ -2034,6 +2035,7 @@ run-pass	derives/deriving-associated-types.rs
 run-pass	derives/deriving-in-fn.rs
 check-pass	derives/deriving-meta-empty-trait-list.rs
 compile-fail	derives/deriving-meta-unknown-trait.rs
+compile-fail	derives/deriving-with-repr-packed-2.rs
 run-pass	derives/deriving-with-repr-packed-3.rs
 run-pass	derives/eq-ord/derive-partial-ord-discriminant-64bit.rs
 run-pass	derives/eq-ord/derive-partial-ord-discriminant.rs
@@ -4212,6 +4214,7 @@ compile-fail	methods/associated-fn-turbofish-issue-159813.rs
 run-pass	methods/by-value-self-method-on-int.rs
 compile-fail	methods/call_method_unknown_pointee.rs
 check-pass	methods/calling-conventions-with-where-clause-ref-bound.rs
+compile-fail	methods/clone-missing.rs
 run-pass	methods/destructure-and-call-self-method.rs
 compile-fail	methods/disambiguate-associated-function-first-arg.rs
 compile-fail	methods/dont-suggest-import-on-deref-err.rs

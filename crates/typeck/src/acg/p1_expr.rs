@@ -1788,6 +1788,19 @@ impl Cx<'_> {
             self.rg_written_on(path);
         }
         let r = self.struct_lit_inner(e, expected);
+        // (E0277: an argument of a parameter bounded by Copy that is not (`union U<T: Copy>` as `U<Rc<u32>>`))
+        if let (Ok((_, Ty::Struct(sid))), true) = (&r, self.user_code && !self.prog.copy_params.is_empty()) {
+            let (sid, prog) = (*sid, self.prog);
+            if let Some(ks) = prog.copy_params.get(&prog.base_of(sid)) {
+                for &k in ks {
+                    if let Some(&a) = prog.structs[sid as usize].args.get(k) {
+                        if !prog.has_param(a) && !has_hole(prog, a) && (!super::borrowck::is_copy(prog, a, 0) || super::p3_ops::copy_mut_ref(prog, a, 0)) {
+                            return err(expr_start(e), format!("the trait bound `{}: Copy` is not satisfied (E0277)", prog.tn(a)));
+                        }
+                    }
+                }
+            }
+        }
         if let Ok((_, t)) = &r {
             self.rg_struct_lit(e, *t);
             // (a struct-like variant (`E::V { r: x }`): its value's tree, which variant_value made last)
@@ -1827,6 +1840,12 @@ impl Cx<'_> {
             }
             return self.variant_value(sid, vi, &args, expected);
         }
+        // (`Self::<u8> {}`: E0109)
+        if let [s] = path.segs.as_slice() {
+            if s.name == "Self" && !s.args.is_empty() {
+                return err(SP, "type arguments are not allowed on self type (E0109)");
+            }
+        }
         // (`S::<u32> { t: 1 }`: the struct without the turbofish, which gives its type arguments)
         let (pp, targs) = self.turbofish_split(path);
         let mut written = None;
@@ -1837,6 +1856,17 @@ impl Cx<'_> {
                     Some(s) => {
                         self.lifetime_arity(s, path, "struct")?;
                         let ts = self.turbofish_targs(s, ta)?;
+                        // (`Foo::<u8> { ..base }` with base a `Foo<u16>`: the base is the mismatch, as rustc says it)
+                        if let Some(base) = rest.as_deref() {
+                            if let Some(bt @ Ty::Struct(b)) = self.peek(base).filter(|t| !self.prog.has_param(*t)) {
+                                let bargs = &self.prog.structs[b as usize].args;
+                                if self.prog.base_of(b) == self.prog.base_of(s) && ts.iter().enumerate().any(|(k, a)| a.is_some_and(|a| !self.prog.has_param(a) && bargs.get(k).is_some_and(|&ba| ba != a))) {
+                                    let full: Vec<Ty> = ts.iter().enumerate().map(|(k, a)| a.or(bargs.get(k).copied()).unwrap_or(Ty::Unit)).collect();
+                                    let want = self.prog.instantiate(self.prog.base_of(s), full).map(|i| self.prog.tn(Ty::Struct(i))).unwrap_or_else(|_| self.prog.structs[s as usize].name.clone());
+                                    return err(expr_start(base), format!("mismatched types: expected `{want}`, found `{}`", self.prog.tn(bt)));
+                                }
+                            }
+                        }
                         // (`let x: S<u16> = S::<u8> { t: 1 }`: the turbofish against the expected instance)
                         self.turbofish_vs_expected(s, &ts, expected)?;
                         written = Some(ts);

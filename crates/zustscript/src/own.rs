@@ -201,6 +201,21 @@ impl Resolve {
                 self.scopes.pop();
                 self.closures -= 1;
             }
+            // (a handler arm is a function the operation calls: its own bindings are one level deeper, as a closure's)
+            EK::Handle(body, arms) => {
+                self.expr(body);
+                for a in arms {
+                    self.closures += 1;
+                    self.scopes.push(HashMap::new());
+                    for p in &a.pats {
+                        self.pat(p, a.body.id);
+                    }
+                    self.bind((a.body.id, a.k.clone()));
+                    self.expr(&a.body);
+                    self.scopes.pop();
+                    self.closures -= 1;
+                }
+            }
             _ => {
                 for c in children(e) {
                     self.expr(c);
@@ -226,6 +241,17 @@ pub fn names(e: &Expr, reads: &mut HashSet<String>, assigns: &mut HashSet<String
             }
         }
     }
+}
+
+fn jsx_children(j: &Jsx) -> Vec<&Expr> {
+    j.attrs
+        .iter()
+        .map(|a| &a.1)
+        .chain(j.children.iter().filter_map(|c| match c {
+            JsxChild::Expr(e) => Some(e),
+            JsxChild::Text(_) => None,
+        }))
+        .collect()
 }
 
 /// The names a pattern binds
@@ -265,7 +291,9 @@ fn children(e: &Expr) -> Vec<&Expr> {
             .chain(tail.as_deref())
             .collect(),
         EK::Handle(b, arms) => std::iter::once(&**b).chain(arms.iter().map(|a| &a.body)).collect(),
-        EK::Lit(_) | EK::Var(_) | EK::Path(..) | EK::Break | EK::Continue | EK::Jsx(_) => vec![],
+        // (a JSX element's attribute values and expression children are evaluated as well)
+        EK::Jsx(j) => jsx_children(j),
+        EK::Lit(_) | EK::Var(_) | EK::Path(..) | EK::Break | EK::Continue => vec![],
     }
 }
 
@@ -525,7 +553,26 @@ impl Lv<'_> {
                 self.closure -= 1;
                 live.extend(l);
             }
-            EK::Call(_, args) => self.operands(&args.iter().collect::<Vec<_>>(), live),
+            // (the callee too: it may be an expression, `(if c { f } else { g })(x)`)
+            EK::Call(f, args) => self.operands(&std::iter::once(&**f).chain(args).collect::<Vec<_>>(), live),
+            // (the emitted JS evaluates a JSX element's parts in its own order (`key` after the props): as operands, a
+            // local read by two of them is moved by none, whatever the order)
+            EK::Jsx(j) => self.operands(&jsx_children(j), live),
+            // (a handler's arms run once per operation, maybe many times: like a closure, a local from outside is
+            // never moved in them; the body runs while they can)
+            EK::Handle(body, arms) => {
+                // (the arms are alternatives: each from what is live after the handle, then joined)
+                self.closure += 1;
+                let mut acc = live.clone();
+                for a in arms {
+                    let mut l = live.clone();
+                    self.expr(&a.body, &mut l);
+                    acc.extend(l);
+                }
+                self.closure -= 1;
+                *live = acc;
+                self.expr(body, live);
+            }
             EK::Method(r, _, args) => self.operands(&std::iter::once(&**r).chain(args).collect::<Vec<_>>(), live),
             EK::Bin(op, a, b) if *op == "&&" || *op == "||" => {
                 // (the right operand may not run: what is live before it joins what is live after the operator)
@@ -571,6 +618,165 @@ impl Lv<'_> {
         self.record = saved;
         h
     }
+}
+
+/// The JS layer's `push` / `concat` calls that can append in place (`(acc.push(x), acc)` instead of
+/// `[...acc, x]`): the receiver is a `let mut` local whose array no one else can see, at its last use.
+///
+/// JS arrays are shared by reference, so "no one else can see it" is the whole question. A `let mut` local
+/// qualifies when
+/// - every value it is given is a new array: a literal, `range(..)`, or the result of `map` / `filter` / `push` /
+///   `concat` (not a parameter or a call's result, which someone else may hold);
+/// - every use reads it without keeping it (`len`, an index, a `for`, the receiver of `map` / `filter` / `fold` /
+///   `any` / `all` / `push` / `concat`, an operator), or is its last use (then it may go anywhere: it is dead here).
+///
+/// A mutable local cannot be captured by a closure, so no closure can see it either.
+pub fn inplace_pushes(params: &[String], body: &Expr, info: &Info) -> HashSet<Id> {
+    use crate::check::{Builtin as B, Callee};
+    let live = liveness(params, body, &|_| false);
+    let mut r = Resolve { scopes: vec![HashMap::new()], binds: HashMap::new(), uses: HashMap::new(), depth: vec![], closures: 0 };
+    for p in params {
+        r.bind((PARAM, p.clone()));
+    }
+    r.expr(body);
+    // the `let mut` bindings, and the values each is given
+    let mut values: HashMap<usize, Vec<&Expr>> = HashMap::new();
+    fn lets<'e>(e: &'e Expr, r: &Resolve, out: &mut HashMap<usize, Vec<&'e Expr>>) {
+        match &e.kind {
+            EK::Block(stmts, _) => {
+                for st in stmts {
+                    if let Stmt::LetMut(n, _, x) = st
+                        && let Some(b) = r.binds.get(&(x.id, n.clone()))
+                    {
+                        out.entry(*b).or_default().push(x);
+                    }
+                }
+            }
+            EK::Assign(_, x) => {
+                if let Some(b) = r.uses.get(&e.id) {
+                    out.entry(*b).or_default().push(x);
+                }
+            }
+            _ => {}
+        }
+        for c in children(e) {
+            lets(c, r, out);
+        }
+    }
+    lets(body, &r, &mut values);
+    let fresh = |x: &Expr| match &x.kind {
+        EK::Array(_) => !info.typed_lit.contains_key(&x.id),
+        EK::Method(..) => matches!(info.builtin.get(&x.id), Some(B::Map | B::Filter | B::Push | B::Concat)),
+        EK::Call(f, _) => matches!(info.callee.get(&f.id), Some(Callee::Range)),
+        _ => false,
+    };
+    let mut ok: HashSet<usize> = values.iter().filter(|(_, vs)| vs.iter().all(|x| fresh(x))).map(|(b, _)| *b).collect();
+    // every use: read without keeping, or the last
+    fn uses(e: &Expr, keeps: bool, r: &Resolve, info: &Info, live: &Live, ok: &mut HashSet<usize>) {
+        use crate::check::Builtin as B;
+        if let EK::Var(_) = &e.kind {
+            if keeps
+                && let Some(b) = r.uses.get(&e.id)
+                && !live.last.contains(&e.id)
+            {
+                ok.remove(b);
+            }
+            return;
+        }
+        match &e.kind {
+            EK::Method(recv, _, args) => {
+                let reads = matches!(info.builtin.get(&e.id), Some(B::Len | B::Map | B::Filter | B::Fold | B::Any | B::All | B::Push | B::Concat | B::Join));
+                uses(recv, !reads, r, info, live, ok);
+                for a in args {
+                    uses(a, true, r, info, live, ok);
+                }
+            }
+            EK::Index(x, i) => {
+                uses(x, false, r, info, live, ok);
+                uses(i, true, r, info, live, ok);
+            }
+            EK::For(_, it, b) => {
+                // (JS's `for .. of` walks the array object itself: a local the iterable reads and the body assigns
+                // must not be appended to in place, or the loop would see the new elements)
+                let (mut reads, mut assigns) = (HashSet::new(), HashSet::new());
+                bindings(it, r, &mut reads, &mut HashSet::new());
+                bindings(b, r, &mut HashSet::new(), &mut assigns);
+                for x in reads.intersection(&assigns) {
+                    ok.remove(x);
+                }
+                uses(it, false, r, info, live, ok);
+                uses(b, true, r, info, live, ok);
+            }
+            EK::Bin(_, a, b) => {
+                // (the left operand's value is held while the right one runs: `xs == xs.push(2)` must not append
+                // to the array it compares)
+                uses(a, true, r, info, live, ok);
+                uses(b, false, r, info, live, ok);
+            }
+            // (a block's statements are not its value: an expression statement keeps nothing)
+            EK::Block(stmts, tail) => {
+                for st in stmts {
+                    match st {
+                        Stmt::Expr(x) => uses(x, false, r, info, live, ok),
+                        Stmt::Let(_, _, x) | Stmt::LetMut(_, _, x) => uses(x, true, r, info, live, ok),
+                    }
+                }
+                if let Some(t) = tail {
+                    uses(t, keeps, r, info, live, ok);
+                }
+            }
+            EK::If(c, t, el) => {
+                uses(c, false, r, info, live, ok);
+                uses(t, keeps, r, info, live, ok);
+                if let Some(el) = el {
+                    uses(el, keeps, r, info, live, ok);
+                }
+            }
+            _ => {
+                for c in children(e) {
+                    uses(c, true, r, info, live, ok);
+                }
+            }
+        }
+    }
+    fn bindings(e: &Expr, r: &Resolve, reads: &mut HashSet<usize>, assigns: &mut HashSet<usize>) {
+        match &e.kind {
+            EK::Var(_) => reads.extend(r.uses.get(&e.id)),
+            EK::Assign(..) => assigns.extend(r.uses.get(&e.id)),
+            _ => {}
+        }
+        for c in children(e) {
+            bindings(c, r, reads, assigns);
+        }
+    }
+    uses(body, true, &r, info, &live, &mut ok);
+    // the pushes and concats onto such a local, at its last use
+    let mut out = HashSet::new();
+    fn pushes(e: &Expr, r: &Resolve, info: &Info, live: &Live, ok: &HashSet<usize>, out: &mut HashSet<Id>) {
+        use crate::check::Builtin as B;
+        if let EK::Method(recv, _, args) = &e.kind
+            && matches!(info.builtin.get(&e.id), Some(B::Push | B::Concat))
+            && let EK::Var(_) = recv.kind
+            && let Some(b) = r.uses.get(&recv.id)
+            && ok.contains(b)
+            && live.last.contains(&recv.id)
+        {
+            // (an argument that assigns the receiver, `a.push({ a = [7]; 2 })`, would make the appended array and
+            // the one the expression yields differ)
+            let mut assigns = HashSet::new();
+            for a in args {
+                bindings(a, r, &mut HashSet::new(), &mut assigns);
+            }
+            if !assigns.contains(b) {
+                out.insert(e.id);
+            }
+        }
+        for c in children(e) {
+            pushes(c, r, info, live, ok, out);
+        }
+    }
+    pushes(body, &r, info, &live, &ok, &mut out);
+    out
 }
 
 #[cfg(test)]
