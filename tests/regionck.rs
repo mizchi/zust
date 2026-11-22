@@ -1779,3 +1779,14 @@ fn variant_destructuring_moves_by_type() {
     let d = check("enum E {\n    V(i32, String),\n}\nfn take_fn(_: impl Fn()) {}\nfn main() {\n    let e = E::V(1, String::new());\n    take_fn(move || {\n        let E::V(_, s) = e;\n        drop(s);\n    });\n}\n");
     assert!(d.len() == 1 && d[0].0 == 8 && d[0].1.contains("E0507"), "{d:?}");
 }
+
+/// The scrutinee of an `if let` or a `match` in a closure for an `Fn` bound comes with the patterns: one that binds a
+/// part of a capture by value that is not `Copy` moves it (E0507, at the scrutinee); `ref` and `Copy` parts do not
+#[test]
+fn closure_match_scrutinee_moves() {
+    let d = check("enum E {\n    V(i32, String),\n}\nfn take_fn(_: impl Fn()) {}\nfn main() {\n    let e = E::V(1, String::new());\n    take_fn(move || {\n        if let E::V(_, s) = e {\n            drop(s);\n        }\n    });\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 8 && d[0].1.contains("E0507"), "{d:?}");
+    let d = check("fn take_fn(_: impl Fn()) {}\nfn main() {\n    let o = Some(String::new());\n    take_fn(move || match o {\n        Some(s) => drop(s),\n        None => {}\n    });\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 4 && d[0].1.contains("E0507"), "{d:?}");
+    assert_eq!(check("fn take_fn(_: impl Fn()) {}\nfn main() {\n    let o = Some(String::new());\n    take_fn(move || match o {\n        Some(ref s) => println!(\"{}\", s),\n        None => {}\n    });\n    let p = Some((1, String::new()));\n    take_fn(move || {\n        if let Some((n, _)) = p {\n            let _ = n;\n        }\n    });\n}\n"), vec![]);
+}

@@ -621,7 +621,9 @@ fn scoped_children(e: &Expr, caps: &[String], f: &mut dyn FnMut(&Expr, &[String]
             false
         }
         Expr::Match(x, arms) => {
-            if f(x, caps, None) {
+            // (the scrutinee comes with each arm's pattern, as a `let`'s initializer with its: `match cap { E::V(_, s)
+            // => .. }` moves cap.1)
+            if f(x, caps, None) || arms.iter().any(|a| f(x, caps, Some(&a.pat))) {
                 return true;
             }
             arms.iter().any(|a| {
@@ -634,7 +636,7 @@ fn scoped_children(e: &Expr, caps: &[String], f: &mut dyn FnMut(&Expr, &[String]
         Expr::If(c, t, _) | Expr::While(_, c, t) if matches!(&**c, Expr::Let(..)) => {
             let Expr::Let(p, x) = &**c else { return false };
             let els = if let Expr::If(_, _, els) = e { els.as_deref() } else { None };
-            f(x, caps, None) || f(&Expr::Block(None, false, t.clone()), &unbound(caps, p), None) || els.is_some_and(|x| f(x, caps, None))
+            f(x, caps, Some(p)) || f(&Expr::Block(None, false, t.clone()), &unbound(caps, p), None) || els.is_some_and(|x| f(x, caps, None))
         }
         Expr::Closure(_, ps, _, body, _) => {
             let mut cs = caps.to_vec();
