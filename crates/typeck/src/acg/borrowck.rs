@@ -1751,7 +1751,9 @@ impl Cx<'_> {
                 return;
             }
         }
-        if !self.bk_ty(t).0 {
+        // (a `&mut` bound by value is moved out too: a pattern does not reborrow it (`if let Some(mut x) = opt` in a
+        // loop, with opt: `Option<&mut T>`, is E0382 the second time))
+        if !self.bk_ty(t).0 || matches!(t, Ty::Ref(true, _)) {
             let sp = self.bk.scrut_place.as_ref().map(|x| x.1).unwrap_or(super::SP);
             let a = if self.bk.guard_arm { Acc::Read } else { Acc::Move };
             self.bk_acc_place(p, a, sp);

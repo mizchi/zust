@@ -935,6 +935,18 @@ impl Cx<'_> {
             }
             let bk_recv_ty = if self.bk.shared_recv == e as *const Expr as usize { Ty::Ref(false, intern(st)) } else { recv_ty };
             let ev = self.bk_recv_ev(recv, bk_recv_ty, flows);
+            // (a receiver written as a borrow (`(&mut x).with(|v| x = ..)`): its loan lasts while the arguments are
+            // evaluated, when they name x)
+            if ev.is_none() {
+                if let Expr::Ref(_, inner) = strip_paren(recv) {
+                    if let (Some(&ln), Some(n)) = (self.bk.loan_of.get(&(&**inner as *const Expr as usize)), borrowck::root_local(inner)) {
+                        if margs.iter().any(|a| borrowck::mentions(a, n)) {
+                            self.bk_call_temp(&[borrowck::Src::Loan(ln)], true);
+                            bk_op_temp = true;
+                        }
+                    }
+                }
+            }
             if let (true, Some(borrowck::Ev::Acc(_, borrowck::Acc::Borrow(ln), _))) = (flows, &ev) {
                 self.bk.loan_of.insert(e as *const Expr as usize, *ln);
             }

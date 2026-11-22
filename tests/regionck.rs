@@ -1834,3 +1834,15 @@ fn part10_review_2() {
     let d = check("fn main() {\n    match Some(String::from(\"arm\")) {\n        Some(foo) if { let c = move || { drop(foo.len()); false }; c() } => (),\n        _ => (),\n    }\n}\n");
     assert!(d.len() == 1 && d[0].0 == 3 && d[0].1.contains("E0507"), "{d:?}");
 }
+
+/// A `&mut` bound by value by a pattern is moved out (no reborrow): in a loop it is E0382 the second time. A receiver
+/// written as a borrow (`(&mut x).with(..)`) stays borrowed while the arguments that name x are evaluated (E0499)
+#[test]
+fn pattern_mut_ref_moves_and_written_receivers() {
+    let d = check("fn main() {\n    let mut x = 42_i32;\n    let opt = Some(&mut x);\n    for _ in 0..5 {\n        if let Some(_x) = opt {}\n    }\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 5 && d[0].1.contains("moved value"), "{d:?}");
+    assert_eq!(check("struct Node { v: i32, next: Option<Box<Node>> }\nfn main() {\n    let mut x = 1;\n    let mut opt = Some(&mut x);\n    if let Some(r) = opt.as_mut() { **r += 1; }\n    if let Some(ref mut r) = opt { **r += 1; }\n    if let Some(r) = opt { *r += 1; }\n    let mut head = Node { v: 1, next: Some(Box::new(Node { v: 2, next: None })) };\n    let mut cur = &mut head;\n    while let Some(ref mut n) = cur.next { n.v += 1; break; }\n    let mut cur2 = Some(&mut head);\n    while let Some(n) = cur2 { n.v += 1; cur2 = match n.next { Some(ref mut b) => Some(&mut **b), None => None }; }\n    println!(\"{}\", x);\n}\n"), vec![]);
+    let d = check("struct X(u32);\nimpl X {\n    pub fn with<F>(&self, blk: F) where F: FnOnce(&u32) { blk(&self.0) }\n    pub fn with_mut<F>(&mut self, blk: F) where F: FnOnce(&u32) { blk(&self.0) }\n}\nfn main() {\n    let mut x = X(1);\n    (&mut x).with(|v| { x = X(*v); });\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 8 && d[0].1.contains("more than once"), "{d:?}");
+    assert_eq!(check("struct X(u32);\nimpl X { fn get(&self, n: u32) -> u32 { self.0 + n } }\nfn main() {\n    let mut x = X(1);\n    let a = (&x).get(x.0);\n    let b = (&mut x).get(2);\n    let y = &x;\n    let c = (&x).get(y.0);\n    println!(\"{} {} {}\", a, b, c);\n}\n"), vec![]);
+}
