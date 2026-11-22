@@ -124,3 +124,10 @@ pub fn nested_k() -> i32 {
     Op, k => handle { let g = perform Get; k(1 + g) } { Get, j => j(0) },
   }
 }
+
+// an operation named __proto__ is an arm of the table, not its prototype
+enum Proto { __proto__ -> i32 }
+fn ask_proto() -> i32 { perform __proto__ }
+pub fn proto_op() -> i32 {
+  handle ask_proto() { __proto__, k => k(7) }
+}

@@ -278,10 +278,10 @@ console.log(m.shadow(), m.only("One"), m.range_end_once(), m.prec(-1, 2, 3));
 console.log(m.add_all([1, 2]).join(","), m.push_v([1, 2], 3).join(","));
 console.log(m.shadow_fn(), m.prec_str(3), m.push_zs([1], 2).join(","), m.re({ value: 5 }));
 console.log(m.zs_inj(5, 2), m.kw_inj(7, 3), JSON.stringify(m.kw_rec({ async_: 1, move: 2 })));
-console.log(m.many_ops(100000), m.own_ops(), m.nested_k());
+console.log(m.many_ops(100000), m.own_ops(), m.nested_k(), m.proto_op());
 "#,
     );
-    assert_eq!(out, "4 9\n12 1 3 9\n2,3 1,2,3\n7 6 1,2 5\n3 4 {\"async_\":2,\"move\":1}\n99999 42 101\n");
+    assert_eq!(out, "4 9\n12 1 3 9\n2,3 1,2,3\n7 6 1,2 5\n3 4 {\"async_\":2,\"move\":1}\n99999 42 101 7\n");
     let dts = std::fs::read_to_string(d.join("regress.d.ts")).unwrap();
     assert!(dts.contains("import type { ReactElement as $ReactElement } from \"react\";"), "{dts}");
     assert!(dts.contains("export interface ReactElement {"), "{dts}");
@@ -326,4 +326,9 @@ fn externs_match_ts() {
     let o = zsc(&root().join("tests/externs/named.zsc"), &d, &["--check-externs"]);
     let err = String::from_utf8_lossy(&o.stderr);
     assert!(o.status.success() && err.contains("(2 checked with tsrs)"), "{err}");
+    // a record's Jsx field, reached only by expanding the record: ReactElement is still imported
+    std::fs::write(d.join("lib.d.ts"), "import type { ReactElement } from \"react\";\nexport declare function view(): { title: string; body: ReactElement };\n").unwrap();
+    let o = zsc(&root().join("tests/externs/jsx.zsc"), &d, &["--check-externs"]);
+    let err = String::from_utf8_lossy(&o.stderr);
+    assert!(o.status.success() && err.contains("(1 checked with tsrs)"), "{err}");
 }
