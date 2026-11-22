@@ -127,6 +127,12 @@ fn std_root(s: &str) -> bool {
     matches!(s, "std" | "core" | "alloc")
 }
 
+/// A tool's attribute (`#[rustfmt::skip]`, `#[clippy::allow(..)]`, `#[diagnostic::on_unimplemented]`): never a proc
+/// macro's
+fn tool_root(s: &str) -> bool {
+    matches!(s, "rustfmt" | "clippy" | "rustdoc" | "rust_analyzer" | "diagnostic" | "miri")
+}
+
 /// `#[proc_macro_derive(Name, ..)]`, `#[proc_macro_attribute] pub fn name`, `#[proc_macro] pub fn name` (src: the root
 /// file with its cfgs evaluated, so `#[cfg_attr(p, proc_macro_attribute)]` counts when p holds)
 pub fn macros_of(src: &str) -> Macros {
@@ -257,6 +263,10 @@ pub fn uses_in(src: &str) -> Uses {
             if let Some((name, after)) = tk.name(j).filter(|_| tk.ident(j)) {
                 if tk.text(after) == "as" {
                     if let Some((alias, aa)) = tk.name(after + 1) {
+                        // (the alias is a name the crate brings in: `use pm::Error as Debug;`)
+                        if !imported.iter().any(|x| x == plain(&alias)) {
+                            imported.push(plain(&alias).to_string());
+                        }
                         if !u.renames.contains(&(name.clone(), alias.clone())) {
                             u.renames.push((name, alias));
                         }
@@ -273,6 +283,8 @@ pub fn uses_in(src: &str) -> Uses {
             j += 1;
         }
     }
+    // (a path that starts in std or a tool, unless that first name is the crate's own: `use pm as core;`)
+    let outside = |first: &str| (std_root(first) || tool_root(first)) && !u.renames.iter().any(|(_, a)| plain(a) == first);
     let mut k = 0;
     while k < n {
         // (`macro_rules! name { .. }` neither called nor exported)
@@ -297,7 +309,7 @@ pub fn uses_in(src: &str) -> Uses {
             while j < n && tk.text(j) != ")" {
                 match tk.path(j) {
                     Some(d) => {
-                        let counts = if d.segs > 1 { !std_root(&d.first) } else { !BUILTIN_DERIVES.contains(&plain(&d.last)) || imported.iter().any(|x| x == plain(&d.last)) };
+                        let counts = if d.segs > 1 { !outside(&d.first) } else { !BUILTIN_DERIVES.contains(&plain(&d.last)) || imported.iter().any(|x| x == plain(&d.last)) };
                         if counts && !u.derives.contains(&d.last) {
                             u.derives.push(d.last);
                         }
@@ -309,7 +321,7 @@ pub fn uses_in(src: &str) -> Uses {
             k = j;
             continue;
         }
-        let counts = if p.segs > 1 { !std_root(&p.first) } else { !BUILTIN_ATTRS.contains(&p.last.as_str()) };
+        let counts = if p.segs > 1 { !outside(&p.first) } else { !BUILTIN_ATTRS.contains(&p.last.as_str()) };
         if counts && !u.attrs.contains(&p.last) {
             u.attrs.push(p.last);
         }
@@ -356,6 +368,14 @@ mod tests {
         assert_eq!(uses_in("use std::fmt::Debug;\n#[derive(Debug, std::fmt::Debug)]\nstruct P;\n").hit(&dm), None);
         assert_eq!(uses_in("#[derive(derive_more::Debug)]\nstruct P;\n").hit(&dm).as_deref(), Some("the derive `Debug`"));
         assert_eq!(uses_in("#[core::prelude::v1::test]\nfn t() {}\n"), Uses::default());
+        // (a tool's attribute is not a proc macro's; a dependency renamed `core` is not std; a derive renamed to a
+        // name of the language's)
+        let sm = Macros { attributes: vec!["skip".into(), "route".into()], derives: vec!["Error".into()], ..Default::default() };
+        assert_eq!(uses_in("#[rustfmt::skip]\nfn t() {}\n").hit(&sm), None);
+        assert_eq!(uses_in("#[pm::skip]\nfn t() {}\n").hit(&sm).as_deref(), Some("the attribute `#[skip]`"));
+        assert_eq!(uses_in("use pm as core;\n#[core::route]\nfn f() {}\n").hit(&sm).as_deref(), Some("the attribute `#[route]`"));
+        assert_eq!(uses_in("use pm::Error as Debug;\n#[derive(Debug)]\nstruct E;\n").hit(&sm).as_deref(), Some("the derive `Debug`"));
+        assert_eq!(uses_in("#[derive(Debug)]\nstruct E;\n").hit(&sm), None);
         // (a macro_rules! body: read when the macro is called or exported)
         let tmpl = "macro_rules! m {\n    () => {\n        #[web::route]\n        fn f() {}\n    };\n}\n";
         assert_eq!(uses_in(&format!("{tmpl}fn main() {{}}\n")).hit(&m), None);

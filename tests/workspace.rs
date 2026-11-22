@@ -172,11 +172,13 @@ fn crate_cfgs_and_env() {
     //  alone rebuilds the crate, and the crate whose code a generic function of it is compiled in; `env!($k)` in a
     //  macro's body; `env !`)
     let raw = "env!(\"CARGO_PKG_NAME\")";
+    // (`option_env!` of a name nothing sets: None, unless the runner's own environment has it)
+    let unset = std::env::var("ZUST_SURELY_UNSET").map(|v| format!("Some({v:?})")).unwrap_or_else(|_| "None".into());
     for (big, m_big, want) in [
-        (true, true, format!("my lib kind big generated Some(\"a#b\") None\nmy lib {raw} true\ntrue m label m label\n")),
-        (false, false, format!("my lib kind small generated Some(\"a#b\") None\nmy lib {raw} false\nfalse m label m label\n")),
+        (true, true, format!("my lib kind big generated Some(\"a#b\") {unset}\nmy lib {raw} true\ntrue m label m label\n")),
+        (false, false, format!("my lib kind small generated Some(\"a#b\") {unset}\nmy lib {raw} false\nfalse m label m label\n")),
         // (only m's cfg: nothing of the app's text or of m's changes)
-        (false, true, format!("my lib kind small generated Some(\"a#b\") None\nmy lib {raw} true\ntrue m label m label\n")),
+        (false, true, format!("my lib kind small generated Some(\"a#b\") {unset}\nmy lib {raw} true\ntrue m label m label\n")),
     ] {
         put("ws.txt", &ws(big, m_big));
         let crates = zustc::driver2::read_workspace(&dir.join("ws.txt")).unwrap();

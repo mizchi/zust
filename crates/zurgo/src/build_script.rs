@@ -111,6 +111,9 @@ impl<'a> Runner<'a> {
         let dir = self.out.join("build").join(format!("{}-{h}", pk.name));
         let out_dir = dir.join("out");
         mkdir(&out_dir)?;
+        // (one zurgo process at a time builds, runs and keeps a script's result: another one sharing the target
+        //  directory waits, so a run's OUT_DIR and its stamp stay together)
+        let _lock = lock_dir(&dir)?;
         let exe = self.compile(n, &script, &dir)?;
         // (the environment: cargo's variables)
         let mut env = pkg_env(pk);
@@ -130,6 +133,8 @@ impl<'a> Runner<'a> {
             }
             env.push((format!("CARGO_CFG_{}", k.to_uppercase()), side.values(k).join(",")));
         }
+        // (and the package's features, as cargo gives them: `a,b-c,default`, empty when there are none)
+        env.push(("CARGO_CFG_FEATURE".into(), feats.join(",")));
         env.push(("OUT_DIR".into(), out_dir.display().to_string()));
         env.push(("TARGET".into(), side.triple.clone()));
         env.push(("HOST".into(), self.host.triple.clone()));
@@ -574,12 +579,27 @@ fn stamp_fresh(stamp: &str, exe_fp: &str, env_fp: &str, pkg_dir: &Path, skip: &P
     })
 }
 
-/// A variable's value for the stamp: `-` when it is not set, else `=` and the value with `\`, newlines and tabs escaped
+/// A variable's value for the stamp (var_value)
 fn var_text(name: &str) -> String {
-    match std::env::var(name) {
-        Ok(v) => format!("={}", v.replace('\\', "\\\\").replace('\n', "\\n").replace('\r', "\\r").replace('\t', "\\t")),
-        Err(_) => "-".into(),
+    var_value(std::env::var_os(name).as_deref())
+}
+
+/// `-` when it is not set; `=` and the value with `\`, newlines and tabs escaped; `~` and its bytes in hex when it is
+/// not UTF-8 (so no two values give one text)
+fn var_value(v: Option<&std::ffi::OsStr>) -> String {
+    match v.map(|v| (v.to_str(), v)) {
+        None => "-".into(),
+        Some((Some(v), _)) => format!("={}", v.replace('\\', "\\\\").replace('\n', "\\n").replace('\r', "\\r").replace('\t', "\\t")),
+        Some((None, raw)) => format!("~{}", raw.as_encoded_bytes().iter().map(|b| format!("{b:02x}")).collect::<String>()),
     }
+}
+
+/// An exclusive lock on a build directory (released when the file is dropped)
+fn lock_dir(dir: &Path) -> R<std::fs::File> {
+    let p = dir.join("lock");
+    let f = std::fs::OpenOptions::new().create(true).truncate(false).write(true).open(&p).map_err(|e| format!("{}: {e}", p.display()))?;
+    f.lock().map_err(|e| format!("{}: {e}", p.display()))?;
+    Ok(f)
 }
 
 /// The value of a `rustc-cfg` `key="value"`: a string literal (`\"` and `\\` unescaped), or the text as it is
@@ -635,7 +655,7 @@ impl Scan {
 fn scan(dir: &Path, skip: Option<&Path>, hidden: bool) -> Scan {
     let mut sc = Scan { entries: vec![], newest: 0, complete: true };
     let skip = skip.map(crate::manifest::normalize);
-    walk(dir, skip.as_deref(), hidden, &mut sc);
+    walk(dir, skip.as_deref(), hidden, &mut sc, &mut vec![]);
     sc
 }
 
@@ -644,11 +664,17 @@ fn src_fp(dir: &Path, skip: &Path) -> String {
     scan(dir, Some(skip), false).fp()
 }
 
-fn walk(dir: &Path, skip: Option<&Path>, hidden: bool, sc: &mut Scan) {
+/// (active: the directories being walked, resolved: a symlink back to one of them is not walked again)
+fn walk(dir: &Path, skip: Option<&Path>, hidden: bool, sc: &mut Scan, active: &mut Vec<PathBuf>) {
+    let real = std::fs::canonicalize(dir).unwrap_or_else(|_| dir.to_path_buf());
+    if active.contains(&real) {
+        return;
+    }
     let Ok(rd) = std::fs::read_dir(dir) else {
         sc.complete = false;
         return;
     };
+    active.push(real);
     // (a directory's own time too: a file removed while a script ran changes only that)
     sc.newest = sc.newest.max(mtime(dir).unwrap_or(0));
     let mut es: Vec<PathBuf> = vec![];
@@ -664,7 +690,7 @@ fn walk(dir: &Path, skip: Option<&Path>, hidden: bool, sc: &mut Scan) {
         if e.is_dir() {
             let pruned = skip.is_some() && (name == "target" || skip.is_some_and(|s| crate::manifest::normalize(&e) == s));
             if !pruned && (hidden || !name.starts_with('.')) {
-                walk(&e, skip, hidden, sc);
+                walk(&e, skip, hidden, sc, active);
             }
         } else {
             let t = mtime(&e).unwrap_or(0);
@@ -672,6 +698,7 @@ fn walk(dir: &Path, skip: Option<&Path>, hidden: bool, sc: &mut Scan) {
             sc.entries.push(format!("{} {}", e.display(), file_fp(&e)));
         }
     }
+    active.pop();
 }
 
 /// FNV-1a over the parts, as 16 hex digits
@@ -728,15 +755,33 @@ mod tests {
         assert_eq!(unquote("\"a\\\"b\""), "a\"b");
         assert_eq!(unquote("\"plain\""), "plain");
         assert_eq!(unquote("bare"), "bare");
-        // (a value with a newline stays one line of the stamp, and compares equal to itself)
-        let k = format!("ZURGO_TEST_VAR_{}", std::process::id());
-        // SAFETY: a variable of this test alone
-        unsafe { std::env::set_var(&k, "two\nlines\tand\\") };
-        let t = var_text(&k);
-        assert!(!t.contains('\n') && t.starts_with('='));
-        assert_eq!(var_text(&k), t);
-        unsafe { std::env::remove_var(&k) };
-        assert_eq!(var_text(&k), "-");
+        // (a value with a newline stays one line of the stamp; unset, empty and a value that is not UTF-8 all differ)
+        let t = var_value(Some(std::ffi::OsStr::new("two\nlines\tand\\")));
+        assert_eq!(t, "=two\\nlines\\tand\\\\");
+        assert_eq!(var_value(None), "-");
+        assert_eq!(var_value(Some(std::ffi::OsStr::new(""))), "=");
+        #[cfg(unix)]
+        {
+            use std::os::unix::ffi::OsStrExt;
+            assert_eq!(var_value(Some(std::ffi::OsStr::from_bytes(b"a\xff"))), "~61ff");
+        }
+    }
+
+    #[test]
+    fn a_symlink_back_to_a_directory_is_walked_once() {
+        let d = std::env::temp_dir().join(format!("zurgo-loop-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&d);
+        std::fs::create_dir_all(d.join("a")).unwrap();
+        std::fs::write(d.join("a/f.txt"), "x").unwrap();
+        #[cfg(unix)]
+        {
+            std::os::unix::fs::symlink(&d, d.join("a/up")).unwrap();
+            std::os::unix::fs::symlink(&d, d.join("a/up2")).unwrap();
+        }
+        let sc = scan(&d, None, false);
+        assert!(sc.complete);
+        assert_eq!(sc.entries.len(), 1, "{:?}", sc.entries);
+        let _ = std::fs::remove_dir_all(&d);
     }
 
     #[test]

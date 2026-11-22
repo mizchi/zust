@@ -113,10 +113,41 @@ fn eval(s: &[u8], toks: &[Tok], mut i: usize, c: &CfgSet) -> (bool, usize) {
     let name = String::from_utf8_lossy(name).into_owned();
     if t(i) == b"=" && toks.get(i + 1).is_some_and(|x| x.0 == 2) {
         let lit = t(i + 1);
-        let val = String::from_utf8_lossy(&lit[1..lit.len() - 1]).into_owned();
+        let mut val = String::from_utf8_lossy(&lit[1..lit.len() - 1]).into_owned();
+        // (`label = "a\"b"`: the literal's value, as a build script's `rustc-cfg` gives it)
+        if val.contains('\\') {
+            val = unescape(&val);
+        }
         return (c.kv(&name, &val), i + 2);
     }
     (c.flag(&name), i)
+}
+
+/// The value of a string literal's text between its quotes (`\"`, `\\`, `\n`, `\t`, `\r`, `\0`, `\u{..}`)
+fn unescape(v: &str) -> String {
+    let mut out = String::with_capacity(v.len());
+    let mut it = v.chars();
+    while let Some(ch) = it.next() {
+        if ch != '\\' {
+            out.push(ch);
+            continue;
+        }
+        match it.next() {
+            Some('n') => out.push('\n'),
+            Some('t') => out.push('\t'),
+            Some('r') => out.push('\r'),
+            Some('0') => out.push('\0'),
+            Some('u') => {
+                let hex: String = it.by_ref().skip_while(|&c| c == '{').take_while(|&c| c != '}').collect();
+                if let Some(c) = u32::from_str_radix(&hex, 16).ok().and_then(char::from_u32) {
+                    out.push(c);
+                }
+            }
+            Some(x) => out.push(x),
+            None => {}
+        }
+    }
+    out
 }
 
 fn is_open(b: &[u8]) -> bool {
@@ -526,6 +557,10 @@ mod tests {
         assert_eq!(run("match x { #[cfg(any(test, doc))] 1 => {} _ => 2 }", &[]), "match x { _ => 2 }");
         assert_eq!(run("#[cfg(test)] const X: S = S { a: 1 }; fn f() {}", &[]), "fn f() {}");
         assert_eq!(run("#[cfg(test)] use a::{b, c}; fn f() {}", &[]), "fn f() {}");
+        // (a value with an escape: compared as the literal's value)
+        let q = CfgSet { cfgs: vec![("label".into(), Some("a\"b".into()))], ..Default::default() };
+        assert!(strip("#[cfg(label = \"a\\\"b\")] fn f() {}", &q).unwrap().contains("fn f()"));
+        assert!(!strip("#[cfg(label = \"ab\")] fn f() {}", &q).unwrap().contains("fn f()"));
         // (whether the source may call `env!`, seen by the same tokens: also inside a macro's arguments)
         let env = |src: &str| {
             let mut e = None;

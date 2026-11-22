@@ -124,6 +124,16 @@ error of each failing crate. Details and the order of the work: [docs/reports/20
   build scripts and gives their cfgs, `rustc-env` and `OUT_DIR` to the crates (M1). thiserror 2's library builds.
   Left: two versions of one crate and renamed dependencies (zustc's workspace has one name per crate), workspace
   builds for wasm32, link instructions of build scripts, `zurgo test`.
+  - What the caches do not see yet:
+    - the process environment that an `env!($k)` made by a macro reads (the crate's own environment is in its
+      fingerprint, the values zustc falls back to are not);
+    - the variables a rustc-built script or host library reads with `env!` (cargo reads them from rustc's dep-info,
+      `# env-dep:`);
+    - a file removed from `OUT_DIR` by hand (cargo does not rerun the script either).
+  - The proc-macro check:
+    - reads a proc-macro crate's root with its features but not with its own build script's cfgs;
+    - evaluates `cfg!` in the arguments of a user's macro named like std's format macros (`print!`) before that
+      macro's rules match.
 - Proc macros ([#29](https://github.com/mizchi/zust/issues/29)): none can run. zurgo builds a proc-macro dependency as a
   stub and stops on a use of its derives or attributes; zustc alone still drops an unknown attribute silently
   (`#[wasm_bindgen]`, `#[component]`).

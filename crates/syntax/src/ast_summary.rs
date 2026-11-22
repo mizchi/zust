@@ -644,7 +644,7 @@ fn parse_sig(sig: &PSig, is_extern: bool, is_main: bool, owner: Option<&Owner>) 
             t => (t, None),
         };
         if let PTy::Impl(bs) = inner {
-            let g = format!("__impl{}", generics.len());
+            let g = fresh_impl_name(&generics);
             generics.push((g.clone(), bound_names(bs)?));
             let n = TySyn::Named(g);
             params.push(match rf {
@@ -1458,12 +1458,21 @@ fn lit_ty(t: &str, int_hint: Option<Ty>) -> Option<TySyn> {
     Some(TySyn::Prim(Ty::from_suffix(suffix).or(int_hint).unwrap_or(Ty::I32)))
 }
 
+/// `__implN` that no type parameter has yet (`fn f<__impl1>(x: __impl1, y: Option<impl Copy>)`)
+fn fresh_impl_name(generics: &[(String, Vec<String>)]) -> String {
+    let mut k = generics.len();
+    while generics.iter().any(|(n, _)| *n == format!("__impl{k}")) {
+        k += 1;
+    }
+    format!("__impl{k}")
+}
+
 /// t with each `impl Trait` in it replaced by a new type parameter `__implN` (added to generics with its bounds)
 fn lift_impls(t: &PTy, generics: &mut Vec<(String, Vec<String>)>) -> R<PTy> {
     use crate::parse::{GArg, Seg};
     Ok(match t {
         PTy::Impl(bs) => {
-            let g = format!("__impl{}", generics.len());
+            let g = fresh_impl_name(generics);
             generics.push((g.clone(), bound_names(bs)?));
             PTy::Path(None, Path { global: false, segs: vec![Seg { name: g.clone(), args: vec![], fn_args: None, text: g }], pos: Default::default() })
         }

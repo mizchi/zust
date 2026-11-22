@@ -1258,6 +1258,28 @@ pub fn expand_env(src: &str, cfg: &crate::cfg::CfgSet) -> Option<String> {
     let mut changed = false;
     let mut i = 0;
     while i < toks.len() {
+        // (`stringify!(env!("X"))` is the text of the tokens, not their value)
+        if t(i) == b"stringify" && t(i + 1) == b"!" && matches!(t(i + 2), b"(" | b"[" | b"{") {
+            let mut depth = 0usize;
+            let mut j = i + 2;
+            while j < toks.len() {
+                if toks[j].0 == 1 {
+                    match t(j) {
+                        b"(" | b"[" | b"{" => depth += 1,
+                        b")" | b"]" | b"}" => {
+                            depth -= 1;
+                            if depth == 0 {
+                                break;
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+                j += 1;
+            }
+            i = j + 1;
+            continue;
+        }
         let opt = t(i) == b"option_env";
         if !(toks[i].0 == 0 && (opt || t(i) == b"env") && t(i + 1) == b"!" && t(i + 2) == b"(" && is_lit(i + 3)) {
             i += 1;
@@ -1294,7 +1316,9 @@ pub fn expand_env(src: &str, cfg: &crate::cfg::CfgSet) -> Option<String> {
             }
             st -= 3;
             if back(st, 1) == b":" && back(st, 2) == b":" {
-                if st >= 3 && (toks[st - 3].0 == 0 || t(st - 3) == b">") {
+                // (`a::std::env!`, `<T>::std::env!`: a path of its own; `return ::std::env!(..)`: std's)
+                let kw = matches!(back(st, 3), b"return" | b"break" | b"in" | b"if" | b"else" | b"match" | b"while" | b"move" | b"mut" | b"let" | b"yield" | b"unsafe" | b"async");
+                if st >= 3 && !kw && (toks[st - 3].0 == 0 || t(st - 3) == b">") {
                     i = close + 1;
                     continue;
                 }
@@ -1546,6 +1570,8 @@ mod env_tests {
         // (another path names a macro of its own)
         assert_eq!(x("custom::env!(\"LABEL\"); a::std::env!(\"LABEL\");"), "custom::env!(\"LABEL\"); a::std::env!(\"LABEL\");");
         assert_eq!(x("env ! (\"LABEL\")"), "\"v\"");
+        assert_eq!(x("return ::std::env!(\"LABEL\");"), "return \"v\";");
+        assert_eq!(x("stringify!(env!(\"LABEL\")); env!(\"LABEL\")"), "stringify!(env!(\"LABEL\")); \"v\"");
         assert!(may_use_env("let a = env ! (\"X\");") && may_use_env("option_env!(\"X\")"));
         assert!(!may_use_env("use std::env; fn environment() {}"));
     }

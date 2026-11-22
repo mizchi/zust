@@ -128,6 +128,27 @@ pub fn plan(g: &Graph, o: &BuildOpts) -> R<Vec<CrateSpec>> {
         // (cargo gives rustc the members' paths from the workspace root, and the others' as they are)
         p.strip_prefix(&g.ws_dir).map(|x| x.display().to_string()).unwrap_or_else(|_| p.display().to_string())
     };
+    // (the bins asked for: they exist and their required features are on, before any build script runs)
+    if !o.bins.is_empty() {
+        let mut seen: Vec<&String> = vec![];
+        for &m in &selected {
+            for b in g.pkgs[m].m.bins.iter().filter(|b| o.bins.contains(&b.name)) {
+                seen.push(&b.name);
+                let missing = missing_features(g, &r, (m, false), b);
+                if !missing.is_empty() {
+                    return Err(format!(
+                        "the bin `{}` needs the features `{}` (`required-features`): turn them on with `--features`",
+                        b.name,
+                        missing.iter().map(|f| f.as_str()).collect::<Vec<_>>().join("`, `")
+                    ));
+                }
+            }
+        }
+        let missing: Vec<&String> = o.bins.iter().filter(|b| !seen.contains(b)).collect();
+        if !missing.is_empty() {
+            return Err(format!("no bin target named `{}`", missing.iter().map(|b| b.as_str()).collect::<Vec<_>>().join("`, `")));
+        }
+    }
     // (build scripts, dependencies first)
     let mut bs = Runner::new(g, &r, &target, &host, out_dir(g, o), o.release, o.bs_compiler, o.jobs, o.verbose);
     let mut bs_out: BTreeMap<Node, build_script::Output> = BTreeMap::new();
@@ -149,14 +170,17 @@ pub fn plan(g: &Graph, o: &BuildOpts) -> R<Vec<CrateSpec>> {
             let p = pn.0;
             let pk = &g.pkgs[p].m;
             let Some(lib) = &pk.lib else { continue };
+            // (two proc-macro packages of one library name: one stub cannot stand for both)
+            if let Some(&other) = lib_of.get(&lib.name) {
+                return Err(format!(
+                    "two packages give the library `{}`: `{} v{}` and `{} v{}`. Two versions of one crate are not supported yet (mizchi/zust#28)",
+                    lib.name, g.pkgs[other].m.name, g.pkgs[other].m.version, pk.name, pk.version
+                ));
+            }
             let src = std::fs::read_to_string(&lib.path).map_err(|e| format!("{}: {e}", lib.path.display()))?;
             // (its root with its features: `#[cfg_attr(feature = "x", proc_macro_attribute)]`)
             let cfg = zustc::cfg::CfgSet { features: r.nodes[&pn].features.iter().cloned().collect(), debug_assertions: !o.release, ..Default::default() };
             let m = proc_macro_stub::macros_of(&zustc::cfg::strip(&src, &cfg).unwrap_or(src));
-            if lib_of.contains_key(&lib.name) {
-                pm_macros.push((p, m));
-                continue;
-            }
             let stub = stub_dir.join(format!("{}.rs", lib.name));
             let text = proc_macro_stub::stub_text(&pk.name, &m);
             if std::fs::read_to_string(&stub).ok().as_deref() != Some(text.as_str()) {
@@ -218,25 +242,9 @@ pub fn plan(g: &Graph, o: &BuildOpts) -> R<Vec<CrateSpec>> {
                 continue;
             }
             found.extend(o.bins.iter().filter(|x| **x == b.name));
-            // (`required-features`: a bin is built only when they are all on; asking for it by name says which miss.
-            //  `dep/feat` is a feature of the dependency `dep`, on the node this package's edge reaches)
-            let on = |f: &String| -> bool {
-                match f.split_once('/') {
-                    Some((dep, feat)) => r.nodes[&n].edges.iter().any(|&(ei, t)| {
-                        g.decl(n.0, &g.edges[n.0][ei]).name == dep.trim_end_matches('?') && r.nodes.get(&t).is_some_and(|s| s.features.contains(feat))
-                    }),
-                    None => r.nodes[&n].features.contains(f),
-                }
-            };
-            let missing: Vec<&String> = b.required_features.iter().filter(|f| !on(f)).collect();
-            if !missing.is_empty() {
-                if asked {
-                    return Err(format!(
-                        "the bin `{}` needs the features `{}` (`required-features`): turn them on with `--features`",
-                        b.name,
-                        missing.iter().map(|f| f.as_str()).collect::<Vec<_>>().join("`, `")
-                    ));
-                }
+            // (`required-features`: a bin is built only when they are all on; asking for it by name says which miss:
+            //  checked before any build script runs, with the names asked for)
+            if !missing_features(g, &r, n, b).is_empty() {
                 continue;
             }
             let mut deps = deps_of(g, &r, n)?;
@@ -297,6 +305,20 @@ pub fn plan(g: &Graph, o: &BuildOpts) -> R<Vec<CrateSpec>> {
     Ok(crates)
 }
 
+/// The `required-features` of a bin that are off (`dep/feat` is a feature of the dependency `dep`, on the node this
+/// package's edge reaches)
+fn missing_features<'a>(g: &Graph, r: &resolve::Resolved, n: Node, b: &'a crate::manifest::Target) -> Vec<&'a String> {
+    let on = |f: &String| -> bool {
+        match f.split_once('/') {
+            Some((dep, feat)) => r.nodes[&n].edges.iter().any(|&(ei, t)| {
+                g.decl(n.0, &g.edges[n.0][ei]).name == dep.trim_end_matches('?') && r.nodes.get(&t).is_some_and(|s| s.features.contains(feat))
+            }),
+            None => r.nodes[&n].features.contains(f),
+        }
+    };
+    b.required_features.iter().filter(|f| !on(f)).collect()
+}
+
 /// The proc-macro packages a node reaches through its normal dependencies (a library may re-export them)
 fn pm_reach(g: &Graph, r: &resolve::Resolved, n: Node, memo: &mut BTreeMap<Node, Vec<usize>>) -> Vec<usize> {
     if let Some(v) = memo.get(&n) {
@@ -344,6 +366,12 @@ fn deps_of(g: &Graph, r: &resolve::Resolved, n: Node) -> R<Vec<String>> {
 
 /// The workspace as `zustc build` reads it (`-v`)
 pub fn ws_text(crates: &[CrateSpec]) -> String {
+    ws_text_in(crates, false)
+}
+
+/// ws_text, with the environment's values left out when `redact` (for a log: a build script's `rustc-env` may pass a
+/// secret on)
+fn ws_text_in(crates: &[CrateSpec], redact: bool) -> String {
     let mut s = String::new();
     for c in crates {
         let f = if c.features.is_empty() { String::new() } else { format!(" features={}", c.features.join(",")) };
@@ -359,7 +387,7 @@ pub fn ws_text(crates: &[CrateSpec]) -> String {
             }
         }
         for (k, v) in &c.env {
-            e.push_str(&format!(" env={}={}", esc(k), esc(v)));
+            e.push_str(&format!(" env={}={}", esc(k), if redact { "…".to_string() } else { esc(v) }));
         }
         s.push_str(&format!("{} {} {} {}{f}{e}\n", if c.lib { "lib" } else { "bin" }, c.name, c.root.display(), c.deps.join(" ")));
     }
@@ -374,8 +402,8 @@ pub fn build(g: &Graph, o: &BuildOpts) -> R<Built> {
         let ws = ws_text(&crates);
         let p = out.join("zurgo-ws.txt");
         let _ = std::fs::write(&p, &ws);
-        eprint!("{ws}");
-        eprintln!("(written to {})", p.display());
+        eprint!("{}", ws_text_in(&crates, true));
+        eprintln!("(written to {}, with the environment's values)", p.display());
     }
     let mut opts = Options2 { opt: o.release, time: o.time, no_cache: o.no_cache, ..Options2::default() };
     if let Some(j) = o.jobs {
