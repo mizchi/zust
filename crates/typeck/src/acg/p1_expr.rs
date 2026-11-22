@@ -1936,6 +1936,11 @@ impl Cx<'_> {
             self.requested.push(iid);
         }
         let st = Ty::Struct(sid);
+        if let Expr::Closure(.., csp) = c {
+            if !self.bk.clo_at.iter().any(|x| x.0 == st) {
+                self.bk.clo_at.push((st, *csp));
+            }
+        }
         // (a closure that moves what it captures out of itself is `FnOnce`)
         if self.bk.fnonce_sure.contains(&(c as *const Expr as usize)) && !self.bk.fnonce.contains(&st) {
             self.bk.fnonce.push(st);
@@ -2669,16 +2674,22 @@ impl Cx<'_> {
             whole = false;
         }
         let Expr::Path(None, p) = e else { return None };
-        let [seg] = p.segs.as_slice() else { return None };
-        if !seg.args.is_empty() || self.lookup(&seg.name).is_some() {
+        // (`N` not shadowed by a local, or `m::N`: by the path's static)
+        if ident_of(p).is_some_and(|id| self.lookup(id).is_some()) {
             return None;
         }
-        let &ci = self.prog.const_index.get(&seg.name)?;
+        let ci = match self.static_of(e) {
+            Some(ci) => ci,
+            None => match p.segs.as_slice() {
+                [seg] if seg.args.is_empty() => *self.prog.const_index.get(&seg.name)?,
+                _ => return None,
+            },
+        };
         let c = &self.prog.consts[ci as usize];
         if c.stat != Some(false) || crate::parse::extern_static(&c.expr).is_some() {
             return None;
         }
-        let n = &seg.name;
+        let n = &p.segs.iter().map(|s| s.name.as_str()).collect::<Vec<_>>().join("::");
         Some(if whole { format!("cannot assign to immutable static item `{n}` (E0594)") } else { format!("cannot assign to a part of `{n}`, as `{n}` is an immutable static item (E0594)") })
     }
 

@@ -211,14 +211,16 @@ pub struct Bk {
     pub fnmut_exprs: Vec<usize>,
     /// The types of such closures
     pub fnmut: Vec<Ty>,
-    /// The closures (by address) that may move what they capture out of themselves (they hold a value that is not
-    /// `Copy`): not `FnMut` for sure
+    /// The closures (by address) that may move what they capture by value out of themselves (bk_may_consume): not
+    /// `FnMut` for sure
     pub fnonce_exprs: Vec<usize>,
     /// The closures (by address) whose bodies move a capture that is not `Copy` (`|| drop(v)`): `FnOnce`, a call of
     /// one by name moves it
     pub fnonce_sure: Vec<usize>,
     /// The types of such closures
     pub fnonce: Vec<Ty>,
+    /// Where the closures of fnmut / fnonce are written
+    pub clo_at: Vec<(Ty, Sp)>,
     /// Loans the region check found must outlive a region of locals' types (sorted by loan): those locals hold them
     pub held_by: Vec<(u32, Vec<u32>)>,
     /// The loan of each method call's receiver, by the call's address (while the region check is on)
@@ -422,9 +424,10 @@ fn path_str(locals: &[Local], p: &BPlace) -> String {
     s
 }
 
-/// a is a prefix of b
+/// a is a prefix of b (an index `[..]` is any element, an array pattern's `[2]` too)
 fn prefix(a: &[Proj], b: &[Proj]) -> bool {
-    a.len() <= b.len() && a.iter().zip(b).all(|(x, y)| x == y || (*x == Proj::Index && *y == Proj::Index))
+    let elem = |p: &Proj| matches!(p, Proj::Field(f) if f.starts_with('['));
+    a.len() <= b.len() && a.iter().zip(b).all(|(x, y)| x == y || (*x == Proj::Index && (*y == Proj::Index || elem(y))) || (elem(x) && *y == Proj::Index))
 }
 
 /// The two places overlap (one contains the other)
@@ -1742,7 +1745,7 @@ impl Cx<'_> {
                 self.bk.fnmut_exprs.push(ca);
             }
         }
-        if (by_move || move_kw) && !self.bk_ty(t).0 && !self.bk.fnonce_exprs.contains(&ca) {
+        if (by_move || move_kw) && !self.bk_ty(t).0 && !self.bk.fnonce_exprs.contains(&ca) && (crate::ast_closure::moves_capture(c, &[n.to_string()]) || self.bk_may_consume(body, n)) {
             self.bk.fnonce_exprs.push(ca);
         }
         if (by_move || move_kw) && !self.bk_ty(t).0 && crate::ast_closure::moves_capture(c, &[n.to_string()]) && !self.bk.fnonce_sure.contains(&ca) {
@@ -1944,6 +1947,50 @@ impl Cx<'_> {
             _ => {}
         }
         crate::ast_closure::each_child_pub(e, &mut |c| self.bk_cap_muts(c, n, out, calls));
+    }
+
+    /// Whether a closure's body may take its capture n by value, beyond what moves_capture sees: a method of it that
+    /// takes `self` (or one not known), a pattern that binds a part of it by value (`match n { Some(x) => .. }`), in a
+    /// macro's arguments too
+    fn bk_may_consume(&self, e: &Expr, n: &str) -> bool {
+        match e {
+            Expr::MethodCall(r, m, ..) => {
+                if let Some((_, rt)) = self.bk_rooted_at(r, n) {
+                    let by_value = match rt {
+                        Some(Ty::Struct(sid)) => self.prog.method(sid, m).is_none_or(|id| {
+                            let sg = &self.prog.sigs[id as usize];
+                            !(sg.has_self && matches!(sg.params.first(), Some(Ty::Ref(..))))
+                        }),
+                        Some(Ty::Ref(..)) => false,
+                        _ => true,
+                    };
+                    if by_value {
+                        return true;
+                    }
+                }
+            }
+            Expr::Match(x, arms) => {
+                if self.bk_rooted_at(x, n).is_some() && arms.iter().any(|a| crate::ast_closure::binds_by_value(&a.pat)) {
+                    return true;
+                }
+            }
+            Expr::Let(p, x) => {
+                if self.bk_rooted_at(x, n).is_some() && crate::ast_closure::binds_by_value(p) {
+                    return true;
+                }
+            }
+            Expr::Macro(_, g, _) => {
+                return crate::ast_closure::macro_args(g).unwrap_or_default().iter().any(|a| self.bk_may_consume(a, n));
+            }
+            _ => {}
+        }
+        let mut found = false;
+        crate::ast_closure::each_child_pub(e, &mut |c| {
+            if !found && self.bk_may_consume(c, n) {
+                found = true;
+            }
+        });
+        found
     }
 
     /// The places rooted at the variable n that the closure body uses

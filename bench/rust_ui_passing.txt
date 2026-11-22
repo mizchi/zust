@@ -815,6 +815,7 @@ compile-fail	borrowck/borrowck-move-in-irrefut-pat.rs
 compile-fail	borrowck/borrowck-move-moved-value-into-closure.rs
 check-pass	borrowck/borrowck-move-out-from-array-no-overlap-match.rs
 check-pass	borrowck/borrowck-move-out-from-array-no-overlap.rs
+compile-fail	borrowck/borrowck-move-out-from-array-use-match.rs
 check-pass	borrowck/borrowck-move-out-from-array-use-no-overlap-match.rs
 check-pass	borrowck/borrowck-move-out-from-array-use-no-overlap.rs
 compile-fail	borrowck/borrowck-move-out-from-array-use.rs
@@ -1155,6 +1156,7 @@ compile-fail	closures/2229_closure_analysis/diagnostics/borrowck/borrowck-3.rs
 compile-fail	closures/2229_closure_analysis/diagnostics/borrowck/borrowck-closures-mut-and-imm.rs
 compile-fail	closures/2229_closure_analysis/diagnostics/box.rs
 compile-fail	closures/2229_closure_analysis/diagnostics/cant-mutate-imm.rs
+compile-fail	closures/2229_closure_analysis/diagnostics/closure-origin-array-diagnostics.rs
 compile-fail	closures/2229_closure_analysis/diagnostics/closure-origin-struct-diagnostics.rs
 compile-fail	closures/2229_closure_analysis/diagnostics/closure-origin-tuple-diagnostics-1.rs
 check-pass	closures/2229_closure_analysis/diagnostics/liveness.rs
@@ -1219,6 +1221,7 @@ compile-fail	closures/closure-bounds-static-cant-capture-borrowed.rs
 compile-fail	closures/closure-expected-type/expect-region-supply-region.rs
 compile-fail	closures/closure-expected.rs
 compile-fail	closures/closure-immutable-outer-variable.rs
+compile-fail	closures/closure-kind-caching-during-upvar-inference.rs
 run-pass	closures/closure-last-use-move.rs
 compile-fail	closures/closure-move-sync.rs
 compile-fail	closures/closure-move-use-after-move-diagnostic.rs
@@ -1235,6 +1238,7 @@ compile-fail	closures/closure-to-fn-pointer-lifetime-error.rs
 run-pass	closures/closure-type-inference-in-context-9129.rs
 run-pass	closures/closure-upvar-trait-caching.rs
 run-pass	closures/closure-with-fixed-size-array-param.rs
+compile-fail	closures/closure-wrong-kind.rs
 run-pass	closures/closure_no_cap_coerce_many_unsafe_1.rs
 check-pass	closures/closure_promotion.rs
 check-pass	closures/closure_requires_expectation.rs

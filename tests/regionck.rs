@@ -1222,3 +1222,24 @@ fn fn_bound_closures() {
     assert!(d.len() == 1 && d[0].0 == 11 && d[0].1.contains("cannot borrow `x` as mutable"), "{d:?}");
     assert_eq!(check("pub fn bar<F: FnMut()>(mut f: F) {\n    f();\n}\npub fn baz<F: Fn() -> i32>(f: F) -> i32 {\n    f()\n}\nfn main() {\n    let mut x = 0;\n    bar(|| x += 1);\n    let y = 2;\n    baz(|| y + 1);\n}\n"), vec![]);
 }
+
+/// Review of #43: an index reads an array pattern's moved element; a move closure that only mutates a capture that is
+/// not `Copy` is `FnMut`; a qualified immutable static; a placeholder of another type parameter keeps its bound's
+/// lifetimes; a named closure passed where `Fn` is wanted (E0525); `for x in v.iter().copied()` does not take v
+#[test]
+fn review_of_43() {
+    let d = check("fn main() {\n    let a = [String::new(), String::new(), String::new()];\n    let [_, _, _s] = a;\n    let _t = &a[2];\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 4, "{d:?}");
+    let d = check("fn main() {\n    let mut s = String::new();\n    let append = move || s.push_str(\"x\");\n    append();\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 4 && d[0].1.contains("not declared as mutable"), "{d:?}");
+    let d = check("mod m {\n    pub static N: i32 = 0;\n}\nfn main() {\n    m::N = 1;\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 5 && d[0].1.contains("immutable static item `m::N`"), "{d:?}");
+    let d = check("trait Get<'a> {\n    fn get(&self) -> &'a u8;\n    fn bad<'b, G: Get<'b>>(&self, g: G) -> &'a u8 {\n        g.get()\n    }\n}\nfn main() {}\n");
+    assert!(d.len() == 1 && d[0].0 == 4 && d[0].1.contains("`'b` must outlive `'a`"), "{d:?}");
+    let d = check("fn wants_fn<F: Fn()>(_f: F) {}\nfn main() {\n    let mut x = 0;\n    let c = || x += 1;\n    wants_fn(c);\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 4 && d[0].1.contains("E0525"), "{d:?}");
+    assert_eq!(
+        check("fn wants_mut<F: FnMut()>(mut f: F) {\n    f();\n}\nfn main() {\n    let v = vec![1, 2];\n    for x in v.iter().copied() {\n        let _ = x;\n    }\n    let _n = v.len();\n    let mut x = 0;\n    let c = || x += 1;\n    wants_mut(c);\n    let mut foo = Some(Box::new(8));\n    let f = move || {\n        if let Some(b) = foo {\n            foo = Some(b);\n        }\n        println!(\"{:?}\", foo.unwrap());\n    };\n    f();\n}\n"),
+        vec![]
+    );
+}

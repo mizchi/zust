@@ -519,7 +519,9 @@ impl Cx<'_> {
         }
         // 値で回す (`for x in arr`): 要素は x にムーブするので、配列は drop しない。
         // Vec なら長さを 0 にしておき、バッファの解放だけを Vec の drop に任せる
-        if mode.is_none() {
+        // (`v.iter().copied()` / `.cloned()`: the elements are copied out of a borrow, v stays as it is)
+        let borrowed = adapters.iter().any(|a| a == "iter" || a == "iter_mut");
+        if mode.is_none() && !borrowed {
             let vec = match self.peek(base_e) {
                 Some(Ty::Struct(sid)) => self.vec_fields(sid),
                 _ => None,
@@ -559,8 +561,16 @@ impl Cx<'_> {
             iv
         };
         let addr = self.elem_addr(ptr, idx, elem);
+        // (`v.iter().cloned()` of elements that need a drop: each is cloned (`Clone::clone` of a reference to it), not
+        // copied bit for bit)
+        let clone_elems = mode.is_none() && borrowed && adapters.iter().any(|a| a == "cloned") && self.needs_drop(elem);
         let (val, vt) = match mode {
             Some(m) => (Some(addr), Ty::Ref(m, intern(elem))),
+            None if clone_elems => {
+                self.bind("__exr_cl".into(), Ty::Ref(false, intern(elem)), Some(addr));
+                let ce = self.keep_expr(mcall(path_expr("__exr_cl"), "clone", vec![]));
+                self.expr(ce, Some(elem))?
+            }
             None => self.read(Place::Mem(addr, 0, elem)),
         };
         // (`for (i, x) in v.iter().enumerate()`: 組を作らずに i と x をそれぞれ束縛する)

@@ -1864,6 +1864,26 @@ impl Cx<'_> {
                     }
                 }
             }
+            // (a closure passed by name where a bound wants `Fn` / `FnMut`: one that mutates its captures is only `FnMut`,
+            // one that moves them out only `FnOnce` (E0525, at the closure))
+            if let (Some(x), Expr::Path(None, _)) = (&fbt, strip_paren(a)) {
+                let want = x.2.trim_start();
+                let kind = |k: &str| want.strip_prefix(k).is_some_and(|r| r.trim_start().starts_with('('));
+                if let Some(t @ Ty::Struct(_)) = self.peek(a) {
+                    let has = if self.bk.fnonce.contains(&t) && (kind("Fn") || kind("FnMut")) {
+                        Some("FnOnce")
+                    } else if self.bk.fnmut.contains(&t) && kind("Fn") {
+                        Some("FnMut")
+                    } else {
+                        None
+                    };
+                    if let Some(has) = has {
+                        let w = if kind("Fn") { "Fn" } else { "FnMut" };
+                        let at = self.bk.clo_at.iter().find(|c| c.0 == t).map(|c| c.1).unwrap_or(super::borrowck::pos(a));
+                        return Err(self.at(at, format!("expected a closure that implements the `{w}` trait, but this closure only implements `{has}` (E0525)")));
+                    }
+                }
+            }
             // 関数アイテム (`or_insert_with(Vec::new)`) なら、境界を関数ポインタの期待型にして型引数を決める
             if let (Some((bps, bret)), None, Expr::Path(..)) = (&fb, exp, strip_paren(a)) {
                 let ft = crate::types::FnTy {

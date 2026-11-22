@@ -2596,7 +2596,8 @@ impl Cx<'_> {
                 let short = tr.rsplit("::").next().unwrap_or(tr);
                 let bs = prog.structs[s as usize].placeholder.as_deref().unwrap_or(&[]);
                 // (`Self` of the trait's own default method: bounded by the trait, whose lifetimes are the method's, by name)
-                let own = prog.sigs.get(rg.base as usize).and_then(|c| c.trait_of.as_deref()) == Some(tr);
+                // (only for the `Self` placeholder: another type parameter of the method (`G: Get<'b>`) has its own bound)
+                let own = prog.sigs.get(rg.base as usize).and_then(|c| c.trait_of.as_deref()) == Some(tr) && prog.structs[s as usize].name == "Self#";
                 if let (true, Some(r)) = (own, rs.as_deref()) {
                     for (i, l) in r.lts.iter().enumerate().take(outer) {
                         if let (Some(p), Some(slot)) = (rg.lt_names.iter().position(|x| x == l), lts.get_mut(i)) {
