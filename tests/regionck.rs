@@ -2275,6 +2275,19 @@ fn part12_review_3() {
     let d = check(&chain(128, "fn main() {\n    let mut x = VALUE;\n    x.field = 1;\n}\n"));
     assert!(d.len() == 1 && d[0].1.contains("cannot assign to data in dereference of `S1` (E0594)"), "{d:?}");
     assert_eq!(check(&chain(128, "fn main() {\n    let x = VALUE;\n    println!(\"{}\", x.field);\n}\n")), vec![]);
+    // (through a generic target, `W<T>: Deref<Target = T>`: as far, then E0055; a shorter chain's write is E0594)
+    let generic = |n: usize, body: &str| {
+        let mut v = String::from("S0 { field: 0 }");
+        for _ in 0..n {
+            v = format!("W({v})");
+        }
+        "use std::ops::Deref;\nstruct S0 {\n    field: u32,\n}\nstruct W<T>(T);\nimpl<T> Deref for W<T> {\n    type Target = T;\n    fn deref(&self) -> &T {\n        &self.0\n    }\n}\n".to_string() + &body.replace("VALUE", &v)
+    };
+    let d = check(&generic(129, "fn main() {\n    let mut x = VALUE;\n    x.field = 1;\n}\n"));
+    assert!(d.len() == 1 && d[0].1.contains("reached the recursion limit while auto-dereferencing `W<"), "{d:?}");
+    let d = check(&generic(20, "fn main() {\n    let mut x = VALUE;\n    x.field = 1;\n}\n"));
+    assert!(d.len() == 1 && d[0].1.contains("cannot assign to data in dereference of `W` (E0594)"), "{d:?}");
+    assert_eq!(check(&generic(20, "fn main() {\n    let x = VALUE;\n    println!(\"{}\", x.field);\n}\n")), vec![]);
     // (a cycle through two types: type inference followed it until the stack overflowed)
     let d = check("use std::ops::Deref;\nstruct A {\n    x: u32,\n}\nstruct B {\n    y: u32,\n}\nstatic BB: B = B { y: 2 };\nstatic AA: A = A { x: 2 };\nimpl Deref for A {\n    type Target = B;\n    fn deref(&self) -> &B {\n        &BB\n    }\n}\nimpl Deref for B {\n    type Target = A;\n    fn deref(&self) -> &A {\n        &AA\n    }\n}\nfn main() {\n    let a = A { x: 1 };\n    println!(\"{}\", a.missing);\n}\n");
     assert!(d.len() == 1 && d[0].0 == 24 && d[0].1.contains("reached the recursion limit while auto-dereferencing `A` (E0055)"), "{d:?}");

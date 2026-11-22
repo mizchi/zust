@@ -311,9 +311,10 @@ impl Cx<'_> {
                 // (フィールドがなく Deref を実装した型 (`self.prog` で self: &Inf): `(*self.deref()).prog`)
                 if let Some(Ty::Struct(sid)) = self.peek(base).map(|t| self.strip_refs(t)) {
                     if self.prog.field(sid, fname).is_none() {
-                        // (a Deref chain that does not reach a field of that name within rustc's recursion limit (128):
-                        // a cycle (`impl Deref for Foo { type Target = Foo }`), or a chain that long. The borrow
-                        // check follows a place's derefs as far (bk_place))
+                        // (a Deref chain that does not reach a field of that name within rustc's default recursion
+                        // limit (128): a cycle (`impl Deref for Foo { type Target = Foo }`), or a chain that long,
+                        // through generic targets too (`W<W<..>>` with `Target = T`). The borrow check follows a
+                        // place's derefs as far, the same way (bk_place, bk_overloaded_shr))
                         let mut t = sid;
                         let mut over = true;
                         for _ in 0..128 {
@@ -321,11 +322,16 @@ impl Cx<'_> {
                                 over = false;
                                 break;
                             };
-                            let Ty::Ref(_, Ty::Struct(n)) = self.prog.sigs[d as usize].ret else {
+                            let Ty::Ref(_, i) = self.prog.sigs[d as usize].ret else {
                                 over = false;
                                 break;
                             };
-                            t = *n;
+                            let args: Vec<Option<Ty>> = self.prog.structs[t as usize].args.iter().map(|&a| Some(a)).collect();
+                            let Ty::Struct(n) = self.prog.partial_subst(*i, &args) else {
+                                over = false;
+                                break;
+                            };
+                            t = n;
                             if self.prog.field(t, fname).is_some() {
                                 over = false;
                                 break;
