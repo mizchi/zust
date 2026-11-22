@@ -1932,7 +1932,7 @@ impl Cx<'_> {
         let k = x as *const Expr as usize;
         // (a constant whose type needs dropping (`&Test` with `impl Drop for Test`) is not promoted either)
         let dropped = || matches!(x, Expr::Path(None, p) if p.segs.len() != 1 || self.lookup(&p.segs[0].name).is_none()) && self.needs_drop(t);
-        if self.rg.calls.contains_key(&k) || !(self.not_const(x) || dropped()) || super::borrowck::has_refs(self.prog, t, 0) {
+        if self.rg.calls.contains_key(&k) || !(self.not_const(x) || dropped()) || self.bk_ty(t).1 {
             return;
         }
         self.rg.temps.insert(k, t);

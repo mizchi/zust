@@ -1381,3 +1381,121 @@ fn part7_review_follow_ups() {
     let d = check("fn bad<F: FnMut()>(f: &F) {\n    f();\n}\nfn main() {}\n");
     assert!(d.len() == 1 && d[0].0 == 2 && d[0].1.contains("behind a `&` reference"), "{d:?}");
 }
+
+/// What is stored through a `&mut` a local holds (`*q = &y` with `q = &mut p`) is held by what it points to: p used
+/// after y is gone is E0597. Not when p is not used after, nor through a `&mut` of a local that outlives y
+#[test]
+fn store_through_mut_ref() {
+    let d = check("fn deref(_: &i32) {}\nfn main() {\n    let x = 44;\n    let mut p = &x;\n    {\n        let y = 22;\n        let q = &mut p;\n        *q = &y;\n    }\n    deref(p);\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 8 && d[0].1.contains("does not live long enough"), "{d:?}");
+    assert_eq!(check("fn deref(_: &i32) {}\nfn main() {\n    let x = 44;\n    let mut p = &x;\n    {\n        let y = 22;\n        let q = &mut p;\n        *q = &y;\n        deref(p);\n    }\n    let z = 1;\n    p = &z;\n    deref(p);\n}\n"), vec![]);
+    assert_eq!(check("fn main() {\n    let y = 22;\n    let x = 44;\n    let mut p = &x;\n    let q = &mut p;\n    *q = &y;\n    println!(\"{}\", p);\n}\n"), vec![]);
+}
+
+/// A `&mut` local passed for a type parameter not known yet (`fn g<T>(x: T)`) is moved, not reborrowed (E0382 when
+/// used after); one passed where the parameter is a `&mut` is reborrowed
+#[test]
+fn mut_ref_moved_into_type_parameter() {
+    let d = check("struct X(u32);\nimpl X {\n    fn f(&mut self) {\n        generic(self);\n        self.0 += 1;\n    }\n}\nfn generic<T>(_x: T) {}\nfn main() {}\n");
+    assert!(d.len() == 1 && d[0].0 == 5 && d[0].1.contains("moved"), "{d:?}");
+    assert_eq!(check("struct X(u32);\nimpl X {\n    fn f(&mut self) {\n        by_ref(self);\n        self.0 += 1;\n    }\n}\nfn by_ref(_x: &mut X) {}\nfn main() {}\n"), vec![]);
+}
+
+/// Two fields of a union are the same memory: `&mut u.s.a` and `&u.z.c` conflict (E0502); fields of the same field
+/// do not
+#[test]
+fn union_fields_overlap() {
+    let src = |second: &str| format!("#[derive(Clone, Copy)]\nstruct S {{\n    a: u8,\n    b: u8,\n}}\n#[derive(Clone, Copy)]\nstruct Z {{\n    c: u8,\n    d: u8,\n}}\nunion U {{\n    s: S,\n    z: Z,\n}}\nfn main() {{\n    unsafe {{\n        let mut u = U {{ s: S {{ a: 1, b: 2 }} }};\n        let m = &mut u.s.a;\n        let n = &{second};\n        println!(\"{{}} {{}}\", m, n);\n    }}\n}}\n");
+    let d = check(&src("u.z.c"));
+    assert!(d.len() == 1 && d[0].0 == 19, "{d:?}");
+    assert_eq!(check(&src("u.s.b")), vec![]);
+}
+
+/// Review follow-ups of part 8: a write to one union field while another is borrowed is reported (it panicked); a store
+/// through a field's `&mut` is not followed into the local's other loans; E0509 for a projected scrutinee and nested
+/// patterns; a `&mut` field moved into a type parameter; a static moved out by a module path (E0507)
+#[test]
+fn part8_review_follow_ups() {
+    // (a write to `u.b.x` while `u.a` is borrowed: the same memory)
+    let d = check("#[derive(Clone, Copy)]\nstruct P { x: u32, y: u32 }\nunion U { a: u32, b: P }\nfn main() {\n    let mut u = U { a: 1 };\n    let r = unsafe { &u.a };\n    unsafe { u.b.x = 2; }\n    println!(\"{}\", r);\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 7 && d[0].1.contains("borrowed"), "{d:?}");
+    // (a union's field written: the union is, its field moved out before too)
+    assert_eq!(check("struct A;\nstruct B;\nunion U {\n    a: std::mem::ManuallyDrop<A>,\n    b: std::mem::ManuallyDrop<B>,\n}\nfn main() {\n    unsafe {\n        let mut u = U { a: std::mem::ManuallyDrop::new(A) };\n        let _a = u.a;\n        u.b = std::mem::ManuallyDrop::new(B);\n        let _a = u.a;\n    }\n}\n"), vec![]);
+    // (`*q.0 = &y` with q = (&mut p, &mut z): z is not changed)
+    assert_eq!(check("fn sink(_: &u32) {}\nfn main() {\n    let x = 0;\n    let mut p = &x;\n    let mut z = &x;\n    {\n        let y = 1;\n        let q = (&mut p, &mut z);\n        *q.0 = &y;\n        sink(p);\n    }\n    sink(z);\n}\n"), vec![]);
+    let drop_d = "struct D { f: Option<String> }\nimpl Drop for D { fn drop(&mut self) {} }\n";
+    // (`match d.f { Some(x) => .. }`: x is moved out of d)
+    let d = check(&format!("{drop_d}fn main() {{\n    let d = D {{ f: Some(String::new()) }};\n    match d.f {{ Some(x) => drop(x), None => {{}} }}\n}}\n"));
+    assert!(d.len() == 1 && d[0].0 == 5 && d[0].1.contains("E0509"), "{d:?}");
+    assert_eq!(check(&format!("{drop_d}fn main() {{\n    let d = D {{ f: Some(String::new()) }};\n    match d.f {{ Some(ref x) => println!(\"{{}}\", x), None => {{}} }}\n}}\n")), vec![]);
+    // (`let D { f: Some(x) } = d`: deeper than d's own field)
+    let d = check(&format!("{drop_d}fn main() {{\n    let d = D {{ f: Some(String::new()) }};\n    let D {{ f: Some(x) }} = d else {{ return }};\n    drop(x);\n}}\n"));
+    assert!(d.len() == 1 && d[0].0 == 5 && d[0].1.contains("E0509"), "{d:?}");
+    // (a `&mut` field passed for a type parameter is moved)
+    let d = check("fn consume<T>(_: T) {}\nfn main() {\n    let mut a = 1;\n    let s = (&mut a,);\n    consume(s.0);\n    *s.0 = 2;\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 6 && d[0].1.contains("moved"), "{d:?}");
+    // (a static by its module's path)
+    let d = check("mod m {\n    pub static BAR: String = String::new();\n}\nfn take(_: String) {}\nfn main() {\n    take(m::BAR);\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 6 && d[0].1.contains("E0507"), "{d:?}");
+    assert_eq!(check("mod m {\n    pub static BAR: String = String::new();\n}\nfn main() {\n    println!(\"{}\", m::BAR.len());\n}\n"), vec![]);
+    // (`*q = &mut y` with q = &mut p, p = &mut *z: p changes, not z, which q holds a loan of through p)
+    assert_eq!(check("fn main() {\n    let mut z0 = 0;\n    let z = &mut z0;\n    let mut w = 5;\n    let mut p = &mut w;\n    p = &mut *z;\n    {\n        let mut y = 1;\n        let q = &mut p;\n        *q = &mut y;\n        **q += 1;\n    }\n    *z += 1;\n}\n"), vec![]);
+    // (nor what z points to when z is a parameter: `*q = &mut y` does not store y behind it)
+    assert_eq!(check("fn f(z: &mut i32) {\n    let mut p = &mut *z;\n    {\n        let mut y = 1;\n        let q = &mut p;\n        *q = &mut y;\n        **q += 1;\n    }\n    *z += 1;\n}\nfn main() {}\n"), vec![]);
+    let d = check("fn g(z: &mut &i32) {\n    let y = 1;\n    let q = &mut *z;\n    *q = &y;\n}\nfn main() {}\n");
+    assert!(d.len() == 1 && d[0].0 == 4, "{d:?}");
+    // (a reborrow `q = &mut *p` points to what p points to: `*q = &y` stores into r)
+    let d = check("fn sink(_: &i32) {}\nfn main() {\n    let x = 1;\n    let mut r = &x;\n    {\n        let y = 2;\n        let p = &mut r;\n        let q = &mut *p;\n        *q = &y;\n    }\n    sink(r);\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 9, "{d:?}");
+    // (but `*q = &mut &y`: the `&mut` is invariant, so z's region is y's)
+    let d = check("fn sink(_: &u32) {}\nfn main() {\n    let z0 = 0;\n    let mut z = &z0;\n    let mut p = &mut z;\n    {\n        let y = 1;\n        let q = &mut p;\n        *q = &mut &y;\n    }\n    sink(z);\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 9, "{d:?}");
+    // (E0509 after a `..`, of an array's element, of a field through a box, of a `&mut` field into a type parameter)
+    let d = check("struct D(i32, String);\nimpl Drop for D {\n    fn drop(&mut self) {}\n}\nfn main() {\n    let d = D(1, String::new());\n    let D(.., s) = d;\n    drop(s);\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 7 && d[0].1.contains("E0509"), "{d:?}");
+    let d = check("struct D {\n    f: [String; 1],\n}\nimpl Drop for D {\n    fn drop(&mut self) {}\n}\nfn main() {\n    let d = D { f: [String::new()] };\n    let D { f: [s] } = d;\n    drop(s);\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 9 && d[0].1.contains("E0509"), "{d:?}");
+    let d = check("struct D {\n    f: String,\n}\nimpl Drop for D {\n    fn drop(&mut self) {}\n}\nfn main() {\n    let b = Box::new(D { f: String::new() });\n    let s = b.f;\n    drop(s);\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 9 && d[0].1.contains("E0509"), "{d:?}");
+    let d = check("struct D<'a> {\n    r: &'a mut i32,\n}\nimpl<'a> Drop for D<'a> {\n    fn drop(&mut self) {}\n}\nfn consume<T>(_: T) {}\nfn main() {\n    let mut x = 1;\n    let d = D { r: &mut x };\n    consume(d.r);\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 11 && d[0].1.contains("E0509"), "{d:?}");
+    // (a `ref` binding and a `Copy` part are fine)
+    assert_eq!(check("struct D(i32, String);\nimpl Drop for D {\n    fn drop(&mut self) {}\n}\nfn main() {\n    let d = D(1, String::new());\n    let D(n, ref s) = d;\n    let D(.., ref t) = d;\n    println!(\"{} {} {}\", n, s, t);\n}\n"), vec![]);
+}
+
+/// E0582: a lifetime a `for<'a>` binder declares that only the bound's result or an associated type's binding names
+#[test]
+fn e0582_unconstrained_binder() {
+    let d = check("fn bar<F>(_t: F)\nwhere\n    F: for<'a> Fn() -> Option<&'a i32>,\n{\n}\nfn main() {}\n");
+    assert!(d.len() == 1 && d[0].0 == 3 && d[0].1.contains("E0582"), "{d:?}");
+    let d = check("fn baz<F>(_t: F)\nwhere\n    F: for<'a> Iterator<Item = &'a i32>,\n{\n}\nfn main() {}\n");
+    assert!(d.len() == 1 && d[0].0 == 3 && d[0].1.contains("E0582"), "{d:?}");
+    assert_eq!(check("fn ok<F, T, U>(_t: F)\nwhere\n    F: for<'a> Fn(&'a u8) -> &'a u8,\n    for<'a> &'a T: IntoIterator<Item = &'a U>,\n{\n}\nfn main() {}\n"), vec![]);
+    // (a generic associated type's binding names the binder's lifetime in its own arguments: an input)
+    assert_eq!(check("trait S {\n    type Item<'a> where Self: 'a;\n}\nfn f<T>() where T: for<'a> S<Item<'a> = &'a i32> {}\nfn main() {}\n"), vec![]);
+}
+
+/// A move out of a static (E0507); a constant is a new value at each use
+#[test]
+fn move_out_of_static() {
+    let d = check("struct Foo {\n    foo: String,\n}\nstatic BAR: Foo = Foo { foo: String::new() };\nfn test(_f: Foo) {}\nfn main() {\n    test(BAR);\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 7 && d[0].1.contains("E0507"), "{d:?}");
+    assert_eq!(check("struct Foo {\n    foo: u8,\n}\nconst BAR: Foo = Foo { foo: 1 };\nfn test(_f: Foo) {}\nfn main() {\n    test(BAR);\n    println!(\"{}\", BAR.foo);\n}\n"), vec![]);
+}
+
+/// A tuple / array / struct literal of a runtime value (`(v,)` of a local) is a temporary, not promoted to a static as
+/// `&(1,)` is: borrowed past the statement it is E0716. A `let` extends it
+#[test]
+fn runtime_literal_temporaries() {
+    // (a block, an `if`, a `match` in a literal: the value it ends with; constant ones are promoted)
+    let first = "fn first(x: &(i32,)) -> &i32 {\n    &x.0\n}\n";
+    assert_eq!(check(&format!("{first}fn main() {{\n    let r = first(&({{ 1 }},));\n    let k = first(&(if true {{ 1 }} else {{ 2 }},));\n    println!(\"{{}} {{}}\", r, k);\n}}\n")), vec![]);
+    let d = check(&format!("{first}fn main() {{\n    let c = true;\n    let q = first(&(if c {{ 1 }} else {{ 2 }},));\n    println!(\"{{}}\", q);\n}}\n"));
+    assert!(d.len() == 1 && d[0].0 == 6 && d[0].1.contains("E0716"), "{d:?}");
+    // (a struct update reads its base)
+    let d = check("struct S {\n    a: i32,\n    b: i32,\n}\nfn get(s: &S) -> &i32 {\n    &s.b\n}\nfn main() {\n    let s = S { a: 1, b: 2 };\n    let r = get(&S { a: 3, ..s });\n    println!(\"{}\", r);\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 10 && d[0].1.contains("E0716"), "{d:?}");
+    let d = check("fn gimme(x: &(u32,)) -> &u32 {\n    &x.0\n}\nfn main() {\n    let v = 22;\n    let x = gimme(&(v,));\n    println!(\"{:?}\", x);\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 6 && d[0].1.contains("E0716"), "{d:?}");
+    assert_eq!(check("fn gimme(x: &(u32,)) -> &u32 {\n    &x.0\n}\nfn main() {\n    let v = 22;\n    let a = gimme(&(1,));\n    let r = &(v,);\n    let b = gimme(r);\n    println!(\"{} {} {}\", a, b, gimme(&(v,)));\n}\n"), vec![]);
+}

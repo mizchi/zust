@@ -1012,7 +1012,7 @@ impl Cx<'_> {
         let args: Vec<&Expr> = margs.iter().collect();
         // (a `&mut self` method of a value that holds references stores what its arguments borrow:
         // `v.push(&mut x)`)
-        let into_recv = self.bk_on() && !via_deref && matches!(recv_ty, Ty::Ref(true, _)) && borrowck::has_refs(self.prog, st, 0);
+        let into_recv = self.bk_on() && !via_deref && matches!(recv_ty, Ty::Ref(true, _)) && self.bk_ty(st).1;
         if into_recv {
             self.bk_frame();
         }
@@ -1900,6 +1900,9 @@ impl Cx<'_> {
         }
         for (i, (a, &pt)) in args.iter().zip(&sig0.params[skip..]).enumerate() {
             let mut exp = Some(self.prog.partial_subst(pt, &sol)).filter(|&t| !self.prog.has_param(t));
+            // (an argument for a type parameter not known yet (`fn g<T>(x: T)`): no coercion site, so a `&mut` local
+            // passed is moved, not reborrowed (E0382 when it is used after))
+            let to_param = exp.is_none() && matches!(pt, Ty::Param(_));
             // (an integer literal for `T: Foo`: the one integer type that implements every bound, as rustc picks it)
             if exp.is_none() {
                 if let (Ty::Param(g), true) = (pt, is_int_lit(a)) {
@@ -2031,6 +2034,21 @@ impl Cx<'_> {
             let r = self.expr(a, exp);
             if matches!(pt, Ty::Ref(true, _)) {
                 self.bk_reborrow_arg(a);
+            }
+            // (`take(m::BAR)`: a static moved out by its module's path, E0507; by its name alone, the read of the
+            // place checks it. A path is no place expression, so it is read as a value elsewhere too (a method's
+            // receiver `m::KEY.with(..)`): only an argument passed by value is surely moved)
+            if self.bk_on() && matches!(strip_paren(a), Expr::Path(None, p) if p.segs.len() >= 2) && self.static_of(strip_paren(a)).is_some() {
+                if let Ok(t) = r.as_ref().map(|x| x.1) {
+                    if !self.bk_ty(t).0 {
+                        self.drop_move_check(a)?;
+                    }
+                }
+            }
+            if to_param && self.bk_on() && matches!(strip_paren(a), Expr::Path(..) | Expr::Field(..)) && matches!(r.as_ref().map(|x| x.1), Ok(Ty::Ref(true, _))) {
+                // (`consume(d.r)` with d's type implementing `Drop`: E0509, as for any field moved out of it)
+                self.drop_move_check(a)?;
+                self.bk_acc(a, borrowck::Acc::Move);
             }
             if top_ref {
                 // (the loan of an argument `&x` / `&mut x` lasts until the call: `f(&mut x, &x)` conflicts)

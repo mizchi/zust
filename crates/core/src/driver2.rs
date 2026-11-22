@@ -2541,6 +2541,8 @@ fn inline_bodies(a: &Analysis) -> acg::Inline {
         crate::prelude::DROP_GLUE, "__exr_hash", "__exr_cmp", "__exr_eq", "__exr_clone", "__exr_default", "__exr_display", "__exr_debug",
         "__exr_rt_init", "__exr_on_trap", "Option::unwrap", "Option::expect", "Result::unwrap", "Result::expect", "Result::unwrap_err", "Result::expect_err",
     ];
+    // (read once: getenv scans the whole environment)
+    let (no_inline_closure, inline_log) = (std::env::var_os("ZUSTC_NO_INLINE_CLOSURE").is_some(), std::env::var_os("ZUSTC_INLINE_LOG").is_some());
     for id in 0..p.names.len() {
         let Some(ii) = p.item_of[id] else { continue };
         // (依存するクレートの関数は展開しない: 本体はインターフェースのハッシュに入らないので、変わっても気付けない)
@@ -2549,12 +2551,12 @@ fn inline_bodies(a: &Analysis) -> acg::Inline {
         }
         // (クロージャの本体: 大きさは本体の構文木で見る (アイテムは囲む関数のもの))
         if p.closures.contains_key(&(id as u32)) {
-            if std::env::var_os("ZUSTC_NO_INLINE_CLOSURE").is_some() {
+            if no_inline_closure {
                 continue;
             }
             if let Ok(f) = fn_ast(a, id as u32) {
                 let ok = acg::inline_candidate(&f) && format!("{:?}", f.block).len() <= 2400;
-                if std::env::var_os("ZUSTC_INLINE_LOG").is_some() {
+                if inline_log {
                     eprintln!("inline {} closure {}", if ok { "yes" } else { "no " }, p.names[id]);
                 }
                 if ok {
@@ -2581,7 +2583,7 @@ fn inline_bodies(a: &Analysis) -> acg::Inline {
         }
         if let Ok(f) = fn_ast(a, id as u32) {
             let ok = acg::inline_candidate(&f);
-            if std::env::var_os("ZUSTC_INLINE_LOG").is_some() {
+            if inline_log {
                 eprintln!("inline {} {ntok} {}", if ok { "yes" } else { "no " }, p.names[id]);
             }
             if ok {

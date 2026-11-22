@@ -310,6 +310,7 @@ impl Cx<'_> {
             Some(_) => return err(SP, "format argument must be a string literal"),
             None => return err(span, format!("`{name}!` needs a format string")),
         };
+        let fmt_arg = args.first().copied();
         let rest: Vec<&Expr> = args.into_iter().skip(1).collect();
         // 位置引数と `name = expr`
         let mut pos: Vec<&Expr> = vec![];
@@ -332,9 +333,17 @@ impl Cx<'_> {
         if newline {
             pieces.push(FmtPiece::Lit("\n".into()));
         }
-        // 書式文字列の `{x}` (引数にない名前) はその名前の変数
+        // 書式文字列の `{x}` (引数にない名前) はその名前の変数。位置は書式文字列のもの (rustc は `{x}` で報告する)
+        let lit_pos = match fmt_arg {
+            Some(Expr::Lit(_, p)) => *p,
+            _ => SP,
+        };
         for n in &names[named.len()..] {
-            named_e.push(self.keep_expr(path_expr(n)));
+            let mut pe = path_expr(n);
+            if let Expr::Path(_, p) = &mut pe {
+                p.pos = lit_pos;
+            }
+            named_e.push(self.keep_expr(pe));
         }
         let all: Vec<&Expr> = pos.into_iter().chain(named_e).collect();
         // 書き込み先の Formatter
