@@ -119,6 +119,17 @@ fn self_of(name: &str, generics: &[String]) -> TySyn {
     }
 }
 
+/// A discriminant that is an integer literal, negated or in parentheses / a block (`3`, `-1`, `{ 3 }`)
+fn lit_discr(e: &Expr) -> bool {
+    match e {
+        Expr::Lit(t, _) => t.starts_with(|c: char| c.is_ascii_digit()),
+        Expr::Unary(op, x, _) if op == "-" => lit_discr(x),
+        Expr::Paren(x) => lit_discr(x),
+        Expr::Block(_, _, b) if b.stmts.len() == 1 => matches!(&b.stmts[0], crate::parse::Stmt::Expr(x, false) if lit_discr(x)),
+        _ => false,
+    }
+}
+
 pub fn const_int(e: &Expr) -> R<i64> {
     match e {
         Expr::Lit(t, _) if t.starts_with(|c: char| c.is_ascii_digit()) => {
@@ -2397,7 +2408,9 @@ pub fn summarize(item: &Item, owner: Option<&Owner>) -> R<Summary> {
                 let mut discr_src = String::new();
                 let discr = match d {
                     None => None,
-                    Some(e) => match const_int(e) {
+                    // (a literal here; an expression with an operator or a cast is Program's typed evaluator's:
+                    // `A = (300u32 as u8) as u16` is 44, which an untyped fold would read as 300)
+                    Some(e) => match if lit_discr(e) { const_int(e) } else { err("not a literal") } {
                         Ok(v) => Some(v),
                         // (`Bar = QUUX` / `Y = Foo::X as isize - 3`: Program evaluates it with the constants)
                         Err(er) => {

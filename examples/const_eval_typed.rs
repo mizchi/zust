@@ -113,6 +113,7 @@ fn main() {
     println!("{}", std::mem::size_of::<PL>());
     println!("{} {} {}", FLIP2, WIDE, std::mem::size_of::<[u8; ADD_U16]>());
     println!("{}", DIV_LATE);
+    println!("{} {}", E2::A as u16, E2::B as u16);
 }
 
 // (a generic alias resolves before layout; an unsafe block evaluates; the i128::MIN literal negates)
@@ -160,3 +161,10 @@ const DIV_LATE: u8 = {
     let x = 1 / ((!0 >> 7) + 1);
     x
 };
+// (a discriminant with a cast is evaluated typed)
+#[repr(u16)]
+#[derive(Clone, Copy)]
+enum E2 {
+    A = (300u32 as u8) as u16,
+    B = 1 << 3,
+}
