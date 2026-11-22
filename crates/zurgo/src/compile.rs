@@ -395,9 +395,12 @@ fn ws_text_in(crates: &[CrateSpec], redact: bool) -> String {
 }
 
 pub fn build(g: &Graph, o: &BuildOpts) -> R<Built> {
-    let crates = plan(g, o)?;
     let out = out_dir(g, o);
     std::fs::create_dir_all(&out).map_err(|e| format!("{}: {e}", out.display()))?;
+    // (one zurgo build at a time in a target directory, as cargo locks its build directory: the OUT_DIR a build script
+    //  filled stays the one this build's crates read)
+    let _lock = build_script::lock_file(&out.join(".zurgo-lock"))?;
+    let crates = plan(g, o)?;
     if o.verbose {
         let ws = ws_text(&crates);
         let p = out.join("zurgo-ws.txt");

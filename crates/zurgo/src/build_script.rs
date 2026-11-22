@@ -596,8 +596,12 @@ fn var_value(v: Option<&std::ffi::OsStr>) -> String {
 
 /// An exclusive lock on a build directory (released when the file is dropped)
 fn lock_dir(dir: &Path) -> R<std::fs::File> {
-    let p = dir.join("lock");
-    let f = std::fs::OpenOptions::new().create(true).truncate(false).write(true).open(&p).map_err(|e| format!("{}: {e}", p.display()))?;
+    lock_file(&dir.join("lock"))
+}
+
+/// An exclusive lock on the file p, made if missing (released when the file is dropped)
+pub(crate) fn lock_file(p: &Path) -> R<std::fs::File> {
+    let f = std::fs::OpenOptions::new().create(true).truncate(false).write(true).open(p).map_err(|e| format!("{}: {e}", p.display()))?;
     f.lock().map_err(|e| format!("{}: {e}", p.display()))?;
     Ok(f)
 }

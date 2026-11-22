@@ -122,8 +122,8 @@ A package's `build.rs` runs before its crates are built, as under cargo:
     so), when a directory could not be read, or when a file it names does not exist (cargo runs such a script every
     time).
   - The old result is removed before a script runs again, so a run that fails leaves nothing to reuse.
-  - Two zurgo processes that share a target directory take turns on a script: its directory is locked while the
-    script is built, run and its result kept.
+  - Two zurgo processes that share a target directory take turns, as cargo does: a build holds a lock on it from
+    its first build script to its last compiled crate, so the `OUT_DIR` a script filled is the one its crates read.
 - **rustc's builds** of the host libraries and scripts are kept while the rustc (`rustc -vV`), the sources, the
   dependencies' artifacts and the files their build scripts wrote to `OUT_DIR` are the same.
 
