@@ -2152,6 +2152,7 @@ build-pass	drop/static-variable-with-drop-trait-9243.rs
 run-pass	drop/struct-field-drop-order.rs
 check-pass	drop/tail_expr_drop_order-on-recursive-boxed-fut.rs
 run-pass	dropck/cleanup-arm-conditional.rs
+run-pass	dropck/compound-type-of-raw-pointers.rs
 check-pass	dropck/constrained_by_assoc_type_equality.rs
 compile-fail	dropck/drop-on-non-struct.rs
 compile-fail	dropck/drop-with-active-borrows-1.rs
@@ -2996,6 +2997,7 @@ run-pass	impl-header-lifetime-elision/path-underscore.rs
 run-pass	impl-header-lifetime-elision/ref-underscore.rs
 run-pass	impl-header-lifetime-elision/trait-underscore.rs
 run-pass	impl-trait/basic-trait-impl.rs
+check-pass	impl-trait/bivariant-lifetime-liveness.rs
 run-pass	impl-trait/bounds_regression.rs
 compile-fail	impl-trait/captured-invalid-lifetime.rs
 check-pass	impl-trait/closure-calling-parent-fn.rs
@@ -7022,6 +7024,7 @@ compile-fail	traits/ignore-err-impls.rs
 compile-fail	traits/impl-1.rs
 run-pass	traits/impl-2.rs
 compile-fail	traits/impl-can-not-have-untraitful-items.rs
+check-pass	traits/impl-evaluation-order.rs
 compile-fail	traits/impl-for-module.rs
 run-pass	traits/impl-implicit-trait.rs
 run-pass	traits/impl-inherent-prefer-over-trait.rs
@@ -7630,6 +7633,7 @@ run-pass	unsized/enum-struct-optimization.rs
 build-pass	unsized/issue-23649-3.rs
 compile-fail	unsized/issue-75707.rs
 compile-fail	unsized/issue-91803.rs
+check-pass	unsized/maybe-bounds-where-cpass.rs
 compile-fail	unsized/param-mentioned-by-different-field.rs
 compile-fail	unsized/relaxed-bounds-invalid-places.rs
 compile-fail	unsized/thin-ptr-to-unsized-projection.rs
