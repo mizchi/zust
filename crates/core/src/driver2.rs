@@ -2892,13 +2892,16 @@ impl Session2 {
         }
         tm.lap("check", format!("{n_memo} from the last check, {n_keys} keys, {n_hit} cached, {n_checked} checked"));
         let mut d: Vec<Diagnostic> = errs.iter().map(|e| Diagnostic::parse(e)).collect();
-        // (an item moved out of a fn body (`fn main() { fn helper() { .. } }`) is past the source's last line: its
-        // errors are at the lines it was moved from)
-        if d.iter().any(|x| x.line > user_lines) {
+        // (an item moved out of a fn body (`fn main() { fn helper() { .. } }`) is past the source's last line: its borrow
+        // and region checks' errors are at the lines it was moved from. Not its other errors: typeck does not know all
+        // such an item may name where it was (`Self` of the impl around it), so they are left out as before)
+        if d.iter().any(|x| x.line > user_lines && acg::borrow_check_error(&x.msg)) {
             if let Some(moved) = self.moved_lines(src) {
                 for x in &mut d {
-                    if let Some(l) = moved_line(&moved, user_lines, x.line) {
-                        x.line = l;
+                    if x.line > user_lines && acg::borrow_check_error(&x.msg) {
+                        if let Some(l) = moved_line(&moved, user_lines, x.line) {
+                            x.line = l;
+                        }
                     }
                 }
             }
