@@ -278,3 +278,4 @@ date	commit	change	noop_M	edit_M	check_M	cache_KiB	lsp_G	run	check	build	cfail	t
 2026-11-22	0d6bba4+	Review of #52 (3): Clone and Copy only through arguments of containers, raw strings, probes' names	0.695	549.779	3750.836	1902.8	-	1813	1495	102	4278	1179.916	64.135	10.452	320.176	718.230	266.322
 2026-11-22	db53692	Review of #52 (4): literals in the constants' scans, the repr attribute, Self::C repeats, &mut not Clone	0.693	549.734	3750.895	1902.8	-	1813	1495	102	4278	1179.899	64.132	10.439	320.104	718.424	266.291
 2026-11-22	13c69c4+	&T to *const T in inference, for over a Result constructor, deny(deprecated) for std::intrinsics	0.697	549.793	3752.043	1902.8	-	1814	1498	102	4309	1180.997	64.232	10.466	320.562	719.017	266.806
+2026-11-22	b61f543	Review of #55: supertraits and equations of uncalled fns' bounds, fn pointers' dyn, item allow(deprecated)	0.693	549.801	3752.007	1902.8	-	1814	1498	102	4309	1180.975	64.229	10.438	320.449	718.972	266.772
