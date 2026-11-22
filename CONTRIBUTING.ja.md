@@ -321,11 +321,13 @@ python3 bench/ci_bench.py --out-dir out/ci
 
 - `scripts/docs_manifest.py` は、組から jev-lint のマニフェスト (`.jev-lint/documents*.json`) を書く。`--check` は、
   相手のないファイルがあるか、マニフェストが古ければ失敗する。
-- `scripts/docs_check.sh` は、記録した判定 (`.jev-lint/*-baseline.json`) を今の文書で読み直す。オフラインで、API キーは
-  要らない (CI が走らせる)。組が食い違っていれば失敗する。判定を記録した後に文書が変わったマニフェストは API キーが
-  なければ判定し直せないので、`TYPESAFE_API_KEY` がないときは警告を出して飛ばす (`DOCS_CHECK_STRICT=1` なら飛ばさず
-  失敗にする。終了コード 3)。組がそろっているかとマニフェストが最新かは、どちらでも確かめる。
-- `scripts/docs_check.sh --update` は、文書が変わったマニフェストだけをモデルに判定させ直し、記録を書き直す。
+- `scripts/docs_check.sh` は、今の文書についての記録した判定を台帳 (`.jev-lint/judgments/`) から読む。台帳は jev-lint の
+  judgment ledger で、追記だけのファイルからなり、ブランチ同士はその和集合としてマージできる。答えは比べる本文・問い・
+  モデルで引く。オフラインで、API キーは要らない (CI が走らせる)。組が食い違っていれば失敗する。判定を記録した後に
+  文書が変わった組は台帳に答えがなく、API キーがなければ判定できないので、`TYPESAFE_API_KEY` がないときはその
+  マニフェストを警告を出して飛ばす (`DOCS_CHECK_STRICT=1` なら飛ばさず失敗にする。終了コード 3)。組がそろっているかと
+  マニフェストが最新かは、どちらでも確かめる。
+- `scripts/docs_check.sh --update` は、台帳に答えのない組だけをモデルに判定させ、答えを台帳に足す。
   https://typesafe.ai の `TYPESAFE_API_KEY` (か `TYPESAFEAI_API_KEY`) が要る。文書の本文はその API に送られる。64 組を
   全部判定して約 $0.03。
 
@@ -335,7 +337,7 @@ python3 bench/ci_bench.py --out-dir out/ci
 git config core.hooksPath .githooks
 ```
 
-Markdown を変えたコミットでは、フックが `scripts/docs_check.sh --update` を走らせ、書き直した記録をコミットに足し、組が
+Markdown を変えたコミットでは、フックが `scripts/docs_check.sh --update` を走らせ、新しい答えをコミットに足し、組が
 食い違っていればコミットを止める。判定はモデルの判断なので、出た組を読んで間違っている側を直す (判定の方が間違っていれば
 `--no-verify` でコミットする)。
 
