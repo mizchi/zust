@@ -2924,7 +2924,8 @@ fn placeholder_wave(a: &Analysis, insts: &Mutex<Insts>) -> Vec<u32> {
         let ii = p.item_of[id].unwrap_or(0) as usize;
         let body = a.items.get(ii).and_then(|it| a.src.get(it.start..it.end)).unwrap_or("");
         let calls_bound = sig.generics.iter().flat_map(|(_, bs)| bs.iter()).any(|b| {
-            if matches!(b.as_str(), "Copy" | "Sized" | "?Sized" | "Send" | "Sync" | "Unpin") {
+            // (`Fn(..)` / `FnMut(..)` / `FnOnce(..)`: a call of the parameter is checked against the bound itself)
+            if matches!(b.as_str(), "Copy" | "Sized" | "?Sized" | "Send" | "Sync" | "Unpin") || crate::ast_summary::parse_fn_bound(b).is_some() {
                 return false;
             }
             let tr = b.split('<').next().unwrap_or(b).trim();

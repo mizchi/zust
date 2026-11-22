@@ -440,6 +440,9 @@ pub struct Summary {
     pub assoc_bounds: Vec<(String, String, Vec<String>)>,
     /// `type Key = u128;` / `type R<T> = Result<T, E>;` の (名前, 型パラメータ, 中身)
     pub aliases: Vec<(String, Vec<String>, TySyn)>,
+    /// The aliases whose definitions name a lifetime that is not their own (`type S = &'static u8;`): TySyn keeps no
+    /// lifetimes, so a use of one written without lifetimes cannot be told from an elided one
+    pub alias_fixed_lts: Vec<String>,
     /// The concrete (non-parameter, non-primitive) types bounded in the item's where clauses (`where Local: Any`):
     /// Program checks that they exist
     pub where_types: Vec<String>,

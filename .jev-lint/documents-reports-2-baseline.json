@@ -1,6 +1,6 @@
 {
   "schema": "jev-lint-documents-1",
-  "snapshotDigest": "3c0f7f5f423c2f6b818bee0fe541891bec2b315a5641c1fe0ced478708ef2fc7",
+  "snapshotDigest": "38737b1ece2dc48dc8255104d4d72f8e1610ad46df15d8b7777529aef80af517",
   "questionDigest": "209d6df378ccb747fcb0e821998fcd6105bc76638a88d22488d3b398d6a21595",
   "model": "jev-1.14.0",
   "snapshotChanged": false,
@@ -100,12 +100,12 @@
       "contextHash": "a068452334ef52150a1932e9d45207a4c156e3a5c60d69e061e986b1aa86d889",
       "judgment": {
         "choice": "supports",
-        "confidence": 0.96,
+        "confidence": 0.97,
         "probabilities": {
-          "supports": 0.97,
+          "supports": 0.98,
           "contradicts": 0.02,
           "unrelated": 0,
-          "insufficient_context": 0.01
+          "insufficient_context": 0
         }
       }
     },
@@ -168,12 +168,12 @@
       "contextHash": "ecee8f597e8c6093bcea35ffd84dafe505685fb3c77901bd2a2a9e033883360c",
       "judgment": {
         "choice": "supports",
-        "confidence": 0.97,
+        "confidence": 0.99,
         "probabilities": {
-          "supports": 0.98,
+          "supports": 0.99,
           "contradicts": 0.01,
           "unrelated": 0,
-          "insufficient_context": 0.01
+          "insufficient_context": 0
         }
       }
     },
@@ -202,10 +202,10 @@
       "contextHash": "5b6ede2d00ec82893b1c63b36b593d1e9e7999236c2422416b8324666f265c93",
       "judgment": {
         "choice": "supports",
-        "confidence": 0.96,
+        "confidence": 0.93,
         "probabilities": {
-          "supports": 0.97,
-          "contradicts": 0.03,
+          "supports": 0.95,
+          "contradicts": 0.05,
           "unrelated": 0,
           "insufficient_context": 0
         }
@@ -236,10 +236,10 @@
       "contextHash": "68facf70966b576a1dde106a31fd37de8e21bda46e6439878b91e7bce57154b6",
       "judgment": {
         "choice": "supports",
-        "confidence": 0.95,
+        "confidence": 0.97,
         "probabilities": {
-          "supports": 0.96,
-          "contradicts": 0.04,
+          "supports": 0.98,
+          "contradicts": 0.02,
           "unrelated": 0,
           "insufficient_context": 0
         }
@@ -270,10 +270,10 @@
       "contextHash": "ed2a1f14d0739ff354f0f733b191758f1f701bf8d97c6ff2fb9d9d6c3960f277",
       "judgment": {
         "choice": "supports",
-        "confidence": 0.97,
+        "confidence": 0.99,
         "probabilities": {
-          "supports": 0.98,
-          "contradicts": 0.02,
+          "supports": 0.99,
+          "contradicts": 0.01,
           "unrelated": 0,
           "insufficient_context": 0
         }
@@ -304,10 +304,10 @@
       "contextHash": "41c0a2541784f0e073e300bd96b1ad35979d31a7048a9c86dc0c9821eba76c55",
       "judgment": {
         "choice": "supports",
-        "confidence": 1,
+        "confidence": 0.99,
         "probabilities": {
-          "supports": 1,
-          "contradicts": 0,
+          "supports": 0.99,
+          "contradicts": 0.01,
           "unrelated": 0,
           "insufficient_context": 0
         }
@@ -644,10 +644,10 @@
       "contextHash": "1275e8de4d291bc21dd7f5b87a5196cba9cca33005a1ac6eca77fa3d0892971e",
       "judgment": {
         "choice": "supports",
-        "confidence": 0.99,
+        "confidence": 0.97,
         "probabilities": {
-          "supports": 0.99,
-          "contradicts": 0.01,
+          "supports": 0.98,
+          "contradicts": 0.02,
           "unrelated": 0,
           "insufficient_context": 0
         }
@@ -746,10 +746,10 @@
       "contextHash": "74cd923d61e00b7739f80b534b652a909070bb949bfb007a464579050da1d263",
       "judgment": {
         "choice": "supports",
-        "confidence": 0.96,
+        "confidence": 0.97,
         "probabilities": {
-          "supports": 0.97,
-          "contradicts": 0.02,
+          "supports": 0.98,
+          "contradicts": 0.01,
           "unrelated": 0,
           "insufficient_context": 0.01
         }
@@ -780,10 +780,10 @@
       "contextHash": "54b56e94027819b91287b9766c4872faa76c4344146540b341b4389c6b8dd7ce",
       "judgment": {
         "choice": "supports",
-        "confidence": 0.89,
+        "confidence": 0.92,
         "probabilities": {
-          "supports": 0.92,
-          "contradicts": 0.07,
+          "supports": 0.94,
+          "contradicts": 0.05,
           "unrelated": 0,
           "insufficient_context": 0.01
         }
@@ -814,10 +814,10 @@
       "contextHash": "7438e0bb6ac3c01bf6beaa56051a35abf5a2f30ee56334c8cd754b996d6bd4e6",
       "judgment": {
         "choice": "supports",
-        "confidence": 0.88,
+        "confidence": 0.87,
         "probabilities": {
-          "supports": 0.91,
-          "contradicts": 0.08,
+          "supports": 0.9,
+          "contradicts": 0.09,
           "unrelated": 0,
           "insufficient_context": 0.01
         }
@@ -950,10 +950,10 @@
       "contextHash": "4df342055803f33b6195c27c167f6f86d7071a5337af51009058f12b67f5035e",
       "judgment": {
         "choice": "supports",
-        "confidence": 0.97,
+        "confidence": 0.99,
         "probabilities": {
-          "supports": 0.98,
-          "contradicts": 0.02,
+          "supports": 0.99,
+          "contradicts": 0.01,
           "unrelated": 0,
           "insufficient_context": 0
         }
@@ -984,10 +984,10 @@
       "contextHash": "262bb5dcd097b8cb7be1fb2545acff1e36bb67eb6c6b7603871f70e0250fd627",
       "judgment": {
         "choice": "supports",
-        "confidence": 0.55,
+        "confidence": 0.69,
         "probabilities": {
-          "supports": 0.66,
-          "contradicts": 0.32,
+          "supports": 0.77,
+          "contradicts": 0.21,
           "unrelated": 0,
           "insufficient_context": 0.02
         }
@@ -1018,10 +1018,10 @@
       "contextHash": "0b80accfa94c5b38ba9a5a907f337dfaa274c72bc632be2ff55655cef05112aa",
       "judgment": {
         "choice": "supports",
-        "confidence": 0.52,
+        "confidence": 0.69,
         "probabilities": {
-          "supports": 0.64,
-          "contradicts": 0.35,
+          "supports": 0.77,
+          "contradicts": 0.22,
           "unrelated": 0,
           "insufficient_context": 0.01
         }
@@ -1052,12 +1052,12 @@
       "contextHash": "bfaf4d56cd89f0d502d67729104d49b1f7a5d01e4a0434db45cecfa6c5d2c14a",
       "judgment": {
         "choice": "supports",
-        "confidence": 0.97,
+        "confidence": 0.93,
         "probabilities": {
-          "supports": 0.98,
-          "contradicts": 0.02,
+          "supports": 0.95,
+          "contradicts": 0.04,
           "unrelated": 0,
-          "insufficient_context": 0
+          "insufficient_context": 0.01
         }
       }
     },
@@ -1086,12 +1086,12 @@
       "contextHash": "3680d7821ceccb84e40c111efdbf9782ab670b502e1b1838ae62cb03ee844288",
       "judgment": {
         "choice": "supports",
-        "confidence": 0.96,
+        "confidence": 0.99,
         "probabilities": {
-          "supports": 0.97,
-          "contradicts": 0.02,
+          "supports": 0.99,
+          "contradicts": 0.01,
           "unrelated": 0,
-          "insufficient_context": 0.01
+          "insufficient_context": 0
         }
       }
     },
@@ -1120,10 +1120,10 @@
       "contextHash": "bdae948e735bbc239b594e195dd432f3efabbcd09895e48688e599b130a79530",
       "judgment": {
         "choice": "supports",
-        "confidence": 0.83,
+        "confidence": 0.84,
         "probabilities": {
-          "supports": 0.87,
-          "contradicts": 0.12,
+          "supports": 0.88,
+          "contradicts": 0.11,
           "unrelated": 0,
           "insufficient_context": 0.01
         }
@@ -1154,10 +1154,10 @@
       "contextHash": "56aef8202ec18e7d916f99df3c3f62b2bb9580fd1fbf151d494787ff37e24afd",
       "judgment": {
         "choice": "supports",
-        "confidence": 0.85,
+        "confidence": 0.83,
         "probabilities": {
-          "supports": 0.89,
-          "contradicts": 0.1,
+          "supports": 0.87,
+          "contradicts": 0.12,
           "unrelated": 0,
           "insufficient_context": 0.01
         }
@@ -1222,10 +1222,10 @@
       "contextHash": "f0d2be59aa7f66b5393e14f52bebb261bbc73ff0e17d8864466d2fbbacc92e53",
       "judgment": {
         "choice": "supports",
-        "confidence": 0.91,
+        "confidence": 0.92,
         "probabilities": {
-          "supports": 0.93,
-          "contradicts": 0.06,
+          "supports": 0.94,
+          "contradicts": 0.05,
           "unrelated": 0,
           "insufficient_context": 0.01
         }
@@ -1256,6 +1256,40 @@
       "contextHash": "e6ee8a7c0ecfcc1d24cf3e3a49387253a59f79cbb14f5dfe17684e41f47ac559",
       "judgment": {
         "choice": "supports",
+        "confidence": 0.92,
+        "probabilities": {
+          "supports": 0.94,
+          "contradicts": 0.05,
+          "unrelated": 0,
+          "insufficient_context": 0.01
+        }
+      }
+    },
+    {
+      "id": "docs_reports_2026-11-22-03-region-check-7",
+      "topic": "The Japanese file docs/ja/reports/2026-11-22-03-region-check-7.md is a faithful translation of docs/reports/2026-11-22-03-region-check-7.md",
+      "mode": "translation",
+      "reference": {
+        "source": "docs_reports_2026-11-22-03-region-check-7.en",
+        "path": "docs/reports/2026-11-22-03-region-check-7.md",
+        "startLine": 1,
+        "endLine": 108,
+        "quote": "# Region (lifetime) checking, part 7: control flow, temporaries and what prelude methods return (issue #1)\n\nDate: 2026-11-22\n\nPart 6 ([2026-11-22-02](2026-11-22-02-region-check-6.md)) was merged with #43. This step takes the cases its report\nleft out where the borrow check's graph, temporaries and the prelude's results were not followed.\n\n## 1. What was added\n\n### Borrow check\n\n- **Constant conditions:** the borrow check's graph takes both edges of a constant condition, as rustc's does:\n  `false || { i = 5; true }` may leave i uninitialized (E0381). Before, a constant condition took one edge.\n- **Chains of `&&` / `||`:** `a && b && c` (one operator) is lowered as one chain, each operand's short-circuit to the\n  end, so c runs only after b did: `true && { z = 3; true } && z == 3` reads z after it is set, as rustc's control flow\n  says.\n- **`&*Box::new(1)`:** a borrow of the deref of a temporary a call makes is a loan of that temporary, as `&f()` is:\n  stored where it outlives the statement (`m.insert(42, &*Box::new(1))`) it is E0716. A `let` extends it.\n- **Receiver temporaries:** in `let x = mk().get();` with `fn get(&self) -> &A`, the receiver is a temporary freed at\n  the end of the statement: a use of x after it is E0716. Not when the method's result does not borrow self\n  (`mk().len()`, a result `&'static str`).\n- **What a prelude method returns:** a method of the prelude's types whose result holds references holds what its\n  receiver holds (the prelude writes no lifetimes). Returning `it.next()` of a local's iterator, or\n  `raw.iter().map(..).collect()`, is E0515. `copied` / `cloned` take a reference off: the result holds what is under it,\n  not the borrow (`parts.first().copied()` holds what parts holds).\n  - A returned chain of method calls is reported where it starts, as rustc's span of the returned value is.\n- **Move closures and captures not `mut`:** a capture held by value of a local not declared `mut`, which the body\n  assigns (or borrows mutably, or calls a `&mut self` method of), is E0594 / E0596 at the mutation. Not a mutation\n  through a reference the capture holds (`t.0.0 = x` with `t.0: &mut S`).\n\n- **Calls of a type parameter's closure:** a placeholder bounded by `Fn(..)` / `FnMut(..)` / `FnOnce(..)` is callable\n  in its instance, against the bound: its arguments checked against the bound's parameters, its result a value of the\n  bound's result type. `FnMut` borrows the callee mutably (E0596 when it is not `mut`), `FnOnce` takes it (E0382 when it\n  is called twice), `Fn` reads it. Such bounds no longer keep a fn from its placeholder instance.\n\n### Region check and signatures\n\n- **Type aliases written without their lifetimes:** `b: A` with `type A<'a> = &'a isize` is one marker for what the\n  alias stands for; its regions are elided (fresh ones in a parameter), as `&isize`'s. Before, such a parameter had no\n  tree and was not followed.\n- **E0195 for impls of types that are not structs:** the methods of `impl<'a> Foo<'a> for &'a isize` are checked\n  against the trait's declarations as a struct's are: the method's own early-bound lifetimes and their bounds.\n\n### After the review\n\n- **E0195 and E0276 as rustc tells them apart:** E0195 when the method has a different number of early-bound\n  lifetimes than the trait's declaration, or one that is early-bound where the declaration's is late-bound\n  (`fn f<'a, 'b: 'static>` against `fn f<'a: 'static, 'b>`). With the same ones, E0276 when a bound of the impl's\n  among them is not implied by the declaration's (`fn f<'a, 'b: 'a>` against `fn f<'a: 'b, 'b>`). An impl that\n  bounds less is accepted. Before, the number of bounds of each was compared, which rejected an impl that bounds less.\n  The impl's and the trait's own lifetimes are matched by name (the header's trait arguments are not kept).\n- **A method named `__ref_m` itself** is compared with the declaration of that name first.\n- **An alias that fixes a lifetime** (`type S = &'static u8;`): which alias a use written without lifetimes is cannot\n  be told, so in a program with such an alias it is not followed, as before.\n- **`map` with a closure that does not use its item** (`raw.iter().map(|_| \"ok\").collect()`) does not hold what the\n  receiver holds.\n- **A binding of the same name in a `move` closure** (`let mut x = x;`) shadows the capture: assigning it is not E0594.\n- **A receiver a call returns as a reference** (`id(&a).get()`) is not a temporary that frees what it points to.\n- **`FnMut` through a reference** (`f: &F`): a `&mut` of `*f` (E0596). The bound's arity and the primitive types of\n  its arguments are checked; in a placeholder's instance such a type error only stops its check, as the others do.\n- **A diverging operand in the middle of a `&&` / `||` chain** (`a && { return true; } && false`) ends at the chain's\n  end with the earlier operands' value. Before, the lowering left that end unfinished, and Cranelift panicked.\n\n## 2. Coverage\n\n(tests/ui compile-fail, rust-lang/rust 1.100.0)\n\n| | main (ba26be2) | this work | main (5977b27), merged in | this work on it |\n|---|---:|---:|---:|---:|\n| compile-fail passing (accidental ones not counted) | 4097 | 4113 (+16) | 4125 | 4141 (+16) |\n\n- No test that passed before fails now; run-pass and check-pass do not change.\n- The new ones: `borrowck/borrowck-or-init.rs`, `borrowck/issue-83760.rs`, `liveness/liveness-move-in-while.rs`,\n  `borrowck/regions-bound-missing-bound-in-impl.rs`, `compare-method/region-extra-2.rs`,\n  `generics/generic-lifetime-trait-impl.rs`, `dropck/drop-with-active-borrows-2.rs`,\n  `iterators/iterator-scope-collect-suggestion-81584.rs`, `lifetimes/return-reference-local-variable-13497.rs`,\n  `nll/issue-46023.rs`, `borrowck/borrowck-unboxed-closures.rs`, `borrowck/unconstrained-closure-lifetime-generic.rs`,\n  `closures/closure-bounds-subtype.rs`, `associated-types/associated-types-outlives.rs`,\n  `regions/regions-creating-enums.rs`, `borrowck/borrowck-borrowed-uniq-rvalue.rs`.\n- `zustc check` of the 1802 run-pass tests that pass (built, not checked, by tests/ui): none is rejected that main\n  accepts.\n\n## 3. KPIs\n\n`bench/kpi_track.py --dry-run --lsp`, main (ba26be2) and this work, both measured here, one after the other:\n\n| KPI | main (ba26be2) | this work (db7d16a) | change |\n|---|---:|---:|---:|\n| no-op build (M) | 0.706 | 0.706 | ±0 |\n| edit one fn (M) | 545.736 | 545.739 | ±0 |\n| check (M) | 3847.98 | 3847.61 | -0.01% |\n| cache (KiB) | 1902.8 | 1902.8 | ±0 |\n| LSP session (G) | 10.9072 | 10.9043 | -0.03% |\n| traits check (M) | 1189.52 | 1190.31 | +0.07% |\n| traits edit (M) | 61.515 | 61.495 | -0.03% |\n| crates no-op (M) | 9.94 | 9.94 | ±0 |\n| crates edit (M) | 315.914 | 316.278 | +0.12% |\n| patterns check (M) | 716.49 | 716.63 | +0.02% |\n| patterns edit (M) | 260.697 | 260.544 | -0.06% |\n\nNo KPI moves past run-to-run noise. The new work is the borrow check's: the chains of `&&` / `||`, the receiver\ntemporaries and the results of prelude methods, which follow what the check already holds.\n\n## 4. Not covered yet\n\n- **Tail expressions' temporaries:** a temporary of a block's tail expression lives to the end of the enclosing\n  statement, after the block's locals (before edition 2024). zustc has no notion of the edition yet.\n- **Projections of placeholders and `impl Trait` captures:** as in part 5.",
+        "contentHash": "f6d986daaab9b6e99cead4792393f7a5c1f909469a65583ed8c13778e0d86afc"
+      },
+      "target": {
+        "source": "docs_reports_2026-11-22-03-region-check-7.ja",
+        "path": "docs/ja/reports/2026-11-22-03-region-check-7.md",
+        "startLine": 1,
+        "endLine": 103,
+        "quote": "# リージョン (ライフタイム) 検査、その 7: 制御フロー、一時値、prelude のメソッドが返すもの (issue #1)\n\n日付: 2026-11-22\n\nその 6 ([2026-11-22-02](2026-11-22-02-region-check-6.md)) は #43 でマージした。この段は、借用検査のグラフ、一時値、prelude の\n結果を辿っていなかった場合を扱う。\n\n## 1. 加えたもの\n\n### 借用検査\n\n- **定数の条件:** 借用検査のグラフは、rustc と同じく、定数の条件でも両方の辺を取る。`false || { i = 5; true }` は i を\n  初期化しないことがある (E0381)。以前は、定数の条件では片方の辺だけを取っていた。\n- **`&&` / `||` の連鎖:** `a && b && c` (演算子が 1 つ) は 1 つの連鎖として下ろす。各項の短絡は終わりへ飛ぶので、c は b の\n  後でだけ走る。rustc の制御フローのとおり、`true && { z = 3; true } && z == 3` は z を入れた後で読む。\n- **`&*Box::new(1)`:** 呼び出しが作る一時値の deref の借用は、`&f()` と同じく、その一時値の貸し出し。文より長く残る\n  ところにしまえば (`m.insert(42, &*Box::new(1))`) E0716。`let` はそれを延ばす。\n- **受け手の一時値:** `fn get(&self) -> &A` に対する `let x = mk().get();` では、受け手は文の終わりで解放される一時値。\n  その後で x を使えば E0716。メソッドの結果が self を借りないなら (`mk().len()`、結果が `&'static str`) そうしない。\n- **prelude のメソッドが返すもの:** prelude の型のメソッドで、結果が参照を持つものは、受け手が持つものを持つ (prelude は\n  ライフタイムを書かない)。ローカルのイテレータの `it.next()` や、`raw.iter().map(..).collect()` を返せば E0515。\n  `copied` / `cloned` は参照を 1 つ外す。結果が持つのは、その下にあるもので、借用そのものではない\n  (`parts.first().copied()` は parts が持つものを持つ)。\n  - メソッド呼び出しの連鎖を返すときは、rustc の返す値の範囲のとおり、連鎖の始まりで報告する。\n- **move クロージャと `mut` でない捕捉:** `mut` と宣言していないローカルを値で持つ捕捉に、本体が代入する (可変で借りる、\n  `&mut self` のメソッドを呼ぶ) なら、変更の位置で E0594 / E0596。捕捉が持つ参照を通した変更 (`t.0: &mut S` に対する\n  `t.0.0 = x`) はそうしない。\n\n- **型パラメータのクロージャの呼び出し:** `Fn(..)` / `FnMut(..)` / `FnOnce(..)` で縛った代わりの型は、そのインスタンスの中で、\n  境界に照らして呼べる。引数は境界の引数の型で検査し、結果は境界の結果の型の値。`FnMut` は呼ぶ先を可変で借り (`mut` で\n  なければ E0596)、`FnOnce` は取り (2 回呼べば E0382)、`Fn` は読む。そうした境界は、もう関数の代わりの型のインスタンスを\n  止めない。\n\n### リージョン検査とシグネチャ\n\n- **ライフタイムを書かない型エイリアス:** `type A<'a> = &'a isize` に対する `b: A` は、エイリアスが表すものの 1 つの印。\n  そのリージョンは、`&isize` と同じく省略したもの (引数なら新しいもの)。以前は、そうした引数は木を持たず、辿らなかった。\n- **struct でない型の impl の E0195:** `impl<'a> Foo<'a> for &'a isize` のメソッドも、struct のものと同じく、トレイトの\n  宣言と照らす。メソッド自身の early-bound なライフタイムと、その境界を見る。\n\n### レビューの後\n\n- **rustc と同じ E0195 と E0276 の分け方:** メソッドの early-bound なライフタイムが、トレイトの宣言と数が違うか、宣言で\n  late-bound のところで early-bound なら E0195 (`fn f<'a, 'b: 'static>` に対する `fn f<'a: 'static, 'b>`)。同じものなら、\n  impl のそれらの間の境界で、宣言の境界から導けないものがあれば E0276 (`fn f<'a: 'b, 'b>` に対する `fn f<'a, 'b: 'a>`)。\n  境界が少ない impl は受け入れる。以前は、それぞれの境界の数を比べていて、境界が少ない impl を拒否していた。impl と\n  トレイト自身のライフタイムは名前で対応させる (ヘッダのトレイトの引数は持っていない)。\n- **`__ref_m` という名前のメソッド**は、まず同じ名前の宣言と照らす。\n- **ライフタイムを固定するエイリアス** (`type S = &'static u8;`): ライフタイムを書かない使い方がどのエイリアスかは分から\n  ないので、そうしたエイリアスがあるプログラムでは、以前と同じく辿らない。\n- **要素を使わないクロージャの `map`** (`raw.iter().map(|_| \"ok\").collect()`) は、受け手が持つものを持たない。\n- **`move` クロージャの中の同じ名前の束縛** (`let mut x = x;`) は捕捉を隠す。それへの代入は E0594 でない。\n- **呼び出しが参照で返した受け手** (`id(&a).get()`) は、指す先を解放する一時値でない。\n- **参照を通した `FnMut`** (`f: &F`): `*f` の `&mut` (E0596)。境界の引数の数と、引数のプリミティブ型も照らす。代わりの\n  型のインスタンスでは、ほかの型エラーと同じく、そうしたエラーはその検査を止めるだけ。\n- **`&&` / `||` の連鎖の途中で発散する項** (`a && { return true; } && false`): 前の項の値で連鎖の終わりに着く。以前は\n  その終わりを閉じないまま下ろしていて、Cranelift が panic した。\n\n## 2. カバー率\n\n(tests/ui の compile-fail、rust-lang/rust 1.100.0)\n\n| | main (ba26be2) | この作業 | main (5977b27、マージした) | その上のこの作業 |\n|---|---:|---:|---:|---:|\n| 通る compile-fail (偶然の通過は数えない) | 4097 | 4113 (+16) | 4125 | 4141 (+16) |\n\n- 前に通っていたテストで、いま通らないものはない。run-pass と check-pass は変わらない。\n- 通るようになったもの: `borrowck/borrowck-or-init.rs`、`borrowck/issue-83760.rs`、`liveness/liveness-move-in-while.rs`、\n  `borrowck/regions-bound-missing-bound-in-impl.rs`、`compare-method/region-extra-2.rs`、\n  `generics/generic-lifetime-trait-impl.rs`、`dropck/drop-with-active-borrows-2.rs`、\n  `iterators/iterator-scope-collect-suggestion-81584.rs`、`lifetimes/return-reference-local-variable-13497.rs`、\n  `nll/issue-46023.rs`、`borrowck/borrowck-unboxed-closures.rs`、`borrowck/unconstrained-closure-lifetime-generic.rs`、\n  `closures/closure-bounds-subtype.rs`、`associated-types/associated-types-outlives.rs`、\n  `regions/regions-creating-enums.rs`、`borrowck/borrowck-borrowed-uniq-rvalue.rs`。\n- 通る run-pass のテスト 1802 本の `zustc check` (tests/ui はビルドで試し、検査では試さない): main が受け入れるもので、\n  拒否するものはない。\n\n## 3. KPI\n\n`bench/kpi_track.py --dry-run --lsp` で、main (ba26be2) とこの作業を、ここで続けて測った:\n\n| KPI | main (ba26be2) | この作業 (db7d16a) | 変化 |\n|---|---:|---:|---:|\n| no-op build (M) | 0.706 | 0.706 | ±0 |\n| edit one fn (M) | 545.736 | 545.739 | ±0 |\n| check (M) | 3847.98 | 3847.61 | -0.01% |\n| cache (KiB) | 1902.8 | 1902.8 | ±0 |\n| LSP session (G) | 10.9072 | 10.9043 | -0.03% |\n| traits check (M) | 1189.52 | 1190.31 | +0.07% |\n| traits edit (M) | 61.515 | 61.495 | -0.03% |\n| crates no-op (M) | 9.94 | 9.94 | ±0 |\n| crates edit (M) | 315.914 | 316.278 | +0.12% |\n| patterns check (M) | 716.49 | 716.63 | +0.02% |\n| patterns edit (M) | 260.697 | 260.544 | -0.06% |\n\nどの KPI も、実行ごとのぶれを越えて動かない。新しい仕事は借用検査のもの (`&&` / `||` の連鎖、受け手の一時値、\nprelude のメソッドの結果) で、検査がすでに持つものを辿る。\n\n## 4. まだ扱わないもの\n\n- **末尾の式の一時値:** ブロックの末尾の式の一時値は、ブロックのローカルより後、囲む文の終わりまで生きる (edition 2024\n  より前)。zustc はまだ edition を持たない。\n- **代わりの型の射影型と `impl Trait` の捕捉:** その 5 と同じ。",
+        "contentHash": "81eb56ce0b2dc3f55208b4457230559399decab891f69c6e5d843d9f92c90752"
+      },
+      "context": [],
+      "candidateId": "fc0b466b673e4486b83f1fa282a3dccff070b088f150ef621eb66336467e64bf",
+      "contextHash": "c5f11c2a5bb22360cce2d81aaeea5a50ddd0d694d43c8b59fe35e5f382753834",
+      "judgment": {
+        "choice": "supports",
         "confidence": 0.93,
         "probabilities": {
           "supports": 0.95,
@@ -1266,28 +1300,28 @@
       }
     },
     {
-      "id": "docs_reports_2026-11-22-03-zurgo-build-scripts",
-      "topic": "The Japanese file docs/ja/reports/2026-11-22-03-zurgo-build-scripts.md is a faithful translation of docs/reports/2026-11-22-03-zurgo-build-scripts.md",
+      "id": "docs_reports_2026-11-22-04-zurgo-build-scripts",
+      "topic": "The Japanese file docs/ja/reports/2026-11-22-04-zurgo-build-scripts.md is a faithful translation of docs/reports/2026-11-22-04-zurgo-build-scripts.md",
       "mode": "translation",
       "reference": {
-        "source": "docs_reports_2026-11-22-03-zurgo-build-scripts.en",
-        "path": "docs/reports/2026-11-22-03-zurgo-build-scripts.md",
+        "source": "docs_reports_2026-11-22-04-zurgo-build-scripts.en",
+        "path": "docs/reports/2026-11-22-04-zurgo-build-scripts.md",
         "startLine": 1,
         "endLine": 99,
         "quote": "# zurgo M1: build scripts, `env!`, and proc-macro stubs\n\nDate: 2026-11-22\n\nM0 built Cargo packages without running their build scripts, and stopped on any proc-macro dependency. This is the\nsecond milestone of mizchi/zust#28 and the start of step W0 of the wasm-bindgen roadmap (mizchi/zust#38). Usage:\n[zurgo.md](../zurgo.md).\n\n## 1. What changed\n\n- **zustc: a crate's own cfgs and compile-time environment.**\n  - `env!` / `option_env!` are expanded when a file is read. They read the crate's environment first, then zustc's\n    own, as rustc reads its own.\n  - `include!(concat!(env!(\"OUT_DIR\"), \"/x.rs\"))` therefore works.\n  - Each crate of a workspace can carry cfgs (`cfg=name`, `cfg=name=value`) and environment variables\n    (`env=KEY=VALUE`).\n- **zurgo: build scripts.**\n  - A build script is compiled with its build-dependencies, by zustc when it can and by rustc otherwise.\n  - It runs with cargo's variables, and its `cargo:` / `cargo::` output is read.\n  - It runs again only when something it depends on changes.\n- **zurgo: cargo's variables for every crate.** `CARGO_PKG_*`, `CARGO_MANIFEST_DIR`, `CARGO_CRATE_NAME`, and\n  `CARGO_BIN_NAME` for a bin.\n- **zurgo: proc-macro dependencies are stubs.** A proc-macro crate is built as an empty library of its name, so a\n  crate that only re-exports it builds. Using one of its macros is an error naming mizchi/zust#29, not an attribute\n  dropped silently.\n- **zustc fixes found on the way:**\n  - `cfg!` inside the arguments of std's format macros (`println!(\"{}\", cfg!(unix))`) was never evaluated;\n  - `compile_error!`;\n  - `dyn Error + Send + Sync + UnwindSafe` (only `Send` and `Sync` counted as auto traits);\n  - `std::path::Display`;\n  - `fmt::Pointer`.\n\n## 2. Decisions\n\nThese were open questions in mizchi/zust#28:\n\n- **`RUSTC` for build scripts is the real rustc** (question 1). A script's probes (thiserror's and anyhow's nightly\n  probes, autocfg) and its version checks (rustversion, version_check) then see what they see under cargo. A crate\n  takes the same paths as in its cargo build. zustc follows a recent stable rustc, so those are the paths it must\n  support.\n- **The build-script compiler is zustc, with rustc as the fallback** (question 3, `--build-script-compiler auto`).\n  - Of the scripts tried, zustc compiles the fixture's `gen` script only. thiserror's, anyhow's, libc's, serde_core's\n    and the fixture's app script stop on std functions zustc lacks: `env::vars()`, `Command` with an `OsString`,\n    `process::Output`, `fs::create_dir`.\n  - rustc builds those, so every script runs.\n  - zurgo remembers which compiler built a script until its sources change, so a script zustc cannot build is not\n    tried again on every build.\n- **Proc-macro dependencies are stubs, with a check.**\n  - zustc drops an unknown attribute silently, so the stub alone could miscompile code that uses an attribute macro.\n  - zurgo therefore reads the macros a proc-macro crate defines (`#[proc_macro_derive(..)]`,\n    `#[proc_macro_attribute]`, `#[proc_macro]`). A crate of the build that reaches the proc-macro crate and whose\n    source uses one of its derives or attributes stops the build before anything is compiled.\n  - Function-like macros expand to a `compile_error!`.\n\n## 3. Results\n\n`crates/zurgo/tests/zurgo.rs`:\n\n- **`build_scripts_match_cargo`.** A fixture package compared with `cargo run` under both `rustc` and `auto`. The\n  output is the same. The package has:\n  - a build script with a build-dependency, that reads `DEP_GEN_*` and writes code into `OUT_DIR`;\n  - `rustc-cfg` (also `name=\"value\"`) and `rustc-env`;\n  - `CARGO_PKG_*` with a pre-release version, `CARGO_CFG_*` and `PROFILE`;\n  - a dependency with `links` whose script emits metadata in both forms and a cfg that depends on a feature.\n\n  The test also checks that a second build runs no script, and that an edit of the file the app's script names in\n  `rerun-if-changed` runs only that script. A failing script stops the build with its output.\n- **thiserror 2.0.21's library builds.** An app that depends on it prints what its cargo build prints, and so it joins\n  `registry_crates_run_like_cargo`. The library needs:\n  - its build script, which writes `OUT_DIR/private.rs` from `CARGO_PKG_VERSION_PATCH` and probes `$RUSTC`;\n  - `include!(concat!(env!(\"OUT_DIR\"), \"/private.rs\"))`;\n  - the stub for thiserror-impl;\n  - the four zustc fixes above.\n\n  `#[derive(thiserror::Error)]` is the #29 error.\n- **`errors`.** A proc-macro dependency that is not used builds. Its attribute used is the #29 error, and so is its\n  function-like macro.\n\nCrates whose build scripts now run, and where they stop next. All of these are zustc's own gaps:\n\n| crate | build script | the crate itself |\n|---|---|---|\n| thiserror 2.0.21 | runs (rustc) | builds |\n| anyhow 1.0.104 | runs (rustc) | `error.rs:808`: a missing lifetime specifier (E0106) |\n| libc 0.2.191 | runs (rustc) | `mod types;` inside the `prelude!` macro |\n| serde_core 1.0.229 | runs (rustc) | `mod de;` inside the `crate_root!` macro |\n\nFor the last two, rustc looks for the module's file where the macro is expanded (the crate root). zustc looks\nbeside the file that defines the macro.\n\n## 4. Next\n\nFor W0 of mizchi/zust#38:\n- workspace builds for wasm32 (zustc's workspace build is x86-64 only);\n- crate identity apart from the extern name (two versions of one crate, renamed dependencies);\n- the compiler gaps on the way to wasm-bindgen-shared (the UI report, sections 3, 2.5 and 2.6).\n\nThen W1: proc macros themselves (mizchi/zust#29). The rustc path for build scripts already builds proc-macro crates\nas dylibs, which is backend A of #29.",
         "contentHash": "4424326e1897d913143bc3ee43b0c654413c1bfb290a07862783562b8017e9ec"
       },
       "target": {
-        "source": "docs_reports_2026-11-22-03-zurgo-build-scripts.ja",
-        "path": "docs/ja/reports/2026-11-22-03-zurgo-build-scripts.md",
+        "source": "docs_reports_2026-11-22-04-zurgo-build-scripts.ja",
+        "path": "docs/ja/reports/2026-11-22-04-zurgo-build-scripts.md",
         "startLine": 1,
         "endLine": 99,
         "quote": "# zurgo M1: ビルドスクリプト、`env!`、proc-macro のスタブ\n\n日付: 2026-11-22\n\nM0 は Cargo のパッケージを、ビルドスクリプトを実行せずにビルドし、proc-macro の依存があれば止まった。これは\nmizchi/zust#28 の 2 つめのマイルストーンで、wasm-bindgen のロードマップ (mizchi/zust#38) の W0 の始まりである。\n使い方: [zurgo.md](../zurgo.md)。\n\n## 1. 変えたもの\n\n- **zustc: クレートごとの cfg とコンパイル時の環境。**\n  - `env!` / `option_env!` は、ファイルを読むときに展開する。まずクレートの環境を、次に zustc 自身の環境を読む\n    (rustc が自分の環境を読むのと同じ)。\n  - なので `include!(concat!(env!(\"OUT_DIR\"), \"/x.rs\"))` が動く。\n  - ワークスペースのクレートはそれぞれ、cfg (`cfg=name`、`cfg=name=value`) と環境変数 (`env=KEY=VALUE`) を持てる。\n- **zurgo: ビルドスクリプト。**\n  - ビルドスクリプトを、そのビルド用の依存と一緒に、zustc でできれば zustc で、できなければ rustc でコンパイルする。\n  - cargo の変数を付けて実行し、`cargo:` / `cargo::` の出力を読む。\n  - 依存するものが変わったときだけ、もう一度実行する。\n- **zurgo: どのクレートにも cargo の変数。** `CARGO_PKG_*`、`CARGO_MANIFEST_DIR`、`CARGO_CRATE_NAME`、bin なら\n  `CARGO_BIN_NAME`。\n- **zurgo: proc-macro の依存はスタブ。** proc-macro のクレートは、その名前の空のライブラリとしてビルドするので、それを\n  再エクスポートするだけのクレートはビルドできる。そのマクロのどれかを使うのは、mizchi/zust#29 を示すエラーになり、\n  属性を黙って捨てることはない。\n- **途中で見つけた zustc の直し:**\n  - std の書式のマクロの引数の中の `cfg!` (`println!(\"{}\", cfg!(unix))`) を、評価していなかった;\n  - `compile_error!`;\n  - `dyn Error + Send + Sync + UnwindSafe` (自動 trait として数えていたのは `Send` と `Sync` だけだった);\n  - `std::path::Display`;\n  - `fmt::Pointer`。\n\n## 2. 決めたこと\n\nmizchi/zust#28 で未決だった問い:\n\n- **ビルドスクリプトの `RUSTC` は本物の rustc にした** (問い 1)。スクリプトの試しのコンパイル (thiserror と anyhow\n  の nightly の試し、autocfg) と版の確認 (rustversion、version_check) は、cargo のときと同じものを見る。クレートは\n  cargo でビルドしたときと同じ道を通る。zustc は新しい安定版の rustc に従うので、その道こそ zustc が受け付けるべき\n  ものである。\n- **ビルドスクリプトのコンパイラは zustc で、だめなら rustc にした** (問い 3、`--build-script-compiler auto`)。\n  - 試したスクリプトのうち、zustc がコンパイルできるのはテストのパッケージの `gen` のものだけである。thiserror、\n    anyhow、libc、serde_core と、テストのパッケージのアプリのスクリプトは、zustc にない std の関数で止まる:\n    `env::vars()`、`OsString` を取る `Command`、`process::Output`、`fs::create_dir`。\n  - それらは rustc がビルドするので、どのスクリプトも実行できる。\n  - zurgo は、どちらがスクリプトをビルドしたかを、そのソースが変わるまで覚えておく。なので、zustc がビルドできない\n    スクリプトを、ビルドのたびに試し直すことはない。\n- **proc-macro の依存は、確かめた上でスタブにした。**\n  - zustc は知らない属性を黙って捨てるので、スタブだけでは、属性マクロを使うコードを間違ってコンパイルしうる。\n  - そこで zurgo は、proc-macro のクレートが定義するマクロ (`#[proc_macro_derive(..)]`、`#[proc_macro_attribute]`、\n    `#[proc_macro]`) を読む。その proc-macro のクレートにたどり着くクレートのソースが、その derive か属性を\n    使っていれば、何もコンパイルする前にビルドを止める。\n  - 関数のようなマクロは `compile_error!` に展開する。\n\n## 3. 結果\n\n`crates/zurgo/tests/zurgo.rs`:\n\n- **`build_scripts_match_cargo`。** テストのパッケージを、`rustc` と `auto` の両方で `cargo run` と比べる。出力は\n  同じである。そのパッケージには、次のものがある:\n  - ビルド用の依存を使い、`DEP_GEN_*` を読み、`OUT_DIR` にコードを書くビルドスクリプト;\n  - `rustc-cfg` (`name=\"value\"` も) と `rustc-env`;\n  - pre-release の版の `CARGO_PKG_*`、`CARGO_CFG_*`、`PROFILE`;\n  - `links` を持つ依存。そのスクリプトは、2 つの形で metadata を出し、feature によって決まる cfg を出す。\n\n  テストは、2 回めのビルドがどのスクリプトも実行しないこと、アプリのスクリプトが `rerun-if-changed` で名指しする\n  ファイルを変えると、そのスクリプトだけを実行することも確かめる。失敗するスクリプトは、その出力を付けてビルドを\n  止める。\n- **thiserror 2.0.21 のライブラリはビルドできる。** それに依存するアプリは、cargo でビルドしたものと同じものを出す\n  ので、`registry_crates_run_like_cargo` に加えた。ライブラリに要るもの:\n  - `CARGO_PKG_VERSION_PATCH` から `OUT_DIR/private.rs` を書き、`$RUSTC` を試すビルドスクリプト;\n  - `include!(concat!(env!(\"OUT_DIR\"), \"/private.rs\"))`;\n  - thiserror-impl のスタブ;\n  - 上の zustc の 4 つの直し。\n\n  `#[derive(thiserror::Error)]` は #29 のエラーになる。\n- **`errors`。** 使われない proc-macro の依存はビルドできる。その属性を使えば #29 のエラーで、関数のようなマクロも\n  同じである。\n\nいまビルドスクリプトを実行できるクレートと、次に止まる所。どれも zustc 自身の足りない所である:\n\n| クレート | ビルドスクリプト | クレートそのもの |\n|---|---|---|\n| thiserror 2.0.21 | 実行できる (rustc) | ビルドできる |\n| anyhow 1.0.104 | 実行できる (rustc) | `error.rs:808`: ライフタイムの指定がない (E0106) |\n| libc 0.2.191 | 実行できる (rustc) | `prelude!` マクロの中の `mod types;` |\n| serde_core 1.0.229 | 実行できる (rustc) | `crate_root!` マクロの中の `mod de;` |\n\nあとの 2 つでは、rustc はモジュールのファイルを、マクロを展開した場所 (クレートの根) から探す。zustc はマクロを\n定義したファイルのそばを探す。\n\n## 4. 次\n\nmizchi/zust#38 の W0 のために:\n- wasm32 向けのワークスペースのビルド (zustc のワークスペースのビルドは x86-64 だけ);\n- extern の名前とは別のクレートの同一性 (1 つのクレートの 2 つの版、名前を変えた依存);\n- wasm-bindgen-shared までの途中にあるコンパイラの足りない所 (UI のレポートの 3、2.5、2.6 節)。\n\n次に W1: proc macro そのもの (mizchi/zust#29)。ビルドスクリプトのための rustc の道は、すでに proc-macro のクレートを\ndylib としてビルドする。それが #29 のバックエンド A である。",
         "contentHash": "b6021cfd3eecbd2d0e447905ffdab727d9cb66f44d61a43d4099b4e503a52d83"
       },
       "context": [],
-      "candidateId": "d026d5956ae8613aef7cc0f35f6f98dee654839976590c596b1da9955551510a",
-      "contextHash": "055c67775942f74fc8f5b58c85133d294a46ab732a07c14a4b33307a663cca36",
+      "candidateId": "1f512cebd206a9682106abc2726c4501ae8f93cab5e5a7ec940ad88d326a4154",
+      "contextHash": "1ceaf582419d383a7de9fdd44afaaa6505c5f68372bbcd2a2fbf32ae24a3e846",
       "judgment": {
         "choice": "supports",
         "confidence": 0.99,
@@ -1301,9 +1335,9 @@
     }
   ],
   "coverage": {
-    "expected": 38,
-    "selected": 38,
-    "answered": 38,
+    "expected": 39,
+    "selected": 39,
+    "answered": 39,
     "missing": 0,
     "contradictions": 0,
     "unassessed": 0,
@@ -1312,9 +1346,9 @@
     "unboundDocuments": 0
   },
   "usage": {
-    "requests": 38,
-    "inputTokens": 210905,
-    "usd": 0.008858010000000001
+    "requests": 39,
+    "inputTokens": 217774,
+    "usd": 0.009146508000000001
   },
   "errors": []
 }
