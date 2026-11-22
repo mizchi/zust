@@ -126,6 +126,17 @@ fn discriminants_and_nested_constants() {
     assert_eq!(d.iter().map(|d| d.line).collect::<Vec<_>>(), vec![2, 9, 11], "{d:?}");
 }
 
+/// A generic fn nothing calls is checked with placeholders for its type parameters: a mismatch of types written out,
+/// and an operator its bounds do not give, are reported; not a mismatch a bound may explain (`Tr<X = T>`, `&T: Add`)
+#[test]
+fn uncalled_generic_fns() {
+    let src = "use std::fmt::Debug;\nfn shown(x: impl Debug) -> String {\n    x\n}\nfn total<T>(a: T, b: T) -> T {\n    a + b\n}\ntrait Layout { type Unit; }\nfn unit<L: Layout<Unit = U>, U>(u: U) -> U { u }\nfn add_refs<T>(a: &T, b: &T) -> T where for<'x> &'x T: std::ops::Add<&'x T, Output = T> {\n    a + b\n}\nfn main() {}\n";
+    let mut s = Session2::new(Options2 { jobs: 1, ..Options2::default() });
+    let d = s.check(src);
+    assert_eq!(d.iter().map(|d| d.line).collect::<Vec<_>>(), vec![3, 6], "{d:?}");
+    assert!(d[1].msg.contains("cannot add `T` to `T`"), "{d:?}");
+}
+
 /// A constant whose value needs its own is E0391 at the constant, not an endless evaluation
 #[test]
 fn constant_cycles() {
@@ -134,6 +145,34 @@ fn constant_cycles() {
     let d = s.check(src);
     assert!(d.iter().all(|d| d.msg.contains("(E0391)")), "{d:?}");
     assert_eq!(d.iter().map(|d| d.line).collect::<Vec<_>>(), vec![1, 2, 3], "{d:?}");
+}
+
+/// E0038 for `dyn Tr` in a signature when Tr is not dyn compatible (a method without `self` nor `where Self: Sized`),
+/// called or not; not when that method is `where Self: Sized`
+#[test]
+fn dyn_incompatible_in_signature() {
+    let bad = "trait Shape {\n    fn new() -> Self;\n    fn area(&self) -> f64;\n}\n#[inline]\nfn total(shapes: &[Box<dyn Shape>]) -> f64 {\n    shapes.iter().map(|s| s.area()).sum()\n}\nfn main() {}\n";
+    let mut s = Session2::new(Options2 { jobs: 1, ..Options2::default() });
+    let d = s.check(bad);
+    assert_eq!(d.iter().map(|d| d.line).collect::<Vec<_>>(), vec![6], "{d:?}");
+    assert!(d[0].msg.contains("(E0038)"), "{d:?}");
+    let good = bad.replace("fn new() -> Self;", "fn new() -> Self\n    where\n        Self: Sized;");
+    assert!(s.check(&good).is_empty(), "{:?}", s.check(&good));
+}
+
+#[test]
+fn errors_of_items_in_fn_bodies_at_their_lines() {
+    // an item in a fn body is checked after the text, and its error is reported where it is written
+    let bad = "fn outer<T>(x: T) {\n    fn inner(y: T) {}\n}\nfn main() {}\n";
+    let mut s = Session2::new(Options2 { jobs: 1, ..Options2::default() });
+    let d = s.check(bad);
+    assert_eq!(d.iter().map(|d| d.line).collect::<Vec<_>>(), vec![2], "{d:?}");
+    assert!(d[0].msg.contains("cannot find type `T`"), "{d:?}");
+    let dir = std::env::temp_dir().join(format!("zust-unhoist-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let e = Session2::new(Options2 { jobs: 1, ..Options2::default() }).build(bad, &dir.join("a")).unwrap_err();
+    assert!(e.starts_with("2:"), "{e}");
+    let _ = std::fs::remove_dir_all(&dir);
 }
 
 /// A raw string with quotes and brackets in an enum's body is no part of its discriminants; a program that writes
@@ -166,4 +205,20 @@ fn discriminants_and_constants_past_literals() {
     assert_eq!(lines(&mut s, ptr), vec![1]);
     let repeat = "struct S;\nimpl S {\n    const C: S = S;\n    fn make() {\n        let _ = [Self::C; 2];\n    }\n}\nfn main() {\n    S::make();\n}\n";
     assert_eq!(lines(&mut s, repeat), Vec::<usize>::new());
+}
+
+/// Review of #55: an operator a bound's supertrait gives, a mismatch a bound's equation may make (`Deref<Target = i32>`,
+/// in a where clause too) are no errors of an uncalled generic fn; `dyn` in a fn pointer of a signature is read; an
+/// item's `#[allow(deprecated)]` allows its intrinsics paths
+#[test]
+fn uncalled_generic_fns_with_supertraits_and_equations() {
+    let ok = "trait Sum: std::ops::Add<Output = Self> + Sized {}\nfn f<T: Sum>(a: T, b: T) -> T {\n    a + b\n}\nfn g<T: std::ops::Deref<Target = i32>>(x: &T) -> &i32 {\n    x\n}\nfn h<T>(x: &T) -> &i32\nwhere\n    T: std::ops::Deref<Target = i32>,\n{\n    x\n}\nfn main() {}\n";
+    let mut s = Session2::new(Options2 { jobs: 1, ..Options2::default() });
+    assert!(s.check(ok).is_empty(), "{:?}", s.check(ok));
+    let fnptr = "trait Bad {\n    fn make() -> Self;\n}\nfn unused<T>(_: fn(&dyn Bad)) {}\nfn main() {}\n";
+    let d = s.check(fnptr);
+    assert_eq!(d.iter().map(|d| d.line).collect::<Vec<_>>(), vec![4], "{d:?}");
+    assert!(d[0].msg.contains("(E0038)"), "{d:?}");
+    let allowed = "#![deny(deprecated)]\n#[allow(deprecated)]\nfn conv(x: f32) -> u32 {\n    unsafe { std::intrinsics::transmute(x) }\n}\nfn main() {\n    let _ = conv(1.0);\n}\n";
+    assert!(s.check(allowed).is_empty(), "{:?}", s.check(allowed));
 }

@@ -188,6 +188,56 @@ impl Cx<'_> {
             return Ok((Some(res), Ty::Bool));
         }
 
+        // (E0369 / E0368: an operator on a type parameter whose bounds have not the operator's trait (`a * b` with
+        // `T: MyMul<f64>`: a method of that name is not the operator). Not one behind a reference, which a where
+        // clause may give it (`for<'x> &'x T: Add<&'x T>`)
+        // (behind a reference: no check, and none of the mismatches the numeric path would make: the placeholder's
+        // instance is left unchecked)
+        // (only where placeholders are: zustc check's last round)
+        let placeholders = matches!(op, "+" | "-" | "*" | "/" | "%") && self.prog.any_placeholder();
+        if let Some(Ty::Ref(_, Ty::Struct(sid))) = if placeholders { self.peek(left) } else { None } {
+            if self.prog.structs[*sid as usize].placeholder.is_some() && self.peek(right).is_some_and(|r| !matches!(r, Ty::Ref(..) | Ty::Struct(_))) {
+                return err(SP, "an operator on a reference to a type parameter and a value of another type");
+            }
+        }
+        if let Some(lt @ Ty::Struct(sid)) = if placeholders { self.peek(left) } else { None } {
+            let tr = match op {
+                "+" => "Add",
+                "-" => "Sub",
+                "*" => "Mul",
+                "/" => "Div",
+                "%" => "Rem",
+                _ => "",
+            };
+            if let (Some(bs), false) = (&self.prog.structs[sid as usize].placeholder, tr.is_empty()) {
+                // (the trait of the operator's form, `AddAssign` for `+=`; a bound's supertraits give it too
+                // (`trait Sum: Add<Output = Self>`); a bound zustc does not know may)
+                let want = if assign { format!("{tr}Assign") } else { tr.to_string() };
+                let prog = self.prog;
+                fn gives(prog: &Program, n: &str, want: &str, depth: u32) -> bool {
+                    let n = n.rsplit("::").next().unwrap_or(n).trim();
+                    n == want
+                        || depth < 8 && prog.trait_supers.get(n).is_some_and(|ss| ss.iter().any(|s| gives(prog, s.split('<').next().unwrap_or(s), want, depth + 1)))
+                        || !prog.traits.contains_key(n) && !matches!(n, "Copy" | "Clone" | "Debug" | "Display" | "PartialEq" | "Eq" | "PartialOrd" | "Ord" | "Hash" | "Default" | "Sized" | "Send" | "Sync")
+                            && !["Add", "Sub", "Mul", "Div", "Rem"].iter().any(|o| n == *o || n == format!("{o}Assign"))
+                }
+                let named = |b: &String| b.split('<').next().is_some_and(|n| gives(prog, n, &want, 0));
+                if !bs.iter().any(named) {
+                    let show = |t: Ty| self.prog.tn(t).replace('#', "");
+                    let (l, r) = (show(lt), self.peek(right).map_or("_".to_string(), show));
+                    let pos = if let Expr::Binary(_, _, _, sp) | Expr::AssignOp(_, _, _, sp) = e { sp.start } else { SP };
+                    let m = match (tr, assign) {
+                        (_, true) => format!("binary assignment operation `{op}=` cannot be applied to type `{l}` (E0368)"),
+                        ("Add", _) => format!("cannot add `{r}` to `{l}` (E0369)"),
+                        ("Sub", _) => format!("cannot subtract `{r}` from `{l}` (E0369)"),
+                        ("Mul", _) => format!("cannot multiply `{l}` by `{r}` (E0369)"),
+                        ("Div", _) => format!("cannot divide `{l}` by `{r}` (E0369)"),
+                        _ => format!("cannot calculate the remainder of `{l}` divided by `{r}` (E0369)"),
+                    };
+                    return err(pos, m);
+                }
+            }
+        }
         // 演算子のオーバーロード (`impl Add for V` / String + &str): `a.add(b)` / `a.add_assign(b)`
         if let Some(Ty::Struct(sid)) = self.peek(left) {
             let m = match (op, assign) {

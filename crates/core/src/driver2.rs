@@ -1236,6 +1236,7 @@ impl Session2 {
         let mut deny_unused_alloc = false;
         let mut deny_trivial_casts = (false, false);
         let mut deny_unused_lifetimes = (false, false);
+        let mut deny_deprecated = false;
         // (non_snake_case, non_camel_case_types, non_upper_case_globals)
         let mut deny_style = [false; 3];
         let lib_attr = {
@@ -1283,6 +1284,7 @@ impl Session2 {
             };
             deny_trivial_casts = (lint("trivial_casts"), lint("trivial_numeric_casts"));
             deny_unused_lifetimes = (lint("unused_lifetimes"), lint("single_use_lifetimes"));
+            deny_deprecated = lint("deprecated") || (levels.contains(&"warnings") && !c.contains("#![allow(deprecated"));
             deny_unused_alloc = lint("unused_allocation")
                 || (!levels.contains(&"unused_allocation") && levels.iter().any(|l| matches!(*l, "unused" | "warnings")) && !c.contains("#![allow(unused"));
             for (k, n) in ["non_snake_case", "non_camel_case_types", "non_upper_case_globals"].iter().enumerate() {
@@ -1325,6 +1327,12 @@ impl Session2 {
                 }
             }
         }
+        // (deprecated: a path through `std::intrinsics` to what is stable elsewhere (`std::mem::transmute`))
+        if deny_deprecated {
+            if let Some(e) = first_accidentally_stable(&src, &items[..user_src]) {
+                return Err(e);
+            }
+        }
         // (unused_lifetimes: a lifetime parameter of a fn or an impl of the program's that nothing in it names;
         // single_use_lifetimes: one named once, in a parameter's type (or the impl's header), which eliding it would
         // say)
@@ -1359,6 +1367,10 @@ impl Session2 {
         tm.lap("program", String::new());
         prog.prelude_from = user as u32;
         if let Some(e) = cross_kind_duplicate(&prog, &src, &items, &sums, user) {
+            return Err(e);
+        }
+        // (in a check (zustc check, the LSP): a build stays as fast as it was, and reports it when it makes the vtable)
+        if let Some(e) = self.checking.then(|| dyn_in_signature(&prog, &src, &items)).flatten() {
             return Err(e);
         }
         // (E0277: a static is reachable from every thread, so its type must be Sync)
@@ -1927,6 +1939,61 @@ fn malformed_attr(src0: &str, split: &str, items: &[SrcItem], standalone: bool) 
             if !ok {
                 let line = it.line + text[..at].matches('\n').count();
                 return Some(format!("{line}:1: `#[{name}]` attribute cannot be used on {kind}"));
+            }
+        }
+    }
+    None
+}
+
+/// E0038: a fn of the program whose parameters or result name `dyn Tr` of a trait that is not dyn compatible (rustc
+/// checks the types a signature writes, called or not): at the fn's line
+fn dyn_in_signature(prog: &Program, src: &str, items: &[SrcItem]) -> Option<String> {
+    // (only a program that writes `dyn`: one look at its own text)
+    let user_end = items.get((prog.prelude_from as usize).wrapping_sub(1)).map_or(0, |it| it.end);
+    if !src[..user_end.min(src.len())].contains("dyn") {
+        return None;
+    }
+    fn dyns(prog: &Program, t: Ty, depth: u32, out: &mut Vec<&'static String>) {
+        if depth > 8 {
+            return;
+        }
+        match t {
+            Ty::Dyn(d) => out.push(d),
+            Ty::Ref(_, i) | Ty::Ptr(_, i) | Ty::Box(i) | Ty::Array(i, _) | Ty::Slice(i) => dyns(prog, *i, depth + 1, out),
+            Ty::Struct(sid) => {
+                for &a in &prog.structs[sid as usize].args {
+                    dyns(prog, a, depth + 1, out);
+                }
+            }
+            // (a fn pointer's parameters and result: `fn(&dyn Bad)`)
+            Ty::Fn(f) => {
+                for &a in f.params.iter().chain([&f.ret]) {
+                    dyns(prog, a, depth + 1, out);
+                }
+            }
+            _ => {}
+        }
+    }
+    let mut found = vec![];
+    for (fi, sig) in prog.sigs.iter().enumerate() {
+        let Some(ii) = prog.item_of.get(fi).copied().flatten().filter(|&ii| ii < prog.prelude_from) else { continue };
+        found.clear();
+        for &t in sig.params.iter().chain(std::iter::once(&sig.ret)) {
+            dyns(prog, t, 0, &mut found);
+        }
+        for d in &found {
+            // (the principal trait: `dyn Tr<u8> + Send`'s `Tr`)
+            let tr = d.split('+').map(str::trim).find(|b| !matches!(*b, "Send" | "Sync" | "Unpin") && !b.starts_with('\'')).unwrap_or("");
+            let tr = tr.split('<').next().unwrap_or("").trim();
+            // (a trait the program knows; dyn_incompatible reads the methods of the program's own ones)
+            if !prog.traits.contains_key(tr) || crate::ast_summary::parse_fn_bound(tr).is_some() {
+                continue;
+            }
+            if let Some(m) = acg::dyn_incompatible(prog, tr, &prog.dyn_methods(tr), true) {
+                // (the line of `fn`, past the item's attributes and doc comments)
+                let it = &items[ii as usize];
+                let past = src[it.start..it.end].lines().take_while(|l| { let l = l.trim_start(); l.starts_with('#') || l.starts_with("//") }).count();
+                return Some(format!("{}:1: {m}", it.line + past));
             }
         }
     }
@@ -3572,6 +3639,49 @@ fn compile_id_req(a: &Analysis, insts: &Mutex<Insts>, id: u32) -> R<(Blob, Vec<u
 #[cfg(not(feature = "build"))]
 fn lower_blob(_: &Analysis, _: acg::Compiled, _: Vec<u32>) -> R<(Blob, Vec<u32>)> { Err("internal: zust-core was built without the backend (feature `build`)".into()) }
 
+impl Session2 {
+    /// An error of the analysis at a line past the program's own (an item hoisted out of a fn body, prep::HOIST_MARK):
+    /// at the line it was written on. The text is preprocessed again for it, only when there is such an error
+    #[cold]
+    #[inline(never)]
+    pub(crate) fn unhoist_analysis_err(&self, src0: &str, e: String) -> String {
+        let d = Diagnostic::parse(&e);
+        let user_lines = src0.bytes().filter(|&c| c == b'\n').count() + 1;
+        if d.line <= user_lines || !e.trim_start().starts_with(|c: char| c.is_ascii_digit()) || !hoisted_err_holds(&d.msg) {
+            return e;
+        }
+        // (the analysis's configuration: the crate's features, cfgs and env when it has them)
+        let cfg = self.opts.cfg_of(self.ctx.features.as_ref().unwrap_or(&self.opts.features), &self.ctx.cfgs, &self.ctx.env);
+        let stripped = crate::cfg::strip(src0, &cfg);
+        let s = stripped.as_deref().unwrap_or(src0);
+        let renamed = crate::prep::std_renames(s);
+        let s = renamed.as_deref().unwrap_or(s);
+        let mut crates = self.ctx.deps.clone();
+        crates.extend(self.ctx.lib.iter().cloned());
+        let Ok(p) = crate::prep::prep_full(s, &crates, &mut vec![], Some(&cfg)) else { return e };
+        match crate::prep::hoisted_line(&crate::prep::marked(p), d.line) {
+            Some(l) => with_line(&e, l),
+            None => e,
+        }
+    }
+}
+
+/// An analysis error of a hoisted item that says what rustc says there: a name it cannot see (a type parameter or
+/// `Self` of the fn or impl around it, a local), an import, `_` in a signature, an item never used. Not what zustc
+/// does not read (`unsupported ..`, a parse error of syntax it does not know), nor a name the hoisting made (`X__h0`)
+fn hoisted_err_holds(msg: &str) -> bool {
+    let named = ["cannot find type `", "cannot find value `", "`Self` is only available in impls", "`self` is only allowed in impls", "unresolved import `", "the placeholder `_` is not allowed", "expected identifier, found keyword"];
+    let unused = msg.starts_with("function `") && msg.contains("is never used");
+    !msg.contains("__h") && !msg.contains("unsupported") && (named.iter().any(|n| msg.starts_with(n)) || (msg.starts_with("cannot find constant `") && !msg.starts_with("cannot find constant `_`")) || unused)
+}
+
+/// e with its leading line `L:` made l
+fn with_line(e: &str, l: usize) -> String {
+    let lead = e.trim_start();
+    let n = lead.find(':').unwrap_or(0);
+    format!("{l}{}", &lead[n..])
+}
+
 /// An error at a line of an item hoisted out of a fn body (prep::HOIST_MARK): at the line it was written on
 pub(crate) fn unhoist_err(a: &Analysis, e: String) -> String {
     let d = Diagnostic::parse(&e);
@@ -3580,10 +3690,7 @@ pub(crate) fn unhoist_err(a: &Analysis, e: String) -> String {
         return e;
     }
     match crate::prep::hoisted_line(&a.src, d.line) {
-        Some(l) => {
-            let n = lead.find(':').unwrap_or(0);
-            format!("{l}{}", &lead[n..])
-        }
+        Some(l) => with_line(&e, l),
         None => e,
     }
 }
@@ -3633,7 +3740,7 @@ impl Session2 {
         self.checking = false;
         let mut a = match r {
             Ok(a) => a,
-            Err(e) => return vec![Diagnostic::parse(&e)],
+            Err(e) => return vec![Diagnostic::parse(&self.unhoist_analysis_err(src, e))],
         };
         // 検査だけ: コード生成 (acg) で型を検査し、機械語は作らない (ZUSTC_CHECK_CODEGEN=1 で機械語まで作る)。
         // 検査済みの印は、要求したインスタンスへの再配置だけを持つ空の Blob を、ビルドとは別のキーで覚える
@@ -3931,6 +4038,71 @@ fn placeholder_wave(a: &Analysis, insts: &Mutex<Insts>) -> Vec<u32> {
         let _ = g.request(p, id as u32, args);
     }
     std::mem::take(&mut g.pending)
+}
+
+/// `#![deny(deprecated)]`: the first path of the program's through `std::intrinsics` / `core::intrinsics` to an
+/// intrinsic that is stable through another module (`transmute`, `copy`, `copy_nonoverlapping`, `write_bytes`), in a
+/// `use` (a group too) or an expression: `line:col: use of deprecated ..`
+fn first_accidentally_stable(src: &str, items: &[SrcItem]) -> Option<String> {
+    const STABLE: [&str; 4] = ["transmute", "copy_nonoverlapping", "copy", "write_bytes"];
+    for it in items {
+        let raw = src.get(it.start..it.end)?;
+        // (an item's `#[allow(deprecated)]` allows its uses, under the crate's deny)
+        if !raw.contains("intrinsics") || raw.contains("allow(deprecated") || raw.contains("expect(deprecated") {
+            continue;
+        }
+        // (comments and string literals are no paths)
+        let mut text = blank_comments(raw).into_bytes();
+        let mut i = 0;
+        while i < text.len() {
+            match literal_end(&text, i).filter(|_| text[i] != b'\'') {
+                Some(e) => {
+                    for c in &mut text[i..e] {
+                        if *c != b'\n' {
+                            *c = b' ';
+                        }
+                    }
+                    i = e;
+                }
+                None => i += 1,
+            }
+        }
+        let Ok(text) = String::from_utf8(text) else { continue };
+        let b = text.as_bytes();
+        for (k, _) in text.match_indices("intrinsics") {
+            // (`std::intrinsics::` / `core::intrinsics::`, the module a segment of its own)
+            let before = text[..k].trim_end();
+            let Some(before) = before.strip_suffix("::") else { continue };
+            let root = before.trim_end();
+            if !(root.ends_with("std") || root.ends_with("core")) || root.len() > 4 && b[root.len() - if root.ends_with("std") { 4 } else { 5 }].is_ascii_alphanumeric() {
+                continue;
+            }
+            let Some(after) = text[k + "intrinsics".len()..].trim_start().strip_prefix("::") else { continue };
+            let after = after.trim_start();
+            // (the names it brings: one, or a group's)
+            let names: Vec<(usize, &str)> = if let Some(g) = after.strip_prefix('{') {
+                let g_at = text.len() - g.len();
+                let end = g.find('}').unwrap_or(g.len());
+                g[..end].split(',').scan(g_at, |at, part| {
+                    let here = *at + (part.len() - part.trim_start().len());
+                    *at += part.len() + 1;
+                    Some((here, part.trim()))
+                }).collect()
+            } else {
+                // (at the path's first segment, as rustc)
+                vec![(root.len() - if root.ends_with("std") { 3 } else { 4 }, after)]
+            };
+            for (at, name) in names {
+                let id: String = name.chars().take_while(|c| c.is_ascii_alphanumeric() || *c == '_').collect();
+                if STABLE.contains(&id.as_str()) {
+                    let line = it.line + text[..at].matches('\n').count();
+                    let col = at - text[..at].rfind('\n').map_or(0, |n| n + 1) + 1;
+                    return Some(format!("{line}:{col}: use of deprecated import through accidentally stabilized module `intrinsics`: `{id}` (deprecated)"));
+                }
+            }
+        }
+    }
+    None
 }
 
 /// The lint levels codegen checks (`#![deny(unused_must_use)]`, `trivial_casts` ..) as one byte for the cache keys: a

@@ -90,6 +90,40 @@ pub fn borrow_error(e: &str) -> bool {
 /// borrowed (E0716), a match guard's change (E0510), a returned borrow (E0515, E0713), a closure that outlives what it
 /// borrows (E0373), a use of what is mutably borrowed (E0503) or partly moved (E0382), an assignment to a part of
 /// what was moved (E0382), a closure's borrow that escapes it (E0521)
+/// A placeholder instance's error that holds whatever its type parameters are: an operator its bounds do not give, or
+/// mismatched types of two types written
+/// out (no projection `T::Item` / `<T as Tr>::X`, no `impl` / `dyn` type, no hole, no lifetime), as `x` of
+/// `impl Debug` returned as a String (a placeholder is `T#`)
+pub fn placeholder_mismatch(e: &str, bound_eqs: &[&str]) -> bool {
+    // (an operator a type parameter's bounds do not give, p3_ops: holds whatever the parameter is)
+    if (e.ends_with("(E0369)") || e.ends_with("(E0368)"))
+        && ["cannot add `", "cannot subtract `", "cannot multiply `", "cannot divide `", "cannot calculate the remainder of `", "binary assignment operation `"].iter().any(|v| e.contains(v))
+    {
+        return true;
+    }
+    let Some(m) = e.find("mismatched types: expected `") else { return false };
+    let tys: Vec<&str> = e[m..].split('`').skip(1).step_by(2).take(2).collect();
+    // (the placeholders named: `T#`)
+    let names = |t: &str| -> Vec<String> {
+        t.split(|c: char| !(c.is_alphanumeric() || c == '_' || c == '#')).filter_map(|w| w.strip_suffix('#')).map(str::to_string).collect()
+    };
+    if tys.len() == 2 {
+        let (a, b) = (names(tys[0]), names(tys[1]));
+        // (two placeholders: a closure or a bound may relate them; one equated by a bound `Tr<X = T>`)
+        let equated = a.iter().chain(&b).any(|n| bound_eqs.iter().any(|q| q.split('=').skip(1).any(|r| r.trim_start().split(|c: char| !(c.is_alphanumeric() || c == '_')).next() == Some(n.as_str()))));
+        if (!a.is_empty() && !b.is_empty()) || equated {
+            return false;
+        }
+    }
+    // (a hole `_`, or a type parameter left unsubstituted (`T0`): what inference did not reach)
+    let unknown = |t: &str| {
+        t.split(|c: char| !(c.is_alphanumeric() || c == '_' || c == '#')).any(|w| {
+            w == "_" || (w.starts_with(|c: char| c.is_ascii_uppercase()) && w[1..].chars().all(|c| c.is_ascii_digit()))
+        })
+    };
+    tys.len() == 2 && tys.iter().all(|t| !t.contains("::") && !t.contains(" as ") && !t.contains("impl ") && !t.contains("dyn ") && !t.contains('\'') && !unknown(t))
+}
+
 pub fn borrow_check_error(e: &str) -> bool {
     borrow_error(e)
         || [
@@ -471,13 +505,48 @@ fn compile_once(prog: &Program, insts: &Mutex<Insts>, id: u32, f: &ItemFn, line_
     // fails, as a placeholder cannot do all its bounds allow (a trait's method, a coercion to `dyn`): not checked
     // further, nothing reported. Its borrow and region checks' errors are)
     // (not an error of the borrow check's kind lowering itself returns: `m[k] = v` of a HashMap is E0594 whatever T is)
-    if placeholder && r.as_ref().is_err_and(|e| !borrow_error(e)) {
+    // (a placeholder's mismatch holds, unless a bound equates its parameter with another type (`Tr<X = T>`))
+    let mut bound_eqs: Vec<&str> = vec![];
+    let mut bound_params: Vec<String> = vec![];
+    if placeholder && r.is_err() {
+        bound_eqs.extend(sig.generics.iter().flat_map(|(_, bs)| bs.iter().map(|b| b.as_str())).filter(|b| b.contains('=')));
+        // (a parameter with an equation in its bounds (`T: Deref<Target = i32>`): its mismatches may be the projection's)
+        bound_params.extend(sig.generics.iter().filter(|(_, bs)| bs.iter().any(|b| b.contains('='))).map(|(n, _)| format!("= {n}")));
+    }
+    // (and the fn's own where clauses, on any type: `where Back: Backend<Layout = DSL>`)
+    for (subj, bs) in f.sig.generics.preds.iter().filter(|_| placeholder && r.is_err()) {
+        for b in bs {
+            if let crate::parse::Bound::Trait(_, p) = b {
+                for seg in &p.segs {
+                    for a in &seg.args {
+                        if let crate::parse::GArg::Bind(_, bt) = a {
+                            if let crate::parse::Ty::Path(None, tp) = bt {
+                                if let Some(s) = tp.segs.last() {
+                                    bound_params.push(format!("= {}", s.name));
+                                }
+                            }
+                            // (`where T: Deref<Target = i32>`: T's mismatches may be the projection's)
+                            if let crate::parse::Ty::Path(None, sp) = subj {
+                                if let [s] = sp.segs.as_slice() {
+                                    bound_params.push(format!("= {}", s.name));
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    bound_eqs.extend(bound_params.iter().map(|s| s.as_str()));
+    if placeholder && r.as_ref().is_err_and(|e| !borrow_error(e) && !placeholder_mismatch(e, &bound_eqs)) {
         if regionck::debug() {
             eprintln!("regionck: placeholder instance not checked: {}", r.as_ref().err().map(|e| e.as_str()).unwrap_or(""));
         }
         let b = cx.b;
         return Ok((Compiled { rec: b.m, late: vec![], datas: vec![], vtables: vec![], infos: vec![], loc_used: false, line_base }, vec![]));
     }
+    // (a placeholder's type by its parameter's name: `T`, not `T#`)
+    let r = if placeholder { r.map_err(|e| e.replace("#`", "`").replace("#>", ">").replace("#,", ",")) } else { r };
     r?;
     cx.bk_check()?;
     let rerun = cx.rg.rerun && !force_rg;

@@ -323,6 +323,8 @@ check-pass	associated-types/normalize-cycle-in-eval.rs
 run-pass	associated-types/object-method-numbering.rs
 check-pass	associated-types/object-normalization.rs
 check-pass	associated-types/param-env-normalize-cycle.rs
+compile-fail	associated-types/param-env-shadowing-false-positive.rs
+compile-fail	associated-types/param-env-shadowing-gat.rs
 compile-fail	associated-types/param-env-shadowing-suggestion-no-ice-on-missing-assoc-value.rs
 run-pass	associated-types/project-defer-unification.rs
 run-pass	associated-types/projection-as-type-alias.rs
@@ -706,6 +708,7 @@ compile-fail	binop/let-chain-type-issue-147665.rs
 run-pass	binop/operator-overloading.rs
 compile-fail	binop/shift-various-bad-types.rs
 compile-fail	binop/spaceship.rs
+compile-fail	binop/struct-field-generic-type-binary-assignment-error-6738.rs
 run-pass	binop/structured-compare.rs
 compile-fail	blind/blind-item-item-shadow.rs
 compile-fail	block-result/block-must-not-have-result-res.rs
@@ -1354,6 +1357,7 @@ run-pass	closures/old-closure-iter-2.rs
 check-pass	closures/or-patterns-issue-137467.rs
 run-pass	closures/pass-lifetime-fn-to-generic-fnonce.rs
 compile-fail	closures/print/closure-print-generic-2.rs
+compile-fail	closures/return-in-closure-with-fn-bound.rs
 compile-fail	closures/return-value-lifetime-error.rs
 run-pass	closures/semistatement-in-lambda.rs
 run-pass	closures/simple-capture-and-call.rs
@@ -1593,6 +1597,7 @@ compile-fail	const-generics/infer/uninferred-consts.rs
 check-pass	const-generics/integer-literal-generic-arg-in-where-clause.rs
 compile-fail	const-generics/invalid-attributes-on-const-params-78957.rs
 compile-fail	const-generics/invalid-const-arg-for-type-param.rs
+compile-fail	const-generics/invalid-path-in-const.rs
 compile-fail	const-generics/invalid-rustc_legacy_const_generics-issue-123077.rs
 check-pass	const-generics/issues/issue-60818-struct-constructors.rs
 build-pass	const-generics/issues/issue-61336-1.rs
@@ -2147,6 +2152,7 @@ build-pass	drop/static-variable-with-drop-trait-9243.rs
 run-pass	drop/struct-field-drop-order.rs
 check-pass	drop/tail_expr_drop_order-on-recursive-boxed-fut.rs
 run-pass	dropck/cleanup-arm-conditional.rs
+run-pass	dropck/compound-type-of-raw-pointers.rs
 check-pass	dropck/constrained_by_assoc_type_equality.rs
 compile-fail	dropck/drop-on-non-struct.rs
 compile-fail	dropck/drop-with-active-borrows-1.rs
@@ -2193,15 +2199,20 @@ compile-fail	dyn-compatibility/dyn-compatible-trait-implementation-20939.rs
 compile-fail	dyn-compatibility/dyn-incompatible-supertrait.rs
 check-pass	dyn-compatibility/elaborated-predicates-ordering.rs
 compile-fail	dyn-compatibility/erroneous_signature.rs
+compile-fail	dyn-compatibility/generics.rs
 check-pass	dyn-compatibility/impossible-predicates-multiple_supertrait_upcastable-check.rs
 check-pass	dyn-compatibility/item-bounds-can-reference-self.rs
 compile-fail	dyn-compatibility/mention-correct-dyn-incompatible-trait.rs
 compile-fail	dyn-compatibility/mentions-Self-in-super-predicates.rs
+compile-fail	dyn-compatibility/mentions-Self.rs
 compile-fail	dyn-compatibility/method-with-self-trait-bound-not-dyn-safe.rs
 compile-fail	dyn-compatibility/no-static.rs
 check-pass	dyn-compatibility/phantom-fn.rs
 compile-fail	dyn-compatibility/reference-to-bare-trait-in-fn-inputs-and-outputs-issue-125139.rs
 compile-fail	dyn-compatibility/require-assoc-for-all-super-substs.rs
+compile-fail	dyn-compatibility/sized-2.rs
+compile-fail	dyn-compatibility/sized.rs
+compile-fail	dyn-compatibility/static-constructor-prevents-dyn-no-api-guidance.rs
 compile-fail	dyn-compatibility/supertrait-mentions-GAT.rs
 compile-fail	dyn-keyword/dyn-2015-edition-keyword-ident-lint.rs
 compile-fail	dyn-keyword/dyn-2018-edition-lint.rs
@@ -2294,6 +2305,7 @@ compile-fail	error-codes/E0026.rs
 compile-fail	error-codes/E0027.rs
 compile-fail	error-codes/E0029.rs
 compile-fail	error-codes/E0033.rs
+compile-fail	error-codes/E0038.rs
 compile-fail	error-codes/E0044.rs
 compile-fail	error-codes/E0050.rs
 compile-fail	error-codes/E0054.rs
@@ -2344,6 +2356,7 @@ compile-fail	error-codes/E0381-duplicated-label.rs
 compile-fail	error-codes/E0389.rs
 compile-fail	error-codes/E0390.rs
 compile-fail	error-codes/E0392.rs
+compile-fail	error-codes/E0401.rs
 compile-fail	error-codes/E0403.rs
 compile-fail	error-codes/E0404.rs
 compile-fail	error-codes/E0405.rs
@@ -2809,6 +2822,7 @@ check-pass	generic-associated-types/issue-92954.rs
 check-pass	generic-associated-types/issue-93141.rs
 check-pass	generic-associated-types/issue-93262.rs
 check-pass	generic-associated-types/issue-93341.rs
+compile-fail	generic-associated-types/missing-bounds.rs
 compile-fail	generic-associated-types/parse/trait-path-expected-token.rs
 compile-fail	generic-associated-types/parse/trait-path-expressions.rs
 compile-fail	generic-associated-types/parse/trait-path-missing-gen_arg.rs
@@ -2826,6 +2840,7 @@ compile-fail	generics/box-missing-generics-14092.rs
 compile-fail	generics/cyclic-default-type-param-via-alias.rs
 run-pass	generics/default-type-params-well-formedness.rs
 run-pass	generics/empty-generic-brackets-equiv.rs
+compile-fail	generics/enum-definition-with-outer-generic-parameter-5997.rs
 compile-fail	generics/generic-arg-mismatch-recover.rs
 run-pass	generics/generic-derived-type.rs
 compile-fail	generics/generic-enum-errors.rs
@@ -2982,6 +2997,7 @@ run-pass	impl-header-lifetime-elision/path-underscore.rs
 run-pass	impl-header-lifetime-elision/ref-underscore.rs
 run-pass	impl-header-lifetime-elision/trait-underscore.rs
 run-pass	impl-trait/basic-trait-impl.rs
+check-pass	impl-trait/bivariant-lifetime-liveness.rs
 run-pass	impl-trait/bounds_regression.rs
 compile-fail	impl-trait/captured-invalid-lifetime.rs
 check-pass	impl-trait/closure-calling-parent-fn.rs
@@ -3015,6 +3031,7 @@ compile-fail	impl-trait/in-trait/bad-item-bound-within-rpitit-2.rs
 compile-fail	impl-trait/in-trait/bad-projection-from-opaque.rs
 check-pass	impl-trait/in-trait/box-coerce-span-in-default.rs
 check-pass	impl-trait/in-trait/deep-match-works.rs
+compile-fail	impl-trait/in-trait/default-body-type-err-2.rs
 check-pass	impl-trait/in-trait/default-body.rs
 check-pass	impl-trait/in-trait/default-method-binder-shifting.rs
 check-pass	impl-trait/in-trait/default-method-constraint.rs
@@ -3116,6 +3133,7 @@ check-pass	impl-trait/trait_resolution.rs
 compile-fail	impl-trait/trait_type.rs
 check-pass	impl-trait/transmute/in-defining-scope.rs
 check-pass	impl-trait/transmute/outside-of-defining-scope.rs
+compile-fail	impl-trait/universal-mismatched-type.rs
 run-pass	impl-trait/universal_hrtb_anon.rs
 run-pass	impl-trait/universal_hrtb_named.rs
 run-pass	impl-trait/universal_in_adt_in_parameters.rs
@@ -3222,6 +3240,7 @@ check-pass	imports/issue-32119.rs
 check-pass	imports/issue-32222.rs
 compile-fail	imports/issue-32354-suggest-import-rename.rs
 compile-fail	imports/issue-33464.rs
+compile-fail	imports/issue-37887.rs
 compile-fail	imports/issue-45799-bad-extern-crate-rename-suggestion-formatting.rs
 compile-fail	imports/issue-45829/import-self.rs
 compile-fail	imports/issue-45829/import-twice.rs
@@ -3645,6 +3664,7 @@ check-pass	lint/dead-code/expect-dead-code-154324.rs
 check-pass	lint/dead-code/expect-dead-code-field-read-in-dead-fn.rs
 check-pass	lint/dead-code/expect-dead-code-through-non-expect-item.rs
 check-pass	lint/dead-code/expect-on-assoc-fn-issue-148861.rs
+compile-fail	lint/dead-code/in-closure.rs
 check-pass	lint/dead-code/inferred-generic-arg.rs
 compile-fail	lint/dead-code/issue-41883.rs
 check-pass	lint/dead-code/issue-59003.rs
@@ -5898,6 +5918,7 @@ compile-fail	resolve/associated-fn-called-as-fn.rs
 compile-fail	resolve/bad-expr-path.rs
 compile-fail	resolve/bad-expr-path2.rs
 compile-fail	resolve/bad-module.rs
+compile-fail	resolve/bad-type-env-capture.rs
 run-pass	resolve/blind-item-local-shadow.rs
 run-pass	resolve/blind-item-mixed-use-item.rs
 check-pass	resolve/block-with-trait-parent.rs
@@ -5926,6 +5947,7 @@ compile-fail	resolve/ice-inconsistent-resolution-with-import-separators-issue-14
 compile-fail	resolve/impl-on-non-type.rs
 compile-fail	resolve/impl-trait-for-undeclared-type.rs
 compile-fail	resolve/import-suggestion-duplicated-importing-same-item.rs
+compile-fail	resolve/incorrect-self-res.rs
 compile-fail	resolve/issue-100365.rs
 compile-fail	resolve/issue-101749-2.rs
 compile-fail	resolve/issue-101749.rs
@@ -5938,6 +5960,7 @@ compile-fail	resolve/issue-111312.rs
 compile-fail	resolve/issue-111727.rs
 check-pass	resolve/issue-114433-invalid-unused-qualifications-suggestion.rs
 compile-fail	resolve/issue-118295.rs
+compile-fail	resolve/issue-12796.rs
 compile-fail	resolve/issue-14254.rs
 compile-fail	resolve/issue-16058.rs
 compile-fail	resolve/issue-17518.rs
@@ -5950,6 +5973,7 @@ compile-fail	resolve/issue-2356.rs
 compile-fail	resolve/issue-24968.rs
 compile-fail	resolve/issue-3099-a.rs
 compile-fail	resolve/issue-3099-b.rs
+compile-fail	resolve/issue-3214.rs
 compile-fail	resolve/issue-33876.rs
 compile-fail	resolve/issue-35675.rs
 compile-fail	resolve/issue-39559-2.rs
@@ -5983,6 +6007,7 @@ run-pass	resolve/no-std-2.rs
 run-pass	resolve/no-std-3.rs
 check-pass	resolve/non-macro-attrs-accepted.rs
 compile-fail	resolve/nonexistent-macro.rs
+compile-fail	resolve/outer-generic-in-trait-method.rs
 compile-fail	resolve/parse_error.rs
 compile-fail	resolve/privacy-enum-ctor.rs
 run-pass	resolve/reference-clone-nonclone-11820.rs
@@ -6032,16 +6057,19 @@ compile-fail	resolve/unresolved-module-error-33293.rs
 compile-fail	resolve/unresolved-segments-visibility.rs
 compile-fail	resolve/unresolved_static_type_field.rs
 check-pass	resolve/unused-macro-import.rs
+compile-fail	resolve/use-self-in-inner-fn.rs
 check-pass	resolve/use-shadowing-14082.rs
 compile-fail	resolve/use_suggestion.rs
 compile-fail	resolve/visibility-indeterminate.rs
 compile-fail	return/dont-suggest-through-inner-const.rs
 run-pass	return/early-return-with-unreachable-code-24353.rs
+compile-fail	return/infer-return-ty-for-fn-sig-issue-125488.rs
 run-pass	return/ret-bang.rs
 compile-fail	return/ret-non-nil.rs
 compile-fail	return/return-disjoint-regions.rs
 compile-fail	return/return-from-diverging.rs
 compile-fail	return/return-from-residual-sugg-issue-125997.rs
+compile-fail	return/return-impl-trait-bad.rs
 run-pass	return/return-nil.rs
 compile-fail	return/return-struct.rs
 compile-fail	return/return-ty-mismatch-note.rs
@@ -6606,6 +6634,7 @@ compile-fail	suggestions/dont-suggest-try_into-in-macros.rs
 compile-fail	suggestions/dont-suggest-ufcs-for-const.rs
 run-pass	suggestions/dont-try-removing-the-field.rs
 compile-fail	suggestions/double-reference-ty-in-self-ty.rs
+compile-fail	suggestions/dyn-incompatible-trait-references-self.rs
 compile-fail	suggestions/dyn-incompatible-trait-should-use-self-2021-without-dyn.rs
 compile-fail	suggestions/dyn-incompatible-trait-should-use-self-2021.rs
 compile-fail	suggestions/dyn-incompatible-trait-should-use-self.rs
@@ -6995,6 +7024,7 @@ compile-fail	traits/ignore-err-impls.rs
 compile-fail	traits/impl-1.rs
 run-pass	traits/impl-2.rs
 compile-fail	traits/impl-can-not-have-untraitful-items.rs
+check-pass	traits/impl-evaluation-order.rs
 compile-fail	traits/impl-for-module.rs
 run-pass	traits/impl-implicit-trait.rs
 run-pass	traits/impl-inherent-prefer-over-trait.rs
@@ -7291,6 +7321,7 @@ compile-fail	type/type-check/coerce-result-return-value-2.rs
 compile-fail	type/type-check/coerce-result-return-value.rs
 compile-fail	type/type-check/issue-116967-cannot-coerce-returned-result.rs
 compile-fail	type/type-check/issue-41314.rs
+compile-fail	type/type-check/missing_trait_impl.rs
 compile-fail	type/type-check/point-at-inference-3.rs
 compile-fail	type/type-check/unknown_type_for_closure.rs
 compile-fail	type/type-mismatch-multiple.rs
@@ -7363,6 +7394,7 @@ compile-fail	typeck/issue-67971.rs
 check-pass	typeck/issue-68590-reborrow-through-derefmut.rs
 compile-fail	typeck/issue-69378-ice-on-invalid-type-node-after-recovery.rs
 check-pass	typeck/issue-72225-call-fnmut-through-derefmut.rs
+compile-fail	typeck/issue-74086.rs
 check-pass	typeck/issue-74933.rs
 compile-fail	typeck/issue-75883.rs
 compile-fail	typeck/issue-7813.rs
@@ -7422,6 +7454,7 @@ compile-fail	typeck/remove-semi-but-confused-char.rs
 compile-fail	typeck/return-unsized-coercion.rs
 compile-fail	typeck/return_type_containing_closure.rs
 compile-fail	typeck/self-constructor-type-error-56199.rs
+compile-fail	typeck/self-param-in-fn-item-cast-to-fn-trait.rs
 compile-fail	typeck/slow-lhs-suggestion.rs
 compile-fail	typeck/span-bug-issue-121410.rs
 compile-fail	typeck/str-no-field-desc-14721.rs
@@ -7600,6 +7633,7 @@ run-pass	unsized/enum-struct-optimization.rs
 build-pass	unsized/issue-23649-3.rs
 compile-fail	unsized/issue-75707.rs
 compile-fail	unsized/issue-91803.rs
+check-pass	unsized/maybe-bounds-where-cpass.rs
 compile-fail	unsized/param-mentioned-by-different-field.rs
 compile-fail	unsized/relaxed-bounds-invalid-places.rs
 compile-fail	unsized/thin-ptr-to-unsized-projection.rs
@@ -7623,6 +7657,7 @@ check-pass	use/use-mod/use-mod-5.rs
 check-pass	use/use-mod/use-mod-6.rs
 compile-fail	use/use-mod/use-mod.rs
 compile-fail	use/use-paths-as-items.rs
+compile-fail	use/use-self-type.rs
 compile-fail	variance/leaking-unnameables.rs
 check-pass	variance/smart-pointers-covariant.rs
 compile-fail	variance/type-resolve-error-two-structs-deep.rs

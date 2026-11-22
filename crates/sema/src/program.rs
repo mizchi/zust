@@ -2909,7 +2909,11 @@ impl Program {
         s
     }
 
-    /// sid is a placeholder (Program::placeholder); cheap when none was made
+    /// Whether the program has placeholders for type parameters (zustc check's last round) at all
+    pub fn any_placeholder(&self) -> bool {
+        self.structs.any_placeholder.load(std::sync::atomic::Ordering::Relaxed)
+    }
+
     /// Whether t is surely not Clone (`r.clone()` of `&t` is then the reference's clone): a type of the program with no
     /// clone and no derive, or an instance with such an argument (`Option<NoClone>`), but for the shared pointers
     pub fn surely_not_clone(&self, t: Ty, depth: u32) -> bool {
@@ -2940,6 +2944,7 @@ impl Program {
             || matches!(name, "Option" | "Result" | "Vec" | "VecDeque" | "BinaryHeap" | "HashMap" | "HashSet" | "BTreeMap" | "BTreeSet" | "RefCell" | "Reverse")
     }
 
+    /// sid is a placeholder (Program::placeholder); cheap when none was made
     pub fn is_placeholder(&self, sid: u32) -> bool {
         self.structs.any_placeholder.load(std::sync::atomic::Ordering::Relaxed) && self.structs[sid as usize].placeholder.is_some()
     }
