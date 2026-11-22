@@ -454,6 +454,9 @@ pub struct Insts {
     /// Of those, the instances of fns that instances were made of with `Copy` types only (driver2's
     /// placeholder_wave): checked for what moving a T does, nothing else
     pub recheck: FxSet<u32>,
+    /// Closures (by their fn) whose kind no bound nor expected type decides, made in the program's code: one that
+    /// returns a mutable borrow of what it captures by reference is `FnMut`, and the borrow escapes its body
+    pub kind_free: FxSet<u32>,
 }
 
 /// Insts::closure_rg (codes: see typeck's regionck)
@@ -480,6 +483,7 @@ impl Insts {
             imp_cache: HashMap::default(),
             lenient: false,
             recheck: FxSet::default(),
+            kind_free: FxSet::default(),
         }
     }
 

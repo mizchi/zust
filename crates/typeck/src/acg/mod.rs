@@ -340,10 +340,10 @@ pub fn compile(prog: &Program, insts: &Mutex<Insts>, id: u32, f: &ItemFn, line_b
 
 #[allow(clippy::too_many_arguments)]
 fn compile_once(prog: &Program, insts: &Mutex<Insts>, id: u32, f: &ItemFn, line_base: u32, inl: &Inline, force_rg: bool, rerun_out: &mut bool) -> R<(Compiled, Vec<u32>)> {
-    let (sig, env, body_id, fnptr, inst_args, clo_rg, lenient, recheck) = {
+    let (sig, env, body_id, fnptr, inst_args, clo_rg, lenient, recheck, fnmut_ret) = {
         let g = insts.lock().unwrap();
         let b = g.body_of(id);
-        (g.sig(prog, id).clone(), g.env(prog, id), b, g.get(id).is_some_and(|i| i.fnptr), g.get(id).map(|i| i.args.clone()), g.closure_rg.get(&b).cloned(), g.lenient, g.recheck.contains(&id))
+        (g.sig(prog, id).clone(), g.env(prog, id), b, g.get(id).is_some_and(|i| i.fnptr), g.get(id).map(|i| i.args.clone()), g.closure_rg.get(&b).cloned(), g.lenient, g.recheck.contains(&id), g.kind_free.contains(&b))
     };
     // (zustc check's last round: instances with placeholders for type parameters, and those they request (only
     // there are placeholders): see below)
@@ -401,7 +401,7 @@ fn compile_once(prog: &Program, insts: &Mutex<Insts>, id: u32, f: &ItemFn, line_
     let bk_level = if user_code { borrowck::level() } else { 0 };
     let mut cx = Cx {
         b: FunctionBuilder::new(&clif_sig(&sig)),
-        bk: borrowck::Bk { on: bk_level > 0, level: bk_level, line_base, ..Default::default() },
+        bk: borrowck::Bk { on: bk_level > 0, level: bk_level, line_base, fnmut_ret, ..Default::default() },
         // (a function's own body, not a generic one's instance nor a closure's: see regionck)
         // (a generic function's instance: the generic signature, its type parameters' regions not followed)
         // (a closure's: with the region signature the bound it is passed to (or its annotations) gives it)

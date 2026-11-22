@@ -2173,3 +2173,15 @@ fn closure_value_captures_outlive_the_call() {
     assert_eq!(check("fn main() {\n    let a = 0;\n    let mut b: Option<&i32> = None;\n    let mut c = || {\n        b = Some(&a);\n    };\n    c();\n    println!(\"{:?}\", b);\n}\n"), vec![]);
     assert_eq!(check("fn main() {\n    let s = 5;\n    let mut acc: Vec<&i32> = vec![];\n    let r = &s;\n    let mut c = move || {\n        acc.push(r);\n        acc.len()\n    };\n    let t = String::from(\"ab\");\n    let e = move || {\n        let x = &t;\n        x.len()\n    };\n    println!(\"{} {}\", c(), e());\n}\n"), vec![]);
 }
+
+/// A closure whose kind nothing decides that returns a closure mutating what it captures by reference: the inner
+/// closure's `&mut` of the capture is through the outer's `&mut self` (nll/issue-40510-3.rs,
+/// closures/nested-closure-escape-borrow.rs)
+#[test]
+fn closure_returning_a_closure_that_mutates_its_capture() {
+    let d = check("fn main() {\n    let mut x: Vec<()> = Vec::new();\n    || {\n        || {\n            x.push(())\n        }\n    };\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 4 && d[0].1.contains("captured variable cannot escape `FnMut` closure body"), "{d:?}");
+    let d = check("fn main() {\n    let mut x = 0;\n    || {\n        || {\n            let _y = &mut x;\n        }\n    };\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 4, "{d:?}");
+    assert_eq!(check("fn once<F: FnOnce() -> G, G: FnMut()>(f: F) -> G {\n    f()\n}\nfn main() {\n    let v = vec![1u32];\n    let f = || {\n        || v.len()\n    };\n    let n = f()();\n    let mut c = 0;\n    let mut g = || {\n        c += 1;\n        c\n    };\n    let k = g();\n    let mut w = vec![1u32];\n    let mut h = once(|| || w.push(2));\n    h();\n    println!(\"{} {} {:?}\", n, k, w);\n}\n"), vec![]);
+}

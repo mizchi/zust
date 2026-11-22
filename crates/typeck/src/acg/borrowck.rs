@@ -145,6 +145,9 @@ pub struct BkError {
 
 #[derive(Default)]
 pub struct Bk {
+    /// The body of a closure whose kind nothing decides (Insts::kind_free): a mutable loan of what it captures by
+    /// reference, returned, escapes the `FnMut` body
+    pub fnmut_ret: bool,
     /// The loans of implicit reborrows (`f(x)` with x: `&mut T`: bk_reborrow_arg)
     pub implicit: Vec<u32>,
     /// The loans that are two-phase borrows' reservations (shared loans of a `&mut self` receiver while the arguments
@@ -1366,6 +1369,15 @@ impl Bk {
                             }
                             if let Some(&ln) = through.iter().find(|&&ln| self.drop_field_borrow(&self.loans[ln as usize], st)) {
                                 errs.push(BkError { sp: self.loans[ln as usize].sp, msg: "borrow may still be in use when destructor runs (E0713)".to_string() });
+                            }
+                            // (a closure whose kind nothing decides that returns a mutable borrow of what it captures
+                            // by reference (a closure that mutates it, `|| { || x.push(()) }`): the borrow is through
+                            // the `&mut self` of a call, which it cannot outlive)
+                            if self.fnmut_ret && ls.iter().any(|&ln| {
+                                let lo = &self.loans[ln as usize];
+                                lo.mutable && self.locals.get(lo.place.local as usize).is_some_and(|l| l.via_ref)
+                            }) {
+                                errs.push(BkError { sp: *sp, msg: "captured variable cannot escape `FnMut` closure body (what is returned holds a mutable borrow of a capture)".to_string() });
                             }
                             for ln in ls {
                                 let lo = &self.loans[ln as usize];

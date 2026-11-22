@@ -2038,6 +2038,10 @@ impl Cx<'_> {
             if let Some(sp) = regionck::fnmut_escape(body, &by_ref) {
                 return Err(self.at(sp, "captured variable cannot escape `FnMut` closure body (a mutable borrow of what the closure captures is returned)".to_string()));
             }
+            // (its body's borrow check finds the rest: a closure it returns that mutates what it captures)
+            if !by_ref.is_empty() {
+                self.insts.lock().unwrap().kind_free.insert(cid);
+            }
         }
         let mut caps = vec![];
         let mut copy_caps = vec![];
