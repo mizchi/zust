@@ -505,7 +505,7 @@ impl Cx<'_> {
         self.bk.place_depth = pd;
         let (v, t) = r.map_err(|m| {
             // (エラーに、位置を持つ一番内側の式の先頭の行:桁を付ける。ACG_DEBUG_AT=1 なら式も)
-            let m = if std::env::var_os("ACG_DEBUG_AT").is_some() && !m.contains(" (at `") {
+            let m = if super::debug_at() && !m.contains(" (at `") {
                 let d = format!("{e:?}");
                 format!("{m} (at `{}`)", d.chars().take(400).collect::<String>())
             } else {
@@ -701,6 +701,9 @@ impl Cx<'_> {
                 let p = self.place(e)?;
                 let r = self.read(p);
                 if self.bk_on() && (!self.bk_ty(r.1).0 || exp_none && matches!(r.1, Ty::Ref(true, _))) {
+                    if !self.bk_ty(r.1).0 {
+                        self.drop_move_check(e)?;
+                    }
                     self.bk_acc(e, borrowck::Acc::Move);
                 }
                 // drop が要る値を値として読んだらムーブ
@@ -1106,7 +1109,7 @@ impl Cx<'_> {
                         if t == Ty::Never {
                             return Ok((None, Ty::Never));
                         }
-                        if borrowck::has_refs(self.prog, ret, 0) {
+                        if self.bk_ty(ret).1 {
                             { let _ = &srcs; self.bk_ret(e); }
                         }
                         self.rg_ret(e);
@@ -1842,6 +1845,12 @@ impl Cx<'_> {
                         let mut p = bp.clone();
                         p.proj.push(borrowck::Proj::Field(f));
                         let a = if borrowck::is_copy(self.prog, ft, 0) { borrowck::Acc::Read } else { borrowck::Acc::Move };
+                        // (moving a field out of a value whose type implements `Drop`: E0509)
+                        if a == borrowck::Acc::Move && self.bk.level >= 1 {
+                            if let Some(n) = self.user_drop_name(bsid) {
+                                return err(err_pos(base), format!("cannot move out of type `{n}`, which implements the `Drop` trait (E0509)"));
+                            }
+                        }
                         self.bk_acc_place(p, a, err_pos(base));
                     }
                 }
@@ -2005,7 +2014,7 @@ impl Cx<'_> {
             .or(hint.as_ref().and_then(|h| h.1).filter(|&t| !prog.has_param(t)))
             .or_else(|| self.lets.get(&(c as *const Expr as usize)).copied().filter(|&t| !prog.has_param(t)))
             .or(hint.as_ref().and_then(|h| h.1));
-        if std::env::var_os("ACG_DEBUG_CLO").is_some() {
+        if super::debug_clo() {
             eprintln!("closure k={k} ret_ann={:?} hint={:?} rec={:?} -> {:?}", cd.ret_ann, hint, self.lets.get(&(c as *const Expr as usize)), sol[ri]);
         }
         if let Some(a) = exp_args {

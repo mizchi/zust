@@ -238,6 +238,8 @@ impl Cx<'_> {
         let merge = self.b.create_block();
         let mut result_ty: Option<Ty> = None;
         let mut param: Option<Value> = None;
+        // (the places a guard must not change, made at the first guard: see below)
+        let mut guard_places: Option<Vec<(borrowck::BPlace, bool)>> = None;
         // 各 arm を上から順に試す (判定 → 束縛 → ガード → 本体)
         for arm in arms {
             let next = self.b.create_block();
@@ -256,6 +258,38 @@ impl Cx<'_> {
             r?;
             if self.owned_binds > ob {
                 self.release_outer(scrut, sflag)?;
+            }
+            // (a guard must not change what the match tests: rustc's fake borrows (E0510). The places the patterns
+            // test (`.0` of `(None, _)`; `match x { y if .. }` and `S { .. }` test nothing), and the deref prefixes of
+            // the place bindings are bound from (`ptr` of `match *ptr { v if .. }`))
+            if guard_places.is_none() && arm.guard.is_some() && self.bk_on() {
+                if let Some((sp, _)) = &bk_sp {
+                    let mut gs: Vec<(borrowck::BPlace, bool)> = vec![];
+                    let mut tested = vec![];
+                    for a in arms {
+                        self.tested_places(&a.pat, sp, place.ty(), &mut tested, 0);
+                    }
+                    gs.extend(tested.into_iter().map(|p| (p, true)));
+                    let mut names = vec![];
+                    for a in arms {
+                        crate::ast_closure::pat_idents(&a.pat, &mut names);
+                    }
+                    if names.iter().any(|n| n.starts_with(|c: char| c.is_lowercase() || c == '_')) {
+                        for (i, x) in sp.proj.iter().enumerate() {
+                            if matches!(x, borrowck::Proj::Deref(_) | borrowck::Proj::Shr) {
+                                gs.push((borrowck::BPlace { local: sp.local, proj: sp.proj[..i].to_vec() }, false));
+                            }
+                        }
+                    }
+                    guard_places = Some(gs);
+                }
+            }
+            let guard_place = match (&arm.guard, &guard_places) {
+                (Some(_), Some(gs)) if self.bk_on() && !gs.is_empty() => Some(gs.clone()),
+                _ => None,
+            };
+            if let Some(gp) = &guard_place {
+                self.bk_ev(borrowck::Ev::Guard(Some(gp.clone())));
             }
             if let Some(g) = &arm.guard {
                 // (`P if let Q = e && c => ..`: each `let` of the guard tests and binds in the arm's scope, each other
@@ -293,6 +327,9 @@ impl Cx<'_> {
                         self.require(c, next);
                     }
                 }
+            }
+            if guard_place.is_some() {
+                self.bk_ev(borrowck::Ev::Guard(None));
             }
             let t0 = self.temps.len();
             let (v, t) = self.expr(&arm.body, result_ty.or(expected))?;
@@ -345,7 +382,7 @@ impl Cx<'_> {
         // block: `(if let Some(_) = c.borrow().first() { 1 } else { 0 }, c.borrow_mut().len())` does not panic. Not
         // when the result may borrow from them, which rustc rejects (E0716) and zustc does not see yet; never the
         // result itself)
-        if tt != Ty::Never && !borrowck::has_refs(self.prog, tt, 0) {
+        if tt != Ty::Never && !self.bk_ty(tt).1 {
             let n = self.temps.len();
             let ts: Vec<Owned> = self.temps[t0.min(n)..t1.min(n)].iter().filter(|o| tv.is_none_or(|v| o.loc != Loc::Ptr(v))).copied().collect();
             for o in ts.into_iter().rev() {
@@ -518,6 +555,91 @@ impl Cx<'_> {
         let c = self.b.ins().icmp(IntCC::Equal, tv, d);
         self.require(c, fail);
         Ok(())
+    }
+
+    /// The places pattern p tests, from the place of the value it matches (of type t): rustc's shallow fake borrows
+    /// of a match with guards. A tuple or a struct is not tested, only what its fields' patterns test (`(None, _)`
+    /// tests `.0`); where a part's place is not followed, the place of the whole
+    fn tested_places(&self, p: &Pat, place: &borrowck::BPlace, t: Ty, out: &mut Vec<borrowck::BPlace>, depth: u32) {
+        let push = |out: &mut Vec<borrowck::BPlace>, pl: &borrowck::BPlace| {
+            if !out.contains(pl) {
+                out.push(pl.clone());
+            }
+        };
+        let field = |pl: &borrowck::BPlace, f: String| {
+            let mut q = pl.clone();
+            q.proj.push(borrowck::Proj::Field(f));
+            q
+        };
+        if depth > 8 {
+            return push(out, place);
+        }
+        // (a reference matched by a pattern that is not a reference's: what it points to is tested)
+        if let (Ty::Ref(m, i), Pat::Tuple(_) | Pat::TupleStruct(..) | Pat::Struct(..) | Pat::Lit(_) | Pat::Range(..) | Pat::Path(_) | Pat::Slice(_)) = (t, p) {
+            let mut q = place.clone();
+            q.proj.push(if m { borrowck::Proj::Deref(false) } else { borrowck::Proj::Shr });
+            return self.tested_places(p, &q, *i, out, depth + 1);
+        }
+        match p {
+            Pat::Wild | Pat::Rest => {}
+            Pat::Ident(_, _, n, sub) if n.starts_with(|c: char| c.is_lowercase() || c == '_') => {
+                if let Some(s) = sub {
+                    self.tested_places(s, place, t, out, depth + 1);
+                }
+            }
+            Pat::Ref(_, i) => match t {
+                Ty::Ref(m, it) => {
+                    let mut q = place.clone();
+                    q.proj.push(if m { borrowck::Proj::Deref(false) } else { borrowck::Proj::Shr });
+                    self.tested_places(i, &q, *it, out, depth + 1);
+                }
+                _ => push(out, place),
+            },
+            Pat::Or(ps) => {
+                for q in ps {
+                    self.tested_places(q, place, t, out, depth + 1);
+                }
+            }
+            Pat::Tuple(ps) => match t {
+                Ty::Struct(sid) if self.prog.is_tuple(sid) => {
+                    let fs = &self.prog.structs[sid as usize].fields;
+                    match Self::tuple_fields(ps.iter(), fs.len(), SP) {
+                        Ok(v) => {
+                            for (i, q) in v {
+                                self.tested_places(q, &field(place, i.to_string()), fs[i].1, out, depth + 1);
+                            }
+                        }
+                        Err(_) => push(out, place),
+                    }
+                }
+                _ => push(out, place),
+            },
+            // (a struct's pattern (not an enum's variant): what its fields' patterns test)
+            Pat::TupleStruct(..) | Pat::Struct(..) if matches!(t, Ty::Struct(sid) if self.prog.structs[sid as usize].variants.is_empty() && !self.prog.is_tuple(sid)) => {
+                let Ty::Struct(sid) = t else { return };
+                let fs = &self.prog.structs[sid as usize].fields;
+                match p {
+                    Pat::TupleStruct(_, ps) => match Self::tuple_fields(ps.iter(), fs.len(), SP) {
+                        Ok(v) => {
+                            for (i, q) in v {
+                                self.tested_places(q, &field(place, i.to_string()), fs[i].1, out, depth + 1);
+                            }
+                        }
+                        Err(_) => push(out, place),
+                    },
+                    Pat::Struct(_, named, _) => {
+                        for (n, q) in named {
+                            match fs.iter().find(|f| f.0 == *n) {
+                                Some(f) => self.tested_places(q, &field(place, n.clone()), f.1, out, depth + 1),
+                                None => push(out, place),
+                            }
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            _ => push(out, place),
+        }
     }
 
     /// パターン列 (`V(a, .., z)`) とフィールド列の対応 (`..` は途中を飛ばす)
@@ -1536,6 +1658,138 @@ impl Cx<'_> {
     pub(crate) fn release(&mut self, e: &Expr, flag: Option<StackSlot>) -> R<()> {
         self.deref_move_check(e)?;
         self.release_inner(e, flag)
+    }
+
+    /// A move of a field (`s.f`, `s.a.b`) out of a value whose type implements `Drop` (E0509): its `drop` would see
+    /// the field moved. A move out of a static (E0507)
+    pub(crate) fn drop_move_check(&mut self, e: &Expr) -> R<()> {
+        if self.bk.level == 0 {
+            return Ok(());
+        }
+        if let Some(n) = self.drop_owner(e) {
+            return err(expr_start(e), format!("cannot move out of type `{n}`, which implements the `Drop` trait (E0509)"));
+        }
+        let mut cur = strip_paren(e);
+        while let Expr::Field(b, _, _) = cur {
+            cur = strip_paren(b);
+        }
+        // (a static (or a field of one) moved out: E0507, also by a module's path (`m::BAR`). Not a constant, each
+        // of whose uses is a new value)
+        if let Expr::Path(None, p) = cur {
+            let ci = match ident_of(p) {
+                Some(id) if self.lookup(id).is_none() => self.prog.const_index.get(id).copied(),
+                Some(_) => None,
+                None => self.static_of(cur),
+            };
+            if let (Some(ci), Some(id)) = (ci, p.segs.last()) {
+                if self.prog.consts[ci as usize].stat.is_some() {
+                    return err(expr_start(e), format!("cannot move out of static item `{}` (E0507)", id.name));
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// The type implementing `Drop` that e (a field, `d.f.g`) is a part of: the innermost such owner's name
+    pub(crate) fn drop_owner(&mut self, e: &Expr) -> Option<String> {
+        let mut cur = strip_paren(e);
+        while let Expr::Field(b, _, _) = cur {
+            // (`b.f` with b: Box<D>: a field of the D the box owns)
+            let mut t = self.peek(b);
+            while let Some(Ty::Box(i)) = t {
+                t = Some(*i);
+            }
+            if let Some(Ty::Struct(sid)) = t {
+                if let Some(n) = self.user_drop_name(sid) {
+                    return Some(n);
+                }
+            }
+            cur = strip_paren(b);
+        }
+        None
+    }
+
+    /// A pattern that binds by value a part of a value whose type implements `Drop` (`let S { f: s } = ..;`, also
+    /// deeper: `S { f: Some(s) }`): E0509 at the scrutinee `sp`, as rustc's "cannot move out of here". `owner`: the
+    /// type implementing `Drop` the scrutinee (t) is a part of
+    pub(crate) fn drop_pat_check(&mut self, pat: &Pat, t: Ty, sp: Sp, owner: Option<&str>) -> R<()> {
+        if let (Some(n), Pat::Ident(false, _, _, _)) = (owner, pat) {
+            if unit_variant_ident(self.prog, pat).is_none() && const_lit_pat(self.prog, pat).is_none() && !borrowck::is_copy(self.prog, t, 0) {
+                return err(sp, format!("cannot move out of type `{n}`, which implements the `Drop` trait (E0509)"));
+            }
+        }
+        // (`D { f: [s] }`: an array's elements; `rest @ ..` binds the rest by value)
+        if let (Pat::Slice(ps), Ty::Array(elem, _)) = (pat, t) {
+            for p in ps {
+                match p {
+                    Pat::Rest => {}
+                    Pat::Ident(_, _, _, Some(sub)) if matches!(**sub, Pat::Rest) => self.drop_pat_check(p, t, sp, owner)?,
+                    _ => self.drop_pat_check(p, *elem, sp, owner)?,
+                }
+            }
+            return Ok(());
+        }
+        let Ty::Struct(sid) = t else { return Ok(()) };
+        let sd = &self.prog.structs[sid as usize];
+        let fields: Vec<(&Pat, Ty)> = match pat {
+            Pat::Ident(_, _, _, Some(sub)) => return self.drop_pat_check(sub, t, sp, owner),
+            Pat::Or(ps) => {
+                for p in ps {
+                    self.drop_pat_check(p, t, sp, owner)?;
+                }
+                return Ok(());
+            }
+            // (both sides of a `..`: `D(.., s)`)
+            Pat::Tuple(ps) if !sd.is_enum => match Self::tuple_fields(ps.iter(), sd.fields.len(), sp) {
+                Ok(fs) => fs.into_iter().filter_map(|(i, p)| sd.fields.get(i).map(|f| (p, f.1))).collect(),
+                Err(_) => return Ok(()),
+            },
+            Pat::Struct(path, fs, _) => {
+                let defs = if sd.is_enum {
+                    let vn = path.segs.last().map(|s| s.name.as_str()).unwrap_or("");
+                    match sd.variants.iter().find(|v| v.name == vn) {
+                        Some(v) => &v.fields,
+                        None => return Ok(()),
+                    }
+                } else {
+                    &sd.fields
+                };
+                fs.iter().filter_map(|(n, p)| defs.iter().find(|f| f.0 == *n).map(|f| (p, f.1))).collect()
+            }
+            Pat::TupleStruct(path, ps) => {
+                let defs = if sd.is_enum {
+                    let vn = path.segs.last().map(|s| s.name.as_str()).unwrap_or("");
+                    match sd.variants.iter().find(|v| v.name == vn) {
+                        Some(v) => &v.fields,
+                        None => return Ok(()),
+                    }
+                } else {
+                    &sd.fields
+                };
+                // (both sides of a `..`: `D(.., s)`)
+                match Self::tuple_fields(ps.iter(), defs.len(), sp) {
+                    Ok(fs) => fs.into_iter().filter_map(|(i, p)| defs.get(i).map(|f| (p, f.1))).collect(),
+                    Err(_) => return Ok(()),
+                }
+            }
+            _ => return Ok(()),
+        };
+        let drop = self.user_drop_name(sid);
+        let owner = drop.as_deref().or(owner).map(str::to_string);
+        for (p, ft) in fields {
+            self.drop_pat_check(p, ft, sp, owner.as_deref())?;
+        }
+        Ok(())
+    }
+
+    /// The name of a struct of the program's that implements `Drop` (not the prelude's, whose fields are not seen)
+    pub(crate) fn user_drop_name(&self, sid: u32) -> Option<String> {
+        let base = self.prog.base_of(sid);
+        let prelude = self.prog.struct_item.get(base as usize).is_some_and(|&i| i >= self.prog.prelude_from);
+        if prelude || self.prog.closure_of_struct.contains_key(&base) || !self.prog.impls.contains(&(base, "Drop".to_string())) {
+            return None;
+        }
+        Some(self.prog.tn(Ty::Struct(sid)))
     }
 
     /// a pattern moved a value out of `*rc` (an Rc / a Deref type of the program's): E0507, as `let x = *rc;`
