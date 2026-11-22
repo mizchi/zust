@@ -10,8 +10,6 @@ What it rewrites (anything else in README.md is left as written):
   - `kpi`: the KPI table, from ci-dir/zustc.json and ci-dir/analyzer.json (bench/ci_bench.py)
   - `ui`: the tests/ui table, from the rust_ui.py summary (--json)
 - inline values right after a marker:
-  - `<!-- total:KIND -->65.9% (1572 / 2385)`: the pass rate of one tests/ui kind (run-pass, check-pass, build-pass,
-    compile-fail)
   - `<!-- ui:DIR,DIR -->72.5%`: run-pass + check-pass + build-pass of those tests/ui directories, from the per-test
     results (rust_ui.py --results)
   - `<!-- cf:DIR,DIR -->38.0%`: compile-fail of those directories
@@ -44,19 +42,23 @@ def kpi_table(z, a):
     def v(d, k, fmt):
         return fmt.format(d[k]) if k in d else "-"
     lines = ["| KPI | gen1000 | gen5000 |", "|---|---:|---:|"]
-    for label, key, fmt in (
-        ("cold build", "build cold", "{:.0f} ms"),
-        ("no-op build", "build noop", "{:.1f} ms"),
-        ("build after editing one function", "build edit 1 fn", "{:.1f} ms"),
-        ("`check`", "check", "{:.0f} ms"),
-        ("no-op build (instructions)", "build noop instructions", "{:.1f} M"),
-        ("edit one function (instructions)", "build edit 1 fn instructions", "{:.1f} M"),
-        ("`check` (instructions)", "check instructions", "{:.1f} M"),
-        ("build cache on disk", "cache", "{:.1f} KiB"),
-        ("binary", "binary", "{:.1f} KiB"),
-        ("cold build peak RSS", "build cold peak RSS", "{:.1f} MiB"),
+
+    def cell(n, key, fmt, ins):
+        # a time, and its instruction count (valgrind) when there is one: "21.8 ms (124.7 M)"
+        t = v(z, f"{n} {key}", fmt)
+        if ins and f"{n} {key} instructions" in z:
+            t += f" ({z[f'{n} {key} instructions']:.1f} M)"
+        return t
+    for label, key, fmt, ins in (
+        ("cold build", "build cold", "{:.0f} ms", False),
+        ("no-op build", "build noop", "{:.1f} ms", True),
+        ("build after editing one function", "build edit 1 fn", "{:.1f} ms", True),
+        ("`check`", "check", "{:.0f} ms", True),
+        ("build cache on disk", "cache", "{:.1f} KiB", False),
+        ("binary", "binary", "{:.1f} KiB", False),
+        ("cold build peak RSS", "build cold peak RSS", "{:.1f} MiB", False),
     ):
-        lines.append(f"| {label} | {v(z, f'gen1000 {key}', fmt)} | {v(z, f'gen5000 {key}', fmt)} |")
+        lines.append(f"| {label} | {cell('gen1000', key, fmt, ins)} | {cell('gen5000', key, fmt, ins)} |")
     lsp = [f"{q} {v(a, f'lsp {q} p50', '{:.2f} ms')}" for q in ("definition", "hover", "completion", "references", "rename")]
     lines += ["", "| zust-analyzer (zustc's own sources) | |", "|---|---:|",
               "| p50: " + ", ".join(q.split()[0] for q in lsp) + " | " + " / ".join(q.split(" ", 1)[1] for q in lsp) + " |",
@@ -118,10 +120,6 @@ def main():
     if ui:
         kinds = ui["kinds"]
         block("ui", ui_table(kinds))
-        for k in KINDS:
-            d = kinds[k]
-            s = re.sub(rf"(<!-- total:{k} -->)[0-9.]+% \(\d+ / \d+\)",
-                       lambda m: f"{m.group(1)}{d['pass'] / d['applicable'] * 100:.1f}% ({d['pass']} / {d['applicable']})", s)
     if os.path.exists(ui_results):
         c = per_dir(ui_results)
 

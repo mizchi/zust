@@ -26,8 +26,11 @@ Options:
   directory up.
 - `-r` / `--release`: zustc's `-O`.
 - `-F` / `--features a,b`, `--all-features`, `--no-default-features`. `dep/feat` names a dependency's feature.
-- `--target <triple>`: `x86_64-unknown-linux-gnu` (the default). `wasm32-unknown-unknown` is accepted, but zustc's
-  workspace build does not take it yet.
+- `--target <triple>`: `x86_64-unknown-linux-gnu` (the default) or `wasm32-unknown-unknown`.
+  - For wasm32, each bin is one wasm module, `target/zust/wasm32-unknown-unknown/<profile>/<bin>.wasm`.
+  - `zurgo run` runs it as cargo does: with the program in `CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_RUNNER`, split on
+    white space, then the module and the arguments. In this repository the runner is `node tests/wasm/run.mjs`.
+  - Build scripts are still built for the host and run on it.
 - `--bin <name>`, `-j <n>`, `--time` (zustc's timings), `--no-cache`.
 - `--build-script-compiler auto|zustc|rustc`: what compiles build scripts (below). `auto`, the default, tries zustc
   and falls back to rustc.

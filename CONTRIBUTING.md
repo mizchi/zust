@@ -323,20 +323,23 @@ python3 bench/ci_bench.py --out-dir out/ci
 ## English and Japanese documents
 
 `README.md` is in English only: it holds the overview, the measured numbers and what is supported in one
-place; the roadmap is in this document. The measured numbers in it (between `<!-- auto:.. -->` markers, and after `<!-- total:.. -->`, `<!-- ui:.. -->`
-and `<!-- cf:.. -->` markers) are rewritten by CI (`scripts/update_readme.py`, run by bench.yml after each push to
+place; the roadmap is in this document. The measured numbers in it (between `<!-- auto:.. -->` markers, and after `<!-- ui:.. -->` and `<!-- cf:.. -->`
+markers) are rewritten by CI (`scripts/update_readme.py`, run by bench.yml after each push to
 main); do not edit them by hand. `CONTRIBUTING.md` / `CONTRIBUTING.ja.md` and `docs/X.md` / `docs/ja/X.md` (reports
 included) are English / Japanese pairs. When you change one, change the other
 too. [jev-lint](https://github.com/mizchi/jev-lint) `docs` asks a model whether each pair still says the same thing.
 
 - `scripts/docs_manifest.py` writes the jev-lint manifests (`.jev-lint/documents*.json`) from the pairs;
   `--check` fails if a file has no counterpart or a manifest is out of date.
-- `scripts/docs_check.sh` replays the recorded verdicts (`.jev-lint/*-baseline.json`) against the current documents.
-  It is offline and needs no API key; CI runs it. It fails if a pair contradicts. A manifest whose documents changed
-  after its verdict was recorded cannot be judged without an API key: with no `TYPESAFE_API_KEY` it is skipped with a
-  warning (`DOCS_CHECK_STRICT=1` makes it fail instead, exit 3). The pairs and the manifests are checked either way.
-- `scripts/docs_check.sh --update` asks the model again for the manifests whose documents changed and rewrites the
-  records. It needs `TYPESAFE_API_KEY` (or `TYPESAFEAI_API_KEY`) from https://typesafe.ai; the document text is
+- `scripts/docs_check.sh` reads the recorded verdicts for the current documents from the ledger
+  (`.jev-lint/judgments/`, jev-lint's judgment ledger: append-only files that one branch merges with another as their
+  union, and whose answers are keyed by the text compared, the question and the model). It is offline and needs no API
+  key; CI runs it. It fails if a pair contradicts. A pair whose documents changed since its verdict was recorded has
+  no answer in the ledger and cannot be judged without an API key: with no `TYPESAFE_API_KEY` its manifest is skipped
+  with a warning (`DOCS_CHECK_STRICT=1` makes it fail instead, exit 3). The pairs and the manifests are checked
+  either way.
+- `scripts/docs_check.sh --update` asks the model about the pairs the ledger has no answer for, and adds the answers
+  to the ledger. It needs `TYPESAFE_API_KEY` (or `TYPESAFEAI_API_KEY`) from https://typesafe.ai; the document text is
   sent to that API. A full run of all 64 pairs costs about $0.03.
 
 Enable the pre-commit hook once per clone:
@@ -345,7 +348,7 @@ Enable the pre-commit hook once per clone:
 git config core.hooksPath .githooks
 ```
 
-When a commit touches Markdown, the hook runs `scripts/docs_check.sh --update`, adds the updated records to the
+When a commit touches Markdown, the hook runs `scripts/docs_check.sh --update`, adds the new answers to the
 commit, and stops the commit if a pair contradicts. A verdict is a model's judgment: read the reported pair and fix
 whichever side is wrong (or, if the finding is wrong, commit with `--no-verify`).
 
