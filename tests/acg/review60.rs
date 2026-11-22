@@ -41,4 +41,7 @@ fn main() {
     let _d: T = <T as Factory>::clone();
     let p = Pair::<u8, _> { a: 3, b: true };
     println!("{} {}", p.a, p.b);
+    // (a destructuring let of such a literal: its temporaries extended too)
+    let Foo { value: w } = Foo::<&'_ String> { value: &String::from("ab") };
+    println!("{w}");
 }
