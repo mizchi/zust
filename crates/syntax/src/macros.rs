@@ -207,6 +207,10 @@ fn take_frag(toks: &[TokenTree], kind: &str, stop: Option<&TokenTree>) -> Option
             // name go on)
             let mut ty_end = false;
             let mut quote = false;
+            // (the type so far ends in a name: `Fn(u8)`'s parentheses go on it, `Vec<u8> (bool, char)`'s start the next)
+            let mut named = false;
+            // (`m!` before its group: a type macro, `m!(u8)` / `m![u8]`)
+            let mut mac = false;
             while n < toks.len() {
                 if angle > 0 {
                     if let TokenTree::Punct(p) = &toks[n] {
@@ -216,6 +220,7 @@ fn take_frag(toks: &[TokenTree], kind: &str, stop: Option<&TokenTree>) -> Option
                             '>' if !(n > 0 && matches!(&toks[n - 1], TokenTree::Punct(q) if q.as_char() == '-' && q.spacing() == Spacing::Joint)) => {
                                 angle -= 1;
                                 ty_end = angle == 0;
+                                named = false;
                             }
                             ';' => break,
                             _ => {}
@@ -232,20 +237,26 @@ fn take_frag(toks: &[TokenTree], kind: &str, stop: Option<&TokenTree>) -> Option
                                 break;
                             }
                             ty_end = !quote && !matches!(w.as_str(), "dyn" | "impl" | "mut" | "const" | "fn" | "unsafe" | "extern" | "for" | "as");
+                            named = ty_end;
+                            mac = false;
                             quote = false;
                         }
                         TokenTree::Group(g) => {
-                            if ty_end && g.delimiter() != Delimiter::Parenthesis {
+                            if ty_end && !mac && (g.delimiter() != Delimiter::Parenthesis || !named) {
                                 break;
                             }
                             ty_end = true;
+                            named = false;
+                            mac = false;
                         }
                         TokenTree::Punct(p) => {
                             if ty_end && matches!(p.as_char(), '&' | '*') {
                                 break;
                             }
                             quote = p.as_char() == '\'';
+                            mac = p.as_char() == '!' && named;
                             ty_end = p.as_char() == '!';
+                            named = false;
                         }
                         TokenTree::Literal(_) => {
                             if ty_end {

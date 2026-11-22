@@ -1728,6 +1728,39 @@ pub fn rename_module_collisions_fix(src: &str, crates: &[String], fix: &mut Vec<
         }
         mod_of_path.get(&base).copied()
     };
+    // (a module imported by `use`, under its own name or another: `use util as u;` with the crate `util`, or
+    // `use crate::geom::shape;`. (scope, the name used) → the module, so `u::calls()` is `util::calls()`)
+    let mut mod_alias: LMap<(usize, Vec<u8>), usize> = LMap::default();
+    let mut k = 0;
+    while k < toks.len() {
+        if !is_id(k, b"use") {
+            k += 1;
+            continue;
+        }
+        let sc = scope_of(k);
+        let mut e = k;
+        while e < toks.len() && !is_sym(e, b';') {
+            e += 1;
+        }
+        let mut items = vec![];
+        use_walk(&toks, s, k + 1, e, vec![], &mut items);
+        for (path, local) in items {
+            if local.as_slice() != b"*" && local.as_slice() != b"_" && !path.is_empty() {
+                if let Some(m) = resolve_mod(sc, &path).filter(|&m| m != usize::MAX) {
+                    mod_alias.insert((sc, local), m);
+                }
+            }
+        }
+        k = e + 1;
+    }
+    let resolve_mod = |from: usize, segs: &[Vec<u8>]| -> Option<usize> {
+        if let Some(&m) = segs.first().and_then(|f| mod_alias.get(&(from, f.clone()))) {
+            let mut p = mods[m].0.clone();
+            p.extend(segs[1..].iter().cloned());
+            return if segs.len() == 1 { Some(m) } else { mod_of_path.get(&p).copied() };
+        }
+        resolve_mod(from, segs)
+    };
     let renamed_in = |m: usize, n: &[u8]| -> Option<Vec<u8>> { renamed_map.get(&(m, n.to_vec())).cloned() };
     // use 文で取り込んだ名前: (スコープ, 使う名前) → 新しい名前。use 文のトークン範囲は書き換えない
     let mut imports: Vec<(usize, Vec<u8>, Vec<u8>)> = vec![];

@@ -492,6 +492,11 @@ fn strip_toks(src: &str, c: &CfgSet, select: &mut bool, env: &mut bool, externs:
             if t(e) == b";" {
                 externs.push((toks[i].1, toks[e].2));
                 blank(&mut out, toks[i].1, toks[e].2);
+                // (`extern crate util as u;` names the crate `u` too: `use util as u;` in its place, as long or shorter)
+                if e == i + 5 && t(i + 3) == b"as" && t(i + 4) != b"_" && !matches!(t(i + 2), b"std" | b"core" | b"alloc") {
+                    let u = format!("use {} as {};", String::from_utf8_lossy(t(i + 2)), String::from_utf8_lossy(t(i + 4)));
+                    out[toks[i].1..toks[i].1 + u.len()].copy_from_slice(u.as_bytes());
+                }
                 changed = true;
                 i = e + 1;
                 continue;
@@ -609,6 +614,7 @@ mod tests {
         assert_eq!(run("[1, #[cfg(test)] 2, 3]", &[]), "[1, 3]");
         assert_eq!(run("m! { if #[cfg(test)] { a } } macro_rules! n { () => { #[cfg(test)] fn f() {} } }", &[]), "m! { if #[cfg(test)] { a } } macro_rules! n { () => { #[cfg(test)] fn f() {} } }");
         assert_eq!(run("#[cfg(feature = \"alloc\")] extern crate alloc; extern crate std as s; fn f() {}", &["alloc"]), "fn f() {}");
+        assert_eq!(run("extern crate util as u; extern crate geom as _; fn f() {}", &[]), "use util as u; fn f() {}");
     }
 }
 
