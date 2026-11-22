@@ -1605,3 +1605,14 @@ fn static_copy_impl() {
     let ok = "#[derive(Clone)] struct Bar<'a>(&'a u32);\nimpl<'a> Copy for Bar<'a> {}\nstatic N: u32 = 3;\nfn main() {\n    let s = 2;\n    let a = Foo(&N);\n    drop(a);\n    drop(a);\n    let b = Bar(&s);\n    drop(b);\n    drop(b);\n    let c = Foo(&7);\n    let e = (c, &s);\n    let d = e;\n    drop(d);\n}\n";
     assert_eq!(check(&format!("{pre}{ok}")), vec![]);
 }
+
+/// A type alias written without its lifetimes that stands for a Box (`Box<B>` with `type B<'a> = Box<&'a isize>`):
+/// each of its regions is elided (regions/regions-infer-paramd-indirect.rs)
+#[test]
+fn alias_of_box_elided() {
+    let pre = "type A<'a> = &'a isize;\ntype B<'a> = Box<A<'a>>;\nstruct C<'a> { f: Box<B<'a>> }\n";
+    let d = check(&format!("{pre}impl<'a> C<'a> {{\n    fn set_f_bad(&mut self, b: Box<B>) {{\n        self.f = b;\n    }}\n}}\nfn main() {{}}\n"));
+    assert!(d.len() == 1 && d[0].0 == 6 && d[0].1.contains("lifetime may not live long enough"), "{d:?}");
+    let ok = "impl<'a> C<'a> {\n    fn set_f_ok(&mut self, b: Box<B<'a>>) { self.f = b; }\n    fn get(&self) -> &B { &self.f }\n}\nfn g(b: Box<B>) -> isize { **b + 1 }\nfn main() {}\n";
+    assert_eq!(check(&format!("{pre}{ok}")), vec![]);
+}

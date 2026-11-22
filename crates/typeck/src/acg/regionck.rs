@@ -1150,10 +1150,24 @@ impl RgSt {
         if codes.is_some_and(|c| c.contains(&R_UNKNOWN)) {
             return None;
         }
+        let u0 = self.univ.len();
         let mut c = Codes { codes, pos: 0, ok: true, parent: None };
         let mut out = vec![];
         self.inst(prog, t, &mut c, lts, targs, elided, &mut out, 0);
-        (c.ok && codes.is_none_or(|x| c.pos == x.len())).then_some(out)
+        if c.ok && codes.is_none_or(|x| c.pos == x.len()) {
+            return Some(out);
+        }
+        // (a type alias written without its lifetimes that stands for a Box or a struct (`Box<B>` with
+        // `type B<'a> = Box<&'a u8>`): its marker is taken for the Box's own. Codes that name no region elide each
+        // region, wherever it is, so the type alone gives them; not an alias that fixes a lifetime (see inst))
+        if codes.is_some_and(|x| x.iter().all(|&c| c == R_ELIDED || c == R_ELIDED_ADT)) && !prog.alias_fixed_lt {
+            self.univ.truncate(u0);
+            let mut c = Codes { codes: None, pos: 0, ok: true, parent: None };
+            let mut out = vec![];
+            self.inst(prog, t, &mut c, lts, targs, elided, &mut out, 0);
+            return c.ok.then_some(out);
+        }
+        None
     }
 
     /// sub <: sup at type t (the value of sub flows where sup is expected)
