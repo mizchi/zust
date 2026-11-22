@@ -2020,6 +2020,12 @@ impl Emitter {
 
     pub fn bswap(&mut self, a: Value) -> Value {
         let t = self.value_type(a);
+        // (i128: the low half of the result is the high half's bytes reversed, the high half the low half's)
+        if t == Type::I128 {
+            let (lo, hi) = self.isplit(a);
+            let (l, h) = (self.bswap(hi), self.bswap(lo));
+            return self.iconcat(l, h);
+        }
         self.load_rax(a);
         match t {
             Type::I16 => self.emit(&[0x66, 0xC1, 0xC0, 0x08]), // rol ax, 8

@@ -11,7 +11,7 @@ mod stamp;
 
 fn usage() -> ! {
     eprintln!(
-        "usage: zustc <input.rs> [-o out] [-O] [--backend=cranelift|minclif] [--target=wasm32-unknown-unknown] [--linker=NAME] [--features=a,b] [-L dir] [--time] [-j N] [--no-cache] [--edition=2015|2018|2021|2024]\n       zustc build <workspace-file> [-o out-dir] [-O] [--backend=..] [-j N] [--time] [--no-cache]\n       zustc check <input.rs> [--edition=..]"
+        "usage: zustc <input.rs> [-o out] [-O] [--backend=cranelift|minclif] [--target=wasm32-unknown-unknown] [--linker=NAME] [--features=a,b] [-L dir] [--time] [-j N] [--no-cache] [--edition=2015|2018|2021|2024]\n       zustc build <workspace-file> [-o out-dir] [-O] [--backend=..] [--target=..] [-j N] [--time] [--no-cache]\n       zustc check <input.rs> [--edition=..]"
     );
     std::process::exit(2)
 }

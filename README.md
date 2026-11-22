@@ -269,7 +269,8 @@ zustc build workspace.txt -o target
 
   In a value, `%`, `#` and white space are written `%XX`. A name `env!` does not find there is looked up in zustc's
   own environment, as rustc does.
-- Each crate gets its own object file and cache, and they are linked at the end.
+- Each crate gets its own object file and cache, and they are linked at the end. With
+  `--target wasm32-unknown-unknown`, the crates' functions and data are put into one wasm module per bin.
 - Changing the body of a function in a crate that others depend on does not recompile the dependents; zustc only
   relinks.
 - See `tests/workspace/` for an example.
@@ -286,7 +287,9 @@ zurgo run
 ```
 
 - Commands: `build`, `run`, `metadata` (the JSON of `cargo metadata`), `clean`, with cargo's flags for them.
-- Output goes to `target/zust/<profile>/`.
+- Output goes to `target/zust/<profile>/`. With `--target wasm32-unknown-unknown`, each bin is a wasm module in
+  `target/zust/wasm32-unknown-unknown/<profile>/`, and `zurgo run` runs it with
+  `CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_RUNNER`, as cargo does.
 - Build scripts run as under cargo (compiled by zustc, or by rustc when zustc cannot), and their cfgs, `rustc-env` and
   `OUT_DIR` reach the crates. A proc-macro dependency is a stub: using its macros is an error.
 - Not yet: running proc macros, two versions of one crate, renamed dependencies, git dependencies, its own resolver

@@ -260,7 +260,11 @@ impl Session2 {
             return Ok(rep);
         }
         let obj_path = output.with_extension("o");
-        let same = std::fs::read(&obj_path).is_ok_and(|old| old == obj) && std::fs::read(output).is_ok();
+        // (and the executable linked from it, not before it: `-o x.cold` writes the same `x.o` as `-o x`, and a link
+        // that failed leaves its object behind)
+        let mtime = |p: &std::path::Path| std::fs::metadata(p).and_then(|m| m.modified()).ok();
+        let same = std::fs::read(&obj_path).is_ok_and(|old| old == obj)
+            && matches!((mtime(output), mtime(&obj_path)), (Some(e), Some(o)) if e >= o);
         if same {
             tm.lap("link", "skipped (object unchanged)".to_string());
         } else {
@@ -686,6 +690,131 @@ fn emit_object(a: &Analysis, ctx: &CrateCtx, insts: &Insts, user_live: &[u32], b
     }
 }
 
+/// A wasm32 crate's object: the functions and data of the module it is a part of, as `w(&funcs, &datas)` takes them
+/// (the module writer's arguments), for a bin's "link" to write the module whole
+fn write_parts(funcs: &[(String, Vec<u8>, Vec<Reloc>, bool)], datas: &[DataDef]) -> Result<Vec<u8>, String> {
+    fn uv(out: &mut Vec<u8>, mut v: u64) {
+        loop {
+            let b = (v & 0x7f) as u8;
+            v >>= 7;
+            if v == 0 {
+                out.push(b);
+                return;
+            }
+            out.push(b | 0x80);
+        }
+    }
+    fn bytes(out: &mut Vec<u8>, b: &[u8]) {
+        uv(out, b.len() as u64);
+        out.extend_from_slice(b);
+    }
+    let zz = |v: i64| ((v << 1) ^ (v >> 63)) as u64;
+    let mut out = PARTS_MAGIC.to_vec();
+    uv(&mut out, funcs.len() as u64);
+    for (n, code, rs, g) in funcs {
+        bytes(&mut out, n.as_bytes());
+        bytes(&mut out, code);
+        uv(&mut out, rs.len() as u64);
+        for r in rs {
+            uv(&mut out, r.offset as u64);
+            bytes(&mut out, r.name.as_bytes());
+            uv(&mut out, r.kind as u64);
+            uv(&mut out, zz(r.addend));
+        }
+        out.push(*g as u8);
+    }
+    uv(&mut out, datas.len() as u64);
+    for (n, d, rs, g) in datas {
+        bytes(&mut out, n.as_bytes());
+        bytes(&mut out, d);
+        uv(&mut out, rs.len() as u64);
+        for (o, rn, a) in rs {
+            uv(&mut out, *o as u64);
+            bytes(&mut out, rn.as_bytes());
+            uv(&mut out, zz(*a));
+        }
+        out.push(*g as u8);
+    }
+    Ok(out)
+}
+
+const PARTS_MAGIC: &[u8] = b"zust-wasm-parts 1\n";
+
+type Parts = (Vec<(String, Vec<u8>, Vec<Reloc>, bool)>, Vec<DataDef>);
+
+fn read_parts(d: &[u8]) -> Option<Parts> {
+    let d = d.strip_prefix(PARTS_MAGIC)?;
+    let mut r = crate::cache2::Rd { d, pos: 0 };
+    let unzz = |v: u64| ((v >> 1) as i64) ^ -((v & 1) as i64);
+    let s = |r: &mut crate::cache2::Rd| -> Option<String> {
+        let n = r.uv()? as usize;
+        Some(String::from_utf8_lossy(r.take(n)?).into_owned())
+    };
+    let mut funcs = vec![];
+    for _ in 0..r.uv()? {
+        let n = s(&mut r)?;
+        let cl = r.uv()? as usize;
+        let code = r.take(cl)?.to_vec();
+        let mut rs = vec![];
+        for _ in 0..r.uv()? {
+            let offset = r.uv()? as u32;
+            let name = s(&mut r)?;
+            let kind = r.uv()? as u32;
+            let addend = unzz(r.uv()?);
+            rs.push(Reloc { offset, name, kind, addend });
+        }
+        funcs.push((n, code, rs, r.u8()? != 0));
+    }
+    let mut datas = vec![];
+    for _ in 0..r.uv()? {
+        let n = s(&mut r)?;
+        let dl = r.uv()? as usize;
+        let bytes = r.take(dl)?.to_vec();
+        let mut rs = vec![];
+        for _ in 0..r.uv()? {
+            let o = r.uv()? as u32;
+            let rn = s(&mut r)?;
+            rs.push((o, rn, unzz(r.uv()?)));
+        }
+        datas.push((n, bytes, rs, r.u8()? != 0));
+    }
+    Some((funcs, datas))
+}
+
+/// One module's functions and data from its crates' parts. A name a crate keeps to itself (a generic instance, a
+/// string's data) may be in two crates: it gets the crate's number (`name@1`), in its definition and in the
+/// relocations of that crate that name it
+fn merge_parts(parts: Vec<Parts>) -> R<Parts> {
+    // (the global names, and which part defines each: two parts may not both define one, and a local name of the bin's
+    //  part (the first) that a dependency defines globally is renamed too, so one name never has two bodies)
+    let mut global_of: FxMap<String, usize> = FxMap::default();
+    for (ci, (fs, ds)) in parts.iter().enumerate() {
+        for n in fs.iter().filter(|f| f.3).map(|f| &f.0).chain(ds.iter().filter(|d| d.3).map(|d| &d.0)) {
+            if let Some(&cj) = global_of.get(n) {
+                if cj != ci {
+                    return Err(format!("wasm32: the symbol `{n}` is defined by two crates of the build"));
+                }
+            }
+            global_of.insert(n.clone(), ci);
+        }
+    }
+    let mut funcs = vec![];
+    let mut datas = vec![];
+    for (ci, (fs, ds)) in parts.into_iter().enumerate() {
+        let local: FxSet<String> = fs.iter().filter(|f| !f.3).map(|f| f.0.clone()).chain(ds.iter().filter(|d| !d.3).map(|d| d.0.clone())).collect();
+        let rn = |n: String| if local.contains(&n) && (ci > 0 || global_of.contains_key(&n)) { format!("{n}@{ci}") } else { n };
+        for (n, code, rs, g) in fs {
+            let rs = rs.into_iter().map(|r| Reloc { name: rn(r.name), ..r }).collect();
+            funcs.push((rn(n), code, rs, g));
+        }
+        for (n, d, rs, g) in ds {
+            let rs = rs.into_iter().map(|(o, x, a)| (o, rn(x), a)).collect();
+            datas.push((rn(n), d, rs, g));
+        }
+    }
+    Ok((funcs, datas))
+}
+
 fn trap_table_ci(prog: &Program) -> u32 {
     prog.const_index.get("__EXR_TRAP_TABLE").copied().unwrap_or(0)
 }
@@ -1036,6 +1165,11 @@ impl Session2 {
         if !self.opts.no_cache {
             self.save_cache_keep(cp.as_path())?;
             std::fs::write(fp_path.as_path(), fp).map_err(|e| format!("{}: {e}", fp_path.display()))?;
+        } else {
+            // (the fingerprints of an earlier cached build no longer describe the object written here: without them the
+            // next cached build compiles and links again)
+            let _ = std::fs::remove_file(fp_path.as_path());
+            let _ = std::fs::remove_file(out_dir.join(format!("{}.fp2", c.name).as_str()));
         }
         let mut changed = false;
         if !std::fs::read(op.as_path()).is_ok_and(|old| old == obj) {
@@ -1109,6 +1243,8 @@ impl Session2 {
         let mut h = KeyHasher::new();
         h.add(&self.cid);
         h.add(&(self.opts.opt as u8));
+        // (the backend: a wasm32 crate's object is its module parts, an x86-64 one an ELF object)
+        h.add(&self.opts.backend_id());
         h.add(&(c.lib as u8));
         add_crate_cfg(&mut h, c);
         h.add(own);
@@ -1131,9 +1267,18 @@ impl Session2 {
     /// ワークスペースをビルドする: クレートごとに .o を out_dir に作り (変わらなければ書かない)、
     /// bin ごとに自分と依存するクレートの .o をリンクする。キャッシュはこの Session2 のものを共有する
     pub fn build_workspace(&mut self, crates: &[CrateSpec], out_dir: &std::path::Path) -> R<WsReport> {
-        if self.opts.module_writer.is_some() {
-            return Err("wasm32-unknown-unknown: workspace builds are not supported yet (build one crate)".into());
+        // (wasm32: a crate's object is the parts of the module (write_parts); a bin's "link" writes the module from its
+        // parts and its dependencies' with the module writer itself)
+        let module_writer = self.opts.module_writer;
+        if module_writer.is_some() {
+            self.opts.module_writer = Some(write_parts);
         }
+        let r = self.build_workspace_in(crates, out_dir, module_writer);
+        self.opts.module_writer = module_writer;
+        r
+    }
+
+    fn build_workspace_in(&mut self, crates: &[CrateSpec], out_dir: &std::path::Path, module_writer: Option<ModuleWriter>) -> R<WsReport> {
         let t0 = now_ns();
         let order = topo(crates)?;
         mkdir_all(out_dir)?;
@@ -1208,6 +1353,7 @@ impl Session2 {
             let mut h = KeyHasher::new();
             h.add(&self.cid);
             h.add(&(self.opts.opt as u8));
+            h.add(&self.opts.backend_id());
             h.add(&(c.lib as u8));
             h.add(&cfg_keys[i]);
             h.add(&loaded[i].as_ref().unwrap().0);
@@ -1273,6 +1419,8 @@ impl Session2 {
                 kh.add(&self.cid);
                 kh.add(&text);
                 kh.add(&dd);
+                // (the expansion's cfg follows the target: `cfg(target_arch = "wasm32")` in a macro's output)
+                kh.add(&self.opts.backend_id());
                 add_crate_cfg(&mut kh, &crates[i]);
                 let pkey = key_hex(kh.finish());
                 let pp = out_dir.join(format!("{}.prep", crates[i].name).as_str());
@@ -1470,25 +1618,51 @@ impl Session2 {
             }
             let deps = all_deps(i);
             let exe_name = c.exe.as_deref().unwrap_or(c.name.as_str());
-            let exe = out_dir.join(exe_name);
-            // (what this executable is linked from: the crates' names and fingerprints, kept next to it. An unchanged
-            //  object is not enough when another bin crate wrote this executable last (`exe=` moved between crates))
+            let exe = match module_writer {
+                Some(_) => out_dir.join(format!("{exe_name}.wasm").as_str()),
+                None => out_dir.join(exe_name),
+            };
+            // (what this executable is linked from: the crates' names, fingerprints and objects' sizes and times, kept
+            //  next to it. An unchanged object is not enough when another bin crate wrote this executable last (`exe=`
+            //  moved between crates), and an object written again is linked again (a `--no-cache` build has no
+            //  fingerprints, also one that stopped before its links))
             let mut stamp = String::new();
             for j in std::iter::once(i).chain(deps.iter().copied()) {
                 stamp.push_str(&crates[j].name);
                 stamp.push(' ');
                 stamp.push_str(&std::fs::read_to_string(out_dir.join(format!("{}.fp", crates[j].name).as_str())).unwrap_or_default());
+                if let Ok(m) = std::fs::metadata(out_dir.join(format!("{}.o", crates[j].name).as_str())) {
+                    let t = m.modified().ok().and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok()).map_or(0, |d| d.as_nanos());
+                    stamp.push_str(&format!(" {} {t}", m.len()));
+                }
                 stamp.push('\n');
             }
             let stamp_path = out_dir.join(format!("{exe_name}.linked").as_str());
             if !changed[i] && !deps.iter().any(|&j| changed[j]) && exe.exists() && std::fs::read_to_string(stamp_path.as_path()).is_ok_and(|s| s == stamp) {
                 continue;
             }
+            // (no stamp while linking: a link that fails is tried again, also by a `--no-cache` build that leaves the
+            //  fingerprints as they were)
+            let _ = std::fs::remove_file(stamp_path.as_path());
             let t1 = now_ns();
             let mut objs: Vec<std::path::PathBuf> = vec![out_dir.join(format!("{}.o", c.name).as_str())];
             objs.extend(deps.iter().map(|&j| out_dir.join(format!("{}.o", crates[j].name).as_str())));
-            let refs: Vec<&std::path::Path> = objs.iter().map(|p| p.as_path()).collect();
-            crate::link::link_many(self.opts.linker.as_deref(), &refs, exe.as_path())?;
+            match module_writer {
+                Some(w) => {
+                    let mut parts = vec![];
+                    for o in &objs {
+                        let d = std::fs::read(o).map_err(|e| format!("{}: {e}", o.display()))?;
+                        parts.push(read_parts(&d).ok_or_else(|| format!("{}: not the parts of a wasm32 module (built for another target?)", o.display()))?);
+                    }
+                    let (funcs, datas) = merge_parts(parts)?;
+                    let m = w(&funcs, &datas)?;
+                    std::fs::write(exe.as_path(), m).map_err(|e| format!("{}: {e}", exe.display()))?;
+                }
+                None => {
+                    let refs: Vec<&std::path::Path> = objs.iter().map(|p| p.as_path()).collect();
+                    crate::link::link_many(self.opts.linker.as_deref(), &refs, exe.as_path())?;
+                }
+            }
             let _ = std::fs::write(stamp_path.as_path(), &stamp);
             rep.linked += 1;
             if self.opts.time {
