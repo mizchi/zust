@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795377400246,
+  "lastUpdate": 1795377402728,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -102898,6 +102898,70 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/mizchi/zust/commit/17c92ec6cd2d67bafddb5074b3d94d27c683c91d"
         },
         "date": 1795376708972,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tests/ui run-pass pass rate",
+            "value": 76.39,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui run-pass passing",
+            "value": 1822,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui check-pass pass rate",
+            "value": 83.51,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui check-pass passing",
+            "value": 1509,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui build-pass pass rate",
+            "value": 75.56,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui build-pass passing",
+            "value": 102,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui compile-fail pass rate",
+            "value": 59.7,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui compile-fail passing",
+            "value": 4393,
+            "unit": "tests"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "miz404@gmail.com",
+            "name": "Kotaro Chikuba",
+            "username": "mizchi"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "867f67263ab48ed41036263d5cf712f12eea356a",
+          "message": "Merge pull request #62 from mizchi/claude/gracious-brahmagupta-16jxdl\n\nzustscript: in-place push in JS, kept borrows of owned locals, strings and == by content in @wasm",
+          "timestamp": "2026-11-23T04:51:50+09:00",
+          "tree_id": "e4a70aae9c99e715a739729b1ac154605d996ab7",
+          "url": "https://github.com/mizchi/zust/commit/867f67263ab48ed41036263d5cf712f12eea356a"
+        },
+        "date": 1795377402213,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
