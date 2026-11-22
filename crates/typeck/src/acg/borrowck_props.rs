@@ -199,7 +199,7 @@ fn fixpoint_does_not_give_up() {
     use crate::types::Ty;
     const K: u32 = 700;
     let sp = |line: u32| Sp { line, col: 0 };
-    let local = |name: String, refs: bool| Local { name, ty: Ty::Unit, copy: false, refs, mutable: Some(true) };
+    let local = |name: String, refs: bool| Local { name, ty: Ty::Unit, copy: false, refs, mutable: Some(true), decl: crate::acg::SP };
     let place = |l: u32| BPlace { local: l, proj: vec![] };
     // (locals: 0 = x, 1 = z, 2 + i = r{i})
     let mut bk = Bk { on: true, level: 2, ..Bk::default() };

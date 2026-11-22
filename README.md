@@ -472,7 +472,8 @@ the measured numbers. The [reports](docs/reports/) explain each step.
   ([report](docs/reports/2026-11-21-06-region-check-3.md)). Part 4 (generic fns nothing calls, with placeholder
   types): every KPI within run-to-run noise ([report](docs/reports/2026-11-21-07-region-check-4.md)). Part 5 (a type
   parameter's region, E0309 / E0310): every KPI within run-to-run noise
-  ([report](docs/reports/2026-11-22-01-region-check-5.md))
+  ([report](docs/reports/2026-11-22-01-region-check-5.md)). Part 6 (placeholders' regions everywhere, the borrow
+  check's mutability): every KPI within run-to-run noise ([report](docs/reports/2026-11-22-02-region-check-6.md))
 - [ ] coherence and bounds of blanket impls: `check` time, LSP
 - [ ] real async (state machines, `poll`, an executor): build time, binary size
 - [ ] unwinding (landing pads): build time, binary size

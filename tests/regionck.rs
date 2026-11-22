@@ -1121,6 +1121,18 @@ fn placeholder_trait_outlives() {
     assert_eq!(check("trait Tr {}\nfn p<T: Tr + 'static>(v: *const T) -> *const (dyn Tr + 'static) {\n    v as *const (dyn Tr + 'static)\n}\nfn main() {}\n"), vec![]);
 }
 
+/// A placeholder's region is the same wherever its type is: a type argument written (`f::<T>(x)`), an annotation
+/// (`let _: &'static T`), not only a value's type. E0311 when the region it must outlive has no name
+#[test]
+fn placeholder_type_arguments() {
+    let w = "fn with_restriction<'b, T: 'b>(x: &'b ()) -> &'b () {\n    x\n}\n";
+    let d = check(&format!("fn no_restriction<T>(x: &()) -> &() {{\n    with_restriction::<T>(x)\n}}\n{w}fn main() {{}}\n"));
+    assert!(d.len() == 1 && d[0].0 == 2 && d[0].1.contains("E0311"), "{d:?}");
+    let d = check("fn test<T>(_: &u8) {\n    let _: &'static T;\n}\nfn main() {}\n");
+    assert!(d.len() == 1 && d[0].0 == 2 && d[0].1.contains("E0310"), "{d:?}");
+    assert_eq!(check(&format!("fn bounded<'b, T: 'b>(x: &'b ()) -> &'b () {{\n    with_restriction::<T>(x)\n}}\nfn local<T>(x: &()) {{\n    with_restriction::<T>(x);\n}}\n{w}fn main() {{}}\n")), vec![]);
+}
+
 /// A placeholder bounded by a trait: coerced to `dyn Tr + 'static` (E0310), cast to it; a fn whose body calls the
 /// bound's methods is not checked (`dyn Tr + '_` in a parameter is an elided lifetime, not the default)
 #[test]
@@ -1131,6 +1143,137 @@ fn placeholder_bounds() {
     assert!(d.len() == 1 && d[0].0 == 5 && d[0].1.contains("E0310"), "{d:?}");
     assert_eq!(
         check("trait X {\n    fn foo(&self) {}\n}\nfn p1<'a, T: X + 'a>(v: T) -> Box<dyn X + 'a> {\n    Box::new(v)\n}\ntrait G {\n    fn get(&self) -> usize;\n}\nstruct H<'a> {\n    c: &'a usize,\n}\nimpl<'a> G for H<'a> {\n    fn get(&self) -> usize {\n        *self.c\n    }\n}\nfn get_v(gc: Box<dyn G + '_>) -> usize {\n    gc.get()\n}\nfn main() {\n    let c = 22;\n    let h = H { c: &c };\n    println!(\"{}\", get_v(Box::new(h) as Box<dyn G>));\n}\n"),
+        vec![]
+    );
+}
+
+/// The borrow check's mutability: a `ref` binding is not `mut` (E0596 for `&mut x` of it), an immutable static is not
+/// assigned (E0594), a slice by range is a loan of the elements (E0596 behind `&`, and a conflict as `&x[i]` is)
+#[test]
+fn mutability_of_bindings_statics_slices() {
+    let d = check("fn main() {\n    let op = Some(2);\n    match op {\n        Some(ref v) => {\n            let _a = &mut v;\n        }\n        None => {}\n    }\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 5 && d[0].1.contains("not declared as mutable"), "{d:?}");
+    // (two or more such borrows: one error, at the declaration, as rustc reports them)
+    let d = check("fn main() {\n    let v = Vec::new();\n    v.push(0);\n    v.push(1);\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 2 && d[0].1.contains("not declared as mutable"), "{d:?}");
+    let d = check("fn main() {\n    let v: Vec<u8> = Vec::new();\n    v.push(0);\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 3, "{d:?}");
+    let d = check("static FOO: isize = 5;\nfn main() {\n    FOO = 6;\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 3 && d[0].1.contains("immutable static item `FOO`"), "{d:?}");
+    let d = check("fn main() {\n    let x: &[isize] = &[1, 2, 3];\n    let _ = &mut x[0..2];\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 3 && d[0].1.contains("behind a `&` reference"), "{d:?}");
+    let d = check("fn main() {\n    let mut v = vec![1, 2, 3];\n    let a = &mut v[0..2];\n    let b = &v[1..];\n    a[0] = 1;\n    println!(\"{:?}\", b);\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 4, "{d:?}");
+    assert_eq!(
+        check("static mut N: i32 = 0;\nstatic K: i32 = 1;\nfn main() {\n    let op = Some(2);\n    if let Some(ref mut v) = Some(op) {\n        *v = None;\n    }\n    unsafe {\n        N = K;\n    }\n    let mut v = vec![1, 2, 3];\n    let a = &mut v[0..2];\n    a[0] = 1;\n    let b = &v[1..];\n    println!(\"{:?}\", b);\n}\n"),
+        vec![]
+    );
+}
+
+/// A closure that mutates what it captures is `FnMut`: a call of it by name borrows it mutably (E0596 when the binding
+/// is not `mut`); one that holds a `&mut` of a capture is not `Copy` (E0382 when moved twice). One that holds a value
+/// that is not `Copy` may be `FnOnce`, called by value
+#[test]
+fn fnmut_closures() {
+    let d = check("fn main() {\n    let mut my_var = false;\n    let callback = || {\n        my_var = true;\n    };\n    callback();\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 6 && d[0].1.contains("not declared as mutable"), "{d:?}");
+    let d = check("fn main() {\n    let mut a = 5;\n    let hello = || {\n        a += 1;\n    };\n    let _b = hello;\n    let _c = hello;\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 7 && d[0].1.contains("use of moved value: `hello`"), "{d:?}");
+    assert_eq!(
+        check("fn main() {\n    let mut a = 5;\n    let mut inc = || {\n        a += 1;\n    };\n    inc();\n    inc();\n    let b = 1;\n    let read = || b + 1;\n    let r1 = read;\n    let r2 = read;\n    let mut foo = Some(Box::new(8));\n    let f = move || {\n        if let Some(x) = foo {\n            foo = Some(x);\n        }\n        println!(\"{:?}\", foo.unwrap());\n    };\n    f();\n    println!(\"{} {}\", r1(), r2());\n}\n"),
+        vec![]
+    );
+}
+
+/// An array matched by value: each element is a place of its own (`let [_, _, x] = a;` moves a[2], not the others)
+#[test]
+fn array_pattern_moves() {
+    let arr = "fn array() -> [(String, String); 3] {\n    Default::default()\n}\n";
+    let d = check(&format!("{arr}fn f() {{\n    let a = array();\n    let [_, _, _x] = a;\n    let [.., _y] = a;\n}}\nfn main() {{}}\n"));
+    assert!(d.len() == 1 && d[0].0 == 7 && d[0].1.contains("use of moved value: `a[2]`"), "{d:?}");
+    let d = check(&format!("{arr}fn f() {{\n    let a = array();\n    let [_x, _, _] = a;\n    let [_y @ .., _, _] = a;\n}}\nfn main() {{}}\n"));
+    assert!(d.len() == 1 && d[0].0 == 7, "{d:?}");
+    assert_eq!(check(&format!("{arr}fn f() {{\n    let a = array();\n    let [_x, _, _] = a;\n    let [.., _y] = a;\n    let [_, (_, _z), _] = a;\n}}\nfn main() {{}}\n")), vec![]);
+}
+
+/// `for x in v` of a Vec / an array by value takes it (E0382 after); `&mut x;` in a closure is a `&mut` capture (FnMut);
+/// a closure whose body moves a capture out is FnOnce, and a call of it by name takes it (E0382 when called again)
+#[test]
+fn for_moves_and_fnonce() {
+    let d = check("fn main() {\n    let v = vec![String::new()];\n    for l in v {\n        let _ = l;\n    }\n    let _w = v;\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 6 && d[0].1.contains("use of moved value: `v`"), "{d:?}");
+    let d = check("fn main() {\n    let mut my_var = false;\n    let callback = || {\n        &mut my_var;\n    };\n    callback();\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 6 && d[0].1.contains("not declared as mutable"), "{d:?}");
+    let d = check("fn main() {\n    let counter: Vec<i32> = Vec::new();\n    let tick = || std::mem::drop(counter);\n    tick();\n    tick();\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 5 && d[0].1.contains("use of moved value: `tick`"), "{d:?}");
+    assert_eq!(
+        check("fn main() {\n    let mut w = vec![1];\n    for x in w.iter() {\n        let _ = x;\n    }\n    w.push(1);\n    for x in &w {\n        let _ = x;\n    }\n    w.push(2);\n    let a = [1, 2];\n    for x in a {\n        let _ = x;\n    }\n    let _b = a;\n    let s = String::from(\"x\");\n    let show = move || println!(\"{}\", s);\n    show();\n    show();\n}\n"),
+        vec![]
+    );
+}
+
+/// A closure passed where a bound wants `Fn` may not mutate what it captures: E0594 for an assignment, E0596 for a
+/// `&mut` or a `&mut self` method (in a closure inside it too)
+#[test]
+fn fn_bound_closures() {
+    let d = check("pub fn bar<F: Fn()>(_f: F) {}\npub fn foo() {\n    let mut x = 0;\n    bar(move || x = 1);\n}\nfn main() {}\n");
+    assert!(d.len() == 1 && d[0].0 == 4 && d[0].1.contains("captured variable in a `Fn` closure"), "{d:?}");
+    let d = check("fn call_it<F>(f: F) where F: Fn() {\n    f();\n}\nstruct A;\nimpl A {\n    fn gen_mut(&mut self) {}\n}\nfn main() {\n    let mut x = A;\n    call_it(|| {\n        call_it(|| x.gen_mut());\n    });\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 11 && d[0].1.contains("cannot borrow `x` as mutable"), "{d:?}");
+    assert_eq!(check("pub fn bar<F: FnMut()>(mut f: F) {\n    f();\n}\npub fn baz<F: Fn() -> i32>(f: F) -> i32 {\n    f()\n}\nfn main() {\n    let mut x = 0;\n    bar(|| x += 1);\n    let y = 2;\n    baz(|| y + 1);\n}\n"), vec![]);
+}
+
+/// Review of #43: an index reads an array pattern's moved element; a move closure that only mutates a capture that is
+/// not `Copy` is `FnMut`; a qualified immutable static; a placeholder of another type parameter keeps its bound's
+/// lifetimes; a named closure passed where `Fn` is wanted (E0525); `for x in v.iter().copied()` does not take v
+#[test]
+fn review_of_43() {
+    let d = check("fn main() {\n    let a = [String::new(), String::new(), String::new()];\n    let [_, _, _s] = a;\n    let _t = &a[2];\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 4, "{d:?}");
+    let d = check("fn main() {\n    let mut s = String::new();\n    let append = move || s.push_str(\"x\");\n    append();\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 4 && d[0].1.contains("not declared as mutable"), "{d:?}");
+    let d = check("mod m {\n    pub static N: i32 = 0;\n}\nfn main() {\n    m::N = 1;\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 5 && d[0].1.contains("immutable static item `m::N`"), "{d:?}");
+    let d = check("trait Get<'a> {\n    fn get(&self) -> &'a u8;\n    fn bad<'b, G: Get<'b>>(&self, g: G) -> &'a u8 {\n        g.get()\n    }\n}\nfn main() {}\n");
+    assert!(d.len() == 1 && d[0].0 == 4 && d[0].1.contains("`'b` must outlive `'a`"), "{d:?}");
+    let d = check("fn wants_fn<F: Fn()>(_f: F) {}\nfn main() {\n    let mut x = 0;\n    let c = || x += 1;\n    wants_fn(c);\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 4 && d[0].1.contains("E0525"), "{d:?}");
+    assert_eq!(
+        check("fn wants_mut<F: FnMut()>(mut f: F) {\n    f();\n}\nfn main() {\n    let v = vec![1, 2];\n    for x in v.iter().copied() {\n        let _ = x;\n    }\n    let _n = v.len();\n    let mut x = 0;\n    let c = || x += 1;\n    wants_mut(c);\n    let mut foo = Some(Box::new(8));\n    let f = move || {\n        if let Some(b) = foo {\n            foo = Some(b);\n        }\n        println!(\"{:?}\", foo.unwrap());\n    };\n    f();\n}\n"),
+        vec![]
+    );
+}
+
+/// Review of #43 (2): an `FnMut` closure called through a `&` (E0596) or a `&mut` (accepted); `a[1] = x` does not
+/// reinitialize a[0] moved by a pattern; `for x in v.iter()` borrows v for the loop
+#[test]
+fn review_of_43_2() {
+    let d = check("fn main() {\n    let mut x = 0;\n    let c = || x += 1;\n    let r = &c;\n    r();\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 5 && d[0].1.contains("behind a `&` reference"), "{d:?}");
+    let d = check("fn main() {\n    let mut a = [String::new(), String::new()];\n    let [_x, _y] = a;\n    a[1] = String::new();\n    let _z = &a[0];\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 5 && d[0].1.contains("moved"), "{d:?}");
+    let d = check("fn main() {\n    let mut v = vec![1];\n    for x in v.iter() {\n        v.push(*x);\n    }\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 4 && d[0].1.contains("also borrowed as immutable"), "{d:?}");
+    assert_eq!(check("fn main() {\n    let mut x = 0;\n    let mut c = || x += 1;\n    let r = &mut c;\n    r();\n    r();\n    let mut v = vec![1];\n    for x in v.iter_mut() {\n        *x += 1;\n    }\n    v.push(2);\n}\n"), vec![]);
+}
+
+/// Review of #43 (3): an `FnMut` closure called through `&&mut` is behind a `&` (E0596), through `&mut &mut` it is not;
+/// a long `rest @ ..` moves its elements as one place (a[1..19]), which a[0] is not
+#[test]
+fn review_of_43_3() {
+    let d = check("fn main() {\n    let mut x = 0;\n    let mut c = || x += 1;\n    let m = &mut c;\n    let r = &m;\n    r();\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 6 && d[0].1.contains("behind a `&` reference"), "{d:?}");
+    let d = check("fn main() {\n    let a: [String; 20] = Default::default();\n    let [_f, _rest @ ..] = a;\n    let _g = &a[5];\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 4 && d[0].1.contains("moved"), "{d:?}");
+    assert_eq!(check("fn main() {\n    let mut x = 0;\n    let mut c = || x += 1;\n    let mut m = &mut c;\n    let r = &mut m;\n    r();\n    let a: [String; 20] = Default::default();\n    let [_f, _rest @ .., _l] = a;\n}\n"), vec![]);
+}
+
+/// A builtin method's result (`v.iter()` of `&[T]`): a placeholder's region in it is its own, not the receiver's
+/// (`v.iter().count()` in a generic fn nothing calls was "`'_` must outlive `T#`")
+#[test]
+fn builtin_results_of_placeholders() {
+    assert_eq!(
+        check("fn d<T>(v: &[T]) -> usize {\n    v.iter().filter(|_| true).count()\n}\nfn e<T>(v: &[T]) -> Option<&T> {\n    v.iter().next()\n}\nfn f<T>(v: &[T]) -> usize {\n    v.iter().map(|_| 1).count()\n}\nfn main() {}\n"),
         vec![]
     );
 }
