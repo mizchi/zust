@@ -3256,7 +3256,13 @@ impl Program {
                 }
                 // (`Foo::Bar as usize`: a unit variant's discriminant)
                 if let Some((sid, vi)) = self.variant_by_p(&PPath::of(p), None) {
-                    return un(self.structs[sid as usize].variants[vi].discr as i128);
+                    // (as a value of the repr type: `#[repr(u64)]`'s 2^63 is not negative)
+                    let d = self.structs[sid as usize].variants[vi].discr as i128;
+                    let rt = self.reprs.get(&self.structs[sid as usize].name).copied().and_then(It::of_ty);
+                    return Ok(match rt {
+                        Some(it) => (it.wrap(d), Some(it)),
+                        None => (d, None),
+                    });
                 }
                 // (through an alias of a primitive: `type Mask = u16;` and `Mask::BITS`)
                 let t = Ty::prim(&p.segs[0].name).or_else(|| Ty::prim(&self.prim_of_name(&p.segs[0].name))).ok_or("unsupported path in constant")?;
