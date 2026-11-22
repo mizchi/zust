@@ -5983,6 +5983,28 @@ impl Deref for __CowStr {
     }
 }
 
+// (`Cow<str>` shows as its text, as std's: `{}` the text, `{:?}` the text quoted)
+impl Display for __CowStr {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError> {
+        let s: &str = match self {
+            __CowStr::Borrowed(s) => *s,
+            __CowStr::Owned(v) => v.as_str(),
+        };
+        __exr_fmt_str::<()>(f, s);
+        Ok(())
+    }
+}
+
+impl Debug for __CowStr {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError> {
+        let s: &str = match self {
+            __CowStr::Borrowed(s) => *s,
+            __CowStr::Owned(v) => v.as_str(),
+        };
+        write!(f, "{:?}", s)
+    }
+}
+
 // --- std::path / std::ffi (パスは UTF-8 の文字列として持つ: Path = str、OsString = String) ---
 
 pub type Path = str;

@@ -1553,6 +1553,15 @@ impl Cx<'_> {
             let (fat, _) = self.deref_to_slice(va, vs, m)?;
             return Some((fat, Ty::Ref(m, intern(Ty::Str))));
         }
+        // (a `Cow<str>` / `Cow<[T]>`: what its Deref gives, the text or the slice it borrows or owns; never `&mut`)
+        let base = self.prog.base_of(sid);
+        let bname = self.prog.structs[base as usize].name.clone();
+        if !m && matches!(bname.as_str(), "__CowStr" | "Cow") && self.prog.index.contains_key(&format!("{bname}::deref")) {
+            let targs = self.prog.structs[sid as usize].args.clone();
+            let r = Ty::Ref(false, intern(Ty::Struct(sid)));
+            let (v, t) = self.call_named(&format!("{bname}::deref"), targs, &[(a, r)], SP).ok()?;
+            return Some((v?, t));
+        }
         None
     }
 

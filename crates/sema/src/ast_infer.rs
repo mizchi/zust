@@ -376,6 +376,13 @@ impl Inf<'_> {
         self.prog.resolve_env(&ts, self.env).ok()
     }
 
+    fn strip_refs_ty(mut t: Ty) -> Ty {
+        while let Ty::Ref(_, i) = t {
+            t = *i;
+        }
+        t
+    }
+
     fn variant_by(&self, p: &Path) -> Option<(u32, usize)> {
         self.prog.variant_by_p(&PPath::of(p), self.self_sid)
     }
@@ -1781,6 +1788,16 @@ impl Inf<'_> {
                         let v = self.expr(a);
                         xs.push((i.to_string(), v));
                     }
+                    // (`Cow::Borrowed(s)` / `Cow::Owned(s)` of a `&str` / `String`: prelude's `__CowStr`, as the
+                    // code generator reads it; prelude's `Cow<T>` stands for `Cow<[T]>`)
+                    if let (Some(&cow), Some(&cs), Some(&(_, x))) = (self.prog.struct_index.get("Cow"), self.prog.struct_index.get("__CowStr"), xs.first()) {
+                        if self.prog.base_of(sid) == cow {
+                            let string = self.prog.struct_index.get("String").copied();
+                            if matches!(self.resolve(x), Some(Ty::Ref(_, Ty::Str))) || self.resolve(x).is_some_and(|t| Some(t) == string.map(Ty::Struct)) {
+                                return self.adt_ctor(cs, Some(vi), xs);
+                            }
+                        }
+                    }
                     return self.adt_ctor(sid, Some(vi), xs);
                 }
                 let local = ident(p).is_some_and(|id| self.lookup(id).is_some());
@@ -1895,6 +1912,19 @@ impl Inf<'_> {
     }
 
     fn method_call(&mut self, recv: &Expr, n: &str, tf: &Vec<GArg>, args: &[Expr]) -> u32 {
+        // (`s.as_ref()` on a `&str` / `String` (also through references, `&&str` of an `AsRef<str>` instance): `&str`,
+        // what the code generator's as_ref gives)
+        if n == "as_ref" && args.is_empty() {
+            let r = self.expr(recv);
+            let rv = self.deref_expr(r);
+            let string = self.prog.struct_index.get("String").copied();
+            match self.resolve(rv) {
+                Some(Ty::Str) => return self.known(Ty::Ref(false, intern(Ty::Str))),
+                Some(Ty::Ref(_, t)) if matches!(Self::strip_refs_ty(*t), Ty::Str) => return self.known(Ty::Ref(false, intern(Ty::Str))),
+                Some(Ty::Struct(sid)) if Some(sid) == string => return self.known(Ty::Ref(false, intern(Ty::Str))),
+                _ => {}
+            }
+        }
         // 値としての `[a, b].into_iter()`
         if n == "into_iter" && args.is_empty() && self.prog.struct_index.contains_key("IntoIter") {
             if let Expr::Array(xs) = recv {

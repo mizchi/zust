@@ -2058,6 +2058,12 @@ impl Cx<'_> {
     /// パターンのパスのバリアントを、match 対象の型 t (インスタンス) に合わせて引く
     pub(crate) fn variant_on(&self, p: &Path, t: Ty) -> Option<(u32, usize)> {
         let (sid, vi) = self.prog.variant_by_p(&PPath::of(p), self.self_sid)?;
+        // (`Cow::Borrowed(s)` on a `Cow<str>`: prelude's `__CowStr`, whose variants are in the same order)
+        if let (Ty::Struct(x), Some(&cow), Some(&cs)) = (t, self.prog.struct_index.get("Cow"), self.prog.struct_index.get("__CowStr")) {
+            if x == cs && self.prog.base_of(sid) == cow {
+                return Some((cs, vi));
+            }
+        }
         match t {
             Ty::Struct(x) if self.prog.base_of(x) == self.prog.base_of(sid) => {
                 // (`A::V(_)` with `type A = E<u8>;`: a variant of that instance only, not of an `E<u16>`)
