@@ -1,0 +1,3 @@
+// expect: `==` compares values
+type Wrap<T> = { v: T }
+fn f(a: Wrap<Wrap<fn(i32) -> i32>>, b: Wrap<Wrap<fn(i32) -> i32>>) -> bool { a == b }

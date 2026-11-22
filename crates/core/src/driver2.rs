@@ -1000,6 +1000,8 @@ impl Session2 {
         let iface_fp = {
             let mut h = KeyHasher::new();
             h.add(&self.ctx.dep_ranges.len());
+            // (the edition changes what a body's check finds: tail temporaries)
+            h.add(&self.opts.edition);
             let mut new_fp: FxMap<Key, u64> = FxMap::default();
             for (i, it) in items.iter().enumerate() {
                 let is_fn = !sums[i].fns.is_empty() && sums[i].structs.is_empty() && sums[i].enums.is_empty() && matches!(it.kind, ItemKind::Normal | ItemKind::ImplMember(_) | ItemKind::TraitMember(_));
@@ -1401,6 +1403,8 @@ impl Session2 {
         prog.has_mods = has_mod_word;
         prog.lower_consts = prog.consts.iter().any(|c| !c.name.contains("::") && c.name.trim_start_matches('_').starts_with(|ch: char| ch.is_lowercase()));
         prog.deny_must_use = deny_must_use;
+        prog.edition = self.opts.edition;
+        prog.path_lts = crate::regions::src_path_lts(src0);
         prog.deny_unused_alloc = deny_unused_alloc;
         prog.deny_trivial_casts = deny_trivial_casts;
         if deny_must_use {
@@ -4111,7 +4115,7 @@ fn first_accidentally_stable(src: &str, items: &[SrcItem]) -> Option<String> {
 /// The lint levels codegen checks (`#![deny(unused_must_use)]`, `trivial_casts` ..) as one byte for the cache keys: a
 /// function compiled before such a `#![deny]` was added is not reused without its check
 fn lint_bits(p: &Program) -> u8 {
-    p.deny_must_use as u8 | (p.deny_trivial_casts.0 as u8) << 1 | (p.deny_trivial_casts.1 as u8) << 2 | (p.deny_unreachable as u8) << 3 | (p.deny_unused_alloc as u8) << 4
+    p.deny_must_use as u8 | (p.deny_trivial_casts.0 as u8) << 1 | (p.deny_trivial_casts.1 as u8) << 2 | (p.deny_unreachable as u8) << 3 | (p.deny_unused_alloc as u8) << 4 | ((p.edition >= 2024) as u8) << 5
 }
 
 /// The attributes behind a feature gate, and the feature

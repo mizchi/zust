@@ -75,8 +75,36 @@ impl Cx<'_> {
         if ty_seg.name == "Self" || self.prog.aliases.contains_key(&ty_seg.name) {
             return err(SP, "type arguments are not allowed on this type (E0109)");
         }
-        if has_ty(ty_seg) {
+        // (`E::<'static>::V::<u8>(..)`: the enum's arguments are written, lifetimes too)
+        if !ty_seg.args.is_empty() {
             return err(SP, format!("type arguments are not allowed on {kind} `{}` (E0109)", p.segs[n - 1].name));
+        }
+        Ok(())
+    }
+
+    /// t implements `Copy` (borrowck's is_copy counts a `&mut` as Copy, for the reborrows of passing it)
+    pub(crate) fn strict_copy(&self, t: Ty) -> bool {
+        match t {
+            Ty::Ref(true, _) => false,
+            Ty::Array(e, _) => self.strict_copy(*e),
+            Ty::Struct(s) if self.prog.is_tuple(s) => self.prog.structs[s as usize].args.iter().all(|&a| self.strict_copy(a)),
+            t => borrowck::is_copy(self.prog, t, 0),
+        }
+    }
+
+    /// A struct's turbofish (ts: its arguments, None for `_`) against the expected instance of it: each argument
+    /// written is the expected one (`let _: S<u8, u8> = S::<u16, _> { .. }` is a mismatch; `S::<u8, _>` is not)
+    pub(crate) fn turbofish_vs_expected(&self, sid: u32, ts: &[Option<Ty>], expected: Option<Ty>) -> R<()> {
+        let Some(Ty::Struct(es)) = expected else { return Ok(()) };
+        let base = self.prog.base_of(sid);
+        if self.prog.base_of(es) != base || self.prog.has_param(Ty::Struct(es)) {
+            return Ok(());
+        }
+        let eargs = &self.prog.structs[es as usize].args;
+        if ts.iter().zip(eargs).any(|(w, e)| w.is_some_and(|w| w != *e)) {
+            let shown: Vec<String> = ts.iter().map(|w| w.map_or("_".to_string(), |w| self.prog.tn(w))).collect();
+            let name = &self.prog.structs[base as usize].name;
+            return err(SP, format!("mismatched types: expected `{}`, found `{name}<{}>`", self.prog.tn(Ty::Struct(es)), shown.join(", ")));
         }
         Ok(())
     }
@@ -147,25 +175,6 @@ impl Cx<'_> {
             Some(ts) => Ok(Some(Ty::Struct(self.prog.instantiate(base, ts)?))),
             None => Ok(None),
         }
-    }
-
-    /// A struct pattern's turbofish (`S::<u16>(x)`) against the value's instance t (`S<u8>`): mismatched types when an
-    /// argument it writes (not `_`) is another
-    pub(crate) fn pat_args_check(&self, path: &crate::parse::Path, sid: u32, t: Ty) -> R<()> {
-        let Some(args) = path.segs.last().map(|s| &s.args).filter(|a| !a.is_empty()) else { return Ok(()) };
-        let Ty::Struct(v) = t else { return Ok(()) };
-        let base = self.prog.base_of(sid);
-        if self.prog.base_of(v) != base || self.prog.has_param(t) {
-            return Ok(());
-        }
-        let ts = self.turbofish_targs(sid, args)?;
-        let vargs = &self.prog.structs[v as usize].args;
-        if ts.iter().enumerate().any(|(k, a)| a.is_some_and(|a| !self.prog.has_param(a) && vargs.get(k).is_some_and(|&va| va != a))) {
-            let full: Vec<Ty> = ts.iter().enumerate().map(|(k, a)| a.or(vargs.get(k).copied()).unwrap_or(Ty::Unit)).collect();
-            let found = self.prog.instantiate(base, full).map(|i| self.prog.tn(Ty::Struct(i))).unwrap_or_else(|_| self.prog.structs[base as usize].name.clone());
-            return err(SP, format!("mismatched types: expected `{}`, found `{found}`", self.prog.tn(t)));
-        }
-        Ok(())
     }
 
     /// the type arguments a struct's turbofish gives (None for `_`; lifetimes left out), checked against the struct's
@@ -703,8 +712,10 @@ impl Cx<'_> {
                     }
                     self.prog.instantiate(self.prog.base_of(sid), ts).ok().map(Ty::Struct)
                 });
+                self.rg_written_on(p);
                 let r = self.variant_value(sid, vi, &[], expected);
                 self.rg_took_call(e);
+                self.rg_written_ctor(e, p);
                 r
             }
             Expr::Match(..) => self.match_(e, expected),
@@ -1777,6 +1788,9 @@ impl Cx<'_> {
     }
 
     pub(crate) fn struct_lit(&mut self, e: &Expr, expected: Option<Ty>) -> R<V> {
+        if let Expr::Struct(path, ..) = e {
+            self.rg_written_on(path);
+        }
         let r = self.struct_lit_inner(e, expected);
         // (E0277: an argument of a parameter bounded by Copy that is not (`union U<T: Copy>` as `U<Rc<u32>>`))
         if let (Ok((_, Ty::Struct(sid))), true) = (&r, self.user_code && !self.prog.copy_params.is_empty()) {
@@ -1796,6 +1810,9 @@ impl Cx<'_> {
             // (a struct-like variant (`E::V { r: x }`): its value's tree, which variant_value made last)
             if matches!(t, Ty::Struct(s) if self.prog.structs[*s as usize].is_enum) {
                 self.rg_took_call(e);
+            }
+            if let Expr::Struct(path, ..) = e {
+                self.rg_written_ctor(e, path);
             }
         }
         r
@@ -1833,43 +1850,38 @@ impl Cx<'_> {
                 return err(SP, "type arguments are not allowed on self type (E0109)");
             }
         }
-        // (`Foo::<i32> { .. }`: the struct of the path without its arguments, as the type the path writes)
-        if path.segs.last().is_some_and(|s| !s.args.is_empty()) {
-            let mut bare = path.clone();
-            for s in &mut bare.segs {
-                s.args.clear();
-            }
-            if self.prog.struct_by_p(&PPath::of(&bare), self.self_sid).is_some() {
-                // (arguments that name lifetimes are read by the region check from the `let` that block_stmts makes of a
-                // statement's literal. A type the arguments do not name is an error (`Foo::<Missing> {..}`); `_` is
-                // left to inference)
-                let sid0 = self.prog.struct_by_p(&PPath::of(&bare), self.self_sid).unwrap();
-                let targs = self.turbofish_targs(sid0, &path.segs.last().unwrap().args)?;
-                let typed = if targs.iter().all(|a| a.is_some()) { self.parse_ty(&crate::parse::Ty::Path(None, path.clone())).ok().filter(|t| matches!(t, Ty::Struct(_))) } else { None };
-                // (`Foo::<u8> { ..base }` with base a `Foo<u16>`: mismatched types)
-                if let (Some(t), Some(base)) = (typed, rest.as_deref()) {
-                    if let Some(bt @ Ty::Struct(_)) = self.peek(base) {
-                        if bt != t && !self.prog.has_param(t) && !has_hole(self.prog, t) {
-                            return err(expr_start(base), format!("mismatched types: expected `{}`, found `{}`", self.prog.tn(t), self.prog.tn(bt)));
+        // (`S::<u32> { t: 1 }`: the struct without the turbofish, which gives its type arguments)
+        let (pp, targs) = self.turbofish_split(path);
+        let mut written = None;
+        let found = match self.prog.struct_by_p(&PPath::of(path), self.self_sid) {
+            Some(s) => Some(s),
+            None => match targs {
+                Some(ta) => match self.prog.struct_by_p(&pp, self.self_sid) {
+                    Some(s) => {
+                        self.lifetime_arity(s, path, "struct")?;
+                        let ts = self.turbofish_targs(s, ta)?;
+                        // (`Foo::<u8> { ..base }` with base a `Foo<u16>`: the base is the mismatch, as rustc says it)
+                        if let Some(base) = rest.as_deref() {
+                            if let Some(bt @ Ty::Struct(b)) = self.peek(base).filter(|t| !self.prog.has_param(*t)) {
+                                let bargs = &self.prog.structs[b as usize].args;
+                                if self.prog.base_of(b) == self.prog.base_of(s) && ts.iter().enumerate().any(|(k, a)| a.is_some_and(|a| !self.prog.has_param(a) && bargs.get(k).is_some_and(|&ba| ba != a))) {
+                                    let full: Vec<Ty> = ts.iter().enumerate().map(|(k, a)| a.or(bargs.get(k).copied()).unwrap_or(Ty::Unit)).collect();
+                                    let want = self.prog.instantiate(self.prog.base_of(s), full).map(|i| self.prog.tn(Ty::Struct(i))).unwrap_or_else(|_| self.prog.structs[s as usize].name.clone());
+                                    return err(expr_start(base), format!("mismatched types: expected `{want}`, found `{}`", self.prog.tn(bt)));
+                                }
+                            }
                         }
+                        // (`let x: S<u16> = S::<u8> { t: 1 }`: the turbofish against the expected instance)
+                        self.turbofish_vs_expected(s, &ts, expected)?;
+                        written = Some(ts);
+                        Some(s)
                     }
-                }
-                let ne = self.keep_expr(Expr::Struct(bare, sfields.clone(), rest.clone()));
-                let r = self.struct_lit(ne, typed.or(expected))?;
-                // (`Pair::<u8, _> { a: 300u16, .. }`: the arguments written beside a `_` hold too)
-                if let (None, Ty::Struct(v)) = (typed, r.1) {
-                    let vargs = &self.prog.structs[v as usize].args;
-                    if targs.iter().enumerate().any(|(k, a)| a.is_some_and(|a| !self.prog.has_param(a) && vargs.get(k).is_some_and(|&va| va != a))) {
-                        let full: Vec<Ty> = targs.iter().enumerate().map(|(k, a)| a.or(vargs.get(k).copied()).unwrap_or(Ty::Unit)).collect();
-                        let base = self.prog.base_of(v);
-                        let want = self.prog.instantiate(base, full).map(|i| self.prog.tn(Ty::Struct(i))).unwrap_or_else(|_| self.prog.structs[base as usize].name.clone());
-                        return err(expr_start(e), format!("mismatched types: expected `{want}`, found `{}`", self.prog.tn(r.1)));
-                    }
-                }
-                return Ok(r);
-            }
-        }
-        let Some(sid) = self.prog.struct_by_p(&PPath::of(path), self.self_sid) else {
+                    None => None,
+                },
+                None => None,
+            },
+        };
+        let Some(sid) = found else {
             // (`Self::Output::Simple {}` with `type Output<T> = Bar<T>;`: the generic associated type's arguments are
             // not given, nothing else says them)
             if path.segs.len() >= 3 && path.segs[0].name == "Self" && path.segs[1].args.is_empty()
@@ -2005,7 +2017,23 @@ impl Cx<'_> {
         if args.len() != fields.len() && !union {
             return err(SP, format!("missing fields in initializer of `{}`", self.prog.structs[sid as usize].name));
         }
-        self.adt_value(sid, None, &args, expected, SP)
+        if written.is_some() {
+            self.adt_targs = written;
+        }
+        let r = self.adt_value(sid, None, &args, expected, SP)?;
+        // (a generic union's instance: its fields are `Copy` or `ManuallyDrop`, as the definition's bounds require
+        // (`union U<T: Copy> { a: T }` with `U { a: Rc::new(0u32) }`, E0277))
+        if let (true, Ty::Struct(inst)) = (union, r.1) {
+            if self.prog.structs[inst as usize].base.is_some() {
+                for (_, ft, _) in self.prog.structs[inst as usize].fields.clone() {
+                    let md = matches!(ft, Ty::Struct(f) if self.prog.structs[self.prog.base_of(f) as usize].name == "ManuallyDrop");
+                    if !md && !self.prog.has_param(ft) && !self.strict_copy(ft) {
+                        return err(SP, format!("the trait bound `{}: Copy` is not satisfied (E0277)", self.prog.tn(ft)));
+                    }
+                }
+            }
+        }
+        Ok(r)
     }
 
     /// `|..| ..`: キャプチャを struct に詰めた値。型引数 (キャプチャ・引数・戻り値の型) をここで決める
@@ -2768,7 +2796,51 @@ impl Cx<'_> {
         }
         let args: Vec<&Expr> = margs.iter().collect();
         let decl = decls[idx];
+        // (the receiver is borrowed by `&self` / `&mut self`, and a result that borrows from self holds the loan:
+        // `let y = x.f1(); x.f2(); y.use_ref();` with x a `&mut dyn Foo` is E0499)
+        // (a `&mut self` receiver whose arguments name it (`x.set(x.get())`): two-phase, as a method of a struct's. A
+        // shared reservation while the arguments are evaluated, whose loans are held to the call; the `&mut` loan then)
+        let mut two_phase = None;
+        if self.bk_on() && !by_box {
+            if let (Expr::MethodCall(recv, ..), Some(&Ty::Ref(m, _))) = (mc, self.prog.sigs[decl as usize].params.first()) {
+                let flows = self.bk_ret_from(decl, 0);
+                if m && borrowck::root_local(recv).is_some_and(|n| margs.iter().any(|a| borrowck::mentions(a, n))) {
+                    let t0 = self.bk.call_temps.len();
+                    let rs = self.bk_recv_ev(recv, Ty::Ref(false, intern(Ty::Unit)), false);
+                    let tid = match &rs {
+                        Some(borrowck::Ev::Acc(_, borrowck::Acc::Borrow(l), _)) => Some(*l),
+                        _ => None,
+                    };
+                    self.bk_push(rs);
+                    if let Some(l) = tid {
+                        self.bk_call_temp(&[borrowck::Src::Loan(l)], true);
+                    }
+                    self.bk_frame();
+                    two_phase = Some((recv, flows, t0));
+                } else {
+                    let ev = self.bk_recv_ev(recv, Ty::Ref(m, intern(Ty::Unit)), flows);
+                    self.bk_push(ev);
+                }
+            }
+        }
         let r = self.dyn_call(fat, idx, &ps, ret, &args, SP);
+        if let Some((recv, flows, t0)) = two_phase {
+            // (the arguments' loans live to the call, where the `&mut` loan is taken; what they borrow may flow on)
+            let srcs = self.bk_frame_end();
+            self.bk_call_temp(&srcs, true);
+            // (the reservation ends before the `&mut` loan is taken)
+            if let Some(tid) = self.bk.call_temps.get(t0).copied().filter(|&t| t != u32::MAX) {
+                self.bk_ev(borrowck::Ev::Acc(borrowck::BPlace { local: tid, proj: vec![] }, borrowck::Acc::Read, SP));
+                self.bk_ev(borrowck::Ev::Dead(tid, SP));
+                self.bk.call_temps[t0] = u32::MAX;
+            }
+            let ev = self.bk_recv_ev(recv, Ty::Ref(true, intern(Ty::Unit)), flows);
+            self.bk_push(ev);
+            self.bk_call_temps_end(t0);
+            for s in srcs {
+                self.bk.src(s);
+            }
+        }
         if r.is_ok() {
             self.rg_dyn_call(mc, decl, &sol, &ps, ret);
         }
@@ -3377,6 +3449,7 @@ impl Cx<'_> {
             }
         }
         if let Expr::Path(_, p) = &**func {
+            self.rg_written_on(p);
             if let Some((sid, vi)) = self.prog.variant_by_p(&PPath::of(p), self.self_sid) {
                 let v = &self.prog.structs[sid as usize].variants[vi];
                 if v.kind != crate::types::VariantKind::Tuple || v.fields.len() != cargs.len() {
@@ -3401,6 +3474,7 @@ impl Cx<'_> {
                 }
                 let r = self.variant_value(sid, vi, &args, expected);
                 self.rg_took_call(c);
+                self.rg_written_ctor(c, p);
                 return r;
             }
             // タプル構造体の構築 `P(1, 2)`
@@ -3416,19 +3490,14 @@ impl Cx<'_> {
                     if let Some(args) = targs {
                         let ts = self.turbofish_targs(sid, args)?;
                         // (`let x: S<u16> = S::<u8>(1u16)`: the turbofish against the expected instance)
-                        if let (Some(Ty::Struct(es)), Some(ts)) = (expected, ts.iter().copied().collect::<Option<Vec<Ty>>>()) {
-                            let base = self.prog.base_of(sid);
-                            if self.prog.base_of(es) == base && !self.prog.has_param(Ty::Struct(es)) {
-                                let it = Ty::Struct(self.prog.instantiate(base, ts)?);
-                                self.same(SP, it, Ty::Struct(es))?;
-                            }
-                        }
+                        self.turbofish_vs_expected(sid, &ts, expected)?;
                         self.adt_targs = Some(ts);
                     }
                     let args: Vec<(usize, &Expr)> = cargs.iter().enumerate().collect();
                     let r = self.adt_value(sid, None, &args, expected, SP);
                     if let Ok((_, t)) = &r {
                         self.rg_ctor(c, *t, &args);
+                        self.rg_written_ctor(c, p);
                     }
                     return r;
                 }
@@ -3494,7 +3563,21 @@ impl Cx<'_> {
         if self.rg_on() {
             self.rg.call_sp = borrowck::pos(c);
         }
+        // (the lifetimes written on the type: `A::<'a>::new`, `<A<'a>>::new`, `<A<'a> as Tr>::f`)
+        let mut written = None;
+        if let Expr::Path(q, p) = &**func {
+            let seg = match q.as_deref() {
+                Some(crate::parse::Ty::Path(None, qp)) => qp.segs.last(),
+                Some(_) => None,
+                None => p.segs.len().checked_sub(2).map(|i| &p.segs[i]),
+            };
+            let ls: Vec<String> = seg.map(|s| s.args.iter().filter_map(|a| if let GArg::Lifetime(l) = a { Some(l.clone()) } else { None }).collect()).unwrap_or_default();
+            written = (!ls.is_empty()).then(|| (self.rg.depth + 1, id, ls));
+        }
+        // (a call of this kind in the arguments keeps the outer one's for after it)
+        let outer = std::mem::replace(&mut self.rg.call_self, written);
         let r = self.call_fn(id, None, &args, tf, expected, SP);
+        self.rg.call_self = outer;
         self.rg_took_call(c);
         self.seg_self = None;
         r

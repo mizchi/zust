@@ -1,0 +1,2 @@
+{"schema":"jev-lint-ledger-1","namespace":"jev-lint-documents-judgments-1","written":"2026-11-22T18:09:48.315Z","model":"jev-1.14.0"}
+{"key":"ea7794621955d3c230d81e822f45f22ed0b55a2649448d3145bb0054a431cd52","at":"2026-11-22T18:09:48.311Z","value":{"judgment":{"choice":"supports","confidence":0.96,"probabilities":{"supports":0.97,"contradicts":0.03,"unrelated":0,"insufficient_context":0}},"comparisonId":"docs_reports_2026-11-22-08-wasm-bindgen-shared-wasm32","target":"docs/ja/reports/2026-11-22-08-wasm-bindgen-shared-wasm32.md"}}

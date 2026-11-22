@@ -103,6 +103,51 @@ fn is_array(t: &Ty) -> bool {
     matches!(t, Ty::Array(_) | Ty::Typed(_))
 }
 
+/// A type whose borrow is a slice of it (`&[T]`, `&str`: `&x[..]`)
+fn sliced(t: &Ty) -> bool {
+    is_array(t) || *t == Ty::Str
+}
+
+/// The string helpers (JS's meaning, in Rust): (name, the helpers it needs, text). zustc's std has no
+/// `encode_utf16` and no `memmem`, so the UTF-16 length and order and the substring search are written here
+const STR_HELPERS: &[(&str, &[&str], &str)] = &[
+    (
+        "zs_len16",
+        &[],
+        "/// JS's `length`: UTF-16 code units\nfn zs_len16(s: &str) -> i32 {\n    let mut n = 0i32;\n    for c in s.chars() {\n        n += if (c as u32) > 0xffff { 2 } else { 1 };\n    }\n    n\n}",
+    ),
+    (
+        "zs_units16",
+        &[],
+        "fn zs_units16(c: char) -> (u32, u32) {\n    let v = c as u32;\n    if v > 0xffff {\n        let w = v - 0x10000;\n        (0xd800 + (w >> 10), 0xdc00 + (w & 0x3ff))\n    } else {\n        (v, 0x10000)\n    }\n}",
+    ),
+    (
+        "zs_cmp16",
+        &["zs_units16"],
+        "/// JS's string order: by UTF-16 code units (not UTF-8 bytes: they differ above U+FFFF)\nfn zs_cmp16(a: &str, b: &str) -> i32 {\n    let mut x = a.chars();\n    let mut y = b.chars();\n    loop {\n        match (x.next(), y.next()) {\n            (None, None) => return 0,\n            (None, Some(_)) => return -1,\n            (Some(_), None) => return 1,\n            (Some(p), Some(q)) => {\n                if p == q {\n                    continue;\n                }\n                let (p1, p2) = zs_units16(p);\n                let (q1, q2) = zs_units16(q);\n                if p1 != q1 {\n                    return if p1 < q1 { -1 } else { 1 };\n                }\n                return if p2 < q2 { -1 } else { 1 };\n            }\n        }\n    }\n}",
+    ),
+    (
+        "zs_ws",
+        &[],
+        "/// JS's white space and line terminators (what `trim` removes)\nfn zs_ws(c: char) -> bool {\n    matches!(c, '\\t' | '\\u{b}' | '\\u{c}' | ' ' | '\\u{a0}' | '\\u{feff}' | '\\n' | '\\r' | '\\u{2028}' | '\\u{2029}' | '\\u{1680}' | '\\u{2000}'..='\\u{200a}' | '\\u{202f}' | '\\u{205f}' | '\\u{3000}')\n}",
+    ),
+    (
+        "zs_trim",
+        &["zs_ws"],
+        "fn zs_trim(s: &str) -> &str {\n    let mut start = s.len();\n    let mut end = 0usize;\n    for (i, c) in s.char_indices() {\n        if !zs_ws(c) {\n            if start == s.len() {\n                start = i;\n            }\n            end = i + c.len_utf8();\n        }\n    }\n    if start >= end { \"\" } else { &s[start..end] }\n}",
+    ),
+    (
+        "zs_contains",
+        &[],
+        "fn zs_contains(a: &str, b: &str) -> bool {\n    let (x, y) = (a.as_bytes(), b.as_bytes());\n    if y.len() > x.len() {\n        return false;\n    }\n    let mut i = 0usize;\n    while i + y.len() <= x.len() {\n        let mut j = 0usize;\n        while j < y.len() && x[i + j] == y[j] {\n            j += 1;\n        }\n        if j == y.len() {\n            return true;\n        }\n        i += 1;\n    }\n    false\n}",
+    ),
+    (
+        "zs_split",
+        &[],
+        "/// JS's `split`: an empty separator splits into characters\nfn zs_split(s: &str, sep: &str) -> Vec<String> {\n    if sep.is_empty() {\n        return s.chars().map(|c| c.to_string()).collect::<Vec<_>>();\n    }\n    s.split(sep).map(|x| x.to_string()).collect::<Vec<_>>()\n}",
+    ),
+];
+
 /// A type as zustscript writes it (for messages)
 fn show(t: &Ty) -> String {
     match t {
@@ -131,8 +176,8 @@ enum Form {
     /// an owned temporary
     Val,
     /// a place in a local the function owns (`xs`, `p.pts`, `ps[i]`); `movable`: it can be moved from here (the
-    /// local's last use, no index on the way)
-    Own { movable: bool },
+    /// local's last use, no index on the way); `root`: that local
+    Own { movable: bool, root: String },
     /// reached through a borrow: a reference already (`is_ref`: `&[T]` / `&ZsX`), or a place behind one (`p.pts`
     /// where `p: &ZsP`). `roots`: the borrowed parameters it comes from (None: a local or a temporary, so it lives only
     /// as long as the statement); `param`: it is that parameter itself, whole
@@ -164,6 +209,10 @@ pub struct Lower<'a> {
     subst: HashMap<String, Ty>,
     /// the non-Copy locals in scope
     vars: HashMap<String, VarK>,
+    /// owned locals a live `let` borrows from (to the end of its block): never moved while frozen
+    frozen: Vec<String>,
+    /// the locals the rest of the block being lowered assigns (a borrow of one of them cannot be kept)
+    later_assigns: HashSet<String>,
     live: Rc<Live>,
     lives: HashMap<String, Rc<Live>>,
     /// the inferred signatures so far (only ever made more owned)
@@ -184,6 +233,8 @@ pub struct Lower<'a> {
     type_pos: HashMap<String, Pos>,
     /// the helper functions used (`zs_max_f32` ..)
     helpers: BTreeSet<String>,
+    /// the string helpers used ([`STR_HELPERS`])
+    str_helpers: BTreeSet<&'static str>,
 }
 
 /// The Rust name of a record or enum: `ZsPoint`
@@ -213,6 +264,8 @@ pub fn lower(items: &[Item], info: &Info, wanted: &[(String, Vec<Ty>)], simd_as_
         fns,
         subst: HashMap::new(),
         vars: HashMap::new(),
+        frozen: vec![],
+        later_assigns: HashSet::new(),
         live: Rc::default(),
         lives: HashMap::new(),
         modes: Modes::default(),
@@ -226,6 +279,7 @@ pub fn lower(items: &[Item], info: &Info, wanted: &[(String, Vec<Ty>)], simd_as_
         used: Default::default(),
         type_pos,
         helpers: Default::default(),
+        str_helpers: Default::default(),
     };
     l.all(wanted)
 }
@@ -326,6 +380,12 @@ impl Lower<'_> {
                 "fn {h}(a: {t}, b: {t}) -> {t} {{\n    if a.is_nan() || b.is_nan() {{ {t}::NAN }} else if a == b {{ if {zero} {{ a }} else {{ b }} }} else if {pick} {{ a }} else {{ b }}\n}}\n\n"
             );
         }
+        for (name, _, text) in STR_HELPERS {
+            if self.str_helpers.contains(name) {
+                defs.push_str(text);
+                defs.push_str("\n\n");
+            }
+        }
         if errors.is_empty() { Ok((out, defs + &internal)) } else { Err(errors) }
     }
 
@@ -341,7 +401,7 @@ impl Lower<'_> {
     fn adapter(&mut self, rs: &str, text: String, args: &[(String, Ty)], ret: &Ty) -> Result<(String, String), Vec<(Pos, String)>> {
         let owned: Vec<bool> = (0..args.len()).map(|i| self.modes.owned.contains(&(rs.to_string(), i))).collect();
         let ret_ref = !self.copy(ret) && !self.modes.owned_result.contains(rs);
-        if !owned.iter().zip(args).any(|(o, (_, t))| *o && is_array(t)) && !ret_ref {
+        if !owned.iter().zip(args).any(|(o, (_, t))| *o && sliced(t)) && !ret_ref {
             return Ok((text, rs.to_string()));
         }
         let pos = Pos::default();
@@ -349,12 +409,12 @@ impl Lower<'_> {
         let mut call = vec![];
         for ((n, t), o) in args.iter().zip(&owned) {
             ps.push(format!("{}: {}", local(n), self.rty(t, pos, Some(None)).map_err(|e| vec![e])?));
-            call.push(if *o && is_array(t) { format!("{}.to_vec()", local(n)) } else { local(n) });
+            call.push(if *o && sliced(t) { self.clone_of(&local(n), t) } else { local(n) });
         }
         let rt = self.rty(ret, pos, None).map_err(|e| vec![e])?;
         let mut body = format!("{rs}({})", call.join(", "));
         if ret_ref {
-            body = format!("{body}.to_vec()");
+            body = self.clone_of(&body, ret);
         }
         // (named in the generated `__zs` namespace: a source function's Rust name is `zs_..`, so none can meet it)
         let entry = format!("__zs_js_{rs}");
@@ -459,6 +519,9 @@ impl Lower<'_> {
             }
             Ty::Bool => WTy::Bool,
             Ty::Unit => WTy::Unit,
+            Ty::Str => {
+                if arg { WTy::Str } else { WTy::String }
+            }
             Ty::Array(e) if scalar(e).and_then(Elem::parse).is_some() => {
                 let el = scalar(e).and_then(Elem::parse).unwrap();
                 if arg { WTy::Slice(el) } else { WTy::Vec(el) }
@@ -479,7 +542,7 @@ impl<'a> Lower<'a> {
 
     fn copy(&self, t: &Ty) -> bool {
         match t {
-            Ty::Array(_) | Ty::Typed(_) => false,
+            Ty::Array(_) | Ty::Typed(_) | Ty::Str => false,
             Ty::Named(..) | Ty::Tuple(_) => {
                 if let Some(c) = self.copies.borrow().get(t) {
                     return *c;
@@ -531,6 +594,10 @@ impl<'a> Lower<'a> {
                     None => format!("Vec<{el}>"),
                 })
             }
+            Ty::Str => Ok(match borrow {
+                Some(lt) => format!("{}str", r(lt)),
+                None => "String".into(),
+            }),
             _ => not_in_subset(pos, &format!("the type {}", show(t))),
         }
     }
@@ -560,6 +627,7 @@ impl<'a> Lower<'a> {
         self.cur = rs.clone();
         self.params = params;
         self.vars.clear();
+        self.frozen.clear();
         self.region.clear();
         let mut owned = vec![];
         for (i, ((a, _), t)) in args.iter().zip(&ats).enumerate() {
@@ -577,7 +645,7 @@ impl<'a> Lower<'a> {
             let (s, f) = self.ex(body)?;
             match self.borrow_of(&s, &f, &ret) {
                 // (empty roots: only while a callee's region is still being found; it grows, and this is redone)
-                (s, Some(roots)) => {
+                (s, Some(roots)) if !roots.iter().any(|r| r.starts_with('@')) => {
                     // (which parameters the result borrows from: callers count only those arguments)
                     let idx = self.params.iter().enumerate().filter(|(_, p)| roots.contains(*p)).map(|(i, _)| i).collect();
                     self.modes.region.insert(rs.clone(), idx);
@@ -616,8 +684,8 @@ impl<'a> Lower<'a> {
             return s;
         }
         match f {
-            Form::Val | Form::Own { movable: true } => s,
-            Form::Own { movable: false } => self.clone_of(&s, t),
+            Form::Val | Form::Own { movable: true, .. } => s,
+            Form::Own { movable: false, .. } => self.clone_of(&s, t),
             Form::Brw { param, .. } => {
                 // (a borrowed parameter consumed whole: from now on it is taken owned)
                 if let Some(p) = param
@@ -633,15 +701,23 @@ impl<'a> Lower<'a> {
     fn clone_of(&self, s: &str, t: &Ty) -> String {
         // (a block, `if`, `match` or reference takes the method only inside parentheses)
         let s = if ["if ", "match ", "{", "&", "*"].iter().any(|p| s.starts_with(p)) { format!("({s})") } else { s.to_string() };
-        if is_array(t) { format!("{s}.to_vec()") } else { format!("{s}.clone()") }
+        if is_array(t) {
+            format!("{s}.to_vec()")
+        } else if *t == Ty::Str {
+            format!("{s}.to_string()")
+        } else {
+            format!("{s}.clone()")
+        }
     }
 
     /// A borrow of expression `s` (`&[T]` / `&ZsX`), and the parameters it borrows from (None: a local or temporary)
     fn borrow_of(&self, s: &str, f: &Form, t: &Ty) -> (String, Option<BTreeSet<String>>) {
-        let tail = if is_array(t) { "[..]" } else { "" };
+        let tail = if sliced(t) { "[..]" } else { "" };
         match f {
             Form::Val => (format!("&({s}){tail}"), None),
-            Form::Own { .. } => (format!("&{s}{tail}"), None),
+            // (a borrow of a local: `@name` among the roots, so it can be kept past the statement only while that
+            // local is frozen, and never returned)
+            Form::Own { root, .. } => (format!("&{s}{tail}"), Some(BTreeSet::from([format!("@{root}")]))),
             Form::Brw { is_ref: true, roots, .. } => (s.to_string(), roots.clone()),
             Form::Brw { is_ref: false, roots, .. } => (format!("&{s}{tail}"), roots.clone()),
         }
@@ -669,7 +745,7 @@ impl<'a> Lower<'a> {
         match f {
             Form::Val if index => Form::Brw { is_ref: false, roots: None, param: None },
             Form::Val => Form::Val,
-            Form::Own { movable } => Form::Own { movable: movable && !index },
+            Form::Own { movable, root } => Form::Own { movable: movable && !index, root },
             Form::Brw { roots, .. } => Form::Brw { is_ref: false, roots, param: None },
         }
     }
@@ -706,6 +782,8 @@ impl<'a> Lower<'a> {
     fn canon(&mut self, n: &str, t: &Ty) -> String {
         if is_array(t) {
             format!("let {0}: &[{1}] = {0};\n", local(n), self.elem_rty(t))
+        } else if *t == Ty::Str {
+            format!("let {0}: &str = {0};\n", local(n))
         } else {
             String::new()
         }
@@ -730,9 +808,16 @@ impl<'a> Lower<'a> {
                 }
                 let (s, f) = self.ex(x)?;
                 let (s, k) = match &f {
-                    Form::Val | Form::Own { movable: true } => (s, VarK::Owned),
+                    Form::Val | Form::Own { movable: true, .. } => (s, VarK::Owned),
                     // (a part of the borrowed parameters: borrowed for as long as the function runs)
-                    Form::Brw { roots: Some(r), .. } => (self.borrow_of(&s, &f, &t).0, VarK::Borrow { roots: Some(r.clone()), param: false }),
+                    // (a part of the borrowed parameters, or of owned locals the rest of the block does not assign:
+                    // borrowed while it lives, and those locals are frozen, never moved, to the end of the block)
+                    Form::Brw { roots: Some(r), .. } if !r.iter().any(|x| x.strip_prefix('@').is_some_and(|n| self.later_assigns.contains(n))) => {
+                        for x in r.iter().filter_map(|x| x.strip_prefix('@')) {
+                            self.frozen.push(x.to_string());
+                        }
+                        (self.borrow_of(&s, &f, &t).0, VarK::Borrow { roots: Some(r.clone()), param: false })
+                    }
                     _ => (self.owned(s, &f, &t), VarK::Owned),
                 };
                 self.vars.insert(n.clone(), k);
@@ -820,7 +905,7 @@ impl<'a> Lower<'a> {
                 Form::Val => (ss, false, None),
                 // (the arms assign a local the scrutinee reads: match a value of it, taken if dead, else a copy)
                 _ if self.live.clone_root.contains(&m.id) => (self.owned(ss, &sf, &st), false, None),
-                Form::Own { movable: true } if self.live.match_move.contains(&m.id) => (ss, false, None),
+                Form::Own { movable: true, .. } if self.live.match_move.contains(&m.id) => (ss, false, None),
                 Form::Brw { is_ref: true, roots, .. } => (format!("*{ss}"), true, roots.clone()),
                 Form::Brw { roots, .. } => (ss, true, roots.clone()),
                 Form::Own { .. } => (ss, true, None),
@@ -833,6 +918,15 @@ impl<'a> Lower<'a> {
                 let mut pre = String::new();
                 let ps = l.pat(p, &st, by_ref, &roots, &mut pre, body.pos)?;
                 let (b, f) = l.ex(body)?;
+                // (a borrow of what the arm binds cannot leave the arm)
+                let names: Vec<String> = own::pat_names(p).into_iter().map(|n| format!("@{n}")).collect();
+                let (b, f) = match &f {
+                    Form::Brw { roots: Some(r), .. } if r.iter().any(|x| names.contains(x)) => {
+                        let t = l.ty(body.id);
+                        (l.owned(b, &f, &t), Form::Val)
+                    }
+                    _ => (b, f),
+                };
                 Ok((ps, if pre.is_empty() { b } else { format!("{{\n{pre}{b}\n}}") }, f))
             })?;
             pats.push(r.0);
@@ -886,7 +980,7 @@ impl<'a> Lower<'a> {
                 }
                 if ps.is_empty() { format!("{}::{v}", rs_type(&en)) } else { format!("{}::{v}({})", rs_type(&en), ps.join(", ")) }
             }
-            _ => return not_in_subset(pos, "this pattern (a tuple or a float)"),
+            _ => return not_in_subset(pos, "this pattern (a tuple, a float or a string)"),
         })
     }
 
@@ -950,6 +1044,8 @@ impl<'a> Lower<'a> {
         let pos = e.pos;
         let val = |s: String| Ok((s, Form::Val));
         match &e.kind {
+            // (a string literal is a `&'static str`: borrowed from nothing, copied only where it is consumed)
+            EK::Lit(Lit::Str(v)) => Ok((format!("{v:?}"), Form::Brw { is_ref: true, roots: Some(BTreeSet::new()), param: None })),
             EK::Lit(l) => val(self.lit(l, e.id, pos)?),
             EK::Var(n) | EK::Path(_, n) if matches!(self.info.callee.get(&e.id), Some(Callee::Variant(_))) => {
                 let Some(Callee::Variant(en)) = self.info.callee.get(&e.id).cloned() else { unreachable!() };
@@ -962,7 +1058,8 @@ impl<'a> Lower<'a> {
                 Some(Callee::Local) => {
                     let s = local(n);
                     Ok(match self.vars.get(n) {
-                        Some(VarK::Owned) => (s, Form::Own { movable: self.live.last.contains(&e.id) }),
+                        // (a local borrowed by a live `let` is frozen: never moved while the borrow may be used)
+                        Some(VarK::Owned) => (s, Form::Own { movable: self.live.last.contains(&e.id) && !self.frozen.contains(n), root: n.clone() }),
                         Some(VarK::Borrow { roots, param }) => (s, Form::Brw { is_ref: true, roots: roots.clone(), param: param.then(|| n.clone()) }),
                         None => (s, Form::Val),
                     })
@@ -1049,8 +1146,30 @@ impl<'a> Lower<'a> {
             }
             EK::Method(r, _, args) => self.method(e, r, args),
             EK::Bin(op, l, r) => {
-                if matches!(*op, "==" | "!=") && !self.copy(&self.ty(l.id)) {
-                    return not_in_subset(pos, "`==` on arrays or on records / enums that hold them");
+                let lt = self.ty(l.id);
+                if !self.copy(&lt) {
+                    // (values that are not Copy: compared through borrows of the same type, `&[T]` / `&str` / `&ZsX`,
+                    // by content (derive(PartialEq)), as the JS layer's `$eq`)
+                    // (both borrowed, through the arguments' path: a right operand that assigns what the left one reads,
+                    // `xs == { xs = [2]; xs }`, gets the left one as a value first. The left string of `+` is taken
+                    // owned, so nothing of it is borrowed while the right one runs)
+                    let (a, b) = match *op {
+                        "+" => (self.expr(l)?, self.borrowed(r)?.0),
+                        _ => {
+                            let (v, _) = self.args_as(&[(**l).clone(), (**r).clone()], &[true, true], &[lt.clone(), lt.clone()])?;
+                            (v[0].clone(), v[1].clone())
+                        }
+                    };
+                    return val(match *op {
+                        "==" | "!=" => format!("({a} {op} {b})"),
+                        "<" | "<=" | ">" | ">=" if lt == Ty::Str => {
+                            self.str_helpers.extend(["zs_cmp16", "zs_units16"]);
+                            format!("(zs_cmp16({a}, {b}) {op} 0)")
+                        }
+                        // (the left string is taken, moved where it can be: `a + b + c` appends in place)
+                        "+" if lt == Ty::Str => format!("{{ let mut __zs_s = {a}; __zs_s.push_str({b}); __zs_s }}"),
+                        _ => return not_in_subset(pos, &format!("`{op}` on {}", show(&lt))),
+                    });
                 }
                 let (a, b) = (self.expr(l)?, self.expr(r)?);
                 val(match *op {
@@ -1095,9 +1214,33 @@ impl<'a> Lower<'a> {
             EK::Match(sc, arms) => self.match_(e, sc, arms),
             EK::Block(stmts, tail) => self.scoped(|l| {
                 let mut s = String::from("{\n");
-                for st in stmts {
+                let frozen = l.frozen.len();
+                let saved = std::mem::take(&mut l.later_assigns);
+                for (i, st) in stmts.iter().enumerate() {
+                    // (what the rest of the block assigns: a `let` may keep a borrow of a local only if it is not
+                    // assigned while the borrow lives. Most blocks assign nothing, which the liveness pass knows)
+                    l.later_assigns.clear();
+                    if let Stmt::Let(_, _, x) = st
+                        && !l.copy(&l.ty(x.id))
+                    {
+                        let rest = stmts[i + 1..].iter().map(|s| match s {
+                            Stmt::Let(_, _, x) | Stmt::LetMut(_, _, x) | Stmt::Expr(x) => x,
+                        });
+                        for x in rest.chain(tail.as_deref()).filter(|x| l.live.assigns_in.contains(&x.id)) {
+                            own::names(x, &mut HashSet::new(), &mut l.later_assigns);
+                        }
+                    }
                     s.push_str(&l.stmt(st)?);
                 }
+                l.later_assigns = saved;
+                // (the locals this block declares: a borrow of one cannot leave it)
+                let declared: HashSet<String> = stmts
+                    .iter()
+                    .filter_map(|st| match st {
+                        Stmt::Let(Pat::Bind(n), ..) | Stmt::LetMut(n, ..) => Some(format!("@{n}")),
+                        _ => None,
+                    })
+                    .collect();
                 let mut f = Form::Val;
                 if let Some(t) = tail {
                     let (ts, tf) = l.ex(t)?;
@@ -1107,7 +1250,7 @@ impl<'a> Lower<'a> {
                     // block cannot leave it, so it is copied)
                     let ts = match tf {
                         _ if l.copy(&ty) => ts,
-                        Form::Brw { roots: Some(r), param, is_ref } => {
+                        Form::Brw { roots: Some(r), param, is_ref } if !r.iter().any(|x| declared.contains(x)) => {
                             let b = if is_ref { ts } else { l.borrow_of(&ts, &Form::Brw { is_ref, roots: None, param: None }, &ty).0 };
                             f = Form::Brw { is_ref: true, roots: Some(r), param };
                             b
@@ -1117,6 +1260,7 @@ impl<'a> Lower<'a> {
                     let _ = writeln!(s, "{ts}");
                 }
                 s.push('}');
+                l.frozen.truncate(frozen);
                 Ok((s, f))
             }),
             EK::Assign(n, x) => val(format!("{} = {}", local(n), self.expr(x)?)),
@@ -1139,7 +1283,7 @@ impl<'a> Lower<'a> {
                             (format!("{v}.iter().copied()"), None)
                         } else {
                             match f {
-                                Form::Val | Form::Own { movable: true } => (format!("{v}.into_iter()"), None),
+                                Form::Val | Form::Own { movable: true, .. } => (format!("{v}.into_iter()"), None),
                                 Form::Brw { roots, .. } => (format!("{v}.iter()"), Some(roots)),
                                 Form::Own { .. } => (format!("{v}.iter()"), Some(None)),
                             }
@@ -1231,15 +1375,69 @@ impl<'a> Lower<'a> {
         let (it, elems): (String, Option<Option<BTreeSet<String>>>) = match (&range, &rf) {
             (Some((a, b)), _) => (format!("({a}..{b})"), None),
             _ if self.copy(&el) => (format!("{recv}.iter().copied()"), None),
-            (_, Form::Val | Form::Own { movable: true }) => (format!("{recv}.into_iter()"), None),
+            (_, Form::Val | Form::Own { movable: true, .. }) => (format!("{recv}.into_iter()"), None),
             (_, Form::Brw { roots, .. }) => (format!("{recv}.iter()"), Some(roots.clone())),
             (_, Form::Own { .. }) => (format!("{recv}.iter()"), Some(None)),
         };
         let by_ref = elems.is_some();
         let k = |pre: &'static str| (elems.clone(), pre);
         let val = |s: String| Ok((s, Form::Val));
+        // strings: JS's meaning (lengths and order in UTF-16 code units, JS's white space)
+        if rt == Ty::Str {
+            let (mut sb, mut sroots) = self.borrow_of(&recv, &rf, &rt);
+            // (an argument that assigns what the receiver reads, `s.contains({ s = "b"; "a" })`: the receiver is taken
+            // as a value first, so no borrow of it is held across the assignment)
+            if args.iter().any(|a| self.live.assigns_in.contains(&a.id)) {
+                let (mut reads, mut assigns) = (HashSet::new(), HashSet::new());
+                own::names(r, &mut reads, &mut HashSet::new());
+                for a in args {
+                    own::names(a, &mut HashSet::new(), &mut assigns);
+                }
+                if reads.iter().any(|n| assigns.contains(n)) {
+                    let v = format!("{{ {} }}", self.owned(recv.clone(), &rf, &rt));
+                    sb = self.borrow_of(&v, &Form::Val, &rt).0;
+                    sroots = None;
+                }
+            }
+            return match b {
+                B::Len => {
+                    self.str_helpers.insert("zs_len16");
+                    val(format!("zs_len16({sb})"))
+                }
+                B::ToUpper => val(format!("{recv}.to_uppercase()")),
+                // (a part of the string: a borrow of what the string borrows from)
+                B::Trim => {
+                    self.str_helpers.extend(["zs_trim", "zs_ws"]);
+                    Ok((format!("zs_trim({sb})"), Form::Brw { is_ref: true, roots: sroots, param: None }))
+                }
+                B::Contains | B::Split => {
+                    let (o, _) = self.borrowed(&args[0])?;
+                    let h = if b == B::Contains { "zs_contains" } else { "zs_split" };
+                    self.str_helpers.insert(h);
+                    val(format!("{h}({sb}, {o})"))
+                }
+                _ => not_in_subset(pos, "this method on a string"),
+            };
+        }
         match b {
             B::Len => val(format!("({recv}.len() as i32)")),
+            B::Join => {
+                // (a separator that assigns what the receiver reads: the receiver is taken as a value first)
+                let mut recv = recv;
+                if self.live.assigns_in.contains(&args[0].id) {
+                    let (mut reads, mut assigns) = (HashSet::new(), HashSet::new());
+                    own::names(r, &mut reads, &mut HashSet::new());
+                    own::names(&args[0], &mut HashSet::new(), &mut assigns);
+                    if reads.iter().any(|n| assigns.contains(n)) {
+                        recv = format!("({{ {} }})", self.owned(recv, &rf, &rt));
+                    }
+                }
+                let (sep, _) = self.borrowed(&args[0])?;
+                val(format!("{recv}.join({sep})"))
+            }
+            // (JS's and Rust's formats agree for integers and bools; not for floats)
+            B::ToString if matches!(rt, Ty::F32 | Ty::F64) => not_in_subset(pos, "`to_string` of a float (JS and Rust format floats differently)"),
+            B::ToString => val(format!("{recv}.to_string()")),
             B::Map => val(format!("{it}.map({}).collect::<Vec<_>>()", self.closure(&args[0], &[k("")])?)),
             B::Filter => {
                 // (filter's closure gets `&Item`. For copied items and for references `|&x|` binds the item; for
