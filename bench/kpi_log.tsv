@@ -273,3 +273,4 @@ date	commit	change	noop_M	edit_M	check_M	cache_KiB	lsp_G	run	check	build	cfail	t
 2026-11-22	d843cb4+	E0391 for a cycle of constants (the constants' check no longer overflows)	0.695	549.627	3873.943	1902.8	-	1813	1495	102	4248	1182.573	64.146	10.452	319.934	721.244	266.290
 2026-11-22	092efb3+	Review of #52: probes' names, comments and literals, &mut not Copy, clone inference	0.695	549.558	3874.047	1902.8	-	-	-	-	-	1182.573	64.089	10.452	319.932	721.256	266.286
 2026-11-22	0d6bba4+	Review of #52 (3): Clone and Copy only through arguments of containers, raw strings, probes' names	0.695	549.779	3750.836	1902.8	-	1813	1495	102	4278	1179.916	64.135	10.452	320.176	718.230	266.322
+2026-11-22	db53692	Review of #52 (4): literals in the constants' scans, the repr attribute, Self::C repeats, &mut not Clone	0.693	549.734	3750.895	1902.8	-	1813	1495	102	4278	1179.899	64.132	10.439	320.104	718.424	266.291
