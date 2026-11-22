@@ -328,6 +328,9 @@ pub struct Program {
     /// Types whose `Copy` impl names 'static in its self type (`impl Copy for Foo<'static>`): a copy of one requires
     /// what it borrows to be 'static
     pub static_copy: FxSet<u32>,
+    /// Associated consts of impls whose self type names 'static (`impl A<'static> { const IC: i32 = 10; }`), with
+    /// the region slots of that self type: `A::<'a>::IC` requires 'a to be 'static
+    pub static_self_consts: FxMap<u32, Vec<u8>>,
     /// `#[panic_handler]` の関数 (no_std)。panic (範囲外アクセス・unwrap など) はここを呼ぶ
     pub panic_handler: Option<u32>,
     /// const と static
@@ -757,6 +760,7 @@ impl Program {
             trait_self_outlives: FxMap::default(),
             any_immutable_static: false,
             static_copy: FxSet::default(),
+            static_self_consts: FxMap::default(),
             alias_fixed_lt: false,
             trait_ngen: FxMap::default(),
             impl_targs: FxMap::default(),
@@ -970,6 +974,13 @@ impl Program {
                 if let (Some(tr), false) = (trait_of(ii), n.contains(" as ")) {
                     if let Some((base, last)) = n.rsplit_once("::") {
                         p.const_index.insert(format!("{base} as {tr}::{last}"), p.consts.len() as u32);
+                    }
+                }
+                // (an impl's for its type's 'static instance (`impl A<'static> { const IC }`): a use names the
+                // lifetimes it is used at)
+                if let crate::lexer::ItemKind::ImplMember(h) = items[ii].kind {
+                    if let Some(r) = sums[h as usize].hdr_regions.as_ref().filter(|r| r.self_slots.contains(&R_STATIC)) {
+                        p.static_self_consts.insert(p.consts.len() as u32, r.self_slots.clone());
                     }
                 }
                 p.consts.push(ConstDef {

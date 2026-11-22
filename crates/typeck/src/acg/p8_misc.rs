@@ -735,7 +735,9 @@ impl Cx<'_> {
 impl Cx<'_> {
     /// const は式そのものを埋め込む
     pub(crate) fn const_value(&mut self, p: &Expr, ci: u32) -> R<V> {
-        let _ = p;
+        if !self.prog.static_self_consts.is_empty() {
+            self.rg_static_self_const(p, ci);
+        }
         let prog = self.prog;
         let c = &prog.consts[ci as usize];
         let (t, src) = (c.ty, c.expr.clone());

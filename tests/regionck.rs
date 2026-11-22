@@ -1616,3 +1616,13 @@ fn alias_of_box_elided() {
     let ok = "impl<'a> C<'a> {\n    fn set_f_ok(&mut self, b: Box<B<'a>>) { self.f = b; }\n    fn get(&self) -> &B { &self.f }\n}\nfn g(b: Box<B>) -> isize { **b + 1 }\nfn main() {}\n";
     assert_eq!(check(&format!("{pre}{ok}")), vec![]);
 }
+
+/// An associated const of an impl for its type's 'static instance (`impl A<'static> { const IC }`): `A::<'a>::IC`
+/// requires 'a to be 'static (nll/user-annotations/inherent-associated-constants.rs, nll/issue-58299.rs)
+#[test]
+fn static_self_const() {
+    let pre = "struct A<'a>(&'a ());\nimpl A<'static> {\n    const IC: i32 = 10;\n}\n";
+    let d = check(&format!("{pre}fn f<'a>(_x: &'a i32) -> i32 {{\n    A::<'a>::IC\n}}\nfn main() {{}}\n"));
+    assert!(d.len() == 1 && d[0].0 == 6 && d[0].1.contains("lifetime may not live long enough"), "{d:?}");
+    assert_eq!(check(&format!("{pre}fn f<'a>(_x: &'a i32) -> i32 {{\n    A::<'static>::IC + A::IC\n}}\nfn main() {{}}\n")), vec![]);
+}
