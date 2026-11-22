@@ -3641,7 +3641,8 @@ impl Session2 {
                                             // (nor a mismatch zustc's coercions may make: of a raw pointer, or of a type
                                             // that has no size, which rustc rejects another way)
                                             // (nor a reference to a type with a Deref, whose coercion zustc does not make)
-                                            let m = e.find("mismatched types").filter(|&m| {
+                                            // (a cycle of constants, E0391, is the constant's too)
+                                            let m = e.find("cycle detected when const-evaluating").or_else(|| e.find("mismatched types").filter(|&m| {
                                                 let tys = &e[m..];
                                                 let unsized_ty = |t: &str| t == "str" || t.starts_with('[') && !t.contains(';') || t.starts_with("dyn ");
                                                 let derefs = |t: &str| {
@@ -3649,7 +3650,7 @@ impl Session2 {
                                                     a.prog.struct_index.get(n).is_some_and(|&sid| a.prog.method(sid, "deref").is_some())
                                                 };
                                                 !tys.contains("*const") && !tys.contains("*mut") && !tys.split('`').skip(1).step_by(2).any(|t| unsized_ty(t) || derefs(t))
-                                            });
+                                            }));
                                             if let (Some(&l), Some(m)) = (self.const_lines.get(k), m) {
                                                 errs.push(format!("{l}:1: {}", &e[m..]));
                                             }

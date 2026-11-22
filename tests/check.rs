@@ -125,3 +125,13 @@ fn discriminants_and_nested_constants() {
     let d = s.check(src);
     assert_eq!(d.iter().map(|d| d.line).collect::<Vec<_>>(), vec![2, 9, 11], "{d:?}");
 }
+
+/// A constant whose value needs its own is E0391 at the constant, not an endless evaluation
+#[test]
+fn constant_cycles() {
+    let src = "const A: i32 = B;\nconst B: i32 = A;\nconst SELF_SIZE: usize = SELF_SIZE;\nfn main() {}\n";
+    let mut s = Session2::new(Options2 { jobs: 1, ..Options2::default() });
+    let d = s.check(src);
+    assert!(!d.is_empty() && d.iter().all(|d| d.msg.contains("(E0391)")), "{d:?}");
+    assert!(d.iter().any(|d| d.line == 3), "{d:?}");
+}

@@ -141,6 +141,8 @@ run-pass	associated-consts/defaults-cyclic-pass.rs
 run-pass	associated-consts/defaults-not-assumed-pass.rs
 check-pass	associated-consts/double-elided.rs
 compile-fail	associated-consts/infer-placeholder-in-non-suggestable-pos.rs
+compile-fail	associated-consts/issue-24949-assoc-const-static-recursion-impl.rs
+compile-fail	associated-consts/issue-24949-assoc-const-static-recursion-trait.rs
 compile-fail	associated-consts/issue-58022.rs
 compile-fail	associated-consts/issue-63496.rs
 check-pass	associated-consts/trait-associated-const-usage-43483.rs
@@ -1906,6 +1908,7 @@ run-pass	consts/promoted_const_call4.rs
 check-pass	consts/promotion-drop-type-static-lifetime-86672.rs
 check-pass	consts/raw-ptr-const.rs
 check-pass	consts/raw_pointer_promoted.rs
+compile-fail	consts/recursive-const-stack-overflow.rs
 check-pass	consts/recursive-type.rs
 run-pass	consts/references.rs
 run-pass	consts/repeat_match.rs
@@ -4722,6 +4725,7 @@ run-pass	packed/packed-struct-vec.rs
 run-pass	packed/packed-tuple-struct-layout.rs
 check-pass	panics/panic-handler-closures.rs
 build-pass	parallel-rustc/assert-found_cycle-issue-115223.rs
+compile-fail	parallel-rustc/cycle_crash-issue-135870.rs
 build-pass	parallel-rustc/export-symbols-deadlock-issue-118205.rs
 compile-fail	parallel-rustc/fn-sig-cycle-ice-153391.rs
 compile-fail	parallel-rustc/infer-unwrap-none-issue-120786.rs
@@ -5655,6 +5659,7 @@ compile-fail	reachable/unreachable-code.rs
 compile-fail	reachable/unreachable-ret-after-panic.rs
 run-pass	reborrow/reborrow-mutable-reference.rs
 run-pass	recursion/instantiable.rs
+compile-fail	recursion/issue-23302-3.rs
 build-pass	recursion/issue-86784.rs
 run-pass	recursion/recursion-tail-call-no-arg-leak.rs
 run-pass	recursion/recursion-tail-cps.rs

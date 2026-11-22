@@ -758,6 +758,22 @@ impl Cx<'_> {
 impl Cx<'_> {
     /// const は式そのものを埋め込む
     pub(crate) fn const_value(&mut self, p: &Expr, ci: u32) -> R<V> {
+        // (E0391: a constant whose value needs its own (`const A: i32 = B; const B: i32 = A;`))
+        thread_local! {
+            static EVALUATING: std::cell::RefCell<Vec<u32>> = const { std::cell::RefCell::new(Vec::new()) };
+        }
+        if EVALUATING.with(|v| v.borrow().contains(&ci)) {
+            return err(SP, format!("cycle detected when const-evaluating `{}` (E0391)", self.prog.consts[ci as usize].name));
+        }
+        EVALUATING.with(|v| v.borrow_mut().push(ci));
+        let r = self.const_value_in(p, ci);
+        EVALUATING.with(|v| {
+            v.borrow_mut().pop();
+        });
+        r
+    }
+
+    fn const_value_in(&mut self, p: &Expr, ci: u32) -> R<V> {
         let _ = p;
         let prog = self.prog;
         let c = &prog.consts[ci as usize];
