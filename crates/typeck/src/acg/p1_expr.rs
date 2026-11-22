@@ -1924,6 +1924,16 @@ impl Cx<'_> {
             self.requested.push(iid);
         }
         let st = Ty::Struct(sid);
+        // (a closure that mutates its captures is `FnMut`; one that holds a `&mut` of them is not `Copy`)
+        if self.bk.fnmut_exprs.contains(&(c as *const Expr as usize)) && !self.bk.fnonce_exprs.contains(&(c as *const Expr as usize)) {
+            if !self.bk.fnmut.contains(&st) {
+                self.bk.fnmut.push(st);
+            }
+            let unique = self.bk.cap_loans.get(&(c as *const Expr as usize)).is_some_and(|ls| ls.iter().any(|&l| self.bk.loans[l as usize].mutable));
+            if unique {
+                self.bk.ty_info.insert(st, (false, true));
+            }
+        }
         self.rg_closure(c, st);
         let a = self.temp(st);
         let fields = prog.structs[sid as usize].fields.clone();
@@ -2535,6 +2545,12 @@ impl Cx<'_> {
             }
         }
         let args: Vec<&Expr> = cargs.iter().collect();
+        // (an `FnMut` closure called by name: a `&mut` of it (E0596 when it is not `mut`))
+        if matches!(t, Ty::Struct(_)) && self.bk.fnmut.contains(&t) && is_place_expr(func) && self.peek(func) == Some(t) {
+            self.bk.no_loan_src = true;
+            self.bk_borrow(func, true, err_pos(func));
+            self.bk.no_loan_src = false;
+        }
         self.bk_frame();
         let r = match t {
             Ty::Struct(sid) => {

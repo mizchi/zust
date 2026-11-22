@@ -205,6 +205,12 @@ pub struct Bk {
     pub forever: Vec<u32>,
     /// The loans of each closure's captures by reference, by the closure's address
     pub cap_loans: HashMap<usize, Vec<u32>>,
+    /// The closures (by address) whose bodies mutate what they capture: `FnMut`, called through a `&mut` of them
+    pub fnmut_exprs: Vec<usize>,
+    /// The types of such closures
+    pub fnmut: Vec<Ty>,
+    /// The closures (by address) that move what they capture out of themselves: `FnOnce`, called by value
+    pub fnonce_exprs: Vec<usize>,
     /// Loans the region check found must outlive a region of locals' types (sorted by loan): those locals hold them
     pub held_by: Vec<(u32, Vec<u32>)>,
     /// The loan of each method call's receiver, by the call's address (while the region check is on)
@@ -1708,6 +1714,17 @@ impl Cx<'_> {
         let mut calls: Vec<BPlace> = vec![];
         self.bk_cap_muts(body, n, &mut muts, &mut calls);
         let assigns = crate::ast_closure::assigns_capture(c, &[n.to_string()]);
+        // (a closure that mutates what it captures, by value or by `&mut`: `FnMut`; one that holds a value that is not
+        // `Copy` may move it out of itself (`FnOnce`, called by value): not known here, so not `FnMut` either)
+        let ca = c as *const Expr as usize;
+        if (assigns && !muts.is_empty()) || !calls.is_empty() {
+            if !self.bk.fnmut_exprs.contains(&ca) {
+                self.bk.fnmut_exprs.push(ca);
+            }
+        }
+        if (by_move || move_kw) && !self.bk_ty(t).0 && !self.bk.fnonce_exprs.contains(&ca) {
+            self.bk.fnonce_exprs.push(ca);
+        }
         for (p, pt, mode, _) in &mut paths {
             // (stop at an index, and a move closure at a deref: it captures the reference)
             let cut = p.proj.iter().position(|x| *x == Proj::Index || move_kw && matches!(x, Proj::Deref(_) | Proj::Shr));

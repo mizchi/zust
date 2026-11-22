@@ -1164,3 +1164,18 @@ fn mutability_of_bindings_statics_slices() {
         vec![]
     );
 }
+
+/// A closure that mutates what it captures is `FnMut`: a call of it by name borrows it mutably (E0596 when the binding
+/// is not `mut`); one that holds a `&mut` of a capture is not `Copy` (E0382 when moved twice). One that holds a value
+/// that is not `Copy` may be `FnOnce`, called by value
+#[test]
+fn fnmut_closures() {
+    let d = check("fn main() {\n    let mut my_var = false;\n    let callback = || {\n        my_var = true;\n    };\n    callback();\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 6 && d[0].1.contains("not declared as mutable"), "{d:?}");
+    let d = check("fn main() {\n    let mut a = 5;\n    let hello = || {\n        a += 1;\n    };\n    let _b = hello;\n    let _c = hello;\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 7 && d[0].1.contains("use of moved value: `hello`"), "{d:?}");
+    assert_eq!(
+        check("fn main() {\n    let mut a = 5;\n    let mut inc = || {\n        a += 1;\n    };\n    inc();\n    inc();\n    let b = 1;\n    let read = || b + 1;\n    let r1 = read;\n    let r2 = read;\n    let mut foo = Some(Box::new(8));\n    let f = move || {\n        if let Some(x) = foo {\n            foo = Some(x);\n        }\n        println!(\"{:?}\", foo.unwrap());\n    };\n    f();\n    println!(\"{} {}\", r1(), r2());\n}\n"),
+        vec![]
+    );
+}
