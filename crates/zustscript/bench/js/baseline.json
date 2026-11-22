@@ -1,0 +1,88 @@
+{
+  "node": "v26.13.1",
+  "esbuild": true,
+  "size": {
+    "app": {
+      "raw": 5899,
+      "raw_gz": 2100,
+      "min": 3779,
+      "gz": 1552
+    },
+    "basics": {
+      "raw": 3757,
+      "raw_gz": 1313,
+      "min": 2465,
+      "gz": 1031
+    },
+    "effects": {
+      "raw": 3608,
+      "raw_gz": 1156,
+      "min": 2001,
+      "gz": 759
+    },
+    "kernels": {
+      "raw": 1722,
+      "raw_gz": 682,
+      "min": 1096,
+      "gz": 535
+    },
+    "ml": {
+      "raw": 1972,
+      "raw_gz": 720,
+      "min": 1311,
+      "gz": 562
+    },
+    "numeric": {
+      "raw": 3005,
+      "raw_gz": 1075,
+      "min": 2043,
+      "gz": 862
+    },
+    "regress": {
+      "raw": 1867,
+      "raw_gz": 760,
+      "min": 1099,
+      "gz": 533
+    },
+    "shapes": {
+      "raw": 2667,
+      "raw_gz": 1011,
+      "min": 1588,
+      "gz": 770
+    },
+    "workloads": {
+      "raw": 4179,
+      "raw_gz": 1533,
+      "min": 2373,
+      "gz": 1091
+    },
+    "TOTAL": {
+      "raw": 28676,
+      "raw_gz": 10350,
+      "min": 17755,
+      "gz": 7695
+    }
+  },
+  "speed": {
+    "w_effects": {
+      "ms": 676.55,
+      "result": "1197"
+    },
+    "w_records": {
+      "ms": 7.46,
+      "result": "399960"
+    },
+    "w_enums": {
+      "ms": 9.41,
+      "result": "8845127.652340543"
+    },
+    "w_numeric": {
+      "ms": 3.21,
+      "result": "-1627944058"
+    },
+    "w_strings": {
+      "ms": 12.7,
+      "result": "1778000"
+    }
+  }
+}

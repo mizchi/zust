@@ -79,6 +79,26 @@ r5 / r2 を書いた agent が報告したもの。次の改訂で直す。
 - 001 の決定 9(`pub` の入口で TAG を検査し、内部の呼び出しは検査しない): `@wasm` の `pub` な関数では、JS 層の中からの呼び出しも glue の検査を通る
 - 001 の引数のあるバリアント(`if c { Parsed::Ok(1) } else { Ok(2) }`)は、`EK::If` が他の分岐の型を期待する型として渡すので、分岐の順で結果が変わりうる(003 は「書いた型」だけを数える規則で避けた。001 にも同じ規則を入れる)
 
+## JS ターゲット: サイズ、速さ、TS との型の接続
+
+計測は `node bench/js/kpi.mjs`(`--esbuild PATH`、`--save FILE`、`--against FILE`)。`examples/*.zsc` と `bench/js/workloads.zsc` を `--all-js` でコンパイルし、esbuild で bundle + minify + gzip したサイズと、`w_*` の速さを出す。ベースラインは `bench/js/baseline.json`(node 26.13.1、esbuild 0.28.2)。
+
+決めたこと(順に入れて、1 つずつ効果を測る):
+
+1. **effect の tail-resumptive な handler を、直接の関数呼び出しにする**
+   - handler のすべての arm が末尾で `k(x)` を呼ぶだけなら、generator を使わず、handler を引数で渡す普通の呼び出しにする。それ以外の handler だけ generator を残す
+   - **不具合**: 今の generator の deep handler は、operation のたびに JS のスタックが深くなり、1 つの `handle` の中で operation が 1000 回前後になるとスタックがあふれる(`w_effects` は n=500 で RangeError)。直接の呼び出しにすると、この不具合も消える。残る generator の handler にもループの形の再開が要る
+2. **実行時の補助関数を共通の runtime モジュールにする**: `zsc-runtime.js`(`$div_i32`、`$fold`、`$handle`、数値の brand のコンストラクタなど)と `zsc-prelude.d.ts` を 1 つ出し、各モジュールは使うものだけ import する(bundler の tree-shaking が効き、モジュールの間で重複しない。003 の prelude の計画と同じ)
+3. **TS との境界の検査に tsrs を使う**(`npm i tsrs`。tsc と同じ診断で、今の .d.ts の検査は 0.89 秒 → 0.06 秒)
+   - `extern` で宣言した TS の関数の型と、実際の .d.ts の型が合うかを、検査用の .ts を生成して tsrs で確かめる。TS の型検査を自前で実装しない
+   - tsrs は Rust 1.100 が要り(この環境は 1.97)、Rust ライブラリとしての安定した API もないので、zustc と同じく外部コマンドとして使う
+
+まだ決めていないこと:
+
+- 式の中の即時関数(`iife`)をなくす変換(003 の `?` の脱糖と同じ AST の書き換えに載せる)
+- enum の表現(`@tag`)がサイズに効く分(`TAG: "Circle"` と `_0` のキー)
+- `|> .map(..) |> .filter(..)` の連鎖を 1 つのループにまとめるか
+
 ## 実装の残り(文法以外)
 
 - PR #31 のレビューで直さずに残した指摘: [mizchi/zust#35](https://github.com/mizchi/zust/issues/35)(検証の結果は [docs/review-31.md](docs/review-31.md))
