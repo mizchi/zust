@@ -323,8 +323,8 @@ python3 bench/ci_bench.py --out-dir out/ci
 ## English and Japanese documents
 
 `README.md` is in English only: it holds the overview, the measured numbers and what is supported in one
-place; the roadmap is in this document. The measured numbers in it (between `<!-- auto:.. -->` markers, and after `<!-- total:.. -->`, `<!-- ui:.. -->`
-and `<!-- cf:.. -->` markers) are rewritten by CI (`scripts/update_readme.py`, run by bench.yml after each push to
+place; the roadmap is in this document. The measured numbers in it (between `<!-- auto:.. -->` markers, and after `<!-- ui:.. -->` and `<!-- cf:.. -->`
+markers) are rewritten by CI (`scripts/update_readme.py`, run by bench.yml after each push to
 main); do not edit them by hand. `CONTRIBUTING.md` / `CONTRIBUTING.ja.md` and `docs/X.md` / `docs/ja/X.md` (reports
 included) are English / Japanese pairs. When you change one, change the other
 too. [jev-lint](https://github.com/mizchi/jev-lint) `docs` asks a model whether each pair still says the same thing.

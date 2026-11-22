@@ -51,18 +51,16 @@ only the tests it can be asked to handle (no nightly features, auxiliary crates 
 
 ### KPIs
 
-Build speed, build cache size and LSP latency on generated programs of 1000 / 5000 functions (`bench/ci_bench.py`):
+Build speed, build cache size and LSP latency on generated programs of 1000 / 5000 functions (`bench/ci_bench.py`).
+In parentheses: the instruction count (valgrind), which does not vary with the runner:
 
 <!-- auto:kpi -->
 | KPI | gen1000 | gen5000 |
 |---|---:|---:|
 | cold build | 125 ms | 560 ms |
-| no-op build | 1.1 ms | 1.1 ms |
-| build after editing one function | 21.8 ms | 75.6 ms |
-| `check` | 98 ms | 474 ms |
-| no-op build (instructions) | 0.6 M | 0.6 M |
-| edit one function (instructions) | 124.7 M | 591.4 M |
-| `check` (instructions) | 786.0 M | 3879.0 M |
+| no-op build | 1.1 ms (0.6 M) | 1.1 ms (0.6 M) |
+| build after editing one function | 21.8 ms (124.7 M) | 75.6 ms (591.4 M) |
+| `check` | 98 ms (786.0 M) | 474 ms (3879.0 M) |
 | build cache on disk | 387.2 KiB | 1902.8 KiB |
 | binary | 324.0 KiB | 1558.3 KiB |
 | cold build peak RSS | 19.1 MiB | 52.8 MiB |
@@ -379,10 +377,7 @@ the measured numbers. The [reports](docs/reports/) explain each step.
 
 ### Overall
 
-- [x] tests/ui run-pass: <!-- total:run-pass -->75.9% (1811 / 2385)
-- [x] tests/ui check-pass: <!-- total:check-pass -->82.6% (1493 / 1807)
-- [x] tests/ui build-pass: <!-- total:build-pass -->74.8% (101 / 135)
-- [ ] tests/ui compile-fail (an error on an annotated line): <!-- total:compile-fail -->57.0% (4196 / 7358)
+- [x] tests/ui: the [table above](#coverage-of-rusts-test-suite)
 - [x] real crates: fnv, adler2, hex, itoa, rustc-hash and cfg-if build and give the same output (6 / 6)
 - [x] zust-analyzer answers like rust-analyzer: 95.4% (rust-analyzer: 96.2%)
 
@@ -438,9 +433,11 @@ the measured numbers. The [reports](docs/reports/) explain each step.
   closure bodies against the bound they are passed to, trait object lifetimes, well-formed written types (E0309,
   E0310, E0491), undeclared / shadowed / unconstrained lifetimes (E0261, E0496, E0207), missing ones in fn pointer
   types (E0106), `'_` where it cannot be used (E0637), `unused_lifetimes` / `single_use_lifetimes`; borrows that
-  must outlive the fn live to its end, closures that are not general enough or let borrowed data escape. Not yet:
-  generic fns that are never called, what a closure's body requires of its fn, higher-ranked trait selection, the
-  requirements of the impl a coercion selects, the prelude's iterators (their types hold no lifetimes). regions <!-- cf:regions -->73.3%, lifetimes <!-- cf:lifetimes -->72.7%
+  must outlive the fn live to its end, closures that are not general enough or let borrowed data escape, generic fns
+  that are never called (checked with placeholder types). Not yet: what a closure's body requires of its fn,
+  higher-ranked trait selection, the requirements of the impl a coercion selects, the prelude's iterators (their types
+  hold no lifetimes). regions <!-- cf:regions -->73.3%, lifetimes <!-- cf:lifetimes -->72.7%
+  ([issue #1](https://github.com/mizchi/zust/issues/1))
 - [ ] coherence, bounds of blanket impls, dyn compatibility (E0038), the bindings of `dyn Tr<A = T>` against the associated type's bounds (done when T is a primitive, `str` or a struct name)
 - [ ] lints and warnings: lint <!-- cf:lint -->30.6%
 - [ ] editions (2015-only errors)
@@ -475,35 +472,27 @@ the measured numbers. The [reports](docs/reports/) explain each step.
 
 ### Expected to cost performance (measured before kept)
 
-- [x] region checking against signatures: measured against cd5dccd (instructions): check +0.14%, edit one fn +0.28%,
-  traits check +0.36%, patterns check +0.91% (the region check itself ~0.5%), LSP session +0.06%, no-op and cache unchanged.
-  Part 2 (closures, trait objects, well-formedness) against 18e598d: patterns check +0.5%, traits check +0.2%,
-  check +0.08%, LSP ±0 ([report](docs/reports/2026-11-21-05-region-check-2.md)). Part 3 (closures, loans that outlive
-  the fn, lints), merged against main 68b7497: patterns check +0.60%, traits check +0.30%, check +0.33%
-  ([report](docs/reports/2026-11-21-06-region-check-3.md)). Part 4 (generic fns nothing calls, with placeholder
-  types): every KPI within run-to-run noise ([report](docs/reports/2026-11-21-07-region-check-4.md)). Part 5 (a type
-  parameter's region, E0309 / E0310): every KPI within run-to-run noise
-  ([report](docs/reports/2026-11-22-01-region-check-5.md)). Part 6 (placeholders' regions everywhere, the borrow
-  check's mutability): every KPI within run-to-run noise ([report](docs/reports/2026-11-22-02-region-check-6.md))
+- [x] region checking against signatures: each part is measured in its PR, and every KPI stayed within +1%
+  (patterns check, the most affected); no-op build and cache size unchanged. The numbers are in
+  [issue #1](https://github.com/mizchi/zust/issues/1) and its reports
 - [ ] coherence and bounds of blanket impls: `check` time, LSP
-- [ ] real async (state machines, `poll`, an executor): build time, binary size
-- [ ] unwinding (landing pads): build time, binary size
 - [ ] field-precise closure captures in codegen: binary size
 - [ ] a larger prelude: no-op build and cache size (the prelude, ~11k lines, is scanned on every build)
-- [ ] real threads (a pthread runtime): runtime size
 
 ### Large features not started
 
-- [ ] real concurrency (threads on several OS threads, in parallel: atomic `Arc` and atomics, a thread-safe runtime)
-- [ ] executors: `Future::poll`, `Waker`, `Pin<Box<dyn Future>>` (~25 tests)
-- [ ] unwinding: `catch_unwind`, panic hooks (~22 tests)
+- [ ] real concurrency: threads on several OS threads, in parallel (atomic `Arc` and atomics, a thread-safe
+  runtime; cost: runtime size)
+- [ ] executors: async as state machines, `Future::poll`, `Waker`, `Pin<Box<dyn Future>>` (~25 tests; cost: build
+  time, binary size)
+- [ ] unwinding: `catch_unwind`, panic hooks (~22 tests; landing pads cost build time and binary size)
 - [ ] FFI: structs by value, other ABIs (~27 tests)
-- [ ] full region / lifetime checking
 - [ ] a full trait solver: specialization, auto traits through `dyn` / `async`, higher-ranked bounds
-- [ ] lints and warnings
-- [ ] editions
-- [ ] SIMD, inline asm
-- proc macros: not applicable (they are separate crates)
+- [ ] inline asm
+- [ ] proc macros: none run yet; zurgo stops on a use of one ([issue #29](https://github.com/mizchi/zust/issues/29))
+
+Lints, editions and region checking are under [Checks](#checks-compile-fail). SIMD is done in part
+([tests/simd/README.md](tests/simd/README.md), [issue #30](https://github.com/mizchi/zust/issues/30)).
 
 ## Roadmap
 

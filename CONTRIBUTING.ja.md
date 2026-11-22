@@ -313,7 +313,7 @@ python3 bench/ci_bench.py --out-dir out/ci
 ## 英語の文書と日本語訳
 
 `README.md` は英語だけ (概要・測った数値・サポート範囲を 1 か所に持つ。ロードマップはこの文書にある)。その中の測った数値
-(`<!-- auto:.. -->` の間と、`<!-- total:.. -->` / `<!-- ui:.. -->` / `<!-- cf:.. -->` の直後) は CI が書き直す
+(`<!-- auto:.. -->` の間と、`<!-- ui:.. -->` / `<!-- cf:.. -->` の直後) は CI が書き直す
 (bench.yml が main への push ごとに `scripts/update_readme.py` を実行する) ので、手で直さない。英語の文書と日本語訳の組は
 `CONTRIBUTING.md` / `CONTRIBUTING.ja.md`、
 `docs/X.md` / `docs/ja/X.md` (レポートも)。片方を変えたら、もう片方も変える。
