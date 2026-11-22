@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795374846338,
+  "lastUpdate": 1795374848564,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -102196,6 +102196,70 @@ window.BENCHMARK_DATA = {
           {
             "name": "tests/ui compile-fail passing",
             "value": 4364,
+            "unit": "tests"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "miz404@gmail.com",
+            "name": "Kotaro Chikuba",
+            "username": "mizchi"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "5520c53fe958840b51cd75e4d7f8e4a9ba6c1d92",
+          "message": "Merge pull request #59 from mizchi/claude/clever-pasteur-11fjnw\n\nW0 of #38: wasm-bindgen-shared for wasm32 with zurgo (wasm32 workspace builds)",
+          "timestamp": "2026-11-23T04:09:56+09:00",
+          "tree_id": "f22ee629c92a77cf5943224380bd7ff4698e77bf",
+          "url": "https://github.com/mizchi/zust/commit/5520c53fe958840b51cd75e4d7f8e4a9ba6c1d92"
+        },
+        "date": 1795374848114,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tests/ui run-pass pass rate",
+            "value": 76.23,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui run-pass passing",
+            "value": 1818,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui check-pass pass rate",
+            "value": 83.23,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui check-pass passing",
+            "value": 1504,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui build-pass pass rate",
+            "value": 75.56,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui build-pass passing",
+            "value": 102,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui compile-fail pass rate",
+            "value": 59.34,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui compile-fail passing",
+            "value": 4366,
             "unit": "tests"
           }
         ]
