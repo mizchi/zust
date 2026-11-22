@@ -14,7 +14,7 @@
 use crate::ast::*;
 use std::collections::{BTreeSet, HashMap, HashSet};
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum Ty {
     I32,
     U32,
@@ -132,6 +132,9 @@ pub struct Info {
     /// effects whose handlers all resume in tail position (see [`direct_effects`]): in JS they are plain calls to the
     /// handler's arm, not generators
     pub direct: BTreeSet<String>,
+    /// the type of each expression of a `@wasm` / `@simd` function (the lowering to Rust decides by it what is Copy,
+    /// what is borrowed and what is moved). Not recorded for the JS layer, which does not need it
+    pub ty: HashMap<Id, Ty>,
 }
 
 pub struct Checker {
@@ -157,6 +160,8 @@ pub struct Checker {
     /// type variables that only float types may fill (from float literals)
     floatv: HashSet<u32>,
     typed_lits: Vec<(Id, Ty)>,
+    /// (id, type) of the expressions of a `@wasm` function, resolved into `Info::ty` when the function is done
+    tys: Vec<(Id, Ty)>,
     bound_checks: Vec<(Pos, Ty, String)>,
     /// mutable locals: (scope index, name)
     muts: HashSet<(usize, String)>,
@@ -238,6 +243,7 @@ impl Checker {
             insts: vec![],
             floatv: HashSet::new(),
             typed_lits: vec![],
+            tys: vec![],
             bound_checks: vec![],
             muts: HashSet::new(),
             closure_bases: vec![],
@@ -568,6 +574,10 @@ impl Checker {
             let r = self.resolve(&t);
             self.info.num.insert(id, r);
         }
+        for (id, t) in std::mem::take(&mut self.tys) {
+            let r = self.resolve(&t);
+            self.info.ty.insert(id, r);
+        }
         for (id, ts) in std::mem::take(&mut self.insts) {
             let r = ts.iter().map(|t| self.resolve(t)).collect();
             self.info.inst.insert(id, r);
@@ -739,6 +749,14 @@ impl Checker {
     // ------------------------------------------------------------ expressions
 
     fn infer(&mut self, e: &Expr, expect: Option<&Ty>) -> Ty {
+        let t = self.infer_kind(e, expect);
+        if self.in_wasm {
+            self.tys.push((e.id, t.clone()));
+        }
+        t
+    }
+
+    fn infer_kind(&mut self, e: &Expr, expect: Option<&Ty>) -> Ty {
         let pos = e.pos;
         match &e.kind {
             EK::Lit(l) => {
