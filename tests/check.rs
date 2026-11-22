@@ -207,6 +207,16 @@ fn discriminants_and_constants_past_literals() {
     assert_eq!(lines(&mut s, repeat), Vec::<usize>::new());
 }
 
+/// A scrutinee's type from the arms: a unit struct pattern (`Some(S)`), a reference pattern of a type not known yet
+/// (`&S`), as rustc infers `fn get<T>() -> T` from them (rust-lang/rust#55810)
+#[test]
+fn scrutinee_types_from_unit_struct_and_reference_patterns() {
+    let src = "struct S;\nimpl S {\n    fn method(&self) -> bool {\n        true\n    }\n}\nfn get<T>() -> T {\n    unimplemented!()\n}\nfn opt<T>() -> Option<T> {\n    None\n}\nfn main() {\n    match opt() {\n        Some(S) => {}\n        None => {}\n    }\n    let w = opt();\n    if let Some(S) = w {}\n    match get() {\n        x if x.method() => {}\n        &S => {}\n    }\n}\n";
+    let mut s = Session2::new(Options2 { jobs: 1, ..Options2::default() });
+    let d = s.check(src);
+    assert!(d.is_empty(), "{d:?}");
+}
+
 /// Review of #55: an operator a bound's supertrait gives, a mismatch a bound's equation may make (`Deref<Target = i32>`,
 /// in a where clause too) are no errors of an uncalled generic fn; `dyn` in a fn pointer of a signature is read; an
 /// item's `#[allow(deprecated)]` allows its intrinsics paths
@@ -221,4 +231,11 @@ fn uncalled_generic_fns_with_supertraits_and_equations() {
     assert!(d[0].msg.contains("(E0038)"), "{d:?}");
     let allowed = "#![deny(deprecated)]\n#[allow(deprecated)]\nfn conv(x: f32) -> u32 {\n    unsafe { std::intrinsics::transmute(x) }\n}\nfn main() {\n    let _ = conv(1.0);\n}\n";
     assert!(s.check(allowed).is_empty(), "{:?}", s.check(allowed));
+    // (a string that says `allow(deprecated` allows nothing)
+    let in_str = "#![deny(deprecated)]\nfn main() {\n    let _ = \"allow(deprecated\";\n    let _: u32 = unsafe { std::intrinsics::transmute(0u32) };\n}\n";
+    assert_eq!(s.check(in_str).iter().map(|d| d.line).collect::<Vec<_>>(), vec![4]);
+    // (an equation fixes `T::Target`, not T: a T returned as i32 is mismatched types, inline or in a where clause)
+    let by_value = "trait Tr {\n    type Out;\n}\nfn bad<T: Tr<Out = i32>>(x: T) -> i32 {\n    x\n}\nfn bad2<T>(x: T) -> i32\nwhere\n    T: Tr<Out = i32>,\n{\n    x\n}\nfn main() {}\n";
+    let d = s.check(by_value);
+    assert_eq!(d.iter().map(|d| d.line).collect::<Vec<_>>(), vec![5, 11], "{d:?}");
 }

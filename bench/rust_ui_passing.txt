@@ -2880,6 +2880,7 @@ compile-fail	generics/generic-lifetime-trait-impl.rs
 run-pass	generics/generic-newtype-struct.rs
 run-pass	generics/generic-object.rs
 run-pass	generics/generic-recursive-tag.rs
+run-pass	generics/generic-static-methods.rs
 run-pass	generics/generic-tag-corruption.rs
 run-pass	generics/generic-tag-local.rs
 run-pass	generics/generic-tag-match.rs
@@ -3659,6 +3660,7 @@ check-pass	lint/clashing-extern-fn-recursion.rs
 check-pass	lint/clashing-extern-fn-wasm.rs
 check-pass	lint/const-item-interior-mutations-const-atomics.rs
 check-pass	lint/const-item-interior-mutations-const-deref.rs
+check-pass	lint/dangling-pointers-from-locals.rs
 compile-fail	lint/dangling-pointers-from-temporaries/cstring-as-ptr.rs
 compile-fail	lint/dangling-pointers-from-temporaries/example-from-issue123613.rs
 compile-fail	lint/dangling-pointers-from-temporaries/ext.rs
@@ -6058,6 +6060,7 @@ compile-fail	resolve/resolve-dont-hint-macro.rs
 compile-fail	resolve/resolve-hint-macro.rs
 run-pass	resolve/resolve-issue-2428.rs
 compile-fail	resolve/resolve-primitive-fallback.rs
+run-pass	resolve/resolve-pseudo-shadowing.rs
 run-pass	resolve/resolve-same-name-struct.rs
 compile-fail	resolve/resolve-self-in-impl-2.rs
 compile-fail	resolve/resolve-speculative-adjustment.rs
@@ -6192,6 +6195,7 @@ check-pass	rfcs/rfc-2294-if-let-guard/move-guard-if-let.rs
 check-pass	rfcs/rfc-2294-if-let-guard/partially-macro-expanded.rs
 run-pass	rfcs/rfc-2294-if-let-guard/run-pass.rs
 check-pass	rfcs/rfc-2294-if-let-guard/shadowing.rs
+check-pass	rfcs/rfc-2294-if-let-guard/type-inference.rs
 compile-fail	rfcs/rfc-2361-dbg-macro/dbg-macro-move-semantics.rs
 compile-fail	rfcs/rfc-2361-dbg-macro/dbg-macro-requires-debug.rs
 check-pass	rfcs/rfc-2396-target_feature-11/check-pass.rs
@@ -6959,6 +6963,7 @@ compile-fail	trait-bounds/argument-with-unnecessary-method-call.rs
 compile-fail	trait-bounds/deep-level-send-bound-check-issue-40827.rs
 compile-fail	trait-bounds/false-span-in-trait-bound-label.rs
 compile-fail	trait-bounds/issue-119530-sugg-from-fn.rs
+check-pass	trait-bounds/issue-75961.rs
 compile-fail	trait-bounds/issue-82038.rs
 check-pass	trait-bounds/issue-94680.rs
 check-pass	trait-bounds/issue-94999.rs
@@ -7423,6 +7428,7 @@ check-pass	typeck/issue-22375.rs
 compile-fail	typeck/issue-29124.rs
 compile-fail	typeck/issue-33575.rs
 compile-fail	typeck/issue-53712.rs
+check-pass	typeck/issue-55810-must-typeck-match-pats-before-guards.rs
 compile-fail	typeck/issue-57673-ice-on-deref-of-boxed-trait.rs
 compile-fail	typeck/issue-67971.rs
 check-pass	typeck/issue-68590-reborrow-through-derefmut.rs

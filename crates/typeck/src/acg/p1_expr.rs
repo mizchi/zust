@@ -3220,6 +3220,38 @@ impl Cx<'_> {
         if let Some(r) = self.default_call(c, expected)? {
             return Ok(r);
         }
+        // (`<T as Clone>::clone(x)`: `(x).clone()` naming its trait (not an inherent `clone` of T), for x: &T, a derive's
+        // clone too; x of another referent is mismatched types (`<u8 as Clone>::clone(&1u32)`))
+        if let (Expr::Path(Some(qs), p), [x]) = (&**func, cargs.as_slice()) {
+            let n = p.segs.len();
+            if n >= 2 && p.segs[n - 2].name == "Clone" && p.segs[n - 1].name == "clone" && p.segs[n - 2].args.is_empty() && self.lookup("Clone").is_none() {
+                // (x is `&Self` after deref coercions (`&&1u8` for `<u8 as Clone>`); Self a reference: its clone is a copy of
+                // it, not its referent's clone (`<&Q as Clone>::clone(&&q)` is `&Q`))
+                let mut arg = x.clone();
+                if let (Ok(st), Some(xt)) = (self.parse_ty(qs), self.peek(x)) {
+                    if !self.prog.has_param(st) && !self.prog.has_param(xt) && !has_hole(self.prog, st) {
+                        let mut t = xt;
+                        loop {
+                            match t {
+                                Ty::Ref(_, i) if *i == st => break,
+                                Ty::Ref(_, i @ Ty::Ref(..)) => {
+                                    arg = Expr::Unary("*".into(), Box::new(Expr::Paren(Box::new(arg))), Default::default());
+                                    t = *i;
+                                }
+                                _ => return err(expr_start(x), format!("mismatched types: expected `&{}`, found `{}`", self.prog.tn(st), self.prog.tn(xt))),
+                            }
+                        }
+                        if matches!(st, Ty::Ref(false, _)) {
+                            let d = self.keep_expr(Expr::Unary("*".into(), Box::new(Expr::Paren(Box::new(arg))), Default::default()));
+                            return self.expr(d, expected);
+                        }
+                    }
+                }
+                let e = self.keep_expr(mcall(Expr::Paren(Box::new(arg)), "clone", vec![]));
+                self.explicit_traits.insert(e as *const Expr as usize, "Clone".to_string());
+                return self.expr(e, expected);
+            }
+        }
         // `From::from(x)` to an expected type T: `T::from(x)`; `Into::into(x)`: `x.into()`
         if let (Expr::Path(None, p), [x]) = (&**func, cargs.as_slice()) {
             let n = p.segs.len();
