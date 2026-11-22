@@ -485,24 +485,33 @@ fn elems(p: &Proj) -> Option<(usize, usize)> {
 /// a is a prefix of b (an index `[..]` is any element; an array pattern's elements, `[2]` or `[1..19]`, are where they
 /// overlap)
 fn prefix(a: &[Proj], b: &[Proj]) -> bool {
-    let same = |x: &Proj, y: &Proj| match (elems(x), elems(y)) {
+    a.len() <= b.len() && a.iter().zip(b).all(|(x, y)| same_proj(x, y))
+}
+
+/// The two projections may be the same part (an index `[..]` is any element)
+fn same_proj(x: &Proj, y: &Proj) -> bool {
+    match (elems(x), elems(y)) {
         (Some((a0, a1)), Some((b0, b1))) => a0 < b1 && b0 < a1,
         (Some(_), None) => *y == Proj::Index,
         (None, Some(_)) => *x == Proj::Index,
         (None, None) => x == y || (*x == Proj::Index && *y == Proj::Index),
-    };
+    }
+}
+
+/// The two paths part at two fields of one union (`u.a` and `u.b.x`): the same memory, whatever follows. Neither is
+/// a prefix of the other, so this is not prefix's (whose callers rely on the length)
+fn union_overlap(a: &[Proj], b: &[Proj]) -> bool {
     for (x, y) in a.iter().zip(b) {
-        // (two fields of a union: the same memory, whatever follows)
         if let (Proj::Field(f), Proj::Field(g)) = (x, y) {
             if f != g && f.starts_with(UNION_FIELD) && g.starts_with(UNION_FIELD) {
                 return true;
             }
         }
-        if !same(x, y) {
+        if !same_proj(x, y) {
             return false;
         }
     }
-    a.len() <= b.len()
+    false
 }
 
 /// The mark of a union's field in a place (Proj::Field)
@@ -510,7 +519,7 @@ const UNION_FIELD: char = '\u{1}';
 
 /// The two places overlap (one contains the other)
 fn overlap(a: &BPlace, b: &BPlace) -> bool {
-    a.local == b.local && (prefix(&a.proj, &b.proj) || prefix(&b.proj, &a.proj))
+    a.local == b.local && (prefix(&a.proj, &b.proj) || prefix(&b.proj, &a.proj) || union_overlap(&a.proj, &b.proj))
 }
 
 /// A path that may be moved out (or was never initialized)
@@ -1020,7 +1029,8 @@ impl Bk {
                             // (reinitializes the path and everything under it; not through an index, which is some element,
                             // not a known one: `a[1] = x` after `let [_, _] = a;` leaves a[0] moved)
                             if p.owned_len() == p.proj.len() && !p.proj.contains(&Proj::Index) {
-                                st.moved.retain(|m| !(m.place.local == p.local && prefix(&p.proj, &m.place.proj)));
+                                // (a union's field written: the whole union is, its other fields too)
+                                st.moved.retain(|m| !(m.place.local == p.local && (prefix(&p.proj, &m.place.proj) || union_overlap(&p.proj, &m.place.proj))));
                             }
                             if p.proj.is_empty() {
                                 st.holds.retain(|h| h.0 != p.local);
@@ -1242,6 +1252,7 @@ impl Bk {
                 Acc::Write => {
                     prefix(&p.proj, &lo.place.proj) && !lo.place.proj[p.proj.len()..].first().is_some_and(|x| matches!(x, Proj::Deref(false) | Proj::Shr))
                         || prefix(&lo.place.proj, &p.proj)
+                        || union_overlap(&p.proj, &lo.place.proj)
                 }
                 _ => overlap(&lo.place, p),
             };
@@ -1435,8 +1446,10 @@ impl Cx<'_> {
         self.bk.scrut_place = self.bk_place(e).map(|p| (p.0, err_pos(e)));
         if let (Ok(Some(p)), true) = (&r, self.bk.level >= 1) {
             let t = p.ty();
+            // (`match d.f { Some(x) => .. }` with d's type implementing `Drop`: what the pattern moves is d's)
+            let owner = self.drop_owner(e);
             for pat in pats {
-                self.drop_pat_check(pat, t, err_pos(e))?;
+                self.drop_pat_check(pat, t, err_pos(e), owner.as_deref())?;
             }
         }
         r
@@ -2366,12 +2379,15 @@ impl Cx<'_> {
         // (`*x = ..` / `x.f = ..` through a reference parameter: what is stored outlives the function)
         let through = p.owned_len() < p.proj.len() && self.bk.params.contains(&l);
         let derefs = p.proj.iter().filter(|x| matches!(x, Proj::Deref(false))).count() as u32;
+        // (the local's loans are not known by field: through `*q.0` of `q = (&mut p, &mut z)` it is not known which
+        // it points to, so only a store through derefs of the whole local (`*q`, `**q`, `(*q).f`) is followed)
+        let whole_derefs = p.proj.iter().take_while(|x| matches!(x, Proj::Deref(false))).count() as u32 == derefs;
         self.bk_ev(Ev::Acc(p, Acc::Write, err_pos(left)));
         if through && !srcs.is_empty() {
             self.bk_ev(Ev::Escape(srcs.to_vec()));
         }
         // (through a `&mut` the local holds: what is stored is held by what it points to)
-        if !through && derefs > 0 && !srcs.is_empty() && self.bk.locals[l as usize].refs {
+        if !through && derefs > 0 && whole_derefs && !srcs.is_empty() && self.bk.locals[l as usize].refs {
             self.bk_ev(Ev::Store(l, derefs, srcs.to_vec()));
         }
         if self.bk.locals[l as usize].refs {
