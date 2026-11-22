@@ -532,6 +532,11 @@ impl Cx<'_> {
             } else if self.needs_drop(elem) {
                 self.mark_moved(base_e);
             }
+            // (the borrow check: `into_iter` takes the Vec / array, which is not used after (E0382). The elements are
+            // read by the loop itself, not through it)
+            if is_place_expr(base_e) && self.peek(base_e).is_some_and(|t| !matches!(t, Ty::Ref(..)) && !self.bk_ty(t).0) {
+                self.bk_acc(base_e, crate::acg::borrowck::Acc::Move);
+            }
         }
         let i = self.b.declare_var(types::I64);
         let start = if rev { len } else { self.b.ins().iconst(types::I64, 0) };

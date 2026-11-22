@@ -1195,3 +1195,19 @@ fn array_pattern_moves() {
     assert!(d.len() == 1 && d[0].0 == 7, "{d:?}");
     assert_eq!(check(&format!("{arr}fn f() {{\n    let a = array();\n    let [_x, _, _] = a;\n    let [.., _y] = a;\n    let [_, (_, _z), _] = a;\n}}\nfn main() {{}}\n")), vec![]);
 }
+
+/// `for x in v` of a Vec / an array by value takes it (E0382 after); `&mut x;` in a closure is a `&mut` capture (FnMut);
+/// a closure whose body moves a capture out is FnOnce, and a call of it by name takes it (E0382 when called again)
+#[test]
+fn for_moves_and_fnonce() {
+    let d = check("fn main() {\n    let v = vec![String::new()];\n    for l in v {\n        let _ = l;\n    }\n    let _w = v;\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 6 && d[0].1.contains("use of moved value: `v`"), "{d:?}");
+    let d = check("fn main() {\n    let mut my_var = false;\n    let callback = || {\n        &mut my_var;\n    };\n    callback();\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 6 && d[0].1.contains("not declared as mutable"), "{d:?}");
+    let d = check("fn main() {\n    let counter: Vec<i32> = Vec::new();\n    let tick = || std::mem::drop(counter);\n    tick();\n    tick();\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 5 && d[0].1.contains("use of moved value: `tick`"), "{d:?}");
+    assert_eq!(
+        check("fn main() {\n    let mut w = vec![1];\n    for x in w.iter() {\n        let _ = x;\n    }\n    w.push(1);\n    for x in &w {\n        let _ = x;\n    }\n    w.push(2);\n    let a = [1, 2];\n    for x in a {\n        let _ = x;\n    }\n    let _b = a;\n    let s = String::from(\"x\");\n    let show = move || println!(\"{}\", s);\n    show();\n    show();\n}\n"),
+        vec![]
+    );
+}

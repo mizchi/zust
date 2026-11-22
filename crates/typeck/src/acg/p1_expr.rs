@@ -1924,6 +1924,10 @@ impl Cx<'_> {
             self.requested.push(iid);
         }
         let st = Ty::Struct(sid);
+        // (a closure that moves what it captures out of itself is `FnOnce`)
+        if self.bk.fnonce_sure.contains(&(c as *const Expr as usize)) && !self.bk.fnonce.contains(&st) {
+            self.bk.fnonce.push(st);
+        }
         // (a closure that mutates its captures is `FnMut`; one that holds a `&mut` of them is not `Copy`)
         if self.bk.fnmut_exprs.contains(&(c as *const Expr as usize)) && !self.bk.fnonce_exprs.contains(&(c as *const Expr as usize)) {
             if !self.bk.fnmut.contains(&st) {
@@ -2545,8 +2549,12 @@ impl Cx<'_> {
             }
         }
         let args: Vec<&Expr> = cargs.iter().collect();
+        // (an `FnOnce` closure called by name: the call takes it (E0382 when it is called again))
+        if matches!(t, Ty::Struct(_)) && self.bk.fnonce.contains(&t) && is_place_expr(func) && self.peek(func) == Some(t) {
+            self.bk_acc(func, borrowck::Acc::Move);
+        }
         // (an `FnMut` closure called by name: a `&mut` of it (E0596 when it is not `mut`))
-        if matches!(t, Ty::Struct(_)) && self.bk.fnmut.contains(&t) && is_place_expr(func) && self.peek(func) == Some(t) {
+        if matches!(t, Ty::Struct(_)) && self.bk.fnmut.contains(&t) && !self.bk.fnonce.contains(&t) && is_place_expr(func) && self.peek(func) == Some(t) {
             self.bk.no_loan_src = true;
             self.bk_borrow(func, true, err_pos(func));
             self.bk.no_loan_src = false;

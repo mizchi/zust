@@ -211,8 +211,14 @@ pub struct Bk {
     pub fnmut_exprs: Vec<usize>,
     /// The types of such closures
     pub fnmut: Vec<Ty>,
-    /// The closures (by address) that move what they capture out of themselves: `FnOnce`, called by value
+    /// The closures (by address) that may move what they capture out of themselves (they hold a value that is not
+    /// `Copy`): not `FnMut` for sure
     pub fnonce_exprs: Vec<usize>,
+    /// The closures (by address) whose bodies move a capture that is not `Copy` (`|| drop(v)`): `FnOnce`, a call of
+    /// one by name moves it
+    pub fnonce_sure: Vec<usize>,
+    /// The types of such closures
+    pub fnonce: Vec<Ty>,
     /// Loans the region check found must outlive a region of locals' types (sorted by loan): those locals hold them
     pub held_by: Vec<(u32, Vec<u32>)>,
     /// The loan of each method call's receiver, by the call's address (while the region check is on)
@@ -1731,13 +1737,16 @@ impl Cx<'_> {
         // (a closure that mutates what it captures, by value or by `&mut`: `FnMut`; one that holds a value that is not
         // `Copy` may move it out of itself (`FnOnce`, called by value): not known here, so not `FnMut` either)
         let ca = c as *const Expr as usize;
-        if (assigns && !muts.is_empty()) || !calls.is_empty() {
+        if (assigns && !muts.is_empty()) || muts.iter().any(|q| q.owned_len() == q.proj.len()) || !calls.is_empty() {
             if !self.bk.fnmut_exprs.contains(&ca) {
                 self.bk.fnmut_exprs.push(ca);
             }
         }
         if (by_move || move_kw) && !self.bk_ty(t).0 && !self.bk.fnonce_exprs.contains(&ca) {
             self.bk.fnonce_exprs.push(ca);
+        }
+        if (by_move || move_kw) && !self.bk_ty(t).0 && crate::ast_closure::moves_capture(c, &[n.to_string()]) && !self.bk.fnonce_sure.contains(&ca) {
+            self.bk.fnonce_sure.push(ca);
         }
         for (p, pt, mode, _) in &mut paths {
             // (stop at an index, and a move closure at a deref: it captures the reference)
@@ -1750,7 +1759,8 @@ impl Cx<'_> {
                 *mode = CapMode::Val;
             } else if *mode == CapMode::Use {
                 // (a use that is not a pattern: acg's analysis says whether the closure takes the value)
-                let m = assigns && muts.iter().any(|q| overlap(q, p)) || calls.iter().any(|q| overlap(q, p));
+                // (`&mut x` of what the closure owns no reference to (`|| { &mut my_var; }`) is a `&mut` capture too)
+                let m = muts.iter().any(|q| overlap(q, p) && (assigns || q.owned_len() == q.proj.len())) || calls.iter().any(|q| overlap(q, p));
                 *mode = if by_move { CapMode::Val } else if m { CapMode::RefMut } else { CapMode::Ref };
             }
         }
