@@ -1211,3 +1211,14 @@ fn for_moves_and_fnonce() {
         vec![]
     );
 }
+
+/// A closure passed where a bound wants `Fn` may not mutate what it captures: E0594 for an assignment, E0596 for a
+/// `&mut` or a `&mut self` method (in a closure inside it too)
+#[test]
+fn fn_bound_closures() {
+    let d = check("pub fn bar<F: Fn()>(_f: F) {}\npub fn foo() {\n    let mut x = 0;\n    bar(move || x = 1);\n}\nfn main() {}\n");
+    assert!(d.len() == 1 && d[0].0 == 4 && d[0].1.contains("captured variable in a `Fn` closure"), "{d:?}");
+    let d = check("fn call_it<F>(f: F) where F: Fn() {\n    f();\n}\nstruct A;\nimpl A {\n    fn gen_mut(&mut self) {}\n}\nfn main() {\n    let mut x = A;\n    call_it(|| {\n        call_it(|| x.gen_mut());\n    });\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 11 && d[0].1.contains("cannot borrow `x` as mutable"), "{d:?}");
+    assert_eq!(check("pub fn bar<F: FnMut()>(mut f: F) {\n    f();\n}\npub fn baz<F: Fn() -> i32>(f: F) -> i32 {\n    f()\n}\nfn main() {\n    let mut x = 0;\n    bar(|| x += 1);\n    let y = 2;\n    baz(|| y + 1);\n}\n"), vec![]);
+}

@@ -1888,6 +1888,7 @@ impl Cx<'_> {
                 let prelude = prelude && !by_key;
                 self.closure_bound = None;
                 self.closure_prelude = prelude;
+                self.closure_fn_only = fbt.as_ref().is_some_and(|x| x.2.trim_start().strip_prefix("Fn").is_some_and(|r| r.trim_start().starts_with('(')));
                 if !prelude && self.user_code && self.bk.level >= 2 && regionck::enabled() {
                     if let Some(x) = &fbt {
                         let lts = sig0.regions.as_deref().map(|r| r.lts.clone()).unwrap_or_default();
@@ -1920,6 +1921,7 @@ impl Cx<'_> {
             self.closure_hint = None;
             self.closure_bound = None;
             self.closure_prelude = false;
+            self.closure_fn_only = false;
             // クロージャの実際の引数・戻り値の型から境界の型パラメータを解く (`map<U, F: FnOnce(T) -> U>`)
             if let Some((bps, bret)) = &fb {
                 let mut ct = t;

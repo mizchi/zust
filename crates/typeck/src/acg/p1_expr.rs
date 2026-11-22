@@ -1741,6 +1741,8 @@ impl Cx<'_> {
         let hint = self.closure_hint.take();
         let bound = self.closure_bound.take();
         let to_prelude = std::mem::take(&mut self.closure_prelude);
+        let fn_only = self.closure_fn_only;
+        self.closure_fn_only = false;
         let Some(&k) = self.closure_ix.get(&format!("@{}", c as *const Expr as usize)).or_else(|| self.closure_ix.get(&crate::ast_closure::closure_key(c))) else {
             return err(SP, "internal: unknown closure");
         };
@@ -1791,6 +1793,16 @@ impl Cx<'_> {
             sol[cd.n_parent + i] = Some(ct);
             caps.push((loc, t));
             self.bk_capture(c, n, loc, t, by_move);
+        }
+        // (passed where a bound wants `Fn`: a closure that mutates what it captures is not one (E0594 / E0596))
+        if fn_only && self.bk.fnmut_exprs.contains(&(c as *const Expr as usize)) {
+            let Expr::Closure(_, _, _, body, csp) = c else { unreachable!() };
+            let (sp, msg) = match self.fn_mutation(body, &cd.captures) {
+                Some((sp, n, true)) => (sp, format!("cannot assign to `{n}`, as it is a captured variable in a `Fn` closure (E0594)")),
+                Some((sp, n, false)) => (sp, format!("cannot borrow `{n}` as mutable, as it is a captured variable in a `Fn` closure (E0596)")),
+                None => (*csp, "a closure that mutates what it captures is passed where `Fn` is expected (E0596)".to_string()),
+            };
+            return Err(self.at(sp, msg));
         }
         let mut g = cd.n_parent + cd.captures.len();
         let mut pslots = vec![];
@@ -1977,6 +1989,46 @@ impl Cx<'_> {
             }
         }
         Ok((Some(a), st))
+    }
+
+    /// The first assignment to, `&mut` of, or `&mut self` method call of a captured variable in a closure's body (a
+    /// closure in it too): where, which, whether an assignment
+    fn fn_mutation(&self, e: &Expr, caps: &[String]) -> Option<(Sp, String, bool)> {
+        let hit = |l: &Expr| borrowck::root_local(strip_paren(l)).filter(|n| caps.iter().any(|c| c == n)).map(|n| n.to_string());
+        match e {
+            Expr::Assign(l, _) | Expr::AssignOp(_, l, _, _) => {
+                if let Some(n) = hit(l) {
+                    return Some((borrowck::pos(e), n, true));
+                }
+            }
+            Expr::Ref(true, l) => {
+                if let Some(n) = hit(l) {
+                    return Some((borrowck::pos(e), n, false));
+                }
+            }
+            Expr::MethodCall(r, m, ..) => {
+                if let Some(n) = hit(r) {
+                    let mut_self = match self.lookup(&n) {
+                        Some((_, Ty::Struct(sid))) => self.prog.method(sid, m).is_some_and(|id| {
+                            let sg = &self.prog.sigs[id as usize];
+                            sg.has_self && matches!(sg.params.first(), Some(Ty::Ref(true, _)))
+                        }),
+                        _ => false,
+                    };
+                    if mut_self {
+                        return Some((borrowck::pos(e), n, false));
+                    }
+                }
+            }
+            _ => {}
+        }
+        let mut found = None;
+        crate::ast_closure::each_child_pub(e, &mut |c| {
+            if found.is_none() {
+                found = self.fn_mutation(c, caps);
+            }
+        });
+        found
     }
 
     /// `&T` (アドレス v) を `&dyn tr` の fat pointer にする

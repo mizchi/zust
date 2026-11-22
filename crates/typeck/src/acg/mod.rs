@@ -340,6 +340,7 @@ fn compile_once(prog: &Program, insts: &Mutex<Insts>, id: u32, f: &ItemFn, line_
         closure_hint: None,
         closure_bound: None,
         closure_prelude: false,
+        closure_fn_only: false,
         hr_lost: vec![],
         clo_ret_param: vec![],
         seg_self: None,
@@ -786,6 +787,8 @@ pub struct Cx<'p> {
     pub closure_bound: Option<Box<(String, Vec<String>, Vec<String>)>>,
     /// The closure being passed goes to a function of the prelude (whose bounds write no lifetimes)
     pub closure_prelude: bool,
+    /// The closure being lowered is passed where a bound wants `Fn`: it may not mutate what it captures
+    pub closure_fn_only: bool,
     /// Closures made where nothing was expected (their kind, signature: from the body), by their definition: the
     /// parameters with no type written that are references (one region each, not higher-ranked)
     pub hr_lost: Vec<(u32, Vec<usize>)>,
