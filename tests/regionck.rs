@@ -1184,3 +1184,14 @@ fn fnmut_closures() {
         vec![]
     );
 }
+
+/// An array matched by value: each element is a place of its own (`let [_, _, x] = a;` moves a[2], not the others)
+#[test]
+fn array_pattern_moves() {
+    let arr = "fn array() -> [(String, String); 3] {\n    Default::default()\n}\n";
+    let d = check(&format!("{arr}fn f() {{\n    let a = array();\n    let [_, _, _x] = a;\n    let [.., _y] = a;\n}}\nfn main() {{}}\n"));
+    assert!(d.len() == 1 && d[0].0 == 7 && d[0].1.contains("use of moved value: `a[2]`"), "{d:?}");
+    let d = check(&format!("{arr}fn f() {{\n    let a = array();\n    let [_x, _, _] = a;\n    let [_y @ .., _, _] = a;\n}}\nfn main() {{}}\n"));
+    assert!(d.len() == 1 && d[0].0 == 7, "{d:?}");
+    assert_eq!(check(&format!("{arr}fn f() {{\n    let a = array();\n    let [_x, _, _] = a;\n    let [.., _y] = a;\n    let [_, (_, _z), _] = a;\n}}\nfn main() {{}}\n")), vec![]);
+}

@@ -398,7 +398,10 @@ fn path_str(locals: &[Local], p: &BPlace) -> String {
     for (i, pr) in p.proj.iter().enumerate() {
         match pr {
             Proj::Field(f) => {
-                s.push('.');
+                // (an array pattern's element: `a[2]`)
+                if !f.starts_with('[') {
+                    s.push('.');
+                }
                 s.push_str(f);
             }
             Proj::Deref(_) | Proj::Shr => {
@@ -1205,7 +1208,9 @@ fn pat_reads(p: &Pat) -> bool {
     match p {
         Pat::Wild | Pat::Rest => false,
         Pat::Ident(_, _, _, sub) => sub.as_deref().is_some_and(pat_reads),
-        Pat::Tuple(ps) => ps.iter().any(pat_reads),
+        // (an array pattern tests nothing of the array itself (`let [_, x] = a;` after a[0] moved); a slice's length
+        // is not followed)
+        Pat::Tuple(ps) | Pat::Slice(ps) => ps.iter().any(pat_reads),
         Pat::Ref(_, q) => pat_reads(q),
         _ => true,
     }
