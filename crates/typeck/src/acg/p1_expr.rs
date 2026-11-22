@@ -83,6 +83,32 @@ impl Cx<'_> {
 
     /// `U::<u8>` / `Foo::<3>` / `Flag::<true>`: the path without the last segment's turbofish, and the type arguments
     /// it gives (None for `_`); the path itself when it has none
+    /// The func `<X>::m` of a path call whose path names the type X before m: `T::A::m` (A an associated type of the type
+    /// parameter T), `<T as Tr>::A::m`, or `<X as From<_>>::from` (std's conversions, whose impls for the primitives
+    /// are builtins); X known (no parameter left). None otherwise
+    #[cold]
+    #[inline(never)]
+    pub(crate) fn assoc_path_func(&self, q: Option<&crate::parse::Ty>, p: &crate::parse::Path) -> Option<Expr> {
+        let (m, pre) = p.segs.split_last()?;
+        let ty = match q {
+            None if pre.len() == 2 && pre.iter().all(|s| s.args.is_empty()) && self.env.params.iter().any(|(n, _)| *n == pre[0].name) => {
+                crate::parse::Ty::Path(None, crate::parse::Path { global: false, segs: pre.to_vec(), pos: p.pos })
+            }
+            Some(q) if pre.len() >= 2 => crate::parse::Ty::Path(Some(Box::new(q.clone())), crate::parse::Path { global: p.global, segs: pre.to_vec(), pos: p.pos }),
+            Some(q) if pre.len() == 1 && matches!((pre[0].name.as_str(), m.name.as_str()), ("From", "from") | ("TryFrom", "try_from")) => q.clone(),
+            _ => return None,
+        };
+        let t = self.parse_ty(&ty).ok().filter(|&t| !self.prog.has_param(t) && !has_hole(self.prog, t))?;
+        // (`<u16>::from` parses as `u16::from`)
+        let Ok(Expr::Path(qt, mut qp)) = crate::parse::parse_expr(&format!("<{}>::{}", self.prog.tn(t), m.name)) else { return None };
+        // (the method's own arguments: `<T as Foo>::U::gm::<f64>()`)
+        if let Some(l) = qp.segs.last_mut() {
+            l.args = m.args.clone();
+        }
+        qp.pos = p.pos;
+        Some(Expr::Path(qt, qp))
+    }
+
     pub(crate) fn turbofish_split<'a>(&self, p: &'a crate::parse::Path) -> (PPath, Option<&'a [GArg]>) {
         let mut pp = PPath::of(p);
         let Some(last) = p.segs.last().filter(|s| !s.args.is_empty() && s.fn_args.is_none()) else { return (pp, None) };
@@ -3139,6 +3165,16 @@ impl Cx<'_> {
         if let Some(r) = self.default_call(c, expected)? {
             return Ok(r);
         }
+        // (`T::A::m(..)` / `<T as Tr>::A::m(..)` / `<u16 as From<u8>>::from(..)` that no fn of the program answers: the
+        // call on the type the path names, `<u16>::m(..)`, which reaches the builtins too)
+        if let Expr::Path(q, p) = &**func {
+            if (p.segs.len() >= 3 || q.is_some()) && self.callee(func).is_none() {
+                if let Some(nf) = self.assoc_path_func(q.as_deref(), p) {
+                    let ne: &Expr = self.keep_expr(Expr::Call(Box::new(nf), cargs.clone()));
+                    return self.expr(ne, expected);
+                }
+            }
+        }
         // (`<T as Clone>::clone(x)`: `(x).clone()` naming its trait (not an inherent `clone` of T), for x: &T, a derive's
         // clone too; x of another referent is mismatched types (`<u8 as Clone>::clone(&1u32)`))
         if let (Expr::Path(Some(qs), p), [x]) = (&**func, cargs.as_slice()) {
@@ -3209,6 +3245,22 @@ impl Cx<'_> {
                         }
                     }
                     _ => {}
+                }
+            }
+        }
+        // (`u16::from(5u32)`: a number's `from` of another primitive is the widening one only, E0277 else as in rustc)
+        if let (Expr::Path(None, p), [x]) = (&**func, cargs.as_slice()) {
+            if let [ts, m] = p.segs.as_slice() {
+                if m.name == "from" && ts.args.is_empty() && m.args.is_empty() {
+                    if let Some(t) = Ty::prim(&ts.name).filter(|t| t.is_int() || t.is_float()) {
+                        if self.prog.fn_by_p(&PPath::of(p), self.self_sid).is_none() {
+                            if let Some(a) = self.peek(x).filter(|a| a.is_int() || a.is_float() || matches!(a, Ty::Bool | Ty::Char)) {
+                                if !crate::program::prim_from(a, t) {
+                                    return err(SP, format!("the trait `From<{}>` is not implemented for `{}` (E0277)", self.prog.tn(a), self.prog.tn(t)));
+                                }
+                            }
+                        }
+                    }
                 }
             }
         }
