@@ -90,6 +90,9 @@ pub struct StructDef {
     /// 型引数に型パラメータが残っているインスタンスか (has_param が引数を辿り直さないように: 入れ子のクロージャの
     /// 型は共有された部分を持つので、辿り直すと段の数の指数になる)
     pub symbolic: bool,
+    /// A placeholder for a type parameter of a generic fn `zustc check` instantiates though nothing calls it: the
+    /// traits the parameter's bounds name (Program::placeholder)
+    pub placeholder: Option<Vec<String>>,
 }
 
 impl StructDef {
@@ -107,6 +110,7 @@ impl StructDef {
             base: None,
             args: vec![],
             symbolic: false,
+            placeholder: None,
         }
     }
 }
@@ -122,6 +126,8 @@ pub struct AdtTable {
     v: Mutex<Vec<Box<StructDef>>>,
     inst: Mutex<HashMap<(u32, Vec<Ty>), u32>>,
     tuples: Mutex<HashMap<usize, u32>>,
+    /// The placeholders made, by (fn, type parameter)
+    placeholders: Mutex<HashMap<(u32, u32), u32>>,
 }
 
 impl AdtTable {
@@ -130,6 +136,7 @@ impl AdtTable {
             v: Mutex::new(vec![]),
             inst: Mutex::new(HashMap::default()),
             tuples: Mutex::new(HashMap::default()),
+            placeholders: Mutex::new(HashMap::default()),
         }
     }
     pub fn len(&self) -> usize {
@@ -416,6 +423,9 @@ pub struct Insts {
     /// The region check's implied relations of struct types, by position (typeck's Rg::imp_cache): kept between
     /// the functions of a build
     pub imp_cache: HashMap<(u32, u32, bool), Option<Vec<(u32, u32)>>>,
+    /// zustc check's last round: the instances with placeholders for type parameters (Program::placeholder), and
+    /// what they request. A typeck error of one is not reported (acg::compile)
+    pub lenient: bool,
 }
 
 /// Insts::closure_rg (codes: see typeck's regionck)
@@ -440,6 +450,7 @@ impl Insts {
             pending: vec![],
             closure_rg: HashMap::default(),
             imp_cache: HashMap::default(),
+            lenient: false,
         }
     }
 
@@ -1931,6 +1942,13 @@ impl Program {
         if self.blanket_traits.contains(tr) {
             return true;
         }
+        // (a placeholder implements the traits its parameter's bounds name, and the auto traits)
+        if let Ty::Struct(sid) = t {
+            if let Some(bs) = &self.structs[sid as usize].placeholder {
+                let name = |b: &str| b.split('<').next().unwrap_or(b).trim().to_string();
+                return matches!(tr, "Sized" | "Send" | "Sync" | "Unpin") || bs.iter().any(|b| b == tr || name(b) == name(tr));
+            }
+        }
         if matches!(t, Ty::Ref(..)) && !self.ref_impls.is_empty() && self.ref_impls.contains(&(t, tr.to_string())) {
             return true;
         }
@@ -2387,7 +2405,11 @@ impl Program {
                     Some(_) => return Err(format!("missing generics for `{n}`")),
                     // (`zeros::<K>()` / `Buf<K>`: const の名前は const ジェネリクスの引数)
                     None if self.const_index.contains_key(n) => Ty::Array(intern(Ty::Unit), self.const_usize(n)? as u32),
-                    None => return Err(format!("cannot find type `{n}`")),
+                    // (core::arch's vector types, when the program has no type of the name: `v128`, `__m256`)
+                    None => match crate::simd_sig::vector_name(n) {
+                        Some(t) => t,
+                        None => return Err(format!("cannot find type `{n}`")),
+                    },
                 }
             }
             // `Box<dyn Error>`: prelude の __DynError (表示と Debug の文字列を持つ)
@@ -2459,7 +2481,7 @@ impl Program {
             .cloned()
     }
 
-    fn const_usize(&self, name: &str) -> R<u64> {
+    pub fn const_usize(&self, name: &str) -> R<u64> {
         // (`<Foo as Bar>::SIZE`: the trait's under its qualified name, else the only `Foo::SIZE`; an expression with a
         // cast in it, `(1 as usize) + Foo::SIZE`, is not one)
         let word = |s: &str| !s.is_empty() && s.chars().all(|c| c.is_alphanumeric() || c == '_');
@@ -2560,13 +2582,73 @@ impl Program {
         Err("a const fn without a value".into())
     }
 
+    /// The name of a cast's target type, through aliases of it (`type Lane = i32` -> "i32"); "" for another type
+    fn cast_prim(&self, t: &crate::parse::Ty) -> String {
+        let mut prim = match t {
+            crate::parse::Ty::Path(None, p) if p.segs.len() == 1 && p.segs[0].args.is_empty() => p.segs[0].name.clone(),
+            _ => String::new(),
+        };
+        // (a primitive integer's name is that type, not an alias of it: the aliases are the whole program's, and a
+        // program's `type u32 = u8;` must not change the prelude's `as u32`, whose cached code does not hash aliases)
+        for _ in 0..16 {
+            if matches!(prim.as_str(), "u8" | "u16" | "u32" | "u64" | "u128" | "usize" | "i8" | "i16" | "i32" | "i64" | "i128" | "isize") {
+                break;
+            }
+            match self.aliases.get(&prim) {
+                Some((g, crate::types::TySyn::Named(n))) if g.is_empty() => prim = n.clone(),
+                Some((g, crate::types::TySyn::Prim(p))) if g.is_empty() => prim = format!("{p:?}").to_lowercase(),
+                _ => break,
+            }
+        }
+        prim
+    }
+
+    /// The width in bits of a constant expression's integer type when it is written (a cast, a suffixed literal,
+    /// `-` of one): `count_ones` of `-1i8` counts 8 bits, not the 128 of the evaluator's i128
+    fn const_width(&self, e: &crate::parse::Expr) -> Option<u32> {
+        use crate::parse::Expr;
+        let of = |n: &str| match n {
+            "u8" | "i8" => Some(8),
+            "u16" | "i16" => Some(16),
+            "u32" | "i32" => Some(32),
+            "u64" | "i64" | "usize" | "isize" => Some(64),
+            "u128" | "i128" => Some(128),
+            _ => None,
+        };
+        match e {
+            Expr::Cast(_, t) => of(&self.cast_prim(t)),
+            Expr::Paren(x) => self.const_width(x),
+            Expr::Unary(op, x, _) if op == "-" || op == "!" => self.const_width(x),
+            Expr::Lit(t, _) => ["u128", "i128", "usize", "isize", "u64", "i64", "u32", "i32", "u16", "i16", "u8", "i8"]
+                .iter()
+                .find(|s| t.ends_with(*s))
+                .and_then(|s| of(s)),
+            _ => None,
+        }
+    }
+
     /// 自前の構文木の整数の定数式を評価する
     pub fn eval_const(&self, e: &crate::parse::Expr, depth: u32) -> R<i128> {
         use crate::parse::Expr;
         Ok(match e {
             Expr::Lit(t, _) => lit_int(t).ok_or("not an integer constant")?,
             Expr::Paren(x) => self.eval_const(x, depth)?,
-            Expr::Cast(x, _) => self.eval_const(x, depth)?,
+            // (an integer `as` wraps to its type, as rustc's: `4294967297u64 as i32` is 1)
+            Expr::Cast(x, t) => {
+                let v = self.eval_const(x, depth)?;
+                let prim = self.cast_prim(t);
+                match prim.as_str() {
+                    "u8" => v as u8 as i128,
+                    "u16" => v as u16 as i128,
+                    "u32" => v as u32 as i128,
+                    "u64" | "usize" => v as u64 as i128,
+                    "i8" => v as i8 as i128,
+                    "i16" => v as i16 as i128,
+                    "i32" => v as i32 as i128,
+                    "i64" | "isize" => v as i64 as i128,
+                    _ => v,
+                }
+            }
             // (`{ 3 }` / `{ let x = ..; }` is not: a block of one expression; `if c { a } else { b }`)
             Expr::Block(None, false, b) if b.stmts.len() == 1 => match &b.stmts[0] {
                 crate::parse::Stmt::Expr(x, false) => self.eval_const(x, depth)?,
@@ -2709,7 +2791,9 @@ impl Program {
             Expr::MethodCall(recv, m, _, args, _) => {
                 let v = self.eval_const(recv, depth)?;
                 let unsigned = matches!(&**recv, Expr::Path(None, p) if p.segs.len() == 2 && Ty::prim(&p.segs[0].name).is_some_and(|t| !t.signed()));
-                let u = v as u128;
+                // (the bits of the receiver's type only: a negative i8 is 8 bits, not 128)
+                let bits = self.const_width(recv).unwrap_or(128);
+                let u = if bits < 128 { (v as u128) & ((1u128 << bits) - 1) } else { v as u128 };
                 let a: Vec<i128> = args.iter().map(|x| self.eval_const(x, depth)).collect::<R<Vec<i128>>>()?;
                 match (m.as_str(), a.as_slice()) {
                     ("ilog10", []) if unsigned || v > 0 => {
@@ -2723,7 +2807,7 @@ impl Program {
                     }
                     ("ilog2", []) if unsigned || v > 0 => (127 - (if unsigned { u } else { v as u128 }).leading_zeros()) as i128,
                     ("count_ones", []) => u.count_ones() as i128,
-                    ("trailing_zeros", []) => u.trailing_zeros() as i128,
+                    ("trailing_zeros", []) => u.trailing_zeros().min(bits) as i128,
                     ("pow", [e]) => v.checked_pow(*e as u32).ok_or("overflow in constant")?,
                     ("min", [b]) => v.min(*b),
                     ("max", [b]) => v.max(*b),
@@ -2736,6 +2820,26 @@ impl Program {
     }
 
     /// n 要素のタプルの (組み込みの) ジェネリック定義
+    /// The placeholder type for type parameter k (named `name`, bounded by the traits `bounds`) of fn id: a struct
+    /// with no fields, named `name#` (no program's type has that name), that implements just those traits
+    pub fn placeholder(&self, id: u32, k: u32, name: &str, bounds: &[String]) -> u32 {
+        if let Some(&s) = self.structs.placeholders.lock().unwrap().get(&(id, k)) {
+            return s;
+        }
+        let mut d = StructDef::blank(format!("{name}#"), false);
+        d.placeholder = Some(bounds.to_vec());
+        let mut h = KeyHasher::new();
+        h.add(&("placeholder", id, k));
+        d.deep = h.finish();
+        let mut g = self.structs.placeholders.lock().unwrap();
+        if let Some(&s) = g.get(&(id, k)) {
+            return s;
+        }
+        let s = self.structs.push(d);
+        g.insert((id, k), s);
+        s
+    }
+
     pub fn tuple_base(&self, n: usize) -> u32 {
         if let Some(&id) = self.structs.tuples.lock().unwrap().get(&n) {
             return id;
@@ -3543,6 +3647,8 @@ impl Program {
             Ty::Struct(id) => self.structs[id as usize].name.clone(),
             Ty::Unit => "()".into(),
             Ty::Never => "!".into(),
+            Ty::Vec(128) => "v128".into(),
+            Ty::Vec(b) => format!("__m{b}"),
             Ty::Param(i) => format!("T{i}"),
             Ty::Ptr(false, i) => format!("*const {}", self.tn(*i)),
             Ty::Ptr(true, i) => format!("*mut {}", self.tn(*i)),
@@ -3561,6 +3667,15 @@ impl Program {
             }
             t => format!("{t:?}").to_lowercase(),
         }
+    }
+
+    /// A type's identity as a key (`TypeId::of`): its structural hash (`hash_ty`, which memoizes instances), not
+    /// its display name: a program's `struct v128` is not `__m128i`, at any depth (`&v128`, `(v128,)`,
+    /// `Option<v128>`), and a deeply nested instance's key stays fixed-size
+    pub fn type_key(&self, t: Ty) -> String {
+        let mut h = KeyHasher::new();
+        self.hash_ty(t, &mut h);
+        format!("{:032x}", h.finish())
     }
 
     /// キャッシュキー用: 型を (struct は deep hash で) ハッシュする
@@ -3633,6 +3748,7 @@ impl Program {
                     self.hash_ty(p, h);
                 }
             }
+            Ty::Vec(b) => h.add(&(112u8, b)),
             t => h.add(&ty_code(t)),
         }
     }

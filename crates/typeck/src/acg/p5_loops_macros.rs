@@ -1676,6 +1676,12 @@ impl Cx<'_> {
             let ft = if f64_ { types::F64 } else { types::F32 };
             return Ok(Some((Some(self.b.ins().bitcast(ft, MemFlagsData::new(), a)), if f64_ { Ty::F64 } else { Ty::F32 })));
         }
+        // `core::arch::wasm32`'s SIMD intrinsics (`f32x4_add(a, b)`): one instruction each
+        if crate::simd_sig::maybe_simd(&name) {
+            if let Some(r) = self.simd_call(p, cargs)? {
+                return Ok(Some(r));
+            }
+        }
         let n = p.segs.len();
         // `Box::leak(b)`: Box の指す先をそのまま `&'static mut T` に (解放しない)
         if name == "leak" && n >= 2 && p.segs[n - 2].name == "Box" && cargs.len() == 1 {
@@ -1697,7 +1703,9 @@ impl Cx<'_> {
                     Expr::Lit(format!("{:?}", tn.replace("__u_", "")), Default::default())
                 } else {
                     let mut h: u64 = 0xcbf2_9ce4_8422_2325;
-                    for b in tn.bytes() {
+                    // (a vector's key is not its display name, which a program's `struct v128` may also have)
+                    let key = self.prog.type_key(t);
+                    for b in key.bytes() {
                         h = (h ^ b as u64).wrapping_mul(0x0100_0000_01b3);
                     }
                     let seg = |n: &str| crate::parse::Seg { name: n.to_string(), args: vec![], fn_args: None, text: n.to_string() };

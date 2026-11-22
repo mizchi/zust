@@ -16,6 +16,9 @@ pub fn lower(rec: &Recorder, late: &[StackSlot], opt: bool, cl: Option<ClBackend
         // (Cranelift のバックエンド: 記録した命令の列を Cranelift の IR にしてコンパイルする)
         Some(cl) => cl(&fb, late, opt),
         None => {
+            if fb.has_simd() {
+                return Err("minclif has no SIMD yet: build with the Cranelift backend (the default) or for wasm32 (issue #30)".into());
+            }
             fb.set_zero(late);
             let t = fb.traps();
             let (c, r) = fb.finish_zeroing(late);

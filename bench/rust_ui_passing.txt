@@ -467,6 +467,7 @@ check-pass	async-await/issues/issue-64477.rs
 compile-fail	async-await/issues/issue-65159.rs
 check-pass	async-await/issues/issue-65436-raw-ptr-not-send.rs
 build-pass	async-await/issues/issue-66695-static-refs.rs
+compile-fail	async-await/issues/issue-66958-non-copy-infered-type-arg.rs
 build-pass	async-await/issues/issue-67611-static-mut-refs.rs
 check-pass	async-await/issues/issue-69307-nested.rs
 check-pass	async-await/issues/issue-69307.rs
@@ -895,8 +896,10 @@ check-pass	borrowck/enum-variants-share-field-name.rs
 compile-fail	borrowck/fnmut-borrow-error-in-closure-match.rs
 run-pass	borrowck/fsu-moves-and-copies.rs
 compile-fail	borrowck/ice-mutability-error-slicing-121807.rs
+compile-fail	borrowck/ice-on-non-ref-sig-ty.rs
 compile-fail	borrowck/immut-function-arguments.rs
 compile-fail	borrowck/immutable-arg.rs
+compile-fail	borrowck/immutable-borrow-prevents-mut-method.rs
 compile-fail	borrowck/implementation-not-general-enough-ice-133252.rs
 run-pass	borrowck/incorrect-loan-error-on-local-update-5550.rs
 compile-fail	borrowck/index-mut-help-with-impl.rs
@@ -960,6 +963,7 @@ compile-fail	borrowck/move-from-union-field-issue-66500.rs
 compile-fail	borrowck/move-in-pattern-mut.rs
 compile-fail	borrowck/move-in-pattern.rs
 compile-fail	borrowck/multiple-mutable-borrows-error-65131.rs
+compile-fail	borrowck/mut-borrow-in-loop.rs
 compile-fail	borrowck/mut-borrow-of-mut-ref.rs
 compile-fail	borrowck/mutability-errors.rs
 compile-fail	borrowck/mutate-vec-while-iterating.rs
@@ -2835,6 +2839,7 @@ check-pass	higher-ranked/trait-bounds/normalize-under-binder/issue-81809.rs
 check-pass	higher-ranked/trait-bounds/normalize-under-binder/issue-90612.rs
 check-pass	higher-ranked/trait-bounds/normalize-under-binder/issue-90875.rs
 check-pass	higher-ranked/trait-bounds/normalize-under-binder/norm-before-method-resolution.rs
+compile-fail	higher-ranked/unbound-hrtb-lifetime.rs
 compile-fail	hygiene/expansion-info-reset.rs
 compile-fail	hygiene/fields-numeric-borrowck.rs
 compile-fail	hygiene/for-loop.rs
@@ -3341,6 +3346,7 @@ run-pass	lexer/unicode-pattern-white-space.rs
 compile-fail	lexer/unterminated-comment.rs
 compile-fail	lexer/unterminated-nested-comment.rs
 compile-fail	lifetimes/E0106-trailing-comma-in-lifetime-suggestion.rs
+compile-fail	lifetimes/apit-not-targeted-by-lifetime-suggestion.rs
 check-pass	lifetimes/array-pattern-matching-10396.rs
 compile-fail	lifetimes/borrowck-let-suggestion.rs
 compile-fail	lifetimes/closure-must-return-bound-lifetime.rs
@@ -3397,6 +3403,7 @@ compile-fail	lifetimes/lifetime-errors/ex1-return-one-existing-name-return-type-
 compile-fail	lifetimes/lifetime-errors/ex1-return-one-existing-name-self-is-anon.rs
 compile-fail	lifetimes/lifetime-errors/ex1b-return-no-names-if-else.rs
 compile-fail	lifetimes/lifetime-errors/ex2a-push-one-existing-name-2.rs
+compile-fail	lifetimes/lifetime-errors/ex2a-push-one-existing-name-early-bound.rs
 compile-fail	lifetimes/lifetime-errors/ex2a-push-one-existing-name.rs
 compile-fail	lifetimes/lifetime-errors/ex2b-push-no-existing-names.rs
 compile-fail	lifetimes/lifetime-errors/ex2c-push-inference-variable.rs
@@ -4062,6 +4069,7 @@ compile-fail	methods/tuple-suggestions-issue-142488.rs
 compile-fail	methods/untrimmed-path-type.rs
 compile-fail	methods/vec-autoderef-autoref.rs
 compile-fail	mir/build-async-error-body-correctly.rs
+compile-fail	mir/drop-elaboration-after-borrowck-error.rs
 build-pass	mir/field-projection-invariant.rs
 build-pass	mir/field-ty-ascription-enums.rs
 build-pass	mir/field-ty-ascription.rs
@@ -4231,6 +4239,9 @@ compile-fail	moves/no-capture-arc.rs
 compile-fail	moves/no-reuse-move-arc.rs
 compile-fail	moves/recreating-value-in-loop-condition.rs
 compile-fail	moves/suggest-clone.rs
+compile-fail	moves/unconstrained-impl-param-clone-suggestion.rs
+compile-fail	moves/use_of_moved_value_clone_suggestions.rs
+compile-fail	moves/use_of_moved_value_copy_suggestions.rs
 compile-fail	mut/mut-cant-alias.rs
 compile-fail	mut/mut-cross-borrowing.rs
 compile-fail	mut/mut-pattern-internal-mutability.rs
@@ -4331,6 +4342,7 @@ check-pass	nll/issue-51770.rs
 run-pass	nll/issue-52057.rs
 check-pass	nll/issue-52078.rs
 compile-fail	nll/issue-52113.rs
+compile-fail	nll/issue-52213.rs
 compile-fail	nll/issue-52533-1.rs
 compile-fail	nll/issue-52534-1.rs
 compile-fail	nll/issue-52534-2.rs
@@ -4358,7 +4370,10 @@ compile-fail	nll/issue-57989.rs
 compile-fail	nll/issue-58053.rs
 check-pass	nll/issue-61311-normalize.rs
 check-pass	nll/issue-61320-normalize.rs
+compile-fail	nll/issue-62007-assign-const-index.rs
+compile-fail	nll/issue-62007-assign-differing-fields.rs
 compile-fail	nll/issue-67007-escaping-data.rs
+compile-fail	nll/issue-68550.rs
 compile-fail	nll/issue-69114-static-mut-ty.rs
 compile-fail	nll/issue-69114-static-ty.rs
 compile-fail	nll/issue-95272.rs
@@ -6010,6 +6025,7 @@ check-pass	self/elision/lt-self.rs
 check-pass	self/elision/lt-struct-async.rs
 check-pass	self/elision/lt-struct.rs
 compile-fail	self/elision/nested-item.rs
+compile-fail	self/elision/no-shadow-pin-self.rs
 check-pass	self/elision/ref-alias-async.rs
 check-pass	self/elision/ref-alias.rs
 compile-fail	self/elision/ref-assoc-async.rs
@@ -6605,6 +6621,7 @@ compile-fail	sync/mutexguard-sync.rs
 compile-fail	sync/suggest-cell.rs
 compile-fail	sync/suggest-once-cell.rs
 compile-fail	sync/suggest-ref-cell.rs
+build-pass	target-feature/asm-implied-features-issue-128125.rs
 check-pass	target-feature/const-target-feature-fn-ptr-coercion.rs
 compile-fail	target-feature/gate.rs
 build-pass	target-feature/implied-features.rs

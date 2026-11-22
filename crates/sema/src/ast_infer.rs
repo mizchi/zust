@@ -1703,6 +1703,39 @@ impl Inf<'_> {
                         return self.known(t);
                     }
                 }
+                // `core::arch::wasm32`'s SIMD intrinsics (`f32x4_add(a, b)`; acg lowers them in place)
+                let last = &segs[segs.len() - 1].name;
+                // (not a local of that name (a closure, a fn pointer), nor the program's function)
+                let local = ident(p).is_some_and(|id| self.lookup(id).is_some());
+                let arch = crate::simd_sig::arch_path(segs[..segs.len() - 1].iter().map(|s| s.name.as_str()), last);
+                // (nor a tuple struct or variant of the program's: `struct f32x4(u64, u64, u64, u64)`)
+                let ctor = self.variant_by(p).is_some() || self.struct_by(p).is_some();
+                // (nor a constant or static of the program's: `const _mm_add_ps: fn(i32, i32) -> i32 = add;`)
+                let konst = segs.len() == 1 && self.prog.const_index.contains_key(last.as_str());
+                if crate::simd_sig::maybe_simd(last) && arch && !local && !ctor && !konst && self.fn_by(p).is_none() {
+                    if let Some((ps, r)) = crate::simd_sig::simd_sig(last).filter(|(ps, _)| ps.len() == args.len()) {
+                        for (a, k) in args.iter().zip(ps) {
+                            let av = self.expr(a);
+                            match k {
+                                crate::simd_sig::SArg::V(w) => {
+                                    let kv = self.known(Ty::Vec(w));
+                                    self.unify(av, kv);
+                                }
+                                crate::simd_sig::SArg::S(t) => {
+                                    let kv = self.known(t);
+                                    self.unify(av, kv);
+                                }
+                                crate::simd_sig::SArg::R(t) => {
+                                    let kv = self.known(Ty::Ref(false, intern(t)));
+                                    self.unify(av, kv);
+                                }
+                                // (a raw pointer: acg checks it, with rustc's coercions)
+                                crate::simd_sig::SArg::P(..) => {}
+                            }
+                        }
+                        return self.known(r);
+                    }
+                }
                 // `f64::from_bits(u)`
                 if segs.len() == 2 && args.len() == 1 && segs[1].name == "from_bits" && matches!(segs[0].name.as_str(), "f64" | "f32") {
                     let a = self.expr(&args[0]);

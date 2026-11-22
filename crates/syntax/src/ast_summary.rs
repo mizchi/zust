@@ -1686,6 +1686,8 @@ fn input_lifetimes(ps: &[PTy]) -> (usize, bool) {
             }
             PTy::Path(None, p) => {
                 let mut lts = 0;
+                // (every argument is counted, though one is not known: what follows it still has lifetimes)
+                let mut args_ok = true;
                 for sg in &p.segs {
                     for a in &sg.args {
                         match a {
@@ -1700,9 +1702,7 @@ fn input_lifetimes(ps: &[PTy]) -> (usize, bool) {
                                 }
                             }
                             crate::parse::GArg::Ty(t) => {
-                                if !go(t, named, elided) {
-                                    return false;
-                                }
+                                args_ok &= go(t, named, elided);
                             }
                             _ => {}
                         }
@@ -1710,10 +1710,10 @@ fn input_lifetimes(ps: &[PTy]) -> (usize, bool) {
                 }
                 // (a type parameter (one letter) or a type known to have no lifetime parameter)
                 let last = p.segs.last().map(|s| s.name.as_str()).unwrap_or("");
-                lts > 0 || last.len() == 1 || NO_LTS.contains(&last)
+                args_ok && (lts > 0 || last.len() == 1 || NO_LTS.contains(&last))
             }
             PTy::Ptr(_, i) | PTy::Slice(i) | PTy::Array(i, _) => go(i, named, elided),
-            PTy::Tuple(ts) => ts.iter().all(|t| go(t, named, elided)),
+            PTy::Tuple(ts) => ts.iter().fold(true, |ok, t| go(t, named, elided) && ok),
             PTy::Never => true,
             // (a nested fn pointer or a trait object binds or hides its own)
             _ => false,

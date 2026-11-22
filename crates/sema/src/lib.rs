@@ -6,4 +6,5 @@ pub use zust_syntax::*;
 pub mod ast_consteval;
 pub mod ast_infer;
 pub mod program;
+pub mod simd_sig;
 pub mod solver;

@@ -34,7 +34,7 @@ impl CfgSet {
             "target_arch" if self.wasm => val == "wasm32",
             "target_env" if self.wasm => val.is_empty(),
             "panic" if self.wasm => val == "abort",
-            "target_feature" if self.wasm => val == "bulk-memory" || val == "sign-ext" || val == "nontrapping-fptoint" || val == "multivalue",
+            "target_feature" if self.wasm => val == "bulk-memory" || val == "sign-ext" || val == "nontrapping-fptoint" || val == "multivalue" || val == "simd128" || val == "relaxed-simd",
             "target_os" => val == "linux",
             "target_family" => val == "unix",
             "target_arch" => val == "x86_64",

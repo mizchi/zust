@@ -2,5 +2,5 @@
 # --write-baseline raises it, never lowers it). Accidental passes (rust_ui_accidental.txt) are not counted
 run-pass	1805
 check-pass	1488
-build-pass	100
-compile-fail	4041
+build-pass	101
+compile-fail	4057

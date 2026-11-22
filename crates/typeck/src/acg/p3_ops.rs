@@ -1329,7 +1329,10 @@ impl Cx<'_> {
             self.b.ins().store(mf(), tv, a, 0);
         }
         for (fi, v, vt, sp) in vals {
-            let (_, fty, off) = fields[fi];
+            // (a type whose fields are not known (of a placeholder's associated type): an error, not a panic)
+            let Some(&(_, fty, off)) = fields.get(fi) else {
+                return err(sp, format!("internal: `{}` has no field {fi}", self.prog.tn(t)));
+            };
             // (`V(x)` で x: &&T を &T のフィールドに: deref の強制変換)
             let (v, vt) = self.deref_coerce(v, vt, fty);
             self.same(sp, vt, fty)?;

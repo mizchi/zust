@@ -2369,6 +2369,24 @@ impl Cx<'_> {
         self.rg.last_call = None;
         let prog = self.prog;
         let sig0 = &prog.sigs[id as usize];
+        // (a generic function's instance calling the method of an impl that writes lifetimes in its trait
+        // (`impl Trait<'static> for ()`): the generic body called the trait's method under its own bounds
+        // (`(): Trait<'a>`), with the trait's signature, not the impl's. Not followed)
+        // (only where the trait's declaration of the method names the trait's own lifetimes, which the impl sets and a
+        // bound may set otherwise; a trait's `fn take(x: &'static u8)` is the impl's too: `S::take(x)` is followed)
+        let decl_names_trait_lts = || {
+            let tr = sig0.impl_trait.as_deref()?;
+            let name = prog.names[id as usize].rsplit("::").next()?;
+            let tail = format!("::{tr}");
+            let decls = prog.traits.get(tr).or_else(|| prog.traits.iter().find(|(k, _)| k.ends_with(&tail)).map(|(_, v)| v))?;
+            let d = decls.iter().copied().find(|&d| prog.names[d as usize].rsplit("::").next() == Some(name))?;
+            let r = prog.sigs[d as usize].regions.as_deref()?;
+            Some(r.slots.iter().flatten().any(|&c| c < r.outer))
+        };
+        if !self.rg.inst_args.is_empty() && sig0.impl_trait.is_some() && decl_names_trait_lts().unwrap_or(false) {
+            self.rg.missed.push("trait impl");
+            return;
+        }
         let rs = sig0.regions.clone();
         let codes = |i: usize| rs.as_deref().map(|r| r.slots.get(i).map(|c| c.as_slice()).unwrap_or(&[]));
         // (the prelude writes no lifetimes: what its results borrow is not known from elision. A closure's call
