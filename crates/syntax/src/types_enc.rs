@@ -154,6 +154,7 @@ crate::enc_struct!(Summary {
     alias_fixed_lts,
     where_types,
     impl_trait_args,
+    impl_trait_lts,
     assoc_bounds,
     hdr_regions,
     adt_regions,

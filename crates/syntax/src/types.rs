@@ -428,6 +428,9 @@ pub struct Summary {
     pub impl_self_ty: Option<TySyn>,
     /// The type arguments of the trait of an `impl Trait<A, B> for S` header
     pub impl_trait_args: Vec<TySyn>,
+    /// The header's trait path writes a lifetime (`impl Tr<&'a u8>`, `impl Tr<&'static u8>`): its regions are not
+    /// all elided ones (regionck's impl_sig_mismatch)
+    pub impl_trait_lts: bool,
     /// `const N: T = e;` の (名前, 型, 式のソース)。使う側で式として埋め込む
     pub consts: Vec<(String, TySyn, String)>,
     /// `static [mut] N: T = e;` の (名前, 型, 初期値のソース, mut)

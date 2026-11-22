@@ -2044,6 +2044,7 @@ pub fn summarize(item: &Item, owner: Option<&Owner>) -> R<Summary> {
         }
         ItemKind::Impl(g, tr, self_ty, _) => {
             sm.hdr_regions = crate::regions::hdr_regions(g, Some(self_ty));
+            sm.impl_trait_lts = tr.as_ref().is_some_and(|(_, p)| crate::regions::path_names_lt(p));
             // (E0261: the header names only the lifetimes it declares; E0207: a lifetime parameter an associated type
             // names must be constrained by the self type or the trait)
             if crate::regions::generics_name_lt(g) || crate::regions::names_lt(self_ty) || tr.as_ref().is_some_and(|(_, p)| crate::regions::path_names_lt(p)) {

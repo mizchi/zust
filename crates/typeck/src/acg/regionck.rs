@@ -3797,14 +3797,38 @@ pub fn trait_decl_of(prog: &Program, mi: u32) -> Option<u32> {
 /// (`fn foo<'a>(x: &'a i32, y: &'a i32) -> &'a i32` for `fn foo<'a>(x: &i32, y: &'a i32) -> &'a i32`). Not compared:
 /// signatures that name the impl's or the trait's own lifetimes, or declare bounds among lifetimes, and parameters
 /// whose types do not have as many regions on both sides (`Self`, a trait's type parameter)
+/// An impl's `Self` and the trait's arguments its header gives (`impl HaveRelationship<&ProofReader> for Article`),
+/// when one of them has a region and they are all elided: the header writes no lifetime (`'static`, `'a`) and the
+/// impl declares none. None for two impls of the trait for the type (`impl Tr<&u8> for S`, `impl Tr<&u16> for S`)
+fn header_targs(prog: &Program, ms: &crate::program::FnSig, mr: Option<&RSigSyn>) -> Option<(Ty, Vec<Ty>)> {
+    let tr = ms.impl_trait.as_deref()?;
+    let st = ms.self_ty?;
+    if mr.is_some_and(|r| r.outer > 0) || prog.impl_targs_lts.contains(&(tr.to_string(), st)) {
+        return None;
+    }
+    let mut es = prog.impl_targs.get(tr)?.iter().filter(|e| e.0 == st);
+    let e = es.next()?;
+    if es.next().is_some() {
+        return None;
+    }
+    let regions = |t: Ty| count(prog, t, 0).is_some_and(|n| n > 0);
+    if !regions(st) && !e.1.iter().any(|&t| regions(t)) {
+        return None;
+    }
+    Some((st, e.1.clone()))
+}
+
 pub fn impl_sig_mismatch(prog: &Program, decl: u32, imp: u32) -> bool {
     let (ds, ms) = (&prog.sigs[decl as usize], &prog.sigs[imp as usize]);
     if ds.params.len() != ms.params.len() || ds.has_self != ms.has_self {
         return false;
     }
     let (dr, mr) = (ds.regions.as_deref(), ms.regions.as_deref());
-    // (nothing written on either side: every region is elided the same way)
-    if dr.is_none() && mr.is_none() {
+    // (the trait's type parameters as the impl's header gives them: `To` of `fn get_relation(&self) -> To` is the
+    // header's `&ProofReader` in `impl HaveRelationship<&ProofReader> for Article`)
+    let hdr = header_targs(prog, ms, mr);
+    // (nothing written on either side, nor in the header: every region is elided the same way)
+    if dr.is_none() && mr.is_none() && hdr.is_none() {
         return false;
     }
     let plain = |r: Option<&RSigSyn>| {
@@ -3819,6 +3843,21 @@ pub fn impl_sig_mismatch(prog: &Program, decl: u32, imp: u32) -> bool {
         r.map(|r| r.slots.get(i).map(|c| c.as_slice()).unwrap_or(&[]))
     }
     let mut rg = RgSt::default();
+    // (`Self` and the trait's type parameters (Param(0), Param(1), ..): their regions are the impl's, universal, each
+    // elided one of the header its own lifetime parameter of the impl)
+    let targs: Vec<Option<RT>> = match &hdr {
+        Some((st, args)) => std::iter::once(st)
+            .chain(args.iter())
+            .map(|&t| {
+                rg.instantiate(prog, t, None, &[], &[], &mut |me| {
+                    let v = me.var();
+                    me.univ.push((v, "'_".to_string()));
+                    v
+                })
+            })
+            .collect(),
+        None => vec![],
+    };
     let dl: Vec<u32> = dr.map(|r| r.lts.as_slice()).unwrap_or(&[]).iter().map(|l| {
         let v = rg.var();
         rg.univ.push((v, l.clone()));
@@ -3830,7 +3869,7 @@ pub fn impl_sig_mismatch(prog: &Program, decl: u32, imp: u32) -> bool {
     let (mut d_self, mut m_self) = (None, None);
     for i in 0..ds.params.len() {
         let (dt, mt) = (ds.params[i], ms.params[i]);
-        let Some(dtr) = rg.instantiate(prog, dt, codes(dr, i), &dl, &[], &mut |me| {
+        let Some(dtr) = rg.instantiate(prog, dt, codes(dr, i), &dl, &targs, &mut |me| {
             let v = me.var();
             me.univ.push((v, "'_".to_string()));
             v
@@ -3860,7 +3899,7 @@ pub fn impl_sig_mismatch(prog: &Program, decl: u32, imp: u32) -> bool {
     let (d_el, m_el) = (d_self.or_else(|| one(&mut d_in)), m_self.or_else(|| one(&mut m_in)));
     let mut bad = false;
     let n = ds.params.len();
-    let dret = rg.instantiate(prog, ds.ret, codes(dr, n), &dl, &[], &mut |_| d_el.unwrap_or_else(|| {
+    let dret = rg.instantiate(prog, ds.ret, codes(dr, n), &dl, &targs, &mut |_| d_el.unwrap_or_else(|| {
         bad = true;
         STATIC
     }));
