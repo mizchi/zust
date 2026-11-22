@@ -1644,16 +1644,9 @@ impl Cx<'_> {
             self.mark_ret_call(e);
             self.bk.tail = e as *const Expr as usize;
         }
+        self.bk.cap_vals = cap_vals;
         let (v, t) = self.block(&f.block, Some(self.ret))?;
-        // (a closure's captures held by value outlive the body's call, in its environment: what they borrow of the
-        // body's own (another capture held by value, a local) escapes it (`move || { b = Some(&a); }`, rustc's E0521))
-        if self.bk_on() {
-            for &id in &cap_vals {
-                if self.bk.locals.get(id as usize).is_some_and(|l| l.refs) {
-                    self.bk_ev(borrowck::Ev::Escape(vec![borrowck::Src::Local(id)]));
-                }
-            }
-        }
+        self.bk_cap_escape();
         // (the temporaries of the body's tail go away after its locals (edition 2021))
         self.bk_temps_end(0);
         if t == Ty::Never {
@@ -1676,6 +1669,21 @@ impl Cx<'_> {
         let e = strip_paren(e);
         if self.sret.is_some() && self.inline_ret.is_none() && matches!(e, Expr::Call(..) | Expr::MethodCall(..) | Expr::Struct(..)) && !no_ret_dst() {
             self.ret_call = Some(e as *const Expr as usize);
+        }
+    }
+
+    /// A closure's captures held by value outlive the body's call, in its environment: at an exit of the body, what
+    /// they borrow of the body's own (another capture held by value, a local) escapes it (`move || { b = Some(&a); }`,
+    /// rustc's E0521). Not while inlining (the borrow check is off): a `return` there leaves the inlined body only
+    pub(crate) fn bk_cap_escape(&mut self) {
+        if !self.bk_on() {
+            return;
+        }
+        for i in 0..self.bk.cap_vals.len() {
+            let id = self.bk.cap_vals[i];
+            if self.bk.locals.get(id as usize).is_some_and(|l| l.refs) {
+                self.bk_ev(borrowck::Ev::Escape(vec![borrowck::Src::Local(id)]));
+            }
         }
     }
 

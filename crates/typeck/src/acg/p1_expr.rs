@@ -311,22 +311,27 @@ impl Cx<'_> {
                 // (フィールドがなく Deref を実装した型 (`self.prog` で self: &Inf): `(*self.deref()).prog`)
                 if let Some(Ty::Struct(sid)) = self.peek(base).map(|t| self.strip_refs(t)) {
                     if self.prog.field(sid, fname).is_none() {
-                        // (a Deref chain that never reaches a field of that name: `impl Deref for Foo { type Target = Foo }`)
+                        // (a Deref chain that does not reach a field of that name within rustc's recursion limit (128):
+                        // a cycle (`impl Deref for Foo { type Target = Foo }`), or a chain that long. The borrow
+                        // check follows a place's derefs as far (bk_place))
                         let mut t = sid;
-                        let mut cycle = false;
-                        for _ in 0..16 {
-                            let Some(d) = self.prog.method(t, "deref") else { break };
-                            let Ty::Ref(_, Ty::Struct(n)) = self.prog.sigs[d as usize].ret else { break };
+                        let mut over = true;
+                        for _ in 0..128 {
+                            let Some(d) = self.prog.method(t, "deref") else {
+                                over = false;
+                                break;
+                            };
+                            let Ty::Ref(_, Ty::Struct(n)) = self.prog.sigs[d as usize].ret else {
+                                over = false;
+                                break;
+                            };
                             t = *n;
                             if self.prog.field(t, fname).is_some() {
-                                break;
-                            }
-                            if t == sid {
-                                cycle = true;
+                                over = false;
                                 break;
                             }
                         }
-                        if cycle {
+                        if over {
                             let sname = self.prog.structs[sid as usize].name.clone();
                             return err(SP, format!("reached the recursion limit while auto-dereferencing `{sname}` (E0055)"));
                         }
@@ -1156,6 +1161,8 @@ impl Cx<'_> {
                         None
                     }
                 };
+                // (a closure's exit: what its captures held by value hold escapes it)
+                self.bk_cap_escape();
                 self.drop_for_exit(0, 0);
                 self.emit_return(v);
                 Ok(self.dead())

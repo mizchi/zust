@@ -145,6 +145,9 @@ pub struct BkError {
 
 #[derive(Default)]
 pub struct Bk {
+    /// A closure's body: the borrow checker's locals of its captures held by value. They outlive the body's call, in
+    /// the closure's environment: at each exit (its end, `return`, `?`), what they hold escapes it (Cx::bk_cap_escape)
+    pub cap_vals: Vec<u32>,
     /// The body of a closure whose kind nothing decides (Insts::kind_free): a mutable loan of what it captures by
     /// reference, returned, escapes the `FnMut` body
     pub fnmut_ret: bool,

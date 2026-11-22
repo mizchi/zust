@@ -2248,3 +2248,31 @@ fn part12_review_2() {
     assert!(d.len() == 1 && d[0].0 == 5 && d[0].1.contains("lifetime may not live long enough"), "{d:?}");
     assert_eq!(check(&(id.to_string() + "static X: u8 = 1;\nfn main() {\n    let (p, _): (&'static u8, u8) = (id(&X), 0);\n    println!(\"{}\", p);\n}\n")), vec![]);
 }
+
+/// From the third review of #64: a closure's captures held by value escape at each of its exits, an explicit `return`
+/// and a `?` too (E0521 in rustc), not only at the body's end; a `Deref` chain that does not reach the field within
+/// rustc's recursion limit (128) is E0055, so the borrow check, which follows a place's derefs as far, does not drop
+/// a place the program keeps (a write through 129 `Deref`s), and a chain of 128 is followed
+#[test]
+fn part12_review_3() {
+    let d = check("fn main() {\n    let a = 1;\n    let mut b: Option<&i32> = None;\n    let mut c = move || {\n        b = Some(&a);\n        return;\n    };\n    c();\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 5 && d[0].1.contains("`a` does not live long enough"), "{d:?}");
+    let d = check("fn get() -> Option<u8> {\n    None\n}\nfn main() {\n    let a = 1;\n    let mut b: Option<&i32> = None;\n    let mut c = move || -> Option<u8> {\n        b = Some(&a);\n        let v = get()?;\n        loop {\n            let _ = v;\n        }\n    };\n    let _ = c();\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 8 && d[0].1.contains("`a` does not live long enough"), "{d:?}");
+    assert_eq!(check("fn main() {\n    let a = 1;\n    let mut c = move |k: bool| -> i32 {\n        let r = &a;\n        if k {\n            return *r;\n        }\n        *r + 1\n    };\n    println!(\"{}\", c(true));\n}\n"), vec![]);
+    // (S_n derefs to S_{n-1}; S0 has the field)
+    let chain = |n: usize, body: &str| {
+        let mut s = String::from("use std::ops::Deref;\nstruct S0 {\n    field: u32,\n}\n");
+        let mut v = String::from("S0 { field: 0 }");
+        for i in 1..=n {
+            s += &format!("struct S{i}(S{});\nimpl Deref for S{i} {{\n    type Target = S{};\n    fn deref(&self) -> &S{} {{\n        &self.0\n    }}\n}}\n", i - 1, i - 1, i - 1);
+            v = format!("S{i}({v})");
+        }
+        s + &body.replace("VALUE", &v)
+    };
+    let d = check(&chain(129, "fn main() {\n    let mut x = VALUE;\n    x.field = 1;\n}\n"));
+    assert!(d.len() == 1 && d[0].1.contains("reached the recursion limit while auto-dereferencing `S129` (E0055)"), "{d:?}");
+    let d = check(&chain(128, "fn main() {\n    let mut x = VALUE;\n    x.field = 1;\n}\n"));
+    assert!(d.len() == 1 && d[0].1.contains("cannot assign to data in dereference of `S1` (E0594)"), "{d:?}");
+    assert_eq!(check(&chain(128, "fn main() {\n    let x = VALUE;\n    println!(\"{}\", x.field);\n}\n")), vec![]);
+}
