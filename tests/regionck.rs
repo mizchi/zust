@@ -2114,3 +2114,15 @@ fn let_pattern_annotation_lifetimes() {
     assert!(d.len() == 1 && d[0].0 == 3 && d[0].1.contains("`'b` must outlive `'a`"), "{d:?}");
     assert_eq!(check("struct S<'a> {\n    x: &'a u32,\n}\nfn g<'a>(x: &'a u32) -> &'a u32 {\n    let (y, _): (&'a u32, u32) = (x, 1);\n    y\n}\nfn k<'a>(s: S<'a>) -> &'a u32 {\n    let S { x }: S<'_> = s;\n    x\n}\nfn m<'a, 'b>(p: (&'a u32, &'b u32)) -> &'a u32 {\n    let (a, _): (&'a u32, &u32) = p;\n    a\n}\nfn q<'a>(x: &'a mut u32) -> u32 {\n    let (ref mut y, z): (&'a mut u32, u32) = (x, 3);\n    **y += z;\n    **y\n}\nfn main() {\n    let mut w = 4;\n    println!(\"{} {} {} {}\", g(&1), k(S { x: &7 }), m((&1, &2)), q(&mut w));\n}\n"), vec![]);
 }
+
+/// A closure made where a trait object of a closure trait is expected is checked with that trait's signature, as with
+/// a bound (borrowck/regions-escape-unboxed-closure.rs: `with_int(&mut |y| x = Some(y))` for a
+/// `&mut dyn FnMut(&isize)` is E0521)
+#[test]
+fn closure_dyn_fn_signature() {
+    let d = check("fn with_int(_f: &mut dyn FnMut(&isize)) {}\nfn main() {\n    let mut x: Option<&isize> = None;\n    with_int(&mut |y| x = Some(y));\n    let _ = x;\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 4 && d[0].1.contains("borrowed data escapes outside of closure"), "{d:?}");
+    let d = check("fn main() {\n    let mut x: Option<&isize> = None;\n    let f: &mut dyn FnMut(&isize) = &mut |y| x = Some(y);\n    f(&1);\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 3 && d[0].1.contains("borrowed data escapes outside of closure"), "{d:?}");
+    assert_eq!(check("fn g<'a>(out: &mut Vec<&'a u32>, a: &'a u32) {\n    let f: &mut dyn FnMut(&'a u32) = &mut |y| out.push(y);\n    f(a);\n}\nfn main() {\n    let mut count = 0;\n    {\n        let f: &mut dyn FnMut(&str) = &mut |s| count += s.len();\n        f(\"abc\");\n    }\n    let k: &dyn Fn(&u32) -> &u32 = &|x| x;\n    let first: &dyn Fn(&Vec<u32>) -> Option<&u32> = &|v| v.first();\n    let v = vec![4u32, 5];\n    let mut all = vec![];\n    g(&mut all, &v[0]);\n    println!(\"{} {} {:?} {}\", count, k(&7), first(&v), all.len());\n}\n"), vec![]);
+}

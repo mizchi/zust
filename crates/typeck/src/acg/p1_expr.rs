@@ -1985,7 +1985,17 @@ impl Cx<'_> {
         let Expr::Closure(_, inputs, _, _, _) = c else { return err(SP, "internal: expected a closure") };
         let prog = self.prog;
         let hint = self.closure_hint.take();
-        let bound = self.closure_bound.take();
+        let mut bound = self.closure_bound.take();
+        // (made where a trait object of a closure trait is expected (`&mut |y| x = Some(y)` for a
+        // `&mut dyn FnMut(&isize)`): its text is the bound its body is checked with, its lifetimes from outside)
+        if bound.is_none() && self.user_code && self.bk.level >= 2 && regionck::enabled() {
+            if let Some(Ty::Dyn(d)) = expected {
+                let fn_trait = ["FnOnce", "FnMut", "Fn"].iter().find_map(|k| d.trim_start().strip_prefix(k)).is_some_and(|r| r.trim_start().starts_with('('));
+                if fn_trait {
+                    bound = Some(Box::new((d.to_string(), self.rg.lt_names.clone(), vec![])));
+                }
+            }
+        }
         let to_prelude = std::mem::take(&mut self.closure_prelude);
         let fn_only = self.closure_fn_only;
         self.closure_fn_only = false;
