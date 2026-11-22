@@ -3079,6 +3079,7 @@ impl Session2 {
                     if x.line > user_lines && acg::borrow_check_error(&x.msg) {
                         if let Some(l) = moved_line(&moved, user_lines, x.line) {
                             x.line = l;
+                            x.msg = moved_msg_lines(&x.msg, &moved, user_lines);
                         }
                     }
                 }
@@ -3103,6 +3104,26 @@ fn moved_line(moved: &[(usize, usize)], user_lines: usize, line: usize) -> Optio
         start += nl + 1;
     }
     None
+}
+
+/// The positions `at L:C` a message names (`(first borrow at 14:22)`) on lines moved out of fn bodies: at the lines
+/// they were moved from (moved_line)
+fn moved_msg_lines(msg: &str, moved: &[(usize, usize)], user_lines: usize) -> String {
+    let mut out = String::with_capacity(msg.len());
+    let mut rest = msg;
+    while let Some(i) = rest.find("at ") {
+        out.push_str(&rest[..i + 3]);
+        rest = &rest[i + 3..];
+        let n = rest.bytes().take_while(|b| b.is_ascii_digit()).count();
+        if n > 0 && rest[n..].starts_with(':') {
+            if let Some(l) = rest[..n].parse::<usize>().ok().filter(|&l| l > user_lines).and_then(|l| moved_line(moved, user_lines, l)) {
+                out.push_str(&l.to_string());
+                rest = &rest[n..];
+            }
+        }
+    }
+    out.push_str(rest);
+    out
 }
 
 /// The program's generic fns (not a trait's default methods, not a closure's body, not a dependency's) that no
