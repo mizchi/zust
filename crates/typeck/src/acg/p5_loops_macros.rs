@@ -673,6 +673,7 @@ impl Cx<'_> {
             // パターンの束縛のスコープも break で drop する
             depth: self.scopes.len() - 1,
             temps: self.temps.len(),
+            no_value: Some("for"),
         });
         let (_, bt) = self.block(fbody, Some(Ty::Unit))?;
         self.loops.pop();
@@ -1927,7 +1928,18 @@ impl Cx<'_> {
     pub(crate) fn variant_on(&self, p: &Path, t: Ty) -> Option<(u32, usize)> {
         let (sid, vi) = self.prog.variant_by_p(&PPath::of(p), self.self_sid)?;
         match t {
-            Ty::Struct(x) if self.prog.base_of(x) == self.prog.base_of(sid) => Some((x, vi)),
+            Ty::Struct(x) if self.prog.base_of(x) == self.prog.base_of(sid) => {
+                // (`A::V(_)` with `type A = E<u8>;`: a variant of that instance only, not of an `E<u16>`)
+                if p.segs.len() == 2 && !self.prog.struct_index.contains_key(&p.segs[0].name) && self.prog.aliases.contains_key(&p.segs[0].name) {
+                    let at = self.parse_ty(&crate::parse::Ty::Path(None, path_of(&p.segs[0].name)));
+                    if let Ok(at @ Ty::Struct(_)) = at {
+                        if at != t && !self.prog.has_param(at) && !self.prog.has_param(t) {
+                            return None;
+                        }
+                    }
+                }
+                Some((x, vi))
+            }
             _ => Some((sid, vi)),
         }
     }

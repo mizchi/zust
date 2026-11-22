@@ -1192,8 +1192,15 @@ impl Cx<'_> {
             if let Some(f) = f {
                 if let Some(&id0) = self.prog.index.get(&f) {
                     // (a named trait's impl among the overloads: `impl Other for &X` and `impl PartialEq for &X`)
+                    // (that trait's impl for this receiver: `impl PartialEq for &TX<u8>` and `.. for &TX<u16>` share the
+                    // group)
+                    let fits = |c: u32| {
+                        let sig = &self.prog.sigs[c as usize];
+                        let Some(&Ty::Ref(_, Ty::Ref(_, s))) = sig.params.first() else { return true };
+                        self.prog.match_ty(**s, *inner, &mut vec![None; sig.generics.len()])
+                    };
                     let id = match &self.explicit_trait {
-                        Some((m, tr)) if m == method => self.trait_candidate(&f, tr).unwrap_or(id0),
+                        Some((m, tr)) if m == method => self.trait_candidate_where(&f, tr, fits).or_else(|| self.trait_candidate(&f, tr)).unwrap_or(id0),
                         _ => id0,
                     };
                     let f = self.prog.names[id as usize].clone();
@@ -1388,10 +1395,24 @@ impl Cx<'_> {
             for (i, a) in tf.iter().enumerate() {
                 // (`get_flag::<false, 0xFF>()` with `const C: char`: a const argument of another kind than its parameter's
                 // type)
-                if let Some((_, bs)) = sig.generics.get(first + i).filter(|(_, bs)| bs.iter().any(|b| b == crate::types::CONST_GENERIC)) {
+                let const_slot = sig.generics.get(first + i).filter(|(_, bs)| bs.iter().any(|b| b == crate::types::CONST_GENERIC));
+                // (`identity::<true>(..)` with `fn identity<T>`: a boolean where a type goes)
+                if const_slot.is_none() && sig.generics.get(first + i).is_some() && matches!(a, GArg::Ty(t) if crate::ast_types::bool_arg(t).is_some()) {
+                    return err(SP, "constant provided when a type was expected (E0747)");
+                }
+                if let Some((_, bs)) = const_slot {
                     let decl = bs.iter().find_map(|b| b.strip_prefix(crate::types::CONST_GENERIC)?.strip_prefix(':')).unwrap_or("usize");
+                    // (`{true}`: a block of one boolean is a boolean too)
+                    let braced_bool = |e: &Expr| match e {
+                        Expr::Block(None, false, b) if b.stmts.len() == 1 => {
+                            matches!(&b.stmts[0], crate::parse::Stmt::Expr(Expr::Lit(s, _), false) if s == "true" || s == "false")
+                                || matches!(&b.stmts[0], crate::parse::Stmt::Expr(Expr::Path(None, p), false) if p.segs.len() == 1 && matches!(p.segs[0].name.as_str(), "true" | "false"))
+                        }
+                        _ => false,
+                    };
                     let found = match a {
                         GArg::Ty(t) if crate::ast_types::bool_arg(t).is_some() => Some(("bool", "bool")),
+                        GArg::Const(e) if braced_bool(e) => Some(("bool", "bool")),
                         GArg::Const(Expr::Lit(s, _)) if s.starts_with('\'') => Some(("char", "char")),
                         GArg::Const(Expr::Lit(s, _)) if s.starts_with(|c: char| c.is_ascii_digit()) => Some(("int", "integer")),
                         _ => None,

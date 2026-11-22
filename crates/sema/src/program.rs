@@ -4210,6 +4210,7 @@ impl Program {
     /// `type E2 = E;` / `type Opt<T> = Option<T>;`: the struct / enum (its base) an alias names directly
     pub fn alias_adt(&self, name: &str) -> Option<u32> {
         let (_, syn) = self.aliases.get(name)?;
+        // (`type A = E<u8>;`: its base; a pattern through it is checked against the instance by variant_on)
         let n = match syn {
             TySyn::Named(n) | TySyn::App(n, _) => n.as_str(),
             _ => return None,
