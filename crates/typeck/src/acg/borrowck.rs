@@ -2363,6 +2363,29 @@ impl Cx<'_> {
                 }
                 return;
             }
+            // (a pattern that binds a part of the place by `ref mut` (`let (ref mut x, _) = p;`): a mutable borrow
+            // of it)
+            Expr::Match(x, arms) if arms.iter().any(|a| crate::ast_closure::binds_ref_mut(&a.pat)) => {
+                if let Some((p, _)) = self.bk_rooted_at(x, n) {
+                    out.push(p);
+                }
+            }
+            Expr::Let(pat, x) if crate::ast_closure::binds_ref_mut(pat) => {
+                if let Some((p, _)) = self.bk_rooted_at(x, n) {
+                    out.push(p);
+                }
+            }
+            Expr::Block(_, _, b) => {
+                for st in &b.stmts {
+                    if let crate::parse::Stmt::Let(pat, _, Some(x), ..) = st {
+                        if crate::ast_closure::binds_ref_mut(pat) {
+                            if let Some((p, _)) = self.bk_rooted_at(x, n) {
+                                out.push(p);
+                            }
+                        }
+                    }
+                }
+            }
             _ => {}
         }
         crate::ast_closure::each_child_pub(e, &mut |c| self.bk_cap_muts(c, n, out, calls));

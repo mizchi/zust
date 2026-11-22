@@ -1680,3 +1680,12 @@ fn scope_exits_and_self() {
     // (a borrow that ends before the jump, a `Drop` value's borrow that ends in its scope, `mut self`)
     assert_eq!(check(&format!("{s}struct T(u8);\nimpl T {{\n    fn bar(&mut self) {{}}\n    fn a(mut self) -> u8 {{\n        self.bar();\n        self.0 = 1;\n        self.0\n    }}\n    fn b(&mut self) {{\n        self.bar();\n        let r = &mut *self;\n        r.bar();\n    }}\n}}\nfn main() {{\n    let mut v = vec![];\n    for i in 0..3 {{\n        let x = i;\n        let r = &x;\n        if *r == 1 {{\n            break;\n        }}\n        v.push(*r);\n    }}\n    let mut y = 1;\n    {{\n        let s = Scribble(&mut y);\n        let r = &mut *s.0;\n        *r = 3;\n    }}\n    println!(\"{{:?}}\", v);\n}}\n")), vec![]);
 }
+
+/// A closure that binds a part of a capture by `ref mut` borrows it mutably: it is `FnMut`, not `Copy`
+/// (closures/2229_closure_analysis/diagnostics/closure-origin-*-diagnostics.rs)
+#[test]
+fn closure_ref_mut_pattern_capture() {
+    let d = check("fn main() {\n    let mut p = (1, 2);\n    let c = || {\n        let (ref mut x, _) = p;\n        *x += 1;\n    };\n    let _b = c;\n    let _a = c;\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 8 && d[0].1.contains("use of moved value: `c`"), "{d:?}");
+    assert_eq!(check("fn main() {\n    let p = (1, 2);\n    let c = || {\n        let (ref x, _) = p;\n        let _ = *x;\n    };\n    let _b = c;\n    let _a = c;\n    let mut q = (1, 2);\n    let mut d = || {\n        let (ref mut x, _) = q;\n        *x += 1;\n    };\n    d();\n    d();\n}\n"), vec![]);
+}

@@ -1036,6 +1036,17 @@ impl EHash {
 }
 
 /// The pattern binds a part of the value by value (`x`, `Some(x)`), not only by reference or not at all
+/// Whether p binds a part of what it matches by `ref mut` (a mutable borrow of it)
+pub fn binds_ref_mut(p: &Pat) -> bool {
+    match p {
+        Pat::Ident(by_ref, m, _, sub) => (*by_ref && *m) || sub.as_deref().is_some_and(binds_ref_mut),
+        Pat::Ref(_, q) => binds_ref_mut(q),
+        Pat::Or(v) | Pat::Tuple(v) | Pat::TupleStruct(_, v) | Pat::Slice(v) => v.iter().any(binds_ref_mut),
+        Pat::Struct(_, fs, _) => fs.iter().any(|f| binds_ref_mut(&f.1)),
+        _ => false,
+    }
+}
+
 pub fn binds_by_value(p: &Pat) -> bool {
     match p {
         Pat::Ident(by_ref, _, n, sub) => {
