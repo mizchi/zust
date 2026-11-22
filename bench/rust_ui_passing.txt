@@ -1205,6 +1205,7 @@ compile-fail	closures/2229_closure_analysis/unique-borrows-are-invariant-1.rs
 compile-fail	closures/2229_closure_analysis/unique-borrows-are-invariant-2.rs
 run-pass	closures/2229_closure_analysis/unresolvable-upvar-issue-87987.rs
 compile-fail	closures/add_semicolon_non_block_closure.rs
+compile-fail	closures/aliasability-violation-with-closure-21600.rs
 check-pass	closures/at-pattern-weirdness-issue-137553.rs
 run-pass	closures/basic-closure-syntax.rs
 check-pass	closures/boxed-closure-captures-fnmut-with-ref.rs
@@ -2533,6 +2534,7 @@ compile-fail	fn/coerce-suggestion-infer-region.rs
 compile-fail	fn/error-recovery-mismatch.rs
 run-pass	fn/expr-fn.rs
 compile-fail	fn/fn-bad-block-type.rs
+compile-fail	fn/fn-closure-mutable-capture.rs
 compile-fail	fn/fn-compare-mismatch.rs
 compile-fail	fn/fn-item-type.rs
 compile-fail	fn/fn-pointer-mismatch.rs
@@ -7286,6 +7288,7 @@ run-pass	unboxed-closures/unboxed-closures-infer-kind.rs
 run-pass	unboxed-closures/unboxed-closures-infer-upvar.rs
 run-pass	unboxed-closures/unboxed-closures-move-mutable.rs
 run-pass	unboxed-closures/unboxed-closures-move-some-upvars-in-by-ref-closure.rs
+compile-fail	unboxed-closures/unboxed-closures-mutated-upvar-from-fn-closure.rs
 run-pass	unboxed-closures/unboxed-closures-prelude.rs
 run-pass	unboxed-closures/unboxed-closures-simple.rs
 run-pass	unboxed-closures/unboxed-closures-single-word-env.rs
