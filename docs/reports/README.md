@@ -86,3 +86,4 @@ Japanese versions are in [../ja/reports/](../ja/reports/README.md).
 | 2026-11-22 | [zurgo M1: build scripts, `env!`, and proc-macro stubs](2026-11-22-04-zurgo-build-scripts.md) |
 | 2026-11-22 | [Region (lifetime) checking, part 8: stores through `&mut`, moves out of what cannot be moved, and tuning](2026-11-22-05-region-check-8.md) |
 | 2026-11-22 | [Region (lifetime) checking, part 9: block tails, match guards, destructors, and items in fn bodies](2026-11-22-06-region-check-9.md) |
+| 2026-11-22 | [Region (lifetime) checking, part 10: closures' captures, guards, patterns, implicit reborrows, and `'static` instances](2026-11-22-07-region-check-10.md) |

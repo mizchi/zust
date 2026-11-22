@@ -124,11 +124,31 @@ pub const CONST_CHECK_LINE: usize = 1_000_000;
 
 /// `s` with its comments (`//..` to the line's end, `/* .. */`) as spaces, its newlines and length kept; strings and chars
 /// skipped
+/// Where the raw string at b[i] ends (past it), b[i] its `r` (`r#"a "{" b"#`, `br"\"`); None for anything else
+fn raw_str_end(b: &[u8], i: usize) -> Option<usize> {
+    let ident = |k: usize| b[k].is_ascii_alphanumeric() || b[k] == b'_';
+    let alone = |k: usize| k == 0 || !ident(k - 1);
+    if b[i] != b'r' || !(alone(i) || (b[i - 1] == b'b' && alone(i - 1))) {
+        return None;
+    }
+    let hashes = b[i + 1..].iter().take_while(|&&c| c == b'#').count();
+    if b.get(i + 1 + hashes) != Some(&b'"') {
+        return None;
+    }
+    let close = [&b"\""[..], &vec![b'#'; hashes]].concat();
+    let from = i + 2 + hashes;
+    Some(b[from..].windows(close.len()).position(|w| w == close).map_or(b.len(), |p| from + p + close.len()))
+}
+
 fn blank_comments(s: &str) -> String {
     let b = s.as_bytes();
     let mut out = b.to_vec();
     let mut i = 0;
     while i < b.len() {
+        if let Some(e) = raw_str_end(b, i) {
+            i = e;
+            continue;
+        }
         match b[i] {
             b'"' => {
                 i += 1;
@@ -179,6 +199,9 @@ fn blank_comments(s: &str) -> String {
 /// Where the string or char literal at b[i] ends (past it): `"..."`, `b'{'`, `'\n'`; None for anything else (a
 /// lifetime `'a`)
 fn literal_end(b: &[u8], i: usize) -> Option<usize> {
+    if let Some(e) = raw_str_end(b, i) {
+        return Some(e);
+    }
     match b[i] {
         b'"' => {
             let mut j = i + 1;
@@ -207,8 +230,9 @@ pub const CONST_CHECK_FN: &str = "__zust_const_";
 /// it is defined, used or not, as rustc checks every constant, with the inference of a fn's body: (the fns'
 /// text, the line of each initializer). None without one. Not one whose initializer defines items (a fn body would
 /// hoist them again). An enum's discriminants likewise, of its `#[repr(..)]` integer type or isize
-fn const_check_item(src: &str, items: &[SrcItem]) -> Option<(String, Vec<usize>)> {
-    let mut body_out = String::new();
+fn const_check_item(src: &str, items: &[SrcItem]) -> Option<(String, Vec<usize>, String)> {
+    // (each probe's type and initializer, named at the end)
+    let mut probes: Vec<(String, String)> = vec![];
     let mut lines = vec![];
     // (an item hoisted out of a fn body: the line it was written on, prep::HOIST_MARK; looked for at the first)
     let marks: std::cell::OnceCell<Vec<(usize, usize)>> = std::cell::OnceCell::new();
@@ -292,7 +316,7 @@ fn const_check_item(src: &str, items: &[SrcItem]) -> Option<(String, Vec<usize>)
                 }
                 let at = body_at + a + eq + 1;
                 let skip = { let b = blank_comments(&text[at..]); b.len() - b.trim_start().len() };
-                body_out.push_str(&format!("#[allow(dead_code, unused)] fn {CONST_CHECK_FN}{}() {{\n    let _zc: {} = (\n{e}\n    );\n}}\n", lines.len(), repr.unwrap_or("isize")));
+                probes.push((repr.unwrap_or("isize").to_string(), e.to_string()));
                 lines.push(written(it.line + text[..at + skip].matches('\n').count()));
             }
             continue;
@@ -357,14 +381,19 @@ fn const_check_item(src: &str, items: &[SrcItem]) -> Option<(String, Vec<usize>)
         let at = text.len() - ty_from.len() + eq + 1;
         let skip = { let b = blank_comments(&text[at..]); b.len() - b.trim_start().len() };
         // (a `let` of the type: the coercions of a `let`, as a constant's initializer has)
-        body_out.push_str(&format!("#[allow(dead_code, unused)] fn {CONST_CHECK_FN}{}() {{\n    let _zc: {ty_s} = (\n{init}\n    );\n}}\n", lines.len()));
+        probes.push((ty_s, init.to_string()));
         lines.push(written(it.line + text[..at + skip].matches('\n').count()));
     }
-    // (none when the program names its own fns so: the probes' names are theirs alone)
-    if lines.is_empty() || items.iter().any(|it| src[it.start..it.end].contains(CONST_CHECK_FN)) {
+    if lines.is_empty() {
         return None;
     }
-    Some((body_out, lines))
+    // (the probes' names are theirs alone: `__zust_const_`, or `__zust_const1_` .. when the program writes that)
+    let name = (0..).map(|n| if n == 0 { CONST_CHECK_FN.to_string() } else { format!("__zust_const{n}_") }).find(|p| !items.iter().any(|it| src[it.start..it.end].contains(p.as_str())))?;
+    let mut body_out = String::new();
+    for (k, (ty, init)) in probes.iter().enumerate() {
+        body_out.push_str(&format!("#[allow(dead_code, unused)] fn {name}{k}() {{\n    let _zc: {ty} = (\n{init}\n    );\n}}\n"));
+    }
+    Some((body_out, lines, name))
 }
 
 /// 検査だけの印のキャッシュのキー (ビルドの Blob のキーと混ざらないように)
@@ -670,11 +699,13 @@ pub struct Session2 {
     checking: bool,
     /// The lines of the constants that the check's const_check_item reads, in its order
     const_lines: Vec<usize>,
+    /// their fns' names' prefix (CONST_CHECK_FN, or another when the program writes that)
+    const_fn: String,
 }
 
 impl Session2 {
     pub fn new(opts: Options2) -> Session2 {
-        Session2 { opts, cid: compiler_id(), disk: crate::cache2::Cache2::empty(), mem: FxMap::default(), used: FxSet::default(), fresh: vec![], ctx: CrateCtx::default(), last_map: None, sel: Default::default(), sum_fp: FxMap::default(), chk: None, externs: vec![], checking: false, const_lines: vec![] }
+        Session2 { opts, cid: compiler_id(), disk: crate::cache2::Cache2::empty(), mem: FxMap::default(), used: FxSet::default(), fresh: vec![], ctx: CrateCtx::default(), last_map: None, sel: Default::default(), sum_fp: FxMap::default(), chk: None, externs: vec![], checking: false, const_lines: vec![], const_fn: String::new() }
     }
 
     pub fn load_cache(&mut self, path: &std::path::Path) {
@@ -790,7 +821,7 @@ impl Session2 {
         let user_src = user;
         self.const_lines.clear();
         if self.checking {
-            if let Some((text, lines)) = const_check_item(&src, &items[..user]) {
+            if let Some((text, lines, name)) = const_check_item(&src, &items[..user]) {
                 if !src.ends_with('\n') {
                     src.push('\n');
                 }
@@ -818,6 +849,7 @@ impl Session2 {
                     items.splice(user..user, its);
                     user += n;
                     self.const_lines = lines;
+                    self.const_fn = name;
                 }
             }
         }
@@ -3790,7 +3822,7 @@ impl Session2 {
                                 Err(e) => {
                                     // (a fn that reads a constant: its type errors are the constant's, at its line; what
                                     // zustc cannot evaluate in a constant is not an error of the program)
-                                    match body.strip_prefix(CONST_CHECK_FN).and_then(|k| k.parse::<usize>().ok()).filter(|_| !self.const_lines.is_empty()) {
+                                    match body.strip_prefix(self.const_fn.as_str()).and_then(|k| k.parse::<usize>().ok()).filter(|_| !self.const_lines.is_empty()) {
                                         Some(k) => {
                                             // (nor a mismatch zustc's coercions may make: of a raw pointer, or of a type
                                             // that has no size, which rustc rejects another way)

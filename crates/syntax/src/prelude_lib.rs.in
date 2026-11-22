@@ -9529,6 +9529,20 @@ impl<T> Deref for MutexGuard<T> {
     }
 }
 
+impl<T: Debug> Debug for MutexGuard<T> {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError> {
+        __exr_debug(self.deref(), f);
+        Ok(())
+    }
+}
+
+impl<T: Display> Display for MutexGuard<T> {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError> {
+        __exr_display(self.deref(), f);
+        Ok(())
+    }
+}
+
 impl<T> Drop for MutexGuard<T> {
     fn drop(&mut self) {
         unsafe {

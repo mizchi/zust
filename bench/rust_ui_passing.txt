@@ -750,6 +750,9 @@ compile-fail	borrowck/borrow-raw-address-of-mutability.rs
 compile-fail	borrowck/borrow-tuple-fields.rs
 compile-fail	borrowck/borrowck-access-permissions.rs
 compile-fail	borrowck/borrowck-and-init.rs
+compile-fail	borrowck/borrowck-anon-fields-struct.rs
+compile-fail	borrowck/borrowck-anon-fields-tuple.rs
+compile-fail	borrowck/borrowck-anon-fields-variant.rs
 compile-fail	borrowck/borrowck-argument.rs
 compile-fail	borrowck/borrowck-assign-comp-idx.rs
 compile-fail	borrowck/borrowck-assign-comp.rs
@@ -844,6 +847,7 @@ compile-fail	borrowck/borrowck-move-out-of-overloaded-deref.rs
 compile-fail	borrowck/borrowck-move-out-of-static-item.rs
 compile-fail	borrowck/borrowck-move-out-of-struct-with-dtor.rs
 compile-fail	borrowck/borrowck-move-out-of-tuple-struct-with-dtor.rs
+compile-fail	borrowck/borrowck-move-subcomponent.rs
 run-pass	borrowck/borrowck-multiple-borrows-interior-boxes.rs
 compile-fail	borrowck/borrowck-multiple-captures.rs
 compile-fail	borrowck/borrowck-mut-addr-of-imm-var.rs
@@ -867,6 +871,7 @@ compile-fail	borrowck/borrowck-pat-reassign-binding.rs
 run-pass	borrowck/borrowck-pat-reassign-no-binding.rs
 compile-fail	borrowck/borrowck-reborrow-from-mut.rs
 compile-fail	borrowck/borrowck-reborrow-from-shorter-lived-andmut.rs
+compile-fail	borrowck/borrowck-ref-mut-of-imm.rs
 compile-fail	borrowck/borrowck-reinit.rs
 compile-fail	borrowck/borrowck-report-with-custom-diagnostic.rs
 compile-fail	borrowck/borrowck-return.rs
@@ -922,7 +927,9 @@ compile-fail	borrowck/dbg-issue-120327.rs
 compile-fail	borrowck/deref-and-mut-borrow-conflict.rs
 compile-fail	borrowck/deref-index-pattern-ref-suggestion.rs
 compile-fail	borrowck/disallow-possibly-uninitialized.rs
+compile-fail	borrowck/drop-in-loop.rs
 check-pass	borrowck/enum-variants-share-field-name.rs
+compile-fail	borrowck/fn-ptr-lifetime-mismatch-with-impl-trait-arg.rs
 compile-fail	borrowck/fnmut-borrow-error-in-closure-match.rs
 run-pass	borrowck/fsu-moves-and-copies.rs
 compile-fail	borrowck/ice-mutability-error-slicing-121807.rs
@@ -935,6 +942,7 @@ run-pass	borrowck/incorrect-loan-error-on-local-update-5550.rs
 compile-fail	borrowck/index-mut-help-with-impl.rs
 compile-fail	borrowck/index-mut-help.rs
 check-pass	borrowck/index-self-with-arithmetic-on-self-item.rs
+compile-fail	borrowck/issue-101119.rs
 compile-fail	borrowck/issue-103250.rs
 compile-fail	borrowck/issue-103624.rs
 check-pass	borrowck/issue-104639-lifetime-order.rs
@@ -947,6 +955,7 @@ check-pass	borrowck/issue-17263.rs
 compile-fail	borrowck/issue-17718-static-move.rs
 run-pass	borrowck/issue-23338-params-outlive-temps-of-body.rs
 compile-fail	borrowck/issue-24267-flow-exit.rs
+compile-fail	borrowck/issue-31287-drop-in-guard.rs
 compile-fail	borrowck/issue-33819.rs
 compile-fail	borrowck/issue-41962.rs
 compile-fail	borrowck/issue-42344.rs
@@ -968,6 +977,7 @@ check-pass	borrowck/issue-55552-ascribe-wildcard-to-structured-pattern.rs
 compile-fail	borrowck/issue-58776-borrowck-scans-children.rs
 run-pass	borrowck/issue-62007-assign-box.rs
 run-pass	borrowck/issue-62007-assign-field.rs
+compile-fail	borrowck/issue-62107-match-arm-scopes.rs
 compile-fail	borrowck/issue-62387-suggest-iter-mut-2.rs
 compile-fail	borrowck/issue-62387-suggest-iter-mut.rs
 compile-fail	borrowck/issue-64453.rs
@@ -1008,6 +1018,7 @@ compile-fail	borrowck/multiple-mutable-borrows-error-65131.rs
 compile-fail	borrowck/mut-borrow-in-loop.rs
 compile-fail	borrowck/mut-borrow-of-mut-ref.rs
 compile-fail	borrowck/mutability-errors.rs
+compile-fail	borrowck/mutable-borrow-behind-reference-61623.rs
 compile-fail	borrowck/mutate-vec-while-iterating.rs
 check-pass	borrowck/nested-closure-with-generic-ice.rs
 compile-fail	borrowck/non-ADT-struct-pattern-box-pattern-ice-121463.rs
@@ -1196,6 +1207,8 @@ compile-fail	closures/2229_closure_analysis/diagnostics/borrowck/borrowck-closur
 compile-fail	closures/2229_closure_analysis/diagnostics/box.rs
 compile-fail	closures/2229_closure_analysis/diagnostics/cant-mutate-imm.rs
 compile-fail	closures/2229_closure_analysis/diagnostics/closure-origin-array-diagnostics.rs
+compile-fail	closures/2229_closure_analysis/diagnostics/closure-origin-multi-variant-diagnostics.rs
+compile-fail	closures/2229_closure_analysis/diagnostics/closure-origin-single-variant-diagnostics.rs
 compile-fail	closures/2229_closure_analysis/diagnostics/closure-origin-struct-diagnostics.rs
 compile-fail	closures/2229_closure_analysis/diagnostics/closure-origin-tuple-diagnostics-1.rs
 check-pass	closures/2229_closure_analysis/diagnostics/liveness.rs
@@ -2049,6 +2062,7 @@ compile-fail	did_you_mean/compatible-variants.rs
 compile-fail	did_you_mean/expect-instead-of-unwrap.rs
 compile-fail	did_you_mean/issue-103909.rs
 compile-fail	did_you_mean/issue-114112.rs
+compile-fail	did_you_mean/issue-31424.rs
 compile-fail	did_you_mean/issue-34126.rs
 compile-fail	did_you_mean/issue-34337.rs
 compile-fail	did_you_mean/issue-35937.rs
@@ -4378,6 +4392,7 @@ run-pass	moves/moves-based-on-type-capture-clause.rs
 compile-fail	moves/moves-based-on-type-cyclic-types-issue-4821.rs
 compile-fail	moves/moves-based-on-type-distribute-copy-over-paren.rs
 compile-fail	moves/moves-based-on-type-exprs.rs
+compile-fail	moves/moves-based-on-type-match-bindings.rs
 compile-fail	moves/moves-based-on-type-tuple.rs
 compile-fail	moves/moves-sru-moved-field.rs
 compile-fail	moves/needs-clone-through-deref.rs
@@ -4449,6 +4464,8 @@ check-pass	nll/closure-requirements/type-test-subject-unnamed-region.rs
 compile-fail	nll/closure-use-spans.rs
 compile-fail	nll/closures-in-loops.rs
 check-pass	nll/constant.rs
+compile-fail	nll/do-not-ignore-lifetime-bounds-in-copy-proj.rs
+compile-fail	nll/do-not-ignore-lifetime-bounds-in-copy.rs
 compile-fail	nll/dont-print-desugared.rs
 check-pass	nll/empty-type-predicate-2.rs
 check-pass	nll/empty-type-predicate.rs
@@ -4458,9 +4475,12 @@ compile-fail	nll/issue-21232-partial-init-and-erroneous-use.rs
 compile-fail	nll/issue-21232-partial-init-and-use.rs
 check-pass	nll/issue-22323-temp-destruction.rs
 run-pass	nll/issue-24535-allow-mutable-borrow-in-match-guard.rs
+compile-fail	nll/issue-27282-move-match-input-into-guard.rs
+compile-fail	nll/issue-27282-move-ref-mut-into-guard.rs
 compile-fail	nll/issue-27282-mutate-before-diverging-arm-1.rs
 compile-fail	nll/issue-27282-mutate-before-diverging-arm-2.rs
 compile-fail	nll/issue-27282-mutate-before-diverging-arm-3.rs
+compile-fail	nll/issue-27282-mutation-in-guard.rs
 compile-fail	nll/issue-27868.rs
 check-pass	nll/issue-30104.rs
 compile-fail	nll/issue-30438-a.rs
@@ -4490,12 +4510,14 @@ compile-fail	nll/issue-48803.rs
 run-pass	nll/issue-50343.rs
 run-pass	nll/issue-50461-used-mut-from-moves.rs
 check-pass	nll/issue-50716-1.rs
+compile-fail	nll/issue-51191.rs
 compile-fail	nll/issue-51244.rs
 check-pass	nll/issue-51351.rs
 check-pass	nll/issue-51770.rs
 run-pass	nll/issue-52057.rs
 compile-fail	nll/issue-52059-report-when-borrow-and-drop-conflict.rs
 check-pass	nll/issue-52078.rs
+compile-fail	nll/issue-52086.rs
 compile-fail	nll/issue-52113.rs
 compile-fail	nll/issue-52213.rs
 compile-fail	nll/issue-52533-1.rs
@@ -4509,6 +4531,7 @@ check-pass	nll/issue-52992.rs
 compile-fail	nll/issue-53040.rs
 run-pass	nll/issue-53123-raw-pointer-cast.rs
 check-pass	nll/issue-53570.rs
+compile-fail	nll/issue-53773.rs
 compile-fail	nll/issue-53807.rs
 compile-fail	nll/issue-54189.rs
 compile-fail	nll/issue-54556-wrap-it-up.rs
@@ -4524,6 +4547,7 @@ compile-fail	nll/issue-57843.rs
 run-pass	nll/issue-57960.rs
 compile-fail	nll/issue-57989.rs
 compile-fail	nll/issue-58053.rs
+compile-fail	nll/issue-58299.rs
 check-pass	nll/issue-61311-normalize.rs
 check-pass	nll/issue-61320-normalize.rs
 compile-fail	nll/issue-62007-assign-const-index.rs
@@ -4539,6 +4563,7 @@ compile-fail	nll/lub-if.rs
 compile-fail	nll/lub-match.rs
 compile-fail	nll/match-cfg-fake-edges.rs
 compile-fail	nll/match-cfg-fake-edges2.rs
+compile-fail	nll/match-guards-always-borrow.rs
 compile-fail	nll/match-guards-partially-borrow.rs
 compile-fail	nll/match-on-borrowed.rs
 compile-fail	nll/maybe-initialized-drop-implicit-fragment-drop.rs
@@ -4575,6 +4600,7 @@ check-pass	nll/ty-outlives/projection-where-clause-trait.rs
 compile-fail	nll/ty-outlives/ty-param-fn-body.rs
 compile-fail	nll/ty-outlives/ty-param-fn.rs
 compile-fail	nll/ty-outlives/wf-unreachable.rs
+compile-fail	nll/type-alias-free-regions.rs
 compile-fail	nll/type-check-pointer-coercions.rs
 compile-fail	nll/type-check-pointer-comparisons.rs
 compile-fail	nll/type-test-universe.rs
@@ -4588,6 +4614,7 @@ compile-fail	nll/user-annotations/constant-in-expr-normalize.rs
 compile-fail	nll/user-annotations/constant-in-expr-trait-item-1.rs
 check-pass	nll/user-annotations/downcast-infer.rs
 compile-fail	nll/user-annotations/fns.rs
+compile-fail	nll/user-annotations/inherent-associated-constants.rs
 check-pass	nll/user-annotations/issue-55219.rs
 run-pass	nll/user-annotations/issue-55241.rs
 compile-fail	nll/user-annotations/issue-55748-pat-types-constrain-bindings.rs
@@ -5422,6 +5449,7 @@ compile-fail	pattern/array-length-mismatch-13482.rs
 compile-fail	pattern/at-in-struct-patterns.rs
 run-pass	pattern/bindings-after-at/bind-by-copy-or-pat.rs
 run-pass	pattern/bindings-after-at/bind-by-copy.rs
+compile-fail	pattern/bindings-after-at/bind-by-move-neither-can-live-while-the-other-survives-1.rs
 compile-fail	pattern/bindings-after-at/bind-by-move-no-subbindings-fun-param.rs
 check-pass	pattern/bindings-after-at/borrowck-pat-ref-both-sides.rs
 check-pass	pattern/bindings-after-at/nested-binding-mode-lint.rs
@@ -5796,6 +5824,7 @@ compile-fail	regions/regions-infer-invariance-due-to-decl.rs
 compile-fail	regions/regions-infer-invariance-due-to-mutability-3.rs
 compile-fail	regions/regions-infer-invariance-due-to-mutability-4.rs
 compile-fail	regions/regions-infer-not-param.rs
+compile-fail	regions/regions-infer-paramd-indirect.rs
 compile-fail	regions/regions-infer-proc-static-upvar.rs
 run-pass	regions/regions-infer-reborrow-ref-mut-recurse.rs
 run-pass	regions/regions-infer-region-in-fn-but-not-type.rs
@@ -6343,6 +6372,7 @@ compile-fail	span/pub-struct-field.rs
 compile-fail	span/range-2.rs
 compile-fail	span/regionck-unboxed-closure-lifetimes.rs
 compile-fail	span/regions-escape-loop-via-variable.rs
+compile-fail	span/regions-infer-borrow-scope-within-loop.rs
 compile-fail	span/send-is-not-static-std-sync-2.rs
 compile-fail	span/slice-borrow.rs
 compile-fail	span/suggestion-non-ascii.rs

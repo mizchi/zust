@@ -275,3 +275,4 @@ date	commit	change	noop_M	edit_M	check_M	cache_KiB	lsp_G	run	check	build	cfail	t
 2026-11-22	092efb3+	Review of #52: probes' names, comments and literals, &mut not Copy, clone inference	0.695	549.558	3874.047	1902.8	-	-	-	-	-	1182.573	64.089	10.452	319.932	721.256	266.286
 2026-11-22	1ccede7+	E0038 for dyn of a trait not dyn compatible in a signature (check)	0.695	549.671	3876.466	1902.8	-	1813	1495	102	4264	1183.134	64.062	10.452	319.904	721.477	266.285
 2026-11-22	8d03471+	Analysis errors of hoisted items at their written lines	0.695	549.572	3876.358	1902.8	-	-	-	-	-	1183.155	64.217	10.452	319.905	721.433	266.276
+2026-11-22	0d6bba4+	Review of #52 (3): Clone and Copy only through arguments of containers, raw strings, probes' names	0.695	549.779	3750.836	1902.8	-	1813	1495	102	4278	1179.916	64.135	10.452	320.176	718.230	266.322
