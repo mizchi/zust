@@ -1212,6 +1212,7 @@ impl Session2 {
         let mut deny_unused_alloc = false;
         let mut deny_trivial_casts = (false, false);
         let mut deny_unused_lifetimes = (false, false);
+        let mut deny_deprecated = false;
         // (non_snake_case, non_camel_case_types, non_upper_case_globals)
         let mut deny_style = [false; 3];
         let lib_attr = {
@@ -1259,6 +1260,7 @@ impl Session2 {
             };
             deny_trivial_casts = (lint("trivial_casts"), lint("trivial_numeric_casts"));
             deny_unused_lifetimes = (lint("unused_lifetimes"), lint("single_use_lifetimes"));
+            deny_deprecated = lint("deprecated") || (levels.contains(&"warnings") && !c.contains("#![allow(deprecated"));
             deny_unused_alloc = lint("unused_allocation")
                 || (!levels.contains(&"unused_allocation") && levels.iter().any(|l| matches!(*l, "unused" | "warnings")) && !c.contains("#![allow(unused"));
             for (k, n) in ["non_snake_case", "non_camel_case_types", "non_upper_case_globals"].iter().enumerate() {
@@ -1299,6 +1301,12 @@ impl Session2 {
                         return Err(format!("{}:{}: unreachable {what}", it.line + p.line as usize - 1, p.col + 1));
                     }
                 }
+            }
+        }
+        // (deprecated: a path through `std::intrinsics` to what is stable elsewhere (`std::mem::transmute`))
+        if deny_deprecated {
+            if let Some(e) = first_accidentally_stable(&src, &items[..user_src]) {
+                return Err(e);
             }
         }
         // (unused_lifetimes: a lifetime parameter of a fn or an impl of the program's that nothing in it names;
@@ -3997,6 +4005,70 @@ fn placeholder_wave(a: &Analysis, insts: &Mutex<Insts>) -> Vec<u32> {
         let _ = g.request(p, id as u32, args);
     }
     std::mem::take(&mut g.pending)
+}
+
+/// `#![deny(deprecated)]`: the first path of the program's through `std::intrinsics` / `core::intrinsics` to an
+/// intrinsic that is stable through another module (`transmute`, `copy`, `copy_nonoverlapping`, `write_bytes`), in a
+/// `use` (a group too) or an expression: `line:col: use of deprecated ..`
+fn first_accidentally_stable(src: &str, items: &[SrcItem]) -> Option<String> {
+    const STABLE: [&str; 4] = ["transmute", "copy_nonoverlapping", "copy", "write_bytes"];
+    for it in items {
+        let raw = src.get(it.start..it.end)?;
+        if !raw.contains("intrinsics") {
+            continue;
+        }
+        // (comments and string literals are no paths)
+        let mut text = blank_comments(raw).into_bytes();
+        let mut i = 0;
+        while i < text.len() {
+            match literal_end(&text, i).filter(|_| text[i] != b'\'') {
+                Some(e) => {
+                    for c in &mut text[i..e] {
+                        if *c != b'\n' {
+                            *c = b' ';
+                        }
+                    }
+                    i = e;
+                }
+                None => i += 1,
+            }
+        }
+        let Ok(text) = String::from_utf8(text) else { continue };
+        let b = text.as_bytes();
+        for (k, _) in text.match_indices("intrinsics") {
+            // (`std::intrinsics::` / `core::intrinsics::`, the module a segment of its own)
+            let before = text[..k].trim_end();
+            let Some(before) = before.strip_suffix("::") else { continue };
+            let root = before.trim_end();
+            if !(root.ends_with("std") || root.ends_with("core")) || root.len() > 4 && b[root.len() - if root.ends_with("std") { 4 } else { 5 }].is_ascii_alphanumeric() {
+                continue;
+            }
+            let Some(after) = text[k + "intrinsics".len()..].trim_start().strip_prefix("::") else { continue };
+            let after = after.trim_start();
+            // (the names it brings: one, or a group's)
+            let names: Vec<(usize, &str)> = if let Some(g) = after.strip_prefix('{') {
+                let g_at = text.len() - g.len();
+                let end = g.find('}').unwrap_or(g.len());
+                g[..end].split(',').scan(g_at, |at, part| {
+                    let here = *at + (part.len() - part.trim_start().len());
+                    *at += part.len() + 1;
+                    Some((here, part.trim()))
+                }).collect()
+            } else {
+                // (at the path's first segment, as rustc)
+                vec![(root.len() - if root.ends_with("std") { 3 } else { 4 }, after)]
+            };
+            for (at, name) in names {
+                let id: String = name.chars().take_while(|c| c.is_ascii_alphanumeric() || *c == '_').collect();
+                if STABLE.contains(&id.as_str()) {
+                    let line = it.line + text[..at].matches('\n').count();
+                    let col = at - text[..at].rfind('\n').map_or(0, |n| n + 1) + 1;
+                    return Some(format!("{line}:{col}: use of deprecated import through accidentally stabilized module `intrinsics`: `{id}` (deprecated)"));
+                }
+            }
+        }
+    }
+    None
 }
 
 /// The lint levels codegen checks (`#![deny(unused_must_use)]`, `trivial_casts` ..) as one byte for the cache keys: a
