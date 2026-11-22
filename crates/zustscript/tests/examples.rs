@@ -10,13 +10,7 @@ fn root() -> PathBuf {
 }
 
 fn zsc(input: &Path, out: &Path, flags: &[&str]) -> std::process::Output {
-    Command::new(env!("CARGO_BIN_EXE_zsc"))
-        .arg(input)
-        .arg("-o")
-        .arg(out)
-        .args(flags)
-        .output()
-        .unwrap()
+    Command::new(env!("CARGO_BIN_EXE_zsc")).arg(input).arg("-o").arg(out).args(flags).output().unwrap()
 }
 
 fn out_dir(name: &str) -> PathBuf {
@@ -35,39 +29,17 @@ fn out_dir(name: &str) -> PathBuf {
 }
 
 fn node(dir: &Path, script: &str) -> String {
-    let o = Command::new("node")
-        .current_dir(dir)
-        .arg("--input-type=module")
-        .arg("-e")
-        .arg(script)
-        .output()
-        .expect("node");
-    assert!(
-        o.status.success(),
-        "node failed:\n{}",
-        String::from_utf8_lossy(&o.stderr)
-    );
+    let o = Command::new("node").current_dir(dir).arg("--input-type=module").arg("-e").arg(script).output().expect("node");
+    assert!(o.status.success(), "node failed:\n{}", String::from_utf8_lossy(&o.stderr));
     String::from_utf8(o.stdout).unwrap()
 }
 
 fn build(name: &str) -> PathBuf {
     let d = out_dir(name);
     let o = zsc(&root().join(format!("examples/{name}.zsc")), &d, &[]);
-    assert!(
-        o.status.success(),
-        "zsc failed:\n{}",
-        String::from_utf8_lossy(&o.stderr)
-    );
-    let c = Command::new("node")
-        .arg("--check")
-        .arg(d.join(format!("{name}.js")))
-        .output()
-        .unwrap();
-    assert!(
-        c.status.success(),
-        "the output is not valid JS:\n{}",
-        String::from_utf8_lossy(&c.stderr)
-    );
+    assert!(o.status.success(), "zsc failed:\n{}", String::from_utf8_lossy(&o.stderr));
+    let c = Command::new("node").arg("--check").arg(d.join(format!("{name}.js"))).output().unwrap();
+    assert!(c.status.success(), "the output is not valid JS:\n{}", String::from_utf8_lossy(&c.stderr));
     d
 }
 
@@ -92,20 +64,13 @@ fn basics() {
     assert!(dts.contains("export declare function sum$i64(xs: readonly bigint[]): bigint;"));
     assert!(dts.contains("export declare function sum$i32(xs: readonly i32[]): i32;"));
     // (the brands are declared once, in the shared runtime, and re-exported by the module)
-    assert!(
-        dts.contains("import { i32, f64 } from \"./zsc-runtime.js\";")
-            || dts.contains("from \"./zsc-runtime.js\";"),
-        "{dts}"
-    );
+    assert!(dts.contains("import { i32, f64 } from \"./zsc-runtime.js\";") || dts.contains("from \"./zsc-runtime.js\";"), "{dts}");
     let rt = std::fs::read_to_string(d.join("zsc-runtime.d.ts")).unwrap();
     assert!(rt.contains("export type i32 = number & { readonly __zsc_num: \"i32\" };"));
     let js = std::fs::read_to_string(d.join("basics.js")).unwrap();
     assert!(!js.contains("class "), "the output uses no classes");
     // the brands' constructors check at the boundary
-    let out = node(
-        &d,
-        "const m = await import('./basics.js'); console.log(m.i32(3)); try { m.i32(1.5) } catch (e) { console.log(e.message) }",
-    );
+    let out = node(&d, "const m = await import('./basics.js'); console.log(m.i32(3)); try { m.i32(1.5) } catch (e) { console.log(e.message) }");
     assert_eq!(out, "3\nnot a 32-bit signed integer: 1.5\n");
 }
 
@@ -120,14 +85,8 @@ fn effects() {
     );
     // State and Console have only tail-resumptive handlers: plain calls. Fail's handler does not resume: a generator
     let js = std::fs::read_to_string(d.join("effects.js")).unwrap();
-    assert!(
-        js.contains("$perform(\"Get\")") && js.contains("$handleD("),
-        "{js}"
-    );
-    assert!(
-        js.contains("function* safe_div") && !js.contains("function* counter"),
-        "{js}"
-    );
+    assert!(js.contains("$perform(\"Get\")") && js.contains("$handleD("), "{js}");
+    assert!(js.contains("function* safe_div") && !js.contains("function* counter"), "{js}");
 }
 
 #[test]
@@ -164,20 +123,11 @@ fn errors() {
     for f in std::fs::read_dir(&dir).unwrap() {
         let f = f.unwrap().path();
         let src = std::fs::read_to_string(&f).unwrap();
-        let want = src
-            .lines()
-            .next()
-            .unwrap()
-            .strip_prefix("// expect: ")
-            .expect("first line: // expect: <message>");
+        let want = src.lines().next().unwrap().strip_prefix("// expect: ").expect("first line: // expect: <message>");
         let o = zsc(&f, &root().join("target/test-out/errors"), &[]);
         let err = String::from_utf8_lossy(&o.stderr);
         assert!(!o.status.success(), "{} compiled", f.display());
-        assert!(
-            err.contains(want),
-            "{}: expected `{want}` in:\n{err}",
-            f.display()
-        );
+        assert!(err.contains(want), "{}: expected `{want}` in:\n{err}", f.display());
         n += 1;
     }
     assert!(n >= 10);
@@ -195,36 +145,17 @@ fn dts_typechecks() {
     let d = out_dir("ts");
     for name in ["basics", "app", "ml"] {
         let o = zsc(&root().join(format!("examples/{name}.zsc")), &d, &[]);
-        assert!(
-            o.status.success(),
-            "zsc failed:\n{}",
-            String::from_utf8_lossy(&o.stderr)
-        );
+        assert!(o.status.success(), "zsc failed:\n{}", String::from_utf8_lossy(&o.stderr));
     }
     std::fs::copy(root().join("tests/consumer.ts"), d.join("consumer.ts")).unwrap();
     // (zsc's output is ES modules)
     std::fs::write(d.join("package.json"), "{ \"type\": \"module\" }\n").unwrap();
     let o = Command::new(&tsc)
         .current_dir(&d)
-        .args([
-            "--strict",
-            "--noEmit",
-            "--target",
-            "es2022",
-            "--module",
-            "nodenext",
-            "--moduleResolution",
-            "nodenext",
-            "consumer.ts",
-        ])
+        .args(["--strict", "--noEmit", "--target", "es2022", "--module", "nodenext", "--moduleResolution", "nodenext", "consumer.ts"])
         .output()
         .unwrap();
-    assert!(
-        o.status.success(),
-        "tsc:\n{}{}",
-        String::from_utf8_lossy(&o.stdout),
-        String::from_utf8_lossy(&o.stderr)
-    );
+    assert!(o.status.success(), "tsc:\n{}{}", String::from_utf8_lossy(&o.stdout), String::from_utf8_lossy(&o.stderr));
 }
 
 /// examples/numeric.zsc's `@wasm fn`s give the same results lowered to Rust and run as wasm, and run as JS
@@ -236,17 +167,9 @@ fn numeric_same_in_js_and_wasm() {
     for (name, flags) in [("numeric-wasm", &[][..]), ("numeric-js", &["--all-js"][..])] {
         let d = out_dir(name);
         let o = zsc(&src, &d, flags);
-        assert!(
-            o.status.success(),
-            "zsc failed:\n{}",
-            String::from_utf8_lossy(&o.stderr)
-        );
+        assert!(o.status.success(), "zsc failed:\n{}", String::from_utf8_lossy(&o.stderr));
         assert_eq!(d.join("numeric.wasm").exists(), flags.is_empty());
-        let r = Command::new("node")
-            .arg(root().join("tests/numeric_driver.mjs"))
-            .arg(d.join("numeric.js"))
-            .output()
-            .unwrap();
+        let r = Command::new("node").arg(root().join("tests/numeric_driver.mjs")).arg(d.join("numeric.js")).output().unwrap();
         assert!(r.status.success(), "{}", String::from_utf8_lossy(&r.stderr));
         outs.push(String::from_utf8(r.stdout).unwrap());
     }
@@ -268,22 +191,10 @@ fn shapes_same_in_js_and_wasm() {
     for (name, flags) in [("shapes-wasm", &[][..]), ("shapes-js", &["--all-js"][..])] {
         let d = out_dir(name);
         let o = zsc(&src, &d, flags);
-        assert!(
-            o.status.success(),
-            "zsc failed:\n{}",
-            String::from_utf8_lossy(&o.stderr)
-        );
-        let c = Command::new("node")
-            .arg("--check")
-            .arg(d.join("shapes.js"))
-            .output()
-            .unwrap();
+        assert!(o.status.success(), "zsc failed:\n{}", String::from_utf8_lossy(&o.stderr));
+        let c = Command::new("node").arg("--check").arg(d.join("shapes.js")).output().unwrap();
         assert!(c.status.success(), "{}", String::from_utf8_lossy(&c.stderr));
-        let r = Command::new("node")
-            .arg(root().join("tests/shapes_driver.mjs"))
-            .arg(d.join("shapes.js"))
-            .output()
-            .unwrap();
+        let r = Command::new("node").arg(root().join("tests/shapes_driver.mjs")).arg(d.join("shapes.js")).output().unwrap();
         assert!(r.status.success(), "{}", String::from_utf8_lossy(&r.stderr));
         outs.push(String::from_utf8(r.stdout).unwrap());
     }
@@ -307,23 +218,11 @@ fn owned_same_in_js_and_wasm() {
     let run = |src: &str, stem: &str, call: &str| -> (String, String) {
         let mut outs = vec![];
         let mut rust = String::new();
-        for (name, flags) in [
-            (format!("{stem}-wasm"), &[][..]),
-            (format!("{stem}-js"), &["--all-js"][..]),
-        ] {
+        for (name, flags) in [(format!("{stem}-wasm"), &[][..]), (format!("{stem}-js"), &["--all-js"][..])] {
             let d = out_dir(&name);
             let o = zsc(&root().join(src), &d, flags);
-            assert!(
-                o.status.success(),
-                "zsc failed:\n{}",
-                String::from_utf8_lossy(&o.stderr)
-            );
-            outs.push(node(
-                &d,
-                &format!(
-                    "const m = await import('./{stem}.js'); console.log(JSON.stringify({call}))"
-                ),
-            ));
+            assert!(o.status.success(), "zsc failed:\n{}", String::from_utf8_lossy(&o.stderr));
+            outs.push(node(&d, &format!("const m = await import('./{stem}.js'); console.log(JSON.stringify({call}))")));
             if flags.is_empty() {
                 rust = std::fs::read_to_string(d.join(format!("{stem}.wasm.rs"))).unwrap();
             }
@@ -331,11 +230,7 @@ fn owned_same_in_js_and_wasm() {
         assert_eq!(outs[0], outs[1], "{src}: wasm and JS differ");
         (outs.remove(0), rust)
     };
-    let (out, rs) = run(
-        "examples/owned.zsc",
-        "owned",
-        "[m.summary(6), m.ramp_sum(1000), m.appended([1, 2], 3), m.longer([1], [2, 3]), m.longer([4, 5], [6])]",
-    );
+    let (out, rs) = run("examples/owned.zsc", "owned", "[m.summary(6), m.ramp_sum(1000), m.appended([1, 2], 3), m.longer([1], [2, 3]), m.longer([4, 5], [6])]");
     assert_eq!(out, "[[346,90,30,1,20],499500,[1,2,3],[2,3],[4,5]]\n");
     // the inferred signatures: read only → borrowed; returned → borrowed through, with a lifetime; consumed → owned
     for sig in [
@@ -350,90 +245,44 @@ fn owned_same_in_js_and_wasm() {
         assert!(rs.contains(sig), "missing `{sig}` in:\n{rs}");
     }
     // a record that holds an array is not Copy; one of scalars still is
-    assert!(
-        rs.contains("#[derive(Clone, PartialEq)]\nstruct ZsPoly"),
-        "{rs}"
-    );
+    assert!(rs.contains("#[derive(Clone, PartialEq)]\nstruct ZsPoly"), "{rs}");
     // the push in the loop reuses the array (no copy of it), and the elements of a dead array are taken
     let ramp = &rs[rs.find("fn zs_ramp(").unwrap()..];
     let ramp = &ramp[..ramp.find("\n}\n").unwrap()];
-    assert!(
-        ramp.contains("let mut __zs_v = acc;") && !ramp.contains("to_vec"),
-        "{ramp}"
-    );
+    assert!(ramp.contains("let mut __zs_v = acc;") && !ramp.contains("to_vec"), "{ramp}");
     assert!(rs.contains("(zs_polys(n)).into_iter().map(|p|"), "{rs}");
     // a borrow of an owned local the rest of the block keeps: no copy
     assert!(rs.contains("let firsts = zs_first_pts(&ps[..]);"), "{rs}");
     // matched by reference through the borrowed parameter
-    assert!(
-        rs.contains("match *s {\nZsShape::Polygon(ref p, n)"),
-        "{rs}"
-    );
+    assert!(rs.contains("match *s {\nZsShape::Polygon(ref p, n)"), "{rs}");
     // the glue still passes slices and takes an owned result: adapters in front of the inferred signatures
     // (named in the generated `__zs` namespace: no source function's Rust name can be it)
     assert!(rs.contains("fn __zs_js_zs_appended(xs: &[f64], x: f64) -> Vec<f64> {\n    zs_appended(xs.to_vec(), x)\n}"), "{rs}");
     assert!(rs.contains("zs_longer(a, b).to_vec()"), "{rs}");
 
-    let (out, rs) = run(
-        "tests/owned_cases.zsc",
-        "owned_cases",
-        "[m.cases(4), m.more(4), m.grow([5]), m.borrows(4)]",
-    );
-    assert_eq!(
-        out,
-        "[[66.5,24,21.5,41.5,36,18.5,38,36],[65,10,5,4,9,6,4,13,6,2,6],[5,1],[12.5,7,12]]\n"
-    );
+    let (out, rs) = run("tests/owned_cases.zsc", "owned_cases", "[m.cases(4), m.more(4), m.grow([5]), m.borrows(4)]");
+    assert_eq!(out, "[[66.5,24,21.5,41.5,36,18.5,38,36],[65,10,5,4,9,6,4,13,6,2,6],[5,1],[12.5,7,12]]\n");
     // a borrow of an owned local kept by a `let`: the local is frozen (copied, not moved, while the borrow lives);
     // assigned later in the block, or leaving it, the borrow is copied instead
-    assert!(
-        rs.contains("let f = zs_id(&ys[..]);\nlet z = zs_keep(ys.to_vec());"),
-        "{rs}"
-    );
-    assert!(
-        rs.contains("let f = zs_id(&ys[..]).to_vec();\nys = vec![1.0f64];"),
-        "{rs}"
-    );
-    assert!(
-        rs.contains("let t = (zs_mk(n)).pts;\nzs_id(&t[..]).to_vec()"),
-        "{rs}"
-    );
+    assert!(rs.contains("let f = zs_id(&ys[..]);\nlet z = zs_keep(ys.to_vec());"), "{rs}");
+    assert!(rs.contains("let f = zs_id(&ys[..]).to_vec();\nys = vec![1.0f64];"), "{rs}");
+    assert!(rs.contains("let t = (zs_mk(n)).pts;\nzs_id(&t[..]).to_vec()"), "{rs}");
     // a result that borrows only its first parameter: a temporary second argument needs no copy
-    assert!(
-        rs.contains("fn zs_wrap<'a>(a: &'a [f64]) -> &'a [f64]"),
-        "{rs}"
-    );
-    assert!(
-        rs.contains("fn zs_first<'a>(a: &'a [f64], b: &[f64]) -> &'a [f64]"),
-        "{rs}"
-    );
+    assert!(rs.contains("fn zs_wrap<'a>(a: &'a [f64]) -> &'a [f64]"), "{rs}");
+    assert!(rs.contains("fn zs_first<'a>(a: &'a [f64], b: &[f64]) -> &'a [f64]"), "{rs}");
     // a later argument assigns what an earlier one reads: the earlier one is taken as a value first
     assert!(rs.contains("zs_pair(&({ xs })[..], &({"), "{rs}");
     // the iterable is reassigned in the body: a dead one is taken, a borrowed one through a call is copied
-    assert!(
-        rs.contains("for x in xs.into_iter() {\nxs = vec![x];"),
-        "{rs}"
-    );
-    assert!(
-        rs.contains("for x in (zs_id(&xs[..])).to_vec().into_iter() {"),
-        "{rs}"
-    );
+    assert!(rs.contains("for x in xs.into_iter() {\nxs = vec![x];"), "{rs}");
+    assert!(rs.contains("for x in (zs_id(&xs[..])).to_vec().into_iter() {"), "{rs}");
     // an element matched while its array is replaced in the arm: copied first (it cannot be moved out)
     assert!(rs.contains("match xs[(0i32) as usize].to_vec() {"), "{rs}");
     // `&&`'s right operand may not run: the push on its left copies
-    assert!(
-        rs.contains("({ let mut __zs_v = xs.to_vec(); __zs_v.push(2.0f64); __zs_v })"),
-        "{rs}"
-    );
+    assert!(rs.contains("({ let mut __zs_v = xs.to_vec(); __zs_v.push(2.0f64); __zs_v })"), "{rs}");
     // a local borrowed by one argument and consumed by the other is copied for the consumer only
-    assert!(
-        rs.contains("zs_pair(&xs[..], &(zs_keep(xs.to_vec()))[..])"),
-        "{rs}"
-    );
+    assert!(rs.contains("zs_pair(&xs[..], &(zs_keep(xs.to_vec()))[..])"), "{rs}");
     // iterated and reassigned in the loop: the loop iterates a copy, and the push inside still reuses the array
-    assert!(
-        rs.contains("for x in xs.to_vec().into_iter() {\nxs = { let mut __zs_v = xs;"),
-        "{rs}"
-    );
+    assert!(rs.contains("for x in xs.to_vec().into_iter() {\nxs = { let mut __zs_v = xs;"), "{rs}");
 }
 
 /// examples/text.zsc: strings and `==` by content in @wasm. Lengths and order are JS's (UTF-16 code units: `"😀"` is
@@ -446,34 +295,18 @@ fn text_same_in_js_and_wasm() {
     for (name, flags) in [("text-wasm", &[][..]), ("text-js", &["--all-js"][..])] {
         let d = out_dir(name);
         let o = zsc(&root().join("examples/text.zsc"), &d, flags);
-        assert!(
-            o.status.success(),
-            "zsc failed:\n{}",
-            String::from_utf8_lossy(&o.stderr)
-        );
+        assert!(o.status.success(), "zsc failed:\n{}", String::from_utf8_lossy(&o.stderr));
         outs.push(node(&d, "const m = await import('./text.js'); console.log(JSON.stringify([m.text(4), m.shout('  hé '), m.conflict_report(5)]))"));
         if flags.is_empty() {
             rs = std::fs::read_to_string(d.join("text.wasm.rs")).unwrap();
         }
     }
     assert_eq!(outs[0], outs[1], "wasm and JS differ");
-    assert_eq!(
-        outs[0],
-        "[\"Hello, bo! ANA,BO,😀X abc 3 110 2 TFTFTT 0;1;2;3;\",\"HÉ!\",\"FTxya,b5\"]\n"
-    );
+    assert_eq!(outs[0], "[\"Hello, bo! ANA,BO,😀X abc 3 110 2 TFTFTT 0;1;2;3;\",\"HÉ!\",\"FTxya,b5\"]\n");
     // borrowed strings, a borrowed result with a lifetime, `==` through borrows, and a string grown in place
-    assert!(
-        rs.contains("fn zs_longest<'a>(a: &'a str, b: &'a str) -> &'a str"),
-        "{rs}"
-    );
-    assert!(
-        rs.contains("fn zs_same(p: &ZsPerson, q: &ZsPerson) -> bool {\n{\n(p == q)"),
-        "{rs}"
-    );
-    assert!(
-        rs.contains("s = { let mut __zs_s = { let mut __zs_s = s;"),
-        "{rs}"
-    );
+    assert!(rs.contains("fn zs_longest<'a>(a: &'a str, b: &'a str) -> &'a str"), "{rs}");
+    assert!(rs.contains("fn zs_same(p: &ZsPerson, q: &ZsPerson) -> bool {\n{\n(p == q)"), "{rs}");
+    assert!(rs.contains("s = { let mut __zs_s = { let mut __zs_s = s;"), "{rs}");
 }
 
 /// tests/eq_chain.zsc: `==` on a type with exponentially many paths to the same types checks each type once
@@ -484,11 +317,7 @@ fn eq_check_is_linear() {
         let d = out_dir(name);
         let t = std::time::Instant::now();
         let o = zsc(&root().join(format!("tests/{name}.zsc")), &d, &[]);
-        assert!(
-            o.status.success(),
-            "{name}: {}",
-            String::from_utf8_lossy(&o.stderr)
-        );
+        assert!(o.status.success(), "{name}: {}", String::from_utf8_lossy(&o.stderr));
         assert!(t.elapsed().as_secs() < 5, "{name} took {:?}", t.elapsed());
     }
 }
@@ -500,27 +329,16 @@ fn js_push_in_place() {
     let d = out_dir("js_inplace");
     let o = zsc(&root().join("tests/js_inplace.zsc"), &d, &[]);
     assert!(o.status.success(), "{}", String::from_utf8_lossy(&o.stderr));
-    let out = node(
-        &d,
-        "const m = await import('./js_inplace.js'); const xs = [1]; const r = m.from_param(xs); console.log(JSON.stringify([m.ramp(5), m.aliased(), [r, xs.length], m.iterate_and_grow(), m.stored(), m.other_local(), m.concat_and_short(), m.compare_with_push(), m.push_arg_assigns(), m.jsx_alias(), m.computed_callee(), m.jsx_key().key, m.handler_twice(), m.handler_alternatives()]))",
-    );
+    let out = node(&d, "const m = await import('./js_inplace.js'); const xs = [1]; const r = m.from_param(xs); console.log(JSON.stringify([m.ramp(5), m.aliased(), [r, xs.length], m.iterate_and_grow(), m.stored(), m.other_local(), m.concat_and_short(), m.compare_with_push(), m.push_arg_assigns(), m.jsx_alias(), m.computed_callee(), m.jsx_key().key, m.handler_twice(), m.handler_alternatives()]))");
     assert_eq!(out, "[5,12,[2,1],4,114,13,31,false,2,1,1,1,4,1]\n");
     // == by content compares the declared fields only, so it is symmetric: a value from TS may carry more
-    let out = node(
-        &d,
-        "const m = await import('./js_inplace.js'); const a = { x: 1, name: 'a' }, b = { x: 1, name: 'a', extra: 2 }; console.log(JSON.stringify([m.same_p(a, b), m.same_p(b, a), m.same_p(a, { x: 2, name: 'a' })]))",
-    );
+    let out = node(&d, "const m = await import('./js_inplace.js'); const a = { x: 1, name: 'a' }, b = { x: 1, name: 'a', extra: 2 }; console.log(JSON.stringify([m.same_p(a, b), m.same_p(b, a), m.same_p(a, { x: 2, name: 'a' })]))");
     assert_eq!(out, "[true,true,false]\n");
     let js = std::fs::read_to_string(d.join("js_inplace.js")).unwrap();
     // in place exactly where no one else can see the array: the loop's accumulator, a local made by a copying
     // push, and a concat onto a fresh literal
     assert_eq!(js.matches(".push(").count(), 2, "{js}");
-    assert!(
-        js.contains("acc = (acc.push(i), acc);")
-            && js.contains("b = (b.push(3), b);")
-            && js.contains("a = $append(a, [2, 3]);"),
-        "{js}"
-    );
+    assert!(js.contains("acc = (acc.push(i), acc);") && js.contains("b = (b.push(3), b);") && js.contains("a = $append(a, [2, 3]);"), "{js}");
 }
 
 /// examples/kernels.zsc: the `@simd` kernels (v128, a module zsc writes), the same functions through zustc
@@ -530,24 +348,12 @@ fn js_push_in_place() {
 fn kernels_simd_nosimd_js_agree() {
     let src = root().join("examples/kernels.zsc");
     let mut outs = vec![];
-    for (name, flags) in [
-        ("kernels-simd", &[][..]),
-        ("kernels-nosimd", &["--no-simd"][..]),
-        ("kernels-js", &["--all-js"][..]),
-    ] {
+    for (name, flags) in [("kernels-simd", &[][..]), ("kernels-nosimd", &["--no-simd"][..]), ("kernels-js", &["--all-js"][..])] {
         let d = out_dir(name);
         let o = zsc(&src, &d, flags);
-        assert!(
-            o.status.success(),
-            "zsc failed:\n{}",
-            String::from_utf8_lossy(&o.stderr)
-        );
+        assert!(o.status.success(), "zsc failed:\n{}", String::from_utf8_lossy(&o.stderr));
         assert_eq!(d.join("kernels.simd.wasm").exists(), flags.is_empty());
-        let r = Command::new("node")
-            .arg(root().join("tests/kernels_driver.mjs"))
-            .arg(d.join("kernels.js"))
-            .output()
-            .unwrap();
+        let r = Command::new("node").arg(root().join("tests/kernels_driver.mjs")).arg(d.join("kernels.js")).output().unwrap();
         assert!(r.status.success(), "{}", String::from_utf8_lossy(&r.stderr));
         outs.push(String::from_utf8(r.stdout).unwrap());
     }
@@ -560,26 +366,11 @@ fn kernels_simd_nosimd_js_agree() {
 /// The guideline: i64 arithmetic in the JS layer is a warning (BigInt); in a @wasm fn it is not
 #[test]
 fn i64_in_js_warns() {
-    let o = zsc(
-        &root().join("examples/basics.zsc"),
-        &out_dir("warn-basics"),
-        &[],
-    );
+    let o = zsc(&root().join("examples/basics.zsc"), &out_dir("warn-basics"), &[]);
     assert!(o.status.success());
-    assert!(
-        String::from_utf8_lossy(&o.stderr)
-            .contains("warning: i64 arithmetic in the JS layer runs on BigInt")
-    );
-    let o = zsc(
-        &root().join("examples/numeric.zsc"),
-        &out_dir("warn-numeric"),
-        &[],
-    );
-    assert!(
-        !String::from_utf8_lossy(&o.stderr).contains("warning"),
-        "{}",
-        String::from_utf8_lossy(&o.stderr)
-    );
+    assert!(String::from_utf8_lossy(&o.stderr).contains("warning: i64 arithmetic in the JS layer runs on BigInt"));
+    let o = zsc(&root().join("examples/numeric.zsc"), &out_dir("warn-numeric"), &[]);
+    assert!(!String::from_utf8_lossy(&o.stderr).contains("warning"), "{}", String::from_utf8_lossy(&o.stderr));
 }
 
 /// examples/ml.zsc: f32 kernels on F32Array (f32x4), @simd(relaxed) (fused multiply-add, relaxed max) and a
@@ -588,23 +379,11 @@ fn i64_in_js_warns() {
 fn ml_kernels_agree() {
     let src = root().join("examples/ml.zsc");
     let mut outs = vec![];
-    for (name, flags) in [
-        ("ml-simd", &[][..]),
-        ("ml-nosimd", &["--no-simd"][..]),
-        ("ml-js", &["--all-js"][..]),
-    ] {
+    for (name, flags) in [("ml-simd", &[][..]), ("ml-nosimd", &["--no-simd"][..]), ("ml-js", &["--all-js"][..])] {
         let d = out_dir(name);
         let o = zsc(&src, &d, flags);
-        assert!(
-            o.status.success(),
-            "zsc failed:\n{}",
-            String::from_utf8_lossy(&o.stderr)
-        );
-        let r = Command::new("node")
-            .arg(root().join("tests/ml_driver.mjs"))
-            .arg(d.join("ml.js"))
-            .output()
-            .unwrap();
+        assert!(o.status.success(), "zsc failed:\n{}", String::from_utf8_lossy(&o.stderr));
+        let r = Command::new("node").arg(root().join("tests/ml_driver.mjs")).arg(d.join("ml.js")).output().unwrap();
         assert!(r.status.success(), "{}", String::from_utf8_lossy(&r.stderr));
         outs.push(String::from_utf8(r.stdout).unwrap());
     }
@@ -633,15 +412,9 @@ console.log(m.zs_inj(5, 2), m.kw_inj(7, 3), JSON.stringify(m.kw_rec({ async_: 1,
 console.log(m.many_ops(100000), m.own_ops(), m.nested_k(), m.proto_op());
 "#,
     );
-    assert_eq!(
-        out,
-        "4 9\n12 1 3 9\n2,3 1,2,3\n7 6 1,2 5\n3 4 {\"async_\":2,\"move\":1}\n99999 42 101 7\n"
-    );
+    assert_eq!(out, "4 9\n12 1 3 9\n2,3 1,2,3\n7 6 1,2 5\n3 4 {\"async_\":2,\"move\":1}\n99999 42 101 7\n");
     let dts = std::fs::read_to_string(d.join("regress.d.ts")).unwrap();
-    assert!(
-        dts.contains("import type { ReactElement as $ReactElement } from \"react\";"),
-        "{dts}"
-    );
+    assert!(dts.contains("import type { ReactElement as $ReactElement } from \"react\";"), "{dts}");
     assert!(dts.contains("export interface ReactElement {"), "{dts}");
 }
 
@@ -651,17 +424,9 @@ console.log(m.many_ops(100000), m.own_ops(), m.nested_k(), m.proto_op());
 fn no_jsx_no_react_import() {
     let d = out_dir("no_jsx");
     let src = d.join("nojsx.zsc");
-    std::fs::write(
-        &src,
-        "pub fn f<T: Num, ReactElement>(x: T) -> T { x }\npub fn g(x: i32) -> i32 { f(x) }\n",
-    )
-    .unwrap();
+    std::fs::write(&src, "pub fn f<T: Num, ReactElement>(x: T) -> T { x }\npub fn g(x: i32) -> i32 { f(x) }\n").unwrap();
     let o = zsc(&src, &d, &[]);
-    assert!(
-        o.status.success(),
-        "zsc failed:\n{}",
-        String::from_utf8_lossy(&o.stderr)
-    );
+    assert!(o.status.success(), "zsc failed:\n{}", String::from_utf8_lossy(&o.stderr));
     let dts = std::fs::read_to_string(d.join("nojsx.d.ts")).unwrap();
     assert!(!dts.contains("import type"), "{dts}");
 }
@@ -678,57 +443,25 @@ fn externs_match_ts() {
     }
     let d = out_dir("externs");
     let o = zsc(&root().join("examples/app.zsc"), &d, &["--check-externs"]);
-    assert!(
-        o.status.success(),
-        "zsc failed:\n{}",
-        String::from_utf8_lossy(&o.stderr)
-    );
-    assert!(
-        String::from_utf8_lossy(&o.stderr)
-            .contains("externs match their TS declarations (1 checked with tsrs)")
-    );
-    let o = zsc(
-        &root().join("tests/externs/bad.zsc"),
-        &d,
-        &["--check-externs"],
-    );
+    assert!(o.status.success(), "zsc failed:\n{}", String::from_utf8_lossy(&o.stderr));
+    assert!(String::from_utf8_lossy(&o.stderr).contains("externs match their TS declarations (1 checked with tsrs)"));
+    let o = zsc(&root().join("tests/externs/bad.zsc"), &d, &["--check-externs"]);
     let err = String::from_utf8_lossy(&o.stderr);
     assert!(!o.status.success(), "{err}");
-    assert!(
-        err.contains("the TS declaration of `useState` does not fit this signature"),
-        "{err}"
-    );
+    assert!(err.contains("the TS declaration of `useState` does not fit this signature"), "{err}");
     assert!(err.contains("bad.zsc:2:1"), "{err}");
     assert!(!err.contains("`log`"), "console.log fits: {err}");
     // a record type (the TS side returns plain numbers) and a dotted extern (`api.read`) both check
     std::fs::write(d.join("lib.d.ts"), "export declare function point(): { x: number; y: number };\nexport declare const api: { read(): string };\n").unwrap();
-    std::fs::write(
-        d.join("lib.js"),
-        "export const point = () => ({ x: 1, y: 2 });\nexport const api = { read: () => \"r\" };\n",
-    )
-    .unwrap();
-    let o = zsc(
-        &root().join("tests/externs/named.zsc"),
-        &d,
-        &["--check-externs"],
-    );
+    std::fs::write(d.join("lib.js"), "export const point = () => ({ x: 1, y: 2 });\nexport const api = { read: () => \"r\" };\n").unwrap();
+    let o = zsc(&root().join("tests/externs/named.zsc"), &d, &["--check-externs"]);
     let err = String::from_utf8_lossy(&o.stderr);
-    assert!(
-        o.status.success() && err.contains("(2 checked with tsrs)"),
-        "{err}"
-    );
+    assert!(o.status.success() && err.contains("(2 checked with tsrs)"), "{err}");
     // a record's Jsx field, reached only by expanding the record: ReactElement is still imported
     std::fs::write(d.join("lib.d.ts"), "import type { ReactElement } from \"react\";\nexport declare function view(): { title: string; body: ReactElement };\n").unwrap();
-    let o = zsc(
-        &root().join("tests/externs/jsx.zsc"),
-        &d,
-        &["--check-externs"],
-    );
+    let o = zsc(&root().join("tests/externs/jsx.zsc"), &d, &["--check-externs"]);
     let err = String::from_utf8_lossy(&o.stderr);
-    assert!(
-        o.status.success() && err.contains("(1 checked with tsrs)"),
-        "{err}"
-    );
+    assert!(o.status.success() && err.contains("(1 checked with tsrs)"), "{err}");
 }
 
 #[test]
@@ -740,36 +473,16 @@ fn runtime_name_collisions() {
     let src = d.join("zsc-runtime.zsc");
     std::fs::write(&src, "pub fn one() -> i32 { 1 }\n").unwrap();
     let o = zsc(&src, &d, &[]);
-    assert!(
-        !o.status.success(),
-        "a module named like the runtime is refused in shared mode"
-    );
-    assert!(
-        zsc(&root().join("examples/basics.zsc"), &d, &[])
-            .status
-            .success()
-    );
+    assert!(!o.status.success(), "a module named like the runtime is refused in shared mode");
+    assert!(zsc(&root().join("examples/basics.zsc"), &d, &[]).status.success());
     let rt = std::fs::read_to_string(d.join("zsc-runtime.js")).unwrap();
     let o = zsc(&src, &d, &["--inline-runtime"]);
-    assert!(
-        !o.status.success(),
-        "an inline `zsc-runtime` must not overwrite the shared runtime"
-    );
-    assert_eq!(
-        std::fs::read_to_string(d.join("zsc-runtime.js")).unwrap(),
-        rt
-    );
+    assert!(!o.status.success(), "an inline `zsc-runtime` must not overwrite the shared runtime");
+    assert_eq!(std::fs::read_to_string(d.join("zsc-runtime.js")).unwrap(), rt);
     // in its own directory, the inline build works; a shared build into that directory is then refused
     let e = d.join("inline");
     assert!(zsc(&src, &e, &["--inline-runtime"]).status.success());
     let o = zsc(&root().join("examples/basics.zsc"), &e, &[]);
-    assert!(
-        !o.status.success(),
-        "the shared runtime must not overwrite a module named like it"
-    );
-    assert!(
-        std::fs::read_to_string(e.join("zsc-runtime.js"))
-            .unwrap()
-            .contains("function one")
-    );
+    assert!(!o.status.success(), "the shared runtime must not overwrite a module named like it");
+    assert!(std::fs::read_to_string(e.join("zsc-runtime.js")).unwrap().contains("function one"));
 }

@@ -49,10 +49,9 @@ use std::fmt::Write;
 use std::rc::Rc;
 
 const RUST_KW: &[&str] = &[
-    "as", "async", "await", "box", "break", "const", "continue", "crate", "dyn", "else", "enum",
-    "extern", "false", "fn", "for", "if", "impl", "in", "let", "loop", "macro", "match", "mod",
-    "move", "mut", "priv", "pub", "ref", "return", "self", "Self", "static", "struct", "super",
-    "trait", "true", "try", "type", "typeof", "union", "unsafe", "unsized", "use", "virtual",
+    "as", "async", "await", "box", "break", "const", "continue", "crate", "dyn", "else", "enum", "extern", "false", "fn", "for",
+    "if", "impl", "in", "let", "loop", "macro", "match", "mod", "move", "mut", "priv", "pub", "ref", "return", "self", "Self",
+    "static", "struct", "super", "trait", "true", "try", "type", "typeof", "union", "unsafe", "unsized", "use", "virtual",
     "where", "while", "yield",
 ];
 
@@ -82,10 +81,7 @@ fn subst_ty(t: &Ty, m: &HashMap<String, Ty>) -> Ty {
         Ty::Typed(a) => Ty::Typed(Box::new(subst_ty(a, m))),
         Ty::Tuple(ts) => Ty::Tuple(ts.iter().map(|t| subst_ty(t, m)).collect()),
         Ty::Named(n, a) => Ty::Named(n.clone(), a.iter().map(|t| subst_ty(t, m)).collect()),
-        Ty::Fn(a, r) => Ty::Fn(
-            a.iter().map(|t| subst_ty(t, m)).collect(),
-            Box::new(subst_ty(r, m)),
-        ),
+        Ty::Fn(a, r) => Ty::Fn(a.iter().map(|t| subst_ty(t, m)).collect(), Box::new(subst_ty(r, m))),
         o => o.clone(),
     }
 }
@@ -159,11 +155,7 @@ fn show(t: &Ty) -> String {
         Ty::Jsx => "Jsx".into(),
         Ty::Array(e) => format!("Array<{}>", show(e)),
         Ty::Tuple(ts) => format!("({})", ts.iter().map(show).collect::<Vec<_>>().join(", ")),
-        Ty::Fn(a, r) => format!(
-            "fn({}) -> {}",
-            a.iter().map(show).collect::<Vec<_>>().join(", "),
-            show(r)
-        ),
+        Ty::Fn(a, r) => format!("fn({}) -> {}", a.iter().map(show).collect::<Vec<_>>().join(", "), show(r)),
         Ty::Named(n, a) if a.is_empty() => n.clone(),
         Ty::Named(n, a) => format!("{n}<{}>", a.iter().map(show).collect::<Vec<_>>().join(", ")),
         Ty::Param(p) => p.clone(),
@@ -174,12 +166,7 @@ fn show(t: &Ty) -> String {
 type LResult<X> = Result<X, (Pos, String)>;
 
 fn not_in_subset<X>(pos: Pos, what: &str) -> LResult<X> {
-    Err((
-        pos,
-        format!(
-            "{what} is not in the @wasm subset (numbers, bools, arrays, records and enums of them, let / let mut / if / match / loops, map / filter / fold)"
-        ),
-    ))
+    Err((pos, format!("{what} is not in the @wasm subset (numbers, bools, arrays, records and enums of them, let / let mut / if / match / loops, map / filter / fold)")))
 }
 
 /// Where the value of a lowered expression lives, for an expression whose type is not Copy (a Copy one is always
@@ -194,11 +181,7 @@ enum Form {
     /// reached through a borrow: a reference already (`is_ref`: `&[T]` / `&ZsX`), or a place behind one (`p.pts`
     /// where `p: &ZsP`). `roots`: the borrowed parameters it comes from (None: a local or a temporary, so it lives only
     /// as long as the statement); `param`: it is that parameter itself, whole
-    Brw {
-        is_ref: bool,
-        roots: Option<BTreeSet<String>>,
-        param: Option<String>,
-    },
+    Brw { is_ref: bool, roots: Option<BTreeSet<String>>, param: Option<String> },
 }
 
 /// What a local that is not Copy holds
@@ -206,10 +189,7 @@ enum Form {
 enum VarK {
     Owned,
     /// a reference (`&[T]` / `&ZsX`) to (a part of) `roots` (None: of a local); `param`: the parameter itself
-    Borrow {
-        roots: Option<BTreeSet<String>>,
-        param: bool,
-    },
+    Borrow { roots: Option<BTreeSet<String>>, param: bool },
 }
 
 /// The inferred signatures (see the module comment): for each instance (Rust name), which parameters are owned, and
@@ -265,18 +245,11 @@ fn rs_type(n: &str) -> String {
 /// Lowers the wanted `@wasm` instances (those the JS layer calls, and the public ones) and every instance they
 /// call. Returns the ones that need glue, and the Rust of the others.
 /// (`simd_as_wasm`: `@simd fn`s are lowered too: `zsc --no-simd`)
-pub fn lower(
-    items: &[Item],
-    info: &Info,
-    wanted: &[(String, Vec<Ty>)],
-    simd_as_wasm: bool,
-) -> Result<(Vec<WFn>, String), Vec<(Pos, String)>> {
+pub fn lower(items: &[Item], info: &Info, wanted: &[(String, Vec<Ty>)], simd_as_wasm: bool) -> Result<(Vec<WFn>, String), Vec<(Pos, String)>> {
     let fns: HashMap<&str, &Item> = items
         .iter()
         .filter_map(|it| match it {
-            Item::Fn {
-                name, wasm, simd, ..
-            } if *wasm || (*simd && simd_as_wasm) => Some((name.as_str(), it)),
+            Item::Fn { name, wasm, simd, .. } if *wasm || (*simd && simd_as_wasm) => Some((name.as_str(), it)),
             _ => None,
         })
         .collect();
@@ -316,18 +289,12 @@ impl Lower<'_> {
     /// (what it found while being lowered) or a callee's did. Each change makes a parameter or a result owned, or
     /// grows a result's region, and is never undone, so this ends; an instance is lowered at most (1 + the changes of
     /// itself and its callees) times, and fewer as the changes are batched (see `again`)
-    fn all(
-        &mut self,
-        wanted: &[(String, Vec<Ty>)],
-    ) -> Result<(Vec<WFn>, String), Vec<(Pos, String)>> {
+    fn all(&mut self, wanted: &[(String, Vec<Ty>)]) -> Result<(Vec<WFn>, String), Vec<(Pos, String)>> {
         for (n, t) in wanted {
             self.want(n, t.clone());
         }
         let mut order = vec![];
-        let mut results: HashMap<
-            String,
-            (String, Vec<Ty>, LResult<(String, Vec<(String, Ty)>, Ty)>),
-        > = HashMap::new();
+        let mut results: HashMap<String, (String, Vec<Ty>, LResult<(String, Vec<(String, Ty)>, Ty)>)> = HashMap::new();
         let mut callers: HashMap<String, HashSet<String>> = HashMap::new();
         // (instances never lowered come first; the ones to lower again wait until there are none, so a caller of
         // many callees that each change is lowered again once for all of them, not once for each)
@@ -370,22 +337,13 @@ impl Lower<'_> {
             match r {
                 Ok((text, args, ret)) => {
                     if wanted_names.contains(rs) {
-                        let Item::Fn { public, pos, .. } = self.fns[name.as_str()] else {
-                            unreachable!()
-                        };
+                        let Item::Fn { public, pos, .. } = self.fns[name.as_str()] else { unreachable!() };
                         match self.boundary(&args, &ret, *pos) {
                             Ok((wargs, wret)) => {
                                 // (the glue passes arrays as slices and takes an owned result: an instance whose
                                 // inferred signature differs gets an adapter)
                                 let (text, entry) = self.adapter(rs, text, &args, &ret)?;
-                                out.push(WFn {
-                                    js: inst_name(&name, &targs),
-                                    rs: entry,
-                                    args: wargs,
-                                    ret: wret,
-                                    text,
-                                    public: *public,
-                                })
+                                out.push(WFn { js: inst_name(&name, &targs), rs: entry, args: wargs, ret: wret, text, public: *public })
                             }
                             Err(e) => errors.push(e),
                         }
@@ -401,12 +359,7 @@ impl Lower<'_> {
         let mut written = HashSet::new();
         let mut defs = String::new();
         loop {
-            let todo: Vec<String> = self
-                .used
-                .iter()
-                .filter(|n| !written.contains(*n))
-                .cloned()
-                .collect();
+            let todo: Vec<String> = self.used.iter().filter(|n| !written.contains(*n)).cloned().collect();
             if todo.is_empty() {
                 break;
             }
@@ -421,11 +374,7 @@ impl Lower<'_> {
         for h in &self.helpers {
             // zs_max_f32 / zs_min_f64 ..
             let (op, t) = h.trim_start_matches("zs_").split_once('_').unwrap();
-            let (pick, zero) = if op == "max" {
-                ("a > b", "a.is_sign_positive()")
-            } else {
-                ("a < b", "a.is_sign_negative()")
-            };
+            let (pick, zero) = if op == "max" { ("a > b", "a.is_sign_positive()") } else { ("a < b", "a.is_sign_negative()") };
             let _ = write!(
                 defs,
                 "fn {h}(a: {t}, b: {t}) -> {t} {{\n    if a.is_nan() || b.is_nan() {{ {t}::NAN }} else if a == b {{ if {zero} {{ a }} else {{ b }} }} else if {pick} {{ a }} else {{ b }}\n}}\n\n"
@@ -437,38 +386,20 @@ impl Lower<'_> {
                 defs.push_str("\n\n");
             }
         }
-        if errors.is_empty() {
-            Ok((out, defs + &internal))
-        } else {
-            Err(errors)
-        }
+        if errors.is_empty() { Ok((out, defs + &internal)) } else { Err(errors) }
     }
 
     /// An instance's inferred signature (its owned parameters, whether its result is owned)
     fn sig_of(&self, name: &str, rs: &str) -> (usize, bool, Option<BTreeSet<usize>>) {
-        let k = (0..self.info.fns.get(name).map_or(0, |s| s.args.len()))
-            .filter(|i| self.modes.owned.contains(&(rs.to_string(), *i)))
-            .count();
-        (
-            k,
-            self.modes.owned_result.contains(rs),
-            self.modes.region.get(rs).cloned(),
-        )
+        let k = (0..self.info.fns.get(name).map_or(0, |s| s.args.len())).filter(|i| self.modes.owned.contains(&(rs.to_string(), *i))).count();
+        (k, self.modes.owned_result.contains(rs), self.modes.region.get(rs).cloned())
     }
 
     /// For an instance the glue calls: (its text, the name the glue calls). The glue passes an array as a slice and
     /// takes an owned result; if the inferred signature owns an array parameter or borrows the result, a small
     /// adapter in front converts
-    fn adapter(
-        &mut self,
-        rs: &str,
-        text: String,
-        args: &[(String, Ty)],
-        ret: &Ty,
-    ) -> Result<(String, String), Vec<(Pos, String)>> {
-        let owned: Vec<bool> = (0..args.len())
-            .map(|i| self.modes.owned.contains(&(rs.to_string(), i)))
-            .collect();
+    fn adapter(&mut self, rs: &str, text: String, args: &[(String, Ty)], ret: &Ty) -> Result<(String, String), Vec<(Pos, String)>> {
+        let owned: Vec<bool> = (0..args.len()).map(|i| self.modes.owned.contains(&(rs.to_string(), i))).collect();
         let ret_ref = !self.copy(ret) && !self.modes.owned_result.contains(rs);
         if !owned.iter().zip(args).any(|(o, (_, t))| *o && sliced(t)) && !ret_ref {
             return Ok((text, rs.to_string()));
@@ -477,16 +408,8 @@ impl Lower<'_> {
         let mut ps = vec![];
         let mut call = vec![];
         for ((n, t), o) in args.iter().zip(&owned) {
-            ps.push(format!(
-                "{}: {}",
-                local(n),
-                self.rty(t, pos, Some(None)).map_err(|e| vec![e])?
-            ));
-            call.push(if *o && sliced(t) {
-                self.clone_of(&local(n), t)
-            } else {
-                local(n)
-            });
+            ps.push(format!("{}: {}", local(n), self.rty(t, pos, Some(None)).map_err(|e| vec![e])?));
+            call.push(if *o && sliced(t) { self.clone_of(&local(n), t) } else { local(n) });
         }
         let rt = self.rty(ret, pos, None).map_err(|e| vec![e])?;
         let mut body = format!("{rs}({})", call.join(", "));
@@ -495,38 +418,19 @@ impl Lower<'_> {
         }
         // (named in the generated `__zs` namespace: a source function's Rust name is `zs_..`, so none can meet it)
         let entry = format!("__zs_js_{rs}");
-        Ok((
-            format!(
-                "{text}\n\nfn {entry}({}) -> {rt} {{\n    {body}\n}}",
-                ps.join(", ")
-            ),
-            entry,
-        ))
+        Ok((format!("{text}\n\nfn {entry}({}) -> {rt} {{\n    {body}\n}}", ps.join(", ")), entry))
     }
 
     /// The Rust definition of record or enum `n` (Copy, and passed by value like a number, when all its fields are)
     fn type_def(&mut self, n: &str) -> LResult<String> {
         let pos = self.type_pos.get(n).copied().unwrap_or_default();
         let generic = Ty::Named(n.to_string(), {
-            let ps = self
-                .info
-                .records
-                .get(n)
-                .map(|r| &r.params)
-                .unwrap_or_else(|| &self.info.enums[n].params);
+            let ps = self.info.records.get(n).map(|r| &r.params).unwrap_or_else(|| &self.info.enums[n].params);
             ps.iter().map(|p| Ty::Param(p.clone())).collect()
         });
-        let mut s = String::from(if own::is_copy(&generic, self.info) {
-            "#[derive(Clone, Copy, PartialEq)]\n"
-        } else {
-            "#[derive(Clone, PartialEq)]\n"
-        });
+        let mut s = String::from(if own::is_copy(&generic, self.info) { "#[derive(Clone, Copy, PartialEq)]\n" } else { "#[derive(Clone, PartialEq)]\n" });
         if let Some(r) = self.info.records.get(n) {
-            let g = if r.params.is_empty() {
-                String::new()
-            } else {
-                format!("<{}>", r.params.join(", "))
-            };
+            let g = if r.params.is_empty() { String::new() } else { format!("<{}>", r.params.join(", ")) };
             let _ = writeln!(s, "struct {}{g} {{", rs_type(n));
             for (f, t) in r.fields.clone() {
                 let _ = writeln!(s, "    {}: {},", local(&f), self.field_ty(&t, pos)?);
@@ -534,20 +438,13 @@ impl Lower<'_> {
             s.push_str("}\n\n");
         } else {
             let e = &self.info.enums[n];
-            let g = if e.params.is_empty() {
-                String::new()
-            } else {
-                format!("<{}>", e.params.join(", "))
-            };
+            let g = if e.params.is_empty() { String::new() } else { format!("<{}>", e.params.join(", ")) };
             let _ = writeln!(s, "enum {}{g} {{", rs_type(n));
             for (v, fs) in e.variants.clone() {
                 if fs.is_empty() {
                     let _ = writeln!(s, "    {v},");
                 } else {
-                    let ts = fs
-                        .iter()
-                        .map(|t| self.field_ty(t, pos))
-                        .collect::<LResult<Vec<_>>>()?;
+                    let ts = fs.iter().map(|t| self.field_ty(t, pos)).collect::<LResult<Vec<_>>>()?;
                     let _ = writeln!(s, "    {v}({}),", ts.join(", "));
                 }
             }
@@ -577,67 +474,28 @@ impl Lower<'_> {
             Ty::Named(n, targs) => {
                 let rt = self.rty(t, pos, None)?;
                 if let Some(r) = self.info.records.get(n) {
-                    let m: HashMap<String, Ty> = r
-                        .params
-                        .iter()
-                        .cloned()
-                        .zip(targs.iter().cloned())
-                        .collect();
-                    let fields: Vec<(String, Ty)> = r
-                        .fields
-                        .iter()
-                        .map(|(f, ft)| (f.clone(), subst_ty(ft, &m)))
-                        .collect();
-                    let fs = fields
-                        .iter()
-                        .map(|(f, ft)| Ok((f.clone(), self.vty(ft, pos)?)))
-                        .collect::<LResult<Vec<_>>>()?;
+                    let m: HashMap<String, Ty> = r.params.iter().cloned().zip(targs.iter().cloned()).collect();
+                    let fields: Vec<(String, Ty)> = r.fields.iter().map(|(f, ft)| (f.clone(), subst_ty(ft, &m))).collect();
+                    let fs = fields.iter().map(|(f, ft)| Ok((f.clone(), self.vty(ft, pos)?))).collect::<LResult<Vec<_>>>()?;
                     Ok(VTy::Record(rt, fs))
                 } else {
                     let e = &self.info.enums[n];
-                    let m: HashMap<String, Ty> = e
-                        .params
-                        .iter()
-                        .cloned()
-                        .zip(targs.iter().cloned())
-                        .collect();
+                    let m: HashMap<String, Ty> = e.params.iter().cloned().zip(targs.iter().cloned()).collect();
                     let string_enum = e.unit_only() && !e.is_effect();
-                    let vs: Vec<(String, Vec<Ty>)> = e
-                        .variants
-                        .iter()
-                        .map(|(v, fs)| (v.clone(), fs.iter().map(|t| subst_ty(t, &m)).collect()))
-                        .collect();
+                    let vs: Vec<(String, Vec<Ty>)> = e.variants.iter().map(|(v, fs)| (v.clone(), fs.iter().map(|t| subst_ty(t, &m)).collect())).collect();
                     let vs = vs
                         .iter()
-                        .map(|(v, fs)| {
-                            Ok((
-                                v.clone(),
-                                fs.iter()
-                                    .map(|t| self.vty(t, pos))
-                                    .collect::<LResult<Vec<_>>>()?,
-                            ))
-                        })
+                        .map(|(v, fs)| Ok((v.clone(), fs.iter().map(|t| self.vty(t, pos)).collect::<LResult<Vec<_>>>()?)))
                         .collect::<LResult<Vec<_>>>()?;
                     Ok(VTy::Enum(rt, string_enum, vs))
                 }
             }
-            _ => Err((
-                pos,
-                format!(
-                    "{} cannot be inside a record or enum that crosses to wasm (keep it inside the wasm side)",
-                    show(t)
-                ),
-            )),
+            _ => Err((pos, format!("{} cannot be inside a record or enum that crosses to wasm (keep it inside the wasm side)", show(t)))),
         }
     }
 
     /// The boundary types of a lowered function's signature (what its glue converts)
-    fn boundary(
-        &mut self,
-        args: &[(String, Ty)],
-        ret: &Ty,
-        pos: Pos,
-    ) -> LResult<(Vec<(String, WTy)>, WTy)> {
+    fn boundary(&mut self, args: &[(String, Ty)], ret: &Ty, pos: Pos) -> LResult<(Vec<(String, WTy)>, WTy)> {
         let mut a = vec![];
         for (n, t) in args {
             a.push((n.clone(), self.wty(t, true, pos)?));
@@ -662,25 +520,13 @@ impl Lower<'_> {
             Ty::Bool => WTy::Bool,
             Ty::Unit => WTy::Unit,
             Ty::Str => {
-                if arg {
-                    WTy::Str
-                } else {
-                    WTy::String
-                }
+                if arg { WTy::Str } else { WTy::String }
             }
             Ty::Array(e) if scalar(e).and_then(Elem::parse).is_some() => {
                 let el = scalar(e).and_then(Elem::parse).unwrap();
                 if arg { WTy::Slice(el) } else { WTy::Vec(el) }
             }
-            _ => {
-                return Err((
-                    pos,
-                    format!(
-                        "{} cannot cross from JS to a @wasm function yet (numbers, bools, arrays of numbers, records, enums)",
-                        show(t)
-                    ),
-                ));
-            }
+            _ => return Err((pos, format!("{} cannot cross from JS to a @wasm function yet (numbers, bools, arrays of numbers, records, enums)", show(t)))),
         })
     }
 }
@@ -724,18 +570,12 @@ impl<'a> Lower<'a> {
         match t {
             // (in a generic record's or enum's definition)
             Ty::Param(p) => Ok(p.clone()),
-            Ty::Named(n, targs)
-                if self.info.records.contains_key(n)
-                    || self.info.enums.get(n).is_some_and(|e| !e.is_effect()) =>
-            {
+            Ty::Named(n, targs) if self.info.records.contains_key(n) || self.info.enums.get(n).is_some_and(|e| !e.is_effect()) => {
                 self.used.insert(n.clone());
                 let base = if targs.is_empty() {
                     rs_type(n)
                 } else {
-                    let a = targs
-                        .iter()
-                        .map(|t| self.rty(t, pos, None))
-                        .collect::<LResult<Vec<_>>>()?;
+                    let a = targs.iter().map(|t| self.rty(t, pos, None)).collect::<LResult<Vec<_>>>()?;
                     format!("{}<{}>", rs_type(n), a.join(", "))
                 };
                 Ok(match borrow {
@@ -764,41 +604,16 @@ impl<'a> Lower<'a> {
 
     /// One instance: (its Rust text, its parameters' and result's types)
     fn function(&mut self, name: &str, targs: &[Ty]) -> LResult<(String, Vec<(String, Ty)>, Ty)> {
-        let Item::Fn {
-            args,
-            body,
-            pos,
-            generics,
-            bounds,
-            ..
-        } = self.fns[name]
-        else {
-            unreachable!()
-        };
+        let Item::Fn { args, body, pos, generics, bounds, .. } = self.fns[name] else { unreachable!() };
         if !self.info.effects[name].is_empty() {
-            return Err((
-                *pos,
-                format!(
-                    "a @wasm function cannot perform effects ({:?})",
-                    self.info.effects[name]
-                ),
-            ));
+            return Err((*pos, format!("a @wasm function cannot perform effects ({:?})", self.info.effects[name])));
         }
         for g in generics {
             if !bounds.iter().any(|b| b.0 == *g) {
-                return Err((
-                    *pos,
-                    format!(
-                        "the generic parameter `{g}` of a @wasm function needs a numeric bound (`{g}: Num`)"
-                    ),
-                ));
+                return Err((*pos, format!("the generic parameter `{g}` of a @wasm function needs a numeric bound (`{g}: Num`)")));
             }
         }
-        self.subst = generics
-            .iter()
-            .cloned()
-            .zip(targs.iter().cloned())
-            .collect();
+        self.subst = generics.iter().cloned().zip(targs.iter().cloned()).collect();
         let rs = rs_name(name, targs);
         let sig = &self.info.fns[name];
         let ats: Vec<Ty> = sig.args.iter().map(|t| subst_ty(t, &self.subst)).collect();
@@ -819,14 +634,7 @@ impl<'a> Lower<'a> {
             let o = self.modes.owned.contains(&(rs.clone(), i));
             owned.push(o);
             if !self.copy(t) {
-                let k = if o {
-                    VarK::Owned
-                } else {
-                    VarK::Borrow {
-                        roots: Some(BTreeSet::from([a.clone()])),
-                        param: true,
-                    }
-                };
+                let k = if o { VarK::Owned } else { VarK::Borrow { roots: Some(BTreeSet::from([a.clone()])), param: true } };
                 self.vars.insert(a.clone(), k);
             }
         }
@@ -839,13 +647,7 @@ impl<'a> Lower<'a> {
                 // (empty roots: only while a callee's region is still being found; it grows, and this is redone)
                 (s, Some(roots)) if !roots.iter().any(|r| r.starts_with('@')) => {
                     // (which parameters the result borrows from: callers count only those arguments)
-                    let idx = self
-                        .params
-                        .iter()
-                        .enumerate()
-                        .filter(|(_, p)| roots.contains(*p))
-                        .map(|(i, _)| i)
-                        .collect();
+                    let idx = self.params.iter().enumerate().filter(|(_, p)| roots.contains(*p)).map(|(i, _)| i).collect();
                     self.modes.region.insert(rs.clone(), idx);
                     self.region = roots;
                     s
@@ -864,11 +666,7 @@ impl<'a> Lower<'a> {
         let lt = if ret_ref { Some("a") } else { None };
         let mut ps = vec![];
         for (((a, _), t), o) in args.iter().zip(&ats).zip(&owned) {
-            let borrow = if *o {
-                None
-            } else {
-                Some(if self.region.contains(a) { lt } else { None })
-            };
+            let borrow = if *o { None } else { Some(if self.region.contains(a) { lt } else { None }) };
             ps.push(format!("{}: {}", local(a), self.rty(t, *pos, borrow)?));
         }
         let rt = self.rty(&ret, *pos, if lt.is_some() { Some(lt) } else { None })?;
@@ -902,14 +700,7 @@ impl<'a> Lower<'a> {
 
     fn clone_of(&self, s: &str, t: &Ty) -> String {
         // (a block, `if`, `match` or reference takes the method only inside parentheses)
-        let s = if ["if ", "match ", "{", "&", "*"]
-            .iter()
-            .any(|p| s.starts_with(p))
-        {
-            format!("({s})")
-        } else {
-            s.to_string()
-        };
+        let s = if ["if ", "match ", "{", "&", "*"].iter().any(|p| s.starts_with(p)) { format!("({s})") } else { s.to_string() };
         if is_array(t) {
             format!("{s}.to_vec()")
         } else if *t == Ty::Str {
@@ -926,20 +717,9 @@ impl<'a> Lower<'a> {
             Form::Val => (format!("&({s}){tail}"), None),
             // (a borrow of a local: `@name` among the roots, so it can be kept past the statement only while that
             // local is frozen, and never returned)
-            Form::Own { root, .. } => (
-                format!("&{s}{tail}"),
-                Some(BTreeSet::from([format!("@{root}")])),
-            ),
-            Form::Brw {
-                is_ref: true,
-                roots,
-                ..
-            } => (s.to_string(), roots.clone()),
-            Form::Brw {
-                is_ref: false,
-                roots,
-                ..
-            } => (format!("&{s}{tail}"), roots.clone()),
+            Form::Own { root, .. } => (format!("&{s}{tail}"), Some(BTreeSet::from([format!("@{root}")]))),
+            Form::Brw { is_ref: true, roots, .. } => (s.to_string(), roots.clone()),
+            Form::Brw { is_ref: false, roots, .. } => (format!("&{s}{tail}"), roots.clone()),
         }
     }
 
@@ -963,21 +743,10 @@ impl<'a> Lower<'a> {
     /// The form of a place `x.f` / `x[i]` reached from `x` (form `f`)
     fn project(f: Form, index: bool) -> Form {
         match f {
-            Form::Val if index => Form::Brw {
-                is_ref: false,
-                roots: None,
-                param: None,
-            },
+            Form::Val if index => Form::Brw { is_ref: false, roots: None, param: None },
             Form::Val => Form::Val,
-            Form::Own { movable, root } => Form::Own {
-                movable: movable && !index,
-                root,
-            },
-            Form::Brw { roots, .. } => Form::Brw {
-                is_ref: false,
-                roots,
-                param: None,
-            },
+            Form::Own { movable, root } => Form::Own { movable: movable && !index, root },
+            Form::Brw { roots, .. } => Form::Brw { is_ref: false, roots, param: None },
         }
     }
 
@@ -993,23 +762,10 @@ impl<'a> Lower<'a> {
             }
         }
         if all && !arms.is_empty() {
-            let ss = arms
-                .iter()
-                .map(|(s, f)| self.borrow_of(s, f, t).0)
-                .collect();
-            (
-                ss,
-                Form::Brw {
-                    is_ref: true,
-                    roots: Some(roots),
-                    param: None,
-                },
-            )
+            let ss = arms.iter().map(|(s, f)| self.borrow_of(s, f, t).0).collect();
+            (ss, Form::Brw { is_ref: true, roots: Some(roots), param: None })
         } else {
-            let ss = arms
-                .into_iter()
-                .map(|(s, f)| self.owned(s, &f, t))
-                .collect();
+            let ss = arms.into_iter().map(|(s, f)| self.owned(s, &f, t)).collect();
             (ss, Form::Val)
         }
     }
@@ -1034,9 +790,7 @@ impl<'a> Lower<'a> {
     }
 
     fn elem_rty(&mut self, t: &Ty) -> String {
-        let (Ty::Array(e) | Ty::Typed(e)) = t else {
-            return "()".into();
-        };
+        let (Ty::Array(e) | Ty::Typed(e)) = t else { return "()".into() };
         self.rty(e, Pos::default(), None).unwrap_or_default()
     }
 
@@ -1058,22 +812,11 @@ impl<'a> Lower<'a> {
                     // (a part of the borrowed parameters: borrowed for as long as the function runs)
                     // (a part of the borrowed parameters, or of owned locals the rest of the block does not assign:
                     // borrowed while it lives, and those locals are frozen, never moved, to the end of the block)
-                    Form::Brw { roots: Some(r), .. }
-                        if !r.iter().any(|x| {
-                            x.strip_prefix('@')
-                                .is_some_and(|n| self.later_assigns.contains(n))
-                        }) =>
-                    {
+                    Form::Brw { roots: Some(r), .. } if !r.iter().any(|x| x.strip_prefix('@').is_some_and(|n| self.later_assigns.contains(n))) => {
                         for x in r.iter().filter_map(|x| x.strip_prefix('@')) {
                             self.frozen.push(x.to_string());
                         }
-                        (
-                            self.borrow_of(&s, &f, &t).0,
-                            VarK::Borrow {
-                                roots: Some(r.clone()),
-                                param: false,
-                            },
-                        )
+                        (self.borrow_of(&s, &f, &t).0, VarK::Borrow { roots: Some(r.clone()), param: false })
                     }
                     _ => (self.owned(s, &f, &t), VarK::Owned),
                 };
@@ -1083,11 +826,7 @@ impl<'a> Lower<'a> {
             Stmt::Let(Pat::Wild, _, x) => {
                 let (s, f) = self.ex(x)?;
                 // (a place is only evaluated: `let _ = &xs[i];` checks the index without moving)
-                Ok(if matches!(f, Form::Val) {
-                    format!("let _ = {s};\n")
-                } else {
-                    format!("let _ = &{s};\n")
-                })
+                Ok(if matches!(f, Form::Val) { format!("let _ = {s};\n") } else { format!("let _ = &{s};\n") })
             }
             Stmt::LetMut(n, _, x) => {
                 let t = self.ty(x.id);
@@ -1097,29 +836,18 @@ impl<'a> Lower<'a> {
                 } else {
                     self.vars.insert(n.clone(), VarK::Owned);
                 }
-                Ok(format!(
-                    "let mut {}: {} = {s};\n",
-                    local(n),
-                    self.rty(&t, x.pos, None)?
-                ))
+                Ok(format!("let mut {}: {} = {s};\n", local(n), self.rty(&t, x.pos, None)?))
             }
             Stmt::Let(_, _, x) => not_in_subset(x.pos, "a destructuring `let`"),
             Stmt::Expr(x) => {
                 let (s, f) = self.ex(x)?;
-                Ok(if matches!(f, Form::Val) {
-                    format!("{s};\n")
-                } else {
-                    format!("let _ = &{s};\n")
-                })
+                Ok(if matches!(f, Form::Val) { format!("{s};\n") } else { format!("let _ = &{s};\n") })
             }
         }
     }
 
     fn num(&self, id: Id) -> Ty {
-        subst_ty(
-            &self.info.num.get(&id).cloned().unwrap_or(Ty::F64),
-            &self.subst,
-        )
+        subst_ty(&self.info.num.get(&id).cloned().unwrap_or(Ty::F64), &self.subst)
     }
 
     fn lit(&self, l: &Lit, id: Id, pos: Pos) -> LResult<String> {
@@ -1128,14 +856,7 @@ impl<'a> Lower<'a> {
                 Some(s) => format!("{n}{s}"),
                 None => format!("{n}"),
             },
-            Lit::Float(f) => format!(
-                "{f}{}",
-                if self.num(id) == Ty::F32 {
-                    "f32"
-                } else {
-                    "f64"
-                }
-            ),
+            Lit::Float(f) => format!("{f}{}", if self.num(id) == Ty::F32 { "f32" } else { "f64" }),
             Lit::Bool(b) => b.to_string(),
             Lit::Unit => "()".into(),
             Lit::Str(_) => return not_in_subset(pos, "a string"),
@@ -1144,20 +865,14 @@ impl<'a> Lower<'a> {
 
     /// A closure given to an iterator method: its parameters bound as `kinds` say (None: Copy or owned; Some(roots):
     /// a reference into the iterated array), `pre` is the pattern prefix of each (`&` for filter's `&&T`)
-    fn closure(
-        &mut self,
-        f: &Expr,
-        kinds: &[(Option<Option<BTreeSet<String>>>, &str)],
-    ) -> LResult<String> {
+    fn closure(&mut self, f: &Expr, kinds: &[(Option<Option<BTreeSet<String>>>, &str)]) -> LResult<String> {
         let EK::Closure(ps, body) = &f.kind else {
             return not_in_subset(f.pos, "a function value (pass a closure `(x) => ..` here)");
         };
         self.scoped(|l| {
             let mut pre = String::new();
             let mut names = vec![];
-            let Ty::Fn(pts, _) = l.ty(f.id) else {
-                unreachable!()
-            };
+            let Ty::Fn(pts, _) = l.ty(f.id) else { unreachable!() };
             for (((n, _), (k, p)), t) in ps.iter().zip(kinds).zip(&pts) {
                 names.push(format!("{p}{}", local(n)));
                 match k {
@@ -1168,23 +883,13 @@ impl<'a> Lower<'a> {
                         l.vars.insert(n.clone(), VarK::Owned);
                     }
                     Some(roots) => {
-                        l.vars.insert(
-                            n.clone(),
-                            VarK::Borrow {
-                                roots: roots.clone(),
-                                param: false,
-                            },
-                        );
+                        l.vars.insert(n.clone(), VarK::Borrow { roots: roots.clone(), param: false });
                         pre.push_str(&l.canon(n, t));
                     }
                 }
             }
             let b = l.expr(body)?;
-            Ok(if pre.is_empty() {
-                format!("|{}| {b}", names.join(", "))
-            } else {
-                format!("|{}| {{\n{pre}{b}\n}}", names.join(", "))
-            })
+            Ok(if pre.is_empty() { format!("|{}| {b}", names.join(", ")) } else { format!("|{}| {{\n{pre}{b}\n}}", names.join(", ")) })
         })
     }
 
@@ -1199,17 +904,9 @@ impl<'a> Lower<'a> {
             match &sf {
                 Form::Val => (ss, false, None),
                 // (the arms assign a local the scrutinee reads: match a value of it, taken if dead, else a copy)
-                _ if self.live.clone_root.contains(&m.id) => {
-                    (self.owned(ss, &sf, &st), false, None)
-                }
-                Form::Own { movable: true, .. } if self.live.match_move.contains(&m.id) => {
-                    (ss, false, None)
-                }
-                Form::Brw {
-                    is_ref: true,
-                    roots,
-                    ..
-                } => (format!("*{ss}"), true, roots.clone()),
+                _ if self.live.clone_root.contains(&m.id) => (self.owned(ss, &sf, &st), false, None),
+                Form::Own { movable: true, .. } if self.live.match_move.contains(&m.id) => (ss, false, None),
+                Form::Brw { is_ref: true, roots, .. } => (format!("*{ss}"), true, roots.clone()),
                 Form::Brw { roots, .. } => (ss, true, roots.clone()),
                 Form::Own { .. } => (ss, true, None),
             }
@@ -1222,10 +919,7 @@ impl<'a> Lower<'a> {
                 let ps = l.pat(p, &st, by_ref, &roots, &mut pre, body.pos)?;
                 let (b, f) = l.ex(body)?;
                 // (a borrow of what the arm binds cannot leave the arm)
-                let names: Vec<String> = own::pat_names(p)
-                    .into_iter()
-                    .map(|n| format!("@{n}"))
-                    .collect();
+                let names: Vec<String> = own::pat_names(p).into_iter().map(|n| format!("@{n}")).collect();
                 let (b, f) = match &f {
                     Form::Brw { roots: Some(r), .. } if r.iter().any(|x| names.contains(x)) => {
                         let t = l.ty(body.id);
@@ -1233,24 +927,12 @@ impl<'a> Lower<'a> {
                     }
                     _ => (b, f),
                 };
-                Ok((
-                    ps,
-                    if pre.is_empty() {
-                        b
-                    } else {
-                        format!("{{\n{pre}{b}\n}}")
-                    },
-                    f,
-                ))
+                Ok((ps, if pre.is_empty() { b } else { format!("{{\n{pre}{b}\n}}") }, f))
             })?;
             pats.push(r.0);
             bodies.push((r.1, r.2));
         }
-        let (bs, f) = if self.copy(&t) {
-            (bodies.into_iter().map(|b| b.0).collect(), Form::Val)
-        } else {
-            self.join(bodies, &t)
-        };
+        let (bs, f) = if self.copy(&t) { (bodies.into_iter().map(|b| b.0).collect(), Form::Val) } else { self.join(bodies, &t) };
         let mut s = format!("match {head} {{\n");
         for (p, b) in pats.iter().zip(bs) {
             let _ = writeln!(s, "{p} => {b},");
@@ -1261,15 +943,7 @@ impl<'a> Lower<'a> {
 
     /// A pattern against a value of type `t`. `by_ref`: the scrutinee is a place that stays alive, so the bindings
     /// that are not Copy borrow from it (`ref xs`) instead of moving
-    fn pat(
-        &mut self,
-        p: &Pat,
-        t: &Ty,
-        by_ref: bool,
-        roots: &Option<BTreeSet<String>>,
-        pre: &mut String,
-        pos: Pos,
-    ) -> LResult<String> {
+    fn pat(&mut self, p: &Pat, t: &Ty, by_ref: bool, roots: &Option<BTreeSet<String>>, pre: &mut String, pos: Pos) -> LResult<String> {
         Ok(match p {
             Pat::Wild => "_".to_string(),
             Pat::Bind(n) => {
@@ -1277,13 +951,7 @@ impl<'a> Lower<'a> {
                     self.vars.remove(n);
                     local(n)
                 } else if by_ref {
-                    self.vars.insert(
-                        n.clone(),
-                        VarK::Borrow {
-                            roots: roots.clone(),
-                            param: false,
-                        },
-                    );
+                    self.vars.insert(n.clone(), VarK::Borrow { roots: roots.clone(), param: false });
                     pre.push_str(&self.canon(n, t));
                     format!("ref {}", local(n))
                 } else {
@@ -1300,17 +968,8 @@ impl<'a> Lower<'a> {
                 let fts: Vec<Ty> = match t {
                     Ty::Named(_, targs) => {
                         let e = &self.info.enums[&en];
-                        let m: HashMap<String, Ty> = e
-                            .params
-                            .iter()
-                            .cloned()
-                            .zip(targs.iter().cloned())
-                            .collect();
-                        e.variants
-                            .iter()
-                            .find(|x| x.0 == *v)
-                            .map(|x| x.1.iter().map(|t| subst_ty(t, &m)).collect())
-                            .unwrap_or_default()
+                        let m: HashMap<String, Ty> = e.params.iter().cloned().zip(targs.iter().cloned()).collect();
+                        e.variants.iter().find(|x| x.0 == *v).map(|x| x.1.iter().map(|t| subst_ty(t, &m)).collect()).unwrap_or_default()
                     }
                     _ => vec![],
                 };
@@ -1319,11 +978,7 @@ impl<'a> Lower<'a> {
                     let ft = fts.get(i).cloned().unwrap_or(Ty::Unit);
                     ps.push(self.pat(p, &ft, by_ref, roots, pre, pos)?);
                 }
-                if ps.is_empty() {
-                    format!("{}::{v}", rs_type(&en))
-                } else {
-                    format!("{}::{v}({})", rs_type(&en), ps.join(", "))
-                }
+                if ps.is_empty() { format!("{}::{v}", rs_type(&en)) } else { format!("{}::{v}({})", rs_type(&en), ps.join(", ")) }
             }
             _ => return not_in_subset(pos, "this pattern (a tuple, a float or a string)"),
         })
@@ -1335,43 +990,21 @@ impl<'a> Lower<'a> {
             return not_in_subset(pos, "an effect");
         }
         self.used.insert(en.to_string());
-        Ok(if args.is_empty() {
-            format!("{}::{v}", rs_type(en))
-        } else {
-            format!("{}::{v}({})", rs_type(en), args.join(", "))
-        })
+        Ok(if args.is_empty() { format!("{}::{v}", rs_type(en)) } else { format!("{}::{v}({})", rs_type(en), args.join(", ")) })
     }
 
     /// The arguments of a call of a lowered instance: each borrowed or owned as the callee's inferred signature says
-    fn call_args(
-        &mut self,
-        rs: &str,
-        args: &[Expr],
-        ptys: &[Ty],
-    ) -> LResult<(Vec<String>, Vec<Option<BTreeSet<String>>>)> {
-        let borrow: Vec<bool> = args
-            .iter()
-            .zip(ptys)
-            .enumerate()
-            .map(|(i, (_, t))| !self.copy(t) && !self.modes.owned.contains(&(rs.to_string(), i)))
-            .collect();
+    fn call_args(&mut self, rs: &str, args: &[Expr], ptys: &[Ty]) -> LResult<(Vec<String>, Vec<Option<BTreeSet<String>>>)> {
+        let borrow: Vec<bool> = args.iter().zip(ptys).enumerate().map(|(i, (_, t))| !self.copy(t) && !self.modes.owned.contains(&(rs.to_string(), i))).collect();
         self.args_as(args, &borrow, ptys)
     }
 
     /// Arguments, each borrowed or owned as `borrow` says. A borrowed argument that reads a local a later argument
     /// assigns (`pair(xs, { xs = [2]; .. })`) is made a value first, so it keeps the old one and no borrow is held
     /// across the assignment
-    fn args_as(
-        &mut self,
-        args: &[Expr],
-        borrow: &[bool],
-        ptys: &[Ty],
-    ) -> LResult<(Vec<String>, Vec<Option<BTreeSet<String>>>)> {
+    fn args_as(&mut self, args: &[Expr], borrow: &[bool], ptys: &[Ty]) -> LResult<(Vec<String>, Vec<Option<BTreeSet<String>>>)> {
         let mut later = vec![HashSet::new(); args.len()];
-        let any = args
-            .iter()
-            .skip(1)
-            .any(|x| self.live.assigns_in.contains(&x.id));
+        let any = args.iter().skip(1).any(|x| self.live.assigns_in.contains(&x.id));
         for i in (0..args.len().saturating_sub(1)).rev().filter(|_| any) {
             let mut a = later[i + 1].clone();
             own::names(&args[i + 1], &mut HashSet::new(), &mut a);
@@ -1403,11 +1036,7 @@ impl<'a> Lower<'a> {
 
     /// The method receiver: an expression usable before `.method()` (parenthesized unless a name or a place)
     fn recv(s: String, x: &Expr) -> String {
-        if matches!(x.kind, EK::Var(_) | EK::Field(..) | EK::Index(..)) {
-            s
-        } else {
-            format!("({s})")
-        }
+        if matches!(x.kind, EK::Var(_) | EK::Field(..) | EK::Index(..)) { s } else { format!("({s})") }
     }
 
     /// An expression and the form of its value
@@ -1416,26 +1045,11 @@ impl<'a> Lower<'a> {
         let val = |s: String| Ok((s, Form::Val));
         match &e.kind {
             // (a string literal is a `&'static str`: borrowed from nothing, copied only where it is consumed)
-            EK::Lit(Lit::Str(v)) => Ok((
-                format!("{v:?}"),
-                Form::Brw {
-                    is_ref: true,
-                    roots: Some(BTreeSet::new()),
-                    param: None,
-                },
-            )),
+            EK::Lit(Lit::Str(v)) => Ok((format!("{v:?}"), Form::Brw { is_ref: true, roots: Some(BTreeSet::new()), param: None })),
             EK::Lit(l) => val(self.lit(l, e.id, pos)?),
-            EK::Var(n) | EK::Path(_, n)
-                if matches!(self.info.callee.get(&e.id), Some(Callee::Variant(_))) =>
-            {
-                let Some(Callee::Variant(en)) = self.info.callee.get(&e.id).cloned() else {
-                    unreachable!()
-                };
-                if self.info.enums[&en]
-                    .variants
-                    .iter()
-                    .any(|x| x.0 == *n && !x.1.is_empty())
-                {
+            EK::Var(n) | EK::Path(_, n) if matches!(self.info.callee.get(&e.id), Some(Callee::Variant(_))) => {
+                let Some(Callee::Variant(en)) = self.info.callee.get(&e.id).cloned() else { unreachable!() };
+                if self.info.enums[&en].variants.iter().any(|x| x.0 == *n && !x.1.is_empty()) {
                     return not_in_subset(pos, "a variant constructor as a function value");
                 }
                 val(self.variant(&en, n, vec![], pos)?)
@@ -1445,21 +1059,8 @@ impl<'a> Lower<'a> {
                     let s = local(n);
                     Ok(match self.vars.get(n) {
                         // (a local borrowed by a live `let` is frozen: never moved while the borrow may be used)
-                        Some(VarK::Owned) => (
-                            s,
-                            Form::Own {
-                                movable: self.live.last.contains(&e.id) && !self.frozen.contains(n),
-                                root: n.clone(),
-                            },
-                        ),
-                        Some(VarK::Borrow { roots, param }) => (
-                            s,
-                            Form::Brw {
-                                is_ref: true,
-                                roots: roots.clone(),
-                                param: param.then(|| n.clone()),
-                            },
-                        ),
+                        Some(VarK::Owned) => (s, Form::Own { movable: self.live.last.contains(&e.id) && !self.frozen.contains(n), root: n.clone() }),
+                        Some(VarK::Borrow { roots, param }) => (s, Form::Brw { is_ref: true, roots: roots.clone(), param: param.then(|| n.clone()) }),
                         None => (s, Form::Val),
                     })
                 }
@@ -1473,20 +1074,13 @@ impl<'a> Lower<'a> {
                     return val(match t {
                         Ty::F64 => (if c == "one" { "1.0f64" } else { "0.0f64" }).into(),
                         Ty::F32 => (if c == "one" { "1.0f32" } else { "0.0f32" }).into(),
-                        t => format!(
-                            "{}{}",
-                            if c == "one" { 1 } else { 0 },
-                            scalar(&t).unwrap_or("")
-                        ),
+                        t => format!("{}{}", if c == "one" { 1 } else { 0 }, scalar(&t).unwrap_or("")),
                     });
                 }
                 if let EK::Var(n) | EK::Path(_, n) = &f.kind
                     && let Some(Callee::Variant(en)) = self.info.callee.get(&f.id).cloned()
                 {
-                    let a = args
-                        .iter()
-                        .map(|x| self.expr(x))
-                        .collect::<LResult<Vec<_>>>()?;
+                    let a = args.iter().map(|x| self.expr(x)).collect::<LResult<Vec<_>>>()?;
                     return val(self.variant(&en, n, a, pos)?);
                 }
                 if let Some(Callee::TypedCtor(el, c)) = self.info.callee.get(&f.id).cloned() {
@@ -1501,33 +1095,16 @@ impl<'a> Lower<'a> {
                         format!("({}).to_vec()", self.borrowed(&args[0])?.0)
                     });
                 }
-                let EK::Var(n) = &f.kind else {
-                    return not_in_subset(pos, "calling this");
-                };
+                let EK::Var(n) = &f.kind else { return not_in_subset(pos, "calling this") };
                 if let Some((a, b)) = self.range_args(e)? {
                     return val(format!("({a}..{b}).collect::<Vec<i32>>()"));
                 }
                 match self.info.callee.get(&f.id) {
                     Some(Callee::Fn) if self.fns.contains_key(n.as_str()) => {
-                        let targs: Vec<Ty> = self
-                            .info
-                            .inst
-                            .get(&f.id)
-                            .map(|t| t.iter().map(|t| subst_ty(t, &self.subst)).collect())
-                            .unwrap_or_default();
-                        let Item::Fn { generics, .. } = self.fns[n.as_str()] else {
-                            unreachable!()
-                        };
-                        let m: HashMap<String, Ty> = generics
-                            .iter()
-                            .cloned()
-                            .zip(targs.iter().cloned())
-                            .collect();
-                        let ptys: Vec<Ty> = self.info.fns[n]
-                            .args
-                            .iter()
-                            .map(|t| subst_ty(t, &m))
-                            .collect();
+                        let targs: Vec<Ty> = self.info.inst.get(&f.id).map(|t| t.iter().map(|t| subst_ty(t, &self.subst)).collect()).unwrap_or_default();
+                        let Item::Fn { generics, .. } = self.fns[n.as_str()] else { unreachable!() };
+                        let m: HashMap<String, Ty> = generics.iter().cloned().zip(targs.iter().cloned()).collect();
+                        let ptys: Vec<Ty> = self.info.fns[n].args.iter().map(|t| subst_ty(t, &m)).collect();
                         let ret = subst_ty(&self.info.fns[n].ret, &m);
                         let rs = self.want(n, targs);
                         self.calls.insert(rs.clone());
@@ -1540,11 +1117,7 @@ impl<'a> Lower<'a> {
                             // borrow from)
                             let region = self.modes.region.get(&rs).cloned().unwrap_or_default();
                             let mut all = Some(BTreeSet::new());
-                            for (_, r) in roots
-                                .into_iter()
-                                .enumerate()
-                                .filter(|(i, _)| region.contains(i))
-                            {
+                            for (_, r) in roots.into_iter().enumerate().filter(|(i, _)| region.contains(i)) {
                                 all = match (all, r) {
                                     (Some(mut a), Some(r)) => {
                                         a.extend(r);
@@ -1553,36 +1126,15 @@ impl<'a> Lower<'a> {
                                     _ => None,
                                 };
                             }
-                            Ok((
-                                s,
-                                Form::Brw {
-                                    is_ref: true,
-                                    roots: all,
-                                    param: None,
-                                },
-                            ))
+                            Ok((s, Form::Brw { is_ref: true, roots: all, param: None }))
                         }
                     }
-                    Some(Callee::Fn) => Err((
-                        pos,
-                        format!(
-                            "`{n}` is a JS-layer function: a @wasm function calls only @wasm and `wasm fn` functions (mark `{n}` @wasm)"
-                        ),
-                    )),
+                    Some(Callee::Fn) => Err((pos, format!("`{n}` is a JS-layer function: a @wasm function calls only @wasm and `wasm fn` functions (mark `{n}` @wasm)"))),
                     Some(Callee::Wasm) => {
                         let (wargs, _) = &self.info.wasm[n];
-                        let arrs: Vec<bool> = wargs
-                            .iter()
-                            .map(|(_, w)| matches!(w, WTy::Slice(_)))
-                            .collect();
-                        if wargs
-                            .iter()
-                            .any(|(_, w)| matches!(w, WTy::Str | WTy::Callback(..)))
-                        {
-                            return not_in_subset(
-                                pos,
-                                "calling a `wasm fn` that takes a string or a callback",
-                            );
+                        let arrs: Vec<bool> = wargs.iter().map(|(_, w)| matches!(w, WTy::Slice(_))).collect();
+                        if wargs.iter().any(|(_, w)| matches!(w, WTy::Str | WTy::Callback(..))) {
+                            return not_in_subset(pos, "calling a `wasm fn` that takes a string or a callback");
                         }
                         let ptys: Vec<Ty> = args.iter().map(|x| self.ty(x.id)).collect();
                         let (a, _) = self.args_as(args, &arrs, &ptys)?;
@@ -1604,11 +1156,7 @@ impl<'a> Lower<'a> {
                     let (a, b) = match *op {
                         "+" => (self.expr(l)?, self.borrowed(r)?.0),
                         _ => {
-                            let (v, _) = self.args_as(
-                                &[(**l).clone(), (**r).clone()],
-                                &[true, true],
-                                &[lt.clone(), lt.clone()],
-                            )?;
+                            let (v, _) = self.args_as(&[(**l).clone(), (**r).clone()], &[true, true], &[lt.clone(), lt.clone()])?;
                             (v[0].clone(), v[1].clone())
                         }
                     };
@@ -1619,17 +1167,13 @@ impl<'a> Lower<'a> {
                             format!("(zs_cmp16({a}, {b}) {op} 0)")
                         }
                         // (the left string is taken, moved where it can be: `a + b + c` appends in place)
-                        "+" if lt == Ty::Str => {
-                            format!("{{ let mut __zs_s = {a}; __zs_s.push_str({b}); __zs_s }}")
-                        }
+                        "+" if lt == Ty::Str => format!("{{ let mut __zs_s = {a}; __zs_s.push_str({b}); __zs_s }}"),
                         _ => return not_in_subset(pos, &format!("`{op}` on {}", show(&lt))),
                     });
                 }
                 let (a, b) = (self.expr(l)?, self.expr(r)?);
                 val(match *op {
-                    "==" | "!=" | "<" | "<=" | ">" | ">=" | "&&" | "||" => {
-                        format!("({a} {op} {b})")
-                    }
+                    "==" | "!=" | "<" | "<=" | ">" | ">=" | "&&" | "||" => format!("({a} {op} {b})"),
                     _ => match self.num(e.id) {
                         Ty::I32 | Ty::U32 | Ty::I64 => {
                             let m = match *op {
@@ -1654,11 +1198,7 @@ impl<'a> Lower<'a> {
             EK::Cast(x, _) => {
                 let (_, to) = self.info.cast[&e.id].clone();
                 let to = subst_ty(&to, &self.subst);
-                val(format!(
-                    "(({}) as {})",
-                    self.expr(x)?,
-                    scalar(&to).unwrap_or("f64")
-                ))
+                val(format!("(({}) as {})", self.expr(x)?, scalar(&to).unwrap_or("f64")))
             }
             EK::If(c, t, el) => {
                 let c = self.expr(c)?;
@@ -1668,19 +1208,8 @@ impl<'a> Lower<'a> {
                     return val(format!("if {c} {}", Self::braced(a.0)));
                 };
                 let b = self.scoped(|l| l.ex(el))?;
-                let (bs, f) = if self.copy(&ty) {
-                    (vec![a.0, b.0], Form::Val)
-                } else {
-                    self.join(vec![a, b], &ty)
-                };
-                Ok((
-                    format!(
-                        "if {c} {} else {}",
-                        Self::braced(bs[0].clone()),
-                        Self::braced(bs[1].clone())
-                    ),
-                    f,
-                ))
+                let (bs, f) = if self.copy(&ty) { (vec![a.0, b.0], Form::Val) } else { self.join(vec![a, b], &ty) };
+                Ok((format!("if {c} {} else {}", Self::braced(bs[0].clone()), Self::braced(bs[1].clone())), f))
             }
             EK::Match(sc, arms) => self.match_(e, sc, arms),
             EK::Block(stmts, tail) => self.scoped(|l| {
@@ -1697,10 +1226,7 @@ impl<'a> Lower<'a> {
                         let rest = stmts[i + 1..].iter().map(|s| match s {
                             Stmt::Let(_, _, x) | Stmt::LetMut(_, _, x) | Stmt::Expr(x) => x,
                         });
-                        for x in rest
-                            .chain(tail.as_deref())
-                            .filter(|x| l.live.assigns_in.contains(&x.id))
-                        {
+                        for x in rest.chain(tail.as_deref()).filter(|x| l.live.assigns_in.contains(&x.id)) {
                             own::names(x, &mut HashSet::new(), &mut l.later_assigns);
                         }
                     }
@@ -1724,30 +1250,9 @@ impl<'a> Lower<'a> {
                     // block cannot leave it, so it is copied)
                     let ts = match tf {
                         _ if l.copy(&ty) => ts,
-                        Form::Brw {
-                            roots: Some(r),
-                            param,
-                            is_ref,
-                        } if !r.iter().any(|x| declared.contains(x)) => {
-                            let b = if is_ref {
-                                ts
-                            } else {
-                                l.borrow_of(
-                                    &ts,
-                                    &Form::Brw {
-                                        is_ref,
-                                        roots: None,
-                                        param: None,
-                                    },
-                                    &ty,
-                                )
-                                .0
-                            };
-                            f = Form::Brw {
-                                is_ref: true,
-                                roots: Some(r),
-                                param,
-                            };
+                        Form::Brw { roots: Some(r), param, is_ref } if !r.iter().any(|x| declared.contains(x)) => {
+                            let b = if is_ref { ts } else { l.borrow_of(&ts, &Form::Brw { is_ref, roots: None, param: None }, &ty).0 };
+                            f = Form::Brw { is_ref: true, roots: Some(r), param };
                             b
                         }
                         other => l.owned(ts, &other, &ty),
@@ -1778,9 +1283,7 @@ impl<'a> Lower<'a> {
                             (format!("{v}.iter().copied()"), None)
                         } else {
                             match f {
-                                Form::Val | Form::Own { movable: true, .. } => {
-                                    (format!("{v}.into_iter()"), None)
-                                }
+                                Form::Val | Form::Own { movable: true, .. } => (format!("{v}.into_iter()"), None),
                                 Form::Brw { roots, .. } => (format!("{v}.iter()"), Some(roots)),
                                 Form::Own { .. } => (format!("{v}.iter()"), Some(None)),
                             }
@@ -1797,22 +1300,12 @@ impl<'a> Lower<'a> {
                             l.vars.insert(x.clone(), VarK::Owned);
                         }
                         Some(roots) => {
-                            l.vars.insert(
-                                x.clone(),
-                                VarK::Borrow {
-                                    roots,
-                                    param: false,
-                                },
-                            );
+                            l.vars.insert(x.clone(), VarK::Borrow { roots, param: false });
                             pre = l.canon(x, &el);
                         }
                     }
                     let b = l.block(body)?;
-                    let b = if pre.is_empty() {
-                        b
-                    } else {
-                        format!("{{\n{pre}{b}\n}}")
-                    };
+                    let b = if pre.is_empty() { b } else { format!("{{\n{pre}{b}\n}}") };
                     val(format!("for {} in {iter} {b}", local(x)))
                 })
             }
@@ -1823,17 +1316,10 @@ impl<'a> Lower<'a> {
                 let a = Self::recv(a, x);
                 // (a negative index becomes a huge usize: out of bounds, as in JS)
                 let s = format!("{a}[({}) as usize]", self.expr(i)?);
-                Ok(if self.copy(&self.ty(e.id)) {
-                    (s, Form::Val)
-                } else {
-                    (s, Self::project(f, true))
-                })
+                Ok(if self.copy(&self.ty(e.id)) { (s, Form::Val) } else { (s, Self::project(f, true)) })
             }
             EK::Array(xs) => {
-                let v = xs
-                    .iter()
-                    .map(|x| self.expr(x))
-                    .collect::<LResult<Vec<_>>>()?;
+                let v = xs.iter().map(|x| self.expr(x)).collect::<LResult<Vec<_>>>()?;
                 if v.is_empty() {
                     // (the element type, for an empty literal)
                     let t = self.ty(e.id);
@@ -1841,32 +1327,19 @@ impl<'a> Lower<'a> {
                 }
                 val(format!("vec![{}]", v.join(", ")))
             }
-            EK::Closure(..) => {
-                not_in_subset(pos, "a closure outside map / filter / fold / any / all")
-            }
+            EK::Closure(..) => not_in_subset(pos, "a closure outside map / filter / fold / any / all"),
             EK::Field(x, f) => {
                 if f.parse::<usize>().is_ok() {
                     return not_in_subset(pos, "a tuple");
                 }
                 let (s, xf) = self.ex(x)?;
-                let s = if matches!(x.kind, EK::Var(_) | EK::Field(..) | EK::Index(..)) {
-                    s
-                } else {
-                    format!("({s})")
-                };
+                let s = if matches!(x.kind, EK::Var(_) | EK::Field(..) | EK::Index(..)) { s } else { format!("({s})") };
                 let s = format!("{s}.{}", local(f));
-                Ok(if self.copy(&self.ty(e.id)) {
-                    (s, Form::Val)
-                } else {
-                    (s, Self::project(xf, false))
-                })
+                Ok(if self.copy(&self.ty(e.id)) { (s, Form::Val) } else { (s, Self::project(xf, false)) })
             }
             EK::Record(n, fields, base) => {
                 self.used.insert(n.clone());
-                let mut parts = fields
-                    .iter()
-                    .map(|(f, x)| Ok(format!("{}: {}", local(f), self.expr(x)?)))
-                    .collect::<LResult<Vec<_>>>()?;
+                let mut parts = fields.iter().map(|(f, x)| Ok(format!("{}: {}", local(f), self.expr(x)?))).collect::<LResult<Vec<_>>>()?;
                 if let Some(b) = base {
                     parts.push(format!("..{}", self.expr(b)?));
                 }
@@ -1882,9 +1355,7 @@ impl<'a> Lower<'a> {
     fn method(&mut self, e: &Expr, r: &Expr, args: &[Expr]) -> LResult<(String, Form)> {
         use Builtin as B;
         let pos = e.pos;
-        let Some(b) = self.info.builtin.get(&e.id).copied() else {
-            return not_in_subset(pos, "this method");
-        };
+        let Some(b) = self.info.builtin.get(&e.id).copied() else { return not_in_subset(pos, "this method") };
         let rt = self.ty(r.id);
         let el = match &rt {
             Ty::Array(t) | Ty::Typed(t) => (**t).clone(),
@@ -1904,9 +1375,7 @@ impl<'a> Lower<'a> {
         let (it, elems): (String, Option<Option<BTreeSet<String>>>) = match (&range, &rf) {
             (Some((a, b)), _) => (format!("({a}..{b})"), None),
             _ if self.copy(&el) => (format!("{recv}.iter().copied()"), None),
-            (_, Form::Val | Form::Own { movable: true, .. }) => {
-                (format!("{recv}.into_iter()"), None)
-            }
+            (_, Form::Val | Form::Own { movable: true, .. }) => (format!("{recv}.into_iter()"), None),
             (_, Form::Brw { roots, .. }) => (format!("{recv}.iter()"), Some(roots.clone())),
             (_, Form::Own { .. }) => (format!("{recv}.iter()"), Some(None)),
         };
@@ -1939,22 +1408,11 @@ impl<'a> Lower<'a> {
                 // (a part of the string: a borrow of what the string borrows from)
                 B::Trim => {
                     self.str_helpers.extend(["zs_trim", "zs_ws"]);
-                    Ok((
-                        format!("zs_trim({sb})"),
-                        Form::Brw {
-                            is_ref: true,
-                            roots: sroots,
-                            param: None,
-                        },
-                    ))
+                    Ok((format!("zs_trim({sb})"), Form::Brw { is_ref: true, roots: sroots, param: None }))
                 }
                 B::Contains | B::Split => {
                     let (o, _) = self.borrowed(&args[0])?;
-                    let h = if b == B::Contains {
-                        "zs_contains"
-                    } else {
-                        "zs_split"
-                    };
+                    let h = if b == B::Contains { "zs_contains" } else { "zs_split" };
                     self.str_helpers.insert(h);
                     val(format!("{h}({sb}, {o})"))
                 }
@@ -1978,55 +1436,31 @@ impl<'a> Lower<'a> {
                 val(format!("{recv}.join({sep})"))
             }
             // (JS's and Rust's formats agree for integers and bools; not for floats)
-            B::ToString if matches!(rt, Ty::F32 | Ty::F64) => not_in_subset(
-                pos,
-                "`to_string` of a float (JS and Rust format floats differently)",
-            ),
+            B::ToString if matches!(rt, Ty::F32 | Ty::F64) => not_in_subset(pos, "`to_string` of a float (JS and Rust format floats differently)"),
             B::ToString => val(format!("{recv}.to_string()")),
-            B::Map => val(format!(
-                "{it}.map({}).collect::<Vec<_>>()",
-                self.closure(&args[0], &[k("")])?
-            )),
+            B::Map => val(format!("{it}.map({}).collect::<Vec<_>>()", self.closure(&args[0], &[k("")])?)),
             B::Filter => {
                 // (filter's closure gets `&Item`. For copied items and for references `|&x|` binds the item; for
                 // items the iterator owns that are not Copy, `|x|` borrows it)
-                let param = if elems.is_none() && range.is_none() && !self.copy(&el) {
-                    (Some(None), "")
-                } else {
-                    k("&")
-                };
+                let param = if elems.is_none() && range.is_none() && !self.copy(&el) { (Some(None), "") } else { k("&") };
                 let f = self.closure(&args[0], &[param])?;
-                val(if by_ref {
-                    format!("{it}.filter({f}).cloned().collect::<Vec<_>>()")
-                } else {
-                    format!("{it}.filter({f}).collect::<Vec<_>>()")
-                })
+                val(if by_ref { format!("{it}.filter({f}).cloned().collect::<Vec<_>>()") } else { format!("{it}.filter({f}).collect::<Vec<_>>()") })
             }
             B::Any => val(format!("{it}.any({})", self.closure(&args[0], &[k("")])?)),
             B::All => val(format!("{it}.all({})", self.closure(&args[0], &[k("")])?)),
             B::Fold => {
                 let init = self.expr(&args[0])?;
-                val(format!(
-                    "{it}.fold({init}, {})",
-                    self.closure(&args[1], &[(None, ""), k("")])?
-                ))
+                val(format!("{it}.fold({init}, {})", self.closure(&args[1], &[(None, ""), k("")])?))
             }
             B::Push => {
                 // (in place when the array is owned and dead here: amortized O(1))
                 let v = self.owned(recv, &rf, &rt);
-                val(format!(
-                    "{{ let mut __zs_v = {v}; __zs_v.push({}); __zs_v }}",
-                    self.expr(&args[0])?
-                ))
+                val(format!("{{ let mut __zs_v = {v}; __zs_v.push({}); __zs_v }}", self.expr(&args[0])?))
             }
             B::Concat => {
                 let v = self.owned(recv, &rf, &rt);
                 let (o, _) = self.borrowed(&args[0])?;
-                let ext = if self.copy(&el) {
-                    format!("__zs_v.extend_from_slice({o})")
-                } else {
-                    format!("__zs_v.extend(({o}).iter().cloned())")
-                };
+                let ext = if self.copy(&el) { format!("__zs_v.extend_from_slice({o})") } else { format!("__zs_v.extend(({o}).iter().cloned())") };
                 val(format!("{{ let mut __zs_v = {v}; {ext}; __zs_v }}"))
             }
             B::Sqrt => val(format!("{recv}.sqrt()")),
@@ -2057,11 +1491,7 @@ impl<'a> Lower<'a> {
     }
 
     fn braced(s: String) -> String {
-        if s.starts_with('{') {
-            s
-        } else {
-            format!("{{ {s} }}")
-        }
+        if s.starts_with('{') { s } else { format!("{{ {s} }}") }
     }
 
     fn block(&mut self, e: &Expr) -> LResult<String> {

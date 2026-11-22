@@ -193,12 +193,7 @@ struct Kernel {
 type SResult<X> = Result<X, (Pos, String)>;
 
 fn no<X>(pos: Pos, what: &str) -> SResult<X> {
-    Err((
-        pos,
-        format!(
-            "@simd: {what} (a kernel is a map / sum over an array or `range(0, n)`, or `range(0, m).map((r) => ..)` around one inner sum; arithmetic on one numeric type)"
-        ),
-    ))
+    Err((pos, format!("@simd: {what} (a kernel is a map / sum over an array or `range(0, n)`, or `range(0, m).map((r) => ..)` around one inner sum; arithmetic on one numeric type)")))
 }
 
 struct Ctx<'a> {
@@ -219,10 +214,7 @@ struct Ctx<'a> {
 impl Ctx<'_> {
     fn array_param(&self, e: &Expr) -> Option<usize> {
         match &e.kind {
-            EK::Var(n) => self
-                .params
-                .iter()
-                .position(|p| p.0 == *n && p.1 == PK::Array),
+            EK::Var(n) => self.params.iter().position(|p| p.0 == *n && p.1 == PK::Array),
             _ => None,
         }
     }
@@ -234,30 +226,15 @@ impl Ctx<'_> {
     fn count(&self, e: &Expr) -> SResult<Count> {
         match &e.kind {
             EK::Lit(Lit::Int(n)) => Ok(Count::Const(*n as i32)),
-            EK::Var(n) => match self
-                .params
-                .iter()
-                .position(|p| p.0 == *n && p.1 != PK::Array)
-            {
+            EK::Var(n) => match self.params.iter().position(|p| p.0 == *n && p.1 != PK::Array) {
                 Some(k) if self.int_param(k) => Ok(Count::Param(k)),
-                _ => no(
-                    e.pos,
-                    "a count other than an i32 parameter, a literal or `a.len()`",
-                ),
+                _ => no(e.pos, "a count other than an i32 parameter, a literal or `a.len()`"),
             },
-            EK::Method(a, _, _) if self.info.builtin.get(&e.id) == Some(&Builtin::Len) => {
-                match self.array_param(a) {
-                    Some(k) => Ok(Count::Len(k)),
-                    None => no(
-                        e.pos,
-                        "the length of something other than an array parameter",
-                    ),
-                }
-            }
-            _ => no(
-                e.pos,
-                "a count other than an i32 parameter, a literal or `a.len()`",
-            ),
+            EK::Method(a, _, _) if self.info.builtin.get(&e.id) == Some(&Builtin::Len) => match self.array_param(a) {
+                Some(k) => Ok(Count::Len(k)),
+                None => no(e.pos, "the length of something other than an array parameter"),
+            },
+            _ => no(e.pos, "a count other than an i32 parameter, a literal or `a.len()`"),
         }
     }
 
@@ -272,12 +249,7 @@ impl Ctx<'_> {
             },
             EK::Bin("+", a, b) => IE::Add(Box::new(self.ie(a)?), Box::new(self.ie(b)?)),
             EK::Bin("*", a, b) => IE::Mul(Box::new(self.ie(a)?), Box::new(self.ie(b)?)),
-            _ => {
-                return no(
-                    e.pos,
-                    "this index (an index is `i` or `off + i`, `off` affine in `r`)",
-                );
-            }
+            _ => return no(e.pos, "this index (an index is `i` or `off + i`, `off` affine in `r`)"),
         })
     }
 
@@ -306,15 +278,10 @@ impl Ctx<'_> {
                 }
             }
             EK::Index(a, i) => {
-                let Some(k) = self.array_param(a) else {
-                    return no(pos, "indexing something other than an array parameter");
-                };
+                let Some(k) = self.array_param(a) else { return no(pos, "indexing something other than an array parameter") };
                 if self.lane.is_some() {
                     if matches!(self.lane, Some((_, Some(_)))) {
-                        return no(
-                            pos,
-                            "indexing inside `xs.map` / `xs.fold` (loop over `range(0, xs.len())`)",
-                        );
+                        return no(pos, "indexing inside `xs.map` / `xs.fold` (loop over `range(0, xs.len())`)");
                     }
                     // the inner loop: `a[i]`, `a[off + i]`, `a[i + off]`
                     let off = if self.is_index_var(i) {
@@ -323,12 +290,7 @@ impl Ctx<'_> {
                         match &i.kind {
                             EK::Bin("+", l, r) if self.is_index_var(r) => Some(self.ie(l)?),
                             EK::Bin("+", l, r) if self.is_index_var(l) => Some(self.ie(r)?),
-                            _ => {
-                                return no(
-                                    pos,
-                                    "an index other than `i` or `off + i` in the inner loop",
-                                );
-                            }
+                            _ => return no(pos, "an index other than `i` or `off + i` in the inner loop"),
                         }
                     };
                     if off.as_ref().is_some_and(|o| o.degree() > 1) {
@@ -354,9 +316,7 @@ impl Ctx<'_> {
                 VE::Bin(op, Box::new(self.ve(l)?), Box::new(self.ve(r)?))
             }
             EK::Un("-", x) => VE::Neg(Box::new(self.ve(x)?)),
-            EK::Method(..) if matches!(self.info.builtin.get(&e.id), Some(Builtin::Fold)) => {
-                self.inner_fold(e)?
-            }
+            EK::Method(..) if matches!(self.info.builtin.get(&e.id), Some(Builtin::Fold)) => self.inner_fold(e)?,
             EK::Method(x, _, args) if float => match self.info.builtin.get(&e.id) {
                 Some(Builtin::Sqrt) => VE::Sqrt(Box::new(self.ve(x)?)),
                 Some(Builtin::Abs) => VE::Abs(Box::new(self.ve(x)?)),
@@ -371,10 +331,7 @@ impl Ctx<'_> {
     /// The one inner fold of an outer map's body
     fn inner_fold(&mut self, e: &Expr) -> SResult<VE> {
         if self.outer_var.is_none() || self.lane.is_some() || self.inner.is_some() {
-            return no(
-                e.pos,
-                "a fold here (one inner fold, in the body of `range(0, m).map((r) => ..)`)",
-            );
+            return no(e.pos, "a fold here (one inner fold, in the body of `range(0, m).map((r) => ..)`)");
         }
         let inner = self.inner_loop(e)?;
         self.inner = Some(inner);
@@ -383,9 +340,7 @@ impl Ctx<'_> {
 
     /// `xs.map(..)` / `range(0, n).fold(..)` ...
     fn inner_loop(&mut self, e: &Expr) -> SResult<Inner> {
-        let EK::Method(recv, _, margs) = &e.kind else {
-            return no(e.pos, "the body");
-        };
+        let EK::Method(recv, _, margs) = &e.kind else { return no(e.pos, "the body") };
         let b = self.info.builtin.get(&e.id).copied();
         let (count, lane_array) = match &recv.kind {
             EK::Call(f, ra) if matches!(self.info.callee.get(&f.id), Some(Callee::Range)) => {
@@ -396,12 +351,7 @@ impl Ctx<'_> {
             }
             _ => match self.array_param(recv) {
                 Some(k) => (Count::Len(k), Some(k)),
-                None => {
-                    return no(
-                        recv.pos,
-                        "a loop over something other than an array parameter or `range(0, n)`",
-                    );
-                }
+                None => return no(recv.pos, "a loop over something other than an array parameter or `range(0, n)`"),
             },
         };
         let closure = |k: usize| -> SResult<(&Vec<(String, Option<TyS>)>, &Expr)> {
@@ -415,20 +365,14 @@ impl Ctx<'_> {
                 let (ps, body) = closure(0)?;
                 self.lane = Some((ps[0].0.clone(), lane_array));
                 let v = self.ve(body)?;
-                Inner {
-                    count,
-                    fold: None,
-                    body: v,
-                }
+                Inner { count, fold: None, body: v }
             }
             Some(Builtin::Fold) => {
                 let init = self.ve(&margs[0])?;
                 let (ps, body) = closure(1)?;
                 let acc = ps[0].0.clone();
                 self.lane = Some((ps[1].0.clone(), lane_array));
-                let EK::Bin("+", l, r) = &body.kind else {
-                    return no(body.pos, "a fold other than a sum `acc + ..`");
-                };
+                let EK::Bin("+", l, r) = &body.kind else { return no(body.pos, "a fold other than a sum `acc + ..`") };
                 let is_acc = |x: &Expr| matches!(&x.kind, EK::Var(n) if *n == acc);
                 let term = if is_acc(l) {
                     r
@@ -438,11 +382,7 @@ impl Ctx<'_> {
                     return no(body.pos, "a fold other than a sum `acc + ..`");
                 };
                 let v = self.ve(term)?;
-                Inner {
-                    count,
-                    fold: Some(init),
-                    body: v,
-                }
+                Inner { count, fold: Some(init), body: v }
             }
             _ => return no(e.pos, "a method other than `map` / `fold`"),
         };
@@ -466,11 +406,7 @@ fn el_of(t: &Ty) -> Option<El> {
 
 fn has_fold(e: &Expr, info: &Info) -> bool {
     match &e.kind {
-        EK::Method(r, _, a) => {
-            info.builtin.get(&e.id) == Some(&Builtin::Fold)
-                || has_fold(r, info)
-                || a.iter().any(|x| has_fold(x, info))
-        }
+        EK::Method(r, _, a) => info.builtin.get(&e.id) == Some(&Builtin::Fold) || has_fold(r, info) || a.iter().any(|x| has_fold(x, info)),
         EK::Bin(_, l, r) => has_fold(l, info) || has_fold(r, info),
         EK::Un(_, x) => has_fold(x, info),
         _ => false,
@@ -479,19 +415,7 @@ fn has_fold(e: &Expr, info: &Info) -> bool {
 
 /// Recognizes the kernel in a `@simd fn`
 fn kernel(it: &Item, info: &Info) -> SResult<Kernel> {
-    let Item::Fn {
-        name,
-        public,
-        relaxed,
-        args,
-        body,
-        pos,
-        generics,
-        ..
-    } = it
-    else {
-        unreachable!()
-    };
+    let Item::Fn { name, public, relaxed, args, body, pos, generics, .. } = it else { unreachable!() };
     if !generics.is_empty() {
         return no(*pos, "a generic kernel (write one per type)");
     }
@@ -503,12 +427,7 @@ fn kernel(it: &Item, info: &Info) -> SResult<Kernel> {
         Ty::Array(e) | Ty::Typed(e) => el_of(e),
         _ => None,
     };
-    let el = sig.args.iter().find_map(elem).ok_or_else(|| {
-        (
-            *pos,
-            "@simd: a kernel takes an array of f64, f32 or i32".to_string(),
-        )
-    })?;
+    let el = sig.args.iter().find_map(elem).ok_or_else(|| (*pos, "@simd: a kernel takes an array of f64, f32 or i32".to_string()))?;
     let want = el.ty();
     let mut params = vec![];
     for ((a, _), t) in args.iter().zip(&sig.args) {
@@ -516,29 +435,12 @@ fn kernel(it: &Item, info: &Info) -> SResult<Kernel> {
             Ty::Array(e) | Ty::Typed(e) if **e == want => PK::Array,
             t if *t == want => PK::Scalar,
             Ty::I32 => PK::Index,
-            t => {
-                return Err((
-                    *pos,
-                    format!(
-                        "@simd: the parameter `{a}` is {t:?}: a kernel's arrays and scalars are {want:?} (and i32 counts / offsets)"
-                    ),
-                ));
-            }
+            t => return Err((*pos, format!("@simd: the parameter `{a}` is {t:?}: a kernel's arrays and scalars are {want:?} (and i32 counts / offsets)"))),
         };
         params.push((a.clone(), k));
     }
     let typed_result = matches!(sig.ret, Ty::Typed(_));
-    let mut cx = Ctx {
-        info,
-        el,
-        params: params.clone(),
-        scalars: HashMap::new(),
-        nslots: params.len(),
-        outer_var: None,
-        lane: None,
-        inner: None,
-        reads: vec![],
-    };
+    let mut cx = Ctx { info, el, params: params.clone(), scalars: HashMap::new(), nslots: params.len(), outer_var: None, lane: None, inner: None, reads: vec![] };
     for (k, (a, pk)) in params.iter().enumerate() {
         if *pk == PK::Scalar {
             cx.scalars.insert(a.clone(), k);
@@ -557,9 +459,7 @@ fn kernel(it: &Item, info: &Info) -> SResult<Kernel> {
                 cx.scalars.insert(n.clone(), cx.nslots);
                 cx.nslots += 1;
             }
-            Stmt::Let(_, _, x) | Stmt::LetMut(_, _, x) | Stmt::Expr(x) => {
-                return no(x.pos, "a statement other than `let x = <scalar>`");
-            }
+            Stmt::Let(_, _, x) | Stmt::LetMut(_, _, x) | Stmt::Expr(x) => return no(x.pos, "a statement other than `let x = <scalar>`"),
         }
     }
     // an outer map whose body has an inner fold: `range(0, m).map((r) => .. range(0, n).fold(..) ..)`
@@ -575,24 +475,15 @@ fn kernel(it: &Item, info: &Info) -> SResult<Kernel> {
     };
     let (outer, inner) = match outer_map {
         Some((recv, margs)) => {
-            let EK::Call(_, ra) = &recv.kind else {
-                unreachable!()
-            };
+            let EK::Call(_, ra) = &recv.kind else { unreachable!() };
             if !matches!(ra[0].kind, EK::Lit(Lit::Int(0))) {
                 return no(recv.pos, "a range that does not start at 0");
             }
             let m = cx.count(&ra[1])?;
-            let EK::Closure(ps, ob) = &margs[0].kind else {
-                unreachable!()
-            };
+            let EK::Closure(ps, ob) = &margs[0].kind else { unreachable!() };
             cx.outer_var = Some(ps[0].0.clone());
             let f = cx.ve(ob)?;
-            let inner = cx.inner.take().ok_or_else(|| {
-                (
-                    ob.pos,
-                    "@simd: the outer map's body needs one inner fold".to_string(),
-                )
-            })?;
+            let inner = cx.inner.take().ok_or_else(|| (ob.pos, "@simd: the outer map's body needs one inner fold".to_string()))?;
             if inner.fold.is_none() {
                 return no(ob.pos, "a map inside a map");
             }
@@ -600,18 +491,7 @@ fn kernel(it: &Item, info: &Info) -> SResult<Kernel> {
         }
         None => (None, cx.inner_loop(tail)?),
     };
-    Ok(Kernel {
-        name: name.clone(),
-        public: *public,
-        relaxed: *relaxed,
-        el,
-        params,
-        lets,
-        outer,
-        inner,
-        typed_result,
-        reads: cx.reads,
-    })
+    Ok(Kernel { name: name.clone(), public: *public, relaxed: *relaxed, el, params, lets, outer, inner, typed_result, reads: cx.reads })
 }
 
 // ---------------------------------------------------------------- wasm encoding
@@ -865,11 +745,7 @@ impl Code<'_> {
             VE::Max(a, b) | VE::Min(a, b) => {
                 self.scalar(a);
                 self.scalar(b);
-                let o = if matches!(v, VE::Max(..)) {
-                    self.o.max.0
-                } else {
-                    self.o.min.0
-                };
+                let o = if matches!(v, VE::Max(..)) { self.o.max.0 } else { self.o.min.0 };
                 self.op(o);
             }
         }
@@ -890,19 +766,9 @@ impl Code<'_> {
                 self.simd(self.o.splat);
             }
             // relaxed: `a * b + c` as one fused multiply-add
-            VE::Bin("+", a, b)
-                if self.k.relaxed
-                    && self.k.el.float()
-                    && (matches!(**a, VE::Bin("*", ..)) || matches!(**b, VE::Bin("*", ..))) =>
-            {
-                let (m, c) = if matches!(**a, VE::Bin("*", ..)) {
-                    (a, b)
-                } else {
-                    (b, a)
-                };
-                let VE::Bin(_, x, y) = &**m else {
-                    unreachable!()
-                };
+            VE::Bin("+", a, b) if self.k.relaxed && self.k.el.float() && (matches!(**a, VE::Bin("*", ..)) || matches!(**b, VE::Bin("*", ..))) => {
+                let (m, c) = if matches!(**a, VE::Bin("*", ..)) { (a, b) } else { (b, a) };
+                let VE::Bin(_, x, y) = &**m else { unreachable!() };
                 self.vector(x);
                 self.vector(y);
                 self.vector(c);
@@ -991,9 +857,7 @@ impl Code<'_> {
             self.counted(self.i, self.nv, lanes, &|c| {
                 if relaxed_fma {
                     // vacc = madd(x, y, vacc)
-                    let VE::Bin(_, x, y) = &body else {
-                        unreachable!()
-                    };
+                    let VE::Bin(_, x, y) = &body else { unreachable!() };
                     c.vector(x);
                     c.vector(y);
                     c.get(c.vacc);
@@ -1090,8 +954,7 @@ fn function(k: &Kernel) -> (Vec<u8>, Vec<u8>, Vec<u8>) {
             offs.push((o.clone(), 0));
         }
     }
-    let (i, r, n_inner, m_outer, nv) =
-        (nparams, nparams + 1, nparams + 2, nparams + 3, nparams + 4);
+    let (i, r, n_inner, m_outer, nv) = (nparams, nparams + 1, nparams + 2, nparams + 3, nparams + 4);
     let mut next = nparams + 5;
     for o in &mut offs {
         o.1 = next;
@@ -1113,22 +976,7 @@ fn function(k: &Kernel) -> (Vec<u8>, Vec<u8>, Vec<u8>) {
         next += 1;
     }
     let n_vec = 1 + slot.len() as u32;
-    let mut c = Code {
-        k,
-        o: ops(el),
-        c: vec![],
-        p_local,
-        slot,
-        splat,
-        i,
-        r,
-        n_inner,
-        nv,
-        acc,
-        vacc,
-        offs,
-        out,
-    };
+    let mut c = Code { k, o: ops(el), c: vec![], p_local, slot, splat, i, r, n_inner, nv, acc, vacc, offs, out };
     // the lets, then a splat of every scalar
     for (j, l) in k.lets.iter().enumerate() {
         c.scalar(l);
@@ -1250,9 +1098,7 @@ fn base64(b: &[u8]) -> String {
     const A: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
     let mut s = String::new();
     for c in b.chunks(3) {
-        let n = (c[0] as u32) << 16
-            | (*c.get(1).unwrap_or(&0) as u32) << 8
-            | *c.get(2).unwrap_or(&0) as u32;
+        let n = (c[0] as u32) << 16 | (*c.get(1).unwrap_or(&0) as u32) << 8 | *c.get(2).unwrap_or(&0) as u32;
         for k in 0..4 {
             if k <= c.len() {
                 s.push(A[(n >> (18 - 6 * k) & 63) as usize] as char);
@@ -1270,17 +1116,11 @@ pub struct Simd {
 }
 
 /// The kernels of the `@simd fn`s `names`: the module (embedded in the glue) and the glue
-pub fn generate(
-    items: &[Item],
-    info: &Info,
-    names: &[String],
-) -> Result<Option<Simd>, Vec<(Pos, String)>> {
+pub fn generate(items: &[Item], info: &Info, names: &[String]) -> Result<Option<Simd>, Vec<(Pos, String)>> {
     let mut ks = vec![];
     let mut errs = vec![];
     for it in items {
-        if let Item::Fn {
-            name, simd: true, ..
-        } = it
+        if let Item::Fn { name, simd: true, .. } = it
             && names.contains(name)
         {
             match kernel(it, info) {
@@ -1296,14 +1136,8 @@ pub fn generate(
         return Ok(None);
     }
     let wasm = module(&ks);
-    let mut g = String::from(
-        "// ---- @simd kernels: a v128 module written by zsc (no allocator: the glue lays out each call's arrays)\n",
-    );
-    let _ = writeln!(
-        g,
-        "const $simdBytes = Uint8Array.from(atob({:?}), (c) => c.charCodeAt(0));",
-        base64(&wasm)
-    );
+    let mut g = String::from("// ---- @simd kernels: a v128 module written by zsc (no allocator: the glue lays out each call's arrays)\n");
+    let _ = writeln!(g, "const $simdBytes = Uint8Array.from(atob({:?}), (c) => c.charCodeAt(0));", base64(&wasm));
     g.push_str("const $simd = (await WebAssembly.instantiate($simdBytes)).instance.exports;\n");
     g.push_str("function $simdArray(v) {\n  const r = new Array(v.length);\n  for (let i = 0; i < v.length; i++) r[i] = v[i];\n  return r;\n}\n");
     g.push_str("// (an arena per call: the arrays from offset 0, 16-byte aligned; the memory grows when they do not fit)\nfunction $simdLayout(bytes) {\n  let at = 0;\n  const offs = bytes.map((b) => { const o = at; at += (b + 15) & ~15; return o; });\n  const have = $simd.memory.buffer.byteLength;\n  if (at > have) $simd.memory.grow(Math.ceil((at - have) / 65536));\n  return offs;\n}\n");
@@ -1312,13 +1146,7 @@ pub fn generate(
         let (arr, sz) = (k.el.js_array(), k.el.size());
         let ps: Vec<&str> = k.params.iter().map(|p| p.0.as_str()).collect();
         let narrays = k.params.iter().filter(|p| p.1 == PK::Array).count();
-        let _ = writeln!(
-            g,
-            "{}function {}({}) {{",
-            if k.public { "export " } else { "" },
-            k.name,
-            ps.join(", ")
-        );
+        let _ = writeln!(g, "{}function {}({}) {{", if k.public { "export " } else { "" }, k.name, ps.join(", "));
         let _ = writeln!(g, "  const $n = {};", k.inner.count.js(&k.params));
         if let Some((m, _)) = &k.outer {
             let _ = writeln!(g, "  const $m = {};", m.js(&k.params));
@@ -1333,57 +1161,34 @@ pub fn generate(
             seen.push(format!("{rd:?}"));
             let (a, off, outer_ix) = rd;
             let an = &k.params[*a].0;
-            let guard = if k.outer.is_some() {
-                "$n > 0 && $m > 0"
-            } else {
-                "$n > 0"
-            };
+            let guard = if k.outer.is_some() { "$n > 0 && $m > 0" } else { "$n > 0" };
             match (off, outer_ix) {
                 (None, None) => {
                     let _ = writeln!(g, "  if ({guard}) $simdBounds({an}.length, 0, $n);");
                 }
                 (Some(o), _) => {
                     let (lo, hi) = (o.js(&k.params, "0"), o.js(&k.params, r_hi));
-                    let _ = writeln!(
-                        g,
-                        "  if ({guard}) $simdBounds({an}.length, Math.min({lo}, {hi}), Math.max({lo}, {hi}) + $n);"
-                    );
+                    let _ = writeln!(g, "  if ({guard}) $simdBounds({an}.length, Math.min({lo}, {hi}), Math.max({lo}, {hi}) + $n);");
                 }
                 (None, Some(ix)) => {
                     let (lo, hi) = (ix.js(&k.params, "0"), ix.js(&k.params, r_hi));
-                    let _ = writeln!(
-                        g,
-                        "  if ($m > 0) $simdBounds({an}.length, Math.min({lo}, {hi}), Math.max({lo}, {hi}) + 1);"
-                    );
+                    let _ = writeln!(g, "  if ($m > 0) $simdBounds({an}.length, Math.min({lo}, {hi}), Math.max({lo}, {hi}) + 1);");
                 }
             }
         }
         let out_len = if k.outer.is_some() { "$m" } else { "$n" };
         let has_out = k.inner.fold.is_none() || k.outer.is_some();
-        let mut sizes: Vec<String> = k
-            .params
-            .iter()
-            .filter(|p| p.1 == PK::Array)
-            .map(|p| format!("{}.length * {sz}", p.0))
-            .collect();
+        let mut sizes: Vec<String> = k.params.iter().filter(|p| p.1 == PK::Array).map(|p| format!("{}.length * {sz}", p.0)).collect();
         if has_out {
             sizes.push(format!("{out_len} * {sz}"));
         }
         let offs: Vec<String> = (0..sizes.len()).map(|j| format!("$o{j}")).collect();
-        let _ = writeln!(
-            g,
-            "  const [{}] = $simdLayout([{}]);",
-            offs.join(", "),
-            sizes.join(", ")
-        );
+        let _ = writeln!(g, "  const [{}] = $simdLayout([{}]);", offs.join(", "), sizes.join(", "));
         let mut cargs = vec![];
         let mut ai = 0;
         for (p, pk) in &k.params {
             if *pk == PK::Array {
-                let _ = writeln!(
-                    g,
-                    "  new {arr}($simd.memory.buffer, $o{ai}, {p}.length).set({p});"
-                );
+                let _ = writeln!(g, "  new {arr}($simd.memory.buffer, $o{ai}, {p}.length).set({p});");
                 cargs.push(format!("$o{ai}"));
                 cargs.push(format!("{p}.length"));
                 ai += 1;
