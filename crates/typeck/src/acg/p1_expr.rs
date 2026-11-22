@@ -386,22 +386,39 @@ impl Cx<'_> {
                 // (フィールドがなく Deref を実装した型 (`self.prog` で self: &Inf): `(*self.deref()).prog`)
                 if let Some(Ty::Struct(sid)) = self.peek(base).map(|t| self.strip_refs(t)) {
                     if self.prog.field(sid, fname).is_none() {
-                        // (a Deref chain that never reaches a field of that name: `impl Deref for Foo { type Target = Foo }`)
+                        // (a Deref chain that does not reach a field of that name within rustc's default recursion
+                        // limit (128): a cycle (`impl Deref for Foo { type Target = Foo }`), or a chain that long,
+                        // through generic targets too (`W<W<..>>` with `Target = T`). The borrow check follows a
+                        // place's derefs as far, the same way (bk_place, bk_overloaded_shr))
                         let mut t = sid;
-                        let mut cycle = false;
-                        for _ in 0..16 {
-                            let Some(d) = self.prog.method(t, "deref") else { break };
-                            let Ty::Ref(_, Ty::Struct(n)) = self.prog.sigs[d as usize].ret else { break };
-                            t = *n;
-                            if self.prog.field(t, fname).is_some() {
+                        let mut over = true;
+                        for _ in 0..128 {
+                            let Some(d) = self.prog.method(t, "deref") else {
+                                over = false;
                                 break;
+                            };
+                            let Ty::Ref(_, i) = self.prog.sigs[d as usize].ret else {
+                                over = false;
+                                break;
+                            };
+                            let args: Vec<Option<Ty>> = self.prog.structs[t as usize].args.iter().map(|&a| Some(a)).collect();
+                            // (a target that is a reference (`Target = &'static S`) is followed through it)
+                            let mut target = self.prog.partial_subst(*i, &args);
+                            while let Ty::Ref(_, x) = target {
+                                target = *x;
                             }
-                            if t == sid {
-                                cycle = true;
+                            let Ty::Struct(n) = target else {
+                                over = false;
+                                break;
+                            };
+                            t = n;
+                            if self.prog.field(t, fname).is_some() {
+                                over = false;
                                 break;
                             }
                         }
-                        if cycle {
+                        // (the rewrites below lower the access again from the target: counted across them)
+                        if over || self.deref_depth >= 128 {
                             let sname = self.prog.structs[sid as usize].name.clone();
                             return err(SP, format!("reached the recursion limit while auto-dereferencing `{sname}` (E0055)"));
                         }
@@ -412,7 +429,10 @@ impl Cx<'_> {
                                     self.deref_shared(u);
                                 }
                             }
-                            return self.place(f2);
+                            self.deref_depth += 1;
+                            let r = self.place(f2);
+                            self.deref_depth -= 1;
+                            return r;
                         }
                     }
                 }
@@ -1231,6 +1251,8 @@ impl Cx<'_> {
                         None
                     }
                 };
+                // (a closure's exit: what its captures held by value hold escapes it)
+                self.bk_cap_escape();
                 self.drop_for_exit(0, 0);
                 self.emit_return(v);
                 Ok(self.dead())
@@ -2090,7 +2112,17 @@ impl Cx<'_> {
         let Expr::Closure(_, inputs, _, _, _) = c else { return err(SP, "internal: expected a closure") };
         let prog = self.prog;
         let hint = self.closure_hint.take();
-        let bound = self.closure_bound.take();
+        let mut bound = self.closure_bound.take();
+        // (made where a trait object of a closure trait is expected (`&mut |y| x = Some(y)` for a
+        // `&mut dyn FnMut(&isize)`): its text is the bound its body is checked with, its lifetimes from outside)
+        if bound.is_none() && self.user_code && self.bk.level >= 2 && regionck::enabled() {
+            if let Some(Ty::Dyn(d)) = expected {
+                let fn_trait = ["FnOnce", "FnMut", "Fn"].iter().find_map(|k| d.trim_start().strip_prefix(k)).is_some_and(|r| r.trim_start().starts_with('('));
+                if fn_trait {
+                    bound = Some(Box::new((d.to_string(), self.rg.lt_names.clone(), vec![])));
+                }
+            }
+        }
         let to_prelude = std::mem::take(&mut self.closure_prelude);
         let fn_only = self.closure_fn_only;
         self.closure_fn_only = false;
@@ -2132,6 +2164,12 @@ impl Cx<'_> {
             let by_ref: Vec<&str> = cd.captures.iter().enumerate().filter(|(i, _)| !*mv && !cd.moved.get(*i).copied().unwrap_or(false)).map(|(_, n)| n.as_str()).collect();
             if let Some(sp) = regionck::fnmut_escape(body, &by_ref) {
                 return Err(self.at(sp, "captured variable cannot escape `FnMut` closure body (a mutable borrow of what the closure captures is returned)".to_string()));
+            }
+            // (its body's borrow check finds the rest: a closure it returns that mutates what it captures)
+            if !by_ref.is_empty() {
+                let mut g = self.insts.lock().unwrap();
+                g.kind_free.insert(cid);
+                g.fx_log.push(cid);
             }
         }
         let mut caps = vec![];
@@ -3076,8 +3114,16 @@ impl Cx<'_> {
 
     /// 関数でない値の呼び出し `f(x)`: クロージャ (の参照) か `&dyn Fn`
     pub(crate) fn call_value(&mut self, c: &Expr, expected: Option<Ty>) -> R<V> {
+        let t0 = self.bk.call_temps.len();
+        let r = self.call_value_inner(c, expected);
+        self.bk_call_temps_end(t0);
+        r
+    }
+
+    fn call_value_inner(&mut self, c: &Expr, expected: Option<Ty>) -> R<V> {
         let Expr::Call(func, cargs) = c else { return err(SP, "internal: expected a call") };
         // 呼び出しはムーブしない (Fn / FnMut は参照で呼ぶ)。一時値なら文の終わりまで所有する
+        self.bk_frame();
         let (v, mut t) = if is_place_expr(func) && !matches!(&**func, Expr::Path(..) if self.fn_item(func).is_some()) {
             let p = self.place(func)?;
             self.read(p)
@@ -3088,6 +3134,7 @@ impl Cx<'_> {
             }
             r
         };
+        let callee_srcs = self.bk_frame_end();
         let Some(mut v) = v else {
             return err(SP, "expected a function");
         };
@@ -3128,6 +3175,20 @@ impl Cx<'_> {
                 self.bk.no_loan_src = true;
                 self.bk_borrow(x, true, err_pos(func));
                 self.bk.no_loan_src = false;
+            }
+        }
+        // (a closure called: what it borrows is held until the call, after its arguments, as rustc's `&c` of the
+        // call (`c(take(v))` with c capturing v by reference is E0505))
+        if let Ty::Struct(sid) = t {
+            if self.prog.closure_of_struct.contains_key(&self.prog.base_of(sid)) {
+                // (and the closure itself, which the call borrows: `c(drop(c))` is E0505)
+                let mut hold = callee_srcs.clone();
+                if is_place_expr(func) && self.bk_on() {
+                    if let Some(ln) = self.bk_loan_only(func, false) {
+                        hold.push(borrowck::Src::Loan(ln));
+                    }
+                }
+                self.bk_callee_hold(&hold);
             }
         }
         self.bk_frame();

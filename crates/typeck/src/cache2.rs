@@ -9,7 +9,7 @@ use std::sync::Mutex;
 
 use crate::acg::{Blob, BlobReloc, Target};
 use crate::fxhash::FxMap;
-use crate::program::{Insts, Program};
+use crate::program::{CloFact, CloRg, Insts, Program};
 
 pub use crate::key::{Key, KeyHasher};
 
@@ -211,7 +211,8 @@ fn get_func(r: &mut Rd, tag: u8, prog: &Program, insts: &Mutex<Insts>) -> Option
 
 /// 機械語 + 再配置 + 無名データ + vtable + panic の場所を書く (整数は可変長、オフセットと行は前からの差)
 pub fn encode_blob(b: &Blob, prog: &Program, insts: &Insts, out: &mut Vec<u8>) {
-    put_uv(out, b.align as u64);
+    // (the low bit: the closures' facts follow at the end)
+    put_uv(out, (b.align as u64) << 1 | !b.clo_facts.is_empty() as u64);
     put_bytes(out, &b.code);
     put_uv(out, b.relocs.len() as u64);
     let mut prev = 0u32;
@@ -269,12 +270,79 @@ pub fn encode_blob(b: &Blob, prog: &Program, insts: &Insts, out: &mut Vec<u8>) {
         put_uv(out, col as u64);
     }
     put_uv(out, b.line_base.map_or(0, |l| l as u64 + 1));
+    // (what the lowering told the closures it makes: by the body's name)
+    if b.clo_facts.is_empty() {
+        return;
+    }
+    put_uv(out, b.clo_facts.len() as u64);
+    for f in &b.clo_facts {
+        put_bytes(out, prog.names[f.body as usize].as_bytes());
+        out.push(f.kind_free as u8 | (f.rg.is_some() as u8) << 1);
+        if let Some(rg) = &f.rg {
+            put_uv(out, rg.codes.len() as u64);
+            for c in &rg.codes {
+                put_bytes(out, c);
+            }
+            put_uv(out, rg.caps.len() as u64);
+            for c in &rg.caps {
+                match c {
+                    Some(c) => {
+                        out.push(1);
+                        put_bytes(out, c);
+                    }
+                    None => out.push(0),
+                }
+            }
+            put_uv(out, rg.known.len() as u64);
+            for &(l, s) in &rg.known {
+                out.extend_from_slice(&[l, s]);
+            }
+            put_uv(out, rg.lts.len() as u64);
+            for (n, c) in &rg.lts {
+                put_bytes(out, n.as_bytes());
+                out.push(*c);
+            }
+        }
+    }
+}
+
+fn get_clo_fact(r: &mut Rd, prog: &Program) -> Option<CloFact> {
+    let body = *prog.index.get(get_name(r)?)?;
+    let fl = r.u8()?;
+    let rg = if fl & 2 != 0 {
+        let mut rg = CloRg::default();
+        for _ in 0..r.uv()? {
+            let n = r.uv()? as usize;
+            rg.codes.push(r.take(n)?.to_vec());
+        }
+        for _ in 0..r.uv()? {
+            rg.caps.push(match r.u8()? {
+                0 => None,
+                _ => {
+                    let n = r.uv()? as usize;
+                    Some(r.take(n)?.to_vec())
+                }
+            });
+        }
+        for _ in 0..r.uv()? {
+            rg.known.push((r.u8()?, r.u8()?));
+        }
+        for _ in 0..r.uv()? {
+            let n = get_name(r)?.to_string();
+            rg.lts.push((n, r.u8()?));
+        }
+        Some(Box::new(rg))
+    } else {
+        None
+    };
+    Some(CloFact { body, kind_free: fl & 1 != 0, rg })
 }
 
 /// encode_blob の逆。呼び先のインスタンスは insts に要求し直す
 pub fn decode_blob(d: &[u8], prog: &Program, insts: &Mutex<Insts>) -> Option<Blob> {
     let mut r = Rd { d, pos: 0 };
-    let align = r.uv()? as u32;
+    let a0 = r.uv()?;
+    let align = (a0 >> 1) as u32;
     let n = r.uv()? as usize;
     let code = r.take(n)?.to_vec();
     let nr = r.uv()? as usize;
@@ -330,7 +398,17 @@ pub fn decode_blob(d: &[u8], prog: &Program, insts: &Mutex<Insts>) -> Option<Blo
         0 => None,
         l => Some(l as u32 - 1),
     };
-    Some(Blob { align, code, relocs, datas, vtables, traps, line_base, code_ref: None })
+    // (the closures' facts go back to insts: their bodies are checked as the lowering, not made here, told them)
+    let nf = if a0 & 1 != 0 { r.uv()? as usize } else { 0 };
+    let mut clo_facts = Vec::with_capacity(nf);
+    for _ in 0..nf {
+        clo_facts.push(get_clo_fact(&mut r, prog)?);
+    }
+    if !clo_facts.is_empty() {
+        let mut g = insts.lock().unwrap();
+        g.give_facts(&clo_facts);
+    }
+    Some(Blob { align, code, relocs, datas, vtables, traps, line_base, code_ref: None, clo_facts })
 }
 
 #[cfg(test)]

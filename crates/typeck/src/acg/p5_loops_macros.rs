@@ -1762,6 +1762,7 @@ impl Cx<'_> {
             };
             self.write(Place::Mem(a, reoff as i32, rety), ev);
         }
+        self.bk_cap_escape();
         self.drop_for_exit(0, 0);
         self.emit_return(Some(a));
         self.b.switch_to_block(cont);
