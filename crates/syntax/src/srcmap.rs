@@ -215,13 +215,14 @@ fn load_file_in(path: &Path, display: &str, mod_dir: &Path, disp_dir: &str, star
         Some(t) => {
             // (the root file's `extern crate` items, for a caller that asked)
             if map.inputs.is_empty() && map.keep_externs {
-                map.externs = crate::cfg::blanked_externs(&src, &t);
+                map.externs = crate::cfg::blanked_externs(&src, &t, cfg);
             }
             t
         }
         None => src,
     };
     map.inputs.push(path.to_path_buf());
+    let configured_len = src.len();
     // (`env!` / `option_env!` read the environment, which file stamps do not cover. A workspace's no-op build reads
     // every file: one more look at the source only when the cfg pass did not read its tokens)
     let src = if env.unwrap_or_else(|| crate::macros::may_use_env(&src)) {
@@ -239,6 +240,10 @@ fn load_file_in(path: &Path, display: &str, mod_dir: &Path, disp_dir: &str, star
         Ok(None) => src,
         Err(e) => return Err(format!("{display}: {e}")),
     };
+    // (the root's `extern crate` items keep their places only while the expansions keep the text's length)
+    if map.inputs.len() == 1 && src.len() != configured_len {
+        map.externs.clear();
+    }
     let fi = map.files.len() as u32;
     map.files.push(display.to_string());
     map.segs.push((start, fi, 1));
