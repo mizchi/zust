@@ -1626,6 +1626,7 @@ fn static_self_const() {
     assert!(d.len() == 1 && d[0].0 == 6 && d[0].1.contains("lifetime may not live long enough"), "{d:?}");
     assert_eq!(check(&format!("{pre}fn f<'a>(_x: &'a i32) -> i32 {{\n    A::<'static>::IC + A::IC\n}}\nfn main() {{}}\n")), vec![]);
 
+}
 
 /// From the review of part 9 (#51): guards protect the places the patterns test, and the deref prefixes of where
 /// bindings come from; `S { .. }` tests nothing (E0510)
@@ -1661,4 +1662,21 @@ fn part9_review_follow_ups() {
     // (an fn in a fn body: E0503 at its own lines, the position the message names too)
     let d = check("fn main() {\n    fn helper() {\n        let mut x = 1;\n        let r = &mut x;\n        let y = x;\n        *r = 2;\n        let _ = y;\n    }\n    helper();\n}\n");
     assert!(d.len() == 1 && d[0].0 == 5 && d[0].1.contains("because it was mutably borrowed (at 4:"), "{d:?}");
+}
+
+/// `break` / `continue` take the locals of the scopes they leave out of scope (E0597), a `Drop` value's too (E0713,
+/// also at a scope's end); `self` is mutable only as `mut self` (E0596)
+#[test]
+fn scope_exits_and_self() {
+    let d = check("fn main() {\n    let r;\n    loop {\n        let x = 1;\n        r = &x;\n        break;\n    }\n    println!(\"{}\", r);\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 5 && d[0].1.contains("`x` does not live long enough"), "{d:?}");
+    let d = check("fn main() {\n    let mut r = &0;\n    for i in 0..3 {\n        let x = i;\n        if i == 1 {\n            r = &x;\n            continue;\n        }\n    }\n    println!(\"{}\", r);\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 6 && d[0].1.contains("`x` does not live long enough"), "{d:?}");
+    let s = "struct Scribble<'a>(&'a mut u32);\nimpl Drop for Scribble<'_> {\n    fn drop(&mut self) {\n        *self.0 = 42;\n    }\n}\n";
+    let d = check(&format!("{s}fn main() {{\n    let mut x = 1;\n    let r;\n    {{\n        let s = Scribble(&mut x);\n        r = &mut *s.0;\n    }}\n    *r = 2;\n}}\n"));
+    assert!(d.len() == 1 && d[0].0 == 12 && d[0].1.contains("E0713"), "{d:?}");
+    let d = check("struct S;\nimpl S {\n    fn bar(&mut self) {}\n    fn imm(self) {\n        (&mut self).bar();\n    }\n}\nfn main() {}\n");
+    assert!(d.len() == 1 && d[0].0 == 5 && d[0].1.contains("`self` is not declared as mutable"), "{d:?}");
+    // (a borrow that ends before the jump, a `Drop` value's borrow that ends in its scope, `mut self`)
+    assert_eq!(check(&format!("{s}struct T(u8);\nimpl T {{\n    fn bar(&mut self) {{}}\n    fn a(mut self) -> u8 {{\n        self.bar();\n        self.0 = 1;\n        self.0\n    }}\n    fn b(&mut self) {{\n        self.bar();\n        let r = &mut *self;\n        r.bar();\n    }}\n}}\nfn main() {{\n    let mut v = vec![];\n    for i in 0..3 {{\n        let x = i;\n        let r = &x;\n        if *r == 1 {{\n            break;\n        }}\n        v.push(*r);\n    }}\n    let mut y = 1;\n    {{\n        let s = Scribble(&mut y);\n        let r = &mut *s.0;\n        *r = 3;\n    }}\n    println!(\"{{:?}}\", v);\n}}\n")), vec![]);
 }

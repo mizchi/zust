@@ -1084,6 +1084,8 @@ impl Cx<'_> {
                 lp.breaks += 1;
                 let (t, d, tt) = (lp.brk, lp.depth, lp.temps);
                 self.drop_for_exit(d, tt);
+                // (the locals of the scopes left go out of scope here: `loop { let x = 1; r = &x; break; }`)
+                self.bk_dead_exit(d, *pos);
                 let args: Vec<Value> = args;
                 self.b.ins().jump(t, &args);
                 Ok(self.dead())
@@ -1096,6 +1098,7 @@ impl Cx<'_> {
                 let lp = &self.loops[li];
                 let (t, d, tt) = (lp.cont, lp.depth, lp.temps);
                 self.drop_for_exit(d, tt);
+                self.bk_dead_exit(d, *pos);
                 self.b.ins().jump(t, &[]);
                 Ok(self.dead())
             }

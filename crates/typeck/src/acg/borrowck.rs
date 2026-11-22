@@ -1062,6 +1062,15 @@ impl Bk {
                     }
                     if loans_on {
                         if let Some(errs) = errs.as_deref_mut() {
+                            // (a borrow through a `&mut` field of a `Drop` value the local owns, still in use when
+                            // the local is dropped here (`members.push(child.raw)` in a loop): its drop may use the
+                            // field, E0713)
+                            if self.drop_owners.iter().any(|d| d.0 == *l) {
+                                let ll = live_loans(st, &live_at[i * w..(i + 1) * w]);
+                                if let Some(&ln) = ll.iter().find(|&&ln| self.loans[ln as usize].place.local == *l && self.drop_field_borrow(&self.loans[ln as usize], st)) {
+                                    errs.push(BkError { sp: self.loans[ln as usize].sp, msg: "borrow may still be in use when destructor runs (E0713)".to_string() });
+                                }
+                            }
                             // (a loan of the local, or of what it owns, still live when it goes away)
                             for ln in live_loans(st, &live_at[i * w..(i + 1) * w]) {
                                 let lo = &self.loans[ln as usize];
@@ -1260,21 +1269,8 @@ impl Bk {
                                 }
                                 k += 1;
                             }
-                            'owners: for &ln in &through {
-                                let lo = &self.loans[ln as usize];
-                                for (_, op) in self.drop_owners.iter().filter(|d| d.0 == lo.place.local) {
-                                    let (pr, k, ol) = (&lo.place.proj, op.len(), lo.place.owned_len());
-                                    let field_of_owner = pr.len() > k && prefix(op, &pr[..k]) && matches!(pr[k], Proj::Field(_));
-                                    // (not when the owner, or what holds it, was moved out: then it is not dropped here)
-                                    let moved = st.moved.iter().any(|m| m.place.local == lo.place.local && prefix(&m.place.proj, op));
-                                    // (not past a `&` deref after it: `&**s.data` with `data: &mut &'static u32`
-                                    // borrows what the shared reference points to, which the drop does not reach)
-                                    let shared_after = pr.iter().skip(ol + 1).any(|x| *x == Proj::Shr);
-                                    if field_of_owner && ol < pr.len() && pr[ol] == Proj::Deref(false) && !shared_after && !moved {
-                                        errs.push(BkError { sp: lo.sp, msg: "borrow may still be in use when destructor runs (E0713)".to_string() });
-                                        break 'owners;
-                                    }
-                                }
+                            if let Some(&ln) = through.iter().find(|&&ln| self.drop_field_borrow(&self.loans[ln as usize], st)) {
+                                errs.push(BkError { sp: self.loans[ln as usize].sp, msg: "borrow may still be in use when destructor runs (E0713)".to_string() });
                             }
                             for ln in ls {
                                 let lo = &self.loans[ln as usize];
@@ -1381,6 +1377,22 @@ impl Bk {
             errs.push(BkError { sp, msg });
             return;
         }
+    }
+
+    /// lo borrows through a `&mut` field of a value whose type implements `Drop` that its local owns (drop_owners),
+    /// not moved out: the value's drop may use the field, so the borrow must end before the drop
+    fn drop_field_borrow(&self, lo: &Loan, st: &State) -> bool {
+        let (pr, ol) = (&lo.place.proj, lo.place.owned_len());
+        // (not past a `&` deref after it: `&**s.data` with `data: &mut &'static u32` borrows what the shared
+        // reference points to, which the drop does not reach)
+        if ol >= pr.len() || pr[ol] != Proj::Deref(false) || pr.iter().skip(ol + 1).any(|x| *x == Proj::Shr) {
+            return false;
+        }
+        self.drop_owners.iter().filter(|d| d.0 == lo.place.local).any(|(_, op)| {
+            let k = op.len();
+            // (not when the owner, or what holds it, was moved out: then it is not dropped here)
+            pr.len() > k && prefix(op, &pr[..k]) && matches!(pr[k], Proj::Field(_)) && !st.moved.iter().any(|m| m.place.local == lo.place.local && prefix(&m.place.proj, op))
+        })
     }
 
     /// The place of a running guard's match that a write or a `&mut` of p changes (E0510): p is the place or one it
@@ -1743,6 +1755,26 @@ impl Cx<'_> {
         let depth = self.scopes.len().saturating_sub(1);
         while self.bk.scope_temps.last().is_some_and(|x| x.0 >= depth) {
             let (_, id) = self.bk.scope_temps.pop().unwrap();
+            self.bk_ev(Ev::Dead(id, sp));
+        }
+    }
+
+    /// A jump out of the scopes from `depth` on (`break` / `continue` out of a loop's body): their locals go out of
+    /// scope there, innermost first, as at their ends (bk_dead_scope). The scopes stay: the code after the jump is
+    /// not reached
+    pub(crate) fn bk_dead_exit(&mut self, depth: usize, sp: Sp) {
+        if !self.bk_on() || depth >= self.scopes.len() {
+            return;
+        }
+        let ids: Vec<(u32, Ty)> = self.scopes[depth..].iter().rev().flat_map(|s| s.iter().rev()).filter_map(|(_, l, t)| self.bk.by_loc.get(l).map(|&id| (id, *t))).collect();
+        for (id, t) in ids {
+            if self.bk.locals[id as usize].refs && self.bk.level >= 2 && self.dropck(t, 0) {
+                self.bk_ev(Ev::Acc(BPlace { local: id, proj: vec![] }, Acc::Drop, sp));
+            }
+            self.bk_ev(Ev::Dead(id, sp));
+        }
+        let temps: Vec<u32> = self.bk.scope_temps.iter().rev().filter(|x| x.0 >= depth).map(|x| x.1).collect();
+        for id in temps {
             self.bk_ev(Ev::Dead(id, sp));
         }
     }

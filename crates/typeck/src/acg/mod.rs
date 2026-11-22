@@ -1361,10 +1361,11 @@ impl Cx<'_> {
         for (k, (p, _)) in f.sig.params.iter().enumerate() {
             names.push(param_name(k, p)?);
         }
-        // (`mut x` parameters, for the borrow checker; `self` is not known)
+        // (`mut x` parameters, for the borrow checker; `self` is `mut self` / `mut self: T` (not `&mut self`, whose
+        // binding is not mutable))
         let mut muts: Vec<Option<bool>> = vec![];
-        if f.sig.recv.is_some() {
-            muts.push(None);
+        if let Some(r) = &f.sig.recv {
+            muts.push(Some(r.starts_with("mut ")));
         }
         for (p, _) in &f.sig.params {
             muts.push(pat_mut(p));
