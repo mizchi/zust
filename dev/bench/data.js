@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795383351941,
+  "lastUpdate": 1795383354318,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -86136,6 +86136,85 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/mizchi/zust/commit/0501acf4d97d64847cbc103180dc68d10c4c0c07"
         },
         "date": 1795379020492,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "parity documentSymbol (名前の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity workspace/symbol (上位 20 の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity definition (行き先の一致)",
+            "value": 89.655,
+            "unit": "%"
+          },
+          {
+            "name": "parity hover (名前を含む)",
+            "value": 87.5,
+            "unit": "%"
+          },
+          {
+            "name": "parity references (数の一致)",
+            "value": 84.615,
+            "unit": "%"
+          },
+          {
+            "name": "parity documentHighlight (数の一致)",
+            "value": 88.235,
+            "unit": "%"
+          },
+          {
+            "name": "parity rename (書き換えの一致)",
+            "value": 80,
+            "unit": "%"
+          },
+          {
+            "name": "parity signatureHelp (名前・引数の数・今の引数の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity completion `x.\\|` (書いてある名前を含む)",
+            "value": 95,
+            "unit": "%"
+          },
+          {
+            "name": "parity completion `na\\|me` (同)",
+            "value": 95.455,
+            "unit": "%"
+          },
+          {
+            "name": "parity 一致の平均",
+            "value": 92.046,
+            "unit": "%"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "miz404@gmail.com",
+            "name": "Kotaro Chikuba",
+            "username": "mizchi"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "fa48073a779560774193a457ad2b5fcd1b9244bd",
+          "message": "Merge pull request #65 from mizchi/claude/compat-next35\n\nCompat: calls through associated-type paths; E0277 for a primitive's narrowing from; split_ascii_whitespace, char escapes; review fixes",
+          "timestamp": "2026-11-23T06:30:55+09:00",
+          "tree_id": "6b3a3cc98d60d15211cf05716ce9189e7508b9aa",
+          "url": "https://github.com/mizchi/zust/commit/fa48073a779560774193a457ad2b5fcd1b9244bd"
+        },
+        "date": 1795383353813,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
