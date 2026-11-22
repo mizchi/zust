@@ -2631,6 +2631,20 @@ impl Cx<'_> {
     }
 
     /// `Fn(A, B) -> R` (dyn の中身) の引数と戻り値の型
+    /// A value of type t made of zeros (what a placeholder's call returns in a check: its bits are never used)
+    pub(crate) fn zero_of(&mut self, t: Ty) -> V {
+        if t == Ty::Unit || t == Ty::Never {
+            return (None, t);
+        }
+        if t.is_agg() {
+            let tmp = self.temp(t);
+            self.zero(tmp, t);
+            return (Some(tmp), t);
+        }
+        let v = clif_ty(t).map(|ct| if ct == types::I128 { self.int_const(Ty::I128, 0) } else if ct == types::F64 { self.b.ins().f64const(0.0) } else if ct == types::F32 { self.b.ins().f32const(0.0) } else { self.b.ins().iconst(ct, 0) });
+        (v, t)
+    }
+
     pub(crate) fn dyn_fn_sig(&self, s: &str) -> R<(Vec<Ty>, Ty)> {
         let Some((_, ps, r)) = crate::ast_summary::parse_fn_bound(s) else {
             return Err(format!("`dyn {s}` is not a function type"));
@@ -2699,6 +2713,31 @@ impl Cx<'_> {
         let r = match t {
             Ty::Struct(sid) => {
                 let Some(&cid) = self.prog.closure_of_struct.get(&self.prog.base_of(sid)) else {
+                    // (a type parameter's placeholder bounded by `Fn` / `FnMut` / `FnOnce` (zustc check of a generic fn
+                    // nothing calls): the call is checked against the bound, its result a value of the bound's result
+                    // type; `FnMut` borrows the callee mutably, `FnOnce` takes it)
+                    let bound = self.prog.structs[sid as usize].placeholder.as_ref().and_then(|bs| bs.iter().find_map(|b| crate::ast_summary::parse_fn_bound(b).map(|(k, _, _)| (k, b.clone()))));
+                    if let (Some((kind, b)), true) = (bound, self.prog.is_placeholder(sid)) {
+                        let (ps, ret) = self.dyn_fn_sig(&b).map_err(|e| self.at(SP, e))?;
+                        if is_place_expr(func) && self.peek(func) == Some(t) {
+                            match kind.as_str() {
+                                "FnOnce" => self.bk_acc(func, borrowck::Acc::Move),
+                                k => {
+                                    self.bk.no_loan_src = true;
+                                    self.bk_borrow(func, k == "FnMut", err_pos(func));
+                                    self.bk.no_loan_src = false;
+                                }
+                            }
+                        }
+                        let mut never = false;
+                        for (a, &pt) in args.iter().zip(&ps) {
+                            let (_, at) = self.expr(a, Some(pt))?;
+                            never |= at == Ty::Never;
+                        }
+                        let r = if never { (None, Ty::Never) } else { self.zero_of(ret) };
+                        self.bk_frame_end_call();
+                        return Ok(r);
+                    }
                     return err(SP, format!("expected a function, found `{}`", self.prog.tn(t)));
                 };
                 let recv = (v, Ty::Ptr(true, intern(t)));

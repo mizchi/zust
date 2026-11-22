@@ -1335,3 +1335,17 @@ fn move_closure_assigns_immutable_capture() {
     assert!(d.len() == 1 && d[0].0 == 4 && d[0].1.contains("E0594"), "{d:?}");
     assert_eq!(check("struct S(String);\nstruct T<'a>(&'a mut S);\nfn main() {\n    let mut s = S(String::new());\n    let t = T(&mut s);\n    let mut c = move || {\n        t.0.0 = String::from(\"new\");\n    };\n    c();\n    let y = 1;\n    let g = move || y + 1;\n    g();\n    let mut z = 0;\n    let mut h = move || z += 1;\n    h();\n}\n"), vec![]);
 }
+
+/// A type parameter bounded by `Fn` / `FnMut` / `FnOnce` in a generic fn nothing calls: its calls are checked against
+/// the bound (`FnMut` borrows it mutably: E0596 when not `mut`; `FnOnce` takes it: E0382 when called twice; `Fn`
+/// reads it: E0502 under a `&mut` of it)
+#[test]
+fn placeholder_fn_calls() {
+    let d = check("fn b<F: FnMut(isize, isize) -> isize>(f: F) {\n    f(1, 2);\n}\nfn main() {}\n");
+    assert!(d.len() == 1 && d[0].0 == 2 && d[0].1.contains("not declared as mutable"), "{d:?}");
+    let d = check("fn c<F: FnOnce(isize, isize) -> isize>(f: F) {\n    f(1, 2);\n    f(1, 2);\n}\nfn main() {}\n");
+    assert!(d.len() == 1 && d[0].0 == 3 && d[0].1.contains("use of moved value: `f`"), "{d:?}");
+    let d = check("fn a<F: Fn(isize, isize) -> isize>(mut f: F) {\n    let g = &mut f;\n    f(1, 2);\n    use_mut(g);\n}\nfn use_mut<T>(_: &mut T) {}\nfn main() {}\n");
+    assert!(d.len() == 1 && d[0].0 == 3, "{d:?}");
+    assert_eq!(check("fn a<F: Fn(isize, isize) -> isize>(f: F) -> isize {\n    f(1, 2) + f(3, 4)\n}\nfn b<F: FnMut(isize) -> isize>(mut f: F) -> isize {\n    f(1) + f(2)\n}\nfn c<F: FnOnce() -> String>(f: F) -> String {\n    f()\n}\nfn d<T, F: Fn(&T) -> bool>(v: &[T], f: F) -> usize {\n    v.iter().filter(|x| f(x)).count()\n}\nfn main() {}\n"), vec![]);
+}
