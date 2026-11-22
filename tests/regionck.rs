@@ -2046,3 +2046,13 @@ fn part11_review() {
     assert_eq!(check("trait Id { fn id(self) -> Self where Self: Sized { self } }\nimpl<T> Id for T {}\nfn main() {\n    let mut n = 3u8;\n    let r = &mut n;\n    let r2: &mut u8 = r.id();\n    *r2 += 1;\n}\n"), vec![]);
     assert_eq!(check("fn main() {\n    let mut y = 1;\n    match Some(5) {\n        Some(ref mut r) if (|r: &mut i32| { *r = 2; true })(&mut y) => { *r += 1; }\n        _ => {}\n    }\n}\n"), vec![]);
 }
+
+/// A generic fn whose instances all give a `Copy` type for a parameter its bounds do not make `Copy`
+/// (`dup(1u32)` of `fn dup<T>(x: T) -> (T, T) { (x, x) }`) is checked with placeholders too: moving a T twice is
+/// E0382, as rustc checks the generic body. One with a `T: Copy` bound is not
+#[test]
+fn generic_moves_behind_copy_instances() {
+    let d = check("fn dup<T>(x: T) -> (T, T) {\n    (x, x)\n}\nfn main() {\n    let _ = dup(1u32);\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 2 && d[0].1.contains("use of moved value: `x`"), "{d:?}");
+    assert_eq!(check("fn dup<T: Copy>(x: T) -> (T, T) {\n    (x, x)\n}\nfn main() {\n    let _ = dup(1u32);\n}\n"), vec![]);
+}

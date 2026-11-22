@@ -451,6 +451,9 @@ pub struct Insts {
     /// zustc check's last round: the instances with placeholders for type parameters (Program::placeholder), and
     /// what they request. A typeck error of one is not reported (acg::compile)
     pub lenient: bool,
+    /// Of those, the instances of fns that instances were made of with `Copy` types only (driver2's
+    /// placeholder_wave): checked for what moving a T does, nothing else
+    pub recheck: FxSet<u32>,
 }
 
 /// Insts::closure_rg (codes: see typeck's regionck)
@@ -476,6 +479,7 @@ impl Insts {
             closure_rg: HashMap::default(),
             imp_cache: HashMap::default(),
             lenient: false,
+            recheck: FxSet::default(),
         }
     }
 
