@@ -84,6 +84,7 @@ run-pass	array-slice-vec/new-style-fixed-length-vec.rs
 run-pass	array-slice-vec/repeated-vector-syntax.rs
 run-pass	array-slice-vec/show-boxed-slice.rs
 compile-fail	array-slice-vec/slice-2.rs
+compile-fail	array-slice-vec/slice-mut-2.rs
 compile-fail	array-slice-vec/slice-mut.rs
 run-pass	array-slice-vec/slice-of-multi-ref.rs
 compile-fail	array-slice-vec/slice-pat-type-mismatches.rs
@@ -488,6 +489,7 @@ compile-fail	async-await/pin-needed-to-poll.rs
 compile-fail	async-await/proper-span-for-type-error.rs
 check-pass	async-await/recursive-async-auto-trait-overflow-only-parent-args.rs
 check-pass	async-await/recursive-async-auto-trait-overflow.rs
+compile-fail	async-await/spurious-static-bound-issue-115376.rs
 compile-fail	async-await/suggest-switching-edition-on-await.rs
 check-pass	async-await/track-caller/issue-105134.rs
 compile-fail	async-await/try-on-option-in-async.rs
@@ -738,6 +740,7 @@ compile-fail	borrowck/borrowck-assign-comp-idx.rs
 compile-fail	borrowck/borrowck-assign-comp.rs
 compile-fail	borrowck/borrowck-assign-to-andmut-in-aliasable-loc.rs
 compile-fail	borrowck/borrowck-assign-to-andmut-in-borrowed-loc.rs
+compile-fail	borrowck/borrowck-assign-to-constants.rs
 run-pass	borrowck/borrowck-assign-to-subfield.rs
 run-pass	borrowck/borrowck-assignment-to-static-mut.rs
 compile-fail	borrowck/borrowck-auto-mut-ref-to-immut-var.rs
@@ -911,6 +914,7 @@ compile-fail	borrowck/issue-119915-bad-clone-suggestion.rs
 check-pass	borrowck/issue-17263.rs
 run-pass	borrowck/issue-23338-params-outlive-temps-of-body.rs
 compile-fail	borrowck/issue-24267-flow-exit.rs
+compile-fail	borrowck/issue-33819.rs
 compile-fail	borrowck/issue-41962.rs
 compile-fail	borrowck/issue-42344.rs
 compile-fail	borrowck/issue-45199.rs
@@ -1144,6 +1148,8 @@ compile-fail	closures/2229_closure_analysis/diagnostics/borrowck/borrowck-3.rs
 compile-fail	closures/2229_closure_analysis/diagnostics/borrowck/borrowck-closures-mut-and-imm.rs
 compile-fail	closures/2229_closure_analysis/diagnostics/box.rs
 compile-fail	closures/2229_closure_analysis/diagnostics/cant-mutate-imm.rs
+compile-fail	closures/2229_closure_analysis/diagnostics/closure-origin-struct-diagnostics.rs
+compile-fail	closures/2229_closure_analysis/diagnostics/closure-origin-tuple-diagnostics-1.rs
 check-pass	closures/2229_closure_analysis/diagnostics/liveness.rs
 check-pass	closures/2229_closure_analysis/diagnostics/liveness_unintentional_copy.rs
 compile-fail	closures/2229_closure_analysis/diagnostics/multilevel-path.rs
@@ -1209,6 +1215,7 @@ run-pass	closures/closure-last-use-move.rs
 compile-fail	closures/closure-move-sync.rs
 compile-fail	closures/closure-move-use-after-move-diagnostic.rs
 run-pass	closures/closure-mut-argument-6153.rs
+compile-fail	closures/closure-no-copy-mut-env.rs
 compile-fail	closures/closure-no-fn-1.rs
 compile-fail	closures/closure-no-fn-2.rs
 compile-fail	closures/closure-no-fn-3.rs
@@ -1251,6 +1258,8 @@ compile-fail	closures/issue-6801.rs
 check-pass	closures/issue-68025.rs
 check-pass	closures/issue-72408-nested-closures-exponential.rs
 compile-fail	closures/issue-78720.rs
+compile-fail	closures/issue-80313-mutation-in-closure.rs
+compile-fail	closures/issue-80313-mutation-in-move-closure.rs
 compile-fail	closures/issue-82438-mut-without-upvar.rs
 compile-fail	closures/issue-84044-drop-non-mut.rs
 run-pass	closures/issue-868.rs
@@ -1956,9 +1965,11 @@ compile-fail	did_you_mean/expect-instead-of-unwrap.rs
 compile-fail	did_you_mean/issue-103909.rs
 compile-fail	did_you_mean/issue-114112.rs
 compile-fail	did_you_mean/issue-34126.rs
+compile-fail	did_you_mean/issue-34337.rs
 compile-fail	did_you_mean/issue-35937.rs
 compile-fail	did_you_mean/issue-36798.rs
 compile-fail	did_you_mean/issue-36798_unknown_field.rs
+compile-fail	did_you_mean/issue-37139.rs
 compile-fail	did_you_mean/issue-38054-do-not-show-unresolved-names.rs
 compile-fail	did_you_mean/issue-38147-1.rs
 compile-fail	did_you_mean/issue-38147-2.rs
@@ -2224,6 +2235,7 @@ compile-fail	error-codes/E0282.rs
 compile-fail	error-codes/E0283.rs
 compile-fail	error-codes/E0297.rs
 compile-fail	error-codes/E0308-4.rs
+compile-fail	error-codes/E0311.rs
 compile-fail	error-codes/E0389.rs
 compile-fail	error-codes/E0390.rs
 compile-fail	error-codes/E0392.rs
@@ -2264,6 +2276,7 @@ compile-fail	error-codes/E0540.rs
 compile-fail	error-codes/E0559.rs
 compile-fail	error-codes/E0560.rs
 compile-fail	error-codes/E0585.rs
+compile-fail	error-codes/E0594.rs
 compile-fail	error-codes/E0596.rs
 compile-fail	error-codes/E0597.rs
 compile-fail	error-codes/E0599.rs
@@ -3339,6 +3352,7 @@ check-pass	lifetimes/elided-lifetime-in-anon-const.rs
 compile-fail	lifetimes/elided-lifetime-in-const-param-type.rs
 check-pass	lifetimes/elided-lifetime-in-path-in-pat.rs
 check-pass	lifetimes/elided-lifetime-in-path-in-type-relative-expression.rs
+compile-fail	lifetimes/elided-self-lifetime-in-trait-fn.rs
 run-pass	lifetimes/enum-lifetime-container-10228.rs
 compile-fail	lifetimes/explicit-lifetime-required-14285.rs
 compile-fail	lifetimes/explicit-self-lifetime-mismatch.rs
@@ -3377,6 +3391,7 @@ compile-fail	lifetimes/lifetime-errors/elision-error-omits-lifetimeless-params.r
 compile-fail	lifetimes/lifetime-errors/ex1-return-one-existing-name-early-bound-in-struct.rs
 compile-fail	lifetimes/lifetime-errors/ex1-return-one-existing-name-if-else-2.rs
 compile-fail	lifetimes/lifetime-errors/ex1-return-one-existing-name-if-else-3.rs
+compile-fail	lifetimes/lifetime-errors/ex1-return-one-existing-name-if-else-using-impl-2.rs
 compile-fail	lifetimes/lifetime-errors/ex1-return-one-existing-name-if-else-using-impl-3.rs
 compile-fail	lifetimes/lifetime-errors/ex1-return-one-existing-name-if-else-using-impl.rs
 compile-fail	lifetimes/lifetime-errors/ex1-return-one-existing-name-if-else.rs
@@ -3446,7 +3461,9 @@ compile-fail	lifetimes/static-typos.rs
 check-pass	lifetimes/struct-lifetime-field-assignment-13405.rs
 check-pass	lifetimes/struct-lifetime-inference-15735.rs
 run-pass	lifetimes/struct-with-lifetime-parameters-9259.rs
+compile-fail	lifetimes/suggest-introducing-and-adding-missing-lifetime.rs
 run-pass	lifetimes/trait-method-lifetime-bounds.rs
+compile-fail	lifetimes/trait-method-lifetime-suggestion.rs
 run-pass	lifetimes/trait-object-constructor-14821.rs
 check-pass	lifetimes/tuple-struct-vs-struct-with-fields-borrowck-10902.rs
 check-pass	lifetimes/unconstrained-lifetime-in-impl-bound.rs
@@ -4181,6 +4198,7 @@ check-pass	modules/pub-use-module-alias-5950.rs
 run-pass	modules/special_module_name_ignore.rs
 run-pass	modules/use-statement-duplicate-check-7663.rs
 compile-fail	moves/arc-consumed-in-looped-closure.rs
+compile-fail	moves/borrow-closures-instead-of-move.rs
 compile-fail	moves/invalid-suggestions-destructuring-assignment-drop.rs
 run-pass	moves/issue-22536-copy-mustnt-zero.rs
 compile-fail	moves/issue-46099-move-in-macro.rs
@@ -5293,6 +5311,7 @@ check-pass	pattern/move-ref-patterns/by-move-sub-pat-unreachable.rs
 check-pass	pattern/move-ref-patterns/issue-53840.rs
 compile-fail	pattern/move-ref-patterns/move-ref-patterns-closure-captures-inside.rs
 check-pass	pattern/move-ref-patterns/move-ref-patterns-closure-captures-pass.rs
+compile-fail	pattern/move-ref-patterns/pattern-ref-bindings-reassignment.rs
 compile-fail	pattern/multiple-bindings-on-var.rs
 compile-fail	pattern/mut-pattern-of-immutable-borrow.rs
 compile-fail	pattern/no-patterns-in-args.rs
@@ -5544,6 +5563,7 @@ run-pass	regions/regions-bot.rs
 run-pass	regions/regions-bound-lists-feature-gate-2.rs
 run-pass	regions/regions-bound-lists-feature-gate.rs
 compile-fail	regions/regions-bounded-by-trait-requiring-static.rs
+compile-fail	regions/regions-bounded-method-type-parameters-trait-bound.rs
 compile-fail	regions/regions-bounded-method-type-parameters.rs
 compile-fail	regions/regions-bounds.rs
 compile-fail	regions/regions-close-over-type-parameter-1.rs
@@ -5558,6 +5578,8 @@ run-pass	regions/regions-debruijn-of-object.rs
 run-pass	regions/regions-dependent-autofn.rs
 run-pass	regions/regions-dependent-autoslice.rs
 run-pass	regions/regions-dependent-let-ref.rs
+compile-fail	regions/regions-early-bound-error-method.rs
+compile-fail	regions/regions-early-bound-error.rs
 run-pass	regions/regions-early-bound-lifetime-in-assoc-fn.rs
 run-pass	regions/regions-early-bound-used-in-bound-method.rs
 run-pass	regions/regions-escape-into-other-fn.rs
@@ -5586,6 +5608,7 @@ compile-fail	regions/regions-infer-borrow-scope-too-big.rs
 run-pass	regions/regions-infer-borrow-scope-view.rs
 run-pass	regions/regions-infer-borrow-scope-within-loop-ok.rs
 run-pass	regions/regions-infer-borrow-scope.rs
+compile-fail	regions/regions-infer-bound-from-trait-self.rs
 compile-fail	regions/regions-infer-bound-from-trait.rs
 run-pass	regions/regions-infer-call-2.rs
 compile-fail	regions/regions-infer-call-3.rs
@@ -6185,6 +6208,7 @@ compile-fail	statics/static-generic-param-soundness.rs
 run-pass	statics/static-method-in-trait-with-tps-intracrate.rs
 run-pass	statics/static-methods-in-traits.rs
 run-pass	statics/static-methods-in-traits2.rs
+compile-fail	statics/static-mut-borrow-of-temporary.rs
 check-pass	statics/static-mut-shared-parens.rs
 build-pass	statics/static-mut-unsafe-init.rs
 build-pass	statics/static-mut-with-assoc-type-field.rs
@@ -7240,6 +7264,8 @@ run-pass	unboxed-closures/unboxed-closures-infer-arg-types-from-expected-bound.r
 run-pass	unboxed-closures/unboxed-closures-infer-arg-types-w-bound-regs-from-expected-bound.rs
 compile-fail	unboxed-closures/unboxed-closures-infer-fn-once-move-from-projection.rs
 run-pass	unboxed-closures/unboxed-closures-infer-fnmut-calling-fnmut.rs
+compile-fail	unboxed-closures/unboxed-closures-infer-fnmut-missing-mut.rs
+compile-fail	unboxed-closures/unboxed-closures-infer-fnmut-move-missing-mut.rs
 run-pass	unboxed-closures/unboxed-closures-infer-fnmut-move.rs
 run-pass	unboxed-closures/unboxed-closures-infer-fnmut.rs
 run-pass	unboxed-closures/unboxed-closures-infer-kind.rs
