@@ -270,7 +270,8 @@ impl Session2 {
             None => output.with_extension("o"),
         };
         // (and the output was linked from that object: not older than it)
-        let mtime = |p: &std::path::Path| std::fs::metadata(p).and_then(|m| m.modified()).ok();
+        // (a regular file: a directory at the output path is not an executable)
+        let mtime = |p: &std::path::Path| std::fs::metadata(p).ok().filter(|m| m.is_file()).and_then(|m| m.modified().ok());
         let same = std::fs::read(&obj_path).is_ok_and(|old| old == obj) && matches!((mtime(output), mtime(&obj_path)), (Some(e), Some(o)) if e >= o);
         if same {
             tm.lap("link", "skipped (object unchanged)".to_string());

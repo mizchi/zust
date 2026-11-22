@@ -2767,6 +2767,13 @@ impl Program {
         Ok(self.eval_t(e, depth, None)?.0)
     }
 
+    /// e's value as type t (an integer type: unsuffixed literals in e are t's, the value is wrapped to t)
+    pub fn eval_const_as(&self, e: &crate::parse::Expr, t: Ty) -> R<i128> {
+        let it = It::of_ty(t);
+        let (v, _) = self.eval_t(e, 0, it)?;
+        Ok(it.map_or(v, |it| it.wrap(v)))
+    }
+
     /// A constant's value and its integer type, wrapped to the type it is declared with (`const X: i8 = -1`)
     fn const_int_t(&self, name: &str, depth: u32) -> R<(i128, Option<It>)> {
         if depth > 64 {
@@ -4759,6 +4766,15 @@ fn strip_parens(e: &crate::parse::Expr) -> &crate::parse::Expr {
 fn typed_lit(v: i128, t: Option<It>, pos: crate::parse::Pos) -> crate::parse::Expr {
     use crate::parse::Expr;
     let sfx = t.map(|it| it.name()).unwrap_or("");
+    // (a u128 past i128::MAX is held as a negative bit pattern: its literal is the unsigned value)
+    if t.is_some_and(|it| it.bits == 128 && !it.signed) {
+        return Expr::Lit(format!("{}{sfx}", v as u128), pos);
+    }
+    // (i128::MIN has no positive literal to negate)
+    if v == i128::MIN {
+        let seg = |n: &str| crate::parse::Seg { name: n.to_string(), args: vec![], fn_args: None, text: n.to_string() };
+        return Expr::Path(None, crate::parse::Path { global: false, segs: vec![seg("i128"), seg("MIN")], pos });
+    }
     if v < 0 {
         Expr::Paren(Box::new(Expr::Unary("-".into(), Box::new(Expr::Lit(format!("{}{sfx}", -v), pos)), Default::default())))
     } else {

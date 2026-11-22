@@ -32,6 +32,19 @@ const LAYOUT_N: usize = X.count_ones() as usize;
 struct S {
     a: [u8; LAYOUT_N],
 }
+// (a static of an integer constant or expression is its type's: 15, not the low byte of an untyped -1 >> 4; a u128
+// local past i128::MAX and i128::MIN substitute as their values)
+const M2: u8 = !0 >> 4;
+static SB: u8 = M2;
+static SC: u8 = !0 >> 4;
+const U128_SHR: usize = {
+    let x: u128 = u128::MAX;
+    (x >> 127) as usize
+};
+const I128_MIN_OK: usize = {
+    let m = i128::MIN;
+    (m == i128::MIN) as usize + 1
+};
 
 fn main() {
     println!("{}", std::mem::size_of::<[u8; M as usize]>());
@@ -57,4 +70,7 @@ fn main() {
     println!("{}", std::mem::size_of::<S>());
     let s = S { a: [0; LAYOUT_N] };
     println!("{}", s.a.len());
+    println!("{} {}", SB, SC);
+    println!("{}", std::mem::size_of::<[u8; U128_SHR]>());
+    println!("{}", std::mem::size_of::<[u8; I128_MIN_OK]>());
 }
