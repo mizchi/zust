@@ -1807,3 +1807,17 @@ fn part10_review() {
     assert!(d.len() == 1 && d[0].0 == 7 && d[0].1.contains("cannot move out of an `Rc`"), "{d:?}");
     assert_eq!(check("fn main() {\n    match Some(String::from(\"arm\")) {\n        Some(foo) if {\n            let foo = String::from(\"local\");\n            (|| { let _owned = foo; true })()\n        } => (),\n        _ => (),\n    }\n}\n"), vec![]);
 }
+
+/// A block's tail's temporary a method is called on lives until the end of the enclosing statement, after the block's
+/// locals: one whose `Drop` may see a local it borrows is E0597 (with `;`, it is dropped first). `a;` in a closure
+/// moves a (a closure made in a loop is then E0382). A guard sees a `ref mut` binding as shared (E0596 / E0594)
+#[test]
+fn tail_temps_stmt_moves_guard_ref_mut() {
+    let d = check("#[derive(Debug)]\nstruct D<T: std::fmt::Debug>(T);\nimpl<T: std::fmt::Debug> Drop for D<T> {\n    fn drop(&mut self) {}\n}\nimpl<T: std::fmt::Debug> D<T> {\n    fn end(&self) {}\n}\nfn f() {\n    let t = D(Box::new(1));\n    D(&t).end()\n}\nfn g() {\n    let t = D(Box::new(1));\n    D(&t).end();\n}\nfn main() {\n    f();\n    g();\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 11 && d[0].1.contains("does not live long enough"), "{d:?}");
+    let d = check("struct NotCopy;\nfn main() {\n    let mut a = NotCopy;\n    loop {\n        || {\n            &mut a;\n            a;\n        };\n    }\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 5 && d[0].1.contains("use of moved value: `a`"), "{d:?}");
+    assert_eq!(check("fn main() {\n    let n = 5;\n    let s = String::new();\n    for _ in 0..2 {\n        let c = || {\n            n;\n            s.len();\n        };\n        c();\n    }\n}\n"), vec![]);
+    let d = check("fn main() {\n    let mut x = Some(1);\n    match x {\n        Some(ref mut r) if {\n            let q = &mut *r;\n            *q == 1\n        } => {}\n        Some(ref mut r) if *r == 1 => {\n            *r = 3;\n        }\n        _ => {}\n    }\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 5 && d[0].1.contains("E0596"), "{d:?}");
+}

@@ -219,6 +219,8 @@ pub struct Bk {
     /// Hidden locals of temporaries borrowed in the statements being lowered (they go out of scope at the end of
     /// their statement)
     pub stmt_temps: Vec<u32>,
+    /// Those of them whose `Drop` may see what they borrow: dropped when they go out of scope (bk_tail_drop_temps)
+    pub drop_temps: Vec<u32>,
     /// The temporaries of the `let` initializers being lowered that are followed (see direct_temps): their addresses
     pub direct: Vec<usize>,
     /// Loans the region check found must outlive the function (a reborrow through a parameter flowing into a
@@ -2111,7 +2113,40 @@ impl Cx<'_> {
         }
         let ts: Vec<u32> = self.bk.stmt_temps.drain(mark..).collect();
         for t in ts {
+            if self.bk.drop_temps.contains(&t) {
+                self.bk_ev(Ev::Acc(BPlace { local: t, proj: vec![] }, Acc::Drop, super::SP));
+            }
             self.bk_ev(Ev::Dead(t, super::SP));
+        }
+    }
+
+    /// The temporaries of a block's tail that a method is called on (`D(&_t1).end()`) live until the end of the
+    /// enclosing statement, after the block's locals (edition 2021). One whose `Drop` may see what it borrows uses
+    /// its loans when it is dropped there: a loan of one of the block's locals is then E0597 at the local
+    pub(crate) fn bk_tail_drop_temps(&mut self, e: &Expr) {
+        if !self.bk_on() || self.bk.level < 2 || !self.user_code {
+            return;
+        }
+        let mut cur = strip_paren(e);
+        while let Expr::MethodCall(recv, ..) = cur {
+            let r = strip_paren(recv);
+            if !super::is_place_expr(r) {
+                if let Some(t) = self.peek(r) {
+                    if self.dropck(t, 0) {
+                        let mut srcs = vec![];
+                        self.bk_direct(r, &mut srcs);
+                        if !srcs.is_empty() {
+                            let id = self.bk.locals.len() as u32;
+                            self.bk.locals.push(Local { name: TEMP.to_string(), ty: t, copy: false, refs: true, mutable: Some(true), decl: super::SP });
+                            self.bk_ev(Ev::Bind(id, true));
+                            self.bk_ev(Ev::Def(id, srcs));
+                            self.bk.drop_temps.push(id);
+                            self.bk.stmt_temps.push(id);
+                        }
+                    }
+                }
+            }
+            cur = r;
         }
     }
 

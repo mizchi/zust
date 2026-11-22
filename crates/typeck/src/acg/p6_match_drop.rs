@@ -329,6 +329,14 @@ impl Cx<'_> {
                         return Err(self.at(at, format!("cannot move out of `{n}` in pattern guard (E0507)")));
                     }
                 }
+                // (a `ref mut` binding is a shared reference in the guard: assigning through it or borrowing it
+                // mutably there, in a closure too, is E0594 / E0596)
+                let mut rm = vec![];
+                ref_mut_names(&arm.pat, &mut rm);
+                if let Some((at, n, assign)) = guard_mut_use(g, &rm) {
+                    let msg = if assign { format!("cannot assign to `*{n}`, as it is immutable for the pattern guard (E0594)") } else { format!("cannot borrow `*{n}` as mutable, as it is immutable for the pattern guard (E0596)") };
+                    return Err(self.at(at, msg));
+                }
             }
             if let Some(g) = &arm.guard {
                 // (`P if let Q = e && c => ..`: each `let` of the guard tests and binds in the arm's scope, each other
@@ -2393,6 +2401,86 @@ fn lit_suffix(e: &Expr) -> Option<bool> {
 }
 
 /// A closure in e (a match guard) whose body moves one of names out: that capture, and where it moves
+/// The names a pattern binds by `ref mut`
+fn ref_mut_names(p: &Pat, out: &mut Vec<String>) {
+    match p {
+        Pat::Ident(by_ref, m, n, sub) => {
+            if *by_ref && *m {
+                out.push(n.clone());
+            }
+            if let Some(q) = sub {
+                ref_mut_names(q, out);
+            }
+        }
+        Pat::Ref(_, q) => ref_mut_names(q, out),
+        Pat::Or(v) | Pat::Tuple(v) | Pat::TupleStruct(_, v) | Pat::Slice(v) => v.iter().for_each(|q| ref_mut_names(q, out)),
+        Pat::Struct(_, fs, _) => fs.iter().for_each(|f| ref_mut_names(&f.1, out)),
+        _ => {}
+    }
+}
+
+/// Where a guard assigns through one of names (`*r = ..`) or borrows it mutably (`&mut *r`, `&mut r`), in a closure
+/// too: the position, the name, and whether it assigns. A block's `let` that binds a name again ends it there
+fn guard_mut_use(e: &Expr, names: &[String]) -> Option<(crate::parse::Pos, String, bool)> {
+    if names.is_empty() {
+        return None;
+    }
+    let named = |x: &Expr| -> Option<String> {
+        let mut x = strip_paren(x);
+        if let Expr::Unary(op, i, _) = x {
+            if op == "*" {
+                x = strip_paren(i);
+            }
+        }
+        match x {
+            Expr::Path(None, p) if p.segs.len() == 1 && names.contains(&p.segs[0].name) => Some(p.segs[0].name.clone()),
+            _ => None,
+        }
+    };
+    match e {
+        Expr::Assign(l, _) | Expr::AssignOp(_, l, _, _) if matches!(strip_paren(l), Expr::Unary(op, ..) if op == "*") => {
+            if let Some(n) = named(l) {
+                return Some((borrowck::pos(e), n, true));
+            }
+        }
+        Expr::Ref(true, x) => {
+            if let Some(n) = named(x) {
+                return Some((borrowck::pos(e), n, false));
+            }
+        }
+        Expr::Block(_, _, b) => {
+            let mut cur = names.to_vec();
+            for st in &b.stmts {
+                match st {
+                    crate::parse::Stmt::Let(p, _, init, ..) => {
+                        if let Some(f) = init.as_ref().and_then(|x| guard_mut_use(x, &cur)) {
+                            return Some(f);
+                        }
+                        let mut bound = vec![];
+                        crate::ast_closure::pat_idents(p, &mut bound);
+                        cur.retain(|n| !bound.contains(n));
+                    }
+                    crate::parse::Stmt::Expr(x, _) => {
+                        if let Some(f) = guard_mut_use(x, &cur) {
+                            return Some(f);
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            return None;
+        }
+        _ => {}
+    }
+    let mut found = None;
+    crate::ast_closure::each_child_pub(e, &mut |c| {
+        if found.is_none() {
+            found = guard_mut_use(c, names);
+        }
+    });
+    found
+}
+
 fn guard_closure_move(e: &Expr, names: &[String], by: crate::ast_closure::MovesBy) -> Option<(String, crate::parse::Pos)> {
     if names.is_empty() {
         return None;

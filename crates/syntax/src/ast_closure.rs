@@ -618,6 +618,13 @@ fn scoped_children(e: &Expr, caps: &[String], f: &mut dyn FnMut(&Expr, &[String]
                         }
                         cur = unbound(&cur, p);
                     }
+                    // (`a;`: the value is moved into the statement's temporary, as `let x = a;` binds it)
+                    Stmt::Expr(x, true) if matches!(unparen(x), Expr::Path(None, p) if p.segs.len() == 1) => {
+                        let tmp = Pat::Ident(false, false, "__stmt".to_string(), None);
+                        if f(x, &cur, Some(&tmp)) {
+                            return true;
+                        }
+                    }
                     Stmt::Expr(x, _) => {
                         if f(x, &cur, None) {
                             return true;

@@ -1490,6 +1490,8 @@ impl Cx<'_> {
             self.bk.tail = e as *const Expr as usize;
         }
         let (v, t) = self.block(&f.block, Some(self.ret))?;
+        // (the temporaries of the body's tail go away after its locals (edition 2021))
+        self.bk_temps_end(0);
         if t == Ty::Never {
             self.b.ins().trap(TrapCode::unwrap_user(1));
             return Ok(());
@@ -2037,6 +2039,7 @@ impl Cx<'_> {
                     // (a block's value: its tree, while the block's locals are in scope)
                     if last && !*semi && r.is_ok() {
                         self.rg_keep(e);
+                        self.bk_tail_drop_temps(e);
                     }
                     if tail {
                         let srcs = self.bk_frame_end();
