@@ -1,0 +1,76 @@
+// @wasm with values that are not Copy (arrays, records and enums that hold them): the Rust needs `&`, `'a`, moves
+// and clones, and zsc infers them (src/lower.rs, "Ownership"). The same source runs as JS (zsc --all-js) and as
+// wasm, with the same results (tests/examples.rs: owned_same_in_js_and_wasm).
+
+type Poly = { pts: Array<f64>, weight: f64 }
+enum Shape { Polygon(Poly, i32), Empty }
+
+// only read: borrowed (`p: &ZsPoly`)
+@wasm fn total(p: Poly) -> f64 { p.pts.fold(0.0, (s, x) => s + x) * p.weight }
+
+// the result is one of the parameters: borrowed through, `fn heavier<'a>(a: &'a ZsPoly, b: &'a ZsPoly) -> &'a ZsPoly`
+@wasm fn heavier(a: Poly, b: Poly) -> Poly { if total(a) >= total(b) { a } else { b } }
+
+// a part of a borrowed parameter: `-> &'a [f64]`
+@wasm fn first_pts(ps: Array<Poly>) -> Array<f64> { ps[0].pts }
+
+// consumed whole (`..p` keeps its points): owned, and the caller moves it when it is dead there
+@wasm fn reweigh(p: Poly, w: f64) -> Poly { Poly { weight: w, ..p } }
+
+// matched by reference (the scrutinee is borrowed): `match *s { ZsShape::Polygon(ref p, n) => .. }`
+@wasm fn shape_area(s: Shape) -> f64 {
+  match s {
+    Polygon(p, n) => total(p) * (n as f64),
+    Empty => 0.0,
+  }
+}
+
+// the old array is dead after each push: the push is in place (amortized O(1), not a copy)
+@wasm fn ramp(n: i32) -> Array<f64> {
+  let mut acc = [];
+  for i in range(0, n) {
+    acc = acc.push(i as f64);
+  }
+  acc
+}
+
+@wasm fn polys(n: i32) -> Array<Poly> {
+  range(0, n).map((i) => Poly { pts: ramp(i + 1), weight: 1.0 + (i as f64) })
+}
+
+// `polys(n)` is a temporary: its elements are taken (into_iter), and each `p` is moved into the variant
+@wasm fn shapes(n: i32) -> Array<Shape> {
+  polys(n).map((p) => if p.weight > 2.0 { Polygon(p, 2) } else { Empty })
+}
+
+@wasm fn heaviest(ps: Array<Poly>) -> f64 {
+  let mut best = ps[0];
+  for p in ps {
+    best = heavier(best, p);
+  }
+  total(best)
+}
+
+// arrays of arrays, and a fold that pushes into its accumulator (in place too)
+@wasm fn rows(n: i32) -> Array<Array<f64>> { range(0, n).fold([], (acc, i) => acc.push(ramp(i))) }
+
+@wasm pub fn summary(n: i32) -> Array<f64> {
+  let ps = polys(n);
+  let ss = shapes(n);
+  let area = ss.fold(0.0, (acc, s) => acc + shape_area(s));
+  let heavy = heaviest(ps);
+  let r = reweigh(ps[1], 10.0);
+  let firsts = first_pts(ps);
+  let tail = match Polygon(r, 3) {
+    Polygon(q, k) => total(q) * (k as f64),
+    Empty => 0.0,
+  };
+  [area, heavy, tail, firsts.len() as f64, rows(n).fold(0.0, (s, r) => s + r.fold(0.0, (t, x) => t + x))]
+}
+
+// pushes 0..n one at a time: quadratic if each push copied the array
+@wasm pub fn ramp_sum(n: i32) -> f64 { ramp(n).fold(0.0, (s, x) => s + x) }
+
+// across the boundary: an owned array parameter, and a borrowed result (an adapter converts for the glue)
+@wasm pub fn appended(xs: Array<f64>, x: f64) -> Array<f64> { xs.push(x) }
+@wasm pub fn longer(a: Array<f64>, b: Array<f64>) -> Array<f64> { if a.len() >= b.len() { a } else { b } }

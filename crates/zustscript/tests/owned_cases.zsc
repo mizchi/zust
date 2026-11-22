@@ -1,0 +1,175 @@
+// Cases where an inferred move could meet a borrow (tests/examples.rs: owned_cases_same_in_js_and_wasm). Each must
+// pass zustc's borrow checker and give the JS layer's result.
+
+type Poly = { pts: Array<f64>, weight: f64 }
+type Box2<T> = { v: T, n: i32 }
+enum Tree { Leaf(Array<f64>), Node(Poly, Array<f64>), Nil }
+
+@wasm fn total(p: Poly) -> f64 { p.pts.fold(0.0, (s, x) => s + x) * p.weight }
+@wasm fn sum(xs: Array<f64>) -> f64 { xs.fold(0.0, (s, x) => s + x) }
+@wasm fn keep(xs: Array<f64>) -> Array<f64> { xs.push(0.5) }
+@wasm fn pair(a: Array<f64>, b: Array<f64>) -> f64 { sum(a) * 10.0 + sum(b) }
+@wasm fn mk(n: i32) -> Poly { Poly { pts: range(0, n).map((i) => i as f64), weight: 2.0 } }
+
+// the same local, borrowed by one argument and consumed by the other
+@wasm fn both(n: i32) -> f64 {
+  let xs = mk(n).pts;
+  pair(xs, keep(xs))
+}
+
+// a field kept, then the record consumed
+@wasm fn field_then_whole(n: i32) -> f64 {
+  let p = mk(n);
+  let pts = p.pts;
+  let q = Poly { weight: 3.0, ..p };
+  sum(pts) + total(q)
+}
+
+// matched while it stays alive, then used again
+@wasm fn match_then_use(n: i32) -> f64 {
+  let t = Node(mk(n), [1.0, 2.0]);
+  let a = match t {
+    Leaf(xs) => sum(xs),
+    Node(p, xs) => total(p) + sum(xs),
+    Nil => 0.0,
+  };
+  let b = match t {
+    Node(p, _) => sum(keep(p.pts)),
+    _ => 0.0,
+  };
+  a + b
+}
+
+// iterated, then reassigned inside the loop (the loop must not borrow it)
+@wasm fn iterate_and_grow(n: i32) -> f64 {
+  let mut xs = [1.0, 2.0];
+  for x in xs {
+    xs = xs.push(x * 10.0);
+  }
+  let mut i = 0;
+  while i < n {
+    if i == 3 { break; }
+    xs = keep(xs);
+    i += 1;
+  }
+  sum(xs) + (xs.len() as f64)
+}
+
+// captured by a closure while the array is mapped
+@wasm fn captured(n: i32) -> f64 {
+  let ys = mk(n).pts;
+  let zs = ys.map((y) => y + sum(ys));
+  sum(zs) + sum(ys)
+}
+
+// shadowing, and a generic record holding an array
+@wasm fn shadow(n: i32) -> f64 {
+  let v = mk(n).pts;
+  let w = { let v = keep(v); sum(v) };
+  let b = Box2 { v: v, n: 2 };
+  w + sum(b.v) * (b.n as f64)
+}
+
+// a nested enum pattern, matched by reference through a borrowed parameter
+@wasm fn depth(t: Tree) -> f64 {
+  match t {
+    Leaf(xs) => sum(xs),
+    Node(p, xs) => total(p) * sum(xs),
+    Nil => -1.0,
+  }
+}
+
+@wasm fn trees(n: i32) -> Array<Tree> { [Leaf([1.0, 2.0]), Node(mk(n), [3.0]), Nil] }
+
+// a later argument assigns what an earlier one borrows: the earlier one keeps the old value
+@wasm fn arg_assign(n: i32) -> f64 {
+  let mut xs = mk(n).pts;
+  let a = pair(xs, { xs = [2.0]; [3.0] });
+  a + sum(xs)
+}
+
+// a typed array from a literal, and concat of arrays of arrays (method calls on generated borrows)
+@wasm fn typed_concat(n: i32) -> f64 {
+  let t = F64Array::from([1.0, 2.0]);
+  let rows = [[1.0], [2.0, 3.0]].concat([[4.0]]);
+  (t.len() as f64) + (rows.len() as f64) + sum(rows[1])
+}
+
+// consumes its parameter (push) and returns a scalar, then shadowed by the result
+@wasm fn eat(xs: Array<f64>) -> i32 { xs.push(1.0).len() }
+@wasm fn shadow_call(n: i32) -> f64 {
+  let xs = mk(n).pts;
+  let xs = eat(xs);
+  xs as f64
+}
+
+// filter over an owned iterator of arrays
+@wasm fn rows(n: i32) -> Array<Array<f64>> { range(0, n).map((i) => range(0, i).map((j) => j as f64)) }
+@wasm fn long_rows(n: i32) -> f64 { rows(n).filter((r) => r.len() > 1).fold(0.0, (s, r) => s + sum(r)) }
+
+// iterating a borrow obtained through a call, while the root is reassigned; and a dead source reassigned
+@wasm fn id(xs: Array<f64>) -> Array<f64> { xs }
+@wasm fn loop_call(n: i32) -> f64 {
+  let mut xs = mk(n).pts;
+  let mut s = 0.0;
+  for x in id(xs) {
+    xs = [x];
+    s += x;
+  }
+  s + sum(xs)
+}
+@wasm fn loop_dead(n: i32) -> f64 {
+  let mut xs = mk(n).pts;
+  let mut s = 0.0;
+  for x in xs {
+    xs = [x];
+    s += x;
+  }
+  s
+}
+
+// the right operand of && may not run
+@wasm fn short_circuit(n: i32) -> f64 {
+  let mut xs = [1.0, (n as f64)];
+  let ok = (xs.push(2.0).len() == 0) && { xs = [3.0]; true };
+  xs[1] + (if ok { 1.0 } else { 0.0 })
+}
+
+// matching a borrow obtained through a call, while an arm consumes the root
+@wasm fn idt(t: Tree) -> Tree { t }
+@wasm fn tsize(t: Tree) -> f64 { let u = Box2 { v: t, n: 1 }; u.n as f64 }
+@wasm fn match_call(n: i32) -> f64 {
+  let t = Node(mk(n), [1.0]);
+  match idt(t) {
+    Node(p, _) => total(p) + tsize(t),
+    _ => 0.0,
+  }
+}
+
+// an element matched while the arm replaces its array (the element cannot be moved out, so it is copied)
+@wasm fn match_index(n: i32) -> f64 {
+  let mut xs = [mk(n).pts];
+  match xs[0] {
+    row => {
+      xs = [[2.0]];
+      (row.len() as f64) + sum(xs[0])
+    },
+  }
+}
+
+// the result borrows only from the first parameter: a temporary second argument needs no copy
+@wasm fn first(a: Array<f64>, b: Array<f64>) -> Array<f64> { let k = b.len(); a }
+@wasm fn wrap(a: Array<f64>) -> Array<f64> { first(a, [2.0]) }
+
+// a function whose Rust name is an adapter's name
+@wasm pub fn grow(xs: Array<f64>) -> Array<f64> { xs.push(1.0) }
+@wasm fn grow__js(x: f64) -> f64 { x + 1.0 }
+
+@wasm pub fn more(n: i32) -> Array<f64> {
+  [arg_assign(n), typed_concat(n), shadow_call(n), long_rows(n), loop_call(n), loop_dead(n), short_circuit(n), match_call(n), sum(wrap(mk(n).pts)), grow__js(1.0), match_index(n)]
+}
+
+@wasm pub fn cases(n: i32) -> Array<f64> {
+  let ts = trees(n);
+  [both(n), field_then_whole(n), match_then_use(n), iterate_and_grow(n), captured(n), shadow(n), ts.fold(0.0, (s, t) => s + depth(t)), depth(ts[1])]
+}
