@@ -337,6 +337,7 @@ fn compile_once(prog: &Program, insts: &Mutex<Insts>, id: u32, f: &ItemFn, line_
         closure_ix,
         explicit_traits: HashMap::default(),
         explicit_trait: None,
+        keep_overload: std::cell::Cell::new(None),
         closure_hint: None,
         closure_bound: None,
         closure_prelude: false,
@@ -597,7 +598,9 @@ pub fn expr_start(e: &Expr) -> Sp {
         Expr::Closure(.., p) => *p,
         // (no position of their own: that of their first part, usually on the same line)
         Expr::Ref(_, x) | Expr::RawRef(_, x) | Expr::Repeat(x, _) | Expr::Let(_, x) | Expr::Match(x, _) | Expr::If(x, _, _) => expr_start(x),
-        Expr::While(_, x, _) | Expr::For(_, _, x, _) | Expr::Return(Some(x)) | Expr::Break(_, Some(x)) => expr_start(x),
+        Expr::While(_, x, _) | Expr::For(_, _, x, _) | Expr::Return(Some(x)) | Expr::Break(_, Some(x), _) => expr_start(x),
+        // (`break` / `continue` / `break 'a`: the keyword, or the label when there is one)
+        Expr::Break(_, None, p) | Expr::Continue(_, p) => *p,
         Expr::Array(es) | Expr::Tuple(es) => es.first().map_or(SP, expr_start),
         _ => SP,
     }
@@ -701,6 +704,9 @@ pub struct Loop {
     pub is_block: bool,
     pub depth: usize,
     pub temps: usize,
+    /// a `while` / `for` loop (and a while's condition): the kind it names in E0571, for a `break` with a value
+    /// (None: a `loop` or a labeled block, which `break v` may leave)
+    pub no_value: Option<&'static str>,
 }
 
 #[derive(Clone, Copy)]
@@ -781,6 +787,8 @@ pub struct Cx<'p> {
     pub explicit_traits: HashMap<usize, String>,
     /// while a method call that named its trait is being resolved: (the method, the trait)
     pub explicit_trait: Option<(String, String)>,
+    /// an overload already chosen (`X::__ref_eq#1`, PartialEq's among a reference's `eq`s): pick_overload keeps it once
+    pub keep_overload: std::cell::Cell<Option<u32>>,
     pub closure_hint: Option<(Vec<Ty>, Option<Ty>)>,
     /// The bound the closure being passed is checked against (`FnOnce(&u32) -> &u32`), with the callee's lifetimes and
     /// type parameters (regionck)
@@ -2053,7 +2061,7 @@ impl Cx<'_> {
                 if p.segs[1].name == "BITS" { Some(Ty::U32) } else { Ty::from_suffix(&p.segs[0].name) }
             }
             Expr::Path(None, p) if p.segs.len() == 2 && self.const_of(e).is_some() => Some(self.prog.consts[self.const_of(e)? as usize].ty),
-            Expr::Path(None, _) if self.const_generic(e).is_some() => Some(Ty::Usize),
+            Expr::Path(None, _) if self.const_generic(e).is_some() => Some(self.const_generic_ty(e).unwrap_or(Ty::Usize)),
             Expr::Try(x) => {
                 let Ty::Struct(sid) = self.peek(x)? else { return None };
                 let sd = &self.prog.structs[sid as usize];
@@ -2308,7 +2316,12 @@ impl Cx<'_> {
 
     /// The method named `name` (`S::m`, among its overloads) that is an impl of trait tr
     pub fn trait_candidate(&self, name: &str, tr: &str) -> Option<u32> {
-        let of_tr = |i: u32| self.prog.sigs[i as usize].impl_trait.as_deref().is_some_and(|t| t.split('<').next().unwrap_or(t).trim() == tr);
+        self.trait_candidate_where(name, tr, |_| true)
+    }
+
+    /// trait_candidate among those `ok` accepts (`impl PartialEq for &TX<u8>` / `.. for &TX<u16>`: the receiver's)
+    pub fn trait_candidate_where(&self, name: &str, tr: &str, ok: impl Fn(u32) -> bool) -> Option<u32> {
+        let of_tr = |i: u32| self.prog.sigs[i as usize].impl_trait.as_deref().is_some_and(|t| t.split('<').next().unwrap_or(t).trim() == tr) && ok(i);
         let first = self.prog.index.get(name).copied();
         first.filter(|&i| of_tr(i)).or_else(|| self.prog.overloads.get(name).and_then(|cs| cs.iter().copied().find(|&c| of_tr(c))))
     }

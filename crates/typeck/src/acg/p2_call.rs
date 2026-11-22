@@ -1214,7 +1214,20 @@ impl Cx<'_> {
                 _ => None,
             };
             if let Some(f) = f {
-                if let Some(&id) = self.prog.index.get(&f) {
+                if let Some(&id0) = self.prog.index.get(&f) {
+                    // (a named trait's impl among the overloads: `impl Other for &X` and `impl PartialEq for &X`)
+                    // (that trait's impl for this receiver: `impl PartialEq for &TX<u8>` and `.. for &TX<u16>` share the
+                    // group)
+                    let fits = |c: u32| {
+                        let sig = &self.prog.sigs[c as usize];
+                        let Some(&Ty::Ref(_, Ty::Ref(_, s))) = sig.params.first() else { return true };
+                        self.prog.match_ty(**s, *inner, &mut vec![None; sig.generics.len()])
+                    };
+                    let id = match &self.explicit_trait {
+                        Some((m, tr)) if m == method => self.trait_candidate_where(&f, tr, fits).or_else(|| self.trait_candidate(&f, tr)).unwrap_or(id0),
+                        _ => id0,
+                    };
+                    let f = self.prog.names[id as usize].clone();
                     let a0 = match self.prog.sigs[id as usize].params.first() {
                         Some(Ty::Ref(m, Ty::Ref(..))) => Expr::Ref(*m, Box::new(recv.clone())),
                         _ => recv.clone(),
@@ -1222,7 +1235,12 @@ impl Cx<'_> {
                     let mut args = vec![a0];
                     args.extend(margs.iter().cloned());
                     let c = Expr::Call(Box::new(path_expr(&f)), args);
-                    return self.expr(&c, expected).map(Some);
+                    if id != id0 {
+                        self.keep_overload.set(Some(id));
+                    }
+                    let r = self.expr(&c, expected).map(Some);
+                    self.keep_overload.set(None);
+                    return r;
                 }
             }
         }
@@ -1385,6 +1403,64 @@ impl Cx<'_> {
 
     /// 型引数を解いて、呼ぶべき関数 (インスタンス / trait 実装) とそのシグネチャを決める
     /// turbofish (`f::<A, B>`) で決まる型パラメータ
+    /// the kind of a const argument as written (`true` / `{ false }`: bool, `'c'`: char, `3`: an integer, `N`: a named
+    /// const's own type), for a parameter's declared type: (kind, its name in the message)
+    pub(crate) fn const_arg_kind(&self, a: &GArg) -> Option<(&'static str, &'static str)> {
+        // (`{true}`: a block of one boolean is a boolean too)
+        let braced_bool = |e: &Expr| match e {
+            Expr::Block(None, false, b) if b.stmts.len() == 1 => {
+                matches!(&b.stmts[0], crate::parse::Stmt::Expr(Expr::Lit(s, _), false) if s == "true" || s == "false")
+                    || matches!(&b.stmts[0], crate::parse::Stmt::Expr(Expr::Path(None, p), false) if p.segs.len() == 1 && matches!(p.segs[0].name.as_str(), "true" | "false"))
+            }
+            _ => false,
+        };
+        // (`flag::<N>()` with `const N: u8`: a named const's own type)
+        let named_const = |n: &str| self.lookup(n).is_none().then(|| self.prog.const_index.get(n).map(|&ci| self.prog.consts[ci as usize].ty)).flatten();
+        let kind_of = |t: Ty| match t {
+            Ty::Bool => Some(("bool", "bool")),
+            Ty::Char => Some(("char", "char")),
+            t if t.is_int() => Some(("int", "integer")),
+            _ => None,
+        };
+        match a {
+            GArg::Ty(crate::parse::Ty::Path(None, q)) if q.segs.len() == 1 && q.segs[0].args.is_empty() && named_const(&q.segs[0].name).is_some() => {
+                kind_of(named_const(&q.segs[0].name).unwrap())
+            }
+            GArg::Ty(t) if crate::ast_types::bool_arg(t).is_some() => Some(("bool", "bool")),
+            GArg::Const(e) if braced_bool(e) => Some(("bool", "bool")),
+            GArg::Const(Expr::Lit(s, _)) if s.starts_with('\'') => Some(("char", "char")),
+            GArg::Const(Expr::Lit(s, _)) if s.starts_with(|c: char| c.is_ascii_digit()) => Some(("int", "integer")),
+            _ => None,
+        }
+    }
+
+    /// a turbofish argument against its parameter's kind: E0747 for a boolean where a type goes, "mismatched types" for
+    /// a const argument of another kind than the parameter's declared type (out of line: the common calls do not reach
+    /// it)
+    #[inline(never)]
+    fn turbofish_arg_kind(&self, sig: &FnSig, slot: usize, a: &GArg) -> R<()> {
+        // (`get_flag::<false, 0xFF>()` with `const C: char`: a const argument of another kind than its parameter's
+        // type)
+        let const_slot = sig.generics.get(slot).filter(|(_, bs)| bs.iter().any(|b| b == crate::types::CONST_GENERIC));
+        // (`identity::<true>(..)` with `fn identity<T>`: a boolean where a type goes)
+        if const_slot.is_none() && sig.generics.get(slot).is_some() && matches!(a, GArg::Ty(t) if crate::ast_types::bool_arg(t).is_some()) {
+            return err(SP, "constant provided when a type was expected (E0747)");
+        }
+        if let Some((_, bs)) = const_slot {
+            let decl = bs.iter().find_map(|b| b.strip_prefix(crate::types::CONST_GENERIC)?.strip_prefix(':')).unwrap_or("usize");
+            let decl = &*self.prog.const_decl(decl);
+            let found = self.const_arg_kind(a);
+            let kind = match decl {
+                "bool" | "char" => decl,
+                _ => "int",
+            };
+            if let Some((_, shown)) = found.filter(|(k, _)| *k != kind) {
+                return err(SP, format!("mismatched types: expected `{decl}`, found {shown} (const argument)"));
+            }
+        }
+        Ok(())
+    }
+
     pub(crate) fn turbofish_sol(&self, sig: &FnSig, turbofish: Option<&[GArg]>) -> R<Vec<Option<Ty>>> {
         let mut sol: Vec<Option<Ty>> = vec![None; sig.generics.len()];
         if let (Some(t), Some(st)) = (self.seg_self, sig.self_ty) {
@@ -1396,10 +1472,25 @@ impl Cx<'_> {
             }
         }
         // trait メソッドは先頭が Self なので、turbofish はその後ろの型パラメータに当たる
+        // (the turbofish names the fn's own parameters, the last ones: an impl's come first, `impl<const N: usize>
+        // T<N> for S { fn l<const M: bool>() }` with `<S as T<123>>::l::<true>()`; a hidden `__impl0` of an
+        // `impl Trait` argument is not named)
         let first = sig.trait_of.is_some() as usize;
         if let Some(tf) = turbofish {
+            // (the summary names an `impl Trait` argument's parameter `__impl` and its index: a user's `__implT` is not one)
+            // (an impl's member only: a free fn's parameters are all its own, the prelude's `__exr_*` put the named
+            // ones first; the many calls to those skip the list)
+            let member = sig.self_ty.is_some() || sig.impl_of.is_some();
+            let named: Vec<usize> = if member { (0..sig.generics.len()).filter(|&k| !hidden_param(&sig.generics[k].0)).collect() } else { vec![] };
+            let ntf = tf.iter().filter(|a| !matches!(a, GArg::Lifetime(_))).count();
+            let own0 = if member { named.len().saturating_sub(ntf).max(first.min(named.len())) } else { first };
+            let slot_of = |i: usize| if member { named.get(own0 + i).copied().unwrap_or(usize::MAX) } else { first + i };
             for (i, a) in tf.iter().enumerate() {
+                let first = slot_of(i).wrapping_sub(i);
+                self.turbofish_arg_kind(sig, first + i, a)?;
                 let ty = match a {
+                    // (`f::<true>()`: a bool const argument, which the parser reads as a type path)
+                    GArg::Ty(t) if crate::ast_types::bool_arg(t).is_some() => self.prog.resolve_env(&crate::ast_types::bool_arg(t).unwrap(), &self.env).or_else(|er| err(SP, er))?,
                     GArg::Ty(t) => self.parse_ty(t)?,
                     // `f::<3>()`: const ジェネリクスの引数
                     GArg::Const(e) => {
@@ -1546,6 +1637,10 @@ impl Cx<'_> {
 
     /// 同じ名前の trait impl の関数 (`P::from` が `From<&str>` と `From<String>`) から、最初の引数の型で選ぶ
     pub(crate) fn pick_overload(&self, id: u32, recv: Option<Ty>, args: &[&Expr]) -> u32 {
+        if self.keep_overload.get() == Some(id) {
+            self.keep_overload.set(None);
+            return id;
+        }
         // (by the group's name: a candidate's own may carry an overload suffix, `S::from#1`)
         let gname = &self.prog.names[id as usize];
         let Some(cands) = self.prog.overloads.get(gname).or_else(|| self.prog.overloads.get(gname.split('#').next().unwrap_or(gname))) else {
@@ -1585,7 +1680,9 @@ impl Cx<'_> {
         // method of the same name)
         if let Some((m, tr)) = &self.explicit_trait {
             let name = &self.prog.names[id as usize];
-            if name.rsplit("::").next().map(|l| l.split('#').next().unwrap_or(l)) == Some(m.as_str()) {
+            // (an impl for a reference, `impl PartialEq for &X`: its methods are `X::__ref_eq`)
+            let last = name.rsplit("::").next().map(|l| l.split('#').next().unwrap_or(l));
+            if last == Some(m.as_str()) || last.and_then(|l| l.strip_prefix("__ref_")) == Some(m.as_str()) {
                 let of_tr = |c: u32| base(c) == Some(tr.as_str());
                 if let Some(&c) = cands.iter().find(|&&c| of_tr(c) && fits(c, at)) {
                     return c;
@@ -2551,6 +2648,15 @@ impl Cx<'_> {
             let m = &p.segs[1].name;
             return Some(Expr::MethodCall(Box::new(paren(cargs[0].clone())), m.clone(), vec![], vec![cargs[1].clone()], crate::parse::Span::default()));
         }
+        // (`U::from(x)` in a generic fn with `U: From<u8>`: U's instance, when it is a number and x a number std
+        // converts to it losslessly; a program's own `impl From<Code> for u32` is called as written)
+        if Ty::prim(ty).is_none() && p.segs[1].name == "from" && cargs.len() == 1 {
+            if let Some(&(_, t)) = self.env.params.iter().rev().find(|(n, _)| n == ty) {
+                if (t.is_int() || t.is_float()) && self.peek(&cargs[0]).is_some_and(|a| crate::program::prim_from(a, t)) {
+                    return Some(paren(Expr::Cast(Box::new(paren(cargs[0].clone())), ty_named(&self.prog.tn(t)))));
+                }
+            }
+        }
         let t = Ty::prim(ty)?;
         if t == Ty::Char || t == Ty::Bool {
             return None;
@@ -2683,4 +2789,10 @@ pub fn static_not_sync(prog: &Program) -> Option<(usize, String)> {
         let ext = c.expr.starts_with(crate::parse::EXTERN_STATIC_SYM);
         (c.stat == Some(false) && user && !ext && not_sync(prog, c.ty)).then(|| (ci, prog.tn(c.ty)))
     })
+}
+
+/// `__impl0`: the parameter the summary makes of an `impl Trait` argument (its index after the name), not a user's
+/// `__implT`
+fn hidden_param(n: &str) -> bool {
+    n.starts_with("__impl") && n.len() > 6 && n.as_bytes()[6..].iter().all(|c| c.is_ascii_digit())
 }

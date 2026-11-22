@@ -63,6 +63,11 @@ fn eval(s: &[u8], toks: &[Tok], mut i: usize, c: &CfgSet) -> (bool, usize) {
     };
     let name: &[u8] = t(i);
     i += 1;
+    // (`not((any(..)))`: a predicate in parentheses, as a macro's `$e:expr` puts it)
+    if name == b"(" {
+        let (v, j) = eval(s, toks, i, c);
+        return (v, if t(j) == b")" { j + 1 } else { j });
+    }
     if t(i) == b"(" && (name == b"not" || name == b"all" || name == b"any") {
         i += 1;
         let mut vals: Vec<bool> = vec![];
@@ -183,10 +188,130 @@ fn thing_end(s: &[u8], toks: &[Tok], mut i: usize) -> usize {
 }
 
 /// src の cfg を評価する。変わらなければ None
+/// `cfg_select! { pred => { .. } _ => { .. } }`: the tokens of the first arm whose predicate holds, in place of the
+/// whole call (the rest blanked, newlines kept, so lines and columns stay). Nested calls in the chosen arm are
+/// expanded too; not inside `macro_rules!` (a predicate there may be a metavariable, expanded first)
+pub fn expand_select(src: &str, c: &CfgSet) -> Option<String> {
+    if !src.contains("cfg_select") {
+        return None;
+    }
+    let mut out = src.as_bytes().to_vec();
+    let mut changed = false;
+    for _ in 0..16 {
+        let s = out.clone();
+        let toks = crate::lexer::tokenize(&s);
+        let t = |k: usize| -> &[u8] {
+            match toks.get(k) {
+                Some(&(_, a, b)) => &s[a..b],
+                None => b"",
+            }
+        };
+        let mut found = false;
+        let mut i = 0;
+        while i + 2 < toks.len() {
+            // (a `macro_rules!` body is skipped)
+            if t(i) == b"macro_rules" && t(i + 1) == b"!" && toks.get(i + 2).is_some_and(|x| x.0 == 0) && is_open(t(i + 3)) {
+                i = matching(&s, &toks, i + 3) + 1;
+                continue;
+            }
+            // (another macro's arguments are its own: `stringify!(cfg_select! { .. })` keeps them; a macro_rules! call's
+            // are expanded with it. The std macros that take expressions, `println!(cfg_select! { .. })`, are looked in)
+            if toks[i].0 == 0 && t(i) != b"cfg_select" && t(i + 1) == b"!" && is_open(t(i + 2)) && !expr_macro(t(i)) {
+                i = matching(&s, &toks, i + 2) + 1;
+                continue;
+            }
+            if !(toks[i].0 == 0 && t(i) == b"cfg_select" && t(i + 1) == b"!" && is_open(t(i + 2))) {
+                i += 1;
+                continue;
+            }
+            let close = matching(&s, &toks, i + 2);
+            // (the call's path: `std::cfg_select!` / `::core::cfg_select!` from its first segment)
+            let mut st = i;
+            while st >= 2 && t(st - 1) == b":" && t(st - 2) == b":" {
+                if st >= 3 && toks[st - 3].0 == 0 {
+                    st -= 3;
+                } else {
+                    st -= 2;
+                    break;
+                }
+            }
+            // (in an expression, not as statements or items: after an operator, `=`, `(`, `,`, `=>`, `return` ..)
+            let in_expr = st > 0 && !matches!(t(st - 1), b"{" | b"}" | b";" | b"]");
+            // the arms: `pred => { .. }` / `_ => { .. }`, an optional `,` after each
+            let mut k = i + 3;
+            let mut chosen: Option<(usize, usize)> = None;
+            let mut ok = true;
+            while k < close {
+                let (v, j) = if t(k) == b"_" { (true, k + 1) } else { eval(&s, &toks, k, c) };
+                if !(t(j) == b"=" && t(j + 1) == b">" && is_open(t(j + 2))) {
+                    ok = false;
+                    break;
+                }
+                let bc = matching(&s, &toks, j + 2);
+                if v && chosen.is_none() {
+                    chosen = Some((j + 2, bc));
+                }
+                k = bc + 1;
+                if t(k) == b"," {
+                    k += 1;
+                }
+            }
+            if !ok || close >= toks.len() {
+                i += 1;
+                continue;
+            }
+            match chosen {
+                // (a `{ .. }` arm gives its contents as statements or items; a `( .. )` / `[ .. ]` one, and a `{ .. }`
+                // one of more than one token in an expression, keeps its delimiters: `2 * cfg_select! { _ => { 1 + 2 } }`
+                // is 6, a block. One token, `println!(cfg_select! { _ => { "x" } })`, is itself)
+                Some((bo, bc)) if t(bo) == b"{" && (!in_expr || bc == bo + 2) => {
+                    blank(&mut out, toks[st].1, toks[bo].2);
+                    blank(&mut out, toks[bc].1, toks[close].2);
+                }
+                Some((bo, bc)) => {
+                    blank(&mut out, toks[st].1, toks[bo].1);
+                    blank(&mut out, toks[bc].2, toks[close].2);
+                }
+                // (no arm holds: an error at the call, as rustc's "none of the predicates in this `cfg_select`
+                // evaluated to true")
+                None => {
+                    let (a, b) = (toks[st].1, toks[close].2);
+                    blank(&mut out, a, b);
+                    let w: &[u8] = b"compile_error!(\"none of the predicates in this `cfg_select` evaluated to true\")";
+                    if b - a >= w.len() {
+                        out[a..a + w.len()].copy_from_slice(w);
+                    } else {
+                        out.splice(a..a, w.iter().copied());
+                    }
+                }
+            }
+            found = true;
+            changed = true;
+            i = close + 1;
+        }
+        if !found {
+            break;
+        }
+    }
+    if changed { String::from_utf8(out).ok() } else { None }
+}
+
 pub fn strip(src: &str, c: &CfgSet) -> Option<String> {
     if !src.contains("cfg") && !src.contains("extern crate") {
         return None;
     }
+    // (a `cfg_select!` call the tokens below pass: its chosen arm in place, then that arm's own cfgs)
+    let mut select = false;
+    let r = strip_toks(src, c, &mut select);
+    if select {
+        if let Some(e) = expand_select(r.as_deref().unwrap_or(src), c) {
+            return Some(strip_toks(&e, c, &mut false).unwrap_or(e));
+        }
+    }
+    r
+}
+
+fn strip_toks(src: &str, c: &CfgSet, select: &mut bool) -> Option<String> {
     let s = src.as_bytes();
     let toks = crate::lexer::tokenize(s);
     let mut out = s.to_vec();
@@ -223,7 +348,11 @@ pub fn strip(src: &str, c: &CfgSet) -> Option<String> {
                 None
             };
             if let Some(g) = g {
-                i = matching(s, &toks, g) + 1;
+                let end = matching(s, &toks, g);
+                // (also in the arguments of a std macro that takes expressions: `println!(cfg_select! { .. })`)
+                *select |= t(i) == b"cfg_select"
+                    || (expr_macro(t(i)) && end < toks.len() && src[toks[g].1..toks[end].2].contains("cfg_select"));
+                i = end + 1;
                 continue;
             }
         }
@@ -327,4 +456,14 @@ mod tests {
         assert_eq!(run("m! { if #[cfg(test)] { a } } macro_rules! n { () => { #[cfg(test)] fn f() {} } }", &[]), "m! { if #[cfg(test)] { a } } macro_rules! n { () => { #[cfg(test)] fn f() {} } }");
         assert_eq!(run("#[cfg(feature = \"alloc\")] extern crate alloc; extern crate std as s; fn f() {}", &["alloc"]), "fn f() {}");
     }
+}
+
+/// std macros whose arguments are expressions (a `cfg_select!` in them is expanded in place)
+fn expr_macro(n: &[u8]) -> bool {
+    matches!(
+        n,
+        b"println" | b"print" | b"eprintln" | b"eprint" | b"format" | b"write" | b"writeln" | b"panic" | b"assert" | b"assert_eq"
+            | b"assert_ne" | b"debug_assert" | b"debug_assert_eq" | b"debug_assert_ne" | b"vec" | b"dbg" | b"todo" | b"unreachable"
+            | b"unimplemented" | b"format_args"
+    )
 }

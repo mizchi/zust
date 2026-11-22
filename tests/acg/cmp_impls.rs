@@ -28,6 +28,7 @@ fn main() {
     println!("{:?}", by_ref());
     println!("{:?}", other_eq());
     println!("{}", whole_array());
+    println!("{:?}", two_ref_eqs());
 }
 // (`impl PartialEq for &X` only: `&X(1) == &X(2)` compares through it, not by the fields)
 struct RX(i32);
@@ -66,4 +67,23 @@ impl PartialEq<RR> for [NN; 1] {
 #[allow(dead_code)]
 fn whole_array() -> bool {
     [NN] == RR
+}
+// (`impl Other for &X` before `impl PartialEq for &X`: `==` still calls PartialEq's)
+trait Other2 {
+    fn eq(&self, o: &Self) -> bool;
+}
+struct TX(i32);
+impl Other2 for &TX {
+    fn eq(&self, _o: &Self) -> bool {
+        false
+    }
+}
+impl PartialEq for &TX {
+    fn eq(&self, _o: &Self) -> bool {
+        true
+    }
+}
+#[allow(dead_code)]
+fn two_ref_eqs() -> (bool, bool) {
+    (&TX(1) == &TX(2), &TX(1) != &TX(2))
 }
