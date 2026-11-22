@@ -1500,6 +1500,10 @@ impl Cx<'_> {
             // (`&mut x as *mut _` / coerced to a raw pointer: not a loan)
             if !matches!(expected, Some(Ty::Ptr(..))) {
                 self.bk_borrow(rexpr, m, err_pos(rexpr));
+                // (`&*Box::new(1)`: a borrow of what a temporary owns, which goes away with it (E0716))
+                if matches!(strip_paren(rexpr), Expr::Unary(op, _, _) if op == "*") && self.bk_place(rexpr).is_none() {
+                    self.bk_temp_borrow(rexpr, m, pl.ty());
+                }
             }
             return match pl {
                 // `&mut v[i]` (v: Vec<Box<T>>) を `&mut T` の位置に: Box の中身を指す (deref の強制変換)

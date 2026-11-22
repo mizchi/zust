@@ -320,6 +320,12 @@ pub fn direct_ref(a: &Expr, out: &mut Vec<usize>) {
             out.push(&**x as *const Expr as usize);
             out.push(strip(x) as *const Expr as usize);
         }
+        // (`&*Box::new(1)`: a borrow of what a temporary owns)
+        if let Expr::Unary(op, y, _) = strip(x) {
+            if op == "*" && made_temp(y) {
+                out.push(&**x as *const Expr as usize);
+            }
+        }
     }
 }
 

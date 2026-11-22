@@ -1349,3 +1349,12 @@ fn placeholder_fn_calls() {
     assert!(d.len() == 1 && d[0].0 == 3, "{d:?}");
     assert_eq!(check("fn a<F: Fn(isize, isize) -> isize>(f: F) -> isize {\n    f(1, 2) + f(3, 4)\n}\nfn b<F: FnMut(isize) -> isize>(mut f: F) -> isize {\n    f(1) + f(2)\n}\nfn c<F: FnOnce() -> String>(f: F) -> String {\n    f()\n}\nfn d<T, F: Fn(&T) -> bool>(v: &[T], f: F) -> usize {\n    v.iter().filter(|x| f(x)).count()\n}\nfn main() {}\n"), vec![]);
 }
+
+/// `&*Box::new(1)` borrows what a temporary owns: stored in a map that outlives the statement, E0716; a `let` extends
+/// it (`let r = &*Box::new(1);`)
+#[test]
+fn borrow_of_a_temporarys_contents() {
+    let d = check("use std::collections::HashMap;\nfn main() {\n    let mut m: HashMap<usize, &usize> = HashMap::new();\n    m.insert(42, &*Box::new(1));\n    println!(\"{:?}\", m.len());\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 4 && d[0].1.contains("E0716"), "{d:?}");
+    assert_eq!(check("fn main() {\n    let r: &usize = &*Box::new(1);\n    println!(\"{}\", r);\n}\n"), vec![]);
+}
