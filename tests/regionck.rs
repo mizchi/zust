@@ -1317,3 +1317,12 @@ fn prelude_results_hold_receivers() {
     assert!(d.len() == 1 && d[0].0 == 3, "{d:?}");
     assert_eq!(check("fn ok(s: &str) -> Option<&str> {\n    let parts: Vec<&str> = s.split(',').collect();\n    parts.first().copied()\n}\nfn n() -> usize {\n    let raw: Vec<String> = Vec::new();\n    raw.iter().count()\n}\nfn main() {}\n"), vec![]);
 }
+
+/// E0195 for the methods of an impl of a type that is not a struct (`impl<'a> Foo<'a> for &'a isize`): the method's
+/// early-bound lifetimes are the trait's
+#[test]
+fn e0195_for_impls_of_references() {
+    let d = check("pub trait Foo<'a> {\n    fn no_bound<'b>(self, b: &'b u8);\n}\nimpl<'a> Foo<'a> for &'a isize {\n    fn no_bound<'b: 'a>(self, b: &'b u8) {}\n}\nfn main() {}\n");
+    assert!(d.len() == 1 && d[0].1.contains("E0195"), "{d:?}");
+    assert_eq!(check("pub trait Foo<'a> {\n    fn no_bound<'b>(self, b: &'b u8);\n    fn has_bound<'b: 'a>(self, b: &'b u8);\n}\nimpl<'a> Foo<'a> for &'a isize {\n    fn no_bound<'b>(self, b: &'b u8) {}\n    fn has_bound<'b: 'a>(self, b: &'b u8) {}\n}\nfn main() {}\n"), vec![]);
+}

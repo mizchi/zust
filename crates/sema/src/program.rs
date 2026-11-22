@@ -1557,6 +1557,34 @@ impl Program {
             .filter_map(|(tn, ds)| p.struct_index.get(tn).map(|&sid| (sid, ds)))
             .flat_map(|(sid, ds)| ds.iter().map(move |d| (sid, d.clone())))
             .collect();
+        // (E0195 for the methods of an impl of a type that is not a struct (`impl<'a> Foo<'a> for &'a isize`), which
+        // the loop below does not reach: the method's own early-bound lifetimes are the trait's)
+        {
+            let early = |r: Option<&crate::types::RSigSyn>, g: &[(String, Vec<String>)]| -> Vec<usize> {
+                let Some(r) = r else { return vec![] };
+                let in_bounds = |l: &str| g.iter().flat_map(|x| x.1.iter()).any(|b| b.match_indices(l).any(|(k, _)| !b[k + l.len()..].starts_with(|c: char| c.is_alphanumeric() || c == '_')));
+                (r.outer as usize..r.lts.len())
+                    .map(|i| r.outlives.iter().filter(|&&(a, b)| a as usize == i || b as usize == i).count() + in_bounds(&r.lts[i]) as usize)
+                    .filter(|&n| n > 0)
+                    .collect()
+            };
+            for (mi, ms) in p.sigs.iter().enumerate() {
+                let (Some(tr), None, true) = (ms.impl_trait.as_deref(), ms.impl_of, ms.has_body) else { continue };
+                let Some(ii) = p.item_of[mi] else { continue };
+                if ii as usize >= user {
+                    continue;
+                }
+                let m = p.names[mi].rsplit("::").next().unwrap_or("").split('#').next().unwrap_or("");
+                // (an impl of a reference names its methods `__ref_m`)
+                let same = |dn: &str| m == dn || m.strip_suffix(dn).is_some_and(|pre| pre.starts_with("__") && pre.ends_with('_'));
+                let Some(&d) = p.traits.get(tr).and_then(|ds| ds.iter().find(|&&d| p.names[d as usize].rsplit("::").next().is_some_and(same))) else { continue };
+                let m = p.names[d as usize].rsplit("::").next().unwrap_or(m);
+                let ds = &p.sigs[d as usize];
+                if early(ds.regions.as_deref(), &ds.generics) != early(ms.regions.as_deref(), &ms.generics) {
+                    return Err(format!("{}:1: lifetime parameters or bounds on method `{m}` do not match the trait declaration (E0195)", items[ii as usize].line));
+                }
+            }
+        }
         for (sid, tr) in &p.impls {
             if derived.contains(&(*sid, tr.clone())) {
                 continue;
