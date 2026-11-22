@@ -392,6 +392,13 @@ impl Cx<'_> {
             if let (Ty::Struct(sid), true) = (pt, self.user_code) {
                 let b = self.prog.base_of(sid);
                 if self.not_clone(pt, 0) && self.prog.method(sid, "deref").is_none() && self.prog.method(b, "deref").is_none() {
+                    // (a closure's Clone is the compiler's, and asks it of each capture)
+                    if self.prog.is_closure(b) {
+                        let fields = &self.prog.structs[sid as usize].fields;
+                        if let Some(f) = fields.iter().find(|f| self.not_clone(f.1, 1)) {
+                            return err(SP, format!("the trait bound `{}: Clone` is not satisfied (E0277)", self.prog.tn(f.1)));
+                        }
+                    }
                     let derived = self.prog.derived.get(&b).is_some_and(|d| d.iter().any(|x| x == "Clone"));
                     let what = if self.prog.structs[b as usize].is_enum { "enum" } else { "struct" };
                     let tn = self.prog.tn(pt);

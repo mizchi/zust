@@ -2934,11 +2934,20 @@ impl Program {
         if depth > 4 || (own && self.method(sid, "clone").is_some()) {
             return false;
         }
+        // (a closure is Clone when its captures are, whatever its signature: `|x: NotClone| -> NotClone {..}` is)
+        if self.is_closure(b) {
+            return self.structs[sid as usize].fields.iter().any(|f| self.surely_not_clone(f.1, depth + 1));
+        }
         let derived = self.derived.get(&b).is_some_and(|d| d.iter().any(|x| x == "Clone"));
         if own && !derived && !self.implements(t, "Clone") {
             return true;
         }
         self.clone_needs_args(b, own) && self.structs[sid as usize].args.iter().any(|&a| self.surely_not_clone(a, depth + 1))
+    }
+
+    /// The base b is a closure's struct (`f::{closure#0}`)
+    pub fn is_closure(&self, b: u32) -> bool {
+        self.structs[b as usize].name.contains("{closure#")
     }
 
     /// Whether the base b is Clone only when its arguments are: a derive of the program's own, and std's containers

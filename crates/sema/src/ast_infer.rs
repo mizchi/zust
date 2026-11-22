@@ -1008,7 +1008,8 @@ impl Inf<'_> {
             _ => return false,
         };
         let own = self.prog.struct_item.get(b as usize).is_some_and(|&ii| ii < self.prog.prelude_from);
-        if own && self.prog.method(b, "clone").is_some() {
+        // (a closure's Clone is its captures', which are not among the arguments here)
+        if (own && self.prog.method(b, "clone").is_some()) || self.prog.is_closure(b) {
             return false;
         }
         let derived = self.prog.derived.get(&b).is_some_and(|d| d.iter().any(|x| x == "Clone"));
