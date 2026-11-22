@@ -727,6 +727,7 @@ run-pass	borrowck/borrow-box-in-map-3026.rs
 compile-fail	borrowck/borrow-checker-lifetime-error-46471.rs
 compile-fail	borrowck/borrow-immutable-deref-box.rs
 run-pass	borrowck/borrow-in-match-with-format-string.rs
+compile-fail	borrowck/borrow-of-moved-value-in-for-loop-61108.rs
 compile-fail	borrowck/borrow-raw-address-of-borrowed.rs
 check-pass	borrowck/borrow-raw-address-of-deref-mutability-ok.rs
 compile-fail	borrowck/borrow-raw-address-of-deref-mutability.rs
@@ -816,6 +817,8 @@ check-pass	borrowck/borrowck-move-out-from-array-no-overlap-match.rs
 check-pass	borrowck/borrowck-move-out-from-array-no-overlap.rs
 check-pass	borrowck/borrowck-move-out-from-array-use-no-overlap-match.rs
 check-pass	borrowck/borrowck-move-out-from-array-use-no-overlap.rs
+compile-fail	borrowck/borrowck-move-out-from-array-use.rs
+compile-fail	borrowck/borrowck-move-out-from-array.rs
 compile-fail	borrowck/borrowck-move-out-of-overloaded-auto-deref.rs
 compile-fail	borrowck/borrowck-move-out-of-overloaded-deref.rs
 run-pass	borrowck/borrowck-multiple-borrows-interior-boxes.rs
@@ -845,6 +848,7 @@ compile-fail	borrowck/borrowck-return.rs
 run-pass	borrowck/borrowck-rvalues-mutable.rs
 run-pass	borrowck/borrowck-scope-of-deref-issue-4666.rs
 check-pass	borrowck/borrowck-slice-pattern-element-loan-array-no-overlap.rs
+compile-fail	borrowck/borrowck-slice-pattern-element-loan-array.rs
 check-pass	borrowck/borrowck-slice-pattern-element-loan-slice-no-overlap.rs
 run-pass	borrowck/borrowck-static-item-in-fn.rs
 compile-fail	borrowck/borrowck-storage-dead.rs
@@ -959,10 +963,12 @@ compile-fail	borrowck/issue-92015.rs
 compile-fail	borrowck/issue-93093.rs
 run-pass	borrowck/lazy-init.rs
 compile-fail	borrowck/liberated-region-from-outer-closure.rs
+compile-fail	borrowck/many-mutable-borrows.rs
 compile-fail	borrowck/mismatched-pointer-type-in-self-7061.rs
 compile-fail	borrowck/move-from-union-field-issue-66500.rs
 compile-fail	borrowck/move-in-pattern-mut.rs
 compile-fail	borrowck/move-in-pattern.rs
+compile-fail	borrowck/moved-value-in-closure-suggestion-64559.rs
 compile-fail	borrowck/multiple-mutable-borrows-error-65131.rs
 compile-fail	borrowck/mut-borrow-in-loop.rs
 compile-fail	borrowck/mut-borrow-of-mut-ref.rs
@@ -1144,6 +1150,7 @@ compile-fail	closures/2229_closure_analysis/bad-pattern.rs
 run-pass	closures/2229_closure_analysis/capture-enum-field.rs
 compile-fail	closures/2229_closure_analysis/diagnostics/arrays.rs
 compile-fail	closures/2229_closure_analysis/diagnostics/borrowck/borrowck-1.rs
+compile-fail	closures/2229_closure_analysis/diagnostics/borrowck/borrowck-2.rs
 compile-fail	closures/2229_closure_analysis/diagnostics/borrowck/borrowck-3.rs
 compile-fail	closures/2229_closure_analysis/diagnostics/borrowck/borrowck-closures-mut-and-imm.rs
 compile-fail	closures/2229_closure_analysis/diagnostics/box.rs
@@ -1258,6 +1265,8 @@ compile-fail	closures/issue-6801.rs
 check-pass	closures/issue-68025.rs
 check-pass	closures/issue-72408-nested-closures-exponential.rs
 compile-fail	closures/issue-78720.rs
+compile-fail	closures/issue-80313-mutable-borrow-in-closure.rs
+compile-fail	closures/issue-80313-mutable-borrow-in-move-closure.rs
 compile-fail	closures/issue-80313-mutation-in-closure.rs
 compile-fail	closures/issue-80313-mutation-in-move-closure.rs
 compile-fail	closures/issue-82438-mut-without-upvar.rs
@@ -3759,6 +3768,7 @@ compile-fail	loops/dont-suggest-break-thru-item.rs
 build-pass	loops/infinite-loop-simplify-cfg-75704.rs
 run-pass	loops/issue-1974.rs
 compile-fail	loops/issue-43162.rs
+compile-fail	loops/issue-82916.rs
 compile-fail	loops/label-on-block-suggest-move.rs
 compile-fail	loops/loop-break-never-type-mismatch.rs
 check-pass	loops/loop-break-unsize.rs
@@ -4221,6 +4231,7 @@ compile-fail	moves/move-into-dead-array-2.rs
 run-pass	moves/move-nullary-fn.rs
 compile-fail	moves/move-of-addr-of-mut.rs
 compile-fail	moves/move-out-of-array-1.rs
+compile-fail	moves/move-out-of-array-ref.rs
 run-pass	moves/move-out-of-field.rs
 compile-fail	moves/move-out-of-shared-ref-deref.rs
 compile-fail	moves/move-out-of-tuple-field.rs
@@ -6377,6 +6388,7 @@ compile-fail	suggestions/attribute-typos.rs
 compile-fail	suggestions/bad-infer-in-trait-impl.rs
 compile-fail	suggestions/bool_typo_err_suggest.rs
 compile-fail	suggestions/borrow-cast-or-binexpr-with-parens.rs
+compile-fail	suggestions/borrow-for-loop-head.rs
 compile-fail	suggestions/box-future-wrong-output.rs
 compile-fail	suggestions/boxed-variant-field.rs
 compile-fail	suggestions/call-boxed.rs
@@ -7268,6 +7280,8 @@ compile-fail	unboxed-closures/unboxed-closures-infer-fnmut-missing-mut.rs
 compile-fail	unboxed-closures/unboxed-closures-infer-fnmut-move-missing-mut.rs
 run-pass	unboxed-closures/unboxed-closures-infer-fnmut-move.rs
 run-pass	unboxed-closures/unboxed-closures-infer-fnmut.rs
+compile-fail	unboxed-closures/unboxed-closures-infer-fnonce-call-twice.rs
+compile-fail	unboxed-closures/unboxed-closures-infer-fnonce-move-call-twice.rs
 run-pass	unboxed-closures/unboxed-closures-infer-kind.rs
 run-pass	unboxed-closures/unboxed-closures-infer-upvar.rs
 run-pass	unboxed-closures/unboxed-closures-move-mutable.rs
