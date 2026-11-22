@@ -252,6 +252,8 @@ pub struct Program {
     pub derived_peq: FxSet<u32>,
     /// the derived impls (base ids and traits): `#[derive(Clone)] struct S<T>` is Clone when each type argument is
     pub derived: FxMap<u32, Vec<String>>,
+    /// a struct's / enum's const parameters of other types than usize (base ids): (the parameter's place, its type)
+    pub const_param_tys: FxMap<u32, Vec<(usize, String)>>,
     /// the program's source declares modules (`mod m { .. }`), whose scopes are flattened away: a name's item may then
     /// be out of scope where the name is written
     pub has_mods: bool,
@@ -777,6 +779,7 @@ impl Program {
             const_index: FxMap::default(),
             derived_peq: FxSet::default(),
             derived: FxMap::default(),
+            const_param_tys: FxMap::default(),
             has_mods: false,
             lower_consts: false,
             const_by_last: FxMap::default(),
@@ -981,6 +984,13 @@ impl Program {
                 p.struct_index.insert(name.clone(), sdefs.len() as u32);
                 if let Some(r) = &sm.adt_regions {
                     p.adt_regions.insert(sdefs.len() as u32, std::sync::Arc::new((**r).clone()));
+                }
+                // (the declared types of its const parameters other than usize, by the parameter's place)
+                for (pn, bs) in &sm.adt_bounds {
+                    let decl = bs.iter().find_map(|b| b.strip_prefix(CONST_GENERIC)?.strip_prefix(':'));
+                    if let (Some(d), Some(k)) = (decl, sm.adt_generics.iter().position(|g| g == pn)) {
+                        p.const_param_tys.entry(sdefs.len() as u32).or_default().push((k, d.to_string()));
+                    }
                 }
                 sdefs.push((ii, name.clone(), shape, sm.adt_generics.clone()));
             }

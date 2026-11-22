@@ -123,7 +123,21 @@ impl Cx<'_> {
     /// number of generic parameters (E0107); a type that does not resolve is that error
     pub(crate) fn turbofish_targs(&self, sid: u32, args: &[GArg]) -> R<Vec<Option<Ty>>> {
         let mut ts = vec![];
+        // (`Flag::<1>` with `struct Flag<const B: bool>`: a const argument of another kind than the parameter's type)
+        let decls = self.prog.const_param_tys.get(&self.prog.base_of(sid));
         for a in args {
+            if let Some(ds) = decls {
+                let k = ts.len();
+                if let Some((_, decl)) = ds.iter().find(|(i, _)| *i == k) {
+                    let kind = match decl.as_str() {
+                        "bool" | "char" => decl.as_str(),
+                        _ => "int",
+                    };
+                    if let Some((_, shown)) = self.const_arg_kind(a).filter(|(f, _)| *f != kind) {
+                        return err(SP, format!("mismatched types: expected `{decl}`, found {shown} (const argument)"));
+                    }
+                }
+            }
             ts.push(match a {
                 GArg::Ty(crate::parse::Ty::Infer) => None,
                 GArg::Ty(t) if crate::ast_types::bool_arg(t).is_some() => Some(self.prog.resolve_env(&crate::ast_types::bool_arg(t).unwrap(), &self.env).or_else(|e| err(SP, e))?),

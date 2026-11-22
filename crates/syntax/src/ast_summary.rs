@@ -295,6 +295,12 @@ fn where_types(item: &Item, owner: Option<&Owner>, out: &mut Vec<String>) {
 fn adt_bounds(g: &Generics) -> Vec<(String, Vec<String>)> {
     let mut v = Vec::new();
     for p in &g.params {
+        // (`struct Flag<const B: bool>`: a const parameter's declared type when it is not usize, `__const:bool`)
+        if let GParam::Const(n, PTy::Path(None, q)) = p {
+            if q.segs.len() == 1 && q.segs[0].name != "usize" {
+                v.push((n.clone(), vec![format!("{CONST_GENERIC}:{}", q.segs[0].name)]));
+            }
+        }
         if let GParam::Ty(n, bs, _) = p {
             let trs: Vec<String> = bs
                 .iter()
