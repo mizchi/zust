@@ -1338,8 +1338,12 @@ impl Cx<'_> {
             return Ok(None);
         };
         // (a vector's method may be an `unsafe fn` (`impl Vector for __m128i`): E0133 outside an unsafe block)
+        // (when every overload is unsafe: a safe one that the overload choice may take is checked there instead)
         if let (Ty::Vec(_), Expr::MethodCall(.., msp)) = (t, e) {
-            self.check_unsafe_call(id, msp.start)?;
+            let group = self.prog.overloads.get(&self.prog.names[id as usize]).cloned().unwrap_or_else(|| vec![id]);
+            if group.iter().all(|&i| self.prog.sigs[i as usize].is_unsafe) {
+                self.check_unsafe_call(id, msp.start)?;
+            }
         }
         // (`impl Tr for Box<S>`: only when the impl's self type is this Box; else the method is S's, through deref)
         if let Ty::Box(_) = t {
