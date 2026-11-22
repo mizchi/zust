@@ -2126,3 +2126,15 @@ fn closure_dyn_fn_signature() {
     assert!(d.len() == 1 && d[0].0 == 3 && d[0].1.contains("borrowed data escapes outside of closure"), "{d:?}");
     assert_eq!(check("fn g<'a>(out: &mut Vec<&'a u32>, a: &'a u32) {\n    let f: &mut dyn FnMut(&'a u32) = &mut |y| out.push(y);\n    f(a);\n}\nfn main() {\n    let mut count = 0;\n    {\n        let f: &mut dyn FnMut(&str) = &mut |s| count += s.len();\n        f(\"abc\");\n    }\n    let k: &dyn Fn(&u32) -> &u32 = &|x| x;\n    let first: &dyn Fn(&Vec<u32>) -> Option<&u32> = &|v| v.first();\n    let v = vec![4u32, 5];\n    let mut all = vec![];\n    g(&mut all, &v[0]);\n    println!(\"{} {} {:?} {}\", count, k(&7), first(&v), all.len());\n}\n"), vec![]);
 }
+
+/// An impl's method whose regions make it less general than its trait's declaration: the declaration's regions are
+/// placeholders, the method's own lifetimes variables (lifetimes/lifetime-mismatch-between-trait-and-impl.rs,
+/// trait-impl-mismatch-elided-lifetime-issue-65866.rs)
+#[test]
+fn impl_method_regions_against_the_trait() {
+    let d = check("trait Foo {\n    fn foo<'a>(x: &i32, y: &'a i32) -> &'a i32;\n}\nimpl Foo for () {\n    fn foo<'a>(x: &'a i32, y: &'a i32) -> &'a i32 {\n        if x > y { x } else { y }\n    }\n}\nfn main() {}\n");
+    assert!(d.len() == 1 && d[0].0 == 5 && d[0].1.contains("`impl` item signature doesn't match `trait` item signature"), "{d:?}");
+    let d = check("struct Foo;\nstruct Re<'a> {\n    _data: &'a u16,\n}\ntrait Bar {\n    fn bar(&self, r: &mut Re);\n}\nimpl Bar for Foo {\n    fn bar<'a, 'b>(&'a self, _r: &'b mut Re<'a>) {}\n}\nfn main() {}\n");
+    assert!(d.len() == 1 && d[0].0 == 9, "{d:?}");
+    assert_eq!(check("trait B {\n    fn g<'a>(&self, x: &'a u32) -> &'a u32;\n}\ntrait C {\n    fn h<'a>(x: &'a u32, y: &'a u32) -> &'a u32;\n}\ntrait A {\n    fn f(&self) -> &u32;\n}\nstruct S(u32);\nstruct L<'a>(&'a u32);\nimpl B for S {\n    fn g<'b>(&self, x: &'b u32) -> &'b u32 {\n        x\n    }\n}\nimpl C for S {\n    fn h<'a, 'b>(x: &'a u32, _y: &'b u32) -> &'a u32 {\n        x\n    }\n}\nimpl<'a> A for L<'a> {\n    fn f(&self) -> &u32 {\n        self.0\n    }\n}\nfn main() {\n    let n = 5;\n    println!(\"{} {} {}\", S(1).g(&n), S::h(&n, &n), L(&n).f());\n}\n"), vec![]);
+}

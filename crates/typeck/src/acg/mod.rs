@@ -311,6 +311,18 @@ pub fn compile(prog: &Program, insts: &Mutex<Insts>, id: u32, f: &ItemFn, line_b
     // (a region check begun late (`'static` required where the gate left the function out) that met a local bound
     // before it began, with no tree: the function again, checked from its start)
     // (rerun out of band: the result is compile's own, returned as it is, not copied into another)
+    // (an impl's method whose regions make it less general than its trait's declaration)
+    if regionck::enabled() {
+        let b = insts.lock().unwrap().body_of(id);
+        let user = prog.item_of.get(b as usize).copied().flatten().is_some_and(|i| i < prog.prelude_from);
+        if user && prog.sigs[b as usize].impl_trait.is_some() {
+            if let Some(d) = regionck::trait_decl_of(prog, b) {
+                if regionck::impl_sig_mismatch(prog, d, b) {
+                    return Err(format!("{}:1: `impl` item signature doesn't match `trait` item signature (E0308)", line_base + 1));
+                }
+            }
+        }
+    }
     let mut rerun = false;
     let r = compile_once(prog, insts, id, f, line_base, inl, false, &mut rerun);
     if rerun && r.is_ok() {

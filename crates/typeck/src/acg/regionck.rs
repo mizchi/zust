@@ -3727,3 +3727,97 @@ impl Cx<'_> {
         }
     }
 }
+
+/// The declaration in its trait of the method an impl's method implements (by name)
+pub fn trait_decl_of(prog: &Program, mi: u32) -> Option<u32> {
+    let ms = prog.sigs.get(mi as usize)?;
+    let tr = ms.impl_trait.as_deref()?;
+    let m = prog.names[mi as usize].rsplit("::").next()?.split('#').next()?;
+    let ds = prog.traits.get(tr)?;
+    ds.iter().copied().find(|&d| d != mi && prog.names[d as usize].rsplit("::").next() == Some(m))
+}
+
+/// An impl's method against its trait's declaration, by regions (rustc's "`impl` item signature doesn't match
+/// `trait` item signature"): the declaration's regions are universal, the method's own lifetimes and elided regions
+/// are variables; each of the declaration's parameters flows into the impl's, and the impl's result into the
+/// declaration's. True when that needs a region of the declaration to outlive another it is not known to
+/// (`fn foo<'a>(x: &'a i32, y: &'a i32) -> &'a i32` for `fn foo<'a>(x: &i32, y: &'a i32) -> &'a i32`). Not compared:
+/// signatures that name the impl's or the trait's own lifetimes, or declare bounds among lifetimes, and parameters
+/// whose types do not have as many regions on both sides (`Self`, a trait's type parameter)
+pub fn impl_sig_mismatch(prog: &Program, decl: u32, imp: u32) -> bool {
+    let (ds, ms) = (&prog.sigs[decl as usize], &prog.sigs[imp as usize]);
+    if ds.params.len() != ms.params.len() || ds.has_self != ms.has_self {
+        return false;
+    }
+    let (dr, mr) = (ds.regions.as_deref(), ms.regions.as_deref());
+    // (nothing written on either side: every region is elided the same way)
+    if dr.is_none() && mr.is_none() {
+        return false;
+    }
+    let plain = |r: Option<&RSigSyn>| {
+        r.is_none_or(|r| {
+            r.outlives.is_empty() && r.ty_outlives.is_empty() && r.slots.iter().flatten().all(|&c| c == R_STATIC || c == R_ELIDED || c == R_ELIDED_ADT || (c >= r.outer && (c as usize) < r.lts.len()))
+        })
+    };
+    if !plain(dr) || !plain(mr) {
+        return false;
+    }
+    fn codes(r: Option<&RSigSyn>, i: usize) -> Option<&[u8]> {
+        r.map(|r| r.slots.get(i).map(|c| c.as_slice()).unwrap_or(&[]))
+    }
+    let mut rg = RgSt::default();
+    let dl: Vec<u32> = dr.map(|r| r.lts.as_slice()).unwrap_or(&[]).iter().map(|l| {
+        let v = rg.var();
+        rg.univ.push((v, l.clone()));
+        v
+    }).collect();
+    let ml: Vec<u32> = mr.map(|r| r.lts.as_slice()).unwrap_or(&[]).iter().map(|_| rg.var()).collect();
+    let sp = super::SP;
+    let (mut d_in, mut m_in): (Vec<u32>, Vec<u32>) = (vec![], vec![]);
+    let (mut d_self, mut m_self) = (None, None);
+    for i in 0..ds.params.len() {
+        let (dt, mt) = (ds.params[i], ms.params[i]);
+        let Some(dtr) = rg.instantiate(prog, dt, codes(dr, i), &dl, &[], &mut |me| {
+            let v = me.var();
+            me.univ.push((v, "'_".to_string()));
+            v
+        }) else {
+            return false;
+        };
+        let Some(mtr) = rg.instantiate(prog, mt, codes(mr, i), &ml, &[], &mut |me| me.var()) else { return false };
+        if dtr.len() != mtr.len() || count(prog, mt, 0) != Some(mtr.len()) {
+            return false;
+        }
+        if i == 0 && ds.has_self && matches!(dt, Ty::Ref(..)) && matches!(mt, Ty::Ref(..)) {
+            d_self = dtr.first().copied();
+            m_self = mtr.first().copied();
+        }
+        d_in.extend(dtr.iter().copied().filter(|&v| v != STATIC));
+        m_in.extend(mtr.iter().copied().filter(|&v| v != STATIC));
+        rg.implied(prog, dt, &dtr, 0);
+        rg.relate(prog, mt, &dtr, &mtr, sp);
+    }
+    // (the results' elided regions: of `&self`, else of the one region of the parameters)
+    let one = |v: &mut Vec<u32>| {
+        v.sort();
+        v.dedup();
+        if v.len() == 1 { Some(v[0]) } else { None }
+    };
+    let (d_el, m_el) = (d_self.or_else(|| one(&mut d_in)), m_self.or_else(|| one(&mut m_in)));
+    let mut bad = false;
+    let n = ds.params.len();
+    let dret = rg.instantiate(prog, ds.ret, codes(dr, n), &dl, &[], &mut |_| d_el.unwrap_or_else(|| {
+        bad = true;
+        STATIC
+    }));
+    let mret = rg.instantiate(prog, ms.ret, codes(mr, n), &ml, &[], &mut |_| m_el.unwrap_or_else(|| {
+        bad = true;
+        STATIC
+    }));
+    let (Some(dret), Some(mret)) = (dret, mret) else { return false };
+    if bad || dret.len() != mret.len() || count(prog, ms.ret, 0) != Some(mret.len()) {
+        return false;
+    }
+    rg.relate(prog, ms.ret, &mret, &dret, sp);
+    rg.check().is_some()
+}
