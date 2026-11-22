@@ -111,6 +111,10 @@ pub fn placeholder_mismatch(e: &str, bound_eqs: &[&str]) -> bool {
         let (a, b) = (names(tys[0]), names(tys[1]));
         // (two placeholders: a closure or a bound may relate them; one equated by a bound `Tr<X = T>`)
         let equated = a.iter().chain(&b).any(|n| bound_eqs.iter().any(|q| q.split('=').skip(1).any(|r| r.trim_start().split(|c: char| !(c.is_alphanumeric() || c == '_')).next() == Some(n.as_str()))));
+        // (a parameter with an equation in its bounds, `=& T`: its mismatches behind a reference (`&T#`), where a deref
+        // coercion through the projection may hold)
+        let by_ref = |n: &str| tys.iter().any(|t| t.contains(&format!("&{n}#")) || t.contains(&format!("&mut {n}#")));
+        let equated = equated || a.iter().chain(&b).any(|n| bound_eqs.iter().any(|q| q.strip_prefix("=&").is_some_and(|r| r.trim() == n.as_str())) && by_ref(n));
         if (!a.is_empty() && !b.is_empty()) || equated {
             return false;
         }
@@ -511,7 +515,8 @@ fn compile_once(prog: &Program, insts: &Mutex<Insts>, id: u32, f: &ItemFn, line_
     if placeholder && r.is_err() {
         bound_eqs.extend(sig.generics.iter().flat_map(|(_, bs)| bs.iter().map(|b| b.as_str())).filter(|b| b.contains('=')));
         // (a parameter with an equation in its bounds (`T: Deref<Target = i32>`): its mismatches may be the projection's)
-        bound_params.extend(sig.generics.iter().filter(|(_, bs)| bs.iter().any(|b| b.contains('='))).map(|(n, _)| format!("= {n}")));
+        // (behind a reference only: `&T` to `&i32` through `T: Deref<Target = i32>`, not `T` to `i32`)
+        bound_params.extend(sig.generics.iter().filter(|(_, bs)| bs.iter().any(|b| b.contains('='))).map(|(n, _)| format!("=& {n}")));
     }
     // (and the fn's own where clauses, on any type: `where Back: Backend<Layout = DSL>`)
     for (subj, bs) in f.sig.generics.preds.iter().filter(|_| placeholder && r.is_err()) {
@@ -525,10 +530,10 @@ fn compile_once(prog: &Program, insts: &Mutex<Insts>, id: u32, f: &ItemFn, line_
                                     bound_params.push(format!("= {}", s.name));
                                 }
                             }
-                            // (`where T: Deref<Target = i32>`: T's mismatches may be the projection's)
+                            // (`where T: Deref<Target = i32>`: T's mismatches behind a reference may be the projection's)
                             if let crate::parse::Ty::Path(None, sp) = subj {
                                 if let [s] = sp.segs.as_slice() {
-                                    bound_params.push(format!("= {}", s.name));
+                                    bound_params.push(format!("=& {}", s.name));
                                 }
                             }
                         }

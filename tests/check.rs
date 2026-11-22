@@ -231,4 +231,11 @@ fn uncalled_generic_fns_with_supertraits_and_equations() {
     assert!(d[0].msg.contains("(E0038)"), "{d:?}");
     let allowed = "#![deny(deprecated)]\n#[allow(deprecated)]\nfn conv(x: f32) -> u32 {\n    unsafe { std::intrinsics::transmute(x) }\n}\nfn main() {\n    let _ = conv(1.0);\n}\n";
     assert!(s.check(allowed).is_empty(), "{:?}", s.check(allowed));
+    // (a string that says `allow(deprecated` allows nothing)
+    let in_str = "#![deny(deprecated)]\nfn main() {\n    let _ = \"allow(deprecated\";\n    let _: u32 = unsafe { std::intrinsics::transmute(0u32) };\n}\n";
+    assert_eq!(s.check(in_str).iter().map(|d| d.line).collect::<Vec<_>>(), vec![4]);
+    // (an equation fixes `T::Target`, not T: a T returned as i32 is mismatched types, inline or in a where clause)
+    let by_value = "fn bad<T: std::ops::Deref<Target = i32>>(x: T) -> i32 {\n    x\n}\nfn bad2<T>(x: T) -> i32\nwhere\n    T: std::ops::Deref<Target = i32>,\n{\n    x\n}\nfn main() {}\n";
+    let d = s.check(by_value);
+    assert_eq!(d.iter().map(|d| d.line).collect::<Vec<_>>(), vec![2, 8], "{d:?}");
 }
