@@ -2042,6 +2042,20 @@ impl Cx<'_> {
             if matches!(pt, Ty::Ref(true, _)) {
                 self.bk_reborrow_arg(a);
             }
+            // (a closure written where a bound wants `Fn` / `FnMut`: it is that, so its body moving out what it captures
+            // by value (`|| { let s = val; }`) is E0507, at the move. Passed by name, it is E0525 (above))
+            if let (Some(x), Expr::Closure(..), true) = (&fbt, strip_paren(a), self.bk_on()) {
+                let want = x.2.trim_start();
+                let kind = |k: &str| want.strip_prefix(k).is_some_and(|r| r.trim_start().starts_with('('));
+                let c = strip_paren(a);
+                if (kind("Fn") || kind("FnMut")) && self.bk.fnonce_sure.contains(&(c as *const Expr as usize)) {
+                    let caps: Vec<String> = crate::ast_closure::free_vars(c).into_iter().filter(|n| self.lookup(n).is_some_and(|(_, t)| !self.bk_ty(t).0)).collect();
+                    if let Some((n, at)) = crate::ast_closure::move_site(c, &caps) {
+                        let w = if kind("Fn") { "Fn" } else { "FnMut" };
+                        return Err(self.at(at, format!("cannot move out of `{n}`, a captured variable in an `{w}` closure (E0507)")));
+                    }
+                }
+            }
             // (`take(m::BAR)`: a static moved out by its module's path, E0507; by its name alone, the read of the
             // place checks it. A path is no place expression, so it is read as a value elsewhere too (a method's
             // receiver `m::KEY.with(..)`): only an argument passed by value is surely moved)

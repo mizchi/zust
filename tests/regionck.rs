@@ -1542,3 +1542,14 @@ fn borrow_in_use_when_destructor_runs() {
     // (not through a `&mut Scribble`, nor of a type without `Drop`, nor a borrow not returned)
     assert_eq!(check(&format!("{s}struct Plain<'a>(&'a mut u32);\nfn f<'a>(s: &'a mut Scribble) -> &'a mut u32 {{\n    &mut *s.0\n}}\nfn g<'a>(s: Plain<'a>) -> &'a mut u32 {{\n    &mut *s.0\n}}\nfn h(s: Scribble) -> u32 {{\n    let r = &mut *s.0;\n    *r\n}}\nfn main() {{}}\n")), vec![]);
 }
+
+/// E0507: a closure written where a bound wants `Fn` / `FnMut` is that, so moving out what it captures by value is an
+/// error at the move; `FnOnce` takes it
+#[test]
+fn closure_moves_capture_out() {
+    let d = check("fn take_mut(_f: impl FnMut()) {}\nfn main() {\n    let val = String::new();\n    take_mut(|| {\n        let _s: String = val;\n    });\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 5 && d[0].1.contains("E0507"), "{d:?}");
+    let d = check("fn take_fn<F: Fn()>(_f: F) {}\nfn main() {\n    let v = String::new();\n    take_fn(move || {\n        drop(v);\n    });\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 5 && d[0].1.contains("`Fn` closure"), "{d:?}");
+    assert_eq!(check("fn take_once(_f: impl FnOnce()) {}\nfn take_mut(_f: impl FnMut()) {}\nfn main() {\n    let a = String::new();\n    take_once(|| {\n        let _x: String = a;\n    });\n    let c = 5;\n    take_mut(move || {\n        let _z = c;\n    });\n    let e = vec![1];\n    take_mut(move || drop(e.clone()));\n}\n"), vec![]);
+}

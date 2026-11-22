@@ -598,6 +598,62 @@ pub fn moves_capture(c: &Expr, caps: &[String]) -> bool {
     moves_in(body, caps)
 }
 
+/// Where the body of closure c first moves one of caps out (what moves_capture finds), with that capture's name. Not
+/// in a nested closure (its move is the nested closure's capture)
+pub fn move_site(c: &Expr, caps: &[String]) -> Option<(String, Pos)> {
+    let Expr::Closure(_, _, _, body, _) = c else { return None };
+    let tail = match &**body {
+        Expr::Block(_, _, b) => b.stmts.last().and_then(|s| match s {
+            Stmt::Expr(e, false) => Some(e),
+            _ => None,
+        }),
+        e => Some(e),
+    };
+    tail.and_then(|e| cap_at(e, caps)).or_else(|| move_site_in(body, caps))
+}
+
+fn cap_at(e: &Expr, caps: &[String]) -> Option<(String, Pos)> {
+    match e {
+        Expr::Path(None, p) if is_cap(e, caps) => Some((p.segs[0].name.clone(), p.pos)),
+        _ => None,
+    }
+}
+
+fn move_site_in(e: &Expr, caps: &[String]) -> Option<(String, Pos)> {
+    match e {
+        Expr::Closure(..) => return None,
+        Expr::Call(_, a) => {
+            if let Some(x) = a.iter().find_map(|x| cap_at(x, caps)) {
+                return Some(x);
+            }
+        }
+        Expr::Return(Some(v)) => {
+            if let Some(x) = cap_at(v, caps) {
+                return Some(x);
+            }
+        }
+        Expr::Block(_, _, b) | Expr::Const(b) | Expr::Loop(_, b) => {
+            for s in &b.stmts {
+                if let Stmt::Let(p, _, Some(x), _, ..) = s {
+                    if binds_by_value(p) {
+                        if let Some(r) = cap_at(x, caps) {
+                            return Some(r);
+                        }
+                    }
+                }
+            }
+        }
+        _ => {}
+    }
+    let mut found = None;
+    each_child_stmts(e, &mut |c| {
+        if found.is_none() {
+            found = move_site_in(c, caps);
+        }
+    });
+    found
+}
+
 /// 子の式を順に f に渡す (外から使う版)
 pub fn each_child_pub(e: &Expr, f: &mut dyn FnMut(&Expr)) {
     each_child(e, f)
