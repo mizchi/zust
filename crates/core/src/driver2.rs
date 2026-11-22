@@ -247,9 +247,12 @@ fn const_check_item(src: &str, items: &[SrcItem]) -> Option<(String, Vec<usize>,
     // (nor one with a `return`, which would return from the fn: E0572 in a constant)
     let items_inside = ["fn ", "struct ", "enum ", "union ", "impl ", "trait ", "mod ", "use ", "static ", "const ", "macro_rules", "type ", "return"];
     // (its comments blanked; `*const T` is a type, no item)
+    // (nor one that casts to a raw pointer of an inferred type, `as *mut _`, whose inference zustc's casts may get wrong)
     let defines_items = |e: &str| {
         let b = blank_comments(e).replace("*const ", "*");
-        items_inside.iter().any(|k| b.contains(k))
+        let tight: String = b.chars().filter(|c| !c.is_whitespace()).collect();
+        let infer_cast = ["as*_", "as*mut_"].iter().any(|k| tight.match_indices(k).any(|(i, _)| !tight[i + k.len()..].starts_with(|c: char| c.is_alphanumeric() || c == '_')));
+        infer_cast || items_inside.iter().any(|k| b.contains(k))
     };
     for it in items {
         if !matches!(it.kind, ItemKind::Normal) {
