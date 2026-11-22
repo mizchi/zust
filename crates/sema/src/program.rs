@@ -2889,6 +2889,11 @@ impl Program {
     }
 
     /// sid is a placeholder (Program::placeholder); cheap when none was made
+    /// Whether the program has placeholders for type parameters (zustc check's last round) at all
+    pub fn any_placeholder(&self) -> bool {
+        self.structs.any_placeholder.load(std::sync::atomic::Ordering::Relaxed)
+    }
+
     pub fn is_placeholder(&self, sid: u32) -> bool {
         self.structs.any_placeholder.load(std::sync::atomic::Ordering::Relaxed) && self.structs[sid as usize].placeholder.is_some()
     }

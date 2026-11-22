@@ -321,6 +321,8 @@ check-pass	associated-types/normalize-cycle-in-eval.rs
 run-pass	associated-types/object-method-numbering.rs
 check-pass	associated-types/object-normalization.rs
 check-pass	associated-types/param-env-normalize-cycle.rs
+compile-fail	associated-types/param-env-shadowing-false-positive.rs
+compile-fail	associated-types/param-env-shadowing-gat.rs
 compile-fail	associated-types/param-env-shadowing-suggestion-no-ice-on-missing-assoc-value.rs
 run-pass	associated-types/project-defer-unification.rs
 run-pass	associated-types/projection-as-type-alias.rs
@@ -704,6 +706,7 @@ compile-fail	binop/let-chain-type-issue-147665.rs
 run-pass	binop/operator-overloading.rs
 compile-fail	binop/shift-various-bad-types.rs
 compile-fail	binop/spaceship.rs
+compile-fail	binop/struct-field-generic-type-binary-assignment-error-6738.rs
 run-pass	binop/structured-compare.rs
 compile-fail	blind/blind-item-item-shadow.rs
 compile-fail	block-result/block-must-not-have-result-res.rs
@@ -1339,6 +1342,7 @@ run-pass	closures/old-closure-iter-2.rs
 check-pass	closures/or-patterns-issue-137467.rs
 run-pass	closures/pass-lifetime-fn-to-generic-fnonce.rs
 compile-fail	closures/print/closure-print-generic-2.rs
+compile-fail	closures/return-in-closure-with-fn-bound.rs
 compile-fail	closures/return-value-lifetime-error.rs
 run-pass	closures/semistatement-in-lambda.rs
 run-pass	closures/simple-capture-and-call.rs
@@ -2792,6 +2796,7 @@ check-pass	generic-associated-types/issue-92954.rs
 check-pass	generic-associated-types/issue-93141.rs
 check-pass	generic-associated-types/issue-93262.rs
 check-pass	generic-associated-types/issue-93341.rs
+compile-fail	generic-associated-types/missing-bounds.rs
 compile-fail	generic-associated-types/parse/trait-path-expected-token.rs
 compile-fail	generic-associated-types/parse/trait-path-expressions.rs
 compile-fail	generic-associated-types/parse/trait-path-missing-gen_arg.rs
@@ -2998,6 +3003,7 @@ compile-fail	impl-trait/in-trait/bad-item-bound-within-rpitit-2.rs
 compile-fail	impl-trait/in-trait/bad-projection-from-opaque.rs
 check-pass	impl-trait/in-trait/box-coerce-span-in-default.rs
 check-pass	impl-trait/in-trait/deep-match-works.rs
+compile-fail	impl-trait/in-trait/default-body-type-err-2.rs
 check-pass	impl-trait/in-trait/default-body.rs
 check-pass	impl-trait/in-trait/default-method-binder-shifting.rs
 check-pass	impl-trait/in-trait/default-method-constraint.rs
@@ -3099,6 +3105,7 @@ check-pass	impl-trait/trait_resolution.rs
 compile-fail	impl-trait/trait_type.rs
 check-pass	impl-trait/transmute/in-defining-scope.rs
 check-pass	impl-trait/transmute/outside-of-defining-scope.rs
+compile-fail	impl-trait/universal-mismatched-type.rs
 run-pass	impl-trait/universal_hrtb_anon.rs
 run-pass	impl-trait/universal_hrtb_named.rs
 run-pass	impl-trait/universal_in_adt_in_parameters.rs
@@ -6008,6 +6015,7 @@ compile-fail	return/ret-non-nil.rs
 compile-fail	return/return-disjoint-regions.rs
 compile-fail	return/return-from-diverging.rs
 compile-fail	return/return-from-residual-sugg-issue-125997.rs
+compile-fail	return/return-impl-trait-bad.rs
 run-pass	return/return-nil.rs
 compile-fail	return/return-struct.rs
 compile-fail	return/return-ty-mismatch-note.rs
@@ -6571,6 +6579,7 @@ compile-fail	suggestions/dont-suggest-try_into-in-macros.rs
 compile-fail	suggestions/dont-suggest-ufcs-for-const.rs
 run-pass	suggestions/dont-try-removing-the-field.rs
 compile-fail	suggestions/double-reference-ty-in-self-ty.rs
+compile-fail	suggestions/dyn-incompatible-trait-references-self.rs
 compile-fail	suggestions/dyn-incompatible-trait-should-use-self-2021-without-dyn.rs
 compile-fail	suggestions/dyn-incompatible-trait-should-use-self-2021.rs
 compile-fail	suggestions/dyn-incompatible-trait-should-use-self.rs
@@ -7256,6 +7265,7 @@ compile-fail	type/type-check/coerce-result-return-value-2.rs
 compile-fail	type/type-check/coerce-result-return-value.rs
 compile-fail	type/type-check/issue-116967-cannot-coerce-returned-result.rs
 compile-fail	type/type-check/issue-41314.rs
+compile-fail	type/type-check/missing_trait_impl.rs
 compile-fail	type/type-check/point-at-inference-3.rs
 compile-fail	type/type-check/unknown_type_for_closure.rs
 compile-fail	type/type-mismatch-multiple.rs
