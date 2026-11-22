@@ -2981,8 +2981,16 @@ impl Cx<'_> {
 
     /// 関数でない値の呼び出し `f(x)`: クロージャ (の参照) か `&dyn Fn`
     pub(crate) fn call_value(&mut self, c: &Expr, expected: Option<Ty>) -> R<V> {
+        let t0 = self.bk.call_temps.len();
+        let r = self.call_value_inner(c, expected);
+        self.bk_call_temps_end(t0);
+        r
+    }
+
+    fn call_value_inner(&mut self, c: &Expr, expected: Option<Ty>) -> R<V> {
         let Expr::Call(func, cargs) = c else { return err(SP, "internal: expected a call") };
         // 呼び出しはムーブしない (Fn / FnMut は参照で呼ぶ)。一時値なら文の終わりまで所有する
+        self.bk_frame();
         let (v, mut t) = if is_place_expr(func) && !matches!(&**func, Expr::Path(..) if self.fn_item(func).is_some()) {
             let p = self.place(func)?;
             self.read(p)
@@ -2993,6 +3001,7 @@ impl Cx<'_> {
             }
             r
         };
+        let callee_srcs = self.bk_frame_end();
         let Some(mut v) = v else {
             return err(SP, "expected a function");
         };
@@ -3033,6 +3042,13 @@ impl Cx<'_> {
                 self.bk.no_loan_src = true;
                 self.bk_borrow(x, true, err_pos(func));
                 self.bk.no_loan_src = false;
+            }
+        }
+        // (a closure called: what it borrows is held until the call, after its arguments, as rustc's `&c` of the
+        // call (`c(take(v))` with c capturing v by reference is E0505))
+        if let Ty::Struct(sid) = t {
+            if self.prog.closure_of_struct.contains_key(&self.prog.base_of(sid)) {
+                self.bk_callee_hold(&callee_srcs);
             }
         }
         self.bk_frame();

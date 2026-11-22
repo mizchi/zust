@@ -2873,6 +2873,19 @@ impl Cx<'_> {
         self.bk.call_temps.push(id);
     }
 
+    /// What the callee of a call holds (the locals read for it, the loans made for it), held until the call ends
+    /// (bk_call_temps_end), after the arguments
+    pub(crate) fn bk_callee_hold(&mut self, srcs: &[Src]) {
+        if !self.bk_on() || srcs.is_empty() {
+            return;
+        }
+        let id = self.bk.locals.len() as u32;
+        self.bk.locals.push(Local { name: "<callee>".into(), ty: Ty::Unit, copy: true, refs: true, mutable: None, decl: super::SP, via_ref: false });
+        self.bk_ev(Ev::Bind(id, true));
+        self.bk_ev(Ev::Def(id, srcs.to_vec()));
+        self.bk.call_temps.push(id);
+    }
+
     /// `IndexMut::index_mut(&mut b, ..)` of a place written: the `&mut b` loan, held until the index is evaluated
     /// (bk_call_temps_end)
     pub(crate) fn bk_index_mut(&mut self, b: &Expr) -> bool {

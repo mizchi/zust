@@ -2138,3 +2138,14 @@ fn impl_method_regions_against_the_trait() {
     assert!(d.len() == 1 && d[0].0 == 9, "{d:?}");
     assert_eq!(check("trait B {\n    fn g<'a>(&self, x: &'a u32) -> &'a u32;\n}\ntrait C {\n    fn h<'a>(x: &'a u32, y: &'a u32) -> &'a u32;\n}\ntrait A {\n    fn f(&self) -> &u32;\n}\nstruct S(u32);\nstruct L<'a>(&'a u32);\nimpl B for S {\n    fn g<'b>(&self, x: &'b u32) -> &'b u32 {\n        x\n    }\n}\nimpl C for S {\n    fn h<'a, 'b>(x: &'a u32, _y: &'b u32) -> &'a u32 {\n        x\n    }\n}\nimpl<'a> A for L<'a> {\n    fn f(&self) -> &u32 {\n        self.0\n    }\n}\nfn main() {\n    let n = 5;\n    println!(\"{} {} {}\", S(1).g(&n), S::h(&n, &n), L(&n).f());\n}\n"), vec![]);
 }
+
+/// A closure called holds what it borrows until the call, after its arguments (regions/
+/// region-bound-on-closure-outlives-call.rs: `(|x| f(x))(call_rec(f))` is E0505; `c(take(v))` with c capturing v)
+#[test]
+fn closure_call_holds_its_captures_through_the_arguments() {
+    let d = check("fn call_rec<F>(mut f: F) -> usize\nwhere\n    F: FnMut(usize) -> usize,\n{\n    (|x| f(x))(call_rec(f))\n}\nfn main() {}\n");
+    assert!(d.len() == 1 && d[0].0 == 5 && d[0].1.contains("cannot move out of `f` because it is borrowed"), "{d:?}");
+    let d = check("fn take(v: Vec<u32>) -> usize {\n    v.len()\n}\nfn main() {\n    let v = vec![1];\n    let c = |x: usize| v.len() + x;\n    let _ = c(take(v));\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 7 && d[0].1.contains("cannot move out of `v` because it is borrowed"), "{d:?}");
+    assert_eq!(check("fn main() {\n    let mut v = vec![1u32];\n    let mut c = |x| v.push(x);\n    c(1);\n    c(2);\n    let w = vec![5u32, 6];\n    let d = |x: usize| w.len() + x;\n    let a = d(w.len());\n    let s = String::from(\"hi\");\n    let e = move |k: usize| s.len() + k;\n    let t = e(e(1));\n    println!(\"{:?} {} {}\", v, a, t);\n}\n"), vec![]);
+}
