@@ -490,7 +490,7 @@ impl Cx<'_> {
             let bsig = &self.prog.sigs[bid as usize];
             let bounds = bsig.trait_of.as_deref().or(bsig.impl_trait.as_deref()).and_then(|tr| self.prog.blanket_bounds.get(tr));
             let prog = self.prog;
-            let holds = |t: Ty| bounds.is_none_or(|bs| blanket_bounds_hold(prog, t, bs, 0));
+            let holds = |t: Ty| bounds.is_none_or(|bs| blanket_bounds_hold(prog, t, bs, &mut vec![], &mut vec![]));
             let extra = |t: Ty| (prim(t) || matches!(t, Ty::Unit | Ty::Box(_))) && holds(t);
             let to_prim = matches!(pt, Some(Ty::Ref(_, i)) if extra(*i));
             if !own && pt.is_some_and(|t| prim(t) || matches!(t, Ty::Ref(_, Ty::Str)) || (t == Ty::Unit && holds(t))) || (!own && to_prim) {
@@ -2955,15 +2955,31 @@ fn hidden_param(n: &str) -> bool {
 
 /// The bounds of a blanket impl's self type hold of t (`?Sized` and lifetimes aside). A bound that is a trait with a
 /// blanket impl of its own holds when that impl's bounds do (`impl<T: Marker> Other for T`)
-fn blanket_bounds_hold(prog: &crate::program::Program, t: Ty, bs: &[String], depth: u32) -> bool {
+fn blanket_bounds_hold(prog: &crate::program::Program, t: Ty, bs: &[String], path: &mut Vec<String>, seen: &mut Vec<(String, bool)>) -> bool {
     bs.iter().all(|b| {
         if b.starts_with('?') || b.starts_with('\'') {
             return true;
         }
-        // (an impl for t itself (`impl Other for ()`), or the blanket impl's bounds; past the depth limit, only an
-        // impl for t itself: a chain that long, or a cycle, is not taken to hold)
+        // (an impl for t itself (`impl Other for ()`), or the blanket impl's bounds. A trait met again on the way
+        // (a cycle of blanket impls), or a chain past rustc's recursion limit (128), does not hold: rustc reports
+        // E0275 there. Each trait is decided once (seen): a trait has one blanket impl, so its answer for t is one)
         match prog.blanket_bounds.get(b.as_str()) {
-            Some(inner) if prog.blanket_traits.contains(b.as_str()) => prog.implements_concrete(t, b) || (depth < 8 && blanket_bounds_hold(prog, t, inner, depth + 1)),
+            Some(inner) if prog.blanket_traits.contains(b.as_str()) => {
+                if prog.implements_concrete(t, b) {
+                    return true;
+                }
+                if let Some(&(_, r)) = seen.iter().find(|(n, _)| n == b) {
+                    return r;
+                }
+                if path.len() >= 128 || path.iter().any(|n| n == b) {
+                    return false;
+                }
+                path.push(b.clone());
+                let r = blanket_bounds_hold(prog, t, inner, path, seen);
+                path.pop();
+                seen.push((b.clone(), r));
+                r
+            }
             _ => prog.implements(t, b),
         }
     })

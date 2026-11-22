@@ -2040,7 +2040,9 @@ impl Cx<'_> {
             }
             // (its body's borrow check finds the rest: a closure it returns that mutates what it captures)
             if !by_ref.is_empty() {
-                self.insts.lock().unwrap().kind_free.insert(cid);
+                let mut g = self.insts.lock().unwrap();
+                g.kind_free.insert(cid);
+                g.fx_log.push(cid);
             }
         }
         let mut caps = vec![];
@@ -3052,7 +3054,14 @@ impl Cx<'_> {
         // call (`c(take(v))` with c capturing v by reference is E0505))
         if let Ty::Struct(sid) = t {
             if self.prog.closure_of_struct.contains_key(&self.prog.base_of(sid)) {
-                self.bk_callee_hold(&callee_srcs);
+                // (and the closure itself, which the call borrows: `c(drop(c))` is E0505)
+                let mut hold = callee_srcs.clone();
+                if is_place_expr(func) && self.bk_on() {
+                    if let Some(ln) = self.bk_loan_only(func, false) {
+                        hold.push(borrowck::Src::Loan(ln));
+                    }
+                }
+                self.bk_callee_hold(&hold);
             }
         }
         self.bk_frame();

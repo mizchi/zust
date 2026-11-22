@@ -454,9 +454,21 @@ pub struct Insts {
     /// Of those, the instances of fns that instances were made of with `Copy` types only (driver2's
     /// placeholder_wave): checked for what moving a T does, nothing else
     pub recheck: FxSet<u32>,
-    /// Closures (by their fn) whose kind no bound nor expected type decides, made in the program's code: one that
+    /// Closures' bodies (by their fn id) whose kind no bound nor expected type decides, made in the program's code: one that
     /// returns a mutable borrow of what it captures by reference is `FnMut`, and the borrow escapes its body
     pub kind_free: FxSet<u32>,
+    /// The closures' bodies kind_free or closure_rg was given a fact for, in order: what a function's lowering told
+    /// the closures it makes, kept with its Blob (acg::Blob::clo_facts), as one taken from a cache, a check's record
+    /// or another process is not lowered here
+    pub fx_log: Vec<u32>,
+}
+
+/// What a function's lowering told a closure's body it makes (Insts::kind_free, Insts::closure_rg)
+#[derive(Clone, Debug)]
+pub struct CloFact {
+    pub body: u32,
+    pub kind_free: bool,
+    pub rg: Option<Box<CloRg>>,
 }
 
 /// Insts::closure_rg (codes: see typeck's regionck)
@@ -484,6 +496,7 @@ impl Insts {
             lenient: false,
             recheck: FxSet::default(),
             kind_free: FxSet::default(),
+            fx_log: vec![],
         }
     }
 
@@ -608,6 +621,34 @@ impl Insts {
     }
 
     /// 本体を持つ関数 (インスタンスなら元のジェネリック関数) の id
+    /// The facts a lowering told closures' bodies (from fx_log: those logged from `from` on)
+    pub fn facts_since(&self, from: usize) -> Vec<CloFact> {
+        let mut out: Vec<CloFact> = vec![];
+        for &b in &self.fx_log[from.min(self.fx_log.len())..] {
+            if !out.iter().any(|f| f.body == b) {
+                out.extend(self.facts_of(b));
+            }
+        }
+        out
+    }
+
+    /// A closure's body's facts
+    pub fn facts_of(&self, b: u32) -> Vec<CloFact> {
+        vec![CloFact { body: b, kind_free: self.kind_free.contains(&b), rg: self.closure_rg.get(&b).cloned() }]
+    }
+
+    /// Facts of a lowering not made here (a Blob's): as it would have set them
+    pub fn give_facts(&mut self, fs: &[CloFact]) {
+        for f in fs {
+            if f.kind_free {
+                self.kind_free.insert(f.body);
+            }
+            if let Some(rg) = &f.rg {
+                self.closure_rg.insert(f.body, rg.clone());
+            }
+        }
+    }
+
     pub fn body_of(&self, id: u32) -> u32 {
         self.get(id).map(|i| i.base).unwrap_or(id)
     }

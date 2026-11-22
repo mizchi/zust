@@ -2194,3 +2194,41 @@ fn move_closure_holds_what_its_value_captures_hold() {
     assert!(d.len() == 1 && d[0].0 == 6, "{d:?}");
     assert_eq!(check("fn f<'a>(s: &'a str) -> impl Fn() -> usize + 'a {\n    move || s.len()\n}\nfn main() {\n    let v = vec![1u32, 2];\n    let r = &v;\n    let g = move || r.len();\n    println!(\"{} {}\", f(\"ab\")(), g());\n}\n"), vec![]);
 }
+
+/// From the review of #64: a session's second check keeps a closure body's kind (its parent taken from the record);
+/// a `Deref` whose target is the type itself is not followed forever; a destructuring `let` writing `'static` turns
+/// the check on, and one with holes (`(&'static u8, _)`) is related element by element; a closure called holds a
+/// borrow of itself through its arguments (`c(drop(c))`, E0505); an impl's `&'static` input elides its result
+#[test]
+fn part12_review() {
+    let src = "fn main() {\n    let mut x: Vec<()> = Vec::new();\n    || {\n        || {\n            x.push(())\n        }\n    };\n}\n";
+    let mut s = Session2::new(Options2 { jobs: 1, ..Options2::default() });
+    assert_eq!(s.check(src).len(), 1);
+    assert_eq!(s.check(&format!("{src}fn other() {{}}\n")).len(), 1);
+    assert_eq!(s.check(&format!("{src}fn other() {{\n    let _ = 1;\n}}\n")).len(), 1);
+    assert_eq!(s.check(src).len(), 1);
+    let d = check("use std::ops::Deref;\nstruct S {\n    v: u32,\n}\nimpl Deref for S {\n    type Target = S;\n    fn deref(&self) -> &S {\n        self\n    }\n}\nfn main() {\n    let s = S { v: 1 };\n    let c = || s.missing;\n    let _ = c;\n}\n");
+    assert!(!d.is_empty(), "{d:?}");
+    let d = check("fn main() {\n    let x = 5;\n    let (a, _): (&'static i32, u8) = (&x, 0);\n    println!(\"{}\", a);\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 3 && d[0].1.contains("`x` does not live long enough"), "{d:?}");
+    let d = check("fn f(r: &u8) -> u8 {\n    let (x, _): (&'static u8, _) = (r, 0u8);\n    *x\n}\nfn main() {\n    let v = 1;\n    println!(\"{}\", f(&v));\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 2 && d[0].1.contains("lifetime may not live long enough"), "{d:?}");
+    let d = check("fn main() {\n    let s = String::from(\"a\");\n    let c = move |_: ()| s.len();\n    let _ = c(drop(c));\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 4 && d[0].1.contains("cannot move out of `c` because it is borrowed"), "{d:?}");
+    let d = check("trait Tr {\n    fn f(x: &u8) -> &u8;\n}\nstruct S;\nimpl Tr for S {\n    fn f(x: &'static u8) -> &u8 {\n        x\n    }\n}\nfn main() {}\n");
+    assert!(d.len() == 1 && d[0].0 == 6 && d[0].1.contains("`impl` item signature doesn't match"), "{d:?}");
+    assert_eq!(check("trait Tr {\n    fn f(x: &'static u8) -> &u8;\n}\nstruct S;\nimpl Tr for S {\n    fn f(x: &'static u8) -> &u8 {\n        x\n    }\n}\nfn main() {\n    let mut n = 0;\n    let mut f = |x: u32| {\n        n += x;\n        x + 1\n    };\n    let a = f(1);\n    let s = String::from(\"ab\");\n    let e = move |k: usize| s.len() + k;\n    let (p, _): (&'static str, _) = (\"x\", 1u8);\n    println!(\"{} {} {} {}\", a, e(e(1)), n, p);\n}\n"), vec![]);
+}
+
+/// From the review of #54 (a follow-up): a chain of blanket impls is followed past eight impls (as far as rustc's
+/// recursion limit), so `().go()` through ten of them is accepted when `()` has the first trait and rejected when it
+/// does not; a cycle of blanket impls does not hold (E0599 in rustc), and is not followed forever
+#[test]
+fn blanket_chain_past_eight() {
+    let chain = "trait Marker {}\ntrait A {}\ntrait B {}\ntrait C {}\ntrait D {}\ntrait E {}\ntrait F {}\ntrait G {}\ntrait H {}\ntrait I {}\nimpl<T: Marker> A for T {}\nimpl<T: A> B for T {}\nimpl<T: B> C for T {}\nimpl<T: C> D for T {}\nimpl<T: D> E for T {}\nimpl<T: E> F for T {}\nimpl<T: F> G for T {}\nimpl<T: G> H for T {}\nimpl<T: H> I for T {}\ntrait Tr {\n    fn go(&self) -> u32 {\n        7\n    }\n}\nimpl<T: I> Tr for T {}\n";
+    assert_eq!(check(&format!("{chain}impl Marker for () {{}}\nfn main() {{\n    println!(\"{{}}\", ().go());\n}}\n")), vec![]);
+    let d = check(&format!("{chain}fn main() {{\n    println!(\"{{}}\", ().go());\n}}\n"));
+    assert!(d.len() == 1 && d[0].0 == 27 && d[0].1.contains("no method `go`"), "{d:?}");
+    let d = check("trait A {}\ntrait B {}\nimpl<T: B> A for T {}\nimpl<T: A> B for T {}\ntrait Tr {\n    fn go(&self) -> u32 {\n        7\n    }\n}\nimpl<T: A> Tr for T {}\nfn main() {\n    println!(\"{}\", ().go());\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 12 && d[0].1.contains("no method `go`"), "{d:?}");
+}

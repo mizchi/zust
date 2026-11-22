@@ -1979,6 +1979,9 @@ impl Cx<'_> {
             Expr::Field(b, name, _) => {
                 let (mut p, t) = self.bk_place(b)?;
                 let mut t = t?;
+                // (overloaded derefs followed: a `Deref` whose target is the type itself (`Target = S`) never reaches
+                // a field, and is not followed past a few (lowering reports the recursion))
+                let mut n = 0;
                 loop {
                     match t {
                         Ty::Ref(m, i) => {
@@ -1991,6 +1994,10 @@ impl Cx<'_> {
                         }
                         // (a field of what an overloaded `Deref` reaches: `rc.y` with `rc: Rc<Point>`)
                         Ty::Struct(sid) if !self.prog.structs[sid as usize].is_enum && self.prog.field(sid, name).is_none() => {
+                            n += 1;
+                            if n > 16 {
+                                return None;
+                            }
                             t = self.bk_overloaded_shr(&mut p, sid)?;
                             if self.prog.has_param(t) {
                                 return None;

@@ -202,6 +202,8 @@ pub struct Blob {
     pub traps: Vec<(u32, u32, u32)>,
     pub line_base: Option<u32>,
     pub code_ref: Option<(u32, u64)>,
+    /// What the function's lowering told the closures it makes (Insts::fx_log): given back to Insts with the Blob
+    pub clo_facts: Vec<crate::program::CloFact>,
 }
 
 #[derive(Clone, Debug)]
@@ -611,7 +613,7 @@ pub struct Compiled {
 impl Compiled {
     /// 機械語なしの Blob (check の検査済みの印)
     pub fn empty_blob() -> Blob {
-        Blob { align: 16, code: vec![], relocs: vec![], datas: vec![], vtables: vec![], traps: vec![], line_base: None, code_ref: None }
+        Blob { align: 16, code: vec![], relocs: vec![], datas: vec![], vtables: vec![], traps: vec![], line_base: None, code_ref: None, clo_facts: vec![] }
     }
 
     /// バックエンドが作った (機械語, 再配置, trap) から Blob を作る
@@ -637,7 +639,7 @@ impl Compiled {
                 traps.push((off, info, msg));
             }
         }
-        Blob { align: 16, code, relocs: out, datas, vtables, traps, line_base: loc_used.then_some(line_base), code_ref: None }
+        Blob { align: 16, code, relocs: out, datas, vtables, traps, line_base: loc_used.then_some(line_base), code_ref: None, clo_facts: vec![] }
     }
 }
 
@@ -1845,7 +1847,11 @@ impl Cx<'_> {
                     };
                     // (`let (y, _): (&'a u32, u32) = ..;`: the pattern binds from a value of the annotation's type)
                     if let Some(a) = ann_ty {
-                        if let Some((t, tr)) = self.rg_let_ann(a, init) {
+                        // (one that writes `'static`: checked from here on, as a `let x: &'static T`)
+                        if !self.rg.on && self.rg.eligible && self.inline_depth == 0 && crate::regions::mentions_static(a) {
+                            self.rg_late_on();
+                        }
+                        if let Some((t, tr)) = self.rg_let_ann(a, init, Some(place.ty())) {
                             if t == place.ty() {
                                 self.rg.scrut = Some((t, tr));
                             }
