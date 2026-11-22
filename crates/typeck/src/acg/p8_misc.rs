@@ -382,8 +382,23 @@ impl Cx<'_> {
             // (`r.clone()` with `r: &S` and S not Clone: the reference's own clone, a copy of r (`&S`). Not Clone: a type
             // of the program with no clone and no derive, or an instance with such an argument (`Option<NoClone>`), but
             // for the shared pointers)
-            if let Ty::Ref(false, i @ Ty::Struct(_)) = pt {
-                if self.not_clone(*i, 0) {
+            // (neither when a trait of the program gives S a `clone` (a default fn of `impl Duplicate for S {}`): that is
+            // the method called)
+            let user_clone = |sid: u32| self.prog.default_method(sid, "clone").is_some();
+            // (a closure's Clone is the compiler's, and asks it of each capture: E0277 for one that is not, also through
+            // a reference, which rustc does not copy then)
+            let closure_err = |sid: u32| -> Option<String> {
+                if !self.prog.is_closure(self.prog.base_of(sid)) {
+                    return None;
+                }
+                let f = self.prog.structs[sid as usize].fields.iter().find(|f| self.not_clone(f.1, 1))?;
+                Some(format!("the trait bound `{}: Clone` is not satisfied (E0277)", self.prog.tn(f.1)))
+            };
+            if let Ty::Ref(false, i @ Ty::Struct(isid)) = pt {
+                if self.not_clone(*i, 0) && !user_clone(*isid) {
+                    if let (Some(m), true) = (closure_err(*isid), self.user_code) {
+                        return err(SP, m);
+                    }
                     return self.operand(receiver, None, false).map(Some);
                 }
             }
@@ -391,13 +406,9 @@ impl Cx<'_> {
             // bounds an argument does not meet (`Bar<NotClone>`), or a type of the program's with no clone)
             if let (Ty::Struct(sid), true) = (pt, self.user_code) {
                 let b = self.prog.base_of(sid);
-                if self.not_clone(pt, 0) && self.prog.method(sid, "deref").is_none() && self.prog.method(b, "deref").is_none() {
-                    // (a closure's Clone is the compiler's, and asks it of each capture)
-                    if self.prog.is_closure(b) {
-                        let fields = &self.prog.structs[sid as usize].fields;
-                        if let Some(f) = fields.iter().find(|f| self.not_clone(f.1, 1)) {
-                            return err(SP, format!("the trait bound `{}: Clone` is not satisfied (E0277)", self.prog.tn(f.1)));
-                        }
+                if self.not_clone(pt, 0) && self.prog.method(sid, "deref").is_none() && self.prog.method(b, "deref").is_none() && !user_clone(sid) {
+                    if let Some(m) = closure_err(sid) {
+                        return err(SP, m);
                     }
                     let derived = self.prog.derived.get(&b).is_some_and(|d| d.iter().any(|x| x == "Clone"));
                     let what = if self.prog.structs[b as usize].is_enum { "enum" } else { "struct" };
@@ -417,7 +428,7 @@ impl Cx<'_> {
                 t = *i;
             }
             if let Ty::Struct(sid) = t {
-                if self.prog.method(sid, "clone").is_some() {
+                if self.prog.method(sid, "clone").is_some() || user_clone(sid) {
                     return Ok(None);
                 }
             }

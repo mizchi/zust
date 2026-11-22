@@ -2923,11 +2923,13 @@ impl Program {
     /// Whether t is surely not Clone (`r.clone()` of `&t` is then the reference's clone): a type of the program with no
     /// clone and no derive, or an instance with such an argument (`Option<NoClone>`), but for the shared pointers
     pub fn surely_not_clone(&self, t: Ty, depth: u32) -> bool {
-        // (`&mut T` is not Clone: `Option<&mut T>` neither)
-        if let Ty::Ref(true, _) = t {
-            return true;
-        }
-        let Ty::Struct(sid) = t else { return false };
+        // (`&mut T` is not Clone: `Option<&mut T>` neither; an array or a Box is Clone when its element is)
+        let sid = match t {
+            Ty::Ref(true, _) => return true,
+            Ty::Array(e, _) | Ty::Box(e) => return depth <= 4 && self.surely_not_clone(*e, depth + 1),
+            Ty::Struct(sid) => sid,
+            _ => return false,
+        };
         let b = self.base_of(sid);
         let own = self.struct_item.get(b as usize).is_some_and(|&ii| ii < self.prelude_from);
         // (a clone of the program's own; std's (`Vec<T>`) is Clone when its arguments are)
