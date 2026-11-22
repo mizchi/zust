@@ -2750,6 +2750,9 @@ impl Cx<'_> {
                             let n = format!("{}::from", self.ty_key(t));
                             let src = if self.trait_candidate(&n, "From").is_some() {
                                 Some(format!("<{} as From>::from", self.prog.tn(t)))
+                            } else if t.is_int() || t.is_float() {
+                                // (`let b: u32 = From::from(4u16)`: a number's `from`, the widening cast)
+                                Some(format!("{}::from", self.prog.tn(t)))
                             } else if self.no_trait_method(&n) {
                                 Some(format!("{}::from", self.prog.tn(t)))
                             } else {

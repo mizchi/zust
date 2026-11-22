@@ -2598,6 +2598,14 @@ impl Cx<'_> {
             let m = &p.segs[1].name;
             return Some(Expr::MethodCall(Box::new(paren(cargs[0].clone())), m.clone(), vec![], vec![cargs[1].clone()], crate::parse::Span::default()));
         }
+        // (`U::from(x)` in a generic fn with `U: From<u8>`: U's instance, when it is a number)
+        if Ty::prim(ty).is_none() && p.segs[1].name == "from" && cargs.len() == 1 {
+            if let Some(&(_, t)) = self.env.params.iter().rev().find(|(n, _)| n == ty) {
+                if t.is_int() || t.is_float() {
+                    return Some(paren(Expr::Cast(Box::new(paren(cargs[0].clone())), ty_named(&self.prog.tn(t)))));
+                }
+            }
+        }
         let t = Ty::prim(ty)?;
         if t == Ty::Char || t == Ty::Bool {
             return None;
