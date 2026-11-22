@@ -1609,6 +1609,9 @@ fn part9_review_follow_ups() {
     assert_eq!(check("struct P {\n    n: u32,\n    s: String,\n}\nfn take_fn(_: impl Fn()) {}\nfn main() {\n    let pair = (1, String::new());\n    take_fn(move || {\n        let (n, _) = pair;\n        let _ = n;\n    });\n    let p = P { n: 1, s: String::new() };\n    take_fn(move || {\n        let P { n, .. } = p;\n        let _ = n;\n    });\n}\n"), vec![]);
     let d = check("fn take_fn(_: impl Fn()) {}\nfn main() {\n    let pair = (1, String::new());\n    take_fn(move || {\n        let (_, s) = pair;\n        drop(s);\n    });\n}\n");
     assert!(d.len() == 1 && d[0].0 == 5 && d[0].1.contains("E0507"), "{d:?}");
+    // (so a named closure that copies out of it and mutates another capture is FnMut only, not maybe FnOnce)
+    let d = check("fn take_fn<F: Fn()>(_: F) {}\nfn main() {\n    let pair = (1, String::new());\n    let mut x = 0;\n    let c = move || {\n        let (n, _) = pair;\n        x += n;\n    };\n    take_fn(c);\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 5 && d[0].1.contains("E0525") && d[0].1.contains("only implements `FnMut`"), "{d:?}");
     // (a nested closure without `move` whose body moves the capture out takes it by value too; one that borrows it
     // does not)
     let d = check("fn take_mut(_: impl FnMut()) {}\nfn main() {\n    let v = String::new();\n    take_mut(|| {\n        let _inner = || drop(v);\n    });\n}\n");
