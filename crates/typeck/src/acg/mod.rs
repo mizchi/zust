@@ -2528,8 +2528,20 @@ impl Cx<'_> {
                     return Some((i, &self.prog.sigs[i as usize]));
                 }
             }
+            // (`<T as Tr>::A::m`: a fn of the associated type A, its instance's)
+            if p.segs.len() >= 3 {
+                if let Some(i) = self.assoc_ty_callee(Some(q), p, &by_ty) {
+                    return Some((i, &self.prog.sigs[i as usize]));
+                }
+            }
             let i = by_ty(t, &m)?;
             return Some((i, &self.prog.sigs[i as usize]));
+        }
+        // (`T::A::m(..)`: a fn of the associated type A of the type parameter T)
+        if p.segs.len() == 3 && self.env.params.iter().any(|(n, _)| *n == p.segs[0].name) {
+            if let Some(i) = self.assoc_ty_callee(None, p, &by_ty) {
+                return Some((i, &self.prog.sigs[i as usize]));
+            }
         }
         // `T::f(..)` (T は型引数。インスタンスでは具体的な型)
         if p.segs.len() == 2 {
@@ -2568,6 +2580,17 @@ impl Cx<'_> {
             }
         };
         Some((i, &self.prog.sigs[i as usize]))
+    }
+
+    /// The fn m of `<T as Tr>::A::m` / `T::A::m`: the path without its last segment is a type (an associated one), whose
+    /// fn m it is, by by_ty
+    #[cold]
+    #[inline(never)]
+    fn assoc_ty_callee(&self, q: Option<&Box<crate::parse::Ty>>, p: &Path, by_ty: &dyn Fn(Ty, &str) -> Option<u32>) -> Option<u32> {
+        let (m, pre) = p.segs.split_last()?;
+        let ty = crate::parse::Ty::Path(q.cloned(), Path { global: p.global, segs: pre.to_vec(), pos: p.pos });
+        let t = self.parse_ty(&ty).ok().filter(|t| !matches!(t, Ty::Param(_)))?;
+        by_ty(t, &m.name)
     }
 
     /// blk's statements (index, statement), with each destructuring `let pat = S::<&'a u32> {..};` (type arguments

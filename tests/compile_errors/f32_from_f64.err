@@ -1,0 +1,1 @@
+1:21: the trait `From<f64>` is not implemented for `f32` (E0277)
