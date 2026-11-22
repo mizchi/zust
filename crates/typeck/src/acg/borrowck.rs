@@ -145,6 +145,9 @@ pub struct BkError {
 
 #[derive(Default)]
 pub struct Bk {
+    /// A closure's body: the borrow checker's locals of its captures held by value. They outlive the body's call, in
+    /// the closure's environment: at each exit (its end, `return`, `?`), what they hold escapes it (Cx::bk_cap_escape)
+    pub cap_vals: Vec<u32>,
     /// The body of a closure whose kind nothing decides (Insts::kind_free): a mutable loan of what it captures by
     /// reference, returned, escapes the `FnMut` body
     pub fnmut_ret: bool,
@@ -1979,6 +1982,9 @@ impl Cx<'_> {
             Expr::Field(b, name, _) => {
                 let (mut p, t) = self.bk_place(b)?;
                 let mut t = t?;
+                // (overloaded derefs followed: a `Deref` whose target is the type itself (`Target = S`) never reaches
+                // a field, and is not followed past a few (lowering reports the recursion))
+                let mut n = 0;
                 loop {
                     match t {
                         Ty::Ref(m, i) => {
@@ -1991,6 +1997,12 @@ impl Cx<'_> {
                         }
                         // (a field of what an overloaded `Deref` reaches: `rc.y` with `rc: Rc<Point>`)
                         Ty::Struct(sid) if !self.prog.structs[sid as usize].is_enum && self.prog.field(sid, name).is_none() => {
+                            // (as far as rustc's recursion limit, past which it rejects the program (E0055): a chain
+                            // that long is followed, and a cycle (`type Target = Self`) ends)
+                            n += 1;
+                            if n > 128 {
+                                return None;
+                            }
                             t = self.bk_overloaded_shr(&mut p, sid)?;
                             if self.prog.has_param(t) {
                                 return None;

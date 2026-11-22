@@ -2204,3 +2204,107 @@ fn reference_clone_of_an_unbounded_param() {
     // (an instance's `x.clone()` with T a `Clone` type is that type's clone, not the reference's: not followed)
     assert_eq!(check("fn dup<T: Clone>(x: &T) -> T {\n    x.clone()\n}\nfn main() {\n    let s = String::from(\"a\");\n    println!(\"{}\", dup(&s));\n}\n"), vec![]);
 }
+
+/// From the review of #64: a session's second check keeps a closure body's kind (its parent taken from the record);
+/// a `Deref` whose target is the type itself is not followed forever; a destructuring `let` writing `'static` turns
+/// the check on, and one with holes (`(&'static u8, _)`) is related element by element; a closure called holds a
+/// borrow of itself through its arguments (`c(drop(c))`, E0505); an impl's `&'static` input elides its result
+#[test]
+fn part12_review() {
+    let src = "fn main() {\n    let mut x: Vec<()> = Vec::new();\n    || {\n        || {\n            x.push(())\n        }\n    };\n}\n";
+    let mut s = Session2::new(Options2 { jobs: 1, ..Options2::default() });
+    assert_eq!(s.check(src).len(), 1);
+    assert_eq!(s.check(&format!("{src}fn other() {{}}\n")).len(), 1);
+    assert_eq!(s.check(&format!("{src}fn other() {{\n    let _ = 1;\n}}\n")).len(), 1);
+    assert_eq!(s.check(src).len(), 1);
+    let d = check("use std::ops::Deref;\nstruct S {\n    v: u32,\n}\nimpl Deref for S {\n    type Target = S;\n    fn deref(&self) -> &S {\n        self\n    }\n}\nfn main() {\n    let s = S { v: 1 };\n    let c = || s.missing;\n    let _ = c;\n}\n");
+    assert!(!d.is_empty(), "{d:?}");
+    let d = check("fn main() {\n    let x = 5;\n    let (a, _): (&'static i32, u8) = (&x, 0);\n    println!(\"{}\", a);\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 3 && d[0].1.contains("`x` does not live long enough"), "{d:?}");
+    let d = check("fn f(r: &u8) -> u8 {\n    let (x, _): (&'static u8, _) = (r, 0u8);\n    *x\n}\nfn main() {\n    let v = 1;\n    println!(\"{}\", f(&v));\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 2 && d[0].1.contains("lifetime may not live long enough"), "{d:?}");
+    let d = check("fn main() {\n    let s = String::from(\"a\");\n    let c = move |_: ()| s.len();\n    let _ = c(drop(c));\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 4 && d[0].1.contains("cannot move out of `c` because it is borrowed"), "{d:?}");
+    let d = check("trait Tr {\n    fn f(x: &u8) -> &u8;\n}\nstruct S;\nimpl Tr for S {\n    fn f(x: &'static u8) -> &u8 {\n        x\n    }\n}\nfn main() {}\n");
+    assert!(d.len() == 1 && d[0].0 == 6 && d[0].1.contains("`impl` item signature doesn't match"), "{d:?}");
+    assert_eq!(check("trait Tr {\n    fn f(x: &'static u8) -> &u8;\n}\nstruct S;\nimpl Tr for S {\n    fn f(x: &'static u8) -> &u8 {\n        x\n    }\n}\nfn main() {\n    let mut n = 0;\n    let mut f = |x: u32| {\n        n += x;\n        x + 1\n    };\n    let a = f(1);\n    let s = String::from(\"ab\");\n    let e = move |k: usize| s.len() + k;\n    let (p, _): (&'static str, _) = (\"x\", 1u8);\n    println!(\"{} {} {} {}\", a, e(e(1)), n, p);\n}\n"), vec![]);
+}
+
+/// From the review of #54 (a follow-up): a chain of blanket impls is followed past eight impls (as far as rustc's
+/// recursion limit), so `().go()` through ten of them is accepted when `()` has the first trait and rejected when it
+/// does not; a cycle of blanket impls does not hold (E0599 in rustc), and is not followed forever
+#[test]
+fn blanket_chain_past_eight() {
+    let chain = "trait Marker {}\ntrait A {}\ntrait B {}\ntrait C {}\ntrait D {}\ntrait E {}\ntrait F {}\ntrait G {}\ntrait H {}\ntrait I {}\nimpl<T: Marker> A for T {}\nimpl<T: A> B for T {}\nimpl<T: B> C for T {}\nimpl<T: C> D for T {}\nimpl<T: D> E for T {}\nimpl<T: E> F for T {}\nimpl<T: F> G for T {}\nimpl<T: G> H for T {}\nimpl<T: H> I for T {}\ntrait Tr {\n    fn go(&self) -> u32 {\n        7\n    }\n}\nimpl<T: I> Tr for T {}\n";
+    assert_eq!(check(&format!("{chain}impl Marker for () {{}}\nfn main() {{\n    println!(\"{{}}\", ().go());\n}}\n")), vec![]);
+    let d = check(&format!("{chain}fn main() {{\n    println!(\"{{}}\", ().go());\n}}\n"));
+    assert!(d.len() == 1 && d[0].0 == 27 && d[0].1.contains("no method `go`"), "{d:?}");
+    let d = check("trait A {}\ntrait B {}\nimpl<T: B> A for T {}\nimpl<T: A> B for T {}\ntrait Tr {\n    fn go(&self) -> u32 {\n        7\n    }\n}\nimpl<T: A> Tr for T {}\nfn main() {\n    println!(\"{}\", ().go());\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 12 && d[0].1.contains("no method `go`"), "{d:?}");
+}
+
+/// From the second review of #64: a write through a chain of 17 `Deref`s with no `DerefMut` is E0594 (the borrow
+/// check follows such a chain as far as rustc's recursion limit, not 16 steps), and a read through it is accepted; a
+/// destructuring `let` whose annotation writes `'static` turns the check on before its initializer is lowered, so a
+/// call in it (`(id(r), 0)`) is related to the annotation
+#[test]
+fn part12_review_2() {
+    let chain = "use std::ops::Deref;\nstruct S0 {\n    field: u32,\n}\nstruct S1(S0);\nimpl Deref for S1 {\n    type Target = S0;\n    fn deref(&self) -> &S0 {\n        &self.0\n    }\n}\nstruct S2(S1);\nimpl Deref for S2 {\n    type Target = S1;\n    fn deref(&self) -> &S1 {\n        &self.0\n    }\n}\nstruct S3(S2);\nimpl Deref for S3 {\n    type Target = S2;\n    fn deref(&self) -> &S2 {\n        &self.0\n    }\n}\nstruct S4(S3);\nimpl Deref for S4 {\n    type Target = S3;\n    fn deref(&self) -> &S3 {\n        &self.0\n    }\n}\nstruct S5(S4);\nimpl Deref for S5 {\n    type Target = S4;\n    fn deref(&self) -> &S4 {\n        &self.0\n    }\n}\nstruct S6(S5);\nimpl Deref for S6 {\n    type Target = S5;\n    fn deref(&self) -> &S5 {\n        &self.0\n    }\n}\nstruct S7(S6);\nimpl Deref for S7 {\n    type Target = S6;\n    fn deref(&self) -> &S6 {\n        &self.0\n    }\n}\nstruct S8(S7);\nimpl Deref for S8 {\n    type Target = S7;\n    fn deref(&self) -> &S7 {\n        &self.0\n    }\n}\nstruct S9(S8);\nimpl Deref for S9 {\n    type Target = S8;\n    fn deref(&self) -> &S8 {\n        &self.0\n    }\n}\nstruct S10(S9);\nimpl Deref for S10 {\n    type Target = S9;\n    fn deref(&self) -> &S9 {\n        &self.0\n    }\n}\nstruct S11(S10);\nimpl Deref for S11 {\n    type Target = S10;\n    fn deref(&self) -> &S10 {\n        &self.0\n    }\n}\nstruct S12(S11);\nimpl Deref for S12 {\n    type Target = S11;\n    fn deref(&self) -> &S11 {\n        &self.0\n    }\n}\nstruct S13(S12);\nimpl Deref for S13 {\n    type Target = S12;\n    fn deref(&self) -> &S12 {\n        &self.0\n    }\n}\nstruct S14(S13);\nimpl Deref for S14 {\n    type Target = S13;\n    fn deref(&self) -> &S13 {\n        &self.0\n    }\n}\nstruct S15(S14);\nimpl Deref for S15 {\n    type Target = S14;\n    fn deref(&self) -> &S14 {\n        &self.0\n    }\n}\nstruct S16(S15);\nimpl Deref for S16 {\n    type Target = S15;\n    fn deref(&self) -> &S15 {\n        &self.0\n    }\n}\nstruct S17(S16);\nimpl Deref for S17 {\n    type Target = S16;\n    fn deref(&self) -> &S16 {\n        &self.0\n    }\n}\n";
+    let d = check(&(chain.to_string() + "fn main() {\n    let mut x = S17(S16(S15(S14(S13(S12(S11(S10(S9(S8(S7(S6(S5(S4(S3(S2(S1(S0 { field: 0 })))))))))))))))));\n    x.field = 1;\n}\n"));
+    assert!(d.len() == 1 && d[0].1.contains("cannot assign to data in dereference of `S1` (E0594)"), "{d:?}");
+    assert_eq!(check(&(chain.to_string() + "fn main() {\n    let x = S17(S16(S15(S14(S13(S12(S11(S10(S9(S8(S7(S6(S5(S4(S3(S2(S1(S0 { field: 0 })))))))))))))))));\n    println!(\"{}\", x.field);\n}\n")), vec![]);
+    let id = "fn id(x: &u8) -> &u8 {\n    x\n}\n";
+    let d = check(&(id.to_string() + "fn f(r: &u8) {\n    let (_x, _): (&'static u8, u8) = (id(r), 0);\n}\nfn main() {\n    let v = 1;\n    f(&v);\n}\n"));
+    assert!(d.len() == 1 && d[0].0 == 5 && d[0].1.contains("lifetime may not live long enough"), "{d:?}");
+    assert_eq!(check(&(id.to_string() + "static X: u8 = 1;\nfn main() {\n    let (p, _): (&'static u8, u8) = (id(&X), 0);\n    println!(\"{}\", p);\n}\n")), vec![]);
+}
+
+/// From the third review of #64: a closure's captures held by value escape at each of its exits, an explicit `return`
+/// and a `?` too (E0521 in rustc), not only at the body's end; a `Deref` chain that does not reach the field within
+/// rustc's recursion limit (128) is E0055, so the borrow check, which follows a place's derefs as far, does not drop
+/// a place the program keeps (a write through 129 `Deref`s), and a chain of 128 is followed
+#[test]
+fn part12_review_3() {
+    let d = check("fn main() {\n    let a = 1;\n    let mut b: Option<&i32> = None;\n    let mut c = move || {\n        b = Some(&a);\n        return;\n    };\n    c();\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 5 && d[0].1.contains("`a` does not live long enough"), "{d:?}");
+    let d = check("fn get() -> Option<u8> {\n    None\n}\nfn main() {\n    let a = 1;\n    let mut b: Option<&i32> = None;\n    let mut c = move || -> Option<u8> {\n        b = Some(&a);\n        let v = get()?;\n        loop {\n            let _ = v;\n        }\n    };\n    let _ = c();\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 8 && d[0].1.contains("`a` does not live long enough"), "{d:?}");
+    assert_eq!(check("fn main() {\n    let a = 1;\n    let mut c = move |k: bool| -> i32 {\n        let r = &a;\n        if k {\n            return *r;\n        }\n        *r + 1\n    };\n    println!(\"{}\", c(true));\n}\n"), vec![]);
+    // (S_n derefs to S_{n-1}; S0 has the field)
+    let chain = |n: usize, body: &str| {
+        let mut s = String::from("use std::ops::Deref;\nstruct S0 {\n    field: u32,\n}\n");
+        let mut v = String::from("S0 { field: 0 }");
+        for i in 1..=n {
+            s += &format!("struct S{i}(S{});\nimpl Deref for S{i} {{\n    type Target = S{};\n    fn deref(&self) -> &S{} {{\n        &self.0\n    }}\n}}\n", i - 1, i - 1, i - 1);
+            v = format!("S{i}({v})");
+        }
+        s + &body.replace("VALUE", &v)
+    };
+    let d = check(&chain(129, "fn main() {\n    let mut x = VALUE;\n    x.field = 1;\n}\n"));
+    assert!(d.len() == 1 && d[0].1.contains("reached the recursion limit while auto-dereferencing `S129` (E0055)"), "{d:?}");
+    let d = check(&chain(128, "fn main() {\n    let mut x = VALUE;\n    x.field = 1;\n}\n"));
+    assert!(d.len() == 1 && d[0].1.contains("cannot assign to data in dereference of `S1` (E0594)"), "{d:?}");
+    assert_eq!(check(&chain(128, "fn main() {\n    let x = VALUE;\n    println!(\"{}\", x.field);\n}\n")), vec![]);
+    // (through a generic target, `W<T>: Deref<Target = T>`: as far, then E0055; a shorter chain's write is E0594)
+    let generic = |n: usize, body: &str| {
+        let mut v = String::from("S0 { field: 0 }");
+        for _ in 0..n {
+            v = format!("W({v})");
+        }
+        "use std::ops::Deref;\nstruct S0 {\n    field: u32,\n}\nstruct W<T>(T);\nimpl<T> Deref for W<T> {\n    type Target = T;\n    fn deref(&self) -> &T {\n        &self.0\n    }\n}\n".to_string() + &body.replace("VALUE", &v)
+    };
+    let d = check(&generic(129, "fn main() {\n    let mut x = VALUE;\n    x.field = 1;\n}\n"));
+    assert!(d.len() == 1 && d[0].1.contains("reached the recursion limit while auto-dereferencing `W<"), "{d:?}");
+    let d = check(&generic(20, "fn main() {\n    let mut x = VALUE;\n    x.field = 1;\n}\n"));
+    assert!(d.len() == 1 && d[0].1.contains("cannot assign to data in dereference of `W` (E0594)"), "{d:?}");
+    assert_eq!(check(&generic(20, "fn main() {\n    let x = VALUE;\n    println!(\"{}\", x.field);\n}\n")), vec![]);
+    // (a target that is a reference, `Target = &'static S`: followed through it, as part of the chain; a cycle so is
+    // E0055, not lowered again and again until the stack overflows)
+    let rr = "use std::ops::Deref;\nstruct S0 {\n    field: u32,\n}\nstatic Z: S0 = S0 { field: 3 };\nstatic RZ: &S0 = &Z;\nstruct W;\nimpl Deref for W {\n    type Target = &'static S0;\n    fn deref(&self) -> &&'static S0 {\n        &RZ\n    }\n}\n";
+    assert_eq!(check(&format!("{rr}fn main() {{\n    let w = W;\n    println!(\"{{}}\", w.field);\n}}\n")), vec![]);
+    let d = check("use std::ops::Deref;\nstruct S;\nstatic SS: S = S;\nstatic RS: &S = &SS;\nimpl Deref for S {\n    type Target = &'static S;\n    fn deref(&self) -> &&'static S {\n        &RS\n    }\n}\nfn main() {\n    let s = S;\n    println!(\"{}\", s.missing);\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 13 && d[0].1.contains("reached the recursion limit while auto-dereferencing `S` (E0055)"), "{d:?}");
+    // (a cycle through two types: type inference followed it until the stack overflowed)
+    let d = check("use std::ops::Deref;\nstruct A {\n    x: u32,\n}\nstruct B {\n    y: u32,\n}\nstatic BB: B = B { y: 2 };\nstatic AA: A = A { x: 2 };\nimpl Deref for A {\n    type Target = B;\n    fn deref(&self) -> &B {\n        &BB\n    }\n}\nimpl Deref for B {\n    type Target = A;\n    fn deref(&self) -> &A {\n        &AA\n    }\n}\nfn main() {\n    let a = A { x: 1 };\n    println!(\"{}\", a.missing);\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 24 && d[0].1.contains("reached the recursion limit while auto-dereferencing `A` (E0055)"), "{d:?}");
+}

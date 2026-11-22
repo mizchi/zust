@@ -202,6 +202,8 @@ pub struct Blob {
     pub traps: Vec<(u32, u32, u32)>,
     pub line_base: Option<u32>,
     pub code_ref: Option<(u32, u64)>,
+    /// What the function's lowering told the closures it makes (Insts::fx_log): given back to Insts with the Blob
+    pub clo_facts: Vec<crate::program::CloFact>,
 }
 
 #[derive(Clone, Debug)]
@@ -487,6 +489,7 @@ fn compile_once(prog: &Program, insts: &Mutex<Insts>, id: u32, f: &ItemFn, line_
         inl,
         inline_ret: None,
         inline_depth: 0,
+        deref_depth: 0,
         inlined: 0,
         try_into_hint: None,
     };
@@ -611,7 +614,7 @@ pub struct Compiled {
 impl Compiled {
     /// 機械語なしの Blob (check の検査済みの印)
     pub fn empty_blob() -> Blob {
-        Blob { align: 16, code: vec![], relocs: vec![], datas: vec![], vtables: vec![], traps: vec![], line_base: None, code_ref: None }
+        Blob { align: 16, code: vec![], relocs: vec![], datas: vec![], vtables: vec![], traps: vec![], line_base: None, code_ref: None, clo_facts: vec![] }
     }
 
     /// バックエンドが作った (機械語, 再配置, trap) から Blob を作る
@@ -637,7 +640,7 @@ impl Compiled {
                 traps.push((off, info, msg));
             }
         }
-        Blob { align: 16, code, relocs: out, datas, vtables, traps, line_base: loc_used.then_some(line_base), code_ref: None }
+        Blob { align: 16, code, relocs: out, datas, vtables, traps, line_base: loc_used.then_some(line_base), code_ref: None, clo_facts: vec![] }
     }
 }
 
@@ -989,6 +992,9 @@ pub struct Cx<'p> {
     /// 展開している本体の続きのブロック (return / 末尾の値はここへ飛ぶ)
     pub inline_ret: Option<Block>,
     pub inline_depth: u32,
+    /// The overloaded derefs a field access is lowered through so far (`(*s.deref()).f`, then again): at most rustc's
+    /// default recursion limit (128), then E0055
+    pub deref_depth: u32,
     pub inlined: u32,
     /// `x.try_into().unwrap()` の unwrap の期待型 (型推論が try_into の行き先を記録していないとき)
     pub try_into_hint: Option<Ty>,
@@ -1642,16 +1648,9 @@ impl Cx<'_> {
             self.mark_ret_call(e);
             self.bk.tail = e as *const Expr as usize;
         }
+        self.bk.cap_vals = cap_vals;
         let (v, t) = self.block(&f.block, Some(self.ret))?;
-        // (a closure's captures held by value outlive the body's call, in its environment: what they borrow of the
-        // body's own (another capture held by value, a local) escapes it (`move || { b = Some(&a); }`, rustc's E0521))
-        if self.bk_on() {
-            for &id in &cap_vals {
-                if self.bk.locals.get(id as usize).is_some_and(|l| l.refs) {
-                    self.bk_ev(borrowck::Ev::Escape(vec![borrowck::Src::Local(id)]));
-                }
-            }
-        }
+        self.bk_cap_escape();
         // (the temporaries of the body's tail go away after its locals (edition 2021))
         self.bk_temps_end(0);
         if t == Ty::Never {
@@ -1674,6 +1673,21 @@ impl Cx<'_> {
         let e = strip_paren(e);
         if self.sret.is_some() && self.inline_ret.is_none() && matches!(e, Expr::Call(..) | Expr::MethodCall(..) | Expr::Struct(..)) && !no_ret_dst() {
             self.ret_call = Some(e as *const Expr as usize);
+        }
+    }
+
+    /// A closure's captures held by value outlive the body's call, in its environment: at an exit of the body, what
+    /// they borrow of the body's own (another capture held by value, a local) escapes it (`move || { b = Some(&a); }`,
+    /// rustc's E0521). Not while inlining (the borrow check is off): a `return` there leaves the inlined body only
+    pub(crate) fn bk_cap_escape(&mut self) {
+        if !self.bk_on() {
+            return;
+        }
+        for i in 0..self.bk.cap_vals.len() {
+            let id = self.bk.cap_vals[i];
+            if self.bk.locals.get(id as usize).is_some_and(|l| l.refs) {
+                self.bk_ev(borrowck::Ev::Escape(vec![borrowck::Src::Local(id)]));
+            }
         }
     }
 
@@ -1812,12 +1826,29 @@ impl Cx<'_> {
         self.scopes.push(vec![]);
         let mut diverged = false;
         let mut result: V = (None, Ty::Unit);
-        let n = blk.stmts.len();
+        // (`let Foo { value } = Foo::<&'static u32> { value: &x };`: a destructuring let of a literal whose type
+        // arguments name lifetimes, as `let mut #slI: Foo<&'static u32> = ..; let Foo { value } = #slI;`, whose
+        // first let the region check reads. The block's statements are kept by reference, with their indices)
+        let split = if blk.stmts.iter().any(|st| matches!(st, Stmt::Let(pat, None, Some(Expr::Struct(p, ..)), None, _) if !is_simple_let(pat) && p.segs.last().is_some_and(|s| !s.args.is_empty()))) {
+            self.lifetime_lit_split(blk)
+        } else {
+            Vec::new()
+        };
+        let n = if split.is_empty() { blk.stmts.len() } else { split.len() };
         // (the borrowed temporaries of each statement end with it; the tail expression's, with the enclosing one)
         let bk_mark = self.bk.stmt_temps.len();
-        for (i, st) in blk.stmts.iter().enumerate() {
+        for k in 0..n {
+            let (i, st) = if split.is_empty() { (k, &blk.stmts[k]) } else { split[k] };
+            // (`let x = S::<&'static u32> { t: &c };` / `S::<&'a u32> { t: &c };`: a `let` of the type the path writes,
+            // whose annotation the region check reads; a let's temporaries are extended as the literal's would be. Only
+            // that statement is replaced: the others keep their identity, which inference's records and the tail's
+            // borrow check go by)
+            let st: &Stmt = match st {
+                Stmt::Let(_, None, Some(Expr::Struct(p, ..)), None, _) | Stmt::Expr(Expr::Struct(p, ..), true) if p.segs.last().is_some_and(|s| !s.args.is_empty()) => self.lifetime_lit(st).unwrap_or(st),
+                st => st,
+            };
             self.bk_temps_end(bk_mark);
-            let last = i + 1 == n;
+            let last = k + 1 == n;
             let t0 = self.temps.len();
             self.stmt_i = i;
             match st {
@@ -1828,6 +1859,13 @@ impl Cx<'_> {
                         return err(SP, "`let` without initializer is not supported");
                     };
                     let ann = ann_ty.as_ref().and_then(|t| self.parse_ty(t).ok());
+                    // (an annotation that writes `'static`: checked from here on, as a `let x: &'static T`, from
+                    // its initializer, whose calls are lowered with the check on)
+                    if let Some(a) = ann_ty {
+                        if !self.rg.on && self.rg.eligible && self.inline_depth == 0 && crate::regions::mentions_static(a) {
+                            self.rg_late_on();
+                        }
+                    }
                     // (destructuring reads the parts the pattern binds, not the whole value)
                     // (a `let`'s temporary bound by `ref` lives as long as the block: not one of the statement)
                     self.bk.let_scrut = true;
@@ -1845,7 +1883,7 @@ impl Cx<'_> {
                     };
                     // (`let (y, _): (&'a u32, u32) = ..;`: the pattern binds from a value of the annotation's type)
                     if let Some(a) = ann_ty {
-                        if let Some((t, tr)) = self.rg_let_ann(a, init) {
+                        if let Some((t, tr)) = self.rg_let_ann(a, init, Some(place.ty())) {
                             if t == place.ty() {
                                 self.rg.scrut = Some((t, tr));
                             }
@@ -2559,8 +2597,20 @@ impl Cx<'_> {
                     return Some((i, &self.prog.sigs[i as usize]));
                 }
             }
+            // (`<T as Tr>::A::m`: a fn of the associated type A, its instance's)
+            if p.segs.len() >= 3 {
+                if let Some(i) = self.assoc_ty_callee(Some(q), p, &by_ty) {
+                    return Some((i, &self.prog.sigs[i as usize]));
+                }
+            }
             let i = by_ty(t, &m)?;
             return Some((i, &self.prog.sigs[i as usize]));
+        }
+        // (`T::A::m(..)`: a fn of the associated type A of the type parameter T)
+        if p.segs.len() == 3 && self.env.params.iter().any(|(n, _)| *n == p.segs[0].name) {
+            if let Some(i) = self.assoc_ty_callee(None, p, &by_ty) {
+                return Some((i, &self.prog.sigs[i as usize]));
+            }
         }
         // `T::f(..)` (T は型引数。インスタンスでは具体的な型)
         if p.segs.len() == 2 {
@@ -2599,6 +2649,71 @@ impl Cx<'_> {
             }
         };
         Some((i, &self.prog.sigs[i as usize]))
+    }
+
+    /// The fn m of `<T as Tr>::A::m` / `T::A::m`: the path without its last segment is a type (an associated one), whose
+    /// fn m it is, by by_ty
+    #[cold]
+    #[inline(never)]
+    fn assoc_ty_callee(&self, q: Option<&Box<crate::parse::Ty>>, p: &Path, by_ty: &dyn Fn(Ty, &str) -> Option<u32>) -> Option<u32> {
+        let (m, pre) = p.segs.split_last()?;
+        let ty = crate::parse::Ty::Path(q.cloned(), Path { global: p.global, segs: pre.to_vec(), pos: p.pos });
+        let t = self.parse_ty(&ty).ok().filter(|t| !matches!(t, Ty::Param(_)))?;
+        by_ty(t, &m.name)
+    }
+
+    /// blk's statements (index, statement), with each destructuring `let pat = S::<&'a u32> {..};` (type arguments
+    /// that name lifetimes) as `let mut #slI: S<&'a u32> = S::<&'a u32> {..};` and `let pat = #slI;`
+    #[cold]
+    #[inline(never)]
+    fn lifetime_lit_split<'b>(&self, blk: &'b crate::parse::Block) -> Vec<(usize, &'b Stmt)> {
+        let mut out = Vec::with_capacity(blk.stmts.len() + 1);
+        for (i, st) in blk.stmts.iter().enumerate() {
+            if let Stmt::Let(pat, None, Some(init @ Expr::Struct(path, ..)), None, lp) = st {
+                if !is_simple_let(pat) && path.segs.iter().any(|s| s.args.iter().any(|a| format!("{a:?}").contains('\''))) {
+                    let mut bare = path.clone();
+                    for s in &mut bare.segs {
+                        s.args.clear();
+                    }
+                    if self.prog.struct_by_p(&PPath::of(&bare), self.self_sid).is_some() {
+                        // (a name source cannot write, so no binding of the user's is shadowed; `mut`, as the literal it
+                        // holds was a temporary that `ref mut` in the pattern may borrow)
+                        let tmp = format!("#sl{i}");
+                        let first: &'static Stmt = Box::leak(Box::new(Stmt::Let(Pat::Ident(false, true, tmp.clone(), None), Some(crate::parse::Ty::Path(None, path.clone())), Some(init.clone()), None, *lp)));
+                        let second: &'static Stmt = Box::leak(Box::new(Stmt::Let(pat.clone(), None, Some(path_expr(&tmp)), None, *lp)));
+                        out.push((i, first));
+                        out.push((i, second));
+                        continue;
+                    }
+                }
+            }
+            out.push((i, st));
+        }
+        out
+    }
+
+    /// The statement `let x = S::<&'a u32> {..};` / `S::<&'a u32> {..};` (type arguments that name lifetimes) as
+    /// `let x: S<&'a u32> = S::<&'a u32> {..};` / `let _: S<&'a u32> = S::<&'a u32> {..};`; None for any other
+    #[cold]
+    #[inline(never)]
+    fn lifetime_lit(&self, st: &Stmt) -> Option<&'static Stmt> {
+        let (pat, init, lp) = match st {
+            Stmt::Let(pat, None, Some(init @ Expr::Struct(..)), None, lp) if is_simple_let(pat) => (pat.clone(), init, *lp),
+            Stmt::Expr(init @ Expr::Struct(..), true) => (Pat::Wild, init, Default::default()),
+            _ => return None,
+        };
+        let Expr::Struct(path, ..) = init else { return None };
+        if !path.segs.iter().any(|s| s.args.iter().any(|a| format!("{a:?}").contains('\''))) {
+            return None;
+        }
+        let mut bare = path.clone();
+        for s in &mut bare.segs {
+            s.args.clear();
+        }
+        self.prog.struct_by_p(&PPath::of(&bare), self.self_sid)?;
+        // (the literal keeps its arguments too: struct_lit_inner checks them against the fields and an update's base,
+        // also when the annotation, with a `_`, gives no type)
+        Some(Box::leak(Box::new(Stmt::Let(pat, Some(crate::parse::Ty::Path(None, path.clone())), Some(init.clone()), None, lp))))
     }
 
     /// The name methods of t are indexed under (`S` for a struct's instances too, `u8`, `#tuple0`)

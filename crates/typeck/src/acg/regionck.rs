@@ -1851,6 +1851,32 @@ impl Cx<'_> {
         }
         match e {
             Expr::Paren(x) => self.rt_expr(x),
+            // (`(&x, 0)`: the elements' trees in order; one of another type (a coercion) flows into fresh regions)
+            Expr::Tuple(es) if !es.is_empty() => {
+                let prog = self.prog;
+                let t = self.peek(e)?;
+                let Ty::Struct(sid) = t else { return None };
+                if !prog.is_tuple(sid) || prog.structs[sid as usize].args.len() != es.len() {
+                    return None;
+                }
+                let args = prog.structs[sid as usize].args.clone();
+                let mut out = vec![];
+                for (x, a) in es.iter().zip(args) {
+                    let c = count(prog, a, 0)?;
+                    if c == 0 {
+                        continue;
+                    }
+                    let (xt, xtr) = self.rt_expr(x)?;
+                    if xt == a && xtr.len() == c {
+                        out.extend(xtr);
+                    } else {
+                        let f = self.rg.fresh(prog, a)?;
+                        self.rg.flow(prog, xt, a, &xtr, &f, super::borrowck::pos(x));
+                        out.extend(f);
+                    }
+                }
+                Some((t, out))
+            }
             Expr::Lit(s, _) if s.starts_with('"') || s.starts_with("r\"") || s.starts_with("r#") => Some((Ty::Ref(false, crate::types::intern(Ty::Str)), vec![STATIC])),
             // (`&f(..)` / `&mut 4` / `&{ let y = ..; y }`: a temporary the function owns (a `&` of a literal is
             // promoted to a static, and so may be a block of a constant alone))
@@ -2499,33 +2525,58 @@ impl Cx<'_> {
 
     /// `let _: ann = init;`: init flows into a value of the annotation's type
     pub(crate) fn rg_let_wild(&mut self, ann: &PTy, init: &Expr) {
-        self.rg_let_ann(ann, init);
+        self.rg_let_ann(ann, init, None);
     }
 
     /// `let PAT: ann = init;`: init flows into a value of the annotation's type, whose tree is returned (what the
     /// pattern binds from: `let (y, _): (&'a u32, u32) = (&22, 44);` makes y a `&'a u32`)
-    pub(crate) fn rg_let_ann(&mut self, ann: &PTy, init: &Expr) -> Option<(Ty, RT)> {
+    pub(crate) fn rg_let_ann(&mut self, ann: &PTy, init: &Expr, actual: Option<Ty>) -> Option<(Ty, RT)> {
         if !self.rg_on() {
             return None;
         }
         let init_tree = self.rt_expr(init);
-        let Ok(t) = self.parse_ty(ann) else { return None };
         let prog = self.prog;
-        let names = self.rg.lt_names.clone();
-        let mut s = crate::regions::Slots { lts: names, tparams: vec![], self_slots: &[], any: false, in_fn: 0 };
-        let mut codes = vec![];
-        s.slots(ann, false, &mut codes);
-        let lts = self.rg.lts.clone();
-        self.rg.dyn_infer = true;
-        let tree = self.rg.instantiate(prog, t, Some(&codes), &lts, &[], &mut |me| me.var());
-        self.rg.dyn_infer = false;
-        let tree = tree?;
+        // (the type of the value bound (a pattern's), else the annotation's: an annotation with holes (`(&'static u8,
+        // _)`) gives its tree against the type inference found, element by element, a hole's regions its own)
+        let t = match actual {
+            Some(t) => t,
+            None => self.parse_ty(ann).ok()?,
+        };
+        let tree = self.rg_ann_tree(ann, t)?;
         let sp = Some(super::borrowck::pos(init)).filter(|s| s.line != 0).unwrap_or(self.rg.let_sp);
         self.rg.wf(prog, t, &tree, sp);
         if let Some((it, itr)) = init_tree {
             self.rg.flow(prog, it, t, &itr, &tree, sp);
         }
         Some((t, tree))
+    }
+
+    /// The tree of a value of type t written as ann (the annotation of a `let`): the regions it writes, fresh ones for
+    /// a hole (`_`) and for what it elides; through tuples element by element
+    fn rg_ann_tree(&mut self, ann: &PTy, t: Ty) -> Option<RT> {
+        let prog = self.prog;
+        match (ann, t) {
+            (PTy::Infer, _) => self.rg.fresh(prog, t),
+            (PTy::Tuple(es), Ty::Struct(sid)) if prog.is_tuple(sid) && prog.structs[sid as usize].args.len() == es.len() => {
+                let args = prog.structs[sid as usize].args.clone();
+                let mut out = vec![];
+                for (e, a) in es.iter().zip(args) {
+                    out.extend(self.rg_ann_tree(e, a)?);
+                }
+                Some(out)
+            }
+            _ => {
+                let names = self.rg.lt_names.clone();
+                let mut s = crate::regions::Slots { lts: names, tparams: vec![], self_slots: &[], any: false, in_fn: 0 };
+                let mut codes = vec![];
+                s.slots(ann, false, &mut codes);
+                let lts = self.rg.lts.clone();
+                self.rg.dyn_infer = true;
+                let tree = self.rg.instantiate(prog, t, Some(&codes), &lts, &[], &mut |me| me.var());
+                self.rg.dyn_infer = false;
+                tree
+            }
+        }
     }
 
     /// `let x: ann;` (`let _: ann;`): the annotation's type is well formed; x's tree is of it
@@ -3212,7 +3263,9 @@ impl Cx<'_> {
                 codes.push(v);
             }
         }
-        self.insts.lock().unwrap().closure_rg.insert(cid, Box::new(crate::program::CloRg { codes, caps, known, lts }));
+        let mut g = self.insts.lock().unwrap();
+        g.closure_rg.insert(cid, Box::new(crate::program::CloRg { codes, caps, known, lts }));
+        g.fx_log.push(cid);
     }
 
     /// The codes of a closure's captures (cid) as trees of this function: its universal regions are CLO_U + i; what
@@ -3792,8 +3845,9 @@ pub fn impl_sig_mismatch(prog: &Program, decl: u32, imp: u32) -> bool {
             d_self = dtr.first().copied();
             m_self = mtr.first().copied();
         }
-        d_in.extend(dtr.iter().copied().filter(|&v| v != STATIC));
-        m_in.extend(mtr.iter().copied().filter(|&v| v != STATIC));
+        // (`'static` too: the one region of the inputs, written or elided, is the result's elided one)
+        d_in.extend(dtr.iter().copied());
+        m_in.extend(mtr.iter().copied());
         rg.implied(prog, dt, &dtr, 0);
         rg.relate(prog, mt, &dtr, &mtr, sp);
     }

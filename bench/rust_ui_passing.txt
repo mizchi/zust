@@ -207,6 +207,7 @@ run-pass	associated-types/assoc-type-ref-in-tuple-return.rs
 run-pass	associated-types/assoc-type-returns-outer-wrapping-self.rs
 compile-fail	associated-types/assoc-type-unsatisfied-bound.rs
 check-pass	associated-types/associate-type-bound-normalization.rs
+run-pass	associated-types/associated-item-long-paths.rs
 compile-fail	associated-types/associated-type-as-value-in-impl-issue-142797.rs
 compile-fail	associated-types/associated-type-call.rs
 check-pass	associated-types/associated-type-const-nomalization.rs
@@ -358,6 +359,7 @@ build-pass	async-await/async-closures/implements-fnmut.rs
 compile-fail	async-await/async-closures/kind-due-to-arg-with-box-wrap.rs
 check-pass	async-await/async-closures/mac-body.rs
 compile-fail	async-await/async-closures/move-from-async-fn-bound.rs
+compile-fail	async-await/async-closures/not-clone-closure.rs
 check-pass	async-await/async-closures/sig-from-bare-fn.rs
 compile-fail	async-await/async-closures/suggest-async-block-issue-140265.rs
 compile-fail	async-await/async-closures/suggest-impl-async-fn-issue-148493.rs
@@ -778,6 +780,8 @@ compile-fail	borrowck/borrowck-borrow-immut-deref-of-box-as-mut.rs
 compile-fail	borrowck/borrowck-borrow-mut-base-ptr-in-aliasable-loc.rs
 compile-fail	borrowck/borrowck-borrow-mut-object-twice.rs
 run-pass	borrowck/borrowck-borrow-of-mut-base-ptr-safe.rs
+compile-fail	borrowck/borrowck-borrow-overloaded-auto-deref.rs
+compile-fail	borrowck/borrowck-borrow-overloaded-deref.rs
 compile-fail	borrowck/borrowck-borrowed-uniq-rvalue-2.rs
 compile-fail	borrowck/borrowck-borrowed-uniq-rvalue.rs
 run-pass	borrowck/borrowck-box-sensitivity.rs
@@ -792,6 +796,7 @@ compile-fail	borrowck/borrowck-closures-two-mut-fail.rs
 compile-fail	borrowck/borrowck-closures-two-mut.rs
 compile-fail	borrowck/borrowck-closures-unique-imm.rs
 compile-fail	borrowck/borrowck-closures-unique.rs
+compile-fail	borrowck/borrowck-closures-use-after-free.rs
 compile-fail	borrowck/borrowck-consume-unsize-vec.rs
 compile-fail	borrowck/borrowck-consume-upcast-box.rs
 compile-fail	borrowck/borrowck-deref-pattern-assignment.rs
@@ -923,6 +928,7 @@ compile-fail	borrowck/borrowck-while-break.rs
 compile-fail	borrowck/borrowck-while-cond.rs
 compile-fail	borrowck/borrowck-while.rs
 compile-fail	borrowck/borrowck_for_loop_pattern_assignment.rs
+compile-fail	borrowck/borrowed-data-escapes-closure-148392.rs
 build-pass	borrowck/borrowed-pointer-in-struct-5884.rs
 compile-fail	borrowck/branch-condition-flow-issue-156494.rs
 compile-fail	borrowck/buffer-reuse-pattern-issue-147694.rs
@@ -932,11 +938,13 @@ compile-fail	borrowck/cannot-borrow-index-output-mutably.rs
 compile-fail	borrowck/clone-on-ref.rs
 compile-fail	borrowck/clone-span-on-try-operator.rs
 compile-fail	borrowck/cloning-in-async-block-121547.rs
+compile-fail	borrowck/closure-borrow-conflict-11192.rs
 compile-fail	borrowck/copy-suggestion-region-vid.rs
 compile-fail	borrowck/dbg-issue-120327.rs
 compile-fail	borrowck/deref-and-mut-borrow-conflict.rs
 compile-fail	borrowck/deref-index-pattern-ref-suggestion.rs
 compile-fail	borrowck/disallow-possibly-uninitialized.rs
+compile-fail	borrowck/do-not-suggest-adding-move-when-closure-is-already-marked-as-move.rs
 compile-fail	borrowck/drop-in-loop.rs
 check-pass	borrowck/enum-variants-share-field-name.rs
 compile-fail	borrowck/fn-ptr-lifetime-mismatch-with-impl-trait-arg.rs
@@ -1054,6 +1062,7 @@ run-pass	borrowck/region-checker-map-closure-13665.rs
 compile-fail	borrowck/regions-bound-missing-bound-in-impl.rs
 compile-fail	borrowck/regions-escape-bound-fn-2.rs
 compile-fail	borrowck/regions-escape-bound-fn.rs
+compile-fail	borrowck/regions-escape-unboxed-closure.rs
 compile-fail	borrowck/return-ref-to-temporary.rs
 run-pass	borrowck/rvalue-lifetime-match-equivalence-7660.rs
 check-pass	borrowck/self-field-consume-with-drop-type.rs
@@ -1345,6 +1354,7 @@ compile-fail	closures/issue-80313-mutable-borrow-in-closure.rs
 compile-fail	closures/issue-80313-mutable-borrow-in-move-closure.rs
 compile-fail	closures/issue-80313-mutation-in-closure.rs
 compile-fail	closures/issue-80313-mutation-in-move-closure.rs
+compile-fail	closures/issue-81700-mut-borrow.rs
 compile-fail	closures/issue-82438-mut-without-upvar.rs
 compile-fail	closures/issue-84044-drop-non-mut.rs
 run-pass	closures/issue-868.rs
@@ -1360,6 +1370,7 @@ check-pass	closures/move-closure-can-call-captured-fnmut.rs
 run-pass	closures/move-closure-is-send.rs
 run-pass	closures/moved-upvar-mut-rebind-11958.rs
 run-pass	closures/nested-closure-call.rs
+compile-fail	closures/nested-closure-escape-borrow.rs
 run-pass	closures/no-capture-closure-call.rs
 run-pass	closures/no-unused-mut-warning-for-move-closure.rs
 run-pass	closures/old-closure-arg-call-as.rs
@@ -2012,6 +2023,7 @@ check-pass	derives/debug/derive-debug-newtype-unsized-slice.rs
 run-pass	derives/debug/derive-debug.rs
 run-pass	derives/default/deriving-default-box.rs
 run-pass	derives/default/deriving-default-enum.rs
+compile-fail	derives/derive-assoc-type-not-impl.rs
 check-pass	derives/derive-compound-arities.rs
 run-pass	derives/derive-hrtb-for-bare-fn-field-with-lifetime.rs
 run-pass	derives/derive-hygiene-struct-builder.rs
@@ -2025,6 +2037,7 @@ run-pass	derives/deriving-associated-types.rs
 run-pass	derives/deriving-in-fn.rs
 check-pass	derives/deriving-meta-empty-trait-list.rs
 compile-fail	derives/deriving-meta-unknown-trait.rs
+compile-fail	derives/deriving-with-repr-packed-2.rs
 run-pass	derives/deriving-with-repr-packed-3.rs
 run-pass	derives/eq-ord/derive-partial-ord-discriminant-64bit.rs
 run-pass	derives/eq-ord/derive-partial-ord-discriminant.rs
@@ -2397,6 +2410,7 @@ compile-fail	error-codes/E0435.rs
 compile-fail	error-codes/E0478.rs
 compile-fail	error-codes/E0496.rs
 compile-fail	error-codes/E0499.rs
+compile-fail	error-codes/E0501.rs
 compile-fail	error-codes/E0502.rs
 compile-fail	error-codes/E0503.rs
 compile-fail	error-codes/E0505.rs
@@ -3605,6 +3619,7 @@ compile-fail	lifetimes/lifetime-errors/iterator-next-extra-named-lifetime.rs
 compile-fail	lifetimes/lifetime-errors/liveness-assign-imm-local-notes.rs
 check-pass	lifetimes/lifetime-in-unit-struct-pattern.rs
 check-pass	lifetimes/lifetime-inference-miss-15735.rs
+compile-fail	lifetimes/lifetime-mismatch-between-trait-and-impl.rs
 compile-fail	lifetimes/lifetime-no-keyword.rs
 run-pass	lifetimes/lifetime-param-in-fn-coercion.rs
 compile-fail	lifetimes/mismatched-lifetime-syntaxes-details/mismatched-lifetime-syntaxes.rs
@@ -3642,6 +3657,7 @@ check-pass	lifetimes/struct-lifetime-field-assignment-13405.rs
 check-pass	lifetimes/struct-lifetime-inference-15735.rs
 run-pass	lifetimes/struct-with-lifetime-parameters-9259.rs
 compile-fail	lifetimes/suggest-introducing-and-adding-missing-lifetime.rs
+compile-fail	lifetimes/trait-impl-mismatch-elided-lifetime-issue-65866.rs
 run-pass	lifetimes/trait-method-lifetime-bounds.rs
 compile-fail	lifetimes/trait-method-lifetime-suggestion.rs
 run-pass	lifetimes/trait-object-constructor-14821.rs
@@ -3706,6 +3722,7 @@ check-pass	lint/dead-code/not-lint-adt-appeared-in-pattern-issue-120770.rs
 check-pass	lint/dead-code/offset-of-correct-param-env.rs
 check-pass	lint/dead-code/self-assign.rs
 check-pass	lint/dead-code/struct-used-as-pattern-issue-56750.rs
+check-pass	lint/dead-code/trait-only-used-as-type-bound.rs
 check-pass	lint/dead-code/type-alias-used-in-impl-59333.rs
 check-pass	lint/dead-code/type-in-foreign.rs
 check-pass	lint/dead-code/type-in-transparent.rs
@@ -4200,6 +4217,7 @@ compile-fail	methods/associated-fn-turbofish-issue-159813.rs
 run-pass	methods/by-value-self-method-on-int.rs
 compile-fail	methods/call_method_unknown_pointee.rs
 check-pass	methods/calling-conventions-with-where-clause-ref-bound.rs
+compile-fail	methods/clone-missing.rs
 run-pass	methods/destructure-and-call-self-method.rs
 compile-fail	methods/disambiguate-associated-function-first-arg.rs
 compile-fail	methods/dont-suggest-import-on-deref-err.rs
@@ -4328,6 +4346,7 @@ compile-fail	mismatched_types/issue-19109.rs
 compile-fail	mismatched_types/issue-38371-unfixable.rs
 compile-fail	mismatched_types/issue-47706.rs
 compile-fail	mismatched_types/issue-74918-missing-lifetime.rs
+compile-fail	mismatched_types/issue-75361-mismatched-impl.rs
 compile-fail	mismatched_types/issue-84976.rs
 compile-fail	mismatched_types/mismatch-args-crash-issue-130400.rs
 compile-fail	mismatched_types/mismatch-args-vargs-issue-130372.rs
@@ -4521,6 +4540,7 @@ compile-fail	nll/issue-30438-c.rs
 compile-fail	nll/issue-31567.rs
 compile-fail	nll/issue-40510-1.rs
 check-pass	nll/issue-40510-2.rs
+compile-fail	nll/issue-40510-3.rs
 check-pass	nll/issue-40510-4.rs
 check-pass	nll/issue-43058.rs
 compile-fail	nll/issue-45157.rs
@@ -4574,6 +4594,7 @@ compile-fail	nll/issue-54943.rs
 check-pass	nll/issue-55288.rs
 check-pass	nll/issue-55344.rs
 compile-fail	nll/issue-55394.rs
+compile-fail	nll/issue-55401.rs
 check-pass	nll/issue-55651.rs
 compile-fail	nll/issue-57100.rs
 compile-fail	nll/issue-57280-1-flipped.rs
@@ -5782,6 +5803,7 @@ run-pass	regions/owned-implies-static.rs
 compile-fail	regions/region-borrow-params-issue-29793-big.rs
 compile-fail	regions/region-borrow-params-issue-29793-small.rs
 check-pass	regions/region-bound-extra-bound-in-inherent-impl.rs
+compile-fail	regions/region-bound-on-closure-outlives-call.rs
 check-pass	regions/region-bound-same-bounds-in-trait-and-impl.rs
 compile-fail	regions/region-bounds-on-objects-and-type-parameters.rs
 compile-fail	regions/region-invariant-static-error-reporting.rs
@@ -6490,6 +6512,7 @@ run-pass	std/issue-3563-3.rs
 run-pass	std/thread-sleep-ms.rs
 run-pass	stdlib-unit-tests/matches2021.rs
 compile-fail	stdlib-unit-tests/not-sync.rs
+run-pass	str/char-escape-unicode.rs
 run-pass	str/debug-print-basic-tuple.rs
 run-pass	str/nul-char-equivalence.rs
 check-pass	str/raw-string-literal-unescaped-unicode.rs
@@ -7763,6 +7786,7 @@ run-pass	where-clauses/where-clauses-lifetimes.rs
 run-pass	where-clauses/where-clauses-method.rs
 run-pass	where-clauses/where-clauses-unboxed-closures.rs
 run-pass	where-clauses/where-clauses.rs
+run-pass	whitespace/ascii_whitespace_excludes_vertical_tab.rs
 run-pass	whitespace/vertical_tab_lexer.rs
 run-pass	windows-subsystem/console.rs
 run-pass	windows-subsystem/windows.rs

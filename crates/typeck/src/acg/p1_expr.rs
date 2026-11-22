@@ -111,6 +111,81 @@ impl Cx<'_> {
 
     /// `U::<u8>` / `Foo::<3>` / `Flag::<true>`: the path without the last segment's turbofish, and the type arguments
     /// it gives (None for `_`); the path itself when it has none
+    /// The func `<X>::m` of a path call whose path names the type X before m: `T::A::m` (A an associated type of the type
+    /// parameter T), `<T as Tr>::A::m`, or `<X as From<_>>::from` (std's conversions, whose impls for the primitives
+    /// are builtins); X known (no parameter left). None otherwise
+    #[cold]
+    #[inline(never)]
+    pub(crate) fn assoc_path_func(&self, q: Option<&crate::parse::Ty>, p: &crate::parse::Path) -> Option<Expr> {
+        let (m, pre) = p.segs.split_last()?;
+        let ty = match q {
+            None if pre.len() == 2 && pre.iter().all(|s| s.args.is_empty()) && self.env.params.iter().any(|(n, _)| *n == pre[0].name) => {
+                crate::parse::Ty::Path(None, crate::parse::Path { global: false, segs: pre.to_vec(), pos: p.pos })
+            }
+            Some(q) if pre.len() >= 2 => crate::parse::Ty::Path(Some(Box::new(q.clone())), crate::parse::Path { global: p.global, segs: pre.to_vec(), pos: p.pos }),
+            Some(q) if pre.len() == 1 && matches!((pre[0].name.as_str(), m.name.as_str()), ("From", "from") | ("TryFrom", "try_from")) => q.clone(),
+            _ => return None,
+        };
+        let t = self.parse_ty(&ty).ok().filter(|&t| !self.prog.has_param(t) && !has_hole(self.prog, t))?;
+        // (`<u16>::from` parses as `u16::from`)
+        let Ok(Expr::Path(qt, mut qp)) = crate::parse::parse_expr(&format!("<{}>::{}", self.prog.tn(t), m.name)) else { return None };
+        // (the method's own arguments: `<T as Foo>::U::gm::<f64>()`)
+        if let Some(l) = qp.segs.last_mut() {
+            l.args = m.args.clone();
+        }
+        qp.pos = p.pos;
+        Some(Expr::Path(qt, qp))
+    }
+
+    /// The arguments of `<T as From<S>>::from(x)` as the call on T gets them: x of the source S written (E0308 for
+    /// another type; an unsuffixed literal of S's kind is S's, `<u16 as From<u8>>::from(6)`). Other calls' as they are
+    fn from_source_args(&self, p: &crate::parse::Path, cargs: &[Expr]) -> R<Vec<Expr>> {
+        if let ([tr, m], [x]) = (p.segs.as_slice(), cargs) {
+            if matches!((tr.name.as_str(), m.name.as_str()), ("From", "from") | ("TryFrom", "try_from")) {
+                if let [GArg::Ty(sty)] = tr.args.as_slice() {
+                    if let Some(s) = self.parse_ty(sty).ok().filter(|&s| !self.prog.has_param(s) && !has_hole(self.prog, s)) {
+                        // (a literal of the source's kind takes it as its suffix (`6` as `6u8`, out of range an error as for
+                        // `300u8`); one of the other kind is a mismatch (`from(3.5)` for a u8), as rustc says)
+                        // (the literal's parsed kind, only without a suffix: `1f32` and `1E3` are floats, `5u8` keeps its own)
+                        fn unsuffixed(e: &Expr) -> Option<bool> {
+                            match e {
+                                Expr::Paren(i) => unsuffixed(i),
+                                Expr::Unary(op, i, _) if op == "-" => unsuffixed(i),
+                                Expr::Lit(t, _) => match super::lit::lit(t)? {
+                                    super::lit::Lit::Int(i) if i.suffix().is_empty() => Some(true),
+                                    super::lit::Lit::Float(f) if f.suffix().is_empty() => Some(false),
+                                    _ => None,
+                                },
+                                _ => None,
+                            }
+                        }
+                        let kind = unsuffixed(x);
+                        let (int, float) = (kind == Some(true), kind == Some(false));
+                        if int || float {
+                            if (int && !s.is_int()) || (float && !s.is_float()) {
+                                let found = if int { "integer" } else { "floating-point number" };
+                                return err(expr_start(x), format!("mismatched types: expected `{}`, found {found}", self.prog.tn(s)));
+                            }
+                            fn suffixed(e: &Expr, sfx: &str) -> Expr {
+                                match e {
+                                    Expr::Paren(i) => suffixed(i, sfx),
+                                    Expr::Lit(t, sp) => Expr::Lit(format!("{t}{sfx}"), *sp),
+                                    Expr::Unary(op, i, sp) => Expr::Unary(op.clone(), Box::new(suffixed(i, sfx)), *sp),
+                                    e => e.clone(),
+                                }
+                            }
+                            return Ok(vec![suffixed(x, &self.prog.tn(s))]);
+                        }
+                        if let Some(a) = self.peek(x).filter(|&a| a != s && !self.prog.has_param(a)) {
+                            return err(expr_start(x), format!("mismatched types: expected `{}`, found `{}`", self.prog.tn(s), self.prog.tn(a)));
+                        }
+                    }
+                }
+            }
+        }
+        Ok(cargs.to_vec())
+    }
+
     pub(crate) fn turbofish_split<'a>(&self, p: &'a crate::parse::Path) -> (PPath, Option<&'a [GArg]>) {
         let mut pp = PPath::of(p);
         let Some(last) = p.segs.last().filter(|s| !s.args.is_empty() && s.fn_args.is_none()) else { return (pp, None) };
@@ -311,22 +386,39 @@ impl Cx<'_> {
                 // (フィールドがなく Deref を実装した型 (`self.prog` で self: &Inf): `(*self.deref()).prog`)
                 if let Some(Ty::Struct(sid)) = self.peek(base).map(|t| self.strip_refs(t)) {
                     if self.prog.field(sid, fname).is_none() {
-                        // (a Deref chain that never reaches a field of that name: `impl Deref for Foo { type Target = Foo }`)
+                        // (a Deref chain that does not reach a field of that name within rustc's default recursion
+                        // limit (128): a cycle (`impl Deref for Foo { type Target = Foo }`), or a chain that long,
+                        // through generic targets too (`W<W<..>>` with `Target = T`). The borrow check follows a
+                        // place's derefs as far, the same way (bk_place, bk_overloaded_shr))
                         let mut t = sid;
-                        let mut cycle = false;
-                        for _ in 0..16 {
-                            let Some(d) = self.prog.method(t, "deref") else { break };
-                            let Ty::Ref(_, Ty::Struct(n)) = self.prog.sigs[d as usize].ret else { break };
-                            t = *n;
-                            if self.prog.field(t, fname).is_some() {
+                        let mut over = true;
+                        for _ in 0..128 {
+                            let Some(d) = self.prog.method(t, "deref") else {
+                                over = false;
                                 break;
+                            };
+                            let Ty::Ref(_, i) = self.prog.sigs[d as usize].ret else {
+                                over = false;
+                                break;
+                            };
+                            let args: Vec<Option<Ty>> = self.prog.structs[t as usize].args.iter().map(|&a| Some(a)).collect();
+                            // (a target that is a reference (`Target = &'static S`) is followed through it)
+                            let mut target = self.prog.partial_subst(*i, &args);
+                            while let Ty::Ref(_, x) = target {
+                                target = *x;
                             }
-                            if t == sid {
-                                cycle = true;
+                            let Ty::Struct(n) = target else {
+                                over = false;
+                                break;
+                            };
+                            t = n;
+                            if self.prog.field(t, fname).is_some() {
+                                over = false;
                                 break;
                             }
                         }
-                        if cycle {
+                        // (the rewrites below lower the access again from the target: counted across them)
+                        if over || self.deref_depth >= 128 {
                             let sname = self.prog.structs[sid as usize].name.clone();
                             return err(SP, format!("reached the recursion limit while auto-dereferencing `{sname}` (E0055)"));
                         }
@@ -337,7 +429,10 @@ impl Cx<'_> {
                                     self.deref_shared(u);
                                 }
                             }
-                            return self.place(f2);
+                            self.deref_depth += 1;
+                            let r = self.place(f2);
+                            self.deref_depth -= 1;
+                            return r;
                         }
                     }
                 }
@@ -1156,6 +1251,8 @@ impl Cx<'_> {
                         None
                     }
                 };
+                // (a closure's exit: what its captures held by value hold escapes it)
+                self.bk_cap_escape();
                 self.drop_for_exit(0, 0);
                 self.emit_return(v);
                 Ok(self.dead())
@@ -1766,6 +1863,19 @@ impl Cx<'_> {
             self.rg_written_on(path);
         }
         let r = self.struct_lit_inner(e, expected);
+        // (E0277: an argument of a parameter bounded by Copy that is not (`union U<T: Copy>` as `U<Rc<u32>>`))
+        if let (Ok((_, Ty::Struct(sid))), true) = (&r, self.user_code && !self.prog.copy_params.is_empty()) {
+            let (sid, prog) = (*sid, self.prog);
+            if let Some(ks) = prog.copy_params.get(&prog.base_of(sid)) {
+                for &k in ks {
+                    if let Some(&a) = prog.structs[sid as usize].args.get(k) {
+                        if !prog.has_param(a) && !has_hole(prog, a) && (!super::borrowck::is_copy(prog, a, 0) || super::p3_ops::copy_mut_ref(prog, a, 0)) {
+                            return err(expr_start(e), format!("the trait bound `{}: Copy` is not satisfied (E0277)", prog.tn(a)));
+                        }
+                    }
+                }
+            }
+        }
         if let Ok((_, t)) = &r {
             self.rg_struct_lit(e, *t);
             // (a struct-like variant (`E::V { r: x }`): its value's tree, which variant_value made last)
@@ -1805,6 +1915,12 @@ impl Cx<'_> {
             }
             return self.variant_value(sid, vi, &args, expected);
         }
+        // (`Self::<u8> {}`: E0109)
+        if let [s] = path.segs.as_slice() {
+            if s.name == "Self" && !s.args.is_empty() {
+                return err(SP, "type arguments are not allowed on self type (E0109)");
+            }
+        }
         // (`S::<u32> { t: 1 }`: the struct without the turbofish, which gives its type arguments)
         let (pp, targs) = self.turbofish_split(path);
         let mut written = None;
@@ -1815,6 +1931,17 @@ impl Cx<'_> {
                     Some(s) => {
                         self.lifetime_arity(s, path, "struct")?;
                         let ts = self.turbofish_targs(s, ta)?;
+                        // (`Foo::<u8> { ..base }` with base a `Foo<u16>`: the base is the mismatch, as rustc says it)
+                        if let Some(base) = rest.as_deref() {
+                            if let Some(bt @ Ty::Struct(b)) = self.peek(base).filter(|t| !self.prog.has_param(*t)) {
+                                let bargs = &self.prog.structs[b as usize].args;
+                                if self.prog.base_of(b) == self.prog.base_of(s) && ts.iter().enumerate().any(|(k, a)| a.is_some_and(|a| !self.prog.has_param(a) && bargs.get(k).is_some_and(|&ba| ba != a))) {
+                                    let full: Vec<Ty> = ts.iter().enumerate().map(|(k, a)| a.or(bargs.get(k).copied()).unwrap_or(Ty::Unit)).collect();
+                                    let want = self.prog.instantiate(self.prog.base_of(s), full).map(|i| self.prog.tn(Ty::Struct(i))).unwrap_or_else(|_| self.prog.structs[s as usize].name.clone());
+                                    return err(expr_start(base), format!("mismatched types: expected `{want}`, found `{}`", self.prog.tn(bt)));
+                                }
+                            }
+                        }
                         // (`let x: S<u16> = S::<u8> { t: 1 }`: the turbofish against the expected instance)
                         self.turbofish_vs_expected(s, &ts, expected)?;
                         written = Some(ts);
@@ -2040,7 +2167,9 @@ impl Cx<'_> {
             }
             // (its body's borrow check finds the rest: a closure it returns that mutates what it captures)
             if !by_ref.is_empty() {
-                self.insts.lock().unwrap().kind_free.insert(cid);
+                let mut g = self.insts.lock().unwrap();
+                g.kind_free.insert(cid);
+                g.fx_log.push(cid);
             }
         }
         let mut caps = vec![];
@@ -3052,7 +3181,14 @@ impl Cx<'_> {
         // call (`c(take(v))` with c capturing v by reference is E0505))
         if let Ty::Struct(sid) = t {
             if self.prog.closure_of_struct.contains_key(&self.prog.base_of(sid)) {
-                self.bk_callee_hold(&callee_srcs);
+                // (and the closure itself, which the call borrows: `c(drop(c))` is E0505)
+                let mut hold = callee_srcs.clone();
+                if is_place_expr(func) && self.bk_on() {
+                    if let Some(ln) = self.bk_loan_only(func, false) {
+                        hold.push(borrowck::Src::Loan(ln));
+                    }
+                }
+                self.bk_callee_hold(&hold);
             }
         }
         self.bk_frame();
@@ -3240,6 +3376,17 @@ impl Cx<'_> {
         if let Some(r) = self.default_call(c, expected)? {
             return Ok(r);
         }
+        // (`T::A::m(..)` / `<T as Tr>::A::m(..)` / `<u16 as From<u8>>::from(..)` that no fn of the program answers: the
+        // call on the type the path names, `<u16>::m(..)`, which reaches the builtins too)
+        if let Expr::Path(q, p) = &**func {
+            if (p.segs.len() >= 3 || q.is_some()) && self.callee(func).is_none() {
+                if let Some(nf) = self.assoc_path_func(q.as_deref(), p) {
+                    let args = self.from_source_args(p, cargs)?;
+                    let ne: &Expr = self.keep_expr(Expr::Call(Box::new(nf), args));
+                    return self.expr(ne, expected);
+                }
+            }
+        }
         // (`<T as Clone>::clone(x)`: `(x).clone()` naming its trait (not an inherent `clone` of T), for x: &T, a derive's
         // clone too; x of another referent is mismatched types (`<u8 as Clone>::clone(&1u32)`))
         if let (Expr::Path(Some(qs), p), [x]) = (&**func, cargs.as_slice()) {
@@ -3310,6 +3457,24 @@ impl Cx<'_> {
                         }
                     }
                     _ => {}
+                }
+            }
+        }
+        // (`u16::from(5u32)`: a number's `from` of another primitive is the widening one only, E0277 else as in rustc)
+        if let (Expr::Path(None, p), [x]) = (&**func, cargs.as_slice()) {
+            if let [ts, m] = p.segs.as_slice() {
+                if m.name == "from" && ts.args.is_empty() && m.args.is_empty() {
+                    if let Some(t) = Ty::prim(&ts.name).filter(|t| t.is_int() || t.is_float()) {
+                        if self.prog.fn_by_p(&PPath::of(p), self.self_sid).is_none() {
+                            if let Some(a) = self.peek(x).filter(|a| a.is_int() || a.is_float() || matches!(a, Ty::Bool | Ty::Char)) {
+                                // (not `f32::from(3.14)`: an unsuffixed float literal falls back to f32 there, which rustc accepts;
+                                // `f32::from(1f64)` is E0277)
+                                if !crate::program::prim_from(a, t) && !(t == Ty::F32 && a == Ty::F64 && super::p2_call::is_float_lit(x)) {
+                                    return err(SP, format!("the trait `From<{}>` is not implemented for `{}` (E0277)", self.prog.tn(a), self.prog.tn(t)));
+                                }
+                            }
+                        }
+                    }
                 }
             }
         }

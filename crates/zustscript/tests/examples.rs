@@ -251,6 +251,8 @@ fn owned_same_in_js_and_wasm() {
     let ramp = &ramp[..ramp.find("\n}\n").unwrap()];
     assert!(ramp.contains("let mut __zs_v = acc;") && !ramp.contains("to_vec"), "{ramp}");
     assert!(rs.contains("(zs_polys(n)).into_iter().map(|p|"), "{rs}");
+    // a borrow of an owned local the rest of the block keeps: no copy
+    assert!(rs.contains("let firsts = zs_first_pts(&ps[..]);"), "{rs}");
     // matched by reference through the borrowed parameter
     assert!(rs.contains("match *s {\nZsShape::Polygon(ref p, n)"), "{rs}");
     // the glue still passes slices and takes an owned result: adapters in front of the inferred signatures
@@ -258,8 +260,13 @@ fn owned_same_in_js_and_wasm() {
     assert!(rs.contains("fn __zs_js_zs_appended(xs: &[f64], x: f64) -> Vec<f64> {\n    zs_appended(xs.to_vec(), x)\n}"), "{rs}");
     assert!(rs.contains("zs_longer(a, b).to_vec()"), "{rs}");
 
-    let (out, rs) = run("tests/owned_cases.zsc", "owned_cases", "[m.cases(4), m.more(4), m.grow([5])]");
-    assert_eq!(out, "[[66.5,24,21.5,41.5,36,18.5,38,36],[65,10,5,4,9,6,4,13,6,2,6],[5,1]]\n");
+    let (out, rs) = run("tests/owned_cases.zsc", "owned_cases", "[m.cases(4), m.more(4), m.grow([5]), m.borrows(4)]");
+    assert_eq!(out, "[[66.5,24,21.5,41.5,36,18.5,38,36],[65,10,5,4,9,6,4,13,6,2,6],[5,1],[12.5,7,12]]\n");
+    // a borrow of an owned local kept by a `let`: the local is frozen (copied, not moved, while the borrow lives);
+    // assigned later in the block, or leaving it, the borrow is copied instead
+    assert!(rs.contains("let f = zs_id(&ys[..]);\nlet z = zs_keep(ys.to_vec());"), "{rs}");
+    assert!(rs.contains("let f = zs_id(&ys[..]).to_vec();\nys = vec![1.0f64];"), "{rs}");
+    assert!(rs.contains("let t = (zs_mk(n)).pts;\nzs_id(&t[..]).to_vec()"), "{rs}");
     // a result that borrows only its first parameter: a temporary second argument needs no copy
     assert!(rs.contains("fn zs_wrap<'a>(a: &'a [f64]) -> &'a [f64]"), "{rs}");
     assert!(rs.contains("fn zs_first<'a>(a: &'a [f64], b: &[f64]) -> &'a [f64]"), "{rs}");
@@ -276,6 +283,62 @@ fn owned_same_in_js_and_wasm() {
     assert!(rs.contains("zs_pair(&xs[..], &(zs_keep(xs.to_vec()))[..])"), "{rs}");
     // iterated and reassigned in the loop: the loop iterates a copy, and the push inside still reuses the array
     assert!(rs.contains("for x in xs.to_vec().into_iter() {\nxs = { let mut __zs_v = xs;"), "{rs}");
+}
+
+/// examples/text.zsc: strings and `==` by content in @wasm. Lengths and order are JS's (UTF-16 code units: `"😀"` is
+/// 2 long, and `"｡" > "😀"` though UTF-8 orders them the other way), and `==` on arrays, records and enums compares
+/// contents in JS (`$eq`) and in Rust (derive(PartialEq))
+#[test]
+fn text_same_in_js_and_wasm() {
+    let mut outs = vec![];
+    let mut rs = String::new();
+    for (name, flags) in [("text-wasm", &[][..]), ("text-js", &["--all-js"][..])] {
+        let d = out_dir(name);
+        let o = zsc(&root().join("examples/text.zsc"), &d, flags);
+        assert!(o.status.success(), "zsc failed:\n{}", String::from_utf8_lossy(&o.stderr));
+        outs.push(node(&d, "const m = await import('./text.js'); console.log(JSON.stringify([m.text(4), m.shout('  hé '), m.conflict_report(5)]))"));
+        if flags.is_empty() {
+            rs = std::fs::read_to_string(d.join("text.wasm.rs")).unwrap();
+        }
+    }
+    assert_eq!(outs[0], outs[1], "wasm and JS differ");
+    assert_eq!(outs[0], "[\"Hello, bo! ANA,BO,😀X abc 3 110 2 TFTFTT 0;1;2;3;\",\"HÉ!\",\"FTxya,b5\"]\n");
+    // borrowed strings, a borrowed result with a lifetime, `==` through borrows, and a string grown in place
+    assert!(rs.contains("fn zs_longest<'a>(a: &'a str, b: &'a str) -> &'a str"), "{rs}");
+    assert!(rs.contains("fn zs_same(p: &ZsPerson, q: &ZsPerson) -> bool {\n{\n(p == q)"), "{rs}");
+    assert!(rs.contains("s = { let mut __zs_s = { let mut __zs_s = s;"), "{rs}");
+}
+
+/// tests/eq_chain.zsc: `==` on a type with exponentially many paths to the same types checks each type once
+#[test]
+fn eq_check_is_linear() {
+    // a cycle on the type itself (eq_chain), and one that closes at the outermost type (eq_outer)
+    for name in ["eq_chain", "eq_outer"] {
+        let d = out_dir(name);
+        let t = std::time::Instant::now();
+        let o = zsc(&root().join(format!("tests/{name}.zsc")), &d, &[]);
+        assert!(o.status.success(), "{name}: {}", String::from_utf8_lossy(&o.stderr));
+        assert!(t.elapsed().as_secs() < 5, "{name} took {:?}", t.elapsed());
+    }
+}
+
+/// tests/js_inplace.zsc: the JS layer appends in place only onto a local array no one else can see, so every
+/// result is what the copying push gives
+#[test]
+fn js_push_in_place() {
+    let d = out_dir("js_inplace");
+    let o = zsc(&root().join("tests/js_inplace.zsc"), &d, &[]);
+    assert!(o.status.success(), "{}", String::from_utf8_lossy(&o.stderr));
+    let out = node(&d, "const m = await import('./js_inplace.js'); const xs = [1]; const r = m.from_param(xs); console.log(JSON.stringify([m.ramp(5), m.aliased(), [r, xs.length], m.iterate_and_grow(), m.stored(), m.other_local(), m.concat_and_short(), m.compare_with_push(), m.push_arg_assigns(), m.jsx_alias(), m.computed_callee(), m.jsx_key().key, m.handler_twice(), m.handler_alternatives()]))");
+    assert_eq!(out, "[5,12,[2,1],4,114,13,31,false,2,1,1,1,4,1]\n");
+    // == by content compares the declared fields only, so it is symmetric: a value from TS may carry more
+    let out = node(&d, "const m = await import('./js_inplace.js'); const a = { x: 1, name: 'a' }, b = { x: 1, name: 'a', extra: 2 }; console.log(JSON.stringify([m.same_p(a, b), m.same_p(b, a), m.same_p(a, { x: 2, name: 'a' })]))");
+    assert_eq!(out, "[true,true,false]\n");
+    let js = std::fs::read_to_string(d.join("js_inplace.js")).unwrap();
+    // in place exactly where no one else can see the array: the loop's accumulator, a local made by a copying
+    // push, and a concat onto a fresh literal
+    assert_eq!(js.matches(".push(").count(), 2, "{js}");
+    assert!(js.contains("acc = (acc.push(i), acc);") && js.contains("b = (b.push(3), b);") && js.contains("a = $append(a, [2, 3]);"), "{js}");
 }
 
 /// examples/kernels.zsc: the `@simd` kernels (v128, a module zsc writes), the same functions through zustc

@@ -3630,13 +3630,16 @@ fn compile_id_req(a: &Analysis, insts: &Mutex<Insts>, id: u32) -> R<(Blob, Vec<u
         let g = insts.lock().unwrap();
         a.line_shift(&*g, id)
     };
+    let l0 = insts.lock().unwrap().fx_log.len();
     let (c, req) = acg::compile(&a.prog, insts, id, f, lb, &a.inl)
         .map_err(|e| if acg::has_loc(&e) { untag_lines(&e, shift) } else { format!("{}:1: in `{}`: {e}", it.line, a.prog.names[body as usize]) })?;
+    // (what it told the closures it makes goes with its Blob: one read back (a cache, another process) tells them too)
+    let clo_facts = insts.lock().unwrap().facts_since(l0);
     // (check は機械語にしない。ビルドは記録をバックエンドで機械語にする)
     if a.inl.check_only {
-        return Ok((acg::Compiled::empty_blob(), req));
+        return Ok((Blob { clo_facts, ..acg::Compiled::empty_blob() }, req));
     }
-    lower_blob(a, c, req)
+    lower_blob(a, c, req).map(|(b, req)| (Blob { clo_facts, ..b }, req))
 }
 
 /// 記録を機械語にして Blob を作る (バックエンドなしでは作れない)
@@ -3903,7 +3906,10 @@ impl Session2 {
                         let children: Vec<String> = req.iter().filter(|&&i| g.get(i).is_some()).map(|&i| name_of(&*g, i)).collect();
                         let mut me = vec![];
                         if g.get(id).is_some() {
-                            let b = Blob { align: 1, code: vec![], relocs: vec![acg::BlobReloc { offset: 0, kind: 4, addend: 0, target: acg::Target::Func(id) }], datas: vec![], vtables: vec![], traps: vec![], line_base: None, code_ref: None };
+                            // (a closure's body: with what its parent's lowering, which the record stands for, told it)
+                            let bo = g.body_of(id);
+                            let clo_facts = if g.kind_free.contains(&bo) || g.closure_rg.contains_key(&bo) { g.facts_of(bo) } else { vec![] };
+                            let b = Blob { align: 1, code: vec![], relocs: vec![acg::BlobReloc { offset: 0, kind: 4, addend: 0, target: acg::Target::Func(id) }], datas: vec![], vtables: vec![], traps: vec![], line_base: None, code_ref: None, clo_facts };
                             crate::cache2::encode_blob(&b, &a.prog, &*g, &mut me);
                         }
                         memo.ents.insert(name, ChkEnt { body, body_hash: bh, children, me, ok });

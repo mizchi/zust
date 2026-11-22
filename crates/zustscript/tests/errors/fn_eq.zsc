@@ -1,0 +1,2 @@
+// expect: `==` compares values (numbers, strings, bools, and arrays, records, enums and tuples of them, by content), not
+fn f(a: fn(i32) -> i32, b: fn(i32) -> i32) -> bool { a == b }

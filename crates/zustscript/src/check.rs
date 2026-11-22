@@ -135,6 +135,9 @@ pub struct Info {
     /// the type of each expression of a `@wasm` / `@simd` function (the lowering to Rust decides by it what is Copy,
     /// what is borrowed and what is moved). Not recorded for the JS layer, which does not need it
     pub ty: HashMap<Id, Ty>,
+    /// `==` / `!=` that compare values with parts (arrays, records, enums with data, tuples): by content, in JS with
+    /// `$eq`, in Rust with `derive(PartialEq)`. Values are immutable, so equal contents are equal values
+    pub deep_eq: HashMap<Id, Ty>,
 }
 
 pub struct Checker {
@@ -162,6 +165,10 @@ pub struct Checker {
     typed_lits: Vec<(Id, Ty)>,
     /// (id, type) of the expressions of a `@wasm` function, resolved into `Info::ty` when the function is done
     tys: Vec<(Id, Ty)>,
+    /// [`Checker::eqable`]'s finished answers
+    eq_memo: std::cell::RefCell<HashMap<Ty, bool>>,
+    eq_low: std::cell::Cell<usize>,
+    eq_pending: std::cell::RefCell<(Vec<Ty>, HashMap<Ty, usize>)>,
     bound_checks: Vec<(Pos, Ty, String)>,
     /// mutable locals: (scope index, name)
     muts: HashSet<(usize, String)>,
@@ -204,6 +211,61 @@ pub fn is_int(t: &Ty) -> bool {
     matches!(t, Ty::I32 | Ty::U32 | Ty::I64)
 }
 
+/// The number of nodes of `t`, counted up to `cap`
+fn ty_size(t: &Ty, cap: usize) -> usize {
+    let mut n = 1;
+    let kids: Vec<&Ty> = match t {
+        Ty::Array(a) | Ty::Typed(a) => vec![a],
+        Ty::Tuple(ts) | Ty::Named(_, ts) => ts.iter().collect(),
+        Ty::Fn(a, r) => a.iter().chain(std::iter::once(&**r)).collect(),
+        _ => vec![],
+    };
+    for k in kids {
+        if n >= cap {
+            break;
+        }
+        n += ty_size(k, cap - n);
+    }
+    n
+}
+
+/// The size `subst_named(t, m)` would have (a parameter counts as the size of its argument, `sizes`), up to `cap`,
+/// without building it
+fn subst_size(t: &Ty, sizes: &HashMap<String, usize>, cap: usize) -> usize {
+    if let Ty::Param(p) = t {
+        if let Some(&n) = sizes.get(p) {
+            return n.min(cap);
+        }
+    }
+    let mut n = 1;
+    let kids: Vec<&Ty> = match t {
+        Ty::Array(a) | Ty::Typed(a) => vec![a],
+        Ty::Tuple(ts) | Ty::Named(_, ts) => ts.iter().collect(),
+        Ty::Fn(a, r) => a.iter().chain(std::iter::once(&**r)).collect(),
+        _ => vec![],
+    };
+    for k in kids {
+        if n >= cap {
+            break;
+        }
+        n += subst_size(k, sizes, cap - n);
+    }
+    n
+}
+
+/// `t` with the generic parameters of a record or enum replaced
+pub(crate) fn subst_named(t: &Ty, m: &HashMap<String, Ty>) -> Ty {
+    match t {
+        Ty::Param(p) => m.get(p).cloned().unwrap_or_else(|| t.clone()),
+        Ty::Array(a) => Ty::Array(Box::new(subst_named(a, m))),
+        Ty::Typed(a) => Ty::Typed(Box::new(subst_named(a, m))),
+        Ty::Tuple(ts) => Ty::Tuple(ts.iter().map(|t| subst_named(t, m)).collect()),
+        Ty::Named(n, a) => Ty::Named(n.clone(), a.iter().map(|t| subst_named(t, m)).collect()),
+        Ty::Fn(a, r) => Ty::Fn(a.iter().map(|t| subst_named(t, m)).collect(), Box::new(subst_named(r, m))),
+        t => t.clone(),
+    }
+}
+
 pub fn is_num(t: &Ty) -> bool {
     matches!(t, Ty::I32 | Ty::U32 | Ty::I64 | Ty::F32 | Ty::F64)
 }
@@ -244,6 +306,9 @@ impl Checker {
             floatv: HashSet::new(),
             typed_lits: vec![],
             tys: vec![],
+            eq_memo: Default::default(),
+            eq_low: std::cell::Cell::new(usize::MAX),
+            eq_pending: Default::default(),
             bound_checks: vec![],
             muts: HashSet::new(),
             closure_bases: vec![],
@@ -549,7 +614,96 @@ impl Checker {
         }
     }
 
+    /// Can values of `t` be compared with `==` (by content): not functions, JSX or effects
+    /// (`seen`: the instantiated types being checked, so a recursive type ends; a type that grows without repeating
+    /// is refused past a depth, or once it is large, before its fields are substituted. Finished answers are kept in
+    /// `eq_memo`, so a type shared by many fields is checked once)
+    fn eqable(&self, t: &Ty, seen: &mut Vec<Ty>) -> bool {
+        if let Some(r) = self.eq_memo.borrow().get(t) {
+            return *r;
+        }
+        // (`eq_low`: the shallowest type still being checked that a cycle below reached. false is final. true
+        // assumes the outer types it reached are comparable: it waits in `eq_pending`, with the depth it relies on,
+        // until the outermost of them (the root of its cycle) finishes, and is kept when that one is true too, as
+        // in Tarjan's algorithm. Another path to a waiting type reuses it and relies on the same depth)
+        if let Some(&at) = self.eq_pending.borrow().1.get(t) {
+            self.eq_low.set(self.eq_low.get().min(at));
+            return true;
+        }
+        let depth = seen.len();
+        let outer = self.eq_low.replace(usize::MAX);
+        let mark = self.eq_pending.borrow().0.len();
+        let r = self.eqable_inner(t, seen);
+        let low = self.eq_low.get();
+        let mut pending = self.eq_pending.borrow_mut();
+        let (order, at) = &mut *pending;
+        if !r {
+            for d in order.drain(mark..) {
+                at.remove(&d);
+            }
+            self.eq_memo.borrow_mut().insert(t.clone(), false);
+        } else if low >= depth {
+            let mut memo = self.eq_memo.borrow_mut();
+            for d in order.drain(mark..) {
+                at.remove(&d);
+                memo.insert(d, true);
+            }
+            memo.insert(t.clone(), true);
+        } else {
+            // (what waits below this type relies on it, so on what it relies on)
+            for d in &order[mark..] {
+                let a = at.get_mut(d).unwrap();
+                *a = (*a).min(low);
+            }
+            order.push(t.clone());
+            at.insert(t.clone(), low);
+        }
+        drop(pending);
+        self.eq_low.set(outer.min(low));
+        r
+    }
+
+    fn eqable_inner(&self, t: &Ty, seen: &mut Vec<Ty>) -> bool {
+        match t {
+            // (a generic parameter compares only with a numeric bound: unbounded, it could be a function)
+            Ty::Str | Ty::Bool | Ty::Unit => true,
+            t if self.numeric(t) => true,
+            Ty::Array(e) | Ty::Typed(e) => self.eqable(e, seen),
+            Ty::Tuple(ts) => ts.iter().all(|t| self.eqable(t, seen)),
+            Ty::Named(n, targs) => {
+                if let Some(at) = seen.iter().position(|s| s == t) {
+                    self.eq_low.set(self.eq_low.get().min(at));
+                    return true;
+                }
+                if seen.len() > 64 || ty_size(t, 4096) >= 4096 {
+                    return false;
+                }
+                let (params, fields): (Vec<String>, Vec<Ty>) = if let Some(r) = self.info.records.get(n) {
+                    (r.params.clone(), r.fields.iter().map(|f| f.1.clone()).collect())
+                } else if let Some(e) = self.info.enums.get(n).filter(|e| !e.is_effect()) {
+                    (e.params.clone(), e.variants.iter().flat_map(|v| v.1.iter().cloned()).collect())
+                } else {
+                    return false;
+                };
+                // (a field that would be large once substituted is refused before it is built)
+                let sizes: HashMap<String, usize> = params.iter().cloned().zip(targs.iter().map(|a| ty_size(a, 4096))).collect();
+                if fields.iter().any(|f| subst_size(f, &sizes, 4096) >= 4096) {
+                    return false;
+                }
+                let m: HashMap<String, Ty> = params.into_iter().zip(targs.iter().cloned()).collect();
+                seen.push(t.clone());
+                let ok = fields.iter().all(|f| self.eqable(&subst_named(f, &m), seen));
+                seen.pop();
+                ok
+            }
+            _ => false,
+        }
+    }
+
     fn finish_fn(&mut self) {
+        // (comparability depends on this function's bounds: no answer from another function's)
+        self.eq_memo.borrow_mut().clear();
+        *self.eq_pending.borrow_mut() = Default::default();
         // integer literals nothing constrained are i32
         let mut intv: Vec<u32> = self.intv.iter().copied().collect();
         intv.sort();
@@ -618,12 +772,19 @@ impl Checker {
             let ok = match what {
                 "num" | "div" => self.numeric(&r),
                 "add" | "ord" => self.numeric(&r) || r == Ty::Str,
-                "eq" => match &r {
-                    Ty::Str | Ty::Bool | Ty::Unit => true,
-                    t if self.numeric(t) => true,
-                    Ty::Named(n, _) => self.info.enums.get(n).is_some_and(|e| e.unit_only()),
-                    _ => false,
-                },
+                "eq" => {
+                    let primitive = match &r {
+                        Ty::Str | Ty::Bool | Ty::Unit => true,
+                        t if self.numeric(t) => true,
+                        Ty::Named(n, _) => self.info.enums.get(n).is_some_and(|e| e.unit_only() && !e.is_effect()),
+                        _ => false,
+                    };
+                    let ok = primitive || self.eqable(&r, &mut vec![]);
+                    if !primitive && ok {
+                        self.info.deep_eq.insert(_id, r.clone());
+                    }
+                    ok
+                }
                 "child" => match &r {
                     Ty::Jsx | Ty::Str => true,
                     t if self.numeric(t) => true,
@@ -640,7 +801,7 @@ impl Checker {
                     "num" | "div" => format!("expected a number (i32, u32, i64, f64), found {s}"),
                     "add" => format!("`+` takes numbers or String, found {s}"),
                     "ord" => format!("cannot compare {s} with `<`"),
-                    "eq" => format!("`==` compares numbers, String, Bool and enums without data, found {s} (records and arrays would compare references in JS)"),
+                    "eq" => format!("`==` compares values (numbers, strings, bools, and arrays, records, enums and tuples of them, by content), not {s}"),
                     _ => format!("a JSX child is Jsx, String, a number or an Array of Jsx / String, found {s}"),
                 };
                 self.err(pos, m);
