@@ -2443,7 +2443,12 @@ impl Cx<'_> {
     /// Rg::forever)
     fn rg_reborrow_arg(&mut self, a: &Expr, t: &mut Option<(Ty, RT)>) {
         let Some((Ty::Ref(true, _), tr)) = t else { return };
-        if tr.is_empty() || self.rg.closure.is_some() || !matches!(strip(a), Expr::Path(..)) {
+        // (a field of a local too: `v.push(c.raw)`)
+        let mut root = strip(a);
+        while let Expr::Field(x, _, _) = root {
+            root = strip(x);
+        }
+        if tr.is_empty() || self.rg.closure.is_some() || !matches!(root, Expr::Path(..)) {
             return;
         }
         let r = self.rg.var();

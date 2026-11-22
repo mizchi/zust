@@ -1667,6 +1667,12 @@ fn part9_review_follow_ups() {
     // (so a named closure that copies out of it and mutates another capture is FnMut only, not maybe FnOnce)
     let d = check("fn take_fn<F: Fn()>(_: F) {}\nfn main() {\n    let pair = (1, String::new());\n    let mut x = 0;\n    let c = move || {\n        let (n, _) = pair;\n        x += n;\n    };\n    take_fn(c);\n}\n");
     assert!(d.len() == 1 && d[0].0 == 5 && d[0].1.contains("E0525") && d[0].1.contains("only implements `FnMut`"), "{d:?}");
+    // (a closure that holds a capture by value holds all of the variable: of one that needs dropping, using a part
+    // that is not `Copy` moves all of it, so a part used after is a use of a moved value. Only `Copy` parts used: the
+    // variable stays (the closure's copy is emptied of the rest). A variable that needs no dropping: the parts)
+    let d = check("fn main() {\n    let q = (String::new(), String::new());\n    let d = move || {\n        let (ref a, _) = q;\n        let _ = a.len();\n    };\n    drop(q.1);\n    d();\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 7 && d[0].1.contains("use of moved value"), "{d:?}");
+    assert_eq!(check("struct P {\n    n: u32,\n    s: String,\n}\nstruct Q {\n    a: u32,\n    b: u32,\n}\nfn main() {\n    let p = P { n: 1, s: String::new() };\n    let c = move || p.n;\n    drop(p.s);\n    let _ = c();\n    let q = Q { a: 1, b: 2 };\n    let d = move || q.a;\n    let _ = q.b;\n    let _ = d();\n}\n"), vec![]);
     // (a nested closure without `move` whose body moves the capture out takes it by value too; one that borrows it
     // does not)
     let d = check("fn take_mut(_: impl FnMut()) {}\nfn main() {\n    let v = String::new();\n    take_mut(|| {\n        let _inner = || drop(v);\n    });\n}\n");
@@ -1709,4 +1715,16 @@ fn closure_ref_mut_pattern_capture() {
     let d = check("fn main() {\n    let mut p = (1, 2);\n    let c = || {\n        let (ref mut x, _) = p;\n        *x += 1;\n    };\n    let _b = c;\n    let _a = c;\n}\n");
     assert!(d.len() == 1 && d[0].0 == 8 && d[0].1.contains("use of moved value: `c`"), "{d:?}");
     assert_eq!(check("fn main() {\n    let p = (1, 2);\n    let c = || {\n        let (ref x, _) = p;\n        let _ = *x;\n    };\n    let _b = c;\n    let _a = c;\n    let mut q = (1, 2);\n    let mut d = || {\n        let (ref mut x, _) = q;\n        *x += 1;\n    };\n    d();\n    d();\n}\n"), vec![]);
+}
+
+/// E0713 through an implicit reborrow: a `&mut` field of a `Drop` value passed where a `&mut` is expected
+/// (`v.push(c.raw)` is `v.push(&mut *c.raw)`), the loan stored where it outlives the value, a local or a parameter. The
+/// region check is turned on for it in a fn of one region. A reborrow that ends with the call is fine
+#[test]
+fn drop_field_implicit_reborrow() {
+    let d = check("struct C<'a> {\n    raw: &'a mut i32,\n}\nimpl<'a> Drop for C<'a> {\n    fn drop(&mut self) {}\n}\nfn put<'a>(v: &mut Vec<&'a mut i32>, x: &'a mut i32) {\n    v.push(x)\n}\nfn f<'a>(v: &mut Vec<&'a mut i32>, x: &'a mut i32) {\n    let c = C { raw: x };\n    v.push(c.raw);\n}\nfn main() {}\n");
+    assert!(d.len() == 1 && d[0].0 == 12 && d[0].1.contains("E0713"), "{d:?}");
+    let d = check("struct C<'a> {\n    raw: &'a mut i32,\n}\nimpl<'a> Drop for C<'a> {\n    fn drop(&mut self) {}\n}\nfn put<'a>(v: &mut Vec<&'a mut i32>, x: &'a mut i32) {\n    v.push(x)\n}\nfn f<'a>(v: &mut Vec<&'a mut i32>, c: C<'a>) {\n    put(v, c.raw);\n}\nfn main() {}\n");
+    assert!(d.len() == 1 && d[0].0 == 11 && d[0].1.contains("E0713"), "{d:?}");
+    assert_eq!(check("struct C<'a> {\n    raw: &'a mut i32,\n}\nimpl<'a> Drop for C<'a> {\n    fn drop(&mut self) {}\n}\nfn put<'a>(v: &mut Vec<&'a mut i32>, x: &'a mut i32) {\n    v.push(x)\n}\nfn bump(x: &mut i32) {\n    *x += 1;\n}\nfn f(c: C) {\n    bump(c.raw);\n    bump(c.raw);\n}\nfn g<'a>(v: &mut Vec<C<'a>>, c: C<'a>) {\n    v.push(c)\n}\nfn main() {}\n"), vec![]);
 }

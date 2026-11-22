@@ -1020,6 +1020,11 @@ impl Bk {
                         let name = path_str(&self.locals, &lo.place);
                         errs.push(BkError { sp: lo.sp, msg: format!("`{name}` does not live long enough (stored where it outlives the function)") });
                     }
+                    // (through a `&mut` field of a parameter whose type has a `Drop` impl, which is dropped when the
+                    // function returns: E0713)
+                    if self.params.contains(&lo.place.local) && self.drop_field_borrow(lo, &st) {
+                        errs.push(BkError { sp: lo.sp, msg: "borrow may still be in use when destructor runs (E0713)".to_string() });
+                    }
                 }
             }
         }
@@ -1979,10 +1984,24 @@ impl Cx<'_> {
     /// lives as long as the region check finds it must (Rg::forever, Rg::holders), by the argument's address. Only when
     /// the region check is on: it is what makes such a loan outlive the call
     pub(crate) fn bk_reborrow_arg(&mut self, a: &Expr) {
-        if !self.bk_on() || !self.rg.on || !matches!(strip_paren(a), Expr::Path(..)) {
+        // (a field of a local too (`v.push(c.raw)`): the reborrow is of `*c.raw`, which a `Drop` c must not outlive
+        // (E0713))
+        let mut root = strip_paren(a);
+        while let Expr::Field(x, _, _) = root {
+            root = strip_paren(x);
+        }
+        if !self.bk_on() || !matches!(root, Expr::Path(..)) {
             return;
         }
         let Some((mut p, Some(Ty::Ref(true, _)))) = self.bk_place(a) else { return };
+        // (through a field of a value whose type has a `Drop` impl: only the region check knows how long the loan
+        // lives, so it is on from here (and the function is checked again with it from the start))
+        if !self.rg.on && !p.proj.is_empty() && self.inline_depth == 0 && self.bk.drop_owners.iter().any(|d| d.0 == p.local) {
+            self.rg_late_on();
+        }
+        if !self.rg.on {
+            return;
+        }
         p.proj.push(ref_deref(true));
         let sp = err_pos(a);
         let ln = self.bk.loans.len() as u32;
@@ -2175,12 +2194,15 @@ impl Cx<'_> {
 
     /// A closure captures the local n: by value it is moved (or copied), by reference it is borrowed (mutably if the
     /// closure assigns it) and the closure holds the loan
-    pub(crate) fn bk_capture(&mut self, c: &Expr, n: &str, loc: Loc, t: Ty, by_move: bool) {
+    ///
+    /// Returns whether the closure holds a copy of the variable of which only the `Copy` parts it uses count: the
+    /// code then empties the copy's parts that need dropping, and the variable stays where it was
+    pub(crate) fn bk_capture(&mut self, c: &Expr, n: &str, loc: Loc, t: Ty, by_move: bool) -> bool {
         if !self.bk_on() {
-            return;
+            return false;
         }
-        let Some(&l) = self.bk.by_loc.get(&loc) else { return };
-        let Expr::Closure(_, _, _, body, sp) = c else { return };
+        let Some(&l) = self.bk.by_loc.get(&loc) else { return false };
+        let Expr::Closure(_, _, _, body, sp) = c else { return false };
         let sp = *sp;
         // (edition 2021 closures capture the places they use (`x.a`), not whole variables (RFC 2229))
         let mut paths: Vec<(BPlace, Option<Ty>, CapMode, Sp)> = vec![];
@@ -2227,6 +2249,24 @@ impl Cx<'_> {
                 *mode = if by_move { CapMode::Val } else if m { CapMode::RefMut } else { CapMode::Ref };
             }
         }
+        // (a closure that holds the capture by value holds all of the variable: the code copies it whole into the
+        // closure. Of a variable that needs dropping, the parts the body uses (rustc's captures) are not all that
+        // is held: a part used after the closure would be dropped twice, by the closure and where it is used.
+        // When the body uses only `Copy` parts and the rest can be emptied (no `Drop` impl of the program's in it),
+        // the closure's copy is emptied of the rest and the variable stays where it was, as in rustc. Otherwise
+        // the variable is moved, all of it. A type with a `Drop` impl of the program's is left to the parts:
+        // rustc does not let them be moved out of it)
+        let mut copy_cap = false;
+        if (by_move || move_kw) && !self.bk_ty(t).0 && self.needs_drop(t) {
+            let used: Vec<&(BPlace, Option<Ty>, CapMode, Sp)> = paths.iter().filter(|x| x.0.local == l).collect();
+            let parts = !used.is_empty() && used.iter().all(|x| !x.0.proj.is_empty() && x.0.proj.iter().all(|p| matches!(p, Proj::Field(_))) && x.1.is_some_and(|pt| self.bk_ty(pt).0));
+            if parts && self.zeroable(t) {
+                copy_cap = true;
+            } else if !parts {
+                let at = paths.iter().map(|x| x.3).find(|a| a.line != 0).unwrap_or(super::SP);
+                paths = vec![(BPlace { local: l, proj: vec![] }, Some(t), CapMode::Val, at)];
+            }
+        }
         paths.sort_by_key(|p| p.0.proj.len());
         let mut keep: Vec<(BPlace, Option<Ty>, CapMode, Sp)> = vec![];
         for (p, pt, mode, at) in paths {
@@ -2266,6 +2306,7 @@ impl Cx<'_> {
         if self.bk.locals[l as usize].refs {
             self.bk.src(Src::Local(l));
         }
+        copy_cap
     }
 
     pub(crate) fn bk_rooted_at_pub(&self, e: &Expr, n: &str) -> Option<(BPlace, Option<Ty>)> {

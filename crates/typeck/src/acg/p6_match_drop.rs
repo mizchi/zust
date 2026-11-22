@@ -1462,6 +1462,26 @@ impl Cx<'_> {
         }
     }
 
+    /// Empties the parts of the value of type t at dst that need dropping (t is zeroable): a struct's fields one by
+    /// one, so that its other fields keep their values
+    pub(crate) fn zero_drop_parts(&mut self, dst: Value, t: Ty) {
+        if !self.needs_drop(t) {
+            return;
+        }
+        if let Ty::Struct(sid) = t {
+            let sd = &self.prog.structs[sid as usize];
+            let bname = &self.prog.structs[self.prog.base_of(sid) as usize].name;
+            if !sd.is_enum && !matches!(bname.as_str(), "Vec" | "String" | "Rc" | "Arc") {
+                for (_, ft, off) in sd.fields.clone() {
+                    let d = self.addr_plus(dst, off as i32);
+                    self.zero_drop_parts(d, ft);
+                }
+                return;
+            }
+        }
+        self.zero(dst, t);
+    }
+
     pub(crate) fn zero(&mut self, dst: Value, t: Ty) {
         let (size, _) = self.prog.size_align(t);
         let z = self.b.ins().iconst(types::I8, 0);

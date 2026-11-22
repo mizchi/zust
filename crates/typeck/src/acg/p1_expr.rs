@@ -1958,6 +1958,7 @@ impl Cx<'_> {
             }
         }
         let mut caps = vec![];
+        let mut copy_caps = vec![];
         for (i, n) in cd.captures.iter().enumerate() {
             let Some((loc, t)) = self.lookup(n) else {
                 return err(SP, format!("cannot capture `{n}` here"));
@@ -1966,7 +1967,7 @@ impl Cx<'_> {
             let ct = if by_move { t } else { Ty::Ptr(true, intern(t)) };
             sol[cd.n_parent + i] = Some(ct);
             caps.push((loc, t));
-            self.bk_capture(c, n, loc, t, by_move);
+            copy_caps.push(self.bk_capture(c, n, loc, t, by_move));
         }
         // (a capture held by value (a `move` closure's) of a local not declared `mut`, which the body assigns or borrows
         // mutably: E0594 / E0596 at the mutation; one held by reference is a `&mut` loan the borrow check reports)
@@ -2159,6 +2160,13 @@ impl Cx<'_> {
                 };
                 let (v, _) = self.read(p);
                 self.write(Place::Mem(a, off as i32, ft), v);
+                // (a copy of which the body uses only `Copy` parts (bk_capture): its other parts are emptied, so that
+                // dropping the closure frees nothing, and the variable is not moved)
+                if copy_caps.get(i).copied().unwrap_or(false) {
+                    let dst = self.addr_plus(a, off as i32);
+                    self.zero_drop_parts(dst, t);
+                    continue;
+                }
                 if self.needs_drop(t) {
                     // (a capture of the enclosing closure moved into this one: as for moving it out, the
                     // enclosing closure's slot becomes empty)
