@@ -262,6 +262,9 @@ pub struct Program {
     /// some trait other than Clone has a fn `clone` (`trait Duplicate { fn clone(&self) -> S { .. } }`), or a blanket
     /// impl one: only then can default_method find a `clone` for a type
     pub trait_clone_fns: bool,
+    /// method names that two traits of the program's declare (`trait A { fn foo(self); } trait B { fn foo(self); }`):
+    /// only a call of one of these can be ambiguous (E0034)
+    pub multi_trait_methods: FxSet<String>,
     /// a constant with a lowercase name exists (`const or: usize`): an identifier pattern of any case may name one;
     /// without, only an uppercase one is looked up
     pub lower_consts: bool,
@@ -813,6 +816,7 @@ impl Program {
             copy_params: FxMap::default(),
             has_mods: false,
             trait_clone_fns: false,
+            multi_trait_methods: FxSet::default(),
             lower_consts: false,
             const_by_last: FxMap::default(),
             prim_impls: HashSet::default(),
@@ -1840,6 +1844,26 @@ impl Program {
         p.any_immutable_static = p.consts.iter().any(|c| c.stat == Some(false) && (c.item as usize) < user);
         // (a body, whatever the trait's name: the prelude's `Clone::clone` has none, a program's own `trait Clone` may)
         p.trait_clone_fns = p.blanket.contains_key("clone") || p.traits.values().flatten().any(|&d| p.sigs[d as usize].has_body && p.names.get(d as usize).is_some_and(|n| n.rsplit("::").next() == Some("clone")));
+        let mut first_trait: FxMap<&str, &str> = FxMap::default();
+        let mut multi: FxSet<String> = FxSet::default();
+        for (tr, ds) in &p.traits {
+            for &d in ds {
+                if !p.item_of.get(d as usize).copied().flatten().is_some_and(|i| i < p.prelude_from) {
+                    continue;
+                }
+                let Some(n) = p.names.get(d as usize).and_then(|n| n.rsplit("::").next()) else { continue };
+                match first_trait.get(n) {
+                    Some(&t) if t != tr.as_str() => {
+                        multi.insert(n.to_string());
+                    }
+                    Some(_) => {}
+                    None => {
+                        first_trait.insert(n, tr.as_str());
+                    }
+                }
+            }
+        }
+        p.multi_trait_methods = multi;
         Ok(p)
     }
 

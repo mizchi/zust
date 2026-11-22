@@ -92,6 +92,44 @@ impl Cx<'_> {
         r
     }
 
+    /// Two traits give t (references aside) a method `name` and no inherent one does: an impl's method of each, or a
+    /// default of a trait t implements
+    #[cold]
+    #[inline(never)]
+    fn ambiguous_method(&self, t: Ty, name: &str) -> bool {
+        let t = self.strip_refs(t);
+        let key = format!("{}::{name}", self.ty_key(t));
+        let mut trs: Vec<&str> = vec![];
+        let cands = self.prog.index.get(&key).copied().into_iter().chain(self.prog.overloads.get(&key).into_iter().flatten().copied());
+        for c in cands {
+            let sg = &self.prog.sigs[c as usize];
+            let applies = sg.has_self && sg.params.first().is_some_and(|&p| self.strip_refs(p) == t);
+            match sg.impl_trait.as_deref() {
+                None if applies => return false,
+                Some(tr) if applies => {
+                    let b = tr.split('<').next().unwrap_or(tr).trim();
+                    if !trs.contains(&b) {
+                        trs.push(b);
+                    }
+                }
+                _ => {}
+            }
+        }
+        for (tr, ds) in &self.prog.traits {
+            if trs.contains(&tr.as_str()) {
+                continue;
+            }
+            let default = ds.iter().any(|&d| {
+                let sg = &self.prog.sigs[d as usize];
+                sg.has_body && sg.has_self && self.prog.names[d as usize].rsplit("::").next() == Some(name)
+            });
+            if default && self.prog.implements(t, tr) {
+                trs.push(tr);
+            }
+        }
+        trs.len() >= 2
+    }
+
     fn method_call_inner(&mut self, e: &Expr, expected: Option<Ty>) -> R<V> {
         let Expr::MethodCall(recv, method, gargs, margs, msp) = e else { unreachable!() };
         let msp = *msp;
@@ -111,6 +149,14 @@ impl Cx<'_> {
                     let lit = Expr::Lit(format!("{t}{}", self.prog.tn(c)), *sp);
                     let ne: &Expr = self.keep_expr(Expr::MethodCall(Box::new(lit), method.clone(), gargs.clone(), margs.clone(), msp));
                     return self.expr(ne, expected);
+                }
+            }
+        }
+        // (E0034: `x.foo()` that two traits of the program's give x's type, with no inherent `foo`)
+        if self.user_code && self.explicit_trait.is_none() && !self.prog.has_mods && !self.prog.multi_trait_methods.is_empty() && self.prog.multi_trait_methods.contains(method.as_str()) {
+            if let Some(t) = self.peek(recv).filter(|&t| !self.prog.has_param(t)) {
+                if self.ambiguous_method(t, method) {
+                    return err(SP, "multiple applicable items in scope (E0034)");
                 }
             }
         }
