@@ -254,6 +254,8 @@ pub struct Program {
     pub derived: FxMap<u32, Vec<String>>,
     /// a struct's / enum's const parameters of other types than usize (base ids): (the parameter's place, its type)
     pub const_param_tys: FxMap<u32, Vec<(usize, String)>>,
+    /// A struct / enum / union of the program's: the places of its type parameters bounded by Copy (`union U<T: Copy>`)
+    pub copy_params: FxMap<u32, Vec<usize>>,
     /// the program's source declares modules (`mod m { .. }`), whose scopes are flattened away: a name's item may then
     /// be out of scope where the name is written
     pub has_mods: bool,
@@ -805,6 +807,7 @@ impl Program {
             derived_peq: FxSet::default(),
             derived: FxMap::default(),
             const_param_tys: FxMap::default(),
+            copy_params: FxMap::default(),
             has_mods: false,
             lower_consts: false,
             const_by_last: FxMap::default(),
@@ -1023,6 +1026,9 @@ impl Program {
                     let decl = bs.iter().find_map(|b| b.strip_prefix(CONST_GENERIC)?.strip_prefix(':'));
                     if let (Some(d), Some(k)) = (decl, sm.adt_generics.iter().position(|g| g == pn)) {
                         p.const_param_tys.entry(sdefs.len() as u32).or_default().push((k, d.to_string()));
+                    }
+                    if let (true, Some(k)) = (bs.iter().any(|b| b == "Copy" || b.ends_with("::Copy")), sm.adt_generics.iter().position(|g| g == pn)) {
+                        p.copy_params.entry(sdefs.len() as u32).or_default().push(k);
                     }
                 }
                 sdefs.push((ii, name.clone(), shape, sm.adt_generics.clone()));
@@ -2932,22 +2938,33 @@ impl Program {
     /// Whether t is surely not Clone (`r.clone()` of `&t` is then the reference's clone): a type of the program with no
     /// clone and no derive, or an instance with such an argument (`Option<NoClone>`), but for the shared pointers
     pub fn surely_not_clone(&self, t: Ty, depth: u32) -> bool {
-        // (`&mut T` is not Clone: `Option<&mut T>` neither)
-        if let Ty::Ref(true, _) = t {
-            return true;
-        }
-        let Ty::Struct(sid) = t else { return false };
+        // (`&mut T` is not Clone: `Option<&mut T>` neither; an array or a Box is Clone when its element is)
+        let sid = match t {
+            Ty::Ref(true, _) => return true,
+            Ty::Array(e, _) | Ty::Box(e) => return depth <= 4 && self.surely_not_clone(*e, depth + 1),
+            Ty::Struct(sid) => sid,
+            _ => return false,
+        };
         let b = self.base_of(sid);
         let own = self.struct_item.get(b as usize).is_some_and(|&ii| ii < self.prelude_from);
         // (a clone of the program's own; std's (`Vec<T>`) is Clone when its arguments are)
         if depth > 4 || (own && self.method(sid, "clone").is_some()) {
             return false;
         }
+        // (a closure is Clone when its captures are, whatever its signature: `|x: NotClone| -> NotClone {..}` is)
+        if self.is_closure(b) {
+            return self.structs[sid as usize].fields.iter().any(|f| self.surely_not_clone(f.1, depth + 1));
+        }
         let derived = self.derived.get(&b).is_some_and(|d| d.iter().any(|x| x == "Clone"));
         if own && !derived && !self.implements(t, "Clone") {
             return true;
         }
         self.clone_needs_args(b, own) && self.structs[sid as usize].args.iter().any(|&a| self.surely_not_clone(a, depth + 1))
+    }
+
+    /// The base b is a closure's struct (`f::{closure#0}`)
+    pub fn is_closure(&self, b: u32) -> bool {
+        self.structs[b as usize].name.contains("{closure#")
     }
 
     /// Whether the base b is Clone only when its arguments are: a derive of the program's own, and std's containers

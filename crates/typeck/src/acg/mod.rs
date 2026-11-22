@@ -1772,12 +1772,29 @@ impl Cx<'_> {
         self.scopes.push(vec![]);
         let mut diverged = false;
         let mut result: V = (None, Ty::Unit);
-        let n = blk.stmts.len();
+        // (`let Foo { value } = Foo::<&'static u32> { value: &x };`: a destructuring let of a literal whose type
+        // arguments name lifetimes, as `let mut #slI: Foo<&'static u32> = ..; let Foo { value } = #slI;`, whose
+        // first let the region check reads. The block's statements are kept by reference, with their indices)
+        let split = if blk.stmts.iter().any(|st| matches!(st, Stmt::Let(pat, None, Some(Expr::Struct(p, ..)), None, _) if !is_simple_let(pat) && p.segs.last().is_some_and(|s| !s.args.is_empty()))) {
+            self.lifetime_lit_split(blk)
+        } else {
+            Vec::new()
+        };
+        let n = if split.is_empty() { blk.stmts.len() } else { split.len() };
         // (the borrowed temporaries of each statement end with it; the tail expression's, with the enclosing one)
         let bk_mark = self.bk.stmt_temps.len();
-        for (i, st) in blk.stmts.iter().enumerate() {
+        for k in 0..n {
+            let (i, st) = if split.is_empty() { (k, &blk.stmts[k]) } else { split[k] };
+            // (`let x = S::<&'static u32> { t: &c };` / `S::<&'a u32> { t: &c };`: a `let` of the type the path writes,
+            // whose annotation the region check reads; a let's temporaries are extended as the literal's would be. Only
+            // that statement is replaced: the others keep their identity, which inference's records and the tail's
+            // borrow check go by)
+            let st: &Stmt = match st {
+                Stmt::Let(_, None, Some(Expr::Struct(p, ..)), None, _) | Stmt::Expr(Expr::Struct(p, ..), true) if p.segs.last().is_some_and(|s| !s.args.is_empty()) => self.lifetime_lit(st).unwrap_or(st),
+                st => st,
+            };
             self.bk_temps_end(bk_mark);
-            let last = i + 1 == n;
+            let last = k + 1 == n;
             let t0 = self.temps.len();
             self.stmt_i = i;
             match st {
@@ -2551,6 +2568,60 @@ impl Cx<'_> {
             }
         };
         Some((i, &self.prog.sigs[i as usize]))
+    }
+
+    /// blk's statements (index, statement), with each destructuring `let pat = S::<&'a u32> {..};` (type arguments
+    /// that name lifetimes) as `let mut #slI: S<&'a u32> = S::<&'a u32> {..};` and `let pat = #slI;`
+    #[cold]
+    #[inline(never)]
+    fn lifetime_lit_split<'b>(&self, blk: &'b crate::parse::Block) -> Vec<(usize, &'b Stmt)> {
+        let mut out = Vec::with_capacity(blk.stmts.len() + 1);
+        for (i, st) in blk.stmts.iter().enumerate() {
+            if let Stmt::Let(pat, None, Some(init @ Expr::Struct(path, ..)), None, lp) = st {
+                if !is_simple_let(pat) && path.segs.iter().any(|s| s.args.iter().any(|a| format!("{a:?}").contains('\''))) {
+                    let mut bare = path.clone();
+                    for s in &mut bare.segs {
+                        s.args.clear();
+                    }
+                    if self.prog.struct_by_p(&PPath::of(&bare), self.self_sid).is_some() {
+                        // (a name source cannot write, so no binding of the user's is shadowed; `mut`, as the literal it
+                        // holds was a temporary that `ref mut` in the pattern may borrow)
+                        let tmp = format!("#sl{i}");
+                        let first: &'static Stmt = Box::leak(Box::new(Stmt::Let(Pat::Ident(false, true, tmp.clone(), None), Some(crate::parse::Ty::Path(None, path.clone())), Some(init.clone()), None, *lp)));
+                        let second: &'static Stmt = Box::leak(Box::new(Stmt::Let(pat.clone(), None, Some(path_expr(&tmp)), None, *lp)));
+                        out.push((i, first));
+                        out.push((i, second));
+                        continue;
+                    }
+                }
+            }
+            out.push((i, st));
+        }
+        out
+    }
+
+    /// The statement `let x = S::<&'a u32> {..};` / `S::<&'a u32> {..};` (type arguments that name lifetimes) as
+    /// `let x: S<&'a u32> = S::<&'a u32> {..};` / `let _: S<&'a u32> = S::<&'a u32> {..};`; None for any other
+    #[cold]
+    #[inline(never)]
+    fn lifetime_lit(&self, st: &Stmt) -> Option<&'static Stmt> {
+        let (pat, init, lp) = match st {
+            Stmt::Let(pat, None, Some(init @ Expr::Struct(..)), None, lp) if is_simple_let(pat) => (pat.clone(), init, *lp),
+            Stmt::Expr(init @ Expr::Struct(..), true) => (Pat::Wild, init, Default::default()),
+            _ => return None,
+        };
+        let Expr::Struct(path, ..) = init else { return None };
+        if !path.segs.iter().any(|s| s.args.iter().any(|a| format!("{a:?}").contains('\''))) {
+            return None;
+        }
+        let mut bare = path.clone();
+        for s in &mut bare.segs {
+            s.args.clear();
+        }
+        self.prog.struct_by_p(&PPath::of(&bare), self.self_sid)?;
+        // (the literal keeps its arguments too: struct_lit_inner checks them against the fields and an update's base,
+        // also when the annotation, with a `_`, gives no type)
+        Some(Box::leak(Box::new(Stmt::Let(pat, Some(crate::parse::Ty::Path(None, path.clone())), Some(init.clone()), None, lp))))
     }
 
     /// The name methods of t are indexed under (`S` for a struct's instances too, `u8`, `#tuple0`)
