@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795358040661,
+  "lastUpdate": 1795358042975,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -61492,6 +61492,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "lsp peak RSS",
             "value": 93.871,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "miz404@gmail.com",
+            "name": "Kotaro Chikuba",
+            "username": "mizchi"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "7f7fa464a78985d977338cf7bc0d3464ab7259cb",
+          "message": "Merge pull request #53 from mizchi/claude/sleepy-dijkstra-8sankk\n\nRegion check, part 10: closures' captures, guards, patterns, implicit reborrows (E0713), 'static instances",
+          "timestamp": "2026-11-22T23:29:54+09:00",
+          "tree_id": "3cf348ed5c3cc5cbae72e81f0c45f94eff526462",
+          "url": "https://github.com/mizchi/zust/commit/7f7fa464a78985d977338cf7bc0d3464ab7259cb"
+        },
+        "date": 1795358042490,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "lsp definition p50",
+            "value": 0.689,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp hover p50",
+            "value": 0.493,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp completion p50",
+            "value": 1.216,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp references p50",
+            "value": 5.137,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp rename p50",
+            "value": 0.613,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp signatureHelp p50",
+            "value": 1.177,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp documentHighlight p50",
+            "value": 1.335,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp ready (startup to indexed)",
+            "value": 173.692,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp peak RSS",
+            "value": 94.406,
             "unit": "MiB"
           }
         ]
