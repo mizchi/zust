@@ -2202,11 +2202,12 @@ impl Cx<'_> {
                 self.bk.fnmut_exprs.push(ca);
             }
         }
-        if (by_move || move_kw) && !self.bk_ty(t).0 && !self.bk.fnonce_exprs.contains(&ca) && (crate::ast_closure::moves_capture(c, &[n.to_string()]) || self.bk_may_consume(body, n)) {
+        // (a `let` that destructures the capture moves only the parts that are not Copy, both for the closure that
+        // may be `FnOnce` and for the one that surely is)
+        let prog = self.prog;
+        if (by_move || move_kw) && !self.bk_ty(t).0 && !self.bk.fnonce_exprs.contains(&ca) && (crate::ast_closure::moves_capture_by(c, &[n.to_string()], &|p, _| pat_moves(prog, p, t, 0)) || self.bk_may_consume(body, n)) {
             self.bk.fnonce_exprs.push(ca);
         }
-        // (surely: a `let` that destructures the capture moves only the parts that are not Copy)
-        let prog = self.prog;
         if (by_move || move_kw) && !self.bk_ty(t).0 && !self.bk.fnonce_sure.contains(&ca) && crate::ast_closure::moves_capture_by(c, &[n.to_string()], &|p, _| pat_moves(prog, p, t, 0)) {
             self.bk.fnonce_sure.push(ca);
         }
