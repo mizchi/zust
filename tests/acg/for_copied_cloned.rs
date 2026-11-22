@@ -57,6 +57,10 @@ fn main() {
     for x in [String::from("r")].iter().cloned() {
         u += x.len();
     }
+    for x in mk().iter_mut() {
+        x.push('!');
+        u += x.len();
+    }
     println!("{}", u);
     // (the loop's own local does not hide one of the program's)
     let __exr_for_tmp = [9];

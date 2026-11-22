@@ -332,7 +332,7 @@ impl Cx<'_> {
                     false,
                     crate::parse::Block {
                         stmts: vec![
-                            Stmt::Let(Pat::Ident(false, false, "for#tmp".into(), None), None, Some(base), None, at),
+                            Stmt::Let(Pat::Ident(false, true, "for#tmp".into(), None), None, Some(base), None, at),
                             Stmt::Expr(Expr::For(label.clone(), fpat.clone(), Box::new(rebuilt), fbody.clone()), false),
                         ],
                     },
