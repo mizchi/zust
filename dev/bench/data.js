@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795376706970,
+  "lastUpdate": 1795376709553,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -102567,6 +102567,70 @@ window.BENCHMARK_DATA = {
           {
             "name": "tests/ui compile-fail passing",
             "value": 4366,
+            "unit": "tests"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "miz404@gmail.com",
+            "name": "Kotaro Chikuba",
+            "username": "mizchi"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "17c92ec6cd2d67bafddb5074b3d94d27c683c91d",
+          "message": "Merge pull request #54 from mizchi/claude/sleepy-dijkstra-8sankk\n\nRegion check, part 11: match tails, tail temporaries, closures' bodies, lifetimes written in paths, trait objects' receivers",
+          "timestamp": "2026-11-23T04:39:57+09:00",
+          "tree_id": "ea0d86243471c1613ac05dd017bf54173b7f8e83",
+          "url": "https://github.com/mizchi/zust/commit/17c92ec6cd2d67bafddb5074b3d94d27c683c91d"
+        },
+        "date": 1795376708972,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tests/ui run-pass pass rate",
+            "value": 76.39,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui run-pass passing",
+            "value": 1822,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui check-pass pass rate",
+            "value": 83.51,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui check-pass passing",
+            "value": 1509,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui build-pass pass rate",
+            "value": 75.56,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui build-pass passing",
+            "value": 102,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui compile-fail pass rate",
+            "value": 59.7,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui compile-fail passing",
+            "value": 4393,
             "unit": "tests"
           }
         ]
