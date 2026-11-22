@@ -29,7 +29,7 @@
 
 ## Status
 
-Numbers measured <!-- measured -->2026-11-22, 38e288b<!-- /measured --> by CI on each push to main (bench.yml runs
+Numbers measured <!-- measured -->2026-11-22, 548feb9<!-- /measured --> by CI on each push to main (bench.yml runs
 `bench/ci_bench.py` and `bench/rust_ui.py`, then `scripts/update_readme.py` writes them here). Times come from shared
 GitHub Actions runners and vary by about ±20%; the instruction counts (valgrind) do not.
 
@@ -42,9 +42,9 @@ only the tests it can be asked to handle (no nightly features, auxiliary crates 
 | kind | applicable | pass |
 |---|---:|---:|
 | run-pass (builds, runs, same output) | 2385 | 1802 (75.6%) |
-| check-pass (accepted by `zustc check`) | 1807 | 1477 (81.7%) |
+| check-pass (accepted by `zustc check`) | 1807 | 1482 (82.0%) |
 | build-pass | 135 | 99 (73.3%) |
-| compile-fail (rejected at an annotated line) | 7358 | 4084 (55.5%) |
+| compile-fail (rejected at an annotated line) | 7358 | 4093 (55.6%) |
 <!-- /auto:ui -->
 
 [What is supported](#what-is-supported) breaks this down by area.
@@ -56,22 +56,22 @@ Build speed, build cache size and LSP latency on generated programs of 1000 / 50
 <!-- auto:kpi -->
 | KPI | gen1000 | gen5000 |
 |---|---:|---:|
-| cold build | 122 ms | 553 ms |
-| no-op build | 0.7 ms | 0.6 ms |
-| build after editing one function | 17.9 ms | 63.6 ms |
-| `check` | 79 ms | 379 ms |
+| cold build | 161 ms | 743 ms |
+| no-op build | 1.1 ms | 1.1 ms |
+| build after editing one function | 23.1 ms | 87.9 ms |
+| `check` | 119 ms | 559 ms |
 | no-op build (instructions) | 0.6 M | 0.6 M |
-| edit one function (instructions) | 124.4 M | 590.0 M |
+| edit one function (instructions) | 124.2 M | 589.3 M |
 | `check` (instructions) | 781.3 M | 3855.4 M |
 | build cache on disk | 387.2 KiB | 1902.8 KiB |
 | binary | 324.0 KiB | 1558.3 KiB |
-| cold build peak RSS | 18.7 MiB | 52.4 MiB |
+| cold build peak RSS | 18.8 MiB | 52.6 MiB |
 
 | zust-analyzer (zustc's own sources) | |
 |---|---:|
-| p50: definition, hover, completion, references, rename | 0.54 ms / 0.46 ms / 1.23 ms / 3.44 ms / 0.47 ms |
-| startup until indexed | 162 ms |
-| peak RSS | 88.8 MiB |
+| p50: definition, hover, completion, references, rename | 0.87 ms / 0.70 ms / 1.58 ms / 8.11 ms / 0.73 ms |
+| startup until indexed | 197 ms |
+| peak RSS | 89.4 MiB |
 <!-- /auto:kpi -->
 
 Every change is also measured on its own with `python3 bench/kpi_track.py`, so that small increases that add up stay
@@ -370,9 +370,9 @@ the measured numbers. The [reports](docs/reports/) explain each step.
 ### Overall
 
 - [x] tests/ui run-pass: <!-- total:run-pass -->75.6% (1802 / 2385)
-- [x] tests/ui check-pass: <!-- total:check-pass -->81.7% (1477 / 1807)
+- [x] tests/ui check-pass: <!-- total:check-pass -->82.0% (1482 / 1807)
 - [x] tests/ui build-pass: <!-- total:build-pass -->73.3% (99 / 135)
-- [ ] tests/ui compile-fail (an error on an annotated line): <!-- total:compile-fail -->55.5% (4084 / 7358)
+- [ ] tests/ui compile-fail (an error on an annotated line): <!-- total:compile-fail -->55.6% (4093 / 7358)
 - [x] real crates: fnv, adler2, hex, itoa, rustc-hash and cfg-if build and give the same output (6 / 6)
 - [x] zust-analyzer answers like rust-analyzer: 95.4% (rust-analyzer: 96.2%)
 
@@ -405,7 +405,7 @@ the measured numbers. The [reports](docs/reports/) explain each step.
 - [ ] `macro_rules!`: <!-- ui:macros -->76.4% (hygiene for `let`, labels, arm bindings; not every fragment kind)
 - [ ] unions: <!-- ui:union -->69.2% (no `repr(packed)`)
 - [ ] const generics: <!-- ui:const-generics -->58.4% (no `generic_const_exprs`)
-- [ ] generic associated types: <!-- ui:generic-associated-types -->71.1%
+- [ ] generic associated types: <!-- ui:generic-associated-types -->80.0%
 - [ ] casts (`as _` / `as *const _` take the source or expected type; a pointer of unknown kind is E0641): <!-- ui:cast -->72.4%
 - [ ] `impl Trait`: <!-- ui:impl-trait -->70.3% (return position, also nested (`-> Option<impl Debug>`), in trait methods and generic fns (typed per instance); no TAIT)
 - [ ] layout: `repr(packed)` / `repr(align)` are ignored: <!-- ui:packed,layout -->58.1%
