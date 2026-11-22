@@ -269,6 +269,9 @@ pub struct Options2 {
     /// wasm32-unknown-unknown: writes the module instead of an ELF object, and does not link (zust_wasm::write_module;
     /// `backend` is then zust_wasm::compile)
     pub module_writer: Option<ModuleWriter>,
+    /// The edition (`--edition`, 2021 by default). Only what differs between 2015 and later reads it: the crate root's
+    /// own `extern crate std` holds the name `std` in 2015 alone
+    pub edition: u16,
 }
 
 /// Writes the output from the functions and data build.rs lays out (in place of the ELF object)
@@ -276,7 +279,7 @@ pub type ModuleWriter = fn(&[(String, Vec<u8>, Vec<crate::ir::Reloc>, bool)], &[
 
 impl Default for Options2 {
     fn default() -> Self {
-        Options2 { opt: false, jobs: cpu_count(), linker: None, lib_dirs: vec![], no_cache: false, time: false, backend: None, features: vec![], module_writer: None }
+        Options2 { opt: false, jobs: cpu_count(), linker: None, lib_dirs: vec![], no_cache: false, time: false, backend: None, features: vec![], module_writer: None, edition: 2021 }
     }
 }
 
@@ -411,11 +414,14 @@ pub struct Session2 {
     pub ctx: CrateCtx,
     /// the files the last build_path read (for the CLI's stamp file)
     pub last_map: Option<crate::srcmap::SrcMap>,
+    /// A crate of one file that the caller configured before it checks it: the `extern crate x;` items the configuring
+    /// blanked (SrcMap::externs), whose names may be defined twice. Read by the next analyze
+    pub externs: Vec<(usize, String)>,
 }
 
 impl Session2 {
     pub fn new(opts: Options2) -> Session2 {
-        Session2 { opts, cid: compiler_id(), disk: crate::cache2::Cache2::empty(), mem: FxMap::default(), used: FxSet::default(), fresh: vec![], ctx: CrateCtx::default(), last_map: None, sel: Default::default(), sum_fp: FxMap::default(), chk: None }
+        Session2 { opts, cid: compiler_id(), disk: crate::cache2::Cache2::empty(), mem: FxMap::default(), used: FxSet::default(), fresh: vec![], ctx: CrateCtx::default(), last_map: None, sel: Default::default(), sum_fp: FxMap::default(), chk: None, externs: vec![] }
     }
 
     pub fn load_cache(&mut self, path: &std::path::Path) {
@@ -499,11 +505,18 @@ impl Session2 {
 
     /// 要約はアイテムのハッシュで引く
     pub fn analyze(&mut self, src0: &str) -> R<Analysis> {
+        let mut externs = std::mem::take(&mut self.externs);
         // (ファイルから読んだもの (load_crate) は読むときに cfg を評価してある)
         let stripped;
         let src0 = if self.ctx.map.inputs.is_empty() {
-            match crate::cfg::strip(src0, &self.opts.cfg_with(&self.opts.features)) {
+            let cfg = self.opts.cfg_with(&self.opts.features);
+            let mut ext = vec![];
+            match crate::cfg::strip_noting(src0, &cfg, &mut None, &mut ext) {
                 Some(t) => {
+                    // (the `extern crate` items it blanked, for the names they define)
+                    if externs.is_empty() {
+                        externs = ext.iter().map(|&(a, b)| (a, src0[a..b].to_string())).collect();
+                    }
                     stripped = t;
                     stripped.as_str()
                 }
@@ -529,7 +542,7 @@ impl Session2 {
             }
             // (E0428 of an inline module and an item: a whole-text pass, so not on each build of a crate loaded from
             // files, whose incremental builds would pay it every time)
-            if let Some(e) = duplicate_name(src0) {
+            if let Some(e) = duplicate_name(src0, &externs, self.opts.edition < 2018) {
                 return Err(e);
             }
             if let Some(e) = malformed_attr(src0, &src, &items[..user], self.ctx.deps.is_empty() && self.ctx.lib.is_none()) {
@@ -999,6 +1012,9 @@ impl Session2 {
         let mut prog = Program::build_with(&items, &sums, self.ctx.lib.is_none() && !lib_attr, user).map_err(|e| name_line(&e, &src, &items))?;
         tm.lap("program", String::new());
         prog.prelude_from = user as u32;
+        if let Some(e) = cross_kind_duplicate(&prog, &src, &items, &sums, user) {
+            return Err(e);
+        }
         // (E0277: a static is reachable from every thread, so its type must be Sync)
         if let Some((ci, tn)) = crate::acg::static_not_sync(&prog) {
             let line = items.get(prog.consts[ci].item as usize).map_or(0, |it| it.line);
@@ -1571,17 +1587,232 @@ fn malformed_attr(src0: &str, split: &str, items: &[SrcItem], standalone: bool) 
     None
 }
 
-/// E0252 / E0255: a name a top-level `use` brings in that another top-level `use` or item of the crate root also
-/// defines ("the name `X` is defined multiple times", at the second). Top level = the item starts a line (the
+/// E0428 for two of the program's items of one name and namespace that the build keeps in separate tables: a struct
+/// / enum, a trait or a type alias (types), a unit / tuple struct and a const / static / fn (values). At the later
+/// of the two. Costs a lookup for each of the program's structs, traits and aliases
+fn cross_kind_duplicate<'p>(prog: &'p Program, src: &str, items: &[SrcItem], sums: &'p [Summary], user: usize) -> Option<String> {
+    let user = user.min(sums.len());
+    let mut first: Option<(usize, &'p str)> = None;
+    let mut found = |a: usize, b: usize, n: &'p str| {
+        let l = items[a].line.max(items[b].line);
+        if first.is_none_or(|(l0, _)| l < l0) {
+            first = Some((l, n));
+        }
+    };
+    for (ii, sm) in sums[..user].iter().enumerate() {
+        if let Some(tr) = sm.trait_decl.as_deref() {
+            if let Some(&sid) = prog.struct_index.get(tr) {
+                if let Some(&si) = prog.struct_item.get(sid as usize).filter(|&&si| (si as usize) < user) {
+                    found(si as usize, ii, tr);
+                }
+            }
+        }
+        // (a type alias and a struct / enum / trait)
+        for (n, _, _) in &sm.aliases {
+            if let Some(&si) = prog.struct_index.get(n).and_then(|&sid| prog.struct_item.get(sid as usize)).filter(|&&si| (si as usize) < user) {
+                found(si as usize, ii, n);
+            } else if prog.traits.contains_key(n) {
+                if let Some(ti) = sums[..user].iter().position(|t| t.trait_decl.as_deref() == Some(n.as_str())) {
+                    found(ti, ii, n);
+                }
+            }
+        }
+        for (n, fields) in &sm.structs {
+            // (a struct with named fields is a type only: no lookup)
+            if fields.first().is_some_and(|(f, _)| f != "0") {
+                continue;
+            }
+            let item_of = |k: u32| if (k as usize) < user { Some(k as usize) } else { None };
+            let other = prog
+                .const_index
+                .get(n)
+                .and_then(|&c| item_of(prog.consts[c as usize].item))
+                .or_else(|| prog.index.get(n).and_then(|&f| prog.item_of.get(f as usize).copied().flatten()).and_then(item_of));
+            let Some(o) = other else { continue };
+            if o == ii || sm.unions.iter().any(|u| u == n) {
+                continue;
+            }
+            // (a unit / tuple struct is a value too: `struct X;`, `struct X(u8);`, not `struct X {}`)
+            let value = match fields.first() {
+                Some((f, _)) => f == "0",
+                None => {
+                    let text = src.get(items[ii].start..items[ii].end).unwrap_or("");
+                    // (past the item's attributes and the comments among them, whose text may say `struct X;`)
+                    let mut text = text.trim_start();
+                    loop {
+                        if text.starts_with("#[") || text.starts_with("#![") {
+                            let o = text.find('[').map_or(text.len(), |o| o + 1);
+                            text = text[(o + attr_end(&text[o..])).min(text.len())..].trim_start();
+                        } else if text.starts_with("//") {
+                            text = text.find('\n').map_or("", |e| text[e..].trim_start());
+                        } else if text.starts_with("/*") {
+                            text = text.find("*/").map_or("", |e| text[e + 2..].trim_start());
+                        } else {
+                            break;
+                        }
+                    }
+                    text.find("struct ").is_some_and(|k| {
+                        let rest = text[k + 7..].trim_start();
+                        let rest = rest.strip_prefix(n.as_str()).unwrap_or(rest).trim_start();
+                        let rest = if rest.starts_with('<') { rest.find('>').map_or("", |e| &rest[e + 1..]) } else { rest };
+                        rest.trim_start().starts_with([';', '('])
+                    })
+                }
+            };
+            if value {
+                found(ii, o, n);
+            }
+        }
+    }
+    // (the name as written: without the flattened modules' `a__` prefix and the renamer's `__u_`)
+    first.map(|(l, n)| format!("{l}:1: the name `{}` is defined multiple times (E0428)", n.rsplit("__").next().unwrap_or(n).trim_start_matches("u_")))
+}
 
-/// E0428: two items of a module (the crate root or a `mod m { .. }`) with the same name in the type namespace (`mod`,
-/// `struct`, `enum`, `union`, `trait`, `type`, `extern crate`) or the value namespace (`fn`, `const`, `static`, a unit
-/// / tuple struct), at the second: `enum Foo {}` and `mod Foo {}`. Only read when the program has a `mod`
-fn duplicate_name(src: &str) -> Option<String> {
-    // (one scan: a program without an inline module has its other duplicates found when its items are collected)
-    if !src.contains("mod ") {
+/// What defines a name in a module, for the code of two definitions of one name: E0428 two items, E0252 two imports,
+/// E0255 an import and an item, E0259 two extern crates, E0260 an extern crate and an item, E0254 an extern crate and
+/// an import
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Def {
+    Item,
+    Use,
+    Crate,
+    /// the `extern crate std;` (`core` under `#![no_std]`) the compiler puts in the crate root
+    Injected,
+}
+
+/// A name a module defines, for duplicate_name
+struct DupDef<'a> {
+    /// the namespaces: 1 types, 2 values (0: an import that names nothing found, not compared)
+    ns: u8,
+    name: &'a [u8],
+    def: Def,
+    /// the token the error points at (usize::MAX: the injected crate, written nowhere)
+    at: usize,
+    /// an import's path (`use a::b as c;`: [a, b])
+    path: Vec<&'a [u8]>,
+    /// an import `self` of a list (`use a::b::{self}`): the module, not a value of its name
+    module_only: bool,
+}
+
+/// The names a `use` tree from token k binds: (name, path, the first token of its part of the tree, whether it is a
+/// `self` of a list, which names a module only). A glob and `as _` bind none. Returns the token past the tree
+fn use_tree_names<'a>(
+    b: &'a [u8],
+    toks: &[(u8, usize, usize)],
+    close: &[usize],
+    k: usize,
+    prefix: &mut Vec<&'a [u8]>,
+    out: &mut Vec<(&'a [u8], Vec<&'a [u8]>, usize, bool)>,
+) -> usize {
+    let t = |k: usize| -> &'a [u8] { toks.get(k).map_or(&b""[..], |&(_, a, e)| &b[a..e]) };
+    let is_id = |k: usize| toks.get(k).is_some_and(|x| x.0 == 0);
+    let at = k;
+    let depth = prefix.len();
+    let mut k = k;
+    // (a leading `::`)
+    if t(k) == b":" && t(k + 1) == b":" {
+        k += 2;
+    }
+    let end = loop {
+        if t(k) == b"{" {
+            let Some(&e) = close.get(k).filter(|&&e| e != usize::MAX) else { break k };
+            let mut j = k + 1;
+            while j < e {
+                j = use_tree_names(b, toks, close, j, prefix, out);
+                if t(j) != b"," {
+                    break;
+                }
+                j += 1;
+            }
+            break e + 1;
+        }
+        if !is_id(k) {
+            // (a glob, or what this does not read)
+            break k + usize::from(t(k) == b"*");
+        }
+        // (`r#foo` is the name `foo`: the tokens split it into `r`, `#`, `foo`)
+        let s = if t(k) == b"r" && t(k + 1) == b"#" && is_id(k + 2) { k + 2 } else { k };
+        if t(s + 1) == b":" && t(s + 2) == b":" {
+            prefix.push(t(s));
+            k = s + 3;
+            continue;
+        }
+        // (`as r#x` binds `x`)
+        let (alias, next) = match t(s + 1) == b"as" {
+            true if t(s + 2) == b"r" && t(s + 3) == b"#" && is_id(s + 4) => (Some(t(s + 4)), s + 5),
+            true => (Some(t(s + 2)), s + 3),
+            false => (None, s + 1),
+        };
+        // (`use a::{self}` binds `a`, the module alone)
+        let own = t(s) == b"self";
+        let (name, path) = if own {
+            (alias.or(prefix.last().copied()), prefix.clone())
+        } else {
+            let mut p = prefix.clone();
+            p.push(t(s));
+            (Some(alias.unwrap_or(t(s))), p)
+        };
+        if let Some(nm) = name.filter(|&nm| nm != b"_" && !path.is_empty()) {
+            out.push((nm, path, at, own));
+        }
+        break next;
+    };
+    prefix.truncate(depth);
+    end
+}
+
+/// The namespaces of what an import of std / core / alloc names, where its path tells (0: unknown): the crate, one of
+/// its modules, or a type or trait (`std::collections::HashMap`)
+fn std_path_ns(path: &[&[u8]]) -> u8 {
+    const MODS: &[&str] = &[
+        "alloc", "any", "array", "ascii", "borrow", "boxed", "cell", "char", "clone", "cmp", "collections", "convert", "default",
+        "env", "error", "f32", "f64", "ffi", "fmt", "fs", "future", "hash", "hint", "i8", "i16", "i32", "i64", "i128", "io",
+        "isize", "iter", "marker", "mem", "net", "num", "ops", "option", "os", "panic", "path", "pin", "prelude", "primitive",
+        "process", "ptr", "rc", "result", "slice", "str", "string", "sync", "task", "thread", "time", "u8", "u16", "u32", "u64",
+        "u128", "usize", "vec",
+    ];
+    let last = path[path.len() - 1];
+    if path.len() == 1 || (path.len() == 2 && MODS.iter().any(|m| m.as_bytes() == last)) {
+        1
+    } else if last.first().is_some_and(u8::is_ascii_uppercase) && last.iter().any(u8::is_ascii_lowercase) {
+        1
+    } else {
+        0
+    }
+}
+
+/// E0428 and the like: two definitions of one name in one namespace of a module (the crate root or a `mod m { .. }`),
+/// at the second (`enum Foo {}` and `mod Foo {}`). The definitions: items (types: `mod` / `struct` / `enum` / `union`
+/// / `trait` / `type` / `extern crate`; values: `fn` / `const` / `static` / a unit or tuple struct), imports of a module
+/// or item of the program or of a module or type of std, and the `extern crate std` the compiler puts in the crate
+/// root in edition 2015 (`injected`; a later edition's is hygienic). Only read when the program has a `mod` or an
+/// `extern crate`, or in edition 2015 something that may define `std` / `core`. `src` is the configured text, `externs` the `extern crate` items
+/// the configuring blanked (cfg::strip_noting)
+fn duplicate_name(src: &str, externs: &[(usize, String)], injected: bool) -> Option<String> {
+    // (a few scans: a program without these has its other duplicates found when its items are collected)
+    // (2015's injected `std` meets an item or import of that name: `struct std;`, `use x as std;`, `enum std {`)
+    let names_std = || {
+        ["std", "core"].iter().any(|w| {
+            src.match_indices(w).any(|(i, _)| src[i + w.len()..].trim_start().starts_with([';', '{', '=', '<', '(']))
+        })
+    };
+    if externs.is_empty() && !src.contains("mod ") && !(injected && names_std()) {
         return None;
     }
+    // (the blanked `extern crate x;` items back in their places, where those are still blank)
+    let restored;
+    let src = if externs.is_empty() {
+        src
+    } else {
+        let mut out = src.as_bytes().to_vec();
+        for (p, text) in externs {
+            if let Some(at) = out.get_mut(*p..*p + text.len()).filter(|at| at.iter().all(u8::is_ascii_whitespace)) {
+                at.copy_from_slice(text.as_bytes());
+            }
+        }
+        restored = String::from_utf8(out).ok()?;
+        restored.as_str()
+    };
     let b = src.as_bytes();
     let toks = crate::lexer::tokenize(b);
     let n = toks.len();
@@ -1604,17 +1835,45 @@ fn duplicate_name(src: &str) -> Option<String> {
     }
     let line_of = |k: usize| b[..toks[k].1].iter().filter(|&&c| c == b'\n').count() + 1;
     let is_id = |k: usize| toks.get(k).is_some_and(|x| x.0 == 0);
-    // (scopes to scan: token ranges of module bodies)
-    let mut scopes: Vec<(usize, usize)> = vec![(0, n)];
-    while let Some((lo, hi)) = scopes.pop() {
-        let mut names: Vec<(u8, &[u8])> = vec![];
+    // (`r#foo` is the name `foo`: the tokens split it into `r`, `#`, `foo`)
+    let raw = |k: usize| if t(k) == b"r" && t(k + 1) == b"#" && is_id(k + 2) { k + 2 } else { k };
+    // (modules: (the tokens of the body, the parent, the name); the crate root first)
+    let mut mods: Vec<(usize, usize, usize, &[u8])> = vec![(0, n, usize::MAX, b"")];
+    let mut defs: Vec<Vec<DupDef>> = vec![];
+    let mut uses: Vec<(&[u8], Vec<&[u8]>, usize, bool)> = vec![];
+    let mut prefix: Vec<&[u8]> = vec![];
+    while defs.len() < mods.len() {
+        let m = defs.len();
+        let (lo, hi, _, _) = mods[m];
+        let mut names: Vec<DupDef> = vec![];
+        // (the crate's own attributes `#![no_std]` / `#![no_core]`: the inner attributes the text starts with, from the
+        // tokens (not a comment, nor a macro's input))
+        let inner = |a: &[u8]| {
+            let mut k = 0;
+            while t(k) == b"#" && t(k + 1) == b"!" && t(k + 2) == b"[" && close[k + 2] != usize::MAX {
+                if t(k + 3) == a && t(k + 4) == b"]" {
+                    return true;
+                }
+                k = close[k + 2] + 1;
+            }
+            false
+        };
+        if m == 0 && injected && !inner(b"no_core") {
+            let name: &[u8] = if inner(b"no_std") { b"core" } else { b"std" };
+            names.push(DupDef { ns: 1, name, def: Def::Injected, at: usize::MAX, path: vec![], module_only: false });
+        }
         let mut k = lo;
+        // (the item's first token past its attributes: `pub` included)
+        let mut start = usize::MAX;
         while k < hi {
             // attributes
             if t(k) == b"#" && (t(k + 1) == b"[" || (t(k + 1) == b"!" && t(k + 2) == b"[")) {
                 let o = if t(k + 1) == b"[" { k + 1 } else { k + 2 };
                 k = close[o].saturating_add(1);
                 continue;
+            }
+            if start == usize::MAX {
+                start = k;
             }
             if t(k) == b"pub" {
                 k += 1;
@@ -1627,11 +1886,19 @@ fn duplicate_name(src: &str) -> Option<String> {
                 k += 1;
                 continue;
             }
-            // (the item's namespace and name: 0 types, 1 values)
-            let mut item: Option<(u8, usize)> = None;
+            // (`const fn` / `const unsafe fn` / `extern "C" fn`: qualifiers of a fn)
+            if t(k) == b"const" && matches!(t(k + 1), b"fn" | b"unsafe" | b"extern" | b"async") {
+                k += 1;
+                continue;
+            }
+            if t(k) == b"extern" && toks.get(k + 1).is_some_and(|x| x.0 == 2) && matches!(t(k + 2), b"fn" | b"unsafe") {
+                k += 2;
+                continue;
+            }
+            // (the item's namespaces and name: 1 types, 2 values)
+            let mut item: Option<(u8, usize, Def)> = None;
             match t(k) {
                 // (an inline module; a `mod m;` file may be configured away by its own `#![cfg(..)]`)
-                // (nor one whose body starts with an inner `#![cfg(..)]`, a file module brought in that way)
                 // (nor one whose body starts with an inner `#![cfg(..)]`, nor an empty one over several lines: a file module
                 // the loader brought in, configured away by its own `#![cfg(..)]`)
                 b"mod" if is_id(k + 1)
@@ -1639,13 +1906,12 @@ fn duplicate_name(src: &str) -> Option<String> {
                     && !(t(k + 3) == b"#" && t(k + 4) == b"!" && t(k + 5) == b"[" && t(k + 6).starts_with(b"cfg"))
                     && !(close[k + 2] == k + 3 && b[toks[k + 2].1..toks[k + 3].1].contains(&b'\n')) =>
                 {
-                    item = Some((0, k + 1));
+                    item = Some((1, k + 1, Def::Item));
                     if close[k + 2] < hi {
-                        scopes.push((k + 3, close[k + 2]));
+                        mods.push((k + 3, close[k + 2], m, t(raw(k + 1))));
                     }
                 }
                 b"struct" if is_id(k + 1) => {
-                    item = Some((0, k + 1));
                     // (a unit / tuple struct is a value too)
                     let mut j = k + 2;
                     if t(j) == b"<" {
@@ -1665,34 +1931,34 @@ fn duplicate_name(src: &str) -> Option<String> {
                         }
                         j += 1;
                     }
-                    if matches!(t(j), b";" | b"(") {
-                        names.push((1, t(k + 1)));
-                    }
+                    item = Some((if matches!(t(j), b";" | b"(") { 3 } else { 1 }, k + 1, Def::Item));
                 }
-                b"enum" | b"trait" | b"type" if is_id(k + 1) => item = Some((0, k + 1)),
-                b"union" if is_id(k + 1) && t(k + 1) != b"union" => item = Some((0, k + 1)),
+                b"enum" | b"trait" | b"type" if is_id(k + 1) => item = Some((1, k + 1, Def::Item)),
+                b"union" if is_id(k + 1) && t(k + 1) != b"union" => item = Some((1, k + 1, Def::Item)),
                 b"fn" | b"const" | b"static" if is_id(k + 1) && t(k + 1) != b"_" && t(k + 1) != b"fn" && t(k + 1) != b"mut" => {
-                    item = Some((1, k + 1))
+                    item = Some((2, k + 1, Def::Item))
                 }
-                b"static" if t(k + 1) == b"mut" && is_id(k + 2) => item = Some((1, k + 2)),
+                b"static" if t(k + 1) == b"mut" && is_id(k + 2) => item = Some((2, k + 2, Def::Item)),
                 b"extern" if t(k + 1) == b"crate" && is_id(k + 2) => {
                     let nm = if t(k + 3) == b"as" && (is_id(k + 4) || t(k + 4) == b"_") { k + 4 } else { k + 2 };
                     // (`as _` binds no name)
                     if t(nm) != b"self" && t(nm) != b"_" {
-                        item = Some((0, nm));
+                        item = Some((1, nm, Def::Crate));
+                    }
+                }
+                b"use" => {
+                    uses.clear();
+                    use_tree_names(b, &toks, &close, k + 1, &mut prefix, &mut uses);
+                    for (name, path, at, own) in uses.drain(..) {
+                        names.push(DupDef { ns: 0, name, def: Def::Use, at, path, module_only: own });
                     }
                 }
                 _ => {}
             }
-            if let Some((ns, at)) = item {
-                // (`r#foo` is the name `foo`: the tokens split it into `r`, `#`, `foo`)
-                let at = if t(at) == b"r" && t(at + 1) == b"#" && is_id(at + 2) { at + 2 } else { at };
-                let name = t(at);
-                if names.iter().any(|&(m, x)| m == ns && x == name) {
-                    return Some(format!("{}:1: the name `{}` is defined multiple times (E0428)", line_of(at), String::from_utf8_lossy(name)));
-                }
-                names.push((ns, name));
+            if let Some((ns, at, def)) = item {
+                names.push(DupDef { ns, name: t(raw(at)), def, at: start, path: vec![], module_only: false });
             }
+            start = usize::MAX;
             // to the item's end: a `;` or a body `{ .. }` (a body in brackets is skipped whole)
             let mut j = if item.is_some() { k + 1 } else { k };
             loop {
@@ -1718,10 +1984,110 @@ fn duplicate_name(src: &str) -> Option<String> {
             }
             k = j.saturating_add(1);
         }
+        defs.push(names);
     }
-    None
+    // (an import's namespaces: what it names in a module of the program, std's, or an `extern crate`)
+    // (each module's child modules by name; the first of a name, as a lookup in order finds)
+    let mut kids: FxMap<(usize, &[u8]), usize> = FxMap::default();
+    for (i, x) in mods.iter().enumerate() {
+        kids.entry((x.2, x.3)).or_insert(i);
+    }
+    let child = |m: usize, nm: &[u8]| kids.get(&(m, nm)).copied();
+    let mut resolved: Vec<(usize, usize, u8)> = vec![];
+    for (m, ds) in defs.iter().enumerate() {
+        for (i, d) in ds.iter().enumerate() {
+            if d.def != Def::Use {
+                continue;
+            }
+            let path = &d.path;
+            let mut cur = m;
+            let mut s = 0;
+            match path[0] {
+                b"crate" => {
+                    cur = 0;
+                    s = 1;
+                }
+                b"self" => s = 1,
+                b"super" => {
+                    while path.get(s).is_some_and(|&x| x == b"super") {
+                        cur = mods[cur].2;
+                        if cur == usize::MAX {
+                            break;
+                        }
+                        s += 1;
+                    }
+                }
+                // (a path of neither: from the crate root in 2015, from this module later)
+                b"std" | b"core" | b"alloc" if child(if injected { 0 } else { m }, path[0]).is_none() => {
+                    resolved.push((m, i, std_path_ns(path) & if d.module_only { 1 } else { 3 }));
+                    continue;
+                }
+                _ if injected => cur = 0,
+                _ => {}
+            }
+            if cur == usize::MAX || s >= path.len() {
+                continue;
+            }
+            for seg in &path[s..path.len() - 1] {
+                match child(cur, seg) {
+                    Some(c) => cur = c,
+                    None => {
+                        cur = usize::MAX;
+                        break;
+                    }
+                }
+            }
+            if cur == usize::MAX {
+                continue;
+            }
+            let last = path[path.len() - 1];
+            let mut ns = defs[cur].iter().filter(|x| x.name == last && x.def != Def::Use && x.at != usize::MAX).fold(0, |a, x| a | x.ns);
+            if child(cur, last).is_some() {
+                ns |= 1;
+            }
+            resolved.push((m, i, if d.module_only { ns & 1 } else { ns }));
+        }
+    }
+    for (m, i, ns) in resolved {
+        defs[m][i].ns = ns;
+    }
+    // (in each module, the definitions of one name in their order: by name, then by place)
+    let mut first: Option<(usize, usize, &[u8], &str)> = None;
+    let mut order: Vec<usize> = vec![];
+    for ds in &defs {
+        order.clear();
+        order.extend((0..ds.len()).filter(|&i| ds[i].ns != 0));
+        order.sort_by(|&x, &y| ds[x].name.cmp(ds[y].name).then(x.cmp(&y)));
+        for (oi, &i) in order.iter().enumerate() {
+            let e = &ds[i];
+            let prev = order[..oi].iter().rev().take_while(|&&p| ds[p].name == e.name).map(|&p| &ds[p]).find(|p| {
+                p.ns & e.ns != 0
+                    // (`use std;` names the crate the root already has)
+                    && !(p.def == Def::Injected && e.def == Def::Use && e.path.len() == 1 && e.path[0] == e.name)
+            });
+            let Some(p) = prev else { continue };
+            let code = match (p.def, e.def) {
+                (Def::Item, Def::Item) => "E0428",
+                (Def::Use, Def::Use) => "E0252",
+                (Def::Use, Def::Item) | (Def::Item, Def::Use) => "E0255",
+                (Def::Use, _) | (_, Def::Use) => "E0254",
+                (Def::Item, _) | (_, Def::Item) => "E0260",
+                _ => "E0259",
+            };
+            let line = line_of(e.at);
+            if first.is_none_or(|(l, _, _, _)| line < l) {
+                // (the column: the item's first token, an import's path)
+                let p = toks[e.at].1;
+                let col = p - b[..p].iter().rposition(|&c| c == b'\n').map_or(0, |l| l + 1) + 1;
+                first = Some((line, col, e.name, code));
+            }
+        }
+    }
+    first.map(|(line, col, name, code)| format!("{line}:{col}: the name `{}` is defined multiple times ({code})", String::from_utf8_lossy(name)))
 }
 
+/// E0252 / E0255: a name a top-level `use` brings in that another top-level `use` or item of the crate root also
+/// defines ("the name `X` is defined multiple times", at the second). Top level = the item starts a line (the
 /// flattened modules' items keep their indentation)
 fn duplicate_import(src0: &str, split: &str, items: &[SrcItem]) -> Option<String> {
     // (no crate-root `use`, no clash to look for: the common case costs one look at each item's first bytes)

@@ -15,8 +15,9 @@ enum N {
     Wild,
     /// constructor index of the type, and the sub-patterns (as many as the constructor has fields)
     Ctor(usize, Vec<N>),
-    /// a literal of a type with no finite constructors (it covers nothing as a whole)
-    Lit,
+    /// a literal of a type with no finite constructors (it covers nothing as a whole): its value as written (an
+    /// integer's in decimal), None for a const's
+    Lit(Option<String>),
     Or(Vec<N>),
 }
 
@@ -80,13 +81,22 @@ impl Cx<'_> {
                 ntys.extend_from_slice(&tys[1..]);
                 self.useful_q(&spec, &q2, &ntys, work)
             }
-            // (literals are not told apart: a literal after a literal of the same column is not judged)
-            N::Lit => {
-                if rs.iter().any(|r| matches!(r[0], N::Lit | N::Ctor(..))) {
+            // (a literal: the rows with the same literal or a wildcard there go on; another literal does not match it; a
+            // const's value, not known, gives up)
+            N::Lit(v) => {
+                if rs.iter().any(|r| matches!(r[0], N::Ctor(..) | N::Lit(None))) || (v.is_none() && rs.iter().any(|r| matches!(r[0], N::Lit(_)))) {
                     return Err(Unknown);
                 }
-                let default: Vec<Vec<N>> = rs.iter().filter(|r| matches!(r[0], N::Wild)).map(|r| r[1..].to_vec()).collect();
-                self.useful_q(&default, &q[1..], &tys[1..], work)
+                let spec: Vec<Vec<N>> = rs
+                    .iter()
+                    .filter(|r| match &r[0] {
+                        N::Wild => true,
+                        N::Lit(w) => w == v,
+                        _ => false,
+                    })
+                    .map(|r| r[1..].to_vec())
+                    .collect();
+                self.useful_q(&spec, &q[1..], &tys[1..], work)
             }
             N::Wild => {
                 let ctors = self.ctors(t);
@@ -227,7 +237,7 @@ impl Cx<'_> {
                 if self.ctors(t0).is_some() {
                     return Err(Unknown);
                 }
-                N::Lit
+                N::Lit(None)
             }
             // (a const of another type (`FOO` of a struct type): its value is not modeled)
             Pat::Ident(false, false, n, None) if self.prog.const_index.contains_key(n) || self.prog.const_by_last.contains_key(n) => {
@@ -243,7 +253,7 @@ impl Cx<'_> {
                 match (t0, text) {
                     (Ty::Bool, "false") => N::Ctor(0, vec![]),
                     (Ty::Bool, "true") => N::Ctor(1, vec![]),
-                    (t, _) if self.ctors(t).is_none() => N::Lit,
+                    (t, s) if self.ctors(t).is_none() => N::Lit(Some(lit_value(s))),
                     _ => return Err(Unknown),
                 }
             }
@@ -425,4 +435,22 @@ fn show(name: &str, args: &[String], tuple: bool) -> String {
         return if tuple { "()".into() } else { name.to_string() };
     }
     format!("{name}({})", args.join(", "))
+}
+
+/// a literal pattern's value for telling literals apart: an integer's in decimal (`0x2a` is `42`), else its text
+fn lit_value(s: &str) -> String {
+    let t: String = s.chars().filter(|&c| c != '_').collect();
+    let (digits, radix) = match t.get(..2) {
+        Some("0x") => (&t[2..], 16),
+        Some("0o") => (&t[2..], 8),
+        Some("0b") => (&t[2..], 2),
+        _ => (&t[..], 10),
+    };
+    let end = digits.find(|c: char| !c.is_digit(radix)).unwrap_or(digits.len());
+    let suffix = &digits[end..];
+    let int_suffix = suffix.is_empty() || matches!(suffix, "u8" | "u16" | "u32" | "u64" | "u128" | "usize" | "i8" | "i16" | "i32" | "i64" | "i128" | "isize");
+    match (end > 0 && int_suffix && !(radix == 10 && digits[..end].starts_with('0') && end > 1 && s.contains('.')), u128::from_str_radix(&digits[..end], radix)) {
+        (true, Ok(v)) => v.to_string(),
+        _ => s.to_string(),
+    }
 }
