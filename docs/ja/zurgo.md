@@ -111,10 +111,15 @@ zurgo run
   - `metadata` (古い形では、ほかのキーすべて) は、依存する側のスクリプトに `DEP_<LINKS>_<キー>` として渡す;
   - リンクの指示 (`rustc-link-lib`、`rustc-link-search`、`rustc-link-arg`、`rustc-flags`) は取っておくが、zustc は
     まだ使わない: 警告でそう言う。
-- **もう一度実行するとき。** 出力は `target/zust/<profile>/build/<パッケージ>-<ハッシュ>/` に取っておく。スクリプトが
+- **もう一度実行するとき。** 出力は `target/zust/<profile>/build/<パッケージ>-<ハッシュ>/run` に取っておく。スクリプトが
   変わったとき、cargo の変数が変わったとき、`rerun-if-changed` / `rerun-if-env-changed` が名指しするファイルか変数が
   変わったときに、もう一度実行する。どちらも出さないスクリプトは、cargo と同じく、パッケージのどれかのファイルが
   変わったときに実行する。
+  - 実行している間に、依存するファイルが変わったとき、ディレクトリが読めなかったとき、名指しするファイルがない
+    とき (cargo はそういうスクリプトを毎回実行する) は、その結果を取っておかない。
+  - スクリプトをもう一度実行する前に、前の結果を消す。なので、失敗した実行が使い回せるものを残すことはない。
+- **rustc のビルド** (ホスト向けのライブラリとスクリプト) は、rustc (`rustc -vV`)、ソース、依存の成果物が同じ間は
+  取っておく。
 
 どのクレートも、`env!` / `option_env!` のために cargo の変数を受け取る: `CARGO_PKG_*`、`CARGO_MANIFEST_DIR`、
 `CARGO_CRATE_NAME`、bin なら `CARGO_BIN_NAME`。`OUT_DIR` とスクリプトの `rustc-env` はその上に加わる。
@@ -126,8 +131,10 @@ proc macro はまだ動かせない (mizchi/zust#29)。proc-macro の依存は�
 feature。
 
 zustc は知らない属性を黙って捨てるので、proc macro を使うと、何もビルドする前にエラーになる:
-- ビルドのどれかのクレートが、スタブの derive (`#[derive(thiserror::Error)]`) か属性マクロ (`#[wasm_bindgen]`) を
-  使っていれば、#29 を示すエラーになる;
+- ビルドのどれかのクレートが、スタブの derive (`#[derive(thiserror::Error)]`) か属性マクロ (`#[wasm_bindgen]`。
+  名前を変えたもの `use wasm_bindgen::prelude::wasm_bindgen as wb;` も) を使っていれば、#29 を示すエラーになる。
+  それぞれのクレートは zustc が読むとおりに読む: そのモジュールの木のファイルを、その feature と cfg で。なので、
+  たどり着かないファイルの中や、無効な cfg の下で使っているものは数えない;
 - 関数のようなマクロ (`html!(..)`) は、#29 を示す `compile_error!` に展開する。
 
 ## まだのもの (mizchi/zust#28)

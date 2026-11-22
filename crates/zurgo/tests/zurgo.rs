@@ -244,9 +244,20 @@ fn errors() {
     assert!(!ok && err.contains("cargo generate-lockfile"), "{err}");
     let (ok, _, err) = cargo(&["generate-lockfile", "--offline"], &m, &d.join("t"));
     assert!(ok, "{err}");
-    // (a proc-macro dependency is a stub: unused, the build goes on)
+    // (a proc-macro dependency is a stub: unused, the build goes on; so does a use in a file the crate does not reach
+    //  or under a cfg that is off)
     let (ok, _, err) = zurgo(&["build"], &m, &d.join("t"));
     assert!(ok, "{err}");
+    sc.write(&[
+        ("p/src/unused.rs", "#[pm::traced]\nfn f() {}\n"),
+        ("p/src/main.rs", "#[cfg(any())]\n#[pm::traced]\nfn hidden() {}\nfn main() {}\n"),
+    ]);
+    let (ok, _, err) = zurgo(&["build"], &m, &d.join("t"));
+    assert!(ok, "{err}");
+    // (under another name: `use pm::traced as trace;`)
+    sc.write(&[("p/src/main.rs", "use pm::traced as trace;\n#[trace]\nfn main() {}\n")]);
+    let (ok, _, err) = zurgo(&["build"], &m, &d.join("t"));
+    assert!(!ok && err.contains("the attribute `#[trace]` of the proc-macro crate `pm v0.1.0`"), "{err}");
     // (its attribute used: an error that names mizchi/zust#29, not an attribute dropped)
     sc.write(&[("p/src/main.rs", "#[pm::traced]\nfn main() {}\n")]);
     let (ok, _, err) = zurgo(&["build"], &m, &d.join("t"));

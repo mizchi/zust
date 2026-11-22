@@ -50,8 +50,15 @@ pub fn selection(g: &Graph) -> Vec<usize> {
     }
 }
 
+/// The target directory (`CARGO_TARGET_DIR`, relative to where zurgo runs, else the workspace's `target/`), absolute:
+/// build scripts and rustc run in other directories
 pub fn target_dir(g: &Graph) -> PathBuf {
-    std::env::var_os("CARGO_TARGET_DIR").map(PathBuf::from).unwrap_or_else(|| g.ws_dir.join("target"))
+    let d = std::env::var_os("CARGO_TARGET_DIR").map(PathBuf::from).unwrap_or_else(|| g.ws_dir.join("target"));
+    if d.is_absolute() {
+        d
+    } else {
+        std::env::current_dir().map(|c| c.join(&d)).unwrap_or(d)
+    }
 }
 
 pub fn out_dir(g: &Graph, o: &BuildOpts) -> PathBuf {
@@ -133,21 +140,9 @@ pub fn plan(g: &Graph, o: &BuildOpts) -> R<Vec<CrateSpec>> {
     let mut lib_of: BTreeMap<String, usize> = BTreeMap::new();
     // (a stub for each proc-macro dependency; a crate of the build that uses one of their derives or attributes is
     //  an error, as zustc would drop the attribute)
+    // (the proc macros of each stub, checked against the crates once they are all planned)
+    let mut pm_macros: Vec<(usize, proc_macro_stub::Macros)> = vec![];
     if !pms.is_empty() {
-        let mut uses_d: Vec<(String, Vec<String>, Vec<String>)> = vec![];
-        let mut seen_dirs: Vec<PathBuf> = vec![];
-        for &n in &order {
-            let pk = &g.pkgs[n.0].m;
-            for t in pk.lib.iter().chain(pk.bins.iter()) {
-                let Some(d) = t.path.parent().map(Path::to_path_buf) else { continue };
-                if seen_dirs.contains(&d) {
-                    continue;
-                }
-                seen_dirs.push(d.clone());
-                let (ds, ats) = proc_macro_stub::uses(&d);
-                uses_d.push((pk.name.clone(), ds, ats));
-            }
-        }
         let stub_dir = out_dir(g, o).join("proc-macro-stubs");
         std::fs::create_dir_all(&stub_dir).map_err(|e| format!("{}: {e}", stub_dir.display()))?;
         for &p in &pms {
@@ -155,13 +150,8 @@ pub fn plan(g: &Graph, o: &BuildOpts) -> R<Vec<CrateSpec>> {
             let Some(lib) = &pk.lib else { continue };
             let src = std::fs::read_to_string(&lib.path).map_err(|e| format!("{}: {e}", lib.path.display()))?;
             let m = proc_macro_stub::macros_of(&src);
-            for (user, ds, ats) in &uses_d {
-                let hit = ds.iter().find(|d| m.derives.contains(d)).map(|d| format!("the derive `{d}`")).or_else(|| ats.iter().find(|a| m.attributes.contains(a)).map(|a| format!("the attribute `#[{a}]`")));
-                if let Some(h) = hit {
-                    return Err(format!("`{user}` uses {h} of the proc-macro crate `{} v{}`: proc macros cannot run yet (mizchi/zust#29)", pk.name, pk.version));
-                }
-            }
             if lib_of.contains_key(&lib.name) {
+                pm_macros.push((p, m));
                 continue;
             }
             let stub = stub_dir.join(format!("{}.rs", lib.name));
@@ -184,8 +174,10 @@ pub fn plan(g: &Graph, o: &BuildOpts) -> R<Vec<CrateSpec>> {
                 cfgs: vec![],
                 env: vec![],
             });
+            pm_macros.push((p, m));
         }
     }
+    let n_stubs = crates.len();
     for &n in &order {
         let pk = &g.pkgs[n.0];
         let Some(lib) = &pk.m.lib else { continue };
@@ -272,6 +264,22 @@ pub fn plan(g: &Graph, o: &BuildOpts) -> R<Vec<CrateSpec>> {
     let missing: Vec<&String> = o.bins.iter().filter(|b| !found.contains(b)).collect();
     if !missing.is_empty() {
         return Err(format!("no bin target named `{}`", missing.iter().map(|b| b.as_str()).collect::<Vec<_>>().join("`, `")));
+    }
+    // (a crate that uses one of a stub's derives or attributes: an error, as zustc would drop the attribute. Each crate
+    //  is read as zustc reads it: its module tree, with its features and cfgs)
+    if !pm_macros.is_empty() {
+        let wasm = target.triple.starts_with("wasm32");
+        for c in &crates[n_stubs..] {
+            let cfg = zustc::cfg::CfgSet { features: c.features.clone(), debug_assertions: !o.release, wasm, cfgs: c.cfgs.clone(), env: c.env.clone() };
+            let (text, _) = zustc::srcmap::load_crate(&c.root, &c.display, &cfg)?;
+            let u = proc_macro_stub::uses_in(&text);
+            for (p, m) in &pm_macros {
+                if let Some(h) = u.hit(m) {
+                    let pk = &g.pkgs[*p].m;
+                    return Err(format!("`{}` uses {h} of the proc-macro crate `{} v{}`: proc macros cannot run yet (mizchi/zust#29)", c.name, pk.name, pk.version));
+                }
+            }
+        }
     }
     Ok(crates)
 }

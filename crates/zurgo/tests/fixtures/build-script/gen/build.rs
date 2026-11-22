@@ -5,4 +5,9 @@ fn main() {
         println!("cargo:rustc-cfg=spicy");
     }
     println!("cargo:rustc-env=GEN_FLAVOR=umami");
+    // (compiled with the package's features, as cargo compiles build.rs)
+    #[cfg(feature = "spicy")]
+    println!("cargo:rustc-env=GEN_COMPILED_WITH=spicy");
+    #[cfg(not(feature = "spicy"))]
+    println!("cargo:rustc-env=GEN_COMPILED_WITH=none");
 }

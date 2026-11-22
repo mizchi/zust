@@ -142,21 +142,23 @@ impl<'a> Runner<'a> {
         env.push(("CARGO".into(), std::env::var("CARGO").unwrap_or_else(|_| "cargo".into())));
         env.push(("CARGO_ENCODED_RUSTFLAGS".into(), String::new()));
         env.extend(dep_env);
-        // (the last run, if nothing it depends on changed)
-        let stamp_path = dir.join("stamp");
-        let output_path = dir.join("output");
+        // (the last run, if nothing it depends on changed: what it depends on and its stdout, in one file)
+        let run_path = dir.join("run");
         let exe_fp = file_fp(&exe);
         let env_fp = hash(&env.iter().map(|(k, v)| format!("{k}={v}")).collect::<Vec<_>>().iter().map(String::as_str).collect::<Vec<_>>());
-        if let (Ok(stamp), Ok(text)) = (std::fs::read_to_string(&stamp_path), std::fs::read_to_string(&output_path)) {
-            if stamp_fresh(&stamp, &exe_fp, &env_fp, &pk.dir, &self.skip) {
-                let o = parse(&text, pk, &out_dir, false)?;
+        if let Some((stamp, text)) = std::fs::read_to_string(&run_path).ok().as_deref().and_then(|t| t.split_once(RUN_SEP)) {
+            if stamp_fresh(stamp, &exe_fp, &env_fp, &pk.dir, &self.skip) {
+                let o = parse(text, pk, &out_dir, false)?;
                 self.done.insert(n, Some(o.clone()));
                 return Ok(Some(o));
             }
         }
+        // (not that run any more: a run that fails, or changes OUT_DIR and then fails, leaves nothing to reuse)
+        let _ = std::fs::remove_file(&run_path);
         if self.verbose {
             eprintln!("     Running build script of `{} v{}`", pk.name, pk.version);
         }
+        let start = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_nanos()).unwrap_or(0);
         let res = Command::new(&exe).current_dir(&pk.dir).envs(env.iter().map(|(k, v)| (k, v))).output().map_err(|e| format!("{}: {e}", exe.display()))?;
         let stdout = String::from_utf8_lossy(&res.stdout).into_owned();
         let _ = std::fs::write(dir.join("stderr"), &res.stderr);
@@ -171,8 +173,13 @@ impl<'a> Runner<'a> {
             ));
         }
         let o = parse(&stdout, pk, &out_dir, true)?;
-        std::fs::write(&output_path, &stdout).map_err(|e| format!("{}: {e}", output_path.display()))?;
-        std::fs::write(&stamp_path, stamp_text(&stdout, &exe_fp, &env_fp, &pk.dir, &self.skip)).map_err(|e| format!("{}: {e}", stamp_path.display()))?;
+        // (kept only when what it depends on did not change while it ran; written whole, then renamed into place, so
+        //  two zurgo processes never leave one run's stdout beside the other's stamp)
+        if let Some(stamp) = stamp_text(&stdout, &exe_fp, &env_fp, &pk.dir, &self.skip, start) {
+            let tmp = dir.join(format!("run.{}", std::process::id()));
+            std::fs::write(&tmp, format!("{stamp}{RUN_SEP}{stdout}")).map_err(|e| format!("{}: {e}", tmp.display()))?;
+            std::fs::rename(&tmp, &run_path).map_err(|e| format!("{}: {e}", run_path.display()))?;
+        }
         self.done.insert(n, Some(o.clone()));
         Ok(Some(o))
     }
@@ -304,7 +311,8 @@ impl<'a> Runner<'a> {
             display: script.display().to_string(),
             lib: false,
             deps,
-            features: vec![],
+            // (the package's features: cargo compiles build.rs with them too)
+            features: self.r.nodes[&n].features.iter().cloned().collect(),
             exe: Some("build-script-build".into()),
             cfgs,
             env,
@@ -329,7 +337,10 @@ impl<'a> Runner<'a> {
             let feats: Vec<String> = self.r.nodes[&m].features.iter().cloned().collect();
             let o = outs.get(&m).cloned().flatten();
             let externs: Vec<(String, PathBuf)> = self.externs(m, DepKind::Normal).into_iter().filter_map(|(e, t)| art.get(&t).map(|a| (e, a.clone()))).collect();
-            let h = hash(&[&self.g.pkgs[m.0].id, &feats.join(","), &format!("{externs:?}"), &format!("{:?}", o.as_ref().map(|o| (&o.cfgs, &o.env)))]);
+            // (what it is built from: the compiler, the package, its features, its dependencies' artifacts (their
+            //  contents, not only their paths) and what its build script gave)
+            let deps_fp: Vec<String> = externs.iter().map(|(e, a)| format!("{e}={}", file_fp(a))).collect();
+            let h = hash(&[&rustc_id(), &self.g.pkgs[m.0].id, &feats.join(","), &format!("{externs:?}"), &deps_fp.join(","), &format!("{:?}", o.as_ref().map(|o| (&o.cfgs, &o.env)))]);
             let pm = lib.is_proc_macro();
             let file = deps_dir.join(format!("lib{}-{h}.{}", lib.name, if pm { "so" } else { "rlib" }));
             let fresh = file.is_file() && (self.g.pkgs[m.0].source.is_some() || src_fp(&p.dir, &self.skip) == std::fs::read_to_string(file.with_extension("fp")).unwrap_or_default());
@@ -350,7 +361,7 @@ impl<'a> Runner<'a> {
                 let (cfgs, env) = crate_env(p, &lib.name, o.as_ref());
                 for (k, v) in &cfgs {
                     c.args(["--cfg", &match v {
-                        Some(v) => format!("{k}=\"{v}\""),
+                        Some(v) => format!("{k}=\"{}\"", v.replace('\\', "\\\\").replace('"', "\\\"")),
                         None => k.clone(),
                     }]);
                 }
@@ -367,16 +378,21 @@ impl<'a> Runner<'a> {
         let mut c = Command::new(rustc());
         c.args(["--crate-name", "build_script_build", "--edition", &pk.edition, "--crate-type", "bin", "--emit=link", "--cap-lints", "allow", "-C", "opt-level=0", "-o"]).arg(&exe);
         c.arg("-L").arg(format!("dependency={}", deps_dir.display()));
+        for f in &self.r.nodes[&n].features {
+            c.args(["--cfg", &format!("feature=\"{f}\"")]);
+        }
+        let mut deps_fp: Vec<String> = vec![];
         for (e, t) in self.externs(n, DepKind::Build) {
             if let Some(a) = art.get(&t) {
                 c.arg("--extern").arg(format!("{e}={}", a.display()));
+                deps_fp.push(file_fp(a));
             }
         }
         let (_, mut env) = crate_env(pk, "build_script_build", None);
         env.retain(|(k, _)| k != "OUT_DIR");
         c.envs(env.iter().map(|(k, v)| (k, v))).current_dir(&pk.dir).arg(script);
         // (not again while the command and the package's files are the same)
-        let key = hash(&[&format!("{c:?}"), &src_fp(&pk.dir, &self.skip)]);
+        let key = hash(&[&rustc_id(), &format!("{c:?}"), &deps_fp.join(","), &src_fp(&pk.dir, &self.skip)]);
         let kp = rd.join("key");
         if exe.is_file() && std::fs::read_to_string(&kp).is_ok_and(|k| k == key) {
             return Ok(exe);
@@ -453,7 +469,7 @@ fn parse(text: &str, pk: &Package, out_dir: &Path, fresh: bool) -> R<Output> {
         };
         match key {
             "rustc-cfg" => o.cfgs.push(match val.split_once('=') {
-                Some((k, v)) => (k.trim().to_string(), Some(v.trim().trim_matches('"').to_string())),
+                Some((k, v)) => (k.trim().to_string(), Some(unquote(v.trim()))),
                 None => (val.trim().to_string(), None),
             }),
             "rustc-env" => {
@@ -489,10 +505,14 @@ fn parse(text: &str, pk: &Package, out_dir: &Path, fresh: bool) -> R<Output> {
     Ok(o)
 }
 
+/// The line between the stamp and the stdout in the `run` file
+const RUN_SEP: &str = "--- stdout\n";
+
 /// What a run depends on: the script, its environment, and the files (and variables) its `rerun-if-*` lines name;
-/// without them, every file of the package. One line each: `exe <fp>`, `env <fp>`, `file <path> <fp>`, `var <name>
-/// <value>`
-fn stamp_text(stdout: &str, exe_fp: &str, env_fp: &str, pkg_dir: &Path, skip: &Path) -> String {
+/// without them, every file of the package. One line each: `exe <fp>`, `env <fp>`, `all <fp>`, `file <path>\t<fp>`,
+/// `var <name>\t<-|=value>` (the value escaped). None: the run cannot be reused, as an input changed after `start` (while
+/// it ran), a directory could not be read, or a file it names does not exist (cargo reruns such a script every time)
+fn stamp_text(stdout: &str, exe_fp: &str, env_fp: &str, pkg_dir: &Path, skip: &Path, start: u128) -> Option<String> {
     let mut s = format!("exe {exe_fp}\nenv {env_fp}\n");
     let mut files: Vec<PathBuf> = vec![];
     let mut vars: Vec<String> = vec![];
@@ -505,15 +525,28 @@ fn stamp_text(stdout: &str, exe_fp: &str, env_fp: &str, pkg_dir: &Path, skip: &P
         }
     }
     if files.is_empty() && vars.is_empty() {
-        s.push_str(&format!("all {}\n", src_fp(pkg_dir, skip)));
+        let sc = scan(pkg_dir, Some(skip), false);
+        if !sc.complete || sc.newest >= start {
+            return None;
+        }
+        s.push_str(&format!("all {}\n", sc.fp()));
     }
     for f in files {
-        s.push_str(&format!("file {}\t{}\n", f.display(), path_fp(&f)));
+        let (fp, newest, complete) = if f.is_dir() {
+            let sc = scan(&f, None, true);
+            (sc.fp(), sc.newest, sc.complete)
+        } else {
+            (file_fp(&f), mtime(&f).unwrap_or(u128::MAX), f.is_file())
+        };
+        if !complete || newest >= start {
+            return None;
+        }
+        s.push_str(&format!("file {}\t{fp}\n", f.display()));
     }
     for v in vars {
-        s.push_str(&format!("var {v}\t{}\n", std::env::var(&v).unwrap_or_else(|_| "\u{0}unset".into())));
+        s.push_str(&format!("var {v}\t{}\n", var_text(&v)));
     }
-    s
+    Some(s)
 }
 
 fn stamp_fresh(stamp: &str, exe_fp: &str, env_fp: &str, pkg_dir: &Path, skip: &Path) -> bool {
@@ -523,60 +556,113 @@ fn stamp_fresh(stamp: &str, exe_fp: &str, env_fp: &str, pkg_dir: &Path, skip: &P
     }
     lines.all(|l| {
         if let Some(fp) = l.strip_prefix("all ") {
-            return fp == src_fp(pkg_dir, skip);
+            return fp == scan(pkg_dir, Some(skip), false).fp();
         }
         if let Some((p, fp)) = l.strip_prefix("file ").and_then(|r| r.split_once('\t')) {
-            return path_fp(Path::new(p)) == fp;
+            let p = Path::new(p);
+            return if p.is_dir() { scan(p, None, true).fp() } else { file_fp(p) } == fp;
         }
         if let Some((v, val)) = l.strip_prefix("var ").and_then(|r| r.split_once('\t')) {
-            return std::env::var(v).unwrap_or_else(|_| "\u{0}unset".into()) == val;
+            return var_text(v) == val;
         }
         false
     })
 }
 
-/// A file's size and modification time ("-" when it does not exist)
-fn file_fp(p: &Path) -> String {
-    match std::fs::metadata(p) {
-        Ok(m) => {
-            let t = m.modified().ok().and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok()).map(|d| d.as_nanos()).unwrap_or(0);
-            format!("{}:{t}", m.len())
-        }
+/// A variable's value for the stamp: `-` when it is not set, else `=` and the value with `\`, newlines and tabs escaped
+fn var_text(name: &str) -> String {
+    match std::env::var(name) {
+        Ok(v) => format!("={}", v.replace('\\', "\\\\").replace('\n', "\\n").replace('\r', "\\r").replace('\t', "\\t")),
         Err(_) => "-".into(),
     }
 }
 
-/// A file, or a directory with everything under it
-fn path_fp(p: &Path) -> String {
-    if p.is_dir() {
-        let mut v = vec![];
-        walk(p, Path::new(""), &mut v);
-        hash(&v.iter().map(String::as_str).collect::<Vec<_>>())
-    } else {
-        file_fp(p)
+/// The value of a `rustc-cfg` `key="value"`: a string literal (`\"` and `\\` unescaped), or the text as it is
+fn unquote(v: &str) -> String {
+    let Some(inner) = v.strip_prefix('"').and_then(|r| r.strip_suffix('"')) else { return v.to_string() };
+    let mut out = String::with_capacity(inner.len());
+    let mut it = inner.chars();
+    while let Some(c) = it.next() {
+        if c == '\\' {
+            match it.next() {
+                Some('n') => out.push('\n'),
+                Some('t') => out.push('\t'),
+                Some('r') => out.push('\r'),
+                Some('0') => out.push('\0'),
+                Some(x) => out.push(x),
+                None => out.push('\\'),
+            }
+        } else {
+            out.push(c);
+        }
+    }
+    out
+}
+
+/// A file's size and modification time ("-" when it does not exist)
+fn file_fp(p: &Path) -> String {
+    match std::fs::metadata(p) {
+        Ok(m) => format!("{}:{}", m.len(), mtime(p).unwrap_or(0)),
+        Err(_) => "-".into(),
     }
 }
 
-/// Every file of a package (not `target/`, the target directory or hidden directories), for a script without
-/// `rerun-if-*` lines
-fn src_fp(dir: &Path, skip: &Path) -> String {
-    let mut v = vec![];
-    walk(dir, skip, &mut v);
-    hash(&v.iter().map(String::as_str).collect::<Vec<_>>())
+fn mtime(p: &Path) -> Option<u128> {
+    std::fs::metadata(p).ok()?.modified().ok()?.duration_since(std::time::UNIX_EPOCH).ok().map(|d| d.as_nanos())
 }
 
-fn walk(dir: &Path, skip: &Path, out: &mut Vec<String>) {
-    let Ok(rd) = std::fs::read_dir(dir) else { return };
-    let mut es: Vec<PathBuf> = rd.filter_map(|e| e.ok().map(|e| e.path())).collect();
+/// The files under a directory: each one's path, size and modification time; the newest time; whether every
+/// directory could be read
+struct Scan {
+    entries: Vec<String>,
+    newest: u128,
+    complete: bool,
+}
+
+impl Scan {
+    fn fp(&self) -> String {
+        hash(&self.entries.iter().map(String::as_str).collect::<Vec<_>>())
+    }
+}
+
+/// A package's files (skip: the target directory, also `target/` and hidden directories), or every file under a
+/// directory a script names (`hidden`: hidden ones too)
+fn scan(dir: &Path, skip: Option<&Path>, hidden: bool) -> Scan {
+    let mut sc = Scan { entries: vec![], newest: 0, complete: true };
+    let skip = skip.map(crate::manifest::normalize);
+    walk(dir, skip.as_deref(), hidden, &mut sc);
+    sc
+}
+
+/// Every file of a package, for the cache keys of rustc's builds
+fn src_fp(dir: &Path, skip: &Path) -> String {
+    scan(dir, Some(skip), false).fp()
+}
+
+fn walk(dir: &Path, skip: Option<&Path>, hidden: bool, sc: &mut Scan) {
+    let Ok(rd) = std::fs::read_dir(dir) else {
+        sc.complete = false;
+        return;
+    };
+    let mut es: Vec<PathBuf> = vec![];
+    for e in rd {
+        match e {
+            Ok(e) => es.push(e.path()),
+            Err(_) => sc.complete = false,
+        }
+    }
     es.sort();
     for e in es {
         let name = e.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
         if e.is_dir() {
-            if name != "target" && !name.starts_with('.') && crate::manifest::normalize(&e) != crate::manifest::normalize(skip) {
-                walk(&e, skip, out);
+            let pruned = skip.is_some() && (name == "target" || skip.is_some_and(|s| crate::manifest::normalize(&e) == s));
+            if !pruned && (hidden || !name.starts_with('.')) {
+                walk(&e, skip, hidden, sc);
             }
         } else {
-            out.push(format!("{} {}", e.display(), file_fp(&e)));
+            let t = mtime(&e).unwrap_or(0);
+            sc.newest = sc.newest.max(t);
+            sc.entries.push(format!("{} {}", e.display(), file_fp(&e)));
         }
     }
 }
@@ -597,6 +683,17 @@ fn rustc() -> String {
     std::env::var("RUSTC").ok().filter(|s| !s.is_empty()).unwrap_or_else(|| "rustc".into())
 }
 
+/// Which rustc builds the host libraries and scripts (`rustc -vV`, hashed): a part of their cache keys, so a new
+/// toolchain, also at the same path, builds them again
+fn rustc_id() -> String {
+    static ID: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    ID.get_or_init(|| {
+        let out = Command::new(rustc()).arg("-vV").output().map(|o| String::from_utf8_lossy(&o.stdout).into_owned()).unwrap_or_default();
+        hash(&[&rustc(), &out])
+    })
+    .clone()
+}
+
 fn run_rustc(mut c: Command, what: &str) -> R<()> {
     let o = c.output().map_err(|e| format!("rustc ({what}): {e}"))?;
     if !o.status.success() {
@@ -613,4 +710,47 @@ fn mkdir(d: &Path) -> R<()> {
 fn tail(s: &str) -> String {
     let lines: Vec<&str> = s.lines().collect();
     lines[lines.len().saturating_sub(40)..].join("\n")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn cfg_values_and_watched_variables() {
+        assert_eq!(unquote("\"a\\\"b\""), "a\"b");
+        assert_eq!(unquote("\"plain\""), "plain");
+        assert_eq!(unquote("bare"), "bare");
+        // (a value with a newline stays one line of the stamp, and compares equal to itself)
+        let k = format!("ZURGO_TEST_VAR_{}", std::process::id());
+        // SAFETY: a variable of this test alone
+        unsafe { std::env::set_var(&k, "two\nlines\tand\\") };
+        let t = var_text(&k);
+        assert!(!t.contains('\n') && t.starts_with('='));
+        assert_eq!(var_text(&k), t);
+        unsafe { std::env::remove_var(&k) };
+        assert_eq!(var_text(&k), "-");
+    }
+
+    #[test]
+    fn a_run_whose_input_changed_is_not_kept() {
+        let d = std::env::temp_dir().join(format!("zurgo-stamp-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&d);
+        std::fs::create_dir_all(d.join("cfg/.hidden")).unwrap();
+        std::fs::write(d.join("schema.txt"), "v1").unwrap();
+        std::fs::write(d.join("cfg/.hidden/x"), "a").unwrap();
+        let stdout = "cargo:rerun-if-changed=schema.txt\ncargo:rerun-if-changed=cfg\n";
+        // (started after the files were written: kept; started before (they changed while it ran): not)
+        let later = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos() + 1;
+        let stamp = stamp_text(stdout, "e", "v", &d, Path::new("/nonexistent"), later).expect("kept");
+        assert!(stamp_fresh(&stamp, "e", "v", &d, Path::new("/nonexistent")));
+        assert!(stamp_text(stdout, "e", "v", &d, Path::new("/nonexistent"), 0).is_none());
+        // (a hidden file inside a watched directory counts)
+        std::thread::sleep(std::time::Duration::from_millis(20));
+        std::fs::write(d.join("cfg/.hidden/x"), "bb").unwrap();
+        assert!(!stamp_fresh(&stamp, "e", "v", &d, Path::new("/nonexistent")));
+        // (a watched file that does not exist: never kept)
+        assert!(stamp_text("cargo:rerun-if-changed=missing.txt\n", "e", "v", &d, Path::new("/nonexistent"), later).is_none());
+        let _ = std::fs::remove_dir_all(&d);
+    }
 }

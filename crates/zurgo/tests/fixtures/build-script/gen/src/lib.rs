@@ -5,3 +5,7 @@ pub fn value() -> u32 {
 pub fn flavor() -> &'static str {
     env!("GEN_FLAVOR")
 }
+
+pub fn compiled_with() -> &'static str {
+    env!("GEN_COMPILED_WITH")
+}
