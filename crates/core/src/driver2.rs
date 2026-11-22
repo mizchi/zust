@@ -1044,6 +1044,7 @@ impl Session2 {
         prog.lower_consts = prog.consts.iter().any(|c| !c.name.contains("::") && c.name.trim_start_matches('_').starts_with(|ch: char| ch.is_lowercase()));
         prog.deny_must_use = deny_must_use;
         prog.edition = self.opts.edition;
+        prog.path_lts = crate::regions::src_path_lts(src0);
         prog.deny_unused_alloc = deny_unused_alloc;
         prog.deny_trivial_casts = deny_trivial_casts;
         if deny_must_use {

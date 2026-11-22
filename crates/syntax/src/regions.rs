@@ -22,6 +22,73 @@ pub fn names_lt(t: &PTy) -> bool {
     }
 }
 
+/// The source writes a lifetime in a path's generic arguments: in a turbofish (`S::<&'a u32>`,
+/// `E::V::<Cell<&'static u32>>`) or before a `::` (`<A<'a>>::new`, `<A<'a> as Tr>::IC`). Only then do a body's
+/// statements look for paths that write lifetimes (writes_path_lts): most programs have none
+pub fn src_path_lts(src: &str) -> bool {
+    let b = src.as_bytes();
+    let before = || {
+        src.match_indices(">::").any(|(i, _)| {
+            let mut d = 0i32;
+            for &c in b[..=i].iter().rev() {
+                match c {
+                    b'>' => d += 1,
+                    b'<' => {
+                        d -= 1;
+                        if d == 0 {
+                            return false;
+                        }
+                    }
+                    b'\'' => return true,
+                    b';' | b'{' | b'}' | b'\n' => return false,
+                    _ => {}
+                }
+            }
+            false
+        })
+    };
+    before() || src.match_indices("::<").any(|(i, _)| {
+        let mut d = 0i32;
+        for &c in &b[i + 2..] {
+            match c {
+                b'<' => d += 1,
+                b'>' => {
+                    d -= 1;
+                    if d == 0 {
+                        return false;
+                    }
+                }
+                b'\'' => return true,
+                b';' | b'{' | b'}' | b'\n' => return false,
+                _ => {}
+            }
+        }
+        false
+    })
+}
+
+/// e calls or builds a constructor, calls a function or names a value through a path that writes a lifetime
+/// (`combine(E::V(&c), E::U::<&'static u32>)`, `A::<'a>::new(&v)`): the region check of a function it left out is
+/// turned on before e, so the borrows e makes before the path is lowered are followed
+pub fn writes_path_lts(e: &crate::parse::Expr) -> bool {
+    use crate::parse::Expr;
+    let written = |q: &Option<Box<PTy>>, p: &crate::parse::Path| q.as_deref().is_some_and(names_lt) || (p.segs.iter().any(|s| !s.args.is_empty()) && path_names_lt(p));
+    let here = match e {
+        Expr::Path(q, p) => written(q, p),
+        Expr::Struct(p, ..) => p.segs.iter().any(|s| !s.args.is_empty()) && path_names_lt(p),
+        Expr::Call(f, _) => matches!(&**f, Expr::Path(q, p) if written(q, p)),
+        // (a closure's body is checked on its own)
+        Expr::Closure(..) => return false,
+        _ => false,
+    };
+    if here {
+        return true;
+    }
+    let mut found = false;
+    crate::ast_closure::each_child_pub(e, &mut |x| found = found || writes_path_lts(x));
+    found
+}
+
 pub fn path_names_lt(p: &crate::parse::Path) -> bool {
     p.segs.iter().any(|s| {
         s.args.iter().any(|a| match a {

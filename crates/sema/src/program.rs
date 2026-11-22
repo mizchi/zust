@@ -264,6 +264,8 @@ pub struct Program {
     pub deny_must_use: bool,
     /// The edition (2021 unless given): from 2024, a block's tail's temporaries go away before its locals
     pub edition: u16,
+    /// The source writes a lifetime in a path's generic arguments (regions::src_path_lts)
+    pub path_lts: bool,
     /// `#![deny(unused_allocation)]`: `Box::new(x).m()` with m of `&self` on what the box holds is an error
     pub deny_unused_alloc: bool,
     /// `#![deny(trivial_casts)]` / `#![deny(trivial_numeric_casts)]`: a cast a coercion or nothing would do
@@ -772,6 +774,7 @@ impl Program {
             deny_unreachable: false,
             deny_must_use: false,
             edition: 2021,
+            path_lts: false,
             deny_unused_alloc: false,
             deny_trivial_casts: (false, false),
             must_use_fns: vec![],
@@ -3726,6 +3729,8 @@ impl Program {
             Ty::Never => "!".into(),
             Ty::Vec(128) => "v128".into(),
             Ty::Vec(b) => format!("__m{b}"),
+            // (a hole of an annotation (`Foo<_>`), as written)
+            Ty::Param(HOLE) => "_".into(),
             Ty::Param(i) => format!("T{i}"),
             Ty::Ptr(false, i) => format!("*const {}", self.tn(*i)),
             Ty::Ptr(true, i) => format!("*mut {}", self.tn(*i)),

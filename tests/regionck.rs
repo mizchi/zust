@@ -1894,3 +1894,54 @@ fn closure_body_by_ref_capture() {
     assert_eq!(check("struct Foo { x: isize, y: isize }\nfn main() {\n    let mut this = Foo { x: 1, y: 2 };\n    let mut r = || {\n        let p = &this.x;\n        let q = &mut this.y;\n        *q += *p;\n    };\n    r();\n    println!(\"{}\", this.y);\n}\n"), vec![]);
     assert_eq!(check("fn main() {\n    let mut v = vec![1];\n    let mut r = || {\n        let p = &mut v;\n        p.push(2);\n        v.push(3);\n    };\n    r();\n    println!(\"{:?}\", v);\n}\n"), vec![]);
 }
+
+/// A constructor's path that writes lifetimes gives the value's type (nll/user-annotations/adt-*.rs): a tuple
+/// variant's, a struct-like variant's, a unit variant's (`SomeOtherVariant::<Cell<&'static u32>>`, through an
+/// invariant `Cell`), a tuple struct's and a struct literal's (which zustc did not accept with a turbofish). A pattern's
+/// struct path with a turbofish is resolved (pattern_substs_on_*_struct.rs). A trait's const through a qualified path
+/// (`<A<'a> as Tr>::IC`) requires what its impl's self type writes
+#[test]
+fn written_ctor_lifetimes() {
+    let pre = "use std::cell::Cell;\nenum E<T> { V(T), W { t: T }, U }\nstruct P<T>(T);\nstruct S<T> { t: T }\nfn combine<T>(_: T, _: T) {}\n";
+    let at = |body: &str| check(&format!("{pre}{body}\nfn main() {{}}\n"));
+    for (body, line) in [
+        ("fn a() {\n    let c = 66;\n    E::V::<&'static u32>(&c);\n}", 8),
+        ("fn a<'a>(_d: &'a u32) {\n    let c = 66;\n    E::W::<&'a u32> { t: &c };\n}", 8),
+        ("fn a() {\n    let c = 66;\n    combine(E::V(Cell::new(&c)), E::U::<Cell<&'static u32>>);\n}", 8),
+        ("fn a() {\n    let c = 66;\n    P::<&'static u32>(&c);\n}", 8),
+        ("fn a<'a>(_d: &'a u32) {\n    let c = 66;\n    S::<&'a u32> { t: &c };\n}", 8),
+    ] {
+        let d = at(body);
+        assert!(d.len() == 1 && d[0].0 == line && d[0].1.contains("does not live long enough"), "{body}: {d:?}");
+    }
+    for body in [
+        "fn a<'a>(c: &'a u32) {\n    E::V::<&'a u32>(c);\n    E::W::<&'a u32> { t: c };\n    combine(E::V(Cell::new(c)), E::U::<Cell<&'a u32>>);\n    P::<&'a u32>(c);\n    S::<&'a u32> { t: c };\n}",
+        "fn a() {\n    let c = 66;\n    E::V::<&u32>(&c);\n    P::<&u32>(&c);\n    S::<&u32> { t: &c };\n    let f = P::<&u32>;\n    f(&c);\n}",
+    ] {
+        assert_eq!(at(body), vec![], "{body}");
+    }
+    let d = check("struct Foo<'a> { field: &'a u32 }\nfn main() {\n    let y = 22;\n    let foo = Foo { field: &y };\n    let Foo::<'static> { field: _z } = foo;\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 4, "{d:?}");
+    let d = check("struct T<'a>(&'a u32);\nfn main() {\n    let z = 23;\n    let t = T(&z);\n    match t {\n        T::<'static>(_w) => {}\n    }\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 4, "{d:?}");
+    let d = check("struct A<'a>(&'a ());\ntrait Tr { const IC: i32; }\nimpl Tr for A<'static> { const IC: i32 = 10; }\nfn f<'a>() -> i32 { <A<'a> as Tr>::IC }\nfn g() -> i32 { <A<'static> as Tr>::IC }\nfn main() { println!(\"{}\", f() + g()); }\n");
+    assert!(d.len() == 1 && d[0].0 == 4 && d[0].1.contains("'a` must outlive `'static"), "{d:?}");
+}
+
+/// The lifetimes a path call writes on its type are the impl's (nll/user-annotations/method-ufcs-inherent-*.rs):
+/// `A::<'a>::new(&v, 22)` and `<A<'a>>::new(&v, 22)` with `impl<'a> A<'a> { fn new(x: &'a u32, ..) }` require v to
+/// outlive 'a, in a fn of one region too; a call in the arguments does not take them
+#[test]
+fn path_call_self_lifetimes() {
+    let pre = "struct A<'a> { x: &'a u32 }\nimpl<'a> A<'a> {\n    fn new<T>(x: &'a u32, _y: T) -> Self { Self { x } }\n    fn id(x: &u32) -> u32 { *x }\n}\n";
+    let at = |body: &str| check(&format!("{pre}{body}\nfn main() {{}}\n"));
+    for body in [
+        "fn f<'a>() {\n    let v = 22;\n    let _x = A::<'a>::new(&v, 22);\n}",
+        "fn f<'a>() {\n    let v = 22;\n    let _x = <A<'a>>::new(&v, 22);\n}",
+        "fn f() {\n    let v = 22;\n    let _x = A::<'static>::new(&v, A::id(&3));\n}",
+    ] {
+        let d = at(body);
+        assert!(d.len() == 1 && d[0].0 == 8 && d[0].1.contains("does not live long enough"), "{body}: {d:?}");
+    }
+    assert_eq!(at("fn f<'a>(c: &'a u32) -> A<'a> {\n    let v = 22;\n    let _n = A::<'a>::id(&v);\n    A::<'a>::new(c, A::<'a>::id(&v))\n}"), vec![]);
+}

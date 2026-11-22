@@ -1,0 +1,1 @@
+10:22: mismatched types: expected `Foo<_>`, found `Bar<usize>`

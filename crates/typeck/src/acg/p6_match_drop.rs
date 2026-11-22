@@ -1081,8 +1081,17 @@ impl Cx<'_> {
     }
 
     /// struct パターン (`P(a, b)` / `S { .. }`) のフィールド。match 対象の型 t のインスタンスで引く
+    /// The struct a pattern's path names, with or without a turbofish (`Foo::<'static> { field }`: the value's type
+    /// gives the instance, the region check the lifetimes)
+    pub(crate) fn pat_struct_by(&self, path: &Path) -> Option<u32> {
+        self.prog.struct_by_p(&PPath::of(path), self.self_sid).or_else(|| {
+            let (pp, targs) = self.turbofish_split(path);
+            targs.and_then(|_| self.prog.struct_by_p(&pp, self.self_sid))
+        })
+    }
+
     pub(crate) fn tuple_struct_fields(&self, path: &Path, t: Ty, span: Sp) -> R<Vec<(String, Ty, u32)>> {
-        let Some(sid) = self.prog.struct_by_p(&PPath::of(path), self.self_sid) else {
+        let Some(sid) = self.pat_struct_by(path) else {
             return err(span, self.no_variant_msg(path));
         };
         match t {
@@ -1122,7 +1131,7 @@ impl Cx<'_> {
                 self.test_variant(p, sid, vi, SP, fail)?;
             }
             self.prog.structs[sid as usize].variants[vi].fields.clone()
-        } else if self.prog.struct_by_p(&PPath::of(path), self.self_sid).is_some() {
+        } else if self.pat_struct_by(path).is_some() {
             self.tuple_struct_fields(path, p.ty(), SP)?
         } else {
             return err(SP, "cannot find struct or variant");
