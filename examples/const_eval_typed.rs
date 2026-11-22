@@ -106,4 +106,17 @@ fn main() {
     println!("{}", std::mem::size_of::<[u8; POW_U32]>());
     println!("{}", std::mem::size_of::<[u8; ABS]>());
     println!("{} {}", REM, ARR[0]);
+    println!("{} {}", std::mem::size_of::<G>(), US);
+    println!("{}", std::mem::size_of::<[u8; I128_LIT_MIN]>());
 }
+
+// (a generic alias resolves before layout; an unsafe block evaluates; the i128::MIN literal negates)
+type Id<T> = T;
+const GX: Id<i8> = -1;
+const GEN_N: usize = GX.count_ones() as usize;
+struct G {
+    a: [u8; GEN_N],
+}
+const UNSAFE_C: u8 = unsafe { 7 };
+static US: u8 = UNSAFE_C;
+const I128_LIT_MIN: usize = (-170141183460469231731687303715884105728i128).count_ones() as usize;

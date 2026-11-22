@@ -272,7 +272,8 @@ impl Session2 {
         // (and the output was linked from that object: not older than it)
         // (a regular file: a directory at the output path is not an executable)
         let mtime = |p: &std::path::Path| std::fs::metadata(p).ok().filter(|m| m.is_file()).and_then(|m| m.modified().ok());
-        let same = std::fs::read(&obj_path).is_ok_and(|old| old == obj) && matches!((mtime(output), mtime(&obj_path)), (Some(e), Some(o)) if e >= o);
+        // (and readable: an output with mode 000 is relinked)
+        let same = std::fs::read(&obj_path).is_ok_and(|old| old == obj) && std::fs::File::open(output).is_ok() && matches!((mtime(output), mtime(&obj_path)), (Some(e), Some(o)) if e >= o);
         if same {
             tm.lap("link", "skipped (object unchanged)".to_string());
         } else {

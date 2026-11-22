@@ -216,12 +216,21 @@ fn anon_const(n: &str) -> bool {
 
 /// A constant's declared type, when it is an integer type written as one or as an alias of one (`u8`, `type L = u16`)
 fn early_int_ty(t: &TySyn, aliases: &FxMap<String, (Vec<String>, TySyn)>) -> Option<Ty> {
-    let mut t = t;
+    let mut t = t.clone();
     for _ in 0..16 {
-        match t {
-            TySyn::Prim(p) if It::of_ty(*p).is_some() => return Some(*p),
-            TySyn::Named(n) => match aliases.get(n) {
-                Some((g, a)) if g.is_empty() => t = a,
+        t = match t {
+            TySyn::Prim(p) if It::of_ty(p).is_some() => return Some(p),
+            TySyn::Named(n) => match aliases.get(&n) {
+                Some((g, a)) if g.is_empty() => a.clone(),
+                _ => return None,
+            },
+            // (a generic alias whose body is a parameter or a type: `type Id<T> = T;` makes `Id<i8>` an i8)
+            TySyn::App(n, args) => match aliases.get(&n) {
+                Some((g, TySyn::Named(p))) if g.len() == args.len() => match g.iter().position(|x| x == p) {
+                    Some(i) => args[i].clone(),
+                    None => TySyn::Named(p.clone()),
+                },
+                Some((g, a)) if g.len() == args.len() => a.clone(),
                 _ => return None,
             },
             _ => return None,
@@ -2831,12 +2840,12 @@ impl Program {
                 })
             }
             // (`{ 3 }` / `{ let x = ..; }` is not: a block of one expression; `if c { a } else { b }`)
-            Expr::Block(None, false, b) if b.stmts.len() == 1 => match &b.stmts[0] {
+            Expr::Block(None, _, b) if b.stmts.len() == 1 => match &b.stmts[0] {
                 crate::parse::Stmt::Expr(x, false) => self.eval_t(x, depth, want),
                 _ => Err("unsupported expression in constant".into()),
             },
             // (`{ let x = 2; 5 }`)
-            Expr::Block(None, false, b) if b.stmts.len() > 1 => self.eval_block_env(b, &mut vec![], depth + 1, want),
+            Expr::Block(None, _, b) if b.stmts.len() > 1 => self.eval_block_env(b, &mut vec![], depth + 1, want),
             Expr::Ref(false, x) => self.eval_t(x, depth, want),
             Expr::If(c, t, Some(els)) => {
                 let tail = |b: &crate::parse::Block| match b.stmts.as_slice() {
@@ -2912,7 +2921,9 @@ impl Program {
                 let raw = lit_int(t).ok_or("not an integer constant")?;
                 let (_, it) = self.eval_t(x, depth, want)?;
                 match it {
-                    Some(it) => Ok((it.check(raw.checked_neg().filter(|_| it.signed || raw == 0))?, Some(it))),
+                    // (`-170141183460469231731687303715884105728i128` is i128::MIN: its magnitude wrapped to MIN)
+                    Some(it) if it.signed && it.bits == 128 && raw == i128::MIN => Ok((i128::MIN, Some(it))),
+                    Some(it) => Ok((it.check(raw.checked_neg().filter(|_| (it.signed || raw == 0) && raw >= 0))?, Some(it))),
                     None => un(raw.wrapping_neg()),
                 }
             }
@@ -3162,7 +3173,7 @@ impl Program {
                 "<<" | ">>" => self.static_ty(l),
                 _ => self.static_ty(l).or_else(|| self.static_ty(r)),
             },
-            Expr::Block(None, false, b) => match b.stmts.last() {
+            Expr::Block(None, _, b) => match b.stmts.last() {
                 Some(crate::parse::Stmt::Expr(x, false)) => self.static_ty(x),
                 _ => None,
             },

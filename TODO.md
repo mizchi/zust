@@ -95,6 +95,10 @@ rustc's wasm32-wasip1 builds (tests/wasm/README.md). Left:
   operand (or an unaligned load op) on `Op::Load` / `Op::Store` would make the flag true.
 - The constant evaluator is typed (`Program::eval_t`), except through a `const fn`: its parameters and its result
   have no integer type (an unsuffixed value), so `!x` of a `u8` parameter is -1 there, not 255.
+- Incremental preprocessing (`prep` with a `PrepMemo`) can differ from `prep_full` on unbalanced input: an item in a
+  brace that an edit leaves open (`println!("{}", std::mem::size_o{ fn inner() {} }` inside `fn main`) is hoisted to
+  the top level by the full pass but left in place by the chunked one. Found by `tests/prep_inc.rs` when
+  `examples/const_eval_typed.rs` grew; the example's new items were moved to its end, which changes the random edits.
 - Nested generic aliases (`type T1 = D<T0, T0>; type T2 = D<T1, T1>; ..`) take time exponential in the depth to
   compile (about 3x per two levels; 0.7 s at depth 20), with or without `TypeId` (whose key is the fixed-size
   `hash_ty`). Pre-existing (not SIMD): probably the aliases' expansion.
