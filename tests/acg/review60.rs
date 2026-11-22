@@ -44,4 +44,11 @@ fn main() {
     // (a destructuring let of such a literal: its temporaries extended too)
     let Foo { value: w } = Foo::<&'_ String> { value: &String::from("ab") };
     println!("{w}");
+    // (its intermediate shadows no binding of the program's, and `ref mut` may borrow from it)
+    let __exr_sl1 = Foo { value: &7u32 };
+    let Foo { value } = Foo::<&'_ u32> { value: &1u32 };
+    println!("{} {}", __exr_sl1.value, value);
+    let Foo { value: ref mut m } = Foo::<&'_ u32> { value: &2u32 };
+    *m = &3u32;
+    println!("{m}");
 }
