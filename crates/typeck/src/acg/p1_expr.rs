@@ -47,6 +47,44 @@ pub(crate) fn closure_synth(c: &Expr) -> ItemFn {
 }
 
 impl Cx<'_> {
+    /// `S::<'static>(..)` with `struct S<'a, 'b>`: E0107 for another number of lifetime arguments than the type has
+    /// (none given is fine: they are inferred)
+    pub(crate) fn lifetime_arity(&self, sid: u32, p: &crate::parse::Path, what: &str) -> R<()> {
+        let Some(seg) = p.segs.iter().rev().find(|s| !s.args.is_empty()) else { return Ok(()) };
+        let k = seg.args.iter().filter(|a| matches!(a, GArg::Lifetime(_))).count();
+        if k == 0 {
+            return Ok(());
+        }
+        let n = self.prog.adt_regions.get(&self.prog.base_of(sid)).map_or(0, |r| r.lts.len());
+        if k != n {
+            let (ns, ks) = (if n == 1 { "" } else { "s" }, if k == 1 { " was" } else { "s were" });
+            return err(SP, format!("{what} takes {n} lifetime argument{ns} but {k} lifetime argument{ks} supplied (E0107)"));
+        }
+        Ok(())
+    }
+
+    /// `U::<u8>` / `Foo::<3>` / `Flag::<true>`: the path without the last segment's turbofish, and the type arguments
+    /// it gives (None for `_`); the path itself when it has none
+    pub(crate) fn turbofish_split(&self, p: &crate::parse::Path) -> (PPath, Option<Vec<Option<Ty>>>) {
+        let mut pp = PPath::of(p);
+        let Some(last) = p.segs.last().filter(|s| !s.args.is_empty() && s.fn_args.is_none()) else { return (pp, None) };
+        if let Some(l) = pp.segs.last_mut() {
+            l.args = false;
+        }
+        let ts = last
+            .args
+            .iter()
+            .filter_map(|a| match a {
+                GArg::Ty(crate::parse::Ty::Infer) => Some(None),
+                GArg::Ty(t) if crate::ast_types::bool_arg(t).is_some() => Some(self.prog.resolve_env(&crate::ast_types::bool_arg(t).unwrap(), &self.env).ok()),
+                GArg::Ty(t) => Some(self.parse_ty(t).ok().filter(|&t| !has_hole(self.prog, t))),
+                GArg::Const(e) => Some(crate::ast_types::const_arg_syn(e).ok().and_then(|ts| self.prog.resolve_env(&ts, &self.env).ok())),
+                _ => None,
+            })
+            .collect();
+        (pp, Some(ts))
+    }
+
     // --- place (左辺値) ---------------------------------------------------
 
     pub(crate) fn place(&mut self, e: &Expr) -> R<Place> {
@@ -94,6 +132,19 @@ impl Cx<'_> {
                     let t = self.prog.consts[ci as usize].ty;
                     let a = self.static_sym(ci);
                     return Ok(Place::Mem(a, 0, t));
+                }
+                // (`Generic::<5>` / `PhantomData::<u8>`: a generic unit struct with the turbofish's type arguments)
+                if p.segs.last().is_some_and(|s| !s.args.is_empty()) {
+                    let (pp, targs) = self.turbofish_split(p);
+                    if let (Some(sid), Some(ts)) = (self.prog.struct_by_p(&pp, self.self_sid), targs) {
+                        let sd = &self.prog.structs[sid as usize];
+                        if sd.fields.is_empty() && !sd.is_enum && ts.len() == sd.generics.len() {
+                            if let Some(ts) = ts.into_iter().collect::<Option<Vec<Ty>>>() {
+                                let t = Ty::Struct(self.prog.instantiate(self.prog.base_of(sid), ts)?);
+                                return Ok(Place::Mem(self.temp(t), 0, t));
+                            }
+                        }
+                    }
                 }
                 let Some(id) = ident_of(p) else {
                     return err(SP, "unsupported path");
@@ -2764,6 +2815,7 @@ impl Cx<'_> {
                 if v.kind != crate::types::VariantKind::Tuple || v.fields.len() != cargs.len() {
                     return err(SP, format!("variant `{}` takes {} fields", v.name, v.fields.len()));
                 }
+                self.lifetime_arity(sid, p, "enum")?;
                 let args: Vec<(usize, &Expr)> = cargs.iter().enumerate().collect();
                 // (`Ok::<_, ()>(1)` / `Some::<u8>(3)`: the turbofish gives the type arguments it names)
                 if let Some(ta) = p.segs.iter().rev().find_map(|s| if s.args.is_empty() { None } else { Some(&s.args) }) {
@@ -2784,11 +2836,17 @@ impl Cx<'_> {
                 return r;
             }
             // タプル構造体の構築 `P(1, 2)`
-            if let Some(sid) = self.prog.struct_by_p(&PPath::of(p), self.self_sid) {
-                if self.lookup(&p.segs[0].name).is_none() && self.prog.fn_by_p(&PPath::of(p), self.self_sid).is_none() {
+            // (`U::<u8>(7)` / `Foo::<3>([1, 2, 3])`: the struct without the turbofish, which gives its type arguments)
+            let (pp, targs) = self.turbofish_split(p);
+            if let Some(sid) = self.prog.struct_by_p(&pp, self.self_sid) {
+                if self.lookup(&p.segs[0].name).is_none() && self.prog.fn_by_p(&pp, self.self_sid).is_none() {
                     let n = self.prog.structs[sid as usize].fields.len();
                     if n != cargs.len() {
                         return err(SP, format!("this struct takes {n} fields"));
+                    }
+                    self.lifetime_arity(sid, p, "struct")?;
+                    if let Some(ts) = targs.filter(|ts| ts.len() == self.prog.structs[self.prog.base_of(sid) as usize].generics.len()) {
+                        self.adt_targs = Some(ts);
                     }
                     let args: Vec<(usize, &Expr)> = cargs.iter().enumerate().collect();
                     let r = self.adt_value(sid, None, &args, expected, SP);

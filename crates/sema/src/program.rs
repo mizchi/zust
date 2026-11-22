@@ -240,6 +240,8 @@ pub struct Program {
     /// structs / enums with `#[derive(PartialEq)]` (base ids): a constant of such a type (with fields of such types) is
     /// structural, usable as a pattern
     pub derived_peq: FxSet<u32>,
+    /// the derived impls (base ids and traits): `#[derive(Clone)] struct S<T>` is Clone when each type argument is
+    pub derived: FxMap<u32, Vec<String>>,
     /// the program's source declares modules (`mod m { .. }`), whose scopes are flattened away: a name's item may then
     /// be out of scope where the name is written
     pub has_mods: bool,
@@ -757,6 +759,7 @@ impl Program {
             consts: vec![],
             const_index: FxMap::default(),
             derived_peq: FxSet::default(),
+            derived: FxMap::default(),
             has_mods: false,
             lower_consts: false,
             const_by_last: FxMap::default(),
@@ -1520,6 +1523,7 @@ impl Program {
                 if let Some(&sid) = p.struct_index.get(tn) {
                     for d in ds {
                         p.impls.insert((sid, d.clone()));
+                        p.derived.entry(sid).or_default().push(d.clone());
                         if d == "PartialEq" {
                             p.derived_peq.insert(sid);
                         }
@@ -1948,6 +1952,14 @@ impl Program {
         if let Ty::Box(i) = t {
             if matches!(tr, "Clone" | "PartialEq" | "Eq" | "PartialOrd" | "Ord" | "Debug" | "Display" | "Hash" | "Default") {
                 return self.implements(*i, tr);
+            }
+        }
+        // (`#[derive(Clone)] struct S<T>(PhantomData<T>)`: a derived impl of the program's requires the trait of each
+        // type argument, `S<X>: Clone` needs `X: Clone`)
+        if let Ty::Struct(sid) = t {
+            let b = self.base_of(sid);
+            if b != sid && self.derived.get(&b).is_some_and(|ds| ds.iter().any(|d| d == tr)) && self.struct_item.get(b as usize).is_some_and(|&i| i < self.prelude_from) {
+                return self.structs[sid as usize].args.iter().all(|&a| matches!(a, Ty::Array(Ty::Unit, _)) || self.has_param(a) || self.implements(a, tr));
             }
         }
         // (const ジェネリクスの引数は長さを持つ配列型)

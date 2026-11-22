@@ -955,6 +955,17 @@ impl Cx<'_> {
     /// 判定に通った後で、パターン中の名前を束縛する
     pub(crate) fn pat_bind(&mut self, pat: &Pat, p: Place, mode: BindMode) -> R<()> {
         match pat {
+            // (`let PhantomData::<(A, B)> = x`: a unit struct's turbofish names the type the value has)
+            Pat::Path(path) if path.segs.last().is_some_and(|s| !s.args.is_empty()) && self.variant_on(path, p.ty()).is_none() => {
+                let (pp, targs) = self.turbofish_split(path);
+                if let (Some(sid), Some(ts)) = (self.prog.struct_by_p(&pp, self.self_sid), targs) {
+                    if let Some(ts) = ts.into_iter().collect::<Option<Vec<Ty>>>().filter(|ts| ts.len() == self.prog.structs[self.prog.base_of(sid) as usize].generics.len()) {
+                        let pt = Ty::Struct(self.prog.instantiate(self.prog.base_of(sid), ts)?);
+                        self.same(SP, pt, p.ty())?;
+                    }
+                }
+                Ok(())
+            }
             Pat::Wild | Pat::Rest | Pat::Lit(_) | Pat::Range(..) | Pat::Path(_) => Ok(()),
             Pat::Ident(..) if unit_variant_ident(self.prog, pat).is_some() => Ok(()),
             Pat::Ident(..) if const_lit_pat(self.prog, pat).is_some() => Ok(()),

@@ -188,6 +188,7 @@ check-pass	associated-type-bounds/traits-assoc-anonymized.rs
 check-pass	associated-type-bounds/traits-assoc-type-macros.rs
 compile-fail	associated-types/ambiguous-associated-type-error-78622.rs
 check-pass	associated-types/assoc-type-in-generic-struct-bound.rs
+run-pass	associated-types/assoc-type-in-struct-constructor.rs
 check-pass	associated-types/assoc-type-in-unused-where-clause.rs
 run-pass	associated-types/assoc-type-layout-unsized-allowed-sized-used.rs
 run-pass	associated-types/assoc-type-method-call-via-blanket-impl.rs
@@ -283,6 +284,7 @@ run-pass	associated-types/issue-23208.rs
 check-pass	associated-types/issue-24159.rs
 check-pass	associated-types/issue-24204.rs
 check-pass	associated-types/issue-24338.rs
+run-pass	associated-types/issue-25700-1.rs
 run-pass	associated-types/issue-25700-2.rs
 compile-fail	associated-types/issue-26262.rs
 run-pass	associated-types/issue-27901.rs
@@ -1454,6 +1456,7 @@ compile-fail	const-generics/bad-subst-const-kind.rs
 compile-fail	const-generics/ban-self-when-feature-not-enabled.rs
 run-pass	const-generics/broken-mir-1.rs
 run-pass	const-generics/broken-mir-2.rs
+check-pass	const-generics/cannot-infer-type-for-const-param.rs
 run-pass	const-generics/concrete-const-as-fn-arg.rs
 run-pass	const-generics/concrete-const-impl-method.rs
 run-pass	const-generics/const-arg-in-fn.rs
@@ -1508,6 +1511,7 @@ check-pass	const-generics/integer-literal-generic-arg-in-where-clause.rs
 compile-fail	const-generics/invalid-attributes-on-const-params-78957.rs
 compile-fail	const-generics/invalid-const-arg-for-type-param.rs
 compile-fail	const-generics/invalid-rustc_legacy_const_generics-issue-123077.rs
+check-pass	const-generics/issues/issue-60818-struct-constructors.rs
 build-pass	const-generics/issues/issue-61336-1.rs
 check-pass	const-generics/issues/issue-61422.rs
 run-pass	const-generics/issues/issue-61432.rs
@@ -1527,6 +1531,7 @@ compile-fail	const-generics/issues/issue-80375.rs
 compile-fail	const-generics/issues/issue-87493.rs
 build-pass	const-generics/issues/issue-97634.rs
 compile-fail	const-generics/lifetime-in-const-param.rs
+compile-fail	const-generics/lookup-method.rs
 compile-fail	const-generics/mgca/gca-macro-feature-gate.rs
 check-pass	const-generics/min_const_generics/assoc_const.rs
 compile-fail	const-generics/min_const_generics/complex-types.rs
@@ -1547,6 +1552,7 @@ compile-fail	const-generics/parser-error-recovery/issue-89013.rs
 compile-fail	const-generics/projection-as-arg-const.rs
 run-pass	const-generics/promotion.rs
 compile-fail	const-generics/sneaky-array-repeat-expr.rs
+check-pass	const-generics/trait-const-args.rs
 run-pass	const-generics/type-after-const-ok.rs
 run-pass	const-generics/type-dependent/issue-63695.rs
 check-pass	const-generics/type-dependent/issue-67144-1.rs
@@ -1912,6 +1918,7 @@ run-pass	derives/eq-ord/deriving-cmp-shortcircuit.rs
 run-pass	derives/eq-ord/deriving-self-lifetime-totalord-totaleq.rs
 compile-fail	derives/eq-ord/internal_eq_trait_method_impls.rs
 check-pass	derives/hash-on-compound-types.rs
+compile-fail	derives/imperfect-derive-advanced.rs
 compile-fail	derives/imperfect-derive-copy.rs
 compile-fail	derives/imperfect-derive-phantom.rs
 compile-fail	derives/issue-91492.rs
@@ -2753,11 +2760,13 @@ compile-fail	generics/overlapping-errors-span-issue-123861.rs
 check-pass	generics/resolve-generic-method-param-2312.rs
 compile-fail	generics/single-colon-path-not-const-generics.rs
 compile-fail	generics/slightly-nice-generic-literal-messages.rs
+build-pass	generics/ssa-rval-monomorphization-issue-157922.rs
 run-pass	generics/type-params-in-for-each.rs
 compile-fail	generics/unclosed-generics-in-impl-def.rs
 compile-fail	generics/unconstrained-param-default-available.rs
 compile-fail	generics/unconstrained-type-params-inherent-impl.rs
 compile-fail	generics/unconstrained-used-param.rs
+check-pass	generics/unnecessary-path-disambiguator-36116.rs
 compile-fail	generics/unused-type-and-lifetime-param.rs
 check-pass	generics/unused-type-parameter-regression-36075.rs
 compile-fail	generics/wrong-number-of-args-in-macro.rs
@@ -5179,6 +5188,7 @@ compile-fail	parser/suggest_misplaced_generics/struct.rs
 compile-fail	parser/suggest_misplaced_generics/trait.rs
 compile-fail	parser/suggest_misplaced_generics/type.rs
 run-pass	parser/super-fast-paren-parsing.rs
+run-pass	parser/syntactic-trailing-commas.rs
 compile-fail	parser/ternary_operator.rs
 check-pass	parser/trailing-plus-in-bounds.rs
 compile-fail	parser/trailing-question-in-type.rs
@@ -6069,6 +6079,7 @@ compile-fail	single-use-lifetime/two-uses-in-inherent-method-argument-and-return
 check-pass	single-use-lifetime/two-uses-in-trait-impl.rs
 compile-fail	single-use-lifetime/zero-uses-in-fn.rs
 compile-fail	single-use-lifetime/zero-uses-in-impl.rs
+check-pass	sized/coinductive-1-gat.rs
 compile-fail	sized/ensure-overriding-bindings-in-pattern-with-ty-err-doesnt-ice.rs
 compile-fail	sized/recursive-type-infinite-size.rs
 check-pass	sized/recursive-type-pass.rs
@@ -6724,6 +6735,7 @@ run-pass	traits/default-method/supervtable.rs
 run-pass	traits/default-method/trait-object-lifetime-bound.rs
 run-pass	traits/default-method/trivial.rs
 run-pass	traits/default_method_simple.rs
+compile-fail	traits/derive-implicit-bound.rs
 compile-fail	traits/dont-autoderef-ty-with-escaping-var.rs
 compile-fail	traits/dont-suggest-impl-as-closure-arg.rs
 compile-fail	traits/duplicate-generic-parameter-error-86756.rs
