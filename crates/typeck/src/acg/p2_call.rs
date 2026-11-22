@@ -2840,7 +2840,7 @@ impl Cx<'_> {
 }
 
 /// An integer literal without a suffix (`3`, `-3`)
-fn is_int_lit(e: &Expr) -> bool {
+pub(crate) fn is_int_lit(e: &Expr) -> bool {
     match strip_paren(e) {
         Expr::Lit(t, _) => t.starts_with(|c: char| c.is_ascii_digit()) && !t.contains('.') && !t.contains(['i', 'u']) && !t.contains('e'),
         Expr::Unary(op, x, _) => op == "-" && is_int_lit(x),
@@ -2849,7 +2849,7 @@ fn is_int_lit(e: &Expr) -> bool {
 }
 
 /// An unsuffixed float literal (`5.0`, `1e3`, `-2.5`)
-fn is_float_lit(e: &Expr) -> bool {
+pub(crate) fn is_float_lit(e: &Expr) -> bool {
     match strip_paren(e) {
         Expr::Lit(t, _) => {
             t.starts_with(|c: char| c.is_ascii_digit()) && !t.starts_with("0x") && !t.starts_with("0b") && !t.starts_with("0o") && (t.contains('.') || t.contains(['e', 'E'])) && !t.contains("f32") && !t.contains("f64")

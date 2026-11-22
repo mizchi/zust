@@ -207,6 +207,7 @@ run-pass	associated-types/assoc-type-ref-in-tuple-return.rs
 run-pass	associated-types/assoc-type-returns-outer-wrapping-self.rs
 compile-fail	associated-types/assoc-type-unsatisfied-bound.rs
 check-pass	associated-types/associate-type-bound-normalization.rs
+run-pass	associated-types/associated-item-long-paths.rs
 compile-fail	associated-types/associated-type-as-value-in-impl-issue-142797.rs
 compile-fail	associated-types/associated-type-call.rs
 check-pass	associated-types/associated-type-const-nomalization.rs
@@ -2022,6 +2023,7 @@ check-pass	derives/debug/derive-debug-newtype-unsized-slice.rs
 run-pass	derives/debug/derive-debug.rs
 run-pass	derives/default/deriving-default-box.rs
 run-pass	derives/default/deriving-default-enum.rs
+compile-fail	derives/derive-assoc-type-not-impl.rs
 check-pass	derives/derive-compound-arities.rs
 run-pass	derives/derive-hrtb-for-bare-fn-field-with-lifetime.rs
 run-pass	derives/derive-hygiene-struct-builder.rs
@@ -3720,6 +3722,7 @@ check-pass	lint/dead-code/not-lint-adt-appeared-in-pattern-issue-120770.rs
 check-pass	lint/dead-code/offset-of-correct-param-env.rs
 check-pass	lint/dead-code/self-assign.rs
 check-pass	lint/dead-code/struct-used-as-pattern-issue-56750.rs
+check-pass	lint/dead-code/trait-only-used-as-type-bound.rs
 check-pass	lint/dead-code/type-alias-used-in-impl-59333.rs
 check-pass	lint/dead-code/type-in-foreign.rs
 check-pass	lint/dead-code/type-in-transparent.rs
@@ -6509,6 +6512,7 @@ run-pass	std/issue-3563-3.rs
 run-pass	std/thread-sleep-ms.rs
 run-pass	stdlib-unit-tests/matches2021.rs
 compile-fail	stdlib-unit-tests/not-sync.rs
+run-pass	str/char-escape-unicode.rs
 run-pass	str/debug-print-basic-tuple.rs
 run-pass	str/nul-char-equivalence.rs
 check-pass	str/raw-string-literal-unescaped-unicode.rs
@@ -7782,6 +7786,7 @@ run-pass	where-clauses/where-clauses-lifetimes.rs
 run-pass	where-clauses/where-clauses-method.rs
 run-pass	where-clauses/where-clauses-unboxed-closures.rs
 run-pass	where-clauses/where-clauses.rs
+run-pass	whitespace/ascii_whitespace_excludes_vertical_tab.rs
 run-pass	whitespace/vertical_tab_lexer.rs
 run-pass	windows-subsystem/console.rs
 run-pass	windows-subsystem/windows.rs
