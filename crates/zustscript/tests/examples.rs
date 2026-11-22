@@ -251,6 +251,8 @@ fn owned_same_in_js_and_wasm() {
     let ramp = &ramp[..ramp.find("\n}\n").unwrap()];
     assert!(ramp.contains("let mut __zs_v = acc;") && !ramp.contains("to_vec"), "{ramp}");
     assert!(rs.contains("(zs_polys(n)).into_iter().map(|p|"), "{rs}");
+    // a borrow of an owned local the rest of the block keeps: no copy
+    assert!(rs.contains("let firsts = zs_first_pts(&ps[..]);"), "{rs}");
     // matched by reference through the borrowed parameter
     assert!(rs.contains("match *s {\nZsShape::Polygon(ref p, n)"), "{rs}");
     // the glue still passes slices and takes an owned result: adapters in front of the inferred signatures
@@ -258,8 +260,13 @@ fn owned_same_in_js_and_wasm() {
     assert!(rs.contains("fn __zs_js_zs_appended(xs: &[f64], x: f64) -> Vec<f64> {\n    zs_appended(xs.to_vec(), x)\n}"), "{rs}");
     assert!(rs.contains("zs_longer(a, b).to_vec()"), "{rs}");
 
-    let (out, rs) = run("tests/owned_cases.zsc", "owned_cases", "[m.cases(4), m.more(4), m.grow([5])]");
-    assert_eq!(out, "[[66.5,24,21.5,41.5,36,18.5,38,36],[65,10,5,4,9,6,4,13,6,2,6],[5,1]]\n");
+    let (out, rs) = run("tests/owned_cases.zsc", "owned_cases", "[m.cases(4), m.more(4), m.grow([5]), m.borrows(4)]");
+    assert_eq!(out, "[[66.5,24,21.5,41.5,36,18.5,38,36],[65,10,5,4,9,6,4,13,6,2,6],[5,1],[12.5,7,12]]\n");
+    // a borrow of an owned local kept by a `let`: the local is frozen (copied, not moved, while the borrow lives);
+    // assigned later in the block, or leaving it, the borrow is copied instead
+    assert!(rs.contains("let f = zs_id(&ys[..]);\nlet z = zs_keep(ys.to_vec());"), "{rs}");
+    assert!(rs.contains("let f = zs_id(&ys[..]).to_vec();\nys = vec![1.0f64];"), "{rs}");
+    assert!(rs.contains("let t = (zs_mk(n)).pts;\nzs_id(&t[..]).to_vec()"), "{rs}");
     // a result that borrows only its first parameter: a temporary second argument needs no copy
     assert!(rs.contains("fn zs_wrap<'a>(a: &'a [f64]) -> &'a [f64]"), "{rs}");
     assert!(rs.contains("fn zs_first<'a>(a: &'a [f64], b: &[f64]) -> &'a [f64]"), "{rs}");

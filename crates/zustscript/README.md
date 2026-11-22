@@ -299,6 +299,7 @@ type Poly = { pts: Array<f64>, weight: f64 }
   - これにより、`acc = acc.push(x)` と `xs.fold([], (a, x) => a.push(x))` はその場で push する(配列のコピーではなく、償却 O(1))
   - 使い終わる配列の `map` / `filter` / `for` は、要素を clone せずに取り出す(`into_iter`)
 - **ローカルな借用**: 借用した引数の一部を `let` すると、借用のままになる(`let pts = &p.pts[..]`)
+  - 所有するローカル変数の借用も、ブロックの残りがその変数を代入しなければ借用のままにする(`let firsts = zs_first_pts(&ps[..]);`)。その変数はブロックの終わりまで凍結され、move されず clone される。ブロックやアームの外へ出る借用と、結果として返る借用は所有にする
   - 生き続ける値の `match` は参照で束縛する(`match *s { ZsS::Poly(ref p, n) => .. }`)。生き続ける配列の `for` は `.iter()` で回す
 - **安全側に倒すところ**: borrow checker と食い違いうる箇所では move しない
   - クロージャが捕捉した変数

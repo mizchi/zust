@@ -131,8 +131,8 @@ enum Form {
     /// an owned temporary
     Val,
     /// a place in a local the function owns (`xs`, `p.pts`, `ps[i]`); `movable`: it can be moved from here (the
-    /// local's last use, no index on the way)
-    Own { movable: bool },
+    /// local's last use, no index on the way); `root`: that local
+    Own { movable: bool, root: String },
     /// reached through a borrow: a reference already (`is_ref`: `&[T]` / `&ZsX`), or a place behind one (`p.pts`
     /// where `p: &ZsP`). `roots`: the borrowed parameters it comes from (None: a local or a temporary, so it lives only
     /// as long as the statement); `param`: it is that parameter itself, whole
@@ -164,6 +164,10 @@ pub struct Lower<'a> {
     subst: HashMap<String, Ty>,
     /// the non-Copy locals in scope
     vars: HashMap<String, VarK>,
+    /// owned locals a live `let` borrows from (to the end of its block): never moved while frozen
+    frozen: Vec<String>,
+    /// the locals the rest of the block being lowered assigns (a borrow of one of them cannot be kept)
+    later_assigns: HashSet<String>,
     live: Rc<Live>,
     lives: HashMap<String, Rc<Live>>,
     /// the inferred signatures so far (only ever made more owned)
@@ -213,6 +217,8 @@ pub fn lower(items: &[Item], info: &Info, wanted: &[(String, Vec<Ty>)], simd_as_
         fns,
         subst: HashMap::new(),
         vars: HashMap::new(),
+        frozen: vec![],
+        later_assigns: HashSet::new(),
         live: Rc::default(),
         lives: HashMap::new(),
         modes: Modes::default(),
@@ -560,6 +566,7 @@ impl<'a> Lower<'a> {
         self.cur = rs.clone();
         self.params = params;
         self.vars.clear();
+        self.frozen.clear();
         self.region.clear();
         let mut owned = vec![];
         for (i, ((a, _), t)) in args.iter().zip(&ats).enumerate() {
@@ -577,7 +584,7 @@ impl<'a> Lower<'a> {
             let (s, f) = self.ex(body)?;
             match self.borrow_of(&s, &f, &ret) {
                 // (empty roots: only while a callee's region is still being found; it grows, and this is redone)
-                (s, Some(roots)) => {
+                (s, Some(roots)) if !roots.iter().any(|r| r.starts_with('@')) => {
                     // (which parameters the result borrows from: callers count only those arguments)
                     let idx = self.params.iter().enumerate().filter(|(_, p)| roots.contains(*p)).map(|(i, _)| i).collect();
                     self.modes.region.insert(rs.clone(), idx);
@@ -616,8 +623,8 @@ impl<'a> Lower<'a> {
             return s;
         }
         match f {
-            Form::Val | Form::Own { movable: true } => s,
-            Form::Own { movable: false } => self.clone_of(&s, t),
+            Form::Val | Form::Own { movable: true, .. } => s,
+            Form::Own { movable: false, .. } => self.clone_of(&s, t),
             Form::Brw { param, .. } => {
                 // (a borrowed parameter consumed whole: from now on it is taken owned)
                 if let Some(p) = param
@@ -641,7 +648,9 @@ impl<'a> Lower<'a> {
         let tail = if is_array(t) { "[..]" } else { "" };
         match f {
             Form::Val => (format!("&({s}){tail}"), None),
-            Form::Own { .. } => (format!("&{s}{tail}"), None),
+            // (a borrow of a local: `@name` among the roots, so it can be kept past the statement only while that
+            // local is frozen, and never returned)
+            Form::Own { root, .. } => (format!("&{s}{tail}"), Some(BTreeSet::from([format!("@{root}")]))),
             Form::Brw { is_ref: true, roots, .. } => (s.to_string(), roots.clone()),
             Form::Brw { is_ref: false, roots, .. } => (format!("&{s}{tail}"), roots.clone()),
         }
@@ -669,7 +678,7 @@ impl<'a> Lower<'a> {
         match f {
             Form::Val if index => Form::Brw { is_ref: false, roots: None, param: None },
             Form::Val => Form::Val,
-            Form::Own { movable } => Form::Own { movable: movable && !index },
+            Form::Own { movable, root } => Form::Own { movable: movable && !index, root },
             Form::Brw { roots, .. } => Form::Brw { is_ref: false, roots, param: None },
         }
     }
@@ -730,9 +739,16 @@ impl<'a> Lower<'a> {
                 }
                 let (s, f) = self.ex(x)?;
                 let (s, k) = match &f {
-                    Form::Val | Form::Own { movable: true } => (s, VarK::Owned),
+                    Form::Val | Form::Own { movable: true, .. } => (s, VarK::Owned),
                     // (a part of the borrowed parameters: borrowed for as long as the function runs)
-                    Form::Brw { roots: Some(r), .. } => (self.borrow_of(&s, &f, &t).0, VarK::Borrow { roots: Some(r.clone()), param: false }),
+                    // (a part of the borrowed parameters, or of owned locals the rest of the block does not assign:
+                    // borrowed while it lives, and those locals are frozen, never moved, to the end of the block)
+                    Form::Brw { roots: Some(r), .. } if !r.iter().any(|x| x.strip_prefix('@').is_some_and(|n| self.later_assigns.contains(n))) => {
+                        for x in r.iter().filter_map(|x| x.strip_prefix('@')) {
+                            self.frozen.push(x.to_string());
+                        }
+                        (self.borrow_of(&s, &f, &t).0, VarK::Borrow { roots: Some(r.clone()), param: false })
+                    }
                     _ => (self.owned(s, &f, &t), VarK::Owned),
                 };
                 self.vars.insert(n.clone(), k);
@@ -820,7 +836,7 @@ impl<'a> Lower<'a> {
                 Form::Val => (ss, false, None),
                 // (the arms assign a local the scrutinee reads: match a value of it, taken if dead, else a copy)
                 _ if self.live.clone_root.contains(&m.id) => (self.owned(ss, &sf, &st), false, None),
-                Form::Own { movable: true } if self.live.match_move.contains(&m.id) => (ss, false, None),
+                Form::Own { movable: true, .. } if self.live.match_move.contains(&m.id) => (ss, false, None),
                 Form::Brw { is_ref: true, roots, .. } => (format!("*{ss}"), true, roots.clone()),
                 Form::Brw { roots, .. } => (ss, true, roots.clone()),
                 Form::Own { .. } => (ss, true, None),
@@ -833,6 +849,15 @@ impl<'a> Lower<'a> {
                 let mut pre = String::new();
                 let ps = l.pat(p, &st, by_ref, &roots, &mut pre, body.pos)?;
                 let (b, f) = l.ex(body)?;
+                // (a borrow of what the arm binds cannot leave the arm)
+                let names: Vec<String> = own::pat_names(p).into_iter().map(|n| format!("@{n}")).collect();
+                let (b, f) = match &f {
+                    Form::Brw { roots: Some(r), .. } if r.iter().any(|x| names.contains(x)) => {
+                        let t = l.ty(body.id);
+                        (l.owned(b, &f, &t), Form::Val)
+                    }
+                    _ => (b, f),
+                };
                 Ok((ps, if pre.is_empty() { b } else { format!("{{\n{pre}{b}\n}}") }, f))
             })?;
             pats.push(r.0);
@@ -962,7 +987,8 @@ impl<'a> Lower<'a> {
                 Some(Callee::Local) => {
                     let s = local(n);
                     Ok(match self.vars.get(n) {
-                        Some(VarK::Owned) => (s, Form::Own { movable: self.live.last.contains(&e.id) }),
+                        // (a local borrowed by a live `let` is frozen: never moved while the borrow may be used)
+                        Some(VarK::Owned) => (s, Form::Own { movable: self.live.last.contains(&e.id) && !self.frozen.contains(n), root: n.clone() }),
                         Some(VarK::Borrow { roots, param }) => (s, Form::Brw { is_ref: true, roots: roots.clone(), param: param.then(|| n.clone()) }),
                         None => (s, Form::Val),
                     })
@@ -1095,9 +1121,33 @@ impl<'a> Lower<'a> {
             EK::Match(sc, arms) => self.match_(e, sc, arms),
             EK::Block(stmts, tail) => self.scoped(|l| {
                 let mut s = String::from("{\n");
-                for st in stmts {
+                let frozen = l.frozen.len();
+                let saved = std::mem::take(&mut l.later_assigns);
+                for (i, st) in stmts.iter().enumerate() {
+                    // (what the rest of the block assigns: a `let` may keep a borrow of a local only if it is not
+                    // assigned while the borrow lives. Most blocks assign nothing, which the liveness pass knows)
+                    l.later_assigns.clear();
+                    if let Stmt::Let(_, _, x) = st
+                        && !l.copy(&l.ty(x.id))
+                    {
+                        let rest = stmts[i + 1..].iter().map(|s| match s {
+                            Stmt::Let(_, _, x) | Stmt::LetMut(_, _, x) | Stmt::Expr(x) => x,
+                        });
+                        for x in rest.chain(tail.as_deref()).filter(|x| l.live.assigns_in.contains(&x.id)) {
+                            own::names(x, &mut HashSet::new(), &mut l.later_assigns);
+                        }
+                    }
                     s.push_str(&l.stmt(st)?);
                 }
+                l.later_assigns = saved;
+                // (the locals this block declares: a borrow of one cannot leave it)
+                let declared: HashSet<String> = stmts
+                    .iter()
+                    .filter_map(|st| match st {
+                        Stmt::Let(Pat::Bind(n), ..) | Stmt::LetMut(n, ..) => Some(format!("@{n}")),
+                        _ => None,
+                    })
+                    .collect();
                 let mut f = Form::Val;
                 if let Some(t) = tail {
                     let (ts, tf) = l.ex(t)?;
@@ -1107,7 +1157,7 @@ impl<'a> Lower<'a> {
                     // block cannot leave it, so it is copied)
                     let ts = match tf {
                         _ if l.copy(&ty) => ts,
-                        Form::Brw { roots: Some(r), param, is_ref } => {
+                        Form::Brw { roots: Some(r), param, is_ref } if !r.iter().any(|x| declared.contains(x)) => {
                             let b = if is_ref { ts } else { l.borrow_of(&ts, &Form::Brw { is_ref, roots: None, param: None }, &ty).0 };
                             f = Form::Brw { is_ref: true, roots: Some(r), param };
                             b
@@ -1117,6 +1167,7 @@ impl<'a> Lower<'a> {
                     let _ = writeln!(s, "{ts}");
                 }
                 s.push('}');
+                l.frozen.truncate(frozen);
                 Ok((s, f))
             }),
             EK::Assign(n, x) => val(format!("{} = {}", local(n), self.expr(x)?)),
@@ -1139,7 +1190,7 @@ impl<'a> Lower<'a> {
                             (format!("{v}.iter().copied()"), None)
                         } else {
                             match f {
-                                Form::Val | Form::Own { movable: true } => (format!("{v}.into_iter()"), None),
+                                Form::Val | Form::Own { movable: true, .. } => (format!("{v}.into_iter()"), None),
                                 Form::Brw { roots, .. } => (format!("{v}.iter()"), Some(roots)),
                                 Form::Own { .. } => (format!("{v}.iter()"), Some(None)),
                             }
@@ -1231,7 +1282,7 @@ impl<'a> Lower<'a> {
         let (it, elems): (String, Option<Option<BTreeSet<String>>>) = match (&range, &rf) {
             (Some((a, b)), _) => (format!("({a}..{b})"), None),
             _ if self.copy(&el) => (format!("{recv}.iter().copied()"), None),
-            (_, Form::Val | Form::Own { movable: true }) => (format!("{recv}.into_iter()"), None),
+            (_, Form::Val | Form::Own { movable: true, .. }) => (format!("{recv}.into_iter()"), None),
             (_, Form::Brw { roots, .. }) => (format!("{recv}.iter()"), Some(roots.clone())),
             (_, Form::Own { .. }) => (format!("{recv}.iter()"), Some(None)),
         };

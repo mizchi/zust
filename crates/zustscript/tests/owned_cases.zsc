@@ -173,3 +173,27 @@ enum Tree { Leaf(Array<f64>), Node(Poly, Array<f64>), Nil }
   let ts = trees(n);
   [both(n), field_then_whole(n), match_then_use(n), iterate_and_grow(n), captured(n), shadow(n), ts.fold(0.0, (s, t) => s + depth(t)), depth(ts[1])]
 }
+
+// borrows of owned locals kept by a `let` (the local is frozen while the borrow lives)
+@wasm fn borrow_then_move(n: i32) -> f64 {
+  let ys = mk(n).pts;
+  let f = id(ys);
+  let z = keep(ys);
+  sum(f) + sum(z)
+}
+@wasm fn borrow_then_assign(n: i32) -> f64 {
+  let mut ys = mk(n).pts;
+  let f = id(ys);
+  ys = [1.0];
+  sum(f) + sum(ys)
+}
+@wasm fn borrow_leaves_block(n: i32) -> f64 {
+  let g = { let t = mk(n).pts; id(t) };
+  let h = match Leaf(mk(n).pts) {
+    Leaf(xs) => id(xs),
+    _ => [],
+  };
+  sum(g) + sum(h)
+}
+
+@wasm pub fn borrows(n: i32) -> Array<f64> { [borrow_then_move(n), borrow_then_assign(n), borrow_leaves_block(n)] }
