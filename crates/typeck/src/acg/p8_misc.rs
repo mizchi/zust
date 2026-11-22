@@ -421,19 +421,9 @@ impl Cx<'_> {
         self.call_named("__exr_clone", vec![t], &[(a, r)], SP).map(Some)
     }
 
-    /// Whether t is surely not Clone (clone_call): see there
+    /// Whether t is surely not Clone (clone_call): Program::surely_not_clone
     fn not_clone(&self, t: Ty, depth: u32) -> bool {
-        let Ty::Struct(sid) = t else { return false };
-        if depth > 4 || self.prog.method(sid, "clone").is_some() {
-            return false;
-        }
-        let b = self.prog.base_of(sid);
-        let derived = self.prog.derived.get(&b).is_some_and(|d| d.iter().any(|x| x == "Clone"));
-        if self.prog.struct_item.get(b as usize).is_some_and(|&ii| ii < self.prog.prelude_from) && !derived && !self.prog.implements(t, "Clone") {
-            return true;
-        }
-        let shared = matches!(self.prog.structs[b as usize].name.as_str(), "Rc" | "Arc" | "Weak" | "PhantomData" | "Sender" | "SyncSender");
-        !shared && self.prog.structs[sid as usize].args.iter().any(|&a| self.not_clone(a, depth + 1))
+        self.prog.surely_not_clone(t, depth)
     }
 
     /// `__exr_clone::<T>(x: &T) -> T` の本体

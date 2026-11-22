@@ -973,14 +973,15 @@ impl Inf<'_> {
         }
         let f = self.find(v);
         let (b, args) = match self.shape[f as usize] {
-            Some(Shape::Known(Ty::Struct(s))) => (self.prog.base_of(s), None),
+            // (a known instance: its arguments are known too)
+            Some(Shape::Known(t @ Ty::Struct(_))) => return self.prog.surely_not_clone(t, depth),
             Some(Shape::Adt(b, st, n)) => (b, Some((st, n))),
             _ => return false,
         };
-        if self.prog.method(b, "clone").is_some() {
+        let own = self.prog.struct_item.get(b as usize).is_some_and(|&ii| ii < self.prog.prelude_from);
+        if own && self.prog.method(b, "clone").is_some() {
             return false;
         }
-        let own = self.prog.struct_item.get(b as usize).is_some_and(|&ii| ii < self.prog.prelude_from);
         let derived = self.prog.derived.get(&b).is_some_and(|d| d.iter().any(|x| x == "Clone"));
         if own && !derived && !self.prog.implements(Ty::Struct(b), "Clone") {
             return true;

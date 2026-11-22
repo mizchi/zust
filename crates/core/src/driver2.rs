@@ -329,26 +329,26 @@ fn const_check_item(src: &str, items: &[SrcItem]) -> Option<(String, Vec<usize>)
         }
         // (a constant's references are 'static: `&str` is `&'static str`)
         let mut ty_s = String::new();
-        let tb = ty.as_bytes();
+        let tb: Vec<char> = ty.chars().collect();
         // (not a `&` of an array's length, `[u8; 3 & 1]`: after a `;` in brackets)
         let mut lens: Vec<bool> = vec![];
         for (i, &c) in tb.iter().enumerate() {
             match c {
-                b'[' => lens.push(false),
-                b']' => {
+                '[' => lens.push(false),
+                ']' => {
                     lens.pop();
                 }
-                b';' => {
+                ';' => {
                     if let Some(l) = lens.last_mut() {
                         *l = true;
                     }
                 }
                 _ => {}
             }
-            ty_s.push(c as char);
-            if c == b'&' && !lens.last().copied().unwrap_or(false) {
-                let next = tb[i + 1..].iter().find(|c| !c.is_ascii_whitespace());
-                if !next.is_some_and(|&n| n == b'\'') {
+            ty_s.push(c);
+            if c == '&' && !lens.last().copied().unwrap_or(false) {
+                let next = tb[i + 1..].iter().find(|c| !c.is_whitespace());
+                if !next.is_some_and(|&n| n == '\'') {
                     ty_s.push_str("'static ");
                 }
             }
