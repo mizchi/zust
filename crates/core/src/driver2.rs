@@ -2013,7 +2013,23 @@ fn strip_strings(t: &str) -> String {
             continue;
         }
         if b[i] == b'/' && b.get(i + 1) == Some(&b'*') {
-            let end = t[i + 2..].find("*/").map_or(b.len(), |k| i + 2 + k + 2);
+            // (block comments nest, as in Rust and in `tokenize`)
+            let (mut depth, mut j) = (0usize, i);
+            while j < b.len() {
+                if b[j..].starts_with(b"/*") {
+                    depth += 1;
+                    j += 2;
+                } else if b[j..].starts_with(b"*/") {
+                    depth -= 1;
+                    j += 2;
+                    if depth == 0 {
+                        break;
+                    }
+                } else {
+                    j += 1;
+                }
+            }
+            let end = j.min(b.len());
             blank(&mut out, i, end);
             i = end;
             continue;
@@ -2695,104 +2711,130 @@ impl Session2 {
             .filter(|&i| concrete(&a.prog, i) && a.prog.item_of[i].is_some_and(|ii| ii < a.prog.prelude_from) && !a.is_ext(i as u32))
             .map(|i| i as u32)
             .collect();
-        while !wave.is_empty() {
-            for &id in &wave {
-                if !done.insert(id) {
-                    continue;
-                }
-                let (name, body) = {
-                    let g = insts.lock().unwrap();
-                    (name_of(&*g, id), a.prog.names[g.body_of(id) as usize].clone())
-                };
-                if !seen.insert(name.clone()) {
-                    continue;
-                }
-                // (記録から: 本体が同じなら、要求していたインスタンスを名前で辿る)
-                if let Some(o) = &old {
-                    if let Some(e) = o.ents.get(&name) {
-                        if e.ok && Some(e.body_hash) == body_hash(&e.body) {
-                            n_memo += 1;
-                            let mut st: Vec<String> = e.children.clone();
-                            memo.ents.insert(name.clone(), e.clone());
-                            while let Some(c) = st.pop() {
-                                if seen.contains(&c) {
-                                    continue;
-                                }
-                                let Some(ce) = o.ents.get(&c) else { continue };
-                                if ce.ok && Some(ce.body_hash) == body_hash(&ce.body) {
-                                    seen.insert(c.clone());
-                                    n_memo += 1;
-                                    st.extend(ce.children.iter().cloned());
-                                    memo.ents.insert(c, ce.clone());
-                                } else {
-                                    // (本体が変わったインスタンス: 要求し直して検査する)
-                                    let _ = crate::cache2::decode_blob(&ce.me, &a.prog, &insts);
-                                }
-                            }
-                            continue;
-                        }
+        // (then, once: the program's generic fns nothing instantiated, with a placeholder type for each type
+        // parameter: acg keeps only the borrow and region checks' errors of such an instance)
+        let mut placeholders = !check_only || std::env::var_os("ZUSTC_NO_PLACEHOLDERS").is_some();
+        // (in the placeholders' round)
+        let mut ph_round = false;
+        let mut ph_depth = 0;
+        loop {
+            while !wave.is_empty() {
+                for &id in &wave {
+                    if !done.insert(id) {
+                        continue;
                     }
-                }
-                let k = self.key_of(&a, &insts, id);
-                let kc = k ^ CHECK_SALT;
-                n_keys += 1;
-                // (キャッシュにあれば検査済み: 読み戻すと要求していたインスタンスも要求し直す)
-                let hit = match self.get(k).and_then(|d| crate::cache2::decode_blob(&d, &a.prog, &insts)) {
-                    Some(b) => Some(b),
-                    None if check_only => self.get(kc).and_then(|d| crate::cache2::decode_blob(&d, &a.prog, &insts)),
-                    None => None,
-                };
-                let mut ok = true;
-                let req: Option<Vec<u32>> = match hit {
-                    Some(b) => {
-                        n_hit += 1;
-                        Some(b.relocs.iter().filter_map(|r| match r.target { acg::Target::Func(i) => Some(i), _ => None }).collect())
+                    let (name, body) = {
+                        let g = insts.lock().unwrap();
+                        (name_of(&*g, id), a.prog.names[g.body_of(id) as usize].clone())
+                    };
+                    if !seen.insert(name.clone()) {
+                        continue;
                     }
-                    None => {
-                        n_checked += 1;
-                        match compile_id_req(&a, &insts, id) {
-                            Ok((b, req)) => {
-                                if !self.opts.no_cache {
-                                    let b = if check_only {
-                                        let relocs = req.iter().map(|&i| acg::BlobReloc { offset: 0, kind: 4, addend: 0, target: acg::Target::Func(i) }).collect();
-                                        Blob { relocs, ..b }
-                                    } else {
-                                        b
-                                    };
-                                    let mut e = vec![];
-                                    {
-                                        let g = insts.lock().unwrap();
-                                        crate::cache2::encode_blob(&b, &a.prog, &*g, &mut e);
+                    // (記録から: 本体が同じなら、要求していたインスタンスを名前で辿る)
+                    if let Some(o) = &old {
+                        if let Some(e) = o.ents.get(&name) {
+                            if e.ok && Some(e.body_hash) == body_hash(&e.body) {
+                                n_memo += 1;
+                                let mut st: Vec<String> = e.children.clone();
+                                memo.ents.insert(name.clone(), e.clone());
+                                while let Some(c) = st.pop() {
+                                    if seen.contains(&c) {
+                                        continue;
                                     }
-                                    self.put(if check_only { kc } else { k }, e);
+                                    let Some(ce) = o.ents.get(&c) else { continue };
+                                    if ce.ok && Some(ce.body_hash) == body_hash(&ce.body) {
+                                        seen.insert(c.clone());
+                                        n_memo += 1;
+                                        st.extend(ce.children.iter().cloned());
+                                        memo.ents.insert(c, ce.clone());
+                                    } else {
+                                        // (本体が変わったインスタンス: 要求し直して検査する)
+                                        let _ = crate::cache2::decode_blob(&ce.me, &a.prog, &insts);
+                                    }
                                 }
-                                Some(req)
-                            }
-                            Err(e) => {
-                                errs.push(e);
-                                ok = false;
-                                Some(vec![])
+                                continue;
                             }
                         }
                     }
-                };
-                // (記録)
-                if !keep {
-                    continue;
-                }
-                if let (Some(req), Some(bh)) = (req, body_hash(&body)) {
-                    let g = insts.lock().unwrap();
-                    let children: Vec<String> = req.iter().filter(|&&i| g.get(i).is_some()).map(|&i| name_of(&*g, i)).collect();
-                    let mut me = vec![];
-                    if g.get(id).is_some() {
-                        let b = Blob { align: 1, code: vec![], relocs: vec![acg::BlobReloc { offset: 0, kind: 4, addend: 0, target: acg::Target::Func(id) }], datas: vec![], vtables: vec![], traps: vec![], line_base: None, code_ref: None };
-                        crate::cache2::encode_blob(&b, &a.prog, &*g, &mut me);
+                    let k = self.key_of(&a, &insts, id);
+                    let kc = k ^ CHECK_SALT;
+                    n_keys += 1;
+                    // (キャッシュにあれば検査済み: 読み戻すと要求していたインスタンスも要求し直す)
+                    let hit = match self.get(k).and_then(|d| crate::cache2::decode_blob(&d, &a.prog, &insts)) {
+                        Some(b) => Some(b),
+                        None if check_only => self.get(kc).and_then(|d| crate::cache2::decode_blob(&d, &a.prog, &insts)),
+                        None => None,
+                    };
+                    let mut ok = true;
+                    let req: Option<Vec<u32>> = match hit {
+                        Some(b) => {
+                            n_hit += 1;
+                            Some(b.relocs.iter().filter_map(|r| match r.target { acg::Target::Func(i) => Some(i), _ => None }).collect())
+                        }
+                        None => {
+                            n_checked += 1;
+                            match compile_id_req(&a, &insts, id) {
+                                Ok((b, req)) => {
+                                    if !self.opts.no_cache {
+                                        let b = if check_only {
+                                            let relocs = req.iter().map(|&i| acg::BlobReloc { offset: 0, kind: 4, addend: 0, target: acg::Target::Func(i) }).collect();
+                                            Blob { relocs, ..b }
+                                        } else {
+                                            b
+                                        };
+                                        let mut e = vec![];
+                                        {
+                                            let g = insts.lock().unwrap();
+                                            crate::cache2::encode_blob(&b, &a.prog, &*g, &mut e);
+                                        }
+                                        self.put(if check_only { kc } else { k }, e);
+                                    }
+                                    Some(req)
+                                }
+                                Err(e) => {
+                                    errs.push(e);
+                                    ok = false;
+                                    Some(vec![])
+                                }
+                            }
+                        }
+                    };
+                    // (記録)
+                    if !keep {
+                        continue;
                     }
-                    memo.ents.insert(name, ChkEnt { body, body_hash: bh, children, me, ok });
+                    if let (Some(req), Some(bh)) = (req, body_hash(&body)) {
+                        let g = insts.lock().unwrap();
+                        let children: Vec<String> = req.iter().filter(|&&i| g.get(i).is_some()).map(|&i| name_of(&*g, i)).collect();
+                        let mut me = vec![];
+                        if g.get(id).is_some() {
+                            let b = Blob { align: 1, code: vec![], relocs: vec![acg::BlobReloc { offset: 0, kind: 4, addend: 0, target: acg::Target::Func(id) }], datas: vec![], vtables: vec![], traps: vec![], line_base: None, code_ref: None };
+                            crate::cache2::encode_blob(&b, &a.prog, &*g, &mut me);
+                        }
+                        memo.ents.insert(name, ChkEnt { body, body_hash: bh, children, me, ok });
+                    }
+                }
+                wave = std::mem::take(&mut insts.lock().unwrap().pending);
+                wave.retain(|id| !done.contains(id));
+                // (the placeholders' round follows the closures their bodies make, a few levels: an instance of
+                // another generic fn they request may make another (`foo(p, |x| f(x))` in foo), and the generic fn
+                // has a placeholder instance of its own)
+                if ph_round {
+                    ph_depth += 1;
+                    let g = insts.lock().unwrap();
+                    wave.retain(|&id| ph_depth < 4 && a.prog.closures.contains_key(&g.body_of(id)));
                 }
             }
-            wave = std::mem::take(&mut insts.lock().unwrap().pending);
+            if placeholders {
+                break;
+            }
+            placeholders = true;
+            ph_round = true;
+            wave = placeholder_wave(&a, &insts);
             wave.retain(|id| !done.contains(id));
+            if wave.is_empty() {
+                break;
+            }
         }
         if keep {
             self.chk = Some(memo);
@@ -2803,6 +2845,34 @@ impl Session2 {
         d.dedup();
         d
     }
+}
+
+/// The program's generic fns (not a trait's default methods, not a closure's body, not a dependency's) that no
+/// instance was requested of: one instance of each with a placeholder for each type parameter (Program::placeholder),
+/// as `zustc check` checks every fn. The ids requested
+fn placeholder_wave(a: &Analysis, insts: &Mutex<Insts>) -> Vec<u32> {
+    let p = &a.prog;
+    let mut g = insts.lock().unwrap();
+    g.lenient = true;
+    let made: FxSet<u32> = g.list.iter().map(|i| i.base).collect();
+    for id in 0..p.names.len() {
+        let sig = &p.sigs[id];
+        if !sig.is_generic() || !sig.has_body || sig.trait_of.is_some() || made.contains(&(id as u32)) || p.closures.contains_key(&(id as u32)) {
+            continue;
+        }
+        // (not a dependency's: `is_ext` knows only concrete fns, the item's flag tells)
+        if !p.item_of[id].is_some_and(|ii| ii < p.prelude_from && !a.ext_items.get(ii as usize).copied().unwrap_or(false)) {
+            continue;
+        }
+        // (a placeholder has no trait's methods: a fn whose type parameters are bounded by more than marker traits
+        // would most likely fail its typeck after the work of it. Not made)
+        if sig.generics.iter().any(|(_, bs)| bs.iter().any(|b| !matches!(b.as_str(), "Copy" | "Sized" | "?Sized" | "Send" | "Sync" | "Unpin"))) {
+            continue;
+        }
+        let args: Vec<Ty> = sig.generics.iter().enumerate().map(|(k, (n, bs))| Ty::Struct(p.placeholder(id as u32, k as u32, n, bs))).collect();
+        let _ = g.request(p, id as u32, args);
+    }
+    std::mem::take(&mut g.pending)
 }
 
 /// The lint levels codegen checks (`#![deny(unused_must_use)]`, `trivial_casts` ..) as one byte for the cache keys: a

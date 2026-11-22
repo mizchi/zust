@@ -1079,3 +1079,22 @@ fn accepted_review_39() {
     let d = check("struct S;\nimpl S {\n    fn pick<'a, 'b>(x: &'a u8, _y: &'b u8) -> &u8 {\n        x\n    }\n}\nfn main() {}\n");
     assert!(d.len() == 1 && d[0].1.contains("E0106"), "{d:?}");
 }
+
+/// zustc check checks a generic fn nothing calls, with a placeholder type for each type parameter: its borrow and
+/// region errors are reported; what a placeholder cannot do (a bound's method, a coercion to `dyn`) leaves the fn
+/// unchecked, nothing reported
+#[test]
+fn uncalled_generic_fns() {
+    let d = check("struct W<'a, T: 'a> {\n    func: fn(&'a mut T),\n}\nimpl<'a, T: 'a> W<'a, T> {\n    fn in_loop(self, arg: &'a mut T) {\n        loop {\n            (self.func)(arg)\n        }\n    }\n}\nfn main() {}\n");
+    assert!(d.len() == 1 && d[0].0 == 7 && d[0].1.contains("more than once"), "{d:?}");
+    let d = check("fn baz<'a, 'b, T>(x: &mut Vec<&'a T>, y: &T) {\n    x.push(y);\n}\nfn main() {}\n");
+    assert!(d.len() == 1 && d[0].0 == 2 && d[0].1.contains("lifetime may not live long enough"), "{d:?}");
+    // (a generic fn's call of a concrete impl's method whose trait declares 'static too is followed)
+    let d = check("struct S;\ntrait Tr {\n    fn take(x: &'static u8);\n}\nimpl Tr for S {\n    fn take(_: &'static u8) {}\n}\nfn f<T>(x: &u8) {\n    S::take(x);\n}\nfn main() {\n    let n = 0u8;\n    f::<u8>(&n);\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 9, "{d:?}");
+    // (accepted: a bound's method, a Copy bound, a recursive call through a closure, a trait's impl with 'static)
+    assert_eq!(
+        check("trait Tr {\n    fn get(&self) -> u8;\n}\nfn a<T: Tr>(x: &T) -> u8 {\n    x.get()\n}\nfn b<T: Copy>(x: T) -> (T, T) {\n    (x, x)\n}\nfn c<F: FnMut(u8)>(n: u8, mut f: F) {\n    if n > 0 {\n        c(n - 1, |x| f(x))\n    }\n}\nfn d<'a, 'b, T>(_: &'a &'b (), v: &'b T, _: &()) -> &'a T {\n    v\n}\nfn main() {}\n"),
+        vec![]
+    );
+}

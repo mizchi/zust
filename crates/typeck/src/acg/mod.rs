@@ -224,11 +224,14 @@ pub fn compile(prog: &Program, insts: &Mutex<Insts>, id: u32, f: &ItemFn, line_b
 
 #[allow(clippy::too_many_arguments)]
 fn compile_once(prog: &Program, insts: &Mutex<Insts>, id: u32, f: &ItemFn, line_base: u32, inl: &Inline, force_rg: bool, rerun_out: &mut bool) -> R<(Compiled, Vec<u32>)> {
-    let (sig, env, body_id, fnptr, inst_args, clo_rg) = {
+    let (sig, env, body_id, fnptr, inst_args, clo_rg, lenient) = {
         let g = insts.lock().unwrap();
         let b = g.body_of(id);
-        (g.sig(prog, id).clone(), g.env(prog, id), b, g.get(id).is_some_and(|i| i.fnptr), g.get(id).map(|i| i.args.clone()), g.closure_rg.get(&b).cloned())
+        (g.sig(prog, id).clone(), g.env(prog, id), b, g.get(id).is_some_and(|i| i.fnptr), g.get(id).map(|i| i.args.clone()), g.closure_rg.get(&b).cloned(), g.lenient)
     };
+    // (zustc check's last round: instances with placeholders for type parameters, and those they request (only
+    // there are placeholders): see below)
+    let placeholder = lenient;
     // (a closure's fn-pointer instance: the body without the `__env` parameter (it has no captures))
     let f_np;
     let f = if fnptr {
@@ -395,6 +398,16 @@ fn compile_once(prog: &Program, insts: &Mutex<Insts>, id: u32, f: &ItemFn, line_
         if g.imp_cache.len() < ic.len() {
             g.imp_cache = ic;
         }
+    }
+    // (an instance with placeholders for type parameters (zustc check of a generic fn nothing calls) whose typeck
+    // fails, as a placeholder cannot do all its bounds allow (a trait's method, a coercion to `dyn`): not checked
+    // further, nothing reported. Its borrow and region checks' errors are)
+    if r.is_err() && placeholder {
+        if regionck::debug() {
+            eprintln!("regionck: placeholder instance not checked: {}", r.as_ref().err().map(|e| e.as_str()).unwrap_or(""));
+        }
+        let b = cx.b;
+        return Ok((Compiled { rec: b.m, late: vec![], datas: vec![], vtables: vec![], infos: vec![], loc_used: false, line_base }, vec![]));
     }
     r?;
     cx.bk_check()?;
@@ -1013,6 +1026,13 @@ pub fn pat_name(p: &Pat) -> R<String> {
     }
 }
 
+/// A parameter's name: `_` the k-th is bound as `_#k` (no program's name), so two `_` parameters are two locals the
+/// region check finds each of
+fn param_name(k: usize, p: &Pat) -> R<String> {
+    let n = pat_name(p)?;
+    Ok(if n == "_" { format!("_#{k}") } else { n })
+}
+
 impl Cx<'_> {
     pub fn same(&self, span: Sp, got: Ty, want: Ty) -> R<()> {
         if got == want || got == Ty::Never {
@@ -1263,8 +1283,8 @@ impl Cx<'_> {
         if f.sig.recv.is_some() {
             names.push("self".to_string());
         }
-        for (p, _) in &f.sig.params {
-            names.push(pat_name(p)?);
+        for (k, (p, _)) in f.sig.params.iter().enumerate() {
+            names.push(param_name(k, p)?);
         }
         // (`mut x` parameters, for the borrow checker; `self` is not known)
         let mut muts: Vec<Option<bool>> = vec![];
@@ -1312,8 +1332,8 @@ impl Cx<'_> {
         // (a closure's body: its parameters but the environment)
         if self.rg.on && self.rg.closure.is_some() {
             let mut ps = vec![];
-            for (p, _) in &f.sig.params {
-                let n = pat_name(p)?;
+            for (k, (p, _)) in f.sig.params.iter().enumerate() {
+                let n = param_name(k, p)?;
                 if n != "__env" {
                     ps.push(n);
                 }
@@ -1325,8 +1345,8 @@ impl Cx<'_> {
             if f.sig.recv.is_some() {
                 ps.push("self".to_string());
             }
-            for (p, _) in &f.sig.params {
-                ps.push(pat_name(p)?);
+            for (k, (p, _)) in f.sig.params.iter().enumerate() {
+                ps.push(param_name(k, p)?);
             }
             let ps: Vec<(Loc, Ty)> = ps.iter().filter_map(|n| self.lookup(n)).collect();
             if ps.len() == sig.params.len() {
