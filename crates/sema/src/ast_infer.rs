@@ -1381,6 +1381,18 @@ impl Inf<'_> {
                     self.adt_ctor(sid, Some(vi), args)
                 } else if let Some(sid) = self.struct_by(p) {
                     self.adt_ctor(sid, None, args)
+                } else if let Some(sid) = p.segs.last().filter(|s| !s.args.is_empty()).and_then(|_| {
+                    // (`Foo::<i32> { .. }`: the struct of the path without its arguments, of the type the path writes)
+                    let mut bare = p.clone();
+                    for s in &mut bare.segs {
+                        s.args.clear();
+                    }
+                    self.struct_by(&bare)
+                }) {
+                    let v = self.adt_ctor(sid, None, args);
+                    let t = self.ty_var(&PTy::Path(None, p.clone()));
+                    self.unify(v, t);
+                    v
                 } else {
                     self.var()
                 }

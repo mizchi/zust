@@ -1769,6 +1769,18 @@ impl Cx<'_> {
             }
             return self.variant_value(sid, vi, &args, expected);
         }
+        // (`Foo::<i32> { .. }`: the struct of the path without its arguments, as the type the path writes)
+        if path.segs.last().is_some_and(|s| !s.args.is_empty()) {
+            let mut bare = path.clone();
+            for s in &mut bare.segs {
+                s.args.clear();
+            }
+            if self.prog.struct_by_p(&PPath::of(&bare), self.self_sid).is_some() {
+                let typed = self.parse_ty(&crate::parse::Ty::Path(None, path.clone())).ok().filter(|t| matches!(t, Ty::Struct(_)));
+                let ne = self.keep_expr(Expr::Struct(bare, sfields.clone(), rest.clone()));
+                return self.struct_lit(ne, typed.or(expected));
+            }
+        }
         let Some(sid) = self.prog.struct_by_p(&PPath::of(path), self.self_sid) else {
             // (`Self::Output::Simple {}` with `type Output<T> = Bar<T>;`: the generic associated type's arguments are
             // not given, nothing else says them)

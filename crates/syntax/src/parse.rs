@@ -1665,10 +1665,19 @@ impl Parser {
             self.i += 1;
             return Ok(Pat::Macro(self.group_text()?));
         }
+        // (`S::<u8>(x)` / `Foo::<i32> { value }`: a struct pattern's type arguments are the scrutinee's, which says
+        // them; the path names the struct)
+        let unargs = |mut p: Path| {
+            for s in &mut p.segs {
+                s.args.clear();
+            }
+            p
+        };
         if self.is_open("(") {
             self.i += 1;
-            return Ok(Pat::TupleStruct(path, self.pat_list(")")?));
+            return Ok(Pat::TupleStruct(unargs(path), self.pat_list(")")?));
         }
+        let path = if self.is_open("{") { unargs(path) } else { path };
         if self.is_open("{") {
             self.i += 1;
             let mut fs = Vec::new();
