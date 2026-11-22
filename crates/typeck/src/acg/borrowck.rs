@@ -1091,29 +1091,31 @@ impl Bk {
                     let mut at = vec![*l];
                     let mut escapes = false;
                     for _ in 0..*derefs {
-                        let mut next = vec![];
+                        // (each local the `&mut`s point to, and whether through a parameter's pointee)
+                        let mut next: Vec<(u32, bool)> = vec![];
                         for &x in &at {
                             for &ln in st.held(x) {
                                 let lo = &self.loans[ln as usize];
                                 if !lo.mutable {
                                     continue;
                                 }
-                                if lo.place.owned_len() < lo.place.proj.len() && self.params.contains(&lo.place.local) {
-                                    escapes = true;
-                                } else if !next.contains(&lo.place.local) {
-                                    next.push(lo.place.local);
+                                let behind = lo.place.owned_len() < lo.place.proj.len() && self.params.contains(&lo.place.local);
+                                match next.iter_mut().find(|n| n.0 == lo.place.local) {
+                                    Some(n) => n.1 |= behind,
+                                    None => next.push((lo.place.local, behind)),
                                 }
                             }
                         }
                         // (a `&mut p` holds what p holds too (`p = &mut z`): z is reached through p, one deref
-                        // deeper, not by this one. `*q = &mut y` with q = &mut p changes p, not z. Unless what is
-                        // stored holds references itself: `*q = &mut &y` makes p's type's inner region, z's too,
-                        // y's)
+                        // deeper, not by this one. `*q = &mut y` with q = &mut p changes p, not z, nor what z points
+                        // to when z is a parameter's. Unless what is stored holds references itself: `*q = &mut &y`
+                        // makes p's type's inner region, z's too, y's)
                         if !*deep {
-                            let through: Vec<u32> = next.iter().copied().filter(|&c| next.iter().any(|&o| o != c && st.held(o).iter().any(|&h| self.loans[h as usize].place.local == c))).collect();
-                            next.retain(|c| !through.contains(c));
+                            let through: Vec<u32> = next.iter().map(|n| n.0).filter(|&c| next.iter().any(|&(o, _)| o != c && st.held(o).iter().any(|&h| self.loans[h as usize].place.local == c))).collect();
+                            next.retain(|n| !through.contains(&n.0));
                         }
-                        at = next;
+                        escapes |= next.iter().any(|n| n.1);
+                        at = next.iter().filter(|n| !n.1).map(|n| n.0).collect();
                     }
                     if escapes {
                         for &ln in &ls {
