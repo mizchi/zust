@@ -499,11 +499,12 @@ impl Session2 {
         let stripped;
         let src0 = if self.ctx.map.inputs.is_empty() {
             let cfg = self.opts.cfg_with(&self.opts.features);
-            match crate::cfg::strip(src0, &cfg) {
+            let mut ext = vec![];
+            match crate::cfg::strip_noting(src0, &cfg, &mut None, &mut ext) {
                 Some(t) => {
                     // (the `extern crate` items it blanked, for the names they define)
                     if externs.is_empty() {
-                        externs = crate::cfg::blanked_externs(src0, &t, &cfg);
+                        externs = ext.iter().map(|&(a, b)| (a, src0[a..b].to_string())).collect();
                     }
                     stripped = t;
                     stripped.as_str()
@@ -1625,11 +1626,19 @@ fn cross_kind_duplicate<'p>(prog: &'p Program, src: &str, items: &[SrcItem], sum
                 Some((f, _)) => f == "0",
                 None => {
                     let text = src.get(items[ii].start..items[ii].end).unwrap_or("");
-                    // (past the item's attributes, whose text may say `struct X;`)
+                    // (past the item's attributes and the comments among them, whose text may say `struct X;`)
                     let mut text = text.trim_start();
-                    while text.starts_with("#[") || text.starts_with("#![") {
-                        let o = text.find('[').map_or(text.len(), |o| o + 1);
-                        text = text[(o + attr_end(&text[o..])).min(text.len())..].trim_start();
+                    loop {
+                        if text.starts_with("#[") || text.starts_with("#![") {
+                            let o = text.find('[').map_or(text.len(), |o| o + 1);
+                            text = text[(o + attr_end(&text[o..])).min(text.len())..].trim_start();
+                        } else if text.starts_with("//") {
+                            text = text.find('\n').map_or("", |e| text[e..].trim_start());
+                        } else if text.starts_with("/*") {
+                            text = text.find("*/").map_or("", |e| text[e + 2..].trim_start());
+                        } else {
+                            break;
+                        }
                     }
                     text.find("struct ").is_some_and(|k| {
                         let rest = text[k + 7..].trim_start();
@@ -1767,7 +1776,7 @@ fn std_path_ns(path: &[&[u8]]) -> u8 {
 /// or item of the program or of a module or type of std, and the `extern crate std` the compiler puts in the crate
 /// root in edition 2015 (`injected`; a later edition's is hygienic). Only read when the program has a `mod` or an
 /// `extern crate`, or in edition 2015 something that may define `std` / `core`. `src` is the configured text, `externs` the `extern crate` items
-/// the configuring blanked (cfg::blanked_externs)
+/// the configuring blanked (cfg::strip_noting)
 fn duplicate_name(src: &str, externs: &[(usize, String)], injected: bool) -> Option<String> {
     // (a few scans: a program without these has its other duplicates found when its items are collected)
     // (2015's injected `std` meets an item or import of that name: `struct std;`, `use x as std;`, `enum std {`)
@@ -1826,8 +1835,18 @@ fn duplicate_name(src: &str, externs: &[(usize, String)], injected: bool) -> Opt
         let m = defs.len();
         let (lo, hi, _, _) = mods[m];
         let mut names: Vec<DupDef> = vec![];
-        // (the crate's own attributes `#![no_std]` / `#![no_core]`, from the tokens: not in a comment)
-        let inner = |a: &[u8]| (0..n.saturating_sub(4)).any(|k| t(k) == b"#" && t(k + 1) == b"!" && t(k + 2) == b"[" && t(k + 3) == a && t(k + 4) == b"]");
+        // (the crate's own attributes `#![no_std]` / `#![no_core]`: the inner attributes the text starts with, from the
+        // tokens (not a comment, nor a macro's input))
+        let inner = |a: &[u8]| {
+            let mut k = 0;
+            while t(k) == b"#" && t(k + 1) == b"!" && t(k + 2) == b"[" && close[k + 2] != usize::MAX {
+                if t(k + 3) == a && t(k + 4) == b"]" {
+                    return true;
+                }
+                k = close[k + 2] + 1;
+            }
+            false
+        };
         if m == 0 && injected && !inner(b"no_core") {
             let name: &[u8] = if inner(b"no_std") { b"core" } else { b"std" };
             names.push(DupDef { ns: 1, name, def: Def::Injected, at: usize::MAX, path: vec![], module_only: false });
@@ -1957,7 +1976,12 @@ fn duplicate_name(src: &str, externs: &[(usize, String)], injected: bool) -> Opt
         defs.push(names);
     }
     // (an import's namespaces: what it names in a module of the program, std's, or an `extern crate`)
-    let child = |m: usize, nm: &[u8]| mods.iter().position(|x| x.2 == m && x.3 == nm);
+    // (each module's child modules by name; the first of a name, as a lookup in order finds)
+    let mut kids: FxMap<(usize, &[u8]), usize> = FxMap::default();
+    for (i, x) in mods.iter().enumerate() {
+        kids.entry((x.2, x.3)).or_insert(i);
+    }
+    let child = |m: usize, nm: &[u8]| kids.get(&(m, nm)).copied();
     let mut resolved: Vec<(usize, usize, u8)> = vec![];
     for (m, ds) in defs.iter().enumerate() {
         for (i, d) in ds.iter().enumerate() {
