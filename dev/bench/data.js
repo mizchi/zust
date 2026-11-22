@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795321624856,
+  "lastUpdate": 1795321626828,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -96220,6 +96220,70 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/mizchi/zust/commit/2c8411a9ea94793b035670b2bdd4638030405c97"
         },
         "date": 1795313938946,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tests/ui run-pass pass rate",
+            "value": 75.56,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui run-pass passing",
+            "value": 1802,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui check-pass pass rate",
+            "value": 82.01,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui check-pass passing",
+            "value": 1482,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui build-pass pass rate",
+            "value": 73.33,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui build-pass passing",
+            "value": 99,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui compile-fail pass rate",
+            "value": 55.79,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui compile-fail passing",
+            "value": 4105,
+            "unit": "tests"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "miz404@gmail.com",
+            "name": "Kotaro Chikuba",
+            "username": "mizchi"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "b86a3926105e05b11bf5d5af6a7e157e9ff47d4e",
+          "message": "Merge pull request #44 from mizchi/claude/gracious-brahmagupta-16jxdl\n\nzustscript: JS-target KPIs, direct effect handlers, a shared runtime, and --check-externs with tsrs",
+          "timestamp": "2026-11-22T13:22:16+09:00",
+          "tree_id": "7eb699095e3b24a9319b00db8be1410563d9023a",
+          "url": "https://github.com/mizchi/zust/commit/b86a3926105e05b11bf5d5af6a7e157e9ff47d4e"
+        },
+        "date": 1795321626515,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
