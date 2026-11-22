@@ -204,6 +204,9 @@ pub struct Bk {
     pub line_base: u32,
     /// The locals that are parameters
     pub params: Vec<u32>,
+    /// Locals whose type implements `Drop` (a user's), through so many boxes (`Box<Scribble>`: 1): its `drop` may
+    /// use what a `&mut` field points to, so a borrow through it must not outlive the local (E0713)
+    pub drop_owners: Vec<(u32, u8)>,
     /// Type → (Copy, may hold references)
     pub ty_info: HashMap<Ty, (bool, bool)>,
     /// Hidden locals of temporaries borrowed in the statements being lowered (they go out of scope at the end of
@@ -1164,7 +1167,37 @@ impl Bk {
                 Ev::Ret(srcs, sp) => {
                     if loans_on {
                         if let Some(errs) = errs.as_deref_mut() {
-                            for ln in self.resolve(srcs, st) {
+                            let ls = self.resolve(srcs, st);
+                            // (a borrow through a `&mut` field of a local whose type implements `Drop`: the local's
+                            // drop, when the function returns, may use the field, so the borrow is still in use then
+                            // (`&mut *s.0` with s: Scribble). Not through a `&` field: a shared one is copied out)
+                            // (also what is reborrowed through a reference a local holds: `&r.0` with `r = &*v.0`
+                            // returns a borrow of what r points to, the loans r holds)
+                            let mut through = ls.clone();
+                            let mut k = 0;
+                            while k < through.len() && through.len() < 64 {
+                                let lp = &self.loans[through[k] as usize].place;
+                                if lp.owned_len() < lp.proj.len() {
+                                    for &h in st.held(lp.local) {
+                                        if !through.contains(&h) {
+                                            through.push(h);
+                                        }
+                                    }
+                                }
+                                k += 1;
+                            }
+                            for &ln in &through {
+                                let lo = &self.loans[ln as usize];
+                                let Some(&(_, k)) = self.drop_owners.iter().find(|d| d.0 == lo.place.local) else { continue };
+                                let (pr, k, ol) = (&lo.place.proj, k as usize, lo.place.owned_len());
+                                let field_of_owner = pr.len() > k && pr[..k].iter().all(|x| *x == Proj::Deref(true)) && matches!(pr[k], Proj::Field(_));
+                                let moved = st.moved.iter().any(|m| m.place.local == lo.place.local && m.place.proj.is_empty());
+                                if field_of_owner && ol < pr.len() && pr[ol] == Proj::Deref(false) && !moved {
+                                    errs.push(BkError { sp: lo.sp, msg: "borrow may still be in use when destructor runs (E0713)".to_string() });
+                                    break;
+                                }
+                            }
+                            for ln in ls {
                                 let lo = &self.loans[ln as usize];
                                 if lo.place.owned_len() == lo.place.proj.len() {
                                     let what = if self.locals[lo.place.local as usize].name == "self" { "a value owned by the function" } else { "a local variable" };
@@ -1434,6 +1467,18 @@ impl Cx<'_> {
         let (copy, refs) = self.bk_ty(ty);
         self.bk.locals.push(Local { name: name.to_string(), ty, copy, refs, mutable, decl: self.rg.let_sp });
         self.bk.by_loc.insert(loc, id);
+        if refs && self.bk.level >= 2 {
+            let (mut t, mut k) = (ty, 0u8);
+            while let Ty::Box(i) = t {
+                t = *i;
+                k = k.saturating_add(1);
+            }
+            if let Ty::Struct(sid) = t {
+                if self.user_drop_name(sid).is_some() {
+                    self.bk.drop_owners.push((id, k));
+                }
+            }
+        }
         self.bk_ev(Ev::Bind(id, !uninit));
         if refs {
             if let Some(srcs) = self.bk.bind_srcs.clone().filter(|s| !s.is_empty()) {

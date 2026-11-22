@@ -1468,3 +1468,57 @@ fn runtime_literal_temporaries() {
     assert!(d.len() == 1 && d[0].0 == 6 && d[0].1.contains("E0716"), "{d:?}");
     assert_eq!(check("fn gimme(x: &(u32,)) -> &u32 {\n    &x.0\n}\nfn main() {\n    let v = 22;\n    let a = gimme(&(1,));\n    let r = &(v,);\n    let b = gimme(r);\n    println!(\"{} {} {}\", a, b, gimme(&(v,)));\n}\n"), vec![]);
 }
+
+/// A block passed as an argument passes what its tail borrows: its temporaries are the call's (E0716). `&{ .. }` is a
+/// temporary. `let _ = z;` keeps z live (rustc's fake read)
+#[test]
+fn block_tail_temporaries() {
+    let gimme = "fn gimme(x: &(u32,)) -> &u32 {\n    &x.0\n}\n";
+    let d = check(&format!("{gimme}fn main() {{\n    let x = gimme({{ let v = 22; &(v,) }});\n    println!(\"{{:?}}\", x);\n}}\n"));
+    assert!(d.len() == 1 && d[0].0 == 5 && d[0].1.contains("E0716"), "{d:?}");
+    let d = check(&format!("{gimme}fn main() {{\n    let z = gimme(&{{ let v = 4; (v,) }});\n    let _ = z;\n}}\n"));
+    assert!(d.len() == 1 && d[0].0 == 5 && d[0].1.contains("E0716"), "{d:?}");
+    let d = check("fn mk() -> String {\n    String::from(\"a\")\n}\nfn main() {\n    let x: &str = { mk().as_str() };\n    println!(\"{}\", x);\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 5 && d[0].1.contains("E0716"), "{d:?}");
+    // (the `let` extends a block tail's borrow to its own block; a value used within the statement is fine)
+    assert_eq!(check(&format!("fn mk() -> String {{\n    String::from(\"a\")\n}}\n{gimme}fn main() {{\n    let n = {{ mk().as_str() }}.len();\n    let s = {{ let v = 1; &(v,) }};\n    let q = *gimme({{ let v = 5; &(v,) }});\n    println!(\"{{}} {{:?}} {{}}\", n, s, q);\n}}\n")), vec![]);
+    // (a fake read keeps x live: the write to y while it is borrowed conflicts)
+    let d = check("fn main() {\n    let mut y = 1;\n    let r = &y;\n    y = 2;\n    let _ = r;\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 4, "{d:?}");
+    // (but it is no use of a moved value)
+    assert_eq!(check("fn main() {\n    let x = String::new();\n    drop(x);\n    let _ = x;\n}\n"), vec![]);
+}
+
+/// A trait's parameters are invariant: a callee's bound `G: Get<T>` met by the caller's `G: Get<&'max i32>` makes T's
+/// region 'max
+#[test]
+fn trait_bound_regions_invariant() {
+    let tr = "trait Get<T> {\n    fn get(&self) -> T;\n}\nfn impls_get<G: Get<T>, T>() {}\n";
+    let d = check(&format!("{tr}fn f<'min, 'max: 'min, G: Get<&'max i32>>() {{\n    impls_get::<G, &'min i32>()\n}}\nfn main() {{}}\n"));
+    assert!(d.len() == 1 && d[0].0 == 6 && d[0].1.contains("lifetime may not live long enough"), "{d:?}");
+    assert_eq!(check(&format!("{tr}fn f<'a, G: Get<&'a i32>>() {{\n    impls_get::<G, &'a i32>()\n}}\nfn g<'a, 'b, G: Get<&'a i32>>() where 'a: 'b, 'b: 'a {{\n    impls_get::<G, &'b i32>()\n}}\nfn main() {{}}\n")), vec![]);
+}
+
+/// E0510: a match guard must not assign or mutably borrow the place the match tests (or one it is part of, or what it
+/// points to); a part of it is fine, as is a match that tests nothing
+#[test]
+fn match_guard_mutation() {
+    let d = check("fn main() {\n    let mut n = 3;\n    match n {\n        0 => {}\n        _ if { n += 1; true } => {}\n        _ => {}\n    }\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 5 && d[0].1.contains("E0510"), "{d:?}");
+    let d = check("fn main() {\n    let mut x = &mut Some(&2);\n    match x {\n        &mut None => {}\n        &mut Some(&_) if { (|| { *x = None; })(); false } => {}\n        _ => {}\n    }\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 5 && d[0].1.contains("E0510"), "{d:?}");
+    assert_eq!(check("fn main() {\n    let mut s = (1, Some(2));\n    match s {\n        (_, Some(_)) if { s.0 = 5; true } => {}\n        _ => {}\n    }\n    let mut v = vec![1];\n    match v.len() {\n        0 if { v.push(2); true } => {}\n        _ => {}\n    }\n    println!(\"{:?} {:?}\", s, v);\n}\n"), vec![]);
+}
+
+/// E0713: a borrow through a `&mut` field of a value whose type implements `Drop`, returned: the value's drop may use
+/// the field when the function returns
+#[test]
+fn borrow_in_use_when_destructor_runs() {
+    let s = "struct Scribble<'a>(&'a mut u32);\nimpl<'a> Drop for Scribble<'a> {\n    fn drop(&mut self) {\n        *self.0 = 42;\n    }\n}\n";
+    let d = check(&format!("{s}fn f<'a>(s: Scribble<'a>) -> &'a mut u32 {{\n    &mut *s.0\n}}\nfn main() {{}}\n"));
+    assert!(d.len() == 1 && d[0].0 == 8 && d[0].1.contains("E0713"), "{d:?}");
+    let d = check(&format!("{s}fn f<'a>(s: Box<Scribble<'a>>) -> &'a u32 {{\n    let r: &'a u32 = &*(*s).0;\n    &*r\n}}\nfn main() {{}}\n"));
+    assert!(d.len() == 1 && d[0].0 == 8 && d[0].1.contains("E0713"), "{d:?}");
+    // (not through a `&mut Scribble`, nor of a type without `Drop`, nor a borrow not returned)
+    assert_eq!(check(&format!("{s}struct Plain<'a>(&'a mut u32);\nfn f<'a>(s: &'a mut Scribble) -> &'a mut u32 {{\n    &mut *s.0\n}}\nfn g<'a>(s: Plain<'a>) -> &'a mut u32 {{\n    &mut *s.0\n}}\nfn h(s: Scribble) -> u32 {{\n    let r = &mut *s.0;\n    *r\n}}\nfn main() {{}}\n")), vec![]);
+}
