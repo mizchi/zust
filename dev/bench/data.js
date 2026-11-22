@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795326661707,
+  "lastUpdate": 1795326663717,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -80610,6 +80610,85 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/mizchi/zust/commit/ba26be24b1bddf45d4063e819df8a14190502e46"
         },
         "date": 1795325074950,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "parity documentSymbol (名前の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity workspace/symbol (上位 20 の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity definition (行き先の一致)",
+            "value": 89.655,
+            "unit": "%"
+          },
+          {
+            "name": "parity hover (名前を含む)",
+            "value": 87.5,
+            "unit": "%"
+          },
+          {
+            "name": "parity references (数の一致)",
+            "value": 82.051,
+            "unit": "%"
+          },
+          {
+            "name": "parity documentHighlight (数の一致)",
+            "value": 83.871,
+            "unit": "%"
+          },
+          {
+            "name": "parity rename (書き換えの一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity signatureHelp (名前・引数の数・今の引数の一致)",
+            "value": 94.737,
+            "unit": "%"
+          },
+          {
+            "name": "parity completion `x.\\|` (書いてある名前を含む)",
+            "value": 90,
+            "unit": "%"
+          },
+          {
+            "name": "parity completion `na\\|me` (同)",
+            "value": 87.5,
+            "unit": "%"
+          },
+          {
+            "name": "parity 一致の平均",
+            "value": 91.531,
+            "unit": "%"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "miz404@gmail.com",
+            "name": "Kotaro Chikuba",
+            "username": "mizchi"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "1739a48bb3b0f2b30aec332a96e53f1bb583a8db",
+          "message": "Merge pull request #41 from mizchi/claude/compat-next25\n\nCompat: turbofish on struct values and methods, bool const params, alias paths, cfg_select!, break checks",
+          "timestamp": "2026-11-22T14:46:17+09:00",
+          "tree_id": "c0302350d5284ac564e7dd3d73b09dc6f6b116f1",
+          "url": "https://github.com/mizchi/zust/commit/1739a48bb3b0f2b30aec332a96e53f1bb583a8db"
+        },
+        "date": 1795326663391,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
