@@ -2967,6 +2967,10 @@ impl Cx<'_> {
                                 self.bk.no_loan_src = false;
                             }
                         }
+                        // (a bound that writes `'static` (`F: Fn(&'static u8)`): checked from here on, as a `dyn Fn`'s)
+                        if !self.rg.on && self.rg.eligible && self.inline_depth == 0 && b.contains("'static") {
+                            self.rg_late_on();
+                        }
                         let mut never = false;
                         let prim = |t: Ty| t.is_int() || t.is_float() || matches!(t, Ty::Bool | Ty::Char);
                         for (a, &pt) in args.iter().zip(&ps) {
@@ -2976,6 +2980,8 @@ impl Cx<'_> {
                                 return err(expr_start(a), format!("mismatched types: expected `{}`, found `{}` (an argument of a call through the bound `{b}`) (E0308)", self.prog.tn(pt), self.prog.tn(at)));
                             }
                         }
+                        // (the arguments flow into the regions the bound's parameters write, as for a `dyn Fn`)
+                        self.rg_dyn_fn_args(&b, &args);
                         let r = if never { (None, Ty::Never) } else { self.zero_of(ret) };
                         self.bk_frame_end_call();
                         return Ok(r);

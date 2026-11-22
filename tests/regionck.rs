@@ -1580,3 +1580,14 @@ fn guard_closure_moves_binding() {
     assert!(d.len() == 1 && d[0].0 == 5 && d[0].1.contains("in pattern guard (E0507)"), "{d:?}");
     assert_eq!(check("fn main() {\n    let v = Some(String::new());\n    match v {\n        Some(ref s) if (|| s.len() > 0)() => {}\n        Some(s) if s.len() > 1 => drop(s),\n        _ => {}\n    }\n}\n"), vec![]);
 }
+
+/// A call through a type parameter's `Fn` bound: the arguments flow into the regions the bound's parameters write, as
+/// for a `dyn Fn`
+#[test]
+fn fn_bound_call_regions() {
+    let d = check("fn f<'a>(g: impl FnOnce(&'static i32), x: &'a i32) {\n    g(x);\n}\nfn main() {}\n");
+    assert!(d.len() == 1 && d[0].0 == 2 && d[0].1.contains("lifetime may not live long enough"), "{d:?}");
+    let d = check("fn f<'a>(g: impl FnOnce(fn(&'a i32)), x: fn(&'static i32)) {\n    g(x);\n}\nfn main() {}\n");
+    assert!(d.len() == 1 && d[0].0 == 2, "{d:?}");
+    assert_eq!(check("fn f<'a, 'b: 'a, G: FnOnce(&'a i32)>(g: G, x: &'b i32) {\n    g(x);\n}\nfn h<G: Fn(&i32)>(g: G) {\n    let v = 1;\n    g(&v);\n}\nfn main() {}\n"), vec![]);
+}
