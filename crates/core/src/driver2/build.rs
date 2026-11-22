@@ -914,6 +914,16 @@ fn mkdir_all(dir: &std::path::Path) -> R<()> {
     if dir.is_dir() { Ok(()) } else { Err(format!("{}: cannot create the directory", dir.display())) }
 }
 
+/// A crate's features and cfgs, for its fingerprints
+fn add_crate_cfg(h: &mut KeyHasher, c: &CrateSpec) {
+    for f in &c.features {
+        h.add(&format!("feature {f}"));
+    }
+    for (k, v) in &c.cfgs {
+        h.add(&format!("cfg {k}={v:?}"));
+    }
+}
+
 fn n_lines(s: &str) -> u32 {
     s.as_bytes().iter().filter(|&&c| c == b'\n').count() as u32
 }
@@ -1099,6 +1109,7 @@ impl Session2 {
         h.add(&self.cid);
         h.add(&(self.opts.opt as u8));
         h.add(&(c.lib as u8));
+        add_crate_cfg(&mut h, c);
         h.add(own);
         for f in &own_map.files {
             h.add(f);
@@ -1188,6 +1199,9 @@ impl Session2 {
             h.add(&self.cid);
             h.add(&(self.opts.opt as u8));
             h.add(&(c.lib as u8));
+            // (the crate's features and cfgs: a `cfg!` inside a macro_rules! body is only evaluated after expansion,
+            // so the text alone does not show a change of them)
+            add_crate_cfg(&mut h, c);
             h.add(&loaded[i].as_ref().unwrap().0);
             for f in &loaded[i].as_ref().unwrap().1.files {
                 h.add(f);

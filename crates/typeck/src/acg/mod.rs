@@ -2153,10 +2153,14 @@ impl Cx<'_> {
                         _ => None,
                     };
                 }
-                // (`unsafe { a.get_unchecked(i) }.wrapping_shr(..)`: the element's reference)
+                // (`unsafe { a.get_unchecked(i) }.wrapping_shr(..)`: the element's reference; with a range, the subslice)
                 if let Ty::Array(el, _) | Ty::Slice(el) = t {
                     if name == "get_unchecked" || name == "get_unchecked_mut" {
-                        return Some(Ty::Ref(name.ends_with("_mut"), el));
+                        let m = name.ends_with("_mut");
+                        return Some(match args.first() {
+                            Some(Expr::Range(..)) => Ty::Ref(m, intern(Ty::Slice(el))),
+                            _ => Ty::Ref(m, el),
+                        });
                     }
                 }
                 let Ty::Struct(sid) = t else { return None };

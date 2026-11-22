@@ -205,7 +205,12 @@ fn load_file_in(path: &Path, display: &str, mod_dir: &Path, disp_dir: &str, star
     let src = match crate::macros::expand_includes(&src, path.parent().unwrap_or(Path::new("."))) {
         Ok(Some(s)) => {
             map.volatile = true;
-            s
+            // (and the `env!` of what `include!` put in: before it, `env!` gave the include's path)
+            if s.contains("env!") {
+                crate::macros::expand_env(&s, cfg).unwrap_or(s)
+            } else {
+                s
+            }
         }
         Ok(None) => src,
         Err(e) => return Err(format!("{display}: {e}")),

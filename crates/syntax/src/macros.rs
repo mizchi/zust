@@ -1211,33 +1211,63 @@ fn find_calls(
 /// `env!("NAME")` / `env!("NAME", "message")` and `option_env!("NAME")` with the crate's compile-time environment
 /// (`CfgSet::env`, then zustc's own): `env!` becomes the value as a string literal, `option_env!` `Some("value")`.
 /// A name that is not set is left as written: `option_env!` is then `None` (acg), and `env!` the error that names it.
-/// The value goes on one line (newlines escaped), so the lines after it keep their numbers. None: nothing to expand
-/// (the caller looks for `env!` first)
+/// Found by tokens, so the text of string literals and comments is not read. The value goes on one line (newlines
+/// escaped), followed by the newlines the invocation spanned, so the lines after it keep their numbers. None: nothing
+/// to expand (the caller looks for `env!` first)
 pub fn expand_env(src: &str, cfg: &crate::cfg::CfgSet) -> Option<String> {
-    let b = src.as_bytes();
+    let s = src.as_bytes();
+    let toks = crate::lexer::tokenize(s);
+    let t = |k: usize| -> &[u8] {
+        match toks.get(k) {
+            Some(&(_, a, b)) => &s[a..b],
+            None => b"",
+        }
+    };
+    let is_lit = |k: usize| toks.get(k).is_some_and(|x| x.0 == 2);
     let mut out = String::with_capacity(src.len());
     let mut at = 0;
     let mut changed = false;
-    let mut from = 0;
-    while let Some(k) = src[from..].find("env!") {
-        let i = from + k;
-        from = i + 4;
-        // (`option_env!` or `env!`, not part of another name, not in a line comment or right after a quote)
-        let (mut start, opt) = if src[..i].ends_with("option_") { (i - 7, true) } else { (i, false) };
-        // (`std::env!`, `::core::option_env!`: the path goes too)
-        for p in ["::core::", "::std::", "core::", "std::"] {
-            if src[..start].ends_with(p) {
-                start -= p.len();
-                break;
-            }
-        }
-        let line_start = src[..start].rfind('\n').map(|k| k + 1).unwrap_or(0);
-        if src[line_start..start].contains("//") || start > 0 && (b[start - 1] == b'"' || b[start - 1] == b'_' || b[start - 1].is_ascii_alphanumeric()) {
+    let mut i = 0;
+    while i < toks.len() {
+        let opt = t(i) == b"option_env";
+        if !(toks[i].0 == 0 && (opt || t(i) == b"env") && t(i + 1) == b"!" && t(i + 2) == b"(" && is_lit(i + 3)) {
+            i += 1;
             continue;
         }
-        let Some((name, end)) = env_args(&src[i + 4..], opt) else { continue };
-        let Some(v) = cfg.env_var(&name) else { continue };
-        out.push_str(&src[at..start]);
+        // (the arguments: `"NAME"`, `"NAME",`, and for env! `"NAME", "message"`)
+        let close = if t(i + 4) == b")" {
+            i + 4
+        } else if t(i + 4) == b"," && t(i + 5) == b")" {
+            i + 5
+        } else if !opt && t(i + 4) == b"," && is_lit(i + 5) && t(i + 6) == b")" {
+            i + 6
+        } else if !opt && t(i + 4) == b"," && is_lit(i + 5) && t(i + 6) == b"," && t(i + 7) == b")" {
+            i + 7
+        } else {
+            i += 1;
+            continue;
+        };
+        let name = match t(i + 3).strip_prefix(b"\"").and_then(|r| r.strip_suffix(b"\"")) {
+            Some(n) if !n.is_empty() && !n.contains(&b'\\') => String::from_utf8_lossy(n).into_owned(),
+            _ => {
+                i = close + 1;
+                continue;
+            }
+        };
+        let Some(v) = cfg.env_var(&name) else {
+            i = close + 1;
+            continue;
+        };
+        // (`std::env!`, `::core::option_env!`: the path goes too)
+        let mut st = i;
+        if st >= 3 && t(st - 1) == b":" && t(st - 2) == b":" && matches!(t(st - 3), b"std" | b"core") {
+            st -= 3;
+            if st >= 2 && t(st - 1) == b":" && t(st - 2) == b":" {
+                st -= 2;
+            }
+        }
+        let (a, b) = (toks[st].1, toks[close].2);
+        out.push_str(&src[at..a]);
         let lit = str_literal(&v);
         if opt {
             out.push_str("Some(");
@@ -1246,44 +1276,18 @@ pub fn expand_env(src: &str, cfg: &crate::cfg::CfgSet) -> Option<String> {
         } else {
             out.push_str(&lit);
         }
-        at = i + 4 + end;
-        from = at;
+        for _ in 0..src[a..b].matches('\n').count() {
+            out.push('\n');
+        }
+        at = b;
         changed = true;
+        i = close + 1;
     }
     if !changed {
         return None;
     }
     out.push_str(&src[at..]);
     Some(out)
-}
-
-/// The arguments of `env!` / `option_env!` after the `!`: `("NAME")`, or for `env!` `("NAME", "message")`; (the name,
-/// the length up to and with the closing parenthesis). None: not that form (a macro's `$x`, an escape in the name)
-fn env_args(after: &str, opt: bool) -> Option<(String, usize)> {
-    let t = after.trim_start().strip_prefix('(')?.trim_start();
-    let r = t.strip_prefix('"')?;
-    let e = r.find('"')?;
-    let name = &r[..e];
-    if name.contains('\\') || name.is_empty() {
-        return None;
-    }
-    let mut rest = r[e + 1..].trim_start();
-    if let Some(x) = rest.strip_prefix(',') {
-        rest = x.trim_start();
-        if !opt {
-            // (the message: a plain string literal)
-            if let Some(m) = rest.strip_prefix('"') {
-                let mut j = 0;
-                let mb = m.as_bytes();
-                while j < mb.len() && mb[j] != b'"' {
-                    j += if mb[j] == b'\\' { 2 } else { 1 };
-                }
-                rest = m.get(j + 1..)?.trim_start().strip_prefix(',').unwrap_or(m.get(j + 1..)?).trim_start();
-            }
-        }
-    }
-    let close = rest.strip_prefix(')')?;
-    Some((name.to_string(), after.len() - close.len()))
 }
 
 /// A string literal (on one line) whose value is s

@@ -465,7 +465,8 @@ the measured numbers. The [reports](docs/reports/) explain each step.
 - [ ] items inside blocks: `mod`, `trait`, `impl`, `type`, `union` and `pub` items in a fn body now move out; items a
   macro expands to in statement position move out too; from a macro in expression position not yet (~12 tests)
 - [ ] builtin macros: `offset_of!`, `addr_of!` / `addr_of_mut!`, `try!`, `stringify!`, `concat!`, `line!`, `column!`,
-  `env!`, `option_env!`, `assert_matches!`, `format_args!` now work; `module_path!`, `file!`, `include!`, `asm!` do not (~8 tests)
+  `env!`, `option_env!`, `assert_matches!`, `format_args!` now work, and so does `include!` of a literal path or of
+  `concat!` of literals and `env!`; `module_path!`, `file!`, other forms of `include!`, `asm!` do not (~8 tests)
 - [ ] `repr(packed)` / `repr(align)`: ~16 tests
 - [ ] `Pin`: `Pin<&T>` / `Pin<&mut T>` work as the pointer; `Box::pin(fut)` and `Pin<Box<dyn Future<Output = T>>>` work (the future's value, as async runs at once); `self: Pin<&mut Self>` and
   `self: Box<Self>` receivers work; `pin!` does not

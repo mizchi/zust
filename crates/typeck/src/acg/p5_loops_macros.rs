@@ -1551,9 +1551,11 @@ impl Cx<'_> {
             // `env!("X")` left by the preprocessor (macros::expand_env): X is not set
             "env" => {
                 let args = self.macro_args(p, g)?;
-                match args.first().and_then(|a| str_lit(a)) {
-                    Some(n) => err(SP, format!("environment variable `{n}` not defined at compile time")),
-                    None => err(SP, "expected string literal"),
+                // (`env!("X", "message")`: the message is the error)
+                match (args.first().and_then(|a| str_lit(a)), args.get(1).and_then(|a| str_lit(a))) {
+                    (Some(_), Some(m)) => err(SP, m),
+                    (Some(n), None) => err(SP, format!("environment variable `{n}` not defined at compile time")),
+                    (None, _) => err(SP, "expected string literal"),
                 }
             }
             _ => err(SP, format!("macro `{name}!` is not supported")),

@@ -135,6 +135,8 @@ error of each failing crate. Details and the order of the work: [docs/reports/20
   build script compiles with zustc and runs, and unicode-ident builds. The crate stops on:
   - `alloc::borrow::Cow::Borrowed(..)`: a value through an `alloc::` path is not found (`std::` works);
   - `Cow::Borrowed(s)` as a `Cow<'_, str>`: "type annotations needed", also with the type written out.
+- `include!("x.rs")` as an item shifts the line numbers after it (`line!()`, panic locations) by the lines of the
+  included file: its code goes in as it is, not on one line.
 - `s.as_ref()` with `s: &T`, `T: AsRef<str>` and `T = &str` is "cannot index into a value of type `str`"; inside a
   closure (`.map(|x| x.as_ref())`) its return type is not inferred.
 - async is erased: an `async fn` runs when called and returns its value. Needs a state-machine lowering, `Pin`,
