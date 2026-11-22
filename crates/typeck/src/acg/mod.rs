@@ -1762,7 +1762,7 @@ impl Cx<'_> {
         let mut diverged = false;
         let mut result: V = (None, Ty::Unit);
         // (`let Foo { value } = Foo::<&'static u32> { value: &x };`: a destructuring let of a literal whose type
-        // arguments name lifetimes, as `let __exr_slI: Foo<&'static u32> = ..; let Foo { value } = __exr_slI;`, whose
+        // arguments name lifetimes, as `let mut #slI: Foo<&'static u32> = ..; let Foo { value } = #slI;`, whose
         // first let the region check reads. The block's statements are kept by reference, with their indices)
         let split = if blk.stmts.iter().any(|st| matches!(st, Stmt::Let(pat, None, Some(Expr::Struct(p, ..)), None, _) if !is_simple_let(pat) && p.segs.last().is_some_and(|s| !s.args.is_empty()))) {
             self.lifetime_lit_split(blk)
@@ -2564,7 +2564,7 @@ impl Cx<'_> {
     }
 
     /// blk's statements (index, statement), with each destructuring `let pat = S::<&'a u32> {..};` (type arguments
-    /// that name lifetimes) as `let __exr_slI: S<&'a u32> = S::<&'a u32> {..};` and `let pat = __exr_slI;`
+    /// that name lifetimes) as `let mut #slI: S<&'a u32> = S::<&'a u32> {..};` and `let pat = #slI;`
     #[cold]
     #[inline(never)]
     fn lifetime_lit_split<'b>(&self, blk: &'b crate::parse::Block) -> Vec<(usize, &'b Stmt)> {
@@ -2577,8 +2577,10 @@ impl Cx<'_> {
                         s.args.clear();
                     }
                     if self.prog.struct_by_p(&PPath::of(&bare), self.self_sid).is_some() {
-                        let tmp = format!("__exr_sl{i}");
-                        let first: &'static Stmt = Box::leak(Box::new(Stmt::Let(Pat::Ident(false, false, tmp.clone(), None), Some(crate::parse::Ty::Path(None, path.clone())), Some(init.clone()), None, *lp)));
+                        // (a name source cannot write, so no binding of the user's is shadowed; `mut`, as the literal it
+                        // holds was a temporary that `ref mut` in the pattern may borrow)
+                        let tmp = format!("#sl{i}");
+                        let first: &'static Stmt = Box::leak(Box::new(Stmt::Let(Pat::Ident(false, true, tmp.clone(), None), Some(crate::parse::Ty::Path(None, path.clone())), Some(init.clone()), None, *lp)));
                         let second: &'static Stmt = Box::leak(Box::new(Stmt::Let(pat.clone(), None, Some(path_expr(&tmp)), None, *lp)));
                         out.push((i, first));
                         out.push((i, second));
