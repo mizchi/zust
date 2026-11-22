@@ -92,9 +92,12 @@ r5 / r2 を書いた agent が報告したもの。次の改訂で直す。
 2. **済: 実行時の補助関数を共通の runtime モジュールにした**: `zsc-runtime.js` / `.d.ts`(補助関数と、数値の brand とそのコンストラクタ)を出力先に 1 つ書き、各モジュールは使うものだけ import する。モジュールは使う brand を re-export するので、TS 側の import は変わらない。`--inline-runtime` で、これまでどおりモジュールの中に書く
    - 1 つのモジュールの bundle は変わらない(tree-shaking)。全モジュールを 1 つに bundle すると minify 後で 18,376 → 14,249 バイト(−22%)、gzip 後で −6.5%。zsc が出す .js は −30%
    - 003 の prelude(`Option` / `Result` の型)も、ここに置く予定
-3. **TS との境界の検査に tsrs を使う**(`npm i tsrs`。tsc と同じ診断で、今の .d.ts の検査は 0.89 秒 → 0.06 秒)
-   - `extern` で宣言した TS の関数の型と、実際の .d.ts の型が合うかを、検査用の .ts を生成して tsrs で確かめる。TS の型検査を自前で実装しない
+3. **済: TS との境界の検査に tsrs を使う**(`zsc --check-externs`、`npm i tsrs`。tsc と同じ診断で、今の .d.ts の検査は 0.89 秒 → 0.06 秒)
+   - zsc は `<stem>.externs.ts` を書く。各 `extern` の実体を、zustscript の型(数値は `number`)の変数に代入する: `const $c0: <T>(a0: T) => readonly [T, (a0: T) => void] = useState;`。引数は反変、戻り値は共変で確かめられる。TS の型検査を自前で実装しない
+   - tsrs のエラーは、その `extern` の位置に戻して報告する(`the TS declaration of \`useId\` does not fit this signature: Type '() => string' is not assignable to type '() => number'`)
+   - 実際の `@types/react`(React 19)で、`useState` は合い、戻り値を誤った `useId` は検出された。CI は tsrs も入れて、テスト `externs_match_ts` を走らせる
    - tsrs は Rust 1.100 が要り(この環境は 1.97)、Rust ライブラリとしての安定した API もないので、zustc と同じく外部コマンドとして使う
+   - 次: npm の .d.ts から `extern` の宣言を作る(`zsc import-types`)。tsrs の Node API の型の問い合わせはまだ partial
 
 まだ決めていないこと:
 

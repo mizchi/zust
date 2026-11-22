@@ -1,6 +1,6 @@
 //! zsc: the zustscript prototype's compiler.
 //!
-//!   zsc <input.zsc> [-o out-dir] [--zustc PATH] [--jsx-runtime MODULE] [--wasm-O] [--all-js] [--no-simd] [--inline-runtime]
+//!   zsc <input.zsc> [-o out-dir] [--zustc PATH] [--jsx-runtime MODULE] [--wasm-O] [--all-js] [--no-simd] [--inline-runtime] [--check-externs]
 //!
 //! (`--no-simd` compiles `@simd fn`s through zustc like `@wasm` ones (no vectors).
 //! `--all-js` keeps `@wasm fn`s in the JS output: the same source, run as JS.
@@ -35,6 +35,7 @@ fn main() {
     let mut all_js = false;
     let mut no_simd = false;
     let mut inline_runtime = false;
+    let mut check_externs = false;
     let mut it = args.iter();
     while let Some(a) = it.next() {
         match a.as_str() {
@@ -45,6 +46,7 @@ fn main() {
             "--all-js" => all_js = true,
             "--no-simd" => no_simd = true,
             "--inline-runtime" => inline_runtime = true,
+            "--check-externs" => check_externs = true,
             _ if input.is_none() => input = Some(PathBuf::from(a)),
             _ => usage(),
         }
@@ -166,6 +168,53 @@ fn main() {
         eprint!("; wasm layer via zustc {:.1} ms, {size} bytes", t.as_secs_f64() * 1e3);
     }
     eprintln!(")");
+    if check_externs {
+        check_externs_with_tsrs(&items, &info, &stem, &out_dir, &file, &src);
+    }
+}
+
+/// `--check-externs`: writes `<stem>.externs.ts` (each extern's TS declaration assigned to its zustscript type) and
+/// type-checks it with tsrs (the `TSRS` variable, or `tsrs` on PATH; TypeScript's checker, in Rust). An error is
+/// reported at the extern it belongs to.
+fn check_externs_with_tsrs(items: &[ast::Item], info: &check::Info, stem: &str, out_dir: &std::path::Path, file: &str, src: &str) {
+    let Some((ts, lines)) = js::extern_check(items, info, stem) else { return };
+    let name = format!("{stem}.externs.ts");
+    std::fs::write(out_dir.join(&name), ts).unwrap();
+    let tsrs = std::env::var("TSRS").unwrap_or_else(|_| "tsrs".into());
+    let o = Command::new(&tsrs)
+        .current_dir(out_dir)
+        .args(["--noEmit", "--strict", "--skipLibCheck", "--target", "es2022", "--module", "esnext", "--moduleResolution", "bundler", &name])
+        .output()
+        .unwrap_or_else(|e| die(&format!("--check-externs needs tsrs (`npm i tsrs`, or set TSRS): {tsrs}: {e}")));
+    if o.status.success() {
+        eprintln!("zsc: externs match their TS declarations ({} checked with tsrs)", lines.len());
+        return;
+    }
+    // `<file>(line,col): error TSxxxx: message` (continuation lines are indented)
+    let text = String::from_utf8_lossy(&o.stdout).to_string() + &String::from_utf8_lossy(&o.stderr);
+    let mut errs: Vec<(ast::Pos, String)> = vec![];
+    let mut other = vec![];
+    for l in text.lines() {
+        let line = l.strip_prefix(&name).and_then(|r| r.strip_prefix('(')).and_then(|r| r.split(',').next()).and_then(|n| n.parse::<usize>().ok());
+        match line.and_then(|n| lines.iter().find(|x| x.0 == n)) {
+            Some((_, ext, pos)) => {
+                let msg = l.split_once("): ").map(|x| x.1).unwrap_or(l);
+                errs.push((*pos, format!("the TS declaration of `{ext}` does not fit this signature: {msg}")));
+            }
+            None if l.starts_with(' ') && !errs.is_empty() => {
+                let e = errs.last_mut().unwrap();
+                e.1.push('\n');
+                e.1.push_str(l.trim_end());
+            }
+            None if !l.trim().is_empty() => other.push(l.to_string()),
+            None => {}
+        }
+    }
+    if errs.is_empty() {
+        die(&format!("tsrs failed on {}:\n{}", out_dir.join(&name).display(), other.join("\n")));
+    }
+    report(file, src, &errs);
+    std::process::exit(1);
 }
 
 /// zustc next to this binary's checkout: crates/zustscript/target/<profile>/zsc → <zust>/target/release/zustc
@@ -203,7 +252,7 @@ fn report_warnings(file: &str, src: &str, ws: &[(ast::Pos, String)]) {
 }
 
 fn usage() -> ! {
-    die("usage: zsc <input.zsc> [-o out-dir] [--zustc PATH] [--jsx-runtime MODULE] [--wasm-O] [--all-js] [--no-simd] [--inline-runtime]")
+    die("usage: zsc <input.zsc> [-o out-dir] [--zustc PATH] [--jsx-runtime MODULE] [--wasm-O] [--all-js] [--no-simd] [--inline-runtime] [--check-externs]")
 }
 
 fn die(m: &str) -> ! {

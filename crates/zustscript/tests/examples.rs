@@ -299,3 +299,25 @@ fn no_jsx_no_react_import() {
     let dts = std::fs::read_to_string(d.join("nojsx.d.ts")).unwrap();
     assert!(!dts.contains("import type"), "{dts}");
 }
+
+/// `--check-externs`: each extern's TS declaration is checked against its zustscript signature with tsrs (the
+/// `TSRS` variable, or `tsrs` on PATH; skipped otherwise). app.zsc's `useState` fits the react stand-in's
+/// declaration; tests/externs/bad.zsc gives the setter the wrong type, and the error points at that extern.
+#[test]
+fn externs_match_ts() {
+    let tsrs = std::env::var("TSRS").unwrap_or_else(|_| "tsrs".into());
+    if Command::new(&tsrs).arg("--version").output().is_err() {
+        eprintln!("skipped: no tsrs (set TSRS)");
+        return;
+    }
+    let d = out_dir("externs");
+    let o = zsc(&root().join("examples/app.zsc"), &d, &["--check-externs"]);
+    assert!(o.status.success(), "zsc failed:\n{}", String::from_utf8_lossy(&o.stderr));
+    assert!(String::from_utf8_lossy(&o.stderr).contains("externs match their TS declarations (1 checked with tsrs)"));
+    let o = zsc(&root().join("tests/externs/bad.zsc"), &d, &["--check-externs"]);
+    let err = String::from_utf8_lossy(&o.stderr);
+    assert!(!o.status.success(), "{err}");
+    assert!(err.contains("the TS declaration of `useState` does not fit this signature"), "{err}");
+    assert!(err.contains("bad.zsc:2:1"), "{err}");
+    assert!(!err.contains("`log`"), "console.log fits: {err}");
+}
