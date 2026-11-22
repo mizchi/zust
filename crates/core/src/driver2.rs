@@ -1315,7 +1315,7 @@ fn first_unreachable(b: &crate::parse::Block) -> Option<(crate::parse::Pos, &'st
     use crate::parse::{Expr, Stmt};
     fn diverges(e: &Expr) -> bool {
         match e {
-            Expr::Return(_) | Expr::Break(..) | Expr::Continue(_) => true,
+            Expr::Return(_) | Expr::Break(..) | Expr::Continue(..) => true,
             Expr::Macro(p, _, _) => matches!(p.segs.last().map(|s| s.name.as_str()), Some("panic" | "unreachable" | "todo" | "unimplemented")),
             Expr::Loop(_, body) => !format!("{body:?}").contains("Break("),
             Expr::Paren(x) => diverges(x),

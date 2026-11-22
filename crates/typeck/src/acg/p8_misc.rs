@@ -130,6 +130,7 @@ impl Cx<'_> {
             is_block: true,
             depth: self.scopes.len(),
             temps: self.temps.len(),
+            no_value: None,
         });
         let (v, t) = self.block(blk, expected)?;
         let lp = self.loops.pop().unwrap();

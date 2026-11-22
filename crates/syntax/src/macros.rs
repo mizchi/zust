@@ -983,6 +983,7 @@ pub fn expand_cfg(src: &str, cfg: Option<&crate::cfg::CfgSet>) -> Result<Option<
         // (展開したものの中にマクロの名前が無ければ、もう一周しなくてよい)
         let again = reps.iter().any(|r| r.2.contains("macro_rules") || macros.keys().any(|m| r.2.contains(m.as_str())));
         let has_cfg = cfg.is_some() && reps.iter().any(|r| r.2.contains("cfg"));
+        let has_select = !has_cfg && reps.iter().any(|r| r.2.contains("cfg_select"));
         // (`env!($k)` in a template: its name is known only now)
         let has_env = reps.iter().any(|r| r.2.contains("env"));
         for (a, e, rep) in reps {
@@ -995,6 +996,11 @@ pub fn expand_cfg(src: &str, cfg: Option<&crate::cfg::CfgSet>) -> Result<Option<
         }
         if has_cfg {
             if let Some(t) = crate::cfg::strip(&text, cfg.unwrap()) {
+                text = t;
+            }
+        } else if has_select {
+            // (`cfg_select!` an expansion produced, without a configuration given: the default one's)
+            if let Some(t) = crate::cfg::expand_select(&text, &crate::cfg::CfgSet { debug_assertions: true, ..Default::default() }) {
                 text = t;
             }
         }

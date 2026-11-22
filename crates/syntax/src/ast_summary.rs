@@ -238,7 +238,11 @@ fn collect_generics(g: &Generics, out: &mut Vec<(String, Vec<String>)>) -> R<()>
         match p {
             GParam::Lifetime(_) => {}
             GParam::Ty(n, bs, _) => out.push((n.clone(), bound_names(bs)?)),
-            GParam::Const(n, _) => out.push((n.clone(), vec![CONST_GENERIC.to_string()])),
+            // (`const B: bool`: the parameter's type when it is not usize, as `__const:bool` after the mark)
+            GParam::Const(n, t) => out.push((n.clone(), match t {
+                PTy::Path(None, q) if q.segs.len() == 1 && q.segs[0].name != "usize" => vec![CONST_GENERIC.to_string(), format!("{CONST_GENERIC}:{}", q.segs[0].name)],
+                _ => vec![CONST_GENERIC.to_string()],
+            })),
         }
     }
     for (t, bs) in &g.preds {
@@ -291,6 +295,12 @@ fn where_types(item: &Item, owner: Option<&Owner>, out: &mut Vec<String>) {
 fn adt_bounds(g: &Generics) -> Vec<(String, Vec<String>)> {
     let mut v = Vec::new();
     for p in &g.params {
+        // (`struct Flag<const B: bool>`: a const parameter's declared type when it is not usize, `__const:bool`)
+        if let GParam::Const(n, PTy::Path(None, q)) = p {
+            if q.segs.len() == 1 && q.segs[0].name != "usize" {
+                v.push((n.clone(), vec![format!("{CONST_GENERIC}:{}", q.segs[0].name)]));
+            }
+        }
         if let GParam::Ty(n, bs, _) = p {
             let trs: Vec<String> = bs
                 .iter()

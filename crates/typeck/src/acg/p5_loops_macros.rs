@@ -549,7 +549,7 @@ impl Cx<'_> {
             self.bk_def_named("__exr_it", &srcs, src_e);
             let call: &Expr = self.keep_expr(mcall(path_expr("__exr_it"), "next", vec![]));
             let pat = Pat::TupleStruct(path_of("Some"), vec![(**fpat).clone()]);
-            let r = self.while_let_parts(&pat, call, fbody);
+            let r = self.while_let_parts(&pat, call, fbody, "for");
             self.pop_scope();
             r?;
             return Ok((None, Ty::Unit));
@@ -754,6 +754,7 @@ impl Cx<'_> {
             // パターンの束縛のスコープも break で drop する
             depth: self.scopes.len() - 1,
             temps: self.temps.len(),
+            no_value: Some("for"),
         });
         let (_, bt) = self.block(fbody, Some(Ty::Unit))?;
         self.loops.pop();
@@ -1523,6 +1524,14 @@ impl Cx<'_> {
                 let e: &Expr = self.keep_expr(Expr::Macro(path_of("format"), g.to_string(), crate::parse::Span::default()));
                 self.expr(e, None)
             }
+            // `compile_error!("msg")`: the error it names, here
+            "compile_error" => {
+                let args = self.macro_args(p, g)?;
+                match args.first().and_then(str_lit) {
+                    Some(m) => err(SP, m),
+                    None => err(SP, "compile_error! takes a string literal"),
+                }
+            }
             // `option_env!("X")`: no build-time environment here
             "option_env" => {
                 let args = self.macro_args(p, g)?;
@@ -2028,7 +2037,18 @@ impl Cx<'_> {
     pub(crate) fn variant_on(&self, p: &Path, t: Ty) -> Option<(u32, usize)> {
         let (sid, vi) = self.prog.variant_by_p(&PPath::of(p), self.self_sid)?;
         match t {
-            Ty::Struct(x) if self.prog.base_of(x) == self.prog.base_of(sid) => Some((x, vi)),
+            Ty::Struct(x) if self.prog.base_of(x) == self.prog.base_of(sid) => {
+                // (`A::V(_)` with `type A = E<u8>;`: a variant of that instance only, not of an `E<u16>`)
+                if p.segs.len() == 2 && !self.prog.struct_index.contains_key(&p.segs[0].name) && self.prog.aliases.contains_key(&p.segs[0].name) {
+                    let at = self.parse_ty(&crate::parse::Ty::Path(None, path_of(&p.segs[0].name)));
+                    if let Ok(at @ Ty::Struct(_)) = at {
+                        if at != t && !self.prog.has_param(at) && !self.prog.has_param(t) {
+                            return None;
+                        }
+                    }
+                }
+                Some((x, vi))
+            }
             _ => Some((sid, vi)),
         }
     }
@@ -2346,6 +2366,16 @@ impl Cx<'_> {
         crate::program::const_generic_value(&self.env, id)
     }
 
+    /// the declared type of the const generic parameter `e` names, when it is not usize (`const B: bool`)
+    pub(crate) fn const_generic_ty(&self, e: &Expr) -> Option<Ty> {
+        let Expr::Path(_, p) = e else { return None };
+        let id = ident_of(p)?;
+        let sig = self.prog.sigs.get(self.root as usize)?;
+        let (_, bs) = sig.generics.iter().find(|(n, _)| n == id)?;
+        let t = bs.iter().find_map(|b| b.strip_prefix(crate::types::CONST_GENERIC)?.strip_prefix(':'))?;
+        Ty::prim(&self.prog.const_decl(t))
+    }
+
     pub(crate) fn const_of(&self, e: &Expr) -> Option<u32> {
         let Expr::Path(qself, p) = e else { return None };
         // (速い判定: 複数セグメントのパスで、最後の名前の const がなければ const ではない)
@@ -2374,7 +2404,8 @@ impl Cx<'_> {
             let (a, n) = (p.segs[0].name.clone(), p.segs[1].name.clone());
             let ty = if a == "Self" {
                 self.env.self_ty.or(self.self_sid.map(Ty::Struct))
-            } else if self.env.params.iter().any(|(g, _)| *g == a) {
+            } else if self.env.params.iter().any(|(g, _)| *g == a) || self.prog.aliases.contains_key(&a) {
+                // (`T::N` of a type parameter, `Alias::N` of a type alias: the type it stands for)
                 let ty = crate::parse::Ty::Path(None, path_of(&a));
                 self.parse_ty(&ty).ok()
             } else {

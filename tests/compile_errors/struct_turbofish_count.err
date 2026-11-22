@@ -1,0 +1,1 @@
+3:13: struct takes 1 generic argument but 2 generic arguments were supplied (E0107)

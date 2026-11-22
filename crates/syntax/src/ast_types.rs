@@ -42,8 +42,21 @@ fn lit_u64(t: &str) -> Option<u64> {
 }
 
 /// const ジェネリクスの引数 (`Buf<4>` / `Buf<N>` / `Buf<{ 4 }>`): 長さを持つ配列型 `[(); n]`
+/// (`Flag<true>`: `true` / `false` in a type's arguments, which the parser reads as a type path, is a const argument:
+/// 1 / 0, as an integer const argument is)
+pub fn bool_arg(t: &PTy) -> Option<TySyn> {
+    let PTy::Path(None, p) = t else { return None };
+    let n = match single(p)? {
+        "true" => 1,
+        "false" => 0,
+        _ => return None,
+    };
+    Some(TySyn::Array(Box::new(TySyn::Prim(Ty::Unit)), ArrLen::Lit(n)))
+}
+
 pub fn const_arg_syn(e: &Expr) -> R<TySyn> {
     match e {
+        Expr::Lit(t, _) if t == "true" || t == "false" => Ok(TySyn::Array(Box::new(TySyn::Prim(Ty::Unit)), ArrLen::Lit((t == "true") as u64))),
         Expr::Lit(t, _) if t.starts_with(|c: char| c.is_ascii_digit()) => match lit_u64(t) {
             Some(n) => Ok(TySyn::Array(Box::new(TySyn::Prim(Ty::Unit)), ArrLen::Lit(n))),
             None => Err("bad const argument".to_string()),
@@ -274,7 +287,10 @@ fn gat_app(base: TySyn, seg: &crate::parse::Seg, self_ty: Option<&TySyn>) -> R<T
         match a {
             // (`M::Box<dyn Send>`: an auto trait alone, right in a Box, as for the last segment of a path)
             GArg::Ty(t) if seg.name == "Box" && auto_dyn(t).is_some() => parts.push(TySyn::Dyn(auto_dyn(t).unwrap())),
-            GArg::Ty(t) => parts.push(tysyn(t, self_ty)?),
+            GArg::Ty(t) => parts.push(match bool_arg(t) {
+                Some(b) => b,
+                None => tysyn(t, self_ty)?,
+            }),
             GArg::Lifetime(_) => {}
             // (`M::S<3>`: a module-qualified type with a const argument also comes here; `Program` resolves it as `S<3>`)
             GArg::Const(e) => parts.push(const_arg_syn(e)?),
@@ -344,6 +360,7 @@ fn path_ty(p: &Path, self_ty: Option<&TySyn>) -> R<TySyn> {
         match a {
             // (`Box<dyn Send>`: an auto trait alone, right in a Box)
             GArg::Ty(t) if s == "Box" && auto_dyn(t).is_some() => generic_args.push(TySyn::Dyn(auto_dyn(t).unwrap())),
+            GArg::Ty(t) if bool_arg(t).is_some() => generic_args.push(bool_arg(t).unwrap()),
             GArg::Ty(t) => {
                 // (`Buf<N>`: 型の位置の 1 つの名前は型として読まれる (syn と同じ))
                 generic_args.push(tysyn(t, self_ty)?)

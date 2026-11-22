@@ -156,7 +156,7 @@ pub fn vec_repeat_parts(g: &str, base: Pos) -> Option<(Expr, Expr)> {
 /// 子の式を順に f に渡す (ブロック・文の中も。アイテムには入らない)
 fn each_child(e: &Expr, f: &mut dyn FnMut(&Expr)) {
     match e {
-        Expr::Lit(_, _) | Expr::Path(..) | Expr::Continue(_) => {}
+        Expr::Lit(_, _) | Expr::Path(..) | Expr::Continue(..) => {}
         Expr::Unary(_, x, _) | Expr::Try(x) | Expr::Paren(x) | Expr::Ref(_, x) | Expr::RawRef(_, x) | Expr::Field(x, _, _) | Expr::Cast(x, _) => f(x),
         Expr::Binary(_, l, r, _) | Expr::Assign(l, r) | Expr::AssignOp(_, l, r, _) | Expr::Index(l, r, _) | Expr::Repeat(l, r) => {
             f(l);
@@ -208,7 +208,7 @@ fn each_child(e: &Expr, f: &mut dyn FnMut(&Expr)) {
             f(x);
             block_exprs(b, f);
         }
-        Expr::Break(_, v) | Expr::Return(v) => {
+        Expr::Break(_, v, _) | Expr::Return(v) => {
             if let Some(v) = v {
                 f(v);
             }
@@ -894,12 +894,12 @@ impl EHash {
                 self.sub(x, memo);
                 self.block(b, memo);
             }
-            Expr::Break(l, x) => {
+            Expr::Break(l, x, _) => {
                 self.n(23);
                 self.opt_s(l);
                 self.opt_e(x, memo);
             }
-            Expr::Continue(l) => {
+            Expr::Continue(l, _) => {
                 self.n(24);
                 self.opt_s(l);
             }
