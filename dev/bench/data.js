@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795326663717,
+  "lastUpdate": 1795326665791,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -97002,6 +97002,70 @@ window.BENCHMARK_DATA = {
           {
             "name": "tests/ui compile-fail passing",
             "value": 4152,
+            "unit": "tests"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "miz404@gmail.com",
+            "name": "Kotaro Chikuba",
+            "username": "mizchi"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "1739a48bb3b0f2b30aec332a96e53f1bb583a8db",
+          "message": "Merge pull request #41 from mizchi/claude/compat-next25\n\nCompat: turbofish on struct values and methods, bool const params, alias paths, cfg_select!, break checks",
+          "timestamp": "2026-11-22T14:46:17+09:00",
+          "tree_id": "c0302350d5284ac564e7dd3d73b09dc6f6b116f1",
+          "url": "https://github.com/mizchi/zust/commit/1739a48bb3b0f2b30aec332a96e53f1bb583a8db"
+        },
+        "date": 1795326665457,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tests/ui run-pass pass rate",
+            "value": 75.85,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui run-pass passing",
+            "value": 1809,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui check-pass pass rate",
+            "value": 82.62,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui check-pass passing",
+            "value": 1493,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui build-pass pass rate",
+            "value": 74.81,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui build-pass passing",
+            "value": 101,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui compile-fail pass rate",
+            "value": 56.81,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui compile-fail passing",
+            "value": 4180,
             "unit": "tests"
           }
         ]
