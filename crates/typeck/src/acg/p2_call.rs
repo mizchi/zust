@@ -1002,6 +1002,13 @@ impl Cx<'_> {
                 }
             }
         }
+        // (a method of what a user's `Deref` gives (`x.get()` with get on the target): `deref(&self)` borrows the
+        // receiver shared, and a result that borrows from self borrows from it)
+        if self.bk_on() && via_deref && is_place_expr(recv) {
+            let flows = self.bk_ret_from(id, 0);
+            let ev = self.bk_recv_ev(recv, Ty::Ref(false, intern(st)), flows);
+            self.bk_push(ev);
+        }
         // `self` を値で受ける: 受け手からムーブ
         if !matches!(recv_ty, Ty::Ref(..)) && self.needs_drop(st) {
             match recv_temp {
