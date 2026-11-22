@@ -3324,6 +3324,7 @@ compile-fail	let-else/let-else-destructuring.rs
 compile-fail	let-else/let-else-if.rs
 check-pass	let-else/let-else-irrefutable-152938.rs
 check-pass	let-else/let-else-irrefutable.rs
+compile-fail	let-else/let-else-missing-semicolon.rs
 compile-fail	let-else/let-else-no-double-error.rs
 run-pass	let-else/let-else-non-copy.rs
 compile-fail	let-else/let-else-non-diverging.rs
@@ -4795,6 +4796,7 @@ check-pass	parser/issues/issue-115780-pat-lt-bracket-in-macro-call.rs
 compile-fail	parser/issues/issue-14303.rs
 compile-fail	parser/issues/issue-15914.rs
 compile-fail	parser/issues/issue-1655.rs
+compile-fail	parser/issues/issue-17718-const-mut.rs
 run-pass	parser/issues/issue-17718-parse-const.rs
 compile-fail	parser/issues/issue-17904-2.rs
 compile-fail	parser/issues/issue-19096.rs
@@ -4818,6 +4820,7 @@ compile-fail	parser/issues/issue-24197.rs
 compile-fail	parser/issues/issue-24375.rs
 compile-fail	parser/issues/issue-24780.rs
 compile-fail	parser/issues/issue-27255.rs
+compile-fail	parser/issues/issue-3036.rs
 compile-fail	parser/issues/issue-31804.rs
 compile-fail	parser/issues/issue-32446.rs
 compile-fail	parser/issues/issue-32505.rs
@@ -5142,6 +5145,8 @@ compile-fail	parser/recover/recover-for-loop-parens-around-head.rs
 compile-fail	parser/recover/recover-from-bad-variant.rs
 compile-fail	parser/recover/recover-from-homoglyph.rs
 compile-fail	parser/recover/recover-labeled-non-block-expr.rs
+compile-fail	parser/recover/recover-missing-semi-before-item.rs
+compile-fail	parser/recover/recover-missing-semi.rs
 compile-fail	parser/recover/recover-parens-around-match-arm-head.rs
 compile-fail	parser/recover/recover-pat-exprs.rs
 compile-fail	parser/recover/recover-pat-issues.rs
@@ -6511,6 +6516,7 @@ compile-fail	suggestions/method-access-to-range-literal-typo.rs
 compile-fail	suggestions/method-missing-parentheses.rs
 check-pass	suggestions/missing-assoc-type-bound-restriction.rs
 compile-fail	suggestions/missing-impl-trait-block-but-not-ascii.rs
+compile-fail	suggestions/missing-semicolon.rs
 compile-fail	suggestions/multiple_tuples_implement_same_trait_continuous_arities.rs
 compile-fail	suggestions/multiple_tuples_implement_same_trait_discontinuous_arities.rs
 compile-fail	suggestions/mut-ref-reassignment.rs

@@ -790,6 +790,19 @@ impl Parser {
         if self.eat_punct(s) {
             Ok(())
         } else {
+            // (a missing `;` before a token on a later line that can begin a statement, or a `}`: right after the
+            // previous token, where it goes, as rustc points: `}` then `let` on the next line. Not `,` / `:` / `.`)
+            if let (true, Some(p), Some(t)) = (s == ";", self.i.checked_sub(1).and_then(|k| self.toks.get(k)), self.toks.get(self.i)) {
+                let begins = match t.kind {
+                    TokKind::Ident | TokKind::Lit | TokKind::Lifetime | TokKind::Open => true,
+                    TokKind::Close => t.text == "}",
+                    TokKind::Punct => matches!(t.text.as_str(), "-" | "!" | "*" | "&" | "|" | "||" | ".." | "<" | "::" | "&&"),
+                };
+                if p.line < t.line && begins && !p.text.contains('\n') {
+                    let pos = self.shift(p.line, p.col + p.text.chars().count() as u32);
+                    return Err(format!("{}:{}: expected `{s}` (found `{}`)", pos.line, pos.col + 1, t.text));
+                }
+            }
             Err(self.err(&format!("expected `{s}`")))
         }
     }
