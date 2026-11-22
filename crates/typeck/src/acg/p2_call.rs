@@ -152,8 +152,9 @@ impl Cx<'_> {
                 }
             }
         }
-        // (E0034: `x.foo()` that two traits of the program's give x's type, with no inherent `foo`)
-        if self.user_code && self.explicit_trait.is_none() && !self.prog.has_mods && !self.prog.multi_trait_methods.is_empty() && self.prog.multi_trait_methods.contains(method.as_str()) {
+        // (E0034: `x.foo()` that two traits of the program's give x's type, with no inherent `foo`. Not in a generic fn's
+        // instance: there `s.scaled()` of `S: Shape0` is Shape0's, by the bound, whatever else S's instance implements)
+        if self.user_code && self.explicit_trait.is_none() && !self.prog.has_mods && self.env.params.is_empty() && !self.prog.multi_trait_methods.is_empty() && self.prog.multi_trait_methods.contains(method.as_str()) {
             if let Some(t) = self.peek(recv).filter(|&t| !self.prog.has_param(t)) {
                 if self.ambiguous_method(t, method) {
                     return err(SP, "multiple applicable items in scope (E0034)");
