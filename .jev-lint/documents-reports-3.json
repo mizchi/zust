@@ -17,6 +17,14 @@
       "path": "docs/ja/reports/2026-11-22-07-region-check-10.md",
       "role": "historical"
     },
+    "docs_reports_2026-11-22-08-region-check-11.en": {
+      "path": "docs/reports/2026-11-22-08-region-check-11.md",
+      "role": "historical"
+    },
+    "docs_reports_2026-11-22-08-region-check-11.ja": {
+      "path": "docs/ja/reports/2026-11-22-08-region-check-11.md",
+      "role": "historical"
+    },
     "docs_reports_2026-11-22-08-wasm-bindgen-shared-wasm32.en": {
       "path": "docs/reports/2026-11-22-08-wasm-bindgen-shared-wasm32.md",
       "role": "historical"
@@ -47,6 +55,17 @@
       },
       "target": {
         "source": "docs_reports_2026-11-22-07-region-check-10.ja"
+      }
+    },
+    {
+      "id": "docs_reports_2026-11-22-08-region-check-11",
+      "topic": "The Japanese file docs/ja/reports/2026-11-22-08-region-check-11.md is a faithful translation of docs/reports/2026-11-22-08-region-check-11.md",
+      "mode": "translation",
+      "reference": {
+        "source": "docs_reports_2026-11-22-08-region-check-11.en"
+      },
+      "target": {
+        "source": "docs_reports_2026-11-22-08-region-check-11.ja"
       }
     },
     {

@@ -81,6 +81,9 @@ pub struct Rg {
     pub rerun: bool,
     /// Nesting of call_fn (this and what follows: where lowering is, written whether the check is on or not)
     pub depth: u32,
+    /// The lifetimes a path call writes on its type (`A::<'a>::new(..)`, `<A<'a> as Tr>::f(..)`): (the call's depth
+    /// in call_fn, the callee, the lifetimes in the type's order). rg_call gives them to the impl's lifetimes
+    pub call_self: Option<(u32, u32, Vec<String>)>,
     /// The receiver of the method call being lowered, as passed, and its position
     pub recv: Option<(RT, Sp)>,
     /// The last scrutinee's tree; the part of it the pattern being bound matches, and the region of the reference
@@ -2677,6 +2680,26 @@ impl Cx<'_> {
         let prelude = prog.item_of.get(id as usize).copied().flatten().is_none_or(|i| i >= prog.prelude_from) && !prog.closures.contains_key(&id);
         let rg = &mut self.rg;
         let mut lts: Vec<u32> = rs.as_deref().map(|r| r.lts.iter().map(|_| rg.var()).collect()).unwrap_or_default();
+        // (the lifetimes the path writes on the impl's self type: `A::<'a>::new` with `impl<'a> A<'a>` is the impl's
+        // `'a`. The self type's first slots are its lifetime parameters')
+        // (a call in the arguments, one level deeper, leaves them: it is made before this call's check)
+        let written = if rg.call_self.as_ref().is_some_and(|x| x.0 == rg.depth && x.1 == id) { rg.call_self.take() } else { None };
+        if let (Some((_, _, ls)), Some(r)) = (written, rs.as_deref()) {
+            let n = match sig0.self_ty {
+                Some(Ty::Struct(s)) => lts_of(prog, prog.base_of(s)),
+                _ => 0,
+            };
+            for (j, l) in ls.iter().enumerate().take(n) {
+                let Some(&c) = r.self_slots.get(j) else { break };
+                if (c as usize) >= (r.outer as usize).min(lts.len()) || l == "'_" {
+                    continue;
+                }
+                let v = if l == "'static" { Some(STATIC) } else { rg.lt_names.iter().position(|x| x == l).and_then(|p| rg.lts.get(p).copied()) };
+                if let Some(v) = v {
+                    lts[c as usize] = v;
+                }
+            }
+        }
         // (a method of a placeholder's bound (`G: GetRef<'a>` calling `g.get()`): the trait's lifetimes are those the
         // bound writes, the caller's; what the declaration requires is the caller's to prove)
         let mut ph_self = false;
@@ -3244,11 +3267,21 @@ impl Cx<'_> {
     /// 'static (the type must implement what the const is of)
     pub(crate) fn rg_static_self_const(&mut self, e: &Expr, ci: u32) {
         let Some(slots) = self.prog.static_self_consts.get(&ci) else { return };
-        let Expr::Path(None, p) = e else { return };
-        if !self.rg_on() || p.segs.len() < 2 {
+        if !self.rg_on() {
             return;
         }
-        let seg = &p.segs[p.segs.len() - 2];
+        // (the type's segment: `A::<'a>::IC`, or the self type of `<A<'a> as Tr>::IC`)
+        let seg = match e {
+            Expr::Path(None, p) if p.segs.len() >= 2 => &p.segs[p.segs.len() - 2],
+            Expr::Path(Some(q), _) => match &**q {
+                PTy::Path(None, qp) => match qp.segs.last() {
+                    Some(s) => s,
+                    None => return,
+                },
+                _ => return,
+            },
+            _ => return,
+        };
         let lts = seg.args.iter().filter_map(|a| if let crate::parse::GArg::Lifetime(l) = a { Some(l) } else { None });
         for (i, l) in lts.enumerate() {
             if slots.get(i) != Some(&R_STATIC) || l == "'static" {
@@ -3600,6 +3633,64 @@ impl Cx<'_> {
     }
 
     /// Keep the tree of the call just lowered, as the value of e
+    /// A value of an ADT whose field nests two of its lifetimes (`p: &'a mut &'b i32`) relates the borrows it is
+    /// built from (a method may store one through the other): the region check of a function the gate left out is
+    /// turned on before its fields are lowered, from the function's start if a local bound before has no tree
+    /// (nll/capture-ref-in-struct.rs)
+    pub(crate) fn rg_adt_on(&mut self, base: u32) {
+        if self.rg.on || !self.rg.eligible || self.inline_depth != 0 {
+            return;
+        }
+        let Some(r) = self.prog.adt_regions.get(&base) else { return };
+        if r.lts.len() < 2 {
+            return;
+        }
+        let nests = r.fields.iter().any(|f| {
+            let mut first = None;
+            f.iter().any(|&c| c < R_STATIC && *first.get_or_insert(c) != c)
+        });
+        if nests {
+            self.rg_late_on();
+        }
+    }
+
+    /// A constructor's path that writes lifetimes turns the region check on, before what it holds is lowered
+    pub(crate) fn rg_written_on(&mut self, path: &crate::parse::Path) {
+        if !self.rg.on && self.rg.eligible && self.inline_depth == 0 && path.segs.iter().any(|s| !s.args.is_empty()) && crate::regions::path_names_lt(path) {
+            self.rg_late_on();
+        }
+    }
+
+    /// A constructor's path writes lifetimes (`SomeEnum::SomeVariant::<&'static u32>(&c)`, `S::<&'a u32> { .. }`,
+    /// `E::Unit::<Cell<&'a u32>>`): the value built (its tree, kept at e) is of the type written. What it holds flows
+    /// into that type, and the value is of it from here on
+    pub(crate) fn rg_written_ctor(&mut self, e: &Expr, path: &crate::parse::Path) {
+        if !self.rg_on() || path.segs.iter().all(|s| s.args.is_empty()) || !crate::regions::path_names_lt(path) {
+            return;
+        }
+        let key = e as *const Expr as usize;
+        let Some((t, tr)) = self.rg.calls.get(&key).cloned() else { return };
+        let (Ty::Struct(sid), Some(seg)) = (t, path.segs.iter().rev().find(|s| !s.args.is_empty())) else { return };
+        let prog = self.prog;
+        // (the arguments of the segment that has them (the enum's or the variant's), on the type's name)
+        let mut seg = seg.clone();
+        seg.name = prog.structs[prog.base_of(sid) as usize].name.clone();
+        let pt = PTy::Path(None, crate::parse::Path { global: false, segs: vec![seg], pos: path.pos });
+        let mut s = crate::regions::Slots { lts: self.rg.lt_names.clone(), tparams: vec![], self_slots: &[], any: false, in_fn: 0 };
+        let mut codes = vec![];
+        s.slots(&pt, false, &mut codes);
+        let lts = self.rg.lts.clone();
+        self.rg.dyn_infer = true;
+        let w = self.rg.instantiate(prog, t, Some(&codes), &lts, &[], &mut |me| me.var());
+        self.rg.dyn_infer = false;
+        let Some(w) = w.filter(|w| w.len() == tr.len()) else { return };
+        // (not its well-formedness: that may rest on implied bounds the check does not know, as of a normalized
+        // parameter's type (implied-bounds/normalization.rs: `None::<&'a A>`))
+        let sp = super::borrowck::pos(e);
+        self.rg.flow(prog, t, t, &tr, &w, sp);
+        self.rg.calls.insert(key, (t, w));
+    }
+
     pub(crate) fn rg_took_call(&mut self, e: &Expr) {
         // (only the call made by this expression's own call_fn: one level below)
         // (read first: taking it would make the state of a check that wrote none)

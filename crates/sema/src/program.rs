@@ -262,6 +262,10 @@ pub struct Program {
     pub lower_consts: bool,
     /// `#![deny(unused_must_use)]`: a statement whose value is a `Result` is an error
     pub deny_must_use: bool,
+    /// The edition (2021 unless given): from 2024, a block's tail's temporaries go away before its locals
+    pub edition: u16,
+    /// The source writes a lifetime in a path's generic arguments (regions::src_path_lts)
+    pub path_lts: bool,
     /// `#![deny(unused_allocation)]`: `Box::new(x).m()` with m of `&self` on what the box holds is an error
     pub deny_unused_alloc: bool,
     /// `#![deny(trivial_casts)]` / `#![deny(trivial_numeric_casts)]`: a cast a coercion or nothing would do
@@ -275,6 +279,9 @@ pub struct Program {
     pub opt: bool,
     /// ブランケット impl のメソッド (名前 → 関数 id) と、その self 型の型パラメータ名
     pub blanket: FxMap<String, u32>,
+    /// A blanket impl's trait → the bounds of its self type's parameter, its where clauses' too
+    /// (`impl<T: ?Sized> FutureExt for T where T: Future`: ?Sized, Future)
+    pub blanket_bounds: FxMap<String, Vec<String>>,
     pub blanket_selfs: HashSet<String>,
     /// Traits with a blanket impl (`impl<T> Tr for T`): every type implements them (bounds are not checked)
     pub blanket_traits: HashSet<String>,
@@ -769,12 +776,15 @@ impl Program {
             fnptr_impls: Default::default(),
             deny_unreachable: false,
             deny_must_use: false,
+            edition: 2021,
+            path_lts: false,
             deny_unused_alloc: false,
             deny_trivial_casts: (false, false),
             must_use_fns: vec![],
             prim_mut_methods: HashSet::default(),
             opt: false,
             blanket: FxMap::default(),
+            blanket_bounds: FxMap::default(),
             blanket_selfs: Default::default(),
             blanket_traits: Default::default(),
             unions: Default::default(),
@@ -1520,6 +1530,9 @@ impl Program {
                 }
                 p.blanket_selfs.insert(sn.clone());
                 p.blanket_traits.insert(tr.clone());
+                if let Some(g) = sm.impl_generics.iter().find(|g| g.0 == *sn) {
+                    p.blanket_bounds.entry(tr.clone()).or_default().extend(g.1.iter().cloned());
+                }
                 // (the trait's default methods are methods of every type)
                 let ids: Vec<u32> = p.traits.get(tr).cloned().unwrap_or_default();
                 for id in ids {
@@ -2006,9 +2019,11 @@ impl Program {
     }
 
     pub fn implements(&self, t: Ty, tr: &str) -> bool {
-        if self.blanket_traits.contains(tr) {
-            return true;
-        }
+        self.blanket_traits.contains(tr) || self.implements_concrete(t, tr)
+    }
+
+    /// implements, not counting a blanket impl of tr (`impl<T: Marker> Other for T`): an impl for t's type itself
+    pub fn implements_concrete(&self, t: Ty, tr: &str) -> bool {
         // (a placeholder implements the traits its parameter's bounds name, and the auto traits)
         if let Ty::Struct(sid) = t {
             if let Some(bs) = &self.structs[sid as usize].placeholder {
@@ -3758,6 +3773,8 @@ impl Program {
             Ty::Never => "!".into(),
             Ty::Vec(128) => "v128".into(),
             Ty::Vec(b) => format!("__m{b}"),
+            // (a hole of an annotation (`Foo<_>`), as written)
+            Ty::Param(HOLE) => "_".into(),
             Ty::Param(i) => format!("T{i}"),
             Ty::Ptr(false, i) => format!("*const {}", self.tn(*i)),
             Ty::Ptr(true, i) => format!("*mut {}", self.tn(*i)),

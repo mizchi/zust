@@ -475,6 +475,8 @@ impl Cx<'_> {
             }
         }
         // ブランケット impl のメソッドをプリミティブ型・&str で呼ぶ (`5.describe()` / `"x".describe()`)
+        // (and `()`, and a reference to one (`r.use_mut()` with `r: &mut ()`): Self is the referent, and the reference
+        // itself is the receiver, as rustc's probe matches `&mut self` with it)
         if let Some(&bid) = self.prog.blanket.get(method) {
             let pt = self.peek(recv);
             let prim = |t: Ty| t.is_int() || t.is_float() || matches!(t, Ty::Bool | Ty::Char);
@@ -482,18 +484,70 @@ impl Cx<'_> {
                 Some(Ty::Struct(sid)) => self.prog.method(sid, method).is_some(),
                 _ => false,
             };
-            if !own && pt.is_some_and(|t| prim(t) || matches!(t, Ty::Ref(_, Ty::Str))) {
+            // (`()`, and what is behind a reference (a `Box` too: Self is the box, before the deref to what it
+            // holds), when the impl's bounds hold of it: `impl<T: ?Sized> FutureExt for T where T: Future` is not
+            // `()`'s)
+            let bsig = &self.prog.sigs[bid as usize];
+            let bounds = bsig.trait_of.as_deref().or(bsig.impl_trait.as_deref()).and_then(|tr| self.prog.blanket_bounds.get(tr));
+            let prog = self.prog;
+            let holds = |t: Ty| bounds.is_none_or(|bs| blanket_bounds_hold(prog, t, bs, 0));
+            let extra = |t: Ty| (prim(t) || matches!(t, Ty::Unit | Ty::Box(_))) && holds(t);
+            let to_prim = matches!(pt, Some(Ty::Ref(_, i)) if extra(*i));
+            if !own && pt.is_some_and(|t| prim(t) || matches!(t, Ty::Ref(_, Ty::Str)) || (t == Ty::Unit && holds(t))) || (!own && to_prim) {
+                // (an `unsafe fn` of the trait: E0133 outside `unsafe`, as for any method)
+                self.check_unsafe_call(bid, msp.start)?;
                 let (v, t) = self.expr(recv, None)?;
-                let Some(v) = v else { return Ok((None, Ty::Never)) };
-                // (&self に渡すのは値のアドレス。&str は fat pointer の置き場所のアドレスがそのまま &&str)
-                let addr = if t.is_fat() {
-                    v
-                } else {
-                    let ss = self.slot(t);
-                    self.b.ins().stack_store(v, ss, 0);
-                    self.b.ins().stack_addr(PTR, ss, 0)
-                };
+                if t == Ty::Never {
+                    return Ok((None, Ty::Never));
+                }
                 let args: Vec<&Expr> = margs.iter().collect();
+                if let (Ty::Ref(m, i), Some(v)) = (t, v) {
+                    if extra(*i) {
+                        // (a `&self` method through a `&mut`: the reference is shared for it; `self` by value keeps it
+                        // as it is)
+                        let shared_self = matches!(self.prog.sigs[bid as usize].params.first(), Some(Ty::Ref(false, _)));
+                        let rt = Ty::Ref(m && !shared_self, i);
+                        // (the receiver is reborrowed: `*r`, which a result that borrows from self holds
+                        // (`let r2 = r.get(); *r = 5;` while r2 is used is E0506))
+                        let t0 = self.bk.call_temps.len();
+                        if self.bk_on() {
+                            // (`self` by value of a reference whose result is Self (`fn id(self) -> Self`): the result
+                            // may be the reborrow. Not another parameter (`fn pick<U>(self, v: U) -> U`))
+                            let bs = &self.prog.sigs[bid as usize];
+                            let by_value = !matches!(bs.params.first(), Some(Ty::Ref(..))) && mentions_param0(self.prog, bs.ret, 0);
+                            let flows = by_value || self.bk_ret_from(bid, 0);
+                            let ev = self.bk_recv_ev(recv, rt, flows);
+                            // (a `&mut` receiver whose arguments name it (`r.touch({ *r = 5; })`): its loan lasts while
+                            // they are evaluated)
+                            let hold = match (&ev, borrowck::root_local(recv)) {
+                                (Some(borrowck::Ev::Acc(_, borrowck::Acc::Borrow(ln), _)), Some(n)) if matches!(rt, Ty::Ref(true, _)) && margs.iter().any(|a| borrowck::mentions(a, n)) => Some(*ln),
+                                _ => None,
+                            };
+                            self.bk_push(ev);
+                            if let Some(ln) = hold {
+                                self.bk_call_temp(&[borrowck::Src::Loan(ln)], true);
+                            }
+                        }
+                        let r = self.call_fn(bid, Some((v, rt)), &args, tf, expected, SP);
+                        self.bk_call_temps_end(t0);
+                        return r;
+                    }
+                }
+                // (&self に渡すのは値のアドレス。&str は fat pointer の置き場所のアドレスがそのまま &&str; `()` は
+                // 1 バイトの置き場所)
+                let addr = match v {
+                    Some(v) if t.is_fat() => v,
+                    Some(v) => {
+                        let ss = self.slot(t);
+                        self.b.ins().stack_store(v, ss, 0);
+                        self.b.ins().stack_addr(PTR, ss, 0)
+                    }
+                    None if t == Ty::Unit => {
+                        let ss = self.slot(Ty::U8);
+                        self.b.ins().stack_addr(PTR, ss, 0)
+                    }
+                    None => return Ok((None, Ty::Never)),
+                };
                 return self.call_fn(bid, Some((addr, Ty::Ref(false, intern(t)))), &args, tf, expected, SP);
             }
         }
@@ -935,6 +989,18 @@ impl Cx<'_> {
             }
             let bk_recv_ty = if self.bk.shared_recv == e as *const Expr as usize { Ty::Ref(false, intern(st)) } else { recv_ty };
             let ev = self.bk_recv_ev(recv, bk_recv_ty, flows);
+            // (a receiver written as a borrow (`(&mut x).with(|v| x = ..)`): its loan lasts while the arguments are
+            // evaluated, when they name x)
+            if ev.is_none() {
+                if let Expr::Ref(_, inner) = strip_paren(recv) {
+                    if let (Some(&ln), Some(n)) = (self.bk.loan_of.get(&(&**inner as *const Expr as usize)), borrowck::root_local(inner)) {
+                        if margs.iter().any(|a| borrowck::mentions(a, n)) {
+                            self.bk_call_temp(&[borrowck::Src::Loan(ln)], true);
+                            bk_op_temp = true;
+                        }
+                    }
+                }
+            }
             if let (true, Some(borrowck::Ev::Acc(_, borrowck::Acc::Borrow(ln), _))) = (flows, &ev) {
                 self.bk.loan_of.insert(e as *const Expr as usize, *ln);
             }
@@ -1213,7 +1279,7 @@ impl Cx<'_> {
 
     /// プリミティブ型への trait 実装のメソッド (`impl Tr for u32` の `x.m()`)
     pub(crate) fn prim_trait_method(&mut self, e: &Expr, expected: Option<Ty>) -> R<Option<V>> {
-        let Expr::MethodCall(recv, method, gargs, margs, _) = e else { unreachable!() };
+        let Expr::MethodCall(recv, method, gargs, margs, msp) = e else { unreachable!() };
         let recv: &Expr = recv;
         let tf: Option<&[GArg]> = (!gargs.is_empty()).then_some(&gargs[..]);
         // (接尾辞のない整数リテラル `5.d()` は i32)
@@ -1336,6 +1402,8 @@ impl Cx<'_> {
         }) else {
             return Ok(None);
         };
+        // (an `unsafe fn` of the impl: E0133 outside `unsafe`, as for any method)
+        self.check_unsafe_call(id, msp.start)?;
         // (`impl Tr for Box<S>`: only when the impl's self type is this Box; else the method is S's, through deref)
         if let Ty::Box(_) = t {
             let st = self.prog.sigs[id as usize].self_ty;
@@ -2872,4 +2940,30 @@ pub fn static_not_sync(prog: &Program) -> Option<(usize, String)> {
 /// `__implT`
 fn hidden_param(n: &str) -> bool {
     n.starts_with("__impl") && n.len() > 6 && n.as_bytes()[6..].iter().all(|c| c.is_ascii_digit())
+}
+
+/// The bounds of a blanket impl's self type hold of t (`?Sized` and lifetimes aside). A bound that is a trait with a
+/// blanket impl of its own holds when that impl's bounds do (`impl<T: Marker> Other for T`)
+fn blanket_bounds_hold(prog: &crate::program::Program, t: Ty, bs: &[String], depth: u32) -> bool {
+    bs.iter().all(|b| {
+        if b.starts_with('?') || b.starts_with('\'') {
+            return true;
+        }
+        // (an impl for t itself (`impl Other for ()`), or the blanket impl's bounds; past the depth limit, only an
+        // impl for t itself: a chain that long, or a cycle, is not taken to hold)
+        match prog.blanket_bounds.get(b.as_str()) {
+            Some(inner) if prog.blanket_traits.contains(b.as_str()) => prog.implements_concrete(t, b) || (depth < 8 && blanket_bounds_hold(prog, t, inner, depth + 1)),
+            _ => prog.implements(t, b),
+        }
+    })
+}
+
+/// t names the type parameter 0 (a trait's `Self`, or a blanket impl's `T`)
+fn mentions_param0(prog: &crate::program::Program, t: Ty, depth: u32) -> bool {
+    match t {
+        Ty::Param(0) => true,
+        Ty::Ref(_, i) | Ty::Ptr(_, i) | Ty::Box(i) | Ty::Array(i, _) | Ty::Slice(i) if depth < 8 => mentions_param0(prog, *i, depth + 1),
+        Ty::Struct(s) if depth < 8 => prog.structs[s as usize].args.iter().any(|&a| mentions_param0(prog, a, depth + 1)),
+        _ => false,
+    }
 }
