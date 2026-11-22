@@ -88,7 +88,8 @@ pub fn borrow_error(e: &str) -> bool {
 
 /// borrow_error, and the borrow check's other errors: a use of what is not initialized (E0381), a temporary freed while
 /// borrowed (E0716), a match guard's change (E0510), a returned borrow (E0515, E0713), a closure that outlives what it
-/// borrows (E0373), a use of what is mutably borrowed (E0503) or partly moved (E0382)
+/// borrows (E0373), a use of what is mutably borrowed (E0503) or partly moved (E0382), an assignment to a part of
+/// what was moved (E0382), a closure's borrow that escapes it (E0521)
 pub fn borrow_check_error(e: &str) -> bool {
     borrow_error(e)
         || [
@@ -100,6 +101,8 @@ pub fn borrow_check_error(e: &str) -> bool {
             "may outlive the current function",
             "because it was mutably borrowed",
             "of partially moved",
+            "to part of moved",
+            "escapes outside of closure",
             "(E0505)",
             "(E0499)",
             "(E0502)",
