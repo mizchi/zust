@@ -50,6 +50,9 @@ pub fn ref_deref(m: bool) -> Proj {
 
 impl BPlace {
     /// The part of the place the local owns (up to the first deref of a reference)
+    pub(crate) fn owned_len_pub(&self) -> usize {
+        self.owned_len()
+    }
     fn owned_len(&self) -> usize {
         self.proj.iter().position(|p| matches!(p, Proj::Deref(false) | Proj::Shr)).unwrap_or(self.proj.len())
     }
@@ -250,11 +253,31 @@ pub fn direct_temps(e: &Expr, out: &mut Vec<usize>) {
     }
     let args = match strip(e) {
         Expr::Call(_, a) => a,
-        Expr::MethodCall(_, _, _, a, _) => a,
+        Expr::MethodCall(r, _, _, a, _) => {
+            // (the receiver made by a call (`mk(1).get()`): borrowed by a `&self` method, it is a temporary too)
+            if made_temp(r) {
+                out.push(&**r as *const Expr as usize);
+            }
+            a
+        }
         _ => return,
     };
     for a in args {
         direct_ref(a, out);
+    }
+}
+
+/// A value a call makes (not a place, not a constant rustc would promote): `f()`, `x.m()`, `vec![..]`
+fn made_temp(x: &Expr) -> bool {
+    let mut x = x;
+    while let Expr::Paren(p) = x {
+        x = p;
+    }
+    match x {
+        Expr::MethodCall(..) => true,
+        Expr::Call(f, _) => matches!(&**f, Expr::Path(_, p) if p.segs.last().is_some_and(|s| s.name.starts_with(|c: char| c.is_ascii_lowercase() || c == '_'))),
+        Expr::Macro(p, ..) => p.segs.last().is_some_and(|s| s.name == "vec" || s.name == "format"),
+        _ => false,
     }
 }
 
@@ -293,15 +316,15 @@ pub fn direct_ref(a: &Expr, out: &mut Vec<usize>) {
         e
     }
     if let Expr::Ref(_, x) = strip(a) {
-        let made = match strip(x) {
-            Expr::MethodCall(..) => true,
-            Expr::Call(f, _) => matches!(strip(f), Expr::Path(_, p) if p.segs.last().is_some_and(|s| s.name.starts_with(|c: char| c.is_ascii_lowercase() || c == '_'))),
-            Expr::Macro(p, ..) => p.segs.last().is_some_and(|s| s.name == "vec" || s.name == "format"),
-            _ => false,
-        };
-        if made {
+        if made_temp(x) {
             out.push(&**x as *const Expr as usize);
             out.push(strip(x) as *const Expr as usize);
+        }
+        // (`&*Box::new(1)`: a borrow of what a temporary owns)
+        if let Expr::Unary(op, y, _) = strip(x) {
+            if op == "*" && made_temp(y) {
+                out.push(&**x as *const Expr as usize);
+            }
         }
     }
 }
@@ -1825,6 +1848,10 @@ impl Cx<'_> {
         }
     }
 
+    pub(crate) fn bk_rooted_at_pub(&self, e: &Expr, n: &str) -> Option<(BPlace, Option<Ty>)> {
+        self.bk_rooted_at(e, n)
+    }
+
     /// A place rooted at the variable n (`n`, `n.a`, `*n.b`)
     fn bk_rooted_at(&self, e: &Expr, n: &str) -> Option<(BPlace, Option<Ty>)> {
         let mut root = e;
@@ -2297,7 +2324,30 @@ impl Cx<'_> {
             }
         }
         if !srcs.is_empty() {
-            self.bk_ev(Ev::Ret(srcs, pos(e)));
+            // (a chain of method calls is reported where it starts (rustc's span of the returned value), not at its
+            // last method's name: `raw\n.iter()\n.collect()`)
+            let mut x = e;
+            while let Expr::Paren(i) | Expr::Ref(_, i) = x {
+                x = i;
+            }
+            let sp = if matches!(x, Expr::MethodCall(..)) { super::expr_start(x) } else { pos(e) };
+            self.bk_ev(Ev::Ret(srcs, if sp.line == 0 { pos(e) } else { sp }));
+        }
+    }
+
+    /// What the value of e holds under the borrows it is (a chain's root local's loans: `parts.first()` holds what parts
+    /// holds)
+    fn bk_held(&self, e: &Expr, out: &mut Vec<Src>) {
+        match e {
+            Expr::Paren(x) | Expr::MethodCall(x, ..) => self.bk_held(x, out),
+            Expr::Path(..) => {
+                if let Some((p, _)) = self.bk_place(e) {
+                    if p.proj.is_empty() && self.bk.locals[p.local as usize].refs {
+                        out.push(Src::Local(p.local));
+                    }
+                }
+            }
+            _ => {}
         }
     }
 
@@ -2322,9 +2372,40 @@ impl Cx<'_> {
                     out.push(Src::Loan(ln));
                 }
             }
-            Expr::MethodCall(_, name, _, args, _) => {
+            Expr::MethodCall(recv, name, _, args, _) => {
+                let n0 = out.len();
                 if let Some(&ln) = self.bk.loan_of.get(&(e as *const Expr as usize)) {
                     out.push(Src::Loan(ln));
+                }
+                // (a method of the prelude's types whose result holds references: what its receiver holds (`it.next()`,
+                // `raw.iter().map(..).collect()`). The prelude writes no lifetimes)
+                if out.len() == n0 && self.peek(e).is_some_and(|t| has_refs(self.prog, t, 0)) {
+                    let prelude = |t: Ty| match t {
+                        Ty::Struct(sid) => self.prog.struct_item.get(self.prog.base_of(sid) as usize).is_some_and(|&i| i >= self.prog.prelude_from),
+                        _ => false,
+                    };
+                    let mut rt = self.peek(recv);
+                    while let Some(Ty::Ref(_, i)) = rt {
+                        rt = Some(*i);
+                    }
+                    // (an adapter whose closure makes the items (`map`, `filter_map` ..): they hold what the closure's
+                    // result does, not the receiver's items, when the closure does not use its parameter
+                    // (`raw.iter().map(|_| "ok")`))
+                    let made = matches!(name.as_str(), "map" | "filter_map" | "flat_map" | "map_while")
+                        && matches!(args.first().map(|a| super::strip_paren(a)), Some(Expr::Closure(_, ps, _, body, _)) if ps.iter().all(|(p, _)| {
+                            let mut v = vec![];
+                            crate::ast_closure::pat_idents(p, &mut v);
+                            v.iter().all(|n| !mentions(body, n))
+                        }));
+                    if rt.is_some_and(prelude) && !made {
+                        // (`copied` / `cloned` take a reference off: what is under it, not the borrow itself
+                        // (`parts.first().copied()` holds what parts holds, not a loan of parts))
+                        if matches!(name.as_str(), "copied" | "cloned") {
+                            self.bk_held(recv, out);
+                        } else {
+                            self.bk_direct(recv, out);
+                        }
+                    }
                 }
                 // (a closure passed to an iterator adapter, which its result holds: `lines.filter_map(|l| .. self.x ..)`
                 // returned. Not `find(|a| ..)`, whose result does not)

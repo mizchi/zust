@@ -1925,6 +1925,12 @@ pub fn summarize(item: &Item, owner: Option<&Owner>) -> R<Summary> {
                 return err("generic parameters may not be used in const operations");
             }
             sm.aliases.push((n.clone(), gs.into_iter().map(|x| x.0).collect(), tysyn(t, None)?));
+            let own: Vec<&str> = g.params.iter().filter_map(|p| if let GParam::Lifetime(l) = p { Some(l.as_str()) } else { None }).collect();
+            let mut named = vec![];
+            crate::regions::lifetimes_in(t, &mut named);
+            if named.iter().any(|l| l != "'_" && !own.contains(&l.as_str())) {
+                sm.alias_fixed_lts.push(n.clone());
+            }
         }
         ItemKind::Trait(n, g, supers, _) => {
             // (E0261: the lifetimes its bounds and where clause name are its own; `'_`, `'static` and a binder's
