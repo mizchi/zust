@@ -103,6 +103,11 @@ pub(crate) fn const_expr_text(e: &Expr) -> Option<String> {
                 _ => inner,
             }
         }
+        // (`unsafe { 1 + 2 }` inside another expression keeps its `unsafe`: `1 + (unsafe { 1 + 2 })`)
+        Expr::Block(None, true, b) if b.stmts.len() == 1 => match &b.stmts[0] {
+            Stmt::Expr(x, false) => format!("(unsafe {{ {} }})", const_expr_text(x)?),
+            _ => return None,
+        },
         Expr::Block(None, false, b) | Expr::Const(b) if b.stmts.len() == 1 => match &b.stmts[0] {
             Stmt::Expr(x, false) => const_expr_text(x)?,
             _ => return None,

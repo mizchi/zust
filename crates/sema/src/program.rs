@@ -2434,7 +2434,9 @@ impl Program {
     }
 
     pub fn prim_method(&self, t: Ty, name: &str) -> Option<u32> {
-        if let Some(&id) = self.index.get(&format!("{}::{name}", self.tn(t))) {
+        // (not a program's own `struct v128`, which is not the vector `tn` names)
+        let direct = self.tn(t);
+        if let Some(&id) = self.index.get(&format!("{direct}::{name}")).filter(|_| !(matches!(t, Ty::Vec(_)) && self.struct_index.contains_key(&direct))) {
             return Some(id);
         }
         // (a vector type's methods are under the name its impl wrote: `impl Vector for __m128i` has `__m128i::splat`)

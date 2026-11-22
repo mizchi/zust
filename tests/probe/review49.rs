@@ -8,6 +8,8 @@ fn second() -> u8 { m::value() }
 #[repr(u16)]
 #[derive(Clone, Copy)]
 enum Q { A = (255u8 as core::primitive::u16) << 1 }
+#[derive(Clone, Copy)]
+enum U { A = 1 + (unsafe { 1 + 2 }), B }
 const NB: u8 = (!true) as u8;
 const NB2: u8 = (!(1 < 2)) as u8 + 3;
 const SK: i64 = {
@@ -17,7 +19,7 @@ const SK: i64 = {
 };
 fn main() {
     println!("{} {}", first(), second());
-    println!("{}", Q::A as u16);
+    println!("{} {} {}", Q::A as u16, U::A as isize, U::B as isize);
     println!("{} {} {}", NB, NB2, SK);
     let b = Box::new(1u8);
     let c: Box<u8> = Box::from(b);
