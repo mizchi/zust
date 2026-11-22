@@ -1,0 +1,45 @@
+{
+  "schema": "jev-lint-documents-manifest-1",
+  "files": {
+    "docs_reports_2026-11-22-06-region-check-9.en": {
+      "path": "docs/reports/2026-11-22-06-region-check-9.md",
+      "role": "historical"
+    },
+    "docs_reports_2026-11-22-06-region-check-9.ja": {
+      "path": "docs/ja/reports/2026-11-22-06-region-check-9.md",
+      "role": "historical"
+    },
+    "docs_reports_2026-11-22-07-region-check-10.en": {
+      "path": "docs/reports/2026-11-22-07-region-check-10.md",
+      "role": "historical"
+    },
+    "docs_reports_2026-11-22-07-region-check-10.ja": {
+      "path": "docs/ja/reports/2026-11-22-07-region-check-10.md",
+      "role": "historical"
+    }
+  },
+  "comparisons": [
+    {
+      "id": "docs_reports_2026-11-22-06-region-check-9",
+      "topic": "The Japanese file docs/ja/reports/2026-11-22-06-region-check-9.md is a faithful translation of docs/reports/2026-11-22-06-region-check-9.md",
+      "mode": "translation",
+      "reference": {
+        "source": "docs_reports_2026-11-22-06-region-check-9.en"
+      },
+      "target": {
+        "source": "docs_reports_2026-11-22-06-region-check-9.ja"
+      }
+    },
+    {
+      "id": "docs_reports_2026-11-22-07-region-check-10",
+      "topic": "The Japanese file docs/ja/reports/2026-11-22-07-region-check-10.md is a faithful translation of docs/reports/2026-11-22-07-region-check-10.md",
+      "mode": "translation",
+      "reference": {
+        "source": "docs_reports_2026-11-22-07-region-check-10.en"
+      },
+      "target": {
+        "source": "docs_reports_2026-11-22-07-region-check-10.ja"
+      }
+    }
+  ]
+}

@@ -800,6 +800,14 @@ pub fn std_renames(src: &str) -> Option<String> {
     changed.then_some(out)
 }
 
+/// Where the items moved out of function bodies came from (Prep::moved), for the source `prep` is given: their
+/// lines past the input's last one are theirs. None when nothing was moved
+pub fn moved_lines(src: &str, crates: &[String], cfg: Option<&crate::cfg::CfgSet>) -> Option<Vec<(usize, usize)>> {
+    let start = file_start(src);
+    let src: &str = start.as_deref().unwrap_or(src);
+    prep_full(src, crates, &mut vec![], cfg).ok()?.moved
+}
+
 /// 前処理 (差分)。fix には桁のずれを足す
 pub fn prep(src: &str, crates: &[String], fix: &mut Vec<(u32, u32, i32)>, cfg: Option<&crate::cfg::CfgSet>, memo: &mut PrepMemo) -> R<String> {
     memo.calls += 1;

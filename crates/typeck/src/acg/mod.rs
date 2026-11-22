@@ -72,9 +72,75 @@ pub const PTR: Type = types::I64;
 pub type Sp = crate::parse::Pos;
 pub const SP: Sp = crate::parse::Pos { line: 0, col: 0 };
 
+/// Whether an environment variable is set, read once for each flag: getenv scans the whole environment, and these are
+/// asked for each function, closure or temporary
+fn env_once(cell: &'static std::sync::OnceLock<bool>, name: &str) -> bool {
+    *cell.get_or_init(|| std::env::var_os(name).is_some())
+}
+
+/// ACG_PANIC_ERR=1: an error panics (to find where it is made from the backtrace)
+/// An error of the borrow or region check's kind (lowering itself returns some: `m[k] = v` of a HashMap is E0594)
+pub fn borrow_error(e: &str) -> bool {
+    ["cannot assign", "cannot borrow", "cannot move out", "use of moved", "borrow of moved", "does not live long enough", "may not live long enough", "(E0594)", "(E0596)", "(E0384)"]
+        .iter()
+        .any(|k| e.contains(k))
+}
+
+/// borrow_error, and the borrow check's other errors: a use of what is not initialized (E0381), a temporary freed while
+/// borrowed (E0716), a match guard's change (E0510), a returned borrow (E0515, E0713), a closure that outlives what it
+/// borrows (E0373), a use of what is mutably borrowed (E0503) or partly moved (E0382), an assignment to a part of
+/// what was moved (E0382), a closure's borrow that escapes it (E0521)
+pub fn borrow_check_error(e: &str) -> bool {
+    borrow_error(e)
+        || [
+            "isn't initialized",
+            "temporary value",
+            "in match guard",
+            "destructor runs",
+            "cannot return",
+            "may outlive the current function",
+            "because it was mutably borrowed",
+            "of partially moved",
+            "to part of moved",
+            "escapes outside of closure",
+            "(E0505)",
+            "(E0499)",
+            "(E0502)",
+            "(E0506)",
+            "(E0503)",
+        ]
+            .iter()
+            .any(|k| e.contains(k))
+}
+
+pub(crate) fn panic_err() -> bool {
+    static C: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    env_once(&C, "ACG_PANIC_ERR")
+}
+
+pub(crate) fn no_fresh() -> bool {
+    static C: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    env_once(&C, "ZUSTC_NO_FRESH")
+}
+
+pub(crate) fn no_ret_dst() -> bool {
+    static C: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    env_once(&C, "ZUSTC_NO_RET_DST")
+}
+
+pub(crate) fn debug_at() -> bool {
+    static C: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    env_once(&C, "ACG_DEBUG_AT")
+}
+
+pub(crate) fn debug_clo() -> bool {
+    static C: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    env_once(&C, "ACG_DEBUG_CLO")
+}
+
 pub fn err<T>(_: Sp, msg: impl std::fmt::Display) -> R<T> {
     // (ACG_PANIC_ERR=1: エラーの場所をバックトレースで調べる)
-    if std::env::var_os("ACG_PANIC_ERR").is_some() {
+    if panic_err() {
         panic!("{msg}");
     }
     Err(msg.to_string())
@@ -337,6 +403,7 @@ fn compile_once(prog: &Program, insts: &Mutex<Insts>, id: u32, f: &ItemFn, line_
         closure_ix,
         explicit_traits: HashMap::default(),
         explicit_trait: None,
+        keep_overload: std::cell::Cell::new(None),
         closure_hint: None,
         closure_bound: None,
         closure_prelude: false,
@@ -404,12 +471,7 @@ fn compile_once(prog: &Program, insts: &Mutex<Insts>, id: u32, f: &ItemFn, line_
     // fails, as a placeholder cannot do all its bounds allow (a trait's method, a coercion to `dyn`): not checked
     // further, nothing reported. Its borrow and region checks' errors are)
     // (not an error of the borrow check's kind lowering itself returns: `m[k] = v` of a HashMap is E0594 whatever T is)
-    let borrow_kind = |e: &str| {
-        ["cannot assign", "cannot borrow", "cannot move out", "use of moved", "borrow of moved", "does not live long enough", "may not live long enough", "(E0594)", "(E0596)", "(E0384)"]
-            .iter()
-            .any(|k| e.contains(k))
-    };
-    if placeholder && r.as_ref().is_err_and(|e| !borrow_kind(e)) {
+    if placeholder && r.as_ref().is_err_and(|e| !borrow_error(e)) {
         if regionck::debug() {
             eprintln!("regionck: placeholder instance not checked: {}", r.as_ref().err().map(|e| e.as_str()).unwrap_or(""));
         }
@@ -597,7 +659,9 @@ pub fn expr_start(e: &Expr) -> Sp {
         Expr::Closure(.., p) => *p,
         // (no position of their own: that of their first part, usually on the same line)
         Expr::Ref(_, x) | Expr::RawRef(_, x) | Expr::Repeat(x, _) | Expr::Let(_, x) | Expr::Match(x, _) | Expr::If(x, _, _) => expr_start(x),
-        Expr::While(_, x, _) | Expr::For(_, _, x, _) | Expr::Return(Some(x)) | Expr::Break(_, Some(x)) => expr_start(x),
+        Expr::While(_, x, _) | Expr::For(_, _, x, _) | Expr::Return(Some(x)) | Expr::Break(_, Some(x), _) => expr_start(x),
+        // (`break` / `continue` / `break 'a`: the keyword, or the label when there is one)
+        Expr::Break(_, None, p) | Expr::Continue(_, p) => *p,
         Expr::Array(es) | Expr::Tuple(es) => es.first().map_or(SP, expr_start),
         _ => SP,
     }
@@ -701,6 +765,9 @@ pub struct Loop {
     pub is_block: bool,
     pub depth: usize,
     pub temps: usize,
+    /// a `while` / `for` loop (and a while's condition): the kind it names in E0571, for a `break` with a value
+    /// (None: a `loop` or a labeled block, which `break v` may leave)
+    pub no_value: Option<&'static str>,
 }
 
 #[derive(Clone, Copy)]
@@ -781,6 +848,8 @@ pub struct Cx<'p> {
     pub explicit_traits: HashMap<usize, String>,
     /// while a method call that named its trait is being resolved: (the method, the trait)
     pub explicit_trait: Option<(String, String)>,
+    /// an overload already chosen (`X::__ref_eq#1`, PartialEq's among a reference's `eq`s): pick_overload keeps it once
+    pub keep_overload: std::cell::Cell<Option<u32>>,
     pub closure_hint: Option<(Vec<Ty>, Option<Ty>)>,
     /// The bound the closure being passed is checked against (`FnOnce(&u32) -> &u32`), with the callee's lifetimes and
     /// type parameters (regionck)
@@ -1047,7 +1116,7 @@ impl Cx<'_> {
         if got == want || got == Ty::Never {
             Ok(())
         } else {
-            if std::env::var_os("ACG_PANIC_ERR").is_some() {
+            if panic_err() {
                 panic!("mismatched types");
             }
             Err(self.at(span, format!("mismatched types: expected `{}`, found `{}`", self.prog.tn(want), self.prog.tn(got))))
@@ -1104,7 +1173,7 @@ impl Cx<'_> {
     pub fn temp_fresh(&mut self, t: Ty) -> Value {
         let ss = self.slot(t);
         let a = self.b.ins().stack_addr(PTR, ss, 0);
-        if std::env::var_os("ZUSTC_NO_FRESH").is_none() {
+        if !no_fresh() {
             self.fresh.insert(a.0, ss);
         }
         a
@@ -1277,7 +1346,15 @@ impl Cx<'_> {
     }
 
     pub fn lookup(&self, name: &str) -> Option<(Loc, Ty)> {
-        self.scopes.iter().rev().flat_map(|s| s.iter().rev()).find(|(n, _, _)| n == name).map(|&(_, l, t)| (l, t))
+        // (plain loops: a `flat_map` over the scopes costs more per name, and most lookups of a function's names miss)
+        for s in self.scopes.iter().rev() {
+            for (n, l, t) in s.iter().rev() {
+                if n.len() == name.len() && n.as_bytes() == name.as_bytes() {
+                    return Some((*l, *t));
+                }
+            }
+        }
+        None
     }
 
     fn body(&mut self, f: &ItemFn, sig: &FnSig) -> R<()> {
@@ -1295,10 +1372,11 @@ impl Cx<'_> {
         for (k, (p, _)) in f.sig.params.iter().enumerate() {
             names.push(param_name(k, p)?);
         }
-        // (`mut x` parameters, for the borrow checker; `self` is not known)
+        // (`mut x` parameters, for the borrow checker; `self` is `mut self` / `mut self: T` (not `&mut self`, whose
+        // binding is not mutable))
         let mut muts: Vec<Option<bool>> = vec![];
-        if f.sig.recv.is_some() {
-            muts.push(None);
+        if let Some(r) = &f.sig.recv {
+            muts.push(Some(r.starts_with("mut ")));
         }
         for (p, _) in &f.sig.params {
             muts.push(pat_mut(p));
@@ -1430,7 +1508,7 @@ impl Cx<'_> {
     /// e が呼び出しなら、戻り値を sret の場所に直接書かせる印を付ける
     pub fn mark_ret_call(&mut self, e: &Expr) {
         let e = strip_paren(e);
-        if self.sret.is_some() && self.inline_ret.is_none() && matches!(e, Expr::Call(..) | Expr::MethodCall(..) | Expr::Struct(..)) && std::env::var_os("ZUSTC_NO_RET_DST").is_none() {
+        if self.sret.is_some() && self.inline_ret.is_none() && matches!(e, Expr::Call(..) | Expr::MethodCall(..) | Expr::Struct(..)) && !no_ret_dst() {
             self.ret_call = Some(e as *const Expr as usize);
         }
     }
@@ -1662,7 +1740,7 @@ impl Cx<'_> {
                     }
                     // (as for a plain let: what the bindings may borrow (a `ref` binding, a reference in the value)
                     // lives to the end of the block, the rest is dropped here: `let (n, _) = (c.borrow().len(), 0);`)
-                    if extends_temps(init) || borrowck::has_refs(self.prog, place.ty(), 0) || format!("{pat:?}").contains("Ident(true") {
+                    if extends_temps(init) || self.bk_ty(place.ty()).1 || format!("{pat:?}").contains("Ident(true") {
                         self.extend_temps(t0);
                     } else {
                         self.drop_temps(t0);
@@ -1691,6 +1769,7 @@ impl Cx<'_> {
                         let r = self.place(init);
                         self.bk.place_depth -= 1;
                         let _ = r?;
+                        self.bk_fake_read(init);
                     } else {
                         // (`let _: [(); 0] = [];`: the annotation is the expected type)
                         // (only for an array literal, which needs it for its element type: an expected type would
@@ -1901,7 +1980,7 @@ impl Cx<'_> {
                     // extends them (`let r = &f();`, `let p: *const S = &S::new();`). zustc also keeps them when the
                     // bound value may hold a reference, which rustc rejects when it borrows a temporary (E0716) and
                     // zustc does not see yet. A RefCell guard in `let n = *c.borrow();` must not outlive the let)
-                    if extends_temps(init) || borrowck::has_refs(self.prog, ty, 0) {
+                    if extends_temps(init) || self.bk_ty(ty).1 {
                         self.extend_temps(t0);
                     } else {
                         self.drop_temps(t0);
@@ -1961,7 +2040,7 @@ impl Cx<'_> {
                     }
                     if tail {
                         let srcs = self.bk_frame_end();
-                        if borrowck::has_refs(self.prog, self.ret, 0) {
+                        if self.bk_ty(self.ret).1 {
                             { let _ = &srcs; self.bk_ret(e); }
                         }
                     }
@@ -2053,7 +2132,7 @@ impl Cx<'_> {
                 if p.segs[1].name == "BITS" { Some(Ty::U32) } else { Ty::from_suffix(&p.segs[0].name) }
             }
             Expr::Path(None, p) if p.segs.len() == 2 && self.const_of(e).is_some() => Some(self.prog.consts[self.const_of(e)? as usize].ty),
-            Expr::Path(None, _) if self.const_generic(e).is_some() => Some(Ty::Usize),
+            Expr::Path(None, _) if self.const_generic(e).is_some() => Some(self.const_generic_ty(e).unwrap_or(Ty::Usize)),
             Expr::Try(x) => {
                 let Ty::Struct(sid) = self.peek(x)? else { return None };
                 let sd = &self.prog.structs[sid as usize];
@@ -2152,6 +2231,16 @@ impl Cx<'_> {
                         | "powi" | "powf" | "exp" | "ln" | "sin" | "cos" | "tan" | "clamp" => Some(t),
                         _ => None,
                     };
+                }
+                // (`unsafe { a.get_unchecked(i) }.wrapping_shr(..)`: the element's reference; with a range, the subslice)
+                if let Ty::Array(el, _) | Ty::Slice(el) = t {
+                    if name == "get_unchecked" || name == "get_unchecked_mut" {
+                        let m = name.ends_with("_mut");
+                        return Some(match args.first() {
+                            Some(Expr::Range(..)) => Ty::Ref(m, intern(Ty::Slice(el))),
+                            _ => Ty::Ref(m, el),
+                        });
+                    }
                 }
                 let Ty::Struct(sid) = t else { return None };
                 let id = self.prog.method(sid, name).or_else(|| self.prog.default_method(sid, name))?;
@@ -2308,7 +2397,12 @@ impl Cx<'_> {
 
     /// The method named `name` (`S::m`, among its overloads) that is an impl of trait tr
     pub fn trait_candidate(&self, name: &str, tr: &str) -> Option<u32> {
-        let of_tr = |i: u32| self.prog.sigs[i as usize].impl_trait.as_deref().is_some_and(|t| t.split('<').next().unwrap_or(t).trim() == tr);
+        self.trait_candidate_where(name, tr, |_| true)
+    }
+
+    /// trait_candidate among those `ok` accepts (`impl PartialEq for &TX<u8>` / `.. for &TX<u16>`: the receiver's)
+    pub fn trait_candidate_where(&self, name: &str, tr: &str, ok: impl Fn(u32) -> bool) -> Option<u32> {
+        let of_tr = |i: u32| self.prog.sigs[i as usize].impl_trait.as_deref().is_some_and(|t| t.split('<').next().unwrap_or(t).trim() == tr) && ok(i);
         let first = self.prog.index.get(name).copied();
         first.filter(|&i| of_tr(i)).or_else(|| self.prog.overloads.get(name).and_then(|cs| cs.iter().copied().find(|&c| of_tr(c))))
     }

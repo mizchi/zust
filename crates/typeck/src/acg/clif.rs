@@ -260,15 +260,9 @@ impl Ins<'_> {
     }
     pub fn brif(mut self, c: Value, a: Block, aa: &[Value], b: Block, ba: &[Value]) {
         if let Some(cur) = self.0.live_block() {
-            // (a constant condition (`true && ..`) takes one edge only)
-            match self.0.consts.get(&c.0) {
-                Some(0) => self.0.edges.push((cur, b)),
-                Some(_) => self.0.edges.push((cur, a)),
-                None => {
-                    self.0.edges.push((cur, a));
-                    self.0.edges.push((cur, b));
-                }
-            }
+            // (both edges, a constant condition's too: the borrow check, as rustc's, does not fold `false || ..`)
+            self.0.edges.push((cur, a));
+            self.0.edges.push((cur, b));
         }
         self.0.dead = true;
         self.m().brif(c, a, aa, b, ba)

@@ -269,6 +269,9 @@ pub struct Options2 {
     /// wasm32-unknown-unknown: writes the module instead of an ELF object, and does not link (zust_wasm::write_module;
     /// `backend` is then zust_wasm::compile)
     pub module_writer: Option<ModuleWriter>,
+    /// The edition (`--edition`, 2021 by default). Only what differs between 2015 and later reads it: the crate root's
+    /// own `extern crate std` holds the name `std` in 2015 alone
+    pub edition: u16,
 }
 
 /// Writes the output from the functions and data build.rs lays out (in place of the ELF object)
@@ -276,7 +279,7 @@ pub type ModuleWriter = fn(&[(String, Vec<u8>, Vec<crate::ir::Reloc>, bool)], &[
 
 impl Default for Options2 {
     fn default() -> Self {
-        Options2 { opt: false, jobs: cpu_count(), linker: None, lib_dirs: vec![], no_cache: false, time: false, backend: None, features: vec![], module_writer: None }
+        Options2 { opt: false, jobs: cpu_count(), linker: None, lib_dirs: vec![], no_cache: false, time: false, backend: None, features: vec![], module_writer: None, edition: 2021 }
     }
 }
 
@@ -293,7 +296,18 @@ impl Options2 {
 
     /// cfg の述語の設定 (features は与えたもの)
     pub fn cfg_with(&self, features: &[String]) -> crate::cfg::CfgSet {
-        crate::cfg::CfgSet { features: features.to_vec(), debug_assertions: !self.opt, wasm: self.module_writer.is_some() }
+        self.cfg_of(features, &[], &[])
+    }
+
+    /// cfg の述語の設定 (ワークスペースのクレート: feature、ビルドスクリプトの cfg、`env!` の環境)
+    pub fn cfg_of(&self, features: &[String], cfgs: &[(String, Option<String>)], env: &[(String, String)]) -> crate::cfg::CfgSet {
+        crate::cfg::CfgSet {
+            features: features.to_vec(),
+            debug_assertions: !self.opt,
+            wasm: self.module_writer.is_some(),
+            cfgs: cfgs.to_vec(),
+            env: env.to_vec(),
+        }
     }
 }
 
@@ -312,6 +326,9 @@ pub struct CrateCtx {
     pub deps: Vec<String>,
     /// このクレートの feature (ワークスペース。None なら Options2 の features)
     pub features: Option<Vec<String>>,
+    /// このクレートの cfg と `env!` の環境 (ワークスペース: CrateSpec の cfgs / env)
+    pub cfgs: Vec<(String, Option<String>)>,
+    pub env: Vec<(String, String)>,
     /// 依存するクレートのテキストの範囲 (結合したソースの行 [開始, 終わり)) と、そこから見えるクレート (この表の番号。自分も)
     pub dep_ranges: Vec<(u32, u32, Vec<usize>, u32)>,
 }
@@ -397,11 +414,14 @@ pub struct Session2 {
     pub ctx: CrateCtx,
     /// the files the last build_path read (for the CLI's stamp file)
     pub last_map: Option<crate::srcmap::SrcMap>,
+    /// A crate of one file that the caller configured before it checks it: the `extern crate x;` items the configuring
+    /// blanked (SrcMap::externs), whose names may be defined twice. Read by the next analyze
+    pub externs: Vec<(usize, String)>,
 }
 
 impl Session2 {
     pub fn new(opts: Options2) -> Session2 {
-        Session2 { opts, cid: compiler_id(), disk: crate::cache2::Cache2::empty(), mem: FxMap::default(), used: FxSet::default(), fresh: vec![], ctx: CrateCtx::default(), last_map: None, sel: Default::default(), sum_fp: FxMap::default(), chk: None }
+        Session2 { opts, cid: compiler_id(), disk: crate::cache2::Cache2::empty(), mem: FxMap::default(), used: FxSet::default(), fresh: vec![], ctx: CrateCtx::default(), last_map: None, sel: Default::default(), sum_fp: FxMap::default(), chk: None, externs: vec![] }
     }
 
     pub fn load_cache(&mut self, path: &std::path::Path) {
@@ -472,13 +492,31 @@ impl Session2 {
         self.fresh.push(k);
     }
 
+    /// Where the items moved out of fn bodies came from, for src as analyze prepares it (Prep::moved)
+    fn moved_lines(&self, src0: &str) -> Option<Vec<(usize, usize)>> {
+        let stripped = if self.ctx.map.inputs.is_empty() { crate::cfg::strip(src0, &self.opts.cfg_with(&self.opts.features)) } else { None };
+        let src0 = stripped.as_deref().unwrap_or(src0);
+        let mut crates = self.ctx.deps.clone();
+        crates.extend(self.ctx.lib.iter().cloned());
+        let cfg = self.opts.cfg_with(self.ctx.features.as_ref().unwrap_or(&self.opts.features));
+        let renamed = crate::prep::std_renames(src0);
+        crate::prep::moved_lines(renamed.as_deref().unwrap_or(src0), &crates, Some(&cfg))
+    }
+
     /// 要約はアイテムのハッシュで引く
     pub fn analyze(&mut self, src0: &str) -> R<Analysis> {
+        let mut externs = std::mem::take(&mut self.externs);
         // (ファイルから読んだもの (load_crate) は読むときに cfg を評価してある)
         let stripped;
         let src0 = if self.ctx.map.inputs.is_empty() {
-            match crate::cfg::strip(src0, &self.opts.cfg_with(&self.opts.features)) {
+            let cfg = self.opts.cfg_with(&self.opts.features);
+            let mut ext = vec![];
+            match crate::cfg::strip_noting(src0, &cfg, &mut None, &mut ext) {
                 Some(t) => {
+                    // (the `extern crate` items it blanked, for the names they define)
+                    if externs.is_empty() {
+                        externs = ext.iter().map(|&(a, b)| (a, src0[a..b].to_string())).collect();
+                    }
                     stripped = t;
                     stripped.as_str()
                 }
@@ -490,7 +528,7 @@ impl Session2 {
         let mut crates = self.ctx.deps.clone();
         crates.extend(self.ctx.lib.iter().cloned());
         let mut fix = vec![];
-        let cfg = self.opts.cfg_with(self.ctx.features.as_ref().unwrap_or(&self.opts.features));
+        let cfg = self.opts.cfg_of(self.ctx.features.as_ref().unwrap_or(&self.opts.features), &self.ctx.cfgs, &self.ctx.env);
         let (src, items, user, prelude_line0) = with_prelude_in(src0, &crates, &mut fix, Some(&cfg), &mut self.sel)?;
         self.ctx.map.colfix = fix;
         // (E0432: a top-level `use` of a path whose first segment names nothing; the `use` items come from the item
@@ -500,6 +538,11 @@ impl Session2 {
                 return Err(e);
             }
             if let Some(e) = duplicate_import(src0, &src, &items[..user]) {
+                return Err(e);
+            }
+            // (E0428 of an inline module and an item: a whole-text pass, so not on each build of a crate loaded from
+            // files, whose incremental builds would pay it every time)
+            if let Some(e) = duplicate_name(src0, &externs, self.opts.edition < 2018) {
                 return Err(e);
             }
             if let Some(e) = malformed_attr(src0, &src, &items[..user], self.ctx.deps.is_empty() && self.ctx.lib.is_none()) {
@@ -969,6 +1012,9 @@ impl Session2 {
         let mut prog = Program::build_with(&items, &sums, self.ctx.lib.is_none() && !lib_attr, user).map_err(|e| name_line(&e, &src, &items))?;
         tm.lap("program", String::new());
         prog.prelude_from = user as u32;
+        if let Some(e) = cross_kind_duplicate(&prog, &src, &items, &sums, user) {
+            return Err(e);
+        }
         // (E0277: a static is reachable from every thread, so its type must be Sync)
         if let Some((ci, tn)) = crate::acg::static_not_sync(&prog) {
             let line = items.get(prog.consts[ci].item as usize).map_or(0, |it| it.line);
@@ -1301,7 +1347,7 @@ fn first_unreachable(b: &crate::parse::Block) -> Option<(crate::parse::Pos, &'st
     use crate::parse::{Expr, Stmt};
     fn diverges(e: &Expr) -> bool {
         match e {
-            Expr::Return(_) | Expr::Break(..) | Expr::Continue(_) => true,
+            Expr::Return(_) | Expr::Break(..) | Expr::Continue(..) => true,
             Expr::Macro(p, _, _) => matches!(p.segs.last().map(|s| s.name.as_str()), Some("panic" | "unreachable" | "todo" | "unimplemented")),
             Expr::Loop(_, body) => !format!("{body:?}").contains("Break("),
             Expr::Paren(x) => diverges(x),
@@ -1541,6 +1587,505 @@ fn malformed_attr(src0: &str, split: &str, items: &[SrcItem], standalone: bool) 
     None
 }
 
+/// E0428 for two of the program's items of one name and namespace that the build keeps in separate tables: a struct
+/// / enum, a trait or a type alias (types), a unit / tuple struct and a const / static / fn (values). At the later
+/// of the two. Costs a lookup for each of the program's structs, traits and aliases
+fn cross_kind_duplicate<'p>(prog: &'p Program, src: &str, items: &[SrcItem], sums: &'p [Summary], user: usize) -> Option<String> {
+    let user = user.min(sums.len());
+    let mut first: Option<(usize, &'p str)> = None;
+    let mut found = |a: usize, b: usize, n: &'p str| {
+        let l = items[a].line.max(items[b].line);
+        if first.is_none_or(|(l0, _)| l < l0) {
+            first = Some((l, n));
+        }
+    };
+    for (ii, sm) in sums[..user].iter().enumerate() {
+        if let Some(tr) = sm.trait_decl.as_deref() {
+            if let Some(&sid) = prog.struct_index.get(tr) {
+                if let Some(&si) = prog.struct_item.get(sid as usize).filter(|&&si| (si as usize) < user) {
+                    found(si as usize, ii, tr);
+                }
+            }
+        }
+        // (a type alias and a struct / enum / trait)
+        for (n, _, _) in &sm.aliases {
+            if let Some(&si) = prog.struct_index.get(n).and_then(|&sid| prog.struct_item.get(sid as usize)).filter(|&&si| (si as usize) < user) {
+                found(si as usize, ii, n);
+            } else if prog.traits.contains_key(n) {
+                if let Some(ti) = sums[..user].iter().position(|t| t.trait_decl.as_deref() == Some(n.as_str())) {
+                    found(ti, ii, n);
+                }
+            }
+        }
+        for (n, fields) in &sm.structs {
+            // (a struct with named fields is a type only: no lookup)
+            if fields.first().is_some_and(|(f, _)| f != "0") {
+                continue;
+            }
+            let item_of = |k: u32| if (k as usize) < user { Some(k as usize) } else { None };
+            let other = prog
+                .const_index
+                .get(n)
+                .and_then(|&c| item_of(prog.consts[c as usize].item))
+                .or_else(|| prog.index.get(n).and_then(|&f| prog.item_of.get(f as usize).copied().flatten()).and_then(item_of));
+            let Some(o) = other else { continue };
+            if o == ii || sm.unions.iter().any(|u| u == n) {
+                continue;
+            }
+            // (a unit / tuple struct is a value too: `struct X;`, `struct X(u8);`, not `struct X {}`)
+            let value = match fields.first() {
+                Some((f, _)) => f == "0",
+                None => {
+                    let text = src.get(items[ii].start..items[ii].end).unwrap_or("");
+                    // (past the item's attributes and the comments among them, whose text may say `struct X;`)
+                    let mut text = text.trim_start();
+                    loop {
+                        if text.starts_with("#[") || text.starts_with("#![") {
+                            let o = text.find('[').map_or(text.len(), |o| o + 1);
+                            text = text[(o + attr_end(&text[o..])).min(text.len())..].trim_start();
+                        } else if text.starts_with("//") {
+                            text = text.find('\n').map_or("", |e| text[e..].trim_start());
+                        } else if text.starts_with("/*") {
+                            text = text.find("*/").map_or("", |e| text[e + 2..].trim_start());
+                        } else {
+                            break;
+                        }
+                    }
+                    text.find("struct ").is_some_and(|k| {
+                        let rest = text[k + 7..].trim_start();
+                        let rest = rest.strip_prefix(n.as_str()).unwrap_or(rest).trim_start();
+                        let rest = if rest.starts_with('<') { rest.find('>').map_or("", |e| &rest[e + 1..]) } else { rest };
+                        rest.trim_start().starts_with([';', '('])
+                    })
+                }
+            };
+            if value {
+                found(ii, o, n);
+            }
+        }
+    }
+    // (the name as written: without the flattened modules' `a__` prefix and the renamer's `__u_`)
+    first.map(|(l, n)| format!("{l}:1: the name `{}` is defined multiple times (E0428)", n.rsplit("__").next().unwrap_or(n).trim_start_matches("u_")))
+}
+
+/// What defines a name in a module, for the code of two definitions of one name: E0428 two items, E0252 two imports,
+/// E0255 an import and an item, E0259 two extern crates, E0260 an extern crate and an item, E0254 an extern crate and
+/// an import
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Def {
+    Item,
+    Use,
+    Crate,
+    /// the `extern crate std;` (`core` under `#![no_std]`) the compiler puts in the crate root
+    Injected,
+}
+
+/// A name a module defines, for duplicate_name
+struct DupDef<'a> {
+    /// the namespaces: 1 types, 2 values (0: an import that names nothing found, not compared)
+    ns: u8,
+    name: &'a [u8],
+    def: Def,
+    /// the token the error points at (usize::MAX: the injected crate, written nowhere)
+    at: usize,
+    /// an import's path (`use a::b as c;`: [a, b])
+    path: Vec<&'a [u8]>,
+    /// an import `self` of a list (`use a::b::{self}`): the module, not a value of its name
+    module_only: bool,
+}
+
+/// The names a `use` tree from token k binds: (name, path, the first token of its part of the tree, whether it is a
+/// `self` of a list, which names a module only). A glob and `as _` bind none. Returns the token past the tree
+fn use_tree_names<'a>(
+    b: &'a [u8],
+    toks: &[(u8, usize, usize)],
+    close: &[usize],
+    k: usize,
+    prefix: &mut Vec<&'a [u8]>,
+    out: &mut Vec<(&'a [u8], Vec<&'a [u8]>, usize, bool)>,
+) -> usize {
+    let t = |k: usize| -> &'a [u8] { toks.get(k).map_or(&b""[..], |&(_, a, e)| &b[a..e]) };
+    let is_id = |k: usize| toks.get(k).is_some_and(|x| x.0 == 0);
+    let at = k;
+    let depth = prefix.len();
+    let mut k = k;
+    // (a leading `::`)
+    if t(k) == b":" && t(k + 1) == b":" {
+        k += 2;
+    }
+    let end = loop {
+        if t(k) == b"{" {
+            let Some(&e) = close.get(k).filter(|&&e| e != usize::MAX) else { break k };
+            let mut j = k + 1;
+            while j < e {
+                j = use_tree_names(b, toks, close, j, prefix, out);
+                if t(j) != b"," {
+                    break;
+                }
+                j += 1;
+            }
+            break e + 1;
+        }
+        if !is_id(k) {
+            // (a glob, or what this does not read)
+            break k + usize::from(t(k) == b"*");
+        }
+        // (`r#foo` is the name `foo`: the tokens split it into `r`, `#`, `foo`)
+        let s = if t(k) == b"r" && t(k + 1) == b"#" && is_id(k + 2) { k + 2 } else { k };
+        if t(s + 1) == b":" && t(s + 2) == b":" {
+            prefix.push(t(s));
+            k = s + 3;
+            continue;
+        }
+        // (`as r#x` binds `x`)
+        let (alias, next) = match t(s + 1) == b"as" {
+            true if t(s + 2) == b"r" && t(s + 3) == b"#" && is_id(s + 4) => (Some(t(s + 4)), s + 5),
+            true => (Some(t(s + 2)), s + 3),
+            false => (None, s + 1),
+        };
+        // (`use a::{self}` binds `a`, the module alone)
+        let own = t(s) == b"self";
+        let (name, path) = if own {
+            (alias.or(prefix.last().copied()), prefix.clone())
+        } else {
+            let mut p = prefix.clone();
+            p.push(t(s));
+            (Some(alias.unwrap_or(t(s))), p)
+        };
+        if let Some(nm) = name.filter(|&nm| nm != b"_" && !path.is_empty()) {
+            out.push((nm, path, at, own));
+        }
+        break next;
+    };
+    prefix.truncate(depth);
+    end
+}
+
+/// The namespaces of what an import of std / core / alloc names, where its path tells (0: unknown): the crate, one of
+/// its modules, or a type or trait (`std::collections::HashMap`)
+fn std_path_ns(path: &[&[u8]]) -> u8 {
+    const MODS: &[&str] = &[
+        "alloc", "any", "array", "ascii", "borrow", "boxed", "cell", "char", "clone", "cmp", "collections", "convert", "default",
+        "env", "error", "f32", "f64", "ffi", "fmt", "fs", "future", "hash", "hint", "i8", "i16", "i32", "i64", "i128", "io",
+        "isize", "iter", "marker", "mem", "net", "num", "ops", "option", "os", "panic", "path", "pin", "prelude", "primitive",
+        "process", "ptr", "rc", "result", "slice", "str", "string", "sync", "task", "thread", "time", "u8", "u16", "u32", "u64",
+        "u128", "usize", "vec",
+    ];
+    let last = path[path.len() - 1];
+    if path.len() == 1 || (path.len() == 2 && MODS.iter().any(|m| m.as_bytes() == last)) {
+        1
+    } else if last.first().is_some_and(u8::is_ascii_uppercase) && last.iter().any(u8::is_ascii_lowercase) {
+        1
+    } else {
+        0
+    }
+}
+
+/// E0428 and the like: two definitions of one name in one namespace of a module (the crate root or a `mod m { .. }`),
+/// at the second (`enum Foo {}` and `mod Foo {}`). The definitions: items (types: `mod` / `struct` / `enum` / `union`
+/// / `trait` / `type` / `extern crate`; values: `fn` / `const` / `static` / a unit or tuple struct), imports of a module
+/// or item of the program or of a module or type of std, and the `extern crate std` the compiler puts in the crate
+/// root in edition 2015 (`injected`; a later edition's is hygienic). Only read when the program has a `mod` or an
+/// `extern crate`, or in edition 2015 something that may define `std` / `core`. `src` is the configured text, `externs` the `extern crate` items
+/// the configuring blanked (cfg::strip_noting)
+fn duplicate_name(src: &str, externs: &[(usize, String)], injected: bool) -> Option<String> {
+    // (a few scans: a program without these has its other duplicates found when its items are collected)
+    // (2015's injected `std` meets an item or import of that name: `struct std;`, `use x as std;`, `enum std {`)
+    let names_std = || {
+        ["std", "core"].iter().any(|w| {
+            src.match_indices(w).any(|(i, _)| src[i + w.len()..].trim_start().starts_with([';', '{', '=', '<', '(']))
+        })
+    };
+    if externs.is_empty() && !src.contains("mod ") && !(injected && names_std()) {
+        return None;
+    }
+    // (the blanked `extern crate x;` items back in their places, where those are still blank)
+    let restored;
+    let src = if externs.is_empty() {
+        src
+    } else {
+        let mut out = src.as_bytes().to_vec();
+        for (p, text) in externs {
+            if let Some(at) = out.get_mut(*p..*p + text.len()).filter(|at| at.iter().all(u8::is_ascii_whitespace)) {
+                at.copy_from_slice(text.as_bytes());
+            }
+        }
+        restored = String::from_utf8(out).ok()?;
+        restored.as_str()
+    };
+    let b = src.as_bytes();
+    let toks = crate::lexer::tokenize(b);
+    let n = toks.len();
+    let t = |k: usize| -> &[u8] { toks.get(k).map_or(&b""[..], |&(_, a, e)| &b[a..e]) };
+    // (each open bracket's match)
+    let mut close = vec![usize::MAX; n];
+    let mut stack: Vec<usize> = vec![];
+    for k in 0..n {
+        if toks[k].0 == 1 {
+            match b[toks[k].1] {
+                b'(' | b'[' | b'{' => stack.push(k),
+                b')' | b']' | b'}' => {
+                    if let Some(o) = stack.pop() {
+                        close[o] = k;
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+    let line_of = |k: usize| b[..toks[k].1].iter().filter(|&&c| c == b'\n').count() + 1;
+    let is_id = |k: usize| toks.get(k).is_some_and(|x| x.0 == 0);
+    // (`r#foo` is the name `foo`: the tokens split it into `r`, `#`, `foo`)
+    let raw = |k: usize| if t(k) == b"r" && t(k + 1) == b"#" && is_id(k + 2) { k + 2 } else { k };
+    // (modules: (the tokens of the body, the parent, the name); the crate root first)
+    let mut mods: Vec<(usize, usize, usize, &[u8])> = vec![(0, n, usize::MAX, b"")];
+    let mut defs: Vec<Vec<DupDef>> = vec![];
+    let mut uses: Vec<(&[u8], Vec<&[u8]>, usize, bool)> = vec![];
+    let mut prefix: Vec<&[u8]> = vec![];
+    while defs.len() < mods.len() {
+        let m = defs.len();
+        let (lo, hi, _, _) = mods[m];
+        let mut names: Vec<DupDef> = vec![];
+        // (the crate's own attributes `#![no_std]` / `#![no_core]`: the inner attributes the text starts with, from the
+        // tokens (not a comment, nor a macro's input))
+        let inner = |a: &[u8]| {
+            let mut k = 0;
+            while t(k) == b"#" && t(k + 1) == b"!" && t(k + 2) == b"[" && close[k + 2] != usize::MAX {
+                if t(k + 3) == a && t(k + 4) == b"]" {
+                    return true;
+                }
+                k = close[k + 2] + 1;
+            }
+            false
+        };
+        if m == 0 && injected && !inner(b"no_core") {
+            let name: &[u8] = if inner(b"no_std") { b"core" } else { b"std" };
+            names.push(DupDef { ns: 1, name, def: Def::Injected, at: usize::MAX, path: vec![], module_only: false });
+        }
+        let mut k = lo;
+        // (the item's first token past its attributes: `pub` included)
+        let mut start = usize::MAX;
+        while k < hi {
+            // attributes
+            if t(k) == b"#" && (t(k + 1) == b"[" || (t(k + 1) == b"!" && t(k + 2) == b"[")) {
+                let o = if t(k + 1) == b"[" { k + 1 } else { k + 2 };
+                k = close[o].saturating_add(1);
+                continue;
+            }
+            if start == usize::MAX {
+                start = k;
+            }
+            if t(k) == b"pub" {
+                k += 1;
+                if t(k) == b"(" {
+                    k = close[k].saturating_add(1);
+                }
+                continue;
+            }
+            if matches!(t(k), b"unsafe" | b"async" | b"default") {
+                k += 1;
+                continue;
+            }
+            // (`const fn` / `const unsafe fn` / `extern "C" fn`: qualifiers of a fn)
+            if t(k) == b"const" && matches!(t(k + 1), b"fn" | b"unsafe" | b"extern" | b"async") {
+                k += 1;
+                continue;
+            }
+            if t(k) == b"extern" && toks.get(k + 1).is_some_and(|x| x.0 == 2) && matches!(t(k + 2), b"fn" | b"unsafe") {
+                k += 2;
+                continue;
+            }
+            // (the item's namespaces and name: 1 types, 2 values)
+            let mut item: Option<(u8, usize, Def)> = None;
+            match t(k) {
+                // (an inline module; a `mod m;` file may be configured away by its own `#![cfg(..)]`)
+                // (nor one whose body starts with an inner `#![cfg(..)]`, nor an empty one over several lines: a file module
+                // the loader brought in, configured away by its own `#![cfg(..)]`)
+                b"mod" if is_id(k + 1)
+                    && t(k + 2) == b"{"
+                    && !(t(k + 3) == b"#" && t(k + 4) == b"!" && t(k + 5) == b"[" && t(k + 6).starts_with(b"cfg"))
+                    && !(close[k + 2] == k + 3 && b[toks[k + 2].1..toks[k + 3].1].contains(&b'\n')) =>
+                {
+                    item = Some((1, k + 1, Def::Item));
+                    if close[k + 2] < hi {
+                        mods.push((k + 3, close[k + 2], m, t(raw(k + 1))));
+                    }
+                }
+                b"struct" if is_id(k + 1) => {
+                    // (a unit / tuple struct is a value too)
+                    let mut j = k + 2;
+                    if t(j) == b"<" {
+                        let mut d = 0i32;
+                        while j < hi {
+                            match t(j) {
+                                b"<" => d += 1,
+                                b">" => {
+                                    d -= 1;
+                                    if d == 0 {
+                                        break;
+                                    }
+                                }
+                                _ => {}
+                            }
+                            j += 1;
+                        }
+                        j += 1;
+                    }
+                    item = Some((if matches!(t(j), b";" | b"(") { 3 } else { 1 }, k + 1, Def::Item));
+                }
+                b"enum" | b"trait" | b"type" if is_id(k + 1) => item = Some((1, k + 1, Def::Item)),
+                b"union" if is_id(k + 1) && t(k + 1) != b"union" => item = Some((1, k + 1, Def::Item)),
+                b"fn" | b"const" | b"static" if is_id(k + 1) && t(k + 1) != b"_" && t(k + 1) != b"fn" && t(k + 1) != b"mut" => {
+                    item = Some((2, k + 1, Def::Item))
+                }
+                b"static" if t(k + 1) == b"mut" && is_id(k + 2) => item = Some((2, k + 2, Def::Item)),
+                b"extern" if t(k + 1) == b"crate" && is_id(k + 2) => {
+                    let nm = if t(k + 3) == b"as" && (is_id(k + 4) || t(k + 4) == b"_") { k + 4 } else { k + 2 };
+                    // (`as _` binds no name)
+                    if t(nm) != b"self" && t(nm) != b"_" {
+                        item = Some((1, nm, Def::Crate));
+                    }
+                }
+                b"use" => {
+                    uses.clear();
+                    use_tree_names(b, &toks, &close, k + 1, &mut prefix, &mut uses);
+                    for (name, path, at, own) in uses.drain(..) {
+                        names.push(DupDef { ns: 0, name, def: Def::Use, at, path, module_only: own });
+                    }
+                }
+                _ => {}
+            }
+            if let Some((ns, at, def)) = item {
+                names.push(DupDef { ns, name: t(raw(at)), def, at: start, path: vec![], module_only: false });
+            }
+            start = usize::MAX;
+            // to the item's end: a `;` or a body `{ .. }` (a body in brackets is skipped whole)
+            let mut j = if item.is_some() { k + 1 } else { k };
+            loop {
+                if j >= hi {
+                    break;
+                }
+                match t(j) {
+                    b";" => break,
+                    b"{" => {
+                        j = close[j];
+                        // (`struct S { .. }` / `fn f() { .. }` end at their body; `const C: T = S { .. };` goes on)
+                        if t(j + 1) != b";" && !matches!(t(j + 1), b"." | b"?" | b"+" | b"-" | b"*" | b"/") {
+                            break;
+                        }
+                    }
+                    b"(" | b"[" => j = close[j],
+                    _ => {}
+                }
+                if j == usize::MAX {
+                    return None;
+                }
+                j += 1;
+            }
+            k = j.saturating_add(1);
+        }
+        defs.push(names);
+    }
+    // (an import's namespaces: what it names in a module of the program, std's, or an `extern crate`)
+    // (each module's child modules by name; the first of a name, as a lookup in order finds)
+    let mut kids: FxMap<(usize, &[u8]), usize> = FxMap::default();
+    for (i, x) in mods.iter().enumerate() {
+        kids.entry((x.2, x.3)).or_insert(i);
+    }
+    let child = |m: usize, nm: &[u8]| kids.get(&(m, nm)).copied();
+    let mut resolved: Vec<(usize, usize, u8)> = vec![];
+    for (m, ds) in defs.iter().enumerate() {
+        for (i, d) in ds.iter().enumerate() {
+            if d.def != Def::Use {
+                continue;
+            }
+            let path = &d.path;
+            let mut cur = m;
+            let mut s = 0;
+            match path[0] {
+                b"crate" => {
+                    cur = 0;
+                    s = 1;
+                }
+                b"self" => s = 1,
+                b"super" => {
+                    while path.get(s).is_some_and(|&x| x == b"super") {
+                        cur = mods[cur].2;
+                        if cur == usize::MAX {
+                            break;
+                        }
+                        s += 1;
+                    }
+                }
+                // (a path of neither: from the crate root in 2015, from this module later)
+                b"std" | b"core" | b"alloc" if child(if injected { 0 } else { m }, path[0]).is_none() => {
+                    resolved.push((m, i, std_path_ns(path) & if d.module_only { 1 } else { 3 }));
+                    continue;
+                }
+                _ if injected => cur = 0,
+                _ => {}
+            }
+            if cur == usize::MAX || s >= path.len() {
+                continue;
+            }
+            for seg in &path[s..path.len() - 1] {
+                match child(cur, seg) {
+                    Some(c) => cur = c,
+                    None => {
+                        cur = usize::MAX;
+                        break;
+                    }
+                }
+            }
+            if cur == usize::MAX {
+                continue;
+            }
+            let last = path[path.len() - 1];
+            let mut ns = defs[cur].iter().filter(|x| x.name == last && x.def != Def::Use && x.at != usize::MAX).fold(0, |a, x| a | x.ns);
+            if child(cur, last).is_some() {
+                ns |= 1;
+            }
+            resolved.push((m, i, if d.module_only { ns & 1 } else { ns }));
+        }
+    }
+    for (m, i, ns) in resolved {
+        defs[m][i].ns = ns;
+    }
+    // (in each module, the definitions of one name in their order: by name, then by place)
+    let mut first: Option<(usize, usize, &[u8], &str)> = None;
+    let mut order: Vec<usize> = vec![];
+    for ds in &defs {
+        order.clear();
+        order.extend((0..ds.len()).filter(|&i| ds[i].ns != 0));
+        order.sort_by(|&x, &y| ds[x].name.cmp(ds[y].name).then(x.cmp(&y)));
+        for (oi, &i) in order.iter().enumerate() {
+            let e = &ds[i];
+            let prev = order[..oi].iter().rev().take_while(|&&p| ds[p].name == e.name).map(|&p| &ds[p]).find(|p| {
+                p.ns & e.ns != 0
+                    // (`use std;` names the crate the root already has)
+                    && !(p.def == Def::Injected && e.def == Def::Use && e.path.len() == 1 && e.path[0] == e.name)
+            });
+            let Some(p) = prev else { continue };
+            let code = match (p.def, e.def) {
+                (Def::Item, Def::Item) => "E0428",
+                (Def::Use, Def::Use) => "E0252",
+                (Def::Use, Def::Item) | (Def::Item, Def::Use) => "E0255",
+                (Def::Use, _) | (_, Def::Use) => "E0254",
+                (Def::Item, _) | (_, Def::Item) => "E0260",
+                _ => "E0259",
+            };
+            let line = line_of(e.at);
+            if first.is_none_or(|(l, _, _, _)| line < l) {
+                // (the column: the item's first token, an import's path)
+                let p = toks[e.at].1;
+                let col = p - b[..p].iter().rposition(|&c| c == b'\n').map_or(0, |l| l + 1) + 1;
+                first = Some((line, col, e.name, code));
+            }
+        }
+    }
+    first.map(|(line, col, name, code)| format!("{line}:{col}: the name `{}` is defined multiple times ({code})", String::from_utf8_lossy(name)))
+}
+
 /// E0252 / E0255: a name a top-level `use` brings in that another top-level `use` or item of the crate root also
 /// defines ("the name `X` is defined multiple times", at the second). Top level = the item starts a line (the
 /// flattened modules' items keep their indentation)
@@ -1674,6 +2219,16 @@ fn unresolved_import(src: &str, split: &str, items: &[SrcItem], deps: &[String])
                 let second: String = r2.chars().take_while(|c| c.is_alphanumeric() || *c == '_').collect();
                 if !second.is_empty() && second != "self" && second != "super" {
                     seconds.push((line, first.clone(), second));
+                } else if let Some(list) = r2.trim_start().strip_prefix('{').and_then(|l| l.split_once('}')).map(|(l, _)| l).filter(|l| !l.contains('{')) {
+                    // (`use m::{f, g as h};`: each name of a flat list)
+                    for part in list.split(',') {
+                        // (`r#foo` names `foo`)
+                        let p = part.trim_start();
+                        let n: String = p.strip_prefix("r#").unwrap_or(p).chars().take_while(|c| c.is_alphanumeric() || *c == '_').collect();
+                        if !n.is_empty() && n != "self" && n != "super" && !part.contains("::") {
+                            seconds.push((line, first.clone(), n));
+                        }
+                    }
                 }
             }
             firsts.push((line, first));
@@ -2363,6 +2918,8 @@ fn inline_bodies(a: &Analysis) -> acg::Inline {
         crate::prelude::DROP_GLUE, "__exr_hash", "__exr_cmp", "__exr_eq", "__exr_clone", "__exr_default", "__exr_display", "__exr_debug",
         "__exr_rt_init", "__exr_on_trap", "Option::unwrap", "Option::expect", "Result::unwrap", "Result::expect", "Result::unwrap_err", "Result::expect_err",
     ];
+    // (read once: getenv scans the whole environment)
+    let (no_inline_closure, inline_log) = (std::env::var_os("ZUSTC_NO_INLINE_CLOSURE").is_some(), std::env::var_os("ZUSTC_INLINE_LOG").is_some());
     for id in 0..p.names.len() {
         let Some(ii) = p.item_of[id] else { continue };
         // (依存するクレートの関数は展開しない: 本体はインターフェースのハッシュに入らないので、変わっても気付けない)
@@ -2371,12 +2928,12 @@ fn inline_bodies(a: &Analysis) -> acg::Inline {
         }
         // (クロージャの本体: 大きさは本体の構文木で見る (アイテムは囲む関数のもの))
         if p.closures.contains_key(&(id as u32)) {
-            if std::env::var_os("ZUSTC_NO_INLINE_CLOSURE").is_some() {
+            if no_inline_closure {
                 continue;
             }
             if let Ok(f) = fn_ast(a, id as u32) {
                 let ok = acg::inline_candidate(&f) && format!("{:?}", f.block).len() <= 2400;
-                if std::env::var_os("ZUSTC_INLINE_LOG").is_some() {
+                if inline_log {
                     eprintln!("inline {} closure {}", if ok { "yes" } else { "no " }, p.names[id]);
                 }
                 if ok {
@@ -2403,7 +2960,7 @@ fn inline_bodies(a: &Analysis) -> acg::Inline {
         }
         if let Ok(f) = fn_ast(a, id as u32) {
             let ok = acg::inline_candidate(&f);
-            if std::env::var_os("ZUSTC_INLINE_LOG").is_some() {
+            if inline_log {
                 eprintln!("inline {} {ntok} {}", if ok { "yes" } else { "no " }, p.names[id]);
             }
             if ok {
@@ -2878,11 +3435,61 @@ impl Session2 {
             self.chk = Some(memo);
         }
         tm.lap("check", format!("{n_memo} from the last check, {n_keys} keys, {n_hit} cached, {n_checked} checked"));
-        let mut d: Vec<Diagnostic> = errs.iter().map(|e| Diagnostic::parse(e)).filter(|d| d.line <= user_lines).collect();
+        let mut d: Vec<Diagnostic> = errs.iter().map(|e| Diagnostic::parse(e)).collect();
+        // (an item moved out of a fn body (`fn main() { fn helper() { .. } }`) is past the source's last line: its borrow
+        // and region checks' errors are at the lines it was moved from. Not its other errors: typeck does not know all
+        // such an item may name where it was (`Self` of the impl around it), so they are left out as before)
+        if d.iter().any(|x| x.line > user_lines && acg::borrow_check_error(&x.msg)) {
+            if let Some(moved) = self.moved_lines(src) {
+                for x in &mut d {
+                    if x.line > user_lines && acg::borrow_check_error(&x.msg) {
+                        if let Some(l) = moved_line(&moved, user_lines, x.line) {
+                            x.line = l;
+                            x.msg = moved_msg_lines(&x.msg, &moved, user_lines);
+                        }
+                    }
+                }
+            }
+        }
+        d.retain(|d| d.line <= user_lines);
         d.sort_by(|x, y| (x.line, x.col).cmp(&(y.line, y.col)));
         d.dedup();
         d
     }
+}
+
+/// The line (1-based) in the source of line `line` of the prepared text, past the source's `user_lines`: in the
+/// items moved out of fn bodies, appended in order, each after a newline (Prep::moved: each one's first line in the
+/// source (0-based) and its newlines). None past them (the prelude's)
+fn moved_line(moved: &[(usize, usize)], user_lines: usize, line: usize) -> Option<usize> {
+    let mut start = user_lines + 1;
+    for &(from, nl) in moved {
+        if line >= start && line <= start + nl {
+            return Some(from + 1 + (line - start));
+        }
+        start += nl + 1;
+    }
+    None
+}
+
+/// The positions `at L:C` a message names (`(first borrow at 14:22)`) on lines moved out of fn bodies: at the lines
+/// they were moved from (moved_line)
+fn moved_msg_lines(msg: &str, moved: &[(usize, usize)], user_lines: usize) -> String {
+    let mut out = String::with_capacity(msg.len());
+    let mut rest = msg;
+    while let Some(i) = rest.find("at ") {
+        out.push_str(&rest[..i + 3]);
+        rest = &rest[i + 3..];
+        let n = rest.bytes().take_while(|b| b.is_ascii_digit()).count();
+        if n > 0 && rest[n..].starts_with(':') {
+            if let Some(l) = rest[..n].parse::<usize>().ok().filter(|&l| l > user_lines).and_then(|l| moved_line(moved, user_lines, l)) {
+                out.push_str(&l.to_string());
+                rest = &rest[n..];
+            }
+        }
+    }
+    out.push_str(rest);
+    out
 }
 
 /// The program's generic fns (not a trait's default methods, not a closure's body, not a dependency's) that no
@@ -2910,7 +3517,8 @@ fn placeholder_wave(a: &Analysis, insts: &Mutex<Insts>) -> Vec<u32> {
         let ii = p.item_of[id].unwrap_or(0) as usize;
         let body = a.items.get(ii).and_then(|it| a.src.get(it.start..it.end)).unwrap_or("");
         let calls_bound = sig.generics.iter().flat_map(|(_, bs)| bs.iter()).any(|b| {
-            if matches!(b.as_str(), "Copy" | "Sized" | "?Sized" | "Send" | "Sync" | "Unpin") {
+            // (`Fn(..)` / `FnMut(..)` / `FnOnce(..)`: a call of the parameter is checked against the bound itself)
+            if matches!(b.as_str(), "Copy" | "Sized" | "?Sized" | "Send" | "Sync" | "Unpin") || crate::ast_summary::parse_fn_bound(b).is_some() {
                 return false;
             }
             let tr = b.split('<').next().unwrap_or(b).trim();

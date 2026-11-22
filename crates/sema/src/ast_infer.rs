@@ -117,7 +117,7 @@ fn diverging_macro(p: &Path) -> bool {
 /// 必ず発散する式 (`return` / `break` / `continue` / `panic!(..)`)
 fn diverges(e: &Expr) -> bool {
     match e {
-        Expr::Return(_) | Expr::Break(..) | Expr::Continue(_) => true,
+        Expr::Return(_) | Expr::Break(..) | Expr::Continue(..) => true,
         Expr::Macro(p, _, _) => diverging_macro(p),
         _ => false,
     }
@@ -186,7 +186,8 @@ fn join_toks(ts: &[crate::parse::Tok]) -> String {
 
 /// 整数・浮動小数点のリテラルの (浮動小数点か, 接尾辞)
 fn num_suffix(t: &str) -> (bool, String) {
-    let s: String = t.chars().filter(|&c| c != '_').collect();
+    // (most literals have no `_`: no copy then)
+    let s: std::borrow::Cow<str> = if t.contains('_') { t.chars().filter(|&c| c != '_').collect::<String>().into() } else { t.into() };
     let radix_prefix = s.starts_with("0x") || s.starts_with("0b") || s.starts_with("0o");
     if radix_prefix {
         let body = &s[2..];
@@ -321,7 +322,6 @@ pub fn infer_ctx_margs(
             out.insert(k, t);
         }
     }
-    let mut texts = TextTypes::default();
     // (同じ式を何度か推論し直すことがある: lets と同じく後の記録を使う)
     let mut recs: Vec<(*const Expr, u32)> = std::mem::take(&mut s.exprs);
     // (アドレスで並べ、同じアドレスは最後の記録だけ残す: 安定ソートなので記録順は保たれる)
@@ -334,6 +334,7 @@ pub fn infer_ctx_margs(
         }
     }
     let recs = dedup;
+    let mut texts = TextTypes::with_capacity_and_hasher(recs.len(), Default::default());
     let mut memo = crate::fxhash::FxMap::default();
     for (e, v) in recs {
         let Some(t) = s.resolve(v) else { continue };
@@ -1368,7 +1369,7 @@ impl Inf<'_> {
                 }
                 self.known(Ty::Never)
             }
-            Expr::Break(label, x) => {
+            Expr::Break(label, x, _) => {
                 let fi = self.brk.iter().rposition(|f| match label {
                     Some(n) => f.0.as_deref() == Some(n.as_str()),
                     None => !f.2,
@@ -1385,7 +1386,7 @@ impl Inf<'_> {
                 }
                 self.known(Ty::Never)
             }
-            Expr::Continue(_) => self.known(Ty::Never),
+            Expr::Continue(..) => self.known(Ty::Never),
             Expr::Call(f, args) => self.call(f, args),
             Expr::Closure(..) => self.closure(e),
             Expr::MethodCall(recv, name, tf, args, _) => self.method_call(recv, name, tf, args),

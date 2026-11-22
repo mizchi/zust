@@ -1,0 +1,1 @@
+2:17: the trait `From<u16>` is not implemented for `u8` (E0277)

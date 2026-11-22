@@ -139,21 +139,45 @@ impl Cx<'_> {
             return err(pos, format!("binary operation `{op}` cannot be applied to a fn item (cast it to a fn pointer)"));
         }
         // 短絡評価
+        // (a chain of one operator (`a && b && c`) is lowered as one: each operand's short-circuit goes to the end, so
+        // the borrow check sees that c runs only after b did, as rustc's control flow does)
         if !assign && (op == "&&" || op == "||") {
-            let (l, lt) = self.expr(left, Some(Ty::Bool))?;
-            self.same(SP, lt, Ty::Bool)?;
-            let Some(l) = l else {
-                return Ok((None, Ty::Never));
-            };
-            let rhs_blk = self.b.create_block();
+            let mut ops: Vec<&Expr> = vec![right];
+            let mut l0 = left;
+            while let Expr::Binary(o, a, b, _) = l0 {
+                if o != op {
+                    break;
+                }
+                ops.push(b);
+                l0 = a;
+            }
+            ops.push(l0);
+            ops.reverse();
+            let last = ops.pop().unwrap();
             let merge = self.b.create_block();
             let res = self.b.append_block_param(merge, types::I8);
-            if op == "&&" {
-                self.b.ins().brif(l, rhs_blk, &[], merge, &[l]);
-            } else {
-                self.b.ins().brif(l, merge, &[l], rhs_blk, &[]);
+            for (i, x) in ops.into_iter().enumerate() {
+                let (l, lt) = self.expr(x, Some(Ty::Bool))?;
+                self.same(SP, lt, Ty::Bool)?;
+                let Some(l) = l else {
+                    // (the first operand diverges: so does the whole. A later one: the operands before it may
+                    // short-circuit to the end, whose value is the chain's)
+                    if i == 0 {
+                        return Ok((None, Ty::Never));
+                    }
+                    self.b.ins().trap(TrapCode::unwrap_user(1));
+                    self.b.switch_to_block(merge);
+                    return Ok((Some(res), Ty::Bool));
+                };
+                let rhs_blk = self.b.create_block();
+                if op == "&&" {
+                    self.b.ins().brif(l, rhs_blk, &[], merge, &[l]);
+                } else {
+                    self.b.ins().brif(l, merge, &[l], rhs_blk, &[]);
+                }
+                self.b.switch_to_block(rhs_blk);
             }
-            self.b.switch_to_block(rhs_blk);
+            let right = last;
             let (r, rt) = self.expr(right, Some(Ty::Bool))?;
             self.same(SP, rt, Ty::Bool)?;
             match r {
@@ -223,13 +247,22 @@ impl Cx<'_> {
             }
             // (`&a == &b` with `impl PartialEq for &X`: that impl's eq, `(&a).eq(&&b)`, not X's fields)
             // (only PartialEq's `eq` for `&X` (another trait's `eq` gets the same name), and both sides `&X`)
-            let peq_ref = self.prog.method(*sid, "__ref_eq").is_some_and(|id| {
-                self.prog.sigs[id as usize].impl_trait.as_deref().is_some_and(|t| t == "PartialEq" || t.starts_with("PartialEq<"))
-            });
+            // (among the `__ref_eq` overloads: `impl Other for &X` may come before `impl PartialEq for &X`)
+            let rname = format!("{}::__ref_eq", self.prog.structs[self.prog.base_of(*sid) as usize].name);
+            let peq_ref = self.prog.method(*sid, "__ref_eq").is_some() && self.trait_candidate(&rname, "PartialEq").is_some();
             if matches!(op, "==" | "!=") && !assign && peq_ref && self.peek(right) == self.peek(left) {
                 let call = mcall(paren(left), "eq", vec![Expr::Ref(false, Box::new(paren(right)))]);
                 let ne = if op == "!=" { Expr::Unary("!".into(), Box::new(Expr::Paren(Box::new(call))), Default::default()) } else { call };
                 let ne = self.keep_expr(ne);
+                // (the call is PartialEq's eq, whichever trait's `eq` the type has first)
+                let call_at = match ne {
+                    Expr::Unary(_, i, _) => match &**i {
+                        Expr::Paren(c) => &**c as *const Expr as usize,
+                        c => c as *const Expr as usize,
+                    },
+                    c => c as *const Expr as usize,
+                };
+                self.explicit_traits.insert(call_at, "PartialEq".to_string());
                 return self.expr(ne, expected);
             }
         }

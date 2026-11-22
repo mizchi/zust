@@ -425,8 +425,9 @@ pub enum Expr {
     While(Option<String>, Box<Expr>, Block),
     Loop(Option<String>, Block),
     For(Option<String>, Box<Pat>, Box<Expr>, Block),
-    Break(Option<String>, Option<Box<Expr>>),
-    Continue(Option<String>),
+    /// (the last field: where its label is, else where the keyword is)
+    Break(Option<String>, Option<Box<Expr>>, Pos),
+    Continue(Option<String>, Pos),
     Return(Option<Box<Expr>>),
     /// (the last field: where the closure starts)
     Closure(bool, Vec<(Pat, Option<Ty>)>, Option<Box<Ty>>, Box<Expr>, Pos),
@@ -728,6 +729,48 @@ fn fut_output(p: &Path) -> Option<Ty> {
 }
 
 impl Parser {
+    /// E0582: a lifetime a binder (`for<'a>`) declares that the bound's result (`-> T`) or an associated type's binding
+    /// (`Item = T`) names, but not its inputs (`Fn(..)`'s parameters, the trait's arguments): no type can be it
+    fn hr_output_check(&self, binder: &[GArg], p: &Path, at: usize, self_ty: Option<&Ty>) -> R<()> {
+        if binder.is_empty() {
+            return Ok(());
+        }
+        let Some(last) = p.segs.last() else { return Ok(()) };
+        // (a generic associated type's binding (`Item<'a> = &'a T`, `Gat<'b>: Tr`) drops its arguments, which may be
+        // the binder's inputs: not checked)
+        let t: String = last.text.chars().filter(|c| !c.is_whitespace()).collect();
+        if t.contains(">=") || t.match_indices(">:").any(|(k, _)| !t[k + 2..].starts_with(':')) {
+            return Ok(());
+        }
+        for b in binder {
+            let GArg::Lifetime(l) = b else { continue };
+            // (the predicate's own type is an input: `for<'a> &'a T: IntoIterator<Item = &'a U>`)
+            let mut ins = self_ty.is_some_and(|t| crate::regions::mentions_lt(t, l)) || last.args.iter().any(|a| match a {
+                GArg::Ty(t) => crate::regions::mentions_lt(t, l),
+                GArg::Lifetime(x) => x == l,
+                _ => false,
+            });
+            // (`Item = T` binds; `Item: 'a` (parsed as `impl` bounds) only bounds it, which a binder's lifetime may)
+            let mut out = last.args.iter().any(|a| matches!(a, GArg::Bind(_, t) if !matches!(t, Ty::Impl(_)) && crate::regions::mentions_lt(t, l)));
+            if let Some((ps, r)) = &last.fn_args {
+                ins |= ps.iter().any(|t| crate::regions::mentions_lt(t, l));
+                out |= r.as_deref().is_some_and(|t| crate::regions::mentions_lt(t, l));
+            }
+            // (an earlier segment's arguments are inputs too: `a::Tr<'a>::..` is rare, taken as one)
+            ins |= p.segs[..p.segs.len() - 1].iter().any(|s| s.args.iter().any(|a| matches!(a, GArg::Lifetime(x) if x == l) || matches!(a, GArg::Ty(t) if crate::regions::mentions_lt(t, l))));
+            if out && !ins {
+                let line = self.toks.get(at).map(|t| (t.line, t.col + 1)).unwrap_or((0, 0));
+                let bound_name = last.args.iter().find_map(|a| match a {
+                    GArg::Bind(n, t) if !matches!(t, Ty::Impl(_)) && crate::regions::mentions_lt(t, l) => Some(n.clone()),
+                    _ => None,
+                });
+                let what = format!("`{}`", bound_name.unwrap_or_else(|| "Output".to_string()));
+                return Err(format!("{}:{}: binding for associated type {what} references lifetime `{l}`, which does not appear in the trait input types (E0582)", line.0, line.1));
+            }
+        }
+        Ok(())
+    }
+
     fn err(&self, msg: &str) -> String {
         match self.toks.get(self.i) {
             Some(t) => format!("{}:{}: {msg} (found `{}`)", t.line, t.col + 1, t.text),
@@ -789,6 +832,19 @@ impl Parser {
         if self.eat_punct(s) {
             Ok(())
         } else {
+            // (a missing `;` before a token on a later line that can begin a statement, or a `}`: right after the
+            // previous token, where it goes, as rustc points: `}` then `let` on the next line. Not `,` / `:` / `.`)
+            if let (true, Some(p), Some(t)) = (s == ";", self.i.checked_sub(1).and_then(|k| self.toks.get(k)), self.toks.get(self.i)) {
+                let begins = match t.kind {
+                    TokKind::Ident | TokKind::Lit | TokKind::Lifetime | TokKind::Open => true,
+                    TokKind::Close => t.text == "}",
+                    TokKind::Punct => matches!(t.text.as_str(), "-" | "!" | "*" | "&" | "|" | "||" | ".." | "<" | "::" | "&&"),
+                };
+                if p.line < t.line && begins && !p.text.contains('\n') {
+                    let pos = self.shift(p.line, p.col + p.text.chars().count() as u32);
+                    return Err(format!("{}:{}: expected `{s}` (found `{}`)", pos.line, pos.col + 1, t.text));
+                }
+            }
             Err(self.err(&format!("expected `{s}`")))
         }
     }
@@ -1159,20 +1215,28 @@ impl Parser {
         } else if self.is_open("(") {
             self.i += 1;
             let q = self.eat_punct("?");
+            let mut binder = vec![];
             if self.eat_ident("for") {
                 self.expect_punct("<")?;
-                let _ = self.generic_args()?;
+                binder = self.generic_args()?;
             }
-            v.push(Bound::Trait(q, self.path(true)?));
+            let at = self.i;
+            let p = self.path(true)?;
+            self.hr_output_check(&binder, &p, at, None)?;
+            v.push(Bound::Trait(q, p));
             self.expect_close(")")?;
         } else {
             let q = self.eat_punct("?");
+            let mut binder = vec![];
             if self.eat_ident("for") {
                 self.expect_punct("<")?;
-                let _ = self.generic_args()?;
+                binder = self.generic_args()?;
             }
             if self.tok(0).is_some_and(|t| t.kind == TokKind::Ident) || self.is_punct("::") {
-                v.push(Bound::Trait(q, self.path(true)?));
+                let at = self.i;
+                let p = self.path(true)?;
+                self.hr_output_check(&binder, &p, at, None)?;
+                v.push(Bound::Trait(q, p));
             }
         }
         Ok(v)
@@ -1778,6 +1842,29 @@ impl Parser {
         Ok(l)
     }
 
+    /// The rest of a binary expression whose first operand is l (casts of l first)
+    #[cold]
+    #[inline(never)]
+    fn bin_continue(&mut self, mut l: Expr, start: Pos) -> R<Expr> {
+        while self.is_ident("as") {
+            self.i += 1;
+            let t = self.ty_no_bounds()?;
+            l = Expr::Cast(Box::new(l), Box::new(t));
+        }
+        loop {
+            let Some(op) = self.bin_op() else { break };
+            let p = bin_prec(&op);
+            if p == 0 {
+                break;
+            }
+            let at = self.pos();
+            self.i += op.len();
+            let r = self.bin_expr(p, true)?;
+            l = Expr::Binary(op, Box::new(l), Box::new(r), Span { start, at });
+        }
+        Ok(l)
+    }
+
     fn cast_expr(&mut self, ss: bool) -> R<Expr> {
         let mut e = self.unary_expr(ss)?;
         while self.is_ident("as") {
@@ -2202,14 +2289,20 @@ impl Parser {
                 return Ok(Expr::Return(v));
             }
             "break" => {
+                let kw = self.pos();
                 self.i += 1;
+                let lp = self.pos();
                 let l = self.lifetime();
+                let pos = if l.is_some() { lp } else { kw };
                 let v = if self.expr_follows() && !(self.is_open("{") && !ss) { Some(Box::new(self.expr(ss)?)) } else { None };
-                return Ok(Expr::Break(l, v));
+                return Ok(Expr::Break(l, v, pos));
             }
             "continue" => {
+                let kw = self.pos();
                 self.i += 1;
-                return Ok(Expr::Continue(self.lifetime()));
+                let lp = self.pos();
+                let l = self.lifetime();
+                return Ok(Expr::Continue(l.clone(), if l.is_some() { lp } else { kw }));
             }
             "let" => {
                 self.i += 1;
@@ -2423,6 +2516,9 @@ impl Parser {
                 return Ok(Stmt::Expr(e, semi));
             }
             let e = self.postfix_rest(e, start)?;
+            // (after the postfix part it is no longer block-like: `unsafe { a.get_unchecked(i) }.shr(n) & 1 != 0`
+            //  goes on through casts and binary operators, as in rustc)
+            let e = self.bin_continue(e, start)?;
             // (`{ x }.a = 1;` / `{ t }.0 += 1;`: an assignment to the place)
             let e = if self.tok(0).is_some_and(|t| t.kind == TokKind::Punct && t.text != ";") { self.place_assign(e, start)? } else { e };
             let semi = self.eat_punct(";");
@@ -2520,7 +2616,13 @@ impl Parser {
                 // (`dyn A + 'static: B`: a trait object type takes its bounds)
                 let t = if self.is_ident("dyn") { self.ty()? } else { self.ty_no_bounds()? };
                 self.expect_punct(":")?;
+                let at = self.i;
                 let mut bs = self.bounds()?;
+                for b in &bs {
+                    if let Bound::Trait(_, p) = b {
+                        self.hr_output_check(&binder, p, at, Some(&t))?;
+                    }
+                }
                 // (`for<'a> T: 'a`: the bound is of a lifetime the predicate binds, not one of the item: T outlives
                 // every region, `T: 'static`)
                 for b in bs.iter_mut() {
@@ -3242,7 +3344,7 @@ impl Counts {
                 self.expr(x);
                 self.block(b);
             }
-            Expr::Break(_, v) | Expr::Return(v) => {
+            Expr::Break(_, v, _) | Expr::Return(v) => {
                 if matches!(e, Expr::Return(_)) {
                     self.returns += 1;
                 }
@@ -3250,7 +3352,7 @@ impl Counts {
                     self.expr(v);
                 }
             }
-            Expr::Continue(_) => {}
+            Expr::Continue(..) => {}
             Expr::Closure(_, _, _, b, _) => {
                 self.closures += 1;
                 self.expr(b);

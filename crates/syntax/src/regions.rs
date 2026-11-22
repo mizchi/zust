@@ -39,6 +39,31 @@ fn bounds_name_lt(bs: &[Bound]) -> bool {
     })
 }
 
+/// t names the lifetime l anywhere (fn pointer, `dyn` and `impl` types too)
+pub fn mentions_lt(t: &PTy, l: &str) -> bool {
+    let in_path = |p: &crate::parse::Path| {
+        p.segs.iter().any(|s| {
+            s.args.iter().any(|a| match a {
+                GArg::Ty(t) | GArg::Bind(_, t) => mentions_lt(t, l),
+                GArg::Lifetime(x) => x == l,
+                _ => false,
+            }) || s.fn_args.as_ref().is_some_and(|(ps, r)| ps.iter().any(|t| mentions_lt(t, l)) || r.as_deref().is_some_and(|t| mentions_lt(t, l)))
+        })
+    };
+    match t {
+        PTy::Ref(x, _, i) => x.as_deref() == Some(l) || mentions_lt(i, l),
+        PTy::Ptr(_, i) | PTy::Slice(i) | PTy::Array(i, _) => mentions_lt(i, l),
+        PTy::Tuple(ts) => ts.iter().any(|t| mentions_lt(t, l)),
+        PTy::Path(q, p) => q.as_deref().is_some_and(|q| mentions_lt(q, l)) || in_path(p),
+        PTy::Fn(ps, r) => ps.iter().any(|t| mentions_lt(t, l)) || mentions_lt(r, l),
+        PTy::Impl(bs) | PTy::Dyn(bs) => bs.iter().any(|b| match b {
+            Bound::Lifetime(x) => x == l,
+            Bound::Trait(_, p) => in_path(p),
+        }),
+        PTy::Never | PTy::Infer | PTy::Macro(_) => false,
+    }
+}
+
 /// t writes `'static` somewhere (outside fn pointer, `impl` and `dyn` types)
 pub fn mentions_static(t: &PTy) -> bool {
     match t {
@@ -129,7 +154,7 @@ fn wf_outlives(t: &PTy, out: &mut Vec<(String, String)>, depth: u32) {
 }
 
 /// The lifetimes named in t
-fn lifetimes_in(t: &PTy, out: &mut Vec<String>) {
+pub(crate) fn lifetimes_in(t: &PTy, out: &mut Vec<String>) {
     match t {
         PTy::Ref(l, _, i) => {
             if let Some(l) = l {

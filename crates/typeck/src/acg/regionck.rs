@@ -467,6 +467,63 @@ fn bound_lts(b: &str) -> Vec<String> {
     out
 }
 
+/// The arguments a bound written as a string passes its trait (`Get<&'a i32, T>`: `&'a i32`, `T`), in order
+fn bound_args(b: &str) -> Vec<String> {
+    let (Some(i), Some(j)) = (b.find('<'), b.rfind('>')) else { return vec![] };
+    let Some(inner) = b.get(i + 1..j) else { return vec![] };
+    let (mut out, mut depth, mut from) = (vec![], 0i32, 0);
+    for (k, ch) in inner.char_indices().chain(std::iter::once((inner.len(), ','))) {
+        match ch {
+            '<' | '(' | '[' => depth += 1,
+            '>' | ')' | ']' => depth -= 1,
+            ',' if depth == 0 => {
+                out.push(inner[from..k].trim().to_string());
+                from = k + 1;
+            }
+            _ => {}
+        }
+    }
+    out
+}
+
+/// The lifetimes a type written as a string names, in the order of its region slots, when it writes all of them:
+/// references and generic arguments only (`&'a Foo<'b>`: `'a`, `'b`); None for an elided one (`&u8`, `'_`), a trait
+/// object, an `impl` type or a fn pointer, whose regions are not in written order
+fn written_lts(t: &str) -> Option<Vec<String>> {
+    let b = t.as_bytes();
+    let mut out = vec![];
+    let mut i = 0;
+    while i < b.len() {
+        match b[i] {
+            b'&' => {
+                let rest = t[i + 1..].trim_start();
+                if !rest.starts_with('\'') {
+                    return None;
+                }
+            }
+            b'\'' => {
+                let mut j = i + 1;
+                while j < b.len() && (b[j].is_ascii_alphanumeric() || b[j] == b'_') {
+                    j += 1;
+                }
+                let l = &t[i..j];
+                if l == "'_" {
+                    return None;
+                }
+                out.push(l.to_string());
+                i = j;
+                continue;
+            }
+            _ => {}
+        }
+        i += 1;
+    }
+    if ["dyn", "impl", "fn", "Fn"].iter().any(|k| t.split(|c: char| !c.is_alphanumeric() && c != '_').any(|w| w == *k || w.starts_with("Fn"))) {
+        return None;
+    }
+    Some(out)
+}
+
 /// The number of region slots of t (None: not followed)
 pub fn count(prog: &Program, t: Ty, depth: u32) -> Option<usize> {
     if depth > 24 {
@@ -595,7 +652,7 @@ pub fn fnmut_escape(body: &Expr, caps: &[&str]) -> Option<Sp> {
 /// e has no value: it panics, returns, breaks or continues (as written)
 fn diverges(e: &Expr) -> bool {
     match strip(e) {
-        Expr::Return(_) | Expr::Break(..) | Expr::Continue(_) => true,
+        Expr::Return(_) | Expr::Break(..) | Expr::Continue(..) => true,
         Expr::Macro(p, _, _) => p.segs.last().is_some_and(|s| matches!(s.name.as_str(), "panic" | "unreachable" | "todo" | "unimplemented")),
         Expr::Block(_, _, b) => match b.stmts.last() {
             Some(Stmt::Expr(t, _)) => diverges(t),
@@ -942,6 +999,21 @@ impl RgSt {
             return;
         }
         let parent = c.parent.take();
+        // (a type alias written without its lifetimes (`b: A` with `type A<'a> = &'a isize`): one marker for what it
+        // stands for, whose regions are all elided)
+        if matches!(t, Ty::Ref(..) | Ty::Dyn(_) | Ty::Fn(_)) && c.codes.is_some_and(|x| x.get(c.pos) == Some(&R_ELIDED_ADT)) {
+            // (an alias whose definition fixes a lifetime (`type S = &'static u8;`): which alias this is, and so
+            // which of its regions are fixed, is not known here. Not followed)
+            if prog.alias_fixed_lt {
+                c.ok = false;
+                return;
+            }
+            c.pos += 1;
+            let mut all = Codes { codes: None, pos: 0, ok: true, parent };
+            self.inst(prog, t, &mut all, lts, targs, elided, out, depth + 1);
+            c.ok &= all.ok;
+            return;
+        }
         let region = |me: &mut RgSt, c: &mut Codes, elided: &mut dyn FnMut(&mut RgSt) -> u32| -> u32 {
             match c.next() {
                 R_STATIC => STATIC,
@@ -1078,10 +1150,24 @@ impl RgSt {
         if codes.is_some_and(|c| c.contains(&R_UNKNOWN)) {
             return None;
         }
+        let u0 = self.univ.len();
         let mut c = Codes { codes, pos: 0, ok: true, parent: None };
         let mut out = vec![];
         self.inst(prog, t, &mut c, lts, targs, elided, &mut out, 0);
-        (c.ok && codes.is_none_or(|x| c.pos == x.len())).then_some(out)
+        if c.ok && codes.is_none_or(|x| c.pos == x.len()) {
+            return Some(out);
+        }
+        // (a type alias written without its lifetimes that stands for a Box or a struct (`Box<B>` with
+        // `type B<'a> = Box<&'a u8>`): its marker is taken for the Box's own. Codes that name no region elide each
+        // region, wherever it is, so the type alone gives them; not an alias that fixes a lifetime (see inst))
+        if codes.is_some_and(|x| x.iter().all(|&c| c == R_ELIDED || c == R_ELIDED_ADT)) && !prog.alias_fixed_lt {
+            self.univ.truncate(u0);
+            let mut c = Codes { codes: None, pos: 0, ok: true, parent: None };
+            let mut out = vec![];
+            self.inst(prog, t, &mut c, lts, targs, elided, &mut out, 0);
+            return c.ok.then_some(out);
+        }
+        None
     }
 
     /// sub <: sup at type t (the value of sub flows where sup is expected)
@@ -1917,7 +2003,7 @@ impl Cx<'_> {
         let k = x as *const Expr as usize;
         // (a constant whose type needs dropping (`&Test` with `impl Drop for Test`) is not promoted either)
         let dropped = || matches!(x, Expr::Path(None, p) if p.segs.len() != 1 || self.lookup(&p.segs[0].name).is_none()) && self.needs_drop(t);
-        if self.rg.calls.contains_key(&k) || !(self.not_const(x) || dropped()) || super::borrowck::has_refs(self.prog, t, 0) {
+        if self.rg.calls.contains_key(&k) || !(self.not_const(x) || dropped()) || self.bk_ty(t).1 {
             return;
         }
         self.rg.temps.insert(k, t);
@@ -2357,7 +2443,12 @@ impl Cx<'_> {
     /// Rg::forever)
     fn rg_reborrow_arg(&mut self, a: &Expr, t: &mut Option<(Ty, RT)>) {
         let Some((Ty::Ref(true, _), tr)) = t else { return };
-        if tr.is_empty() || self.rg.closure.is_some() || !matches!(strip(a), Expr::Path(..)) {
+        // (a field of a local too: `v.push(c.raw)`)
+        let mut root = strip(a);
+        while let Expr::Field(x, _, _) = root {
+            root = strip(x);
+        }
+        if tr.is_empty() || self.rg.closure.is_some() || !matches!(root, Expr::Path(..)) {
             return;
         }
         let r = self.rg.var();
@@ -2754,6 +2845,44 @@ impl Cx<'_> {
                 }
             }
         }
+        // (a callee's trait bound on a type parameter the caller's own type parameter fills, as the caller's bound
+        // of that trait (`G: Get<T>` with T = &'min i32, the caller's `G: Get<&'max i32>`): a trait's parameters are
+        // invariant, so the regions are the same)
+        if !through_trait && !ph_self {
+            for (gi, (_, bs)) in sig0.generics.iter().enumerate() {
+                let Some(&Some(Ty::Struct(s))) = sol.get(gi) else { continue };
+                if !prog.is_placeholder(s) {
+                    continue;
+                }
+                let cbs = prog.structs[s as usize].placeholder.as_deref().unwrap_or(&[]);
+                for b in bs.iter().filter(|b| b.contains('<')) {
+                    let tr = b.split('<').next().unwrap_or(b).trim();
+                    let mut same = cbs.iter().filter(|c| c.split('<').next().unwrap_or(c).trim() == tr);
+                    let (Some(cb), None) = (same.next(), same.next()) else { continue };
+                    let (xs, ys) = (bound_args(b), bound_args(cb));
+                    if xs.len() != ys.len() {
+                        continue;
+                    }
+                    for (x, y) in xs.iter().zip(&ys) {
+                        let callee: Option<RT> = if x.starts_with('\'') {
+                            if x == "'static" { Some(vec![STATIC]) } else { rs.as_deref().and_then(|r| r.lts.iter().position(|l| l == x)).and_then(|p| lts.get(p).copied()).map(|v| vec![v]) }
+                        } else {
+                            sig0.generics.iter().position(|g| g.0 == *x).and_then(|p| targs.get(p).cloned().flatten())
+                        };
+                        let caller: Option<RT> = written_lts(y).and_then(|ls| {
+                            ls.iter().map(|l| if l == "'static" { Some(STATIC) } else { rg.lt_names.iter().position(|n| n == l).and_then(|p| rg.lts.get(p).copied()) }).collect()
+                        });
+                        if let (Some(a), Some(c)) = (callee, caller) {
+                            if a.len() == c.len() {
+                                for (&a, &c) in a.iter().zip(&c) {
+                                    rg.constrain(a, c, Var::Inv, sp);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
         // (the result: its elided regions are of `&self`, else of the one region among the parameters)
         // (a receiver `&self` / `&mut self`: of the impl's own type; another receiver type leaves the result's
         // elided regions unknown)
@@ -3110,6 +3239,27 @@ impl Cx<'_> {
 
     /// A closure's body begins: its parameters' trees and its result's from its region signature; what it
     /// captures is from outside it (rg_capture)
+    /// A use of an associated const of an impl for its type's 'static instance (`A::<'a>::IC` with
+    /// `impl A<'static> { const IC: i32 = 10; }`): a lifetime written where the impl's self type has 'static must be
+    /// 'static (the type must implement what the const is of)
+    pub(crate) fn rg_static_self_const(&mut self, e: &Expr, ci: u32) {
+        let Some(slots) = self.prog.static_self_consts.get(&ci) else { return };
+        let Expr::Path(None, p) = e else { return };
+        if !self.rg_on() || p.segs.len() < 2 {
+            return;
+        }
+        let seg = &p.segs[p.segs.len() - 2];
+        let lts = seg.args.iter().filter_map(|a| if let crate::parse::GArg::Lifetime(l) = a { Some(l) } else { None });
+        for (i, l) in lts.enumerate() {
+            if slots.get(i) != Some(&R_STATIC) || l == "'static" {
+                continue;
+            }
+            if let Some(v) = self.rg.lt_names.iter().position(|x| x == l).and_then(|k| self.rg.lts.get(k).copied()) {
+                self.rg.edge(v, STATIC, super::borrowck::pos(e));
+            }
+        }
+    }
+
     pub(crate) fn rg_begin_closure(&mut self, params: &[(Loc, Ty)]) {
         let prog = self.prog;
         let Some(clo) = self.rg.closure.clone() else { return };

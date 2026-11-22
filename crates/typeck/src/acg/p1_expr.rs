@@ -47,6 +47,121 @@ pub(crate) fn closure_synth(c: &Expr) -> ItemFn {
 }
 
 impl Cx<'_> {
+    /// `S::<'static>(..)` with `struct S<'a, 'b>`: E0107 for another number of lifetime arguments than the type has
+    /// (none given is fine: they are inferred)
+    pub(crate) fn lifetime_arity(&self, sid: u32, p: &crate::parse::Path, what: &str) -> R<()> {
+        // (on any segment: `E::<'static>::V::<u8>(..)`)
+        let k: usize = p.segs.iter().map(|s| s.args.iter().filter(|a| matches!(a, GArg::Lifetime(_))).count()).sum();
+        if k == 0 {
+            return Ok(());
+        }
+        let n = self.prog.adt_regions.get(&self.prog.base_of(sid)).map_or(0, |r| r.lts.len());
+        if k != n {
+            let (ns, ks) = (if n == 1 { "" } else { "s" }, if k == 1 { " was" } else { "s were" });
+            return err(SP, format!("{what} takes {n} lifetime argument{ns} but {k} lifetime argument{ks} supplied (E0107)"));
+        }
+        Ok(())
+    }
+
+    /// `Enum::<()>::V::<()>(..)` / `Alias::V::<()>(..)` / `Self::V::<()>(..)`: E0109 for type arguments on a variant
+    /// when its type has them already, or is an alias or `Self` (`Enum::V::<()>` alone is fine)
+    pub(crate) fn variant_targs_allowed(&self, p: &crate::parse::Path, kind: &str) -> R<()> {
+        let n = p.segs.len();
+        let has_ty = |s: &crate::parse::Seg| s.args.iter().any(|a| matches!(a, GArg::Ty(_) | GArg::Const(_)));
+        if n < 2 || !has_ty(&p.segs[n - 1]) {
+            return Ok(());
+        }
+        let ty_seg = &p.segs[n - 2];
+        if ty_seg.name == "Self" || self.prog.aliases.contains_key(&ty_seg.name) {
+            return err(SP, "type arguments are not allowed on this type (E0109)");
+        }
+        if has_ty(ty_seg) {
+            return err(SP, format!("type arguments are not allowed on {kind} `{}` (E0109)", p.segs[n - 1].name));
+        }
+        Ok(())
+    }
+
+    /// `U::<u8>` / `Foo::<3>` / `Flag::<true>`: the path without the last segment's turbofish, and the type arguments
+    /// it gives (None for `_`); the path itself when it has none
+    pub(crate) fn turbofish_split<'a>(&self, p: &'a crate::parse::Path) -> (PPath, Option<&'a [GArg]>) {
+        let mut pp = PPath::of(p);
+        let Some(last) = p.segs.last().filter(|s| !s.args.is_empty() && s.fn_args.is_none()) else { return (pp, None) };
+        if let Some(l) = pp.segs.last_mut() {
+            l.args = false;
+        }
+        (pp, Some(&last.args))
+    }
+
+    /// a unit struct pattern's instance (`G::<5, _>` against a `G<5, 7>`: its `_` from the value's type), after its
+    /// lifetime and argument counts are checked; None when it is not one
+    pub(crate) fn pat_turbofish_ty(&self, path: &crate::parse::Path, value: Ty) -> R<Option<Ty>> {
+        let (pp, targs) = self.turbofish_split(path);
+        let (Some(sid), Some(args)) = (self.prog.struct_by_p(&pp, self.self_sid), targs) else { return Ok(None) };
+        let sd = &self.prog.structs[sid as usize];
+        if !sd.fields.is_empty() || sd.is_enum {
+            return Ok(None);
+        }
+        self.lifetime_arity(sid, path, "struct")?;
+        let base = self.prog.base_of(sid);
+        let mut ts = self.turbofish_targs(sid, args)?;
+        // (`matches!(0u8, G::<_>)`: a value of another type than the struct is a mismatch, `_` or not)
+        if !matches!(value, Ty::Struct(v) if self.prog.base_of(v) == base) && !self.prog.has_param(value) {
+            return err(SP, format!("mismatched types: expected `{}`, found `{}`", self.prog.tn(value), self.prog.structs[base as usize].name));
+        }
+        if let Ty::Struct(v) = value {
+            if self.prog.base_of(v) == base {
+                for (k, t) in ts.iter_mut().enumerate() {
+                    if t.is_none() {
+                        *t = self.prog.structs[v as usize].args.get(k).copied();
+                    }
+                }
+            }
+        }
+        match ts.into_iter().collect::<Option<Vec<Ty>>>() {
+            Some(ts) => Ok(Some(Ty::Struct(self.prog.instantiate(base, ts)?))),
+            None => Ok(None),
+        }
+    }
+
+    /// the type arguments a struct's turbofish gives (None for `_`; lifetimes left out), checked against the struct's
+    /// number of generic parameters (E0107); a type that does not resolve is that error
+    pub(crate) fn turbofish_targs(&self, sid: u32, args: &[GArg]) -> R<Vec<Option<Ty>>> {
+        let mut ts = vec![];
+        // (`Flag::<1>` with `struct Flag<const B: bool>`: a const argument of another kind than the parameter's type)
+        let decls = self.prog.const_param_tys.get(&self.prog.base_of(sid));
+        for a in args {
+            if let Some(ds) = decls {
+                let k = ts.len();
+                if let Some((_, decl)) = ds.iter().find(|(i, _)| *i == k) {
+                    let decl = &*self.prog.const_decl(decl);
+                    let kind = match decl {
+                        "bool" | "char" => decl,
+                        _ => "int",
+                    };
+                    if let Some((_, shown)) = self.const_arg_kind(a).filter(|(f, _)| *f != kind) {
+                        return err(SP, format!("mismatched types: expected `{decl}`, found {shown} (const argument)"));
+                    }
+                }
+            }
+            ts.push(match a {
+                GArg::Ty(crate::parse::Ty::Infer) => None,
+                GArg::Ty(t) if crate::ast_types::bool_arg(t).is_some() => Some(self.prog.resolve_env(&crate::ast_types::bool_arg(t).unwrap(), &self.env).or_else(|e| err(SP, e))?),
+                GArg::Ty(t) => Some(self.parse_ty(t)?).filter(|&t| !has_hole(self.prog, t)),
+                GArg::Const(e) => {
+                    let syn = crate::ast_types::const_arg_syn(e).or_else(|e| err(SP, e))?;
+                    Some(self.prog.resolve_env(&syn, &self.env).or_else(|e| err(SP, e))?)
+                }
+                _ => continue,
+            });
+        }
+        let n = self.prog.structs[self.prog.base_of(sid) as usize].generics.len();
+        if ts.len() != n {
+            let (ns, ks) = (if n == 1 { "" } else { "s" }, if ts.len() == 1 { " was" } else { "s were" });
+            return err(SP, format!("struct takes {n} generic argument{ns} but {} generic argument{ks} supplied (E0107)", ts.len()));
+        }
+        Ok(ts)
+    }
+
     // --- place (左辺値) ---------------------------------------------------
 
     pub(crate) fn place(&mut self, e: &Expr) -> R<Place> {
@@ -65,10 +180,11 @@ impl Cx<'_> {
             Expr::Paren(p) => self.place(p),
             Expr::Path(..) if self.const_generic(e).is_some() => {
                 let n = self.const_generic(e).unwrap();
-                let v = self.b.ins().iconst(types::I64, n as i64);
-                let var = self.b.declare_var(types::I64);
+                let t = self.const_generic_ty(e).unwrap_or(Ty::Usize);
+                let v = self.int_const(t, n as i128);
+                let var = self.b.declare_var(clif_ty(t).unwrap_or(types::I64));
                 self.b.def_var(var, v);
-                Ok(Place::Var(var, Ty::Usize))
+                Ok(Place::Var(var, t))
             }
             // const (`LIMIT` / `S::N`) を場所として使う (`println!("{}", LIMIT)` / `&LIMIT`): 一時領域に置く
             Expr::Path(_, p) if self.const_of(e).is_some() && ident_of(p).is_none_or(|id| self.lookup(id).is_none()) => {
@@ -93,6 +209,19 @@ impl Cx<'_> {
                     let t = self.prog.consts[ci as usize].ty;
                     let a = self.static_sym(ci);
                     return Ok(Place::Mem(a, 0, t));
+                }
+                // (`Generic::<5>` / `PhantomData::<u8>`: a generic unit struct with the turbofish's type arguments)
+                if p.segs.last().is_some_and(|s| !s.args.is_empty()) {
+                    let (pp, targs) = self.turbofish_split(p);
+                    if let (Some(sid), Some(args)) = (self.prog.struct_by_p(&pp, self.self_sid), targs) {
+                        let sd = &self.prog.structs[sid as usize];
+                        if sd.fields.is_empty() && !sd.is_enum {
+                            if let Some(ts) = self.turbofish_targs(sid, args)?.into_iter().collect::<Option<Vec<Ty>>>() {
+                                let t = Ty::Struct(self.prog.instantiate(self.prog.base_of(sid), ts)?);
+                                return Ok(Place::Mem(self.temp(t), 0, t));
+                            }
+                        }
+                    }
                 }
                 let Some(id) = ident_of(p) else {
                     return err(SP, "unsupported path");
@@ -376,7 +505,7 @@ impl Cx<'_> {
         self.bk.place_depth = pd;
         let (v, t) = r.map_err(|m| {
             // (エラーに、位置を持つ一番内側の式の先頭の行:桁を付ける。ACG_DEBUG_AT=1 なら式も)
-            let m = if std::env::var_os("ACG_DEBUG_AT").is_some() && !m.contains(" (at `") {
+            let m = if super::debug_at() && !m.contains(" (at `") {
                 let d = format!("{e:?}");
                 format!("{m} (at `{}`)", d.chars().take(400).collect::<String>())
             } else {
@@ -537,9 +666,11 @@ impl Cx<'_> {
             // const ジェネリクスの N: インスタンスの型引数の長さ
             Expr::Path(..) if self.const_generic(e).is_some() => {
                 let n = self.const_generic(e).unwrap();
-                // (`const N: u8`: the parameter's type is not kept; an expected integer type is taken as it)
-                let t = match expected {
-                    Some(t) if t.is_int() => t,
+                // (`const B: bool` / `const N: u8`: the parameter's declared type; a usize one takes an expected integer
+                // type)
+                let t = match (self.const_generic_ty(e), expected) {
+                    (Some(t), _) => t,
+                    (None, Some(t)) if t.is_int() => t,
                     _ => Ty::Usize,
                 };
                 Ok((Some(self.int_const(t, n as i128)), t))
@@ -570,7 +701,12 @@ impl Cx<'_> {
                 let p = self.place(e)?;
                 let r = self.read(p);
                 if self.bk_on() && (!self.bk_ty(r.1).0 || exp_none && matches!(r.1, Ty::Ref(true, _))) {
+                    if !self.bk_ty(r.1).0 {
+                        self.drop_move_check(e)?;
+                    }
                     self.bk_acc(e, borrowck::Acc::Move);
+                } else if self.bk_on() && !self.prog.static_copy.is_empty() {
+                    self.bk_copy(e, r.1);
                 }
                 // drop が要る値を値として読んだらムーブ
                 if self.needs_drop(r.1) {
@@ -824,7 +960,16 @@ impl Cx<'_> {
                 self.b.ins().jump(header, &[]);
                 self.b.switch_to_block(header);
                 let t0 = self.temps.len();
+                // (`'a: while break 'a {}`: the label is a target of `break` already in the condition (an unlabeled
+                // `break` or a `continue` there is not))
+                let label = self.pending_label.take();
+                if label.is_some() {
+                    self.loops.push(Loop { cont: header, brk: exit, breaks: 0, label: label.clone(), val: None, is_block: true, depth: self.scopes.len(), temps: t0, no_value: Some("while") });
+                }
                 let (c, ct) = self.expr(cond, Some(Ty::Bool))?;
+                if label.is_some() {
+                    self.loops.pop();
+                }
                 self.same(SP, ct, Ty::Bool)?;
                 // (the condition's temporaries are dropped before the body: `while borrow().ok() { .. }`)
                 if c.is_some() {
@@ -843,11 +988,12 @@ impl Cx<'_> {
                     cont: header,
                     brk: exit,
                     breaks: 0,
-                    label: self.pending_label.take(),
+                    label,
                     val: None,
                     is_block: false,
                     depth: self.scopes.len(),
                     temps: t0,
+                    no_value: Some("while"),
                 });
                 let (_, bt) = self.block(wbody, Some(Ty::Unit))?;
                 self.loops.pop();
@@ -878,6 +1024,7 @@ impl Cx<'_> {
                     is_block: false,
                     depth: self.scopes.len(),
                     temps: self.temps.len(),
+                    no_value: None,
                 });
                 let (_, bt) = self.block(lbody, Some(Ty::Unit))?;
                 let lp = self.loops.pop().unwrap();
@@ -900,11 +1047,16 @@ impl Cx<'_> {
                 }
                 Ok((None, Ty::Unit))
             }
-            Expr::Break(label, value) => {
+            Expr::Break(label, value, pos) => {
                 let label = label.as_deref().map(label_name);
+                // (the error at the keyword or label itself, also when a value follows on another line)
                 let Some(li) = self.loop_index(label.as_deref(), true) else {
-                    return err(SP, "`break` outside of a loop (or unknown label)");
+                    return Err(self.at(*pos, "`break` outside of a loop (or unknown label)".to_string()));
                 };
+                // (E0571: `break 'a 1` out of a `while` / `for` loop, or a while's condition)
+                if let (Some(_), Some(kind)) = (value, self.loops[li].no_value) {
+                    return Err(self.at(*pos, format!("`break` with value from a `{kind}` loop (E0571)")));
+                }
                 // `break v`: 値を評価してから抜ける (型は最初の break で決まる)
                 let mut args = vec![];
                 if let Some(e) = value {
@@ -932,18 +1084,21 @@ impl Cx<'_> {
                 lp.breaks += 1;
                 let (t, d, tt) = (lp.brk, lp.depth, lp.temps);
                 self.drop_for_exit(d, tt);
+                // (the locals of the scopes left go out of scope here: `loop { let x = 1; r = &x; break; }`)
+                self.bk_dead_exit(d, *pos);
                 let args: Vec<Value> = args;
                 self.b.ins().jump(t, &args);
                 Ok(self.dead())
             }
-            Expr::Continue(label) => {
+            Expr::Continue(label, pos) => {
                 let label = label.as_deref().map(label_name);
                 let Some(li) = self.loop_index(label.as_deref(), false) else {
-                    return err(SP, "`continue` outside of a loop (or unknown label)");
+                    return Err(self.at(*pos, "`continue` outside of a loop (or unknown label)".to_string()));
                 };
                 let lp = &self.loops[li];
                 let (t, d, tt) = (lp.cont, lp.depth, lp.temps);
                 self.drop_for_exit(d, tt);
+                self.bk_dead_exit(d, *pos);
                 self.b.ins().jump(t, &[]);
                 Ok(self.dead())
             }
@@ -959,7 +1114,7 @@ impl Cx<'_> {
                         if t == Ty::Never {
                             return Ok((None, Ty::Never));
                         }
-                        if borrowck::has_refs(self.prog, ret, 0) {
+                        if self.bk_ty(ret).1 {
                             { let _ = &srcs; self.bk_ret(e); }
                         }
                         self.rg_ret(e);
@@ -1367,7 +1522,16 @@ impl Cx<'_> {
 
     /// a constant expression's value as static data: a reference to it
     fn promote(&mut self, rexpr: &Expr, inner_exp: Option<Ty>) -> Option<V> {
-        let t = inner_exp.filter(|t| !matches!(t, Ty::Dyn(_) | Ty::Slice(_) | Ty::Str)).or_else(|| self.peek(rexpr));
+        // (`&1u16`: a suffixed literal is of its suffix's type, whatever is expected or inferred around it)
+        let own = match strip_paren(rexpr) {
+            Expr::Lit(l, _) => match lit::lit(l) {
+                Some(Lit::Int(i)) => Ty::from_suffix(i.suffix()).or(match i.suffix() { "f32" => Some(Ty::F32), "f64" => Some(Ty::F64), _ => None }),
+                Some(Lit::Float(f)) => match f.suffix() { "f32" => Some(Ty::F32), "f64" => Some(Ty::F64), _ => None },
+                _ => None,
+            },
+            _ => None,
+        };
+        let t = own.or_else(|| inner_exp.filter(|t| !matches!(t, Ty::Dyn(_) | Ty::Slice(_) | Ty::Str))).or_else(|| self.peek(rexpr));
         let t = t.filter(|&t| !self.needs_drop(t) && !self.prog.has_param(t) && !self.interior_mut(t, 0))?;
         let dv = crate::ast_consteval::eval(self.prog, rexpr, t).ok()?;
         if !dv.relocs.is_empty() || dv.bytes.is_empty() {
@@ -1500,6 +1664,10 @@ impl Cx<'_> {
             // (`&mut x as *mut _` / coerced to a raw pointer: not a loan)
             if !matches!(expected, Some(Ty::Ptr(..))) {
                 self.bk_borrow(rexpr, m, err_pos(rexpr));
+                // (`&*Box::new(1)`: a borrow of what a temporary owns, which goes away with it (E0716))
+                if matches!(strip_paren(rexpr), Expr::Unary(op, _, _) if op == "*") && self.bk_place(rexpr).is_none() {
+                    self.bk_temp_borrow(rexpr, m, pl.ty());
+                }
             }
             return match pl {
                 // `&mut v[i]` (v: Vec<Box<T>>) を `&mut T` の位置に: Box の中身を指す (deref の強制変換)
@@ -1682,6 +1850,12 @@ impl Cx<'_> {
                         let mut p = bp.clone();
                         p.proj.push(borrowck::Proj::Field(f));
                         let a = if borrowck::is_copy(self.prog, ft, 0) { borrowck::Acc::Read } else { borrowck::Acc::Move };
+                        // (moving a field out of a value whose type implements `Drop`: E0509)
+                        if a == borrowck::Acc::Move && self.bk.level >= 1 {
+                            if let Some(n) = self.user_drop_name(bsid) {
+                                return err(err_pos(base), format!("cannot move out of type `{n}`, which implements the `Drop` trait (E0509)"));
+                            }
+                        }
                         self.bk_acc_place(p, a, err_pos(base));
                     }
                 }
@@ -1784,6 +1958,7 @@ impl Cx<'_> {
             }
         }
         let mut caps = vec![];
+        let mut copy_caps = vec![];
         for (i, n) in cd.captures.iter().enumerate() {
             let Some((loc, t)) = self.lookup(n) else {
                 return err(SP, format!("cannot capture `{n}` here"));
@@ -1792,7 +1967,25 @@ impl Cx<'_> {
             let ct = if by_move { t } else { Ty::Ptr(true, intern(t)) };
             sol[cd.n_parent + i] = Some(ct);
             caps.push((loc, t));
-            self.bk_capture(c, n, loc, t, by_move);
+            copy_caps.push(self.bk_capture(c, n, loc, t, by_move));
+        }
+        // (a capture held by value (a `move` closure's) of a local not declared `mut`, which the body assigns or borrows
+        // mutably: E0594 / E0596 at the mutation; one held by reference is a `&mut` loan the borrow check reports)
+        if self.bk_on() && self.bk.fnmut_exprs.contains(&(c as *const Expr as usize)) {
+            let Expr::Closure(_, _, _, body, _) = c else { unreachable!() };
+            for (i, n) in cd.captures.iter().enumerate() {
+                if !cd.moved.get(i).copied().unwrap_or(false) {
+                    continue;
+                }
+                let immutable = self.lookup(n).and_then(|(loc, _)| self.bk.by_loc.get(&loc).copied()).is_some_and(|l| self.bk.locals[l as usize].mutable == Some(false));
+                if !immutable {
+                    continue;
+                }
+                if let Some((sp, assign)) = self.owned_mutation(body, n) {
+                    let msg = if assign { format!("cannot assign to `{n}`, as it is not declared as mutable (E0594)") } else { format!("cannot borrow `{n}` as mutable, as it is not declared as mutable (E0596)") };
+                    return Err(self.at(sp, msg));
+                }
+            }
         }
         // (passed where a bound wants `Fn`: a closure that mutates what it captures is not one (E0594 / E0596))
         if fn_only && self.bk.fnmut_exprs.contains(&(c as *const Expr as usize)) {
@@ -1827,7 +2020,7 @@ impl Cx<'_> {
             .or(hint.as_ref().and_then(|h| h.1).filter(|&t| !prog.has_param(t)))
             .or_else(|| self.lets.get(&(c as *const Expr as usize)).copied().filter(|&t| !prog.has_param(t)))
             .or(hint.as_ref().and_then(|h| h.1));
-        if std::env::var_os("ACG_DEBUG_CLO").is_some() {
+        if super::debug_clo() {
             eprintln!("closure k={k} ret_ann={:?} hint={:?} rec={:?} -> {:?}", cd.ret_ann, hint, self.lets.get(&(c as *const Expr as usize)), sol[ri]);
         }
         if let Some(a) = exp_args {
@@ -1967,6 +2160,13 @@ impl Cx<'_> {
                 };
                 let (v, _) = self.read(p);
                 self.write(Place::Mem(a, off as i32, ft), v);
+                // (a copy of which the body uses only `Copy` parts (bk_capture): its other parts are emptied, so that
+                // dropping the closure frees nothing, and the variable is not moved)
+                if copy_caps.get(i).copied().unwrap_or(false) {
+                    let dst = self.addr_plus(a, off as i32);
+                    self.zero_drop_parts(dst, t);
+                    continue;
+                }
                 if self.needs_drop(t) {
                     // (a capture of the enclosing closure moved into this one: as for moving it out, the
                     // enclosing closure's slot becomes empty)
@@ -1994,6 +2194,100 @@ impl Cx<'_> {
             }
         }
         Ok((Some(a), st))
+    }
+
+    /// The first assignment to, `&mut` of, or `&mut self` method call of what the capture n itself holds (not through a
+    /// reference it holds: `t.0.0 = x` with `t.0: &mut S` mutates no part of t): where, whether an assignment
+    fn owned_mutation(&self, e: &Expr, n: &str) -> Option<(Sp, bool)> {
+        let owned = |l: &Expr| self.bk_rooted_at_pub(strip_paren(l), n).is_some_and(|(p, t)| p.owned_len_pub() == p.proj.len() && !matches!(t, Some(Ty::Ref(..))));
+        match e {
+            Expr::Assign(l, _) | Expr::AssignOp(_, l, _, _) => {
+                let mut b: &Expr = l;
+                while let Expr::Index(x, _, _) = strip_paren(b) {
+                    b = x;
+                }
+                if owned(b) {
+                    return Some((borrowck::pos(e), true));
+                }
+            }
+            Expr::Ref(true, l) => {
+                if owned(l) {
+                    return Some((borrowck::pos(e), false));
+                }
+            }
+            Expr::MethodCall(r, m, ..) => {
+                if owned(r) {
+                    let mut_self = match self.bk_rooted_at_pub(strip_paren(r), n) {
+                        Some((_, Some(Ty::Struct(sid)))) => self.prog.method(sid, m).is_some_and(|id| {
+                            let sg = &self.prog.sigs[id as usize];
+                            sg.has_self && matches!(sg.params.first(), Some(Ty::Ref(true, _)))
+                        }),
+                        _ => false,
+                    };
+                    if mut_self {
+                        return Some((borrowck::pos(e), false));
+                    }
+                }
+            }
+            _ => {}
+        }
+        // (a binding of the same name shadows the capture where it is in scope: `let mut x = x; x += 1;`)
+        let binds = |p: &Pat| {
+            let mut v = vec![];
+            crate::ast_closure::pat_idents(p, &mut v);
+            v.iter().any(|x| x == n)
+        };
+        let either = |a: Option<(Sp, bool)>, b: &mut dyn FnMut() -> Option<(Sp, bool)>| a.or_else(b);
+        match e {
+            Expr::Block(_, _, b) | Expr::Const(b) | Expr::Loop(_, b) => return self.owned_mutation_block(b, n),
+            Expr::Closure(_, ps, _, body, _) => return if ps.iter().any(|(p, _)| binds(p)) { None } else { self.owned_mutation(body, n) },
+            Expr::Match(x, arms) => {
+                return either(self.owned_mutation(x, n), &mut || {
+                    arms.iter().filter(|a| !binds(&a.pat)).find_map(|a| a.guard.as_ref().and_then(|g| self.owned_mutation(g, n)).or_else(|| self.owned_mutation(&a.body, n)))
+                });
+            }
+            Expr::For(_, p, it, b) => return either(self.owned_mutation(it, n), &mut || if binds(p) { None } else { self.owned_mutation_block(b, n) }),
+            Expr::If(c, b, _) | Expr::While(_, c, b) if matches!(&**c, Expr::Let(..)) => {
+                let Expr::Let(p, x) = &**c else { unreachable!() };
+                let els = if let Expr::If(_, _, els) = e { els.as_deref() } else { None };
+                return either(self.owned_mutation(x, n), &mut || {
+                    if binds(p) { None } else { self.owned_mutation_block(b, n) }.or_else(|| els.and_then(|x| self.owned_mutation(x, n)))
+                });
+            }
+            _ => {}
+        }
+        let mut found = None;
+        crate::ast_closure::each_child_pub(e, &mut |c| {
+            if found.is_none() {
+                found = self.owned_mutation(c, n);
+            }
+        });
+        found
+    }
+
+    /// owned_mutation in a block's statements: a `let` of the same name ends the search
+    fn owned_mutation_block(&self, b: &crate::parse::Block, n: &str) -> Option<(Sp, bool)> {
+        for st in &b.stmts {
+            match st {
+                crate::parse::Stmt::Let(p, _, init, els, _) => {
+                    if let Some(f) = init.as_ref().and_then(|x| self.owned_mutation(x, n)).or_else(|| els.as_ref().and_then(|b| self.owned_mutation_block(b, n))) {
+                        return Some(f);
+                    }
+                    let mut v = vec![];
+                    crate::ast_closure::pat_idents(p, &mut v);
+                    if v.iter().any(|x| x == n) {
+                        return None;
+                    }
+                }
+                crate::parse::Stmt::Expr(x, _) => {
+                    if let Some(f) = self.owned_mutation(x, n) {
+                        return Some(f);
+                    }
+                }
+                crate::parse::Stmt::Item(_) => {}
+            }
+        }
+        None
     }
 
     /// The first assignment to, `&mut` of, or `&mut self` method call of a captured variable in a closure's body (a
@@ -2569,6 +2863,20 @@ impl Cx<'_> {
     }
 
     /// `Fn(A, B) -> R` (dyn の中身) の引数と戻り値の型
+    /// A value of type t made of zeros (what a placeholder's call returns in a check: its bits are never used)
+    pub(crate) fn zero_of(&mut self, t: Ty) -> V {
+        if t == Ty::Unit || t == Ty::Never {
+            return (None, t);
+        }
+        if t.is_agg() {
+            let tmp = self.temp(t);
+            self.zero(tmp, t);
+            return (Some(tmp), t);
+        }
+        let v = clif_ty(t).map(|ct| if ct == types::I128 { self.int_const(Ty::I128, 0) } else if ct == types::F64 { self.b.ins().f64const(0.0) } else if ct == types::F32 { self.b.ins().f32const(0.0) } else { self.b.ins().iconst(ct, 0) });
+        (v, t)
+    }
+
     pub(crate) fn dyn_fn_sig(&self, s: &str) -> R<(Vec<Ty>, Ty)> {
         let Some((_, ps, r)) = crate::ast_summary::parse_fn_bound(s) else {
             return Err(format!("`dyn {s}` is not a function type"));
@@ -2637,6 +2945,60 @@ impl Cx<'_> {
         let r = match t {
             Ty::Struct(sid) => {
                 let Some(&cid) = self.prog.closure_of_struct.get(&self.prog.base_of(sid)) else {
+                    // (a type parameter's placeholder bounded by `Fn` / `FnMut` / `FnOnce` (zustc check of a generic fn
+                    // nothing calls): the call is checked against the bound, its result a value of the bound's result
+                    // type; `FnMut` borrows the callee mutably, `FnOnce` takes it)
+                    let bound = self.prog.structs[sid as usize].placeholder.as_ref().and_then(|bs| bs.iter().find_map(|b| crate::ast_summary::parse_fn_bound(b).map(|(k, _, _)| (k, b.clone()))));
+                    if let (Some((kind, b)), true) = (bound, self.prog.is_placeholder(sid)) {
+                        let (ps, ret) = self.dyn_fn_sig(&b).map_err(|e| self.at(SP, e))?;
+                        // (the bound's arity and its parameters of primitive types. A placeholder's instance's type errors
+                        // are not reported (see compile_once): it stops being checked. A name a macro's expansion
+                        // shadows (no hygiene) may be such a callee)
+                        if args.len() != ps.len() {
+                            return err(err_pos(func), format!("this function takes {} arguments but {} were supplied (a call through the bound `{b}`) (E0057)", ps.len(), args.len()));
+                        }
+                        if is_place_expr(func) && kind == "FnOnce" && self.peek(func) == Some(t) {
+                            self.bk_acc(func, borrowck::Acc::Move);
+                        } else if is_place_expr(func) && kind != "FnOnce" {
+                            // (through every reference to it, as a closure's call: `f: &F` with `F: FnMut()` is a `&mut`
+                            // of `*f`, behind a `&` (E0596))
+                            let mut ft = self.peek(func);
+                            let mut x: &Expr = func;
+                            let mut n = 0;
+                            while let Some(Ty::Ref(_, i)) = ft {
+                                if n > 8 {
+                                    break;
+                                }
+                                let sp = crate::parse::Span { start: expr_start(func), at: expr_start(func) };
+                                x = self.keep_expr(Expr::Unary("*".into(), Box::new(x.clone()), sp));
+                                ft = Some(*i);
+                                n += 1;
+                            }
+                            if ft == Some(t) {
+                                self.bk.no_loan_src = true;
+                                self.bk_borrow(x, kind == "FnMut", err_pos(func));
+                                self.bk.no_loan_src = false;
+                            }
+                        }
+                        // (a bound that writes `'static` (`F: Fn(&'static u8)`): checked from here on, as a `dyn Fn`'s)
+                        if !self.rg.on && self.rg.eligible && self.inline_depth == 0 && b.contains("'static") {
+                            self.rg_late_on();
+                        }
+                        let mut never = false;
+                        let prim = |t: Ty| t.is_int() || t.is_float() || matches!(t, Ty::Bool | Ty::Char);
+                        for (a, &pt) in args.iter().zip(&ps) {
+                            let (_, at) = self.expr(a, Some(pt))?;
+                            never |= at == Ty::Never;
+                            if at != Ty::Never && at != pt && prim(at) && prim(pt) {
+                                return err(expr_start(a), format!("mismatched types: expected `{}`, found `{}` (an argument of a call through the bound `{b}`) (E0308)", self.prog.tn(pt), self.prog.tn(at)));
+                            }
+                        }
+                        // (the arguments flow into the regions the bound's parameters write, as for a `dyn Fn`)
+                        self.rg_dyn_fn_args(&b, &args);
+                        let r = if never { (None, Ty::Never) } else { self.zero_of(ret) };
+                        self.bk_frame_end_call();
+                        return Ok(r);
+                    }
                     return err(SP, format!("expected a function, found `{}`", self.prog.tn(t)));
                 };
                 let recv = (v, Ty::Ptr(true, intern(t)));
@@ -2782,6 +3144,14 @@ impl Cx<'_> {
                             let n = format!("{}::from", self.ty_key(t));
                             let src = if self.trait_candidate(&n, "From").is_some() {
                                 Some(format!("<{} as From>::from", self.prog.tn(t)))
+                            } else if (t.is_int() || t.is_float()) && self.peek(x).is_some_and(|a| a.is_int() || a.is_float() || matches!(a, Ty::Bool | Ty::Char)) {
+                                // (`let b: u32 = From::from(4u16)`: a number's `from`, the widening cast; a narrowing
+                                // one, `u8` from `256u16`, is E0277 as in rustc)
+                                let a = self.peek(x).unwrap();
+                                if !crate::program::prim_from(a, t) {
+                                    return err(SP, format!("the trait `From<{}>` is not implemented for `{}` (E0277)", self.prog.tn(a), self.prog.tn(t)));
+                                }
+                                Some(format!("{}::from", self.prog.tn(t)))
                             } else if self.no_trait_method(&n) {
                                 Some(format!("{}::from", self.prog.tn(t)))
                             } else {
@@ -2885,6 +3255,8 @@ impl Cx<'_> {
                 if v.kind != crate::types::VariantKind::Tuple || v.fields.len() != cargs.len() {
                     return err(SP, format!("variant `{}` takes {} fields", v.name, v.fields.len()));
                 }
+                self.lifetime_arity(sid, p, "enum")?;
+                self.variant_targs_allowed(p, "tuple variant")?;
                 let args: Vec<(usize, &Expr)> = cargs.iter().enumerate().collect();
                 // (`Ok::<_, ()>(1)` / `Some::<u8>(3)`: the turbofish gives the type arguments it names)
                 if let Some(ta) = p.segs.iter().rev().find_map(|s| if s.args.is_empty() { None } else { Some(&s.args) }) {
@@ -2905,11 +3277,26 @@ impl Cx<'_> {
                 return r;
             }
             // タプル構造体の構築 `P(1, 2)`
-            if let Some(sid) = self.prog.struct_by_p(&PPath::of(p), self.self_sid) {
-                if self.lookup(&p.segs[0].name).is_none() && self.prog.fn_by_p(&PPath::of(p), self.self_sid).is_none() {
+            // (`U::<u8>(7)` / `Foo::<3>([1, 2, 3])`: the struct without the turbofish, which gives its type arguments)
+            let (pp, targs) = self.turbofish_split(p);
+            if let Some(sid) = self.prog.struct_by_p(&pp, self.self_sid) {
+                if self.lookup(&p.segs[0].name).is_none() && self.prog.fn_by_p(&pp, self.self_sid).is_none() {
                     let n = self.prog.structs[sid as usize].fields.len();
                     if n != cargs.len() {
                         return err(SP, format!("this struct takes {n} fields"));
+                    }
+                    self.lifetime_arity(sid, p, "struct")?;
+                    if let Some(args) = targs {
+                        let ts = self.turbofish_targs(sid, args)?;
+                        // (`let x: S<u16> = S::<u8>(1u16)`: the turbofish against the expected instance)
+                        if let (Some(Ty::Struct(es)), Some(ts)) = (expected, ts.iter().copied().collect::<Option<Vec<Ty>>>()) {
+                            let base = self.prog.base_of(sid);
+                            if self.prog.base_of(es) == base && !self.prog.has_param(Ty::Struct(es)) {
+                                let it = Ty::Struct(self.prog.instantiate(base, ts)?);
+                                self.same(SP, it, Ty::Struct(es))?;
+                            }
+                        }
+                        self.adt_targs = Some(ts);
                     }
                     let args: Vec<(usize, &Expr)> = cargs.iter().enumerate().collect();
                     let r = self.adt_value(sid, None, &args, expected, SP);

@@ -339,6 +339,10 @@ pub struct Program {
     /// structs / enums with `#[derive(PartialEq)]` (base ids): a constant of such a type (with fields of such types) is
     /// structural, usable as a pattern
     pub derived_peq: FxSet<u32>,
+    /// the derived impls (base ids and traits): `#[derive(Clone)] struct S<T>` is Clone when each type argument is
+    pub derived: FxMap<u32, Vec<String>>,
+    /// a struct's / enum's const parameters of other types than usize (base ids): (the parameter's place, its type)
+    pub const_param_tys: FxMap<u32, Vec<(usize, String)>>,
     /// the program's source declares modules (`mod m { .. }`), whose scopes are flattened away: a name's item may then
     /// be out of scope where the name is written
     pub has_mods: bool,
@@ -400,6 +404,9 @@ pub struct Program {
     pub trait_self_outlives: FxMap<String, Vec<String>>,
     /// The program (not the prelude) has a static not declared `mut`: an assignment is checked against it
     pub any_immutable_static: bool,
+    /// An alias of the program's names a lifetime that is not its own (`type S = &'static u8;`): see
+    /// Summary::alias_fixed_lts
+    pub alias_fixed_lt: bool,
     /// the generics a method of the trait starts with: Self and the trait's own parameters
     pub trait_ngen: FxMap<String, usize>,
     /// a generic trait's impls: trait → (self type, the trait's arguments, both with the impl's parameters as
@@ -407,6 +414,12 @@ pub struct Program {
     pub impl_targs: FxMap<String, Vec<(Ty, Vec<Ty>, usize)>>,
     /// (型, trait) の実装
     pub impls: HashSet<(u32, String)>,
+    /// Types whose `Copy` impl names 'static in its self type (`impl Copy for Foo<'static>`): a copy of one requires
+    /// what it borrows to be 'static
+    pub static_copy: FxSet<u32>,
+    /// Associated consts of impls whose self type names 'static (`impl A<'static> { const IC: i32 = 10; }`), with
+    /// the region slots of that self type: `A::<'a>::IC` requires 'a to be 'static
+    pub static_self_consts: FxMap<u32, Vec<u8>>,
     /// `#[panic_handler]` の関数 (no_std)。panic (範囲外アクセス・unwrap など) はここを呼ぶ
     pub panic_handler: Option<u32>,
     /// const と static
@@ -835,6 +848,9 @@ impl Program {
             trait_supers: FxMap::default(),
             trait_self_outlives: FxMap::default(),
             any_immutable_static: false,
+            static_copy: FxSet::default(),
+            static_self_consts: FxMap::default(),
+            alias_fixed_lt: false,
             trait_ngen: FxMap::default(),
             impl_targs: FxMap::default(),
             ref_impls: Default::default(),
@@ -866,6 +882,8 @@ impl Program {
             consts: vec![],
             const_index: FxMap::default(),
             derived_peq: FxSet::default(),
+            derived: FxMap::default(),
+            const_param_tys: FxMap::default(),
             has_mods: false,
             lower_consts: false,
             const_by_last: FxMap::default(),
@@ -915,6 +933,7 @@ impl Program {
                     *e = (*e).max(k);
                 }
             }
+            p.alias_fixed_lt |= !sm.alias_fixed_lts.is_empty();
             for (n, g, t) in &sm.aliases {
                 if !adt_names.contains(n.as_str()) {
                     p.aliases.insert(n.clone(), (g.clone(), t.clone()));
@@ -1046,6 +1065,13 @@ impl Program {
                         p.const_index.insert(format!("{base} as {tr}::{last}"), p.consts.len() as u32);
                     }
                 }
+                // (an impl's for its type's 'static instance (`impl A<'static> { const IC }`): a use names the
+                // lifetimes it is used at)
+                if let crate::lexer::ItemKind::ImplMember(h) = items[ii].kind {
+                    if let Some(r) = sums[h as usize].hdr_regions.as_ref().filter(|r| r.self_slots.contains(&R_STATIC)) {
+                        p.static_self_consts.insert(p.consts.len() as u32, r.self_slots.clone());
+                    }
+                }
                 // (an integer type is known already, before the layouts that evaluate constants (`[u8; N]`); the other
                 // types are resolved below)
                 let early = early_int_ty(t, &p.aliases).unwrap_or(Ty::Unit);
@@ -1073,6 +1099,13 @@ impl Program {
                 p.struct_index.insert(name.clone(), sdefs.len() as u32);
                 if let Some(r) = &sm.adt_regions {
                     p.adt_regions.insert(sdefs.len() as u32, std::sync::Arc::new((**r).clone()));
+                }
+                // (the declared types of its const parameters other than usize, by the parameter's place)
+                for (pn, bs) in &sm.adt_bounds {
+                    let decl = bs.iter().find_map(|b| b.strip_prefix(CONST_GENERIC)?.strip_prefix(':'));
+                    if let (Some(d), Some(k)) = (decl, sm.adt_generics.iter().position(|g| g == pn)) {
+                        p.const_param_tys.entry(sdefs.len() as u32).or_default().push((k, d.to_string()));
+                    }
                 }
                 sdefs.push((ii, name.clone(), shape, sm.adt_generics.clone()));
             }
@@ -1604,6 +1637,12 @@ impl Program {
             // (a trait with parameters, `impl Tr<u8> for S` and `impl Tr<u16> for S`, or self types that differ in their
             // arguments, `impl Tr for Vec<i32>` and `impl Tr for Vec<Box<i32>>`)
             let dup = !p.impls.insert((sid, tr.clone()));
+            // (all of its lifetimes 'static: `impl Copy for Foo<'static>`, `impl Copy for Foo<&'static u32>` (a path
+            // written without lifetimes is no lifetime of its own). One with others (`impl<'b> Copy for Foo<'static,
+            // 'b>`) is not followed: the borrow check would ask all of a copy's borrows to be 'static)
+            if tr == "Copy" && sm.hdr_regions.as_ref().is_some_and(|r| r.self_slots.contains(&R_STATIC) && r.self_slots.iter().all(|&c| c == R_STATIC || c == R_ELIDED_ADT)) {
+                p.static_copy.insert(sid);
+            }
 
             if impl_overlaps(&mut self_tys, sums, ii, sn, tr, dup)
                 && !matches!(
@@ -1635,6 +1674,7 @@ impl Program {
                 if let Some(&sid) = p.struct_index.get(tn) {
                     for d in ds {
                         p.impls.insert((sid, d.clone()));
+                        p.derived.entry(sid).or_default().push(d.clone());
                         if d == "PartialEq" {
                             p.derived_peq.insert(sid);
                         }
@@ -1649,6 +1689,29 @@ impl Program {
             .filter_map(|(tn, ds)| p.struct_index.get(tn).map(|&sid| (sid, ds)))
             .flat_map(|(sid, ds)| ds.iter().map(move |d| (sid, d.clone())))
             .collect();
+        // (E0195 for the methods of an impl of a type that is not a struct (`impl<'a> Foo<'a> for &'a isize`), which
+        // the loop below does not reach: the method's own early-bound lifetimes are the trait's)
+        {
+            for (mi, ms) in p.sigs.iter().enumerate() {
+                let (Some(tr), None, true) = (ms.impl_trait.as_deref(), ms.impl_of, ms.has_body) else { continue };
+                let Some(ii) = p.item_of[mi] else { continue };
+                if ii as usize >= user {
+                    continue;
+                }
+                let m = p.names[mi].rsplit("::").next().unwrap_or("").split('#').next().unwrap_or("");
+                // (an impl of a reference names its methods `__ref_m`)
+                // (the declaration of the same name first: a method may be named `__ref_m` itself)
+                let decl_name = |d: u32| p.names[d as usize].rsplit("::").next().unwrap_or("");
+                let ds = p.traits.get(tr).map(|v| v.as_slice()).unwrap_or(&[]);
+                let found = ds.iter().find(|&&d| decl_name(d) == m).or_else(|| ds.iter().find(|&&d| m.strip_suffix(decl_name(d)).is_some_and(|pre| pre.starts_with("__") && pre.ends_with('_'))));
+                let Some(&d) = found else { continue };
+                let m = p.names[d as usize].rsplit("::").next().unwrap_or(m);
+                let ds = &p.sigs[d as usize];
+                if let Some(e) = early_mismatch(ds, ms, m) {
+                    return Err(format!("{}:1: {e}", items[ii as usize].line));
+                }
+            }
+        }
         for (sid, tr) in &p.impls {
             if derived.contains(&(*sid, tr.clone())) {
                 continue;
@@ -1689,22 +1752,8 @@ impl Program {
                         }
                         // (E0195: the method's own lifetimes that bounds make early-bound, and how many bounds each has,
                         // are the trait's: `fn bar<'a, 'b: 'a>` in the trait, `fn bar<'a, 'b>` in the impl)
-                        {
-                            // (a lifetime a type parameter's bound names (`T: Test<'p>`) is early-bound too)
-                            let early = |r: Option<&crate::types::RSigSyn>, g: &[(String, Vec<String>)]| -> Vec<usize> {
-                                let Some(r) = r else { return vec![] };
-                                let in_bounds = |l: &str| {
-                                    g.iter().flat_map(|x| x.1.iter()).any(|b| b.match_indices(l).any(|(k, _)| !b[k + l.len()..].starts_with(|c: char| c.is_alphanumeric() || c == '_')))
-                                };
-                                (r.outer as usize..r.lts.len())
-                                    .map(|i| r.outlives.iter().filter(|&&(a, b)| a as usize == i || b as usize == i).count() + in_bounds(&r.lts[i]) as usize)
-                                    .filter(|&n| n > 0)
-                                    .collect()
-                            };
-                            let (de, me) = (early(ds.regions.as_deref(), &ds.generics), early(ms.regions.as_deref(), &ms.generics));
-                            if de != me {
-                                return Err(format!("{line}lifetime parameters or bounds on method `{m}` do not match the trait declaration (E0195)"));
-                            }
+                        if let Some(e) = early_mismatch(ds, ms, m) {
+                            return Err(format!("{line}{e}"));
                         }
                         // (a parameter's reference the trait leaves to the caller (elided, or the method's own lifetime)
                         // that the impl ties to one of its header's (`fn next(&'a mut self)`): less general, E0308)
@@ -1910,6 +1959,15 @@ impl Program {
             Ty::Struct(sid) => Some(self.structs[self.base_of(sid) as usize].name.as_str()),
             _ => None,
         };
+        // (`u16: From<u8>` / `u8: Into<u32>`: std's lossless conversions between primitives, and `T: From<T>`)
+        if (tr.starts_with("From") || tr.starts_with("Into")) && (t.is_int() || t.is_float() || matches!(t, Ty::Bool | Ty::Char)) {
+            let tr2: String = tr.chars().filter(|c| !c.is_whitespace()).collect();
+            let arg = |p: &str| tr2.strip_prefix(p).and_then(|r| r.strip_prefix('<')).and_then(|r| r.strip_suffix('>')).and_then(Ty::prim);
+            // (only a conversion std has answers here; the rest goes to the impls, a program's own `From` among them)
+            if arg("From").is_some_and(|a| prim_from(a, t)) || arg("Into").is_some_and(|a| prim_from(t, a)) {
+                return Some(true);
+            }
+        }
         match (t, tr) {
             // (`&str: ToString`, `&T: ToString` for T: Display)
             (Ty::Ref(_, i), "ToString") => Some(*i == Ty::Str || self.implements(*i, "Display") || self.implements(*i, "ToString")),
@@ -2073,8 +2131,17 @@ impl Program {
                 return self.implements(*i, tr);
             }
         }
+        // (`#[derive(Clone)] struct S<T>(PhantomData<T>)`: a derived impl of the program's requires the trait of each
+        // type argument, `S<X>: Clone` needs `X: Clone`)
+        if let Ty::Struct(sid) = t {
+            let b = self.base_of(sid);
+            // (`#[derive(Default)]` on an enum takes its `#[default]` unit variant: no bound on the arguments)
+            if b != sid && !(tr == "Default" && self.structs[b as usize].is_enum) && self.derived.get(&b).is_some_and(|ds| ds.iter().any(|d| d == tr)) && self.struct_item.get(b as usize).is_some_and(|&i| i < self.prelude_from) {
+                return self.structs[sid as usize].args.iter().all(|&a| matches!(a, Ty::Array(Ty::Unit, _)) || self.has_param(a) || self.implements(a, tr));
+            }
+        }
         // (const ジェネリクスの引数は長さを持つ配列型)
-        if tr == CONST_GENERIC {
+        if tr == CONST_GENERIC || tr.strip_prefix(CONST_GENERIC).is_some_and(|r| r.starts_with(':')) {
             return matches!(t, Ty::Array(Ty::Unit, _));
         }
         // 組み込みの AsRef<str> / AsRef<[T]> (文字列・Vec・配列・スライスとその参照)
@@ -4009,6 +4076,8 @@ impl Program {
         s.extend(self.struct_index.keys().map(|k| k.as_str()));
         s.extend(self.const_index.keys().map(|k| k.as_str()));
         s.extend(self.const_by_last.keys().map(|k| k.as_str()));
+        // (`A::V` through `type A = E;`: the alias leads to E)
+        s.extend(self.aliases.keys().map(|k| k.as_str()));
         s.insert("for");
         s
     }
@@ -4027,20 +4096,32 @@ impl Program {
             }
             // `for` はイテレータなら名前を書かずに next を呼ぶ
             let s = if s == "for" { "next" } else { s };
+            let mut hit = false;
             if let Some(ids) = self.by_last.get(s) {
                 fns.extend_from_slice(ids);
+                hit = true;
             }
             if let Some(&i) = self.struct_index.get(s) {
                 sts.push(i);
+                hit = true;
             }
             if has_consts {
                 if let Some(&i) = self.const_index.get(s) {
                     cs.push(i);
+                    hit = true;
                 }
                 if has_assoc {
                     if let Some(ids) = self.const_by_last.get(s) {
                         cs.extend_from_slice(ids);
+                        hit = true;
                     }
+                }
+            }
+            // (a name no table has: an alias, whose structs / enums a fn using `A::V` depends on, so a change to `E`
+            // reaches it)
+            if !hit {
+                if let Some((_, syn)) = self.aliases.get(s) {
+                    alias_structs(syn, &self.struct_index, &mut sts);
                 }
             }
         }
@@ -4281,6 +4362,73 @@ fn syn_has_assoc(t: &TySyn) -> bool {
     }
 }
 
+/// A method's own early-bound lifetimes: those its bounds name (`'a: 'b`, `T: Tr<'a>`), in their order. Returns
+/// whether each of its own lifetimes is early-bound, and its bounds `'a: 'b` among the early-bound ones, to
+/// `'static` (-1) and to the impl's or trait's lifetimes (-100 - k, k their name's place in `outer_names`), each own
+/// lifetime by its place among the early-bound ones
+fn early_bound(r: Option<&crate::types::RSigSyn>, g: &[(String, Vec<String>)], outer_names: &mut Vec<String>) -> (Vec<bool>, Vec<(i32, i32)>) {
+    let Some(r) = r else { return (vec![], vec![]) };
+    let in_bounds = |l: &str| g.iter().flat_map(|x| x.1.iter()).any(|b| b.match_indices(l).any(|(k, _)| !b[k + l.len()..].starts_with(|c: char| c.is_alphanumeric() || c == '_')));
+    let idx: Vec<usize> = (r.outer as usize..r.lts.len()).filter(|&i| in_bounds(&r.lts[i]) || r.outlives.iter().any(|&(a, b)| a as usize == i || b as usize == i)).collect();
+    let mut ord = |c: u8| match idx.iter().position(|&k| k == c as usize) {
+        Some(p) => Some(p as i32),
+        None if c == crate::types::R_STATIC => Some(-1),
+        None if c < r.outer => {
+            let n = &r.lts[c as usize];
+            let k = outer_names.iter().position(|x| x == n).unwrap_or_else(|| {
+                outer_names.push(n.clone());
+                outer_names.len() - 1
+            });
+            Some(-100 - k as i32)
+        }
+        None => None,
+    };
+    let rel = r.outlives.iter().filter_map(|&(a, b)| Some((ord(a)?, ord(b)?))).collect();
+    ((r.outer as usize..r.lts.len()).map(|i| idx.contains(&i)).collect(), rel)
+}
+
+/// An impl's method against the trait's declaration: E0195 when they have a different number of early-bound
+/// lifetimes, or the same lifetimes with one early-bound where the other's is late-bound; E0276 when the impl's
+/// bounds among them are not implied by the declaration's (rustc's order of the checks). The impl's and the trait's
+/// own lifetimes are told apart by name: a bound with one of the impl's that the trait has no lifetime of that name for
+/// is not compared (the header's trait arguments, which relate them, are not kept)
+fn early_mismatch(decl: &FnSig, imp: &FnSig, m: &str) -> Option<String> {
+    let mut names = vec![];
+    let (de, drel) = early_bound(decl.regions.as_deref(), &decl.generics, &mut names);
+    let n_decl = names.len();
+    let (me, mrel) = early_bound(imp.regions.as_deref(), &imp.generics, &mut names);
+    let count = |v: &[bool]| v.iter().filter(|&&x| x).count();
+    if count(&de) != count(&me) || de.len() == me.len() && de != me {
+        return Some(format!("lifetime parameters or bounds on method `{m}` do not match the trait declaration (E0195)"));
+    }
+    // (the trait's lifetimes: the declaration's own ones, and the impl's of the same names)
+    let decl_outer = |x: i32| x > -100 || ((-100 - x) as usize) < n_decl || decl.regions.as_deref().is_some_and(|r| r.lts[..r.outer as usize].iter().any(|l| *l == names[(-100 - x) as usize]));
+    // ('a: 'b holds when the declaration's bounds lead from 'a to 'b, or 'a is 'static)
+    let implied = |a: i32, b: i32| {
+        if a == b || a == -1 {
+            return true;
+        }
+        let (mut seen, mut work) = (vec![a], vec![a]);
+        while let Some(x) = work.pop() {
+            for &(p, q) in &drel {
+                if p == x && !seen.contains(&q) {
+                    if q == b || q == -1 {
+                        return true;
+                    }
+                    seen.push(q);
+                    work.push(q);
+                }
+            }
+        }
+        false
+    };
+    // (a bound with none of the method's own lifetimes may be the impl header's (`impl<'a: 'b, 'b>`): not compared)
+    if mrel.iter().any(|&(a, b)| (a >= 0 || b >= 0) && decl_outer(a) && decl_outer(b) && !implied(a, b)) {
+        return Some(format!("impl has stricter requirements than trait: method `{m}` (E0276)"));
+    }
+    None
+}
+
 fn syn_has_app(t: &TySyn, aliases: &FxMap<String, (Vec<String>, TySyn)>) -> bool {
     match t {
         TySyn::App(..) | TySyn::Dyn(_) => true,
@@ -4407,13 +4555,33 @@ impl Program {
             return None;
         }
         let tn = segs[0].name.as_str();
-        let sid = if tn == "Self" { self_sid? } else { *self.struct_index.get(tn)? };
+        // (`E2::A` of `type E2 = E;`; an alias with arguments, `Lt::<'static>::None`, is not looked through yet)
+        let sid = if tn == "Self" { self_sid? } else { self.struct_index.get(tn).copied().or_else(|| self.alias_adt(tn).filter(|_| !segs[0].args))? };
         let sd = &self.structs[sid as usize];
         if !sd.is_enum {
             return None;
         }
         let vn = &segs[1].name;
         sd.variants.iter().position(|v| &v.name == vn).map(|vi| (sid, vi))
+    }
+
+    /// a const parameter's declared type name, through an alias (`type Switch = bool;` with `const B: Switch`: bool)
+    pub fn const_decl<'a>(&self, n: &'a str) -> std::borrow::Cow<'a, str> {
+        match self.aliases.get(n) {
+            Some((_, TySyn::Prim(t))) if Ty::prim(n).is_none() => std::borrow::Cow::Owned(self.tn(*t)),
+            _ => std::borrow::Cow::Borrowed(n),
+        }
+    }
+
+    /// `type E2 = E;` / `type Opt<T> = Option<T>;`: the struct / enum (its base) an alias names directly
+    pub fn alias_adt(&self, name: &str) -> Option<u32> {
+        let (_, syn) = self.aliases.get(name)?;
+        // (`type A = E<u8>;`: its base; a pattern through it is checked against the instance by variant_on)
+        let n = match syn {
+            TySyn::Named(n) | TySyn::App(n, _) => n.as_str(),
+            _ => return None,
+        };
+        self.struct_index.get(n).copied()
     }
 
     pub fn struct_by_p(&self, p: &PPath, self_sid: Option<u32>) -> Option<u32> {
@@ -4643,5 +4811,41 @@ fn subst_consts(e: &crate::parse::Expr, env: &[(String, i128, Option<It>)]) -> c
             Expr::Block(l.clone(), *u, b)
         }
         e => e.clone(),
+    }
+}
+
+/// std has `impl From<a> for b` (b losslessly holds every a; `T: From<T>`)
+pub fn prim_from(a: Ty, b: Ty) -> bool {
+    use Ty::*;
+    if a == b {
+        return true;
+    }
+    match a {
+        Bool => b.is_int(),
+        Char => matches!(b, U32 | U64 | U128),
+        U8 => matches!(b, U16 | U32 | U64 | U128 | Usize | I16 | I32 | I64 | I128 | Isize | F32 | F64 | Char),
+        U16 => matches!(b, U32 | U64 | U128 | Usize | I32 | I64 | I128 | F32 | F64),
+        U32 => matches!(b, U64 | U128 | I64 | I128 | F64),
+        U64 => matches!(b, U128 | I128),
+        I8 => matches!(b, I16 | I32 | I64 | I128 | Isize | F32 | F64),
+        I16 => matches!(b, I32 | I64 | I128 | Isize | F32 | F64),
+        I32 => matches!(b, I64 | I128 | F64),
+        I64 => matches!(b, I128),
+        F32 => matches!(b, F64),
+        _ => false,
+    }
+}
+
+/// the structs / enums a type alias's value names (by the program's index)
+fn alias_structs(t: &TySyn, index: &FxMap<String, u32>, out: &mut Vec<u32>) {
+    match t {
+        TySyn::Named(n) => out.extend(index.get(n).copied()),
+        TySyn::App(n, args) => {
+            out.extend(index.get(n).copied());
+            args.iter().for_each(|a| alias_structs(a, index, out));
+        }
+        TySyn::Ref(_, i) | TySyn::Ptr(_, i) | TySyn::Slice(i) | TySyn::Array(i, _) | TySyn::Assoc(i, _) => alias_structs(i, index, out),
+        TySyn::Tuple(ts) | TySyn::FnPtr(ts) => ts.iter().for_each(|a| alias_structs(a, index, out)),
+        _ => {}
     }
 }
