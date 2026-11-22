@@ -315,9 +315,19 @@ fn made_temp(x: &Expr) -> bool {
         // static as a constant one is (`&(1, 2)`), so a temporary)
         Expr::Tuple(xs) | Expr::Array(xs) => !xs.is_empty() && xs.iter().any(runtime_value),
         Expr::Struct(_, fs, None) => fs.iter().any(|f| runtime_value(&f.1)),
+        // (`S { a: 3, ..s }`: the base's other fields are read too)
+        Expr::Struct(_, fs, Some(b)) => runtime_value(b) || fs.iter().any(|f| runtime_value(&f.1)),
         // (`&{ let v = 4; (v,) }`: a block's value is a temporary, moved or copied out of what its tail names)
-        Expr::Block(None, _, b) => matches!(b.stmts.last(), Some(crate::parse::Stmt::Expr(t, false)) if runtime_value(t)),
+        Expr::Block(None, _, b) => block_tail(b).is_some_and(runtime_value),
         _ => false,
+    }
+}
+
+/// The value a block ends with (its tail), if it has one
+fn block_tail(b: &crate::parse::Block) -> Option<&Expr> {
+    match b.stmts.last() {
+        Some(crate::parse::Stmt::Expr(t, false)) => Some(t),
+        _ => None,
     }
 }
 
@@ -326,7 +336,12 @@ fn runtime_value(e: &Expr) -> bool {
     match e {
         Expr::Paren(x) | Expr::Field(x, _, _) | Expr::Cast(x, _) | Expr::Unary(_, x, _) | Expr::Ref(_, x) => runtime_value(x),
         Expr::Path(None, p) => p.segs.len() == 1 && p.segs[0].name.starts_with(|c: char| c.is_ascii_lowercase() || c == '_') && !matches!(p.segs[0].name.as_str(), "true" | "false"),
-        Expr::Call(..) | Expr::MethodCall(..) | Expr::Index(..) | Expr::Macro(..) | Expr::Block(..) | Expr::If(..) | Expr::Match(..) => true,
+        Expr::Call(..) | Expr::MethodCall(..) | Expr::Index(..) | Expr::Macro(..) => true,
+        // (a block, an `if` or a `match` is the value it ends with: `({ 1 },)` and `(if true { 1 } else { 2 },)` are
+        // promoted as rustc does; a runtime condition or scrutinee makes it a temporary)
+        Expr::Block(_, _, b) => block_tail(b).is_some_and(runtime_value),
+        Expr::If(c, t, e) => runtime_value(c) || block_tail(t).is_some_and(runtime_value) || e.as_deref().is_some_and(runtime_value),
+        Expr::Match(x, arms) => runtime_value(x) || arms.iter().any(|a| runtime_value(&a.body) || a.guard.as_ref().is_some_and(runtime_value)),
         Expr::Binary(_, a, b, _) => runtime_value(a) || runtime_value(b),
         _ => made_temp(e),
     }
@@ -1158,16 +1173,28 @@ impl Bk {
                     for _ in 0..*derefs {
                         // (each local the `&mut`s point to, and whether through a parameter's pointee)
                         let mut next: Vec<(u32, bool)> = vec![];
+                        let push = |next: &mut Vec<(u32, bool)>, local: u32, behind: bool| match next.iter_mut().find(|n| n.0 == local) {
+                            Some(n) => n.1 |= behind,
+                            None => next.push((local, behind)),
+                        };
                         for &x in &at {
                             for &ln in st.held(x) {
                                 let lo = &self.loans[ln as usize];
                                 if !lo.mutable {
                                     continue;
                                 }
-                                let behind = lo.place.owned_len() < lo.place.proj.len() && self.params.contains(&lo.place.local);
-                                match next.iter_mut().find(|n| n.0 == lo.place.local) {
-                                    Some(n) => n.1 |= behind,
-                                    None => next.push((lo.place.local, behind)),
+                                let through_ref = lo.place.owned_len() < lo.place.proj.len();
+                                let behind = through_ref && self.params.contains(&lo.place.local);
+                                if through_ref && !behind {
+                                    // (a reborrow through a local's `&mut` (`q = &mut *p`): it points to what p points to)
+                                    for &h in st.held(lo.place.local) {
+                                        let hl = &self.loans[h as usize];
+                                        if hl.mutable {
+                                            push(&mut next, hl.place.local, hl.place.owned_len() < hl.place.proj.len() && self.params.contains(&hl.place.local));
+                                        }
+                                    }
+                                } else {
+                                    push(&mut next, lo.place.local, behind);
                                 }
                             }
                         }

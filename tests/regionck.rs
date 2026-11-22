@@ -1444,6 +1444,9 @@ fn part8_review_follow_ups() {
     assert_eq!(check("fn f(z: &mut i32) {\n    let mut p = &mut *z;\n    {\n        let mut y = 1;\n        let q = &mut p;\n        *q = &mut y;\n        **q += 1;\n    }\n    *z += 1;\n}\nfn main() {}\n"), vec![]);
     let d = check("fn g(z: &mut &i32) {\n    let y = 1;\n    let q = &mut *z;\n    *q = &y;\n}\nfn main() {}\n");
     assert!(d.len() == 1 && d[0].0 == 4, "{d:?}");
+    // (a reborrow `q = &mut *p` points to what p points to: `*q = &y` stores into r)
+    let d = check("fn sink(_: &i32) {}\nfn main() {\n    let x = 1;\n    let mut r = &x;\n    {\n        let y = 2;\n        let p = &mut r;\n        let q = &mut *p;\n        *q = &y;\n    }\n    sink(r);\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 9, "{d:?}");
     // (but `*q = &mut &y`: the `&mut` is invariant, so z's region is y's)
     let d = check("fn sink(_: &u32) {}\nfn main() {\n    let z0 = 0;\n    let mut z = &z0;\n    let mut p = &mut z;\n    {\n        let y = 1;\n        let q = &mut p;\n        *q = &mut &y;\n    }\n    sink(z);\n}\n");
     assert!(d.len() == 1 && d[0].0 == 9, "{d:?}");
@@ -1484,6 +1487,14 @@ fn move_out_of_static() {
 /// `&(1,)` is: borrowed past the statement it is E0716. A `let` extends it
 #[test]
 fn runtime_literal_temporaries() {
+    // (a block, an `if`, a `match` in a literal: the value it ends with; constant ones are promoted)
+    let first = "fn first(x: &(i32,)) -> &i32 {\n    &x.0\n}\n";
+    assert_eq!(check(&format!("{first}fn main() {{\n    let r = first(&({{ 1 }},));\n    let k = first(&(if true {{ 1 }} else {{ 2 }},));\n    println!(\"{{}} {{}}\", r, k);\n}}\n")), vec![]);
+    let d = check(&format!("{first}fn main() {{\n    let c = true;\n    let q = first(&(if c {{ 1 }} else {{ 2 }},));\n    println!(\"{{}}\", q);\n}}\n"));
+    assert!(d.len() == 1 && d[0].0 == 6 && d[0].1.contains("E0716"), "{d:?}");
+    // (a struct update reads its base)
+    let d = check("struct S {\n    a: i32,\n    b: i32,\n}\nfn get(s: &S) -> &i32 {\n    &s.b\n}\nfn main() {\n    let s = S { a: 1, b: 2 };\n    let r = get(&S { a: 3, ..s });\n    println!(\"{}\", r);\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 10 && d[0].1.contains("E0716"), "{d:?}");
     let d = check("fn gimme(x: &(u32,)) -> &u32 {\n    &x.0\n}\nfn main() {\n    let v = 22;\n    let x = gimme(&(v,));\n    println!(\"{:?}\", x);\n}\n");
     assert!(d.len() == 1 && d[0].0 == 6 && d[0].1.contains("E0716"), "{d:?}");
     assert_eq!(check("fn gimme(x: &(u32,)) -> &u32 {\n    &x.0\n}\nfn main() {\n    let v = 22;\n    let a = gimme(&(1,));\n    let r = &(v,);\n    let b = gimme(r);\n    println!(\"{} {} {}\", a, b, gimme(&(v,)));\n}\n"), vec![]);
