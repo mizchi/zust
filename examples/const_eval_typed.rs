@@ -115,7 +115,7 @@ fn main() {
     println!("{}", DIV_LATE);
     println!("{} {}", E2::A as u16, E2::B as u16);
     println!("{}", std::mem::size_of::<[u8; QFLIP]>());
-    println!("{} {} {}", SKIPPED, E3::A as isize, E3::B as isize);
+    println!("{} {} {} {}", SKIPPED, E3::A as isize, E3::B as isize, E3::C as isize);
 }
 
 // (a generic alias resolves before layout; an unsafe block evaluates; the i128::MIN literal negates)
@@ -185,4 +185,5 @@ const SKIPPED: u8 = {
 enum E3 {
     A = (1 << 63) >> 63,
     B = unsafe { 1 + 2 },
+    C = (unsafe { 2 + 2 }),
 }

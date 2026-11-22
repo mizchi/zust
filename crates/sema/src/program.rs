@@ -117,8 +117,9 @@ impl StructDef {
 
 /// The untyped locals of the blocks being evaluated (Program::eval_block_env): their expressions, and their values
 /// at each type a use wanted (memoized, so a chain `let x1 = x0 & x0; let x2 = x1 & x1; ..` is linear)
-type LazyLocals = (u64, FxMap<u64, (crate::parse::Expr, Vec<(Option<It>, Result<(i128, Option<It>), String>)>, Option<String>)>);
-// (the third: the error of its untyped value, reported if no use evaluates it: `let _x = 1 / 0;`)
+type LazyLocals = (u64, FxMap<u64, (crate::parse::Expr, Vec<(Option<It>, Result<(i128, Option<It>), String>)>, Option<String>, bool)>);
+// (the third: the error of its untyped value, reported if no use evaluates it: `let _x = 1 / 0;`; the fourth: whether
+// the block refers to it, where it may not be evaluated (an `if` arm not taken))
 
 thread_local! {
     static LAZY: std::cell::RefCell<LazyLocals> = std::cell::RefCell::new((0, FxMap::default()));
@@ -2762,8 +2763,19 @@ impl Program {
         // (the untyped locals this block registers are dropped when it is done)
         let start = LAZY.with(|l| l.borrow().0);
         let r = self.eval_block_in(b, env, depth, want);
-        // (an unused local whose untyped value failed is that error: `{ let _x = 1 / 0; 1 }`)
-        let unused = LAZY.with(|l| l.borrow().1.iter().filter(|(k, e)| **k >= start && e.1.is_empty()).find_map(|(_, e)| e.2.clone()));
+        // (a local whose untyped value failed and that no use evaluated: an error if the block does not refer to it
+        // (`{ let _x = 1 / 0; 1 }`), or if it fails at the block's type too (`let x = 1 / 0; if false { x } else { 1 }`);
+        // `let x = 1 / ((!0 >> 7) + 1); if false { x } else { 0u8 }` is a u8's 0)
+        let pending: Vec<(crate::parse::Expr, String, bool)> = LAZY.with(|l| {
+            l.borrow().1.iter().filter(|(k, e)| **k >= start && e.1.is_empty()).filter_map(|(_, e)| e.2.clone().map(|er| (e.0.clone(), er, e.3))).collect()
+        });
+        let mut unused = None;
+        for (x, er, referenced) in pending {
+            let fails = !referenced || want.is_none() || self.eval_t(&x, depth, want).is_err();
+            if fails && unused.is_none() {
+                unused = Some(er);
+            }
+        }
         LAZY.with(|l| l.borrow_mut().1.retain(|&k, _| k < start));
         match (r, unused) {
             (Ok(_), Some(e)) => Err(e),
@@ -2777,7 +2789,7 @@ impl Program {
             let mut l = l.borrow_mut();
             let id = l.0;
             l.0 += 1;
-            l.1.insert(id, (x, vec![], failed));
+            l.1.insert(id, (x, vec![], failed, false));
             id
         });
         crate::parse::parse_expr(&format!("__zust_lazy_{id}"))
@@ -2788,13 +2800,13 @@ impl Program {
     fn note_refs(&self, x: &crate::parse::Expr) {
         LAZY.with(|l| {
             let mut l = l.borrow_mut();
-            if l.1.values().all(|e| e.2.is_none()) {
+            if l.1.values().all(|e| e.2.is_none() || e.3) {
                 return;
             }
             let t = format!("{x:?}");
             for (id, e) in l.1.iter_mut() {
                 if e.2.is_some() && t.contains(&format!("\"__zust_lazy_{id}\"")) {
-                    e.2 = None;
+                    e.3 = true;
                 }
             }
         });
@@ -2974,7 +2986,7 @@ impl Program {
                 let id: u64 = p.segs[0].name["__zust_lazy_".len()..].parse().map_err(|_| "bad local")?;
                 let (x, hit) = LAZY.with(|l| {
                     let l = l.borrow();
-                    let (x, memo, _) = l.1.get(&id).ok_or("a local out of its block")?;
+                    let (x, memo, ..) = l.1.get(&id).ok_or("a local out of its block")?;
                     R::Ok((x.clone(), memo.iter().find(|m| m.0 == want).map(|m| m.1.clone())))
                 })?;
                 if let Some(r) = hit {
