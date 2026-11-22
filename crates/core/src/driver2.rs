@@ -3703,10 +3703,7 @@ impl Session2 {
             self.chk = Some(memo);
         }
         tm.lap("check", format!("{n_memo} from the last check, {n_keys} keys, {n_hit} cached, {n_checked} checked"));
-<<<<<<< HEAD
         self.const_lines.clear();
-        let mut d: Vec<Diagnostic> = errs.iter().map(|e| Diagnostic::parse(e)).filter(|d| d.line <= user_lines).collect();
-=======
         let mut d: Vec<Diagnostic> = errs.iter().map(|e| Diagnostic::parse(e)).collect();
         // (an item moved out of a fn body (`fn main() { fn helper() { .. } }`) is past the source's last line: its borrow
         // and region checks' errors are at the lines it was moved from. Not its other errors: typeck does not know all
@@ -3724,7 +3721,6 @@ impl Session2 {
             }
         }
         d.retain(|d| d.line <= user_lines);
->>>>>>> claude/compat-next30
         d.sort_by(|x, y| (x.line, x.col).cmp(&(y.line, y.col)));
         d.dedup();
         d
