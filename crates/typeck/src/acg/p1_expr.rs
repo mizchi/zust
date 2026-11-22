@@ -47,6 +47,121 @@ pub(crate) fn closure_synth(c: &Expr) -> ItemFn {
 }
 
 impl Cx<'_> {
+    /// `S::<'static>(..)` with `struct S<'a, 'b>`: E0107 for another number of lifetime arguments than the type has
+    /// (none given is fine: they are inferred)
+    pub(crate) fn lifetime_arity(&self, sid: u32, p: &crate::parse::Path, what: &str) -> R<()> {
+        // (on any segment: `E::<'static>::V::<u8>(..)`)
+        let k: usize = p.segs.iter().map(|s| s.args.iter().filter(|a| matches!(a, GArg::Lifetime(_))).count()).sum();
+        if k == 0 {
+            return Ok(());
+        }
+        let n = self.prog.adt_regions.get(&self.prog.base_of(sid)).map_or(0, |r| r.lts.len());
+        if k != n {
+            let (ns, ks) = (if n == 1 { "" } else { "s" }, if k == 1 { " was" } else { "s were" });
+            return err(SP, format!("{what} takes {n} lifetime argument{ns} but {k} lifetime argument{ks} supplied (E0107)"));
+        }
+        Ok(())
+    }
+
+    /// `Enum::<()>::V::<()>(..)` / `Alias::V::<()>(..)` / `Self::V::<()>(..)`: E0109 for type arguments on a variant
+    /// when its type has them already, or is an alias or `Self` (`Enum::V::<()>` alone is fine)
+    pub(crate) fn variant_targs_allowed(&self, p: &crate::parse::Path, kind: &str) -> R<()> {
+        let n = p.segs.len();
+        let has_ty = |s: &crate::parse::Seg| s.args.iter().any(|a| matches!(a, GArg::Ty(_) | GArg::Const(_)));
+        if n < 2 || !has_ty(&p.segs[n - 1]) {
+            return Ok(());
+        }
+        let ty_seg = &p.segs[n - 2];
+        if ty_seg.name == "Self" || self.prog.aliases.contains_key(&ty_seg.name) {
+            return err(SP, "type arguments are not allowed on this type (E0109)");
+        }
+        if has_ty(ty_seg) {
+            return err(SP, format!("type arguments are not allowed on {kind} `{}` (E0109)", p.segs[n - 1].name));
+        }
+        Ok(())
+    }
+
+    /// `U::<u8>` / `Foo::<3>` / `Flag::<true>`: the path without the last segment's turbofish, and the type arguments
+    /// it gives (None for `_`); the path itself when it has none
+    pub(crate) fn turbofish_split<'a>(&self, p: &'a crate::parse::Path) -> (PPath, Option<&'a [GArg]>) {
+        let mut pp = PPath::of(p);
+        let Some(last) = p.segs.last().filter(|s| !s.args.is_empty() && s.fn_args.is_none()) else { return (pp, None) };
+        if let Some(l) = pp.segs.last_mut() {
+            l.args = false;
+        }
+        (pp, Some(&last.args))
+    }
+
+    /// a unit struct pattern's instance (`G::<5, _>` against a `G<5, 7>`: its `_` from the value's type), after its
+    /// lifetime and argument counts are checked; None when it is not one
+    pub(crate) fn pat_turbofish_ty(&self, path: &crate::parse::Path, value: Ty) -> R<Option<Ty>> {
+        let (pp, targs) = self.turbofish_split(path);
+        let (Some(sid), Some(args)) = (self.prog.struct_by_p(&pp, self.self_sid), targs) else { return Ok(None) };
+        let sd = &self.prog.structs[sid as usize];
+        if !sd.fields.is_empty() || sd.is_enum {
+            return Ok(None);
+        }
+        self.lifetime_arity(sid, path, "struct")?;
+        let base = self.prog.base_of(sid);
+        let mut ts = self.turbofish_targs(sid, args)?;
+        // (`matches!(0u8, G::<_>)`: a value of another type than the struct is a mismatch, `_` or not)
+        if !matches!(value, Ty::Struct(v) if self.prog.base_of(v) == base) && !self.prog.has_param(value) {
+            return err(SP, format!("mismatched types: expected `{}`, found `{}`", self.prog.tn(value), self.prog.structs[base as usize].name));
+        }
+        if let Ty::Struct(v) = value {
+            if self.prog.base_of(v) == base {
+                for (k, t) in ts.iter_mut().enumerate() {
+                    if t.is_none() {
+                        *t = self.prog.structs[v as usize].args.get(k).copied();
+                    }
+                }
+            }
+        }
+        match ts.into_iter().collect::<Option<Vec<Ty>>>() {
+            Some(ts) => Ok(Some(Ty::Struct(self.prog.instantiate(base, ts)?))),
+            None => Ok(None),
+        }
+    }
+
+    /// the type arguments a struct's turbofish gives (None for `_`; lifetimes left out), checked against the struct's
+    /// number of generic parameters (E0107); a type that does not resolve is that error
+    pub(crate) fn turbofish_targs(&self, sid: u32, args: &[GArg]) -> R<Vec<Option<Ty>>> {
+        let mut ts = vec![];
+        // (`Flag::<1>` with `struct Flag<const B: bool>`: a const argument of another kind than the parameter's type)
+        let decls = self.prog.const_param_tys.get(&self.prog.base_of(sid));
+        for a in args {
+            if let Some(ds) = decls {
+                let k = ts.len();
+                if let Some((_, decl)) = ds.iter().find(|(i, _)| *i == k) {
+                    let decl = &*self.prog.const_decl(decl);
+                    let kind = match decl {
+                        "bool" | "char" => decl,
+                        _ => "int",
+                    };
+                    if let Some((_, shown)) = self.const_arg_kind(a).filter(|(f, _)| *f != kind) {
+                        return err(SP, format!("mismatched types: expected `{decl}`, found {shown} (const argument)"));
+                    }
+                }
+            }
+            ts.push(match a {
+                GArg::Ty(crate::parse::Ty::Infer) => None,
+                GArg::Ty(t) if crate::ast_types::bool_arg(t).is_some() => Some(self.prog.resolve_env(&crate::ast_types::bool_arg(t).unwrap(), &self.env).or_else(|e| err(SP, e))?),
+                GArg::Ty(t) => Some(self.parse_ty(t)?).filter(|&t| !has_hole(self.prog, t)),
+                GArg::Const(e) => {
+                    let syn = crate::ast_types::const_arg_syn(e).or_else(|e| err(SP, e))?;
+                    Some(self.prog.resolve_env(&syn, &self.env).or_else(|e| err(SP, e))?)
+                }
+                _ => continue,
+            });
+        }
+        let n = self.prog.structs[self.prog.base_of(sid) as usize].generics.len();
+        if ts.len() != n {
+            let (ns, ks) = (if n == 1 { "" } else { "s" }, if ts.len() == 1 { " was" } else { "s were" });
+            return err(SP, format!("struct takes {n} generic argument{ns} but {} generic argument{ks} supplied (E0107)", ts.len()));
+        }
+        Ok(ts)
+    }
+
     // --- place (左辺値) ---------------------------------------------------
 
     pub(crate) fn place(&mut self, e: &Expr) -> R<Place> {
@@ -65,10 +180,11 @@ impl Cx<'_> {
             Expr::Paren(p) => self.place(p),
             Expr::Path(..) if self.const_generic(e).is_some() => {
                 let n = self.const_generic(e).unwrap();
-                let v = self.b.ins().iconst(types::I64, n as i64);
-                let var = self.b.declare_var(types::I64);
+                let t = self.const_generic_ty(e).unwrap_or(Ty::Usize);
+                let v = self.int_const(t, n as i128);
+                let var = self.b.declare_var(clif_ty(t).unwrap_or(types::I64));
                 self.b.def_var(var, v);
-                Ok(Place::Var(var, Ty::Usize))
+                Ok(Place::Var(var, t))
             }
             // const (`LIMIT` / `S::N`) を場所として使う (`println!("{}", LIMIT)` / `&LIMIT`): 一時領域に置く
             Expr::Path(_, p) if self.const_of(e).is_some() && ident_of(p).is_none_or(|id| self.lookup(id).is_none()) => {
@@ -93,6 +209,19 @@ impl Cx<'_> {
                     let t = self.prog.consts[ci as usize].ty;
                     let a = self.static_sym(ci);
                     return Ok(Place::Mem(a, 0, t));
+                }
+                // (`Generic::<5>` / `PhantomData::<u8>`: a generic unit struct with the turbofish's type arguments)
+                if p.segs.last().is_some_and(|s| !s.args.is_empty()) {
+                    let (pp, targs) = self.turbofish_split(p);
+                    if let (Some(sid), Some(args)) = (self.prog.struct_by_p(&pp, self.self_sid), targs) {
+                        let sd = &self.prog.structs[sid as usize];
+                        if sd.fields.is_empty() && !sd.is_enum {
+                            if let Some(ts) = self.turbofish_targs(sid, args)?.into_iter().collect::<Option<Vec<Ty>>>() {
+                                let t = Ty::Struct(self.prog.instantiate(self.prog.base_of(sid), ts)?);
+                                return Ok(Place::Mem(self.temp(t), 0, t));
+                            }
+                        }
+                    }
                 }
                 let Some(id) = ident_of(p) else {
                     return err(SP, "unsupported path");
@@ -537,9 +666,11 @@ impl Cx<'_> {
             // const ジェネリクスの N: インスタンスの型引数の長さ
             Expr::Path(..) if self.const_generic(e).is_some() => {
                 let n = self.const_generic(e).unwrap();
-                // (`const N: u8`: the parameter's type is not kept; an expected integer type is taken as it)
-                let t = match expected {
-                    Some(t) if t.is_int() => t,
+                // (`const B: bool` / `const N: u8`: the parameter's declared type; a usize one takes an expected integer
+                // type)
+                let t = match (self.const_generic_ty(e), expected) {
+                    (Some(t), _) => t,
+                    (None, Some(t)) if t.is_int() => t,
                     _ => Ty::Usize,
                 };
                 Ok((Some(self.int_const(t, n as i128)), t))
@@ -824,7 +955,16 @@ impl Cx<'_> {
                 self.b.ins().jump(header, &[]);
                 self.b.switch_to_block(header);
                 let t0 = self.temps.len();
+                // (`'a: while break 'a {}`: the label is a target of `break` already in the condition (an unlabeled
+                // `break` or a `continue` there is not))
+                let label = self.pending_label.take();
+                if label.is_some() {
+                    self.loops.push(Loop { cont: header, brk: exit, breaks: 0, label: label.clone(), val: None, is_block: true, depth: self.scopes.len(), temps: t0, no_value: Some("while") });
+                }
                 let (c, ct) = self.expr(cond, Some(Ty::Bool))?;
+                if label.is_some() {
+                    self.loops.pop();
+                }
                 self.same(SP, ct, Ty::Bool)?;
                 // (the condition's temporaries are dropped before the body: `while borrow().ok() { .. }`)
                 if c.is_some() {
@@ -843,11 +983,12 @@ impl Cx<'_> {
                     cont: header,
                     brk: exit,
                     breaks: 0,
-                    label: self.pending_label.take(),
+                    label,
                     val: None,
                     is_block: false,
                     depth: self.scopes.len(),
                     temps: t0,
+                    no_value: Some("while"),
                 });
                 let (_, bt) = self.block(wbody, Some(Ty::Unit))?;
                 self.loops.pop();
@@ -878,6 +1019,7 @@ impl Cx<'_> {
                     is_block: false,
                     depth: self.scopes.len(),
                     temps: self.temps.len(),
+                    no_value: None,
                 });
                 let (_, bt) = self.block(lbody, Some(Ty::Unit))?;
                 let lp = self.loops.pop().unwrap();
@@ -900,11 +1042,16 @@ impl Cx<'_> {
                 }
                 Ok((None, Ty::Unit))
             }
-            Expr::Break(label, value) => {
+            Expr::Break(label, value, pos) => {
                 let label = label.as_deref().map(label_name);
+                // (the error at the keyword or label itself, also when a value follows on another line)
                 let Some(li) = self.loop_index(label.as_deref(), true) else {
-                    return err(SP, "`break` outside of a loop (or unknown label)");
+                    return Err(self.at(*pos, "`break` outside of a loop (or unknown label)".to_string()));
                 };
+                // (E0571: `break 'a 1` out of a `while` / `for` loop, or a while's condition)
+                if let (Some(_), Some(kind)) = (value, self.loops[li].no_value) {
+                    return Err(self.at(*pos, format!("`break` with value from a `{kind}` loop (E0571)")));
+                }
                 // `break v`: 値を評価してから抜ける (型は最初の break で決まる)
                 let mut args = vec![];
                 if let Some(e) = value {
@@ -936,10 +1083,10 @@ impl Cx<'_> {
                 self.b.ins().jump(t, &args);
                 Ok(self.dead())
             }
-            Expr::Continue(label) => {
+            Expr::Continue(label, pos) => {
                 let label = label.as_deref().map(label_name);
                 let Some(li) = self.loop_index(label.as_deref(), false) else {
-                    return err(SP, "`continue` outside of a loop (or unknown label)");
+                    return Err(self.at(*pos, "`continue` outside of a loop (or unknown label)".to_string()));
                 };
                 let lp = &self.loops[li];
                 let (t, d, tt) = (lp.cont, lp.depth, lp.temps);
@@ -1367,7 +1514,16 @@ impl Cx<'_> {
 
     /// a constant expression's value as static data: a reference to it
     fn promote(&mut self, rexpr: &Expr, inner_exp: Option<Ty>) -> Option<V> {
-        let t = inner_exp.filter(|t| !matches!(t, Ty::Dyn(_) | Ty::Slice(_) | Ty::Str)).or_else(|| self.peek(rexpr));
+        // (`&1u16`: a suffixed literal is of its suffix's type, whatever is expected or inferred around it)
+        let own = match strip_paren(rexpr) {
+            Expr::Lit(l, _) => match lit::lit(l) {
+                Some(Lit::Int(i)) => Ty::from_suffix(i.suffix()).or(match i.suffix() { "f32" => Some(Ty::F32), "f64" => Some(Ty::F64), _ => None }),
+                Some(Lit::Float(f)) => match f.suffix() { "f32" => Some(Ty::F32), "f64" => Some(Ty::F64), _ => None },
+                _ => None,
+            },
+            _ => None,
+        };
+        let t = own.or_else(|| inner_exp.filter(|t| !matches!(t, Ty::Dyn(_) | Ty::Slice(_) | Ty::Str))).or_else(|| self.peek(rexpr));
         let t = t.filter(|&t| !self.needs_drop(t) && !self.prog.has_param(t) && !self.interior_mut(t, 0))?;
         let dv = crate::ast_consteval::eval(self.prog, rexpr, t).ok()?;
         if !dv.relocs.is_empty() || dv.bytes.is_empty() {
@@ -2960,6 +3116,14 @@ impl Cx<'_> {
                             let n = format!("{}::from", self.ty_key(t));
                             let src = if self.trait_candidate(&n, "From").is_some() {
                                 Some(format!("<{} as From>::from", self.prog.tn(t)))
+                            } else if (t.is_int() || t.is_float()) && self.peek(x).is_some_and(|a| a.is_int() || a.is_float() || matches!(a, Ty::Bool | Ty::Char)) {
+                                // (`let b: u32 = From::from(4u16)`: a number's `from`, the widening cast; a narrowing
+                                // one, `u8` from `256u16`, is E0277 as in rustc)
+                                let a = self.peek(x).unwrap();
+                                if !crate::program::prim_from(a, t) {
+                                    return err(SP, format!("the trait `From<{}>` is not implemented for `{}` (E0277)", self.prog.tn(a), self.prog.tn(t)));
+                                }
+                                Some(format!("{}::from", self.prog.tn(t)))
                             } else if self.no_trait_method(&n) {
                                 Some(format!("{}::from", self.prog.tn(t)))
                             } else {
@@ -3063,6 +3227,8 @@ impl Cx<'_> {
                 if v.kind != crate::types::VariantKind::Tuple || v.fields.len() != cargs.len() {
                     return err(SP, format!("variant `{}` takes {} fields", v.name, v.fields.len()));
                 }
+                self.lifetime_arity(sid, p, "enum")?;
+                self.variant_targs_allowed(p, "tuple variant")?;
                 let args: Vec<(usize, &Expr)> = cargs.iter().enumerate().collect();
                 // (`Ok::<_, ()>(1)` / `Some::<u8>(3)`: the turbofish gives the type arguments it names)
                 if let Some(ta) = p.segs.iter().rev().find_map(|s| if s.args.is_empty() { None } else { Some(&s.args) }) {
@@ -3083,11 +3249,26 @@ impl Cx<'_> {
                 return r;
             }
             // タプル構造体の構築 `P(1, 2)`
-            if let Some(sid) = self.prog.struct_by_p(&PPath::of(p), self.self_sid) {
-                if self.lookup(&p.segs[0].name).is_none() && self.prog.fn_by_p(&PPath::of(p), self.self_sid).is_none() {
+            // (`U::<u8>(7)` / `Foo::<3>([1, 2, 3])`: the struct without the turbofish, which gives its type arguments)
+            let (pp, targs) = self.turbofish_split(p);
+            if let Some(sid) = self.prog.struct_by_p(&pp, self.self_sid) {
+                if self.lookup(&p.segs[0].name).is_none() && self.prog.fn_by_p(&pp, self.self_sid).is_none() {
                     let n = self.prog.structs[sid as usize].fields.len();
                     if n != cargs.len() {
                         return err(SP, format!("this struct takes {n} fields"));
+                    }
+                    self.lifetime_arity(sid, p, "struct")?;
+                    if let Some(args) = targs {
+                        let ts = self.turbofish_targs(sid, args)?;
+                        // (`let x: S<u16> = S::<u8>(1u16)`: the turbofish against the expected instance)
+                        if let (Some(Ty::Struct(es)), Some(ts)) = (expected, ts.iter().copied().collect::<Option<Vec<Ty>>>()) {
+                            let base = self.prog.base_of(sid);
+                            if self.prog.base_of(es) == base && !self.prog.has_param(Ty::Struct(es)) {
+                                let it = Ty::Struct(self.prog.instantiate(base, ts)?);
+                                self.same(SP, it, Ty::Struct(es))?;
+                            }
+                        }
+                        self.adt_targs = Some(ts);
                     }
                     let args: Vec<(usize, &Expr)> = cargs.iter().enumerate().collect();
                     let r = self.adt_value(sid, None, &args, expected, SP);

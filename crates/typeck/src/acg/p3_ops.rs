@@ -247,13 +247,22 @@ impl Cx<'_> {
             }
             // (`&a == &b` with `impl PartialEq for &X`: that impl's eq, `(&a).eq(&&b)`, not X's fields)
             // (only PartialEq's `eq` for `&X` (another trait's `eq` gets the same name), and both sides `&X`)
-            let peq_ref = self.prog.method(*sid, "__ref_eq").is_some_and(|id| {
-                self.prog.sigs[id as usize].impl_trait.as_deref().is_some_and(|t| t == "PartialEq" || t.starts_with("PartialEq<"))
-            });
+            // (among the `__ref_eq` overloads: `impl Other for &X` may come before `impl PartialEq for &X`)
+            let rname = format!("{}::__ref_eq", self.prog.structs[self.prog.base_of(*sid) as usize].name);
+            let peq_ref = self.prog.method(*sid, "__ref_eq").is_some() && self.trait_candidate(&rname, "PartialEq").is_some();
             if matches!(op, "==" | "!=") && !assign && peq_ref && self.peek(right) == self.peek(left) {
                 let call = mcall(paren(left), "eq", vec![Expr::Ref(false, Box::new(paren(right)))]);
                 let ne = if op == "!=" { Expr::Unary("!".into(), Box::new(Expr::Paren(Box::new(call))), Default::default()) } else { call };
                 let ne = self.keep_expr(ne);
+                // (the call is PartialEq's eq, whichever trait's `eq` the type has first)
+                let call_at = match ne {
+                    Expr::Unary(_, i, _) => match &**i {
+                        Expr::Paren(c) => &**c as *const Expr as usize,
+                        c => c as *const Expr as usize,
+                    },
+                    c => c as *const Expr as usize,
+                };
+                self.explicit_traits.insert(call_at, "PartialEq".to_string());
                 return self.expr(ne, expected);
             }
         }

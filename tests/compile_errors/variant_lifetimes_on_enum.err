@@ -1,0 +1,1 @@
+5:13: enum takes 2 lifetime arguments but 1 lifetime argument was supplied (E0107)

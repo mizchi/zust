@@ -250,6 +250,10 @@ pub struct Program {
     /// structs / enums with `#[derive(PartialEq)]` (base ids): a constant of such a type (with fields of such types) is
     /// structural, usable as a pattern
     pub derived_peq: FxSet<u32>,
+    /// the derived impls (base ids and traits): `#[derive(Clone)] struct S<T>` is Clone when each type argument is
+    pub derived: FxMap<u32, Vec<String>>,
+    /// a struct's / enum's const parameters of other types than usize (base ids): (the parameter's place, its type)
+    pub const_param_tys: FxMap<u32, Vec<(usize, String)>>,
     /// the program's source declares modules (`mod m { .. }`), whose scopes are flattened away: a name's item may then
     /// be out of scope where the name is written
     pub has_mods: bool,
@@ -781,6 +785,8 @@ impl Program {
             consts: vec![],
             const_index: FxMap::default(),
             derived_peq: FxSet::default(),
+            derived: FxMap::default(),
+            const_param_tys: FxMap::default(),
             has_mods: false,
             lower_consts: false,
             const_by_last: FxMap::default(),
@@ -986,6 +992,13 @@ impl Program {
                 p.struct_index.insert(name.clone(), sdefs.len() as u32);
                 if let Some(r) = &sm.adt_regions {
                     p.adt_regions.insert(sdefs.len() as u32, std::sync::Arc::new((**r).clone()));
+                }
+                // (the declared types of its const parameters other than usize, by the parameter's place)
+                for (pn, bs) in &sm.adt_bounds {
+                    let decl = bs.iter().find_map(|b| b.strip_prefix(CONST_GENERIC)?.strip_prefix(':'));
+                    if let (Some(d), Some(k)) = (decl, sm.adt_generics.iter().position(|g| g == pn)) {
+                        p.const_param_tys.entry(sdefs.len() as u32).or_default().push((k, d.to_string()));
+                    }
                 }
                 sdefs.push((ii, name.clone(), shape, sm.adt_generics.clone()));
             }
@@ -1548,6 +1561,7 @@ impl Program {
                 if let Some(&sid) = p.struct_index.get(tn) {
                     for d in ds {
                         p.impls.insert((sid, d.clone()));
+                        p.derived.entry(sid).or_default().push(d.clone());
                         if d == "PartialEq" {
                             p.derived_peq.insert(sid);
                         }
@@ -1832,6 +1846,15 @@ impl Program {
             Ty::Struct(sid) => Some(self.structs[self.base_of(sid) as usize].name.as_str()),
             _ => None,
         };
+        // (`u16: From<u8>` / `u8: Into<u32>`: std's lossless conversions between primitives, and `T: From<T>`)
+        if (tr.starts_with("From") || tr.starts_with("Into")) && (t.is_int() || t.is_float() || matches!(t, Ty::Bool | Ty::Char)) {
+            let tr2: String = tr.chars().filter(|c| !c.is_whitespace()).collect();
+            let arg = |p: &str| tr2.strip_prefix(p).and_then(|r| r.strip_prefix('<')).and_then(|r| r.strip_suffix('>')).and_then(Ty::prim);
+            // (only a conversion std has answers here; the rest goes to the impls, a program's own `From` among them)
+            if arg("From").is_some_and(|a| prim_from(a, t)) || arg("Into").is_some_and(|a| prim_from(t, a)) {
+                return Some(true);
+            }
+        }
         match (t, tr) {
             // (`&str: ToString`, `&T: ToString` for T: Display)
             (Ty::Ref(_, i), "ToString") => Some(*i == Ty::Str || self.implements(*i, "Display") || self.implements(*i, "ToString")),
@@ -1995,8 +2018,17 @@ impl Program {
                 return self.implements(*i, tr);
             }
         }
+        // (`#[derive(Clone)] struct S<T>(PhantomData<T>)`: a derived impl of the program's requires the trait of each
+        // type argument, `S<X>: Clone` needs `X: Clone`)
+        if let Ty::Struct(sid) = t {
+            let b = self.base_of(sid);
+            // (`#[derive(Default)]` on an enum takes its `#[default]` unit variant: no bound on the arguments)
+            if b != sid && !(tr == "Default" && self.structs[b as usize].is_enum) && self.derived.get(&b).is_some_and(|ds| ds.iter().any(|d| d == tr)) && self.struct_item.get(b as usize).is_some_and(|&i| i < self.prelude_from) {
+                return self.structs[sid as usize].args.iter().all(|&a| matches!(a, Ty::Array(Ty::Unit, _)) || self.has_param(a) || self.implements(a, tr));
+            }
+        }
         // (const ジェネリクスの引数は長さを持つ配列型)
-        if tr == CONST_GENERIC {
+        if tr == CONST_GENERIC || tr.strip_prefix(CONST_GENERIC).is_some_and(|r| r.starts_with(':')) {
             return matches!(t, Ty::Array(Ty::Unit, _));
         }
         // 組み込みの AsRef<str> / AsRef<[T]> (文字列・Vec・配列・スライスとその参照)
@@ -3820,6 +3852,8 @@ impl Program {
         s.extend(self.struct_index.keys().map(|k| k.as_str()));
         s.extend(self.const_index.keys().map(|k| k.as_str()));
         s.extend(self.const_by_last.keys().map(|k| k.as_str()));
+        // (`A::V` through `type A = E;`: the alias leads to E)
+        s.extend(self.aliases.keys().map(|k| k.as_str()));
         s.insert("for");
         s
     }
@@ -3838,20 +3872,32 @@ impl Program {
             }
             // `for` はイテレータなら名前を書かずに next を呼ぶ
             let s = if s == "for" { "next" } else { s };
+            let mut hit = false;
             if let Some(ids) = self.by_last.get(s) {
                 fns.extend_from_slice(ids);
+                hit = true;
             }
             if let Some(&i) = self.struct_index.get(s) {
                 sts.push(i);
+                hit = true;
             }
             if has_consts {
                 if let Some(&i) = self.const_index.get(s) {
                     cs.push(i);
+                    hit = true;
                 }
                 if has_assoc {
                     if let Some(ids) = self.const_by_last.get(s) {
                         cs.extend_from_slice(ids);
+                        hit = true;
                     }
+                }
+            }
+            // (a name no table has: an alias, whose structs / enums a fn using `A::V` depends on, so a change to `E`
+            // reaches it)
+            if !hit {
+                if let Some((_, syn)) = self.aliases.get(s) {
+                    alias_structs(syn, &self.struct_index, &mut sts);
                 }
             }
         }
@@ -4285,13 +4331,33 @@ impl Program {
             return None;
         }
         let tn = segs[0].name.as_str();
-        let sid = if tn == "Self" { self_sid? } else { *self.struct_index.get(tn)? };
+        // (`E2::A` of `type E2 = E;`; an alias with arguments, `Lt::<'static>::None`, is not looked through yet)
+        let sid = if tn == "Self" { self_sid? } else { self.struct_index.get(tn).copied().or_else(|| self.alias_adt(tn).filter(|_| !segs[0].args))? };
         let sd = &self.structs[sid as usize];
         if !sd.is_enum {
             return None;
         }
         let vn = &segs[1].name;
         sd.variants.iter().position(|v| &v.name == vn).map(|vi| (sid, vi))
+    }
+
+    /// a const parameter's declared type name, through an alias (`type Switch = bool;` with `const B: Switch`: bool)
+    pub fn const_decl<'a>(&self, n: &'a str) -> std::borrow::Cow<'a, str> {
+        match self.aliases.get(n) {
+            Some((_, TySyn::Prim(t))) if Ty::prim(n).is_none() => std::borrow::Cow::Owned(self.tn(*t)),
+            _ => std::borrow::Cow::Borrowed(n),
+        }
+    }
+
+    /// `type E2 = E;` / `type Opt<T> = Option<T>;`: the struct / enum (its base) an alias names directly
+    pub fn alias_adt(&self, name: &str) -> Option<u32> {
+        let (_, syn) = self.aliases.get(name)?;
+        // (`type A = E<u8>;`: its base; a pattern through it is checked against the instance by variant_on)
+        let n = match syn {
+            TySyn::Named(n) | TySyn::App(n, _) => n.as_str(),
+            _ => return None,
+        };
+        self.struct_index.get(n).copied()
     }
 
     pub fn struct_by_p(&self, p: &PPath, self_sid: Option<u32>) -> Option<u32> {
@@ -4504,5 +4570,41 @@ fn subst_consts(e: &crate::parse::Expr, env: &[(String, i128)]) -> crate::parse:
             Expr::Block(l.clone(), *u, b)
         }
         e => e.clone(),
+    }
+}
+
+/// std has `impl From<a> for b` (b losslessly holds every a; `T: From<T>`)
+pub fn prim_from(a: Ty, b: Ty) -> bool {
+    use Ty::*;
+    if a == b {
+        return true;
+    }
+    match a {
+        Bool => b.is_int(),
+        Char => matches!(b, U32 | U64 | U128),
+        U8 => matches!(b, U16 | U32 | U64 | U128 | Usize | I16 | I32 | I64 | I128 | Isize | F32 | F64 | Char),
+        U16 => matches!(b, U32 | U64 | U128 | Usize | I32 | I64 | I128 | F32 | F64),
+        U32 => matches!(b, U64 | U128 | I64 | I128 | F64),
+        U64 => matches!(b, U128 | I128),
+        I8 => matches!(b, I16 | I32 | I64 | I128 | Isize | F32 | F64),
+        I16 => matches!(b, I32 | I64 | I128 | Isize | F32 | F64),
+        I32 => matches!(b, I64 | I128 | F64),
+        I64 => matches!(b, I128),
+        F32 => matches!(b, F64),
+        _ => false,
+    }
+}
+
+/// the structs / enums a type alias's value names (by the program's index)
+fn alias_structs(t: &TySyn, index: &FxMap<String, u32>, out: &mut Vec<u32>) {
+    match t {
+        TySyn::Named(n) => out.extend(index.get(n).copied()),
+        TySyn::App(n, args) => {
+            out.extend(index.get(n).copied());
+            args.iter().for_each(|a| alias_structs(a, index, out));
+        }
+        TySyn::Ref(_, i) | TySyn::Ptr(_, i) | TySyn::Slice(i) | TySyn::Array(i, _) | TySyn::Assoc(i, _) => alias_structs(i, index, out),
+        TySyn::Tuple(ts) | TySyn::FnPtr(ts) => ts.iter().for_each(|a| alias_structs(a, index, out)),
+        _ => {}
     }
 }

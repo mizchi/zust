@@ -1,6 +1,6 @@
 {
   "schema": "jev-lint-documents-1",
-  "snapshotDigest": "48d0c0f2df7212ee0b1a570b7ab8d5a95d2b4c50cb97d63c7386b9f0a2e93728",
+  "snapshotDigest": "85a06bdaa715ad22b375775e7f28280cad55854132c709a241ea8b033171b352",
   "questionDigest": "209d6df378ccb747fcb0e821998fcd6105bc76638a88d22488d3b398d6a21595",
   "model": "jev-1.14.0",
   "snapshotChanged": false,
@@ -100,10 +100,10 @@
       "contextHash": "a068452334ef52150a1932e9d45207a4c156e3a5c60d69e061e986b1aa86d889",
       "judgment": {
         "choice": "supports",
-        "confidence": 0.97,
+        "confidence": 0.99,
         "probabilities": {
-          "supports": 0.98,
-          "contradicts": 0.02,
+          "supports": 0.99,
+          "contradicts": 0.01,
           "unrelated": 0,
           "insufficient_context": 0
         }
@@ -236,10 +236,10 @@
       "contextHash": "68facf70966b576a1dde106a31fd37de8e21bda46e6439878b91e7bce57154b6",
       "judgment": {
         "choice": "supports",
-        "confidence": 0.99,
+        "confidence": 0.97,
         "probabilities": {
-          "supports": 0.99,
-          "contradicts": 0.01,
+          "supports": 0.98,
+          "contradicts": 0.02,
           "unrelated": 0,
           "insufficient_context": 0
         }
@@ -372,12 +372,12 @@
       "contextHash": "65d03eec8a642fb4c59c7bacc74397f936864091105bba631e8977b9ca9c1612",
       "judgment": {
         "choice": "supports",
-        "confidence": 0.97,
+        "confidence": 0.95,
         "probabilities": {
-          "supports": 0.98,
-          "contradicts": 0.02,
+          "supports": 0.96,
+          "contradicts": 0.03,
           "unrelated": 0,
-          "insufficient_context": 0
+          "insufficient_context": 0.01
         }
       }
     },
@@ -440,10 +440,10 @@
       "contextHash": "d77f2024ffc7a01c94e005a23cd8538534ebb4abb40df15020d2f6eb96f550b6",
       "judgment": {
         "choice": "supports",
-        "confidence": 0.99,
+        "confidence": 1,
         "probabilities": {
-          "supports": 0.99,
-          "contradicts": 0.01,
+          "supports": 1,
+          "contradicts": 0,
           "unrelated": 0,
           "insufficient_context": 0
         }
@@ -644,10 +644,10 @@
       "contextHash": "1275e8de4d291bc21dd7f5b87a5196cba9cca33005a1ac6eca77fa3d0892971e",
       "judgment": {
         "choice": "supports",
-        "confidence": 0.96,
+        "confidence": 0.95,
         "probabilities": {
-          "supports": 0.97,
-          "contradicts": 0.03,
+          "supports": 0.96,
+          "contradicts": 0.04,
           "unrelated": 0,
           "insufficient_context": 0
         }
@@ -783,9 +783,9 @@
         "confidence": 0.93,
         "probabilities": {
           "supports": 0.95,
-          "contradicts": 0.04,
+          "contradicts": 0.03,
           "unrelated": 0,
-          "insufficient_context": 0.01
+          "insufficient_context": 0.02
         }
       }
     },
@@ -814,10 +814,10 @@
       "contextHash": "7438e0bb6ac3c01bf6beaa56051a35abf5a2f30ee56334c8cd754b996d6bd4e6",
       "judgment": {
         "choice": "supports",
-        "confidence": 0.84,
+        "confidence": 0.89,
         "probabilities": {
-          "supports": 0.88,
-          "contradicts": 0.11,
+          "supports": 0.92,
+          "contradicts": 0.07,
           "unrelated": 0,
           "insufficient_context": 0.01
         }
@@ -848,10 +848,10 @@
       "contextHash": "7982c179582830150e0121639bf13f758b8cd2967a8c41c2205db632219eb8e5",
       "judgment": {
         "choice": "supports",
-        "confidence": 0.97,
+        "confidence": 0.95,
         "probabilities": {
-          "supports": 0.98,
-          "contradicts": 0.02,
+          "supports": 0.96,
+          "contradicts": 0.04,
           "unrelated": 0,
           "insufficient_context": 0
         }
@@ -916,12 +916,12 @@
       "contextHash": "6ef3c783f7f2ee4aa85d450d7fc65f20f61a1aa01a222d8aeb9ddeda31a027f9",
       "judgment": {
         "choice": "supports",
-        "confidence": 0.71,
+        "confidence": 0.83,
         "probabilities": {
-          "supports": 0.78,
-          "contradicts": 0.05,
+          "supports": 0.87,
+          "contradicts": 0.06,
           "unrelated": 0,
-          "insufficient_context": 0.17
+          "insufficient_context": 0.07
         }
       }
     },
@@ -984,10 +984,10 @@
       "contextHash": "262bb5dcd097b8cb7be1fb2545acff1e36bb67eb6c6b7603871f70e0250fd627",
       "judgment": {
         "choice": "supports",
-        "confidence": 0.59,
+        "confidence": 0.67,
         "probabilities": {
-          "supports": 0.69,
-          "contradicts": 0.29,
+          "supports": 0.75,
+          "contradicts": 0.23,
           "unrelated": 0,
           "insufficient_context": 0.02
         }
@@ -1018,10 +1018,10 @@
       "contextHash": "0b80accfa94c5b38ba9a5a907f337dfaa274c72bc632be2ff55655cef05112aa",
       "judgment": {
         "choice": "supports",
-        "confidence": 0.64,
+        "confidence": 0.71,
         "probabilities": {
-          "supports": 0.73,
-          "contradicts": 0.26,
+          "supports": 0.78,
+          "contradicts": 0.21,
           "unrelated": 0,
           "insufficient_context": 0.01
         }
@@ -1052,12 +1052,12 @@
       "contextHash": "bfaf4d56cd89f0d502d67729104d49b1f7a5d01e4a0434db45cecfa6c5d2c14a",
       "judgment": {
         "choice": "supports",
-        "confidence": 0.96,
+        "confidence": 0.93,
         "probabilities": {
-          "supports": 0.97,
-          "contradicts": 0.03,
+          "supports": 0.95,
+          "contradicts": 0.04,
           "unrelated": 0,
-          "insufficient_context": 0
+          "insufficient_context": 0.01
         }
       }
     },
@@ -1120,10 +1120,10 @@
       "contextHash": "bdae948e735bbc239b594e195dd432f3efabbcd09895e48688e599b130a79530",
       "judgment": {
         "choice": "supports",
-        "confidence": 0.75,
+        "confidence": 0.79,
         "probabilities": {
-          "supports": 0.81,
-          "contradicts": 0.17,
+          "supports": 0.84,
+          "contradicts": 0.14,
           "unrelated": 0,
           "insufficient_context": 0.02
         }
@@ -1154,10 +1154,10 @@
       "contextHash": "56aef8202ec18e7d916f99df3c3f62b2bb9580fd1fbf151d494787ff37e24afd",
       "judgment": {
         "choice": "supports",
-        "confidence": 0.84,
+        "confidence": 0.88,
         "probabilities": {
-          "supports": 0.88,
-          "contradicts": 0.11,
+          "supports": 0.91,
+          "contradicts": 0.08,
           "unrelated": 0,
           "insufficient_context": 0.01
         }
@@ -1222,10 +1222,10 @@
       "contextHash": "f0d2be59aa7f66b5393e14f52bebb261bbc73ff0e17d8864466d2fbbacc92e53",
       "judgment": {
         "choice": "supports",
-        "confidence": 0.95,
+        "confidence": 0.92,
         "probabilities": {
-          "supports": 0.96,
-          "contradicts": 0.03,
+          "supports": 0.94,
+          "contradicts": 0.05,
           "unrelated": 0,
           "insufficient_context": 0.01
         }
@@ -1256,10 +1256,10 @@
       "contextHash": "e6ee8a7c0ecfcc1d24cf3e3a49387253a59f79cbb14f5dfe17684e41f47ac559",
       "judgment": {
         "choice": "supports",
-        "confidence": 0.92,
+        "confidence": 0.91,
         "probabilities": {
-          "supports": 0.94,
-          "contradicts": 0.05,
+          "supports": 0.93,
+          "contradicts": 0.06,
           "unrelated": 0,
           "insufficient_context": 0.01
         }
@@ -1274,26 +1274,26 @@
         "path": "docs/reports/2026-11-22-03-region-check-7.md",
         "startLine": 1,
         "endLine": 108,
-        "quote": "# Region (lifetime) checking, part 7: control flow, temporaries and what prelude methods return (issue #1)\n\nDate: 2026-11-22\n\nPart 6 ([2026-11-22-02](2026-11-22-02-region-check-6.md)) was merged with #43. This step takes the cases its report\nleft out where the borrow check's graph, temporaries and the prelude's results were not followed.\n\n## 1. What was added\n\n### Borrow check\n\n- **Constant conditions:** the borrow check's graph takes both edges of a constant condition, as rustc's does:\n  `false || { i = 5; true }` may leave i uninitialized (E0381). Before, a constant condition took one edge.\n- **Chains of `&&` / `||`:** `a && b && c` (one operator) is lowered as one chain, each operand's short-circuit to the\n  end, so c runs only after b did: `true && { z = 3; true } && z == 3` reads z after it is set, as rustc's control flow\n  says.\n- **`&*Box::new(1)`:** a borrow of the deref of a temporary a call makes is a loan of that temporary, as `&f()` is:\n  stored where it outlives the statement (`m.insert(42, &*Box::new(1))`) it is E0716. A `let` extends it.\n- **Receiver temporaries:** in `let x = mk().get();` with `fn get(&self) -> &A`, the receiver is a temporary freed at\n  the end of the statement: a use of x after it is E0716. Not when the method's result does not borrow self\n  (`mk().len()`, a result `&'static str`).\n- **What a prelude method returns:** a method of the prelude's types whose result holds references holds what its\n  receiver holds (the prelude writes no lifetimes). Returning `it.next()` of a local's iterator, or\n  `raw.iter().map(..).collect()`, is E0515. `copied` / `cloned` take a reference off: the result holds what is under it,\n  not the borrow (`parts.first().copied()` holds what parts holds).\n  - A returned chain of method calls is reported where it starts, as rustc's span of the returned value is.\n- **Move closures and captures not `mut`:** a capture held by value of a local not declared `mut`, which the body\n  assigns (or borrows mutably, or calls a `&mut self` method of), is E0594 / E0596 at the mutation. Not a mutation\n  through a reference the capture holds (`t.0.0 = x` with `t.0: &mut S`).\n\n- **Calls of a type parameter's closure:** a placeholder bounded by `Fn(..)` / `FnMut(..)` / `FnOnce(..)` is callable\n  in its instance, against the bound: its arguments checked against the bound's parameters, its result a value of the\n  bound's result type. `FnMut` borrows the callee mutably (E0596 when it is not `mut`), `FnOnce` takes it (E0382 when it\n  is called twice), `Fn` reads it. Such bounds no longer keep a fn from its placeholder instance.\n\n### Region check and signatures\n\n- **Type aliases written without their lifetimes:** `b: A` with `type A<'a> = &'a isize` is one marker for what the\n  alias stands for; its regions are elided (fresh ones in a parameter), as `&isize`'s. Before, such a parameter had no\n  tree and was not followed.\n- **E0195 for impls of types that are not structs:** the methods of `impl<'a> Foo<'a> for &'a isize` are checked\n  against the trait's declarations as a struct's are: the method's own early-bound lifetimes and their bounds.\n\n### After the review\n\n- **E0195 and E0276 as rustc tells them apart:** E0195 when the method has a different number of early-bound\n  lifetimes than the trait's declaration, or one that is early-bound where the declaration's is late-bound\n  (`fn f<'a, 'b: 'static>` against `fn f<'a: 'static, 'b>`). With the same ones, E0276 when a bound of the impl's\n  among them is not implied by the declaration's (`fn f<'a, 'b: 'a>` against `fn f<'a: 'b, 'b>`). An impl that\n  bounds less is accepted. Before, the number of bounds of each was compared, which rejected an impl that bounds less.\n  The impl's and the trait's own lifetimes are matched by name (the header's trait arguments are not kept).\n- **A method named `__ref_m` itself** is compared with the declaration of that name first.\n- **An alias that fixes a lifetime** (`type S = &'static u8;`): which alias a use written without lifetimes is cannot\n  be told, so in a program with such an alias it is not followed, as before.\n- **`map` with a closure that does not use its item** (`raw.iter().map(|_| \"ok\").collect()`) does not hold what the\n  receiver holds.\n- **A binding of the same name in a `move` closure** (`let mut x = x;`) shadows the capture: assigning it is not E0594.\n- **A receiver a call returns as a reference** (`id(&a).get()`) is not a temporary that frees what it points to.\n- **`FnMut` through a reference** (`f: &F`): a `&mut` of `*f` (E0596). The bound's arity and the primitive types of\n  its arguments are checked; in a placeholder's instance such a type error only stops its check, as the others do.\n- **A diverging operand in the middle of a `&&` / `||` chain** (`a && { return true; } && false`) ends at the chain's\n  end with the earlier operands' value. Before, the lowering left that end unfinished, and Cranelift panicked.\n\n## 2. Coverage\n\n(tests/ui compile-fail, rust-lang/rust 1.100.0)\n\n| | main (ba26be2) | this work |\n|---|---:|---:|\n| compile-fail passing (accidental ones not counted) | 4097 | 4113 (+16) |\n\n- No test that passed before fails now; run-pass and check-pass do not change.\n- The new ones: `borrowck/borrowck-or-init.rs`, `borrowck/issue-83760.rs`, `liveness/liveness-move-in-while.rs`,\n  `borrowck/regions-bound-missing-bound-in-impl.rs`, `compare-method/region-extra-2.rs`,\n  `generics/generic-lifetime-trait-impl.rs`, `dropck/drop-with-active-borrows-2.rs`,\n  `iterators/iterator-scope-collect-suggestion-81584.rs`, `lifetimes/return-reference-local-variable-13497.rs`,\n  `nll/issue-46023.rs`, `borrowck/borrowck-unboxed-closures.rs`, `borrowck/unconstrained-closure-lifetime-generic.rs`,\n  `closures/closure-bounds-subtype.rs`, `associated-types/associated-types-outlives.rs`,\n  `regions/regions-creating-enums.rs`, `borrowck/borrowck-borrowed-uniq-rvalue.rs`.\n- `zustc check` of the 1802 run-pass tests that pass (built, not checked, by tests/ui): none is rejected that main\n  accepts.\n\n## 3. KPIs\n\n`bench/kpi_track.py --dry-run --lsp`, main (ba26be2) and this work, both measured here, one after the other:\n\n| KPI | main (ba26be2) | this work (db7d16a) | change |\n|---|---:|---:|---:|\n| no-op build (M) | 0.706 | 0.706 | ±0 |\n| edit one fn (M) | 545.736 | 545.739 | ±0 |\n| check (M) | 3847.98 | 3847.61 | -0.01% |\n| cache (KiB) | 1902.8 | 1902.8 | ±0 |\n| LSP session (G) | 10.9072 | 10.9043 | -0.03% |\n| traits check (M) | 1189.52 | 1190.31 | +0.07% |\n| traits edit (M) | 61.515 | 61.495 | -0.03% |\n| crates no-op (M) | 9.94 | 9.94 | ±0 |\n| crates edit (M) | 315.914 | 316.278 | +0.12% |\n| patterns check (M) | 716.49 | 716.63 | +0.02% |\n| patterns edit (M) | 260.697 | 260.544 | -0.06% |\n\nNo KPI moves past run-to-run noise. The new work is the borrow check's: the chains of `&&` / `||`, the receiver\ntemporaries and the results of prelude methods, which follow what the check already holds.\n\n## 4. Not covered yet\n\n- **Tail expressions' temporaries:** a temporary of a block's tail expression lives to the end of the enclosing\n  statement, after the block's locals (before edition 2024). zustc has no notion of the edition yet.\n- **Projections of placeholders and `impl Trait` captures:** as in part 5.",
-        "contentHash": "7b7e50aee247c1dd11767c2116d9ee1a66f2d7d6af5e58cf519b912c16fe61b4"
+        "quote": "# Region (lifetime) checking, part 7: control flow, temporaries and what prelude methods return (issue #1)\n\nDate: 2026-11-22\n\nPart 6 ([2026-11-22-02](2026-11-22-02-region-check-6.md)) was merged with #43. This step takes the cases its report\nleft out where the borrow check's graph, temporaries and the prelude's results were not followed.\n\n## 1. What was added\n\n### Borrow check\n\n- **Constant conditions:** the borrow check's graph takes both edges of a constant condition, as rustc's does:\n  `false || { i = 5; true }` may leave i uninitialized (E0381). Before, a constant condition took one edge.\n- **Chains of `&&` / `||`:** `a && b && c` (one operator) is lowered as one chain, each operand's short-circuit to the\n  end, so c runs only after b did: `true && { z = 3; true } && z == 3` reads z after it is set, as rustc's control flow\n  says.\n- **`&*Box::new(1)`:** a borrow of the deref of a temporary a call makes is a loan of that temporary, as `&f()` is:\n  stored where it outlives the statement (`m.insert(42, &*Box::new(1))`) it is E0716. A `let` extends it.\n- **Receiver temporaries:** in `let x = mk().get();` with `fn get(&self) -> &A`, the receiver is a temporary freed at\n  the end of the statement: a use of x after it is E0716. Not when the method's result does not borrow self\n  (`mk().len()`, a result `&'static str`).\n- **What a prelude method returns:** a method of the prelude's types whose result holds references holds what its\n  receiver holds (the prelude writes no lifetimes). Returning `it.next()` of a local's iterator, or\n  `raw.iter().map(..).collect()`, is E0515. `copied` / `cloned` take a reference off: the result holds what is under it,\n  not the borrow (`parts.first().copied()` holds what parts holds).\n  - A returned chain of method calls is reported where it starts, as rustc's span of the returned value is.\n- **Move closures and captures not `mut`:** a capture held by value of a local not declared `mut`, which the body\n  assigns (or borrows mutably, or calls a `&mut self` method of), is E0594 / E0596 at the mutation. Not a mutation\n  through a reference the capture holds (`t.0.0 = x` with `t.0: &mut S`).\n\n- **Calls of a type parameter's closure:** a placeholder bounded by `Fn(..)` / `FnMut(..)` / `FnOnce(..)` is callable\n  in its instance, against the bound: its arguments checked against the bound's parameters, its result a value of the\n  bound's result type. `FnMut` borrows the callee mutably (E0596 when it is not `mut`), `FnOnce` takes it (E0382 when it\n  is called twice), `Fn` reads it. Such bounds no longer keep a fn from its placeholder instance.\n\n### Region check and signatures\n\n- **Type aliases written without their lifetimes:** `b: A` with `type A<'a> = &'a isize` is one marker for what the\n  alias stands for; its regions are elided (fresh ones in a parameter), as `&isize`'s. Before, such a parameter had no\n  tree and was not followed.\n- **E0195 for impls of types that are not structs:** the methods of `impl<'a> Foo<'a> for &'a isize` are checked\n  against the trait's declarations as a struct's are: the method's own early-bound lifetimes and their bounds.\n\n### After the review\n\n- **E0195 and E0276 as rustc tells them apart:** E0195 when the method has a different number of early-bound\n  lifetimes than the trait's declaration, or one that is early-bound where the declaration's is late-bound\n  (`fn f<'a, 'b: 'static>` against `fn f<'a: 'static, 'b>`). With the same ones, E0276 when a bound of the impl's\n  among them is not implied by the declaration's (`fn f<'a, 'b: 'a>` against `fn f<'a: 'b, 'b>`). An impl that\n  bounds less is accepted. Before, the number of bounds of each was compared, which rejected an impl that bounds less.\n  The impl's and the trait's own lifetimes are matched by name (the header's trait arguments are not kept).\n- **A method named `__ref_m` itself** is compared with the declaration of that name first.\n- **An alias that fixes a lifetime** (`type S = &'static u8;`): which alias a use written without lifetimes is cannot\n  be told, so in a program with such an alias it is not followed, as before.\n- **`map` with a closure that does not use its item** (`raw.iter().map(|_| \"ok\").collect()`) does not hold what the\n  receiver holds.\n- **A binding of the same name in a `move` closure** (`let mut x = x;`) shadows the capture: assigning it is not E0594.\n- **A receiver a call returns as a reference** (`id(&a).get()`) is not a temporary that frees what it points to.\n- **`FnMut` through a reference** (`f: &F`): a `&mut` of `*f` (E0596). The bound's arity and the primitive types of\n  its arguments are checked; in a placeholder's instance such a type error only stops its check, as the others do.\n- **A diverging operand in the middle of a `&&` / `||` chain** (`a && { return true; } && false`) ends at the chain's\n  end with the earlier operands' value. Before, the lowering left that end unfinished, and Cranelift panicked.\n\n## 2. Coverage\n\n(tests/ui compile-fail, rust-lang/rust 1.100.0)\n\n| | main (ba26be2) | this work | main (5977b27), merged in | this work on it |\n|---|---:|---:|---:|---:|\n| compile-fail passing (accidental ones not counted) | 4097 | 4113 (+16) | 4125 | 4141 (+16) |\n\n- No test that passed before fails now; run-pass and check-pass do not change.\n- The new ones: `borrowck/borrowck-or-init.rs`, `borrowck/issue-83760.rs`, `liveness/liveness-move-in-while.rs`,\n  `borrowck/regions-bound-missing-bound-in-impl.rs`, `compare-method/region-extra-2.rs`,\n  `generics/generic-lifetime-trait-impl.rs`, `dropck/drop-with-active-borrows-2.rs`,\n  `iterators/iterator-scope-collect-suggestion-81584.rs`, `lifetimes/return-reference-local-variable-13497.rs`,\n  `nll/issue-46023.rs`, `borrowck/borrowck-unboxed-closures.rs`, `borrowck/unconstrained-closure-lifetime-generic.rs`,\n  `closures/closure-bounds-subtype.rs`, `associated-types/associated-types-outlives.rs`,\n  `regions/regions-creating-enums.rs`, `borrowck/borrowck-borrowed-uniq-rvalue.rs`.\n- `zustc check` of the 1802 run-pass tests that pass (built, not checked, by tests/ui): none is rejected that main\n  accepts.\n\n## 3. KPIs\n\n`bench/kpi_track.py --dry-run --lsp`, main (ba26be2) and this work, both measured here, one after the other:\n\n| KPI | main (ba26be2) | this work (db7d16a) | change |\n|---|---:|---:|---:|\n| no-op build (M) | 0.706 | 0.706 | ±0 |\n| edit one fn (M) | 545.736 | 545.739 | ±0 |\n| check (M) | 3847.98 | 3847.61 | -0.01% |\n| cache (KiB) | 1902.8 | 1902.8 | ±0 |\n| LSP session (G) | 10.9072 | 10.9043 | -0.03% |\n| traits check (M) | 1189.52 | 1190.31 | +0.07% |\n| traits edit (M) | 61.515 | 61.495 | -0.03% |\n| crates no-op (M) | 9.94 | 9.94 | ±0 |\n| crates edit (M) | 315.914 | 316.278 | +0.12% |\n| patterns check (M) | 716.49 | 716.63 | +0.02% |\n| patterns edit (M) | 260.697 | 260.544 | -0.06% |\n\nNo KPI moves past run-to-run noise. The new work is the borrow check's: the chains of `&&` / `||`, the receiver\ntemporaries and the results of prelude methods, which follow what the check already holds.\n\n## 4. Not covered yet\n\n- **Tail expressions' temporaries:** a temporary of a block's tail expression lives to the end of the enclosing\n  statement, after the block's locals (before edition 2024). zustc has no notion of the edition yet.\n- **Projections of placeholders and `impl Trait` captures:** as in part 5.",
+        "contentHash": "f6d986daaab9b6e99cead4792393f7a5c1f909469a65583ed8c13778e0d86afc"
       },
       "target": {
         "source": "docs_reports_2026-11-22-03-region-check-7.ja",
         "path": "docs/ja/reports/2026-11-22-03-region-check-7.md",
         "startLine": 1,
         "endLine": 103,
-        "quote": "# リージョン (ライフタイム) 検査、その 7: 制御フロー、一時値、prelude のメソッドが返すもの (issue #1)\n\n日付: 2026-11-22\n\nその 6 ([2026-11-22-02](2026-11-22-02-region-check-6.md)) は #43 でマージした。この段は、借用検査のグラフ、一時値、prelude の\n結果を辿っていなかった場合を扱う。\n\n## 1. 加えたもの\n\n### 借用検査\n\n- **定数の条件:** 借用検査のグラフは、rustc と同じく、定数の条件でも両方の辺を取る。`false || { i = 5; true }` は i を\n  初期化しないことがある (E0381)。以前は、定数の条件では片方の辺だけを取っていた。\n- **`&&` / `||` の連鎖:** `a && b && c` (演算子が 1 つ) は 1 つの連鎖として下ろす。各項の短絡は終わりへ飛ぶので、c は b の\n  後でだけ走る。rustc の制御フローのとおり、`true && { z = 3; true } && z == 3` は z を入れた後で読む。\n- **`&*Box::new(1)`:** 呼び出しが作る一時値の deref の借用は、`&f()` と同じく、その一時値の貸し出し。文より長く残る\n  ところにしまえば (`m.insert(42, &*Box::new(1))`) E0716。`let` はそれを延ばす。\n- **受け手の一時値:** `fn get(&self) -> &A` に対する `let x = mk().get();` では、受け手は文の終わりで解放される一時値。\n  その後で x を使えば E0716。メソッドの結果が self を借りないなら (`mk().len()`、結果が `&'static str`) そうしない。\n- **prelude のメソッドが返すもの:** prelude の型のメソッドで、結果が参照を持つものは、受け手が持つものを持つ (prelude は\n  ライフタイムを書かない)。ローカルのイテレータの `it.next()` や、`raw.iter().map(..).collect()` を返せば E0515。\n  `copied` / `cloned` は参照を 1 つ外す。結果が持つのは、その下にあるもので、借用そのものではない\n  (`parts.first().copied()` は parts が持つものを持つ)。\n  - メソッド呼び出しの連鎖を返すときは、rustc の返す値の範囲のとおり、連鎖の始まりで報告する。\n- **move クロージャと `mut` でない捕捉:** `mut` と宣言していないローカルを値で持つ捕捉に、本体が代入する (可変で借りる、\n  `&mut self` のメソッドを呼ぶ) なら、変更の位置で E0594 / E0596。捕捉が持つ参照を通した変更 (`t.0: &mut S` に対する\n  `t.0.0 = x`) はそうしない。\n\n- **型パラメータのクロージャの呼び出し:** `Fn(..)` / `FnMut(..)` / `FnOnce(..)` で縛った代わりの型は、そのインスタンスの中で、\n  境界に照らして呼べる。引数は境界の引数の型で検査し、結果は境界の結果の型の値。`FnMut` は呼ぶ先を可変で借り (`mut` で\n  なければ E0596)、`FnOnce` は取り (2 回呼べば E0382)、`Fn` は読む。そうした境界は、もう関数の代わりの型のインスタンスを\n  止めない。\n\n### リージョン検査とシグネチャ\n\n- **ライフタイムを書かない型エイリアス:** `type A<'a> = &'a isize` に対する `b: A` は、エイリアスが表すものの 1 つの印。\n  そのリージョンは、`&isize` と同じく省略したもの (引数なら新しいもの)。以前は、そうした引数は木を持たず、辿らなかった。\n- **struct でない型の impl の E0195:** `impl<'a> Foo<'a> for &'a isize` のメソッドも、struct のものと同じく、トレイトの\n  宣言と照らす。メソッド自身の early-bound なライフタイムと、その境界を見る。\n\n### レビューの後\n\n- **rustc と同じ E0195 と E0276 の分け方:** メソッドの early-bound なライフタイムが、トレイトの宣言と数が違うか、宣言で\n  late-bound のところで early-bound なら E0195 (`fn f<'a, 'b: 'static>` に対する `fn f<'a: 'static, 'b>`)。同じものなら、\n  impl のそれらの間の境界で、宣言の境界から導けないものがあれば E0276 (`fn f<'a: 'b, 'b>` に対する `fn f<'a, 'b: 'a>`)。\n  境界が少ない impl は受け入れる。以前は、それぞれの境界の数を比べていて、境界が少ない impl を拒否していた。impl と\n  トレイト自身のライフタイムは名前で対応させる (ヘッダのトレイトの引数は持っていない)。\n- **`__ref_m` という名前のメソッド**は、まず同じ名前の宣言と照らす。\n- **ライフタイムを固定するエイリアス** (`type S = &'static u8;`): ライフタイムを書かない使い方がどのエイリアスかは分から\n  ないので、そうしたエイリアスがあるプログラムでは、以前と同じく辿らない。\n- **要素を使わないクロージャの `map`** (`raw.iter().map(|_| \"ok\").collect()`) は、受け手が持つものを持たない。\n- **`move` クロージャの中の同じ名前の束縛** (`let mut x = x;`) は捕捉を隠す。それへの代入は E0594 でない。\n- **呼び出しが参照で返した受け手** (`id(&a).get()`) は、指す先を解放する一時値でない。\n- **参照を通した `FnMut`** (`f: &F`): `*f` の `&mut` (E0596)。境界の引数の数と、引数のプリミティブ型も照らす。代わりの\n  型のインスタンスでは、ほかの型エラーと同じく、そうしたエラーはその検査を止めるだけ。\n- **`&&` / `||` の連鎖の途中で発散する項** (`a && { return true; } && false`): 前の項の値で連鎖の終わりに着く。以前は\n  その終わりを閉じないまま下ろしていて、Cranelift が panic した。\n\n## 2. カバー率\n\n(tests/ui の compile-fail、rust-lang/rust 1.100.0)\n\n| | main (ba26be2) | この作業 |\n|---|---:|---:|\n| 通る compile-fail (偶然の通過は数えない) | 4097 | 4113 (+16) |\n\n- 前に通っていたテストで、いま通らないものはない。run-pass と check-pass は変わらない。\n- 通るようになったもの: `borrowck/borrowck-or-init.rs`、`borrowck/issue-83760.rs`、`liveness/liveness-move-in-while.rs`、\n  `borrowck/regions-bound-missing-bound-in-impl.rs`、`compare-method/region-extra-2.rs`、\n  `generics/generic-lifetime-trait-impl.rs`、`dropck/drop-with-active-borrows-2.rs`、\n  `iterators/iterator-scope-collect-suggestion-81584.rs`、`lifetimes/return-reference-local-variable-13497.rs`、\n  `nll/issue-46023.rs`、`borrowck/borrowck-unboxed-closures.rs`、`borrowck/unconstrained-closure-lifetime-generic.rs`、\n  `closures/closure-bounds-subtype.rs`、`associated-types/associated-types-outlives.rs`、\n  `regions/regions-creating-enums.rs`、`borrowck/borrowck-borrowed-uniq-rvalue.rs`。\n- 通る run-pass のテスト 1802 本の `zustc check` (tests/ui はビルドで試し、検査では試さない): main が受け入れるもので、\n  拒否するものはない。\n\n## 3. KPI\n\n`bench/kpi_track.py --dry-run --lsp` で、main (ba26be2) とこの作業を、ここで続けて測った:\n\n| KPI | main (ba26be2) | この作業 (db7d16a) | 変化 |\n|---|---:|---:|---:|\n| no-op build (M) | 0.706 | 0.706 | ±0 |\n| edit one fn (M) | 545.736 | 545.739 | ±0 |\n| check (M) | 3847.98 | 3847.61 | -0.01% |\n| cache (KiB) | 1902.8 | 1902.8 | ±0 |\n| LSP session (G) | 10.9072 | 10.9043 | -0.03% |\n| traits check (M) | 1189.52 | 1190.31 | +0.07% |\n| traits edit (M) | 61.515 | 61.495 | -0.03% |\n| crates no-op (M) | 9.94 | 9.94 | ±0 |\n| crates edit (M) | 315.914 | 316.278 | +0.12% |\n| patterns check (M) | 716.49 | 716.63 | +0.02% |\n| patterns edit (M) | 260.697 | 260.544 | -0.06% |\n\nどの KPI も、実行ごとのぶれを越えて動かない。新しい仕事は借用検査のもの (`&&` / `||` の連鎖、受け手の一時値、\nprelude のメソッドの結果) で、検査がすでに持つものを辿る。\n\n## 4. まだ扱わないもの\n\n- **末尾の式の一時値:** ブロックの末尾の式の一時値は、ブロックのローカルより後、囲む文の終わりまで生きる (edition 2024\n  より前)。zustc はまだ edition を持たない。\n- **代わりの型の射影型と `impl Trait` の捕捉:** その 5 と同じ。",
-        "contentHash": "5c4daafa182dd187897f5359eddc31d4c7493ed9fcbc3fd90b458b4c3f2f75ad"
+        "quote": "# リージョン (ライフタイム) 検査、その 7: 制御フロー、一時値、prelude のメソッドが返すもの (issue #1)\n\n日付: 2026-11-22\n\nその 6 ([2026-11-22-02](2026-11-22-02-region-check-6.md)) は #43 でマージした。この段は、借用検査のグラフ、一時値、prelude の\n結果を辿っていなかった場合を扱う。\n\n## 1. 加えたもの\n\n### 借用検査\n\n- **定数の条件:** 借用検査のグラフは、rustc と同じく、定数の条件でも両方の辺を取る。`false || { i = 5; true }` は i を\n  初期化しないことがある (E0381)。以前は、定数の条件では片方の辺だけを取っていた。\n- **`&&` / `||` の連鎖:** `a && b && c` (演算子が 1 つ) は 1 つの連鎖として下ろす。各項の短絡は終わりへ飛ぶので、c は b の\n  後でだけ走る。rustc の制御フローのとおり、`true && { z = 3; true } && z == 3` は z を入れた後で読む。\n- **`&*Box::new(1)`:** 呼び出しが作る一時値の deref の借用は、`&f()` と同じく、その一時値の貸し出し。文より長く残る\n  ところにしまえば (`m.insert(42, &*Box::new(1))`) E0716。`let` はそれを延ばす。\n- **受け手の一時値:** `fn get(&self) -> &A` に対する `let x = mk().get();` では、受け手は文の終わりで解放される一時値。\n  その後で x を使えば E0716。メソッドの結果が self を借りないなら (`mk().len()`、結果が `&'static str`) そうしない。\n- **prelude のメソッドが返すもの:** prelude の型のメソッドで、結果が参照を持つものは、受け手が持つものを持つ (prelude は\n  ライフタイムを書かない)。ローカルのイテレータの `it.next()` や、`raw.iter().map(..).collect()` を返せば E0515。\n  `copied` / `cloned` は参照を 1 つ外す。結果が持つのは、その下にあるもので、借用そのものではない\n  (`parts.first().copied()` は parts が持つものを持つ)。\n  - メソッド呼び出しの連鎖を返すときは、rustc の返す値の範囲のとおり、連鎖の始まりで報告する。\n- **move クロージャと `mut` でない捕捉:** `mut` と宣言していないローカルを値で持つ捕捉に、本体が代入する (可変で借りる、\n  `&mut self` のメソッドを呼ぶ) なら、変更の位置で E0594 / E0596。捕捉が持つ参照を通した変更 (`t.0: &mut S` に対する\n  `t.0.0 = x`) はそうしない。\n\n- **型パラメータのクロージャの呼び出し:** `Fn(..)` / `FnMut(..)` / `FnOnce(..)` で縛った代わりの型は、そのインスタンスの中で、\n  境界に照らして呼べる。引数は境界の引数の型で検査し、結果は境界の結果の型の値。`FnMut` は呼ぶ先を可変で借り (`mut` で\n  なければ E0596)、`FnOnce` は取り (2 回呼べば E0382)、`Fn` は読む。そうした境界は、もう関数の代わりの型のインスタンスを\n  止めない。\n\n### リージョン検査とシグネチャ\n\n- **ライフタイムを書かない型エイリアス:** `type A<'a> = &'a isize` に対する `b: A` は、エイリアスが表すものの 1 つの印。\n  そのリージョンは、`&isize` と同じく省略したもの (引数なら新しいもの)。以前は、そうした引数は木を持たず、辿らなかった。\n- **struct でない型の impl の E0195:** `impl<'a> Foo<'a> for &'a isize` のメソッドも、struct のものと同じく、トレイトの\n  宣言と照らす。メソッド自身の early-bound なライフタイムと、その境界を見る。\n\n### レビューの後\n\n- **rustc と同じ E0195 と E0276 の分け方:** メソッドの early-bound なライフタイムが、トレイトの宣言と数が違うか、宣言で\n  late-bound のところで early-bound なら E0195 (`fn f<'a, 'b: 'static>` に対する `fn f<'a: 'static, 'b>`)。同じものなら、\n  impl のそれらの間の境界で、宣言の境界から導けないものがあれば E0276 (`fn f<'a: 'b, 'b>` に対する `fn f<'a, 'b: 'a>`)。\n  境界が少ない impl は受け入れる。以前は、それぞれの境界の数を比べていて、境界が少ない impl を拒否していた。impl と\n  トレイト自身のライフタイムは名前で対応させる (ヘッダのトレイトの引数は持っていない)。\n- **`__ref_m` という名前のメソッド**は、まず同じ名前の宣言と照らす。\n- **ライフタイムを固定するエイリアス** (`type S = &'static u8;`): ライフタイムを書かない使い方がどのエイリアスかは分から\n  ないので、そうしたエイリアスがあるプログラムでは、以前と同じく辿らない。\n- **要素を使わないクロージャの `map`** (`raw.iter().map(|_| \"ok\").collect()`) は、受け手が持つものを持たない。\n- **`move` クロージャの中の同じ名前の束縛** (`let mut x = x;`) は捕捉を隠す。それへの代入は E0594 でない。\n- **呼び出しが参照で返した受け手** (`id(&a).get()`) は、指す先を解放する一時値でない。\n- **参照を通した `FnMut`** (`f: &F`): `*f` の `&mut` (E0596)。境界の引数の数と、引数のプリミティブ型も照らす。代わりの\n  型のインスタンスでは、ほかの型エラーと同じく、そうしたエラーはその検査を止めるだけ。\n- **`&&` / `||` の連鎖の途中で発散する項** (`a && { return true; } && false`): 前の項の値で連鎖の終わりに着く。以前は\n  その終わりを閉じないまま下ろしていて、Cranelift が panic した。\n\n## 2. カバー率\n\n(tests/ui の compile-fail、rust-lang/rust 1.100.0)\n\n| | main (ba26be2) | この作業 | main (5977b27、マージした) | その上のこの作業 |\n|---|---:|---:|---:|---:|\n| 通る compile-fail (偶然の通過は数えない) | 4097 | 4113 (+16) | 4125 | 4141 (+16) |\n\n- 前に通っていたテストで、いま通らないものはない。run-pass と check-pass は変わらない。\n- 通るようになったもの: `borrowck/borrowck-or-init.rs`、`borrowck/issue-83760.rs`、`liveness/liveness-move-in-while.rs`、\n  `borrowck/regions-bound-missing-bound-in-impl.rs`、`compare-method/region-extra-2.rs`、\n  `generics/generic-lifetime-trait-impl.rs`、`dropck/drop-with-active-borrows-2.rs`、\n  `iterators/iterator-scope-collect-suggestion-81584.rs`、`lifetimes/return-reference-local-variable-13497.rs`、\n  `nll/issue-46023.rs`、`borrowck/borrowck-unboxed-closures.rs`、`borrowck/unconstrained-closure-lifetime-generic.rs`、\n  `closures/closure-bounds-subtype.rs`、`associated-types/associated-types-outlives.rs`、\n  `regions/regions-creating-enums.rs`、`borrowck/borrowck-borrowed-uniq-rvalue.rs`。\n- 通る run-pass のテスト 1802 本の `zustc check` (tests/ui はビルドで試し、検査では試さない): main が受け入れるもので、\n  拒否するものはない。\n\n## 3. KPI\n\n`bench/kpi_track.py --dry-run --lsp` で、main (ba26be2) とこの作業を、ここで続けて測った:\n\n| KPI | main (ba26be2) | この作業 (db7d16a) | 変化 |\n|---|---:|---:|---:|\n| no-op build (M) | 0.706 | 0.706 | ±0 |\n| edit one fn (M) | 545.736 | 545.739 | ±0 |\n| check (M) | 3847.98 | 3847.61 | -0.01% |\n| cache (KiB) | 1902.8 | 1902.8 | ±0 |\n| LSP session (G) | 10.9072 | 10.9043 | -0.03% |\n| traits check (M) | 1189.52 | 1190.31 | +0.07% |\n| traits edit (M) | 61.515 | 61.495 | -0.03% |\n| crates no-op (M) | 9.94 | 9.94 | ±0 |\n| crates edit (M) | 315.914 | 316.278 | +0.12% |\n| patterns check (M) | 716.49 | 716.63 | +0.02% |\n| patterns edit (M) | 260.697 | 260.544 | -0.06% |\n\nどの KPI も、実行ごとのぶれを越えて動かない。新しい仕事は借用検査のもの (`&&` / `||` の連鎖、受け手の一時値、\nprelude のメソッドの結果) で、検査がすでに持つものを辿る。\n\n## 4. まだ扱わないもの\n\n- **末尾の式の一時値:** ブロックの末尾の式の一時値は、ブロックのローカルより後、囲む文の終わりまで生きる (edition 2024\n  より前)。zustc はまだ edition を持たない。\n- **代わりの型の射影型と `impl Trait` の捕捉:** その 5 と同じ。",
+        "contentHash": "81eb56ce0b2dc3f55208b4457230559399decab891f69c6e5d843d9f92c90752"
       },
       "context": [],
-      "candidateId": "f7c3c368edbb76dc688520854406c0a11a9446ea8576ed98fc6c7b32f99a30d8",
-      "contextHash": "2896fda17e1e2bab3c80e8539d4d3b5030eacfd7fc1f239fbe78a96a2578451a",
+      "candidateId": "fc0b466b673e4486b83f1fa282a3dccff070b088f150ef621eb66336467e64bf",
+      "contextHash": "c5f11c2a5bb22360cce2d81aaeea5a50ddd0d694d43c8b59fe35e5f382753834",
       "judgment": {
         "choice": "supports",
-        "confidence": 0.85,
+        "confidence": 0.93,
         "probabilities": {
-          "supports": 0.89,
-          "contradicts": 0.1,
+          "supports": 0.95,
+          "contradicts": 0.04,
           "unrelated": 0,
           "insufficient_context": 0.01
         }
@@ -1313,8 +1313,8 @@
   },
   "usage": {
     "requests": 38,
-    "inputTokens": 212218,
-    "usd": 0.008913156
+    "inputTokens": 212311,
+    "usd": 0.008917062
   },
   "errors": []
 }
