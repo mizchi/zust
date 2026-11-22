@@ -1876,6 +1876,14 @@ fn part10_review_3() {
     assert!(d.len() == 1 && d[0].0 == 3 && d[0].1.contains("E0507"), "{d:?}");
 }
 
+/// From the fourth review of #53: a `&mut` bound by value under a reference pattern (`let &mut bar = foo;` with foo a
+/// `&mut &mut u32`) moves it out (E0507); a `Copy` referent (`let &mut n = foo;` with a `&mut u32`) does not
+#[test]
+fn part10_review_4() {
+    let d = check("fn main() {\n    let mut x = 7u32;\n    match Some(&mut x) {\n        Some(ref mut foo) if (|| {\n            let &mut bar = foo;\n            *bar == 7\n        })() => {}\n        _ => {}\n    }\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 5 && d[0].1.contains("E0507"), "{d:?}");
+}
+
 /// A capture held by reference is the place the environment points to: the closure's body borrows and assigns it as
 /// its own (`let p = &this.x; &mut this.x;` in the body conflicts, borrowck/borrowck-closures-unique-imm.rs); what the
 /// body may move or write through it is checked where the closure is made
