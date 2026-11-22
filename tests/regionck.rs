@@ -1277,3 +1277,13 @@ fn builtin_results_of_placeholders() {
         vec![]
     );
 }
+
+/// A constant condition is not folded for the borrow check (`false || { i = 5; true }` may leave i uninitialized,
+/// E0381); a chain of one operator is one control flow, so `true && { z = 3; true } && z == 3` reads z only after it is
+/// set
+#[test]
+fn constant_conditions_and_chains() {
+    let d = check("fn main() {\n    let i: isize;\n    println!(\"{}\", false || { i = 5; true });\n    println!(\"{}\", i);\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 4 && d[0].1.contains("isn't initialized"), "{d:?}");
+    assert_eq!(check("fn main() {\n    let z;\n    if true && { z = 3; true } && z == 3 {}\n    let y;\n    if false || { y = 3; false } || y == 3 {}\n}\n"), vec![]);
+}
