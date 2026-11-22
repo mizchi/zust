@@ -1165,6 +1165,11 @@ impl Session2 {
         if !self.opts.no_cache {
             self.save_cache_keep(cp.as_path())?;
             std::fs::write(fp_path.as_path(), fp).map_err(|e| format!("{}: {e}", fp_path.display()))?;
+        } else {
+            // (the fingerprints of an earlier cached build no longer describe the object written here: without them the
+            // next cached build compiles and links again)
+            let _ = std::fs::remove_file(fp_path.as_path());
+            let _ = std::fs::remove_file(out_dir.join(format!("{}.fp2", c.name).as_str()));
         }
         let mut changed = false;
         if !std::fs::read(op.as_path()).is_ok_and(|old| old == obj) {

@@ -1779,10 +1779,29 @@ pub fn rename_module_collisions_fix(src: &str, crates: &[String], fix: &mut Vec<
         k = e + 1;
     }
     // (a path at token `at` in scope `from`: its first segment through the aliases, the innermost block's first)
+    // (a `mod x { .. }` declared in a block (a fn body): (the block's `{`, its `}`, the name, the module, the scope it is
+    // declared in). Inside the block it shadows an alias `x` of the module's)
+    let mut block_mods: Vec<(usize, usize, Vec<u8>, usize, usize)> = vec![];
+    for (m, md) in mods.iter().enumerate() {
+        if md.1 < 2 {
+            continue;
+        }
+        let d = md.1 - 2;
+        let sc = scope_of(d);
+        let own = if sc == usize::MAX { usize::MAX } else { mods[sc].1 };
+        let b = block_of[d];
+        if let (Some(&c), Some(n)) = (close_at.get(&b), md.0.last()) {
+            if b != own {
+                block_mods.push((b, c, n.clone(), m, sc));
+            }
+        }
+    }
     let resolve_mod = |from: usize, segs: &[Vec<u8>], at: usize| -> Option<usize> {
         let alias = segs.first().and_then(|f| {
+            // (the innermost block's alias or module of that name, then the module's alias)
             block_alias
                 .iter()
+                .chain(block_mods.iter())
                 .filter(|b| b.0 < at && at < b.1 && b.2 == *f && b.4 == from)
                 .max_by_key(|b| b.0)
                 .map(|b| b.3)

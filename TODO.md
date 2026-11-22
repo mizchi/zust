@@ -148,6 +148,8 @@ error of each failing crate. Details and the order of the work: [docs/reports/20
   "cannot find type" (`impl Vector for v128` in its wasm32 module, `impl Vector for __m128i` in its x86-64 one).
 - `cratebench/ui/run.py` does not run build scripts: a crate gets cargo's variables (`CARGO_PKG_*`) but not what its
   script would give (zurgo does both).
+- `x.as_ref()` on text takes the `AsRef` targets of all the bounds in scope, not those of `x`'s own parameter: in
+  `fn f<A: AsRef<str>, B: AsRef<[u8]>>(a: A, b: B)` with a text `B`, `b.as_ref()` is inferred as `&str`.
 - `include!("x.rs")` as an item shifts the line numbers after it (`line!()`, panic locations) by the lines of the
   included file: its code goes in as it is, not on one line.
 - async is erased: an `async fn` runs when called and returns its value. Needs a state-machine lowering, `Pin`,
