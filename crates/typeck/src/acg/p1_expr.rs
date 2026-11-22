@@ -3094,11 +3094,18 @@ impl Cx<'_> {
         if let Some(r) = self.default_call(c, expected)? {
             return Ok(r);
         }
-        // (`<T as Clone>::clone(x)`: `(x).clone()`, as method resolution picks T's clone for x: &T, a derive's too)
-        if let (Expr::Path(Some(_), p), [x]) = (&**func, cargs.as_slice()) {
+        // (`<T as Clone>::clone(x)`: `(x).clone()` naming its trait (not an inherent `clone` of T), for x: &T, a derive's
+        // clone too; x of another referent is mismatched types (`<u8 as Clone>::clone(&1u32)`))
+        if let (Expr::Path(Some(qs), p), [x]) = (&**func, cargs.as_slice()) {
             let n = p.segs.len();
             if n >= 2 && p.segs[n - 2].name == "Clone" && p.segs[n - 1].name == "clone" && p.segs[n - 2].args.is_empty() && self.lookup("Clone").is_none() {
+                if let (Ok(st), Some(Ty::Ref(_, xt))) = (self.parse_ty(qs), self.peek(x)) {
+                    if !self.prog.has_param(st) && !self.prog.has_param(*xt) && st != *xt {
+                        return err(expr_start(x), format!("mismatched types: expected `&{}`, found `&{}`", self.prog.tn(st), self.prog.tn(*xt)));
+                    }
+                }
                 let e = self.keep_expr(mcall(Expr::Paren(Box::new(x.clone())), "clone", vec![]));
+                self.explicit_traits.insert(e as *const Expr as usize, "Clone".to_string());
                 return self.expr(e, expected);
             }
         }
