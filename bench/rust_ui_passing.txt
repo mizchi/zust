@@ -6591,6 +6591,7 @@ compile-fail	sync/mutexguard-sync.rs
 compile-fail	sync/suggest-cell.rs
 compile-fail	sync/suggest-once-cell.rs
 compile-fail	sync/suggest-ref-cell.rs
+build-pass	target-feature/asm-implied-features-issue-128125.rs
 check-pass	target-feature/const-target-feature-fn-ptr-coercion.rs
 compile-fail	target-feature/gate.rs
 build-pass	target-feature/implied-features.rs
