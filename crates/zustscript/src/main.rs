@@ -172,8 +172,8 @@ fn main() {
         out.push_str(&js::brand_runtime(&brands));
     } else {
         out.push_str(&js::brand_reexport(&brands));
-        std::fs::write(out_dir.join(format!("{}.js", js::RUNTIME)), js::runtime_js()).unwrap();
-        std::fs::write(out_dir.join(format!("{}.d.ts", js::RUNTIME)), js::runtime_dts()).unwrap();
+        publish_atomic(&out_dir.join(format!("{}.js", js::RUNTIME)), js::runtime_js());
+        publish_atomic(&out_dir.join(format!("{}.d.ts", js::RUNTIME)), js::runtime_dts());
     }
     std::fs::write(out_dir.join(format!("{stem}.js")), out).unwrap();
     std::fs::write(out_dir.join(format!("{stem}.d.ts")), dts).unwrap();
@@ -273,4 +273,12 @@ fn usage() -> ! {
 fn die(m: &str) -> ! {
     eprintln!("zsc: {m}");
     std::process::exit(2)
+}
+
+/// Writes a file shared by the builds of one directory: a temporary file renamed over the target, so a concurrent or
+/// interrupted build never sees it empty.
+fn publish_atomic(path: &std::path::Path, contents: impl AsRef<[u8]>) {
+    let tmp = path.with_extension(format!("{}.tmp", std::process::id()));
+    std::fs::write(&tmp, contents).unwrap_or_else(|e| die(&format!("{}: {e}", tmp.display())));
+    std::fs::rename(&tmp, path).unwrap_or_else(|e| die(&format!("{}: {e}", path.display())));
 }
