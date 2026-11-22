@@ -736,6 +736,12 @@ impl Parser {
             return Ok(());
         }
         let Some(last) = p.segs.last() else { return Ok(()) };
+        // (a generic associated type's binding (`Item<'a> = &'a T`, `Gat<'b>: Tr`) drops its arguments, which may be
+        // the binder's inputs: not checked)
+        let t: String = last.text.chars().filter(|c| !c.is_whitespace()).collect();
+        if t.contains(">=") || t.match_indices(">:").any(|(k, _)| !t[k + 2..].starts_with(':')) {
+            return Ok(());
+        }
         for b in binder {
             let GArg::Lifetime(l) = b else { continue };
             // (the predicate's own type is an input: `for<'a> &'a T: IntoIterator<Item = &'a U>`)
@@ -754,7 +760,11 @@ impl Parser {
             ins |= p.segs[..p.segs.len() - 1].iter().any(|s| s.args.iter().any(|a| matches!(a, GArg::Lifetime(x) if x == l) || matches!(a, GArg::Ty(t) if crate::regions::mentions_lt(t, l))));
             if out && !ins {
                 let line = self.toks.get(at).map(|t| (t.line, t.col + 1)).unwrap_or((0, 0));
-                let what = if last.fn_args.is_some() { "`Output`".to_string() } else { "an associated type".to_string() };
+                let bound_name = last.args.iter().find_map(|a| match a {
+                    GArg::Bind(n, t) if !matches!(t, Ty::Impl(_)) && crate::regions::mentions_lt(t, l) => Some(n.clone()),
+                    _ => None,
+                });
+                let what = format!("`{}`", bound_name.unwrap_or_else(|| "Output".to_string()));
                 return Err(format!("{}:{}: binding for associated type {what} references lifetime `{l}`, which does not appear in the trait input types (E0582)", line.0, line.1));
             }
         }

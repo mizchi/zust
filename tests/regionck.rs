@@ -1419,6 +1419,8 @@ fn e0582_unconstrained_binder() {
     let d = check("fn baz<F>(_t: F)\nwhere\n    F: for<'a> Iterator<Item = &'a i32>,\n{\n}\nfn main() {}\n");
     assert!(d.len() == 1 && d[0].0 == 3 && d[0].1.contains("E0582"), "{d:?}");
     assert_eq!(check("fn ok<F, T, U>(_t: F)\nwhere\n    F: for<'a> Fn(&'a u8) -> &'a u8,\n    for<'a> &'a T: IntoIterator<Item = &'a U>,\n{\n}\nfn main() {}\n"), vec![]);
+    // (a generic associated type's binding names the binder's lifetime in its own arguments: an input)
+    assert_eq!(check("trait S {\n    type Item<'a> where Self: 'a;\n}\nfn f<T>() where T: for<'a> S<Item<'a> = &'a i32> {}\nfn main() {}\n"), vec![]);
 }
 
 /// A move out of a static (E0507); a constant is a new value at each use
