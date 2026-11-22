@@ -719,6 +719,9 @@ impl Cx<'_> {
             }
             Expr::Binary(..) => self.binary(e, expected),
             Expr::AssignOp(_, left, _, _) => {
+                if let Some(m) = self.immutable_static(left) {
+                    return err(expr_start(left), m);
+                }
                 // (an overloaded `+=` is a call of `add_assign(&mut self, ..)`: no access of its own)
                 let builtin = !matches!(self.peek(left), Some(Ty::Struct(_) | Ty::Ref(_, Ty::Struct(_))));
                 let r = self.binary(e, expected)?;
@@ -728,6 +731,9 @@ impl Cx<'_> {
                 Ok(r)
             }
             Expr::Assign(left, right) => {
+                if let Some(m) = self.immutable_static(left) {
+                    return err(expr_start(left), m);
+                }
                 // (`map[&k] = v`: a map's index is not a place to assign to (E0594); `insert` or `get_mut`)
                 if let Expr::Index(b, _, _) = strip_paren(left) {
                     if let Some(Ty::Struct(sid)) = self.peek(b).map(|t| self.strip_refs(t)) {
@@ -1469,7 +1475,10 @@ impl Cx<'_> {
         // `&a[lo..hi]` → スライス (fat pointer)
         if let Expr::Index(b, ix, _) = &**rexpr {
             if let Expr::Range(..) = &**ix {
-                return self.slice_range(b, ix, m);
+                let r = self.slice_range(b, ix, m)?;
+                // (a borrow of the elements: `&mut x[1..3]` with x: &[T] is E0596, and it conflicts as `&mut x[1]`)
+                self.bk_borrow(rexpr, m, err_pos(rexpr));
+                return Ok(r);
             }
         }
         let fn_item = matches!(&**rexpr, Expr::Path(..) if self.fn_item(rexpr).is_some());
@@ -2573,6 +2582,28 @@ impl Cx<'_> {
         let inh = |i: u32| self.prog.sigs[i as usize].impl_trait.is_none();
         let Some(&i) = self.prog.index.get(name) else { return false };
         inh(i) && self.prog.overloads.get(name).is_none_or(|cs| cs.iter().all(|&c| inh(c)))
+    }
+
+    /// An assignment to (a field or element of) a static not declared `mut` (E0594)
+    pub(crate) fn immutable_static(&self, left: &Expr) -> Option<String> {
+        let mut e = strip_paren(left);
+        let mut whole = true;
+        while let Expr::Field(b, ..) | Expr::Index(b, ..) = e {
+            e = strip_paren(b);
+            whole = false;
+        }
+        let Expr::Path(None, p) = e else { return None };
+        let [seg] = p.segs.as_slice() else { return None };
+        if !seg.args.is_empty() || self.lookup(&seg.name).is_some() {
+            return None;
+        }
+        let &ci = self.prog.const_index.get(&seg.name)?;
+        let c = &self.prog.consts[ci as usize];
+        if c.stat != Some(false) || crate::parse::extern_static(&c.expr).is_some() {
+            return None;
+        }
+        let n = &seg.name;
+        Some(if whole { format!("cannot assign to immutable static item `{n}` (E0594)") } else { format!("cannot assign to a part of `{n}`, as `{n}` is an immutable static item (E0594)") })
     }
 
     /// Why reading static ci needs `unsafe` (E0133): a `static mut`, or an extern block's static (foreign memory)

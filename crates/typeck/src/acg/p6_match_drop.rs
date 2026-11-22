@@ -996,6 +996,9 @@ impl Cx<'_> {
                             }
                         };
                         let saved = self.bk_pat_ref(m, *by_ref);
+                        // (the binding of `ref x` / `ref mut x`, or one by reference of the default binding mode, is not
+                        // `mut` itself: `&mut x` of it is E0596)
+                        self.bk.mut_next = Some(false);
                         self.bind(name.clone(), Ty::Ref(m, intern(t)), Some(addr));
                         self.bk.bind_srcs = saved;
                         if !*by_ref {

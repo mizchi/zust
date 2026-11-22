@@ -1146,3 +1146,21 @@ fn placeholder_bounds() {
         vec![]
     );
 }
+
+/// The borrow check's mutability: a `ref` binding is not `mut` (E0596 for `&mut x` of it), an immutable static is not
+/// assigned (E0594), a slice by range is a loan of the elements (E0596 behind `&`, and a conflict as `&x[i]` is)
+#[test]
+fn mutability_of_bindings_statics_slices() {
+    let d = check("fn main() {\n    let op = Some(2);\n    match op {\n        Some(ref v) => {\n            let _a = &mut v;\n        }\n        None => {}\n    }\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 5 && d[0].1.contains("not declared as mutable"), "{d:?}");
+    let d = check("static FOO: isize = 5;\nfn main() {\n    FOO = 6;\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 3 && d[0].1.contains("immutable static item `FOO`"), "{d:?}");
+    let d = check("fn main() {\n    let x: &[isize] = &[1, 2, 3];\n    let _ = &mut x[0..2];\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 3 && d[0].1.contains("behind a `&` reference"), "{d:?}");
+    let d = check("fn main() {\n    let mut v = vec![1, 2, 3];\n    let a = &mut v[0..2];\n    let b = &v[1..];\n    a[0] = 1;\n    println!(\"{:?}\", b);\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 4, "{d:?}");
+    assert_eq!(
+        check("static mut N: i32 = 0;\nstatic K: i32 = 1;\nfn main() {\n    let op = Some(2);\n    if let Some(ref mut v) = Some(op) {\n        *v = None;\n    }\n    unsafe {\n        N = K;\n    }\n    let mut v = vec![1, 2, 3];\n    let a = &mut v[0..2];\n    a[0] = 1;\n    let b = &v[1..];\n    println!(\"{:?}\", b);\n}\n"),
+        vec![]
+    );
+}
