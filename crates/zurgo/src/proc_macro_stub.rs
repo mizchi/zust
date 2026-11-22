@@ -206,6 +206,8 @@ mod tests {
         let only_alias = uses_in("use web::route as get;\n#[get]\nfn g() {}\n");
         assert_eq!(only_alias.hit(&m).as_deref(), Some("the attribute `#[get]`"));
         assert_eq!(uses_in("#[derive(Debug)]\nstruct P;\n").hit(&m), None);
+        // (a quote inside a raw string before `#[`: the string goes on to its `"##`)
+        assert_eq!(uses_in("const EX: &str = r##\"example \"#[pm::traced]\"##;\nfn f() {}\n"), Uses::default());
         // (a derive under another name too: `use web::Error as WebError;`)
         let derive_alias = uses_in("use web::Error as WebError;\n#[derive(Debug, WebError)]\nstruct E;\n");
         assert_eq!(derive_alias.hit(&m).as_deref(), Some("the derive `WebError`"));
