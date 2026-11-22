@@ -644,13 +644,17 @@ fn parse_sig(sig: &PSig, is_extern: bool, is_main: bool, owner: Option<&Owner>) 
             t => (t, None),
         };
         if let PTy::Impl(bs) = inner {
-            let g = format!("__impl{}", generics.len());
+            let g = fresh_impl_name(&generics);
             generics.push((g.clone(), bound_names(bs)?));
             let n = TySyn::Named(g);
             params.push(match rf {
                 Some(m) => TySyn::Ref(m, Box::new(n)),
                 None => n,
             });
+        } else if nested_impl(t) {
+            // (`Option<&[impl AsRef<str>]>`: each `impl Trait` inside is a type parameter without a name, too)
+            let lifted = lift_impls(t, &mut generics)?;
+            params.push(tysyn(&lifted, self_ty)?);
         } else {
             params.push(tysyn(t, self_ty)?);
         }
@@ -1452,6 +1456,44 @@ fn lit_ty(t: &str, int_hint: Option<Ty>) -> Option<TySyn> {
         return Some(TySyn::Prim(if suffix == "f32" { Ty::F32 } else { Ty::F64 }));
     }
     Some(TySyn::Prim(Ty::from_suffix(suffix).or(int_hint).unwrap_or(Ty::I32)))
+}
+
+/// `__implN` that no type parameter has yet (`fn f<__impl1>(x: __impl1, y: Option<impl Copy>)`)
+fn fresh_impl_name(generics: &[(String, Vec<String>)]) -> String {
+    let mut k = generics.len();
+    while generics.iter().any(|(n, _)| *n == format!("__impl{k}")) {
+        k += 1;
+    }
+    format!("__impl{k}")
+}
+
+/// t with each `impl Trait` in it replaced by a new type parameter `__implN` (added to generics with its bounds)
+fn lift_impls(t: &PTy, generics: &mut Vec<(String, Vec<String>)>) -> R<PTy> {
+    use crate::parse::{GArg, Seg};
+    Ok(match t {
+        PTy::Impl(bs) => {
+            let g = fresh_impl_name(generics);
+            generics.push((g.clone(), bound_names(bs)?));
+            PTy::Path(None, Path { global: false, segs: vec![Seg { name: g.clone(), args: vec![], fn_args: None, text: g }], pos: Default::default() })
+        }
+        PTy::Path(q, p) => {
+            let mut p = p.clone();
+            for s in &mut p.segs {
+                for a in &mut s.args {
+                    if let GArg::Ty(x) | GArg::Bind(_, x) = a {
+                        *x = lift_impls(x, generics)?;
+                    }
+                }
+            }
+            PTy::Path(q.clone(), p)
+        }
+        PTy::Ref(l, m, i) => PTy::Ref(l.clone(), *m, Box::new(lift_impls(i, generics)?)),
+        PTy::Ptr(m, i) => PTy::Ptr(*m, Box::new(lift_impls(i, generics)?)),
+        PTy::Slice(i) => PTy::Slice(Box::new(lift_impls(i, generics)?)),
+        PTy::Array(i, n) => PTy::Array(Box::new(lift_impls(i, generics)?), n.clone()),
+        PTy::Tuple(v) => PTy::Tuple(v.iter().map(|x| lift_impls(x, generics)).collect::<R<Vec<_>>>()?),
+        t => t.clone(),
+    })
 }
 
 /// whether an `impl Trait` appears inside t
