@@ -100,9 +100,11 @@ pub enum Ev {
     /// locals those point to hold them. The flag: what is stored is a reference to something that holds references
     /// (`*q = &mut &y`), whose region is shared with what the `&mut`s point into (a `&mut T` is invariant in T)
     Store(u32, u32, bool, Vec<Src>),
-    /// A match's guard begins (the place the match tests) or ends (None). The events between are the guard's, in the
-    /// order they are made: a guard's evaluation is one piece of the source, nested in the match's
-    Guard(Option<BPlace>),
+    /// A match's guard begins (rustc's fake borrows of the match: the places its patterns test, and the deref
+    /// prefixes of the place its bindings are bound from, whose flag is false: what they point to is not borrowed) or
+    /// ends (None). The events between are the guard's, in the order they are made: a guard's evaluation is one piece
+    /// of the source, nested in the match's
+    Guard(Option<Vec<(BPlace, bool)>>),
 }
 
 #[derive(Clone, Debug)]
@@ -205,9 +207,10 @@ pub struct Bk {
     pub line_base: u32,
     /// The locals that are parameters
     pub params: Vec<u32>,
-    /// Locals whose type implements `Drop` (a user's), through so many boxes (`Box<Scribble>`: 1): its `drop` may
-    /// use what a `&mut` field points to, so a borrow through it must not outlive the local (E0713)
-    pub drop_owners: Vec<(u32, u8)>,
+    /// Locals that own a value whose type implements `Drop` (a user's), and the place of that value in the local,
+    /// through boxes and fields (`Box<Scribble>`: `*`; `Wrapper(Scribble)`: `.0`): its `drop` may use what a `&mut`
+    /// field points to, so a borrow through it must not outlive the local (E0713)
+    pub drop_owners: Vec<(u32, Vec<Proj>)>,
     /// Type → (Copy, may hold references)
     pub ty_info: HashMap<Ty, (bool, bool)>,
     /// Hidden locals of temporaries borrowed in the statements being lowered (they go out of scope at the end of
@@ -720,7 +723,7 @@ impl Bk {
             }
         }
         // (the places of the matches whose guards are running: rustc's fake borrows, which a guard must not change)
-        let mut guards: Vec<&BPlace> = vec![];
+        let mut guards: Vec<&[(BPlace, bool)]> = vec![];
         for (_, e) in &self.evs {
             match e {
                 Ev::Guard(Some(g)) => guards.push(g),
@@ -1244,15 +1247,20 @@ impl Bk {
                                 }
                                 k += 1;
                             }
-                            for &ln in &through {
+                            'owners: for &ln in &through {
                                 let lo = &self.loans[ln as usize];
-                                let Some(&(_, k)) = self.drop_owners.iter().find(|d| d.0 == lo.place.local) else { continue };
-                                let (pr, k, ol) = (&lo.place.proj, k as usize, lo.place.owned_len());
-                                let field_of_owner = pr.len() > k && pr[..k].iter().all(|x| *x == Proj::Deref(true)) && matches!(pr[k], Proj::Field(_));
-                                let moved = st.moved.iter().any(|m| m.place.local == lo.place.local && m.place.proj.is_empty());
-                                if field_of_owner && ol < pr.len() && pr[ol] == Proj::Deref(false) && !moved {
-                                    errs.push(BkError { sp: lo.sp, msg: "borrow may still be in use when destructor runs (E0713)".to_string() });
-                                    break;
+                                for (_, op) in self.drop_owners.iter().filter(|d| d.0 == lo.place.local) {
+                                    let (pr, k, ol) = (&lo.place.proj, op.len(), lo.place.owned_len());
+                                    let field_of_owner = pr.len() > k && prefix(op, &pr[..k]) && matches!(pr[k], Proj::Field(_));
+                                    // (not when the owner, or what holds it, was moved out: then it is not dropped here)
+                                    let moved = st.moved.iter().any(|m| m.place.local == lo.place.local && prefix(&m.place.proj, op));
+                                    // (not past a `&` deref after it: `&**s.data` with `data: &mut &'static u32`
+                                    // borrows what the shared reference points to, which the drop does not reach)
+                                    let shared_after = pr.iter().skip(ol + 1).any(|x| *x == Proj::Shr);
+                                    if field_of_owner && ol < pr.len() && pr[ol] == Proj::Deref(false) && !shared_after && !moved {
+                                        errs.push(BkError { sp: lo.sp, msg: "borrow may still be in use when destructor runs (E0713)".to_string() });
+                                        break 'owners;
+                                    }
                                 }
                             }
                             for ln in ls {
@@ -1363,9 +1371,9 @@ impl Bk {
     }
 
     /// The place of a running guard's match that a write or a `&mut` of p changes (E0510): p is the place or one it
-    /// is part of, or what it points to (`*x = None` in a guard of `match x { &mut None => .. }`). Not a part of it
-    /// (`s.b = 2` of `match s`): rustc's fake borrows are shallow
-    fn guard_conflict<'g>(&self, guards: &[&'g BPlace], p: &BPlace, a: Acc) -> Option<&'g BPlace> {
+    /// is part of, or, for a place a pattern tests, what it points to (`*x = None` in a guard of
+    /// `match x { &mut None => .. }`). Not a part of it (`s.b = 2` of `match s`): rustc's fake borrows are shallow
+    fn guard_conflict<'g>(&self, guards: &[&'g [(BPlace, bool)]], p: &BPlace, a: Acc) -> Option<&'g BPlace> {
         let changes = match a {
             Acc::Write | Acc::Modify => true,
             Acc::Borrow(l) => self.loans[l as usize].mutable,
@@ -1374,9 +1382,9 @@ impl Bk {
         if !changes {
             return None;
         }
-        guards.iter().copied().find(|g| {
-            g.local == p.local && (prefix(&p.proj, &g.proj) || prefix(&g.proj, &p.proj) && p.proj[g.proj.len()..].iter().all(|x| matches!(x, Proj::Deref(_))))
-        })
+        guards.iter().flat_map(|gs| gs.iter()).find(|(g, deep)| {
+            g.local == p.local && (prefix(&p.proj, &g.proj) || *deep && prefix(&g.proj, &p.proj) && p.proj[g.proj.len()..].iter().all(|x| matches!(x, Proj::Deref(_))))
+        }).map(|g| &g.0)
     }
 
     fn check_loans(&self, live: &[u32], p: &BPlace, a: Acc, sp: Sp, errs: &mut Vec<BkError>) {
@@ -1525,16 +1533,11 @@ impl Cx<'_> {
         let (copy, refs) = self.bk_ty(ty);
         self.bk.locals.push(Local { name: name.to_string(), ty, copy, refs, mutable, decl: self.rg.let_sp });
         self.bk.by_loc.insert(loc, id);
-        if refs && self.bk.level >= 2 {
-            let (mut t, mut k) = (ty, 0u8);
-            while let Ty::Box(i) = t {
-                t = *i;
-                k = k.saturating_add(1);
-            }
-            if let Ty::Struct(sid) = t {
-                if self.user_drop_name(sid).is_some() {
-                    self.bk.drop_owners.push((id, k));
-                }
+        if refs && self.bk.level >= 2 && matches!(ty, Ty::Struct(_) | Ty::Box(_)) {
+            let mut paths = vec![];
+            self.drop_paths(ty, &mut vec![], &mut paths, 0);
+            for p in paths {
+                self.bk.drop_owners.push((id, p));
             }
         }
         self.bk_ev(Ev::Bind(id, !uninit));
@@ -1954,6 +1957,36 @@ impl Cx<'_> {
         }
     }
 
+    /// The places in a value of type t of the values whose type implements `Drop` (a user's), through boxes and the
+    /// fields of the program's structs and tuples (not into such a value: its own drop covers its fields)
+    fn drop_paths(&self, t: Ty, at: &mut Vec<Proj>, out: &mut Vec<Vec<Proj>>, depth: u32) {
+        if depth > 4 || out.len() >= 8 {
+            return;
+        }
+        match t {
+            Ty::Box(i) => {
+                at.push(Proj::Deref(true));
+                self.drop_paths(*i, at, out, depth + 1);
+                at.pop();
+            }
+            Ty::Struct(sid) if self.user_drop_name(sid).is_some() => out.push(at.clone()),
+            Ty::Struct(sid) => {
+                let base = self.prog.base_of(sid);
+                let user = self.prog.struct_item.get(base as usize).is_some_and(|&i| i < self.prog.prelude_from);
+                let sd = &self.prog.structs[sid as usize];
+                if !(user || self.prog.is_tuple(sid)) || !sd.variants.is_empty() || self.prog.closure_of_struct.contains_key(&base) {
+                    return;
+                }
+                for (n, ft, _) in &sd.fields {
+                    at.push(Proj::Field(n.clone()));
+                    self.drop_paths(*ft, at, out, depth + 1);
+                    at.pop();
+                }
+            }
+            _ => {}
+        }
+    }
+
     /// The event for the receiver (a `&mut self` borrow is two-phase: the caller records it after the arguments)
     pub(crate) fn bk_recv_ev(&mut self, recv: &Expr, recv_ty: Ty, flows: bool) -> Option<Ev> {
         let Some((mut p, t)) = self.bk_place(recv) else { return None };
@@ -2073,7 +2106,8 @@ impl Cx<'_> {
         if (by_move || move_kw) && !self.bk_ty(t).0 && !self.bk.fnonce_exprs.contains(&ca) && (crate::ast_closure::moves_capture(c, &[n.to_string()]) || self.bk_may_consume(body, n)) {
             self.bk.fnonce_exprs.push(ca);
         }
-        if (by_move || move_kw) && !self.bk_ty(t).0 && crate::ast_closure::moves_capture(c, &[n.to_string()]) && !self.bk.fnonce_sure.contains(&ca) {
+        // (surely: not a name the body binds again (`let val = ..; drop(val)`), which moves_capture takes for the capture)
+        if (by_move || move_kw) && !self.bk_ty(t).0 && crate::ast_closure::moves_capture(c, &[n.to_string()]) && !self.bk.fnonce_sure.contains(&ca) && !crate::ast_closure::rebinds(c, &[n.to_string()]) {
             self.bk.fnonce_sure.push(ca);
         }
         for (p, pt, mode, _) in &mut paths {

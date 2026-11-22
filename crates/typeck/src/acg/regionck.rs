@@ -2846,7 +2846,7 @@ impl Cx<'_> {
                     }
                     for (x, y) in xs.iter().zip(&ys) {
                         let callee: Option<RT> = if x.starts_with('\'') {
-                            rs.as_deref().and_then(|r| r.lts.iter().position(|l| l == x)).and_then(|p| lts.get(p).copied()).map(|v| vec![v])
+                            if x == "'static" { Some(vec![STATIC]) } else { rs.as_deref().and_then(|r| r.lts.iter().position(|l| l == x)).and_then(|p| lts.get(p).copied()).map(|v| vec![v]) }
                         } else {
                             sig0.generics.iter().position(|g| g.0 == *x).and_then(|p| targs.get(p).cloned().flatten())
                         };

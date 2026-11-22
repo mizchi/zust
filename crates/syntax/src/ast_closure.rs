@@ -384,6 +384,9 @@ fn str_lit_body(t: &str) -> Option<&str> {
 struct Free {
     scopes: Vec<Vec<String>>,
     out: Vec<String>,
+    /// (rebinds) names to watch, and whether one was bound
+    watch: Vec<String>,
+    rebound: bool,
 }
 
 impl Free {
@@ -393,6 +396,7 @@ impl Free {
     fn bind(&mut self, p: &Pat) {
         let mut v = vec![];
         pat_idents(p, &mut v);
+        self.rebound |= !self.watch.is_empty() && v.iter().any(|n| self.watch.contains(n));
         self.scopes.last_mut().unwrap().extend(v);
     }
     fn name(&mut self, n: &str) {
@@ -522,9 +526,18 @@ impl Free {
 
 /// クロージャの自由変数 (使われた順)
 pub fn free_vars(c: &Expr) -> Vec<String> {
-    let mut v = Free { scopes: vec![vec![]], out: Vec::new() };
+    let mut v = Free { scopes: vec![vec![]], out: Vec::new(), watch: vec![], rebound: false };
     v.expr(c);
     v.out
+}
+
+/// Whether the body of closure c binds one of names again (a `let`, a pattern, a nested closure's parameter). A use of
+/// the name may then be of that binding, which moves_capture and move_site, going by names, take for the capture
+pub fn rebinds(c: &Expr, names: &[String]) -> bool {
+    let Expr::Closure(_, _, _, body, _) = c else { return false };
+    let mut v = Free { scopes: vec![vec![]], out: Vec::new(), watch: names.to_vec(), rebound: false };
+    v.expr(body);
+    v.rebound
 }
 
 fn is_cap(e: &Expr, caps: &[String]) -> bool {
@@ -621,6 +634,9 @@ fn cap_at(e: &Expr, caps: &[String]) -> Option<(String, Pos)> {
 
 fn move_site_in(e: &Expr, caps: &[String]) -> Option<(String, Pos)> {
     match e {
+        // (a nested `move` closure that captures one: it is moved into that closure where the closure is made. A
+        // nested closure's own moves are its own)
+        Expr::Closure(true, _, _, _, at) => return free_vars(e).into_iter().find(|n| caps.contains(n)).map(|n| (n, *at)),
         Expr::Closure(..) => return None,
         Expr::Call(_, a) => {
             if let Some(x) = a.iter().find_map(|x| cap_at(x, caps)) {

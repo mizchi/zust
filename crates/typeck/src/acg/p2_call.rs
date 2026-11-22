@@ -1007,7 +1007,17 @@ impl Cx<'_> {
         if self.bk_on() && via_deref && is_place_expr(recv) {
             let flows = self.bk_ret_from(id, 0);
             let ev = self.bk_recv_ev(recv, Ty::Ref(false, intern(st)), flows);
+            // (an argument that names the receiver (`w.read(drop(w))`): the loan lasts while the arguments are
+            // evaluated, as a receiver's that is not reached through `Deref`)
+            let hold = match (&ev, borrowck::root_local(recv)) {
+                (Some(borrowck::Ev::Acc(_, borrowck::Acc::Borrow(ln), _)), Some(n)) if margs.iter().any(|a| borrowck::mentions(a, n)) => Some(*ln),
+                _ => None,
+            };
             self.bk_push(ev);
+            if let Some(ln) = hold {
+                self.bk_call_temp(&[borrowck::Src::Loan(ln)], true);
+                bk_op_temp = true;
+            }
         }
         // `self` を値で受ける: 受け手からムーブ
         if !matches!(recv_ty, Ty::Ref(..)) && self.needs_drop(st) {
@@ -2049,7 +2059,7 @@ impl Cx<'_> {
                 let kind = |k: &str| want.strip_prefix(k).is_some_and(|r| r.trim_start().starts_with('('));
                 let c = strip_paren(a);
                 if (kind("Fn") || kind("FnMut")) && self.bk.fnonce_sure.contains(&(c as *const Expr as usize)) {
-                    let caps: Vec<String> = crate::ast_closure::free_vars(c).into_iter().filter(|n| self.lookup(n).is_some_and(|(_, t)| !self.bk_ty(t).0)).collect();
+                    let caps: Vec<String> = crate::ast_closure::free_vars(c).into_iter().filter(|n| self.lookup(n).is_some_and(|(_, t)| !self.bk_ty(t).0) && !crate::ast_closure::rebinds(c, std::slice::from_ref(n))).collect();
                     if let Some((n, at)) = crate::ast_closure::move_site(c, &caps) {
                         let w = if kind("Fn") { "Fn" } else { "FnMut" };
                         return Err(self.at(at, format!("cannot move out of `{n}`, a captured variable in an `{w}` closure (E0507)")));

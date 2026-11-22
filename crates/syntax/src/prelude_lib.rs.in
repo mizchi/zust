@@ -9112,14 +9112,14 @@ pub struct Pin<P> {
 }
 
 // (as std's: what the pointer prints)
-impl<P> Debug for Pin<P> {
+impl<P: Debug> Debug for Pin<P> {
     fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError> {
         __exr_debug(&self.pointer, f);
         Ok(())
     }
 }
 
-impl<P> Display for Pin<P> {
+impl<P: Display> Display for Pin<P> {
     fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError> {
         __exr_display(&self.pointer, f);
         Ok(())

@@ -6632,6 +6632,8 @@ compile-fail	suggestions/non_copy_move_out_of_tuple.rs
 compile-fail	suggestions/only-replace-intended-coma-not-all-in-pattern.rs
 compile-fail	suggestions/only-suggest-removal-of-conversion-method-calls.rs
 compile-fail	suggestions/option-content-move.rs
+compile-fail	suggestions/option-content-move2.rs
+compile-fail	suggestions/option-content-move3.rs
 compile-fail	suggestions/option-to-bool.rs
 compile-fail	suggestions/parenthesized-deref-suggestion.rs
 compile-fail	suggestions/partialeq_suggest_swap.rs
