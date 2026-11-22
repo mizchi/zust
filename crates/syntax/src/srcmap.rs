@@ -196,7 +196,7 @@ fn load_file_in(path: &Path, display: &str, mod_dir: &Path, disp_dir: &str, star
     map.inputs.push(path.to_path_buf());
     // (`env!` / `option_env!` read the environment, which file stamps do not cover. One look at the source: a
     // workspace's no-op build reads every file)
-    let src = if src.contains("env!") {
+    let src = if crate::macros::may_use_env(&src) {
         map.volatile = true;
         crate::macros::expand_env(&src, cfg).unwrap_or(src)
     } else {
@@ -206,7 +206,7 @@ fn load_file_in(path: &Path, display: &str, mod_dir: &Path, disp_dir: &str, star
         Ok(Some(s)) => {
             map.volatile = true;
             // (and the `env!` of what `include!` put in: before it, `env!` gave the include's path)
-            if s.contains("env!") {
+            if crate::macros::may_use_env(&s) {
                 crate::macros::expand_env(&s, cfg).unwrap_or(s)
             } else {
                 s

@@ -342,9 +342,11 @@ impl<'a> Runner<'a> {
             let o = outs.get(&m).cloned().flatten();
             let externs: Vec<(String, PathBuf)> = self.externs(m, DepKind::Normal).into_iter().filter_map(|(e, t)| art.get(&t).map(|a| (e, a.clone()))).collect();
             // (what it is built from: the compiler, the package, its features, its dependencies' artifacts (their
-            //  contents, not only their paths) and what its build script gave)
+            //  contents, not only their paths), what its build script gave, and the files that script wrote to OUT_DIR)
             let deps_fp: Vec<String> = externs.iter().map(|(e, a)| format!("{e}={}", file_fp(a))).collect();
-            let h = hash(&[&rustc_id(), &self.g.pkgs[m.0].id, &feats.join(","), &format!("{externs:?}"), &deps_fp.join(","), &format!("{:?}", o.as_ref().map(|o| (&o.cfgs, &o.env)))]);
+            let (cfgs, env) = crate_env(p, &lib.name, o.as_ref());
+            let out_fp = env.iter().find(|(k, _)| k == "OUT_DIR").map(|(_, d)| scan(Path::new(d), None, true).fp()).unwrap_or_default();
+            let h = hash(&[&rustc_id(), &self.g.pkgs[m.0].id, &feats.join(","), &format!("{externs:?}"), &deps_fp.join(","), &format!("{:?}", o.as_ref().map(|o| (&o.cfgs, &o.env))), &out_fp]);
             let pm = lib.is_proc_macro();
             let file = deps_dir.join(format!("lib{}-{h}.{}", lib.name, if pm { "so" } else { "rlib" }));
             let fresh = file.is_file() && (self.g.pkgs[m.0].source.is_some() || src_fp(&p.dir, &self.skip) == std::fs::read_to_string(file.with_extension("fp")).unwrap_or_default());
@@ -362,7 +364,6 @@ impl<'a> Runner<'a> {
                 for (e, a) in &externs {
                     c.arg("--extern").arg(format!("{e}={}", a.display()));
                 }
-                let (cfgs, env) = crate_env(p, &lib.name, o.as_ref());
                 for (k, v) in &cfgs {
                     c.args(["--cfg", &match v {
                         Some(v) => format!("{k}=\"{}\"", v.replace('\\', "\\\\").replace('"', "\\\"")),
@@ -615,8 +616,8 @@ fn mtime(p: &Path) -> Option<u128> {
     std::fs::metadata(p).ok()?.modified().ok()?.duration_since(std::time::UNIX_EPOCH).ok().map(|d| d.as_nanos())
 }
 
-/// The files under a directory: each one's path, size and modification time; the newest time; whether every
-/// directory could be read
+/// The files under a directory: each one's path, size and modification time; the newest time (of the files and the
+/// directories); whether every directory could be read
 struct Scan {
     entries: Vec<String>,
     newest: u128,
@@ -648,6 +649,8 @@ fn walk(dir: &Path, skip: Option<&Path>, hidden: bool, sc: &mut Scan) {
         sc.complete = false;
         return;
     };
+    // (a directory's own time too: a file removed while a script ran changes only that)
+    sc.newest = sc.newest.max(mtime(dir).unwrap_or(0));
     let mut es: Vec<PathBuf> = vec![];
     for e in rd {
         match e {
@@ -755,6 +758,15 @@ mod tests {
         assert!(!stamp_fresh(&stamp, "e", "v", &d, Path::new("/nonexistent")));
         // (a watched file that does not exist: never kept)
         assert!(stamp_text("cargo:rerun-if-changed=missing.txt\n", "e", "v", &d, Path::new("/nonexistent"), later).is_none());
+        // (a file of a watched directory removed while it ran: the directory's time says so)
+        std::fs::create_dir_all(d.join("data")).unwrap();
+        std::fs::write(d.join("data/schema.txt"), "v1").unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(20));
+        let start = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();
+        std::thread::sleep(std::time::Duration::from_millis(20));
+        std::fs::remove_file(d.join("data/schema.txt")).unwrap();
+        assert!(stamp_text("cargo:rerun-if-changed=data\n", "e", "v", &d, Path::new("/nonexistent"), start).is_none());
+        assert!(stamp_text("", "e", "v", &d, Path::new("/nonexistent"), start).is_none());
         let _ = std::fs::remove_dir_all(&d);
     }
 }

@@ -244,13 +244,16 @@ fn errors() {
     assert!(!ok && err.contains("cargo generate-lockfile"), "{err}");
     let (ok, _, err) = cargo(&["generate-lockfile", "--offline"], &m, &d.join("t"));
     assert!(ok, "{err}");
-    // (a proc-macro dependency is a stub: unused, the build goes on; so does a use in a file the crate does not reach
-    //  or under a cfg that is off)
+    // (a proc-macro dependency is a stub: unused, the build goes on; so does a use in a file the crate does not reach,
+    //  under a cfg that is off (before or after the attribute), or in a macro_rules! body nothing calls)
     let (ok, _, err) = zurgo(&["build"], &m, &d.join("t"));
     assert!(ok, "{err}");
     sc.write(&[
         ("p/src/unused.rs", "#[pm::traced]\nfn f() {}\n"),
-        ("p/src/main.rs", "#[cfg(any())]\n#[pm::traced]\nfn hidden() {}\nfn main() {}\n"),
+        (
+            "p/src/main.rs",
+            "#[cfg(any())]\n#[pm::traced]\nfn hidden() {}\n#[pm::traced]\n#[cfg(any())]\nfn hidden2() {}\nmacro_rules! unused {\n    () => {\n        #[pm::traced]\n        fn t() {}\n    };\n}\nfn main() {}\n",
+        ),
     ]);
     let (ok, _, err) = zurgo(&["build"], &m, &d.join("t"));
     assert!(ok, "{err}");

@@ -150,28 +150,35 @@ fn crate_cfgs_and_env() {
         "lib/lib.rs",
         "include!(concat!(env!(\"OUT_DIR\"), \"/gen.rs\"));\npub const RAW: &str = r#\"env!(\"CARGO_PKG_NAME\")\"#;\n#[cfg(big)]\npub const SIZE: &str = \"big\";\n#[cfg(not(big))]\npub const SIZE: &str = \"small\";\npub fn hi() -> String {\n    let mut s = String::from(env!(\"CARGO_PKG_NAME\"));\n    if cfg!(kind = \"x y\") {\n        s.push_str(\" kind\");\n    }\n    s\n}\n",
     );
-    put("m/lib.rs", "macro_rules! big {\n    () => {\n        cfg!(big)\n    };\n}\npub fn is_big() -> bool {\n    big!()\n}\n");
+    put(
+        "m/lib.rs",
+        "macro_rules! big {\n    () => {\n        cfg!(big)\n    };\n}\nmacro_rules! label {\n    ($k:literal) => {\n        env!($k)\n    };\n}\npub fn is_big() -> bool {\n    big!()\n}\npub fn big_of<T>() -> bool {\n    big!()\n}\npub fn label() -> &'static str {\n    label!(\"M_LABEL\")\n}\npub fn spaced() -> &'static str {\n    env ! (\"M_LABEL\")\n}\n",
+    );
     put(
         "app/main.rs",
-        "fn main() {\n    println!(\"{} {} {} {:?} {:?}\", lib::hi(), lib::SIZE, lib::gen(), option_env!(\"APP_NOTE\"), option_env!(\"ZUST_SURELY_UNSET\"));\n    println!(\"{} {} {}\", lib::gen_name(), lib::RAW, m::is_big());\n}\n",
+        "fn main() {\n    println!(\"{} {} {} {:?} {:?}\", lib::hi(), lib::SIZE, lib::gen(), option_env!(\"APP_NOTE\"), option_env!(\"ZUST_SURELY_UNSET\"));\n    println!(\"{} {} {}\", lib::gen_name(), lib::RAW, m::is_big());\n    println!(\"{} {} {}\", m::big_of::<u8>(), m::label(), m::spaced());\n}\n",
     );
-    let ws = |big: bool| {
+    let ws = |big: bool, m_big: bool| {
         let out = zustc::driver2::ws_escape(dir.join("out").to_str().unwrap());
         let cfg = if big { " cfg=big" } else { "" };
+        let m_cfg = if m_big { " cfg=big" } else { "" };
         format!(
-            "lib lib lib/lib.rs cfg=kind={}{cfg} env=OUT_DIR={out} env=CARGO_PKG_NAME=my%20lib\nlib m m/lib.rs{cfg}\nbin app app/main.rs lib m env=APP_NOTE=a%23b\n",
+            "lib lib lib/lib.rs cfg=kind={}{cfg} env=OUT_DIR={out} env=CARGO_PKG_NAME=my%20lib\nlib m m/lib.rs{m_cfg} env=M_LABEL=m%20label\nbin app app/main.rs lib m env=APP_NOTE=a%23b\n",
             zustc::driver2::ws_escape("x y")
         )
     };
     let target = dir.join("target");
     // (`env!` in the included file; text in a raw string left alone; a cfg only a macro's body reads: a change of it
-    //  alone rebuilds the crate)
+    //  alone rebuilds the crate, and the crate whose code a generic function of it is compiled in; `env!($k)` in a
+    //  macro's body; `env !`)
     let raw = "env!(\"CARGO_PKG_NAME\")";
-    for (big, want) in [
-        (true, format!("my lib kind big generated Some(\"a#b\") None\nmy lib {raw} true\n")),
-        (false, format!("my lib kind small generated Some(\"a#b\") None\nmy lib {raw} false\n")),
+    for (big, m_big, want) in [
+        (true, true, format!("my lib kind big generated Some(\"a#b\") None\nmy lib {raw} true\ntrue m label m label\n")),
+        (false, false, format!("my lib kind small generated Some(\"a#b\") None\nmy lib {raw} false\nfalse m label m label\n")),
+        // (only m's cfg: nothing of the app's text or of m's changes)
+        (false, true, format!("my lib kind small generated Some(\"a#b\") None\nmy lib {raw} true\ntrue m label m label\n")),
     ] {
-        put("ws.txt", &ws(big));
+        put("ws.txt", &ws(big, m_big));
         let crates = zustc::driver2::read_workspace(&dir.join("ws.txt")).unwrap();
         // (no forked workers: the other tests of this file run in threads beside this one)
         let mut s = zustc::driver2::Session2::new(zustc::driver2::Options2 { jobs: 1, ..Default::default() });

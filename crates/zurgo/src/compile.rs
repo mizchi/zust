@@ -96,8 +96,8 @@ pub fn plan(g: &Graph, o: &BuildOpts) -> R<Vec<CrateSpec>> {
     let mut order: Vec<Node> = vec![];
     let mut state: BTreeMap<Node, u8> = BTreeMap::new();
     // (proc-macro dependencies: stubs, before the crates that use them)
-    let mut pms: Vec<usize> = vec![];
-    fn visit(g: &Graph, r: &resolve::Resolved, n: Node, order: &mut Vec<Node>, state: &mut BTreeMap<Node, u8>, pms: &mut Vec<usize>) -> R<()> {
+    let mut pms: Vec<Node> = vec![];
+    fn visit(g: &Graph, r: &resolve::Resolved, n: Node, order: &mut Vec<Node>, state: &mut BTreeMap<Node, u8>, pms: &mut Vec<Node>) -> R<()> {
         match state.get(&n) {
             Some(2) => return Ok(()),
             Some(_) => return Err(format!("dependency cycle at `{}`", g.pkgs[n.0].m.name)),
@@ -110,8 +110,8 @@ pub fn plan(g: &Graph, o: &BuildOpts) -> R<Vec<CrateSpec>> {
                 continue;
             }
             if g.pkgs[t.0].m.is_proc_macro() {
-                if !pms.contains(&t.0) {
-                    pms.push(t.0);
+                if !pms.iter().any(|p| p.0 == t.0) {
+                    pms.push(t);
                 }
                 continue;
             }
@@ -145,11 +145,14 @@ pub fn plan(g: &Graph, o: &BuildOpts) -> R<Vec<CrateSpec>> {
     if !pms.is_empty() {
         let stub_dir = out_dir(g, o).join("proc-macro-stubs");
         std::fs::create_dir_all(&stub_dir).map_err(|e| format!("{}: {e}", stub_dir.display()))?;
-        for &p in &pms {
+        for &pn in &pms {
+            let p = pn.0;
             let pk = &g.pkgs[p].m;
             let Some(lib) = &pk.lib else { continue };
             let src = std::fs::read_to_string(&lib.path).map_err(|e| format!("{}: {e}", lib.path.display()))?;
-            let m = proc_macro_stub::macros_of(&src);
+            // (its root with its features: `#[cfg_attr(feature = "x", proc_macro_attribute)]`)
+            let cfg = zustc::cfg::CfgSet { features: r.nodes[&pn].features.iter().cloned().collect(), debug_assertions: !o.release, ..Default::default() };
+            let m = proc_macro_stub::macros_of(&zustc::cfg::strip(&src, &cfg).unwrap_or(src));
             if lib_of.contains_key(&lib.name) {
                 pm_macros.push((p, m));
                 continue;
@@ -178,6 +181,8 @@ pub fn plan(g: &Graph, o: &BuildOpts) -> R<Vec<CrateSpec>> {
         }
     }
     let n_stubs = crates.len();
+    // (the node of each crate after the stubs)
+    let mut node_of: Vec<Node> = vec![];
     for &n in &order {
         let pk = &g.pkgs[n.0];
         let Some(lib) = &pk.m.lib else { continue };
@@ -189,6 +194,7 @@ pub fn plan(g: &Graph, o: &BuildOpts) -> R<Vec<CrateSpec>> {
         }
         lib_of.insert(lib.name.clone(), n.0);
         let (cfgs, env) = build_script::crate_env(&pk.m, &lib.name, bs_out.get(&n));
+        node_of.push(n);
         crates.push(CrateSpec {
             name: lib.name.clone(),
             root: lib.path.clone(),
@@ -248,6 +254,7 @@ pub fn plan(g: &Graph, o: &BuildOpts) -> R<Vec<CrateSpec>> {
             let (cfgs, mut env) = build_script::crate_env(&pk.m, &b.name, bs_out.get(&n));
             env.push(("CARGO_BIN_NAME".into(), b.name.clone()));
             env.push(("CARGO_PRIMARY_PACKAGE".into(), "1".into()));
+            node_of.push(n);
             crates.push(CrateSpec {
                 name,
                 root: b.path.clone(),
@@ -266,14 +273,20 @@ pub fn plan(g: &Graph, o: &BuildOpts) -> R<Vec<CrateSpec>> {
         return Err(format!("no bin target named `{}`", missing.iter().map(|b| b.as_str()).collect::<Vec<_>>().join("`, `")));
     }
     // (a crate that uses one of a stub's derives or attributes: an error, as zustc would drop the attribute. Each crate
-    //  is read as zustc reads it: its module tree, with its features and cfgs)
+    //  is read as zustc reads it: its module tree, with its features and cfgs. Only the proc-macro crates it reaches
+    //  count, directly or through the libraries that re-export them)
     if !pm_macros.is_empty() {
         let wasm = target.triple.starts_with("wasm32");
-        for c in &crates[n_stubs..] {
+        let mut reach: BTreeMap<Node, Vec<usize>> = BTreeMap::new();
+        for (c, &n) in crates[n_stubs..].iter().zip(&node_of) {
+            let pm_deps = pm_reach(g, &r, n, &mut reach);
+            if pm_deps.is_empty() {
+                continue;
+            }
             let cfg = zustc::cfg::CfgSet { features: c.features.clone(), debug_assertions: !o.release, wasm, cfgs: c.cfgs.clone(), env: c.env.clone() };
             let (text, _) = zustc::srcmap::load_crate(&c.root, &c.display, &cfg)?;
             let u = proc_macro_stub::uses_in(&text);
-            for (p, m) in &pm_macros {
+            for (p, m) in pm_macros.iter().filter(|(p, _)| pm_deps.contains(p)) {
                 if let Some(h) = u.hit(m) {
                     let pk = &g.pkgs[*p].m;
                     return Err(format!("`{}` uses {h} of the proc-macro crate `{} v{}`: proc macros cannot run yet (mizchi/zust#29)", c.name, pk.name, pk.version));
@@ -282,6 +295,27 @@ pub fn plan(g: &Graph, o: &BuildOpts) -> R<Vec<CrateSpec>> {
         }
     }
     Ok(crates)
+}
+
+/// The proc-macro packages a node reaches through its normal dependencies (a library may re-export them)
+fn pm_reach(g: &Graph, r: &resolve::Resolved, n: Node, memo: &mut BTreeMap<Node, Vec<usize>>) -> Vec<usize> {
+    if let Some(v) = memo.get(&n) {
+        return v.clone();
+    }
+    let mut v: Vec<usize> = vec![];
+    for &(ei, t) in &r.nodes[&n].edges {
+        if g.decl(n.0, &g.edges[n.0][ei]).kind != crate::manifest::DepKind::Normal {
+            continue;
+        }
+        let more = if g.pkgs[t.0].m.is_proc_macro() { vec![t.0] } else { pm_reach(g, r, t, memo) };
+        for p in more {
+            if !v.contains(&p) {
+                v.push(p);
+            }
+        }
+    }
+    memo.insert(n, v.clone());
+    v
 }
 
 /// The extern names of a node's normal dependencies (as zustc's workspace names them: the library names)

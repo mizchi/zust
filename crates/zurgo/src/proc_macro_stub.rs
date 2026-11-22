@@ -41,22 +41,94 @@ impl<'a> Toks<'a> {
         }
         self.ident(k).then(|| (self.text(k).to_string(), k + 1))
     }
-    /// A path at k (`a::b::c`, `::a`): its last name and the token after it
-    fn path(&self, mut k: usize) -> Option<(String, usize)> {
+    /// A path at k (`a::b::c`, `::a`)
+    fn path(&self, mut k: usize) -> Option<Path> {
         if self.text(k) == ":" && self.text(k + 1) == ":" {
             k += 2;
         }
-        let (mut last, mut j) = self.name(k)?;
+        let (first, mut j) = self.name(k)?;
+        let (mut last, mut segs) = (first.clone(), 1);
         while self.text(j) == ":" && self.text(j + 1) == ":" {
             let (n, jj) = self.name(j + 2)?;
             last = n;
             j = jj;
+            segs += 1;
         }
-        Some((last, j))
+        Some(Path { first, last, after: j, segs })
+    }
+    /// The bracket that closes the one at k
+    fn close_of(&self, k: usize) -> usize {
+        let mut depth = 0usize;
+        let mut j = k;
+        while j < self.t.len() {
+            if self.t[j].0 == 1 {
+                match self.text(j) {
+                    "(" | "[" | "{" => depth += 1,
+                    ")" | "]" | "}" => {
+                        depth = depth.saturating_sub(1);
+                        if depth == 0 {
+                            return j;
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            j += 1;
+        }
+        self.t.len()
+    }
+    /// Whether the outer attributes just before the token at k have `#[macro_export]`
+    fn exported(&self, k: usize) -> bool {
+        let mut j = k;
+        while j >= 3 && self.text(j - 1) == "]" {
+            // (back to its `#[`)
+            let mut depth = 0usize;
+            let mut o = j - 1;
+            loop {
+                if self.t[o].0 == 1 {
+                    match self.text(o) {
+                        ")" | "]" | "}" => depth += 1,
+                        "(" | "[" | "{" => depth = depth.saturating_sub(1),
+                        _ => {}
+                    }
+                }
+                if depth == 0 || o == 0 {
+                    break;
+                }
+                o -= 1;
+            }
+            if o == 0 || self.text(o - 1) != "#" {
+                return false;
+            }
+            if self.text(o + 1) == "macro_export" {
+                return true;
+            }
+            j = o - 1;
+        }
+        false
     }
 }
 
-/// `#[proc_macro_derive(Name, ..)]`, `#[proc_macro_attribute] pub fn name`, `#[proc_macro] pub fn name`
+/// A path's first and last names, the token after it, and how many names it has
+struct Path {
+    first: String,
+    last: String,
+    after: usize,
+    segs: usize,
+}
+
+/// A name without `r#` (`r#route` and `route` are one identifier)
+fn plain(s: &str) -> &str {
+    s.strip_prefix("r#").unwrap_or(s)
+}
+
+/// A path into std (`std::fmt::Debug`, `core::prelude::v1::test`): never a proc macro's
+fn std_root(s: &str) -> bool {
+    matches!(s, "std" | "core" | "alloc")
+}
+
+/// `#[proc_macro_derive(Name, ..)]`, `#[proc_macro_attribute] pub fn name`, `#[proc_macro] pub fn name` (src: the root
+/// file with its cfgs evaluated, so `#[cfg_attr(p, proc_macro_attribute)]` counts when p holds)
 pub fn macros_of(src: &str) -> Macros {
     let tk = Toks::new(src);
     let mut m = Macros::default();
@@ -119,8 +191,11 @@ const BUILTIN_ATTRS: &[&str] = &[
     "track_caller", "type_length_limit", "unsafe", "used", "warn", "windows_subsystem",
 ];
 
+/// Derives of the language: a proc macro's only when the crate imports one of that name (`use derive_more::Debug;`)
+const BUILTIN_DERIVES: &[&str] = &["Clone", "Copy", "Debug", "Default", "Eq", "Hash", "Ord", "PartialEq", "PartialOrd"];
+
 /// What a crate's source uses: derives (`#[derive(.., Name, ..)]`, also `path::Name`), attributes (`#[name ..]`,
-/// `#[path::name ..]`), and renames (`use a::Name as Other;`: (Name, Other))
+/// `#[path::name ..]`), and renames (`use a::Name as Other;`: (Name, Other)). Paths into std are not counted
 #[derive(Debug, Default, PartialEq)]
 pub struct Uses {
     pub derives: Vec<String>,
@@ -129,9 +204,22 @@ pub struct Uses {
 }
 
 impl Uses {
-    /// The first of a proc-macro crate's derives or attributes this source uses, also under another name
+    /// The first of a proc-macro crate's derives or attributes this source uses, also under another name (renames
+    /// followed to their end)
     pub fn hit(&self, m: &Macros) -> Option<String> {
-        let named = |n: &String, list: &[String]| list.contains(n) || self.renames.iter().any(|(orig, alias)| alias == n && list.contains(orig));
+        let named = |n: &String, list: &[String]| {
+            let mut names = vec![plain(n).to_string()];
+            let mut k = 0;
+            while k < names.len() {
+                for (orig, alias) in &self.renames {
+                    if plain(alias) == names[k] && !names.iter().any(|x| x == plain(orig)) {
+                        names.push(plain(orig).to_string());
+                    }
+                }
+                k += 1;
+            }
+            names.iter().any(|x| list.iter().any(|l| plain(l) == x))
+        };
         if let Some(d) = self.derives.iter().find(|d| named(d, &m.derives)) {
             return Some(format!("the derive `{d}`"));
         }
@@ -139,17 +227,60 @@ impl Uses {
     }
 }
 
-/// The uses in a crate's source as zustc reads it (its module tree, cfgs evaluated: srcmap::load_crate)
+/// The uses in a crate's source as zustc reads it (its module tree, cfgs evaluated: srcmap::load_crate). The body
+/// of a `macro_rules!` that is neither called in the source nor exported is not read: it expands to nothing
 pub fn uses_in(src: &str) -> Uses {
     let tk = Toks::new(src);
+    let n = tk.t.len();
     let mut u = Uses::default();
+    // (first: what `use` brings in from outside std (`use a::{B as C, D};`), and the macros called (`name!`))
+    let mut imported: Vec<String> = vec![];
+    let mut called: Vec<String> = vec![];
+    for k in 0..n {
+        if tk.ident(k) && tk.text(k + 1) == "!" && tk.text(k) != "macro_rules" {
+            let c = plain(tk.text(k)).to_string();
+            if !called.contains(&c) {
+                called.push(c);
+            }
+        }
+        if !(tk.ident(k) && tk.text(k) == "use") {
+            continue;
+        }
+        let mut j = k + 1;
+        if tk.text(j) == ":" && tk.text(j + 1) == ":" {
+            j += 2;
+        }
+        if std_root(tk.text(j)) {
+            continue;
+        }
+        while j < n && tk.text(j) != ";" {
+            if let Some((name, after)) = tk.name(j).filter(|_| tk.ident(j)) {
+                if tk.text(after) == "as" {
+                    if let Some((alias, aa)) = tk.name(after + 1) {
+                        if !u.renames.contains(&(name.clone(), alias.clone())) {
+                            u.renames.push((name, alias));
+                        }
+                        j = aa;
+                        continue;
+                    }
+                }
+                if matches!(tk.text(after), "," | ";" | "}") && !imported.iter().any(|x| x == plain(&name)) {
+                    imported.push(plain(&name).to_string());
+                }
+                j = after;
+                continue;
+            }
+            j += 1;
+        }
+    }
     let mut k = 0;
-    while k < tk.t.len() {
-        // (`use a::B as C;`, also in a group: `use a::{B as C, ..};`)
-        if tk.ident(k) && tk.text(k) == "as" && k > 0 {
-            if let (Some((orig, _)), Some((alias, _))) = (tk.name(k - 1).filter(|_| tk.ident(k - 1)), tk.name(k + 1)) {
-                if !u.renames.contains(&(orig.clone(), alias.clone())) {
-                    u.renames.push((orig, alias));
+    while k < n {
+        // (`macro_rules! name { .. }` neither called nor exported)
+        if tk.text(k) == "macro_rules" && tk.text(k + 1) == "!" && matches!(tk.text(k + 3), "{" | "(" | "[") {
+            if let Some((name, _)) = tk.name(k + 2) {
+                if !called.iter().any(|c| c == plain(&name)) && !tk.exported(k) {
+                    k = tk.close_of(k + 3) + 1;
+                    continue;
                 }
             }
         }
@@ -157,20 +288,20 @@ pub fn uses_in(src: &str) -> Uses {
             k += 1;
             continue;
         }
-        let Some((last, after)) = tk.path(k + 2) else {
+        let Some(p) = tk.path(k + 2) else {
             k += 2;
             continue;
         };
-        let qualified = tk.text(k + 3) == ":";
-        if last == "derive" && !qualified && tk.text(after) == "(" {
-            let mut j = after + 1;
-            while j < tk.t.len() && tk.text(j) != ")" {
+        if p.last == "derive" && p.segs == 1 && tk.text(p.after) == "(" {
+            let mut j = p.after + 1;
+            while j < n && tk.text(j) != ")" {
                 match tk.path(j) {
-                    Some((d, jj)) => {
-                        if !u.derives.contains(&d) {
-                            u.derives.push(d);
+                    Some(d) => {
+                        let counts = if d.segs > 1 { !std_root(&d.first) } else { !BUILTIN_DERIVES.contains(&plain(&d.last)) || imported.iter().any(|x| x == plain(&d.last)) };
+                        if counts && !u.derives.contains(&d.last) {
+                            u.derives.push(d.last);
                         }
-                        j = jj;
+                        j = d.after;
                     }
                     None => j += 1,
                 }
@@ -178,10 +309,11 @@ pub fn uses_in(src: &str) -> Uses {
             k = j;
             continue;
         }
-        if (qualified || !BUILTIN_ATTRS.contains(&last.as_str())) && !u.attrs.contains(&last) {
-            u.attrs.push(last);
+        let counts = if p.segs > 1 { !std_root(&p.first) } else { !BUILTIN_ATTRS.contains(&p.last.as_str()) };
+        if counts && !u.attrs.contains(&p.last) {
+            u.attrs.push(p.last);
         }
-        k = after;
+        k = p.after;
     }
     u
 }
@@ -199,7 +331,8 @@ mod tests {
         let u = uses_in(
             "#[derive(Debug, thiserror::Error)]\nstruct E;\n// #[derive(Fake)]\nconst S: &str = r#\"#[web::route] \"quoted\"\"#;\n#[test]\nfn t() {}\n# [ web :: route ( \"/\" ) ]\nfn r() {}\n#[inline]\nfn i() {}\nuse web::route as get;\n#[get]\nfn g() {}\n#[derive (Clone)]\nstruct C;\n",
         );
-        assert_eq!(u.derives, ["Debug", "Error", "Clone"]);
+        // (`Debug` and `Clone` are the language's: no crate imports one of those names)
+        assert_eq!(u.derives, ["Error"]);
         assert_eq!(u.attrs, ["route", "get"]);
         assert_eq!(u.renames, [("route".to_string(), "get".to_string())]);
         assert_eq!(u.hit(&m).as_deref(), Some("the derive `Error`"));
@@ -211,5 +344,26 @@ mod tests {
         // (a derive under another name too: `use web::Error as WebError;`)
         let derive_alias = uses_in("use web::Error as WebError;\n#[derive(Debug, WebError)]\nstruct E;\n");
         assert_eq!(derive_alias.hit(&m).as_deref(), Some("the derive `WebError`"));
+        // (`r#route` is `route`; renames are followed to their end)
+        assert_eq!(uses_in("#[web::r#route]\nfn f() {}\n").hit(&m).as_deref(), Some("the attribute `#[r#route]`"));
+        let chained = uses_in("use web::route as first;\nuse crate::first as second;\n#[second]\nfn f() {}\n");
+        assert_eq!(chained.hit(&m).as_deref(), Some("the attribute `#[second]`"));
+        assert_eq!(uses_in("use a::b as c;\nuse a::c as b;\n#[b]\nfn f() {}\n").hit(&m), None);
+        // (a derive of the language's name: a proc macro's only when imported from outside std)
+        let dm = Macros { derives: vec!["Debug".into()], ..Default::default() };
+        assert_eq!(uses_in("use derive_more::Debug;\n#[derive(Debug)]\nstruct P;\n").hit(&dm).as_deref(), Some("the derive `Debug`"));
+        assert_eq!(uses_in("use derive_more::{Display, Debug};\n#[derive(Debug)]\nstruct P;\n").hit(&dm).as_deref(), Some("the derive `Debug`"));
+        assert_eq!(uses_in("use std::fmt::Debug;\n#[derive(Debug, std::fmt::Debug)]\nstruct P;\n").hit(&dm), None);
+        assert_eq!(uses_in("#[derive(derive_more::Debug)]\nstruct P;\n").hit(&dm).as_deref(), Some("the derive `Debug`"));
+        assert_eq!(uses_in("#[core::prelude::v1::test]\nfn t() {}\n"), Uses::default());
+        // (a macro_rules! body: read when the macro is called or exported)
+        let tmpl = "macro_rules! m {\n    () => {\n        #[web::route]\n        fn f() {}\n    };\n}\n";
+        assert_eq!(uses_in(&format!("{tmpl}fn main() {{}}\n")).hit(&m), None);
+        assert_eq!(uses_in(&format!("{tmpl}m!();\n")).hit(&m).as_deref(), Some("the attribute `#[route]`"));
+        assert_eq!(uses_in(&format!("#[macro_export]\n#[doc(hidden)]\n{tmpl}")).hit(&m).as_deref(), Some("the attribute `#[route]`"));
+        // (a declaration under `cfg_attr`: macros_of reads the root with its cfgs evaluated)
+        let gated = "#[cfg_attr(feature = \"on\", proc_macro_attribute)]\npub fn gated(a: TokenStream, i: TokenStream) -> TokenStream { i }\n#[cfg_attr(feature = \"off\", proc_macro_attribute)]\npub fn hidden(a: TokenStream, i: TokenStream) -> TokenStream { i }\n";
+        let c = zustc::cfg::CfgSet { features: vec!["on".into()], ..Default::default() };
+        assert_eq!(macros_of(&zustc::cfg::strip(gated, &c).unwrap()).attributes, ["gated"]);
     }
 }

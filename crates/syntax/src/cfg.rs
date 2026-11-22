@@ -227,6 +227,10 @@ pub fn strip(src: &str, c: &CfgSet) -> Option<String> {
             None => b"",
         }
     };
+    // (where the outer attributes before i start: a false `#[cfg]` takes them with its item, `#[derive(Debug)]
+    // #[cfg(x)] struct A;` (they would apply to the next item otherwise))
+    let mut run_start = 0;
+    let mut run_end = usize::MAX;
     let mut i = 0;
     while i < toks.len() {
         // `cfg!(p)` → `true` / `false`
@@ -288,6 +292,12 @@ pub fn strip(src: &str, c: &CfgSet) -> Option<String> {
         }
         let rb = matching(s, &toks, lb);
         let name = t(lb + 1);
+        if !inner {
+            if i == 0 || run_end != i - 1 {
+                run_start = toks[i].1;
+            }
+            run_end = rb;
+        }
         if (name == b"cfg" || name == b"cfg_attr") && t(lb + 2) == b"(" {
             let pclose = matching(s, &toks, lb + 2);
             let (mut v, after) = eval(s, &toks, lb + 3, c);
@@ -325,7 +335,7 @@ pub fn strip(src: &str, c: &CfgSet) -> Option<String> {
                 i = rb + 1;
             } else {
                 let e = thing_end(s, &toks, rb + 1);
-                blank(&mut out, toks[i].1, toks[e.max(rb)].2);
+                blank(&mut out, run_start, toks[e.max(rb)].2);
                 i = e.max(rb) + 1;
             }
             continue;
@@ -355,6 +365,11 @@ mod tests {
         assert_eq!(run("match x { #[cfg(any(test, doc))] 1 => {} _ => 2 }", &[]), "match x { _ => 2 }");
         assert_eq!(run("#[cfg(test)] const X: S = S { a: 1 }; fn f() {}", &[]), "fn f() {}");
         assert_eq!(run("#[cfg(test)] use a::{b, c}; fn f() {}", &[]), "fn f() {}");
+        // (the attributes before a false `#[cfg]` go with its item, not on to the next one)
+        assert_eq!(run("#[derive(Debug)] #[cfg(test)] struct A; struct B;", &[]), "struct B;");
+        assert_eq!(run("#[inline] fn a() {} #[pm::traced]\n#[cfg(any())] fn h() {} fn b() {}", &[]), "#[inline] fn a() {} fn b() {}");
+        assert_eq!(run("struct S { #[serde(x)] #[cfg(test)] a: u8, b: u8 }", &[]), "struct S { b: u8 }");
+        assert_eq!(run("#[derive(Debug)] #[cfg_attr(test, inline)] #[cfg(test)] struct A;", &[]), "");
         assert_eq!(run("#[cfg_attr(feature = \"std\", derive(Debug))] struct S;", &["std"]), "#[ derive(Debug) ] struct S;");
         assert_eq!(run("#![cfg_attr(not(feature = \"std\"), no_std)] fn f() {}", &["std"]), "fn f() {}");
         assert_eq!(run("let a = cfg!(all(unix, target_pointer_width = \"64\"));", &[]), "let a = true ;");

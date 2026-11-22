@@ -983,6 +983,8 @@ pub fn expand_cfg(src: &str, cfg: Option<&crate::cfg::CfgSet>) -> Result<Option<
         // (展開したものの中にマクロの名前が無ければ、もう一周しなくてよい)
         let again = reps.iter().any(|r| r.2.contains("macro_rules") || macros.keys().any(|m| r.2.contains(m.as_str())));
         let has_cfg = cfg.is_some() && reps.iter().any(|r| r.2.contains("cfg"));
+        // (`env!($k)` in a template: its name is known only now)
+        let has_env = reps.iter().any(|r| r.2.contains("env"));
         for (a, e, rep) in reps {
             let nl = text[a..e].bytes().filter(|&c| c == b'\n').count();
             let mut r = rep;
@@ -993,6 +995,12 @@ pub fn expand_cfg(src: &str, cfg: Option<&crate::cfg::CfgSet>) -> Result<Option<
         }
         if has_cfg {
             if let Some(t) = crate::cfg::strip(&text, cfg.unwrap()) {
+                text = t;
+            }
+        }
+        if has_env {
+            let none = crate::cfg::CfgSet::default();
+            if let Some(t) = expand_env(&text, cfg.unwrap_or(&none)) {
                 text = t;
             }
         }
@@ -1208,6 +1216,21 @@ fn find_calls(
     Ok(())
 }
 
+/// Whether src may call `env!` / `option_env!` (also written `env !`): the one look a file gets before expand_env
+pub fn may_use_env(src: &str) -> bool {
+    if !src.contains("env") {
+        return false;
+    }
+    let b = src.as_bytes();
+    src.match_indices("env").any(|(k, _)| {
+        let mut j = k + 3;
+        while j < b.len() && b[j].is_ascii_whitespace() {
+            j += 1;
+        }
+        b.get(j) == Some(&b'!')
+    })
+}
+
 /// `env!("NAME")` / `env!("NAME", "message")` and `option_env!("NAME")` with the crate's compile-time environment
 /// (`CfgSet::env`, then zustc's own): `env!` becomes the value as a string literal, `option_env!` `Some("value")`.
 /// A name that is not set is left as written: `option_env!` is then `None` (acg), and `env!` the error that names it.
@@ -1254,18 +1277,28 @@ pub fn expand_env(src: &str, cfg: &crate::cfg::CfgSet) -> Option<String> {
                 continue;
             }
         };
+        // (`std::env!`, `::core::option_env!`: the path goes too. Another path (`custom::env!`, `a::std::env!`) names
+        // a macro of its own: left as it is)
+        let back = |k: usize, d: usize| if k >= d { t(k - d) } else { b"" };
+        let mut st = i;
+        if back(st, 1) == b":" && back(st, 2) == b":" {
+            if !matches!(back(st, 3), b"std" | b"core") {
+                i = close + 1;
+                continue;
+            }
+            st -= 3;
+            if back(st, 1) == b":" && back(st, 2) == b":" {
+                if st >= 3 && (toks[st - 3].0 == 0 || t(st - 3) == b">") {
+                    i = close + 1;
+                    continue;
+                }
+                st -= 2;
+            }
+        }
         let Some(v) = cfg.env_var(&name) else {
             i = close + 1;
             continue;
         };
-        // (`std::env!`, `::core::option_env!`: the path goes too)
-        let mut st = i;
-        if st >= 3 && t(st - 1) == b":" && t(st - 2) == b":" && matches!(t(st - 3), b"std" | b"core") {
-            st -= 3;
-            if st >= 2 && t(st - 1) == b":" && t(st - 2) == b":" {
-                st -= 2;
-            }
-        }
         let (a, b) = (toks[st].1, toks[close].2);
         out.push_str(&src[at..a]);
         let lit = str_literal(&v);
@@ -1493,4 +1526,21 @@ fn expand_include_code(src: &str, dir: &std::path::Path, depth: u32) -> Result<O
     }
     out.push_str(&src[at..]);
     Ok(changed.then_some(out))
+}
+
+#[cfg(test)]
+mod env_tests {
+    use super::*;
+
+    #[test]
+    fn env_macros_and_their_paths() {
+        let c = crate::cfg::CfgSet { env: vec![("LABEL".into(), "v".into())], ..Default::default() };
+        let x = |s: &str| expand_env(s, &c).unwrap_or_else(|| s.to_string());
+        assert_eq!(x("f(env!(\"LABEL\"), ::std::env!(\"LABEL\"), core::option_env!(\"LABEL\"));"), "f(\"v\", \"v\", Some(\"v\"));");
+        // (another path names a macro of its own)
+        assert_eq!(x("custom::env!(\"LABEL\"); a::std::env!(\"LABEL\");"), "custom::env!(\"LABEL\"); a::std::env!(\"LABEL\");");
+        assert_eq!(x("env ! (\"LABEL\")"), "\"v\"");
+        assert!(may_use_env("let a = env ! (\"X\");") && may_use_env("option_env!(\"X\")"));
+        assert!(!may_use_env("use std::env; fn environment() {}"));
+    }
 }

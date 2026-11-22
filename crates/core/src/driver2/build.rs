@@ -914,11 +914,14 @@ fn mkdir_all(dir: &std::path::Path) -> R<()> {
     if dir.is_dir() { Ok(()) } else { Err(format!("{}: cannot create the directory", dir.display())) }
 }
 
-/// A crate's features and cfgs, for its fingerprints
+/// A crate's features, cfgs and compile-time environment, for its fingerprints (and its dependents': a `cfg!` or an
+/// `env!($k)` in a macro_rules! body is only evaluated after expansion, so the text alone does not show a change of
+/// them)
 fn add_crate_cfg(h: &mut KeyHasher, c: &CrateSpec) {
     // (the lists as they are: no string built for each, as every no-op build computes this)
     h.add(&c.features);
     h.add(&c.cfgs);
+    h.add(&c.env);
 }
 
 fn n_lines(s: &str) -> u32 {
@@ -1186,6 +1189,15 @@ impl Session2 {
                 }
             };
         }
+        // (each crate's features, cfgs and environment: add_crate_cfg)
+        let cfg_keys: Vec<Key> = crates
+            .iter()
+            .map(|c| {
+                let mut h = KeyHasher::new();
+                add_crate_cfg(&mut h, c);
+                h.finish()
+            })
+            .collect();
         // 古いクレート: (番号, 指紋)
         let mut stale: Vec<(usize, String)> = vec![];
         for &i in &order {
@@ -1196,9 +1208,7 @@ impl Session2 {
             h.add(&self.cid);
             h.add(&(self.opts.opt as u8));
             h.add(&(c.lib as u8));
-            // (the crate's features and cfgs: a `cfg!` inside a macro_rules! body is only evaluated after expansion,
-            // so the text alone does not show a change of them)
-            add_crate_cfg(&mut h, c);
+            h.add(&cfg_keys[i]);
             h.add(&loaded[i].as_ref().unwrap().0);
             for f in &loaded[i].as_ref().unwrap().1.files {
                 h.add(f);
@@ -1206,6 +1216,8 @@ impl Session2 {
             for &j in &deps {
                 h.add(&crates[j].name);
                 h.add(&ifaces[j]);
+                // (and the dependency's: what its generic code expands to)
+                h.add(&cfg_keys[j]);
                 for f in &loaded[j].as_ref().unwrap().1.files {
                     h.add(f);
                 }
@@ -1260,12 +1272,7 @@ impl Session2 {
                 kh.add(&self.cid);
                 kh.add(&text);
                 kh.add(&dd);
-                for f in &crates[i].features {
-                    kh.add(f);
-                }
-                for (k, v) in &crates[i].cfgs {
-                    kh.add(&format!("cfg {k}={v:?}"));
-                }
+                add_crate_cfg(&mut kh, &crates[i]);
                 let pkey = key_hex(kh.finish());
                 let pp = out_dir.join(format!("{}.prep", crates[i].name).as_str());
                 if let Ok(old) = std::fs::read_to_string(pp.as_path()) {
