@@ -2323,7 +2323,9 @@ impl Cx<'_> {
             } else if *mode == CapMode::Use {
                 // (a use that is not a pattern: acg's analysis says whether the closure takes the value)
                 // (`&mut x` of what the closure owns no reference to (`|| { &mut my_var; }`) is a `&mut` capture too)
-                let m = muts.iter().any(|q| overlap(q, p) && (assigns || q.owned_len() == q.proj.len())) || calls.iter().any(|q| overlap(q, p));
+                // (`&mut *x` through a reference the closure captures (`|| set(&mut *x)`): a unique borrow of `*x`, so
+                // a `&mut` capture of it too (E0596 through a `&`; two such closures at once conflict))
+                let m = muts.iter().any(|q| overlap(q, p) && (assigns || q.owned_len() == q.proj.len() || q.proj.len() == q.owned_len() + 1)) || calls.iter().any(|q| overlap(q, p));
                 *mode = if by_move { CapMode::Val } else if m { CapMode::RefMut } else { CapMode::Ref };
             }
         }

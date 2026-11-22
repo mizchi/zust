@@ -1853,3 +1853,14 @@ fn returned_borrow_through_cast_and_box() {
     let d = check("trait X { }\nstruct B<'a>(&'a u32);\nimpl<'a> X for B<'a> {}\nfn f(v: Box<u32>) -> Box<dyn X + 'static> {\n    Box::new(B(&*v)) as Box<dyn X>\n}\nfn h(v: Box<u32>) -> Box<dyn X + 'static> {\n    Box::new(B(&*v))\n}\nfn main() {}\n");
     assert!(d.len() == 2 && d[0].0 == 5 && d[1].0 == 8 && d[0].1.contains("cannot return a reference"), "{d:?}");
 }
+
+/// `&mut *x` in a closure through a reference it captures is a unique borrow of `*x`: E0596 through a `&`, and two
+/// such closures alive at once conflict; one after the other is fine
+#[test]
+fn closure_mut_through_captured_ref() {
+    let d = check("fn set(x: &mut isize) {\n    *x = 4;\n}\nfn a(x: &isize) {\n    let mut c1 = || set(&mut *x);\n    c1();\n}\nfn main() {}\n");
+    assert!(d.len() == 1 && d[0].0 == 5 && d[0].1.contains("behind a `&` reference"), "{d:?}");
+    let d = check("fn set(x: &mut isize) {\n    *x = 4;\n}\nfn b(x: &mut isize) {\n    let mut c1 = || set(&mut *x);\n    let mut c2 = || set(&mut *x);\n    c2();\n    c1();\n}\nfn main() {}\n");
+    assert!(d.len() == 1 && d[0].0 == 6 && d[0].1.contains("more than once"), "{d:?}");
+    assert_eq!(check("fn set(x: &mut isize) {\n    *x = 4;\n}\nfn ok(x: &mut isize) {\n    let mut c1 = || set(&mut *x);\n    c1();\n    let mut c2 = || set(&mut *x);\n    c2();\n    *x += 1;\n}\nfn main() {}\n"), vec![]);
+}
