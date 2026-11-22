@@ -114,6 +114,7 @@ fn main() {
     println!("{} {} {}", FLIP2, WIDE, std::mem::size_of::<[u8; ADD_U16]>());
     println!("{}", DIV_LATE);
     println!("{} {}", E2::A as u16, E2::B as u16);
+    println!("{}", std::mem::size_of::<[u8; QFLIP]>());
 }
 
 // (a generic alias resolves before layout; an unsafe block evaluates; the i128::MIN literal negates)
@@ -168,3 +169,8 @@ enum E2 {
     A = (300u32 as u8) as u16,
     B = 1 << 3,
 }
+// (a const fn's signature types by their paths)
+const fn qflip(x: core::primitive::u8) -> core::primitive::u8 {
+    !x >> 4
+}
+const QFLIP: usize = qflip(0) as usize;

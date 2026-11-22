@@ -2256,8 +2256,17 @@ pub fn summarize(item: &Item, owner: Option<&Owner>) -> R<Summary> {
                     _ => None,
                 }).collect();
                 if let Some(ps) = ps {
+                    // (`u8`, an alias, or a primitive by its path: `core::primitive::u8`)
                     let tn = |t: &crate::parse::Ty| match t {
                         crate::parse::Ty::Path(None, p) if p.segs.len() == 1 && p.segs[0].args.is_empty() => p.segs[0].name.clone(),
+                        crate::parse::Ty::Path(None, p)
+                            if p.segs.len() == 3
+                                && matches!(p.segs[0].name.as_str(), "core" | "std")
+                                && p.segs[1].name == "primitive"
+                                && p.segs.iter().all(|s| s.args.is_empty()) =>
+                        {
+                            p.segs[2].name.clone()
+                        }
                         _ => String::new(),
                     };
                     let pts = fs.params.iter().map(|(_, t)| tn(t)).collect();

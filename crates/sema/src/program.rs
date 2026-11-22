@@ -117,7 +117,8 @@ impl StructDef {
 
 /// The untyped locals of the blocks being evaluated (Program::eval_block_env): their expressions, and their values
 /// at each type a use wanted (memoized, so a chain `let x1 = x0 & x0; let x2 = x1 & x1; ..` is linear)
-type LazyLocals = (u64, FxMap<u64, (crate::parse::Expr, Vec<(Option<It>, Result<(i128, Option<It>), String>)>)>);
+type LazyLocals = (u64, FxMap<u64, (crate::parse::Expr, Vec<(Option<It>, Result<(i128, Option<It>), String>)>, Option<String>)>);
+// (the third: the error of its untyped value, reported if no use evaluates it: `let _x = 1 / 0;`)
 
 thread_local! {
     static LAZY: std::cell::RefCell<LazyLocals> = std::cell::RefCell::new((0, FxMap::default()));
@@ -2739,17 +2740,22 @@ impl Program {
         // (the untyped locals this block registers are dropped when it is done)
         let start = LAZY.with(|l| l.borrow().0);
         let r = self.eval_block_in(b, env, depth, want);
+        // (an unused local whose untyped value failed is that error: `{ let _x = 1 / 0; 1 }`)
+        let unused = LAZY.with(|l| l.borrow().1.iter().filter(|(k, e)| **k >= start && e.1.is_empty()).find_map(|(_, e)| e.2.clone()));
         LAZY.with(|l| l.borrow_mut().1.retain(|&k, _| k < start));
-        r
+        match (r, unused) {
+            (Ok(_), Some(e)) => Err(e),
+            (r, _) => r,
+        }
     }
 
     /// An untyped local's expression as a marker (`__zust_lazy_N`) that a use evaluates at the type it wants
-    fn lazy_marker(&self, x: crate::parse::Expr) -> R<crate::parse::Expr> {
+    fn lazy_marker(&self, x: crate::parse::Expr, failed: Option<String>) -> R<crate::parse::Expr> {
         let id = LAZY.with(|l| {
             let mut l = l.borrow_mut();
             let id = l.0;
             l.0 += 1;
-            l.1.insert(id, (x, vec![]));
+            l.1.insert(id, (x, vec![], failed));
             id
         });
         crate::parse::parse_expr(&format!("__zust_lazy_{id}"))
@@ -2766,14 +2772,18 @@ impl Program {
                     let lt = ty.as_ref().and_then(|t| It::of_name(&self.cast_prim(t))).or_else(|| self.static_ty(&x));
                     // (with no type yet, its failing untyped value is not an error: `let x = 1 / ((!0 >> 7) + 1);` is
                     // 0 as a u8, whose use evaluates it again at that type)
+                    let mut failed = None;
                     let (v, t) = match self.eval_t(&x, depth, lt) {
-                        Err(_) if lt.is_none() => (0, None),
+                        Err(e) if lt.is_none() => {
+                            failed = Some(e);
+                            (0, None)
+                        }
                         r => r?,
                     };
                     let t = lt.or(t);
                     // (untyped (`let x = !0 >> 4;`): kept as its expression too, which takes the type of its use; as a
                     // marker, so a chain of them does not grow)
-                    let lazy = if t.is_none() { Some(self.lazy_marker(x)?) } else { None };
+                    let lazy = if t.is_none() { Some(self.lazy_marker(x, failed)?) } else { None };
                     env.push((name.clone(), t.map_or(v, |it| it.wrap(v)), t, lazy));
                 }
                 Stmt::Expr(x, false) if k + 1 == n => return self.eval_t(&subst_consts(x, env), depth, want),
@@ -2788,13 +2798,17 @@ impl Program {
                     };
                     let st = env[slot].2;
                     let x = subst_consts(r, env);
+                    let mut failed = None;
                     let (v, t) = match self.eval_t(&x, depth, st) {
-                        Err(_) if st.is_none() => (0, None),
+                        Err(e) if st.is_none() => {
+                            failed = Some(e);
+                            (0, None)
+                        }
                         r => r?,
                     };
                     env[slot].1 = v;
                     env[slot].2 = st.or(t);
-                    env[slot].3 = if env[slot].2.is_none() { Some(self.lazy_marker(x)?) } else { None };
+                    env[slot].3 = if env[slot].2.is_none() { Some(self.lazy_marker(x, failed)?) } else { None };
                 }
                 _ => return Err("unsupported statement in a const fn".into()),
             }
@@ -2915,7 +2929,7 @@ impl Program {
                 let id: u64 = p.segs[0].name["__zust_lazy_".len()..].parse().map_err(|_| "bad local")?;
                 let (x, hit) = LAZY.with(|l| {
                     let l = l.borrow();
-                    let (x, memo) = l.1.get(&id).ok_or("a local out of its block")?;
+                    let (x, memo, _) = l.1.get(&id).ok_or("a local out of its block")?;
                     R::Ok((x.clone(), memo.iter().find(|m| m.0 == want).map(|m| m.1.clone())))
                 })?;
                 if let Some(r) = hit {
