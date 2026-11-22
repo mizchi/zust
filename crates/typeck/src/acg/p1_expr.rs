@@ -123,6 +123,25 @@ impl Cx<'_> {
         }
     }
 
+    /// A struct pattern's turbofish (`S::<u16>(x)`) against the value's instance t (`S<u8>`): mismatched types when an
+    /// argument it writes (not `_`) is another
+    pub(crate) fn pat_args_check(&self, path: &crate::parse::Path, sid: u32, t: Ty) -> R<()> {
+        let Some(args) = path.segs.last().map(|s| &s.args).filter(|a| !a.is_empty()) else { return Ok(()) };
+        let Ty::Struct(v) = t else { return Ok(()) };
+        let base = self.prog.base_of(sid);
+        if self.prog.base_of(v) != base || self.prog.has_param(t) {
+            return Ok(());
+        }
+        let ts = self.turbofish_targs(sid, args)?;
+        let vargs = &self.prog.structs[v as usize].args;
+        if ts.iter().enumerate().any(|(k, a)| a.is_some_and(|a| !self.prog.has_param(a) && vargs.get(k).is_some_and(|&va| va != a))) {
+            let full: Vec<Ty> = ts.iter().enumerate().map(|(k, a)| a.or(vargs.get(k).copied()).unwrap_or(Ty::Unit)).collect();
+            let found = self.prog.instantiate(base, full).map(|i| self.prog.tn(Ty::Struct(i))).unwrap_or_else(|_| self.prog.structs[base as usize].name.clone());
+            return err(SP, format!("mismatched types: expected `{}`, found `{found}`", self.prog.tn(t)));
+        }
+        Ok(())
+    }
+
     /// the type arguments a struct's turbofish gives (None for `_`; lifetimes left out), checked against the struct's
     /// number of generic parameters (E0107); a type that does not resolve is that error
     pub(crate) fn turbofish_targs(&self, sid: u32, args: &[GArg]) -> R<Vec<Option<Ty>>> {
@@ -1739,7 +1758,7 @@ impl Cx<'_> {
             if let Some(ks) = prog.copy_params.get(&prog.base_of(sid)) {
                 for &k in ks {
                     if let Some(&a) = prog.structs[sid as usize].args.get(k) {
-                        if !prog.has_param(a) && !has_hole(prog, a) && !super::borrowck::is_copy(prog, a, 0) {
+                        if !prog.has_param(a) && !has_hole(prog, a) && (!super::borrowck::is_copy(prog, a, 0) || super::p3_ops::copy_mut_ref(prog, a, 0)) {
                             return err(expr_start(e), format!("the trait bound `{}: Copy` is not satisfied (E0277)", prog.tn(a)));
                         }
                     }
@@ -1795,21 +1814,20 @@ impl Cx<'_> {
                 s.args.clear();
             }
             if self.prog.struct_by_p(&PPath::of(&bare), self.self_sid).is_some() {
-                // (arguments that name lifetimes (`SomeStruct::<&'static u32> { t: &c }`): a `let` of the type the path
-                // writes, whose annotation the region check reads)
-                let lts = path.segs.iter().any(|s| s.args.iter().any(|a| format!("{a:?}").contains('\'')));
-                if lts {
-                    let tmp = format!("__exr_sl{}", self.temps.len());
-                    let blk = crate::parse::Block {
-                        stmts: vec![
-                            crate::parse::Stmt::Let(Pat::Ident(false, false, tmp.clone(), None), Some(crate::parse::Ty::Path(None, path.clone())), Some(Expr::Struct(bare, sfields.clone(), rest.clone())), None, Default::default()),
-                            crate::parse::Stmt::Expr(path_expr(&tmp), false),
-                        ],
-                    };
-                    let ne: &Expr = self.keep_expr(Expr::Block(None, false, blk));
-                    return self.expr(ne, expected);
+                // (arguments that name lifetimes are read by the region check from the `let` that block_stmts makes of a
+                // statement's literal. A type the arguments do not name is an error (`Foo::<Missing> {..}`); `_` is
+                // left to inference)
+                let sid0 = self.prog.struct_by_p(&PPath::of(&bare), self.self_sid).unwrap();
+                let targs = self.turbofish_targs(sid0, &path.segs.last().unwrap().args)?;
+                let typed = if targs.iter().all(|a| a.is_some()) { self.parse_ty(&crate::parse::Ty::Path(None, path.clone())).ok().filter(|t| matches!(t, Ty::Struct(_))) } else { None };
+                // (`Foo::<u8> { ..base }` with base a `Foo<u16>`: mismatched types)
+                if let (Some(t), Some(base)) = (typed, rest.as_deref()) {
+                    if let Some(bt @ Ty::Struct(_)) = self.peek(base) {
+                        if bt != t && !self.prog.has_param(t) && !has_hole(self.prog, t) {
+                            return err(expr_start(base), format!("mismatched types: expected `{}`, found `{}`", self.prog.tn(t), self.prog.tn(bt)));
+                        }
+                    }
                 }
-                let typed = self.parse_ty(&crate::parse::Ty::Path(None, path.clone())).ok().filter(|t| matches!(t, Ty::Struct(_)));
                 let ne = self.keep_expr(Expr::Struct(bare, sfields.clone(), rest.clone()));
                 return self.struct_lit(ne, typed.or(expected));
             }

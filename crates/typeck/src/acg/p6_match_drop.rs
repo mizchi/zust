@@ -1079,6 +1079,7 @@ impl Cx<'_> {
         let Some(sid) = self.prog.struct_by_p(&pp, self.self_sid) else {
             return err(span, self.no_variant_msg(path));
         };
+        self.pat_args_check(path, sid, t)?;
         match t {
             Ty::Struct(x) if self.prog.base_of(x) == self.prog.base_of(sid) => Ok(self.prog.structs[x as usize].fields.clone()),
             _ => err(span, format!("mismatched types: expected `{}`, found `{}`", self.prog.tn(t), self.prog.structs[sid as usize].name)),

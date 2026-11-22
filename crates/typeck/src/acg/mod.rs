@@ -1758,6 +1758,13 @@ impl Cx<'_> {
             let nb: &'static crate::parse::Block = Box::leak(Box::new(crate::parse::Block { stmts }));
             return self.block_stmts(nb, expected);
         }
+        // (`let x = S::<&'static u32> { t: &c };` / `S::<&'a u32> { t: &c };`: a `let` of the type the path writes, whose
+        // annotation the region check reads; a let's temporaries are extended as the literal's would be)
+        if blk.stmts.iter().any(|st| matches!(st, Stmt::Let(_, None, Some(Expr::Struct(p, ..)), ..) | Stmt::Expr(Expr::Struct(p, ..), true) if p.segs.last().is_some_and(|s| !s.args.is_empty()))) {
+            if let Some(nb) = self.lifetime_lits(blk) {
+                return self.block_stmts(nb, expected);
+            }
+        }
         self.scopes.push(vec![]);
         let mut diverged = false;
         let mut result: V = (None, Ty::Unit);
@@ -2521,6 +2528,39 @@ impl Cx<'_> {
             }
         };
         Some((i, &self.prog.sigs[i as usize]))
+    }
+
+    /// blk with its statements `let x = S::<&'a u32> {..};` / `S::<&'a u32> {..};` (type arguments that name
+    /// lifetimes) as `let x: S<&'a u32> = S {..};` / `let _: S<&'a u32> = S {..};`; None when it has none
+    #[cold]
+    #[inline(never)]
+    fn lifetime_lits(&self, blk: &crate::parse::Block) -> Option<&'static crate::parse::Block> {
+        let mut any = false;
+        let stmts = blk
+            .stmts
+            .iter()
+            .map(|st| {
+                let (pat, init, lp) = match st {
+                    Stmt::Let(pat, None, Some(init @ Expr::Struct(..)), None, lp) => (pat.clone(), init, *lp),
+                    Stmt::Expr(init @ Expr::Struct(..), true) => (Pat::Wild, init, Default::default()),
+                    _ => return st.clone(),
+                };
+                let Expr::Struct(path, fields, rest) = init else { return st.clone() };
+                if !path.segs.iter().any(|s| s.args.iter().any(|a| format!("{a:?}").contains('\''))) {
+                    return st.clone();
+                }
+                let mut bare = path.clone();
+                for s in &mut bare.segs {
+                    s.args.clear();
+                }
+                if self.prog.struct_by_p(&PPath::of(&bare), self.self_sid).is_none() {
+                    return st.clone();
+                }
+                any = true;
+                Stmt::Let(pat, Some(crate::parse::Ty::Path(None, path.clone())), Some(Expr::Struct(bare, fields.clone(), rest.clone())), None, lp)
+            })
+            .collect();
+        any.then(|| &*Box::leak(Box::new(crate::parse::Block { stmts })))
     }
 
     /// The name methods of t are indexed under (`S` for a struct's instances too, `u8`, `#tuple0`)
