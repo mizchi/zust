@@ -5316,9 +5316,6 @@ fn __exr_escape<G>(s: &mut String, c: char, quote: char) {
         s.push_str("\\t");
     } else if c == '\0' {
         s.push_str("\\0");
-    } else if (c as u32) < 0x20 || (c as u32 >= 0x7f && (c as u32) < 0xa0) {
-        // (the other control characters, as rustc's escape_debug: `\u{b}`)
-        __exr_push_unicode_escape::<()>(s, c as u32);
     } else {
         s.push(c);
     }
@@ -5343,20 +5340,12 @@ fn __exr_push_unicode_escape<G>(s: &mut String, v: u32) {
 fn __exr_fmt_str_debug<G>(f: &mut Formatter, x: &str) {
     let mut s = String::new();
     s.push('"');
-    let b = x.as_bytes();
-    let mut i = 0;
-    while i < b.len() {
-        let c = b[i];
-        if c < 0x80 {
-            __exr_escape::<()>(&mut s, c as char, '"');
-        } else if c == 0xc2 && i + 1 < b.len() && b[i + 1] < 0xa0 {
-            // (U+0080..U+009F, the C1 controls: escaped too)
-            __exr_push_unicode_escape::<()>(&mut s, b[i + 1] as u32);
-            i += 1;
+    for &b in x.as_bytes() {
+        if b < 0x80 {
+            __exr_escape::<()>(&mut s, b as char, '"');
         } else {
-            s.vec.push(c);
+            s.vec.push(b);
         }
-        i += 1;
     }
     s.push('"');
     __exr_pad::<()>(f, s.as_str(), 1);
