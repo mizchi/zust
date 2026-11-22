@@ -1150,10 +1150,24 @@ impl RgSt {
         if codes.is_some_and(|c| c.contains(&R_UNKNOWN)) {
             return None;
         }
+        let u0 = self.univ.len();
         let mut c = Codes { codes, pos: 0, ok: true, parent: None };
         let mut out = vec![];
         self.inst(prog, t, &mut c, lts, targs, elided, &mut out, 0);
-        (c.ok && codes.is_none_or(|x| c.pos == x.len())).then_some(out)
+        if c.ok && codes.is_none_or(|x| c.pos == x.len()) {
+            return Some(out);
+        }
+        // (a type alias written without its lifetimes that stands for a Box or a struct (`Box<B>` with
+        // `type B<'a> = Box<&'a u8>`): its marker is taken for the Box's own. Codes that name no region elide each
+        // region, wherever it is, so the type alone gives them; not an alias that fixes a lifetime (see inst))
+        if codes.is_some_and(|x| x.iter().all(|&c| c == R_ELIDED || c == R_ELIDED_ADT)) && !prog.alias_fixed_lt {
+            self.univ.truncate(u0);
+            let mut c = Codes { codes: None, pos: 0, ok: true, parent: None };
+            let mut out = vec![];
+            self.inst(prog, t, &mut c, lts, targs, elided, &mut out, 0);
+            return c.ok.then_some(out);
+        }
+        None
     }
 
     /// sub <: sup at type t (the value of sub flows where sup is expected)
@@ -2429,7 +2443,12 @@ impl Cx<'_> {
     /// Rg::forever)
     fn rg_reborrow_arg(&mut self, a: &Expr, t: &mut Option<(Ty, RT)>) {
         let Some((Ty::Ref(true, _), tr)) = t else { return };
-        if tr.is_empty() || self.rg.closure.is_some() || !matches!(strip(a), Expr::Path(..)) {
+        // (a field of a local too: `v.push(c.raw)`)
+        let mut root = strip(a);
+        while let Expr::Field(x, _, _) = root {
+            root = strip(x);
+        }
+        if tr.is_empty() || self.rg.closure.is_some() || !matches!(root, Expr::Path(..)) {
             return;
         }
         let r = self.rg.var();
@@ -3220,6 +3239,27 @@ impl Cx<'_> {
 
     /// A closure's body begins: its parameters' trees and its result's from its region signature; what it
     /// captures is from outside it (rg_capture)
+    /// A use of an associated const of an impl for its type's 'static instance (`A::<'a>::IC` with
+    /// `impl A<'static> { const IC: i32 = 10; }`): a lifetime written where the impl's self type has 'static must be
+    /// 'static (the type must implement what the const is of)
+    pub(crate) fn rg_static_self_const(&mut self, e: &Expr, ci: u32) {
+        let Some(slots) = self.prog.static_self_consts.get(&ci) else { return };
+        let Expr::Path(None, p) = e else { return };
+        if !self.rg_on() || p.segs.len() < 2 {
+            return;
+        }
+        let seg = &p.segs[p.segs.len() - 2];
+        let lts = seg.args.iter().filter_map(|a| if let crate::parse::GArg::Lifetime(l) = a { Some(l) } else { None });
+        for (i, l) in lts.enumerate() {
+            if slots.get(i) != Some(&R_STATIC) || l == "'static" {
+                continue;
+            }
+            if let Some(v) = self.rg.lt_names.iter().position(|x| x == l).and_then(|k| self.rg.lts.get(k).copied()) {
+                self.rg.edge(v, STATIC, super::borrowck::pos(e));
+            }
+        }
+    }
+
     pub(crate) fn rg_begin_closure(&mut self, params: &[(Loc, Ty)]) {
         let prog = self.prog;
         let Some(clo) = self.rg.closure.clone() else { return };

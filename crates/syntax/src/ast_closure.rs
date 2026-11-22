@@ -528,6 +528,14 @@ pub fn free_vars(c: &Expr) -> Vec<String> {
 }
 
 /// The capture e names (a path that is one of caps)
+/// e without the parentheses around it (`(b)`)
+fn unparen(e: &Expr) -> &Expr {
+    match e {
+        Expr::Paren(x) => unparen(x),
+        _ => e,
+    }
+}
+
 fn cap_name<'c>(e: &Expr, caps: &'c [String]) -> Option<&'c str> {
     match e {
         Expr::Path(None, p) if !p.global && p.segs.len() == 1 && p.segs[0].args.is_empty() => caps.iter().find(|c| **c == p.segs[0].name).map(|c| c.as_str()),
@@ -565,7 +573,24 @@ fn moves_in(e: &Expr, caps: &[String], by: MovesBy) -> bool {
         _ => {}
     }
     // (`let C(ref mut r, _) = c;` binds by reference: not a move)
-    scoped_children(e, caps, &mut |c, cs, let_pat| let_pat.is_some_and(|p| cap_name(c, cs).is_some_and(|n| by(p, n))) || moves_in(c, cs, by))
+    scoped_children(e, caps, &mut |c, cs, let_pat| let_pat.is_some_and(|p| cap_name(unparen(c), cs).is_some_and(|n| by(p, n))) || moves_in(c, cs, by))
+}
+
+/// Whether the body of closure c moves one of caps by a `let` that binds it by value (`let bar = b;`). Not by passing
+/// it: an argument of type `&mut T` is reborrowed, which the syntax does not tell. Not in a nested closure
+pub fn let_moves_capture(c: &Expr, caps: &[String]) -> bool {
+    let Expr::Closure(_, ps, _, body, _) = c else { return false };
+    let mut caps = caps.to_vec();
+    for (p, _) in ps {
+        caps = unbound(&caps, p);
+    }
+    fn walk(e: &Expr, caps: &[String]) -> bool {
+        if caps.is_empty() || matches!(e, Expr::Closure(..)) {
+            return false;
+        }
+        scoped_children(e, caps, &mut |c, cs, let_pat| let_pat.is_some_and(|p| cap_name(unparen(c), cs).is_some() && binds_by_value(p)) || walk(c, cs))
+    }
+    walk(body, &caps)
 }
 
 /// The names of caps that p does not bind
@@ -755,7 +780,7 @@ fn move_site_in(e: &Expr, caps: &[String], by: MovesBy) -> Option<(String, Pos)>
     }
     let mut found = None;
     scoped_children(e, caps, &mut |c, cs, let_pat| {
-        found = let_pat.and_then(|p| cap_at(c, cs).filter(|(n, _)| by(p, n))).or_else(|| move_site_in(c, cs, by));
+        found = let_pat.and_then(|p| cap_at(unparen(c), cs).filter(|(n, _)| by(p, n))).or_else(|| move_site_in(c, cs, by));
         found.is_some()
     });
     found
@@ -1127,6 +1152,17 @@ impl EHash {
 }
 
 /// The pattern binds a part of the value by value (`x`, `Some(x)`), not only by reference or not at all
+/// Whether p binds a part of what it matches by `ref mut` (a mutable borrow of it)
+pub fn binds_ref_mut(p: &Pat) -> bool {
+    match p {
+        Pat::Ident(by_ref, m, _, sub) => (*by_ref && *m) || sub.as_deref().is_some_and(binds_ref_mut),
+        Pat::Ref(_, q) => binds_ref_mut(q),
+        Pat::Or(v) | Pat::Tuple(v) | Pat::TupleStruct(_, v) | Pat::Slice(v) => v.iter().any(binds_ref_mut),
+        Pat::Struct(_, fs, _) => fs.iter().any(|f| binds_ref_mut(&f.1)),
+        _ => false,
+    }
+}
+
 pub fn binds_by_value(p: &Pat) -> bool {
     match p {
         Pat::Ident(by_ref, _, n, sub) => {

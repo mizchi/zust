@@ -1346,7 +1346,15 @@ impl Cx<'_> {
     }
 
     pub fn lookup(&self, name: &str) -> Option<(Loc, Ty)> {
-        self.scopes.iter().rev().flat_map(|s| s.iter().rev()).find(|(n, _, _)| n == name).map(|&(_, l, t)| (l, t))
+        // (plain loops: a `flat_map` over the scopes costs more per name, and most lookups of a function's names miss)
+        for s in self.scopes.iter().rev() {
+            for (n, l, t) in s.iter().rev() {
+                if n.len() == name.len() && n.as_bytes() == name.as_bytes() {
+                    return Some((*l, *t));
+                }
+            }
+        }
+        None
     }
 
     fn body(&mut self, f: &ItemFn, sig: &FnSig) -> R<()> {
@@ -1364,10 +1372,11 @@ impl Cx<'_> {
         for (k, (p, _)) in f.sig.params.iter().enumerate() {
             names.push(param_name(k, p)?);
         }
-        // (`mut x` parameters, for the borrow checker; `self` is not known)
+        // (`mut x` parameters, for the borrow checker; `self` is `mut self` / `mut self: T` (not `&mut self`, whose
+        // binding is not mutable))
         let mut muts: Vec<Option<bool>> = vec![];
-        if f.sig.recv.is_some() {
-            muts.push(None);
+        if let Some(r) = &f.sig.recv {
+            muts.push(Some(r.starts_with("mut ")));
         }
         for (p, _) in &f.sig.params {
             muts.push(pat_mut(p));
