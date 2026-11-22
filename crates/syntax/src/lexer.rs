@@ -1732,7 +1732,7 @@ pub fn rename_module_collisions_fix(src: &str, crates: &[String], fix: &mut Vec<
     // `use crate::geom::shape;`. (scope, the name used) → the module, so `u::calls()` is `util::calls()`)
     let mut mod_alias: LMap<(usize, Vec<u8>), usize> = LMap::default();
     // (a `use` in a block (a fn body) names the module in that block only: (its `{`, its `}`, the name, the module))
-    let mut block_alias: Vec<(usize, usize, Vec<u8>, usize)> = vec![];
+    let mut block_alias: Vec<(usize, usize, Vec<u8>, usize, usize)> = vec![];
     // (the innermost `{` around each token, and the `}` of each `{`)
     let mut block_of: Vec<usize> = vec![usize::MAX; toks.len()];
     let mut close_at: LMap<usize, usize> = LMap::default();
@@ -1767,7 +1767,8 @@ pub fn rename_module_collisions_fix(src: &str, crates: &[String], fix: &mut Vec<
             if local.as_slice() != b"*" && local.as_slice() != b"_" && !path.is_empty() {
                 if let Some(m) = resolve_mod(sc, &path).filter(|&m| m != usize::MAX) {
                     match close_at.get(&block) {
-                        Some(&close) if block != own => block_alias.push((block, close, local, m)),
+                        // (and its module: a `mod` declared in the block does not see it)
+                        Some(&close) if block != own => block_alias.push((block, close, local, m, sc)),
                         _ => {
                             mod_alias.insert((sc, local), m);
                         }
@@ -1782,7 +1783,7 @@ pub fn rename_module_collisions_fix(src: &str, crates: &[String], fix: &mut Vec<
         let alias = segs.first().and_then(|f| {
             block_alias
                 .iter()
-                .filter(|b| b.0 < at && at < b.1 && b.2 == *f)
+                .filter(|b| b.0 < at && at < b.1 && b.2 == *f && b.4 == from)
                 .max_by_key(|b| b.0)
                 .map(|b| b.3)
                 .or_else(|| mod_alias.get(&(from, f.clone())).copied())
@@ -1804,7 +1805,7 @@ pub fn rename_module_collisions_fix(src: &str, crates: &[String], fix: &mut Vec<
     let mut pending: Vec<(usize, Vec<u8>, usize, Vec<u8>, Option<(usize, usize)>)> = vec![];
     // (a name a `use` in a block (a fn body) imports, seen in that block only: (its `{`, its `}`, the name used, the new
     // name). The innermost block's wins over the module's items and imports)
-    let mut block_imports: Vec<(usize, usize, Vec<u8>, Vec<u8>)> = vec![];
+    let mut block_imports: Vec<(usize, usize, Vec<u8>, Vec<u8>, usize)> = vec![];
     let mut k = 0;
     while k < toks.len() {
         if !is_id(k, b"use") {
@@ -1822,7 +1823,7 @@ pub fn rename_module_collisions_fix(src: &str, crates: &[String], fix: &mut Vec<
         let own_brace = if sc == usize::MAX { usize::MAX } else { mods[sc].1 };
         let in_block = close_at.get(&block_of[k]).filter(|_| block_of[k] != own_brace).map(|&c| (block_of[k], c));
         let mut add = |local: Vec<u8>, nn: Vec<u8>| match in_block {
-            Some((o, c)) => block_imports.push((o, c, local, nn)),
+            Some((o, c)) => block_imports.push((o, c, local, nn, sc)),
             None => imports.push((sc, local, nn)),
         };
         for (path, local) in items {
@@ -1859,7 +1860,7 @@ pub fn rename_module_collisions_fix(src: &str, crates: &[String], fix: &mut Vec<
             match found {
                 Some(nn) => {
                     match p.4 {
-                        Some((o, c)) => block_imports.push((o, c, p.1, nn)),
+                        Some((o, c)) => block_imports.push((o, c, p.1, nn, p.0)),
                         None => imports.push((p.0, p.1, nn)),
                     }
                     progress = true;
@@ -2090,7 +2091,7 @@ pub fn rename_module_collisions_fix(src: &str, crates: &[String], fix: &mut Vec<
             // `use thing::*;` stays the root's)
             let own = || own_defs.contains(&(sc, n));
             // (a block's own import first: `fn f() { use b::g; g() }` beside a module-level `g`)
-            let in_block = || if is_def { None } else { block_imports.iter().filter(|b| b.0 < k && k < b.1 && b.2 == n).max_by_key(|b| b.0).map(|b| b.3.clone()) };
+            let in_block = || if is_def { None } else { block_imports.iter().filter(|b| b.0 < k && k < b.1 && b.2 == n && b.4 == sc).max_by_key(|b| b.0).map(|b| b.3.clone()) };
             let nn = in_block()
                 .or_else(|| renamed_in(sc, n))
                 .or_else(|| imported(sc, n))

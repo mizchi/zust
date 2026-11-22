@@ -72,6 +72,19 @@ fn imports_b() -> u32 {
     use b::f;
     f()
 }
+// (a module declared in a block sees its own imports, not the block's)
+fn nested_mod() -> u32 {
+    use crate::a as z;
+    use crate::a::f;
+    mod inner {
+        use crate::b as z;
+        use crate::b::f;
+        pub fn g() -> u32 {
+            z::f() * 10 + f()
+        }
+    }
+    z::f() * 100 + f() + inner::g()
+}
 
 fn show<T: Debug>(t: T) -> String {
     format!("{t:?}")
@@ -95,5 +108,5 @@ fn main() {
     println!("{}", count_boxed!(dyn Debug + 'static u8 &'static str dyn Debug + Send + 'static));
     println!("{}", show(defaults!(u8 String Vec<u8> (bool, char) Option<&'static str> id_ty!(u8) [u8; 2])));
     println!("{} {} {} {} {}", x::f(), y::f(), x::deep::K, inner_alias(), x::f());
-    println!("{} {}", imports_a(), imports_b());
+    println!("{} {} {}", imports_a(), imports_b(), nested_mod());
 }
