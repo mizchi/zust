@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795306168071,
+  "lastUpdate": 1795306169818,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -95147,6 +95147,70 @@ window.BENCHMARK_DATA = {
           {
             "name": "tests/ui compile-fail passing",
             "value": 4068,
+            "unit": "tests"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "miz404@gmail.com",
+            "name": "Kotaro Chikuba",
+            "username": "mizchi"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "38e288bba0b818df8085fdc8c8827f6caa554271",
+          "message": "Merge pull request #40 from mizchi/claude/sleepy-dijkstra-8sankk\n\nRegion checking, part 4: check generic fns nothing calls, with placeholder types (issue #1)",
+          "timestamp": "2026-11-22T09:04:54+09:00",
+          "tree_id": "a61d56f9d891b54b28dee59f761bfeebf4b4b7e5",
+          "url": "https://github.com/mizchi/zust/commit/38e288bba0b818df8085fdc8c8827f6caa554271"
+        },
+        "date": 1795306169583,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tests/ui run-pass pass rate",
+            "value": 75.56,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui run-pass passing",
+            "value": 1802,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui check-pass pass rate",
+            "value": 81.74,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui check-pass passing",
+            "value": 1477,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui build-pass pass rate",
+            "value": 73.33,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui build-pass passing",
+            "value": 99,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui compile-fail pass rate",
+            "value": 55.5,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui compile-fail passing",
+            "value": 4084,
             "unit": "tests"
           }
         ]
