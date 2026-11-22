@@ -1438,6 +1438,22 @@ fn part8_review_follow_ups() {
     let d = check("mod m {\n    pub static BAR: String = String::new();\n}\nfn take(_: String) {}\nfn main() {\n    take(m::BAR);\n}\n");
     assert!(d.len() == 1 && d[0].0 == 6 && d[0].1.contains("E0507"), "{d:?}");
     assert_eq!(check("mod m {\n    pub static BAR: String = String::new();\n}\nfn main() {\n    println!(\"{}\", m::BAR.len());\n}\n"), vec![]);
+    // (`*q = &mut y` with q = &mut p, p = &mut *z: p changes, not z, which q holds a loan of through p)
+    assert_eq!(check("fn main() {\n    let mut z0 = 0;\n    let z = &mut z0;\n    let mut w = 5;\n    let mut p = &mut w;\n    p = &mut *z;\n    {\n        let mut y = 1;\n        let q = &mut p;\n        *q = &mut y;\n        **q += 1;\n    }\n    *z += 1;\n}\n"), vec![]);
+    // (but `*q = &mut &y`: the `&mut` is invariant, so z's region is y's)
+    let d = check("fn sink(_: &u32) {}\nfn main() {\n    let z0 = 0;\n    let mut z = &z0;\n    let mut p = &mut z;\n    {\n        let y = 1;\n        let q = &mut p;\n        *q = &mut &y;\n    }\n    sink(z);\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 9, "{d:?}");
+    // (E0509 after a `..`, of an array's element, of a field through a box, of a `&mut` field into a type parameter)
+    let d = check("struct D(i32, String);\nimpl Drop for D {\n    fn drop(&mut self) {}\n}\nfn main() {\n    let d = D(1, String::new());\n    let D(.., s) = d;\n    drop(s);\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 7 && d[0].1.contains("E0509"), "{d:?}");
+    let d = check("struct D {\n    f: [String; 1],\n}\nimpl Drop for D {\n    fn drop(&mut self) {}\n}\nfn main() {\n    let d = D { f: [String::new()] };\n    let D { f: [s] } = d;\n    drop(s);\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 9 && d[0].1.contains("E0509"), "{d:?}");
+    let d = check("struct D {\n    f: String,\n}\nimpl Drop for D {\n    fn drop(&mut self) {}\n}\nfn main() {\n    let b = Box::new(D { f: String::new() });\n    let s = b.f;\n    drop(s);\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 9 && d[0].1.contains("E0509"), "{d:?}");
+    let d = check("struct D<'a> {\n    r: &'a mut i32,\n}\nimpl<'a> Drop for D<'a> {\n    fn drop(&mut self) {}\n}\nfn consume<T>(_: T) {}\nfn main() {\n    let mut x = 1;\n    let d = D { r: &mut x };\n    consume(d.r);\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 11 && d[0].1.contains("E0509"), "{d:?}");
+    // (a `ref` binding and a `Copy` part are fine)
+    assert_eq!(check("struct D(i32, String);\nimpl Drop for D {\n    fn drop(&mut self) {}\n}\nfn main() {\n    let d = D(1, String::new());\n    let D(n, ref s) = d;\n    let D(.., ref t) = d;\n    println!(\"{} {} {}\", n, s, t);\n}\n"), vec![]);
 }
 
 /// E0582: a lifetime a `for<'a>` binder declares that only the bound's result or an associated type's binding names

@@ -1572,7 +1572,12 @@ impl Cx<'_> {
     pub(crate) fn drop_owner(&mut self, e: &Expr) -> Option<String> {
         let mut cur = strip_paren(e);
         while let Expr::Field(b, _, _) = cur {
-            if let Some(Ty::Struct(sid)) = self.peek(b) {
+            // (`b.f` with b: Box<D>: a field of the D the box owns)
+            let mut t = self.peek(b);
+            while let Some(Ty::Box(i)) = t {
+                t = Some(*i);
+            }
+            if let Some(Ty::Struct(sid)) = t {
                 if let Some(n) = self.user_drop_name(sid) {
                     return Some(n);
                 }
@@ -1591,6 +1596,17 @@ impl Cx<'_> {
                 return err(sp, format!("cannot move out of type `{n}`, which implements the `Drop` trait (E0509)"));
             }
         }
+        // (`D { f: [s] }`: an array's elements; `rest @ ..` binds the rest by value)
+        if let (Pat::Slice(ps), Ty::Array(elem, _)) = (pat, t) {
+            for p in ps {
+                match p {
+                    Pat::Rest => {}
+                    Pat::Ident(_, _, _, Some(sub)) if matches!(**sub, Pat::Rest) => self.drop_pat_check(p, t, sp, owner)?,
+                    _ => self.drop_pat_check(p, *elem, sp, owner)?,
+                }
+            }
+            return Ok(());
+        }
         let Ty::Struct(sid) = t else { return Ok(()) };
         let sd = &self.prog.structs[sid as usize];
         let fields: Vec<(&Pat, Ty)> = match pat {
@@ -1601,7 +1617,11 @@ impl Cx<'_> {
                 }
                 return Ok(());
             }
-            Pat::Tuple(ps) if !sd.is_enum => ps.iter().take_while(|p| !matches!(p, Pat::Rest)).zip(sd.fields.iter()).map(|(p, f)| (p, f.1)).collect(),
+            // (both sides of a `..`: `D(.., s)`)
+            Pat::Tuple(ps) if !sd.is_enum => match Self::tuple_fields(ps.iter(), sd.fields.len(), sp) {
+                Ok(fs) => fs.into_iter().filter_map(|(i, p)| sd.fields.get(i).map(|f| (p, f.1))).collect(),
+                Err(_) => return Ok(()),
+            },
             Pat::Struct(path, fs, _) => {
                 let defs = if sd.is_enum {
                     let vn = path.segs.last().map(|s| s.name.as_str()).unwrap_or("");
@@ -1624,8 +1644,11 @@ impl Cx<'_> {
                 } else {
                     &sd.fields
                 };
-                // (the parts before a `..`: their places are known)
-                ps.iter().take_while(|p| !matches!(p, Pat::Rest)).zip(defs.iter()).map(|(p, f)| (p, f.1)).collect()
+                // (both sides of a `..`: `D(.., s)`)
+                match Self::tuple_fields(ps.iter(), defs.len(), sp) {
+                    Ok(fs) => fs.into_iter().filter_map(|(i, p)| defs.get(i).map(|f| (p, f.1))).collect(),
+                    Err(_) => return Ok(()),
+                }
             }
             _ => return Ok(()),
         };

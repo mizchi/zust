@@ -97,8 +97,9 @@ pub enum Ev {
     /// The local keeps these loans (what its initializer borrows directly): they must not be of a dead local
     Keep(u32, Vec<Src>),
     /// These loans are stored behind the local's `&mut`s, so many derefs deep (`*q = &y` with q = &mut p): the
-    /// locals those point to hold them
-    Store(u32, u32, Vec<Src>),
+    /// locals those point to hold them. The flag: what is stored is a reference to something that holds references
+    /// (`*q = &mut &y`), whose region is shared with what the `&mut`s point into (a `&mut T` is invariant in T)
+    Store(u32, u32, bool, Vec<Src>),
 }
 
 #[derive(Clone, Debug)]
@@ -1083,7 +1084,7 @@ impl Bk {
                         add_sorted(&mut st.escaped, ln);
                     }
                 }
-                Ev::Store(l, derefs, srcs) => {
+                Ev::Store(l, derefs, deep, srcs) => {
                     let ls = self.resolve(srcs, st);
                     // (the locals the `&mut`s point to, deref by deref; one behind a parameter: it outlives the
                     // function)
@@ -1103,6 +1104,14 @@ impl Bk {
                                     next.push(lo.place.local);
                                 }
                             }
+                        }
+                        // (a `&mut p` holds what p holds too (`p = &mut z`): z is reached through p, one deref
+                        // deeper, not by this one. `*q = &mut y` with q = &mut p changes p, not z. Unless what is
+                        // stored holds references itself: `*q = &mut &y` makes p's type's inner region, z's too,
+                        // y's)
+                        if !*deep {
+                            let through: Vec<u32> = next.iter().copied().filter(|&c| next.iter().any(|&o| o != c && st.held(o).iter().any(|&h| self.loans[h as usize].place.local == c))).collect();
+                            next.retain(|c| !through.contains(c));
                         }
                         at = next;
                     }
@@ -2373,9 +2382,11 @@ impl Cx<'_> {
         if !self.bk_on() {
             return;
         }
-        let Some((p, _)) = self.bk_place(strip_paren(left)) else { return };
+        let Some((p, pt)) = self.bk_place(strip_paren(left)) else { return };
         let l = p.local;
         let whole = p.proj.is_empty();
+        // (a reference to what holds references (`&mut &u8`): see Ev::Store)
+        let deep = matches!(pt, Some(Ty::Ref(_, i)) if self.bk_ty(*i).1);
         // (`*x = ..` / `x.f = ..` through a reference parameter: what is stored outlives the function)
         let through = p.owned_len() < p.proj.len() && self.bk.params.contains(&l);
         let derefs = p.proj.iter().filter(|x| matches!(x, Proj::Deref(false))).count() as u32;
@@ -2388,7 +2399,7 @@ impl Cx<'_> {
         }
         // (through a `&mut` the local holds: what is stored is held by what it points to)
         if !through && derefs > 0 && whole_derefs && !srcs.is_empty() && self.bk.locals[l as usize].refs {
-            self.bk_ev(Ev::Store(l, derefs, srcs.to_vec()));
+            self.bk_ev(Ev::Store(l, derefs, deep, srcs.to_vec()));
         }
         if self.bk.locals[l as usize].refs {
             if whole {

@@ -2046,6 +2046,8 @@ impl Cx<'_> {
                 }
             }
             if to_param && self.bk_on() && matches!(strip_paren(a), Expr::Path(..) | Expr::Field(..)) && matches!(r.as_ref().map(|x| x.1), Ok(Ty::Ref(true, _))) {
+                // (`consume(d.r)` with d's type implementing `Drop`: E0509, as for any field moved out of it)
+                self.drop_move_check(a)?;
                 self.bk_acc(a, borrowck::Acc::Move);
             }
             if top_ref {
