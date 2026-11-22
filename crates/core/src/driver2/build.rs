@@ -784,12 +784,25 @@ fn read_parts(d: &[u8]) -> Option<Parts> {
 /// One module's functions and data from its crates' parts. A name a crate keeps to itself (a generic instance, a
 /// string's data) may be in two crates: it gets the crate's number (`name@1`), in its definition and in the
 /// relocations of that crate that name it
-fn merge_parts(parts: Vec<Parts>) -> Parts {
+fn merge_parts(parts: Vec<Parts>) -> R<Parts> {
+    // (the global names, and which part defines each: two parts may not both define one, and a local name of the bin's
+    //  part (the first) that a dependency defines globally is renamed too, so one name never has two bodies)
+    let mut global_of: FxMap<String, usize> = FxMap::default();
+    for (ci, (fs, ds)) in parts.iter().enumerate() {
+        for n in fs.iter().filter(|f| f.3).map(|f| &f.0).chain(ds.iter().filter(|d| d.3).map(|d| &d.0)) {
+            if let Some(&cj) = global_of.get(n) {
+                if cj != ci {
+                    return Err(format!("wasm32: the symbol `{n}` is defined by two crates of the build"));
+                }
+            }
+            global_of.insert(n.clone(), ci);
+        }
+    }
     let mut funcs = vec![];
     let mut datas = vec![];
     for (ci, (fs, ds)) in parts.into_iter().enumerate() {
         let local: FxSet<String> = fs.iter().filter(|f| !f.3).map(|f| f.0.clone()).chain(ds.iter().filter(|d| !d.3).map(|d| d.0.clone())).collect();
-        let rn = |n: String| if ci > 0 && local.contains(&n) { format!("{n}@{ci}") } else { n };
+        let rn = |n: String| if local.contains(&n) && (ci > 0 || global_of.contains_key(&n)) { format!("{n}@{ci}") } else { n };
         for (n, code, rs, g) in fs {
             let rs = rs.into_iter().map(|r| Reloc { name: rn(r.name), ..r }).collect();
             funcs.push((rn(n), code, rs, g));
@@ -799,7 +812,7 @@ fn merge_parts(parts: Vec<Parts>) -> Parts {
             datas.push((rn(n), d, rs, g));
         }
     }
-    (funcs, datas)
+    Ok((funcs, datas))
 }
 
 fn trap_table_ci(prog: &Program) -> u32 {
@@ -1401,6 +1414,8 @@ impl Session2 {
                 kh.add(&self.cid);
                 kh.add(&text);
                 kh.add(&dd);
+                // (the expansion's cfg follows the target: `cfg(target_arch = "wasm32")` in a macro's output)
+                kh.add(&self.opts.backend_id());
                 add_crate_cfg(&mut kh, &crates[i]);
                 let pkey = key_hex(kh.finish());
                 let pp = out_dir.join(format!("{}.prep", crates[i].name).as_str());
@@ -1615,6 +1630,9 @@ impl Session2 {
             if !changed[i] && !deps.iter().any(|&j| changed[j]) && exe.exists() && std::fs::read_to_string(stamp_path.as_path()).is_ok_and(|s| s == stamp) {
                 continue;
             }
+            // (no stamp while linking: a link that fails is tried again, also by a `--no-cache` build that leaves the
+            //  fingerprints as they were)
+            let _ = std::fs::remove_file(stamp_path.as_path());
             let t1 = now_ns();
             let mut objs: Vec<std::path::PathBuf> = vec![out_dir.join(format!("{}.o", c.name).as_str())];
             objs.extend(deps.iter().map(|&j| out_dir.join(format!("{}.o", crates[j].name).as_str())));
@@ -1625,7 +1643,7 @@ impl Session2 {
                         let d = std::fs::read(o).map_err(|e| format!("{}: {e}", o.display()))?;
                         parts.push(read_parts(&d).ok_or_else(|| format!("{}: not the parts of a wasm32 module (built for another target?)", o.display()))?);
                     }
-                    let (funcs, datas) = merge_parts(parts);
+                    let (funcs, datas) = merge_parts(parts)?;
                     let m = w(&funcs, &datas)?;
                     std::fs::write(exe.as_path(), m).map_err(|e| format!("{}: {e}", exe.display()))?;
                 }
