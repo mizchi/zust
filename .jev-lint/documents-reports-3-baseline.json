@@ -1,6 +1,6 @@
 {
   "schema": "jev-lint-documents-1",
-  "snapshotDigest": "905cf6d20df176a7f71ffb84f37a3105f5a84f95fb0a5bb7d7a5f230477b286b",
+  "snapshotDigest": "7a5ad716722d023b375c2f780c2a1c4fa4f2046c57a13dbdc42a8852668569aa",
   "questionDigest": "209d6df378ccb747fcb0e821998fcd6105bc76638a88d22488d3b398d6a21595",
   "model": "jev-1.14.0",
   "snapshotChanged": false,
@@ -32,10 +32,10 @@
       "contextHash": "1492bbbed2d1dadd5dd1f209f4c2e613757fbd98e92fad89caeb1a12d302921d",
       "judgment": {
         "choice": "supports",
-        "confidence": 0.95,
+        "confidence": 0.91,
         "probabilities": {
-          "supports": 0.96,
-          "contradicts": 0.03,
+          "supports": 0.93,
+          "contradicts": 0.06,
           "unrelated": 0,
           "insufficient_context": 0.01
         }
@@ -74,12 +74,46 @@
           "insufficient_context": 0.01
         }
       }
+    },
+    {
+      "id": "docs_reports_2026-11-22-08-wasm-bindgen-shared-wasm32",
+      "topic": "The Japanese file docs/ja/reports/2026-11-22-08-wasm-bindgen-shared-wasm32.md is a faithful translation of docs/reports/2026-11-22-08-wasm-bindgen-shared-wasm32.md",
+      "mode": "translation",
+      "reference": {
+        "source": "docs_reports_2026-11-22-08-wasm-bindgen-shared-wasm32.en",
+        "path": "docs/reports/2026-11-22-08-wasm-bindgen-shared-wasm32.md",
+        "startLine": 1,
+        "endLine": 119,
+        "quote": "# W0: wasm-bindgen-shared for wasm32, with zurgo\n\nDate: 2026-11-22\n\nStep W0 of the wasm-bindgen roadmap (mizchi/zust#38) was to build wasm-bindgen-shared for wasm32 with zurgo.\nwasm-bindgen-shared is the part of wasm-bindgen with no proc macro. The step is done: an app that calls the whole\npublic API of wasm-bindgen-shared 0.2.130 is built with `zurgo run --target wasm32-unknown-unknown`, and under node it\nprints what its cargo build prints. The previous milestone is the [zurgo M1 report](2026-11-22-04-zurgo-build-scripts.md).\nUsage: [zurgo.md](../zurgo.md).\n\n## 1. What changed\n\n### 1.1 Workspace builds for wasm32\n\n`zustc build --target wasm32-unknown-unknown` and `zurgo --target wasm32-unknown-unknown` used to stop with \"workspace\nbuilds are not supported yet\".\n\n- **The problem.** On x86-64, each crate is an ELF object and the system linker joins them. There is no wasm linker\n  here: zustc's module writer writes a module in one go, from all its functions and data.\n- **What a crate's `.o` holds now (wasm32).**\n  - A crate's object is its *parts*: the functions and data that it would give the module writer, serialized\n    (`zust-wasm-parts 1`).\n  - The bin's link step reads its own parts and those of its dependencies, then gives each crate's local symbols a\n    name of their own (`name@crate`).\n  - It then calls the module writer once and writes `<bin>.wasm`.\n- **The cache and incremental builds** work as on x86-64. An edit in one crate rewrites that crate's parts, and the\n  bin is linked again.\n- **`zurgo run`** runs a wasm bin as cargo does: with the program in `CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_RUNNER`,\n  then the module and the arguments. In this repository the runner is `node tests/wasm/run.mjs`. Without the variable\n  it is an error that says so.\n- **Build scripts** are still built for the host and run on it. They see wasm32's `CARGO_CFG_*`, as under cargo.\n- **The wasm backend** had no byte swap of a 128-bit integer (`u128::swap_bytes`, `to_be`), which byteorder uses.\n  It swaps the two 64-bit halves now, each with its bytes reversed.\n\n### 1.2 The compiler gaps on the way\n\nwasm-bindgen-shared hit the first three. The UI report lists the others for the crates after it\n([section 3](2026-11-21-03-ui-frameworks-wasm.md)).\n\n- **`alloc::borrow::Cow::Borrowed(..)`.** A value through an `alloc::` path is now found as through `std::` or\n  `core::`.\n- **`Cow<'_, str>`.**\n  - zustc's prelude has two Cows: `Cow<[T]>`, and `__CowStr` for `Cow<str>`.\n  - `Cow::Borrowed(s)` with a `&str` or `String` argument is now the str one without an annotation. This holds where\n    types are inferred and in code generation. Before, inference took the slice one, and `name` became `&[T]`:\n    \"no method `bytes` on type `str`\".\n  - A pattern `Cow::Borrowed(s)` on a `Cow<str>` is the str one too.\n  - `Cow<str>` has `Display` and `Debug`, and as an argument it coerces to `&str`.\n- **`x.as_ref()`** follows the `AsRef` bounds in scope:\n  - it is `&str` for `T: AsRef<str>`, and `&[u8]` for `T: AsRef<[u8]>`;\n  - this also holds in a closure (`.map(|s| s.as_ref())`), whose return type is now inferred;\n  - it works on a `&&str` too, which used to be \"cannot index into a value of type `str`\".\n- **`$($t:ty)*`.** A type now ends where the next one starts, as rustc splits them:\n  - the list `u8 u16 Vec<u8> (bool, char) fn(u8) -> u8 m!(u8)` is six types;\n  - parentheses go on a type only after a name (`Fn(u8)`) or a type macro's `!`.\n\n  Before, the repetition took the whole list as one type: wasm-bindgen's `vectors!`, num-traits'\n  `int_trait_impl!`.\n- **A crate or a module under another name.** After `use util as u;`, or `extern crate util as u;`, the path\n  `u::f()` is `util::f()`.\n\n## 2. Results\n\n- `crates/zurgo/tests/zurgo.rs`:\n  - **`registry_crates_run_like_cargo`** now includes wasm-bindgen-shared 0.2.130. The app calls its whole public\n    API, and on x86-64 it prints what its cargo build prints. Its build script is compiled by zustc.\n  - **`wasm32_runs_like_native`** (new). Each fixture is built with `--target wasm32-unknown-unknown` and run under\n    node, and prints what its x86-64 build prints. The fixtures are:\n    - the path workspace and the build-script package;\n    - fnv, adler2, hex, itoa, rustc-hash, cfg-if, thiserror and wasm-bindgen-shared.\n\n    The two differences are those of the target: the build script's `CARGO_CFG_*` line, and cfg-if's `cfg(unix)` arm.\n- **`tests/wasm.rs`'s `wasm_workspace_runs_like_native`** (new). tests/workspace (three crates) is built as one module.\n  On every path it prints what its x86-64 build prints, with the same exit code. The paths include a panic in another\n  crate's generic function, an `unwrap` of `None`, and a division by zero in a dependency.\n- **`tests/probe/cow_asref_ty_frags.rs`** prints what rustc's build prints. It covers the gaps of 1.2.\n- **tests/workspace** calls `util` through `use util as u;`. It still matches rustc's build there.\n- **`cratebench/ui/run.py`** now builds for wasm32, and gives each crate cargo's variables (`CARGO_PKG_*`). Build\n  scripts still do not run there. The results, against the same zustc with the x86-64 cfg and no variables:\n\n  | app | crates that pass | before |\n  |---|---:|---:|\n  | dioxus | 19 | 18 |\n  | leptos | 18 | 17 |\n\n  - wasm-bindgen-shared passes, and wasm-bindgen stops on `closures!`.\n  - byteorder needed the 128-bit byte swap.\n  - memchr's wasm32 SIMD module stops on `impl Vector for v128`. Its x86-64 module stops on the same kind of impl,\n    for `__m128i`.\n\nThe wasm-bindgen-shared app, built cold (the median of 3, 4 cores). Each build includes the build script and\nunicode-ident:\n\n| build | time | output |\n|---|---:|---|\n| zurgo, x86-64 | 0.19 s | an executable of 59 KB |\n| zurgo, wasm32 | 0.14 s | a module of 164 KB |\n| cargo, x86-64 (debug) | 0.59 s | an executable of 5.4 MB |\n\nThe wasm32 build is the faster of the two zurgo builds: it does not run the system linker.\n\nThe KPI is the no-op rebuild of each crate of cratebench, in instructions, measured as `bench/ci_bench.py` measures\nit. Over all the crates, main takes 10.102 billion instructions and this branch 10.057 (−0.4%). No crate moved by\nmore than 1%.\n\n## 3. Next\n\nW1 of mizchi/zust#38: wasm-bindgen itself. These are the gaps known so far:\n\n- `closures!` (a tt-muncher) matches none of its calls;\n- `ref_by_copy!` makes `impl IntoWasmAbi for &&str`, an impl for a reference to a reference;\n- its proc macro (`#[wasm_bindgen]`, mizchi/zust#29) and its ABI.\n\nThe rest of W0's list in #38 moves on with it:\n\n- **a crate's identity apart from its extern name.** Two versions of one crate, and a dependency renamed in\n  Cargo.toml (`package = \"..\"`), are still errors;\n- **a crate's own edition;**\n- **`stringify!` of a type.** zustc spaces it as tokens (`Vec < u8 >`), while rustc writes `Vec<u8>`.",
+        "contentHash": "02ffc3801d335fbf6cfdb1d44e756a159cb722790f60db17e1368275f512a015"
+      },
+      "target": {
+        "source": "docs_reports_2026-11-22-08-wasm-bindgen-shared-wasm32.ja",
+        "path": "docs/ja/reports/2026-11-22-08-wasm-bindgen-shared-wasm32.md",
+        "startLine": 1,
+        "endLine": 120,
+        "quote": "# W0: wasm-bindgen-shared を zurgo で wasm32 向けに\n\n日付: 2026-11-22\n\nwasm-bindgen のロードマップ (mizchi/zust#38) の W0 は、wasm-bindgen-shared を zurgo で wasm32 向けにビルドすること\nだった。wasm-bindgen-shared は、wasm-bindgen のうち proc macro のない部分である。W0 は終わった:\nwasm-bindgen-shared 0.2.130 の公開 API を全部呼ぶアプリを `zurgo run --target wasm32-unknown-unknown` でビルドすると、\nnode の上で cargo のビルドと同じものを出す。前のマイルストーンは [zurgo M1 のレポート](2026-11-22-04-zurgo-build-scripts.md)。\n使い方: [zurgo.md](../zurgo.md)。\n\n## 1. 変えたこと\n\n### 1.1 wasm32 向けのワークスペースのビルド\n\n`zustc build --target wasm32-unknown-unknown` と `zurgo --target wasm32-unknown-unknown` は、\"workspace builds are not\nsupported yet\" で止まっていた。\n\n- **問題。** x86-64 では、クレートごとに ELF のオブジェクトを作り、システムのリンカがそれらをつなぐ。ここには wasm の\n  リンカがない: zustc のモジュールの書き出しは、すべての関数とデータからモジュールを一度に書く。\n- **クレートの `.o` の中身 (wasm32)。**\n  - クレートのオブジェクトは、その*部品*になった: モジュールの書き出しに渡すはずの関数とデータを直列化したもの\n    (`zust-wasm-parts 1`)。\n  - bin のリンクでは、自分と依存するクレートの部品を読み、クレートごとのローカルなシンボルに別々の名前\n    (`name@crate`) を付ける。\n  - それから、モジュールの書き出しを 1 回呼び、`<bin>.wasm` を書く。\n- **キャッシュとインクリメンタルビルド**は x86-64 と同じように働く。1 つのクレートを編集すると、そのクレートの部品を\n  書き直し、bin をリンクし直す。\n- **`zurgo run`** は、cargo と同じように wasm の bin を動かす: `CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_RUNNER` の\n  プログラムに、モジュールと引数を渡す。このリポジトリでは、ランナーは `node tests/wasm/run.mjs`。変数がなければ、\n  そう言うエラーになる。\n- **ビルドスクリプト**は、今までどおりホスト向けにビルドし、ホストで動かす。cargo と同じく、wasm32 の\n  `CARGO_CFG_*` を見る。\n- **wasm のバックエンド**には、byteorder が使う 128 ビット整数のバイトの入れ替え (`u128::swap_bytes`、`to_be`) が\n  なかった。今は、2 つの 64 ビットの半分を、それぞれのバイトを逆にして入れ替える。\n\n### 1.2 途中のコンパイラの穴\n\nwasm-bindgen-shared が当たったのは、はじめの 3 つ。ほかは、UI のレポートがその先のクレートについて挙げているもの\n([3 節](2026-11-21-03-ui-frameworks-wasm.md))。\n\n- **`alloc::borrow::Cow::Borrowed(..)`。** `alloc::` のパスを通した値も、`std::` や `core::` と同じように見つかる\n  ようになった。\n- **`Cow<'_, str>`。**\n  - zustc の prelude には Cow が 2 つある: `Cow<[T]>` と、`Cow<str>` のための `__CowStr`。\n  - 引数が `&str` か `String` の `Cow::Borrowed(s)` は、注釈がなくても str の方になった。型の推論でも、コード生成でも\n    そうなる。前は推論がスライスの方を取り、`name` が `&[T]` になっていた: \"no method `bytes` on type `str`\"。\n  - `Cow<str>` に対するパターン `Cow::Borrowed(s)` も str の方になる。\n  - `Cow<str>` には `Display` と `Debug` があり、引数としては `&str` に型強制される。\n- **`x.as_ref()`** は、スコープにある `AsRef` の境界に従う:\n  - `T: AsRef<str>` なら `&str`、`T: AsRef<[u8]>` なら `&[u8]`;\n  - クロージャの中 (`.map(|s| s.as_ref())`) でも同じで、その戻り値の型も推論されるようになった;\n  - `&&str` に対しても働く。前は \"cannot index into a value of type `str`\" だった。\n- **`$($t:ty)*`。** rustc と同じように、型は次の型が始まる所で終わるようになった:\n  - `u8 u16 Vec<u8> (bool, char) fn(u8) -> u8 m!(u8)` は 6 つの型;\n  - 丸括弧が型に付くのは、名前 (`Fn(u8)`) か型のマクロの `!` の後だけ。\n\n  前は、繰り返しがリスト全体を 1 つの型として取っていた: wasm-bindgen の `vectors!`、num-traits の\n  `int_trait_impl!`。\n- **別の名前で呼ぶクレートやモジュール。** `use util as u;` や `extern crate util as u;` の後では、`u::f()` は\n  `util::f()` になる。\n\n## 2. 結果\n\n- `crates/zurgo/tests/zurgo.rs`:\n  - **`registry_crates_run_like_cargo`** に wasm-bindgen-shared 0.2.130 が入った。アプリはその公開 API を全部呼び、\n    x86-64 で cargo のビルドと同じものを出す。そのビルドスクリプトは zustc がコンパイルする。\n  - **`wasm32_runs_like_native`** (新しいテスト)。それぞれのフィクスチャを `--target wasm32-unknown-unknown` で\n    ビルドして node で動かすと、x86-64 のビルドと同じものを出す。フィクスチャは:\n    - パスのワークスペースと、ビルドスクリプトのパッケージ;\n    - fnv、adler2、hex、itoa、rustc-hash、cfg-if、thiserror、wasm-bindgen-shared。\n\n    違いは 2 つで、どちらもターゲットによるもの: ビルドスクリプトの `CARGO_CFG_*` の行と、cfg-if の `cfg(unix)` の\n    腕。\n- **`tests/wasm.rs` の `wasm_workspace_runs_like_native`** (新しいテスト)。tests/workspace (3 つのクレート) を\n  1 つのモジュールにビルドする。どの経路でも x86-64 のビルドと同じものを出し、終了コードも同じ。経路には、別の\n  クレートの総称関数の中の panic、`None` の `unwrap`、依存するクレートの中のゼロ除算がある。\n- **`tests/probe/cow_asref_ty_frags.rs`** は rustc のビルドと同じものを出す。1.2 の穴をひととおり使う。\n- **tests/workspace** は `use util as u;` を通して `util` を呼ぶ。そこでも rustc のビルドと同じである。\n- **`cratebench/ui/run.py`** は wasm32 向けにビルドするようになり、それぞれのクレートに cargo の変数\n  (`CARGO_PKG_*`) を渡す。ビルドスクリプトは、そこでは今も動かさない。同じ zustc で、x86-64 の cfg と変数なしの場合と\n  比べた結果:\n\n  | アプリ | 通るクレート | 前 |\n  |---|---:|---:|\n  | dioxus | 19 | 18 |\n  | leptos | 18 | 17 |\n\n  - wasm-bindgen-shared が通り、wasm-bindgen は `closures!` で止まる。\n  - byteorder には 128 ビットのバイトの入れ替えが要った。\n  - memchr の wasm32 の SIMD のモジュールは、`impl Vector for v128` で止まる。x86-64 のモジュールも、同じ種類の\n    `__m128i` に対する impl で止まる。\n\nwasm-bindgen-shared のアプリのコールドのビルド (3 回の中央値、4 コア)。どのビルドにも、ビルドスクリプトと\nunicode-ident が入る:\n\n| ビルド | 時間 | 出力 |\n|---|---:|---|\n| zurgo、x86-64 | 0.19 s | 59 KB の実行ファイル |\n| zurgo、wasm32 | 0.14 s | 164 KB のモジュール |\n| cargo、x86-64 (debug) | 0.59 s | 5.4 MB の実行ファイル |\n\nzurgo の 2 つのビルドでは、wasm32 の方が速い: システムのリンカを動かさない。\n\nKPI は cratebench のそれぞれのクレートの no-op の再ビルドで、その命令数を `bench/ci_bench.py` と同じように測る。\n全部のクレートで、main は 101.02 億命令、このブランチは 100.57 億命令 (−0.4%)。1% より動いたクレートはない。\n\n## 3. 次\n\nmizchi/zust#38 の W1: wasm-bindgen そのもの。今わかっている穴は:\n\n- `closures!` (tt-muncher) がどの呼び出しにもマッチしない;\n- `ref_by_copy!` が `impl IntoWasmAbi for &&str` を作る。参照の参照に対する impl である;\n- その proc macro (`#[wasm_bindgen]`、mizchi/zust#29) と ABI。\n\nW0 のリストの残り (#38) は、それと一緒に進める:\n\n- **extern の名前とは別の、クレートの同一性。** 1 つのクレートの 2 つの版と、Cargo.toml で名前を変えた依存\n  (`package = \"..\"`) は、まだエラーになる;\n- **クレートごとの edition;**\n- **型の `stringify!`。** zustc はトークンごとに空白を入れる (`Vec < u8 >`) が、rustc は `Vec<u8>` と書く。",
+        "contentHash": "4cacfcf6edfa8e951ce08cdf86950d76199a572e3e7e702935a9fc6d765e39b7"
+      },
+      "context": [],
+      "candidateId": "42ffb8f0b9445809feb3754e32b2a9eef836f45b2610f39ef52cf7fe70468bde",
+      "contextHash": "d2d3e07224881b3dc6a4cf265cabe945ade71769080c20ff65483e532518f36f",
+      "judgment": {
+        "choice": "supports",
+        "confidence": 0.97,
+        "probabilities": {
+          "supports": 0.98,
+          "contradicts": 0.02,
+          "unrelated": 0,
+          "insufficient_context": 0
+        }
+      }
     }
   ],
   "coverage": {
-    "expected": 2,
-    "selected": 2,
-    "answered": 2,
+    "expected": 3,
+    "selected": 3,
+    "answered": 3,
     "missing": 0,
     "contradictions": 0,
     "unassessed": 0,
@@ -88,9 +122,9 @@
     "unboundDocuments": 0
   },
   "usage": {
-    "requests": 2,
-    "inputTokens": 23826,
-    "usd": 0.001000692
+    "requests": 3,
+    "inputTokens": 30482,
+    "usd": 0.001280244
   },
   "errors": []
 }

@@ -65,7 +65,6 @@ behavior: `cve_2020_36323_join_borrow` (join over a `Borrow<str>` of the program
 - Not supported yet:
   - i128 division and i128 to / from float;
   - threads (green threads need `swapcontext`);
-  - workspace builds (`zustc build`);
   - zustc built as wasm by itself.
 - Traps carry no panic message (the native build prints the location from its trap table).
 
@@ -120,8 +119,9 @@ error of each failing crate. Details and the order of the work: [docs/reports/20
 - Cargo graphs: `crates/zurgo` ([#28](https://github.com/mizchi/zust/issues/28), [docs/zurgo.md](docs/zurgo.md))
   reads Cargo.toml / Cargo.lock, turns on features as cargo does and builds path and crates.io packages (M0); runs
   build scripts and gives their cfgs, `rustc-env` and `OUT_DIR` to the crates (M1). thiserror 2's library builds.
-  Left: two versions of one crate and renamed dependencies (zustc's workspace has one name per crate), workspace
-  builds for wasm32, link instructions of build scripts, `zurgo test`.
+  Builds for wasm32 too (one module per bin, run with cargo's runner variable). Left: two versions of one crate and
+  renamed dependencies (zustc's workspace has one name per crate), a crate's own edition, link instructions of build
+  scripts, `zurgo test`.
   - What the caches do not see yet:
     - the process environment that an `env!($k)` made by a macro reads (the crate's own environment is in its
       fingerprint, the values zustc falls back to are not);
@@ -139,19 +139,22 @@ error of each failing crate. Details and the order of the work: [docs/reports/20
   serde_core 1.0.229 (`mod x;` inside a `macro_rules!` body: rustc finds the file where the macro is expanded, zustc
   beside the macro's own file). Their build scripts compile with rustc only (`env::vars()`, `Command` with an
   `OsString`, `Output` and other std gaps).
-- wasm-bindgen-shared 0.2.130 (W0 of [#38](https://github.com/mizchi/zust/issues/38)), built for x86-64 for now: its
-  build script compiles with zustc and runs, and unicode-ident builds. The crate stops on:
-  - `alloc::borrow::Cow::Borrowed(..)`: a value through an `alloc::` path is not found (`std::` works);
-  - `Cow::Borrowed(s)` as a `Cow<'_, str>`: "type annotations needed", also with the type written out.
+- wasm-bindgen-shared 0.2.130 (W0 of [#38](https://github.com/mizchi/zust/issues/38)) builds with zurgo for x86-64 and
+  for wasm32. An app that calls its whole API prints, under node, what its cargo build prints
+  (`crates/zurgo/tests/zurgo.rs`). Next, the wasm-bindgen crate itself (W1), which stops on:
+  - `closures!` (a tt-muncher) matches none of its calls;
+  - `impl IntoWasmAbi for &&str` from `ref_by_copy!`: an impl for a reference to a reference.
+- memchr 2.8.3, which 42 crates of dioxus and 29 of leptos depend on: an impl of a trait for a SIMD vector type is
+  "cannot find type" (`impl Vector for v128` in its wasm32 module, `impl Vector for __m128i` in its x86-64 one).
+- `cratebench/ui/run.py` does not run build scripts: a crate gets cargo's variables (`CARGO_PKG_*`) but not what its
+  script would give (zurgo does both).
 - `include!("x.rs")` as an item shifts the line numbers after it (`line!()`, panic locations) by the lines of the
   included file: its code goes in as it is, not on one line.
-- `s.as_ref()` with `s: &T`, `T: AsRef<str>` and `T = &str` is "cannot index into a value of type `str`"; inside a
-  closure (`.map(|x| x.as_ref())`) its return type is not inferred.
 - async is erased: an `async fn` runs when called and returns its value. Needs a state-machine lowering, `Pin`,
   `Waker` / `Context`.
 - wasm-bindgen's ABI: 32-bit pointers and `usize` on wasm32, imports from JS, exports called after `main`, its custom
   section and describe functions, reference types.
-- Macros: `$($t:ty)*`, larger tt-munchers (`pin_project!`, `bitflags!`), `#[macro_use] extern crate`, `#[macro_use]
+- Macros: larger tt-munchers (`pin_project!`, `bitflags!`), `#[macro_use] extern crate`, `#[macro_use]
   mod` in a file, `#![recursion_limit]`, doc comments before items removed by `#[cfg]` (E0585).
 - Language and std: the tables of sections 2.5 and 2.7 of the report.
 
