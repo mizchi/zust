@@ -9111,6 +9111,21 @@ pub struct Pin<P> {
     pointer: P,
 }
 
+// (as std's: what the pointer prints)
+impl<P: Debug> Debug for Pin<P> {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError> {
+        __exr_debug(&self.pointer, f);
+        Ok(())
+    }
+}
+
+impl<P: Display> Display for Pin<P> {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError> {
+        __exr_display(&self.pointer, f);
+        Ok(())
+    }
+}
+
 // (std::task: futures run at once (see `async`), so nothing here is polled by zustc itself; these let a program
 // implement Future and poll by hand)
 pub enum Poll<T> {

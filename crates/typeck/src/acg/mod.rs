@@ -72,9 +72,75 @@ pub const PTR: Type = types::I64;
 pub type Sp = crate::parse::Pos;
 pub const SP: Sp = crate::parse::Pos { line: 0, col: 0 };
 
+/// Whether an environment variable is set, read once for each flag: getenv scans the whole environment, and these are
+/// asked for each function, closure or temporary
+fn env_once(cell: &'static std::sync::OnceLock<bool>, name: &str) -> bool {
+    *cell.get_or_init(|| std::env::var_os(name).is_some())
+}
+
+/// ACG_PANIC_ERR=1: an error panics (to find where it is made from the backtrace)
+/// An error of the borrow or region check's kind (lowering itself returns some: `m[k] = v` of a HashMap is E0594)
+pub fn borrow_error(e: &str) -> bool {
+    ["cannot assign", "cannot borrow", "cannot move out", "use of moved", "borrow of moved", "does not live long enough", "may not live long enough", "(E0594)", "(E0596)", "(E0384)"]
+        .iter()
+        .any(|k| e.contains(k))
+}
+
+/// borrow_error, and the borrow check's other errors: a use of what is not initialized (E0381), a temporary freed while
+/// borrowed (E0716), a match guard's change (E0510), a returned borrow (E0515, E0713), a closure that outlives what it
+/// borrows (E0373), a use of what is mutably borrowed (E0503) or partly moved (E0382), an assignment to a part of
+/// what was moved (E0382), a closure's borrow that escapes it (E0521)
+pub fn borrow_check_error(e: &str) -> bool {
+    borrow_error(e)
+        || [
+            "isn't initialized",
+            "temporary value",
+            "in match guard",
+            "destructor runs",
+            "cannot return",
+            "may outlive the current function",
+            "because it was mutably borrowed",
+            "of partially moved",
+            "to part of moved",
+            "escapes outside of closure",
+            "(E0505)",
+            "(E0499)",
+            "(E0502)",
+            "(E0506)",
+            "(E0503)",
+        ]
+            .iter()
+            .any(|k| e.contains(k))
+}
+
+pub(crate) fn panic_err() -> bool {
+    static C: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    env_once(&C, "ACG_PANIC_ERR")
+}
+
+pub(crate) fn no_fresh() -> bool {
+    static C: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    env_once(&C, "ZUSTC_NO_FRESH")
+}
+
+pub(crate) fn no_ret_dst() -> bool {
+    static C: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    env_once(&C, "ZUSTC_NO_RET_DST")
+}
+
+pub(crate) fn debug_at() -> bool {
+    static C: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    env_once(&C, "ACG_DEBUG_AT")
+}
+
+pub(crate) fn debug_clo() -> bool {
+    static C: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    env_once(&C, "ACG_DEBUG_CLO")
+}
+
 pub fn err<T>(_: Sp, msg: impl std::fmt::Display) -> R<T> {
     // (ACG_PANIC_ERR=1: エラーの場所をバックトレースで調べる)
-    if std::env::var_os("ACG_PANIC_ERR").is_some() {
+    if panic_err() {
         panic!("{msg}");
     }
     Err(msg.to_string())
@@ -405,12 +471,7 @@ fn compile_once(prog: &Program, insts: &Mutex<Insts>, id: u32, f: &ItemFn, line_
     // fails, as a placeholder cannot do all its bounds allow (a trait's method, a coercion to `dyn`): not checked
     // further, nothing reported. Its borrow and region checks' errors are)
     // (not an error of the borrow check's kind lowering itself returns: `m[k] = v` of a HashMap is E0594 whatever T is)
-    let borrow_kind = |e: &str| {
-        ["cannot assign", "cannot borrow", "cannot move out", "use of moved", "borrow of moved", "does not live long enough", "may not live long enough", "(E0594)", "(E0596)", "(E0384)"]
-            .iter()
-            .any(|k| e.contains(k))
-    };
-    if placeholder && r.as_ref().is_err_and(|e| !borrow_kind(e)) {
+    if placeholder && r.as_ref().is_err_and(|e| !borrow_error(e)) {
         if regionck::debug() {
             eprintln!("regionck: placeholder instance not checked: {}", r.as_ref().err().map(|e| e.as_str()).unwrap_or(""));
         }
@@ -1055,7 +1116,7 @@ impl Cx<'_> {
         if got == want || got == Ty::Never {
             Ok(())
         } else {
-            if std::env::var_os("ACG_PANIC_ERR").is_some() {
+            if panic_err() {
                 panic!("mismatched types");
             }
             Err(self.at(span, format!("mismatched types: expected `{}`, found `{}`", self.prog.tn(want), self.prog.tn(got))))
@@ -1112,7 +1173,7 @@ impl Cx<'_> {
     pub fn temp_fresh(&mut self, t: Ty) -> Value {
         let ss = self.slot(t);
         let a = self.b.ins().stack_addr(PTR, ss, 0);
-        if std::env::var_os("ZUSTC_NO_FRESH").is_none() {
+        if !no_fresh() {
             self.fresh.insert(a.0, ss);
         }
         a
@@ -1438,7 +1499,7 @@ impl Cx<'_> {
     /// e が呼び出しなら、戻り値を sret の場所に直接書かせる印を付ける
     pub fn mark_ret_call(&mut self, e: &Expr) {
         let e = strip_paren(e);
-        if self.sret.is_some() && self.inline_ret.is_none() && matches!(e, Expr::Call(..) | Expr::MethodCall(..) | Expr::Struct(..)) && std::env::var_os("ZUSTC_NO_RET_DST").is_none() {
+        if self.sret.is_some() && self.inline_ret.is_none() && matches!(e, Expr::Call(..) | Expr::MethodCall(..) | Expr::Struct(..)) && !no_ret_dst() {
             self.ret_call = Some(e as *const Expr as usize);
         }
     }
@@ -1670,7 +1731,7 @@ impl Cx<'_> {
                     }
                     // (as for a plain let: what the bindings may borrow (a `ref` binding, a reference in the value)
                     // lives to the end of the block, the rest is dropped here: `let (n, _) = (c.borrow().len(), 0);`)
-                    if extends_temps(init) || borrowck::has_refs(self.prog, place.ty(), 0) || format!("{pat:?}").contains("Ident(true") {
+                    if extends_temps(init) || self.bk_ty(place.ty()).1 || format!("{pat:?}").contains("Ident(true") {
                         self.extend_temps(t0);
                     } else {
                         self.drop_temps(t0);
@@ -1699,6 +1760,7 @@ impl Cx<'_> {
                         let r = self.place(init);
                         self.bk.place_depth -= 1;
                         let _ = r?;
+                        self.bk_fake_read(init);
                     } else {
                         // (`let _: [(); 0] = [];`: the annotation is the expected type)
                         // (only for an array literal, which needs it for its element type: an expected type would
@@ -1909,7 +1971,7 @@ impl Cx<'_> {
                     // extends them (`let r = &f();`, `let p: *const S = &S::new();`). zustc also keeps them when the
                     // bound value may hold a reference, which rustc rejects when it borrows a temporary (E0716) and
                     // zustc does not see yet. A RefCell guard in `let n = *c.borrow();` must not outlive the let)
-                    if extends_temps(init) || borrowck::has_refs(self.prog, ty, 0) {
+                    if extends_temps(init) || self.bk_ty(ty).1 {
                         self.extend_temps(t0);
                     } else {
                         self.drop_temps(t0);
@@ -1969,7 +2031,7 @@ impl Cx<'_> {
                     }
                     if tail {
                         let srcs = self.bk_frame_end();
-                        if borrowck::has_refs(self.prog, self.ret, 0) {
+                        if self.bk_ty(self.ret).1 {
                             { let _ = &srcs; self.bk_ret(e); }
                         }
                     }

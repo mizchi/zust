@@ -16,7 +16,6 @@ These are in the type and borrow checks that the compat and region-check work ch
 |---|---|
 | `borrow_closure_escapes` | E0373 is only checked for `thread::spawn`: a boxed closure borrowing a local is returned |
 | `region_block_tail_escapes` | a loan held by a block's local, or by what a by-value method returns (`Some(&v).unwrap()`), is not followed out of the block's tail (E0597) |
-| `borrow_uninit_read` | rejected, but reported at the function's first line instead of the read |
 
 ### Privacy
 

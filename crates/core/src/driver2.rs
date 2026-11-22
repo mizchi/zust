@@ -492,6 +492,17 @@ impl Session2 {
         self.fresh.push(k);
     }
 
+    /// Where the items moved out of fn bodies came from, for src as analyze prepares it (Prep::moved)
+    fn moved_lines(&self, src0: &str) -> Option<Vec<(usize, usize)>> {
+        let stripped = if self.ctx.map.inputs.is_empty() { crate::cfg::strip(src0, &self.opts.cfg_with(&self.opts.features)) } else { None };
+        let src0 = stripped.as_deref().unwrap_or(src0);
+        let mut crates = self.ctx.deps.clone();
+        crates.extend(self.ctx.lib.iter().cloned());
+        let cfg = self.opts.cfg_with(self.ctx.features.as_ref().unwrap_or(&self.opts.features));
+        let renamed = crate::prep::std_renames(src0);
+        crate::prep::moved_lines(renamed.as_deref().unwrap_or(src0), &crates, Some(&cfg))
+    }
+
     /// 要約はアイテムのハッシュで引く
     pub fn analyze(&mut self, src0: &str) -> R<Analysis> {
         let mut externs = std::mem::take(&mut self.externs);
@@ -2907,6 +2918,8 @@ fn inline_bodies(a: &Analysis) -> acg::Inline {
         crate::prelude::DROP_GLUE, "__exr_hash", "__exr_cmp", "__exr_eq", "__exr_clone", "__exr_default", "__exr_display", "__exr_debug",
         "__exr_rt_init", "__exr_on_trap", "Option::unwrap", "Option::expect", "Result::unwrap", "Result::expect", "Result::unwrap_err", "Result::expect_err",
     ];
+    // (read once: getenv scans the whole environment)
+    let (no_inline_closure, inline_log) = (std::env::var_os("ZUSTC_NO_INLINE_CLOSURE").is_some(), std::env::var_os("ZUSTC_INLINE_LOG").is_some());
     for id in 0..p.names.len() {
         let Some(ii) = p.item_of[id] else { continue };
         // (依存するクレートの関数は展開しない: 本体はインターフェースのハッシュに入らないので、変わっても気付けない)
@@ -2915,12 +2928,12 @@ fn inline_bodies(a: &Analysis) -> acg::Inline {
         }
         // (クロージャの本体: 大きさは本体の構文木で見る (アイテムは囲む関数のもの))
         if p.closures.contains_key(&(id as u32)) {
-            if std::env::var_os("ZUSTC_NO_INLINE_CLOSURE").is_some() {
+            if no_inline_closure {
                 continue;
             }
             if let Ok(f) = fn_ast(a, id as u32) {
                 let ok = acg::inline_candidate(&f) && format!("{:?}", f.block).len() <= 2400;
-                if std::env::var_os("ZUSTC_INLINE_LOG").is_some() {
+                if inline_log {
                     eprintln!("inline {} closure {}", if ok { "yes" } else { "no " }, p.names[id]);
                 }
                 if ok {
@@ -2947,7 +2960,7 @@ fn inline_bodies(a: &Analysis) -> acg::Inline {
         }
         if let Ok(f) = fn_ast(a, id as u32) {
             let ok = acg::inline_candidate(&f);
-            if std::env::var_os("ZUSTC_INLINE_LOG").is_some() {
+            if inline_log {
                 eprintln!("inline {} {ntok} {}", if ok { "yes" } else { "no " }, p.names[id]);
             }
             if ok {
@@ -3422,11 +3435,61 @@ impl Session2 {
             self.chk = Some(memo);
         }
         tm.lap("check", format!("{n_memo} from the last check, {n_keys} keys, {n_hit} cached, {n_checked} checked"));
-        let mut d: Vec<Diagnostic> = errs.iter().map(|e| Diagnostic::parse(e)).filter(|d| d.line <= user_lines).collect();
+        let mut d: Vec<Diagnostic> = errs.iter().map(|e| Diagnostic::parse(e)).collect();
+        // (an item moved out of a fn body (`fn main() { fn helper() { .. } }`) is past the source's last line: its borrow
+        // and region checks' errors are at the lines it was moved from. Not its other errors: typeck does not know all
+        // such an item may name where it was (`Self` of the impl around it), so they are left out as before)
+        if d.iter().any(|x| x.line > user_lines && acg::borrow_check_error(&x.msg)) {
+            if let Some(moved) = self.moved_lines(src) {
+                for x in &mut d {
+                    if x.line > user_lines && acg::borrow_check_error(&x.msg) {
+                        if let Some(l) = moved_line(&moved, user_lines, x.line) {
+                            x.line = l;
+                            x.msg = moved_msg_lines(&x.msg, &moved, user_lines);
+                        }
+                    }
+                }
+            }
+        }
+        d.retain(|d| d.line <= user_lines);
         d.sort_by(|x, y| (x.line, x.col).cmp(&(y.line, y.col)));
         d.dedup();
         d
     }
+}
+
+/// The line (1-based) in the source of line `line` of the prepared text, past the source's `user_lines`: in the
+/// items moved out of fn bodies, appended in order, each after a newline (Prep::moved: each one's first line in the
+/// source (0-based) and its newlines). None past them (the prelude's)
+fn moved_line(moved: &[(usize, usize)], user_lines: usize, line: usize) -> Option<usize> {
+    let mut start = user_lines + 1;
+    for &(from, nl) in moved {
+        if line >= start && line <= start + nl {
+            return Some(from + 1 + (line - start));
+        }
+        start += nl + 1;
+    }
+    None
+}
+
+/// The positions `at L:C` a message names (`(first borrow at 14:22)`) on lines moved out of fn bodies: at the lines
+/// they were moved from (moved_line)
+fn moved_msg_lines(msg: &str, moved: &[(usize, usize)], user_lines: usize) -> String {
+    let mut out = String::with_capacity(msg.len());
+    let mut rest = msg;
+    while let Some(i) = rest.find("at ") {
+        out.push_str(&rest[..i + 3]);
+        rest = &rest[i + 3..];
+        let n = rest.bytes().take_while(|b| b.is_ascii_digit()).count();
+        if n > 0 && rest[n..].starts_with(':') {
+            if let Some(l) = rest[..n].parse::<usize>().ok().filter(|&l| l > user_lines).and_then(|l| moved_line(moved, user_lines, l)) {
+                out.push_str(&l.to_string());
+                rest = &rest[n..];
+            }
+        }
+    }
+    out.push_str(rest);
+    out
 }
 
 /// The program's generic fns (not a trait's default methods, not a closure's body, not a dependency's) that no

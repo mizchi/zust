@@ -467,6 +467,63 @@ fn bound_lts(b: &str) -> Vec<String> {
     out
 }
 
+/// The arguments a bound written as a string passes its trait (`Get<&'a i32, T>`: `&'a i32`, `T`), in order
+fn bound_args(b: &str) -> Vec<String> {
+    let (Some(i), Some(j)) = (b.find('<'), b.rfind('>')) else { return vec![] };
+    let Some(inner) = b.get(i + 1..j) else { return vec![] };
+    let (mut out, mut depth, mut from) = (vec![], 0i32, 0);
+    for (k, ch) in inner.char_indices().chain(std::iter::once((inner.len(), ','))) {
+        match ch {
+            '<' | '(' | '[' => depth += 1,
+            '>' | ')' | ']' => depth -= 1,
+            ',' if depth == 0 => {
+                out.push(inner[from..k].trim().to_string());
+                from = k + 1;
+            }
+            _ => {}
+        }
+    }
+    out
+}
+
+/// The lifetimes a type written as a string names, in the order of its region slots, when it writes all of them:
+/// references and generic arguments only (`&'a Foo<'b>`: `'a`, `'b`); None for an elided one (`&u8`, `'_`), a trait
+/// object, an `impl` type or a fn pointer, whose regions are not in written order
+fn written_lts(t: &str) -> Option<Vec<String>> {
+    let b = t.as_bytes();
+    let mut out = vec![];
+    let mut i = 0;
+    while i < b.len() {
+        match b[i] {
+            b'&' => {
+                let rest = t[i + 1..].trim_start();
+                if !rest.starts_with('\'') {
+                    return None;
+                }
+            }
+            b'\'' => {
+                let mut j = i + 1;
+                while j < b.len() && (b[j].is_ascii_alphanumeric() || b[j] == b'_') {
+                    j += 1;
+                }
+                let l = &t[i..j];
+                if l == "'_" {
+                    return None;
+                }
+                out.push(l.to_string());
+                i = j;
+                continue;
+            }
+            _ => {}
+        }
+        i += 1;
+    }
+    if ["dyn", "impl", "fn", "Fn"].iter().any(|k| t.split(|c: char| !c.is_alphanumeric() && c != '_').any(|w| w == *k || w.starts_with("Fn"))) {
+        return None;
+    }
+    Some(out)
+}
+
 /// The number of region slots of t (None: not followed)
 pub fn count(prog: &Program, t: Ty, depth: u32) -> Option<usize> {
     if depth > 24 {
@@ -1932,7 +1989,7 @@ impl Cx<'_> {
         let k = x as *const Expr as usize;
         // (a constant whose type needs dropping (`&Test` with `impl Drop for Test`) is not promoted either)
         let dropped = || matches!(x, Expr::Path(None, p) if p.segs.len() != 1 || self.lookup(&p.segs[0].name).is_none()) && self.needs_drop(t);
-        if self.rg.calls.contains_key(&k) || !(self.not_const(x) || dropped()) || super::borrowck::has_refs(self.prog, t, 0) {
+        if self.rg.calls.contains_key(&k) || !(self.not_const(x) || dropped()) || self.bk_ty(t).1 {
             return;
         }
         self.rg.temps.insert(k, t);
@@ -2765,6 +2822,44 @@ impl Cx<'_> {
                 if let Some(Some(at)) = targs.get(g) {
                     for &x in at {
                         rg.edge(x, y, sp);
+                    }
+                }
+            }
+        }
+        // (a callee's trait bound on a type parameter the caller's own type parameter fills, as the caller's bound
+        // of that trait (`G: Get<T>` with T = &'min i32, the caller's `G: Get<&'max i32>`): a trait's parameters are
+        // invariant, so the regions are the same)
+        if !through_trait && !ph_self {
+            for (gi, (_, bs)) in sig0.generics.iter().enumerate() {
+                let Some(&Some(Ty::Struct(s))) = sol.get(gi) else { continue };
+                if !prog.is_placeholder(s) {
+                    continue;
+                }
+                let cbs = prog.structs[s as usize].placeholder.as_deref().unwrap_or(&[]);
+                for b in bs.iter().filter(|b| b.contains('<')) {
+                    let tr = b.split('<').next().unwrap_or(b).trim();
+                    let mut same = cbs.iter().filter(|c| c.split('<').next().unwrap_or(c).trim() == tr);
+                    let (Some(cb), None) = (same.next(), same.next()) else { continue };
+                    let (xs, ys) = (bound_args(b), bound_args(cb));
+                    if xs.len() != ys.len() {
+                        continue;
+                    }
+                    for (x, y) in xs.iter().zip(&ys) {
+                        let callee: Option<RT> = if x.starts_with('\'') {
+                            if x == "'static" { Some(vec![STATIC]) } else { rs.as_deref().and_then(|r| r.lts.iter().position(|l| l == x)).and_then(|p| lts.get(p).copied()).map(|v| vec![v]) }
+                        } else {
+                            sig0.generics.iter().position(|g| g.0 == *x).and_then(|p| targs.get(p).cloned().flatten())
+                        };
+                        let caller: Option<RT> = written_lts(y).and_then(|ls| {
+                            ls.iter().map(|l| if l == "'static" { Some(STATIC) } else { rg.lt_names.iter().position(|n| n == l).and_then(|p| rg.lts.get(p).copied()) }).collect()
+                        });
+                        if let (Some(a), Some(c)) = (callee, caller) {
+                            if a.len() == c.len() {
+                                for (&a, &c) in a.iter().zip(&c) {
+                                    rg.constrain(a, c, Var::Inv, sp);
+                                }
+                            }
+                        }
                     }
                 }
             }
