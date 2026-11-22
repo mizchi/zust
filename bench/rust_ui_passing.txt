@@ -1128,9 +1128,11 @@ run-pass	cfg/conditional-compile.rs
 compile-fail	cfg/diagnostics-not-a-def.rs
 compile-fail	cfg/diagnostics-reexport-2.rs
 compile-fail	cfg/diagnostics-reexport.rs
+compile-fail	cfg/diagnostics-same-crate.rs
 check-pass	cfg/expanded-cfg.rs
 compile-fail	cfg/nested-cfg-attr-conditional-compilation.rs
 run-pass	cfg/struct-field-empty.rs
+check-pass	check-cfg/cfg-select.rs
 check-pass	check-cfg/nested-cfg.rs
 check-pass	closure-expected-type/expect-fn-supply-fn-multiple.rs
 check-pass	closure-expected-type/expect-infer-var-supply-ty-with-bound-region.rs
