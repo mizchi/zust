@@ -296,13 +296,13 @@ fn text_same_in_js_and_wasm() {
         let d = out_dir(name);
         let o = zsc(&root().join("examples/text.zsc"), &d, flags);
         assert!(o.status.success(), "zsc failed:\n{}", String::from_utf8_lossy(&o.stderr));
-        outs.push(node(&d, "const m = await import('./text.js'); console.log(JSON.stringify([m.text(4), m.shout('  hé ')]))"));
+        outs.push(node(&d, "const m = await import('./text.js'); console.log(JSON.stringify([m.text(4), m.shout('  hé '), m.conflict_report(5)]))"));
         if flags.is_empty() {
             rs = std::fs::read_to_string(d.join("text.wasm.rs")).unwrap();
         }
     }
     assert_eq!(outs[0], outs[1], "wasm and JS differ");
-    assert_eq!(outs[0], "[\"Hello, bo! ANA,BO,😀X abc 3 110 2 TFTFTT 0;1;2;3;\",\"HÉ!\"]\n");
+    assert_eq!(outs[0], "[\"Hello, bo! ANA,BO,😀X abc 3 110 2 TFTFTT 0;1;2;3;\",\"HÉ!\",\"FTxy5\"]\n");
     // borrowed strings, a borrowed result with a lifetime, `==` through borrows, and a string grown in place
     assert!(rs.contains("fn zs_longest<'a>(a: &'a str, b: &'a str) -> &'a str"), "{rs}");
     assert!(rs.contains("fn zs_same(p: &ZsPerson, q: &ZsPerson) -> bool {\n{\n(p == q)"), "{rs}");
@@ -316,8 +316,11 @@ fn js_push_in_place() {
     let d = out_dir("js_inplace");
     let o = zsc(&root().join("tests/js_inplace.zsc"), &d, &[]);
     assert!(o.status.success(), "{}", String::from_utf8_lossy(&o.stderr));
-    let out = node(&d, "const m = await import('./js_inplace.js'); const xs = [1]; const r = m.from_param(xs); console.log(JSON.stringify([m.ramp(5), m.aliased(), [r, xs.length], m.iterate_and_grow(), m.stored(), m.other_local(), m.concat_and_short()]))");
-    assert_eq!(out, "[5,12,[2,1],4,114,13,31]\n");
+    let out = node(&d, "const m = await import('./js_inplace.js'); const xs = [1]; const r = m.from_param(xs); console.log(JSON.stringify([m.ramp(5), m.aliased(), [r, xs.length], m.iterate_and_grow(), m.stored(), m.other_local(), m.concat_and_short(), m.compare_with_push(), m.push_arg_assigns(), m.jsx_alias()]))");
+    assert_eq!(out, "[5,12,[2,1],4,114,13,31,false,2,1]\n");
+    // == by content compares the declared fields only, so it is symmetric: a value from TS may carry more
+    let out = node(&d, "const m = await import('./js_inplace.js'); const a = { x: 1, name: 'a' }, b = { x: 1, name: 'a', extra: 2 }; console.log(JSON.stringify([m.same_p(a, b), m.same_p(b, a), m.same_p(a, { x: 2, name: 'a' })]))");
+    assert_eq!(out, "[true,true,false]\n");
     let js = std::fs::read_to_string(d.join("js_inplace.js")).unwrap();
     // in place exactly where no one else can see the array: the loop's accumulator, a local made by a copying
     // push, and a concat onto a fresh literal

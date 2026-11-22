@@ -52,3 +52,16 @@ enum Tag { Named(String), Anon }
 }
 
 @wasm pub fn shout(s: String) -> String { s.trim().to_upper() + "!" }
+
+// operands that assign what another operand reads: the left value / the receiver is the one before the assignment
+@wasm fn conflicts(n: i32) -> String {
+  let mut xs = [1.0, 2.0];
+  let a = xs == { xs = [2.0]; xs };
+  let mut s = "ab";
+  let b = s.contains({ s = "zz"; "a" });
+  let mut t = "x";
+  let c = t + { t = "y"; t };
+  (if a { "T" } else { "F" }) + (if b { "T" } else { "F" }) + c + (n as i32).to_string()
+}
+
+@wasm pub fn conflict_report(n: i32) -> String { conflicts(n) }

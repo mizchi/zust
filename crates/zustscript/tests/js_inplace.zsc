@@ -65,3 +65,29 @@ pub fn concat_and_short() -> i32 {
   let ok = (b.push(2).len() == 0) && { b = [7]; true };
   a.len() * 10 + b.len()
 }
+
+// the left operand of == is held while the right one runs
+pub fn compare_with_push() -> bool {
+  let mut xs = [1];
+  xs == xs.push(2)
+}
+
+// an argument that assigns the receiver
+pub fn push_arg_assigns() -> i32 {
+  let mut a = [1];
+  a = a.push({ a = [7]; 2 });
+  a.len()
+}
+
+// an alias made inside a JSX attribute
+pub fn jsx_alias() -> i32 {
+  let mut a = [1];
+  let mut b = [];
+  let view = <div id={{ b = a; 0 }} />;
+  a = a.push(2);
+  b.len()
+}
+
+type P = { x: i32, name: String }
+// == by content, on the declared fields only (a value from TS may carry more)
+pub fn same_p(a: P, b: P) -> bool { a == b }

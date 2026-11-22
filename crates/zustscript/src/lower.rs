@@ -1150,9 +1150,15 @@ impl<'a> Lower<'a> {
                 if !self.copy(&lt) {
                     // (values that are not Copy: compared through borrows of the same type, `&[T]` / `&str` / `&ZsX`,
                     // by content (derive(PartialEq)), as the JS layer's `$eq`)
-                    let ((a, _), (b, _)) = match *op {
-                        "+" => ((self.expr(l)?, None), self.borrowed(r)?),
-                        _ => (self.borrowed(l)?, self.borrowed(r)?),
+                    // (both borrowed, through the arguments' path: a right operand that assigns what the left one reads,
+                    // `xs == { xs = [2]; xs }`, gets the left one as a value first. The left string of `+` is taken
+                    // owned, so nothing of it is borrowed while the right one runs)
+                    let (a, b) = match *op {
+                        "+" => (self.expr(l)?, self.borrowed(r)?.0),
+                        _ => {
+                            let (v, _) = self.args_as(&[(**l).clone(), (**r).clone()], &[true, true], &[lt.clone(), lt.clone()])?;
+                            (v[0].clone(), v[1].clone())
+                        }
                     };
                     return val(match *op {
                         "==" | "!=" => format!("({a} {op} {b})"),
@@ -1378,7 +1384,21 @@ impl<'a> Lower<'a> {
         let val = |s: String| Ok((s, Form::Val));
         // strings: JS's meaning (lengths and order in UTF-16 code units, JS's white space)
         if rt == Ty::Str {
-            let (sb, sroots) = self.borrow_of(&recv, &rf, &rt);
+            let (mut sb, mut sroots) = self.borrow_of(&recv, &rf, &rt);
+            // (an argument that assigns what the receiver reads, `s.contains({ s = "b"; "a" })`: the receiver is taken
+            // as a value first, so no borrow of it is held across the assignment)
+            if args.iter().any(|a| self.live.assigns_in.contains(&a.id)) {
+                let (mut reads, mut assigns) = (HashSet::new(), HashSet::new());
+                own::names(r, &mut reads, &mut HashSet::new());
+                for a in args {
+                    own::names(a, &mut HashSet::new(), &mut assigns);
+                }
+                if reads.iter().any(|n| assigns.contains(n)) {
+                    let v = format!("{{ {} }}", self.owned(recv.clone(), &rf, &rt));
+                    sb = self.borrow_of(&v, &Form::Val, &rt).0;
+                    sroots = None;
+                }
+            }
             return match b {
                 B::Len => {
                     self.str_helpers.insert("zs_len16");

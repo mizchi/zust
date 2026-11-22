@@ -228,6 +228,17 @@ pub fn names(e: &Expr, reads: &mut HashSet<String>, assigns: &mut HashSet<String
     }
 }
 
+fn jsx_children(j: &Jsx) -> Vec<&Expr> {
+    j.attrs
+        .iter()
+        .map(|a| &a.1)
+        .chain(j.children.iter().filter_map(|c| match c {
+            JsxChild::Expr(e) => Some(e),
+            JsxChild::Text(_) => None,
+        }))
+        .collect()
+}
+
 /// The names a pattern binds
 pub fn pat_names(p: &Pat) -> Vec<String> {
     let mut out = vec![];
@@ -265,7 +276,9 @@ fn children(e: &Expr) -> Vec<&Expr> {
             .chain(tail.as_deref())
             .collect(),
         EK::Handle(b, arms) => std::iter::once(&**b).chain(arms.iter().map(|a| &a.body)).collect(),
-        EK::Lit(_) | EK::Var(_) | EK::Path(..) | EK::Break | EK::Continue | EK::Jsx(_) => vec![],
+        // (a JSX element's attribute values and expression children are evaluated as well)
+        EK::Jsx(j) => jsx_children(j),
+        EK::Lit(_) | EK::Var(_) | EK::Path(..) | EK::Break | EK::Continue => vec![],
     }
 }
 
@@ -661,7 +674,9 @@ pub fn inplace_pushes(params: &[String], body: &Expr, info: &Info) -> HashSet<Id
                 uses(b, true, r, info, live, ok);
             }
             EK::Bin(_, a, b) => {
-                uses(a, false, r, info, live, ok);
+                // (the left operand's value is held while the right one runs: `xs == xs.push(2)` must not append
+                // to the array it compares)
+                uses(a, true, r, info, live, ok);
                 uses(b, false, r, info, live, ok);
             }
             // (a block's statements are not its value: an expression statement keeps nothing)
@@ -705,13 +720,22 @@ pub fn inplace_pushes(params: &[String], body: &Expr, info: &Info) -> HashSet<Id
     let mut out = HashSet::new();
     fn pushes(e: &Expr, r: &Resolve, info: &Info, live: &Live, ok: &HashSet<usize>, out: &mut HashSet<Id>) {
         use crate::check::Builtin as B;
-        if let EK::Method(recv, _, _) = &e.kind
+        if let EK::Method(recv, _, args) = &e.kind
             && matches!(info.builtin.get(&e.id), Some(B::Push | B::Concat))
             && let EK::Var(_) = recv.kind
-            && r.uses.get(&recv.id).is_some_and(|b| ok.contains(b))
+            && let Some(b) = r.uses.get(&recv.id)
+            && ok.contains(b)
             && live.last.contains(&recv.id)
         {
-            out.insert(e.id);
+            // (an argument that assigns the receiver, `a.push({ a = [7]; 2 })`, would make the appended array and
+            // the one the expression yields differ)
+            let mut assigns = HashSet::new();
+            for a in args {
+                bindings(a, r, &mut HashSet::new(), &mut assigns);
+            }
+            if !assigns.contains(b) {
+                out.insert(e.id);
+            }
         }
         for c in children(e) {
             pushes(c, r, info, live, ok, out);

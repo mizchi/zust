@@ -1,0 +1,2 @@
+// expect: `==` compares values
+fn f<T>(a: T, b: T) -> bool { a == b }

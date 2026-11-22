@@ -137,7 +137,7 @@ pub struct Info {
     pub ty: HashMap<Id, Ty>,
     /// `==` / `!=` that compare values with parts (arrays, records, enums with data, tuples): by content, in JS with
     /// `$eq`, in Rust with `derive(PartialEq)`. Values are immutable, so equal contents are equal values
-    pub deep_eq: HashSet<Id>,
+    pub deep_eq: HashMap<Id, Ty>,
 }
 
 pub struct Checker {
@@ -208,7 +208,7 @@ pub fn is_int(t: &Ty) -> bool {
 }
 
 /// `t` with the generic parameters of a record or enum replaced
-fn subst_named(t: &Ty, m: &HashMap<String, Ty>) -> Ty {
+pub(crate) fn subst_named(t: &Ty, m: &HashMap<String, Ty>) -> Ty {
     match t {
         Ty::Param(p) => m.get(p).cloned().unwrap_or_else(|| t.clone()),
         Ty::Array(a) => Ty::Array(Box::new(subst_named(a, m))),
@@ -566,15 +566,21 @@ impl Checker {
     }
 
     /// Can values of `t` be compared with `==` (by content): not functions, JSX or effects
-    fn eqable(&self, t: &Ty, seen: &mut Vec<String>) -> bool {
+    /// (`seen`: the instantiated types being checked, so a recursive type ends; a type that grows without repeating
+    /// is refused past a depth)
+    fn eqable(&self, t: &Ty, seen: &mut Vec<Ty>) -> bool {
         match t {
-            Ty::Str | Ty::Bool | Ty::Unit | Ty::Param(_) => true,
+            // (a generic parameter compares only with a numeric bound: unbounded, it could be a function)
+            Ty::Str | Ty::Bool | Ty::Unit => true,
             t if self.numeric(t) => true,
             Ty::Array(e) | Ty::Typed(e) => self.eqable(e, seen),
             Ty::Tuple(ts) => ts.iter().all(|t| self.eqable(t, seen)),
             Ty::Named(n, targs) => {
-                if seen.contains(n) {
+                if seen.contains(t) {
                     return true;
+                }
+                if seen.len() > 64 {
+                    return false;
                 }
                 let (params, fields): (Vec<String>, Vec<Ty>) = if let Some(r) = self.info.records.get(n) {
                     (r.params.clone(), r.fields.iter().map(|f| f.1.clone()).collect())
@@ -584,7 +590,7 @@ impl Checker {
                     return false;
                 };
                 let m: HashMap<String, Ty> = params.into_iter().zip(targs.iter().cloned()).collect();
-                seen.push(n.clone());
+                seen.push(t.clone());
                 let ok = fields.iter().all(|f| self.eqable(&subst_named(f, &m), seen));
                 seen.pop();
                 ok
@@ -669,10 +675,11 @@ impl Checker {
                         Ty::Named(n, _) => self.info.enums.get(n).is_some_and(|e| e.unit_only() && !e.is_effect()),
                         _ => false,
                     };
-                    if !primitive && self.eqable(&r, &mut vec![]) {
-                        self.info.deep_eq.insert(_id);
+                    let ok = primitive || self.eqable(&r, &mut vec![]);
+                    if !primitive && ok {
+                        self.info.deep_eq.insert(_id, r.clone());
                     }
-                    primitive || self.eqable(&r, &mut vec![])
+                    ok
                 }
                 "child" => match &r {
                     Ty::Jsx | Ty::Str => true,
