@@ -2515,7 +2515,9 @@ impl Cx<'_> {
         let mut v = vec![];
         self.bk_pat_cap(pat, p, t, super::SP, &mut v);
         let n0 = out.len();
-        out.extend(v.into_iter().filter(|x| x.2 == CapMode::RefMut && x.0.local == p.local).map(|x| x.0));
+        // (`Use` marks a part the patterns are not followed into (`S { value: ref mut y }`): kept, as borrowed
+        // mutably)
+        out.extend(v.into_iter().filter(|x| matches!(x.2, CapMode::RefMut | CapMode::Use) && x.0.local == p.local).map(|x| x.0));
         if out.len() == n0 {
             out.push(p.clone());
         }

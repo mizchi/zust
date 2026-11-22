@@ -1545,9 +1545,10 @@ impl Program {
             // (a trait with parameters, `impl Tr<u8> for S` and `impl Tr<u16> for S`, or self types that differ in their
             // arguments, `impl Tr for Vec<i32>` and `impl Tr for Vec<Box<i32>>`)
             let dup = !p.impls.insert((sid, tr.clone()));
-            // (all of its lifetimes 'static: `impl Copy for Foo<'static>`. One with others (`impl<'b> Copy for
-            // Foo<'static, 'b>`) is not followed: the borrow check would ask all of a copy's borrows to be 'static)
-            if tr == "Copy" && sm.hdr_regions.as_ref().is_some_and(|r| !r.self_slots.is_empty() && r.self_slots.iter().all(|&c| c == R_STATIC)) {
+            // (all of its lifetimes 'static: `impl Copy for Foo<'static>`, `impl Copy for Foo<&'static u32>` (a path
+            // written without lifetimes is no lifetime of its own). One with others (`impl<'b> Copy for Foo<'static,
+            // 'b>`) is not followed: the borrow check would ask all of a copy's borrows to be 'static)
+            if tr == "Copy" && sm.hdr_regions.as_ref().is_some_and(|r| r.self_slots.contains(&R_STATIC) && r.self_slots.iter().all(|&c| c == R_STATIC || c == R_ELIDED_ADT)) {
                 p.static_copy.insert(sid);
             }
 
