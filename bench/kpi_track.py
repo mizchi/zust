@@ -174,7 +174,8 @@ def ui_counts():
     #  bench/rust_ui_accidental.txt; from the run's per-test results when they are as new as its counts)
     res = os.path.join(ROOT, "out/rust_ui_results.txt")
     acc = os.path.join(ROOT, "bench/rust_ui_accidental.txt")
-    if os.path.exists(res) and os.path.getmtime(res) >= os.path.getmtime(j) - 60 and os.path.exists(acc):
+    # (the same run writes both at its end, a moment apart: a filtered run with its own `--json` leaves the JSON older)
+    if os.path.exists(res) and abs(os.path.getmtime(res) - os.path.getmtime(j)) < 5 and os.path.exists(acc):
         skip = {tuple(l.rstrip("\n").split("\t")[:2]) for l in open(acc) if l.strip() and not l.startswith("#")}
         n = dict.fromkeys(kinds, 0)
         for line in open(res):

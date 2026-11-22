@@ -380,11 +380,12 @@ impl Cx<'_> {
         let Expr::Let(pat, e) = &**cond else {
             unreachable!()
         };
-        self.while_let_parts(pat, e, body)
+        self.while_let_parts(pat, e, body, "while")
     }
 
     /// `while let pat = e { body }` (for ループのイテレータ版からも使う)
-    pub(crate) fn while_let_parts(&mut self, pat: &Pat, e: &Expr, body: &PBlock) -> R<V> {
+    /// (kind: the loop the source wrote, `while` or `for`, for E0571)
+    pub(crate) fn while_let_parts(&mut self, pat: &Pat, e: &Expr, body: &PBlock, kind: &'static str) -> R<V> {
         let header = self.b.create_block();
         let exit = self.b.create_block();
         self.b.ins().jump(header, &[]);
@@ -414,7 +415,7 @@ impl Cx<'_> {
             is_block: false,
             depth: self.scopes.len() - 1,
             temps: t0,
-            no_value: Some("while"),
+            no_value: Some(kind),
         });
         let (_, bt) = self.block(body, Some(Ty::Unit))?;
         self.loops.pop();
@@ -621,6 +622,22 @@ impl Cx<'_> {
             Pat::Ident(..) if const_lit_pat(self.prog, pat).is_some() => {
                 let lp = const_lit_pat(self.prog, pat).unwrap();
                 self.pat_test(&lp, p, fail)
+            }
+            // (`G::<5> => ..` with `struct G<const N: usize>;`: a unit struct's pattern, checked against the value's
+            // type (through references) and always matching)
+            Pat::Path(path) if path.segs.last().is_some_and(|s| !s.args.is_empty()) && self.variant_on(path, p.ty()).is_none() => {
+                let (pp, targs) = self.turbofish_split(path);
+                let (pd, _) = self.pat_deref(p, BindMode::Move);
+                match (self.prog.struct_by_p(&pp, self.self_sid), targs) {
+                    (Some(sid), Some(args)) if self.prog.structs[sid as usize].fields.is_empty() && !self.prog.structs[sid as usize].is_enum => {
+                        if let Some(ts) = self.turbofish_targs(sid, args)?.into_iter().collect::<Option<Vec<Ty>>>() {
+                            let pt = Ty::Struct(self.prog.instantiate(self.prog.base_of(sid), ts)?);
+                            self.same(SP, pt, pd.ty())?;
+                        }
+                        Ok(())
+                    }
+                    _ => err(SP, self.no_variant_msg(path)),
+                }
             }
             // (`Num::ZERO => ..` / `u8::MAX`: a path to a constant, not a variant, is equal to its value)
             Pat::Path(path) if self.variant_on(path, p.ty()).is_none() && self.path_const_pat(path) => {

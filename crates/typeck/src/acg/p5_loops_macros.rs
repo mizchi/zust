@@ -484,7 +484,7 @@ impl Cx<'_> {
             self.bk_def_named("__exr_it", &srcs, src_e);
             let call: &Expr = self.keep_expr(mcall(path_expr("__exr_it"), "next", vec![]));
             let pat = Pat::TupleStruct(path_of("Some"), vec![(**fpat).clone()]);
-            let r = self.while_let_parts(&pat, call, fbody);
+            let r = self.while_let_parts(&pat, call, fbody, "for");
             self.pop_scope();
             r?;
             return Ok((None, Ty::Unit));
