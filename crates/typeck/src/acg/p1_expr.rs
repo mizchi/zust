@@ -137,6 +137,26 @@ impl Cx<'_> {
         Some(Expr::Path(qt, qp))
     }
 
+    /// The arguments of `<T as From<S>>::from(x)` as the call on T gets them: x of the source S written (E0308 for
+    /// another type; an unsuffixed literal is S's, `<u16 as From<u8>>::from(6)`). Other calls' as they are
+    fn from_source_args(&self, p: &crate::parse::Path, cargs: &[Expr]) -> R<Vec<Expr>> {
+        if let ([tr, m], [x]) = (p.segs.as_slice(), cargs) {
+            if matches!((tr.name.as_str(), m.name.as_str()), ("From", "from") | ("TryFrom", "try_from")) {
+                if let [GArg::Ty(sty)] = tr.args.as_slice() {
+                    if let Some(s) = self.parse_ty(sty).ok().filter(|&s| !self.prog.has_param(s) && !has_hole(self.prog, s)) {
+                        if super::p2_call::is_int_lit(x) || super::p2_call::is_float_lit(x) {
+                            return Ok(vec![Expr::Paren(Box::new(Expr::Cast(Box::new(Expr::Paren(Box::new(x.clone()))), Box::new(sty.clone()))))]);
+                        }
+                        if let Some(a) = self.peek(x).filter(|&a| a != s && !self.prog.has_param(a)) {
+                            return err(expr_start(x), format!("mismatched types: expected `{}`, found `{}`", self.prog.tn(s), self.prog.tn(a)));
+                        }
+                    }
+                }
+            }
+        }
+        Ok(cargs.to_vec())
+    }
+
     pub(crate) fn turbofish_split<'a>(&self, p: &'a crate::parse::Path) -> (PPath, Option<&'a [GArg]>) {
         let mut pp = PPath::of(p);
         let Some(last) = p.segs.last().filter(|s| !s.args.is_empty() && s.fn_args.is_none()) else { return (pp, None) };
@@ -3271,7 +3291,8 @@ impl Cx<'_> {
         if let Expr::Path(q, p) = &**func {
             if (p.segs.len() >= 3 || q.is_some()) && self.callee(func).is_none() {
                 if let Some(nf) = self.assoc_path_func(q.as_deref(), p) {
-                    let ne: &Expr = self.keep_expr(Expr::Call(Box::new(nf), cargs.clone()));
+                    let args = self.from_source_args(p, cargs)?;
+                    let ne: &Expr = self.keep_expr(Expr::Call(Box::new(nf), args));
                     return self.expr(ne, expected);
                 }
             }
@@ -3356,8 +3377,9 @@ impl Cx<'_> {
                     if let Some(t) = Ty::prim(&ts.name).filter(|t| t.is_int() || t.is_float()) {
                         if self.prog.fn_by_p(&PPath::of(p), self.self_sid).is_none() {
                             if let Some(a) = self.peek(x).filter(|a| a.is_int() || a.is_float() || matches!(a, Ty::Bool | Ty::Char)) {
-                                // (not `f32::from(3.14)`: a float literal falls back to f32 there, which rustc accepts)
-                                if !crate::program::prim_from(a, t) && !(t == Ty::F32 && a == Ty::F64) {
+                                // (not `f32::from(3.14)`: an unsuffixed float literal falls back to f32 there, which rustc accepts;
+                                // `f32::from(1f64)` is E0277)
+                                if !crate::program::prim_from(a, t) && !(t == Ty::F32 && a == Ty::F64 && super::p2_call::is_float_lit(x)) {
                                     return err(SP, format!("the trait `From<{}>` is not implemented for `{}` (E0277)", self.prog.tn(a), self.prog.tn(t)));
                                 }
                             }

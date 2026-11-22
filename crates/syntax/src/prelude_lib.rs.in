@@ -13117,7 +13117,8 @@ impl Display for CharEscape {
             s.push(self.buf[k]);
             k += 1;
         }
-        f.pad(s.as_str())
+        // (the whole escape, as std's: no width or precision applies)
+        f.write_str(s.as_str())
     }
 }
 

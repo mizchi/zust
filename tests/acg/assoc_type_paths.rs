@@ -49,7 +49,7 @@ fn main() {
     println!("{} {} {}", a::<MyFoo>(), b::<MyFoo>(), c::<MyFoo>());
     let (p, q) = widen(7, -1i16);
     println!("{p} {q}");
-    let r = <u16 as From<u8>>::from(200u8);
+    let r = <u16 as From<u8>>::from(200u8) + <u16 as From<u8>>::from(6);
     let s = <u32 as TryFrom<u64>>::try_from(5u64).unwrap();
     let t = <u32 as TryFrom<u64>>::try_from(1u64 << 40).is_err();
     println!("{r} {s} {t}");
