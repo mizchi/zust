@@ -13,4 +13,6 @@ mod m {
         local()
     }
 }
-fn main() {}
+fn main() {
+    m::get();
+}
