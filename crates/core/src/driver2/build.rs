@@ -242,10 +242,10 @@ impl Session2 {
         let t0 = now_ns();
         let mut tm = Timer { on: self.opts.time, last: t0, start: t0 };
         let mut rep = Report2::default();
-        let a = self.analyze(src)?;
+        let a = self.analyze(src).map_err(|e| self.unhoist_analysis_err(src, e))?;
         rep.items_parsed = a.n_parsed;
         tm.lap("front", format!("{} items, {} parsed", a.items.len(), a.n_parsed));
-        let obj = self.compile_object(&a, &mut rep, Some(&mut tm))?;
+        let obj = self.compile_object(&a, &mut rep, Some(&mut tm)).map_err(|e| super::unhoist_err(&a, e))?;
         tm.lap("object", format!("{} bytes", obj.len()));
         rep.object_bytes = obj.len();
         // (wasm32: the module is the output, nothing to link)
