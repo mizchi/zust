@@ -502,6 +502,8 @@ impl Session2 {
             if let Some(e) = duplicate_import(src0, &src, &items[..user]) {
                 return Err(e);
             }
+            // (E0428 of an inline module and an item: a whole-text pass, so not on each build of a crate loaded from
+            // files, whose incremental builds would pay it every time)
             if let Some(e) = duplicate_name(src0) {
                 return Err(e);
             }
@@ -1649,14 +1651,17 @@ fn duplicate_name(src: &str) -> Option<String> {
                 }
                 b"static" if t(k + 1) == b"mut" && is_id(k + 2) => item = Some((1, k + 2)),
                 b"extern" if t(k + 1) == b"crate" && is_id(k + 2) => {
-                    let nm = if t(k + 3) == b"as" && is_id(k + 4) { k + 4 } else { k + 2 };
-                    if t(nm) != b"self" {
+                    let nm = if t(k + 3) == b"as" && (is_id(k + 4) || t(k + 4) == b"_") { k + 4 } else { k + 2 };
+                    // (`as _` binds no name)
+                    if t(nm) != b"self" && t(nm) != b"_" {
                         item = Some((0, nm));
                     }
                 }
                 _ => {}
             }
             if let Some((ns, at)) = item {
+                // (`r#foo` is the name `foo`: the tokens split it into `r`, `#`, `foo`)
+                let at = if t(at) == b"r" && t(at + 1) == b"#" && is_id(at + 2) { at + 2 } else { at };
                 let name = t(at);
                 if names.iter().any(|&(m, x)| m == ns && x == name) {
                     return Some(format!("{}:1: the name `{}` is defined multiple times (E0428)", line_of(at), String::from_utf8_lossy(name)));
@@ -1826,7 +1831,9 @@ fn unresolved_import(src: &str, split: &str, items: &[SrcItem], deps: &[String])
                 } else if let Some(list) = r2.trim_start().strip_prefix('{').and_then(|l| l.split_once('}')).map(|(l, _)| l).filter(|l| !l.contains('{')) {
                     // (`use m::{f, g as h};`: each name of a flat list)
                     for part in list.split(',') {
-                        let n: String = part.trim_start().chars().take_while(|c| c.is_alphanumeric() || *c == '_').collect();
+                        // (`r#foo` names `foo`)
+                        let p = part.trim_start();
+                        let n: String = p.strip_prefix("r#").unwrap_or(p).chars().take_while(|c| c.is_alphanumeric() || *c == '_').collect();
                         if !n.is_empty() && n != "self" && n != "super" && !part.contains("::") {
                             seconds.push((line, first.clone(), n));
                         }
