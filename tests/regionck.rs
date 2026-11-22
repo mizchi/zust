@@ -1761,3 +1761,21 @@ fn assignment_drop_and_deref_moves() {
     let d = check("use std::rc::Rc;\nstruct Bar {\n    field: Vec<i32>,\n    n: u32,\n}\nfn main() {\n    let x = Rc::new(Bar { field: vec![], n: 1 });\n    let n = x.n;\n    let l = x.field.len();\n    let f = x.field;\n    drop((n, l, f));\n}\n");
     assert!(d.len() == 1 && d[0].0 == 10 && d[0].1.contains("cannot move out of an `Rc`"), "{d:?}");
 }
+
+/// The fn's tail is a match: what an arm returns (a binding, or a constructor of one: `Some(r)`) is returned while the
+/// arm's bindings are in scope, so a `ref mut` binding through a `Drop` value's `&mut` field is E0713
+#[test]
+fn match_tail_returns_arm_binding() {
+    let d = check("enum DropOption<T> {\n    Some(T),\n    None,\n}\nimpl<T> Drop for DropOption<T> {\n    fn drop(&mut self) {}\n}\nfn f(opt: DropOption<&mut i32>) -> Option<&mut i32> {\n    match opt {\n        DropOption::Some(&mut ref mut r) => Some(r),\n        DropOption::None => None,\n    }\n}\nfn main() {}\n");
+    assert!(d.len() == 1 && d[0].0 == 10 && d[0].1.contains("E0713"), "{d:?}");
+    assert_eq!(check("fn f(opt: Option<(&mut i32, String)>) -> Option<&mut i32> {\n    match opt {\n        Some((&mut ref mut r, _)) => Some(r),\n        None => None,\n    }\n}\nfn main() {}\n"), vec![]);
+}
+
+/// From the review of #51: a `let` that destructures an enum variant of a capture moves only the parts it binds by
+/// value whose types are not `Copy`, by the variant's fields (`let E::V(n, _) = e;` with n an integer copies)
+#[test]
+fn variant_destructuring_moves_by_type() {
+    assert_eq!(check("enum E {\n    V(i32, String),\n}\nenum F {\n    W { a: u8, s: String },\n}\nfn take_fn(_: impl Fn()) {}\nfn main() {\n    let e = E::V(1, String::new());\n    take_fn(move || {\n        let E::V(n, _) = e;\n        let _ = n;\n    });\n    let f = F::W { a: 1, s: String::new() };\n    take_fn(move || {\n        let F::W { a, .. } = f;\n        let _ = a;\n    });\n}\n"), vec![]);
+    let d = check("enum E {\n    V(i32, String),\n}\nfn take_fn(_: impl Fn()) {}\nfn main() {\n    let e = E::V(1, String::new());\n    take_fn(move || {\n        let E::V(_, s) = e;\n        drop(s);\n    });\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 8 && d[0].1.contains("E0507"), "{d:?}");
+}

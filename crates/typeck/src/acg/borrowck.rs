@@ -487,20 +487,34 @@ pub fn pat_moves(prog: &Program, p: &Pat, t: Ty, depth: u32) -> bool {
             Ty::Struct(sid) if prog.is_tuple(sid) => parts(ps, &prog.structs[sid as usize].fields),
             _ => crate::ast_closure::binds_by_value(p),
         },
-        // (a struct's pattern, not an enum variant's)
-        Pat::TupleStruct(_, ps) => match t {
-            Ty::Struct(sid) if prog.structs[sid as usize].variants.is_empty() && !prog.is_tuple(sid) => parts(ps, &prog.structs[sid as usize].fields),
+        // (a struct's pattern, or an enum variant's: the variant's fields, by its name (`E::V(n, _)`))
+        Pat::TupleStruct(path, ps) => match t {
+            Ty::Struct(sid) if !prog.is_tuple(sid) => match variant_fields(prog, sid, path) {
+                Some(fs) => parts(ps, fs),
+                None => crate::ast_closure::binds_by_value(p),
+            },
             _ => crate::ast_closure::binds_by_value(p),
         },
-        Pat::Struct(_, named, _) => match t {
-            Ty::Struct(sid) if prog.structs[sid as usize].variants.is_empty() && !prog.is_tuple(sid) => {
-                let fs = &prog.structs[sid as usize].fields;
-                named.iter().any(|(n, q)| fs.iter().find(|f| f.0 == *n).map_or(crate::ast_closure::binds_by_value(q), |f| pat_moves(prog, q, f.1, depth + 1)))
-            }
+        Pat::Struct(path, named, _) => match t {
+            Ty::Struct(sid) if !prog.is_tuple(sid) => match variant_fields(prog, sid, path) {
+                Some(fs) => named.iter().any(|(n, q)| fs.iter().find(|f| f.0 == *n).map_or(crate::ast_closure::binds_by_value(q), |f| pat_moves(prog, q, f.1, depth + 1))),
+                None => crate::ast_closure::binds_by_value(p),
+            },
             _ => crate::ast_closure::binds_by_value(p),
         },
         _ => crate::ast_closure::binds_by_value(p),
     }
+}
+
+/// The fields a struct's or a variant's pattern (path) matches in a value of the struct sid: a struct's own, or those
+/// of the enum's variant the path's last segment names
+fn variant_fields<'p>(prog: &'p Program, sid: u32, path: &crate::parse::Path) -> Option<&'p [(String, Ty, u32)]> {
+    let sd = &prog.structs[sid as usize];
+    if sd.variants.is_empty() && !sd.is_enum {
+        return Some(&sd.fields);
+    }
+    let name = path.segs.last()?.name.as_str();
+    sd.variants.iter().find(|v| v.name == name).map(|v| v.fields.as_slice())
 }
 
 /// The prelude's iterator and view types: raw pointers into what they were made from, so they hold the loan of it
@@ -2885,6 +2899,11 @@ impl Cx<'_> {
                                 self.bk_direct(a, out);
                             }
                         }
+                    }
+                } else if matches!(&**f, Expr::Path(_, p) if p.segs.last().is_some_and(|s| s.name.starts_with(|c: char| c.is_ascii_uppercase()))) {
+                    // (a tuple struct's or a variant's constructor (`Some(r)`): it holds what its arguments do)
+                    for a in args {
+                        self.bk_direct(a, out);
                     }
                 }
             }

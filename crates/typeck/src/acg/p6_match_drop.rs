@@ -372,6 +372,12 @@ impl Cx<'_> {
             }
             let t0 = self.temps.len();
             let (v, t) = self.expr(&arm.body, result_ty.or(expected))?;
+            // (the fn's tail: what an arm returns by naming one of its bindings is returned here, while the binding is
+            // in scope (`S(&mut ref mut r) => r`: E0713 through a `Drop` value); after the match, the return of the
+            // match no longer finds it)
+            if self.bk.tail == m as *const Expr as usize && self.bk_on() && self.bk_ty(self.ret).1 {
+                self.bk_ret(&arm.body);
+            }
             self.rg_keep(&arm.body);
             self.drop_tail_temps(t0, (v, t));
             self.pop_scope();
