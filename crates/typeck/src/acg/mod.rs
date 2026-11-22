@@ -1477,6 +1477,15 @@ impl Cx<'_> {
                 // loop, is a use of a moved value)
                 if !by_ref {
                     self.bk_local(loc, &n, t);
+                } else if self.bk_on() {
+                    // (one held by reference is the place the environment points to: `*x`, which the body borrows
+                    // and assigns as the closure's own (`let p = &this.x; &mut this.x;` conflicts), and which is no
+                    // local of the body's (a borrow of it may be returned))
+                    let id = self.bk.locals.len();
+                    self.bk_local(loc, &n, t);
+                    if let Some(l) = self.bk.locals.get_mut(id) {
+                        l.via_ref = true;
+                    }
                 }
                 self.rg_capture(ci, loc, t);
                 self.scopes.last_mut().unwrap().push((n, loc, t));

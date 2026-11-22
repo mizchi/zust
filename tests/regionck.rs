@@ -1875,3 +1875,14 @@ fn part10_review_3() {
     let d = check("fn main() {\n    match Some(String::new()) {\n        Some(ref mut foo) if (|| { let bar = foo; bar.len() == 0 })() => {}\n        _ => {}\n    }\n}\n");
     assert!(d.len() == 1 && d[0].0 == 3 && d[0].1.contains("E0507"), "{d:?}");
 }
+
+/// A capture held by reference is the place the environment points to: the closure's body borrows and assigns it as
+/// its own (`let p = &this.x; &mut this.x;` in the body conflicts, borrowck/borrowck-closures-unique-imm.rs); what the
+/// body may move or write through it is checked where the closure is made
+#[test]
+fn closure_body_by_ref_capture() {
+    let d = check("struct Foo { x: isize }\nfn main() {\n    let mut this = &mut Foo { x: 1 };\n    let mut r = || {\n        let p = &this.x;\n        let q = &mut this.x;\n        *q += *p;\n    };\n    r();\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 6 && d[0].1.contains("cannot borrow `this.x` as mutable because it is also borrowed as immutable"), "{d:?}");
+    assert_eq!(check("struct Foo { x: isize, y: isize }\nfn main() {\n    let mut this = Foo { x: 1, y: 2 };\n    let mut r = || {\n        let p = &this.x;\n        let q = &mut this.y;\n        *q += *p;\n    };\n    r();\n    println!(\"{}\", this.y);\n}\n"), vec![]);
+    assert_eq!(check("fn main() {\n    let mut v = vec![1];\n    let mut r = || {\n        let p = &mut v;\n        p.push(2);\n        v.push(3);\n    };\n    r();\n    println!(\"{:?}\", v);\n}\n"), vec![]);
+}

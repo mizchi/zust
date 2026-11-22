@@ -118,6 +118,9 @@ pub struct Local {
     pub mutable: Option<bool>,
     /// The `let` that declares it (line 0: not known)
     pub decl: Sp,
+    /// It stands for the place a reference points to (a closure's capture held by reference): its places start with
+    /// a deref (bk_place), which is not shown
+    pub via_ref: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -582,7 +585,9 @@ fn at(lb: u32, sp: Sp) -> String {
 
 fn path_str(locals: &[Local], p: &BPlace) -> String {
     let mut s = locals[p.local as usize].name.clone();
-    for (i, pr) in p.proj.iter().enumerate() {
+    // (a closure's capture held by reference is shown as the variable: `this.x`, not `*this.x`)
+    let skip = (locals[p.local as usize].via_ref && p.proj.first() == Some(&Proj::Deref(false))) as usize;
+    for (i, pr) in p.proj.iter().enumerate().skip(skip) {
         match pr {
             Proj::Field(f) => {
                 // (an array pattern's element: `a[2]`)
@@ -1179,7 +1184,9 @@ impl Bk {
                             self.check_loans(&ll, p, *a, *sp, errs);
                         }
                     }
-                    if let (Acc::Move, Some(errs)) = (a, errs.as_deref_mut()) {
+                    // (not out of a closure's capture held by reference: which captures are held by value is
+                    // decided from the syntax, the body may move one the summary took for a borrow)
+                    if let (Acc::Move, Some(errs), false) = (a, errs.as_deref_mut(), self.locals[p.local as usize].via_ref) {
                         if p.owned_len() < p.proj.len() || p.proj.contains(&Proj::Index) {
                             let what = if p.owned_len() < p.proj.len() { "which is behind a reference" } else { "an indexed place" };
                             errs.push(BkError { sp: *sp, msg: format!("cannot move out of `{}`, {what}", path_str(&self.locals, p)) });
@@ -1394,8 +1401,9 @@ impl Bk {
             Acc::Write | Acc::Modify => true,
             _ => false,
         };
-        // (through a `&`: `&mut *r` / `r.x = 1` with r: &T)
-        if writes && p.proj.contains(&Proj::Shr) {
+        // (through a `&`: `&mut *r` / `r.x = 1` with r: &T. Not in a closure's body through a capture held by
+        // reference: the function that makes the closure reports it, at the capture)
+        if writes && p.proj.contains(&Proj::Shr) && !self.locals[p.local as usize].via_ref {
             let i = p.proj.iter().rposition(|x| *x == Proj::Shr).unwrap();
             let behind = path_str(&self.locals, &BPlace { local: p.local, proj: p.proj[..=i].to_vec() });
             let msg = match a {
@@ -1650,7 +1658,7 @@ impl Cx<'_> {
         }
         let id = self.bk.locals.len() as u32;
         let (copy, refs) = self.bk_ty(ty);
-        self.bk.locals.push(Local { name: name.to_string(), ty, copy, refs, mutable, decl: self.rg.let_sp });
+        self.bk.locals.push(Local { name: name.to_string(), ty, copy, refs, mutable, decl: self.rg.let_sp, via_ref: false });
         self.bk.by_loc.insert(loc, id);
         if refs && self.bk.level >= 2 && matches!(ty, Ty::Struct(_) | Ty::Box(_)) {
             let mut paths = vec![];
@@ -1711,7 +1719,7 @@ impl Cx<'_> {
         // statement)
         if self.bk.level >= 2 && !in_let && !super::is_place_expr(e) && pats.iter().any(|p| pat_binds_ref(p)) {
             let id = self.bk.locals.len() as u32;
-            self.bk.locals.push(Local { name: TEMP.to_string(), ty: Ty::Unit, copy: true, refs: false, mutable: Some(true), decl: super::SP });
+            self.bk.locals.push(Local { name: TEMP.to_string(), ty: Ty::Unit, copy: true, refs: false, mutable: Some(true), decl: super::SP, via_ref: false });
             self.bk_ev(Ev::Bind(id, true));
             let sp = err_pos(e);
             let ln = self.bk.loans.len() as u32;
@@ -1908,7 +1916,8 @@ impl Cx<'_> {
                 let id = ident_of(p)?;
                 let (loc, t) = self.lookup(id)?;
                 let l = *self.bk.by_loc.get(&loc)?;
-                Some((BPlace { local: l, proj: vec![] }, Some(t)))
+                let proj = if self.bk.locals[l as usize].via_ref { vec![Proj::Deref(false)] } else { vec![] };
+                Some((BPlace { local: l, proj }, Some(t)))
             }
             Expr::Field(b, name, _) => {
                 let (mut p, t) = self.bk_place(b)?;
@@ -2071,7 +2080,7 @@ impl Cx<'_> {
         let quiet = std::mem::take(&mut self.bk.no_loan_src);
         let id = self.bk.locals.len() as u32;
         let (copy, refs) = self.bk_ty(t);
-        self.bk.locals.push(Local { name: TEMP.to_string(), ty: t, copy, refs, mutable: Some(true), decl: super::SP });
+        self.bk.locals.push(Local { name: TEMP.to_string(), ty: t, copy, refs, mutable: Some(true), decl: super::SP, via_ref: false });
         self.bk_ev(Ev::Bind(id, true));
         // (a block, which has no position: its first statement's, usually on the line of its `{`)
         let sp = match err_pos(e) {
@@ -2144,7 +2153,7 @@ impl Cx<'_> {
                         self.bk_direct(r, &mut srcs);
                         if !srcs.is_empty() {
                             let id = self.bk.locals.len() as u32;
-                            self.bk.locals.push(Local { name: TEMP.to_string(), ty: t, copy: false, refs: true, mutable: Some(true), decl: super::SP });
+                            self.bk.locals.push(Local { name: TEMP.to_string(), ty: t, copy: false, refs: true, mutable: Some(true), decl: super::SP, via_ref: false });
                             self.bk_ev(Ev::Bind(id, true));
                             self.bk_ev(Ev::Def(id, srcs));
                             self.bk.drop_temps.push(id);
@@ -2747,7 +2756,7 @@ impl Cx<'_> {
             return;
         }
         let id = self.bk.locals.len() as u32;
-        self.bk.locals.push(Local { name: "<argument>".into(), ty: Ty::Unit, copy: true, refs: true, mutable: None, decl: super::SP });
+        self.bk.locals.push(Local { name: "<argument>".into(), ty: Ty::Unit, copy: true, refs: true, mutable: None, decl: super::SP, via_ref: false });
         self.bk_ev(Ev::Bind(id, true));
         self.bk_ev(Ev::Def(id, loans));
         self.bk.call_temps.push(id);
@@ -2922,7 +2931,7 @@ impl Cx<'_> {
             // (not of a reference: `&h()` with h returning `&'static str` is deref-coerced to what h returns)
             if made && self.bk.level >= 2 && self.peek(t).is_some_and(|ty| !matches!(ty, Ty::Ref(..) | Ty::Ptr(..))) {
                 let id = self.bk.locals.len() as u32;
-                self.bk.locals.push(Local { name: TEMP.to_string(), ty: Ty::Unit, copy: true, refs: false, mutable: Some(true), decl: super::SP });
+                self.bk.locals.push(Local { name: TEMP.to_string(), ty: Ty::Unit, copy: true, refs: false, mutable: Some(true), decl: super::SP, via_ref: false });
                 self.bk_ev(Ev::Bind(id, true));
                 let ln = self.bk.loans.len() as u32;
                 let sp = err_pos(t);
