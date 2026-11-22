@@ -1406,6 +1406,8 @@ impl Session2 {
         prog.edition = self.opts.edition;
         prog.path_lts = crate::regions::src_path_lts(src0);
         prog.deny_unused_alloc = deny_unused_alloc;
+        // (an `allow` / `warn` / `expect` of it anywhere, at the crate or an item: not denied there, so not checked)
+        prog.allow_overflowing_literals = ["allow(", "warn(", "expect("].iter().any(|a| src.match_indices(a).any(|(i, _)| src[i..].split(')').next().is_some_and(|l| l.contains("overflowing_literals"))));
         prog.deny_trivial_casts = deny_trivial_casts;
         if deny_must_use {
             for it in &items[..user] {
@@ -4115,7 +4117,7 @@ fn first_accidentally_stable(src: &str, items: &[SrcItem]) -> Option<String> {
 /// The lint levels codegen checks (`#![deny(unused_must_use)]`, `trivial_casts` ..) as one byte for the cache keys: a
 /// function compiled before such a `#![deny]` was added is not reused without its check
 fn lint_bits(p: &Program) -> u8 {
-    p.deny_must_use as u8 | (p.deny_trivial_casts.0 as u8) << 1 | (p.deny_trivial_casts.1 as u8) << 2 | (p.deny_unreachable as u8) << 3 | (p.deny_unused_alloc as u8) << 4 | ((p.edition >= 2024) as u8) << 5
+    p.deny_must_use as u8 | (p.deny_trivial_casts.0 as u8) << 1 | (p.deny_trivial_casts.1 as u8) << 2 | (p.deny_unreachable as u8) << 3 | (p.deny_unused_alloc as u8) << 4 | ((p.edition >= 2024) as u8) << 5 | (p.allow_overflowing_literals as u8) << 6
 }
 
 /// The attributes behind a feature gate, and the feature

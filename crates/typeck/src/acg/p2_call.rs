@@ -2609,7 +2609,16 @@ impl Cx<'_> {
                 Ok((Some(v), ty))
             }
             Lit::Int(i) => {
-                let ty = Ty::from_suffix(i.suffix()).or(expected.filter(|t| t.is_int())).unwrap_or(Ty::I32);
+                let fixed = Ty::from_suffix(i.suffix()).or(expected.filter(|t| t.is_int()));
+                // (overflowing_literals, deny by default: a literal of a type its suffix or the expected one fixes, past
+                // that type: `256u8`, `let x: u8 = 256;`)
+                if let (Some(t), true) = (fixed, self.user_code && !self.prog.allow_overflowing_literals) {
+                    let neg = i.base10_digits().starts_with('-');
+                    if !lit_fits(t, i.base10_digits().trim_start_matches('-'), neg) {
+                        return err(SP, format!("literal out of range for `{}`", self.prog.tn(t)));
+                    }
+                }
+                let ty = fixed.unwrap_or(Ty::I32);
                 // 負のリテラル (パターンの `-1` など) も来るので i128 で読む
                 let n = i
                     .base10_digits()
@@ -2871,6 +2880,25 @@ impl Cx<'_> {
         // (リテラルは型を付ける: `i32::pow(2, 10)` の 2 は i32)
         let recv = if matches!(a0, Expr::Lit(_, _)) { paren(Expr::Cast(Box::new(a0.clone()), ty_named(ty))) } else { paren(a0.clone()) };
         Some(Expr::MethodCall(Box::new(recv), ms.to_string(), vec![], rest, crate::parse::Span::default()))
+    }
+}
+
+/// The literal of decimal digits (negated when neg) is in the integer type t's range
+pub(crate) fn lit_fits(t: Ty, digits: &str, neg: bool) -> bool {
+    let Ok(n) = digits.parse::<u128>() else { return false };
+    let bits = match t {
+        Ty::I8 | Ty::U8 => 8,
+        Ty::I16 | Ty::U16 => 16,
+        Ty::I32 | Ty::U32 => 32,
+        Ty::I64 | Ty::U64 | Ty::Isize | Ty::Usize => 64,
+        _ => return true,
+    };
+    if t.signed() {
+        let max = (1u128 << (bits - 1)) - 1;
+        if neg { n <= max + 1 } else { n <= max }
+    } else {
+        // (a negated unsigned literal is another error, E0600)
+        neg || n <= (1u128 << bits) - 1
     }
 }
 

@@ -276,6 +276,8 @@ pub struct Program {
     pub path_lts: bool,
     /// `#![deny(unused_allocation)]`: `Box::new(x).m()` with m of `&self` on what the box holds is an error
     pub deny_unused_alloc: bool,
+    /// the source allows (or warns of) `overflowing_literals`, at the crate or an item: no "literal out of range"
+    pub allow_overflowing_literals: bool,
     /// `#![deny(trivial_casts)]` / `#![deny(trivial_numeric_casts)]`: a cast a coercion or nothing would do
     pub deny_trivial_casts: (bool, bool),
     /// the program's `#[must_use]` fns (by name), for unused_must_use
@@ -787,6 +789,7 @@ impl Program {
             edition: 2021,
             path_lts: false,
             deny_unused_alloc: false,
+            allow_overflowing_literals: false,
             deny_trivial_casts: (false, false),
             must_use_fns: vec![],
             prim_mut_methods: HashSet::default(),
