@@ -2366,7 +2366,9 @@ impl Cx<'_> {
         // (a closure that mutates what it captures, by value or by `&mut`: `FnMut`; one that holds a value that is not
         // `Copy` may move it out of itself (`FnOnce`, called by value): not known here, so not `FnMut` either)
         let ca = c as *const Expr as usize;
-        if (assigns && !muts.is_empty()) || muts.iter().any(|q| q.owned_len() == q.proj.len()) || !calls.is_empty() {
+        // (a unique borrow through a `&mut` it captures (`|| set(&mut *x)`, `|| foo(x)`) mutates too)
+        let unique = |q: &BPlace| q.proj.len() == q.owned_len() + 1 && q.proj.last() == Some(&Proj::Deref(false));
+        if (assigns && !muts.is_empty()) || muts.iter().any(|q| q.owned_len() == q.proj.len() || unique(q)) || !calls.is_empty() {
             if !self.bk.fnmut_exprs.contains(&ca) {
                 self.bk.fnmut_exprs.push(ca);
             }
@@ -2386,6 +2388,19 @@ impl Cx<'_> {
             if let Some(i) = cut {
                 p.proj.truncate(i);
                 *pt = None;
+            }
+            // (the body borrows uniquely only through the `&mut` p is (`s.put(x)`, `foo(x)` with `x: &mut u32`): the
+            // capture is of `*x`, which borrowing mutably needs no `mut x`)
+            if !move_kw && *mode == CapMode::Use && !by_move {
+                if let Some(q) = muts.iter().find(|q| unique(q) && q.local == p.local && q.proj.len() == p.proj.len() + 1 && q.proj.starts_with(&p.proj)) {
+                    if !muts.iter().any(|r| r.local == p.local && r.proj.len() <= p.proj.len() && overlap(r, p)) && !calls.iter().any(|r| overlap(r, p)) {
+                        *pt = match *pt {
+                            Some(Ty::Ref(_, i)) => Some(*i),
+                            _ => None,
+                        };
+                        *p = q.clone();
+                    }
+                }
             }
             if move_kw {
                 *mode = CapMode::Val;
@@ -2444,6 +2459,21 @@ impl Cx<'_> {
                 // (a copy a closure with no `move` holds of what it only reads: rustc's closure borrows it. Not of a
                 // reference: one passed where a reference is expected is reborrowed (`f(b)` is `f(&*b)`), and the
                 // closure holds a copy of it then (rustc's capture of `*b` by reference, truncated))
+                // (a `&mut` passed as an argument is reborrowed (`look(x)` is `look(&*x)`, `foo(x)` is
+                // `foo(&mut *x)`): the closure borrows `*x`, uniquely when the body passes it where a `&mut` goes.
+                // A borrow of `*x` that conflicts is E0500 / E0502)
+                if copy && !move_kw && matches!(pt, Some(Ty::Ref(true, _))) {
+                    self.bk_acc_place(p.clone(), Acc::Read, sp);
+                    let mut q = p;
+                    q.proj.push(Proj::Deref(false));
+                    let uniq = muts.iter().any(|m| *m == q);
+                    let ln = self.bk.loans.len() as u32;
+                    self.bk.cap_loans.entry(c as *const Expr as usize).or_default().push(ln);
+                    self.bk.loans.push(Loan { place: q.clone(), mutable: uniq, sp, at, quiet: false, capture: true });
+                    self.bk_ev(Ev::Acc(q, Acc::Borrow(ln), sp));
+                    self.bk.src(Src::Loan(ln));
+                    continue;
+                }
                 if !(copy && !move_kw && pt.is_some_and(|t| !matches!(t, Ty::Ref(..) | Ty::Ptr(..) | Ty::Fn(_)))) {
                     self.bk_acc_place(p, if copy { Acc::Read } else { Acc::Move }, sp);
                     continue;
@@ -2574,6 +2604,32 @@ impl Cx<'_> {
 
     /// The places rooted at n that the closure body assigns (`n.a = ..`, `n += 1`) or borrows mutably (`&mut n.b`)
     fn bk_cap_muts(&self, e: &Expr, n: &str, out: &mut Vec<BPlace>, calls: &mut Vec<BPlace>) {
+        // (a `&mut` of the capture passed where a `&mut` is expected (`foo(x)` with `x: &mut u32`, `fn foo(_: &mut
+        // u32)`): reborrowed, a unique borrow of `*x`. Not where a `&` is: a shared reborrow)
+        let params: Option<(&[Expr], &[Ty])> = match e {
+            Expr::Call(f, args) => match strip_paren(f) {
+                Expr::Path(None, fp) if ident_of(fp).is_none_or(|id| self.lookup(id).is_none()) => {
+                    self.prog.fn_by_p(&crate::program::PPath::of(fp), self.self_sid).map(|id| (&args[..], &self.prog.sigs[id as usize].params[..]))
+                }
+                _ => None,
+            },
+            Expr::MethodCall(r, m, _, args, _) => match self.bk_rooted_at(r, n).and_then(|x| x.1).or_else(|| self.peek(r)).map(|t| self.strip_refs(t)) {
+                Some(Ty::Struct(sid)) => self.prog.method(sid, m).filter(|&id| self.prog.sigs[id as usize].has_self).map(|id| (&args[..], self.prog.sigs[id as usize].params.get(1..).unwrap_or(&[]))),
+                _ => None,
+            },
+            _ => None,
+        };
+        if let Some((args, ps)) = params {
+            for (a, pt) in args.iter().zip(ps) {
+                if !matches!(pt, Ty::Ref(true, _)) {
+                    continue;
+                }
+                if let Some((mut p, Some(Ty::Ref(true, _)))) = self.bk_rooted_at(strip_paren(a), n) {
+                    p.proj.push(Proj::Deref(false));
+                    out.push(p);
+                }
+            }
+        }
         match e {
             Expr::Assign(l, _) | Expr::AssignOp(_, l, _, _) | Expr::Ref(true, l) => {
                 // (`v[1] = 4`: v itself, as the capture stops at an index)

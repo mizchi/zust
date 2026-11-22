@@ -1997,3 +1997,21 @@ fn shared_deref_writes() {
     assert_eq!(check(&format!("{pre}fn f(x: Rc<Point>) -> isize {{\n    let a = &x.y;\n    *a + x.get() + (*x).x\n}}\nfn main() {{}}\n")), vec![]);
     assert_eq!(check("use std::cell::RefCell;\nuse std::rc::Rc;\nuse std::sync::Mutex;\nfn main() {\n    let m = Mutex::new(vec![1]);\n    let mut g = m.lock().unwrap();\n    g.push(2);\n    *g = vec![3];\n    drop(g);\n    let r = Rc::new(RefCell::new(String::new()));\n    r.borrow_mut().push('a');\n    let mut b = r.borrow_mut();\n    *b = String::from(\"c\");\n}\n"), vec![]);
 }
+
+/// A closure that passes a `&mut` it captures where a `&mut` is expected (`|| foo(x)`, `|| s.put(x)`) borrows `*x`
+/// uniquely: it is `FnMut`, so calling it through a binding that is not `mut` is E0596
+/// (closures/issue-81700-mut-borrow.rs). Where a `&` is expected, the reborrow is shared and the closure is `Fn`
+#[test]
+fn closure_unique_reborrow_is_fn_mut() {
+    let pre = "fn foo(x: &mut u32) { *x += 1; }\nfn look(x: &u32) -> u32 { *x }\nstruct S;\nimpl S {\n    fn put(&self, x: &mut u32) { *x += 1; }\n    fn see(&self, x: &u32) -> u32 { *x }\n}\n";
+    for body in ["fn f(x: &mut u32) {\n    let bar = || foo(x);\n    bar();\n}", "fn f(x: &mut u32, s: &S) {\n    let bar = || s.put(x);\n    bar();\n}", "fn f(x: &mut u32) {\n    let bar = || foo(&mut *x);\n    bar();\n}"] {
+        let d = check(&format!("{pre}{body}\nfn main() {{}}\n"));
+        assert!(d.len() == 1 && d[0].0 == 10 && d[0].1.contains("cannot borrow `bar` as mutable"), "{body}: {d:?}");
+    }
+    assert_eq!(check(&format!("{pre}fn f(x: &mut u32, s: &S) -> u32 {{\n    let bar = || look(x) + s.see(x);\n    let n = bar();\n    let mut baz = || foo(x);\n    baz();\n    baz();\n    n\n}}\nfn main() {{}}\n")), vec![]);
+    // (the closure borrows `*x`: shared for `look(x)`, uniquely for `foo(x)`; E0500 / E0502 against it)
+    for body in ["fn f(x: &mut u32) -> u32 {\n    let bar = || look(x);\n    let mut baz = || foo(x);\n    baz();\n    bar()\n}", "fn f(x: &mut u32) -> u32 {\n    let bar = || look(x);\n    let m = &mut *x;\n    *m += 1;\n    bar()\n}"] {
+        let d = check(&format!("{pre}{body}\nfn main() {{}}\n"));
+        assert!(d.len() == 1 && d[0].0 == 10 && d[0].1.contains("cannot borrow `*x` as mutable"), "{body}: {d:?}");
+    }
+}
