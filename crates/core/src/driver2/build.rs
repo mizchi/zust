@@ -916,12 +916,9 @@ fn mkdir_all(dir: &std::path::Path) -> R<()> {
 
 /// A crate's features and cfgs, for its fingerprints
 fn add_crate_cfg(h: &mut KeyHasher, c: &CrateSpec) {
-    for f in &c.features {
-        h.add(&format!("feature {f}"));
-    }
-    for (k, v) in &c.cfgs {
-        h.add(&format!("cfg {k}={v:?}"));
-    }
+    // (the lists as they are: no string built for each, as every no-op build computes this)
+    h.add(&c.features);
+    h.add(&c.cfgs);
 }
 
 fn n_lines(s: &str) -> u32 {
