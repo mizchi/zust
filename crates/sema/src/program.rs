@@ -2889,6 +2889,24 @@ impl Program {
     }
 
     /// sid is a placeholder (Program::placeholder); cheap when none was made
+    /// Whether t is surely not Clone (`r.clone()` of `&t` is then the reference's clone): a type of the program with no
+    /// clone and no derive, or an instance with such an argument (`Option<NoClone>`), but for the shared pointers
+    pub fn surely_not_clone(&self, t: Ty, depth: u32) -> bool {
+        let Ty::Struct(sid) = t else { return false };
+        let b = self.base_of(sid);
+        let own = self.struct_item.get(b as usize).is_some_and(|&ii| ii < self.prelude_from);
+        // (a clone of the program's own; std's (`Vec<T>`) is Clone when its arguments are)
+        if depth > 4 || (own && self.method(sid, "clone").is_some()) {
+            return false;
+        }
+        let derived = self.derived.get(&b).is_some_and(|d| d.iter().any(|x| x == "Clone"));
+        if own && !derived && !self.implements(t, "Clone") {
+            return true;
+        }
+        let shared = matches!(self.structs[b as usize].name.as_str(), "Rc" | "Arc" | "Weak" | "PhantomData" | "Sender" | "SyncSender");
+        !shared && self.structs[sid as usize].args.iter().any(|&a| self.surely_not_clone(a, depth + 1))
+    }
+
     pub fn is_placeholder(&self, sid: u32) -> bool {
         self.structs.any_placeholder.load(std::sync::atomic::Ordering::Relaxed) && self.structs[sid as usize].placeholder.is_some()
     }
