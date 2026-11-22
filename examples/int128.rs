@@ -87,4 +87,9 @@ fn main() {
         }
     }
     println!("hash {}", h);
+    // (bytes: swap_bytes, to_be, to_be_bytes / from_be_bytes, as byteorder uses them)
+    let x: u128 = 0x0102030405060708090a0b0c0d0e0f10;
+    let y = -0x1234_5678_9abc_def0_i128;
+    println!("{:x} {:x} {:x} {:?}", x.swap_bytes(), x.to_be(), y.swap_bytes(), y.to_be_bytes());
+    println!("{} {}", i128::from_be_bytes(y.to_be_bytes()) == y, u128::from_le_bytes(x.to_le_bytes()) == x);
 }

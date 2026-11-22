@@ -1331,11 +1331,36 @@ impl Cx<'_> {
 
     /// 一時領域にタグと各フィールドを書いて enum の値を作る。args は (フィールド番号, 式)
     pub(crate) fn variant_value(&mut self, sid: u32, vi: usize, args: &[(usize, &Expr)], expected: Option<Ty>) -> R<V> {
+        let sid = self.cow_of_str(sid, args, expected).unwrap_or(sid);
         let r = self.adt_value(sid, Some(vi), args, expected, SP);
         if let Ok((_, t)) = &r {
             self.rg_variant(*t, vi, args);
         }
         r
+    }
+
+    /// `Cow::Borrowed(s)` / `Cow::Owned(s)` of a `Cow<str>` (the expected type, or an argument `&str` / `String`):
+    /// prelude's `__CowStr`, whose variants are in the same order. Prelude's `Cow<T>` stands for `Cow<[T]>` only
+    pub(crate) fn cow_of_str(&self, sid: u32, args: &[(usize, &Expr)], expected: Option<Ty>) -> Option<u32> {
+        let cow = *self.prog.struct_index.get("Cow")?;
+        if self.prog.base_of(sid) != cow {
+            return None;
+        }
+        let cs = *self.prog.struct_index.get("__CowStr")?;
+        match expected {
+            Some(Ty::Struct(e)) if e == cs => return Some(cs),
+            // (an instance inference settled on; `Cow<T0>` or the definition itself, still open, says nothing)
+            Some(t @ Ty::Struct(e)) if self.prog.base_of(e) == cow && e != cow && !self.prog.has_param(t) => return None,
+            _ => {}
+        }
+        let string = self.prog.struct_index.get("String").copied();
+        // (the argument's own type first: inference may have unified it with the slice `Cow`'s field)
+        let a = args.first()?.1;
+        match self.peek_syn(a).or_else(|| self.peek(a))? {
+            Ty::Ref(_, Ty::Str) => Some(cs),
+            Ty::Struct(s) if Some(s) == string => Some(cs),
+            _ => None,
+        }
     }
 
     /// struct (vi = None) / enum のバリアント (vi = Some) の値を一時領域に作る。args は (フィールド番号, 式)。

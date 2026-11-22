@@ -202,19 +202,83 @@ fn take_frag(toks: &[TokenTree], kind: &str, stop: Option<&TokenTree>) -> Option
             // (a type / path keeps its generic arguments: `HashMap<K, V>` does not end at the `,`)
             let angles = matches!(kind, "ty" | "path");
             let mut angle: u32 = 0;
+            // (a type: after a whole one (a name, a group, closed generic arguments), another name, `&`, `*` or `[..]`
+            // starts the next: `$($t:ty)*` of `u8 u16 String`. A modifier (`dyn`, `mut`, `fn`, ..) and a lifetime's
+            // name go on)
+            let mut ty_end = false;
+            let mut quote = false;
+            // (the type so far ends in a name: `Fn(u8)`'s parentheses go on it, `Vec<u8> (bool, char)`'s start the next)
+            let mut named = false;
+            // (`m!` before its group: a type macro, `m!(u8)` / `m![u8]`)
+            let mut mac = false;
+            // (`for` before `<`, and generic arguments that are its binder: `for<'a> fn(&'a u8)` goes on after the `>`)
+            let mut for_kw = false;
+            let mut binder = false;
+            // (a lifetime after `+` is a bound and can end the type: `dyn Display + 'static`; after `&` it goes on)
+            let mut plus = false;
+            let mut lt_bound = false;
             while n < toks.len() {
                 if angle > 0 {
                     if let TokenTree::Punct(p) = &toks[n] {
                         match p.as_char() {
                             '<' => angle += 1,
                             // (`->` in `Fn() -> T` is not a closing angle)
-                            '>' if !(n > 0 && matches!(&toks[n - 1], TokenTree::Punct(q) if q.as_char() == '-' && q.spacing() == Spacing::Joint)) => angle -= 1,
+                            '>' if !(n > 0 && matches!(&toks[n - 1], TokenTree::Punct(q) if q.as_char() == '-' && q.spacing() == Spacing::Joint)) => {
+                                angle -= 1;
+                                ty_end = angle == 0 && !binder;
+                                named = false;
+                            }
                             ';' => break,
                             _ => {}
                         }
                     }
                     n += 1;
                     continue;
+                }
+                if kind == "ty" && stop.is_none() {
+                    match &toks[n] {
+                        TokenTree::Ident(i) => {
+                            let w = i.to_string();
+                            if ty_end && !quote && w != "as" {
+                                break;
+                            }
+                            ty_end = if quote { lt_bound } else { !matches!(w.as_str(), "dyn" | "impl" | "mut" | "const" | "fn" | "unsafe" | "extern" | "for" | "as" | "async") };
+                            named = ty_end && !quote;
+                            plus = false;
+                            mac = false;
+                            for_kw = w == "for";
+                            quote = false;
+                        }
+                        TokenTree::Group(g) => {
+                            if ty_end && !mac && (g.delimiter() != Delimiter::Parenthesis || !named) {
+                                break;
+                            }
+                            ty_end = true;
+                            named = false;
+                            mac = false;
+                            for_kw = false;
+                            plus = false;
+                        }
+                        TokenTree::Punct(p) => {
+                            if ty_end && matches!(p.as_char(), '&' | '*') {
+                                break;
+                            }
+                            quote = p.as_char() == '\'';
+                            if quote {
+                                lt_bound = plus;
+                            }
+                            plus = p.as_char() == '+';
+                            mac = p.as_char() == '!' && named;
+                            ty_end = p.as_char() == '!';
+                            named = false;
+                            for_kw = for_kw && p.as_char() == '<';
+                        }
+                        TokenTree::Literal(_) => {
+                            if ty_end {
+                                break;
+                            }
+                        }
+                    }
                 }
                 if let Some(s) = stop {
                     if same_tok(&toks[n], s) {
@@ -226,6 +290,7 @@ fn take_frag(toks: &[TokenTree], kind: &str, stop: Option<&TokenTree>) -> Option
                     && (angles || (kind == "expr" && (n == 0 || matches!(&toks[n - 1], TokenTree::Punct(q) if q.as_char() == ':'))))
                 {
                     angle = 1;
+                    binder = std::mem::take(&mut for_kw);
                     n += 1;
                     continue;
                 }

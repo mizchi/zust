@@ -11,6 +11,7 @@ stays in it:
 | test | what it checks |
 |---|---|
 | `wasm_runs_like_rustc` | examples/*.rs and the runtime cases of tests/security (CVE regressions, bounds, overflow, capacity overflow, UTF-8) print what rustc's builds print, with the same exit codes |
+| `wasm_workspace_runs_like_native` | `tests/workspace` built with `zustc build --target wasm32-unknown-unknown` (one module from three crates) prints what its x86-64 build prints, with the same exit codes |
 | `wasm_module_shape` | a module imports only functions of `env` that the host gives, exports only `memory` and `main`, and has no start function |
 | `wasm_host_denies` | `deny/*.rs`: spawning a process (the module imports `fork` / `execvp` and is not run at all), reading and writing host files (they fail; no file appears), the host's environment (empty) |
 | `wasm_contains_faults` | `contain/*.rs`: unsafe code that writes past 4 GiB (would wrap onto the stack), reads the null page, writes past the end of memory, copies or fills such addresses in bulk, calls an integer as a function, calls a function pointer with bits past 32 set, calls through a pointer of another signature, overflows the stack, or allocates more than memory: each run ends in a trap or an abort, before its next line |
@@ -104,7 +105,7 @@ table index or signature mismatch) and for `abort`; 126 for a module that needs 
   Exported functions take and return i64 for them.
 - Traps carry no panic message (the native build prints the location from its trap table).
 - Not supported yet: i128 division and float conversions, threads (green threads need `swapcontext`), processes,
-  files other than the arguments, workspace builds (`zustc build`), and self-hosting zustc as wasm.
+  files other than the arguments, and self-hosting zustc as wasm.
 - Speed: every block is a case of one `loop` + `br_table` dispatcher and every value a local, so bench/rt runs 3 to 15
   times slower than the native build under Node (the address checks are 5–20% of that). A relooper / stackifier and
   local reuse are the next steps.

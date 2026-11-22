@@ -9,8 +9,9 @@ usage: python3 cratebench/ui/run.py [APP ...] [--rustc]   (リポジトリの根
 wasm に入るクレート (proc-macro を通らずに app から届くもの) だけをビルドする。proc-macro とそれが使うクレートは
 ホストで動くもので、zustc には proc-macro を動かす仕組みがないので数えるだけ。
 各クレートは、推移的な依存 (lib) と自分のワークスペース (ws.txt) にして `zustc build` する。依存のどれかが
-通らなければ、そのクレートはビルドせず blocked とする。zustc のワークスペースのビルドは wasm32 をまだ受け付けない
-ので、cfg は x86-64 のもの (wasm32 の cfg にしても、通る・通らないの境目は同じだった: レポート参照)。
+通らなければ、そのクレートはビルドせず blocked とする。`--target wasm32-unknown-unknown` でビルドする (cfg も
+wasm32 のもの。bin はモジュール `<名前>.wasm`)。ビルドスクリプトは動かさない: `env!` には cargo の変数
+(`CARGO_PKG_*` など) だけを渡す。
 結果は out/cratebench-ui/<APP>/ (クレートごとの ws.txt と err.txt、results.json)。
 """
 import json
@@ -86,6 +87,22 @@ def lines_of(d):
     return n
 
 
+def cargo_env(p, t):
+    """cargo's variables for `env!` that a crate sees without its build script (zurgo gives the same ones)"""
+    v = p["version"]
+    core, _, pre = v.split("+")[0].partition("-")
+    major, minor, patch = (core.split(".") + ["0", "0", "0"])[:3]
+    return {"CARGO_PKG_NAME": p["name"], "CARGO_PKG_VERSION": v, "CARGO_PKG_VERSION_MAJOR": major,
+            "CARGO_PKG_VERSION_MINOR": minor, "CARGO_PKG_VERSION_PATCH": patch, "CARGO_PKG_VERSION_PRE": pre,
+            "CARGO_PKG_AUTHORS": ":".join(p.get("authors") or []), "CARGO_PKG_DESCRIPTION": p.get("description") or "",
+            "CARGO_MANIFEST_DIR": os.path.dirname(p["manifest_path"]), "CARGO_CRATE_NAME": t["name"].replace("-", "_")}
+
+
+def ws_escape(s):
+    """a value in zustc's workspace file: `%`, `#` and white space as %XX, one per byte of their UTF-8 (U+3000 too)"""
+    return "".join("".join(f"%{b:02X}" for b in c.encode()) if c in "%#" or c.isspace() else c for c in s)
+
+
 def graph(meta):
     """クレート (id → 情報) と、wasm に入るもの (依存の順、app が最後) と、ホストで動くもの"""
     pk = {p["id"]: p for p in meta["packages"]}
@@ -100,7 +117,7 @@ def graph(meta):
         deps = [d["pkg"] for d in n["deps"] if any(k["kind"] is None and on_target(k["target"]) for k in d["dep_kinds"])]
         C[i] = {"name": p["name"], "version": p["version"], "edition": t["edition"],
                 "proc_macro": "proc-macro" in t["kind"], "build_rs": any("custom-build" in x["kind"] for x in p["targets"]),
-                "features": n["features"], "deps": deps, "src": t["src_path"], "root": i == root}
+                "features": n["features"], "deps": deps, "src": t["src_path"], "root": i == root, "env": cargo_env(p, t)}
     order, seen = [], set()
 
     def visit(i):
@@ -154,13 +171,14 @@ def sweep(app):
             cj = C[j]
             dn = sorted({ext(C[d]) for d in cj["deps"] if d in tset})
             f = f' features={",".join(cj["features"])}' if cj["features"] else ""
-            ws[ext(cj)] = f'{"bin" if cj["root"] else "lib"} {ext(cj)} {cj["src"]} {" ".join(dn)}{f}'.rstrip()
+            e = "".join(f" env={k}={ws_escape(v)}" for k, v in cj["env"].items())
+            ws[ext(cj)] = f'{"bin" if cj["root"] else "lib"} {ext(cj)} {cj["src"]} {" ".join(dn)}{f}{e}'.rstrip()
         d = os.path.join(out, f'{c["name"]}-{c["version"]}')
         os.makedirs(d, exist_ok=True)
         with open(os.path.join(d, "ws.txt"), "w") as h:
             h.write("\n".join(ws.values()) + "\n")
         try:
-            p = subprocess.run([ZUSTC, "build", os.path.join(d, "ws.txt"), "-o", os.path.join(d, "t"), "--no-cache", "-j", "4"],
+            p = subprocess.run([ZUSTC, "build", os.path.join(d, "ws.txt"), "-o", os.path.join(d, "t"), "--no-cache", "-j", "4", "--target", TARGET],
                                capture_output=True, text=True, timeout=300)
             err, ok = (p.stderr + p.stdout).strip(), p.returncode == 0
         except subprocess.TimeoutExpired:

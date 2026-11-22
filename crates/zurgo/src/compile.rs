@@ -420,7 +420,9 @@ pub fn build(g: &Graph, o: &BuildOpts) -> R<Built> {
         }
         Some(t) => return Err(format!("unknown target `{t}`")),
     }
+    let wasm = opts.module_writer.is_some();
     Session2::new(opts).build_workspace(&crates, &out)?;
-    let bins = crates.iter().filter_map(|c| c.exe.as_ref().map(|e| (e.clone(), out.join(e)))).collect();
+    // (wasm32: a bin is the module `<name>.wasm`)
+    let bins = crates.iter().filter_map(|c| c.exe.as_ref().map(|e| (e.clone(), if wasm { out.join(format!("{e}.wasm")) } else { out.join(e) }))).collect();
     Ok(Built { out_dir: out, bins, crates })
 }

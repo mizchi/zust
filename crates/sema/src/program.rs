@@ -4874,8 +4874,8 @@ impl Program {
     }
 
     fn variant_by_p_inner(&self, p: &PPath, self_sid: Option<u32>) -> Option<(u32, usize)> {
-        // `core::option::Option::Some` などは最後の 2 つで見る
-        let segs: &[PSeg] = if p.segs.len() > 2 && matches!(p.segs[0].name.as_str(), "core" | "crate" | "std") {
+        // `core::option::Option::Some` / `alloc::borrow::Cow::Borrowed` などは最後の 2 つで見る
+        let segs: &[PSeg] = if p.segs.len() > 2 && matches!(p.segs[0].name.as_str(), "core" | "crate" | "std" | "alloc") {
             &p.segs[p.segs.len() - 2..]
         } else {
             &p.segs

@@ -29,7 +29,7 @@
 
 ## Status
 
-Numbers measured <!-- measured -->2026-11-22, 9edb119<!-- /measured --> by CI on each push to main (bench.yml runs
+Numbers measured <!-- measured -->2026-11-22, 5520c53<!-- /measured --> by CI on each push to main (bench.yml runs
 `bench/ci_bench.py` and `bench/rust_ui.py`, then `scripts/update_readme.py` writes them here). Times come from shared
 GitHub Actions runners and vary by about ±20%; the instruction counts (valgrind) do not.
 
@@ -41,10 +41,10 @@ only the tests it can be asked to handle (no nightly features, auxiliary crates 
 <!-- auto:ui -->
 | kind | applicable | pass |
 |---|---:|---:|
-| run-pass (builds, runs, same output) | 2385 | 1816 (76.1%) |
-| check-pass (accepted by `zustc check`) | 1807 | 1502 (83.1%) |
+| run-pass (builds, runs, same output) | 2385 | 1818 (76.2%) |
+| check-pass (accepted by `zustc check`) | 1807 | 1504 (83.2%) |
 | build-pass | 135 | 102 (75.6%) |
-| compile-fail (rejected at an annotated line) | 7358 | 4364 (59.3%) |
+| compile-fail (rejected at an annotated line) | 7358 | 4366 (59.3%) |
 <!-- /auto:ui -->
 
 [What is supported](#what-is-supported) breaks this down by area.
@@ -57,19 +57,19 @@ In parentheses: the instruction count (valgrind), which does not vary with the r
 <!-- auto:kpi -->
 | KPI | gen1000 | gen5000 |
 |---|---:|---:|
-| cold build | 123 ms | 437 ms |
-| no-op build | 1.0 ms (0.6 M) | 1.2 ms (0.6 M) |
-| build after editing one function | 23.9 ms (124.9 M) | 70.7 ms (590.9 M) |
-| `check` | 77 ms (761.2 M) | 345 ms (3755.3 M) |
+| cold build | 113 ms | 526 ms |
+| no-op build | 0.6 ms (0.6 M) | 0.6 ms (0.6 M) |
+| build after editing one function | 16.8 ms (124.6 M) | 61.8 ms (590.8 M) |
+| `check` | 68 ms (761.5 M) | 367 ms (3754.6 M) |
 | build cache on disk | 387.2 KiB | 1902.8 KiB |
 | binary | 324.0 KiB | 1558.3 KiB |
-| cold build peak RSS | 19.3 MiB | 52.8 MiB |
+| cold build peak RSS | 19.2 MiB | 52.9 MiB |
 
 | zust-analyzer (zustc's own sources) | |
 |---|---:|
-| p50: definition, hover, completion, references, rename | 1.00 ms / 0.77 ms / 1.54 ms / 2.60 ms / 0.85 ms |
-| startup until indexed | 202 ms |
-| peak RSS | 95.8 MiB |
+| p50: definition, hover, completion, references, rename | 0.55 ms / 0.47 ms / 1.10 ms / 1.79 ms / 0.46 ms |
+| startup until indexed | 174 ms |
+| peak RSS | 96.3 MiB |
 <!-- /auto:kpi -->
 
 Every change is also measured on its own with `python3 bench/kpi_track.py`, so that small increases that add up stay
@@ -269,7 +269,8 @@ zustc build workspace.txt -o target
 
   In a value, `%`, `#` and white space are written `%XX`. A name `env!` does not find there is looked up in zustc's
   own environment, as rustc does.
-- Each crate gets its own object file and cache, and they are linked at the end.
+- Each crate gets its own object file and cache, and they are linked at the end. With
+  `--target wasm32-unknown-unknown`, the crates' functions and data are put into one wasm module per bin.
 - Changing the body of a function in a crate that others depend on does not recompile the dependents; zustc only
   relinks.
 - See `tests/workspace/` for an example.
@@ -286,7 +287,9 @@ zurgo run
 ```
 
 - Commands: `build`, `run`, `metadata` (the JSON of `cargo metadata`), `clean`, with cargo's flags for them.
-- Output goes to `target/zust/<profile>/`.
+- Output goes to `target/zust/<profile>/`. With `--target wasm32-unknown-unknown`, each bin is a wasm module in
+  `target/zust/wasm32-unknown-unknown/<profile>/`, and `zurgo run` runs it with
+  `CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_RUNNER`, as cargo does.
 - Build scripts run as under cargo (compiled by zustc, or by rustc when zustc cannot), and their cfgs, `rustc-env` and
   `OUT_DIR` reach the crates. A proc-macro dependency is a stub: using its macros is an error.
 - Not yet: running proc macros, two versions of one crate, renamed dependencies, git dependencies, its own resolver
@@ -400,8 +403,8 @@ the measured numbers. The [reports](docs/reports/) explain each step.
 - [x] parser: <!-- ui:parser -->90.9%
 - [x] closures (capture, `Fn` traits, `move`; with no captures also as fn pointers): <!-- ui:closures,unboxed-closures,functions-closures -->79.7%
 - [x] derives: `Debug`, `Clone`, `Copy`, `PartialEq`/`Eq`, `PartialOrd`/`Ord`, `Hash`, `Default`: <!-- ui:derives,deriving -->88.6%
-- [x] imports, `use`: <!-- ui:imports -->86.4%
-- [x] associated types: <!-- ui:associated-types -->79.7%
+- [x] imports, `use`: <!-- ui:imports -->87.5%
+- [x] associated types: <!-- ui:associated-types -->80.4%
 - [x] generics: <!-- ui:generics -->85.7% (an integer literal for `T: Foo` takes the one integer type that implements Foo; a type
   parameter known only from the expected type is not inferred)
 - [ ] consts: <!-- ui:consts -->76.9% (no heap values, no generic `const fn`; a const of a generic impl (`const C: Option<T> = None`) takes its type at each use)

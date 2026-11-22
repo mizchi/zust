@@ -217,6 +217,8 @@ struct Inf<'p> {
     exprs: Vec<(*const Expr, u32)>,
     /// 今見ているマクロの引数 (開き括弧) のソース上の位置: 引数を読み直した式の位置の基準
     mbase: crate::parse::Pos,
+    /// the targets of the `AsRef<X>` bounds in scope (the function's and its root's): what `x.as_ref()` gives
+    asref: Vec<String>,
 }
 
 impl<'p> std::ops::Deref for Inf<'p> {
@@ -276,7 +278,20 @@ pub fn infer_ctx_margs(
 ) -> (Full, MacroArgs, TextTypes) {
 
     let clo_root = root.map(|(r, base)| (r, base, body as *const Block));
-    let mut s = Inf { s: Solver::new(prog, env), pending: vec![], keep: vec![], turbofish: None, clo_root, clo_keys: None, margs: Default::default(), exprs: vec![], mbase: Default::default() };
+    let asref_of = |g: &[(String, Vec<String>)]| -> Vec<String> {
+        g.iter()
+            .flat_map(|(_, bs)| bs.iter())
+            .filter_map(|b| {
+                let b: String = b.chars().filter(|c| !c.is_whitespace()).collect();
+                b.strip_prefix("AsRef<").and_then(|x| x.strip_suffix('>')).map(str::to_string)
+            })
+            .collect()
+    };
+    let mut asref = asref_of(&sig.generics);
+    if let Some((r, _)) = root {
+        asref.extend(asref_of(&prog.sigs[r as usize].generics));
+    }
+    let mut s = Inf { s: Solver::new(prog, env), pending: vec![], keep: vec![], turbofish: None, clo_root, clo_keys: None, margs: Default::default(), exprs: vec![], mbase: Default::default(), asref };
     s.ret = match ret {
         Some(t) if prog.has_param(t) => s.known_g(t, &mut vec![]),
         Some(t) => s.known(t),
@@ -374,6 +389,13 @@ impl Inf<'_> {
     fn parse_ty(&self, t: &PTy) -> Option<Ty> {
         let ts = crate::ast_types::tysyn(t, Some(&TySyn::Named("Self".into()))).ok()?;
         self.prog.resolve_env(&ts, self.env).ok()
+    }
+
+    fn strip_refs_ty(mut t: Ty) -> Ty {
+        while let Ty::Ref(_, i) = t {
+            t = *i;
+        }
+        t
     }
 
     fn variant_by(&self, p: &Path) -> Option<(u32, usize)> {
@@ -1808,6 +1830,16 @@ impl Inf<'_> {
                         let v = self.expr(a);
                         xs.push((i.to_string(), v));
                     }
+                    // (`Cow::Borrowed(s)` / `Cow::Owned(s)` of a `&str` / `String`: prelude's `__CowStr`, as the
+                    // code generator reads it; prelude's `Cow<T>` stands for `Cow<[T]>`)
+                    if let (Some(&cow), Some(&cs), Some(&(_, x))) = (self.prog.struct_index.get("Cow"), self.prog.struct_index.get("__CowStr"), xs.first()) {
+                        if self.prog.base_of(sid) == cow {
+                            let string = self.prog.struct_index.get("String").copied();
+                            if matches!(self.resolve(x), Some(Ty::Ref(_, Ty::Str))) || self.resolve(x).is_some_and(|t| Some(t) == string.map(Ty::Struct)) {
+                                return self.adt_ctor(cs, Some(vi), xs);
+                            }
+                        }
+                    }
                     return self.adt_ctor(sid, Some(vi), xs);
                 }
                 let local = ident(p).is_some_and(|id| self.lookup(id).is_some());
@@ -1922,6 +1954,24 @@ impl Inf<'_> {
     }
 
     fn method_call(&mut self, recv: &Expr, n: &str, tf: &Vec<GArg>, args: &[Expr]) -> u32 {
+        // (`s.as_ref()` on a `&str` / `String` (also through references, `&&str` of an `AsRef<str>` instance): `&str`,
+        // or `&[u8]` where the bounds in scope ask for `AsRef<[u8]>` alone, as the code generator's as_ref gives)
+        if n == "as_ref" && args.is_empty() {
+            let r = self.expr(recv);
+            let rv = self.deref_expr(r);
+            let string = self.prog.struct_index.get("String").copied();
+            let text = match self.resolve(rv) {
+                Some(Ty::Str) => true,
+                Some(Ty::Ref(_, t)) => matches!(Self::strip_refs_ty(*t), Ty::Str),
+                Some(Ty::Struct(sid)) => Some(sid) == string,
+                _ => false,
+            };
+            if text {
+                let bytes = self.asref.iter().any(|t| t == "[u8]") && !self.asref.iter().any(|t| t == "str");
+                let t = if bytes { Ty::Slice(intern(Ty::U8)) } else { Ty::Str };
+                return self.known(Ty::Ref(false, intern(t)));
+            }
+        }
         // 値としての `[a, b].into_iter()`
         if n == "into_iter" && args.is_empty() && self.prog.struct_index.contains_key("IntoIter") {
             if let Expr::Array(xs) = recv {
