@@ -4256,6 +4256,14 @@ impl Program {
         sd.variants.iter().position(|v| &v.name == vn).map(|vi| (sid, vi))
     }
 
+    /// a const parameter's declared type name, through an alias (`type Switch = bool;` with `const B: Switch`: bool)
+    pub fn const_decl<'a>(&self, n: &'a str) -> std::borrow::Cow<'a, str> {
+        match self.aliases.get(n) {
+            Some((_, TySyn::Prim(t))) if Ty::prim(n).is_none() => std::borrow::Cow::Owned(self.tn(*t)),
+            _ => std::borrow::Cow::Borrowed(n),
+        }
+    }
+
     /// `type E2 = E;` / `type Opt<T> = Option<T>;`: the struct / enum (its base) an alias names directly
     pub fn alias_adt(&self, name: &str) -> Option<u32> {
         let (_, syn) = self.aliases.get(name)?;
@@ -4481,7 +4489,7 @@ fn subst_consts(e: &crate::parse::Expr, env: &[(String, i128)]) -> crate::parse:
 }
 
 /// std has `impl From<a> for b` (b losslessly holds every a; `T: From<T>`)
-fn prim_from(a: Ty, b: Ty) -> bool {
+pub fn prim_from(a: Ty, b: Ty) -> bool {
     use Ty::*;
     if a == b {
         return true;

@@ -1448,6 +1448,7 @@ impl Cx<'_> {
         }
         if let Some((_, bs)) = const_slot {
             let decl = bs.iter().find_map(|b| b.strip_prefix(crate::types::CONST_GENERIC)?.strip_prefix(':')).unwrap_or("usize");
+            let decl = &*self.prog.const_decl(decl);
             let found = self.const_arg_kind(a);
             let kind = match decl {
                 "bool" | "char" => decl,
@@ -2625,10 +2626,11 @@ impl Cx<'_> {
             let m = &p.segs[1].name;
             return Some(Expr::MethodCall(Box::new(paren(cargs[0].clone())), m.clone(), vec![], vec![cargs[1].clone()], crate::parse::Span::default()));
         }
-        // (`U::from(x)` in a generic fn with `U: From<u8>`: U's instance, when it is a number)
+        // (`U::from(x)` in a generic fn with `U: From<u8>`: U's instance, when it is a number and x a number std
+        // converts to it losslessly; a program's own `impl From<Code> for u32` is called as written)
         if Ty::prim(ty).is_none() && p.segs[1].name == "from" && cargs.len() == 1 {
             if let Some(&(_, t)) = self.env.params.iter().rev().find(|(n, _)| n == ty) {
-                if t.is_int() || t.is_float() {
+                if (t.is_int() || t.is_float()) && self.peek(&cargs[0]).is_some_and(|a| crate::program::prim_from(a, t)) {
                     return Some(paren(Expr::Cast(Box::new(paren(cargs[0].clone())), ty_named(&self.prog.tn(t)))));
                 }
             }

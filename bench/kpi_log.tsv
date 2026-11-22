@@ -258,3 +258,4 @@ date	commit	change	noop_M	edit_M	check_M	cache_KiB	lsp_G	run	check	build	cfail	t
 2026-11-22	e5f8fdb+	A missing ; before a statement on the next line: at the end of the previous token	0.697	555.075	3863.375	1902.8	-	1809	1493	101	4078	1192.762	64.008	10.370	320.250	723.151	268.041
 2026-11-22	5911b30+	Review of #41 (3): alias deps in cache keys, cfg_select delimiters / opaque macros / no arm, compile_error!	0.699	555.600	3863.878	1902.8	10.8520	1809	1493	101	4078	1192.696	64.130	10.400	320.396	723.768	268.207
 2026-11-22	15e01a6+	A struct's const parameters of other types than usize: their kind in its turbofish	0.697	555.606	3863.883	1902.8	-	1809	1493	101	4078	1192.692	64.029	10.388	320.395	723.770	268.207
+2026-11-22	c1dbf81+	Review of #41 (4): cfg_select grouping / std:: path, user From impls, narrowing From, alias const types	0.697	555.615	3863.902	1902.8	-	1809	1493	101	4078	1192.686	64.012	10.388	320.399	723.783	268.225

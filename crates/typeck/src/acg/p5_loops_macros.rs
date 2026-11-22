@@ -2272,7 +2272,7 @@ impl Cx<'_> {
         let sig = self.prog.sigs.get(self.root as usize)?;
         let (_, bs) = sig.generics.iter().find(|(n, _)| n == id)?;
         let t = bs.iter().find_map(|b| b.strip_prefix(crate::types::CONST_GENERIC)?.strip_prefix(':'))?;
-        Ty::prim(t)
+        Ty::prim(&self.prog.const_decl(t))
     }
 
     pub(crate) fn const_of(&self, e: &Expr) -> Option<u32> {

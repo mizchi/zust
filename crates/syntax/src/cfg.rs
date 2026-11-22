@@ -225,6 +225,18 @@ pub fn expand_select(src: &str, c: &CfgSet) -> Option<String> {
                 continue;
             }
             let close = matching(&s, &toks, i + 2);
+            // (the call's path: `std::cfg_select!` / `::core::cfg_select!` from its first segment)
+            let mut st = i;
+            while st >= 2 && t(st - 1) == b":" && t(st - 2) == b":" {
+                if st >= 3 && toks[st - 3].0 == 0 {
+                    st -= 3;
+                } else {
+                    st -= 2;
+                    break;
+                }
+            }
+            // (in an expression, not as statements or items: after an operator, `=`, `(`, `,`, `=>`, `return` ..)
+            let in_expr = st > 0 && !matches!(t(st - 1), b"{" | b"}" | b";" | b"]");
             // the arms: `pred => { .. }` / `_ => { .. }`, an optional `,` after each
             let mut k = i + 3;
             let mut chosen: Option<(usize, usize)> = None;
@@ -249,20 +261,21 @@ pub fn expand_select(src: &str, c: &CfgSet) -> Option<String> {
                 continue;
             }
             match chosen {
-                // (a `{ .. }` arm gives its contents; a `( .. )` / `[ .. ]` one is an expression with its delimiters:
-                // `2 * cfg_select! { _ => (1 + 2) }` is 6)
-                Some((bo, bc)) if t(bo) == b"{" => {
-                    blank(&mut out, toks[i].1, toks[bo].2);
+                // (a `{ .. }` arm gives its contents as statements or items; a `( .. )` / `[ .. ]` one, and a `{ .. }`
+                // one of more than one token in an expression, keeps its delimiters: `2 * cfg_select! { _ => { 1 + 2 } }`
+                // is 6, a block. One token, `println!(cfg_select! { _ => { "x" } })`, is itself)
+                Some((bo, bc)) if t(bo) == b"{" && (!in_expr || bc == bo + 2) => {
+                    blank(&mut out, toks[st].1, toks[bo].2);
                     blank(&mut out, toks[bc].1, toks[close].2);
                 }
                 Some((bo, bc)) => {
-                    blank(&mut out, toks[i].1, toks[bo].1);
+                    blank(&mut out, toks[st].1, toks[bo].1);
                     blank(&mut out, toks[bc].2, toks[close].2);
                 }
                 // (no arm holds: an error at the call, as rustc's "none of the predicates in this `cfg_select`
                 // evaluated to true")
                 None => {
-                    let (a, b) = (toks[i].1, toks[close].2);
+                    let (a, b) = (toks[st].1, toks[close].2);
                     blank(&mut out, a, b);
                     let w: &[u8] = b"compile_error!(\"none of the predicates in this `cfg_select` evaluated to true\")";
                     if b - a >= w.len() {

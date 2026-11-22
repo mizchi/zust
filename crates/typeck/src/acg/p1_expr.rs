@@ -104,6 +104,10 @@ impl Cx<'_> {
         self.lifetime_arity(sid, path, "struct")?;
         let base = self.prog.base_of(sid);
         let mut ts = self.turbofish_targs(sid, args)?;
+        // (`matches!(0u8, G::<_>)`: a value of another type than the struct is a mismatch, `_` or not)
+        if !matches!(value, Ty::Struct(v) if self.prog.base_of(v) == base) && !self.prog.has_param(value) {
+            return err(SP, format!("mismatched types: expected `{}`, found `{}`", self.prog.tn(value), self.prog.structs[base as usize].name));
+        }
         if let Ty::Struct(v) = value {
             if self.prog.base_of(v) == base {
                 for (k, t) in ts.iter_mut().enumerate() {
@@ -129,8 +133,9 @@ impl Cx<'_> {
             if let Some(ds) = decls {
                 let k = ts.len();
                 if let Some((_, decl)) = ds.iter().find(|(i, _)| *i == k) {
-                    let kind = match decl.as_str() {
-                        "bool" | "char" => decl.as_str(),
+                    let decl = &*self.prog.const_decl(decl);
+                    let kind = match decl {
+                        "bool" | "char" => decl,
                         _ => "int",
                     };
                     if let Some((_, shown)) = self.const_arg_kind(a).filter(|(f, _)| *f != kind) {
@@ -2791,8 +2796,13 @@ impl Cx<'_> {
                             let n = format!("{}::from", self.ty_key(t));
                             let src = if self.trait_candidate(&n, "From").is_some() {
                                 Some(format!("<{} as From>::from", self.prog.tn(t)))
-                            } else if t.is_int() || t.is_float() {
-                                // (`let b: u32 = From::from(4u16)`: a number's `from`, the widening cast)
+                            } else if (t.is_int() || t.is_float()) && self.peek(x).is_some_and(|a| a.is_int() || a.is_float() || matches!(a, Ty::Bool | Ty::Char)) {
+                                // (`let b: u32 = From::from(4u16)`: a number's `from`, the widening cast; a narrowing
+                                // one, `u8` from `256u16`, is E0277 as in rustc)
+                                let a = self.peek(x).unwrap();
+                                if !crate::program::prim_from(a, t) {
+                                    return err(SP, format!("the trait `From<{}>` is not implemented for `{}` (E0277)", self.prog.tn(a), self.prog.tn(t)));
+                                }
                                 Some(format!("{}::from", self.prog.tn(t)))
                             } else if self.no_trait_method(&n) {
                                 Some(format!("{}::from", self.prog.tn(t)))
