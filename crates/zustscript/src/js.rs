@@ -751,7 +751,8 @@ impl<'a> Js<'a> {
         self.stmt_expr(body, &Dest::Return);
         let b = std::mem::take(&mut self.out);
         (self.out, self.ind, self.conts, self.dconts, self.gen_) = saved;
-        format!("$handleD({{ {} }}, () => {{\n{b}{pad}}})", parts.join(", "))
+        // (a null prototype: an operation named like an Object method, `toString`, must not find an inherited one)
+        format!("$handleD({{ __proto__: null, {} }}, () => {{\n{b}{pad}}})", parts.join(", "))
     }
 
     fn iife(&mut self, e: &Expr) -> String {
@@ -1374,19 +1375,55 @@ fn ts_plain(t: &Ty, named: &mut BTreeSet<String>) -> String {
             let ps: Vec<String> = a.iter().enumerate().map(|(k, t)| format!("a{k}: {}", ts_plain(t, named))).collect();
             format!("({}) => {}", ps.join(", "), ts_plain(r, named))
         }
+        // (a local copy of the record or enum with its numbers unbranded: TS's values carry no brands)
         Ty::Named(n, a) => {
             named.insert(n.clone());
-            if a.is_empty() { n.clone() } else { format!("{n}<{}>", a.iter().map(|t| ts_plain(t, named)).collect::<Vec<_>>().join(", ")) }
+            if a.is_empty() { format!("$P_{n}") } else { format!("$P_{n}<{}>", a.iter().map(|t| ts_plain(t, named)).collect::<Vec<_>>().join(", ")) }
         }
         Ty::Param(p) => p.clone(),
         Ty::Var(_) => "unknown".into(),
     }
 }
 
+/// The unbranded copy of a record or enum, in the `.d.ts`'s shape
+fn ts_plain_def(n: &str, items: &[Item], info: &Info, named: &mut BTreeSet<String>) -> Option<String> {
+    for it in items {
+        match it {
+            Item::Record { name, params, .. } if name == n => {
+                let g = if params.is_empty() { String::new() } else { format!("<{}>", params.join(", ")) };
+                let fs: Vec<String> = info.records[n].fields.iter().map(|(f, t)| format!("readonly {f}: {}", ts_plain(t, named))).collect();
+                return Some(format!("type $P_{n}{g} = {{ {} }};", fs.join("; ")));
+            }
+            Item::Enum { name, params, .. } if name == n => {
+                let e = &info.enums[n];
+                let g = if params.is_empty() { String::new() } else { format!("<{}>", params.join(", ")) };
+                let alts: Vec<String> = e
+                    .variants
+                    .iter()
+                    .map(|(v, fs)| {
+                        if e.unit_only() && !e.is_effect() {
+                            js_str(v)
+                        } else {
+                            let mut s = format!("{{ readonly TAG: {}", js_str(v));
+                            for (k, t) in fs.iter().enumerate() {
+                                let _ = write!(s, "; readonly _{k}: {}", ts_plain(t, named));
+                            }
+                            s + " }"
+                        }
+                    })
+                    .collect();
+                return Some(format!("type $P_{n}{g} = {};", alts.join(" | ")));
+            }
+            _ => {}
+        }
+    }
+    None
+}
+
 /// The TS file that checks every `extern` against the TS declaration it names: the real function must be
 /// assignable to the type zustscript gives it (arguments are checked contravariantly, results covariantly).
 /// Returns the file and, for each extern, (its line in the file, the extern's name, its position in the source).
-pub fn extern_check(items: &[Item], info: &Info, stem: &str) -> Option<(String, Vec<(usize, String, Pos)>)> {
+pub fn extern_check(items: &[Item], info: &Info) -> Option<(String, Vec<(usize, String, Pos)>)> {
     let mut named = BTreeSet::new();
     let mut imports: Vec<String> = vec![];
     let mut checks: Vec<(String, String, Pos)> = vec![];
@@ -1399,8 +1436,10 @@ pub fn extern_check(items: &[Item], info: &Info, stem: &str) -> Option<(String, 
             let k = checks.len();
             let value = match module {
                 Some(m) => {
-                    imports.push(format!("import {{ {js} as $e{k} }} from {};", js_str(m)));
-                    format!("$e{k}")
+                    // (a dotted name `api.read`: import the root, reach the member through it)
+                    let root = js.split('.').next().unwrap_or(js);
+                    imports.push(format!("import {{ {root} as $e{k} }} from {};", js_str(m)));
+                    format!("$e{k}{}", &js[root.len()..])
                 }
                 None => js.clone(),
             };
@@ -1414,14 +1453,23 @@ pub fn extern_check(items: &[Item], info: &Info, stem: &str) -> Option<(String, 
     if named.remove("$ReactElement") {
         o.push_str("import type { ReactElement as $ReactElement } from \"react\";\n");
     }
-    if !named.is_empty() {
-        let _ = writeln!(o, "import type {{ {} }} from \"./{stem}.js\";", named.into_iter().collect::<Vec<_>>().join(", "));
+    let mut defs = vec![];
+    let mut done = BTreeSet::new();
+    while let Some(n) = named.iter().find(|n| !done.contains(*n)).cloned() {
+        done.insert(n.clone());
+        if let Some(d) = ts_plain_def(&n, items, info, &mut named) {
+            defs.push(d);
+        }
     }
     for i in imports {
         o.push_str(&i);
         o.push('\n');
     }
     o.push_str("export {};\n");
+    for d in defs {
+        o.push_str(&d);
+        o.push('\n');
+    }
     let mut lines = vec![];
     for (c, name, pos) in checks {
         let _ = writeln!(o, "// extern {name}");

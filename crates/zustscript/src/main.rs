@@ -55,6 +55,9 @@ fn main() {
     let src = std::fs::read_to_string(&input).unwrap_or_else(|e| die(&format!("{}: {e}", input.display())));
     let file = input.display().to_string();
     let stem = input.file_stem().unwrap().to_string_lossy().to_string();
+    if stem == js::RUNTIME && !inline_runtime {
+        die(&format!("{}: `{stem}` is the name of the shared runtime the modules import: rename the file, or use --inline-runtime", input.display()));
+    }
 
     let t0 = std::time::Instant::now();
     let items = match parse::Parser::new(&src).file() {
@@ -177,7 +180,7 @@ fn main() {
 /// type-checks it with tsrs (the `TSRS` variable, or `tsrs` on PATH; TypeScript's checker, in Rust). An error is
 /// reported at the extern it belongs to.
 fn check_externs_with_tsrs(items: &[ast::Item], info: &check::Info, stem: &str, out_dir: &std::path::Path, file: &str, src: &str) {
-    let Some((ts, lines)) = js::extern_check(items, info, stem) else { return };
+    let Some((ts, lines)) = js::extern_check(items, info) else { return };
     let name = format!("{stem}.externs.ts");
     std::fs::write(out_dir.join(&name), ts).unwrap();
     let tsrs = std::env::var("TSRS").unwrap_or_else(|_| "tsrs".into());

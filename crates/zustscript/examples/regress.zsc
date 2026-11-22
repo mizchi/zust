@@ -106,3 +106,21 @@ pub fn many_ops(n: i32) -> i32 {
     Bump(v), k => { c = c + v; k(()) },
   }
 }
+
+// an operation named like an Object method finds the outer handler, not an inherited property
+enum Obj { toString -> i32 }
+enum Pings { Ping -> i32 }
+fn ask() -> i32 { perform toString }
+pub fn own_ops() -> i32 {
+  handle (handle ask() { Ping, j => j(5) }) { toString, k => k(42) }
+}
+
+// an arm whose inner handler calls the outer continuation: both stay generators (the inner one suspends through k)
+enum Outer { Op -> i32 }
+enum Inner { Get -> i32 }
+fn use_op() -> i32 { perform Op + 100 }
+pub fn nested_k() -> i32 {
+  handle use_op() {
+    Op, k => handle { let g = perform Get; k(1 + g) } { Get, j => j(0) },
+  }
+}

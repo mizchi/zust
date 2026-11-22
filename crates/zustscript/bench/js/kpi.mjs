@@ -10,19 +10,40 @@
 // --save writes the numbers as JSON; --against compares with a saved file (the change is marked when past 5% for
 // speed, any change for size).
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { gzipSync } from "node:zlib";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 const args = process.argv.slice(2);
-const opt = (k, d) => (args.includes(k) ? args[args.indexOf(k) + 1] : d);
+// (an option given without its operand is an error, not the default: `--save` at the end must not drop the report)
+const opt = (k, d) => {
+  const i = args.indexOf(k);
+  if (i < 0) return d;
+  if (i + 1 >= args.length) {
+    console.error(`${k} needs a value`);
+    process.exit(2);
+  }
+  return args[i + 1];
+};
 const zsc = opt("--zsc", join(root, "target/release/zsc"));
 const esbuild = opt("--esbuild", process.env.ESBUILD || "esbuild");
 const quick = args.includes("--quick");
 // (extra zsc flags, e.g. --inline-runtime to measure the runtime written into each module)
 const extra = args.includes("--zsc-flags") ? opt("--zsc-flags").split(" ") : [];
+// (the baseline is read before the output directory is cleaned: it may be a file saved there)
+const against = opt("--against");
+let base = null;
+if (against !== undefined) {
+  try {
+    base = JSON.parse(readFileSync(against, "utf8"));
+  } catch (e) {
+    console.error(`--against ${against}: ${e.message}`);
+    process.exit(2);
+  }
+}
+const save = opt("--save");
 const out = join(root, "target/js-kpi");
 rmSync(out, { recursive: true, force: true });
 mkdirSync(out, { recursive: true });
@@ -94,8 +115,7 @@ for (const [name, [n, calls]] of Object.entries(loads)) {
 
 // ---- report
 const report = { node: process.version, esbuild: hasEsbuild, size, speed };
-const against = opt("--against");
-const base = against && existsSync(against) ? JSON.parse(readFileSync(against, "utf8")) : null;
+
 const pct = (a, b) => (b ? `${a >= b ? "+" : ""}${(((a - b) / b) * 100).toFixed(1)}%` : "");
 const cols = hasEsbuild ? ["raw", "min", "gz"] : ["raw", "raw_gz"];
 console.log(`## JS target (node ${process.version}${hasEsbuild ? ", esbuild --minify" : ", no esbuild: raw only"})\n`);
@@ -118,5 +138,4 @@ for (const [name, r] of Object.entries(speed)) {
   }
   console.log(`| ${name} | ${r.ms} | ${r.result} |${mark}`);
 }
-const save = opt("--save");
 if (save) writeFileSync(save, JSON.stringify(report, null, 2) + "\n");

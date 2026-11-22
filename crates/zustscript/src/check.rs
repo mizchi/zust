@@ -1641,7 +1641,9 @@ pub fn direct_effects(items: &[Item], info: &Info) -> BTreeSet<String> {
         tail: bool,
     }
     let mut hs: Vec<H> = vec![];
-    fn collect(e: &Expr, info: &Info, hs: &mut Vec<H>) {
+    // `outer`: the continuations of the arms around `e`. A handler whose body or arms call one of them suspends
+    // through that arm, so it cannot be a plain call
+    fn collect(e: &Expr, info: &Info, hs: &mut Vec<H>, outer: &mut Vec<String>) {
         if let EK::Handle(body, arms) = &e.kind {
             let mut w = EffWalk { info, errors: vec![], conts: vec![], in_closure: 0 };
             let handled: BTreeSet<String> = arms.iter().filter_map(|a| info.variant_of.get(&a.variant).cloned()).collect();
@@ -1651,17 +1653,25 @@ pub fn direct_effects(items: &[Item], info: &Info) -> BTreeSet<String> {
                 through.extend(w.expr(&a.body));
                 w.conts.pop();
             }
-            let tail = arms.iter().all(|a| tail_resumes(&a.body, &a.k));
+            let suspends = outer.iter().any(|k| mentions(body, k) || arms.iter().any(|a| mentions(&a.body, k)));
+            let tail = !suspends && arms.iter().all(|a| tail_resumes(&a.body, &a.k));
             hs.push(H { handled, through, tail });
+            collect(body, info, hs, outer);
+            for a in arms {
+                outer.push(a.k.clone());
+                collect(&a.body, info, hs, outer);
+                outer.pop();
+            }
+            return;
         }
         for c in subexprs(e) {
-            collect(c, info, hs);
+            collect(c, info, hs, outer);
         }
     }
     let mut escaping = BTreeSet::new();
     for it in items {
         if let Item::Fn { name, body, public, .. } = it {
-            collect(body, info, &mut hs);
+            collect(body, info, &mut hs, &mut vec![]);
             if *public {
                 escaping.extend(info.effects[name].iter().cloned());
             }
