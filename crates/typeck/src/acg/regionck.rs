@@ -2499,11 +2499,17 @@ impl Cx<'_> {
 
     /// `let _: ann = init;`: init flows into a value of the annotation's type
     pub(crate) fn rg_let_wild(&mut self, ann: &PTy, init: &Expr) {
+        self.rg_let_ann(ann, init);
+    }
+
+    /// `let PAT: ann = init;`: init flows into a value of the annotation's type, whose tree is returned (what the
+    /// pattern binds from: `let (y, _): (&'a u32, u32) = (&22, 44);` makes y a `&'a u32`)
+    pub(crate) fn rg_let_ann(&mut self, ann: &PTy, init: &Expr) -> Option<(Ty, RT)> {
         if !self.rg_on() {
-            return;
+            return None;
         }
         let init_tree = self.rt_expr(init);
-        let Ok(t) = self.parse_ty(ann) else { return };
+        let Ok(t) = self.parse_ty(ann) else { return None };
         let prog = self.prog;
         let names = self.rg.lt_names.clone();
         let mut s = crate::regions::Slots { lts: names, tparams: vec![], self_slots: &[], any: false, in_fn: 0 };
@@ -2513,13 +2519,13 @@ impl Cx<'_> {
         self.rg.dyn_infer = true;
         let tree = self.rg.instantiate(prog, t, Some(&codes), &lts, &[], &mut |me| me.var());
         self.rg.dyn_infer = false;
-        if let Some(tree) = tree {
-            let sp = Some(super::borrowck::pos(init)).filter(|s| s.line != 0).unwrap_or(self.rg.let_sp);
-            self.rg.wf(prog, t, &tree, sp);
-            if let Some((it, itr)) = init_tree {
-                self.rg.flow(prog, it, t, &itr, &tree, sp);
-            }
+        let tree = tree?;
+        let sp = Some(super::borrowck::pos(init)).filter(|s| s.line != 0).unwrap_or(self.rg.let_sp);
+        self.rg.wf(prog, t, &tree, sp);
+        if let Some((it, itr)) = init_tree {
+            self.rg.flow(prog, it, t, &itr, &tree, sp);
         }
+        Some((t, tree))
     }
 
     /// `let x: ann;` (`let _: ann;`): the annotation's type is well formed; x's tree is of it

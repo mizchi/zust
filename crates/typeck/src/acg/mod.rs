@@ -1811,6 +1811,14 @@ impl Cx<'_> {
                         diverged = true;
                         continue;
                     };
+                    // (`let (y, _): (&'a u32, u32) = ..;`: the pattern binds from a value of the annotation's type)
+                    if let Some(a) = ann_ty {
+                        if let Some((t, tr)) = self.rg_let_ann(a, init) {
+                            if t == place.ty() {
+                                self.rg.scrut = Some((t, tr));
+                            }
+                        }
+                    }
                     // (E0005: without `else`, the pattern must cover the value's type)
                     if els.is_none() && self.user_code && !plainly_irrefutable(pat) {
                         // (`let false = 22;`: the literal's type first)

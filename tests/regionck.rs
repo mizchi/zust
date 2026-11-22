@@ -2101,3 +2101,16 @@ fn part11_review_3() {
     s.opts.edition = 2024;
     assert!(s.check(src).is_empty());
 }
+
+/// A destructuring `let` with a type annotation binds from a value of the annotation's type: the bindings have its
+/// lifetimes (nll/issue-55401.rs: `let (ref y, _z): (&'a u32, u32) = (&22, 44); *y` as a `&'static u32`)
+#[test]
+fn let_pattern_annotation_lifetimes() {
+    let d = check("fn f<'a>(_x: &'a u32) -> &'static u32 {\n    let (y, _z): (&'a u32, u32) = (&22, 44);\n    y\n}\nfn main() {}\n");
+    assert!(d.len() == 1 && d[0].0 == 3 && d[0].1.contains("lifetime may not live long enough"), "{d:?}");
+    let d = check("fn f<'a>(_x: &'a u32) -> &'static u32 {\n    let (ref y, _z): (&'a u32, u32) = (&22, 44);\n    *y\n}\nfn main() {}\n");
+    assert!(d.len() == 1 && d[0].0 == 3, "{d:?}");
+    let d = check("fn m<'a, 'b>(p: (&'a u32, &'b u32)) -> &'a u32 {\n    let (_, b): (&u32, &'b u32) = p;\n    b\n}\nfn main() {}\n");
+    assert!(d.len() == 1 && d[0].0 == 3 && d[0].1.contains("`'b` must outlive `'a`"), "{d:?}");
+    assert_eq!(check("struct S<'a> {\n    x: &'a u32,\n}\nfn g<'a>(x: &'a u32) -> &'a u32 {\n    let (y, _): (&'a u32, u32) = (x, 1);\n    y\n}\nfn k<'a>(s: S<'a>) -> &'a u32 {\n    let S { x }: S<'_> = s;\n    x\n}\nfn m<'a, 'b>(p: (&'a u32, &'b u32)) -> &'a u32 {\n    let (a, _): (&'a u32, &u32) = p;\n    a\n}\nfn q<'a>(x: &'a mut u32) -> u32 {\n    let (ref mut y, z): (&'a mut u32, u32) = (x, 3);\n    **y += z;\n    **y\n}\nfn main() {\n    let mut w = 4;\n    println!(\"{} {} {} {}\", g(&1), k(S { x: &7 }), m((&1, &2)), q(&mut w));\n}\n"), vec![]);
+}
